@@ -1,0 +1,105 @@
+====== Random Numbers ======
+{{anchor:torch.random.dok}}
+
+Torch provides accurate mathematical random generation, based on
+[[http://www.math.sci.hiroshima-u.ac.jp/~m-mat/MT/emt.html|Mersenne Twister]]
+random number generator.
+
+======  Seed Handling ======
+{{anchor::torch.seed.dok}}
+
+If no seed is provided to the random generator (using
+[[#torch.seed|seed()]] or [[#torch.manualSeed|manualSeed()]]), a
+random seed will be set according to [[#torch.seed|seed()]] the first
+time a random number is generated.
+
+Initial seed can be obtained using [[#torch.initialSeed|initialSeed()]].
+
+Setting a particular seed allows the user to (re)-generate a particular serie of
+random numbers. Example:
+<file>
+> torch.manualSeed(123)
+> = torch.uniform()
+0.69646918727085
+> return  torch.uniform()
+0.71295532141812
+> return  torch.uniform()
+0.28613933874294
+> torch.manualSeed(123)
+> return  torch.uniform()
+0.69646918727085
+> return  torch.uniform()
+0.71295532141812
+> return  torch.uniform()
+0.28613933874294
+> torch.manualSeed(torch.initialSeed())
+> return  torch.uniform()
+0.69646918727085
+> return  torch.uniform()
+0.71295532141812
+> return  torch.uniform()
+0.28613933874294
+</file>
+
+=====  [number] seed() =====
+{{anchor:torch.seed}}
+
+Set the seed of the random number generator according to the time of the
+computer. Granularity is seconds. Returns the seed obtained.
+
+=====  manualSeed(number) =====
+{{anchor:torch.manualSeed}}
+
+Set the seed of the random number generator to the given ''number''.
+
+=====  initialSeed() =====
+{{anchor:torch.initialSeed}}
+
+Returns the initial seed used to initialize the random generator.
+
+======  [number] random() ======
+{{anchor:torch.random}}
+
+Returns a 32 bit integer random number.
+
+======  [number] uniform([a],[b]) ======
+{{anchor:torch.uniform}}
+
+Returns a random real number according to uniform distribution on [a,b[. By default ''a'' is 0 and ''b'' is 1.
+
+======  [number] normal([mean],[stdv]) ======
+{{anchor:torch.normal}}
+
+Returns a random real number according to a normal distribution with the given ''mean'' and standard deviation ''stdv''.
+''stdv'' must be positive.
+
+======  [number] exponential(lambda) ======
+{{anchor:torch.exponential}}
+
+Returns a random real number according to the exponential distribution
+''p(x) = lambda * exp(-lambda * x)''
+
+======  [number] cauchy(median, sigma) ======
+{{anchor:torch.cauchy}}
+
+Returns a random real number according to the Cauchy distribution
+''p(x) = sigma/(pi*(sigma^2 + (x-median)^2))''
+
+======  [number] logNormal(mean, stdv) ======
+{{anchor:torch.logNormal}}
+
+Returns a random real number according to the log-normal distribution, with
+the given ''mean'' and standard deviation ''stdv''.
+''stdv'' must be positive.
+
+======  [number] geometric(p) ======
+{{anchor:torch.geometric}}
+
+Returns a random integer number according to a geometric distribution
+''p(i) = (1-p) * p^(i-1)''. ''p'' must satisfy ''0 < p < 1''.
+
+======  [number] bernouilli([p]) ======
+{{anchor:torch.bernoulli}}
+
+Returns ''1'' with probability ''p'' and ''0'' with probability ''1-p''. ''p'' must satisfy ''0 < p < 1''.
+By default ''p'' is equal to ''0.5''.

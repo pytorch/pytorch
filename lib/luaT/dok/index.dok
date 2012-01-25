@@ -1,0 +1,137 @@
+====== Lua Torch C API ======
+{{anchor:luat.dok}}
+
+luaT provides an API to interface Lua and C in Torch packages. It defines a
+concept of //classes// to Lua for Torch, and provides a mechanism to easily
+handle these Lua classes from C.
+
+It additionally provides few functions that ''luaL'' should have defined, and
+redefine some ''luaL'' functions for better type error printing when using
+''luaT'' classes.
+
+=====  Memory functions =====
+{{anchor:luat.memory.dok}}
+
+Classical memory allocation functions which generate a Lua error in case of
+problem.
+
+====  void* luaT_alloc(lua_State *L, long size) ====
+{{anchor:luaT_alloc}}
+
+Allocates ''size'' bytes, and return a pointer on the allocated
+memory. A Lua error will be generated if running out of memory.
+
+====  void* luaT_realloc(lua_State *L, void *ptr, long size) ====
+{{anchor:luaT_realloc}}
+
+Realloc ''ptr'' to ''size'' bytes. ''ptr'' must have been previously
+allocated with [[#luaT_alloc|luaT_alloc]] or
+[[#luaT_realloc|luaT_realloc]], or the C ''malloc'' or ''realloc''
+functions. A Lua error will be generated if running out of memory.
+
+====  void luaT_free(lua_State *L, void *ptr) ====
+{{anchor:luaT_free}}
+
+Free memory allocated at address ''ptr''. The memory must have been
+previously allocated with [[#luaT_alloc|luaT_alloc]] or
+[[#luaT_realloc|luaT_realloc]], or the C ''malloc'' or ''realloc''
+functions.
+
+=====  Class creation and basic handling =====
+{{anchor:luat.classcreate}}
+
+A ''luaT'' class is basically either a Lua //table// or //userdata//
+with an appropriate //metatable//.  This appropriate metatable, that
+we call in this section //root metatable// is created with
+[[#luaT_newmetatable|luaT_newmetatable]].
+
+The root metatable of a ''luaT'' object has itself a metatable that we
+call //metaclass//. The metaclass is the actual metatable containing
+all the methods of the class. If the class inherit from another class,
+then the metaclass will itself have a metatable corresponding to the
+//parent metaclass//: the metaclasses are cascaded according to the
+class inheritance.  Multiple inheritance is not supported.
+
+The root metatable of a ''luaT'' object contains ''Lua'' operators
+like ''%%__index%%'', ''%%__newindex%%'', ''%%__tostring%%'',
+''%%__add%%'' (etc...). These operators will respectively look for
+''//index//'', ''//newindex//'', ''//tostring//'', ''//add//''
+(etc...) in the metaclass. If found, the corresponding function or
+value will be returned, else a Lua error will be raised.
+
+If one wants to provide ''//index//'' or ''//newindex//'' in the
+metaclass, these operators must follow a particular scheme:
+
+  * ''//index//'' must either return a value //and// ''true'' or return ''false'' only. In the first case, it means ''//index//'' was able to handle the given argument (for e.g., the type was correct). The second case means it was not able to do anything, so ''%%__index%%'' in the root metatable can then try to see if the metaclass contains the required value.
+
+  * ''//newindex//'' must either return ''true'' or ''false''. As for ''//index//'', ''true'' means it could handle the argument and ''false'' not. If not, the root metatable ''%%__newindex%%'' will then raise an error if the object was a userdata, or apply a rawset if the object was a Lua table.
+
+Other metaclass operators like ''//tostring//'', ''//add//'', etc... do not have any particular constraint.
+
+==== const void* luaT_newmetatable(lua_State *L, const char *tname, const char *parenttname, lua_CFunction constructor, lua_CFunction destructor, lua_CFunction factory) ====
+{{anchor:luat_newmetatable}}
+
+==== void luaT_pushmetatable(lua_State *L, const void *id) ====
+{{anchor:luat_pushmetatable}}
+
+==== void luaT_pushmetaclass(lua_State *L, const void *id) ====
+{{anchor:luaT_pushmetaclass}}
+
+==== int luaT_getmetaclass(lua_State *L, int index) ====
+{{anchor:luaT_getmetaclass}}
+
+
+===== Other Functions =====
+
+==== void* luaT_alloc(lua_State *L, long size) ====
+==== void* luaT_realloc(lua_State *L, void *ptr, long size) ====
+==== void luaT_free(lua_State *L, void *ptr) ====
+==== void luaT_stackdump(lua_State *L) ====
+
+==== void luaT_registeratid(lua_State *L, const struct luaL_Reg *methods, const void *id) ====
+==== void luaT_registeratname(lua_State *L, const struct luaL_Reg *methods, const char *name) ====
+
+==== const char* luaT_id2typename(lua_State *L, const void *id) ====
+==== const void* luaT_typename2id(lua_State *L, const char*) ====
+==== const void* luaT_checktypename2id(lua_State *L, const char *tname) ====
+
+==== const void* luaT_id(lua_State *L, int ud) ====
+==== const char* luaT_typename(lua_State *L, int ud) ====
+
+==== void luaT_pushudata(lua_State *L, void *udata, const void *id) ====
+
+==== void *luaT_toudata (lua_State *L, int ud, const void *id) ====
+==== int luaT_isudata (lua_State *L, int ud, const void *id) ====
+==== void *luaT_checkudata (lua_State *L, int ud, const void *id) ====
+
+==== void *luaT_getfieldcheckudata (lua_State *L, int ud, const char *field, const void *id) ====
+==== void *luaT_getfieldchecklightudata (lua_State *L, int ud, const char *field) ====
+==== double luaT_getfieldchecknumber (lua_State *L, int ud, const char *field) ====
+==== int luaT_getfieldcheckint (lua_State *L, int ud, const char *field) ====
+==== const char* luaT_getfieldcheckstring (lua_State *L, int ud, const char *field) ====
+==== int luaT_getfieldcheckboolean (lua_State *L, int ud, const char *field) ====
+==== void luaT_getfieldchecktable (lua_State *L, int ud, const char *field) ====
+
+==== int luaT_typerror(lua_State *L, int ud, const char *tname) ====
+==== int luaT_checkboolean(lua_State *L, int narg) ====
+==== int luaT_optboolean(lua_State *L, int narg, int def) ====
+
+==== const char *luaT_classrootname(const char *tname) ====
+==== const char *luaT_classmodulename(const char *tname) ====
+==== void luaT_stackdump(lua_State *L) ====
+
+
+==== int luaT_lua_newmetatable(lua_State *L) ====
+==== int luaT_lua_factory(lua_State *L) ====
+==== int luaT_lua_getconstructortable(lua_State *L) ====
+==== int luaT_lua_id(lua_State *L) ====
+==== int luaT_lua_typename(lua_State *L) ====
+==== int luaT_lua_isequal(lua_State *L) ====
+==== int luaT_lua_pointer(lua_State *L) ====
+==== int luaT_lua_setenv(lua_State *L) ====
+==== int luaT_lua_getenv(lua_State *L) ====
+==== int luaT_lua_getmetatable(lua_State *L) ====
+==== int luaT_lua_version(lua_State *L) ====
+==== int luaT_lua_setmetatable(lua_State *L) ====
+==== int luaT_lua_typename2id(lua_State *L) ====
+

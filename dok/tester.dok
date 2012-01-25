@@ -1,0 +1,130 @@
+======  Tester ======
+{{anchor:torch.Tester.dok}}
+
+This class provides a generic unit testing framework. It is already 
+being used in [[..:nn:index|nn]] package to verify the correctness of classes.
+
+The framework is generally used as follows.
+
+<file lua>
+mytest = {}
+
+tester = torch.Tester()
+
+function mytest.TestA()
+	local a = 10
+	local b = 10
+	tester:asserteq(a,b,'a == b')
+	tester:assertne(a,b,'a ~= b')
+end
+
+function mytest.TestB()
+	local a = 10
+	local b = 9
+	tester:assertlt(a,b,'a < b')
+	tester:assertgt(a,b,'a > b')
+end
+
+tester:add(mytest)
+tester:run()
+
+</file>
+
+Running this code will report 2 errors in 2 test functions. Generally it is 
+better to put single test cases in each test function unless several very related
+test cases exit. The error report includes the message and line number of the error.
+
+<file>
+
+Running 2 tests
+**  ==> Done 
+
+Completed 2 tests with 2 errors
+
+--------------------------------------------------------------------------------
+TestB
+a < b
+ LT(<) violation   val=10, condition=9
+	...y/usr.t7/local.master/share/lua/5.1/torch/Tester.lua:23: in function 'assertlt'
+	[string "function mytest.TestB()..."]:4: in function 'f'
+
+--------------------------------------------------------------------------------
+TestA
+a ~= b
+ NE(~=) violation   val=10, condition=10
+	...y/usr.t7/local.master/share/lua/5.1/torch/Tester.lua:38: in function 'assertne'
+	[string "function mytest.TestA()..."]:5: in function 'f'
+
+--------------------------------------------------------------------------------
+
+</file>
+
+
+==== torch.Tester() ====
+{{anchor:torch.Tester}}
+
+Returns a new instance of ''torch.Tester'' class.
+
+==== add(f, 'name') ====
+{{anchor:torch.Tester.add}}
+
+Adds a new test function with name ''name''. The test function is stored in ''f''.
+The function is supposed to run without any arguments and not return any values.
+
+==== add(ftable) ====
+{{anchor:torch.Tester.add}}
+
+Recursively adds all function entries of the table ''ftable'' as tests. This table 
+can only have functions or nested tables of functions.
+
+==== assert(condition [, message]) ====
+{{anchor:torch.Tester.assert}}
+
+Saves an error if condition is not true with the optional message.
+
+==== assertlt(val, condition [, message]) ====
+{{anchor:torch.Tester.assertlt}}
+
+Saves an error if ''val < condition'' is not true with the optional message.
+
+==== assertgt(val, condition [, message]) ====
+{{anchor:torch.Tester.assertgt}}
+
+Saves an error if ''val > condition'' is not true with the optional message.
+
+==== assertle(val, condition [, message]) ====
+{{anchor:torch.Tester.assertle}}
+
+Saves an error if ''val <= condition'' is not true with the optional message.
+
+==== assertge(val, condition [, message]) ====
+{{anchor:torch.Tester.assertge}}
+
+Saves an error if ''val >= condition'' is not true with the optional message.
+
+==== asserteq(val, condition [, message]) ====
+{{anchor:torch.Tester.asserteq}}
+
+Saves an error if ''val == condition'' is not true with the optional message.
+
+==== assertne(val, condition [, message]) ====
+{{anchor:torch.Tester.assertne}}
+
+Saves an error if ''val ~= condition'' is not true with the optional message.
+
+==== assertTensorEq(ta, tb, condition [, message]) ====
+{{anchor:torch.Tester.assertTensorEq}}
+
+Saves an error if ''max(abs(ta-tb)) < condition'' is not true with the optional message.
+
+==== run() ====
+{{anchor:torch.Tester.run}}
+
+Runs all the test functions that are stored using [[#torch.Tester.add|add()]] function. 
+While running it reports progress and at the end gives a summary of all errors.
+
+
+
+
+
+

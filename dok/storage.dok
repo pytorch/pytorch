@@ -1,0 +1,222 @@
+======  Storage ======
+{{anchor:torch.Storage.dok}}
+{{anchor:torch.ByteStorage.dok}}
+{{anchor:torch.CharStorage.dok}}
+{{anchor:torch.ShortStorage.dok}}
+{{anchor:torch.IntStorage.dok}}
+{{anchor:torch.LongStorage.dok}}
+{{anchor:torch.FloatStorage.dok}}
+{{anchor:torch.DoubleStorage.dok}}
+
+//Storages// are basically a way for ''Lua'' to access memory of a ''C'' pointer
+or array. //Storages// can also [[#__torch.StorageMap|map the contents of a file to memory]].
+A ''Storage'' is an array of //basic// ''C'' types. For arrays of ''Torch'' objects,
+use the ''Lua'' tables.
+
+Several ''Storage'' classes for all the basic ''C'' types exist and have the
+following self-explanatory names: ''ByteStorage'', ''CharStorage'', ''ShortStorage'',
+''IntStorage'', ''LongStorage'', ''FloatStorage'', ''DoubleStorage''.
+
+Note that ''ByteStorage'' and ''CharStorage'' represent both arrays of bytes. ''ByteStorage'' represents an array of
+//unsigned// chars, while ''CharStorage'' represents an array of //signed// chars.
+
+Conversions between two ''Storage'' type might be done using ''copy'':
+<file lua>
+x = torch.IntStorage(10):fill(1)
+y = torch.DoubleStorage(10):copy(x)
+</file>
+
+[[#torch.Storage|Classical storages]] are [[File#torch.File.serialization|serializable]].
+[[#__torch.StorageMap|Storages mapping a file]] are also [[#FileSerialization|serializable]],
+but //will be saved as a normal storage//.
+
+An alias ''torch.Storage()'' is made over your preferred Storage type,
+controlled by the
+[[utility#torch.setdefaulttensortype|torch.setdefaulttensortype]]
+function. By default, this "points" on ''torch.DoubleStorage''.
+
+=====  torch.TYPEStorage([size]) =====
+{{anchor:torch.Storage}}
+
+Returns a new ''Storage'' of type ''TYPE''. Valid ''TYPE'' are ''Byte'', ''Char'', ''Short'',
+''Int'', ''Long'', ''Float'', and ''Double''. If ''size'' is given, resize the
+''Storage'' accordingly, else create an empty ''Storage''.
+
+Example:
+<file lua>
+-- Creates a Storage of 10 double:
+x = torch.DoubleStorage(10)
+</file>
+
+The data in the ''Storage'' is //uninitialized//.
+
+===== torch.TYPEStorage(table) =====
+{{anchor:torch.Storage}}
+
+The argument is assumed to be a Lua array of numbers. The constructor returns a new storage of the specified 'TYPE', 
+of the size of the table, containing all the table elements converted
+
+Example:
+<file lua>
+> = torch.IntStorage({1,2,3,4})
+
+ 1
+ 2
+ 3
+ 4
+[torch.IntStorage of size 4]
+</file>
+
+=====  torch.TYPEStorage(filename [, shared]) =====
+{{anchor:torch.Storage}}
+{{anchor:__torch.StorageMap}}
+
+Returns a new kind of ''Storage'' which maps the contents of the given
+''filename'' to memory. Valid ''TYPE'' are ''Byte'', ''Char'', ''Short'', ''Int'', ''Long'',
+''Float'', and ''Double''. If the optional boolean argument ''shared'' is ''true'',
+the mapped memory is shared amongst all processes on the computer.
+
+When ''shared'' is ''true'', the file must be accessible in read-write mode. Any
+changes on the storage will be written in the file. The changes might be written
+only after destruction of the storage.
+
+When ''shared'' is ''false'' (or not provided), the file must be at least
+readable. Any changes on the storage will not affect the file. Note:
+changes made on the file after creation of the storage have an unspecified
+effect on the storage contents.
+
+The [[#torch.Storage.size|size]] of the returned ''Storage'' will be
+<file lua>
+(size of file in byte)/(size of TYPE).
+</file>
+
+Example:
+<file lua>
+$ echo "Hello World" > hello.txt
+$ lua
+Lua 5.1.3  Copyright (C) 1994-2008 Lua.org, PUC-Rio
+> require 'torch'
+> x = torch.CharStorage('hello.txt')
+> = x
+  72
+ 101
+ 108
+ 108
+ 111
+  32
+  87
+ 111
+ 114
+ 108
+ 100
+  10
+[torch.CharStorage of size 12]
+
+> = x:string()
+Hello World
+
+> = x:fill(42):string()
+************
+> 
+$ cat hello.txt 
+Hello World
+$ lua
+Lua 5.1.3  Copyright (C) 1994-2008 Lua.org, PUC-Rio
+> require 'torch'
+> x = torch.CharStorage('hello.txt', true)
+> = x:string()
+Hello World
+
+> x:fill(42)
+>
+$ cat hello.txt 
+************
+</file>
+
+=====  [number] #self =====
+{{anchor:__torch.StorageSharp}}
+
+Returns the number of elements in the storage. Equivalent to [[#torch.Storage.size|size()]].
+
+=====  [number] self[index] =====
+{{anchor:torch.Storage.__index__}}
+
+Returns or set the element at position ''index'' in the storage. Valid range
+of ''index'' is 1 to [[#torch.Storage.size|size()]].
+
+Example:
+<file lua>
+x = torch.DoubleStorage(10)
+print(x[5])
+</file>
+
+=====  [self] copy(storage) =====
+{{anchor:torch.Storage.copy}}
+
+Copy another ''storage''. The types of the two storages might be different: in that case
+a conversion of types occur (which might result, of course, in loss of precision or rounding).
+This method returns self, allowing things like:
+<file lua>
+x = torch.IntStorage(10):fill(1)
+y = torch.DoubleStorage(10):copy(x) -- y won't be nil!
+</file>
+
+=====  [self] fill(value) =====
+{{anchor:torch.Storage.fill}}
+
+Fill the ''Storage'' with the given value. This method returns self, allowing things like:
+<file lua>
+x = torch.IntStorage(10):fill(0) -- x won't be nil!
+</file>
+
+=====  [self] resize(size) =====
+{{anchor:torch.Storage.resize}}
+
+Resize the storage to the provide ''size''. //The new contents are undertermined//.
+
+This function returns self, allowing things like:
+<file lua>
+x = torch.DoubleStorage(10):fill(1)
+y = torch.DoubleStorage():resize(x:size()):copy(x) -- y won't be nil!
+</file>
+
+=====  [number] size() =====
+{{anchor:torch.Storage.size}}
+
+Returns the number of elements in the storage. Equivalent to [[#__torch.StorageSharp|#]].
+
+=====  [self] string(str) =====
+{{anchor:torch.Storage.string}}
+
+This function is available only on ''ByteStorage'' and ''CharStorage''.
+
+This method resizes the storage to the length of the provided
+string ''str'', and copy the contents of ''str'' into the storage. The ''NULL'' terminating character is not copied,
+but ''str'' might contain ''NULL'' characters. The method returns the ''Storage''.
+<file lua>
+> x = torch.CharStorage():string("blah blah")
+> print(x)
+  98
+ 108
+  97
+ 104
+  32
+  98
+ 108
+  97
+ 104
+[torch.CharStorage of size 9]
+</file>
+
+=====  [string] string() =====
+{{anchor:torch.Storage.string}}
+
+This function is available only on ''ByteStorage'' and ''CharStorage''.
+
+The contents of the storage viewed as a string are returned. The string might contain
+''NULL'' characters.
+<file lua>
+> x = torch.CharStorage():string("blah blah")
+> print(x:string())
+blah blah
+</file>

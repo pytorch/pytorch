@@ -1,0 +1,36 @@
+======  MemoryFile ======
+{{anchor:torch.MemoryFile.dok}}
+
+Parent classes: [[File|File]]
+
+A ''MemoryFile'' is a particular ''File'' which is able to perform basic
+read/write operations on a buffer in ''RAM''. It implements all methods
+described in [[File|File]].
+
+The data of the this ''File'' is contained into a ''NULL'' terminated
+[[Storage|CharStorage]].
+
+=====  torch.MemoryFile([mode]) =====
+{{anchor:torch.MemoryFile}}
+
+//Constructor// which returns a new ''MemoryFile'' object using ''mode''. Valid
+''mode'' are ''"r"'' (read), ''"w"'' (write) or ''"rw"'' (read-write). Default is ''"rw"''.
+
+
+=====  torch.MemoryFile(storage, mode) =====
+{{anchor:torch.MemoryFile}}
+
+//Constructor// which returns a new ''MemoryFile'' object, using the given
+[[Storage|storage]] (which must be a ''CharStorage'') and ''mode''. Valid
+''mode'' are ''"r"'' (read), ''"w"'' (write) or ''"rw"'' (read-write). The last character
+in this storage //must// be ''NULL'' or an error will be generated. This allow
+to read existing memory. If used for writing, not that the ''storage'' might
+be resized by this class if needed. 
+
+=====  [CharStorage] storage() =====
+{{anchor:torch.MemoryFile.storage}}
+
+Returns the [[Storage|storage]] which contains all the data of the
+''File'' (note: this is //not// a copy, but a //reference// on this storage). The
+size of the storage is the size of the data in the ''File'', plus one, the
+last character being ''NULL''.

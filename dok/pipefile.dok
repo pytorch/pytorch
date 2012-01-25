@@ -1,0 +1,21 @@
+======  PipeFile ======
+{{anchor:torch.PipeFile.dok}}
+
+Parent classes: [[DiskFile|DiskFile]]
+
+A ''PipeFile'' is a particular ''File'' which is able to perform basic read/write operations
+on a command pipe. It implements all methods described in [[DiskFile|DiskFile]] and [[File|File]].
+
+The file might be open in read or write mode, depending on the parameter
+''mode'' (which can take the value ''"r"'' or ''"w"'') 
+given to the [[#torch.PipeFile|torch.PipeFile(fileName, mode)]]. Read-write mode is not allowed.
+
+=====  torch.PipeFile(command, [mode], [quiet]) =====
+{{anchor:torch.PipeFile}}
+
+//Constructor// which execute ''command'' by opening a pipe in read or write
+''mode''. Valid ''mode'' are ''"r"'' (read) or ''"w"'' (write). Default is read
+mode.
+
+If (and only if) ''quiet'' is ''true'', no error will be raised in case of
+problem opening the file: instead ''nil'' will be returned.

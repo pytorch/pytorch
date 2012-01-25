@@ -1,0 +1,43 @@
+#!/bin/bash
+
+# install prefix
+PREFIX=@Torch_INSTALL_BIN@
+
+# load torch.lua
+INIT="require 'torch'; torch.include('torch','torch.lua')"
+
+# check special arguments
+if [ $# -gt 0 ]
+then
+    if [ $1 == 'install' ]
+    then
+        if [ $# -eq 2 ]
+        then
+            $PREFIX/lua -e "$INIT; install('$2')";
+        else
+            $PREFIX/lua -e "$INIT; install('.')";
+        fi
+        exit
+    fi
+fi
+
+# try to run qlua, and default to lua if not available
+# all the functions defined above are executed before
+# returning to a user prompt
+if [ -f $PREFIX/qlua ]
+then 
+    if [ $DISPLAY ]
+    then
+        echo "Try the IDE: torch -ide"
+        echo "Type help() for more info"
+        $PREFIX/qlua -e "$INIT" -i $*;
+    else
+        echo "Unable to connect X11 server (disabling graphics)"
+        echo "Type help() for more info"
+        $PREFIX/qlua -nographics -e "$INIT" -i $*;
+    fi
+else 
+    echo "Install Qt4 and rebuild Torch7 for graphics capability"
+    echo "Type help() for more info"
+    $PREFIX/lua -e "$INIT" -i $*;
+fi

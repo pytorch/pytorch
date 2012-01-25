@@ -1,0 +1,8 @@
+/* -*- C -*- */
+
+#cmakedefine USE_CBLAS @USE_CBLAS@
+
+#if USE_CBLAS
+# include "@CBLAS_INCLUDE_FILE@"
+#endif
+

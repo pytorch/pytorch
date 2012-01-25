@@ -1,0 +1,333 @@
+====== File ======
+{{anchor:torch.File.dok}}
+
+This is an //abstract// class. It defines most methods implemented by its
+child classes, like [[DiskFile|DiskFile]],
+[[MemoryFile|MemoryFile]] and [[PipeFile|PipeFile]].
+
+Methods defined here are intended for basic read/write functionalities.
+Read/write methods might write in [[#torch.File.ascii|ASCII]] mode or
+[[#torch.File.binary|binary]] mode.
+ 
+In [[#torch.File.ascii|ASCII]] mode, numbers are converted in human readable
+format (characters). Booleans are converted into ''0'' (false) or ''1'' (true).
+In [[#torch.File.binary|binary]] mode, numbers and boolean are directly encoded
+as represented in a register of the computer. While not being human
+readable and less portable, the binary mode is obviously faster.
+
+In [[#torch.File.ascii|ASCII]] mode, if the default option
+[[#torch.File.autoSpacing|autoSpacing()]] is chosen, a space will be generated
+after each written number or boolean. A carriage return will also be added
+after each call to a write method. With this option, the spaces are
+supposed to exist while reading. This option can be deactivated with
+[[#torch.File.noAutoSpacing|noAutoSpacing()]].
+
+A ''Lua'' error might or might be not generated in case of read/write error
+or problem in the file. This depends on the choice made between
+[[#torch.File.quiet|quiet()]] and [[#torch.File.pedantic|pedantic()]] options. It
+is possible to query if an error occured in the last operation by calling
+[[#torch.File.hasError|hasError()]].
+
+=====  Read methods =====
+{{anchor:torch.File.read}}
+{{anchor:torch.File.readBool}}
+{{anchor:torch.File.readByte}}
+{{anchor:torch.File.readChar}}
+{{anchor:torch.File.readShort}}
+{{anchor:torch.File.readInt}}
+{{anchor:torch.File.readLong}}
+{{anchor:torch.File.readFloat}}
+{{anchor:torch.File.readDouble}}
+
+They are three types of reading methods:
+  - ''[number] readTYPE()''
+  - ''[TYPEStorage] readTYPE(n)''
+  - ''[number] readTYPE(TYPEStorage)''
+
+where ''TYPE'' can be either ''Byte'', ''Char'', ''Short'', ''Int'', ''Long'', ''Float'' or ''Double''.
+
+A convenience method also exist for boolean types: ''[boolean] readBool()''. It reads
+a value on the file with ''readInt()'' and returns ''true'' if and only if this value is ''1''. It is not possible
+to read storages of booleans.
+
+All these methods depends on the encoding choice: [[#torch.File.ascii|ASCII]]
+or [[#torch.File.binary|binary]] mode.  In [[#torch.File.ascii|ASCII]] mode, the
+option [[#torch.File.autoSpacing|autoSpacing()]] and
+[[#torch.File.noAutoSpacing|noAutoSpacing()]] have also an effect on these
+methods.
+
+If no parameter is given, one element is returned. This element is
+converted to a ''Lua'' number when reading.
+
+If ''n'' is given, ''n'' values of the specified type are read
+and returned in a new [[Storage|Storage]] of that particular type.
+The storage size corresponds to the number of elements actually read.
+
+If a ''Storage'' is given, the method will attempt to read a number of elements
+equals to the size of the given storage, and fill up the storage with these elements.
+The number of elements actually read is returned.
+
+In case of read error, these methods will call the ''Lua'' error function using the default
+[[#torch.File.pedantic|pedantic]] option, or stay quiet with the [[#torch.File.quiet|quiet]]
+option. In the latter case, one can check if an error occurred with
+[[#torch.File.hasError|hasError()]].
+
+=====  Write methods =====
+{{anchor:torch.File.write}}
+{{anchor:torch.File.writeBool}}
+{{anchor:torch.File.writeByte}}
+{{anchor:torch.File.writeChar}}
+{{anchor:torch.File.writeShort}}
+{{anchor:torch.File.writeInt}}
+{{anchor:torch.File.writeLong}}
+{{anchor:torch.File.writeFloat}}
+{{anchor:torch.File.writeDouble}}
+
+They are two types of reading methods:
+  - ''[number] writeTYPE(number)''
+  - ''[number] writeTYPE(TYPEStorage)''
+
+where ''TYPE'' can be either ''Byte'', ''Char'', ''Short'', ''Int'', ''Long'', ''Float'' or ''Double''.
+
+A convenience method also exist for boolean types: ''writeBool(value)''. If ''value'' is ''nil'' or
+not ''true'' a it is equivalent to a ''writeInt(0)'' call, else to ''writeInt(1)''. It is not possible
+to write storages of booleans.
+
+All these methods depends on the encoding choice: [[#torch.File.ascii|ASCII]]
+or [[#torch.File.ascii|binary]] mode.  In [[#torch.File.ascii|ASCII]] mode, the
+option [[#torch.File.autoSpacing|autoSpacing()]] and
+[[#torch.File.noAutoSpacing|noAutoSpacing()]] have also an effect on these
+methods.
+
+If one ''Lua'' number is given, this number is converted according to the
+name of the method when writing (e.g. ''writeInt(3.14)'' will write ''3'').
+
+If a ''Storage'' is given, the method will attempt to write all the elements contained
+in the storage.
+
+These methods return the number of elements actually written.
+
+In case of read error, these methods will call the ''Lua'' error function using the default
+[[#torch.File.pedantic|pedantic]] option, or stay quiet with the [[#torch.File.quiet|quiet]]
+option. In the latter case, one can check if an error occurred with
+[[#torch.File.hasError|hasError()]].
+
+=====  Serialization methods =====
+{{anchor:torch.File.serialization}}
+
+These methods allow the user to save any serializable objects on disk and
+reload it later in its original state. In other words, it can perform a
+//deep// copy of an object into a given ''File''.
+
+Serializable objects are ''Torch'' objects having a ''read()'' and
+''write()'' method. ''Lua'' objects such as ''table'', ''number'' or
+''string'' or //pure Lua// functions are also serializable.
+
+If the object to save contains several other objects (let say it is a tree
+of objects), then objects appearing several times in this tree will be
+//saved only once//. This saves disk space, speedup loading/saving and
+respect the dependencies between objects.
+
+Interestingly, if the ''File'' is a [[MemoryFile|MemoryFile]], it allows
+the user to easily make a //clone// of any serializable object:
+<file lua>
+file = torch.MemoryFile() -- creates a file in memory
+file:writeObject(object) -- writes the object into file
+file:seek(1) -- comes back at the beginning of the file
+objectClone = file:readObject() -- gets a clone of object
+</file>
+
+====  readObject() ====
+{{anchor:torch.File.readObject}}
+
+Returns the next [[#torch.File.serialization|serializable]] object saved beforehand
+in the file with [[#torch.File.writeObject|writeObject()]].
+
+Note that objects which were [[#torch.File.writeObject|written]] with the same
+reference have still the same reference after loading.
+
+Example:
+<file lua>
+-- creates an array which contains twice the same tensor  
+array = {}
+x = torch.Tensor(1)
+table.insert(array, x)
+table.insert(array, x)
+
+-- array[1] and array[2] refer to the same address
+-- x[1] == array[1][1] == array[2][1] == 3.14
+array[1][1] = 3.14
+
+-- write the array on disk
+file = torch.DiskFile('foo.asc', 'w')
+file:writeObject(array)
+file:close() -- make sure the data is written
+
+-- reload the array
+file = torch.DiskFile('foo.asc', 'r')
+arrayNew = file:readObject()
+
+-- arrayNew[1] and arrayNew[2] refer to the same address!
+-- arrayNew[1][1] == arrayNew[2][1] == 3.14
+-- so if we do now:
+arrayNew[1][1] = 2.72
+-- arrayNew[1][1] == arrayNew[2][1] == 2.72 !
+</file>
+
+====  writeObject(object) ====
+{{anchor:torch.File.writeObject}}
+
+Writes ''object'' into the file. This object can be read later using
+[[#torch.File.readObject|readObject()]]. Serializable objects are ''Torch''
+objects having a ''read()'' and ''write()'' method. ''Lua'' objects such as
+''table'', ''number'' or ''string'' or pure Lua functions are also serializable.
+
+If the object has been already written in the file, only a //reference// to
+this already saved object will be written: this saves space an speed-up
+writing; it also allows to keep the dependencies between objects intact.
+
+In returns, if one writes an object, modify its member, and write the
+object again in the same file, the modifications will not be recorded
+in the file, as only a reference to the original will be written. See
+[[#torch.File.readObject|readObject()]] for an example.
+
+====  [string] readString(format) ====
+{{anchor:torch.File.readString}}
+
+If ''format'' starts with ''"*l"'' then returns the next line in the ''File''. The end-of-line character is skipped.
+
+If ''format'' starts with ''"*a"'' then returns all the remaining contents of the ''File''.
+
+If no data is available, then an error is raised, except if ''File'' is in [[#torch.File.quiet|quiet()]] mode where
+it then returns ''nil''.
+
+Because Torch is more precised on number typing, the ''Lua'' format ''"*n"'' is not supported:
+instead use one of the [[#torch.File.read|number read methods]].
+
+====  [number] writeString(str) ====
+{{anchor:torch.File.writeString}}
+
+Writes the string ''str'' in the ''File''. If the string cannot be written completely an error is raised, except
+if ''File'' is in [[#torch.File.quiet|quiet()]] mode where it returns the number of character actually written.
+
+=====  ascii() [default] =====
+{{anchor:torch.File.ascii}}
+
+The data read or written will be in ''ASCII'' mode: all numbers are converted
+to characters (human readable format) and boolean are converted to ''0''
+(false) or ''1'' (true). The input-output format in this mode depends on the
+options [[#torch.File.autoSpacing|autoSpacing()]] and
+[[#torch.File.noAutoSpacing|noAutoSpacing()]].
+
+=====  autoSpacing() [default] =====
+{{anchor:torch.File.autoSpacing}}
+
+In [[#torch.File.ascii|ASCII]] mode, write additional spaces around the elements
+written on disk: if writing a [[Storage|Storage]], a space will be
+generated between each //element// and a //return line// after the last
+element. If only writing one element, a //return line// will be generated
+after this element.
+
+Those spaces are supposed to exist while reading in this mode.
+
+This is the default behavior. You can de-activate this option with the
+[[#torch.File.noAutoSpacing|noAutoSpacing()]] method.
+
+=====  binary() =====
+{{anchor:torch.File.binary}}
+
+The data read or written will be in binary mode: the representation in the
+''File'' is the same that the one in the computer memory/register (not human
+readable).  This mode is faster than [[#torch.File.ascii|ASCII]] but less
+portable.
+
+=====  clearError() =====
+{{anchor:torch.File.clearError}}
+
+Clear the error.flag returned by [[#torch.File.hasError|hasError()]].
+
+=====  close() =====
+{{anchor:torch.File.close}}
+
+Close the file. Any subsequent operation will generate a ''Lua'' error.
+
+=====  noAutoSpacing() =====
+{{anchor:torch.File.noAutoSpacing}}
+
+In [[#torch.File.ascii|ASCII]] mode, do not put extra spaces between element
+written on disk. This is the contrary of the option
+[[#torch.File.autoSpacing|autoSpacing()]].
+
+=====  synchronize() =====
+{{anchor:torch.File.synchronize}}
+
+If the child class bufferize the data while writing, ensure that the data
+is actually written.
+
+
+=====  pedantic() [default] =====
+{{anchor:torch.File.pedantic}}
+
+If this mode is chosen (which is the default), a ''Lua'' error will be
+generated in case of error (which will cause the program to stop).
+
+It is possible to use [[#torch.File.quiet|quiet()]] to avoid ''Lua'' error generation
+and set a flag instead.
+
+=====  [number] position() =====
+{{anchor:torch.File.position}}
+
+Returns the current position (in bytes) in the file.
+The first position is ''1'' (following Lua standard indexing).
+
+=====  quiet() =====
+{{anchor:torch.File.quiet}}
+
+If this mode is chosen instead of [[#torch.File.pedantic|pedantic()]], no ''Lua''
+error will be generated in case of read/write error. Instead, a flag will
+be raised, readable through [[#torch.File.hasError|hasError()]]. This flag can
+be cleared with [[#torch.File.clearError|clearError()]]
+
+Checking if a file is quiet can be performed using [[#torch.File.isQuiet|isQuiet()]].
+
+=====  seek(position) =====
+{{anchor:torch.File.seek}}
+
+Jump into the file at the given ''position'' (in byte). Might generate/raise
+an error in case of problem. The first position is ''1'' (following Lua standard indexing).
+
+=====  seekEnd() =====
+{{anchor:torch.File.seekEnd}}
+
+Jump at the end of the file. Might generate/raise an error in case of
+problem.
+
+===== File state query =====
+
+These methods allow the user to query the state of the given ''File''.
+
+====  [boolean] hasError() ====
+{{anchor:torch.File.hasError}}
+
+Returns if an error occurred since the last [[#torch.File.clearError|clearError()]] call, or since
+the opening of the file if ''clearError()'' has never been called.
+
+====  [boolean] isQuiet() ====
+{{anchor:torch.File.isQuiet}}
+
+Returns a boolean which tells if the file is in [[#torch.File.quiet|quiet]] mode or not.
+
+====  [boolean] isReadable() ====
+{{anchor:torch.File.isReadable}}
+
+Tells if one can read the file or not.
+
+====  [boolean] isWritable() ====
+{{anchor:torch.File.isWritable}}
+
+Tells if one can write in the file or not.
+
+==== [boolean] isAutoSpacing() ====
+{{anchor:torch.File.isAutoSpacing}}
+
+Return ''true'' if [[#torch.File.autoSpacing|autoSpacing]] has been chosen.
