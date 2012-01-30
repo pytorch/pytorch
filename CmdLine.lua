@@ -65,7 +65,22 @@ function CmdLine:__init(argseparator_,keyseparator_)
    self.options = {}
    self.arguments = {}
    self.helplines = {}
+   self.dateformat = nil
 end
+
+function CmdLine:addTime(name, format)
+   format = format or '%F %T'
+   if type(format) ~= 'string' then
+      error('Argument has to be string')
+   end
+   if name ~= nil then
+      name = '[' .. name .. ']: '
+   else
+      name = ''
+   end
+   self.dateformat = format .. name
+end
+
 
 function CmdLine:argument(key, help, _type_)
    table.insert(self.arguments, {key=key, help=help, type=_type_})
@@ -173,14 +188,15 @@ function CmdLine:log(file, params)
    function print(...)
       local n = select("#", ...)
       oprint(...)
-      for i=1,n do
-         f:write(tostring(select(i, ...)))
-         if i ~= n then
-            f:write(' ')
-         else
-            f:write('\n')
-         end
+      local str = {}
+      if self.dateformat then
+	 table.insert(str, os.date(self.dateformat))
       end
+      for i=1,n do
+	 table.insert(str,tostring(select(i, ...)))
+      end
+      table.insert(str,'\n')
+      f:write(table.concat(str,' '))
       f:flush()
    end
    print('[program started on ' .. os.date() .. ']')

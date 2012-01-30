@@ -1,43 +1,89 @@
-#!/bin/bash
+#!@Torch_INSTALL_BIN@/lua
 
-# install prefix
-PREFIX=@Torch_INSTALL_BIN@
+-- PREFIX
+PREFIX = '@Torch_INSTALL_BIN@'
 
-# load torch.lua
-INIT="require 'torch'; torch.include('torch','torch.lua')"
+-- use paths lib
+require 'paths'
 
-# check special arguments
-if [ $# -gt 0 ]
-then
-    if [ $1 == 'install' ]
-    then
-        if [ $# -eq 2 ]
-        then
-            $PREFIX/lua -e "$INIT; install('$2')";
-        else
-            $PREFIX/lua -e "$INIT; install('.')";
-        fi
-        exit
-    fi
-fi
+-- help/args
+help = 
+[=[Usage: torch [options] [script [args]]
+General options:
+  -b|-bare         start a bare environment (no libs preloaded)
+  -e string        execute string
+  -l lib           require lib
+  -i               enter interactive mode after executing script [false]
+  -v|-version      show version information [false]
+  -h|-help         this help [false]
+Qt options:
+  -nographics|-ng  disable all the graphical capabilities [false]
+  -ide             enable IDE (graphical console) [false]
+  -onethread       run lua in the main thread (might be safer) [false] ]=]
 
-# try to run qlua, and default to lua if not available
-# all the functions defined above are executed before
-# returning to a user prompt
-if [ -f $PREFIX/qlua ]
-then 
-    if [ $DISPLAY ]
-    then
-        echo "Try the IDE: torch -ide"
-        echo "Type help() for more info"
-        $PREFIX/qlua -e "$INIT" -i $*;
-    else
-        echo "Unable to connect X11 server (disabling graphics)"
-        echo "Type help() for more info"
-        $PREFIX/qlua -nographics -e "$INIT" -i $*;
-    fi
-else 
-    echo "Install Qt4 and rebuild Torch7 for graphics capability"
-    echo "Type help() for more info"
-    $PREFIX/lua -e "$INIT" -i $*;
-fi
+-- default lua: qlua
+lua = 'qlua'
+
+-- preload torch environment
+env = ' -e "' .. "require 'torch'; torch.include('torch','torch.lua'); " .. '" '
+
+-- by default, be interactive
+interactive = true
+
+-- parse some arguments
+for i,a in ipairs(arg) do
+   --  no graphics mode?
+   if a == '-nographics' or a == '-ng' then
+      lua = 'lua'
+      arg[i] = ''
+   end
+   -- help?
+   if a == '-help' or a == '--help' or a == '-h' then
+      print(help)
+      os.exit()
+   end
+   -- version?
+   if a == '-v' or a == '-version' then
+      print('Torch 7.0  Copyright (C) 2001-2011 Idiap, NEC Labs, NYU')
+      os.execute(paths.concat(PREFIX,lua) .. ' -v')
+      os.exit()
+   end
+   -- bare env?
+   if a == '-b' or a == '-bare' then
+      env = ' '
+      arg[i] = ' '
+   end
+   -- protect -e
+   if a == '-e' and arg[i+1] then
+      arg[i+1] = '"' .. arg[i+1] .. '"'
+   end
+   -- autostart interactive sessions if no user script:
+   if a:find('%.lua$') and paths.filep(a) then
+      interactive = false
+      -- do not consider further arguments
+      break
+   end
+end
+
+-- interactive?
+if interactive then
+   env = env .. ' -i '
+end
+
+-- re-pack arguments
+args = table.concat(arg, ' ')
+
+-- test qlua existence
+if lua == 'qlua' and not paths.filep(paths.concat(PREFIX,lua)) then
+   print('Install Qt4 and rebuild Torch7 for graphics capability (graphics disabled)')
+   lua = 'lua'
+elseif os.getenv('DISPLAY') == '' or os.getenv('DISPLAY') == nil then
+   print('Unable to connect X11 server (disabling graphics)')
+   lua = 'lua'
+else
+   print('Try the IDE: torch -ide')
+end
+
+-- finally execute main thread, with proper options
+print('Type help() for more info')
+os.execute(paths.concat(PREFIX,lua) .. env .. args)
