@@ -1,5 +1,3 @@
-INCLUDE_DIRECTORIES("${Torch_SOURCE_DIR}/libraries/TH")
-
 SET(src 
   THCGeneral.c THCStorage.c THCTensor.c THCTensorCopy.c)
 
