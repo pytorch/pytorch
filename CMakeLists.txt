@@ -10,7 +10,8 @@ ADD_TORCH_DOK(dok torch "Fundamentals" "Torch package" 1.1)
 
 TARGET_LINK_LIBRARIES(torch luaT TH)
 
-INSTALL(FILES generic/Storage.c generic/Tensor.c DESTINATION "${Torch_INSTALL_LUA_PATH_SUBDIR}/generic")
+INSTALL(FILES generic/Storage.c generic/Tensor.c
+  DESTINATION "${Torch_INSTALL_LUA_PATH_SUBDIR}/torch/generic")
 
 CONFIGURE_FILE(torch.in "${Torch_BINARY_DIR}/torch")
 INSTALL(FILES "${Torch_BINARY_DIR}/torch"
