@@ -5,7 +5,7 @@ SET(luasrc init.lua File.lua Tensor.lua TensorMath.lua CmdLine.lua Tester.lua to
 ADD_TORCH_WRAP(tensormathwrap TensorMathWrap.lua)
 ADD_TORCH_WRAP(randomwrap random.lua)
 
-ADD_TORCH_PACKAGE(torch "${src}" "${luasrc}" "Basics")
+ADD_TORCH_PACKAGE(torch "${src}" "${luasrc}")
 ADD_TORCH_DOK(dok torch "Fundamentals" "Torch package" 1.1)
 
 TARGET_LINK_LIBRARIES(torch luaT TH)
