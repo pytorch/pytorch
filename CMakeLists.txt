@@ -1,5 +1,5 @@
 SET(src DiskFile.c File.c MemoryFile.c PipeFile.c Storage.c Tensor.c Timer.c utils.c init.c TensorOperator.c TensorMathWrap.c random.c)
-SET(luasrc init.lua File.lua Tensor.lua TensorMath.lua CmdLine.lua Tester.lua torch.lua test/test.lua)
+SET(luasrc init.lua File.lua Tensor.lua TensorMath.lua CmdLine.lua Tester.lua test/test.lua)
   
 # Necessary do generate wrapper
 ADD_TORCH_WRAP(tensormathwrap TensorMathWrap.lua)
@@ -12,10 +12,3 @@ TARGET_LINK_LIBRARIES(torch luaT TH)
 
 INSTALL(FILES generic/Storage.c generic/Tensor.c
   DESTINATION "${Torch_INSTALL_LUA_PATH_SUBDIR}/torch/generic")
-
-CONFIGURE_FILE(torch.in "${Torch_BINARY_DIR}/torch")
-INSTALL(FILES "${Torch_BINARY_DIR}/torch"
-        DESTINATION "${Torch_INSTALL_BIN_SUBDIR}"
-        PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ
-                    GROUP_EXECUTE GROUP_READ
-                    WORLD_EXECUTE WORLD_READ)
