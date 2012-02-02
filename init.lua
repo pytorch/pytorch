@@ -2,7 +2,6 @@
 -- We are using paths.require to appease mkl
 require "paths"
 paths.require "libtorch"
-require "libtorch"
 
 --- package stuff
 function torch.packageLuaPath(name)
