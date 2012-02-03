@@ -5,6 +5,9 @@
 TH_API void THTensor_(fill)(THTensor *r_, real value);
 TH_API void THTensor_(zero)(THTensor *r_);
 
+TH_API void THTensor_(maskedFill)(THTensor *tensor, THByteTensor *mask, real value);
+TH_API void THTensor_(maskedCopy)(THTensor *tensor, THByteTensor *mask, THTensor* src);
+
 TH_API accreal THTensor_(dot)(THTensor *t, THTensor *src);
   
 TH_API real THTensor_(minall)(THTensor *t);
@@ -49,6 +52,20 @@ TH_API void THTensor_(sort)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int d
 TH_API void THTensor_(tril)(THTensor *r_, THTensor *t, long k);
 TH_API void THTensor_(triu)(THTensor *r_, THTensor *t, long k);
 TH_API void THTensor_(cat)(THTensor *r_, THTensor *ta, THTensor *tb, int dimension);
+
+TH_API void THTensor_(ltValue)(THByteTensor *r_, THTensor* t, real value);
+TH_API void THTensor_(leValue)(THByteTensor *r_, THTensor* t, real value);
+TH_API void THTensor_(gtValue)(THByteTensor *r_, THTensor* t, real value);
+TH_API void THTensor_(geValue)(THByteTensor *r_, THTensor* t, real value);
+TH_API void THTensor_(neValue)(THByteTensor *r_, THTensor* t, real value);
+TH_API void THTensor_(eqValue)(THByteTensor *r_, THTensor* t, real value);
+
+TH_API void THTensor_(ltTensor)(THByteTensor *r_, THTensor *ta, THTensor *tb);
+TH_API void THTensor_(leTensor)(THByteTensor *r_, THTensor *ta, THTensor *tb);
+TH_API void THTensor_(gtTensor)(THByteTensor *r_, THTensor *ta, THTensor *tb);
+TH_API void THTensor_(geTensor)(THByteTensor *r_, THTensor *ta, THTensor *tb);
+TH_API void THTensor_(neTensor)(THByteTensor *r_, THTensor *ta, THTensor *tb);
+TH_API void THTensor_(eqTensor)(THByteTensor *r_, THTensor *ta, THTensor *tb);
 
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
 

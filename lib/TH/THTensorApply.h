@@ -9,7 +9,7 @@
   TYPE2 *TENSOR2##_data = NULL; \
   long *TENSOR2##_counter = NULL; \
   long TENSOR2##_stride = 0, TENSOR2##_size = 0, TENSOR2##_dim = 0, TENSOR2##_i, TENSOR2##_n; \
-  TYPE2 *TENSOR3##_data = NULL; \
+  TYPE3 *TENSOR3##_data = NULL; \
   long *TENSOR3##_counter = NULL; \
   long TENSOR3##_stride = 0, TENSOR3##_size = 0, TENSOR3##_dim = 0, TENSOR3##_i, TENSOR3##_n; \
   int TH_TENSOR_APPLY_hasFinished = 0; \

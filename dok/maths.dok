@@ -11,6 +11,7 @@ categories:
   * [[#torch.matrixwide.dok|matrix-wide operations]] like [[#torch.trace|trace]] and [[#torch.norm|norm]].
   * [[#torch.conv.dok|Convolution and cross-correlation]] operations like [[#torch.conv2|conv2]].
   * [[#torch.linalg.dok|Basic linear algebra operations]] like [[#torch.eig|eigen value/vector calculation]], [[#torch.svd|singular value decomposition (svd)]] and [[#torch.gesv|linear system solution]].
+  * [[#torch.logical.dok|Logical Operations on Tensors]].
 
 By default, all operations allocate a new tensor to return the
 result. However, all functions also support passing the resulting(s)
@@ -802,3 +803,161 @@ u,s,v = torch.svd(a)
 
 </file>
 
+====== Logical Operations on Tensors ======
+{{anchor:torch.logical.dok}}
+
+These functions implement logical comparison operators that take a
+tensor as input and another tensor or a number as the comparison
+target.  They return a ''ByteTensor'' in which each element is 0 or 1
+indicating if the comparison for the corresponding element was
+''false'' or ''true'' respectively.
+
+===== torch.lt(a, b) =====
+{{anchor:torch.lt}}
+
+Implements %%<%% operator comparing each element in ''a'' with ''b''
+(if ''b'' is a number) or each element in ''a'' with corresponding element in ''b''.
+
+===== torch.le(a, b) =====
+{{anchor:torch.lt}}
+
+Implements %%<=%% operator comparing each element in ''a'' with ''b''
+(if ''b'' is a number) or each element in ''a'' with corresponding element in ''b''.
+
+===== torch.gt(a, b) =====
+{{anchor:torch.lt}}
+
+Implements %%>%% operator comparing each element in ''a'' with ''b''
+(if ''b'' is a number) or each element in ''a'' with corresponding element in ''b''.
+
+===== torch.ge(a, b) =====
+{{anchor:torch.lt}}
+
+Implements %%>=%% operator comparing each element in ''a'' with ''b''
+(if ''b'' is a number) or each element in ''a'' with corresponding element in ''b''.
+
+===== torch.eq(a, b) =====
+{{anchor:torch.lt}}
+
+Implements %%==%% operator comparing each element in ''a'' with ''b''
+(if ''b'' is a number) or each element in ''a'' with corresponding element in ''b''.
+
+===== torch.ne(a, b) =====
+{{anchor:torch.lt}}
+
+Implements %%!=%% operator comparing each element in ''a'' with ''b''
+(if ''b'' is a number) or each element in ''a'' with corresponding element in ''b''.
+
+
+<file lua>
+
+> a = torch.rand(10)
+> b = torch.rand(10)
+> =a
+ 0.5694
+ 0.5264
+ 0.3041
+ 0.4159
+ 0.1677
+ 0.7964
+ 0.0257
+ 0.2093
+ 0.6564
+ 0.0740
+[torch.DoubleTensor of dimension 10]
+
+> =b
+ 0.2950
+ 0.4867
+ 0.9133
+ 0.1291
+ 0.1811
+ 0.3921
+ 0.7750
+ 0.3259
+ 0.2263
+ 0.1737
+[torch.DoubleTensor of dimension 10]
+
+> =torch.lt(a,b)
+ 0
+ 0
+ 1
+ 0
+ 1
+ 0
+ 1
+ 1
+ 0
+ 1
+[torch.ByteTensor of dimension 10]
+
+> return torch.eq(a,b)
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+[torch.ByteTensor of dimension 10]
+
+> return torch.ne(a,b)
+ 1
+ 1
+ 1
+ 1
+ 1
+ 1
+ 1
+ 1
+ 1
+ 1
+[torch.ByteTensor of dimension 10]
+
+> return torch.gt(a,b)
+ 1
+ 1
+ 0
+ 1
+ 0
+ 1
+ 0
+ 0
+ 1
+ 0
+[torch.ByteTensor of dimension 10]
+
+> a[torch.gt(a,b)] = 10
+> =a
+ 10.0000
+ 10.0000
+  0.3041
+ 10.0000
+  0.1677
+ 10.0000
+  0.0257
+  0.2093
+ 10.0000
+  0.0740
+[torch.DoubleTensor of dimension 10]
+
+> a[torch.gt(a,1)] = -1
+> =a
+-1.0000
+-1.0000
+ 0.3041
+-1.0000
+ 0.1677
+-1.0000
+ 0.0257
+ 0.2093
+-1.0000
+ 0.0740
+[torch.DoubleTensor of dimension 10]
+
+
+</file>

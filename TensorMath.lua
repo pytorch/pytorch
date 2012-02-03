@@ -30,7 +30,13 @@ for _,tensortype in ipairs({'ByteTensor',
                          'ceil',
                          'floor',
                          'abs',
-			 'sign'
+			 'sign',
+			 'lt',
+			 'gt',
+			 'le',
+			 'ge',
+			 'eq',
+			 'ne'
                       }) do
 
       local torchfunc = torch[tensortype].torch[func]

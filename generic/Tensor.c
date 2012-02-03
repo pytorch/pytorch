@@ -470,6 +470,7 @@ static int torch_Tensor_(__newindex__)(lua_State *L)
 {
   THTensor *tensor = luaT_checkudata(L, 1, torch_Tensor_id);
   THLongStorage *idx = NULL;
+  THByteTensor *mask;
 
   if(lua_isnumber(L, 2))
   {
@@ -555,6 +556,22 @@ static int torch_Tensor_(__newindex__)(lua_State *L)
     }
     THStorage_(set)(tensor->storage, index, value);
     lua_pushboolean(L, 1);
+  }
+  else if((mask = luaT_toudata(L, 2, torch_ByteTensor_id)))
+  {
+    THTensor *vals;
+    if (lua_isnumber(L, 3))
+    {
+      THTensor_(maskedFill)(tensor, mask, (real)(luaL_checknumber(L,3)));
+    }
+    else if((vals = luaT_toudata(L, 3, torch_Tensor_id)))
+    {
+      THTensor_(maskedCopy)(tensor, mask, vals);
+    }
+    else
+    {
+      luaL_error(L,"number or tensor expected");
+    }
   }
   else
     lua_pushboolean(L, 0);
