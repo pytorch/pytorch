@@ -66,6 +66,11 @@ function CmdLine:__init(argseparator_,keyseparator_)
    self.arguments = {}
    self.helplines = {}
    self.dateformat = nil
+   self.silentio = false
+end
+
+function CmdLine:silent()
+   self.silentio = true
 end
 
 function CmdLine:addTime(name, format)
@@ -187,7 +192,9 @@ function CmdLine:log(file, params)
    local oprint = print
    function print(...)
       local n = select("#", ...)
-      oprint(...)
+      if not self.silentio then
+	 oprint(...)
+      end
       local str = {}
       if self.dateformat then
 	 table.insert(str, os.date(self.dateformat))
