@@ -14,6 +14,36 @@ void THTensor_(zero)(THTensor *r_)
                   THVector_(fill)(r__data, 0, r__size); break;);
 }
 
+void THTensor_(maskedFill)(THTensor *tensor, THByteTensor *mask, real value)
+{
+  TH_TENSOR_APPLY2(real, tensor, unsigned char, mask,
+                   if (*mask_data > 1) THError("Mask tensor can take 0 and 1 values only");
+                   else if (*mask_data == 1) *tensor_data = value;);
+}
+
+void THTensor_(maskedCopy)(THTensor *tensor, THByteTensor *mask, THTensor* src )
+{
+  THTensor *srct = THTensor_(newContiguous)(src);
+  real *src_data = srct->storage->data;
+  long cntr = 0;
+  long nelem = THTensor_(nElement)(srct);
+  TH_TENSOR_APPLY2(real, tensor, unsigned char, mask,
+		   if (*mask_data > 1)
+		   {
+		     THError("Mask tensor can take 0 and 1 values only");
+		   }
+		   else if (*mask_data == 1)
+		   {
+		     *tensor_data = *src_data;
+		     src_data++;
+		     cntr++;
+		     if (cntr > nelem)
+		       THError("Number of elements of src != mask");
+		   });
+  if (cntr != nelem)
+    THError("Number of elements of src != mask");
+}
+
 accreal THTensor_(dot)(THTensor *tensor, THTensor *src)
 {
   accreal sum = 0;
@@ -846,6 +876,29 @@ void THTensor_(cat)(THTensor *r_, THTensor *ta, THTensor *tb, int dimension)
     THTensor_(free)(ntb);
   }
 }
+
+#define TENSOR_IMPLEMENT_LOGICAL(NAME,OP)				\
+  void THTensor_(NAME##Value)(THByteTensor *r_, THTensor* t, real value)	\
+  {									\
+    THByteTensor_rawResize(r_, t->nDimension, t->size, NULL);		\
+    THByteTensor_zero(r_);						\
+    TH_TENSOR_APPLY2(unsigned char, r_, real, t,			\
+		     if (*t_data OP value) *r__data = 1;);		\
+  }									\
+  void THTensor_(NAME##Tensor)(THByteTensor *r_, THTensor *ta, THTensor *tb) \
+  {									\
+    THByteTensor_rawResize(r_, ta->nDimension, ta->size, NULL);		\
+    THByteTensor_zero(r_);						\
+    TH_TENSOR_APPLY3(unsigned char, r_, real, ta, real, tb,		\
+		     if(*ta_data OP *tb_data) *r__data = 1;);		\
+  }									\
+
+TENSOR_IMPLEMENT_LOGICAL(lt,<)
+TENSOR_IMPLEMENT_LOGICAL(gt,>)
+TENSOR_IMPLEMENT_LOGICAL(le,<=)
+TENSOR_IMPLEMENT_LOGICAL(ge,>=)
+TENSOR_IMPLEMENT_LOGICAL(eq,==)
+TENSOR_IMPLEMENT_LOGICAL(ne,!=)
 
 /* floating point only now */
 
