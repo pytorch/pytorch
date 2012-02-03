@@ -20,11 +20,11 @@ local function Storage__printformat(self)
       end
 --   end
    local tensor = torch.DoubleTensor(torch.DoubleStorage(self:size()):copy(self), 1, self:size()):abs()
-   local expMin = tensor:minall()
+   local expMin = tensor:min()
    if expMin ~= 0 then
       expMin = math.floor(math.log10(expMin)) + 1
    end
-   local expMax = tensor:maxall()
+   local expMax = tensor:max()
    if expMax ~= 0 then
       expMax = math.floor(math.log10(expMax)) + 1
    end

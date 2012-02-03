@@ -7,10 +7,10 @@ local msize = 100
 local function maxdiff(x,y)
    local d = x-y
    if x:type() == 'torch.DoubleTensor' or x:type() == 'torch.FloatTensor' then
-      return d:abs():maxall()
+      return d:abs():max()
    else
       local dd = torch.Tensor():resize(d:size()):copy(d)
-      return dd:abs():maxall()
+      return dd:abs():max()
    end
 end
 
@@ -25,39 +25,39 @@ function torchtest.max()
 end
 function torchtest.min()
    local x = torch.rand(msize,msize)
-   local mx,ix = torch.min(x)
+   local mx,ix = torch.min(x,2)
    local mxx = torch.Tensor()
    local ixx = torch.LongTensor()
-   torch.min(mxx,ixx,x)
+   torch.min(mxx,ixx,x,2)
    mytester:asserteq(maxdiff(mx,mxx),0,'torch.min value')
    mytester:asserteq(maxdiff(ix,ixx),0,'torch.min index')
 end
 function torchtest.sum()
    local x = torch.rand(msize,msize)
-   local mx = torch.sum(x)
+   local mx = torch.sum(x,2)
    local mxx = torch.Tensor()
-   torch.sum(mxx,x)
+   torch.sum(mxx,x,2)
    mytester:asserteq(maxdiff(mx,mxx),0,'torch.sum value')
 end
 function torchtest.prod()
    local x = torch.rand(msize,msize)
-   local mx = torch.prod(x)
+   local mx = torch.prod(x,2)
    local mxx = torch.Tensor()
-   torch.prod(mxx,x)
+   torch.prod(mxx,x,2)
    mytester:asserteq(maxdiff(mx,mxx),0,'torch.prod value')
 end
 function torchtest.cumsum()
    local x = torch.rand(msize,msize)
-   local mx = torch.cumsum(x)
+   local mx = torch.cumsum(x,2)
    local mxx = torch.Tensor()
-   torch.cumsum(mxx,x)
+   torch.cumsum(mxx,x,2)
    mytester:asserteq(maxdiff(mx,mxx),0,'torch.cumsum value')
 end
 function torchtest.cumprod()
    local x = torch.rand(msize,msize)
-   local mx = torch.cumprod(x)
+   local mx = torch.cumprod(x,2)
    local mxx = torch.Tensor()
-   torch.cumprod(mxx,x)
+   torch.cumprod(mxx,x,2)
    mytester:asserteq(maxdiff(mx,mxx),0,'torch.cumprod value')
 end
 function torchtest.cross()
@@ -356,8 +356,8 @@ function torchtest.logical()
 
    local neqs = xgt+xlt
    local all = neqs + xeq
-   mytester:asserteq(neqs:sumall(), xne:sumall(), 'torch.logical')
-   mytester:asserteq(x:nElement(),all:double():sumall() , 'torch.logical')
+   mytester:asserteq(neqs:sum(), xne:sum(), 'torch.logical')
+   mytester:asserteq(x:nElement(),all:double():sum() , 'torch.logical')
 end
 
 function torch.test()

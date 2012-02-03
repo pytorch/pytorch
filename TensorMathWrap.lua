@@ -268,13 +268,6 @@ for _,Tensor in ipairs({"ByteTensor", "CharTensor",
                    {name=Tensor},
                    {name=real, creturned=true}})
 
-   for _,name in ipairs({"minall", "maxall", "sumall"}) do
-      interface:wrap(name,
-                     cname(name),
-                     {{name=Tensor},            
-                      {name=real, creturned=true}})
-   end
-
    interface:wrap("add",
                   cname("add"),
                   {{name=Tensor, default=true, returned=true},
@@ -342,27 +335,34 @@ for _,Tensor in ipairs({"ByteTensor", "CharTensor",
                   {{name=Tensor},
                    {name=real, creturned=true}})
 
-   for _,name in ipairs({"sum", "prod", "cumsum", "cumprod"}) do
+   for _,name in ipairs({"prod", "cumsum", "cumprod"}) do
       interface:wrap(name,
                      cname(name),
                      {{name=Tensor, default=true, returned=true},
                       {name=Tensor},
-                      {name="index", default=lastdim(2)}})
+                      {name="index"}})
    end
 
-   interface:wrap("min",
-                  cname("min"),
+   interface:wrap("sum",
+                  cname("sumall"),
+                  {{name=Tensor},
+                   {name=real, creturned=true}},
+                  cname("sum"),
                   {{name=Tensor, default=true, returned=true},
-                   {name="IndexTensor", default=true, returned=true},
                    {name=Tensor},
-                   {name="index", default=lastdim(3)}})
+                   {name="index"}})
 
-   interface:wrap("max",
-                  cname("max"),
-                  {{name=Tensor, default=true, returned=true},
-                   {name="IndexTensor", default=true, returned=true},
-                   {name=Tensor},
-                   {name="index", default=lastdim(3)}})
+   for _,name in ipairs({"min", "max"}) do
+      interface:wrap(name,
+                     cname(name .. "all"),
+                     {{name=Tensor},
+                      {name=real, creturned=true}},
+                     cname(name),
+                     {{name=Tensor, default=true, returned=true},
+                      {name="IndexTensor", default=true, returned=true},
+                      {name=Tensor},
+                      {name="index"}})
+   end
 
    interface:wrap("trace",
                   cname("trace"),
@@ -409,7 +409,6 @@ for _,Tensor in ipairs({"ByteTensor", "CharTensor",
                    {name=Tensor},
                    {name="index", default=lastdim(3)},
                    {name="boolean", default=0}})
-
 
    interface:wrap("tril",
                   cname("tril"),
@@ -675,24 +674,25 @@ static void THTensor_random1__(THTensor *self, long b)
    if Tensor == 'FloatTensor' or Tensor == 'DoubleTensor' then
 
       interface:wrap("mean",
+                     cname("meanall"),
+                     {{name=Tensor},
+                      {name=real, creturned=true}},
                      cname("mean"),
                      {{name=Tensor, default=true, returned=true},
                       {name=Tensor},
-                      {name="index", default=lastdim(2)}})
+                      {name="index"}})
 
-      interface:wrap("std",
-                     cname("std"),
-                     {{name=Tensor, default=true, returned=true},
-                      {name=Tensor},
-                      {name="index", default=lastdim(2)},
-                      {name="boolean", default=false}})
-
-      interface:wrap("var",
-                     cname("var"),
-                     {{name=Tensor, default=true, returned=true},
-                      {name=Tensor},
-                      {name="index", default=lastdim(2)},
-                      {name="boolean", default=false}})
+      for _,name in ipairs({"var", "std"}) do
+         interface:wrap(name,
+                        cname(name .. "all"),
+                        {{name=Tensor},
+                         {name=real, creturned=true}},
+                        cname(name),
+                        {{name=Tensor, default=true, returned=true},
+                         {name=Tensor},
+                         {name="index"},
+                         {name="boolean", default=false}})
+      end
 
       interface:wrap("norm",
                      cname("norm"),
@@ -706,13 +706,6 @@ static void THTensor_random1__(THTensor *self, long b)
                       {name=Tensor},
                       {name=real, default=2},
                       {name=real, creturned=true}})
-
-      for _,name in ipairs({"meanall", "varall", "stdall"}) do
-         interface:wrap(name,
-                        cname(name),
-                        {{name=Tensor},
-                         {name=real, creturned=true}})
-      end
 
       interface:wrap("linspace",
                      cname("linspace"),
