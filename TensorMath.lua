@@ -1,7 +1,3 @@
--- 
--- require 'wrap'
----
-
 local interface = wrap.CInterface.new()
 local method = wrap.CInterface.new()
 
