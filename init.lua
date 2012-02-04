@@ -72,6 +72,5 @@ torch.include('torch', 'Tensor.lua')
 torch.include('torch', 'File.lua')
 torch.include('torch', 'CmdLine.lua')
 torch.include('torch', 'Tester.lua')
-torch.include('torch', 'TensorMath.lua')
 torch.include('torch', 'test.lua')
 return torch
