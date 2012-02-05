@@ -7,6 +7,7 @@ TH_API void THTensor_(zero)(THTensor *r_);
 
 TH_API void THTensor_(maskedFill)(THTensor *tensor, THByteTensor *mask, real value);
 TH_API void THTensor_(maskedCopy)(THTensor *tensor, THByteTensor *mask, THTensor* src);
+TH_API void THTensor_(maskedSelect)(THTensor *tensor, THTensor* src, THByteTensor *mask);
 
 TH_API accreal THTensor_(dot)(THTensor *t, THTensor *src);
   

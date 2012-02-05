@@ -24,7 +24,7 @@ void THTensor_(maskedFill)(THTensor *tensor, THByteTensor *mask, real value)
 void THTensor_(maskedCopy)(THTensor *tensor, THByteTensor *mask, THTensor* src )
 {
   THTensor *srct = THTensor_(newContiguous)(src);
-  real *src_data = srct->storage->data;
+  real *src_data = THTensor_(data)(srct);
   long cntr = 0;
   long nelem = THTensor_(nElement)(srct);
   TH_TENSOR_APPLY2(real, tensor, unsigned char, mask,
@@ -42,6 +42,23 @@ void THTensor_(maskedCopy)(THTensor *tensor, THByteTensor *mask, THTensor* src )
 		   });
   if (cntr != nelem)
     THError("Number of elements of src != mask");
+}
+
+void THTensor_(maskedSelect)(THTensor *tensor, THTensor *src, THByteTensor *mask)
+{
+  long numel = THByteTensor_sumall(mask);
+  THTensor_(resize1d)(tensor,numel);
+  real *tensor_data = THTensor_(data)(tensor);
+  TH_TENSOR_APPLY2(real, src, unsigned char, mask,
+		   if (*mask_data > 1)
+		   {
+		     THError("Mask tensor can take 0 and 1 values only");
+		   }
+		   else if (*mask_data == 1)
+		   {
+		     *tensor_data = *src_data;
+		     tensor_data++;
+		   });
 }
 
 accreal THTensor_(dot)(THTensor *tensor, THTensor *src)
