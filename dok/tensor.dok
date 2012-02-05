@@ -1,15 +1,19 @@
 ======  Tensor ======
 {{anchor:torch.Tensor.dok}}
 
-The ''Tensor'' class is probably the most important class in ''Torch''. Almost every package depends on this
-class. It is ***the*** class for handling numeric data. Tensors are [[File#torch.File.serialization|serializable]].
+The ''Tensor'' class is probably the most important class in
+''Torch''. Almost every package depends on this class. It is ***the***
+class for handling numeric data. As with   pretty much anything in
+[[.:..:index|Torch7]], tensors are
+[[File#torch.File.serialization|serializable]].
 
 **Multi-dimensional matrix**
 
 A ''Tensor'' is a potentially multi-dimensional matrix. The number of
-dimensions is unlimited. Many methods have some convenience methods for for
-a number of dimensions inferior or equal to ''4'', but can also be called using
-[[Storage|LongStorage]] with more dimensions. Example:
+dimensions is unlimited that can be created using
+[[Storage|LongStorage]] with more dimensions.
+
+Example:
 <file lua>
  --- creation of a 4D-tensor 4x5x6x2
  z = torch.Tensor(4,5,6,2)
@@ -20,10 +24,12 @@ a number of dimensions inferior or equal to ''4'', but can also be called using
 </file>
 
 The number of dimensions of a ''Tensor'' can be queried by
-[[#torch.Tensor.nDimension|nDimension()]] or [[#torch.Tensor.dim|dim()]]. Size of
-the ''i-th'' dimension is returned by [[#torch.Tensor.size|size(i)]]. A
-[[Storage|LongStorage]] containing all the dimensions can be returned by
+[[#torch.Tensor.nDimension|nDimension()]] or
+[[#torch.Tensor.dim|dim()]]. Size of the ''i-th'' dimension is
+returned by [[#torch.Tensor.size|size(i)]]. A [[Storage|LongStorage]]
+containing all the dimensions can be returned by
 [[#torch.Tensor.size|size()]].
+
 <file lua>
 > print(x:nDimension())
 6
@@ -41,11 +47,15 @@ the ''i-th'' dimension is returned by [[#torch.Tensor.size|size(i)]]. A
 
 The actual data of a ''Tensor'' is contained into a
 [[Storage|Storage]]. It can be accessed using
-[[#torch.Tensor.storage|''storage()'']]. While the memory of a ''Tensor'' has to be
-contained in this unique ''Storage'', it might not be contiguous:
-the first position used in the ''Storage'' is given by [[#torch.Tensor.storageOffset|''storageOffset()'']]
-(starting at ''1''). And the //jump// needed to go from one element to another element
-in the ''i-th'' dimension is given by [[#torch.Tensor.stride|''stride(i)'']]. In other words, given a 3D tensor
+[[#torch.Tensor.storage|''storage()'']]. While the memory of a
+''Tensor'' has to be contained in this unique ''Storage'', it might
+not be contiguous: the first position used in the ''Storage'' is given
+by [[#torch.Tensor.storageOffset|''storageOffset()'']] (starting at
+''1''). And the //jump// needed to go from one element to another
+element in the ''i-th'' dimension is given by
+[[#torch.Tensor.stride|''stride(i)'']]. In other words, given a 3D
+tensor
+
 <file lua>
 x = torch.Tensor(7,7,7)
 </file>
@@ -143,7 +153,7 @@ obtained by good usage of the [[#torch.Tensor.stride|stride()]] and
 0
 [torch.DoubleTensor of dimension 5]
 > x:narrow(1, 2, 3):fill(1) -- narrow() returns a Tensor
-                            -- referencing the same Storage than x
+                            -- referencing the same Storage as x
 > print(x)
  0
  1
@@ -168,7 +178,10 @@ just replace ''Tensor'' by the name of the Tensor variant (like ''CharTensor'').
 =====  Tensor constructors =====
 {{anchor:torch.Tensor}}
 
-Here are several ways to construct a new ''Tensor''.
+Tensor constructors, create new Tensor object, optionally, allocating
+new memory. By default the elements of a newly allocated memory are
+not initialized, therefore, might contain arbitrary numbers. Here are
+several ways to construct a new ''Tensor''.
 
 ====  torch.Tensor() ====
 {{anchor:torch.Tensor}}
@@ -178,15 +191,17 @@ Returns an empty tensor.
 ====  torch.Tensor(tensor) ====
 {{anchor:torch.Tensor}}
 
-Returns a new tensor which reference the same [[#torch.Tensor.storage|Storage]]
-than the given ''tensor''. The [[#torch.Tensor.size|size]],
-[[#torch.Tensor.stride|stride]], and [[#torch.Tensor.storageOffset|storage offset]] are
-the same than the given tensor.
+Returns a new tensor which reference the same
+[[#torch.Tensor.storage|Storage]] than the given ''tensor''. The
+[[#torch.Tensor.size|size]], [[#torch.Tensor.stride|stride]], and
+[[#torch.Tensor.storageOffset|storage offset]] are the same than the
+given tensor.
 
-The new ''Tensor'' is now going to "view" the same
-[[Storage|storage]] than the given ''tensor''. As the result, any
-modification in the elements of the ''Tensor'' will have a impact on the
-elements of the given ''tensor'', and vice-versa. No memory copy!
+The new ''Tensor'' is now going to "view" the same [[Storage|storage]]
+as the given ''tensor''. As a result, any modification in the elements
+of the ''Tensor'' will have a impact on the elements of the given
+''tensor'', and vice-versa. No memory copy!
+
 <file lua>
 > x = torch.Tensor(2,5):fill(3.14)
 > print(x)
@@ -203,7 +218,7 @@ elements of the given ''tensor'', and vice-versa. No memory copy!
 [torch.DoubleTensor of dimension 2x5]
 
 > y:zero()
-> print(x) -- elements of x are the same than y!
+> print(x) -- elements of x are the same as y!
 
 0 0 0 0 0
 0 0 0 0 0
@@ -219,13 +234,14 @@ Create a tensor up to 4 dimensions. The tensor size will be ''sz1 x sz2 x sx3 x 
 ====  torch.Tensor(sizes, [strides]) ====
 {{anchor:torch.Tensor}}
 
-Create a tensor of any number of dimensions. The [[Storage|LongStorage]]
-''sizes'' gives the size in each dimension of the tensor. The optional
-[[Storage|LongStorage]] ''strides'' gives the jump necessary to go from
-one element to the next one in the each dimension. Of course, ''sizes'' and
-''strides'' must have the same size. If not given, or if some elements of
-''strides'' are //negative//, the [[#torch.Tensor.stride|stride()]] will be computed
-such that the tensor is as contiguous as possible in memory.
+Create a tensor of any number of dimensions. The
+[[Storage|LongStorage]] ''sizes'' gives the size in each dimension of
+the tensor. The optional [[Storage|LongStorage]] ''strides'' gives the
+jump necessary to go from one element to the next one in the each
+dimension. Of course, ''sizes'' and ''strides'' must have the same
+number of elements. If not given, or if some elements of ''strides''
+are //negative//, the [[#torch.Tensor.stride|stride()]] will be
+computed such that the tensor is as contiguous as possible in memory.
 
 Example, create a 4D 4x4x3x2 tensor:
 <file lua>
@@ -244,27 +260,32 @@ print(x)
  1
 [torch.DoubleTensor of dimension 4]
 </file>
-Note that //negative strides are not allowed//, and, if given as argument when constructing the Tensor, will be interpreted
-as //choose the right stride such that the Tensor is contiguous in memory//.
+
+Note that //negative strides are not allowed//, and, if given as
+argument when constructing the Tensor, will be interpreted as //choose
+the right stride such that the Tensor is contiguous in memory//.
 
 ====  torch.Tensor(storage, [storageOffset, sizes, [strides]]) ====
 {{anchor:torch.Tensor}}
 
 Returns a tensor which uses the existing [[Storage|Storage]]
-''storage'', starting at position ''storageOffset'' (>=1).  The size of each
-dimension of the tensor is given by the [[Storage|LongStorage]]
-''sizes''.
+''storage'', starting at position ''storageOffset'' (>=1).  The size
+of each dimension of the tensor is given by the
+[[Storage|LongStorage]] ''sizes''.
 
-If only ''storage'' is provided, it will create a 1D Tensor viewing the all Storage.
+If only ''storage'' is provided, it will create a 1D Tensor viewing
+the all Storage.
 
-The jump necessary to go from one element to the next one in each dimension
-is given by the optional argument [[Storage|LongStorage]] ''strides''. If
-not given, or if some elements of ''strides'' are negative, the
-[[#torch.Tensor.stride|stride()]] will be computed such that the tensor is as
-contiguous as possible in memory.
+The jump necessary to go from one element to the next one in each
+dimension is given by the optional argument [[Storage|LongStorage]]
+''strides''. If not given, or if some elements of ''strides'' are
+negative, the [[#torch.Tensor.stride|stride()]] will be computed such
+that the tensor is as contiguous as possible in memory.
 
-Any modification in the elements of the ''Storage'' will have a impact on the
-elements of the new ''Tensor'', and vice-versa. There is no memory copy!
+Any modification in the elements of the ''Storage'' will have an
+impact on the elements of the new ''Tensor'', and vice-versa. There is
+no memory copy!
+
 <file lua>
 -- creates a storage with 10 elements
 > s = torch.Storage(10):fill(1)
@@ -295,9 +316,10 @@ elements of the new ''Tensor'', and vice-versa. There is no memory copy!
 ====  torch.Tensor(storage, [storageOffset, sz1 [, st1 ... [, sz4 [, st4]]]]) ====
 {{anchor:torch.Tensor}}
 
-Convenience constructor (for the previous constructor) assuming a number of
-dimensions inferior or equal to 4. ''szi'' is the size in the ''i-th'' dimension, and ''sti'' it
-the stride in the ''i-th'' dimension.
+Convenience constructor (for the previous constructor) assuming a
+number of dimensions inferior or equal to 4. ''szi'' is the size in
+the ''i-th'' dimension, and ''sti'' it the stride in the ''i-th''
+dimension.
 
 ==== torch.Tensor(table) =====
 {{anchor:torch.Tensor}}
@@ -419,14 +441,18 @@ z = x:t():contiguous():fill(3.14)
 ==== [Tensor or string] type(type) ====
 {{anchor:torch.Tensor.type}}
 
-**If ''type'' is ''nil''**, returns the type name of the given tensor.
+**If ''type'' is ''nil''**, returns atring containing the type name of
+  the given tensor.
+
 <file lua>
 = torch.Tensor():type()
 torch.DoubleTensor
 </file>
 
-**If ''type'' is a string** describing a Tensor type, and is equal to the
-given tensor typename, returns the exact same tensor (//no memory copy//).
+**If ''type'' is a string** describing a Tensor type, and is equal to
+the given tensor typename, returns the exact same tensor (//no memory
+copy//).
+
 <file lua>
 x = torch.Tensor(3):fill(3.14)
 = x
@@ -457,9 +483,12 @@ y:zero()
 
 </file>
 
-**If ''type'' is a string** describing a Tensor type, different from the type name of the given Tensor,
-returns a new Tensor of the specified type, whose contents corresponds to the contents of the original Tensor,
-casted to the given type (//memory copy occurs, with possible loss of precision//).
+**If ''type'' is a string** describing a Tensor type, different from
+the type name of the given Tensor, returns a new Tensor of the
+specified type, whose contents corresponds to the contents of the
+original Tensor, casted to the given type (//memory copy occurs, with
+possible loss of precision//).
+
 <file lua>
 x = torch.Tensor(3):fill(3.14)
 = x
@@ -584,7 +613,7 @@ of the tensor.
 ====  [LongStorage] #self ====
 {{anchor:torch.Tensor.size}}
 
-Same as previous method.
+Same as [[#torch.Tensor.size|size()]] method.
 
 ====  [number] stride(dim) ====
 {{anchor:torch.Tensor.stride}}
@@ -699,16 +728,18 @@ Return the first index (starting at 1) used in the tensor's [[#torch.Tensor.stor
 
 Elements of a tensor can be retrieved with the ''[index]'' operator.
 
-If ''index'' is a number, ''[index]'' operator is equivalent to a [[#torch.Tensor.select|''select(last dim, start)'']] if the
-tensor has more than one dimension. If the tensor is a 1D tensor, it returns the value
+If ''index'' is a number, ''[index]'' operator is equivalent to a
+[[#torch.Tensor.select|''select(1, index)'']] if the tensor has more
+than one dimension. If the tensor is a 1D tensor, it returns the value
 at ''index'' in this tensor.
 
-If ''index'' is a table, the table must contain //n// numbers, where //n//
-is the [[#torch.Tensor.nDimension|number of dimensions]] of the Tensor. It will return the element
-at the given position.
+If ''index'' is a table, the table must contain //n// numbers, where
+//n// is the [[#torch.Tensor.nDimension|number of dimensions]] of the
+Tensor. It will return the element at the given position.
 
 In the same spirit, ''index'' might be a [[Storage|LongStorage]],
-specifying the position (in the Tensor) of the element to be retrieved.
+specifying the position (in the Tensor) of the element to be
+retrieved.
 
 Example:
 <file lua>
@@ -761,8 +792,8 @@ x = torch.Tensor(y, 1, 10)
 {{anchor:torch.Tensor.set}}
 
 The ''Tensor'' is now going to "view" the same [[#torch.Tensor.storage|storage]]
-than the given ''tensor''. As the result, any modification in the elements of
-the ''Tensor'' will have a impact on the elements of the given ''tensor'', and
+as the given ''tensor''. As the result, any modification in the elements of
+the ''Tensor'' will have an impact on the elements of the given ''tensor'', and
 vice-versa. This is an efficient method, as there is no memory copy!
 
 <file lua>
@@ -842,8 +873,10 @@ It works up to 4 dimensions. ''szi'' is the size of the ''i''-th dimension of th
 ====  [self] copy(tensor) ====
 {{anchor:torch.Tensor.copy}}
 
-Copy the elements of the given ''tensor''. The [[#torch.Tensor.nElement|number of elements]] must match, but
-the sizes might be different.
+Copy the elements of the given ''tensor''. The
+[[#torch.Tensor.nElement|number of elements]] must match, but the
+sizes might be different.
+
 <file lua>
 > x = torch.Tensor(4):fill(1)
 > y = torch.Tensor(2,2):copy(x)
@@ -863,7 +896,7 @@ the sizes might be different.
 </file>
 
 If a different type of ''tensor'' is given, then a type conversion occurs,
-which, of course, might result in lost of precision.
+which, of course, might result in loss of precision.
 
 ====  [self] fill(value) ====
 {{anchor:torch.Tensor.fill}}
@@ -966,11 +999,12 @@ from ''index'' to ''index+size-1''.
 ====  [Tensor] sub(dim1s, dim1e ... [, dim4s [, dim4e]]) ====
 {{anchor:torch.Tensor.sub}}
 
-This method is equivalent to do a serie of
-[[#torch.Tensor.narrow|narrow]] up to the first 4 dimensions.  It returns
-a new ''Tensor'' which is a sub-tensor going from index ''dimis'' to ''dimie'' in
-the ''i''-th dimension. Negative values are interpreted index starting from the end:
-''-1'' is the last index, ''-2'' is the index before the last index, ...
+This method is equivalent to do a series of
+[[#torch.Tensor.narrow|narrow]] up to the first 4 dimensions.  It
+returns a new ''Tensor'' which is a sub-tensor going from index
+''dimis'' to ''dimie'' in the ''i''-th dimension. Negative values are
+interpreted index starting from the end: ''-1'' is the last index,
+''-2'' is the index before the last index, ...
 
 <file lua>
 > x = torch.Tensor(5, 6):zero()
@@ -1207,8 +1241,7 @@ An additional dimension of size ''size'' is appended in the returned tensor.
 These functions apply a function to each element of the tensor on which the
 method is called (self). These methods are much faster than using a ''for''
 loop in ''Lua''. The results is stored in ''self'' (if the function returns
-something). A similar function exists in the [[..:lab:index#map|lab]]
-package, but where a new tensor containing the result is returned instead.
+something).
 
 ====  [self] apply(function) ====
 {{anchor:torch.Tensor.apply}}
@@ -1354,441 +1387,3 @@ Example:
 [torch.DoubleTensor of dimension 3x3]
 </file>
 
-=====  Math functions =====
-
-These functions apply a function to the tensor, and return self.
-
-====  [self] log() ====
-{{anchor:torch.Tensor.Log}}
-
-Computes the natural logarithm.
-
-====  [self] log1p() ====
-{{anchor:torch.Tensor.Log1p}}
-
-''log1p(x)'' computes [[#torch.Tensor.Log|log(1+x)]], with precision more
-accurate than standard ''log()'' function for small value of ''x''.
-
-====  [self] exp() ====
-{{anchor:torch.Tensor.Exp}}
-
-Computes the exponential function.
-
-====  [self] cos() ====
-{{anchor:torch.Tensor.cos}}
-
-Computes the cosine function.
-
-====  [self] acos() ====
-{{anchor:torch.Tensor.acos}}
-
-Computes the arc cosine function.
-
-====  [self] cosh() ====
-{{anchor:torch.Tensor.cosh}}
-
-Computes the hyperbolic cosine function.
-
-====  [self] sin() ====
-{{anchor:torch.Tensor.sin}}
-
-Computes the sinusoid function.
-
-====  [self] asin() ====
-{{anchor:torch.Tensor.asin}}
-
-Computes the arc sinusoid function.
-
-====  [self] sinh() ====
-{{anchor:torch.Tensor.sinh}}
-
-Computes the hyperbolic sinusoid function.
-
-====  [self] tan() ====
-{{anchor:torch.Tensor.tanh}}
-
-Computes the tangent function.
-
-====  [self] atan() ====
-{{anchor:torch.Tensor.atan}}
-
-Computes the arc tangent function.
-
-====  [self] tanh() ====
-{{anchor:torch.Tensor.tanh}}
-
-Computes the hyperbolic tangent function.
-
-====  [self] pow(value) ====
-{{anchor:torch.Tensor.pow}}
-
-Computes the power to the given ''value''.
-
-====  [self] sqrt() ====
-{{anchor:torch.Tensor.sqrt}}
-
-Computes the square root. Values must be positive.
-
-====  [self] ceil() ====
-{{anchor:torch.Tensor.ceil}}
-
-For each tensor value, computes the smallest integral value greater than or equal to this value.
-
-====  [self] floor() ====
-{{anchor:torch.Tensor.floor}}
-
-For each tensor value, computes the largest integral value less than or equal to this value.
-
-====  [self] abs() ====
-{{anchor:torch.Tensor.abs}}
-
-Computes the absolute value.
-
-=====  Basic statistics =====
-
-This functions return a statistic (scalar) on the full tensor. For more complex statistics
-see the [[..:lab:index|lab]] package.
-
-====  [number] sum() ====
-{{anchor:torch.Tensor.sum}}
-
-Returns the sum of all the elements in the tensor.
-
-====  [number] mean() ====
-{{anchor:torch.Tensor.mean}}
-
-Returns the mean of all the elements in the tensor.
-
-====  [number] max() ====
-{{anchor:torch.Tensor.max}}
-
-Returns the maximum value of the tensor.
-
-====  [number] min() ====
-{{anchor:torch.Tensor.min}}
-
-Returns the minimum value of the tensor.
-
-====  [number] std() ====
-{{anchor:torch.Tensor.std}}
-
-Returns the unbiased standard deviation estimator of the elements in the tensor. (The normalization
-factor is (n-1) and not n, where n is the number of elements in the tensor).
-
-====  [number] var() ====
-{{anchor:torch.Tensor.var}}
-
-Returns the unbiased variance estimator of the elements in the tensor. (The normalization
-factor is (n-1) and not n, where n is the number of elements in the tensor).
-
-====  [number] norm([p])  ====
-{{anchor:torch.Tensor.norm}}
-
-Returns the p-norm of the elements of the tensor seen as a vector.
-Default value for ''p'' is ''2''.
-
-====  [number] dist(tensor, [value])   ====
-{{anchor:torch.Tensor.dist}}
-
-Returns the p-norm of the difference between self and the given ''tensor''.
-
-=====  Basic operations =====
-{{anchor:torch.Tensor.BasicOperations.dok}}
-
-All this operation affect the tensor on which the method is called (self).
-No additional memory is created.
-
-====  [self] add(value) ====
-{{anchor:torch.Tensor.add}}
-
-Add the given value to all elements in the tensor.
-
-====  [self] add(tensor) ====
-{{anchor:torch.Tensor.add}}
-
-Add the given ''tensor'' to self. The number of elements must match, but sizes do not matter.
-<file>
-> x = torch.Tensor(2,2):fill(2)
-> y = torch.Tensor(4):fill(3)
-> x:add(y)
-> = x
-
- 5  5
- 5  5
-[torch.Tensor of dimension 2x2]
-</file>
-
-====  [self] add(value, tensor) ====
-{{anchor:torch.Tensor.add}}
-
-Multiply elements of ''tensor'' by the scalar ''value'' and add it to self.
-The number of elements must match, but sizes do not matter.
-<file>
-> x = torch.Tensor(2,2):fill(2)
-> y = torch.Tensor(4):fill(3)
-> x:add(2, y)
-> = x
-
- 8  8
- 8  8
-[torch.Tensor of dimension 2x2]
-</file>
-
-====  [self] mul(value) ====
-{{anchor:torch.Tensor.mul}}
-
-Multiply all elements in the tensor by the given ''value''.
-
-====  [self] cmul(tensor) ====
-{{anchor:torch.Tensor.cmul}}
-
-Element-wise multiplication of ''tensor'' by self. The number of elements must match, but sizes do not matter.
-<file>
-> x = torch.Tensor(2,2):fill(2)
-> y = torch.Tensor(4):fill(3)
-> x:cmul(y)
-> = x
-
- 6  6
- 6  6
-[torch.Tensor of dimension 2x2]
-</file>
-
-====  [self] addcmul(value, tensor1, tensor2) ====
-{{anchor:torch.Tensor.addcmul}}
-
-Performs the element-wise multiplication of ''tensor1'' by ''tensor1'', multiply the result by the scalar ''value''
-and add it to self. The number of elements must match, but sizes do not matter.
-<file>
-> x = torch.Tensor(2,2):fill(2)
-> y = torch.Tensor(4):fill(3)
-> z = torch.Tensor(2,2):fill(5)
-> x:addcmul(2, y, z)
-> = x
-
- 32  32
- 32  32
-[torch.Tensor of dimension 2x2]
-</file>
-
-====  [self] div(value) ====
-{{anchor:torch.Tensor.div}}
-
-Divide all elements in the tensor by the given ''value''.
-
-====  [self] cdiv(tensor) ====
-{{anchor:torch.Tensor.cdiv}}
-
-Performs the element-wise division of self by ''tensor''.
-The number of elements must match, but sizes do not matter.
-<file>
-> x = torch.Tensor(2,2):fill(1)
-> y = torch.Tensor(4)        
-> for i=1,4 do y[i] = i end
-> x:cdiv(y)
-> = x
-
- 1.0000  0.3333
- 0.5000  0.2500
-[torch.Tensor of dimension 2x2]
-</file>
-
-====  [self] addcdiv(value, tensor1, tensor2) ====
-{{anchor:torch.Tensor.addcdiv}}
-
-Performs the element-wise division of ''tensor1'' by ''tensor1'', multiply the result by the scalar ''value''
-and add it to self. The number of elements must match, but sizes do not matter.
-<file>
-> x = torch.Tensor(2,2):fill(1)
-> y = torch.Tensor(4)
-> z = torch.Tensor(2,2):fill(5)
-> for i=1,4 do y[i] = i end
-> x:addcdiv(2, y, z)
-> = x
-
- 1.4000  2.2000
- 1.8000  2.6000
-[torch.Tensor of dimension 2x2]
-</file>
-
-====  [number] dot(tensor) ====
-{{anchor:torch.Tensor.dot}}
-
-Performs the dot product between ''tensor'' and self. The number of elements must match: both tensors are seen
-as a 1D vector.
-<file>
-> x = torch.Tensor(2,2):fill(2)
-> y = torch.Tensor(4):fill(3)
-> = x:dot(y)
-24
-</file>
-
-====  addmv(value, mat, vec) ====
-{{anchor:torch.Tensor.addmv}}
-
-Performs a matrix-vector multiplication between ''mat'' (2D tensor) and ''vec'' (1D tensor), multiply by the scalar ''value'' and add
-it to self. In other words,
-<file>
-self = self + value * mat*vec
-</file>
-
-Sizes must respect the matrix-multiplication operation: if ''mat'' is a ''n x m'' matrix, ''vec'' must be
-vector of size ''m''  and self must be a vector of size ''n''.
-
-<file>
-> x = torch.Tensor(3):fill(0)
-> M = torch.Tensor(3,2):fill(3)
-> y = torch.Tensor(2):fill(2)
-> x:addT2dotT1(1, M, y)
-> = x
-
- 12
- 12
- 12
-[torch.Tensor of dimension 3]
-</file>
-
-====  addr(value, vec1, vec2) ====
-{{anchor:torch.Tensor.addr}}
-
-Performs the outer-product between ''vec1'' (1D tensor) and ''vec2'' (1D tensor), multiply the resulting matrix
-by the scalar ''value'' and add the result to self (which must be a 2D tensor).
-In other words,
-<file>
-self_ij = self_ij + value * vec1_i * vec2_j
-</file>
-
-If ''vec1'' is a vector of size ''n'' and ''vec2'' is a vector of size ''m'', then self must be a matrix of size
-''n x m''.
-<file>
-> x = torch.Tensor(3)        
-> y = torch.Tensor(2)
-> for i=1,3 do x[i] = i end
-> for i=1,2 do y[i] = i end
-> M = torch.Tensor(3, 2):zero()
-> M:addT1outT1(1, x, y)
-> = M
-
- 1  2
- 2  4
- 3  6
-[torch.Tensor of dimension 3x2]
-</file>
-
-====  addmm(value, mat1, mat2) ====
-{{anchor:torch.Tensor.addmm}}
-
-Performs a matrix-matrix multiplication between ''mat1'' (2D tensor) and ''mat2'' (2D tensor), multiply the resulting
-matrix by the scalar ''value'' and add the result to self (2D tensor).
-In other words,
-<file>
-self = self + value * mat1*mat2
-</file>
-
-If ''mat1'' is a ''n x m'' matrix, ''mat2'' a ''m x p'' matrix, self must be a ''n x p'' matrix.
-
-=====  Overloaded operators =====
-
-It is possible to use basic mathematic operators like ''+'', ''-'', ''/'' and =*=
-with tensors.  These operators are provided as a convenience. While they
-might be handy, they create and return a new tensor containing the
-results. They are thus not as fast as the operations available in the
-[[#torch.Tensor.BasicOperations.dok|previous section]].
-
-====  Addition and substraction ====
-
-You can add a tensor to another one with the ''+'' operator. Substraction is done with ''-''.
-The number of elements in the tensors must match, but the sizes do not matter. The size
-of the returned tensor will be the size of the first tensor.
-<file>
-> x = torch.Tensor(2,2):fill(2)
-> y = torch.Tensor(4):fill(3)
-> = x+y
-
- 5  5
- 5  5
-[torch.Tensor of dimension 2x2]
-
-> = y-x
-
- 1
- 1
- 1
- 1
-[torch.Tensor of dimension 4]
-</file>
-
-A scalar might also be added or substracted to a tensor. The scalar might be on the right or left of the operator.
-<file>
-> x = torch.Tensor(2,2):fill(2)
-> = x+3
-
- 5  5
- 5  5
-[torch.Tensor of dimension 2x2]
-
-> = 3-x
-
- 1  1
- 1  1
-[torch.Tensor of dimension 2x2]
-</file>
-
-====  Negation ====
-
-A tensor can be negated with the ''-'' operator placed in front:
-<file>
-> x = torch.Tensor(2,2):fill(2)
-> = -x
-
--2 -2
--2 -2
-[torch.Tensor of dimension 2x2]
-</file>
-
-====  Multiplication ====
-
-Multiplication between two tensors is supported with the =*= operators. The result of the multiplication
-depends on the sizes of the tensors.
-$ 1D and 1D: Returns the dot product between the two tensors (scalar).
-$ 2D and 1D: Returns the matrix-vector operation between the two tensors (1D tensor).
-$ 2D and 2D: Returns the matrix-matrix operation between the two tensors (2D tensor).
-$ 4D and 2D: Returns a tensor product (2D tensor).
-Sizes must be relevant for the corresponding operation.
-
-A tensor might also be multiplied by a scalar. The scalar might be on the right or left of the operator.
-
-Examples:
-<file>
-> M = torch.Tensor(2,2):fill(2)
-> N = torch.Tensor(2,4):fill(3)
-> x = torch.Tensor(2):fill(4)
-> y = torch.Tensor(2):fill(5)
-> = x*y -- dot product
-40
-> = M*x --- matrix-vector
-
- 16
- 16
-[torch.Tensor of dimension 2]
-
-> = M*N -- matrix-matrix
-
- 12  12  12  12
- 12  12  12  12
-[torch.Tensor of dimension 2x4]
-</file>
-
-
-====  Division ====
-
-Only the division of a tensor by a scalar is supported with the operator ''/''.
-Example:
-<file>
-> x = torch.Tensor(2,2):fill(2)
-> = x/3
-
- 0.6667  0.6667
- 0.6667  0.6667
-[torch.Tensor of dimension 2x2]
-</file>

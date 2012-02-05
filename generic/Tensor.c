@@ -583,6 +583,7 @@ static int torch_Tensor_(__index__)(lua_State *L)
 {
   THTensor *tensor = luaT_checkudata(L, 1, torch_Tensor_id);
   THLongStorage *idx = NULL;
+  THByteTensor *mask;
 
   if(lua_isnumber(L, 2))
   {
@@ -643,6 +644,14 @@ static int torch_Tensor_(__index__)(lua_State *L)
       index += z*tensor->stride[dim];
     }
     lua_pushnumber(L, (double)THStorage_(get)(THTensor_(storage)(tensor), index));
+    lua_pushboolean(L, 1);
+    return 2;
+  }
+  else if((mask = luaT_toudata(L, 2, torch_ByteTensor_id)))
+  {
+    THTensor *vals = THTensor_(new)();
+    THTensor_(maskedSelect)(vals, tensor, mask);
+    luaT_pushudata(L, vals, torch_Tensor_id);
     lua_pushboolean(L, 1);
     return 2;
   }

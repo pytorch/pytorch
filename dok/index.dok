@@ -1,23 +1,11 @@
 ====== Torch Package Reference Manual ======
 {{anchor:torch.reference.dok}}
 
-The **''torch''** package contains basic classes used everywhere in ''Torch7''.
-
-//Input-output management// is provided with [[File|File]] (abstract class), [[DiskFile|DiskFile]] (file on disk),
-[[MemoryFile|MemoryFile]] (file in ''RAM'') and [[PipeFile|PipeFile]] (file from a piped command). These
-classes also handle //serialization//.
-
-[[Storage|Storage]] and [[Tensor|Tensor]] are the basic bricks for //powerful numeric operations//. Tensors support
-a wide variety of fundamental [[maths|math operations]].
-
-[[Timer|Timer]] is provided for //measuring time//.
-
-[[Tester|Tester]] is provided as a generic testing framework and it is also used by [[..:nn:index|nn]] package.
-
-[[CmdLine|CmdLine]] is provided as a command line argument parsing utility.
-
-Finally, ''Torch'' provides some [[Utility|utility functions]] for creating and handling ''Torch'' //classes//,
-as well as support for [[random|random number generation]].
+**Torch** is the main package in [[http://torch.ch|Torch7]] where data
+structures for multi-dimensional tensors and mathematical operations
+over these are defined. Additionally, it provides many utilities for
+accessing files, serializing objects of arbitrary types and other
+useful utilities.
 
 ===== Torch Packages =====
 {{anchor:torch.reference.dok}}
@@ -29,11 +17,11 @@ as well as support for [[random|random number generation]].
     * [[PipeFile|Pipe File]] defines operations for using piped commands.
   * Tensor Library
     * [[Storage|Storage]] defines a simple storage interface that controls the underlying storage for any tensor object.
-    * [[Tensor|Tensor]] defines the //all powerful// tensor object that defines multi-dimensional numerical arrays with type templating.
-    * [[maths|Mathemetical operations]] are defined for the tensor object types.
+    * [[Tensor|Tensor]] defines the //all powerful// tensor object that prvides multi-dimensional numerical arrays with type templating.
+    * [[maths|Mathemetical operations]] that are defined for the tensor object types.
   * Useful Utilities
     * [[Timer|Timer]] provides functionality for //measuring time//.
     * [[Tester|Tester]] is a generic tester framework.
     * [[CmdLine|CmdLine]] is a command line argument parsing utility.
     * [[Random|Random]] defines a random number generator package with various distributions.
-    * Finally useful [[Utility|utility] functions are provided for easy handling of torch tensor types and class inheritance.
+    * Finally useful [[Utility|utility]] functions are provided for easy handling of torch tensor types and class inheritance.
