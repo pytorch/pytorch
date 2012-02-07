@@ -191,13 +191,11 @@ tables (or Torch objects) have the same address in memory. Returns ''false'' in 
 A Torch class is a class created with [[#TorchClass|torch.class()]] or
 [[#torch.newmetatable|torch.newmetatable()]].
 
-=====  torch.setenv(function or userdata, table) =====
-{{anchor:torch.setenv}}
+===== [string] torch.getdefaulttensortype() =====
+{{anchor:torch.getdefaulttensortype}}
 
-Assign ''table'' as the Lua environment of the given ''function'' or the given
-''userdata''.  To know more about environments, please read the documentation
-of [[http://www.lua.org/manual/5.1/manual.html#lua_setfenv|lua_setfenv()]]
-and [[http://www.lua.org/manual/5.1/manual.html#lua_getfenv|lua_getfenv()]].
+Returns a string representing the default tensor type currently in use
+by Torch7.
 
 =====  [table] torch.getenv(function or userdata) =====
 {{anchor:torch.getenv}}
@@ -221,11 +219,32 @@ object, a table, a thread or a function.
 
 This is different from the //class// id returned by [[#torch.id|torch.id()]].
 
+===== torch.setdefaulttensortype([typename]) =====
+{{anchor:torch.setdefaulttensortype}}
+
+Sets the default tensor type for all the tensors allocated from this
+point on. Valid types are:
+  * ''ByteTensor''
+  * ''CharTensor''
+  * ''ShortTensor''
+  * ''IntTensor''
+  * ''FloatTensor''
+  * ''DoubleTensor''
+
+=====  torch.setenv(function or userdata, table) =====
+{{anchor:torch.setenv}}
+
+Assign ''table'' as the Lua environment of the given ''function'' or the given
+''userdata''.  To know more about environments, please read the documentation
+of [[http://www.lua.org/manual/5.1/manual.html#lua_setfenv|lua_setfenv()]]
+and [[http://www.lua.org/manual/5.1/manual.html#lua_getfenv|lua_getfenv()]].
+
 ===== [object] torch.setmetatable(table, classname) =====
 {{anchor:torch.setmetatable}}
 
-Set the metatable of the given ''table'' to the metatable of the Torch object named ''classname''.
-This function has to be used with a lot of care.
+Set the metatable of the given ''table'' to the metatable of the Torch
+object named ''classname''.  This function has to be used with a lot
+of care.
 
 ===== [table] torch.getconstructortable(string) =====
 {{anchor:torch.getconstructortable}}

@@ -82,19 +82,49 @@ stroption	mycustomstring
 and the output will be logged in
 ''experiment,seed=456,stroption=mycustomstring/log''
 
-==== text(string) ====
-{{anchor:torch.CmdLine.text}}
-Logs a custom text message.
+==== addTime([name] [,format]) ====
+{{anchor:torch.CmdLine.addtime}}
+
+Adds a prefix to every line in the log file with the date/time in the
+given format with an optional name argument. The date/time format is
+the same as ''os.date()''. Note that the prefix is only added to the
+log file, not the screen output. The default value for name is empty
+and the default format is '%F %T'.
+
+The final produced output for the following command is:
+
+<file lua>
+> cmd:addTime('your project name','%F %T')
+> print('Your log message')
+</file>
+
+<file>
+2012-02-07 08:21:56[your project name]: Your log message
+</file>
+
+==== log(filename, parameter_table) ====
+{{anchor:torch.CmdLine.log}}
+
+It sets the log filename to ''filename'' and prints the values of
+parameters in the ''parameter_table''.
 
 ==== option(name, default, help) ====
 {{anchor:torch.CmdLine.option}}
+
 Stores an option argument. The name should always start with '-'.
 
 ==== [table] parse(arg) ====
 {{anchor:torch.CmdLine.parse}}
+
 Parses a given table, ''arg'' is by default the argument table that 
 is created by ''lua'' using the command line arguments passed to the 
 executable. Returns a table of option values.
+
+==== silent() ====
+{{anchor:torch.CmdLine.silent}}
+
+Silences the output to standard output. The only output is written to
+the log file.
 
 ==== [string] string(prefix, params, ignore) ====
 {{anchor:torch.CmdLine.string}}
@@ -107,9 +137,9 @@ string representation.
 This function is usefull for creating unique experiment directories that
 depend on the parameter settings.
 
-==== log(filename, parameter_table) ====
-{{anchor:torch.CmdLine.log}}
+==== text(string) ====
+{{anchor:torch.CmdLine.text}}
 
-It set the log filename to ''filename'' and prints the values of
-parameters in the ''parameter_table''.
+Logs a custom text message.
+
 
