@@ -971,7 +971,7 @@ static void THTensor_random1__(THTensor *self, long b)
 
    method:register(string.format("m_torch_%sMath__", Tensor))
    interface:print(method:tostring())
-   method:cleanhistory()
+   method:clearhistory()
    interface:register(string.format("torch_%sMath__", Tensor))
 
    interface:print(string.gsub([[
