@@ -1021,6 +1021,7 @@ general form of operations always remain the same.
 
 ===== [res] torch.conv2([res,] x, k, ['F' or 'V']) =====
 {{anchor:torch.conv2}}
+{{anchor:torch.Tensor.conv2}}
 
 This function computes 2 dimensional convolutions between '' x '' and '' k ''. These operations are similar to BLAS operations when number of dimensions of input and kernel are reduced by 2.
 
@@ -1051,6 +1052,7 @@ c = torch.conv2(x,k,'F')
 
 ===== [res] torch.xcorr2([res,] x, k, ['F' or 'V']) =====
 {{anchor:torch.xcorr2}}
+{{anchor:torch.Tensor.xcorr2}}
 
 This function operates with same options and input/output
 configurations as [[#torch.conv2|torch.conv2]], but performs
@@ -1058,6 +1060,7 @@ cross-correlation of the input with the kernel '' k ''.
 
 ===== [res] torch.conv3([res,] x, k, ['F' or 'V']) =====
 {{anchor:torch.conv3}}
+{{anchor:torch.Tensor.conv3}}
 
 This function computes 3 dimensional convolutions between '' x '' and '' k ''. These operations are similar to BLAS operations when number of dimensions of input and kernel are reduced by 3.
 
@@ -1090,6 +1093,7 @@ c = torch.conv3(x,k,'F')
 
 ===== [res] torch.xcorr3([res,] x, k, ['F' or 'V']) =====
 {{anchor:torch.xcorr3}}
+{{anchor:torch.Tensor.xcorr3}}
 
 This function operates with same options and input/output
 configurations as [[#torch.conv3|torch.conv3]], but performs
