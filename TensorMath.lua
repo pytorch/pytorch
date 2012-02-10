@@ -170,16 +170,19 @@ static int torch_NAME(lua_State *L)
   int narg = lua_gettop(L);
   const void *id;
 
-  if(narg < 1 || !(id = torch_istensorid(L, luaT_id(L, 1)))) /* first argument is tensor? */
+  if(narg >= 1 && (id = torch_istensorid(L, luaT_id(L, 1)))) /* first argument is tensor? */
   {
-    if(narg < 2 || !(id = torch_istensorid(L, luaT_id(L, 2)))) /* second? */
-    {
-      if(lua_isstring(L, -1) && (id = torch_istensorid(L, luaT_typename2id(L, lua_tostring(L, -1))))) /* do we have a valid string then? */
-        lua_remove(L, -2);
-      else if(!(id = torch_istensorid(L, torch_getdefaulttensorid())))
-        luaL_error(L, "internal error: the default tensor type does not seem to be an actual tensor");
-    }
   }
+  else if(narg >= 2 && (id = torch_istensorid(L, luaT_id(L, 2)))) /* second? */
+  {
+  }
+  else if(narg >= 1 && lua_isstring(L, -1)
+	  && (id = torch_istensorid(L, luaT_typename2id(L, lua_tostring(L, -1))))) /* do we have a valid string then? */
+  {
+    lua_remove(L, -2);
+  }
+  else if(!(id = torch_istensorid(L, torch_getdefaulttensorid())))
+    luaL_error(L, "internal error: the default tensor type does not seem to be an actual tensor");
   
   lua_pushstring(L, "NAME");
   lua_rawget(L, -2);
