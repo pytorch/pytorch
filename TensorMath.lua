@@ -832,6 +832,13 @@ static void THTensor_random1__(THTensor *self, long b)
                {name="index"},
                {name="boolean", default=false}})
       end
+      wrap("histc",
+           cname("histc"),
+           {{name=Tensor, default=true, returned=true},
+            {name=Tensor},
+            {name="long",default=100},
+            {name="double",default=0},
+            {name="double",default=0}})
 
       wrap("norm",
            cname("norm"),

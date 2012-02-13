@@ -1129,5 +1129,35 @@ void THTensor_(randn)(THTensor *r_, THLongStorage *size)
   THTensor_(normal)(r_, 0, 1);
 }
 
+void THTensor_(histc)(THTensor *hist, THTensor *tensor, long nbins, real minvalue, real maxvalue)
+{
+  THTensor_(resize1d)(hist, nbins);
+  THTensor_(zero)(hist);
+  real minval = minvalue;
+  real maxval = maxvalue;
+  if (minval == maxval) 
+  {
+    minval = THTensor_(minall)(tensor);
+    maxval = THTensor_(maxall)(tensor);
+  }
+  real bins = (real)(nbins)-1e-6;
+
+  THTensor *clone = THTensor_(newWithSize1d)(THTensor_(nElement)(tensor));
+  THTensor_(copy)(clone,tensor);
+  THTensor_(add)(clone, clone, -minval);
+  THTensor_(div)(clone, clone, (maxval-minval));
+  THTensor_(mul)(clone, clone, bins);
+  THTensor_(floor)(clone, clone);
+  THTensor_(add)(clone, clone, 1);
+
+  real *h_data = THTensor_(data)(hist);
+
+  TH_TENSOR_APPLY(real, clone,                                         \
+                  if ((*clone_data <= nbins) && (*clone_data >= 1)) {  \
+                    *(h_data + (int)(*clone_data) - 1) += 1;           \
+                  });
+  THTensor_(free)(clone);
+}
+
 #endif /* floating point only part */
 #endif
