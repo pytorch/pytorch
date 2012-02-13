@@ -15,7 +15,7 @@ The file might be open in read, write, or read-write mode, depending on the para
 ''mode'' (which can take the value ''"r"'', ''"w"'' or ''"rw"'' respectively) 
 given to the [[#torch.DiskFile|torch.DiskFile(fileName, mode)]].
 
-=====  torch.DiskFile(fileName, [mode], [quiet]) =====
+====  torch.DiskFile(fileName, [mode], [quiet]) ====
 {{anchor:torch.DiskFile}}
 
 //Constructor// which opens ''fileName'' on disk, using the given ''mode''. Valid ''mode'' are
@@ -29,35 +29,35 @@ problem opening the file: instead ''nil'' will be returned.
 
 The file is opened in [[File#torch.File.ascii|ASCII]] mode by default.
 
-=====  bigEndianEncoding() =====
+====  bigEndianEncoding() ====
 {{anchor:torch.DiskFile.bigEndianEncoding}}
 
 In [[file#torch.File.binary|binary]] mode, force encoding in //big endian//. 
 (//big end first//: decreasing numeric significance with increasing memory
 addresses)
 
-=====  [boolean] isBigEndianCPU() =====
+====  [boolean] isBigEndianCPU() ====
 {{anchor:torch.DiskFile.isBigEndianCPU}}
 
 Returns ''true'' if, and only if, the computer CPU operates in //big endian//.
 //Big end first//: decreasing numeric significance with increasing
 memory addresses.
 
-=====  [boolean] isLittleEndianCPU() =====
+====  [boolean] isLittleEndianCPU() ====
 {{anchor:torch.DiskFile.isLittleEndianCPU}}
 
 Returns ''true'' if, and only if, the computer CPU operates in //little endian//.
 //Little end first//: increasing numeric significance with increasing
 memory addresses.
 
-=====  littleEndianEncoding() =====
+====  littleEndianEncoding() ====
 {{anchor:torch.DiskFile.littleEndianEncoding}}
 
 In [[file#torch.File.binary|binary]] mode, force encoding in //little endian//.
 (//little end first//: increasing numeric significance with increasing memory
 addresses)
 
-=====  nativeEndianEncoding() =====
+====  nativeEndianEncoding() ====
 {{anchor:torch.DiskFile.nativeEndianEncoding}}
 
 In [[file#torch.File.binary|binary]] mode, force encoding in //native endian//.

@@ -35,7 +35,9 @@ controlled by the
 [[utility#torch.setdefaulttensortype|torch.setdefaulttensortype]]
 function. By default, this "points" on ''torch.DoubleStorage''.
 
-=====  torch.TYPEStorage([size]) =====
+===== Constructors and Access Methods =====
+
+====  torch.TYPEStorage([size]) ====
 {{anchor:torch.Storage}}
 
 Returns a new ''Storage'' of type ''TYPE''. Valid ''TYPE'' are ''Byte'', ''Char'', ''Short'',
@@ -50,7 +52,7 @@ x = torch.DoubleStorage(10)
 
 The data in the ''Storage'' is //uninitialized//.
 
-===== torch.TYPEStorage(table) =====
+==== torch.TYPEStorage(table) ====
 {{anchor:torch.Storage}}
 
 The argument is assumed to be a Lua array of numbers. The constructor returns a new storage of the specified 'TYPE', 
@@ -67,7 +69,7 @@ Example:
 [torch.IntStorage of size 4]
 </file>
 
-=====  torch.TYPEStorage(filename [, shared]) =====
+====  torch.TYPEStorage(filename [, shared]) ====
 {{anchor:torch.Storage}}
 {{anchor:__torch.StorageMap}}
 
@@ -133,12 +135,12 @@ $ cat hello.txt
 ************
 </file>
 
-=====  [number] #self =====
+====  [number] #self ====
 {{anchor:__torch.StorageSharp}}
 
 Returns the number of elements in the storage. Equivalent to [[#torch.Storage.size|size()]].
 
-=====  [number] self[index] =====
+====  [number] self[index] ====
 {{anchor:torch.Storage.__index__}}
 
 Returns or set the element at position ''index'' in the storage. Valid range
@@ -150,7 +152,7 @@ x = torch.DoubleStorage(10)
 print(x[5])
 </file>
 
-=====  [self] copy(storage) =====
+====  [self] copy(storage) ====
 {{anchor:torch.Storage.copy}}
 
 Copy another ''storage''. The types of the two storages might be different: in that case
@@ -161,7 +163,7 @@ x = torch.IntStorage(10):fill(1)
 y = torch.DoubleStorage(10):copy(x) -- y won't be nil!
 </file>
 
-=====  [self] fill(value) =====
+====  [self] fill(value) ====
 {{anchor:torch.Storage.fill}}
 
 Fill the ''Storage'' with the given value. This method returns self, allowing things like:
@@ -169,7 +171,7 @@ Fill the ''Storage'' with the given value. This method returns self, allowing th
 x = torch.IntStorage(10):fill(0) -- x won't be nil!
 </file>
 
-=====  [self] resize(size) =====
+====  [self] resize(size) ====
 {{anchor:torch.Storage.resize}}
 
 Resize the storage to the provide ''size''. //The new contents are undertermined//.
@@ -180,12 +182,12 @@ x = torch.DoubleStorage(10):fill(1)
 y = torch.DoubleStorage():resize(x:size()):copy(x) -- y won't be nil!
 </file>
 
-=====  [number] size() =====
+====  [number] size() ====
 {{anchor:torch.Storage.size}}
 
 Returns the number of elements in the storage. Equivalent to [[#__torch.StorageSharp|#]].
 
-=====  [self] string(str) =====
+====  [self] string(str) ====
 {{anchor:torch.Storage.string}}
 
 This function is available only on ''ByteStorage'' and ''CharStorage''.
@@ -208,7 +210,7 @@ but ''str'' might contain ''NULL'' characters. The method returns the ''Storage'
 [torch.CharStorage of size 9]
 </file>
 
-=====  [string] string() =====
+====  [string] string() ====
 {{anchor:torch.Storage.string}}
 
 This function is available only on ''ByteStorage'' and ''CharStorage''.

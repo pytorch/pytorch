@@ -210,7 +210,9 @@ instead use one of the [[#torch.File.read|number read methods]].
 Writes the string ''str'' in the ''File''. If the string cannot be written completely an error is raised, except
 if ''File'' is in [[#torch.File.quiet|quiet()]] mode where it returns the number of character actually written.
 
-=====  ascii() [default] =====
+===== General Access and Control Methods =====
+
+====  ascii() [default] ====
 {{anchor:torch.File.ascii}}
 
 The data read or written will be in ''ASCII'' mode: all numbers are converted
@@ -219,7 +221,7 @@ to characters (human readable format) and boolean are converted to ''0''
 options [[#torch.File.autoSpacing|autoSpacing()]] and
 [[#torch.File.noAutoSpacing|noAutoSpacing()]].
 
-=====  autoSpacing() [default] =====
+====  autoSpacing() [default] ====
 {{anchor:torch.File.autoSpacing}}
 
 In [[#torch.File.ascii|ASCII]] mode, write additional spaces around the elements
@@ -233,7 +235,7 @@ Those spaces are supposed to exist while reading in this mode.
 This is the default behavior. You can de-activate this option with the
 [[#torch.File.noAutoSpacing|noAutoSpacing()]] method.
 
-=====  binary() =====
+====  binary() ====
 {{anchor:torch.File.binary}}
 
 The data read or written will be in binary mode: the representation in the
@@ -241,31 +243,31 @@ The data read or written will be in binary mode: the representation in the
 readable).  This mode is faster than [[#torch.File.ascii|ASCII]] but less
 portable.
 
-=====  clearError() =====
+====  clearError() ====
 {{anchor:torch.File.clearError}}
 
 Clear the error.flag returned by [[#torch.File.hasError|hasError()]].
 
-=====  close() =====
+====  close() ====
 {{anchor:torch.File.close}}
 
 Close the file. Any subsequent operation will generate a ''Lua'' error.
 
-=====  noAutoSpacing() =====
+====  noAutoSpacing() ====
 {{anchor:torch.File.noAutoSpacing}}
 
 In [[#torch.File.ascii|ASCII]] mode, do not put extra spaces between element
 written on disk. This is the contrary of the option
 [[#torch.File.autoSpacing|autoSpacing()]].
 
-=====  synchronize() =====
+====  synchronize() ====
 {{anchor:torch.File.synchronize}}
 
 If the child class bufferize the data while writing, ensure that the data
 is actually written.
 
 
-=====  pedantic() [default] =====
+====  pedantic() [default] ====
 {{anchor:torch.File.pedantic}}
 
 If this mode is chosen (which is the default), a ''Lua'' error will be
@@ -274,13 +276,13 @@ generated in case of error (which will cause the program to stop).
 It is possible to use [[#torch.File.quiet|quiet()]] to avoid ''Lua'' error generation
 and set a flag instead.
 
-=====  [number] position() =====
+====  [number] position() ====
 {{anchor:torch.File.position}}
 
 Returns the current position (in bytes) in the file.
 The first position is ''1'' (following Lua standard indexing).
 
-=====  quiet() =====
+====  quiet() ====
 {{anchor:torch.File.quiet}}
 
 If this mode is chosen instead of [[#torch.File.pedantic|pedantic()]], no ''Lua''
@@ -290,13 +292,13 @@ be cleared with [[#torch.File.clearError|clearError()]]
 
 Checking if a file is quiet can be performed using [[#torch.File.isQuiet|isQuiet()]].
 
-=====  seek(position) =====
+====  seek(position) ====
 {{anchor:torch.File.seek}}
 
 Jump into the file at the given ''position'' (in byte). Might generate/raise
 an error in case of problem. The first position is ''1'' (following Lua standard indexing).
 
-=====  seekEnd() =====
+====  seekEnd() ====
 {{anchor:torch.File.seekEnd}}
 
 Jump at the end of the file. Might generate/raise an error in case of

@@ -11,29 +11,32 @@ This class is able to measure time (in seconds) elapsed in a particular period. 
   print('Time elapsed for 1,000,000 sin: ' .. timer:time().real .. ' seconds')
 </file>
 
-=====  torch.Timer() =====
+===== Timer Class Constructor and Methods =====
+{{anchor:torch.Timer}}
+
+====  torch.Timer() ====
 {{anchor:torch.Timer}}
 
 Returns a new ''Timer''. The timer starts to count the time now.
 
-=====  [self] reset() =====
+====  [self] reset() ====
 {{anchor:torch.Timer.reset}}
 
 Reset the timer accumulated time to ''0''. If the timer was running, the timer
 restarts to count the time now. If the timer was stopped, it stays stopped.
 
-=====  [self] resume() =====
+====  [self] resume() ====
 {{anchor:torch.Timer.resume}}
 
 Resume a stopped timer. The timer restarts to count the time, and addition
 the accumulated time with the time already counted before being stopped.
 
-=====  [self] stop() =====
+====  [self] stop() ====
 {{anchor:torch.Timer.stop}}
 
 Stop the timer. The accumulated time counted until now is stored.
 
-=====   [table] time() =====
+====   [table] time() ====
 {{anchor:torch.Timer.time}}
 
 Returns a table reporting the accumulated time elapsed until now. Following the UNIX shell ''time'' command,

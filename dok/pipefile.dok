@@ -10,7 +10,7 @@ The file might be open in read or write mode, depending on the parameter
 ''mode'' (which can take the value ''"r"'' or ''"w"'') 
 given to the [[#torch.PipeFile|torch.PipeFile(fileName, mode)]]. Read-write mode is not allowed.
 
-=====  torch.PipeFile(command, [mode], [quiet]) =====
+====  torch.PipeFile(command, [mode], [quiet]) ====
 {{anchor:torch.PipeFile}}
 
 //Constructor// which execute ''command'' by opening a pipe in read or write

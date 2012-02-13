@@ -10,14 +10,14 @@ described in [[File|File]].
 The data of the this ''File'' is contained into a ''NULL'' terminated
 [[Storage|CharStorage]].
 
-=====  torch.MemoryFile([mode]) =====
+====  torch.MemoryFile([mode]) ====
 {{anchor:torch.MemoryFile}}
 
 //Constructor// which returns a new ''MemoryFile'' object using ''mode''. Valid
 ''mode'' are ''"r"'' (read), ''"w"'' (write) or ''"rw"'' (read-write). Default is ''"rw"''.
 
 
-=====  torch.MemoryFile(storage, mode) =====
+====  torch.MemoryFile(storage, mode) ====
 {{anchor:torch.MemoryFile}}
 
 //Constructor// which returns a new ''MemoryFile'' object, using the given
@@ -27,7 +27,7 @@ in this storage //must// be ''NULL'' or an error will be generated. This allow
 to read existing memory. If used for writing, not that the ''storage'' might
 be resized by this class if needed. 
 
-=====  [CharStorage] storage() =====
+====  [CharStorage] storage() ====
 {{anchor:torch.MemoryFile.storage}}
 
 Returns the [[Storage|storage]] which contains all the data of the

@@ -8,7 +8,7 @@ also be interesting to check what is the class of a given Torch object.
 
 The other functions are more for advanced users.
 
-=====  [metatable] torch.class(name, [parentName]) =====
+====  [metatable] torch.class(name, [parentName]) ====
 {{anchor:torch.class}}
 
 Creates a new ''Torch'' class called ''name''. If ''parentName'' is provided, the class will inherit
@@ -97,7 +97,7 @@ metatable on it, and then calls <file lua>__init()</file> if it exists in the
 metatable. It also sets a [[#torch.factory|factory]] field <file lua>__factory</file> such that it
 is possible to create an empty object of this class.
 
-=====  [string] torch.typename(object) =====
+====  [string] torch.typename(object) ====
 {{anchor:torch.typename}}
 
 Checks if ''object'' has a metatable. If it does, and if it corresponds to a
@@ -107,7 +107,7 @@ class. Returns ''nil'' in any other cases.
 A Torch class is a class created with [[#torch.class|torch.class()]] or
 [[#torch.newmetatable|torch.newmetatable()]].
 
-===== [userdata] torch.typename2id(string) =====
+==== [userdata] torch.typename2id(string) ====
 {{anchor:torch.typename2id}}
 
 Given a Torch class name specified by ''string'', returns a unique
@@ -118,7 +118,7 @@ comparisons.
 
 Returns ''nil'' if ''string'' does not specify a Torch object.
 
-===== [userdata] torch.id(object) =====
+==== [userdata] torch.id(object) ====
 {{anchor:torch.id}}
 
 Returns a unique id corresponding to the //class// of the given Torch object.
@@ -129,7 +129,7 @@ Returns ''nil'' if ''object'' is not a Torch object.
 
 This is different from the //object// id returned by [[#torch.pointer|torch.pointer()]].
 
-=====  [table] torch.newmetatable(name, parentName, constructor) =====
+====  [table] torch.newmetatable(name, parentName, constructor) ====
 {{anchor:torch.newmetatable}}
 
 Register a new metatable as a Torch type with the given string ''name''. The new metatable is returned.
@@ -142,7 +142,7 @@ If the given ''constructor'' function is not ''nil'', then assign to the variabl
 The given ''name'' might be of the form ''package.className'', in which case the ''className'' will be local to the
 specified ''package''. In that case, ''package'' must be a valid and already loaded package.
 
-=====  [function] torch.factory(name) =====
+====  [function] torch.factory(name) ====
 {{anchor:torch.factory}}
 
 Returns the factory function of the Torch class ''name''. If the class name is invalid or if the class
@@ -154,7 +154,7 @@ A Torch class is a class created with [[#torch.class|torch.class()]] or
 A factory function is able to return a new (empty) object of its corresponding class. This is helpful for
 [[File#torch.File.serialization|object serialization]].
 
-=====  [table] torch.getmetatable(string) =====
+====  [table] torch.getmetatable(string) ====
 {{anchor:torch.getmetatable}}
 
 Given a ''string'', returns a metatable corresponding to the Torch class described
@@ -182,7 +182,7 @@ __index table: 0x1a4a080
 size    function: 0x1a4ba20
 </file>
 
-=====  [boolean] torch.isequal(object1, object2) =====
+====  [boolean] torch.isequal(object1, object2) ====
 {{anchor:torch.isequal}}
 
 If the two objects given as arguments are ''Lua'' tables (or Torch objects), then returns ''true'' if and only if the
@@ -191,13 +191,13 @@ tables (or Torch objects) have the same address in memory. Returns ''false'' in 
 A Torch class is a class created with [[#TorchClass|torch.class()]] or
 [[#torch.newmetatable|torch.newmetatable()]].
 
-===== [string] torch.getdefaulttensortype() =====
+==== [string] torch.getdefaulttensortype() ====
 {{anchor:torch.getdefaulttensortype}}
 
 Returns a string representing the default tensor type currently in use
 by Torch7.
 
-=====  [table] torch.getenv(function or userdata) =====
+====  [table] torch.getenv(function or userdata) ====
 {{anchor:torch.getenv}}
 
 Returns the Lua ''table'' environment of the given ''function'' or the given
@@ -205,13 +205,13 @@ Returns the Lua ''table'' environment of the given ''function'' or the given
 of [[http://www.lua.org/manual/5.1/manual.html#lua_setfenv|lua_setfenv()]]
 and [[http://www.lua.org/manual/5.1/manual.html#lua_getfenv|lua_getfenv()]].
 
-===== [number] torch.version(object) =====
+==== [number] torch.version(object) ====
 {{anchor:torch.version}}
 
 Returns the field <file lua>__version</file> of a given object. This might
 be helpful to handle variations in a class over time.
 
-=====  [number] torch.pointer(object) =====
+====  [number] torch.pointer(object) ====
 {{anchor:torch.pointer}}
 
 Returns a unique id (pointer) of the given ''object'', which can be a Torch
@@ -219,7 +219,7 @@ object, a table, a thread or a function.
 
 This is different from the //class// id returned by [[#torch.id|torch.id()]].
 
-===== torch.setdefaulttensortype([typename]) =====
+==== torch.setdefaulttensortype([typename]) ====
 {{anchor:torch.setdefaulttensortype}}
 
 Sets the default tensor type for all the tensors allocated from this
@@ -231,7 +231,7 @@ point on. Valid types are:
   * ''FloatTensor''
   * ''DoubleTensor''
 
-=====  torch.setenv(function or userdata, table) =====
+====  torch.setenv(function or userdata, table) ====
 {{anchor:torch.setenv}}
 
 Assign ''table'' as the Lua environment of the given ''function'' or the given
@@ -239,14 +239,14 @@ Assign ''table'' as the Lua environment of the given ''function'' or the given
 of [[http://www.lua.org/manual/5.1/manual.html#lua_setfenv|lua_setfenv()]]
 and [[http://www.lua.org/manual/5.1/manual.html#lua_getfenv|lua_getfenv()]].
 
-===== [object] torch.setmetatable(table, classname) =====
+==== [object] torch.setmetatable(table, classname) ====
 {{anchor:torch.setmetatable}}
 
 Set the metatable of the given ''table'' to the metatable of the Torch
 object named ''classname''.  This function has to be used with a lot
 of care.
 
-===== [table] torch.getconstructortable(string) =====
+==== [table] torch.getconstructortable(string) ====
 {{anchor:torch.getconstructortable}}
 
 BUGGY
