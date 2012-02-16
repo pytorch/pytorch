@@ -1291,7 +1291,7 @@ e,v = torch.eig(a,'V')
 {{anchor:torch.svd}}
 
 Singular value decomposition of a real matrix '' A '' of size '' n x m
-'' such that '' A = USV**T ''. The call to ''svd'' returns ''U,S,VT''.
+'' such that '' A = USV**T ''. The call to ''svd'' returns ''U,S,V''.
 
 The last argument, if it is string, represents the number of singular
 values to be computed. 'S' stands for 'some' and 'A' stands for 'all'.
@@ -1331,14 +1331,14 @@ u,s,v = torch.svd(a)
 [torch.DoubleTensor of dimension 5]
 
 =v
--0.2514 -0.3968 -0.6922 -0.3662 -0.4076
- 0.8148  0.3587 -0.2489 -0.3686 -0.0980
--0.2606  0.7008 -0.2208  0.3859 -0.4933
- 0.3967 -0.4507  0.2513  0.4342 -0.6227
--0.2180  0.1402  0.5891 -0.6265 -0.4396
+-0.2514  0.8148 -0.2606  0.3967 -0.2180
+-0.3968  0.3587  0.7008 -0.4507  0.1402
+-0.6922 -0.2489 -0.2208  0.2513  0.5891
+-0.3662 -0.3686  0.3859  0.4342 -0.6265
+-0.4076 -0.0980 -0.4933 -0.6227 -0.4396
 [torch.DoubleTensor of dimension 5x5]
 
-=u*torch.diag(s)*v
+=u*torch.diag(s)*v:t()
   8.7900   9.9300   9.8300   5.4500   3.1600
   6.1100   6.9100   5.0400  -0.2700   7.9800
  -9.1500  -7.9300   4.8600   4.8500   3.0100
@@ -1347,7 +1347,7 @@ u,s,v = torch.svd(a)
   9.8400   0.1500  -8.9900  -6.0200  -5.3100
 [torch.DoubleTensor of dimension 6x5]
 
- =a:dist(u*torch.diag(s)*v)
+ =a:dist(u*torch.diag(s)*v:t())
 2.8923773593204e-14
 
 </file>
