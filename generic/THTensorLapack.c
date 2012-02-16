@@ -301,7 +301,8 @@ TH_API void THTensor_(gesvd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTen
     THTensor_(resize2d)(ru_,k,ldu);
   }
   THTensor_(transpose)(ru_,NULL,0,1);
-  THTensor_(transpose)(rv_,NULL,0,1);
+  /* we want to return V not VT*/
+  /*THTensor_(transpose)(rv_,NULL,0,1);*/
 
   THLapack_(gesvd)(jobu[0],jobu[0],
 		   m,n,THTensor_(data)(ra__),lda,
