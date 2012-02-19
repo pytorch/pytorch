@@ -148,7 +148,7 @@ function CmdLine:string(prefix, params, ignore)
       if ignore[k] then
          print('-- ignore option ' .. k)
       elseif self.options['-' .. k] then
-         if v ~= self.options['-' .. k].default then
+         if v ~= self.options['-' .. k].default or ignore[k] == false then
             if type(v) == 'boolean' then
                if v then
                   v = 't'
