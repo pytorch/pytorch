@@ -26,4 +26,4 @@ INSTALL(FILES "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/luaTConfig.cmake"
   DESTINATION "${Torch_INSTALL_CMAKE_SUBDIR}")
 
 # luaT help
-ADD_TORCH_DOK(dok luaT "Torch C Libraries" "luaT" 5.1)
+ADD_TORCH_DOK(dok luat "Torch C Libraries" "luaT" 5.1)
