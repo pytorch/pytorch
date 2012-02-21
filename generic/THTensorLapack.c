@@ -341,4 +341,73 @@ TH_API void THTensor_(gesvd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTen
   THTensor_(free)(work);
 }
 
+TH_API void THTensor_(getri)(THTensor *ra_, THTensor *a)
+{
+  int m, n, lda, info, lwork;
+  real wkopt;
+  THIntTensor *ipiv;
+  THTensor *work;
+  THTensor *ra__;
+
+  int clonea;
+  int destroy;
+
+  if (a == NULL) /* possibly destroy the inputs  */
+  {
+    ra__ = THTensor_(new)();
+    clonea = THTensor_(lapackClone)(ra__,ra_,0);
+    destroy = 1;
+  }
+  else /*we want to definitely clone */
+  {
+    clonea = THTensor_(lapackClone)(ra_,a,1);
+    ra__ = ra_;
+    destroy = 0;
+  }
+  
+  THArgCheck(ra__->nDimension == 2, 2, "A should be 2 dimensional");
+  m = ra__->size[0];
+  n = ra__->size[1];
+  THArgCheck(m == n, 2, "A should be square");
+  lda = m;
+  ipiv = THIntTensor_newWithSize1d((long)m);
+
+  /* Run LU */
+  THLapack_(getrf)(n, n, THTensor_(data)(ra__), lda, THIntTensor_data(ipiv), &info);
+  if (info > 0)
+  {
+    THError("Lapack getrf : U(%d,%d) is 0, U is singular",info, info);
+  }
+  else if (info < 0)
+  {
+    THError("Lapack getrf : Argument %d : illegal value", -info);
+  }
+
+  /* Run inverse */
+  THLapack_(getri)(n, THTensor_(data)(ra__), lda, THIntTensor_data(ipiv), &wkopt, -1, &info);
+  lwork = (int)wkopt;
+  work = THTensor_(newWithSize1d)(lwork);
+  THLapack_(getri)(n, THTensor_(data)(ra__), lda, THIntTensor_data(ipiv), THTensor_(data)(work), lwork, &info);
+  if (info > 0)
+  {
+    THError("Lapack getri : U(%d,%d) is 0, U is singular",info, info);
+  }
+  else if (info < 0)
+  {
+    THError("Lapack getri : Argument %d : illegal value", -info);
+  }
+
+  /* clean up */
+  if (destroy)
+  {
+    if (clonea)
+    {
+      THTensor_(copy)(ra_,ra__);
+    }
+    THTensor_(free)(ra__);
+  }
+  THTensor_(free)(work);
+  THIntTensor_free(ipiv);
+}
+
 #endif
