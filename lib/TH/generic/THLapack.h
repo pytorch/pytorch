@@ -12,4 +12,8 @@ void THLapack_(gels)(char trans, int m, int n, int nrhs, real *a, int lda, real 
 void THLapack_(syev)(char jobz, char uplo, int n, real *a, int lda, real *w, real *work, int lwork, int *info);
 /* svd */
 void THLapack_(gesvd)(char jobu, char jobvt, int m, int n, real *a, int lda, real *s, real *u, int ldu, real *vt, int ldvt, real *work, int lwork, int *info);
+/* LU decomposition */
+void THLapack_(getrf)(int m, int n, real *a, int lda, int *ipiv, int *info);
+/* Matrix Inverse */
+void THLapack_(getri)(int n, real *a, int lda, int *ipiv, real *work, int lwork, int* info);
 #endif

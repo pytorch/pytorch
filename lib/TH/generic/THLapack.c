@@ -63,4 +63,35 @@ void THLapack_(gesvd)(char jobu, char jobvt, int m, int n, real *a, int lda, rea
 #endif
 }
 
+/* LU decomposition */
+void THLapack_(getrf)(int m, int n, real *a, int lda, int *ipiv, int *info)
+{
+#ifdef  __LAPACK__
+#if defined(TH_REAL_IS_DOUBLE)
+  extern void dgetrf_(int *m, int *n, real *a, int *lda, int *ipiv, int *info);
+  dgetrf_(&m, &n, a, &lda, ipiv, info);
+#else
+  extern void sgetrf_(int *m, int *n, real *a, int *lda, int *ipiv, int *info);
+  sgetrf_(&m, &n, a, &lda, ipiv, info);
+#endif
+#else
+  THError("getrf : Lapack library not found in compile time\n");
+#endif
+}
+/* Matrix Inverse */
+void THLapack_(getri)(int n, real *a, int lda, int *ipiv, real *work, int lwork, int* info)
+{
+#ifdef  __LAPACK__
+#if defined(TH_REAL_IS_DOUBLE)
+  extern void dgetri_(int *n, real *a, int *lda, int *ipiv, real *work, int *lwork, int *info);
+  dgetri_(&n, a, &lda, ipiv, work, &lwork, info);
+#else
+  extern void sgetri_(int *n, real *a, int *lda, int *ipiv, real *work, int *lwork, int *info);
+  sgetri_(&n, a, &lda, ipiv, work, &lwork, info);
+#endif
+#else
+  THError("getri : Lapack library not found in compile time\n");
+#endif
+}
+
 #endif
