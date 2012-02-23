@@ -1,14 +1,14 @@
 #ifndef TH_INC
 #define TH_INC
 
-#include "THBlas.h"
+#include "THGeneral.h"
 
-#ifdef __LAPACK__
+#include "THBlas.h"
+#ifdef USE_LAPACK
 #include "THLapack.h"
 #endif
 
 #include "THVector.h"
-#include "THGeneral.h"
 #include "THLogAdd.h"
 #include "THRandom.h"
 #include "THStorage.h"

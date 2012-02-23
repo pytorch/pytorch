@@ -10,6 +10,9 @@
 #include <time.h>
 #include <string.h>
 
+#cmakedefine USE_BLAS
+#cmakedefine USE_LAPACK
+
 #ifdef __cplusplus
 # define TH_EXTERNC extern "C"
 #else
