@@ -4,7 +4,7 @@
 
 void THLapack_(gesv)(int n, int nrhs, real *a, int lda, int *ipiv, real *b, int ldb, int* info)
 {
-#ifdef __LAPACK__
+#ifdef USE_LAPACK
 #if defined(TH_REAL_IS_DOUBLE)
   extern void dgesv_(int *n, int *nrhs, double *a, int *lda, int *ipiv, double *b, int *ldb, int *info);
   dgesv_(&n, &nrhs, a, &lda, ipiv, b, &ldb, info);
@@ -20,7 +20,7 @@ void THLapack_(gesv)(int n, int nrhs, real *a, int lda, int *ipiv, real *b, int 
 
 void THLapack_(gels)(char trans, int m, int n, int nrhs, real *a, int lda, real *b, int ldb, real *work, int lwork, int *info)
 {
-#ifdef __LAPACK__
+#ifdef USE_LAPACK
 #if defined(TH_REAL_IS_DOUBLE)
   extern void dgels_(char *trans, int *m, int *n, int *nrhs, double *a, int *lda, double *b, int *ldb, double *work, int *lwork, int *info);
   dgels_(&trans, &m, &n, &nrhs, a, &lda, b, &ldb, work, &lwork, info);
@@ -35,7 +35,7 @@ void THLapack_(gels)(char trans, int m, int n, int nrhs, real *a, int lda, real 
 
 void THLapack_(syev)(char jobz, char uplo, int n, real *a, int lda, real *w, real *work, int lwork, int *info)
 {
-#ifdef __LAPACK__
+#ifdef USE_LAPACK
 #if defined(TH_REAL_IS_DOUBLE)
   extern void dsyev_(char *jobz, char *uplo, int *n, double *a, int *lda, double *w, double *work, int *lwork, int *info);
   dsyev_(&jobz, &uplo, &n, a, &lda, w, work, &lwork, info);
@@ -50,7 +50,7 @@ void THLapack_(syev)(char jobz, char uplo, int n, real *a, int lda, real *w, rea
 
 void THLapack_(gesvd)(char jobu, char jobvt, int m, int n, real *a, int lda, real *s, real *u, int ldu, real *vt, int ldvt, real *work, int lwork, int *info)
 {
-#ifdef __LAPACK__
+#ifdef USE_LAPACK
 #if defined(TH_REAL_IS_DOUBLE)
   extern void dgesvd_(char *jobu, char *jobvt, int *m, int *n, double *a, int *lda, double *s, double *u, int *ldu, double *vt, int *ldvt, double *work, int *lwork, int *info);
   dgesvd_( &jobu,  &jobvt,  &m,  &n,  a,  &lda,  s,  u,  &ldu,  vt,  &ldvt,  work,  &lwork,  info);
@@ -66,7 +66,7 @@ void THLapack_(gesvd)(char jobu, char jobvt, int m, int n, real *a, int lda, rea
 /* LU decomposition */
 void THLapack_(getrf)(int m, int n, real *a, int lda, int *ipiv, int *info)
 {
-#ifdef  __LAPACK__
+#ifdef  USE_LAPACK
 #if defined(TH_REAL_IS_DOUBLE)
   extern void dgetrf_(int *m, int *n, real *a, int *lda, int *ipiv, int *info);
   dgetrf_(&m, &n, a, &lda, ipiv, info);
@@ -81,7 +81,7 @@ void THLapack_(getrf)(int m, int n, real *a, int lda, int *ipiv, int *info)
 /* Matrix Inverse */
 void THLapack_(getri)(int n, real *a, int lda, int *ipiv, real *work, int lwork, int* info)
 {
-#ifdef  __LAPACK__
+#ifdef  USE_LAPACK
 #if defined(TH_REAL_IS_DOUBLE)
   extern void dgetri_(int *n, real *a, int *lda, int *ipiv, real *work, int *lwork, int *info);
   dgetri_(&n, a, &lda, ipiv, work, &lwork, info);
