@@ -40,7 +40,7 @@ static inline void THVector_(diff)(real *z, const real *x, const real *y, const 
   for(; i < n-4; i += 4)
   {
     z[i] = x[i] - y[i];
-    z[i+1] + x[i+1] - y[i+1];
+    z[i+1] = x[i+1] - y[i+1];
     z[i+2] = x[i+2] - y[i+2];
     z[i+3] = x[i+3] - y[i+3];
   }
