@@ -509,6 +509,10 @@ static int torch_Tensor_(__newindex__)(lua_State *L)
       tensor = THTensor_(newWithTensor)(tensor);
       THTensor_(narrow)(tensor, NULL, 0, index, 1);
       THTensor_(copyFloat)(tensor, src);
+    } else if( (src = luaT_toudata(L, 3, torch_DoubleTensor_id)) ) {
+      tensor = THTensor_(newWithTensor)(tensor);
+      THTensor_(narrow)(tensor, NULL, 0, index, 1);
+      THTensor_(copyDouble)(tensor, src);
     } else {
       luaL_typerror(L, 3, "torch.*Tensor");
     }
@@ -585,7 +589,6 @@ static int torch_Tensor_(__newindex__)(lua_State *L)
       } else if( (src = luaT_toudata(L, 3, torch_Tensor_id)) ) {
         THTensor_(copy)(tensor, src);
       } else if( (src = luaT_toudata(L, 3, torch_ByteTensor_id)) ) {
-        tensor = THTensor_(newWithTensor)(tensor);
         THTensor_(copyByte)(tensor, src);
       } else if( (src = luaT_toudata(L, 3, torch_CharTensor_id)) ) {
         THTensor_(copyChar)(tensor, src);
@@ -597,6 +600,8 @@ static int torch_Tensor_(__newindex__)(lua_State *L)
         THTensor_(copyLong)(tensor, src);
       } else if( (src = luaT_toudata(L, 3, torch_FloatTensor_id)) ) {
         THTensor_(copyFloat)(tensor, src);
+      } else if( (src = luaT_toudata(L, 3, torch_DoubleTensor_id)) ) {
+        THTensor_(copyDouble)(tensor, src);
       } else {
         luaL_typerror(L, 3, "torch.*Tensor");
       }
