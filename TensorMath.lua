@@ -885,6 +885,17 @@ static void THTensor_random1__(THTensor *self, long b)
          
       end
 
+      wrap("atan2",
+           cname("atan2"),
+           {{name=Tensor, default=true, returned=true, method={default='nil'}},
+            {name=Tensor, method={default=1}},
+            {name=Tensor}},
+           "atan2",
+           {{name=real},
+            {name=real},
+            {name=real, creturned=true}}
+            )
+
       wrap("pow",
            cname("pow"),
            {{name=Tensor, default=true, returned=true, method={default='nil'}},
