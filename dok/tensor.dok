@@ -1118,6 +1118,65 @@ Note that "selecting" on the first dimension is equivalent to use the [[#torch.T
 [torch.DoubleTensor of dimension 5x6]
 </file>
 
+====  [Tensor] [{ dim1,dim2,... }] or [{ {dim1s,dim1e}, {dim2s,dim2e} }] ====
+{{anchor:torch.Tensor.index}}
+
+The indexing operator [] can be used to combine narrow/sub and
+select in a concise an efficient way. It can also be used
+to copy, and fill (sub) tensors.
+
+<file lua>
+> x = torch.Tensor(5, 6):zero()
+> print(x)
+
+0 0 0 0 0 0
+0 0 0 0 0 0
+0 0 0 0 0 0
+0 0 0 0 0 0
+0 0 0 0 0 0
+[torch.DoubleTensor of dimension 5x6]
+
+> x[{ 1,3 }] = 1 -- sets element at (i=1,j=3) to 1
+> print(x)
+ 
+ 0  0  1  0  0  0
+ 0  0  0  0  0  0
+ 0  0  0  0  0  0
+ 0  0  0  0  0  0
+ 0  0  0  0  0  0
+[torch.DoubleTensor of dimension 5x6]
+
+> x[{ 2,{2,4} }] = 2  -- sets a slice of 3 elements to 2
+> print(x)
+
+ 0  0  1  0  0  0
+ 0  2  2  2  0  0
+ 0  0  0  0  0  0
+ 0  0  0  0  0  0
+ 0  0  0  0  0  0
+[torch.DoubleTensor of dimension 5x6]
+
+> x[{ {},4 }] = -1 -- sets the full 4th column to -1
+> print(x)
+
+ 0  0  1 -1  0  0
+ 0  2  2 -1  0  0
+ 0  0  0 -1  0  0
+ 0  0  0 -1  0  0
+ 0  0  0 -1  0  0
+[torch.DoubleTensor of dimension 5x6]
+
+> x[{ {},2 }] = torch.range(1,5) -- copy a 1D tensor to a slice of x
+> print(x)
+
+ 0  1  1 -1  0  0
+ 0  2  2 -1  0  0
+ 0  3  0 -1  0  0
+ 0  4  0 -1  0  0
+ 0  5  0 -1  0  0
+[torch.DoubleTensor of dimension 5x6]
+</file>
+
 =====  Manipulating the tensor view =====
 
 Each of these methods returns a ''Tensor'' which is another way of viewing
