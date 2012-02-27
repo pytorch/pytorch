@@ -953,6 +953,12 @@ LAB_IMPLEMENT_BASIC_FUNCTION(ceil,ceil)
 LAB_IMPLEMENT_BASIC_FUNCTION(floor,floor)
 LAB_IMPLEMENT_BASIC_FUNCTION(abs,fabs)
 
+void THTensor_(atan2)(THTensor *r_, THTensor *tx, THTensor *ty)
+{
+  THTensor_(resizeAs)(r_, tx);
+  TH_TENSOR_APPLY3(real, r_, real, tx, real, ty, *r__data = atan2(*tx_data,*ty_data););
+}
+
 void THTensor_(mean)(THTensor *r_, THTensor *t, int dimension)
 {
   THLongStorage *dim;
