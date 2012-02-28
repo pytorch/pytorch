@@ -7,7 +7,7 @@ void THCudaStorage_set(THCudaStorage *self, long index, float value)
   THCudaCheck(cudaMemcpy(self->data + index, &value, sizeof(float), cudaMemcpyHostToDevice));
 }
 
-float THCudaStorage_get(THCudaStorage *self, long index)
+float THCudaStorage_get(const THCudaStorage *self, long index)
 {
   float value;
   THArgCheck((index >= 0) && (index < self->size), 2, "index out of bounds");
