@@ -22,14 +22,14 @@ typedef struct THTensor
 
 
 /**** access methods ****/
-TH_API THStorage* THTensor_(storage)(THTensor *self);
-TH_API long THTensor_(storageOffset)(THTensor *self);
-TH_API int THTensor_(nDimension)(THTensor *self);
-TH_API long THTensor_(size)(THTensor *self, int dim);
-TH_API long THTensor_(stride)(THTensor *self, int dim);
+TH_API THStorage* THTensor_(storage)(const THTensor *self);
+TH_API long THTensor_(storageOffset)(const THTensor *self);
+TH_API int THTensor_(nDimension)(const THTensor *self);
+TH_API long THTensor_(size)(const THTensor *self, int dim);
+TH_API long THTensor_(stride)(const THTensor *self, int dim);
 TH_API THLongStorage *THTensor_(newSizeOf)(THTensor *self);
 TH_API THLongStorage *THTensor_(newStrideOf)(THTensor *self);
-TH_API real *THTensor_(data)(THTensor *self);
+TH_API real *THTensor_(data)(const THTensor *self);
 
 TH_API void THTensor_(setFlag)(THTensor *self, const char flag);
 TH_API void THTensor_(clearFlag)(THTensor *self, const char flag);
@@ -102,8 +102,8 @@ TH_API void THTensor_(unfold)(THTensor *self, THTensor *src, int dimension_, lon
 TH_API void THTensor_(squeeze)(THTensor *self, THTensor *src);
 TH_API void THTensor_(squeeze1d)(THTensor *self, THTensor *src, int dimension_);
     
-TH_API int THTensor_(isContiguous)(THTensor *self);
-TH_API long THTensor_(nElement)(THTensor *self);
+TH_API int THTensor_(isContiguous)(const THTensor *self);
+TH_API long THTensor_(nElement)(const THTensor *self);
 
 TH_API void THTensor_(retain)(THTensor *self);
 TH_API void THTensor_(free)(THTensor *self);
@@ -115,9 +115,9 @@ TH_API void THTensor_(set2d)(THTensor *tensor, long x0, long x1, real value);
 TH_API void THTensor_(set3d)(THTensor *tensor, long x0, long x1, long x2, real value);
 TH_API void THTensor_(set4d)(THTensor *tensor, long x0, long x1, long x2, long x3, real value);
 
-TH_API real THTensor_(get1d)(THTensor *tensor, long x0);
-TH_API real THTensor_(get2d)(THTensor *tensor, long x0, long x1);
-TH_API real THTensor_(get3d)(THTensor *tensor, long x0, long x1, long x2);
-TH_API real THTensor_(get4d)(THTensor *tensor, long x0, long x1, long x2, long x3);
+TH_API real THTensor_(get1d)(const THTensor *tensor, long x0);
+TH_API real THTensor_(get2d)(const THTensor *tensor, long x0, long x1);
+TH_API real THTensor_(get3d)(const THTensor *tensor, long x0, long x1, long x2);
+TH_API real THTensor_(get4d)(const THTensor *tensor, long x0, long x1, long x2, long x3);
 
 #endif

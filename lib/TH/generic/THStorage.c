@@ -250,7 +250,7 @@ void THStorage_(set)(THStorage *self, long idx, real value)
   self->data[idx] = value;
 }
 
-real THStorage_(get)(THStorage *self, long idx)
+real THStorage_(get)(const THStorage *self, long idx)
 {
   THArgCheck((idx >= 0) && (idx < self->size), 2, "out of bounds");
   return self->data[idx];
