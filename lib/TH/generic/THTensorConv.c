@@ -32,8 +32,7 @@ TH_API void THTensor_(validXCorr2Dptr)(real *r_,
           pw_ += kc; /* next mask line */
         }
         /* Update output */
-        *r_ += alpha*sum;
-        *r_++;
+        *r_++ += alpha*sum;
       }
     }
 
@@ -86,8 +85,7 @@ TH_API void THTensor_(validConv2Dptr)(real *r_,
           pw_ -= kc; /* next mask line */
         }
         /* Update output */
-        *r_ += alpha*sum;
-        *r_++;
+        *r_++ += alpha*sum;
       }
     }
 
@@ -305,8 +303,7 @@ TH_API void THTensor_(validXCorr3Dptr)(real *r_,
           }
         }
         /* Update output */
-        *r_ += sum*alpha;
-        *r_++;
+        *r_++ += sum*alpha;
       }
     }
   }
@@ -350,8 +347,7 @@ TH_API void THTensor_(validConv3Dptr)(real *r_,
           }
         }
         /* Update output */
-        *r_ += alpha*sum;
-        *r_++;
+        *r_++ += alpha*sum;
       }
     }
   }
