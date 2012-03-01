@@ -31,8 +31,8 @@
 
 #define THInf DBL_MAX
 
-#if !defined(inline)
-# define inline
+#ifndef __cplusplus
+#define inline @TH_INLINE@
 #endif
 
 #ifndef M_PI
