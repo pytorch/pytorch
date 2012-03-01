@@ -154,7 +154,6 @@ static int torch_File_writeString(lua_State *L)
   THFile *self = luaT_checkudata(L, 1, torch_File_id);
   const char *str = NULL;
   size_t size;
-  long nwrite;
 
   luaL_checktype(L, 2, LUA_TSTRING);
   str = lua_tolstring(L, 2, &size);

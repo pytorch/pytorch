@@ -149,7 +149,6 @@ static int THMemoryFile_mode(const char *mode, int *isReadable, int *isWritable)
   static long THMemoryFile_write##TYPEC(THFile *self, TYPE *data, long n) \
   {                                                                     \
     THMemoryFile *mfself = (THMemoryFile*)self;                         \
-    long nread = 0L;                                                    \
                                                                         \
     THArgCheck(mfself->storage != NULL, 1, "attempt to use a closed file");     \
     THArgCheck(mfself->file.isWritable, 1, "attempt to write in a read-only file"); \

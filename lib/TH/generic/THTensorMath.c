@@ -209,7 +209,6 @@ void THTensor_(addmv)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
 
 void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor *m1, THTensor *m2)
 { 
-  long r, c;
   char transpose, transpose_m1, transpose_m2;
   THTensor *r__, *m1_, *m2_;
 

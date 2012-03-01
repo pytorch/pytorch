@@ -117,7 +117,6 @@ TH_API void THTensor_(fullConv2Dptr)(real *r_,
                                   real *k_, long kr, long kc,
                                   long sr, long sc)
 {
-  long or = (ir - 1) * sr + kr;
   long oc = (ic - 1) * sc + kc;
 
   long xx, yy, kx, ky;
@@ -170,7 +169,6 @@ TH_API void THTensor_(fullXCorr2Dptr)(real *r_,
                                    real *k_, long kr, long kc,
                                    long sr, long sc)
 {
-  long or = (ir - 1) * sr + kr;
   long oc = (ic - 1) * sc + kc;
 
   long xx, yy, kx, ky;
@@ -363,7 +361,6 @@ TH_API void THTensor_(fullConv3Dptr)(real *r_,
                                   real *k_, long kt, long kr, long kc,
                                   long st, long sr, long sc)
 {
-  long ot = (it - 1) * st + kt;
   long or = (ir - 1) * sr + kr;
   long oc = (ic - 1) * sc + kc;
 
@@ -411,7 +408,6 @@ TH_API void THTensor_(fullXCorr3Dptr)(real *r_,
                                    real *k_, long kt, long kr, long kc,
                                    long st, long sr, long sc)
 {
-  long ot = (it - 1) * st + kt;
   long or = (ir - 1) * sr + kr;
   long oc = (ic - 1) * sc + kc;
 
