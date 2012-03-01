@@ -108,7 +108,6 @@ TH_API void THTensor_(gesv)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor 
 TH_API void THTensor_(gels)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
 {
   int m, n, nrhs, lda, ldb, info, lwork;
-  char transpose;
   THTensor *work = NULL;
   real wkopt = 0;
 
