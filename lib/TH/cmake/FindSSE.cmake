@@ -1,104 +1,97 @@
-# Check if SSE instructions are available on the machine where 
-# the project is compiled.
+INCLUDE(CheckCSourceRuns)
+INCLUDE(CheckCXXSourceRuns)
 
-IF(CMAKE_SYSTEM_NAME MATCHES "Linux")
-   EXEC_PROGRAM(cat ARGS "/proc/cpuinfo" OUTPUT_VARIABLE CPUINFO)
+SET(SSE1_CODE "
+  #include <xmmintrin.h>
 
-   STRING(REGEX REPLACE "^.*(sse2).*$" "\\1" SSE_THERE ${CPUINFO})
-   STRING(COMPARE EQUAL "sse2" "${SSE_THERE}" SSE2_TRUE)
-   IF (SSE2_TRUE)
-      set(SSE2_FOUND true CACHE BOOL "SSE2 available on host")
-   ELSE (SSE2_TRUE)
-      set(SSE2_FOUND false CACHE BOOL "SSE2 available on host")
-   ENDIF (SSE2_TRUE)
+  int main()
+  {
+    __m128 a;
+    float vals[4] = {0,0,0,0};
+    a = _mm_loadu_ps(vals);
+    return 0;
+  }")
 
-   # /proc/cpuinfo apparently omits sse3 :(
-   STRING(REGEX REPLACE "^.*[^s](sse3).*$" "\\1" SSE_THERE ${CPUINFO})
-   STRING(COMPARE EQUAL "sse3" "${SSE_THERE}" SSE3_TRUE)
-   IF (NOT SSE3_TRUE)
-      STRING(REGEX REPLACE "^.*(T2300).*$" "\\1" SSE_THERE ${CPUINFO})
-      STRING(COMPARE EQUAL "T2300" "${SSE_THERE}" SSE3_TRUE)
-   ENDIF (NOT SSE3_TRUE)
+SET(SSE2_CODE "
+  #include <emmintrin.h>
 
-   STRING(REGEX REPLACE "^.*(ssse3).*$" "\\1" SSE_THERE ${CPUINFO})
-   STRING(COMPARE EQUAL "ssse3" "${SSE_THERE}" SSSE3_TRUE)
-   IF (SSE3_TRUE OR SSSE3_TRUE)
-      set(SSE3_FOUND true CACHE BOOL "SSE3 available on host")
-   ELSE (SSE3_TRUE OR SSSE3_TRUE)
-      set(SSE3_FOUND false CACHE BOOL "SSE3 available on host")
-   ENDIF (SSE3_TRUE OR SSSE3_TRUE)
-   IF (SSSE3_TRUE)
-      set(SSSE3_FOUND true CACHE BOOL "SSSE3 available on host")
-   ELSE (SSSE3_TRUE)
-      set(SSSE3_FOUND false CACHE BOOL "SSSE3 available on host")
-   ENDIF (SSSE3_TRUE)
+  int main()
+  {
+    __m128d a;
+    double vals[2] = {0,0};
+    a = _mm_loadu_pd(vals);
+    return 0;
+  }")
 
-   STRING(REGEX REPLACE "^.*(sse4_1).*$" "\\1" SSE_THERE ${CPUINFO})
-   STRING(COMPARE EQUAL "sse4_1" "${SSE_THERE}" SSE41_TRUE)
-   IF (SSE41_TRUE)
-      set(SSE4_1_FOUND true CACHE BOOL "SSE4.1 available on host")
-   ELSE (SSE41_TRUE)
-      set(SSE4_1_FOUND false CACHE BOOL "SSE4.1 available on host")
-   ENDIF (SSE41_TRUE)
-ELSEIF(CMAKE_SYSTEM_NAME MATCHES "Darwin")
-   EXEC_PROGRAM("/usr/sbin/sysctl -n machdep.cpu.features" OUTPUT_VARIABLE
-      CPUINFO)
+SET(SSE3_CODE "
+  #include <pmmintrin.h>
 
-   STRING(REGEX REPLACE "^.*[^S](SSE2).*$" "\\1" SSE_THERE ${CPUINFO})
-   STRING(COMPARE EQUAL "SSE2" "${SSE_THERE}" SSE2_TRUE)
-   IF (SSE2_TRUE)
-      set(SSE2_FOUND true CACHE BOOL "SSE2 available on host")
-   ELSE (SSE2_TRUE)
-      set(SSE2_FOUND false CACHE BOOL "SSE2 available on host")
-   ENDIF (SSE2_TRUE)
+  int main( )
+  {
+    const int vals[4] = {0,0,0,0};
+    __m128i a;
+    a = _mm_lddqu_si128( (const __m128i*)vals );
+    return 0;
+  }")
 
-   STRING(REGEX REPLACE "^.*[^S](SSE3).*$" "\\1" SSE_THERE ${CPUINFO})
-   STRING(COMPARE EQUAL "SSE3" "${SSE_THERE}" SSE3_TRUE)
-   IF (SSE3_TRUE)
-      set(SSE3_FOUND true CACHE BOOL "SSE3 available on host")
-   ELSE (SSE3_TRUE)
-      set(SSE3_FOUND false CACHE BOOL "SSE3 available on host")
-   ENDIF (SSE3_TRUE)
+SET(SSE4_1_CODE "
+  #include <smmintrin.h>
 
-   STRING(REGEX REPLACE "^.*(SSSE3).*$" "\\1" SSE_THERE ${CPUINFO})
-   STRING(COMPARE EQUAL "SSSE3" "${SSE_THERE}" SSSE3_TRUE)
-   IF (SSSE3_TRUE)
-      set(SSSE3_FOUND true CACHE BOOL "SSSE3 available on host")
-   ELSE (SSSE3_TRUE)
-      set(SSSE3_FOUND false CACHE BOOL "SSSE3 available on host")
-   ENDIF (SSSE3_TRUE)
+  int main ()
+  {
+    __m128i a, b;
+    __m128i res = _mm_max_epi8(a, b);
 
-   STRING(REGEX REPLACE "^.*(SSE4.1).*$" "\\1" SSE_THERE ${CPUINFO})
-   STRING(COMPARE EQUAL "SSE4.1" "${SSE_THERE}" SSE41_TRUE)
-   IF (SSE41_TRUE)
-      set(SSE4_1_FOUND true CACHE BOOL "SSE4.1 available on host")
-   ELSE (SSE41_TRUE)
-      set(SSE4_1_FOUND false CACHE BOOL "SSE4.1 available on host")
-   ENDIF (SSE41_TRUE)
-ELSEIF(CMAKE_SYSTEM_NAME MATCHES "Windows")
-   # TODO
-   set(SSE2_FOUND   true  CACHE BOOL "SSE2 available on host")
-   set(SSE3_FOUND   false CACHE BOOL "SSE3 available on host")
-   set(SSSE3_FOUND  false CACHE BOOL "SSSE3 available on host")
-   set(SSE4_1_FOUND false CACHE BOOL "SSE4.1 available on host")
-ELSE(CMAKE_SYSTEM_NAME MATCHES "Linux")
-   set(SSE2_FOUND   true  CACHE BOOL "SSE2 available on host")
-   set(SSE3_FOUND   false CACHE BOOL "SSE3 available on host")
-   set(SSSE3_FOUND  false CACHE BOOL "SSSE3 available on host")
-   set(SSE4_1_FOUND false CACHE BOOL "SSE4.1 available on host")
-ENDIF(CMAKE_SYSTEM_NAME MATCHES "Linux")
+    return 0;
+  }
+")
 
-if(NOT SSE2_FOUND)
-      MESSAGE(STATUS "Could not find hardware support for SSE2 on this machine.")
-endif(NOT SSE2_FOUND)
-if(NOT SSE3_FOUND)
-      MESSAGE(STATUS "Could not find hardware support for SSE3 on this machine.")
-endif(NOT SSE3_FOUND)
-if(NOT SSSE3_FOUND)
-      MESSAGE(STATUS "Could not find hardware support for SSSE3 on this machine.")
-endif(NOT SSSE3_FOUND)
-if(NOT SSE4_1_FOUND)
-      MESSAGE(STATUS "Could not find hardware support for SSE4.1 on this machine.")
-endif(NOT SSE4_1_FOUND)
+SET(SSE4_2_CODE "
+  #include <nmmintrin.h>
 
-mark_as_advanced(SSE2_FOUND SSE3_FOUND SSSE3_FOUND SSE4_1_FOUND)
+  int main()
+  {
+    __m128i a, b, c;
+    c = _mm_cmpgt_epi64(a, b);
+    return 0;
+  }
+")
+
+MACRO(CHECK_SSE lang type flags)
+  SET(__FLAG_I 1)
+  FOREACH(__FLAG ${flags})
+    IF(NOT ${lang}_${type}_FOUND)
+      SET(CMAKE_REQUIRED_FLAGS ${__FLAG})
+      IF(lang STREQUAL "CXX")
+        CHECK_CXX_SOURCE_RUNS("${${type}_CODE}" ${lang}_HAS_${type}_${__FLAG_I})
+      ELSE()
+        CHECK_C_SOURCE_RUNS("${${type}_CODE}" ${lang}_HAS_${type}_${__FLAG_I})
+      ENDIF()
+      IF(${lang}_HAS_${type}_${__FLAG_I})
+        SET(${lang}_${type}_FOUND TRUE CACHE BOOL "${lang} ${type} support")
+        SET(${lang}_${type}_FLAGS "${__FLAG}" CACHE STRING "${lang} ${type} flags")
+      ENDIF()
+      MATH(EXPR __FLAG_I "${__FLAG_I}+1")
+    ENDIF()
+  ENDFOREACH()
+
+  IF(NOT ${lang}_${type}_FOUND)
+    SET(${lang}_${type}_FOUND FALSE CACHE BOOL "${lang} ${type} support")
+    SET(${lang}_${type}_FLAGS "" CACHE STRING "${lang} ${type} flags")
+  ENDIF()
+
+  MARK_AS_ADVANCED(${lang}_${type}_FOUND ${lang}_${type}_FLAGS)
+
+ENDMACRO()
+
+CHECK_SSE(C "SSE1" " ;-msse;/arch:SSE")
+CHECK_SSE(C "SSE2" " ;-msse2;/arch:SSE2")
+CHECK_SSE(C "SSE3" " ;-msse3;/arch:SSE3")
+CHECK_SSE(C "SSE4_1" " ;-msse4.1;-msse4;/arch:SSE4")
+CHECK_SSE(C "SSE4_2" " ;-msse4.2;-msse4;/arch:SSE4")
+
+CHECK_SSE(CXX "SSE1" " ;-msse;/arch:SSE")
+CHECK_SSE(CXX "SSE2" " ;-msse2;/arch:SSE2")
+CHECK_SSE(CXX "SSE3" " ;-msse3;/arch:SSE3")
+CHECK_SSE(CXX "SSE4_1" " ;-msse4.1;-msse4;/arch:SSE4")
+CHECK_SSE(CXX "SSE4_2" " ;-msse4.2;-msse4;/arch:SSE4")
