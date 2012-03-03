@@ -5,22 +5,22 @@
 
 #define THVector_(NAME) TH_CONCAT_4(TH,Real,Vector_,NAME)
 
-#if defined __SSE2__ || defined __SSE3__ || defined __SSSE3__ \
-  || defined __SSE4_1__ || defined __SSE4_2__
+#if defined USE_SSE2 || defined USE_SSE3 || defined USE_SSSE3 \
+  || defined USE_SSE4_1 || defined USE_SSE4_2
 
-#ifdef __SSE2__
+#ifdef USE_SSE2
 #include <emmintrin.h>
 #endif
  
-#ifdef __SSE3__
+#ifdef USE_SSE3
 #include <pmmintrin.h>
 #endif
  
-#ifdef __SSSE3__
+#ifdef USE_SSSE3
 #include <tmmintrin.h>
 #endif
  
-#if defined (__SSE4_2__) || defined (__SSE4_1__)
+#if defined (USE_SSE4_2) || defined (USE_SSE4_1)
 #include <smmintrin.h>
 #endif
 
