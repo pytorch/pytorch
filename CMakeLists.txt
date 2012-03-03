@@ -51,11 +51,23 @@ ENDIF(LAPACK_FOUND)
 
 FOREACH(KEYWORD "inline" "__inline__" "__inline")
   IF(NOT DEFINED C_INLINE)
-    TRY_COMPILE(C_HAS_${KEYWORD} "${CMAKE_CURRENT_BINARY_DIR}"
-      "${CMAKE_CURRENT_SOURCE_DIR}/cmake/testinline.c"
-      COMPILE_DEFINITIONS "-Dinline=${KEYWORD}")
+
+    SET(CMAKE_REQUIRED_FLAGS "-Dinline=${KEYWORD}")
+    CHECK_C_SOURCE_RUNS("
+       static inline int static_foo()
+       {
+         return 0;
+       }
+
+       int main(int argc, char *argv[])
+       {
+         static_foo();
+         return 0;
+       }" C_HAS_${KEYWORD})
+
     IF(C_HAS_${KEYWORD})
       SET(C_INLINE TRUE)
+# Right now i put it in THGeneral.h -- debatable
 #      ADD_DEFINITIONS("-Dinline=${KEYWORD}")
       SET(TH_INLINE ${KEYWORD})
       MESSAGE(STATUS "C inline is supported (${KEYWORD})")
@@ -64,6 +76,7 @@ FOREACH(KEYWORD "inline" "__inline__" "__inline")
 ENDFOREACH(KEYWORD)
 IF(NOT DEFINED C_INLINE)
   MESSAGE(STATUS "C inline seems not supported")
+# Right now i put it in THGeneral.h -- debatable
 #  ADD_DEFINITIONS("-Dinline=")
 SET(TH_INLINE "")
 ENDIF(NOT DEFINED C_INLINE)
