@@ -9,6 +9,9 @@
 #  LAPACK_FOUND - set to true if a library implementing the LAPACK interface is found
 #  LAPACK_LIBRARIES - list of libraries (using full path name) for LAPACK
 
+# Note: I do not think it is a good idea to mixup different BLAS/LAPACK versions
+# Hence, this script wants to find a Lapack library matching your Blas library
+
 SET(LAPACK_LIBRARIES)
 SET(LAPACK_INFO)
 
@@ -17,17 +20,6 @@ IF(LAPACK_FIND_QUIETLY OR NOT LAPACK_FIND_REQUIRED)
 ELSE(LAPACK_FIND_QUIETLY OR NOT LAPACK_FIND_REQUIRED)
   FIND_PACKAGE(BLAS REQUIRED)
 ENDIF(LAPACK_FIND_QUIETLY OR NOT LAPACK_FIND_REQUIRED)
-
-# LAPACK in Intel mkl
-IF (MKL_FOUND AND NOT LAPACK_LIBRARIES)
-  IF(MKL_LAPACK_LIBRARIES)
-    SET(LAPACK_LIBRARIES ${MKL_LAPACK_LIBRARIES} ${MKL_LIBRARIES})
-  ELSE(MKL_LAPACK_LIBRARIES)
-    SET(LAPACK_LIBRARIES ${MKL_LIBRARIES})
-  ENDIF(MKL_LAPACK_LIBRARIES)
-  SET(LAPACK_INCLUDE_DIR ${MKL_INCLUDE_DIR})
-  SET(LAPACK_INFO "mkl")
-ENDIF (MKL_FOUND AND NOT LAPACK_LIBRARIES)
 
 # Old search lapack script
 include(CheckFortranFunctionExists)
@@ -88,53 +80,104 @@ endmacro(Check_Lapack_Libraries)
 
 
 if(BLAS_FOUND)
+
+  # Intel MKL
+  IF((NOT LAPACK_LIBRARIES) AND (BLAS_INFO STREQUAL "mkl"))
+    IF(MKL_LAPACK_LIBRARIES)
+      SET(LAPACK_LIBRARIES ${MKL_LAPACK_LIBRARIES} ${MKL_LIBRARIES})
+    ELSE(MKL_LAPACK_LIBRARIES)
+      SET(LAPACK_LIBRARIES ${MKL_LIBRARIES})
+    ENDIF(MKL_LAPACK_LIBRARIES)
+    SET(LAPACK_INCLUDE_DIR ${MKL_INCLUDE_DIR})
+    SET(LAPACK_INFO "mkl")
+  ENDIF()
   
-  #acml lapack
-  if(NOT LAPACK_LIBRARIES)
+  # OpenBlas
+  IF((NOT LAPACK_LIBRARIES) AND (BLAS_INFO STREQUAL "open"))
     check_lapack_libraries(
       LAPACK_LIBRARIES
       LAPACK
       cheev
       ""
-      "acml"
+      ""
+      "${BLAS_LIBRARIES}"
+      )
+    if(LAPACK_LIBRARIES)
+      SET(LAPACK_INFO "openblas")
+    else(LAPACK_LIBRARIES)
+      message(STATUS "It seems OpenBlas has not been compiled with Lapack support")
+    endif(LAPACK_LIBRARIES)
+  endif()
+
+  # Goto2
+  IF((NOT LAPACK_LIBRARIES) AND (BLAS_INFO STREQUAL "goto"))
+    check_lapack_libraries(
+      LAPACK_LIBRARIES
+      LAPACK
+      cheev
+      ""
+      ""
+      "${BLAS_LIBRARIES}"
+      )
+    if(LAPACK_LIBRARIES)
+      SET(LAPACK_INFO "goto")
+    else(LAPACK_LIBRARIES)
+      message(STATUS "It seems GotoBlas has not been compiled with Lapack support")
+    endif(LAPACK_LIBRARIES)
+  endif()
+
+  #acml lapack
+  IF((NOT LAPACK_LIBRARIES) AND (BLAS_INFO STREQUAL "acml"))
+    check_lapack_libraries(
+      LAPACK_LIBRARIES
+      LAPACK
+      cheev
+      ""
+      ""
       "${BLAS_LIBRARIES}"
       )
     if(LAPACK_LIBRARIES)
       SET(LAPACK_INFO "acml")
+    else(LAPACK_LIBRARIES)
+      message(STATUS "Strangely, your ACML library does not support Lapack?!")  
     endif(LAPACK_LIBRARIES)
-  endif(NOT LAPACK_LIBRARIES)
+  endif()
 
   # Apple LAPACK library?
-  if(NOT LAPACK_LIBRARIES)
+  IF((NOT LAPACK_LIBRARIES) AND (BLAS_INFO STREQUAL "accelerate"))
     check_lapack_libraries(
       LAPACK_LIBRARIES
       LAPACK
       cheev
       ""
-      "Accelerate"
+      ""
       "${BLAS_LIBRARIES}"
       )
     if(LAPACK_LIBRARIES)
-      SET(LAPACK_INFO "Accelerate")
+      SET(LAPACK_INFO "accelerate")
+    else(LAPACK_LIBRARIES)
+      message(STATUS "Strangely, your Accelerate library does not support Lapack?!")  
     endif(LAPACK_LIBRARIES)
-  endif(NOT LAPACK_LIBRARIES)
+  endif()
 
-  if ( NOT LAPACK_LIBRARIES )
+  IF((NOT LAPACK_LIBRARIES) AND (BLAS_INFO STREQUAL "veclib"))
     check_lapack_libraries(
       LAPACK_LIBRARIES
       LAPACK
       cheev
       ""
-      "vecLib"
+      ""
       "${BLAS_LIBRARIES}"
       )
     if(LAPACK_LIBRARIES)
       SET(LAPACK_INFO "veclib")
+    else(LAPACK_LIBRARIES)
+      message(STATUS "Strangely, your vecLib library does not support Lapack?!")  
     endif(LAPACK_LIBRARIES)
-  endif ( NOT LAPACK_LIBRARIES )
+  endif()
 
   # Generic LAPACK library?
-  if ( NOT LAPACK_LIBRARIES )
+  IF((NOT LAPACK_LIBRARIES) AND (BLAS_INFO STREQUAL "generic"))
     check_lapack_libraries(
       LAPACK_LIBRARIES
       LAPACK
@@ -146,7 +189,7 @@ if(BLAS_FOUND)
     if(LAPACK_LIBRARIES)
       SET(LAPACK_INFO "generic")
     endif(LAPACK_LIBRARIES)
-  endif ( NOT LAPACK_LIBRARIES )
+  endif()
 
 else(BLAS_FOUND)
   message(STATUS "LAPACK requires BLAS")
