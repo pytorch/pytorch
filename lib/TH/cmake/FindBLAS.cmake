@@ -12,6 +12,9 @@
 #  BLAS_LIBRARIES - list of libraries to link against to use BLAS
 #  BLAS_INCLUDE_DIR - include directory
 
+# Do nothing is BLAS was found before
+IF(NOT BLAS_FOUND)
+
 SET(BLAS_LIBRARIES)
 SET(BLAS_INCLUDE_DIR)
 SET(BLAS_INFO)
@@ -249,3 +252,6 @@ IF(NOT BLAS_FIND_QUIETLY)
     MESSAGE(STATUS "Cannot find a library with BLAS API. Not using BLAS.")
   ENDIF(BLAS_FOUND)
 ENDIF(NOT BLAS_FIND_QUIETLY)
+
+# Do nothing is BLAS was found before
+ENDIF(NOT BLAS_FOUND)
