@@ -12,6 +12,9 @@
 # Note: I do not think it is a good idea to mixup different BLAS/LAPACK versions
 # Hence, this script wants to find a Lapack library matching your Blas library
 
+# Do nothing if LAPACK was found before
+IF(NOT LAPACK_FOUND)
+
 SET(LAPACK_LIBRARIES)
 SET(LAPACK_INFO)
 
@@ -182,3 +185,6 @@ IF(NOT LAPACK_FIND_QUIETLY)
     MESSAGE(STATUS "Cannot find a library with LAPACK API. Not using LAPACK.")
   ENDIF(LAPACK_FOUND)
 ENDIF(NOT LAPACK_FIND_QUIETLY)
+
+# Do nothing if LAPACK was found before
+ENDIF(NOT LAPACK_FOUND)
