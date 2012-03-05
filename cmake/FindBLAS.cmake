@@ -17,19 +17,11 @@ SET(BLAS_INCLUDE_DIR)
 SET(BLAS_INFO)
 SET(BLAS_F2C)
 
-# CBLAS in Intel mkl
-FIND_PACKAGE(MKL)
-IF (MKL_FOUND AND NOT BLAS_LIBRARIES)
-  SET(BLAS_INFO imkl)
-  SET(BLAS_LIBRARIES ${MKL_LIBRARIES})
-  SET(BLAS_INCLUDE_DIR ${MKL_INCLUDE_DIR})
-  SET(BLAS_VERSION ${MKL_VERSION})
-ENDIF (MKL_FOUND AND NOT BLAS_LIBRARIES)
+SET(WITH_BLAS "" CACHE STRING "Blas type [mkl/open/goto/acml/atlas/accelerate/veclib/generic]")
 
 # Old FindBlas
 INCLUDE(CheckCSourceRuns)
 INCLUDE(CheckFortranFunctionExists)
-SET(_verbose TRUE)
 
 MACRO(Check_Fortran_Libraries LIBRARIES _prefix _name _flags _list)
   # This macro checks for the existence of the combination of fortran libraries
@@ -50,9 +42,7 @@ MACRO(Check_Fortran_Libraries LIBRARIES _prefix _name _flags _list)
       set(__list "${_elem}")
     endif(__list)
   endforeach(_elem)
-  if(_verbose)
-    message(STATUS "Checking for [${__list}]")
-  endif(_verbose)
+  message(STATUS "Checking for [${__list}]")
 
   set(_libraries_work TRUE)
   set(${LIBRARIES})
@@ -80,6 +70,7 @@ MACRO(Check_Fortran_Libraries LIBRARIES _prefix _name _flags _list)
       mark_as_advanced(${_prefix}_${_library}_LIBRARY)
       set(${LIBRARIES} ${${LIBRARIES}} ${${_prefix}_${_library}_LIBRARY})
       set(_libraries_work ${${_prefix}_${_library}_LIBRARY})
+      MESSAGE(STATUS "  Library ${_library}: ${${_prefix}_${_library}_LIBRARY}")
     endif(_libraries_work)
   endforeach(_library ${_list})
   if(_libraries_work)
@@ -99,9 +90,60 @@ MACRO(Check_Fortran_Libraries LIBRARIES _prefix _name _flags _list)
   endif(NOT _libraries_work)
 endmacro(Check_Fortran_Libraries)
 
+# Intel MKL?
+if((NOT BLAS_LIBRARIES)
+    AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "mkl")))
+  FIND_PACKAGE(MKL)
+  IF(MKL_FOUND)
+    SET(BLAS_INFO "mkl")
+    SET(BLAS_LIBRARIES ${MKL_LIBRARIES})
+    SET(BLAS_INCLUDE_DIR ${MKL_INCLUDE_DIR})
+    SET(BLAS_VERSION ${MKL_VERSION})
+  ENDIF(MKL_FOUND)
+endif()
+
+if((NOT BLAS_LIBRARIES)
+    AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "open")))
+  check_fortran_libraries(
+  BLAS_LIBRARIES
+  BLAS
+  sgemm
+  ""
+  "openblas;gfortran")
+  if(BLAS_LIBRARIES)
+    set(BLAS_INFO "open")
+  endif(BLAS_LIBRARIES)
+endif()
+
+if((NOT BLAS_LIBRARIES)
+    AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "goto")))
+  check_fortran_libraries(
+  BLAS_LIBRARIES
+  BLAS
+  sgemm
+  ""
+  "goto2;gfortran")
+  if (BLAS_LIBRARIES)
+    set(BLAS_INFO "goto")
+  endif (BLAS_LIBRARIES)
+endif()
+
+if((NOT BLAS_LIBRARIES)
+    AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "acml")))
+  check_fortran_libraries(
+  BLAS_LIBRARIES
+  BLAS
+  sgemm
+  ""
+  "acml;gfortran")
+  if (BLAS_LIBRARIES)
+    set(BLAS_INFO "acml")
+  endif (BLAS_LIBRARIES)
+endif()
 
 # Apple BLAS library?
-if(NOT BLAS_LIBRARIES)
+if((NOT BLAS_LIBRARIES)
+    AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "accelerate")))
   check_fortran_libraries(
   BLAS_LIBRARIES
   BLAS
@@ -111,8 +153,10 @@ if(NOT BLAS_LIBRARIES)
   if (BLAS_LIBRARIES)
     set(BLAS_INFO "accelerate")
   endif (BLAS_LIBRARIES)
-endif(NOT BLAS_LIBRARIES)
-if ( NOT BLAS_LIBRARIES )
+endif()
+
+if((NOT BLAS_LIBRARIES)
+    AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "veclib")))
   check_fortran_libraries(
     BLAS_LIBRARIES
     BLAS
@@ -122,10 +166,11 @@ if ( NOT BLAS_LIBRARIES )
   if (BLAS_LIBRARIES)
     set(BLAS_INFO "veclib")
   endif (BLAS_LIBRARIES)
-endif ( NOT BLAS_LIBRARIES )
+endif()
 
 # BLAS in ATLAS library? (http://math-atlas.sourceforge.net/)
-if(NOT BLAS_LIBRARIES)
+if((NOT BLAS_LIBRARIES)
+    AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "atlas")))
   check_fortran_libraries(
   BLAS_LIBRARIES
   BLAS
@@ -135,10 +180,11 @@ if(NOT BLAS_LIBRARIES)
   if (BLAS_LIBRARIES)
     set(BLAS_INFO "atlas")
   endif (BLAS_LIBRARIES)
-endif(NOT BLAS_LIBRARIES)
+endif()
 
 # Generic BLAS library?
-if(NOT BLAS_LIBRARIES)
+if((NOT BLAS_LIBRARIES)
+    AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "generic")))
   check_fortran_libraries(
   BLAS_LIBRARIES
   BLAS
@@ -148,7 +194,7 @@ if(NOT BLAS_LIBRARIES)
   if (BLAS_LIBRARIES)
     set(BLAS_INFO "generic")
   endif (BLAS_LIBRARIES)
-endif(NOT BLAS_LIBRARIES)
+endif()
 
 # Determine if blas was compiled with the f2c conventions
 IF (BLAS_LIBRARIES)
@@ -178,9 +224,7 @@ int main() {
   exit((float)r != (float).1234);
 }" BLAS_F2C_FLOAT_WORKS )
   IF (BLAS_F2C_DOUBLE_WORKS AND NOT BLAS_F2C_FLOAT_WORKS)
-    IF (_verbose)
-      MESSAGE(STATUS "This BLAS uses the F2C return conventions")
-    ENDIF(_verbose)
+    MESSAGE(STATUS "This BLAS uses the F2C return conventions")
     SET(BLAS_F2C TRUE)
   ELSE (BLAS_F2C_DOUBLE_WORKS AND NOT BLAS_F2C_FLOAT_WORKS)
     SET(BLAS_F2C FALSE)
@@ -205,8 +249,3 @@ IF(NOT BLAS_FIND_QUIETLY)
     MESSAGE(STATUS "Cannot find a library with BLAS API. Not using BLAS.")
   ENDIF(BLAS_FOUND)
 ENDIF(NOT BLAS_FIND_QUIETLY)
-
-
-
-
-
