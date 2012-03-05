@@ -82,7 +82,7 @@ endmacro(Check_Lapack_Libraries)
 if(BLAS_FOUND)
 
   # Intel MKL
-  IF((NOT LAPACK_LIBRARIES) AND (BLAS_INFO STREQUAL "mkl"))
+  IF((NOT LAPACK_INFO) AND (BLAS_INFO STREQUAL "mkl"))
     IF(MKL_LAPACK_LIBRARIES)
       SET(LAPACK_LIBRARIES ${MKL_LAPACK_LIBRARIES} ${MKL_LIBRARIES})
     ELSE(MKL_LAPACK_LIBRARIES)
@@ -93,91 +93,62 @@ if(BLAS_FOUND)
   ENDIF()
   
   # OpenBlas
-  IF((NOT LAPACK_LIBRARIES) AND (BLAS_INFO STREQUAL "open"))
-    check_lapack_libraries(
-      LAPACK_LIBRARIES
-      LAPACK
-      cheev
-      ""
-      ""
-      "${BLAS_LIBRARIES}"
-      )
-    if(LAPACK_LIBRARIES)
-      SET(LAPACK_INFO "openblas")
-    else(LAPACK_LIBRARIES)
+  IF((NOT LAPACK_INFO) AND (BLAS_INFO STREQUAL "open"))
+    SET(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
+    check_function_exists("cheev_" OPEN_LAPACK_WORKS)
+    if(OPEN_LAPACK_WORKS)
+      SET(LAPACK_INFO "open")
+    else()
       message(STATUS "It seems OpenBlas has not been compiled with Lapack support")
-    endif(LAPACK_LIBRARIES)
+    endif()
   endif()
 
-  # Goto2
-  IF((NOT LAPACK_LIBRARIES) AND (BLAS_INFO STREQUAL "goto"))
-    check_lapack_libraries(
-      LAPACK_LIBRARIES
-      LAPACK
-      cheev
-      ""
-      ""
-      "${BLAS_LIBRARIES}"
-      )
-    if(LAPACK_LIBRARIES)
+  # GotoBlas
+  IF((NOT LAPACK_INFO) AND (BLAS_INFO STREQUAL "goto"))
+    SET(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
+    check_function_exists("cheev_" GOTO_LAPACK_WORKS)
+    if(GOTO_LAPACK_WORKS)
       SET(LAPACK_INFO "goto")
-    else(LAPACK_LIBRARIES)
+    else()
       message(STATUS "It seems GotoBlas has not been compiled with Lapack support")
-    endif(LAPACK_LIBRARIES)
+    endif()
   endif()
 
-  #acml lapack
-  IF((NOT LAPACK_LIBRARIES) AND (BLAS_INFO STREQUAL "acml"))
-    check_lapack_libraries(
-      LAPACK_LIBRARIES
-      LAPACK
-      cheev
-      ""
-      ""
-      "${BLAS_LIBRARIES}"
-      )
-    if(LAPACK_LIBRARIES)
+  # ACML
+  IF((NOT LAPACK_INFO) AND (BLAS_INFO STREQUAL "acml"))
+    SET(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
+    check_function_exists("cheev_" ACML_LAPACK_WORKS)
+    if(ACML_LAPACK_WORKS)
       SET(LAPACK_INFO "acml")
-    else(LAPACK_LIBRARIES)
-      message(STATUS "Strangely, your ACML library does not support Lapack?!")  
-    endif(LAPACK_LIBRARIES)
+    else()
+      message(STATUS "Strangely, this ACML library does not support Lapack?!")  
+    endif()
   endif()
 
-  # Apple LAPACK library?
-  IF((NOT LAPACK_LIBRARIES) AND (BLAS_INFO STREQUAL "accelerate"))
-    check_lapack_libraries(
-      LAPACK_LIBRARIES
-      LAPACK
-      cheev
-      ""
-      ""
-      "${BLAS_LIBRARIES}"
-      )
-    if(LAPACK_LIBRARIES)
+  # Accelerate
+  IF((NOT LAPACK_INFO) AND (BLAS_INFO STREQUAL "accelerate"))
+    SET(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
+    check_function_exists("cheev_" ACCELERATE_LAPACK_WORKS)
+    if(ACCELERATE_LAPACK_WORKS)
       SET(LAPACK_INFO "accelerate")
-    else(LAPACK_LIBRARIES)
-      message(STATUS "Strangely, your Accelerate library does not support Lapack?!")  
-    endif(LAPACK_LIBRARIES)
+    else()
+      message(STATUS "Strangely, this Accelerate library does not support Lapack?!")  
+    endif()
   endif()
 
-  IF((NOT LAPACK_LIBRARIES) AND (BLAS_INFO STREQUAL "veclib"))
-    check_lapack_libraries(
-      LAPACK_LIBRARIES
-      LAPACK
-      cheev
-      ""
-      ""
-      "${BLAS_LIBRARIES}"
-      )
-    if(LAPACK_LIBRARIES)
+  # vecLib
+  IF((NOT LAPACK_INFO) AND (BLAS_INFO STREQUAL "veclib"))
+    SET(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
+    check_function_exists("cheev_" VECLIB_LAPACK_WORKS)
+    if(VECLIB_LAPACK_WORKS)
       SET(LAPACK_INFO "veclib")
-    else(LAPACK_LIBRARIES)
-      message(STATUS "Strangely, your vecLib library does not support Lapack?!")  
-    endif(LAPACK_LIBRARIES)
+    else()
+      message(STATUS "Strangely, this vecLib library does not support Lapack?!")  
+    endif()
   endif()
 
   # Generic LAPACK library?
-  IF((NOT LAPACK_LIBRARIES) AND (BLAS_INFO STREQUAL "generic"))
+  IF((NOT LAPACK_INFO) AND (BLAS_INFO STREQUAL "generic"))
     check_lapack_libraries(
       LAPACK_LIBRARIES
       LAPACK
@@ -195,11 +166,11 @@ else(BLAS_FOUND)
   message(STATUS "LAPACK requires BLAS")
 endif(BLAS_FOUND)
 
-if(LAPACK_LIBRARIES)
+if(LAPACK_INFO)
   set(LAPACK_FOUND TRUE)
-else(LAPACK_LIBRARIES)
+else(LAPACK_INFO)
   set(LAPACK_FOUND FALSE)
-endif(LAPACK_LIBRARIES)
+endif(LAPACK_INFO)
 
 IF (NOT LAPACK_FOUND AND LAPACK_FIND_REQUIRED)
   message(FATAL_ERROR "Cannot find a library with LAPACK API. Please specify library location.")
