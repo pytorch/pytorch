@@ -118,6 +118,20 @@ if((NOT BLAS_LIBRARIES)
   endif(BLAS_LIBRARIES)
 endif()
 
+
+if((NOT BLAS_LIBRARIES)
+    AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "open")))
+  check_fortran_libraries(
+  BLAS_LIBRARIES
+  BLAS
+  sgemm
+  ""
+  "openblas;gfortran;pthread")
+  if(BLAS_LIBRARIES)
+    set(BLAS_INFO "open")
+  endif(BLAS_LIBRARIES)
+endif()
+
 if((NOT BLAS_LIBRARIES)
     AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "goto")))
   check_fortran_libraries(
@@ -126,6 +140,19 @@ if((NOT BLAS_LIBRARIES)
   sgemm
   ""
   "goto2;gfortran")
+  if (BLAS_LIBRARIES)
+    set(BLAS_INFO "goto")
+  endif (BLAS_LIBRARIES)
+endif()
+
+if((NOT BLAS_LIBRARIES)
+    AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "goto")))
+  check_fortran_libraries(
+  BLAS_LIBRARIES
+  BLAS
+  sgemm
+  ""
+  "goto2;gfortran;pthread")
   if (BLAS_LIBRARIES)
     set(BLAS_INFO "goto")
   endif (BLAS_LIBRARIES)
