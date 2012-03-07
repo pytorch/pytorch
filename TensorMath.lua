@@ -249,11 +249,20 @@ local reals = {ByteTensor='unsigned char',
                FloatTensor='float',
                DoubleTensor='double'}
 
+local accreals = {ByteTensor='long',
+               CharTensor='long',
+               ShortTensor='long',
+               IntTensor='long',
+               LongTensor='long',
+               FloatTensor='double',
+               DoubleTensor='double'}
+
 for _,Tensor in ipairs({"ByteTensor", "CharTensor",
                         "ShortTensor", "IntTensor", "LongTensor",
                         "FloatTensor", "DoubleTensor"}) do
 
    local real = reals[Tensor]
+   local accreal = accreals[Tensor]
 
    function interface.luaname2wrapname(self, name)
       return string.format('torch_%s_%s', Tensor, name)
@@ -302,7 +311,7 @@ for _,Tensor in ipairs({"ByteTensor", "CharTensor",
         cname("dot"),
         {{name=Tensor},
          {name=Tensor},
-         {name=real, creturned=true}})
+         {name=accreal, creturned=true}})
    
    wrap("add",
         cname("add"),
@@ -480,7 +489,7 @@ for _,Tensor in ipairs({"ByteTensor", "CharTensor",
    wrap("sum",
         cname("sumall"),
         {{name=Tensor},
-         {name=real, creturned=true}},
+         {name=accreal, creturned=true}},
         cname("sum"),
         {{name=Tensor, default=true, returned=true},
          {name=Tensor},
@@ -501,7 +510,7 @@ for _,Tensor in ipairs({"ByteTensor", "CharTensor",
    wrap("trace",
         cname("trace"),
         {{name=Tensor},
-         {name=real, creturned=true}})
+         {name=accreal, creturned=true}})
    
    wrap("cross",
         cname("cross"),
@@ -815,7 +824,7 @@ static void THTensor_random1__(THTensor *self, long b)
       wrap("mean",
            cname("meanall"),
            {{name=Tensor},
-            {name=real, creturned=true}},
+            {name=accreal, creturned=true}},
            cname("mean"),
            {{name=Tensor, default=true, returned=true},
             {name=Tensor},
@@ -825,7 +834,7 @@ static void THTensor_random1__(THTensor *self, long b)
          wrap(name,
               cname(name .. "all"),
               {{name=Tensor},
-               {name=real, creturned=true}},
+               {name=accreal, creturned=true}},
               cname(name),
               {{name=Tensor, default=true, returned=true},
                {name=Tensor},
@@ -844,7 +853,7 @@ static void THTensor_random1__(THTensor *self, long b)
            cname("normall"),
            {{name=Tensor},
             {name=real, default=2},
-            {name=real, creturned=true}},
+            {name=accreal, creturned=true}},
            cname("norm"),
            {{name=Tensor, default=true, returned=true},
             {name=Tensor},
@@ -856,7 +865,7 @@ static void THTensor_random1__(THTensor *self, long b)
            {{name=Tensor},
             {name=Tensor},
             {name=real, default=2},
-            {name=real, creturned=true}})
+            {name=accreal, creturned=true}})
       
       wrap("linspace",
            cname("linspace"),
