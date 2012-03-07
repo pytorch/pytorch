@@ -1057,7 +1057,26 @@ void THTensor_(var)(THTensor *r_, THTensor *t, int dimension, int flag)
                        });
 }
 
-accreal THTensor_(norm)(THTensor *tensor, real value)
+void THTensor_(norm)(THTensor *r_, THTensor *t, real value, int dimension)
+{
+  THLongStorage *dim;
+
+  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimension)(t), 3, "invalid dimension");
+
+  dim = THTensor_(newSizeOf)(t);
+  THLongStorage_set(dim, dimension, 1);
+  THTensor_(resize)(r_, dim, NULL);
+  THLongStorage_free(dim);
+
+  TH_TENSOR_DIM_APPLY2(real, t, real, r_, dimension,
+                       accreal sum = 0;
+                       long i;
+                       for(i = 0; i < t_size; i++)
+                         sum += pow(fabs(t_data[i*t_stride]), value);
+                       *r__data = pow(sum, 1.0/value);)
+}
+
+accreal THTensor_(normall)(THTensor *tensor, real value)
 { 
   accreal sum = 0;
   TH_TENSOR_APPLY(real, tensor, sum += pow(fabs(*tensor_data), value););
