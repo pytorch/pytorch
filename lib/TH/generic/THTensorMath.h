@@ -92,13 +92,14 @@ TH_API void THTensor_(abs)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(mean)(THTensor *r_, THTensor *t, int dimension);
 TH_API void THTensor_(std)(THTensor *r_, THTensor *t, int dimension, int flag);
 TH_API void THTensor_(var)(THTensor *r_, THTensor *t, int dimension, int flag);
-TH_API accreal THTensor_(norm)(THTensor *t, real value);
+TH_API void THTensor_(norm)(THTensor *r_, THTensor *t, real value, int dimension);
 TH_API accreal THTensor_(dist)(THTensor *a, THTensor *b, real value);
 TH_API void THTensor_(histc)(THTensor *hist, THTensor *tensor, long nbins, real minvalue, real maxvalue);
 
 TH_API accreal THTensor_(meanall)(THTensor *self);
 TH_API accreal THTensor_(varall)(THTensor *self);
 TH_API accreal THTensor_(stdall)(THTensor *self);
+TH_API accreal THTensor_(normall)(THTensor *t, real value);
 
 TH_API void THTensor_(linspace)(THTensor *r_, real a, real b, long n);
 TH_API void THTensor_(logspace)(THTensor *r_, real a, real b, long n);

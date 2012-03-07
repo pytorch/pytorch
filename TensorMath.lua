@@ -841,10 +841,15 @@ static void THTensor_random1__(THTensor *self, long b)
             {name="double",default=0}})
 
       wrap("norm",
-           cname("norm"),
+           cname("normall"),
            {{name=Tensor},
             {name=real, default=2},
-            {name=real, creturned=true}})
+            {name=real, creturned=true}},
+           cname("norm"),
+           {{name=Tensor, default=true, returned=true},
+            {name=Tensor},
+            {name=real},
+            {name="index"}})
       
       wrap("dist",
            cname("dist"),
