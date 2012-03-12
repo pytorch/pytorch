@@ -24,7 +24,7 @@ cmd:option('-stroption','mystring','string option')
 cmd:text()
 
 -- parse input params
-params = cmd:pard(arg)
+params = cmd:parse(arg)
 
 params.rundir = cmd:string('experiment', params, {dir=true})
 
