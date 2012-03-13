@@ -2,7 +2,10 @@
 #include "utils.h"
 
 #include <sys/time.h>
+
+#ifdef _OPENMP
 #include <omp.h>
+#endif
 
 static const void* torch_LongStorage_id = NULL;
 static const void* torch_default_tensor_id = NULL;
@@ -110,14 +113,20 @@ const void* torch_getdefaulttensorid()
 
 static int torch_getnumthreads(lua_State *L)
 {
+#ifdef _OPENMP
   lua_pushinteger(L, omp_get_max_threads());
+#else
+  lua_pushinteger(L, 1);
+#endif
   return 1;
 }
 
 static int torch_setnumthreads(lua_State *L)
 {
   int nth = luaL_checkint(L,1);
+#ifdef _OPENMP
   omp_set_num_threads(nth);
+#endif
   return 0;
 }
 
