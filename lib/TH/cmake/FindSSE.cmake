@@ -59,6 +59,7 @@ SET(SSE4_2_CODE "
 
 MACRO(CHECK_SSE lang type flags)
   SET(__FLAG_I 1)
+  SET(CMAKE_REQUIRED_FLAGS_SAVE ${CMAKE_REQUIRED_FLAGS})
   FOREACH(__FLAG ${flags})
     IF(NOT ${lang}_${type}_FOUND)
       SET(CMAKE_REQUIRED_FLAGS ${__FLAG})
@@ -74,6 +75,7 @@ MACRO(CHECK_SSE lang type flags)
       MATH(EXPR __FLAG_I "${__FLAG_I}+1")
     ENDIF()
   ENDFOREACH()
+  SET(CMAKE_REQUIRED_FLAGS ${CMAKE_REQUIRED_FLAGS_SAVE})
 
   IF(NOT ${lang}_${type}_FOUND)
     SET(${lang}_${type}_FOUND FALSE CACHE BOOL "${lang} ${type} support")
