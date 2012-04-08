@@ -11,15 +11,15 @@
 #ifdef USE_SSE2
 #include <emmintrin.h>
 #endif
- 
+
 #ifdef USE_SSE3
 #include <pmmintrin.h>
 #endif
- 
+
 #ifdef USE_SSSE3
 #include <tmmintrin.h>
 #endif
- 
+
 #if defined (USE_SSE4_2) || defined (USE_SSE4_1)
 #include <smmintrin.h>
 #endif
@@ -41,20 +41,31 @@
 
 
 #define THDoubleVector_add(y, x, c, n) {        \
-    long i = 0;                                 \
-    __m128d XMM7 = _mm_set1_pd(c);              \
-    __m128d XMM0,XMM2;                          \
-    for (; i<=((n)-2); i+=2) {                  \
-      XMM0 = _mm_loadu_pd((x)+i);               \
-      XMM2 = _mm_loadu_pd((y)+i);               \
-      XMM0 = _mm_mul_pd(XMM0, XMM7);            \
-      XMM2 = _mm_add_pd(XMM2, XMM0);            \
-      _mm_storeu_pd((y)+i  , XMM2);             \
-    }                                           \
-    for (; i<(n); i++) {                        \
-      y[i] += c * x[i];                         \
-    }                                           \
-  }
+        long i = 0;                             \
+        __m128d XMM7 = _mm_set1_pd(c);          \
+        __m128d XMM0,XMM1,XMM2;                 \
+        __m128d XMM3,XMM4,XMM5;                 \
+        for (; i<=((n)-6); i+=6) {              \
+            XMM0 = _mm_loadu_pd((x)+i);         \
+            XMM1 = _mm_loadu_pd((x)+i+2);       \
+            XMM2 = _mm_loadu_pd((x)+i+4);       \
+            XMM3 = _mm_loadu_pd((y)+i);         \
+            XMM4 = _mm_loadu_pd((y)+i+2);       \
+            XMM5 = _mm_loadu_pd((y)+i+4);       \
+            XMM0 = _mm_mul_pd(XMM0, XMM7);      \
+            XMM1 = _mm_mul_pd(XMM1, XMM7);      \
+            XMM2 = _mm_mul_pd(XMM2, XMM7);      \
+            XMM3 = _mm_add_pd(XMM3, XMM0);      \
+            XMM4 = _mm_add_pd(XMM4, XMM1);      \
+            XMM5 = _mm_add_pd(XMM5, XMM2);      \
+            _mm_storeu_pd((y)+i  , XMM3);       \
+            _mm_storeu_pd((y)+i+2, XMM4);       \
+            _mm_storeu_pd((y)+i+4, XMM5);       \
+        }                                       \
+        for (; i<(n); i++) {                    \
+            y[i] += c * x[i];                   \
+        }                                       \
+    }
 
 #define THDoubleVector_diff(z, x, y, n) {       \
     long i;                                     \
@@ -141,20 +152,31 @@
   }
 
 #define THFloatVector_add(y, x, c, n) {         \
-    long i = 0;                                 \
-    __m128 XMM7 = _mm_set_ps1(c);               \
-    __m128 XMM0,XMM2;                           \
-    for (; i<=((n)-4); i+=4) {                  \
-      XMM0 = _mm_loadu_ps((x)+i);               \
-      XMM2 = _mm_loadu_ps((y)+i);               \
-      XMM0 = _mm_mul_ps(XMM0, XMM7);            \
-      XMM2 = _mm_add_ps(XMM2, XMM0);            \
-      _mm_storeu_ps((y)+i  , XMM2);             \
-    }                                           \
-    for (; i<(n); i++) {                        \
-      y[i] += c * x[i];                         \
-    }                                           \
-  }
+        long i = 0;                             \
+        __m128 XMM7 = _mm_set_ps1(c);           \
+        __m128 XMM0,XMM1,XMM2;                  \
+        __m128 XMM3,XMM4,XMM5;                  \
+        for (; i<=((n)-12); i+=12) {            \
+            XMM0 = _mm_loadu_ps((x)+i);         \
+            XMM1 = _mm_loadu_ps((x)+i+4);       \
+            XMM2 = _mm_loadu_ps((x)+i+8);       \
+            XMM3 = _mm_loadu_ps((y)+i);         \
+            XMM4 = _mm_loadu_ps((y)+i+4);       \
+            XMM5 = _mm_loadu_ps((y)+i+8);       \
+            XMM0 = _mm_mul_ps(XMM0, XMM7);      \
+            XMM1 = _mm_mul_ps(XMM1, XMM7);      \
+            XMM2 = _mm_mul_ps(XMM2, XMM7);      \
+            XMM3 = _mm_add_ps(XMM3, XMM0);      \
+            XMM4 = _mm_add_ps(XMM4, XMM1);      \
+            XMM5 = _mm_add_ps(XMM5, XMM2);      \
+            _mm_storeu_ps((y)+i  , XMM3);       \
+            _mm_storeu_ps((y)+i+4, XMM4);       \
+            _mm_storeu_ps((y)+i+8, XMM5);       \
+        }                                       \
+        for (; i<(n); i++) {                    \
+            y[i] += c * x[i];                   \
+        }                                       \
+    }
 
 #define THFloatVector_diff(z, x, y, n) {        \
     long i;                                     \
