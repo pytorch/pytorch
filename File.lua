@@ -186,7 +186,7 @@ function File:readObject()
             className = self:readChar(self:readInt()):string()
          end
          if not torch.factory(className) then
-            error(string.format('unknown Torch class <%s>' .. className))
+            error(string.format('unknown Torch class <%s>', tostring(className)))
          end
          local object = torch.factory(className)()
          objects[index] = object
@@ -198,7 +198,7 @@ function File:readObject()
                object[k] = v
             end
          else
-            error(string.format('Cannot load object class <%s>', className))
+            error(string.format('Cannot load object class <%s>', tostring(className)))
          end
          return object
       else -- it is a table
