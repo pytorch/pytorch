@@ -190,6 +190,72 @@ TH_API void THTensor_(gels)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor 
   THTensor_(free)(work);
 }
 
+TH_API void THTensor_(geev)(THTensor *re_, THTensor *rv_, THTensor *a_, const char *jobvr)
+{
+  int n, lda, lwork, info, ldvr;
+  THTensor *work, *wi, *wr, *a;
+  real wkopt;
+  real *rv_data;
+  long i;
+
+  THArgCheck(a_->nDimension == 2, 3, "A should be 2 dimensional");
+  THArgCheck(a_->size[0] == a_->size[1], 3,"A should be square");
+
+  /* we want to definitely clone */
+  a = THTensor_(new)();
+  THTensor_(lapackClone)(a,a_,1);
+  
+  n = a->size[0];
+  lda = n;
+
+  wi = THTensor_(new)();
+  wr = THTensor_(new)();
+  THTensor_(resize2d)(re_,n,2);
+  THTensor_(resize1d)(wi,n);
+  THTensor_(resize1d)(wr,n);
+
+  rv_data = NULL;
+  ldvr = 1;
+  if (*jobvr == 'V')
+  {
+    THTensor_(resize2d)(rv_,n,n);
+    rv_data = THTensor_(data)(rv_);
+    ldvr = n;
+  }
+  // get optimal workspace size
+  THLapack_(geev)('N', jobvr[0], n, THTensor_(data)(a), lda, THTensor_(data)(wr), THTensor_(data)(wi), 
+      NULL, 1, rv_data, ldvr, &wkopt, -1, &info);
+
+  lwork = (int)wkopt;
+  work = THTensor_(newWithSize1d)(lwork);
+
+  THLapack_(geev)('N', jobvr[0], n, THTensor_(data)(a), lda, THTensor_(data)(wr), THTensor_(data)(wi), 
+      NULL, 1, rv_data, ldvr, THTensor_(data)(work), lwork, &info);
+
+  if (info > 0)
+  {
+    THError(" Lapack geev : Failed to converge. %d off-diagonal elements of an didn't converge to zero",info);
+  }
+  else if (info < 0)
+  {
+    THError("Lapack geev : Argument %d : illegal value", -info);
+  }
+
+  real *re_data = THTensor_(data)(re_);
+  real *wi_data = THTensor_(data)(wi);
+  real *wr_data = THTensor_(data)(wr);
+  for (i=0; i<n; i++)
+  {
+    re_data[2*i] = wr_data[i];
+    re_data[2*i+1] = wi_data[i];
+  }
+  THTensor_(transpose)(rv_,NULL,0,1);
+  THTensor_(free)(a);
+  THTensor_(free)(wi);
+  THTensor_(free)(wr);
+  THTensor_(free)(work);
+}
+
 TH_API void THTensor_(syev)(THTensor *re_, THTensor *rv_, THTensor *a, const char *jobz, const char *uplo)
 {
   int n, lda, lwork, info;
