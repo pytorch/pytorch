@@ -249,7 +249,10 @@ TH_API void THTensor_(geev)(THTensor *re_, THTensor *rv_, THTensor *a_, const ch
     re_data[2*i] = wr_data[i];
     re_data[2*i+1] = wi_data[i];
   }
-  THTensor_(transpose)(rv_,NULL,0,1);
+  if (*jobvr == 'V')
+  {
+    THTensor_(transpose)(rv_,NULL,0,1);
+  }
   THTensor_(free)(a);
   THTensor_(free)(wi);
   THTensor_(free)(wr);

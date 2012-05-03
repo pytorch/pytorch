@@ -972,7 +972,7 @@ static void THTensor_random1__(THTensor *self, long b)
                      )
       end
 
-      interface:wrap("eig",
+      interface:wrap("symeig",
                      cname("syev"),
                      {{name=Tensor, returned=true},
                       {name=Tensor, returned=true},
@@ -986,7 +986,7 @@ static void THTensor_random1__(THTensor *self, long b)
                       {name='charoption', values={'N', 'V'}, default='N'},
                       {name='charoption', values={'U', 'L'}, default='U'}}
                   )
-      interface:wrap("reig",
+      interface:wrap("eig",
                      cname("geev"),
                      {{name=Tensor, returned=true},
                       {name=Tensor, returned=true},

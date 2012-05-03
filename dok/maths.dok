@@ -1200,7 +1200,7 @@ b=torch.Tensor({{8.58,  8.26,  8.48, -5.28,  5.72,  8.93},
  8.9300 -2.5200
 [torch.DoubleTensor of dimension 6x2]
 
-x = torch.gels(a,b)
+x = torch.gels(b,a)
 =x 
  -0.4506   0.2497 
  -0.8492  -0.9020
@@ -1218,8 +1218,8 @@ x = torch.gels(a,b)
 
 </file>
 
-==== torch.eig([rese, resv,] a, [, 'N' or 'V'] ['U' or 'L']) ====
-{{anchor:torch.eig}}
+==== torch.symeig([rese, resv,] a, [, 'N' or 'V'] ['U' or 'L']) ====
+{{anchor:torch.symeig}}
 
 Eigen values and eigen vectors of a symmetric real matrix '' A '' of
 size '' m x m ''. This function calculates all eigenvalues (and
@@ -1248,7 +1248,7 @@ a=torch.Tensor({{ 1.96,  0.00,  0.00,  0.00,  0.00},
  0.0000  0.0000  0.0000  0.0000 -7.1000
 [torch.DoubleTensor of dimension 5x5]
 
-e = torch.eig(a)
+e = torch.symeig(a)
 =e
 -11.0656
  -6.2287
@@ -1257,7 +1257,7 @@ e = torch.eig(a)
  16.0948
 [torch.DoubleTensor of dimension 5]
 
-e,v = torch.eig(a,'V')
+e,v = torch.symeig(a,'V')
 =e
 -11.0656
  -6.2287
@@ -1284,6 +1284,82 @@ e,v = torch.eig(a,'V')
 
 =a:dist(torch.triu(v*torch.diag(e)*v:t()))
 1.0219480822443e-14
+
+</file>
+
+==== torch.eig([rese, resv,] a, [, 'N' or 'V']) ====
+{{anchor:torch.eig}}
+
+Eigen values and eigen vectors of a general real matrix '' A '' of
+size '' m x m ''. This function calculates all right eigenvalues (and
+vectors) of '' A '' such that '' A = V' diag(e) V ''. 
+
+Third argument defines computation of eigenvectors or eigenvalues
+only. If '' N '', only eignevalues are computed. If '' V '', both
+eigenvalues and eigenvectors are computed.
+
+<file lua>
+
+a=torch.Tensor({{ 1.96,  0.00,  0.00,  0.00,  0.00},
+                {-6.49,  3.80,  0.00,  0.00,  0.00},
+                {-0.47, -6.39,  4.17,  0.00,  0.00},
+    {-7.20,  1.50, -1.51,  5.70,  0.00},
+    {-0.65, -6.34,  2.67,  1.80, -7.10}}):t()
+
+=a
+ 1.9600 -6.4900 -0.4700 -7.2000 -0.6500
+ 0.0000  3.8000 -6.3900  1.5000 -6.3400
+ 0.0000  0.0000  4.1700 -1.5100  2.6700
+ 0.0000  0.0000  0.0000  5.7000  1.8000
+ 0.0000  0.0000  0.0000  0.0000 -7.1000
+[torch.DoubleTensor of dimension 5x5]
+
+b = a+torch.triu(a,1):t()
+=b
+
+  1.9600 -6.4900 -0.4700 -7.2000 -0.6500
+ -6.4900  3.8000 -6.3900  1.5000 -6.3400
+ -0.4700 -6.3900  4.1700 -1.5100  2.6700
+ -7.2000  1.5000 -1.5100  5.7000  1.8000
+ -0.6500 -6.3400  2.6700  1.8000 -7.1000
+[torch.DoubleTensor of dimension 5x5]
+
+e = torch.eig(b)
+=e
+ 16.0948   0.0000
+-11.0656   0.0000
+ -6.2287   0.0000
+  0.8640   0.0000
+  8.8655   0.0000
+[torch.DoubleTensor of dimension 5x2]
+
+e,v = torch.eig(b,'V')
+=e
+ 16.0948   0.0000
+-11.0656   0.0000
+ -6.2287   0.0000
+  0.8640   0.0000
+  8.8655   0.0000
+[torch.DoubleTensor of dimension 5x2]
+
+=v
+-0.4896  0.2981 -0.6075 -0.4026 -0.3745
+ 0.6053  0.5078 -0.2880  0.4066 -0.3572
+-0.3991  0.0816 -0.3843  0.6600  0.5008
+ 0.4564  0.0036 -0.4467 -0.4553  0.6204
+-0.1622  0.8041  0.4480 -0.1725  0.3108
+[torch.DoubleTensor of dimension 5x5]
+
+=v*torch.diag(e:select(2,1))*v:t()
+ 1.9600 -6.4900 -0.4700 -7.2000 -0.6500
+-6.4900  3.8000 -6.3900  1.5000 -6.3400
+-0.4700 -6.3900  4.1700 -1.5100  2.6700
+-7.2000  1.5000 -1.5100  5.7000  1.8000
+-0.6500 -6.3400  2.6700  1.8000 -7.1000
+[torch.DoubleTensor of dimension 5x5]
+
+=b:dist(v*torch.diag(e:select(2,1))*v:t())
+3.5423944346685e-14
 
 </file>
 
