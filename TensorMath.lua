@@ -986,6 +986,18 @@ static void THTensor_random1__(THTensor *self, long b)
                       {name='charoption', values={'N', 'V'}, default='N'},
                       {name='charoption', values={'U', 'L'}, default='U'}}
                   )
+      interface:wrap("reig",
+                     cname("geev"),
+                     {{name=Tensor, returned=true},
+                      {name=Tensor, returned=true},
+                      {name=Tensor},
+                      {name='charoption', values={'N', 'V'}, default='N'}},
+                     cname("geev"),
+                     {{name=Tensor, default=true, returned=true, invisible=true},
+                      {name=Tensor, default=true, returned=true, invisible=true},
+                      {name=Tensor},
+                      {name='charoption', values={'N', 'V'}, default='N'}}
+                  )
 
       interface:wrap("svd",
                      cname("gesvd"),
