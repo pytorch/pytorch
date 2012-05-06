@@ -886,10 +886,10 @@ static void THTensor_random1__(THTensor *self, long b)
                             "sin", "asin", "sinh",
                             "tan", "atan", "tanh",
                             "sqrt",
-                            "ceil", "floor",
-                            "abs"}) do
+                            "ceil", "floor"}) do
+                            --"abs"}) do
 
-         wrap(name,
+         wrap(name, 
               cname(name),
               {{name=Tensor, default=true, returned=true, method={default='nil'}},
                {name=Tensor, method={default=1}}},
@@ -898,6 +898,13 @@ static void THTensor_random1__(THTensor *self, long b)
                {name=real, creturned=true}})
          
       end
+         wrap("abs",
+              cname("abs"),
+              {{name=Tensor, default=true, returned=true, method={default='nil'}},
+               {name=Tensor, method={default=1}}},
+              "fabs",
+              {{name=real},
+               {name=real, creturned=true}})
 
       wrap("atan2",
            cname("atan2"),
