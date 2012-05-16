@@ -187,11 +187,12 @@ function CmdLine:string(prefix, params, ignore)
    end
 end
 
+local oprint = print
 function CmdLine:log(file, params)   
    local f = io.open(file, 'w')
-   local oprint = print
    function print(...)
       local n = select("#", ...)
+      local arg = {...}
       if not self.silentio then
 	 oprint(...)
       end
@@ -200,7 +201,7 @@ function CmdLine:log(file, params)
 	 table.insert(str, os.date(self.dateformat))
       end
       for i=1,n do
-	 table.insert(str,tostring(select(i, ...)))
+	 table.insert(str,tostring(arg[i]))
       end
       table.insert(str,'\n')
       f:write(table.concat(str,' '))

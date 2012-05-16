@@ -475,6 +475,7 @@ static int torch_Tensor_(__newindex__)(lua_State *L)
   if(lua_isnumber(L, 2))
   {
     long index = luaL_checklong(L,2)-1;
+    if (index < 0) index = tensor->size[0] + index + 1;
     void *src;
     if (lua_isnumber(L,3)) {
       real value = (real)luaL_checknumber(L,3);
@@ -543,6 +544,7 @@ static int torch_Tensor_(__newindex__)(lua_State *L)
     for(dim = 0; dim < idx->size; dim++)
     {
       long z = idx->data[dim]-1;
+      if (z < 0) z = tensor->size[dim] + z + 1;
       luaL_argcheck(L, (z >= 0) && (z < tensor->size[dim]), 2, "index out of bound");
       index += z*tensor->stride[dim];
     }
@@ -565,7 +567,8 @@ static int torch_Tensor_(__newindex__)(lua_State *L)
       {
         long z = lua_tonumber(L, -1)-1;
         lua_pop(L, 1);
-        luaL_argcheck(L, (z >= 0) && (z < tensor->size[dim]), 2, "index out of bound");
+        if (z < 0) z = tensor->size[cdim] + z + 1;
+        luaL_argcheck(L, (z >= 0) && (z < tensor->size[cdim]), 2, "index out of bound");
         if(tensor->nDimension == 1) {
           done = 1;
           real value = (real)luaL_checknumber(L,3);
@@ -581,13 +584,22 @@ static int torch_Tensor_(__newindex__)(lua_State *L)
         long end = tensor->size[cdim]-1;
         if(lua_isnumber(L, -1)) {
           start = lua_tonumber(L, -1)-1;
+          end = start;
         }
         lua_pop(L, 1);
+        if (start < 0) start = tensor->size[cdim] + start + 1;
+        luaL_argcheck(L, (start >= 0) && (start < tensor->size[cdim]), 2, "start index out of bound");
+
         lua_rawgeti(L, -1, 2);
         if(lua_isnumber(L, -1)) {
           end = lua_tonumber(L, -1)-1;
         }
         lua_pop(L, 2);
+        if (end < 0) end = tensor->size[cdim] + end + 1;
+        luaL_argcheck(L, (end >= 0) && (end < tensor->size[cdim]), 2, "end index out of bound");
+
+        luaL_argcheck(L, (end >= start), 2, "end index must be greater or equal to start index");
+
         THTensor_(narrow)(tensor, NULL, cdim++, start, end-start+1);
       }
       else 
@@ -654,7 +666,8 @@ static int torch_Tensor_(__index__)(lua_State *L)
   if(lua_isnumber(L, 2))
   {
     long index = luaL_checklong(L,2)-1;
-    
+    if (index < 0) index = tensor->size[0] + index + 1;
+
     luaL_argcheck(L, tensor->nDimension > 0, 1, "empty tensor");
     luaL_argcheck(L, index >= 0 && index < tensor->size[0], 2, "out of range");
 
@@ -681,6 +694,7 @@ static int torch_Tensor_(__index__)(lua_State *L)
     for(dim = 0; dim < idx->size; dim++)
     {
       long z = idx->data[dim]-1;
+      if (z < 0) z = tensor->size[dim] + z + 1;
       luaL_argcheck(L, (z >= 0) && (z < tensor->size[dim]), 2, "index out of bound");
       index += z*tensor->stride[dim];
     }
@@ -703,7 +717,8 @@ static int torch_Tensor_(__index__)(lua_State *L)
       {
         long z = lua_tonumber(L, -1)-1;
         lua_pop(L, 1);
-        luaL_argcheck(L, (z >= 0) && (z < tensor->size[dim]), 2, "index out of bound");
+        if (z < 0) z = tensor->size[cdim] + z + 1;
+        luaL_argcheck(L, (z >= 0) && (z < tensor->size[cdim]), 2, "index out of bound");
         if(tensor->nDimension == 1) {
           done = 1;
           lua_pushnumber(L, THStorage_(get)(tensor->storage, tensor->storageOffset+z*tensor->stride[0]));
@@ -711,20 +726,29 @@ static int torch_Tensor_(__index__)(lua_State *L)
           THTensor_(select)(tensor, NULL, cdim, z);
         }
       } 
-      else if (lua_istable(L, -1)) 
+      else if (lua_istable(L, -1))
       {
         lua_rawgeti(L, -1, 1);
         long start = 0;
         long end = tensor->size[cdim]-1;
         if(lua_isnumber(L, -1)) {
           start = lua_tonumber(L, -1)-1;
+          end = start;
         }
         lua_pop(L, 1);
+        if (start < 0) start = tensor->size[cdim] + start + 1;
+        luaL_argcheck(L, (start >= 0) && (start < tensor->size[cdim]), 2, "start index out of bound");
+
         lua_rawgeti(L, -1, 2);
         if(lua_isnumber(L, -1)) {
           end = lua_tonumber(L, -1)-1;
         }
         lua_pop(L, 2);
+        if (end < 0) end = tensor->size[cdim] + end + 1;
+        luaL_argcheck(L, (end >= 0) && (end < tensor->size[cdim]), 2, "end index out of bound");
+
+        luaL_argcheck(L, (end >= start), 2, "end index must be greater or equal to start index");
+
         THTensor_(narrow)(tensor, NULL, cdim++, start, end-start+1);
       }
       else 

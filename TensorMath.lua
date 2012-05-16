@@ -886,10 +886,10 @@ static void THTensor_random1__(THTensor *self, long b)
                             "sin", "asin", "sinh",
                             "tan", "atan", "tanh",
                             "sqrt",
-                            "ceil", "floor",
-                            "abs"}) do
+                            "ceil", "floor"}) do
+                            --"abs"}) do
 
-         wrap(name,
+         wrap(name, 
               cname(name),
               {{name=Tensor, default=true, returned=true, method={default='nil'}},
                {name=Tensor, method={default=1}}},
@@ -898,6 +898,13 @@ static void THTensor_random1__(THTensor *self, long b)
                {name=real, creturned=true}})
          
       end
+         wrap("abs",
+              cname("abs"),
+              {{name=Tensor, default=true, returned=true, method={default='nil'}},
+               {name=Tensor, method={default=1}}},
+              "fabs",
+              {{name=real},
+               {name=real, creturned=true}})
 
       wrap("atan2",
            cname("atan2"),
@@ -972,7 +979,7 @@ static void THTensor_random1__(THTensor *self, long b)
                      )
       end
 
-      interface:wrap("eig",
+      interface:wrap("symeig",
                      cname("syev"),
                      {{name=Tensor, returned=true},
                       {name=Tensor, returned=true},
@@ -985,6 +992,18 @@ static void THTensor_random1__(THTensor *self, long b)
                       {name=Tensor},
                       {name='charoption', values={'N', 'V'}, default='N'},
                       {name='charoption', values={'U', 'L'}, default='U'}}
+                  )
+      interface:wrap("eig",
+                     cname("geev"),
+                     {{name=Tensor, returned=true},
+                      {name=Tensor, returned=true},
+                      {name=Tensor},
+                      {name='charoption', values={'N', 'V'}, default='N'}},
+                     cname("geev"),
+                     {{name=Tensor, default=true, returned=true, invisible=true},
+                      {name=Tensor, default=true, returned=true, invisible=true},
+                      {name=Tensor},
+                      {name='charoption', values={'N', 'V'}, default='N'}}
                   )
 
       interface:wrap("svd",
