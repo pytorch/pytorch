@@ -242,34 +242,37 @@ function Tensor.typeAs(self,tensor)
    return self:type(tensor:type())
 end
 
-function Tensor.byte(self,type)
+function Tensor.byte(self)
    return self:type('torch.ByteTensor')
 end
 
-function Tensor.char(self,type)
+function Tensor.char(self)
    return self:type('torch.CharTensor')
 end
 
-function Tensor.short(self,type)
+function Tensor.short(self)
    return self:type('torch.ShortTensor')
 end
 
-function Tensor.int(self,type)
+function Tensor.int(self)
    return self:type('torch.IntTensor')
 end
 
-function Tensor.long(self,type)
+function Tensor.long(self)
    return self:type('torch.LongTensor')
 end
 
-function Tensor.float(self,type)
+function Tensor.float(self)
    return self:type('torch.FloatTensor')
 end
 
-function Tensor.double(self,type)
+function Tensor.double(self)
    return self:type('torch.DoubleTensor')
 end
 
+function Tensor.real(self)
+   return self:type(torch.getdefaulttensortype())
+end
 
 for _,type in ipairs(types) do
    local metatable = torch.getmetatable('torch.' .. type .. 'Tensor')
