@@ -940,10 +940,15 @@ x.
 ====  torch.sort([resval, resind, ] x) ====
 {{anchor:torch.sort}}
 
-''y,i=torch.sort(x)'' returns a tensor y of the sorted 
-rows of x, and a tensor i of the corresponding indices from x.
+''y,i=torch.sort(x)'' returns a tensor ''y'' where all entries
+are sorted along the last dimension. It also returns a tensor
+''i'' that provides the corresponding indices from ''x''.
 
-''y,i=torch.sort(x,2)'' performs the sort operation for each row and
+''y,i=torch.sort(x,d)'' performs the sort operation along
+a specific dimension ''d''.
+
+''y,i=torch.sort(x)'' is therefore equivalent to
+''y,i=torch.sort(x,x:dim())''
 
 ====  [res] torch.std([res,] x, [flag] [dim]) ====
 {{anchor:torch.std}}
