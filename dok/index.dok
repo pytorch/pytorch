@@ -12,7 +12,7 @@ useful utilities.
 
   * Tensor Library
     * [[Tensor|Tensor]] defines the //all powerful// tensor object that prvides multi-dimensional numerical arrays with type templating.
-    * [[maths|Mathemetical operations]] that are defined for the tensor object types.
+    * [[maths|Mathematical operations]] that are defined for the tensor object types.
     * [[Storage|Storage]] defines a simple storage interface that controls the underlying storage for any tensor object.
   * File I/O Interface Library
     * [[File|File]] is an abstract interface for common file operations.

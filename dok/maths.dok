@@ -937,11 +937,11 @@ x.
 
 ''y=torch.prod(x,n)'' performs the prod operation over the dimension n.
 
-====  torch.sort([resval, resind, ] x) ====
+====  torch.sort([resval, resind, ] x, [d], [flag]) ====
 {{anchor:torch.sort}}
 
 ''y,i=torch.sort(x)'' returns a tensor ''y'' where all entries
-are sorted along the last dimension. It also returns a tensor
+are sorted along the last dimension, in **ascending** order. It also returns a tensor
 ''i'' that provides the corresponding indices from ''x''.
 
 ''y,i=torch.sort(x,d)'' performs the sort operation along
@@ -949,6 +949,9 @@ a specific dimension ''d''.
 
 ''y,i=torch.sort(x)'' is therefore equivalent to
 ''y,i=torch.sort(x,x:dim())''
+
+''y,i=torch.sort(x,d,true)'' performs the sort operation along
+a specific dimension ''d'', in **descending** order.
 
 ====  [res] torch.std([res,] x, [flag] [dim]) ====
 {{anchor:torch.std}}
