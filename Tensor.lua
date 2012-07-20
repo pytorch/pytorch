@@ -274,6 +274,53 @@ function Tensor.real(self)
    return self:type(torch.getdefaulttensortype())
 end
 
+function Tensor.expand(tensor,...)
+   -- get sizes
+   local sizes = {...}
+
+   -- check type
+   local size
+   if torch.typename(sizes[1]) and torch.typename(sizes[1])=='torch.LongStorage' then
+      size = sizes[1]
+   else
+      size = torch.LongStorage(#sizes)
+      for i,s in ipairs(sizes) do
+         size[i] = s
+      end
+   end
+
+   -- get dimensions
+   local tensor_dim = tensor:dim()
+   local tensor_stride = tensor:stride()
+   local tensor_size = tensor:size()
+
+   -- check nb of dimensions
+   if #size ~= tensor:dim() then
+      error('the number of dimensions provided must equal tensor:dim()')
+   end
+
+   -- create a new geometry for tensor:
+   for i = 1,tensor_dim do
+      if tensor_size[i] == 1 then
+         tensor_size[i] = size[i]
+         tensor_stride[i] = 0
+      elseif tensor_size[i] ~= size[i] then
+         error('incorrect size: only supporting singleton expansion (size=1)')
+      end
+   end
+
+   -- create new view, with singleton expansion:
+   tensor = torch.Tensor(tensor:storage(), tensor:storageOffset(),
+                         tensor_size, tensor_stride)
+   return tensor
+end
+torch.expand = Tensor.expand
+
+function Tensor.expandAs(tensor,template)
+   return tensor:expand(template:size())
+end
+torch.expandAs = Tensor.expandAs
+
 for _,type in ipairs(types) do
    local metatable = torch.getmetatable('torch.' .. type .. 'Tensor')
    for funcname, func in pairs(Tensor) do
