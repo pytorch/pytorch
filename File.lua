@@ -193,7 +193,7 @@ function File:readObject()
          if object.read then
             object:read(self, versionNumber)
          elseif type(object) == 'table' then
-            local var = self:readObject(var)
+            local var = self:readObject()
             for k,v in pairs(var) do
                object[k] = v
             end
