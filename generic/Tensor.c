@@ -53,7 +53,6 @@ static int torch_Tensor_(nDimension)(lua_State *L)
 static int torch_Tensor_(storage)(lua_State *L)
 {
   THTensor *tensor = luaT_checkudata(L, 1, torch_Tensor_id);
-
   if(tensor->storage)
   {
     THStorage_(retain)(tensor->storage);
@@ -97,7 +96,7 @@ static int torch_Tensor_(new)(lua_State *L)
       lua_rawgeti(L, -1, 1);
     }
     lua_pop(L, 1);
-            
+
     counter = THLongStorage_newWithSize(size->size);
     THLongStorage_fill(counter, 0);
 
