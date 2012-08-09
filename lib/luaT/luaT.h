@@ -35,23 +35,14 @@ LUAT_API void* luaT_realloc(lua_State *L, void *ptr, long size);
 LUAT_API void luaT_free(lua_State *L, void *ptr);
 LUAT_API void luaT_stackdump(lua_State *L);
 
-LUAT_API void luaT_registeratid(lua_State *L, const struct luaL_Reg *methods, const char *id);
 LUAT_API void luaT_registeratname(lua_State *L, const struct luaL_Reg *methods, const char *name);
 
 LUAT_API const char* luaT_newmetatable(lua_State *L, const char *tname, const char *parenttname,
                                        lua_CFunction constructor, lua_CFunction destructor, lua_CFunction factory);
 
 LUAT_API int luaT_pushmetatable(lua_State *L, const char *tname);
-LUAT_API int luaT_pushmetaclass(lua_State *L, const char *tname);
-LUAT_API int luaT_getmetaclass(lua_State *L, int index);
 
 LUAT_API const char* luaT_typenameid(lua_State *L, const char *tname);
-
-LUAT_API const char* luaT_id2typename(lua_State *L, const char *id);
-LUAT_API const char* luaT_typename2id(lua_State *L, const char*);
-LUAT_API const char* luaT_checktypename2id(lua_State *L, const char *tname);
-
-LUAT_API const char* luaT_id(lua_State *L, int ud);
 LUAT_API const char* luaT_typename(lua_State *L, int ud);
 
 LUAT_API void luaT_pushudata(lua_State *L, void *udata, const char *tname);
@@ -81,7 +72,6 @@ LUAT_API void luaT_stackdump(lua_State *L);
 LUAT_API int luaT_lua_newmetatable(lua_State *L);
 LUAT_API int luaT_lua_factory(lua_State *L);
 LUAT_API int luaT_lua_getconstructortable(lua_State *L);
-LUAT_API int luaT_lua_id(lua_State *L);
 LUAT_API int luaT_lua_typename(lua_State *L);
 LUAT_API int luaT_lua_isequal(lua_State *L);
 LUAT_API int luaT_lua_pointer(lua_State *L);
@@ -90,6 +80,24 @@ LUAT_API int luaT_lua_getenv(lua_State *L);
 LUAT_API int luaT_lua_getmetatable(lua_State *L);
 LUAT_API int luaT_lua_version(lua_State *L);
 LUAT_API int luaT_lua_setmetatable(lua_State *L);
-LUAT_API int luaT_lua_typename2id(lua_State *L);
+
+/* deprecated */
+#if (__GNUC__ > 3 || (__GNUC__ == 3 && __GNUC_MINOR__ >= 1))
+#define LUAT_DEPRECATED  __attribute__((__deprecated__))
+#elif defined(_MSC_VER)
+#define LUAT_DEPRECATED __declspec(deprecated)
+#else
+#define LUAT_DEPRECATED
+#endif
+
+LUAT_API LUAT_DEPRECATED void luaT_registeratid(lua_State *L, const struct luaL_Reg *methods, const char *id);
+LUAT_API LUAT_DEPRECATED int luaT_pushmetaclass(lua_State *L, const char *tname);
+LUAT_API LUAT_DEPRECATED int luaT_getmetaclass(lua_State *L, int index);
+LUAT_API LUAT_DEPRECATED const char* luaT_id2typename(lua_State *L, const char *id);
+LUAT_API LUAT_DEPRECATED const char* luaT_typename2id(lua_State *L, const char*);
+LUAT_API LUAT_DEPRECATED const char* luaT_checktypename2id(lua_State *L, const char *tname);
+LUAT_API LUAT_DEPRECATED const char* luaT_id(lua_State *L, int ud);
+LUAT_API LUAT_DEPRECATED int luaT_lua_id(lua_State *L);
+LUAT_API LUAT_DEPRECATED int luaT_lua_typename2id(lua_State *L);
 
 #endif
