@@ -6,7 +6,7 @@ concept of //classes// to Lua for Torch, and provides a mechanism to easily
 handle these Lua classes from C.
 
 It additionally provides few functions that ''luaL'' should have defined, and
-redefine some ''luaL'' functions for better type error printing when using
+defines several functions similar to ''luaL'' ones for better type error printing when using
 ''luaT'' classes.
 
 =====  Memory functions =====
@@ -40,24 +40,23 @@ functions.
 =====  Class creation and basic handling =====
 {{anchor:luat.classcreate}}
 
-A ''luaT'' class is basically either a Lua //table// or //userdata//
-with an appropriate //metatable//.  This appropriate metatable, that
-we call in this section //root metatable// is created with
-[[#luaT_newmetatable|luaT_newmetatable]].
+A ''luaT'' class is basically either a Lua //table// or //userdata// with
+an appropriate //metatable//. This appropriate metatable is created with
+[[#luaT_newmetatable|luaT_newmetatable]]. Contrary to luaL userdata
+functions, luaT mechanism handles inheritance. If the class inherit from
+another class, then the metatable will itself have a metatable
+corresponding to the //parent metatable//: the metatables are cascaded
+according to the class inheritance. Multiple inheritance is not supported.
 
-The root metatable of a ''luaT'' object has itself a metatable that we
-call //metaclass//. The metaclass is the actual metatable containing
-all the methods of the class. If the class inherit from another class,
-then the metaclass will itself have a metatable corresponding to the
-//parent metaclass//: the metaclasses are cascaded according to the
-class inheritance.  Multiple inheritance is not supported.
+==== Operator overloading ====
+{{anchor:luat.operatoroverloading}}
 
-The root metatable of a ''luaT'' object contains ''Lua'' operators
-like ''%%__index%%'', ''%%__newindex%%'', ''%%__tostring%%'',
-''%%__add%%'' (etc...). These operators will respectively look for
-''//index//'', ''//newindex//'', ''//tostring//'', ''//add//''
-(etc...) in the metaclass. If found, the corresponding function or
-value will be returned, else a Lua error will be raised.
+The metatable of a ''luaT'' object contains ''Lua'' operators like
+''%%__index%%'', ''%%__newindex%%'', ''%%__tostring%%'', ''%%__add%%''
+(etc...). These operators will respectively look for ''//index//'',
+''//newindex//'', ''//tostring//'', ''//add//'' (etc...) in the
+metatable. If found, the corresponding function or value will be returned,
+else a Lua error will be raised.
 
 If one wants to provide ''//index//'' or ''//newindex//'' in the
 metaclass, these operators must follow a particular scheme:
@@ -68,70 +67,172 @@ metaclass, these operators must follow a particular scheme:
 
 Other metaclass operators like ''//tostring//'', ''//add//'', etc... do not have any particular constraint.
 
-==== const void* luaT_newmetatable(lua_State *L, const char *tname, const char *parenttname, lua_CFunction constructor, lua_CFunction destructor, lua_CFunction factory) ====
+==== const char* luaT_newmetatable(lua_State *L, const char *tname, const char *parenttname, lua_CFunction constructor, lua_CFunction destructor, lua_CFunction factory) ====
 {{anchor:luat_newmetatable}}
 
-==== void luaT_pushmetatable(lua_State *L, const void *id) ====
+This function creates a new metatable, which is the Lua way to define a new
+object class. As for ''luaL_newmetatable'', the metatable is registered in
+the Lua registry table, with the key ''tname''. In addition, ''tname'' is
+also registered in the Lua registry, with the metatable as key (the
+typename of a given object can be thus easily retrieved).
+
+The class name ''tname'' must be of the form ''modulename.classname''. The module name
+If not NULL, ''parenttname'' must be a valid typename corresponding to the
+parent class of the new class.
+
+If not NULL, ''constructor'', a function ''new'' will be added to the metatable, pointing to this given function. The constructor might also
+be called through ''modulename.classname()'', which is an alias setup by ''luaT_metatable''.
+
+If not NULL, ''destructor'' will be called when garbage collecting the object.
+
+If not NULL, ''factory'' must be a Lua C function creating an empty object
+instance of the class. This functions are used in Torch for serialization.
+
+Note that classes can be partly defined in C and partly defined in Lua:
+once the metatable is created in C, it can be filled up with additional
+methods in Lua.
+
+The return value is the value returned by [[#luat_typenameid|luaT_typenameid]].
+
+==== int luaT_pushmetatable(lua_State *L, const name *tname) ====
 {{anchor:luat_pushmetatable}}
 
-==== void luaT_pushmetaclass(lua_State *L, const void *id) ====
-{{anchor:luaT_pushmetaclass}}
+Push the metatable with type name ''tname'' on the stack, it ''tname'' is a
+valid Torch class name (previously registered with luaT_newmetatable).
 
-==== int luaT_getmetaclass(lua_State *L, int index) ====
-{{anchor:luaT_getmetaclass}}
+On success, returns 1. If ''tname'' is invalid, nothing is pushed and it
+returns 0.
 
+==== const char* luaT_typenameid(lua_State *L, const char *tname) ====
+{{anchor:luat_typenameid}}
 
-===== Other Functions =====
+If ''tname'' is a valid Torch class name, then returns a unique string (the
+contents will be the same than ''tname'') pointing on the string registered
+in the Lua registry. This string is thus valid as long as Lua is
+running. The returned string shall not be freed.
 
-==== void* luaT_alloc(lua_State *L, long size) ====
-==== void* luaT_realloc(lua_State *L, void *ptr, long size) ====
-==== void luaT_free(lua_State *L, void *ptr) ====
-==== void luaT_stackdump(lua_State *L) ====
+If ''tname'' is an invalid class name, returns NULL.
 
-==== void luaT_registeratid(lua_State *L, const struct luaL_Reg *methods, const void *id) ====
-==== void luaT_registeratname(lua_State *L, const struct luaL_Reg *methods, const char *name) ====
-
-==== const char* luaT_id2typename(lua_State *L, const void *id) ====
-==== const void* luaT_typename2id(lua_State *L, const char*) ====
-==== const void* luaT_checktypename2id(lua_State *L, const char *tname) ====
-
-==== const void* luaT_id(lua_State *L, int ud) ====
 ==== const char* luaT_typename(lua_State *L, int ud) ====
+{{anchor:luat_typename}}
 
-==== void luaT_pushudata(lua_State *L, void *udata, const void *id) ====
+Returns the typename of the object at index ''ud'' on the stack. If it is
+not a valid Torch object, returns NULL.
 
-==== void *luaT_toudata (lua_State *L, int ud, const void *id) ====
-==== int luaT_isudata (lua_State *L, int ud, const void *id) ====
-==== void *luaT_checkudata (lua_State *L, int ud, const void *id) ====
+==== void luaT_pushudata(lua_State *L, void *udata, const char *tname) ====
+{{anchor:luat_pushudata}}
 
-==== void *luaT_getfieldcheckudata (lua_State *L, int ud, const char *field, const void *id) ====
-==== void *luaT_getfieldchecklightudata (lua_State *L, int ud, const char *field) ====
-==== double luaT_getfieldchecknumber (lua_State *L, int ud, const char *field) ====
-==== int luaT_getfieldcheckint (lua_State *L, int ud, const char *field) ====
-==== const char* luaT_getfieldcheckstring (lua_State *L, int ud, const char *field) ====
-==== int luaT_getfieldcheckboolean (lua_State *L, int ud, const char *field) ====
-==== void luaT_getfieldchecktable (lua_State *L, int ud, const char *field) ====
+Given a C structure ''udata'', push a userdata object on the stack with
+metatable corresponding to ''tname''. Obviously, ''tname'' must be a valid
+Torch name registered with [[#luat_newmetatable|luaT_newmetatable]].
+
+==== void *luaT_toudata(lua_State *L, int ud, const char *tname) ====
+{{anchor:luat_toudata}}
+
+Returns a pointer to the original C structure previously pushed on the
+stack with [[#luat_pushudata|luaT_pushudata]], if the object at index
+''ud'' is a valid Torch class name. Returns NULL otherwise.
+
+==== int luaT_isudata(lua_State *L, int ud, const char *tname) ====
+{{anchor:luat_isudata}}
+
+Returns 1 if the object at index ''ud'' on the stack is a valid Torch class name ''tname''.
+Returns 0 otherwise.
+
+==== Checking fields of a table ====
+{{anchor:luat_getfield}}
+
+This functions check that the table at the given index ''ud'' on the Lua
+stack has a field named ''field'', and that it is of the specified type.
+These function raises a Lua error on failure.
+
+===== void *luaT_getfieldcheckudata(lua_State *L, int ud, const char *field, const char *tname) =====
+{{anchor:luat_getfieldcheckudata}}
+
+Checks that the field named ''field'' of the table at index ''ud'' is a
+Torch class name ''tname''.  Returns the pointer of the C structure
+previously pushed on the stack with [[#luat_pushudata|luaT_pushudata]] on
+success. The function raises a Lua error on failure.
+
+===== void *luaT_getfieldchecklightudata(lua_State *L, int ud, const char *field) =====
+{{anchor:luat_getfieldchecklightudata}}
+
+Checks that the field named ''field'' of the table at index ''ud'' is a
+lightuserdata.  Returns the lightuserdata pointer on success. The function
+raises a Lua error on failure.
+
+===== int luaT_getfieldcheckint(lua_State *L, int ud, const char *field) =====
+{{anchor:luat_getfieldcheckint}}
+
+Checks that the field named ''field'' of the table at index ''ud'' is an
+int. Returns the int value pointer on success. The function raises a Lua
+error on failure.
+
+===== const char* luaT_getfieldcheckstring(lua_State *L, int ud, const char *field) =====
+{{anchor:luat_getfieldcheckstring}}
+
+Checks that the field named ''field'' of the table at index ''ud'' is a
+string. Returns a pointer to the string on success. The function raises a
+Lua error on failure.
+
+===== int luaT_getfieldcheckboolean(lua_State *L, int ud, const char *field) =====
+{{anchor:luat_getfieldcheckboolean}}
+
+Checks that the field named ''field'' of the table at index ''ud'' is a
+boolean. On success, returns 1 if the boolean is ''true'', 0 if it is
+''false''. The function raises a Lua error on failure.
+
+===== void luaT_getfieldchecktable(lua_State *L, int ud, const char *field) =====
+{{anchor:luat_getfieldchecktable}}
+
+Checks that the field named ''field'' of the table at index ''ud'' is a
+table. On success, push the table on the stack. The function raises a Lua
+error on failure.
 
 ==== int luaT_typerror(lua_State *L, int ud, const char *tname) ====
-==== int luaT_checkboolean(lua_State *L, int narg) ====
-==== int luaT_optboolean(lua_State *L, int narg, int def) ====
+{{anchor:luat_typerror}}
+
+Raises a ''luaL_argerror'' (and returns its value), claiming that the
+object at index ''ud'' on the stack is not of type ''tname''. Note that
+this function does not check the type, it only raises an error.
+
+==== int luaT_checkboolean(lua_State *L, int ud) ====
+{{anchor:luat_checkboolean}}
+
+Checks that the value at index ''ud'' is a boolean. On success, returns 1
+if the boolean is ''true'', 0 if it is ''false''. The function raises a Lua
+error on failure.
+
+==== int luaT_optboolean(lua_State *L, int ud, int def) ====
+{{anchor:luat_optboolean}}
+
+Checks that the value at index ''ud'' is a boolean. On success, returns 1
+if the boolean is ''true'', 0 if it is ''false''. If there is no value at
+index ''ud'', returns ''def''. In any other cases, raises an error.
+
+==== void luaT_registeratname(lua_State *L, const struct luaL_Reg *methods, const char *name) ====
+{{anchor:luat_registeratname}}
+
+This function assume a table is on the stack. It creates a table field
+''name'' in the table (if this field does not exist yet), and fill up
+''methods'' in this table field.
 
 ==== const char *luaT_classrootname(const char *tname) ====
+{{anchor:luat_classrootname}}
+
+Assuming ''tname'' is of the form ''modulename.classname'', returns
+''classname''. The returned value shall not be freed. It is a pointer
+inside ''tname'' string.
+
 ==== const char *luaT_classmodulename(const char *tname) ====
+{{anchor:luat_classmodulename}}
+
+Assuming ''tname'' is of the form ''modulename.classname'', returns
+''modulename''. The returned value shall not be freed. It is valid until the
+next call to ''luaT_classrootname''.
+
 ==== void luaT_stackdump(lua_State *L) ====
+{{anchor:luat_stackdump}}
 
-
-==== int luaT_lua_newmetatable(lua_State *L) ====
-==== int luaT_lua_factory(lua_State *L) ====
-==== int luaT_lua_getconstructortable(lua_State *L) ====
-==== int luaT_lua_id(lua_State *L) ====
-==== int luaT_lua_typename(lua_State *L) ====
-==== int luaT_lua_isequal(lua_State *L) ====
-==== int luaT_lua_pointer(lua_State *L) ====
-==== int luaT_lua_setenv(lua_State *L) ====
-==== int luaT_lua_getenv(lua_State *L) ====
-==== int luaT_lua_getmetatable(lua_State *L) ====
-==== int luaT_lua_version(lua_State *L) ====
-==== int luaT_lua_setmetatable(lua_State *L) ====
-==== int luaT_lua_typename2id(lua_State *L) ====
-
+This function print outs the state of the Lua stack. It is useful for debug
+purposes.
