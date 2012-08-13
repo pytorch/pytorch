@@ -305,6 +305,9 @@ int luaT_typerror(lua_State *L, int narg, const char *tname)
   const char *msg;
   const char *tnamenarg = luaT_typename(L, narg);
 
+  if(!tnamenarg)
+    tnamenarg = lua_typename(L, narg);
+
   msg = lua_pushfstring(L, "%s expected, got %s",
                         tname,
                         (tnamenarg ? tnamenarg : "unknown object"));
