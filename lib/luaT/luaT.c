@@ -94,23 +94,23 @@ void luaT_stackdump(lua_State *L)
   printf("---------------------------------------------\n");
 }
 
-/* Root-metatable methods */
-static int luaT_rmt__index(lua_State *L);
-static int luaT_rmt__newindex(lua_State *L);
-static int luaT_rmt__tostring(lua_State *L);
-static int luaT_rmt__add(lua_State *L);
-static int luaT_rmt__sub(lua_State *L);
-static int luaT_rmt__mul(lua_State *L);
-static int luaT_rmt__div(lua_State *L);
-static int luaT_rmt__mod(lua_State *L);
-static int luaT_rmt__pow(lua_State *L);
-static int luaT_rmt__unm(lua_State *L);
-static int luaT_rmt__concat(lua_State *L);
-static int luaT_rmt__len(lua_State *L);
-static int luaT_rmt__eq(lua_State *L);
-static int luaT_rmt__lt(lua_State *L);
-static int luaT_rmt__le(lua_State *L);
-static int luaT_rmt__call(lua_State *L);
+/* metatable operator methods */
+static int luaT_mt__index(lua_State *L);
+static int luaT_mt__newindex(lua_State *L);
+static int luaT_mt__tostring(lua_State *L);
+static int luaT_mt__add(lua_State *L);
+static int luaT_mt__sub(lua_State *L);
+static int luaT_mt__mul(lua_State *L);
+static int luaT_mt__div(lua_State *L);
+static int luaT_mt__mod(lua_State *L);
+static int luaT_mt__pow(lua_State *L);
+static int luaT_mt__unm(lua_State *L);
+static int luaT_mt__concat(lua_State *L);
+static int luaT_mt__len(lua_State *L);
+static int luaT_mt__eq(lua_State *L);
+static int luaT_mt__lt(lua_State *L);
+static int luaT_mt__le(lua_State *L);
+static int luaT_mt__call(lua_State *L);
 
 /* Constructor-metatable methods */
 static int luaT_cmt__call(lua_State *L);
@@ -418,11 +418,11 @@ int luaT_lua_newmetatable(lua_State *L)
     lua_rawset(L, LUA_REGISTRYINDEX);
 
     /* __index handling */
-    lua_pushcfunction(L, luaT_rmt__index);
+    lua_pushcfunction(L, luaT_mt__index);
     lua_setfield(L, -2, "__index");
 
     /* __newindex handling */
-    lua_pushcfunction(L, luaT_rmt__newindex);
+    lua_pushcfunction(L, luaT_mt__newindex);
     lua_setfield(L, -2, "__newindex");
 
     /* __typename contains the typename */
@@ -438,43 +438,43 @@ int luaT_lua_newmetatable(lua_State *L)
     lua_setfield(L, -2, "__version");
 
     /* assign default operator functions */
-    lua_pushcfunction(L, luaT_rmt__tostring);
+    lua_pushcfunction(L, luaT_mt__tostring);
     lua_setfield(L, -2, "__tostring");
 
-    lua_pushcfunction(L, luaT_rmt__add);
+    lua_pushcfunction(L, luaT_mt__add);
     lua_setfield(L, -2, "__add");
 
-    lua_pushcfunction(L, luaT_rmt__sub);
+    lua_pushcfunction(L, luaT_mt__sub);
     lua_setfield(L, -2, "__sub");
 
-    lua_pushcfunction(L, luaT_rmt__mul);
+    lua_pushcfunction(L, luaT_mt__mul);
     lua_setfield(L, -2, "__mul");
 
-    lua_pushcfunction(L, luaT_rmt__div);
+    lua_pushcfunction(L, luaT_mt__div);
     lua_setfield(L, -2, "__div");
 
-    lua_pushcfunction(L, luaT_rmt__mod);
+    lua_pushcfunction(L, luaT_mt__mod);
     lua_setfield(L, -2, "__mod");
 
-    lua_pushcfunction(L, luaT_rmt__pow);
+    lua_pushcfunction(L, luaT_mt__pow);
     lua_setfield(L, -2, "__pow");
 
-    lua_pushcfunction(L, luaT_rmt__unm);
+    lua_pushcfunction(L, luaT_mt__unm);
     lua_setfield(L, -2, "__unm");
 
-    lua_pushcfunction(L, luaT_rmt__concat);
+    lua_pushcfunction(L, luaT_mt__concat);
     lua_setfield(L, -2, "__concat");
 
-    lua_pushcfunction(L, luaT_rmt__len);
+    lua_pushcfunction(L, luaT_mt__len);
     lua_setfield(L, -2, "__len");
 
-    lua_pushcfunction(L, luaT_rmt__eq);
+    lua_pushcfunction(L, luaT_mt__eq);
     lua_setfield(L, -2, "__eq");
 
-    lua_pushcfunction(L, luaT_rmt__lt);
+    lua_pushcfunction(L, luaT_mt__lt);
     lua_setfield(L, -2, "__lt");
 
-    lua_pushcfunction(L, luaT_rmt__le);
+    lua_pushcfunction(L, luaT_mt__le);
     lua_setfield(L, -2, "__le");
   }
 
@@ -726,8 +726,8 @@ int luaT_lua_setmetatable(lua_State *L)
   return 1;
 }
 
-/* root-metatable functions */
-static int luaT_rmt__index(lua_State *L)
+/* metatable operator methods */
+static int luaT_mt__index(lua_State *L)
 {
   if(!lua_getmetatable(L, 1))
     luaL_error(L, "critical internal indexing error: no metatable found");
@@ -769,7 +769,7 @@ static int luaT_rmt__index(lua_State *L)
   return 1;
 }
 
-static int luaT_rmt__newindex(lua_State *L)
+static int luaT_mt__newindex(lua_State *L)
 {
   if(!lua_getmetatable(L, 1))
     luaL_error(L, "critical internal indexing error: no metatable found");
@@ -812,7 +812,7 @@ static int luaT_rmt__newindex(lua_State *L)
 
 /* note: check dans metatable pour ca, donc necessaire */
 #define MT_DECLARE_OPERATOR(NAME, NIL_BEHAVIOR)                     \
-  int luaT_rmt__##NAME(lua_State *L)                                \
+  int luaT_mt__##NAME(lua_State *L)                                 \
   {                                                                 \
     if(!lua_getmetatable(L, 1))                                     \
       luaL_error(L, "internal error in __" #NAME ": no metatable"); \
