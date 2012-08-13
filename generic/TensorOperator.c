@@ -2,12 +2,10 @@
 #define TH_GENERIC_FILE "generic/TensorOperator.c"
 #else
 
-static const void* torch_Tensor_id;
-
 static int torch_TensorOperator_(__add__)(lua_State *L)
 {
-  THTensor *tensor1 = luaT_toudata(L, 1, torch_Tensor_id);
-  THTensor *tensor2 = luaT_toudata(L, 2, torch_Tensor_id);
+  THTensor *tensor1 = luaT_toudata(L, 1, torch_Tensor);
+  THTensor *tensor2 = luaT_toudata(L, 2, torch_Tensor);
   THTensor *r;
 
   if(!tensor1 && !tensor2)
@@ -15,7 +13,7 @@ static int torch_TensorOperator_(__add__)(lua_State *L)
   else
   {
     r = THTensor_(new)();
-    luaT_pushudata(L, r, torch_Tensor_id);
+    luaT_pushudata(L, r, torch_Tensor);
     
     if(!tensor1 && tensor2)
     {
@@ -41,8 +39,8 @@ static int torch_TensorOperator_(__add__)(lua_State *L)
 
 static int torch_TensorOperator_(__sub__)(lua_State *L)
 {
-  THTensor *tensor1 = luaT_toudata(L, 1, torch_Tensor_id);
-  THTensor *tensor2 = luaT_toudata(L, 2, torch_Tensor_id);
+  THTensor *tensor1 = luaT_toudata(L, 1, torch_Tensor);
+  THTensor *tensor2 = luaT_toudata(L, 2, torch_Tensor);
   THTensor *r;
 
   if(!tensor1 && !tensor2)
@@ -50,7 +48,7 @@ static int torch_TensorOperator_(__sub__)(lua_State *L)
   else
   {
     r = THTensor_(new)();
-    luaT_pushudata(L, r, torch_Tensor_id);
+    luaT_pushudata(L, r, torch_Tensor);
     
     if(!tensor1 && tensor2)
     {
@@ -76,11 +74,11 @@ static int torch_TensorOperator_(__sub__)(lua_State *L)
 
 static int torch_TensorOperator_(__unm__)(lua_State *L)
 {
-  THTensor *tensor = luaT_checkudata(L, 1, torch_Tensor_id);
+  THTensor *tensor = luaT_checkudata(L, 1, torch_Tensor);
   THTensor *r;
 
   r = THTensor_(new)();
-  luaT_pushudata(L, r, torch_Tensor_id);
+  luaT_pushudata(L, r, torch_Tensor);
   THTensor_(resizeAs)(r, tensor);
   THTensor_(copy)(r, tensor);
   THTensor_(mul)(r, r, -1);
@@ -90,8 +88,8 @@ static int torch_TensorOperator_(__unm__)(lua_State *L)
 
 static int torch_TensorOperator_(__mul__)(lua_State *L)
 {
-  THTensor *tensor1 = luaT_toudata(L, 1, torch_Tensor_id);
-  THTensor *tensor2 = luaT_toudata(L, 2, torch_Tensor_id);
+  THTensor *tensor1 = luaT_toudata(L, 1, torch_Tensor);
+  THTensor *tensor2 = luaT_toudata(L, 2, torch_Tensor);
   THTensor *r;
 
   if(!tensor1 && !tensor2)
@@ -99,7 +97,7 @@ static int torch_TensorOperator_(__mul__)(lua_State *L)
   else
   {
     r = THTensor_(new)();
-    luaT_pushudata(L, r, torch_Tensor_id);
+    luaT_pushudata(L, r, torch_Tensor);
     
     if(!tensor1 && tensor2)
     {
@@ -141,13 +139,13 @@ static int torch_TensorOperator_(__mul__)(lua_State *L)
 
 static int torch_TensorOperator_(__div__)(lua_State *L)
 {
-  THTensor *tensor = luaT_checkudata(L, 1, torch_Tensor_id);
+  THTensor *tensor = luaT_checkudata(L, 1, torch_Tensor);
   THTensor *r;
 
   luaL_argcheck(L, lua_isnumber(L,2), 2, "number expected");
 
   r = THTensor_(new)();
-  luaT_pushudata(L, r, torch_Tensor_id);
+  luaT_pushudata(L, r, torch_Tensor);
 
   THTensor_(resizeAs)(r, tensor);
   THTensor_(copy)(r, tensor);
@@ -167,9 +165,7 @@ static const struct luaL_Reg torch_TensorOperator_(_) [] = {
 
 void torch_TensorOperator_(init)(lua_State *L)
 {
-  torch_Tensor_id = luaT_checktypename2id(L, STRING_torchTensor);
-
-  luaT_pushmetaclass(L, torch_Tensor_id);
+  luaT_pushmetatable(L, torch_Tensor);
   luaL_register(L, NULL, torch_TensorOperator_(_));
   lua_pop(L, 1);
 }

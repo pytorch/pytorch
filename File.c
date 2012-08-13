@@ -1,19 +1,10 @@
 #include "THFile.h"
 #include "luaT.h"
 
-static const void *torch_File_id = NULL;
-static const void *torch_ByteStorage_id = NULL;
-static const void *torch_CharStorage_id = NULL;
-static const void *torch_ShortStorage_id = NULL;
-static const void *torch_IntStorage_id = NULL;
-static const void *torch_LongStorage_id = NULL;
-static const void *torch_FloatStorage_id = NULL;
-static const void *torch_DoubleStorage_id = NULL;
-
 #define IMPLEMENT_TORCH_FILE_FLAG(NAME)                   \
   static int torch_File_##NAME(lua_State *L)              \
   {                                                       \
-    THFile *self = luaT_checkudata(L, 1, torch_File_id);  \
+    THFile *self = luaT_checkudata(L, 1, "torch.File");  \
     lua_pushboolean(L, THFile_##NAME(self));              \
     return 1;                                             \
   }
@@ -28,7 +19,7 @@ IMPLEMENT_TORCH_FILE_FLAG(hasError)
 #define IMPLEMENT_TORCH_FILE_FUNC(NAME)                   \
   static int torch_File_##NAME(lua_State *L)              \
   {                                                       \
-    THFile *self = luaT_checkudata(L, 1, torch_File_id);  \
+    THFile *self = luaT_checkudata(L, 1, "torch.File");  \
     THFile_##NAME(self);                                  \
     lua_settop(L, 1);                                     \
     return 1;                                             \
@@ -46,7 +37,7 @@ IMPLEMENT_TORCH_FILE_FUNC(synchronize)
 
 static int torch_File_seek(lua_State *L)
 {
-  THFile *self = luaT_checkudata(L, 1, torch_File_id);
+  THFile *self = luaT_checkudata(L, 1, "torch.File");
   long position = luaL_checklong(L, 2)-1;
   THFile_seek(self, position);
   lua_settop(L, 1);
@@ -57,7 +48,7 @@ IMPLEMENT_TORCH_FILE_FUNC(seekEnd)
 
 static int torch_File_position(lua_State *L)
 {
-  THFile *self = luaT_checkudata(L, 1, torch_File_id);
+  THFile *self = luaT_checkudata(L, 1, "torch.File");
   lua_pushnumber(L, THFile_position(self)+1);
   return 1;
 }
@@ -67,7 +58,7 @@ IMPLEMENT_TORCH_FILE_FUNC(close)
 #define IMPLEMENT_TORCH_FILE_RW(TYPEC, TYPE)                            \
   static int torch_File_read##TYPEC(lua_State *L)                       \
   {                                                                     \
-    THFile *self = luaT_checkudata(L, 1, torch_File_id);                \
+    THFile *self = luaT_checkudata(L, 1, "torch.File");                \
     int narg = lua_gettop(L);                                           \
                                                                         \
     if(narg == 1)                                                       \
@@ -83,15 +74,15 @@ IMPLEMENT_TORCH_FILE_FUNC(close)
         long nread;                                                     \
                                                                         \
         TH##TYPEC##Storage *storage = TH##TYPEC##Storage_newWithSize(size); \
-        luaT_pushudata(L, storage, torch_##TYPEC##Storage_id);          \
+        luaT_pushudata(L, storage, "torch." #TYPEC "Storage");           \
         nread = THFile_read##TYPEC(self, storage);                      \
         if(nread != size)                                               \
           TH##TYPEC##Storage_resize(storage, size);                     \
         return 1;                                                       \
       }                                                                 \
-      else if(luaT_toudata(L, 2, torch_##TYPEC##Storage_id))            \
+      else if(luaT_toudata(L, 2, "torch." #TYPEC "Storage"))             \
       {                                                                 \
-        TH##TYPEC##Storage *storage = luaT_toudata(L, 2, torch_##TYPEC##Storage_id); \
+        TH##TYPEC##Storage *storage = luaT_toudata(L, 2, "torch." #TYPEC "Storage"); \
         lua_pushnumber(L, THFile_read##TYPEC(self, storage));           \
         return 1;                                                       \
       }                                                                 \
@@ -103,7 +94,7 @@ IMPLEMENT_TORCH_FILE_FUNC(close)
                                                                         \
   static int torch_File_write##TYPEC(lua_State *L)                      \
   {                                                                     \
-    THFile *self = luaT_checkudata(L, 1, torch_File_id);                \
+    THFile *self = luaT_checkudata(L, 1, "torch.File");                \
     int narg = lua_gettop(L);                                           \
                                                                         \
     if(narg == 2)                                                       \
@@ -114,9 +105,9 @@ IMPLEMENT_TORCH_FILE_FUNC(close)
         THFile_write##TYPEC##Scalar(self, (TYPE)value);                 \
         return 0;                                                       \
       }                                                                 \
-      else if(luaT_toudata(L, 2, torch_##TYPEC##Storage_id))            \
+      else if(luaT_toudata(L, 2, "torch." #TYPEC "Storage"))            \
       {                                                                 \
-        TH##TYPEC##Storage *storage = luaT_toudata(L, 2, torch_##TYPEC##Storage_id); \
+        TH##TYPEC##Storage *storage = luaT_toudata(L, 2, "torch." #TYPEC "Storage"); \
         lua_pushnumber(L, THFile_write##TYPEC(self, storage));          \
         return 1;                                                       \
       }                                                                 \
@@ -137,7 +128,7 @@ IMPLEMENT_TORCH_FILE_RW(Double, double)
 
 static int torch_File_readString(lua_State *L)
 {
-  THFile *self = luaT_checkudata(L, 1, torch_File_id);
+  THFile *self = luaT_checkudata(L, 1, "torch.File");
   const char *format = luaL_checkstring(L, 2);
   char *str;
   long size;
@@ -151,7 +142,7 @@ static int torch_File_readString(lua_State *L)
 
 static int torch_File_writeString(lua_State *L)
 {
-  THFile *self = luaT_checkudata(L, 1, torch_File_id);
+  THFile *self = luaT_checkudata(L, 1, "torch.File");
   const char *str = NULL;
   size_t size;
 
@@ -195,7 +186,7 @@ static const struct luaL_Reg torch_File__ [] = {
   {"writeFloat", torch_File_writeFloat},
   {"writeDouble", torch_File_writeDouble},
   {"writeString", torch_File_writeString},
-  
+
   {"synchronize", torch_File_synchronize},
   {"seek", torch_File_seek},
   {"seekEnd", torch_File_seekEnd},
@@ -207,18 +198,7 @@ static const struct luaL_Reg torch_File__ [] = {
 
 void torch_File_init(lua_State *L)
 {
-  torch_File_id = luaT_newmetatable(L, "torch.File", NULL, NULL, NULL, NULL);
+  luaT_newmetatable(L, "torch.File", NULL, NULL, NULL, NULL);
   luaL_register(L, NULL, torch_File__);
   lua_pop(L, 1);
-}
-
-void torch_File_init_storage_id(lua_State *L)
-{
-  torch_ByteStorage_id = luaT_checktypename2id(L, "torch.ByteStorage");
-  torch_CharStorage_id = luaT_checktypename2id(L, "torch.CharStorage");
-  torch_ShortStorage_id = luaT_checktypename2id(L, "torch.ShortStorage");
-  torch_IntStorage_id = luaT_checktypename2id(L, "torch.IntStorage");
-  torch_LongStorage_id = luaT_checktypename2id(L, "torch.LongStorage");
-  torch_FloatStorage_id = luaT_checktypename2id(L, "torch.FloatStorage");
-  torch_DoubleStorage_id = luaT_checktypename2id(L, "torch.DoubleStorage");
 }

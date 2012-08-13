@@ -7,12 +7,6 @@
 #include <sys/resource.h>
 #endif
 
-#ifdef _MSC_VER
-static time_t base_time = 0;
-#endif    
-
-static const void* torch_Timer_id = NULL;
-
 typedef struct _Timer
 {
     int isRunning;
@@ -24,6 +18,10 @@ typedef struct _Timer
     double startrealtime;
     double startusertime;
     double startsystime;
+
+#ifdef _MSC_VER
+  time_t base_time;
+#endif
 
 } Timer;
 
@@ -52,8 +50,9 @@ static int torch_Timer_new(lua_State *L)
 {
   Timer *timer = luaT_alloc(L, sizeof(Timer));
 #ifdef _MSC_VER
-  while(!base_time)
-    time(&base_time);
+  timer->base_time = 0;
+  while(!timer->base_time)
+    time(&timer->base_time);
 #endif
   timer->isRunning = 1;
   timer->totalrealtime = 0;
@@ -62,13 +61,13 @@ static int torch_Timer_new(lua_State *L)
   timer->startrealtime = torch_Timer_realtime();
   timer->startusertime = torch_Timer_usertime();
   timer->startsystime = torch_Timer_systime();
-  luaT_pushudata(L, timer, torch_Timer_id);
+  luaT_pushudata(L, timer, "torch.Timer");
   return 1;
 }
 
 static int torch_Timer_reset(lua_State *L)
 {
-  Timer *timer = luaT_checkudata(L, 1, torch_Timer_id);
+  Timer *timer = luaT_checkudata(L, 1, "torch.Timer");
   timer->totalrealtime = 0;
   timer->totalusertime = 0;
   timer->totalsystime = 0;
@@ -81,14 +80,14 @@ static int torch_Timer_reset(lua_State *L)
 
 static int torch_Timer_free(lua_State *L)
 {
-  Timer *timer = luaT_checkudata(L, 1, torch_Timer_id);
+  Timer *timer = luaT_checkudata(L, 1, "torch.Timer");
   luaT_free(L, timer);
   return 0;
 }
 
 static int torch_Timer_stop(lua_State *L)
 {
-  Timer *timer = luaT_checkudata(L, 1, torch_Timer_id);
+  Timer *timer = luaT_checkudata(L, 1, "torch.Timer");
   if(timer->isRunning)  
   {
     double realtime = torch_Timer_realtime() - timer->startrealtime;
@@ -105,7 +104,7 @@ static int torch_Timer_stop(lua_State *L)
 
 static int torch_Timer_resume(lua_State *L)
 {
-  Timer *timer = luaT_checkudata(L, 1, torch_Timer_id);
+  Timer *timer = luaT_checkudata(L, 1, "torch.Timer");
   if(!timer->isRunning)
   {
     timer->isRunning = 1;
@@ -119,7 +118,7 @@ static int torch_Timer_resume(lua_State *L)
 
 static int torch_Timer_time(lua_State *L)
 {
-  Timer *timer = luaT_checkudata(L, 1, torch_Timer_id);
+  Timer *timer = luaT_checkudata(L, 1, "torch.Timer");
   double realtime = (timer->isRunning ? (timer->totalrealtime + torch_Timer_realtime() - timer->startrealtime) : timer->totalrealtime);
   double usertime = (timer->isRunning ? (timer->totalusertime + torch_Timer_usertime() - timer->startusertime) : timer->totalusertime);
   double systime = (timer->isRunning ? (timer->totalsystime + torch_Timer_systime() - timer->startsystime) : timer->totalsystime);
@@ -135,7 +134,7 @@ static int torch_Timer_time(lua_State *L)
 
 static int torch_Timer___tostring__(lua_State *L)
 {
-  Timer *timer = luaT_checkudata(L, 1, torch_Timer_id);
+  Timer *timer = luaT_checkudata(L, 1, "torch.Timer");
   lua_pushfstring(L, "torch.Timer [status: %s]", (timer->isRunning ? "running" : "stopped"));
   return 1;
 }
@@ -151,7 +150,7 @@ static const struct luaL_Reg torch_Timer__ [] = {
 
 void torch_Timer_init(lua_State *L)
 {
-  torch_Timer_id = luaT_newmetatable(L, "torch.Timer", NULL, torch_Timer_new, torch_Timer_free, NULL);
+  luaT_newmetatable(L, "torch.Timer", NULL, torch_Timer_new, torch_Timer_free, NULL);
   luaL_register(L, NULL, torch_Timer__);
   lua_pop(L, 1);
 }

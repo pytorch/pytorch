@@ -32,20 +32,20 @@ static int torch_Storage_(new)(lua_State *L)
     long size = luaL_optlong(L, 1, 0);
     storage = THStorage_(newWithSize)(size);
   }
-  luaT_pushudata(L, storage, torch_Storage_id);
+  luaT_pushudata(L, storage, torch_Storage);
   return 1;
 }
 
 static int torch_Storage_(free)(lua_State *L)
 {
-  THStorage *storage = luaT_checkudata(L, 1, torch_Storage_id);
+  THStorage *storage = luaT_checkudata(L, 1, torch_Storage);
   THStorage_(free)(storage);
   return 0;
 }
 
 static int torch_Storage_(resize)(lua_State *L)
 {
-  THStorage *storage = luaT_checkudata(L, 1, torch_Storage_id);
+  THStorage *storage = luaT_checkudata(L, 1, torch_Storage);
   long size = luaL_checklong(L, 2);
 /*  int keepContent = luaT_optboolean(L, 3, 0); */
   THStorage_(resize)(storage, size);/*, keepContent); */
@@ -55,23 +55,23 @@ static int torch_Storage_(resize)(lua_State *L)
 
 static int torch_Storage_(copy)(lua_State *L)
 {
-  THStorage *storage = luaT_checkudata(L, 1, torch_Storage_id);
+  THStorage *storage = luaT_checkudata(L, 1, torch_Storage);
   void *src;
-  if( (src = luaT_toudata(L, 2, torch_Storage_id)) )
+  if( (src = luaT_toudata(L, 2, torch_Storage)) )
     THStorage_(copy)(storage, src);
-  else if( (src = luaT_toudata(L, 2, torch_ByteStorage_id)) )
+  else if( (src = luaT_toudata(L, 2, "torch.ByteStorage")) )
     THStorage_(copyByte)(storage, src);
-  else if( (src = luaT_toudata(L, 2, torch_CharStorage_id)) )
+  else if( (src = luaT_toudata(L, 2, "torch.CharStorage")) )
     THStorage_(copyChar)(storage, src);
-  else if( (src = luaT_toudata(L, 2, torch_ShortStorage_id)) )
+  else if( (src = luaT_toudata(L, 2, "torch.ShortStorage")) )
     THStorage_(copyShort)(storage, src);
-  else if( (src = luaT_toudata(L, 2, torch_IntStorage_id)) )
+  else if( (src = luaT_toudata(L, 2, "torch.IntStorage")) )
     THStorage_(copyInt)(storage, src);
-  else if( (src = luaT_toudata(L, 2, torch_LongStorage_id)) )
+  else if( (src = luaT_toudata(L, 2, "torch.LongStorage")) )
     THStorage_(copyLong)(storage, src);
-  else if( (src = luaT_toudata(L, 2, torch_FloatStorage_id)) )
+  else if( (src = luaT_toudata(L, 2, "torch.FloatStorage")) )
     THStorage_(copyFloat)(storage, src);
-  else if( (src = luaT_toudata(L, 2, torch_DoubleStorage_id)) )
+  else if( (src = luaT_toudata(L, 2, "torch.DoubleStorage")) )
     THStorage_(copyDouble)(storage, src);
   else
     luaL_typerror(L, 2, "torch.*Storage");
@@ -81,7 +81,7 @@ static int torch_Storage_(copy)(lua_State *L)
 
 static int torch_Storage_(fill)(lua_State *L)
 {
-  THStorage *storage = luaT_checkudata(L, 1, torch_Storage_id);
+  THStorage *storage = luaT_checkudata(L, 1, torch_Storage);
   double value = luaL_checknumber(L, 2);
   THStorage_(fill)(storage, (real)value);
   lua_settop(L, 1);
@@ -90,7 +90,7 @@ static int torch_Storage_(fill)(lua_State *L)
 
 static int torch_Storage_(__len__)(lua_State *L)
 {
-  THStorage *storage = luaT_checkudata(L, 1, torch_Storage_id);
+  THStorage *storage = luaT_checkudata(L, 1, torch_Storage);
   lua_pushnumber(L, storage->size);
   return 1;
 }
@@ -99,7 +99,7 @@ static int torch_Storage_(__newindex__)(lua_State *L)
 {
   if(lua_isnumber(L, 2))
   {
-    THStorage *storage = luaT_checkudata(L, 1, torch_Storage_id);
+    THStorage *storage = luaT_checkudata(L, 1, torch_Storage);
     long index = luaL_checklong(L, 2) - 1;
     double number = luaL_checknumber(L, 3);
     THStorage_(set)(storage, index, (real)number);
@@ -115,7 +115,7 @@ static int torch_Storage_(__index__)(lua_State *L)
 {
   if(lua_isnumber(L, 2))
   {
-    THStorage *storage = luaT_checkudata(L, 1, torch_Storage_id);
+    THStorage *storage = luaT_checkudata(L, 1, torch_Storage);
     long index = luaL_checklong(L, 2) - 1;
     lua_pushnumber(L, THStorage_(get)(storage, index));
     lua_pushboolean(L, 1);
@@ -131,7 +131,7 @@ static int torch_Storage_(__index__)(lua_State *L)
 #if defined(TH_REAL_IS_CHAR) || defined(TH_REAL_IS_BYTE)
 static int torch_Storage_(string)(lua_State *L)
 {
-  THStorage *storage = luaT_checkudata(L, 1, torch_Storage_id);
+  THStorage *storage = luaT_checkudata(L, 1, torch_Storage);
   if(lua_isstring(L, -1))
   {
     size_t len = 0;
@@ -149,7 +149,7 @@ static int torch_Storage_(string)(lua_State *L)
 
 static int torch_Storage_(totable)(lua_State *L)
 {
-  THStorage *storage = luaT_checkudata(L, 1, torch_Storage_id);
+  THStorage *storage = luaT_checkudata(L, 1, torch_Storage);
   long i;
 
   lua_newtable(L);
@@ -164,14 +164,14 @@ static int torch_Storage_(totable)(lua_State *L)
 static int torch_Storage_(factory)(lua_State *L)
 {
   THStorage *storage = THStorage_(new)();
-  luaT_pushudata(L, storage, torch_Storage_id);
+  luaT_pushudata(L, storage, torch_Storage);
   return 1;
 }
 
 static int torch_Storage_(write)(lua_State *L)
 {
-  THStorage *storage = luaT_checkudata(L, 1, torch_Storage_id);
-  THFile *file = luaT_checkudata(L, 2, torch_File_id);
+  THStorage *storage = luaT_checkudata(L, 1, torch_Storage);
+  THFile *file = luaT_checkudata(L, 2, "torch.File");
  
   THFile_writeLongScalar(file, storage->size);
   THFile_writeRealRaw(file, storage->data, storage->size);
@@ -181,8 +181,8 @@ static int torch_Storage_(write)(lua_State *L)
 
 static int torch_Storage_(read)(lua_State *L)
 {
-  THStorage *storage = luaT_checkudata(L, 1, torch_Storage_id);
-  THFile *file = luaT_checkudata(L, 2, torch_File_id);
+  THStorage *storage = luaT_checkudata(L, 1, torch_Storage);
+  THFile *file = luaT_checkudata(L, 2, "torch.File");
   long size = THFile_readLongScalar(file);
 
   THStorage_(resize)(storage, size);
@@ -210,10 +210,8 @@ static const struct luaL_Reg torch_Storage_(_) [] = {
 
 void torch_Storage_(init)(lua_State *L)
 {
-  torch_File_id = luaT_checktypename2id(L, "torch.File");
-
-  torch_Storage_id = luaT_newmetatable(L, STRING_torchStorage, NULL,
-                                  torch_Storage_(new), torch_Storage_(free), torch_Storage_(factory));
+  luaT_newmetatable(L, torch_Storage, NULL,
+                    torch_Storage_(new), torch_Storage_(free), torch_Storage_(factory));
   luaL_register(L, NULL, torch_Storage_(_));
   lua_pop(L, 1);
 }
