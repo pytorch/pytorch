@@ -53,19 +53,19 @@ according to the class inheritance. Multiple inheritance is not supported.
 
 The metatable of a ''luaT'' object contains ''Lua'' operators like
 ''%%__index%%'', ''%%__newindex%%'', ''%%__tostring%%'', ''%%__add%%''
-(etc...). These operators will respectively look for ''//index//'',
-''//newindex//'', ''//tostring//'', ''//add//'' (etc...) in the
+(etc...). These operators will respectively look for ''%%__index__%%'',
+''%%__newindex__%%'', ''%%__tostring__%%'', ''%%__add__%%'' (etc...) in the
 metatable. If found, the corresponding function or value will be returned,
 else a Lua error will be raised.
 
-If one wants to provide ''//index//'' or ''//newindex//'' in the
+If one wants to provide ''%%__index__%%'' or ''%%__newindex__%%'' in the
 metaclass, these operators must follow a particular scheme:
 
-  * ''//index//'' must either return a value //and// ''true'' or return ''false'' only. In the first case, it means ''//index//'' was able to handle the given argument (for e.g., the type was correct). The second case means it was not able to do anything, so ''%%__index%%'' in the root metatable can then try to see if the metaclass contains the required value.
+  * ''%%__index__%%'' must either return a value //and// ''true'' or return ''false'' only. In the first case, it means ''%%__index__%%'' was able to handle the given argument (for e.g., the type was correct). The second case means it was not able to do anything, so ''%%__index%%'' in the root metatable can then try to see if the metaclass contains the required value.
 
-  * ''//newindex//'' must either return ''true'' or ''false''. As for ''//index//'', ''true'' means it could handle the argument and ''false'' not. If not, the root metatable ''%%__newindex%%'' will then raise an error if the object was a userdata, or apply a rawset if the object was a Lua table.
+  * ''%%__newindex__%%'' must either return ''true'' or ''false''. As for ''%%__index__%%'', ''true'' means it could handle the argument and ''false'' not. If not, the root metatable ''%%__newindex%%'' will then raise an error if the object was a userdata, or apply a rawset if the object was a Lua table.
 
-Other metaclass operators like ''//tostring//'', ''//add//'', etc... do not have any particular constraint.
+Other metaclass operators like ''%%__tostring__%%'', ''%%__add__%%'', etc... do not have any particular constraint.
 
 ==== const char* luaT_newmetatable(lua_State *L, const char *tname, const char *parenttname, lua_CFunction constructor, lua_CFunction destructor, lua_CFunction factory) ====
 {{anchor:luat_newmetatable}}
