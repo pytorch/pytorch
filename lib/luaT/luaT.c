@@ -300,34 +300,34 @@ void luaT_getfieldchecktable(lua_State *L, int ud, const char *field)
 }
 
 /**** type checks as in luaL ****/
-int luaT_typerror(lua_State *L, int narg, const char *tname)
+int luaT_typerror(lua_State *L, int ud, const char *tname)
 {
   const char *msg;
-  const char *tnamenarg = luaT_typename(L, narg);
+  const char *tnameud = luaT_typename(L, ud);
 
-  if(!tnamenarg)
-    tnamenarg = lua_typename(L, narg);
+  if(!tnameud)
+    tnameud = lua_typename(L, ud);
 
   msg = lua_pushfstring(L, "%s expected, got %s",
                         tname,
-                        (tnamenarg ? tnamenarg : "unknown object"));
+                        (tnameud ? tnameud : "unknown object"));
 
-  return luaL_argerror(L, narg, msg);
+  return luaL_argerror(L, ud, msg);
 }
 
-int luaT_checkboolean(lua_State *L, int narg)
+int luaT_checkboolean(lua_State *L, int ud)
 {
-  if(!lua_isboolean(L, narg))
-    luaT_typerror(L, narg, lua_typename(L, LUA_TBOOLEAN));
-  return lua_toboolean(L, narg);
+  if(!lua_isboolean(L, ud))
+    luaT_typerror(L, ud, lua_typename(L, LUA_TBOOLEAN));
+  return lua_toboolean(L, ud);
 }
 
-int luaT_optboolean(lua_State *L, int narg, int def)
+int luaT_optboolean(lua_State *L, int ud, int def)
 {
-  if(lua_isnoneornil(L,narg))
+  if(lua_isnoneornil(L,ud))
     return def;
 
-  return luaT_checkboolean(L, narg);
+  return luaT_checkboolean(L, ud);
 }
 
 void luaT_registeratname(lua_State *L, const struct luaL_Reg *methods, const char *name)

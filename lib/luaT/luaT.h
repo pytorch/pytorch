@@ -42,22 +42,22 @@ LUAT_API const char* luaT_typenameid(lua_State *L, const char *tname);
 LUAT_API const char* luaT_typename(lua_State *L, int ud);
 
 LUAT_API void luaT_pushudata(lua_State *L, void *udata, const char *tname);
-LUAT_API void *luaT_toudata (lua_State *L, int ud, const char *tname);
-LUAT_API int luaT_isudata (lua_State *L, int ud, const char *tname);
-LUAT_API void *luaT_checkudata (lua_State *L, int ud, const char *tname);
+LUAT_API void *luaT_toudata(lua_State *L, int ud, const char *tname);
+LUAT_API int luaT_isudata(lua_State *L, int ud, const char *tname);
+LUAT_API void *luaT_checkudata(lua_State *L, int ud, const char *tname);
 
-LUAT_API void *luaT_getfieldcheckudata (lua_State *L, int ud, const char *field, const char *tname);
-LUAT_API void *luaT_getfieldchecklightudata (lua_State *L, int ud, const char *field);
-LUAT_API double luaT_getfieldchecknumber (lua_State *L, int ud, const char *field);
-LUAT_API int luaT_getfieldcheckint (lua_State *L, int ud, const char *field);
-LUAT_API const char* luaT_getfieldcheckstring (lua_State *L, int ud, const char *field);
-LUAT_API int luaT_getfieldcheckboolean (lua_State *L, int ud, const char *field);
-LUAT_API void luaT_getfieldchecktable (lua_State *L, int ud, const char *field);
+LUAT_API void *luaT_getfieldcheckudata(lua_State *L, int ud, const char *field, const char *tname);
+LUAT_API void *luaT_getfieldchecklightudata(lua_State *L, int ud, const char *field);
+LUAT_API double luaT_getfieldchecknumber(lua_State *L, int ud, const char *field);
+LUAT_API int luaT_getfieldcheckint(lua_State *L, int ud, const char *field);
+LUAT_API const char* luaT_getfieldcheckstring(lua_State *L, int ud, const char *field);
+LUAT_API int luaT_getfieldcheckboolean(lua_State *L, int ud, const char *field);
+LUAT_API void luaT_getfieldchecktable(lua_State *L, int ud, const char *field);
 
 LUAT_API int luaT_typerror(lua_State *L, int ud, const char *tname);
 
-LUAT_API int luaT_checkboolean(lua_State *L, int narg);
-LUAT_API int luaT_optboolean(lua_State *L, int narg, int def);
+LUAT_API int luaT_checkboolean(lua_State *L, int ud);
+LUAT_API int luaT_optboolean(lua_State *L, int ud, int def);
 
 LUAT_API void luaT_registeratname(lua_State *L, const struct luaL_Reg *methods, const char *name);
 
