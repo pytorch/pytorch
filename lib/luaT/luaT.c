@@ -70,8 +70,8 @@ void luaT_stackdump(lua_State *L)
         printf("userdata %lx [%s]", (long)lua_topointer(L, i), (tname ? tname : "not a Torch object"));
         break;
       case LUA_TTABLE:
-        lua_pushliteral(L, "__typename");
-        lua_rawget(L, i);
+        lua_pushvalue(L, i);
+        lua_rawget(L, LUA_REGISTRYINDEX);
         if(lua_isstring(L, -1))
           tname = lua_tostring(L, -1); /*luaT_typenameid(L, lua_tostring(L, -1)); */
         else
@@ -86,7 +86,7 @@ void luaT_stackdump(lua_State *L)
         }
         break;
       default:
-        printf("%s", lua_typename(L,t));
+        printf("Lua object type: %s", lua_typename(L,t));
         break;
     }
     printf("\n");
@@ -126,23 +126,7 @@ const char* luaT_newmetatable(lua_State *L, const char *tname, const char *paren
   (destructor ? lua_pushcfunction(L, destructor) : lua_pushnil(L));
   (factory ? lua_pushcfunction(L, factory) : lua_pushnil(L));
   lua_call(L, 5, 1);
-
   return luaT_typenameid(L, tname);
-}
-
-const char *luaT_typenameid(lua_State *L, const char *tname)
-{
-  if(luaT_pushmetatable(L, tname))
-  {
-    const char *tnameid = NULL;
-    lua_pushliteral(L, "__typename");
-    lua_rawget(L, -2);
-    if(lua_isstring(L, -1))
-      tnameid = lua_tostring(L, -1);
-    lua_pop(L, 2); /* the metatable and the string/nil */
-    return tnameid;
-  }
-  return NULL;
 }
 
 int luaT_pushmetatable(lua_State *L, const char *tname)
@@ -156,37 +140,18 @@ int luaT_pushmetatable(lua_State *L, const char *tname)
   return 1;
 }
 
-int luaT_pushmetaclass(lua_State *L, const char *tname)
+const char *luaT_typenameid(lua_State *L, const char *tname)
 {
-  return luaT_pushmetatable(L, tname);
-}
-
-const char* luaT_id2typename(lua_State *L, const char *id)
-{
-  return id;
-}
-
-const char* luaT_typename2id(lua_State *L, const char *tname)
-{
-  return luaT_typenameid(L, tname);
-}
-
-const char* luaT_checktypename2id(lua_State *L, const char *tname)
-{
-  const char* id = luaT_typename2id(L, tname);
-  if(!id)
-    luaL_error(L, "unknown class <%s>", tname);
-  return id;
-}
-
-int luaT_getmetaclass(lua_State *L, int index)
-{
-  return lua_getmetatable(L, index);
-}
-
-const char* luaT_id(lua_State *L, int ud)
-{
-  return luaT_typename(L, ud);
+  if(luaT_pushmetatable(L, tname))
+  {
+    const char *tnameid = NULL;
+    lua_rawget(L, LUA_REGISTRYINDEX);
+    if(lua_isstring(L, -1))
+      tnameid = lua_tostring(L, -1);
+    lua_pop(L, 1); /* the string/nil */
+    return tnameid;
+  }
+  return NULL;
 }
 
 const char* luaT_typename(lua_State *L, int ud)
@@ -194,12 +159,11 @@ const char* luaT_typename(lua_State *L, int ud)
   if(lua_getmetatable(L, ud))
   {
     const char *tname = NULL;
-    lua_pushliteral(L, "__typename");
-    lua_rawget(L, -2);
+    lua_rawget(L, LUA_REGISTRYINDEX);
     if(lua_isstring(L, -1))
       tname = lua_tostring(L, -1);
-    lua_pop(L, 2); /* the metatable and the string/nil */
-    return (tname ? luaT_typenameid(L, tname) : NULL); /* checks it is actually a torch type */
+    lua_pop(L, 1); /* the string/nil */
+    return tname;
   }
   return NULL;
 }
@@ -221,7 +185,6 @@ void luaT_pushudata(lua_State *L, void *udata, const char *tname)
 void *luaT_toudata(lua_State *L, int ud, const char *tname)
 {
   void **p = lua_touserdata(L, ud);
-  int i = 0;
   if(p != NULL) /* value is a userdata? */
   {
     if(!luaT_pushmetatable(L, tname))
@@ -252,7 +215,7 @@ int luaT_isudata(lua_State *L, int ud, const char *tname)
     return 0;
 }
 
-void *luaT_checkudata (lua_State *L, int ud, const char *tname)
+void *luaT_checkudata(lua_State *L, int ud, const char *tname)
 {
   void *p = luaT_toudata(L, ud, tname);
   if(!p)
@@ -260,7 +223,7 @@ void *luaT_checkudata (lua_State *L, int ud, const char *tname)
   return p;
 }
 
-void *luaT_getfieldcheckudata (lua_State *L, int ud, const char *field, const char *tname)
+void *luaT_getfieldcheckudata(lua_State *L, int ud, const char *field, const char *tname)
 {
   void *p;
   lua_getfield(L, ud, field);
@@ -272,7 +235,7 @@ void *luaT_getfieldcheckudata (lua_State *L, int ud, const char *field, const ch
   return p;
 }
 
-void *luaT_getfieldchecklightudata (lua_State *L, int ud, const char *field)
+void *luaT_getfieldchecklightudata(lua_State *L, int ud, const char *field)
 {
   void *p;
   lua_getfield(L, ud, field);
@@ -287,7 +250,7 @@ void *luaT_getfieldchecklightudata (lua_State *L, int ud, const char *field)
   return p;
 }
 
-double luaT_getfieldchecknumber (lua_State *L, int ud, const char *field)
+double luaT_getfieldchecknumber(lua_State *L, int ud, const char *field)
 {
   lua_getfield(L, ud, field);
   if(lua_isnil(L, -1))
@@ -297,7 +260,7 @@ double luaT_getfieldchecknumber (lua_State *L, int ud, const char *field)
   return lua_tonumber(L, -1);
 }
 
-int luaT_getfieldcheckint (lua_State *L, int ud, const char *field)
+int luaT_getfieldcheckint(lua_State *L, int ud, const char *field)
 {
   lua_getfield(L, ud, field);
   if(lua_isnil(L, -1))
@@ -307,7 +270,7 @@ int luaT_getfieldcheckint (lua_State *L, int ud, const char *field)
   return (int)lua_tonumber(L, -1);
 }
 
-const char* luaT_getfieldcheckstring (lua_State *L, int ud, const char *field)
+const char* luaT_getfieldcheckstring(lua_State *L, int ud, const char *field)
 {
   lua_getfield(L, ud, field);
   if(lua_isnil(L, -1))
@@ -317,7 +280,7 @@ const char* luaT_getfieldcheckstring (lua_State *L, int ud, const char *field)
   return lua_tostring(L, -1);
 }
 
-int luaT_getfieldcheckboolean (lua_State *L, int ud, const char *field)
+int luaT_getfieldcheckboolean(lua_State *L, int ud, const char *field)
 {
   lua_getfield(L, ud, field);
   if(lua_isnil(L, -1))
@@ -327,7 +290,7 @@ int luaT_getfieldcheckboolean (lua_State *L, int ud, const char *field)
   return lua_toboolean(L, -1);
 }
 
-void luaT_getfieldchecktable (lua_State *L, int ud, const char *field)
+void luaT_getfieldchecktable(lua_State *L, int ud, const char *field)
 {
   lua_getfield(L, ud, field);
   if(lua_isnil(L, -1))
@@ -364,46 +327,6 @@ int luaT_optboolean(lua_State *L, int narg, int def)
   return luaT_checkboolean(L, narg);
 }
 
-
-/* utility functions */
-const char *luaT_classrootname(const char *tname)
-{
-  int i;
-  int sz = strlen(tname);
-
-  for(i = 0; i < sz; i++)
-  {
-    if(tname[i] == '.')
-      return tname+i+1;
-  }
-  return tname;
-}
-
-static char luaT_class_module_name[256];
-const char *luaT_classmodulename(const char *tname)
-{
-  int i;
-
-  strncpy(luaT_class_module_name, tname, 256);
-  
-  for(i = 0; i < 256; i++)
-  {
-    if(luaT_class_module_name[i] == '\0')
-      break;
-    if(luaT_class_module_name[i] == '.')
-    {
-      luaT_class_module_name[i] = '\0';
-      return luaT_class_module_name;
-    }
-  }
-  return NULL;
-}
-
-void luaT_registeratid(lua_State *L, const struct luaL_Reg *methods, const char *id)
-{
-  luaT_registeratname(L, methods, id);
-}
-
 void luaT_registeratname(lua_State *L, const struct luaL_Reg *methods, const char *name)
 {
   int idx = lua_gettop(L);
@@ -425,6 +348,40 @@ void luaT_registeratname(lua_State *L, const struct luaL_Reg *methods, const cha
 
   luaL_register(L, NULL, methods);
   lua_pop(L, 1);
+}
+
+
+/* utility functions */
+const char *luaT_classrootname(const char *tname)
+{
+  int i;
+  int sz = strlen(tname);
+
+  for(i = 0; i < sz; i++)
+  {
+    if(tname[i] == '.')
+      return tname+i+1;
+  }
+  return tname;
+}
+
+const char *luaT_classmodulename(const char *tname)
+{
+  static char luaT_class_module_name[256];
+  int i;
+
+  strncpy(luaT_class_module_name, tname, 256);
+  for(i = 0; i < 256; i++)
+  {
+    if(luaT_class_module_name[i] == '\0')
+      break;
+    if(luaT_class_module_name[i] == '.')
+    {
+      luaT_class_module_name[i] = '\0';
+      return luaT_class_module_name;
+    }
+  }
+  return NULL;
 }
 
 /* Lua only functions */
@@ -451,9 +408,14 @@ int luaT_lua_newmetatable(lua_State *L)
     /* create the metatable */
     lua_newtable(L);
 
-    /* register it in the REGISTRY */
+    /* registry[name] = metatable */
     lua_pushvalue(L, -1);
     lua_setfield(L, LUA_REGISTRYINDEX, tname);
+
+    /* registry[metatable] = tname */
+    lua_pushvalue(L, -1);
+    lua_pushstring(L, tname);
+    lua_rawset(L, LUA_REGISTRYINDEX);
 
     /* __index handling */
     lua_pushcfunction(L, luaT_rmt__index);
@@ -670,29 +632,13 @@ int luaT_lua_typename(lua_State *L)
   return 0;
 }
 
-int luaT_lua_id(lua_State *L)
-{
-  return luaT_lua_typename(L);
-}
-
-int luaT_lua_typename2id(lua_State *L)
-{
-  const char* typename = luaL_checkstring(L, 1);
-  const char* id = luaT_typename2id(L, typename);
-  if(id)
-    lua_pushlightuserdata(L, (void*)id);
-  else
-    lua_pushnil(L);
-  return 1;
-}
-
 int luaT_lua_isequal(lua_State *L)
 {
   if(lua_isuserdata(L, 1) && lua_isuserdata(L, 2))
   {
     void **u1, **u2;
-    luaL_argcheck(L, luaT_id(L, 1), 1, "Torch object expected");
-    luaL_argcheck(L, luaT_id(L, 2), 2, "Torch object expected");
+    luaL_argcheck(L, luaT_typename(L, 1), 1, "Torch object expected");
+    luaL_argcheck(L, luaT_typename(L, 2), 2, "Torch object expected");
 
     u1 = lua_touserdata(L, 1);
     u2 = lua_touserdata(L, 2);
@@ -954,3 +900,44 @@ int luaT_cmt__newindex(lua_State *L)
 
   return 0;
 }
+
+/******************** deprecated functions ********************/
+int luaT_pushmetaclass(lua_State *L, const char *tname)
+{
+  return luaT_pushmetatable(L, tname);
+}
+
+const char* luaT_id(lua_State *L, int ud)
+{
+  return luaT_typename(L, ud);
+}
+
+const char* luaT_id2typename(lua_State *L, const char *id)
+{
+  return id;
+}
+
+const char* luaT_typename2id(lua_State *L, const char *tname)
+{
+  return luaT_typenameid(L, tname);
+}
+
+int luaT_getmetaclass(lua_State *L, int index)
+{
+  return lua_getmetatable(L, index);
+}
+
+const char* luaT_checktypename2id(lua_State *L, const char *tname)
+{
+  const char* id = luaT_typenameid(L, tname);
+  if(!id)
+    luaL_error(L, "unknown class <%s>", tname);
+  return id;
+}
+
+void luaT_registeratid(lua_State *L, const struct luaL_Reg *methods, const char *id)
+{
+  luaT_registeratname(L, methods, id);
+}
+
+/**************************************************************/
