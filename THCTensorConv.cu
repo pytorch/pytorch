@@ -907,6 +907,7 @@ TH_API void THCudaTensor_conv2DRevgerm(THCudaTensor *output, float beta, float a
 
 ///////////////////////////////////
 ///// ConvolutionMap
+#define CUDA_SHARED_MEM_SIZE 0
   /*
    * Description:
    *   base conv2D routine: 3D input, 3D output, 4D kernel
@@ -977,11 +978,11 @@ TH_API void THCudaTensor_conv2DRevgerm(THCudaTensor *output, float beta, float a
             for(yy = yy_start; yy < yy_end; yy+=yy_step) {
               for(xx = xx_start; xx < xx_end; xx+=xx_step) {
                 // Dot product in two dimensions... (between input image and the mask)
-                float *input_p = input + ((long)table[ii])*input_h*input_w 
+                float *input_p = input + ((long)table[ii]-1)*input_h*input_w 
                   + yy*stride_h*input_w + xx*stride_w;
                 float *output_p = output + oo*output_h*output_w + yy*output_w + xx;
                 float *kernel_p = shared_kernel 
-                  + ((long)table[ii + 1]) *kernel_w*kernel_h + koffset;
+                  + ((long)table[ii + 1]-1) *kernel_w*kernel_h + koffset;
                 float sum = 0;
                 if (swapkernel) {
 #pragma unroll
@@ -1014,12 +1015,12 @@ TH_API void THCudaTensor_conv2DRevgerm(THCudaTensor *output, float beta, float a
             for(yy = yy_start; yy < yy_end; yy+=yy_step) {
               for(xx = xx_start; xx < xx_end; xx+=xx_step) {
                 // Dot product in two dims (between input image and the mask)
-                float *input_p = input + ((long)table[ii])*input_h*input_w 
+                float *input_p = input + ((long)table[ii]-1)*input_h*input_w 
                   + yy*stride_h*input_w + xx*stride_w;
                 float *output_p = output + oo*output_h*output_w + yy*output_w 
                   + xx;
                 float *kernel_p = shared_kernel 
-                  + (((long)table[ii]) % fanin) * kernel_w * kernel_h + koffset;
+                  + (((long)table[ii]-1) % fanin) * kernel_w * kernel_h + koffset;
                 float sum = 0;
                 if (swapkernel) {
                   for(ky = 0; ky < kernel_h; ky++) {
@@ -1053,10 +1054,10 @@ TH_API void THCudaTensor_conv2DRevgerm(THCudaTensor *output, float beta, float a
           for(yy = yy_start; yy < yy_end; yy+=yy_step) {
             for(xx = xx_start; xx < xx_end; xx+=xx_step) {
               // Dot product in two dimensions... (between input image and the mask)
-              float *input_p = input + ((long)table[ii])*input_h*input_w 
+              float *input_p = input + ((long)table[ii]-1)*input_h*input_w 
                 + yy*stride_h*input_w + xx*stride_w;
               float *output_p = output + oo*output_h*output_w + yy*output_w + xx;
-              float *kernel_p = kernel + ((long)table[ii + 1]) *kernel_w*kernel_h + koffset;
+              float *kernel_p = kernel + ((long)table[ii + 1]-1) *kernel_w*kernel_h + koffset;
               float sum = 0;
               if (swapkernel) {
                 for(ky = 0; ky < kernel_h; ky++) {
@@ -1084,7 +1085,6 @@ TH_API void THCudaTensor_conv2DRevgerm(THCudaTensor *output, float beta, float a
   }
 
 
-
 /*
  * API-compatible with THRealTensor_conv2Dmv
  * 3D input, 4D kernel, 3D output
@@ -1098,28 +1098,29 @@ TH_API void THCudaTensor_conv2Dmap(THCudaTensor *output, THCudaTensor *input,
   long nKernelRows, nKernelCols;
   long nOutputPlane, nOutputRows, nOutputCols;
 
-  THArgCheck(kernel->nDimension == 4 , 4, "kernel: 4D Tensor expected");
+  THArgCheck(kernel->nDimension == 3 , 4, "kernel: 3D Tensor expected");
   THArgCheck(stride_x >= 1, 5, "Stride should be a positive integer");
   THArgCheck(stride_y >= 1, 6, "Stride should be a positive integer");
 
   input = THCudaTensor_newContiguous(input);
   kernel = THCudaTensor_newContiguous(kernel);
+  table = THCudaTensor_newContiguous(table);
 
   nInputPlane = input->size[0];
   nInputRows  = input->size[1];
   nInputCols  = input->size[2];
 
-  nKernelRows  = kernel->size[2];
-  nKernelCols  = kernel->size[3];
-  nOutputPlane = kernel->size[0];
-  THArgCheck(kernel->size[1] == nInputPlane, 2, "invalid number of input planes");
+  nKernelRows  = kernel->size[1];
+  nKernelCols  = kernel->size[2];
+  nOutputPlane = kernel->size[0] / fanin;
+  // THArgCheck(kernel->size[1] == nInputPlane, 2, "invalid number of input planes");
 
   THArgCheck( (nInputRows >= nKernelRows && nInputCols >= nKernelCols), 2,
               "conv2Dmap : Input image is smaller than kernel");
 
   // output dims
-  nOutputRows = (nInputRows - nKernelRows) / stride_x + 1;
-  nOutputCols = (nInputCols - nKernelCols) / stride_y + 1;
+  nOutputRows = (nInputRows - nKernelRows) / stride_y + 1;
+  nOutputCols = (nInputCols - nKernelCols) / stride_x + 1;
 
   // long nelem = THCudaTensor_nElement(output);
   THCudaTensor_resize3d(output, nOutputPlane, nOutputRows, nOutputCols);
