@@ -907,7 +907,6 @@ TH_API void THCudaTensor_conv2DRevgerm(THCudaTensor *output, float beta, float a
 
 ///////////////////////////////////
 ///// ConvolutionMap
-#define CUDA_SHARED_MEM_SIZE 0
   /*
    * Description:
    *   base conv2D routine: 3D input, 3D output, 4D kernel
@@ -923,7 +922,7 @@ TH_API void THCudaTensor_conv2DRevgerm(THCudaTensor *output, float beta, float a
   __global__ void conv2mapgeneric(float *input, float *kernel, float *output,
                                   int input_n, int input_h, int input_w,
                                   int kernel_n, int kernel_h, int kernel_w,
-                                  int stride_h, int stride_w,
+                                  int stride_w, int stride_h,
                                   float *table, int fanin)
   {
     // output dimensions
