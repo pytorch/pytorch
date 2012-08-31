@@ -984,17 +984,13 @@ a specific dimension ''d'', in **descending** order.
 ====  [res] torch.std([res,] x, [flag] [dim]) ====
 {{anchor:torch.std}}
 
-''y=torch.std(x)'' returns the standard deviation of the elements of
-x.
+''y=torch.std(x)'' returns the standard deviation of the elements of x.
 
-''torch.std(x)'' normalizes by (n-1) where n is the number of elements.
+''y=torch.std(x,dim)'' performs the std operation over the dimension dim.
 
-''y=torch.std(x,true)'' performs the std operation normalizing by n instead of n-1.
+''y=torch.std(x,dim,false)'' performs the std operation normalizing by n-1 (this is the default).
 
-''y=torch.std(x,false)'' performs the std operation normalizing by n-1.
-
-''y=torch.std(x,flag,n)'' performs the std operation over the dimension n.
-
+''y=torch.std(x,dim,true)'' performs the std operation normalizing by n instead of n-1.
 
 ====  [res] torch.sum([res,] x) ====
 {{anchor:torch.sum}}
@@ -1009,13 +1005,11 @@ x.
 
 ''y=torch.var(x)'' returns the variance of the elements of x.
 
-''torch.var(x)'' normalizes by (n-1) where n is the number of elements.
+''y=torch.var(x,dim)'' performs the var operation over the dimension dim.
 
-''y=torch.var(x,true)'' performs the var operation normalizing by n instead of n-1.
+''y=torch.var(x,dim,false)'' performs the var operation normalizing by n-1 (this is the default).
 
-''y=torch.var(x,false)'' performs the var operation normalizing by n-1.
-
-''y=torch.var(x,flag,n)'' performs the var operation over the dimension n.
+''y=torch.var(x,dim,true)'' performs the var operation normalizing by n instead of n-1.
 
 =====  Matrix-wide operations  (tensor-wide operations) =====
 {{anchor:torch.matrixwide.dok}}
