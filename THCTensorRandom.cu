@@ -7,8 +7,6 @@
 #include <thrust/reduce.h>
 #include <thrust/inner_product.h>
 
-#include <curand_kernel.h>
-
 /* The initial seed. */
 static unsigned long the_initial_seed = 0;
 static int initf = 0;
