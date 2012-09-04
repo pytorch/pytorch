@@ -12,6 +12,7 @@
 /* The initial seed. */
 __device__ static unsigned long the_initial_seed = 0;
 __device__ static int initf = 0;
+__device__ static thrust::default_random_engine rng;
 
 /* Seeds */
 __host__ __device__ unsigned long THCRandom_seed()
@@ -24,6 +25,7 @@ __host__ __device__ unsigned long THCRandom_seed()
 __host__ __device__ void THCRandom_manualSeed(unsigned long the_seed_)
 {
   the_initial_seed = the_seed_;
+  rng.seed(the_initial_seed);
 }
 
 __host__ __device__ unsigned long THCRandom_initialSeed()
@@ -36,7 +38,6 @@ __host__ __device__ unsigned long THCRandom_initialSeed()
 
 __host__ __device__ unsigned long THCRandom_random()
 {
-  thrust::default_random_engine rng(the_initial_seed);
   thrust::uniform_int_distribution<unsigned long> ufm(0,(((unsigned long)1)<<31)-1);
   return ufm(rng);
 }
@@ -44,7 +45,6 @@ __host__ __device__ unsigned long THCRandom_random()
 /* generates a random number on [0,1)-double-interval */
 __host__ __device__ static double __uniform__()
 {
-  thrust::default_random_engine rng(the_initial_seed);
   thrust::uniform_real_distribution<double> ufm(0,1);
   return ufm(rng);
 }
@@ -69,7 +69,6 @@ __host__ __device__ double THCRandom_uniform(double a, double b)
 __host__ __device__ double THCRandom_normal(double mean, double stdv)
 {
   //THArgCheck(stdv > 0, 2, "standard deviation must be strictly positive");
-  thrust::default_random_engine rng(the_initial_seed);
   thrust::random::experimental::normal_distribution<double> normal(mean,stdv);
   return normal(rng);
 }
