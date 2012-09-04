@@ -620,14 +620,14 @@ static void THTensor_random1__(THTensor *self, long b)
         'THRandom_random',
         {{name='long', creturned=true}},
         cname("random2__"),
-        {{name=Tensor},
+        {{name=Tensor, returned=true},
          {name='long'},
          {name='long'}},
         cname("random1__"),
-        {{name=Tensor},
+        {{name=Tensor, returned=true},
          {name='long'}},
         cname("random"),
-        {{name=Tensor}})
+        {{name=Tensor, returned=true}})
 
    for _,f in ipairs({{name='geometric'},
                       {name='bernoulli', a=0.5}}) do
