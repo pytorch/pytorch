@@ -51,4 +51,7 @@ TH_API float THCudaTensor_stdall(THCudaTensor *self);
 TH_API float THCudaTensor_norm(THCudaTensor *self, float value);
 TH_API float THCudaTensor_dist(THCudaTensor *self, THCudaTensor *src, float value);
 
+TH_API void THCudaTensor_rand(THCudaTensor *r_, THLongStorage *size);
+TH_API void THCudaTensor_randn(THCudaTensor *r_, THLongStorage *size);
+
 #endif

@@ -5,3 +5,4 @@
 #include "THCTensorCopy.cu"
 #include "THCTensorMath.cu"
 #include "THCTensorConv.cu"
+#include "THCTensorRandom.cu"

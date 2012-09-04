@@ -1,5 +1,6 @@
 #include "THCTensorMath.h"
 #include "THCGeneral.h"
+#include "THCTensorRandom.h"
 
 #include <thrust/fill.h>
 #include <thrust/functional.h>
@@ -594,4 +595,16 @@ float THCudaTensor_dist(THCudaTensor *self, THCudaTensor *src, float value)
   THCudaTensor_free(self);
   
   return pow(result, (float)1.0/value);
+}
+
+void THCudaTensor_rand(THCudaTensor *r_, THLongStorage *size)
+{
+  THCudaTensor_resize(r_, size, NULL);
+  THCudaTensor_uniform(r_, 0, 1);
+}
+
+void THCudaTensor_randn(THCudaTensor *r_, THLongStorage *size)
+{
+  THCudaTensor_resize(r_, size, NULL);
+  THCudaTensor_normal(r_, 0, 1);
 }

@@ -1,5 +1,5 @@
 SET(src 
-  THCGeneral.c THCStorage.c THCTensor.c THCTensorCopy.c)
+   THCGeneral.c THCStorage.c THCTensor.c THCTensorCopy.c)
 
 SET(src-cuda THC.cu)
 
