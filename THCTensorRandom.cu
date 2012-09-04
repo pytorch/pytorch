@@ -10,25 +10,27 @@
 #include <curand_kernel.h>
 
 /* The initial seed. */
-__device__ static unsigned long the_initial_seed = 0;
-__device__ static int initf = 0;
-__device__ static thrust::default_random_engine rng;
+static unsigned long the_initial_seed = 0;
+static int initf = 0;
+__device__ static thrust::minstd_rand * rng = NULL;
 
 /* Seeds */
-__host__ __device__ unsigned long THCRandom_seed()
+__host__ unsigned long THCRandom_seed()
 {
-  unsigned long s = (unsigned long)0; // TODO: this should be random
+  unsigned long s = (unsigned long)1; // TODO: this should be random
   THCRandom_manualSeed(s);
   return s;
 }
 
-__host__ __device__ void THCRandom_manualSeed(unsigned long the_seed_)
+__host__ void THCRandom_manualSeed(unsigned long the_seed_)
 {
   the_initial_seed = the_seed_;
-  rng.seed(the_initial_seed);
+  if (rng==NULL) rng = new thrust::minstd_rand(the_initial_seed);
+  else rng->seed(the_initial_seed);
+  initf = 1;
 }
 
-__host__ __device__ unsigned long THCRandom_initialSeed()
+__host__ unsigned long THCRandom_initialSeed()
 {
   if(initf == 0) {
     THCRandom_seed();
@@ -39,14 +41,14 @@ __host__ __device__ unsigned long THCRandom_initialSeed()
 __host__ __device__ unsigned long THCRandom_random()
 {
   thrust::uniform_int_distribution<unsigned long> ufm(0,(((unsigned long)1)<<31)-1);
-  return ufm(rng);
+  return ufm(*rng);
 }
 
 /* generates a random number on [0,1)-double-interval */
 __host__ __device__ static double __uniform__()
 {
   thrust::uniform_real_distribution<double> ufm(0,1);
-  return ufm(rng);
+  return ufm(*rng);
 }
 
 __host__ __device__ unsigned long THCRandom_random1(long b)
@@ -70,7 +72,7 @@ __host__ __device__ double THCRandom_normal(double mean, double stdv)
 {
   //THArgCheck(stdv > 0, 2, "standard deviation must be strictly positive");
   thrust::random::experimental::normal_distribution<double> normal(mean,stdv);
-  return normal(rng);
+  return normal(*rng);
 }
 
 __host__ __device__ double THCRandom_exponential(double lambda)
@@ -105,9 +107,7 @@ __host__ __device__ int THCRandom_bernoulli(double p)
 
 struct random_functor
 {
-  const float value;
-
-  random_functor(float value_) : value(value_) {}
+  random_functor() {}
 
   __host__ __device__ float operator()(const float& x) const
   {
@@ -120,7 +120,7 @@ TH_API void THCudaTensor_random(THCudaTensor *self_) {
   long size = THCudaTensor_nElement(self);
   thrust::device_ptr<float> self_data(THCudaTensor_data(self));
   
-  thrust::transform(self_data, self_data+size, self_data, random_functor(0.0));
+  thrust::transform(self_data, self_data+size, self_data, random_functor());
 
   THCudaTensor_freeCopyTo(self, self_);
 };
