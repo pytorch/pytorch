@@ -23,9 +23,15 @@ __host__ unsigned long THCRandom_seed()
 __host__ void THCRandom_manualSeed(unsigned long the_seed_)
 {
   the_initial_seed = the_seed_;
-  if (rng==NULL) rng = new thrust::minstd_rand(the_initial_seed);
-  else rng->seed(the_initial_seed);
-  initf = 1;
+  if (initf == 0) {
+    cudaMalloc(&rng, sizeof(thrust::minstd_rand));
+    thrust::minstd_rand rnghost(the_initial_seed);
+    cudaMemcpy(rng, &rnghost, sizeof(thrust::minstd_rand), cudaMemcpyHostToDevice);
+    cudaThreadSynchronize();
+    initf = 1;
+  } else {
+    rng->seed(the_initial_seed);
+  }
 }
 
 __host__ unsigned long THCRandom_initialSeed()
