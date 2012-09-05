@@ -6,11 +6,12 @@
 #include <thrust/functional.h>
 #include <thrust/reduce.h>
 #include <thrust/inner_product.h>
+#include <thrust/sequence.h>
 
 /* The initial seed. */
-static unsigned long the_initial_seed = 0;
-static int initf = 0;
-__device__ static thrust::minstd_rand * rng = NULL;
+__device__ static int initf = 0;
+__device__ static unsigned long the_initial_seed = 0;
+__device__ static unsigned long step = 0;
 
 /* Seeds */
 __host__ unsigned long THCRandom_seed()
@@ -23,36 +24,28 @@ __host__ unsigned long THCRandom_seed()
 __host__ void THCRandom_manualSeed(unsigned long the_seed_)
 {
   the_initial_seed = the_seed_;
-  if (initf == 0) {
-    cudaMalloc(&rng, sizeof(thrust::minstd_rand));
-    thrust::minstd_rand rnghost(the_initial_seed);
-    cudaMemcpy(rng, &rnghost, sizeof(thrust::minstd_rand), cudaMemcpyHostToDevice);
-    cudaThreadSynchronize();
-    initf = 1;
-  } else {
-    rng->seed(the_initial_seed);
-  }
+  initf = 1;
 }
 
 __host__ unsigned long THCRandom_initialSeed()
 {
-  if(initf == 0) {
-    THCRandom_seed();
-  }
+  if(initf == 0) THCRandom_seed();
   return the_initial_seed;
 }
 
 __host__ __device__ unsigned long THCRandom_random()
 {
+  thrust::default_random_engine rng(the_initial_seed); rng.discard(step++);
   thrust::uniform_int_distribution<unsigned long> ufm(0,(((unsigned long)1)<<31)-1);
-  return ufm(*rng);
+  return ufm(rng);
 }
 
 /* generates a random number on [0,1)-double-interval */
 __host__ __device__ static double __uniform__()
 {
+  thrust::default_random_engine rng(the_initial_seed); rng.discard(step++);
   thrust::uniform_real_distribution<double> ufm(0,1);
-  return ufm(*rng);
+  return ufm(rng);
 }
 
 __host__ __device__ unsigned long THCRandom_random1(long b)
@@ -75,8 +68,9 @@ __host__ __device__ double THCRandom_uniform(double a, double b)
 __host__ __device__ double THCRandom_normal(double mean, double stdv)
 {
   //THArgCheck(stdv > 0, 2, "standard deviation must be strictly positive");
+  thrust::default_random_engine rng(the_initial_seed); rng.discard(step++);
   thrust::random::experimental::normal_distribution<double> normal(mean,stdv);
-  return normal(*rng);
+  return normal(rng);
 }
 
 __host__ __device__ double THCRandom_exponential(double lambda)
@@ -91,10 +85,12 @@ __host__ __device__ double THCRandom_cauchy(double median, double sigma)
 
 __host__ __device__ double THCRandom_logNormal(double mean, double stdv)
 {
+  //THArgCheck(stdv > 0, 2, "standard deviation must be strictly positive");
   double zm = mean*mean;
   double zs = stdv*stdv;
-  //THArgCheck(stdv > 0, 2, "standard deviation must be strictly positive");
-  return(exp(THCRandom_normal(log(zm/sqrt(zs + zm)), sqrt(log(zs/zm+1)) )));
+  thrust::default_random_engine rng(the_initial_seed); rng.discard(step++);
+  thrust::random::experimental::normal_distribution<double> normal(log(zm/sqrt(zs + zm)), sqrt(log(zs/zm+1)));
+  return exp(normal(rng));
 }
 
 __host__ __device__ int THCRandom_geometric(double p)
@@ -115,7 +111,10 @@ struct random_functor
 
   __host__ __device__ float operator()(const float& x) const
   {
-    return (float)(THCRandom_random() % ((1UL << FLT_MANT_DIG)+1));
+    thrust::default_random_engine rng(the_initial_seed); rng.discard(x);
+    thrust::uniform_int_distribution<unsigned long> ufm(0,(((unsigned long)1)<<31)-1);
+    unsigned long r = ufm(rng);
+    return (float)(r % ((1UL << FLT_MANT_DIG)+1));
   }
 };
 
@@ -123,7 +122,8 @@ TH_API void THCudaTensor_random(THCudaTensor *self_) {
   THCudaTensor *self = THCudaTensor_newContiguous(self_);
   long size = THCudaTensor_nElement(self);
   thrust::device_ptr<float> self_data(THCudaTensor_data(self));
-  
+
+  thrust::sequence(self_data, self_data+size, step+=size);
   thrust::transform(self_data, self_data+size, self_data, random_functor());
 
   THCudaTensor_freeCopyTo(self, self_);
@@ -137,7 +137,10 @@ struct random1_functor
 
   __host__ __device__ float operator()(const float& x) const
   {
-    return (float)(THCRandom_random() % b + 1);
+    thrust::default_random_engine rng(the_initial_seed); rng.discard(x);
+    thrust::uniform_int_distribution<unsigned long> ufm(0,(((unsigned long)1)<<31)-1);
+    unsigned long r = ufm(rng);
+    return (float)(r % b + 1);
   }
 };
 
@@ -145,7 +148,8 @@ TH_API void THCudaTensor_random1(THCudaTensor *self_, long b) {
   THCudaTensor *self = THCudaTensor_newContiguous(self_);
   long size = THCudaTensor_nElement(self);
   thrust::device_ptr<float> self_data(THCudaTensor_data(self));
-  
+
+  thrust::sequence(self_data, self_data+size, step+=size);
   thrust::transform(self_data, self_data+size, self_data, random1_functor(b));
 
   THCudaTensor_freeCopyTo(self, self_);
@@ -159,7 +163,10 @@ struct random2_functor
 
   __host__ __device__ float operator()(const float& x) const
   {
-    return (float)((THCRandom_random() % (b+1-a)) + a);
+    thrust::default_random_engine rng(the_initial_seed); rng.discard(x);
+    thrust::uniform_int_distribution<unsigned long> ufm(0,(((unsigned long)1)<<31)-1);
+    unsigned long r = ufm(rng);
+    return (float)((r % (b+1-a)) + a);
   }
 };
 
@@ -168,6 +175,7 @@ TH_API void THCudaTensor_random2(THCudaTensor *self_, long a, long b) {
   long size = THCudaTensor_nElement(self);
   thrust::device_ptr<float> self_data(THCudaTensor_data(self));
   
+  thrust::sequence(self_data, self_data+size, step+=size);
   thrust::transform(self_data, self_data+size, self_data, random2_functor(a,b));
 
   THCudaTensor_freeCopyTo(self, self_);
@@ -181,15 +189,18 @@ struct bernoulli_functor
 
   __host__ __device__ float operator()(const float& x) const
   {
-    return (float)(THCRandom_bernoulli(p));
+    thrust::default_random_engine rng(the_initial_seed); rng.discard(x);
+    thrust::uniform_real_distribution<float> uniform(0,1);
+    return (float)(uniform(rng) <= p);
   }
 };
 
-TH_API void THCudaTensor_bernoulli(THCudaTensor *self_, float p) {
+TH_API void THCudaTensor_bernoulli(THCudaTensor *self_, double p) {
   THCudaTensor *self = THCudaTensor_newContiguous(self_);
   long size = THCudaTensor_nElement(self);
   thrust::device_ptr<float> self_data(THCudaTensor_data(self));
   
+  thrust::sequence(self_data, self_data+size, step+=size);
   thrust::transform(self_data, self_data+size, self_data, bernoulli_functor(p));
 
   THCudaTensor_freeCopyTo(self, self_);
@@ -203,7 +214,9 @@ struct uniform_functor
 
   __host__ __device__ float operator()(const float& x) const
   {
-    return (float)(THCRandom_uniform(a,b));
+    thrust::default_random_engine rng(the_initial_seed); rng.discard(x);
+    thrust::uniform_real_distribution<float> uniform(a,b);
+    return uniform(rng);
   }
 };
 
@@ -212,6 +225,7 @@ TH_API void THCudaTensor_uniform(THCudaTensor *self_, double a, double b) {
   long size = THCudaTensor_nElement(self);
   thrust::device_ptr<float> self_data(THCudaTensor_data(self));
   
+  thrust::sequence(self_data, self_data+size, step+=size);
   thrust::transform(self_data, self_data+size, self_data, uniform_functor(a,b));
 
   THCudaTensor_freeCopyTo(self, self_);
@@ -221,11 +235,15 @@ struct normal_functor
 {
   const double mean,stdv;
 
-  normal_functor(double mean_, double stdv_) : mean(mean_),stdv(stdv_) {}
+  normal_functor(double mean_, double stdv_)
+    : mean(mean_),stdv(stdv_) {}
 
-  __host__ __device__ float operator()(const float& x) const
+  __host__ __device__ 
+  float operator()(const float& x) const
   {
-    return (float)(THCRandom_normal(mean,stdv));
+    thrust::default_random_engine rng(the_initial_seed); rng.discard(x);
+    thrust::random::experimental::normal_distribution<float> normal(mean,stdv);
+    return normal(rng);
   }
 };
 
@@ -233,26 +251,114 @@ TH_API void THCudaTensor_normal(THCudaTensor *self_, double mean, double stdv) {
   THCudaTensor *self = THCudaTensor_newContiguous(self_);
   long size = THCudaTensor_nElement(self);
   thrust::device_ptr<float> self_data(THCudaTensor_data(self));
-  
+
+  thrust::sequence(self_data, self_data+size, step+=size);
   thrust::transform(self_data, self_data+size, self_data, normal_functor(mean,stdv));
 
   THCudaTensor_freeCopyTo(self, self_);
 };
 
-// TODO: implement these guys:
+struct geometric_functor
+{
+  const double p;
 
-TH_API void THCudaTensor_geometric(THCudaTensor *self_, float p) {
-  //TH_TENSOR_APPLY(real, self, *self_data = (real)THCRandom_geometric(p););
+  geometric_functor(double p_) : p(p_) {}
+
+  __host__ __device__ float operator()(const float& x) const
+  {
+    thrust::default_random_engine rng(the_initial_seed); rng.discard(x);
+    thrust::uniform_real_distribution<float> uniform(0,1);
+    float u = uniform(rng);
+    return (float)((log(1-u) / log(p)) + 1);
+  }
+};
+
+TH_API void THCudaTensor_geometric(THCudaTensor *self_, double p) {
+  THCudaTensor *self = THCudaTensor_newContiguous(self_);
+  long size = THCudaTensor_nElement(self);
+  thrust::device_ptr<float> self_data(THCudaTensor_data(self));
+  
+  thrust::sequence(self_data, self_data+size, step+=size);
+  thrust::transform(self_data, self_data+size, self_data, geometric_functor(p));
+
+  THCudaTensor_freeCopyTo(self, self_);
+};
+
+struct exponential_functor
+{
+  const double lambda;
+
+  exponential_functor(double lambda_) : lambda(lambda_) {}
+
+  __host__ __device__ float operator()(const float& x) const
+  {
+    thrust::default_random_engine rng(the_initial_seed); rng.discard(x);
+    thrust::uniform_real_distribution<float> uniform(0,1);
+    float u = uniform(rng);
+    return (float)(-1. / lambda * log(1-u));
+  }
 };
 
 TH_API void THCudaTensor_exponential(THCudaTensor *self_, double lambda) {
-  //TH_TENSOR_APPLY(real, self, *self_data = (real)THCRandom_exponential(lambda););
+  THCudaTensor *self = THCudaTensor_newContiguous(self_);
+  long size = THCudaTensor_nElement(self);
+  thrust::device_ptr<float> self_data(THCudaTensor_data(self));
+  
+  thrust::sequence(self_data, self_data+size, step+=size);
+  thrust::transform(self_data, self_data+size, self_data, exponential_functor(lambda));
+
+  THCudaTensor_freeCopyTo(self, self_);
+};
+
+struct cauchy_functor
+{
+  const double median,sigma;
+
+  cauchy_functor(double median_, double sigma_) : median(median_),sigma(sigma_) {}
+
+  __host__ __device__ float operator()(const float& x) const
+  {
+    thrust::default_random_engine rng(the_initial_seed); rng.discard(x);
+    thrust::uniform_real_distribution<float> uniform(0,1);
+    float u = uniform(rng);
+    return (float)(median + sigma * tan(M_PI*(u-0.5)));
+  }
 };
 
 TH_API void THCudaTensor_cauchy(THCudaTensor *self_, double median, double sigma) {
-  //TH_TENSOR_APPLY(real, self, *self_data = (real)THCRandom_cauchy(median, sigma););
+  THCudaTensor *self = THCudaTensor_newContiguous(self_);
+  long size = THCudaTensor_nElement(self);
+  thrust::device_ptr<float> self_data(THCudaTensor_data(self));
+  
+  thrust::sequence(self_data, self_data+size, step+=size);
+  thrust::transform(self_data, self_data+size, self_data, cauchy_functor(median, sigma));
+
+  THCudaTensor_freeCopyTo(self, self_);
+};
+
+struct logNormal_functor
+{
+  const double mean,stdv;
+
+  logNormal_functor(double mean_, double stdv_) : mean(mean_),stdv(stdv_) {}
+
+  __host__ __device__ float operator()(const float& x) const
+  {
+    double zm = mean*mean;
+    double zs = stdv*stdv;
+    thrust::default_random_engine rng(the_initial_seed); rng.discard(x);
+    thrust::random::experimental::normal_distribution<double> normal(log(zm/sqrt(zs + zm)), sqrt(log(zs/zm+1)));
+    return exp(normal(rng));
+  }
 };
 
 TH_API void THCudaTensor_logNormal(THCudaTensor *self_, double mean, double stdv) {
-  //TH_TENSOR_APPLY(real, self, *self_data = (real)THCRandom_logNormal(mean, stdv););
+  THCudaTensor *self = THCudaTensor_newContiguous(self_);
+  long size = THCudaTensor_nElement(self);
+  thrust::device_ptr<float> self_data(THCudaTensor_data(self));
+  
+  thrust::sequence(self_data, self_data+size, step+=size);
+  thrust::transform(self_data, self_data+size, self_data, logNormal_functor(mean, stdv));
+
+  THCudaTensor_freeCopyTo(self, self_);
 };
