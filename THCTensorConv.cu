@@ -1019,7 +1019,7 @@ template <bool swapkernel, int T_kernel_h, int T_kernel_w>
               float *output_p = output + oo*output_h*output_w + yy*output_w 
                 + xx;
               float *kernel_p = shared_kernel 
-                + (((long)table[ii]-1) % fanin) * kernel_w * kernel_h + koffset;
+                + ((long)table[ii + 1]-1) *kernel_w*kernel_h + koffset;
               float sum = 0;
               if (swapkernel) {
                 for(ky = 0; ky < kernel_h; ky++) {
