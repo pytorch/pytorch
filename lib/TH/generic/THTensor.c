@@ -621,16 +621,30 @@ static void THTensor_(rawResize)(THTensor *self, int nDimension, long *size, lon
   int d;
   int nDimension_;
   long totalSize;
+  int hascorrectsize = 1;
 
   nDimension_ = 0;
   for(d = 0; d < nDimension; d++)
   {
     if(size[d] > 0)
+    {
       nDimension_++;
+      if((self->nDimension > d) && (size[d] != self->size[d]))
+        hascorrectsize = 0;
+
+      if((self->nDimension > d) && stride && (stride[d] >= 0) && (stride[d] != self->stride[d]))
+        hascorrectsize = 0;
+    }
     else
       break;
   }
   nDimension = nDimension_;
+
+  if(nDimension != self->nDimension)
+    hascorrectsize = 0;
+
+  if(hascorrectsize)
+    return;
 
   if(nDimension > 0)
   {
