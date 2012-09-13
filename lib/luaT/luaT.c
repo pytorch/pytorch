@@ -479,6 +479,9 @@ int luaT_lua_newmetatable(lua_State *L)
 
     lua_pushcfunction(L, luaT_mt__le);
     lua_setfield(L, -2, "__le");
+
+    lua_pushcfunction(L, luaT_mt__call);
+    lua_setfield(L, -2, "__call");
   }
 
   /* we assign the parent class if necessary */
@@ -821,7 +824,6 @@ static int luaT_mt__newindex(lua_State *L)
       luaL_error(L, "internal error in __" #NAME ": no metatable"); \
                                                                     \
     lua_getfield(L, -1, "__" #NAME "__");                           \
-                                                                    \
     if(lua_isnil(L, -1))                                                \
     {                                                                   \
       NIL_BEHAVIOR;                                                     \
@@ -833,13 +835,16 @@ static int luaT_mt__newindex(lua_State *L)
         lua_insert(L, 1); /* insert function */                         \
         lua_pop(L, 1); /* remove metatable */                           \
         lua_call(L, lua_gettop(L)-1, LUA_MULTRET); /* we return the result of the call */ \
+        return lua_gettop(L);                                           \
       }                                                                 \
       /* we return the thing the user left in __tostring__ */           \
     }                                                                   \
-    return lua_gettop(L);                                               \
+    return 0;                                                           \
   }
 
-MT_DECLARE_OPERATOR(tostring, lua_pushstring(L, luaT_typename(L, 1)))
+MT_DECLARE_OPERATOR(tostring,
+                    lua_pushstring(L, luaT_typename(L, 1));
+                    return 1;)
 MT_DECLARE_OPERATOR(add, luaL_error(L, "%s has no addition operator", luaT_typename(L, 1)))
 MT_DECLARE_OPERATOR(sub, luaL_error(L, "%s has no substraction operator", luaT_typename(L, 1)))
 MT_DECLARE_OPERATOR(mul, luaL_error(L, "%s has no multiplication operator", luaT_typename(L, 1)))
@@ -853,7 +858,8 @@ MT_DECLARE_OPERATOR(eq,
                     lua_settop(L, 2);
                     lua_pushcfunction(L, luaT_lua_isequal);
                     lua_insert(L, 1);
-                    lua_call(L, 2, 1);)
+                    lua_call(L, 2, 1);
+                    return 1;)
 MT_DECLARE_OPERATOR(lt, luaL_error(L, "%s has no lower than operator", luaT_typename(L, 1)))
 MT_DECLARE_OPERATOR(le, luaL_error(L, "%s has no lower or equal than operator", luaT_typename(L, 1)))
 MT_DECLARE_OPERATOR(call, luaL_error(L, "%s has no call operator", luaT_typename(L, 1)))
