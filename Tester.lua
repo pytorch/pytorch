@@ -52,7 +52,7 @@ function Tester:assertTensorEq(ta, tb, condition, message)
 end
 
 function Tester:assertTableEq(ta, condition, message)
-   self:assert_sub(unpack(ta) == unpack(condition), string.format('%s\n%s  val=%s, condition=%s',message,' TensorEQ(~=) violation ', tostring(err), tostring(condition)))
+   self:assert_sub(unpack(ta) == unpack(condition), string.format('%s\n%s val=%s, condition=%s',message,' TableEQ(~=) violation ', tostring(err), tostring(condition)))
 end
 
 function Tester:pcall(f)
