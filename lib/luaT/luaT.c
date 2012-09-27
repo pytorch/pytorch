@@ -604,11 +604,14 @@ int luaT_lua_newmetatable(lua_State *L)
 int luaT_lua_factory(lua_State *L)
 {
   const char* tname = luaL_checkstring(L, 1);
-  luaT_pushmetatable(L, tname);
-  if(!lua_isnil(L, -1))
+  if(luaT_pushmetatable(L, tname) && !lua_isnil(L, -1))
   {
     lua_pushstring(L, "__factory");
     lua_rawget(L, -2);
+  }
+  else
+  {
+    lua_pushnil(L);
   }
   return 1;
 }
