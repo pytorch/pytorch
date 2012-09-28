@@ -41,16 +41,16 @@ static void luaTorchErrorHandlerFunction(const char *msg)
   luaL_error(globalL, msg);
 }
 
-static void luaTorchArgCheckHandlerFunction(int condition, int argNumber, const char *msg)
+static void luaTorchArgErrorHandlerFunction(int argNumber, const char *msg)
 {
-  luaL_argcheck(globalL, condition, argNumber, msg);
+  luaL_argcheck(globalL, 0, argNumber, msg);
 }
 
 DLL_EXPORT int luaopen_libtorch(lua_State *L)
 {
   globalL = L;
   THSetErrorHandler(luaTorchErrorHandlerFunction);
-  THSetArgCheckHandler(luaTorchArgCheckHandlerFunction);
+  THSetArgErrorHandler(luaTorchArgErrorHandlerFunction);
 
   lua_newtable(L);
   lua_pushvalue(L, -1);
