@@ -2,6 +2,16 @@
 #define TH_GENERIC_FILE "generic/THStorage.c"
 #else
 
+real* THStorage_(data)(const THStorage *self)
+{
+  return self->data;
+}
+
+long THStorage_(size)(const THStorage *self)
+{
+  return self->size;
+}
+
 THStorage* THStorage_(new)(void)
 {
   return THStorage_(newWithSize)(0);
