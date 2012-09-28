@@ -32,30 +32,29 @@ void THSetErrorHandler( void (*torchErrorHandlerFunction_)(const char *msg) )
 }
 
 /* Torch Arg Checking Handling */
-static void defaultTorchArgCheckHandlerFunction(int condition, int argNumber, const char *msg)
+static void defaultTorchArgErrorHandlerFunction(int argNumber, const char *msg)
 {
-  if(!condition)
-  {
-    if(msg)
-      printf("$ Invalid argument %d: %s\n", argNumber, msg);
-    else
-      printf("$ Invalid argument %d\n", argNumber);
-    exit(-1);
-  }
+  if(msg)
+    printf("$ Invalid argument %d: %s\n", argNumber, msg);
+  else
+    printf("$ Invalid argument %d\n", argNumber);
+  exit(-1);
 }
-static void (*torchArgCheckHandlerFunction)(int condition, int argNumber, const char *msg) = defaultTorchArgCheckHandlerFunction;
+
+static void (*torchArgErrorHandlerFunction)(int argNumber, const char *msg) = defaultTorchArgErrorHandlerFunction;
 
 void THArgCheck(int condition, int argNumber, const char *msg)
 {
-  (*torchArgCheckHandlerFunction)(condition, argNumber, msg);
+  if(!condition)
+    (*torchArgErrorHandlerFunction)(argNumber, msg);
 }
 
-void THSetArgCheckHandler( void (*torchArgCheckHandlerFunction_)(int condition, int argNumber, const char *msg) )
+void THSetArgErrorHandler( void (*torchArgErrorHandlerFunction_)(int argNumber, const char *msg) )
 {
-  if(torchArgCheckHandlerFunction_)
-    torchArgCheckHandlerFunction = torchArgCheckHandlerFunction_;
+  if(torchArgErrorHandlerFunction_)
+    torchArgErrorHandlerFunction = torchArgErrorHandlerFunction_;
   else
-    torchArgCheckHandlerFunction = defaultTorchArgCheckHandlerFunction;
+    torchArgErrorHandlerFunction = defaultTorchArgErrorHandlerFunction;
 }
 
 void* THAlloc(long size)
