@@ -19,6 +19,7 @@ useful utilities.
     * [[DiskFile|Disk File]] defines operations on files stored on disk.
     * [[MemoryFile|Memory File]] defines operations on stored in RAM.
     * [[PipeFile|Pipe File]] defines operations for using piped commands.
+    * [[serialization|High-Level File operations]] defines higher-level serialization functions.
   * Useful Utilities
     * [[Timer|Timer]] provides functionality for //measuring time//.
     * [[Tester|Tester]] is a generic tester framework.
