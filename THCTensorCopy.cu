@@ -31,14 +31,21 @@ __global__ void THCudaTensor_kernel_copy(float *dst,
                                          long *dst_sz, long *dst_st, int dst_dim,
                                          float *src,
                                          long *src_sz, long *src_st, int src_dim,
-                                         long n_elem)
+                                         long n_elem, long innerdim)
 {
-  long k = (((blockIdx.y * gridDim.x) + blockIdx.x) * blockDim.x) + threadIdx.x;
-  
-  if(k < n_elem)
+  long k = blockIdx.x*blockDim.y + threadIdx.y;
+
+  long i_start = threadIdx.x * src_st[src_dim-1];
+  long i_step = blockDim.x * src_st[src_dim-1];
+  long i_end = innerdim * src_st[src_dim-1];
+
+  long o_start = threadIdx.x * dst_st[dst_dim-1];
+  long o_step = blockDim.x * dst_st[dst_dim-1];
+
+  if ( ((k+1) * innerdim) <= n_elem) // too safe
   {
     long dst_idx = 0;
-    long dst_rest = k;
+    long dst_rest = k * innerdim;
     for(int dim = 0; dim < dst_dim; dim++)
     {
       dst_idx += (dst_rest/dst_sz[dim])*dst_st[dim];
@@ -46,14 +53,16 @@ __global__ void THCudaTensor_kernel_copy(float *dst,
     }
 
     long src_idx = 0;
-    long src_rest = k;
+    long src_rest = k * innerdim;
     for(int dim = 0; dim < src_dim; dim++)
     {
       src_idx += (src_rest/src_sz[dim])*src_st[dim];
       src_rest = src_rest % src_sz[dim];
     }
 
-    dst[dst_idx] = src[src_idx];
+    for (int i=i_start, o=o_start; i<i_end; i+=i_step, o+=o_step) {
+      dst[dst_idx + o] = src[src_idx + i];
+    }
   }
 }
 
@@ -68,19 +77,21 @@ void THCudaTensor_copy(THCudaTensor *self, THCudaTensor *src)
     long *d_self_sz, *d_self_st, *d_src_sz, *d_src_st;
     long size = THCudaTensor_nElement(self);
 
+    long ndims = self->nDimension;
+    long innermostdim = self->size[ndims-1];
+
     THCudaTensor_computesz(self, &d_self_sz, &d_self_st);
     THCudaTensor_computesz(src, &d_src_sz, &d_src_st);
 
-    int nBlockPerRow, nBlockPerColumn, nThreadPerBlock;
-    THCudaGetGridSize(&nBlockPerRow, &nBlockPerColumn, &nThreadPerBlock, size);    
-    dim3 threads(nThreadPerBlock);
-    dim3 grid(nBlockPerRow, nBlockPerColumn);
+    int nblocks = ceil((float)size / (16 * innermostdim ));
+    dim3 threads(16,16);
+    dim3 grid(nblocks);
 
-    THCudaTensor_kernel_copy<<<grid, threads>>>(THCudaTensor_data(self), 
-                                                d_self_sz, d_self_st, self->nDimension,
+    THCudaTensor_kernel_copy<<<grid, threads>>>(THCudaTensor_data(self),
+                                                d_self_sz, d_self_st, ndims,
                                                 THCudaTensor_data(src),
                                                 d_src_sz, d_src_st, src->nDimension,
-                                                size);
+                                                size, innermostdim);
 
     cudaError errcode = cudaGetLastError();
     if(errcode != cudaSuccess)
