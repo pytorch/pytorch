@@ -86,8 +86,6 @@ void THCudaTensor_copy(THCudaTensor *self, THCudaTensor *src)
     if(errcode != cudaSuccess)
       THError(cudaGetErrorString(errcode));
 
-    cudaThreadSynchronize();
-
     THCudaCheck(cudaFree(d_self_sz));
     THCudaCheck(cudaFree(d_self_st));
     THCudaCheck(cudaFree(d_src_sz));

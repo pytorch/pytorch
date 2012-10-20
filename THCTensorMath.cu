@@ -154,8 +154,6 @@ void THCudaTensor_addcmul(THCudaTensor *self_, float value, THCudaTensor *src1, 
     if(errcode != cudaSuccess)
       THError(cudaGetErrorString(errcode));
 
-    cudaThreadSynchronize();
-
     THCudaTensor_free(src1);
     THCudaTensor_free(src2);
     THCudaTensor_freeCopyTo(self, self_);
@@ -192,8 +190,6 @@ void THCudaTensor_addcdiv(THCudaTensor *self_, float value, THCudaTensor *src1, 
     cudaError errcode = cudaGetLastError();
     if(errcode != cudaSuccess)
       THError(cudaGetErrorString(errcode));
-
-    cudaThreadSynchronize();
 
     THCudaTensor_free(src1);
     THCudaTensor_free(src2);

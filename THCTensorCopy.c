@@ -7,8 +7,6 @@ void THCudaTensor_copyFloat(THCudaTensor *self, struct THFloatTensor *src)
 {
   THArgCheck(THCudaTensor_nElement(self) == THFloatTensor_nElement(src), 2, "sizes do not match"); 
 
-  cudaDeviceSynchronize();
-
   {
     THCudaTensor *selfc = THCudaTensor_newContiguous(self);
     src = THFloatTensor_newContiguous(src);
@@ -25,8 +23,6 @@ void THCudaTensor_copyFloat(THCudaTensor *self, struct THFloatTensor *src)
 void THCudaTensor_copy##TYPEC(THCudaTensor *self, struct TH##TYPEC##Tensor *src) \
 {                                                                       \
   THArgCheck(THCudaTensor_nElement(self) == TH##TYPEC##Tensor_nElement(src), 2, "sizes do not match"); \
-                                                                        \
-  cudaDeviceSynchronize();                                              \
                                                                         \
   {                                                                     \
     THLongStorage *size = TH##TYPEC##Tensor_newSizeOf(src);             \
@@ -53,8 +49,6 @@ void THFloatTensor_copyCuda(THFloatTensor *self, struct THCudaTensor *src)
 {
   THArgCheck(THFloatTensor_nElement(self) == THCudaTensor_nElement(src), 2, "sizes do not match"); 
 
-  cudaDeviceSynchronize();
-
   {
     THFloatTensor *selfc = THFloatTensor_newContiguous(self);
     src = THCudaTensor_newContiguous(src);
@@ -70,8 +64,6 @@ void THFloatTensor_copyCuda(THFloatTensor *self, struct THCudaTensor *src)
   void TH##TYPEC##Tensor_copyCuda(TH##TYPEC##Tensor *self, struct THCudaTensor *src) \
   {                                                                     \
     THArgCheck(TH##TYPEC##Tensor_nElement(self) == THCudaTensor_nElement(src), 2, "sizes do not match"); \
-                                                                        \
-    cudaDeviceSynchronize();                                            \
                                                                         \
     {                                                                   \
       THLongStorage *size = THCudaTensor_newSizeOf(src);                \

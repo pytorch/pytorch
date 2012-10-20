@@ -352,9 +352,6 @@ TH_API void THCudaTensor_conv2Dmv(THCudaTensor *output, float beta, THCudaTensor
   dim3 blocks(nOutputPlane,yblocks);
   dim3 threads(32,8);
 
-  // sync any previous kernel exec
-  cudaDeviceSynchronize();
-
   // convolution: xcorr2 or conv2
   if (type[1] == 'x') {
     if ((nKernelCols == 3) && (nKernelRows == 3))
@@ -485,8 +482,7 @@ TH_API void THCudaTensor_conv2Dmv(THCudaTensor *output, float beta, THCudaTensor
                                                         srow, scol);
   }
 
-  // sync & clean
-  cudaDeviceSynchronize();
+  // clean
   if (*type != 'f') THCudaTensor_free(input);
   THCudaTensor_free(kernel);
 
@@ -588,9 +584,6 @@ TH_API void THCudaTensor_conv2Dmm(THCudaTensor *output, float beta, THCudaTensor
   dim3 blocks(nOutputPlane*nbatch,yblocks);
   dim3 threads(32,8);
 
-  // sync any previous kernel exec
-  cudaDeviceSynchronize();
-
   // convolution: xcorr2 or conv2
   if (type[1] == 'x') {
     if ((nKernelCols == 3) && (nKernelRows == 3))
@@ -721,8 +714,7 @@ TH_API void THCudaTensor_conv2Dmm(THCudaTensor *output, float beta, THCudaTensor
 							     srow, scol);
   }
 
-  // sync & clean
-  cudaDeviceSynchronize();
+  // clean
   if (*type != 'f') THCudaTensor_free(input);
   THCudaTensor_free(kernel);
 
@@ -797,17 +789,13 @@ TH_API void THCudaTensor_conv2DRevger(THCudaTensor *output, float beta, float al
   dim3 blocks(nKernelPlane, nInputPlane);
   dim3 threads(128/nOutputRows, nOutputRows);
 
-  // sync previous jobs
-  cudaDeviceSynchronize();
-
   // compute rev conv
   conv2genericrev <<<blocks, threads>>> (input_data, kernel_data, output_data,
                                          nInputPlane, nInputRows, nInputCols,
                                          nKernelPlane, nKernelRows, nKernelCols,
                                          alpha, srow, scol);
 
-  // sync & clean
-  cudaDeviceSynchronize();
+  // clean
   THCudaTensor_free(input);
   THCudaTensor_free(kernel);
 
@@ -869,9 +857,6 @@ TH_API void THCudaTensor_conv2DRevgerm(THCudaTensor *output, float beta, float a
   float *kernel_data = THCudaTensor_data(kernel);
   float *output_data = THCudaTensor_data(output);
 
-  // sync previous jobs
-  cudaDeviceSynchronize();
-
   // kernel is called multiple times
   // (the arbitrary split below is just here to make sure we dont go over 256 threads)
   for (int sl=0; sl<nbatch; sl+=6) {
@@ -891,8 +876,7 @@ TH_API void THCudaTensor_conv2DRevgerm(THCudaTensor *output, float beta, float a
                                            alpha, srow, scol);
   }
 
-  // sync & clean
-  cudaDeviceSynchronize();
+  // clean
   THCudaTensor_free(input);
   THCudaTensor_free(kernel);
 
@@ -1137,8 +1121,7 @@ TH_API void THCudaTensor_conv2Dmap(THCudaTensor *output, THCudaTensor *input,
     block_height = 1;
   dim3 blocks(nOutputPlane,block_height);
   dim3 threads(nthreads_x,nthreads_y);
-  // sync any previous kernel exec
-  cudaDeviceSynchronize();
+  
   if ((nKernelCols == 3) && (nKernelRows == 3))
     conv2mapgeneric <false, 3, 3> <<<blocks, threads>>> (input_data, 
                                                          kernel_data, 
@@ -1320,9 +1303,8 @@ TH_API void THCudaTensor_conv2Dmap(THCudaTensor *output, THCudaTensor *input,
                                                           stride_y, 
                                                           table_data, 
                                                           fanin);
-  // sync & clean
-  cudaDeviceSynchronize();
 
+  // clean
   THCudaTensor_free(input);
   THCudaTensor_free(kernel);
   THCudaTensor_free(table);
