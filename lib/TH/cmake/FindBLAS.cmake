@@ -206,7 +206,7 @@ if((NOT BLAS_LIBRARIES)
   BLAS
   sgemm
   ""
-  "cblas;f77blas;atlas")
+  "ptf77blas;atlas;gfortran")
   if (BLAS_LIBRARIES)
     set(BLAS_INFO "atlas")
   endif (BLAS_LIBRARIES)
