@@ -494,7 +494,7 @@ for _,Tensor in ipairs({"ByteTensor", "CharTensor",
             {name=real, creturned=true}},
            cname(name),
            {{name=Tensor, default=true, returned=true},
-            {name="IndexTensor", default=true, returned=true},
+            {name="IndexTensor", default=true, returned=true, noreadadd=true},
             {name=Tensor},
             {name="index"}})
    end
@@ -545,7 +545,7 @@ for _,Tensor in ipairs({"ByteTensor", "CharTensor",
    wrap("sort",
         cname("sort"),
         {{name=Tensor, default=true, returned=true},
-         {name="IndexTensor", default=true, returned=true},
+         {name="IndexTensor", default=true, returned=true, noreadadd=true},
          {name=Tensor},
          {name="index", default=lastdim(3)},
          {name="boolean", default=0}})
