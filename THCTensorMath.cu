@@ -87,6 +87,27 @@ void THCudaTensor_cadd(THCudaTensor *self_, float value, THCudaTensor *src)
   }
 }
 
+void THCudaTensor_cadd_tst(THCudaTensor *self_, THCudaTensor* src1, float value, THCudaTensor *src2)
+{
+  THArgCheck(THCudaTensor_nElement(self_) == THCudaTensor_nElement(src1), 3, "size do not match");
+  THArgCheck(THCudaTensor_nElement(self_) == THCudaTensor_nElement(src2), 3, "size do not match");
+
+  {
+    THCudaTensor *self = THCudaTensor_newContiguous(self_);
+
+    src1 = THCudaTensor_newContiguous(src1);
+    src2 = THCudaTensor_newContiguous(src2);
+
+    THCudaTensor_copy(self, src1);
+    cublasSaxpy(THCudaTensor_nElement(self), value, THCudaTensor_data(src2), 1, THCudaTensor_data(self), 1);
+    THCublasCheck();
+
+    THCudaTensor_free(src1);
+    THCudaTensor_free(src2);
+    THCudaTensor_freeCopyTo(self, self_);
+  }
+}
+
 void THCudaTensor_cmul(THCudaTensor *self_, THCudaTensor *src)
 {
   THArgCheck(THCudaTensor_nElement(self_) == THCudaTensor_nElement(src), 2, "size do not match");

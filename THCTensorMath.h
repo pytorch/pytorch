@@ -11,6 +11,7 @@ TH_API void THCudaTensor_mul(THCudaTensor *self, float value);
 TH_API void THCudaTensor_div(THCudaTensor *self, float value);
 
 TH_API void THCudaTensor_cadd(THCudaTensor *self, float value, THCudaTensor *src);  
+TH_API void THCudaTensor_cadd_tst(THCudaTensor *self, THCudaTensor *src1, float value, THCudaTensor *src2);
 TH_API void THCudaTensor_cmul(THCudaTensor *self, THCudaTensor *src);
 TH_API void THCudaTensor_cdiv(THCudaTensor *self, THCudaTensor *src);
 
