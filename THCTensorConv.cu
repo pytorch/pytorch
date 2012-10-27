@@ -14,7 +14,7 @@
  *   July 21, 2011, 11:21PM  -  Clement Farabet  -  Creation, based conv2d routine
  */
 
-#define CUDA_SHARED_MEM_SIZE (4*1024-32) // this is given by nVidia: max shared mem per block
+#define CUDA_SHARED_MEM_SIZE (12*1024-32) // this is given by nVidia: max shared mem per block
 
 /*
  * Description:
