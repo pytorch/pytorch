@@ -84,7 +84,7 @@ function Storage.__tostring__(self)
       end
    end
    table.insert(strt, '[' .. torch.typename(self) .. ' of size ' .. self:size() .. ']\n')
-   str = table.concat(strt)
+   local str = table.concat(strt)
    return str
 end
 
