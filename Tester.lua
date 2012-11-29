@@ -9,6 +9,7 @@ end
 
 
 function Tester:assert_sub (condition, message)
+   self.countasserts = self.countasserts + 1
    if not condition then
       local ss = debug.traceback('tester',2)
       --print(ss)
@@ -70,7 +71,7 @@ function Tester:report(tests)
    if not tests then
       tests = self.tests
    end
-   print('Completed ' .. #tests .. ' tests with ' .. #self.errors .. ' errors')
+   print('Completed ' .. self.countasserts .. ' asserts in ' .. #tests .. ' tests with ' .. #self.errors .. ' errors')
    print()
    print(string.rep('-',80))
    for i,v in ipairs(self.errors) do
@@ -81,6 +82,7 @@ end
 
 function Tester:run(run_tests)
    local tests, testnames
+   self.countasserts = 0
    tests = self.tests
    testnames = self.testnames
    if type(run_tests) == 'string' then
