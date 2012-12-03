@@ -233,6 +233,6 @@ int THRandom_geometric(double p)
 
 int THRandom_bernoulli(double p)
 {
-  THArgCheck(p > 0 && p < 1, 1, "must be > 0 and < 1");
+  THArgCheck(p >= 0 && p <= 1, 1, "must be >= 0 and <= 1");
   return(__uniform__() <= p);
 }
