@@ -101,5 +101,5 @@ Returns a random integer number according to a geometric distribution
 ====  [number] bernoulli([p]) ====
 {{anchor:torch.bernoulli}}
 
-Returns ''1'' with probability ''p'' and ''0'' with probability ''1-p''. ''p'' must satisfy ''0 < p < 1''.
+Returns ''1'' with probability ''p'' and ''0'' with probability ''1-p''. ''p'' must satisfy ''0 <= p <= 1''.
 By default ''p'' is equal to ''0.5''.
