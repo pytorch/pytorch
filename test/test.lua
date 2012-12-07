@@ -360,6 +360,10 @@ function torchtest.logical()
    mytester:asserteq(x:nElement(),all:double():sum() , 'torch.logical')
 end
 
+function torchtest.TestAssertError()
+   tester:assertError(function() error('hello') end, 'Error not caught')
+end
+
 function torch.test()
    math.randomseed(os.time())
    mytester = torch.Tester()
