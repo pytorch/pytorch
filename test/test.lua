@@ -361,7 +361,7 @@ function torchtest.logical()
 end
 
 function torchtest.TestAssertError()
-   tester:assertError(function() error('hello') end, 'Error not caught')
+   mytester:assertError(function() error('hello') end, 'Error not caught')
 end
 
 function torch.test()

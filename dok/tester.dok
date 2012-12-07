@@ -117,6 +117,26 @@ Saves an error if ''val ~= condition'' is not true with the optional message.
 
 Saves an error if ''max(abs(ta-tb)) < condition'' is not true with the optional message.
 
+==== assertTensorNe(ta, tb, condition [, message]) ====
+{{anchor:torch.Tester.assertTensorNe}}
+
+Saves an error if ''max(abs(ta-tb)) >= condition'' is not true with the optional message.
+
+==== assertTableEq(ta, tb, condition [, message]) ====
+{{anchor:torch.Tester.assertTableEq}}
+
+Saves an error if ''max(abs(ta-tb)) < condition'' is not true with the optional message.
+
+==== assertTableNe(ta, tb, condition [, message]) ====
+{{anchor:torch.Tester.assertTableNe}}
+
+Saves an error if ''max(abs(ta-tb)) >= condition'' is not true with the optional message.
+
+==== assertError(f [, message]) ====
+{{anchor:torch.Tester.assertError}}
+
+Saves an error if calling the function f() does not return an error, with the optional message.
+
 ==== run() ====
 {{anchor:torch.Tester.run}}
 
