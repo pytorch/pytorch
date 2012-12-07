@@ -49,11 +49,11 @@ end
 function Tester:assertTensorEq(ta, tb, condition, message)
    local diff = ta-tb
    local err = diff:abs():max()
-   self:assert_sub(err<condition,string.format('%s\n%s  val=%s, condition=%s',message,' TensorEQ(~=) violation ', tostring(err), tostring(condition)))
+   self:assert_sub(err<condition,string.format('%s\n%s  val=%s, condition=%s',message,' TensorEQ(==) violation ', tostring(err), tostring(condition)))
 end
 
 function Tester:assertTableEq(ta, condition, message)
-   self:assert_sub(unpack(ta) == unpack(condition), string.format('%s\n%s val=%s, condition=%s',message,' TableEQ(~=) violation ', tostring(err), tostring(condition)))
+   self:assert_sub(unpack(ta) == unpack(condition), string.format('%s\n%s val=%s, condition=%s',message,' TableEQ(==) violation ', tostring(err), tostring(condition)))
 end
 
 function Tester:pcall(f)
