@@ -360,8 +360,13 @@ function torchtest.logical()
    mytester:asserteq(x:nElement(),all:double():sum() , 'torch.logical')
 end
 
-function torchtest.TestAssertError()
-   mytester:assertError(function() error('hello') end, 'Error not caught')
+function torchtest.TestAsserts()
+   mytester:assertError(function() error('hello') end, 'assertError: Error not caught')
+
+   local x = torch.rand(100,100)*2-1;
+   local xx = x:clone();
+   mytester:assertTensorEq(x, xx, 1e-16, 'assertTensorEq: not deemed equal')
+   mytester:assertTensorNe(x, xx+1, 1e-16, 'assertTensorNe: not deemed different')
 end
 
 function torch.test()
