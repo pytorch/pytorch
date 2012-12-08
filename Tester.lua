@@ -58,12 +58,14 @@ function Tester:assertTensorNe(ta, tb, condition, message)
    self:assert_sub(err>=condition,string.format('%s\n%s  val=%s, condition=%s',message,' TensorNE(~=) violation ', tostring(err), tostring(condition)))
 end
 
-function Tester:assertTableNe(ta, condition, message)
-   self:assert_sub(unpack(ta) ~= unpack(condition), string.format('%s\n%s val=%s, condition=%s',message,' TableEQ(==) violation ', tostring(err), tostring(condition)))
+function Tester:assertTableEq(ta, condition, message)
+   -- TODO: fix bug, the comparison below does not compare elements which are not in common
+   self:assert_sub(unpack(ta) == unpack(condition), string.format('%s\n%s val=%s, condition=%s',message,' TableEQ(==) violation ', tostring(err), tostring(condition)))
 end
 
-function Tester:assertTableEq(ta, condition, message)
-   self:assert_sub(unpack(ta) == unpack(condition), string.format('%s\n%s val=%s, condition=%s',message,' TableEQ(==) violation ', tostring(err), tostring(condition)))
+function Tester:assertTableNe(ta, condition, message)
+   -- TODO: fix bug, the comparison below does not compare elements which are not in common
+   self:assert_sub(unpack(ta) ~= unpack(condition), string.format('%s\n%s val=%s, condition=%s',message,' TableEQ(==) violation ', tostring(err), tostring(condition)))
 end
 
 function Tester:assertError(f, message)
