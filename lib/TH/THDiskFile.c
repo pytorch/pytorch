@@ -36,8 +36,12 @@ const char *THDiskFile_name(THFile *self)
                                                                         \
     if(dfself->file.isBinary)                                           \
     {                                                                   \
-      nread = fread(data, sizeof(TYPE), n, dfself->handle);        \
-      if(!dfself->isNativeEncoding && (sizeof(TYPE) > 1) && (nread > 0)) \
+      while (nread < n)                                                 \
+      {                                                                 \
+        long nn = THMin((INT_MAX)/sizeof(TYPE),n-nread);                \
+        nread += fread(data+nread, sizeof(TYPE), nn, dfself->handle);   \
+      }                                                                 \
+      if(!dfself->isNativeEncoding && (sizeof(TYPE) > 1) && (nread > 0))\
         THDiskFile_reverseMemory(data, data, sizeof(TYPE), nread);      \
     }                                                                   \
     else                                                                \
