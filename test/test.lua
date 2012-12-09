@@ -367,19 +367,20 @@ function torchtest.TestAsserts()
    local xx = x:clone();
    mytester:assertTensorEq(x, xx, 1e-16, 'assertTensorEq: not deemed equal')
    mytester:assertTensorNe(x, xx+1, 1e-16, 'assertTensorNe: not deemed different')
-
 end
+
 
 function torchtest.BugInAssertTableEq()
    local t = {1,2,3}
    local tt = {1,2,3}
    mytester:assertTableEq(t, tt, 'assertTableEq: not deemed equal')
    mytester:assertTableNe(t, {3,2,1}, 'assertTableNe: not deemed different')
-   -- TODO: fix bug  below, where only the first components are compared
-   mytester:assertTableEq(t, {1,2}, 'assertTableNe: different size should not be equal') -- should err, doesn't
-   mytester:assertTableNe(t, {1,2}, 'assertTableNe: different size not deemed different') -- should pass, doesn't
-   mytester:assertTableEq(t, {1,2,3,4}, 'assertTableNe: different size should not be equal') -- should err, doesn't
-   mytester:assertTableNe(t, {1,2,3,4}, 'assertTableNe: different size not deemed different') -- should pass, doesn't
+   -- TODO: once a mechanism for testing that assert fails exist, test that the two asserts below do not pass
+   -- should not pass: mytester:assertTableEq(t, {1,2}, 'assertTableNe: different size should not be equal') 
+   -- should not pass: mytester:assertTableEq(t, {1,2,3,4}, 'assertTableNe: different size should not be equal')
+
+   mytester:assertTableNe(t, {1,2}, 'assertTableNe: different size not deemed different')
+   mytester:assertTableNe(t, {1,2,3,4}, 'assertTableNe: different size not deemed different')
 end
 
 function torch.test()
