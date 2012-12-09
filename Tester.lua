@@ -60,13 +60,15 @@ end
 
 function areTablesEqual(ta, tb)
    local function isIncludedIn(ta, tb)
+      if type(ta) ~= 'table' or type(tb) ~= 'table' then 
+         return ta == tb 
+      end
       for k, v in pairs(tb) do
-         if ta[k] ~= v then return false end
+         if not areTablesEqual(ta[k], v) then return false end
       end
       return true
    end
 
-   -- TODO: compare recursively all sublists
    return isIncludedIn(ta, tb) and isIncludedIn(tb, ta)
 end
 
