@@ -659,7 +659,7 @@ void THTensor_(range)(THTensor *r_, real xmin, real xmax, real step)
   real i = 0;
 
   THArgCheck(step > 0 || step < 0, 3, "step must be a non-null number");
-  THArgCheck((step > 0) && (xmax > xmin) || (step < 0) && (xmax < xmin), 2, "upper bound and larger bound incoherent with step sign");
+  THArgCheck((step > 0) && (xmax >= xmin) || (step < 0) && (xmax <= xmin), 2, "upper bound and larger bound incoherent with step sign");
 
   size = (long)((xmax-xmin)/step+1);
   
