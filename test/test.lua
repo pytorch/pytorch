@@ -99,6 +99,12 @@ function torchtest.range()
    torch.range(mxx,0,1)
    mytester:asserteq(maxdiff(mx,mxx),0,'torch.range value')
 end
+function torchtest.rangenegative()
+   local mx = torch.Tensor({1,0})
+   local mxx = torch.Tensor()
+   torch.range(mxx,1,0,-1)
+   mytester:asserteq(maxdiff(mx,mxx),0,'torch.range value for negative step')
+end
 function torchtest.randperm()
    local t=os.time()
    torch.manualSeed(t)
