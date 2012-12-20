@@ -58,7 +58,7 @@ function Tester:assertTensorNe(ta, tb, condition, message)
    self:assert_sub(err>=condition,string.format('%s\n%s  val=%s, condition=%s',message,' TensorNE(~=) violation ', tostring(err), tostring(condition)))
 end
 
-function areTablesEqual(ta, tb)
+local function areTablesEqual(ta, tb)
    local function isIncludedIn(ta, tb)
       if type(ta) ~= 'table' or type(tb) ~= 'table' then 
          return ta == tb 
