@@ -41,7 +41,7 @@ function File:isWritableObject(object)
    return typeidx
 end
 
-function File:writeObject(object)
+function File:writeObject(object, force)
    -- we use an environment to keep a record of written objects
    if not torch.getenv(self).writeObjects then
       torch.setenv(self, {writeObjects={}, writeObjectsRef={}, readObjects={}})
@@ -86,7 +86,7 @@ function File:writeObject(object)
       local objectsRef = torch.getenv(self).writeObjectsRef
       local index = objects[torch.pointer(object)]
 
-      if index then
+      if index and (not force) then
          -- if already exists, write only its index
          self:writeInt(index)
       else
