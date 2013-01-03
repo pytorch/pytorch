@@ -87,13 +87,14 @@ end
 
 function Tester:pcall(f)
    local nerr = #self.errors
-   local res = f()
---    local stat, result = pcall(f)
---    if not stat then
---       result = result .. debug.traceback()
---    end
---    return stat, result, stat and (nerr == #self.errors)
-   return true, res, nerr == #self.errors
+   -- local res = f()
+   local stat, result = pcall(f)
+   if not stat then
+      result = result .. debug.traceback()
+      self.errors[#self.errors+1] = self.curtestname .. '\n Function call failed \n' .. result .. '\n'
+   end
+   return stat, result, stat and (nerr == #self.errors)
+   -- return true, res, nerr == #self.errors
 end
 
 function Tester:report(tests)
@@ -156,9 +157,9 @@ function Tester:run(run_tests)
       end
       
       if not stat then
-         print()
-         print('Function call failed: Test No ' .. i .. ' ' .. testnames[i])
-         print(message)
+         -- print()
+         -- print('Function call failed: Test No ' .. i .. ' ' .. testnames[i])
+         -- print(message)
       end
       collectgarbage()
    end
