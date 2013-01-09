@@ -88,9 +88,8 @@ end
 function Tester:pcall(f)
    local nerr = #self.errors
    -- local res = f()
-   local stat, result = pcall(f)
+   local stat, result = xpcall(f, debug.traceback)
    if not stat then
-      result = result .. debug.traceback()
       self.errors[#self.errors+1] = self.curtestname .. '\n Function call failed \n' .. result .. '\n'
    end
    return stat, result, stat and (nerr == #self.errors)
