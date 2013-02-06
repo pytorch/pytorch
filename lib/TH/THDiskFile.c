@@ -24,6 +24,18 @@ const char *THDiskFile_name(THFile *self)
   return dfself->name;
 }
 
+/* workaround mac osx lion ***insane*** fread bug */
+#ifdef __APPLE__
+size_t fread__(void *restrict ptr, size_t size, size_t nitems, FILE *restrict stream)
+{
+  size_t nread = 0;
+  while(!feof(stream) && !ferror(stream) && (nread < nitems))
+    nread += fread(ptr+nread*size, size, THMin(2147483648/size, nitems-nread), stream);
+  return nread;
+}
+#else
+#define fread__ fread
+#endif
 
 #define READ_WRITE_METHODS(TYPE, TYPEC, ASCII_READ_ELEM, ASCII_WRITE_ELEM) \
   static long THDiskFile_read##TYPEC(THFile *self, TYPE *data, long n)  \
@@ -36,7 +48,7 @@ const char *THDiskFile_name(THFile *self)
                                                                         \
     if(dfself->file.isBinary)                                           \
     {                                                                   \
-      nread = fread(data, sizeof(TYPE), n, dfself->handle);        \
+      nread = fread__(data, sizeof(TYPE), n, dfself->handle);           \
       if(!dfself->isNativeEncoding && (sizeof(TYPE) > 1) && (nread > 0)) \
         THDiskFile_reverseMemory(data, data, sizeof(TYPE), nread);      \
     }                                                                   \
