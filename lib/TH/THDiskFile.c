@@ -26,7 +26,7 @@ const char *THDiskFile_name(THFile *self)
 
 /* workaround mac osx lion ***insane*** fread bug */
 #ifdef __APPLE__
-size_t fread__(void *restrict ptr, size_t size, size_t nitems, FILE *restrict stream)
+size_t fread__(void *ptr, size_t size, size_t nitems, FILE *stream)
 {
   size_t nread = 0;
   while(!feof(stream) && !ferror(stream) && (nread < nitems))
