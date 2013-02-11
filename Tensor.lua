@@ -310,7 +310,7 @@ function Tensor.expand(tensor,...)
    end
 
    -- create new view, with singleton expansion:
-   tensor = torch.Tensor(tensor:storage(), tensor:storageOffset(),
+   tensor = tensor.new(tensor:storage(), tensor:storageOffset(),
                          tensor_size, tensor_stride)
    return tensor
 end
