@@ -43,7 +43,7 @@ end
 
 function File:referenced(ref)
    local env = torch.getenv(self)
-   env.force = ref
+   env.force = not ref
    torch.setenv(self,env)
    return self
 end
