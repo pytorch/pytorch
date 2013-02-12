@@ -42,10 +42,23 @@ function File:isWritableObject(object)
 end
 
 function File:referenced(ref)
+   -- we use an environment to keep a record of written objects
+   if not torch.getenv(self).writeObjects then
+      torch.setenv(self, {writeObjects={}, writeObjectsRef={}, readObjects={}})
+   end
    local env = torch.getenv(self)
    env.force = not ref
    torch.setenv(self,env)
    return self
+end
+
+function File:isReferenced()
+   -- if no environment, then no forcing setup yet
+   if not torch.getenv(self).writeObjects then
+      return true
+   end
+   local env = torch.getenv(self)
+   return not env.force
 end
 
 function File:writeObject(object)
