@@ -41,11 +41,20 @@ function File:isWritableObject(object)
    return typeidx
 end
 
-function File:writeObject(object, force)
+function File:referenced(ref)
+   local env = torch.getenv(self)
+   env.force = ref
+   torch.setenv(self,env)
+   return self
+end
+
+function File:writeObject(object)
    -- we use an environment to keep a record of written objects
    if not torch.getenv(self).writeObjects then
       torch.setenv(self, {writeObjects={}, writeObjectsRef={}, readObjects={}})
    end
+
+   local force = torch.getenv(self).force
 
    -- if nil object, only write the type and return
    if type(object) ~= 'boolean' and not object then
@@ -94,7 +103,9 @@ function File:writeObject(object, force)
          index = objects.nWriteObject or 0
          index = index + 1
          objects[torch.pointer(object)] = index
-         objectsRef[object] = index -- we make sure the object is not going to disappear
+         if not force then
+            objectsRef[object] = index -- we make sure the object is not going to disappear
+         end
          self:writeInt(index)
          objects.nWriteObject = index
 
