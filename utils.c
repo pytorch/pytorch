@@ -57,7 +57,16 @@ int torch_islongargs(lua_State *L, int index)
   return 0;
 }
 
-
+static int torch_isatty(lua_State *L)
+{
+#ifdef LUA_WIN
+  lua_pushboolean(L, 0);
+#else
+  FILE **fp = (FILE **) luaL_checkudata(L, -1, LUA_FILEHANDLE);
+  lua_pushboolean(L, isatty(fileno(*fp)));
+#endif
+  return 1;
+}
 
 static int torch_lua_tic(lua_State* L)
 {
@@ -158,6 +167,7 @@ static int torch_setnumthreads(lua_State *L)
 
 static const struct luaL_Reg torch_utils__ [] = {
   {"getdefaulttensortype", torch_lua_getdefaulttensortype},
+  {"isatty", torch_isatty},
   {"tic", torch_lua_tic},
   {"toc", torch_lua_toc},
   {"setnumthreads", torch_setnumthreads},
