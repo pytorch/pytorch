@@ -1177,6 +1177,149 @@ to copy, and fill (sub) tensors.
 [torch.DoubleTensor of dimension 5x6]
 </file>
 
+=====  Expanding/Replicating Tensors =====
+
+These methods returns a ''Tensor'' which is created by replications of the
+original tensor.
+
+=== [Tensor] expand(sizes) ===
+{{anchor:torch.Tensor.expand}}
+
+''sizes'' can either be a ''torch.LongStorage'' or numbers. Expanding a tensor
+does not allocate new memory, but only creates a new view on the existing tensor where
+singleton dimensions can be expanded to multiple ones by setting the ''stride'' to 0. 
+Any dimension that is 1 can be expanded to arbitrary value without any new memory allocation.
+
+<file lua>
+t7> x=torch.rand(10,1)
+t7> =x
+ 0.3837
+ 0.5966
+ 0.0763
+ 0.1896
+ 0.4958
+ 0.6841
+ 0.4038
+ 0.4068
+ 0.1502
+ 0.2239
+[torch.DoubleTensor of dimension 10x1]
+
+t7> y=torch.expand(x,10,2)
+t7> =y
+ 0.3837  0.3837
+ 0.5966  0.5966
+ 0.0763  0.0763
+ 0.1896  0.1896
+ 0.4958  0.4958
+ 0.6841  0.6841
+ 0.4038  0.4038
+ 0.4068  0.4068
+ 0.1502  0.1502
+ 0.2239  0.2239
+[torch.DoubleTensor of dimension 10x2]
+
+t7> y:fill(1)
+t7> =y
+ 1  1
+ 1  1
+ 1  1
+ 1  1
+ 1  1
+ 1  1
+ 1  1
+ 1  1
+ 1  1
+ 1  1
+[torch.DoubleTensor of dimension 10x2]
+
+t7> =x
+ 1
+ 1
+ 1
+ 1
+ 1
+ 1
+ 1
+ 1
+ 1
+ 1
+[torch.DoubleTensor of dimension 10x1]
+
+t7> i=0; y:apply(function() i=i+1;return i end)
+t7> =y
+  2   2
+  4   4
+  6   6
+  8   8
+ 10  10
+ 12  12
+ 14  14
+ 16  16
+ 18  18
+ 20  20
+[torch.DoubleTensor of dimension 10x2]
+
+t7> =x
+  2
+  4
+  6
+  8
+ 10
+ 12
+ 14
+ 16
+ 18
+ 20
+[torch.DoubleTensor of dimension 10x1]
+
+</file>
+
+=== [Tensor] expandAs(tensor) ===
+{{anchor:torch.Tensor.expandAs}}
+
+This is equivalent to self:expand(tensor:size())
+
+=== [Tensor] repeatTensor(sizes) ===
+{{anchor:torch.Tensor.repeatTensor}}
+
+''sizes'' can either be a ''torch.LongStorage'' or numbers. Repeating a tensor allocates
+ new memory. ''sizes'' specify the number of times the tensor is repeated in each dimension.
+
+ <file lua>
+ t7> x=torch.rand(5)
+t7> =x
+ 0.7160
+ 0.6514
+ 0.0704
+ 0.7856
+ 0.7452
+[torch.DoubleTensor of dimension 5]
+
+t7> =torch.repeatTensor(x,3,2)
+ 0.7160  0.6514  0.0704  0.7856  0.7452  0.7160  0.6514  0.0704  0.7856  0.7452
+ 0.7160  0.6514  0.0704  0.7856  0.7452  0.7160  0.6514  0.0704  0.7856  0.7452
+ 0.7160  0.6514  0.0704  0.7856  0.7452  0.7160  0.6514  0.0704  0.7856  0.7452
+[torch.DoubleTensor of dimension 3x10]
+
+t7> return torch.repeatTensor(x,3,2,1)
+(1,.,.) = 
+  0.7160  0.6514  0.0704  0.7856  0.7452
+  0.7160  0.6514  0.0704  0.7856  0.7452
+
+(2,.,.) = 
+  0.7160  0.6514  0.0704  0.7856  0.7452
+  0.7160  0.6514  0.0704  0.7856  0.7452
+
+(3,.,.) = 
+  0.7160  0.6514  0.0704  0.7856  0.7452
+  0.7160  0.6514  0.0704  0.7856  0.7452
+[torch.DoubleTensor of dimension 3x2x5]
+
+ </file>
+
+
+
 =====  Manipulating the tensor view =====
 
 Each of these methods returns a ''Tensor'' which is another way of viewing

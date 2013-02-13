@@ -333,3 +333,15 @@ Tells if one can write in the file or not.
 {{anchor:torch.File.isAutoSpacing}}
 
 Return ''true'' if [[#torch.File.autoSpacing|autoSpacing]] has been chosen.
+
+==== referenced(ref) ====
+{{anchor:torch.File.referenced}}
+
+Sets the referenced property of the File to ''ref''. ''ref'' has to be ''true'' or ''false''. By default it is true, which means that a File object keeps track of objects written using [[#torch.File.writeObject|writeObject]] method. When one needs to push the same tensor repeatedly into a file but everytime changing its contents, calling ''referenced(false)'' ensures desired behaviour.
+
+==== isReferenced() ====
+{{anchor:torch.File.isReferenced}}
+
+Return the state set by [[#torch.File.referenced|referenced]].
+
+
