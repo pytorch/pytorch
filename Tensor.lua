@@ -321,6 +321,45 @@ function Tensor.expandAs(tensor,template)
 end
 torch.expandAs = Tensor.expandAs
 
+function Tensor.repeatTensor(tensor,...)
+   -- get sizes
+   local sizes = {...}
+
+   -- check type
+   local size
+   if torch.typename(sizes[1]) and torch.typename(sizes[1])=='torch.LongStorage' then
+      size = sizes[1]
+   else
+      size = torch.LongStorage(#sizes)
+      for i,s in ipairs(sizes) do
+         size[i] = s
+      end
+   end
+   if size:size() < tensor:dim() then
+      error('Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor')
+   end
+   local xtensor = tensor.new():set(tensor)
+   local xsize = xtensor:size():totable()
+   for i=1,size:size()-tensor:dim() do
+      table.insert(xsize,1,1)
+   end
+   size = torch.DoubleTensor(xsize):cmul(torch.DoubleTensor(size:totable())):long():storage()
+   xtensor:resize(torch.LongStorage(xsize))
+   local rtensor = tensor.new():resize(size)
+   local urtensor = rtensor.new(rtensor)
+   for i=1,xtensor:dim() do
+      urtensor = urtensor:unfold(i,xtensor:size(i),xtensor:size(i))
+   end
+   for i=1,urtensor:dim()-xtensor:dim() do
+      table.insert(xsize,1,1)
+   end
+   xtensor:resize(torch.LongStorage(xsize))
+   local xxtensor = xtensor:expandAs(urtensor)
+   urtensor:copy(xxtensor)
+   return rtensor
+end
+torch.repeatTensor = Tensor.repeatTensor
+
 for _,type in ipairs(types) do
    local metatable = torch.getmetatable('torch.' .. type .. 'Tensor')
    for funcname, func in pairs(Tensor) do
