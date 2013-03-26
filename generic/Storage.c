@@ -9,7 +9,8 @@ static int torch_Storage_(new)(lua_State *L)
   {
     const char *fileName = luaL_checkstring(L, 1);
     int isShared = luaT_optboolean(L, 2, 0);
-    storage = THStorage_(newWithMapping)(fileName, isShared);  }
+    storage = THStorage_(newWithMapping)(fileName, isShared);  
+  }
   else if(lua_type(L, 1) == LUA_TTABLE)
   {
     long size = lua_objlen(L, 1);
@@ -26,6 +27,13 @@ static int torch_Storage_(new)(lua_State *L)
       THStorage_(set)(storage, i-1, (real)lua_tonumber(L, -1));
       lua_pop(L, 1);
     }
+  }
+  else if(lua_type(L, 2) == LUA_TNUMBER)
+  {
+    long size = luaL_optlong(L, 1, 0);
+    real *ptr = (real *)luaL_optlong(L, 2, 0);
+    storage = THStorage_(newWithData)(ptr, size);
+    storage->flag = 0;
   }
   else
   {
