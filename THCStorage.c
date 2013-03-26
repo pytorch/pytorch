@@ -84,6 +84,16 @@ THCudaStorage* THCudaStorage_newWithMapping(const char *fileName, int isShared)
   return NULL;
 }
 
+THCudaStorage* THCudaStorage_newWithData(float *data, long size)
+{
+  THCudaStorage *storage = THAlloc(sizeof(THCudaStorage));
+  storage->data = data;
+  storage->size = size;
+  storage->refcount = 1;
+  storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE | TH_STORAGE_FREEMEM;
+  return storage;
+}
+
 void THCudaStorage_retain(THCudaStorage *self)
 {
   if(self && (self->flag & TH_STORAGE_REFCOUNTED))
