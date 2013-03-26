@@ -66,7 +66,7 @@ end
 {{anchor:torch.Tensor.cat}}
 ''x=torch.cat(x_1,x_2,[dimension])'' returns a tensor ''x'' which is the concatenation of tensors x_1 and x_2 along dimension ''dimension''. 
 
-If ''dimension'' is not specified it is 1.
+If ''dimension'' is not specified it is the last dimension.
 
 The other dimensions of x_1 and x_2 have to be equal.
 
@@ -82,7 +82,7 @@ Examples:
 [torch.Tensor of dimension 5]
 
 
-> print(torch.cat(torch.ones(3,2),torch.zeros(2,2)))
+> print(torch.cat(torch.ones(3,2),torch.zeros(2,2),1))
 
  1  1
  1  1
@@ -92,7 +92,7 @@ Examples:
 [torch.DoubleTensor of dimension 5x2]
 
 
-> print(torch.cat(torch.ones(2,2),torch.zeros(2,2)))
+> print(torch.cat(torch.ones(2,2),torch.zeros(2,2),1))
  1  1
  1  1
  0  0
@@ -105,7 +105,7 @@ Examples:
 [torch.DoubleTensor of dimension 2x4]
 
 
-> print(torch.cat(torch.cat(torch.ones(2,2),torch.zeros(2,2)),torch.rand(3,2)))
+> print(torch.cat(torch.cat(torch.ones(2,2),torch.zeros(2,2),1),torch.rand(3,2),1))
 
  1.0000  1.0000
  1.0000  1.0000
