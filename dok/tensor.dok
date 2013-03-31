@@ -630,12 +630,12 @@ specified dimension ''dim''. Example:
 0 0 0 0 0
 [torch.DoubleTensor of dimension 4x5]
 
-  --- elements in a column are contiguous in memory
-> return  x:stride(1)
+  --- elements in a row are contiguous in memory
+> return  x:stride(2)
 1
 
-  --- to go from one element to the next one in a row
-  --- we need here to jump the size of the column
+  --- to go from one element to the next one in a column
+  --- we need here to jump the size of the row
 > return  x:stride(1)
 5
 </file>
@@ -659,7 +659,7 @@ Returns the jump necessary to go from one element to the next one in each dimens
 
 > return  x:stride()
  5
- 1 -- elements are contiguous in a column [last dimension]
+ 1 -- elements are contiguous in a row [last dimension]
 [torch.LongStorage of size 2]
 </file>
 
