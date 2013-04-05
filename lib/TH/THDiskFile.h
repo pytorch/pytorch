@@ -3,15 +3,15 @@
 
 #include "THFile.h"
 
-THFile *THDiskFile_new(const char *name, const char *mode, int isQuiet);
-THFile *THPipeFile_new(const char *name, const char *mode, int isQuiet);
+TH_API THFile *THDiskFile_new(const char *name, const char *mode, int isQuiet);
+TH_API THFile *THPipeFile_new(const char *name, const char *mode, int isQuiet);
 
-const char *THDiskFile_name(THFile *self);
+TH_API const char *THDiskFile_name(THFile *self);
 
-int THDiskFile_isLittleEndianCPU(void);
-int THDiskFile_isBigEndianCPU(void);
-void THDiskFile_nativeEndianEncoding(THFile *self);
-void THDiskFile_littleEndianEncoding(THFile *self);
-void THDiskFile_bigEndianEncoding(THFile *self);
+TH_API int THDiskFile_isLittleEndianCPU(void);
+TH_API int THDiskFile_isBigEndianCPU(void);
+TH_API void THDiskFile_nativeEndianEncoding(THFile *self);
+TH_API void THDiskFile_littleEndianEncoding(THFile *self);
+TH_API void THDiskFile_bigEndianEncoding(THFile *self);
 
 #endif

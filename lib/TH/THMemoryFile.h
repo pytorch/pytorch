@@ -4,9 +4,9 @@
 #include "THFile.h"
 #include "THStorage.h"
 
-THFile *THMemoryFile_newWithStorage(THCharStorage *storage, const char *mode);
-THFile *THMemoryFile_new(const char *mode);
+TH_API THFile *THMemoryFile_newWithStorage(THCharStorage *storage, const char *mode);
+TH_API THFile *THMemoryFile_new(const char *mode);
 
-THCharStorage *THMemoryFile_storage(THFile *self);
+TH_API THCharStorage *THMemoryFile_storage(THFile *self);
 
 #endif
