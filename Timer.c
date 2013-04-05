@@ -27,23 +27,37 @@ typedef struct _Timer
 
 static double torch_Timer_realtime()
 {
+#ifdef WIN32
+  time_t ltime;
+  time(&ltime);
+  return (double)(ltime);
+#else
   struct timeval current;
   gettimeofday(&current, NULL);
   return (current.tv_sec + current.tv_usec/1000000.0);
+#endif
 }
 
 static double torch_Timer_usertime()
 {
+#ifdef WIN32
+  return torch_Timer_realtime();
+#else
   struct rusage current;
   getrusage(RUSAGE_SELF, &current);
   return (current.ru_utime.tv_sec + current.ru_utime.tv_usec/1000000.0);
+#endif
 }
 
 static double torch_Timer_systime()
 {
+#ifdef WIN32
+  return 0;
+#else
   struct rusage current;
   getrusage(RUSAGE_SELF, &current);
   return (current.ru_stime.tv_sec + current.ru_stime.tv_usec/1000000.0);
+#endif
 }
 
 static int torch_Timer_new(lua_State *L)

@@ -553,9 +553,9 @@ static int torch_Tensor_(__newindex__)(lua_State *L)
 
   if(lua_isnumber(L, 2))
   {
+    void *src;
     long index = luaL_checklong(L,2)-1;
     if (index < 0) index = tensor->size[0] + index + 1;
-    void *src;
     if (lua_isnumber(L,3)) {
       real value = (real)luaL_checknumber(L,3);
       if (tensor->nDimension == 1) {
@@ -633,12 +633,12 @@ static int torch_Tensor_(__newindex__)(lua_State *L)
   }
   else if(lua_istable(L, 2))
   {
-    tensor = THTensor_(newWithTensor)(tensor);
-    
-    int dim;
+	int dim;
     int cdim = 0;
-    int ndims = tensor->nDimension;
+    int ndims;
     int done = 0;
+    tensor = THTensor_(newWithTensor)(tensor);
+    ndims = tensor->nDimension;
     for(dim = 0; dim < ndims; dim++)
     {
       lua_rawgeti(L, 2, dim+1);
@@ -649,8 +649,8 @@ static int torch_Tensor_(__newindex__)(lua_State *L)
         if (z < 0) z = tensor->size[cdim] + z + 1;
         luaL_argcheck(L, (z >= 0) && (z < tensor->size[cdim]), 2, "index out of bound");
         if(tensor->nDimension == 1) {
-          done = 1;
           real value = (real)luaL_checknumber(L,3);
+          done = 1;
           THStorage_(set)(tensor->storage, tensor->storageOffset+z*tensor->stride[0], value);
         } else {
           THTensor_(select)(tensor, NULL, cdim, z);
@@ -658,9 +658,9 @@ static int torch_Tensor_(__newindex__)(lua_State *L)
       } 
       else if (lua_istable(L, -1)) 
       {
-        lua_rawgeti(L, -1, 1);
         long start = 0;
         long end = tensor->size[cdim]-1;
+        lua_rawgeti(L, -1, 1);
         if(lua_isnumber(L, -1)) {
           start = lua_tonumber(L, -1)-1;
           end = start;
@@ -783,12 +783,13 @@ static int torch_Tensor_(__index__)(lua_State *L)
   }
   else if(lua_istable(L, 2))
   {
-    tensor = THTensor_(newWithTensor)(tensor);
-    
     int dim;
     int cdim = 0;
-    int ndims = tensor->nDimension;
+    int ndims;
     int done = 0;
+    tensor = THTensor_(newWithTensor)(tensor);
+    ndims = tensor->nDimension;
+    
     for(dim = 0; dim < ndims; dim++)
     {
       lua_rawgeti(L, 2, dim+1);
@@ -807,9 +808,9 @@ static int torch_Tensor_(__index__)(lua_State *L)
       } 
       else if (lua_istable(L, -1))
       {
-        lua_rawgeti(L, -1, 1);
         long start = 0;
         long end = tensor->size[cdim]-1;
+        lua_rawgeti(L, -1, 1);
         if(lua_isnumber(L, -1)) {
           start = lua_tonumber(L, -1)-1;
           end = start;

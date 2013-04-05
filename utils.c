@@ -1,7 +1,11 @@
 #include "general.h"
 #include "utils.h"
 
-#include <sys/time.h>
+#ifdef WIN32
+# include <time.h>
+#else
+# include <sys/time.h>
+#endif
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -68,20 +72,29 @@ static int torch_isatty(lua_State *L)
   return 1;
 }
 
+static double real_time()
+{
+#ifdef LUA_WIN
+  time_t ltime;
+  time(&ltime);
+  return (double)(ltime);
+#else
+  struct timeval current;
+  gettimeofday(&current, NULL);
+  return (current.tv_sec + current.tv_usec/1000000.0);
+#endif
+}
+
 static int torch_lua_tic(lua_State* L)
 {
-  struct timeval tv;
-  gettimeofday(&tv,NULL);
-  double ttime = (double)tv.tv_sec + (double)(tv.tv_usec)/1000000.0;
+  double ttime = real_time();
   lua_pushnumber(L,ttime);
   return 1;
 }
 
 static int torch_lua_toc(lua_State* L)
 {
-  struct timeval tv;
-  gettimeofday(&tv,NULL);
-  double toctime = (double)tv.tv_sec + (double)(tv.tv_usec)/1000000.0;
+  double toctime = real_time();
   lua_Number tictime = luaL_checknumber(L,1);
   lua_pushnumber(L,toctime-tictime);
   return 1;
