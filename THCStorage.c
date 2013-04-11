@@ -164,8 +164,9 @@ void THCudaStorage_copyFloat(THCudaStorage *self, struct THFloatStorage *src)
 #define TH_CUDA_STORAGE_IMPLEMENT_COPY(TYPEC)                           \
   void THCudaStorage_copy##TYPEC(THCudaStorage *self, struct TH##TYPEC##Storage *src) \
   {                                                                     \
+    THFloatStorage *buffer;                                             \
     THArgCheck(self->size == src->size, 2, "size does not match");      \
-    THFloatStorage *buffer = THFloatStorage_newWithSize(src->size);     \
+    buffer = THFloatStorage_newWithSize(src->size);                     \
     THFloatStorage_copy##TYPEC(buffer, src);                            \
     THCudaStorage_copyFloat(self, buffer);                              \
     THFloatStorage_free(buffer);                                        \
@@ -187,8 +188,9 @@ void THFloatStorage_copyCuda(THFloatStorage *self, struct THCudaStorage *src)
 #define TH_CUDA_STORAGE_IMPLEMENT_COPYTO(TYPEC)                           \
   void TH##TYPEC##Storage_copyCuda(TH##TYPEC##Storage *self, struct THCudaStorage *src) \
   {                                                                     \
+    THFloatStorage *buffer;                                             \
     THArgCheck(self->size == src->size, 2, "size does not match");      \
-    THFloatStorage *buffer = THFloatStorage_newWithSize(src->size);     \
+    buffer = THFloatStorage_newWithSize(src->size);                     \
     THFloatStorage_copyCuda(buffer, src);                               \
     TH##TYPEC##Storage_copyFloat(self, buffer);                         \
     THFloatStorage_free(buffer);                                        \

@@ -347,7 +347,7 @@ TH_API void THCudaTensor_conv2Dmv(THCudaTensor *output, float beta, THCudaTensor
   float *output_data = THCudaTensor_data(output);
 
   // cuda blocks & threads:
-  int yblocks = floor(16 / nOutputPlane);
+  int yblocks = (int)(16L / nOutputPlane);
   yblocks = yblocks < 1 ? 1 : yblocks;
   dim3 blocks(nOutputPlane,yblocks);
   dim3 threads(32,8);
@@ -579,7 +579,7 @@ TH_API void THCudaTensor_conv2Dmm(THCudaTensor *output, float beta, THCudaTensor
   float *output_data = THCudaTensor_data(output);
 
   // cuda blocks & threads:
-  int yblocks = floor(16 / nOutputPlane);
+  int yblocks = (int)(16L / nOutputPlane);
   yblocks = yblocks < 1 ? 1 : yblocks;
   dim3 blocks(nOutputPlane*nbatch,yblocks);
   dim3 threads(32,8);
@@ -1116,7 +1116,7 @@ TH_API void THCudaTensor_conv2Dmap(THCudaTensor *output, THCudaTensor *input,
   // set the number of blocks and threads
   int nthreads_x = 32;
   int nthreads_y = 8;
-  int block_height = floor(16 / nOutputPlane);
+  int block_height = (int)(16L / nOutputPlane);
   if (block_height < 1)
     block_height = 1;
   dim3 blocks(nOutputPlane,block_height);
