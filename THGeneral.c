@@ -99,11 +99,13 @@ void THFree(void *ptr)
   free(ptr);
 }
 
-#ifdef _MSC_VER
-double log1p(const double x)
+double THLog1p(const double x)
 {
-  volatile double y;
-  y = 1 + x;
+#ifdef _MSC_VER
+  volatile double y = 1 + x;
   return log(y) - ((y-1)-x)/y ;  /* cancels errors with IEEE arithmetic */
-}
+#else
+  return log1p(x);
 #endif
+}
+
