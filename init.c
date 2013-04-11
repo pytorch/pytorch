@@ -46,7 +46,9 @@ static void luaTorchArgErrorHandlerFunction(int argNumber, const char *msg)
   luaL_argcheck(globalL, 0, argNumber, msg);
 }
 
-DLL_EXPORT int luaopen_libtorch(lua_State *L)
+LUA_EXTERNC DLL_EXPORT int luaopen_libtorch(lua_State *L);
+
+int luaopen_libtorch(lua_State *L)
 {
   globalL = L;
   THSetErrorHandler(luaTorchErrorHandlerFunction);
