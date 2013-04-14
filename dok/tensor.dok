@@ -1177,6 +1177,105 @@ to copy, and fill (sub) tensors.
 [torch.DoubleTensor of dimension 5x6]
 </file>
 
+====  [Tensor] index(dim, index) ====
+{{anchor:torch.Tensor.index}}
+
+Returns a new ''Tensor'' which indexes the given tensor along dimension ''dim'' and using the entries in ''torch.LongTensor'' ''index''. The returned tensor has the same number of dimensions as the original tensor. The returned tensor does **not** use the same storage as the original tensor.
+
+<file lua>
+t7> x = torch.rand(5,5)
+t7> =x
+ 0.8020  0.7246  0.1204  0.3419  0.4385
+ 0.0369  0.4158  0.0985  0.3024  0.8186
+ 0.2746  0.9362  0.2546  0.8586  0.6674
+ 0.7473  0.9028  0.1046  0.9085  0.6622
+ 0.1412  0.6784  0.1624  0.8113  0.3949
+[torch.DoubleTensor of dimension 5x5]
+
+t7> y = x:index(1,torch.LongTensor{3,1})
+t7> =y
+ 0.2746  0.9362  0.2546  0.8586  0.6674
+ 0.8020  0.7246  0.1204  0.3419  0.4385
+[torch.DoubleTensor of dimension 2x5]
+t7> y:fill(1)
+t7> =y
+ 1  1  1  1  1
+ 1  1  1  1  1
+[torch.DoubleTensor of dimension 2x5]
+
+t7> =x
+ 0.8020  0.7246  0.1204  0.3419  0.4385
+ 0.0369  0.4158  0.0985  0.3024  0.8186
+ 0.2746  0.9362  0.2546  0.8586  0.6674
+ 0.7473  0.9028  0.1046  0.9085  0.6622
+ 0.1412  0.6784  0.1624  0.8113  0.3949
+[torch.DoubleTensor of dimension 5x5]
+
+</file>
+
+Note the explicit ''index'' function is different than the indexing operator ''[]''. The indexing operator ''[]'' is a syntactic shortcut for a series of select and narrow operations, therefore it always returns a new view on the original tensor that shares the same storage. However, he explicit ''index'' function can not use the same storage.
+
+=== [Tensor] indexCopy(dim, index, tensor) ===
+{{anchor:torch.Tensor.indexCopy}}
+
+Copies the elements of ''tensor'' into itself by selecting the indices in the order defined by the order given in ''index''.
+
+<file lua>
+t7> =x
+ 0.8020  0.7246  0.1204  0.3419  0.4385
+ 0.0369  0.4158  0.0985  0.3024  0.8186
+ 0.2746  0.9362  0.2546  0.8586  0.6674
+ 0.7473  0.9028  0.1046  0.9085  0.6622
+ 0.1412  0.6784  0.1624  0.8113  0.3949
+[torch.DoubleTensor of dimension 5x5]
+t7> z=torch.Tensor(5,2)
+t7> z:select(2,1):fill(-1)
+t7> z:select(2,2):fill(-2)
+t7> =z
+-1 -2
+-1 -2
+-1 -2
+-1 -2
+-1 -2
+[torch.DoubleTensor of dimension 5x2]
+
+t7> x:indexCopy(2,torch.LongTensor{5,1},z)
+t7> =x
+-2.0000  0.7246  0.1204  0.3419 -1.0000
+-2.0000  0.4158  0.0985  0.3024 -1.0000
+-2.0000  0.9362  0.2546  0.8586 -1.0000
+-2.0000  0.9028  0.1046  0.9085 -1.0000
+-2.0000  0.6784  0.1624  0.8113 -1.0000
+[torch.DoubleTensor of dimension 5x5]
+
+</file>
+
+=== [Tensor] indexFill(dim, index, val) ===
+{{anchor:torch.Tensor.indexFill}}
+
+Fills the elements of itself with value ''val'' by selecting the indices in the order defined by the order given in ''index''.
+
+<file lua>
+t7> x=torch.rand(5,5)
+t7> =x
+ 0.8414  0.4121  0.3934  0.5600  0.5403
+ 0.3029  0.2040  0.7893  0.6079  0.6334
+ 0.3743  0.1389  0.1573  0.1357  0.8460
+ 0.2838  0.9925  0.0076  0.7220  0.5185
+ 0.8739  0.6887  0.4271  0.0385  0.9116
+[torch.DoubleTensor of dimension 5x5]
+
+t7> x:indexFill(2,torch.LongTensor{4,2},-10)
+t7> =x
+  0.8414 -10.0000   0.3934 -10.0000   0.5403
+  0.3029 -10.0000   0.7893 -10.0000   0.6334
+  0.3743 -10.0000   0.1573 -10.0000   0.8460
+  0.2838 -10.0000   0.0076 -10.0000   0.5185
+  0.8739 -10.0000   0.4271 -10.0000   0.9116
+[torch.DoubleTensor of dimension 5x5]
+
+</file>
+
 =====  Expanding/Replicating Tensors =====
 
 These methods returns a ''Tensor'' which is created by replications of the

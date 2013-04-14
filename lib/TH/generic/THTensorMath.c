@@ -78,6 +78,7 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, long dim, THLongTen
   THLongStorage_rawCopy(newSize,src->size);
   newSize->data[dim] = numel;
   THTensor_(resize)(tensor,newSize,NULL);
+  THLongStorage_free(newSize);
 
   index = THLongTensor_newContiguous(index);
   long *index_data = THLongTensor_data(index);
@@ -106,7 +107,6 @@ void THTensor_(indexCopy)(THTensor *tensor, long dim, THLongTensor *index, THTen
   long i, numel;
   THTensor *tSlice, *sSlice;
 
-
   numel = THLongTensor_nElement(index);
   THArgCheck(index->nDimension == 1, 3, "Index is supposed to be a vector");
   THArgCheck(dim < src->nDimension,4,"Indexing dim is out of bounds");
@@ -116,13 +116,20 @@ void THTensor_(indexCopy)(THTensor *tensor, long dim, THLongTensor *index, THTen
 
   for (i=0; i<numel; i++)
   {
-    tSlice = THTensor_(new)();
-    sSlice = THTensor_(new)();
-    THTensor_(select)(tSlice, tensor, dim, index_data[i]-1);
-    THTensor_(select)(sSlice, src, dim, i);
-    THTensor_(copy)(tSlice, sSlice);
-    THTensor_(free)(tSlice);
-    THTensor_(free)(sSlice);
+    if (tensor->nDimension > 1 )
+    {
+      tSlice = THTensor_(new)();
+      sSlice = THTensor_(new)();
+      THTensor_(select)(tSlice, tensor, dim, index_data[i]-1);
+      THTensor_(select)(sSlice, src, dim, i);
+      THTensor_(copy)(tSlice, sSlice);
+      THTensor_(free)(tSlice);
+      THTensor_(free)(sSlice);
+    }
+    else
+    {
+      THTensor_(set1d)(tensor,index_data[i]-1,THTensor_(get1d)(src,i));
+    }
   }
   THLongTensor_free(index);
 }
@@ -142,10 +149,17 @@ void THTensor_(indexFill)(THTensor *tensor, long dim, THLongTensor *index, real 
   
   for (i=0; i<numel; i++)
   {
-    tSlice = THTensor_(new)();
-    THTensor_(select)(tSlice, tensor,dim,index_data[i]-1);
-    THTensor_(fill)(tSlice, val);
-    THTensor_(free)(tSlice);
+    if (tensor->nDimension > 1 )
+    {
+      tSlice = THTensor_(new)();
+      THTensor_(select)(tSlice, tensor,dim,index_data[i]-1);
+      THTensor_(fill)(tSlice, val);
+      THTensor_(free)(tSlice);
+    }
+    else
+    {
+      THTensor_(set1d)(tensor,index_data[i]-1,val);
+    }
   }
   THLongTensor_free(index);
 }
