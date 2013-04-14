@@ -375,6 +375,88 @@ static int torch_Tensor_(select)(lua_State *L)
   return 1;
 }
 
+static int torch_Tensor_(indexSelect)(lua_State *L)
+{
+  int narg = lua_gettop(L);
+  THTensor *tensor, *src;
+  THLongTensor *index;
+  int dim;
+  if (narg == 3)
+  {
+    tensor = THTensor_(new)();
+    src = luaT_checkudata(L, 1, torch_Tensor);
+    dim = luaL_checkint(L, 2) - 1;
+    index = luaT_checkudata(L, 3, "torch.LongTensor");
+  }
+  else if(narg == 4)
+  {
+    tensor = luaT_checkudata(L,1,torch_Tensor);
+    src = luaT_checkudata(L, 2, torch_Tensor);
+    dim = luaL_checkint(L, 3) - 1;
+    index = luaT_checkudata(L, 4, "torch.LongTensor");
+  }
+  else
+  {
+    luaL_error(L,"Tensor, number, LongTensor | Tensor, Tensor, number, LongTensor expected");
+    return 0;
+  }
+
+  THTensor_(indexSelect)(tensor,src,dim,index);
+  luaT_pushudata(L,tensor,torch_Tensor);
+
+  return 1;
+}
+
+static int torch_Tensor_(indexCopy)(lua_State *L)
+{
+  int narg = lua_gettop(L);
+  THTensor *tensor, *src;
+  THLongTensor *index;
+  int dim;
+  if(narg == 4)
+  {
+    tensor = luaT_checkudata(L,1,torch_Tensor);
+    dim = luaL_checkint(L, 2) - 1;
+    index = luaT_checkudata(L, 3, "torch.LongTensor");
+    src = luaT_checkudata(L, 4, torch_Tensor);
+  }
+  else
+  {
+    luaL_error(L,"Tensor, number, LongTensor, Tensor expected");
+    return 0;
+  }
+
+  THTensor_(indexCopy)(tensor,dim,index,src);
+  luaT_pushudata(L,tensor,torch_Tensor);
+
+  return 1;
+}
+
+static int torch_Tensor_(indexFill)(lua_State *L)
+{
+  int narg = lua_gettop(L);
+  THTensor *tensor;
+  THLongTensor *index;
+  real val;
+  int dim;
+  if(narg == 4)
+  {
+    tensor = luaT_checkudata(L,1,torch_Tensor);
+    dim = luaL_checkint(L, 2) - 1;
+    index = luaT_checkudata(L, 3, "torch.LongTensor");
+    val = luaL_checknumber(L, 4);
+  }
+  else
+  {
+    luaL_error(L,"Tensor, number, LongTensor, number expected");
+    return 0;
+  }
+
+  THTensor_(indexFill)(tensor,dim,index,val);
+  luaT_pushudata(L,tensor,torch_Tensor);
+
+  return 1;
+}
 
 static int torch_Tensor_(transpose)(lua_State *L)
 {
@@ -1050,6 +1132,9 @@ static const struct luaL_Reg torch_Tensor_(_) [] = {
   {"narrow", torch_Tensor_(narrow)},
   {"sub", torch_Tensor_(sub)},
   {"select", torch_Tensor_(select)},
+  {"index", torch_Tensor_(indexSelect)},
+  {"indexCopy", torch_Tensor_(indexCopy)},
+  {"indexFill", torch_Tensor_(indexFill)},
   {"transpose", torch_Tensor_(transpose)},
   {"t", torch_Tensor_(t)},
   {"unfold", torch_Tensor_(unfold)},

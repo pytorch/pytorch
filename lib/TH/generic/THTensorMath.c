@@ -61,6 +61,95 @@ void THTensor_(maskedSelect)(THTensor *tensor, THTensor *src, THByteTensor *mask
 		   });
 }
 
+void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, long dim, THLongTensor *index)
+{
+  long i, numel;
+  THLongStorage * newSize;
+  THTensor *tSlice, *sSlice;
+
+
+  THArgCheck(index->nDimension == 1, 3, "Index is supposed to be a vector");
+  THArgCheck(dim < src->nDimension,4,"Indexing dim is out of bounds");
+  THArgCheck(src->nDimension > 0,2,"Source tensor is empty");
+
+  numel = THLongTensor_nElement(index);
+
+  newSize = THLongStorage_newWithSize(src->nDimension);
+  THLongStorage_rawCopy(newSize,src->size);
+  newSize->data[dim] = numel;
+  THTensor_(resize)(tensor,newSize,NULL);
+
+  index = THLongTensor_newContiguous(index);
+  long *index_data = THLongTensor_data(index);
+  for (i=0; i<numel; i++)
+  {
+    if (src->nDimension > 1)
+    {
+      tSlice = THTensor_(new)();
+      sSlice = THTensor_(new)();
+      THTensor_(select)(tSlice, tensor, dim, i);
+      THTensor_(select)(sSlice, src, dim, index_data[i]-1);
+      THTensor_(copy)(tSlice, sSlice);
+      THTensor_(free)(tSlice);
+      THTensor_(free)(sSlice);
+    }
+    else
+    {
+      THTensor_(set1d)(tensor,i,THTensor_(get1d)(src,index_data[i]-1));
+    }
+  }
+  THLongTensor_free(index);
+}
+
+void THTensor_(indexCopy)(THTensor *tensor, long dim, THLongTensor *index, THTensor *src)
+{
+  long i, numel;
+  THTensor *tSlice, *sSlice;
+
+
+  numel = THLongTensor_nElement(index);
+  THArgCheck(index->nDimension == 1, 3, "Index is supposed to be a vector");
+  THArgCheck(dim < src->nDimension,4,"Indexing dim is out of bounds");
+
+  index = THLongTensor_newContiguous(index);
+  long *index_data = THLongTensor_data(index);
+
+  for (i=0; i<numel; i++)
+  {
+    tSlice = THTensor_(new)();
+    sSlice = THTensor_(new)();
+    THTensor_(select)(tSlice, tensor, dim, index_data[i]-1);
+    THTensor_(select)(sSlice, src, dim, i);
+    THTensor_(copy)(tSlice, sSlice);
+    THTensor_(free)(tSlice);
+    THTensor_(free)(sSlice);
+  }
+  THLongTensor_free(index);
+}
+
+void THTensor_(indexFill)(THTensor *tensor, long dim, THLongTensor *index, real val)
+{
+  long i, numel;
+  THTensor *tSlice;
+
+
+  numel = THLongTensor_nElement(index);
+  THArgCheck(index->nDimension == 1, 3, "Index is supposed to be a vector");
+  THArgCheck(dim < tensor->nDimension,4,"Indexing dim is out of bounds");
+
+  index = THLongTensor_newContiguous(index);
+  long *index_data = THLongTensor_data(index);
+  
+  for (i=0; i<numel; i++)
+  {
+    tSlice = THTensor_(new)();
+    THTensor_(select)(tSlice, tensor,dim,index_data[i]-1);
+    THTensor_(fill)(tSlice, val);
+    THTensor_(free)(tSlice);
+  }
+  THLongTensor_free(index);
+}
+
 accreal THTensor_(dot)(THTensor *tensor, THTensor *src)
 {
   accreal sum = 0;
@@ -659,7 +748,8 @@ void THTensor_(range)(THTensor *r_, real xmin, real xmax, real step)
   real i = 0;
 
   THArgCheck(step > 0 || step < 0, 3, "step must be a non-null number");
-  THArgCheck((step > 0) && (xmax >= xmin) || (step < 0) && (xmax <= xmin), 2, "upper bound and larger bound incoherent with step sign");
+  THArgCheck(((step > 0) && (xmax >= xmin)) || ((step < 0) && (xmax <= xmin))
+              , 2, "upper bound and larger bound incoherent with step sign");
 
   size = (long)((xmax-xmin)/step+1);
   
