@@ -1215,7 +1215,7 @@ t7> =x
 
 Note the explicit ''index'' function is different than the indexing operator ''[]''. The indexing operator ''[]'' is a syntactic shortcut for a series of select and narrow operations, therefore it always returns a new view on the original tensor that shares the same storage. However, he explicit ''index'' function can not use the same storage.
 
-=== [Tensor] indexCopy(dim, index, tensor) ===
+==== [Tensor] indexCopy(dim, index, tensor) ====
 {{anchor:torch.Tensor.indexCopy}}
 
 Copies the elements of ''tensor'' into itself by selecting the indices in the order defined by the order given in ''index''.
@@ -1250,7 +1250,7 @@ t7> =x
 
 </file>
 
-=== [Tensor] indexFill(dim, index, val) ===
+==== [Tensor] indexFill(dim, index, val) ====
 {{anchor:torch.Tensor.indexFill}}
 
 Fills the elements of itself with value ''val'' by selecting the indices in the order defined by the order given in ''index''.
