@@ -387,13 +387,14 @@ static int torch_Tensor_(indexSelect)(lua_State *L)
     src = luaT_checkudata(L, 1, torch_Tensor);
     dim = luaL_checkint(L, 2) - 1;
     index = luaT_checkudata(L, 3, "torch.LongTensor");
+    luaT_pushudata(L,tensor,torch_Tensor);
   }
   else if(narg == 4)
   {
-    tensor = luaT_checkudata(L,1,torch_Tensor);
     src = luaT_checkudata(L, 2, torch_Tensor);
     dim = luaL_checkint(L, 3) - 1;
     index = luaT_checkudata(L, 4, "torch.LongTensor");
+    tensor = luaT_checkudata(L,1,torch_Tensor);
   }
   else
   {
@@ -402,7 +403,6 @@ static int torch_Tensor_(indexSelect)(lua_State *L)
   }
 
   THTensor_(indexSelect)(tensor,src,dim,index);
-  luaT_pushudata(L,tensor,torch_Tensor);
 
   return 1;
 }
@@ -415,10 +415,10 @@ static int torch_Tensor_(indexCopy)(lua_State *L)
   int dim;
   if(narg == 4)
   {
-    tensor = luaT_checkudata(L,1,torch_Tensor);
     dim = luaL_checkint(L, 2) - 1;
     index = luaT_checkudata(L, 3, "torch.LongTensor");
     src = luaT_checkudata(L, 4, torch_Tensor);
+    tensor = luaT_checkudata(L,1,torch_Tensor);
   }
   else
   {
@@ -427,7 +427,6 @@ static int torch_Tensor_(indexCopy)(lua_State *L)
   }
 
   THTensor_(indexCopy)(tensor,dim,index,src);
-  luaT_pushudata(L,tensor,torch_Tensor);
 
   return 1;
 }
@@ -441,10 +440,10 @@ static int torch_Tensor_(indexFill)(lua_State *L)
   int dim;
   if(narg == 4)
   {
-    tensor = luaT_checkudata(L,1,torch_Tensor);
     dim = luaL_checkint(L, 2) - 1;
     index = luaT_checkudata(L, 3, "torch.LongTensor");
     val = luaL_checknumber(L, 4);
+    tensor = luaT_checkudata(L,1,torch_Tensor);
   }
   else
   {
@@ -453,7 +452,6 @@ static int torch_Tensor_(indexFill)(lua_State *L)
   }
 
   THTensor_(indexFill)(tensor,dim,index,val);
-  luaT_pushudata(L,tensor,torch_Tensor);
 
   return 1;
 }

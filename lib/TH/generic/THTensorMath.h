@@ -9,9 +9,9 @@ TH_API void THTensor_(maskedFill)(THTensor *tensor, THByteTensor *mask, real val
 TH_API void THTensor_(maskedCopy)(THTensor *tensor, THByteTensor *mask, THTensor* src);
 TH_API void THTensor_(maskedSelect)(THTensor *tensor, THTensor* src, THByteTensor *mask);
 
-TH_API void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, long dim, THLongTensor *index);
-TH_API void THTensor_(indexCopy)(THTensor *tensor, long dim, THLongTensor *index, THTensor *src);
-TH_API void THTensor_(indexFill)(THTensor *tensor, long dim, THLongTensor *index, real val);
+TH_API void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTensor *index);
+TH_API void THTensor_(indexCopy)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src);
+TH_API void THTensor_(indexFill)(THTensor *tensor, int dim, THLongTensor *index, real val);
 
 TH_API accreal THTensor_(dot)(THTensor *t, THTensor *src);
   

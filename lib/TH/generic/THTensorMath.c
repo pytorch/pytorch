@@ -61,10 +61,10 @@ void THTensor_(maskedSelect)(THTensor *tensor, THTensor *src, THByteTensor *mask
 		   });
 }
 
-void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, long dim, THLongTensor *index)
+void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTensor *index)
 {
   long i, numel;
-  THLongStorage * newSize;
+  THLongStorage *newSize;
   THTensor *tSlice, *sSlice;
 
 
@@ -102,7 +102,7 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, long dim, THLongTen
   THLongTensor_free(index);
 }
 
-void THTensor_(indexCopy)(THTensor *tensor, long dim, THLongTensor *index, THTensor *src)
+void THTensor_(indexCopy)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src)
 {
   long i, numel;
   THTensor *tSlice, *sSlice;
@@ -134,7 +134,7 @@ void THTensor_(indexCopy)(THTensor *tensor, long dim, THLongTensor *index, THTen
   THLongTensor_free(index);
 }
 
-void THTensor_(indexFill)(THTensor *tensor, long dim, THLongTensor *index, real val)
+void THTensor_(indexFill)(THTensor *tensor, int dim, THLongTensor *index, real val)
 {
   long i, numel;
   THTensor *tSlice;
