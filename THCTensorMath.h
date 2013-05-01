@@ -45,6 +45,7 @@ TH_API void THCudaTensor_sqrt(THCudaTensor *self);
 TH_API void THCudaTensor_ceil(THCudaTensor *self);
 TH_API void THCudaTensor_floor(THCudaTensor *self);
 TH_API void THCudaTensor_abs(THCudaTensor *self);
+TH_API void THCudaTensor_sign(THCudaTensor *self, THCudaTensor *src);
 
 TH_API float THCudaTensor_meanall(THCudaTensor *self);
 TH_API float THCudaTensor_varall(THCudaTensor *self);

@@ -524,6 +524,33 @@ void THCudaTensor_pow(THCudaTensor *self_, float value)
   THCudaTensor_freeCopyTo(self, self_);
 }
 
+
+struct sign_functor
+{
+  __device__ float operator()(const float &v) const {
+    return (v > 0) - (v < 0);
+  }
+};
+
+
+void THCudaTensor_sign(THCudaTensor *self_, THCudaTensor *src)
+{
+  THArgCheck(THCudaTensor_nElement(self_) == THCudaTensor_nElement(src), 2, "size do not match");
+
+  {
+    THCudaTensor *self = THCudaTensor_newContiguous(self_);
+    long size = THCudaTensor_nElement(self);
+    src = THCudaTensor_newContiguous(src);
+    thrust::device_ptr<float> self_data(THCudaTensor_data(self));
+    thrust::device_ptr<float> src_data(THCudaTensor_data(src));
+
+    thrust::transform(src_data, src_data+size, self_data, sign_functor());
+
+    THCudaTensor_free(src);
+    THCudaTensor_freeCopyTo(self, self_);
+  }
+}
+
 float THCudaTensor_meanall(THCudaTensor *self)
 {
   THArgCheck(self->nDimension > 0, 1, "empty Tensor");
