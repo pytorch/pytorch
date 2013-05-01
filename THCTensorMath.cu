@@ -108,20 +108,24 @@ void THCudaTensor_cadd_tst(THCudaTensor *self_, THCudaTensor* src1, float value,
   }
 }
 
-void THCudaTensor_cmul(THCudaTensor *self_, THCudaTensor *src)
+void THCudaTensor_cmul(THCudaTensor *self_, THCudaTensor *src1, THCudaTensor *src2)
 {
-  THArgCheck(THCudaTensor_nElement(self_) == THCudaTensor_nElement(src), 2, "size do not match");
+  THArgCheck(THCudaTensor_nElement(self_) == THCudaTensor_nElement(src1), 2, "size do not match");
+  THArgCheck(THCudaTensor_nElement(self_) == THCudaTensor_nElement(src2), 3, "size do not match");
 
   {
     THCudaTensor *self = THCudaTensor_newContiguous(self_);
     long size = THCudaTensor_nElement(self);
-    src = THCudaTensor_newContiguous(src);
+    src1 = THCudaTensor_newContiguous(src1);
+    src2 = THCudaTensor_newContiguous(src2);
     thrust::device_ptr<float> self_data(THCudaTensor_data(self));
-    thrust::device_ptr<float> src_data(THCudaTensor_data(src));
+    thrust::device_ptr<float> src1_data(THCudaTensor_data(src1));
+    thrust::device_ptr<float> src2_data(THCudaTensor_data(src2));
 
-    thrust::transform(src_data, src_data+size, self_data, self_data, thrust::multiplies<float>());
+    thrust::transform(src2_data, src2_data+size, src1_data, self_data, thrust::multiplies<float>());
 
-    THCudaTensor_free(src);
+    THCudaTensor_free(src1);
+    THCudaTensor_free(src2);
     THCudaTensor_freeCopyTo(self, self_);
   }
 }
