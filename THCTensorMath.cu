@@ -276,6 +276,198 @@ float THCudaTensor_sumall(THCudaTensor *self)
   return result;
 }
 
+
+
+struct dim4 {
+    unsigned arr[4];
+
+    __host__ dim4(unsigned init=0) {
+        for(unsigned i=0; i<4; i++) { arr[i] = init; }
+    }
+
+    __host__ __device__ unsigned& operator[](const unsigned& idx) { return arr[idx]; }
+};
+
+
+
+/* Reduce one of the outer dimensions of a tensor
+ *
+ * For an n-d tensor (n <= 4) where the reduction is *not* along the innermost
+ * dimension:
+ *
+ * - block.x and grid.x make up the innermost dimension;
+ * - The reduced dimension is looped over inside a block; and
+ * - grid.y and grid.z are the remaining two dimensions (if any).
+ * - block.y and block.z are not used as we're limited to 512 or 1024 threads
+ *   in the block.
+ *
+ * For sizes/strides, index 3 is the reduced dimension, while the remaining
+ * indices are for the remaining dimensions with index 0 the innermost dimension.
+ *
+ * Reduction along the innermost dimension is handled in a separate kernel.
+ */
+template<class Op, typename T>
+__global__ void THCudaTensor_kernel_reduceOuterDim(float *tgt, float *src_,
+        dim4 src_stride, dim4 tgt_stride, dim4 size, Op op, T init)
+{
+  const size_t reduce = 3;
+  uint col = blockIdx.x * blockDim.x + threadIdx.x;
+  float *src = src_ + blockIdx.z * src_stride[2] + blockIdx.y * src_stride[1] + col;
+
+  if(col < size[0]) {
+    T acc = init;
+    for(uint i=0; i < size[reduce]; i++) {
+      acc = op((T) acc, (T) *src);
+      src += src_stride[reduce];
+    }
+    tgt[blockIdx.z * tgt_stride[2] + blockIdx.y * tgt_stride[1] + col] = float(acc);
+  }
+}
+
+
+template<class Op, typename T>
+__host__ void THCudaTensor_reduceOuterDim(THCudaTensor *tgt, THCudaTensor *src, long rdim, Op op, T init)
+{
+  const size_t reduce = 3;
+  dim4 src_stride(0);
+  dim4 tgt_stride(0);
+  dim4 size(1);
+
+  uint ndim = THCudaTensor_nDimension(src);
+  for(uint idim=0, o=ndim-2; idim < ndim; idim++) {
+    uint odim = idim == rdim ? reduce : o--;
+    src_stride[odim] = THCudaTensor_stride(src, idim);
+    tgt_stride[odim] = THCudaTensor_stride(tgt, idim);
+    size[odim]       = THCudaTensor_size(src, idim);
+  }
+
+  const uint nThreadPerBlock = 256;
+  uint nBlockPerColumn = (size[0] + nThreadPerBlock - 1) / nThreadPerBlock;
+  dim3 threads(nThreadPerBlock);
+  dim3 grid(nBlockPerColumn, size[1], size[2]);
+
+  THCudaTensor_kernel_reduceOuterDim<<<grid, threads>>>(THCudaTensor_data(tgt),
+          THCudaTensor_data(src), src_stride, tgt_stride, size, op, init);
+  cudaError errcode = cudaGetLastError();
+  if(errcode != cudaSuccess) {
+    THError(cudaGetErrorString(errcode));
+  }
+}
+
+
+
+/* Reduce the innermost dimension of a tensor
+ *
+ * For an n-d tensor (n <= 4) where the reduction is along the innermost dimension:
+ *
+ * - block.x is the innermost dimension, i.e. dimension 0;
+ * - block.y and grid.y make up dimension 1; and
+ * - grid.x and grid z are the remaining two outer dimensions (if any)
+ *
+ * Reduction along other dimensions is handled in a separate kernel.
+ */
+template<class Op, typename T>
+__global__ void THCudaTensor_kernel_reduceInnermostDim(float *tgt, float *src_,
+        dim4 src_stride, dim4 tgt_stride, dim4 size, Op op, T init)
+{
+  __shared__ float sbuf[16][32]; // 8kB
+
+  T acc = init;
+
+  uint row = blockIdx.y * blockDim.y + threadIdx.y;
+  float *src = src_ + blockIdx.z * src_stride[3] + blockIdx.x * src_stride[2] + row * src_stride[1];
+  bool reducing = threadIdx.x < blockDim.y
+                && blockIdx.y * blockDim.y + threadIdx.x < size[1]
+                && threadIdx.y == 0;
+
+  for(uint bCol=0; bCol < size[0]; bCol += blockDim.x) {
+
+    sbuf[threadIdx.y][threadIdx.x] = init;
+    uint col = bCol + threadIdx.x;
+    if(row < size[1] && col < size[0]) {
+      sbuf[threadIdx.y][threadIdx.x] = src[col];
+    }
+    __syncthreads();
+
+    if(reducing) {
+      for(uint x=0; x < blockDim.x; ++x) {
+        /* Could eliminate shared memory bank conflicst hare by using modulo 32
+         * addressing: (x + threadIdx) % 32. However, due to the memory-bound
+         * nature of the kernel this makes no difference to performance */
+        acc = op((T) acc, (T) sbuf[threadIdx.x][x]);
+      }
+    }
+    __syncthreads(); // to avoid sbuf being cleared too early
+  }
+
+  if(reducing) {
+    uint row = blockIdx.y * blockDim.y + threadIdx.x;
+    uint tgt_offset = blockIdx.z * tgt_stride[3] + blockIdx.x * tgt_stride[2];
+    tgt[tgt_offset + row] = float(acc);
+  }
+}
+
+
+
+template<class Op, typename T>
+__host__ void THCudaTensor_reduceInnermostDim(THCudaTensor *tgt, THCudaTensor *src, Op op, T init)
+{
+  dim4 src_stride(0);
+  dim4 tgt_stride(0);
+  dim4 size(1);
+
+  uint ndim = THCudaTensor_nDimension(src);
+  for(uint dim=0; dim < ndim; dim++) {
+    uint odim = ndim - 1 - dim;
+    src_stride[odim] = THCudaTensor_stride(src, dim);
+    tgt_stride[odim] = THCudaTensor_stride(tgt, dim);
+    size[odim]       = THCudaTensor_size(src, dim);
+  }
+
+  dim3 threads(32, 16);
+  uint nBlockPerRow = (size[1] + threads.y - 1) / threads.y;
+  dim3 grid(size[2], nBlockPerRow, size[3]);
+
+  THCudaTensor_kernel_reduceInnermostDim<<<grid, threads>>>(THCudaTensor_data(tgt),
+          THCudaTensor_data(src), src_stride, tgt_stride, size, op, init);
+  cudaError errcode = cudaGetLastError();
+  if(errcode != cudaSuccess) {
+    THError(cudaGetErrorString(errcode));
+  }
+}
+
+
+template<class Op, typename T>
+void THCudaTensor_reduceDim(THCudaTensor *self_, THCudaTensor *src, long dimension, Op op, T init)
+{
+  THArgCheck(dimension >= 0 && dimension < THCudaTensor_nDimension(src), 3, "dimension out of range");
+  THArgCheck(THCudaTensor_nDimension(src) <= 4, 2, "too many dimensions (>4)");
+
+  THLongStorage *dim = THCudaTensor_newSizeOf(src);
+  THLongStorage_set(dim, dimension, 1);
+  THCudaTensor_resize(self_, dim, NULL);
+  THLongStorage_free(dim);
+
+  THCudaTensor *self = THCudaTensor_newContiguous(self_);
+  src = THCudaTensor_newContiguous(src);
+
+  if(dimension == THCudaTensor_nDimension(src)-1) {
+    THCudaTensor_reduceInnermostDim(self, src, op, init);
+  } else {
+    THCudaTensor_reduceOuterDim(self, src, dimension, op, init);
+  }
+
+  THCudaTensor_free(src);
+  THCudaTensor_freeCopyTo(self, self_);
+}
+
+
+void THCudaTensor_sum(THCudaTensor *self, THCudaTensor *src, long dimension)
+{
+  return THCudaTensor_reduceDim(self, src, dimension, thrust::plus<double>(), 0.0);
+}
+
+
 void THCudaTensor_addmv(THCudaTensor *self, float beta, float alpha, THCudaTensor *mat, THCudaTensor *vec)
 {
   if( (mat->nDimension != 2) || (vec->nDimension != 1) )
