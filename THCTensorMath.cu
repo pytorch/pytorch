@@ -802,6 +802,168 @@ float THCudaTensor_stdall(THCudaTensor *self)
   return sqrt(THCudaTensor_varall(self));
 }
 
+
+
+template<class Op>
+void THCudaTensor_logicalValue(THCudaTensor *self_, THCudaTensor *src, Op op)
+{
+  THArgCheck(THCudaTensor_nElement(self_) == THCudaTensor_nElement(src), 2, "size do not match");
+
+  THCudaTensor *self = THCudaTensor_newContiguous(self_);
+  long size = THCudaTensor_nElement(self);
+  src = THCudaTensor_newContiguous(src);
+  thrust::device_ptr<float> self_data(THCudaTensor_data(self));
+  thrust::device_ptr<float> src_data(THCudaTensor_data(src));
+
+  thrust::transform(src_data, src_data+size, self_data, op);
+
+  THCudaTensor_free(src);
+  THCudaTensor_freeCopyTo(self, self_);
+}
+
+
+struct partial_less_functor
+{
+  const float rhs;
+  partial_less_functor(float rhs) : rhs(rhs) {}
+  __host__ __device__ bool operator()(const float &lhs) const {return lhs < rhs;}
+};
+
+
+void THCudaTensor_ltValue(THCudaTensor *self_, THCudaTensor *src, float value)
+{
+  THCudaTensor_logicalValue(self_, src, partial_less_functor(value));
+}
+
+
+struct partial_greater_functor
+{
+  const float rhs;
+  partial_greater_functor(float rhs) : rhs(rhs) {}
+  __host__ __device__ bool operator()(const float &lhs) const {return lhs > rhs;}
+};
+
+
+void THCudaTensor_gtValue(THCudaTensor *self_, THCudaTensor *src, float value)
+{
+  THCudaTensor_logicalValue(self_, src, partial_greater_functor(value));
+}
+
+
+struct partial_less_equal_functor
+{
+  const float rhs;
+  partial_less_equal_functor(float rhs) : rhs(rhs) {}
+  __host__ __device__ bool operator()(const float &lhs) const {return lhs <= rhs;}
+};
+
+
+void THCudaTensor_leValue(THCudaTensor *self_, THCudaTensor *src, float value)
+{
+  THCudaTensor_logicalValue(self_, src, partial_less_equal_functor(value));
+}
+
+
+struct partial_greater_equal_functor
+{
+  const float rhs;
+  partial_greater_equal_functor(float rhs) : rhs(rhs) {}
+  __host__ __device__ bool operator()(const float &lhs) const {return lhs >= rhs;}
+};
+
+
+void THCudaTensor_geValue(THCudaTensor *self_, THCudaTensor *src, float value)
+{
+  THCudaTensor_logicalValue(self_, src, partial_greater_equal_functor(value));
+}
+
+
+struct partial_equal_functor
+{
+  const float rhs;
+  partial_equal_functor(float rhs) : rhs(rhs) {}
+  __host__ __device__ bool operator()(const float &lhs) const {return lhs == rhs;}
+};
+
+
+void THCudaTensor_eqValue(THCudaTensor *self_, THCudaTensor *src, float value)
+{
+  THCudaTensor_logicalValue(self_, src, partial_equal_functor(value));
+}
+
+
+struct partial_not_equal_functor
+{
+  const float rhs;
+  partial_not_equal_functor(float rhs) : rhs(rhs) {}
+  __host__ __device__ bool operator()(const float &lhs) const {return lhs != rhs;}
+};
+
+
+void THCudaTensor_neValue(THCudaTensor *self_, THCudaTensor *src, float value)
+{
+  THCudaTensor_logicalValue(self_, src, partial_not_equal_functor(value));
+}
+
+
+template<class Op>
+void THCudaTensor_logicalTensor(THCudaTensor *self_, THCudaTensor *src1, THCudaTensor *src2, Op op)
+{
+  THArgCheck(THCudaTensor_nElement(self_) == THCudaTensor_nElement(src1), 2, "size does not match");
+  THArgCheck(THCudaTensor_nElement(self_) == THCudaTensor_nElement(src2), 3, "size does not match");
+
+  THCudaTensor *self = THCudaTensor_newContiguous(self_);
+  long size = THCudaTensor_nElement(self);
+  src1 = THCudaTensor_newContiguous(src1);
+  src2 = THCudaTensor_newContiguous(src2);
+  thrust::device_ptr<float> self_data(THCudaTensor_data(self));
+  thrust::device_ptr<float> src1_data(THCudaTensor_data(src1));
+  thrust::device_ptr<float> src2_data(THCudaTensor_data(src2));
+
+  thrust::transform(src2_data, src2_data+size, src1_data, self_data, op);
+
+  THCudaTensor_free(src1);
+  THCudaTensor_free(src2);
+  THCudaTensor_freeCopyTo(self, self_);
+}
+
+
+void THCudaTensor_ltTensor(THCudaTensor *self_, THCudaTensor *src1, THCudaTensor *src2)
+{
+  THCudaTensor_logicalTensor(self_, src1, src2, thrust::less<float>());
+}
+
+
+void THCudaTensor_gtTensor(THCudaTensor *self_, THCudaTensor *src1, THCudaTensor *src2)
+{
+  THCudaTensor_logicalTensor(self_, src1, src2, thrust::greater<float>());
+}
+
+
+void THCudaTensor_leTensor(THCudaTensor *self_, THCudaTensor *src1, THCudaTensor *src2)
+{
+  THCudaTensor_logicalTensor(self_, src1, src2, thrust::less_equal<float>());
+}
+
+
+void THCudaTensor_geTensor(THCudaTensor *self_, THCudaTensor *src1, THCudaTensor *src2)
+{
+  THCudaTensor_logicalTensor(self_, src1, src2, thrust::greater_equal<float>());
+}
+
+
+void THCudaTensor_eqTensor(THCudaTensor *self_, THCudaTensor *src1, THCudaTensor *src2)
+{
+  THCudaTensor_logicalTensor(self_, src1, src2, thrust::equal_to<float>());
+}
+
+
+void THCudaTensor_neTensor(THCudaTensor *self_, THCudaTensor *src1, THCudaTensor *src2)
+{
+  THCudaTensor_logicalTensor(self_, src1, src2, thrust::not_equal_to<float>());
+}
+
+
 struct norm_functor
 {
   const float exponent;

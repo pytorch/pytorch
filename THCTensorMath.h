@@ -50,6 +50,20 @@ TH_API void THCudaTensor_floor(THCudaTensor *self);
 TH_API void THCudaTensor_abs(THCudaTensor *self);
 TH_API void THCudaTensor_sign(THCudaTensor *self, THCudaTensor *src);
 
+TH_API void THCudaTensor_ltValue(THCudaTensor *self_, THCudaTensor *src, float value);
+TH_API void THCudaTensor_gtValue(THCudaTensor *self_, THCudaTensor *src, float value);
+TH_API void THCudaTensor_leValue(THCudaTensor *self_, THCudaTensor *src, float value);
+TH_API void THCudaTensor_geValue(THCudaTensor *self_, THCudaTensor *src, float value);
+TH_API void THCudaTensor_eqValue(THCudaTensor *self_, THCudaTensor *src, float value);
+TH_API void THCudaTensor_neValue(THCudaTensor *self_, THCudaTensor *src, float value);
+
+TH_API void THCudaTensor_ltTensor(THCudaTensor *self_, THCudaTensor *src1, THCudaTensor *src2);
+TH_API void THCudaTensor_gtTensor(THCudaTensor *self_, THCudaTensor *src1, THCudaTensor *src2);
+TH_API void THCudaTensor_leTensor(THCudaTensor *self_, THCudaTensor *src1, THCudaTensor *src2);
+TH_API void THCudaTensor_geTensor(THCudaTensor *self_, THCudaTensor *src1, THCudaTensor *src2);
+TH_API void THCudaTensor_eqTensor(THCudaTensor *self_, THCudaTensor *src1, THCudaTensor *src2);
+TH_API void THCudaTensor_neTensor(THCudaTensor *self_, THCudaTensor *src1, THCudaTensor *src2);
+
 TH_API float THCudaTensor_meanall(THCudaTensor *self);
 TH_API float THCudaTensor_varall(THCudaTensor *self);
 TH_API float THCudaTensor_stdall(THCudaTensor *self);
