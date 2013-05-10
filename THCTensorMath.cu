@@ -723,13 +723,16 @@ struct pow_functor
   }
 };
 
-void THCudaTensor_pow(THCudaTensor *self_, float value)
+void THCudaTensor_pow(THCudaTensor *self_, THCudaTensor *src, float value)
 {
+  THArgCheck(THCudaTensor_nElement(self_) == THCudaTensor_nElement(src), 2, "sizes do not match");
   THCudaTensor *self = THCudaTensor_newContiguous(self_);
+  src = THCudaTensor_newContiguous(src);
   long size = THCudaTensor_nElement(self);
   thrust::device_ptr<float> self_data(THCudaTensor_data(self));
+  thrust::device_ptr<float> src_data(THCudaTensor_data(src));
   
-  thrust::transform(self_data, self_data+size, self_data, pow_functor(value));
+  thrust::transform(src_data, src_data+size, self_data, pow_functor(value));
 
   THCudaTensor_freeCopyTo(self, self_);
 }

@@ -43,7 +43,7 @@ TH_API void THCudaTensor_sinh(THCudaTensor *self);
 TH_API void THCudaTensor_tan(THCudaTensor *self);
 TH_API void THCudaTensor_atan(THCudaTensor *self);
 TH_API void THCudaTensor_tanh(THCudaTensor *self);
-TH_API void THCudaTensor_pow(THCudaTensor *self, float value);
+TH_API void THCudaTensor_pow(THCudaTensor *self, THCudaTensor *src, float value);
 TH_API void THCudaTensor_sqrt(THCudaTensor *self);
 TH_API void THCudaTensor_ceil(THCudaTensor *self);
 TH_API void THCudaTensor_floor(THCudaTensor *self);
