@@ -805,8 +805,16 @@ static void THTensor_random1__(THTensor *self, long b)
            {{name='ByteTensor',default=true, returned=true},
             {name=Tensor},
             {name=real}},
+           cname(name .. 'ValueT'),
+           {{name=Tensor, returned=true},
+            {name=Tensor},
+            {name=real}},
            cname(name .. 'Tensor'),
            {{name='ByteTensor',default=true, returned=true},
+            {name=Tensor},
+            {name=Tensor}},
+           cname(name .. 'TensorT'),
+           {{name=Tensor, returned=true},
             {name=Tensor},
             {name=Tensor}})
    end
