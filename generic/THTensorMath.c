@@ -997,6 +997,13 @@ void THTensor_(cat)(THTensor *r_, THTensor *ta, THTensor *tb, int dimension)
     TH_TENSOR_APPLY2(unsigned char, r_, real, t,			\
 		     if (*t_data OP value) *r__data = 1;);		\
   }									\
+  void THTensor_(NAME##ValueT)(THTensor* r_, THTensor* t, real value)	\
+  {									\
+    THTensor_(rawResize)(r_, t->nDimension, t->size, NULL);		\
+    THTensor_(zero)(r_);						\
+    TH_TENSOR_APPLY2(real, r_, real, t,					\
+		     if (*t_data OP value) *r__data = 1;);		\
+  }									\
   void THTensor_(NAME##Tensor)(THByteTensor *r_, THTensor *ta, THTensor *tb) \
   {									\
     THByteTensor_rawResize(r_, ta->nDimension, ta->size, NULL);		\
@@ -1004,6 +1011,14 @@ void THTensor_(cat)(THTensor *r_, THTensor *ta, THTensor *tb, int dimension)
     TH_TENSOR_APPLY3(unsigned char, r_, real, ta, real, tb,		\
 		     if(*ta_data OP *tb_data) *r__data = 1;);		\
   }									\
+  void THTensor_(NAME##TensorT)(THTensor *r_, THTensor *ta, THTensor *tb) \
+  {									\
+    THTensor_(rawResize)(r_, ta->nDimension, ta->size, NULL);		\
+    THTensor_(zero)(r_);						\
+    TH_TENSOR_APPLY3(real, r_, real, ta, real, tb,			\
+		     if(*ta_data OP *tb_data) *r__data = 1;);		\
+  }									\
+
 
 TENSOR_IMPLEMENT_LOGICAL(lt,<)
 TENSOR_IMPLEMENT_LOGICAL(gt,>)
