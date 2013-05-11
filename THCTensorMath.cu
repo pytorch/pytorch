@@ -920,7 +920,7 @@ void THCudaTensor_logicalTensor(THCudaTensor *self_, THCudaTensor *src1, THCudaT
   thrust::device_ptr<float> src1_data(THCudaTensor_data(src1));
   thrust::device_ptr<float> src2_data(THCudaTensor_data(src2));
 
-  thrust::transform(src2_data, src2_data+size, src1_data, self_data, op);
+  thrust::transform(src1_data, src1_data+size, src2_data, self_data, op);
 
   THCudaTensor_free(src1);
   THCudaTensor_free(src2);
