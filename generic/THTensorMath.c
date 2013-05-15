@@ -1179,19 +1179,33 @@ void THTensor_(norm)(THTensor *r_, THTensor *t, real value, int dimension)
   THTensor_(resize)(r_, dim, NULL);
   THLongStorage_free(dim);
 
-  TH_TENSOR_DIM_APPLY2(real, t, real, r_, dimension,
-                       accreal sum = 0;
-                       long i;
-                       for(i = 0; i < t_size; i++)
-                         sum += pow(fabs(t_data[i*t_stride]), value);
-                       *r__data = pow(sum, 1.0/value);)
+  if(value == 0) {
+    TH_TENSOR_DIM_APPLY2(real, t, real, r_, dimension,
+                         accreal sum = 0;
+                         long i;
+                         for(i = 0; i < t_size; i++)
+                           sum += t_data[i*t_stride] != 0.0;
+                         *r__data = sum;)
+  } else {
+    TH_TENSOR_DIM_APPLY2(real, t, real, r_, dimension,
+                         accreal sum = 0;
+                         long i;
+                         for(i = 0; i < t_size; i++)
+                           sum += pow(fabs(t_data[i*t_stride]), value);
+                         *r__data = pow(sum, 1.0/value);)
+  }
 }
 
 accreal THTensor_(normall)(THTensor *tensor, real value)
 { 
   accreal sum = 0;
-  TH_TENSOR_APPLY(real, tensor, sum += pow(fabs(*tensor_data), value););
-  return pow(sum, 1.0/value);
+  if(value == 0) {
+    TH_TENSOR_APPLY(real, tensor, sum += *tensor_data != 0.0;);
+    return sum;
+  } else {
+    TH_TENSOR_APPLY(real, tensor, sum += pow(fabs(*tensor_data), value););
+    return pow(sum, 1.0/value);
+  }
 }
 
 accreal THTensor_(dist)(THTensor *tensor, THTensor *src, real value)
