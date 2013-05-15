@@ -1021,6 +1021,8 @@ a specific dimension ''d'', in **descending** order.
 
 ''y=torch.norm(x,p)'' returns the p-norm of the tensor x. 
 
+''y=torch.norm(x,p,dim)'' returns the p-norms of the tensor x computed over the dimension dim.
+
 ====  torch.dist(x,y)        ====
 {{anchor:torch.dist}}
 
