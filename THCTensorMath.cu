@@ -311,18 +311,20 @@ __global__ void THCudaTensor_kernel_reduceOuterDim(float *tgt, float *src_,
         dim4 src_stride, dim4 tgt_stride, dim4 size, Op op, T init)
 {
   const size_t reduce = 3;
-  unsigned col = blockIdx.x * blockDim.x + threadIdx.x;
-  float *src = src_ + blockIdx.z * src_stride[2] + blockIdx.y * src_stride[1] + col;
 
-  if(col < size[0]) {
+  for(unsigned z = blockIdx.z; z < size[2] ; z += gridDim.z)
+  for(unsigned y = blockIdx.y; y < size[1] ; y += gridDim.y)
+  for(unsigned col = blockIdx.x * blockDim.x + threadIdx.x; col < size[0]; col += blockDim.x * gridDim.x) {
+    float *src = src_ + z * src_stride[2] + y * src_stride[1] + col;
     T acc = init;
     for(unsigned i=0; i < size[reduce]; i++) {
       acc = op((T) acc, (T) *src);
       src += src_stride[reduce];
     }
-    tgt[blockIdx.z * tgt_stride[2] + blockIdx.y * tgt_stride[1] + col] = float(acc);
+    tgt[z * tgt_stride[2] + y * tgt_stride[1] + col] = float(acc);
   }
 }
+
 
 
 template<class Op, typename T>
@@ -344,7 +346,8 @@ __host__ void THCudaTensor_reduceOuterDim(THCudaTensor *tgt, THCudaTensor *src, 
   const unsigned nThreadPerBlock = 256;
   unsigned nBlockPerColumn = (size[0] + nThreadPerBlock - 1) / nThreadPerBlock;
   dim3 threads(nThreadPerBlock);
-  dim3 grid(nBlockPerColumn, size[1], size[2]);
+  unsigned maxGridDim = 1024; // anything < 64k is fine. The choice has no impact on performance.
+  dim3 grid(min(maxGridDim, nBlockPerColumn), min(maxGridDim, size[1]), min(maxGridDim, size[2]));
 
   THCudaTensor_kernel_reduceOuterDim<<<grid, threads>>>(THCudaTensor_data(tgt),
           THCudaTensor_data(src), src_stride, tgt_stride, size, op, init);
@@ -372,38 +375,40 @@ __global__ void THCudaTensor_kernel_reduceInnermostDim(float *tgt, float *src_,
 {
   __shared__ float sbuf[16][32]; // 8kB
 
-  T acc = init;
+  for(unsigned z = blockIdx.z; z < size[3] ; z += gridDim.z)
+  for(unsigned x = blockIdx.x; x < size[2] ; x += gridDim.x)
+  for(unsigned bRow = blockIdx.y * blockDim.y; bRow < size[1]; bRow += blockDim.y * gridDim.y) {
 
-  unsigned row = blockIdx.y * blockDim.y + threadIdx.y;
-  float *src = src_ + blockIdx.z * src_stride[3] + blockIdx.x * src_stride[2] + row * src_stride[1];
-  bool reducing = threadIdx.x < blockDim.y
-                && blockIdx.y * blockDim.y + threadIdx.x < size[1]
-                && threadIdx.y == 0;
+    T acc = init;
+    unsigned row = bRow + threadIdx.y;
+    float *src = src_ + z * src_stride[3] + x * src_stride[2] + row * src_stride[1];
+    bool reducing = threadIdx.x < blockDim.y && bRow + threadIdx.x < size[1] && threadIdx.y == 0;
 
-  for(unsigned bCol=0; bCol < size[0]; bCol += blockDim.x) {
+    for(unsigned bCol=0; bCol < size[0]; bCol += blockDim.x) {
 
-    sbuf[threadIdx.y][threadIdx.x] = init;
-    unsigned col = bCol + threadIdx.x;
-    if(row < size[1] && col < size[0]) {
-      sbuf[threadIdx.y][threadIdx.x] = src[col];
+      sbuf[threadIdx.y][threadIdx.x] = init;
+      unsigned col = bCol + threadIdx.x;
+      if(row < size[1] && col < size[0]) {
+        sbuf[threadIdx.y][threadIdx.x] = src[col];
+      }
+      __syncthreads();
+
+      if(reducing) {
+        for(unsigned x=0; x < blockDim.x; ++x) {
+          /* Could eliminate shared memory bank conflicts here by using modulo 32
+           * addressing: (x + threadIdx) % 32. However, due to the memory-bound
+           * nature of the kernel this makes no difference to performance */
+          acc = op((T) acc, (T) sbuf[threadIdx.x][x]);
+        }
+      }
+      __syncthreads(); // to avoid sbuf being cleared too early
     }
-    __syncthreads();
 
     if(reducing) {
-      for(unsigned x=0; x < blockDim.x; ++x) {
-        /* Could eliminate shared memory bank conflicst hare by using modulo 32
-         * addressing: (x + threadIdx) % 32. However, due to the memory-bound
-         * nature of the kernel this makes no difference to performance */
-        acc = op((T) acc, (T) sbuf[threadIdx.x][x]);
-      }
+      unsigned row = bRow + threadIdx.x;
+      unsigned tgt_offset = z * tgt_stride[3] + x * tgt_stride[2];
+      tgt[tgt_offset + row] = float(acc);
     }
-    __syncthreads(); // to avoid sbuf being cleared too early
-  }
-
-  if(reducing) {
-    unsigned row = blockIdx.y * blockDim.y + threadIdx.x;
-    unsigned tgt_offset = blockIdx.z * tgt_stride[3] + blockIdx.x * tgt_stride[2];
-    tgt[tgt_offset + row] = float(acc);
   }
 }
 
@@ -426,7 +431,9 @@ __host__ void THCudaTensor_reduceInnermostDim(THCudaTensor *tgt, THCudaTensor *s
 
   dim3 threads(32, 16);
   unsigned nBlockPerRow = (size[1] + threads.y - 1) / threads.y;
-  dim3 grid(size[2], nBlockPerRow, size[3]);
+  unsigned maxGridDim = 1024; // anything < 64k is fine. The choice has no impact on performance.
+  dim3 grid(min(maxGridDim, size[2]), min(maxGridDim, nBlockPerRow), min(maxGridDim, size[3]));
+
 
   THCudaTensor_kernel_reduceInnermostDim<<<grid, threads>>>(THCudaTensor_data(tgt),
           THCudaTensor_data(src), src_stride, tgt_stride, size, op, init);
