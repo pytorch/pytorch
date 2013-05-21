@@ -309,7 +309,7 @@ struct dim4 {
 template<class UnaryFunction, class BinaryFunction>
 __global__ void THCudaTensor_kernel_transformReduceOuterDim(float *tgt, float *src_,
         dim4 src_stride, dim4 tgt_stride, dim4 size,
-        UnaryFunction unary_op, BinaryFunction binary_op, float init)
+        UnaryFunction unary_op, float init, BinaryFunction binary_op)
 {
   const size_t reduce = 3;
 
@@ -330,7 +330,7 @@ __global__ void THCudaTensor_kernel_transformReduceOuterDim(float *tgt, float *s
 
 template<class UnaryFunction, class BinaryFunction>
 __host__ void THCudaTensor_transformReduceOuterDim(THCudaTensor *tgt, THCudaTensor *src,
-        long rdim, UnaryFunction unary_op, BinaryFunction binary_op, float init)
+        long rdim, UnaryFunction unary_op, float init, BinaryFunction binary_op)
 {
   const size_t reduce = 3;
   dim4 src_stride(0);
@@ -352,7 +352,7 @@ __host__ void THCudaTensor_transformReduceOuterDim(THCudaTensor *tgt, THCudaTens
   dim3 grid(min(maxGridDim, nBlockPerColumn), min(maxGridDim, size[1]), min(maxGridDim, size[2]));
 
   THCudaTensor_kernel_transformReduceOuterDim<<<grid, threads>>>(THCudaTensor_data(tgt),
-          THCudaTensor_data(src), src_stride, tgt_stride, size, unary_op, binary_op, init);
+          THCudaTensor_data(src), src_stride, tgt_stride, size, unary_op, init, binary_op);
   cudaError errcode = cudaGetLastError();
   if(errcode != cudaSuccess) {
     THError(cudaGetErrorString(errcode));
@@ -373,7 +373,7 @@ __host__ void THCudaTensor_transformReduceOuterDim(THCudaTensor *tgt, THCudaTens
  */
 template<class UnaryFunction, class BinaryFunction>
 __global__ void THCudaTensor_kernel_transformReduceInnermostDim(float *tgt, float *src_,
-        dim4 src_stride, dim4 tgt_stride, dim4 size, UnaryFunction unary_op, BinaryFunction binary_op, float init)
+        dim4 src_stride, dim4 tgt_stride, dim4 size, UnaryFunction unary_op, float init, BinaryFunction binary_op)
 {
   __shared__ float sbuf[16][32]; // 8kB
 
@@ -421,7 +421,7 @@ __global__ void THCudaTensor_kernel_transformReduceInnermostDim(float *tgt, floa
 
 template<class UnaryFunction, class BinaryFunction>
 __host__ void THCudaTensor_transformReduceInnermostDim(THCudaTensor *tgt, THCudaTensor *src,
-        UnaryFunction unary_op, BinaryFunction binary_op, float init)
+        UnaryFunction unary_op, float init, BinaryFunction binary_op)
 {
   dim4 src_stride(0);
   dim4 tgt_stride(0);
@@ -441,7 +441,7 @@ __host__ void THCudaTensor_transformReduceInnermostDim(THCudaTensor *tgt, THCuda
   dim3 grid(min(maxGridDim, size[2]), min(maxGridDim, nBlockPerRow), min(maxGridDim, size[3]));
 
   THCudaTensor_kernel_transformReduceInnermostDim<<<grid, threads>>>(THCudaTensor_data(tgt),
-          THCudaTensor_data(src), src_stride, tgt_stride, size, unary_op, binary_op, init);
+          THCudaTensor_data(src), src_stride, tgt_stride, size, unary_op, init, binary_op);
   cudaError errcode = cudaGetLastError();
   if(errcode != cudaSuccess) {
     THError(cudaGetErrorString(errcode));
@@ -451,7 +451,7 @@ __host__ void THCudaTensor_transformReduceInnermostDim(THCudaTensor *tgt, THCuda
 
 template<class UnaryFunction, class BinaryFunction>
 void THCudaTensor_transformReduceDim(THCudaTensor *self_, THCudaTensor *src,
-        long dimension, UnaryFunction unary_op, BinaryFunction binary_op, float init)
+        long dimension, UnaryFunction unary_op, float init, BinaryFunction binary_op)
 {
   THArgCheck(dimension >= 0 && dimension < THCudaTensor_nDimension(src), 3, "dimension out of range");
   THArgCheck(THCudaTensor_nDimension(src) <= 4, 2, "too many dimensions (>4)");
@@ -465,9 +465,9 @@ void THCudaTensor_transformReduceDim(THCudaTensor *self_, THCudaTensor *src,
   src = THCudaTensor_newContiguous(src);
 
   if(dimension == THCudaTensor_nDimension(src)-1) {
-    THCudaTensor_transformReduceInnermostDim(self, src, unary_op, binary_op, init);
+    THCudaTensor_transformReduceInnermostDim(self, src, unary_op, init, binary_op);
   } else {
-    THCudaTensor_transformReduceOuterDim(self, src, dimension, unary_op, binary_op, init);
+    THCudaTensor_transformReduceOuterDim(self, src, dimension, unary_op, init, binary_op);
   }
 
   THCudaTensor_free(src);
@@ -476,29 +476,29 @@ void THCudaTensor_transformReduceDim(THCudaTensor *self_, THCudaTensor *src,
 
 
 template<class BinaryFunction>
-void THCudaTensor_reduceDim(THCudaTensor *self_, THCudaTensor *src, long dimension, BinaryFunction binary_op, float init)
+void THCudaTensor_reduceDim(THCudaTensor *self_, THCudaTensor *src, long dimension, float init, BinaryFunction binary_op)
 {
-  THCudaTensor_transformReduceDim(self_, src, dimension, thrust::identity<float>(), binary_op, init);
+  THCudaTensor_transformReduceDim(self_, src, dimension, thrust::identity<float>(), init, binary_op);
 }
 
 
 void THCudaTensor_sum(THCudaTensor *self, THCudaTensor *src, long dimension)
 {
-  return THCudaTensor_reduceDim(self, src, dimension, thrust::plus<float>(), 0.0f);
+  return THCudaTensor_reduceDim(self, src, dimension, 0.0f, thrust::plus<float>());
 }
 
 
 void THCudaTensor_max(THCudaTensor *self, THCudaTensor *src, long dimension)
 {
   const float minfloat32 = -3.402823466e+38f;
-  return THCudaTensor_reduceDim(self, src, dimension, thrust::maximum<float>(), minfloat32);
+  return THCudaTensor_reduceDim(self, src, dimension, minfloat32, thrust::maximum<float>());
 }
 
 
 void THCudaTensor_min(THCudaTensor *self, THCudaTensor *src, long dimension)
 {
   const float maxfloat32 = 3.402823466e+38f;
-  return THCudaTensor_reduceDim(self, src, dimension, thrust::minimum<float>(), maxfloat32);
+  return THCudaTensor_reduceDim(self, src, dimension, maxfloat32, thrust::minimum<float>());
 }
 
 
