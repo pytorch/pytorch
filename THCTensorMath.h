@@ -67,7 +67,8 @@ TH_API void THCudaTensor_neTensor(THCudaTensor *self_, THCudaTensor *src1, THCud
 TH_API float THCudaTensor_meanall(THCudaTensor *self);
 TH_API float THCudaTensor_varall(THCudaTensor *self);
 TH_API float THCudaTensor_stdall(THCudaTensor *self);
-TH_API float THCudaTensor_norm(THCudaTensor *self, float value);
+TH_API float THCudaTensor_normall(THCudaTensor *self, float value);
+TH_API void  THCudaTensor_norm(THCudaTensor* self, THCudaTensor* src, float value, long dimension);
 TH_API float THCudaTensor_dist(THCudaTensor *self, THCudaTensor *src, float value);
 
 TH_API void THCudaTensor_rand(THCudaTensor *r_, THLongStorage *size);

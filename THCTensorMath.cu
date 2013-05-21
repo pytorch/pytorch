@@ -996,7 +996,7 @@ struct norm_functor
   }
 };
 
-float THCudaTensor_norm(THCudaTensor *self, float value)
+float THCudaTensor_normall(THCudaTensor *self, float value)
 {
   self = THCudaTensor_newContiguous(self);
   long size = THCudaTensor_nElement(self);
@@ -1007,6 +1007,13 @@ float THCudaTensor_norm(THCudaTensor *self, float value)
   THCudaTensor_free(self);
   return pow(result, (float)1.0/value);
 }
+
+
+void THCudaTensor_norm(THCudaTensor* self, THCudaTensor* src, float value, long dimension)
+{
+  THCudaTensor_transformReduceDim(self, src, dimension, norm_functor(value), (float)0, thrust::plus<float>());
+}
+
 
 struct dist_functor
 {
