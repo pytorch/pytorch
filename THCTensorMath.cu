@@ -480,7 +480,7 @@ void THCudaTensor_sum(THCudaTensor *self, THCudaTensor *src, long dimension)
 
 void THCudaTensor_max(THCudaTensor *self, THCudaTensor *src, long dimension)
 {
-  const float minfloat32 = 1.175494351e-38f;
+  const float minfloat32 = -3.402823466e+38f;
   return THCudaTensor_reduceDim(self, src, dimension, thrust::maximum<float>(), minfloat32);
 }
 
