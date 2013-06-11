@@ -37,10 +37,10 @@ __global__ void THCudaTensor_kernel_copy(float *dst,
 
   long i_start = threadIdx.x * src_st[src_dim-1];
   long i_step = blockDim.x * src_st[src_dim-1];
-  long i_end = innerdim * src_st[src_dim-1];
 
   long o_start = threadIdx.x * dst_st[dst_dim-1];
   long o_step = blockDim.x * dst_st[dst_dim-1];
+  long o_end = innerdim * dst_st[dst_dim-1];
 
   if ( ((k+1) * innerdim) <= n_elem) // too safe
   {
@@ -60,7 +60,7 @@ __global__ void THCudaTensor_kernel_copy(float *dst,
       src_rest = src_rest % src_sz[dim];
     }
 
-    for (int i=i_start, o=o_start; i<i_end; i+=i_step, o+=o_step) {
+    for (int i=i_start, o=o_start; o<o_end; i+=i_step, o+=o_step) {
       dst[dst_idx + o] = src[src_idx + i];
     }
   }
