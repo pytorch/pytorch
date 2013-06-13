@@ -327,6 +327,14 @@ for _,Tensor in ipairs({"ByteTensor", "CharTensor",
         {{name=Tensor, default=true, returned=true, method={default='nil'}},
          {name=Tensor, method={default=1}},
          {name=real}})
+   
+   wrap("match",
+        cname("match"),
+        {{name=Tensor, default=true, returned=true, method={default='nil'}},
+         {name=Tensor},
+         {name=Tensor},
+         {name=real, default=1}
+        })
 
    wrap("cmul",
         cname("cmul"),

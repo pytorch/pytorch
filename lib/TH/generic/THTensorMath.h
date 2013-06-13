@@ -34,6 +34,8 @@ TH_API void THTensor_(addmv)(THTensor *r_, real beta, THTensor *t, real alpha, T
 TH_API void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor *mat1, THTensor *mat2);
 TH_API void THTensor_(addr)(THTensor *r_,  real beta, THTensor *t, real alpha, THTensor *vec1, THTensor *vec2);
 
+TH_API void THTensor_(match)(THTensor *r_, THTensor *m1, THTensor *m2, real gain);
+
 TH_API long THTensor_(numel)(THTensor *t);
 TH_API void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension);
 TH_API void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension);
