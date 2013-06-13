@@ -310,6 +310,43 @@ void THTensor_(addmv)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
   }
 }
 
+void THTensor_(match)(THTensor *r_, THTensor *m1, THTensor *m2, real gain)
+{
+    long N1 = m1->size[0];
+    long N2 = m2->size[0];
+
+    THTensor_(resize2d)(r_, N1, N2);
+
+    m1 = THTensor_(newContiguous)(m1);
+    m2 = THTensor_(newContiguous)(m2);
+
+    THTensor_(resize2d)(m1, N1, THTensor_(nElement)(m1) / N1);
+    THTensor_(resize2d)(m2, N2, THTensor_(nElement)(m2) / N2);
+    
+    long dim = m1->size[1];
+    THArgCheck(m1->size[1] == m2->size[1], 3, "m1 and m2 must have the same inner vector dim");
+
+    real *m1_p = THTensor_(data)(m1);
+    real *m2_p = THTensor_(data)(m2);
+    real *r_p = THTensor_(data)(r_);
+
+    long i,j,k;
+#pragma omp parallel for private(i)
+    for (i=0; i<N1; i++) {
+        for (j=0; j<N2; j++) {
+            real sum = 0;
+            for (k=0; k<dim; k++) {
+                real term = m1_p[ i*dim + k ] - m2_p[ j*dim + k ];
+                sum += term*term;
+            }
+            r_p[ i*N2 + j ] = gain * sum;
+        }
+    }
+
+    THTensor_(free)(m1);
+    THTensor_(free)(m2);
+}
+
 void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor *m1, THTensor *m2)
 { 
   char transpose_r, transpose_m1, transpose_m2;
