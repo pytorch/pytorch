@@ -65,6 +65,7 @@ TH_API void THCudaTensor_eqTensor(THCudaTensor *self_, THCudaTensor *src1, THCud
 TH_API void THCudaTensor_neTensor(THCudaTensor *self_, THCudaTensor *src1, THCudaTensor *src2);
 
 TH_API float THCudaTensor_meanall(THCudaTensor *self);
+TH_API void  THCudaTensor_mean(THCudaTensor *self, THCudaTensor *src, long dim);
 TH_API float THCudaTensor_varall(THCudaTensor *self);
 TH_API float THCudaTensor_stdall(THCudaTensor *self);
 TH_API float THCudaTensor_normall(THCudaTensor *self, float value);
