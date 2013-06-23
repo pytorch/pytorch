@@ -72,4 +72,10 @@ TH_API void THFree(void *ptr);
 #define THMin(X, Y)  ((X) < (Y) ? (X) : (Y))
 #define THMax(X, Y)  ((X) > (Y) ? (X) : (Y))
 
+#ifdef _OPENMP
+#define for_omp _Pragma("omp parallel for") for
+#else
+#define for_omp for
+#endif
+
 #endif

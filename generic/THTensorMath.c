@@ -184,7 +184,15 @@ real THTensor_(minall)(THTensor *tensor)
   real theMin;
   THArgCheck(tensor->nDimension > 0, 1, "tensor must have one dimension");
   theMin = THTensor_(data)(tensor)[0];
-  TH_TENSOR_APPLY(real, tensor, if(*tensor_data < theMin) theMin = *tensor_data;);
+  if (THTensor_(isContiguous)(tensor)) {
+      real *tp = THTensor_(data)(tensor);
+      for_omp (long i=0; i<THTensor_(nElement)(tensor); i++)
+      {
+          if (tp[i] < theMin) theMin = tp[i];
+      }
+  } else {
+      TH_TENSOR_APPLY(real, tensor, if(*tensor_data < theMin) theMin = *tensor_data;);
+  }
   return theMin; 
 }
 
@@ -193,51 +201,124 @@ real THTensor_(maxall)(THTensor *tensor)
   real theMax;
   THArgCheck(tensor->nDimension > 0, 1, "tensor must have one dimension");
   theMax = THTensor_(data)(tensor)[0];
-  TH_TENSOR_APPLY(real, tensor, if(*tensor_data > theMax) theMax = *tensor_data;);
+  if (THTensor_(isContiguous)(tensor)) {
+      real *tp = THTensor_(data)(tensor);
+      for_omp (long i=0; i<THTensor_(nElement)(tensor); i++)
+      {
+          if (tp[i] > theMax) theMax = tp[i];
+      }
+  } else {
+      TH_TENSOR_APPLY(real, tensor, if(*tensor_data > theMax) theMax = *tensor_data;);
+  }
   return theMax; 
 }
 
 accreal THTensor_(sumall)(THTensor *tensor)
 {
   accreal sum = 0;
-  TH_TENSOR_APPLY(real, tensor, sum += *tensor_data;);
+  if (THTensor_(isContiguous)(tensor)) {
+      real *tp = THTensor_(data)(tensor);
+      for_omp (long i=0; i<THTensor_(nElement)(tensor); i++)
+      {
+          sum += tp[i];
+      }
+  } else {
+      TH_TENSOR_APPLY(real, tensor, sum += *tensor_data;);
+  }
   return sum;
 }
 
 void THTensor_(add)(THTensor *r_, THTensor *t, real value)
 {
   THTensor_(resizeAs)(r_, t);
-  TH_TENSOR_APPLY2(real, r_, real, t, *r__data = *t_data + value;);
+  if (THTensor_(isContiguous)(t)) {
+      real *tp = THTensor_(data)(t);
+      real *rp = THTensor_(data)(r_);
+      for_omp (long i=0; i<THTensor_(nElement)(t); i++)
+      {
+          rp[i] = tp[i] + value;
+      }
+  } else {
+      TH_TENSOR_APPLY2(real, r_, real, t, *r__data = *t_data + value;);
+  }
 }
 
 void THTensor_(mul)(THTensor *r_, THTensor *t, real value)
 {
   THTensor_(resizeAs)(r_, t);
-  TH_TENSOR_APPLY2(real, r_, real, t, *r__data = *t_data * value;);
+  if (THTensor_(isContiguous)(t)) {
+      real *tp = THTensor_(data)(t);
+      real *rp = THTensor_(data)(r_);
+      for_omp (long i=0; i<THTensor_(nElement)(t); i++)
+      {
+          rp[i] = tp[i] * value;
+      }
+  } else {
+      TH_TENSOR_APPLY2(real, r_, real, t, *r__data = *t_data * value;);
+  }
 }
 
 void THTensor_(div)(THTensor *r_, THTensor *t, real value)
 {
   THTensor_(resizeAs)(r_, t);
-  TH_TENSOR_APPLY2(real, r_, real, t, *r__data = *t_data / value;);
+  if (THTensor_(isContiguous)(t)) {
+      real *tp = THTensor_(data)(t);
+      real *rp = THTensor_(data)(r_);
+      for_omp (long i=0; i<THTensor_(nElement)(t); i++)
+      {
+          rp[i] = tp[i] / value;
+      }
+  } else {
+      TH_TENSOR_APPLY2(real, r_, real, t, *r__data = *t_data / value;);
+  }
 }
 
 void THTensor_(cadd)(THTensor *r_, THTensor *t, real value, THTensor *src)
 {
   THTensor_(resizeAs)(r_, t);
-  TH_TENSOR_APPLY3(real, r_, real, t, real, src, *r__data = *t_data + value * *src_data;);
+  if (THTensor_(isContiguous)(t) && THTensor_(isContiguous)(src)) {
+      real *tp = THTensor_(data)(t);
+      real *sp = THTensor_(data)(src);
+      real *rp = THTensor_(data)(r_);
+      for_omp (long i=0; i<THTensor_(nElement)(t); i++)
+      {
+          rp[i] = tp[i] + value * sp[i];
+      }
+  } else {
+      TH_TENSOR_APPLY3(real, r_, real, t, real, src, *r__data = *t_data + value * *src_data;);
+  }
 }
 
 void THTensor_(cmul)(THTensor *r_, THTensor *t, THTensor *src)
 {
   THTensor_(resizeAs)(r_, t);
-  TH_TENSOR_APPLY3(real, r_, real, t, real, src, *r__data = *t_data * *src_data;);
+  if (THTensor_(isContiguous)(t) && THTensor_(isContiguous)(src)) {
+      real *tp = THTensor_(data)(t);
+      real *sp = THTensor_(data)(src);
+      real *rp = THTensor_(data)(r_);
+      for_omp (long i=0; i<THTensor_(nElement)(t); i++)
+      {
+          rp[i] = tp[i] * sp[i];
+      }
+  } else {
+      TH_TENSOR_APPLY3(real, r_, real, t, real, src, *r__data = *t_data * *src_data;);
+  }
 }
 
 void THTensor_(cdiv)(THTensor *r_, THTensor *t, THTensor *src)
 {
   THTensor_(resizeAs)(r_, t);
-  TH_TENSOR_APPLY3(real, r_, real, t, real, src, *r__data = *t_data / *src_data;);
+  if (THTensor_(isContiguous)(t) && THTensor_(isContiguous)(src)) {
+      real *tp = THTensor_(data)(t);
+      real *sp = THTensor_(data)(src);
+      real *rp = THTensor_(data)(r_);
+      for_omp (long i=0; i<THTensor_(nElement)(t); i++)
+      {
+          rp[i] = tp[i] / sp[i];
+      }
+  } else {
+      TH_TENSOR_APPLY3(real, r_, real, t, real, src, *r__data = *t_data / *src_data;);
+  }
 }
 
 void THTensor_(addcmul)(THTensor *r_, THTensor *t, real value, THTensor *src1, THTensor *src2)
@@ -330,12 +411,10 @@ void THTensor_(match)(THTensor *r_, THTensor *m1, THTensor *m2, real gain)
     real *m2_p = THTensor_(data)(m2);
     real *r_p = THTensor_(data)(r_);
 
-    long i,j,k;
-#pragma omp parallel for private(i)
-    for (i=0; i<N1; i++) {
-        for (j=0; j<N2; j++) {
+    for_omp (long i=0; i<N1; i++) {
+        for (long j=0; j<N2; j++) {
             real sum = 0;
-            for (k=0; k<dim; k++) {
+            for (long k=0; k<dim; k++) {
                 real term = m1_p[ i*dim + k ] - m2_p[ j*dim + k ];
                 sum += term*term;
             }
