@@ -11,3 +11,14 @@ INSTALL(TARGETS THC
           RUNTIME DESTINATION "${Torch_INSTALL_BIN_SUBDIR}"
           LIBRARY DESTINATION "${Torch_INSTALL_LIB_SUBDIR}"
           ARCHIVE DESTINATION "${Torch_INSTALL_LIB_SUBDIR}")
+
+INSTALL(FILES
+          THC.h
+          THCGeneral.h
+          THCGeneral.h
+          THCStorage.h
+          THCTensor.h
+          THCTensorRandom.h
+          THCTensorMath.h
+          THCTensorConv.h
+          DESTINATION "${Torch_INSTALL_INCLUDE_SUBDIR}/THC")
