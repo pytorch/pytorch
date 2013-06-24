@@ -184,17 +184,7 @@ real THTensor_(minall)(THTensor *tensor)
   real theMin;
   THArgCheck(tensor->nDimension > 0, 1, "tensor must have one dimension");
   theMin = THTensor_(data)(tensor)[0];
-  if (THTensor_(isContiguous)(tensor)) {
-      real *tp = THTensor_(data)(tensor);
-      long i;
-      #pragma omp parallel for private(i)
-      for (i=0; i<THTensor_(nElement)(tensor); i++)
-      {
-          if (tp[i] < theMin) theMin = tp[i];
-      }
-  } else {
-      TH_TENSOR_APPLY(real, tensor, if(*tensor_data < theMin) theMin = *tensor_data;);
-  }
+  TH_TENSOR_APPLY(real, tensor, if(*tensor_data < theMin) theMin = *tensor_data;);
   return theMin; 
 }
 
@@ -203,34 +193,14 @@ real THTensor_(maxall)(THTensor *tensor)
   real theMax;
   THArgCheck(tensor->nDimension > 0, 1, "tensor must have one dimension");
   theMax = THTensor_(data)(tensor)[0];
-  if (THTensor_(isContiguous)(tensor)) {
-      real *tp = THTensor_(data)(tensor);
-      long i;
-      #pragma omp parallel for private(i)
-      for (i=0; i<THTensor_(nElement)(tensor); i++)
-      {
-          if (tp[i] > theMax) theMax = tp[i];
-      }
-  } else {
-      TH_TENSOR_APPLY(real, tensor, if(*tensor_data > theMax) theMax = *tensor_data;);
-  }
+  TH_TENSOR_APPLY(real, tensor, if(*tensor_data > theMax) theMax = *tensor_data;);
   return theMax; 
 }
 
 accreal THTensor_(sumall)(THTensor *tensor)
 {
   accreal sum = 0;
-  if (THTensor_(isContiguous)(tensor)) {
-      real *tp = THTensor_(data)(tensor);
-      long i;
-      #pragma omp parallel for private(i)
-      for (i=0; i<THTensor_(nElement)(tensor); i++)
-      {
-          sum += tp[i];
-      }
-  } else {
-      TH_TENSOR_APPLY(real, tensor, sum += *tensor_data;);
-  }
+  TH_TENSOR_APPLY(real, tensor, sum += *tensor_data;);
   return sum;
 }
 
