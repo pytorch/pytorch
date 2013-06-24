@@ -186,7 +186,9 @@ real THTensor_(minall)(THTensor *tensor)
   theMin = THTensor_(data)(tensor)[0];
   if (THTensor_(isContiguous)(tensor)) {
       real *tp = THTensor_(data)(tensor);
-      for_omp (long i=0; i<THTensor_(nElement)(tensor); i++)
+      long i;
+      #pragma omp parallel for private(i)
+      for (i=0; i<THTensor_(nElement)(tensor); i++)
       {
           if (tp[i] < theMin) theMin = tp[i];
       }
@@ -203,7 +205,9 @@ real THTensor_(maxall)(THTensor *tensor)
   theMax = THTensor_(data)(tensor)[0];
   if (THTensor_(isContiguous)(tensor)) {
       real *tp = THTensor_(data)(tensor);
-      for_omp (long i=0; i<THTensor_(nElement)(tensor); i++)
+      long i;
+      #pragma omp parallel for private(i)
+      for (i=0; i<THTensor_(nElement)(tensor); i++)
       {
           if (tp[i] > theMax) theMax = tp[i];
       }
@@ -218,7 +222,9 @@ accreal THTensor_(sumall)(THTensor *tensor)
   accreal sum = 0;
   if (THTensor_(isContiguous)(tensor)) {
       real *tp = THTensor_(data)(tensor);
-      for_omp (long i=0; i<THTensor_(nElement)(tensor); i++)
+      long i;
+      #pragma omp parallel for private(i)
+      for (i=0; i<THTensor_(nElement)(tensor); i++)
       {
           sum += tp[i];
       }
@@ -234,7 +240,9 @@ void THTensor_(add)(THTensor *r_, THTensor *t, real value)
   if (THTensor_(isContiguous)(t)) {
       real *tp = THTensor_(data)(t);
       real *rp = THTensor_(data)(r_);
-      for_omp (long i=0; i<THTensor_(nElement)(t); i++)
+      long i;
+      #pragma omp parallel for private(i)
+      for (i=0; i<THTensor_(nElement)(t); i++)
       {
           rp[i] = tp[i] + value;
       }
@@ -249,7 +257,9 @@ void THTensor_(mul)(THTensor *r_, THTensor *t, real value)
   if (THTensor_(isContiguous)(t)) {
       real *tp = THTensor_(data)(t);
       real *rp = THTensor_(data)(r_);
-      for_omp (long i=0; i<THTensor_(nElement)(t); i++)
+      long i;
+      #pragma omp parallel for private(i)
+      for (i=0; i<THTensor_(nElement)(t); i++)
       {
           rp[i] = tp[i] * value;
       }
@@ -264,7 +274,9 @@ void THTensor_(div)(THTensor *r_, THTensor *t, real value)
   if (THTensor_(isContiguous)(t)) {
       real *tp = THTensor_(data)(t);
       real *rp = THTensor_(data)(r_);
-      for_omp (long i=0; i<THTensor_(nElement)(t); i++)
+      long i;
+      #pragma omp parallel for private(i)
+      for (i=0; i<THTensor_(nElement)(t); i++)
       {
           rp[i] = tp[i] / value;
       }
@@ -280,7 +292,9 @@ void THTensor_(cadd)(THTensor *r_, THTensor *t, real value, THTensor *src)
       real *tp = THTensor_(data)(t);
       real *sp = THTensor_(data)(src);
       real *rp = THTensor_(data)(r_);
-      for_omp (long i=0; i<THTensor_(nElement)(t); i++)
+      long i;
+      #pragma omp parallel for private(i)
+      for (i=0; i<THTensor_(nElement)(t); i++)
       {
           rp[i] = tp[i] + value * sp[i];
       }
@@ -296,7 +310,9 @@ void THTensor_(cmul)(THTensor *r_, THTensor *t, THTensor *src)
       real *tp = THTensor_(data)(t);
       real *sp = THTensor_(data)(src);
       real *rp = THTensor_(data)(r_);
-      for_omp (long i=0; i<THTensor_(nElement)(t); i++)
+      long i;
+      #pragma omp parallel for private(i)
+      for (i=0; i<THTensor_(nElement)(t); i++)
       {
           rp[i] = tp[i] * sp[i];
       }
@@ -312,7 +328,9 @@ void THTensor_(cdiv)(THTensor *r_, THTensor *t, THTensor *src)
       real *tp = THTensor_(data)(t);
       real *sp = THTensor_(data)(src);
       real *rp = THTensor_(data)(r_);
-      for_omp (long i=0; i<THTensor_(nElement)(t); i++)
+      long i;
+      #pragma omp parallel for private(i)
+      for (i=0; i<THTensor_(nElement)(t); i++)
       {
           rp[i] = tp[i] / sp[i];
       }
@@ -411,10 +429,13 @@ void THTensor_(match)(THTensor *r_, THTensor *m1, THTensor *m2, real gain)
     real *m2_p = THTensor_(data)(m2);
     real *r_p = THTensor_(data)(r_);
 
-    for_omp (long i=0; i<N1; i++) {
-        for (long j=0; j<N2; j++) {
+    long i;
+    #pragma omp parallel for private(i)
+    for (i=0; i<N1; i++) {
+        long j,k;
+        for (j=0; j<N2; j++) {
             real sum = 0;
-            for (long k=0; k<dim; k++) {
+            for (k=0; k<dim; k++) {
                 real term = m1_p[ i*dim + k ] - m2_p[ j*dim + k ];
                 sum += term*term;
             }
