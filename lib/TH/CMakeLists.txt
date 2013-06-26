@@ -143,6 +143,38 @@ INSTALL(FILES
   generic/THVector.c
   DESTINATION "${Torch_INSTALL_INCLUDE_SUBDIR}/TH/generic")
 
+
+IF (WIN32 AND NOT CYGWIN)
+  SET(BLAS_INSTALL_LIBRARIES "OFF"
+    CACHE BOOL "Copy the required BLAS DLLs into the Torch install dirs")
+ENDIF (WIN32 AND NOT CYGWIN)
+
+MACRO(Install_Required_Library ln)
+    get_filename_component(libpath ${ln} PATH)
+    get_filename_component(libname ${ln} NAME_WE)
+    file(GLOB libdlls "${libpath}/${libname}*.dll")
+    install(PROGRAMS ${libdlls} 
+      DESTINATION "${Torch_INSTALL_BIN_SUBDIR}")
+ENDMACRO(Install_Required_Library libname)
+
+IF (BLAS_FOUND AND BLAS_INSTALL_LIBRARIES)
+  IF (BLAS_goto2_LIBRARY)
+    Install_Required_Library(${BLAS_goto2_LIBRARY})
+    Install_Required_Library("${libpath}/libgfortran")
+    Install_Required_Library("${libpath}/libquadmath")
+    Install_Required_Library("${libpath}/libgcc")
+  ENDIF()
+  IF (BLAS_openblas_LIBRARY)
+    Install_Required_Library(${BLAS_openblas_LIBRARY})
+    Install_Required_Library("${libpath}/libquadmath")
+    Install_Required_Library("${libpath}/libgfortran")
+    Install_Required_Library("${libpath}/libquadmath")
+    Install_Required_Library("${libpath}/libgcc")
+  ENDIF()
+ENDIF()
+
+
+
 # Create THConfig.cmake
 GET_TARGET_PROPERTY(TH_OUTPUT_NAME TH LOCATION)
 GET_FILENAME_COMPONENT(TH_OUTPUT_NAME ${TH_OUTPUT_NAME} NAME)

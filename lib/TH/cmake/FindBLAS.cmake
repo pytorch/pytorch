@@ -118,7 +118,6 @@ if((NOT BLAS_LIBRARIES)
   endif(BLAS_LIBRARIES)
 endif()
 
-
 if((NOT BLAS_LIBRARIES)
     AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "open")))
   check_fortran_libraries(
@@ -127,6 +126,19 @@ if((NOT BLAS_LIBRARIES)
   sgemm
   ""
   "openblas;gfortran;pthread")
+  if(BLAS_LIBRARIES)
+    set(BLAS_INFO "open")
+  endif(BLAS_LIBRARIES)
+endif()
+
+if((NOT BLAS_LIBRARIES) AND (WIN32)
+    AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "open")))
+  check_fortran_libraries(
+  BLAS_LIBRARIES
+  BLAS
+  sgemm
+  ""
+  "libopenblas")
   if(BLAS_LIBRARIES)
     set(BLAS_INFO "open")
   endif(BLAS_LIBRARIES)

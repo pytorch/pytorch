@@ -13,6 +13,7 @@
 #cmakedefine USE_BLAS
 #cmakedefine USE_LAPACK
 #cmakedefine BLAS_IS_ACCELERATE
+#cmakedefine BLAS_F2C
 
 #ifdef __cplusplus
 # define TH_EXTERNC extern "C"
