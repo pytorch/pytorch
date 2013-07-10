@@ -149,8 +149,8 @@ real THBlas_(dot)(long n, real *x, long incx, real *y, long incy)
     extern double ddot_(int *n, double *x, int *incx, double *y, int *incy);
     return ddot_(&i_n, x, &i_incx, y, &i_incy);
 #else
-    extern float sdot_(int *n, float *x, int *incx, float *y, int *incy);
-    return sdot_(&i_n, x, &i_incx, y, &i_incy);
+    extern double sdot_(int *n, float *x, int *incx, float *y, int *incy);
+    return (float)sdot_(&i_n, x, &i_incx, y, &i_incy);
 #endif
   }
 #endif
