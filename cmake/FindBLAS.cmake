@@ -182,6 +182,7 @@ if((NOT BLAS_LIBRARIES)
   "Accelerate")
   if (BLAS_LIBRARIES)
     set(BLAS_INFO "accelerate")
+    set(BLAS_IS_ACCELERATE 1)
   endif (BLAS_LIBRARIES)
 endif()
 
