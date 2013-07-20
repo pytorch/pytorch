@@ -123,7 +123,7 @@ TH_API void THCudaTensor_random(THCudaTensor *self_) {
   long size = THCudaTensor_nElement(self);
   thrust::device_ptr<float> self_data(THCudaTensor_data(self));
 
-  thrust::sequence(self_data, self_data+size, step+=size);
+  thrust::sequence(self_data, self_data+size, step); step+=size;
   thrust::transform(self_data, self_data+size, self_data, random_functor());
 
   THCudaTensor_freeCopyTo(self, self_);
@@ -149,7 +149,7 @@ TH_API void THCudaTensor_random1(THCudaTensor *self_, long b) {
   long size = THCudaTensor_nElement(self);
   thrust::device_ptr<float> self_data(THCudaTensor_data(self));
 
-  thrust::sequence(self_data, self_data+size, step+=size);
+  thrust::sequence(self_data, self_data+size, step); step+=size;
   thrust::transform(self_data, self_data+size, self_data, random1_functor(b));
 
   THCudaTensor_freeCopyTo(self, self_);
@@ -175,7 +175,7 @@ TH_API void THCudaTensor_random2(THCudaTensor *self_, long a, long b) {
   long size = THCudaTensor_nElement(self);
   thrust::device_ptr<float> self_data(THCudaTensor_data(self));
   
-  thrust::sequence(self_data, self_data+size, step+=size);
+  thrust::sequence(self_data, self_data+size, step); step+=size;
   thrust::transform(self_data, self_data+size, self_data, random2_functor(a,b));
 
   THCudaTensor_freeCopyTo(self, self_);
@@ -200,7 +200,7 @@ TH_API void THCudaTensor_bernoulli(THCudaTensor *self_, double p) {
   long size = THCudaTensor_nElement(self);
   thrust::device_ptr<float> self_data(THCudaTensor_data(self));
   
-  thrust::sequence(self_data, self_data+size, step+=size);
+  thrust::sequence(self_data, self_data+size, step); step+=size;
   thrust::transform(self_data, self_data+size, self_data, bernoulli_functor(p));
 
   THCudaTensor_freeCopyTo(self, self_);
@@ -225,7 +225,7 @@ TH_API void THCudaTensor_uniform(THCudaTensor *self_, double a, double b) {
   long size = THCudaTensor_nElement(self);
   thrust::device_ptr<float> self_data(THCudaTensor_data(self));
   
-  thrust::sequence(self_data, self_data+size, step+=size);
+  thrust::sequence(self_data, self_data+size, step); step+=size;
   thrust::transform(self_data, self_data+size, self_data, uniform_functor(a,b));
 
   THCudaTensor_freeCopyTo(self, self_);
@@ -252,7 +252,7 @@ TH_API void THCudaTensor_normal(THCudaTensor *self_, double mean, double stdv) {
   long size = THCudaTensor_nElement(self);
   thrust::device_ptr<float> self_data(THCudaTensor_data(self));
 
-  thrust::sequence(self_data, self_data+size, step+=size);
+  thrust::sequence(self_data, self_data+size, step); step+=size;
   thrust::transform(self_data, self_data+size, self_data, normal_functor(mean,stdv));
 
   THCudaTensor_freeCopyTo(self, self_);
@@ -278,7 +278,7 @@ TH_API void THCudaTensor_geometric(THCudaTensor *self_, double p) {
   long size = THCudaTensor_nElement(self);
   thrust::device_ptr<float> self_data(THCudaTensor_data(self));
   
-  thrust::sequence(self_data, self_data+size, step+=size);
+  thrust::sequence(self_data, self_data+size, step); step+=size;
   thrust::transform(self_data, self_data+size, self_data, geometric_functor(p));
 
   THCudaTensor_freeCopyTo(self, self_);
@@ -304,7 +304,7 @@ TH_API void THCudaTensor_exponential(THCudaTensor *self_, double lambda) {
   long size = THCudaTensor_nElement(self);
   thrust::device_ptr<float> self_data(THCudaTensor_data(self));
   
-  thrust::sequence(self_data, self_data+size, step+=size);
+  thrust::sequence(self_data, self_data+size, step); step+=size;
   thrust::transform(self_data, self_data+size, self_data, exponential_functor(lambda));
 
   THCudaTensor_freeCopyTo(self, self_);
@@ -330,7 +330,7 @@ TH_API void THCudaTensor_cauchy(THCudaTensor *self_, double median, double sigma
   long size = THCudaTensor_nElement(self);
   thrust::device_ptr<float> self_data(THCudaTensor_data(self));
   
-  thrust::sequence(self_data, self_data+size, step+=size);
+  thrust::sequence(self_data, self_data+size, step); step+=size;
   thrust::transform(self_data, self_data+size, self_data, cauchy_functor(median, sigma));
 
   THCudaTensor_freeCopyTo(self, self_);
@@ -357,7 +357,7 @@ TH_API void THCudaTensor_logNormal(THCudaTensor *self_, double mean, double stdv
   long size = THCudaTensor_nElement(self);
   thrust::device_ptr<float> self_data(THCudaTensor_data(self));
   
-  thrust::sequence(self_data, self_data+size, step+=size);
+  thrust::sequence(self_data, self_data+size, step); step+=size;
   thrust::transform(self_data, self_data+size, self_data, logNormal_functor(mean, stdv));
 
   THCudaTensor_freeCopyTo(self, self_);
