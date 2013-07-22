@@ -16,6 +16,9 @@ interface:wrap('manualSeed',
                'THRandom_manualSeed',
                {{name="long"}})
 
+interface:wrap('getRNGState','THLongTensor_getRNGState',{{name='LongTensor',default=true,returned=true,method={default='nil'}}})
+interface:wrap('setRNGState','THLongTensor_setRNGState',{{name='LongTensor',default=true,returned=true,method={default='nil'}}})
+
 interface:register("random__")
                 
 interface:print(

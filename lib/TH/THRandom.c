@@ -236,3 +236,22 @@ int THRandom_bernoulli(double p)
   THArgCheck(p >= 0 && p <= 1, 1, "must be >= 0 and <= 1");
   return(__uniform__() <= p);
 }
+
+/* returns the random number state */
+void THRandom_getState(unsigned long *_state, long *offset, long *_left)
+{
+  if(initf == 0)
+    THRandom_seed();
+  memmove(_state, state, n*sizeof(long));
+  *offset = (long)(next - state);
+  *_left = left;
+}
+
+/* sets the random number state */
+void THRandom_setState(unsigned long *_state, long offset, long _left)
+{
+  memmove(state, _state, n*sizeof(long));
+  next = state + offset;
+  left = _left;
+  initf = 1;
+}
