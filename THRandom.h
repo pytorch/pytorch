@@ -49,4 +49,9 @@ TH_API int THRandom_geometric(double p);
 /* Returns true with probability $p$ and false with probability $1-p$ (p > 0). */
 TH_API int THRandom_bernoulli(double p);
 
+/* returns the random number state */
+TH_API void THRandom_getState(unsigned long *state, long *offset, long *_left);
+
+/* sets the random number state */
+TH_API void THRandom_setState(unsigned long *state, long offset, long _left);
 #endif
