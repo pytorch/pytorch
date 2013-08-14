@@ -2,7 +2,7 @@
 #define TH_GENERIC_FILE "generic/THBlas.c"
 #else
 
-#if BLAS_F2C
+#ifdef BLAS_F2C
 # define ffloat double
 #else
 # define ffloat float
