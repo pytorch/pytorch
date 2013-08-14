@@ -1036,7 +1036,23 @@ static void THTensor_random1__(THTensor *self, long b)
                      {{name=Tensor, default=true, returned=true, invisible=true},
                       {name=Tensor}}
                   )
-      
+     
+      interface:wrap("potri",
+                     cname("potri"),
+                     {{name=Tensor, returned=true},
+                      {name=Tensor}},
+                     cname("potri"),
+                     {{name=Tensor, default=true, returned=true, invisible=true},
+                      {name=Tensor}}
+                  )
+      interface:wrap("potrf",
+                     cname("potrf"),
+                     {{name=Tensor, returned=true},
+                      {name=Tensor}},
+                     cname("potrf"),
+                     {{name=Tensor, default=true, returned=true, invisible=true},
+                      {name=Tensor}}
+                  )
    end
 
    method:register(string.format("m_torch_%sMath__", Tensor))

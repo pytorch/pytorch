@@ -478,4 +478,131 @@ TH_API void THTensor_(getri)(THTensor *ra_, THTensor *a)
   THIntTensor_free(ipiv);
 }
 
+TH_API void THTensor_(potrf)(THTensor *ra_, THTensor *a)
+{
+  int n, lda, info;
+  char uplo = 'U';
+  THTensor *ra__;
+
+  int clonea;
+  int destroy;
+
+  if (a == NULL) /* possibly destroy the inputs  */
+  {
+    ra__ = THTensor_(new)();
+    clonea = THTensor_(lapackClone)(ra__,ra_,0);
+    destroy = 1;
+  }
+  else /*we want to definitely clone */
+  {
+    clonea = THTensor_(lapackClone)(ra_,a,1);
+    ra__ = ra_;
+    destroy = 0;
+  }
+  
+  THArgCheck(ra__->nDimension == 2, 2, "A should be 2 dimensional");
+  THArgCheck(ra__->size[0] == ra__->size[1], 2, "A should be square");
+  n = ra__->size[0];
+  lda = n;
+
+  /* Run Factorization */
+  THLapack_(potrf)(uplo, n, THTensor_(data)(ra__), lda, &info);
+  if (info > 0)
+  {
+    THError("Lapack potrf : A(%d,%d) is 0, A cannot be factorized", info, info);
+  }
+  else if (info < 0)
+  {
+    THError("Lapack potrf : Argument %d : illegal value", -info);
+  }
+
+  /* Build full matrix */
+  real *p = THTensor_(data)(ra__);
+  long i,j;
+  for (i=0; i<n; i++) {
+    for (j=i+1; j<n; j++) {
+       p[i*n+j] = p[j*n+i];
+    }
+  }
+
+  /* clean up */
+  if (destroy)
+  {
+    if (clonea)
+    {
+      THTensor_(copy)(ra_,ra__);
+    }
+    THTensor_(free)(ra__);
+  }
+}
+
+TH_API void THTensor_(potri)(THTensor *ra_, THTensor *a)
+{
+  int n, lda, info;
+  char uplo = 'U';
+  THTensor *ra__;
+
+  int clonea;
+  int destroy;
+
+  if (a == NULL) /* possibly destroy the inputs  */
+  {
+    ra__ = THTensor_(new)();
+    clonea = THTensor_(lapackClone)(ra__,ra_,0);
+    destroy = 1;
+  }
+  else /*we want to definitely clone */
+  {
+    clonea = THTensor_(lapackClone)(ra_,a,1);
+    ra__ = ra_;
+    destroy = 0;
+  }
+  
+  THArgCheck(ra__->nDimension == 2, 2, "A should be 2 dimensional");
+  THArgCheck(ra__->size[0] == ra__->size[1], 2, "A should be square");
+  n = ra__->size[0];
+  lda = n;
+
+  /* Run Factorization */
+  THLapack_(potrf)(uplo, n, THTensor_(data)(ra__), lda, &info);
+  if (info > 0)
+  {
+    THError("Lapack potrf : A(%d,%d) is 0, A cannot be factorized", info, info);
+  }
+  else if (info < 0)
+  {
+    THError("Lapack potrf : Argument %d : illegal value", -info);
+  }
+
+  /* Run inverse */
+  THLapack_(potri)(uplo, n, THTensor_(data)(ra__), lda, &info);
+  if (info > 0)
+  {
+    THError("Lapack potrf : A(%d,%d) is 0, A cannot be factorized", info, info);
+  }
+  else if (info < 0)
+  {
+    THError("Lapack potrf : Argument %d : illegal value", -info);
+  }
+
+  /* Build full matrix */
+  real *p = THTensor_(data)(ra__);
+  long i,j;
+  for (i=0; i<n; i++) {
+    for (j=i+1; j<n; j++) {
+       p[i*n+j] = p[j*n+i];
+    }
+  }
+
+  /* clean up */
+  if (destroy)
+  {
+    if (clonea)
+    {
+      THTensor_(copy)(ra_,ra__);
+    }
+    THTensor_(free)(ra__);
+  }
+}
+
 #endif
