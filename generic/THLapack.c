@@ -17,7 +17,13 @@ TH_EXTERNC void dgetrf_(int *m, int *n, double *a, int *lda, int *ipiv, int *inf
 TH_EXTERNC void sgetrf_(int *m, int *n, float *a, int *lda, int *ipiv, int *info);
 TH_EXTERNC void dgetri_(int *n, double *a, int *lda, int *ipiv, double *work, int *lwork, int *info);
 TH_EXTERNC void sgetri_(int *n, float *a, int *lda, int *ipiv, float *work, int *lwork, int *info);
-  
+TH_EXTERNC void dpotrf_(char *uplo, int *n, double *a, int *lda, int *info);
+TH_EXTERNC void spotrf_(char *uplo, int *n, float *a, int *lda, int *info);
+TH_EXTERNC void dpotri_(char *uplo, int *n, double *a, int *lda, int *info);
+TH_EXTERNC void spotri_(char *uplo, int *n, float *a, int *lda, int *info);
+TH_EXTERNC void dpotrs_(char *uplo, int *n, int *nrhs, double *a, int *lda, double *b, int *ldb, int *info);
+TH_EXTERNC void spotrs_(char *uplo, int *n, int *nrhs, float *a, int *lda, float *b, int *ldb, int *info);
+
 
 void THLapack_(gesv)(int n, int nrhs, real *a, int lda, int *ipiv, real *b, int ldb, int* info)
 {
@@ -117,10 +123,8 @@ void THLapack_(potrf)(char uplo, int n, real *a, int lda, int *info)
 {
 #ifdef  USE_LAPACK
 #if defined(TH_REAL_IS_DOUBLE)
-  extern void dpotrf_(char *uplo, int *n, real *a, int *lda, int *info);
   dpotrf_(&uplo, &n, a, &lda, info);
 #else
-  extern void spotrf_(char *uplo, int *n, real *a, int *lda, int *info);
   spotrf_(&uplo, &n, a, &lda, info);
 #endif
 #else
@@ -133,10 +137,8 @@ void THLapack_(potri)(char uplo, int n, real *a, int lda, int *info)
 {
 #ifdef  USE_LAPACK
 #if defined(TH_REAL_IS_DOUBLE)
-  extern void dpotri_(char *uplo, int *n, real *a, int *lda, int *info);
   dpotri_(&uplo, &n, a, &lda, info);
 #else
-  extern void spotri_(char *uplo, int *n, real *a, int *lda, int *info);
   spotri_(&uplo, &n, a, &lda, info);
 #endif
 #else
@@ -149,10 +151,8 @@ void THLapack_(potrs)(char uplo, int n, int nrhs, real *a, int lda, real *b, int
 {
 #ifdef  USE_LAPACK
 #if defined(TH_REAL_IS_DOUBLE)
-  extern void dpotrs_(char *uplo, int *n, int *nrhs, real *a, int *lda, real *b, int *ldb, int *info);
   dpotrs_(&uplo, &n, &nrhs, a, &lda, b, &ldb, info);
 #else
-  extern void spotrs_(char *uplo, int *n, int *nrhs, real *a, int *lda, real *b, int *ldb, int *info);
   spotrs_(&uplo, &n, &nrhs, a, &lda, b, &ldb, info);
 #endif
 #else
