@@ -164,6 +164,8 @@ function File:readObject()
       torch.setenv(self, {writeObjects={}, writeObjectsRef={}, readObjects={}})
    end
 
+   local force = torch.getenv(self).force
+
    -- read the typeidx
    local typeidx = self:readInt()
 
@@ -194,7 +196,7 @@ function File:readObject()
 
       -- check it is loaded already
       local objects = torch.getenv(self).readObjects
-      if objects[index] then
+      if objects[index] and not force then
          return objects[index]
       end
 
