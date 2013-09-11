@@ -263,7 +263,7 @@ end
 
 -- simple helpers to serialize/deserialize arbitrary objects/tables
 function torch.serialize(object)
-   local f = torch.MemoryFile()
+   local f = torch.MemoryFile():binary()
    f:writeObject(object)
    local s = f:storage():string()
    f:close()
@@ -277,7 +277,7 @@ function torch.deserialize(str)
    local txp = torch.CharTensor(xp)
    txp:narrow(1,1,tx:size(1)):copy(tx)
    txp[tx:size(1)+1] = 0
-   local f = torch.MemoryFile(xp)
+   local f = torch.MemoryFile(xp):binary()
    local object = f:readObject()
    f:close()
    return object
