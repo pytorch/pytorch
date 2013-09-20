@@ -1,5 +1,6 @@
 #include "THCStorage.h"
 
+#include <thrust/device_ptr.h>
 #include <thrust/fill.h>
 
 void THCudaStorage_fill(THCudaStorage *self, float value)
