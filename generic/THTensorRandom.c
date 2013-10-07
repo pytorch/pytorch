@@ -65,19 +65,29 @@ TH_API void THTensor_(logNormal)(THTensor *self, double mean, double stdv)
 #if defined(TH_REAL_IS_LONG)
 TH_API void THTensor_(getRNGState)(THTensor *self)
 {
+  unsigned long *data;
+  long *offset;
+  long *left;
+
   THTensor_(resize1d)(self,626);
-  unsigned long *data = (unsigned long *)THTensor_(data)(self);
-  long *offset = (long *)data+624;
-  long *left = (long *)data+625;
+  data = (unsigned long *)THTensor_(data)(self);
+  offset = (long *)data+624;
+  left = (long *)data+625;
+
   THRandom_getState(data,offset,left);
 }
 
 TH_API void THTensor_(setRNGState)(THTensor *self)
 {
+  unsigned long *data;
+  long *offset;
+  long *left;
+
   THArgCheck(THTensor_(nElement)(self) == 626, 1, "state should have 626 elements");
-  unsigned long *data = (unsigned long *)THTensor_(data)(self);
-  long *offset = (long *)(data+624);
-  long *left = (long *)(data+625);
+  data = (unsigned long *)THTensor_(data)(self);
+  offset = (long *)(data+624);
+  left = (long *)(data+625);
+
   THRandom_setState(data,*offset,*left);
 }
 
