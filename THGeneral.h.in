@@ -75,6 +75,9 @@ TH_API void THFree(void *ptr);
 
 #ifdef _MSC_VER
 # define log1p(x) THLog1p(x)
+#define snprintf _snprintf
+#define popen _popen
+#define pclose _pclose
 #endif
 
 #endif
