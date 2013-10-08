@@ -30,7 +30,7 @@ size_t fread__(void *ptr, size_t size, size_t nitems, FILE *stream)
 {
   size_t nread = 0;
   while(!feof(stream) && !ferror(stream) && (nread < nitems))
-    nread += fread(ptr+nread*size, size, THMin(2147483648/size, nitems-nread), stream);
+    nread += fread((char*)ptr+nread*size, size, THMin(2147483648/size, nitems-nread), stream);
   return nread;
 }
 #else

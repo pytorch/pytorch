@@ -155,7 +155,7 @@ TH_API void THTensor_(gels)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor 
   ldb = m;
   info = 0;
 
-  // get optimal workspace size
+  /* get optimal workspace size */
   THLapack_(gels)('N', m, n, nrhs, THTensor_(data)(ra__), lda, 
 		  THTensor_(data)(rb__), ldb, 
 		  &wkopt, -1, &info);
@@ -165,7 +165,7 @@ TH_API void THTensor_(gels)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor 
 		  THTensor_(data)(rb__), ldb, 
 		  THTensor_(data)(work), lwork, &info);
 
-  //printf("lwork = %d,%g\n",lwork,THTensor_(data)(work)[0]);
+  /* printf("lwork = %d,%g\n",lwork,THTensor_(data)(work)[0]); */
   if (info != 0)
   {
     THError("Lapack gels : Argument %d : illegal value", -info);
@@ -222,7 +222,7 @@ TH_API void THTensor_(geev)(THTensor *re_, THTensor *rv_, THTensor *a_, const ch
     rv_data = THTensor_(data)(rv_);
     ldvr = n;
   }
-  // get optimal workspace size
+  /* get optimal workspace size */
   THLapack_(geev)('N', jobvr[0], n, THTensor_(data)(a), lda, THTensor_(data)(wr), THTensor_(data)(wi), 
       NULL, 1, rv_data, ldvr, &wkopt, -1, &info);
 
@@ -241,13 +241,15 @@ TH_API void THTensor_(geev)(THTensor *re_, THTensor *rv_, THTensor *a_, const ch
     THError("Lapack geev : Argument %d : illegal value", -info);
   }
 
-  real *re_data = THTensor_(data)(re_);
-  real *wi_data = THTensor_(data)(wi);
-  real *wr_data = THTensor_(data)(wr);
-  for (i=0; i<n; i++)
   {
-    re_data[2*i] = wr_data[i];
-    re_data[2*i+1] = wi_data[i];
+    real *re_data = THTensor_(data)(re_);
+    real *wi_data = THTensor_(data)(wi);
+    real *wr_data = THTensor_(data)(wr);
+    for (i=0; i<n; i++)
+    {
+      re_data[2*i] = wr_data[i];
+      re_data[2*i+1] = wi_data[i];
+    }
   }
   if (*jobvr == 'V')
   {
@@ -290,7 +292,7 @@ TH_API void THTensor_(syev)(THTensor *re_, THTensor *rv_, THTensor *a, const cha
 
   THTensor_(resize1d)(re_,n);
 
-  // get optimal workspace size
+  /* get optimal workspace size */
   THLapack_(syev)(jobz[0], uplo[0], n, THTensor_(data)(rv__), lda,
 		  THTensor_(data)(re_), &wkopt, -1, &info);
   lwork = (int)wkopt;
@@ -517,11 +519,13 @@ TH_API void THTensor_(potrf)(THTensor *ra_, THTensor *a)
   }
 
   /* Build full matrix */
-  real *p = THTensor_(data)(ra__);
-  long i,j;
-  for (i=0; i<n; i++) {
-    for (j=i+1; j<n; j++) {
-       p[i*n+j] = p[j*n+i];
+  {
+    real *p = THTensor_(data)(ra__);
+    long i,j;
+    for (i=0; i<n; i++) {
+      for (j=i+1; j<n; j++) {
+        p[i*n+j] = p[j*n+i];
+      }
     }
   }
 
@@ -586,11 +590,13 @@ TH_API void THTensor_(potri)(THTensor *ra_, THTensor *a)
   }
 
   /* Build full matrix */
-  real *p = THTensor_(data)(ra__);
-  long i,j;
-  for (i=0; i<n; i++) {
-    for (j=i+1; j<n; j++) {
-       p[i*n+j] = p[j*n+i];
+  {
+    real *p = THTensor_(data)(ra__);
+    long i,j;
+    for (i=0; i<n; i++) {
+      for (j=i+1; j<n; j++) {
+        p[i*n+j] = p[j*n+i];
+      }
     }
   }
 
