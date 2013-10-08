@@ -57,7 +57,7 @@ SET(CMAKE_REQUIRED_FLAGS_SAVE ${CMAKE_REQUIRED_FLAGS})
 FOREACH(KEYWORD "inline" "__inline__" "__inline")
   IF(NOT DEFINED C_INLINE)
 
-    SET(CMAKE_REQUIRED_FLAGS "-Dinline=${KEYWORD}")
+    SET(CMAKE_REQUIRED_FLAGS "-Dinline=${KEYWORD} ${CMAKE_C_FLAGS}")
     CHECK_C_SOURCE_RUNS("
        static inline int static_foo()
        {

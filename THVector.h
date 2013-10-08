@@ -26,6 +26,7 @@
 
 #define THDoubleVector_fill(x, c, n) {          \
     long i;                                     \
+    long off;                                   \
     __m128d XMM0 = _mm_set1_pd(c);              \
     for (i=0; i<=((n)-8); i+=8) {               \
       _mm_storeu_pd((x)+i  , XMM0);             \
@@ -33,7 +34,7 @@
       _mm_storeu_pd((x)+i+4, XMM0);             \
       _mm_storeu_pd((x)+i+6, XMM0);             \
     }                                           \
-    long off = (n) - ((n)%8);                   \
+    off = (n) - ((n)%8);                        \
     for (i=0; i<((n)%8); i++) {                 \
       x[off+i] = c;                             \
     }                                           \
@@ -128,13 +129,14 @@
 #define THFloatVector_fill(x, c, n) {           \
     long i;                                     \
     __m128 XMM0 = _mm_set_ps1(c);               \
+    long off;                                   \
     for (i=0; i<=((n)-16); i+=16) {             \
       _mm_storeu_ps((x)+i  ,  XMM0);            \
       _mm_storeu_ps((x)+i+4,  XMM0);            \
       _mm_storeu_ps((x)+i+8,  XMM0);            \
       _mm_storeu_ps((x)+i+12, XMM0);            \
     }                                           \
-    long off = (n) - ((n)%16);                  \
+    off = (n) - ((n)%16);                       \
     for (i=0; i<((n)%16); i++) {                \
       x[off+i] = c;                             \
     }                                           \

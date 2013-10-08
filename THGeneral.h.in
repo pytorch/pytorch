@@ -33,6 +33,8 @@
 
 #define THInf DBL_MAX
 
+#define TH_INLINE @TH_INLINE@
+
 #ifndef __cplusplus
 #define inline @TH_INLINE@
 #endif
