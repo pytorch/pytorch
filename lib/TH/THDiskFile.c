@@ -528,11 +528,7 @@ static void THPipeFile_free(THFile *self)
 {
   THDiskFile *dfself = (THDiskFile*)(self);
   if(dfself->handle)
-#ifdef _WIN32
-    _pclose(dfself->handle);
-#else
     pclose(dfself->handle);
-#endif
   THFree(dfself->name);
   THFree(dfself);
 }
@@ -576,7 +572,7 @@ THFile *THPipeFile_new(const char *name, const char *mode, int isQuiet)
   THArgCheck(THPipeFile_mode(mode, &isReadable, &isWritable), 2, "file mode should be 'r','w'");
 
 #ifdef _WIN32
-  handle = _popen(name, (isReadable ? "rb" : "wb"));
+  handle = popen(name, (isReadable ? "rb" : "wb"));
 #else
   handle = popen(name, (isReadable ? "r" : "w"));
 #endif
