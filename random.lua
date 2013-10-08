@@ -27,6 +27,6 @@ void torch_random_init(lua_State *L)
 {
   luaL_register(L, NULL, random__);
 }
-   ]])
+]])
 
 interface:tofile(arg[1])

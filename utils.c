@@ -171,8 +171,8 @@ static int torch_getnumthreads(lua_State *L)
 
 static int torch_setnumthreads(lua_State *L)
 {
-  int nth = luaL_checkint(L,1);
 #ifdef _OPENMP
+  int nth = luaL_checkint(L,1);
   omp_set_num_threads(nth);
 #endif
   return 0;

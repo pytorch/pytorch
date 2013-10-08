@@ -687,7 +687,7 @@ static int torch_Tensor_(__newindex__)(lua_State *L)
       }
     }
     if(!done) {
-      // doing a copy
+      /* doing a copy */
       void *src;
       if (lua_isnumber(L,3)) {
         THTensor_(fill)(tensor, lua_tonumber(L,3));
