@@ -1022,13 +1022,13 @@ float THCudaTensor_normall(THCudaTensor *self, float value)
   return result;
 }
 
-
 void THCudaTensor_norm(THCudaTensor* self, THCudaTensor* src, float value, long dimension)
 {
   if(value == 0.0f) {
     THCudaTensor_transformReduceDim(self, src, dimension, partial_not_equal_functor(0.0f), (float)0, thrust::plus<float>());
   } else {
     THCudaTensor_transformReduceDim(self, src, dimension, norm_functor(value), (float)0, thrust::plus<float>());
+    THCudaTensor_pow(self, self, 1/value);
   }
 }
 
