@@ -3,7 +3,8 @@
 require 'mathx'
 require 'gnuplot'
 
-function testSort()
+function testSort(output, descending)
+    descending = descending or false
     local pow10 = torch.linspace(1,5,10)
     local bench_rnd = torch.zeros(pow10:numel())
     local bench_srt = torch.zeros(pow10:numel())
@@ -11,7 +12,7 @@ function testSort()
 
     local function time_sort(x)
         local start = os.clock()
-        torch.sort(x)
+        torch.sort(x,descending)
         return (os.clock()-start)
     end
 
@@ -40,9 +41,10 @@ function testSort()
                  {'Sorted', pow10, bench_srt})
     gnuplot.xlabel('Log10(N)')
     gnuplot.ylabel('Time (s)')
-    gnuplot.figprint('timeSort.png')
+    gnuplot.figprint(output)
     print('RND:', bench_rnd)
     print('SRT:', bench_srt)
 end
 
-testSort()
+testSort('timeSortAscending.png', false) -- Ascending
+testSort('timeSortDescending.png', true) -- Descending
