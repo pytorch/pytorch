@@ -754,6 +754,7 @@ void THCudaTensor_pow(THCudaTensor *self_, THCudaTensor *src, float value)
   
   thrust::transform(src_data, src_data+size, self_data, pow_functor(value));
 
+  THCudaTensor_free(src);
   THCudaTensor_freeCopyTo(self, self_);
 }
 
