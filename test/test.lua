@@ -137,6 +137,23 @@ function torchtest.sort()
    torch.sort(mxx,ixx,x)
    mytester:asserteq(maxdiff(mx,mxx),0,'torch.sort value')
    mytester:asserteq(maxdiff(ix,ixx),0,'torch.sort index')
+
+   local increasing = true
+   for j = 1,msize do
+       for k = 2,msize do
+           increasing = increasing and (mxx[j][k-1] <= mxx[j][k])
+       end
+   end
+   mytester:assert(increasing, 'torch.sort increasing')
+
+   local indicesCorrect = true
+   for k = 1,msize do
+       for j = 1,msize do
+           indicesCorrect = indicesCorrect and (x[k][ixx[k][j]] == mxx[k][j])
+       end
+   end
+   mytester:assert(indicesCorrect, 'torch.sort indices')
+
 end
 function torchtest.tril()
    local x = torch.rand(msize,msize)
