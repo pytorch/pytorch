@@ -141,18 +141,29 @@ function torchtest.sort()
    local increasing = true
    for j = 1,msize do
        for k = 2,msize do
-           increasing = increasing and (mxx[j][k-1] <= mxx[j][k])
+           increasing = increasing and (mxx[j][k-1] < mxx[j][k])
        end
    end
    mytester:assert(increasing, 'torch.sort increasing')
 
+   local seen = torch.ByteTensor(msize)
    local indicesCorrect = true
    for k = 1,msize do
+       seen:zero()
        for j = 1,msize do
            indicesCorrect = indicesCorrect and (x[k][ixx[k][j]] == mxx[k][j])
+           seen[ixx[k][j]] = 1
        end
+       indicesCorrect = indicesCorrect and (torch.sum(seen) == msize)
    end
    mytester:assert(indicesCorrect, 'torch.sort indices')
+
+   mytester:assertTensorEq(
+           torch.sort(torch.Tensor{ 50, 40, 30, 20, 10 }),
+           torch.Tensor{ 10, 20, 30, 40, 50 },
+           1e-16,
+           "torch.sort simple sort"
+       )
 
 end
 function torchtest.tril()
