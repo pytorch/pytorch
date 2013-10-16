@@ -986,14 +986,36 @@ static void THTensor_(quicksortdescend)(real *arr, long *idx, long elements, lon
       piv=arr[L*stride];
       pid=idx[L*stride];
       while (L<R) {
-        while (arr[R*stride]<=piv && L<R) R--; if (L<R) {idx[L*stride]=idx[R*stride]; arr[L*stride]=arr[R*stride]; L++;}
-        while (arr[L*stride]>=piv && L<R) L++; if (L<R) {idx[R*stride]=idx[L*stride]; arr[R*stride]=arr[L*stride]; R--;} }
-      idx[L*stride]=pid; arr[L*stride]=piv; beg[i+1]=L+1; end[i+1]=end[i]; end[i++]=L;
+        while (arr[R*stride]<=piv && L<R)
+            R--;
+        if (L<R) {
+            idx[L*stride]=idx[R*stride];
+            arr[L*stride]=arr[R*stride];
+            L++;
+        }
+        while (arr[L*stride]>=piv && L<R)
+            L++;
+        if (L<R) {
+            idx[R*stride]=idx[L*stride];
+            arr[R*stride]=arr[L*stride];
+            R--;
+        }
+      }
+      idx[L*stride]=pid;
+      arr[L*stride]=piv;
+      beg[i+1]=L+1;
+      end[i+1]=end[i];
+      end[i++]=L;
       if (end[i]-beg[i]>end[i-1]-beg[i-1]) {
         swap=beg[i]; beg[i]=beg[i-1]; beg[i-1]=swap;
-        swap=end[i]; end[i]=end[i-1]; end[i-1]=swap; }}
+        swap=end[i]; end[i]=end[i-1]; end[i-1]=swap;
+      }
+    }
     else {
-      i--; }}}
+      i--;
+    }
+  }
+}
 
 void THTensor_(sort)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int dimension, int descendingOrder)
 {
