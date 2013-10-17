@@ -129,14 +129,71 @@ function torchtest.reshape()
    torch.reshape(mxx,x,130,23)
    mytester:asserteq(maxdiff(mx,mxx),0,'torch.reshape value')
 end
-function torchtest.sort()
+function torchtest.sortAscending()
    local x = torch.rand(msize,msize)
    local mx,ix = torch.sort(x)
    local mxx = torch.Tensor()
    local ixx = torch.LongTensor()
    torch.sort(mxx,ixx,x)
-   mytester:asserteq(maxdiff(mx,mxx),0,'torch.sort value')
-   mytester:asserteq(maxdiff(ix,ixx),0,'torch.sort index')
+   mytester:asserteq(maxdiff(mx,mxx),0,'torch.sort (ascending) value')
+   mytester:asserteq(maxdiff(ix,ixx),0,'torch.sort (ascending) index')
+   local increasing = true
+   for j = 1,msize do
+       for k = 2,msize do
+           increasing = increasing and (mxx[j][k-1] < mxx[j][k])
+       end
+   end
+   mytester:assert(increasing, 'torch.sort (ascending) increasing')
+   local seen = torch.ByteTensor(msize)
+   local indicesCorrect = true
+   for k = 1,msize do
+       seen:zero()
+       for j = 1,msize do
+           indicesCorrect = indicesCorrect and (x[k][ixx[k][j]] == mxx[k][j])
+           seen[ixx[k][j]] = 1
+       end
+       indicesCorrect = indicesCorrect and (torch.sum(seen) == msize)
+   end
+   mytester:assert(indicesCorrect, 'torch.sort (ascending) indices')
+   mytester:assertTensorEq(
+           torch.sort(torch.Tensor{ 50, 40, 30, 20, 10 }),
+           torch.Tensor{ 10, 20, 30, 40, 50 },
+           1e-16,
+           "torch.sort (ascending) simple sort"
+       )
+end
+function torchtest.sortDescending()
+   local x = torch.rand(msize,msize)
+   local mx,ix = torch.sort(x,true)
+   local mxx = torch.Tensor()
+   local ixx = torch.LongTensor()
+   torch.sort(mxx,ixx,x,true)
+   mytester:asserteq(maxdiff(mx,mxx),0,'torch.sort (descending) value')
+   mytester:asserteq(maxdiff(ix,ixx),0,'torch.sort (descending) index')
+   local increasing = true
+   for j = 1,msize do
+       for k = 2,msize do
+           increasing = increasing and (mxx[j][k-1] > mxx[j][k])
+       end
+   end
+   mytester:assert(increasing, 'torch.sort (descending) decreasing')
+   local seen = torch.ByteTensor(msize)
+   local indicesCorrect = true
+   for k = 1,msize do
+       seen:zero()
+       for j = 1,msize do
+           indicesCorrect = indicesCorrect and (x[k][ixx[k][j]] == mxx[k][j])
+           seen[ixx[k][j]] = 1
+       end
+       indicesCorrect = indicesCorrect and (torch.sum(seen) == msize)
+   end
+   mytester:assert(indicesCorrect, 'torch.sort (descending) indices')
+   mytester:assertTensorEq(
+           torch.sort(torch.Tensor{ 10, 20, 30, 40, 50 },true),
+           torch.Tensor{ 50, 40, 30, 20, 10 },
+           1e-16,
+           "torch.sort (descending) simple sort"
+       )
 end
 function torchtest.tril()
    local x = torch.rand(msize,msize)
