@@ -2,6 +2,8 @@
 #define TH_GENERIC_FILE "generic/THTensorMath.c"
 #else
 
+#define TH_OMP_OVERHEAD_THRESHOLD 100000
+
 void THTensor_(fill)(THTensor *r_, real value)
 {
   TH_TENSOR_APPLY(real, r_, 
@@ -214,7 +216,7 @@ void THTensor_(add)(THTensor *r_, THTensor *t, real value)
       real *tp = THTensor_(data)(t);
       real *rp = THTensor_(data)(r_);
       long i;
-      #pragma omp parallel for private(i)
+      #pragma omp parallel for if(THTensor_(nElement)(t) > TH_OMP_OVERHEAD_THRESHOLD) private(i) 
       for (i=0; i<THTensor_(nElement)(t); i++)
       {
           rp[i] = tp[i] + value;
@@ -231,7 +233,7 @@ void THTensor_(mul)(THTensor *r_, THTensor *t, real value)
       real *tp = THTensor_(data)(t);
       real *rp = THTensor_(data)(r_);
       long i;
-      #pragma omp parallel for private(i)
+      #pragma omp parallel for if(THTensor_(nElement)(t) > TH_OMP_OVERHEAD_THRESHOLD) private(i)  
       for (i=0; i<THTensor_(nElement)(t); i++)
       {
           rp[i] = tp[i] * value;
@@ -248,7 +250,7 @@ void THTensor_(div)(THTensor *r_, THTensor *t, real value)
       real *tp = THTensor_(data)(t);
       real *rp = THTensor_(data)(r_);
       long i;
-      #pragma omp parallel for private(i)
+      #pragma omp parallel for if(THTensor_(nElement)(t) > TH_OMP_OVERHEAD_THRESHOLD) private(i)
       for (i=0; i<THTensor_(nElement)(t); i++)
       {
           rp[i] = tp[i] / value;
@@ -266,7 +268,7 @@ void THTensor_(cadd)(THTensor *r_, THTensor *t, real value, THTensor *src)
       real *sp = THTensor_(data)(src);
       real *rp = THTensor_(data)(r_);
       long i;
-      #pragma omp parallel for private(i)
+      #pragma omp parallel for if(THTensor_(nElement)(t) > TH_OMP_OVERHEAD_THRESHOLD) private(i)
       for (i=0; i<THTensor_(nElement)(t); i++)
       {
           rp[i] = tp[i] + value * sp[i];
@@ -284,7 +286,7 @@ void THTensor_(cmul)(THTensor *r_, THTensor *t, THTensor *src)
       real *sp = THTensor_(data)(src);
       real *rp = THTensor_(data)(r_);
       long i;
-      #pragma omp parallel for private(i)
+      #pragma omp parallel for if(THTensor_(nElement)(t) > TH_OMP_OVERHEAD_THRESHOLD) private(i) 
       for (i=0; i<THTensor_(nElement)(t); i++)
       {
           rp[i] = tp[i] * sp[i];
@@ -302,7 +304,7 @@ void THTensor_(cdiv)(THTensor *r_, THTensor *t, THTensor *src)
       real *sp = THTensor_(data)(src);
       real *rp = THTensor_(data)(r_);
       long i;
-      #pragma omp parallel for private(i)
+      #pragma omp parallel for if(THTensor_(nElement)(t) > TH_OMP_OVERHEAD_THRESHOLD) private(i) 
       for (i=0; i<THTensor_(nElement)(t); i++)
       {
           rp[i] = tp[i] / sp[i];
@@ -933,7 +935,7 @@ static void THTensor_(quicksortascend)(real *arr, long *idx, long elements, long
   while (i>=0) {
     L=beg[i]; R=end[i]-1;
     if (L<R) {
-      P=(L+R)>>1; // Choose pivot as middle element of the current block
+      P=(L+R)>>1; /* Choose pivot as middle element of the current block */
       piv=arr[P*stride];
       pid=idx[P*stride];
       rswap=arr[L*stride];
@@ -983,7 +985,7 @@ static void THTensor_(quicksortdescend)(real *arr, long *idx, long elements, lon
   while (i>=0) {
     L=beg[i]; R=end[i]-1;
     if (L<R) {
-      P=(L+R)>>1; // Choose pivot as middle element of the current block
+      P=(L+R)>>1; /* Choose pivot as middle element of the current block */
       piv=arr[P*stride];
       pid=idx[P*stride];
       rswap=arr[L*stride];
