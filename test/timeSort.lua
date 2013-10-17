@@ -1,6 +1,5 @@
 -- Test torch sort, show it suffers from the problems of quicksort
 -- i.e. complexity O(N^2) in worst-case of sorted list
-require 'mathx'
 require 'gnuplot'
 
 function testSort(output, descending)
