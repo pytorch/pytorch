@@ -102,7 +102,7 @@ end
 function Tester:assertErrorObj(f, errcomp, message)
     -- errcomp must be  a function  that compares the error object to its expected value
    local status, err = pcall(f)
-   self:assert_sub(status == false and errcomp(err), string.format('%s\n%s  condition=%s',message,' ERROR violation ', 'did not match expected error'))
+   self:assert_sub(status == false and errcomp(err), string.format('%s\n%s  err=%s', message,' ERROR violation ', tostring(err)))
 end
 
 
