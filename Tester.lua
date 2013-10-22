@@ -45,9 +45,8 @@ end
 function Tester:assertalmosteq (a, b, condition, message)
    condition = condition or 1e-16
    local err = math.abs(a-b)
-   self:assert_sub(err < condition, string.format('%s\n%s  val=%s, condition=%s',message,' ALMST_EQ(==) violation ', tostring(val), tostring(condition)))
+   self:assert_sub(err < condition, string.format('%s\n%s  val=%s, condition=%s',message,' ALMOST_EQ(==) violation ', tostring(err), tostring(condition)))
 end
-
 
 function Tester:assertne (val, condition, message)
    self:assert_sub(val~=condition,string.format('%s\n%s  val=%s, condition=%s',message,' NE(~=) violation ', tostring(val), tostring(condition)))
