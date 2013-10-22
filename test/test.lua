@@ -442,6 +442,7 @@ function torchtest.TestAsserts()
    local xx = x:clone();
    mytester:assertTensorEq(x, xx, 1e-16, 'assertTensorEq: not deemed equal')
    mytester:assertTensorNe(x, xx+1, 1e-16, 'assertTensorNe: not deemed different')
+   mytester:assertalmosteq(0, 1e-250, 1e-16, 'assertalmosteq: not deemed different')
 end
 
 
