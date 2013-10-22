@@ -88,6 +88,10 @@ function Tester:assertErrorMsg(f, errmsg, message)
     return self:assertErrorObj(f, function(err) return err == errmsg end, message)
 end
 
+function Tester:assertErrorPattern(f, errPattern, message)
+    return self:assertErrorObj(f, function(err) return string.find(err, errPattern) ~= nil end, message)
+end
+
 function Tester:assertErrorObj(f, errcomp, message)
     -- errcomp must be  a function  that compares the error object to its expected value
    local status, err = pcall(f)
