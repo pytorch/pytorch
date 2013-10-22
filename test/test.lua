@@ -454,10 +454,6 @@ function torchtest.BugInAssertTableEq()
    mytester:assertTableEq(t, tt, 'assertTableEq: not deemed equal')
    mytester:assertTableNe(t, {3,2,1}, 'assertTableNe: not deemed different')
    mytester:assertTableEq({1,2,{4,5}}, {1,2,{4,5}}, 'assertTableEq: fails on recursive lists')
-   -- TODO: once a mechanism for testing that assert fails exist, test that the two asserts below do not pass
-   -- should not pass: mytester:assertTableEq(t, {1,2}, 'assertTableNe: different size should not be equal') 
-   -- should not pass: mytester:assertTableEq(t, {1,2,3,4}, 'assertTableNe: different size should not be equal')
-
    mytester:assertTableNe(t, {1,2}, 'assertTableNe: different size not deemed different')
    mytester:assertTableNe(t, {1,2,3,4}, 'assertTableNe: different size not deemed different')
 end
