@@ -437,6 +437,8 @@ end
 
 function torchtest.TestAsserts()
    mytester:assertError(function() error('hello') end, 'assertError: Error not caught')
+   mytester:assertErrorMsg(function() error('hello') end, 'test.lua:440: hello', 'assertError: "hello" Error not caught')
+   mytester:assertErrorPattern(function() error('hello') end, '.*ll.*', 'assertError: ".*ll.*" Error not caught')
 
    local x = torch.rand(100,100)*2-1;
    local xx = x:clone();
