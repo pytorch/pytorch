@@ -1,8 +1,14 @@
 #ifndef LUAT_UTILS_INC
 #define LUAT_UTILS_INC
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 #include <lua.h>
 #include <lauxlib.h>
+#ifdef __cplusplus
+}
+#endif
 
 #ifndef LUA_EXTERNC
 # ifdef __cplusplus
