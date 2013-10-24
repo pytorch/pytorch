@@ -924,7 +924,7 @@ void THTensor_(reshape)(THTensor *r_, THTensor *t, THLongStorage *size)
    Thanks man :)
 
     Updated Oct 16 2013: change choice of pivot to avoid worst-case being a pre-sorted input - Daniel and Julien
-    Updated Oct 24 2013: change pivot comparison to strict inequality to avoid worst-case on constant input - Julien
+    Updated Oct 24 2013: change pivot comparison to strict inequality to avoid worst-case on constant input, see Sedgewick, Algorithms in C, Addison Wesley, 1990, p. 120 - Julien
 */
 #define  MAX_LEVELS  300
 static void THTensor_(quicksortascend)(real *arr, long *idx, long elements, long stride)
