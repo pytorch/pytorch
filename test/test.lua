@@ -437,11 +437,14 @@ end
 
 function torchtest.TestAsserts()
    mytester:assertError(function() error('hello') end, 'assertError: Error not caught')
+   mytester:assertErrorMsg(function() error('hello') end, 'test.lua:440: hello', 'assertError: "hello" Error not caught')
+   mytester:assertErrorPattern(function() error('hello') end, '.*ll.*', 'assertError: ".*ll.*" Error not caught')
 
    local x = torch.rand(100,100)*2-1;
    local xx = x:clone();
    mytester:assertTensorEq(x, xx, 1e-16, 'assertTensorEq: not deemed equal')
    mytester:assertTensorNe(x, xx+1, 1e-16, 'assertTensorNe: not deemed different')
+   mytester:assertalmosteq(0, 1e-250, 1e-16, 'assertalmosteq: not deemed different')
 end
 
 
@@ -451,10 +454,6 @@ function torchtest.BugInAssertTableEq()
    mytester:assertTableEq(t, tt, 'assertTableEq: not deemed equal')
    mytester:assertTableNe(t, {3,2,1}, 'assertTableNe: not deemed different')
    mytester:assertTableEq({1,2,{4,5}}, {1,2,{4,5}}, 'assertTableEq: fails on recursive lists')
-   -- TODO: once a mechanism for testing that assert fails exist, test that the two asserts below do not pass
-   -- should not pass: mytester:assertTableEq(t, {1,2}, 'assertTableNe: different size should not be equal') 
-   -- should not pass: mytester:assertTableEq(t, {1,2,3,4}, 'assertTableNe: different size should not be equal')
-
    mytester:assertTableNe(t, {1,2}, 'assertTableNe: different size not deemed different')
    mytester:assertTableNe(t, {1,2,3,4}, 'assertTableNe: different size not deemed different')
 end

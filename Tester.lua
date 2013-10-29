@@ -42,6 +42,12 @@ function Tester:asserteq (val, condition, message)
    self:assert_sub(val==condition,string.format('%s\n%s  val=%s, condition=%s',message,' EQ(==) violation ', tostring(val), tostring(condition)))
 end
 
+function Tester:assertalmosteq (a, b, condition, message)
+   condition = condition or 1e-16
+   local err = math.abs(a-b)
+   self:assert_sub(err < condition, string.format('%s\n%s  val=%s, condition=%s',message,' ALMOST_EQ(==) violation ', tostring(err), tostring(condition)))
+end
+
 function Tester:assertne (val, condition, message)
    self:assert_sub(val~=condition,string.format('%s\n%s  val=%s, condition=%s',message,' NE(~=) violation ', tostring(val), tostring(condition)))
 end
@@ -81,9 +87,24 @@ function Tester:assertTableNe(ta, tb, message)
 end
 
 function Tester:assertError(f, message)
-   status, err = pcall(f)
-   self:assert_sub(status == false, string.format('%s\n%s  condition=%s',message,' ERROR violation ', 'should have errored'))
+    return self:assertErrorObj(f, function(err) return true end, message)
 end
+
+function Tester:assertErrorMsg(f, errmsg, message)
+    return self:assertErrorObj(f, function(err) return err == errmsg end, message)
+end
+
+function Tester:assertErrorPattern(f, errPattern, message)
+    return self:assertErrorObj(f, function(err) return string.find(err, errPattern) ~= nil end, message)
+end
+
+function Tester:assertErrorObj(f, errcomp, message)
+    -- errcomp must be  a function  that compares the error object to its expected value
+   local status, err = pcall(f)
+   self:assert_sub(status == false and errcomp(err), string.format('%s\n%s  err=%s', message,' ERROR violation ', tostring(err)))
+end
+
+
 
 function Tester:pcall(f)
    local nerr = #self.errors
