@@ -518,13 +518,13 @@ TH_API void THTensor_(potrf)(THTensor *ra_, THTensor *a)
     THError("Lapack potrf : Argument %d : illegal value", -info);
   }
 
-  /* Build full matrix */
+  /* Build full upper-triangular matrix */
   {
     real *p = THTensor_(data)(ra__);
     long i,j;
     for (i=0; i<n; i++) {
       for (j=i+1; j<n; j++) {
-        p[i*n+j] = p[j*n+i];
+        p[i*n+j] = 0;
       }
     }
   }
