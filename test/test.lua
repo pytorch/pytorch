@@ -477,8 +477,16 @@ function torchtest.testCholesky()
     local A = torch.mm(x, x:t())
     local C = torch.potrf(A)
     local B = torch.mm(C:t(), C)
-    mytester:assertTensorEq(A, B, 1e-15, 'potrf did not allow rebuilding the original matrix')
+    mytester:assertTensorEq(A, B, 1e-14, 'potrf did not allow rebuilding the original matrix')
 end
+function torchtest.testCholeskyErrsOnRankDeficient()
+    local x = torch.rand(5,5)
+    local A = torch.mm(x, x:t())
+    -- Make the matrix rank-defficient
+    A[{{},5}]:copy(A[{{},{1}}])
+    mytester:assertError(function() torch.potrf(A) end)
+end
+
 
 function torch.test()
    math.randomseed(os.time())
