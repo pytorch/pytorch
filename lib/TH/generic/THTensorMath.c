@@ -923,7 +923,8 @@ void THTensor_(reshape)(THTensor *r_, THTensor *t, THLongStorage *size)
    This public-domain C implementation by Darel Rex Finley.
    Thanks man :)
 
-    Updated Oct 16 2013: change choice of pivot to avoid worst-case being a pre-sorted input
+    Updated Oct 16 2013: change choice of pivot to avoid worst-case being a pre-sorted input - Daniel and Julien
+    Updated Oct 24 2013: change pivot comparison to strict inequality to avoid worst-case on constant input, see Sedgewick, Algorithms in C, Addison Wesley, 1990, p. 120 - Julien
 */
 #define  MAX_LEVELS  300
 static void THTensor_(quicksortascend)(real *arr, long *idx, long elements, long stride)
@@ -945,14 +946,14 @@ static void THTensor_(quicksortascend)(real *arr, long *idx, long elements, long
       arr[P*stride]=rswap;
       idx[P*stride]=swap;
       while (L<R) {
-        while (arr[R*stride]>=piv && L<R)
+        while (arr[R*stride]>piv && L<R)
             R--;
         if (L<R) {
             idx[L*stride]=idx[R*stride];
             arr[L*stride]=arr[R*stride];
             L++;
         }
-        while (arr[L*stride]<=piv && L<R)
+        while (arr[L*stride]<piv && L<R)
             L++;
         if (L<R) {
             idx[R*stride]=idx[L*stride];
@@ -995,14 +996,14 @@ static void THTensor_(quicksortdescend)(real *arr, long *idx, long elements, lon
       arr[P*stride]=rswap;
       idx[P*stride]=swap;
       while (L<R) {
-        while (arr[R*stride]<=piv && L<R)
+        while (arr[R*stride]<piv && L<R)
             R--;
         if (L<R) {
             idx[L*stride]=idx[R*stride];
             arr[L*stride]=arr[R*stride];
             L++;
         }
-        while (arr[L*stride]>=piv && L<R)
+        while (arr[L*stride]>piv && L<R)
             L++;
         if (L<R) {
             idx[R*stride]=idx[L*stride];
