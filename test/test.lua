@@ -472,6 +472,14 @@ function torchtest.RNGState()
    mytester:assertTensorEq(before, after, 1e-16, 'getRNGState/setRNGState not generating same sequence')
 end
 
+function torchtest.testCholesky()
+    local x = torch.rand(10,10)
+    local A = torch.mm(x, x:t())
+    local C = torch.potrf(A)
+    local B = torch.mm(C:t(), C)
+    mytester:assertTensorEq(A, B, 1e-15, 'potrf did not allow rebuilding the original matrix')
+end
+
 function torch.test()
    math.randomseed(os.time())
    mytester = torch.Tester()
