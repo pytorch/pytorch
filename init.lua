@@ -12,7 +12,7 @@ function torch.packageLuaPath(name)
        end
        return ret 
    end
-   for path in string.gmatch(package.path, "(.-);") do
+   for path in string.gmatch(package.path, "[^;]+") do
       path = string.gsub(path, "%?", name)
       local f = io.open(path)
       if f then
