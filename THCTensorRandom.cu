@@ -80,7 +80,7 @@ struct cauchy_functor
   }
 };
 
-TH_API void THCudaTensor_uniform(THCudaTensor *self_, double a, double b) {
+THC_API void THCudaTensor_uniform(THCudaTensor *self_, double a, double b) {
   THCudaTensor *self = THCudaTensor_newContiguous(self_);
   long size = THCudaTensor_nElement(self);
   float *data = THCudaTensor_data(self);
@@ -95,7 +95,7 @@ TH_API void THCudaTensor_uniform(THCudaTensor *self_, double a, double b) {
   THCudaTensor_freeCopyTo(self, self_);
 };
 
-TH_API void THCudaTensor_bernoulli(THCudaTensor *self_, double p) {
+THC_API void THCudaTensor_bernoulli(THCudaTensor *self_, double p) {
   THCudaTensor *self = THCudaTensor_newContiguous(self_);
   long size = THCudaTensor_nElement(self);
   float *data = THCudaTensor_data(self);
@@ -108,7 +108,7 @@ TH_API void THCudaTensor_bernoulli(THCudaTensor *self_, double p) {
   THCudaTensor_freeCopyTo(self, self_);
 };
 
-TH_API void THCudaTensor_normal(THCudaTensor *self_, double mean, double stdv) {
+THC_API void THCudaTensor_normal(THCudaTensor *self_, double mean, double stdv) {
   THCudaTensor *self = THCudaTensor_newContiguous(self_);
   long size = THCudaTensor_nElement(self);
   float *data = THCudaTensor_data(self);
@@ -118,7 +118,7 @@ TH_API void THCudaTensor_normal(THCudaTensor *self_, double mean, double stdv) {
   THCudaTensor_freeCopyTo(self, self_);
 };
 
-TH_API void THCudaTensor_logNormal(THCudaTensor *self_, double mean, double stdv) {
+THC_API void THCudaTensor_logNormal(THCudaTensor *self_, double mean, double stdv) {
   THCudaTensor *self = THCudaTensor_newContiguous(self_);
   long size = THCudaTensor_nElement(self);
   float *data = THCudaTensor_data(self);
@@ -128,7 +128,7 @@ TH_API void THCudaTensor_logNormal(THCudaTensor *self_, double mean, double stdv
   THCudaTensor_freeCopyTo(self, self_);
 };
 
-TH_API void THCudaTensor_geometric(THCudaTensor *self_, double p) {
+THC_API void THCudaTensor_geometric(THCudaTensor *self_, double p) {
   THCudaTensor *self = THCudaTensor_newContiguous(self_);
   long size = THCudaTensor_nElement(self);
   float *data = THCudaTensor_data(self);
@@ -141,7 +141,7 @@ TH_API void THCudaTensor_geometric(THCudaTensor *self_, double p) {
   THCudaTensor_freeCopyTo(self, self_);
 };
 
-TH_API void THCudaTensor_exponential(THCudaTensor *self_, double lambda) {
+THC_API void THCudaTensor_exponential(THCudaTensor *self_, double lambda) {
   THCudaTensor *self = THCudaTensor_newContiguous(self_);
   long size = THCudaTensor_nElement(self);
   float *data = THCudaTensor_data(self);
@@ -154,7 +154,7 @@ TH_API void THCudaTensor_exponential(THCudaTensor *self_, double lambda) {
   THCudaTensor_freeCopyTo(self, self_);
 };
 
-TH_API void THCudaTensor_cauchy(THCudaTensor *self_, double median, double sigma) {
+THC_API void THCudaTensor_cauchy(THCudaTensor *self_, double median, double sigma) {
   THCudaTensor *self = THCudaTensor_newContiguous(self_);
   long size = THCudaTensor_nElement(self);
   float *data = THCudaTensor_data(self);

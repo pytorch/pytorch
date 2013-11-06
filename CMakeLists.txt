@@ -1,9 +1,11 @@
-SET(src 
-   THCGeneral.c THCStorage.c THCTensor.c THCTensorCopy.c)
+
+SET(src THCGeneral.c THCStorage.c THCTensor.c THCTensorCopy.c)
 
 SET(src-cuda THC.cu)
 
-CUDA_ADD_LIBRARY(THC SHARED ${src} ${src-cuda})
+SET(CUDA_ATTACH_VS_BUILD_RULE_TO_CUDA_FILE OFF)
+
+CUDA_ADD_LIBRARY(THC SHARED ${src-cuda} ${src})
 CUDA_ADD_CUBLAS_TO_TARGET(THC)
 TARGET_LINK_LIBRARIES(THC TH ${CUDA_curand_LIBRARY})
 

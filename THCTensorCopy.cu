@@ -1,6 +1,6 @@
-#include "THCTensor.h"
-#include "THCGeneral.h"
 #include "THGeneral.h"
+#include "THCGeneral.h"
+#include "THCTensor.h"
 
 static void THCudaTensor_computesz(THCudaTensor *self, long **sz_, long **st_)
 {
@@ -66,7 +66,7 @@ __global__ void THCudaTensor_kernel_copy(float *dst,
   }
 }
 
-void THCudaTensor_copy(THCudaTensor *self, THCudaTensor *src)
+THC_API void THCudaTensor_copy(THCudaTensor *self, THCudaTensor *src)
 {
   THArgCheck(THCudaTensor_nElement(self) == THCudaTensor_nElement(src), 2, "sizes do not match"); 
 

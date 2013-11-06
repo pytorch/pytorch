@@ -19,8 +19,15 @@
 
 #undef real
 #undef Real
+#undef TH_API
+#ifdef WIN32
+# define TH_API THC_EXTERNC __declspec(dllimport)
+#else
+# define TH_API THC_EXTERNC
+#endif
 
 THC_API void THCudaTensor_fill(THCudaTensor *self, float value);
+THC_API void THCudaTensor_copy(THCudaTensor *self, THCudaTensor *src);
 
 THC_API void THByteTensor_copyCuda(THByteTensor *self, THCudaTensor *src);
 THC_API void THCharTensor_copyCuda(THCharTensor *self, THCudaTensor *src);

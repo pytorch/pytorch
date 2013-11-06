@@ -268,7 +268,7 @@ __global__ void conv2genericrev(float *input, float *kernel, float *output,
  * 3D input, 4D kernel, 3D output
  * matrix vector product like: y <- Ax + beta*y
  */
-TH_API void THCudaTensor_conv2Dmv(THCudaTensor *output, float beta, THCudaTensor *input,
+THC_API void THCudaTensor_conv2Dmv(THCudaTensor *output, float beta, THCudaTensor *input,
                                   THCudaTensor *kernel, long srow, long scol, const char *type)
 {
   long nInputPlane, nInputRows, nInputCols;
@@ -499,7 +499,7 @@ TH_API void THCudaTensor_conv2Dmv(THCudaTensor *output, float beta, THCudaTensor
  * 4D input, 4D kernel, 4D output
  * matrix vector product like: y <- Ax + beta*y
  */
-TH_API void THCudaTensor_conv2Dmm(THCudaTensor *output, float beta, THCudaTensor *input,
+THC_API void THCudaTensor_conv2Dmm(THCudaTensor *output, float beta, THCudaTensor *input,
                                   THCudaTensor *kernel, long srow, long scol, const char *type)
 {
   long nbatch, nInputPlane, nInputRows, nInputCols;
@@ -742,7 +742,7 @@ TH_API void THCudaTensor_conv2Dmm(THCudaTensor *output, float beta, THCudaTensor
  * for sr,sc=1 this is equivalent to xcorr2Dger, but otherwise it is useful for
  * calculating derivatives wrt a kernel that is applied with stride sr,sc != 1
  */
-TH_API void THCudaTensor_conv2DRevger(THCudaTensor *output, float beta, float alpha,
+THC_API void THCudaTensor_conv2DRevger(THCudaTensor *output, float beta, float alpha,
                                       THCudaTensor *input, THCudaTensor *kernel,
                                       long srow, long scol)
 {
@@ -812,7 +812,7 @@ TH_API void THCudaTensor_conv2DRevger(THCudaTensor *output, float beta, float al
  * 4D input, 4D kernel, 4D output
  * conv2DRevgerm is doing the same thing as conv2DRevger, but with batch inputs
  */
-TH_API void THCudaTensor_conv2DRevgerm(THCudaTensor *output, float beta, float alpha,
+THC_API void THCudaTensor_conv2DRevgerm(THCudaTensor *output, float beta, float alpha,
                                        THCudaTensor *input, THCudaTensor *kernel,
                                        long srow, long scol)
 {
@@ -1073,7 +1073,7 @@ template <bool swapkernel, int T_kernel_h, int T_kernel_w>
  * 3D input, 4D kernel, 3D output
  * matrix vector product like: y <- Ax + beta*y
  */
-TH_API void THCudaTensor_conv2Dmap(THCudaTensor *output, THCudaTensor *input,
+THC_API void THCudaTensor_conv2Dmap(THCudaTensor *output, THCudaTensor *input,
                                    THCudaTensor *kernel, long stride_x, long stride_y,
                                    THCudaTensor *table, long fanin)
 {
