@@ -228,7 +228,7 @@
   }
 
 #elif defined __NEON__
-// ARM NEON Assembly routine for operating on floats
+/* ARM NEON Assembly routine for operating on floats */
 
 #define THFloatVector_fill(x, c, n) {                   \
         float ctemp = c;                                \
