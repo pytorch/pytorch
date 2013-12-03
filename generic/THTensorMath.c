@@ -44,6 +44,7 @@ void THTensor_(maskedCopy)(THTensor *tensor, THByteTensor *mask, THTensor* src )
 		   });
   if (cntr != nelem)
     THError("Number of elements of src != mask");
+  THTensor_(free)(srct);
 }
 
 void THTensor_(maskedSelect)(THTensor *tensor, THTensor *src, THByteTensor *mask)
