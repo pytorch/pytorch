@@ -795,7 +795,7 @@ void
 THCudaTensor_mean(THCudaTensor *self, THCudaTensor *src, long dim)
 {
   THCudaTensor_sum(self, src, dim);
-  THCudaTensor_div(self, THCudaTensor_nElement(src) / THCudaTensor_size(src, dim));
+  THCudaTensor_div(self, THCudaTensor_size(src, dim));
 }
 
 struct square_functor
