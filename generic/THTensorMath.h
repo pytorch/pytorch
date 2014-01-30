@@ -88,6 +88,10 @@ TH_API void THTensor_(geTensorT)(THTensor *r_, THTensor *ta, THTensor *tb);
 TH_API void THTensor_(neTensorT)(THTensor *r_, THTensor *ta, THTensor *tb);
 TH_API void THTensor_(eqTensorT)(THTensor *r_, THTensor *ta, THTensor *tb);
 
+#if defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_LONG)
+TH_API void THTensor_(abs)(THTensor *r_, THTensor *t);
+#endif
+
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
 
 TH_API void THTensor_(log)(THTensor *r_, THTensor *t);
