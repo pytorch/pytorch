@@ -1,16 +1,50 @@
-# -*- cmake -*-
-
 SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
 
-SET(hdr 
-  THGeneral.h THStorage.h THTensor.h THTensorApply.h
-  THBlas.h THLapack.h THLogAdd.h THRandom.h THVector.h)
-SET(src 
-  THGeneral.c THStorage.c THTensor.c THBlas.c THLapack.c
-  THLogAdd.c THRandom.c
-  THFile.c THDiskFile.c THMemoryFile.c)
+# flags
 
-SET(src ${src} ${hdr})
+# OpenMP support?
+SET(WITH_OPENMP ON CACHE BOOL "OpenMP support if available?")
+IF (APPLE AND CMAKE_COMPILER_IS_GNUCC)
+  EXEC_PROGRAM (uname ARGS -v  OUTPUT_VARIABLE DARWIN_VERSION)
+  STRING (REGEX MATCH "[0-9]+" DARWIN_VERSION ${DARWIN_VERSION})
+  MESSAGE (STATUS "MAC OS Darwin Version: ${DARWIN_VERSION}")
+  IF (DARWIN_VERSION GREATER 9)
+    SET(APPLE_OPENMP_SUCKS 1)
+  ENDIF (DARWIN_VERSION GREATER 9)
+  EXECUTE_PROCESS (COMMAND ${CMAKE_C_COMPILER} -dumpversion
+    OUTPUT_VARIABLE GCC_VERSION)
+  IF (APPLE_OPENMP_SUCKS AND GCC_VERSION VERSION_LESS 4.6.2)
+    MESSAGE(STATUS "Warning: Disabling OpenMP (unstable with this version of GCC)")
+    MESSAGE(STATUS " Install GCC >= 4.6.2 or change your OS to enable OpenMP")
+    SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-unknown-pragmas")
+    SET(WITH_OPENMP OFF CACHE BOOL "OpenMP support if available?" FORCE)
+  ENDIF ()
+ENDIF ()
+
+IF (WITH_OPENMP)
+  FIND_PACKAGE(OpenMP)
+  IF(OPENMP_FOUND)
+    MESSAGE(STATUS "Compiling with OpenMP support")
+    SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
+    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+    SET(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
+  ENDIF(OPENMP_FOUND)
+ENDIF (WITH_OPENMP)
+
+# ARM specific flags
+FIND_PACKAGE(ARM)
+IF (NEON_FOUND)
+  MESSAGE(STATUS "Neon found with compiler flag : -mfpu=neon -D__NEON__")
+  SET(CMAKE_C_FLAGS "-mfpu=neon -D__NEON__ ${CMAKE_C_FLAGS}")
+ENDIF (NEON_FOUND)
+IF (CORTEXA8_FOUND)
+  MESSAGE(STATUS "Cortex-A8 Found with compiler flag : -mcpu=cortex-a8")
+  SET(CMAKE_C_FLAGS "-mcpu=cortex-a8 -fprefetch-loop-arrays ${CMAKE_C_FLAGS}")
+ENDIF (CORTEXA8_FOUND)
+IF (CORTEXA9_FOUND)
+  MESSAGE(STATUS "Cortex-A9 Found with compiler flag : -mcpu=cortex-a9")
+  SET(CMAKE_C_FLAGS "-mcpu=cortex-a9 ${CMAKE_C_FLAGS}")
+ENDIF (CORTEXA9_FOUND)
 
 IF(UNIX)
   INCLUDE(CheckFunctionExists)
@@ -20,8 +54,6 @@ IF(UNIX)
     ADD_DEFINITIONS(-DHAVE_MMAP=1)
   ENDIF(HAVE_MMAP)
 ENDIF(UNIX)
-
-ADD_LIBRARY(TH SHARED ${src})
 
 FIND_PACKAGE(SSE)
 IF(C_SSE2_FOUND)
@@ -36,6 +68,17 @@ ENDIF(C_SSE4_1_FOUND)
 IF(C_SSE4_2_FOUND)
   SET(CMAKE_C_FLAGS "${C_SSE4_2_FLAGS} -DUSE_SSE4_2 ${CMAKE_C_FLAGS}")
 ENDIF(C_SSE4_2_FOUND)
+
+SET(hdr 
+  THGeneral.h THStorage.h THTensor.h THTensorApply.h
+  THBlas.h THLapack.h THLogAdd.h THRandom.h THVector.h)
+SET(src 
+  THGeneral.c THStorage.c THTensor.c THBlas.c THLapack.c
+  THLogAdd.c THRandom.c
+  THFile.c THDiskFile.c THMemoryFile.c)
+
+SET(src ${src} ${hdr})
+ADD_LIBRARY(TH SHARED ${src})
 
 FIND_PACKAGE(BLAS)
 IF(BLAS_FOUND)
@@ -172,8 +215,6 @@ IF (BLAS_FOUND AND BLAS_INSTALL_LIBRARIES)
     Install_Required_Library("${libpath}/libgcc")
   ENDIF()
 ENDIF()
-
-
 
 # Create THConfig.cmake
 GET_TARGET_PROPERTY(TH_OUTPUT_NAME TH LOCATION)
