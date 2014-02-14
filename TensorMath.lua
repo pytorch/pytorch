@@ -1,3 +1,7 @@
+local wrap = require 'cwrap'
+
+require 'torchcwrap'
+
 local interface = wrap.CInterface.new()
 local method = wrap.CInterface.new()
 
@@ -7,121 +11,7 @@ interface:print([[
 #include "utils.h"
                 ]])
 
--- special argument specific to torch package
-local argtypes = {}
-argtypes.LongArg = {
-
-   vararg = true,
-
-   helpname = function(arg)
-               return "(LongStorage | dim1 [dim2...])"
-            end,
-
-   declare = function(arg)
-              return string.format("THLongStorage *arg%d = NULL;", arg.i)
-           end,
-
-   init = function(arg)
-             if arg.default then
-                error('LongArg cannot have a default value')
-             end
-          end,
-   
-   check = function(arg, idx)
-            return string.format("torch_islongargs(L, %d)", idx)
-         end,
-
-   read = function(arg, idx)
-             return string.format("arg%d = torch_checklongargs(L, %d);", arg.i, idx)
-          end,
-   
-   carg = function(arg, idx)
-             return string.format('arg%d', arg.i)
-          end,
-
-   creturn = function(arg, idx)
-                return string.format('arg%d', arg.i)
-             end,
-   
-   precall = function(arg)
-                local txt = {}
-                if arg.returned then
-                   table.insert(txt, string.format('luaT_pushudata(L, arg%d, "torch.LongStorage");', arg.i))
-                end
-                return table.concat(txt, '\n')
-             end,
-
-   postcall = function(arg)
-                 local txt = {}
-                 if arg.creturned then
-                    -- this next line is actually debatable
-                    table.insert(txt, string.format('THLongStorage_retain(arg%d);', arg.i))
-                    table.insert(txt, string.format('luaT_pushudata(L, arg%d, "torch.LongStorage");', arg.i))
-                 end
-                 if not arg.returned and not arg.creturned then
-                    table.insert(txt, string.format('THLongStorage_free(arg%d);', arg.i))
-                 end
-                 return table.concat(txt, '\n')
-              end   
-}
-
-argtypes.charoption = {
-   
-   helpname = function(arg)
-                 if arg.values then
-                    return "(" .. table.concat(arg.values, '|') .. ")"
-                 end
-              end,
-
-   declare = function(arg)
-                local txt = {}
-                table.insert(txt, string.format("const char *arg%d = NULL;", arg.i))
-                if arg.default then
-                   table.insert(txt, string.format("char arg%d_default = '%s';", arg.i, arg.default))
-                end
-                return table.concat(txt, '\n')
-           end,
-
-   init = function(arg)
-             return string.format("arg%d = &arg%d_default;", arg.i, arg.i)
-          end,
-   
-   check = function(arg, idx)
-              local txt = {}
-              local txtv = {}
-              table.insert(txt, string.format('(arg%d = lua_tostring(L, %d)) && (', arg.i, idx))
-              for _,value in ipairs(arg.values) do
-                 table.insert(txtv, string.format("*arg%d == '%s'", arg.i, value))
-              end
-              table.insert(txt, table.concat(txtv, ' || '))
-              table.insert(txt, ')')              
-              return table.concat(txt, '')
-         end,
-
-   read = function(arg, idx)
-          end,
-   
-   carg = function(arg, idx)
-             return string.format('arg%d', arg.i)
-          end,
-
-   creturn = function(arg, idx)
-             end,
-   
-   precall = function(arg)
-             end,
-
-   postcall = function(arg)
-              end   
-}
-
--- both interface & method support these new arguments
-for k,v in pairs(argtypes) do
-   interface.argtypes[k] = v
-   method.argtypes[k] = v
-end
-   
--- also specific to torch: we generate a 'dispatch' function
+-- specific to torch: we generate a 'dispatch' function
 -- first we create a helper function
 -- note that it let the "torch" table on the stack
 interface:print([[

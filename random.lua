@@ -1,3 +1,7 @@
+local wrap = require 'cwrap'
+
+require 'torchcwrap'
+
 local interface = wrap.CInterface.new()
 
 interface:print(
