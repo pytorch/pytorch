@@ -7,7 +7,7 @@
 #include <lua.h>
 #include <lualib.h>
 
-#ifdef LUA_WIN
+#ifdef _WIN32
 #else
 #include <unistd.h>
 #endif

@@ -63,7 +63,7 @@ int torch_islongargs(lua_State *L, int index)
 
 static int torch_isatty(lua_State *L)
 {
-#ifdef LUA_WIN
+#ifdef _WIN32
   lua_pushboolean(L, 0);
 #else
   FILE **fp = (FILE **) luaL_checkudata(L, -1, LUA_FILEHANDLE);
@@ -74,7 +74,7 @@ static int torch_isatty(lua_State *L)
 
 static double real_time()
 {
-#ifdef LUA_WIN
+#ifdef _WIN32
   time_t ltime;
   time(&ltime);
   return (double)(ltime);
