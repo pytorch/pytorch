@@ -178,6 +178,7 @@ THStorage* THStorage_(newWithMapping)(const char *fileName, int isShared)
 THStorage* THStorage_(newWithMapping)(const char *fileName, int isShared)
 {
   THError("Mapped file Storages are not supported on your system");
+  return NULL;
 }
 
 #endif
