@@ -1,28 +1,23 @@
 #include "THGeneral.h"
 #include "THRandom.h"
 
-/* The initial seed. */
-static unsigned long the_initial_seed;
 
 /* Code for the Mersenne Twister random generator.... */
-#define n 624
-#define m 397
-static int left = 1;
-static int initf = 0;
-static unsigned long *next;
-static unsigned long state[n]; /* the array for the state vector  */
-/********************************/
+#define n _MERSENNE_STATE_N
+#define m _MERSENNE_STATE_M
+mersenne_state new_state()
+{
+    mersenne_state s;
+    s.left = 1;
+    s.initf = 0;
+    s.normal_is_valid = 0;
+    return s;
+}
 
-/* For normal distribution */
-static double normal_x;
-static double normal_y;
-static double normal_rho;
-static int normal_is_valid = 0;
-
-unsigned long THRandom_seed()
+unsigned long THRandom_seed(mersenne_state * _mersenne)
 {
   unsigned long s = (unsigned long)time(0);
-  THRandom_manualSeed(s);
+  THRandom_manualSeed(_mersenne, s);
   return s;
 }
 
@@ -86,46 +81,46 @@ unsigned long THRandom_seed()
 #define TWIST(u,v) ((MIXBITS(u,v) >> 1) ^ ((v)&1UL ? MATRIX_A : 0UL))
 /*********************************************************** That's it. */
 
-void THRandom_manualSeed(unsigned long the_seed_)
+void THRandom_manualSeed(mersenne_state * _mersenne, unsigned long the_seed_)
 {
   int j;
-  the_initial_seed = the_seed_;
-  state[0]= the_initial_seed & 0xffffffffUL;
+  _mersenne->the_initial_seed = the_seed_;
+  _mersenne->state[0] = _mersenne->the_initial_seed & 0xffffffffUL;
   for(j = 1; j < n; j++)
   {
-    state[j] = (1812433253UL * (state[j-1] ^ (state[j-1] >> 30)) + j); 
+    _mersenne->state[j] = (1812433253UL * (_mersenne->state[j-1] ^ (_mersenne->state[j-1] >> 30)) + j); 
     /* See Knuth TAOCP Vol2. 3rd Ed. P.106 for multiplier. */
     /* In the previous versions, mSBs of the seed affect   */
     /* only mSBs of the array state[].                        */
     /* 2002/01/09 modified by makoto matsumoto             */
-    state[j] &= 0xffffffffUL;  /* for >32 bit machines */
+    _mersenne->state[j] &= 0xffffffffUL;  /* for >32 bit machines */
   }
-  left = 1;
-  initf = 1;
+  _mersenne->left = 1;
+  _mersenne->initf = 1;
 }
 
-unsigned long THRandom_initialSeed()
+unsigned long THRandom_initialSeed(mersenne_state * _mersenne)
 {
-  if(initf == 0)
+  if(_mersenne->initf == 0)
   {
-    THRandom_seed();
+    THRandom_seed(_mersenne);
   }
 
-  return the_initial_seed;
+  return _mersenne->the_initial_seed;
 }
 
-void THRandom_nextState()
+void THRandom_nextState(mersenne_state * _mersenne)
 {
-  unsigned long *p=state;
+  unsigned long *p = _mersenne->state;
   int j;
 
   /* if init_genrand() has not been called, */
   /* a default initial seed is used         */
-  if(initf == 0)
-    THRandom_seed();
+  if(_mersenne->initf == 0)
+    THRandom_seed(_mersenne);
 
-  left = n;
-  next = state;
+  _mersenne->left = n;
+  _mersenne->next = _mersenne->state;
     
   for(j = n-m+1; --j; p++) 
     *p = p[m] ^ TWIST(p[0], p[1]);
@@ -133,16 +128,16 @@ void THRandom_nextState()
   for(j = m; --j; p++) 
     *p = p[m-n] ^ TWIST(p[0], p[1]);
 
-  *p = p[m-n] ^ TWIST(p[0], state[0]);
+  *p = p[m-n] ^ TWIST(p[0], p[0]);
 }
 
-unsigned long THRandom_random()
+unsigned long THRandom_random(mersenne_state * _mersenne)
 {
   unsigned long y;
 
-  if (--left == 0)
-    THRandom_nextState();
-  y = *next++;
+  if (--(_mersenne->left) == 0)
+    THRandom_nextState(_mersenne);
+  y = *((_mersenne->next)++);
   
   /* Tempering */
   y ^= (y >> 11);
@@ -154,14 +149,14 @@ unsigned long THRandom_random()
 }
 
 /* generates a random number on [0,1)-double-interval */
-static double __uniform__()
+static double __uniform__(mersenne_state * _mersenne)
 {
   unsigned long y;
 
-  if(--left == 0)
-    THRandom_nextState();
-  y = *next++;
-
+  if (--(_mersenne->left) == 0)
+    THRandom_nextState(_mersenne);
+  y = *((_mersenne->next)++);
+  
   /* Tempering */
   y ^= (y >> 11);
   y ^= (y << 7) & 0x9d2c5680UL;
@@ -180,78 +175,79 @@ static double __uniform__()
 
 *********************************************************/
 
-double THRandom_uniform(double a, double b)
+double THRandom_uniform(mersenne_state * _mersenne, double a, double b)
 {
-  return(__uniform__() * (b - a) + a);
+  return(__uniform__(_mersenne) * (b - a) + a);
 }
 
-double THRandom_normal(double mean, double stdv)
+double THRandom_normal(mersenne_state * _mersenne, double mean, double stdv)
 {
   THArgCheck(stdv > 0, 2, "standard deviation must be strictly positive");
 
-  if(!normal_is_valid)
+  /* This is known as the Box-Muller method */
+  if(!_mersenne->normal_is_valid)
   {
-    normal_x = __uniform__();
-    normal_y = __uniform__();
-    normal_rho = sqrt(-2. * log(1.0-normal_y));
-    normal_is_valid = 1;
+    _mersenne->normal_x = __uniform__(_mersenne);
+    _mersenne->normal_y = __uniform__(_mersenne);
+    _mersenne->normal_rho = sqrt(-2. * log(1.0-_mersenne->normal_y));
+    _mersenne->normal_is_valid = 1;
   }
   else
-    normal_is_valid = 0;
+    _mersenne->normal_is_valid = 0;
   
-  if(normal_is_valid)
-    return normal_rho*cos(2.*M_PI*normal_x)*stdv+mean;
+  if(_mersenne->normal_is_valid)
+    return _mersenne->normal_rho*cos(2.*M_PI*_mersenne->normal_x)*stdv+mean;
   else
-    return normal_rho*sin(2.*M_PI*normal_x)*stdv+mean;
+    return _mersenne->normal_rho*sin(2.*M_PI*_mersenne->normal_x)*stdv+mean;
 }
 
-double THRandom_exponential(double lambda)
+double THRandom_exponential(mersenne_state * _mersenne, double lambda)
 {
-  return(-1. / lambda * log(1-__uniform__()));
+  return(-1. / lambda * log(1-__uniform__(_mersenne)));
 }
 
-double THRandom_cauchy(double median, double sigma)
+double THRandom_cauchy(mersenne_state * _mersenne, double median, double sigma)
 {
-  return(median + sigma * tan(M_PI*(__uniform__()-0.5)));
+  return(median + sigma * tan(M_PI*(__uniform__(_mersenne)-0.5)));
 }
 
 /* Faut etre malade pour utiliser ca.
    M'enfin. */
-double THRandom_logNormal(double mean, double stdv)
+double THRandom_logNormal(mersenne_state * _mersenne, double mean, double stdv)
 {
   double zm = mean*mean;
   double zs = stdv*stdv;
   THArgCheck(stdv > 0, 2, "standard deviation must be strictly positive");
-  return(exp(THRandom_normal(log(zm/sqrt(zs + zm)), sqrt(log(zs/zm+1)) )));
+  return(exp(THRandom_normal(_mersenne, log(zm/sqrt(zs + zm)), sqrt(log(zs/zm+1)) )));
 }
 
-int THRandom_geometric(double p)
+int THRandom_geometric(mersenne_state * _mersenne, double p)
 {
   THArgCheck(p > 0 && p < 1, 1, "must be > 0 and < 1");
-  return((int)(log(1-__uniform__()) / log(p)) + 1);
+  return((int)(log(1-__uniform__(_mersenne)) / log(p)) + 1);
 }
 
-int THRandom_bernoulli(double p)
+int THRandom_bernoulli(mersenne_state * _mersenne, double p)
 {
   THArgCheck(p >= 0 && p <= 1, 1, "must be >= 0 and <= 1");
-  return(__uniform__() <= p);
+  return(__uniform__(_mersenne) <= p);
 }
 
 /* returns the random number state */
-void THRandom_getState(unsigned long *_state, long *offset, long *_left)
+void THRandom_getState(mersenne_state * _mersenne, unsigned long *_state, long *offset, long *_left)
 {
-  if(initf == 0)
-    THRandom_seed();
-  memmove(_state, state, n*sizeof(long));
-  *offset = (long)(next - state);
-  *_left = left;
+  if(_mersenne->initf == 0)
+    THRandom_seed(_mersenne);
+  memmove(_state, _mersenne->state, n*sizeof(long));
+  *offset = (long)(_mersenne->next - _mersenne->state);
+  *_left = _mersenne->left;
 }
 
 /* sets the random number state */
-void THRandom_setState(unsigned long *_state, long offset, long _left)
+void THRandom_setState(mersenne_state * _mersenne, unsigned long *_state, long offset, long _left)
 {
-  memmove(state, _state, n*sizeof(long));
-  next = state + offset;
-  left = _left;
-  initf = 1;
+  memmove(_mersenne->state, _state, n*sizeof(long));
+  _mersenne->next = _mersenne->state + offset;
+  _mersenne->left = _left;
+  _mersenne->initf = 1;
 }

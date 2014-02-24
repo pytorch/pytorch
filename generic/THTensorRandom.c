@@ -2,68 +2,68 @@
 #define TH_GENERIC_FILE "generic/THTensorRandom.c"
 #else
 
-TH_API void THTensor_(random)(THTensor *self)
+TH_API void THTensor_(random)(mersenne_state *_mersenne, THTensor *self)
 {
 #if defined(TH_REAL_IS_BYTE)
-  TH_TENSOR_APPLY(real, self, *self_data = (unsigned char)(THRandom_random() % (UCHAR_MAX+1)););
+  TH_TENSOR_APPLY(real, self, *self_data = (unsigned char)(THRandom_random(_mersenne) % (UCHAR_MAX+1)););
 #elif defined(TH_REAL_IS_CHAR)
-  TH_TENSOR_APPLY(real, self, *self_data = (char)(THRandom_random() % (CHAR_MAX+1)););
+  TH_TENSOR_APPLY(real, self, *self_data = (char)(THRandom_random(_mersenne) % (CHAR_MAX+1)););
 #elif defined(TH_REAL_IS_SHORT)
-  TH_TENSOR_APPLY(real, self, *self_data = (short)(THRandom_random() % (SHRT_MAX+1)););
+  TH_TENSOR_APPLY(real, self, *self_data = (short)(THRandom_random(_mersenne) % (SHRT_MAX+1)););
 #elif defined(TH_REAL_IS_INT)
-  TH_TENSOR_APPLY(real, self, *self_data = (int)(THRandom_random() % (INT_MAX+1UL)););
+  TH_TENSOR_APPLY(real, self, *self_data = (int)(THRandom_random(_mersenne) % (INT_MAX+1UL)););
 #elif defined(TH_REAL_IS_LONG)
-  TH_TENSOR_APPLY(real, self, *self_data = (long)(THRandom_random() % (LONG_MAX+1UL)););
+  TH_TENSOR_APPLY(real, self, *self_data = (long)(THRandom_random(_mersenne) % (LONG_MAX+1UL)););
 #elif defined(TH_REAL_IS_FLOAT)
-  TH_TENSOR_APPLY(real, self, *self_data = (float)(THRandom_random() % ((1UL << FLT_MANT_DIG)+1)););
+  TH_TENSOR_APPLY(real, self, *self_data = (float)(THRandom_random(_mersenne) % ((1UL << FLT_MANT_DIG)+1)););
 #elif defined(TH_REAL_IS_DOUBLE)
-  TH_TENSOR_APPLY(real, self, *self_data = (float)(THRandom_random() % ((1UL << DBL_MANT_DIG)+1)););
+  TH_TENSOR_APPLY(real, self, *self_data = (float)(THRandom_random(_mersenne) % ((1UL << DBL_MANT_DIG)+1)););
 #else
 #error "Unknown type"
 #endif
 }
 
-TH_API void THTensor_(geometric)(THTensor *self, double p)
+TH_API void THTensor_(geometric)(mersenne_state *_mersenne, THTensor *self, double p)
 {
-  TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_geometric(p););
+  TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_geometric(_mersenne, p););
 }
 
-TH_API void THTensor_(bernoulli)(THTensor *self, double p)
+TH_API void THTensor_(bernoulli)(mersenne_state *_mersenne, THTensor *self, double p)
 {
-  TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_bernoulli(p););
+  TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_bernoulli(_mersenne, p););
 }
 
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
 
-TH_API void THTensor_(uniform)(THTensor *self, double a, double b)
+TH_API void THTensor_(uniform)(mersenne_state *_mersenne, THTensor *self, double a, double b)
 {
-  TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_uniform(a, b););
+  TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_uniform(_mersenne, a, b););
 }
 
-TH_API void THTensor_(normal)(THTensor *self, double mean, double stdv)
+TH_API void THTensor_(normal)(mersenne_state *_mersenne, THTensor *self, double mean, double stdv)
 {
-  TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_normal(mean, stdv););
+  TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_normal(_mersenne, mean, stdv););
 }
 
-TH_API void THTensor_(exponential)(THTensor *self, double lambda)
+TH_API void THTensor_(exponential)(mersenne_state *_mersenne, THTensor *self, double lambda)
 {
-  TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_exponential(lambda););
+  TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_exponential(_mersenne, lambda););
 }
 
-TH_API void THTensor_(cauchy)(THTensor *self, double median, double sigma)
+TH_API void THTensor_(cauchy)(mersenne_state *_mersenne, THTensor *self, double median, double sigma)
 {
-  TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_cauchy(median, sigma););
+  TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_cauchy(_mersenne, median, sigma););
 }
 
-TH_API void THTensor_(logNormal)(THTensor *self, double mean, double stdv)
+TH_API void THTensor_(logNormal)(mersenne_state *_mersenne, THTensor *self, double mean, double stdv)
 {
-  TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_logNormal(mean, stdv););
+  TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_logNormal(_mersenne, mean, stdv););
 }
 
 #endif
 
 #if defined(TH_REAL_IS_LONG)
-TH_API void THTensor_(getRNGState)(THTensor *self)
+TH_API void THTensor_(getRNGState)(mersenne_state * _mersenne, THTensor *self)
 {
   unsigned long *data;
   long *offset;
@@ -74,10 +74,10 @@ TH_API void THTensor_(getRNGState)(THTensor *self)
   offset = (long *)data+624;
   left = (long *)data+625;
 
-  THRandom_getState(data,offset,left);
+  THRandom_getState(_mersenne, data, offset, left);
 }
 
-TH_API void THTensor_(setRNGState)(THTensor *self)
+TH_API void THTensor_(setRNGState)(mersenne_state * _mersenne, THTensor *self)
 {
   unsigned long *data;
   long *offset;
@@ -88,7 +88,7 @@ TH_API void THTensor_(setRNGState)(THTensor *self)
   offset = (long *)(data+624);
   left = (long *)(data+625);
 
-  THRandom_setState(data,*offset,*left);
+  THRandom_setState(_mersenne, data, *offset, *left);
 }
 
 #endif
