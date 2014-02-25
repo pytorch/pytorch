@@ -5,7 +5,7 @@
 /* Code for the Mersenne Twister random generator.... */
 #define n _MERSENNE_STATE_N
 #define m _MERSENNE_STATE_M
-mersenne_state* THRandomGenerator_new()
+THGenerator* THGenerator_new()
 {
     mersenne_state *self = THAlloc(sizeof(mersenne_state));
     self->left = 1;
@@ -14,7 +14,7 @@ mersenne_state* THRandomGenerator_new()
     return self;
 }
 
-void THRandomGenerator_free(THRandomGenerator *self)
+void THGenerator_free(THGenerator *self)
 {
     THFree(self);
 }

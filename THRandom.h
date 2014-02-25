@@ -21,7 +21,7 @@ typedef struct mersenne_state {
   int normal_is_valid; /* = 0; */
 } mersenne_state;
 
-#define THRandomGenerator mersenne_state
+/* #define THRandomGenerator mersenne_state */
 #define THGenerator mersenne_state
 #define torch_Generator "torch.Generator"
 
