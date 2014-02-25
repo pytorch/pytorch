@@ -21,6 +21,10 @@ typedef struct mersenne_state {
   int normal_is_valid; /* = 0; */
 } mersenne_state;
 
+#define THRandomGenerator mersenne_state
+#define THGenerator mersenne_state
+#define torch_Generator "torch.Generator"
+
 /* Initializes the random number generator with the current time (granularity: seconds) and returns the seed. */
 TH_API unsigned long THRandom_seed(mersenne_state * _mersenne);
 

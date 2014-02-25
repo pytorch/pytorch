@@ -5,13 +5,18 @@
 /* Code for the Mersenne Twister random generator.... */
 #define n _MERSENNE_STATE_N
 #define m _MERSENNE_STATE_M
-mersenne_state new_state()
+mersenne_state* THRandomGenerator_new()
 {
-    mersenne_state s;
-    s.left = 1;
-    s.initf = 0;
-    s.normal_is_valid = 0;
-    return s;
+    mersenne_state *self = THAlloc(sizeof(mersenne_state));
+    self->left = 1;
+    self->initf = 0;
+    self->normal_is_valid = 0;
+    return self;
+}
+
+void THRandomGenerator_free(THRandomGenerator *self)
+{
+    THFree(self);
 }
 
 unsigned long THRandom_seed(mersenne_state * _mersenne)
