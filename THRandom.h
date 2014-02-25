@@ -25,6 +25,10 @@ typedef struct mersenne_state {
 #define THGenerator mersenne_state
 #define torch_Generator "torch.Generator"
 
+TH_API THGenerator * THGenerator_new();
+
+TH_API void THGenerator_free(THGenerator *gen);
+
 /* Initializes the random number generator with the current time (granularity: seconds) and returns the seed. */
 TH_API unsigned long THRandom_seed(mersenne_state * _mersenne);
 
