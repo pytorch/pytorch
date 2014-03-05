@@ -133,7 +133,7 @@ void THRandom_nextState(THGenerator *_generator)
   for(j = m; --j; p++) 
     *p = p[m-n] ^ TWIST(p[0], p[1]);
 
-  *p = p[m-n] ^ TWIST(p[0], p[0]);
+  *p = p[m-n] ^ TWIST(p[0], _generator->state[0]);
 }
 
 unsigned long THRandom_random(THGenerator *_generator)
