@@ -3,7 +3,7 @@
 
 #include "THGeneral.h"
 
-#define _MERSENNE_STATE_N 624 
+#define _MERSENNE_STATE_N 624
 #define _MERSENNE_STATE_M 397
 typedef struct THGenerator {
   /* The initial seed. */
@@ -13,7 +13,7 @@ typedef struct THGenerator {
   unsigned long *next;
   unsigned long state[_MERSENNE_STATE_N]; /* the array for the state vector  */
   /********************************/
-  
+
   /* For normal distribution */
   double normal_x;
   double normal_y;
@@ -23,8 +23,10 @@ typedef struct THGenerator {
 
 #define torch_Generator "torch.Generator"
 
+/* Create a new random number generator stream */
 TH_API THGenerator * THGenerator_new();
 
+/* Free a random number generator stream */
 TH_API void THGenerator_free(THGenerator *gen);
 
 /* Initializes the random number generator with the current time (granularity: seconds) and returns the seed. */

@@ -7,16 +7,16 @@
 #define m _MERSENNE_STATE_M
 THGenerator* THGenerator_new()
 {
-    THGenerator *self = THAlloc(sizeof(THGenerator));
-    self->left = 1;
-    self->initf = 0;
-    self->normal_is_valid = 0;
-    return self;
+  THGenerator *self = THAlloc(sizeof(THGenerator));
+  self->left = 1;
+  self->initf = 0;
+  self->normal_is_valid = 0;
+  return self;
 }
 
 void THGenerator_free(THGenerator *self)
 {
-    THFree(self);
+  THFree(self);
 }
 
 unsigned long THRandom_seed(THGenerator *_generator)
@@ -161,7 +161,7 @@ static double __uniform__(THGenerator *_generator)
   if (--(_generator->left) == 0)
     THRandom_nextState(_generator);
   y = *((_generator->next)++);
-  
+
   /* Tempering */
   y ^= (y >> 11);
   y ^= (y << 7) & 0x9d2c5680UL;
