@@ -62,151 +62,148 @@ TH_API void THTensor_(logNormal)(THTensor *self, double mean, double stdv)
   TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_logNormal(mean, stdv););
 }
 
-// update a row of cumulative distribution from prob distribution
+// Generate a set of multinomial samples from rows of multionomial probability distributions.
 // @param:
-//    cum_dist: cumulative probability distribution
-//    prob_dist: probability distribution
-//    row: row of the cum_distr to be updated   
-static void THTensor_(update_cum_row)(THTensor* cum_dist, THTensor* prob_dist, int row)
-{
-  long n_categories = THTensor_(size)(cum_dist, 1);
-  real sum = 0;
-  int j;
-  for (j=0; j<n_categories; j++)
-  {
-    sum += THStorage_(get)(prob_dist->storage, prob_dist->storageOffset+row*prob_dist->stride[0]+j*prob_dist->stride[1]);
-    THStorage_(set)(cum_dist->storage, cum_dist->storageOffset+row*cum_dist->stride[0]+j*cum_dist->stride[1], sum);
-  }
-}
-
-
-// generate cumulative distribution from probability distribution
-// @param:
-//   prob_dist: probability distribution (rows sum to one)
-static THTensor* THTensor_(generate_cum_matrix)(THTensor *prob_dist)
-{
-  THTensor *cum_dist = THTensor_(new)();
-  THTensor_(resizeAs)(cum_dist, prob_dist);
-
-  // Get normalized cumulative distribution from prob distribution
-  int i;
-  for (i=0; i<THTensor_(size)(cum_dist, 0); i++)
-  {
-    THTensor_(update_cum_row)(cum_dist, prob_dist, i);
-  }
-  return cum_dist;
-}
-
-// Do a binary search for the slot in which the prob falls
-// @params:
-//     cum_width: width of the cum_distr
-//     row: the row of the cum_distr matrix to search where the prob falls
-//     uniform_sample: a sample from an uniform distribution U ~ [0, 1]
-// @return: the slot in which the prob falls, 
-//     ie cum_distr[row][slot-1] < prob < cum_distr[row][slot]
-static int THTensor_(binarySearch)(THTensor* cum_dist, int row, real uniform_sample)
-{
-    int left_pointer = 0;
-    int right_pointer = (int)THTensor_(size)(cum_dist, 1);
-    int mid_pointer;
-    real cum_prob;
-    while(right_pointer - left_pointer > 0)
-    {
-        mid_pointer = left_pointer + (right_pointer - left_pointer) / 2;
-        cum_prob = THStorage_(get)(cum_dist->storage, cum_dist->storageOffset+row*cum_dist->stride[0]+mid_pointer*cum_dist->stride[1]);
-        printf("pointer, tmp : %d %d %d : %f > %f", left_pointer, right_pointer, mid_pointer, uniform_sample, cum_prob);
-        if (cum_prob < uniform_sample) 
-        {
-          printf(" search right\n");
-          left_pointer = mid_pointer + 1;
-        }
-        else
-        {
-          printf(" search left\n");
-          right_pointer = mid_pointer;
-        }
-    }
-    
-    printf("return %d \n", left_pointer);
-    return left_pointer;
-}
-
-
-// Generate a subset of random samples from the prob_dist
-// @param:
-//     h: height of multinomial matrix, each row in matrix represents an individual experiment
-//     prob_width: width of prob_distr
-//     num_samples: number of samples to sample from the multinomial distribution
-//     with_replacement: 1 for true, 0 for false
+//     self: a matrix of sampled indices
+//     prob_dist: a matrix with rows of probability distributions.
+//       Rows do not need to sum to one since we do this (not in place) to build the cumulative distribution
+//     n_samples: number of samples per row sampled from the multinomial distribution
+//     with_replacement: sample with or without replacement
+//     thread_safe: thread safe version doesn't use a static declaration
 // @return:
-//     a sample of experts from the multinomial probability distribution
+//     a THLongTensor matrix of samples of category indices
 TH_API void THTensor_(multinomial)(THLongTensor *self, THTensor *prob_dist, int n_sample, int with_replacement)
 {
-  printf("n_sample : %d\n", n_sample);
-  THTensor* cum_dist = THTensor_(generate_cum_matrix)(prob_dist);    
-
-  // Generate 2d samples randomly from a uniform distribution ~ [0, 1]
-  THTensor* uniform_samples = THTensor_(new)();
-  long size[2] = {THTensor_(size)(cum_dist, 0), (long)n_sample};
-  THLongStorage* sample_size = THLongStorage_newWithData(size, 2);
-  THTensor_(rand)(uniform_samples, sample_size);
+  printf("n_sample : %d\n", n_sample);  
+  long n_dist = THTensor_(size)(prob_dist, 0);
+  long n_categories = THTensor_(size)(prob_dist, 1);
   
-  // multinomial samples
-  THLongTensor_resize(self, sample_size, NULL);
-  
-  // Allows drawn sample to be placed back into the pool for drawing again. ie with replacement
-  int i,j;
-  if (with_replacement)
+  if (!with_replacement)
   {
-    for (i=0; i<THTensor_(size)(cum_dist, 0); i++)
+    THArgCheck((!with_replacement) && (n_sample <= n_categories), 2, \
+    "cannot sample n_sample > prob_dist:size(1) samples without replacement");
+  }
+  
+  // cumulative probability distribution vector
+  THTensor* cum_dist = THTensor_(newWithSize1d)(n_categories);
+    
+  // will contain multinomial samples (category indices to be returned)
+  THLongTensor_resize2d(self, n_dist , n_sample);
+  
+  int i,j,k;
+  for (i=0; i<n_dist; i++)
+  {
+    // Get normalized cumulative distribution from prob distribution
+    real sum = 0;
+    for (j=0; j<n_categories; j++)
     {
-      for (j=0; j<n_sample; j++)
+      sum += THStorage_(get)( \
+        prob_dist->storage, \
+        prob_dist->storageOffset+i*prob_dist->stride[0]+j*prob_dist->stride[1] \
+      );
+      THStorage_(set)( 
+        cum_dist->storage, \
+        cum_dist->storageOffset+j*cum_dist->stride[0], \
+        sum \
+      );
+    }
+    // normalize cumulative probability distribution so that last val is 1 
+    // i.e. dosen't assume original prob_dist row sums to one
+    if ( (sum > 0) || ( ( sum < 1.00001) && (sum > 0.99999) ) )  
+    {
+      for (j=0; j<n_categories; j++)
       {
-        real uniform_sample = THStorage_(get)(uniform_samples->storage, uniform_samples->storageOffset+i*uniform_samples->stride[0]+j*uniform_samples->stride[1]);
-        // increment sample index for lua compat
-        THLongStorage_set(self->storage, self->storageOffset+i*self->stride[0]+j*self->stride[1], 1 + THTensor_(binarySearch)(cum_dist, i, uniform_sample));
-        if (DEBUG)
-        {
-          printf("(%d, %d): random_sample %f in slot %ld \n", i, j, \
-          uniform_sample, THLongStorage_get(self->storage, self->storageOffset+i*self->stride[0]+j*self->stride[1]));
-        }                                     
+        THTensor_(data)(cum_dist)[j*cum_dist->stride[0]] /= sum;
+        printf("%d, %d, cum_prob: %f \n", i, j, THTensor_(data)(cum_dist)[j*cum_dist->stride[0]]);
       }
     }
-  }
-  /**
-  // Once sample is drawn, it cannot be drawn again. ie sample without replacement
-  else
-  {
-      for (i=0; i<h; i++)
-      {   
-          for (j=0; j<num_samples; j++)
+    
+    for (j=0; j<n_sample; j++)
+    {
+      // sample a probability mass from a uniform distribution
+      double uniform_sample = THRandom_uniform(0, 1);      
+      // Do a binary search for the slot in which the prob falls
+      // ie cum_dist[row][slot-1] < uniform_prob < cum_distr[row][slot]
+      int left_pointer = 0;
+      int right_pointer = n_categories;
+      int mid_pointer;
+      real cum_prob;
+      while(right_pointer - left_pointer > 0)
+      {
+          mid_pointer = left_pointer + (right_pointer - left_pointer) / 2;
+          cum_prob = THStorage_(get)( \
+            cum_dist->storage, \
+            cum_dist->storageOffset+mid_pointer*cum_dist->stride[0] \
+          );
+          printf("pointer, tmp : %d %d %d : %f > %f", left_pointer, right_pointer, mid_pointer, uniform_sample, cum_prob);
+          if (cum_prob < uniform_sample) 
           {
-              if (DEBUG)
-              {
-                  printf("==before==\n");
-                  printDouble(h, prob_width+1, cum_distr);
-              } 
-          
-              int sample = binarySearch(cum_distr, prob_width + 1, i, random_samples[i][j]);
-              // increase all the sample index by 1
-              self[i][j] = sample + 1;
-              prob_distr[i][sample] = 0;
-              update_cum_row(cum_distr, prob_distr, i, prob_width);
-              
-              if (DEBUG)
-              {
-                  printf("==after==");
-                  printf("(%d, %d): random_sample %f in slot %d \n", i, j, \
-                  random_samples[i][j], self[i][j]);
-                  printDouble(h, prob_width, prob_distr);
-                  printDouble(h, prob_width+1, cum_distr);
-              } 
+            printf(" search right\n");
+            left_pointer = mid_pointer + 1;
+          }
+          else
+          {
+            printf(" search left\n");
+            right_pointer = mid_pointer;
           }
       }
-  }**/
-  
+      int sample_idx = left_pointer;
+      printf("return %d \n", left_pointer);
+      
+       // store in result tensor and increment sample index for lua compat
+      THLongStorage_set( \
+        self->storage, \
+        self->storageOffset+i*self->stride[0]+j*self->stride[1], \
+        sample_idx + 1 \
+      );
+      
+      // Once a sample is drawn, it cannot be drawn again. ie sample without replacement
+      if (!with_replacement)
+      {
+        // update cumulative distribution so that sample cannot be drawn again
+        real new_val = 0;
+        if (sample_idx != 0)
+        {
+          new_val = THStorage_(get)( \
+            cum_dist->storage, \
+            cum_dist->storageOffset+(sample_idx-1)*cum_dist->stride[0] \
+          );
+        }
+        // marginal cumulative mass (i.e. original probability) of sample
+        real diff = THStorage_(get)( \
+          cum_dist->storage, \
+          cum_dist->storageOffset+sample_idx*cum_dist->stride[0] \
+        ) - new_val;
+        // new sum of marginals is not one anymore...
+        real sum = 1.0 - diff;
+        for (k=0; k<n_categories; k++)
+        {
+          new_val = THStorage_(get)( \
+            cum_dist->storage, \
+            cum_dist->storageOffset+k*cum_dist->stride[0] \
+          );
+          if (k >= sample_idx) 
+          {
+            // remove sampled probability mass from later cumulative probabilities
+            new_val -= diff;
+          }
+          // make total marginals sum to one
+          new_val /= sum;
+          THStorage_(set)( \
+            cum_dist->storage, \
+            cum_dist->storageOffset+k*cum_dist->stride[0], \
+            new_val \
+          );
+        }
+      }
+      if (DEBUG)
+      {
+        printf("(%d, %d): random_sample %f in slot %ld \n", i, j, \
+        uniform_sample, THLongStorage_get(self->storage, self->storageOffset+i*self->stride[0]+j*self->stride[1]));
+      }                                     
+    }
+  }
   THTensor_(free)(cum_dist);
-  THTensor_(free)(uniform_samples);
 }
 
 #endif
