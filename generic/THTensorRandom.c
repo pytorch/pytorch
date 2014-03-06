@@ -2,8 +2,6 @@
 #define TH_GENERIC_FILE "generic/THTensorRandom.c"
 #else
 
-#define DEBUG 1
-
 TH_API void THTensor_(random)(THTensor *self)
 {
 #if defined(TH_REAL_IS_BYTE)
@@ -62,21 +60,18 @@ TH_API void THTensor_(logNormal)(THTensor *self, double mean, double stdv)
   TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_logNormal(mean, stdv););
 }
 
-// Generate a set of multinomial samples from rows of multionomial probability distributions.
-// @param:
-//     self: a matrix of sampled indices
-//     prob_dist: a matrix with rows of probability distributions.
-//       Rows do not need to sum to one since we do this (not in place) to build the cumulative distribution
-//     n_samples: number of samples per row sampled from the multinomial distribution
-//     with_replacement: sample with or without replacement
-//     thread_safe: thread safe version doesn't use a static declaration
-// @return:
-//     a THLongTensor matrix of samples of category indices
 TH_API void THTensor_(multinomial)(THLongTensor *self, THTensor *prob_dist, int n_sample, int with_replacement)
 {
-  printf("n_sample : %d\n", n_sample);  
+  int start_dim = THTensor_(nDimension)(prob_dist);
+  if (start_dim == 1)
+  {
+    THTensor_(resize2d)(prob_dist, 1, THTensor_(size)(prob_dist, 0));
+  }
+  
   long n_dist = THTensor_(size)(prob_dist, 0);
   long n_categories = THTensor_(size)(prob_dist, 1);
+  
+  THArgCheck(n_sample > 0, 2, "cannot sample n_sample < 0 samples");
   
   if (!with_replacement)
   {
@@ -107,6 +102,7 @@ TH_API void THTensor_(multinomial)(THLongTensor *self, THTensor *prob_dist, int 
         sum \
       );
     }
+    THArgCheck((sum > 0), 2, "invalid multinomial distribution (sum of probabilities <= 0)");
     // normalize cumulative probability distribution so that last val is 1 
     // i.e. dosen't assume original prob_dist row sums to one
     if ( (sum > 0) || ( ( sum < 1.00001) && (sum > 0.99999) ) )  
@@ -114,7 +110,6 @@ TH_API void THTensor_(multinomial)(THLongTensor *self, THTensor *prob_dist, int 
       for (j=0; j<n_categories; j++)
       {
         THTensor_(data)(cum_dist)[j*cum_dist->stride[0]] /= sum;
-        printf("%d, %d, cum_prob: %f \n", i, j, THTensor_(data)(cum_dist)[j*cum_dist->stride[0]]);
       }
     }
     
@@ -135,26 +130,22 @@ TH_API void THTensor_(multinomial)(THLongTensor *self, THTensor *prob_dist, int 
             cum_dist->storage, \
             cum_dist->storageOffset+mid_pointer*cum_dist->stride[0] \
           );
-          printf("pointer, tmp : %d %d %d : %f > %f", left_pointer, right_pointer, mid_pointer, uniform_sample, cum_prob);
           if (cum_prob < uniform_sample) 
           {
-            printf(" search right\n");
             left_pointer = mid_pointer + 1;
           }
           else
           {
-            printf(" search left\n");
             right_pointer = mid_pointer;
           }
       }
       int sample_idx = left_pointer;
-      printf("return %d \n", left_pointer);
       
-       // store in result tensor and increment sample index for lua compat
+       // store in result tensor (will be incremented for lua compat by wrapper)
       THLongStorage_set( \
         self->storage, \
         self->storageOffset+i*self->stride[0]+j*self->stride[1], \
-        sample_idx + 1 \
+        sample_idx \
       );
       
       // Once a sample is drawn, it cannot be drawn again. ie sample without replacement
@@ -195,15 +186,17 @@ TH_API void THTensor_(multinomial)(THLongTensor *self, THTensor *prob_dist, int 
             new_val \
           );
         }
-      }
-      if (DEBUG)
-      {
-        printf("(%d, %d): random_sample %f in slot %ld \n", i, j, \
-        uniform_sample, THLongStorage_get(self->storage, self->storageOffset+i*self->stride[0]+j*self->stride[1]));
-      }                                     
+      }                                
     }
   }
+  
   THTensor_(free)(cum_dist);
+  
+  if (start_dim == 1)
+  {
+    THLongTensor_resize1d(self, n_sample);
+    THTensor_(resize1d)(prob_dist, n_categories);
+  }
 }
 
 #endif
