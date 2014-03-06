@@ -93,7 +93,7 @@ void THRandom_manualSeed(THGenerator *_generator, unsigned long the_seed_)
   _generator->state[0] = _generator->the_initial_seed & 0xffffffffUL;
   for(j = 1; j < n; j++)
   {
-    _generator->state[j] = (1812433253UL * (_generator->state[j-1] ^ (_generator->state[j-1] >> 30)) + j); 
+    _generator->state[j] = (1812433253UL * (_generator->state[j-1] ^ (_generator->state[j-1] >> 30)) + j);
     /* See Knuth TAOCP Vol2. 3rd Ed. P.106 for multiplier. */
     /* In the previous versions, mSBs of the seed affect   */
     /* only mSBs of the array state[].                        */
