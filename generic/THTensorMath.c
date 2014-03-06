@@ -216,12 +216,11 @@ void THTensor_(add)(THTensor *r_, THTensor *t, real value)
   if (THTensor_(isContiguous)(r_) && THTensor_(isContiguous)(t) && THTensor_(nElement)(r_) == THTensor_(nElement)(t)) {
       real *tp = THTensor_(data)(t);
       real *rp = THTensor_(data)(r_);
+      long sz = THTensor_(nElement)(t);
       long i;
-      #pragma omp parallel for if(THTensor_(nElement)(t) > TH_OMP_OVERHEAD_THRESHOLD) private(i) 
-      for (i=0; i<THTensor_(nElement)(t); i++)
-      {
+      #pragma omp parallel for if(sz > TH_OMP_OVERHEAD_THRESHOLD) private(i)
+      for (i=0; i<sz; i++)
           rp[i] = tp[i] + value;
-      }
   } else {
       TH_TENSOR_APPLY2(real, r_, real, t, *r__data = *t_data + value;);
   }
@@ -233,12 +232,11 @@ void THTensor_(mul)(THTensor *r_, THTensor *t, real value)
   if (THTensor_(isContiguous)(r_) && THTensor_(isContiguous)(t) && THTensor_(nElement)(r_) == THTensor_(nElement)(t)) {
       real *tp = THTensor_(data)(t);
       real *rp = THTensor_(data)(r_);
+      long sz = THTensor_(nElement)(t);
       long i;
-      #pragma omp parallel for if(THTensor_(nElement)(t) > TH_OMP_OVERHEAD_THRESHOLD) private(i)  
-      for (i=0; i<THTensor_(nElement)(t); i++)
-      {
+      #pragma omp parallel for if(sz > TH_OMP_OVERHEAD_THRESHOLD) private(i)
+      for (i=0; i<sz; i++)
           rp[i] = tp[i] * value;
-      }
   } else {
       TH_TENSOR_APPLY2(real, r_, real, t, *r__data = *t_data * value;);
   }
@@ -250,12 +248,11 @@ void THTensor_(div)(THTensor *r_, THTensor *t, real value)
   if (THTensor_(isContiguous)(r_) && THTensor_(isContiguous)(t) && THTensor_(nElement)(r_) == THTensor_(nElement)(t)) {
       real *tp = THTensor_(data)(t);
       real *rp = THTensor_(data)(r_);
+      long sz = THTensor_(nElement)(t);
       long i;
-      #pragma omp parallel for if(THTensor_(nElement)(t) > TH_OMP_OVERHEAD_THRESHOLD) private(i)
-      for (i=0; i<THTensor_(nElement)(t); i++)
-      {
+      #pragma omp parallel for if(sz > TH_OMP_OVERHEAD_THRESHOLD) private(i)
+      for (i=0; i<sz; i++)
           rp[i] = tp[i] / value;
-      }
   } else {
       TH_TENSOR_APPLY2(real, r_, real, t, *r__data = *t_data / value;);
   }
@@ -268,12 +265,11 @@ void THTensor_(cadd)(THTensor *r_, THTensor *t, real value, THTensor *src)
       real *tp = THTensor_(data)(t);
       real *sp = THTensor_(data)(src);
       real *rp = THTensor_(data)(r_);
+      long sz = THTensor_(nElement)(t);
       long i;
-      #pragma omp parallel for if(THTensor_(nElement)(t) > TH_OMP_OVERHEAD_THRESHOLD) private(i)
-      for (i=0; i<THTensor_(nElement)(t); i++)
-      {
+      #pragma omp parallel for if(sz > TH_OMP_OVERHEAD_THRESHOLD) private(i)
+      for (i=0; i< sz; i++)
           rp[i] = tp[i] + value * sp[i];
-      }
   } else {
       TH_TENSOR_APPLY3(real, r_, real, t, real, src, *r__data = *t_data + value * *src_data;);
   }
@@ -286,12 +282,11 @@ void THTensor_(cmul)(THTensor *r_, THTensor *t, THTensor *src)
       real *tp = THTensor_(data)(t);
       real *sp = THTensor_(data)(src);
       real *rp = THTensor_(data)(r_);
+      long sz = THTensor_(nElement)(t);
       long i;
-      #pragma omp parallel for if(THTensor_(nElement)(t) > TH_OMP_OVERHEAD_THRESHOLD) private(i) 
-      for (i=0; i<THTensor_(nElement)(t); i++)
-      {
-          rp[i] = tp[i] * sp[i];
-      }
+      #pragma omp parallel for if(sz > TH_OMP_OVERHEAD_THRESHOLD) private(i)
+      for (i=0; i<sz; i++)
+        rp[i] = tp[i] * sp[i];
   } else {
       TH_TENSOR_APPLY3(real, r_, real, t, real, src, *r__data = *t_data * *src_data;);
   }
@@ -304,12 +299,11 @@ void THTensor_(cdiv)(THTensor *r_, THTensor *t, THTensor *src)
       real *tp = THTensor_(data)(t);
       real *sp = THTensor_(data)(src);
       real *rp = THTensor_(data)(r_);
+      long sz = THTensor_(nElement)(t);
       long i;
-      #pragma omp parallel for if(THTensor_(nElement)(t) > TH_OMP_OVERHEAD_THRESHOLD) private(i) 
-      for (i=0; i<THTensor_(nElement)(t); i++)
-      {
-          rp[i] = tp[i] / sp[i];
-      }
+      #pragma omp parallel for if(sz > TH_OMP_OVERHEAD_THRESHOLD) private(i)
+      for (i=0; i<sz; i++)
+        rp[i] = tp[i] / sp[i];
   } else {
       TH_TENSOR_APPLY3(real, r_, real, t, real, src, *r__data = *t_data / *src_data;);
   }
