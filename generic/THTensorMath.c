@@ -1381,6 +1381,12 @@ accreal THTensor_(normall)(THTensor *tensor, real value)
   if(value == 0) {
     TH_TENSOR_APPLY(real, tensor, sum += *tensor_data != 0.0;);
     return sum;
+  } else if(value == 1) {
+    TH_TENSOR_APPLY(real, tensor, sum += fabs(*tensor_data););
+    return sum;
+  } else if(value == 2) {
+    TH_TENSOR_APPLY(real, tensor, accreal z = *tensor_data; sum += z*z;);
+    return sqrt(sum);
   } else {
     TH_TENSOR_APPLY(real, tensor, sum += pow(fabs(*tensor_data), value););
     return pow(sum, 1.0/value);
