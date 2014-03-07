@@ -11,7 +11,7 @@ static void (*torchErrorHandlerFunction)(const char *msg) = defaultTorchErrorHan
 
 void THError(const char *fmt, ...)
 {
-  static char msg[1024];
+  char msg[1024];
   va_list args;
 
   /* vasprintf not standard */
