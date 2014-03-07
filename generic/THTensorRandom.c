@@ -63,13 +63,18 @@ TH_API void THTensor_(logNormal)(THTensor *self, double mean, double stdv)
 TH_API void THTensor_(multinomial)(THLongTensor *self, THTensor *prob_dist, int n_sample, int with_replacement)
 {
   int start_dim = THTensor_(nDimension)(prob_dist);
+  long n_dist;
+  long n_categories;
+  THTensor* cum_dist;
+  int i,j,k;
+  
   if (start_dim == 1)
   {
     THTensor_(resize2d)(prob_dist, 1, THTensor_(size)(prob_dist, 0));
   }
   
-  long n_dist = THTensor_(size)(prob_dist, 0);
-  long n_categories = THTensor_(size)(prob_dist, 1);
+  n_dist = THTensor_(size)(prob_dist, 0);
+  n_categories = THTensor_(size)(prob_dist, 1);
   
   THArgCheck(n_sample > 0, 2, "cannot sample n_sample < 0 samples");
   
@@ -79,16 +84,15 @@ TH_API void THTensor_(multinomial)(THLongTensor *self, THTensor *prob_dist, int 
     "cannot sample n_sample > prob_dist:size(1) samples without replacement");
   }
   
-  // cumulative probability distribution vector
-  THTensor* cum_dist = THTensor_(newWithSize1d)(n_categories);
+  /* cumulative probability distribution vector */
+  cum_dist = THTensor_(newWithSize1d)(n_categories);
     
-  // will contain multinomial samples (category indices to be returned)
+  /* will contain multinomial samples (category indices to be returned) */
   THLongTensor_resize2d(self, n_dist , n_sample);
   
-  int i,j,k;
   for (i=0; i<n_dist; i++)
   {
-    // Get normalized cumulative distribution from prob distribution
+    /* Get normalized cumulative distribution from prob distribution */
     real sum = 0;
     for (j=0; j<n_categories; j++)
     {
@@ -103,8 +107,8 @@ TH_API void THTensor_(multinomial)(THLongTensor *self, THTensor *prob_dist, int 
       );
     }
     THArgCheck((sum > 0), 2, "invalid multinomial distribution (sum of probabilities <= 0)");
-    // normalize cumulative probability distribution so that last val is 1 
-    // i.e. dosen't assume original prob_dist row sums to one
+    /* normalize cumulative probability distribution so that last val is 1 
+    i.e. dosen't assume original prob_dist row sums to one */
     if ( (sum > 0) || ( ( sum < 1.00001) && (sum > 0.99999) ) )  
     {
       for (j=0; j<n_categories; j++)
@@ -115,14 +119,16 @@ TH_API void THTensor_(multinomial)(THLongTensor *self, THTensor *prob_dist, int 
     
     for (j=0; j<n_sample; j++)
     {
-      // sample a probability mass from a uniform distribution
+      /* sample a probability mass from a uniform distribution */
       double uniform_sample = THRandom_uniform(0, 1);      
-      // Do a binary search for the slot in which the prob falls
-      // ie cum_dist[row][slot-1] < uniform_prob < cum_distr[row][slot]
+      /* Do a binary search for the slot in which the prob falls  
+      ie cum_dist[row][slot-1] < uniform_prob < cum_distr[row][slot] */
       int left_pointer = 0;
       int right_pointer = n_categories;
       int mid_pointer;
       real cum_prob;
+      int sample_idx;
+      
       while(right_pointer - left_pointer > 0)
       {
           mid_pointer = left_pointer + (right_pointer - left_pointer) / 2;
@@ -139,20 +145,23 @@ TH_API void THTensor_(multinomial)(THLongTensor *self, THTensor *prob_dist, int 
             right_pointer = mid_pointer;
           }
       }
-      int sample_idx = left_pointer;
+      sample_idx = left_pointer;
       
-       // store in result tensor (will be incremented for lua compat by wrapper)
+       /* store in result tensor (will be incremented for lua compat by wrapper) */
       THLongStorage_set( \
         self->storage, \
         self->storageOffset+i*self->stride[0]+j*self->stride[1], \
         sample_idx \
       );
       
-      // Once a sample is drawn, it cannot be drawn again. ie sample without replacement
+      /* Once a sample is drawn, it cannot be drawn again. ie sample without replacement */
       if (!with_replacement)
       {
-        // update cumulative distribution so that sample cannot be drawn again
+        /* update cumulative distribution so that sample cannot be drawn again */
+        real diff;
         real new_val = 0;
+        real sum;
+        
         if (sample_idx != 0)
         {
           new_val = THStorage_(get)( \
@@ -160,13 +169,13 @@ TH_API void THTensor_(multinomial)(THLongTensor *self, THTensor *prob_dist, int 
             cum_dist->storageOffset+(sample_idx-1)*cum_dist->stride[0] \
           );
         }
-        // marginal cumulative mass (i.e. original probability) of sample
-        real diff = THStorage_(get)( \
+        /* marginal cumulative mass (i.e. original probability) of sample */
+        diff = THStorage_(get)( \
           cum_dist->storage, \
           cum_dist->storageOffset+sample_idx*cum_dist->stride[0] \
         ) - new_val;
-        // new sum of marginals is not one anymore...
-        real sum = 1.0 - diff;
+        /* new sum of marginals is not one anymore... */
+        sum = 1.0 - diff;
         for (k=0; k<n_categories; k++)
         {
           new_val = THStorage_(get)( \
@@ -175,10 +184,10 @@ TH_API void THTensor_(multinomial)(THLongTensor *self, THTensor *prob_dist, int 
           );
           if (k >= sample_idx) 
           {
-            // remove sampled probability mass from later cumulative probabilities
+            /* remove sampled probability mass from later cumulative probabilities */
             new_val -= diff;
           }
-          // make total marginals sum to one
+          /* make total marginals sum to one */
           new_val /= sum;
           THStorage_(set)( \
             cum_dist->storage, \
@@ -229,7 +238,6 @@ TH_API void THTensor_(setRNGState)(THTensor *self)
 
   THRandom_setState(data,*offset,*left);
 }
-
 #endif
 
 #endif
