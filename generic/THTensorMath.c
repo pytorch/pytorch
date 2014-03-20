@@ -262,6 +262,9 @@ void THTensor_(cadd)(THTensor *r_, THTensor *t, real value, THTensor *src)
 {
   THTensor_(resizeAs)(r_, t);
   if (THTensor_(isContiguous)(r_) && THTensor_(isContiguous)(t) && THTensor_(isContiguous)(src) && THTensor_(nElement)(r_) == THTensor_(nElement)(src)) {
+    if(r_ == t) {
+      THBlas_(axpy)(THTensor_(nElement)(t), value, THTensor_(data)(src), 1, THTensor_(data)(r_), 1);
+    } else {
       real *tp = THTensor_(data)(t);
       real *sp = THTensor_(data)(src);
       real *rp = THTensor_(data)(r_);
@@ -270,6 +273,7 @@ void THTensor_(cadd)(THTensor *r_, THTensor *t, real value, THTensor *src)
       #pragma omp parallel for if(sz > TH_OMP_OVERHEAD_THRESHOLD) private(i)
       for (i=0; i< sz; i++)
           rp[i] = tp[i] + value * sp[i];
+    }
   } else {
       TH_TENSOR_APPLY3(real, r_, real, t, real, src, *r__data = *t_data + value * *src_data;);
   }
@@ -883,7 +887,7 @@ void THTensor_(range)(THTensor *r_, real xmin, real xmax, real step)
   TH_TENSOR_APPLY(real, r_, *r__data = xmin + (i++)*step;);
 }
 
-void THTensor_(randperm)(THTensor *r_, long n)
+void THTensor_(randperm)(THTensor *r_, THGenerator *_generator, long n)
 {
   real *r__data;
   long r__stride_0;
@@ -900,7 +904,7 @@ void THTensor_(randperm)(THTensor *r_, long n)
 
   for(i = 0; i < n-1; i++)
   {    
-    long z = THRandom_random() % (n-i);
+    long z = THRandom_random(_generator) % (n-i);
     real sav = r__data[i*r__stride_0];
     r__data[i*r__stride_0] = r__data[(z+i)*r__stride_0];
     r__data[(z+i)*r__stride_0] = sav;
@@ -1381,6 +1385,12 @@ accreal THTensor_(normall)(THTensor *tensor, real value)
   if(value == 0) {
     TH_TENSOR_APPLY(real, tensor, sum += *tensor_data != 0.0;);
     return sum;
+  } else if(value == 1) {
+    TH_TENSOR_APPLY(real, tensor, sum += fabs(*tensor_data););
+    return sum;
+  } else if(value == 2) {
+    TH_TENSOR_APPLY(real, tensor, accreal z = *tensor_data; sum += z*z;);
+    return sqrt(sum);
   } else {
     TH_TENSOR_APPLY(real, tensor, sum += pow(fabs(*tensor_data), value););
     return pow(sum, 1.0/value);
@@ -1458,16 +1468,16 @@ void THTensor_(logspace)(THTensor *r_, real a, real b, long n)
   }
 }
 
-void THTensor_(rand)(THTensor *r_, THLongStorage *size)
+void THTensor_(rand)(THTensor *r_, THGenerator *_generator, THLongStorage *size)
 {
   THTensor_(resize)(r_, size, NULL);
-  THTensor_(uniform)(r_, 0, 1);
+  THTensor_(uniform)(r_, _generator, 0, 1);
 }
 
-void THTensor_(randn)(THTensor *r_, THLongStorage *size)
+void THTensor_(randn)(THTensor *r_, THGenerator *_generator, THLongStorage *size)
 {
   THTensor_(resize)(r_, size, NULL);
-  THTensor_(normal)(r_, 0, 1);
+  THTensor_(normal)(r_, _generator, 0, 1);
 }
 
 void THTensor_(histc)(THTensor *hist, THTensor *tensor, long nbins, real minvalue, real maxvalue)

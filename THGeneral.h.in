@@ -45,9 +45,9 @@
 
 TH_API double THLog1p(const double x);
 TH_API void THError(const char *fmt, ...);
-TH_API void THSetErrorHandler( void (*torchErrorHandlerFunction)(const char *msg) );
+TH_API void THSetErrorHandler( void (*torchErrorHandlerFunction)(const char *msg, void *data), void *data );
 TH_API void THArgCheck(int condition, int argNumber, const char *msg);
-TH_API void THSetArgErrorHandler( void (*torchArgErrorHandlerFunction)(int argNumber, const char *msg) );
+TH_API void THSetArgErrorHandler( void (*torchArgErrorHandlerFunction)(int argNumber, const char *msg, void *data), void *data );
 TH_API void* THAlloc(long size);
 TH_API void* THRealloc(void *ptr, long size);
 TH_API void THFree(void *ptr);
