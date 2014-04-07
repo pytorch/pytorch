@@ -78,7 +78,7 @@ THCudaStorage* THCudaStorage_newWithSize4(float data0, float data1, float data2,
   return self;
 }
 
-THCudaStorage* THCudaStorage_newWithMapping(const char *fileName, int isShared)
+THCudaStorage* THCudaStorage_newWithMapping(const char *fileName, long size, int isShared)
 {
   THError("not available yet for THCudaStorage");
   return NULL;
