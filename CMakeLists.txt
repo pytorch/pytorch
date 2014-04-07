@@ -1,6 +1,21 @@
+cmake_minimum_required(VERSION 2.6)
+
 SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
 
+# Can be compiled without being a torch sub-project
+IF(NOT Torch_INSTALL_BIN_SUBDIR)
+  SET(Torch_INSTALL_BIN_SUBDIR "bin")
+  SET(Torch_INSTALL_LIB_SUBDIR "lib")
+  SET(Torch_INSTALL_INCLUDE_SUBDIR "include")
+  SET(Torch_INSTALL_CMAKE_SUBDIR "share/cmake/torch")
+ENDIF()
+
 # flags
+
+IF(MSVC)
+  # respect the standard
+  ADD_DEFINITIONS(-D_CRT_SECURE_NO_DEPRECATE=1)
+ENDIF(MSVC)
 
 # OpenMP support?
 SET(WITH_OPENMP ON CACHE BOOL "OpenMP support if available?")
@@ -69,13 +84,13 @@ IF(C_SSE4_2_FOUND)
   SET(CMAKE_C_FLAGS "${C_SSE4_2_FLAGS} -DUSE_SSE4_2 ${CMAKE_C_FLAGS}")
 ENDIF(C_SSE4_2_FOUND)
 
-SET(hdr 
-  THGeneral.h THStorage.h THTensor.h THTensorApply.h
-  THBlas.h THLapack.h THLogAdd.h THRandom.h THVector.h)
-SET(src 
-  THGeneral.c THStorage.c THTensor.c THBlas.c THLapack.c
-  THLogAdd.c THRandom.c
-  THFile.c THDiskFile.c THMemoryFile.c)
+SET(hdr
+  THGeneral.h THAllocator.h THStorage.h THTensor.h THTensorApply.h THBlas.h
+  THLapack.h THLogAdd.h THRandom.h THVector.h)
+
+SET(src
+  THGeneral.c THAllocator.c THStorage.c THTensor.c THBlas.c THLapack.c
+  THLogAdd.c THRandom.c THFile.c THDiskFile.c THMemoryFile.c)
 
 SET(src ${src} ${hdr})
 ADD_LIBRARY(TH SHARED ${src})
@@ -151,6 +166,7 @@ INSTALL(TARGETS TH
 
 INSTALL(FILES
   TH.h
+  THAllocator.h
   THBlas.h
   THDiskFile.h
   THFile.h
