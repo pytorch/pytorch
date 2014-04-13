@@ -306,12 +306,12 @@ READ_WRITE_METHODS(long, Long,
                    int ret = fprintf(dfself->handle, "%ld", data[i]); if(ret <= 0) break; else nwrite++)
 
 READ_WRITE_METHODS(float, Float,
-                   int ret = fscanf(dfself->handle, "%g", &data[i]); if(ret <= 0) break; else nread++,
-                   int ret = fprintf(dfself->handle, "%g", data[i]); if(ret <= 0) break; else nwrite++)
+                   int ret = fscanf(dfself->handle, "%12.12g", &data[i]); if(ret <= 0) break; else nread++,
+                   int ret = fprintf(dfself->handle, "%12.12g", data[i]); if(ret <= 0) break; else nwrite++)
 
 READ_WRITE_METHODS(double, Double,
-                   int ret = fscanf(dfself->handle, "%lg", &data[i]); if(ret <= 0) break; else nread++,
-                   int ret = fprintf(dfself->handle, "%lg", data[i]); if(ret <= 0) break; else nwrite++)
+                   int ret = fscanf(dfself->handle, "%12.12lg", &data[i]); if(ret <= 0) break; else nread++,
+                   int ret = fprintf(dfself->handle, "%12.12lg", data[i]); if(ret <= 0) break; else nwrite++)
 
 static long THDiskFile_readString(THFile *self, const char *format, char **str_)
 {
