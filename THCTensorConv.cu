@@ -262,6 +262,29 @@ __global__ void conv2genericrev(float *input, float *kernel, float *output,
   }
 }
 
+// A helper macro for the common pattern of checking the input
+// rows/columns for a small number of values, specializing the kernel
+// template paremeters if rows/columns are equal and small, and
+// otherwise just passing zero to the kernel.
+#define FOR_KERNEL_SPECIALIZED_DIMENSION(ROWS, COLUMNS, KERNEL) \
+  if ((ROWS) == (COLUMNS)) {                                    \
+    switch ((ROWS)) {                                           \
+      case 3: { KERNEL(3); break; }                             \
+      case 4: { KERNEL(4); break; }                             \
+      case 5: { KERNEL(5); break; }                             \
+      case 6: { KERNEL(6); break; }                             \
+      case 7: { KERNEL(7); break; }                             \
+      case 8: { KERNEL(8); break; }                             \
+      case 9: { KERNEL(9); break; }                             \
+      case 10: { KERNEL(10); break; }                           \
+      case 11: { KERNEL(11); break; }                           \
+      case 12: { KERNEL(12); break; }                           \
+      case 13: { KERNEL(13); break; }                           \
+      default: { KERNEL(0); break; }                            \
+    }                                                           \
+  } else {                                                      \
+    KERNEL(0);                                                  \
+  }
 
 /*
  * API-compatible with THRealTensor_conv2Dmv
@@ -354,132 +377,25 @@ THC_API void THCudaTensor_conv2Dmv(THCudaTensor *output, float beta, THCudaTenso
 
   // convolution: xcorr2 or conv2
   if (type[1] == 'x') {
-    if ((nKernelCols == 3) && (nKernelRows == 3))
-      conv2generic <false, 3, 3> <<<blocks, threads>>> (input_data, weight_data, output_data,
-                                                        nInputPlane, nInputRows, nInputCols,
-                                                        nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-                                                        srow, scol);
-    else if ((nKernelCols == 5) && (nKernelRows == 5))
-      conv2generic <false, 5, 5> <<<blocks, threads>>> (input_data, weight_data, output_data,
-                                                        nInputPlane, nInputRows, nInputCols,
-                                                        nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-                                                        srow, scol);
-    else if ((nKernelCols == 7) && (nKernelRows == 7))
-      conv2generic <false, 7, 7> <<<blocks, threads>>> (input_data, weight_data, output_data,
-                                                        nInputPlane, nInputRows, nInputCols,
-                                                        nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-                                                        srow, scol);
-    else if ((nKernelCols == 9) && (nKernelRows == 9))
-      conv2generic <false, 9, 9> <<<blocks, threads>>> (input_data, weight_data, output_data,
-                                                        nInputPlane, nInputRows, nInputCols,
-                                                        nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-                                                        srow, scol);
-    else if ((nKernelCols == 11) && (nKernelRows == 11))
-      conv2generic <false, 11, 11> <<<blocks, threads>>> (input_data, weight_data, output_data,
-                                                          nInputPlane, nInputRows, nInputCols,
-                                                          nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-                                                          srow, scol);
-    else if ((nKernelCols == 13) && (nKernelRows == 13))
-      conv2generic <false, 13, 13> <<<blocks, threads>>> (input_data, weight_data, output_data,
-                                                          nInputPlane, nInputRows, nInputCols,
-                                                          nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-                                                          srow, scol);
-    else if ((nKernelCols == 4) && (nKernelRows == 4))
-      conv2generic <false, 4, 4> <<<blocks, threads>>> (input_data, weight_data, output_data,
-                                                        nInputPlane, nInputRows, nInputCols,
-                                                        nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-                                                        srow, scol);
-    else if ((nKernelCols == 6) && (nKernelRows == 6))
-      conv2generic <false, 6, 6> <<<blocks, threads>>> (input_data, weight_data, output_data,
-                                                        nInputPlane, nInputRows, nInputCols,
-                                                        nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-                                                        srow, scol);
-    else if ((nKernelCols == 8) && (nKernelRows == 8))
-      conv2generic <false, 8, 8> <<<blocks, threads>>> (input_data, weight_data, output_data,
-                                                        nInputPlane, nInputRows, nInputCols,
-                                                        nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-                                                        srow, scol);
-    else if ((nKernelCols == 10) && (nKernelRows == 10))
-      conv2generic <false, 10, 10> <<<blocks, threads>>> (input_data, weight_data, output_data,
-                                                          nInputPlane, nInputRows, nInputCols,
-                                                          nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-                                                          srow, scol);
-    else if ((nKernelCols == 12) && (nKernelRows == 12))
-      conv2generic <false, 12, 12> <<<blocks, threads>>> (input_data, weight_data, output_data,
-                                                          nInputPlane, nInputRows, nInputCols,
-                                                          nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-                                                          srow, scol);
-    else
-      conv2generic <false, 0 , 0> <<<blocks, threads>>> (input_data, weight_data, output_data,
-                                                         nInputPlane, nInputRows, nInputCols,
-                                                         nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-                                                         srow, scol);
+#define X_CONV_KERNEL(dim)                                              \
+    conv2generic <false, (dim), (dim)> <<<blocks, threads>>> (          \
+        input_data, weight_data, output_data,                           \
+        nInputPlane, nInputRows, nInputCols,                            \
+        nOutputPlane*nInputPlane, nKernelRows, nKernelCols,             \
+        srow, scol);
+
+    FOR_KERNEL_SPECIALIZED_DIMENSION(nKernelRows, nKernelCols, X_CONV_KERNEL);
+#undef X_CONV_KERNEL
   } else { // 'c'
-    if ((nKernelCols == 3) && (nKernelRows == 3))
-      conv2generic <true, 3, 3> <<<blocks, threads>>> (input_data, weight_data, output_data,
-                                                       nInputPlane, nInputRows, nInputCols,
-                                                       nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-                                                       srow, scol);
-    else if ((nKernelCols == 5) && (nKernelRows == 5))
-      conv2generic <true, 5, 5> <<<blocks, threads>>> (input_data, weight_data, output_data,
-                                                       nInputPlane, nInputRows, nInputCols,
-                                                       nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-                                                       srow, scol);
-    else if ((nKernelCols == 7) && (nKernelRows == 7))
-      conv2generic <true, 7, 7> <<<blocks, threads>>> (input_data, weight_data, output_data,
-                                                       nInputPlane, nInputRows, nInputCols,
-                                                       nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-                                                       srow, scol);
-    else if ((nKernelCols == 9) && (nKernelRows == 9))
-      conv2generic <true, 9, 9> <<<blocks, threads>>> (input_data, weight_data, output_data,
-                                                       nInputPlane, nInputRows, nInputCols,
-                                                       nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-                                                       srow, scol);
-    else if ((nKernelCols == 11) && (nKernelRows == 11))
-      conv2generic <true, 11, 11> <<<blocks, threads>>> (input_data, weight_data, output_data,
-                                                         nInputPlane, nInputRows, nInputCols,
-                                                         nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-                                                         srow, scol);
-    else if ((nKernelCols == 13) && (nKernelRows == 13))
-      conv2generic <true, 13, 13> <<<blocks, threads>>> (input_data, weight_data, output_data,
-                                                         nInputPlane, nInputRows, nInputCols,
-                                                         nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-                                                         srow, scol);
-    else if ((nKernelCols == 2) && (nKernelRows == 2))
-      conv2generic <true, 2, 2> <<<blocks, threads>>> (input_data, weight_data, output_data,
-                                                       nInputPlane, nInputRows, nInputCols,
-                                                       nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-                                                       srow, scol);
-    else if ((nKernelCols == 4) && (nKernelRows == 4))
-      conv2generic <true, 4, 4> <<<blocks, threads>>> (input_data, weight_data, output_data,
-                                                       nInputPlane, nInputRows, nInputCols,
-                                                       nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-                                                       srow, scol);
-    else if ((nKernelCols == 6) && (nKernelRows == 6))
-      conv2generic <true, 6, 6> <<<blocks, threads>>> (input_data, weight_data, output_data,
-                                                       nInputPlane, nInputRows, nInputCols,
-                                                       nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-                                                       srow, scol);
-    else if ((nKernelCols == 8) && (nKernelRows == 8))
-      conv2generic <true, 8, 8> <<<blocks, threads>>> (input_data, weight_data, output_data,
-                                                       nInputPlane, nInputRows, nInputCols,
-                                                       nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-                                                       srow, scol);
-    else if ((nKernelCols == 10) && (nKernelRows == 10))
-      conv2generic <true, 10, 10> <<<blocks, threads>>> (input_data, weight_data, output_data,
-                                                         nInputPlane, nInputRows, nInputCols,
-                                                         nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-                                                         srow, scol);
-    else if ((nKernelCols == 12) && (nKernelRows == 12))
-      conv2generic <true, 12, 12> <<<blocks, threads>>> (input_data, weight_data, output_data,
-                                                         nInputPlane, nInputRows, nInputCols,
-                                                         nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-                                                         srow, scol);
-    else
-      conv2generic <true, 0 , 0> <<<blocks, threads>>> (input_data, weight_data, output_data,
-                                                        nInputPlane, nInputRows, nInputCols,
-                                                        nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-                                                        srow, scol);
+#define C_CONV_KERNEL(dim)                                              \
+    conv2generic <true, (dim), (dim)> <<<blocks, threads>>> (           \
+        input_data, weight_data, output_data,                           \
+        nInputPlane, nInputRows, nInputCols,                            \
+        nOutputPlane*nInputPlane, nKernelRows, nKernelCols,             \
+        srow, scol);
+
+    FOR_KERNEL_SPECIALIZED_DIMENSION(nKernelRows, nKernelCols, C_CONV_KERNEL);
+#undef C_CONV_KERNEL
   }
 
   // clean
@@ -586,132 +502,25 @@ THC_API void THCudaTensor_conv2Dmm(THCudaTensor *output, float beta, THCudaTenso
 
   // convolution: xcorr2 or conv2
   if (type[1] == 'x') {
-    if ((nKernelCols == 3) && (nKernelRows == 3))
-      conv2generic <false, 3, 3> <<<blocks, threads>>> (input_data, weight_data, output_data,
-							     nInputPlane, nInputRows, nInputCols,
-							     nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-							     srow, scol);
-    else if ((nKernelCols == 5) && (nKernelRows == 5))
-      conv2generic <false, 5, 5> <<<blocks, threads>>> (input_data, weight_data, output_data,
-							     nInputPlane, nInputRows, nInputCols,
-							     nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-							     srow, scol);
-    else if ((nKernelCols == 7) && (nKernelRows == 7))
-      conv2generic <false, 7, 7> <<<blocks, threads>>> (input_data, weight_data, output_data,
-							     nInputPlane, nInputRows, nInputCols,
-							     nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-							     srow, scol);
-    else if ((nKernelCols == 9) && (nKernelRows == 9))
-      conv2generic <false, 9, 9> <<<blocks, threads>>> (input_data, weight_data, output_data,
-							     nInputPlane, nInputRows, nInputCols,
-							     nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-							     srow, scol);
-    else if ((nKernelCols == 11) && (nKernelRows == 11))
-      conv2generic <false, 11, 11> <<<blocks, threads>>> (input_data, weight_data, output_data,
-							       nInputPlane, nInputRows, nInputCols,
-							       nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-							       srow, scol);
-    else if ((nKernelCols == 13) && (nKernelRows == 13))
-      conv2generic <false, 13, 13> <<<blocks, threads>>> (input_data, weight_data, output_data,
-							       nInputPlane, nInputRows, nInputCols,
-							       nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-							       srow, scol);
-    else if ((nKernelCols == 4) && (nKernelRows == 4))
-      conv2generic <false, 4, 4> <<<blocks, threads>>> (input_data, weight_data, output_data,
-							     nInputPlane, nInputRows, nInputCols,
-							     nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-							     srow, scol);
-    else if ((nKernelCols == 6) && (nKernelRows == 6))
-      conv2generic <false, 6, 6> <<<blocks, threads>>> (input_data, weight_data, output_data,
-							     nInputPlane, nInputRows, nInputCols,
-							     nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-							     srow, scol);
-    else if ((nKernelCols == 8) && (nKernelRows == 8))
-      conv2generic <false, 8, 8> <<<blocks, threads>>> (input_data, weight_data, output_data,
-							     nInputPlane, nInputRows, nInputCols,
-							     nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-							     srow, scol);
-    else if ((nKernelCols == 10) && (nKernelRows == 10))
-      conv2generic <false, 10, 10> <<<blocks, threads>>> (input_data, weight_data, output_data,
-							       nInputPlane, nInputRows, nInputCols,
-							       nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-							       srow, scol);
-    else if ((nKernelCols == 12) && (nKernelRows == 12))
-      conv2generic <false, 12, 12> <<<blocks, threads>>> (input_data, weight_data, output_data,
-							       nInputPlane, nInputRows, nInputCols,
-							       nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-							       srow, scol);
-    else
-      conv2generic <false, 0 , 0> <<<blocks, threads>>> (input_data, weight_data, output_data,
-							      nInputPlane, nInputRows, nInputCols,
-							      nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-							      srow, scol);
+#define X_CONV_KERNEL(dim)                                              \
+    conv2generic <false, (dim), (dim)> <<<blocks, threads>>> (          \
+        input_data, weight_data, output_data,                           \
+        nInputPlane, nInputRows, nInputCols,                            \
+        nOutputPlane*nInputPlane, nKernelRows, nKernelCols,             \
+        srow, scol);
+
+    FOR_KERNEL_SPECIALIZED_DIMENSION(nKernelCols, nKernelRows, X_CONV_KERNEL);
+#undef X_CONV_KERNEL
   } else { // 'c'
-    if ((nKernelCols == 3) && (nKernelRows == 3))
-      conv2generic <true, 3, 3> <<<blocks, threads>>> (input_data, weight_data, output_data,
-							    nInputPlane, nInputRows, nInputCols,
-							    nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-							    srow, scol);
-    else if ((nKernelCols == 5) && (nKernelRows == 5))
-      conv2generic <true, 5, 5> <<<blocks, threads>>> (input_data, weight_data, output_data,
-							    nInputPlane, nInputRows, nInputCols,
-							    nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-							    srow, scol);
-    else if ((nKernelCols == 7) && (nKernelRows == 7))
-      conv2generic <true, 7, 7> <<<blocks, threads>>> (input_data, weight_data, output_data,
-							    nInputPlane, nInputRows, nInputCols,
-							    nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-							    srow, scol);
-    else if ((nKernelCols == 9) && (nKernelRows == 9))
-      conv2generic <true, 9, 9> <<<blocks, threads>>> (input_data, weight_data, output_data,
-							    nInputPlane, nInputRows, nInputCols,
-							    nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-							    srow, scol);
-    else if ((nKernelCols == 11) && (nKernelRows == 11))
-      conv2generic <true, 11, 11> <<<blocks, threads>>> (input_data, weight_data, output_data,
-							      nInputPlane, nInputRows, nInputCols,
-							      nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-							      srow, scol);
-    else if ((nKernelCols == 13) && (nKernelRows == 13))
-      conv2generic <true, 13, 13> <<<blocks, threads>>> (input_data, weight_data, output_data,
-							      nInputPlane, nInputRows, nInputCols,
-							      nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-							      srow, scol);
-    else if ((nKernelCols == 2) && (nKernelRows == 2))
-      conv2generic <true, 2, 2> <<<blocks, threads>>> (input_data, weight_data, output_data,
-							    nInputPlane, nInputRows, nInputCols,
-							    nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-							    srow, scol);
-    else if ((nKernelCols == 4) && (nKernelRows == 4))
-      conv2generic <true, 4, 4> <<<blocks, threads>>> (input_data, weight_data, output_data,
-							    nInputPlane, nInputRows, nInputCols,
-							    nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-							    srow, scol);
-    else if ((nKernelCols == 6) && (nKernelRows == 6))
-      conv2generic <true, 6, 6> <<<blocks, threads>>> (input_data, weight_data, output_data,
-							    nInputPlane, nInputRows, nInputCols,
-							    nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-							    srow, scol);
-    else if ((nKernelCols == 8) && (nKernelRows == 8))
-      conv2generic <true, 8, 8> <<<blocks, threads>>> (input_data, weight_data, output_data,
-							    nInputPlane, nInputRows, nInputCols,
-							    nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-							    srow, scol);
-    else if ((nKernelCols == 10) && (nKernelRows == 10))
-      conv2generic <true, 10, 10> <<<blocks, threads>>> (input_data, weight_data, output_data,
-							      nInputPlane, nInputRows, nInputCols,
-							      nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-							      srow, scol);
-    else if ((nKernelCols == 12) && (nKernelRows == 12))
-      conv2generic <true, 12, 12> <<<blocks, threads>>> (input_data, weight_data, output_data,
-							      nInputPlane, nInputRows, nInputCols,
-							      nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-							      srow, scol);
-    else
-      conv2generic <true, 0 , 0> <<<blocks, threads>>> (input_data, weight_data, output_data,
-							     nInputPlane, nInputRows, nInputCols,
-							     nOutputPlane*nInputPlane, nKernelRows, nKernelCols,
-							     srow, scol);
+#define C_CONV_KERNEL(dim)                                              \
+    conv2generic <true, (dim), (dim)> <<<blocks, threads>>> (           \
+        input_data, weight_data, output_data,                           \
+        nInputPlane, nInputRows, nInputCols,                            \
+        nOutputPlane*nInputPlane, nKernelRows, nKernelCols,             \
+        srow, scol);                                                    \
+
+    FOR_KERNEL_SPECIALIZED_DIMENSION(nKernelCols, nKernelRows, C_CONV_KERNEL);
+#undef C_CONV_KERNEL
   }
 
   // clean
@@ -1121,189 +930,15 @@ THC_API void THCudaTensor_conv2Dmap(THCudaTensor *output, THCudaTensor *input,
     block_height = 1;
   dim3 blocks(nOutputPlane,block_height);
   dim3 threads(nthreads_x,nthreads_y);
-  
-  if ((nKernelCols == 3) && (nKernelRows == 3))
-    conv2mapgeneric <false, 3, 3> <<<blocks, threads>>> (input_data, 
-                                                         kernel_data, 
-                                                         output_data,
-                                                         nInputPlane, 
-                                                         nInputRows, 
-                                                         nInputCols,
-                                                         nOutputPlane*fanin, 
-                                                         nKernelRows, 
-                                                         nKernelCols,
-                                                         stride_x, 
-                                                         stride_y, 
-                                                         table_data, 
-                                                         fanin);
-  else if ((nKernelCols == 5) && (nKernelRows == 5))
-    conv2mapgeneric <false, 5, 5> <<<blocks, threads>>> (input_data, 
-                                                         kernel_data, 
-                                                         output_data,
-                                                         nInputPlane, 
-                                                         nInputRows, 
-                                                         nInputCols,
-                                                         nOutputPlane*fanin, 
-                                                         nKernelRows, 
-                                                         nKernelCols,
-                                                         stride_x, 
-                                                         stride_y, 
-                                                         table_data, 
-                                                         fanin);
-  else if ((nKernelCols == 7) && (nKernelRows == 7))
-    conv2mapgeneric <false, 7, 7> <<<blocks, threads>>> (input_data, 
-                                                         kernel_data, 
-                                                         output_data,
-                                                         nInputPlane, 
-                                                         nInputRows, 
-                                                         nInputCols,
-                                                         nOutputPlane*fanin, 
-                                                         nKernelRows, 
-                                                         nKernelCols,
-                                                         stride_x, 
-                                                         stride_y, 
-                                                         table_data, 
-                                                         fanin);
-  else if ((nKernelCols == 9) && (nKernelRows == 9))
-    conv2mapgeneric <false, 9, 9> <<<blocks, threads>>> (input_data, 
-                                                         kernel_data, 
-                                                         output_data,
-                                                         nInputPlane, 
-                                                         nInputRows, 
-                                                         nInputCols,
-                                                         nOutputPlane*fanin, 
-                                                         nKernelRows, 
-                                                         nKernelCols,
-                                                         stride_x, 
-                                                         stride_y, 
-                                                         table_data, 
-                                                         fanin);
-  else if ((nKernelCols == 11) && (nKernelRows == 11))
-    conv2mapgeneric <false, 11, 11> <<<blocks, threads>>> (input_data, 
-                                                           kernel_data, 
-                                                           output_data,
-                                                           nInputPlane, 
-                                                           nInputRows, 
-                                                           nInputCols,
-                                                           nOutputPlane*fanin, 
-                                                           nKernelRows, 
-                                                           nKernelCols,
-                                                           stride_x, 
-                                                           stride_y, 
-                                                           table_data, 
-                                                           fanin);
-  else if ((nKernelCols == 13) && (nKernelRows == 13))
-    conv2mapgeneric <false, 13, 13> <<<blocks, threads>>> (input_data, 
-                                                           kernel_data, 
-                                                           output_data,
-                                                           nInputPlane, 
-                                                           nInputRows, 
-                                                           nInputCols,
-                                                           nOutputPlane*fanin, 
-                                                           nKernelRows, nKernelCols,
-                                                           stride_x, 
-                                                           stride_y, 
-                                                           table_data, 
-                                                           fanin);
-  else if ((nKernelCols == 2) && (nKernelRows == 2))
-    conv2mapgeneric <false, 2, 2> <<<blocks, threads>>> (input_data, 
-                                                         kernel_data, 
-                                                         output_data,
-                                                         nInputPlane, 
-                                                         nInputRows, 
-                                                         nInputCols,
-                                                         nOutputPlane*fanin, 
-                                                         nKernelRows, 
-                                                         nKernelCols,
-                                                         stride_x, 
-                                                         stride_y, 
-                                                         table_data, 
-                                                         fanin);
-  else if ((nKernelCols == 4) && (nKernelRows == 4))
-    conv2mapgeneric <false, 4, 4> <<<blocks, threads>>> (input_data, 
-                                                         kernel_data, 
-                                                         output_data,
-                                                         nInputPlane, 
-                                                         nInputRows, 
-                                                         nInputCols,
-                                                         nOutputPlane*fanin, 
-                                                         nKernelRows, 
-                                                         nKernelCols,
-                                                         stride_x, 
-                                                         stride_y, 
-                                                         table_data, 
-                                                         fanin);
-  else if ((nKernelCols == 6) && (nKernelRows == 6))
-    conv2mapgeneric <false, 6, 6> <<<blocks, threads>>> (input_data, 
-                                                         kernel_data, 
-                                                         output_data,
-                                                         nInputPlane, 
-                                                         nInputRows, 
-                                                         nInputCols,
-                                                         nOutputPlane*fanin, 
-                                                         nKernelRows, 
-                                                         nKernelCols,
-                                                         stride_x, 
-                                                         stride_y, 
-                                                         table_data, 
-                                                         fanin);
-  else if ((nKernelCols == 8) && (nKernelRows == 8))
-    conv2mapgeneric <false, 8, 8> <<<blocks, threads>>> (input_data, 
-                                                         kernel_data, 
-                                                         output_data,
-                                                         nInputPlane, 
-                                                         nInputRows, 
-                                                         nInputCols,
-                                                         nOutputPlane*fanin, 
-                                                         nKernelRows, 
-                                                         nKernelCols,
-                                                         stride_x, 
-                                                         stride_y, 
-                                                         table_data, 
-                                                         fanin);
-  else if ((nKernelCols == 10) && (nKernelRows == 10))
-    conv2mapgeneric <false, 10, 10> <<<blocks, threads>>> (input_data, 
-                                                           kernel_data, 
-                                                           output_data,
-                                                           nInputPlane, 
-                                                           nInputRows, 
-                                                           nInputCols,
-                                                           nOutputPlane*fanin, 
-                                                           nKernelRows, 
-                                                           nKernelCols,
-                                                           stride_x, 
-                                                           stride_y, 
-                                                           table_data, 
-                                                           fanin);
-  else if ((nKernelCols == 12) && (nKernelRows == 12))
-    conv2mapgeneric <false, 12, 12> <<<blocks, threads>>> (input_data, 
-                                                           kernel_data, 
-                                                           output_data,
-                                                           nInputPlane, 
-                                                           nInputRows, 
-                                                           nInputCols,
-                                                           nOutputPlane*fanin, 
-                                                           nKernelRows, 
-                                                           nKernelCols,
-                                                           stride_x, 
-                                                           stride_y, 
-                                                           table_data, 
-                                                           fanin);
-  else
-    conv2mapgeneric <false, 0 , 0> <<<blocks, threads>>> (input_data, 
-                                                          kernel_data, 
-                                                          output_data,
-                                                          nInputPlane, 
-                                                          nInputRows, 
-                                                          nInputCols,
-                                                          nOutputPlane*fanin, 
-                                                          nKernelRows, 
-                                                          nKernelCols,
-                                                          stride_x, 
-                                                          stride_y, 
-                                                          table_data, 
-                                                          fanin);
 
+#define GENERIC_MAP_KERNEL(dim)                                         \
+  conv2mapgeneric <false, (dim), (dim)> <<<blocks, threads>>> (         \
+      input_data, kernel_data, output_data, nInputPlane, nInputRows,    \
+      nInputCols, nOutputPlane*fanin, nKernelRows, nKernelCols,         \
+      stride_x, stride_y, table_data, fanin);
+
+  FOR_KERNEL_SPECIALIZED_DIMENSION(nKernelCols, nKernelRows, GENERIC_MAP_KERNEL);
+#undef GENERIC_MAP_KERNEL
   // clean
   THCudaTensor_free(input);
   THCudaTensor_free(kernel);
@@ -1316,3 +951,5 @@ THC_API void THCudaTensor_conv2Dmap(THCudaTensor *output, THCudaTensor *input,
     THError("aborting");
   }
 }
+
+#undef FOR_KERNEL_SPECIALIZED_DIMENSION
