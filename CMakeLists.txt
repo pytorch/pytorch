@@ -151,6 +151,7 @@ SET(TH_INLINE "")
 ENDIF(NOT DEFINED C_INLINE)
 
 # Is __thread supported?
+INCLUDE (CheckCSourceCompiles)
 CHECK_C_SOURCE_COMPILES("static __thread int x = 1; int main() { return x; }" C_HAS_THREAD)
 IF(NOT DEFINED C_HAS_THREAD)
   MESSAGE(STATUS "Warning: __thread is not supported, generating thread-unsafe code")
