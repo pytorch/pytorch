@@ -168,7 +168,7 @@ static void *THMapAllocator_alloc(void* ctx_, long size)
   {
     /* open file */
     int fd;
-    int fdsz;
+    long fdsz;
 
     if(ctx->shared)
     {
@@ -220,10 +220,11 @@ static void *THMapAllocator_alloc(void* ctx_, long size)
     else
       data = mmap(NULL, ctx->size, PROT_READ|PROT_WRITE, MAP_PRIVATE, fd, 0);
 
-    if(data == MAP_FAILED)
-      data = NULL; /* let's be sure it is NULL */
-
     close(fd);
+    if(data == MAP_FAILED) {
+      data = NULL; /* let's be sure it is NULL */
+      THError("$ Torch: unable to mmap memory: you tried to mmap %dGB.", ctx->size/1073741824);
+    }
   }
 #endif
 
