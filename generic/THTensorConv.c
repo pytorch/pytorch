@@ -299,6 +299,7 @@ TH_API void THTensor_(validXCorr3Dptr)(real *r_,
             pi_ += ic; /* next input line */
             pw_ += kc; /* next mask line */
           }
+          pi_ += (ir-kr)*ic; /* next input slice */
         }
         /* Update output */
         *r_++ += sum*alpha;
@@ -343,6 +344,7 @@ TH_API void THTensor_(validConv3Dptr)(real *r_,
             pi_ += ic; /* next input line */
             pw_ -= kc; /* next mask line */
           }
+          pi_ += (ir-kr)*ic; /* next input slice */
         }
         /* Update output */
         *r_++ += alpha*sum;
@@ -391,6 +393,7 @@ TH_API void THTensor_(fullConv3Dptr)(real *r_,
             po_ += oc; /* next input line */
             pw_ += kc; /* next mask line */
           }
+          po_ += (or-kr)*oc; /* next output slice */
           /* printf("\n"); */
         }
         t_++;
@@ -434,6 +437,7 @@ TH_API void THTensor_(fullXCorr3Dptr)(real *r_,
             po_ += oc; /* next input line */
             pw_ -= kc; /* next mask line */
           }
+          po_ += (or-kr)*oc; /* next output slice */
         }
         t_++;
       }
@@ -476,6 +480,7 @@ TH_API void THTensor_(validXCorr3DRevptr)(real *r_,
             pi_ += ic;
             po_ += oc;
           }
+          pi_ += (ir-or)*ic; /* next input slice */
         }
       }
     }
