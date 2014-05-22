@@ -5,6 +5,7 @@
 
 #define _MERSENNE_STATE_N 624
 #define _MERSENNE_STATE_M 397
+/* A THGenerator contains all the state required for a single random number stream */
 typedef struct THGenerator {
   /* The initial seed. */
   unsigned long the_initial_seed;
@@ -23,10 +24,9 @@ typedef struct THGenerator {
 
 #define torch_Generator "torch.Generator"
 
-/* Create a new random number generator stream */
+/* Manipulate THGenerator objects */
 TH_API THGenerator * THGenerator_new();
-
-/* Free a random number generator stream */
+TH_API THGenerator * THGenerator_copy(THGenerator *self, THGenerator *from);
 TH_API void THGenerator_free(THGenerator *gen);
 
 /* Initializes the random number generator with the current time (granularity: seconds) and returns the seed. */

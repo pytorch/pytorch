@@ -14,6 +14,12 @@ THGenerator* THGenerator_new()
   return self;
 }
 
+THGenerator* THGenerator_copy(THGenerator *self, THGenerator *from)
+{
+    memcpy(self, from, sizeof(THGenerator));
+    return self;
+}
+
 void THGenerator_free(THGenerator *self)
 {
   THFree(self);
@@ -89,6 +95,12 @@ unsigned long THRandom_seed(THGenerator *_generator)
 void THRandom_manualSeed(THGenerator *_generator, unsigned long the_seed_)
 {
   int j;
+
+  /* This ensures reseeding resets all of the state (i.e. state for Gaussian numbers) */
+  THGenerator *blank = THGenerator_new();
+  THGenerator_copy(_generator, blank);
+  THGenerator_free(blank);
+
   _generator->the_initial_seed = the_seed_;
   _generator->state[0] = _generator->the_initial_seed & 0xffffffffUL;
   for(j = 1; j < n; j++)

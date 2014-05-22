@@ -15,7 +15,7 @@ TH_API void THTensor_(logNormal)(THTensor *self, THGenerator *_generator, double
 TH_API void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTensor *prob_dist, int n_sample, int with_replacement);
 #endif
 
-#if defined(TH_REAL_IS_LONG)
+#if defined(TH_REAL_IS_BYTE)
 TH_API void THTensor_(getRNGState)(THGenerator *_generator, THTensor *self);
 TH_API void THTensor_(setRNGState)(THGenerator *_generator, THTensor *self);
 #endif
