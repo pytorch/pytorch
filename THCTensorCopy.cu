@@ -103,8 +103,6 @@ THC_API void THCudaTensor_copy(THCudaTensor *self, THCudaTensor *src)
     int number_blocks_dim_y = DIVUP(nblocks, nblocks_x * nblocks_y);
     int nblocks_z = number_blocks_dim_y;
 
-    // printf("%d %d %d \n", nblocks_x, nblocks_y, nblocks_z);
-
     dim3 grid(nblocks_x, nblocks_y, nblocks_z);
 
     THCudaTensor_kernel_copy<<<grid, threads>>>(THCudaTensor_data(self),
