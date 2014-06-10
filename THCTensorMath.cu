@@ -1033,7 +1033,7 @@ void THCudaTensor_norm(THCudaTensor* self, THCudaTensor* src, float value, long 
   }
 }
 
-__global__ void THCudaTensor_kernel_renorm(float *data, const float value, const long size, const float max_norm)
+__global__ void THCudaTensor_kernel_renorm(float *data, const float value, const long size, const float maxnorm)
 {
   __shared__ float buffer[32];
   long tx = threadIdx.x;
@@ -1059,8 +1059,8 @@ __global__ void THCudaTensor_kernel_renorm(float *data, const float value, const
   __syncthreads();
   float norm = pow(buffer[0], 1/value);
   float new_norm = norm;
-  if (new_norm > max_norm)
-    new_norm = max_norm;
+  if (new_norm > maxnorm)
+    new_norm = maxnorm;
   new_norm /= (norm + 1e-7);
   
   // renormalize
@@ -1070,7 +1070,7 @@ __global__ void THCudaTensor_kernel_renorm(float *data, const float value, const
   }
 }
 
-void THCudaTensor_renorm(THCudaTensor* self, THCudaTensor* src, float value, long dimension, float max_norm)
+void THCudaTensor_renorm(THCudaTensor* self, THCudaTensor* src, float value, long dimension, float maxnorm)
 {
   THCudaTensor *self_;
   THCudaTensor *src_ = THCudaTensor_newTranspose(src, dimension, 0);
@@ -1083,7 +1083,7 @@ void THCudaTensor_renorm(THCudaTensor* self, THCudaTensor* src, float value, lon
   dim3 grid(data->size[0]);
   dim3 threads(min(32,size));
 
-  THCudaTensor_kernel_renorm<<<grid, threads>>>(THCudaTensor_data(data), value, size, max_norm);
+  THCudaTensor_kernel_renorm<<<grid, threads>>>(THCudaTensor_data(data), value, size, maxnorm);
 
   cudaError errcode = cudaGetLastError();
   if(errcode != cudaSuccess)
