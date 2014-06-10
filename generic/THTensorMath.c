@@ -1397,6 +1397,42 @@ accreal THTensor_(normall)(THTensor *tensor, real value)
   }
 }
 
+void THTensor_(renorm)(THTensor *res, THTensor *src, real value, int dimension, real maxnorm)
+{
+  int i;
+  THTensor *rowR, *rowS;
+  
+  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimension)(src), 3, "invalid dimension");
+  THArgCheck(value > 0, 3, "non-positive-norm not supported");
+  
+  rowR = THTensor_(new)();
+  rowS = THTensor_(new)();
+  
+  THTensor_(resizeAs)(res, src);
+   
+  for (i=0; i<src->size[dimension]; i++)
+  {
+    accreal norm, new_norm;
+    
+    THTensor_(select)(rowS, src, dimension, i);
+    THTensor_(select)(rowR, res, dimension, i);
+    
+    TH_TENSOR_APPLY(real, rowS, norm += pow(fabs(*row_data), value);)
+    
+    norm = pow(norm, 1/value);
+    new_norm = min(norm, maxnorm);
+    new_norm /= (norm + 1e-7);
+    
+    TH_TENSOR_APPLY2(
+      real, rowR, real, rowS, 
+      *rowR_data = *rowS_data / new_norm;
+    )
+  }
+  
+  THTensor_(free)(rowR);
+  THTensor_(free)(rowS);
+}
+
 accreal THTensor_(dist)(THTensor *tensor, THTensor *src, real value)
 { 
   real sum = 0;
