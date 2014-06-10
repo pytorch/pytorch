@@ -1033,6 +1033,64 @@ void THCudaTensor_norm(THCudaTensor* self, THCudaTensor* src, float value, long 
   }
 }
 
+__global__ void THCudaTensor_kernel_renorm(float *data, const float value, const long size, const float max_norm)
+{
+  __shared__ float buffer[32];
+  long tx = threadIdx.x;
+  long bx = blockIdx.x;
+  long step = blockDim.x;
+  float row = data + size*bx;
+  
+  buffer[tx] = 0;
+  
+  // get norm of axis
+  for (long i=tx; i<size; i+=step)
+  {
+    buffer[tx] += pow(fabs(row[i]), value);
+  }
+  // add (reduce)
+  for (unsigned int stride = blockDim.x >> 1; stride > 0; stride >>= 1)
+  {
+    __syncthreads();
+    if (tx < stride)
+      buffer[tx] += buffer[tx+stride];
+  }
+  // clip norms
+  __syncthreads();
+  float norm = pow(buffer[0], 0.5);
+  float new_norm = norm;
+  if (new_norm > max_norm)
+    new_norm = max_norm;
+  new_norm /= (norm + 1e-7)
+  
+  // renormalize
+  for (long i=tx; i<size; i+=step)
+  {
+    row[i] *= new_norm
+  }
+}
+
+void THCudaTensor_renorm(THCudaTensor* self, THCudaTensor* src, float value, long dimension, float max_norm)
+{
+  THCudaTensor *self_;
+  THCudaTensor *src_ = THCudaTensor_newTranspose(src, dimension, 0);
+  THCudaTensor *data = THCudaTensor_newClone(src_);
+  long size = THCudaTensor_nElement(data)/data->size[0];
+
+  dim3 grid(data->size[0]);
+  dim3 threads(min(32,size));
+
+  THCudaTensor_kernel_renorm<<<grid, threads>>>(THCudaTensor_data(data), value, size, max_norm);
+
+  cudaError errcode = cudaGetLastError();
+  if(errcode != cudaSuccess)
+    THError(cudaGetErrorString(errcode));
+  
+  THCudaTensor_free(src_);
+  self_ = THCudaTensor_newTranspose(data, dimension, 0); 
+  THCudaTensor_freeCopyTo(self, self_);
+  THCudaTensor_free(data);
+}
 
 struct dist_functor
 {
