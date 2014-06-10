@@ -1416,17 +1416,19 @@ void THTensor_(renorm)(THTensor *res, THTensor *src, real value, int dimension, 
     
     THTensor_(select)(rowS, src, dimension, i);
     THTensor_(select)(rowR, res, dimension, i);
-    
-    TH_TENSOR_APPLY(real, rowS, norm += pow(fabs(*row_data), value);)
+    TH_TENSOR_APPLY(real, rowS, norm += pow(fabs(*rowS_data), value););
     
     norm = pow(norm, 1/value);
-    new_norm = min(norm, maxnorm);
-    new_norm /= (norm + 1e-7);
-    
-    TH_TENSOR_APPLY2(
-      real, rowR, real, rowS, 
-      *rowR_data = *rowS_data / new_norm;
-    )
+    if (norm > maxnorm)
+    {
+      new_norm = maxnorm / (norm + 1e-7);
+      TH_TENSOR_APPLY2(
+        real, rowR, real, rowS, 
+        *rowR_data = (*rowS_data) * new_norm;
+      )
+    }
+    else
+      THTensor_(copy)(rowR, rowS);
   }
   
   THTensor_(free)(rowR);
