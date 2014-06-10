@@ -1039,7 +1039,7 @@ __global__ void THCudaTensor_kernel_renorm(float *data, const float value, const
   long tx = threadIdx.x;
   long bx = blockIdx.x;
   long step = blockDim.x;
-  float row = data + size*bx;
+  float *row = data + size*bx;
   
   buffer[tx] = 0;
   
@@ -1058,15 +1058,14 @@ __global__ void THCudaTensor_kernel_renorm(float *data, const float value, const
   // clip norms
   __syncthreads();
   float norm = pow(buffer[0], 1/value);
-  float new_norm = norm;
-  if (new_norm > maxnorm)
-    new_norm = maxnorm;
-  new_norm /= (norm + 1e-7);
-  
-  // renormalize
-  for (long i=tx; i<size; i+=step)
+  if (norm > maxnorm) 
   {
-    row[i] *= new_norm;
+    norm = maxnorm / (norm + 1e-7);
+    // renormalize
+    for (long i=tx; i<size; i+=step)
+    {
+      row[i] *= norm;
+    }
   }
 }
 
@@ -1081,7 +1080,7 @@ void THCudaTensor_renorm(THCudaTensor* self, THCudaTensor* src, float value, lon
   THArgCheck(value > 0, 3, "non-positive-norm not supported");
 
   dim3 grid(data->size[0]);
-  dim3 threads(min(32,size));
+  dim3 threads(32);
 
   THCudaTensor_kernel_renorm<<<grid, threads>>>(THCudaTensor_data(data), value, size, maxnorm);
 
