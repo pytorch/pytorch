@@ -1077,7 +1077,8 @@ void THCudaTensor_renorm(THCudaTensor* self, THCudaTensor* src, float value, lon
   long size = THCudaTensor_nElement(data)/data->size[0];
   
   THArgCheck(dimension >= 0 && dimension < THCudaTensor_nDimension(src), 3, "invalid dimension");
-  THArgCheck(value > 0, 3, "non-positive-norm not supported");
+  THArgCheck(value > 0, 2, "non-positive-norm not supported");
+  THArgCheck(THCudaTensor_nDimension(src) > 1, 1, "need at least 2 dimensions");
 
   dim3 grid(data->size[0]);
   dim3 threads(32);
