@@ -2,6 +2,10 @@
 #include "THCGeneral.h"
 #include "THCTensor.h"
 
+#ifndef DIVUP
+#define DIVUP(x, y) (((x) + (y) - 1) / (y))
+#endif
+
 static void THCudaTensor_computesz(THCudaTensor *self, long **sz_, long **st_)
 {
   long *sz, *st, *szh;
@@ -33,7 +37,7 @@ __global__ void THCudaTensor_kernel_copy(float *dst,
                                          long *src_sz, long *src_st, int src_dim,
                                          long n_elem, long innerdim)
 {
-  long k = blockIdx.x*blockDim.y + threadIdx.y;
+  long k = (blockIdx.z * gridDim.x * gridDim.y + blockIdx.y * gridDim.x + blockIdx.x)*blockDim.y + threadIdx.y;
 
   long i_start = threadIdx.x * src_st[src_dim-1];
   long i_step = blockDim.x * src_st[src_dim-1];
@@ -83,9 +87,23 @@ THC_API void THCudaTensor_copy(THCudaTensor *self, THCudaTensor *src)
     THCudaTensor_computesz(self, &d_self_sz, &d_self_st);
     THCudaTensor_computesz(src, &d_src_sz, &d_src_st);
 
-    int nblocks = ceil((float)size / (16 * innermostdim ));
     dim3 threads(16,16);
-    dim3 grid(nblocks);
+
+    int nblocks = ceil((float)size / (16 * innermostdim ));
+
+    // if nblocks greater than 65535 then we need to open a second dimension
+#define __MAX_NUM_BLOCKS_PER_GRID_DIM__ 65535
+
+    /* The configuration below can deal with Tensors 
+    * of size up to 65535 * 65535 * 65535 * 16 elements.
+    */
+    int nblocks_x = (nblocks > __MAX_NUM_BLOCKS_PER_GRID_DIM__) ? __MAX_NUM_BLOCKS_PER_GRID_DIM__ : nblocks;
+    int number_blocks_dim_x = DIVUP(nblocks, nblocks_x);
+    int nblocks_y = (number_blocks_dim_x > __MAX_NUM_BLOCKS_PER_GRID_DIM__) ? __MAX_NUM_BLOCKS_PER_GRID_DIM__ : number_blocks_dim_x;
+    int number_blocks_dim_y = DIVUP(nblocks, nblocks_x * nblocks_y);
+    int nblocks_z = number_blocks_dim_y;
+
+    dim3 grid(nblocks_x, nblocks_y, nblocks_z);
 
     THCudaTensor_kernel_copy<<<grid, threads>>>(THCudaTensor_data(self),
                                                 d_self_sz, d_self_st, ndims,
