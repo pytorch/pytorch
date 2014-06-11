@@ -1403,8 +1403,8 @@ void THTensor_(renorm)(THTensor *res, THTensor *src, real value, int dimension, 
   THTensor *rowR, *rowS;
   
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimension)(src), 3, "invalid dimension");
-  THArgCheck(value > 0, 3, "non-positive-norm not supported");
-  THArgCheck(THTensor_(nDimension)(src) > 1, 3, "need at least 2 dimensions");
+  THArgCheck(value > 0, 2, "non-positive-norm not supported");
+  THArgCheck(THTensor_(nDimension)(src) > 1, 1, "need at least 2 dimensions");
   
   rowR = THTensor_(new)();
   rowS = THTensor_(new)();
