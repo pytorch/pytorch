@@ -1081,16 +1081,17 @@ void THCudaTensor_renorm(THCudaTensor* self, THCudaTensor* src, float value, lon
 
   dim3 grid(data->size[0]);
   dim3 threads(32);
-
+  
   THCudaTensor_kernel_renorm<<<grid, threads>>>(THCudaTensor_data(data), value, size, maxnorm);
-
+  
   cudaError errcode = cudaGetLastError();
   if(errcode != cudaSuccess)
     THError(cudaGetErrorString(errcode));
   
   THCudaTensor_free(src_);
   self_ = THCudaTensor_newTranspose(data, dimension, 0); 
-  THCudaTensor_freeCopyTo(self, self_);
+  THCudaTensor_resizeAs(self, self_);
+  THCudaTensor_freeCopyTo(self_, self);
   THCudaTensor_free(data);
 }
 
