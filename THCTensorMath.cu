@@ -1074,8 +1074,10 @@ void THCudaTensor_randn(THCudaTensor *r_, THLongStorage *size)
   THCudaTensor_normal(r_, 0, 1);
 }
 
-__global__ void copyIndexTensor(float *tensor, float *src, long* src_stride, long src_nDim, 
-                               int dim, long *index, long idx_size, long tensor_size, long size_dim)
+__global__ void THCudaTensor_kernel_indexSelect(
+   float *tensor, float *src, long* src_stride, long src_nDim, 
+   int dim, long *index, long idx_size, long tensor_size, long size_dim
+)
 {
   int thread_idx = blockIdx.x * blockDim.x * blockDim.y + threadIdx.y * blockDim.x + threadIdx.x;
 
@@ -1114,41 +1116,40 @@ __global__ void copyIndexTensor(float *tensor, float *src, long* src_stride, lon
 }	
 
 
-void THCudaTensor_indexSelect(THCudaTensor *tensor, THCudaTensor *src, int dim, THLongTensor *index)
+void THCudaTensor_indexSelect(THCudaTensor *res_, THCudaTensor *src, int dim, THLongTensor *indices)
 {
-  THArgCheck(index->nDimension == 1, 3, "Index is supposed to be a vector");
+  THLongStorage *newSize;
+  THCudaTensor *indices_;
+  THCudaStorage *stride_;
+  long nIndex = THLongTensor_nElement(indices);
+  long *index_data, d_index_data;
+  
+  THArgCheck(indices->nDimension == 1, 3, "expecting vector of indices");
   THArgCheck(dim < src->nDimension, 4, "Indexing dim is out of bounds");
   THArgCheck(src->nDimension > 0, 2, "Source tensor is empty");
-
-  long idx_size = THLongTensor_nElement(index);
-  THLongStorage *newSize;
+  
   newSize = THLongStorage_newWithSize(src->nDimension);
-  THLongStorage_rawCopy(newSize,src->size);
-  newSize->data[dim] = idx_size;
-  THCudaTensor_resize(tensor,newSize,NULL);
-
-  long *index_data = THLongTensor_data(index);
-  long *d_index_data;
-  size_t index_size = idx_size * sizeof(long);
-  THCudaCheck(cudaMalloc((void**)&d_index_data, index_size));
-  THCudaCheck(cudaMemcpy(d_index_data, index_data, index_size, cudaMemcpyHostToDevice));
-
-  long tensor_size = 1;
-  for (int i=0; i<newSize->size; i++) {tensor_size *= (long)(newSize->data[i]);}
-
+  THLongStorage_rawCopy(newSize, src->size);
+  newSize->data[dim] = nIndex;
+  THCudaTensor_resize(res_, newSize, NULL);
   THLongStorage_free(newSize);
+  
+  indices_ = THCudaTensor_new();
+  THCudaTensor_copyLong(indices_, indices);
 
   dim3 nthreads(16, 16);
   dim3 nblocks(ceil((float)tensor_size / idx_size / (16*16)));
-
-  long *d_src_stride;
-  THCudaCheck(cudaMalloc((void**)&d_src_stride, src->nDimension * sizeof(long)));
-  THCudaCheck(cudaMemcpy(d_src_stride, src->stride, src->nDimension * sizeof(long), cudaMemcpyHostToDevice));
   
-  copyIndexTensor<<<nblocks, nthreads>>>(THCudaTensor_data(tensor), THCudaTensor_data(src), 
-                                         d_src_stride, src->nDimension, dim, 
-                                         d_index_data, idx_size, tensor_size, 
-                                         src->size[dim]);  
-  THCudaCheck(cudaFree(d_index_data));
-  THCudaCheck(cudaFree(d_src_stride));
+  stride_ = THCudaStorage_new();
+  THCudaStorage_copyLong(stride_, src->stride);
+  
+  THCudaTensor_kernel_indexSelect<<<nblocks, nthreads>>>(
+    THCudaTensor_data(res_), THCudaTensor_data(src), 
+    THCudaTensor_data(stride_), THCudaTensor_data(indices_), 
+    src->nDimension, dim, 
+    THCudaTensor_nElement(res_), src->size[dim]
+  );
+    
+  THCudaStorage_free(stride_);
+  THCudaTensor_free(indices_);
 }
