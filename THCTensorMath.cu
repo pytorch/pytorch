@@ -1073,3 +1073,82 @@ void THCudaTensor_randn(THCudaTensor *r_, THLongStorage *size)
   THCudaTensor_resize(r_, size, NULL);
   THCudaTensor_normal(r_, 0, 1);
 }
+
+__global__ void copyIndexTensor(float *tensor, float *src, long* src_stride, long src_nDim, 
+                               int dim, long *index, long idx_size, long tensor_size, long size_dim)
+{
+  int thread_idx = blockIdx.x * blockDim.x * blockDim.y + threadIdx.y * blockDim.x + threadIdx.x;
+
+  long flat_size = tensor_size / idx_size; 
+  
+  if (thread_idx < flat_size)
+  {
+    long coeff = 0;
+    for (int i=0; i<idx_size; i++)
+    {
+      int leftover = thread_idx;
+      int targetIdx = 0;
+      int srcIdx = 0;
+      long stride_d = 0;
+      for (int d=0; d<src_nDim; d++)
+      {
+        if (d < dim)
+        {
+          stride_d = src_stride[d] / size_dim;
+          coeff = leftover / stride_d;
+          leftover -= coeff * stride_d;
+          targetIdx += coeff * stride_d * idx_size;
+          srcIdx += coeff * src_stride[d];
+        }
+        else if (d > dim)
+        {
+          coeff = leftover / src_stride[d];
+          leftover -= coeff * src_stride[d];
+          targetIdx += coeff * src_stride[d];
+          srcIdx += coeff * src_stride[d];
+        } 
+      }
+      tensor[targetIdx + i*src_stride[dim]] = src[srcIdx + (index[i]-1)*src_stride[dim]];
+    }
+  }
+}	
+
+
+void THCudaTensor_indexSelect(THCudaTensor *tensor, THCudaTensor *src, int dim, THLongTensor *index)
+{
+  THArgCheck(index->nDimension == 1, 3, "Index is supposed to be a vector");
+  THArgCheck(dim < src->nDimension, 4, "Indexing dim is out of bounds");
+  THArgCheck(src->nDimension > 0, 2, "Source tensor is empty");
+
+  long idx_size = THLongTensor_nElement(index);
+  THLongStorage *newSize;
+  newSize = THLongStorage_newWithSize(src->nDimension);
+  THLongStorage_rawCopy(newSize,src->size);
+  newSize->data[dim] = idx_size;
+  THCudaTensor_resize(tensor,newSize,NULL);
+
+  long *index_data = THLongTensor_data(index);
+  long *d_index_data;
+  size_t index_size = idx_size * sizeof(long);
+  THCudaCheck(cudaMalloc((void**)&d_index_data, index_size));
+  THCudaCheck(cudaMemcpy(d_index_data, index_data, index_size, cudaMemcpyHostToDevice));
+
+  long tensor_size = 1;
+  for (int i=0; i<newSize->size; i++) {tensor_size *= (long)(newSize->data[i]);}
+
+  THLongStorage_free(newSize);
+
+  dim3 nthreads(16, 16);
+  dim3 nblocks(ceil((float)tensor_size / idx_size / (16*16)));
+
+  long *d_src_stride;
+  THCudaCheck(cudaMalloc((void**)&d_src_stride, src->nDimension * sizeof(long)));
+  THCudaCheck(cudaMemcpy(d_src_stride, src->stride, src->nDimension * sizeof(long), cudaMemcpyHostToDevice));
+  
+  copyIndexTensor<<<nblocks, nthreads>>>(THCudaTensor_data(tensor), THCudaTensor_data(src), 
+                                         d_src_stride, src->nDimension, dim, 
+                                         d_index_data, idx_size, tensor_size, 
+                                         src->size[dim]);  
+  THCudaCheck(cudaFree(d_index_data));
+  THCudaCheck(cudaFree(d_src_stride));
+}
