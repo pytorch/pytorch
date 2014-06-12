@@ -1075,8 +1075,8 @@ void THCudaTensor_randn(THCudaTensor *r_, THLongStorage *size)
 }
 
 __global__ void THCudaTensor_kernel_indexSelect(
-   float *tensor, float *src, long* src_stride, long src_nDim, 
-   int dim, long *index, long idx_size, long tensor_size, long size_dim
+   float *tensor, float *src, float* src_stride, float *index, 
+   long src_nDim, int dim, long idx_size, long tensor_size, long size_dim
 )
 {
   int thread_idx = blockIdx.x * blockDim.x * blockDim.y + threadIdx.y * blockDim.x + threadIdx.x;
@@ -1146,7 +1146,7 @@ void THCudaTensor_indexSelect(THCudaTensor *res_, THCudaTensor *src, int dim, TH
   THCudaTensor_kernel_indexSelect<<<nblocks, nthreads>>>(
     THCudaTensor_data(res_), THCudaTensor_data(src), 
     THCudaTensor_data(stride_), THCudaTensor_data(indices_), 
-    src->nDimension, dim, 
+    src->nDimension, dim, indices->size[1],
     THCudaTensor_nElement(res_), src->size[dim]
   );
     
