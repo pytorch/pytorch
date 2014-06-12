@@ -1123,7 +1123,7 @@ void THCudaTensor_indexSelect(THCudaTensor *res_, THCudaTensor *src, int dim, TH
   THLongStorage *newSize;
   THCudaTensor *indices_;
   long *stride_;
-  long nIndex = THLongTensor_nElement(indices);
+  long nIndex = indices->size[0];
   long nRes;
   
   THArgCheck(indices->nDimension == 1, 3, "expecting vector of indices");
@@ -1136,7 +1136,7 @@ void THCudaTensor_indexSelect(THCudaTensor *res_, THCudaTensor *src, int dim, TH
   THCudaTensor_resize(res_, newSize, NULL);
   THLongStorage_free(newSize);
   
-  indices_ = THCudaTensor_new();
+  indices_ = THCudaTensor_newWithSize1d(nIndex);
   THCudaTensor_copyLong(indices_, indices);
 
   nRes = THCudaTensor_nElement(res_);
@@ -1149,7 +1149,7 @@ void THCudaTensor_indexSelect(THCudaTensor *res_, THCudaTensor *src, int dim, TH
   THCudaTensor_kernel_indexSelect<<<nblocks, nthreads>>>(
     THCudaTensor_data(res_), THCudaTensor_data(src), 
     stride_, THCudaTensor_data(indices_), 
-    src->nDimension, dim, indices->size[1], nRes, src->size[dim]
+    src->nDimension, dim, indices->size[0], nRes, src->size[dim]
   );
     
   THCudaCheck(cudaFree(stride_));
