@@ -77,5 +77,8 @@ THC_API float THCudaTensor_dist(THCudaTensor *self, THCudaTensor *src, float val
 THC_API void THCudaTensor_rand(THCudaTensor *r_, THLongStorage *size);
 THC_API void THCudaTensor_randn(THCudaTensor *r_, THLongStorage *size);
 
+THC_API void THCudaTensor_indexFill(THCudaTensor *tensor, int dim, THLongTensor *index, float val);
+THC_API void THCudaTensor_indexSelect(THCudaTensor *tensor, THCudaTensor *src, int dim, THLongTensor *index);
+
 
 #endif
