@@ -1418,9 +1418,16 @@ void THTensor_(renorm)(THTensor *res, THTensor *src, real value, int dimension, 
     
     THTensor_(select)(rowS, src, dimension, i);
     THTensor_(select)(rowR, res, dimension, i);
-    TH_TENSOR_APPLY(real, rowS, norm += pow(fabs(*rowS_data), value););
-    
+    if (value == 1) {
+      TH_TENSOR_APPLY(real, rowS, norm += fabs(*rowS_data););
+    } else if (value == 2) {
+      TH_TENSOR_APPLY(real, rowS, accreal z = *rowS_data; norm += z*z;);
+    } else {
+      TH_TENSOR_APPLY(real, rowS, norm += pow(fabs(*rowS_data), value););
+    }
+
     norm = pow(norm, 1/value);
+
     if (norm > maxnorm)
     {
       new_norm = maxnorm / (norm + 1e-7);
