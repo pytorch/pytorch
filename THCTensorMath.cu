@@ -1136,6 +1136,77 @@ void THCudaTensor_randn(THCudaTensor *r_, THLongStorage *size)
   THCudaTensor_normal(r_, 0, 1);
 }
 
+__global__ void THCudaTensor_kernel_indexCopy(
+   float *res, float *src, long* res_stride, float *index, 
+   long res_nDim, int dim, long idx_size, long src_size, long size_dim
+)
+{
+  int thread_idx = blockIdx.x * blockDim.x * blockDim.y + threadIdx.y * blockDim.x + threadIdx.x;
+
+  long flat_size = src_size / idx_size; 
+  
+  if (thread_idx < flat_size)
+  {
+    long coeff = 0;
+    for (int i=0; i<idx_size; i++)
+    {
+      int leftover = thread_idx;
+      int targetIdx = 0;
+      int resIdx = 0;
+      for (int d=0; d<res_nDim; d++)
+      {
+        if (d < dim)
+        {
+          long stride_d = res_stride[d] / size_dim;
+          coeff = leftover / stride_d;
+          leftover -= coeff * stride_d;
+          targetIdx += coeff * stride_d * idx_size;
+          resIdx += coeff * res_stride[d];
+        }
+        else if (d > dim)
+        {
+          coeff = leftover / res_stride[d];
+          leftover -= coeff * res_stride[d];
+          targetIdx += coeff * res_stride[d];
+          resIdx += coeff * res_stride[d];
+        } 
+      }
+      res[resIdx + ((int)(index[i])-1)*res_stride[dim]] = src[targetIdx + i*res_stride[dim]];
+    }
+  }
+}	
+
+void THCudaTensor_indexCopy(THCudaTensor *res_, int dim, THLongTensor *indices, THCudaTensor *src)
+{
+  THCudaTensor *indices_;
+  long *stride_;
+  long nIndex = indices->size[0];
+  long nRes;
+  
+  THArgCheck(indices->nDimension == 1, 3, "expecting vector of indices");
+  THArgCheck(dim < src->nDimension, 4, "Indexing dim is out of bounds");
+  THArgCheck(src->nDimension > 0, 2, "Source tensor is empty");
+
+  indices_ = THCudaTensor_newWithSize1d(nIndex);
+  THCudaTensor_copyLong(indices_, indices);
+
+  nRes = THCudaTensor_nElement(res_);
+  dim3 nthreads(16, 16);
+  dim3 nblocks(ceil((float)nRes / nIndex / (16*16)));
+  
+  THCudaCheck(cudaMalloc((void**)&stride_, res_->nDimension * sizeof(long)));
+  THCudaCheck(cudaMemcpy(stride_, res_->stride, res_->nDimension * sizeof(long), cudaMemcpyHostToDevice));
+  
+  THCudaTensor_kernel_indexCopy<<<nblocks, nthreads>>>(
+    THCudaTensor_data(res_), THCudaTensor_data(src), 
+    stride_, THCudaTensor_data(indices_), 
+    res_->nDimension, dim, indices->size[0], THCudaTensor_nElement(src), res_->size[dim]
+  );
+    
+  THCudaCheck(cudaFree(stride_));
+  THCudaTensor_free(indices_);
+}
+
 __global__ void THCudaTensor_kernel_indexFill(
    float *tensor, long* stride, float *index, long src_nDim, 
    int dim, long idx_size, long tensor_size, long size_dim, float val
@@ -1189,7 +1260,6 @@ void THCudaTensor_indexFill(THCudaTensor *res_, int dim, THLongTensor *indices, 
   
   nRes = THCudaTensor_nElement(res_) / res_->size[dim] * nIndex;
   
-
   dim3 nthreads(16, 16);
   dim3 nblocks(ceil((float)nRes / nIndex / (16*16)));
   
