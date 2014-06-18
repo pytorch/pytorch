@@ -560,7 +560,7 @@ void THCudaTensor_addmm(THCudaTensor *self, float beta, float alpha, THCudaTenso
     THError("size mismatch"); 
 
   /* self */
-  if(self->stride[0] == 1)
+  if ((self->stride[0] == 1) && (self->stride[1] > 1))
   {
     transpose = 'n';
     self_ = self;
