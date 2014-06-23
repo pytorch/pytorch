@@ -220,9 +220,6 @@ TH_API void THTensor_(getRNGState)(THGenerator *_generator, THTensor *self)
   THArgCheck(THTensor_(isContiguous)(self), 1, "RNG state needs to be contiguous");
   rng_state = (THGenerator *)THTensor_(data)(self);
   THGenerator_copy(rng_state, _generator);
-
-  /* We must make the 'next' pointer in RNGState a relative offset, rather than an absolute address */
-  rng_state->next = (unsigned long *)(_generator->next - _generator->state);
 }
 
 TH_API void THTensor_(setRNGState)(THGenerator *_generator, THTensor *self)
@@ -233,9 +230,6 @@ TH_API void THTensor_(setRNGState)(THGenerator *_generator, THTensor *self)
   THArgCheck(THTensor_(isContiguous)(self), 1, "RNG state needs to be contiguous");
   rng_state = (THGenerator *)THTensor_(data)(self);
   THGenerator_copy(_generator, rng_state);
-
-  /* We must make the 'next' pointer in Generator an absolute address, it is stored as a relative offset. */
-  _generator->next = (unsigned long *)(_generator->state + (long)(rng_state->next));
 }
 #endif
 
