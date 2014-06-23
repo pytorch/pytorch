@@ -8,6 +8,7 @@
 THGenerator* THGenerator_new()
 {
   THGenerator *self = THAlloc(sizeof(THGenerator));
+  memset(self, 0, sizeof(THGenerator));
   self->left = 1;
   self->initf = 0;
   self->normal_is_valid = 0;
