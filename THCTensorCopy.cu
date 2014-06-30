@@ -71,8 +71,10 @@ __global__ void THCudaTensor_kernel_copy(float *dst,
 }
 
 THC_API void THCudaTensor_copy(THCudaTensor *self, THCudaTensor *src)
-{
+{  
   THArgCheck(THCudaTensor_nElement(self) == THCudaTensor_nElement(src), 2, "sizes do not match"); 
+
+  if (THCudaTensor_nDimension(self) == 0) return; /* zero-dimension tensor, copy nothing */
 
   if(THCudaTensor_isContiguous(self) && THCudaTensor_isContiguous(src))
     THCudaCheck(cudaMemcpy(self->storage->data + self->storageOffset, src->storage->data + src->storageOffset, THCudaTensor_nElement(src) * sizeof(float), cudaMemcpyDeviceToDevice));
