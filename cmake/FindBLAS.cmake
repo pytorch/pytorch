@@ -112,7 +112,7 @@ if((NOT BLAS_LIBRARIES)
   BLAS
   sgemm
   ""
-  "openblas;gfortran")
+  "openblas")
   if(BLAS_LIBRARIES)
     set(BLAS_INFO "open")
   endif(BLAS_LIBRARIES)
@@ -125,7 +125,7 @@ if((NOT BLAS_LIBRARIES)
   BLAS
   sgemm
   ""
-  "openblas;gfortran;pthread")
+  "openblas;pthread")
   if(BLAS_LIBRARIES)
     set(BLAS_INFO "open")
   endif(BLAS_LIBRARIES)
