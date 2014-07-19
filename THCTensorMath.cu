@@ -826,8 +826,8 @@ float THCudaTensor_stdall(THCudaTensor *self)
 template<class Op>
 void THCudaTensor_logicalValue(THCudaTensor *self_, THCudaTensor *src, Op op)
 {
-  THArgCheck(THCudaTensor_nElement(self_) == THCudaTensor_nElement(src), 2, "size do not match");
-
+  THCudaTensor_resizeAs(self_, src);
+  
   THCudaTensor *self = THCudaTensor_newContiguous(self_);
   long size = THCudaTensor_nElement(self);
   src = THCudaTensor_newContiguous(src);
@@ -928,8 +928,7 @@ void THCudaTensor_neValue(THCudaTensor *self_, THCudaTensor *src, float value)
 template<class Op>
 void THCudaTensor_logicalTensor(THCudaTensor *self_, THCudaTensor *src1, THCudaTensor *src2, Op op)
 {
-  THArgCheck(THCudaTensor_nElement(self_) == THCudaTensor_nElement(src1), 2, "size does not match");
-  THArgCheck(THCudaTensor_nElement(self_) == THCudaTensor_nElement(src2), 3, "size does not match");
+  THCudaTensor_resizeAs(self_, src1);
 
   THCudaTensor *self = THCudaTensor_newContiguous(self_);
   long size = THCudaTensor_nElement(self);
