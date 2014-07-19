@@ -130,8 +130,7 @@ void THCudaTensor_cmul(THCudaTensor *self_, THCudaTensor *src1, THCudaTensor *sr
 
 void THCudaTensor_cdiv(THCudaTensor *self_, THCudaTensor *src)
 {
-  THArgCheck(THCudaTensor_nElement(self_) == THCudaTensor_nElement(src), 2, "size do not match");
-
+  THCudaTensor_resizeAs(self_, src);
   {
     THCudaTensor *self = THCudaTensor_newContiguous(self_);
     long size = THCudaTensor_nElement(self);
