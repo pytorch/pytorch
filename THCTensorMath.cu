@@ -156,9 +156,7 @@ __global__ void THCudaTensor_kernel_addcmul(float *data, float value, float *src
 
 void THCudaTensor_addcmul(THCudaTensor *self_, float value, THCudaTensor *src1, THCudaTensor *src2)
 {
-  THArgCheck(THCudaTensor_nElement(self_) == THCudaTensor_nElement(src1), 3, "size do not match");
-  THArgCheck(THCudaTensor_nElement(self_) == THCudaTensor_nElement(src2), 4, "size do not match");
-
+  THCudaTensor_resizeAs(self_, src1);
   {
     THCudaTensor *self = THCudaTensor_newContiguous(self_);
     long size = THCudaTensor_nElement(self);
@@ -193,9 +191,7 @@ __global__ void THCudaTensor_kernel_addcdiv(float *data, float value, float *src
 
 void THCudaTensor_addcdiv(THCudaTensor *self_, float value, THCudaTensor *src1, THCudaTensor *src2)
 {
-  THArgCheck(THCudaTensor_nElement(self_) == THCudaTensor_nElement(src1), 3, "size do not match");
-  THArgCheck(THCudaTensor_nElement(self_) == THCudaTensor_nElement(src2), 4, "size do not match");
-
+  THCudaTensor_resizeAs(self_, src1);
   {
     THCudaTensor *self = THCudaTensor_newContiguous(self_);
     long size = THCudaTensor_nElement(self);
