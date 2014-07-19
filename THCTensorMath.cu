@@ -89,9 +89,7 @@ void THCudaTensor_cadd(THCudaTensor *self_, float value, THCudaTensor *src)
 
 void THCudaTensor_cadd_tst(THCudaTensor *self_, THCudaTensor* src1, float value, THCudaTensor *src2)
 {
-  THArgCheck(THCudaTensor_nElement(self_) == THCudaTensor_nElement(src1), 3, "size do not match");
-  THArgCheck(THCudaTensor_nElement(self_) == THCudaTensor_nElement(src2), 3, "size do not match");
-
+  THCudaTensor_resizeAs(self_, src1);
   {
     THCudaTensor *self = THCudaTensor_newContiguous(self_);
 
