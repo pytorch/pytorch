@@ -12,6 +12,9 @@ cudaTextureObject_t THCudaTensor_getTextureObject(THCudaTensor *self)
                                                   cudaChannelFormatKindFloat);
   struct cudaTextureDesc texDesc;
   memset(&texDesc, 0, sizeof(texDesc));
-  checkCudaErrors(cudaCreateTextureObject(&texObj, &resDesc, &texDesc, NULL));
+  cudaCreateTextureObject(&texObj, &resDesc, &texDesc, NULL);
+  cudaError errcode = cudaGetLastError();
+  if(errcode != cudaSuccess)
+    THError(cudaGetErrorString(errcode));
   return texObj;
 }
