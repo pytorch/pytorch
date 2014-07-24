@@ -531,6 +531,19 @@ int THTensor_(isContiguous)(const THTensor *self)
   return 1;
 }
 
+int THTensor_(isSameSizeAs)(const THTensor *self, const THTensor* src)
+{
+  int d;
+  if (self->nDimension != src->nDimension)
+    return 0;
+  for(d = 0; d < self->nDimension; ++d)
+  {
+    if(self->size[d] != src->size[d])
+      return 0;
+  }
+  return 1;
+}
+
 long THTensor_(nElement)(const THTensor *self)
 {
   if(self->nDimension == 0)
