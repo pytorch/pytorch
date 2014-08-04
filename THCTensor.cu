@@ -14,7 +14,13 @@ cudaTextureObject_t THCudaTensor_getTextureObject(THCudaTensor *self)
   memset(&texDesc, 0, sizeof(texDesc));
   cudaCreateTextureObject(&texObj, &resDesc, &texDesc, NULL);
   cudaError errcode = cudaGetLastError();
-  if(errcode != cudaSuccess)
-    THError(cudaGetErrorString(errcode));
+  if(errcode != cudaSuccess) {
+    if (THCudaTensor_nElement(self) > 2>>27)
+      THError("Failed to create texture object, "
+              "nElement:%ld exceeds 27-bit addressing required for tex1Dfetch. Cuda Error: %s", 
+              THCudaTensor_nElement(self), cudaGetErrorString(errcode));
+    else
+      THError("Failed to create texture object: %s", cudaGetErrorString(errcode));
+  }
   return texObj;
 }
