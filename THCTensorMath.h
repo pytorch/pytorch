@@ -14,7 +14,7 @@ THC_API void THCudaTensor_div(THCudaTensor *self, float value);
 THC_API void THCudaTensor_cadd(THCudaTensor *self, float value, THCudaTensor *src);  
 THC_API void THCudaTensor_cadd_tst(THCudaTensor *self, THCudaTensor *src1, float value, THCudaTensor *src2);
 THC_API void THCudaTensor_cmul(THCudaTensor *self, THCudaTensor *src1, THCudaTensor *src2);
-THC_API void THCudaTensor_cdiv(THCudaTensor *self, THCudaTensor *src);
+THC_API void THCudaTensor_cdiv(THCudaTensor *self, THCudaTensor *src1, THCudaTensor *src2);
 
 THC_API void THCudaTensor_addcmul(THCudaTensor *self, float value, THCudaTensor *src1, THCudaTensor *src2);
 THC_API void THCudaTensor_addcdiv(THCudaTensor *self, float value, THCudaTensor *src1, THCudaTensor *src2);
