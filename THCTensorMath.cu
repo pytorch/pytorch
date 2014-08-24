@@ -1223,6 +1223,7 @@ void THCudaTensor_indexCopy(THCudaTensor *res_, int dim, THLongTensor *indices, 
   THArgCheck(src->nDimension > 0, 2, "Source tensor is empty");
   THArgCheck(nIndex == src->size[dim], 4, "length of src.size[dim] is not equal to length of indices");
 
+  src = THCudaTensor_newContiguous(src);
   indices_ = THCudaTensor_newWithSize1d(nIndex);
   THCudaTensor_copyLong(indices_, indices);
 
@@ -1242,6 +1243,7 @@ void THCudaTensor_indexCopy(THCudaTensor *res_, int dim, THLongTensor *indices, 
     
   THCudaCheck(cudaFree(stride_));
   THCudaTensor_free(indices_);
+  THCudaTensor_free(src);
 }
 
 
