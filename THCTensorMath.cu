@@ -693,24 +693,28 @@ void THCudaTensor_addr(THCudaTensor *self, float alpha, THCudaTensor *vec1, THCu
   THCublasCheck();
 }
 
-#define IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(NAME, CFUNC)                   \
-  struct NAME##_functor                                                \
-  {                                                                     \
-    __host__ __device__ float operator()(const float& x) const          \
-    {                                                                   \
-      return CFUNC(x);                                                  \
-    }                                                                   \
-  };                                                                    \
-                                                                        \
-  void THCudaTensor_##NAME(THCudaTensor *self_)                         \
-  {                                                                     \
-    THCudaTensor *self = THCudaTensor_newContiguous(self_);             \
-    long size = THCudaTensor_nElement(self);                            \
-    thrust::device_ptr<float> self_data(THCudaTensor_data(self));       \
-                                                                        \
-    thrust::transform(self_data, self_data+size, self_data, NAME##_functor()); \
-                                                                        \
-    THCudaTensor_freeCopyTo(self, self_);                               \
+#define IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(NAME, CFUNC)                        \
+  struct NAME##_functor                                                      \
+  {                                                                          \
+    __host__ __device__ float operator()(const float& x) const               \
+    {                                                                        \
+      return CFUNC(x);                                                       \
+    }                                                                        \
+  };                                                                         \
+                                                                             \
+  void THCudaTensor_##NAME(THCudaTensor *self_, THCudaTensor *src)           \
+  {                                                                          \
+    THCudaTensor_resizeAs(self_, src);                                       \
+    THCudaTensor *self = THCudaTensor_newContiguous(self_);                  \
+    src = THCudaTensor_newContiguous(src);                                   \
+    long size = THCudaTensor_nElement(self);                                 \
+    thrust::device_ptr<float> self_data(THCudaTensor_data(self));            \
+    thrust::device_ptr<float> src_data(THCudaTensor_data(src));              \
+                                                                             \
+    thrust::transform(src_data, src_data+size, self_data, NAME##_functor()); \
+                                                                             \
+    THCudaTensor_free(src);                                                  \
+    THCudaTensor_freeCopyTo(self, self_);                                    \
   }
 
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(log, log)
@@ -744,7 +748,7 @@ struct pow_functor
 
 void THCudaTensor_pow(THCudaTensor *self_, THCudaTensor *src, float value)
 {
-  THArgCheck(THCudaTensor_nElement(self_) == THCudaTensor_nElement(src), 2, "sizes do not match");
+  THCudaTensor_resizeAs(self_, src);
   THCudaTensor *self = THCudaTensor_newContiguous(self_);
   src = THCudaTensor_newContiguous(src);
   long size = THCudaTensor_nElement(self);
@@ -768,20 +772,17 @@ struct sign_functor
 
 void THCudaTensor_sign(THCudaTensor *self_, THCudaTensor *src)
 {
-  THArgCheck(THCudaTensor_nElement(self_) == THCudaTensor_nElement(src), 2, "size do not match");
+  THCudaTensor_resizeAs(self_, src);
+  THCudaTensor *self = THCudaTensor_newContiguous(self_);
+  long size = THCudaTensor_nElement(self);
+  src = THCudaTensor_newContiguous(src);
+  thrust::device_ptr<float> self_data(THCudaTensor_data(self));
+  thrust::device_ptr<float> src_data(THCudaTensor_data(src));
 
-  {
-    THCudaTensor *self = THCudaTensor_newContiguous(self_);
-    long size = THCudaTensor_nElement(self);
-    src = THCudaTensor_newContiguous(src);
-    thrust::device_ptr<float> self_data(THCudaTensor_data(self));
-    thrust::device_ptr<float> src_data(THCudaTensor_data(src));
+  thrust::transform(src_data, src_data+size, self_data, sign_functor());
 
-    thrust::transform(src_data, src_data+size, self_data, sign_functor());
-
-    THCudaTensor_free(src);
-    THCudaTensor_freeCopyTo(self, self_);
-  }
+  THCudaTensor_free(src);
+  THCudaTensor_freeCopyTo(self, self_);
 }
 
 float THCudaTensor_meanall(THCudaTensor *self)
