@@ -5,6 +5,32 @@ void THCudaInit(void)
 {
   if(cublasInit() != CUBLAS_STATUS_SUCCESS)
     THError("unable to initialize cublas");
+
+  int count = 0;
+  THCudaCheck(cudaGetDeviceCount(&count));
+
+  if(count>1)
+  {
+    int device = 0;
+    THCudaCheck(cudaGetDevice(&device));
+
+    int i,j;
+    for(i=0; i < count; ++i)
+    {
+      THCudaCheck(cudaSetDevice(i));
+      for (j=0; j < count; ++j)
+      {
+	if(i != j)
+	{
+	  int can = 0;
+	  THCudaCheck(cudaDeviceCanAccessPeer(&can, i, j));
+	  if(can)
+	    THCudaCheck(cudaDeviceEnablePeerAccess(j, 0));
+	}
+      }
+    }
+    THCudaCheck(cudaSetDevice(device));
+  }
 }
 
 void THCudaShutdown(void)
