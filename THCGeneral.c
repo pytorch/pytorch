@@ -1,5 +1,6 @@
 #include "THCGeneral.h"
 #include "TH.h"
+#include "THCTensorRandom.h"
 
 void THCudaInit(void)
 {
@@ -9,28 +10,26 @@ void THCudaInit(void)
   int count = 0;
   THCudaCheck(cudaGetDeviceCount(&count));
 
-  if(count>1)
-  {
-    int device = 0;
-    THCudaCheck(cudaGetDevice(&device));
+  int device = 0;
+  THCudaCheck(cudaGetDevice(&device));
 
-    int i,j;
-    for(i=0; i < count; ++i)
+  int i,j;
+  for(i=0; i < count; ++i)
+  {
+    THCudaCheck(cudaSetDevice(i));
+    THCRandom_manualSeed(THCRandom_initialSeed());
+    for (j=0; j < count; ++j)
     {
-      THCudaCheck(cudaSetDevice(i));
-      for (j=0; j < count; ++j)
+      if(i != j)
       {
-	if(i != j)
-	{
-	  int can = 0;
-	  THCudaCheck(cudaDeviceCanAccessPeer(&can, i, j));
-	  if(can)
-	    THCudaCheck(cudaDeviceEnablePeerAccess(j, 0));
-	}
+        int can = 0;
+        THCudaCheck(cudaDeviceCanAccessPeer(&can, i, j));
+        if(can)
+          THCudaCheck(cudaDeviceEnablePeerAccess(j, 0));
       }
     }
-    THCudaCheck(cudaSetDevice(device));
   }
+  THCudaCheck(cudaSetDevice(device));
 }
 
 void THCudaShutdown(void)
