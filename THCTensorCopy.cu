@@ -77,7 +77,7 @@ THC_API void THCudaTensor_copy(THCudaTensor *self, THCudaTensor *src)
   if (THCudaTensor_nDimension(self) == 0) return; /* zero-dimension tensor, copy nothing */
 
   if(THCudaTensor_isContiguous(self) && THCudaTensor_isContiguous(src))
-    THCudaCheck(cudaMemcpy(self->storage->data + self->storageOffset, src->storage->data + src->storageOffset, THCudaTensor_nElement(src) * sizeof(float), cudaMemcpyDeviceToDevice));
+    THCudaCheck(cudaMemcpyAsync(self->storage->data + self->storageOffset, src->storage->data + src->storageOffset, THCudaTensor_nElement(src) * sizeof(float), cudaMemcpyDeviceToDevice));
   else
   {    
     long *d_self_sz, *d_self_st, *d_src_sz, *d_src_st;

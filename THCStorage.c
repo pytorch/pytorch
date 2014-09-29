@@ -100,31 +100,6 @@ void THCudaStorage_retain(THCudaStorage *self)
     ++self->refcount;
 }
 
-void THCudaStorage_resize(THCudaStorage *self, long size)
-{
-  THArgCheck(size >= 0, 2, "invalid size");
-
-  if(!(self->flag & TH_STORAGE_RESIZABLE))
-    return;
-
-  if(size == 0)
-  {
-    if(self->flag & TH_STORAGE_FREEMEM)
-      THCudaCheck(cudaFree(self->data));
-    self->data = NULL;
-    self->size = 0;
-  }
-  else
-  {
-    float *data;
-    THCudaCheck(cudaMalloc((void**)(&data), size * sizeof(float)));
-    THCudaCheck(cudaMemcpy(data, self->data, THMin(self->size, size) * sizeof(float), cudaMemcpyDeviceToDevice));
-    THCudaCheck(cudaFree(self->data));    
-    self->data = data;
-    self->size = size;
-  }  
-}
-
 void THCudaStorage_free(THCudaStorage *self)
 {
   if(!(self->flag & TH_STORAGE_REFCOUNTED))
@@ -136,23 +111,6 @@ void THCudaStorage_free(THCudaStorage *self)
       THCudaCheck(cudaFree(self->data));
     THFree(self);
   }
-}
-
-void THCudaStorage_rawCopy(THCudaStorage *self, float *src)
-{
-  THCudaCheck(cudaMemcpy(self->data, src, self->size * sizeof(float), cudaMemcpyDeviceToDevice));
-}
-
-void THCudaStorage_copy(THCudaStorage *self, THCudaStorage *src)
-{
-  THArgCheck(self->size == src->size, 2, "size does not match");
-  THCudaCheck(cudaMemcpy(self->data, src->data, self->size * sizeof(float), cudaMemcpyDeviceToDevice));
-}
-
-void THCudaStorage_copyCuda(THCudaStorage *self, THCudaStorage *src)
-{
-  THArgCheck(self->size == src->size, 2, "size does not match");
-  THCudaCheck(cudaMemcpy(self->data, src->data, self->size * sizeof(float), cudaMemcpyDeviceToDevice));
 }
 
 void THCudaStorage_copyFloat(THCudaStorage *self, struct THFloatStorage *src)
