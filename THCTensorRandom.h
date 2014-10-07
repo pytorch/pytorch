@@ -3,6 +3,9 @@
 
 #include "THCTensor.h"
 
+THC_API void THCRandom_init(int num_devices, int current_device);
+THC_API void THCRandom_shutdown();
+THC_API void THCRandom_setGenerator(int device);
 THC_API unsigned long THCRandom_seed();
 THC_API void THCRandom_manualSeed(unsigned long the_seed_);
 THC_API unsigned long THCRandom_initialSeed();

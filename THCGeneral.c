@@ -13,11 +13,12 @@ void THCudaInit(void)
   int device = 0;
   THCudaCheck(cudaGetDevice(&device));
 
+  THCRandom_init(count, device);
+
   int i,j;
   for(i=0; i < count; ++i)
   {
     THCudaCheck(cudaSetDevice(i));
-    THCRandom_manualSeed(THCRandom_initialSeed());
     for (j=0; j < count; ++j)
     {
       if(i != j)
@@ -34,6 +35,8 @@ void THCudaInit(void)
 
 void THCudaShutdown(void)
 {
+  THCRandom_shutdown();
+
   if(cublasShutdown() != CUBLAS_STATUS_SUCCESS)
     THError("unable to shutdown cublas");
 }
