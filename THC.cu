@@ -1,6 +1,7 @@
 
 /* thrust library does not allow multiple files */
 
+#include "THCBlas.cu"
 #include "THCStorage.cu"
 #include "THCTensor.cu"
 #include "THCTensorCopy.cu"

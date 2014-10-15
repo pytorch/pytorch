@@ -1,5 +1,6 @@
 #include "THCTensorMath.h"
 #include "THCGeneral.h"
+#include "THCBlas.h"
 #include "THCTensorRandom.h"
 
 #include <thrust/fill.h>
@@ -55,8 +56,7 @@ void THCudaTensor_mul(THCudaTensor *self_, float value)
 {
   THCudaTensor *self = THCudaTensor_newContiguous(self_);
 
-  cublasSscal(THCudaTensor_nElement(self), value, THCudaTensor_data(self), 1);
-  THCublasCheck();
+  THCudaBlas_scal(THCudaTensor_nElement(self), value, THCudaTensor_data(self), 1);
 
   THCudaTensor_freeCopyTo(self, self_);
 }
@@ -65,8 +65,7 @@ void THCudaTensor_div(THCudaTensor *self_, float value)
 {
   THCudaTensor *self = THCudaTensor_newContiguous(self_);
 
-  cublasSscal(THCudaTensor_nElement(self), 1/value, THCudaTensor_data(self), 1);
-  THCublasCheck();
+  THCudaBlas_scal(THCudaTensor_nElement(self), 1/value, THCudaTensor_data(self), 1);
 
   THCudaTensor_freeCopyTo(self, self_);
 }
@@ -79,8 +78,7 @@ void THCudaTensor_cadd(THCudaTensor *self_, float value, THCudaTensor *src)
     THCudaTensor *self = THCudaTensor_newContiguous(self_);
     src = THCudaTensor_newContiguous(src);
 
-    cublasSaxpy(THCudaTensor_nElement(self), value, THCudaTensor_data(src), 1, THCudaTensor_data(self), 1);
-    THCublasCheck();
+    THCudaBlas_axpy(THCudaTensor_nElement(self), value, THCudaTensor_data(src), 1, THCudaTensor_data(self), 1);
 
     THCudaTensor_free(src);
     THCudaTensor_freeCopyTo(self, self_);
@@ -98,8 +96,7 @@ void THCudaTensor_cadd_tst(THCudaTensor *self_, THCudaTensor* src1, float value,
     src2 = THCudaTensor_newContiguous(src2);
 
     THCudaTensor_copy(self, src1);
-    cublasSaxpy(THCudaTensor_nElement(self), value, THCudaTensor_data(src2), 1, THCudaTensor_data(self), 1);
-    THCublasCheck();
+    THCudaBlas_axpy(THCudaTensor_nElement(self), value, THCudaTensor_data(src2), 1, THCudaTensor_data(self), 1);
 
     THCudaTensor_free(src1);
     THCudaTensor_free(src2);
@@ -229,12 +226,9 @@ float THCudaTensor_dot(THCudaTensor *self, THCudaTensor *src)
     self = THCudaTensor_newContiguous(self);
     src = THCudaTensor_newContiguous(src);
 
-    float result = cublasSdot(THCudaTensor_nElement(self),
-                              THCudaTensor_data(self), 1,
-                              THCudaTensor_data(src), 1);
-
-    THCublasCheck();
-
+    float result = THCudaBlas_dot(THCudaTensor_nElement(self),
+                                  THCudaTensor_data(self), 1,
+                                  THCudaTensor_data(src), 1);
     THCudaTensor_free(src);
     THCudaTensor_free(self);
 
@@ -517,14 +511,14 @@ void THCudaTensor_addmv(THCudaTensor *self, float beta, float alpha, THCudaTenso
 
   if(mat->stride[0] == 1)
   {
-    cublasSgemv('n', mat->size[0], mat->size[1],
+    THCudaBlas_gemv('n', mat->size[0], mat->size[1],
                 alpha, THCudaTensor_data(mat), mat->stride[1],
                 THCudaTensor_data(vec), vec->stride[0],
                 beta, THCudaTensor_data(self), self->stride[0]);
   }
   else if(mat->stride[1] == 1)
   {
-    cublasSgemv('t',  mat->size[1], mat->size[0],
+    THCudaBlas_gemv('t',  mat->size[1], mat->size[0],
                 alpha, THCudaTensor_data(mat), mat->stride[0],
                 THCudaTensor_data(vec), vec->stride[0],
                 beta, THCudaTensor_data(self), self->stride[0]);
@@ -533,7 +527,7 @@ void THCudaTensor_addmv(THCudaTensor *self, float beta, float alpha, THCudaTenso
   {
     mat = THCudaTensor_newContiguous(mat);
     
-    cublasSgemv('t',  mat->size[1], mat->size[0],
+    THCudaBlas_gemv('t',  mat->size[1], mat->size[0],
                 alpha, THCudaTensor_data(mat), mat->stride[0],
                 THCudaTensor_data(vec), vec->stride[0],
                 beta, THCudaTensor_data(self), self->stride[0]);
@@ -541,7 +535,6 @@ void THCudaTensor_addmv(THCudaTensor *self, float beta, float alpha, THCudaTenso
     THCudaTensor_free(mat);
   }
 
-  THCublasCheck();  
 }
 
 void THCudaTensor_addmm(THCudaTensor *self, float beta, float alpha, THCudaTensor *m1, THCudaTensor *m2)
@@ -619,21 +612,19 @@ void THCudaTensor_addmm(THCudaTensor *self, float beta, float alpha, THCudaTenso
   }
 
   /* do the operation */
-  cublasSgemm(transpose_m1,
-              transpose_m2,
-              self_->size[0],
-              self_->size[1],
-              m1_->size[1],
-              alpha,
-              THCudaTensor_data(m1_),
-              (transpose_m1 == 'n' ? m1_->stride[1] : m1_->stride[0]),
-              THCudaTensor_data(m2_),
-              (transpose_m2 == 'n' ? m2_->stride[1] : m2_->stride[0]),
-              beta,
-              THCudaTensor_data(self_),
-              self_->stride[1]);
-
-  THCublasCheck();
+  THCudaBlas_gemm(transpose_m1,
+                  transpose_m2,
+                  self_->size[0],
+                  self_->size[1],
+                  m1_->size[1],
+                  alpha,
+                  THCudaTensor_data(m1_),
+                  (transpose_m1 == 'n' ? m1_->stride[1] : m1_->stride[0]),
+                  THCudaTensor_data(m2_),
+                  (transpose_m2 == 'n' ? m2_->stride[1] : m2_->stride[0]),
+                  beta,
+                  THCudaTensor_data(self_),
+                  self_->stride[1]);
 
   /* free intermediate variables */
   if(m1_ != m1)
@@ -666,14 +657,14 @@ void THCudaTensor_addr(THCudaTensor *self, float alpha, THCudaTensor *vec1, THCu
 
   if(self->stride[0] == 1)
   {
-    cublasSger(vec1->size[0], vec2->size[0],
+    THCudaBlas_ger(vec1->size[0], vec2->size[0],
                alpha, THCudaTensor_data(vec1), vec1->stride[0],
                THCudaTensor_data(vec2), vec2->stride[0],
                THCudaTensor_data(self), self->stride[1]);
   }
   else if(self->stride[1] == 1)
   {
-    cublasSger(vec2->size[0], vec1->size[0],
+    THCudaBlas_ger(vec2->size[0], vec1->size[0],
                alpha, THCudaTensor_data(vec2), vec2->stride[0],
                THCudaTensor_data(vec1), vec1->stride[0],
                THCudaTensor_data(self), self->stride[0]);
@@ -682,7 +673,7 @@ void THCudaTensor_addr(THCudaTensor *self, float alpha, THCudaTensor *vec1, THCu
   {
     THCudaTensor *cself = THCudaTensor_newClone(self);
 
-    cublasSger(vec2->size[0], vec1->size[0],
+    THCudaBlas_ger(vec2->size[0], vec1->size[0],
                alpha, THCudaTensor_data(vec2), vec2->stride[0],
                THCudaTensor_data(vec1), vec1->stride[0],
                THCudaTensor_data(cself), cself->stride[0]);
@@ -690,7 +681,6 @@ void THCudaTensor_addr(THCudaTensor *self, float alpha, THCudaTensor *vec1, THCu
     THCudaTensor_freeCopyTo(cself, self);
   }
 
-  THCublasCheck();
 }
 
 #define IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(NAME, CFUNC)                        \

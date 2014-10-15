@@ -6,7 +6,6 @@
 
 #include "cuda.h"
 #include "cublas.h"
-//#include "cuda_runtime_api.h"
 
 #ifdef __cplusplus
 # define THC_EXTERNC extern "C"

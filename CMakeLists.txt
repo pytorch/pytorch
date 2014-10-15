@@ -15,7 +15,7 @@ INSTALL(TARGETS THC
 INSTALL(FILES
           THC.h
           THCGeneral.h
-          THCGeneral.h
+          THCBlas.h
           THCStorage.h
           THCTensor.h
           THCTensorRandom.h
