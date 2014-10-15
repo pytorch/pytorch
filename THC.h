@@ -2,6 +2,7 @@
 #define THC_INC
 
 #include "THCGeneral.h"
+#include "THCBlas.h"
 #include "THCStorage.h"
 #include "THCTensor.h"
 #include "THCTensorRandom.h"
