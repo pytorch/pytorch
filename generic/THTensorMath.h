@@ -133,4 +133,11 @@ TH_API void THTensor_(randn)(THTensor *r_, THGenerator *_generator, THLongStorag
 
 #endif
 
+#if defined(TH_REAL_IS_BYTE)
+
+TH_API int THTensor_(logicalall)(THTensor *self);
+TH_API int THTensor_(logicalany)(THTensor *self);
+
+#endif /* TH_REAL_IS_BYTE */
+
 #endif
