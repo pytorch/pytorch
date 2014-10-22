@@ -752,6 +752,43 @@ void THCudaTensor_pow(THCudaTensor *self_, THCudaTensor *src, float value)
 }
 
 
+struct clamp_functor
+{
+  const float min_value;
+  const float max_value;
+
+  clamp_functor(float min_value_, float max_value_) : min_value(min_value_), max_value(max_value_) {}
+
+    __host__ __device__ float operator()(const float& x) const
+  {
+    if (x < min_value) {
+      return min_value;
+    }
+    if (x > max_value) {
+      return max_value;
+    }
+    return x;
+  }
+};
+
+void THCudaTensor_clamp(THCudaTensor *self_, THCudaTensor *src, float min_value,
+  float max_value)
+{
+  THArgCheck(THCudaTensor_nElement(self_) == THCudaTensor_nElement(src), 2, "sizes do not match");
+  THCudaTensor *self = THCudaTensor_newContiguous(self_);
+  src = THCudaTensor_newContiguous(src);
+  long size = THCudaTensor_nElement(self);
+  thrust::device_ptr<float> self_data(THCudaTensor_data(self));
+  thrust::device_ptr<float> src_data(THCudaTensor_data(src));
+
+  thrust::transform(src_data, src_data+size, self_data, clamp_functor(min_value,
+    max_value));
+
+  THCudaTensor_free(src);
+  THCudaTensor_freeCopyTo(self, self_);
+}
+
+
 struct sign_functor
 {
   __device__ float operator()(const float &v) const {

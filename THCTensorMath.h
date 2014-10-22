@@ -45,6 +45,7 @@ THC_API void THCudaTensor_tan(THCudaTensor *self, THCudaTensor *src);
 THC_API void THCudaTensor_atan(THCudaTensor *self, THCudaTensor *src);
 THC_API void THCudaTensor_tanh(THCudaTensor *self, THCudaTensor *src);
 THC_API void THCudaTensor_pow(THCudaTensor *self, THCudaTensor *src, float value);
+THC_API void THCudaTensor_clamp(THCudaTensor *self, THCudaTensor *src, float min_value, float max_value);
 THC_API void THCudaTensor_sqrt(THCudaTensor *self, THCudaTensor *src);
 THC_API void THCudaTensor_ceil(THCudaTensor *self, THCudaTensor *src);
 THC_API void THCudaTensor_floor(THCudaTensor *self, THCudaTensor *src);
