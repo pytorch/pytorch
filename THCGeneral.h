@@ -23,6 +23,10 @@
 # define THC_API THC_EXTERNC
 #endif
 
+#ifndef DIVUP
+#define DIVUP(x, y) (((x) + (y) - 1) / (y))
+#endif
+
 THC_API void THCudaInit(void);
 THC_API void THCudaShutdown(void);
 

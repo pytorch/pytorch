@@ -2,10 +2,6 @@
 #include "THCGeneral.h"
 #include "THCTensor.h"
 
-#ifndef DIVUP
-#define DIVUP(x, y) (((x) + (y) - 1) / (y))
-#endif
-
 // Copy self->size to device and remove all dims of size=1
 static void THCudaTensor_computesz(THCudaTensor *self, long **sz_, long **st_, int *dim_, long *innermostdim)
 {

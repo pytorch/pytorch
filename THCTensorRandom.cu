@@ -197,7 +197,7 @@ __global__ void generate_log_normal(curandStateMtgp32 *state, int size, float *r
   }
 }
 
-#define NUM_BLOCKS min((int)(size / BLOCK_SIZE), MAX_NUM_BLOCKS)
+#define NUM_BLOCKS min((int)DIVUP(size, BLOCK_SIZE), MAX_NUM_BLOCKS)
 THC_API void THCudaTensor_uniform(THCudaTensor *self_, double a, double b)
 {
   if (current_gen == NULL)
