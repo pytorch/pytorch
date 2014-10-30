@@ -17,6 +17,8 @@ static void THCudaTensor_computesz(THCudaTensor *self, long **sz_, long **st_, i
       dim++;
   }
   
+  if (dim == 0) THError("Error: using non-contiguous code-path for tensor with all singleton dimensions");
+  
   THCudaCheck(cudaMalloc(&sz, sizeof(long)*dim));
   THCudaCheck(cudaMalloc(&st, sizeof(long)*dim));
   szh = (long*)THAlloc(sizeof(long)*dim);
