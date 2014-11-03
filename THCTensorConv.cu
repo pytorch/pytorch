@@ -362,7 +362,7 @@ THC_API void THCudaTensor_conv2Dmv(THCudaTensor *output, float beta, THCudaTenso
   if (beta == 0 || nelem != THCudaTensor_nElement(output)) {
     THCudaTensor_zero(output);
   } else if (beta != 1) {
-    THCudaTensor_mul(output, beta);
+    THCudaTensor_mul(output, output, beta);
   }
 
   float *input_data = THCudaTensor_data(input);
@@ -487,7 +487,7 @@ THC_API void THCudaTensor_conv2Dmm(THCudaTensor *output, float beta, THCudaTenso
   if (beta == 0 || nelem != THCudaTensor_nElement(output)) {
     THCudaTensor_zero(output);
   } else if (beta != 1) {
-    THCudaTensor_mul(output, beta);
+    THCudaTensor_mul(output, output, beta);
   }
 
   float *input_data = THCudaTensor_data(input);
@@ -587,7 +587,7 @@ THC_API void THCudaTensor_conv2DRevger(THCudaTensor *output, float beta, float a
   if (nelem == 0 || beta == 0 || nelem != THCudaTensor_nElement(output)) {
     THCudaTensor_zero(output);
   } else if (beta != 1) {
-    THCudaTensor_mul(output, beta);
+    THCudaTensor_mul(output, output, beta);
   }
 
   float *input_data = THCudaTensor_data(input);
@@ -659,7 +659,7 @@ THC_API void THCudaTensor_conv2DRevgerm(THCudaTensor *output, float beta, float 
   if (nelem == 0 || beta == 0 || nelem != THCudaTensor_nElement(output)) {
     THCudaTensor_zero(output);
   } else if (beta != 1) {
-    THCudaTensor_mul(output, beta);
+    THCudaTensor_mul(output, output, beta);
   }
 
   float *input_data = THCudaTensor_data(input);
@@ -678,7 +678,7 @@ THC_API void THCudaTensor_conv2DRevgerm(THCudaTensor *output, float beta, float 
 
     // compute rev conv
     conv2genericrev <<<blocks, threads>>> (input_data + input->stride[0]*sl,
-                                           kernel_data + kernel->stride[0]*sl, 
+                                           kernel_data + kernel->stride[0]*sl,
                                            output_data,
                                            nInputPlane, nInputRows, nInputCols,
                                            nKernelPlane, nKernelRows, nKernelCols,
@@ -708,7 +708,7 @@ THC_API void THCudaTensor_conv2DRevgerm(THCudaTensor *output, float beta, float 
  *   - the swapkernel flag can be used to generate a conv2 instead of xcorr2
  *   - the templated kernel size is useful to generate code that's 2x faster
  *     but can be set to 0 to allow arbitrary kernel sizes
- *   ---- the table should have the first dim with the outputs, each output 
+ *   ---- the table should have the first dim with the outputs, each output
  *   ---- should have a fanin set of inputs contiguously
  */
 template <bool swapkernel, int T_kernel_h, int T_kernel_w>
@@ -744,7 +744,7 @@ template <bool swapkernel, int T_kernel_h, int T_kernel_w>
   int table_end = table_start + (fanin * 2);
 
   // nb threads, unique thread id
-  int tid = blockDim.x*blockDim.y*threadIdx.z 
+  int tid = blockDim.x*blockDim.y*threadIdx.z
     + blockDim.x * threadIdx.y + threadIdx.x;
   int nthreads = blockDim.x * blockDim.y * blockDim.z;
 
@@ -752,7 +752,7 @@ template <bool swapkernel, int T_kernel_h, int T_kernel_w>
   int oo, ii, xx, yy, kx, ky, kk;
 
   // do the kernels fit in shared mem ?
-  if (kernel_w*kernel_h*kernel_n <= CUDA_SHARED_MEM_SIZE) { 
+  if (kernel_w*kernel_h*kernel_n <= CUDA_SHARED_MEM_SIZE) {
     // put the kernel in shared memory
     __shared__ float shared_kernel[CUDA_SHARED_MEM_SIZE];
 
@@ -770,10 +770,10 @@ template <bool swapkernel, int T_kernel_h, int T_kernel_w>
           for(yy = yy_start; yy < yy_end; yy+=yy_step) {
             for(xx = xx_start; xx < xx_end; xx+=xx_step) {
               // Dot product in two dimensions... (between input image and the mask)
-              float *input_p = input + ((long)table[ii]-1)*input_h*input_w 
+              float *input_p = input + ((long)table[ii]-1)*input_h*input_w
                 + yy*stride_h*input_w + xx*stride_w;
               float *output_p = output + oo*output_h*output_w + yy*output_w + xx;
-              float *kernel_p = shared_kernel 
+              float *kernel_p = shared_kernel
                 + ((long)table[ii + 1]-1) *kernel_w*kernel_h + koffset;
               float sum = 0;
               if (swapkernel) {
@@ -807,11 +807,11 @@ template <bool swapkernel, int T_kernel_h, int T_kernel_w>
           for(yy = yy_start; yy < yy_end; yy+=yy_step) {
             for(xx = xx_start; xx < xx_end; xx+=xx_step) {
               // Dot product in two dims (between input image and the mask)
-              float *input_p = input + ((long)table[ii]-1)*input_h*input_w 
+              float *input_p = input + ((long)table[ii]-1)*input_h*input_w
                 + yy*stride_h*input_w + xx*stride_w;
-              float *output_p = output + oo*output_h*output_w + yy*output_w 
+              float *output_p = output + oo*output_h*output_w + yy*output_w
                 + xx;
-              float *kernel_p = shared_kernel 
+              float *kernel_p = shared_kernel
                 + ((long)table[ii + 1]-1) *kernel_w*kernel_h + koffset;
               float sum = 0;
               if (swapkernel) {
@@ -846,7 +846,7 @@ template <bool swapkernel, int T_kernel_h, int T_kernel_w>
         for(yy = yy_start; yy < yy_end; yy+=yy_step) {
           for(xx = xx_start; xx < xx_end; xx+=xx_step) {
             // Dot product in two dimensions... (between input image and the mask)
-            float *input_p = input + ((long)table[ii]-1)*input_h*input_w 
+            float *input_p = input + ((long)table[ii]-1)*input_h*input_w
               + yy*stride_h*input_w + xx*stride_w;
             float *output_p = output + oo*output_h*output_w + yy*output_w + xx;
             float *kernel_p = kernel + ((long)table[ii + 1]-1) *kernel_w*kernel_h + koffset;
