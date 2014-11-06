@@ -104,35 +104,23 @@ void THCudaTensor_div(THCudaTensor *self_, THCudaTensor *src_, float value)
   THCudaTensor_freeCopyTo(self, self_);
 }
 
-void THCudaTensor_cadd(THCudaTensor *self_, float value, THCudaTensor *src)
-{
-  THArgCheck(THCudaTensor_nElement(self_) == THCudaTensor_nElement(src), 3, "size do not match");
-
-  {
-    THCudaTensor *self = THCudaTensor_newContiguous(self_);
-    src = THCudaTensor_newContiguous(src);
-
-    THCudaBlas_axpy(THCudaTensor_nElement(self), value, THCudaTensor_data(src), 1, THCudaTensor_data(self), 1);
-
-    THCudaTensor_free(src);
-    THCudaTensor_freeCopyTo(self, self_);
-  }
-}
-
-void THCudaTensor_cadd_tst(THCudaTensor *self_, THCudaTensor* src1, float value, THCudaTensor *src2)
+void THCudaTensor_cadd(THCudaTensor *self_, THCudaTensor* src1, float value, THCudaTensor *src2)
 {
   THCudaTensor_resizeAs(self_, src1);
   THArgCheck(THCudaTensor_nElement(src1) == THCudaTensor_nElement(src2), 3, "size do not match");
   {
     THCudaTensor *self = THCudaTensor_newContiguous(self_);
 
-    src1 = THCudaTensor_newContiguous(src1);
+    if (self_ != src1) {
+      src1 = THCudaTensor_newContiguous(src1);
+      THCudaTensor_copy(self, src1);
+      THCudaTensor_free(src1);
+    }
+
     src2 = THCudaTensor_newContiguous(src2);
 
-    THCudaTensor_copy(self, src1);
     THCudaBlas_axpy(THCudaTensor_nElement(self), value, THCudaTensor_data(src2), 1, THCudaTensor_data(self), 1);
 
-    THCudaTensor_free(src1);
     THCudaTensor_free(src2);
     THCudaTensor_freeCopyTo(self, self_);
   }
