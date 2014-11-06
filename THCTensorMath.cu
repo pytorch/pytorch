@@ -1479,16 +1479,16 @@ float THCudaTensor_dist(THCudaTensor *self, THCudaTensor *src, float value)
   return pow(result, (float)1.0/value);
 }
 
-void THCudaTensor_rand(THCudaTensor *r_, THLongStorage *size)
+void THCudaTensor_rand(THCudaRNGState* rng_state, THCudaTensor *r_, THLongStorage *size)
 {
   THCudaTensor_resize(r_, size, NULL);
-  THCudaTensor_uniform(r_, 0, 1);
+  THCudaTensor_uniform(rng_state, r_, 0, 1);
 }
 
-void THCudaTensor_randn(THCudaTensor *r_, THLongStorage *size)
+void THCudaTensor_randn(THCudaRNGState* rng_state, THCudaTensor *r_, THLongStorage *size)
 {
   THCudaTensor_resize(r_, size, NULL);
-  THCudaTensor_normal(r_, 0, 1);
+  THCudaTensor_normal(rng_state, r_, 0, 1);
 }
 
 __global__ void THCudaTensor_kernel_indexFill(

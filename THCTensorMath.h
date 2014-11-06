@@ -3,6 +3,8 @@
 
 #include "THCTensor.h"
 
+struct THCudaRNGState;
+
 THC_API void THCudaTensor_fill(THCudaTensor *self, float value);
 THC_API void THCudaTensor_zero(THCudaTensor *self);
 
@@ -83,8 +85,8 @@ THC_API void  THCudaTensor_norm(THCudaTensor* self, THCudaTensor* src, float val
 THC_API void  THCudaTensor_renorm(THCudaTensor* self, THCudaTensor* src, float value, long dimension, float max_norm);
 THC_API float THCudaTensor_dist(THCudaTensor *self, THCudaTensor *src, float value);
 
-THC_API void THCudaTensor_rand(THCudaTensor *r_, THLongStorage *size);
-THC_API void THCudaTensor_randn(THCudaTensor *r_, THLongStorage *size);
+THC_API void THCudaTensor_rand(struct THCudaRNGState* rng_state, THCudaTensor *r_, THLongStorage *size);
+THC_API void THCudaTensor_randn(struct THCudaRNGState* rng_state, THCudaTensor *r_, THLongStorage *size);
 
 THC_API void THCudaTensor_indexCopy(THCudaTensor *res_, int dim, THLongTensor *indices, THCudaTensor *src);
 THC_API void THCudaTensor_indexFill(THCudaTensor *tensor, int dim, THLongTensor *index, float val);
