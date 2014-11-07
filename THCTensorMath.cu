@@ -1053,6 +1053,32 @@ void THCudaTensor_pow(THCudaTensor *self_, THCudaTensor *src, float value)
   THCudaTensor_freeCopyTo(self, self_);
 }
 
+struct atan2_functor
+{
+  __host__ __device__ float operator()(const float& x, const float& y) const
+    {
+      return atan2f(x, y);
+  }
+};
+
+void THCudaTensor_atan2(THCudaTensor *self_, THCudaTensor *tx, THCudaTensor *ty)
+{
+  THCudaTensor_resizeAs(self_, tx);
+  THCudaTensor *self = THCudaTensor_newContiguous(self_);
+  tx = THCudaTensor_newContiguous(tx);
+  ty = THCudaTensor_newContiguous(ty);
+  long size = THCudaTensor_nElement(self);
+  thrust::device_ptr<float> self_data(THCudaTensor_data(self));
+  thrust::device_ptr<float> tx_data(THCudaTensor_data(tx));
+  thrust::device_ptr<float> ty_data(THCudaTensor_data(ty));
+
+  thrust::transform(tx_data, tx_data+size, ty_data, self_data, atan2_functor());
+
+  THCudaTensor_free(tx);
+  THCudaTensor_free(ty);
+  THCudaTensor_freeCopyTo(self, self_);
+}
+
 
 struct clamp_functor
 {
