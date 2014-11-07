@@ -27,6 +27,30 @@ void THCudaTensor_zero(THCudaTensor *self_)
   THCudaTensor_freeCopyTo(self, self_);
 }
 
+void THCudaTensor_zeros(THCudaTensor *r_, THLongStorage *size)
+{
+  THCudaTensor_resize(r_, size, NULL);
+  THCudaTensor_zero(r_);
+}
+
+void THCudaTensor_ones(THCudaTensor *r_, THLongStorage *size)
+{
+  THCudaTensor_resize(r_, size, NULL);
+  THCudaTensor_fill(r_, 1);
+}
+
+void THCudaTensor_reshape(THCudaTensor *r_, THCudaTensor *t, THLongStorage *size)
+{
+  THCudaTensor_resize(r_, size, NULL);
+  THCudaTensor_copy(r_, t);
+}
+
+long THCudaTensor_numel(THCudaTensor *t)
+{
+  return THCudaTensor_nElement(t);
+}
+
+
 struct addvalue_functor
 {
   const float value;
@@ -302,6 +326,17 @@ float THCudaTensor_sumall(THCudaTensor *self)
   return result;
 }
 
+float THCudaTensor_prodall(THCudaTensor *self)
+{
+  self = THCudaTensor_newContiguous(self);
+  thrust::device_ptr<float> self_data(THCudaTensor_data(self));
+
+  float result = thrust::reduce(self_data, self_data+THCudaTensor_nElement(self), (float)(1), thrust::multiplies<float>());
+
+  THCudaTensor_free(self);
+  return result;
+}
+
 
 
 struct dim4 {
@@ -511,6 +546,11 @@ void THCudaTensor_sum(THCudaTensor *self, THCudaTensor *src, long dimension)
   return THCudaTensor_reduceDim(self, src, dimension, 0.0f, thrust::plus<float>());
 }
 
+void THCudaTensor_prod(THCudaTensor *self, THCudaTensor *src, long dimension)
+{
+  return THCudaTensor_reduceDim(self, src, dimension, 1.0f, thrust::multiplies<float>());
+}
+
 /* a set of reduction kernels that take in Binary ops on thrust pairs (of value, index)
    These are useful when you not only have to do a reduction, but you might have
    to preserve the location of contention (for example min/max operations)
@@ -563,7 +603,7 @@ __host__ void THCudaTensor_transformReduceOuterDimIndex(THCudaTensor *tgt1, THCu
   }
 
   const unsigned nThreadPerBlock = 256;
-  unsigned nBlockPerColumn = DIVUP(size[0], nThreadPerBlock); 
+  unsigned nBlockPerColumn = DIVUP(size[0], nThreadPerBlock);
   dim3 threads(nThreadPerBlock);
   unsigned maxGridDim = 1024; // anything < 64k is fine. The choice has no impact on performance.
   dim3 grid(min(maxGridDim, nBlockPerColumn), min(maxGridDim, size[1]), min(maxGridDim, size[2]));
@@ -668,7 +708,7 @@ __host__ void THCudaTensor_transformReduceInnermostDimIndex(
   }
 
   dim3 threads(32, 16);
-  unsigned nBlockPerRow = DIVUP(size[1], threads.y); 
+  unsigned nBlockPerRow = DIVUP(size[1], threads.y);
   unsigned maxGridDim = 1024; // anything < 64k is fine. The choice has no impact on performance.
   dim3 grid(min(maxGridDim, size[2]), min(maxGridDim, nBlockPerRow), min(maxGridDim, size[3]));
 
