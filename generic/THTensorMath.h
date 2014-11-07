@@ -18,6 +18,7 @@ TH_API accreal THTensor_(dot)(THTensor *t, THTensor *src);
 TH_API real THTensor_(minall)(THTensor *t);
 TH_API real THTensor_(maxall)(THTensor *t);
 TH_API accreal THTensor_(sumall)(THTensor *t);
+TH_API accreal THTensor_(prodall)(THTensor *t);
 
 TH_API void THTensor_(add)(THTensor *r_, THTensor *t, real value);
 TH_API void THTensor_(mul)(THTensor *r_, THTensor *t, real value);

@@ -211,6 +211,13 @@ accreal THTensor_(sumall)(THTensor *tensor)
   return sum;
 }
 
+accreal THTensor_(prodall)(THTensor *tensor)
+{
+  accreal prod = 1;
+  TH_TENSOR_APPLY(real, tensor, prod *= *tensor_data;);
+  return prod;
+}
+
 void THTensor_(add)(THTensor *r_, THTensor *t, real value)
 {
   THTensor_(resizeAs)(r_, t);
