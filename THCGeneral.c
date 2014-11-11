@@ -4,9 +4,6 @@
 
 void THCudaInit(void)
 {
-  if(cublasInit() != CUBLAS_STATUS_SUCCESS)
-    THError("unable to initialize cublas");
-
   int count = 0;
   THCudaCheck(cudaGetDeviceCount(&count));
 
@@ -14,6 +11,8 @@ void THCudaInit(void)
   THCudaCheck(cudaGetDevice(&device));
 
   THCRandom_init(count, device);
+
+  THCudaBlas_init(count, device);
 
   int i,j;
   for(i=0; i < count; ++i)
@@ -36,9 +35,7 @@ void THCudaInit(void)
 void THCudaShutdown(void)
 {
   THCRandom_shutdown();
-
-  if(cublasShutdown() != CUBLAS_STATUS_SUCCESS)
-    THError("unable to shutdown cublas");
+  THCudaBlas_shutdown();
 }
 
 void __THCudaCheck(cudaError_t err, const char *file, const int line)
@@ -50,10 +47,8 @@ void __THCudaCheck(cudaError_t err, const char *file, const int line)
   }
 }
 
-void __THCublasCheck(const char *file, const int line)
-{  
-  cublasStatus_t status = cublasGetError();
-
+void __THCublasCheck(cublasStatus_t status, const char *file, const int line)
+{
   if(status != CUBLAS_STATUS_SUCCESS)
   {
     const char* errmsg = NULL;
@@ -92,7 +87,7 @@ void __THCublasCheck(const char *file, const int line)
         errmsg = "unknown error";
         break;
     }
-    
+
     THError("%s(%i) : cublas runtime error : %s",
             file, line, errmsg);
   }

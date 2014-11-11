@@ -5,7 +5,7 @@
 #undef log1p
 
 #include "cuda.h"
-#include "cublas.h"
+#include "cublas_v2.h"
 
 #ifdef __cplusplus
 # define THC_EXTERNC extern "C"
@@ -27,14 +27,18 @@
 #define DIVUP(x, y) (((x) + (y) - 1) / (y))
 #endif
 
+THC_API void THCudaBlas_init(int num_devices, int current_device);
+THC_API void THCudaBlas_shutdown();
+THC_API void THCudaBlas_setHandle(int device);
+
 THC_API void THCudaInit(void);
 THC_API void THCudaShutdown(void);
 
-#define THCudaCheck(err)  __THCudaCheck(err, __FILE__, __LINE__)
-#define THCublasCheck()  __THCublasCheck( __FILE__, __LINE__)
+#define THCudaCheck(err)    __THCudaCheck(err, __FILE__, __LINE__)
+#define THCublasCheck(err)  __THCublasCheck(err,  __FILE__, __LINE__)
 
 THC_API void __THCudaCheck(cudaError_t err, const char *file, const int line);
-THC_API void __THCublasCheck(const char *file, const int line);
+THC_API void __THCublasCheck(cublasStatus_t status, const char *file, const int line);
 
 THC_API void THCudaGetGridSize(int *nBlockPerColumn_, int *nBlockPerRow_, int *nThreadPerBlock_, long size);
 
