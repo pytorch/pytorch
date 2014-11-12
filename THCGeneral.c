@@ -38,9 +38,6 @@ void THCudaShutdown(THCudaState* state)
   THCRandom_shutdown(state->rngState);
   free(state->rngState);
   THCudaBlas_shutdown();
-
-  if(cublasShutdown() != CUBLAS_STATUS_SUCCESS)
-    THError("unable to shutdown cublas");
 }
 
 void __THCudaCheck(cudaError_t err, const char *file, const int line)
