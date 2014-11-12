@@ -325,12 +325,7 @@ THC_API void THCudaTensor_conv2Dmv(THCudaTensor *output, float beta, THCudaTenso
     nOutputCols = (nInputCols - 1) * scol + nKernelCols;
 
     // use temp buffer
-    static THCudaTensor *inputP;
-    static int firstcall = 1;
-    if (firstcall) {
-      inputP = THCudaTensor_new();
-      firstcall = 0;
-    }
+    THCudaTensor *inputP = THCudaTensor_new();
 
     // create a zero-padded input
     long nInputRowsPadded = (nOutputRows - 1) * srow + nKernelRows;
@@ -450,12 +445,7 @@ THC_API void THCudaTensor_conv2Dmm(THCudaTensor *output, float beta, THCudaTenso
     nOutputCols = (nInputCols - 1) * scol + nKernelCols;
 
     // use temp buffer
-    static THCudaTensor *inputP;
-    static int firstcall = 1;
-    if (firstcall) {
-      inputP = THCudaTensor_new();
-      firstcall = 0;
-    }
+    THCudaTensor *inputP = THCudaTensor_new();
 
     // create a zero-padded input
     long nInputRowsPadded = (nOutputRows - 1) * srow + nKernelRows;

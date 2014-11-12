@@ -98,6 +98,13 @@ __host__ unsigned long THCRandom_seed(THCudaRNGState* state)
   return s;
 }
 
+__host__ unsigned long THCRandom_seedAll(THCudaRNGState* state)
+{
+  unsigned long s = (unsigned long)time(0);
+  THCRandom_manualSeedAll(state, s);
+  return s;
+}
+
 /* Manually set the seed */
 __host__ void THCRandom_manualSeed(THCudaRNGState* state, unsigned long seed)
 {
@@ -108,6 +115,19 @@ __host__ void THCRandom_manualSeed(THCudaRNGState* state, unsigned long seed)
   state->current_gen->initial_seed = seed;
   createGeneratorState(state->current_gen, seed);
   state->current_gen->initf = 1;
+}
+
+__host__ void THCRandom_manualSeedAll(THCudaRNGState* state, unsigned long seed)
+{
+  int currentDevice;
+  THCudaCheck(cudaGetDevice(&currentDevice));
+  for (int i = 0; i < state->num_devices; ++i) {
+    THCudaCheck(cudaSetDevice(i));
+    THCRandom_setGenerator(state, i);
+    THCRandom_manualSeed(state, seed);
+  }
+  THCudaCheck(cudaSetDevice(currentDevice));
+  THCRandom_setGenerator(state, currentDevice);
 }
 
 /* Get the initial seed */

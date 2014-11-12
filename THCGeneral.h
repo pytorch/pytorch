@@ -5,6 +5,7 @@
 #undef log1p
 
 #include "cuda.h"
+#include "cuda_runtime.h"
 #include "cublas_v2.h"
 
 #ifdef __cplusplus
@@ -42,7 +43,7 @@ typedef struct THCudaState
 THC_API void THCudaInit(THCudaState* state);
 THC_API void THCudaShutdown(THCudaState* state);
 
-#define THCudaCheck(err)    __THCudaCheck(err, __FILE__, __LINE__)
+#define THCudaCheck(err)  __THCudaCheck(err, __FILE__, __LINE__)
 #define THCublasCheck(err)  __THCublasCheck(err,  __FILE__, __LINE__)
 
 THC_API void __THCudaCheck(cudaError_t err, const char *file, const int line);

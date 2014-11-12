@@ -23,7 +23,7 @@ void THCudaTensor_fill(THCudaTensor *self_, float value)
 void THCudaTensor_zero(THCudaTensor *self_)
 {
   THCudaTensor *self = THCudaTensor_newContiguous(self_);
-  cudaMemset(THCudaTensor_data(self), 0, sizeof(float)*THCudaTensor_nElement(self));
+  THCudaCheck(cudaMemset(THCudaTensor_data(self), 0, sizeof(float)*THCudaTensor_nElement(self)));
   THCudaTensor_freeCopyTo(self, self_);
 }
 
@@ -1380,7 +1380,7 @@ float THCudaTensor_normall(THCudaTensor *self, float value)
 
 void THCudaTensor_norm(THCudaTensor* self, THCudaTensor* src, float value, long dimension)
 {
-  if(value == 0.0f) {
+  if (value == 0.0f) {
     THCudaTensor_transformReduceDim(self, src, dimension, partial_not_equal_functor(0.0f), (float)0, thrust::plus<float>());
   } else {
     THCudaTensor_transformReduceDim(self, src, dimension, norm_functor(value), (float)0, thrust::plus<float>());

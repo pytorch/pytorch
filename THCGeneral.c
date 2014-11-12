@@ -65,7 +65,7 @@ void __THCublasCheck(cublasStatus_t status, const char *file, const int line)
         break;
 
       case CUBLAS_STATUS_ALLOC_FAILED:
-        errmsg = "ressource allocation failed";
+        errmsg = "resource allocation failed";
         break;
 
       case CUBLAS_STATUS_INVALID_VALUE:
@@ -128,4 +128,3 @@ void THCudaGetGridSize(int *nBlockPerColumn_, int *nBlockPerRow_, int *nThreadPe
   *nBlockPerRow_ = (int)nBlockPerRow;
   *nThreadPerBlock_ = (int)nThreadPerBlock;
 }
-

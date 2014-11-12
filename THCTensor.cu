@@ -24,3 +24,10 @@ cudaTextureObject_t THCudaTensor_getTextureObject(THCudaTensor *self)
   }
   return texObj;
 }
+
+THC_API int THCudaTensor_getDevice(const THCudaTensor* thc) {
+  if (!thc->storage) return -1;
+  cudaPointerAttributes attr;
+  THCudaCheck(cudaPointerGetAttributes(&attr, thc->storage->data));
+  return attr.device;
+}

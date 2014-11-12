@@ -29,6 +29,7 @@
 THC_API void THCudaTensor_fill(THCudaTensor *self, float value);
 THC_API void THCudaTensor_copy(THCudaTensor *self, THCudaTensor *src);
 THC_API cudaTextureObject_t THCudaTensor_getTextureObject(THCudaTensor *self);
+THC_API int THCudaTensor_getDevice(const THCudaTensor *self);
 
 THC_API void THByteTensor_copyCuda(THByteTensor *self, THCudaTensor *src);
 THC_API void THCharTensor_copyCuda(THCharTensor *self, THCudaTensor *src);
