@@ -24,10 +24,6 @@
 # define THC_API THC_EXTERNC
 #endif
 
-#ifndef DIVUP
-#define DIVUP(x, y) (((x) + (y) - 1) / (y))
-#endif
-
 THC_API void THCudaBlas_init(int num_devices, int current_device);
 THC_API void THCudaBlas_shutdown();
 THC_API void THCudaBlas_setHandle(int device);

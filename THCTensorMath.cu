@@ -10,6 +10,10 @@
 
 #define NB_THREADS_PER_BLOCK 256
 
+#ifndef DIVUP
+#define DIVUP(x, y) (((x) + (y) - 1) / (y))
+#endif
+
 void THCudaTensor_fill(THCudaTensor *self_, float value)
 {
   THCudaTensor *self = THCudaTensor_newContiguous(self_);

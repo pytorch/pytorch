@@ -10,6 +10,10 @@
 #define MAX_NUM_BLOCKS 64
 #define BLOCK_SIZE 256
 
+#ifndef DIVUP
+#define DIVUP(x, y) (((x) + (y) - 1) / (y))
+#endif
+
 /* Sets up generator. Allocates but does not create the generator states. */
 __host__ void initializeGenerator(Generator* gen)
 {
