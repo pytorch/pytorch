@@ -94,6 +94,13 @@ __host__ void THCRandom_setGenerator(THCudaRNGState* state, int device)
   }
 }
 
+/* Reset the generator for the current device after a device reset */
+__host__ void THCRandom_resetGenerator(THCudaRNGState* state)
+{
+  initializeGenerator(state->current_gen);
+  THCRandom_manualSeed(state, state->current_gen->initial_seed);
+}
+
 /* Random seed */
 __host__ unsigned long THCRandom_seed(THCudaRNGState* state)
 {

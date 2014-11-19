@@ -21,6 +21,7 @@ typedef struct THCudaRNGState {
 THC_API void THCRandom_init(THCudaRNGState* state, int num_devices, int current_device);
 THC_API void THCRandom_shutdown(THCudaRNGState* state);
 THC_API void THCRandom_setGenerator(THCudaRNGState* state, int device);
+THC_API void THCRandom_resetGenerator(THCudaRNGState* state);
 THC_API unsigned long THCRandom_seed(THCudaRNGState* state);
 THC_API unsigned long THCRandom_seedAll(THCudaRNGState* state);
 THC_API void THCRandom_manualSeed(THCudaRNGState* state, unsigned long the_seed_);
