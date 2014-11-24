@@ -112,28 +112,33 @@ void THTensor_(indexCopy)(THTensor *tensor, int dim, THLongTensor *index, THTens
   long i, numel;
   THTensor *tSlice, *sSlice;
   long *index_data;
-
+  
   numel = THLongTensor_nElement(index);
   THArgCheck(index->nDimension == 1, 3, "Index is supposed to be a vector");
   THArgCheck(dim < src->nDimension,4,"Indexing dim is out of bounds");
   THArgCheck(numel == src->size[dim],4,"Number of indices should be equal to source:size(dim)");
-
+  
   index = THLongTensor_newContiguous(index);
   index_data = THLongTensor_data(index);
-
-  for (i=0; i<numel; i++)
+  
+  if (tensor->nDimension > 1 )
   {
-    if (tensor->nDimension > 1 )
+    tSlice = THTensor_(new)();
+    sSlice = THTensor_(new)();
+    
+    for (i=0; i<numel; i++)
     {
-      tSlice = THTensor_(new)();
-      sSlice = THTensor_(new)();
       THTensor_(select)(tSlice, tensor, dim, index_data[i]-1);
       THTensor_(select)(sSlice, src, dim, i);
       THTensor_(copy)(tSlice, sSlice);
-      THTensor_(free)(tSlice);
-      THTensor_(free)(sSlice);
     }
-    else
+    
+    THTensor_(free)(tSlice);
+    THTensor_(free)(sSlice);
+  }
+  else
+  {
+    for (i=0; i<numel; i++)
     {
       THTensor_(set1d)(tensor,index_data[i]-1,THTensor_(get1d)(src,i));
     }
