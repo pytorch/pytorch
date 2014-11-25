@@ -17,7 +17,7 @@ float THCudaStorage_get(const THCudaStorage *self, long index)
 
 THCudaStorage* THCudaStorage_new(void)
 {
-  THCudaStorage *storage = THAlloc(sizeof(THCudaStorage));
+  THCudaStorage *storage = (THCudaStorage*)THAlloc(sizeof(THCudaStorage));
   storage->data = NULL;
   storage->size = 0;
   storage->refcount = 1;
@@ -31,7 +31,7 @@ THCudaStorage* THCudaStorage_newWithSize(long size)
 
   if(size > 0)
   {
-    THCudaStorage *storage = THAlloc(sizeof(THCudaStorage));
+    THCudaStorage *storage = (THCudaStorage*)THAlloc(sizeof(THCudaStorage));
     THCudaCheck(cudaMalloc((void**)&(storage->data), size * sizeof(float)));
     storage->size = size;
     storage->refcount = 1;
@@ -86,7 +86,7 @@ THCudaStorage* THCudaStorage_newWithMapping(const char *fileName, long size, int
 
 THCudaStorage* THCudaStorage_newWithData(float *data, long size)
 {
-  THCudaStorage *storage = THAlloc(sizeof(THCudaStorage));
+  THCudaStorage *storage = (THCudaStorage*)THAlloc(sizeof(THCudaStorage));
   storage->data = data;
   storage->size = size;
   storage->refcount = 1;
