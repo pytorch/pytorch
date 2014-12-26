@@ -456,22 +456,18 @@ void THTensor_(match)(THTensor *r_, THTensor *m1, THTensor *m2, real gain)
 }
 
 void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor *m1, THTensor *m2)
-{
+{ 
   char transpose_r, transpose_m1, transpose_m2;
   THTensor *r__, *m1_, *m2_;
 
-  THStorage* sr_ = THTensor_(storage)(r_);
-  if( (sr_ == THTensor_(storage)(m1)) || (sr_ == THTensor_(storage)(m2)) )
-    THError("output matrix cannot have same storage as input matrix");
-
-  if( (m1->nDimension != 2) || (m2->nDimension != 2) )
-    THError("matrix and matrix expected");
-
+  if( (m1->nDimension != 2) || (m2->nDimension != 2) ) 
+    THError("matrix and matrix expected"); 
+ 
   if(t->nDimension != 2)
-    THError("size mismatch");
+    THError("size mismatch"); 
 
-  if( (t->size[0] != m1->size[0]) || (t->size[1] != m2->size[1]) || (m1->size[1] != m2->size[0]) )
-    THError("size mismatch");
+  if( (t->size[0] != m1->size[0]) || (t->size[1] != m2->size[1]) || (m1->size[1] != m2->size[0]) ) 
+    THError("size mismatch"); 
 
   if(t != r_)
   {
@@ -498,7 +494,7 @@ void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
   else
   {
     transpose_r = 'n';
-
+    
     r__ = THTensor_(newWithSize2d)(r_->size[1], r_->size[0]);
     THTensor_(copy)(r__, r_);
     THTensor_(transpose)(r__, NULL, 0, 1);
@@ -562,7 +558,7 @@ void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
 
   if(r__ != r_)
     THTensor_(freeCopyTo)(r__, r_);
-}
+} 
 
 void THTensor_(addr)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor *vec1, THTensor *vec2)
 {
