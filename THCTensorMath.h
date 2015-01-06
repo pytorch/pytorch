@@ -79,7 +79,9 @@ THC_API void THCudaTensor_neTensor(THCudaTensor *self_, THCudaTensor *src1, THCu
 THC_API float THCudaTensor_meanall(THCudaTensor *self);
 THC_API void  THCudaTensor_mean(THCudaTensor *self, THCudaTensor *src, long dim);
 THC_API float THCudaTensor_varall(THCudaTensor *self);
+THC_API void  THCudaTensor_var(THCudaTensor *self, THCudaTensor *src, long dim, int flag);
 THC_API float THCudaTensor_stdall(THCudaTensor *self);
+THC_API void  THCudaTensor_std(THCudaTensor *self, THCudaTensor *src, long dim, int flag);
 THC_API float THCudaTensor_normall(THCudaTensor *self, float value);
 THC_API void  THCudaTensor_norm(THCudaTensor* self, THCudaTensor* src, float value, long dimension);
 THC_API void  THCudaTensor_renorm(THCudaTensor* self, THCudaTensor* src, float value, long dimension, float max_norm);
