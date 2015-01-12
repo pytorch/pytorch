@@ -24,20 +24,20 @@
 # define THC_API THC_EXTERNC
 #endif
 
-THC_API void THCudaBlas_init(int num_devices, int current_device);
-THC_API void THCudaBlas_shutdown();
-THC_API void THCudaBlas_setHandle(int device);
-
-struct THCudaRNGState;  /* Random number generator state. */
+struct THCRNGState;  /* Random number generator state. */
 
 /* Global state to be held in the cutorch table. */
-typedef struct THCudaState
+typedef struct THCState
 {
-  struct THCudaRNGState* rngState;
-} THCudaState;
+  struct THCRNGState* rngState;
+} THCState;
 
-THC_API void THCudaInit(THCudaState* state);
-THC_API void THCudaShutdown(THCudaState* state);
+THC_API void THCudaBlas_init(THCState *state, int num_devices, int current_device);
+THC_API void THCudaBlas_shutdown(THCState *state);
+THC_API void THCudaBlas_setHandle(THCState *state, int device);
+
+THC_API void THCudaInit(THCState* state);
+THC_API void THCudaShutdown(THCState* state);
 
 #define THCudaCheck(err)  __THCudaCheck(err, __FILE__, __LINE__)
 #define THCublasCheck(err)  __THCublasCheck(err,  __FILE__, __LINE__)

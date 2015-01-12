@@ -11,30 +11,32 @@ typedef struct _Generator {
   unsigned long initial_seed;
 } Generator;
 
-typedef struct THCudaRNGState {
+typedef struct THCRNGState {
   /* One generator per GPU */
   Generator* gen;
   Generator* current_gen;
   int num_devices;
-} THCudaRNGState;
+} THCRNGState;
 
-THC_API void THCRandom_init(THCudaRNGState* state, int num_devices, int current_device);
-THC_API void THCRandom_shutdown(THCudaRNGState* state);
-THC_API void THCRandom_setGenerator(THCudaRNGState* state, int device);
-THC_API void THCRandom_resetGenerator(THCudaRNGState* state);
-THC_API unsigned long THCRandom_seed(THCudaRNGState* state);
-THC_API unsigned long THCRandom_seedAll(THCudaRNGState* state);
-THC_API void THCRandom_manualSeed(THCudaRNGState* state, unsigned long the_seed_);
-THC_API void THCRandom_manualSeedAll(THCudaRNGState* state, unsigned long the_seed_);
-THC_API unsigned long THCRandom_initialSeed(THCudaRNGState* state);
-THC_API void THCRandom_getRNGState(THCudaRNGState* state, THByteTensor *rng_state);
-THC_API void THCRandom_setRNGState(THCudaRNGState* state, THByteTensor *rng_state);
-THC_API void THCudaTensor_geometric(THCudaRNGState* state, THCudaTensor *self, double p);
-THC_API void THCudaTensor_bernoulli(THCudaRNGState* state, THCudaTensor *self, double p);
-THC_API void THCudaTensor_uniform(THCudaRNGState* state, THCudaTensor *self, double a, double b);
-THC_API void THCudaTensor_normal(THCudaRNGState* state, THCudaTensor *self, double mean, double stdv);
-THC_API void THCudaTensor_exponential(THCudaRNGState* state, THCudaTensor *self, double lambda);
-THC_API void THCudaTensor_cauchy(THCudaRNGState* state, THCudaTensor *self, double median, double sigma);
-THC_API void THCudaTensor_logNormal(THCudaRNGState* state, THCudaTensor *self, double mean, double stdv);
+struct THCState;
+
+THC_API void THCRandom_init(struct THCState *state, int num_devices, int current_device);
+THC_API void THCRandom_shutdown(struct THCState *state);
+THC_API void THCRandom_setGenerator(struct THCState *state, int device);
+THC_API void THCRandom_resetGenerator(struct THCState *state);
+THC_API unsigned long THCRandom_seed(struct THCState *state);
+THC_API unsigned long THCRandom_seedAll(struct THCState *state);
+THC_API void THCRandom_manualSeed(struct THCState *state, unsigned long the_seed_);
+THC_API void THCRandom_manualSeedAll(struct THCState *state, unsigned long the_seed_);
+THC_API unsigned long THCRandom_initialSeed(struct THCState *state);
+THC_API void THCRandom_getRNGState(struct THCState *state, THByteTensor *rng_state);
+THC_API void THCRandom_setRNGState(struct THCState *state, THByteTensor *rng_state);
+THC_API void THCudaTensor_geometric(struct THCState *state, THCudaTensor *self, double p);
+THC_API void THCudaTensor_bernoulli(struct THCState *state, THCudaTensor *self, double p);
+THC_API void THCudaTensor_uniform(struct THCState *state, THCudaTensor *self, double a, double b);
+THC_API void THCudaTensor_normal(struct THCState *state, THCudaTensor *self, double mean, double stdv);
+THC_API void THCudaTensor_exponential(struct THCState *state, THCudaTensor *self, double lambda);
+THC_API void THCudaTensor_cauchy(struct THCState *state, THCudaTensor *self, double median, double sigma);
+THC_API void THCudaTensor_logNormal(struct THCState *state, THCudaTensor *self, double mean, double stdv);
 
 #endif

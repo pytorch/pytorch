@@ -5,7 +5,7 @@ static cublasHandle_t* handles;
 static cublasHandle_t* current_handle;
 static int n_devices;
 
-void THCudaBlas_init(int devices, int device)
+void THCudaBlas_init(THCState *state, int devices, int device)
 {
   handles = (cublasHandle_t *)malloc(devices * sizeof(cublasHandle_t));
   for (int i = 0; i < devices; i++) {
@@ -22,7 +22,7 @@ void THCudaBlas_init(int devices, int device)
   cudaSetDevice(device);
 }
 
-void THCudaBlas_shutdown()
+void THCudaBlas_shutdown(THCState *state)
 {
   for (int i = 0; i < n_devices; i++) {
     cublasDestroy(handles[i]);
@@ -30,12 +30,12 @@ void THCudaBlas_shutdown()
   free(handles);
 }
 
-void THCudaBlas_setHandle(int device)
+void THCudaBlas_setHandle(THCState *state, int device)
 {
   current_handle = &handles[device];
 }
 
-void THCudaBlas_swap(long n, float *x, long incx, float *y, long incy)
+void THCudaBlas_swap(THCState *state, long n, float *x, long incx, float *y, long incy)
 {
   if(n == 1)
   {
@@ -55,7 +55,7 @@ void THCudaBlas_swap(long n, float *x, long incx, float *y, long incy)
           " incy upto signed integer limits: %d", INT_MAX);
 }
 
-void THCudaBlas_scal(long n, float a, float *x, long incx)
+void THCudaBlas_scal(THCState *state, long n, float a, float *x, long incx)
 {
   if(n == 1)
     incx = 1;
@@ -71,7 +71,7 @@ void THCudaBlas_scal(long n, float a, float *x, long incx)
           "upto signed integer limits: %d", INT_MAX);
 }
 
-void THCudaBlas_copy(long n, float *x, long incx, float *y, long incy)
+void THCudaBlas_copy(THCState *state, long n, float *x, long incx, float *y, long incy)
 {
   if(n == 1)
   {
@@ -92,7 +92,7 @@ void THCudaBlas_copy(long n, float *x, long incx, float *y, long incy)
           "upto signed integer limits: %d", INT_MAX);
 }
 
-void THCudaBlas_axpy(long n, float a, float *x, long incx, float *y, long incy)
+void THCudaBlas_axpy(THCState *state, long n, float a, float *x, long incx, float *y, long incy)
 {
     if(n == 1)
   {
@@ -113,7 +113,7 @@ void THCudaBlas_axpy(long n, float a, float *x, long incx, float *y, long incy)
           "upto signed integer limits: %d", INT_MAX);
 }
 
-float THCudaBlas_dot(long n, float *x, long incx, float *y, long incy)
+float THCudaBlas_dot(THCState *state, long n, float *x, long incx, float *y, long incy)
 {
   if(n == 1)
   {
@@ -137,7 +137,7 @@ float THCudaBlas_dot(long n, float *x, long incx, float *y, long incy)
 }
 
 /* Level 2 */
-void THCudaBlas_gemv(char trans, long m, long n, float alpha, float *a, long lda, float *x, long incx, float beta, float *y, long incy)
+void THCudaBlas_gemv(THCState *state, char trans, long m, long n, float alpha, float *a, long lda, float *x, long incx, float beta, float *y, long incy)
 {
   if(n == 1)
     lda = m;
@@ -165,7 +165,7 @@ void THCudaBlas_gemv(char trans, long m, long n, float alpha, float *a, long lda
           "in the range 0 < [val] <= %d", INT_MAX);
 }
 
-void THCudaBlas_ger(long m, long n, float alpha, float *x, long incx, float *y, long incy, float *a, long lda)
+void THCudaBlas_ger(THCState *state, long m, long n, float alpha, float *x, long incx, float *y, long incy, float *a, long lda)
 {
   if(n == 1)
     lda = m;
@@ -186,7 +186,7 @@ void THCudaBlas_ger(long m, long n, float alpha, float *x, long incx, float *y, 
 }
 
 /* Level 3 */
-void THCudaBlas_gemm(char transa, char transb, long m, long n, long k, float alpha, float *a, long lda, float *b, long ldb, float beta, float *c, long ldc)
+void THCudaBlas_gemm(THCState *state, char transa, char transb, long m, long n, long k, float alpha, float *a, long lda, float *b, long ldb, float beta, float *c, long ldc)
 {
   int transa_ = ((transa == 't') || (transa == 'T'));
   int transb_ = ((transb == 't') || (transb == 'T'));

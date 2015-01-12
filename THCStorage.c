@@ -1,13 +1,13 @@
 #include "THCStorage.h"
 #include "THCGeneral.h"
 
-void THCudaStorage_set(THCudaStorage *self, long index, float value)
+void THCudaStorage_set(THCState *state, THCudaStorage *self, long index, float value)
 {
   THArgCheck((index >= 0) && (index < self->size), 2, "index out of bounds");
   THCudaCheck(cudaMemcpy(self->data + index, &value, sizeof(float), cudaMemcpyHostToDevice));
 }
 
-float THCudaStorage_get(const THCudaStorage *self, long index)
+float THCudaStorage_get(THCState *state, const THCudaStorage *self, long index)
 {
   float value;
   THArgCheck((index >= 0) && (index < self->size), 2, "index out of bounds");
@@ -15,7 +15,7 @@ float THCudaStorage_get(const THCudaStorage *self, long index)
   return value;
 }
 
-THCudaStorage* THCudaStorage_new(void)
+THCudaStorage* THCudaStorage_new(THCState *state)
 {
   THCudaStorage *storage = (THCudaStorage*)THAlloc(sizeof(THCudaStorage));
   storage->data = NULL;
@@ -25,7 +25,7 @@ THCudaStorage* THCudaStorage_new(void)
   return storage;
 }
 
-THCudaStorage* THCudaStorage_newWithSize(long size)
+THCudaStorage* THCudaStorage_newWithSize(THCState *state, long size)
 {
   THArgCheck(size >= 0, 2, "invalid size");
 
@@ -40,51 +40,51 @@ THCudaStorage* THCudaStorage_newWithSize(long size)
   }
   else
   {
-    return THCudaStorage_new();
+    return THCudaStorage_new(state);
   }
 }
 
-THCudaStorage* THCudaStorage_newWithSize1(float data0)
+THCudaStorage* THCudaStorage_newWithSize1(THCState *state, float data0)
 {
-  THCudaStorage *self = THCudaStorage_newWithSize(1);
-  THCudaStorage_set(self, 0, data0);
+  THCudaStorage *self = THCudaStorage_newWithSize(state, 1);
+  THCudaStorage_set(state, self, 0, data0);
   return self;
 }
 
-THCudaStorage* THCudaStorage_newWithSize2(float data0, float data1)
+THCudaStorage* THCudaStorage_newWithSize2(THCState *state, float data0, float data1)
 {
-  THCudaStorage *self = THCudaStorage_newWithSize(2);
-  THCudaStorage_set(self, 0, data0);
-  THCudaStorage_set(self, 1, data1);
+  THCudaStorage *self = THCudaStorage_newWithSize(state, 2);
+  THCudaStorage_set(state, self, 0, data0);
+  THCudaStorage_set(state, self, 1, data1);
   return self;
 }
 
-THCudaStorage* THCudaStorage_newWithSize3(float data0, float data1, float data2)
+THCudaStorage* THCudaStorage_newWithSize3(THCState *state, float data0, float data1, float data2)
 {
-  THCudaStorage *self = THCudaStorage_newWithSize(3);
-  THCudaStorage_set(self, 0, data0);
-  THCudaStorage_set(self, 1, data1);
-  THCudaStorage_set(self, 2, data2);
+  THCudaStorage *self = THCudaStorage_newWithSize(state, 3);
+  THCudaStorage_set(state, self, 0, data0);
+  THCudaStorage_set(state, self, 1, data1);
+  THCudaStorage_set(state, self, 2, data2);
   return self;
 }
 
-THCudaStorage* THCudaStorage_newWithSize4(float data0, float data1, float data2, float data3)
+THCudaStorage* THCudaStorage_newWithSize4(THCState *state, float data0, float data1, float data2, float data3)
 {
-  THCudaStorage *self = THCudaStorage_newWithSize(4);
-  THCudaStorage_set(self, 0, data0);
-  THCudaStorage_set(self, 1, data1);
-  THCudaStorage_set(self, 2, data2);
-  THCudaStorage_set(self, 3, data3);
+  THCudaStorage *self = THCudaStorage_newWithSize(state, 4);
+  THCudaStorage_set(state, self, 0, data0);
+  THCudaStorage_set(state, self, 1, data1);
+  THCudaStorage_set(state, self, 2, data2);
+  THCudaStorage_set(state, self, 3, data3);
   return self;
 }
 
-THCudaStorage* THCudaStorage_newWithMapping(const char *fileName, long size, int isShared)
+THCudaStorage* THCudaStorage_newWithMapping(THCState *state, const char *fileName, long size, int isShared)
 {
   THError("not available yet for THCudaStorage");
   return NULL;
 }
 
-THCudaStorage* THCudaStorage_newWithData(float *data, long size)
+THCudaStorage* THCudaStorage_newWithData(THCState *state, float *data, long size)
 {
   THCudaStorage *storage = (THCudaStorage*)THAlloc(sizeof(THCudaStorage));
   storage->data = data;
@@ -94,13 +94,13 @@ THCudaStorage* THCudaStorage_newWithData(float *data, long size)
   return storage;
 }
 
-void THCudaStorage_retain(THCudaStorage *self)
+void THCudaStorage_retain(THCState *state, THCudaStorage *self)
 {
   if(self && (self->flag & TH_STORAGE_REFCOUNTED))
     ++self->refcount;
 }
 
-void THCudaStorage_free(THCudaStorage *self)
+void THCudaStorage_free(THCState *state, THCudaStorage *self)
 {
   if(!(self->flag & TH_STORAGE_REFCOUNTED))
     return;
@@ -112,51 +112,3 @@ void THCudaStorage_free(THCudaStorage *self)
     THFree(self);
   }
 }
-
-void THCudaStorage_copyFloat(THCudaStorage *self, struct THFloatStorage *src)
-{
-  THArgCheck(self->size == src->size, 2, "size does not match");
-  THCudaCheck(cudaMemcpy(self->data, src->data, self->size * sizeof(float), cudaMemcpyHostToDevice));
-}
-
-#define TH_CUDA_STORAGE_IMPLEMENT_COPY(TYPEC)                           \
-  void THCudaStorage_copy##TYPEC(THCudaStorage *self, struct TH##TYPEC##Storage *src) \
-  {                                                                     \
-    THFloatStorage *buffer;                                             \
-    THArgCheck(self->size == src->size, 2, "size does not match");      \
-    buffer = THFloatStorage_newWithSize(src->size);                     \
-    THFloatStorage_copy##TYPEC(buffer, src);                            \
-    THCudaStorage_copyFloat(self, buffer);                              \
-    THFloatStorage_free(buffer);                                        \
-  }
-
-TH_CUDA_STORAGE_IMPLEMENT_COPY(Byte)
-TH_CUDA_STORAGE_IMPLEMENT_COPY(Char)
-TH_CUDA_STORAGE_IMPLEMENT_COPY(Short)
-TH_CUDA_STORAGE_IMPLEMENT_COPY(Int)
-TH_CUDA_STORAGE_IMPLEMENT_COPY(Long)
-TH_CUDA_STORAGE_IMPLEMENT_COPY(Double)
-
-void THFloatStorage_copyCuda(THFloatStorage *self, struct THCudaStorage *src)
-{
-  THArgCheck(self->size == src->size, 2, "size does not match");
-  THCudaCheck(cudaMemcpy(self->data, src->data, self->size * sizeof(float), cudaMemcpyDeviceToHost));
-}
-
-#define TH_CUDA_STORAGE_IMPLEMENT_COPYTO(TYPEC)                           \
-  void TH##TYPEC##Storage_copyCuda(TH##TYPEC##Storage *self, struct THCudaStorage *src) \
-  {                                                                     \
-    THFloatStorage *buffer;                                             \
-    THArgCheck(self->size == src->size, 2, "size does not match");      \
-    buffer = THFloatStorage_newWithSize(src->size);                     \
-    THFloatStorage_copyCuda(buffer, src);                               \
-    TH##TYPEC##Storage_copyFloat(self, buffer);                         \
-    THFloatStorage_free(buffer);                                        \
-  }
-
-TH_CUDA_STORAGE_IMPLEMENT_COPYTO(Byte)
-TH_CUDA_STORAGE_IMPLEMENT_COPYTO(Char)
-TH_CUDA_STORAGE_IMPLEMENT_COPYTO(Short)
-TH_CUDA_STORAGE_IMPLEMENT_COPYTO(Int)
-TH_CUDA_STORAGE_IMPLEMENT_COPYTO(Long)
-TH_CUDA_STORAGE_IMPLEMENT_COPYTO(Double)

@@ -1,5 +1,5 @@
-SET(src 
-   THCGeneral.c THCStorage.c THCTensor.c THCTensorCopy.c)
+SET(src
+    THCGeneral.c THCStorage.c THCStorageCopy.c THCTensor.c THCTensorCopy.c)
 
 SET(src-cuda THC.cu)
 
@@ -17,7 +17,9 @@ INSTALL(FILES
           THCGeneral.h
           THCBlas.h
           THCStorage.h
+	  THCStorageCopy.h
           THCTensor.h
+	  THCTensorCopy.h
           THCTensorRandom.h
           THCTensorMath.h
           THCTensorConv.h

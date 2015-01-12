@@ -4,35 +4,52 @@
 #include "THStorage.h"
 #include "THCGeneral.h"
 
-#undef TH_API
-#define TH_API THC_API
-#define real float
-#define Real Cuda
+#define TH_STORAGE_REFCOUNTED 1
+#define TH_STORAGE_RESIZABLE  2
+#define TH_STORAGE_FREEMEM    4
 
-#define TH_GENERIC_FILE "generic/THStorage.h"
-#include "generic/THStorage.h"
-#undef TH_GENERIC_FILE
 
-#define TH_GENERIC_FILE "generic/THStorageCopy.h"
-#include "generic/THStorageCopy.h"
-#undef TH_GENERIC_FILE
+typedef struct THCudaStorage
+{
+    float *data;
+    long size;
+    int refcount;
+    char flag;
+    THAllocator *allocator;
+    void *allocatorContext;
+} THCudaStorage;
 
-#undef real
-#undef Real
-#undef TH_API
-#ifdef WIN32
-# define TH_API THC_EXTERNC __declspec(dllimport)
-#else
-# define TH_API THC_EXTERNC
-#endif
 
-THC_API void THByteStorage_copyCuda(THByteStorage *self, struct THCudaStorage *src);
-THC_API void THCharStorage_copyCuda(THCharStorage *self, struct THCudaStorage *src);
-THC_API void THShortStorage_copyCuda(THShortStorage *self, struct THCudaStorage *src);
-THC_API void THIntStorage_copyCuda(THIntStorage *self, struct THCudaStorage *src);
-THC_API void THLongStorage_copyCuda(THLongStorage *self, struct THCudaStorage *src);
-THC_API void THFloatStorage_copyCuda(THFloatStorage *self, struct THCudaStorage *src);
-THC_API void THDoubleStorage_copyCuda(THDoubleStorage *self, struct THCudaStorage *src);
-THC_API void THCudaStorage_copyCuda(THCudaStorage *self, THCudaStorage *src);
+THC_API float* THCudaStorage_data(THCState *state, const THCudaStorage*);
+THC_API long THCudaStorage_size(THCState *state, const THCudaStorage*);
+
+/* slow access -- checks everything */
+THC_API void THCudaStorage_set(THCState *state, THCudaStorage*, long, float);
+THC_API float THCudaStorage_get(THCState *state, const THCudaStorage*, long);
+
+THC_API THCudaStorage* THCudaStorage_new(THCState *state);
+THC_API THCudaStorage* THCudaStorage_newWithSize(THCState *state, long size);
+THC_API THCudaStorage* THCudaStorage_newWithSize1(THCState *state, float);
+THC_API THCudaStorage* THCudaStorage_newWithSize2(THCState *state, float, float);
+THC_API THCudaStorage* THCudaStorage_newWithSize3(THCState *state, float, float, float);
+THC_API THCudaStorage* THCudaStorage_newWithSize4(THCState *state, float, float, float, float);
+THC_API THCudaStorage* THCudaStorage_newWithMapping(THCState *state, const char *filename, long size, int shared);
+
+/* takes ownership of data */
+THC_API THCudaStorage* THCudaStorage_newWithData(THCState *state, float *data, long size);
+
+THC_API THCudaStorage* THCudaStorage_newWithAllocator(THCState *state, long size,
+                                                      THAllocator* allocator,
+                                                      void *allocatorContext);
+THC_API THCudaStorage* THCudaStorage_newWithDataAndAllocator(
+    THCState *state, float* data, long size, THAllocator* allocator, void *allocatorContext);
+
+THC_API void THCudaStorage_setFlag(THCState *state, THCudaStorage *storage, const char flag);
+THC_API void THCudaStorage_clearFlag(THCState *state, THCudaStorage *storage, const char flag);
+THC_API void THCudaStorage_retain(THCState *state, THCudaStorage *storage);
+
+THC_API void THCudaStorage_free(THCState *state, THCudaStorage *storage);
+THC_API void THCudaStorage_resize(THCState *state, THCudaStorage *storage, long size);
+THC_API void THCudaStorage_fill(THCState *state, THCudaStorage *storage, float value);
 
 #endif

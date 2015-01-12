@@ -3,25 +3,18 @@
 
 #include "THCGeneral.h"
 
-#undef TH_API
-#define TH_API THC_API
-#define real float
-#define Real Cuda
-#define THBlas_(NAME) TH_CONCAT_4(TH,Real,Blas_,NAME)
+/* Level 1 */
+THC_API void THCudaBlas_swap(THCState *state, long n, float *x, long incx, float *y, long incy);
+THC_API void THCudaBlas_scal(THCState *state, long n, float a, float *x, long incx);
+THC_API void THCudaBlas_copy(THCState *state, long n, float *x, long incx, float *y, long incy);
+THC_API void THCudaBlas_axpy(THCState *state, long n, float a, float *x, long incx, float *y, long incy);
+THC_API float THCudaBlas_dot(THCState *state, long n, float *x, long incx, float *y, long incy);
 
-#define TH_GENERIC_FILE "generic/THBlas.h"
-#include "generic/THBlas.h"
-#undef TH_GENERIC_FILE
+/* Level 2 */
+THC_API void THCudaBlas_gemv(THCState *state, char trans, long m, long n, float alpha, float *a, long lda, float *x, long incx, float beta, float *y, long incy);
+THC_API void THCudaBlas_ger(THCState *state, long m, long n, float alpha, float *x, long incx, float *y, long incy, float *a, long lda);
 
-#undef THBlas_
-#undef real
-#undef Real
-#undef TH_API
-
-#ifdef WIN32
-# define TH_API THC_EXTERNC __declspec(dllimport)
-#else
-# define TH_API THC_EXTERNC
-#endif
+/* Level 3 */
+THC_API void THCudaBlas_gemm(THCState *state, char transa, char transb, long m, long n, long k, float alpha, float *a, long lda, float *b, long ldb, float beta, float *c, long ldc);
 
 #endif

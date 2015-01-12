@@ -2,7 +2,7 @@
 #include "TH.h"
 #include "THCTensorRandom.h"
 
-void THCudaInit(THCudaState* state)
+void THCudaInit(THCState* state)
 {
   int count = 0;
   THCudaCheck(cudaGetDeviceCount(&count));
@@ -10,10 +10,10 @@ void THCudaInit(THCudaState* state)
   int device = 0;
   THCudaCheck(cudaGetDevice(&device));
 
-  state->rngState = (THCudaRNGState*)malloc(sizeof(THCudaRNGState));
-  THCRandom_init(state->rngState, count, device);
+  state->rngState = (THCRNGState*)malloc(sizeof(THCRNGState));
+  THCRandom_init(state, count, device);
 
-  THCudaBlas_init(count, device);
+  THCudaBlas_init(state, count, device);
 
   int i,j;
   for(i=0; i < count; ++i)
@@ -33,11 +33,11 @@ void THCudaInit(THCudaState* state)
   THCudaCheck(cudaSetDevice(device));
 }
 
-void THCudaShutdown(THCudaState* state)
+void THCudaShutdown(THCState* state)
 {
-  THCRandom_shutdown(state->rngState);
+  THCRandom_shutdown(state);
   free(state->rngState);
-  THCudaBlas_shutdown();
+  THCudaBlas_shutdown(state);
 }
 
 void __THCudaCheck(cudaError_t err, const char *file, const int line)

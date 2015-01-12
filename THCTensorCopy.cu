@@ -40,12 +40,12 @@ struct TensorInfo {
 // to reduce the complexity of the problem.
 template <typename IndexType>
 TensorInfo<IndexType>
-THCudaTensor_computeTensorInfo(THCudaTensor* t) {
-  int dims = THCudaTensor_nDimension(t);
+THCudaTensor_computeTensorInfo(THCState *state, THCudaTensor* t) {
+  int dims = THCudaTensor_nDimension(state, t);
   assert(dims <= MAX_DIMS);
 
   TensorInfo<IndexType> info;
-  info.data = THCudaTensor_data(t);
+  info.data = THCudaTensor_data(state, t);
 
   // Count the number of successive dimensions that can be collapsed, from
   // innermost to outermost.
@@ -56,7 +56,7 @@ THCudaTensor_computeTensorInfo(THCudaTensor* t) {
   int firstNonOneDim = -1;
 
   for (int i = dims - 1; i >= 0; --i) {
-    if (THCudaTensor_size(t, i) != 1) {
+    if (THCudaTensor_size(state, t, i) != 1) {
       firstNonOneDim = i;
       break;
     }
@@ -70,12 +70,12 @@ THCudaTensor_computeTensorInfo(THCudaTensor* t) {
 
   // Now, to determine the other collapsible dims. These are the size/strides
   // of the previous inner non-collapsible dim we encounter.
-  long sizeInner = THCudaTensor_size(t, firstNonOneDim);
-  long strideInner = THCudaTensor_stride(t, firstNonOneDim);
+  long sizeInner = THCudaTensor_size(state, t, firstNonOneDim);
+  long strideInner = THCudaTensor_stride(state, t, firstNonOneDim);
 
   for (int i = firstNonOneDim - 1; i >= 0; --i) {
-    long sizeOuter = THCudaTensor_size(t, i);
-    long strideOuter = THCudaTensor_stride(t, i);
+    long sizeOuter = THCudaTensor_size(state, t, i);
+    long strideOuter = THCudaTensor_stride(state, t, i);
 
     // The next outermost dimension can be skipped if size 1
     if (sizeOuter == 1) {
@@ -104,12 +104,12 @@ THCudaTensor_computeTensorInfo(THCudaTensor* t) {
 
   // Determine the sizes of the collapsed dimensions.
   int collapsedIndex = dims - numCollapsed - 1;
-  info.sizes[collapsedIndex] = THCudaTensor_size(t, firstNonOneDim);
-  info.strides[collapsedIndex] = THCudaTensor_stride(t, firstNonOneDim);
+  info.sizes[collapsedIndex] = THCudaTensor_size(state, t, firstNonOneDim);
+  info.strides[collapsedIndex] = THCudaTensor_stride(state, t, firstNonOneDim);
 
   for (int i = firstNonOneDim - 1; i >= 0; --i) {
-    long sizeOuter = THCudaTensor_size(t, i);
-    long strideOuter = THCudaTensor_stride(t, i);
+    long sizeOuter = THCudaTensor_size(state, t, i);
+    long strideOuter = THCudaTensor_stride(state, t, i);
 
     if (sizeOuter == 1) {
       // skip
@@ -146,8 +146,8 @@ THCudaTensor_computeTensorInfo(THCudaTensor* t) {
 // Returns true if all linear ID -> offset math can be performed using 32 bit
 // unsigned math
 bool
-canUse32BitCopyMath(THCudaTensor* t) {
-  long elements = THCudaTensor_nElement(t);
+canUse32BitCopyMath(THCState *state, THCudaTensor* t) {
+  long elements = THCudaTensor_nElement(state, t);
   if (elements >= UINT_MAX) {
     return false;
   }
@@ -155,11 +155,11 @@ canUse32BitCopyMath(THCudaTensor* t) {
   long offset = 0;
   long linearId = elements - 1;
 
-  for (int i = THCudaTensor_nDimension(t) - 1; i >= 0; --i) {
-    long curDimIndex = linearId % THCudaTensor_size(t, i);
-    long curDimOffset = curDimIndex * THCudaTensor_stride(t, i);
+  for (int i = THCudaTensor_nDimension(state, t) - 1; i >= 0; --i) {
+    long curDimIndex = linearId % THCudaTensor_size(state, t, i);
+    long curDimOffset = curDimIndex * THCudaTensor_stride(state, t, i);
     offset += curDimOffset;
-    linearId /= THCudaTensor_size(t, i);
+    linearId /= THCudaTensor_size(state, t, i);
   }
 
   if (offset >= UINT_MAX) {
@@ -238,18 +238,18 @@ THCudaTensor_kernel_copy(TensorInfo<IndexType> dst,
 }
 
 THC_API void
-THCudaTensor_copy(THCudaTensor* dst, THCudaTensor* src) {
-  long totalElements = THCudaTensor_nElement(dst);
+THCudaTensor_copy(THCState *state, THCudaTensor* dst, THCudaTensor* src) {
+  long totalElements = THCudaTensor_nElement(state, dst);
 
-  THArgCheck(totalElements == THCudaTensor_nElement(src), 2,
+  THArgCheck(totalElements == THCudaTensor_nElement(state, src), 2,
              "sizes do not match");
 
-  THArgCheck(THCudaTensor_nDimension(dst) <= MAX_DIMS, 2,
+  THArgCheck(THCudaTensor_nDimension(state, dst) <= MAX_DIMS, 2,
              "Copy only supported for <= 25 dimensions");
-  THArgCheck(THCudaTensor_nDimension(src) <= MAX_DIMS, 3,
+  THArgCheck(THCudaTensor_nDimension(state, src) <= MAX_DIMS, 3,
              "Copy only supported for <= 25 dimensions");
 
-  if (THCudaTensor_nDimension(dst) == 0) {
+  if (THCudaTensor_nDimension(state, dst) == 0) {
     // Zero-dim tensor; copy nothing
     return;
   }
@@ -261,12 +261,12 @@ THCudaTensor_copy(THCudaTensor* dst, THCudaTensor* src) {
   // holes within (in other words, there is some permutation that can be applied
   // to the size/strides such that the resulting tensor is contiguous).
   bool memcpyEligible =
-    (THCudaTensor_isContiguous(dst) && THCudaTensor_isContiguous(src)) ||
+    (THCudaTensor_isContiguous(state, dst) && THCudaTensor_isContiguous(state, src)) ||
     (totalElements == 1);
 
   if (memcpyEligible) {
-    THCudaCheck(cudaMemcpyAsync(THCudaTensor_data(dst),
-                                THCudaTensor_data(src),
+    THCudaCheck(cudaMemcpyAsync(THCudaTensor_data(state, dst),
+                                THCudaTensor_data(state, src),
                                 totalElements * sizeof(float),
                                 cudaMemcpyDeviceToDevice));
   } else {
@@ -340,11 +340,11 @@ THCudaTensor_copy(THCudaTensor* dst, THCudaTensor* src) {
     // and the resulting non-linear offset is all computable using 32-bit math?)
     // We also use unsigned index math in the kernel, as signed div/mod has
     // additional overhead.
-    if (canUse32BitCopyMath(src) && canUse32BitCopyMath(dst)) {
+    if (canUse32BitCopyMath(state, src) && canUse32BitCopyMath(state, dst)) {
       TensorInfo<unsigned int> dstInfo =
-        THCudaTensor_computeTensorInfo<unsigned int>(dst);
+        THCudaTensor_computeTensorInfo<unsigned int>(state, dst);
       TensorInfo<unsigned int> srcInfo =
-        THCudaTensor_computeTensorInfo<unsigned int>(src);
+        THCudaTensor_computeTensorInfo<unsigned int>(state, src);
 
       switch (dstInfo.dims) {
         HANDLE_DST_CASE(unsigned int, 1, srcInfo.dims);
@@ -357,9 +357,9 @@ THCudaTensor_copy(THCudaTensor* dst, THCudaTensor* src) {
       }
     } else {
       TensorInfo<unsigned long> dstInfo =
-        THCudaTensor_computeTensorInfo<unsigned long>(dst);
+        THCudaTensor_computeTensorInfo<unsigned long>(state, dst);
       TensorInfo<unsigned long> srcInfo =
-        THCudaTensor_computeTensorInfo<unsigned long>(src);
+        THCudaTensor_computeTensorInfo<unsigned long>(state, src);
 
       switch (dstInfo.dims) {
         HANDLE_DST_CASE(unsigned long, 1, srcInfo.dims);

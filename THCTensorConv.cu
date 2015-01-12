@@ -292,8 +292,8 @@ __global__ void conv2genericrev(float *input, float *kernel, float *output,
  * 3D input, 4D kernel, 3D output
  * matrix vector product like: y <- Ax + beta*y
  */
-THC_API void THCudaTensor_conv2Dmv(THCudaTensor *output, float beta, THCudaTensor *input,
-                                  THCudaTensor *kernel, long srow, long scol, const char *type)
+THC_API void THCudaTensor_conv2Dmv(THCState *state, THCudaTensor *output, float beta, THCudaTensor *input,
+                                   THCudaTensor *kernel, long srow, long scol, const char *type)
 {
   long nInputPlane, nInputRows, nInputCols;
   long nKernelRows, nKernelCols;
@@ -305,8 +305,8 @@ THC_API void THCudaTensor_conv2Dmv(THCudaTensor *output, float beta, THCudaTenso
   THArgCheck(type[0] == 'v' || type[0] == 'f', 7, "type of convolution can 'v' or 'f'");
   THArgCheck(type[1] == 'c' || type[1] == 'x', 7, "type of convolution can 'x' or 'c'");
 
-  input = THCudaTensor_newContiguous(input);
-  kernel = THCudaTensor_newContiguous(kernel);
+  input = THCudaTensor_newContiguous(state, input);
+  kernel = THCudaTensor_newContiguous(state, kernel);
 
   nInputPlane = input->size[0];
   nInputRows  = input->size[1];
@@ -326,22 +326,22 @@ THC_API void THCudaTensor_conv2Dmv(THCudaTensor *output, float beta, THCudaTenso
     nOutputCols = (nInputCols - 1) * scol + nKernelCols;
 
     // use temp buffer
-    THCudaTensor *inputP = THCudaTensor_new();
+    THCudaTensor *inputP = THCudaTensor_new(state);
 
     // create a zero-padded input
     long nInputRowsPadded = (nOutputRows - 1) * srow + nKernelRows;
     long nInputColsPadded = (nOutputCols - 1) * scol + nKernelCols;
-    THCudaTensor_resize3d(inputP, nInputPlane, nInputRowsPadded, nInputColsPadded);
-    THCudaTensor_zero(inputP);
+    THCudaTensor_resize3d(state, inputP, nInputPlane, nInputRowsPadded, nInputColsPadded);
+    THCudaTensor_zero(state, inputP);
 
-    THCudaTensor *centered = THCudaTensor_new();
-    THCudaTensor_narrow(centered, inputP, 2, nKernelCols-1, nInputCols);
-    THCudaTensor_narrow(centered, NULL, 1, nKernelRows-1, nInputRows);
-    THCudaTensor_copy(centered, input);
-    THCudaTensor_free(centered);
+    THCudaTensor *centered = THCudaTensor_new(state);
+    THCudaTensor_narrow(state, centered, inputP, 2, nKernelCols-1, nInputCols);
+    THCudaTensor_narrow(state, centered, NULL, 1, nKernelRows-1, nInputRows);
+    THCudaTensor_copy(state, centered, input);
+    THCudaTensor_free(state, centered);
 
     // remap input to newly created tensor
-    THCudaTensor_free(input);
+    THCudaTensor_free(state, input);
     input = inputP;
     nInputRows = nInputRowsPadded;
     nInputCols = nInputColsPadded;
@@ -352,18 +352,18 @@ THC_API void THCudaTensor_conv2Dmv(THCudaTensor *output, float beta, THCudaTenso
     nOutputCols = (nInputCols - nKernelCols) / scol + 1;
   }
 
-  long nelem = THCudaTensor_nElement(output);
-  THCudaTensor_resize3d(output, nOutputPlane, nOutputRows, nOutputCols);
+  long nelem = THCudaTensor_nElement(state, output);
+  THCudaTensor_resize3d(state, output, nOutputPlane, nOutputRows, nOutputCols);
 
-  if (beta == 0 || nelem != THCudaTensor_nElement(output)) {
-    THCudaTensor_zero(output);
+  if (beta == 0 || nelem != THCudaTensor_nElement(state, output)) {
+    THCudaTensor_zero(state, output);
   } else if (beta != 1) {
-    THCudaTensor_mul(output, output, beta);
+    THCudaTensor_mul(state, output, output, beta);
   }
 
-  float *input_data = THCudaTensor_data(input);
-  float *weight_data = THCudaTensor_data(kernel);
-  float *output_data = THCudaTensor_data(output);
+  float *input_data = THCudaTensor_data(state, input);
+  float *weight_data = THCudaTensor_data(state, kernel);
+  float *output_data = THCudaTensor_data(state, output);
 
   // cuda blocks & threads:
   int yblocks = (int)(16L / nOutputPlane);
@@ -395,8 +395,8 @@ THC_API void THCudaTensor_conv2Dmv(THCudaTensor *output, float beta, THCudaTenso
   }
 
   // clean
-  if (*type != 'f') THCudaTensor_free(input);
-  THCudaTensor_free(kernel);
+  if (*type != 'f') THCudaTensor_free(state, input);
+  THCudaTensor_free(state, kernel);
 
   // check for errors
   cudaError_t err = cudaGetLastError();
@@ -411,8 +411,8 @@ THC_API void THCudaTensor_conv2Dmv(THCudaTensor *output, float beta, THCudaTenso
  * 4D input, 4D kernel, 4D output
  * matrix vector product like: y <- Ax + beta*y
  */
-THC_API void THCudaTensor_conv2Dmm(THCudaTensor *output, float beta, THCudaTensor *input,
-                                  THCudaTensor *kernel, long srow, long scol, const char *type)
+THC_API void THCudaTensor_conv2Dmm(THCState *state, THCudaTensor *output, float beta, THCudaTensor *input,
+                                   THCudaTensor *kernel, long srow, long scol, const char *type)
 {
   long nbatch, nInputPlane, nInputRows, nInputCols;
   long nKernelRows, nKernelCols;
@@ -424,8 +424,8 @@ THC_API void THCudaTensor_conv2Dmm(THCudaTensor *output, float beta, THCudaTenso
   THArgCheck(type[0] == 'v' || type[0] == 'f', 7, "type of convolution can 'v' or 'f'");
   THArgCheck(type[1] == 'c' || type[1] == 'x', 7, "type of convolution can 'x' or 'c'");
 
-  input = THCudaTensor_newContiguous(input);
-  kernel = THCudaTensor_newContiguous(kernel);
+  input = THCudaTensor_newContiguous(state, input);
+  kernel = THCudaTensor_newContiguous(state, kernel);
 
   nbatch      = input->size[0];
   nInputPlane = input->size[1];
@@ -446,22 +446,22 @@ THC_API void THCudaTensor_conv2Dmm(THCudaTensor *output, float beta, THCudaTenso
     nOutputCols = (nInputCols - 1) * scol + nKernelCols;
 
     // use temp buffer
-    THCudaTensor *inputP = THCudaTensor_new();
+    THCudaTensor *inputP = THCudaTensor_new(state);
 
     // create a zero-padded input
     long nInputRowsPadded = (nOutputRows - 1) * srow + nKernelRows;
     long nInputColsPadded = (nOutputCols - 1) * scol + nKernelCols;
-    THCudaTensor_resize4d(inputP, nbatch, nInputPlane, nInputRowsPadded, nInputColsPadded);
-    THCudaTensor_zero(inputP);
+    THCudaTensor_resize4d(state, inputP, nbatch, nInputPlane, nInputRowsPadded, nInputColsPadded);
+    THCudaTensor_zero(state, inputP);
 
-    THCudaTensor *centered = THCudaTensor_new();
-    THCudaTensor_narrow(centered, inputP, 3, nKernelCols-1, nInputCols);
-    THCudaTensor_narrow(centered, NULL, 2, nKernelRows-1, nInputRows);
-    THCudaTensor_copy(centered, input);
-    THCudaTensor_free(centered);
+    THCudaTensor *centered = THCudaTensor_new(state);
+    THCudaTensor_narrow(state, centered, inputP, 3, nKernelCols-1, nInputCols);
+    THCudaTensor_narrow(state, centered, NULL, 2, nKernelRows-1, nInputRows);
+    THCudaTensor_copy(state, centered, input);
+    THCudaTensor_free(state, centered);
 
     // remap input to newly created tensor
-    THCudaTensor_free(input);
+    THCudaTensor_free(state, input);
     input = inputP;
     nInputRows = nInputRowsPadded;
     nInputCols = nInputColsPadded;
@@ -472,18 +472,18 @@ THC_API void THCudaTensor_conv2Dmm(THCudaTensor *output, float beta, THCudaTenso
     nOutputCols = (nInputCols - nKernelCols) / scol + 1;
   }
 
-  long nelem = THCudaTensor_nElement(output);
-  THCudaTensor_resize4d(output, nbatch, nOutputPlane, nOutputRows, nOutputCols);
+  long nelem = THCudaTensor_nElement(state, output);
+  THCudaTensor_resize4d(state, output, nbatch, nOutputPlane, nOutputRows, nOutputCols);
 
-  if (beta == 0 || nelem != THCudaTensor_nElement(output)) {
-    THCudaTensor_zero(output);
+  if (beta == 0 || nelem != THCudaTensor_nElement(state, output)) {
+    THCudaTensor_zero(state, output);
   } else if (beta != 1) {
-    THCudaTensor_mul(output, output, beta);
+    THCudaTensor_mul(state, output, output, beta);
   }
 
-  float *input_data = THCudaTensor_data(input);
-  float *weight_data = THCudaTensor_data(kernel);
-  float *output_data = THCudaTensor_data(output);
+  float *input_data = THCudaTensor_data(state, input);
+  float *weight_data = THCudaTensor_data(state, kernel);
+  float *output_data = THCudaTensor_data(state, output);
 
   // cuda blocks & threads:
   int yblocks = (int)(16L / nOutputPlane);
@@ -515,8 +515,8 @@ THC_API void THCudaTensor_conv2Dmm(THCudaTensor *output, float beta, THCudaTenso
   }
 
   // clean
-  if (*type != 'f') THCudaTensor_free(input);
-  THCudaTensor_free(kernel);
+  if (*type != 'f') THCudaTensor_free(state, input);
+  THCudaTensor_free(state, kernel);
 
   // check for errors
   cudaError_t err = cudaGetLastError();
@@ -542,9 +542,9 @@ THC_API void THCudaTensor_conv2Dmm(THCudaTensor *output, float beta, THCudaTenso
  * for sr,sc=1 this is equivalent to xcorr2Dger, but otherwise it is useful for
  * calculating derivatives wrt a kernel that is applied with stride sr,sc != 1
  */
-THC_API void THCudaTensor_conv2DRevger(THCudaTensor *output, float beta, float alpha,
-                                      THCudaTensor *input, THCudaTensor *kernel,
-                                      long srow, long scol)
+THC_API void THCudaTensor_conv2DRevger(THCState *state, THCudaTensor *output, float beta, float alpha,
+                                       THCudaTensor *input, THCudaTensor *kernel,
+                                       long srow, long scol)
 {
   long nInputPlane, nInputRows, nInputCols;
   long nKernelPlane, nKernelRows, nKernelCols;
@@ -555,8 +555,8 @@ THC_API void THCudaTensor_conv2DRevger(THCudaTensor *output, float beta, float a
   THArgCheck(srow >= 1, 5, "Stride should be a positive integer");
   THArgCheck(scol >= 1, 6, "Stride should be a positive integer");
 
-  input = THCudaTensor_newContiguous(input);
-  kernel = THCudaTensor_newContiguous(kernel);
+  input = THCudaTensor_newContiguous(state, input);
+  kernel = THCudaTensor_newContiguous(state, kernel);
 
   nInputPlane = input->size[0];
   nInputRows  = input->size[1];
@@ -572,18 +572,18 @@ THC_API void THCudaTensor_conv2DRevger(THCudaTensor *output, float beta, float a
   nOutputRows = nInputRows - (nKernelRows - 1) * srow;
   nOutputCols = nInputCols - (nKernelCols - 1) * scol;
 
-  long nelem = THCudaTensor_nElement(output);
-  THCudaTensor_resize4d(output, nKernelPlane, nInputPlane, nOutputRows, nOutputCols);
+  long nelem = THCudaTensor_nElement(state, output);
+  THCudaTensor_resize4d(state, output, nKernelPlane, nInputPlane, nOutputRows, nOutputCols);
 
-  if (nelem == 0 || beta == 0 || nelem != THCudaTensor_nElement(output)) {
-    THCudaTensor_zero(output);
+  if (nelem == 0 || beta == 0 || nelem != THCudaTensor_nElement(state, output)) {
+    THCudaTensor_zero(state, output);
   } else if (beta != 1) {
-    THCudaTensor_mul(output, output, beta);
+    THCudaTensor_mul(state, output, output, beta);
   }
 
-  float *input_data = THCudaTensor_data(input);
-  float *kernel_data = THCudaTensor_data(kernel);
-  float *output_data = THCudaTensor_data(output);
+  float *input_data = THCudaTensor_data(state, input);
+  float *kernel_data = THCudaTensor_data(state, kernel);
+  float *output_data = THCudaTensor_data(state, output);
 
   // auto compute nb of blocks and threads
   dim3 blocks(nKernelPlane, nInputPlane);
@@ -596,8 +596,8 @@ THC_API void THCudaTensor_conv2DRevger(THCudaTensor *output, float beta, float a
                                          alpha, srow, scol);
 
   // clean
-  THCudaTensor_free(input);
-  THCudaTensor_free(kernel);
+  THCudaTensor_free(state, input);
+  THCudaTensor_free(state, kernel);
 
   // check for errors
   cudaError_t err = cudaGetLastError();
@@ -612,9 +612,9 @@ THC_API void THCudaTensor_conv2DRevger(THCudaTensor *output, float beta, float a
  * 4D input, 4D kernel, 4D output
  * conv2DRevgerm is doing the same thing as conv2DRevger, but with batch inputs
  */
-THC_API void THCudaTensor_conv2DRevgerm(THCudaTensor *output, float beta, float alpha,
-                                       THCudaTensor *input, THCudaTensor *kernel,
-                                       long srow, long scol)
+THC_API void THCudaTensor_conv2DRevgerm(THCState *state, THCudaTensor *output, float beta, float alpha,
+                                        THCudaTensor *input, THCudaTensor *kernel,
+                                        long srow, long scol)
 {
   long nInputPlane, nInputRows, nInputCols;
   long nKernelPlane, nKernelRows, nKernelCols;
@@ -626,8 +626,8 @@ THC_API void THCudaTensor_conv2DRevgerm(THCudaTensor *output, float beta, float 
   THArgCheck(srow >= 1, 5, "Stride should be a positive integer");
   THArgCheck(scol >= 1, 6, "Stride should be a positive integer");
 
-  input = THCudaTensor_newContiguous(input);
-  kernel = THCudaTensor_newContiguous(kernel);
+  input = THCudaTensor_newContiguous(state, input);
+  kernel = THCudaTensor_newContiguous(state, kernel);
 
   nbatch      = input->size[0];
   nInputPlane = input->size[1];
@@ -644,18 +644,18 @@ THC_API void THCudaTensor_conv2DRevgerm(THCudaTensor *output, float beta, float 
   nOutputRows = nInputRows - (nKernelRows - 1) * srow;
   nOutputCols = nInputCols - (nKernelCols - 1) * scol;
 
-  long nelem = THCudaTensor_nElement(output);
-  THCudaTensor_resize4d(output, nKernelPlane, nInputPlane, nOutputRows, nOutputCols);
+  long nelem = THCudaTensor_nElement(state, output);
+  THCudaTensor_resize4d(state, output, nKernelPlane, nInputPlane, nOutputRows, nOutputCols);
 
-  if (nelem == 0 || beta == 0 || nelem != THCudaTensor_nElement(output)) {
-    THCudaTensor_zero(output);
+  if (nelem == 0 || beta == 0 || nelem != THCudaTensor_nElement(state, output)) {
+    THCudaTensor_zero(state, output);
   } else if (beta != 1) {
-    THCudaTensor_mul(output, output, beta);
+    THCudaTensor_mul(state, output, output, beta);
   }
 
-  float *input_data = THCudaTensor_data(input);
-  float *kernel_data = THCudaTensor_data(kernel);
-  float *output_data = THCudaTensor_data(output);
+  float *input_data = THCudaTensor_data(state, input);
+  float *kernel_data = THCudaTensor_data(state, kernel);
+  float *output_data = THCudaTensor_data(state, output);
 
   // kernel is called multiple times
   // (the arbitrary split below is just here to make sure we dont go over 256 threads)
@@ -677,8 +677,8 @@ THC_API void THCudaTensor_conv2DRevgerm(THCudaTensor *output, float beta, float 
   }
 
   // clean
-  THCudaTensor_free(input);
-  THCudaTensor_free(kernel);
+  THCudaTensor_free(state, input);
+  THCudaTensor_free(state, kernel);
 
   // check for errors
   cudaError_t err = cudaGetLastError();
@@ -873,9 +873,9 @@ template <bool swapkernel, int T_kernel_h, int T_kernel_w>
  * 3D input, 4D kernel, 3D output
  * matrix vector product like: y <- Ax + beta*y
  */
-THC_API void THCudaTensor_conv2Dmap(THCudaTensor *output, THCudaTensor *input,
-                                   THCudaTensor *kernel, long stride_x, long stride_y,
-                                   THCudaTensor *table, long fanin)
+THC_API void THCudaTensor_conv2Dmap(THCState *state, THCudaTensor *output, THCudaTensor *input,
+                                    THCudaTensor *kernel, long stride_x, long stride_y,
+                                    THCudaTensor *table, long fanin)
 {
   long nInputPlane, nInputRows, nInputCols;
   long nKernelRows, nKernelCols;
@@ -885,9 +885,9 @@ THC_API void THCudaTensor_conv2Dmap(THCudaTensor *output, THCudaTensor *input,
   THArgCheck(stride_x >= 1, 5, "Stride should be a positive integer");
   THArgCheck(stride_y >= 1, 6, "Stride should be a positive integer");
 
-  input = THCudaTensor_newContiguous(input);
-  kernel = THCudaTensor_newContiguous(kernel);
-  table = THCudaTensor_newContiguous(table);
+  input = THCudaTensor_newContiguous(state, input);
+  kernel = THCudaTensor_newContiguous(state, kernel);
+  table = THCudaTensor_newContiguous(state, table);
 
   nInputPlane = input->size[0];
   nInputRows  = input->size[1];
@@ -905,13 +905,13 @@ THC_API void THCudaTensor_conv2Dmap(THCudaTensor *output, THCudaTensor *input,
   nOutputRows = (nInputRows - nKernelRows) / stride_y + 1;
   nOutputCols = (nInputCols - nKernelCols) / stride_x + 1;
 
-  // long nelem = THCudaTensor_nElement(output);
-  THCudaTensor_resize3d(output, nOutputPlane, nOutputRows, nOutputCols);
+  // long nelem = THCudaTensor_nElement(state, output);
+  THCudaTensor_resize3d(state, output, nOutputPlane, nOutputRows, nOutputCols);
 
-  float *input_data = THCudaTensor_data(input);
-  float *kernel_data = THCudaTensor_data(kernel);
-  float *output_data = THCudaTensor_data(output);
-  float *table_data = THCudaTensor_data(table);
+  float *input_data = THCudaTensor_data(state, input);
+  float *kernel_data = THCudaTensor_data(state, kernel);
+  float *output_data = THCudaTensor_data(state, output);
+  float *table_data = THCudaTensor_data(state, table);
 
   // set the number of blocks and threads
   int nthreads_x = 32;
@@ -931,9 +931,9 @@ THC_API void THCudaTensor_conv2Dmap(THCudaTensor *output, THCudaTensor *input,
   FOR_KERNEL_SPECIALIZED_DIMENSION(nKernelCols, nKernelRows, GENERIC_MAP_KERNEL);
 #undef GENERIC_MAP_KERNEL
   // clean
-  THCudaTensor_free(input);
-  THCudaTensor_free(kernel);
-  THCudaTensor_free(table);
+  THCudaTensor_free(state, input);
+  THCudaTensor_free(state, kernel);
+  THCudaTensor_free(state, table);
 
   // check for errors
   cudaError_t err = cudaGetLastError();
