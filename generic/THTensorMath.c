@@ -607,6 +607,40 @@ void THTensor_(addr)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor 
   }
 }
 
+void THTensor_(bmm)(THTensor *result, THTensor *batch1, THTensor *batch2)
+{
+  long batch;
+
+  THArgCheck(THTensor_(nDimension)(batch1) == 3, 1, "expected 3D tensor");
+  THArgCheck(THTensor_(nDimension)(batch2) == 3, 2, "expected 3D tensor");
+  THArgCheck(THTensor_(size)(batch1, 0) == THTensor_(size)(batch2, 0), 2,
+             "equal number of batches expected");
+  THArgCheck(THTensor_(size)(batch1, 2) == THTensor_(size)(batch2, 1), 2,
+             "wrong matrix size");
+
+  THLongStorage* result_size = THLongStorage_newWithSize3(THTensor_(size)(batch1, 0),
+                                                          THTensor_(size)(batch1, 1),
+                                                          THTensor_(size)(batch2, 2));
+  THTensor_(resize)(result, result_size, NULL);
+  THLongStorage_free(result_size);
+
+  for (batch = 0; batch < THTensor_(size)(batch1, 0); ++batch) {
+    THTensor *matrix1 = THTensor_(newWithTensor)(batch1);
+    THTensor *matrix2 = THTensor_(newWithTensor)(batch2);
+    THTensor *result_matrix = THTensor_(newWithTensor(result));
+
+    THTensor_(select)(matrix1, NULL, 0, batch);
+    THTensor_(select)(matrix2, NULL, 0, batch);
+    THTensor_(select)(result_matrix, NULL, 0, batch);
+
+    THTensor_(addmm)(result_matrix, 0, result_matrix, 1, matrix1, matrix2);
+
+    THTensor_(free)(matrix1);
+    THTensor_(free)(matrix2);
+    THTensor_(free)(result_matrix);
+  }
+}
+
 long THTensor_(numel)(THTensor *t)
 {
   return THTensor_(nElement)(t);
