@@ -29,7 +29,8 @@ TH_API THGenerator * THGenerator_new();
 TH_API THGenerator * THGenerator_copy(THGenerator *self, THGenerator *from);
 TH_API void THGenerator_free(THGenerator *gen);
 
-/* Initializes the random number generator with the current time (granularity: seconds) and returns the seed. */
+/* Initializes the random number generator from /dev/urandom (or on Windows
+platforms with the current time (granularity: seconds)) and returns the seed. */
 TH_API unsigned long THRandom_seed(THGenerator *_generator);
 
 /* Initializes the random number generator with the given long "the_seed_". */
