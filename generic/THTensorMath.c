@@ -360,6 +360,22 @@ void THTensor_(cdiv)(THTensor *r_, THTensor *t, THTensor *src)
   }
 }
 
+void THTensor_(tpow)(THTensor *r_, real value, THTensor *t)
+{
+  THTensor_(resizeAs)(r_, t);
+  if (THTensor_(isContiguous)(r_) && THTensor_(isContiguous)(t) && THTensor_(nElement)(r_) == THTensor_(nElement)(t)) {
+      real *tp = THTensor_(data)(t);
+      real *rp = THTensor_(data)(r_);
+      long sz = THTensor_(nElement)(t);
+      long i;
+      #pragma omp parallel for if(sz > TH_OMP_OVERHEAD_THRESHOLD) private(i)
+      for (i=0; i<sz; i++)
+        rp[i] = pow(value, tp[i]);
+  } else {
+      TH_TENSOR_APPLY2(real, r_, real, t, *r__data = pow(value, *t_data););
+  }
+}
+
 void THTensor_(addcmul)(THTensor *r_, THTensor *t, real value, THTensor *src1, THTensor *src2)
 {
   if(r_ != t)

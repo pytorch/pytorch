@@ -113,6 +113,7 @@ TH_API void THTensor_(atan)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(atan2)(THTensor *r_, THTensor *tx, THTensor *ty);
 TH_API void THTensor_(tanh)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(pow)(THTensor *r_, THTensor *t, real value);
+TH_API void THTensor_(tpow)(THTensor *r_, real value, THTensor *t);
 TH_API void THTensor_(sqrt)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(ceil)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(floor)(THTensor *r_, THTensor *t);
