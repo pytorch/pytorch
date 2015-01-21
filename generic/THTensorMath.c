@@ -651,11 +651,10 @@ void THTensor_(bmm)(THTensor *result, THTensor *batch1, THTensor *batch2)
   THArgCheck(THTensor_(size)(batch1, 2) == THTensor_(size)(batch2, 1), 2,
              "wrong matrix size");
 
-  THLongStorage* result_size = THLongStorage_newWithSize3(THTensor_(size)(batch1, 0),
-                                                          THTensor_(size)(batch1, 1),
-                                                          THTensor_(size)(batch2, 2));
-  THTensor_(resize)(result, result_size, NULL);
-  THLongStorage_free(result_size);
+  long bs = THTensor_(size)(batch1, 0);
+  long dim1 = THTensor_(size)(batch1, 1);
+  long dim2 = THTensor_(size)(batch2, 2);
+  THTensor_(resize3d)(result, bs, dim1, dim2);
 
   for (batch = 0; batch < THTensor_(size)(batch1, 0); ++batch) {
     THTensor *matrix1 = THTensor_(newWithTensor)(batch1);
@@ -671,6 +670,42 @@ void THTensor_(bmm)(THTensor *result, THTensor *batch1, THTensor *batch2)
     THTensor_(free)(matrix1);
     THTensor_(free)(matrix2);
     THTensor_(free)(result_matrix);
+  }
+}
+
+void THTensor_(baddmm)(THTensor *result, real beta, THTensor *t, real alpha, THTensor *batch1, THTensor *batch2)
+{
+  long batch;
+
+  THArgCheck(THTensor_(nDimension)(batch1) == 3, 1, "expected 3D tensor");
+  THArgCheck(THTensor_(nDimension)(batch2) == 3, 2, "expected 3D tensor");
+  THArgCheck(THTensor_(size)(batch1, 0) == THTensor_(size)(batch2, 0), 2,
+             "equal number of batches expected");
+  THArgCheck(THTensor_(size)(batch1, 2) == THTensor_(size)(batch2, 1), 2,
+             "wrong matrix size");
+
+  long dim1 = THTensor_(size)(batch1, 1);
+  long dim2 = THTensor_(size)(batch2, 2);
+  THArgCheck(THTensor_(size)(t, 0) == dim1, 1, "output tensor of incorrect size");
+  THArgCheck(THTensor_(size)(t, 1) == dim2, 1, "output tensor of incorrect size");
+
+  if (t != result) {
+    THTensor_(resizeAs)(result, t);
+    THTensor_(copy)(result, t);
+  }
+
+  for (batch = 0; batch < THTensor_(size)(batch1, 0); ++batch) {
+    THTensor *matrix1 = THTensor_(newWithTensor)(batch1);
+    THTensor *matrix2 = THTensor_(newWithTensor)(batch2);
+
+    THTensor_(select)(matrix1, NULL, 0, batch);
+    THTensor_(select)(matrix2, NULL, 0, batch);
+
+    THTensor_(addmm)(result, beta, result, alpha, matrix1, matrix2);
+    beta = 1; // accumulate output once
+
+    THTensor_(free)(matrix1);
+    THTensor_(free)(matrix2);
   }
 }
 
