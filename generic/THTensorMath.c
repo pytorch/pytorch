@@ -656,21 +656,21 @@ void THTensor_(bmm)(THTensor *result, THTensor *batch1, THTensor *batch2)
   long dim2 = THTensor_(size)(batch2, 2);
   THTensor_(resize3d)(result, bs, dim1, dim2);
 
-  for (batch = 0; batch < THTensor_(size)(batch1, 0); ++batch) {
-    THTensor *matrix1 = THTensor_(newWithTensor)(batch1);
-    THTensor *matrix2 = THTensor_(newWithTensor)(batch2);
-    THTensor *result_matrix = THTensor_(newWithTensor(result));
+  THTensor *matrix1 = THTensor_(new)();
+  THTensor *matrix2 = THTensor_(new)();
+  THTensor *result_matrix = THTensor_(new());
 
-    THTensor_(select)(matrix1, NULL, 0, batch);
-    THTensor_(select)(matrix2, NULL, 0, batch);
-    THTensor_(select)(result_matrix, NULL, 0, batch);
+  for (batch = 0; batch < THTensor_(size)(batch1, 0); ++batch) {
+    THTensor_(select)(matrix1, batch1, 0, batch);
+    THTensor_(select)(matrix2, batch2, 0, batch);
+    THTensor_(select)(result_matrix, result, 0, batch);
 
     THTensor_(addmm)(result_matrix, 0, result_matrix, 1, matrix1, matrix2);
-
-    THTensor_(free)(matrix1);
-    THTensor_(free)(matrix2);
-    THTensor_(free)(result_matrix);
   }
+
+  THTensor_(free)(matrix1);
+  THTensor_(free)(matrix2);
+  THTensor_(free)(result_matrix);
 }
 
 void THTensor_(baddmm)(THTensor *result, real beta, THTensor *t, real alpha, THTensor *batch1, THTensor *batch2)
@@ -694,19 +694,19 @@ void THTensor_(baddmm)(THTensor *result, real beta, THTensor *t, real alpha, THT
     THTensor_(copy)(result, t);
   }
 
-  for (batch = 0; batch < THTensor_(size)(batch1, 0); ++batch) {
-    THTensor *matrix1 = THTensor_(newWithTensor)(batch1);
-    THTensor *matrix2 = THTensor_(newWithTensor)(batch2);
+  THTensor *matrix1 = THTensor_(new)();
+  THTensor *matrix2 = THTensor_(new)();
 
-    THTensor_(select)(matrix1, NULL, 0, batch);
-    THTensor_(select)(matrix2, NULL, 0, batch);
+  for (batch = 0; batch < THTensor_(size)(batch1, 0); ++batch) {
+    THTensor_(select)(matrix1, batch1, 0, batch);
+    THTensor_(select)(matrix2, batch2, 0, batch);
 
     THTensor_(addmm)(result, beta, result, alpha, matrix1, matrix2);
     beta = 1; // accumulate output once
-
-    THTensor_(free)(matrix1);
-    THTensor_(free)(matrix2);
   }
+
+  THTensor_(free)(matrix1);
+  THTensor_(free)(matrix2);
 }
 
 long THTensor_(numel)(THTensor *t)
