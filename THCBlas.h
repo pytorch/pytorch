@@ -22,5 +22,8 @@ THC_API void THCudaBlas_ger(THCState *state, long m, long n, float alpha, float 
 
 /* Level 3 */
 THC_API void THCudaBlas_gemm(THCState *state, char transa, char transb, long m, long n, long k, float alpha, float *a, long lda, float *b, long ldb, float beta, float *c, long ldc);
+THC_API void THCudaBlas_gemmBatched(THCState *state, char transa, char transb, long m, long n, long k,
+                                    float alpha, const float *a[], long lda, const float *b[], long ldb,
+                                    float beta, float *c[], long ldc, long batchCount);
 
 #endif

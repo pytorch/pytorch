@@ -1024,6 +1024,152 @@ void THCudaTensor_addr(THCState *state, THCudaTensor *r_, float beta, THCudaTens
   }
 }
 
+void THCudaTensor_baddbmm(THCState *state, THCudaTensor *result, float beta, THCudaTensor *t,
+                          float alpha, THCudaTensor *batch1, THCudaTensor *batch2) {
+  THArgCheck(THCudaTensor_nDimension(state, t) == 3, 4, "expected 3D tensor");
+  THArgCheck(THCudaTensor_nDimension(state, batch1) == 3, 6, "expected 3D tensor");
+  THArgCheck(THCudaTensor_nDimension(state, batch2) == 3, 7, "expected 3D tensor");
+  THArgCheck(THCudaTensor_size(state, t, 0) == THCudaTensor_size(state, batch1, 0), 6,
+             "equal number of batches expected");
+  THArgCheck(THCudaTensor_size(state, t, 0) == THCudaTensor_size(state, batch2, 0), 7,
+             "equal number of batches expected");
+  THArgCheck(THCudaTensor_size(state, t, 1) == THCudaTensor_size(state, batch1, 1), 6,
+             "wrong matrix size");
+  THArgCheck(THCudaTensor_size(state, t, 2) == THCudaTensor_size(state, batch2, 2), 7,
+             "wrong matrix size");
+  THArgCheck(THCudaTensor_size(state, batch1, 2) == THCudaTensor_size(state, batch2, 1), 6,
+             "wrong matrix size");
+
+  if (t != result) {
+    THCudaTensor_resizeAs(state, result, t);
+    THCudaTensor_copy(state, result, t);
+  }
+
+  bool transpose_result;
+  char transpose_batch1, transpose_batch2;
+  long lda, ldb, ldc;
+  THCudaTensor *result_, *batch1_, *batch2_;
+  if (result->stride[1] == 1)
+  {
+    transpose_result = false;
+    result_ = result;
+    ldc = result_->stride[2];
+  }
+  else if (result->stride[2] == 1)
+  {
+    transpose_result = true;
+
+    THCudaTensor *swap = batch2;
+    batch2 = batch1;
+    batch1 = swap;
+
+    result_ = result;
+    ldc = result_->stride[1];
+  }
+  else
+  {
+    transpose_result = false;
+
+    result_ = THCudaTensor_newWithSize3d(state, result->size[0], result->size[2], result->size[1]);
+    THCudaTensor_copy(state, result_, result);
+    THCudaTensor_transpose(state, result_, NULL, 1, 2);
+
+    ldc = result_->stride[2];
+  }
+
+  if (batch1->stride[transpose_result ? 2 : 1] == 1)
+  {
+    transpose_batch1 = 'n';
+    batch1_ = batch1;
+    lda = batch1_->stride[transpose_result ? 1 : 2];
+  }
+  else if (batch1->stride[transpose_result ? 1 : 2] == 1)
+  {
+    transpose_batch1 = 't';
+    batch1_ = batch1;
+    lda = batch1_->stride[transpose_result ? 2 : 1];
+  }
+  else
+  {
+    transpose_batch1 = transpose_result ? 'n' : 't';
+    batch1_ = THCudaTensor_newContiguous(state, batch1);
+    lda = batch1_->stride[1];
+  }
+
+  if (batch2->stride[transpose_result ? 2 : 1] == 1)
+  {
+    transpose_batch2 = 'n';
+    batch2_ = batch2;
+    ldb = batch2_->stride[transpose_result ? 1 : 2];
+  }
+  else if (batch2->stride[transpose_result ? 1 : 2] == 1)
+  {
+    transpose_batch2 = 't';
+    batch2_ = batch2;
+    ldb = batch2_->stride[transpose_result ? 2 : 1];
+  }
+  else
+  {
+    transpose_batch2 = transpose_result ? 'n' : 't';
+    batch2_ = THCudaTensor_newContiguous(state, batch2);
+    ldb = batch2_->stride[1];
+  }
+
+  // Compute pointers to matrices in each batch.
+  long num_batches = result_->size[0];
+  size_t matrices_size = num_batches * sizeof(float*);
+  const float **matrices1 = (const float **)THAlloc(matrices_size);
+  const float **matrices2 = (const float **)THAlloc(matrices_size);
+  float **result_matrices = (float **)THAlloc(matrices_size);
+  for (int i = 0; i < num_batches; ++i)
+  {
+    matrices1[i] = THCudaTensor_data(state, batch1_) + i * batch1_->stride[0];
+    matrices2[i] = THCudaTensor_data(state, batch2_) + i * batch2_->stride[0];
+    result_matrices[i] = THCudaTensor_data(state, result_) + i * result_->stride[0];
+  }
+
+  // Copy pointers to device.
+  const float **d_matrices1, **d_matrices2;
+  float **d_result_matrices;
+  THCudaCheck(cudaMalloc(&d_matrices1, matrices_size));
+  THCudaCheck(cudaMalloc(&d_matrices2, matrices_size));
+  THCudaCheck(cudaMalloc(&d_result_matrices, matrices_size));
+
+  THCudaCheck(cudaMemcpyAsync(d_matrices1, matrices1, matrices_size, cudaMemcpyHostToDevice));
+  THCudaCheck(cudaMemcpyAsync(d_matrices2, matrices2, matrices_size, cudaMemcpyHostToDevice));
+  THCudaCheck(cudaMemcpyAsync(d_result_matrices, result_matrices, matrices_size, cudaMemcpyHostToDevice));
+
+  THCudaBlas_gemmBatched(
+      state,
+      transpose_batch1,
+      transpose_batch2,
+      result_->size[transpose_result ? 2 : 1],
+      result_->size[transpose_result ? 1 : 2],
+      batch1_->size[transpose_result ? 1 : 2],
+      alpha,
+      d_matrices1, lda,
+      d_matrices2, ldb,
+      beta,
+      d_result_matrices, ldc,
+      num_batches);
+
+  cudaFree(d_matrices1);
+  cudaFree(d_matrices2);
+  cudaFree(d_result_matrices);
+  THFree(matrices1);
+  THFree(matrices2);
+  THFree(result_matrices);
+
+  if (batch1_ != batch1)
+    THCudaTensor_free(state, batch1_);
+
+  if (batch2_ != batch2)
+    THCudaTensor_free(state, batch2_);
+
+  if (result_ != result)
+    THCudaTensor_freeCopyTo(state, result_, result);
+}
+
 #define IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(NAME, CFUNC)                                  \
   struct NAME##_functor                                                                \
   {                                                                                    \
