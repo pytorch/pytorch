@@ -25,11 +25,13 @@
 #endif
 
 struct THCRNGState;  /* Random number generator state. */
+struct THCBlasState;
 
 /* Global state to be held in the cutorch table. */
 typedef struct THCState
 {
   struct THCRNGState* rngState;
+  struct THCBlasState* blasState;
 } THCState;
 
 THC_API void THCudaBlas_init(THCState *state, int num_devices, int current_device);
