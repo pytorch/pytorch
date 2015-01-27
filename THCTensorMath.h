@@ -35,6 +35,8 @@ THC_API void THCudaTensor_min(THCState *state, THCudaTensor *values, THCudaTenso
 THC_API void THCudaTensor_max(THCState *state, THCudaTensor *values, THCudaTensor *indices, THCudaTensor *src, long dim);
 THC_API void THCudaTensor_sum(THCState *state, THCudaTensor *self, THCudaTensor *src, long dim);
 THC_API void THCudaTensor_prod(THCState *state, THCudaTensor *self, THCudaTensor *src, long dim);
+THC_API void THCudaTensor_cumsum(THCState *state, THCudaTensor *self, THCudaTensor *src, long dim);
+THC_API void THCudaTensor_cumprod(THCState *state, THCudaTensor *self, THCudaTensor *src, long dim);
 
 THC_API void THCudaTensor_addmv(THCState *state, THCudaTensor *self, float beta, THCudaTensor *t, float alpha, THCudaTensor *mat, THCudaTensor *vec);
 THC_API void THCudaTensor_addmm(THCState *state, THCudaTensor *self, float beta, THCudaTensor *t, float alpha, THCudaTensor *mat1, THCudaTensor *mat2);
