@@ -3,6 +3,12 @@
 
 #include "THCGeneral.h"
 
+typedef struct THCBlasState {
+  cublasHandle_t* handles;
+  cublasHandle_t* current_handle;
+  int n_devices;
+} THCBlasState;
+
 /* Level 1 */
 THC_API void THCudaBlas_swap(THCState *state, long n, float *x, long incx, float *y, long incy);
 THC_API void THCudaBlas_scal(THCState *state, long n, float a, float *x, long incx);
