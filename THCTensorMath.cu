@@ -180,6 +180,35 @@ void THCudaTensor_cmul(THCState *state, THCudaTensor *self_, THCudaTensor *src1,
   }
 }
 
+struct cpow_functor
+{
+  __host__ __device__ float operator()(const float& a, const float& b) const
+  {
+    return pow(a, b);
+  }
+};
+
+void THCudaTensor_cpow(THCState *state, THCudaTensor *self_, THCudaTensor *src1, THCudaTensor *src2)
+{
+  THCudaTensor_resizeAs(state, self_, src1);
+  THArgCheck(THCudaTensor_nElement(state, src1) == THCudaTensor_nElement(state, src2), 3, "size does not match");
+
+  THCudaTensor *self = THCudaTensor_newContiguous(state, self_);
+  long size = THCudaTensor_nElement(state, self);
+  src1 = THCudaTensor_newContiguous(state, src1);
+  src2 = THCudaTensor_newContiguous(state, src2);
+
+  thrust::device_ptr<float> self_data(THCudaTensor_data(state, self));
+  thrust::device_ptr<float> src1_data(THCudaTensor_data(state, src1));
+  thrust::device_ptr<float> src2_data(THCudaTensor_data(state, src2));
+
+  thrust::transform(src1_data, src1_data + size, src2_data, self_data, cpow_functor());
+
+  THCudaTensor_free(state, src1);
+  THCudaTensor_free(state, src2);
+  THCudaTensor_freeCopyTo(state, self, self_);
+}
+
 void THCudaTensor_cdiv(THCState *state, THCudaTensor *self_, THCudaTensor *src1, THCudaTensor *src2)
 {
   THCudaTensor_resizeAs(state, self_, src1);
@@ -1059,6 +1088,33 @@ void THCudaTensor_pow(THCState *state, THCudaTensor *self_, THCudaTensor *src, f
   thrust::device_ptr<float> src_data(THCudaTensor_data(state, src));
 
   thrust::transform(src_data, src_data+size, self_data, pow_functor(value));
+
+  THCudaTensor_free(state, src);
+  THCudaTensor_freeCopyTo(state, self, self_);
+}
+
+struct tpow_functor
+{
+  const float value;
+
+  tpow_functor(float value_) : value(value_) {}
+
+  __host__ __device__ float operator()(const float& x) const
+  {
+    return pow(value, x);
+  }
+};
+
+void THCudaTensor_tpow(THCState *state, THCudaTensor *self_, float value, THCudaTensor *src)
+{
+  THCudaTensor_resizeAs(state, self_, src);
+  THCudaTensor *self = THCudaTensor_newContiguous(state, self_);
+  src = THCudaTensor_newContiguous(state, src);
+  long size = THCudaTensor_nElement(state, self);
+  thrust::device_ptr<float> self_data(THCudaTensor_data(state, self));
+  thrust::device_ptr<float> src_data(THCudaTensor_data(state, src));
+
+  thrust::transform(src_data, src_data+size, self_data, tpow_functor(value));
 
   THCudaTensor_free(state, src);
   THCudaTensor_freeCopyTo(state, self, self_);
