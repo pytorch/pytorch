@@ -184,48 +184,53 @@ void THCudaBlas_ger(THCState *state, long m, long n, float alpha, float *x, long
           "with the bound [val] <= %d", INT_MAX);
 }
 
-/* Level 3 */
-void THCudaBlas_gemm(THCState *state, char transa, char transb, long m, long n, long k, float alpha, float *a, long lda, float *b, long ldb, float beta, float *c, long ldc)
+cublasOperation_t convertTransToCublasOperation(char trans) {
+  if (trans == 't') return CUBLAS_OP_T;
+  else if (trans == 'n') return CUBLAS_OP_N;
+  else if (trans == 'c') return CUBLAS_OP_C;
+  else {
+    THError("trans must be one of: t, n, c");
+    return CUBLAS_OP_T;
+  }
+}
+
+void adjustLd(char transa, char transb, long m, long n, long k, long *lda, long *ldb, long *ldc)
 {
   int transa_ = ((transa == 't') || (transa == 'T'));
   int transb_ = ((transb == 't') || (transb == 'T'));
 
   if(n == 1)
-    ldc = m;
+    *ldc = m;
 
   if(transa_)
   {
     if(m == 1)
-      lda = k;
+      *lda = k;
   }
   else
   {
     if(k == 1)
-      lda = m;
+      *lda = m;
   }
 
   if(transb_)
   {
     if(k == 1)
-      ldb = n;
+      *ldb = n;
   }
   else
   {
     if(n == 1)
-      ldb = k;
+      *ldb = k;
   }
+}
 
-  cublasOperation_t opa;
-  if (transa == 't') opa = CUBLAS_OP_T;
-  else if (transa == 'n') opa = CUBLAS_OP_N;
-  else if (transa == 'c') opa = CUBLAS_OP_C;
-  else THError("transa must be one of: t, n, c");
-
-  cublasOperation_t opb;
-  if (transb == 't') opb = CUBLAS_OP_T;
-  else if (transb == 'n') opb = CUBLAS_OP_N;
-  else if (transb == 'c') opb = CUBLAS_OP_C;
-  else THError("transb must be one of: t, n, c");
+/* Level 3 */
+void THCudaBlas_gemm(THCState *state, char transa, char transb, long m, long n, long k, float alpha, float *a, long lda, float *b, long ldb, float beta, float *c, long ldc)
+{
+  adjustLd(transa, transb, m, n, k, &lda, &ldb, &ldc);
+  cublasOperation_t opa = convertTransToCublasOperation(transa);
+  cublasOperation_t opb = convertTransToCublasOperation(transb);
 
   if( (m <= INT_MAX) && (n <= INT_MAX) && (k <= INT_MAX) && (lda <= INT_MAX)  && (ldb <= INT_MAX) && (ldc <= INT_MAX) )
   {
@@ -241,4 +246,24 @@ void THCudaBlas_gemm(THCState *state, char transa, char transb, long m, long n, 
   }
   THError("Cublas_gemm only supports m, n, k, lda, ldb, ldc"
           "with the bound [val] <= %d", INT_MAX);
+}
+
+void THCudaBlas_gemmBatched(THCState *state, char transa, char transb, long m, long n, long k,
+                            float alpha, const float *a[], long lda, const float *b[], long ldb,
+                            float beta, float *c[], long ldc, long batchCount)
+{
+  if( (m >= INT_MAX) || (n >= INT_MAX) || (k >= INT_MAX) || (lda >= INT_MAX)  || (ldb >= INT_MAX) || (ldc >= INT_MAX) || (batchCount >= INT_MAX) )
+  {
+    THError("Cublas_gemm only supports m, n, k, lda, ldb, ldc, batchCount"
+            "with the bound [val] <= %d", INT_MAX);
+  }
+
+  adjustLd(transa, transb, m, n, k, &lda, &ldb, &ldc);
+  cublasOperation_t opa = convertTransToCublasOperation(transa);
+  cublasOperation_t opb = convertTransToCublasOperation(transb);
+
+  THCublasCheck(cublasSgemmBatched(*state->blasState->current_handle,
+                                   opa, opb, (int)m, (int)n, (int)k,
+                                   &alpha, a, (int)lda, b, (int)ldb, &beta, c, (int)ldc,
+                                   (int)batchCount));
 }
