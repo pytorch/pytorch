@@ -1,3 +1,4 @@
+#include "THCTensorCopy.h"
 #include "THCGeneral.h"
 #include "THCTensor.h"
 

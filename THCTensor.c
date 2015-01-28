@@ -1,5 +1,6 @@
 #include "THCGeneral.h"
 #include "THCTensor.h"
+#include "THCTensorCopy.h"
 
 /**** access methods ****/
 THCudaStorage *THCudaTensor_storage(THCState *state, const THCudaTensor *self)
@@ -71,7 +72,7 @@ static void THCudaTensor_rawResize(THCState *state, THCudaTensor *self, int nDim
 /* Empty init */
 THCudaTensor *THCudaTensor_new(THCState *state)
 {
-  THCudaTensor *self = THAlloc(sizeof(THCudaTensor));
+  THCudaTensor *self = (THCudaTensor*)THAlloc(sizeof(THCudaTensor));
   THCudaTensor_rawInit(state, self);
   return self;
 }
@@ -79,7 +80,7 @@ THCudaTensor *THCudaTensor_new(THCState *state)
 /* Pointer-copy init */
 THCudaTensor *THCudaTensor_newWithTensor(THCState *state, THCudaTensor *tensor)
 {
-  THCudaTensor *self = THAlloc(sizeof(THCudaTensor));
+  THCudaTensor *self = (THCudaTensor*)THAlloc(sizeof(THCudaTensor));
   THCudaTensor_rawInit(state, self);
   THCudaTensor_rawSet(state,
                       self,
@@ -94,7 +95,7 @@ THCudaTensor *THCudaTensor_newWithTensor(THCState *state, THCudaTensor *tensor)
 /* Storage init */
 THCudaTensor *THCudaTensor_newWithStorage(THCState *state, THCudaStorage *storage, long storageOffset, THLongStorage *size, THLongStorage *stride)
 {
-  THCudaTensor *self = THAlloc(sizeof(THCudaTensor));
+  THCudaTensor *self = (THCudaTensor*)THAlloc(sizeof(THCudaTensor));
   if(size && stride)
     THArgCheck(size->size == stride->size, 4, "inconsistent size");
 
@@ -139,7 +140,7 @@ THCudaTensor *THCudaTensor_newWithStorage4d(THCState *state, THCudaStorage *stor
   long size[4] = {size0, size1, size2, size3};
   long stride[4] = {stride0, stride1, stride2, stride3};
 
-  THCudaTensor *self = THAlloc(sizeof(THCudaTensor));
+  THCudaTensor *self = (THCudaTensor*)THAlloc(sizeof(THCudaTensor));
   THCudaTensor_rawInit(state, self);
   THCudaTensor_rawSet(state, self, storage, storageOffset, 4, size, stride);
 
@@ -170,7 +171,7 @@ THCudaTensor *THCudaTensor_newWithSize4d(THCState *state, long size0, long size1
 {
   long size[4] = {size0, size1, size2, size3};
 
-  THCudaTensor *self = THAlloc(sizeof(THCudaTensor));
+  THCudaTensor *self = (THCudaTensor*)THAlloc(sizeof(THCudaTensor));
   THCudaTensor_rawInit(state, self);
   THCudaTensor_rawResize(state, self, 4, size, NULL);
 
@@ -434,8 +435,8 @@ void THCudaTensor_unfold(THCState *state, THCudaTensor *self, THCudaTensor *src,
 
   THCudaTensor_set(state, self, src);
 
-  newSize = THAlloc(sizeof(long)*(self->nDimension+1));
-  newStride = THAlloc(sizeof(long)*(self->nDimension+1));
+  newSize = (long*)THAlloc(sizeof(long)*(self->nDimension+1));
+  newStride = (long*)THAlloc(sizeof(long)*(self->nDimension+1));
 
   newSize[self->nDimension] = size;
   newStride[self->nDimension] = self->stride[dimension];
@@ -666,8 +667,8 @@ static void THCudaTensor_rawResize(THCState *state, THCudaTensor *self, int nDim
   {
     if(nDimension != self->nDimension)
     {
-      self->size = THRealloc(self->size, sizeof(long)*nDimension);
-      self->stride = THRealloc(self->stride, sizeof(long)*nDimension);
+      self->size = (long*)THRealloc(self->size, sizeof(long)*nDimension);
+      self->stride = (long*)THRealloc(self->stride, sizeof(long)*nDimension);
       self->nDimension = nDimension;
     }
 
