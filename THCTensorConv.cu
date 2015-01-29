@@ -1,5 +1,6 @@
 #include "THCTensorConv.h"
 #include "THCTensorMath.h"
+#include "THCTensorCopy.h"
 #include "THCGeneral.h"
 #include <stdio.h>
 
