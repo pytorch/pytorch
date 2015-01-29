@@ -219,8 +219,6 @@ TH_API void THTensor_(getRNGState)(THGenerator *_generator, THTensor *self)
   THArgCheck(THTensor_(nElement)(self) == size, 1, "RNG state is wrong size");
   THArgCheck(THTensor_(isContiguous)(self), 1, "RNG state needs to be contiguous");
   rng_state = (THGenerator *)THTensor_(data)(self);
-  if(_generator->initf == 0)
-    THRandom_seed(_generator);
   THGenerator_copy(rng_state, _generator);
 }
 
