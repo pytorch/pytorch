@@ -27,8 +27,11 @@ void THCudaInit(THCState* state)
       {
         int can = 0;
         THCudaCheck(cudaDeviceCanAccessPeer(&can, i, j));
-        if(can)
-          THCudaCheck(cudaDeviceEnablePeerAccess(j, 0));
+        if(can) {
+          cudaError_t err = cudaDeviceEnablePeerAccess(j, 0);
+          if (err == cudaErrorPeerAccessAlreadyEnabled) continue;
+          THCudaCheck(err);
+        }
       }
     }
   }
