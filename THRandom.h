@@ -10,7 +10,7 @@ typedef struct THGenerator {
   /* The initial seed. */
   unsigned long the_initial_seed;
   int left;  /* = 1; */
-  int initf; /* = 0; */
+  int seeded; /* = 0; */
   unsigned long next;
   unsigned long state[_MERSENNE_STATE_N]; /* the array for the state vector  */
   /********************************/

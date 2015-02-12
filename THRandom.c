@@ -16,7 +16,7 @@ static THGenerator* THGenerator_newUnseeded()
   THGenerator *self = THAlloc(sizeof(THGenerator));
   memset(self, 0, sizeof(THGenerator));
   self->left = 1;
-  self->initf = 0;
+  self->seeded = 0;
   self->normal_is_valid = 0;
   return self;
 }
@@ -118,7 +118,7 @@ unsigned long THRandom_seed(THGenerator *_generator)
 */
 
 /* Macros for the Mersenne Twister random generator... */
-/* Period parameters */  
+/* Period parameters */
 /* #define n 624 */
 /* #define m 397 */
 #define MATRIX_A 0x9908b0dfUL   /* constant vector a */
@@ -149,7 +149,7 @@ void THRandom_manualSeed(THGenerator *_generator, unsigned long the_seed_)
     _generator->state[j] &= 0xffffffffUL;  /* for >32 bit machines */
   }
   _generator->left = 1;
-  _generator->initf = 1;
+  _generator->seeded = 1;
 }
 
 unsigned long THRandom_initialSeed(THGenerator *_generator)
@@ -164,14 +164,24 @@ void THRandom_nextState(THGenerator *_generator)
 
   _generator->left = n;
   _generator->next = 0;
-    
-  for(j = n-m+1; --j; p++) 
+
+  for(j = n-m+1; --j; p++)
     *p = p[m] ^ TWIST(p[0], p[1]);
 
-  for(j = m; --j; p++) 
+  for(j = m; --j; p++)
     *p = p[m-n] ^ TWIST(p[0], p[1]);
 
   *p = p[m-n] ^ TWIST(p[0], _generator->state[0]);
+}
+
+int THRandom_isValidState(THGenerator *_generator)
+{
+  if ((_generator->seeded == 1) &&
+    (_generator->left > 0 && _generator->left <= n) &&
+    (_generator->next >= 0 && _generator->next <= n))
+    return 1;
+
+  return 0;
 }
 
 unsigned long THRandom_random(THGenerator *_generator)
@@ -181,7 +191,7 @@ unsigned long THRandom_random(THGenerator *_generator)
   if (--(_generator->left) == 0)
     THRandom_nextState(_generator);
   y = *(_generator->state + (_generator->next)++);
-  
+
   /* Tempering */
   y ^= (y >> 11);
   y ^= (y << 7) & 0x9d2c5680UL;
@@ -205,8 +215,8 @@ static double __uniform__(THGenerator *_generator)
   y ^= (y << 7) & 0x9d2c5680UL;
   y ^= (y << 15) & 0xefc60000UL;
   y ^= (y >> 18);
-  
-  return (double)y * (1.0/4294967296.0); 
+
+  return (double)y * (1.0/4294967296.0);
   /* divided by 2^32 */
 }
 
@@ -237,7 +247,7 @@ double THRandom_normal(THGenerator *_generator, double mean, double stdv)
   }
   else
     _generator->normal_is_valid = 0;
-  
+
   if(_generator->normal_is_valid)
     return _generator->normal_rho*cos(2.*M_PI*_generator->normal_x)*stdv+mean;
   else
