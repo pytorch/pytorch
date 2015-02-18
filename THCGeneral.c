@@ -29,7 +29,14 @@ void THCudaInit(THCState* state)
         THCudaCheck(cudaDeviceCanAccessPeer(&can, i, j));
         if(can) {
           cudaError_t err = cudaDeviceEnablePeerAccess(j, 0);
-          if (err == cudaErrorPeerAccessAlreadyEnabled) continue;
+          if (err == cudaErrorPeerAccessAlreadyEnabled) {
+            // Any future call to cudaGetLastError will now return an error,
+            // even though we've already dealt with this specific error here.
+            // Call cudaGetLastError once to reset the last error state.
+            cudaGetLastError();
+
+            continue;
+          }
           THCudaCheck(err);
         }
       }
