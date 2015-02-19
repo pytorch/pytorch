@@ -2,11 +2,17 @@
 #define TH_GENERIC_FILE "generic/THTensorLapack.c"
 #else
 
-static int THTensor_(lapackClone)(THTensor *r_, THTensor *m, int forced)
+/*
+  Puts a row-major version of m (suitable as an input for Lapack) with the specified number of rows into the
+  storage of r_. If r_ is already row-major and has the correct number of rows, then r_ becomes a tensor
+  pointing at the storage of m, and the function returns 0. Otherwise, r_ is resized and filled with a
+  row-major copy of m; the function then returns 1.
+*/
+static int THTensor_(lapackCloneNrows)(THTensor *r_, THTensor *m, int forced, int nrows)
 {
   int clone;
 
-  if (!forced && m->stride[0] == 1 && m->stride[1] == m->size[0])
+  if (!forced && m->stride[0] == 1 && m->stride[1] == m->size[0] && m->size[1] == nrows)
   {
     clone = 0;
     THTensor_(set)(r_,m);
@@ -15,11 +21,22 @@ static int THTensor_(lapackClone)(THTensor *r_, THTensor *m, int forced)
   {
     clone = 1;
     /* we need to copy */
-    THTensor_(resize2d)(r_,m->size[1],m->size[0]);
+    THTensor_(resize2d)(r_,m->size[1],nrows);
     THTensor_(transpose)(r_,NULL,0,1);
-    THTensor_(copy)(r_,m);
+    if (m->size[0] == nrows) {
+      THTensor_(copy)(r_,m);
+    } else {
+      THTensor* r_view = THTensor_(newNarrow)(r_,0,0,m->size[0]);
+      THTensor_(copy)(r_view,m);
+      THTensor_(free)(r_view);
+    }
   }
   return clone;
+}
+
+static int THTensor_(lapackClone)(THTensor *r_, THTensor *m, int forced)
+{
+  return THTensor_(lapackCloneNrows)(r_, m, forced, m->size[0]);
 }
 
 TH_API void THTensor_(gesv)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
@@ -63,7 +80,7 @@ TH_API void THTensor_(gesv)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor 
   THArgCheck(ra__->nDimension == 2, 1, "A should be 2 dimensional");
   THArgCheck(rb__->nDimension == 2, 2, "b should be 2 dimensional");
   THArgCheck(ra__->size[0] == ra__->size[1], 1, "A should be square");
-  THArgCheck(rb__->size[0] == ra__->size[0], 2, "A,b size incomptable");
+  THArgCheck(rb__->size[0] == ra__->size[0], 2, "A,b size incompatible");
 
   n    = (int)ra__->size[0];
   nrhs = (int)rb__->size[1];
@@ -107,52 +124,56 @@ TH_API void THTensor_(gesv)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor 
 
 TH_API void THTensor_(gels)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
 {
+  // Note that a = NULL is interpreted as a = ra_, and b = NULL as b = rb_.
   int m, n, nrhs, lda, ldb, info, lwork;
   THTensor *work = NULL;
   real wkopt = 0;
 
-  THTensor *ra__;
-  THTensor *rb__;
+  THTensor *ra__;  // working version of A matrix to be passed into lapack GELS
+  THTensor *rb__;  // working version of B matrix to be passed into lapack GELS
 
-  int clonea;
-  int cloneb;
-  int destroya;
-  int destroyb;
+  int clonea;    // set to 1 if ra__ should be copied into ra_ at return
+  int cloneb;    // set to 1 if rb__ should be copied into rb_ at return
+  int destroya;  // set to 1 if ra__ needs to be destroyed at return
+  int destroyb;  // set to 1 if rb__ needs to be destroyed at return
 
-  
+
   if (a == NULL || ra_ == a) /* possibly destroy the inputs  */
   {
     ra__ = THTensor_(new)();
     clonea = THTensor_(lapackClone)(ra__,ra_,0);
     destroya = 1;
   }
-  else /*we want to definitely clone and use ra_ and rb_ as computational space*/
+  else /*we want to definitely clone and use ra_ as computational space*/
   {
     clonea = THTensor_(lapackClone)(ra_,a,1);
     ra__ = ra_;
     destroya = 0;
   }
-  if (b == NULL || rb_ == b) /* possibly destroy the inputs  */
-  {
-    rb__ = THTensor_(new)();
-    cloneb = THTensor_(lapackClone)(rb__,rb_,0);
-    destroyb = 1;
-  }
-  else /*we want to definitely clone and use ra_ and rb_ as computational space*/
-  {
-    cloneb = THTensor_(lapackClone)(rb_,b,1);
-    rb__ = rb_;
-    destroyb = 0;
-  }
-  
+
   THArgCheck(ra__->nDimension == 2, 1, "A should be 2 dimensional");
-  THArgCheck(ra_->size[0] == rb__->size[0], 2, "size incompatible A,b");
 
   m = ra__->size[0];
   n = ra__->size[1];
-  nrhs = rb__->size[1];
   lda = m;
-  ldb = m;
+  ldb = (m > n) ? m : n;
+
+  if (b == NULL || rb_ == b) /* possibly destroy the inputs  */
+  {
+    THArgCheck(ra_->size[0] == rb_->size[0], 2, "size incompatible A,b");
+    rb__ = THTensor_(new)();
+    cloneb = THTensor_(lapackCloneNrows)(rb__,rb_,0,ldb);
+    destroyb = 1;
+  }
+  else /*we want to definitely clone and use rb_ as computational space*/
+  {
+    THArgCheck(ra_->size[0] == b->size[0], 2, "size incompatible A,b");
+    cloneb = THTensor_(lapackCloneNrows)(rb_,b,1,ldb);
+    rb__ = rb_;
+    destroyb = 0;
+  }
+
+  nrhs = rb__->size[1];
   info = 0;
 
   /* get optimal workspace size */
@@ -170,6 +191,10 @@ TH_API void THTensor_(gels)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor 
   {
     THError("Lapack gels : Argument %d : illegal value", -info);
   }
+
+  /* rb__ is currently ldb by nrhs; resize it to n by nrhs */
+  rb__->size[0] = n;
+
   /* clean up */
   if (destroya)
   {
@@ -183,6 +208,7 @@ TH_API void THTensor_(gels)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor 
   {
     if (cloneb)
     {
+      THTensor_(resize2d)(rb_, n, nrhs);
       THTensor_(copy)(rb_,rb__);
     }
     THTensor_(free)(rb__);
