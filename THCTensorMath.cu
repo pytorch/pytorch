@@ -392,37 +392,32 @@ struct dim4 {
 
 /* Reduce one of the outer dimensions of a tensor
  *
- * For an n-d tensor (n <= 4) where the reduction is *not* along the innermost
- * dimension:
+ * For an n-d tensor where the reduction is *not* along the innermost dimension:
  *
- * - block.x and grid.x make up the innermost dimension;
- * - The reduced dimension is looped over inside a block; and
- * - grid.y and grid.z are the remaining two dimensions (if any).
- * - block.y and block.z are not used as we're limited to 512 or 1024 threads
- *   in the block.
- *
- * For sizes/strides, index 3 is the reduced dimension, while the remaining
- * indices are for the remaining dimensions with index 0 the innermost dimension.
+ * - blockIdx.x loops over the dimensions on the outside of the reduced dimension.
+ * - blockIdx.y and threadIdx.x loop over the dimensions on the inside of the
+ *   reduced dimension.
+ * - Each thread sequentially reduces one row of the reduced dimension.
  *
  * Reduction along the innermost dimension is handled in a separate kernel.
  */
 template<class UnaryFunction, class BinaryFunction>
 __global__ void THCudaTensor_kernel_transformReduceOuterDim(float *tgt, float *src_,
-        dim4 src_stride, dim4 tgt_stride, dim4 size,
+        unsigned num_orows, unsigned num_irows, unsigned row_size,
         UnaryFunction unary_op, float init, BinaryFunction binary_op)
 {
-  const size_t reduce = 3;
 
-  for(unsigned z = blockIdx.z; z < size[2] ; z += gridDim.z)
-  for(unsigned y = blockIdx.y; y < size[1] ; y += gridDim.y)
-  for(unsigned col = blockIdx.x * blockDim.x + threadIdx.x; col < size[0]; col += blockDim.x * gridDim.x) {
-    float *src = src_ + z * src_stride[2] + y * src_stride[1] + col;
-    float acc = init;
-    for(unsigned i=0; i < size[reduce]; i++) {
-      acc = binary_op(acc, unary_op(*src));
-      src += src_stride[reduce];
+  for (unsigned orow = blockIdx.x; orow < num_orows; orow += gridDim.x) {
+    for (unsigned irow = blockIdx.y * blockDim.x + threadIdx.x; irow < num_irows; irow += gridDim.y * blockDim.x) {
+      float *src = src_ + orow * row_size * num_irows + irow;
+      float acc = init;
+
+      for (unsigned col = 0; col < row_size; ++col) {
+        acc = binary_op(acc, unary_op(*src));
+        src += num_irows;
+      }
+      tgt[orow * num_irows + irow] = float(acc);
     }
-    tgt[z * tgt_stride[2] + y * tgt_stride[1] + col] = float(acc);
   }
 }
 
@@ -432,27 +427,23 @@ template<class UnaryFunction, class BinaryFunction>
 __host__ void THCudaTensor_transformReduceOuterDim(THCState *state, THCudaTensor *tgt, THCudaTensor *src,
         long rdim, UnaryFunction unary_op, float init, BinaryFunction binary_op)
 {
-  const size_t reduce = 3;
-  dim4 src_stride(0);
-  dim4 tgt_stride(0);
-  dim4 size(1);
-
   unsigned ndim = THCudaTensor_nDimension(state, src);
-  for(unsigned idim=0, o=ndim-2; idim < ndim; idim++) {
-    unsigned odim = idim == rdim ? reduce : o--;
-    src_stride[odim] = THCudaTensor_stride(state, src, idim);
-    tgt_stride[odim] = THCudaTensor_stride(state, tgt, idim);
-    size[odim]       = THCudaTensor_size(state, src, idim);
+  unsigned num_orows = 1;
+  for (unsigned dim = 0; dim < rdim; dim++) {
+    num_orows *= THCudaTensor_size(state, src, dim);
+  }
+  unsigned row_size = THCudaTensor_size(state, src, rdim);
+  unsigned num_irows = 1;
+  for (unsigned dim = rdim + 1; dim < ndim; dim++) {
+    num_irows *= THCudaTensor_size(state, src, dim);
   }
 
-  const unsigned nThreadPerBlock = 256;
-  unsigned nBlockPerColumn = DIVUP(size[0], nThreadPerBlock);
-  dim3 threads(nThreadPerBlock);
-  unsigned maxGridDim = 1024; // anything < 64k is fine. The choice has no impact on performance.
-  dim3 grid(min(maxGridDim, nBlockPerColumn), min(maxGridDim, size[1]), min(maxGridDim, size[2]));
+  dim3 threads(min(512, num_irows));
+  unsigned maxGridDim = 1024;
+  dim3 grid(min(maxGridDim, num_orows), min(maxGridDim, DIVUP(num_irows, threads.x)));
 
   THCudaTensor_kernel_transformReduceOuterDim<<<grid, threads>>>(THCudaTensor_data(state, tgt),
-          THCudaTensor_data(state, src), src_stride, tgt_stride, size, unary_op, init, binary_op);
+          THCudaTensor_data(state, src), num_orows, num_irows, row_size, unary_op, init, binary_op);
   cudaError errcode = cudaGetLastError();
   if(errcode != cudaSuccess) {
     THError(cudaGetErrorString(errcode));
@@ -463,57 +454,46 @@ __host__ void THCudaTensor_transformReduceOuterDim(THCState *state, THCudaTensor
 
 /* Reduce the innermost dimension of a tensor
  *
- * For an n-d tensor (n <= 4) where the reduction is along the innermost dimension:
+ * For an n-d tensor where the reduction is along the innermost dimension:
  *
- * - block.x is the innermost dimension, i.e. dimension 0;
- * - block.y and grid.y make up dimension 1; and
- * - grid.x and grid z are the remaining two outer dimensions (if any)
+ * - blockIdx.x loops over all the outer rows.
+ * - Threads in the same block reduce one inner row in parallel.
  *
  * Reduction along other dimensions is handled in a separate kernel.
  */
 template<class UnaryFunction, class BinaryFunction>
 __global__ void THCudaTensor_kernel_transformReduceInnermostDim(float *tgt, float *src_,
-        dim4 src_stride, dim4 tgt_stride, dim4 size, UnaryFunction unary_op, float init, BinaryFunction binary_op)
+        unsigned num_rows, unsigned row_size, UnaryFunction unary_op, float init, BinaryFunction binary_op)
 {
-  __shared__ float sbuf[16][32]; // 8kB
+  __shared__ float sbuf[32][16];
 
-  for(unsigned z = blockIdx.z; z < size[3] ; z += gridDim.z)
-  for(unsigned x = blockIdx.x; x < size[2] ; x += gridDim.x)
-  for(unsigned bRow = blockIdx.y * blockDim.y; bRow < size[1]; bRow += blockDim.y * gridDim.y) {
-
+  for (unsigned block_row = blockIdx.x * blockDim.y; block_row < num_rows; block_row += blockDim.y * gridDim.x) {
+    unsigned row = block_row + threadIdx.y;
     float acc = init;
-    unsigned row = bRow + threadIdx.y;
-    float *src = src_ + z * src_stride[3] + x * src_stride[2] + row * src_stride[1];
-    bool reducing = threadIdx.x < blockDim.y && bRow + threadIdx.x < size[1] && threadIdx.y == 0;
-
-    for(unsigned bCol=0; bCol < size[0]; bCol += blockDim.x) {
-
-      sbuf[threadIdx.y][threadIdx.x] = init;
-      unsigned col = bCol + threadIdx.x;
-      if(row < size[1] && col < size[0]) {
-        sbuf[threadIdx.y][threadIdx.x] = unary_op(src[col]);
+    if (row < num_rows) {
+      float *src = src_ + row * row_size;
+      // Sequential reduction within a thread.
+      for (unsigned col = threadIdx.x; col < row_size; col += blockDim.x) {
+        float val = unary_op(src[col]);
+        acc = binary_op(acc, val);
       }
-      __syncthreads();
+    }
 
-      float* line = &sbuf[threadIdx.y][0];
-      for(unsigned s = 16; s > 1; s >>= 1) {
-        if(row < size[1] && threadIdx.x < s) {
-          line[threadIdx.x] = binary_op(line[threadIdx.x], line[threadIdx.x + s]);
-        }
-        __syncthreads();
-      }
-      if(reducing) {
-        sbuf[threadIdx.x][0] = binary_op(sbuf[threadIdx.x][0], sbuf[threadIdx.x][1]);
-        acc = binary_op(acc, sbuf[threadIdx.x][0]);
+    sbuf[threadIdx.y][threadIdx.x] = acc;
+
+    // Reduce intermediate values to single value.
+    float* line = &sbuf[threadIdx.y][0];
+    for (unsigned s = 8; s > 1; s >>= 1) {
+      if (row < num_rows && threadIdx.x < s) {
+        line[threadIdx.x] = binary_op(line[threadIdx.x], line[threadIdx.x + s]);
       }
       __syncthreads();
     }
 
-    if(reducing) {
-      unsigned row = bRow + threadIdx.x;
-      unsigned tgt_offset = z * tgt_stride[3] + x * tgt_stride[2];
-      tgt[tgt_offset + row] = acc;
+    if (row < num_rows && threadIdx.x == 0) {
+      tgt[row] = binary_op(line[0], line[1]);
     }
+    __syncthreads();
   }
 }
 
@@ -521,25 +501,18 @@ template<class UnaryFunction, class BinaryFunction>
 __host__ void THCudaTensor_transformReduceInnermostDim(THCState *state, THCudaTensor *tgt, THCudaTensor *src,
         UnaryFunction unary_op, float init, BinaryFunction binary_op)
 {
-  dim4 src_stride(0);
-  dim4 tgt_stride(0);
-  dim4 size(1);
-
   unsigned ndim = THCudaTensor_nDimension(state, src);
-  for(unsigned dim=0; dim < ndim; dim++) {
-    unsigned odim = ndim - 1 - dim;
-    src_stride[odim] = THCudaTensor_stride(state, src, dim);
-    tgt_stride[odim] = THCudaTensor_stride(state, tgt, dim);
-    size[odim]       = THCudaTensor_size(state, src, dim);
+  unsigned num_rows = 1;
+  for (unsigned dim = 0; dim < ndim - 1; dim++) {
+    num_rows *= THCudaTensor_size(state, src, dim);
   }
+  unsigned row_size = THCudaTensor_size(state, src, ndim - 1);
 
-  dim3 threads(32, 16);
-  unsigned nBlockPerRow = DIVUP(size[1], threads.y);
-  unsigned maxGridDim = 1024; // anything < 64k is fine. The choice has no impact on performance.
-  dim3 grid(min(maxGridDim, size[2]), min(maxGridDim, nBlockPerRow), min(maxGridDim, size[3]));
+  dim3 threads(16, 32);
+  dim3 grid(min(1024, DIVUP(num_rows, threads.y)));
 
   THCudaTensor_kernel_transformReduceInnermostDim<<<grid, threads>>>(THCudaTensor_data(state, tgt),
-          THCudaTensor_data(state, src), src_stride, tgt_stride, size, unary_op, init, binary_op);
+          THCudaTensor_data(state, src), num_rows, row_size, unary_op, init, binary_op);
   cudaError errcode = cudaGetLastError();
   if(errcode != cudaSuccess) {
     THError(cudaGetErrorString(errcode));
@@ -552,7 +525,6 @@ void THCudaTensor_transformReduceDim(THCState *state, THCudaTensor *self_, THCud
         long dimension, UnaryFunction unary_op, float init, BinaryFunction binary_op)
 {
   THArgCheck(dimension >= 0 && dimension < THCudaTensor_nDimension(state, src), 3, "dimension out of range");
-  THArgCheck(THCudaTensor_nDimension(state, src) <= 4, 2, "too many dimensions (>4)");
 
   THLongStorage *dim = THCudaTensor_newSizeOf(state, src);
   THLongStorage_set(dim, dimension, 1);
@@ -787,33 +759,32 @@ void THCudaTensor_cumprod(THCState *state, THCudaTensor *self, THCudaTensor *src
   return THCudaTensor_scanDim(state, self, src, dimension, 1.0f, thrust::multiplies<float>());
 }
 
-/* a set of reduction kernels that take in Binary ops on thrust pairs (of value, index)
+/* A set of reduction kernels that take in binary ops on thrust pairs (of value, index).
    These are useful when you not only have to do a reduction, but you might have
-   to preserve the location of contention (for example min/max operations)
- */
+   to preserve the location of contention (for example min/max operations).
+   The structure of the kernels follows the structure of the reduction kernels.
+*/
 template<class BinaryFunction>
 __global__ void THCudaTensor_kernel_transformReduceOuterDimIndex(float *tgt1, float *tgt2,
                                                              float *src_,
-                                                             dim4 src_stride,
-                                                             dim4 tgt1_stride,
-                                                             dim4 tgt2_stride,
-                                                             dim4 size,
+                                                             unsigned num_orows,
+                                                             unsigned num_irows,
+                                                             unsigned row_size,
                                                              thrust::pair<float,float> init,
                                                              BinaryFunction binary_op)
 {
-  const size_t reduce = 3;
+  for (unsigned orow = blockIdx.x; orow < num_orows; orow += gridDim.x) {
+    for (unsigned irow = blockIdx.y * blockDim.x + threadIdx.x; irow < num_irows; irow += gridDim.y * blockDim.x) {
+      float *src = src_ + orow * row_size * num_irows + irow;
+      thrust::pair<float,float> acc = init;
 
-  for(unsigned z = blockIdx.z; z < size[2] ; z += gridDim.z)
-  for(unsigned y = blockIdx.y; y < size[1] ; y += gridDim.y)
-  for(unsigned col = blockIdx.x * blockDim.x + threadIdx.x; col < size[0]; col += blockDim.x * gridDim.x) {
-    float *src = src_ + z * src_stride[2] + y * src_stride[1] + col;
-    thrust::pair<float,float> acc = init;
-    for(unsigned i=0; i < size[reduce]; i++) {
-      acc = binary_op(thrust::make_pair(*src, i+1), acc); // i+1 for 1-indexing
-      src += src_stride[reduce];
+      for (unsigned col = 0; col < row_size; ++col) {
+        acc = binary_op(thrust::make_pair(*src, col+1), acc); // i+1 for 1-indexing
+        src += num_irows;
+      }
+      tgt1[orow * num_irows + irow] = acc.first;
+      tgt2[orow * num_irows + irow] = acc.second;
     }
-    tgt1[z * tgt1_stride[2] + y * tgt1_stride[1] + col] = acc.first;
-    tgt2[z * tgt2_stride[2] + y * tgt2_stride[1] + col] = acc.second;
   }
 }
 
@@ -823,30 +794,24 @@ __host__ void THCudaTensor_transformReduceOuterDimIndex(THCState *state, THCudaT
                                                    long rdim, thrust::pair<float,float> init,
                                                    BinaryFunction binary_op)
 {
-  const size_t reduce = 3;
-  dim4 src_stride(0);
-  dim4 tgt1_stride(0);
-  dim4 tgt2_stride(0);
-  dim4 size(1);
-
   unsigned ndim = THCudaTensor_nDimension(state, src);
-  for(unsigned idim=0, o=ndim-2; idim < ndim; idim++) {
-    unsigned odim = idim == rdim ? reduce : o--;
-    src_stride[odim] = THCudaTensor_stride(state, src, idim);
-    tgt1_stride[odim] = THCudaTensor_stride(state, tgt1, idim);
-    tgt2_stride[odim] = THCudaTensor_stride(state, tgt2, idim);
-    size[odim]       = THCudaTensor_size(state, src, idim);
+  unsigned num_orows = 1;
+  for (unsigned dim = 0; dim < rdim; dim++) {
+    num_orows *= THCudaTensor_size(state, src, dim);
+  }
+  unsigned row_size = THCudaTensor_size(state, src, rdim);
+  unsigned num_irows = 1;
+  for (unsigned dim = rdim + 1; dim < ndim; dim++) {
+    num_irows *= THCudaTensor_size(state, src, dim);
   }
 
-  const unsigned nThreadPerBlock = 256;
-  unsigned nBlockPerColumn = DIVUP(size[0], nThreadPerBlock);
-  dim3 threads(nThreadPerBlock);
-  unsigned maxGridDim = 1024; // anything < 64k is fine. The choice has no impact on performance.
-  dim3 grid(min(maxGridDim, nBlockPerColumn), min(maxGridDim, size[1]), min(maxGridDim, size[2]));
+  dim3 threads(min(512, num_irows));
+  unsigned maxGridDim = 1024;
+  dim3 grid(min(maxGridDim, num_orows), min(maxGridDim, DIVUP(num_irows, threads.x)));
 
   THCudaTensor_kernel_transformReduceOuterDimIndex<<<grid, threads>>>(
     THCudaTensor_data(state, tgt1), THCudaTensor_data(state, tgt2),
-    THCudaTensor_data(state, src), src_stride, tgt1_stride, tgt2_stride, size, init, binary_op);
+    THCudaTensor_data(state, src), num_orows, num_irows, row_size, init, binary_op);
   cudaError errcode = cudaGetLastError();
   if(errcode != cudaSuccess) {
     THError(cudaGetErrorString(errcode));
@@ -866,61 +831,45 @@ __host__ void THCudaTensor_transformReduceOuterDimIndex(THCState *state, THCudaT
 template<class BinaryFunction>
 __global__ void THCudaTensor_kernel_transformReduceInnermostDimIndex(
   float *tgt1, float* tgt2, float *src_,
-  dim4 src_stride, dim4 tgt1_stride, dim4 tgt2_stride,
-  dim4 size, thrust::pair<float,float> init, BinaryFunction binary_op)
+  unsigned num_rows, unsigned row_size,
+  thrust::pair<float,float> init, BinaryFunction binary_op)
 {
-  __shared__ float sbuf[16][32]; // 8kB
-  __shared__ float ibuf[16][32]; // 8kB
+  __shared__ float sbuf[32][16];
+  __shared__ float ibuf[32][16];
 
-  for(unsigned z = blockIdx.z; z < size[3] ; z += gridDim.z)
-  for(unsigned x = blockIdx.x; x < size[2] ; x += gridDim.x)
-  for(unsigned bRow = blockIdx.y * blockDim.y; bRow < size[1]; bRow += blockDim.y * gridDim.y) {
-
+  for (unsigned block_row = blockIdx.x * blockDim.y; block_row < num_rows; block_row += blockDim.y * gridDim.x) {
+    unsigned row = block_row + threadIdx.y;
     thrust::pair<float,float> acc = init;
-    unsigned row = bRow + threadIdx.y;
-    float *src = src_ + z * src_stride[3] + x * src_stride[2] + row * src_stride[1];
-    bool reducing = threadIdx.x < blockDim.y && bRow + threadIdx.x < size[1] && threadIdx.y == 0;
-
-    for(unsigned bCol=0; bCol < size[0]; bCol += blockDim.x) {
-
-      sbuf[threadIdx.y][threadIdx.x] = init.first;
-      ibuf[threadIdx.y][threadIdx.x] = init.second;
-      unsigned col = bCol + threadIdx.x;
-      if(row < size[1] && col < size[0]) {
-        sbuf[threadIdx.y][threadIdx.x] = src[col];
-        ibuf[threadIdx.y][threadIdx.x] = col+1; // +1 for 1-indexing
+    if (row < num_rows) {
+      float *src = src_ + row * row_size;
+      // Sequential reduction within a thread.
+      for (unsigned col = threadIdx.x; col < row_size; col += blockDim.x) {
+        acc = binary_op(thrust::make_pair(src[col], col+1), acc);
       }
-      __syncthreads();
+    }
 
-      float* sline = &sbuf[threadIdx.y][0];
-      float* iline = &ibuf[threadIdx.y][0];
-      for(unsigned s = 16; s > 1; s >>= 1) {
-        if(row < size[1] && threadIdx.x < s) {
-          thrust::pair<float,float> arg1 = thrust::make_pair<float,float>(sline[threadIdx.x], iline[threadIdx.x]);
-          thrust::pair<float,float> arg2 = thrust::make_pair<float,float>(sline[threadIdx.x + s], iline[threadIdx.x + s]);
-          thrust::pair<float,float> res = binary_op(arg1, arg2);
-          sline[threadIdx.x] = res.first;
-          iline[threadIdx.x] = res.second;
-        }
-        __syncthreads();
-      }
-      if(reducing) {
-        thrust::pair<float,float> res = binary_op(thrust::make_pair<float,float>(sbuf[threadIdx.x][0], ibuf[threadIdx.x][0]),
-                                            thrust::make_pair<float,float>(sbuf[threadIdx.x][1], ibuf[threadIdx.x][1]));
-        sbuf[threadIdx.x][0] = res.first;
-        ibuf[threadIdx.x][0] = res.second;
-        acc = binary_op(acc, res);
+    sbuf[threadIdx.y][threadIdx.x] = acc.first;
+    ibuf[threadIdx.y][threadIdx.x] = acc.second;
+
+    // Reduce intermediate values to single value.
+    float* sline = &sbuf[threadIdx.y][0];
+    float* iline = &ibuf[threadIdx.y][0];
+    for (unsigned s = 8; s > 0; s >>= 1) {
+      if (row < num_rows && threadIdx.x < s) {
+        thrust::pair<float,float> arg1 = thrust::make_pair<float,float>(sline[threadIdx.x], iline[threadIdx.x]);
+        thrust::pair<float,float> arg2 = thrust::make_pair<float,float>(sline[threadIdx.x + s], iline[threadIdx.x + s]);
+        thrust::pair<float,float> res = binary_op(arg1, arg2);
+        sline[threadIdx.x] = res.first;
+        iline[threadIdx.x] = res.second;
       }
       __syncthreads();
     }
 
-    if(reducing) {
-      unsigned row = bRow + threadIdx.x;
-      unsigned tgt1_offset = z * tgt1_stride[3] + x * tgt1_stride[2];
-      unsigned tgt2_offset = z * tgt2_stride[3] + x * tgt2_stride[2];
-      tgt1[tgt1_offset + row] = acc.first;
-      tgt2[tgt2_offset + row] = acc.second;
+    if (row < num_rows && threadIdx.x == 0) {
+      tgt1[row] = sline[0];
+      tgt2[row] = iline[0];
     }
+    __syncthreads();
   }
 }
 
@@ -929,28 +878,19 @@ __host__ void THCudaTensor_transformReduceInnermostDimIndex(
   THCState *state, THCudaTensor *tgt1, THCudaTensor *tgt2, THCudaTensor *src,
   thrust::pair<float,float> init, BinaryFunction binary_op)
 {
-  dim4 src_stride(0);
-  dim4 tgt1_stride(0);
-  dim4 tgt2_stride(0);
-  dim4 size(1);
-
   unsigned ndim = THCudaTensor_nDimension(state, src);
-  for(unsigned dim=0; dim < ndim; dim++) {
-    unsigned odim = ndim - 1 - dim;
-    src_stride[odim] = THCudaTensor_stride(state, src, dim);
-    tgt1_stride[odim] = THCudaTensor_stride(state, tgt1, dim);
-    tgt2_stride[odim] = THCudaTensor_stride(state, tgt2, dim);
-    size[odim]       = THCudaTensor_size(state, src, dim);
+  unsigned num_rows = 1;
+  for (unsigned dim = 0; dim < ndim - 1; dim++) {
+    num_rows *= THCudaTensor_size(state, src, dim);
   }
+  unsigned row_size = THCudaTensor_size(state, src, ndim - 1);
 
-  dim3 threads(32, 16);
-  unsigned nBlockPerRow = DIVUP(size[1], threads.y);
-  unsigned maxGridDim = 1024; // anything < 64k is fine. The choice has no impact on performance.
-  dim3 grid(min(maxGridDim, size[2]), min(maxGridDim, nBlockPerRow), min(maxGridDim, size[3]));
+  dim3 threads(16, 32);
+  dim3 grid(min(1024, DIVUP(num_rows, threads.y)));
 
   THCudaTensor_kernel_transformReduceInnermostDimIndex<<<grid, threads>>>(
     THCudaTensor_data(state, tgt1), THCudaTensor_data(state, tgt2),
-    THCudaTensor_data(state, src), src_stride, tgt1_stride, tgt2_stride, size, init, binary_op);
+    THCudaTensor_data(state, src), num_rows, row_size, init, binary_op);
   cudaError errcode = cudaGetLastError();
   if(errcode != cudaSuccess) {
     THError(cudaGetErrorString(errcode));
@@ -963,7 +903,6 @@ void THCudaTensor_reduceDimIndex(THCState *state, THCudaTensor *tgt1_, THCudaTen
                                      BinaryFunction binary_op)
 {
   THArgCheck(dimension >= 0 && dimension < THCudaTensor_nDimension(state, src), 3, "dimension out of range");
-  THArgCheck(THCudaTensor_nDimension(state, src) <= 4, 2, "too many dimensions (>4)");
 
   THLongStorage *dim = THCudaTensor_newSizeOf(state, src);
   THLongStorage_set(dim, dimension, 1);
