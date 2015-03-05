@@ -19,10 +19,6 @@ __host__ void initializeGenerator(Generator* gen)
 {
   THCudaCheck(cudaMalloc((void**)&gen->gen_states, MAX_NUM_BLOCKS * sizeof(curandStateMtgp32)));
   THCudaCheck(cudaMalloc((void**)&gen->kernel_params, sizeof(mtgp32_kernel_params)));
-  if (curandMakeMTGP32Constants(mtgp32dc_params_fast_11213, gen->kernel_params) != CURAND_STATUS_SUCCESS)
-  {
-    THError("Creating MTGP constants failed.");
-  }
 }
 
 /* Frees memory allocated during setup. */
@@ -43,6 +39,10 @@ __host__ void destroyGenerator(Generator* gen)
 /* Creates a new generator state given the seed. */
 __host__ void createGeneratorState(Generator* gen, unsigned long seed)
 {
+  if (curandMakeMTGP32Constants(mtgp32dc_params_fast_11213, gen->kernel_params) != CURAND_STATUS_SUCCESS)
+  {
+    THError("Creating MTGP constants failed.");
+  }
   if (curandMakeMTGP32KernelState(gen->gen_states, mtgp32dc_params_fast_11213,
                                   gen->kernel_params, MAX_NUM_BLOCKS, seed) != CURAND_STATUS_SUCCESS)
   {
@@ -183,10 +183,13 @@ __host__ void THCRandom_setRNGState(THCState* state, THByteTensor *rng_state)
 __global__ void NAME(curandStateMtgp32 *state, int size, float *result, ARG1)  \
 {                                                                              \
   int idx = blockIdx.x * BLOCK_SIZE + threadIdx.x;                             \
-  for (int i = idx; i < size; i += BLOCK_SIZE * MAX_NUM_BLOCKS) {              \
+  int rounded_size = DIVUP(size, BLOCK_SIZE) * BLOCK_SIZE;                     \
+  for (int i = idx; i < rounded_size; i += BLOCK_SIZE * MAX_NUM_BLOCKS) {      \
     float x = CURAND_FUNC(&state[blockIdx.x]);                                 \
-    x = TRANSFORM;                                                             \
-    result[i] = x;                                                             \
+    if (i < size) {                                                            \
+      x = TRANSFORM;                                                           \
+      result[i] = x;                                                           \
+    }                                                                          \
   }                                                                            \
 }
 
@@ -194,10 +197,13 @@ __global__ void NAME(curandStateMtgp32 *state, int size, float *result, ARG1)  \
 __global__ void NAME(curandStateMtgp32 *state, int size, float *result, ARG1, ARG2)  \
 {                                                                                    \
   int idx = blockIdx.x * BLOCK_SIZE + threadIdx.x;                                   \
-  for (int i = idx; i < size; i += BLOCK_SIZE * MAX_NUM_BLOCKS) {                    \
+  int rounded_size = DIVUP(size, BLOCK_SIZE) * BLOCK_SIZE;                           \
+  for (int i = idx; i < rounded_size; i += BLOCK_SIZE * MAX_NUM_BLOCKS) {            \
     float x = CURAND_FUNC(&state[blockIdx.x]);                                       \
-    x = TRANSFORM;                                                                   \
-    result[i] = x;                                                                   \
+    if (i < size) {                                                                  \
+      x = TRANSFORM;                                                                 \
+      result[i] = x;                                                                 \
+    }                                                                                \
   }                                                                                  \
 }
 
@@ -215,8 +221,12 @@ GENERATE_KERNEL2(generate_cauchy, double median, double sigma, curand_uniform, (
 __global__ void generate_log_normal(curandStateMtgp32 *state, int size, float *result, float mean, float stddev)
 {
   int idx = blockIdx.x * BLOCK_SIZE + threadIdx.x;
-  for (int i = idx; i < size; i += BLOCK_SIZE * MAX_NUM_BLOCKS) {
-    result[i] = curand_log_normal(&state[blockIdx.x], mean, stddev);
+  int rounded_size = DIVUP(size, BLOCK_SIZE) * BLOCK_SIZE;
+  for (int i = idx; i < rounded_size; i += BLOCK_SIZE * MAX_NUM_BLOCKS) {
+    float x = curand_log_normal(&state[blockIdx.x], mean, stddev);
+    if (i < size) {
+      result[i] = x;
+    }
   }
 }
 
