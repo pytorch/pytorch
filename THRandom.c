@@ -40,6 +40,15 @@ void THGenerator_free(THGenerator *self)
   THFree(self);
 }
 
+int THGenerator_isValid(THGenerator *_generator)
+{
+  if ((_generator->seeded == 1) &&
+    (_generator->left > 0 && _generator->left <= n) && (_generator->next <= n))
+    return 1;
+
+  return 0;
+}
+
 #ifndef _WIN32
 static unsigned long readURandomLong()
 {
@@ -174,16 +183,6 @@ void THRandom_nextState(THGenerator *_generator)
   *p = p[m-n] ^ TWIST(p[0], _generator->state[0]);
 }
 
-int THRandom_isValidState(THGenerator *_generator)
-{
-  if ((_generator->seeded == 1) &&
-    (_generator->left > 0 && _generator->left <= n) &&
-    (_generator->next >= 0 && _generator->next <= n))
-    return 1;
-
-  return 0;
-}
-
 unsigned long THRandom_random(THGenerator *_generator)
 {
   unsigned long y;
@@ -204,20 +203,8 @@ unsigned long THRandom_random(THGenerator *_generator)
 /* generates a random number on [0,1)-double-interval */
 static double __uniform__(THGenerator *_generator)
 {
-  unsigned long y;
-
-  if (--(_generator->left) == 0)
-    THRandom_nextState(_generator);
-  y = *(_generator->state + (_generator->next)++);
-
-  /* Tempering */
-  y ^= (y >> 11);
-  y ^= (y << 7) & 0x9d2c5680UL;
-  y ^= (y << 15) & 0xefc60000UL;
-  y ^= (y >> 18);
-
-  return (double)y * (1.0/4294967296.0);
   /* divided by 2^32 */
+  return (double)THRandom_random(_generator) * (1.0/4294967296.0);
 }
 
 /*********************************************************
