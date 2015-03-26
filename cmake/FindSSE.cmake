@@ -39,7 +39,7 @@ SET(SSE4_1_CODE "
 
   int main ()
   {
-    __m128i a, b;
+    __m128i a = {0,0,0,0}, b = {0,0,0,0};
     __m128i res = _mm_max_epi8(a, b);
 
     return 0;
@@ -51,7 +51,7 @@ SET(SSE4_2_CODE "
 
   int main()
   {
-    __m128i a, b, c;
+    __m128i a = {0,0,0,0}, b = {0,0,0,0}, c = {0,0,0,0};
     c = _mm_cmpgt_epi64(a, b);
     return 0;
   }
