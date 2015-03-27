@@ -28,6 +28,11 @@ void THCudaBlas_shutdown(THCState *state)
   free(blas_state->handles);
 }
 
+void THCudaBlas_reset(THCState *state)
+{
+  cublasCreate(state->blasState->current_handle);
+}
+
 void THCudaBlas_setHandle(THCState *state, int device)
 {
   THCBlasState *blas_state = state->blasState;

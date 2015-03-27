@@ -36,6 +36,7 @@ typedef struct THCState
 
 THC_API void THCudaBlas_init(THCState *state, int num_devices, int current_device);
 THC_API void THCudaBlas_shutdown(THCState *state);
+THC_API void THCudaBlas_reset(THCState *state);
 THC_API void THCudaBlas_setHandle(THCState *state, int device);
 
 THC_API void THCudaInit(THCState* state);
