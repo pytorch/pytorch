@@ -17,10 +17,15 @@ void THCudaInit(THCState* state)
   state->blasState = (THCBlasState*)malloc(sizeof(THCBlasState));
   THCudaBlas_init(state, count, device);
 
+  state->deviceProperties =
+    (struct cudaDeviceProp*)malloc(count * sizeof(struct cudaDeviceProp));
+
   int i,j;
   for(i=0; i < count; ++i)
   {
     THCudaCheck(cudaSetDevice(i));
+    THCudaCheck(cudaGetDeviceProperties(&state->deviceProperties[i], i));
+
     for (j=0; j < count; ++j)
     {
       if(i != j)
@@ -50,6 +55,7 @@ void THCudaShutdown(THCState* state)
   THCRandom_shutdown(state);
   free(state->blasState);
   free(state->rngState);
+  free(state->deviceProperties);
   THCudaBlas_shutdown(state);
 }
 

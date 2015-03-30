@@ -32,6 +32,7 @@ typedef struct THCState
 {
   struct THCRNGState* rngState;
   struct THCBlasState* blasState;
+  struct cudaDeviceProp* deviceProperties;
 } THCState;
 
 THC_API void THCudaBlas_init(THCState *state, int num_devices, int current_device);
