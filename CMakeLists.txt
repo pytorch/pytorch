@@ -22,6 +22,7 @@ SET(src-cuda
   THCTensorConv.cu
   THCTensorRandom.cu
   THCApply.cu
+  THCTensorSort.cu
   )
 
 CUDA_ADD_LIBRARY(THC SHARED ${src} ${src-cuda})
@@ -44,6 +45,7 @@ INSTALL(FILES
           THCTensorRandom.h
           THCTensorMath.h
           THCTensorConv.h
+          THCTensorSort.h
           THCApply.cuh
           THCReduce.cuh
           THCReduceApplyUtils.cuh
