@@ -21,12 +21,9 @@ void THError(const char *fmt, ...)
   /* vasprintf not standard */
   /* vsnprintf: how to handle if does not exists? */
   va_start(args, fmt);
-  int n = vsnprintf(msg, 1024, fmt, args);
+  vsnprintf(msg, 1024, fmt, args);
   va_end(args);
 
-  if(n < 1024) {
-    snprintf(msg + n, 1024 - n, "\nat %s:%d", file, line);
-  }
   (*torchErrorHandlerFunction)(msg, torchErrorHandlerData);
 }
 
