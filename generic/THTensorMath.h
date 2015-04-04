@@ -45,6 +45,8 @@ TH_API void THTensor_(match)(THTensor *r_, THTensor *m1, THTensor *m2, real gain
 TH_API long THTensor_(numel)(THTensor *t);
 TH_API void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension);
 TH_API void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension);
+TH_API void THTensor_(kthvalue)(THTensor *values_, THLongTensor *indices_, THTensor *t, long k, int dimension);
+TH_API void THTensor_(median)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension);
 TH_API void THTensor_(sum)(THTensor *r_, THTensor *t, int dimension);
 TH_API void THTensor_(prod)(THTensor *r_, THTensor *t, int dimension);
 TH_API void THTensor_(cumsum)(THTensor *r_, THTensor *t, int dimension);
