@@ -20,13 +20,15 @@ int THTensor_(nDimension)(const THTensor *self)
 
 long THTensor_(size)(const THTensor *self, int dim)
 {
-  THArgCheck((dim >= 0) && (dim < self->nDimension), 2, "out of range");
+  THArgCheck((dim >= 0) && (dim < self->nDimension), 2, "dimension %d out of range of %dD tensor",
+      dim+1, THTensor_(nDimension)(self));
   return self->size[dim];
 }
 
 long THTensor_(stride)(const THTensor *self, int dim)
 {
-  THArgCheck((dim >= 0) && (dim < self->nDimension), 2, "out of range");
+  THArgCheck((dim >= 0) && (dim < self->nDimension), 2, "dimension %d out of range of %dD tensor", dim+1,
+      THTensor_(nDimension)(self));
   return self->stride[dim];
 }
 
@@ -749,6 +751,50 @@ real THTensor_(get4d)(const THTensor *tensor, long x0, long x1, long x2, long x3
   THArgCheck(tensor->nDimension == 4, 1, "tensor must have four dimensions");
   THArgCheck((x0 >= 0) && (x0 < tensor->size[0]) && (x1 >= 0) && (x1 < tensor->size[1]) && (x2 >= 0) && (x2 < tensor->size[2]) && (x3 >= 0) && (x3 < tensor->size[3]), 2, "out of range");
   return THStorage_(get)(tensor->storage, tensor->storageOffset+x0*tensor->stride[0]+x1*tensor->stride[1]+x2*tensor->stride[2]+x3*tensor->stride[3]);
+}
+
+THDescBuff THTensor_(desc)(const THTensor *tensor) {
+  const int L = TH_DESC_BUFF_LEN;
+  THDescBuff buf;
+  char *str = buf.str;
+  int n = 0;
+#define _stringify(x) #x
+  n += snprintf(str, L-n, "torch." _stringify(x) "Tensor of size ");
+#undef _stringify
+  int i;
+  for(i = 0; i < tensor->nDimension; i++) {
+    if(n >= L) break;
+    n += snprintf(str+n, L-n, "%ld", tensor->size[i]);
+    if(i < tensor->nDimension-1) {
+      n += snprintf(str+n, L-n, "x");
+    }
+  }
+  if(n >= L) {
+    snprintf(str+L-4+n, 4, "...");
+  }
+  return buf;
+}
+
+THDescBuff THTensor_(sizeDesc)(const THTensor *tensor) {
+  const int L = TH_DESC_BUFF_LEN;
+  THDescBuff buf;
+  char *str = buf.str;
+  int n = 0;
+  n += snprintf(str, L-n, "[");
+  int i;
+  for(i = 0; i < tensor->nDimension; i++) {
+    if(n >= L) break;
+    n += snprintf(str+n, L-n, "%ld", tensor->size[i]);
+    if(i < tensor->nDimension-1) {
+      n += snprintf(str+n, L-n, " x ");
+    }
+  }
+  if(n < L - 2) {
+    snprintf(str+n, L-n, "]");
+  } else {
+    snprintf(str+L-5, 5, "...]");
+  }
+  return buf;
 }
 
 #endif

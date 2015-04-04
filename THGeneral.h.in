@@ -44,13 +44,29 @@
 #endif
 
 TH_API double THLog1p(const double x);
-TH_API void THError(const char *fmt, ...);
+TH_API void _THError(const char *file, const int line, const char *fmt, ...);
+TH_API void _THAssertionFailed(const char *file, const int line, const char *exp, const char *fmt, ...);
 TH_API void THSetErrorHandler( void (*torchErrorHandlerFunction)(const char *msg, void *data), void *data );
-TH_API void THArgCheck(int condition, int argNumber, const char *msg);
+TH_API void _THArgCheck(const char *file, int line, int condition, int argNumber, const char *fmt, ...);
 TH_API void THSetArgErrorHandler( void (*torchArgErrorHandlerFunction)(int argNumber, const char *msg, void *data), void *data );
 TH_API void* THAlloc(long size);
 TH_API void* THRealloc(void *ptr, long size);
 TH_API void THFree(void *ptr);
+
+#define THError(...) _THError(__FILE__, __LINE__, __VA_ARGS__)
+#define THArgCheck(...) _THArgCheck(__FILE__, __LINE__, __VA_ARGS__)
+#define THAssert(exp)                                                 \
+do {                                                                  \
+  if (!(exp)) {                                                       \
+    _THAssertionFailed(__FILE__, __LINE__, #exp, "");                 \
+  }                                                                   \
+} while(0)
+#define THAssertMsg(exp, ...)                                         \
+do {                                                                  \
+  if (!(exp)) {                                                       \
+    _THAssertionFailed(__FILE__, __LINE__, #exp, __VA_ARGS__);        \
+  }                                                                   \
+} while(0)
 
 #define TH_CONCAT_STRING_2(x,y) TH_CONCAT_STRING_2_EXPAND(x,y)
 #define TH_CONCAT_STRING_2_EXPAND(x,y) #x #y

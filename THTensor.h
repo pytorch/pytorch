@@ -7,6 +7,11 @@
 #define THTensor          TH_CONCAT_3(TH,Real,Tensor)
 #define THTensor_(NAME)   TH_CONCAT_4(TH,Real,Tensor_,NAME)
 
+#define TH_DESC_BUFF_LEN 64
+typedef struct {
+    char str[TH_DESC_BUFF_LEN];
+} THDescBuff;
+
 /* basics */
 #include "generic/THTensor.h"
 #include "THGenerateAllTypes.h"

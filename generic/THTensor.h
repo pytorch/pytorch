@@ -122,4 +122,8 @@ TH_API real THTensor_(get2d)(const THTensor *tensor, long x0, long x1);
 TH_API real THTensor_(get3d)(const THTensor *tensor, long x0, long x1, long x2);
 TH_API real THTensor_(get4d)(const THTensor *tensor, long x0, long x1, long x2, long x3);
 
+/* Debug methods */
+TH_API THDescBuff THTensor_(desc)(const THTensor *tensor);
+TH_API THDescBuff THTensor_(sizeDesc)(const THTensor *tensor);
+
 #endif
