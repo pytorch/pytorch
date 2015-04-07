@@ -25,6 +25,7 @@ struct TensorFillOp {
 
 void THCudaTensor_fill(THCState* state, THCudaTensor *self_, float value)
 {
+  THAssert(THCudaTensor_checkGPU(state, 1, self_));
   if (!THCudaTensor_pointwiseApply1(state, self_, TensorFillOp(value))) {
     THArgCheck(false, 1, CUTORCH_DIM_WARNING);
   }
@@ -34,10 +35,12 @@ void THCudaTensor_fill(THCState* state, THCudaTensor *self_, float value)
 
 void THCudaTensor_zero(THCState *state, THCudaTensor *self_)
 {
+  THAssert(THCudaTensor_checkGPU(state, 1, self_));
   if (THCudaTensor_isContiguous(state, self_)) {
     THCudaCheck(cudaMemsetAsync(THCudaTensor_data(state, self_),
                                 0,
-                                sizeof(float) * THCudaTensor_nElement(state, self_)));
+                                sizeof(float) * THCudaTensor_nElement(state, self_),
+                                THCState_getCurrentStream(state)));
   } else {
     if (!THCudaTensor_pointwiseApply1(state, self_, TensorFillOp(0))) {
       THArgCheck(false, 1, CUTORCH_DIM_WARNING);
@@ -49,18 +52,21 @@ void THCudaTensor_zero(THCState *state, THCudaTensor *self_)
 
 void THCudaTensor_zeros(THCState *state, THCudaTensor *r_, THLongStorage *size)
 {
+  THAssert(THCudaTensor_checkGPU(state, 1, r_));
   THCudaTensor_resize(state, r_, size, NULL);
   THCudaTensor_zero(state, r_);
 }
 
 void THCudaTensor_ones(THCState *state, THCudaTensor *r_, THLongStorage *size)
 {
+  THAssert(THCudaTensor_checkGPU(state, 1, r_));
   THCudaTensor_resize(state, r_, size, NULL);
   THCudaTensor_fill(state, r_, 1);
 }
 
 void THCudaTensor_reshape(THCState *state, THCudaTensor *r_, THCudaTensor *t, THLongStorage *size)
 {
+  THAssert(THCudaTensor_checkGPU(state, 2, r_, t));
   THCudaTensor_resize(state, r_, size, NULL);
   THCudaTensor_copy(state, r_, t);
 }
@@ -82,6 +88,7 @@ struct TensorCPowOp {
 
 void THCudaTensor_cpow(THCState *state, THCudaTensor *self_, THCudaTensor *src1, THCudaTensor *src2)
 {
+  THAssert(THCudaTensor_checkGPU(state, 3, self_, src1, src2));
   THArgCheck(THCudaTensor_nElement(state, src1) ==
              THCudaTensor_nElement(state, src2), 3, "sizes do not match");
 
@@ -116,6 +123,7 @@ struct TensorDivOp {
 
 void THCudaTensor_cdiv(THCState* state, THCudaTensor *self_, THCudaTensor *src1, THCudaTensor *src2)
 {
+  THAssert(THCudaTensor_checkGPU(state, 3, self_, src1, src2));
   THArgCheck(THCudaTensor_nElement(state, src1) ==
              THCudaTensor_nElement(state, src2), 3, "sizes do not match");
 
@@ -149,6 +157,7 @@ struct TensorAddCMulOp {
 
 void THCudaTensor_addcmul(THCState *state, THCudaTensor *self_, THCudaTensor *t, float value, THCudaTensor *src1, THCudaTensor *src2)
 {
+  THAssert(THCudaTensor_checkGPU(state, 4, self_, t, src1, src2));
   if(self_ != t)
   {
     THCudaTensor_resizeAs(state, self_, t);
@@ -179,6 +188,7 @@ struct TensorAddCDivOp {
 
 void THCudaTensor_addcdiv(THCState *state, THCudaTensor *self_, THCudaTensor *t, float value, THCudaTensor *src1, THCudaTensor *src2)
 {
+  THAssert(THCudaTensor_checkGPU(state, 4, self_, t, src1, src2));
   if(self_ != t)
   {
     THCudaTensor_resizeAs(state, self_, t);
@@ -197,6 +207,7 @@ void THCudaTensor_addcdiv(THCState *state, THCudaTensor *self_, THCudaTensor *t,
 
 float THCudaTensor_minall(THCState *state, THCudaTensor *self)
 {
+  THAssert(THCudaTensor_checkGPU(state, 1, self));
   self = THCudaTensor_newContiguous(state, self);
   thrust::device_ptr<float> self_data(THCudaTensor_data(state, self));
 
@@ -208,6 +219,7 @@ float THCudaTensor_minall(THCState *state, THCudaTensor *self)
 
 float THCudaTensor_maxall(THCState *state, THCudaTensor *self)
 {
+  THAssert(THCudaTensor_checkGPU(state, 1, self));
   self = THCudaTensor_newContiguous(state, self);
   thrust::device_ptr<float> self_data(THCudaTensor_data(state, self));
 
@@ -219,6 +231,7 @@ float THCudaTensor_maxall(THCState *state, THCudaTensor *self)
 
 float THCudaTensor_sumall(THCState *state, THCudaTensor *self)
 {
+  THAssert(THCudaTensor_checkGPU(state, 1, self));
   self = THCudaTensor_newContiguous(state, self);
   thrust::device_ptr<float> self_data(THCudaTensor_data(state, self));
 
@@ -230,6 +243,7 @@ float THCudaTensor_sumall(THCState *state, THCudaTensor *self)
 
 float THCudaTensor_prodall(THCState *state, THCudaTensor *self)
 {
+  THAssert(THCudaTensor_checkGPU(state, 1, self));
   self = THCudaTensor_newContiguous(state, self);
   thrust::device_ptr<float> self_data(THCudaTensor_data(state, self));
 
@@ -251,6 +265,7 @@ struct dim4 {
 
 void THCudaTensor_sum(THCState* state, THCudaTensor *self, THCudaTensor *src, long dimension)
 {
+  THAssert(THCudaTensor_checkGPU(state, 2, self, src));
   THCudaTensor_reduceDim(
     state, self, src,
     thrust::identity<float>(), thrust::plus<float>(), 0.0f, dimension);
@@ -260,6 +275,7 @@ void THCudaTensor_sum(THCState* state, THCudaTensor *self, THCudaTensor *src, lo
 
 void THCudaTensor_prod(THCState* state, THCudaTensor *self, THCudaTensor *src, long dimension)
 {
+  THAssert(THCudaTensor_checkGPU(state, 2, self, src));
   THCudaTensor_reduceDim(
     state, self, src,
     thrust::identity<float>(), thrust::multiplies<float>(), 1.0f, dimension);

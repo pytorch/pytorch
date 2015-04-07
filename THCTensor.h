@@ -125,6 +125,6 @@ THC_API float THCudaTensor_get4d(THCState *state, const THCudaTensor *tensor, lo
 /* CUDA-specific functions */
 THC_API cudaTextureObject_t THCudaTensor_getTextureObject(THCState *state, THCudaTensor *self);
 THC_API int THCudaTensor_getDevice(THCState *state, const THCudaTensor *self);
-
+THC_API int THCudaTensor_checkGPU(THCState *state, unsigned int nTensors, ...);
 
 #endif

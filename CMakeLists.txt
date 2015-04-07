@@ -1,3 +1,4 @@
+SET(CMAKE_C_FLAGS "-std=c99")
 SET(src
     THCGeneral.c THCStorage.c THCStorageCopy.c THCTensor.c THCTensorCopy.c)
 

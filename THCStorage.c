@@ -33,6 +33,7 @@ THCudaStorage* THCudaStorage_newWithSize(THCState *state, long size)
   {
     THCudaStorage *storage = (THCudaStorage*)THAlloc(sizeof(THCudaStorage));
     THCudaCheck(cudaMalloc((void**)&(storage->data), size * sizeof(float)));
+
     storage->size = size;
     storage->refcount = 1;
     storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE | TH_STORAGE_FREEMEM;
@@ -107,8 +108,9 @@ void THCudaStorage_free(THCState *state, THCudaStorage *self)
 
   if (--(self->refcount) <= 0)
   {
-    if(self->flag & TH_STORAGE_FREEMEM)
+    if(self->flag & TH_STORAGE_FREEMEM) {
       THCudaCheck(cudaFree(self->data));
+    }
     THFree(self);
   }
 }

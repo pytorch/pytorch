@@ -165,7 +165,8 @@ bool THCudaTensor_pointwiseApply1(THCState* state,
   // index can be similarly collapsed. That is what this unrolling is for.
 #define HANDLE_CASE(TYPE, A)                                   \
   THCudaTensor_pointwiseApply1<Op, TYPE, A>                    \
-    <<<grid, block>>>(aInfo, (TYPE) totalElements, op);
+    <<<grid, block, 0, THCState_getCurrentStream(state)>>>(    \
+      aInfo, (TYPE) totalElements, op);
 
 #define HANDLE_A_CASE(TYPE, A)                      \
   {                                                 \
@@ -205,10 +206,12 @@ bool THCudaTensor_pointwiseApply1(THCState* state,
     // compilation time.
     if (aInfo.isContiguous()) {
       THCudaTensor_pointwiseApply1<Op, unsigned long, -2>
-        <<<grid, block>>>(aInfo, (unsigned long) totalElements, op);
+        <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+          aInfo, (unsigned long) totalElements, op);
     } else {
       THCudaTensor_pointwiseApply1<Op, unsigned long, -1>
-        <<<grid, block>>>(aInfo, (unsigned long) totalElements, op);
+        <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+          aInfo, (unsigned long) totalElements, op);
     }
   }
 #undef HANDLE_CASE
@@ -289,7 +292,8 @@ bool THCudaTensor_pointwiseApply2(THCState* state,
   // index can be similarly collapsed. That is what this unrolling is for.
 #define HANDLE_CASE(TYPE, A, B)                                \
   THCudaTensor_pointwiseApply2<Op, TYPE, A, B>                 \
-    <<<grid, block>>>(aInfo, bInfo, (TYPE) totalElements, op); \
+    <<<grid, block, 0, THCState_getCurrentStream(state)>>>(    \
+      aInfo, bInfo, (TYPE) totalElements, op);
 
 #define HANDLE_B_CASE(TYPE, A, B)                   \
   {                                                 \
@@ -350,10 +354,12 @@ bool THCudaTensor_pointwiseApply2(THCState* state,
     // compilation time.
     if (aInfo.isContiguous() && bInfo.isContiguous()) {
       THCudaTensor_pointwiseApply2<Op, unsigned long, -2, -2>
-        <<<grid, block>>>(aInfo, bInfo, (unsigned long) totalElements, op);
+        <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+          aInfo, bInfo, (unsigned long) totalElements, op);
     } else {
       THCudaTensor_pointwiseApply2<Op, unsigned long, -1, -1>
-        <<<grid, block>>>(aInfo, bInfo, (unsigned long) totalElements, op);
+        <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+          aInfo, bInfo, (unsigned long) totalElements, op);
     }
   }
 #undef HANDLE_CASE
@@ -448,7 +454,8 @@ bool THCudaTensor_pointwiseApply3(THCState* state,
 
 #define HANDLE_CASE(TYPE, A, B, C)                                      \
   THCudaTensor_pointwiseApply3<Op, TYPE, A, B, C>                       \
-    <<<grid, block>>>(aInfo, bInfo, cInfo, (TYPE) totalElements, op);   \
+    <<<grid, block, 0, THCState_getCurrentStream(state)>>>(             \
+      aInfo, bInfo, cInfo, (TYPE) totalElements, op);
 
 #define HANDLE_C_CASE(TYPE, A, B, C)             \
   {                                              \
@@ -534,12 +541,12 @@ bool THCudaTensor_pointwiseApply3(THCState* state,
     // compilation time.
     if (aInfo.isContiguous() && bInfo.isContiguous() && cInfo.isContiguous()) {
       THCudaTensor_pointwiseApply3<Op, unsigned long, -2, -2, -2>
-        <<<grid, block>>>(aInfo, bInfo, cInfo,
-                          (unsigned long) totalElements, op);
+        <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+          aInfo, bInfo, cInfo, (unsigned long) totalElements, op);
     } else {
       THCudaTensor_pointwiseApply3<Op, unsigned long, -1, -1, -1>
-        <<<grid, block>>>(aInfo, bInfo, cInfo,
-                          (unsigned long) totalElements, op);
+        <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+          aInfo, bInfo, cInfo, (unsigned long) totalElements, op);
     }
   }
 #undef HANDLE_CASE

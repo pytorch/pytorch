@@ -18,17 +18,26 @@ void THCudaStorage_resize(THCState *state, THCudaStorage *self, long size)
 
   if(size == 0)
   {
-    if(self->flag & TH_STORAGE_FREEMEM)
+    if(self->flag & TH_STORAGE_FREEMEM) {
       THCudaCheck(cudaFree(self->data));
+    }
     self->data = NULL;
     self->size = 0;
   }
   else
   {
-    float *data;
+    float *data = NULL;
     THCudaCheck(cudaMalloc((void**)(&data), size * sizeof(float)));
-    THCudaCheck(cudaMemcpyAsync(data, self->data, THMin(self->size, size) * sizeof(float), cudaMemcpyDeviceToDevice));
-    THCudaCheck(cudaFree(self->data));
+
+    if (self->data) {
+      THCudaCheck(cudaMemcpyAsync(data,
+                                  self->data,
+                                  THMin(self->size, size) * sizeof(float),
+                                  cudaMemcpyDeviceToDevice,
+                                  THCState_getCurrentStream(state)));
+      THCudaCheck(cudaFree(self->data));
+    }
+
     self->data = data;
     self->size = size;
   }

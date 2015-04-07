@@ -217,18 +217,20 @@ bool THCudaTensor_sortImpl(THCState* state,
 #define HANDLE_CASE(TYPE, A, SIZE)                                      \
   if (dir) {                                                            \
     THCudaTensor_bitonicSortWithIndex<GTComp<float>, TYPE, A, SIZE>     \
-      <<<grid, block>>>(sortedInfo, indicesInfo, inputInfo,             \
-                        dim,                                            \
-                        slices, (TYPE) sliceSize, (TYPE) sliceStride,   \
-                        (TYPE) outSize, (TYPE) outStride,               \
-                        GTComp<float>());                               \
+      <<<grid, block, 0, THCState_getCurrentStream(state)>>>(           \
+        sortedInfo, indicesInfo, inputInfo,                             \
+        dim,                                                            \
+        slices, (TYPE) sliceSize, (TYPE) sliceStride,                   \
+        (TYPE) outSize, (TYPE) outStride,                               \
+        GTComp<float>());                                               \
   } else {                                                              \
     THCudaTensor_bitonicSortWithIndex<LTComp<float>, TYPE, A, SIZE>     \
-      <<<grid, block>>>(sortedInfo, indicesInfo, inputInfo,             \
-                        dim,                                            \
-                        slices, (TYPE) sliceSize, (TYPE) sliceStride,   \
-                        (TYPE) outSize, (TYPE) outStride,               \
-                        LTComp<float>());                               \
+      <<<grid, block, 0, THCState_getCurrentStream(state)>>>(           \
+        sortedInfo, indicesInfo, inputInfo,                             \
+        dim,                                                            \
+        slices, (TYPE) sliceSize, (TYPE) sliceStride,                   \
+        (TYPE) outSize, (TYPE) outStride,                               \
+        LTComp<float>());                                               \
   }
 
 #define HANDLE_SORT_CASE(TYPE, A)               \
@@ -384,7 +386,8 @@ void THCudaTensor_sortImplThrust(THCState* state,
   dim3 grid;
   THC_getGridFromTiles(numSlices, grid);
 
-  THCudaTensor_fillSliceWithIndex<<<grid, min((long long)sliceSize, 1024LL)>>>(
+  THCudaTensor_fillSliceWithIndex<<<grid, min((long long)sliceSize, 1024LL),
+                                    0, THCState_getCurrentStream(state)>>>(
     indicesInfo, numSlices, sliceSize, sliceStride);
   THCudaCheck(cudaGetLastError());
 
@@ -419,6 +422,7 @@ THC_API void THCudaTensor_sort(THCState* state,
                                THCudaTensor *indices,
                                THCudaTensor *input,
                                int dim, int order) {
+  THAssert(THCudaTensor_checkGPU(state, 3, sorted, indices, input));
   // Make sure sufficient output space is allocated
   THCudaTensor_resizeAs(state, sorted, input);
   THCudaTensor_resizeAs(state, indices, input);

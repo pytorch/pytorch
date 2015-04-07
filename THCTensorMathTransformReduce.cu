@@ -66,7 +66,7 @@ __host__ void THCudaTensor_transformReduceOuterDimIndex(THCState *state, THCudaT
   unsigned maxGridDim = 1024;
   dim3 grid(min(maxGridDim, num_orows), min(maxGridDim, DIVUP(num_irows, threads.x)));
 
-  THCudaTensor_kernel_transformReduceOuterDimIndex<<<grid, threads>>>(
+  THCudaTensor_kernel_transformReduceOuterDimIndex<<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
     THCudaTensor_data(state, tgt1), THCudaTensor_data(state, tgt2),
     THCudaTensor_data(state, src), num_orows, num_irows, row_size, init, binary_op);
   cudaError errcode = cudaGetLastError();
@@ -145,7 +145,7 @@ __host__ void THCudaTensor_transformReduceInnermostDimIndex(
   dim3 threads(16, 32);
   dim3 grid(min(1024, DIVUP(num_rows, threads.y)));
 
-  THCudaTensor_kernel_transformReduceInnermostDimIndex<<<grid, threads>>>(
+  THCudaTensor_kernel_transformReduceInnermostDimIndex<<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
     THCudaTensor_data(state, tgt1), THCudaTensor_data(state, tgt2),
     THCudaTensor_data(state, src), num_rows, row_size, init, binary_op);
   cudaError errcode = cudaGetLastError();
@@ -194,6 +194,7 @@ struct maxvalue_functor
 
 void THCudaTensor_max(THCState *state, THCudaTensor *values, THCudaTensor *indices, THCudaTensor *src, long dimension)
 {
+  THAssert(THCudaTensor_checkGPU(state, 3, values, indices, src));
   const float minfloat32 = -3.402823466e+38f;
   thrust::pair<float,float> init = thrust::make_pair<float,float>(minfloat32, -1);
   return THCudaTensor_reduceDimIndex(state, values, indices, src, dimension, init,
@@ -212,6 +213,7 @@ struct minvalue_functor
 
 void THCudaTensor_min(THCState *state, THCudaTensor *values, THCudaTensor *indices, THCudaTensor *src, long dimension)
 {
+  THAssert(THCudaTensor_checkGPU(state, 3, values, indices, src));
   const float maxfloat32 = 3.402823466e+38f;
   thrust::pair<float,float> init = thrust::make_pair<float,float>(maxfloat32, -1);
   return THCudaTensor_reduceDimIndex(state, values, indices, src, dimension, init,

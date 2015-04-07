@@ -94,6 +94,7 @@ __global__ void THCudaTensor_kernel_indexCopy(
 
 void THCudaTensor_indexCopy(THCState *state, THCudaTensor *res_, int dim, THLongTensor *indices, THCudaTensor *src)
 {
+  THAssert(THCudaTensor_checkGPU(state, 2, res_, src));
   THCudaTensor *indices_;
   long *stride_;
   long nIndex = indices->size[0];
@@ -115,7 +116,7 @@ void THCudaTensor_indexCopy(THCState *state, THCudaTensor *res_, int dim, THLong
   THCudaCheck(cudaMalloc((void**)&stride_, res_->nDimension * sizeof(long)));
   THCudaCheck(cudaMemcpy(stride_, res_->stride, res_->nDimension * sizeof(long), cudaMemcpyHostToDevice));
 
-  THCudaTensor_kernel_indexCopy<<<nblocks, nthreads>>>(
+  THCudaTensor_kernel_indexCopy<<<nblocks, nthreads, 0, THCState_getCurrentStream(state)>>>(
     THCudaTensor_data(state, res_), THCudaTensor_data(state, src),
     stride_, THCudaTensor_data(state, indices_),
     res_->nDimension, dim, nIndex,
@@ -130,6 +131,7 @@ void THCudaTensor_indexCopy(THCState *state, THCudaTensor *res_, int dim, THLong
 
 void THCudaTensor_indexFill(THCState *state, THCudaTensor *res_, int dim, THLongTensor *indices, float val)
 {
+  THAssert(THCudaTensor_checkGPU(state, 1, res_));
   THCudaTensor *indices_;
   long *stride_;
   long nIndex = indices->size[0];
@@ -151,7 +153,7 @@ void THCudaTensor_indexFill(THCState *state, THCudaTensor *res_, int dim, THLong
   THCudaCheck(cudaMalloc((void**)&stride_, res_->nDimension * sizeof(long)));
   THCudaCheck(cudaMemcpy(stride_, res_->stride, res_->nDimension * sizeof(long), cudaMemcpyHostToDevice));
 
-  THCudaTensor_kernel_indexFill<<<nblocks, nthreads>>>(
+  THCudaTensor_kernel_indexFill<<<nblocks, nthreads, 0, THCState_getCurrentStream(state)>>>(
     THCudaTensor_data(state, res_), stride_, THCudaTensor_data(state, indices_),
     res_->nDimension, dim, nIndex, nRes, res_->size[dim], val
   );
@@ -203,6 +205,7 @@ __global__ void THCudaTensor_kernel_indexSelect(
 
 void THCudaTensor_indexSelect(THCState *state, THCudaTensor *res_, THCudaTensor *src, int dim, THLongTensor *indices)
 {
+  THAssert(THCudaTensor_checkGPU(state, 2, res_, src));
   THLongStorage *newSize;
   THCudaTensor *indices_;
   long *stride_;
@@ -229,7 +232,7 @@ void THCudaTensor_indexSelect(THCState *state, THCudaTensor *res_, THCudaTensor 
   THCudaCheck(cudaMalloc((void**)&stride_, src->nDimension * sizeof(long)));
   THCudaCheck(cudaMemcpy(stride_, src->stride, src->nDimension * sizeof(long), cudaMemcpyHostToDevice));
 
-  THCudaTensor_kernel_indexSelect<<<nblocks, nthreads>>>(
+  THCudaTensor_kernel_indexSelect<<<nblocks, nthreads, 0, THCState_getCurrentStream(state)>>>(
     THCudaTensor_data(state, res_), THCudaTensor_data(state, src),
     stride_, THCudaTensor_data(state, indices_),
     src->nDimension, dim, indices->size[0], nRes, src->size[dim]

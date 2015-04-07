@@ -24,6 +24,15 @@
 # define THC_API THC_EXTERNC
 #endif
 
+#ifndef THAssert
+#define THAssert(exp)                                                   \
+  do {                                                                  \
+    if (!(exp)) {                                                       \
+      THError("assert(%s) failed in file %s, line %d", #exp, __FILE__, __LINE__); \
+    }                                                                   \
+  } while(0)
+#endif
+
 struct THCRNGState;  /* Random number generator state. */
 struct THCBlasState;
 
@@ -33,15 +42,42 @@ typedef struct THCState
   struct THCRNGState* rngState;
   struct THCBlasState* blasState;
   struct cudaDeviceProp* deviceProperties;
+  /* Convenience reference to the current stream in use */
+  cudaStream_t currentStream;
+  /* Set of all allocated streams. streamsPerDevice[dev][0] is NULL, which
+     specifies the per-device default stream. */
+  cudaStream_t** streamsPerDevice;
+
+  /* Captured number of devices upon startup; convenience for bounds checking */
+  int numDevices;
+  /* Number of Torch defined streams available, indices 1 ... numStreams */
+  int numUserStreams;
+  /* Index of the current selected per-device stream. Actual CUDA stream changes
+     based on the current device, since streams are per-device */
+  int currentPerDeviceStream;
 } THCState;
 
 THC_API void THCudaBlas_init(THCState *state, int num_devices, int current_device);
 THC_API void THCudaBlas_shutdown(THCState *state);
-THC_API void THCudaBlas_reset(THCState *state);
+THC_API void THCudaBlas_reset(THCState *state, int device);
 THC_API void THCudaBlas_setHandle(THCState *state, int device);
+THC_API void THCudaBlas_setStream(THCState *state, int device, cudaStream_t stream);
 
 THC_API void THCudaInit(THCState* state);
 THC_API void THCudaShutdown(THCState* state);
+THC_API void THCudaEnablePeerToPeerAccess(THCState* state);
+
+/* State manipulators and accessors */
+THC_API int THCState_getNumDevices(THCState* state);
+THC_API void THCState_reserveStreams(THCState* state, int numStreams);
+THC_API int THCState_getNumStreams(THCState* state);
+THC_API void THCState_resetStreams(THCState* state, int device);
+
+THC_API cudaStream_t THCState_getDeviceStream(THCState *state, int device, int stream);
+THC_API cudaStream_t THCState_getCurrentStream(THCState *state);
+THC_API int THCState_getCurrentStreamIndex(THCState *state);
+THC_API void THCState_setStream(THCState *state, int device, int stream);
+THC_API void THCState_setStreamForCurrentDevice(THCState *state, int stream);
 
 #define THCudaCheck(err)  __THCudaCheck(err, __FILE__, __LINE__)
 #define THCublasCheck(err)  __THCublasCheck(err,  __FILE__, __LINE__)

@@ -23,7 +23,7 @@ struct THCState;
 THC_API void THCRandom_init(struct THCState *state, int num_devices, int current_device);
 THC_API void THCRandom_shutdown(struct THCState *state);
 THC_API void THCRandom_setGenerator(struct THCState *state, int device);
-THC_API void THCRandom_resetGenerator(struct THCState *state);
+THC_API void THCRandom_resetGenerator(struct THCState *state, int device);
 THC_API unsigned long THCRandom_seed(struct THCState *state);
 THC_API unsigned long THCRandom_seedAll(struct THCState *state);
 THC_API void THCRandom_manualSeed(struct THCState *state, unsigned long the_seed_);

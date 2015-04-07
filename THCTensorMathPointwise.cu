@@ -28,6 +28,7 @@
   };                                                                    \
                                                                         \
   void THCudaTensor_##NAME(THCState* state, THCudaTensor* self_, THCudaTensor* src) { \
+    THAssert(THCudaTensor_checkGPU(state, 2, self_, src));                \
     if (self_ == src) {                                                 \
       if (!THCudaTensor_pointwiseApply1(state, self_, Tensor##NAME##Op())) { \
         THArgCheck(false, 2, CUTORCH_DIM_WARNING); \
@@ -89,6 +90,7 @@ struct TensorCAddOp {
 
 void THCudaTensor_cadd(THCState *state, THCudaTensor *self_, THCudaTensor* src1, float value, THCudaTensor *src2)
 {
+  THAssert(THCudaTensor_checkGPU(state, 3, self_, src1, src2));
   THArgCheck(THCudaTensor_nElement(state, src1) ==
              THCudaTensor_nElement(state, src2), 3, "sizes do not match");
 
@@ -135,6 +137,7 @@ struct TensorMulOp {
 
 void THCudaTensor_cmul(THCState *state, THCudaTensor *self_, THCudaTensor *src1, THCudaTensor *src2)
 {
+  THAssert(THCudaTensor_checkGPU(state, 3, self_, src1, src2));
   THArgCheck(THCudaTensor_nElement(state, src1) ==
              THCudaTensor_nElement(state, src2), 3, "sizes do not match");
 
@@ -154,4 +157,3 @@ void THCudaTensor_cmul(THCState *state, THCudaTensor *self_, THCudaTensor *src1,
 
   THCudaCheck(cudaGetLastError());
 }
-

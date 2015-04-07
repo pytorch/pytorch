@@ -31,6 +31,7 @@ struct TensorPowOp {
 
 void THCudaTensor_pow(THCState *state, THCudaTensor *self_, THCudaTensor *src, float value)
 {
+  THAssert(THCudaTensor_checkGPU(state, 2, self_, src));
   if (self_ == src) {
     if (!THCudaTensor_pointwiseApply1(state, self_, TensorPowOp(value))) {
       THArgCheck(false, 2, CUTORCH_DIM_WARNING);
@@ -62,6 +63,7 @@ struct TensorTPowOp {
 
 void THCudaTensor_tpow(THCState *state, THCudaTensor *self_, float value, THCudaTensor *src)
 {
+  THAssert(THCudaTensor_checkGPU(state, 2, self_, src));
   if (self_ == src) {
     if (!THCudaTensor_pointwiseApply1(state, self_, TensorTPowOp(value))) {
       THArgCheck(false, 2, CUTORCH_DIM_WARNING);
@@ -85,6 +87,7 @@ struct TensorATan2Op {
 
 void THCudaTensor_atan2(THCState *state, THCudaTensor *self_, THCudaTensor *tx, THCudaTensor *ty)
 {
+  THAssert(THCudaTensor_checkGPU(state, 3, self_, tx, ty));
   THArgCheck(THCudaTensor_nElement(state, tx) ==
              THCudaTensor_nElement(state, ty), 3, "sizes do not match");
   THCudaTensor_resizeAs(state, self_, tx);
@@ -113,6 +116,7 @@ struct TensorClampOp {
 void THCudaTensor_clamp(THCState *state, THCudaTensor *self_, THCudaTensor *src, float min_value,
   float max_value)
 {
+  THAssert(THCudaTensor_checkGPU(state, 2, self_, src));
   if (self_ == src) {
     if (!THCudaTensor_pointwiseApply1(state, self_, TensorClampOp(min_value, max_value))) {
       THArgCheck(false, 2, CUTORCH_DIM_WARNING);
@@ -142,6 +146,7 @@ struct TensorSignOp {
 
 void THCudaTensor_sign(THCState *state, THCudaTensor *self_, THCudaTensor *src)
 {
+  THAssert(THCudaTensor_checkGPU(state, 2, self_, src));
   if (self_ == src) {
     if (!THCudaTensor_pointwiseApply1(state, self_, TensorSignOp())) {
       THArgCheck(false, 2, CUTORCH_DIM_WARNING);
@@ -159,6 +164,7 @@ void THCudaTensor_sign(THCState *state, THCudaTensor *self_, THCudaTensor *src)
 
 float THCudaTensor_meanall(THCState *state, THCudaTensor *self)
 {
+  THAssert(THCudaTensor_checkGPU(state, 1, self));
   THArgCheck(self->nDimension > 0, 1, "empty Tensor");
   return THCudaTensor_sumall(state, self)/THCudaTensor_nElement(state, self);
 }
@@ -166,6 +172,7 @@ float THCudaTensor_meanall(THCState *state, THCudaTensor *self)
 void
 THCudaTensor_mean(THCState *state, THCudaTensor *self, THCudaTensor *src, long dim)
 {
+  THAssert(THCudaTensor_checkGPU(state, 2, self, src));
   THCudaTensor_sum(state, self, src, dim);
   THCudaTensor_div(state, self, self, THCudaTensor_size(state, src, dim));
 }
@@ -184,6 +191,7 @@ struct square_functor
 
 float THCudaTensor_varall(THCState *state, THCudaTensor *self)
 {
+  THAssert(THCudaTensor_checkGPU(state, 1, self));
   self = THCudaTensor_newContiguous(state, self);
   long size = THCudaTensor_nElement(state, self);
   thrust::device_ptr<float> self_data(THCudaTensor_data(state, self));
@@ -199,6 +207,7 @@ float THCudaTensor_varall(THCState *state, THCudaTensor *self)
 
 float THCudaTensor_stdall(THCState *state, THCudaTensor *self)
 {
+  THAssert(THCudaTensor_checkGPU(state, 1, self));
   return sqrt(THCudaTensor_varall(state, self));
 }
 
@@ -278,10 +287,10 @@ __host__ void THCudaTensor_varOuterDim(THCState *state, THCudaTensor *tgt, THCud
   dim3 grid(min(maxGridDim, num_orows), min(maxGridDim, DIVUP(num_irows, threads.x)));
 
   if (flag) {
-    THCudaTensor_kernel_varOuterDim<true, apply_sqrt><<<grid, threads>>>(
+    THCudaTensor_kernel_varOuterDim<true, apply_sqrt><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
         THCudaTensor_data(state, tgt), THCudaTensor_data(state, src), num_orows, num_irows, row_size);
   } else {
-    THCudaTensor_kernel_varOuterDim<false, apply_sqrt><<<grid, threads>>>(
+    THCudaTensor_kernel_varOuterDim<false, apply_sqrt><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
         THCudaTensor_data(state, tgt), THCudaTensor_data(state, src), num_orows, num_irows, row_size);
   }
   cudaError errcode = cudaGetLastError();
@@ -359,10 +368,10 @@ __host__ void THCudaTensor_varInnermostDim(THCState *state, THCudaTensor *tgt, T
   dim3 grid(min(1024, DIVUP(num_rows, threads.y)));
 
   if (flag) {
-    THCudaTensor_kernel_varInnermostDim<true, apply_sqrt><<<grid, threads>>>(
+    THCudaTensor_kernel_varInnermostDim<true, apply_sqrt><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
         THCudaTensor_data(state, tgt), THCudaTensor_data(state, src), num_rows, row_size);
   } else {
-    THCudaTensor_kernel_varInnermostDim<false, apply_sqrt><<<grid, threads>>>(
+    THCudaTensor_kernel_varInnermostDim<false, apply_sqrt><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
         THCudaTensor_data(state, tgt), THCudaTensor_data(state, src), num_rows, row_size);
   }
   cudaError errcode = cudaGetLastError();
@@ -373,6 +382,7 @@ __host__ void THCudaTensor_varInnermostDim(THCState *state, THCudaTensor *tgt, T
 
 void THCudaTensor_var(THCState *state, THCudaTensor *self_, THCudaTensor *src, long dimension, int flag)
 {
+  THAssert(THCudaTensor_checkGPU(state, 2, self_, src));
   THLongStorage *dim = THCudaTensor_newSizeOf(state, src);
   THLongStorage_set(dim, dimension, 1);
   THCudaTensor_resize(state, self_, dim, NULL);
@@ -393,6 +403,7 @@ void THCudaTensor_var(THCState *state, THCudaTensor *self_, THCudaTensor *src, l
 
 void THCudaTensor_std(THCState *state, THCudaTensor *self_, THCudaTensor *src, long dimension, int flag)
 {
+  THAssert(THCudaTensor_checkGPU(state, 2, self_, src));
   THLongStorage *dim = THCudaTensor_newSizeOf(state, src);
   THLongStorage_set(dim, dimension, 1);
   THCudaTensor_resize(state, self_, dim, NULL);
@@ -433,6 +444,7 @@ struct partial_not_equal_functor
 
 float THCudaTensor_normall(THCState *state, THCudaTensor *self, float value)
 {
+  THAssert(THCudaTensor_checkGPU(state, 1, self));
   self = THCudaTensor_newContiguous(state, self);
   long size = THCudaTensor_nElement(state, self);
   thrust::device_ptr<float> self_data(THCudaTensor_data(state, self));
@@ -451,6 +463,7 @@ float THCudaTensor_normall(THCState *state, THCudaTensor *self, float value)
 
 void THCudaTensor_norm(THCState *state, THCudaTensor* self, THCudaTensor* src, float value, long dimension)
 {
+  THAssert(THCudaTensor_checkGPU(state, 2, self, src));
   if (value == 0.0f) {
     THCudaTensor_reduceDim(state, self, src,
                            partial_not_equal_functor(0.0f), thrust::plus<float>(),
@@ -503,6 +516,7 @@ __global__ void THCudaTensor_kernel_renorm(float *data, const float value, const
 
 void THCudaTensor_renorm(THCState *state, THCudaTensor* self, THCudaTensor* src, float value, long dimension, float maxnorm)
 {
+  THAssert(THCudaTensor_checkGPU(state, 2, self, src));
   THCudaTensor *self_;
   THCudaTensor *src_ = THCudaTensor_newTranspose(state, src, dimension, 0);
   THCudaTensor *data = THCudaTensor_newClone(state, src_);
@@ -515,7 +529,7 @@ void THCudaTensor_renorm(THCState *state, THCudaTensor* self, THCudaTensor* src,
   dim3 grid(data->size[0]);
   dim3 threads(32);
 
-  THCudaTensor_kernel_renorm<<<grid, threads>>>(THCudaTensor_data(state, data), value, size, maxnorm);
+  THCudaTensor_kernel_renorm<<<grid, threads, 0, THCState_getCurrentStream(state)>>>(THCudaTensor_data(state, data), value, size, maxnorm);
 
   cudaError errcode = cudaGetLastError();
   if(errcode != cudaSuccess)
@@ -542,6 +556,7 @@ struct dist_functor
 
 float THCudaTensor_dist(THCState *state, THCudaTensor *self, THCudaTensor *src, float value)
 {
+  THAssert(THCudaTensor_checkGPU(state, 2, self, src));
   self = THCudaTensor_newContiguous(state, self);
   long size = THCudaTensor_nElement(state, self);
   src = THCudaTensor_newContiguous(state, src);
@@ -558,12 +573,14 @@ float THCudaTensor_dist(THCState *state, THCudaTensor *self, THCudaTensor *src, 
 
 void THCudaTensor_rand(THCState *state, THCudaTensor *r_, THLongStorage *size)
 {
+  THAssert(THCudaTensor_checkGPU(state, 1, r_));
   THCudaTensor_resize(state, r_, size, NULL);
   THCudaTensor_uniform(state, r_, 0, 1);
 }
 
 void THCudaTensor_randn(THCState *state, THCudaTensor *r_, THLongStorage *size)
 {
+  THAssert(THCudaTensor_checkGPU(state, 1, r_));
   THCudaTensor_resize(state, r_, size, NULL);
   THCudaTensor_normal(state, r_, 0, 1);
 }

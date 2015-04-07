@@ -67,35 +67,41 @@ struct TensorNEOp {
 
 void THCudaTensor_ltTensor(THCState *state, THCudaTensor *self_, THCudaTensor *src1, THCudaTensor *src2)
 {
+  THAssert(THCudaTensor_checkGPU(state, 3, self_, src1, src2));
   THCudaTensor_logicalTensor(state, self_, src1, src2, TensorLTOp());
 }
 
 
 void THCudaTensor_gtTensor(THCState *state, THCudaTensor *self_, THCudaTensor *src1, THCudaTensor *src2)
 {
+  THAssert(THCudaTensor_checkGPU(state, 3, self_, src1, src2));
   THCudaTensor_logicalTensor(state, self_, src1, src2, TensorGTOp());
 }
 
 
 void THCudaTensor_leTensor(THCState *state, THCudaTensor *self_, THCudaTensor *src1, THCudaTensor *src2)
 {
+  THAssert(THCudaTensor_checkGPU(state, 3, self_, src1, src2));
   THCudaTensor_logicalTensor(state, self_, src1, src2, TensorLEOp());
 }
 
 
 void THCudaTensor_geTensor(THCState *state, THCudaTensor *self_, THCudaTensor *src1, THCudaTensor *src2)
 {
+  THAssert(THCudaTensor_checkGPU(state, 3, self_, src1, src2));
   THCudaTensor_logicalTensor(state, self_, src1, src2, TensorGEOp());
 }
 
 
 void THCudaTensor_eqTensor(THCState *state, THCudaTensor *self_, THCudaTensor *src1, THCudaTensor *src2)
 {
+  THAssert(THCudaTensor_checkGPU(state, 3, self_, src1, src2));
   THCudaTensor_logicalTensor(state, self_, src1, src2, TensorEQOp());
 }
 
 
 void THCudaTensor_neTensor(THCState *state, THCudaTensor *self_, THCudaTensor *src1, THCudaTensor *src2)
 {
+  THAssert(THCudaTensor_checkGPU(state, 3, self_, src1, src2));
   THCudaTensor_logicalTensor(state, self_, src1, src2, TensorNEOp());
 }

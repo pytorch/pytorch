@@ -39,6 +39,7 @@ struct TensorLTValueOp {
 
 void THCudaTensor_ltValue(THCState *state, THCudaTensor *self_, THCudaTensor *src, float value)
 {
+  THAssert(THCudaTensor_checkGPU(state, 2, self_, src));
   THCudaTensor_logicalValue(state, self_, src, TensorLTValueOp(value));
 }
 
@@ -53,6 +54,7 @@ struct TensorGTValueOp {
 
 void THCudaTensor_gtValue(THCState *state, THCudaTensor *self_, THCudaTensor *src, float value)
 {
+  THAssert(THCudaTensor_checkGPU(state, 2, self_, src));
   THCudaTensor_logicalValue(state, self_, src, TensorGTValueOp(value));
 }
 
@@ -67,6 +69,7 @@ struct TensorLEValueOp {
 
 void THCudaTensor_leValue(THCState *state, THCudaTensor *self_, THCudaTensor *src, float value)
 {
+  THAssert(THCudaTensor_checkGPU(state, 2, self_, src));
   THCudaTensor_logicalValue(state, self_, src, TensorLEValueOp(value));
 }
 
@@ -81,6 +84,7 @@ struct TensorGEValueOp {
 
 void THCudaTensor_geValue(THCState *state, THCudaTensor *self_, THCudaTensor *src, float value)
 {
+  THAssert(THCudaTensor_checkGPU(state, 2, self_, src));
   THCudaTensor_logicalValue(state, self_, src, TensorGEValueOp(value));
 }
 
@@ -95,6 +99,7 @@ struct TensorEQValueOp {
 
 void THCudaTensor_eqValue(THCState *state, THCudaTensor *self_, THCudaTensor *src, float value)
 {
+  THAssert(THCudaTensor_checkGPU(state, 2, self_, src));
   THCudaTensor_logicalValue(state, self_, src, TensorEQValueOp(value));
 }
 
@@ -109,5 +114,6 @@ struct TensorNEValueOp {
 
 void THCudaTensor_neValue(THCState *state, THCudaTensor *self_, THCudaTensor *src, float value)
 {
+  THAssert(THCudaTensor_checkGPU(state, 2, self_, src));
   THCudaTensor_logicalValue(state, self_, src, TensorNEValueOp(value));
 }

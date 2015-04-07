@@ -756,3 +756,21 @@ float THCudaTensor_get4d(THCState *state, const THCudaTensor *tensor, long x0, l
   return THCudaStorage_get(state, tensor->storage, tensor->storageOffset+x0*tensor->stride[0]+x1*tensor->stride[1]+x2*tensor->stride[2]+x3*tensor->stride[3]);
 }
 
+int THCudaTensor_checkGPU(THCState *state, unsigned int nTensors, ...)
+{
+  int curDev = -1;
+  THCudaCheck(cudaGetDevice(&curDev));
+  va_list(args);
+  va_start(args, nTensors);
+  int valid = 1;
+  for (unsigned int i = 0; i < nTensors; i++) {
+    THCudaTensor* tensor = va_arg(args, THCudaTensor*);
+    int tensorDev = THCudaTensor_getDevice(state, tensor);
+    if (tensorDev != -1 && tensorDev != curDev) {
+      valid = 0;
+      break;
+    }
+  }
+  va_end(args);
+  return valid;
+}

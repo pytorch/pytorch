@@ -18,6 +18,7 @@
 
 float THCudaTensor_dot(THCState *state, THCudaTensor *self, THCudaTensor *src)
 {
+  THAssert(THCudaTensor_checkGPU(state, 2, self, src));
   THArgCheck(THCudaTensor_nElement(state, self) == THCudaTensor_nElement(state, src), 2, "sizes do not match");
 
   {
@@ -37,6 +38,7 @@ float THCudaTensor_dot(THCState *state, THCudaTensor *self, THCudaTensor *src)
 
 void THCudaTensor_addmv(THCState *state, THCudaTensor *r_, float beta, THCudaTensor *t, float alpha, THCudaTensor *mat, THCudaTensor *vec)
 {
+  THAssert(THCudaTensor_checkGPU(state, 4, r_, t, mat, vec));
   if( (mat->nDimension != 2) || (vec->nDimension != 1) )
     THError("matrix and vector expected");
 
@@ -84,6 +86,7 @@ void THCudaTensor_addmv(THCState *state, THCudaTensor *r_, float beta, THCudaTen
 
 void THCudaTensor_addmm(THCState *state, THCudaTensor *r_, float beta, THCudaTensor *t, float alpha, THCudaTensor *m1, THCudaTensor *m2)
 {
+  THAssert(THCudaTensor_checkGPU(state, 4, r_, t, m1, m2));
   char transpose_r, transpose_m1, transpose_m2;
   THCudaTensor *r__, *m1_, *m2_;
 
@@ -188,6 +191,7 @@ void THCudaTensor_addmm(THCState *state, THCudaTensor *r_, float beta, THCudaTen
 
 void THCudaTensor_addr(THCState *state, THCudaTensor *r_, float beta, THCudaTensor *t, float alpha, THCudaTensor *vec1, THCudaTensor *vec2)
 {
+  THAssert(THCudaTensor_checkGPU(state, 4, r_, t, vec1, vec2));
   if( (vec1->nDimension != 1) || (vec2->nDimension != 1) )
     THError("vector and vector expected");
 
@@ -235,6 +239,7 @@ void THCudaTensor_addr(THCState *state, THCudaTensor *r_, float beta, THCudaTens
 
 void THCudaTensor_baddbmm(THCState *state, THCudaTensor *result, float beta, THCudaTensor *t,
                           float alpha, THCudaTensor *batch1, THCudaTensor *batch2) {
+  THAssert(THCudaTensor_checkGPU(state, 4, result, t, batch1, batch2));
   THArgCheck(THCudaTensor_nDimension(state, t) == 3, 4, "expected 3D tensor");
   THArgCheck(THCudaTensor_nDimension(state, batch1) == 3, 6, "expected 3D tensor");
   THArgCheck(THCudaTensor_nDimension(state, batch2) == 3, 7, "expected 3D tensor");
@@ -344,9 +349,12 @@ void THCudaTensor_baddbmm(THCState *state, THCudaTensor *result, float beta, THC
   THCudaCheck(cudaMalloc(&d_matrices2, matrices_size));
   THCudaCheck(cudaMalloc(&d_result_matrices, matrices_size));
 
-  THCudaCheck(cudaMemcpyAsync(d_matrices1, matrices1, matrices_size, cudaMemcpyHostToDevice));
-  THCudaCheck(cudaMemcpyAsync(d_matrices2, matrices2, matrices_size, cudaMemcpyHostToDevice));
-  THCudaCheck(cudaMemcpyAsync(d_result_matrices, result_matrices, matrices_size, cudaMemcpyHostToDevice));
+  THCudaCheck(cudaMemcpyAsync(d_matrices1, matrices1, matrices_size,
+                              cudaMemcpyHostToDevice, THCState_getCurrentStream(state)));
+  THCudaCheck(cudaMemcpyAsync(d_matrices2, matrices2, matrices_size,
+                              cudaMemcpyHostToDevice, THCState_getCurrentStream(state)));
+  THCudaCheck(cudaMemcpyAsync(d_result_matrices, result_matrices, matrices_size,
+                              cudaMemcpyHostToDevice, THCState_getCurrentStream(state)));
 
   THCudaBlas_gemmBatched(
       state,

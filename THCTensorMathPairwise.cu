@@ -31,6 +31,7 @@ struct TensorAddConstantOp {
 
 void THCudaTensor_add(THCState *state, THCudaTensor *self_, THCudaTensor *src_, float value)
 {
+  THAssert(THCudaTensor_checkGPU(state, 2, self_, src_));
   if (self_ == src_) {
     if (!THCudaTensor_pointwiseApply1(state, self_, TensorAddConstantOp(value))) {
       THArgCheck(false, 2, CUTORCH_DIM_WARNING);
@@ -61,6 +62,7 @@ struct TensorMulConstantOp {
 
 void THCudaTensor_mul(THCState *state, THCudaTensor *self_, THCudaTensor *src_, float value)
 {
+  THAssert(THCudaTensor_checkGPU(state, 2, self_, src_));
   if (self_ == src_) {
     if (!THCudaTensor_pointwiseApply1(state, self_, TensorMulConstantOp(value))) {
       THArgCheck(false, 2, CUTORCH_DIM_WARNING);
@@ -78,6 +80,7 @@ void THCudaTensor_mul(THCState *state, THCudaTensor *self_, THCudaTensor *src_, 
 
 void THCudaTensor_div(THCState* state, THCudaTensor *self_, THCudaTensor *src_, float value)
 {
+  THAssert(THCudaTensor_checkGPU(state, 2, self_, src_));
   THArgCheck(value != 0.0f, 3, "divide by zero");
 
   if (self_ == src_) {

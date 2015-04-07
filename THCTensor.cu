@@ -2,6 +2,7 @@
 
 cudaTextureObject_t THCudaTensor_getTextureObject(THCState *state, THCudaTensor *self)
 {
+  THAssert(THCudaTensor_checkGPU(state, 1, self));
   cudaTextureObject_t texObj;
   struct cudaResourceDesc resDesc;
   memset(&resDesc, 0, sizeof(resDesc));

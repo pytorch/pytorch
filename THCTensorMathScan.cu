@@ -70,7 +70,7 @@ __host__ void THCudaTensor_scanOuterDim(THCState *state, THCudaTensor *tgt, THCu
   unsigned maxGridDim = 1024;
   dim3 grid(min(maxGridDim, num_orows), min(maxGridDim, DIVUP(num_irows, threads.x)));
 
-  THCudaTensor_kernel_scanOuterDim<<<grid, threads>>>(
+  THCudaTensor_kernel_scanOuterDim<<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
       THCudaTensor_data(state, tgt), THCudaTensor_data(state, src), num_orows, num_irows, row_size, init, binary_op);
   cudaError errcode = cudaGetLastError();
   if (errcode != cudaSuccess) {
@@ -176,7 +176,7 @@ __host__ void THCudaTensor_scanInnermostDim(THCState *state, THCudaTensor *tgt, 
   dim3 threads(16, 32);
   dim3 grid(min(1024, DIVUP(num_rows, threads.y)));
 
-  THCudaTensor_kernel_scanInnermostDim<16, 32><<<grid, threads>>>(
+  THCudaTensor_kernel_scanInnermostDim<16, 32><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
       THCudaTensor_data(state, tgt), THCudaTensor_data(state, src), num_rows, row_size, init, binary_op);
   cudaError errcode = cudaGetLastError();
   if (errcode != cudaSuccess) {
@@ -204,10 +204,12 @@ void THCudaTensor_scanDim(THCState *state, THCudaTensor *self_, THCudaTensor *sr
 
 void THCudaTensor_cumsum(THCState *state, THCudaTensor *self, THCudaTensor *src, long dimension)
 {
+  THAssert(THCudaTensor_checkGPU(state, 2, self, src));
   return THCudaTensor_scanDim(state, self, src, dimension, 0.0f, thrust::plus<float>());
 }
 
 void THCudaTensor_cumprod(THCState *state, THCudaTensor *self, THCudaTensor *src, long dimension)
 {
+  THAssert(THCudaTensor_checkGPU(state, 2, self, src));
   return THCudaTensor_scanDim(state, self, src, dimension, 1.0f, thrust::multiplies<float>());
 }

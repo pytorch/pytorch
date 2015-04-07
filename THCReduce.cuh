@@ -228,16 +228,18 @@ bool THCudaTensor_reduceDim(THCState* state,
   // (or vice versa), the contiguous tensor can be collapsed to one
   // dimension, and the loop to translate the linear index to the array
   // index can be similarly collapsed. That is what this unrolling is for.
-#define HANDLE_CASE(TYPE, OUT, IN)                                       \
-  if (contigReduction) {                                                 \
-    THCudaTensor_reduceContigDim<ModifyOp, ReduceOp, TYPE, OUT, IN>      \
-      <<<grid, block, smemSize>>>(outInfo, inInfo, reductionSize,        \
-                                  (TYPE) outElements, init, modifyOp, reduceOp); \
-  } else {                                                               \
-    THCudaTensor_reduceNoncontigDim<ModifyOp, ReduceOp, TYPE, OUT, IN>   \
-      <<<grid, block>>>(outInfo, inInfo, reductionStride, reductionSize, \
-                        (TYPE) outElements, init, modifyOp, reduceOp);   \
-  }                                                                      \
+#define HANDLE_CASE(TYPE, OUT, IN)                                      \
+  if (contigReduction) {                                                \
+    THCudaTensor_reduceContigDim<ModifyOp, ReduceOp, TYPE, OUT, IN>     \
+      <<<grid, block, smemSize, THCState_getCurrentStream(state)>>>(    \
+        outInfo, inInfo, reductionSize,                                 \
+        (TYPE) outElements, init, modifyOp, reduceOp);                  \
+  } else {                                                              \
+    THCudaTensor_reduceNoncontigDim<ModifyOp, ReduceOp, TYPE, OUT, IN>  \
+      <<<grid, block, 0, THCState_getCurrentStream(state)>>>(           \
+        outInfo, inInfo, reductionStride, reductionSize,                \
+        (TYPE) outElements, init, modifyOp, reduceOp);                  \
+  }                                                                     \
 
 #define HANDLE_IN_CASE(TYPE, OUT, IN)                   \
   {                                                     \

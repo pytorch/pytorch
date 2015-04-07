@@ -28,15 +28,27 @@ void THCudaBlas_shutdown(THCState *state)
   free(blas_state->handles);
 }
 
-void THCudaBlas_reset(THCState *state)
+void THCudaBlas_reset(THCState *state, int device)
 {
-  cublasCreate(state->blasState->current_handle);
+  THCBlasState* blasState = state->blasState;
+
+  if (&blasState->handles[device] != blasState->current_handle) {
+    THError("Unexpected cuBLAS state");
+  }
+
+  cublasCreate(&blasState->handles[device]);
+  blasState->current_handle = &blasState->handles[device];
 }
 
 void THCudaBlas_setHandle(THCState *state, int device)
 {
   THCBlasState *blas_state = state->blasState;
   blas_state->current_handle = &blas_state->handles[device];
+}
+
+void THCudaBlas_setStream(THCState *state, int device, cudaStream_t stream)
+{
+  THCublasCheck(cublasSetStream(state->blasState->handles[device], stream));
 }
 
 void THCudaBlas_swap(THCState *state, long n, float *x, long incx, float *y, long incy)

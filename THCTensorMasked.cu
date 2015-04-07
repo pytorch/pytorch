@@ -32,6 +32,7 @@ struct TensorMaskedFillOp {
 void THCudaTensor_maskedFill(THCState* state,
                              THCudaTensor *tensor, THCudaTensor *mask, float value)
 {
+  THAssert(THCudaTensor_checkGPU(state, 2, tensor, mask));
   THArgCheck(THCudaTensor_nElement(state, tensor) ==
              THCudaTensor_nElement(state, mask),
              2, "sizes do not match");
@@ -47,6 +48,7 @@ void THCudaTensor_maskedCopy(THCState* state,
                              THCudaTensor *tensor, THCudaTensor *mask, THCudaTensor *src)
 {
   THError("maskedCopy is not yet implemented for CUDA");
+  THAssert(THCudaTensor_checkGPU(state, 3, tensor, mask, src));
 }
 
 struct TensorMaskedSelectOp {
@@ -64,6 +66,7 @@ struct TensorMaskedSelectOp {
 void THCudaTensor_maskedSelect(THCState* state,
                                THCudaTensor *tensor, THCudaTensor *src, THCudaTensor *mask)
 {
+  THAssert(THCudaTensor_checkGPU(state, 3, tensor, src, mask));
   THArgCheck(THCudaTensor_nElement(state, mask) == THCudaTensor_nElement(state, src),
              2, "sizes do not match");
 
@@ -101,6 +104,7 @@ void THCudaTensor_maskedSelect(THCState* state,
 
 void THCudaTensor_maskedFillByte(THCState* state, THCudaTensor *tensor, THByteTensor *mask, float value)
 {
+  THAssert(THCudaTensor_checkGPU(state, 1, tensor));
   THLongStorage* maskSize = THByteTensor_newSizeOf(mask);
   THCudaTensor* maskCuda = THCudaTensor_newWithSize(state, maskSize, NULL);
   THLongStorage_free(maskSize);
@@ -112,10 +116,12 @@ void THCudaTensor_maskedFillByte(THCState* state, THCudaTensor *tensor, THByteTe
 void THCudaTensor_maskedCopyByte(THCState* state, THCudaTensor *tensor, THByteTensor *mask, THCudaTensor *src)
 {
   THError("maskedCopyByte is not yet implemented for CUDA");
+  THAssert(THCudaTensor_checkGPU(state, 1, tensor));
 }
 
 void THCudaTensor_maskedSelectByte(THCState* state, THCudaTensor *tensor, THCudaTensor *src, THByteTensor *mask)
 {
+  THAssert(THCudaTensor_checkGPU(state, 2, tensor, src));
   THLongStorage* maskSize = THByteTensor_newSizeOf(mask);
   THCudaTensor* maskCuda = THCudaTensor_newWithSize(state, maskSize, NULL);
   THLongStorage_free(maskSize);

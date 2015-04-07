@@ -98,10 +98,15 @@ __host__ void THCRandom_setGenerator(THCState* state, int device)
 }
 
 /* Reset the generator for the current device after a device reset */
-__host__ void THCRandom_resetGenerator(THCState* state)
+__host__ void THCRandom_resetGenerator(THCState* state, int device)
 {
   THCRNGState* rng_state = state->rngState;
-  initializeGenerator(rng_state->current_gen);
+  if (rng_state->current_gen != &rng_state->gen[device]) {
+    THError("Unexpected generator state");
+  }
+
+  initializeGenerator(&rng_state->gen[device]);
+  rng_state->current_gen = &rng_state->gen[device];
   THCRandom_manualSeed(state, rng_state->current_gen->initial_seed);
 }
 
@@ -233,6 +238,7 @@ __global__ void generate_log_normal(curandStateMtgp32 *state, int size, float *r
 #define NUM_BLOCKS min((int)DIVUP(size, BLOCK_SIZE), MAX_NUM_BLOCKS)
 THC_API void THCudaTensor_uniform(THCState* state, THCudaTensor *self_, double a, double b)
 {
+  THAssert(THCudaTensor_checkGPU(state, 1, self_));
   if (state->rngState->current_gen == NULL)
   {
     THError("Random number generators have not been initialized.");
@@ -241,7 +247,7 @@ THC_API void THCudaTensor_uniform(THCState* state, THCudaTensor *self_, double a
   long size = THCudaTensor_nElement(state, self);
   float *data = THCudaTensor_data(state, self);
 
-  generate_uniform<<<NUM_BLOCKS, BLOCK_SIZE>>>(
+  generate_uniform<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
       state->rngState->current_gen->gen_states, size, data, a, b);
 
   THCudaTensor_freeCopyTo(state, self, self_);
@@ -249,6 +255,7 @@ THC_API void THCudaTensor_uniform(THCState* state, THCudaTensor *self_, double a
 
 THC_API void THCudaTensor_bernoulli(THCState* state, THCudaTensor *self_, double p)
 {
+  THAssert(THCudaTensor_checkGPU(state, 1, self_));
   if (state->rngState->current_gen == NULL)
   {
     THError("Random number generators have not been initialized.");
@@ -257,7 +264,7 @@ THC_API void THCudaTensor_bernoulli(THCState* state, THCudaTensor *self_, double
   long size = THCudaTensor_nElement(state, self);
   float *data = THCudaTensor_data(state, self);
 
-  generate_bernoulli<<<NUM_BLOCKS, BLOCK_SIZE>>>(
+  generate_bernoulli<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
       state->rngState->current_gen->gen_states, size, data, p);
 
   THCudaTensor_freeCopyTo(state, self, self_);
@@ -265,6 +272,7 @@ THC_API void THCudaTensor_bernoulli(THCState* state, THCudaTensor *self_, double
 
 THC_API void THCudaTensor_normal(THCState* state, THCudaTensor *self_, double mean, double stdv)
 {
+  THAssert(THCudaTensor_checkGPU(state, 1, self_));
   if (state->rngState->current_gen == NULL)
   {
     THError("Random number generators have not been initialized.");
@@ -273,7 +281,7 @@ THC_API void THCudaTensor_normal(THCState* state, THCudaTensor *self_, double me
   long size = THCudaTensor_nElement(state, self);
   float *data = THCudaTensor_data(state, self);
 
-  generate_normal<<<NUM_BLOCKS, BLOCK_SIZE>>>(
+  generate_normal<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
       state->rngState->current_gen->gen_states, size, data, mean, stdv);
 
   THCudaTensor_freeCopyTo(state, self, self_);
@@ -281,6 +289,7 @@ THC_API void THCudaTensor_normal(THCState* state, THCudaTensor *self_, double me
 
 THC_API void THCudaTensor_logNormal(THCState* state, THCudaTensor *self_, double mean, double stdv)
 {
+  THAssert(THCudaTensor_checkGPU(state, 1, self_));
   if (state->rngState->current_gen == NULL)
   {
     THError("Random number generators have not been initialized.");
@@ -289,7 +298,7 @@ THC_API void THCudaTensor_logNormal(THCState* state, THCudaTensor *self_, double
   long size = THCudaTensor_nElement(state, self);
   float *data = THCudaTensor_data(state, self);
 
-  generate_log_normal<<<NUM_BLOCKS, BLOCK_SIZE>>>(
+  generate_log_normal<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
       state->rngState->current_gen->gen_states, size, data, mean, stdv);
 
   THCudaTensor_freeCopyTo(state, self, self_);
@@ -297,6 +306,7 @@ THC_API void THCudaTensor_logNormal(THCState* state, THCudaTensor *self_, double
 
 THC_API void THCudaTensor_geometric(THCState* state, THCudaTensor *self_, double p)
 {
+  THAssert(THCudaTensor_checkGPU(state, 1, self_));
   if (state->rngState->current_gen == NULL)
   {
     THError("Random number generators have not been initialized.");
@@ -305,7 +315,7 @@ THC_API void THCudaTensor_geometric(THCState* state, THCudaTensor *self_, double
   long size = THCudaTensor_nElement(state, self);
   float *data = THCudaTensor_data(state, self);
 
-  generate_geometric<<<NUM_BLOCKS, BLOCK_SIZE>>>(
+  generate_geometric<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
       state->rngState->current_gen->gen_states, size, data, p);
 
   THCudaTensor_freeCopyTo(state, self, self_);
@@ -313,6 +323,7 @@ THC_API void THCudaTensor_geometric(THCState* state, THCudaTensor *self_, double
 
 THC_API void THCudaTensor_exponential(THCState* state, THCudaTensor *self_, double lambda)
 {
+  THAssert(THCudaTensor_checkGPU(state, 1, self_));
   if (state->rngState->current_gen == NULL)
   {
     THError("Random number generators have not been initialized.");
@@ -321,7 +332,7 @@ THC_API void THCudaTensor_exponential(THCState* state, THCudaTensor *self_, doub
   long size = THCudaTensor_nElement(state, self);
   float *data = THCudaTensor_data(state, self);
 
-  generate_exponential<<<NUM_BLOCKS, BLOCK_SIZE>>>(
+  generate_exponential<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
       state->rngState->current_gen->gen_states, size, data, lambda);
 
   THCudaTensor_freeCopyTo(state, self, self_);
@@ -329,6 +340,7 @@ THC_API void THCudaTensor_exponential(THCState* state, THCudaTensor *self_, doub
 
 THC_API void THCudaTensor_cauchy(THCState* state, THCudaTensor *self_, double median, double sigma)
 {
+  THAssert(THCudaTensor_checkGPU(state, 1, self_));
   if (state->rngState->current_gen == NULL)
   {
     THError("Random number generators have not been initialized.");
@@ -337,7 +349,7 @@ THC_API void THCudaTensor_cauchy(THCState* state, THCudaTensor *self_, double me
   long size = THCudaTensor_nElement(state, self);
   float *data = THCudaTensor_data(state, self);
 
-  generate_cauchy<<<NUM_BLOCKS, BLOCK_SIZE>>>(
+  generate_cauchy<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
       state->rngState->current_gen->gen_states, size, data, median, sigma);
 
   THCudaTensor_freeCopyTo(state, self, self_);

@@ -296,6 +296,7 @@ __global__ void conv2genericrev(float *input, float *kernel, float *output,
 THC_API void THCudaTensor_conv2Dmv(THCState *state, THCudaTensor *output, float beta, THCudaTensor *input,
                                    THCudaTensor *kernel, long srow, long scol, const char *type)
 {
+  THAssert(THCudaTensor_checkGPU(state, 3, output, input, kernel));
   long nInputPlane, nInputRows, nInputCols;
   long nKernelRows, nKernelCols;
   long nOutputPlane, nOutputRows, nOutputCols;
@@ -375,7 +376,7 @@ THC_API void THCudaTensor_conv2Dmv(THCState *state, THCudaTensor *output, float 
   // convolution: xcorr2 or conv2
   if (type[1] == 'x') {
 #define X_CONV_KERNEL(dim)                                              \
-    conv2generic <false, (dim), (dim)> <<<blocks, threads>>> (          \
+    conv2generic <false, (dim), (dim)> <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> ( \
         input_data, weight_data, output_data,                           \
         nInputPlane, nInputRows, nInputCols,                            \
         nOutputPlane*nInputPlane, nKernelRows, nKernelCols,             \
@@ -385,7 +386,7 @@ THC_API void THCudaTensor_conv2Dmv(THCState *state, THCudaTensor *output, float 
 #undef X_CONV_KERNEL
   } else { // 'c'
 #define C_CONV_KERNEL(dim)                                              \
-    conv2generic <true, (dim), (dim)> <<<blocks, threads>>> (           \
+    conv2generic <true, (dim), (dim)> <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (           \
         input_data, weight_data, output_data,                           \
         nInputPlane, nInputRows, nInputCols,                            \
         nOutputPlane*nInputPlane, nKernelRows, nKernelCols,             \
@@ -415,6 +416,7 @@ THC_API void THCudaTensor_conv2Dmv(THCState *state, THCudaTensor *output, float 
 THC_API void THCudaTensor_conv2Dmm(THCState *state, THCudaTensor *output, float beta, THCudaTensor *input,
                                    THCudaTensor *kernel, long srow, long scol, const char *type)
 {
+  THAssert(THCudaTensor_checkGPU(state, 3, output, input, kernel));
   long nbatch, nInputPlane, nInputRows, nInputCols;
   long nKernelRows, nKernelCols;
   long nOutputPlane, nOutputRows, nOutputCols;
@@ -495,21 +497,21 @@ THC_API void THCudaTensor_conv2Dmm(THCState *state, THCudaTensor *output, float 
   // convolution: xcorr2 or conv2
   if (type[1] == 'x') {
 #define X_CONV_KERNEL(dim)                                              \
-    conv2generic <false, (dim), (dim)> <<<blocks, threads>>> (          \
-        input_data, weight_data, output_data,                           \
-        nInputPlane, nInputRows, nInputCols,                            \
-        nOutputPlane*nInputPlane, nKernelRows, nKernelCols,             \
-        srow, scol);
+    conv2generic <false, (dim), (dim)> <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> ( \
+      input_data, weight_data, output_data,                             \
+      nInputPlane, nInputRows, nInputCols,                              \
+      nOutputPlane*nInputPlane, nKernelRows, nKernelCols,               \
+      srow, scol);
 
     FOR_KERNEL_SPECIALIZED_DIMENSION(nKernelCols, nKernelRows, X_CONV_KERNEL);
 #undef X_CONV_KERNEL
   } else { // 'c'
 #define C_CONV_KERNEL(dim)                                              \
-    conv2generic <true, (dim), (dim)> <<<blocks, threads>>> (           \
-        input_data, weight_data, output_data,                           \
-        nInputPlane, nInputRows, nInputCols,                            \
-        nOutputPlane*nInputPlane, nKernelRows, nKernelCols,             \
-        srow, scol);                                                    \
+    conv2generic <true, (dim), (dim)> <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> ( \
+      input_data, weight_data, output_data,                             \
+      nInputPlane, nInputRows, nInputCols,                              \
+      nOutputPlane*nInputPlane, nKernelRows, nKernelCols,               \
+      srow, scol);                                                      \
 
     FOR_KERNEL_SPECIALIZED_DIMENSION(nKernelCols, nKernelRows, C_CONV_KERNEL);
 #undef C_CONV_KERNEL
@@ -547,6 +549,7 @@ THC_API void THCudaTensor_conv2DRevger(THCState *state, THCudaTensor *output, fl
                                        THCudaTensor *input, THCudaTensor *kernel,
                                        long srow, long scol)
 {
+  THAssert(THCudaTensor_checkGPU(state, 3, output, input, kernel));
   long nInputPlane, nInputRows, nInputCols;
   long nKernelPlane, nKernelRows, nKernelCols;
   long nOutputRows, nOutputCols;
@@ -591,10 +594,11 @@ THC_API void THCudaTensor_conv2DRevger(THCState *state, THCudaTensor *output, fl
   dim3 threads(128/nOutputRows, nOutputRows);
 
   // compute rev conv
-  conv2genericrev <<<blocks, threads>>> (input_data, kernel_data, output_data,
-                                         nInputPlane, nInputRows, nInputCols,
-                                         nKernelPlane, nKernelRows, nKernelCols,
-                                         alpha, srow, scol);
+  conv2genericrev <<<blocks, threads, 0, THCState_getCurrentStream(state)>>>(
+    input_data, kernel_data, output_data,
+    nInputPlane, nInputRows, nInputCols,
+    nKernelPlane, nKernelRows, nKernelCols,
+    alpha, srow, scol);
 
   // clean
   THCudaTensor_free(state, input);
@@ -669,12 +673,13 @@ THC_API void THCudaTensor_conv2DRevgerm(THCState *state, THCudaTensor *output, f
     dim3 threads(cst, nOutputRows, subbatch);
 
     // compute rev conv
-    conv2genericrev <<<blocks, threads>>> (input_data + input->stride[0]*sl,
-                                           kernel_data + kernel->stride[0]*sl,
-                                           output_data,
-                                           nInputPlane, nInputRows, nInputCols,
-                                           nKernelPlane, nKernelRows, nKernelCols,
-                                           alpha, srow, scol);
+    conv2genericrev <<<blocks, threads, 0, THCState_getCurrentStream(state)>>>(
+      input_data + input->stride[0]*sl,
+      kernel_data + kernel->stride[0]*sl,
+      output_data,
+      nInputPlane, nInputRows, nInputCols,
+      nKernelPlane, nKernelRows, nKernelCols,
+      alpha, srow, scol);
   }
 
   // clean
@@ -878,6 +883,7 @@ THC_API void THCudaTensor_conv2Dmap(THCState *state, THCudaTensor *output, THCud
                                     THCudaTensor *kernel, long stride_x, long stride_y,
                                     THCudaTensor *table, long fanin)
 {
+  THAssert(THCudaTensor_checkGPU(state, 4, output, input, kernel, table));
   long nInputPlane, nInputRows, nInputCols;
   long nKernelRows, nKernelCols;
   long nOutputPlane, nOutputRows, nOutputCols;
@@ -924,7 +930,7 @@ THC_API void THCudaTensor_conv2Dmap(THCState *state, THCudaTensor *output, THCud
   dim3 threads(nthreads_x,nthreads_y);
 
 #define GENERIC_MAP_KERNEL(dim)                                         \
-  conv2mapgeneric <false, (dim), (dim)> <<<blocks, threads>>> (         \
+  conv2mapgeneric <false, (dim), (dim)> <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> ( \
       input_data, kernel_data, output_data, nInputPlane, nInputRows,    \
       nInputCols, nOutputPlane*fanin, nKernelRows, nKernelCols,         \
       stride_x, stride_y, table_data, fanin);

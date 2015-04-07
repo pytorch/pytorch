@@ -32,7 +32,8 @@ THCudaTensor_copy(THCState* state, THCudaTensor* dst, THCudaTensor* src) {
     THCudaCheck(cudaMemcpyAsync(THCudaTensor_data(state, dst),
                                 THCudaTensor_data(state, src),
                                 totalElements * sizeof(float),
-                                cudaMemcpyDeviceToDevice));
+                                cudaMemcpyDeviceToDevice,
+                                THCState_getCurrentStream(state)));
   } else {
     int oldDev = curGPU();
     int srcDev = THCudaTensor_getDevice(state, src);
@@ -56,9 +57,13 @@ THCudaTensor_copy(THCState* state, THCudaTensor* dst, THCudaTensor* src) {
       cudaEvent_t dataReady;
       THCudaCheck(cudaSetDevice(remoteDev));
       THCudaCheck(cudaEventCreate(&dataReady));
-      THCudaCheck(cudaEventRecord(dataReady));
+      THCudaCheck(cudaEventRecord(
+                    dataReady,
+                    THCState_getDeviceStream(state, remoteDev, THCState_getCurrentStreamIndex(state))));
       THCudaCheck(cudaSetDevice(copyDev));
-      THCudaCheck(cudaStreamWaitEvent(NULL, dataReady, 0));
+      THCudaCheck(cudaStreamWaitEvent(
+                    THCState_getDeviceStream(state, copyDev, THCState_getCurrentStreamIndex(state)),
+                    dataReady, 0));
       THCudaCheck(cudaEventDestroy(dataReady));
 
       bool succ =
@@ -68,9 +73,13 @@ THCudaTensor_copy(THCState* state, THCudaTensor* dst, THCudaTensor* src) {
       // synchronize remote device after copy
       cudaEvent_t doneCopying;
       THCudaCheck(cudaEventCreate(&doneCopying));
-      THCudaCheck(cudaEventRecord(doneCopying));
+      THCudaCheck(cudaEventRecord(
+                    doneCopying,
+                    THCState_getDeviceStream(state, copyDev, THCState_getCurrentStreamIndex(state))));
       THCudaCheck(cudaSetDevice(remoteDev));
-      THCudaCheck(cudaStreamWaitEvent(NULL, doneCopying, 0));
+      THCudaCheck(cudaStreamWaitEvent(
+                    THCState_getDeviceStream(state, remoteDev, THCState_getCurrentStreamIndex(state)),
+                    doneCopying, 0));
       THCudaCheck(cudaEventDestroy(doneCopying));
     }
 
@@ -84,4 +93,3 @@ THCudaTensor_copy(THCState* state, THCudaTensor* dst, THCudaTensor* src) {
     THError(cudaGetErrorString(errcode));
   }
 }
-

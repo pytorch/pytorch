@@ -17,22 +17,79 @@ void THCudaInit(THCState* state)
   state->blasState = (THCBlasState*)malloc(sizeof(THCBlasState));
   THCudaBlas_init(state, count, device);
 
+  state->numDevices = count;
   state->deviceProperties =
     (struct cudaDeviceProp*)malloc(count * sizeof(struct cudaDeviceProp));
 
-  int i,j;
-  for(i=0; i < count; ++i)
+  state->numUserStreams = 0;
+  state->streamsPerDevice =
+    (cudaStream_t**)malloc(count * sizeof(cudaStream_t*));
+
+  /* Enable P2P access between all pairs, if possible */
+  THCudaEnablePeerToPeerAccess(state);
+
+  for (int i = 0; i < count; ++i)
   {
     THCudaCheck(cudaSetDevice(i));
     THCudaCheck(cudaGetDeviceProperties(&state->deviceProperties[i], i));
+    /* Stream index 0 will be the default stream for convenience; by
+       default no user streams are reserved */
+    state->streamsPerDevice[i] =
+      (cudaStream_t*)malloc(sizeof(cudaStream_t));
+    state->streamsPerDevice[i][0] = NULL;
+  }
 
-    for (j=0; j < count; ++j)
-    {
-      if(i != j)
-      {
+  /* Restore to previous device */
+  THCudaCheck(cudaSetDevice(device));
+
+  /* Start in the default stream on the current device */
+  state->currentPerDeviceStream = 0;
+  state->currentStream = NULL;
+}
+
+void THCudaShutdown(THCState* state)
+{
+  THCRandom_shutdown(state);
+  THCudaBlas_shutdown(state);
+  free(state->blasState);
+  free(state->rngState);
+  free(state->deviceProperties);
+
+  int prevDev = -1;
+  THCudaCheck(cudaGetDevice(&prevDev));
+
+  for (int dev = 0; dev < state->numDevices; ++dev) {
+    THCudaCheck(cudaSetDevice(dev));
+
+    /* Free Torch-defined streams (0 is the default stream) */
+    for (int stream = 1; stream <= state->numUserStreams; ++stream) {
+      THCudaCheck(cudaStreamDestroy(state->streamsPerDevice[dev][stream]));
+    }
+
+    free(state->streamsPerDevice[dev]);
+  }
+
+  free(state->streamsPerDevice);
+  THCudaCheck(cudaSetDevice(prevDev));
+}
+
+void THCudaEnablePeerToPeerAccess(THCState* state)
+{
+  int prevDev = -1;
+  THCudaCheck(cudaGetDevice(&prevDev));
+
+  int numDevices = -1;
+  THCudaCheck(cudaGetDeviceCount(&numDevices));
+
+  for (int i = 0; i < numDevices; ++i) {
+    THCudaCheck(cudaSetDevice(i));
+
+    for (int j = 0; j < numDevices; ++j) {
+      if (i != j) {
         int can = 0;
         THCudaCheck(cudaDeviceCanAccessPeer(&can, i, j));
-        if(can) {
+
+        if (can) {
           cudaError_t err = cudaDeviceEnablePeerAccess(j, 0);
           if (err == cudaErrorPeerAccessAlreadyEnabled) {
             // Any future call to cudaGetLastError will now return an error,
@@ -42,21 +99,153 @@ void THCudaInit(THCState* state)
 
             continue;
           }
+
           THCudaCheck(err);
         }
       }
     }
   }
-  THCudaCheck(cudaSetDevice(device));
+
+  /* Restore previous device before continuing */
+  THCudaCheck(cudaSetDevice(prevDev));
 }
 
-void THCudaShutdown(THCState* state)
+int THCState_getNumDevices(THCState *state)
 {
-  THCRandom_shutdown(state);
-  free(state->blasState);
-  free(state->rngState);
-  free(state->deviceProperties);
-  THCudaBlas_shutdown(state);
+  return state->numDevices;
+}
+
+void THCState_reserveStreams(THCState* state, int numStreams)
+{
+  if (numStreams <= state->numUserStreams)
+  {
+    return;
+  }
+
+  int prevDev = -1;
+  THCudaCheck(cudaGetDevice(&prevDev));
+
+  /* Otherwise, we have to allocate a new set of streams */
+  cudaStream_t** newStreams =
+    (cudaStream_t**) malloc(state->numDevices * sizeof(cudaStream_t*));
+  for (int dev = 0; dev < state->numDevices; ++dev) {
+    THCudaCheck(cudaSetDevice(dev));
+
+    /* +1 for the default stream as well */
+    newStreams[dev] =
+      (cudaStream_t*) malloc((numStreams + 1) * sizeof(cudaStream_t));
+
+    /* Copy over old streams
+       (0 is default stream, 1 ... numUserStreams are rest) */
+    for (int stream = 0; stream <= state->numUserStreams; ++stream) {
+      newStreams[dev][stream] = state->streamsPerDevice[dev][stream];
+    }
+
+    /* Allocate new streams */
+    for (int stream = state->numUserStreams + 1; stream <= numStreams; ++stream) {
+      newStreams[dev][stream] = NULL;
+      THCudaCheck(cudaStreamCreate(&newStreams[dev][stream]));
+    }
+  }
+
+  cudaStream_t** oldStreams = state->streamsPerDevice;
+  state->streamsPerDevice = newStreams;
+  state->numUserStreams = numStreams;
+
+  for (int dev = 0; dev < state->numDevices; ++dev) {
+    free(oldStreams[dev]);
+  }
+  free(oldStreams);
+
+  THCudaCheck(cudaSetDevice(prevDev));
+}
+
+int THCState_getNumStreams(THCState* state)
+{
+  return state->numUserStreams;
+}
+
+void THCState_resetStreams(THCState* state, int device)
+{
+  if (state->currentStream !=
+      state->streamsPerDevice[device][state->currentPerDeviceStream]) {
+    THError("Unexpected stream state");
+  }
+
+  /* Reallocate all streams for the current device; the 0 stream
+     doesn't need updating */
+  for (int dev = 0; dev < state->numDevices; ++dev) {
+    for (int stream = 1; stream <= state->numUserStreams; ++stream) {
+      THCudaCheck(cudaStreamCreate(&state->streamsPerDevice[dev][stream]));
+    }
+  }
+
+  state->currentStream =
+    state->streamsPerDevice[device][state->currentPerDeviceStream];
+}
+
+cudaStream_t THCState_getDeviceStream(THCState *state, int device, int stream)
+{
+  /* `device` is a CUDA index */
+  if (device >= state->numDevices || device < 0)
+  {
+    THError("%d is not a device", device + 1 /* back to Torch index */);
+  }
+
+  /* Stream 0 is the default stream, 1 ... `numUserStreams` are Torch streams */
+  if (stream > state->numUserStreams || stream < 0)
+  {
+    THError("%d is not a stream", stream);
+  }
+
+  return state->streamsPerDevice[device][stream];
+}
+
+cudaStream_t THCState_getCurrentStream(THCState *state)
+{
+  /* This is called at the point of kernel execution.
+     For some debugging code or improperly instrumented kernels,
+     `state` is null */
+  if (state) {
+    return state->currentStream;
+  } else {
+    /* assume default stream */
+    return NULL;
+  }
+}
+
+int THCState_getCurrentStreamIndex(THCState *state)
+{
+  return state->currentPerDeviceStream;
+}
+
+void THCState_setStream(THCState *state, int device, int stream)
+{
+  /* `device` is a CUDA index */
+  if (device >= state->numDevices || device < 0)
+  {
+    THError("%d is not a device", device + 1 /* back to Torch index */);
+  }
+
+  /* Stream 0 is the default stream, 1 ... `numUserStreams` are Torch streams */
+  if (stream > state->numUserStreams || stream < 0)
+  {
+    THError("%d is not a stream", stream);
+  }
+
+  state->currentStream = state->streamsPerDevice[device][stream];
+  state->currentPerDeviceStream = stream;
+  THCudaBlas_setStream(state, device, state->currentStream);
+}
+
+void THCState_setStreamForCurrentDevice(THCState *state, int stream)
+{
+  if (state->currentPerDeviceStream != stream)
+  {
+    int device = -1;
+    THCudaCheck(cudaGetDevice(&device));
+    THCState_setStream(state, device, stream);
+  }
 }
 
 void __THCudaCheck(cudaError_t err, const char *file, const int line)
