@@ -95,14 +95,75 @@ ENDIF(C_SSE4_2_FOUND)
 
 SET(hdr
   THGeneral.h THAllocator.h THStorage.h THTensor.h THTensorApply.h THBlas.h
-  THLapack.h THLogAdd.h THRandom.h THVector.h)
+  THLapack.h THLogAdd.h THRandom.h THVector.h THAtomic.h)
 
 SET(src
   THGeneral.c THAllocator.c THStorage.c THTensor.c THBlas.c THLapack.c
-  THLogAdd.c THRandom.c THFile.c THDiskFile.c THMemoryFile.c)
+  THLogAdd.c THRandom.c THFile.c THDiskFile.c THMemoryFile.c THAtomic.c)
 
 SET(src ${src} ${hdr})
 ADD_LIBRARY(TH SHARED ${src})
+
+CHECK_C_SOURCE_RUNS("
+#include <stdatomic.h>
+int main()
+{
+  int a;
+  int oa;
+  atomic_store(&a, 1);
+  atomic_fetch_add(&a, 1);
+  oa = atomic_load(&a);
+  if(!atomic_compare_exchange_strong(&a, &oa, 3))
+    return -1;
+  return 0;
+}
+" HAS_C11_ATOMICS)
+
+IF(NOT HAS_C11_ATOMICS)
+  CHECK_C_SOURCE_RUNS("
+#include <intrin.h>
+int main()
+{
+  long a;
+  _InterlockedExchange(&a, 1);
+  _InterlockedExchangeAdd(&a, 1);
+  if(_InterlockedCompareExchange(&a, 3, 2) != 2)
+    return -1;
+  return 0;
+}
+" HAS_MSC_ATOMICS)
+
+  CHECK_C_SOURCE_RUNS("
+int main()
+{
+  int a;
+  __sync_lock_test_and_set(&a, 1);
+  __sync_fetch_and_add(&a, 1);
+  if(!__sync_bool_compare_and_swap(&a, 2, 3))
+    return -1;
+  return 0;
+}
+" HAS_GCC_ATOMICS)
+ENDIF()
+
+IF(HAS_C11_ATOMICS)
+  ADD_DEFINITIONS(-DUSE_C11_ATOMICS=1)
+  MESSAGE(STATUS "Atomics: using C11 intrinsics")
+ELSEIF(HAS_MSC_ATOMICS)
+  ADD_DEFINITIONS(-DUSE_MSC_ATOMICS=1)
+  MESSAGE(STATUS "Atomics: using MSVC intrinsics")
+ELSEIF(HAS_GCC_ATOMICS)
+  ADD_DEFINITIONS(-DUSE_GCC_ATOMICS=1)
+    MESSAGE(STATUS "Atomics: using GCC intrinsics")
+ELSE()
+  SET(CMAKE_THREAD_PREFER_PTHREAD TRUE)
+  FIND_PACKAGE(Threads)
+  IF(THREADS_FOUND)
+    ADD_DEFINITIONS(-DUSE_PTHREAD_ATOMICS=1)
+    TARGET_LINK_LIBRARIES(TH ${CMAKE_THREAD_LIBS_INIT})
+    MESSAGE(STATUS "Atomics: using pthread")
+  ENDIF()
+ENDIF()
 
 FIND_PACKAGE(BLAS)
 IF(BLAS_FOUND)
@@ -195,6 +256,7 @@ INSTALL(FILES
   THTensorDimApply.h
   THTensorMacros.h
   THVector.h
+  THAtomic.h
   DESTINATION "${TH_INSTALL_INCLUDE_SUBDIR}/TH")
 
 INSTALL(FILES
@@ -231,7 +293,7 @@ MACRO(Install_Required_Library ln)
     get_filename_component(libpath ${ln} PATH)
     get_filename_component(libname ${ln} NAME_WE)
     file(GLOB libdlls "${libpath}/${libname}*.dll")
-    install(PROGRAMS ${libdlls} 
+    install(PROGRAMS ${libdlls}
       DESTINATION "${TH_INSTALL_BIN_SUBDIR}")
 ENDMACRO(Install_Required_Library libname)
 
@@ -257,5 +319,5 @@ GET_FILENAME_COMPONENT(TH_OUTPUT_NAME ${TH_OUTPUT_NAME} NAME)
 SET(TH_LIBRARIES "${CMAKE_INSTALL_PREFIX}/${TH_INSTALL_LIB_SUBDIR}/${TH_OUTPUT_NAME}")
 SET(TH_INCLUDE_DIR "${CMAKE_INSTALL_PREFIX}/${TH_INSTALL_INCLUDE_SUBDIR}/TH")
 CONFIGURE_FILE(THConfig.cmake.in "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/THConfig.cmake")
-INSTALL(FILES "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/THConfig.cmake" 
+INSTALL(FILES "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/THConfig.cmake"
   DESTINATION "${TH_INSTALL_CMAKE_SUBDIR}")
