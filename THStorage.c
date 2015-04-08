@@ -1,3 +1,4 @@
+#include "THAtomic.h"
 #include "THStorage.h"
 
 #include "generic/THStorage.c"

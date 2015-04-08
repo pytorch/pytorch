@@ -561,7 +561,7 @@ long THTensor_(nElement)(const THTensor *self)
 void THTensor_(retain)(THTensor *self)
 {
   if(self->flag & TH_TENSOR_REFCOUNTED)
-    ++self->refcount;
+    THAtomicIncrementRef(&self->refcount);
 }
 
 void THTensor_(free)(THTensor *self)
@@ -571,7 +571,7 @@ void THTensor_(free)(THTensor *self)
 
   if(self->flag & TH_TENSOR_REFCOUNTED)
   {
-    if(--self->refcount == 0)
+    if(THAtomicDecrementRef(&self->refcount))
     {
       THFree(self->size);
       THFree(self->stride);
