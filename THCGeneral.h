@@ -2,6 +2,7 @@
 #define THC_GENERAL_INC
 
 #include "THGeneral.h"
+#include "THAllocator.h"
 #undef log1p
 
 #include "cuda.h"
@@ -55,6 +56,9 @@ typedef struct THCState
   /* Index of the current selected per-device stream. Actual CUDA stream changes
      based on the current device, since streams are per-device */
   int currentPerDeviceStream;
+
+  /* Allocator using cudaMallocHost. */
+  THAllocator* cudaHostAllocator;
 } THCState;
 
 THC_API void THCudaBlas_init(THCState *state, int num_devices, int current_device);
