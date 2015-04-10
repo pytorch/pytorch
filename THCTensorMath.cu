@@ -282,3 +282,41 @@ void THCudaTensor_prod(THCState* state, THCudaTensor *self, THCudaTensor *src, l
 
   THCudaCheck(cudaGetLastError());
 }
+
+struct logicalall_functor
+{
+  __host__ __device__ float operator()(const float& x, const float& y) const
+  {
+    return x && y;
+  }
+};
+
+struct logicalany_functor
+{
+  __host__ __device__ float operator()(const float& x, const float& y) const
+  {
+    return x || y;
+  }
+};
+
+int THCudaTensor_logicalall(THCState *state, THCudaTensor *self) {
+  THAssert(THCudaTensor_checkGPU(state, 1, self));
+  self = THCudaTensor_newContiguous(state, self);
+  thrust::device_ptr<float> self_data(THCudaTensor_data(state, self));
+
+  int result = thrust::reduce(self_data, self_data+THCudaTensor_nElement(state, self), (float)(1), logicalall_functor());
+
+  THCudaTensor_free(state, self);
+  return result;
+}
+
+int THCudaTensor_logicalany(THCState *state, THCudaTensor *self) {
+  THAssert(THCudaTensor_checkGPU(state, 1, self));
+  self = THCudaTensor_newContiguous(state, self);
+  thrust::device_ptr<float> self_data(THCudaTensor_data(state, self));
+
+  int result = thrust::reduce(self_data, self_data+THCudaTensor_nElement(state, self), (float)(0), logicalany_functor());
+
+  THCudaTensor_free(state, self);
+  return result;
+}
