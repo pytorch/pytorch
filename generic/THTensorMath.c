@@ -178,6 +178,67 @@ void THTensor_(indexFill)(THTensor *tensor, int dim, THLongTensor *index, real v
   THLongTensor_free(index);
 }
 
+void THTensor_(gather)(THTensor *tensor, THTensor *src, int dim, THLongTensor *index)
+{
+  long elems_per_row, i, idx;
+
+  THArgCheck(THTensor_(nDimension)(src) == THTensor_(nDimension)(tensor), 2,
+             "Input tensor must have same dimensions as output tensor");
+  THArgCheck(dim < THTensor_(nDimension)(tensor), 3, "Index dimension is out of bounds");
+  THArgCheck(THLongTensor_nDimension(index) == THTensor_(nDimension)(src), 4,
+             "Index tensor must have same dimensions as input tensor");
+
+  elems_per_row = THLongTensor_size(index, dim);
+
+  TH_TENSOR_DIM_APPLY3(real, tensor, real, src, long, index, dim,
+                       for (i = 0; i < elems_per_row; ++i)
+                       {
+                         idx = *(index_data + i*index_stride);
+                         if (idx < 1 || idx > src_size) THError("Invalid index in gather");
+                         *(tensor_data + i*tensor_stride) = src_data[(idx - 1) * src_stride];
+                       })
+}
+
+void THTensor_(scatter)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src)
+{
+  long elems_per_row, i, idx;
+
+  THArgCheck(dim < THTensor_(nDimension)(tensor), 2, "Index dimension is out of bounds");
+  THArgCheck(THLongTensor_nDimension(index) == THTensor_(nDimension)(tensor), 3,
+             "Index tensor must have same dimensions as output tensor");
+  THArgCheck(THTensor_(nDimension)(src) == THTensor_(nDimension)(tensor), 4,
+             "Input tensor must have same dimensions as output tensor");
+
+  elems_per_row = THLongTensor_size(index, dim);
+
+  TH_TENSOR_DIM_APPLY3(real, tensor, real, src, long, index, dim,
+                       for (i = 0; i < elems_per_row; ++i)
+                       {
+                         idx = *(index_data + i*index_stride);
+                         if (idx < 1 || idx > tensor_size) THError("Invalid index in scatter");
+                         tensor_data[(idx - 1) * tensor_stride] = *(src_data + i*src_stride);
+                       })
+}
+
+void THTensor_(scatterFill)(THTensor *tensor, int dim, THLongTensor *index, real val)
+{
+  long elems_per_row, i, idx;
+
+  THArgCheck(dim < THTensor_(nDimension)(tensor), 2, "Index dimension is out of bounds");
+  THArgCheck(THLongTensor_nDimension(index) == THTensor_(nDimension)(tensor), 3,
+             "Index tensor must have same dimensions as output tensor");
+
+  elems_per_row = THLongTensor_size(index, dim);
+
+  TH_TENSOR_DIM_APPLY2(real, tensor, long, index, dim,
+                       for (i = 0; i < elems_per_row; ++i)
+                       {
+                         idx = *(index_data + i*index_stride);
+                         if (idx < 1 || idx > tensor_size) THError("Invalid index in scatter");
+                         tensor_data[(idx - 1) * tensor_stride] = val;
+                       })
+}
+
 accreal THTensor_(dot)(THTensor *tensor, THTensor *src)
 {
   accreal sum = 0;
