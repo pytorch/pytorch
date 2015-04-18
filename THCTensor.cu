@@ -26,9 +26,14 @@ cudaTextureObject_t THCudaTensor_getTextureObject(THCState *state, THCudaTensor 
   return texObj;
 }
 
-THC_API int THCudaTensor_getDevice(THCState* state, const THCudaTensor* thc) {
-  if (!thc->storage) return -1;
-  cudaPointerAttributes attr;
-  THCudaCheck(cudaPointerGetAttributes(&attr, thc->storage->data));
-  return attr.device;
+int THCudaTensor_getDevice(THCState* state, const THCudaTensor* self) {
+  THCudaStorage *storage = THCudaTensor_storage(state, self);
+  THAssert(storage != NULL);
+  return THCudaStorage_getDevice(state, storage);
+}
+
+void THCudaTensor_setDevice(THCState* state, THCudaTensor* self, int device) {
+  THCudaStorage *storage = THCudaTensor_storage(state, self);
+  THAssert(storage != NULL);
+  THCudaStorage_setDevice(state, storage, device);
 }

@@ -599,7 +599,7 @@ void THCudaTensor_freeCopyTo(THCState *state, THCudaTensor *self, THCudaTensor *
 static void THCudaTensor_rawInit(THCState *state, THCudaTensor *self)
 {
   self->refcount = 1;
-  self->storage = NULL;
+  self->storage = THCudaStorage_new(state);
   self->storageOffset = 0;
   self->size = NULL;
   self->stride = NULL;
@@ -609,6 +609,7 @@ static void THCudaTensor_rawInit(THCState *state, THCudaTensor *self)
 
 static void THCudaTensor_rawSet(THCState *state, THCudaTensor *self, THCudaStorage *storage, long storageOffset, int nDimension, long *size, long *stride)
 {
+  THAssert(self->storage != NULL);
   /* storage */
   if(self->storage != storage)
   {
@@ -621,7 +622,7 @@ static void THCudaTensor_rawSet(THCState *state, THCudaTensor *self, THCudaStora
       THCudaStorage_retain(state, self->storage);
     }
     else
-      self->storage = NULL;
+      self->storage = THCudaStorage_new(state);
   }
 
   /* storageOffset */
@@ -758,19 +759,36 @@ float THCudaTensor_get4d(THCState *state, const THCudaTensor *tensor, long x0, l
 
 int THCudaTensor_checkGPU(THCState *state, unsigned int nTensors, ...)
 {
-  int curDev = -1;
-  THCudaCheck(cudaGetDevice(&curDev));
+  int kernelDev;
+  if (THCState_getDeviceMode(state) == THCStateDeviceModeManual) {
+    THCudaCheck(cudaGetDevice(&kernelDev));
+  } else {
+    kernelDev = THC_DEVICE_NONE;
+  }
+
   va_list(args);
   va_start(args, nTensors);
-  int valid = 1;
   for (unsigned int i = 0; i < nTensors; i++) {
     THCudaTensor* tensor = va_arg(args, THCudaTensor*);
     int tensorDev = THCudaTensor_getDevice(state, tensor);
-    if (tensorDev != -1 && tensorDev != curDev) {
-      valid = 0;
-      break;
+    if (tensorDev != THC_DEVICE_NONE) {
+      if (kernelDev != tensorDev && kernelDev != THC_DEVICE_NONE) {
+        va_end(args);
+        return 0; // device mismatch
+      } else {
+        kernelDev = tensorDev;
+      }
     }
   }
   va_end(args);
-  return valid;
+
+  if (THCState_getDeviceMode(state) == THCStateDeviceModeAuto) {
+    if (kernelDev == THC_DEVICE_NONE) {
+      return 0; // cannot determine device
+    } else {
+      THCState_setDevice(state, kernelDev);
+    }
+  }
+
+  return 1;
 }

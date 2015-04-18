@@ -36,6 +36,11 @@
 struct THCRNGState;  /* Random number generator state. */
 struct THCBlasState;
 
+typedef enum THCStateDeviceMode {
+  THCStateDeviceModeManual,
+  THCStateDeviceModeAuto
+} THCStateDeviceMode;
+
 /* Global state to be held in the cutorch table. */
 typedef struct THCState
 {
@@ -55,6 +60,8 @@ typedef struct THCState
   /* Index of the current selected per-device stream. Actual CUDA stream changes
      based on the current device, since streams are per-device */
   int currentPerDeviceStream;
+  /* in DeviceModeAuto, cutorch can set the device based on the location of data tensors */
+  THCStateDeviceMode deviceMode;
 } THCState;
 
 THC_API void THCudaBlas_init(THCState *state, int num_devices, int current_device);
@@ -69,6 +76,9 @@ THC_API void THCudaEnablePeerToPeerAccess(THCState* state);
 
 /* State manipulators and accessors */
 THC_API int THCState_getNumDevices(THCState* state);
+THC_API void THCState_setDevice(THCState* state, int device);
+THC_API THCStateDeviceMode THCState_getDeviceMode(THCState* state);
+THC_API void THCState_setDeviceMode(THCState* state, THCStateDeviceMode mode);
 THC_API void THCState_reserveStreams(THCState* state, int numStreams);
 THC_API int THCState_getNumStreams(THCState* state);
 THC_API void THCState_resetStreams(THCState* state, int device);
