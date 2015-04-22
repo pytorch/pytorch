@@ -12,6 +12,11 @@ long THStorage_(size)(const THStorage *self)
   return self->size;
 }
 
+int THStorage_(elementSize)()
+{
+  return sizeof(real);
+}
+
 THStorage* THStorage_(new)(void)
 {
   return THStorage_(newWithSize)(0);
