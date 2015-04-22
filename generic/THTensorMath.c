@@ -29,6 +29,10 @@ void THTensor_(maskedCopy)(THTensor *tensor, THByteTensor *mask, THTensor* src )
   real *src_data = THTensor_(data)(srct);
   long cntr = 0;
   long nelem = THTensor_(nElement)(srct);
+  if (THTensor_(nElement)(tensor) != THByteTensor_nElement(mask))
+  {
+    THError("Number of elements of destination tensor != Number of elements in mask");
+  }
   TH_TENSOR_APPLY2(real, tensor, unsigned char, mask,
 		   if (*mask_data > 1)
 		   {
@@ -40,10 +44,8 @@ void THTensor_(maskedCopy)(THTensor *tensor, THByteTensor *mask, THTensor* src )
 		     src_data++;
 		     cntr++;
 		     if (cntr > nelem)
-		       THError("Number of elements of src != mask");
+		       THError("Number of elements of src < number of ones in mask");
 		   });
-  if (cntr != nelem)
-    THError("Number of elements of src != mask");
   THTensor_(free)(srct);
 }
 
