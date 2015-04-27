@@ -235,22 +235,7 @@ void THTensor_(resize)(THTensor *self, THLongStorage *size, THLongStorage *strid
 
 void THTensor_(resizeAs)(THTensor *self, THTensor *src)
 {
-  int isSame = 0;
-  int d;
-  if(self->nDimension == src->nDimension)
-  {
-    isSame = 1;
-    for(d = 0; d < self->nDimension; d++)
-    {
-      if(self->size[d] != src->size[d])
-      {
-        isSame = 0;
-        break;
-      }
-    }
-  }
-
-  if(!isSame)
+  if(!THTensor_(isSameSizeAs)(self, src))
     THTensor_(rawResize)(self, src->nDimension, src->size, NULL);
 }
 
