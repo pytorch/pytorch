@@ -1478,8 +1478,8 @@ void THTensor_(cat)(THTensor *r_, THTensor *ta, THTensor *tb, int dimension)
   size = THLongStorage_newWithSize(ndim);
   for(i = 0; i < ndim; i++)
   {
-    int tadi = (i < ta->nDimension ? ta->size[i] : 1);
-    int tbdi = (i < tb->nDimension ? tb->size[i] : 1);
+    long tadi = (i < ta->nDimension ? ta->size[i] : 1);
+    long tbdi = (i < tb->nDimension ? tb->size[i] : 1);
 
     if(i == dimension)
       size->data[i] = tadi+tbdi;
