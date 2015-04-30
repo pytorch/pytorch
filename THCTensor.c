@@ -770,6 +770,9 @@ int THCudaTensor_checkGPU(THCState *state, unsigned int nTensors, ...)
   va_start(args, nTensors);
   for (unsigned int i = 0; i < nTensors; i++) {
     THCudaTensor* tensor = va_arg(args, THCudaTensor*);
+    if(tensor == NULL) {
+      continue;
+    }
     int tensorDev = THCudaTensor_getDevice(state, tensor);
     if (tensorDev != THC_DEVICE_NONE) {
       if (kernelDev != tensorDev && kernelDev != THC_DEVICE_NONE) {
