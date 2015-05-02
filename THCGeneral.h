@@ -66,7 +66,6 @@ typedef struct THCState
 
 THC_API void THCudaBlas_init(THCState *state, int num_devices, int current_device);
 THC_API void THCudaBlas_shutdown(THCState *state);
-THC_API void THCudaBlas_reset(THCState *state, int device);
 THC_API void THCudaBlas_setHandle(THCState *state, int device);
 THC_API void THCudaBlas_setStream(THCState *state, int device, cudaStream_t stream);
 
@@ -81,7 +80,6 @@ THC_API THCStateDeviceMode THCState_getDeviceMode(THCState* state);
 THC_API void THCState_setDeviceMode(THCState* state, THCStateDeviceMode mode);
 THC_API void THCState_reserveStreams(THCState* state, int numStreams);
 THC_API int THCState_getNumStreams(THCState* state);
-THC_API void THCState_resetStreams(THCState* state, int device);
 
 THC_API cudaStream_t THCState_getDeviceStream(THCState *state, int device, int stream);
 THC_API cudaStream_t THCState_getCurrentStream(THCState *state);

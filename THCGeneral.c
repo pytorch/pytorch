@@ -191,25 +191,6 @@ int THCState_getNumStreams(THCState* state)
   return state->numUserStreams;
 }
 
-void THCState_resetStreams(THCState* state, int device)
-{
-  if (state->currentStream !=
-      state->streamsPerDevice[device][state->currentPerDeviceStream]) {
-    THError("Unexpected stream state");
-  }
-
-  /* Reallocate all streams for the current device; the 0 stream
-     doesn't need updating */
-  for (int dev = 0; dev < state->numDevices; ++dev) {
-    for (int stream = 1; stream <= state->numUserStreams; ++stream) {
-      THCudaCheck(cudaStreamCreate(&state->streamsPerDevice[dev][stream]));
-    }
-  }
-
-  state->currentStream =
-    state->streamsPerDevice[device][state->currentPerDeviceStream];
-}
-
 cudaStream_t THCState_getDeviceStream(THCState *state, int device, int stream)
 {
   /* `device` is a CUDA index */

@@ -28,18 +28,6 @@ void THCudaBlas_shutdown(THCState *state)
   free(blas_state->handles);
 }
 
-void THCudaBlas_reset(THCState *state, int device)
-{
-  THCBlasState* blasState = state->blasState;
-
-  if (&blasState->handles[device] != blasState->current_handle) {
-    THError("Unexpected cuBLAS state");
-  }
-
-  cublasCreate(&blasState->handles[device]);
-  blasState->current_handle = &blasState->handles[device];
-}
-
 void THCudaBlas_setHandle(THCState *state, int device)
 {
   THCBlasState *blas_state = state->blasState;

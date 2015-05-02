@@ -97,19 +97,6 @@ __host__ void THCRandom_setGenerator(THCState* state, int device)
   }
 }
 
-/* Reset the generator for the current device after a device reset */
-__host__ void THCRandom_resetGenerator(THCState* state, int device)
-{
-  THCRNGState* rng_state = state->rngState;
-  if (rng_state->current_gen != &rng_state->gen[device]) {
-    THError("Unexpected generator state");
-  }
-
-  initializeGenerator(&rng_state->gen[device]);
-  rng_state->current_gen = &rng_state->gen[device];
-  THCRandom_manualSeed(state, rng_state->current_gen->initial_seed);
-}
-
 /* Random seed */
 __host__ unsigned long THCRandom_seed(THCState* state)
 {
