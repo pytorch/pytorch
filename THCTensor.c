@@ -1,6 +1,7 @@
 #include "THCGeneral.h"
 #include "THCTensor.h"
 #include "THCTensorCopy.h"
+#include "THAtomic.h"
 
 /**** access methods ****/
 THCudaStorage *THCudaTensor_storage(THCState *state, const THCudaTensor *self)

@@ -1,5 +1,6 @@
 #include "THCStorage.h"
 #include "THCGeneral.h"
+#include "THAtomic.h"
 
 void THCudaStorage_set(THCState *state, THCudaStorage *self, long index, float value)
 {
