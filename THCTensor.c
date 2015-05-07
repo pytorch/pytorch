@@ -565,7 +565,7 @@ long THCudaTensor_nElement(THCState *state, const THCudaTensor *self)
 void THCudaTensor_retain(THCState *state, THCudaTensor *self)
 {
   if(self->flag & TH_TENSOR_REFCOUNTED)
-    ++self->refcount;
+    THAtomicIncrementRef(&self->refcount);
 }
 
 void THCudaTensor_free(THCState *state, THCudaTensor *self)
@@ -575,7 +575,7 @@ void THCudaTensor_free(THCState *state, THCudaTensor *self)
 
   if(self->flag & TH_TENSOR_REFCOUNTED)
   {
-    if(--self->refcount == 0)
+    if(THAtomicDecrementRef(&self->refcount))
     {
       THFree(self->size);
       THFree(self->stride);

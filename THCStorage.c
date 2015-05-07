@@ -105,7 +105,7 @@ THCudaStorage* THCudaStorage_newWithData(THCState *state, float *data, long size
 void THCudaStorage_retain(THCState *state, THCudaStorage *self)
 {
   if(self && (self->flag & TH_STORAGE_REFCOUNTED))
-    ++self->refcount;
+    THAtomicIncrementRef(&self->refcount);
 }
 
 void THCudaStorage_free(THCState *state, THCudaStorage *self)
@@ -113,7 +113,7 @@ void THCudaStorage_free(THCState *state, THCudaStorage *self)
   if(!(self->flag & TH_STORAGE_REFCOUNTED))
     return;
 
-  if (--(self->refcount) <= 0)
+  if (THAtomicDecrementRef(&self->refcount))
   {
     if(self->flag & TH_STORAGE_FREEMEM) {
       THCudaCheck(cudaFree(self->data));
