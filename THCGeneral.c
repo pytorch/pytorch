@@ -21,8 +21,6 @@ void THCudaInit(THCState* state)
   state->deviceProperties =
     (struct cudaDeviceProp*)malloc(count * sizeof(struct cudaDeviceProp));
 
-  THCState_setDeviceMode(state, THCStateDeviceModeManual);
-
   state->numUserStreams = 0;
   state->streamsPerDevice =
     (cudaStream_t**)malloc(count * sizeof(cudaStream_t*));
@@ -115,30 +113,6 @@ void THCudaEnablePeerToPeerAccess(THCState* state)
 int THCState_getNumDevices(THCState *state)
 {
   return state->numDevices;
-}
-
-THCStateDeviceMode THCState_getDeviceMode(THCState* state)
-{
-  return state->deviceMode;
-}
-
-void THCState_setDeviceMode(THCState* state, THCStateDeviceMode mode)
-{
-  state->deviceMode = mode;
-}
-
-void THCState_setDevice(THCState *state, int device)
-{
-  int curDev;
-  THCudaCheck(cudaGetDevice(&curDev));
-  if (device != curDev) {
-    THCudaCheck(cudaSetDevice(device));
-    THCRandom_setGenerator(state, device);
-    THCudaBlas_setHandle(state, device);
-
-    /* The stream is per device, so update the stream as well */
-    THCState_setStream(state, device, THCState_getCurrentStreamIndex(state));
-  }
 }
 
 void THCState_reserveStreams(THCState* state, int numStreams)

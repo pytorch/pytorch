@@ -8,14 +8,12 @@
 #define TH_STORAGE_RESIZABLE  2
 #define TH_STORAGE_FREEMEM    4
 
-#define THC_DEVICE_NONE -1
 
 typedef struct THCudaStorage
 {
     float *data;
     long size;
     int refcount;
-    int device;
     char flag;
     THAllocator *allocator;
     void *allocatorContext;
@@ -53,8 +51,5 @@ THC_API void THCudaStorage_retain(THCState *state, THCudaStorage *storage);
 THC_API void THCudaStorage_free(THCState *state, THCudaStorage *storage);
 THC_API void THCudaStorage_resize(THCState *state, THCudaStorage *storage, long size);
 THC_API void THCudaStorage_fill(THCState *state, THCudaStorage *storage, float value);
-
-THC_API int THCudaStorage_getDevice(THCState* state, const THCudaStorage *storage);
-THC_API void THCudaStorage_setDevice(THCState* state, THCudaStorage *storage, int device);
 
 #endif

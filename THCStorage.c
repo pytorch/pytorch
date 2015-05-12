@@ -22,7 +22,6 @@ THCudaStorage* THCudaStorage_new(THCState *state)
   storage->data = NULL;
   storage->size = 0;
   storage->refcount = 1;
-  storage->device = THC_DEVICE_NONE;
   storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE | TH_STORAGE_FREEMEM;
   return storage;
 }
@@ -38,7 +37,6 @@ THCudaStorage* THCudaStorage_newWithSize(THCState *state, long size)
 
     storage->size = size;
     storage->refcount = 1;
-    THCudaCheck(cudaGetDevice(&storage->device));
     storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE | TH_STORAGE_FREEMEM;
     return storage;
   }
@@ -94,11 +92,6 @@ THCudaStorage* THCudaStorage_newWithData(THCState *state, float *data, long size
   storage->data = data;
   storage->size = size;
   storage->refcount = 1;
-  if(size == 0) {
-    storage->device = THC_DEVICE_NONE;
-  } else {
-    THCudaCheck(cudaGetDevice(&storage->device));
-  }
   storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE | TH_STORAGE_FREEMEM;
   return storage;
 }

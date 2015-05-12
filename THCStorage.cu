@@ -26,17 +26,6 @@ void THCudaStorage_resize(THCState *state, THCudaStorage *self, long size)
   }
   else
   {
-    int curDev;
-    THCudaCheck(cudaGetDevice(&curDev));
-    if(self->device != THC_DEVICE_NONE) {
-      if (THCState_getDeviceMode(state) == THCStateDeviceModeAuto) {
-        THCudaCheck(cudaSetDevice(self->device));
-      }
-      else if(self->device != curDev) {
-        THError("THCudaStorage_resize: device mismatch: tensorDev=%d, curDev=%d", self->device + 1, curDev + 1);
-      }
-    }
-
     float *data = NULL;
     THCudaCheck(cudaMalloc((void**)(&data), size * sizeof(float)));
 
@@ -51,19 +40,5 @@ void THCudaStorage_resize(THCState *state, THCudaStorage *self, long size)
 
     self->data = data;
     self->size = size;
-    THCudaCheck(cudaGetDevice(&self->device));
-
-    THCudaCheck(cudaSetDevice(curDev));
   }
-}
-
-int THCudaStorage_getDevice(THCState* state, const THCudaStorage *storage) {
-  return storage->device;
-}
-
-void THCudaStorage_setDevice(THCState* state, THCudaStorage *storage, int device) {
-  if(storage->size > 0 && storage->device != device) {
-    THError("Cannot call setDevice() on a non-empty tensor. Use copy() instead.");
-  }
-  storage->device = device;
 }
