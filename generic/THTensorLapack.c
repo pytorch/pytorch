@@ -637,4 +637,196 @@ TH_API void THTensor_(potri)(THTensor *ra_, THTensor *a)
   }
 }
 
+/*
+  Perform a QR decomposition of a matrix.
+
+  In LAPACK, two parts of the QR decomposition are implemented as two separate
+  functions: geqrf and orgqr. For flexibility and efficiency, these are wrapped
+  directly, below - but to make the common usage convenient, we also provide
+  this function, which calls them both and returns the results in a more
+  intuitive form.
+
+  Args:
+  * `rq_` - result Tensor in which to store the Q part of the decomposition.
+  * `rr_` - result Tensor in which to store the R part of the decomposition.
+  * `a`   - input Tensor; the matrix to decompose.
+
+*/
+TH_API void THTensor_(qr)(THTensor *rq_, THTensor *rr_, THTensor *a)
+{
+  int m = a->size[0];
+  int n = a->size[1];
+  int k = (m < n ? m : n);
+  THTensor *ra_ = THTensor_(new)();
+  THTensor *rtau_ = THTensor_(new)();
+  THTensor *rr__ = THTensor_(new)();
+  THTensor_(geqrf)(ra_, rtau_, a);
+  THTensor_(resize2d)(rr__, k, ra_->size[1]);
+  THTensor_(narrow)(rr__, ra_, 0, 0, k);
+  THTensor_(triu)(rr_, rr__, 0);
+  THTensor_(resize2d)(rq_, ra_->size[0], k);
+  THTensor_(orgqr)(rq_, ra_, rtau_);
+  THTensor_(narrow)(rq_, rq_, 1, 0, k);
+  THTensor_(free)(ra_);
+  THTensor_(free)(rtau_);
+  THTensor_(free)(rr__);
+}
+
+/*
+  The geqrf function does the main work of QR-decomposing a matrix.
+  However, rather than producing a Q matrix directly, it produces a sequence of
+  elementary reflectors which may later be composed to construct Q - for example
+  with the orgqr function, below.
+
+  Args:
+  * `ra_`   - Result matrix which will contain:
+              i)  The elements of R, on and above the diagonal.
+              ii) Directions of the reflectors implicitly defining Q.
+  * `rtau_` - Result tensor which will contain the magnitudes of the reflectors
+              implicitly defining Q.
+  * `a`     - Input matrix, to decompose. If NULL, `ra_` is used as input.
+
+  For further details, please see the LAPACK documentation.
+
+*/
+TH_API void THTensor_(geqrf)(THTensor *ra_, THTensor *rtau_, THTensor *a)
+{
+  /* Prepare the input for LAPACK, making a copy if necessary. */
+  THTensor *ra__;
+  int clonea, destroy;
+  if (a == NULL)
+  {
+    ra__ = THTensor_(new)();
+    clonea = THTensor_(lapackClone)(ra__, ra_, 0);
+    destroy = 1;
+  }
+  else
+  {
+    clonea = THTensor_(lapackClone)(ra_, a, 1);
+    ra__ = ra_;
+    destroy = 0;
+  }
+
+  /* Check input sizes, and ensure we have space to store the results. */
+  THArgCheck(ra__->nDimension == 2, 2, "A should be 2 dimensional");
+  int m = ra__->size[0];
+  int n = ra__->size[1];
+  int k = (m < n ? m : n);
+  int lda = m;
+  THTensor_(resize1d)(rtau_, k);
+
+  /* Dry-run to query the suggested size of the workspace. */
+  int info = 0;
+  real wkopt = 0;
+  THLapack_(geqrf)(m, n, THTensor_(data)(ra__), lda,
+                   THTensor_(data)(rtau_),
+                   &wkopt, -1, &info);
+
+  /* Allocate the workspace and call LAPACK to do the real work. */
+  int lwork = (int)wkopt;
+  THTensor *work = THTensor_(newWithSize1d)(lwork);
+  THLapack_(geqrf)(m, n, THTensor_(data)(ra__), lda,
+                   THTensor_(data)(rtau_),
+                   THTensor_(data)(work), lwork, &info);
+
+  /* Clean up. */
+  if (destroy)
+  {
+    if (clonea)
+    {
+      THTensor_(copy)(ra_, ra__);
+    }
+    THTensor_(free)(ra__);
+  }
+  THTensor_(free)(work);
+
+  /* Raise a Lua error, if a problem was signalled by LAPACK. */
+  if (info < 0)
+  {
+    THError(" Lapack geqrf : Argument %d : illegal value.", -info);
+  }
+  else if (info > 0)
+  {
+    THError(" Lapack geqrf : unknown Lapack error. info = %i", info);
+  }
+}
+
+/*
+  The orgqr function allows reconstruction of a matrix Q with orthogonal
+  columns, from a sequence of elementary reflectors, such as is produced by the
+  geqrf function.
+
+  Args:
+  * `ra_` - result Tensor, which will contain the matrix Q.
+  * `a`   - input Tensor, which should be a matrix with the directions of the
+            elementary reflectors below the diagonal. If NULL, `ra_` is used as
+            input.
+  * `tau` - input Tensor, containing the magnitudes of the elementary
+            reflectors.
+
+  For further details, please see the LAPACK documentation.
+
+*/
+TH_API void THTensor_(orgqr)(THTensor *ra_, THTensor *a, THTensor *tau)
+{
+  /* Prepare the input for LAPACK, making a copy if necessary. */
+  THTensor *ra__;
+  int clonea;
+  int destroy;
+  if (a == NULL)
+  {
+    ra__ = THTensor_(new)();
+    clonea = THTensor_(lapackClone)(ra__, ra_, 0);
+    destroy = 1;
+  }
+  else
+  {
+    clonea = THTensor_(lapackClone)(ra_, a, 1);
+    ra__ = ra_;
+    destroy = 0;
+  }
+
+  /* Check input sizes. */
+  THArgCheck(ra__->nDimension == 2, 2, "A should be 2 dimensional");
+  int m = ra__->size[0];
+  int n = ra__->size[1];
+  int k = tau->size[0];
+  int lda = m;
+
+  /* Dry-run to query the suggested size of the workspace. */
+  int info = 0;
+  real wkopt = 0;
+  THLapack_(orgqr)(m, k, k, THTensor_(data)(ra__), lda,
+                   THTensor_(data)(tau),
+                   &wkopt, -1, &info);
+
+  /* Allocate the workspace and call LAPACK to do the real work. */
+  int lwork = (int)wkopt;
+  THTensor *work = THTensor_(newWithSize1d)(lwork);
+  THLapack_(orgqr)(m, k, k, THTensor_(data)(ra__), lda,
+                   THTensor_(data)(tau),
+                   THTensor_(data)(work), lwork, &info);
+
+  /* Clean up. */
+  if (destroy)
+  {
+    if (clonea)
+    {
+      THTensor_(copy)(ra_, ra__);
+    }
+    THTensor_(free)(ra__);
+  }
+  THTensor_(free)(work);
+
+  /* Raise a Lua error, if a problem was signalled by LAPACK. */
+  if (info < 0)
+  {
+    THError(" Lapack orgqr : Argument %d : illegal value.", -info);
+  }
+  else if (info > 0)
+  {
+    THError(" Lapack orgqr : unknown Lapack error. info = %i", info);
+  }
+}
+
 #endif

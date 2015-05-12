@@ -11,5 +11,8 @@ TH_API void THTensor_(gesvd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTen
 TH_API void THTensor_(getri)(THTensor *ra_, THTensor *a);
 TH_API void THTensor_(potri)(THTensor *ra_, THTensor *a);
 TH_API void THTensor_(potrf)(THTensor *ra_, THTensor *a);
+TH_API void THTensor_(qr)(THTensor *rq_, THTensor *rr_, THTensor *a);
+TH_API void THTensor_(geqrf)(THTensor *ra_, THTensor *rtau_, THTensor *a);
+TH_API void THTensor_(orgqr)(THTensor *ra_, THTensor *a, THTensor *tau);
 
 #endif
