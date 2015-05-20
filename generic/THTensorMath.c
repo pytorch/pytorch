@@ -74,6 +74,8 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
   THLongStorage *newSize;
   THTensor *tSlice, *sSlice;
   long *index_data;
+  real *tensor_data, *src_data;
+  long stride;
 
   THArgCheck(index->nDimension == 1, 3, "Index is supposed to be a vector");
   THArgCheck(dim < src->nDimension, 4,"Indexing dim %d is out of bounds of tensor", dim+1);
@@ -89,9 +91,31 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
 
   index = THLongTensor_newContiguous(index);
   index_data = THLongTensor_data(index);
-  for (i=0; i<numel; i++)
+
+  if (dim == 0 && THTensor_(isContiguous)(src) && THTensor_(isContiguous)(tensor))
   {
-    if (src->nDimension > 1)
+    tensor_data = THTensor_(data)(tensor);
+    src_data = THTensor_(data)(src);
+    stride = src->stride[0];
+
+    // check that the indices are within range
+    long max = src->size[0];
+    for (i=0; i<numel; i++)
+      if (index_data[i] < 1 || index_data[i] > max)
+        THError("index out of range");
+
+    #pragma omp parallel for if(numel*stride > TH_OMP_OVERHEAD_THRESHOLD) private(i)
+    for (i=0; i<numel; i++)
+      memcpy(tensor_data + i*stride, src_data + (index_data[i]-1)*stride, stride*sizeof(real));
+  }
+  else if (src->nDimension == 1)
+  {
+    for (i=0; i<numel; i++)
+      THTensor_(set1d)(tensor,i,THTensor_(get1d)(src,index_data[i]-1));
+  }
+  else
+  {
+    for (i=0; i<numel; i++)
     {
       tSlice = THTensor_(new)();
       sSlice = THTensor_(new)();
@@ -101,11 +125,8 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
       THTensor_(free)(tSlice);
       THTensor_(free)(sSlice);
     }
-    else
-    {
-      THTensor_(set1d)(tensor,i,THTensor_(get1d)(src,index_data[i]-1));
-    }
   }
+
   THLongTensor_free(index);
 }
 
