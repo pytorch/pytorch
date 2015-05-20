@@ -766,6 +766,9 @@ int THCudaTensor_checkGPU(THCState *state, unsigned int nTensors, ...)
   int valid = 1;
   for (unsigned int i = 0; i < nTensors; i++) {
     THCudaTensor* tensor = va_arg(args, THCudaTensor*);
+    if (tensor == NULL) {
+      continue;
+    }
     int tensorDev = THCudaTensor_getDevice(state, tensor);
     if (tensorDev != -1 && tensorDev != curDev) {
       valid = 0;
