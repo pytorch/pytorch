@@ -21,25 +21,25 @@
 /*
  * *a = newvalue
 */
-void THAtomicSet(int volatile *a, int newvalue);
+TH_API void THAtomicSet(int volatile *a, int newvalue);
 
 /*
  * return *a
 */
-int THAtomicGet(int volatile *a);
+TH_API int THAtomicGet(int volatile *a);
 
 /*
  * *a += value,
  * return previous *a
 */
-int THAtomicAdd(int volatile *a, int value);
+TH_API int THAtomicAdd(int volatile *a, int value);
 
 /*
  * check if (*a == oldvalue)
  * if true: set *a to newvalue, return 1
  * if false: return 0
 */
-int THAtomicCompareAndSwap(int volatile *a, int oldvalue, int newvalue);
+TH_API int THAtomicCompareAndSwap(int volatile *a, int oldvalue, int newvalue);
 
 
 /******************************************************************************
@@ -49,12 +49,12 @@ int THAtomicCompareAndSwap(int volatile *a, int oldvalue, int newvalue);
 /*
  * *a++
 */
-void THAtomicIncrementRef(int volatile *a);
+TH_API void THAtomicIncrementRef(int volatile *a);
 
 /*
  * *a--,
  * return 1 if *a == 0 after the operation, 0 otherwise
 */
-int THAtomicDecrementRef(int volatile *a);
+TH_API int THAtomicDecrementRef(int volatile *a);
 
 #endif
