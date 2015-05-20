@@ -101,7 +101,22 @@ void* THAlloc(long size)
   if(size == 0)
     return NULL;
 
-  ptr = malloc(size);
+  if (size > 5120)
+  {
+#if defined(__unix) || defined(__APPLE__)
+    if (posix_memalign(&ptr, 64, size) != 0)
+      ptr = NULL;
+#elif defined(_WIN32)
+    ptr = _aligned_malloc(size, 64);
+#else
+    ptr = malloc(size);
+#endif
+  }
+  else
+  {
+    ptr = malloc(size);
+  }
+
   if(!ptr)
     THError("$ Torch: not enough memory: you tried to allocate %dGB. Buy new RAM!", size/1073741824);
 
