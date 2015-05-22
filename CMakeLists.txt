@@ -1,6 +1,6 @@
 SET(CMAKE_C_FLAGS "-std=c99")
 SET(src
-    THCGeneral.c THCAllocator.c THCStorage.c THCStorageCopy.c THCTensor.c THCTensorCopy.c)
+    THCGeneral.c THCAllocator.c THCStorage.c THCStorageCopy.c THCTensor.c THCTensorCopy.c THCAllocator.c)
 
 SET(src-cuda
   THCReduceApplyUtils.cu
@@ -50,4 +50,5 @@ INSTALL(FILES
           THCApply.cuh
           THCReduce.cuh
           THCReduceApplyUtils.cuh
+	  THCAllocator.h
           DESTINATION "${Torch_INSTALL_INCLUDE_SUBDIR}/THC")
