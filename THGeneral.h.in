@@ -96,4 +96,13 @@ do {                                                                  \
 #define pclose _pclose
 #endif
 
+#define TH_Byte   1
+#define TH_Char   2
+#define TH_Short  3
+#define TH_Int    4
+#define TH_Long   5
+#define TH_Float  6
+#define TH_Double 7
+#define TH_Cuda   8
+
 #endif
