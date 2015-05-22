@@ -1,6 +1,6 @@
 SET(CMAKE_C_FLAGS "-std=c99")
 SET(src
-    THCGeneral.c THCStorage.c THCStorageCopy.c THCTensor.c THCTensorCopy.c)
+    THCGeneral.c THCAllocator.c THCStorage.c THCStorageCopy.c THCTensor.c THCTensorCopy.c)
 
 SET(src-cuda
   THCReduceApplyUtils.cu

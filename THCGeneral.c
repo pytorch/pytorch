@@ -2,6 +2,7 @@
 #include "TH.h"
 #include "THCTensorRandom.h"
 #include "THCBlas.h"
+#include "THCAllocator.h"
 
 void THCudaInit(THCState* state)
 {
@@ -16,6 +17,8 @@ void THCudaInit(THCState* state)
 
   state->blasState = (THCBlasState*)malloc(sizeof(THCBlasState));
   THCudaBlas_init(state, count, device);
+
+  THCAllocator_init(state);
 
   state->numDevices = count;
   state->deviceProperties =
@@ -51,6 +54,7 @@ void THCudaShutdown(THCState* state)
 {
   THCRandom_shutdown(state);
   THCudaBlas_shutdown(state);
+  THCAllocator_shutdown(state);
   free(state->blasState);
   free(state->rngState);
   free(state->deviceProperties);
