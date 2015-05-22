@@ -104,9 +104,15 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
       if (index_data[i] < 1 || index_data[i] > max)
         THError("index out of range");
 
-    #pragma omp parallel for if(numel*stride > TH_OMP_OVERHEAD_THRESHOLD) private(i)
-    for (i=0; i<numel; i++)
-      memcpy(tensor_data + i*stride, src_data + (index_data[i]-1)*stride, stride*sizeof(real));
+    if (src->nDimension == 1) {
+      #pragma omp parallel for if(numel > TH_OMP_OVERHEAD_THRESHOLD) private(i)
+      for (i=0; i<numel; i++)
+        tensor_data[i] = src_data[index_data[i]-1];
+    } else {
+      #pragma omp parallel for if(numel*stride > TH_OMP_OVERHEAD_THRESHOLD) private(i)
+      for (i=0; i<numel; i++)
+        memcpy(tensor_data + i*stride, src_data + (index_data[i]-1)*stride, stride*sizeof(real));
+    }
   }
   else if (src->nDimension == 1)
   {
