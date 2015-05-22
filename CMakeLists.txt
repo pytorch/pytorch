@@ -89,9 +89,20 @@ ENDIF(C_SSE3_FOUND)
 IF(C_SSE4_1_FOUND)
   SET(CMAKE_C_FLAGS "${C_SSE4_1_FLAGS} -DUSE_SSE4_1 ${CMAKE_C_FLAGS}")
 ENDIF(C_SSE4_1_FOUND)
+IF(C_AVX_FOUND OR C_SSE4_2_FOUND)
+  SET(simd generic/simd/convolve.c)
+  SET_SOURCE_FILES_PROPERTIES(generic/simd/convolve.c PROPERTIES COMPILE_FLAGS "-std=c99")
+ENDIF(C_AVX_FOUND OR C_SSE4_2_FOUND)
 IF(C_SSE4_2_FOUND)
   SET(CMAKE_C_FLAGS "${C_SSE4_2_FLAGS} -DUSE_SSE4_2 ${CMAKE_C_FLAGS}")
+  SET_SOURCE_FILES_PROPERTIES(generic/simd/convolve5x5_sse.c PROPERTIES COMPILE_FLAGS "-O3 -ffast-math -std=c99")
+  SET(simd ${simd} generic/simd/convolve5x5_sse.c)
 ENDIF(C_SSE4_2_FOUND)
+IF(C_AVX_FOUND)
+  SET(CMAKE_C_FLAGS "-DUSE_AVX ${CMAKE_C_FLAGS}")
+  SET_SOURCE_FILES_PROPERTIES(generic/simd/convolve5x5_avx.c PROPERTIES COMPILE_FLAGS "-O3 -ffast-math -mavx -std=c99")
+  SET(simd ${simd} generic/simd/convolve5x5_avx.c)
+ENDIF(C_AVX_FOUND)
 
 SET(hdr
   THGeneral.h THAllocator.h THStorage.h THTensor.h THTensorApply.h THBlas.h
@@ -101,7 +112,7 @@ SET(src
   THGeneral.c THAllocator.c THStorage.c THTensor.c THBlas.c THLapack.c
   THLogAdd.c THRandom.c THFile.c THDiskFile.c THMemoryFile.c THAtomic.c)
 
-SET(src ${src} ${hdr})
+SET(src ${src} ${hdr} ${simd})
 ADD_LIBRARY(TH SHARED ${src})
 
 CHECK_C_SOURCE_RUNS("

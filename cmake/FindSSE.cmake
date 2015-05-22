@@ -57,6 +57,19 @@ SET(SSE4_2_CODE "
   }
 ")
 
+SET(AVX_CODE "
+  #include <immintrin.h>
+
+  int main()
+  {
+    if (0) {
+      __m256 a;
+      a = _mm256_set1_ps(0);
+    }
+    return 0;
+  }
+")
+
 MACRO(CHECK_SSE lang type flags)
   SET(__FLAG_I 1)
   SET(CMAKE_REQUIRED_FLAGS_SAVE ${CMAKE_REQUIRED_FLAGS})
@@ -91,6 +104,7 @@ CHECK_SSE(C "SSE2" " ;-msse2;/arch:SSE2")
 CHECK_SSE(C "SSE3" " ;-msse3;/arch:SSE3")
 CHECK_SSE(C "SSE4_1" " ;-msse4.1;-msse4;/arch:SSE4")
 CHECK_SSE(C "SSE4_2" " ;-msse4.2;-msse4;/arch:SSE4")
+CHECK_SSE(C "AVX" " ;-mavx;/arch:AVX")
 
 CHECK_SSE(CXX "SSE1" " ;-msse;/arch:SSE")
 CHECK_SSE(CXX "SSE2" " ;-msse2;/arch:SSE2")
