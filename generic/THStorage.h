@@ -19,6 +19,7 @@
 #define TH_STORAGE_REFCOUNTED 1
 #define TH_STORAGE_RESIZABLE  2
 #define TH_STORAGE_FREEMEM    4
+#define TH_STORAGE_VIEW       8
 
 typedef struct THStorage
 {
@@ -28,6 +29,8 @@ typedef struct THStorage
     char flag;
     THAllocator *allocator;
     void *allocatorContext;
+    int type;
+    struct THStorage *view;
 } THStorage;
 
 TH_API real* THStorage_(data)(const THStorage*);

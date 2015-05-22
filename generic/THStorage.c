@@ -38,6 +38,7 @@ THStorage* THStorage_(newWithAllocator)(long size,
   storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE | TH_STORAGE_FREEMEM;
   storage->allocator = allocator;
   storage->allocatorContext = allocatorContext;
+  storage->type = TH_Type();
   return storage;
 }
 
@@ -116,8 +117,12 @@ void THStorage_(free)(THStorage *storage)
   {
     if(THAtomicDecrementRef(&storage->refcount))
     {
-      if(storage->flag & TH_STORAGE_FREEMEM)
+      if(storage->flag & TH_STORAGE_FREEMEM) {
         storage->allocator->free(storage->allocatorContext, storage->data);
+      }
+      if(storage->flag & TH_STORAGE_VIEW) {
+        THStorage_(free)(storage->view);
+      }
       THFree(storage);
     }
   }
@@ -139,6 +144,7 @@ THStorage* THStorage_(newWithDataAndAllocator)(real* data, long size,
   storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE | TH_STORAGE_FREEMEM;
   storage->allocator = allocator;
   storage->allocatorContext = allocatorContext;
+  storage->type = TH_Type();
   return storage;
 }
 
