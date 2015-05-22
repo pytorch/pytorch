@@ -11,6 +11,8 @@
 #define TH_STORAGE_GET(storage, idx) ((storage)->data[(idx)])
 #define TH_STORAGE_SET(storage, idx, value) ((storage)->data[(idx)] = (value))
 
+#define TH_Type() TH_CONCAT_2(TH_,Real)
+
 #include "generic/THStorage.h"
 #include "THGenerateAllTypes.h"
 
