@@ -759,6 +759,9 @@ float THCudaTensor_get4d(THCState *state, const THCudaTensor *tensor, long x0, l
 
 int THCudaTensor_checkGPU(THCState *state, unsigned int nTensors, ...)
 {
+#ifdef DISABLE_CHECK_GPU
+  return 1;  // Disable GPU checks.
+#else
   int curDev = -1;
   THCudaCheck(cudaGetDevice(&curDev));
   va_list(args);
@@ -777,4 +780,5 @@ int THCudaTensor_checkGPU(THCState *state, unsigned int nTensors, ...)
   }
   va_end(args);
   return valid;
+#endif
 }
