@@ -103,7 +103,7 @@ void* THAlloc(long size)
 
   if (size > 5120)
   {
-#if defined(__unix) || defined(__APPLE__)
+#if (defined(__unix) || defined(__APPLE__)) && (!defined(DISABLE_POSIX_MEMALIGN))
     if (posix_memalign(&ptr, 64, size) != 0)
       ptr = NULL;
 #elif defined(_WIN32)
