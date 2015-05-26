@@ -8,10 +8,10 @@
 
    Pb: THMapStorage is kind of a class
    THLab_()... comment je m'en sors?
-   
+
    en template, faudrait que je les instancie toutes!!! oh boy!
    Et comment je sais que c'est pour Cuda? Le type float est le meme dans les <>
-   
+
    au bout du compte, ca serait sur des pointeurs float/double... etc... = facile.
    primitives??
  */
@@ -29,7 +29,6 @@ typedef struct THStorage
     char flag;
     THAllocator *allocator;
     void *allocatorContext;
-    int type;
     struct THStorage *view;
 } THStorage;
 

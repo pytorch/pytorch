@@ -38,7 +38,6 @@ THStorage* THStorage_(newWithAllocator)(long size,
   storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE | TH_STORAGE_FREEMEM;
   storage->allocator = allocator;
   storage->allocatorContext = allocatorContext;
-  storage->type = TH_Type();
   return storage;
 }
 
@@ -144,7 +143,6 @@ THStorage* THStorage_(newWithDataAndAllocator)(real* data, long size,
   storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE | TH_STORAGE_FREEMEM;
   storage->allocator = allocator;
   storage->allocatorContext = allocatorContext;
-  storage->type = TH_Type();
   return storage;
 }
 
