@@ -17,6 +17,7 @@ typedef struct THCudaStorage
     char flag;
     THAllocator *allocator;
     void *allocatorContext;
+    struct THCudaStorage *view;
 } THCudaStorage;
 
 
