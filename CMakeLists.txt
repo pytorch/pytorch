@@ -103,6 +103,7 @@ SET(src
 
 SET(src ${src} ${hdr})
 ADD_LIBRARY(TH SHARED ${src})
+ADD_LIBRARY(TH_static STATIC ${src})
 
 CHECK_C_SOURCE_RUNS("
 #include <stdatomic.h>
