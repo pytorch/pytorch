@@ -237,8 +237,8 @@ void __THCudaCheck(cudaError_t err, const char *file, const int line)
 {
   if(err != cudaSuccess)
   {
-    THError("%s(%i) : cuda runtime error : %s",
-            file, line, cudaGetErrorString(err));
+    THError("%s(%i) : cuda runtime error (%d) : %s",
+            file, line, err, cudaGetErrorString(err));
   }
 }
 
