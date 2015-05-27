@@ -116,8 +116,12 @@ void THStorage_(free)(THStorage *storage)
   {
     if(THAtomicDecrementRef(&storage->refcount))
     {
-      if(storage->flag & TH_STORAGE_FREEMEM)
+      if(storage->flag & TH_STORAGE_FREEMEM) {
         storage->allocator->free(storage->allocatorContext, storage->data);
+      }
+      if(storage->flag & TH_STORAGE_VIEW) {
+        THStorage_(free)(storage->view);
+      }
       THFree(storage);
     }
   }
