@@ -110,7 +110,8 @@ inline bool getApplyGrid(THCState* state, long totalElements, dim3& grid) {
 
   // 16 warps per block * 4 per SM gives 64 warps per SM at maximum,
   // which seems to be a good sweetspot for latency hiding
-  grid = dim3(min(DIVUP(totalElements, (long long) THC_APPLY_THREADS_PER_BLOCK),
+  grid = dim3(min((long long) THCCeilDiv(totalElements,
+                                         (long) THC_APPLY_THREADS_PER_BLOCK),
                   4LL * numSM));
   return true;
 }

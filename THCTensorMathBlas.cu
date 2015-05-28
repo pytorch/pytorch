@@ -12,10 +12,6 @@
 #include <thrust/reduce.h>
 #include <thrust/inner_product.h>
 
-#ifndef DIVUP
-#define DIVUP(x, y) (((x) + (y) - 1) / (y))
-#endif
-
 float THCudaTensor_dot(THCState *state, THCudaTensor *self, THCudaTensor *src)
 {
   THAssert(THCudaTensor_checkGPU(state, 2, self, src));

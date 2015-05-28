@@ -12,10 +12,6 @@
 #include <thrust/reduce.h>
 #include <thrust/inner_product.h>
 
-#ifndef DIVUP
-#define DIVUP(x, y) (((x) + (y) - 1) / (y))
-#endif
-
 template<class Op>
 void THCudaTensor_logicalTensor(THCState *state, THCudaTensor *self_, THCudaTensor *src1, THCudaTensor *src2, Op op)
 {

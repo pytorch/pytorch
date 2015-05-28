@@ -4,6 +4,12 @@
 #include "THCBlas.h"
 #include "THCAllocator.h"
 
+/* Size of scratch space available in global memory per each SM + stream */
+#define GLOBAL_SCRATCH_SPACE_PER_SM_STREAM 4 * sizeof(float)
+
+THCCudaResourcesPerDevice* THCState_getDeviceResourcePtr(
+  THCState *state, int device);
+
 void THCudaInit(THCState* state)
 {
   int count = 0;
@@ -15,9 +21,6 @@ void THCudaInit(THCState* state)
   state->rngState = (THCRNGState*)malloc(sizeof(THCRNGState));
   THCRandom_init(state, count, device);
 
-  state->blasState = (THCBlasState*)malloc(sizeof(THCBlasState));
-  THCudaBlas_init(state, count, device);
-
   THCAllocator_init(state);
 
   state->numDevices = count;
@@ -25,21 +28,33 @@ void THCudaInit(THCState* state)
     (struct cudaDeviceProp*)malloc(count * sizeof(struct cudaDeviceProp));
 
   state->numUserStreams = 0;
-  state->streamsPerDevice =
-    (cudaStream_t**)malloc(count * sizeof(cudaStream_t*));
+  state->numUserBlasHandles = 0;
 
   /* Enable P2P access between all pairs, if possible */
   THCudaEnablePeerToPeerAccess(state);
 
-  for (int i = 0; i < count; ++i)
-  {
+  state->resourcesPerDevice = (THCCudaResourcesPerDevice*)
+    malloc(count * sizeof(THCCudaResourcesPerDevice));
+  for (int i = 0; i < count; ++i) {
+    THCCudaResourcesPerDevice* res = THCState_getDeviceResourcePtr(state, i);
+
     THCudaCheck(cudaSetDevice(i));
     THCudaCheck(cudaGetDeviceProperties(&state->deviceProperties[i], i));
     /* Stream index 0 will be the default stream for convenience; by
        default no user streams are reserved */
-    state->streamsPerDevice[i] =
-      (cudaStream_t*)malloc(sizeof(cudaStream_t));
-    state->streamsPerDevice[i][0] = NULL;
+    res->streams = NULL;
+    res->blasHandles = NULL;
+
+    /* The scratch space that we want to have available per each device is
+       based on the number of SMs available per device */
+    int numSM = state->deviceProperties[i].multiProcessorCount;
+    size_t sizePerStream = numSM * GLOBAL_SCRATCH_SPACE_PER_SM_STREAM;
+    res->scratchSpacePerStream = sizePerStream;
+
+    /* Allocate scratch space for each stream */
+    res->devScratchSpacePerStream = (void**) malloc(sizeof(void*));
+    THCudaCheck(cudaMalloc(&res->devScratchSpacePerStream[0],
+                           sizePerStream));
   }
 
   /* Restore to previous device */
@@ -48,32 +63,52 @@ void THCudaInit(THCState* state)
   /* Start in the default stream on the current device */
   state->currentPerDeviceStream = 0;
   state->currentStream = NULL;
+
+  /* There is no such thing as a default cublas handle.
+     To maintain consistency with streams API, handle 0 is always NULL and we
+     start counting at 1
+   */
+  THCState_reserveBlasHandles(state, 1);
+  state->currentPerDeviceBlasHandle = 1;
+  state->currentBlasHandle = THCState_getDeviceBlasHandle(state, device, 1);
 }
 
 void THCudaShutdown(THCState* state)
 {
   THCRandom_shutdown(state);
-  THCudaBlas_shutdown(state);
   THCAllocator_shutdown(state);
-  free(state->blasState);
   free(state->rngState);
   free(state->deviceProperties);
 
+  int deviceCount = 0;
   int prevDev = -1;
   THCudaCheck(cudaGetDevice(&prevDev));
+  THCudaCheck(cudaGetDeviceCount(&deviceCount));
 
-  for (int dev = 0; dev < state->numDevices; ++dev) {
+  for (int dev = 0; dev < deviceCount; ++dev) {
     THCudaCheck(cudaSetDevice(dev));
-
     /* Free Torch-defined streams (0 is the default stream) */
     for (int stream = 1; stream <= state->numUserStreams; ++stream) {
-      THCudaCheck(cudaStreamDestroy(state->streamsPerDevice[dev][stream]));
+      THCudaCheck(cudaStreamDestroy(
+                    THCState_getDeviceStream(state, dev, stream)));
+    }
+    /* Free Torch-defined handles (0 is NULL for consistency with streams API) */
+    for (int handle = 1; handle <= state->numUserBlasHandles; ++handle) {
+      THCublasCheck(cublasDestroy(
+                      THCState_getDeviceBlasHandle(state, dev, handle)));
+    }
+    /* Free per-stream scratch space; starts at 0 because there is space for
+       the default stream as well*/
+    for (int stream = 0; stream <= state->numUserStreams; ++stream) {
+      THCudaCheck(cudaFree(THCState_getDeviceScratchSpace(state, dev, stream)));
     }
 
-    free(state->streamsPerDevice[dev]);
+    free(state->resourcesPerDevice[dev].streams);
+    free(state->resourcesPerDevice[dev].blasHandles);
+    free(state->resourcesPerDevice[dev].devScratchSpacePerStream);
   }
+  free(state->resourcesPerDevice);
 
-  free(state->streamsPerDevice);
   THCudaCheck(cudaSetDevice(prevDev));
 }
 
@@ -129,37 +164,85 @@ void THCState_reserveStreams(THCState* state, int numStreams)
   int prevDev = -1;
   THCudaCheck(cudaGetDevice(&prevDev));
 
-  /* Otherwise, we have to allocate a new set of streams */
-  cudaStream_t** newStreams =
-    (cudaStream_t**) malloc(state->numDevices * sizeof(cudaStream_t*));
+  /* Otherwise, we have to allocate a new set of streams and stream data */
   for (int dev = 0; dev < state->numDevices; ++dev) {
     THCudaCheck(cudaSetDevice(dev));
 
     /* +1 for the default stream as well */
-    newStreams[dev] =
+    cudaStream_t* newStreams =
       (cudaStream_t*) malloc((numStreams + 1) * sizeof(cudaStream_t));
 
-    /* Copy over old streams
+    void** newScratchSpace =
+      (void**) malloc((numStreams + 1) * sizeof(void*));
+
+    /* Copy over old stream data
        (0 is default stream, 1 ... numUserStreams are rest) */
     for (int stream = 0; stream <= state->numUserStreams; ++stream) {
-      newStreams[dev][stream] = state->streamsPerDevice[dev][stream];
+      newStreams[stream] =
+        THCState_getDeviceStream(state, dev, stream);
+      newScratchSpace[stream] =
+        THCState_getDeviceScratchSpace(state, dev, stream);
     }
 
-    /* Allocate new streams */
+    /* Allocate new stream resources */
+    size_t scratchSpaceSize = THCState_getDeviceScratchSpaceSize(state, dev);
+
     for (int stream = state->numUserStreams + 1; stream <= numStreams; ++stream) {
-      newStreams[dev][stream] = NULL;
-      THCudaCheck(cudaStreamCreate(&newStreams[dev][stream]));
+      newStreams[stream] = NULL;
+      THCudaCheck(cudaStreamCreate(newStreams + stream));
+      newScratchSpace[stream] = NULL;
+      THCudaCheck(cudaMalloc(&newScratchSpace[stream], scratchSpaceSize));
     }
+
+    THCCudaResourcesPerDevice* res = THCState_getDeviceResourcePtr(state, dev);
+    free(res->streams);
+    res->streams = newStreams;
+    free(res->devScratchSpacePerStream);
+    res->devScratchSpacePerStream = newScratchSpace;
   }
 
-  cudaStream_t** oldStreams = state->streamsPerDevice;
-  state->streamsPerDevice = newStreams;
   state->numUserStreams = numStreams;
 
-  for (int dev = 0; dev < state->numDevices; ++dev) {
-    free(oldStreams[dev]);
+  THCudaCheck(cudaSetDevice(prevDev));
+}
+
+void THCState_reserveBlasHandles(THCState* state, int numBlasHandles)
+{
+  if (numBlasHandles <= state->numUserBlasHandles)
+  {
+    return;
   }
-  free(oldStreams);
+
+  int prevDev = -1;
+  THCudaCheck(cudaGetDevice(&prevDev));
+
+  /* Otherwise, we have to allocate a new set of blasHandles */
+  for (int dev = 0; dev < state->numDevices; ++dev) {
+    THCudaCheck(cudaSetDevice(dev));
+
+    /* +1 to be consistent with stream API, blas handle 0 is NULL and unused */
+    cublasHandle_t* newBlasHandles =
+      (cublasHandle_t*) malloc((numBlasHandles + 1) * sizeof(cublasHandle_t));
+
+    /* Copy over old blasHandles
+       (0 is NULL, 1 ... numUserBlasHandles are rest) */
+    newBlasHandles[0] = NULL;
+    for (int hndl = 1; hndl <= state->numUserBlasHandles; ++hndl) {
+      newBlasHandles[hndl] = THCState_getDeviceBlasHandle(state, dev, hndl);
+    }
+
+    /* Allocate new handles */
+    for (int hndl = state->numUserBlasHandles + 1; hndl <= numBlasHandles; ++hndl) {
+      newBlasHandles[hndl] = NULL;
+      THCublasCheck(cublasCreate(newBlasHandles + hndl));
+    }
+
+    THCCudaResourcesPerDevice* res = THCState_getDeviceResourcePtr(state, dev);
+    free(res->blasHandles);
+    res->blasHandles = newBlasHandles;
+  }
+
+  state->numUserBlasHandles = numBlasHandles;
 
   THCudaCheck(cudaSetDevice(prevDev));
 }
@@ -169,7 +252,13 @@ int THCState_getNumStreams(THCState* state)
   return state->numUserStreams;
 }
 
-cudaStream_t THCState_getDeviceStream(THCState *state, int device, int stream)
+int THCState_getNumBlasHandles(THCState* state)
+{
+  return state->numUserBlasHandles;
+}
+
+THCCudaResourcesPerDevice* THCState_getDeviceResourcePtr(
+  THCState *state, int device)
 {
   /* `device` is a CUDA index */
   if (device >= state->numDevices || device < 0)
@@ -177,13 +266,27 @@ cudaStream_t THCState_getDeviceStream(THCState *state, int device, int stream)
     THError("%d is not a device", device + 1 /* back to Torch index */);
   }
 
-  /* Stream 0 is the default stream, 1 ... `numUserStreams` are Torch streams */
+  return &(state->resourcesPerDevice[device]);
+}
+
+cudaStream_t THCState_getDeviceStream(THCState *state, int device, int stream)
+{
   if (stream > state->numUserStreams || stream < 0)
   {
     THError("%d is not a stream", stream);
   }
+  return (THCState_getDeviceResourcePtr(state, device)->streams == NULL) ? 0
+    : THCState_getDeviceResourcePtr(state, device)->streams[stream];
+}
 
-  return state->streamsPerDevice[device][stream];
+cublasHandle_t THCState_getDeviceBlasHandle(THCState *state, int device, int handle)
+{
+  if (handle <= 0 || handle > state->numUserBlasHandles)
+  {
+    THError("%d is not a valid handle, valid range is: (1, %d)",
+            handle, state->numUserBlasHandles);
+  }
+  return THCState_getDeviceResourcePtr(state, device)->blasHandles[handle];
 }
 
 cudaStream_t THCState_getCurrentStream(THCState *state)
@@ -199,9 +302,35 @@ cudaStream_t THCState_getCurrentStream(THCState *state)
   }
 }
 
+cublasHandle_t THCState_getCurrentBlasHandle(THCState *state)
+{
+  /* This is called at the point of kernel execution.
+     For some debugging code or improperly instrumented kernels,
+     `state` is null */
+  if (state) {
+    if (state->currentBlasHandle <= 0) {
+      THError("%d is not a valid handle, valid range is: (1, %d)",
+              state->currentBlasHandle, state->numUserBlasHandles);
+    }
+    return state->currentBlasHandle;
+  }
+  THError("THCState and blasHandles must be set as there is no default blasHandle");
+  return NULL;
+}
+
 int THCState_getCurrentStreamIndex(THCState *state)
 {
   return state->currentPerDeviceStream;
+}
+
+int THCState_getCurrentBlasHandleIndex(THCState *state)
+{
+  if (state->currentPerDeviceBlasHandle <= 0)
+  {
+    THError("%d is not a valid handle, valid range is: (1, %d)",
+            state->currentPerDeviceBlasHandle, state->numUserBlasHandles);
+  }
+  return state->currentPerDeviceBlasHandle;
 }
 
 void THCState_setStream(THCState *state, int device, int stream)
@@ -212,15 +341,33 @@ void THCState_setStream(THCState *state, int device, int stream)
     THError("%d is not a device", device + 1 /* back to Torch index */);
   }
 
-  /* Stream 0 is the default stream, 1 ... `numUserStreams` are Torch streams */
   if (stream > state->numUserStreams || stream < 0)
   {
     THError("%d is not a stream", stream);
   }
-
-  state->currentStream = state->streamsPerDevice[device][stream];
+  state->currentStream =
+    THCState_getDeviceStream(state, device, stream);
   state->currentPerDeviceStream = stream;
-  THCudaBlas_setStream(state, device, state->currentStream);
+  THCublasCheck(cublasSetStream(state->currentBlasHandle,
+                                state->currentStream));
+}
+
+void THCState_setBlasHandle(THCState *state, int device, int handle)
+{  /* `device` is a CUDA index */
+  if (device >= state->numDevices || device < 0)
+  {
+    THError("%d is not a device", device + 1 /* back to Torch index */);
+  }
+
+  if (handle > state->numUserBlasHandles || handle <= 0)
+  {
+    THError("%d is not a valid handle, valid range is: (1, %d)",
+            handle, state->numUserBlasHandles);
+  }
+  state->currentBlasHandle =
+    THCState_getDeviceBlasHandle(state, device, handle);
+  state->currentPerDeviceBlasHandle = handle;
+  THCublasCheck(cublasSetStream(state->currentBlasHandle, state->currentStream));
 }
 
 void THCState_setStreamForCurrentDevice(THCState *state, int stream)
@@ -231,6 +378,53 @@ void THCState_setStreamForCurrentDevice(THCState *state, int stream)
     THCudaCheck(cudaGetDevice(&device));
     THCState_setStream(state, device, stream);
   }
+}
+
+void THCState_setBlasHandleForCurrentDevice(THCState *state, int handle)
+{
+  if (state->currentPerDeviceBlasHandle != handle)
+  {
+    int device = -1;
+    THCudaCheck(cudaGetDevice(&device));
+    THCState_setBlasHandle(state, device, handle);
+  }
+}
+
+void* THCState_getCurrentDeviceScratchSpace(THCState* state)
+{
+  int device = -1;
+  THCudaCheck(cudaGetDevice(&device));
+  int stream = THCState_getCurrentStreamIndex(state);
+
+  return THCState_getDeviceScratchSpace(state, device, stream);
+}
+
+void* THCState_getDeviceScratchSpace(THCState* state, int device, int stream)
+{
+  THCCudaResourcesPerDevice* res =
+    THCState_getDeviceResourcePtr(state, device);
+
+  if (stream > state->numUserStreams || stream < 0)
+  {
+    THError("%d is not a stream", stream);
+  }
+
+  return res->devScratchSpacePerStream[stream];
+}
+
+size_t THCState_getCurrentDeviceScratchSpaceSize(THCState* state)
+{
+  int device = -1;
+  THCudaCheck(cudaGetDevice(&device));
+  return THCState_getDeviceScratchSpaceSize(state, device);
+}
+
+size_t THCState_getDeviceScratchSpaceSize(THCState* state, int device)
+{
+  THCCudaResourcesPerDevice* res =
+    THCState_getDeviceResourcePtr(state, device);
+
+  return res->scratchSpacePerStream;
 }
 
 void __THCudaCheck(cudaError_t err, const char *file, const int line)
@@ -288,33 +482,4 @@ void __THCublasCheck(cublasStatus_t status, const char *file, const int line)
   }
 }
 
-void THCudaGetGridSize(int *nBlockPerColumn_, int *nBlockPerRow_, int *nThreadPerBlock_, long size)
-{
-  const int nThreadPerBlock = 256;
-  long nBlockPerGrid = size / nThreadPerBlock;
-  long nBlockPerColumn = 0L;
-  long nBlockPerRow = 0L;
-
-  if(size % nThreadPerBlock)
-    nBlockPerGrid++;
-
-  if(nBlockPerGrid <= 65535)
-  {
-    nBlockPerRow = nBlockPerGrid;
-    nBlockPerColumn = 1;
-  }
-  else if(nBlockPerGrid <= (65355L * 65355L))
-  {
-    unsigned int uiSqrt = (unsigned int)(sqrt((float)nBlockPerGrid));
-    nBlockPerRow = uiSqrt;
-    nBlockPerColumn = uiSqrt;
-    while((nBlockPerRow * nBlockPerColumn) < nBlockPerGrid)
-      nBlockPerRow++;
-  }
-  else
-    THError("too large vector for Cuda, sorry");
-
-  *nBlockPerColumn_ = (int)nBlockPerColumn;
-  *nBlockPerRow_ = (int)nBlockPerRow;
-  *nThreadPerBlock_ = (int)nThreadPerBlock;
-}
+#undef GLOBAL_SCRATCH_SPACE_PER_SM_STREAM

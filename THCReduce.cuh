@@ -100,29 +100,9 @@ THCudaTensor_reduceContigDim(TensorInfo<IndexType> out,
 
   // Reduce within the block
   extern __shared__ float smem[];
-  smem[threadIdx.x] = r;
+  r = reduceBlock<float, ReduceOp>(smem, blockDim.x, r, reduceOp, init);
 
-  // First warp will perform reductions across warps
-  __syncthreads();
-  if ((threadIdx.x / 32) == 0) {
-    r = init;
-    for (int i = 0; i < blockDim.x; i += 32) {
-      r = reduceOp(r, smem[i + threadIdx.x]);
-    }
-
-    // Each lane participating writes out a value
-    smem[threadIdx.x] = r;
-  }
-
-  // First thread will perform reductions across the block
-  __syncthreads();
   if (threadIdx.x == 0) {
-    r = init;
-#pragma unroll
-    for (int i = 0; i < 32; ++i) {
-      r = reduceOp(r, smem[i]);
-    }
-
     // Write out reduced value
     out.data[outOffset] = r;
   }
@@ -150,7 +130,7 @@ inline dim3 getContigReduceBlock(long numSlices, long reductionSize) {
   }
 
   // Scale up block size based on the reduction dimension size
-  long warpsInReductionSize = DIVUP(reductionSize, 32L);
+  long warpsInReductionSize = THCCeilDiv(reductionSize, 32L);
   int numWarps =
     warpsInReductionSize > (long) maxWarps ? maxWarps : (int) warpsInReductionSize;
   return dim3(numWarps * 32);
@@ -158,7 +138,7 @@ inline dim3 getContigReduceBlock(long numSlices, long reductionSize) {
 
 inline bool getNoncontigReduceGrid(long elements, dim3& grid) {
   // One output point per thread
-  return THC_getGridFromTiles(DIVUP(elements, THC_NONCONTIG_REDUCE_BLOCK_SIZE), grid);
+  return THC_getGridFromTiles(THCCeilDiv(elements, (long) THC_NONCONTIG_REDUCE_BLOCK_SIZE), grid);
 }
 
 inline bool getContigReduceGrid(long elements, dim3& grid) {
@@ -305,8 +285,8 @@ bool THCudaTensor_reduceDim(THCState* state,
     }
   }
 #undef HANDLE_CASE
-#undef HANDLE_B_CASE
-#undef HANDLE_A_CASE
+#undef HANDLE_IN_CASE
+#undef HANDLE_OUT_CASE
 
   return true;
 }

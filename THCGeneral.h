@@ -35,36 +35,44 @@
 #endif
 
 struct THCRNGState;  /* Random number generator state. */
-struct THCBlasState;
+
+typedef struct _THCCudaResourcesPerDevice {
+  cudaStream_t* streams;
+  cublasHandle_t* blasHandles;
+  /* Size of scratch space per each stream on this device available */
+  size_t scratchSpacePerStream;
+  /* Device-resident scratch space per stream, used for global memory
+     reduction kernels. */
+  void** devScratchSpacePerStream;
+} THCCudaResourcesPerDevice;
+
 
 /* Global state to be held in the cutorch table. */
 typedef struct THCState
 {
   struct THCRNGState* rngState;
-  struct THCBlasState* blasState;
   struct cudaDeviceProp* deviceProperties;
-  /* Convenience reference to the current stream in use */
+  /* Convenience reference to the current stream/handle in use */
   cudaStream_t currentStream;
-  /* Set of all allocated streams. streamsPerDevice[dev][0] is NULL, which
-     specifies the per-device default stream. */
-  cudaStream_t** streamsPerDevice;
-
+  cublasHandle_t currentBlasHandle;
+  /* Set of all allocated resources. resourcePerDevice[dev]->streams[0] is NULL,
+     which specifies the per-device default stream. blasHandles do not have a
+     default and must be explicitly initialized. We always initialize 1
+     blasHandle but we can use more.
+  */
+  THCCudaResourcesPerDevice* resourcesPerDevice;
   /* Captured number of devices upon startup; convenience for bounds checking */
   int numDevices;
-  /* Number of Torch defined streams available, indices 1 ... numStreams */
+  /* Number of Torch defined resources available, indices 1 ... numStreams */
   int numUserStreams;
-  /* Index of the current selected per-device stream. Actual CUDA stream changes
-     based on the current device, since streams are per-device */
+  int numUserBlasHandles;
+  /* Index of the current selected per-device resource. Actual CUDA resource
+     changes based on the current device, since resources are per-device */
   int currentPerDeviceStream;
-
+  int currentPerDeviceBlasHandle;
   /* Allocator using cudaMallocHost. */
   THAllocator* cudaHostAllocator;
 } THCState;
-
-THC_API void THCudaBlas_init(THCState *state, int num_devices, int current_device);
-THC_API void THCudaBlas_shutdown(THCState *state);
-THC_API void THCudaBlas_setHandle(THCState *state, int device);
-THC_API void THCudaBlas_setStream(THCState *state, int device, cudaStream_t stream);
 
 THC_API void THCudaInit(THCState* state);
 THC_API void THCudaShutdown(THCState* state);
@@ -81,12 +89,25 @@ THC_API int THCState_getCurrentStreamIndex(THCState *state);
 THC_API void THCState_setStream(THCState *state, int device, int stream);
 THC_API void THCState_setStreamForCurrentDevice(THCState *state, int stream);
 
+THC_API void THCState_reserveBlasHandles(THCState* state, int numHandles);
+THC_API int THCState_getNumBlasHandles(THCState* state);
+
+THC_API cublasHandle_t THCState_getDeviceBlasHandle(THCState *state, int device, int handle);
+THC_API cublasHandle_t THCState_getCurrentBlasHandle(THCState *state);
+THC_API int THCState_getCurrentBlasHandleIndex(THCState *state);
+THC_API void THCState_setBlasHandle(THCState *state, int device, int handle);
+THC_API void THCState_setBlasHandleForCurrentDevice(THCState *state, int handle);
+
+/* For the current device and stream, returns the allocated scratch space */
+THC_API void* THCState_getCurrentDeviceScratchSpace(THCState* state);
+THC_API void* THCState_getDeviceScratchSpace(THCState* state, int device, int stream);
+THC_API size_t THCState_getCurrentDeviceScratchSpaceSize(THCState* state);
+THC_API size_t THCState_getDeviceScratchSpaceSize(THCState* state, int device);
+
 #define THCudaCheck(err)  __THCudaCheck(err, __FILE__, __LINE__)
 #define THCublasCheck(err)  __THCublasCheck(err,  __FILE__, __LINE__)
 
 THC_API void __THCudaCheck(cudaError_t err, const char *file, const int line);
 THC_API void __THCublasCheck(cublasStatus_t status, const char *file, const int line);
-
-THC_API void THCudaGetGridSize(int *nBlockPerColumn_, int *nBlockPerRow_, int *nThreadPerBlock_, long size);
 
 #endif

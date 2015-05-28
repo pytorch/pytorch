@@ -12,10 +12,6 @@
 #include <thrust/reduce.h>
 #include <thrust/inner_product.h>
 
-#ifndef DIVUP
-#define DIVUP(x, y) (((x) + (y) - 1) / (y))
-#endif
-
 struct TensorPowOp {
   TensorPowOp(float v) : val(v) {}
   __device__ __forceinline__ void operator()(float* out, float* in) {
@@ -284,7 +280,7 @@ __host__ void THCudaTensor_varOuterDim(THCState *state, THCudaTensor *tgt, THCud
 
   dim3 threads(min(512, num_irows));
   unsigned maxGridDim = 1024;
-  dim3 grid(min(maxGridDim, num_orows), min(maxGridDim, DIVUP(num_irows, threads.x)));
+  dim3 grid(min(maxGridDim, num_orows), min(maxGridDim, THCCeilDiv(num_irows, threads.x)));
 
   if (flag) {
     THCudaTensor_kernel_varOuterDim<true, apply_sqrt><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
@@ -365,7 +361,7 @@ __host__ void THCudaTensor_varInnermostDim(THCState *state, THCudaTensor *tgt, T
 
   // From limited testing, 16x32 seemed a good compromise for handling both long and short dimensions.
   dim3 threads(16, 32);
-  dim3 grid(min(1024, DIVUP(num_rows, threads.y)));
+  dim3 grid(min(1024, THCCeilDiv(num_rows, threads.y)));
 
   if (flag) {
     THCudaTensor_kernel_varInnermostDim<true, apply_sqrt><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(

@@ -1,20 +1,14 @@
 #include "THCTensorMath.h"
 #include "THCGeneral.h"
-#include "THCBlas.h"
 #include "THCTensorCopy.h"
 #include "THCTensorRandom.h"
 #include "THCApply.cuh"
 #include "THCReduce.cuh"
+#include "THCReduceAll.cuh"
 
 #include <thrust/device_ptr.h>
-#include <thrust/fill.h>
 #include <thrust/functional.h>
 #include <thrust/reduce.h>
-#include <thrust/inner_product.h>
-
-#ifndef DIVUP
-#define DIVUP(x, y) (((x) + (y) - 1) / (y))
-#endif
 
 struct TensorFillOp {
   TensorFillOp(float v) : val(v) {}
@@ -208,67 +202,71 @@ void THCudaTensor_addcdiv(THCState *state, THCudaTensor *self_, THCudaTensor *t,
 float THCudaTensor_minall(THCState *state, THCudaTensor *self)
 {
   THAssert(THCudaTensor_checkGPU(state, 1, self));
-  self = THCudaTensor_newContiguous(state, self);
-  thrust::device_ptr<float> self_data(THCudaTensor_data(state, self));
+  float val = (float) THInf;
+  if (!THCudaTensor_reduceAll(state, self,
+                              thrust::identity<float>(),
+                              thrust::minimum<float>(),
+                              (float) THInf, &val, 0)) {
+    THArgCheck(false, 1, CUTORCH_DIM_WARNING);
+  }
 
-  float result = thrust::reduce(self_data, self_data+THCudaTensor_nElement(state, self), (float)(THInf), thrust::minimum<float>());
-
-  THCudaTensor_free(state, self);
-  return result;
+  THCudaCheck(cudaGetLastError());
+  return val;
 }
 
 float THCudaTensor_maxall(THCState *state, THCudaTensor *self)
 {
   THAssert(THCudaTensor_checkGPU(state, 1, self));
-  self = THCudaTensor_newContiguous(state, self);
-  thrust::device_ptr<float> self_data(THCudaTensor_data(state, self));
+  float val = (float) -THInf;
+  if (!THCudaTensor_reduceAll(state, self,
+                              thrust::identity<float>(),
+                              thrust::maximum<float>(),
+                              (float) -THInf, &val, 0)) {
+    THArgCheck(false, 1, CUTORCH_DIM_WARNING);
+  }
 
-  float result = thrust::reduce(self_data, self_data+THCudaTensor_nElement(state, self), (float)(-THInf), thrust::maximum<float>());
-
-  THCudaTensor_free(state, self);
-  return result;
+  THCudaCheck(cudaGetLastError());
+  return val;
 }
 
 float THCudaTensor_sumall(THCState *state, THCudaTensor *self)
 {
   THAssert(THCudaTensor_checkGPU(state, 1, self));
-  self = THCudaTensor_newContiguous(state, self);
-  thrust::device_ptr<float> self_data(THCudaTensor_data(state, self));
+  float val = 0.0f;
+  if (!THCudaTensor_reduceAll(state, self,
+                              thrust::identity<float>(),
+                              thrust::plus<float>(),
+                              0.0f, &val, 0)) {
+    THArgCheck(false, 1, CUTORCH_DIM_WARNING);
+  }
 
-  float result = thrust::reduce(self_data, self_data+THCudaTensor_nElement(state, self), (float)(0), thrust::plus<float>());
-
-  THCudaTensor_free(state, self);
-  return result;
+  THCudaCheck(cudaGetLastError());
+  return val;
 }
 
 float THCudaTensor_prodall(THCState *state, THCudaTensor *self)
 {
   THAssert(THCudaTensor_checkGPU(state, 1, self));
-  self = THCudaTensor_newContiguous(state, self);
-  thrust::device_ptr<float> self_data(THCudaTensor_data(state, self));
+  float val = 1.0f;
+  if (!THCudaTensor_reduceAll(state, self,
+                              thrust::identity<float>(),
+                              thrust::multiplies<float>(),
+                              1.0f, &val, 0)) {
+    THArgCheck(false, 1, CUTORCH_DIM_WARNING);
+  }
 
-  float result = thrust::reduce(self_data, self_data+THCudaTensor_nElement(state, self), (float)(1), thrust::multiplies<float>());
-
-  THCudaTensor_free(state, self);
-  return result;
+  THCudaCheck(cudaGetLastError());
+  return val;
 }
-
-struct dim4 {
-    unsigned arr[4];
-
-    __host__ dim4(unsigned init=0) {
-        for(unsigned i=0; i<4; i++) { arr[i] = init; }
-    }
-
-    __host__ __device__ unsigned& operator[](const unsigned& idx) { return arr[idx]; }
-};
 
 void THCudaTensor_sum(THCState* state, THCudaTensor *self, THCudaTensor *src, long dimension)
 {
   THAssert(THCudaTensor_checkGPU(state, 2, self, src));
-  THCudaTensor_reduceDim(
-    state, self, src,
-    thrust::identity<float>(), thrust::plus<float>(), 0.0f, dimension);
+  if (!THCudaTensor_reduceDim(
+        state, self, src,
+        thrust::identity<float>(), thrust::plus<float>(), 0.0f, dimension)) {
+    THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+  }
 
   THCudaCheck(cudaGetLastError());
 }
@@ -276,16 +274,18 @@ void THCudaTensor_sum(THCState* state, THCudaTensor *self, THCudaTensor *src, lo
 void THCudaTensor_prod(THCState* state, THCudaTensor *self, THCudaTensor *src, long dimension)
 {
   THAssert(THCudaTensor_checkGPU(state, 2, self, src));
-  THCudaTensor_reduceDim(
-    state, self, src,
-    thrust::identity<float>(), thrust::multiplies<float>(), 1.0f, dimension);
+  if (!THCudaTensor_reduceDim(
+        state, self, src,
+        thrust::identity<float>(), thrust::multiplies<float>(), 1.0f, dimension)) {
+    THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+  }
 
   THCudaCheck(cudaGetLastError());
 }
 
 struct logicalall_functor
 {
-  __host__ __device__ float operator()(const float& x, const float& y) const
+  __device__ inline float operator()(float x, float y) const
   {
     return x && y;
   }
@@ -293,7 +293,7 @@ struct logicalall_functor
 
 struct logicalany_functor
 {
-  __host__ __device__ float operator()(const float& x, const float& y) const
+  __device__ float operator()(float x, float y) const
   {
     return x || y;
   }
@@ -301,22 +301,26 @@ struct logicalany_functor
 
 int THCudaTensor_logicalall(THCState *state, THCudaTensor *self) {
   THAssert(THCudaTensor_checkGPU(state, 1, self));
-  self = THCudaTensor_newContiguous(state, self);
-  thrust::device_ptr<float> self_data(THCudaTensor_data(state, self));
+  float result = 0.0f;
+  if (!THCudaTensor_reduceAll(state, self,
+                              thrust::identity<float>(),
+                              logicalall_functor(),
+                              1.0f, &result, 0)) {
+    THArgCheck(false, 1, CUTORCH_DIM_WARNING);
+  }
 
-  int result = thrust::reduce(self_data, self_data+THCudaTensor_nElement(state, self), (float)(1), logicalall_functor());
-
-  THCudaTensor_free(state, self);
-  return result;
+  return (int) result;
 }
 
 int THCudaTensor_logicalany(THCState *state, THCudaTensor *self) {
   THAssert(THCudaTensor_checkGPU(state, 1, self));
-  self = THCudaTensor_newContiguous(state, self);
-  thrust::device_ptr<float> self_data(THCudaTensor_data(state, self));
+  float result = 0.0f;
+  if (!THCudaTensor_reduceAll(state, self,
+                              thrust::identity<float>(),
+                              logicalany_functor(),
+                              0.0f, &result, 0)) {
+    THArgCheck(false, 1, CUTORCH_DIM_WARNING);
+  }
 
-  int result = thrust::reduce(self_data, self_data+THCudaTensor_nElement(state, self), (float)(0), logicalany_functor());
-
-  THCudaTensor_free(state, self);
-  return result;
+  return (int) result;
 }

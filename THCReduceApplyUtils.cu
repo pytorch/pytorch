@@ -39,11 +39,11 @@ bool THC_getGridFromTiles(long gridTiles, dim3& grid) {
   long gridZ = 1;
 
   if (gridTiles > MAX_GRID_SIZE) {
-    gridTiles = DIVUP(gridTiles, MAX_GRID_SIZE);
+    gridTiles = THCCeilDiv(gridTiles, MAX_GRID_SIZE);
     gridY = gridTiles > MAX_GRID_SIZE ? MAX_GRID_SIZE : gridTiles;
 
     if (gridTiles > MAX_GRID_SIZE) {
-      gridTiles = DIVUP(gridTiles, MAX_GRID_SIZE);
+      gridTiles = THCCeilDiv(gridTiles, MAX_GRID_SIZE);
       gridZ = gridTiles > MAX_GRID_SIZE ? MAX_GRID_SIZE : gridTiles;
     }
   }

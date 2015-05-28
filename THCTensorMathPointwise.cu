@@ -12,10 +12,6 @@
 #include <thrust/reduce.h>
 #include <thrust/inner_product.h>
 
-#ifndef DIVUP
-#define DIVUP(x, y) (((x) + (y) - 1) / (y))
-#endif
-
 #define IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(NAME, CFUNC)                   \
   struct Tensor##NAME##Op {                                             \
     __device__ __forceinline__ void operator()(float* out, float* in) const { \

@@ -12,10 +12,6 @@
 #include <thrust/reduce.h>
 #include <thrust/inner_product.h>
 
-#ifndef DIVUP
-#define DIVUP(x, y) (((x) + (y) - 1) / (y))
-#endif
-
 struct TensorAddConstantOp {
   TensorAddConstantOp(float v) : val(v) {}
   __device__ __forceinline__ void operator()(float* out, float* in) {

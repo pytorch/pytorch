@@ -12,10 +12,6 @@
 #include <thrust/reduce.h>
 #include <thrust/inner_product.h>
 
-#ifndef DIVUP
-#define DIVUP(x, y) (((x) + (y) - 1) / (y))
-#endif
-
 /* Perform an inclusive scan along an outer dimension of a tensor.
  *
  * - num_orows is the size of the flattened outer dimensions;
@@ -68,7 +64,7 @@ __host__ void THCudaTensor_scanOuterDim(THCState *state, THCudaTensor *tgt, THCu
 
   dim3 threads(min(512, num_irows));
   unsigned maxGridDim = 1024;
-  dim3 grid(min(maxGridDim, num_orows), min(maxGridDim, DIVUP(num_irows, threads.x)));
+  dim3 grid(min(maxGridDim, num_orows), min(maxGridDim, THCCeilDiv(num_irows, threads.x)));
 
   THCudaTensor_kernel_scanOuterDim<<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
       THCudaTensor_data(state, tgt), THCudaTensor_data(state, src), num_orows, num_irows, row_size, init, binary_op);
@@ -174,7 +170,7 @@ __host__ void THCudaTensor_scanInnermostDim(THCState *state, THCudaTensor *tgt, 
   unsigned row_size = THCudaTensor_size(state, src, ndim - 1);
 
   dim3 threads(16, 32);
-  dim3 grid(min(1024, DIVUP(num_rows, threads.y)));
+  dim3 grid(min(1024, THCCeilDiv(num_rows, threads.y)));
 
   THCudaTensor_kernel_scanInnermostDim<16, 32><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
       THCudaTensor_data(state, tgt), THCudaTensor_data(state, src), num_rows, row_size, init, binary_op);
