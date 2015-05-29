@@ -1,4 +1,13 @@
+SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../../cmake ${CMAKE_MODULE_PATH})
+
+FIND_PACKAGE(Torch)
 FIND_PACKAGE(CUDA 5.5 REQUIRED)
+FIND_PACKAGE(MAGMA)
+
+IF(MAGMA_FOUND)
+  SET(USE_MAGMA 1)
+  MESSAGE(STATUS "Compiling with MAGMA support")
+ENDIF(MAGMA_FOUND)
 
 IF(APPLE)
   IF(${CUDA_VERSION} LESS 6.0)
@@ -25,6 +34,9 @@ LIST(APPEND CUDA_NVCC_FLAGS "-arch=sm_20")
 
 INCLUDE_DIRECTORIES(${CUDA_INCLUDE_DIRS})
 INCLUDE_DIRECTORIES("${CUDA_SDK_ROOT_DIR}/common/inc")
+IF(USE_MAGMA)
+  INCLUDE_DIRECTORIES(${MAGMA_INCLUDE_DIR})
+ENDIF(USE_MAGMA)
 
 IF(NOT THC_INSTALL_BIN_SUBDIR
     OR NOT THC_INSTALL_LIB_SUBDIR
@@ -45,6 +57,8 @@ ELSE()
   SET(THC_INSTALL_CMAKE_SUBDIR ${Torch_INSTALL_CMAKE_SUBDIR})
 ENDIF()
 
+INCLUDE_DIRECTORIES("${CMAKE_CURRENT_BINARY_DIR}")
+CONFIGURE_FILE(THCGeneral.h.in "${CMAKE_CURRENT_BINARY_DIR}/THCGeneral.h")
 
 SET(CMAKE_C_FLAGS "-std=c99")
 SET(src
@@ -57,11 +71,12 @@ SET(src-cuda
   THCStorageCopy.cu
   THCTensor.cu
   THCTensorCopy.cu
+  THCTensorMath.cu
   THCTensorMath2.cu
   THCTensorMathBlas.cu
   THCTensorMathCompare.cu
   THCTensorMathCompareT.cu
-  THCTensorMath.cu
+  THCTensorMathMagma.cu
   THCTensorMathPairwise.cu
   THCTensorMathPointwise.cu
   THCTensorMathScan.cu
@@ -78,6 +93,10 @@ CUDA_ADD_LIBRARY(THC SHARED ${src} ${src-cuda})
 CUDA_ADD_CUBLAS_TO_TARGET(THC)
 TARGET_LINK_LIBRARIES(THC TH ${CUDA_curand_LIBRARY})
 
+IF(USE_MAGMA)
+  TARGET_LINK_LIBRARIES(THC ${MAGMA_LIBRARIES})
+ENDIF(USE_MAGMA)
+
 INSTALL(TARGETS THC
           RUNTIME DESTINATION "${THC_INSTALL_BIN_SUBDIR}"
           LIBRARY DESTINATION "${THC_INSTALL_LIB_SUBDIR}"
@@ -85,12 +104,12 @@ INSTALL(TARGETS THC
 
 INSTALL(FILES
           THC.h
-          THCGeneral.h
+          ${CMAKE_CURRENT_BINARY_DIR}/THCGeneral.h
           THCBlas.h
           THCStorage.h
-	  THCStorageCopy.h
+          THCStorageCopy.h
           THCTensor.h
-	  THCTensorCopy.h
+          THCTensorCopy.h
           THCTensorRandom.h
           THCTensorMath.h
           THCTensorConv.h
@@ -98,5 +117,5 @@ INSTALL(FILES
           THCApply.cuh
           THCReduce.cuh
           THCReduceApplyUtils.cuh
-	  THCAllocator.h
+          THCAllocator.h
           DESTINATION "${THC_INSTALL_INCLUDE_SUBDIR}/THC")

@@ -77,6 +77,7 @@ THC_API void THCudaTensor_resize2d(THCState *state, THCudaTensor *tensor, long s
 THC_API void THCudaTensor_resize3d(THCState *state, THCudaTensor *tensor, long size0_, long size1_, long size2_);
 THC_API void THCudaTensor_resize4d(THCState *state, THCudaTensor *tensor, long size0_, long size1_, long size2_, long size3_);
 THC_API void THCudaTensor_resize5d(THCState *state, THCudaTensor *tensor, long size0_, long size1_, long size2_, long size3_, long size4_);
+THC_API void THCudaTensor_rawResize(THCState *state, THCudaTensor *self, int nDimension, long *size, long *stride);
 
 THC_API void THCudaTensor_set(THCState *state, THCudaTensor *self, THCudaTensor *src);
 THC_API void THCudaTensor_setStorage(THCState *state, THCudaTensor *self, THCudaStorage *storage_, long storageOffset_, THLongStorage *size_, THLongStorage *stride_);

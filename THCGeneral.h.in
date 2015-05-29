@@ -9,6 +9,8 @@
 #include "cuda_runtime.h"
 #include "cublas_v2.h"
 
+#cmakedefine USE_MAGMA
+
 #ifdef __cplusplus
 # define THC_EXTERNC extern "C"
 #else
@@ -77,6 +79,8 @@ typedef struct THCState
 THC_API void THCudaInit(THCState* state);
 THC_API void THCudaShutdown(THCState* state);
 THC_API void THCudaEnablePeerToPeerAccess(THCState* state);
+
+THC_API void THCMagma_init(THCState *state);
 
 /* State manipulators and accessors */
 THC_API int THCState_getNumDevices(THCState* state);

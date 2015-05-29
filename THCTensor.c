@@ -67,7 +67,6 @@ void THCudaTensor_clearFlag(THCState *state, THCudaTensor *self, const char flag
 
 static void THCudaTensor_rawInit(THCState *state, THCudaTensor *self);
 static void THCudaTensor_rawSet(THCState *state, THCudaTensor *self, THCudaStorage *storage, long storageOffset, int nDimension, long *size, long *stride);
-static void THCudaTensor_rawResize(THCState *state, THCudaTensor *self, int nDimension, long *size, long *stride);
 
 
 /* Empty init */
@@ -634,7 +633,7 @@ static void THCudaTensor_rawSet(THCState *state, THCudaTensor *self, THCudaStora
   THCudaTensor_rawResize(state, self, nDimension, size, stride);
 }
 
-static void THCudaTensor_rawResize(THCState *state, THCudaTensor *self, int nDimension, long *size, long *stride)
+void THCudaTensor_rawResize(THCState *state, THCudaTensor *self, int nDimension, long *size, long *stride)
 {
   int d;
   int nDimension_;

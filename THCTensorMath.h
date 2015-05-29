@@ -16,6 +16,8 @@ THC_API void THCudaTensor_add(THCState *state, THCudaTensor *self, THCudaTensor 
 THC_API void THCudaTensor_mul(THCState *state, THCudaTensor *self, THCudaTensor *src, float value);
 THC_API void THCudaTensor_div(THCState *state, THCudaTensor *self, THCudaTensor *src, float value);
 
+THC_API void THCudaTensor_tril(THCState *state, THCudaTensor *self, THCudaTensor *src, long k);
+THC_API void THCudaTensor_triu(THCState *state, THCudaTensor *self, THCudaTensor *src, long k);
 
 THC_API void THCudaTensor_cadd(THCState *state, THCudaTensor *self, THCudaTensor *src1, float value, THCudaTensor *src2);
 THC_API void THCudaTensor_cmul(THCState *state, THCudaTensor *self, THCudaTensor *src1, THCudaTensor *src2);
@@ -65,7 +67,19 @@ THC_API void THCudaTensor_floor(THCState *state, THCudaTensor *self, THCudaTenso
 THC_API void THCudaTensor_abs(THCState *state, THCudaTensor *self, THCudaTensor *src);
 THC_API void THCudaTensor_sign(THCState *state, THCudaTensor *self, THCudaTensor *src);
 THC_API void THCudaTensor_round(THCState *state, THCudaTensor *self, THCudaTensor *src);
-TH_API void THCudaTensor_atan2(THCState *state, THCudaTensor *r_, THCudaTensor *tx, THCudaTensor *ty);
+THC_API void THCudaTensor_atan2(THCState *state, THCudaTensor *r_, THCudaTensor *tx, THCudaTensor *ty);
+
+// MAGMA (i.e. CUDA implementation of LAPACK functions)
+THC_API void THCudaTensor_gesv(THCState *state, THCudaTensor *rb_, THCudaTensor *ra_, THCudaTensor *b_, THCudaTensor *a_);
+THC_API void THCudaTensor_gels(THCState *state, THCudaTensor *rb_, THCudaTensor *ra_, THCudaTensor *b_, THCudaTensor *a_);
+THC_API void THCudaTensor_syev(THCState *state, THCudaTensor *re_, THCudaTensor *rv_, THCudaTensor *a_, const char *jobz, const char *uplo);
+THC_API void THCudaTensor_geev(THCState *state, THCudaTensor *re_, THCudaTensor *rv_, THCudaTensor *a_, const char *jobvr);
+THC_API void THCudaTensor_gesvd(THCState *state, THCudaTensor *ru_, THCudaTensor *rs_, THCudaTensor *rv_, THCudaTensor *a, const char *jobu);
+THC_API void THCudaTensor_gesvd2(THCState *state, THCudaTensor *ru_, THCudaTensor *rs_, THCudaTensor *rv_, THCudaTensor *ra_, THCudaTensor *a, const char *jobu);
+THC_API void THCudaTensor_getri(THCState *state, THCudaTensor *ra_, THCudaTensor *a);
+THC_API void THCudaTensor_potri(THCState *state, THCudaTensor *ra_, THCudaTensor *a);
+THC_API void THCudaTensor_potrf(THCState *state, THCudaTensor *ra_, THCudaTensor *a);
+THC_API void THCudaTensor_qr(THCState *state, THCudaTensor *rq_, THCudaTensor *rr_, THCudaTensor *a);
 
 THC_API void THCudaTensor_ltValue(THCState *state, THCudaTensor *self_, THCudaTensor *src, float value);
 THC_API void THCudaTensor_gtValue(THCState *state, THCudaTensor *self_, THCudaTensor *src, float value);
