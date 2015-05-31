@@ -20,9 +20,10 @@ static int THTensor_(lapackCloneNrows)(THTensor *r_, THTensor *m, int forced, in
   else
   {
     clone = 1;
-    /* we need to copy */
     THTensor_(resize2d)(r_,m->size[1],nrows);
-    THTensor_(transpose)(r_,NULL,0,1);
+    if (r_->stride[0] == nrows && r_->stride[1] == 1)
+      THTensor_(transpose)(r_,NULL,0,1);
+    /* we need to copy */
     if (m->size[0] == nrows) {
       THTensor_(copy)(r_,m);
     } else {
