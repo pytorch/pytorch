@@ -243,6 +243,7 @@ endif()
 IF (BLAS_LIBRARIES)
   SET(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
   CHECK_C_SOURCE_RUNS("
+#include <stdlib.h>
 #include <stdio.h>
 float x[4] = { 1, 2, 3, 4 };
 float y[4] = { .1, .01, .001, .0001 };
@@ -255,6 +256,7 @@ int main() {
   exit((float)r != (float).1234);
 }" BLAS_F2C_DOUBLE_WORKS )
   CHECK_C_SOURCE_RUNS("
+#include <stdlib.h>
 #include <stdio.h>
 float x[4] = { 1, 2, 3, 4 };
 float y[4] = { .1, .01, .001, .0001 };
