@@ -361,7 +361,7 @@ bool canSortThrust(THCState* state, THCudaTensor* input, int dim) {
   // the number of slices are small, and they are large
   return ((THCudaTensor_stride(state, input, dim) == 1) &&
           numSlices <= 16 &&
-          sliceSize > 4096);
+          sliceSize > 2048);
 }
 
 void THCudaTensor_sortImplThrust(THCState* state,
