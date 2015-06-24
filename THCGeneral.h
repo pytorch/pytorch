@@ -29,7 +29,7 @@
 #define THAssert(exp)                                                   \
   do {                                                                  \
     if (!(exp)) {                                                       \
-      THError("assert(%s) failed in file %s, line %d", #exp, __FILE__, __LINE__); \
+      _THError(__FILE__, __LINE__, "assert(%s) failed", #exp);          \
     }                                                                   \
   } while(0)
 #endif
