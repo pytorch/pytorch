@@ -147,6 +147,11 @@ __host__ unsigned long THCRandom_initialSeed(THCState* state)
 
 __host__ void THCRandom_getRNGState(THCState* state, THByteTensor *rng_state)
 {
+  if (state->rngState->current_gen == NULL)
+  {
+    THError("Random number generators have not been initialized.");
+  }
+  
   // The RNG state comprises the MTPG32 states and the seed.
   static const size_t states_size = MAX_NUM_BLOCKS * sizeof(curandStateMtgp32);
   static const size_t seed_size = sizeof(unsigned long);
@@ -159,15 +164,28 @@ __host__ void THCRandom_getRNGState(THCState* state, THByteTensor *rng_state)
   memcpy(THByteTensor_data(rng_state) + states_size, &state->rngState->current_gen->initial_seed, seed_size);
 }
 
+__global__ void set_rngstate_kernel(curandStateMtgp32 *state, mtgp32_kernel_params *kernel)
+{
+  state[threadIdx.x].k = kernel;
+}
+
 __host__ void THCRandom_setRNGState(THCState* state, THByteTensor *rng_state)
 {
+  if (state->rngState->current_gen == NULL)
+  {
+    THError("Random number generators have not been initialized.");
+  }
+  
   static const size_t states_size = MAX_NUM_BLOCKS * sizeof(curandStateMtgp32);
   static const size_t seed_size = sizeof(unsigned long);
   static const size_t total_size = states_size + seed_size;
   THArgCheck(THByteTensor_nElement(rng_state) == total_size, 1, "RNG state is wrong size");
   THArgCheck(THByteTensor_isContiguous(rng_state), 1, "RNG state must be contiguous");
+  
   THCudaCheck(cudaMemcpy(state->rngState->current_gen->gen_states, THByteTensor_data(rng_state),
                          states_size, cudaMemcpyHostToDevice));
+  set_rngstate_kernel<<<1, MAX_NUM_BLOCKS, 0, THCState_getCurrentStream(state)>>>(
+      state->rngState->current_gen->gen_states, state->rngState->current_gen->kernel_params);
   memcpy(&state->rngState->current_gen->initial_seed, THByteTensor_data(rng_state) + states_size, seed_size);
 }
 
