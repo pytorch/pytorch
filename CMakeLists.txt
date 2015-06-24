@@ -116,6 +116,8 @@ INSTALL(FILES
           THCTensorSort.h
           THCApply.cuh
           THCReduce.cuh
+          THCReduceAll.cuh
           THCReduceApplyUtils.cuh
           THCAllocator.h
+          THCDeviceUtils.cuh
           DESTINATION "${THC_INSTALL_INCLUDE_SUBDIR}/THC")
