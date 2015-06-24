@@ -237,8 +237,8 @@ void __THCudaCheck(cudaError_t err, const char *file, const int line)
 {
   if(err != cudaSuccess)
   {
-    THError("%s(%i) : cuda runtime error (%d) : %s",
-            file, line, err, cudaGetErrorString(err));
+    _THError(file, line, "cuda runtime error (%d) : %s", err,
+             cudaGetErrorString(err));
   }
 }
 
@@ -283,8 +283,7 @@ void __THCublasCheck(cublasStatus_t status, const char *file, const int line)
         break;
     }
 
-    THError("%s(%i) : cublas runtime error : %s",
-            file, line, errmsg);
+    _THError(file, line, "%s(%i) : cublas runtime error : %s", errmsg);
   }
 }
 
