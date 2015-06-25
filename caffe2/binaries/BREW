@@ -1,0 +1,204 @@
+cc_binary(
+  name = "convert_db",
+  srcs = [
+      "convert_db.cc",
+  ],
+  deps = [
+      "//caffe2/db:db",
+      "//third_party/gflags:gflags",
+      "//third_party/glog:glog",
+  ],
+)
+
+cc_binary(
+  name = "make_cifar_db",
+  srcs = [
+      "make_cifar_db.cc",
+  ],
+  deps = [
+      "//caffe2/db:db",
+      "//caffe2/proto:caffe2_proto",
+      "//third_party/gflags:gflags",
+      "//third_party/glog:glog",
+  ],
+)
+
+cc_binary(
+  name = "make_image_db",
+  srcs = [
+      "make_image_db.cc",
+  ],
+  deps = [
+      "//caffe2/db:db",
+      "//caffe2/proto:caffe2_proto",
+      "//third_party/gflags:gflags",
+      "//third_party/glog:glog",
+  ],
+  external_libs = [
+    "opencv_core",
+    "opencv_highgui",
+    "opencv_imgproc",
+  ],
+)
+
+cc_binary(
+  name = "convert_encoded_to_raw_leveldb",
+  srcs = [
+      "convert_encoded_to_raw_leveldb.cc",
+  ],
+  deps = [
+      "//caffe2/core:core",
+      "//caffe2/proto:caffe2_proto",
+      "//third_party/leveldb:leveldb",
+      "//third_party/gflags:gflags",
+      "//third_party/glog:glog",
+  ],
+  external_libs = [
+    "opencv_core",
+    "opencv_highgui",
+    "opencv_imgproc",
+  ],
+)
+
+
+cc_binary(
+  name = "make_mnist_db",
+  srcs = [
+      "make_mnist_db.cc",
+  ],
+  deps = [
+      "//caffe2/db:db",
+      "//caffe2/proto:caffe2_proto",
+      "//third_party/gflags:gflags",
+      "//third_party/glog:glog",
+  ],
+)
+
+cc_binary(
+  name = "print_registered_core_operators",
+  srcs = [
+      "print_registered_core_operators.cc",
+  ],
+  deps = [
+      "//caffe2/core:core",
+      "//caffe2/db:db",
+      "//caffe2/image:image_ops",
+      "//caffe2/image:image_ops_gpu",
+      "//caffe2/operators:core_ops",
+      "//caffe2/operators:core_ops_gpu",
+  ],
+)
+
+cc_binary(
+  name = "run_client",
+  srcs = [
+      "run_client.cc",
+  ],
+  deps = [
+      "//caffe2/core:core",
+      "//caffe2/db:db",
+      "//caffe2/image:image_ops",
+      "//caffe2/image:image_ops_gpu",
+      "//caffe2/operators:core_ops",
+      "//caffe2/operators:core_ops_gpu",
+      "//caffe2/utils:proto_utils",
+      "//third_party/gflags:gflags",
+      "//third_party/glog:glog",
+  ],
+)
+
+# run_client_minimal is the binary that links in the operators that have no
+# external dependencies at all.
+cc_binary(
+  name = "run_client_minimal",
+  srcs = [
+      "run_client.cc",
+  ],
+  deps = [
+      "//caffe2/core:core",
+      "//caffe2/operators:core_ops",
+      "//caffe2/operators:core_ops_gpu",
+      "//caffe2/utils:proto_utils",
+      "//third_party/gflags:gflags",
+      "//third_party/glog:glog",
+  ],
+)
+
+
+cc_binary(
+  name = "run_plan",
+  srcs = [
+      "run_plan.cc",
+  ],
+  deps = [
+      "//caffe2/core:core",
+      "//caffe2/db:db",
+      "//caffe2/image:image_ops",
+      "//caffe2/image:image_ops_gpu",
+      "//caffe2/operators:core_ops",
+      "//caffe2/operators:core_ops_gpu",
+      "//caffe2/utils:proto_utils",
+      "//third_party/gflags:gflags",
+      "//third_party/glog:glog",
+  ],
+)
+
+# run_plan_minimal is the binary that links in the operators that have no
+# external dependencies at all.
+cc_binary(
+  name = "run_plan_minimal",
+  srcs = [
+      "run_plan.cc",
+  ],
+  deps = [
+      "//caffe2/core:core",
+      "//caffe2/operators:core_ops",
+      "//caffe2/operators:core_ops_gpu",
+      "//caffe2/utils:proto_utils",
+      "//third_party/gflags:gflags",
+      "//third_party/glog:glog",
+  ],
+)
+
+
+cc_binary(
+  name = "run_plan_mpi",
+  srcs = [
+      "run_plan_mpi.cc",
+  ],
+  deps = [
+      "//caffe2/core:core",
+      "//caffe2/db:db",
+      "//caffe2/image:image_ops",
+      "//caffe2/image:image_ops_gpu",
+      "//caffe2/mpi:mpi_ops",
+      "//caffe2/operators:core_ops",
+      "//caffe2/operators:core_ops_gpu",
+      "//caffe2/utils:proto_utils",
+      "//third_party/gflags:gflags",
+      "//third_party/glog:glog",
+  ],
+)
+
+cc_binary(
+  name = "inspect_gpus",
+  srcs = [
+      "inspect_gpus.cc",
+  ],
+  deps = [
+      "//caffe2/core:core_gpu",
+      "//third_party/glog:glog",
+  ],
+)
+
+cc_binary(
+  name = "split_db",
+  srcs = [
+      "split_db.cc",
+  ],
+  deps = [
+      "//caffe2/db:db",
+      "//third_party/gflags:gflags",
+      "//third_party/glog:glog",
+  ],
+)
