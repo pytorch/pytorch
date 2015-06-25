@@ -1,0 +1,32 @@
+cc_library(
+  name = "image_ops",
+  srcs = [
+      "image_input_op.cc",
+  ],
+  hdrs = [
+      "image_input_op.h",
+  ],
+  deps = [
+    "//caffe2/core:core",
+    "//caffe2/operators:core_ops",
+    "//caffe2/utils:math",
+    "//caffe2/utils:proto_utils",
+  ],
+  external_libs = [
+    "opencv_core",
+    "opencv_highgui",
+    "opencv_imgproc",
+  ],
+  whole_archive = True,
+)
+
+cuda_library(
+  name = "image_ops_gpu",
+  srcs = Glob(["*_gpu.cc"]) + Glob(["*.cu"]),
+  deps = [
+      ":image_ops",
+      "//caffe2/core:core_gpu",
+      "//caffe2/utils:math_gpu",
+  ],
+  whole_archive = True,
+)

@@ -1,0 +1,27 @@
+cc_library(
+  name = "sgd_ops",
+  srcs = [
+      "iter_op.cc",
+      "learning_rate_op.cc",
+  ],
+  hdrs = [
+      "learning_rate_functors.h",
+      "learning_rate_op.h"
+  ],
+  deps = [
+    "//caffe2/core:core",
+  ],
+  whole_archive = True,
+)
+
+cuda_library(
+  name = "sgd_ops_gpu",
+  srcs = [
+      "learning_rate_op.cu",
+  ],
+  deps = [
+      ":sgd_ops",
+      "//caffe2/core:core_gpu",
+  ],
+  whole_archive = True,
+)

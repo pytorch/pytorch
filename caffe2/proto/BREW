@@ -1,0 +1,18 @@
+# Build file for the caffe2 protocol buffers.
+
+proto_library(
+    name = 'caffe2_proto',
+    srcs = Glob(['*.proto']),
+    deps = [
+      "//third_party/google:protobuf",
+    ]
+)
+
+filegroup(
+    name = "caffe2_proto_py",
+    srcs = ["__init__.py"],
+    deps = [
+        "//caffe2:caffe2_python",
+    ]
+)
+

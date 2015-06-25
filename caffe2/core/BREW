@@ -1,0 +1,94 @@
+cc_library(
+  name = "core",
+  srcs = [
+      "client.cc",
+      "db.cc",
+      "minidb.cc",
+      "net.cc",
+      "operator.cc",
+      "typeid.cc",
+      "workspace.cc",
+  ],
+  hdrs = [
+      "blob.h",
+      "client.h",
+      "common.h",
+      "context.h",
+      "db.h",
+      "net.h",
+      "operator.h",
+      "registry.h",
+      "typeid.h",
+      "types.h",
+      "workspace.h"
+  ],
+  deps = [
+    "//caffe2/proto:caffe2_proto",
+    "//caffe2/utils:proto_utils",
+    "//caffe2/utils:simple_queue",
+    "//third_party/glog:glog",
+  ],
+  whole_archive = True,
+)
+
+cuda_library(
+  name = "core_gpu",
+  srcs = [
+    "common_gpu.cc",
+  ],
+  hdrs = [
+    "common_gpu.h",
+    "context_gpu.h",
+  ],
+  deps = [
+    ":core",
+  ]
+)
+
+cc_headers(
+  name = "core_cudnn",
+  srcs = [
+    "common_cudnn.h",
+  ],
+  deps = [
+      "//third_party/cudnn:cudnn",
+  ],
+)
+
+cc_test(
+  name = "core_test",
+  srcs = [
+      "blob_test.cc",
+      "context_test.cc",
+      "operator_test.cc",
+      "parallel_net_test.cc",
+      "workspace_test.cc"
+  ],
+  deps = [
+      ":core",
+      "//gtest:gtest",
+      "//gtest:gtest_main",
+  ],
+)
+
+cc_test(
+  name = "core_test_gpu",
+  srcs = [
+      "blob_test_gpu.cc",
+  ],
+  deps = [
+      ":core_gpu",
+      "//gtest:gtest",
+      "//gtest:gtest_main",
+  ],
+)
+
+cc_test(
+  name = "registry_test",
+  srcs = ["registry_test.cc"],
+  deps = [
+      ":core",
+      "//gtest:gtest",
+      "//gtest:gtest_main",
+  ],
+)

@@ -1,0 +1,69 @@
+filegroup(
+  name = "mnist",
+  srcs = [
+      "train-images-idx3-ubyte",
+      "train-labels-idx1-ubyte",
+      "t10k-images-idx3-ubyte",
+      "t10k-labels-idx1-ubyte",
+  ],
+)
+
+shell_script(
+  name = "mnist_minidb",
+  srcs = [],
+  commands = [
+      "rm -rf data/mnist/mnist-*-minidb",
+      "caffe2/binaries/make_mnist_db "
+          "--image_file=data/mnist/train-images-idx3-ubyte "
+          "--label_file=data/mnist/train-labels-idx1-ubyte "
+          "--output_file=data/mnist/mnist-train-minidb "
+          "--db=minidb",
+      "caffe2/binaries/make_mnist_db "
+          "--image_file=data/mnist/t10k-images-idx3-ubyte "
+          "--label_file=data/mnist/t10k-labels-idx1-ubyte "
+          "--output_file=data/mnist/mnist-test-minidb "
+          "--db=minidb",
+      "caffe2/binaries/make_mnist_db "
+          "--image_file=data/mnist/train-images-idx3-ubyte "
+          "--label_file=data/mnist/train-labels-idx1-ubyte "
+          "--output_file=data/mnist/mnist-train-nchw-minidb "
+          "--channel_first "
+          "--db=minidb",
+      "caffe2/binaries/make_mnist_db "
+          "--image_file=data/mnist/t10k-images-idx3-ubyte "
+          "--label_file=data/mnist/t10k-labels-idx1-ubyte "
+          "--output_file=data/mnist/mnist-test-nchw-minidb "
+          "--channel_first "
+          "--db=minidb",
+  ],
+  deps = [
+      ":mnist",
+      "//caffe2/binaries:make_mnist_db",
+  ],
+)
+
+shell_script(
+  name = "mnist_models",
+  srcs = [
+      "generate_mnist_linear_classifier.py",
+      "generate_mnist_two_layer_relu_network.py",
+      "generate_mnist_lenet.py",
+      "generate_mnist_lenet_group_convolution.py",
+      "generate_mnist_lenet_group_convolution_nhwc.py",
+      "generate_mnist_lenet_nhwc.py",
+  ],
+  commands = [
+      "export PYTHONPATH=$GENDIR:$PYTHONPATH",
+      "cd $CWD",
+      "python generate_mnist_linear_classifier.py",
+      "python generate_mnist_two_layer_relu_network.py",
+      "python generate_mnist_lenet.py",
+      "python generate_mnist_lenet_group_convolution.py",
+      "python generate_mnist_lenet_group_convolution_nhwc.py",
+      "python generate_mnist_lenet_nhwc.py",
+  ],
+  deps = [
+      ":mnist_minidb",
+      "//pycaffe2:pycaffe2",
+  ],
+)

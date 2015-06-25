@@ -1,0 +1,14 @@
+shell_script(
+  name = "toy_models",
+  srcs = [
+      "generate_toy_regression.py",
+  ],
+  commands = [
+      "export PYTHONPATH=$GENDIR:$PYTHONPATH",
+      "cd $CWD",
+      "python generate_toy_regression.py",
+  ],
+  deps = [
+      "//pycaffe2:pycaffe2",
+  ],
+)

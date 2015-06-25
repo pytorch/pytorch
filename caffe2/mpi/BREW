@@ -1,0 +1,19 @@
+cc_headers(
+  name = "mpi_common",
+  srcs = [
+      "mpi_common.h",
+  ],
+)
+
+cc_library(
+  name = "mpi_ops",
+  srcs = [
+      "allreduce_op.cc"
+  ],
+  deps = [
+      ":mpi_common",
+      "//caffe2/core:core",
+  ],
+  external_libs = Env.MPI_LIBS,
+  whole_archive = True,
+)

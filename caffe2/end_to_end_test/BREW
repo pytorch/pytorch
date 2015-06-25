@@ -1,0 +1,17 @@
+cc_test(
+  name = "end_to_end_tests",
+  srcs = [
+      "end_to_end_tests.cc",
+  ],
+  deps = [
+      "//caffe2/core:core",
+      "//caffe2/db:db",
+      "//caffe2/operators:core_ops",
+      "//caffe2/operators:core_ops_gpu",
+      "//caffe2/operators:core_ops_cudnn",
+      "//caffe2/utils:proto_utils",
+      "//data/toy:toy_models",
+      "//data/mnist:mnist_models",
+      "//gtest:gtest_main",
+  ],
+)

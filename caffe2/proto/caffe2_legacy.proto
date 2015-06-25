@@ -1,0 +1,9 @@
+syntax = "proto2";
+
+package caffe2;
+
+enum LegacyPadding {
+  NOTSET = 0;
+  VALID = 1;
+  SAME = 2;
+}
