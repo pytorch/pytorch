@@ -40,11 +40,11 @@ void THTensor_(maskedCopy)(THTensor *tensor, THByteTensor *mask, THTensor* src )
 		   }
 		   else if (*mask_data == 1)
 		   {
+		     if (cntr == nelem)
+		       THError("Number of elements of src < number of ones in mask");
 		     *tensor_data = *src_data;
 		     src_data++;
 		     cntr++;
-		     if (cntr > nelem)
-		       THError("Number of elements of src < number of ones in mask");
 		   });
   THTensor_(free)(srct);
 }
