@@ -71,25 +71,23 @@ class Blob {
   DISABLE_COPY_AND_ASSIGN(Blob);
 };
 
-
 template <typename dtype, class Context>
 class Tensor {
  public:
-  Tensor() : ndim_(0), size_(0), data_(nullptr),
-             own_data_(true), data_source_(nullptr) {}
+  Tensor() : ndim_(0), size_(0), data_(nullptr) {}
 
   // Creates a tensor. The actual data allocation is going to be carried out
   // till the first time mutable_data() is called, so there is no overhead of
   // creating multiple tensors just as placeholders (although I haven't got a
   // clear idea where such cases would happen).
   explicit Tensor(const vector<int>& dims)
-      : data_(nullptr), own_data_(true), data_source_(nullptr) {
+      : data_(nullptr) {
     Reshape(dims);
   }
 
   template <class SrcContext>
   Tensor(const Tensor<dtype, SrcContext>& src, Context* context)
-      : data_(nullptr), own_data_(true), data_source_(nullptr) {
+      : data_(nullptr) {
     Reshape(src.dims());
     context->template Copy<dtype, Context, SrcContext>(
         mutable_data(), src.data(), src.size());
@@ -98,7 +96,7 @@ class Tensor {
   // Creates a tensor, and fills its contents with the given values. We need to
   // have a context passed in as the copy function is device dependent.
   Tensor(const vector<int>& dims, vector<dtype> values, Context* context)
-      : data_(nullptr), own_data_(true), data_source_(nullptr) {
+      : data_(nullptr) {
     Reshape(dims);
     CHECK_EQ(values.size(), size_);
     context->template Copy<dtype, Context, CPUContext>(
@@ -107,15 +105,13 @@ class Tensor {
 
   // Special case of above: create a tensor of shape 1, and the given value.
   Tensor(const dtype& value, Context* context)
-      : data_(nullptr), own_data_(true), data_source_(nullptr) {
+      : data_(nullptr) {
     Reshape(std::vector<int>(1, 1));
     context->template Copy<dtype, Context, CPUContext>(
-      mutable_data(), &value, 1);
+        mutable_data(), &value, 1);
   }
 
-  virtual ~Tensor() {
-    Free();
-  }
+  virtual ~Tensor() {}
 
   void Reshape(const vector<int>& dims) {
     CHECK_GT(dims.size(), 0);
@@ -127,10 +123,10 @@ class Tensor {
       CHECK_GT(d, 0);
       new_size *= d;
     }
-    // If the size changes, we will call Free(). The next data() call will
-    // re-allocate the memory.
-    if (data_ && size_ != new_size) {
-      Free();
+    // If the size changes, we will free the data. the next mutable_data() call
+    // will create the data storage.
+    if (data_.get() && size_ != new_size) {
+      data_.reset();
     }
     size_ = new_size;
   }
@@ -142,11 +138,19 @@ class Tensor {
 
   void ShareData(const Tensor& src) {
     // To share data, the sizes must be equal.
+    // The reason we do not force the ShareData to have an explicit reshape is
+    // because we want to allow tensors to have different shape but still
+    // maintain the same underlying data storage, as long as the contents are
+    // of the same size.
     CHECK_EQ(src.size_, size_)
         << "Size mismatch - did you call reshape before sharing the data?";
-    if (data_) Free();
-    own_data_ = false;
-    data_source_ = &src;
+    // It is possible that the source tensor hasn't called mutable_data() yet,
+    // in which case ShareData() does make much sense since we don't really know
+    // what to share yet.
+    CHECK(src.data_.get())
+        << "Source tensor has no content yet.";
+    // Finally, do sharing.
+    data_ = src.data_;
   }
 
   inline int ndim() const { return ndim_; }
@@ -159,49 +163,26 @@ class Tensor {
   }
 
   const dtype* data() const {
-    if (own_data_) {
-      CHECK_NOTNULL(data_);
-      return data_;
-    } else {
-      CHECK_NOTNULL(data_source_);
-      CHECK_EQ(data_source_->size_, size_) << "Source data size has changed.";
-      CHECK_NOTNULL(data_source_->data());
-      return data_source_->data();
-    }
+    CHECK_NOTNULL(data_.get());
+    return data_.get();
   }
 
   dtype* mutable_data() {
-    CHECK(own_data_) << "Cannot call mutable_data() from a shared tensor.";
-    CHECK_GT(size_, 0) << "Cannot call mutable_data on a size 0 tensor.";
-    if (!data_) Allocate();
-    CHECK_NOTNULL(data_);
-    return data_;
+    if (!data_.get()) Allocate();
+    return data_.get();
   }
 
   void Allocate() {
-    CHECK(data_ == nullptr);
     CHECK_GT(size_, 0);
-    data_ = static_cast<dtype*>(Context::New(size_ * sizeof(dtype)));
-  }
-
-  void Free() {
-    if (own_data_) {
-      if (data_) {
-        Context::Delete(data_);
-      }
-    }
-    own_data_ = true;
-    data_ = nullptr;
+    data_.reset(static_cast<dtype*>(Context::New(size_ * sizeof(dtype))),
+                Context::Delete);
   }
 
  protected:
   int ndim_;
   vector<int> dims_;
   int size_;
-  dtype* data_;
-  bool own_data_;
-  const Tensor* data_source_;
-
+  std::shared_ptr<dtype> data_;
   DISABLE_COPY_AND_ASSIGN(Tensor);
 };
 
