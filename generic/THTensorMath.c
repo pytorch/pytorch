@@ -31,21 +31,25 @@ void THTensor_(maskedCopy)(THTensor *tensor, THByteTensor *mask, THTensor* src )
   long nelem = THTensor_(nElement)(srct);
   if (THTensor_(nElement)(tensor) != THByteTensor_nElement(mask))
   {
+    THTensor_(free)(srct);
     THError("Number of elements of destination tensor != Number of elements in mask");
   }
   TH_TENSOR_APPLY2(real, tensor, unsigned char, mask,
-		   if (*mask_data > 1)
-		   {
-		     THError("Mask tensor can take 0 and 1 values only");
-		   }
-		   else if (*mask_data == 1)
-		   {
-		     if (cntr == nelem)
-		       THError("Number of elements of src < number of ones in mask");
-		     *tensor_data = *src_data;
-		     src_data++;
-		     cntr++;
-		   });
+                   if (*mask_data > 1)
+                   {
+                     THTensor_(free)(srct);
+                     THError("Mask tensor can take 0 and 1 values only");
+                   }
+                   else if (*mask_data == 1)
+                   {
+                     if (cntr == nelem) {
+                       THTensor_(free)(srct);
+                       THError("Number of elements of src < number of ones in mask");
+                     }
+                     *tensor_data = *src_data;
+                     src_data++;
+                     cntr++;
+                   });
   THTensor_(free)(srct);
 }
 
@@ -101,8 +105,10 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
     // check that the indices are within range
     long max = src->size[0];
     for (i=0; i<numel; i++)
-      if (index_data[i] < 1 || index_data[i] > max)
+      if (index_data[i] < 1 || index_data[i] > max) {
+        THLongTensor_free(index);
         THError("index out of range");
+      }
 
     if (src->nDimension == 1) {
       #pragma omp parallel for if(numel > TH_OMP_OVERHEAD_THRESHOLD) private(i)
