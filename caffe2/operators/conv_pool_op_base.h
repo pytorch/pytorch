@@ -57,7 +57,7 @@ class ConvPoolOpBase : public Operator<dtype, DeviceContext> {
       pad_t_ = pad_;
       pad_l_ = pad_;
       pad_b_ = pad_;
-      pad_t_ = pad_;
+      pad_r_ = pad_;
     }
     CHECK_GE(pad_, 0);
     CHECK_GE(pad_t_, 0);
