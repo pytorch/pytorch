@@ -214,8 +214,7 @@ class Net(object):
     device_option = caffe2_pb2.DeviceOption()
     device_option.device_type = caffe2_pb2.CUDA
     device_option.cuda_gpu_id = gpu_id
-    for op in self._net.operators:
-      op.device_option.CopyFrom(device_option)
+    self._net.device_option.CopyFrom(device_option)
 
   def __getattr__(self, operator_type):
     if operator_type in self.__class__.operator_registry_:

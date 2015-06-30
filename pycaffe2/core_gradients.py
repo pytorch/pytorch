@@ -115,3 +115,9 @@ def AddSplitGradient(op):
   return CreateOperator('Sum')(
     [GetGradientName(name) for name in op.outputs],
     [GetGradientName(op.inputs[0])])
+
+@GradientRegistry.RegisterGradient('Alias')
+def AddAliasGradient(op):
+  return CreateOperator('Alias')(
+    [GetGradientName(name) for name in op.outputs],
+    [GetGradientName(name) for name in op.inputs])

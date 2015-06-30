@@ -4,19 +4,57 @@ from google.protobuf import text_format
 import numpy as np
 from pycaffe2 import utils
 
-MODE_TRAIN = 0
-MODE_TEST = 1
-__TRANSLATE_MODE__ = MODE_TRAIN
 
-def SetTranslateMode(mode):
-  global __TRANSLATE_MODE__
-  __TRANSLATE_MODE__ = mode
+def _StateMeetsRule(state, rule):
+  """A function that reproduces Caffe's StateMeetsRule functionality."""
+  if rule.HasField('phase') and rule.phase != state.phase:
+    return False
+  if rule.HasField('min_level') and state.level < rule.min_level:
+    return False
+  if rule.HasField('max_level') and state.level > rule.max_lavel:
+    return False
+  curr_stages = set(list(state.stage))
+  # all stages in rule.stages should be in, otherwise it's not a match.
+  if len(rule.stage) and any([s not in curr_stages for s in rule.stage]):
+    return False
+  # none of the stage in rule.stages should be in, otherwise it's not a match.
+  if len(rule.not_stage) and any([s in curr_stages for s in rule.not_stage]):
+    return False
+  # If none of the nonmatch happens, return True.
+  return True
 
-def IsTraining():
-  return (__TRANSLATE_MODE__ == MODE_TRAIN)
 
-def IsTesting():
-  return (__TRANSLATE_MODE__ == MODE_TEST)
+def _ShouldInclude(net_state, layer):
+  """A function that reproduces Caffe's inclusion and exclusion rule."""
+  ret = (len(layer.include) == 0)
+  # check exclude rules: if any exclusion is met, we shouldn't include.
+  ret &= not any([_StateMeetsRule(net_state, rule) for rule in layer.exclude])
+  if len(layer.include):
+    # check include rules: if any inclusion is met, we should include.
+    ret |= any([_StateMeetsRule(net_state, rule) for rule in layer.include])
+  return ret
+
+
+def DeleteDropout(net):
+  """A utility function that replaces all dropout operators with Alias.
+
+  The reason for this is that Caffe involves Dropout in both training and
+  testing, and uses a global mode to determine whether we are training or
+  testing a model. Instead of that, what Caffe2 does is to remove that global
+  mode, and explicitly require the network to NOT contain a dropout operator.
+  In this function, we will simply replace all dropouts with an Alias operator.
+
+  Inputs:
+    net: a caffe2 net.
+  Outputs:
+    None. The function works by modifying net in-place.
+  """
+  for op in net.operators:
+    if op.type == 'Dropout':
+      op.type = 'Alias'
+      del op.outputs[1]  # output 1 is the dropout mask, which is not needed.
+      del op.args[:]  # args is used in Dropout but not needed in Alias.
+  return
 
 
 class CacaRegistry(object):
@@ -43,15 +81,19 @@ class CacaRegistry(object):
     return caffe_ops, params
 
   @classmethod
-  def TranslateModel(cls, caffe_net, pretrained_net):
+  def TranslateModel(cls, caffe_net, pretrained_net,
+                     net_state=caffe_pb2.NetState()):
     net = caffe2_pb2.NetDef()
     net.name = caffe_net.name
-    net_params = []
+    net_params = caffe2_pb2.TensorProtos()
     if len(caffe_net.layer) == 0:
       raise ValueError('I think something is wrong. This translation script '
                        'only accepts new style layers that are stored in the '
                        'layer field.')
     for layer in caffe_net.layer:
+      if not _ShouldInclude(net_state, layer):
+        print 'Current net state does not need layer', layer.name
+        continue
       print 'Translate layer', layer.name
       # Get pretrained one
       pretrained_layers = (
@@ -69,7 +111,7 @@ class CacaRegistry(object):
         pretrained_blobs = []
       operators, params = cls.TranslateLayer(layer, pretrained_blobs)
       net.operators.extend(operators)
-      net_params.extend(params)
+      net_params.protos.extend(params)
     return net, net_params
 
 
@@ -168,14 +210,11 @@ def TranslateInnerProduct(layer, pretrained_blobs):
 
 @CacaRegistry.Register("Dropout")
 def TranslateDropout(layer, pretrained_blobs):
-  if IsTraining():
-    caffe_op = BaseTranslate(layer, "Dropout")
-    caffe_op.outputs.extend(['_' + caffe_op.outputs[0] + '_mask'])
-    param = layer.dropout_param
-    AddArgument(caffe_op, "ratio", param.dropout_ratio)
-    return caffe_op, []
-  else:
-    return BaseTranslate(layer, "Alias"), []
+  caffe_op = BaseTranslate(layer, "Dropout")
+  caffe_op.outputs.extend(['_' + caffe_op.outputs[0] + '_mask'])
+  param = layer.dropout_param
+  AddArgument(caffe_op, "ratio", param.dropout_ratio)
+  return caffe_op, []
 
 
 @CacaRegistry.Register("Softmax")
