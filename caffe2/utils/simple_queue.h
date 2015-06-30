@@ -9,8 +9,8 @@
 
 namespace caffe2 {
 
-// This is a very simple queue that Yangqing wrote when nursing the baby, so
-// don't take it seriously. What it does is a minimal thread-safe queue that
+// This is a very simple queue that Yangqing wrote when bottlefeeding the baby,
+// so don't take it seriously. What it does is a minimal thread-safe queue that
 // allows me to run network as a DAG.
 //
 // A usual work pattern looks like this: one or multiple producers push jobs
