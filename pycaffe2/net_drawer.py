@@ -20,8 +20,8 @@ OP_STYLE = {'shape': 'box', 'color': '#0F9D58', 'style': 'filled',
           'fontcolor': '#FFFFFF'}
 BLOB_STYLE = {'shape': 'octagon'}
 
-def GetPydotGraph(operators, name):
-  graph = pydot.Dot(name, rankdir='LR')
+def GetPydotGraph(operators, name, rankdir='LR'):
+  graph = pydot.Dot(name, rankdir=rankdir)
   pydot_nodes = {}
   pydot_node_counts = defaultdict(int)
   node_id = 0
@@ -56,6 +56,29 @@ def GetPydotGraph(operators, name):
       pydot_nodes[output_name] = output_node
       graph.add_node(output_node)
       graph.add_edge(pydot.Edge(op_node, output_node))
+  return graph
+
+def GetPydotGraphMinimal(operators, name, rankdir='LR'):
+  """Different from GetPydotGraph, hide all blob nodes and only show op nodes.
+  """
+  graph = pydot.Dot(name, rankdir=rankdir)
+  pydot_nodes = {}
+  blob_parents = {}
+  pydot_node_counts = defaultdict(int)
+  node_id = 0
+  for op_id, op in enumerate(operators):
+    if op.name:
+      op_node = pydot.Node(
+          '%s/%s (op#%d)' % (op.name, op.type, op_id), **OP_STYLE)
+    else:
+      op_node = pydot.Node(
+          '%s (op#%d)' % (op.type, op_id), **OP_STYLE)
+    graph.add_node(op_node)
+    for input_name in op.inputs:
+      if input_name in blob_parents:
+        graph.add_edge(pydot.Edge(blob_parents[input_name], op_node))
+    for output_name in op.outputs:
+      blob_parents[output_name] = op_node
   return graph
 
 def GetOperatorMapForPlan(plan_def):

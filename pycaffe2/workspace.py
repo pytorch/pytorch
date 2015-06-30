@@ -1,6 +1,8 @@
 import atexit
+from caffe2.proto import caffe2_pb2
 from multiprocessing import Process
 import socket
+from pycaffe2 import utils
 
 from .libcaffe2_python import *
 # libcaffe2_python contains a global Workspace that we need to properly delete
@@ -70,7 +72,9 @@ def StringfyProto(obj):
       # Proto() function that gives you the protocol buffer.
       return obj.Proto().SerializeToString()
 
-def CreateNet(net):
+def CreateNet(net, input_blobs=[]):
+  for input_blob in input_blobs:
+    CreateBlob(input_blob)
   return cc_CreateNet(StringfyProto(net))
 
 def RunOperatorOnce(operator):
@@ -90,7 +94,64 @@ def RunPlan(plan):
   return cc_RunPlan(StringfyProto(plan))
 
 def FeedBlob(name, arr, device_option=None):
+  """Feeds a blob into the workspace.
+
+  Inputs:
+    name: the name of the blob.
+    arr: either a TensorProto object or a numpy array object to be fed into the
+        workspace.
+    device_option (optional): the device option to feed the data with.
+  Returns:
+    True or False, stating whether the feed is successful.
+  """
+  if type(arr) is caffe2_pb2.TensorProto:
+    arr = utils.Caffe2TensorToNumpyArray(arr)
   if device_option is not None:
     return cc_FeedBlob(name, arr, StringfyProto(device_option))
   else:
     return cc_FeedBlob(name, arr)
+
+class Model(object):
+  def __init__(self, net, parameters, inputs, outputs, device_option=None):
+    """Initializes a model.
+
+    Inputs:
+      net: a Caffe2 NetDef protocol buffer.
+      parameters: a TensorProtos object containing the parameters to feed into
+          the network.
+      inputs: a list of strings specifying the input blob names.
+      outputs: a list of strings specifying the output blob names.
+      device_option (optional): the device option used to run the model. If
+          not given, we will use the net's device option.
+    """
+    self._name = net.name
+    self._inputs = inputs
+    self._outputs = outputs
+    if device_option:
+      self._device_option = device_option.SerializeToString()
+    else:
+      self._device_option = net.device_option.SerializeToString()
+    # For a caffe2 net, before we create it, it needs to have all the parameter
+    # blobs ready. The construction is in two steps: feed in all the parameters
+    # first, and then create the network object.
+    for param in parameters.protos:
+      #print 'Feeding parameter', param.name
+      FeedBlob(param.name, param, net.device_option)
+    if not CreateNet(net, inputs):
+      raise RuntimeError("Error when creating the model.")
+
+  def Run(self, input_arrs):
+    """Runs the model with the given input.
+
+    Inputs:
+      input_arrs: an iterable of input arrays.
+    Outputs:
+      output_arrs: a list of output arrays.
+    """
+    if len(input_arrs) != len(self._inputs):
+      raise RuntimeError("Incorrect number of inputs.")
+    for i, input_arr in enumerate(input_arrs):
+      FeedBlob(self._inputs[i], input_arr, self._device_option)
+    if not RunNet(self._name):
+      raise RuntimeError("Error in running the network.")
+    return [FetchBlob(s) for s in self._outputs]

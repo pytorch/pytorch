@@ -42,11 +42,10 @@ if __name__ == '__main__':
   caffenet_pretrained.ParseFromString(
       open('data/testdata/caffe_translator/bvlc_reference_caffenet.caffemodel')
           .read())
-  caffe_translator.SetTranslateMode(caffe_translator.MODE_TEST)
   net, pretrained_params = caffe_translator.TranslateModel(
       caffenet, caffenet_pretrained)
-
-  for param in pretrained_params:
+  caffe_translator.DeleteDropout(net)
+  for param in pretrained_params.protos:
       workspace.FeedBlob(param.name, utils.Caffe2TensorToNumpyArray(param))
   # Let's also feed in the data from the Caffe test code.
   data = np.load('data/testdata/caffe_translator/data_dump.npy').astype(np.float32)
