@@ -33,8 +33,8 @@ TEST(OperatorDeathTest, CannotUseUninitializedBlob) {
   OperatorDef op_def;
   op_def.set_name("JustTest0");
   op_def.set_type("JustTest");
-  op_def.add_inputs("input");
-  op_def.add_outputs("output");
+  op_def.add_input("input");
+  op_def.add_output("output");
   EXPECT_DEATH(CreateOperator(op_def, &ws), "Check failed");
 }
 
@@ -43,21 +43,21 @@ TEST(OperatorTest, TestParameterAccess) {
   Workspace ws;
   op_def.set_name("JustTest0");
   op_def.set_type("JustTest");
-  op_def.add_inputs("input");
-  op_def.add_outputs("output");
+  op_def.add_input("input");
+  op_def.add_output("output");
   {
-    Argument* arg = op_def.add_args();
+    Argument* arg = op_def.add_arg();
     arg->set_name("arg0");
     arg->set_f(0.1);
   }
   {
-    Argument* arg = op_def.add_args();
+    Argument* arg = op_def.add_arg();
     arg->set_name("arg1");
     arg->add_ints(1);
     arg->add_ints(2);
   }
   {
-    Argument* arg = op_def.add_args();
+    Argument* arg = op_def.add_arg();
     arg->set_name("arg2");
     arg->set_s("argstring");
   }
@@ -78,10 +78,10 @@ TEST(OperatorDeathTest, CannotAccessParameterWithWrongType) {
   Workspace ws;
   op_def.set_name("JustTest0");
   op_def.set_type("JustTest");
-  op_def.add_inputs("input");
-  op_def.add_outputs("output");
+  op_def.add_input("input");
+  op_def.add_output("output");
   {
-    Argument* arg = op_def.add_args();
+    Argument* arg = op_def.add_arg();
     arg->set_name("arg0");
     arg->set_f(0.1);
   }
@@ -98,10 +98,10 @@ TEST(OperatorDeathTest, CannotAccessRepeatedParameterWithWrongType) {
   Workspace ws;
   op_def.set_name("JustTest0");
   op_def.set_type("JustTest");
-  op_def.add_inputs("input");
-  op_def.add_outputs("output");
+  op_def.add_input("input");
+  op_def.add_output("output");
   {
-    Argument* arg = op_def.add_args();
+    Argument* arg = op_def.add_arg();
     arg->set_name("arg0");
     arg->add_floats(0.1);
   }
@@ -128,8 +128,8 @@ TEST(OperatorTest, TestSetUp) {
   OperatorDef op_def;
   op_def.set_name("JustTest0");
   op_def.set_type("JustTest");
-  op_def.add_inputs("input");
-  op_def.add_outputs("output");
+  op_def.add_input("input");
+  op_def.add_output("output");
   EXPECT_NE(nullptr, ws.CreateBlob("input"));
   unique_ptr<OperatorBase> op(CreateOperator(op_def, &ws));
   EXPECT_NE(nullptr, op.get());
@@ -142,9 +142,9 @@ TEST(OperatorTest, TestSetUpInputOutputCount) {
   OperatorDef op_def;
   op_def.set_name("JustTest0");
   op_def.set_type("JustTest");
-  op_def.add_inputs("input");
-  op_def.add_inputs("input2");
-  op_def.add_outputs("output");
+  op_def.add_input("input");
+  op_def.add_input("input2");
+  op_def.add_output("output");
   EXPECT_NE(nullptr, ws.CreateBlob("input"));
   EXPECT_NE(nullptr, ws.CreateBlob("input2"));
   unique_ptr<OperatorBase> op(CreateOperator(op_def, &ws));
@@ -153,9 +153,9 @@ TEST(OperatorTest, TestSetUpInputOutputCount) {
   // Because JustTest will only accept one single input, this will return false.
   EXPECT_FALSE(op->Verify());
 
-  op_def.clear_inputs();
-  op_def.add_inputs("input");
-  op_def.add_outputs("output2");
+  op_def.clear_input();
+  op_def.add_input("input");
+  op_def.add_output("output2");
   op.reset(CreateOperator(op_def, &ws));
   EXPECT_NE(nullptr, op.get());
   // Because JustTest will only produce one single output, this will return
@@ -169,12 +169,12 @@ NetDef GetNetDefForTest() {
   net_def.set_name("NetForTest");
   op_def.set_name("JustTest0");
   op_def.set_type("JustTest");
-  op_def.add_inputs("input");
-  op_def.add_outputs("hidden");
+  op_def.add_input("input");
+  op_def.add_output("hidden");
   net_def.add_operators()->CopyFrom(op_def);
   op_def.set_name("JustTest1");
-  op_def.set_inputs(0, "hidden");
-  op_def.set_outputs(0, "output");
+  op_def.set_input(0, "hidden");
+  op_def.set_output(0, "output");
   net_def.add_operators()->CopyFrom(op_def);
   return net_def;
 }

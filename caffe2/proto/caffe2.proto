@@ -51,12 +51,12 @@ message DeviceOption {
 }
 
 message OperatorDef {
-  repeated string inputs = 1; // the name of the input blobs
-  repeated string outputs = 2; // the name of output top blobs
+  repeated string input = 1; // the name of the input blobs
+  repeated string output = 2; // the name of output top blobs
   optional string name = 3; // the layer name
   optional string type = 4; // the layer type
 
-  repeated Argument args = 5;
+  repeated Argument arg = 5;
 
   optional DeviceOption device_option = 6;
 

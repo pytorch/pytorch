@@ -46,13 +46,13 @@ class PrintOp final : public Operator<dtype, DeviceContext> {
       // We will output to file instead of printing on screen.
       const string& target_folder = ws->RootFolder();
       // We will write each individual tensor to its individual file.
-      log_files_.resize(def().inputs_size());
-      for (int i = 0; i < def().inputs_size(); ++i) {
+      log_files_.resize(def().input_size());
+      for (int i = 0; i < def().input_size(); ++i) {
         log_files_[i].reset(new std::ofstream(
-            target_folder + "/" + def().inputs(i) + kPrintFileExtension,
+            target_folder + "/" + def().input(i) + kPrintFileExtension,
             std::ofstream::out | std::ofstream::trunc));
         CHECK(log_files_[i]->good())
-            << "Failed to open PrintOp file for tensor " << def().inputs(i)
+            << "Failed to open PrintOp file for tensor " << def().input(i)
             << ". rdstate() = " << log_files_[i]->rdstate();
       }
     }
@@ -91,7 +91,7 @@ class PrintOp final : public Operator<dtype, DeviceContext> {
         stream << std::endl;
       } else {
         // Log to console.
-        LOG(INFO) << "Tensor " << def().inputs(input_id)
+        LOG(INFO) << "Tensor " << def().input(input_id)
             << " (" << dims_stream.str() << "): " << values_stream.str();
       }
     }

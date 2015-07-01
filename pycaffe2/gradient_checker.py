@@ -25,7 +25,7 @@ class GradientChecker:
     loss = 0.
     # Get Loss and feed in the gradients, run gradient ops.
     for idx in outputs_with_grads:
-      name = op.outputs[idx]
+      name = op.output[idx]
       arr = workspace.FetchBlob(name)
       loss += (arr ** 2).sum()
       workspace.FeedBlob(core.GetGradientName(name), arr, self._device_option)
@@ -67,10 +67,10 @@ class GradientChecker:
     dims_to_check = inputs[input_to_check].size
     # First, feed in the input.
     for i, arr in enumerate(inputs):
-      workspace.FeedBlob(op.inputs[i], arr, self._device_option)
+      workspace.FeedBlob(op.input[i], arr, self._device_option)
 
     # Get the loss and gradient for the original.
-    input_name = op.inputs[input_to_check]
+    input_name = op.input[input_to_check]
     loss, grad = self.GetLossAndGrad(op, grad_ops, inputs[input_to_check],
                                      input_name, outputs_with_grads)
     grad_estimate = np.zeros_like(inputs[input_to_check])

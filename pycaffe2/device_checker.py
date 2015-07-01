@@ -34,11 +34,11 @@ class DeviceChecker(object):
     workspace.SwitchWorkspace("_device_check_", True)
     for i, device_option in enumerate(self._device_options):
       for i, arr in enumerate(inputs):
-        workspace.FeedBlob(op.inputs[i], arr, device_option)
+        workspace.FeedBlob(op.input[i], arr, device_option)
       op.device_option.CopyFrom(device_option)
       workspace.RunOperatorOnce(op)
       results.append(
-          [workspace.FetchBlob(op.outputs[idx]) for idx in outputs_to_check])
+          [workspace.FetchBlob(op.output[idx]) for idx in outputs_to_check])
       # Everything is done, reset the workspace.
       workspace.ResetWorkspace()
     # After running on all devices, check correctness
@@ -49,7 +49,7 @@ class DeviceChecker(object):
         y = results[0][j]
         if np.any(np.abs(x - y) > self._threshold):
           print 'Failure in checking device option', i, 'and output ',
-          print op.outputs[j], '. The outputs are:'
+          print op.output[j], '. The outputs are:'
           print x.flatten()
           print y.flatten()
           success = False
@@ -63,7 +63,7 @@ class DeviceChecker(object):
     """
     old_ws_name = workspace.CurrentWorkspace()
     results = []
-    blobs_to_check = sum([list(op.outputs) for op in net.operators], [])
+    blobs_to_check = sum([list(op.output) for op in net.operators], [])
     blobs_to_check = [b for b in blobs_to_check if b not in ignore]
     workspace.SwitchWorkspace("_device_check_", True)
     for i, device_option in enumerate(self._device_options):
