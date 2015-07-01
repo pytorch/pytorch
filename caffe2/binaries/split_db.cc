@@ -17,9 +17,9 @@ using caffe2::db::Transaction;
 
 int main(int argc, char** argv) {
   google::InitGoogleLogging(argv[0]);
-  google::SetUsageMessage(
+  gflags::SetUsageMessage(
       "This script converts databases between different formats.");
-  google::ParseCommandLineFlags(&argc, &argv, true);
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
 
   std::unique_ptr<DB> in_db(caffe2::db::CreateDB(
       FLAGS_db_type, FLAGS_input_db, caffe2::db::READ));

@@ -137,10 +137,10 @@ void ConvertCIFAR() {
 
 int main(int argc, char** argv) {
   google::InitGoogleLogging(argv[0]);
-  google::SetUsageMessage(
+  gflags::SetUsageMessage(
       "This script converts the CIFAR dataset to the db format used "
       "by caffe to perform classification.");
-  google::ParseCommandLineFlags(&argc, &argv, true);
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
   caffe2::ConvertCIFAR();
   return 0;
 }

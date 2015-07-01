@@ -14,8 +14,8 @@ DEFINE_string(input_file, "",
 
 int main(int argc, char** argv) {
   google::InitGoogleLogging(argv[0]);
-  google::SetUsageMessage("Runs a given client.");
-  google::ParseCommandLineFlags(&argc, &argv, true);
+  gflags::SetUsageMessage("Runs a given client.");
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
   LOG(INFO) << "Loading client file: " << FLAGS_client_file;
   caffe2::Client client(FLAGS_client_file);
   std::vector<float> input;

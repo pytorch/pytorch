@@ -131,8 +131,8 @@ void ConvertToRawDataset(
 
 int main(int argc, char** argv) {
   google::InitGoogleLogging(argv[0]);
-  google::SetUsageMessage("Converts an image dataset to a leveldb.");
-  google::ParseCommandLineFlags(&argc, &argv, true);
+  gflags::SetUsageMessage("Converts an image dataset to a leveldb.");
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
   caffe2::ConvertToRawDataset(
       FLAGS_input_db_name, FLAGS_output_db_name);
   return 0;

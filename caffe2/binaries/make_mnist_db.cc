@@ -115,8 +115,8 @@ void convert_dataset(const char* image_filename, const char* label_filename,
 
 int main(int argc, char** argv) {
   google::InitGoogleLogging(argv[0]);
-  google::SetUsageMessage("Converts the raw mnist dataset to a leveldb.");
-  google::ParseCommandLineFlags(&argc, &argv, true);
+  gflags::SetUsageMessage("Converts the raw mnist dataset to a leveldb.");
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
   caffe2::convert_dataset(FLAGS_image_file.c_str(), FLAGS_label_file.c_str(),
                           FLAGS_output_file.c_str(), FLAGS_data_limit);
   return 0;

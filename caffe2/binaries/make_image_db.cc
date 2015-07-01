@@ -137,8 +137,8 @@ void ConvertImageDataset(
 
 int main(int argc, char** argv) {
   google::InitGoogleLogging(argv[0]);
-  google::SetUsageMessage("Converts an image dataset to a db.");
-  google::ParseCommandLineFlags(&argc, &argv, true);
+  gflags::SetUsageMessage("Converts an image dataset to a db.");
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
   caffe2::ConvertImageDataset(
       FLAGS_input_folder, FLAGS_list_file,
       FLAGS_output_db_name, FLAGS_shuffle);
