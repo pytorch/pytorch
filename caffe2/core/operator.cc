@@ -90,9 +90,7 @@ bool OperatorBase::Verify() {
   return true;
 }
 
-OperatorBase* CreateOperator(const OperatorDef& operator_def,
-                             const DeviceOption& device_option,
-                             Workspace* ws) {
+OperatorBase* CreateOperator(const OperatorDef& operator_def, Workspace* ws) {
   const string& key = operator_def.type();
   switch (operator_def.device_option().device_type()) {
   case CPU:
