@@ -26,10 +26,10 @@ class ConvPoolOpBase : public Operator<dtype, DeviceContext> {
             OperatorBase::GetSingleArgument<int>(
                 "legacy_pad", LegacyPadding::NOTSET))),
         pad_(OperatorBase::GetSingleArgument<int>("pad", 0)),
-        pad_t_(OperatorBase::GetSingleArgument<int>("pad_t", 0)),
-        pad_l_(OperatorBase::GetSingleArgument<int>("pad_l", 0)),
-        pad_b_(OperatorBase::GetSingleArgument<int>("pad_b", 0)),
-        pad_r_(OperatorBase::GetSingleArgument<int>("pad_r", 0)),
+        pad_t_(OperatorBase::GetSingleArgument<int>("pad_t", pad_)),
+        pad_l_(OperatorBase::GetSingleArgument<int>("pad_l", pad_)),
+        pad_b_(OperatorBase::GetSingleArgument<int>("pad_b", pad_)),
+        pad_r_(OperatorBase::GetSingleArgument<int>("pad_r", pad_)),
         kernel_h_(OperatorBase::GetSingleArgument<int>(
             "kernel_h", OperatorBase::GetSingleArgument<int>("kernel", 0))),
         kernel_w_(OperatorBase::GetSingleArgument<int>(
@@ -44,20 +44,15 @@ class ConvPoolOpBase : public Operator<dtype, DeviceContext> {
     CHECK_GT(kernel_w_, 0);
     // For the padding, they should either be the legacy padding strategy
     // (VALID or SAME), or an explicit, non-negative value.
-    if (legacy_pad_ != LegacyPadding::NOTSET) {
+    if (legacy_pad_ == LegacyPadding::VALID ||
+        legacy_pad_ == LegacyPadding::SAME) {
       CHECK(!OperatorBase::HasArgument("pad") &&
             !OperatorBase::HasArgument("pad_t") &&
             !OperatorBase::HasArgument("pad_l") &&
             !OperatorBase::HasArgument("pad_b") &&
             !OperatorBase::HasArgument("pad_r"))
-          << "If you use legacy padding, you should not specify any specific "
-             "padding values.";
-    } else if (OperatorBase::HasArgument("pad")) {
-      // if pad is set, it overrides the individual values.
-      pad_t_ = pad_;
-      pad_l_ = pad_;
-      pad_b_ = pad_;
-      pad_r_ = pad_;
+          << "If you use legacy padding VALID or SAME, you should not specify "
+             "any specific padding values.";
     }
     CHECK_GE(pad_, 0);
     CHECK_GE(pad_t_, 0);
@@ -150,6 +145,16 @@ class ConvPoolOpBase : public Operator<dtype, DeviceContext> {
 
   virtual ~ConvPoolOpBase() {}
 
+ private:
+  // I put this private section before protected because these variables are
+  // going to be initialized before pad_t_ et al. However, a derivative class
+  // should never use these values. They should refer to pad_t et al. for the
+  // exact padding values. This isolates out the padding scheme that are growing
+  // unfortunately complex due to implementational differences from different
+  // frameworks.
+  LegacyPadding legacy_pad_;
+  int pad_;
+
  protected:
   int pad_t_;
   int pad_l_;
@@ -172,6 +177,30 @@ class ConvPoolOpBase : public Operator<dtype, DeviceContext> {
       *out_size = static_cast<int>(
           static_cast<float>(in_size + *pad_head + *pad_tail - kernel) / stride
           + 1);
+    } else if (legacy_pad_ == LegacyPadding::CAFFE_LEGACY_POOLING) {
+      // This is in order to adapt Caffe's pooling padding case.
+      CHECK_GE(*pad_head, 0);
+      CHECK_GE(*pad_tail, 0);
+      CHECK_EQ(*pad_head, *pad_tail) << "Caffe legacy pooling should have the "
+                                     << "same padding value on both sides.";
+      // Here, notice that caffe casts UP while caffe2 casts DOWN for the
+      // output size computation.
+      *out_size = std::ceil(
+          static_cast<float>(in_size + *pad_head + *pad_tail - kernel) / stride
+          + 1);
+      // If we have padding, ensure that the last pooling starts strictly
+      // inside the image (instead of at the padding); otherwise clip the last.
+      if (*pad_tail > 0 && (*out_size - 1) * stride >= in_size + *pad_tail) {
+        --*out_size;
+      }
+      // Now, compare the output size with the standard Caffe2 output size.
+      int standard_out_size = static_cast<int>(
+          static_cast<float>(in_size + *pad_head + *pad_tail - kernel) / stride
+          + 1);
+      CHECK_GE(*out_size, standard_out_size)
+          << "This should not happen. If this happens, double check the logic "
+          << "above.";
+      *pad_tail += stride * (*out_size - standard_out_size);
     } else {
       int legacy_target_size;
       switch (legacy_pad_) {
@@ -200,8 +229,6 @@ class ConvPoolOpBase : public Operator<dtype, DeviceContext> {
   }
 
  private:
-  LegacyPadding legacy_pad_;
-  int pad_;
   DISABLE_COPY_AND_ASSIGN(ConvPoolOpBase);
 };
 
