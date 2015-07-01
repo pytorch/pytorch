@@ -10,8 +10,9 @@ except ImportError:
          'can usually be installed in python with "pip install pydot". Also, '
          'pydot requires graphviz to convert dot files to pdf: in ubuntu, this '
          'can usually be installed with "sudo apt-get install graphviz".')
-  print ('net_drawer will now exit. Please install the correct dependencies.')
-  sys.exit(1)
+  print ('net_drawer will not run correctly. Please install the correct '
+         'dependencies.')
+  pydot = None
 
 from caffe2.proto import caffe2_pb2
 from google.protobuf import text_format
