@@ -21,7 +21,7 @@ int main(int argc, char** argv) {
 
   // This is to allow us to use memory leak checks.
   google::protobuf::ShutdownProtobufLibrary();
-  google::ShutDownCommandLineFlags();
+  gflags::ShutDownCommandLineFlags();
   MPI_Finalize();
   return 0;
 }

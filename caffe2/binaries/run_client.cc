@@ -49,6 +49,6 @@ int main(int argc, char** argv) {
     outfile.close();
   }
   // This is to allow us to use memory leak checks.
-  google::ShutDownCommandLineFlags();
+  gflags::ShutDownCommandLineFlags();
   return 0;
 }
