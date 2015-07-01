@@ -107,8 +107,14 @@ ParallelNet::ParallelNet(const NetDef& net_def, Workspace* ws)
     }
   }
   // Finally, start the workers.
-  CHECK_GT(net_def.num_workers(), 0) << "Must specify the number of workers.";
-  for (int i = 0; i < net_def.num_workers(); ++i) {
+  int num_workers = net_def.has_num_workers() ? net_def.num_workers() : 1;
+  CHECK_GT(num_workers, 0) << "Must have a nonnegative number of workers";
+  if (num_workers == 1) {
+    LOG(WARNING) << "Number of workers is 1: this means that all operators "
+                 << "will be executed sequentially. Did you forget to set "
+                 << "num_workers in the NetDef?";
+  }
+  for (int i = 0; i < num_workers; ++i) {
     VLOG(1) << "Start worker #" << i;
     workers_.push_back(std::thread(&ParallelNet::WorkerFunction, this));
   }
