@@ -178,29 +178,28 @@ class ConvPoolOpBase : public Operator<dtype, DeviceContext> {
           static_cast<float>(in_size + *pad_head + *pad_tail - kernel) / stride
           + 1);
     } else if (legacy_pad_ == LegacyPadding::CAFFE_LEGACY_POOLING) {
-      // This is in order to adapt Caffe's pooling padding case.
+      // This is in order to adapt Caffe's pooling padding case. In this case,
+      // we will only use pad_head and will compute pad_tail to match the
+      // old caffe pooling strategy.
       CHECK_GE(*pad_head, 0);
-      CHECK_GE(*pad_tail, 0);
-      CHECK_EQ(*pad_head, *pad_tail) << "Caffe legacy pooling should have the "
-                                     << "same padding value on both sides.";
       // Here, notice that caffe casts UP while caffe2 casts DOWN for the
       // output size computation.
       *out_size = std::ceil(
-          static_cast<float>(in_size + *pad_head + *pad_tail - kernel) / stride
+          static_cast<float>(in_size + *pad_head * 2 - kernel) / stride
           + 1);
       // If we have padding, ensure that the last pooling starts strictly
       // inside the image (instead of at the padding); otherwise clip the last.
-      if (*pad_tail > 0 && (*out_size - 1) * stride >= in_size + *pad_tail) {
+      if (*pad_head > 0 && (*out_size - 1) * stride >= in_size + *pad_head) {
         --*out_size;
       }
       // Now, compare the output size with the standard Caffe2 output size.
       int standard_out_size = static_cast<int>(
-          static_cast<float>(in_size + *pad_head + *pad_tail - kernel) / stride
+          static_cast<float>(in_size + *pad_head * 2 - kernel) / stride
           + 1);
       CHECK_GE(*out_size, standard_out_size)
           << "This should not happen. If this happens, double check the logic "
           << "above.";
-      *pad_tail += stride * (*out_size - standard_out_size);
+      *pad_tail = *pad_head + stride * (*out_size - standard_out_size);
     } else {
       int legacy_target_size;
       switch (legacy_pad_) {
