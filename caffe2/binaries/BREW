@@ -113,6 +113,22 @@ cc_binary(
 )
 
 cc_binary(
+  name = "run_plan_mpi",
+  srcs = [
+      "run_plan_mpi.cc",
+  ],
+  deps = [
+      "//caffe2:all_available_ops",
+      "//caffe2/core:core",
+      "//caffe2/db:db",
+      "//caffe2/utils:proto_utils",
+      "//third_party/gflags:gflags",
+      "//third_party/glog:glog",
+  ],
+  external_libs = Env.MPI_LIBS,
+)
+
+cc_binary(
   name = "inspect_gpus",
   srcs = [
       "inspect_gpus.cc",
