@@ -27,10 +27,10 @@ class SummarizeOp final : public Operator<dtype, DeviceContext> {
       const string& target_folder = ws->RootFolder();
       // We will write each individual tensor to its individual file.
       log_file_.reset(new std::ofstream(
-          target_folder + "/" + def.inputs(0) + kSummaryzeOpExtension,
+          target_folder + "/" + def.input(0) + kSummaryzeOpExtension,
           std::ofstream::out | std::ofstream::trunc));
       CHECK(log_file_->good())
-          << "Failed to open summarize file for tensor " << def.inputs(0)
+          << "Failed to open summarize file for tensor " << def.input(0)
           << ". rdstate() = " << log_file_->rdstate();
     }
   }

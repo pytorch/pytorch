@@ -79,7 +79,7 @@ ParallelNet::ParallelNet(const NetDef& net_def, Workspace* ws)
       operator_nodes_[idx].operator_.reset(CreateOperator(op_def, ws));
     }
     // Check the inputs, and set up parents if necessary.
-    for (const string& input : op_def.inputs()) {
+    for (const string& input : op_def.input()) {
       if (blob_creator.count(input) == 0) {
         VLOG(1) << "Input " << input << " not produced by this net. "
                 << "Assuming it is pre-existing.";
@@ -90,7 +90,7 @@ ParallelNet::ParallelNet(const NetDef& net_def, Workspace* ws)
         operator_nodes_[parent].children_.push_back(idx);
       }
     }
-    for (const string& output : op_def.outputs()) {
+    for (const string& output : op_def.output()) {
       if (blob_creator.count(output) != 0) {
         LOG(WARNING) << "Output " << output << " produced again. "
                      << "Such operation is not strictly tested. "

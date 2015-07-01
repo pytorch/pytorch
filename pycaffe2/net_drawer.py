@@ -35,9 +35,9 @@ def GetPydotGraph(operators, name, rankdir='LR'):
           '%s (op#%d)' % (op.type, op_id), **OP_STYLE)
     graph.add_node(op_node)
     # print 'Op: %s' % op.name
-    # print 'inputs: %s' % str(op.inputs)
-    # print 'outputs: %s' % str(op.outputs)
-    for input_name in op.inputs:
+    # print 'inputs: %s' % str(op.input)
+    # print 'outputs: %s' % str(op.output)
+    for input_name in op.input:
       if input_name not in pydot_nodes:
         input_node = pydot.Node(
             input_name + str(pydot_node_counts[input_name]),
@@ -47,7 +47,7 @@ def GetPydotGraph(operators, name, rankdir='LR'):
         input_node = pydot_nodes[input_name]
       graph.add_node(input_node)
       graph.add_edge(pydot.Edge(input_node, op_node))
-    for output_name in op.outputs:
+    for output_name in op.output:
       if output_name in pydot_nodes:
         # we are overwriting an existing blob. need to updat the count.
         pydot_node_counts[output_name] += 1
@@ -75,10 +75,10 @@ def GetPydotGraphMinimal(operators, name, rankdir='LR'):
       op_node = pydot.Node(
           '%s (op#%d)' % (op.type, op_id), **OP_STYLE)
     graph.add_node(op_node)
-    for input_name in op.inputs:
+    for input_name in op.input:
       if input_name in blob_parents:
         graph.add_edge(pydot.Edge(blob_parents[input_name], op_node))
-    for output_name in op.outputs:
+    for output_name in op.output:
       blob_parents[output_name] = op_node
   return graph
 

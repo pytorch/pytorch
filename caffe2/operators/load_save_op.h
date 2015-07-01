@@ -35,7 +35,7 @@ class LoadFloatTensorOp final : public Operator<float, DeviceContext> {
       CHECK_EQ(output->size(), proto.float_data_size());
       this->device_context_.template Copy<float, DeviceContext, CPUContext>(
           output->mutable_data(), proto.float_data().data(), output->size());
-      VLOG(1) << "Loaded tensor " << this->def().outputs(i);
+      VLOG(1) << "Loaded tensor " << this->def().output(i);
       ++i;
     }
     return true;
@@ -62,7 +62,7 @@ class SaveFloatTensorOp final : public Operator<float, DeviceContext> {
       auto& input = OperatorBase::Input<Tensor<float, DeviceContext> >(i);
       auto* proto = protos.add_protos();
       proto->set_data_type(TensorProto::FLOAT);
-      proto->set_name(OperatorBase::def().inputs(i));
+      proto->set_name(OperatorBase::def().input(i));
       for (int dim : input.dims()) {
         proto->add_dims(dim);
       }

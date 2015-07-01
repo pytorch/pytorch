@@ -25,10 +25,10 @@ TEST(FullyConnectedTest, Test) {
   OperatorDef def;
   def.set_name("test");
   def.set_type("FC");
-  def.add_inputs("X");
-  def.add_inputs("W");
-  def.add_inputs("B");
-  def.add_outputs("Y");
+  def.add_input("X");
+  def.add_input("W");
+  def.add_input("B");
+  def.add_output("Y");
   AddConstInput(std::vector<int>{5, 10}, 1., "X", &ws);
   AddConstInput(std::vector<int>{6, 10}, 1., "W", &ws);
   AddConstInput(std::vector<int>{6}, 0.1, "B", &ws);

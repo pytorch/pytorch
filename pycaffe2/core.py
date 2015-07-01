@@ -49,7 +49,7 @@ def CreateOperator(operator_type):
   registered with Caffe2.
   """
   def ReallyCreate(inputs, outputs, name='', device_option=None,
-                   args=None, **kwargs):
+                   arg=None, **kwargs):
     operator = caffe2_pb2.OperatorDef()
     operator.type = operator_type
     operator.name = name
@@ -62,8 +62,8 @@ def CreateOperator(operator_type):
     elif type(outputs) is not list:
       raise ValueError("Unknown output format: %s of type %s."
                        % (str(outputs), type(outputs)))
-    operator.inputs.extend([str(i) for i in inputs])
-    operator.outputs.extend([str(o) for o in outputs])
+    operator.input.extend([str(i) for i in inputs])
+    operator.output.extend([str(o) for o in outputs])
     if device_option:
       operator.device_option.CopyFrom(device_option)
     # random seed is defined in the device option, so we need to do special
@@ -72,11 +72,11 @@ def CreateOperator(operator_type):
       operator.device_option.random_seed = kwargs['random_seed']
       del kwargs['random_seed']
     # Add given arguments that do not need parsing
-    if args:
-      operator.args.extend(args)
+    if arg:
+      operator.arg.extend(arg)
     # Add all other arguments
     for key, value in kwargs.iteritems():
-      operator.args.add().CopyFrom(utils.MakeArgument(key, value))
+      operator.arg.add().CopyFrom(utils.MakeArgument(key, value))
     return operator
   return ReallyCreate
 
@@ -120,8 +120,8 @@ class Net(object):
       self._net.CopyFrom(name)
       # Set the next name index properly.
       existing_names = set(
-          sum([list(op.inputs) for op in self._net.operators], []) +
-          sum([list(op.outputs) for op in self._net.operators], []))
+          sum([list(op.input) for op in self._net.operators], []) +
+          sum([list(op.output) for op in self._net.operators], []))
       prefix_len = len(self._net.name + '_blob_')
       autogen_indices = [int(name[prefix_len:]) for name in existing_names
                        if name.startswith(self._net.name + '_blob_')]
@@ -162,7 +162,7 @@ class Net(object):
     """
     # (1) Make sure that the network is "legal" in terms of computing gradients:
     # for every blob there is only going to be one operator that generates it.
-    all_outputs = sum([list(op.outputs) for op in self._net.operators], [])
+    all_outputs = sum([list(op.output) for op in self._net.operators], [])
     if len(all_outputs) != len(set(all_outputs)):
       # There is some output that is produced by multiple operators. This is not
       # good.
@@ -172,7 +172,7 @@ class Net(object):
     # need to take special care. Currently, we will ask the operators to compute
     # the gradients, and add aggregation operators to get the final gradient.
     input_counts = Counter(
-        sum([list(op.inputs) for op in self._net.operators], []))
+        sum([list(op.input) for op in self._net.operators], []))
     multiple_use_blobs = set(
         [key for key in input_counts if input_counts[key] > 1])
     if len(multiple_use_blobs):
@@ -184,14 +184,14 @@ class Net(object):
       for op in self._net.operators:
         # For the input, if it is one of the mutiple use blobs, change it to
         # an autosplit version.
-        for i, name in enumerate(op.inputs):
+        for i, name in enumerate(op.input):
           if name in multiple_use_blobs:
-            op.inputs[i] = '_' + name + '_autosplit_%d' % current_input_id[name]
+            op.input[i] = '_' + name + '_autosplit_%d' % current_input_id[name]
             current_input_id[name] += 1
         new_ops.append(op)
         # For the output, if it is one of the multiple use blobs, we add a split
         # operator after it is created.
-        for name in op.outputs:
+        for name in op.output:
           if name in multiple_use_blobs:
             new_ops.append(CreateOperator("Split")(
                 [name],
@@ -232,12 +232,12 @@ class Net(object):
         outputs = [self.NextName() for i in range(outputs)]
       op = CreateOperator(operator_type)(inputs, outputs, **kwargs)
       self._net.operators.extend([op])
-      if len(op.outputs) == 0:
+      if len(op.output) == 0:
         return
-      elif len(op.outputs) == 1:
-        return BlobReference(str(op.outputs[0]), self)
+      elif len(op.output) == 1:
+        return BlobReference(str(op.output[0]), self)
       else:
-        return tuple(BlobReference(str(o), self) for o in op.outputs)
+        return tuple(BlobReference(str(o), self) for o in op.output)
     return _CreateAndAddToSelf
 
 

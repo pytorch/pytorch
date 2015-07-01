@@ -52,8 +52,8 @@ def DeleteDropout(net):
   for op in net.operators:
     if op.type == 'Dropout':
       op.type = 'Alias'
-      del op.outputs[1]  # output 1 is the dropout mask, which is not needed.
-      del op.args[:]  # args is used in Dropout but not needed in Alias.
+      del op.output[1]  # output 1 is the dropout mask, which is not needed.
+      del op.arg[:]  # args is used in Dropout but not needed in Alias.
   return
 
 
@@ -122,14 +122,14 @@ def TranslateModel(caffe_net, pretrained_net):
 def BaseTranslate(layer, caffe2_type):
   caffe2_op = caffe2_pb2.OperatorDef()
   caffe2_op.type = caffe2_type
-  caffe2_op.inputs.extend(layer.bottom)
-  caffe2_op.outputs.extend(layer.top)
+  caffe2_op.input.extend(layer.bottom)
+  caffe2_op.output.extend(layer.top)
   return caffe2_op
 
 
 def AddArgument(op, key, value):
   """Makes an argument based on the value type."""
-  op.args.extend([utils.MakeArgument(key, value)])
+  op.arg.extend([utils.MakeArgument(key, value)])
 
 
 ################################################################################
@@ -139,8 +139,8 @@ def AddArgument(op, key, value):
 @CacaRegistry.Register("Convolution")
 def TranslateConv(layer, pretrained_blobs):
   caffe_op = BaseTranslate(layer, "Conv")
-  output = caffe_op.outputs[0]
-  caffe_op.inputs.extend([output + '_w', output + '_b'])
+  output = caffe_op.output[0]
+  caffe_op.input.extend([output + '_w', output + '_b'])
   param = layer.convolution_param
   AddArgument(caffe_op, "stride", param.stride)
   AddArgument(caffe_op, "kernel", param.kernel_size)
@@ -174,7 +174,7 @@ def TranslatePool(layer, pretrained_blobs):
   param = layer.pooling_param
   if param.pool == caffe_pb2.PoolingParameter.MAX:
     caffe_op = BaseTranslate(layer, "MaxPool")
-    caffe_op.outputs.extend(['_' + caffe_op.outputs[0] + '_maxid'])
+    caffe_op.output.extend(['_' + caffe_op.output[0] + '_maxid'])
   elif param.pool == caffe_pb2.PoolingParameter.AVE:
     caffe_op = BaseTranslate(layer, "AveragePool")
   AddArgument(caffe_op, "stride", int(param.stride))
@@ -187,7 +187,7 @@ def TranslatePool(layer, pretrained_blobs):
 @CacaRegistry.Register("LRN")
 def TranslateLRN(layer, pretrained_blobs):
   caffe_op = BaseTranslate(layer, "LRN")
-  caffe_op.outputs.extend(['_' + caffe_op.outputs[0] + '_scale'])
+  caffe_op.output.extend(['_' + caffe_op.output[0] + '_scale'])
   param = layer.lrn_param
   if param.norm_region != caffe_pb2.LRNParameter.ACROSS_CHANNELS:
     raise ValueError("Does not support norm region other than across channels.")
@@ -201,8 +201,8 @@ def TranslateLRN(layer, pretrained_blobs):
 @CacaRegistry.Register("InnerProduct")
 def TranslateInnerProduct(layer, pretrained_blobs):
   caffe_op = BaseTranslate(layer, "FC")
-  output = caffe_op.outputs[0]
-  caffe_op.inputs.extend([output + '_w', output + '_b'])
+  output = caffe_op.output[0]
+  caffe_op.input.extend([output + '_w', output + '_b'])
   weight = utils.NumpyArrayToCaffe2Tensor(
       pretrained_blobs[0][0,0], output + '_w')
   bias = utils.NumpyArrayToCaffe2Tensor(
@@ -212,7 +212,7 @@ def TranslateInnerProduct(layer, pretrained_blobs):
 @CacaRegistry.Register("Dropout")
 def TranslateDropout(layer, pretrained_blobs):
   caffe_op = BaseTranslate(layer, "Dropout")
-  caffe_op.outputs.extend(['_' + caffe_op.outputs[0] + '_mask'])
+  caffe_op.output.extend(['_' + caffe_op.output[0] + '_mask'])
   param = layer.dropout_param
   AddArgument(caffe_op, "ratio", param.dropout_ratio)
   return caffe_op, []
@@ -226,6 +226,6 @@ def TranslateSoftmax(layer, pretrained_blobs):
 @CacaRegistry.Register("Concat")
 def TranslateConcat(layer, pretrained_blobs):
   caffe_op = BaseTranslate(layer, "DepthConcat")
-  caffe_op.outputs.extend(['_' + caffe_op.outputs[0] + '_dims'])
+  caffe_op.output.extend(['_' + caffe_op.output[0] + '_dims'])
   AddArgument(caffe_op, "order", "NCHW")
   return caffe_op, []

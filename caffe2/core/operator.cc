@@ -11,15 +11,15 @@ namespace caffe2 {
 // TODO(Yangqing): move all the checks to a less fatal check mechanism.
 OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
     : operator_def_(operator_def) {
-  for (auto& arg : operator_def.args()) {
+  for (auto& arg : operator_def.arg()) {
     CHECK_GT(arg.name().size(), 0) << "Argument must have a name.";
     CHECK_EQ(arg_map_.count(arg.name()), 0) << "Duplicated argument name.";
     arg_map_[arg.name()] = &arg;
   }
-  for (const string& input_str : operator_def_.inputs()) {
+  for (const string& input_str : operator_def_.input()) {
     inputs_.push_back(CHECK_NOTNULL(ws->GetBlob(input_str)));
   }
-  for (const string& output_str : operator_def_.outputs()) {
+  for (const string& output_str : operator_def_.output()) {
     outputs_.push_back(CHECK_NOTNULL(ws->CreateBlob(output_str)));
   }
 }
@@ -69,18 +69,18 @@ INSTANTIATE_GET_REPEATED_ARGUMENT(string, strings)
 
 bool OperatorBase::Verify() {
   // Check Blob counts.
-  if (operator_def_.inputs_size() < MinInput() ||
-      operator_def_.inputs_size() > MaxInput()) {
-    LOG(ERROR) << "Input size " << operator_def_.inputs_size()
+  if (operator_def_.input_size() < MinInput() ||
+      operator_def_.input_size() > MaxInput()) {
+    LOG(ERROR) << "Input size " << operator_def_.input_size()
                << " not in range [min=" << MinInput() << ", max="
                << MaxInput() << "].";
     LOG(ERROR) << "Error at operator " << operator_def_.name() << ":"
                << operator_def_.type();
     return false;
   }
-  if (operator_def_.outputs_size() < MinOutput() ||
-      operator_def_.outputs_size() > MaxOutput()) {
-    LOG(ERROR) << "Output size " << operator_def_.outputs_size()
+  if (operator_def_.output_size() < MinOutput() ||
+      operator_def_.output_size() > MaxOutput()) {
+    LOG(ERROR) << "Output size " << operator_def_.output_size()
                << " not in range [min=" << MinOutput() << ", max="
                << MaxOutput() << "].";
     LOG(ERROR) << "Error at operator " << operator_def_.name() << ":"
