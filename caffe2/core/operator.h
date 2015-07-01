@@ -216,17 +216,8 @@ DECLARE_REGISTRY(CUDNNOperatorRegistry, OperatorBase,
 #define REGISTER_CUDNN_OPERATOR(name, ...) \
   REGISTER_CLASS(CUDNNOperatorRegistry, name, __VA_ARGS__)
 
-// Creates an operator with the given operator definition and device option.
-OperatorBase* CreateOperator(const OperatorDef& operator_def,
-                             const DeviceOption& device_option,
-                             Workspace* ws);
-
-// Create an operator with the given operator definition, and the device
-// option that is specified in the operator definition.
-inline OperatorBase* CreateOperator(const OperatorDef& operator_def,
-                                    Workspace* ws) {
-  return CreateOperator(operator_def, operator_def.device_option(), ws);
-}
+// Creates an operator with the given operator definition.
+OperatorBase* CreateOperator(const OperatorDef& operator_def, Workspace* ws);
 
 }  // namespace caffe2
 
