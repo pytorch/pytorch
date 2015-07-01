@@ -13,6 +13,9 @@ static void defaultTorchErrorHandlerFunction(const char *msg, void *data)
 static __thread void (*torchErrorHandlerFunction)(const char *msg, void *data) = defaultTorchErrorHandlerFunction;
 static __thread void *torchErrorHandlerData;
 
+static __thread void (*torchGCFunction)(void *data) = NULL;
+static __thread void *torchGCData;
+
 void _THError(const char *file, const int line, const char *fmt, ...)
 {
   char msg[2048];
@@ -91,15 +94,15 @@ void THSetArgErrorHandler( void (*torchArgErrorHandlerFunction_)(int argNumber, 
   torchArgErrorHandlerData = data;
 }
 
-void* THAlloc(long size)
+void THSetGCHandler( void (*torchGCFunction_)(void *data), void *data )
+{
+  torchGCFunction = torchGCFunction_;
+  torchGCData = data;
+}
+
+void* THAllocInternal(long size)
 {
   void *ptr;
-
-  if(size < 0)
-    THError("$ Torch: invalid memory size -- maybe an overflow?");
-
-  if(size == 0)
-    return NULL;
 
   if (size > 5120)
   {
@@ -115,6 +118,25 @@ void* THAlloc(long size)
   else
   {
     ptr = malloc(size);
+  }
+  return ptr;
+}
+
+void* THAlloc(long size)
+{
+  void *ptr;
+
+  if(size < 0)
+    THError("$ Torch: invalid memory size -- maybe an overflow?");
+
+  if(size == 0)
+    return NULL;
+
+  ptr = THAllocInternal(size);
+
+  if(!ptr && torchGCFunction) {
+    torchGCFunction(torchGCData);
+    ptr = THAllocInternal(size);
   }
 
   if(!ptr)
@@ -137,10 +159,17 @@ void* THRealloc(void *ptr, long size)
   if(size < 0)
     THError("$ Torch: invalid memory size -- maybe an overflow?");
 
-  ptr = realloc(ptr, size);
-  if(!ptr)
+  void *newptr = realloc(ptr, size);
+
+  if(!newptr && torchGCFunction) {
+    torchGCFunction(torchGCData);
+    newptr = realloc(ptr, size);
+  }
+
+  if(!newptr)
     THError("$ Torch: not enough memory: you tried to reallocate %dGB. Buy new RAM!", size/1073741824);
-  return ptr;
+
+  return newptr;
 }
 
 void THFree(void *ptr)
