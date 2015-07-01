@@ -33,11 +33,9 @@ cc_binary(
       "//caffe2/proto:caffe2_proto",
       "//third_party/gflags:gflags",
       "//third_party/glog:glog",
-  ],
-  external_libs = [
-    "opencv_core",
-    "opencv_highgui",
-    "opencv_imgproc",
+      "//third_party/opencv:opencv_core",
+      "//third_party/opencv:opencv_highgui",
+      "//third_party/opencv:opencv_imgproc",
   ],
 )
 
@@ -52,11 +50,9 @@ cc_binary(
       "//third_party/leveldb:leveldb",
       "//third_party/gflags:gflags",
       "//third_party/glog:glog",
-  ],
-  external_libs = [
-    "opencv_core",
-    "opencv_highgui",
-    "opencv_imgproc",
+      "//third_party/opencv:opencv_core",
+      "//third_party/opencv:opencv_highgui",
+      "//third_party/opencv:opencv_imgproc",
   ],
 )
 
@@ -81,11 +77,8 @@ cc_binary(
   ],
   deps = [
       "//caffe2/core:core",
+      "//caffe2:all_available_ops",
       "//caffe2/db:db",
-      "//caffe2/image:image_ops",
-      "//caffe2/image:image_ops_gpu",
-      "//caffe2/operators:core_ops",
-      "//caffe2/operators:core_ops_gpu",
   ],
 )
 
@@ -96,34 +89,13 @@ cc_binary(
   ],
   deps = [
       "//caffe2/core:core",
+      "//caffe2:all_available_ops",
       "//caffe2/db:db",
-      "//caffe2/image:image_ops",
-      "//caffe2/image:image_ops_gpu",
-      "//caffe2/operators:core_ops",
-      "//caffe2/operators:core_ops_gpu",
       "//caffe2/utils:proto_utils",
       "//third_party/gflags:gflags",
       "//third_party/glog:glog",
   ],
 )
-
-# run_client_minimal is the binary that links in the operators that have no
-# external dependencies at all.
-cc_binary(
-  name = "run_client_minimal",
-  srcs = [
-      "run_client.cc",
-  ],
-  deps = [
-      "//caffe2/core:core",
-      "//caffe2/operators:core_ops",
-      "//caffe2/operators:core_ops_gpu",
-      "//caffe2/utils:proto_utils",
-      "//third_party/gflags:gflags",
-      "//third_party/glog:glog",
-  ],
-)
-
 
 cc_binary(
   name = "run_plan",
@@ -131,49 +103,9 @@ cc_binary(
       "run_plan.cc",
   ],
   deps = [
+      "//caffe2:all_available_ops",
       "//caffe2/core:core",
       "//caffe2/db:db",
-      "//caffe2/image:image_ops",
-      "//caffe2/image:image_ops_gpu",
-      "//caffe2/operators:core_ops",
-      "//caffe2/operators:core_ops_gpu",
-      "//caffe2/utils:proto_utils",
-      "//third_party/gflags:gflags",
-      "//third_party/glog:glog",
-  ],
-)
-
-# run_plan_minimal is the binary that links in the operators that have no
-# external dependencies at all.
-cc_binary(
-  name = "run_plan_minimal",
-  srcs = [
-      "run_plan.cc",
-  ],
-  deps = [
-      "//caffe2/core:core",
-      "//caffe2/operators:core_ops",
-      "//caffe2/operators:core_ops_gpu",
-      "//caffe2/utils:proto_utils",
-      "//third_party/gflags:gflags",
-      "//third_party/glog:glog",
-  ],
-)
-
-
-cc_binary(
-  name = "run_plan_mpi",
-  srcs = [
-      "run_plan_mpi.cc",
-  ],
-  deps = [
-      "//caffe2/core:core",
-      "//caffe2/db:db",
-      "//caffe2/image:image_ops",
-      "//caffe2/image:image_ops_gpu",
-      "//caffe2/mpi:mpi_ops",
-      "//caffe2/operators:core_ops",
-      "//caffe2/operators:core_ops_gpu",
       "//caffe2/utils:proto_utils",
       "//third_party/gflags:gflags",
       "//third_party/glog:glog",

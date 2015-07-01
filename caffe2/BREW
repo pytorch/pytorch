@@ -2,3 +2,18 @@ filegroup(
     name = "caffe2_python",
     srcs = ["__init__.py"],
 )
+
+cc_library(
+    name = "all_available_ops",
+    srcs = [],
+    optional_deps = [
+      "//caffe2/operators:core_ops",
+      "//caffe2/operators:core_ops_gpu",
+      "//caffe2/operators:core_ops_cudnn",
+      "//caffe2/image:image_ops",
+      "//caffe2/image:image_ops_gpu",
+      "//caffe2/mpi:mpi_ops",
+      "//caffe2/sgd:sgd_ops",
+      "//caffe2/sgd:sgd_ops_gpu",
+    ],
+)

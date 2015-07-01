@@ -4,11 +4,9 @@ cc_test(
       "end_to_end_tests.cc",
   ],
   deps = [
+      "//caffe2:all_available_ops",
       "//caffe2/core:core",
       "//caffe2/db:db",
-      "//caffe2/operators:core_ops",
-      "//caffe2/operators:core_ops_gpu",
-      "//caffe2/operators:core_ops_cudnn",
       "//caffe2/utils:proto_utils",
       "//data/toy:toy_models",
       "//data/mnist:mnist_models",

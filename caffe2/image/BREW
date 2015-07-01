@@ -11,11 +11,9 @@ cc_library(
     "//caffe2/operators:core_ops",
     "//caffe2/utils:math",
     "//caffe2/utils:proto_utils",
-  ],
-  external_libs = [
-    "opencv_core",
-    "opencv_highgui",
-    "opencv_imgproc",
+    "//third_party/opencv:opencv_core",
+    "//third_party/opencv:opencv_highgui",
+    "//third_party/opencv:opencv_imgproc",
   ],
   whole_archive = True,
 )
