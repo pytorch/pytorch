@@ -2,16 +2,26 @@
 # dependencies.
 
 cc_library(
-  name = "db",
+  name = "leveldb",
   srcs = [
       "leveldb.cc",
-      "lmdb.cc",
   ],
   deps = [
-    ":zmqdb",
     "//caffe2/core:core",
     "//third_party/glog:glog",
     "//third_party/leveldb:leveldb",
+  ],
+  whole_archive = True,
+)
+
+cc_library(
+  name = "lmdb",
+  srcs = [
+      "lmdb.cc",
+  ],
+  deps = [
+    "//caffe2/core:core",
+    "//third_party/glog:glog",
     "//third_party/liblmdb:lmdb",
   ],
   whole_archive = True,
@@ -25,9 +35,20 @@ cc_library(
   deps = [
     "//caffe2/core:core",
     "//third_party/glog:glog",
-    "//third_party/leveldb:leveldb",
-    "//third_party/liblmdb:lmdb",
     "//third_party/libzmq:libzmq",
   ],
   whole_archive = True,
+)
+
+cc_library(
+  name = "db",
+  srcs = [],
+  deps = [
+    "//caffe2/core:core",
+  ],
+  optional_deps = [
+    ":leveldb",
+    ":lmdb",
+    ":zmqdb",
+  ],
 )

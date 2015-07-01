@@ -8,7 +8,9 @@
 #include <vector>
 
 #include "caffe2/core/context.h"
+#ifndef PYCAFFE2_CPU_ONLY
 #include "caffe2/core/context_gpu.h"
+#endif  // PYCAFFE2_CPU_ONLY
 #include "caffe2/core/net.h"
 #include "caffe2/core/workspace.h"
 #include "caffe2/proto/caffe2.pb.h"
@@ -72,8 +74,7 @@ PyObject* FetchTensor(const Blob& blob) {
   const Tensor<T, DeviceContext>& tensor =
       blob.Get<Tensor<T, DeviceContext> >();
   CHECK_GT(tensor.size(), 0);
-  // numpy requires long int as its dims.
-  vector<long int> npy_dims;  // NOLINT
+  vector<npy_intp> npy_dims;
   for (const int dim : tensor.dims()) {
     npy_dims.push_back(dim);
   }
@@ -353,8 +354,11 @@ PyObject* FetchBlob(PyObject* self, PyObject* args) {
   // We only support a subset of exporting capabilities.
   RETURN_TENSOR_IF_FORMAT(float, CPUContext)
   RETURN_TENSOR_IF_FORMAT(int, CPUContext)
+#ifndef PYCAFFE2_CPU_ONLY
   RETURN_TENSOR_IF_FORMAT(float, CUDAContext)
   RETURN_TENSOR_IF_FORMAT(int, CUDAContext)
+#endif  // PYCAFFE2_CPU_ONLY
+
   // If all branches failed, we should throw an error.
   LOG(ERROR) << "Blob" << string(name) << " has unsupported data type: "
              << blob.TypeName();
@@ -396,6 +400,7 @@ PyObject* FeedBlob(PyObject* self, PyObject* args) {
         PyErr_SetString(PyExc_TypeError, "Unsupported numpy data type.");
         return NULL;
     }
+#ifndef PYCAFFE2_CPU_ONLY
   case CUDA:
     switch (data_type) {
       case NPY_INT:
@@ -406,6 +411,7 @@ PyObject* FeedBlob(PyObject* self, PyObject* args) {
         PyErr_SetString(PyExc_TypeError, "Unsupported numpy data type.");
         return NULL;
     }
+#endif  // PYCAFFE2_CPU_ONLY
   default:
     PyErr_SetString(PyExc_TypeError, "Unknown device type.");
     return NULL;
@@ -441,8 +447,13 @@ static PyMethodDef gPycaffe2Methods[] = {
 };
 #undef _PYNAME
 
+#ifdef PYCAFFE2_CPU_ONLY
+void initlibcaffe2_python_nogpu(void) {
+  (void) Py_InitModule("libcaffe2_python_nogpu", gPycaffe2Methods);
+#else
 void initlibcaffe2_python(void) {
   (void) Py_InitModule("libcaffe2_python", gPycaffe2Methods);
+#endif
   import_array();  // for numpy
   // We will create a default workspace for us to run stuff.
   SwitchWorkspaceInternal("default", true);

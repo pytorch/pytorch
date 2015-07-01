@@ -226,7 +226,7 @@ class Brewery(object):
                  "%s already in build target.", name)
     BuildDebug("Registered build target %s, deps %s", name, str(target.deps))
     cls._targets[name] = target
-    cls._deps_map[name] = target.deps
+    cls._deps_map[name] = target.deps + target.optional_deps
 
   @classmethod
   def _GetExecutionChain(cls, targets):
@@ -334,11 +334,12 @@ class Brewery(object):
 
 class BuildTarget(object):
   """A build target that can be executed with the Build() function."""
-  def __init__(self, name, srcs, other_files=[], deps=[]):
+  def __init__(self, name, srcs, other_files=[], deps=[], optional_deps=[]):
     self.name = RectifyTarget(name)
     self.srcs = RectifyFileNames(srcs)
     self.files = sorted(self.srcs + other_files)
     self.deps = sorted(RectifyTargets(deps))
+    self.optional_deps = sorted(RectifyTargets(optional_deps))
     self.command_groups = []
     Brewery.Register(self.name, self)
 
@@ -350,10 +351,15 @@ class BuildTarget(object):
     return hashlib.sha256(src_digest + dep_digest).hexdigest()
 
   def SetUpAndBuild(self, built_signature):
+    # Add successful optional dependencies into deps.
+    self.deps += [dep for dep in self.optional_deps
+                  if Brewery.Success(dep)]
     self.SetUp()
     signature = self.GetSignature()
     if not all(Brewery.Success(d) for d in self.deps):
-      BuildWarning("Not all dependencies have succeeded. Skipping build.")
+      BuildWarning("Not all dependencies have succeeded. Skipping build. "
+                   "Failed dependencies: ")
+      BuildWarning(str([d for d in self.deps if not Brewery.Success(d)]))
       return False, True, signature
     if signature != built_signature:
       success = self.Build()
@@ -387,8 +393,8 @@ class proto_library(BuildTarget):
   A protobuffer library builds a set of protobuffer source files to its cc and
   python source files, as well as the static library named "libname.a".
   """
-  def __init__(self, name, srcs, deps=[]):
-    BuildTarget.__init__(self, name, srcs, deps=deps)
+  def __init__(self, name, srcs, deps=[], **kwargs):
+    BuildTarget.__init__(self, name, srcs, deps=deps, **kwargs)
 
   def SetUp(self):
     MakeGenDirs(self.srcs)
@@ -412,7 +418,7 @@ class proto_library(BuildTarget):
 class cc_target(BuildTarget):
   def __init__(self, name, srcs, hdrs=[], deps=[], cflags=[], external_libs=[],
                build_binary=False, is_test=False, whole_archive=False,
-               shared=False):
+               shared=False, **kwargs):
     self.hdrs = RectifyFileNames(hdrs)
     self.cflags = cflags
     self.external_libs = [
@@ -421,9 +427,13 @@ class cc_target(BuildTarget):
     self.is_test = is_test
     self.whole_archive = whole_archive
     self.shared = shared
-    BuildTarget.__init__(self, name, srcs, self.hdrs, deps=deps)
+    BuildTarget.__init__(self, name, srcs, other_files=self.hdrs, deps=deps, **kwargs)
 
   def OutputName(self, is_library=False, is_shared=False):
+    if len(self.srcs) == 0:
+      # This is just a collection of dependencies, so we will not need
+      # any output file. Returning an empty string.
+      return ''
     name_split = self.name.split(':')
     if is_library:
       if is_shared:
@@ -439,39 +449,45 @@ class cc_target(BuildTarget):
   def SetUp(self):
     MakeGenDirs(self.srcs)
     CopyToGenDir(self.hdrs)
-    obj_files = [GenFilename(src, 'o') for src in self.srcs]
-    cpp_commands = [
-        ' '.join([Env.CC, Env.CFLAGS, Env.INCLUDES, ' '.join(self.cflags),
-                  '-c', src, '-o', obj])
-        for src, obj in zip(self.srcs, obj_files)]
     archive_file = self.OutputName(is_library=True)
-    # Create the archive
-    link_commands = [
-        ' '.join([Env.LINK_STATIC, archive_file] + obj_files)]
-    if self.whole_archive:
-      archive_file = Env.WHOLE_ARCHIVE_TEMPLATE % archive_file
     self.cc_obj_files = MergeOrderedObjs(
         [Brewery.Get(dep).cc_obj_files for dep in self.deps] +
         [self.external_libs])
-    self.cc_obj_files.insert(0, archive_file)
-    if self.build_binary:
-      link_binary_commands = [
-          ' '.join([Env.LINK_BINARY, self.OutputName()] + self.cc_obj_files +
-                   [Env.LINKFLAGS])]
-      self.command_groups = [cpp_commands, link_commands, link_binary_commands]
-    elif self.shared:
-      link_shared_commands = [' '.join(
-          [Env.LINK_SHARED, self.OutputName(is_library=True, is_shared=True)]
-          + obj_files + self.cc_obj_files[1:] + [Env.LINKFLAGS])]
-      self.command_groups = [cpp_commands, link_commands, link_shared_commands]
+
+    if self.whole_archive:
+      self.cc_obj_files.insert(0, Env.WHOLE_ARCHIVE_TEMPLATE % archive_file)
     else:
-      self.command_groups = [cpp_commands, link_commands]
-    if self.is_test:
-      # Add test command
-      self.command_groups.append([
-          ' '.join([self.OutputName(), '--caffe_test_root',
-                    os.path.abspath(Env.GENDIR),
-                    '--gtest_filter=-*.LARGE_*'])])
+      self.cc_obj_files.insert(0, archive_file)
+    if len(self.srcs) == 0:
+      # There is nothing to build if there is no source files.
+      self.command_groups = []
+    else:
+      obj_files = [GenFilename(src, 'o') for src in self.srcs]
+      cpp_commands = [
+          ' '.join([Env.CC, Env.CFLAGS, Env.INCLUDES, ' '.join(self.cflags),
+                    '-c', src, '-o', obj])
+          for src, obj in zip(self.srcs, obj_files)]
+      # Create the archive
+      link_commands = [
+          ' '.join([Env.LINK_STATIC, archive_file] + obj_files)]
+      if self.build_binary:
+        link_binary_commands = [
+            ' '.join([Env.LINK_BINARY, self.OutputName()] + self.cc_obj_files +
+                     [Env.LINKFLAGS])]
+        self.command_groups = [cpp_commands, link_commands, link_binary_commands]
+      elif self.shared:
+        link_shared_commands = [' '.join(
+            [Env.LINK_SHARED, self.OutputName(is_library=True, is_shared=True)]
+            + obj_files + self.cc_obj_files[1:] + [Env.LINKFLAGS])]
+        self.command_groups = [cpp_commands, link_commands, link_shared_commands]
+      else:
+        self.command_groups = [cpp_commands, link_commands]
+      if self.is_test:
+        # Add test command
+        self.command_groups.append([
+            ' '.join([self.OutputName(), '--caffe_test_root',
+                      os.path.abspath(Env.GENDIR),
+                      '--gtest_filter=-*.LARGE_*'])])
 
 
 def cc_library(*args, **kwargs):
@@ -490,11 +506,11 @@ def cc_test(*args, **kwargs):
 
 class cuda_library(BuildTarget):
   def __init__(self, name, srcs, hdrs=[], deps=[], cflags=[],
-               whole_archive=False):
+               whole_archive=False, **kwargs):
     self.hdrs = RectifyFileNames(hdrs)
     self.cflags = cflags
     self.whole_archive = whole_archive
-    BuildTarget.__init__(self, name, srcs, self.hdrs, deps=deps)
+    BuildTarget.__init__(self, name, srcs, other_files=self.hdrs, deps=deps, **kwargs)
 
   def OutputName(self, is_library=False):
     name_split = self.name.split(':')
@@ -528,9 +544,9 @@ class cuda_library(BuildTarget):
 
 
 class filegroup(BuildTarget):
-  def __init__(self, name, srcs, deps=[]):
+  def __init__(self, name, srcs, deps=[], **kwargs):
     self.cc_obj_files = []
-    BuildTarget.__init__(self, name, srcs, deps=deps)
+    BuildTarget.__init__(self, name, srcs, deps=deps, **kwargs)
 
   def SetUp(self):
     CopyToGenDir(self.srcs)
@@ -542,9 +558,9 @@ def cc_headers(*args, **kwargs):
   return filegroup(*args, **kwargs)
 
 class py_test(BuildTarget):
-  def __init__(self, name, srcs, deps=[]):
+  def __init__(self, name, srcs, deps=[], **kwargs):
     self.cc_obj_files = []
-    BuildTarget.__init__(self, name, srcs, deps=deps)
+    BuildTarget.__init__(self, name, srcs, deps=deps, **kwargs)
 
   def SetUp(self):
     CopyToGenDir(self.srcs)
@@ -564,7 +580,7 @@ class cc_thirdparty_target(BuildTarget):
   When building, this script will copy all stuff to a temporary directory, so
   that the original source tree is not affected.
   """
-  def __init__(self, name, srcs, commands, cc_obj_files, deps=[]):
+  def __init__(self, name, srcs, commands, cc_obj_files, deps=[], **kwargs):
     self.cwd = Brewery.CWD
     self.build_dir = os.path.join(Brewery.TMPDIR, Brewery.CWD)
     self.commands = [
@@ -577,7 +593,7 @@ class cc_thirdparty_target(BuildTarget):
         os.path.join(Env.GENDIR, "third_party", f)
         for f in cc_obj_files if not f.startswith('-l')] + [
         f for f in cc_obj_files if f.startswith('-l')]
-    BuildTarget.__init__(self, name, srcs, deps=deps)
+    BuildTarget.__init__(self, name, srcs, deps=deps, **kwargs)
 
   def SetUp(self):
     self.cc_obj_files += MergeOrderedObjs(
@@ -585,6 +601,8 @@ class cc_thirdparty_target(BuildTarget):
 
   def Build(self):
     # First, copy all things to the temp directory
+    if os.path.exists(self.build_dir):
+      shutil.rmtree(self.build_dir)
     shutil.copytree(self.cwd, self.build_dir)
     BuildDebug("script: %s" % str(self.commands))
 
@@ -601,14 +619,14 @@ class shell_script(BuildTarget):
   """Shell scripts are directly run to generate data files. It is run from the
   root of the gendir.
   """
-  def __init__(self, name, srcs, commands, deps=[]):
+  def __init__(self, name, srcs, commands, deps=[], **kwargs):
     self.cwd = Brewery.CWD
     self.commands = [
         'GENDIR=%s' % os.path.abspath(Env.GENDIR),
         'CWD=%s' % self.cwd,
         'cd %s' % os.path.abspath(Env.GENDIR),
     ] + commands
-    BuildTarget.__init__(self, name, srcs, deps=deps)
+    BuildTarget.__init__(self, name, srcs, deps=deps, **kwargs)
 
   def SetUp(self):
     """A shell script should produce no cc_obj_files. This is here just so that

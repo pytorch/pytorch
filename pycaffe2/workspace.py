@@ -4,7 +4,11 @@ from multiprocessing import Process
 import socket
 from pycaffe2 import utils
 
-from .libcaffe2_python import *
+try:
+  from .libcaffe2_python import *
+except ImportError as e:
+  print 'Pycaffe+GPU is not available. Using CPU only version.'
+  from .libcaffe2_python_nogpu import *
 # libcaffe2_python contains a global Workspace that we need to properly delete
 # when exiting. Otherwise, cudart will cause segfaults sometimes.
 atexit.register(OnModuleExit)

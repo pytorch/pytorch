@@ -26,6 +26,17 @@ def _GetCompilerType(CC):
   else:
     raise RuntimeError('Cannot determine C++ compiler type.')
 
+def _GetPythonIncludes():
+  includes = _GetSubprocessOutput(['python-config', '--includes'])
+  # determine the numpy include directory. If any error happens, return
+  # empty.
+  try:
+    import numpy.distutils
+    includes += ' -I' + ' -I'.join(
+      numpy.distutils.misc_util.get_numpy_include_dirs())
+  except Error as e:
+    pass
+  return includes
 
 class Env(object):
   """Env is the class that stores all the build variables."""
@@ -64,10 +75,11 @@ class Env(object):
     MPI_LIBS = []
 
   # Determine the CUDA directory.
-  if os.path.exists('/usr/local/cuda'):
-    CUDA_DIR = '/usr/local/cuda'
-  else:
-    raise RuntimeError('Cannot find Cuda directory.')
+  # TODO(Yangqing): find a way to automatically figure out where nvcc is.
+  CUDA_DIR = '/usr/local/cuda'
+  if not os.path.exists(CUDA_DIR):
+    # Currently, we just print a warning.
+    print ('Cannot find Cuda directory. NVCC will not run.')
   NVCC = os.path.join(CUDA_DIR, 'bin', 'nvcc')
   NVCC_INCLUDES = [os.path.join(CUDA_DIR, 'include')]
 
@@ -111,8 +123,8 @@ class Env(object):
       '-O2',
       #'-pg',
       '-DNDEBUG',
-      '-msse',
-      '-mavx',
+      #'-msse',
+      #'-mavx',
       '-ffast-math',
       '-std=c++11',
       '-W',
@@ -132,7 +144,8 @@ class Env(object):
   ]
   INCLUDES = ' '.join(['-I' + s for s in INCLUDES])
   # Python
-  INCLUDES += ' ' + _GetSubprocessOutput(['python-config', '--includes'])
+  INCLUDES += ' ' + _GetPythonIncludes()
+
   # General lib folders.
   LIBDIRS = MPI_LIBDIRS + [
       '/usr/local/lib',
