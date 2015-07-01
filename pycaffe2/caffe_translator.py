@@ -1,4 +1,4 @@
-from caffe2.proto import caffe2_pb2
+from caffe2.proto import caffe2_pb2, caffe2_legacy_pb2
 from caffe.proto import caffe_pb2
 from google.protobuf import text_format
 import numpy as np
@@ -181,6 +181,7 @@ def TranslatePool(layer, pretrained_blobs):
   AddArgument(caffe_op, "kernel", int(param.kernel_size))
   AddArgument(caffe_op, "pad", int(param.pad))
   AddArgument(caffe_op, "order", "NCHW")
+  AddArgument(caffe_op, "legacy_pad", caffe2_legacy_pb2.CAFFE_LEGACY_POOLING)
   return caffe_op, []
 
 @CacaRegistry.Register("LRN")
@@ -220,4 +221,11 @@ def TranslateDropout(layer, pretrained_blobs):
 @CacaRegistry.Register("Softmax")
 def TranslateSoftmax(layer, pretrained_blobs):
   caffe_op = BaseTranslate(layer, "Softmax")
+  return caffe_op, []
+
+@CacaRegistry.Register("Concat")
+def TranslateConcat(layer, pretrained_blobs):
+  caffe_op = BaseTranslate(layer, "DepthConcat")
+  caffe_op.outputs.extend(['_' + caffe_op.outputs[0] + '_dims'])
+  AddArgument(caffe_op, "order", "NCHW")
   return caffe_op, []
