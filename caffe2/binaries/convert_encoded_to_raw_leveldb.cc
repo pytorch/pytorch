@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <fstream>  // NOLINT(readability/streams)
+#include <memory>
 #include <random>
 #include <string>
 
