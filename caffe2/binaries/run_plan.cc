@@ -8,8 +8,8 @@ DEFINE_string(plan, "", "The given path to the plan protobuffer.");
 
 int main(int argc, char** argv) {
   google::InitGoogleLogging(argv[0]);
-  google::SetUsageMessage("Runs a given plan.");
-  google::ParseCommandLineFlags(&argc, &argv, true);
+  gflags::SetUsageMessage("Runs a given plan.");
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
   LOG(INFO) << "Loading plan: " << FLAGS_plan;
   caffe2::PlanDef plan_def;
   CHECK(ReadProtoFromFile(FLAGS_plan, &plan_def));
