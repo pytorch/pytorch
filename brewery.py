@@ -214,11 +214,11 @@ class Brewery(object):
 
   @classmethod
   def RunInParallel(cls, commands):
-    if any(cls.Pool.map(RunSingleCommand, commands)):
+    fail = any(cls.Pool.map(RunSingleCommand, commands))
+    sys.stdout.flush()
+    if fail:
       BuildWarning('Command failed.')
-      return False
-    else:
-      return True
+    return not fail
 
   @classmethod
   def Register(cls, name, target):
