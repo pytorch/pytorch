@@ -120,8 +120,8 @@ class Net(object):
       self._net.CopyFrom(name)
       # Set the next name index properly.
       existing_names = set(
-          sum([list(op.input) for op in self._net.operators], []) +
-          sum([list(op.output) for op in self._net.operators], []))
+          sum([list(op.input) for op in self._net.op], []) +
+          sum([list(op.output) for op in self._net.op], []))
       prefix_len = len(self._net.name + '_blob_')
       autogen_indices = [int(name[prefix_len:]) for name in existing_names
                        if name.startswith(self._net.name + '_blob_')]
@@ -162,7 +162,7 @@ class Net(object):
     """
     # (1) Make sure that the network is "legal" in terms of computing gradients:
     # for every blob there is only going to be one operator that generates it.
-    all_outputs = sum([list(op.output) for op in self._net.operators], [])
+    all_outputs = sum([list(op.output) for op in self._net.op], [])
     if len(all_outputs) != len(set(all_outputs)):
       # There is some output that is produced by multiple operators. This is not
       # good.
@@ -172,7 +172,7 @@ class Net(object):
     # need to take special care. Currently, we will ask the operators to compute
     # the gradients, and add aggregation operators to get the final gradient.
     input_counts = Counter(
-        sum([list(op.input) for op in self._net.operators], []))
+        sum([list(op.input) for op in self._net.op], []))
     multiple_use_blobs = set(
         [key for key in input_counts if input_counts[key] > 1])
     if len(multiple_use_blobs):
@@ -181,7 +181,7 @@ class Net(object):
       # dealt with.
       new_ops = []
       current_input_id = defaultdict(int)
-      for op in self._net.operators:
+      for op in self._net.op:
         # For the input, if it is one of the mutiple use blobs, change it to
         # an autosplit version.
         for i, name in enumerate(op.input):
@@ -201,13 +201,13 @@ class Net(object):
       # that the network currently holds. We have to do this instead of
       # inserting things midway because protobuf python only supports appending
       # to the end.
-      del self._net.operators[:]
-      self._net.operators.extend(new_ops)
+      del self._net.op[:]
+      self._net.op.extend(new_ops)
     # (3) Now that the cleaning has been done, we can simply look into the
     # gradient registry and add gradient operators.
-    for i in xrange(len(self._net.operators) - 1, skip - 1, -1):
-      gradient_ops = GradientRegistry.GetGradient(self._net.operators[i])
-      self._net.operators.extend(gradient_ops)
+    for i in xrange(len(self._net.op) - 1, skip - 1, -1):
+      gradient_ops = GradientRegistry.GetGradient(self._net.op[i])
+      self._net.op.extend(gradient_ops)
 
   def RunAllOnGPU(self, gpu_id=0):
     """A convenient function to run everything on the GPU."""
@@ -231,7 +231,7 @@ class Net(object):
         # auto-generated names.
         outputs = [self.NextName() for i in range(outputs)]
       op = CreateOperator(operator_type)(inputs, outputs, **kwargs)
-      self._net.operators.extend([op])
+      self._net.op.extend([op])
       if len(op.output) == 0:
         return
       elif len(op.output) == 1:
@@ -246,14 +246,14 @@ class ExecutionStep(object):
     self._step = caffe2_pb2.ExecutionStep()
     self._step.name = name
 
-  def __init__(self, name, nets, iterations=None):
+  def __init__(self, name, nets, num_iter=None):
     self._step = caffe2_pb2.ExecutionStep()
     self._step.name = name
     if type(nets) is Net:
       nets = [nets]
-    self._step.networks.extend([str(n) for n in nets])
-    if iterations:
-      self._step.iterations = iterations
+    self._step.network.extend([str(n) for n in nets])
+    if num_iter is not None:
+      self._step.num_iter = num_iter
 
   def __str__(self):
     return self._step.name
@@ -261,14 +261,14 @@ class ExecutionStep(object):
   def Proto(self):
     return self._step
 
-  def SetIter(self, iterations):
-    self._step.iterations = iterations
+  def SetIter(self, num_iter):
+    self._step.num_iter = num_iter
 
   def AddSubstep(self, substep):
-    self._step.substeps.add().CopyFrom(substep)
+    self._step.substep.add().CopyFrom(substep)
 
   def AddNet(self, net):
-    self._step.networks.add(str(net))
+    self._step.network.add(str(net))
 
 
 class Plan(object):
@@ -284,8 +284,8 @@ class Plan(object):
 
   def AddNets(self, nets):
     for net in nets:
-      self._plan.networks.add().CopyFrom(net.Proto())
+      self._plan.network.add().CopyFrom(net.Proto())
 
   def AddStep(self, step):
-    self._plan.execution_steps.add().CopyFrom(step.Proto())
+    self._plan.execution_step.add().CopyFrom(step.Proto())
 

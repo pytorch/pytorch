@@ -99,21 +99,21 @@ bool Workspace::RunNetOnce(const NetDef& net_def) {
 
 bool Workspace::RunPlan(const PlanDef& plan) {
   LOG(INFO) << "Started executing plan.";
-  if (plan.networks_size() == 0 || plan.execution_steps_size() == 0) {
+  if (plan.network_size() == 0 || plan.execution_step_size() == 0) {
     LOG(WARNING) << "Nothing to run - did you define a correct plan?";
     // We will do nothing, but the plan is still legal so we will return true.
     return true;
   }
   LOG(INFO) << "Initializing networks.";
 
-  for (const NetDef& net_def : plan.networks()) {
+  for (const NetDef& net_def : plan.network()) {
     if (!CreateNet(net_def)) {
       LOG(ERROR) << "Failed initializing the networks.";
       return false;
     }
   }
   clock_t start_time = clock();
-  for (const ExecutionStep& step : plan.execution_steps()) {
+  for (const ExecutionStep& step : plan.execution_step()) {
     clock_t step_start_time = clock();
     if (!ExecuteStepRecursive(step)) {
       LOG(ERROR) << "Failed initializing step " << step.name();
@@ -132,16 +132,17 @@ bool Workspace::RunPlan(const PlanDef& plan) {
 
 bool Workspace::ExecuteStepRecursive(const ExecutionStep& step) {
   LOG(INFO) << "Running execution step " << step.name();
-  if (!(step.substeps_size() == 0 || step.networks_size() == 0)) {
-    LOG(ERROR) << "An ExecutionStep should either have substeps or networks "
+  if (!(step.substep_size() == 0 || step.network_size() == 0)) {
+    LOG(ERROR) << "An ExecutionStep should either have substep or networks "
                << "but not both.";
     return false;
   }
 
-  if (step.substeps_size()) {
-    int iterations = step.has_iterations() ? step.iterations() : 1;
+  int iterations = step.has_num_iter() ? step.num_iter() : 1;
+  VLOG(1) << "Executing step for " << iterations << " iterations.";
+  if (step.substep_size()) {
     for (int i = 0; i < iterations; ++i) {
-      for (const ExecutionStep& substep : step.substeps()) {
+      for (const ExecutionStep& substep : step.substep()) {
         if (!ExecuteStepRecursive(substep)) {
           return false;
         }
@@ -152,7 +153,7 @@ bool Workspace::ExecuteStepRecursive(const ExecutionStep& step) {
     // If this ExecutionStep just contains nets, we can directly run it.
     vector<NetBase*> networks;
     // Collect the networks to run.
-    for (const string& network_name : step.networks()) {
+    for (const string& network_name : step.network()) {
       if (!net_map_.count(network_name)) {
         LOG(ERROR) << "Network " << network_name << " not found.";
         return false;
@@ -160,8 +161,6 @@ bool Workspace::ExecuteStepRecursive(const ExecutionStep& step) {
       VLOG(1) << "Going to execute network " << network_name;
       networks.push_back(net_map_[network_name].get());
     }
-    int iterations = step.has_iterations() ? step.iterations() : 1;
-    VLOG(1) << "Executing networks for " << iterations << " iterations.";
     for (int iter = 0; iter < iterations; ++iter) {
       VLOG(1) << "Executing network iteration " << iter;
       for (NetBase* network : networks) {
