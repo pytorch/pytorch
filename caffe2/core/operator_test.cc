@@ -171,11 +171,11 @@ NetDef GetNetDefForTest() {
   op_def.set_type("JustTest");
   op_def.add_input("input");
   op_def.add_output("hidden");
-  net_def.add_operators()->CopyFrom(op_def);
+  net_def.add_op()->CopyFrom(op_def);
   op_def.set_name("JustTest1");
   op_def.set_input(0, "hidden");
   op_def.set_output(0, "output");
-  net_def.add_operators()->CopyFrom(op_def);
+  net_def.add_op()->CopyFrom(op_def);
   return net_def;
 }
 

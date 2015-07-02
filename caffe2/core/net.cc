@@ -23,7 +23,7 @@ SimpleNet::SimpleNet(const NetDef& net_def, Workspace* ws)
     : NetBase(net_def, ws) {
   bool net_def_has_device_option = net_def.has_device_option();
   // Initialize the operators
-  for (const OperatorDef& operator_def : net_def.operators()) {
+  for (const OperatorDef& operator_def : net_def.op()) {
     VLOG(1) << "Creating operator " << operator_def.name()
             << ":" << operator_def.type();
     if (!operator_def.has_device_option() && net_def_has_device_option) {
@@ -62,13 +62,13 @@ bool SimpleNet::Run() {
 }
 
 ParallelNet::ParallelNet(const NetDef& net_def, Workspace* ws)
-    : NetBase(net_def, ws), operator_nodes_(net_def.operators_size()) {
+    : NetBase(net_def, ws), operator_nodes_(net_def.op_size()) {
   // Blob creator allows us to track which operator created which blob.
   std::map<string, int> blob_creator;
   bool net_def_has_device_option = net_def.has_device_option();
   // Initialize the operators
-  for (int idx = 0; idx < net_def.operators_size(); ++idx) {
-    const OperatorDef& op_def = net_def.operators(idx);
+  for (int idx = 0; idx < net_def.op_size(); ++idx) {
+    const OperatorDef& op_def = net_def.op(idx);
     VLOG(1) << "Creating operator #" << idx << ": "
             << op_def.name() << ":" << op_def.type();
     if (!op_def.has_device_option() && net_def_has_device_option) {

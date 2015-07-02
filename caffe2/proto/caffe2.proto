@@ -68,7 +68,10 @@ message OperatorDef {
 
 message NetDef {
   optional string name = 1; // the network's name
-  repeated OperatorDef operators = 2; // a bunch of operators.
+  // Operators that the network contains.
+  // Note(Yangqing): I did not name it "operator" because that is a reserved
+  // word in C++.
+  repeated OperatorDef op = 2;
 
   // net_type and net_args are implementation-specific parameters that we want
   // to pass to specialized implementations. If you do not care about this, you
@@ -91,9 +94,22 @@ message ExecutionStep {
   // network names to run in this execution step. They should NOT both be set
   // at the same time.
   optional string name = 1;
-  repeated ExecutionStep substeps = 2;
-  repeated string networks = 3;
-  optional int32 iterations = 4;
+  // An execution step could be recursive, in which it involves a set of
+  // substeps.
+  repeated ExecutionStep substep = 2;
+  // Alternatively, an execution step could involve one or more networks.
+  // Note that you cannot have both substeps and networks. Choose one.
+  // Note that an executionstep refers networks by their name. The actual
+  // network definition of the same name should be included in the network field
+  // of the plan. The reason is that a network object might hold internal states
+  // (think of a data layer), so we want to have the same network object that
+  // multiple steps could ask to run.
+  repeated string network = 3;
+  // Number of iterations to run this step. The substeps or the networks
+  // specified will be run sequentially, and one sequential run is considered
+  // one iteration. If this is not set, the number of iterations is assumed to
+  // be 1.
+  optional int32 num_iter = 4;
 }
 
 message PlanDef {
@@ -102,8 +118,9 @@ message PlanDef {
   // its input blobs should already have been initialized by the layers or
   // networks defined before it.
   optional string name = 1;
-  repeated NetDef networks = 2;
-  repeated ExecutionStep execution_steps = 3;
+  // The networks that are going to be used in this plan.
+  repeated NetDef network = 2;
+  repeated ExecutionStep execution_step = 3;
 }
 
 // ClientDef is a model we use to ship a pre-trained model. This contains two

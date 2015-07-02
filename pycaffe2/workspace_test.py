@@ -22,7 +22,7 @@ class TestWorkspace(unittest.TestCase):
   def testRunOperatorOnce(self):
     self.assertEqual(
         workspace.RunOperatorOnce(
-            self.net.Proto().operators[0].SerializeToString()),
+            self.net.Proto().op[0].SerializeToString()),
         True)
     self.assertEqual(workspace.HasBlob("testblob"), True)
     blobs = workspace.Blobs()
