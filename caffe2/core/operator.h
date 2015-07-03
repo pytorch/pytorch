@@ -75,6 +75,11 @@ class OperatorBase {
     return inputs_.at(idx)->template IsType<T>();
   }
 
+  template <typename T>
+  inline bool OutputIsType(int idx) {
+    return outputs_.at(idx)->template IsType<T>();
+  }
+
   inline int InputSize() { return inputs_.size(); }
   inline int OutputSize() { return outputs_.size(); }
   inline const vector<const Blob*>& Inputs() const { return inputs_; }
