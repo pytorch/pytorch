@@ -28,6 +28,34 @@ THCudaTensor_copy(THCState* state, THCudaTensor* dst, THCudaTensor* src) {
   bool dstContig = THCudaTensor_isContiguous(state, dst);
   bool memcpyEligible = (srcContig && dstContig) || (totalElements == 1);
 
+  int oldDev = curGPU();
+  int srcDev = THCudaTensor_getDevice(state, src);
+  int dstDev = THCudaTensor_getDevice(state, dst);
+
+  // empirically, running the kernel on the device that holds the
+  // non-contiguous tensor is faster by 5-10x
+  int copyDev   = dstContig ? srcDev : dstDev;
+  int remoteDev = dstContig ? dstDev : srcDev;
+
+  if (srcDev == dstDev) {
+    if (oldDev != srcDev) {
+      THCudaCheck(cudaSetDevice(srcDev));
+    }
+  } else {
+    // synchronize remote device before copy
+    cudaEvent_t dataReady;
+    THCudaCheck(cudaSetDevice(remoteDev));
+    THCudaCheck(cudaEventCreate(&dataReady));
+    THCudaCheck(cudaEventRecord(
+                  dataReady,
+                  THCState_getDeviceStream(state, remoteDev, THCState_getCurrentStreamIndex(state))));
+    THCudaCheck(cudaSetDevice(copyDev));
+    THCudaCheck(cudaStreamWaitEvent(
+                  THCState_getDeviceStream(state, copyDev, THCState_getCurrentStreamIndex(state)),
+                  dataReady, 0));
+    THCudaCheck(cudaEventDestroy(dataReady));
+  }
+
   if (memcpyEligible) {
     THCudaCheck(cudaMemcpyAsync(THCudaTensor_data(state, dst),
                                 THCudaTensor_data(state, src),
@@ -35,57 +63,27 @@ THCudaTensor_copy(THCState* state, THCudaTensor* dst, THCudaTensor* src) {
                                 cudaMemcpyDeviceToDevice,
                                 THCState_getCurrentStream(state)));
   } else {
-    int oldDev = curGPU();
-    int srcDev = THCudaTensor_getDevice(state, src);
-    int dstDev = THCudaTensor_getDevice(state, dst);
-
-    if (srcDev == dstDev) {
-      if (oldDev != srcDev) {
-        THCudaCheck(cudaSetDevice(srcDev));
-      }
-
       bool succ =
         THCudaTensor_pointwiseApply2(state, dst, src, CopyOp<float>());
       THArgCheck(succ, 2, CUTORCH_DIM_WARNING);
-    } else { // multi-gpu
-      // empirically, running the kernel on the device that holds the
-      // non-contiguous tensor is faster by 5-10x
-      int copyDev   = dstContig ? srcDev : dstDev;
-      int remoteDev = dstContig ? dstDev : srcDev;
+  }
 
-      // synchronize remote device before copy
-      cudaEvent_t dataReady;
-      THCudaCheck(cudaSetDevice(remoteDev));
-      THCudaCheck(cudaEventCreate(&dataReady));
-      THCudaCheck(cudaEventRecord(
-                    dataReady,
-                    THCState_getDeviceStream(state, remoteDev, THCState_getCurrentStreamIndex(state))));
-      THCudaCheck(cudaSetDevice(copyDev));
-      THCudaCheck(cudaStreamWaitEvent(
-                    THCState_getDeviceStream(state, copyDev, THCState_getCurrentStreamIndex(state)),
-                    dataReady, 0));
-      THCudaCheck(cudaEventDestroy(dataReady));
+  if (srcDev != dstDev) {
+    // synchronize remote device after copy
+    cudaEvent_t doneCopying;
+    THCudaCheck(cudaEventCreate(&doneCopying));
+    THCudaCheck(cudaEventRecord(
+                  doneCopying,
+                  THCState_getDeviceStream(state, copyDev, THCState_getCurrentStreamIndex(state))));
+    THCudaCheck(cudaSetDevice(remoteDev));
+    THCudaCheck(cudaStreamWaitEvent(
+                  THCState_getDeviceStream(state, remoteDev, THCState_getCurrentStreamIndex(state)),
+                  doneCopying, 0));
+    THCudaCheck(cudaEventDestroy(doneCopying));
+  }
 
-      bool succ =
-        THCudaTensor_pointwiseApply2(state, dst, src, CopyOp<float>());
-      THArgCheck(succ, 2, CUTORCH_DIM_WARNING);
-
-      // synchronize remote device after copy
-      cudaEvent_t doneCopying;
-      THCudaCheck(cudaEventCreate(&doneCopying));
-      THCudaCheck(cudaEventRecord(
-                    doneCopying,
-                    THCState_getDeviceStream(state, copyDev, THCState_getCurrentStreamIndex(state))));
-      THCudaCheck(cudaSetDevice(remoteDev));
-      THCudaCheck(cudaStreamWaitEvent(
-                    THCState_getDeviceStream(state, remoteDev, THCState_getCurrentStreamIndex(state)),
-                    doneCopying, 0));
-      THCudaCheck(cudaEventDestroy(doneCopying));
-    }
-
-    if (curGPU() != oldDev) {
-      THCudaCheck(cudaSetDevice(oldDev));
-    }
+  if (curGPU() != oldDev) {
+    THCudaCheck(cudaSetDevice(oldDev));
   }
 
   cudaError errcode = cudaGetLastError();
