@@ -6,6 +6,8 @@
 
 namespace caffe2 {
 
+// LearningRateFunctor is a functor that when fed with an iter number, produces
+// the learning rate for the corresponding iteration.
 template <typename dtype>
 class LearningRateFunctor {
  public:
