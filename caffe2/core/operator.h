@@ -30,10 +30,10 @@ class OperatorBase {
 
   // Parameter getters. You can use these to get the arguments that you want.
   bool HasArgument(const string& name) { return (arg_map_.count(name) > 0); }
-  template <typename T>
 
   // Functions that deal with arguments. Basically, this allows us to map an
   // argument mane to a specific type of argument that we are trying to access.
+  template <typename T>
   T GetSingleArgument(const string& name, const T& default_value);
   template <typename T>
   vector<T> GetRepeatedArgument(const string& name);
@@ -63,15 +63,18 @@ class OperatorBase {
     DCHECK_LT(idx, inputs_.size());
     return inputs_.at(idx)->template Get<T>();
   }
+
   template <typename T>
   inline T* Output(int idx) {
     DCHECK_LT(idx, outputs_.size());
     return outputs_.at(idx)->template GetMutable<T>();
   }
+
   template <typename T>
   inline bool InputIsType(int idx) {
     return inputs_.at(idx)->template IsType<T>();
   }
+
   inline int InputSize() { return inputs_.size(); }
   inline int OutputSize() { return outputs_.size(); }
   inline const vector<const Blob*>& Inputs() const { return inputs_; }
