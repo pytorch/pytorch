@@ -14,16 +14,15 @@ static_assert(sizeof(void*) <= sizeof(int64_t),
               "This does not happen often, but int64_t is not enough for "
               "pointers on this platform.");
 typedef int64_t TypeId;
-extern std::map<TypeId, string> g_caffe2_type_name_map;
+
+std::map<TypeId, string>& Caffe2TypeNameMap();
 const TypeId gUnknownType = 0;
 
 template <class T>
 class TypeIdRegisterer {
  public:
   TypeIdRegisterer() {
-    CHECK_EQ(g_caffe2_type_name_map.count(id()), 0)
-        << "Registerer instantiated twice.";
-    g_caffe2_type_name_map[id()] = typeid(T).name();
+    Caffe2TypeNameMap()[id()] = typeid(T).name();
   }
   inline TypeId id() {
     return reinterpret_cast<TypeId>(type_id_bit);
@@ -49,7 +48,7 @@ inline bool IsTypeId(TypeId id) {
 
 inline string TypeName(TypeId id) {
   if (id == gUnknownType) return "UNKNOWN";
-  return g_caffe2_type_name_map[id];
+  return Caffe2TypeNameMap()[id];
 }
 
 template <class T>
