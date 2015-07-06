@@ -1,6 +1,7 @@
 import atexit
 from caffe2.proto import caffe2_pb2
 from multiprocessing import Process
+import os
 import socket
 from pycaffe2 import utils
 
@@ -75,6 +76,14 @@ def StringfyProto(obj):
       # Secind, see if this is an object defined in Pycaffe2, which exposes a
       # Proto() function that gives you the protocol buffer.
       return obj.Proto().SerializeToString()
+
+def ResetWorkspace(root_folder=None):
+  if root_folder is None:
+    return cc_ResetWorkspace()
+  else:
+    if not os.path.exists(root_folder):
+      os.makedirs(root_folder)
+    return cc_ResetWorkspace(root_folder)
 
 def CreateNet(net, input_blobs=[]):
   for input_blob in input_blobs:
