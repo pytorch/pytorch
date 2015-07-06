@@ -428,7 +428,7 @@ static PyMethodDef gPycaffe2Methods[] = {
   _PYNAME(SwitchWorkspace),
   _PYNAME(CurrentWorkspace),
   _PYNAME(Workspaces),
-  _PYNAME(ResetWorkspace),
+  {"cc_ResetWorkspace", ResetWorkspace, METH_VARARGS},
   _PYNAME(RootFolder),
   _PYNAME(OnModuleExit),
   _PYNAME(Blobs),
