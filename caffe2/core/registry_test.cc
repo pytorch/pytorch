@@ -39,8 +39,7 @@ TEST(RegistryTest, CanRunCreator) {
 }
 
 TEST(RegistryTest, ReturnNullOnNonExistingCreator) {
-  EXPECT_EQ(
-      FooRegistry()->Create("Non-existing bar", 1), nullptr);
+  EXPECT_EQ(FooRegistry()->Create("Non-existing bar", 1), nullptr);
 }
 
 }  // namespace caffe2
