@@ -3,7 +3,8 @@
 
 namespace caffe2 {
 namespace {
-REGISTER_CUDA_OPERATOR(LoadFloatTensor, LoadFloatTensorOp<CUDAContext>);
-REGISTER_CUDA_OPERATOR(SaveFloatTensor, SaveFloatTensorOp<CUDAContext>);
+REGISTER_CUDA_OPERATOR(LoadTensor, LoadTensorOp<CUDAContext>);
+REGISTER_CUDA_OPERATOR(Save, SaveOp<CUDAContext>);
+REGISTER_CUDA_OPERATOR(Snapshot, SnapshotOp<CUDAContext>);
 }  // namespace
 }  // namespace caffe2

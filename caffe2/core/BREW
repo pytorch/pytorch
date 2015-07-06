@@ -1,6 +1,7 @@
 cc_library(
   name = "core",
   srcs = [
+      "blob_serialization.cc",
       "client.cc",
       "db.cc",
       "minidb.cc",
@@ -11,6 +12,7 @@ cc_library(
   ],
   hdrs = [
       "blob.h",
+      "blob_serialization.h",
       "client.h",
       "common.h",
       "context.h",
@@ -34,6 +36,7 @@ cc_library(
 cuda_library(
   name = "core_gpu",
   srcs = [
+    "blob_serialization_gpu.cc",
     "common_gpu.cc",
   ],
   hdrs = [
@@ -42,7 +45,8 @@ cuda_library(
   ],
   deps = [
     ":core",
-  ]
+  ],
+  whole_archive = True,
 )
 
 cc_headers(

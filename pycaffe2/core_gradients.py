@@ -43,6 +43,7 @@ def CheckAveragedLossNaming(op):
 
 @GradientRegistry.RegisterGradient("TensorProtosDBInput")
 @GradientRegistry.RegisterGradient("GaussianFill")
+@GradientRegistry.RegisterGradient("Iter")
 def NoGradientToCompute(op):
   return
 

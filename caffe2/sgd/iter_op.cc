@@ -28,7 +28,7 @@ class IterOp final : public OperatorBase {
       int* iter = output->mutable_data();
       CHECK_GE(*iter, 0) << "Previous iteration number is negative.";
       CHECK_LT(*iter, INT_MAX) << "Overflow will happen!";
-      *iter++;
+      (*iter)++;
       return true;
     }
   }
