@@ -67,14 +67,18 @@ class PrintOp final : public Operator<dtype, DeviceContext> {
   bool RunOnDevice() final {
     Tensor<dtype, CPUContext> temp_tensor;
     for (int input_id = 0; input_id < InputSize(); ++input_id) {
-      auto& input = Input(input_id);
-      DCHECK_GT(input.size(), 0);
-      temp_tensor.ReshapeLike(input);
-      device_context_.template Copy<dtype, CPUContext, DeviceContext>(
-          temp_tensor.mutable_data(), input.data(), input.size());
-      std::stringstream dims_stream;
-      for (const int dim : input.dims()) {
-        dims_stream << dim << ",";
+      // A special case for inputs that are on CPUContext: in which case we
+      // would not need to do any copy.
+      if (OperatorBase::InputIsType<Tensor<dtype, CPUContext> >(input_id)) {
+        auto& input = OperatorBase::Input<Tensor<dtype, CPUContext> >(input_id);
+        temp_tensor.ReshapeLike(input);
+        temp_tensor.ShareData(input);
+      } else {
+        auto& input = Input(input_id);
+        DCHECK_GT(input.size(), 0);
+        temp_tensor.ReshapeLike(input);
+        device_context_.template Copy<dtype, CPUContext, DeviceContext>(
+            temp_tensor.mutable_data(), input.data(), input.size());
       }
       std::stringstream values_stream;
       int total_count = std::min(temp_tensor.size(), limit_);
@@ -87,9 +91,12 @@ class PrintOp final : public Operator<dtype, DeviceContext> {
       if (to_file_) {
         // Also log to file.
         auto& stream = *log_files_[input_id];
-        stream << values_stream.str();
-        stream << std::endl;
+        stream << values_stream.str() << std::endl;
       } else {
+        std::stringstream dims_stream;
+        for (const int dim : temp_tensor.dims()) {
+          dims_stream << dim << ",";
+        }
         // Log to console.
         LOG(INFO) << "Tensor " << def().input(input_id)
             << " (" << dims_stream.str() << "): " << values_stream.str();
@@ -276,6 +283,26 @@ class CopyOp : public Operator<dtype, DeviceContext> {
 
   INPUT_OUTPUT_STATS(1, 1, 1, 1);
   DISABLE_COPY_AND_ASSIGN(CopyOp);
+};
+
+// RecordShapeOp records the shape of the input tensor to a vector of int. You
+// mostly don't need this operator explicitly, and it is mostly used in the
+// autodiff process.
+template <typename dtype, class DeviceContext>
+class RecordShapeOp : public Operator<dtype, DeviceContext> {
+ public:
+  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_SIMPLE_CTOR_DTOR(RecordShapeOp);
+
+  bool RunOnDevice() final {
+    auto& input = Input(0);
+    auto* output = OperatorBase::Output<vector<dtype, DeviceContext> >(0);
+    *output = input.shape();
+    return true;
+  }
+
+  INPUT_OUTPUT_STATS(1, 1, 1, 1);
+  DISABLE_COPY_AND_ASSIGN(RecordShapeOp);
 };
 
 }  // namespace caffe2

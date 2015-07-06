@@ -6,6 +6,7 @@
 
 #include "caffe2/core/common.h"
 #include "caffe2/core/context.h"
+#include "caffe2/core/registry.h"
 #include "caffe2/core/typeid.h"
 #include "caffe2/proto/caffe2.pb.h"
 #include "glog/logging.h"
@@ -63,6 +64,10 @@ class Blob {
     }
   }
 
+  // Serializes the current blob, if possible. This serialization uses
+  // registration so we don't need to deal with multiple platform problems.
+  string Serialize(const string& name) const;
+
  private:
   internal::TypeId id_;
   void* pointer_;
@@ -70,6 +75,21 @@ class Blob {
 
   DISABLE_COPY_AND_ASSIGN(Blob);
 };
+
+// BlobSerializer is a class that serializes a blob to a string.
+class BlobSerializerBase {
+ public:
+  virtual string Serialize(const Blob& blob, const string& name) = 0;
+};
+
+DECLARE_TYPED_REGISTRY(BlobSerializerRegistry, internal::TypeId,
+                       BlobSerializerBase);
+#define REGISTER_BLOB_SERIALIZER(name, id, ...) \
+  REGISTER_TYPED_CLASS(BlobSerializerRegistry, name, id, __VA_ARGS__)
+// Creates an operator with the given operator definition.
+inline BlobSerializerBase* CreateSerializer(internal::TypeId id) {
+  return BlobSerializerRegistry()->Create(id);
+}
 
 template <typename dtype, class Context>
 class Tensor {

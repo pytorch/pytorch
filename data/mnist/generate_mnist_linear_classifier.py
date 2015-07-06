@@ -1,5 +1,11 @@
+import os
 from pycaffe2 import core
 from pycaffe2 import core_gradients
+# We adopt the tempfile module so we can do a snapshot test.
+import tempfile
+
+snapshot_db_pattern = os.path.join(
+    tempfile.gettempdir(), 'caffe_mnist_linear_regression_snapshot_%d')
 
 init_net = core.Net("init")
 W = init_net.UniformFill([], "W", shape=[10, 784], min=-0.1, max=0.1)
@@ -9,6 +15,7 @@ ONE = init_net.ConstantFill([], "ONE", shape=[1], value=1.0)
 DECAY = init_net.ConstantFill([], "DECAY", shape=[1], value=0.999)
 
 train_net = core.Net("train")
+it = train_net.Iter([], ["iter"])
 data, label = train_net.TensorProtosDBInput(
     [], ["data", "label"], batch_size=64,
     db="gen/data/mnist/mnist-train-minidb", db_type="minidb")
@@ -22,8 +29,10 @@ accuracy = softmax.Accuracy([label], "accuracy")
 W = train_net.WeightedSum([W, ONE, "W_grad", LR], "W")
 B = train_net.WeightedSum([B, ONE, "B_grad", LR], "B")
 LR = train_net.Mul([LR, DECAY], "LR")
+train_net.PrintInt([it], [])
 train_net.Print([loss, accuracy, LR], [])
-
+train_net.Snapshot([it, W, B], db=snapshot_db_pattern,
+                   db_type="protodb", every=100)
 # Run all on GPU.
 # init_net.RunAllOnGPU()
 # train_net.RunAllOnGPU()

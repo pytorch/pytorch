@@ -42,7 +42,9 @@ cc_library(
 
 cc_library(
   name = "db",
-  srcs = [],
+  srcs = [
+    "protodb.cc",
+  ],
   deps = [
     "//caffe2/core:core",
   ],
@@ -51,4 +53,5 @@ cc_library(
     ":lmdb",
     ":zmqdb",
   ],
+  whole_archive = True,
 )
