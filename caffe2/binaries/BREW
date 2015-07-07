@@ -1,4 +1,18 @@
 cc_binary(
+  name = "convert_caffe_image_db",
+  srcs = [
+      "convert_caffe_image_db.cc",
+  ],
+  deps = [
+      "//caffe/proto:caffe_proto",
+      "//caffe2/db:db",
+      "//caffe2/proto:caffe2_proto",
+      "//third_party/gflags:gflags",
+      "//third_party/glog:glog",
+  ],
+)
+
+cc_binary(
   name = "convert_db",
   srcs = [
       "convert_db.cc",

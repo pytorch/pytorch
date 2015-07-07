@@ -88,9 +88,14 @@ void ConvertImageDataset(
     if (!FLAGS_raw) {
       // Second, read images.
       std::ifstream image_file_stream(input_folder + lines[item_id].first);
-      data->mutable_string_data(0)->assign(
-          (std::istreambuf_iterator<char>(image_file_stream)),
-          std::istreambuf_iterator<char>());
+      if (!image_file_stream) {
+        LOG(ERROR) << "Cannot open " << input_folder << lines[item_id].first
+                   << ". Skipping.";
+      } else {
+        data->mutable_string_data(0)->assign(
+            (std::istreambuf_iterator<char>(image_file_stream)),
+            std::istreambuf_iterator<char>());
+      }
     } else {
       // Need to do some opencv magic.
       cv::Mat img = cv::imread(
