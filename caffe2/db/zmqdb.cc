@@ -6,6 +6,10 @@
 #include "glog/logging.h"
 #include "zmq.h"
 
+#if ZMQ_VERSION_MAJOR < 3
+#error "ZmqDB requires ZMQ version 3 or above."
+#endif
+
 namespace caffe2 {
 namespace db {
 
