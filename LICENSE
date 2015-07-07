@@ -1,5 +1,19 @@
+COPYRIGHT
+
+All contributions by Yangqing Jia:
 Copyright (c) 2015 Yangqing Jia
-All Rights Reserved.
+All rights reserved.
+
+All other contributions:
+Copyright(c) 2015, the respective contributors
+All rights reserved.
+
+Caffe2 uses a copyright model similar to Caffe: each contributor holds
+copyright over their contributions to Caffe2. The project versioning records
+all such contribution and copyright details. If a contributor wants to further
+mark their specific copyright on a particular contribution, they should
+indicate their copyright solely in the commit message of the change when it is
+committed.
 
 == LICENSE ==
 
