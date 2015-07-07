@@ -10,9 +10,6 @@
 
 namespace caffe2 {
 
-// CAFFE_VA_ARGS allows us to swallow the comma if __VA_ARGS__ is empty.
-#define CAFFE_VA_ARGS(...) , ##__VA_ARGS__
-
 // Registry is a class that allows one to register classes by a specific
 // key, usually a string specifying the name. For each key type and object type,
 // there should be only one single registry responsible for it.
@@ -92,14 +89,14 @@ class Registerer {
 };
 
 #define DECLARE_TYPED_REGISTRY(RegistryName, SrcType, ObjectType, ...)         \
-  Registry<SrcType, ObjectType CAFFE_VA_ARGS(__VA_ARGS__)>* RegistryName();    \
-  typedef Registerer<SrcType, ObjectType CAFFE_VA_ARGS(__VA_ARGS__)>           \
+  Registry<SrcType, ObjectType, ##__VA_ARGS__>* RegistryName();    \
+  typedef Registerer<SrcType, ObjectType, ##__VA_ARGS__>           \
       Registerer##RegistryName;
 
 #define DEFINE_TYPED_REGISTRY(RegistryName, SrcType, ObjectType, ...)          \
-  Registry<SrcType, ObjectType CAFFE_VA_ARGS(__VA_ARGS__)>* RegistryName() {   \
-    static Registry<SrcType, ObjectType CAFFE_VA_ARGS(__VA_ARGS__)>* registry =\
-        new Registry<SrcType, ObjectType CAFFE_VA_ARGS(__VA_ARGS__)>();        \
+  Registry<SrcType, ObjectType, ##__VA_ARGS__>* RegistryName() {   \
+    static Registry<SrcType, ObjectType, ##__VA_ARGS__>* registry =\
+        new Registry<SrcType, ObjectType, ##__VA_ARGS__>();        \
     return registry;                                                           \
   }
 
@@ -125,11 +122,11 @@ class Registerer {
 // type, because that is the most commonly used one.
 #define DECLARE_REGISTRY(RegistryName, ObjectType, ...)                        \
   DECLARE_TYPED_REGISTRY(RegistryName, std::string,                            \
-                         ObjectType CAFFE_VA_ARGS(__VA_ARGS__))
+                         ObjectType, ##__VA_ARGS__)
 
 #define DEFINE_REGISTRY(RegistryName, ObjectType, ...)                         \
   DEFINE_TYPED_REGISTRY(RegistryName, std::string,                             \
-                        ObjectType CAFFE_VA_ARGS(__VA_ARGS__))
+                        ObjectType, ##__VA_ARGS__)
 
 #define REGISTER_CREATOR(RegistryName, key, ...)                               \
   REGISTER_TYPED_CREATOR(RegistryName, key, #key, __VA_ARGS__)

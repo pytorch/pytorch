@@ -1,7 +1,7 @@
 #ifndef CAFFE2_OPERATORS_LOAD_SAVE_OP_H_
 #define CAFFE2_OPERATORS_LOAD_SAVE_OP_H_
 
-#include <unordered_map>
+#include <map>
 
 #include "caffe2/core/context.h"
 #include "caffe2/core/db.h"
@@ -89,7 +89,7 @@ class LoadTensorOp final : public Operator<float, DeviceContext> {
  private:
   string db_name_;
   string db_type_;
-  std::unordered_map<string, int> output_indices_;
+  std::map<string, int> output_indices_;
   INPUT_OUTPUT_STATS(0, 0, 1, INT_MAX);
   DISABLE_COPY_AND_ASSIGN(LoadTensorOp);
 };
