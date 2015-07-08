@@ -40,7 +40,7 @@ static int THTensor_(lapackClone)(THTensor *r_, THTensor *m, int forced)
   return THTensor_(lapackCloneNrows)(r_, m, forced, m->size[0]);
 }
 
-TH_API void THTensor_(gesv)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
+void THTensor_(gesv)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
 {
   int n, nrhs, lda, ldb, info;
   THIntTensor *ipiv;
@@ -123,7 +123,7 @@ TH_API void THTensor_(gesv)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor 
   THIntTensor_free(ipiv);
 }
 
-TH_API void THTensor_(gels)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
+void THTensor_(gels)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
 {
   // Note that a = NULL is interpreted as a = ra_, and b = NULL as b = rb_.
   int m, n, nrhs, lda, ldb, info, lwork;
@@ -217,7 +217,7 @@ TH_API void THTensor_(gels)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor 
   THTensor_(free)(work);
 }
 
-TH_API void THTensor_(geev)(THTensor *re_, THTensor *rv_, THTensor *a_, const char *jobvr)
+void THTensor_(geev)(THTensor *re_, THTensor *rv_, THTensor *a_, const char *jobvr)
 {
   int n, lda, lwork, info, ldvr;
   THTensor *work, *wi, *wr, *a;
@@ -288,7 +288,7 @@ TH_API void THTensor_(geev)(THTensor *re_, THTensor *rv_, THTensor *a_, const ch
   THTensor_(free)(work);
 }
 
-TH_API void THTensor_(syev)(THTensor *re_, THTensor *rv_, THTensor *a, const char *jobz, const char *uplo)
+void THTensor_(syev)(THTensor *re_, THTensor *rv_, THTensor *a, const char *jobz, const char *uplo)
 {
   int n, lda, lwork, info;
   THTensor *work;
@@ -347,14 +347,14 @@ TH_API void THTensor_(syev)(THTensor *re_, THTensor *rv_, THTensor *a, const cha
   THTensor_(free)(work);
 }
 
-TH_API void THTensor_(gesvd)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *a, const char* jobu)
+void THTensor_(gesvd)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *a, const char* jobu)
 {
   THTensor *ra_ = THTensor_(new)();
   THTensor_(gesvd2)(ru_, rs_, rv_,  ra_, a, jobu);
   THTensor_(free)(ra_);
 }
 
-TH_API void THTensor_(gesvd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *ra_, THTensor *a, const char* jobu)
+void THTensor_(gesvd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *ra_, THTensor *a, const char* jobu)
 {
   int k,m, n, lda, ldu, ldvt, lwork, info;
   THTensor *work;
@@ -438,7 +438,7 @@ TH_API void THTensor_(gesvd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTen
   THTensor_(free)(work);
 }
 
-TH_API void THTensor_(getri)(THTensor *ra_, THTensor *a)
+void THTensor_(getri)(THTensor *ra_, THTensor *a)
 {
   int m, n, lda, info, lwork;
   real wkopt;
@@ -507,7 +507,7 @@ TH_API void THTensor_(getri)(THTensor *ra_, THTensor *a)
   THIntTensor_free(ipiv);
 }
 
-TH_API void THTensor_(potrf)(THTensor *ra_, THTensor *a)
+void THTensor_(potrf)(THTensor *ra_, THTensor *a)
 {
   int n, lda, info;
   char uplo = 'U';
@@ -567,7 +567,7 @@ TH_API void THTensor_(potrf)(THTensor *ra_, THTensor *a)
   }
 }
 
-TH_API void THTensor_(potri)(THTensor *ra_, THTensor *a)
+void THTensor_(potri)(THTensor *ra_, THTensor *a)
 {
   int n, lda, info;
   char uplo = 'U';
@@ -653,7 +653,7 @@ TH_API void THTensor_(potri)(THTensor *ra_, THTensor *a)
   * `a`   - input Tensor; the matrix to decompose.
 
 */
-TH_API void THTensor_(qr)(THTensor *rq_, THTensor *rr_, THTensor *a)
+void THTensor_(qr)(THTensor *rq_, THTensor *rr_, THTensor *a)
 {
   int m = a->size[0];
   int n = a->size[1];
@@ -690,7 +690,7 @@ TH_API void THTensor_(qr)(THTensor *rq_, THTensor *rr_, THTensor *a)
   For further details, please see the LAPACK documentation.
 
 */
-TH_API void THTensor_(geqrf)(THTensor *ra_, THTensor *rtau_, THTensor *a)
+void THTensor_(geqrf)(THTensor *ra_, THTensor *rtau_, THTensor *a)
 {
   /* Prepare the input for LAPACK, making a copy if necessary. */
   THTensor *ra__;
@@ -768,7 +768,7 @@ TH_API void THTensor_(geqrf)(THTensor *ra_, THTensor *rtau_, THTensor *a)
   For further details, please see the LAPACK documentation.
 
 */
-TH_API void THTensor_(orgqr)(THTensor *ra_, THTensor *a, THTensor *tau)
+void THTensor_(orgqr)(THTensor *ra_, THTensor *a, THTensor *tau)
 {
   /* Prepare the input for LAPACK, making a copy if necessary. */
   THTensor *ra__;

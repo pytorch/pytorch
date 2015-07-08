@@ -5,7 +5,7 @@
 /*
   2D Input, 2D kernel  : convolve given image with the given kernel.
 */
-TH_API void THTensor_(validXCorr2Dptr)(real *r_,
+void THTensor_(validXCorr2Dptr)(real *r_,
                                        real alpha,
                                        real *t_, long ir, long ic,
                                        real *k_, long kr, long kc,
@@ -58,7 +58,7 @@ TH_API void THTensor_(validXCorr2Dptr)(real *r_,
 /*
   2D Input, 2D kernel  : convolve given image with the given kernel.
 */
-TH_API void THTensor_(validConv2Dptr)(real *r_,
+void THTensor_(validConv2Dptr)(real *r_,
                                       real alpha,
                                       real *t_, long ir, long ic,
                                       real *k_, long kr, long kc,
@@ -111,7 +111,7 @@ TH_API void THTensor_(validConv2Dptr)(real *r_,
 /*
   2D Input, 2D kernel  : convolve given image with the given kernel, full convolution.
 */
-TH_API void THTensor_(fullConv2Dptr)(real *r_,
+void THTensor_(fullConv2Dptr)(real *r_,
                                      real alpha,
                                      real *t_, long ir, long ic,
                                      real *k_, long kr, long kc,
@@ -163,7 +163,7 @@ TH_API void THTensor_(fullConv2Dptr)(real *r_,
 /*
   2D Input, 2D kernel  : convolve given image with the given kernel, full convolution.
 */
-TH_API void THTensor_(fullXCorr2Dptr)(real *r_,
+void THTensor_(fullXCorr2Dptr)(real *r_,
                                       real alpha,
                                       real *t_, long ir, long ic,
                                       real *k_, long kr, long kc,
@@ -218,7 +218,7 @@ TH_API void THTensor_(fullXCorr2Dptr)(real *r_,
   for sr,sc=1 this is equivalent to validXCorr2Dptr, but otherwise it is useful for
   calculating derivatives wrt a kernel that is applied with stride sr,sc != 1
 */
-TH_API void THTensor_(validXCorr2DRevptr)(real *r_,
+void THTensor_(validXCorr2DRevptr)(real *r_,
                                           real alpha,
                                           real *t_, long ir, long ic,
                                           real *k_, long kr, long kc,
@@ -266,7 +266,7 @@ TH_API void THTensor_(validXCorr2DRevptr)(real *r_,
 /*
   3D Input, 3D kernel  : convolve given volume with the given kernel.
 */
-TH_API void THTensor_(validXCorr3Dptr)(real *r_,
+void THTensor_(validXCorr3Dptr)(real *r_,
                                        real alpha,
                                        real *t_, long it, long ir, long ic,
                                        real *k_, long kt, long kr, long kc,
@@ -311,7 +311,7 @@ TH_API void THTensor_(validXCorr3Dptr)(real *r_,
 /*
   3D Input, 3D kernel  : convolve given volume with the given kernel.
 */
-TH_API void THTensor_(validConv3Dptr)(real *r_,
+void THTensor_(validConv3Dptr)(real *r_,
                                       real alpha,
                                       real *t_, long it, long ir, long ic,
                                       real *k_, long kt, long kr, long kc,
@@ -357,7 +357,7 @@ TH_API void THTensor_(validConv3Dptr)(real *r_,
 /*
   3D Input, 3D kernel  : convolve given volume with the given kernel, full convolution.
 */
-TH_API void THTensor_(fullConv3Dptr)(real *r_,
+void THTensor_(fullConv3Dptr)(real *r_,
                                      real alpha,
                                      real *t_, long it, long ir, long ic,
                                      real *k_, long kt, long kr, long kc,
@@ -405,7 +405,7 @@ TH_API void THTensor_(fullConv3Dptr)(real *r_,
 /*
   3D Input, 3D kernel  : convolve given volume with the given kernel, full convolution.
 */
-TH_API void THTensor_(fullXCorr3Dptr)(real *r_,
+void THTensor_(fullXCorr3Dptr)(real *r_,
                                       real alpha,
                                       real *t_, long it, long ir, long ic,
                                       real *k_, long kt, long kr, long kc,
@@ -450,7 +450,7 @@ TH_API void THTensor_(fullXCorr3Dptr)(real *r_,
   for sr,sc=1 this is equivalent to validXCorr3Dptr, but otherwise it is useful for
   calculating derivatives wrt a kernel that is applied with stride sr,sc != 1
 */
-TH_API void THTensor_(validXCorr3DRevptr)(real *r_,
+void THTensor_(validXCorr3DRevptr)(real *r_,
                                           real alpha,
                                           real *t_, long it, long ir, long ic,
                                           real *k_, long kt, long kr, long kc,
