@@ -150,7 +150,7 @@ void THFree(void *ptr)
 
 double THLog1p(const double x)
 {
-#ifdef _MSC_VER
+#if (defined(_MSC_VER) || defined(__MINGW32__))
   volatile double y = 1 + x;
   return log(y) - ((y-1)-x)/y ;  /* cancels errors with IEEE arithmetic */
 #else

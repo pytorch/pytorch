@@ -89,7 +89,7 @@ do {                                                                  \
 #define THMin(X, Y)  ((X) < (Y) ? (X) : (Y))
 #define THMax(X, Y)  ((X) > (Y) ? (X) : (Y))
 
-#ifdef _MSC_VER
+#if (defined(_MSC_VER) || defined(__MINGW32__))
 # define log1p(x) THLog1p(x)
 #define snprintf _snprintf
 #define popen _popen
