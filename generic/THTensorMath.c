@@ -1066,6 +1066,30 @@ void THTensor_(cross)(THTensor *r_, THTensor *a, THTensor *b, int dimension)
                        r__data[2*r__stride] = a_data[0*a_stride]*b_data[1*b_stride] - a_data[1*a_stride]*b_data[0*b_stride];);
 }
 
+void THTensor_(cmax)(THTensor *r, THTensor *t, THTensor *src) {
+  THTensor_(resizeAs)(r, t);
+  TH_TENSOR_APPLY3(real, r, real, t, real, src,
+                   *r_data = *t_data > *src_data ? *t_data : *src_data;);
+}
+
+void THTensor_(cmin)(THTensor *r, THTensor *t, THTensor *src) {
+  THTensor_(resizeAs)(r, t);
+  TH_TENSOR_APPLY3(real, r, real, t, real, src,
+                   *r_data = *t_data < *src_data ? *t_data : *src_data;);
+}
+
+void THTensor_(cmaxValue)(THTensor *r, THTensor *t, real value) {
+  THTensor_(resizeAs)(r, t);
+  TH_TENSOR_APPLY2(real, r, real, t,
+                   *r_data = *t_data > value ? *t_data : value;);
+}
+
+void THTensor_(cminValue)(THTensor *r, THTensor *t, real value) {
+  THTensor_(resizeAs)(r, t);
+  TH_TENSOR_APPLY2(real, r, real, t,
+                   *r_data = *t_data < value ? *t_data : value;);
+}
+
 void THTensor_(zeros)(THTensor *r_, THLongStorage *size)
 {
   THTensor_(resize)(r_, size, NULL);

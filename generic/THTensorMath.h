@@ -59,6 +59,11 @@ TH_API void THTensor_(sign)(THTensor *r_, THTensor *t);
 TH_API accreal THTensor_(trace)(THTensor *t);
 TH_API void THTensor_(cross)(THTensor *r_, THTensor *a, THTensor *b, int dimension);
 
+TH_API void THTensor_(cmax)(THTensor *r, THTensor *t, THTensor *src);
+TH_API void THTensor_(cmin)(THTensor *r, THTensor *t, THTensor *src);
+TH_API void THTensor_(cmaxValue)(THTensor *r, THTensor *t, real value);
+TH_API void THTensor_(cminValue)(THTensor *r, THTensor *t, real value);
+
 TH_API void THTensor_(zeros)(THTensor *r_, THLongStorage *size);
 TH_API void THTensor_(ones)(THTensor *r_, THLongStorage *size);
 TH_API void THTensor_(diag)(THTensor *r_, THTensor *t, int k);
