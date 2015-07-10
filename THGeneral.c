@@ -106,8 +106,10 @@ void* THAlloc(long size)
 #if (defined(__unix) || defined(__APPLE__)) && (!defined(DISABLE_POSIX_MEMALIGN))
     if (posix_memalign(&ptr, 64, size) != 0)
       ptr = NULL;
+/*
 #elif defined(_WIN32)
     ptr = _aligned_malloc(size, 64);
+*/
 #else
     ptr = malloc(size);
 #endif
