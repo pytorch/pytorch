@@ -55,24 +55,28 @@ void THTensor_(gesv)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
   
   if (a == NULL || ra_ == a) /* possibly destroy the inputs  */
   {
+    THArgCheck(ra_->nDimension == 2, 1, "A should be 2 dimensional");
     ra__ = THTensor_(new)();
     clonea = THTensor_(lapackClone)(ra__,ra_,0);
     destroya = 1;
   }
   else /*we want to definitely clone and use ra_ and rb_ as computational space*/
   {
+    THArgCheck(a->nDimension == 2, 1, "A should be 2 dimensional");
     clonea = THTensor_(lapackClone)(ra_,a,1);
     ra__ = ra_;
     destroya = 0;
   }
   if (b == NULL || rb_ == b) /* possibly destroy the inputs  */
   {
+    THArgCheck(rb_->nDimension == 2, 2, "B should be 2 dimensional");
     rb__ = THTensor_(new)();
     cloneb = THTensor_(lapackClone)(rb__,rb_,0);
     destroyb = 1;
   }
   else /*we want to definitely clone and use ra_ and rb_ as computational space*/
   {
+    THArgCheck(b->nDimension == 2, 2, "B should be 2 dimensional");
     cloneb = THTensor_(lapackClone)(rb_,b,1);
     rb__ = rb_;
     destroyb = 0;
@@ -141,12 +145,14 @@ void THTensor_(gels)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
 
   if (a == NULL || ra_ == a) /* possibly destroy the inputs  */
   {
+    THArgCheck(ra_->nDimension == 2, 1, "A should be 2 dimensional");
     ra__ = THTensor_(new)();
     clonea = THTensor_(lapackClone)(ra__,ra_,0);
     destroya = 1;
   }
   else /*we want to definitely clone and use ra_ as computational space*/
   {
+    THArgCheck(a->nDimension == 2, 1, "A should be 2 dimensional");
     clonea = THTensor_(lapackClone)(ra_,a,1);
     ra__ = ra_;
     destroya = 0;
@@ -161,6 +167,7 @@ void THTensor_(gels)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
 
   if (b == NULL || rb_ == b) /* possibly destroy the inputs  */
   {
+    THArgCheck(rb_->nDimension == 2, 2, "B should be 2 dimensional");
     THArgCheck(ra_->size[0] == rb_->size[0], 2, "size incompatible A,b");
     rb__ = THTensor_(new)();
     cloneb = THTensor_(lapackCloneNrows)(rb__,rb_,0,ldb);
@@ -169,6 +176,7 @@ void THTensor_(gels)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
   else /*we want to definitely clone and use rb_ as computational space*/
   {
     THArgCheck(ra_->size[0] == b->size[0], 2, "size incompatible A,b");
+    THArgCheck(b->nDimension == 2, 2, "B should be 2 dimensional");
     cloneb = THTensor_(lapackCloneNrows)(rb_,b,1,ldb);
     rb__ = rb_;
     destroyb = 0;
@@ -301,12 +309,14 @@ void THTensor_(syev)(THTensor *re_, THTensor *rv_, THTensor *a, const char *jobz
   
   if (a == NULL) /* possibly destroy the inputs  */
   {
+    THArgCheck(rv_->nDimension == 2, 1, "A should be 2 dimensional");
     rv__ = THTensor_(new)();
     clonea = THTensor_(lapackClone)(rv__,rv_,0);
     destroy = 1;
   }
   else /*we want to definitely clone and use ra_ and rb_ as computational space*/
   {
+    THArgCheck(a->nDimension == 2, 1, "A should be 2 dimensional");
     clonea = THTensor_(lapackClone)(rv_,a,1);
     rv__ = rv_;
     destroy = 0;
@@ -367,12 +377,14 @@ void THTensor_(gesvd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *ra
 
   if (a == NULL) /* possibly destroy the inputs  */
   {
+    THArgCheck(ra_->nDimension == 2, 1, "A should be 2 dimensional");
     ra__ = THTensor_(new)();
     clonea = THTensor_(lapackClone)(ra__,ra_,0);
     destroy = 1;
   }
   else /*we want to definitely clone */
   {
+    THArgCheck(a->nDimension == 2, 1, "A should be 2 dimensional");
     clonea = THTensor_(lapackClone)(ra_,a,1);
     ra__ = ra_;
     destroy = 0;
@@ -451,12 +463,14 @@ void THTensor_(getri)(THTensor *ra_, THTensor *a)
 
   if (a == NULL) /* possibly destroy the inputs  */
   {
+    THArgCheck(ra_->nDimension == 2, 1, "A should be 2 dimensional");
     ra__ = THTensor_(new)();
     clonea = THTensor_(lapackClone)(ra__,ra_,0);
     destroy = 1;
   }
   else /*we want to definitely clone */
   {
+    THArgCheck(a->nDimension == 2, 1, "A should be 2 dimensional");
     clonea = THTensor_(lapackClone)(ra_,a,1);
     ra__ = ra_;
     destroy = 0;
@@ -518,12 +532,14 @@ void THTensor_(potrf)(THTensor *ra_, THTensor *a)
 
   if (a == NULL) /* possibly destroy the inputs  */
   {
+    THArgCheck(ra_->nDimension == 2, 1, "A should be 2 dimensional");
     ra__ = THTensor_(new)();
     clonea = THTensor_(lapackClone)(ra__,ra_,0);
     destroy = 1;
   }
   else /*we want to definitely clone */
   {
+    THArgCheck(a->nDimension == 2, 1, "A should be 2 dimensional");
     clonea = THTensor_(lapackClone)(ra_,a,1);
     ra__ = ra_;
     destroy = 0;
@@ -578,12 +594,14 @@ void THTensor_(potri)(THTensor *ra_, THTensor *a)
 
   if (a == NULL) /* possibly destroy the inputs  */
   {
+    THArgCheck(ra_->nDimension == 2, 1, "A should be 2 dimensional");
     ra__ = THTensor_(new)();
     clonea = THTensor_(lapackClone)(ra__,ra_,0);
     destroy = 1;
   }
   else /*we want to definitely clone */
   {
+    THArgCheck(a->nDimension == 2, 1, "A should be 2 dimensional");
     clonea = THTensor_(lapackClone)(ra_,a,1);
     ra__ = ra_;
     destroy = 0;
@@ -697,12 +715,14 @@ void THTensor_(geqrf)(THTensor *ra_, THTensor *rtau_, THTensor *a)
   int clonea, destroy;
   if (a == NULL)
   {
+    THArgCheck(ra_->nDimension == 2, 1, "A should be 2 dimensional");
     ra__ = THTensor_(new)();
     clonea = THTensor_(lapackClone)(ra__, ra_, 0);
     destroy = 1;
   }
   else
   {
+    THArgCheck(a->nDimension == 2, 1, "A should be 2 dimensional");
     clonea = THTensor_(lapackClone)(ra_, a, 1);
     ra__ = ra_;
     destroy = 0;
@@ -776,12 +796,14 @@ void THTensor_(orgqr)(THTensor *ra_, THTensor *a, THTensor *tau)
   int destroy;
   if (a == NULL)
   {
+    THArgCheck(ra_->nDimension == 2, 1, "A should be 2 dimensional");
     ra__ = THTensor_(new)();
     clonea = THTensor_(lapackClone)(ra__, ra_, 0);
     destroy = 1;
   }
   else
   {
+    THArgCheck(a->nDimension == 2, 1, "A should be 2 dimensional");
     clonea = THTensor_(lapackClone)(ra_, a, 1);
     ra__ = ra_;
     destroy = 0;
