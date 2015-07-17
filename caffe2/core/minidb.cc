@@ -10,7 +10,10 @@ namespace db {
 class MiniDBCursor : public Cursor {
  public:
   explicit MiniDBCursor(FILE* f, std::mutex* mutex)
-    : file_(f), lock_(*mutex) {}
+    : file_(f), lock_(*mutex), valid_(true) {
+    // We call Next() to read in the first entry.
+    Next();
+  }
   ~MiniDBCursor() {}
 
   void SeekToFirst() override {
@@ -22,31 +25,37 @@ class MiniDBCursor : public Cursor {
   }
 
   void Next() override {
+    // First, read in the key and value length.
     if (fread(&key_len_, sizeof(int), 1, file_) == 0) {
       // Reaching EOF.
+      LOG(INFO) << "EOF reached, setting valid to false";
       valid_ = false;
       return;
     }
     CHECK_EQ(fread(&value_len_, sizeof(int), 1, file_), 1);
     CHECK_GT(key_len_, 0);
     CHECK_GT(value_len_, 0);
+    // Resize if the key and value len is larger than the current one.
     if (key_len_ > key_.size()) {
       key_.resize(key_len_);
     }
     if (value_len_ > value_.size()) {
       value_.resize(value_len_);
     }
+    // Actually read in the contents.
     CHECK_EQ(fread(key_.data(), sizeof(char), key_len_, file_), key_len_);
     CHECK_EQ(fread(value_.data(), sizeof(char), value_len_, file_), value_len_);
+    // Note(Yangqing): as we read the file, the cursor naturally moves to the
+    // beginning of the next entry.
   }
 
   string key() override {
-    CHECK(valid_) << "Invalid position!";
+    CHECK(valid_) << "Cursor is at invalid location!";
     return string(key_.data(), key_len_);
   }
 
   string value() override {
-    CHECK(valid_) << "Invalid position!";
+    CHECK(valid_) << "Cursor is at invalid location!";
     return string(value_.data(), value_len_);
   }
 

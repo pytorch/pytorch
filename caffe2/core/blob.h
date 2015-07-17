@@ -66,7 +66,7 @@ class Blob {
 
   // Serializes the current blob, if possible. This serialization uses
   // registration so we don't need to deal with multiple platform problems.
-  string Serialize(const string& name) const;
+  inline string Serialize(const string& name) const;
 
  private:
   internal::TypeId id_;
@@ -76,12 +76,15 @@ class Blob {
   DISABLE_COPY_AND_ASSIGN(Blob);
 };
 
-// BlobSerializer is a class that serializes a blob to a string.
+// BlobSerializerBase is a class that serializes a blob to a string. This class
+// exists purely for the purpose of registering type-specific serialization
+// code.
 class BlobSerializerBase {
  public:
   virtual string Serialize(const Blob& blob, const string& name) = 0;
 };
 
+// THe Blob serialization registry and serializer creator functions.
 DECLARE_TYPED_REGISTRY(BlobSerializerRegistry, internal::TypeId,
                        BlobSerializerBase);
 #define REGISTER_BLOB_SERIALIZER(name, id, ...) \
@@ -90,6 +93,13 @@ DECLARE_TYPED_REGISTRY(BlobSerializerRegistry, internal::TypeId,
 inline BlobSerializerBase* CreateSerializer(internal::TypeId id) {
   return BlobSerializerRegistry()->Create(id);
 }
+
+// The blob serialization member function implementation.
+inline string Blob::Serialize(const string& name) const {
+  std::unique_ptr<BlobSerializerBase> serializer(CreateSerializer(id_));
+  return serializer->Serialize(*this, name);
+}
+
 
 template <typename dtype, class Context>
 class Tensor {

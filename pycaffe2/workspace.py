@@ -40,7 +40,12 @@ def _GetFreeFlaskPort():
     return port
 
 def StartMint(root_folder=None, port=None):
-  """Start a mint instance."""
+  """Start a mint instance.
+
+  TODO(Yangqing): this does not work well under ipython yet. According to
+      https://github.com/ipython/ipython/issues/5862
+  writing up some fix is a todo item.
+  """
   if not _has_mint:
     print 'Mint is not available. Not starting the server.'
     return None
@@ -123,6 +128,7 @@ def FeedBlob(name, arr, device_option=None):
     return cc_FeedBlob(name, arr, StringfyProto(device_option))
   else:
     return cc_FeedBlob(name, arr)
+
 
 class Model(object):
   def __init__(self, net, parameters, inputs, outputs, device_option=None):
