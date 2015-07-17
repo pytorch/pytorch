@@ -25,6 +25,36 @@ cc_binary(
 )
 
 cc_binary(
+  name = "convert_encoded_to_raw_leveldb",
+  srcs = [
+      "convert_encoded_to_raw_leveldb.cc",
+  ],
+  deps = [
+      "//caffe2/core:core",
+      "//caffe2/proto:caffe2_proto",
+      "//third_party/leveldb:leveldb",
+      "//third_party/gflags:gflags",
+      "//third_party/glog:glog",
+      "//third_party/opencv:opencv_core",
+      "//third_party/opencv:opencv_highgui",
+      "//third_party/opencv:opencv_imgproc",
+  ],
+)
+
+cc_binary(
+  name = "db_throughput",
+  srcs = [
+      "db_throughput.cc",
+  ],
+  deps = [
+      "//caffe2/db:db",
+      "//third_party/gflags:gflags",
+      "//third_party/glog:glog",
+      "//third_party/google:profiler",
+  ],
+)
+
+cc_binary(
   name = "make_cifar_db",
   srcs = [
       "make_cifar_db.cc",
@@ -52,24 +82,6 @@ cc_binary(
       "//third_party/opencv:opencv_imgproc",
   ],
 )
-
-cc_binary(
-  name = "convert_encoded_to_raw_leveldb",
-  srcs = [
-      "convert_encoded_to_raw_leveldb.cc",
-  ],
-  deps = [
-      "//caffe2/core:core",
-      "//caffe2/proto:caffe2_proto",
-      "//third_party/leveldb:leveldb",
-      "//third_party/gflags:gflags",
-      "//third_party/glog:glog",
-      "//third_party/opencv:opencv_core",
-      "//third_party/opencv:opencv_highgui",
-      "//third_party/opencv:opencv_imgproc",
-  ],
-)
-
 
 cc_binary(
   name = "make_mnist_db",

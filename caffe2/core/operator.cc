@@ -98,12 +98,10 @@ OperatorBase* CreateOperator(const OperatorDef& operator_def, Workspace* ws) {
     return CPUOperatorRegistry()->Create(key, operator_def, ws);
   case CUDA:
     VLOG(1) << "Creating CUDA operator " << key;
-    // In Cuda, if we have cudnn, we will prefer to use cudnn first.
-    if (CUDNNOperatorRegistry()->Has(key)) {
-      VLOG(1) << "Using CuDNN implementation.";
-      return CUDNNOperatorRegistry()->Create(key, operator_def, ws);
-    }
     return CUDAOperatorRegistry()->Create(key, operator_def, ws);
+  case CUDNN:
+    VLOG(1) << "Using CuDNN implementation.";
+    return CUDNNOperatorRegistry()->Create(key, operator_def, ws);
   }
   // Just to suppress some compiler error
   return nullptr;

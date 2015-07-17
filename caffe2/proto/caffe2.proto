@@ -36,8 +36,9 @@ message Argument {
 }
 
 enum DeviceType {
-  CPU = 0; // In default, we will use CPU.
+  CPU = 0;     // In default, we will use CPU.
   CUDA = 1;    // CUDA, with custom kernels.
+  CUDNN = 2;   // CUDA, with CUDNN implementations.
 }
 
 message DeviceOption {

@@ -8,39 +8,77 @@ filegroup(
   ],
 )
 
+# Create database in multiple formats so we can benchmark things more easily.
+for db in ["minidb", "leveldb", "lmdb"]:
+  shell_script(
+    name = "mnist_" + db,
+    srcs = [],
+    commands = [
+        "rm -rf data/mnist/mnist-*-" + db,
+        "caffe2/binaries/make_mnist_db "
+            "--image_file=data/mnist/train-images-idx3-ubyte "
+            "--label_file=data/mnist/train-labels-idx1-ubyte "
+            "--output_file=data/mnist/mnist-train-%s "
+            "--db=%s" % (db, db),
+        "caffe2/binaries/make_mnist_db "
+            "--image_file=data/mnist/t10k-images-idx3-ubyte "
+            "--label_file=data/mnist/t10k-labels-idx1-ubyte "
+            "--output_file=data/mnist/mnist-test-%s "
+            "--db=%s" % (db, db),
+        "caffe2/binaries/make_mnist_db "
+            "--image_file=data/mnist/train-images-idx3-ubyte "
+            "--label_file=data/mnist/train-labels-idx1-ubyte "
+            "--output_file=data/mnist/mnist-train-nchw-%s "
+            "--channel_first "
+            "--db=%s" % (db, db),
+        "caffe2/binaries/make_mnist_db "
+            "--image_file=data/mnist/t10k-images-idx3-ubyte "
+            "--label_file=data/mnist/t10k-labels-idx1-ubyte "
+            "--output_file=data/mnist/mnist-test-nchw-%s "
+            "--channel_first "
+            "--db=%s" % (db, db),
+    ],
+    deps = [
+        ":mnist",
+        "//caffe2/binaries:make_mnist_db",
+    ],
+  )
+
+"""
 shell_script(
-  name = "mnist_minidb",
+  name = "mnist_leveldb",
   srcs = [],
   commands = [
-      "rm -rf data/mnist/mnist-*-minidb",
+      "rm -rf data/mnist/mnist-*-leveldb",
       "caffe2/binaries/make_mnist_db "
           "--image_file=data/mnist/train-images-idx3-ubyte "
           "--label_file=data/mnist/train-labels-idx1-ubyte "
-          "--output_file=data/mnist/mnist-train-minidb "
-          "--db=minidb",
+          "--output_file=data/mnist/mnist-train-leveldb "
+          "--db=leveldb",
       "caffe2/binaries/make_mnist_db "
           "--image_file=data/mnist/t10k-images-idx3-ubyte "
           "--label_file=data/mnist/t10k-labels-idx1-ubyte "
-          "--output_file=data/mnist/mnist-test-minidb "
-          "--db=minidb",
+          "--output_file=data/mnist/mnist-test-leveldb "
+          "--db=leveldb",
       "caffe2/binaries/make_mnist_db "
           "--image_file=data/mnist/train-images-idx3-ubyte "
           "--label_file=data/mnist/train-labels-idx1-ubyte "
-          "--output_file=data/mnist/mnist-train-nchw-minidb "
+          "--output_file=data/mnist/mnist-train-nchw-leveldb "
           "--channel_first "
-          "--db=minidb",
+          "--db=leveldb",
       "caffe2/binaries/make_mnist_db "
           "--image_file=data/mnist/t10k-images-idx3-ubyte "
           "--label_file=data/mnist/t10k-labels-idx1-ubyte "
-          "--output_file=data/mnist/mnist-test-nchw-minidb "
+          "--output_file=data/mnist/mnist-test-nchw-leveldb "
           "--channel_first "
-          "--db=minidb",
+          "--db=leveldb",
   ],
   deps = [
       ":mnist",
       "//caffe2/binaries:make_mnist_db",
   ],
 )
+"""
 
 shell_script(
   name = "mnist_models",
