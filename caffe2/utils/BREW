@@ -68,3 +68,10 @@ cc_test(
       "//gtest:gtest_main",
   ],
 )
+
+cc_headers(
+  name = "zmq_hpp",
+  srcs = [
+      "zmq.hpp"
+  ],
+)

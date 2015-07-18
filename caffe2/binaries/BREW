@@ -176,3 +176,17 @@ cc_binary(
       "//third_party/glog:glog",
   ],
 )
+
+cc_binary(
+  name = "zmq_feeder",
+  srcs = [
+      "zmq_feeder.cc",
+  ],
+  deps = [
+      "//caffe2/db:db",
+      "//caffe2/utils:zmq_hpp",
+      "//third_party/gflags:gflags",
+      "//third_party/glog:glog",
+      "//third_party/libzmq:libzmq",
+  ],
+)
