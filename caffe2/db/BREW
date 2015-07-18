@@ -34,6 +34,7 @@ cc_library(
   ],
   deps = [
     "//caffe2/core:core",
+    "//caffe2/utils:zmq_hpp",
     "//third_party/glog:glog",
     "//third_party/libzmq:libzmq",
   ],

@@ -3,37 +3,17 @@
 #include <cstdint>
 
 #include "caffe2/core/db.h"
+#include "caffe2/utils/zmq.hpp"
 #include "glog/logging.h"
-#include "zmq.h"
-
-#if ZMQ_VERSION_MAJOR < 3
-#error "ZmqDB requires ZMQ version 3 or above."
-#endif
 
 namespace caffe2 {
 namespace db {
 
-typedef char ZmqCommand;
-typedef int ZmqMessageSize;
-const ZmqCommand kQueryMessageSize = 's';
-const ZmqCommand kGet = 'g';
-
 class ZmqDBCursor : public Cursor {
  public:
-  explicit ZmqDBCursor(void* requester)
-      : requester_(requester), buffer_(nullptr), received_size_(0),
-        buffer_size_(0) {
-    // Figure out the buffer size.
-    CHECK_EQ(
-        zmq_send(requester_, &kQueryMessageSize, sizeof(ZmqCommand), 0),
-        sizeof(ZmqCommand))
-        << "Incorrect zmq communication when querying message size.";
-    CHECK_EQ(
-        zmq_recv(requester_, &buffer_size_, sizeof(ZmqMessageSize), 0),
-        sizeof(ZmqMessageSize))
-        << "Incorrect zmq communication when fetching message size.";
-    CHECK_GT(buffer_size_, 0) << "Incorrect buffer size obtained.";
-    buffer_.reset(new char[buffer_size_]);
+  explicit ZmqDBCursor(const string& source)
+      : context_(1), socket_(context_, ZMQ_PULL), key_("") {
+    socket_.connect(source);
     // obtain the first value.
     Next();
   }
@@ -41,62 +21,57 @@ class ZmqDBCursor : public Cursor {
   ~ZmqDBCursor() {}
   void SeekToFirst() override { /* do nothing */ }
   void Next() override {
-    CHECK_EQ(
-        zmq_send(requester_, &kGet, sizeof(ZmqCommand), 0), sizeof(ZmqCommand))
-        << "Incorrect zmq communication when sending request.";
-    received_size_ = zmq_recv(requester_, buffer_.get(), buffer_size_, 0);
-    CHECK_GT(received_size_, 0) << "Received no message.";
+    zmq::message_t content;
+    bool retry = true;
+    while (retry) {
+      try {
+        socket_.recv(&content);
+        retry = false;
+      } catch(const zmq::error_t& ze) {
+        //LOG(ERROR) << "Exception: " << ze.num() << " " << ze.what();
+        if (ze.num() != EINTR && ze.num() != EAGAIN) {
+          LOG(FATAL) << "ZeroMQ received error that cannot continue. Quitting.";
+        }
+      }
+    }
+    value_.assign(static_cast<char*>(content.data()), content.size());
   }
-  string key() override { return ""; }
-  string value() override {
-    return string(buffer_.get(), received_size_);
-  }
+
+  string key() override { return key_; }
+  string value() override { return value_; }
   virtual bool Valid() { return true; }
 
  private:
-  void* requester_;
-  unique_ptr<char[]> buffer_;
-  int received_size_;
-  ZmqMessageSize buffer_size_;
+  zmq::context_t context_;
+  zmq::socket_t socket_;
+  string key_;
+  string value_;
 };
-
 
 class ZmqDB : public DB {
  public:
   ZmqDB(const string& source, Mode mode)
-      : DB(source, mode), context_(zmq_ctx_new()),
-        requester_(zmq_socket(context_, ZMQ_REQ)) {
+      : DB(source, mode), source_(source) {
     CHECK_EQ(mode, READ) << "ZeroMQ DB only supports read mode.";
-    VLOG(1) << "Connecting to ZeroMQ server: " << source;
-    int ret = zmq_connect(requester_, source.c_str());
-    CHECK_EQ(ret, 0) << "Error in connecting to zmq server. "
-                     << "Error is: " << errno;
-    VLOG(1) << "Opened ZeroMQ server: " << source;
   }
 
-  ~ZmqDB() { Close(); }
+  ~ZmqDB() {}
 
-  void Close() override {
-    if (!requester_) {
-      zmq_close(requester_);
-      requester_ = nullptr;
-      zmq_ctx_destroy(context_);
-      context_ = nullptr;
-    }
-  }
+  void Close() override {}
 
   Cursor* NewCursor() override {
-    return new ZmqDBCursor(requester_);
+    return new ZmqDBCursor(source_);
   }
+
   Transaction* NewTransaction() override {
-    // TODO(Yangqing): Do I really need to just do log fatal?
+    // TODO(Yangqing): Do I really need to do log fatal? Any elegant way to
+    // warn the user?
     LOG(FATAL) << "ZeroMQ DB does not support writing with a transaction.";
     return nullptr;  // dummy placeholder to suppress old compiler warnings.
   }
 
  private:
-  void* context_;
-  void* requester_;
+  string source_;
 };
 
 REGISTER_CAFFE2_DB(ZmqDB, ZmqDB);
