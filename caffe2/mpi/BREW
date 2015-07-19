@@ -8,7 +8,8 @@ cc_headers(
 cc_library(
   name = "mpi_ops",
   srcs = [
-      "allreduce_op.cc"
+      "allreduce_op.cc",
+      "broadcast_op.cc",
   ],
   deps = [
       ":mpi_common",
@@ -16,4 +17,18 @@ cc_library(
   ],
   external_libs = Env.MPI_LIBS,
   whole_archive = True,
+)
+
+mpi_test(
+  name = "mpi_test",
+  srcs = [
+    "mpi_test.cc",
+  ],
+  deps = [
+    ":mpi_ops",
+    "//caffe2:all_available_ops",
+    "//gtest:gtest",
+    "//third_party/gflags:gflags",
+    "//third_party/glog:glog"
+  ]
 )

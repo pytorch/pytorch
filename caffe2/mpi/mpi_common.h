@@ -1,6 +1,8 @@
 #ifndef CAFFE2_MPI_MPI_COMMON_H_
 #define CAFFE2_MPI_MPI_COMMON_H_
 
+#include <mpi.h>
+
 namespace caffe2 {
 
 inline void CheckInitializedMPI() {
@@ -20,6 +22,8 @@ template <typename T> class MPIDataTypeWrapper;
 MPI_DATATYPE_WRAPPER(float, MPI_FLOAT)
 MPI_DATATYPE_WRAPPER(double, MPI_DOUBLE)
 // Note(Yangqing): as necessary, add more specializations.
+#undef MPI_DATATYPE_WRAPPER
+
 
 }  // namespace caffe2
 
