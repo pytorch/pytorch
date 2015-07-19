@@ -31,8 +31,9 @@ int main(int argc, char** argv) {
   for (int iter_id = 0; iter_id < FLAGS_repeat; ++iter_id) {
     clock_t start = clock();
     for (int i = 0; i < FLAGS_report_interval; ++i) {
-      volatile string key = cursor->key();
-      volatile string value = cursor->value();
+      string key = cursor->key();
+      string value = cursor->value();
+      VLOG(1) << "Key " << key;
       cursor->Next();
       if (!cursor->Valid()) {
         cursor->SeekToFirst();
