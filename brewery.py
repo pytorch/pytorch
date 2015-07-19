@@ -503,6 +503,24 @@ def cc_test(*args, **kwargs):
   return cc_target(
       *args, build_binary=True, is_test=True, whole_archive=True, **kwargs)
 
+class mpi_test(cc_target):
+  def __init__(self, *args, **kwargs):
+    if 'cflags' not in kwargs:
+      kwargs['cflags'] = []
+    kwargs['cflags'].append("-DGTEST_USE_OWN_TR1_TUPLE=1")
+    kwargs['build_binary'] = True
+    kwargs['is_test'] = True
+    kwargs['whole_archive'] = True
+    cc_target.__init__(self, *args, **kwargs)
+    self.mpi_size = kwargs['mpi_size'] if 'mpi_size' in kwargs else 4
+
+  def SetUp(self):
+    cc_target.SetUp(self)
+    self.command_groups.append([
+        ' '.join(['mpirun -n', str(self.mpi_size), self.OutputName(),
+                  '--caffe_test_root', os.path.abspath(Env.GENDIR),
+                  '--gtest_filter=-*.LARGE_*'])])
+
 
 class cuda_library(BuildTarget):
   def __init__(self, name, srcs, hdrs=[], deps=[], cflags=[],

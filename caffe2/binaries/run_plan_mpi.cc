@@ -9,7 +9,8 @@
 DEFINE_string(plan, "", "The given path to the plan protobuffer.");
 
 int main(int argc, char** argv) {
-  MPI_Init(&argc, &argv);
+  int mpi_ret;
+  MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &mpi_ret);
   google::InitGoogleLogging(argv[0]);
   gflags::SetUsageMessage("Runs a given plan.");
   gflags::ParseCommandLineFlags(&argc, &argv, true);
