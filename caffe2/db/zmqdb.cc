@@ -12,13 +12,15 @@ namespace db {
 class ZmqDBCursor : public Cursor {
  public:
   explicit ZmqDBCursor(const string& source)
-      : context_(1), socket_(context_, ZMQ_PULL), key_("") {
+      : source_(source), context_(1), socket_(context_, ZMQ_PULL), key_("") {
     socket_.connect(source);
     // obtain the first value.
     Next();
   }
 
-  ~ZmqDBCursor() {}
+  ~ZmqDBCursor() {
+    socket_.disconnect(source_);
+  }
   void SeekToFirst() override { /* do nothing */ }
 
   inline void ReceiveWithRetry(zmq::message_t* content) {
@@ -49,6 +51,7 @@ class ZmqDBCursor : public Cursor {
   virtual bool Valid() { return true; }
 
  private:
+  string source_;
   zmq::context_t context_;
   zmq::socket_t socket_;
   string key_;
