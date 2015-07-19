@@ -6,6 +6,7 @@
 
 #include "caffe2/core/db.h"
 #include "caffe2/utils/zmq.hpp"
+#include "gflags/gflags.h"
 #include "glog/logging.h"
 
 DEFINE_string(server, "tcp://*:5555", "The server address.");
@@ -21,8 +22,8 @@ std::unique_ptr<Cursor> cursor;
 
 int main(int argc, char** argv) {
   google::InitGoogleLogging(argv[0]);
-  google::SetUsageMessage("Runs a given plan.");
-  google::ParseCommandLineFlags(&argc, &argv, true);
+  gflags::SetUsageMessage("Runs a given plan.");
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
 
   LOG(INFO) << "Opening DB...";
   in_db.reset(caffe2::db::CreateDB(
@@ -32,10 +33,11 @@ int main(int argc, char** argv) {
   LOG(INFO) << "DB opened.";
 
   LOG(INFO) << "Starting ZeroMQ server...";
+
+  //  Socket to talk to clients
+  zmq::context_t context(1);
+  zmq::socket_t sender(context, ZMQ_PUSH);
   try {
-    //  Socket to talk to clients
-    zmq::context_t context(1);
-    zmq::socket_t sender(context, ZMQ_PUSH);
     sender.bind(FLAGS_server);
     LOG(INFO) << "Server created at " << FLAGS_server;
   } catch (const zmq::error_t& ze) {
