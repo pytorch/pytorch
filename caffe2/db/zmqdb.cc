@@ -20,20 +20,27 @@ class ZmqDBCursor : public Cursor {
 
   ~ZmqDBCursor() {}
   void SeekToFirst() override { /* do nothing */ }
-  void Next() override {
-    zmq::message_t content;
+
+  inline void ReceiveWithRetry(zmq::message_t* content) {
     bool retry = true;
     while (retry) {
       try {
-        socket_.recv(&content);
+        socket_.recv(content);
         retry = false;
       } catch(const zmq::error_t& ze) {
-        //LOG(ERROR) << "Exception: " << ze.num() << " " << ze.what();
+        // LOG(ERROR) << "Exception: " << ze.num() << " " << ze.what();
         if (ze.num() != EINTR && ze.num() != EAGAIN) {
           LOG(FATAL) << "ZeroMQ received error that cannot continue. Quitting.";
         }
       }
     }
+  }
+
+  void Next() override {
+    zmq::message_t content;
+    ReceiveWithRetry(&content);
+    key_.assign(static_cast<char*>(content.data()), content.size());
+    ReceiveWithRetry(&content);
     value_.assign(static_cast<char*>(content.data()), content.size());
   }
 
