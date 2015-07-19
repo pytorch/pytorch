@@ -32,11 +32,15 @@ int main(int argc, char** argv) {
   LOG(INFO) << "DB opened.";
 
   LOG(INFO) << "Starting ZeroMQ server...";
-  //  Socket to talk to clients
-  zmq::context_t context(1);
-  zmq::socket_t sender(context, ZMQ_PUSH);
-  sender.bind(FLAGS_server);
-  LOG(INFO) << "Server created at " << FLAGS_server;
+  try {
+    //  Socket to talk to clients
+    zmq::context_t context(1);
+    zmq::socket_t sender(context, ZMQ_PUSH);
+    sender.bind(FLAGS_server);
+    LOG(INFO) << "Server created at " << FLAGS_server;
+  } catch (const zmq::error_t& ze) {
+    LOG(FATAL) << "ZeroMQ error: " << ze.num() << " " << ze.what();
+  }
 
   while (1) {
     VLOG(1) << "Sending " << cursor->key();
