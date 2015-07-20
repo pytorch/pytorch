@@ -31,7 +31,7 @@ def jsonify_nvd3(chart):
 def visualize_summary(filename):
   try:
     data = np.loadtxt(filename)
-  except Error as e:
+  except Exception as e:
     return 'Cannot load file {}: {}'.format(filename, str(e))
   chart_name = os.path.splitext(os.path.basename(filename))[0]
   chart = nvd3.lineChart(name=chart_name + '_summary_chart',
