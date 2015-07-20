@@ -160,7 +160,6 @@ template <typename dtype, class DeviceContext>
 bool ConvGradientOp<dtype, DeviceContext>::RunOnDeviceWithOrderNCHW() {
   auto& X = Input(INPUT);
   auto& filter = Input(FILTER);
-  auto& bias = Input(BIAS);
   auto& dY = Input(OUTPUT_GRAD);
   auto* dfilter = Output(FILTER_GRAD);
   auto* dbias = Output(BIAS_GRAD);
@@ -171,10 +170,8 @@ bool ConvGradientOp<dtype, DeviceContext>::RunOnDeviceWithOrderNCHW() {
   DCHECK_EQ(filter.dim(1), C);
   DCHECK_EQ(filter.dim(2), kernel_h_);
   DCHECK_EQ(filter.dim(3), kernel_w_);
-  DCHECK_EQ(bias.ndim(), 1);
-  DCHECK_EQ(bias.dim(0), M);
   dfilter->ReshapeLike(filter);
-  dbias->ReshapeLike(bias);
+  dbias->Reshape(std::vector<int>{M});
   // The dimension of each kernel
   const int kernel_dim = C * kernel_h_ * kernel_w_;
   // The offset corresponding to a single input image, and a single output
@@ -248,7 +245,6 @@ template <typename dtype, class DeviceContext>
 bool ConvGradientOp<dtype, DeviceContext>::RunOnDeviceWithOrderNHWC() {
   auto& X = Input(INPUT);
   auto& filter = Input(FILTER);
-  auto& bias = Input(BIAS);
   auto& dY = Input(OUTPUT_GRAD);
   auto* dfilter = Output(FILTER_GRAD);
   auto* dbias = Output(BIAS_GRAD);
@@ -259,10 +255,8 @@ bool ConvGradientOp<dtype, DeviceContext>::RunOnDeviceWithOrderNHWC() {
   DCHECK_EQ(filter.dim(1), kernel_h_);
   DCHECK_EQ(filter.dim(2), kernel_w_);
   DCHECK_EQ(filter.dim(3), C);
-  DCHECK_EQ(bias.ndim(), 1);
-  DCHECK_EQ(bias.dim(0), M);
   dfilter->ReshapeLike(filter);
-  dbias->ReshapeLike(bias);
+  dbias->Reshape(std::vector<int>{M});
   // The dimension of each kernel
   const int kernel_dim = kernel_h_ * kernel_w_ * C;
   // The offset corresponding to a single input image, and a single output

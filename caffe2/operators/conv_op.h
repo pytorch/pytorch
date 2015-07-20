@@ -48,11 +48,11 @@ class ConvGradientOp final : public ConvPoolOpBase<dtype, DeviceContext> {
   Tensor<dtype, DeviceContext> bias_multiplier_;
   Tensor<dtype, DeviceContext> kOne;
   Tensor<dtype, DeviceContext> kZero;
-  // input: X, W, b, dY
+  // input: X, W, dY
   // output: dW, db, and optionally dX
-  INPUT_TAGS(INPUT, FILTER, BIAS, OUTPUT_GRAD);
+  INPUT_TAGS(INPUT, FILTER, OUTPUT_GRAD);
   OUTPUT_TAGS(FILTER_GRAD, BIAS_GRAD, INPUT_GRAD);
-  INPUT_OUTPUT_STATS(4, 4, 2, 3);
+  INPUT_OUTPUT_STATS(3, 3, 2, 3);
   DISABLE_COPY_AND_ASSIGN(ConvGradientOp);
 };
 
