@@ -23,6 +23,7 @@ const char kBcastNet[] =
 "    }"
 "  }"
 "  op {"
+"    input: \"X\""
 "    output: \"X\""
 "    type: \"Broadcast\""
 "    arg {"
