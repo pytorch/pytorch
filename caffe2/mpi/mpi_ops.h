@@ -1,3 +1,6 @@
+#ifndef CAFFE2_MPI_MPI_OPS_H_
+#define CAFFE2_MPI_MPI_OPS_H_
+
 #include <mpi.h>
 
 #include "caffe2/core/operator.h"
@@ -34,9 +37,30 @@ class BroadcastOp final : public Operator<dtype, DeviceContext> {
   DISABLE_COPY_AND_ASSIGN(BroadcastOp);
 };
 
-namespace {
-REGISTER_CPU_OPERATOR(Broadcast, BroadcastOp<float, CPUContext>);
 
-}
+// AllreduceOp does Allreduce using MPI. Currently, only SUM is supported.
+template <typename dtype, class DeviceContext>
+class AllreduceOp final : public Operator<dtype, DeviceContext> {
+ public:
+  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_SIMPLE_CTOR_DTOR(AllreduceOp);
+
+  bool RunOnDevice() {
+    auto& input = Input(0);
+    auto* output = Output(0);
+    output->ReshapeLike(input);
+    MPI_Allreduce(const_cast<dtype*>(input.data()),
+                  output->mutable_data(), input.size(),
+                  MPIDataTypeWrapper<dtype>::type(), MPI_SUM, MPI_COMM_WORLD);
+    return true;
+  }
+
+ protected:
+  // Input: X; Output: X_reduced.
+  INPUT_OUTPUT_STATS(1, 1, 1, 1);
+  DISABLE_COPY_AND_ASSIGN(AllreduceOp);
+};
 
 }  // namespace caffe2
+
+#endif  // CAFFE2_MPI_MPI_OPS_H_

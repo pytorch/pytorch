@@ -8,8 +8,10 @@ cc_headers(
 cc_library(
   name = "mpi_ops",
   srcs = [
-      "allreduce_op.cc",
-      "broadcast_op.cc",
+      "mpi_ops.cc",
+  ],
+  hdrs = [
+      "mpi_ops.h",
   ],
   deps = [
       ":mpi_common",
