@@ -125,6 +125,10 @@ THC_API void THCudaTensor_maskedFillByte(THCState* state, THCudaTensor *tensor, 
 THC_API void THCudaTensor_maskedCopyByte(THCState* state, THCudaTensor *tensor, THByteTensor *mask, THCudaTensor *src);
 THC_API void THCudaTensor_maskedSelectByte(THCState* state, THCudaTensor *tensor, THCudaTensor *src, THByteTensor *mask);
 
+THC_API void THCudaTensor_gather(THCState* state, THCudaTensor *tensor, THCudaTensor *src, int dim, THCudaTensor *index);
+THC_API void THCudaTensor_scatter(THCState* state, THCudaTensor *tensor, int dim, THCudaTensor *index, THCudaTensor *src);
+THC_API void THCudaTensor_scatterFill(THCState* state, THCudaTensor *tensor, int dim, THCudaTensor *index, float value);
+
 THC_API int THCudaTensor_logicalall(THCState *state, THCudaTensor *self);
 THC_API int THCudaTensor_logicalany(THCState *state, THCudaTensor *self);
 
