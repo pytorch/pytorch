@@ -74,9 +74,9 @@ def AddAveragePoolGradient(op):
       [GetGradientName(op.input[0])], arg=op.arg)
 
 @GradientRegistry.RegisterGradient('Conv')
-def AddFCGradient(op):
+def AddConvGradient(op):
   return CreateOperator('ConvGradient')(
-      list(op.input) + [GetGradientName(op.output[0])],
+      [op.input[0], op.input[1], GetGradientName(op.output[0])],
       [GetGradientName(name) for name in
           [op.input[1], op.input[2], op.input[0]]],
       arg=op.arg)
