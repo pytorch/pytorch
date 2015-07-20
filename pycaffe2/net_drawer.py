@@ -83,13 +83,13 @@ def GetPydotGraphMinimal(operators, name, rankdir='LR'):
   return graph
 
 def GetOperatorMapForPlan(plan_def):
-  graphs = {}
-  for net_id, net in enumerate(plan_def.networks):
+  operator_map = {}
+  for net_id, net in enumerate(plan_def.network):
     if net.HasField('name'):
-      graphs[plan_def.name + "_" + net.name] = net.operators
+      operator_map[plan_def.name + "_" + net.name] = net.op
     else:
-      graphs[plan_def.name + "_network_%d" % net_id] = net.operators
-  return graphs
+      operator_map[plan_def.name + "_network_%d" % net_id] = net.op
+  return operator_map
 
 def main():
   with open(sys.argv[1], 'r') as fid:
@@ -97,7 +97,7 @@ def main():
     graphs = utils.GetContentFromProtoString(
         content,{
             caffe2_pb2.PlanDef: lambda x: GetOperatorMapForPlan(x),
-            caffe2_pb2.NetDef: lambda x: {x.name: x.operators},
+            caffe2_pb2.NetDef: lambda x: {x.name: x.op},
         })
   for key, operators in graphs.iteritems():
     graph = GetPydotGraph(operators, key)
