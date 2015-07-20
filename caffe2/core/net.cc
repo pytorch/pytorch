@@ -65,6 +65,7 @@ ParallelNet::ParallelNet(const NetDef& net_def, Workspace* ws)
     : NetBase(net_def, ws), operator_nodes_(net_def.op_size()) {
   // Blob creator allows us to track which operator created which blob.
   std::map<string, int> blob_creator;
+  std::map<string, int> execution_chains;
   bool net_def_has_device_option = net_def.has_device_option();
   // Initialize the operators
   for (int idx = 0; idx < net_def.op_size(); ++idx) {
@@ -97,6 +98,25 @@ ParallelNet::ParallelNet(const NetDef& net_def, Workspace* ws)
                      << "Use at your own risk.";
       }
       blob_creator[output] = idx;
+    }
+
+    for (const auto& arg : op_def.arg()) {
+      if (arg.name() == "execution_chain") {
+        for (const string& name : arg.strings()) {
+          if (execution_chains.count(name) == 0) {
+            // New execution chain. Do nothing but add it.
+            execution_chains[name] = idx;
+          } else {
+            int parent = execution_chains[name];
+            VLOG(1) << "op dependency due to execution chain " << name
+                    << ": " << parent << "->" << idx;
+            operator_nodes_[idx].parents_.push_back(parent);
+            operator_nodes_[parent].children_.push_back(idx);
+            // update the tail of the current execution chain.
+            execution_chains[name] = idx;
+          }
+        }
+      }
     }
   }
   // Figure out the initial frontier - this is the one we will feed into the job
