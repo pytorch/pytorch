@@ -624,12 +624,14 @@ void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
 /*  printf("%ldx%ld = %ldx%ld X %ldx%ld\n", r_->size[0], r_->size[1], m1->size[0], m1->size[1], m2->size[0], m2->size[1]); */
 
   /* r_ */
-  if(r_->stride[0] == 1)
+  if(r_->stride[0] == 1 &&
+     r_->stride[1] != 0)
   {
     transpose_r = 'n';
     r__ = r_;
   }
-  else if(r_->stride[1] == 1)
+  else if(r_->stride[1] == 1 &&
+          r_->stride[0] != 0)
   {
     THTensor *swap = m2;
     m2 = m1;
@@ -647,12 +649,14 @@ void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
   }
 
   /* m1 */
-  if(m1->stride[(transpose_r == 'n' ? 0 : 1)] == 1)
+  if(m1->stride[(transpose_r == 'n' ? 0 : 1)] == 1 &&
+     m1->stride[(transpose_r == 'n' ? 1 : 0)] != 0)
   {
     transpose_m1 = 'n';
     m1_ = m1;
   }
-  else if(m1->stride[(transpose_r == 'n' ? 1 : 0)] == 1)
+  else if(m1->stride[(transpose_r == 'n' ? 1 : 0)] == 1 &&
+          m1->stride[(transpose_r == 'n' ? 0 : 1)] != 0)
   {
     transpose_m1 = 't';
     m1_ = m1;
@@ -664,12 +668,14 @@ void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
   }
 
   /* m2 */
-  if(m2->stride[(transpose_r == 'n' ? 0 : 1)] == 1)
+  if(m2->stride[(transpose_r == 'n' ? 0 : 1)] == 1 &&
+     m2->stride[(transpose_r == 'n' ? 1 : 0)] != 0)
   {
     transpose_m2 = 'n';
     m2_ = m2;
   }
-  else if(m2->stride[(transpose_r == 'n' ? 1 : 0)] == 1)
+  else if(m2->stride[(transpose_r == 'n' ? 1 : 0)] == 1 &&
+          m2->stride[(transpose_r == 'n' ? 0 : 1)] != 0)
   {
     transpose_m2 = 't';
     m2_ = m2;
