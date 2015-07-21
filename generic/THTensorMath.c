@@ -290,19 +290,39 @@ accreal THTensor_(dot)(THTensor *tensor, THTensor *src)
 real THTensor_(minall)(THTensor *tensor)
 {
   real theMin;
+  real value;
+
   THArgCheck(tensor->nDimension > 0, 1, "tensor must have one dimension");
   theMin = THTensor_(data)(tensor)[0];
-  TH_TENSOR_APPLY(real, tensor, if(*tensor_data < theMin) theMin = *tensor_data;);
-  return theMin; 
+  TH_TENSOR_APPLY(real, tensor,
+                  value = *tensor_data;
+                  /* This is not the same as value<theMin in the case of NaNs */
+                  if(!(value >= theMin))
+                  {
+                    theMin = value;
+                    if (isnan(value))
+                      break;
+                  });
+  return theMin;
 }
 
 real THTensor_(maxall)(THTensor *tensor)
 {
   real theMax;
+  real value;
+
   THArgCheck(tensor->nDimension > 0, 1, "tensor must have one dimension");
   theMax = THTensor_(data)(tensor)[0];
-  TH_TENSOR_APPLY(real, tensor, if(*tensor_data > theMax) theMax = *tensor_data;);
-  return theMax; 
+  TH_TENSOR_APPLY(real, tensor,
+                  value = *tensor_data;
+                  /* This is not the same as value>theMax in the case of NaNs */
+                  if(!(value <= theMax))
+                  {
+                    theMax = value;
+                    if (isnan(value))
+                      break;
+                  });
+  return theMax;
 }
 
 accreal THTensor_(sumall)(THTensor *tensor)
@@ -854,6 +874,9 @@ long THTensor_(numel)(THTensor *t)
 void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension)
 {
   THLongStorage *dim;
+  real theMax;
+  real value;
+  long theIndex;
   long i;
 
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimension)(t), 2, "dimension %d out of range",
@@ -866,24 +889,31 @@ void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
   THLongStorage_free(dim);
 
   TH_TENSOR_DIM_APPLY3(real, t, real, values_, long, indices_, dimension,
-                       long theIndex = 0;
-                       real theMax = t_data[0];
-                       for(i = 1; i < t_size; i++)
+                       theMax = t_data[0];
+                       theIndex = 0;
+
+                       for(i = 0; i < t_size; i++)
                        {
-                         if(t_data[i*t_stride] > theMax)
+                         value = t_data[i*t_stride];
+                         /* This is not the same as value>theMax in the case of NaNs */
+                         if(!(value <= theMax))
                          {
                            theIndex = i;
-                           theMax = t_data[i*t_stride];
+                           theMax = value;
+                           if (isnan(value))
+                             break;
                          }
                        }
                        *indices__data = theIndex;
-                       *values__data = theMax;);  
-
+                       *values__data = theMax;);
 }
 
 void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension)
 {
   THLongStorage *dim;
+  real theMin;
+  real value;
+  long theIndex;
   long i;
 
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimension)(t), 2, "dimension %d out of range",
@@ -896,19 +926,23 @@ void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
   THLongStorage_free(dim);
 
   TH_TENSOR_DIM_APPLY3(real, t, real, values_, long, indices_, dimension,
-                       long theIndex = 0;
-                       real theMin = t_data[0];
-                       for(i = 1; i < t_size; i++)
+                       theMin = t_data[0];
+                       theIndex = 0;
+
+                       for(i = 0; i < t_size; i++)
                        {
-                         if(t_data[i*t_stride] < theMin)
+                         value = t_data[i*t_stride];
+                         /* This is not the same as value<theMin in the case of NaNs */
+                         if(!(value >= theMin))
                          {
                            theIndex = i;
-                           theMin = t_data[i*t_stride];
+                           theMin = value;
+                           if (isnan(value))
+                             break;
                          }
                        }
                        *indices__data = theIndex;
-                       *values__data = theMin;);  
-
+                       *values__data = theMin;);
 }
 
 
