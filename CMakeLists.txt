@@ -91,6 +91,7 @@ SET(src-cuda
   THCTensorIndex.cu
   THCTensorConv.cu
   THCTensorRandom.cu
+  THCTensorScatterGather.cu
   THCApply.cu
   THCTensorSort.cu
   )
