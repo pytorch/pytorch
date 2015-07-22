@@ -38,6 +38,11 @@ def _GetPythonIncludes():
     pass
   return includes
 
+def _GetPythonLibDirs():
+  python_root = _GetSubprocessOutput(['python-config', '--prefix'])
+  lib_dir = os.path.join(python_root, 'lib')
+  return ' -L' + lib_dir
+
 class Env(object):
   """Env is the class that stores all the build variables."""
   # Define the compile binary commands.
@@ -158,6 +163,8 @@ class Env(object):
       '/usr/lib',
   ]
   LIBDIRS = ' '.join(['-L' + s for s in LIBDIRS])
+  # Python
+  LIBDIRS += ' ' + _GetPythonLibDirs()
   # General link flags for binary targets
   LIBS = []
   LIBS = ' '.join(['-l' + s for s in LIBS])
