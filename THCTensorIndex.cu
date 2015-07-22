@@ -5,17 +5,8 @@
 #include "THCTensorRandom.h"
 #include "THCApply.cuh"
 #include "THCReduce.cuh"
-
-#include <algorithm>
-#include <thrust/device_ptr.h>
-#include <thrust/fill.h>
-#include <thrust/functional.h>
-#include <thrust/reduce.h>
-#include <thrust/inner_product.h>
-
-#ifndef DIVUP
-#define DIVUP(x, y) (((x) + (y) - 1) / (y))
-#endif
+#include "THCDeviceUtils.cuh"
+#include <algorithm> // for std::min
 
 __global__ void THCudaTensor_kernel_indexFill(
    float *tensor, long* stride, float *index, long src_nDim,
@@ -286,8 +277,8 @@ void THCudaTensor_indexSelect(THCState *state, THCudaTensor *res_, THCudaTensor 
   {
     long stride = src->stride[0];
 
-    int blockX = std::min(DIVUP(nIndex, 4), 65535L);
-    int blockY = std::min(DIVUP(stride, 128), 65535L);
+    int blockX = std::min(THCCeilDiv(nIndex, 4L), 65535L);
+    int blockY = std::min(THCCeilDiv(stride, 128L), 65535L);
 
     dim3 nthreads(32, 4);
     dim3 nblocks(blockX, blockY);

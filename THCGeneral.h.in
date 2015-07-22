@@ -80,6 +80,8 @@ THC_API void THCudaInit(THCState* state);
 THC_API void THCudaShutdown(THCState* state);
 THC_API void THCudaEnablePeerToPeerAccess(THCState* state);
 
+THC_API struct cudaDeviceProp* THCState_getCurrentDeviceProperties(THCState* state);
+
 THC_API void THCMagma_init(THCState *state);
 
 /* State manipulators and accessors */

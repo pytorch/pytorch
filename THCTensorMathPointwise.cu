@@ -2,15 +2,8 @@
 #include "THCGeneral.h"
 #include "THCBlas.h"
 #include "THCTensorCopy.h"
-#include "THCTensorRandom.h"
 #include "THCApply.cuh"
 #include "THCReduce.cuh"
-
-#include <thrust/device_ptr.h>
-#include <thrust/fill.h>
-#include <thrust/functional.h>
-#include <thrust/reduce.h>
-#include <thrust/inner_product.h>
 
 #define IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(NAME, CFUNC)                   \
   struct Tensor##NAME##Op {                                             \

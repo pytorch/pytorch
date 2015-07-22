@@ -6,12 +6,6 @@
 #include "THCApply.cuh"
 #include "THCReduce.cuh"
 
-#include <thrust/device_ptr.h>
-#include <thrust/fill.h>
-#include <thrust/functional.h>
-#include <thrust/reduce.h>
-#include <thrust/inner_product.h>
-
 template<class Op>
 void THCudaTensor_logicalValue(THCState *state, THCudaTensor *self_, THCudaTensor *src, Op op)
 {

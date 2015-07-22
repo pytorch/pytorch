@@ -2,8 +2,10 @@
 #include "THCTensorCopy.h"
 
 #include <thrust/device_ptr.h>
-#include <curand_kernel.h> // known CUDA 6 compilation error fix
 #include <thrust/sort.h>
+#if CUDA_VERSION >= 7000
+#include <thrust/system/cuda/execution_policy.h>
+#endif
 
 template <typename IndexType, int Power2SortSize>
 __device__ __forceinline__ IndexType
@@ -408,11 +410,19 @@ void THCudaTensor_sortImplThrust(THCState* state,
                         indicesStart);
 
     if (dir) {
-      thrust::sort_by_key(sortedSliceStart, sortedSliceEnd, indicesSliceStart,
-                          thrust::greater<float>());
+      thrust::sort_by_key(
+#if CUDA_VERSION >= 7000
+        thrust::cuda::par.on(THCState_getCurrentStream(state)),
+#endif
+        sortedSliceStart, sortedSliceEnd, indicesSliceStart,
+        thrust::greater<float>());
     } else {
-      thrust::sort_by_key(sortedSliceStart, sortedSliceEnd, indicesSliceStart,
-                          thrust::less<float>());
+      thrust::sort_by_key(
+#if CUDA_VERSION >= 7000
+        thrust::cuda::par.on(THCState_getCurrentStream(state)),
+#endif
+        sortedSliceStart, sortedSliceEnd, indicesSliceStart,
+        thrust::less<float>());
     }
   }
 }

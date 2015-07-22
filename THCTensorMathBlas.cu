@@ -6,12 +6,6 @@
 #include "THCApply.cuh"
 #include "THCReduce.cuh"
 
-#include <thrust/device_ptr.h>
-#include <thrust/fill.h>
-#include <thrust/functional.h>
-#include <thrust/reduce.h>
-#include <thrust/inner_product.h>
-
 float THCudaTensor_dot(THCState *state, THCudaTensor *self, THCudaTensor *src)
 {
   THAssert(THCudaTensor_checkGPU(state, 2, self, src));
@@ -347,9 +341,9 @@ void THCudaTensor_baddbmm(THCState *state, THCudaTensor *result, float beta, THC
   // Copy pointers to device.
   const float **d_matrices1, **d_matrices2;
   float **d_result_matrices;
-  THCudaCheck(cudaMalloc(&d_matrices1, matrices_size));
-  THCudaCheck(cudaMalloc(&d_matrices2, matrices_size));
-  THCudaCheck(cudaMalloc(&d_result_matrices, matrices_size));
+  THCudaCheck(cudaMalloc((void**)&d_matrices1, matrices_size));
+  THCudaCheck(cudaMalloc((void**)&d_matrices2, matrices_size));
+  THCudaCheck(cudaMalloc((void**)&d_result_matrices, matrices_size));
 
   THCudaCheck(cudaMemcpyAsync(d_matrices1, matrices1, matrices_size,
                               cudaMemcpyHostToDevice, THCState_getCurrentStream(state)));

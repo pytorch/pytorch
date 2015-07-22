@@ -8,10 +8,10 @@
 #include "THCReduce.cuh"
 
 #include <thrust/device_ptr.h>
-#include <thrust/fill.h>
-#include <thrust/functional.h>
-#include <thrust/reduce.h>
-#include <thrust/inner_product.h>
+#include <thrust/scan.h>
+#if CUDA_VERSION >= 7000
+#include <thrust/system/cuda/execution_policy.h>
+#endif
 
 struct TensorMaskedFillOp {
   TensorMaskedFillOp(float v) : value(v) {}
@@ -96,7 +96,11 @@ void THCudaTensor_maskedCopy(THCState* state,
     maskData(THCudaTensor_data(state, contigMask));
   thrust::device_ptr<float>
     maskPrefixSumData(THCudaTensor_data(state, maskPrefixSum));
-  thrust::exclusive_scan(maskData,
+  thrust::exclusive_scan(
+#if CUDA_VERSION >= 7000
+    thrust::cuda::par.on(THCState_getCurrentStream(state)),
+#endif
+                         maskData,
                          maskData + THCudaTensor_nElement(state, contigMask),
                          maskPrefixSumData);
 
@@ -156,7 +160,11 @@ void THCudaTensor_maskedSelect(THCState* state,
     maskData(THCudaTensor_data(state, contigMask));
   thrust::device_ptr<float>
     maskPrefixSumData(THCudaTensor_data(state, maskPrefixSum));
-  thrust::exclusive_scan(maskData,
+  thrust::exclusive_scan(
+#if CUDA_VERSION >= 7000
+    thrust::cuda::par.on(THCState_getCurrentStream(state)),
+#endif
+                         maskData,
                          maskData + THCudaTensor_nElement(state, contigMask),
                          maskPrefixSumData);
 

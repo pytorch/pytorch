@@ -7,10 +7,12 @@
 #include "THCReduce.cuh"
 
 #include <thrust/device_ptr.h>
-#include <thrust/fill.h>
+#include <thrust/transform_reduce.h>
 #include <thrust/functional.h>
-#include <thrust/reduce.h>
 #include <thrust/inner_product.h>
+#if CUDA_VERSION >= 7000
+#include <thrust/system/cuda/execution_policy.h>
+#endif
 
 struct TensorPowOp {
   TensorPowOp(float v) : val(v) {}
@@ -193,7 +195,13 @@ float THCudaTensor_varall(THCState *state, THCudaTensor *self)
   thrust::device_ptr<float> self_data(THCudaTensor_data(state, self));
 
   float mean = THCudaTensor_meanall(state, self);
-  float result = thrust::transform_reduce(self_data, self_data+size, square_functor(mean), (float)0, thrust::plus<float>());
+  float result =
+    thrust::transform_reduce(
+#if CUDA_VERSION >= 7000
+      thrust::cuda::par.on(THCState_getCurrentStream(state)),
+#endif
+      self_data, self_data+size, square_functor(mean),
+      (float)0, thrust::plus<float>());
 
   result = result/(THCudaTensor_nElement(state, self)-1);
 
@@ -447,9 +455,19 @@ float THCudaTensor_normall(THCState *state, THCudaTensor *self, float value)
 
   float result;
   if(value == 0.0f) {
-    result = thrust::transform_reduce(self_data, self_data+size, partial_not_equal_functor(0.0f), (float)0, thrust::plus<float>());
+    result = thrust::transform_reduce(
+#if CUDA_VERSION >= 7000
+      thrust::cuda::par.on(THCState_getCurrentStream(state)),
+#endif
+      self_data, self_data+size, partial_not_equal_functor(0.0f),
+      (float)0, thrust::plus<float>());
   } else {
-    result = thrust::transform_reduce(self_data, self_data+size, norm_functor(value), (float)0, thrust::plus<float>());
+    result = thrust::transform_reduce(
+#if CUDA_VERSION >= 7000
+      thrust::cuda::par.on(THCState_getCurrentStream(state)),
+#endif
+      self_data, self_data+size, norm_functor(value),
+      (float)0, thrust::plus<float>());
     result = pow(result, (float)1.0/value);
   }
 
@@ -559,7 +577,12 @@ float THCudaTensor_dist(THCState *state, THCudaTensor *self, THCudaTensor *src, 
   thrust::device_ptr<float> self_data(THCudaTensor_data(state, self));
   thrust::device_ptr<float> src_data(THCudaTensor_data(state, src));
 
-  float result = thrust::inner_product(self_data, self_data+size, src_data, (float) 0,thrust::plus<float>(), dist_functor(value));
+  float result = thrust::inner_product(
+#if CUDA_VERSION >= 7000
+    thrust::cuda::par.on(THCState_getCurrentStream(state)),
+#endif
+    self_data, self_data+size, src_data, (float) 0,
+    thrust::plus<float>(), dist_functor(value));
 
   THCudaTensor_free(state, src);
   THCudaTensor_free(state, self);

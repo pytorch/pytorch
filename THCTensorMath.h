@@ -122,13 +122,13 @@ THC_API void THCudaTensor_indexCopy_long(THCState *state, THCudaTensor *res_, in
 THC_API void THCudaTensor_indexFill_long(THCState *state, THCudaTensor *tensor, int dim, THLongTensor *index, float val);
 THC_API void THCudaTensor_indexSelect_long(THCState *state, THCudaTensor *tensor, THCudaTensor *src, int dim, THLongTensor *index);
 
-THC_API void THCudaTensor_maskedFill(THCState* state, THCudaTensor *tensor, THCudaTensor *mask, float value);
-THC_API void THCudaTensor_maskedCopy(THCState* state, THCudaTensor *tensor, THCudaTensor *mask, THCudaTensor *src);
-THC_API void THCudaTensor_maskedSelect(THCState* state, THCudaTensor *tensor, THCudaTensor *src, THCudaTensor *mask);
+THC_API void THCudaTensor_maskedFill(THCState *state, THCudaTensor *tensor, THCudaTensor *mask, float value);
+THC_API void THCudaTensor_maskedCopy(THCState *state, THCudaTensor *tensor, THCudaTensor *mask, THCudaTensor *src);
+THC_API void THCudaTensor_maskedSelect(THCState *state, THCudaTensor *tensor, THCudaTensor *src, THCudaTensor *mask);
 
-THC_API void THCudaTensor_maskedFillByte(THCState* state, THCudaTensor *tensor, THByteTensor *mask, float value);
-THC_API void THCudaTensor_maskedCopyByte(THCState* state, THCudaTensor *tensor, THByteTensor *mask, THCudaTensor *src);
-THC_API void THCudaTensor_maskedSelectByte(THCState* state, THCudaTensor *tensor, THCudaTensor *src, THByteTensor *mask);
+THC_API void THCudaTensor_maskedFillByte(THCState *state, THCudaTensor *tensor, THByteTensor *mask, float value);
+THC_API void THCudaTensor_maskedCopyByte(THCState *state, THCudaTensor *tensor, THByteTensor *mask, THCudaTensor *src);
+THC_API void THCudaTensor_maskedSelectByte(THCState *state, THCudaTensor *tensor, THCudaTensor *src, THByteTensor *mask);
 
 THC_API void THCudaTensor_gather(THCState* state, THCudaTensor *tensor, THCudaTensor *src, int dim, THCudaTensor *index);
 THC_API void THCudaTensor_scatter(THCState* state, THCudaTensor *tensor, int dim, THCudaTensor *index, THCudaTensor *src);

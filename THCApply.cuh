@@ -106,7 +106,7 @@ inline bool getApplyGrid(THCState* state, long totalElements, dim3& grid) {
 
   // Assume a reasonable number of SMs if no state is available
   int numSM =
-    state ? state->deviceProperties[curDevice].multiProcessorCount : 15;
+    state ? THCState_getCurrentDeviceProperties(state)->multiProcessorCount : 15;
 
   // 16 warps per block * 4 per SM gives 64 warps per SM at maximum,
   // which seems to be a good sweetspot for latency hiding

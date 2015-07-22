@@ -2,11 +2,18 @@
 
 #include <thrust/device_ptr.h>
 #include <thrust/fill.h>
+#if CUDA_VERSION >= 7000
+#include <thrust/system/cuda/execution_policy.h>
+#endif
 
 void THCudaStorage_fill(THCState *state, THCudaStorage *self, float value)
 {
   thrust::device_ptr<float> self_data(self->data);
-  thrust::fill(self_data, self_data+self->size, value);
+  thrust::fill(
+#if CUDA_VERSION >= 7000
+    thrust::cuda::par.on(THCState_getCurrentStream(state)),
+#endif
+    self_data, self_data+self->size, value);
 }
 
 void THCudaStorage_resize(THCState *state, THCudaStorage *self, long size)

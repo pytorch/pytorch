@@ -149,6 +149,14 @@ void THCudaEnablePeerToPeerAccess(THCState* state)
   THCudaCheck(cudaSetDevice(prevDev));
 }
 
+struct cudaDeviceProp* THCState_getCurrentDeviceProperties(THCState* state)
+{
+  int curDev = -1;
+  THCudaCheck(cudaGetDevice(&curDev));
+
+  return &(state->deviceProperties[curDev]);
+}
+
 int THCState_getNumDevices(THCState *state)
 {
   return state->numDevices;
@@ -477,7 +485,7 @@ void __THCublasCheck(cublasStatus_t status, const char *file, const int line)
         break;
     }
 
-    _THError(file, line, "%s(%i) : cublas runtime error : %s", errmsg);
+    _THError(file, line, "cublas runtime error : %s", errmsg);
   }
 }
 

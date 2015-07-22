@@ -6,11 +6,7 @@
 #include "THCApply.cuh"
 #include "THCReduce.cuh"
 
-#include <thrust/device_ptr.h>
-#include <thrust/fill.h>
 #include <thrust/functional.h>
-#include <thrust/reduce.h>
-#include <thrust/inner_product.h>
 
 /* A set of reduction kernels that take in binary ops on thrust pairs (of value, index).
    These are useful when you not only have to do a reduction, but you might have
