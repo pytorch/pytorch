@@ -146,6 +146,7 @@ class Env(object):
       os.path.join(GENDIR, 'third_party'),
       os.path.join(GENDIR, 'third_party/include'),
       '/usr/local/include',
+      '/usr/include',
   ]
   INCLUDES = ' '.join(['-I' + s for s in INCLUDES])
   # Python
@@ -154,6 +155,7 @@ class Env(object):
   # General lib folders.
   LIBDIRS = MPI_LIBDIRS + [
       '/usr/local/lib',
+      '/usr/lib',
   ]
   LIBDIRS = ' '.join(['-L' + s for s in LIBDIRS])
   # General link flags for binary targets
