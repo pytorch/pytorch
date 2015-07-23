@@ -115,8 +115,8 @@ class Tensor {
     Reshape(dims);
   }
 
-  template <class SrcContext>
-  Tensor(const Tensor<dtype, SrcContext>& src, Context* context)
+  template <class SrcContext, class ContextForCopy>
+  Tensor(const Tensor<dtype, SrcContext>& src, ContextForCopy* context)
       : data_(nullptr) {
     Reshape(src.dims());
     context->template Copy<dtype, Context, SrcContext>(
