@@ -35,6 +35,10 @@
 
 DEFINE_string(caffe_test_root, "gen/", "The root of the caffe test folder.");
 
+#ifndef GFLAGS_GFLAGS_H_
+  namespace gflags = google;
+#endif
+
 GTEST_API_ int main(int argc, char **argv) {
   // std::cout << "Running main() from gtest_main.cc\n";
   testing::InitGoogleTest(&argc, argv);

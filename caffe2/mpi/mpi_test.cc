@@ -117,6 +117,10 @@ TEST(MPITest, TestAllreduce) {
 
 DEFINE_string(caffe_test_root, "gen/", "The root of the caffe test folder.");
 
+#ifndef GFLAGS_GFLAGS_H_
+  namespace gflags = google;
+#endif
+
 GTEST_API_ int main(int argc, char **argv) {
   int mpi_ret;
   MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &mpi_ret);
