@@ -2,6 +2,7 @@
 #define TH_GENERIC_FILE "generic/THTensorConv.c"
 #else
 
+
 /*
   2D Input, 2D kernel  : convolve given image with the given kernel.
 */
