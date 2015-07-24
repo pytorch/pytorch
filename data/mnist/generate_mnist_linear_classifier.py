@@ -5,7 +5,7 @@ from pycaffe2 import core_gradients
 import tempfile
 
 snapshot_db_pattern = os.path.join(
-    tempfile.gettempdir(), 'caffe_mnist_linear_regression_snapshot_%d')
+    tempfile.mkdtemp(), 'caffe_mnist_linear_regression_snapshot_%d')
 
 init_net = core.Net("init")
 W = init_net.UniformFill([], "W", shape=[10, 784], min=-0.1, max=0.1)
