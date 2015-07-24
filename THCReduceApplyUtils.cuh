@@ -273,14 +273,14 @@ __device__ T reduceBlock(T* smem,
 
 // Returns true if all linear ID -> offset math can be performed using 32 bit
 // unsigned math, which is faster than 64 bit math
-bool THC_canUse32BitIndexMath(THCState* state, THCudaTensor* t);
+THC_API bool THC_canUse32BitIndexMath(THCState* state, THCudaTensor* t);
 
 // Produces a grid with at least one point per tile
-bool THC_getGridFromTiles(long gridTiles, dim3& grid);
+THC_API bool THC_getGridFromTiles(long gridTiles, dim3& grid);
 
 // Determines if the given tensor has overlapping data points (i.e.,
 // is there more than one index into the tensor that references the
 // same piece of data)?
-bool THC_overlappingIndices(THCState* state, THCudaTensor* t);
+THC_API bool THC_overlappingIndices(THCState* state, THCudaTensor* t);
 
 #endif // THC_REDUCE_APPLY_UTILS_INC

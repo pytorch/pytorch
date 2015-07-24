@@ -17,7 +17,7 @@
 # define THC_EXTERNC extern
 #endif
 
-#ifdef WIN32
+#ifdef _WIN32
 # ifdef THC_EXPORTS
 #  define THC_API THC_EXTERNC __declspec(dllexport)
 # else

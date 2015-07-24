@@ -6,6 +6,7 @@
 #include "THCApply.cuh"
 #include "THCReduce.cuh"
 
+#include <algorithm>
 #include <thrust/device_ptr.h>
 #include <thrust/fill.h>
 #include <thrust/functional.h>
