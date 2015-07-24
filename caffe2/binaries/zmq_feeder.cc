@@ -6,7 +6,7 @@
 
 #include "caffe2/core/db.h"
 #include "caffe2/utils/zmq.hpp"
-#include "gflags/gflags.h"
+#include "caffe2/binaries/gflags_namespace.h"
 #include "glog/logging.h"
 
 DEFINE_string(server, "tcp://*:5555", "The server address.");

@@ -15,7 +15,7 @@
 #include <string>
 
 #include "caffe2/proto/caffe2.pb.h"
-#include "gflags/gflags.h"
+#include "caffe2/binaries/gflags_namespace.h"
 #include "glog/logging.h"
 #include "leveldb/db.h"
 #include "leveldb/write_batch.h"

@@ -1,7 +1,7 @@
 #include "caffe2/core/db.h"
 #include "caffe2/proto/caffe2.pb.h"
 #include "caffe/proto/caffe.pb.h"
-#include "gflags/gflags.h"
+#include "caffe2/binaries/gflags_namespace.h"
 #include "glog/logging.h"
 
 DEFINE_string(input_db, "", "The input db.");
