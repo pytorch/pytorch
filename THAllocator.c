@@ -164,15 +164,20 @@ static void *THMapAllocator_alloc(void* ctx_, long size)
     CloseHandle(hfile); 
     CloseHandle(hmfile); 
   }
-#else
+#else /* _WIN32 */
   {
     /* open file */
     int fd;
     long fdsz;
 
-    if(ctx->shared)
+    if(ctx->shared == TH_ALLOCATOR_MAPPED_SHARED)
     {
       if((fd = open(ctx->filename, O_RDWR | O_CREAT, (mode_t)0600)) == -1)
+        THError("unable to open file <%s> in read-write mode", ctx->filename);
+    }
+    else if (ctx->shared == TH_ALLOCATOR_MAPPED_SHAREDMEM)
+    {
+      if((fd = shm_open(ctx->filename, O_RDWR | O_CREAT, (mode_t)0600)) == -1)
         THError("unable to open file <%s> in read-write mode", ctx->filename);
     }
     else
@@ -191,6 +196,12 @@ static void *THMapAllocator_alloc(void* ctx_, long size)
       {
         if(ctx->shared)
         {
+          /* if it is shared mem, let's put it in correct size */
+          if (ctx->shared == TH_ALLOCATOR_MAPPED_SHAREDMEM)
+          {
+            if(ftruncate(fd, size) == -1)
+              THError("unable to resize shared memory file <%s> to the right size", ctx->filename);
+          }
           if((fdsz = lseek(fd, size-1, SEEK_SET)) == -1)
           {
             close(fd);
@@ -220,8 +231,11 @@ static void *THMapAllocator_alloc(void* ctx_, long size)
     else
       data = mmap(NULL, ctx->size, PROT_READ|PROT_WRITE, MAP_PRIVATE, fd, 0);
 
-    close(fd);
-    if(data == MAP_FAILED) {
+    if(close(fd) == -1)
+      THError("Error closing file <%s>", ctx->filename);
+
+    if(data == MAP_FAILED)
+    {
       data = NULL; /* let's be sure it is NULL */
       THError("$ Torch: unable to mmap memory: you tried to mmap %dGB.", ctx->size/1073741824);
     }
@@ -245,6 +259,11 @@ static void THMapAllocator_free(void* ctx_, void* data) {
 #else
   if (munmap(data, ctx->size))
     THError("could not unmap the shared memory file");
+  if (ctx->shared == TH_ALLOCATOR_MAPPED_SHAREDMEM &&
+      shm_unlink(ctx->filename) == -1)
+  {
+    THError("could not unlink the shared memory file %s", ctx->filename);
+  }
 #endif
 
   THMapAllocatorContext_free(ctx);

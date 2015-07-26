@@ -3,6 +3,9 @@
 
 #include "THGeneral.h"
 
+#define TH_ALLOCATOR_MAPPED_SHARED 1
+#define TH_ALLOCATOR_MAPPED_SHAREDMEM 2
+
 /* Custom allocator
  */
 typedef struct THAllocator {
