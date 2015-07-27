@@ -20,7 +20,7 @@ class AveragedLoss final : public Operator<dtype, DeviceContext> {
     auto& X = Input(0);
     auto* Loss = Output(0);
     auto* dX = Output(1);
-    Loss->Reshape(std::vector<int>{1});
+    Loss->Reshape(std::vector<int>());
     dX->ReshapeLike(X);
     math::Set<dtype, DeviceContext>(
         dX->size(), static_cast<dtype>(1.) / X.size(), dX->mutable_data(),
@@ -47,7 +47,7 @@ class WeightedSumLoss final : public Operator<dtype, DeviceContext> {
     DCHECK_EQ(X.size(), W.size());
     auto* Loss = Output(0);
     auto* dX = Output(1);
-    Loss->Reshape(std::vector<int>{1});
+    Loss->Reshape(std::vector<int>());
     math::Dot<dtype, DeviceContext>(
         X.size(), X.data(), W.data(), Loss->mutable_data(), &device_context_);
     dX->ReshapeLike(X);
