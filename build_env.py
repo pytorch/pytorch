@@ -38,6 +38,11 @@ def _GetPythonIncludes():
     pass
   return includes
 
+def _GetPythonLibDirs():
+  python_root = _GetSubprocessOutput(['python-config', '--prefix'])
+  lib_dir = os.path.join(python_root, 'lib')
+  return ' -L' + lib_dir
+
 class Env(object):
   """Env is the class that stores all the build variables."""
   # Define the compile binary commands.
@@ -146,7 +151,9 @@ class Env(object):
       os.path.join(GENDIR, 'third_party'),
       os.path.join(GENDIR, 'third_party/include'),
       '/usr/local/include',
+      '/usr/include',
   ]
+  INCLUDES = [s for s in INCLUDES if s == GENDIR or os.path.isdir(s)]
   INCLUDES = ' '.join(['-I' + s for s in INCLUDES])
   # Python
   INCLUDES += ' ' + _GetPythonIncludes()
@@ -154,8 +161,12 @@ class Env(object):
   # General lib folders.
   LIBDIRS = MPI_LIBDIRS + [
       '/usr/local/lib',
+      '/usr/lib',
   ]
+  LIBDIRS = [s for s in LIBDIRS if os.path.isdir(s)]
   LIBDIRS = ' '.join(['-L' + s for s in LIBDIRS])
+  # Python
+  LIBDIRS += ' ' + _GetPythonLibDirs()
   # General link flags for binary targets
   LIBS = []
   LIBS = ' '.join(['-l' + s for s in LIBS])
