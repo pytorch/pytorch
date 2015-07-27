@@ -125,7 +125,7 @@ class Tensor {
 
   // Creates a tensor, and fills its contents with the given values. We need to
   // have a context passed in as the copy function is device dependent.
-  Tensor(const vector<int>& dims, vector<dtype> values, Context* context)
+  Tensor(const vector<int>& dims, const vector<dtype>& values, Context* context)
       : data_(nullptr) {
     Reshape(dims);
     CHECK_EQ(values.size(), size_);
