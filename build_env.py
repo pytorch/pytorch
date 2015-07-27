@@ -153,6 +153,7 @@ class Env(object):
       '/usr/local/include',
       '/usr/include',
   ]
+  INCLUDES = [s for s in INCLUDES if s == GENDIR or os.path.isdir(s)]
   INCLUDES = ' '.join(['-I' + s for s in INCLUDES])
   # Python
   INCLUDES += ' ' + _GetPythonIncludes()
@@ -162,6 +163,7 @@ class Env(object):
       '/usr/local/lib',
       '/usr/lib',
   ]
+  LIBDIRS = [s for s in LIBDIRS if os.path.isdir(s)]
   LIBDIRS = ' '.join(['-L' + s for s in LIBDIRS])
   # Python
   LIBDIRS += ' ' + _GetPythonLibDirs()
