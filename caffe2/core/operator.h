@@ -39,15 +39,19 @@ class OperatorBase {
   vector<T> GetRepeatedArgument(const string& name);
 
   template <typename MessageType>
-  MessageType GetAnyMessageArgument(const string& name) {
+  MessageType GetMessageArgument(const string& name) {
     CHECK(arg_map_.count(name)) << "Cannot find parameter named " << name;
     MessageType message;
-    CHECK(message.ParseFromString(arg_map_[name]->s()))
-        << "Faild to parse content from the string";
+    if (arg_map_[name]->has_s()) {
+      CHECK(message.ParseFromString(arg_map_[name]->s()))
+          << "Faild to parse content from the string";
+    } else {
+      VLOG(1) << "Return empty message for parameter " << name;
+    }
     return message;
   }
   template <typename MessageType>
-  vector<MessageType> GetAnyRepeatedMessageArgument(const string& name) {
+  vector<MessageType> GetRepeatedMessageArgument(const string& name) {
     CHECK(arg_map_.count(name)) << "Cannot find parameter named " << name;
     vector<MessageType> messages(arg_map_[name]->strings_size());
     for (int i = 0; i < messages.size(); ++i) {
