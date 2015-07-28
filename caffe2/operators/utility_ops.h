@@ -77,8 +77,8 @@ class PrintOp final : public Operator<dtype, DeviceContext> {
         auto& input = Input(input_id);
         DCHECK_GT(input.size(), 0);
         temp_tensor.ReshapeLike(input);
-        device_context_.template Copy<dtype, CPUContext, DeviceContext>(
-            temp_tensor.mutable_data(), input.data(), input.size());
+        device_context_.template Copy<dtype, DeviceContext, CPUContext>(
+            input.size(), input.data(), temp_tensor.mutable_data());
       }
       std::stringstream values_stream;
       int total_count = std::min(temp_tensor.size(), limit_);
@@ -206,7 +206,7 @@ class SumOp : public Operator<dtype, DeviceContext> {
     auto* output = Output(0);
     output->ReshapeLike(input);
     device_context_.template Copy<dtype, DeviceContext, DeviceContext>(
-        output->mutable_data(), input.data(), input.size());
+        input.size(), input.data(), output->mutable_data());
     for (int i = 1; i < InputSize(); ++i) {
       math::Add(output->size(), output->data(), Input(i).data(),
                 output->mutable_data(), &device_context_);
@@ -276,8 +276,8 @@ class CopyOp : public Operator<dtype, DeviceContext> {
     auto& input = OperatorBase::Input<Tensor<dtype, SrcContext> >(0);
     auto* output = OperatorBase::Output<Tensor<dtype, DstContext> >(0);
     output->ReshapeLike(input);
-    this->device_context_.template Copy<dtype, DstContext, SrcContext>(
-      output->mutable_data(), input.data(), input.size());
+    this->device_context_.template Copy<dtype, SrcContext, DstContext>(
+      input.size(), input.data(), output->mutable_data());
     return true;
   }
 

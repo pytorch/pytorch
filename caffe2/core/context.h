@@ -29,13 +29,13 @@ class CPUContext {
   static void Delete(void* data) { delete[] static_cast<char*>(data); }
 
   // Two copy functions that deals with cross-device copies.
-  template <class DstContext, class SrcContext>
-  inline void Memcpy(void* dst, const void* src, size_t nbytes);
-  template <typename T, class DstContext, class SrcContext>
-  inline void Copy(T* dst, const T* src, int n) {
-    Memcpy<DstContext, SrcContext>(static_cast<void*>(dst),
+  template <class SrcContext, class DstContext>
+  inline void Memcpy(size_t nbytes, const void* src, void* dst);
+  template <typename T, class SrcContext, class DstContext>
+  inline void Copy(int n, const T* src, T* dst) {
+    Memcpy<SrcContext, DstContext>(n * sizeof(T),
                                    static_cast<const void*>(src),
-                                   n * sizeof(T));
+                                   static_cast<void*>(dst));
   }
 
  protected:
@@ -44,7 +44,7 @@ class CPUContext {
 
 template<>
 inline void CPUContext::Memcpy<CPUContext, CPUContext>(
-    void* dst, const void* src, size_t nbytes) {
+    size_t nbytes, const void* src, void* dst) {
   memcpy(dst, src, nbytes);
 }
 

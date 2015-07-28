@@ -23,9 +23,8 @@ class TensorSerializerFloat : public BlobSerializerBase {
     for (int i = 0; i < input.size(); ++i) {
       proto.add_float_data(0);
     }
-    this->device_context_.template Copy<float, CPUContext, DeviceContext>(
-        proto.mutable_float_data()->mutable_data(),
-        input.data(), input.size());
+    this->device_context_.template Copy<float, DeviceContext, CPUContext>(
+        input.size(), input.data(), proto.mutable_float_data()->mutable_data());
     return proto.SerializeAsString();
   }
 
@@ -53,9 +52,8 @@ class TensorSerializerInt32 : public BlobSerializerBase {
     for (int i = 0; i < input.size(); ++i) {
       proto.add_int32_data(0);
     }
-    this->device_context_.template Copy<int, CPUContext, DeviceContext>(
-        proto.mutable_int32_data()->mutable_data(),
-        input.data(), input.size());
+    this->device_context_.template Copy<int, DeviceContext, CPUContext>(
+        input.size(), input.data(), proto.mutable_int32_data()->mutable_data());
     return proto.SerializeAsString();
   }
 
@@ -80,8 +78,8 @@ class TensorSerializerBytes : public BlobSerializerBase {
       proto.add_dims(dim);
     }
     std::unique_ptr<char[]> buffer(new char[input.size()]);
-    this->device_context_.template Copy<char, CPUContext, DeviceContext>(
-        buffer.get(), input.data(), input.size());
+    this->device_context_.template Copy<char, DeviceContext, CPUContext>(
+        input.size(), input.data(), buffer.get());
     proto.set_byte_data(buffer, input.size());
     return proto.SerializeAsString();
   }

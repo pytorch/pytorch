@@ -83,9 +83,9 @@ PyObject* FetchTensor(const Blob& blob) {
   // Now, copy the data to the tensor.
   // TODO(Yangqing): Is there an easier way to convert PyObject to
   // PyArrayObject?
-  context.template Copy<T, CPUContext, DeviceContext>(
-      static_cast<T*>(PyArray_DATA(reinterpret_cast<PyArrayObject*>(array))),
-      tensor.data(), tensor.size());
+  context.template Copy<T, DeviceContext, CPUContext>(
+      tensor.size(), tensor.data(),
+      static_cast<T*>(PyArray_DATA(reinterpret_cast<PyArrayObject*>(array))));
   return array;
 }
 
@@ -105,10 +105,9 @@ PyObject* FeedTensor(const DeviceOption& option, PyArrayObject* original_array,
   }
   tensor->Reshape(dims);
   // Now, copy the data to the tensor.
-  context.template Copy<T, DeviceContext, CPUContext>(
-      tensor->mutable_data(),
-      static_cast<T*>(PyArray_DATA(array)),
-      tensor->size());
+  context.template Copy<T, CPUContext, DeviceContext>(
+      tensor->size(), static_cast<T*>(PyArray_DATA(array)),
+      tensor->mutable_data());
   Py_XDECREF(array);
   Py_RETURN_TRUE;
 }
