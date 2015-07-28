@@ -56,9 +56,8 @@ class LoadTensorOp final : public Operator<float, DeviceContext> {
           output->Reshape(
               vector<int>(proto.dims().begin(), proto.dims().end()));
           CHECK_EQ(output->size(), proto.float_data_size());
-          this->device_context_.template Copy<float, DeviceContext, CPUContext>(
-              output->mutable_data(), proto.float_data().data(),
-              output->size());
+          this->device_context_.template Copy<float, CPUContext, DeviceContext>(
+              output->size(), proto.float_data().data(), output->mutable_data());
           VLOG(1) << "Loaded float tensor " << key << ".";
           break;
         }
@@ -71,9 +70,8 @@ class LoadTensorOp final : public Operator<float, DeviceContext> {
           output->Reshape(
               vector<int>(proto.dims().begin(), proto.dims().end()));
           CHECK_EQ(output->size(), proto.int32_data_size());
-          this->device_context_.template Copy<int, DeviceContext, CPUContext>(
-              output->mutable_data(), proto.int32_data().data(),
-              output->size());
+          this->device_context_.template Copy<int, CPUContext, DeviceContext>(
+              output->size(), proto.int32_data().data(), output->mutable_data());
           VLOG(1) << "Loaded int32 tensor " << key << ".";
           break;
         }

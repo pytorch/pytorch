@@ -166,8 +166,8 @@ bool TensorProtosDBInput<DeviceContext>::CopyPrefetched() {
       auto& input =
           prefetched_blobs_[i]->template Get<Tensor<float, CPUContext> >();
       output->ReshapeLike(input);
-      this->device_context_.template Copy<float, DeviceContext, CPUContext>(
-          output->mutable_data(), input.data(), input.size());
+      this->device_context_.template Copy<float, CPUContext, DeviceContext>(
+          input.size(), input.data(), output->mutable_data());
       break;
     }
     case TensorProto::INT32:
@@ -176,8 +176,8 @@ bool TensorProtosDBInput<DeviceContext>::CopyPrefetched() {
       auto& input =
           prefetched_blobs_[i]->template Get<Tensor<int, CPUContext> >();
       output->ReshapeLike(input);
-      this->device_context_.template Copy<int, DeviceContext, CPUContext>(
-          output->mutable_data(), input.data(), input.size());
+      this->device_context_.template Copy<int, CPUContext, DeviceContext>(
+          input.size(), input.data(), output->mutable_data());
       break;
     }
     case TensorProto::STRING:
