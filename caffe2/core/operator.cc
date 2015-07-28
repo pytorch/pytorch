@@ -55,9 +55,6 @@ vector<dtype> OperatorBase::GetRepeatedArgument<dtype>(                        \
     return vector<dtype>();                                                    \
   }                                                                            \
   vector<dtype> values;                                                        \
-  CHECK(arg_map_[name]->fieldname##_size())                                    \
-      << "Argument does not have the right field: expected "                   \
-      << #fieldname;                                                           \
   for (const auto& v : arg_map_[name]->fieldname()) values.push_back(v);       \
   return values;                                                               \
 }
