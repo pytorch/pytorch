@@ -50,9 +50,9 @@ class LearningRateOp final : public Operator<dtype, DeviceContext> {
     dtype learning_rate = base_lr_ * (*functor_)(iter);
     // Write to output.
     auto* output = Output(0);
-    output->Reshape(std::vector<int>{1});
-    device_context_.template Copy<dtype, DeviceContext, CPUContext>(
-        Output(0)->mutable_data(), &learning_rate, 1);
+    output->Reshape(std::vector<int>());
+    device_context_.template Copy<dtype, CPUContext, DeviceContext>(
+        1, &learning_rate, Output(0)->mutable_data());
     return true;
   }
 

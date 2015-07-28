@@ -111,8 +111,8 @@ class GivenTensorFillOp final : public FillerOp<dtype, DeviceContext> {
     DCHECK_EQ(output->size(), values_.size())
         << "output size: " << output->size() << " given size: "
         << values_.size();
-    device_context_.template Copy<dtype, DeviceContext, CPUContext>(
-        output->mutable_data(), values_.data(), output->size());
+    device_context_.template Copy<dtype, CPUContext, DeviceContext>(
+        output->size(), values_.data(), output->mutable_data());
     return true;
   }
 

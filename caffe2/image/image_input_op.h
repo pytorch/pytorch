@@ -187,15 +187,15 @@ bool ImageInputOp<DeviceContext>::CopyPrefetched() {
   // The first output is the image data.
   auto* image_output = OperatorBase::Output<Tensor<float, DeviceContext> >(0);
   image_output->ReshapeLike(prefetched_image_);
-  this->device_context_.template Copy<float, DeviceContext, CPUContext>(
-      image_output->mutable_data(), prefetched_image_.data(),
-      prefetched_image_.size());
+  this->device_context_.template Copy<float, CPUContext, DeviceContext>(
+      prefetched_image_.size(), prefetched_image_.data(),
+      image_output->mutable_data());
   // The second output is the label.
   auto* label_output = OperatorBase::Output<Tensor<int, DeviceContext> >(1);
   label_output->ReshapeLike(prefetched_label_);
-  this->device_context_.template Copy<int, DeviceContext, CPUContext>(
-      label_output->mutable_data(), prefetched_label_.data(),
-      prefetched_label_.size());
+  this->device_context_.template Copy<int, CPUContext, DeviceContext>(
+      prefetched_label_.size(), prefetched_label_.data(),
+      label_output->mutable_data());
   return true;
 }
 

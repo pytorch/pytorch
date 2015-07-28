@@ -106,19 +106,19 @@ class CUDAContext {
     }
   }
 
-  template <class DstContext, class SrcContext>
-  inline void Copy(void* dst, const void* src, size_t nbytes) {
+  template <class SrcContext, class DstContext>
+  inline void Copy(size_t nbytes, const void* src, void* dst) {
     CUDA_CHECK(cudaMemcpyAsync(
         dst, src, nbytes, cudaMemcpyDefault, cuda_stream_));
     // TODO(Yangqing): do we want to synchronize inside copy?
     CUDA_CHECK(cudaStreamSynchronize(cuda_stream_));
   }
 
-  template <typename T, class DstContext, class SrcContext>
-  inline void Copy(T* dst, const T* src, int n) {
-    Copy<DstContext, SrcContext>(static_cast<void*>(dst),
+  template <typename T, class SrcContext, class DstContext>
+  inline void Copy(int n, const T* src, T* dst) {
+    Copy<SrcContext, DstContext>(n * sizeof(T),
                                  static_cast<const void*>(src),
-                                 n * sizeof(T));
+                                 static_cast<void*>(dst));
   }
 
  protected:
@@ -132,10 +132,10 @@ class CUDAContext {
 // For the CPU context, we also allow a (probably expensive) function
 // to copy the data from a cuda context.
 template<>
-inline void CPUContext::Memcpy<CPUContext, CUDAContext>(
-    void* dst, const void* src, size_t nbytes) {
+inline void CPUContext::Memcpy<CUDAContext, CPUContext>(
+    size_t nbytes, const void* src, void* dst) {
   CUDAContext context;
-  context.Copy<CPUContext, CUDAContext>(dst, src, nbytes);
+  context.Copy<CUDAContext, CPUContext>(nbytes, src, dst);
 }
 
 }  // namespace caffe2
