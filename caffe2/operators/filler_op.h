@@ -165,7 +165,6 @@ class XavierFillOp final : public FillerOp<dtype, DeviceContext> {
   DISABLE_COPY_AND_ASSIGN(XavierFillOp);
 };
 
-
 // This is mostly used just as a debugging purpose stuff: it fills a tensor
 // sequentially with values 0, 1, 2..., which can then be used to check e.g.
 // reshape operations by allowing one to read the indices more easily.

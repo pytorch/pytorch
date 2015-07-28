@@ -72,6 +72,32 @@ inline bool ReadProtoFromFile(const string& filename, MessageLite* proto) {
   return ReadProtoFromFile(filename.c_str(), proto);
 }
 
+inline const Argument& GetArgument(const OperatorDef& def, const string& name) {
+  for (const Argument& arg : def.arg()) {
+    if (arg.name() == name) {
+      return arg;
+    }
+  }
+  LOG(FATAL) << "Argument named " << name << " does not exist.";
+}
+
+inline Argument* GetMutableArgument(
+    const string& name, const bool create_if_missing, OperatorDef* def) {
+  for (int i = 0; i < def->arg_size(); ++i) {
+    if (def->arg(i).name() == name) {
+      return def->mutable_arg(i);
+    }
+  }
+  // If no argument of the right name is found...
+  if (create_if_missing) {
+    Argument* arg = def->add_arg();
+    arg->set_name(name);
+    return arg;
+  } else {
+    return nullptr;
+  }
+}
+
 // A coarse support for the Any message in proto3. I am a bit afraid of going
 // directly to proto3 yet, so let's do this first...
 class Any {
