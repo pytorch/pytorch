@@ -29,7 +29,7 @@ def MakeArgument(key, value):
     argument.i = value
   elif type(value) is str:
     argument.s = value
-  elif type(value) is Message:
+  elif isinstance(value, Message):
     argument.s = value.SerializeToString()
   elif all(type(v) is float for v in value):
     argument.floats.extend(value)
@@ -37,7 +37,7 @@ def MakeArgument(key, value):
     argument.ints.extend(value)
   elif all(type(v) is str for v in value):
     argument.strings.extend(value)
-  elif all(type(v) is Message for v in value):
+  elif all(isinstance(v, Message) for v in value):
     argument.strings.extend([v.SerializeToString() for v in values])
   else:
     raise ValueError("Unknown argument type: key=%s value=%s, value type=%s" %
