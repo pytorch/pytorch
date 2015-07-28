@@ -3,6 +3,44 @@
 #else
 
 /*
+Check if self is transpose of a contiguous matrix
+*/
+static int THTensor_(isTransposed)(THTensor *self)
+{
+  return self->stride[0] == 1 && self->stride[1] == self->size[0];
+}
+/*
+If a matrix is a regular contiguous matrix, make sure it is transposed
+because this is what we return from Lapack calls.
+*/
+static void THTensor_(checkTransposed)(THTensor *self)
+{
+  if(THTensor_(isContiguous)(self))
+    THTensor_(transpose)(self, NULL, 0, 1);
+  return;
+}
+/*
+Similar to (newContiguous), but checks if the transpose of the matrix
+is contiguous and also limited to 2D matrices
+*/
+static THTensor *THTensor_(newTransposedContiguous)(THTensor *self)
+{
+  THTensor *tensor;
+  if(THTensor_(isTransposed)(self))
+  {
+    THTensor_(retain)(self);
+    tensor = self;
+  }
+  else
+  {
+    tensor = THTensor_(newContiguous)(self);
+    THTensor_(transpose)(tensor, NULL, 0, 1);
+  }
+
+  return tensor;
+}
+
+/*
   Puts a row-major version of m (suitable as an input for Lapack) with the specified number of rows into the
   storage of r_. If r_ is already row-major and has the correct number of rows, then r_ becomes a tensor
   pointing at the storage of m, and the function returns 0. Otherwise, r_ is resized and filled with a
@@ -12,7 +50,7 @@ static int THTensor_(lapackCloneNrows)(THTensor *r_, THTensor *m, int forced, in
 {
   int clone;
 
-  if (!forced && m->stride[0] == 1 && m->stride[1] == m->size[0] && m->size[1] == nrows)
+  if (!forced && THTensor_(isTransposed)(m) && m->size[1] == nrows)
   {
     clone = 0;
     THTensor_(set)(r_,m);
@@ -21,8 +59,7 @@ static int THTensor_(lapackCloneNrows)(THTensor *r_, THTensor *m, int forced, in
   {
     clone = 1;
     THTensor_(resize2d)(r_,m->size[1],nrows);
-    if (r_->stride[0] == nrows && r_->stride[1] == 1)
-      THTensor_(transpose)(r_,NULL,0,1);
+    THTensor_(checkTransposed)(r_);
     /* we need to copy */
     if (m->size[0] == nrows) {
       THTensor_(copy)(r_,m);
@@ -233,6 +270,9 @@ void THTensor_(geev)(THTensor *re_, THTensor *rv_, THTensor *a_, const char *job
   real *rv_data;
   long i;
 
+  THTensor *re__ = NULL;
+  THTensor *rv__ = NULL;
+
   THArgCheck(a_->nDimension == 2, 3, "A should be 2 dimensional");
   THArgCheck(a_->size[0] == a_->size[1], 3,"A should be square");
 
@@ -254,9 +294,13 @@ void THTensor_(geev)(THTensor *re_, THTensor *rv_, THTensor *a_, const char *job
   if (*jobvr == 'V')
   {
     THTensor_(resize2d)(rv_,n,n);
-    rv_data = THTensor_(data)(rv_);
+    /* guard against someone passing a correct size, but wrong stride */
+    rv__ = THTensor_(newTransposedContiguous)(rv_);
+    rv_data = THTensor_(data)(rv__);
     ldvr = n;
   }
+  re__ = THTensor_(newContiguous)(re_);
+
   /* get optimal workspace size */
   THLapack_(geev)('N', jobvr[0], n, THTensor_(data)(a), lda, THTensor_(data)(wr), THTensor_(data)(wi), 
       NULL, 1, rv_data, ldvr, &wkopt, -1, &info);
@@ -277,7 +321,7 @@ void THTensor_(geev)(THTensor *re_, THTensor *rv_, THTensor *a_, const char *job
   }
 
   {
-    real *re_data = THTensor_(data)(re_);
+    real *re_data = THTensor_(data)(re__);
     real *wi_data = THTensor_(data)(wi);
     real *wr_data = THTensor_(data)(wr);
     for (i=0; i<n; i++)
@@ -287,13 +331,19 @@ void THTensor_(geev)(THTensor *re_, THTensor *rv_, THTensor *a_, const char *job
     }
   }
   if (*jobvr == 'V')
-  {
-    THTensor_(transpose)(rv_,NULL,0,1);
-  }
+    THTensor_(checkTransposed)(rv_);
+
+  if (*jobvr == 'V' && rv__ != rv_)
+    THTensor_(copy)(rv_, rv__);
+  if (re__ != re_)
+    THTensor_(copy)(re_, re__);
+
   THTensor_(free)(a);
   THTensor_(free)(wi);
   THTensor_(free)(wr);
   THTensor_(free)(work);
+  THTensor_(free)(re__);
+  THTensor_(free)(rv__);
 }
 
 void THTensor_(syev)(THTensor *re_, THTensor *rv_, THTensor *a, const char *jobz, const char *uplo)
@@ -302,7 +352,8 @@ void THTensor_(syev)(THTensor *re_, THTensor *rv_, THTensor *a, const char *jobz
   THTensor *work;
   real wkopt;
 
-  THTensor *rv__;
+  THTensor *rv__ = NULL;
+  THTensor *re__ = NULL;
 
   int clonea;
   int destroy;
@@ -328,6 +379,7 @@ void THTensor_(syev)(THTensor *re_, THTensor *rv_, THTensor *a, const char *jobz
   lda = n;
 
   THTensor_(resize1d)(re_,n);
+  re__ = THTensor_(newContiguous)(re_);
 
   /* get optimal workspace size */
   THLapack_(syev)(jobz[0], uplo[0], n, THTensor_(data)(rv__), lda,
@@ -354,6 +406,10 @@ void THTensor_(syev)(THTensor *re_, THTensor *rv_, THTensor *a, const char *jobz
     }
     THTensor_(free)(rv__);
   }
+
+  if (re__ != re_)
+    THTensor_(copy)(re_, re__);
+  THTensor_(free)(re__);
   THTensor_(free)(work);
 }
 
@@ -370,7 +426,10 @@ void THTensor_(gesvd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *ra
   THTensor *work;
   real wkopt;
 
-  THTensor *ra__;
+  THTensor *ra__ = NULL;
+  THTensor *ru__ = NULL;
+  THTensor *rs__ = NULL;
+  THTensor *rv__ = NULL;
 
   int clonea;
   int destroy;
@@ -399,6 +458,7 @@ void THTensor_(gesvd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *ra
   lda = m;
   ldu = m;
   ldvt = n;
+
   THTensor_(resize1d)(rs_,k);
   THTensor_(resize2d)(rv_,ldvt,n);
   if (*jobu == 'A')
@@ -409,25 +469,28 @@ void THTensor_(gesvd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *ra
   {
     THTensor_(resize2d)(ru_,k,ldu);
   }
-  THTensor_(transpose)(ru_,NULL,0,1);
-  /* we want to return V not VT*/
-  /*THTensor_(transpose)(rv_,NULL,0,1);*/
+  THTensor_(checkTransposed)(ru_);
 
+  /* guard against someone passing a correct size, but wrong stride */
+  ru__ = THTensor_(newTransposedContiguous)(ru_);
+  rs__ = THTensor_(newContiguous)(rs_);
+  rv__ = THTensor_(newContiguous)(rv_);
+  
   THLapack_(gesvd)(jobu[0],jobu[0],
 		   m,n,THTensor_(data)(ra__),lda,
-		   THTensor_(data)(rs_),
-		   THTensor_(data)(ru_),
+		   THTensor_(data)(rs__),
+		   THTensor_(data)(ru__),
 		   ldu,
-		   THTensor_(data)(rv_), ldvt,
+		   THTensor_(data)(rv__), ldvt,
 		   &wkopt, -1, &info);
   lwork = (int)wkopt;
   work = THTensor_(newWithSize1d)(lwork);
   THLapack_(gesvd)(jobu[0],jobu[0],
 		   m,n,THTensor_(data)(ra__),lda,
-		   THTensor_(data)(rs_),
-		   THTensor_(data)(ru_),
+		   THTensor_(data)(rs__),
+		   THTensor_(data)(ru__),
 		   ldu,
-		   THTensor_(data)(rv_), ldvt,
+		   THTensor_(data)(rv__), ldvt,
 		   THTensor_(data)(work),lwork, &info);
   if (info > 0)
   {
@@ -437,6 +500,14 @@ void THTensor_(gesvd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *ra
   {
     THError("Lapack gesvd : Argument %d : illegal value", -info);
   }
+
+  /* put the results back */
+  if (ru__ != ru_)
+    THTensor_(copy)(ru_, ru__);
+  if (rs__ != rs_)
+    THTensor_(copy)(rs_, rs__);
+  if (rv__ != rv_)
+    THTensor_(copy)(rv_, rv__);
 
   /* clean up */
   if (destroy)
@@ -448,6 +519,9 @@ void THTensor_(gesvd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *ra
     THTensor_(free)(ra__);
   }
   THTensor_(free)(work);
+  THTensor_(free)(ru__);
+  THTensor_(free)(rs__);
+  THTensor_(free)(rv__);
 }
 
 void THTensor_(getri)(THTensor *ra_, THTensor *a)
