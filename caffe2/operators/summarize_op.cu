@@ -100,8 +100,8 @@ bool SummarizeOp<float, CUDAContext>::RunOnDevice() {
     Y->Reshape(std::vector<int>{4});
     float output_buffer[NUM_STATS] = {result.min, result.max, result.mean,
                                standard_deviation};
-    device_context_.Copy<float, CUDAContext, CPUContext>(
-        Y->mutable_data(), output_buffer, NUM_STATS);
+    device_context_.Copy<float, CPUContext, CUDAContext>(
+        NUM_STATS, output_buffer, Y->mutable_data());
   }
   return true;
 }

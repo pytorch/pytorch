@@ -119,8 +119,8 @@ class Tensor {
   Tensor(const Tensor<dtype, SrcContext>& src, ContextForCopy* context)
       : data_(nullptr) {
     Reshape(src.dims());
-    context->template Copy<dtype, Context, SrcContext>(
-        mutable_data(), src.data(), src.size());
+    context->template Copy<dtype, SrcContext, Context>(
+        src.size(), src.data(), mutable_data());
   }
 
   // Creates a tensor, and fills its contents with the given values. We need to
@@ -129,16 +129,16 @@ class Tensor {
       : data_(nullptr) {
     Reshape(dims);
     CHECK_EQ(values.size(), size_);
-    context->template Copy<dtype, Context, CPUContext>(
-        mutable_data(), values.data(), values.size());
+    context->template Copy<dtype, CPUContext, Context>(
+        values.size(), values.data(), mutable_data());
   }
 
   // Special case of above: create a tensor of shape 1, and the given value.
   Tensor(const dtype& value, Context* context)
       : data_(nullptr) {
     Reshape(std::vector<int>());
-    context->template Copy<dtype, Context, CPUContext>(
-        mutable_data(), &value, 1);
+    context->template Copy<dtype, CPUContext, Context>(
+        1, &value, mutable_data());
   }
 
   virtual ~Tensor() {}

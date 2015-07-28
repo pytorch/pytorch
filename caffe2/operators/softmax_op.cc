@@ -24,7 +24,7 @@ bool SoftmaxOp<float, CPUContext>::RunOnDevice() {
                                       &device_context_);
   // Put the intermediate result X - max(X) into Y
   device_context_.template Copy<float, CPUContext, CPUContext>(
-      Y->mutable_data(), X.data(), X.size());
+      X.size(), X.data(), Y->mutable_data());
   // Subtract the scale
   static const float kMinusOne = -1.;
   static const float kOne = 1.;
@@ -74,7 +74,7 @@ bool SoftmaxGradientOp<float, CPUContext>::RunOnDevice() {
   const float* Ydata = Y.data();
   const float* dYdata = dY.data();
   float* dXdata = dX->mutable_data();
-  device_context_.Copy<float, CPUContext, CPUContext>(dXdata, dYdata, Y.size());
+  device_context_.Copy<float, CPUContext, CPUContext>(Y.size(), dYdata, dXdata);
   float* scaledata = scale_.mutable_data();
   for (int i = 0; i < N; ++i) {
     math::Dot<float, CPUContext>(D, Ydata + i * D, dYdata + i * D,

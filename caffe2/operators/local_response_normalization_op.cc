@@ -42,7 +42,7 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
       float* this_scale_slice = scale_data + n * image_size + c * H * W;
       // copy previous scale
       device_context_.Copy<float, CPUContext, CPUContext>(
-          this_scale_slice, this_scale_slice - H * W, H * W);
+          H * W, this_scale_slice - H * W, this_scale_slice);
       // add head
       math::Axpy<float, CPUContext>(
           H * W, &alpha_over_size, padded_square_data + (c + size_ - 1) * H * W,
