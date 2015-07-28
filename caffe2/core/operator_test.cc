@@ -93,7 +93,7 @@ TEST(OperatorDeathTest, CannotAccessParameterWithWrongType) {
                "Argument does not have the right field: expected i");
 }
 
-TEST(OperatorDeathTest, CannotAccessRepeatedParameterWithWrongType) {
+TEST(OperatorDeathTest, DISABLED_CannotAccessRepeatedParameterWithWrongType) {
   OperatorDef op_def;
   Workspace ws;
   op_def.set_name("JustTest0");
