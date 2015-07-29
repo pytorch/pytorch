@@ -172,42 +172,68 @@ class Net(object):
     # need to take special care. Currently, we will ask the operators to compute
     # the gradients, and add aggregation operators to get the final gradient.
     input_counts = Counter(
-        sum([list(op.input) for op in self._net.op], []))
+        sum([list(op.input) for op in self._net.op[skip:]], []))
     multiple_use_blobs = set(
         [key for key in input_counts if input_counts[key] > 1])
-    if len(multiple_use_blobs):
-      # There are some blobs that are used multiple times; As a result, we will
-      # manually insert split operators and make sure that they are correctly
-      # dealt with.
-      new_ops = []
-      current_input_id = defaultdict(int)
-      for op in self._net.op:
-        # For the input, if it is one of the mutiple use blobs, change it to
-        # an autosplit version.
-        for i, name in enumerate(op.input):
-          if name in multiple_use_blobs:
-            op.input[i] = '_' + name + '_autosplit_%d' % current_input_id[name]
-            current_input_id[name] += 1
-        new_ops.append(op)
-        # For the output, if it is one of the multiple use blobs, we add a split
-        # operator after it is created.
-        for name in op.output:
-          if name in multiple_use_blobs:
-            new_ops.append(CreateOperator("Split")(
-                [name],
-                ['_' + name + '_autosplit_%d' % i
-                 for i in range(input_counts[name])]))
-      # After we create all the new ops, we write them back to the operators
-      # that the network currently holds. We have to do this instead of
-      # inserting things midway because protobuf python only supports appending
-      # to the end.
-      del self._net.op[:]
-      self._net.op.extend(new_ops)
-    # (3) Now that the cleaning has been done, we can simply look into the
-    # gradient registry and add gradient operators.
-    for i in xrange(len(self._net.op) - 1, skip - 1, -1):
-      gradient_ops = GradientRegistry.GetGradient(self._net.op[i])
+
+    # Now, if there are multiple use blobs, it means that we are going to have
+    # shared parameters, and we want to make special care for them. The
+    # conventional strategy in Caffe is to insert a SplitLayer that splits
+    # the input into multiple blobs, with the split layer automatically
+    # accumulates gradients. This makes the AddGradientOperators stateful, in
+    # the sense that it may change existing operators, which is not desired.
+    # In this implementation we will keep the original operator, and instead
+    # manually modify the gradient names.
+    num_ops_before_grad = len(self._net.op)
+    # Obtain the gradient operators that we need. Note that these gradient
+    # operators are going to be refined, as we need to figure out shared
+    # parameters.
+    gradient_ops = sum(
+        [GradientRegistry.GetGradient(self._net.op[i])
+         for i in xrange(num_ops_before_grad - 1, skip - 1, -1)], [])
+    if len(multiple_use_blobs) == 0:
+      # There is no concern about shared parameters, so we can simply skip.
       self._net.op.extend(gradient_ops)
+      return
+    # Now, if there are multiple use operators, we will need to figure out
+    # any gradients that are overwriting each other.
+    # To do this, we do a first pass over the gradients to count the number
+    # of occurences of the gradients.
+    gradient_occurences = defaultdict(int)
+    for blob_name in multiple_use_blobs:
+      count = 0
+      blob_gradient_name = GetGradientName(blob_name)
+      for op in gradient_ops:
+        for output_name in op.output:
+          if output_name == blob_gradient_name:
+            gradient_occurences[blob_gradient_name] += 1
+    # For anything that only has one gradient blob generated, we don't need
+    # to take any special care.
+    for key in gradient_occurences.keys():
+      if gradient_occurences[key] == 1:
+        del gradient_occurences[key]
+    # Now, we add the gradient ops back to the network, modifying the
+    # gradient names on the fly.
+    grad_encountered = defaultdict(int)
+    for op in gradient_ops:
+      additional_sum_ops = []
+      for i, grad_name in enumerate(op.output):
+        if grad_name in gradient_occurences:
+          # rename the gradient to an intermediate name
+          op.output[i] = (
+              '_%s_autosplit_%d' % (grad_name, grad_encountered[grad_name]))
+          grad_encountered[grad_name] += 1
+          if grad_encountered[grad_name] == gradient_occurences[grad_name]:
+            # We have encountered all gradient names; time to add a SumOp.
+            additional_sum_ops.append(
+                CreateOperator('Sum')(
+                    ['_%s_autosplit_%d' % (grad_name, i)
+                     for i in range(gradient_occurences[grad_name])],
+                    [grad_name]))
+      # After re-writing the outputs, we can safely add it to the network.
+      self._net.op.extend([op])
+      self._net.op.extend(additional_sum_ops)
+    return
 
   def RunAllOnGPU(self, gpu_id=0):
     """A convenient function to run everything on the GPU."""
