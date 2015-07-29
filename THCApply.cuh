@@ -16,7 +16,7 @@
 
 // Called when we are copying into an overlapping index `dst`, but
 // we don't care which writer wins. Hacky but it works.
-void THCudaTensor_copyIgnoringOverlaps(THCState* state,
+THC_API void THCudaTensor_copyIgnoringOverlaps(THCState* state,
                                        THCudaTensor* dst,
                                        THCudaTensor* src);
 
