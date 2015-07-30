@@ -25,7 +25,8 @@ def MakeArgument(key, value):
   argument.name = key
   if type(value) is float:
     argument.f = value
-  elif type(value) is int:
+  elif type(value) is int or type(value) is bool:
+    # We make a relaxation that a boolean variable will also be stored as int.
     argument.i = value
   elif type(value) is str:
     argument.s = value
