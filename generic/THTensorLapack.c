@@ -81,13 +81,13 @@ void THTensor_(gesv)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
 {
   int n, nrhs, lda, ldb, info;
   THIntTensor *ipiv;
-  THTensor *ra__;
-  THTensor *rb__;
+  THTensor *ra__;  // working version of A matrix to be passed into lapack GELS
+  THTensor *rb__;  // working version of B matrix to be passed into lapack GELS
 
-  int clonea;
-  int cloneb;
-  int destroya;
-  int destroyb;
+  int clonea;    // set to 1 if ra__ should be copied into ra_ at return
+  int cloneb;    // set to 1 if rb__ should be copied into rb_ at return
+  int destroya;  // set to 1 if ra__ needs to be destroyed at return
+  int destroyb;  // set to 1 if rb__ needs to be destroyed at return
 
   
   if (a == NULL || ra_ == a) /* possibly destroy the inputs  */
@@ -97,7 +97,7 @@ void THTensor_(gesv)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
     clonea = THTensor_(lapackClone)(ra__,ra_,0);
     destroya = 1;
   }
-  else /*we want to definitely clone and use ra_ and rb_ as computational space*/
+  else /*we want to definitely clone and use ra_ as computational space*/
   {
     THArgCheck(a->nDimension == 2, 1, "A should be 2 dimensional");
     clonea = THTensor_(lapackClone)(ra_,a,1);
@@ -111,7 +111,7 @@ void THTensor_(gesv)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
     cloneb = THTensor_(lapackClone)(rb__,rb_,0);
     destroyb = 1;
   }
-  else /*we want to definitely clone and use ra_ and rb_ as computational space*/
+  else /*we want to definitely clone and use rb_ as computational space*/
   {
     THArgCheck(b->nDimension == 2, 2, "B should be 2 dimensional");
     cloneb = THTensor_(lapackClone)(rb_,b,1);
@@ -355,22 +355,22 @@ void THTensor_(syev)(THTensor *re_, THTensor *rv_, THTensor *a, const char *jobz
   THTensor *rv__ = NULL;
   THTensor *re__ = NULL;
 
-  int clonea;
-  int destroy;
+  int clonev;   // set to 1 if rv__ should be copied into rv_ at return
+  int destroyv; // set to 1 if rv__ needs to be destroyed at return
   
   if (a == NULL) /* possibly destroy the inputs  */
   {
     THArgCheck(rv_->nDimension == 2, 1, "A should be 2 dimensional");
     rv__ = THTensor_(new)();
-    clonea = THTensor_(lapackClone)(rv__,rv_,0);
-    destroy = 1;
+    clonev = THTensor_(lapackClone)(rv__,rv_,0);
+    destroyv = 1;
   }
   else /*we want to definitely clone and use ra_ and rb_ as computational space*/
   {
     THArgCheck(a->nDimension == 2, 1, "A should be 2 dimensional");
-    clonea = THTensor_(lapackClone)(rv_,a,1);
+    clonev = THTensor_(lapackClone)(rv_,a,1);
     rv__ = rv_;
-    destroy = 0;
+    destroyv = 0;
   }
 
   THArgCheck(rv__->nDimension == 2, 2, "A should be 2 dimensional");
@@ -398,9 +398,9 @@ void THTensor_(syev)(THTensor *re_, THTensor *rv_, THTensor *a, const char *jobz
     THError("Lapack syev : Argument %d : illegal value", -info);
   }
   /* clean up */
-  if (destroy)
+  if (destroyv)
   {
-    if (clonea)
+    if (clonev)
     {
       THTensor_(copy)(rv_,rv__);
     }
@@ -431,22 +431,22 @@ void THTensor_(gesvd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *ra
   THTensor *rs__ = NULL;
   THTensor *rv__ = NULL;
 
-  int clonea;
-  int destroy;
+  int clonea;   // set to 1 if ra__ should be copied into ra_ at return
+  int destroya; // set to 1 if ra__ needs to be destroyed at return
 
   if (a == NULL) /* possibly destroy the inputs  */
   {
     THArgCheck(ra_->nDimension == 2, 1, "A should be 2 dimensional");
     ra__ = THTensor_(new)();
     clonea = THTensor_(lapackClone)(ra__,ra_,0);
-    destroy = 1;
+    destroya = 1;
   }
   else /*we want to definitely clone */
   {
     THArgCheck(a->nDimension == 2, 1, "A should be 2 dimensional");
     clonea = THTensor_(lapackClone)(ra_,a,1);
     ra__ = ra_;
-    destroy = 0;
+    destroya = 0;
   }
   
   THArgCheck(ra__->nDimension == 2, 2, "A should be 2 dimensional");
@@ -510,7 +510,7 @@ void THTensor_(gesvd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *ra
     THTensor_(copy)(rv_, rv__);
 
   /* clean up */
-  if (destroy)
+  if (destroya)
   {
     if (clonea)
     {
@@ -532,22 +532,22 @@ void THTensor_(getri)(THTensor *ra_, THTensor *a)
   THTensor *work;
   THTensor *ra__;
 
-  int clonea;
-  int destroy;
+  int clonea;   // set to 1 if ra__ should be copied into ra_ at return
+  int destroya; // set to 1 if ra__ needs to be destroyed at return
 
   if (a == NULL) /* possibly destroy the inputs  */
   {
     THArgCheck(ra_->nDimension == 2, 1, "A should be 2 dimensional");
     ra__ = THTensor_(new)();
     clonea = THTensor_(lapackClone)(ra__,ra_,0);
-    destroy = 1;
+    destroya = 1;
   }
   else /*we want to definitely clone */
   {
     THArgCheck(a->nDimension == 2, 1, "A should be 2 dimensional");
     clonea = THTensor_(lapackClone)(ra_,a,1);
     ra__ = ra_;
-    destroy = 0;
+    destroya = 0;
   }
   
   THArgCheck(ra__->nDimension == 2, 2, "A should be 2 dimensional");
@@ -583,7 +583,7 @@ void THTensor_(getri)(THTensor *ra_, THTensor *a)
   }
 
   /* clean up */
-  if (destroy)
+  if (destroya)
   {
     if (clonea)
     {
@@ -601,22 +601,22 @@ void THTensor_(potrf)(THTensor *ra_, THTensor *a)
   char uplo = 'U';
   THTensor *ra__;
 
-  int clonea;
-  int destroy;
+  int clonea;   // set to 1 if ra__ should be copied into ra_ at return
+  int destroya; // set to 1 if ra__ needs to be destroyed at return
 
   if (a == NULL) /* possibly destroy the inputs  */
   {
     THArgCheck(ra_->nDimension == 2, 1, "A should be 2 dimensional");
     ra__ = THTensor_(new)();
     clonea = THTensor_(lapackClone)(ra__,ra_,0);
-    destroy = 1;
+    destroya = 1;
   }
   else /*we want to definitely clone */
   {
     THArgCheck(a->nDimension == 2, 1, "A should be 2 dimensional");
     clonea = THTensor_(lapackClone)(ra_,a,1);
     ra__ = ra_;
-    destroy = 0;
+    destroya = 0;
   }
   
   THArgCheck(ra__->nDimension == 2, 2, "A should be 2 dimensional");
@@ -647,7 +647,7 @@ void THTensor_(potrf)(THTensor *ra_, THTensor *a)
   }
 
   /* clean up */
-  if (destroy)
+  if (destroya)
   {
     if (clonea)
     {
@@ -663,22 +663,22 @@ void THTensor_(potri)(THTensor *ra_, THTensor *a)
   char uplo = 'U';
   THTensor *ra__;
 
-  int clonea;
-  int destroy;
+  int clonea;   // set to 1 if ra__ should be copied into ra_ at return
+  int destroya; // set to 1 if ra__ needs to be destroyed at return
 
   if (a == NULL) /* possibly destroy the inputs  */
   {
     THArgCheck(ra_->nDimension == 2, 1, "A should be 2 dimensional");
     ra__ = THTensor_(new)();
     clonea = THTensor_(lapackClone)(ra__,ra_,0);
-    destroy = 1;
+    destroya = 1;
   }
   else /*we want to definitely clone */
   {
     THArgCheck(a->nDimension == 2, 1, "A should be 2 dimensional");
     clonea = THTensor_(lapackClone)(ra_,a,1);
     ra__ = ra_;
-    destroy = 0;
+    destroya = 0;
   }
   
   THArgCheck(ra__->nDimension == 2, 2, "A should be 2 dimensional");
@@ -701,11 +701,11 @@ void THTensor_(potri)(THTensor *ra_, THTensor *a)
   THLapack_(potri)(uplo, n, THTensor_(data)(ra__), lda, &info);
   if (info > 0)
   {
-    THError("Lapack potrf : A(%d,%d) is 0, A cannot be factorized", info, info);
+    THError("Lapack potri : A(%d,%d) is 0, A cannot be factorized", info, info);
   }
   else if (info < 0)
   {
-    THError("Lapack potrf : Argument %d : illegal value", -info);
+    THError("Lapack potri : Argument %d : illegal value", -info);
   }
 
   /* Build full matrix */
@@ -720,7 +720,7 @@ void THTensor_(potri)(THTensor *ra_, THTensor *a)
   }
 
   /* clean up */
-  if (destroy)
+  if (destroya)
   {
     if (clonea)
     {
@@ -786,20 +786,23 @@ void THTensor_(geqrf)(THTensor *ra_, THTensor *rtau_, THTensor *a)
 {
   /* Prepare the input for LAPACK, making a copy if necessary. */
   THTensor *ra__;
-  int clonea, destroy;
+
+  int clonea;   // set to 1 if ra__ should be copied into ra_ at return
+  int destroya; // set to 1 if ra__ needs to be destroyed at return
+
   if (a == NULL)
   {
     THArgCheck(ra_->nDimension == 2, 1, "A should be 2 dimensional");
     ra__ = THTensor_(new)();
     clonea = THTensor_(lapackClone)(ra__, ra_, 0);
-    destroy = 1;
+    destroya = 1;
   }
   else
   {
     THArgCheck(a->nDimension == 2, 1, "A should be 2 dimensional");
     clonea = THTensor_(lapackClone)(ra_, a, 1);
     ra__ = ra_;
-    destroy = 0;
+    destroya = 0;
   }
 
   /* Check input sizes, and ensure we have space to store the results. */
@@ -825,7 +828,7 @@ void THTensor_(geqrf)(THTensor *ra_, THTensor *rtau_, THTensor *a)
                    THTensor_(data)(work), lwork, &info);
 
   /* Clean up. */
-  if (destroy)
+  if (destroya)
   {
     if (clonea)
     {
@@ -866,21 +869,23 @@ void THTensor_(orgqr)(THTensor *ra_, THTensor *a, THTensor *tau)
 {
   /* Prepare the input for LAPACK, making a copy if necessary. */
   THTensor *ra__;
-  int clonea;
-  int destroy;
+
+  int clonea;   // set to 1 if ra__ should be copied into ra_ at return
+  int destroya; // set to 1 if ra__ needs to be destroyed at return
+
   if (a == NULL)
   {
     THArgCheck(ra_->nDimension == 2, 1, "A should be 2 dimensional");
     ra__ = THTensor_(new)();
     clonea = THTensor_(lapackClone)(ra__, ra_, 0);
-    destroy = 1;
+    destroya = 1;
   }
   else
   {
     THArgCheck(a->nDimension == 2, 1, "A should be 2 dimensional");
     clonea = THTensor_(lapackClone)(ra_, a, 1);
     ra__ = ra_;
-    destroy = 0;
+    destroya = 0;
   }
 
   /* Check input sizes. */
@@ -905,7 +910,7 @@ void THTensor_(orgqr)(THTensor *ra_, THTensor *a, THTensor *tau)
                    THTensor_(data)(work), lwork, &info);
 
   /* Clean up. */
-  if (destroy)
+  if (destroya)
   {
     if (clonea)
     {
