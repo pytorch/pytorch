@@ -115,7 +115,7 @@ void THCudaTensor_indexCopy(THCState *state, THCudaTensor *res_, int dim, THCuda
   dim3 nthreads(16, 16);
   dim3 nblocks(ceil((float)nRes / nIndex / (16*16)));
 
-  THCudaCheck(cudaMalloc((void**)&stride_, res_->nDimension * sizeof(long)));
+  THCudaCheck(THCudaMalloc(state, (void**)&stride_, res_->nDimension * sizeof(long)));
   THCudaCheck(cudaMemcpy(stride_, res_->stride, res_->nDimension * sizeof(long), cudaMemcpyHostToDevice));
 
   THCudaTensor_kernel_indexCopy<<<nblocks, nthreads, 0, THCState_getCurrentStream(state)>>>(
@@ -125,7 +125,7 @@ void THCudaTensor_indexCopy(THCState *state, THCudaTensor *res_, int dim, THCuda
     THCudaTensor_nElement(state, src), res_->size[dim]
   );
 
-  THCudaCheck(cudaFree(stride_));
+  THCudaCheck(THCudaFree(state, stride_));
   THCudaTensor_free(state, indices);
   THCudaTensor_free(state, src);
 }
@@ -159,7 +159,7 @@ void THCudaTensor_indexFill(THCState *state, THCudaTensor *res_, int dim, THCuda
   dim3 nthreads(16, 16);
   dim3 nblocks(ceil((float)nRes / nIndex / (16*16)));
 
-  THCudaCheck(cudaMalloc((void**)&stride_, res_->nDimension * sizeof(long)));
+  THCudaCheck(THCudaMalloc(state, (void**)&stride_, res_->nDimension * sizeof(long)));
   THCudaCheck(cudaMemcpy(stride_, res_->stride, res_->nDimension * sizeof(long), cudaMemcpyHostToDevice));
 
   THCudaTensor_kernel_indexFill<<<nblocks, nthreads, 0, THCState_getCurrentStream(state)>>>(
@@ -167,7 +167,7 @@ void THCudaTensor_indexFill(THCState *state, THCudaTensor *res_, int dim, THCuda
     res_->nDimension, dim, nIndex, nRes, res_->size[dim], val
   );
 
-  THCudaCheck(cudaFree(stride_));
+  THCudaCheck(THCudaFree(state, stride_));
   THCudaTensor_free(state, indices);
 }
 
@@ -299,7 +299,7 @@ void THCudaTensor_indexSelect(THCState *state, THCudaTensor *res_, THCudaTensor 
   dim3 nthreads(16, 16);
   dim3 nblocks(ceil((float)nRes / nIndex / (16*16)));
 
-  THCudaCheck(cudaMalloc((void**)&stride_, src->nDimension * sizeof(long)));
+  THCudaCheck(THCudaMalloc(state, (void**)&stride_, src->nDimension * sizeof(long)));
   THCudaCheck(cudaMemcpy(stride_, src->stride, src->nDimension * sizeof(long), cudaMemcpyHostToDevice));
 
   THCudaTensor_kernel_indexSelect<<<nblocks, nthreads, 0, stream>>>(
@@ -308,7 +308,7 @@ void THCudaTensor_indexSelect(THCState *state, THCudaTensor *res_, THCudaTensor 
     src->nDimension, dim, nIndex, nRes, src->size[dim]
   );
 
-  THCudaCheck(cudaFree(stride_));
+  THCudaCheck(THCudaFree(state, stride_));
   THCudaTensor_free(state, indices);
   THCudaTensor_freeCopyTo(state, res, res_);
 }

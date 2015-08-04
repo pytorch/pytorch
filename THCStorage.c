@@ -33,7 +33,15 @@ THCudaStorage* THCudaStorage_newWithSize(THCState *state, long size)
   if(size > 0)
   {
     THCudaStorage *storage = (THCudaStorage*)THAlloc(sizeof(THCudaStorage));
-    THCudaCheck(cudaMalloc((void**)&(storage->data), size * sizeof(float)));
+
+    // update heap *before* attempting malloc, to free space for the malloc
+    THCHeapUpdate(state, size * sizeof(float));
+    cudaError_t err =
+      THCudaMalloc(state, (void**)&(storage->data), size * sizeof(float));
+    if(err != cudaSuccess){
+      THCHeapUpdate(state, -size * sizeof(float));
+    }
+    THCudaCheck(err);
 
     storage->size = size;
     storage->refcount = 1;
@@ -110,7 +118,8 @@ void THCudaStorage_free(THCState *state, THCudaStorage *self)
   if (THAtomicDecrementRef(&self->refcount))
   {
     if(self->flag & TH_STORAGE_FREEMEM) {
-      THCudaCheck(cudaFree(self->data));
+      THCHeapUpdate(state, -self->size * sizeof(float));
+      THCudaCheck(THCudaFree(state, self->data));
     }
     THFree(self);
   }

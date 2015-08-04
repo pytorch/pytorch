@@ -53,7 +53,7 @@ void THCudaInit(THCState* state)
 
     /* Allocate scratch space for each stream */
     res->devScratchSpacePerStream = (void**) malloc(sizeof(void*));
-    THCudaCheck(cudaMalloc(&res->devScratchSpacePerStream[0],
+    THCudaCheck(THCudaMalloc(state, &res->devScratchSpacePerStream[0],
                            sizePerStream));
   }
 
@@ -71,6 +71,10 @@ void THCudaInit(THCState* state)
   THCState_reserveBlasHandles(state, 1);
   state->currentPerDeviceBlasHandle = 1;
   state->currentBlasHandle = THCState_getDeviceBlasHandle(state, device, 1);
+
+  state->cutorchGCFunction = NULL;
+  state->cutorchGCData = NULL;
+  state->heapSoftmax = 300000000; // 300MB, adjusted upward dynamically
 }
 
 void THCudaShutdown(THCState* state)
@@ -100,7 +104,7 @@ void THCudaShutdown(THCState* state)
     /* Free per-stream scratch space; starts at 0 because there is space for
        the default stream as well*/
     for (int stream = 0; stream <= state->numUserStreams; ++stream) {
-      THCudaCheck(cudaFree(THCState_getDeviceScratchSpace(state, dev, stream)));
+      THCudaCheck(THCudaFree(state, THCState_getDeviceScratchSpace(state, dev, stream)));
     }
 
     free(state->resourcesPerDevice[dev].streams);
@@ -199,7 +203,7 @@ void THCState_reserveStreams(THCState* state, int numStreams)
       newStreams[stream] = NULL;
       THCudaCheck(cudaStreamCreate(newStreams + stream));
       newScratchSpace[stream] = NULL;
-      THCudaCheck(cudaMalloc(&newScratchSpace[stream], scratchSpaceSize));
+      THCudaCheck(THCudaMalloc(state, &newScratchSpace[stream], scratchSpaceSize));
     }
 
     THCCudaResourcesPerDevice* res = THCState_getDeviceResourcePtr(state, dev);
@@ -486,6 +490,60 @@ void __THCublasCheck(cublasStatus_t status, const char *file, const int line)
     }
 
     _THError(file, line, "cublas runtime error : %s", errmsg);
+  }
+}
+
+static long heapSize = 0; // not thread-local
+static const double heapSoftmaxGrowthThresh = 0.8; // grow softmax if >80% max after GC
+static const double heapSoftmaxGrowthFactor = 1.4; // grow softmax by 40%
+
+void THCSetGCHandler(THCState *state, void (*cutorchGCFunction_)(void *data), void *data )
+{
+  state->cutorchGCFunction = cutorchGCFunction_;
+  state->cutorchGCData = data;
+}
+
+cudaError_t THCudaMalloc(THCState *state, void** ptr, size_t size)
+{
+  THCudaCheck(cudaGetLastError());
+  cudaError_t err = cudaMalloc(ptr, size);
+  if (state->cutorchGCFunction != NULL && err != cudaSuccess) {
+    cudaGetLastError(); // reset OOM error
+    (state->cutorchGCFunction)(state->cutorchGCData);
+    err = cudaMalloc(ptr, size);
+  }
+  return err;
+}
+
+cudaError_t THCudaFree(THCState *state, void *ptr)
+{
+  cudaError_t err = cudaFree(ptr);
+  return err;
+}
+
+// Here we maintain a dynamic softmax threshold for THC-allocated storages.
+// When THC heap size goes above this softmax, the GC hook is triggered.
+// If heap size is above 80% of the softmax after GC, then the softmax is
+// increased.
+static void maybeTriggerGC(THCState *state, long curHeapSize) {
+  if (state->cutorchGCFunction != NULL && curHeapSize > state->heapSoftmax) {
+    (state->cutorchGCFunction)(state->cutorchGCData);
+    long newHeapSize = THAtomicGetLong(&heapSize);
+    if (newHeapSize > state->heapSoftmax * heapSoftmaxGrowthThresh) {
+      state->heapSoftmax = state->heapSoftmax * heapSoftmaxGrowthFactor;
+    }
+  }
+}
+
+void THCHeapUpdate(THCState *state, long size) {
+  long newHeapSize = THAtomicAddLong(&heapSize, size) + size;
+#ifdef THC_CHECK_HEAP_UPDATE
+  if (newHeapSize < 0) {
+    THError("Internal error: THC heapSize < 0");
+  }
+#endif
+  if (size > 0) {
+    maybeTriggerGC(state, newHeapSize);
   }
 }
 

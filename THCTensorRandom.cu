@@ -15,23 +15,23 @@
 #define BLOCK_SIZE 256
 
 /* Sets up generator. Allocates but does not create the generator states. */
-__host__ void initializeGenerator(Generator* gen)
+__host__ void initializeGenerator(THCState *state, Generator* gen)
 {
-  THCudaCheck(cudaMalloc((void**)&gen->gen_states, MAX_NUM_BLOCKS * sizeof(curandStateMtgp32)));
-  THCudaCheck(cudaMalloc((void**)&gen->kernel_params, sizeof(mtgp32_kernel_params)));
+  THCudaCheck(THCudaMalloc(state, (void**)&gen->gen_states, MAX_NUM_BLOCKS * sizeof(curandStateMtgp32)));
+  THCudaCheck(THCudaMalloc(state, (void**)&gen->kernel_params, sizeof(mtgp32_kernel_params)));
 }
 
 /* Frees memory allocated during setup. */
-__host__ void destroyGenerator(Generator* gen)
+__host__ void destroyGenerator(THCState *state, Generator* gen)
 {
   if (gen->gen_states)
   {
-    THCudaCheck(cudaFree(gen->gen_states));
+    THCudaCheck(THCudaFree(state, gen->gen_states));
     gen->gen_states = NULL;
   }
   if (gen->kernel_params)
   {
-    THCudaCheck(cudaFree(gen->kernel_params));
+    THCudaCheck(THCudaFree(state, gen->kernel_params));
     gen->kernel_params = NULL;
   }
 }
@@ -66,7 +66,7 @@ __host__ void THCRandom_init(THCState* state, int devices, int current_device)
   rng_state->current_gen = &rng_state->gen[current_device];
   // Initialize the generator for the current device. Other generators will be
   // initialized on-demand in THCRandom_setGenerator.
-  initializeGenerator(rng_state->current_gen);
+  initializeGenerator(state, rng_state->current_gen);
   THCRandom_seed(state);
 }
 
@@ -77,7 +77,7 @@ __host__ void THCRandom_shutdown(THCState* state)
   if (rng_state->gen == NULL) return;
   for (int i = 0; i < rng_state->num_devices; ++i)
   {
-    destroyGenerator(&rng_state->gen[i]);
+    destroyGenerator(state, &rng_state->gen[i]);
   }
   free(rng_state->gen);
   rng_state->gen = NULL;
@@ -92,7 +92,7 @@ __host__ void THCRandom_setGenerator(THCState* state, int device)
   rng_state->current_gen = &rng_state->gen[device];
   if (rng_state->current_gen->initf == 0)
   {
-    initializeGenerator(rng_state->current_gen);
+    initializeGenerator(state, rng_state->current_gen);
     THCRandom_seed(state);
   }
 }
