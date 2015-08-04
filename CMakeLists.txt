@@ -127,4 +127,8 @@ INSTALL(FILES
           THCReduceApplyUtils.cuh
           THCAllocator.h
           THCDeviceUtils.cuh
+          THCDeviceTensor.cuh
+          THCDeviceTensor-inl.cuh       
+          THCDeviceTensorUtils.cuh
+          THCDeviceTensorUtils-inl.cuh
           DESTINATION "${THC_INSTALL_INCLUDE_SUBDIR}/THC")
