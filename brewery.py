@@ -149,7 +149,7 @@ class Brewery(object):
   _signature_filename = 'brewery.signature'
   # Pool is the compute pool that one can use to run a list of commands in
   # parallel.
-  Pool = multiprocessing.Pool(Env.CPUS)
+  Pool = multiprocessing.Pool(Env.CPUS * 2)
   #Pool = multiprocessing.Pool(1)
   CWD = ''
   TARGET_PREFIX = '//'
