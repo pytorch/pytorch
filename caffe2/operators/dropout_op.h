@@ -15,7 +15,7 @@ class DropoutOp final : public Operator<dtype, DeviceContext> {
   DropoutOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<dtype, DeviceContext>(operator_def, ws),
         ratio_(OperatorBase::GetSingleArgument<float>("ratio", 0.5)) {
-    DCHECK_GT(ratio_, 0);
+    DCHECK_GE(ratio_, 0);
     DCHECK_LT(ratio_, 1);
   }
 
@@ -35,7 +35,7 @@ class DropoutGradientOp final : public Operator<dtype, DeviceContext> {
   DropoutGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<dtype, DeviceContext>(operator_def, ws),
         ratio_(OperatorBase::GetSingleArgument<float>("ratio", 0.5)) {
-    DCHECK_GT(ratio_, 0);
+    DCHECK_GE(ratio_, 0);
     DCHECK_LT(ratio_, 1);
   }
 
