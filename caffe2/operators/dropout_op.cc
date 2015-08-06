@@ -38,8 +38,9 @@ bool DropoutGradientOp<float, CPUContext>::RunOnDevice() {
   const float* dYdata = dY.data();
   const bool* mask_data = mask.data();
   float* dXdata = dX->mutable_data();
+  float scale = 1. / (1. - ratio_);
   for (int i = 0; i < dY.size(); ++i) {
-    dXdata[i] = dYdata[i] * mask_data[i];
+    dXdata[i] = dYdata[i] * mask_data[i] * scale;
   }
   return true;
 }

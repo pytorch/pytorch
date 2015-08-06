@@ -20,7 +20,9 @@ class FillerOp : public Operator<dtype, DeviceContext> {
   USE_OPERATOR_BASE_FUNCTIONS;
 
   bool RunOnDevice() override {
-    if (run_once_ && !already_run_) {
+    if (run_once_ && already_run_) {
+      return true;
+    } else {
       already_run_ = true;
       auto* output = Operator<dtype, DeviceContext>::Output(0);
       if (InputSize()) {
@@ -35,7 +37,6 @@ class FillerOp : public Operator<dtype, DeviceContext> {
       }
       return Fill(output);
     }
-    return true;
   }
 
   virtual bool Fill(Tensor<dtype, DeviceContext>* output) = 0;

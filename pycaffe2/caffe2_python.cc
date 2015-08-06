@@ -116,6 +116,14 @@ PyObject* FeedTensor(const DeviceOption& option, PyArrayObject* original_array,
 
 extern "C" {
 
+// The InitGoogleLogging function is provided so one can initialize google logging
+// from python. You should make sure it is not called twice.
+PyObject* InitGoogleLogging(PyObject* self, PyObject* args) {
+  char binary_name[] = "python";
+  google::InitGoogleLogging(binary_name);
+  Py_RETURN_TRUE;
+}
+
 PyObject* SwitchWorkspace(PyObject* self, PyObject* args) {
   PyObject* name = nullptr;
   PyObject* create_if_missing = nullptr;
@@ -424,6 +432,7 @@ static PyMethodDef gPycaffe2Methods[] = {
   // TODO(Yangqing): write the methods string.
   // Note(Yangqing): For any function that we are going to override in the
   // python file, we prepend "cc_" here.
+  _PYNAME(InitGoogleLogging),
   _PYNAME(SwitchWorkspace),
   _PYNAME(CurrentWorkspace),
   _PYNAME(Workspaces),
