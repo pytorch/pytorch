@@ -7,6 +7,7 @@ cc_library(
       "image_input_op.h",
   ],
   deps = [
+    "//caffe/proto:caffe_proto",
     "//caffe2/core:core",
     "//caffe2/operators:core_ops",
     "//caffe2/utils:math",
