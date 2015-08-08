@@ -4,6 +4,10 @@ All contributions by Yangqing Jia:
 Copyright (c) 2015 Yangqing Jia
 All rights reserved.
 
+All contributions from Caffe:
+Copyright(c) 2013, 2014, 2015, the respective contributors
+All rights reserved.
+
 All other contributions:
 Copyright(c) 2015, the respective contributors
 All rights reserved.
@@ -41,4 +45,5 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 Some parts of the caffe2 code is derived from the original Caffe code, which is
 created by Yangqing Jia and is now a BSD-licensed open-source project. The Caffe
-license is attached as LICENSE.caffe.
+license is attached as LICENSE.caffe. The Caffe repository contains the history
+of the respective contributors.
