@@ -116,11 +116,17 @@ PyObject* FeedTensor(const DeviceOption& option, PyArrayObject* original_array,
 
 extern "C" {
 
-// The InitGoogleLogging function is provided so one can initialize google logging
-// from python. You should make sure it is not called twice.
+// The InitGoogleLogging function is provided so one can initialize glog
+// from python. You should make sure it is not called twice. We provide a thin
+// protector but be noted that this does not prevent other functions to
+// initialize google logging.
 PyObject* InitGoogleLogging(PyObject* self, PyObject* args) {
-  char binary_name[] = "python";
-  google::InitGoogleLogging(binary_name);
+  static bool google_logging_initialized = false;
+  if (!google_logging_initialized) {
+    char binary_name[] = "python";
+    google::InitGoogleLogging(binary_name);
+    google_logging_initialized = true;
+  }
   Py_RETURN_TRUE;
 }
 
