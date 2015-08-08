@@ -35,6 +35,7 @@ class PrefetchOperator : public OperatorBase {
   virtual ~PrefetchOperator() {}
 
   bool Run() final {
+    device_context_.SwitchToDevice();
     if (prefetch_thread_ == nullptr) {
       VLOG(1) << "Starting a new prefetch thread.";
       prefetch_thread_.reset(
@@ -59,7 +60,7 @@ class PrefetchOperator : public OperatorBase {
     prefetch_thread_.reset(
         new std::thread(
             internal::PrefetchFunc<DeviceContext>, this));
-    return true;
+    return device_context_.FinishDeviceComputation();
   }
 
   // You will need to implement this instead of the Run function.
