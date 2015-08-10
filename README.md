@@ -2,9 +2,9 @@
 
 Caffe2 is a deep learning framework made with expression, speed, and modularity in mind. It is an experimental refactoring of Caffe, and allows a more flexible way to organize computation.
 
-## What Caffe2 is and what caffe2 is not
+## What Caffe2 is and what it is not
 
-Caffe2 started as an attempt to improve the design of caffe, since we have learned quite a lot since the 2 years of running and using caffe. It is also aiming to make Caffe more general, not only focusing on vision but applicable to all kinds of machine learning tasks.
+Caffe2 started as an attempt to improve the design of caffe, because we have learned quite a lot since the 2 years of running and using caffe. It is also aiming to make Caffe more general, not only focusing on vision but applicable to all kinds of machine learning tasks.
 
 Some highlights of the Caffe refactoring idea can also be found at [the slides from the CVPR caffe tutorial](http://tutorial.caffe.berkeleyvision.org/caffe-cvpr15-improving.pdf).
 
