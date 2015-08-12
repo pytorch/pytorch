@@ -88,7 +88,7 @@ class CUDAContext {
   static void* New(size_t nbytes) {
     void* dev_ptr;
     CUDA_CHECK(cudaMalloc(&dev_ptr, nbytes));
-    CUDA_CHECK(cudaMemset(dev_ptr, 0, nbytes));
+    // CUDA_CHECK(cudaMemset(dev_ptr, 0, nbytes));
     return dev_ptr;
   }
 
