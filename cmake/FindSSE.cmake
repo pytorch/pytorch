@@ -62,10 +62,8 @@ SET(AVX_CODE "
 
   int main()
   {
-    if (0) {
-      __m256 a;
-      a = _mm256_set1_ps(0);
-    }
+     __m256 a;
+    a = _mm256_set1_ps(0);
     return 0;
   }
 ")
