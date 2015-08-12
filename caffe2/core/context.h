@@ -23,7 +23,7 @@ class CPUContext {
 
   static void* New(size_t nbytes) {
     void* data = new char[nbytes];
-    memset(data, 0, nbytes);
+    // memset(data, 0, nbytes);
     return data;
   }
   static void Delete(void* data) { delete[] static_cast<char*>(data); }

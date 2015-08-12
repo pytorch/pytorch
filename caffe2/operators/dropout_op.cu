@@ -37,9 +37,10 @@ bool DropoutOp<float, CUDAContext>::RunOnDevice() {
 
 namespace {
 __global__ void DropoutGradientKernel(const int N, const float* dYdata,
-                                      const bool* maskdata, float* dXdata) {
+                                      const bool* maskdata,
+                                      const float scale, float* dXdata) {
   CUDA_1D_KERNEL_LOOP(i, N) {
-    dXdata[i] = dYdata[i] * maskdata[i];
+    dXdata[i] = dYdata[i] * maskdata[i] * scale;
   }
 }
 }  // namespace
@@ -53,10 +54,11 @@ bool DropoutGradientOp<float, CUDAContext>::RunOnDevice() {
   DCHECK_GT(dY.size(), 0);
   DCHECK_EQ(dY.size(), mask.size());
   dX->Reshape(dY.dims());
+  const float scale = 1. / (1. - ratio_);
   DropoutGradientKernel<<<CAFFE_GET_BLOCKS(dY.size()),
                           CAFFE_CUDA_NUM_THREADS,
                           0, device_context_.cuda_stream()>>>(
-      dY.size(), dY.data(), mask.data(), dX->mutable_data());
+      dY.size(), dY.data(), mask.data(), scale, dX->mutable_data());
   return true;
 }
 
