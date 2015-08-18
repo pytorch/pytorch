@@ -79,7 +79,6 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
   THTensor *tSlice, *sSlice;
   long *index_data;
   real *tensor_data, *src_data;
-  long stride;
 
   THArgCheck(index->nDimension == 1, 3, "Index is supposed to be a vector");
   THArgCheck(dim < src->nDimension, 4,"Indexing dim %d is out of bounds of tensor", dim+1);
@@ -100,24 +99,25 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
   {
     tensor_data = THTensor_(data)(tensor);
     src_data = THTensor_(data)(src);
-    stride = src->stride[0];
+    long rowsize = THTensor_(nElement)(src) / src->size[0];
 
     // check that the indices are within range
     long max = src->size[0];
-    for (i=0; i<numel; i++)
+    for (i=0; i<numel; i++) {
       if (index_data[i] < 1 || index_data[i] > max) {
         THLongTensor_free(index);
         THError("index out of range");
       }
+    }
 
     if (src->nDimension == 1) {
       #pragma omp parallel for if(numel > TH_OMP_OVERHEAD_THRESHOLD) private(i)
       for (i=0; i<numel; i++)
         tensor_data[i] = src_data[index_data[i]-1];
     } else {
-      #pragma omp parallel for if(numel*stride > TH_OMP_OVERHEAD_THRESHOLD) private(i)
+      #pragma omp parallel for if(numel*rowsize > TH_OMP_OVERHEAD_THRESHOLD) private(i)
       for (i=0; i<numel; i++)
-        memcpy(tensor_data + i*stride, src_data + (index_data[i]-1)*stride, stride*sizeof(real));
+        memcpy(tensor_data + i*rowsize, src_data + (index_data[i]-1)*rowsize, rowsize*sizeof(real));
     }
   }
   else if (src->nDimension == 1)
