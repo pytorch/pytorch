@@ -1,11 +1,11 @@
 #include "THGeneral.h"
+#include "THAtomic.h"
 
 #ifndef TH_HAVE_THREAD
 #define __thread
 #endif
 
-#if defined(TH_DISABLE_HEAP_TRACKING)
-#elif (defined(__unix) || defined(_WIN32))
+#if (defined(__unix) || defined(_WIN32))
 #include <malloc.h>
 #elif defined(__APPLE__)
 #include <malloc/malloc.h>
@@ -101,8 +101,10 @@ void THSetArgErrorHandler( void (*torchArgErrorHandlerFunction_)(int argNumber, 
 
 static __thread void (*torchGCFunction)(void *data) = NULL;
 static __thread void *torchGCData;
-static __thread long torchHeapSize = 0;
-static __thread long torchHeapSizeSoftMax = 300000000; // 300MB, adjusted upward dynamically
+static long heapSize = 0;
+static __thread long heapSoftmax = 300000000; // 300MB, adjusted upward dynamically
+static const double heapSoftmaxGrowthThresh = 0.8; // grow softmax if >80% max after GC
+static const double heapSoftmaxGrowthFactor = 1.4; // grow softmax by 40%
 
 /* Optional hook for integrating with a garbage-collected frontend.
  *
@@ -121,9 +123,7 @@ void THSetGCHandler( void (*torchGCFunction_)(void *data), void *data )
 }
 
 static long getAllocSize(void *ptr) {
-#if defined(TH_DISABLE_HEAP_TRACKING)
-  return 0;
-#elif defined(__unix)
+#if defined(__unix)
   return malloc_usable_size(ptr);
 #elif defined(__APPLE__)
   return malloc_size(ptr);
@@ -138,20 +138,29 @@ static long getAllocSize(void *ptr) {
  * (2) if post-GC heap size exceeds 80% of the soft max, increase the
  *     soft max by 40%
  */
-static void maybeTriggerGC() {
-  if(torchGCFunction && torchHeapSize > torchHeapSizeSoftMax) {
+static void maybeTriggerGC(long curHeapSize) {
+  if(torchGCFunction && curHeapSize > heapSoftmax ) {
     torchGCFunction(torchGCData);
-    if(torchHeapSize > torchHeapSizeSoftMax * 0.8) {
-      torchHeapSizeSoftMax = torchHeapSizeSoftMax * 1.4;
+    long newHeapSize = THAtomicGetLong(&heapSize);
+    if(newHeapSize > heapSoftmax * heapSoftmaxGrowthThresh) {
+      heapSoftmax = heapSoftmax * heapSoftmaxGrowthFactor;
     }
   }
 }
 
 // hooks into the TH heap tracking
 void THHeapUpdate(long size) {
-  torchHeapSize += size;
-  if (size > 0)
-    maybeTriggerGC();
+  long newHeapSize = THAtomicAddLong(&heapSize, size) + size;
+
+# ifdef TH_CHECK_HEAP_UPDATE
+  if (newHeapSize < 0) {
+     THError("Torch heap size <0 ?");
+  }
+#endif
+
+  if (size > 0) {
+    maybeTriggerGC(newHeapSize);
+  }
 }
 
 static void* THAllocInternal(long size)

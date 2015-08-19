@@ -57,4 +57,28 @@ TH_API void THAtomicIncrementRef(int volatile *a);
 */
 TH_API int THAtomicDecrementRef(int volatile *a);
 
+
+
+/******************************************************************************
+ * functions for long type
+ ******************************************************************************/
+
+/*
+ * return *a
+*/
+TH_API long THAtomicGetLong(long volatile *a);
+
+/*
+ * *a += value,
+ * return previous *a
+*/
+TH_API long THAtomicAddLong(long volatile *a, long value);
+
+/*
+ * check if (*a == oldvalue)
+ * if true: set *a to newvalue, return 1
+ * if false: return 0
+*/
+TH_API long THAtomicCompareAndSwapLong(long volatile *a, long oldvalue, long newvalue);
+
 #endif
