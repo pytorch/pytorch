@@ -92,3 +92,29 @@ void THCudaTensor_copyCuda(THCState *state, THCudaTensor *self, THCudaTensor *sr
 {
   THCudaTensor_copy(state, self, src);
 }
+
+void THCudaTensor_copyAsyncFloat(THCState *state, THCudaTensor *self, struct THFloatTensor *src)
+{
+  THArgCheck(THCudaTensor_nElement(state, self) == THFloatTensor_nElement(src), 2, "sizes do not match");
+  THArgCheck(THCudaTensor_isContiguous(state, self), 2, "Target tensor must be contiguous");
+  THArgCheck(THFloatTensor_isContiguous(src), 3, "Source tensor must be contiguous");
+
+  THCudaCheck(cudaMemcpyAsync(self->storage->data + self->storageOffset,
+                              src->storage->data + src->storageOffset,
+                              THFloatTensor_nElement(src) * sizeof(float),
+                              cudaMemcpyHostToDevice,
+                              THCState_getCurrentStream(state)));
+}
+
+void THFloatTensor_copyAsyncCuda(THCState *state, THFloatTensor *self, struct THCudaTensor *src)
+{
+  THArgCheck(THFloatTensor_nElement(self) == THCudaTensor_nElement(state, src), 2, "sizes do not match");
+  THArgCheck(THFloatTensor_isContiguous(self), 2, "Target tensor must be contiguous");
+  THArgCheck(THCudaTensor_isContiguous(state, src), 3, "Source tensor must be contiguous");
+
+  THCudaCheck(cudaMemcpyAsync(self->storage->data + self->storageOffset,
+                              src->storage->data + src->storageOffset,
+                              THCudaTensor_nElement(state, src) * sizeof(float),
+                              cudaMemcpyDeviceToHost,
+                              THCState_getCurrentStream(state)));
+}

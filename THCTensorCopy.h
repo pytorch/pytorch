@@ -22,4 +22,7 @@ THC_API void THFloatTensor_copyCuda(THCState *state, THFloatTensor *self, THCuda
 THC_API void THDoubleTensor_copyCuda(THCState *state, THDoubleTensor *self, THCudaTensor *src);
 THC_API void THCudaTensor_copyCuda(THCState *state, THCudaTensor *self, THCudaTensor *src);
 
+THC_API void THCudaTensor_copyAsyncFloat(THCState *state, THCudaTensor *self, THFloatTensor *src);
+THC_API void THFloatTensor_copyAsyncCuda(THCState *state, THFloatTensor *self, THCudaTensor *src);
+
 #endif
