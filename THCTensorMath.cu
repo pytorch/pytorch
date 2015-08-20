@@ -155,10 +155,14 @@ void THCudaTensor_addcmul(THCState *state, THCudaTensor *self_, THCudaTensor *t,
     THCudaTensor_resizeAs(state, self_, t);
     THCudaTensor_copy(state, self_, t);
   }
-  THCudaTensor_resizeAs(state, self_, src1);
+  else
+  {
+    THArgCheck(THCudaTensor_nElement(state, self_) == THCudaTensor_nElement(state, src1),
+               1, "sizes do not match");
+  }
 
-  THArgCheck(THCudaTensor_nElement(state, src1) ==
-             THCudaTensor_nElement(state, src2), 3, "sizes do not match");
+  THArgCheck(THCudaTensor_nElement(state, src1) == THCudaTensor_nElement(state, src2),
+             3, "sizes do not match");
 
   if (!THCudaTensor_pointwiseApply3(state, self_, src1, src2, TensorAddCMulOp(value))) {
     THArgCheck(false, 2, CUTORCH_DIM_WARNING);
@@ -186,9 +190,13 @@ void THCudaTensor_addcdiv(THCState *state, THCudaTensor *self_, THCudaTensor *t,
     THCudaTensor_resizeAs(state, self_, t);
     THCudaTensor_copy(state, self_, t);
   }
-
-  THCudaTensor_resizeAs(state, self_, src1);
-  THArgCheck(THCudaTensor_nElement(state, src1) == THCudaTensor_nElement(state, src2), 3, "sizes do not match");
+  else
+  {
+    THArgCheck(THCudaTensor_nElement(state, self_) == THCudaTensor_nElement(state, src1),
+               1, "sizes do not match");
+  }
+  THArgCheck(THCudaTensor_nElement(state, src1) == THCudaTensor_nElement(state, src2),
+             3, "sizes do not match");
 
   if (!THCudaTensor_pointwiseApply3(state, self_, src1, src2, TensorAddCDivOp(value))) {
     THArgCheck(false, 2, CUTORCH_DIM_WARNING);
