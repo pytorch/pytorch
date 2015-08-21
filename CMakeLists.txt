@@ -135,3 +135,18 @@ INSTALL(FILES
           THCDeviceTensorUtils.cuh
           THCDeviceTensorUtils-inl.cuh
           DESTINATION "${THC_INSTALL_INCLUDE_SUBDIR}/THC")
+
+INSTALL(FILES
+          generic/THCStorage.c
+          generic/THCStorage.cu
+          generic/THCStorage.h
+          generic/THCTensor.c
+          generic/THCTensor.cu
+          generic/THCTensor.h
+          generic/THCStorageCopy.c
+          generic/THCStorageCopy.cu
+          generic/THCStorageCopy.h
+          generic/THCTensorCopy.c
+          generic/THCTensorCopy.cu
+          generic/THCTensorCopy.h
+          DESTINATION "${THC_INSTALL_INCLUDE_SUBDIR}/THC/generic")

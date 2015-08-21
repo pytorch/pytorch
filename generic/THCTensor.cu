@@ -1,14 +1,16 @@
-#include "THCTensor.h"
+#ifndef THC_GENERIC_FILE
+#define THC_GENERIC_FILE "generic/THCTensor.cu"
+#else
 
-cudaTextureObject_t THCudaTensor_getTextureObject(THCState *state, THCudaTensor *self)
+cudaTextureObject_t THCTensor_(getTextureObject)(THCState *state, THCTensor *self)
 {
-  THAssert(THCudaTensor_checkGPU(state, 1, self));
+  THAssert(THCTensor_(checkGPU)(state, 1, self));
   cudaTextureObject_t texObj;
   struct cudaResourceDesc resDesc;
   memset(&resDesc, 0, sizeof(resDesc));
   resDesc.resType = cudaResourceTypeLinear;
-  resDesc.res.linear.devPtr = THCudaTensor_data(state, self);
-  resDesc.res.linear.sizeInBytes = THCudaTensor_nElement(state, self) * 4;
+  resDesc.res.linear.devPtr = THCTensor_(data)(state, self);
+  resDesc.res.linear.sizeInBytes = THCTensor_(nElement)(state, self) * 4;
   resDesc.res.linear.desc = cudaCreateChannelDesc(32, 0, 0, 0,
                                                   cudaChannelFormatKindFloat);
   struct cudaTextureDesc texDesc;
@@ -16,19 +18,21 @@ cudaTextureObject_t THCudaTensor_getTextureObject(THCState *state, THCudaTensor 
   cudaCreateTextureObject(&texObj, &resDesc, &texDesc, NULL);
   cudaError errcode = cudaGetLastError();
   if(errcode != cudaSuccess) {
-    if (THCudaTensor_nElement(state, self) > 2>>27)
+    if (THCTensor_(nElement)(state, self) > 2>>27)
       THError("Failed to create texture object, "
               "nElement:%ld exceeds 27-bit addressing required for tex1Dfetch. Cuda Error: %s",
-              THCudaTensor_nElement(state, self), cudaGetErrorString(errcode));
+              THCTensor_(nElement)(state, self), cudaGetErrorString(errcode));
     else
       THError("Failed to create texture object: %s", cudaGetErrorString(errcode));
   }
   return texObj;
 }
 
-THC_API int THCudaTensor_getDevice(THCState* state, const THCudaTensor* thc) {
+THC_API int THCTensor_(getDevice)(THCState* state, const THCTensor* thc) {
   if (!thc->storage) return -1;
   cudaPointerAttributes attr;
   THCudaCheck(cudaPointerGetAttributes(&attr, thc->storage->data));
   return attr.device;
 }
+
+#endif
