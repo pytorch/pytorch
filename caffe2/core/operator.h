@@ -185,6 +185,7 @@ class Operator : public OperatorBase {
 };
 
 #define USE_OPERATOR_BASE_FUNCTIONS                                            \
+  using OperatorBase::HasArgument;                                             \
   using OperatorBase::GetSingleArgument;                                       \
   using OperatorBase::GetRepeatedArgument;                                     \
   using OperatorBase::def;                                                     \

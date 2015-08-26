@@ -60,6 +60,12 @@ def AddReluGradient(op):
       [op.input[0], GetGradientName(op.output[0])],
       [GetGradientName(op.input[0])])
 
+@GradientRegistry.RegisterGradient("Clip")
+def AddReluGradient(op):
+  return CreateOperator("ClipGradient")(
+      [op.input[0], GetGradientName(op.output[0])],
+      [GetGradientName(op.input[0])])
+
 @GradientRegistry.RegisterGradient("MaxPool")
 def AddMaxPoolGradient(op):
   return CreateOperator("MaxPoolGradient")(
