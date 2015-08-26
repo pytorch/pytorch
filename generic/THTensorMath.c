@@ -72,6 +72,38 @@ void THTensor_(maskedSelect)(THTensor *tensor, THTensor *src, THByteTensor *mask
                    });
 }
 
+// Finds non-zero elements of a tensor and returns their subscripts
+void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
+{
+  long numel = 0;
+  long *subscript_data;
+  long i = 0;
+  long dim;
+  long div = 1;
+
+  /* First Pass to determine size of subscripts */
+  TH_TENSOR_APPLY(real, tensor,
+                  if (*tensor_data != 0) {
+                    ++numel;
+                  });
+  THLongTensor_resize2d(subscript, numel, tensor->nDimension);
+
+  /* Second pass populates subscripts */
+  subscript_data = THLongTensor_data(subscript);
+  TH_TENSOR_APPLY(real, tensor,
+                  if (*tensor_data != 0) {
+                    div = 1;
+
+                    for (dim = tensor->nDimension - 1; dim >= 0; dim--) {
+                      *(subscript_data + dim) = (i/div) % tensor->size[dim];
+                      div *= tensor->size[dim];
+                    }
+
+                    subscript_data += tensor->nDimension;
+                  }
+                  ++i;);
+}
+
 void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTensor *index)
 {
   long i, numel;
