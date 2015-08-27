@@ -16,21 +16,23 @@
 #include "caffe2/proto/caffe2.pb.h"
 #include "glog/logging.h"
 
-using std::map;
-using std::string;
-using std::unique_ptr;
-using std::vector;
-using namespace caffe2;  // NOLINT
+//using namespace caffe2;  // NOLINT
+using caffe2::Blob;
+using caffe2::DeviceOption;
+using caffe2::Tensor;
+using caffe2::Workspace;
 
 // gWorkspaces allows us to define and switch between multiple workspaces in
 // Python.
-static map<string, unique_ptr<Workspace> > gWorkspaces;
+static std::map<std::string, std::unique_ptr<Workspace> > gWorkspaces;
 // gWorkspace is the pointer to the current workspace. The ownership is kept
 // by the gWorkspaces map.
 static Workspace* gWorkspace = nullptr;
-static string gCurrentWorkspaceName;
+static std::string gCurrentWorkspaceName;
 
 namespace {
+
+using caffe2::string;
 
 bool SwitchWorkspaceInternal(const string& name, const bool create_if_missing) {
   if (gWorkspaces.count(name)) {
@@ -74,7 +76,7 @@ PyObject* FetchTensor(const Blob& blob) {
   const Tensor<T, DeviceContext>& tensor =
       blob.Get<Tensor<T, DeviceContext> >();
   CHECK_GT(tensor.size(), 0);
-  vector<npy_intp> npy_dims;
+  std::vector<npy_intp> npy_dims;
   for (const int dim : tensor.dims()) {
     npy_dims.push_back(dim);
   }
@@ -83,7 +85,7 @@ PyObject* FetchTensor(const Blob& blob) {
   // Now, copy the data to the tensor.
   // TODO(Yangqing): Is there an easier way to convert PyObject to
   // PyArrayObject?
-  context.template Copy<T, DeviceContext, CPUContext>(
+  context.template Copy<T, DeviceContext, caffe2::CPUContext>(
       tensor.size(), tensor.data(),
       static_cast<T*>(PyArray_DATA(reinterpret_cast<PyArrayObject*>(array))));
   return array;
@@ -99,13 +101,13 @@ PyObject* FeedTensor(const DeviceOption& option, PyArrayObject* original_array,
   // numpy requires long int as its dims.
   int ndim = PyArray_NDIM(array);
   npy_intp* npy_dims = PyArray_DIMS(array);
-  vector<int> dims;
+  std::vector<int> dims;
   for (int i = 0; i < ndim; ++i) {
     dims.push_back(npy_dims[i]);
   }
   tensor->Reshape(dims);
   // Now, copy the data to the tensor.
-  context.template Copy<T, CPUContext, DeviceContext>(
+  context.template Copy<T, caffe2::CPUContext, DeviceContext>(
       tensor->size(), static_cast<T*>(PyArray_DATA(array)),
       tensor->mutable_data());
   Py_XDECREF(array);
@@ -199,7 +201,7 @@ PyObject* OnModuleExit(PyObject* self, PyObject* args) {
 }
 
 PyObject* Blobs(PyObject* self, PyObject* args) {
-  vector<string> blob_strings = gWorkspace->Blobs();
+  std::vector<caffe2::string> blob_strings = gWorkspace->Blobs();
   PyObject* list = PyList_New(blob_strings.size());
   for (int i = 0; i < blob_strings.size(); ++i) {
     CHECK_EQ(PyList_SetItem(list, i, StdStringToPyString(blob_strings[i])), 0);
@@ -212,7 +214,7 @@ PyObject* HasBlob(PyObject* self, PyObject* args) {
   if (!PyArg_ParseTuple(args, "s", &name)) {
     return NULL;
   }
-  if (gWorkspace->HasBlob(string(name))) {
+  if (gWorkspace->HasBlob(caffe2::string(name))) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -245,7 +247,7 @@ PyObject* RunNet(PyObject* self, PyObject* args) {
                     "Incorrect argument. Must pass in a single string.");
     return NULL;
   }
-  if (!gWorkspace->RunNet(string(name))) {
+  if (!gWorkspace->RunNet(caffe2::string(name))) {
     PyErr_SetString(
         PyExc_RuntimeError,
         "Cannot run network. See console log for error messages.");
@@ -261,12 +263,12 @@ PyObject* DeleteNet(PyObject* self, PyObject* args) {
                     "Incorrect argument. Must pass in a single string.");
     return NULL;
   }
-  gWorkspace->DeleteNet(string(name));
+  gWorkspace->DeleteNet(caffe2::string(name));
   Py_RETURN_TRUE;
 }
 
 PyObject* Nets(PyObject* self, PyObject* args) {
-  vector<string> net_strings = gWorkspace->Nets();
+  std::vector<caffe2::string> net_strings = gWorkspace->Nets();
   PyObject* list = PyList_New(net_strings.size());
   for (int i = 0; i < net_strings.size(); ++i) {
     CHECK_EQ(PyList_SetItem(list, i, StdStringToPyString(net_strings[i])), 0);
@@ -343,7 +345,7 @@ PyObject* CreateBlob(PyObject* self, PyObject* args) {
     PyErr_SetString(PyExc_ValueError, "Incorrect arguments.");
     return NULL;
   }
-  string name(name_char);
+  caffe2::string name(name_char);
   Blob* blob = gWorkspace->CreateBlob(name);
   Py_RETURN_TRUE;
 }
@@ -359,21 +361,21 @@ PyObject* FetchBlob(PyObject* self, PyObject* args) {
     PyErr_SetString(PyExc_ValueError, "Incorrect arguments.");
     return NULL;
   }
-  if (!gWorkspace->HasBlob(string(name))) {
+  if (!gWorkspace->HasBlob(caffe2::string(name))) {
     PyErr_SetString(PyExc_ValueError, "Requested blob does not exist.");
     return NULL;
   }
-  const caffe2::Blob& blob = *(gWorkspace->GetBlob(string(name)));
+  const caffe2::Blob& blob = *(gWorkspace->GetBlob(caffe2::string(name)));
   // We only support a subset of exporting capabilities.
-  RETURN_TENSOR_IF_FORMAT(float, CPUContext)
-  RETURN_TENSOR_IF_FORMAT(int, CPUContext)
+  RETURN_TENSOR_IF_FORMAT(float, caffe2::CPUContext)
+  RETURN_TENSOR_IF_FORMAT(int, caffe2::CPUContext)
 #ifndef PYCAFFE2_CPU_ONLY
-  RETURN_TENSOR_IF_FORMAT(float, CUDAContext)
-  RETURN_TENSOR_IF_FORMAT(int, CUDAContext)
+  RETURN_TENSOR_IF_FORMAT(float, caffe2::CUDAContext)
+  RETURN_TENSOR_IF_FORMAT(int, caffe2::CUDAContext)
 #endif  // PYCAFFE2_CPU_ONLY
 
   // If all branches failed, we should throw an error.
-  LOG(ERROR) << "Blob" << string(name) << " has unsupported data type: "
+  LOG(ERROR) << "Blob" << caffe2::string(name) << " has unsupported data type: "
              << blob.TypeName();
   PyErr_SetString(PyExc_TypeError, "Unsupported data type.");
   return NULL;
@@ -389,7 +391,7 @@ PyObject* FeedBlob(PyObject* self, PyObject* args) {
     PyErr_SetString(PyExc_ValueError, "Incorrect arguments.");
     return NULL;
   }
-  string name(name_char);
+  caffe2::string name(name_char);
   DeviceOption option;
   if (device_option_string != nullptr) {
     // If we have a device option passed in, read it.
@@ -403,23 +405,23 @@ PyObject* FeedBlob(PyObject* self, PyObject* args) {
 
   // Since there is really no polymorphism, we will have to do so...
   switch (option.device_type()) {
-  case CPU:
+  case caffe2::CPU:
     switch (data_type) {
       case NPY_INT:
-        return FeedTensor<int, CPUContext>(option, array, blob);
+        return FeedTensor<int, caffe2::CPUContext>(option, array, blob);
       case NPY_FLOAT:
-        return FeedTensor<float, CPUContext>(option, array, blob);
+        return FeedTensor<float, caffe2::CPUContext>(option, array, blob);
       default:
         PyErr_SetString(PyExc_TypeError, "Unsupported numpy data type.");
         return NULL;
     }
 #ifndef PYCAFFE2_CPU_ONLY
-  case CUDA:
+  case caffe2::CUDA:
     switch (data_type) {
       case NPY_INT:
-        return FeedTensor<int, CUDAContext>(option, array, blob);
+        return FeedTensor<int, caffe2::CUDAContext>(option, array, blob);
       case NPY_FLOAT:
-        return FeedTensor<float, CUDAContext>(option, array, blob);
+        return FeedTensor<float, caffe2::CUDAContext>(option, array, blob);
       default:
         PyErr_SetString(PyExc_TypeError, "Unsupported numpy data type.");
         return NULL;
