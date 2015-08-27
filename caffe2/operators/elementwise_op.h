@@ -14,7 +14,7 @@ class BinaryElementwiseOp : public Operator<dtype, DeviceContext> {
   USE_OPERATOR_BASE_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(BinaryElementwiseOp);
 
-  bool RunOnDevice() final {
+  bool RunOnDevice() {
     auto& input0 = Input(0);
     auto& input1 = Input(1);
     auto* output = Output(0);

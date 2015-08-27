@@ -20,7 +20,7 @@ class FreeOp : public OperatorBase {
  public:
   USE_SIMPLE_BASE_CTOR_DTOR(FreeOp);
 
-  bool Run() final {
+  bool Run() {
     for (Blob* output : Outputs()) {
       output->Reset();
     }
@@ -64,7 +64,7 @@ class PrintOp final : public Operator<dtype, DeviceContext> {
     }
   }
 
-  bool RunOnDevice() final {
+  bool RunOnDevice() {
     Tensor<dtype, CPUContext> temp_tensor;
     for (int input_id = 0; input_id < InputSize(); ++input_id) {
       // A special case for inputs that are on CPUContext: in which case we
@@ -119,7 +119,7 @@ class AliasOp final : public Operator<dtype, DeviceContext> {
   USE_OPERATOR_BASE_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(AliasOp);
 
-  bool RunOnDevice() final {
+  bool RunOnDevice() {
     auto& input = Input(0);
     DCHECK_GT(input.size(), 0);
     if (Output(0) == &input) {
@@ -143,7 +143,7 @@ class FlattenOp : public Operator<dtype, DeviceContext> {
   USE_OPERATOR_BASE_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(FlattenOp);
 
-  bool RunOnDevice() final {
+  bool RunOnDevice() {
     auto& input = Input(0);
     DCHECK_GT(input.size(), 0);
     Output(0)->Reshape(
@@ -163,7 +163,7 @@ class ReshapeLikeOp : public Operator<dtype, DeviceContext> {
   USE_OPERATOR_BASE_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(ReshapeLikeOp);
 
-  bool RunOnDevice() final {
+  bool RunOnDevice() {
     auto* output = Output(0);
     DCHECK_EQ(Input(0).size(), Input(1).size());
     output->ReshapeLike(Input(1));
@@ -181,7 +181,7 @@ class SplitOp : public Operator<dtype, DeviceContext> {
   USE_OPERATOR_BASE_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(SplitOp);
 
-  bool RunOnDevice() final {
+  bool RunOnDevice() {
     const auto& input = Input(0);
     for (int i = 0; i < OutputSize(); ++i) {
       auto* output = Output(i);
@@ -201,7 +201,7 @@ class SumOp : public Operator<dtype, DeviceContext> {
   USE_OPERATOR_BASE_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(SumOp);
 
-  bool RunOnDevice() final {
+  bool RunOnDevice() {
     auto& input = Input(0);
     auto* output = Output(0);
     output->ReshapeLike(input);
@@ -229,7 +229,7 @@ class WeightedSumOp : public Operator<dtype, DeviceContext> {
   USE_OPERATOR_BASE_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(WeightedSumOp);
 
-  bool RunOnDevice() final {
+  bool RunOnDevice() {
     DCHECK_EQ(InputSize() % 2, 0);
     auto& X0 = Input(0);
     auto& weight0 = Input(1);
@@ -272,7 +272,7 @@ class CopyOp : public Operator<dtype, DeviceContext> {
   USE_OPERATOR_BASE_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(CopyOp);
 
-  bool RunOnDevice() final {
+  bool RunOnDevice() {
     auto& input = OperatorBase::Input<Tensor<dtype, SrcContext> >(0);
     auto* output = OperatorBase::Output<Tensor<dtype, DstContext> >(0);
     output->ReshapeLike(input);
@@ -294,7 +294,7 @@ class RecordShapeOp : public Operator<dtype, DeviceContext> {
   USE_OPERATOR_BASE_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(RecordShapeOp);
 
-  bool RunOnDevice() final {
+  bool RunOnDevice() {
     auto& input = Input(0);
     auto* output = OperatorBase::Output<vector<dtype, DeviceContext> >(0);
     *output = input.shape();

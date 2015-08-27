@@ -170,7 +170,7 @@ class Operator : public OperatorBase {
   // The run function of Operator switches to the device, and then carries out
   // the actual computation with RunOnDevice(). You should implement RunOnDevice
   // instead of Run().
-  bool Run() final {
+  bool Run() {
     device_context_.SwitchToDevice();
     bool result = RunOnDevice();
     result &= device_context_.FinishDeviceComputation();

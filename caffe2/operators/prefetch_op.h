@@ -34,7 +34,7 @@ class PrefetchOperator : public OperatorBase {
   }
   virtual ~PrefetchOperator() {}
 
-  bool Run() final {
+  bool Run() {
     device_context_.SwitchToDevice();
     if (prefetch_thread_ == nullptr) {
       VLOG(1) << "Starting a new prefetch thread.";
