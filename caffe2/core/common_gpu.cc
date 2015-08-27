@@ -76,6 +76,8 @@ const char* cublasGetErrorString(cublasStatus_t error) {
 #endif  // CUDA_VERSION >= 6050
 #endif  // CUDA_VERSION >= 6000
   }
+  // To suppress compiler warning.
+  return "Unrecognized cublas error string";
 }
 
 const char* curandGetErrorString(curandStatus_t error) {
@@ -107,6 +109,8 @@ const char* curandGetErrorString(curandStatus_t error) {
   case CURAND_STATUS_INTERNAL_ERROR:
     return "CURAND_STATUS_INTERNAL_ERROR";
   }
+  // To suppress compiler warning.
+  return "Unrecognized curand error string";
 }
 
 }  // namespace internal

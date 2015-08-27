@@ -22,7 +22,7 @@ class SleepOp final : public OperatorBase {
     DCHECK_LT(ms_, 3600 * 1000) << "Really? This long?";
   }
 
-  bool Run() final {
+  bool Run() {
     clock_t start = clock();
     std::this_thread::sleep_for(std::chrono::milliseconds(ms_));
     clock_t end = clock();

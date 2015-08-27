@@ -18,7 +18,7 @@ class FullyConnectedOp final : public Operator<dtype, DeviceContext> {
         kZero(static_cast<dtype>(0), &device_context_) {}
   ~FullyConnectedOp() {}
 
-  bool RunOnDevice() final {
+  bool RunOnDevice() {
     const auto& X = Input(0);
     const auto& W = Input(1);
     const auto& b = Input(2);
@@ -78,7 +78,7 @@ class FullyConnectedGradientOp : public Operator<dtype, DeviceContext> {
         kZero(static_cast<dtype>(0), &device_context_) {}
   ~FullyConnectedGradientOp() {}
 
-  bool RunOnDevice() final {
+  bool RunOnDevice() {
     const auto& X = Input(0);
     const auto& W = Input(1);
     const auto& b = Input(2);
