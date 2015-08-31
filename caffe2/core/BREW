@@ -76,9 +76,9 @@ cc_test(
 )
 
 cc_test(
-  name = "core_test_gpu",
+  name = "core_gpu_test",
   srcs = [
-      "blob_test_gpu.cc",
+      "blob_gpu_test.cc",
   ],
   deps = [
       ":core_gpu",
