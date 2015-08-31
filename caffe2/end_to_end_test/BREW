@@ -1,7 +1,7 @@
 cc_test(
   name = "end_to_end_tests",
   srcs = [
-      "end_to_end_tests.cc",
+      "end_to_end_test.cc",
   ],
   deps = [
       "//caffe2:all_available_ops",
