@@ -3,6 +3,7 @@
 
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context.h"
+#include "caffe2/core/cuda_memorypool.h"
 #include "caffe2/core/types.h"
 #include "caffe2/proto/caffe2.pb.h"
 #include "glog/logging.h"
@@ -85,25 +86,12 @@ class CUDAContext {
     return curand_generator_;
   }
 
-  static void* New(size_t nbytes) {
-    void* dev_ptr;
-    CUDA_CHECK(cudaMalloc(&dev_ptr, nbytes));
-    // CUDA_CHECK(cudaMemset(dev_ptr, 0, nbytes));
-    return dev_ptr;
+  static inline void* New(size_t nbytes) {
+    return CudaMemoryPool::New(nbytes);
   }
 
-  static void Delete(void* data) {
-    cudaError_t error = cudaFree(data);
-    // For some reason, in Python runtime we sometimes delete a data pointer
-    // after the cuda runtime exits - this is odd but is probably caused by
-    // a static workspace that pycaffe2 uses, and the destruction got entangled
-    // in some race condition. Anyway, since cuda runtime is exiting anyway, we
-    // will not need to worry about memory leak, so we basically ignore it.
-    // This is definitely not ideal but works for now.
-    if (error != cudaSuccess && error != cudaErrorCudartUnloading) {
-      LOG(FATAL) << "Error at: " << __FILE__ << ":" << __LINE__ << ": "
-                 << cudaGetErrorString(error);
-    }
+  static inline void Delete(void* data) {
+    CudaMemoryPool::Delete(data);
   }
 
   template <class SrcContext, class DstContext>
