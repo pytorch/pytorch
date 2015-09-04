@@ -61,7 +61,6 @@ cc_binary(
       "//caffe2/db:db",
       "//third_party/gflags:gflags",
       "//third_party/glog:glog",
-      "//third_party/google:profiler",
   ],
 )
 
