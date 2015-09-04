@@ -4,10 +4,3 @@ cc_thirdparty_target(
   commands=[],
   cc_obj_files=["-lprotobuf"],
 )
-
-cc_thirdparty_target(
-  name = "profiler",
-  srcs = ["BREW"],
-  commands=[],
-  cc_obj_files=["-lprofiler"],
-)
