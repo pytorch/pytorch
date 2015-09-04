@@ -38,13 +38,16 @@ cuda_library(
   srcs = [
     "blob_serialization_gpu.cc",
     "common_gpu.cc",
+    "cuda_memorypool.cc",
   ],
   hdrs = [
     "common_gpu.h",
     "context_gpu.h",
+    "cuda_memorypool.h",
   ],
   deps = [
     ":core",
+    "//third_party/cnmem:cnmem",
   ],
   whole_archive = True,
 )
@@ -79,6 +82,18 @@ cc_test(
   name = "core_gpu_test",
   srcs = [
       "blob_gpu_test.cc",
+  ],
+  deps = [
+      ":core_gpu",
+      "//gtest:gtest",
+      "//gtest:gtest_main",
+  ],
+)
+
+cc_test(
+  name = "cuda_memorypool_test",
+  srcs = [
+      "cuda_memorypool_test.cc",
   ],
   deps = [
       ":core_gpu",

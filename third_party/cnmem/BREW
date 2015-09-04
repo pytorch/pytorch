@@ -1,0 +1,9 @@
+cuda_library(
+  name = "cnmem",
+  srcs = [
+    "cnmem.cpp",
+  ],
+  hdrs = [
+    "cnmem.h",
+  ],
+)
