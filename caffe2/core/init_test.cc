@@ -9,8 +9,9 @@ namespace caffe2 {
 namespace {
 bool gTestInitFunctionHasBeenRun = false;
 
-void TestInitFunction() {
+bool TestInitFunction() {
   gTestInitFunctionHasBeenRun = true;
+  return true;
 }
 REGISTER_CAFFE2_INIT_FUNCTION(TestInitFunction,
                               &TestInitFunction,
@@ -24,10 +25,10 @@ TEST(InitTest, TestInitFunctionHasRun) {
 
 TEST(InitDeathTest, CannotRerunGlobalInit) {
   int dummy_argc = 1;
-  char* dummy_name = "foo";
-  char** dummy_argv = &dummy_name;
+  const char* dummy_name = "foo";
+  char** dummy_argv = const_cast<char**>(&dummy_name);
   EXPECT_DEATH(caffe2::GlobalInit(&dummy_argc, &dummy_argv),
-               "blabla");
+               "GlobalInit has already been called: did you double-call?");
 }
 
 }  // namespace caffe2
