@@ -77,8 +77,6 @@ class Registerer {
   Registerer(const SrcType& key,
              Registry<SrcType, ObjectType, Args...>* registry,
              typename Registry<SrcType, ObjectType, Args...>::Creator creator) {
-    // Don't uncomment this.
-    //std::cout << "Registering key " << key << std::endl;
     registry->Register(key, creator);
   }
 

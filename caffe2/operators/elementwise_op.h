@@ -32,7 +32,7 @@ class BinaryElementwiseOp : public Operator<dtype, DeviceContext> {
 
 #define CAFFE2_BINARY_FUNCTOR_WRAPPER(name)                                    \
 template <typename dtype, class DeviceContext>                                 \
-struct name##Functor {                                                          \
+struct name##Functor {                                                         \
   inline void operator()(const int n, const dtype* x, const dtype* y,          \
                          dtype* output, DeviceContext* device_context) {       \
     math::name<dtype, DeviceContext>(n, x, y, output, device_context);         \
