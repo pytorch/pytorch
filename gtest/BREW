@@ -6,23 +6,21 @@ cc_library(
 )
 
 cc_library(
-  name = "gtest_main",
-  srcs = ["gtest_main.cc"],
+  name = "caffe2_gtest_main",
+  srcs = ["caffe2_gtest_main.cc"],
   deps = [
       ":gtest",
-      "//third_party/gflags:gflags",
-      "//third_party/glog:glog"
+      "//caffe2/core:core"
   ],
   cflags = ["-DGTEST_USE_OWN_TR1_TUPLE=1"],
 )
 
 cc_test(
-  name = "gtest_main_binary",
-  srcs = ["gtest_main.cc"],
+  name = "caffe2_gtest_main_binary",
+  srcs = ["caffe2_gtest_main.cc"],
   deps = [
       ":gtest",
-      "//third_party/gflags:gflags",
-      "//third_party/glog:glog",
+      "//caffe2/core:core",
   ],
   cflags = ["-DGTEST_USE_OWN_TR1_TUPLE=1"],
 )

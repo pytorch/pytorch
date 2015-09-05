@@ -76,7 +76,7 @@ cc_test(
   deps = [
       ":core",
       "//gtest:gtest",
-      "//gtest:gtest_main",
+      "//gtest:caffe2_gtest_main",
   ],
 )
 
@@ -88,7 +88,7 @@ cc_test(
   deps = [
       ":core_gpu",
       "//gtest:gtest",
-      "//gtest:gtest_main",
+      "//gtest:caffe2_gtest_main",
   ],
 )
 
@@ -100,7 +100,7 @@ cc_test(
   deps = [
       ":core_gpu",
       "//gtest:gtest",
-      "//gtest:gtest_main",
+      "//gtest:caffe2_gtest_main",
   ],
 )
 
@@ -110,6 +110,17 @@ cc_test(
   deps = [
       ":core",
       "//gtest:gtest",
-      "//gtest:gtest_main",
+      "//gtest:caffe2_gtest_main",
   ],
 )
+
+cc_test(
+  name = "init_test",
+  srcs = ["init_test.cc"],
+  deps = [
+      ":core",
+      "//gtest:gtest",
+      "//gtest:caffe2_gtest_main",
+  ],
+)
+
