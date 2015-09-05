@@ -56,11 +56,6 @@ class CUDAContext {
       LOG(ERROR) << cudaGetErrorString(error);
       return false;
     }
-    error = cudaPeekAtLastError();
-    if (error != cudaSuccess) {
-      LOG(ERROR) << cudaGetErrorString(error);
-      return false;
-    }
     return true;
   }
 
