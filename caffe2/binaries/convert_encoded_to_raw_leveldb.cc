@@ -16,7 +16,6 @@
 
 #include "caffe2/core/init.h"
 #include "caffe2/proto/caffe2.pb.h"
-#include "caffe2/binaries/gflags_namespace.h"
 #include "glog/logging.h"
 #include "leveldb/db.h"
 #include "leveldb/write_batch.h"
