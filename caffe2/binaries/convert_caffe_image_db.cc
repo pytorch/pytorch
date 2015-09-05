@@ -43,7 +43,8 @@ int main(int argc, char** argv) {
       data->add_dims(1);
       data->add_string_data(datum.data());
     } else {
-      CHECK_EQ(datum.float_data_size(), 0);  // float data not supported right now.
+      // float data not supported right now.
+      CHECK_EQ(datum.float_data_size(), 0);
       char buffer[datum.data().size()];
       // swap order from CHW to HWC
       int channels = datum.channels();

@@ -256,8 +256,9 @@ bool LRNGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   float* dXdata = dX->mutable_data();
 
   int n_threads = N * H * W;
-  LRNComputeDiffNCHW<float><<<CAFFE_GET_BLOCKS(n_threads), CAFFE_CUDA_NUM_THREADS,
-                          0, device_context_.cuda_stream()>>>(
+  LRNComputeDiffNCHW<float><<<CAFFE_GET_BLOCKS(n_threads),
+                              CAFFE_CUDA_NUM_THREADS,
+                              0, device_context_.cuda_stream()>>>(
       n_threads, Xdata, Ydata, scale_data, dYdata, N, C, H, W, size_, -beta_,
       2.f * alpha_ * beta_ / size_, dXdata);
   return true;

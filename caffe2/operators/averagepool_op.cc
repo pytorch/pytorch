@@ -189,6 +189,7 @@ bool AveragePoolGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
 
 namespace {
 REGISTER_CPU_OPERATOR(AveragePool, AveragePoolOp<float, CPUContext>)
-REGISTER_CPU_OPERATOR(AveragePoolGradient, AveragePoolGradientOp<float, CPUContext>)
+REGISTER_CPU_OPERATOR(AveragePoolGradient,
+                      AveragePoolGradientOp<float, CPUContext>)
 }  // namespace
 }  // namespace caffe2

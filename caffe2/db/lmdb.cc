@@ -2,7 +2,7 @@
 
 #include "caffe2/core/db.h"
 #include "glog/logging.h"
-#include "lmdb.h"
+#include "lmdb.h"  // NOLINT
 
 namespace caffe2 {
 namespace db {

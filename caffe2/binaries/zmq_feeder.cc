@@ -55,7 +55,7 @@ int main(int argc, char** argv) {
     while (!sender.send(key_msg, ZMQ_SNDMORE)) {
       VLOG(1) << "Trying re-sending key...";
     }
-    while(!sender.send(value_msg)) {
+    while (!sender.send(value_msg)) {
       VLOG(1) << "Trying re-sending...";
     }
     cursor->Next();

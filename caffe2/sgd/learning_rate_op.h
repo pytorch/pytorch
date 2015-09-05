@@ -15,8 +15,8 @@ class LearningRateOp final : public Operator<dtype, DeviceContext> {
   LearningRateOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<dtype, DeviceContext>(operator_def, ws), functor_(nullptr),
         base_lr_(
-            OperatorBase::template GetSingleArgument<float>("base_lr", FLT_MAX))
-  {
+            OperatorBase::template GetSingleArgument<float>(
+                "base_lr", FLT_MAX)) {
     CHECK_NE(base_lr_, FLT_MAX) << "Base learning rate must be set.";
     const string policy = OperatorBase::GetSingleArgument<string>("policy", "");
     CHECK(policy.size()) << "Must specify a learning rate policy.";

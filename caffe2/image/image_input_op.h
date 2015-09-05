@@ -130,7 +130,7 @@ bool ImageInputOp<DeviceContext>::GetImageAndLabelFromDBValue(
             for (int w = 0; w < datum.width(); ++w) {
               *ptr = *(datum_buffer++);
               ptr += 3;
-            }  
+            }
           }
         }
       }

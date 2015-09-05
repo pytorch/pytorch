@@ -47,7 +47,6 @@ class LoadTensorOp final : public Operator<float, DeviceContext> {
         CHECK(proto.ParseFromString(cursor->value()));
         CHECK_GT(proto.dims_size(), 0);
         int idx = output_indices_[key];
-        // TODO: deserialize.
         switch (proto.data_type()) {
         case TensorProto::FLOAT:
         {
@@ -57,7 +56,8 @@ class LoadTensorOp final : public Operator<float, DeviceContext> {
               vector<int>(proto.dims().begin(), proto.dims().end()));
           CHECK_EQ(output->size(), proto.float_data_size());
           this->device_context_.template Copy<float, CPUContext, DeviceContext>(
-              output->size(), proto.float_data().data(), output->mutable_data());
+              output->size(), proto.float_data().data(),
+              output->mutable_data());
           VLOG(1) << "Loaded float tensor " << key << ".";
           break;
         }
@@ -71,7 +71,8 @@ class LoadTensorOp final : public Operator<float, DeviceContext> {
               vector<int>(proto.dims().begin(), proto.dims().end()));
           CHECK_EQ(output->size(), proto.int32_data_size());
           this->device_context_.template Copy<int, CPUContext, DeviceContext>(
-              output->size(), proto.int32_data().data(), output->mutable_data());
+              output->size(), proto.int32_data().data(),
+              output->mutable_data());
           VLOG(1) << "Loaded int32 tensor " << key << ".";
           break;
         }
@@ -123,7 +124,6 @@ class SaveOp final : public OperatorBase {
   DISABLE_COPY_AND_ASSIGN(SaveOp);
 };
 
-namespace {
 template <typename ... Ts>
 string FormatString(const string& pattern, Ts... values) {
   unsigned int required =
@@ -132,7 +132,6 @@ string FormatString(const string& pattern, Ts... values) {
   std::snprintf(bytes, required, pattern.c_str(), values...);
   return string(bytes);
 }
-}  // namespace
 
 // SnapshotOp is a wrapper over a SaveFloatTensorOp that basically allows
 // flexible naming over iterations.

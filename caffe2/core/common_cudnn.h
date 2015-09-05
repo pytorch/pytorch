@@ -6,7 +6,7 @@
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/core/types.h"
 #include "caffe2/proto/caffe2.pb.h"
-#include "cudnn.h"
+#include "cudnn.h"  // NOLINT
 #include "glog/logging.h"
 
 namespace caffe2 {

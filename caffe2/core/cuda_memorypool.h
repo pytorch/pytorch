@@ -46,10 +46,10 @@ class CudaMemoryPool {
       cudaError_t error = cudaFree(data);
       // For some reason, in Python runtime we sometimes delete a data pointer
       // after the cuda runtime exits - this is odd but is probably caused by
-      // a static workspace that pycaffe2 uses, and the destruction got entangled
-      // in some race condition. Anyway, since cuda runtime is exiting anyway, we
-      // will not need to worry about memory leak, so we basically ignore it.
-      // This is definitely not ideal but works for now.
+      // a static workspace that pycaffe2 uses, and the destruction got
+      // entangled in some race condition. Anyway, since cuda runtime is exiting
+      // anyway, we will not need to worry about memory leak, so we basically
+      // ignore it. This is definitely not ideal but works for now.
       if (error != cudaSuccess && error != cudaErrorCudartUnloading) {
         LOG(FATAL) << "Error at: " << __FILE__ << ":" << __LINE__ << ": "
                    << cudaGetErrorString(error);
@@ -59,7 +59,7 @@ class CudaMemoryPool {
 
  private:
   // CudaMemoryPool is a singleton, so it should not be instantiated.
-  CudaMemoryPool() {};
+  CudaMemoryPool() {}
   static void* NewWithMemoryPool(size_t nbytes);
   static void DeleteWithMemoryPool(void* data);
 

@@ -81,4 +81,4 @@ inline bool GlobalInit(int* pargc, char*** pargv) {
 
 
 }  // namespace caffe2
-#endif  // CAFFE2_CORE_COMMON_H_
+#endif  // CAFFE2_CORE_INIT_H_
