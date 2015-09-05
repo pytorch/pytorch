@@ -56,6 +56,10 @@ class InitRegisterer {
 
 // Initialize the global environment of caffe2.
 inline bool GlobalInit(int* pargc, char*** pargv) {
+  static bool global_init_was_already_run = false;
+  if (global_init_was_already_run) {
+    LOG(FATAL) << "GlobalInit has already been called: did you double-call?";
+  }
   // Google flags.
   ::gflags::ParseCommandLineFlags(pargc, pargv, true);
   // Google logging.
@@ -63,8 +67,10 @@ inline bool GlobalInit(int* pargc, char*** pargv) {
   // Provide a backtrace on segfault.
   ::google::InstallFailureSignalHandler();
   // All other initialization functions.
-  return internal::Caffe2InitializeRegistry::Registry()
+  bool retval = internal::Caffe2InitializeRegistry::Registry()
       ->RunRegisteredInitFunctions();
+  global_init_was_already_run = true;
+  return retval;
 }
 
 

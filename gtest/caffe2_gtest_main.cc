@@ -29,20 +29,14 @@
 
 #include <iostream>
 
-#include "glog/logging.h"
-#include "gflags/gflags.h"
 #include "gtest/gtest.h"
+#include "caffe2/core/init.h"
 
 DEFINE_string(caffe_test_root, "gen/", "The root of the caffe test folder.");
-
-#ifndef GFLAGS_GFLAGS_H_
-  namespace gflags = google;
-#endif
 
 GTEST_API_ int main(int argc, char **argv) {
   // std::cout << "Running main() from gtest_main.cc\n";
   testing::InitGoogleTest(&argc, argv);
-  gflags::ParseCommandLineFlags(&argc, &argv, true);
-  google::InitGoogleLogging(argv[0]);
+  caffe2::GlobalInit(&argc, &argv);
   return RUN_ALL_TESTS();
 }

@@ -96,6 +96,6 @@ cc_test(
       ":core_ops_gpu",
       ":core_ops_cudnn",
       "//data/mnist:mnist_minidb",
-      "//gtest:gtest_main",
+      "//gtest:caffe2_gtest_main",
   ]
 )
