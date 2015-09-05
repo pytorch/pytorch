@@ -1,3 +1,4 @@
+#include "caffe2/core/init.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/utils/proto_utils.h"
@@ -7,9 +8,8 @@
 DEFINE_string(plan, "", "The given path to the plan protobuffer.");
 
 int main(int argc, char** argv) {
-  google::InitGoogleLogging(argv[0]);
+  caffe2::GlobalInit(&argc, &argv);
   gflags::SetUsageMessage("Runs a given plan.");
-  gflags::ParseCommandLineFlags(&argc, &argv, true);
   LOG(INFO) << "Loading plan: " << FLAGS_plan;
   caffe2::PlanDef plan_def;
   CHECK(ReadProtoFromFile(FLAGS_plan, &plan_def));

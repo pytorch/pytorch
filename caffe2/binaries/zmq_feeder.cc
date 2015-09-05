@@ -5,6 +5,7 @@
 #include <atomic>
 
 #include "caffe2/core/db.h"
+#include "caffe2/core/init.h"
 #include "caffe2/utils/zmq.hpp"
 #include "caffe2/binaries/gflags_namespace.h"
 #include "glog/logging.h"
@@ -21,9 +22,8 @@ std::unique_ptr<DB> in_db;
 std::unique_ptr<Cursor> cursor;
 
 int main(int argc, char** argv) {
-  google::InitGoogleLogging(argv[0]);
+  caffe2::GlobalInit(&argc, &argv);
   gflags::SetUsageMessage("Runs a given plan.");
-  gflags::ParseCommandLineFlags(&argc, &argv, true);
 
   LOG(INFO) << "Opening DB...";
   in_db.reset(caffe2::db::CreateDB(

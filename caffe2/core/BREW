@@ -17,6 +17,7 @@ cc_library(
       "common.h",
       "context.h",
       "db.h",
+      "init.h",
       "net.h",
       "operator.h",
       "registry.h",
@@ -29,6 +30,7 @@ cc_library(
     "//caffe2/utils:proto_utils",
     "//caffe2/utils:simple_queue",
     "//third_party/glog:glog",
+    "//third_party/gflags:gflags",
   ],
   whole_archive = True,
 )

@@ -2,6 +2,7 @@
 #include <fstream>
 
 #include "caffe2/core/client.h"
+#include "caffe2/core/init.h"
 #include "caffe2/binaries/gflags_namespace.h"
 #include "glog/logging.h"
 
@@ -13,9 +14,8 @@ DEFINE_string(input_file, "",
               "The input file containing a list of float numbers.");
 
 int main(int argc, char** argv) {
-  google::InitGoogleLogging(argv[0]);
+  caffe2::GlobalInit(&argc, &argv);
   gflags::SetUsageMessage("Runs a given client.");
-  gflags::ParseCommandLineFlags(&argc, &argv, true);
   LOG(INFO) << "Loading client file: " << FLAGS_client_file;
   caffe2::Client client(FLAGS_client_file);
   std::vector<float> input;

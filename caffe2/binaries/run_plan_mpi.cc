@@ -1,5 +1,6 @@
 #include <mpi.h>
 
+#include "caffe2/core/init.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/utils/proto_utils.h"
@@ -16,9 +17,8 @@ int main(int argc, char** argv) {
                   "MPI_THREAD_MULTIPLE mode";
     return 1;
   }
-  google::InitGoogleLogging(argv[0]);
+  caffe2::GlobalInit(&argc, &argv);
   gflags::SetUsageMessage("Runs a given plan.");
-  gflags::ParseCommandLineFlags(&argc, &argv, true);
   LOG(INFO) << "Loading plan: " << FLAGS_plan;
   caffe2::PlanDef plan_def;
   CHECK(ReadProtoFromFile(FLAGS_plan, &plan_def));

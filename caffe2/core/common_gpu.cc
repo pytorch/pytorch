@@ -1,6 +1,7 @@
 #include <sstream>
 
 #include "caffe2/core/common_gpu.h"
+#include "caffe2/core/init.h"
 
 namespace caffe2 {
 
@@ -112,6 +113,38 @@ const char* curandGetErrorString(curandStatus_t error) {
   // To suppress compiler warning.
   return "Unrecognized curand error string";
 }
+
+bool Caffe2EnableCudaPeerAccess() {
+  int device_count;
+  CUDA_CHECK(cudaGetDeviceCount(&device_count));
+  int init_device;
+  CUDA_CHECK(cudaGetDevice(&init_device));
+  for (int i = 0; i < device_count; ++i) {
+    if (cudaSetDevice(i) != cudaSuccess) {
+      LOG(ERROR) << "Cannot use device " << i
+                 << ", skipping setting peer access for this device.";
+      continue;
+    }
+    for (int j = 0; j < device_count; ++j) {
+      if (i == j) continue;
+      int can_access;
+      CUDA_CHECK(cudaDeviceCanAccessPeer(&can_access, i, j));
+      if (can_access) {
+        LOG(INFO) << "Enabling peer access from " << i << " to " << j;
+        // Note: just for future reference, the 0 here is not a gpu id, it is
+        // a reserved flag for cudaDeviceEnablePeerAccess that should always be
+        // zero currently.
+        CUDA_CHECK(cudaDeviceEnablePeerAccess(j, 0));
+      }
+    }
+  }
+  CUDA_CHECK(cudaSetDevice(init_device));
+  return true;
+}
+
+REGISTER_CAFFE2_INIT_FUNCTION(Caffe2EnableCudaPeerAccess,
+                              &Caffe2EnableCudaPeerAccess,
+                              "Enable cuda peer access.");
 
 }  // namespace internal
 }  // namespace caffe2

@@ -15,6 +15,7 @@
 
 #include "caffe2/core/common.h"
 #include "caffe2/core/db.h"
+#include "caffe2/core/init.h"
 #include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/binaries/gflags_namespace.h"
 #include "glog/logging.h"
@@ -141,9 +142,8 @@ void ConvertImageDataset(
 
 
 int main(int argc, char** argv) {
-  google::InitGoogleLogging(argv[0]);
+  caffe2::GlobalInit(&argc, &argv);
   gflags::SetUsageMessage("Converts an image dataset to a db.");
-  gflags::ParseCommandLineFlags(&argc, &argv, true);
   caffe2::ConvertImageDataset(
       FLAGS_input_folder, FLAGS_list_file,
       FLAGS_output_db_name, FLAGS_shuffle);

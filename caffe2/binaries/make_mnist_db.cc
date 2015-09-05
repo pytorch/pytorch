@@ -7,6 +7,7 @@
 
 #include "caffe2/core/common.h"
 #include "caffe2/core/db.h"
+#include "caffe2/core/init.h"
 #include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/binaries/gflags_namespace.h"
 #include "glog/logging.h"
@@ -114,9 +115,8 @@ void convert_dataset(const char* image_filename, const char* label_filename,
 }  // namespace caffe2
 
 int main(int argc, char** argv) {
-  google::InitGoogleLogging(argv[0]);
+  caffe2::GlobalInit(&argc, &argv);
   gflags::SetUsageMessage("Converts the raw mnist dataset to a leveldb.");
-  gflags::ParseCommandLineFlags(&argc, &argv, true);
   caffe2::convert_dataset(FLAGS_image_file.c_str(), FLAGS_label_file.c_str(),
                           FLAGS_output_file.c_str(), FLAGS_data_limit);
   return 0;
