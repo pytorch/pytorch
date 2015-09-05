@@ -32,6 +32,7 @@ py_library(
       "core_gradients.py",
       "device_checker.py",
       "gradient_checker.py",
+      "muji.py",
       "net_drawer.py",
       "utils.py",
       "visualize.py",
@@ -64,6 +65,16 @@ py_test(
   name = "workspace_gpu_test",
   srcs = [
       "workspace_gpu_test.py",
+  ],
+  deps = [
+      ":pycaffe2",
+  ],
+)
+
+py_test(
+  name = "muji_test",
+  srcs = [
+      "muji_test.py",
   ],
   deps = [
       ":pycaffe2",
