@@ -1,5 +1,6 @@
 import atexit
 from caffe2.proto import caffe2_pb2
+from google.protobuf.message import Message
 from multiprocessing import Process
 import os
 import socket
@@ -75,13 +76,11 @@ def StringfyProto(obj):
   if type(obj) is str:
     return obj
   else:
-    try:
+    if isinstance(obj, Message):
       # First, see if this object is a protocol buffer, which we can simply
       # serialize with the SerializeToString() call.
       return obj.SerializeToString()
-    except AttributeError:
-      # Secind, see if this is an object defined in Pycaffe2, which exposes a
-      # Proto() function that gives you the protocol buffer.
+    elif hasattr(obj, 'Proto'):
       return obj.Proto().SerializeToString()
 
 def ResetWorkspace(root_folder=None):
