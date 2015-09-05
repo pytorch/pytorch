@@ -3,7 +3,6 @@
 
 #include "caffe2/core/client.h"
 #include "caffe2/core/init.h"
-#include "caffe2/binaries/gflags_namespace.h"
 #include "glog/logging.h"
 
 DEFINE_string(client_file, "", "The given path to the client protobuffer.");
