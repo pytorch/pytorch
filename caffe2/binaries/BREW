@@ -1,17 +1,9 @@
-cc_headers(
-  name = "gflags_namespace_header",
-  srcs = [
-    "gflags_namespace.h",
-  ],
-)
-
 cc_binary(
   name = "convert_caffe_image_db",
   srcs = [
       "convert_caffe_image_db.cc",
   ],
   deps = [
-      ":gflags_namespace_header",
       "//caffe/proto:caffe_proto",
       "//caffe2/db:db",
       "//caffe2/proto:caffe2_proto",
@@ -26,7 +18,6 @@ cc_binary(
       "convert_db.cc",
   ],
   deps = [
-      ":gflags_namespace_header",
       "//caffe2/db:db",
       "//third_party/gflags:gflags",
       "//third_party/glog:glog",
@@ -39,7 +30,6 @@ cc_binary(
       "convert_encoded_to_raw_leveldb.cc",
   ],
   deps = [
-      ":gflags_namespace_header",
       "//caffe2/core:core",
       "//caffe2/proto:caffe2_proto",
       "//third_party/leveldb:leveldb",
@@ -57,7 +47,6 @@ cc_binary(
       "db_throughput.cc",
   ],
   deps = [
-      ":gflags_namespace_header",
       "//caffe2/db:db",
       "//third_party/gflags:gflags",
       "//third_party/glog:glog",
@@ -70,7 +59,6 @@ cc_binary(
       "make_cifar_db.cc",
   ],
   deps = [
-      ":gflags_namespace_header",
       "//caffe2/db:db",
       "//caffe2/proto:caffe2_proto",
       "//third_party/gflags:gflags",
@@ -84,7 +72,6 @@ cc_binary(
       "make_image_db.cc",
   ],
   deps = [
-      ":gflags_namespace_header",
       "//caffe2/db:db",
       "//caffe2/proto:caffe2_proto",
       "//third_party/gflags:gflags",
@@ -101,7 +88,6 @@ cc_binary(
       "make_mnist_db.cc",
   ],
   deps = [
-      ":gflags_namespace_header",
       "//caffe2/db:db",
       "//caffe2/proto:caffe2_proto",
       "//third_party/gflags:gflags",
@@ -127,7 +113,6 @@ cc_binary(
       "run_client.cc",
   ],
   deps = [
-      ":gflags_namespace_header",
       "//caffe2/core:core",
       "//caffe2:all_available_ops",
       "//caffe2/db:db",
@@ -143,7 +128,6 @@ cc_binary(
       "run_plan.cc",
   ],
   deps = [
-      ":gflags_namespace_header",
       "//caffe2:all_available_ops",
       "//caffe2/core:core",
       "//caffe2/db:db",
@@ -159,7 +143,6 @@ cc_binary(
       "run_plan_mpi.cc",
   ],
   deps = [
-      ":gflags_namespace_header",
       "//caffe2:all_available_ops",
       "//caffe2/core:core",
       "//caffe2/db:db",
@@ -187,7 +170,6 @@ cc_binary(
       "split_db.cc",
   ],
   deps = [
-      ":gflags_namespace_header",
       "//caffe2/db:db",
       "//third_party/gflags:gflags",
       "//third_party/glog:glog",
@@ -200,7 +182,6 @@ cc_binary(
       "zmq_feeder.cc",
   ],
   deps = [
-      ":gflags_namespace_header",
       "//caffe2/db:db",
       "//caffe2/utils:zmq_hpp",
       "//third_party/gflags:gflags",
