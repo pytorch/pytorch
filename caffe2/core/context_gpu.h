@@ -13,10 +13,13 @@ namespace caffe2 {
 class CUDAContext {
  public:
   // The default cuda context constructor.
-  CUDAContext()
-      : cuda_stream_(nullptr), cublas_handle_(nullptr),
-        random_seed_(1701), curand_generator_(nullptr) {
-    cuda_gpu_id_ = GetDefaultGPUID();
+  CUDAContext(const int gpu_id = -1)
+      : cuda_gpu_id_(gpu_id), cuda_stream_(nullptr),
+        cublas_handle_(nullptr), random_seed_(1701),
+        curand_generator_(nullptr) {
+    if (gpu_id == -1) {
+      cuda_gpu_id_ = GetDefaultGPUID();
+    }
     CUDA_CHECK(cudaSetDevice(cuda_gpu_id_));
     CUDA_CHECK(cudaStreamCreate(&cuda_stream_));
   }
