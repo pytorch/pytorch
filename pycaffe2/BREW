@@ -61,6 +61,16 @@ py_test(
 )
 
 py_test(
+  name = "workspace_gpu_test",
+  srcs = [
+      "workspace_gpu_test.py",
+  ],
+  deps = [
+      ":pycaffe2",
+  ],
+)
+
+py_test(
   name = "caffe_translator_test",
   srcs = [
       "caffe_translator_test.py",

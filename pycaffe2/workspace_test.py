@@ -58,24 +58,6 @@ class TestWorkspace(unittest.TestCase):
     self.assertEqual(fetched_again.shape, (1, 2, 3, 4))
     np.testing.assert_array_equal(fetched_again, 2.0)
 
-class TestWorkspaceGPU(unittest.TestCase):
-  def setUp(self):
-    self.net = core.Net("test-net")
-    self.net.ConstantFill([], "testblob", shape=[1, 2, 3, 4], value=1.0)
-    self.net.RunAllOnGPU()
-
-  def testFetchBlobGPU(self):
-    self.assertEqual(workspace.RunNetOnce(self.net.Proto().SerializeToString()), True)
-    fetched = workspace.FetchBlob("testblob")
-    # check if fetched is correct.
-    self.assertEqual(fetched.shape, (1, 2, 3, 4))
-    np.testing.assert_array_equal(fetched, 1.0)
-    fetched[:] = 2.0
-    self.assertEqual(workspace.FeedBlob("testblob", fetched), True)
-    fetched_again = workspace.FetchBlob("testblob")
-    self.assertEqual(fetched_again.shape, (1, 2, 3, 4))
-    np.testing.assert_array_equal(fetched_again, 2.0)
-
 
 class TestMultiWorkspaces(unittest.TestCase):
   def setUp(self):

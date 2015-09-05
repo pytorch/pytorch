@@ -385,7 +385,7 @@ PyObject* FetchBlob(PyObject* self, PyObject* args) {
 #ifndef PYCAFFE2_CPU_ONLY
   RETURN_TENSOR_IF_FORMAT(float, caffe2::CUDAContext)
   RETURN_TENSOR_IF_FORMAT(int, caffe2::CUDAContext)
-#endif  // PYCAFFE2_CPU_ONLY
+#endif  // !PYCAFFE2_CPU_ONLY
 
   // If all branches failed, we should throw an error.
   LOG(ERROR) << "Blob" << caffe2::string(name) << " has unsupported data type: "
@@ -439,7 +439,7 @@ PyObject* FeedBlob(PyObject* self, PyObject* args) {
         PyErr_SetString(PyExc_TypeError, "Unsupported numpy data type.");
         return NULL;
     }
-#endif  // PYCAFFE2_CPU_ONLY
+#endif  // !PYCAFFE2_CPU_ONLY
   default:
     PyErr_SetString(PyExc_TypeError, "Unknown device type.");
     return NULL;
@@ -448,7 +448,55 @@ PyObject* FeedBlob(PyObject* self, PyObject* args) {
 
 #ifndef PYCAFFE2_CPU_ONLY
 // Here are functions that are purely GPU-based functions to be filled.
-#endif  // PYCAFFE2_CPU_ONLY
+
+PyObject* NumberOfGPUs(PyObject* self, PyObject* args) {
+  int num_devices;
+  if (cudaGetDeviceCount(&num_devices) != cudaSuccess) {
+    PyErr_SetString(PyExc_RuntimeError, "Runtime CUDA error.");
+    return NULL;
+  }
+  return Py_BuildValue("i", num_devices);
+}
+
+PyObject* SetDefaultGPUID(PyObject* self, PyObject* args) {
+  int device_id;
+  if (!PyArg_ParseTuple(args, "i", &device_id)) {
+    PyErr_SetString(PyExc_ValueError, "Incorrect arguments: must pass an int.");
+    return NULL;
+  }
+  caffe2::SetDefaultGPUID(device_id);
+  Py_RETURN_TRUE;
+}
+
+PyObject* GetDefaultGPUID(PyObject* self, PyObject* args) {
+  int device_id = caffe2::GetDefaultGPUID();
+  return Py_BuildValue("i", device_id);
+}
+
+PyObject* GetCudaPeerAccessPattern(PyObject* self, PyObject* args) {
+  std::vector<std::vector<bool> > pattern;
+  if (!caffe2::GetCudaPeerAccessPattern(&pattern)) {
+    PyErr_SetString(PyExc_RuntimeError,
+                    "Error in running caffe2::GetCudaPeerAccessPattern.");
+    return NULL;
+  }
+  std::vector<npy_intp> npy_dims;
+  int num_devices = pattern.size();
+  npy_dims.push_back(num_devices);
+  npy_dims.push_back(num_devices);
+
+  PyObject* array = PyArray_SimpleNew(2, npy_dims.data(), NPY_BOOL);
+  bool* npy_data = static_cast<bool*>(
+      PyArray_DATA(reinterpret_cast<PyArrayObject*>(array)));
+  for (int i = 0; i < num_devices; ++i) {
+    for (int j = 0; j < num_devices; ++j) {
+      *(npy_data++) = pattern[i][j];
+    }
+  }
+  return array;
+}
+
+#endif  // !PYCAFFE2_CPU_ONLY
 
 // A simple macro to avoid writing repeated symbols.
 #define _PYNAME(name) {#name, name, METH_VARARGS}
@@ -476,6 +524,16 @@ static PyMethodDef gPycaffe2Methods[] = {
   _PYNAME(CreateBlob),
   _PYNAME(FetchBlob),
   {"cc_FeedBlob", FeedBlob, METH_VARARGS},
+#ifndef PYCAFFE2_CPU_ONLY
+  _PYNAME(NumberOfGPUs),
+  _PYNAME(SetDefaultGPUID),
+  _PYNAME(GetDefaultGPUID),
+  _PYNAME(GetCudaPeerAccessPattern),
+#endif   // !PYCAFFE2_CPU_ONLY
+
+
+
+
   {NULL, NULL},  // end of python methods.
 };
 #undef _PYNAME
@@ -483,10 +541,10 @@ static PyMethodDef gPycaffe2Methods[] = {
 #ifdef PYCAFFE2_CPU_ONLY
 void initlibcaffe2_python_nogpu(void) {
   (void) Py_InitModule("libcaffe2_python_nogpu", gPycaffe2Methods);
-#else
+#else  // !PYCAFFE2_CPU_ONPY
 void initlibcaffe2_python(void) {
   (void) Py_InitModule("libcaffe2_python", gPycaffe2Methods);
-#endif
+#endif  // PYCAFFE2_CPU_ONPY
   import_array();  // for numpy
   // We will create a default workspace for us to run stuff.
   SwitchWorkspaceInternal("default", true);
