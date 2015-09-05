@@ -48,6 +48,28 @@ void DeviceQuery(const int device) {
   return;
 }
 
+
+bool GetCudaPeerAccessPattern(vector<vector<bool> >* pattern) {
+  int gpu_count;
+  if (cudaGetDeviceCount(&gpu_count) != cudaSuccess) return false;
+  pattern->clear();
+  pattern->resize(gpu_count, vector<bool>(gpu_count, false));
+  int can_access;
+  for (int i = 0; i < gpu_count; ++i) {
+    for (int j = 0; j < gpu_count; ++j) {
+      int can_access = true;
+      if (i != j) {
+        if (cudaDeviceCanAccessPeer(&can_access, i, j)
+                 != cudaSuccess) {
+          return false;
+        }
+      }
+      (*pattern)[i][j] = can_access;
+    }
+  }
+  return true;
+}
+
 namespace internal {
 
 const char* cublasGetErrorString(cublasStatus_t error) {

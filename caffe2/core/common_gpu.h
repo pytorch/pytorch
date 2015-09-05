@@ -20,6 +20,9 @@ namespace caffe2 {
 void SetDefaultGPUID(const int deviceid);
 int GetDefaultGPUID();
 void DeviceQuery(const int deviceid);
+// Return a peer access pattern by returning a matrix (in the format of a
+// nested vector) of boolean values specifying whether peer access is possible.
+bool GetCudaPeerAccessPattern(vector<vector<bool> >* pattern);
 
 namespace internal {
 const char* cublasGetErrorString(cublasStatus_t error);
