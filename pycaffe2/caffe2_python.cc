@@ -11,6 +11,7 @@
 #ifndef PYCAFFE2_CPU_ONLY
 #include "caffe2/core/context_gpu.h"
 #endif  // PYCAFFE2_CPU_ONLY
+#include "caffe2/core/init.h"
 #include "caffe2/core/net.h"
 #include "caffe2/core/workspace.h"
 #include "caffe2/proto/caffe2.pb.h"
@@ -118,16 +119,28 @@ PyObject* FeedTensor(const DeviceOption& option, PyArrayObject* original_array,
 
 extern "C" {
 
-// The InitGoogleLogging function is provided so one can initialize glog
-// from python. You should make sure it is not called twice. We provide a thin
-// protector but be noted that this does not prevent other functions to
-// initialize google logging.
-PyObject* InitGoogleLogging(PyObject* self, PyObject* args) {
-  static bool google_logging_initialized = false;
-  if (!google_logging_initialized) {
-    char binary_name[] = "python";
-    google::InitGoogleLogging(binary_name);
-    google_logging_initialized = true;
+PyObject* GlobalInit(PyObject* self, PyObject* args) {
+  static bool global_init_called = false;
+  if (global_init_called) {
+    PyErr_SetString(PyExc_RuntimeError, "GlobalInit already called.");
+    return NULL;
+  }
+  PyObject* list;
+  if (!PyArg_ParseTuple(args, "O!", &PyList_Type, &list)) {
+    PyErr_SetString(PyExc_ValueError, "Incorrect arguments.");
+    return NULL;
+  }
+  int argc = PyList_Size(list);
+  std::unique_ptr<char*> argv(new char*[argc]);
+  char** raw_argv = argv.get();
+  for (int i = 0; i < argc; ++i) {
+    // Get the pointer to the string
+    raw_argv[i] = PyString_AsString(PyList_GetItem(list, i));
+  }
+  global_init_called = true;
+  if (!caffe2::GlobalInit(&argc, &raw_argv)) {
+    PyErr_SetString(PyExc_RuntimeError, "Error in global init.");
+    return NULL;
   }
   Py_RETURN_TRUE;
 }
@@ -433,6 +446,10 @@ PyObject* FeedBlob(PyObject* self, PyObject* args) {
   }
 }
 
+#ifndef PYCAFFE2_CPU_ONLY
+// Here are functions that are purely GPU-based functions to be filled.
+#endif  // PYCAFFE2_CPU_ONLY
+
 // A simple macro to avoid writing repeated symbols.
 #define _PYNAME(name) {#name, name, METH_VARARGS}
 
@@ -440,7 +457,7 @@ static PyMethodDef gPycaffe2Methods[] = {
   // TODO(Yangqing): write the methods string.
   // Note(Yangqing): For any function that we are going to override in the
   // python file, we prepend "cc_" here.
-  _PYNAME(InitGoogleLogging),
+  _PYNAME(GlobalInit),
   _PYNAME(SwitchWorkspace),
   _PYNAME(CurrentWorkspace),
   _PYNAME(Workspaces),
