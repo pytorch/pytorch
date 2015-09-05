@@ -12,6 +12,7 @@
 
 #include "caffe2/core/common.h"
 #include "caffe2/core/db.h"
+#include "caffe2/core/init.h"
 #include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/binaries/gflags_namespace.h"
 #include "glog/logging.h"
@@ -136,11 +137,10 @@ void ConvertCIFAR() {
 }  // namespace caffe2
 
 int main(int argc, char** argv) {
-  google::InitGoogleLogging(argv[0]);
+  caffe2::GlobalInit(&argc, &argv);
   gflags::SetUsageMessage(
       "This script converts the CIFAR dataset to the db format used "
       "by caffe to perform classification.");
-  gflags::ParseCommandLineFlags(&argc, &argv, true);
   caffe2::ConvertCIFAR();
   return 0;
 }

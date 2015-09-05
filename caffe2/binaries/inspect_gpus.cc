@@ -4,10 +4,11 @@
 #include <sstream>
 
 #include "caffe2/core/common_gpu.h"
+#include "caffe2/core/init.h"
 #include "glog/logging.h"
 
 int main(int argc, char** argv) {
-  google::InitGoogleLogging(argv[0]);
+  caffe2::GlobalInit(&argc, &argv);
 
   int gpu_count;
   CUDA_CHECK(cudaGetDeviceCount(&gpu_count));

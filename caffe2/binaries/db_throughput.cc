@@ -2,6 +2,7 @@
 #include <cstdio>
 
 #include "caffe2/core/db.h"
+#include "caffe2/core/init.h"
 #include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/binaries/gflags_namespace.h"
 #include "glog/logging.h"
@@ -16,10 +17,9 @@ using caffe2::db::DB;
 using caffe2::string;
 
 int main(int argc, char** argv) {
-  google::InitGoogleLogging(argv[0]);
+  caffe2::GlobalInit(&argc, &argv);
   gflags::SetUsageMessage(
       "This script reports the throughput .");
-  gflags::ParseCommandLineFlags(&argc, &argv, true);
 
   std::unique_ptr<DB> in_db(caffe2::db::CreateDB(
       FLAGS_input_db_type, FLAGS_input_db, caffe2::db::READ));

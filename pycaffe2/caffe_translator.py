@@ -148,7 +148,9 @@ def TranslateConv(layer, pretrained_blobs):
   AddArgument(caffe_op, "order", "NCHW")
   if param.group > 1:
     # Now, if the model is grouped convolution, let's do a backward hack and make
-    # things working but in an efficient way by inserting zero parameters.
+    # things working but in an efficient way by inserting zero parameters. Note
+    # that this is not computationally safe, but grouped convolution is such an
+    # antique technology that we should really deprecate it.
     n, c, h, w = pretrained_blobs[0].shape
     g = param.group
     og = int(n / g)

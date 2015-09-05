@@ -14,6 +14,7 @@
 #include <random>
 #include <string>
 
+#include "caffe2/core/init.h"
 #include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/binaries/gflags_namespace.h"
 #include "glog/logging.h"
@@ -131,9 +132,8 @@ void ConvertToRawDataset(
 
 
 int main(int argc, char** argv) {
-  google::InitGoogleLogging(argv[0]);
+  caffe2::GlobalInit(&argc, &argv);
   gflags::SetUsageMessage("Converts an image dataset to a leveldb.");
-  gflags::ParseCommandLineFlags(&argc, &argv, true);
   caffe2::ConvertToRawDataset(
       FLAGS_input_db_name, FLAGS_output_db_name);
   return 0;
