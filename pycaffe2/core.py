@@ -20,6 +20,11 @@ class BlobReference(object):
   def __str__(self):
     return self._name
 
+  def __add__(self, other):
+    if not isinstance(other, str):
+      raise RuntimeError('Cannot add BlobReference to a non-string.')
+    return self._name + other
+
   def Net(self):
     return self._from_net
 
@@ -38,6 +43,8 @@ class BlobReference(object):
       """Internal function that routes the operator generation to the network's
       __getattr__ function.
       """
+      if isinstance(inputs, BlobReference) or isinstance(inputs, str):
+        inputs = [inputs]
       # add self to the input list.
       inputs.insert(0, self)
       return self._from_net.__getattr__(op_type)(inputs, *args, **kwargs)
