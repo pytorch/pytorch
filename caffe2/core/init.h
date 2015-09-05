@@ -2,7 +2,13 @@
 #define CAFFE2_CORE_INIT_H_
 
 #include "caffe2/core/common.h"
+#include "gflags/gflags.h"
 #include "glog/logging.h"
+
+// This allows us to use legacy gflags namespaces.
+#ifndef GFLAGS_GFLAGS_H_
+  namespace gflags = google;
+#endif
 
 namespace caffe2 {
 
