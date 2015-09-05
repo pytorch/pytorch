@@ -3,6 +3,7 @@ from caffe2.proto import caffe2_pb2
 from google.protobuf.message import Message
 from multiprocessing import Process
 import os
+import sys
 import socket
 from pycaffe2 import utils
 
@@ -13,6 +14,10 @@ except ImportError as e:
   print 'Pycaffe+GPU is not available. Using CPU only version.'
   from .libcaffe2_python_nogpu import *
   has_gpu_support = False
+# We will always do a GlobalInit when we first import the workspace module.
+# This is needed so we can make sure all underlying caffe2 stuff are properly
+# initialized.
+GlobalInit(sys.argv)
 # libcaffe2_python contains a global Workspace that we need to properly delete
 # when exiting. Otherwise, cudart will cause segfaults sometimes.
 atexit.register(OnModuleExit)
