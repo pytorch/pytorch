@@ -62,8 +62,11 @@ def CreateOperator(operator_type):
     operator.name = name
     if type(inputs) is str or type(inputs) is BlobReference:
       inputs = [inputs]
+    elif type(inputs) is unicode:
+      inputs = [str(inputs)]
     elif type(inputs) is not list:
-      raise ValueError("Unknown input format: %s." % str(inputs))
+      raise ValueError("Unknown input format: %s of type %s."
+                       % (str(inputs), type(inputs)))
     if type(outputs) is str or type(outputs) is BlobReference:
       outputs = [outputs]
     elif type(outputs) is not list:

@@ -15,14 +15,17 @@ class DepthSplitOp final : public Operator<dtype, DeviceContext> {
   DepthSplitOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<dtype, DeviceContext>(operator_def, ws),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<string>("order", "NHWC"))) {}
+            OperatorBase::GetSingleArgument<string>("order", "NHWC"))),
+        dimensions_(
+            OperatorBase::GetRepeatedArgument<int>("dimensions")) {}
   bool RunOnDevice() override;
 
  protected:
   StorageOrder order_;
-  // Input: X, dimensions
+  vector<int> dimensions_;
+  // Input: X, optionally dimensions
   // The dimensions are stored in CPU.
-  INPUT_OUTPUT_STATS(2, 2, 1, INT_MAX);
+  INPUT_OUTPUT_STATS(1, 2, 1, INT_MAX);
   DISABLE_COPY_AND_ASSIGN(DepthSplitOp);
 };
 
@@ -49,12 +52,26 @@ class DepthConcatOp final : public Operator<dtype, DeviceContext> {
 template <typename dtype, class DeviceContext>
 bool DepthSplitOp<dtype, DeviceContext>::RunOnDevice() {
   auto& input = Input(0);
-  auto& dimensions =
-      OperatorBase::Input<Tensor<int, CPUContext> >(1);
-  const int* dim_data = dimensions.data();
-  DCHECK_EQ(dimensions.size(), OutputSize());
-  DCHECK_EQ(std::accumulate(dim_data, dim_data + OutputSize(), 0),
-            (order_ == StorageOrder::NCHW ? input.dim(1) : input.dim(3)));
+  const int* dim_data;
+  if (InputSize() == 2) {
+    // We obtain dimensions from the input tensor.
+    CHECK_EQ(dimensions_.size(), 0)
+        << "If you set dimensions with an input blob, do not pass in "
+        << "dimensions in the argument.";
+    auto& dimensions_tensor =
+        OperatorBase::Input<Tensor<int, CPUContext> >(1);
+    CHECK_EQ(dimensions_tensor.size(), OutputSize());
+    dim_data = dimensions_tensor.data();
+  } else {
+    // We obtain dimensions from the parameters.
+    CHECK_EQ(dimensions_.size(), OutputSize());
+    dim_data = dimensions_.data();
+  }
+  const int input_channels =
+      (order_ == StorageOrder::NCHW ? input.dim(1) : input.dim(3));
+  CHECK_EQ(std::accumulate(dim_data, dim_data + OutputSize(), 0),
+           input_channels)
+      << "Dimensions do not match: should be " << input_channels;
   int input_offset = 0;
   for (int i = 0; i < OutputSize(); ++i) {
     auto* output = Output(i);

@@ -40,7 +40,7 @@ def Allreduce(net, blobs, reduced_affix="_reduced", gpu_indices=None):
 
 def Allreduce2(net, blobs, reduced_affix, gpu_indices):
   """Allreduce for 2 gpus.
-  
+
   Algorithm: 0r <- 0 + 1, 1r <- 0r, where r means "reduced"
   """
   a, b = blobs
@@ -54,7 +54,7 @@ def Allreduce2(net, blobs, reduced_affix, gpu_indices):
 def Allreduce4(net, blobs, reduced_affix, gpu_indices):
   """Allreduce for 4 gpus.
 
-  Algorithm: 2 level reduction. 
+  Algorithm: 2 level reduction.
       0r <- 0 + 1, 2r <- 2 + 3
       0r <- 0r + 2r
       2r <- 0r,
@@ -124,7 +124,7 @@ def Allreduce8(net, blobs, reduced_affix, gpu_indices):
 
 def AllreduceFallback(net, blobs, reduced_affix, gpu_indices):
   """A fallback option for Allreduce with no assumption on p2p.
-  
+
   Algorithm: a flat operation on gpu 0
       0r <- 0
       0r <- 0r + i for i in gpu_indices[1:]

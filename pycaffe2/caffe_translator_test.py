@@ -45,6 +45,8 @@ if __name__ == '__main__':
   net, pretrained_params = caffe_translator.TranslateModel(
       caffenet, caffenet_pretrained)
   caffe_translator.DeleteDropout(net)
+  with open('data/testdata/caffe_translator/bvlc_reference_caffenet.translatedmodel', 'w') as fid:
+    fid.write(str(net))
   for param in pretrained_params.protos:
       workspace.FeedBlob(param.name, utils.Caffe2TensorToNumpyArray(param))
   # Let's also feed in the data from the Caffe test code.
