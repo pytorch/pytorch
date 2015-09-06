@@ -517,7 +517,8 @@ class mpi_test(cc_target):
   def SetUp(self):
     cc_target.SetUp(self)
     self.command_groups.append([
-        ' '.join(['mpirun -n', str(self.mpi_size), self.OutputName(),
+        ' '.join(['mpirun --allow-run-as-root -n',
+                  str(self.mpi_size), self.OutputName(),
                   '--caffe_test_root', os.path.abspath(Env.GENDIR),
                   '--gtest_filter=-*.LARGE_*'])])
 

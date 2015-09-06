@@ -34,7 +34,7 @@ def _GetPythonIncludes():
     import numpy.distutils
     includes += ' -I' + ' -I'.join(
       numpy.distutils.misc_util.get_numpy_include_dirs())
-  except Error as e:
+  except Exception as e:
     pass
   return includes
 
