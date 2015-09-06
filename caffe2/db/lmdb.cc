@@ -67,13 +67,11 @@ class LMDBTransaction final : public Transaction {
   ~LMDBTransaction() {
     MDB_CHECK(mdb_txn_commit(mdb_txn_));
     mdb_dbi_close(mdb_env_, mdb_dbi_);
-    mdb_txn_abort(mdb_txn_);
   }
   void Put(const string& key, const string& value) override;
   void Commit() override {
     MDB_CHECK(mdb_txn_commit(mdb_txn_));
     mdb_dbi_close(mdb_env_, mdb_dbi_);
-    mdb_txn_abort(mdb_txn_);
     // Begin a new transaction.
     MDB_CHECK(mdb_txn_begin(mdb_env_, NULL, 0, &mdb_txn_));
     MDB_CHECK(mdb_dbi_open(mdb_txn_, NULL, 0, &mdb_dbi_));
