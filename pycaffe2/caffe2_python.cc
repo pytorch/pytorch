@@ -450,8 +450,11 @@ PyObject* FeedBlob(PyObject* self, PyObject* args) {
 // Here are functions that are purely GPU-based functions to be filled.
 
 PyObject* NumberOfGPUs(PyObject* self, PyObject* args) {
-  int num_devices;
-  if (cudaGetDeviceCount(&num_devices) != cudaSuccess) {
+  int num_devices = 0;
+  auto err = cudaGetDeviceCount(&num_devices);
+  if (err == cudaErrorNoDevice || err == cudaErrorInsufficientDriver) {
+    return Py_BuildValue("i", 0);
+  } else if (err != cudaSuccess) {
     PyErr_SetString(PyExc_RuntimeError, "Runtime CUDA error.");
     return NULL;
   }

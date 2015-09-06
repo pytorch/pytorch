@@ -94,7 +94,6 @@ cc_test(
   deps = [
       ":core_ops",
       ":core_ops_gpu",
-      ":core_ops_cudnn",
       "//data/mnist:mnist_minidb",
       "//gtest:caffe2_gtest_main",
   ]

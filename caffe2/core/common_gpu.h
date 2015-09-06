@@ -14,6 +14,10 @@
 
 namespace caffe2 {
 
+// Check if the current running session has a cuda gpu present. Note that this
+// is different from having caffe2 built with cuda - it is possible that
+// caffe2 is built with cuda but there is no cuda hardware available.
+bool HasCudaGPU();
 // Sets and gets the default GPU id. If the function is not called, we will use
 // GPU 0 ast he default gpu id. If there is an operator that says it runs on the
 // GPU but did not specify which GPU, this default gpuid is going to be used.
