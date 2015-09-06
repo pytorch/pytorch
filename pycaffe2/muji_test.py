@@ -67,4 +67,5 @@ if __name__ == '__main__':
   elif workspace.NumberOfGPUs() == 0:
     print 'No GPU device. Skipping gpu test.'
   else:
+    workspace.GlobalInit(['python'])
     unittest.main()
