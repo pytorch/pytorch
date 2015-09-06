@@ -2,7 +2,7 @@ from caffe2.proto import caffe2_pb2, caffe2_legacy_pb2
 from caffe.proto import caffe_pb2
 from google.protobuf import text_format
 import numpy as np
-from pycaffe2 import utils
+from pycaffe2 import core, utils
 
 
 def _StateMeetsRule(state, rule):
@@ -49,7 +49,7 @@ def DeleteDropout(net):
   Outputs:
     None. The function works by modifying net in-place.
   """
-  for op in net.operators:
+  for op in net.op:
     if op.type == 'Dropout':
       op.type = 'Alias'
       del op.output[1]  # output 1 is the dropout mask, which is not needed.
@@ -73,7 +73,7 @@ class CacaRegistry(object):
     try:
       caffe_ops, params = cls.registry_[layer.type](layer, pretrained_blobs)
     except KeyError as err:
-      raise KeyError('No translator registered for layer: %s' % str(layer))
+      raise KeyError('No translator registered for layer: %s yet.' % str(layer))
     if caffe_ops is None:
       return []
     if type(caffe_ops) is not list:
@@ -110,7 +110,7 @@ class CacaRegistry(object):
         # print 'No pretrained layer for layer', layer.name
         pretrained_blobs = []
       operators, params = cls.TranslateLayer(layer, pretrained_blobs)
-      net.operators.extend(operators)
+      net.op.extend(operators)
       net_params.protos.extend(params)
     return net, net_params
 
@@ -138,34 +138,71 @@ def AddArgument(op, key, value):
 
 @CacaRegistry.Register("Convolution")
 def TranslateConv(layer, pretrained_blobs):
+  param = layer.convolution_param
+  if param.group > 1:
+    return TranslateConvWithGroups(layer, pretrained_blobs)
+  # If there is no odd things, we will basically translate it to a standard
+  # caffe2 op.
   caffe_op = BaseTranslate(layer, "Conv")
   output = caffe_op.output[0]
   caffe_op.input.extend([output + '_w', output + '_b'])
-  param = layer.convolution_param
   AddArgument(caffe_op, "stride", param.stride)
   AddArgument(caffe_op, "kernel", param.kernel_size)
   AddArgument(caffe_op, "pad", param.pad)
   AddArgument(caffe_op, "order", "NCHW")
-  if param.group > 1:
-    # Now, if the model is grouped convolution, let's do a backward hack and make
-    # things working but in an efficient way by inserting zero parameters. Note
-    # that this is not computationally safe, but grouped convolution is such an
-    # antique technology that we should really deprecate it.
-    n, c, h, w = pretrained_blobs[0].shape
-    g = param.group
-    og = int(n / g)
-    if (og * g != n):
-      raise ValueError("This should not happen")
-    weight = np.zeros((n, c * g, h, w), dtype=np.float32)
-    for i in range(param.group):
-      weight[i * og : (i + 1) * og, i * c : (i+1) * c, :, :] = pretrained_blobs[0][i * og : (i + 1) * og]
-  else:
-    weight = pretrained_blobs[0]
-  weight = utils.NumpyArrayToCaffe2Tensor(weight, output + '_w')
+  weight = utils.NumpyArrayToCaffe2Tensor(pretrained_blobs[0], output + '_w')
   bias = utils.NumpyArrayToCaffe2Tensor(
       pretrained_blobs[1].flatten(), output + '_b')
-  # Todo: deal with parameters.
   return caffe_op, [weight, bias]
+
+def TranslateConvWithGroups(layer, pretrained_blobs):
+  print ("Legacy warning: convolution with groups seem to be less and less " +
+         "popular, so we no longer have it as a first-class citizen op. " +
+         "Instead, we will simulate it with depth split followed by conv " +
+         "followed by depth concat.")
+  caffe_ops = []
+  caffe_params = []
+  param = layer.convolution_param
+  weight, bias = pretrained_blobs
+  bias = bias.flatten()
+  n, c, h, w = weight.shape
+  g = param.group  # group
+  od = int(n / g)  # output dimension
+  if (od * g != n):
+    # This should not happen: n should always be divisible by g.
+    raise ValueError("This should not happen.")
+  output = layer.top[0]
+  # first, depth_split
+  depth_split_op = core.CreateOperator("DepthSplit")(
+      layer.bottom[0],
+      ['_' + output + '_gconv_split_' + str(i) for i in range(g)],
+      dimensions=[c for i in range(g)],
+      order="NCHW")
+  caffe_ops.append(depth_split_op)
+  # second, convolutions
+  for i in range(g):
+    # convolution layer i
+    this_weight = utils.NumpyArrayToCaffe2Tensor(
+        weight[i * od : (i + 1) * od], output + '_' + str(i) + '_w')
+    this_bias = utils.NumpyArrayToCaffe2Tensor(
+        bias[i * od : (i + 1) * od], output + '_' + str(i) + '_b')
+    conv_op = core.CreateOperator("Conv")(
+        [depth_split_op.output[i], this_weight.name, this_bias.name],
+        ['_' + output + '_gconv_conv_' + str(i)],
+        stride=param.stride,
+        kernel=param.kernel_size,
+        pad=param.pad,
+        order="NCHW")
+    caffe_ops.append(conv_op)
+    caffe_params.extend([this_weight, this_bias])
+  # third, depth concat
+  depth_concat_op = core.CreateOperator("DepthConcat")(
+      ['_' + output + '_gconv_conv_' + str(i) for i in range(g)],
+      [output, '_' + output + '_gconv_concat_dims'],
+      order="NCHW")
+  caffe_ops.append(depth_concat_op)
+  return caffe_ops, caffe_params
+
 
 @CacaRegistry.Register("ReLU")
 def TranslateRelu(layer, pretrained_blobs):
