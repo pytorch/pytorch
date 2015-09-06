@@ -16,6 +16,7 @@ class MemoryPoolTest : public ::testing::Test {
   // should define it if you need to initialize the varaibles.
   // Otherwise, this can be skipped.
   void SetUp() override {
+    if (!HasCudaGPU()) return;
     int device_count_;
     CUDA_CHECK(cudaGetDeviceCount(&device_count_));
     // If we test with the memory pool, initialize the memory pool.
@@ -29,6 +30,7 @@ class MemoryPoolTest : public ::testing::Test {
   }
 
   void TearDown() override {
+    if (!HasCudaGPU()) return;
     if (UsePoolOrNot::value) {
       CHECK(CudaMemoryPool::FinalizeMemoryPool());
     }
@@ -47,6 +49,7 @@ TYPED_TEST(MemoryPoolTest, InitializeAndFinalizeWorks) {
 }
 
 TYPED_TEST(MemoryPoolTest, AllocateAndDeallocate) {
+  if (!HasCudaGPU()) return;
   const int nbytes = 1048576;
   for (int i = 0; i < this->device_count_; ++i) {
     LOG(INFO) << "Device " << i << " of " << this->device_count_;

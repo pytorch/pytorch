@@ -64,5 +64,7 @@ class TestMuji(unittest.TestCase):
 if __name__ == '__main__':
   if not workspace.has_gpu_support:
     print 'No GPU support. skipping muji test.'
+  elif workspace.NumberOfGPUs() == 0:
+    print 'No GPU device. Skipping gpu test.'
   else:
     unittest.main()

@@ -5,6 +5,21 @@
 
 namespace caffe2 {
 
+bool HasCudaGPU() {
+  int count;
+  auto err = cudaGetDeviceCount(&count);
+  if (err == cudaErrorNoDevice || err == cudaErrorInsufficientDriver) {
+    return false;
+  }
+  // cudaGetDeviceCount() should only return the above two errors. If
+  // there are other kinds of errors, maybe you have called some other
+  // cuda functions before HasCudaGPU().
+  CHECK(err == cudaSuccess)
+      << "Unexpected error from cudaGetDeviceCount(). Did you run some "
+         "cuda functions before calling HasCudaGPU()?";
+  return true;
+}
+
 namespace {
 int gDefaultGPUID = 0;
 }
@@ -137,6 +152,11 @@ const char* curandGetErrorString(curandStatus_t error) {
 }
 
 bool Caffe2EnableCudaPeerAccess() {
+  // If the current run does not have any cuda devices, do nothing.
+  if (!HasCudaGPU()) {
+    LOG(INFO) << "No cuda gpu present. Skipping.";
+    return true;
+  }
   int device_count;
   CUDA_CHECK(cudaGetDeviceCount(&device_count));
   int init_device;
