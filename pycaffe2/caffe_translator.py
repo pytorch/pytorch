@@ -183,9 +183,9 @@ def TranslateConvWithGroups(layer, pretrained_blobs):
   for i in range(g):
     # convolution layer i
     this_weight = utils.NumpyArrayToCaffe2Tensor(
-        weight[i * od : (i + 1) * od], output + '_' + str(i) + '_w')
+        weight[i * od : (i + 1) * od], output + '_gconv_' + str(i) + '_w')
     this_bias = utils.NumpyArrayToCaffe2Tensor(
-        bias[i * od : (i + 1) * od], output + '_' + str(i) + '_b')
+        bias[i * od : (i + 1) * od], output + '_gconv_' + str(i) + '_b')
     conv_op = core.CreateOperator("Conv")(
         [depth_split_op.output[i], this_weight.name, this_bias.name],
         ['_' + output + '_gconv_conv_' + str(i)],
