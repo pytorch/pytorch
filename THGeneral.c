@@ -102,7 +102,9 @@ void THSetArgErrorHandler( void (*torchArgErrorHandlerFunction_)(int argNumber, 
 static __thread void (*torchGCFunction)(void *data) = NULL;
 static __thread void *torchGCData;
 static long heapSize = 0;
-static __thread long heapSoftmax = 300000000; // 300MB, adjusted upward dynamically
+static __thread long heapDelta = 0;
+static const long heapMaxDelta = 1e6; // limit to +/- 1MB before updating heapSize
+static __thread long heapSoftmax = 3e8; // 300MB, adjusted upward dynamically
 static const double heapSoftmaxGrowthThresh = 0.8; // grow softmax if >80% max after GC
 static const double heapSoftmaxGrowthFactor = 1.4; // grow softmax by 40%
 
@@ -134,15 +136,24 @@ static long getAllocSize(void *ptr) {
 #endif
 }
 
+static long applyHeapDelta() {
+  long newHeapSize = THAtomicAddLong(&heapSize, heapDelta) + heapDelta;
+  heapDelta = 0;
+  return newHeapSize;
+}
+
 /* (1) if the torch-allocated heap size exceeds the soft max, run GC
  * (2) if post-GC heap size exceeds 80% of the soft max, increase the
  *     soft max by 40%
  */
 static void maybeTriggerGC(long curHeapSize) {
-  if(torchGCFunction && curHeapSize > heapSoftmax ) {
+  if (torchGCFunction && curHeapSize > heapSoftmax) {
     torchGCFunction(torchGCData);
-    long newHeapSize = THAtomicGetLong(&heapSize);
-    if(newHeapSize > heapSoftmax * heapSoftmaxGrowthThresh) {
+
+    // ensure heapSize is accurate before updating heapSoftmax
+    long newHeapSize = applyHeapDelta();
+
+    if (newHeapSize > heapSoftmax * heapSoftmaxGrowthThresh) {
       heapSoftmax = heapSoftmax * heapSoftmaxGrowthFactor;
     }
   }
@@ -150,13 +161,14 @@ static void maybeTriggerGC(long curHeapSize) {
 
 // hooks into the TH heap tracking
 void THHeapUpdate(long size) {
-  long newHeapSize = THAtomicAddLong(&heapSize, size) + size;
+  heapDelta += size;
 
-# ifdef TH_CHECK_HEAP_UPDATE
-  if (newHeapSize < 0) {
-     THError("Torch heap size <0 ?");
+  // batch updates to global heapSize to minimize thread contention
+  if (abs(heapDelta) < heapMaxDelta) {
+    return;
   }
-#endif
+
+  long newHeapSize = applyHeapDelta();
 
   if (size > 0) {
     maybeTriggerGC(newHeapSize);
