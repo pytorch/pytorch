@@ -348,6 +348,13 @@ void THCudaTensor_scatterFill(THCState* state, THCudaTensor *tensor, int dim, TH
   THArgCheck(THCudaTensor_nDimension(state, index) == THCudaTensor_nDimension(state, tensor), 3,
              "Index tensor must have same dimensions as output tensor");
 
+  for (int d = 0; d < THCudaTensor_nDimension(state, tensor); d++) {
+    if (d != dim) {
+      THArgCheck(THCudaTensor_size(state, tensor, d) == THCudaTensor_size(state, index, d), 4,
+                 "Index tensor must have same size as output tensor apart from the specified dimension");
+    }
+  }
+
   if (THCudaTensor_nDimension(state, tensor) > MAX_CUTORCH_DIMS) {
     return THArgCheck(false, 1, CUTORCH_DIM_WARNING);
   }
