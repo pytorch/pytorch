@@ -74,7 +74,8 @@ void THCudaInit(THCState* state)
 
   state->cutorchGCFunction = NULL;
   state->cutorchGCData = NULL;
-  state->heapSoftmax = 300000000; // 300MB, adjusted upward dynamically
+  state->heapSoftmax = 3e8; // 300MB, adjusted upward dynamically
+  state->heapDelta = 0;
 }
 
 void THCudaShutdown(THCState* state)
@@ -494,6 +495,7 @@ void __THCublasCheck(cublasStatus_t status, const char *file, const int line)
 }
 
 static long heapSize = 0; // not thread-local
+static const long heapMaxDelta = 1e6;
 static const double heapSoftmaxGrowthThresh = 0.8; // grow softmax if >80% max after GC
 static const double heapSoftmaxGrowthFactor = 1.4; // grow softmax by 40%
 
@@ -521,6 +523,12 @@ cudaError_t THCudaFree(THCState *state, void *ptr)
   return err;
 }
 
+static long applyHeapDelta(THCState *state) {
+  long newHeapSize = THAtomicAddLong(&heapSize, state->heapDelta) + state->heapDelta;
+  state->heapDelta = 0;
+  return newHeapSize;
+}
+
 // Here we maintain a dynamic softmax threshold for THC-allocated storages.
 // When THC heap size goes above this softmax, the GC hook is triggered.
 // If heap size is above 80% of the softmax after GC, then the softmax is
@@ -528,7 +536,10 @@ cudaError_t THCudaFree(THCState *state, void *ptr)
 static void maybeTriggerGC(THCState *state, long curHeapSize) {
   if (state->cutorchGCFunction != NULL && curHeapSize > state->heapSoftmax) {
     (state->cutorchGCFunction)(state->cutorchGCData);
-    long newHeapSize = THAtomicGetLong(&heapSize);
+
+    // ensure heapSize is accurate before updating heapSoftmax
+    long newHeapSize = applyHeapDelta(state);
+
     if (newHeapSize > state->heapSoftmax * heapSoftmaxGrowthThresh) {
       state->heapSoftmax = state->heapSoftmax * heapSoftmaxGrowthFactor;
     }
@@ -536,12 +547,13 @@ static void maybeTriggerGC(THCState *state, long curHeapSize) {
 }
 
 void THCHeapUpdate(THCState *state, long size) {
-  long newHeapSize = THAtomicAddLong(&heapSize, size) + size;
-#ifdef THC_CHECK_HEAP_UPDATE
-  if (newHeapSize < 0) {
-    THError("Internal error: THC heapSize < 0");
+  state->heapDelta += size;
+  // batch updates to global heapSize to minimize thread contention
+  if (abs(state->heapDelta) < heapMaxDelta) {
+    return;
   }
-#endif
+
+  long newHeapSize = applyHeapDelta(state);
   if (size > 0) {
     maybeTriggerGC(state, newHeapSize);
   }
