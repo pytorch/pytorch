@@ -1,6 +1,8 @@
 #ifndef CAFFE2_CORE_CONTEXT_GPU_H_
 #define CAFFE2_CORE_CONTEXT_GPU_H_
 
+#include <ctime>
+
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/cuda_memorypool.h"
@@ -26,7 +28,9 @@ class CUDAContext {
 
   explicit CUDAContext(const DeviceOption& option)
       : cuda_stream_(nullptr), cublas_handle_(nullptr),
-        random_seed_(option.random_seed()), curand_generator_(nullptr) {
+        random_seed_(
+            option.has_random_seed() ? option.random_seed() : time(NULL)),
+        curand_generator_(nullptr) {
     DCHECK_EQ(option.device_type(), CUDA);
     cuda_gpu_id_ = option.has_cuda_gpu_id() ?
                    option.cuda_gpu_id() : GetDefaultGPUID();

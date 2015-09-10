@@ -16,6 +16,8 @@ class BlobReference(object):
   def __init__(self, name, net):
     self._name = name
     self._from_net = net
+    # meta allows helper functions to put whatever metainformation needed there.
+    self.meta = {}
 
   def __str__(self):
     return self._name

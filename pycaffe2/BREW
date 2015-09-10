@@ -28,6 +28,7 @@ py_library(
   srcs = [
       "__init__.py",
       "caffe_translator.py",
+      "cnn.py",
       "core.py",
       "core_gradients.py",
       "device_checker.py",
