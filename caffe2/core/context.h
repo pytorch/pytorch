@@ -1,6 +1,7 @@
 #ifndef CAFFE2_CORE_CONTEXT_H_
 #define CAFFE2_CORE_CONTEXT_H_
 
+#include <ctime>
 #include <random>
 
 #include "caffe2/proto/caffe2.pb.h"
@@ -11,9 +12,10 @@ namespace caffe2 {
 class CPUContext {
  public:
   CPUContext() : random_generator_(0) {}
-  explicit CPUContext(const DeviceOption& device_option)
-      : random_generator_(device_option.random_seed()) {
-    DCHECK_EQ(device_option.device_type(), CPU);
+  explicit CPUContext(const DeviceOption& option)
+      : random_generator_(
+            option.has_random_seed() ? option.random_seed() : time(NULL)) {
+    CHECK_EQ(option.device_type(), CPU);
   }
   virtual ~CPUContext() {}
   inline void SwitchToDevice() {}
