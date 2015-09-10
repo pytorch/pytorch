@@ -359,7 +359,7 @@ PyObject* CreateBlob(PyObject* self, PyObject* args) {
     return NULL;
   }
   caffe2::string name(name_char);
-  Blob* blob = gWorkspace->CreateBlob(name);
+  (void) gWorkspace->CreateBlob(name);
   Py_RETURN_TRUE;
 }
 
