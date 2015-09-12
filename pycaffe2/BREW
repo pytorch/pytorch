@@ -91,3 +91,13 @@ py_test(
       ":pycaffe2",
   ],
 )
+
+py_test(
+  name = "gradient_check_test",
+  srcs = [
+      "gradient_check_test.py",
+  ],
+  deps = [
+      ":pycaffe2",
+  ],
+)

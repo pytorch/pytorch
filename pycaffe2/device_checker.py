@@ -2,7 +2,7 @@ import numpy as np
 from pycaffe2 import core, workspace
 
 class DeviceChecker(object):
-  """A gradient checker in Python.
+  """A device checker in Python to check consistency across multiple devices.
 
   This is not the most efficient way to check gradients, as the Python interface
   will involve a lot of copy back and forth operations. Use at your own risk.
@@ -12,19 +12,12 @@ class DeviceChecker(object):
     self._device_options = device_options
 
   def CheckSimple(self, op, inputs, outputs_to_check):
-    """Checks the operator in a very simple fashion by stacking a sum of squares
-    on the top.
+    """Checks the operator with different device implementations.
 
     Inputs:
       op: the operator to be checked.
       inputs: the input data in numpy arrays.
-      input_to_check: an index specifying which input blob we should
-          check.
-      outputs_with_grads: indices specifying which output blobs will we
-          need to check gradients with. For these outputs, we will collect a
-          squared sum and also feed in their gradients.
-      grad_operator: the gradient operator. If not given, we will get the
-          gradient operator from the gradient registry.
+      outputs_to_check: the outputs to check between devices.
     Outputs:
       boolean: True if it passes, False if it does not pass.
     """
@@ -53,23 +46,27 @@ class DeviceChecker(object):
           print x.flatten()
           print y.flatten()
           success = False
-          continue
+        #else:
+        #  print ('Passed device pair (0, %d), %s %s' %
+        #         (i, outputs_to_check[j], y.shape))
     workspace.SwitchWorkspace(old_ws_name)
     return success
 
-  def CheckNet(self, net, inputs={}, ignore=set()):
+  def CheckNet(self, net, inputs={}, blobs_to_check=None, ignore=set()):
     """Checks a network by inspecting all of its intermediate results, and see
     if things match.
     """
     old_ws_name = workspace.CurrentWorkspace()
     results = []
-    blobs_to_check = sum([list(op.output) for op in net.operators], [])
+    if blobs_to_check is None:
+      blobs_to_check = sum([list(op.output) for op in net.op], [])
     blobs_to_check = [b for b in blobs_to_check if b not in ignore]
     workspace.SwitchWorkspace("_device_check_", True)
     for i, device_option in enumerate(self._device_options):
       for name, arr in inputs.iteritems():
+        print 'feeding', name
         workspace.FeedBlob(name, arr, device_option)
-      for op in net.operators:
+      for op in net.op:
         op.device_option.CopyFrom(device_option)
       workspace.RunNetOnce(net)
       results.append(
@@ -86,6 +83,8 @@ class DeviceChecker(object):
           print x.flatten()
           print y.flatten()
           success = False
-          continue
+        #else:
+        #  print ('Passed device pair (%d, %d), %s %s: %s' %
+        #         (i, j, blobs_to_check[j], y.shape, str(y.flatten())))
     workspace.SwitchWorkspace(old_ws_name)
     return success

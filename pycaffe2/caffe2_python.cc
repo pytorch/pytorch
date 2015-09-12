@@ -190,7 +190,7 @@ PyObject* ResetWorkspace(PyObject* self, PyObject* args) {
                     "specifying the root folder of the workspace.");
     return NULL;
   }
-  LOG(INFO) << "Resetting workspace.";
+  VLOG(1) << "Resetting workspace.";
   if (root_folder == nullptr) {
     gWorkspaces[gCurrentWorkspaceName].reset(
         new Workspace());
