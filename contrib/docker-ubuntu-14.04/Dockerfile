@@ -2,6 +2,10 @@ FROM ubuntu:14.04
 MAINTAINER caffe-dev <caffe-dev@googlegroups.com>
 
 # A docker container with CUDA and caffe2 installed.
+# Note: this should install everything but cudnn, which requires you to have a
+# manual registration and download from the NVidia website. After creating this
+# docker image, the Caffe2 repository is located at /opt/caffe2. You can install
+# cudnn manually and re-compile caffe2.
 
 ################################################################################
 # Step 1: set up cuda on the ubuntu box.
