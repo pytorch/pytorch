@@ -14,6 +14,9 @@ import traceback
 
 from build_env import Env
 
+# global variables
+CAFFE2_RUN_TEST = False
+
 class Colors(object):
   HEADER = '\033[95m'
   OKBLUE = '\033[94m'
@@ -344,11 +347,13 @@ class BuildTarget(object):
     Brewery.Register(self.name, self)
 
   def GetSignature(self):
-    """Generate the signature of the build object."""
+    """Generate the signature of the build object, and see if we need to
+    rebuild it."""
     src_digest = ''.join([hashlib.sha256(open(f, 'rb').read()).hexdigest()
                            for f in self.files])
     dep_digest = ''.join([Brewery.Signature(d) for d in self.deps])
-    return hashlib.sha256(src_digest + dep_digest).hexdigest()
+    command_digest = str(self.command_groups)
+    return hashlib.sha256(src_digest + dep_digest + command_digest).hexdigest()
 
   def SetUpAndBuild(self, built_signature):
     # Add successful optional dependencies into deps.
@@ -482,7 +487,7 @@ class cc_target(BuildTarget):
         self.command_groups = [cpp_commands, link_commands, link_shared_commands]
       else:
         self.command_groups = [cpp_commands, link_commands]
-      if self.is_test:
+      if self.is_test and CAFFE2_RUN_TEST:
         # Add test command
         self.command_groups.append([
             ' '.join([self.OutputName(), '--caffe_test_root',
@@ -516,11 +521,12 @@ class mpi_test(cc_target):
 
   def SetUp(self):
     cc_target.SetUp(self)
-    self.command_groups.append([
-        ' '.join(['mpirun --allow-run-as-root -n',
-                  str(self.mpi_size), self.OutputName(),
-                  '--caffe_test_root', os.path.abspath(Env.GENDIR),
-                  '--gtest_filter=-*.LARGE_*'])])
+    if CAFFE2_RUN_TEST:
+      self.command_groups.append([
+          ' '.join(['mpirun --allow-run-as-root -n',
+                    str(self.mpi_size), self.OutputName(),
+                    '--caffe_test_root', os.path.abspath(Env.GENDIR),
+                    '--gtest_filter=-*.LARGE_*'])])
 
 
 class cuda_library(BuildTarget):
@@ -585,9 +591,10 @@ class py_test(BuildTarget):
     CopyToGenDir(self.srcs)
     if len(self.srcs) > 1:
       raise RuntimeError('py_test should only take one python source file.')
-    # Add test command
-    self.command_groups = [
-        ['python %s' % GenFilename(self.srcs[0])]]
+    if CAFFE2_RUN_TEST:
+      # Add test command
+      self.command_groups = [
+          ['python %s' % GenFilename(self.srcs[0])]]
 
 
 class cc_thirdparty_target(BuildTarget):
@@ -683,6 +690,11 @@ def main(argv):
       BuildLog('Finished cleaning.')
     elif sys.argv[1] == 'build':
       # Build all targets.
+      targets = sys.argv[2:]
+      Brewery.Build(targets)
+    elif sys.argv[1] == 'test':
+      global CAFFE2_RUN_TEST
+      CAFFE2_RUN_TEST = True
       targets = sys.argv[2:]
       Brewery.Build(targets)
     elif sys.argv[1] == 'draw':

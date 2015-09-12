@@ -54,7 +54,9 @@ class CNNModelHelper(object):
       conv_blobs.append(
           splitted_blobs[i].Conv([weight, bias], blob_out + '_gconv_%d' % i,
                                  kernel=kernel, order=self.order, **kwargs))
-    concat = self.net.DepthConcat(conv_blobs, blob_out, order=self.order)
+    concat, concat_dims = self.net.DepthConcat(
+          conv_blobs, [blob_out, "_" + blob_out + "_concat_dims"],
+          order=self.order)
     return concat
 
   def FC(self, blob_in, blob_out, dim_in, dim_out, weight_init, bias_init,
@@ -72,9 +74,18 @@ class CNNModelHelper(object):
     return self.net.LRN(blob_in, [blob_out, "_" + blob_out + "_scale"],
                         order=self.order, **kwargs)[0]
 
+  def Dropout(self, blob_in, blob_out, **kwargs):
+    """Dropout"""
+    return self.net.Dropout(blob_in, [blob_out, "_" + blob_out + "_mask"],
+                            **kwargs)[0]
+
   def MaxPool(self, blob_in, blob_out, **kwargs):
     """Max pooling"""
-    return self.net.MaxPool(blob_in, blob_out, order=self.order, **kwargs)
+    return self.net.MaxPool(blob_in, [blob_out, "_" + blob_out + "_idx"],
+                            order=self.order, **kwargs)[0]
+
+  def AddGradientOperators(self):
+    return self.net.AddGradientOperators()
 
   def __getattr__(self, operator_type):
     """Catch-all for all other operators, mostly those without params."""

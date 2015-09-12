@@ -2,6 +2,8 @@
 #define CAFFE2_CORE_BLOB_H_
 
 #include <cstddef>
+#include <sstream>
+#include <typeinfo>
 #include <vector>
 
 #include "caffe2/core/common.h"
@@ -142,6 +144,20 @@ class Tensor {
   }
 
   virtual ~Tensor() {}
+
+  // A utility function to print the debug string for the tensor. Note that this
+  // is very slow since it involves quite some string operations, so do not use
+  // it in your performance-critical code.
+  string DebugString() const {
+    std::stringstream ss;
+    ss << "A Tensor of data type " << typeid(dtype).name()
+       << " and dimension (";
+    for (int d : dims_) {
+      ss << d << ",";
+    }
+    ss << ").";
+    return ss.str();
+  }
 
   void Reshape(const vector<int>& dims) {
     dims_ = dims;
