@@ -21,10 +21,42 @@ cc_library(
   whole_archive = True,
 )
 
+cc_library(
+  name = "mpi_ops_gpu",
+  srcs = [
+      "mpi_ops_gpu.cc",
+  ],
+  hdrs = [
+      "mpi_ops.h",
+      "mpi_ops_fallback.h",
+  ],
+  deps = [
+      ":mpi_common",
+      "//caffe2/core:core_gpu",
+  ],
+  external_libs = Env.MPI_LIBS,
+  whole_archive = True,
+)
+
+
 mpi_test(
   name = "mpi_test",
   srcs = [
     "mpi_test.cc",
+  ],
+  deps = [
+    ":mpi_ops",
+    "//caffe2:all_available_ops",
+    "//gtest:gtest",
+    "//third_party/gflags:gflags",
+    "//third_party/glog:glog"
+  ]
+)
+
+mpi_test(
+  name = "mpi_gpu_test",
+  srcs = [
+    "mpi_gpu_test.cc",
   ],
   deps = [
     ":mpi_ops",

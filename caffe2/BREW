@@ -13,6 +13,7 @@ cc_library(
       "//caffe2/image:image_ops",
       "//caffe2/image:image_ops_gpu",
       "//caffe2/mpi:mpi_ops",
+      "//caffe2/mpi:mpi_ops_gpu",
       "//caffe2/sgd:sgd_ops",
       "//caffe2/sgd:sgd_ops_gpu",
     ],

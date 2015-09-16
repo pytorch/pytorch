@@ -22,7 +22,7 @@ bool HasCudaGPU() {
 
 namespace {
 int gDefaultGPUID = 0;
-}
+}  // namespace
 
 void SetDefaultGPUID(const int deviceid) { gDefaultGPUID = deviceid; }
 int GetDefaultGPUID() { return gDefaultGPUID; }

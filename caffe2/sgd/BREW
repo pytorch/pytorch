@@ -14,10 +14,10 @@ cc_library(
   whole_archive = True,
 )
 
-cuda_library(
+cc_library(
   name = "sgd_ops_gpu",
   srcs = [
-      "learning_rate_op.cu",
+      "learning_rate_op_gpu.cc",
   ],
   deps = [
       ":sgd_ops",

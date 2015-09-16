@@ -117,11 +117,26 @@ class Tensor {
     Reshape(dims);
   }
 
+  // Creates a tensor from a source tensor that is possibly from a different
+  // device context. A device context object (either Context or SrcContext) is
+  // provided for copying the underlying data.
   template <class SrcContext, class ContextForCopy>
   Tensor(const Tensor<dtype, SrcContext>& src, ContextForCopy* context)
       : data_(nullptr) {
     Reshape(src.dims());
     context->template Copy<dtype, SrcContext, Context>(
+        src.size(), src.data(), mutable_data());
+  }
+
+  // Creates a tensor from a source tensor that is possibly from a different
+  // device context. A temporary context object (with its default constructor)
+  // is created in order to carry out the copy.
+  template <class SrcContext>
+  Tensor(const Tensor<dtype, SrcContext>& src)
+      : data_(nullptr) {
+    Reshape(src.dims());
+    Context temp_context;
+    temp_context.template Copy<dtype, SrcContext, Context>(
         src.size(), src.data(), mutable_data());
   }
 

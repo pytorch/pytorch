@@ -24,8 +24,9 @@ class BroadcastOp final : public Operator<dtype, DeviceContext> {
   bool RunOnDevice() {
     auto* output = Output(0);
     CHECK_GT(output->size(), 0);
-    MPI_Bcast(static_cast<void*>(output->mutable_data()), output->size(),
-              MPIDataTypeWrapper<dtype>::type(), root_, MPI_COMM_WORLD);
+    MPI_CHECK(
+        MPI_Bcast(static_cast<void*>(output->mutable_data()), output->size(),
+                  MPIDataTypeWrapper<dtype>::type(), root_, MPI_COMM_WORLD));
     return true;
   }
 
@@ -49,9 +50,18 @@ class AllreduceOp final : public Operator<dtype, DeviceContext> {
     auto& input = Input(0);
     auto* output = Output(0);
     output->ReshapeLike(input);
-    MPI_Allreduce(const_cast<dtype*>(input.data()),
-                  output->mutable_data(), input.size(),
-                  MPIDataTypeWrapper<dtype>::type(), MPI_SUM, MPI_COMM_WORLD);
+    if (output->mutable_data() == input.data()) {
+      // We are doing in-place call. Special case handling.
+      MPI_CHECK(MPI_Allreduce(
+          MPI_IN_PLACE, output->mutable_data(), input.size(),
+          MPIDataTypeWrapper<dtype>::type(), MPI_SUM, MPI_COMM_WORLD));
+    } else {
+      // normal allreduce.
+      MPI_CHECK(MPI_Allreduce(
+          const_cast<dtype*>(input.data()), output->mutable_data(),
+          input.size(), MPIDataTypeWrapper<dtype>::type(), MPI_SUM,
+          MPI_COMM_WORLD));
+    }
     return true;
   }
 

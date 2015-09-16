@@ -1,4 +1,5 @@
 #include "caffe2/core/init.h"
+#include "caffe2/core/context_gpu.h"
 #include "caffe2/core/net.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/mpi/mpi_common.h"
@@ -31,6 +32,9 @@ const char kBcastNet[] =
 "      name: \"root\""
 "      i: 0"
 "    }"
+"  }"
+"  device_option {"
+"    device_type: CUDA"
 "  }";
 
 TEST(MPITest, TestBroadcast) {
@@ -54,10 +58,11 @@ TEST(MPITest, TestBroadcast) {
     EXPECT_TRUE(net->Verify());
     EXPECT_TRUE(net->Run());
     // Let's test the value.
-    auto& X = ws.GetBlob("X")->Get<Tensor<float, CPUContext> >();
-    EXPECT_EQ(X.size(), 10);
-    for (int i = 0; i < X.size(); ++i) {
-      EXPECT_EQ(X.data()[i], root);
+    auto& X = ws.GetBlob("X")->Get<Tensor<float, CUDAContext> >();
+    Tensor<float, CPUContext> X_cpu(X);
+    EXPECT_EQ(X_cpu.size(), 10);
+    for (int i = 0; i < X_cpu.size(); ++i) {
+      EXPECT_EQ(X_cpu.data()[i], root);
     }
   }
 }
@@ -80,6 +85,9 @@ const char kAllreduceNet[] =
 "    input: \"X\""
 "    output: \"X_reduced\""
 "    type: \"Allreduce\""
+"  }"
+"  device_option {"
+"    device_type: CUDA"
 "  }";
 
 TEST(MPITest, TestAllreduce) {
@@ -101,16 +109,18 @@ TEST(MPITest, TestAllreduce) {
   EXPECT_TRUE(net->Verify());
   EXPECT_TRUE(net->Run());
   // Let's test the value.
-  auto& X = ws.GetBlob("X")->Get<Tensor<float, CPUContext> >();
-  EXPECT_EQ(X.size(), 10);
-  for (int i = 0; i < X.size(); ++i) {
-    EXPECT_EQ(X.data()[i], rank);
+  auto& X = ws.GetBlob("X")->Get<Tensor<float, CUDAContext> >();
+  Tensor<float, CPUContext> X_cpu(X);
+  EXPECT_EQ(X_cpu.size(), 10);
+  for (int i = 0; i < X_cpu.size(); ++i) {
+    EXPECT_EQ(X_cpu.data()[i], rank);
   }
-  auto& X_reduced = ws.GetBlob("X_reduced")->Get<Tensor<float, CPUContext> >();
-  EXPECT_EQ(X_reduced.size(), 10);
+  auto& X_reduced = ws.GetBlob("X_reduced")->Get<Tensor<float, CUDAContext> >();
+  Tensor<float, CPUContext> X_reduced_cpu(X_reduced);
+  EXPECT_EQ(X_reduced_cpu.size(), 10);
   int expected_result = size * (size - 1) / 2;
-  for (int i = 0; i < X_reduced.size(); ++i) {
-    EXPECT_EQ(X_reduced.data()[i], expected_result);
+  for (int i = 0; i < X_reduced_cpu.size(); ++i) {
+    EXPECT_EQ(X_reduced_cpu.data()[i], expected_result);
   }
 }
 
@@ -132,6 +142,9 @@ const char kInPlaceAllreduceNet[] =
 "    input: \"X\""
 "    output: \"X\""
 "    type: \"Allreduce\""
+"  }"
+"  device_option {"
+"    device_type: CUDA"
 "  }";
 
 TEST(MPITest, TestInPlaceAllreduce) {
@@ -152,11 +165,12 @@ TEST(MPITest, TestInPlaceAllreduce) {
   EXPECT_NE(nullptr, net.get());
   EXPECT_TRUE(net->Verify());
   EXPECT_TRUE(net->Run());
-  auto& X_reduced = ws.GetBlob("X")->Get<Tensor<float, CPUContext> >();
-  EXPECT_EQ(X_reduced.size(), 10);
+  auto& X_reduced = ws.GetBlob("X")->Get<Tensor<float, CUDAContext> >();
+  Tensor<float, CPUContext> X_reduced_cpu(X_reduced);
+  EXPECT_EQ(X_reduced_cpu.size(), 10);
   int expected_result = size * (size - 1) / 2;
-  for (int i = 0; i < X_reduced.size(); ++i) {
-    EXPECT_EQ(X_reduced.data()[i], expected_result);
+  for (int i = 0; i < X_reduced_cpu.size(); ++i) {
+    EXPECT_EQ(X_reduced_cpu.data()[i], expected_result);
   }
 }
 
@@ -171,6 +185,7 @@ DEFINE_string(caffe_test_root, "gen/", "The root of the caffe test folder.");
 GTEST_API_ int main(int argc, char **argv) {
   int mpi_ret;
   MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &mpi_ret);
+  testing::InitGoogleTest(&argc, argv);
   caffe2::GlobalInit(&argc, &argv);
   int test_result = RUN_ALL_TESTS();
   MPI_Finalize();
