@@ -35,7 +35,7 @@ cc_library(
   whole_archive = True,
 )
 
-cuda_library(
+cc_library(
   name = "core_gpu",
   srcs = [
     "blob_serialization_gpu.cc",

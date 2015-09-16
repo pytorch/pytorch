@@ -24,6 +24,14 @@ MPI_DATATYPE_WRAPPER(double, MPI_DOUBLE)
 // Note(Yangqing): as necessary, add more specializations.
 #undef MPI_DATATYPE_WRAPPER
 
+#define MPI_CHECK(condition)                                                   \
+  do {                                                                         \
+    int error = (condition);                                                   \
+    CHECK_EQ(error, MPI_SUCCESS)                                               \
+        << "Caffe2 MPI Error at: " << __FILE__ << ":" << __LINE__ << ": "      \
+        << error;                                                              \
+  } while (0)
+
 
 }  // namespace caffe2
 
