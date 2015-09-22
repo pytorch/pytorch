@@ -31,5 +31,7 @@ void THLapack_(potrs)(char uplo, int n, int nrhs, real *a, int lda, real *b, int
 void THLapack_(geqrf)(int m, int n, real *a, int lda, real *tau, real *work, int lwork, int *info);
 /* Build Q from output of geqrf */
 void THLapack_(orgqr)(int m, int n, int k, real *a, int lda, real *tau, real *work, int lwork, int *info);
+/* Multiply Q with a matrix from output of geqrf */
+void THLapack_(ormqr)(char side, char trans, int m, int n, int k, real *a, int lda, real *tau, real *c, int ldc, real *work, int lwork, int *info);
 
 #endif

@@ -29,6 +29,8 @@ TH_EXTERNC void sgeqrf_(int *m, int *n, float *a, int *lda, float *tau, float *w
 TH_EXTERNC void dgeqrf_(int *m, int *n, double *a, int *lda, double *tau, double *work, int *lwork, int *info);
 TH_EXTERNC void sorgqr_(int *m, int *n, int *k, float *a, int *lda, float *tau, float *work, int *lwork, int *info);
 TH_EXTERNC void dorgqr_(int *m, int *n, int *k, double *a, int *lda, double *tau, double *work, int *lwork, int *info);
+TH_EXTERNC void sormqr_(char *side, char *trans, int *m, int *n, int *k, float *a, int *lda, float *tau, float *c, int *ldc, float *work, int *lwork, int *info);
+TH_EXTERNC void dormqr_(char *side, char *trans, int *m, int *n, int *k, double *a, int *lda, double *tau, double *c, int *ldc, double *work, int *lwork, int *info);
 
 
 /* Compute the solution to a real system of linear equations  A * X = B */
@@ -215,6 +217,20 @@ void THLapack_(orgqr)(int m, int n, int k, real *a, int lda, real *tau, real *wo
 #endif
 #else
   THError("orgqr: Lapack library not found in compile time\n");
+#endif
+}
+
+/* Multiply Q with a matrix using the output of geqrf */
+void THLapack_(ormqr)(char side, char trans, int m, int n, int k, real *a, int lda, real *tau, real *c, int ldc, real *work, int lwork, int *info)
+{
+#ifdef  USE_LAPACK
+#if defined(TH_REAL_IS_DOUBLE)
+  dormqr_(&side, &trans, &m, &n, &k, a, &lda, tau, c, &ldc, work, &lwork, info);
+#else
+  sormqr_(&side, &trans, &m, &n, &k, a, &lda, tau, c, &ldc, work, &lwork, info);
+#endif
+#else
+  THError("ormqr: Lapack library not found in compile time\n");
 #endif
 }
 

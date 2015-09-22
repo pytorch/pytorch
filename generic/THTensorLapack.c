@@ -637,4 +637,63 @@ void THTensor_(orgqr)(THTensor *ra_, THTensor *a, THTensor *tau)
   THTensor_(free)(work);
 }
 
+/*
+  The ormqr function multiplies Q with another matrix from a sequence of
+  elementary reflectors, such as is produced by the geqrf function.
+
+  Args:
+  * `ra_`   - result Tensor, which will contain the matrix Q' c.
+  * `a`     - input Tensor, which should be a matrix with the directions of the
+              elementary reflectors below the diagonal. If NULL, `ra_` is used as
+              input.
+  * `tau`   - input Tensor, containing the magnitudes of the elementary
+              reflectors.
+  * `c`     - input Tensor, containing the matrix to be multiplied.
+  * `side`  - char, determining whether c is left- or right-multiplied with Q.
+  * `trans` - char, determining whether to transpose Q before multiplying.
+
+  For further details, please see the LAPACK documentation.
+
+*/
+void THTensor_(ormqr)(THTensor *ra_, THTensor *a, THTensor *tau, THTensor *c, const char *side, const char *trans)
+{
+  if (a == NULL) a = ra_;
+  THArgCheck(a->nDimension == 2, 1, "A should be 2 dimensional");
+
+  THTensor *ra__ = NULL;
+  ra__ = THTensor_(cloneColumnMajor)(ra_, c);
+
+  int m = c->size[0];
+  int n = c->size[1];
+  int k = tau->size[0];
+  int lda;
+  if (*side == 'L')
+  {
+    lda = m;
+  }
+  else
+  {
+    lda = n;
+  }
+  int ldc = m;
+
+  /* Dry-run to query the suggested size of the workspace. */
+  int info = 0;
+  real wkopt = 0;
+  THLapack_(ormqr)(side[0], trans[0], m, n, k, THTensor_(data)(a), lda,
+                   THTensor_(data)(tau), THTensor_(data)(ra__), ldc,
+                   &wkopt, -1, &info);
+
+  /* Allocate the workspace and call LAPACK to do the real work. */
+  int lwork = (int)wkopt;
+  THTensor *work = THTensor_(newWithSize1d)(lwork);
+  THLapack_(ormqr)(side[0], trans[0], m, n, k, THTensor_(data)(a), lda,
+                   THTensor_(data)(tau), THTensor_(data)(ra__), ldc,
+                   THTensor_(data)(work), lwork, &info);
+
+  THLapackCheck(" Lapack Error %s : unknown Lapack error. info = %i", "ormqr", info);
+  THTensor_(freeCopyTo)(ra__, ra_);
+  THTensor_(free)(work);
+}
+
 #endif
