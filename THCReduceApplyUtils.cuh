@@ -33,6 +33,8 @@ struct CopyOp {
   }
 };
 
+enum NoCollapseMode { NoCollapseDims };
+
 // CUDA kernel argument that defines tensor layout
 template <typename IndexType>
 struct TensorInfo {
@@ -43,6 +45,9 @@ struct TensorInfo {
   // The optional `reduceDim` indicates a reduction dimension for the
   // given tensor, so that the output size for this dimension will be 1.
   TensorInfo(THCState* state, THCudaTensor* t, int reduceDim = -1);
+
+  // Doesn't collapse runs of contiguous dimensions.
+  TensorInfo(THCState* state, THCudaTensor* t, NoCollapseMode);
 
   // Contiguous tensors of more than one dimension are collapsed down
   // to one tensor
@@ -160,6 +165,20 @@ TensorInfo<IndexType>::TensorInfo(THCState* state,
   assert(collapsedIndex == 0);
 }
 
+template<typename IndexType>
+TensorInfo<IndexType>::TensorInfo(THCState* state,
+                                  THCudaTensor* t,
+                                  NoCollapseMode) {
+  data = THCudaTensor_data(state, t);
+  dims = THCudaTensor_nDimension(state, t);
+  assert(dims <= MAX_CUTORCH_DIMS);
+
+  for (int i = 0; i < dims; ++i) {
+    sizes[i] = THCudaTensor_size(state, t, i);
+    strides[i] = THCudaTensor_stride(state, t, i);
+  }
+}
+
 // Translate a linear index for the apply to a float* offset;
 // specialized on `Dims` to reduce nvcc compilation time
 template <typename IndexType, int Dims>
@@ -270,6 +289,9 @@ __device__ T reduceBlock(T* smem,
 
   return r;
 }
+
+// Make sure the given tensor doesn't have too many dimensions
+void THCCheckTensorDims(THCState* state, THCudaTensor* tensor, int arg);
 
 // Returns true if all linear ID -> offset math can be performed using 32 bit
 // unsigned math, which is faster than 64 bit math

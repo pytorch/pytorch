@@ -6,6 +6,11 @@
 // Maximum size per grid dimension that we assume (compute capability >= 2.0)
 #define MAX_GRID_SIZE 65535L
 
+void THCCheckTensorDims(THCState* state, THCudaTensor* tensor, int arg) {
+  long dims = THCudaTensor_nDimension(state, tensor);
+  THArgCheck(dims <= MAX_CUTORCH_DIMS, arg, CUTORCH_DIM_WARNING);
+}
+
 bool THC_canUse32BitIndexMath(THCState* state, THCudaTensor* t) {
   long elements = THCudaTensor_nElement(state, t);
   if (elements >= UINT_MAX) {
