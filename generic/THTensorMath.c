@@ -1701,47 +1701,63 @@ void THTensor_(triu)(THTensor *r_, THTensor *t, long k)
 
 void THTensor_(cat)(THTensor *r_, THTensor *ta, THTensor *tb, int dimension)
 {
-  THLongStorage *size;
-  int i;
-  int ndim = THMax(ta->nDimension, tb->nDimension);
-  ndim = THMax(ndim, dimension+1);
+  THTensor* inputs[2];
+  inputs[0] = ta;
+  inputs[1] = tb;
+  THTensor_(catArray)(r_, inputs, 2, dimension);
+}
 
+void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int dimension)
+{
+  THLongStorage *size;
+  int i, j;
+  long offset;
+  int ndim = dimension + 1;
+  for (i = 0; i < numInputs; i++)
+  {
+    ndim = THMax(ndim, inputs[i]->nDimension);
+  }
+
+  THArgCheck(numInputs > 0, 3, "invalid number of inputs %d", numInputs);
   THArgCheck(dimension >= 0, 4, "invalid dimension %d", dimension+1);
 
   size = THLongStorage_newWithSize(ndim);
   for(i = 0; i < ndim; i++)
   {
-    long tadi = (i < ta->nDimension ? ta->size[i] : 1);
-    long tbdi = (i < tb->nDimension ? tb->size[i] : 1);
-
-    if(i == dimension)
-      size->data[i] = tadi+tbdi;
+    long dimSize = i < inputs[0]->nDimension ? inputs[0]->size[i] : 1;
+    if (i == dimension)
+    {
+      for (j = 1; j < numInputs; j++)
+      {
+        dimSize += i < inputs[j]->nDimension ? inputs[j]->size[i] : 1;
+      }
+    }
     else
     {
-      if(tadi != tbdi)
+      for (j = 1; j < numInputs; j++)
       {
-        THLongStorage_free(size);
-        THError("inconsistent tensor sizes");
+        if (dimSize != (i < inputs[j]->nDimension ? inputs[j]->size[i] : 1))
+        {
+          THLongStorage_free(size);
+          THError("inconsistent tensor sizes");
+        }
       }
-      size->data[i] = tadi;
     }
+    size->data[i] = dimSize;
   }
 
-  THTensor_(resize)(r_, size, NULL);
+  THTensor_(resize)(result, size, NULL);
   THLongStorage_free(size);
 
+  offset = 0;
+  for (j = 0; j < numInputs; j++)
   {
-    THTensor *nta = THTensor_(newWithTensor)(r_);
-    THTensor_(narrow)(nta, NULL, dimension, 0, (dimension < ta->nDimension ? ta->size[dimension] : 1));
-    THTensor_(copy)(nta, ta);
-    THTensor_(free)(nta);
-  }
-
-  {
-    THTensor *ntb = THTensor_(newWithTensor)(r_);
-    THTensor_(narrow)(ntb, NULL, dimension, (dimension < ta->nDimension ? ta->size[dimension] : 1), (dimension < tb->nDimension ? tb->size[dimension] : 1));
-    THTensor_(copy)(ntb, tb);
-    THTensor_(free)(ntb);
+    long dimSize = dimension < inputs[j]->nDimension ? inputs[j]->size[dimension] : 1;
+    THTensor *nt = THTensor_(newWithTensor)(result);
+    THTensor_(narrow)(nt, NULL, dimension, offset, dimSize);
+    THTensor_(copy)(nt, inputs[j]);
+    THTensor_(free)(nt);
+    offset += dimSize;
   }
 }
 
