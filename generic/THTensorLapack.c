@@ -429,16 +429,15 @@ void THTensor_(getri)(THTensor *ra_, THTensor *a)
   THTensor_(freeCopyTo)(ra__, ra_);
   THTensor_(free)(work);
   THIntTensor_free(ipiv);
-}
+} 
 
-void THTensor_(potrf)(THTensor *ra_, THTensor *a)
+void THTensor_(potrf)(THTensor *ra_, THTensor *a, const char *uplo)
 {
   if (a == NULL) a = ra_;
   THArgCheck(a->nDimension == 2, 1, "A should be 2 dimensional");
   THArgCheck(a->size[0] == a->size[1], 1, "A should be square");
 
   int n, lda, info;
-  char uplo = 'U';
   THTensor *ra__ = NULL;
 
   ra__ = THTensor_(cloneColumnMajor)(ra_, a);
@@ -447,21 +446,62 @@ void THTensor_(potrf)(THTensor *ra_, THTensor *a)
   lda = n;
 
   /* Run Factorization */
-  THLapack_(potrf)(uplo, n, THTensor_(data)(ra__), lda, &info);
+  THLapack_(potrf)(uplo[0], n, THTensor_(data)(ra__), lda, &info);
   THLapackCheck("Lapack Error %s : A(%d,%d) is 0, A cannot be factorized", "potrf", info, info);
 
-  /* Build full upper-triangular matrix */
+  /* Build full matrix */
+  real *p = THTensor_(data)(ra__);
+  long i, j;
+
+  /* Upper Triangular Case */
+  if (uplo[0] == 'U')
   {
-    real *p = THTensor_(data)(ra__);
-    long i,j;
     for (i=0; i<n; i++) {
-      for (j=i+1; j<n; j++) {
-        p[i*n+j] = 0;
+     for (j=i+1; j<n; j++) {
+        p[n*i + j] = 0;
+      }
+    }
+  }
+  /* Lower Triangular Case */
+  else
+  {
+    for (i=0; i<n; i++) {
+      for (j=0; j<i; j++) {
+        p[n*i + j] = 0;
       }
     }
   }
 
   THTensor_(freeCopyTo)(ra__, ra_);
+}
+
+void THTensor_(potrs)(THTensor *rb_, THTensor *b, THTensor *a, const char *uplo)
+{
+  if (b == NULL) b = rb_;
+
+  THArgCheck(a->size[0] == a->size[1], 2, "A should be square");
+  THArgCheck(b->size[0] >= b->size[1], 2, "Matrix B is rank-deficient");
+
+  int n, nrhs, lda, ldb, info;
+  THTensor *ra__; // working version of A matrix to be passed into lapack TRTRS
+  THTensor *rb__; // working version of B matrix to be passed into lapack TRTRS
+
+  ra__ = THTensor_(cloneColumnMajor)(NULL, a);
+  rb__ = THTensor_(cloneColumnMajor)(rb_, b);
+
+  n    = (int)ra__->size[0];
+  nrhs = (int)rb__->size[1];
+  lda  = n;
+  ldb  = n;
+
+  THLapack_(potrs)(uplo[0], n, nrhs, THTensor_(data)(ra__), 
+                   lda, THTensor_(data)(rb__), ldb, &info);
+
+
+  THLapackCheck("Lapack Error in %s : A(%d,%d) is zero, singular A", "potrs", info, info);
+
+  THTensor_(free)(ra__);
+  THTensor_(freeCopyTo)(rb__, rb_);
 }
 
 void THTensor_(potri)(THTensor *ra_, THTensor *a)

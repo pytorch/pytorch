@@ -164,20 +164,6 @@ void THLapack_(potrf)(char uplo, int n, real *a, int lda, int *info)
 #endif
 }
 
-/* Cholesky factorization based Matrix Inverse */
-void THLapack_(potri)(char uplo, int n, real *a, int lda, int *info)
-{
-#ifdef  USE_LAPACK
-#if defined(TH_REAL_IS_DOUBLE)
-  dpotri_(&uplo, &n, a, &lda, info);
-#else
-  spotri_(&uplo, &n, a, &lda, info);
-#endif
-#else
-  THError("potri: Lapack library not found in compile time\n");
-#endif
-}
-
 /* Solve A*X = B with a symmetric positive definite matrix A using the Cholesky factorization */
 void THLapack_(potrs)(char uplo, int n, int nrhs, real *a, int lda, real *b, int ldb, int *info)
 {
@@ -189,6 +175,20 @@ void THLapack_(potrs)(char uplo, int n, int nrhs, real *a, int lda, real *b, int
 #endif
 #else
   THError("potrs: Lapack library not found in compile time\n");
+#endif
+}
+
+/* Cholesky factorization based Matrix Inverse */
+void THLapack_(potri)(char uplo, int n, real *a, int lda, int *info)
+{
+#ifdef  USE_LAPACK
+#if defined(TH_REAL_IS_DOUBLE)
+  dpotri_(&uplo, &n, a, &lda, info);
+#else
+  spotri_(&uplo, &n, a, &lda, info);
+#endif
+#else
+  THError("potri: Lapack library not found in compile time\n");
 #endif
 }
 
