@@ -3,28 +3,6 @@
 #include "THCApply.cuh"
 
 
-// Similar to TensorInfo as defined in THCReduceApplyUtils.h, but it preserves
-// the exact dimensionality of the tensor instead of flattening contiguous or
-// size-1 dimensions. This is required for scatter/gather kernels because we
-// need to know the indices along all dimensions.
-template <typename IndexType>
-struct SimpleTensorInfo {
-  SimpleTensorInfo(THCState* state, THCudaTensor* t) {
-    data = THCudaTensor_data(state, t);
-    dims = THCudaTensor_nDimension(state, t);
-    for (int d = 0; d < dims; d++) {
-      sizes[d] = THCudaTensor_size(state, t, d);
-      strides[d] = THCudaTensor_stride(state, t, d);
-    }
-  }
-
-  float* data;
-  IndexType sizes[MAX_CUTORCH_DIMS];
-  IndexType strides[MAX_CUTORCH_DIMS];
-  int dims;
-};
-
-
 // Compute the offsets into the given tensors for a linear index. For the 't2'
 // tensor, dimension 'dim' is skipped. The tensors are assumed to have the same
 // size (with the exception of 't2' in dimension 'dim').
@@ -33,9 +11,9 @@ template <typename IndexType, int Dims>
 struct IndexToScatterGatherOffsets {
   static __device__ void compute(
       IndexType linearId, const int dim,
-      const SimpleTensorInfo<IndexType>& index, IndexType* indexOffset,
-      const SimpleTensorInfo<IndexType>& t1, IndexType* t1Offset,
-      const SimpleTensorInfo<IndexType>& t2, IndexType* t2Offset) {
+      const TensorInfo<IndexType>& index, IndexType* indexOffset,
+      const TensorInfo<IndexType>& t1, IndexType* t1Offset,
+      const TensorInfo<IndexType>& t2, IndexType* t2Offset) {
     for (int d = Dims - 1; d >= 0; d--) {
       IndexType curDimIndex = linearId % index.sizes[d];
       *indexOffset += curDimIndex * index.strides[d];
@@ -49,8 +27,8 @@ struct IndexToScatterGatherOffsets {
 
   static __device__ void compute(
       IndexType linearId, const int dim,
-      const SimpleTensorInfo<IndexType>& index, IndexType* indexOffset,
-      const SimpleTensorInfo<IndexType>& t2, IndexType* t2Offset) {
+      const TensorInfo<IndexType>& index, IndexType* indexOffset,
+      const TensorInfo<IndexType>& t2, IndexType* t2Offset) {
     for (int d = Dims - 1; d >= 0; d--) {
       IndexType curDimIndex = linearId % index.sizes[d];
       *indexOffset += curDimIndex * index.strides[d];
@@ -67,9 +45,9 @@ template <typename IndexType>
 struct IndexToScatterGatherOffsets<IndexType, -1> {
   static __device__ void compute(
       IndexType linearId, const int dim,
-      const SimpleTensorInfo<IndexType>& index, IndexType* indexOffset,
-      const SimpleTensorInfo<IndexType>& t1, IndexType* t1Offset,
-      const SimpleTensorInfo<IndexType>& t2, IndexType* t2Offset) {
+      const TensorInfo<IndexType>& index, IndexType* indexOffset,
+      const TensorInfo<IndexType>& t1, IndexType* t1Offset,
+      const TensorInfo<IndexType>& t2, IndexType* t2Offset) {
     for (int d = index.dims - 1; d >= 0; d--) {
       IndexType curDimIndex = linearId % index.sizes[d];
       *indexOffset += curDimIndex * index.strides[d];
@@ -83,8 +61,8 @@ struct IndexToScatterGatherOffsets<IndexType, -1> {
 
   static __device__ void compute(
       IndexType linearId, const int dim,
-      const SimpleTensorInfo<IndexType>& index, IndexType* indexOffset,
-      const SimpleTensorInfo<IndexType>& t2, IndexType* t2Offset) {
+      const TensorInfo<IndexType>& index, IndexType* indexOffset,
+      const TensorInfo<IndexType>& t2, IndexType* t2Offset) {
     for (int d = index.dims - 1; d >= 0; d--) {
       IndexType curDimIndex = linearId % index.sizes[d];
       *indexOffset += curDimIndex * index.strides[d];
@@ -99,9 +77,9 @@ struct IndexToScatterGatherOffsets<IndexType, -1> {
 
 template <typename IndexType, int Dims>
 __global__ void THCudaTensor_gatherKernel(
-    SimpleTensorInfo<IndexType> tensor,
-    SimpleTensorInfo<IndexType> src,
-    SimpleTensorInfo<IndexType> index,
+    TensorInfo<IndexType> tensor,
+    TensorInfo<IndexType> src,
+    TensorInfo<IndexType> index,
     const int dim,
     const IndexType totalElements) {
   for (IndexType linearId = blockIdx.x * blockDim.x + threadIdx.x;
@@ -167,9 +145,9 @@ void THCudaTensor_gather(THCState* state, THCudaTensor *tensor, THCudaTensor *sr
   if (THC_canUse32BitIndexMath(state, tensor) &&
       THC_canUse32BitIndexMath(state, src) &&
       THC_canUse32BitIndexMath(state, index)) {
-    SimpleTensorInfo<unsigned int> tensorInfo(state, tensor);
-    SimpleTensorInfo<unsigned int> srcInfo(state, src);
-    SimpleTensorInfo<unsigned int> indexInfo(state, index);
+    TensorInfo<unsigned int> tensorInfo(state, tensor, NoCollapseDims);
+    TensorInfo<unsigned int> srcInfo(state, src, NoCollapseDims);
+    TensorInfo<unsigned int> indexInfo(state, index, NoCollapseDims);
 
     // Specialize for a small number of dimensions.
     switch (indexInfo.dims) {
@@ -187,9 +165,9 @@ void THCudaTensor_gather(THCState* state, THCudaTensor *tensor, THCudaTensor *sr
         break;
     }
   } else {
-    SimpleTensorInfo<unsigned long> tensorInfo(state, tensor);
-    SimpleTensorInfo<unsigned long> srcInfo(state, src);
-    SimpleTensorInfo<unsigned long> indexInfo(state, index);
+    TensorInfo<unsigned long> tensorInfo(state, tensor, NoCollapseDims);
+    TensorInfo<unsigned long> srcInfo(state, src, NoCollapseDims);
+    TensorInfo<unsigned long> indexInfo(state, index, NoCollapseDims);
 
     RUN(unsigned long, -1)
   }
@@ -206,9 +184,9 @@ void THCudaTensor_gather(THCState* state, THCudaTensor *tensor, THCudaTensor *sr
 
 template <typename IndexType, int Dims>
 __global__ void THCudaTensor_scatterKernel(
-    SimpleTensorInfo<IndexType> tensor,
-    SimpleTensorInfo<IndexType> src,
-    SimpleTensorInfo<IndexType> index,
+    TensorInfo<IndexType> tensor,
+    TensorInfo<IndexType> src,
+    TensorInfo<IndexType> index,
     const int dim,
     const IndexType totalElements) {
   for (IndexType linearId = blockIdx.x * blockDim.x + threadIdx.x;
@@ -274,9 +252,9 @@ void THCudaTensor_scatter(THCState* state, THCudaTensor *tensor, int dim, THCuda
   if (THC_canUse32BitIndexMath(state, tensor) &&
       THC_canUse32BitIndexMath(state, src) &&
       THC_canUse32BitIndexMath(state, index)) {
-    SimpleTensorInfo<unsigned int> tensorInfo(state, tensor);
-    SimpleTensorInfo<unsigned int> srcInfo(state, src);
-    SimpleTensorInfo<unsigned int> indexInfo(state, index);
+    TensorInfo<unsigned int> tensorInfo(state, tensor, NoCollapseDims);
+    TensorInfo<unsigned int> srcInfo(state, src, NoCollapseDims);
+    TensorInfo<unsigned int> indexInfo(state, index, NoCollapseDims);
 
     // Specialize for a small number of dimensions.
     switch (indexInfo.dims) {
@@ -294,9 +272,9 @@ void THCudaTensor_scatter(THCState* state, THCudaTensor *tensor, int dim, THCuda
         break;
     }
   } else {
-    SimpleTensorInfo<unsigned long> tensorInfo(state, tensor);
-    SimpleTensorInfo<unsigned long> srcInfo(state, src);
-    SimpleTensorInfo<unsigned long> indexInfo(state, index);
+    TensorInfo<unsigned long> tensorInfo(state, tensor, NoCollapseDims);
+    TensorInfo<unsigned long> srcInfo(state, src, NoCollapseDims);
+    TensorInfo<unsigned long> indexInfo(state, index, NoCollapseDims);
 
     RUN(unsigned long, -1)
   }
@@ -313,8 +291,8 @@ void THCudaTensor_scatter(THCState* state, THCudaTensor *tensor, int dim, THCuda
 
 template <typename IndexType, int Dims>
 __global__ void THCudaTensor_scatterFillKernel(
-    SimpleTensorInfo<IndexType> tensor,
-    SimpleTensorInfo<IndexType> index,
+    TensorInfo<IndexType> tensor,
+    TensorInfo<IndexType> index,
     float value,
     const int dim,
     const IndexType totalElements) {
@@ -374,8 +352,8 @@ void THCudaTensor_scatterFill(THCState* state, THCudaTensor *tensor, int dim, TH
 
   if (THC_canUse32BitIndexMath(state, tensor) &&
       THC_canUse32BitIndexMath(state, index)) {
-    SimpleTensorInfo<unsigned int> tensorInfo(state, tensor);
-    SimpleTensorInfo<unsigned int> indexInfo(state, index);
+    TensorInfo<unsigned int> tensorInfo(state, tensor, NoCollapseDims);
+    TensorInfo<unsigned int> indexInfo(state, index, NoCollapseDims);
 
     // Specialize for a small number of dimensions.
     switch (indexInfo.dims) {
@@ -393,8 +371,8 @@ void THCudaTensor_scatterFill(THCState* state, THCudaTensor *tensor, int dim, TH
         break;
     }
   } else {
-    SimpleTensorInfo<unsigned long> tensorInfo(state, tensor);
-    SimpleTensorInfo<unsigned long> indexInfo(state, index);
+    TensorInfo<unsigned long> tensorInfo(state, tensor, NoCollapseDims);
+    TensorInfo<unsigned long> indexInfo(state, index, NoCollapseDims);
 
     RUN(unsigned long, -1);
   }
