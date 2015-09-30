@@ -504,14 +504,13 @@ void THTensor_(potrs)(THTensor *rb_, THTensor *b, THTensor *a, const char *uplo)
   THTensor_(freeCopyTo)(rb__, rb_);
 }
 
-void THTensor_(potri)(THTensor *ra_, THTensor *a)
+void THTensor_(potri)(THTensor *ra_, THTensor *a, const char *uplo)
 {
   if (a == NULL) a = ra_;
   THArgCheck(a->nDimension == 2, 1, "A should be 2 dimensional");
   THArgCheck(a->size[0] == a->size[1], 1, "A should be square");
 
   int n, lda, info;
-  char uplo = 'U';
   THTensor *ra__ = NULL;
 
   ra__ = THTensor_(cloneColumnMajor)(ra_, a);
@@ -519,21 +518,29 @@ void THTensor_(potri)(THTensor *ra_, THTensor *a)
   n = ra__->size[0];
   lda = n;
 
-  /* Run Factorization */
-  THLapack_(potrf)(uplo, n, THTensor_(data)(ra__), lda, &info);
-  THLapackCheck("Lapack Error %s : A(%d,%d) is 0, A cannot be factorized", "potrf", info, info);
-
   /* Run inverse */
-  THLapack_(potri)(uplo, n, THTensor_(data)(ra__), lda, &info);
+  THLapack_(potri)(uplo[0], n, THTensor_(data)(ra__), lda, &info);
   THLapackCheck("Lapack Error %s : A(%d,%d) is 0, A cannot be factorized", "potri", info, info);
 
   /* Build full matrix */
+  real *p = THTensor_(data)(ra__);
+  long i, j;
+
+  /* Upper Triangular Case */
+  if (uplo[0] == 'U')
   {
-    real *p = THTensor_(data)(ra__);
-    long i,j;
     for (i=0; i<n; i++) {
       for (j=i+1; j<n; j++) {
-        p[i*n+j] = p[j*n+i];
+        p[n*i+j] = p[n*j+i];
+      }
+    }
+  }
+  /* Lower Triangular Case */
+  else
+  {
+    for (i=0; i<n; i++) {
+      for (j=0; j<i; j++) {
+        p[n*i + j] = p[n*j+i];
       }
     }
   }
