@@ -155,6 +155,8 @@ void THStorage_(resize)(THStorage *storage, long size)
         storage->data,
         sizeof(real)*size);
     storage->size = size;
+  } else {
+    THError("Trying to resize storage that is not resizable");
   }
 }
 
