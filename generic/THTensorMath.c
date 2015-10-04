@@ -387,6 +387,11 @@ void THTensor_(add)(THTensor *r_, THTensor *t, real value)
   }
 }
 
+void THTensor_(sub)(THTensor *r_, THTensor *t, real value)
+{
+  THTensor_(add)(r_, t, -value);
+}
+
 void THTensor_(mul)(THTensor *r_, THTensor *t, real value)
 {
   THTensor_(resizeAs)(r_, t);
@@ -455,6 +460,11 @@ void THTensor_(cadd)(THTensor *r_, THTensor *t, real value, THTensor *src)
   } else {
       TH_TENSOR_APPLY3(real, r_, real, t, real, src, *r__data = *t_data + value * *src_data;);
   }
+}
+
+void THTensor_(csub)(THTensor *r_, THTensor *t, real value,THTensor *src)
+{
+  THTensor_(cadd)(r_, t, -value, src);
 }
 
 void THTensor_(cmul)(THTensor *r_, THTensor *t, THTensor *src)
@@ -1858,6 +1868,7 @@ LAB_IMPLEMENT_BASIC_FUNCTION(ceil,ceil)
 LAB_IMPLEMENT_BASIC_FUNCTION(floor,floor)
 LAB_IMPLEMENT_BASIC_FUNCTION(round,round)
 LAB_IMPLEMENT_BASIC_FUNCTION(abs,fabs)
+LAB_IMPLEMENT_BASIC_FUNCTION(neg,-)
 
 void THTensor_(atan2)(THTensor *r_, THTensor *tx, THTensor *ty)
 {
