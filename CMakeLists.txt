@@ -120,7 +120,9 @@ SET(src
 
 SET(src ${src} ${hdr} ${simd})
 ADD_LIBRARY(TH SHARED ${src})
-ADD_LIBRARY(TH_static STATIC ${src})
+if(BUILD_STATIC)
+  ADD_LIBRARY(TH_static STATIC ${src})
+endif()
 
 CHECK_C_SOURCE_RUNS("
 #include <stdatomic.h>
