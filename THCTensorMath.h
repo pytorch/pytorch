@@ -86,6 +86,9 @@ THC_API void THCudaTensor_potri(THCState *state, THCudaTensor *ra_, THCudaTensor
 THC_API void THCudaTensor_potrf(THCState *state, THCudaTensor *ra_, THCudaTensor *a);
 THC_API void THCudaTensor_qr(THCState *state, THCudaTensor *rq_, THCudaTensor *rr_, THCudaTensor *a);
 
+THC_API void THCudaTensor_cat(THCState *state, THCudaTensor *result, THCudaTensor *ta, THCudaTensor *tb, int dimension);
+THC_API void THCudaTensor_catArray(THCState *state, THCudaTensor *result, THCudaTensor **inputs, int numInputs, int dimension);
+
 THC_API void THCudaTensor_ltValue(THCState *state, THCudaTensor *self_, THCudaTensor *src, float value);
 THC_API void THCudaTensor_gtValue(THCState *state, THCudaTensor *self_, THCudaTensor *src, float value);
 THC_API void THCudaTensor_leValue(THCState *state, THCudaTensor *self_, THCudaTensor *src, float value);
