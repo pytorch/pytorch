@@ -82,6 +82,7 @@ void THCudaShutdown(THCState* state)
 {
   THCRandom_shutdown(state);
   THCAllocator_shutdown(state);
+
   free(state->rngState);
   free(state->deviceProperties);
 
@@ -90,6 +91,13 @@ void THCudaShutdown(THCState* state)
   THCudaCheck(cudaGetDevice(&prevDev));
   THCudaCheck(cudaGetDeviceCount(&deviceCount));
 
+  /* cleanup p2p access state */
+  for (int dev = 0; dev < deviceCount; ++dev) {
+    free(state->p2pAccessEnabled[dev]);
+  }
+  free(state->p2pAccessEnabled);
+
+  /* cleanup per-device state */
   for (int dev = 0; dev < deviceCount; ++dev) {
     THCudaCheck(cudaSetDevice(dev));
     /* Free Torch-defined streams (0 is the default stream) */
@@ -125,26 +133,43 @@ void THCudaEnablePeerToPeerAccess(THCState* state)
   int numDevices = -1;
   THCudaCheck(cudaGetDeviceCount(&numDevices));
 
+  state->p2pAccessEnabled = (int**) malloc(sizeof(int*) * numDevices);
+  for (int i = 0; i < numDevices; ++i) {
+    state->p2pAccessEnabled[i] = (int*) malloc(sizeof(int) * numDevices);
+  }
+
+  /* Build a table of all allowed p2p accesses, to avoid checking the p2p
+     status at runtime. */
+
   for (int i = 0; i < numDevices; ++i) {
     THCudaCheck(cudaSetDevice(i));
 
     for (int j = 0; j < numDevices; ++j) {
-      if (i != j) {
-        int can = 0;
-        THCudaCheck(cudaDeviceCanAccessPeer(&can, i, j));
+      /* Presume no access by default */
+      state->p2pAccessEnabled[i][j] = 0;
 
-        if (can) {
+      if (i == j) {
+        /* A GPU can access itself */
+        state->p2pAccessEnabled[i][j] = 1;
+      } else {
+        int access = 0;
+        THCudaCheck(cudaDeviceCanAccessPeer(&access, i, j));
+
+        if (access) {
           cudaError_t err = cudaDeviceEnablePeerAccess(j, 0);
           if (err == cudaErrorPeerAccessAlreadyEnabled) {
-            // Any future call to cudaGetLastError will now return an error,
-            // even though we've already dealt with this specific error here.
-            // Call cudaGetLastError once to reset the last error state.
+            /* Any future call to cudaGetLastError will now return an error, */
+            /* even though we've already dealt with this specific error here. */
+            /* Call cudaGetLastError once to reset the last error state. */
             cudaGetLastError();
-
             continue;
           }
 
+          /* In case there are unknown errors returned from the above */
           THCudaCheck(err);
+
+          /* Access could be enabled */
+          state->p2pAccessEnabled[i][j] = 1;
         }
       }
     }
@@ -152,6 +177,57 @@ void THCudaEnablePeerToPeerAccess(THCState* state)
 
   /* Restore previous device before continuing */
   THCudaCheck(cudaSetDevice(prevDev));
+}
+
+int THCState_getPeerToPeerAccess(THCState* state, int dev, int devToAccess)
+{
+  int numDevices = 0;
+  THCudaCheck(cudaGetDeviceCount(&numDevices));
+  if (dev < 0 || dev >= numDevices) {
+    THError("%d is not a device", dev);
+  }
+
+  if (devToAccess < 0 || dev >= numDevices) {
+    THError("%d is not a device", devToAccess);
+  }
+
+  return state->p2pAccessEnabled[dev][devToAccess];
+}
+
+void THCState_setPeerToPeerAccess(THCState* state, int dev, int devToAccess,
+                                  int enable)
+{
+  /* This will perform device bounds checking for us */
+  int prevEnabled = THCState_getPeerToPeerAccess(state, dev, devToAccess);
+
+  if (enable != prevEnabled) {
+    /* If we're attempting to enable p2p access but p2p access isn't */
+    /* supported, throw an error */
+    if (enable) {
+      int access = 0;
+      THCudaCheck(cudaDeviceCanAccessPeer(&access, dev, devToAccess));
+
+      if (!access) {
+        THError("p2p access not supported for %d accessing %d",
+                dev, devToAccess);
+      }
+    }
+
+    state->p2pAccessEnabled[dev][devToAccess] = enable;
+
+    int prevDev = 0;
+    THCudaCheck(cudaGetDevice(&prevDev));
+    THCudaCheck(cudaSetDevice(dev));
+
+    /* This should be in sync with the current access state */
+    if (enable) {
+      THCudaCheck(cudaDeviceEnablePeerAccess(devToAccess, 0));
+    } else {
+      THCudaCheck(cudaDeviceDisablePeerAccess(devToAccess));
+    }
+
+    THCudaCheck(cudaSetDevice(prevDev));
+  }
 }
 
 struct cudaDeviceProp* THCState_getCurrentDeviceProperties(THCState* state)

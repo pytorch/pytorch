@@ -75,6 +75,10 @@ typedef struct THCState
   /* Allocator using cudaMallocHost. */
   THAllocator* cudaHostAllocator;
 
+  /* Table of enabled peer-to-peer access between directed pairs of GPUs.
+     If i accessing allocs on j is enabled, p2pAccess[i][j] is 1; 0 otherwise. */
+  int** p2pAccessEnabled;
+
   void (*cutorchGCFunction)(void *data);
   void *cutorchGCData;
   long heapSoftmax;
@@ -85,6 +89,14 @@ THC_API void THCudaInit(THCState* state);
 THC_API void THCudaShutdown(THCState* state);
 THC_API void THCudaEnablePeerToPeerAccess(THCState* state);
 
+/* If device `dev` can access allocations on device `devToAccess`, this will return */
+/* 1; otherwise, 0. */
+THC_API int THCState_getPeerToPeerAccess(THCState* state, int dev, int devToAccess);
+/* Enables or disables allowed p2p access using cutorch copy. If we are */
+/* attempting to enable access, throws an error if CUDA cannot enable p2p */
+/* access. */
+THC_API void THCState_setPeerToPeerAccess(THCState* state, int dev, int devToAccess,
+                                          int enable);
 THC_API struct cudaDeviceProp* THCState_getCurrentDeviceProperties(THCState* state);
 
 THC_API void THCMagma_init(THCState *state);
@@ -124,7 +136,7 @@ THC_API void __THCublasCheck(cublasStatus_t status, const char *file, const int 
 THC_API cudaError_t THCudaMalloc(THCState *state, void **ptr, size_t size);
 THC_API cudaError_t THCudaFree(THCState *state, void *ptr);
 THC_API void THCSetGCHandler(THCState *state,
-                             void (*torchGCHandlerFunction)(void *data), 
+                             void (*torchGCHandlerFunction)(void *data),
                              void *data );
 THC_API void THCHeapUpdate(THCState *state, long size);
 
