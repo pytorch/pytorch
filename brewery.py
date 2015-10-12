@@ -51,6 +51,7 @@ _single_command_env = os.environ
 if 'PYTHONPATH' not in _single_command_env:
   _single_command_env['PYTHONPATH'] = ''
 _single_command_env['PYTHONPATH'] = (
+    os.path.join(Env.GENDIR, "third_party") + ":" +
     Env.GENDIR + ':' + _single_command_env['PYTHONPATH'])
 
 def RunSingleCommand(command):
@@ -152,7 +153,7 @@ class Brewery(object):
   _signature_filename = 'brewery.signature'
   # Pool is the compute pool that one can use to run a list of commands in
   # parallel.
-  Pool = multiprocessing.Pool(Env.CPUS * 2)
+  Pool = multiprocessing.Pool(Env.CPUS)
   #Pool = multiprocessing.Pool(1)
   CWD = ''
   TARGET_PREFIX = '//'
@@ -229,16 +230,18 @@ class Brewery(object):
                  "%s already in build target.", name)
     BuildDebug("Registered build target %s, deps %s", name, str(target.deps))
     cls._targets[name] = target
-    cls._deps_map[name] = target.deps + target.optional_deps
 
   @classmethod
   def _GetExecutionChain(cls, targets):
     """Gets the execution chain."""
     # First, verify all dependencies.
-    for t in cls._targets:
-      for d in cls._deps_map[t]:
+    for name in cls._targets:
+      target = cls._targets[name]
+      cls._deps_map[name] = (
+          target.deps + target.optional_deps + target.control_deps)
+      for d in cls._deps_map[name]:
         BuildFatalIf(d not in cls._targets,
-            "Dependency %s for target %s does not exist.", d, t)
+            "Dependency %s for target %s does not exist.", d, name)
     if len(targets) == 0:
       targets = cls._targets
     else:
@@ -313,6 +316,7 @@ class Brewery(object):
     #  if cls._success[key]:
     #    BuildDebug(key)
     failed = [key for key in cls._success if not cls._success[key]]
+    failed.sort()
     if len(failed) > 0:
       BuildWarning("Failed to build:")
       for key in failed:
@@ -337,12 +341,14 @@ class Brewery(object):
 
 class BuildTarget(object):
   """A build target that can be executed with the Build() function."""
-  def __init__(self, name, srcs, other_files=[], deps=[], optional_deps=[]):
+  def __init__(self, name, srcs, other_files=[], deps=[], optional_deps=[],
+               control_deps=[]):
     self.name = RectifyTarget(name)
     self.srcs = RectifyFileNames(srcs)
     self.files = sorted(self.srcs + other_files)
     self.deps = sorted(RectifyTargets(deps))
     self.optional_deps = sorted(RectifyTargets(optional_deps))
+    self.control_deps = sorted(RectifyTargets(control_deps))
     self.command_groups = []
     Brewery.Register(self.name, self)
 
@@ -400,6 +406,7 @@ class proto_library(BuildTarget):
   """
   def __init__(self, name, srcs, deps=[], **kwargs):
     BuildTarget.__init__(self, name, srcs, deps=deps, **kwargs)
+    self.control_deps.append("//third_party/google:protoc")
 
   def SetUp(self):
     MakeGenDirs(self.srcs)
@@ -421,13 +428,11 @@ class proto_library(BuildTarget):
 
 
 class cc_target(BuildTarget):
-  def __init__(self, name, srcs, hdrs=[], deps=[], cflags=[], external_libs=[],
+  def __init__(self, name, srcs, hdrs=[], deps=[], cflags=[],
                build_binary=False, is_test=False, whole_archive=False,
                shared=False, **kwargs):
     self.hdrs = RectifyFileNames(hdrs)
     self.cflags = cflags
-    self.external_libs = [
-        '-l' + s if not s.startswith('-') else s for s in external_libs]
     self.build_binary = build_binary
     self.is_test = is_test
     self.whole_archive = whole_archive
@@ -456,8 +461,7 @@ class cc_target(BuildTarget):
     CopyToGenDir(self.hdrs)
     archive_file = self.OutputName(is_library=True)
     self.cc_obj_files = MergeOrderedObjs(
-        [Brewery.Get(dep).cc_obj_files for dep in self.deps] +
-        [self.external_libs])
+        [Brewery.Get(dep).cc_obj_files for dep in self.deps])
 
     if self.whole_archive:
       self.cc_obj_files.insert(0, Env.WHOLE_ARCHIVE_TEMPLATE % archive_file)
@@ -472,6 +476,8 @@ class cc_target(BuildTarget):
           ' '.join([Env.CC, Env.CFLAGS, Env.INCLUDES, ' '.join(self.cflags),
                     '-c', src, '-o', obj])
           for src, obj in zip(self.srcs, obj_files)]
+      # Also remove the current archive.
+      cpp_commands.append('rm -f ' + archive_file)
       # Create the archive
       link_commands = [
           ' '.join([Env.LINK_STATIC, archive_file] + obj_files)]
@@ -490,8 +496,8 @@ class cc_target(BuildTarget):
       if self.is_test and CAFFE2_RUN_TEST:
         # Add test command
         self.command_groups.append([
-            ' '.join([self.OutputName(), '--caffe_test_root',
-                      os.path.abspath(Env.GENDIR),
+            ' '.join([self.OutputName(),
+                      '--caffe_test_root=' + os.path.abspath(Env.GENDIR),
                       '--gtest_filter=-*.LARGE_*'])])
 
 
@@ -525,7 +531,7 @@ class mpi_test(cc_target):
       self.command_groups.append([
           ' '.join(['mpirun --allow-run-as-root -n',
                     str(self.mpi_size), self.OutputName(),
-                    '--caffe_test_root', os.path.abspath(Env.GENDIR),
+                    '--caffe_test_root=' + os.path.abspath(Env.GENDIR),
                     '--gtest_filter=-*.LARGE_*'])])
 
 
@@ -554,6 +560,8 @@ class cuda_library(BuildTarget):
                   ' '.join(self.cflags), '-c', src, '-o', obj])
         for src, obj in zip(self.srcs, obj_files)]
     archive_file = self.OutputName(is_library=True)
+    # Also remove the current archive.
+    cpp_commands.append('rm -f ' + archive_file)
     # Create the archive
     link_commands = [
         ' '.join([Env.LINK_STATIC, archive_file]
@@ -617,8 +625,8 @@ class cc_thirdparty_target(BuildTarget):
     ] + commands
     self.cc_obj_files = [
         os.path.join(Env.GENDIR, "third_party", f)
-        for f in cc_obj_files if not f.startswith('-l')] + [
-        f for f in cc_obj_files if f.startswith('-l')]
+        for f in cc_obj_files if not f.startswith('-')] + [
+        f for f in cc_obj_files if f.startswith('-')]
     BuildTarget.__init__(self, name, srcs, deps=deps, **kwargs)
 
   def SetUp(self):

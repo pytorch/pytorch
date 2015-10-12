@@ -60,10 +60,10 @@ struct OperatorNode {
 };
 }
 
-class ParallelNet final : public NetBase {
+class DAGNet final : public NetBase {
  public:
-  ParallelNet(const NetDef& net_def, Workspace* ws);
-  ~ParallelNet();
+  DAGNet(const NetDef& net_def, Workspace* ws);
+  ~DAGNet();
   bool Verify() override;
   bool Run() override;
   // WorkerFunction() is a function wrapper to allow us to run worker threads.
@@ -81,8 +81,9 @@ class ParallelNet final : public NetBase {
   bool success_;
   std::mutex remaining_ops_mutex_;
   std::condition_variable cv_;
+  std::mutex run_in_progress_;
 
-  DISABLE_COPY_AND_ASSIGN(ParallelNet);
+  DISABLE_COPY_AND_ASSIGN(DAGNet);
 };
 
 }  // namespace caffe2

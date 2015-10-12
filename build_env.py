@@ -11,10 +11,27 @@ class Env(object):
   LINK_BINARY = CC + ' -o'
   LINK_SHARED = CC + ' -shared -o'
   LINK_STATIC = 'ar rcs'
-  # Protobuf constants
+
+  # The directory that contains the generated stuff.
+  GENDIR = 'gen'
+
+  # Protobuf constants: if you would like to use the protocol buffer library
+  # already installed in the system, set USE_SYSTEM_PROTOBUF to True, and
+  # specify the PROTOC_BINARY path.
+  USE_SYSTEM_PROTOBUF = True
   PROTOC_BINARY = "protoc"
+  # Otherwise, specify USE_SYSTEM_PROTOBUF = False and use the included protoc
+  # binary.
+  #USE_SYSTEM_PROTOBUF = False
+  #PROTOC_BINARY = os.path.join(GENDIR, 'third_party/google/protoc')
   # CUDA directory.
   CUDA_DIR = '/usr/local/cuda'
+  # Caffe defined symbols
+  DEFINES = [
+      #"-DCAFFE2_USE_GOOGLE_GLOG",
+      #"-DCAFFE2_THROW_ON_FATAL",
+      "-DNDEBUG",
+  ]
   # NVCC C flags.
   NVCC_CFLAGS = ' '.join([
       # add cflags here.
@@ -27,7 +44,7 @@ class Env(object):
       '-gencode arch=compute_35,code=sm_35',
       '-gencode arch=compute_50,code=sm_50',
       '-gencode arch=compute_50,code=compute_50',
-  ])
+  ] + DEFINES)
   # General cflags that should be added in all cc arguments.
   CFLAGS = [
       # add cflags here.
@@ -37,19 +54,16 @@ class Env(object):
       '-O2',
       '-g',
       #'-pg',
-      '-DNDEBUG',
       #'-msse',
       #'-mavx',
       '-ffast-math',
       '-std=c++11',
-      '-W',
       '-Wall',
+      '-Wextra',
       '-Wno-unused-parameter',
       '-Wno-sign-compare',
-      #'-Wno-c++11-extensions',
-  ]
-  # The directory that contains the generated stuff.
-  GENDIR = 'gen'
+      #'-Werror',
+  ] + DEFINES
   # The include directories
   INCLUDES = [
       '/usr/local/include',
@@ -154,7 +168,7 @@ class Env(object):
   LINKFLAGS = ' '.join(LINKFLAGS) + ' ' + LIBDIRS + ' ' + LIBS
   PYTHON_LIBS = [GetSubprocessOutput(['python-config', '--ldflags'])]
 
-  CPUS = multiprocessing.cpu_count()
+  CPUS = multiprocessing.cpu_count() * 2
 
   def __init__(self):
     """ENV is a singleton and should not be instantiated."""

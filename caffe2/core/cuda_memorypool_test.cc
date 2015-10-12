@@ -1,7 +1,7 @@
 #include "caffe2/core/cuda_memorypool.h"
 #include "caffe2/core/context_gpu.h"
 #include "gtest/gtest.h"
-#include "glog/logging.h"
+#include "caffe2/core/logging.h"
 
 namespace caffe2 {
 
@@ -25,14 +25,14 @@ class MemoryPoolTest : public ::testing::Test {
       for (int i = 0; i < device_count_; ++i) {
         device_ids[i] = i;
       }
-      CHECK(CudaMemoryPool::InitializeMemoryPool(device_ids, 0.8));
+      CAFFE_CHECK(CudaMemoryPool::InitializeMemoryPool(device_ids, 0.8));
     }
   }
 
   void TearDown() override {
     if (!HasCudaGPU()) return;
     if (UsePoolOrNot::value) {
-      CHECK(CudaMemoryPool::FinalizeMemoryPool());
+      CAFFE_CHECK(CudaMemoryPool::FinalizeMemoryPool());
     }
   }
 
@@ -52,7 +52,7 @@ TYPED_TEST(MemoryPoolTest, AllocateAndDeallocate) {
   if (!HasCudaGPU()) return;
   const int nbytes = 1048576;
   for (int i = 0; i < this->device_count_; ++i) {
-    LOG(INFO) << "Device " << i << " of " << this->device_count_;
+    CAFFE_LOG_INFO << "Device " << i << " of " << this->device_count_;
     CUDA_CHECK(cudaSetDevice(i));
     void* allocated = CUDAContext::New(nbytes);
     EXPECT_NE(allocated, nullptr);

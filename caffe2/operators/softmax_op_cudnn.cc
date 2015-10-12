@@ -14,10 +14,10 @@ const int TOP_GRADIENT_DESC_ID = 2;
 }  // namespace
 
 
-class CuDNNSoftmaxOp final : public Operator<float, CUDAContext> {
+class CuDNNSoftmaxOp final : public Operator<CUDAContext> {
  public:
   explicit CuDNNSoftmaxOp(const OperatorDef& def, Workspace* ws)
-      : Operator<float, CUDAContext>(def, ws),
+      : Operator<CUDAContext>(def, ws),
         cudnn_wrapper_(&device_context_) {}
   bool RunOnDevice() override;
 
@@ -28,10 +28,10 @@ class CuDNNSoftmaxOp final : public Operator<float, CUDAContext> {
 };
 
 
-class CuDNNSoftmaxGradientOp final : public Operator<float, CUDAContext> {
+class CuDNNSoftmaxGradientOp final : public Operator<CUDAContext> {
  public:
   explicit CuDNNSoftmaxGradientOp(const OperatorDef& def, Workspace* ws)
-      : Operator<float, CUDAContext>(def, ws),
+      : Operator<CUDAContext>(def, ws),
         cudnn_wrapper_(&device_context_) {}
   bool RunOnDevice() override;
 
@@ -45,7 +45,7 @@ class CuDNNSoftmaxGradientOp final : public Operator<float, CUDAContext> {
 bool CuDNNSoftmaxOp::RunOnDevice() {
   auto& X = Input(0);
   auto* Y = Output(0);
-  DCHECK_EQ(X.ndim(), 2);
+  CAFFE_DCHECK_EQ(X.ndim(), 2);
   int N = X.dim(0);
   int D = X.dim(1);
   Y->ReshapeLike(X);
@@ -57,10 +57,10 @@ bool CuDNNSoftmaxOp::RunOnDevice() {
       CUDNN_SOFTMAX_ACCURATE, CUDNN_SOFTMAX_MODE_INSTANCE, &alpha,
       cudnn_wrapper_.cudnnGetTensor4dDesc<float>(
           BOTTOM_DESC_ID, CUDNN_TENSOR_NCHW, dims, nullptr),
-      X.data(), &beta,
+      X.data<float>(), &beta,
       cudnn_wrapper_.cudnnGetTensor4dDesc<float>(
           TOP_DESC_ID, CUDNN_TENSOR_NCHW, dims, nullptr),
-      Y->mutable_data()));
+      Y->mutable_data<float>()));
   return true;
 }
 
@@ -68,11 +68,11 @@ bool CuDNNSoftmaxGradientOp::RunOnDevice() {
   auto& Y = Input(0);
   auto& dY = Input(1);
   auto* dX = Output(0);
-  DCHECK_EQ(Y.ndim(), 2);
+  CAFFE_DCHECK_EQ(Y.ndim(), 2);
   int N = Y.dim(0);
   int D = Y.dim(1);
-  DCHECK_EQ(dY.dim(0), N);
-  DCHECK_EQ(dY.dim(1), D);
+  CAFFE_DCHECK_EQ(dY.dim(0), N);
+  CAFFE_DCHECK_EQ(dY.dim(1), D);
   dX->ReshapeLike(Y);
   const float alpha = 1.0;
   const float beta = 0.0;
@@ -82,13 +82,13 @@ bool CuDNNSoftmaxGradientOp::RunOnDevice() {
       CUDNN_SOFTMAX_ACCURATE, CUDNN_SOFTMAX_MODE_INSTANCE, &alpha,
       cudnn_wrapper_.cudnnGetTensor4dDesc<float>(
           TOP_DESC_ID, CUDNN_TENSOR_NCHW, dims, nullptr),
-      Y.data(),
+      Y.data<float>(),
       cudnn_wrapper_.cudnnGetTensor4dDesc<float>(
           TOP_GRADIENT_DESC_ID, CUDNN_TENSOR_NCHW, dims, nullptr),
-      dY.data(), &beta,
+      dY.data<float>(), &beta,
       cudnn_wrapper_.cudnnGetTensor4dDesc<float>(
           BOTTOM_DESC_ID, CUDNN_TENSOR_NCHW, dims, nullptr),
-      dX->mutable_data()));
+      dX->mutable_data<float>()));
   return true;
 }
 

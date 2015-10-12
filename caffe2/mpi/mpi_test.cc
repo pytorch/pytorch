@@ -2,10 +2,11 @@
 #include "caffe2/core/net.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/mpi/mpi_common.h"
-#include "glog/logging.h"
-#include "gflags/gflags.h"
 #include "google/protobuf/text_format.h"
 #include "gtest/gtest.h"
+
+CAFFE2_DEFINE_string(
+    caffe_test_root, "gen/", "The root of the caffe test folder.");
 
 namespace caffe2 {
 
@@ -35,11 +36,11 @@ const char kBcastNet[] =
 
 TEST(MPITest, TestBroadcast) {
   NetDef net_def;
-  CHECK(google::protobuf::TextFormat::ParseFromString(
+  CAFFE_CHECK(google::protobuf::TextFormat::ParseFromString(
       string(kBcastNet), &net_def));
   // Let's set the network's constant fill value to be the mpi rank.
   auto* arg = net_def.mutable_op(0)->mutable_arg(1);
-  CHECK_EQ(arg->name(), "value");
+  CAFFE_CHECK_EQ(arg->name(), "value");
   int rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   arg->set_f(rank);
@@ -54,10 +55,10 @@ TEST(MPITest, TestBroadcast) {
     EXPECT_TRUE(net->Verify());
     EXPECT_TRUE(net->Run());
     // Let's test the value.
-    auto& X = ws.GetBlob("X")->Get<Tensor<float, CPUContext> >();
+    auto& X = ws.GetBlob("X")->Get<TensorCPU>();
     EXPECT_EQ(X.size(), 10);
     for (int i = 0; i < X.size(); ++i) {
-      EXPECT_EQ(X.data()[i], root);
+      EXPECT_EQ(X.data<float>()[i], root);
     }
   }
 }
@@ -84,11 +85,11 @@ const char kAllreduceNet[] =
 
 TEST(MPITest, TestAllreduce) {
   NetDef net_def;
-  CHECK(google::protobuf::TextFormat::ParseFromString(
+  CAFFE_CHECK(google::protobuf::TextFormat::ParseFromString(
       string(kAllreduceNet), &net_def));
   // Let's set the network's constant fill value to be the mpi rank.
   auto* arg = net_def.mutable_op(0)->mutable_arg(1);
-  CHECK_EQ(arg->name(), "value");
+  CAFFE_CHECK_EQ(arg->name(), "value");
   int rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   arg->set_f(rank);
@@ -101,16 +102,16 @@ TEST(MPITest, TestAllreduce) {
   EXPECT_TRUE(net->Verify());
   EXPECT_TRUE(net->Run());
   // Let's test the value.
-  auto& X = ws.GetBlob("X")->Get<Tensor<float, CPUContext> >();
+  auto& X = ws.GetBlob("X")->Get<TensorCPU>();
   EXPECT_EQ(X.size(), 10);
   for (int i = 0; i < X.size(); ++i) {
-    EXPECT_EQ(X.data()[i], rank);
+    EXPECT_EQ(X.data<float>()[i], rank);
   }
-  auto& X_reduced = ws.GetBlob("X_reduced")->Get<Tensor<float, CPUContext> >();
+  auto& X_reduced = ws.GetBlob("X_reduced")->Get<TensorCPU>();
   EXPECT_EQ(X_reduced.size(), 10);
   int expected_result = size * (size - 1) / 2;
   for (int i = 0; i < X_reduced.size(); ++i) {
-    EXPECT_EQ(X_reduced.data()[i], expected_result);
+    EXPECT_EQ(X_reduced.data<float>()[i], expected_result);
   }
 }
 
@@ -136,11 +137,11 @@ const char kInPlaceAllreduceNet[] =
 
 TEST(MPITest, TestInPlaceAllreduce) {
   NetDef net_def;
-  CHECK(google::protobuf::TextFormat::ParseFromString(
+  CAFFE_CHECK(google::protobuf::TextFormat::ParseFromString(
       string(kInPlaceAllreduceNet), &net_def));
   // Let's set the network's constant fill value to be the mpi rank.
   auto* arg = net_def.mutable_op(0)->mutable_arg(1);
-  CHECK_EQ(arg->name(), "value");
+  CAFFE_CHECK_EQ(arg->name(), "value");
   int rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   arg->set_f(rank);
@@ -152,26 +153,22 @@ TEST(MPITest, TestInPlaceAllreduce) {
   EXPECT_NE(nullptr, net.get());
   EXPECT_TRUE(net->Verify());
   EXPECT_TRUE(net->Run());
-  auto& X_reduced = ws.GetBlob("X")->Get<Tensor<float, CPUContext> >();
+  auto& X_reduced = ws.GetBlob("X")->Get<TensorCPU>();
   EXPECT_EQ(X_reduced.size(), 10);
   int expected_result = size * (size - 1) / 2;
   for (int i = 0; i < X_reduced.size(); ++i) {
-    EXPECT_EQ(X_reduced.data()[i], expected_result);
+    EXPECT_EQ(X_reduced.data<float>()[i], expected_result);
   }
 }
 
 }  // namespace caffe2
 
-DEFINE_string(caffe_test_root, "gen/", "The root of the caffe test folder.");
-
-#ifndef GFLAGS_GFLAGS_H_
-  namespace gflags = google;
-#endif
 
 GTEST_API_ int main(int argc, char **argv) {
   int mpi_ret;
   MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &mpi_ret);
-  caffe2::GlobalInit(&argc, &argv);
+  testing::InitGoogleTest(&argc, argv);
+  caffe2::GlobalInit(&argc, argv);
   int test_result = RUN_ALL_TESTS();
   MPI_Finalize();
   return test_result;

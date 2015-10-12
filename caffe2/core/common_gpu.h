@@ -9,7 +9,7 @@
 // #include <thrust/device_vector.h>
 // #include <thrust/functional.h>
 
-#include "glog/logging.h"
+#include "caffe2/core/logging.h"
 #include "caffe2/core/common.h"
 
 namespace caffe2 {
@@ -37,7 +37,7 @@ const char* curandGetErrorString(curandStatus_t error);
 #define CUDA_CHECK(condition)                                                  \
   do {                                                                         \
     cudaError_t error = condition;                                             \
-    CHECK_EQ(error, cudaSuccess)                                               \
+    CAFFE_CHECK_EQ(error, cudaSuccess)                                               \
         << "Error at: " << __FILE__ << ":" << __LINE__ << ": "                 \
         << cudaGetErrorString(error);                                          \
   } while (0)
@@ -45,7 +45,7 @@ const char* curandGetErrorString(curandStatus_t error);
 #define CUBLAS_CHECK(condition)                                                \
   do {                                                                         \
     cublasStatus_t status = condition;                                         \
-    CHECK_EQ(status, CUBLAS_STATUS_SUCCESS)                                    \
+    CAFFE_CHECK_EQ(status, CUBLAS_STATUS_SUCCESS)                                    \
         << "Error at: " << __FILE__ << ":" << __LINE__ << ": "                 \
         << ::caffe2::internal::cublasGetErrorString(status);                   \
   } while (0)
@@ -53,7 +53,7 @@ const char* curandGetErrorString(curandStatus_t error);
 #define CURAND_CHECK(condition)                                                \
   do {                                                                         \
     curandStatus_t status = condition;                                         \
-    CHECK_EQ(status, CURAND_STATUS_SUCCESS)                                    \
+    CAFFE_CHECK_EQ(status, CURAND_STATUS_SUCCESS)                                    \
         << "Error at: " << __FILE__ << ":" << __LINE__ << ": "                 \
         << ::caffe2::internal::curandGetErrorString(status);                   \
   } while (0)

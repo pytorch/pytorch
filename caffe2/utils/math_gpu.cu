@@ -6,18 +6,18 @@ namespace caffe2 {
 namespace math {
 
 // TODO(Yangqing): Yuck again. Maybe change it to templated functors?
-#define DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(dtype, Funcname, function)         \
+#define DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(T, Funcname, function)         \
 __global__                                                                     \
-void _Kernel_##dtype##_##Funcname(const int N, const dtype* x, dtype* y) {     \
+void _Kernel_##T##_##Funcname(const int N, const T* x, T* y) {     \
   CUDA_1D_KERNEL_LOOP(i, N) {                                                  \
     y[i] = function(x[i]);                                                     \
   }                                                                            \
 }                                                                              \
 template <>                                                                    \
-void Funcname<dtype, CUDAContext>(                                             \
-    const int N, const dtype* x, dtype* y,                                     \
+void Funcname<T, CUDAContext>(                                             \
+    const int N, const T* x, T* y,                                     \
     CUDAContext* context) {                                                    \
-  _Kernel_##dtype##_##Funcname<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS,  \
+  _Kernel_##T##_##Funcname<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS,  \
                                  0, context->cuda_stream()>>>(                 \
       N, x, y);                                                                \
 }
@@ -33,19 +33,19 @@ __device__ double cuda_sqr(const double x) { return x * x; }
 DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Sqr, cuda_sqrf)
 DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(double, Sqr, cuda_sqr)
 
-#define DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(dtype, Funcname, function)        \
+#define DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(T, Funcname, function)        \
 __global__                                                                     \
-void _Kernel_##dtype##_##Funcname(                                             \
-    const int N, const dtype* a, const dtype* b, dtype* y) {                   \
+void _Kernel_##T##_##Funcname(                                             \
+    const int N, const T* a, const T* b, T* y) {                   \
   CUDA_1D_KERNEL_LOOP(i, N) {                                                  \
     y[i] = function(a[i], b[i]);                                               \
   }                                                                            \
 }                                                                              \
 template <>                                                                    \
-void Funcname<dtype, CUDAContext>(                                             \
-    const int N, const dtype* a, const dtype* b, dtype* y,                     \
+void Funcname<T, CUDAContext>(                                             \
+    const int N, const T* a, const T* b, T* y,                     \
     CUDAContext* context) {                                                    \
-  _Kernel_##dtype##_##Funcname<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS,  \
+  _Kernel_##T##_##Funcname<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS,  \
                                  0, context->cuda_stream()>>>(                 \
       N, a, b, y);                                                             \
 }
@@ -94,16 +94,16 @@ CAFFE2_SPECIALIZED_COLWISEMAX(float)
 */
 
 namespace {
-template<typename dtype>
-__global__ void AddToRowKernel(const int M, const int N, const dtype* x,
-                               dtype* y) {
+template<typename T>
+__global__ void AddToRowKernel(const int M, const int N, const T* x,
+                               T* y) {
   CUDA_1D_KERNEL_LOOP(i, M * N) {
     y[i] += x[i % N];
   }
 }
-template<typename dtype>
-__global__ void AddToColKernel(const int M, const int N, const dtype* x,
-                               dtype* y) {
+template<typename T>
+__global__ void AddToColKernel(const int M, const int N, const T* x,
+                               T* y) {
   CUDA_1D_KERNEL_LOOP(i, M * N) {
     y[i] += x[i % M];
   }
@@ -156,17 +156,17 @@ void Gemv<float, CUDAContext>(
 
 
 namespace {
-template <typename dtype>
-__global__ void SetKernel(const int N, const dtype alpha, dtype* Y) {
+template <typename T>
+__global__ void SetKernel(const int N, const T alpha, T* Y) {
   CUDA_1D_KERNEL_LOOP(i, N) {
     Y[i] = alpha;
   }
 }
 }  // namespace
 
-#define CAFFE2_SPECIALIZED_CUDA_SET(dtype)                                     \
+#define CAFFE2_SPECIALIZED_CUDA_SET(T)                                     \
   template <>                                                                  \
-  void Set<dtype, CUDAContext>(const int N, const dtype alpha, dtype *Y,       \
+  void Set<T, CUDAContext>(const int N, const T alpha, T *Y,       \
                               CUDAContext* context) {                          \
     SetKernel<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS,                   \
                 0, context->cuda_stream()>>>(N, alpha, Y);                     \
@@ -178,10 +178,10 @@ CAFFE2_SPECIALIZED_CUDA_SET(int);
 #undef CAFFE2_SPECIALIZED_CUDA_SET
 
 namespace {
-template <typename dtype>
-__global__ void UniformShift(const int N, const dtype min, const dtype max,
-                             dtype* x) {
-  dtype scale = max - min;
+template <typename T>
+__global__ void UniformShift(const int N, const T min, const T max,
+                             T* x) {
+  T scale = max - min;
   CUDA_1D_KERNEL_LOOP(i, N) {
     x[i] = x[i] * scale + min;
   }
@@ -256,7 +256,7 @@ void Sum<double, CPUContext>(
 */
 
 namespace {
-template <typename dtype>
+template <typename T>
 __global__ void SelectKernel(
     const int N, const int D, const float* x, const int* idx, float* y) {
   CUDA_1D_KERNEL_LOOP(i, N) {
@@ -274,9 +274,9 @@ void Select<float, CUDAContext>(
 }
 
 namespace {
-template <typename dtype>
+template <typename T>
 __global__ void ScaleKernel(
-    const int n, const dtype* alpha, const dtype* x, dtype* y) {
+    const int n, const T* alpha, const T* x, T* y) {
   CUDA_1D_KERNEL_LOOP(i, n) {
     y[i] = x[i] * (*alpha);
   }
@@ -313,9 +313,9 @@ void Axpy<double, CUDAContext>(
 }
 
 namespace {
-template <typename dtype>
-__global__ void AxpbyKernel(const int n, const dtype* a, const dtype* x,
-                             const dtype* b, dtype* y) {
+template <typename T>
+__global__ void AxpbyKernel(const int n, const T* a, const T* x,
+                             const T* b, T* y) {
   CUDA_1D_KERNEL_LOOP(index, n) {
     y[index] = x[index] * (*a) + y[index] * (*b);
   }
@@ -340,13 +340,13 @@ void Axpby<double, CUDAContext>(
 
 namespace {
 
-template <typename dtype>
-__global__ void im2col_gpu_kernel_nchw(const int n, const dtype* data_im,
+template <typename T>
+__global__ void im2col_gpu_kernel_nchw(const int n, const T* data_im,
     const int height, const int width, const int kernel_h, const int kernel_w,
     const int pad_t, const int pad_l,
     const int stride_h, const int stride_w,
     const int height_col, const int width_col,
-    dtype* data_col) {
+    T* data_col) {
   CUDA_1D_KERNEL_LOOP(index, n) {
     int w_out = index % width_col;
     int h_index = index / width_col;
@@ -355,9 +355,9 @@ __global__ void im2col_gpu_kernel_nchw(const int n, const dtype* data_im,
     int channel_out = channel_in * kernel_h * kernel_w;
     int h_in = h_out * stride_h - pad_t;
     int w_in = w_out * stride_w - pad_l;
-    dtype* data_col_ptr = data_col;
+    T* data_col_ptr = data_col;
     data_col_ptr += (channel_out * height_col + h_out) * width_col + w_out;
-    const dtype* data_im_ptr = data_im;
+    const T* data_im_ptr = data_im;
     data_im_ptr += (channel_in * height + h_in) * width + w_in;
     for (int i = 0; i < kernel_h; ++i) {
       for (int j = 0; j < kernel_w; ++j) {
@@ -371,20 +371,20 @@ __global__ void im2col_gpu_kernel_nchw(const int n, const dtype* data_im,
   }
 }
 
-template <typename dtype>
-__global__ void im2col_gpu_kernel_nhwc(const int n, const dtype* data_im,
+template <typename T>
+__global__ void im2col_gpu_kernel_nhwc(const int n, const T* data_im,
     const int height, const int width, const int kernel_h, const int kernel_w,
     const int pad_t, const int pad_l,
     const int stride_h, const int stride_w,
     const int width_col, const int channels,
-    dtype* data_col) {
+    T* data_col) {
   CUDA_1D_KERNEL_LOOP(index, n) {
     int channel_in = index % channels;
     int w_out = index / channels % width_col;
     int h_out = index / channels / width_col;
     int h_in = h_out * stride_h - pad_t;
     int w_in = w_out * stride_w - pad_l;
-    dtype* local_data_col = data_col +
+    T* local_data_col = data_col +
         ((h_out * width_col) + w_out) * channels * kernel_h * kernel_w
         + channel_in;
     for (int i = 0; i < kernel_h; ++i) {
@@ -399,16 +399,16 @@ __global__ void im2col_gpu_kernel_nhwc(const int n, const dtype* data_im,
   }
 }
 
-template <typename dtype>
-__global__ void col2im_gpu_kernel_nchw(const int n, const dtype* data_col,
+template <typename T>
+__global__ void col2im_gpu_kernel_nchw(const int n, const T* data_col,
     const int height, const int width,
     const int patch_h, const int patch_w,
     const int pad_t, const int pad_l,
     const int stride_h, const int stride_w,
     const int height_col, const int width_col,
-    dtype* data_im) {
+    T* data_im) {
   CUDA_1D_KERNEL_LOOP(index, n) {
-    dtype val = 0;
+    T val = 0;
     int w = index % width + pad_l;
     int h = (index / width) % height + pad_t;
     int c = index / (width * height);
@@ -430,16 +430,16 @@ __global__ void col2im_gpu_kernel_nchw(const int n, const dtype* data_col,
   }
 }
 
-template <typename dtype>
-__global__ void col2im_gpu_kernel_nhwc(const int n, const dtype* data_col,
+template <typename T>
+__global__ void col2im_gpu_kernel_nhwc(const int n, const T* data_col,
     const int width, const int channels,
     const int patch_h, const int patch_w,
     const int pad_t, const int pad_l,
     const int stride_h, const int stride_w,
     const int height_col, const int width_col,
-    dtype* data_im) {
+    T* data_im) {
   CUDA_1D_KERNEL_LOOP(index, n) {
-    dtype val = 0;
+    T val = 0;
     int c = index % channels;
     int w = index / channels % width + pad_l;
     int h = index / channels / width + pad_t;
@@ -553,9 +553,9 @@ void Col2im<float, CUDAContext, StorageOrder::NHWC>(
 }
 
 namespace {
-template <typename T>
 __global__ void CopyMatrixKernel(
-    const int M, const int N, const T* A, const int lda, T* B, const int ldb) {
+    const int M, const int N, const char* A, const int lda,
+    char* B, const int ldb) {
   CUDA_1D_KERNEL_LOOP(i, M * N) {
     int r = i / N;
     int c = i % N;
@@ -565,11 +565,13 @@ __global__ void CopyMatrixKernel(
 }  // namespace
 
 template <>
-void CopyMatrix<float, CUDAContext>(
-    const int M, const int N, const float* A, const int lda, float* B,
-    const int ldb, CUDAContext* context) {
-  CopyMatrixKernel<float><<<CAFFE_GET_BLOCKS(M * N), CAFFE_CUDA_NUM_THREADS, 0,
-                            context->cuda_stream()>>>(M, N, A, lda, B, ldb);
+void CopyMatrix<CUDAContext>(
+    const size_t itemsize, const int M, const int N, const void* A,
+    const int lda, void* B, const int ldb, CUDAContext* context) {
+  CopyMatrixKernel<<<CAFFE_GET_BLOCKS(M * N), CAFFE_CUDA_NUM_THREADS, 0,
+                     context->cuda_stream()>>>(
+      M, N * itemsize, static_cast<const char*>(A), lda * itemsize,
+      static_cast<char*>(B), ldb * itemsize);
 }
 
 }  // namespace math

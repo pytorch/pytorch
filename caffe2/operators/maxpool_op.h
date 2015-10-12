@@ -5,7 +5,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/operators/conv_pool_op_base.h"
 #include "caffe2/utils/math.h"
-#include "glog/logging.h"
+#include "caffe2/core/logging.h"
 
 namespace caffe2 {
 
@@ -13,12 +13,12 @@ namespace caffe2 {
 // input that leads to the max value. Note that the indices are PER IMAGE,
 // meaning that if you compute the offset in the original raw data buffer, you
 // will need to deal with the number of images and channels accordingly.
-template <typename dtype, class DeviceContext>
-class MaxPoolOp final : public ConvPoolOpBase<dtype, DeviceContext> {
+template <typename T, class Context>
+class MaxPoolOp final : public ConvPoolOpBase<Context> {
  public:
   USE_CONV_POOL_BASE_FUNCTIONS;
   MaxPoolOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<dtype, DeviceContext>(operator_def, ws) {}
+      : ConvPoolOpBase<Context>(operator_def, ws) {}
   ~MaxPoolOp() {}
 
   bool RunOnDeviceWithOrderNCHW() override;
@@ -30,12 +30,12 @@ class MaxPoolOp final : public ConvPoolOpBase<dtype, DeviceContext> {
   DISABLE_COPY_AND_ASSIGN(MaxPoolOp);
 };
 
-template <typename dtype, class DeviceContext>
-class MaxPoolGradientOp final : public ConvPoolOpBase<dtype, DeviceContext> {
+template <typename T, class Context>
+class MaxPoolGradientOp final : public ConvPoolOpBase<Context> {
  public:
   USE_CONV_POOL_BASE_FUNCTIONS;
   MaxPoolGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<dtype, DeviceContext>(operator_def, ws) {}
+      : ConvPoolOpBase<Context>(operator_def, ws) {}
   ~MaxPoolGradientOp() {}
 
   bool RunOnDevice() override;

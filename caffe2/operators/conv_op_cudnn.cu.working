@@ -3,11 +3,11 @@
 
 namespace caffe2 {
 
-template <typename dtype>
-class CudnnConvOp final : public ConvPoolOpBase<dtype, CUDAContext> {
+template <typename T>
+class CudnnConvOp final : public ConvPoolOpBase<T, CUDAContext> {
  public:
   CudnnConvOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<dtype, CUDAContext>(operator_def, ws),
+      : ConvPoolOpBase<T, CUDAContext>(operator_def, ws),
         kOne(1, &device_context_), kZero(0, &device_context_) {}
   ~CudnnConvOp() {}
 
@@ -36,12 +36,12 @@ class CudnnConvOp final : public ConvPoolOpBase<dtype, CUDAContext> {
 };
 
 /*
-template <typename dtype, class DeviceContext>
-class ConvGradientOp final : public ConvPoolOpBase<dtype, DeviceContext> {
+template <typename T, class Context>
+class ConvGradientOp final : public ConvPoolOpBase<Context> {
  public:
   USE_CONV_POOL_BASE_FUNCTIONS;
   ConvGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<dtype, DeviceContext>(operator_def, ws),
+      : ConvPoolOpBase<Context>(operator_def, ws),
         kOne(1, &device_context_), kZero(0, &device_context_) {}
   ~ConvGradientOp() {}
 
@@ -49,10 +49,10 @@ class ConvGradientOp final : public ConvPoolOpBase<dtype, DeviceContext> {
   bool RunOnDeviceWithOrderNHWC() override;
 
  private:
-  Tensor<dtype, DeviceContext> col_buffer_;
-  Tensor<dtype, DeviceContext> bias_multiplier_;
-  Tensor<dtype, DeviceContext> kOne;
-  Tensor<dtype, DeviceContext> kZero;
+  Tensor<Context> col_buffer_;
+  Tensor<Context> bias_multiplier_;
+  Tensor<Context> kOne;
+  Tensor<Context> kZero;
   // input: X, W, b, dY
   // output: dW, db, and optionally dX
   INPUT_OUTPUT_STATS(4, 4, 2, 3);

@@ -1,0 +1,6 @@
+cc_thirdparty_target(
+  name="openmpi",
+  srcs=["BREW"],
+  commands=[],
+  cc_obj_files=['-l' + lib for lib in Env.MPI_LIBS],
+)

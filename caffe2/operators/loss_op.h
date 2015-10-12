@@ -4,14 +4,14 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
-#include "glog/logging.h"
+#include "caffe2/core/logging.h"
 
 namespace caffe2 {
 
 // AveragedLoss takes in the input and produces two outputs: one being the loss
 // value, and one being the gradient.
-template <typename dtype, class DeviceContext>
-class AveragedLoss final : public Operator<dtype, DeviceContext> {
+template <typename T, class Context>
+class AveragedLoss final : public Operator<Context> {
  public:
   USE_SIMPLE_CTOR_DTOR(AveragedLoss);
   USE_OPERATOR_BASE_FUNCTIONS;
@@ -22,11 +22,12 @@ class AveragedLoss final : public Operator<dtype, DeviceContext> {
     auto* dX = Output(1);
     Loss->Reshape(std::vector<int>());
     dX->ReshapeLike(X);
-    math::Set<dtype, DeviceContext>(
-        dX->size(), static_cast<dtype>(1.) / X.size(), dX->mutable_data(),
+    math::Set<T, Context>(
+        dX->size(), static_cast<T>(1.) / X.size(), dX->template mutable_data<T>(),
         &device_context_);
-    math::Dot<dtype, DeviceContext>(
-        X.size(), X.data(), dX->data(), Loss->mutable_data(), &device_context_);
+    math::Dot<T, Context>(
+        X.size(), X.template data<T>(), dX->template data<T>(),
+        Loss->template mutable_data<T>(), &device_context_);
     return true;
   }
 
@@ -35,8 +36,8 @@ class AveragedLoss final : public Operator<dtype, DeviceContext> {
   DISABLE_COPY_AND_ASSIGN(AveragedLoss);
 };
 
-template <typename dtype, class DeviceContext>
-class WeightedSumLoss final : public Operator<dtype, DeviceContext> {
+template <typename T, class Context>
+class WeightedSumLoss final : public Operator<Context> {
  public:
   USE_SIMPLE_CTOR_DTOR(WeightedSumLoss);
   USE_OPERATOR_BASE_FUNCTIONS;
@@ -44,12 +45,13 @@ class WeightedSumLoss final : public Operator<dtype, DeviceContext> {
   bool RunOnDevice() override {
     auto& X = Input(0);
     auto& W = Input(1);
-    DCHECK_EQ(X.size(), W.size());
+    CAFFE_DCHECK_EQ(X.size(), W.size());
     auto* Loss = Output(0);
     auto* dX = Output(1);
     Loss->Reshape(std::vector<int>());
-    math::Dot<dtype, DeviceContext>(
-        X.size(), X.data(), W.data(), Loss->mutable_data(), &device_context_);
+    math::Dot<T, Context>(
+        X.size(), X.template data<T>(), W.template data<T>(),
+        Loss->template mutable_data<T>(), &device_context_);
     dX->ReshapeLike(X);
     dX->ShareData(W);
     return true;

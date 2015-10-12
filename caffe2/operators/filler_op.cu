@@ -13,11 +13,11 @@ __global__ void FillRangeKernel(const int n, float* data) {
 
 template <>
 bool RangeFillOp<float, CUDAContext>::Fill(
-    Tensor<float, CUDAContext>* output) {
+    TensorCUDA* output) {
   int N = output->size();
   FillRangeKernel<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS,
                     0, device_context_.cuda_stream()>>>(
-      N, output->mutable_data());
+      N, output->mutable_data<float>());
   return true;
 }
 

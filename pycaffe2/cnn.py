@@ -4,19 +4,16 @@ class CNNModelHelper(object):
   """A helper model so we can write CNN models more easily, without having to
   manually define parameter initializations and operators separately.
   """
-  def __init__(self, order, net=None, param_init_net=None, name=None):
-    self.net = net
-    if net is None:
-      if name is None:
-        name = "CNN"
-      self.net = core.Net(name)
-    self.param_init_net = param_init_net
-    if param_init_net is None:
-      self.param_init_net = core.Net(name + '_init')
+  def __init__(self, order, name=None):
+    if name is None:
+      name = "CNN"
+    self.net = core.Net(name)
+    self.param_init_net = core.Net(name + '_init')
     self.params = []
     self.order = order
     if self.order != "NHWC" and self.order != "NCHW":
-      raise ValueError("Cannot understand the CNN storage order.")
+      raise ValueError("Cannot understand the CNN storage order %s."
+                       % self.order)
 
   def Conv(self, blob_in, blob_out, dim_in, dim_out, kernel,
            weight_init, bias_init, **kwargs):

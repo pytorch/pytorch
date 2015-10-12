@@ -16,8 +16,8 @@ cc_library(
   deps = [
       ":mpi_common",
       "//caffe2/core:core",
+      "//third_party/openmpi:openmpi",
   ],
-  external_libs = Env.MPI_LIBS,
   whole_archive = True,
 )
 
@@ -33,11 +33,10 @@ cc_library(
   deps = [
       ":mpi_common",
       "//caffe2/core:core_gpu",
+      "//third_party/openmpi:openmpi",
   ],
-  external_libs = Env.MPI_LIBS,
   whole_archive = True,
 )
-
 
 mpi_test(
   name = "mpi_test",
@@ -48,8 +47,6 @@ mpi_test(
     ":mpi_ops",
     "//caffe2:all_available_ops",
     "//gtest:gtest",
-    "//third_party/gflags:gflags",
-    "//third_party/glog:glog"
   ]
 )
 
@@ -62,7 +59,5 @@ mpi_test(
     ":mpi_ops",
     "//caffe2:all_available_ops",
     "//gtest:gtest",
-    "//third_party/gflags:gflags",
-    "//third_party/glog:glog"
   ]
 )

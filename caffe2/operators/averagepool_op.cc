@@ -11,8 +11,8 @@ bool AveragePoolOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   auto* Y = Output(0);
   ConvPoolOpBase::SetOutputSize(X, Y, X.dim(1));
 
-  const float* Xdata = X.data();
-  float* Ydata = Y->mutable_data();
+  const float* Xdata = X.data<float>();
+  float* Ydata = Y->mutable_data<float>();
   math::Set<float, CPUContext>(
       Y->size(), 0, Ydata, &device_context_);
   // The main loop
@@ -57,8 +57,8 @@ bool AveragePoolOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   int width = X.dim(2);
   int channels = X.dim(3);
   ConvPoolOpBase::SetOutputSize(X, Y, channels);
-  const float* Xdata = X.data();
-  float* Ydata = Y->mutable_data();
+  const float* Xdata = X.data<float>();
+  float* Ydata = Y->mutable_data<float>();
   math::Set<float, CPUContext>(Y->size(), 0, Ydata, &device_context_);
   // The main loop
   int pooled_height = Y->dim(1);
@@ -102,14 +102,14 @@ bool AveragePoolGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   // TODO(Yangqing): Add shape checks.
   dX->ReshapeLike(X);
   math::Set<float, CPUContext>(
-      X.size(), 0, dX->mutable_data(), &device_context_);
-  const float* dYdata = dY.data();
-  float* dXdata = dX->mutable_data();
+      X.size(), 0, dX->mutable_data<float>(), &device_context_);
+  const float* dYdata = dY.data<float>();
+  float* dXdata = dX->mutable_data<float>();
   int channels = X.dim(1);
-  CHECK_EQ(channels, dY.dim(1));
+  CAFFE_CHECK_EQ(channels, dY.dim(1));
   int height = X.dim(2);
   int width = X.dim(3);
-  ConvPoolOpBase<float, CPUContext>::ComputePads(height, width);
+  ConvPoolOpBase<CPUContext>::ComputePads(height, width);
   int pooled_height = dY.dim(2);
   int pooled_width = dY.dim(3);
   // The main loop
@@ -144,22 +144,22 @@ template <>
 bool AveragePoolGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   auto& X = Input(0);
   auto& dY = Input(1);
-  CHECK_EQ(dY.ndim(), 4);
+  CAFFE_CHECK_EQ(dY.ndim(), 4);
   auto* dX = Output(0);
   // TODO(Yangqing): Add shape checks.
   dX->ReshapeLike(X);
   math::Set<float, CPUContext>(
-      X.size(), 0, dX->mutable_data(), &device_context_);
-  const float* dYdata = dY.data();
-  float* dXdata = dX->mutable_data();
+      X.size(), 0, dX->mutable_data<float>(), &device_context_);
+  const float* dYdata = dY.data<float>();
+  float* dXdata = dX->mutable_data<float>();
   // The main loop
   int height = X.dim(1);
   int width = X.dim(2);
-  ConvPoolOpBase<float, CPUContext>::ComputePads(height, width);
+  ConvPoolOpBase<CPUContext>::ComputePads(height, width);
   int pooled_height = dY.dim(1);
   int pooled_width = dY.dim(2);
   int channels = X.dim(3);
-  CHECK_EQ(channels, dY.dim(3));
+  CAFFE_CHECK_EQ(channels, dY.dim(3));
   for (int n = 0; n < X.dim(0); ++n) {
     for (int ph = 0; ph < pooled_height; ++ph) {
       for (int pw = 0; pw < pooled_width; ++pw) {

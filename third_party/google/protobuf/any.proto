@@ -1,0 +1,98 @@
+// Protocol Buffers - Google's data interchange format
+// Copyright 2008 Google Inc.  All rights reserved.
+// https://developers.google.com/protocol-buffers/
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are
+// met:
+//
+//     * Redistributions of source code must retain the above copyright
+// notice, this list of conditions and the following disclaimer.
+//     * Redistributions in binary form must reproduce the above
+// copyright notice, this list of conditions and the following disclaimer
+// in the documentation and/or other materials provided with the
+// distribution.
+//     * Neither the name of Google Inc. nor the names of its
+// contributors may be used to endorse or promote products derived from
+// this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+syntax = "proto3";
+
+package google.protobuf;
+
+option java_generate_equals_and_hash = true;
+option java_multiple_files = true;
+option java_outer_classname = "AnyProto";
+option java_package = "com.google.protobuf";
+option csharp_namespace = "Google.Protobuf.WellKnownTypes";
+option objc_class_prefix = "GPB";
+
+
+// `Any` contains an arbitrary serialized message along with a URL
+// that describes the type of the serialized message.
+//
+// JSON
+// ====
+// The JSON representation of an `Any` value uses the regular
+// representation of the deserialized, embedded message, with an
+// additional field `@type` which contains the type URL. Example:
+//
+//     package google.profile;
+//     message Person {
+//       string first_name = 1;
+//       string last_name = 2;
+//     }
+//
+//     {
+//       "@type": "type.googleapis.com/google.profile.Person",
+//       "firstName": <string>,
+//       "lastName": <string>
+//     }
+//
+// If the embedded message type is well-known and has a custom JSON
+// representation, that representation will be embedded adding a field
+// `value` which holds the custom JSON in addition to the the `@type`
+// field. Example (for message [google.protobuf.Duration][google.protobuf.Duration]):
+//
+//     {
+//       "@type": "type.googleapis.com/google.protobuf.Duration",
+//       "value": "1.212s"
+//     }
+//
+message Any {
+  // A URL/resource name whose content describes the type of the
+  // serialized message.
+  //
+  // For URLs which use the schema `http`, `https`, or no schema, the
+  // following restrictions and interpretations apply:
+  //
+  // * If no schema is provided, `https` is assumed.
+  // * The last segment of the URL's path must represent the fully
+  //   qualified name of the type (as in `path/google.protobuf.Duration`).
+  // * An HTTP GET on the URL must yield a [google.protobuf.Type][google.protobuf.Type]
+  //   value in binary format, or produce an error.
+  // * Applications are allowed to cache lookup results based on the
+  //   URL, or have them precompiled into a binary to avoid any
+  //   lookup. Therefore, binary compatibility needs to be preserved
+  //   on changes to types. (Use versioned type names to manage
+  //   breaking changes.)
+  //
+  // Schemas other than `http`, `https` (or the empty schema) might be
+  // used with implementation specific semantics.
+  //
+  string type_url = 1;
+
+  // Must be valid serialized data of the above specified type.
+  bytes value = 2;
+}

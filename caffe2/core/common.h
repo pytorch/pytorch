@@ -21,7 +21,7 @@ using CaffeMap = std::map<Key, Value>;
 using std::vector;
 
 // Just in order to mark things as not implemented. Do not use in final code.
-#define NOT_IMPLEMENTED LOG(FATAL) << "Not Implemented."
+#define NOT_IMPLEMENTED CAFFE_LOG_FATAL << "Not Implemented."
 
 // suppress an unused variable.
 #define UNUSED_VARIABLE __attribute__((unused))

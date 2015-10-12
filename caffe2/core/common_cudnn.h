@@ -7,7 +7,7 @@
 #include "caffe2/core/types.h"
 #include "caffe2/proto/caffe2.pb.h"
 #include "cudnn.h"  // NOLINT
-#include "glog/logging.h"
+#include "caffe2/core/logging.h"
 
 namespace caffe2 {
 
@@ -43,13 +43,13 @@ inline const char* cudnnGetErrorString(cudnnStatus_t status) {
 #define CUDNN_CHECK(condition)                                                 \
   do {                                                                         \
     cudnnStatus_t status = condition;                                          \
-    CHECK_EQ(status, CUDNN_STATUS_SUCCESS) << " "                              \
+    CAFFE_CHECK_EQ(status, CUDNN_STATUS_SUCCESS) << " "                              \
         << "Error at: " << __FILE__ << ":" << __LINE__ << ": "                 \
         << ::caffe2::internal::cudnnGetErrorString(status);                    \
   } while (0)
 
 
-template <typename dtype> class cudnnTypeWrapper;
+template <typename T> class cudnnTypeWrapper;
 template<> class cudnnTypeWrapper<float>  {
  public:
   static const cudnnDataType_t type = CUDNN_DATA_FLOAT;
@@ -66,7 +66,7 @@ inline cudnnTensorFormat_t GetCudnnTensorFormat(const StorageOrder& order) {
   case StorageOrder::NCHW:
     return CUDNN_TENSOR_NCHW;
   default:
-    LOG(FATAL) << "Unknown cudnn equivalent for order: " << order;
+    CAFFE_LOG_FATAL << "Unknown cudnn equivalent for order: " << order;
   }
   // Just to suppress compiler warnings
   return CUDNN_TENSOR_NCHW;
@@ -81,7 +81,7 @@ class cudnnDescriptorMeta {
   }
   cudnnDescriptorMeta(const cudnnDescriptorMeta& src) {
     CUDNN_CHECK(cudnnCreateTensorDescriptor(&desc_));
-    CHECK_NOTNULL(Descriptor(src.format_, src.type_, src.dims_, nullptr));
+    CAFFE_CHECK_NOTNULL(Descriptor(src.format_, src.type_, src.dims_, nullptr));
   }
   ~cudnnDescriptorMeta() {
     CUDNN_CHECK(cudnnDestroyTensorDescriptor(desc_));
@@ -95,7 +95,7 @@ class cudnnDescriptorMeta {
       if (changed) *changed = false;
       return desc_;
     }
-    CHECK_EQ(dims.size(), 4)
+    CAFFE_CHECK_EQ(dims.size(), 4)
         << "Currently only 4-dimensional descriptor supported.";
     format_ = format;
     type_ = type;
@@ -142,12 +142,12 @@ class CuDNNWrapper {
     cudnn_tensor_descriptors_.resize(n);
   }
 
-  template <typename dtype>
+  template <typename T>
   inline cudnnTensorDescriptor_t cudnnGetTensor4dDesc(
       const int index, const cudnnTensorFormat_t cudnn_format,
       const vector<int>& dims, bool* changed) {
     return cudnn_tensor_descriptors_.at(index).Descriptor(
-        cudnn_format, cudnnTypeWrapper<dtype>::type, dims, changed);
+        cudnn_format, cudnnTypeWrapper<T>::type, dims, changed);
   }
 
  protected:

@@ -2,7 +2,7 @@
 #include <mutex>
 
 #include "caffe2/core/db.h"
-#include "glog/logging.h"
+#include "caffe2/core/logging.h"
 
 namespace caffe2 {
 namespace db {
@@ -18,7 +18,7 @@ class MiniDBCursor : public Cursor {
 
   void SeekToFirst() override {
     fseek(file_, 0, SEEK_SET);
-    CHECK(!feof(file_)) << "Hmm, empty file?";
+    CAFFE_CHECK(!feof(file_)) << "Hmm, empty file?";
     // Read the first item.
     valid_ = true;
     Next();
@@ -28,13 +28,13 @@ class MiniDBCursor : public Cursor {
     // First, read in the key and value length.
     if (fread(&key_len_, sizeof(int), 1, file_) == 0) {
       // Reaching EOF.
-      LOG(INFO) << "EOF reached, setting valid to false";
+      CAFFE_LOG_INFO << "EOF reached, setting valid to false";
       valid_ = false;
       return;
     }
-    CHECK_EQ(fread(&value_len_, sizeof(int), 1, file_), 1);
-    CHECK_GT(key_len_, 0);
-    CHECK_GT(value_len_, 0);
+    CAFFE_CHECK_EQ(fread(&value_len_, sizeof(int), 1, file_), 1);
+    CAFFE_CHECK_GT(key_len_, 0);
+    CAFFE_CHECK_GT(value_len_, 0);
     // Resize if the key and value len is larger than the current one.
     if (key_len_ > key_.size()) {
       key_.resize(key_len_);
@@ -43,19 +43,19 @@ class MiniDBCursor : public Cursor {
       value_.resize(value_len_);
     }
     // Actually read in the contents.
-    CHECK_EQ(fread(key_.data(), sizeof(char), key_len_, file_), key_len_);
-    CHECK_EQ(fread(value_.data(), sizeof(char), value_len_, file_), value_len_);
+    CAFFE_CHECK_EQ(fread(key_.data(), sizeof(char), key_len_, file_), key_len_);
+    CAFFE_CHECK_EQ(fread(value_.data(), sizeof(char), value_len_, file_), value_len_);
     // Note(Yangqing): as we read the file, the cursor naturally moves to the
     // beginning of the next entry.
   }
 
   string key() override {
-    CHECK(valid_) << "Cursor is at invalid location!";
+    CAFFE_CHECK(valid_) << "Cursor is at invalid location!";
     return string(key_.data(), key_len_);
   }
 
   string value() override {
-    CHECK(valid_) << "Cursor is at invalid location!";
+    CAFFE_CHECK(valid_) << "Cursor is at invalid location!";
     return string(value_.data(), value_len_);
   }
 
@@ -80,14 +80,14 @@ class MiniDBTransaction : public Transaction {
   void Put(const string& key, const string& value) override {
     int key_len = key.size();
     int value_len = value.size();
-    CHECK_EQ(fwrite(&key_len, sizeof(int), 1, file_), 1);
-    CHECK_EQ(fwrite(&value_len, sizeof(int), 1, file_), 1);
-    CHECK_EQ(fwrite(key.c_str(), sizeof(char), key_len, file_), key_len);
-    CHECK_EQ(fwrite(value.c_str(), sizeof(char), value_len, file_), value_len);
+    CAFFE_CHECK_EQ(fwrite(&key_len, sizeof(int), 1, file_), 1);
+    CAFFE_CHECK_EQ(fwrite(&value_len, sizeof(int), 1, file_), 1);
+    CAFFE_CHECK_EQ(fwrite(key.c_str(), sizeof(char), key_len, file_), key_len);
+    CAFFE_CHECK_EQ(fwrite(value.c_str(), sizeof(char), value_len, file_), value_len);
   }
 
   void Commit() override {
-    CHECK_EQ(fflush(file_), 0);
+    CAFFE_CHECK_EQ(fflush(file_), 0);
   }
 
  private:
@@ -112,20 +112,20 @@ class MiniDB : public DB {
         file_ = fopen(source.c_str(), "rb");
         break;
     }
-    CHECK(file_) << "Cannot open file: " << source;
-    LOG(INFO) << "Opened MiniDB " << source;
+    CAFFE_CHECK(file_) << "Cannot open file: " << source;
+    CAFFE_LOG_INFO << "Opened MiniDB " << source;
   }
   ~MiniDB() { Close(); }
 
   void Close() override { fclose(file_); }
 
   Cursor* NewCursor() override {
-    CHECK_EQ(this->mode_, READ);
+    CAFFE_CHECK_EQ(this->mode_, READ);
     return new MiniDBCursor(file_, &file_access_mutex_);
   }
 
   Transaction* NewTransaction() override {
-    CHECK(this->mode_ == NEW || this->mode_ == WRITE);
+    CAFFE_CHECK(this->mode_ == NEW || this->mode_ == WRITE);
     return new MiniDBTransaction(file_, &file_access_mutex_);
   }
 

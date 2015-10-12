@@ -51,7 +51,7 @@ for param in [filter1, bias1, filter2, bias2, W3, B3, W4, B4]:
   train_net.WeightedSum([param, ONE, param.Grad(), LR], param)
 LR = train_net.Mul([LR, DECAY], "LR")
 train_net.Print([accuracy], [])
-train_net._net.net_type = 'parallel'
+train_net._net.net_type = 'dag'
 train_net._net.num_workers = 8
 
 # CPU version

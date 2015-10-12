@@ -39,32 +39,46 @@ cc_library(
 )
 
 cuda_library(
-  name = "core_ops_gpu",
+  name = "core_ops_gpu_cu",
   srcs = [
       "accumulate_op.cu",
       "accuracy_op.cu",
       "averagepool_op.cu",
       "clip_op.cu",
-      "conv_op.cu",
       "cross_entropy_op.cu",
-      "depth_split_op.cu",
       "dropout_op.cu",
-      "elementwise_op_gpu.cc",
       "filler_op.cu",
-      "fully_connected_op_gpu.cc",
       "l2_distance_op.cu",
-      "load_save_op.cu",
       "local_response_normalization_op.cu",
-      "loss_op_gpu.cc",
       "maxpool_op.cu",
       "order_switch_ops.cu",
       "relu_op.cu",
       "softmax_op.cu",
       "summarize_op.cu",
+  ],
+  deps = [
+      ":operators_headers",
+      "//caffe2/core:core_gpu",
+      "//caffe2/utils:math_gpu",
+      "//caffe2/utils:proto_utils",
+  ],
+  whole_archive = True,
+)
+
+cc_library(
+  name = "core_ops_gpu",
+  srcs = [
+      "conv_op_gpu.cc",
+      "depth_split_op_gpu.cc",
+      "elementwise_op_gpu.cc",
+      "fully_connected_op_gpu.cc",
+      "load_save_op_gpu.cc",
+      "loss_op_gpu.cc",
       "tensor_protos_db_input_gpu.cc",
       "utility_ops_gpu.cc",
   ],
   deps = [
+      ":core_ops_gpu_cu",
       ":operators_headers",
       "//caffe2/core:core_gpu",
       "//caffe2/utils:math_gpu",

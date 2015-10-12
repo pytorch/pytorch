@@ -3,16 +3,16 @@
 
 namespace caffe2 {
 namespace {
-template <typename dtype>
-__global__ void ReluKernel(const int N, const dtype* X, dtype* Y) {
+template <typename T>
+__global__ void ReluKernel(const int N, const T* X, T* Y) {
   CUDA_1D_KERNEL_LOOP(i, N) {
     Y[i] = X[i] > 0 ? X[i] : 0;
   }
 }
 
-template <typename dtype>
-__global__ void ReluGradientKernel(const int N, const dtype* X, const dtype* dY,
-                              dtype* dX) {
+template <typename T>
+__global__ void ReluGradientKernel(const int N, const T* X, const T* dY,
+                              T* dX) {
   CUDA_1D_KERNEL_LOOP(i, N) {
     dX[i] = dY[i] * (X[i] > 0);
   }
@@ -23,11 +23,11 @@ template <>
 bool ReluOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
   auto* Y = Output(0);
-  DCHECK_GT(X.size(), 0);
+  CAFFE_DCHECK_GT(X.size(), 0);
   Y->ReshapeLike(X);
   ReluKernel<<<CAFFE_GET_BLOCKS(X.size()), CAFFE_CUDA_NUM_THREADS,
                0, device_context_.cuda_stream()>>>(
-      X.size(), X.data(), Y->mutable_data());
+      X.size(), X.data<float>(), Y->mutable_data<float>());
   return true;
 }
 
@@ -36,12 +36,12 @@ bool ReluGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& dY = Input(1);
   auto* dX = Output(0);
-  DCHECK_GT(X.size(), 0);
-  DCHECK_EQ(dY.size(), X.size());
+  CAFFE_DCHECK_GT(X.size(), 0);
+  CAFFE_DCHECK_EQ(dY.size(), X.size());
   dX->ReshapeLike(X);
   ReluGradientKernel<<<CAFFE_GET_BLOCKS(X.size()), CAFFE_CUDA_NUM_THREADS,
                        0, device_context_.cuda_stream()>>>(
-      X.size(), X.data(), dY.data(), dX->mutable_data());
+      X.size(), X.data<float>(), dY.data<float>(), dX->mutable_data<float>());
   return true;
 }
 

@@ -1,5 +1,5 @@
 #include "caffe2/core/db.h"
-#include "glog/logging.h"
+#include "caffe2/core/logging.h"
 #include "leveldb/db.h"
 #include "leveldb/write_batch.h"
 
@@ -24,7 +24,7 @@ class LevelDBCursor : public Cursor {
 class LevelDBTransaction : public Transaction {
  public:
   explicit LevelDBTransaction(leveldb::DB* db) : db_(db) {
-    CHECK_NOTNULL(db_);
+    CAFFE_CHECK_NOTNULL(db_);
     batch_.reset(new leveldb::WriteBatch());
   }
   ~LevelDBTransaction() { Commit(); }
@@ -34,7 +34,7 @@ class LevelDBTransaction : public Transaction {
   void Commit() override {
     leveldb::Status status = db_->Write(leveldb::WriteOptions(), batch_.get());
     batch_.reset(new leveldb::WriteBatch());
-    CHECK(status.ok()) << "Failed to write batch to leveldb "
+    CAFFE_CHECK(status.ok()) << "Failed to write batch to leveldb "
                        << std::endl << status.ToString();
   }
 
@@ -56,10 +56,10 @@ class LevelDB : public DB {
     options.create_if_missing = mode != READ;
     leveldb::DB* db_temp;
     leveldb::Status status = leveldb::DB::Open(options, source, &db_temp);
-    CHECK(status.ok()) << "Failed to open leveldb " << source
+    CAFFE_CHECK(status.ok()) << "Failed to open leveldb " << source
                        << std::endl << status.ToString();
     db_.reset(db_temp);
-    LOG(INFO) << "Opened leveldb " << source;
+    CAFFE_LOG_INFO << "Opened leveldb " << source;
   }
 
   void Close() override { db_.reset(); }

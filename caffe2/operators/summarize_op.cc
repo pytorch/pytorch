@@ -6,8 +6,8 @@ template<>
 bool SummarizeOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   const int N = X.size();
-  DCHECK_GT(N, 0);
-  const float* Xdata = X.data();
+  CAFFE_DCHECK_GT(N, 0);
+  const float* Xdata = X.data<float>();
   float mean = 0;
   float max = Xdata[0];
   float min = Xdata[0];
@@ -33,7 +33,7 @@ bool SummarizeOp<float, CPUContext>::RunOnDevice() {
   if (OutputSize()) {
     auto* Y = Output(0);
     Y->Reshape(std::vector<int>{NUM_STATS});
-    float* Ydata = Y->mutable_data();
+    float* Ydata = Y->mutable_data<float>();
     Ydata[MIN_IDX] = min;
     Ydata[MAX_IDX] = max;
     Ydata[MEAN_IDX] = mean;

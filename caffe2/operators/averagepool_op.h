@@ -5,16 +5,16 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/operators/conv_pool_op_base.h"
 #include "caffe2/utils/math.h"
-#include "glog/logging.h"
+#include "caffe2/core/logging.h"
 
 namespace caffe2 {
 
-template <typename dtype, class DeviceContext>
-class AveragePoolOp final : public ConvPoolOpBase<dtype, DeviceContext> {
+template <typename T, class Context>
+class AveragePoolOp final : public ConvPoolOpBase<Context> {
  public:
   USE_CONV_POOL_BASE_FUNCTIONS;
   AveragePoolOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<dtype, DeviceContext>(operator_def, ws) {}
+      : ConvPoolOpBase<Context>(operator_def, ws) {}
   ~AveragePoolOp() {}
 
   bool RunOnDeviceWithOrderNCHW() override;
@@ -26,13 +26,13 @@ class AveragePoolOp final : public ConvPoolOpBase<dtype, DeviceContext> {
   DISABLE_COPY_AND_ASSIGN(AveragePoolOp);
 };
 
-template <typename dtype, class DeviceContext>
+template <typename T, class Context>
 class AveragePoolGradientOp final :
-    public ConvPoolOpBase<dtype, DeviceContext> {
+    public ConvPoolOpBase<Context> {
  public:
   USE_CONV_POOL_BASE_FUNCTIONS;
   AveragePoolGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<dtype, DeviceContext>(operator_def, ws) {}
+      : ConvPoolOpBase<Context>(operator_def, ws) {}
   ~AveragePoolGradientOp() {}
 
   bool RunOnDeviceWithOrderNCHW() override;
