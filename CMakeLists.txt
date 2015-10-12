@@ -36,7 +36,10 @@ IF(APPLE)
   # CUDA 7 supports clang and libc++ so no need to change anything
 ENDIF(APPLE)
 
-LIST(APPEND CUDA_NVCC_FLAGS "-arch=sm_20")
+# Detect CUDA architecture and get best NVCC flags
+INCLUDE(${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/FindCudaArch.cmake)
+SELECT_NVCC_ARCH_FLAGS(NVCC_FLAGS_EXTRA)
+LIST(APPEND CUDA_NVCC_FLAGS ${NVCC_FLAGS_EXTRA})
 
 INCLUDE_DIRECTORIES(${CUDA_INCLUDE_DIRS})
 INCLUDE_DIRECTORIES("${CUDA_SDK_ROOT_DIR}/common/inc")
