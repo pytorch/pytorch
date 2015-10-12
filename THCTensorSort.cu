@@ -354,7 +354,7 @@ THCudaTensor_fillSliceWithIndex(TensorInfo<unsigned long> out,
   }
 }
 
-bool canSortThrust(THCState* state, THCudaTensor* input, int dim) {
+bool shouldSortThrust(THCState* state, THCudaTensor* input, int dim) {
   long totalElements = THCudaTensor_nElement(state, input);
   long sliceSize = THCudaTensor_size(state, input, dim);
   long numSlices = totalElements / sliceSize;
@@ -438,17 +438,21 @@ THC_API void THCudaTensor_sort(THCState* state,
   THCudaTensor_resizeAs(state, indices, input);
 
   // If we think Thrust will be more efficient, use that
-  if (canSortThrust(state, input, dim)) {
+  if (shouldSortThrust(state, input, dim)) {
     THCudaTensor_sortImplThrust(state, sorted, indices, input,
                                 dim, (bool) order);
     return;
   }
 
-  // Otherwise, use our blockwide sort kernel per each reduction slice
-  if (!THCudaTensor_sortImpl(state, sorted, indices, input,
-                             dim, (bool) order)) {
-    THArgCheck(false, 1, CUTORCH_DIM_WARNING);
+  // Otherwise, try to use our blockwide sort kernel per each reduction slice
+  if (THCudaTensor_sortImpl(state, sorted, indices, input,
+                            dim, (bool) order)) {
+    return;
   }
+
+  // Fall back to Thrust if our kernel can't handle the input
+  THCudaTensor_sortImplThrust(state, sorted, indices, input,
+                              dim, (bool) order);
 
   THCudaCheck(cudaGetLastError());
 }
