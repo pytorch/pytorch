@@ -40,22 +40,22 @@ class OperatorBase {
 
   template <typename MessageType>
   MessageType GetMessageArgument(const string& name) {
-    CHECK(arg_map_.count(name)) << "Cannot find parameter named " << name;
+    CAFFE_CHECK(arg_map_.count(name)) << "Cannot find parameter named " << name;
     MessageType message;
     if (arg_map_[name]->has_s()) {
-      CHECK(message.ParseFromString(arg_map_[name]->s()))
+      CAFFE_CHECK(message.ParseFromString(arg_map_[name]->s()))
           << "Faild to parse content from the string";
     } else {
-      VLOG(1) << "Return empty message for parameter " << name;
+      CAFFE_VLOG(1) << "Return empty message for parameter " << name;
     }
     return message;
   }
   template <typename MessageType>
   vector<MessageType> GetRepeatedMessageArgument(const string& name) {
-    CHECK(arg_map_.count(name)) << "Cannot find parameter named " << name;
+    CAFFE_CHECK(arg_map_.count(name)) << "Cannot find parameter named " << name;
     vector<MessageType> messages(arg_map_[name]->strings_size());
     for (int i = 0; i < messages.size(); ++i) {
-      CHECK(messages[i].ParseFromString(arg_map_[name]->strings(i)))
+      CAFFE_CHECK(messages[i].ParseFromString(arg_map_[name]->strings(i)))
           << "Faild to parse content from the string";
     }
     return messages;
@@ -64,13 +64,13 @@ class OperatorBase {
   // Get the inputs and outputs as specific types.
   template <typename T>
   inline const T& Input(int idx) {
-    DCHECK_LT(idx, inputs_.size());
+    CAFFE_DCHECK_LT(idx, inputs_.size());
     return inputs_.at(idx)->template Get<T>();
   }
 
   template <typename T>
   inline T* Output(int idx) {
-    DCHECK_LT(idx, outputs_.size());
+    CAFFE_DCHECK_LT(idx, outputs_.size());
     return outputs_.at(idx)->template GetMutable<T>();
   }
 
@@ -117,6 +117,11 @@ class OperatorBase {
       : OperatorBase(operator_def, ws) {}                                      \
   virtual ~name() {}
 
+// OP_SINGLE_ARG provides a shorter initialization choice for initialization of
+// member variables for the class constructors.
+#define OP_SINGLE_ARG(type, name, variable, default)                           \
+  variable(OperatorBase::GetSingleArgument<type>(name, (default)))
+
 // INPUT_OUTPUT_STATS gives the statistics of the input and output that are
 // legal. If the max input/output is not limited, you can specify INT_MAX.
 // TODO(Yangqing): If necessary, add ability to specify that n_input = n_output.
@@ -146,7 +151,7 @@ class OperatorBase {
 // Operator is the class that you usually want to derive, if your operator will
 // run on different devices. You should then implement the RunOnDevice()
 // function.
-template <typename dtype, class DeviceContext>
+template <class Context>
 class Operator : public OperatorBase {
  public:
   // The constructor of the operator. Note that you should not do any
@@ -161,10 +166,10 @@ class Operator : public OperatorBase {
   }
   virtual ~Operator() {}
 
-  inline const Tensor<dtype, DeviceContext>& Input(int idx) {
-    return OperatorBase::template Input<Tensor<dtype, DeviceContext> >(idx); }
-  inline Tensor<dtype, DeviceContext>* Output(int idx) {
-    return OperatorBase::template Output<Tensor<dtype, DeviceContext> >(idx);
+  inline const Tensor<Context>& Input(int idx) {
+    return OperatorBase::template Input<Tensor<Context> >(idx); }
+  inline Tensor<Context>* Output(int idx) {
+    return OperatorBase::template Output<Tensor<Context> >(idx);
   }
 
   // The run function of Operator switches to the device, and then carries out
@@ -180,7 +185,7 @@ class Operator : public OperatorBase {
   virtual bool RunOnDevice() = 0;
 
  protected:
-  DeviceContext device_context_;
+  Context device_context_;
   DISABLE_COPY_AND_ASSIGN(Operator);
 };
 
@@ -192,13 +197,13 @@ class Operator : public OperatorBase {
   using OperatorBase::InputIsType;                                             \
   using OperatorBase::InputSize;                                               \
   using OperatorBase::OutputSize;                                              \
-  using Operator<dtype, DeviceContext>::device_context_;                       \
-  using Operator<dtype, DeviceContext>::Input;                                 \
-  using Operator<dtype, DeviceContext>::Output
+  using Operator<Context>::device_context_;                              \
+  using Operator<Context>::Input;                                        \
+  using Operator<Context>::Output
 
 #define USE_SIMPLE_CTOR_DTOR(name)                                             \
   name(const OperatorDef& operator_def, Workspace* ws)                         \
-      : Operator<dtype, DeviceContext>(operator_def, ws) {}                    \
+      : Operator<Context>(operator_def, ws) {}                           \
   virtual ~name() {}
 
 // The operator registry. Since we are not expecting a great number of devices,

@@ -2,7 +2,7 @@
 
 #include "caffe2/core/db.h"
 #include "caffe2/utils/proto_utils.h"
-#include "glog/logging.h"
+#include "caffe2/core/logging.h"
 
 namespace caffe2 {
 namespace db {
@@ -34,11 +34,11 @@ class ProtoDBTransaction : public Transaction {
   ~ProtoDBTransaction() { Commit(); }
   void Put(const string& key, const string& value) override {
     if (existing_names_.count(key)) {
-      LOG(FATAL) << "An item with key " << key << " already exists.";
+      CAFFE_LOG_FATAL << "An item with key " << key << " already exists.";
     }
     auto* tensor = proto_->add_protos();
-    CHECK(tensor->ParseFromString(value));
-    CHECK_EQ(tensor->name(), key)
+    CAFFE_CHECK(tensor->ParseFromString(value));
+    CAFFE_CHECK_EQ(tensor->name(), key)
         << "Passed in key " << key << " does not equal to the tensor name "
         << tensor->name();
   }
@@ -59,9 +59,9 @@ class ProtoDB : public DB {
       : DB(source, mode), proto_(), source_(source) {
     if (mode == READ || mode == WRITE) {
       // Read the current protobuffer.
-      CHECK(ReadProtoFromFile(source, &proto_));
+      CAFFE_CHECK(ReadProtoFromFile(source, &proto_));
     }
-    LOG(INFO) << "Opened protodb " << source;
+    CAFFE_LOG_INFO << "Opened protodb " << source;
   }
   ~ProtoDB() { Close(); }
 

@@ -5,7 +5,7 @@
 #include <random>
 
 #include "caffe2/proto/caffe2.pb.h"
-#include "glog/logging.h"
+#include "caffe2/core/logging.h"
 
 namespace caffe2 {
 
@@ -15,7 +15,7 @@ class CPUContext {
   explicit CPUContext(const DeviceOption& option)
       : random_generator_(
             option.has_random_seed() ? option.random_seed() : time(NULL)) {
-    CHECK_EQ(option.device_type(), CPU);
+    CAFFE_CHECK_EQ(option.device_type(), CPU);
   }
   virtual ~CPUContext() {}
   inline void SwitchToDevice() {}
@@ -49,6 +49,10 @@ inline void CPUContext::Memcpy<CPUContext, CPUContext>(
     size_t nbytes, const void* src, void* dst) {
   memcpy(dst, src, nbytes);
 }
+
+// For simplicity, we will typedef Tensor<CPUContext> to TensorCPU.
+template <class Context> class Tensor;
+typedef Tensor<CPUContext> TensorCPU;
 
 }  // namespace caffe2
 

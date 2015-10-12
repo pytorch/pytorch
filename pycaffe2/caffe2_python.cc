@@ -15,13 +15,17 @@
 #include "caffe2/core/net.h"
 #include "caffe2/core/workspace.h"
 #include "caffe2/proto/caffe2.pb.h"
-#include "glog/logging.h"
 
 //using namespace caffe2;  // NOLINT
 using caffe2::Blob;
 using caffe2::DeviceOption;
 using caffe2::Tensor;
 using caffe2::Workspace;
+using caffe2::CPUContext;
+
+#ifndef PYCAFFE2_CPU_ONLY
+using caffe2::CUDAContext;
+#endif  // PYCAFFE2_CPU_ONLY
 
 // gWorkspaces allows us to define and switch between multiple workspaces in
 // Python.
@@ -72,11 +76,9 @@ template<> struct NumpyTypeWrapper<int> {
 };
 
 template <typename T, class DeviceContext>
-PyObject* FetchTensor(const Blob& blob) {
+PyObject* FetchTensor(const Tensor<DeviceContext>& tensor) {
   DeviceContext context;
-  const Tensor<T, DeviceContext>& tensor =
-      blob.Get<Tensor<T, DeviceContext> >();
-  CHECK_GT(tensor.size(), 0);
+  CAFFE_CHECK_GT(tensor.size(), 0);
   std::vector<npy_intp> npy_dims;
   for (const int dim : tensor.dims()) {
     npy_dims.push_back(dim);
@@ -87,7 +89,7 @@ PyObject* FetchTensor(const Blob& blob) {
   // TODO(Yangqing): Is there an easier way to convert PyObject to
   // PyArrayObject?
   context.template Copy<T, DeviceContext, caffe2::CPUContext>(
-      tensor.size(), tensor.data(),
+      tensor.size(), tensor.template data<T>(),
       static_cast<T*>(PyArray_DATA(reinterpret_cast<PyArrayObject*>(array))));
   return array;
 }
@@ -97,8 +99,8 @@ PyObject* FeedTensor(const DeviceOption& option, PyArrayObject* original_array,
                      Blob* blob) {
   PyArrayObject* array = PyArray_GETCONTIGUOUS(original_array);
   DeviceContext context(option);
-  Tensor<T, DeviceContext>* tensor =
-      blob->GetMutable<Tensor<T, DeviceContext> >();
+  Tensor<DeviceContext>* tensor =
+      blob->GetMutable<Tensor<DeviceContext> >();
   // numpy requires long int as its dims.
   int ndim = PyArray_NDIM(array);
   npy_intp* npy_dims = PyArray_DIMS(array);
@@ -110,7 +112,7 @@ PyObject* FeedTensor(const DeviceOption& option, PyArrayObject* original_array,
   // Now, copy the data to the tensor.
   context.template Copy<T, caffe2::CPUContext, DeviceContext>(
       tensor->size(), static_cast<T*>(PyArray_DATA(array)),
-      tensor->mutable_data());
+      tensor->template mutable_data<T>());
   Py_XDECREF(array);
   Py_RETURN_TRUE;
 }
@@ -138,7 +140,7 @@ PyObject* GlobalInit(PyObject* self, PyObject* args) {
     raw_argv[i] = PyString_AsString(PyList_GetItem(list, i));
   }
   global_init_called = true;
-  if (!caffe2::GlobalInit(&argc, &raw_argv)) {
+  if (!caffe2::GlobalInit(&argc, raw_argv)) {
     PyErr_SetString(PyExc_RuntimeError, "Error in global init.");
     return NULL;
   }
@@ -176,7 +178,7 @@ PyObject* Workspaces(PyObject* self, PyObject* args) {
   PyObject* list = PyList_New(gWorkspaces.size());
   int i = 0;
   for (auto const & it : gWorkspaces) {
-    CHECK_EQ(PyList_SetItem(list, i, StdStringToPyString(it.first)), 0);
+    CAFFE_CHECK_EQ(PyList_SetItem(list, i, StdStringToPyString(it.first)), 0);
     i += 1;
   }
   return list;
@@ -190,7 +192,7 @@ PyObject* ResetWorkspace(PyObject* self, PyObject* args) {
                     "specifying the root folder of the workspace.");
     return NULL;
   }
-  VLOG(1) << "Resetting workspace.";
+  CAFFE_VLOG(1) << "Resetting workspace.";
   if (root_folder == nullptr) {
     gWorkspaces[gCurrentWorkspaceName].reset(
         new Workspace());
@@ -217,7 +219,7 @@ PyObject* Blobs(PyObject* self, PyObject* args) {
   std::vector<caffe2::string> blob_strings = gWorkspace->Blobs();
   PyObject* list = PyList_New(blob_strings.size());
   for (int i = 0; i < blob_strings.size(); ++i) {
-    CHECK_EQ(PyList_SetItem(list, i, StdStringToPyString(blob_strings[i])), 0);
+    CAFFE_CHECK_EQ(PyList_SetItem(list, i, StdStringToPyString(blob_strings[i])), 0);
   }
   return list;
 }
@@ -284,7 +286,7 @@ PyObject* Nets(PyObject* self, PyObject* args) {
   std::vector<caffe2::string> net_strings = gWorkspace->Nets();
   PyObject* list = PyList_New(net_strings.size());
   for (int i = 0; i < net_strings.size(); ++i) {
-    CHECK_EQ(PyList_SetItem(list, i, StdStringToPyString(net_strings[i])), 0);
+    CAFFE_CHECK_EQ(PyList_SetItem(list, i, StdStringToPyString(net_strings[i])), 0);
   }
   return list;
 }
@@ -363,11 +365,6 @@ PyObject* CreateBlob(PyObject* self, PyObject* args) {
   Py_RETURN_TRUE;
 }
 
-#define RETURN_TENSOR_IF_FORMAT(dtype, context)                                \
-  if (blob.IsType<caffe2::Tensor<dtype, context> >()) {                        \
-    return FetchTensor<dtype, context>(blob);                                  \
-  }
-
 PyObject* FetchBlob(PyObject* self, PyObject* args) {
   char* name;
   if (!PyArg_ParseTuple(args, "s", &name)) {
@@ -379,21 +376,32 @@ PyObject* FetchBlob(PyObject* self, PyObject* args) {
     return NULL;
   }
   const caffe2::Blob& blob = *(gWorkspace->GetBlob(caffe2::string(name)));
-  // We only support a subset of exporting capabilities.
-  RETURN_TENSOR_IF_FORMAT(float, caffe2::CPUContext)
-  RETURN_TENSOR_IF_FORMAT(int, caffe2::CPUContext)
+  if (blob.IsType<Tensor<CPUContext> >()) {
+    const Tensor<CPUContext>& tensor = blob.Get<Tensor<CPUContext> >();
+    if (tensor.IsType<float>()) {
+      return FetchTensor<float, CPUContext>(tensor);
+    } else if (tensor.IsType<int>()) {
+      return FetchTensor<int, CPUContext>(tensor);
+    }
+  }
 #ifndef PYCAFFE2_CPU_ONLY
-  RETURN_TENSOR_IF_FORMAT(float, caffe2::CUDAContext)
-  RETURN_TENSOR_IF_FORMAT(int, caffe2::CUDAContext)
+  if (blob.IsType<Tensor<CUDAContext> >()) {
+    const Tensor<CUDAContext>& tensor = blob.Get<Tensor<CUDAContext> >();
+    if (tensor.IsType<float>()) {
+      return FetchTensor<float, CUDAContext>(tensor);
+    } else if (tensor.IsType<int>()) {
+      return FetchTensor<int, CUDAContext>(tensor);
+    }
+  }
 #endif  // !PYCAFFE2_CPU_ONLY
 
   // If all branches failed, we should throw an error.
-  LOG(ERROR) << "Blob" << caffe2::string(name) << " has unsupported data type: "
-             << blob.TypeName();
+  CAFFE_LOG_ERROR << "Blob" << caffe2::string(name)
+                  << " has unsupported data type: "
+                  << blob.TypeName();
   PyErr_SetString(PyExc_TypeError, "Unsupported data type.");
   return NULL;
 }
-
 
 PyObject* FeedBlob(PyObject* self, PyObject* args) {
   char* name_char;
@@ -502,7 +510,8 @@ PyObject* GetCudaPeerAccessPattern(PyObject* self, PyObject* args) {
 #endif  // !PYCAFFE2_CPU_ONLY
 
 // A simple macro to avoid writing repeated symbols.
-#define _PYNAME(name) {#name, name, METH_VARARGS}
+#define _PYNAME(name) {#name, name, METH_VARARGS, ""}
+
 
 static PyMethodDef gPycaffe2Methods[] = {
   // TODO(Yangqing): write the methods string.
@@ -512,34 +521,31 @@ static PyMethodDef gPycaffe2Methods[] = {
   _PYNAME(SwitchWorkspace),
   _PYNAME(CurrentWorkspace),
   _PYNAME(Workspaces),
-  {"cc_ResetWorkspace", ResetWorkspace, METH_VARARGS},
+  {"cc_ResetWorkspace", ResetWorkspace, METH_VARARGS, ""},
   _PYNAME(RootFolder),
   _PYNAME(OnModuleExit),
   _PYNAME(Blobs),
   _PYNAME(HasBlob),
-  {"cc_CreateNet", CreateNet, METH_VARARGS},
+  {"cc_CreateNet", CreateNet, METH_VARARGS, ""},
   _PYNAME(RunNet),
   _PYNAME(DeleteNet),
   _PYNAME(Nets),
-  {"cc_RunOperatorOnce", RunOperatorOnce, METH_VARARGS},
-  {"cc_RunNetOnce", RunNetOnce, METH_VARARGS},
-  {"cc_RunPlan", RunPlan, METH_VARARGS},
+  {"cc_RunOperatorOnce", RunOperatorOnce, METH_VARARGS, ""},
+  {"cc_RunNetOnce", RunNetOnce, METH_VARARGS, ""},
+  {"cc_RunPlan", RunPlan, METH_VARARGS, ""},
   _PYNAME(CreateBlob),
   _PYNAME(FetchBlob),
-  {"cc_FeedBlob", FeedBlob, METH_VARARGS},
+  {"cc_FeedBlob", FeedBlob, METH_VARARGS, ""},
 #ifndef PYCAFFE2_CPU_ONLY
   _PYNAME(NumberOfGPUs),
   _PYNAME(SetDefaultGPUID),
   _PYNAME(GetDefaultGPUID),
   _PYNAME(GetCudaPeerAccessPattern),
 #endif   // !PYCAFFE2_CPU_ONLY
-
-
-
-
-  {NULL, NULL},  // end of python methods.
+  {NULL, NULL, 0, NULL},  // end of python methods.
 };
 #undef _PYNAME
+
 
 #ifdef PYCAFFE2_CPU_ONLY
 void initlibcaffe2_python_nogpu(void) {

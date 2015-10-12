@@ -9,15 +9,15 @@
 #include "caffe2/core/db.h"
 #include "caffe2/core/init.h"
 #include "caffe2/proto/caffe2.pb.h"
-#include "glog/logging.h"
+#include "caffe2/core/logging.h"
 
-DEFINE_string(image_file, "", "The input image file name.");
-DEFINE_string(label_file, "", "The label file name.");
-DEFINE_string(output_file, "", "The output db name.");
-DEFINE_string(db, "leveldb", "The db type.");
-DEFINE_int32(data_limit, -1,
+CAFFE2_DEFINE_string(image_file, "", "The input image file name.");
+CAFFE2_DEFINE_string(label_file, "", "The label file name.");
+CAFFE2_DEFINE_string(output_file, "", "The output db name.");
+CAFFE2_DEFINE_string(db, "leveldb", "The db type.");
+CAFFE2_DEFINE_int(data_limit, -1,
              "If set, only output this number of data points.");
-DEFINE_bool(channel_first, false,
+CAFFE2_DEFINE_bool(channel_first, false,
             "If set, write the data as channel-first (CHW order) as the old "
             "Caffe does.");
 
@@ -32,8 +32,8 @@ void convert_dataset(const char* image_filename, const char* label_filename,
   // Open files
   std::ifstream image_file(image_filename, std::ios::in | std::ios::binary);
   std::ifstream label_file(label_filename, std::ios::in | std::ios::binary);
-  CHECK(image_file) << "Unable to open file " << image_filename;
-  CHECK(label_file) << "Unable to open file " << label_filename;
+  CAFFE_CHECK(image_file) << "Unable to open file " << image_filename;
+  CAFFE_CHECK(label_file) << "Unable to open file " << label_filename;
   // Read the magic and the meta data
   uint32_t magic;
   uint32_t num_items;
@@ -43,22 +43,22 @@ void convert_dataset(const char* image_filename, const char* label_filename,
 
   image_file.read(reinterpret_cast<char*>(&magic), 4);
   magic = swap_endian(magic);
-  CHECK_EQ(magic, 2051) << "Incorrect image file magic.";
+  CAFFE_CHECK_EQ(magic, 2051) << "Incorrect image file magic.";
   label_file.read(reinterpret_cast<char*>(&magic), 4);
   magic = swap_endian(magic);
-  CHECK_EQ(magic, 2049) << "Incorrect label file magic.";
+  CAFFE_CHECK_EQ(magic, 2049) << "Incorrect label file magic.";
   image_file.read(reinterpret_cast<char*>(&num_items), 4);
   num_items = swap_endian(num_items);
   label_file.read(reinterpret_cast<char*>(&num_labels), 4);
   num_labels = swap_endian(num_labels);
-  CHECK_EQ(num_items, num_labels);
+  CAFFE_CHECK_EQ(num_items, num_labels);
   image_file.read(reinterpret_cast<char*>(&rows), 4);
   rows = swap_endian(rows);
   image_file.read(reinterpret_cast<char*>(&cols), 4);
   cols = swap_endian(cols);
 
   // leveldb
-  std::unique_ptr<db::DB> mnist_db(db::CreateDB(FLAGS_db, db_path, db::NEW));
+  std::unique_ptr<db::DB> mnist_db(db::CreateDB(caffe2::FLAGS_db, db_path, db::NEW));
   std::unique_ptr<db::Transaction> transaction(mnist_db->NewTransaction());
   // Storing to db
   char label_value;
@@ -72,7 +72,7 @@ void convert_dataset(const char* image_filename, const char* label_filename,
   TensorProto* data = protos.add_protos();
   TensorProto* label = protos.add_protos();
   data->set_data_type(TensorProto::BYTE);
-  if (FLAGS_channel_first) {
+  if (caffe2::FLAGS_channel_first) {
     data->add_dims(1);
     data->add_dims(1);
     data->add_dims(rows);
@@ -87,8 +87,8 @@ void convert_dataset(const char* image_filename, const char* label_filename,
   label->add_dims(1);
   label->add_int32_data(0);
 
-  LOG(INFO) << "A total of " << num_items << " items.";
-  LOG(INFO) << "Rows: " << rows << " Cols: " << cols;
+  CAFFE_LOG_INFO << "A total of " << num_items << " items.";
+  CAFFE_LOG_INFO << "Rows: " << rows << " Cols: " << cols;
   for (int item_id = 0; item_id < num_items; ++item_id) {
     image_file.read(pixels.data(), rows * cols);
     label_file.read(&label_value, 1);
@@ -106,7 +106,7 @@ void convert_dataset(const char* image_filename, const char* label_filename,
       transaction->Commit();
     }
     if (data_limit > 0 && count == data_limit) {
-      LOG(INFO) << "Reached data limit of " << data_limit << ", stop.";
+      CAFFE_LOG_INFO << "Reached data limit of " << data_limit << ", stop.";
       break;
     }
   }
@@ -114,9 +114,8 @@ void convert_dataset(const char* image_filename, const char* label_filename,
 }  // namespace caffe2
 
 int main(int argc, char** argv) {
-  caffe2::GlobalInit(&argc, &argv);
-  gflags::SetUsageMessage("Converts the raw mnist dataset to a leveldb.");
-  caffe2::convert_dataset(FLAGS_image_file.c_str(), FLAGS_label_file.c_str(),
-                          FLAGS_output_file.c_str(), FLAGS_data_limit);
+  caffe2::GlobalInit(&argc, argv);
+  caffe2::convert_dataset(caffe2::FLAGS_image_file.c_str(), caffe2::FLAGS_label_file.c_str(),
+                          caffe2::FLAGS_output_file.c_str(), caffe2::FLAGS_data_limit);
   return 0;
 }

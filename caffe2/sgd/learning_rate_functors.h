@@ -8,56 +8,56 @@ namespace caffe2 {
 
 // LearningRateFunctor is a functor that when fed with an iter number, produces
 // the learning rate for the corresponding iteration.
-template <typename dtype>
+template <typename T>
 class LearningRateFunctor {
  public:
-  virtual dtype operator()(const int iter) const = 0;
+  virtual T operator()(const int iter) const = 0;
 };
 
 // Fixed: not changing the learning rate at all.
-template <typename dtype>
-class FixedLearningRate : public LearningRateFunctor<dtype> {
+template <typename T>
+class FixedLearningRate : public LearningRateFunctor<T> {
  public:
-  dtype operator()(const int iter) const override { return 1.; }
+  T operator()(const int iter) const override { return 1.; }
 };
 
 // Step: return gamma ^ (floor(iter / step))
-template <typename dtype>
-class StepLearningRate : public LearningRateFunctor<dtype> {
+template <typename T>
+class StepLearningRate : public LearningRateFunctor<T> {
  public:
-  StepLearningRate(const int stepsize, const dtype gamma)
+  StepLearningRate(const int stepsize, const T gamma)
       : stepsize_(stepsize), gamma_(gamma) {}
-  dtype operator()(const int iter) const override {
-    return std::pow(gamma_, static_cast<dtype>(iter / stepsize_));
+  T operator()(const int iter) const override {
+    return std::pow(gamma_, static_cast<T>(iter / stepsize_));
   }
 
   int stepsize_;
-  dtype gamma_;
+  T gamma_;
 };
 
 // Exp: return gamma ^ iter
-template <typename dtype>
-class ExpLearningRate : public LearningRateFunctor<dtype> {
+template <typename T>
+class ExpLearningRate : public LearningRateFunctor<T> {
  public:
-  explicit ExpLearningRate(const dtype gamma) : gamma_(gamma) {}
-  dtype operator()(const int iter) const override {
-    return std::pow(gamma_, static_cast<dtype>(iter));
+  explicit ExpLearningRate(const T gamma) : gamma_(gamma) {}
+  T operator()(const int iter) const override {
+    return std::pow(gamma_, static_cast<T>(iter));
   }
 
-  dtype gamma_;
+  T gamma_;
 };
 
 // Inv: return (1 + gamma * iter) ^ (-power)
-template <typename dtype>
-class InvLearningRate : public LearningRateFunctor<dtype> {
+template <typename T>
+class InvLearningRate : public LearningRateFunctor<T> {
  public:
-  InvLearningRate(const dtype gamma, const dtype power)
+  InvLearningRate(const T gamma, const T power)
       : gamma_(gamma), power_(power) {}
-  dtype operator()(const int iter) const override {
-      return std::pow(dtype(1) + gamma_ * iter, -power_);
+  T operator()(const int iter) const override {
+      return std::pow(T(1) + gamma_ * iter, -power_);
   }
-  dtype gamma_;
-  dtype power_;
+  T gamma_;
+  T power_;
 };
 
 }  // namespace caffe2

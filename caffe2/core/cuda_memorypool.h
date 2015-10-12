@@ -4,7 +4,7 @@
 #include <cstddef>
 
 #include "caffe2/core/common_gpu.h"
-#include "glog/logging.h"
+#include "caffe2/core/logging.h"
 
 namespace caffe2 {
 
@@ -51,7 +51,7 @@ class CudaMemoryPool {
       // anyway, we will not need to worry about memory leak, so we basically
       // ignore it. This is definitely not ideal but works for now.
       if (error != cudaSuccess && error != cudaErrorCudartUnloading) {
-        LOG(FATAL) << "Error at: " << __FILE__ << ":" << __LINE__ << ": "
+        CAFFE_LOG_FATAL << "Error at: " << __FILE__ << ":" << __LINE__ << ": "
                    << cudaGetErrorString(error);
       }
     }

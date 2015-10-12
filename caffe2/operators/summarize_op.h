@@ -16,11 +16,11 @@ constexpr char kSummaryzeOpExtension[] = ".summary";
 // initialize the output tensor to all zeros, and then do accumulation. Any
 // further calls to the operator, given that no one else fiddles with the output
 // in the interim, will do simple accumulations.
-template <typename dtype, class DeviceContext>
-class SummarizeOp final : public Operator<dtype, DeviceContext> {
+template <typename T, class Context>
+class SummarizeOp final : public Operator<Context> {
  public:
   SummarizeOp(const OperatorDef& def, Workspace* ws)
-      : Operator<dtype, DeviceContext>(def, ws),
+      : Operator<Context>(def, ws),
         to_file_(OperatorBase::GetSingleArgument<int>("to_file", 0)) {
     if (to_file_) {
       // We will output to file instead of printing on screen.
@@ -29,7 +29,7 @@ class SummarizeOp final : public Operator<dtype, DeviceContext> {
       log_file_.reset(new std::ofstream(
           target_folder + "/" + def.input(0) + kSummaryzeOpExtension,
           std::ofstream::out | std::ofstream::trunc));
-      CHECK(log_file_->good())
+      CAFFE_CHECK(log_file_->good())
           << "Failed to open summarize file for tensor " << def.input(0)
           << ". rdstate() = " << log_file_->rdstate();
     }

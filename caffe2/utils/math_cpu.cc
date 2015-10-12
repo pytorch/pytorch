@@ -25,10 +25,10 @@ using ConstEigenVectorMap =
 namespace caffe2 {
 namespace math {
 
-#define DELEGATE_SIMPLE_UNARY_FUNCTION(dtype, Funcname, OriginalFunc)          \
+#define DELEGATE_SIMPLE_UNARY_FUNCTION(T, Funcname, OriginalFunc)          \
 template <>                                                                    \
-void Funcname<dtype, CPUContext>(                                              \
-    const int N, const dtype* x, dtype* y,                                     \
+void Funcname<T, CPUContext>(                                              \
+    const int N, const T* x, T* y,                                     \
     CPUContext* context) {                                                     \
   OriginalFunc(N, x, y);                                                       \
 }
@@ -52,10 +52,10 @@ void Powx<double, CPUContext>(
 }
 
 
-#define DELEGATE_SIMPLE_BINARY_FUNCTION(dtype, Funcname, OriginalFunc)         \
+#define DELEGATE_SIMPLE_BINARY_FUNCTION(T, Funcname, OriginalFunc)         \
 template <>                                                                    \
-void Funcname<dtype, CPUContext>(                                              \
-    const int N, const dtype* a, const dtype* b, dtype* y,                     \
+void Funcname<T, CPUContext>(                                              \
+    const int N, const T* a, const T* b, T* y,                     \
     CPUContext* context) {                                                     \
   OriginalFunc(N, a, b, y);                                                    \
 }
@@ -130,7 +130,7 @@ void Gemm<float, CPUContext>(
           ConstEigenMatrixMap<float>(A, K, M));
       return;
     default:
-      LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for TransB";
+      CAFFE_LOG_FATAL << "Unexpected CBLAS_TRANSPOSE for TransB";
     }
   }
   case CblasTrans: {
@@ -146,11 +146,11 @@ void Gemm<float, CPUContext>(
           ConstEigenMatrixMap<float>(A, M, K).transpose());
       return;
     default:
-      LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for TransB";
+      CAFFE_LOG_FATAL << "Unexpected CBLAS_TRANSPOSE for TransB";
     }
   }
   default:
-    LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for TransA";
+    CAFFE_LOG_FATAL << "Unexpected CBLAS_TRANSPOSE for TransA";
   }
 }
 
@@ -181,15 +181,15 @@ void Gemv<float, CPUContext>(
       return;
     }
     default:
-      LOG(FATAL) << "Gemv float found an unexpected CBLAS_TRANSPOSE input.";
+      CAFFE_LOG_FATAL << "Gemv float found an unexpected CBLAS_TRANSPOSE input.";
   }
 }
 
-#define CAFFE2_SPECIALIZED_SET(dtype)                                          \
+#define CAFFE2_SPECIALIZED_SET(T)                                          \
 template <>                                                                    \
-void Set<dtype, CPUContext>(const int N, const dtype alpha, dtype *Y,          \
+void Set<T, CPUContext>(const int N, const T alpha, T *Y,          \
                            CPUContext* context) {                              \
-  EigenVectorMap<dtype>(Y, N).setConstant(alpha);                              \
+  EigenVectorMap<T>(Y, N).setConstant(alpha);                              \
 }
 
 CAFFE2_SPECIALIZED_SET(float);
@@ -250,7 +250,7 @@ void Select<float, CPUContext>(
       const int N, const int D, const float* x, const int* idx, float* y,
       CPUContext* context) {
   for (int i = 0; i < N; ++i) {
-    DCHECK_LT(idx[i], D);
+    CAFFE_DCHECK_LT(idx[i], D);
     y[i] = x[i * D + idx[i]];
   }
 }
@@ -418,11 +418,13 @@ void Col2im<float, CPUContext, StorageOrder::NHWC>(
 }
 
 template <>
-void CopyMatrix<float, CPUContext>(
-    const int M, const int N, const float* A, const int lda, float* B,
-    const int ldb, CPUContext* context) {
+void CopyMatrix<CPUContext>(
+    const size_t itemsize, const int M, const int N, const void* A,
+    const int lda, void* B, const int ldb, CPUContext* context) {
   for (int i = 0; i < M; ++i) {
-    memcpy(B + ldb * i, A + lda * i, sizeof(float) * N);
+    memcpy(static_cast<char*>(B) + ldb * i * itemsize,
+           static_cast<const char*>(A) + lda * i * itemsize,
+           itemsize * N);
   }
 }
 

@@ -10,7 +10,7 @@ class TestModelDevice(unittest.TestCase):
 
   def _MiniAlexNetNoDropout(self, order):
     # First, AlexNet using the cnn wrapper.
-    model = cnn.CNNModelHelper("alexnet", order=order)
+    model = cnn.CNNModelHelper(order, name="alexnet")
     conv1 = model.Conv("data", "conv1", 3, 16, 11,
                    ("XavierFill", {}),
                    ("ConstantFill", {}), stride=4, pad=0)
@@ -75,7 +75,7 @@ class TestModelDevice(unittest.TestCase):
     gpu_device.device_type = caffe2_pb2.CUDA
 
     checker = device_checker.DeviceChecker(
-        1e-5, [cpu_device, gpu_device])
+        1e-4, [cpu_device, gpu_device])
     ret = checker.CheckNet(
         model.net.Proto(), inputs,
         # The indices sometimes may be sensitive to small numerical differences
@@ -84,8 +84,8 @@ class TestModelDevice(unittest.TestCase):
     self.assertEqual(ret, True)
 
   def testMiniAlexNet(self):
-    self._testMiniAlexNet(order="NCHW")
-    self._testMiniAlexNet(order="NHWC")
+    self._testMiniAlexNet("NCHW")
+    self._testMiniAlexNet("NHWC")
 
 
 if __name__ == '__main__':

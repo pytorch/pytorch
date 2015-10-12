@@ -5,3 +5,5 @@ namespace {
 REGISTER_CPU_OPERATOR(LearningRate, LearningRateOp<float, CPUContext>);
 }  // namespace
 }  // namespace caffe2
+
+

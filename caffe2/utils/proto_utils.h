@@ -3,7 +3,7 @@
 
 #include "caffe2/proto/caffe2.pb.h"
 #include "google/protobuf/message.h"
-#include "glog/logging.h"
+#include "caffe2/core/logging.h"
 
 namespace caffe2 {
 
@@ -26,7 +26,7 @@ inline void WriteProtoToTextFile(const Message& proto, const string& filename) {
 // allowing things to compile. It will produce a runtime error if you are using
 // MessageLite but still want text support.
 inline bool ReadProtoFromTextFile(const char* filename, MessageLite* proto) {
-  LOG(FATAL) << "If you are running lite version, you should not be "
+  CAFFE_LOG_FATAL << "If you are running lite version, you should not be "
              << "calling any text-format protobuffers.";
   return false;  // Just to suppress compiler warning.
 }
@@ -36,7 +36,7 @@ inline bool ReadProtoFromTextFile(const string filename, MessageLite* proto) {
 
 inline void WriteProtoToTextFile(const MessageLite& proto,
                                  const char* filename) {
-  LOG(FATAL) << "If you are running lite version, you should not be "
+  CAFFE_LOG_FATAL << "If you are running lite version, you should not be "
              << "calling any text-format protobuffers.";
 }
 inline void WriteProtoToTextFile(const MessageLite& proto,
@@ -78,7 +78,10 @@ inline const Argument& GetArgument(const OperatorDef& def, const string& name) {
       return arg;
     }
   }
-  LOG(FATAL) << "Argument named " << name << " does not exist.";
+  CAFFE_LOG_FATAL << "Argument named " << name << " does not exist.";
+  // To suppress compiler warning of return values. This will never execute.
+  static Argument _dummy_arg_to_suppress_compiler_warning;
+  return _dummy_arg_to_suppress_compiler_warning;
 }
 
 inline Argument* GetMutableArgument(
@@ -103,10 +106,10 @@ inline Argument* GetMutableArgument(
 class Any {
   template <typename MessageType>
   static MessageType Parse(const Argument& arg) {
-    CHECK_EQ(arg.strings_size(), 1)
+    CAFFE_CHECK_EQ(arg.strings_size(), 1)
         << "An Any object should parse from a single string.";
     MessageType message;
-    CHECK(message.ParseFromString(arg.strings(0)))
+    CAFFE_CHECK(message.ParseFromString(arg.strings(0)))
         << "Faild to parse from the string";
     return message;
   }

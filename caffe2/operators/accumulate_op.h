@@ -12,35 +12,37 @@ namespace caffe2 {
 // initialize the output tensor to all zeros, and then do accumulation. Any
 // further calls to the operator, given that no one else fiddles with the output
 // in the interim, will do simple accumulations.
-template <typename dtype, class DeviceContext>
-class AccumulateOp final : public Operator<dtype, DeviceContext> {
+template <typename T, class Context>
+class AccumulateOp final : public Operator<Context> {
  public:
   AccumulateOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<dtype, DeviceContext>(operator_def, ws),
-        kOne(static_cast<dtype>(1), &device_context_),
-        gamma_(static_cast<dtype>(
-            OperatorBase::template GetSingleArgument<float>("gamma", 1.0)),
-            &device_context_) {}
+      : Operator<Context>(operator_def, ws),
+        kOne(static_cast<T>(1), &device_context_),
+        gamma_(static_cast<T>(
+            OperatorBase::template GetSingleArgument<float>(
+                "gamma", 1.0)), &device_context_) {}
   USE_OPERATOR_BASE_FUNCTIONS;
 
   bool RunOnDevice() override {
     auto& input = Input(0);
     auto* output = Output(0);
     if (output->dims() != input.dims()) {
-      LOG(INFO) << "Reshaping and initializing output.";
+      CAFFE_LOG_INFO << "Reshaping and initializing output.";
       output->ReshapeLike(input);
-      math::Set<dtype, DeviceContext>(
-          output->size(), 0, output->mutable_data(), &device_context_);
+      math::Set<T, Context>(
+          output->size(), 0, output->template mutable_data<T>(), &device_context_);
     }
-    math::Axpby<dtype, DeviceContext>(
-        input.size(), kOne.data(), input.data(), gamma_.data(),
-        output->mutable_data(), &device_context_);
+    math::Axpby<T, Context>(
+        input.size(), kOne.template data<T>(),
+        input.template data<T>(),
+        gamma_.template data<T>(),
+        output->template mutable_data<T>(), &device_context_);
     return true;
   }
 
  protected:
-  Tensor<dtype, DeviceContext> kOne;
-  Tensor<dtype, DeviceContext> gamma_;
+  Tensor<Context> kOne;
+  Tensor<Context> gamma_;
   INPUT_OUTPUT_STATS(1, 1, 1, 1);
   DISABLE_COPY_AND_ASSIGN(AccumulateOp);
 };

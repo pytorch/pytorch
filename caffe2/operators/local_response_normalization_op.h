@@ -4,16 +4,16 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
-#include "glog/logging.h"
+#include "caffe2/core/logging.h"
 
 namespace caffe2 {
 
-template <typename dtype, class DeviceContext>
-class LRNOpBase : public Operator<dtype, DeviceContext> {
+template <typename T, class Context>
+class LRNOpBase : public Operator<Context> {
  public:
   USE_OPERATOR_BASE_FUNCTIONS;
   LRNOpBase(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<dtype, DeviceContext>(operator_def, ws),
+      : Operator<Context>(operator_def, ws),
         size_(OperatorBase::GetSingleArgument<int>("size", 0)),
         alpha_(OperatorBase::GetSingleArgument<float>("alpha", 0)),
         beta_(OperatorBase::GetSingleArgument<float>("beta", 0)),
@@ -21,10 +21,10 @@ class LRNOpBase : public Operator<dtype, DeviceContext> {
         order_(StringToStorageOrder(
             OperatorBase::GetSingleArgument<string>("order", "NHWC"))),
         pre_pad_((size_ - 1) / 2) {
-    DCHECK_GT(size_, 0);
-    DCHECK_EQ(size_ % 2, 1);
-    DCHECK_GT(alpha_, 0);
-    DCHECK_GT(beta_, 0);
+    CAFFE_DCHECK_GT(size_, 0);
+    CAFFE_DCHECK_EQ(size_ % 2, 1);
+    CAFFE_DCHECK_GT(alpha_, 0);
+    CAFFE_DCHECK_GT(beta_, 0);
   }
 
   bool RunOnDevice() override {
@@ -34,7 +34,7 @@ class LRNOpBase : public Operator<dtype, DeviceContext> {
     case StorageOrder::NCHW:
       return RunOnDeviceWithOrderNCHW();
     default:
-      LOG(FATAL) << "Unknown storage order: " << order_;
+      CAFFE_LOG_FATAL << "Unknown storage order: " << order_;
     }
     // To suppress old compiler warnings
     return true;
@@ -55,12 +55,12 @@ class LRNOpBase : public Operator<dtype, DeviceContext> {
   DISABLE_COPY_AND_ASSIGN(LRNOpBase);
 };
 
-template <typename dtype, class DeviceContext>
-class LRNOp final : public LRNOpBase<dtype, DeviceContext> {
+template <typename T, class Context>
+class LRNOp final : public LRNOpBase<T, Context> {
  public:
   USE_OPERATOR_BASE_FUNCTIONS;
   LRNOp(const OperatorDef& operator_def, Workspace* ws)
-      : LRNOpBase<dtype, DeviceContext>(operator_def, ws) {}
+      : LRNOpBase<T, Context>(operator_def, ws) {}
 
   bool RunOnDeviceWithOrderNCHW() override;
   bool RunOnDeviceWithOrderNHWC() override;
@@ -72,12 +72,12 @@ class LRNOp final : public LRNOpBase<dtype, DeviceContext> {
   DISABLE_COPY_AND_ASSIGN(LRNOp);
 };
 
-template <typename dtype, class DeviceContext>
-class LRNGradientOp final : public LRNOpBase<dtype, DeviceContext> {
+template <typename T, class Context>
+class LRNGradientOp final : public LRNOpBase<T, Context> {
  public:
   USE_OPERATOR_BASE_FUNCTIONS;
   LRNGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : LRNOpBase<dtype, DeviceContext>(operator_def, ws) {}
+      : LRNOpBase<T, Context>(operator_def, ws) {}
 
   bool RunOnDeviceWithOrderNCHW() override;
   bool RunOnDeviceWithOrderNHWC() override;

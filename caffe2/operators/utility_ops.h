@@ -7,7 +7,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
-#include "glog/logging.h"
+#include "caffe2/core/logging.h"
 
 namespace caffe2 {
 
@@ -31,12 +31,12 @@ class FreeOp : public OperatorBase {
   DISABLE_COPY_AND_ASSIGN(FreeOp);
 };
 
-template <typename dtype, class DeviceContext>
-class PrintOp final : public Operator<dtype, DeviceContext> {
+template <typename T, class Context>
+class PrintOp final : public Operator<Context> {
  public:
   USE_OPERATOR_BASE_FUNCTIONS;
   PrintOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<dtype, DeviceContext>(operator_def, ws),
+      : Operator<Context>(operator_def, ws),
         to_file_(OperatorBase::GetSingleArgument<int>("to_file", 0)),
         limit_(OperatorBase::GetSingleArgument<int>("limit", 0)) {
     if (limit_ == 0) {
@@ -51,7 +51,7 @@ class PrintOp final : public Operator<dtype, DeviceContext> {
         log_files_[i].reset(new std::ofstream(
             target_folder + "/" + def().input(i) + kPrintFileExtension,
             std::ofstream::out | std::ofstream::trunc));
-        CHECK(log_files_[i]->good())
+        CAFFE_CHECK(log_files_[i]->good())
             << "Failed to open PrintOp file for tensor " << def().input(i)
             << ". rdstate() = " << log_files_[i]->rdstate();
       }
@@ -65,24 +65,25 @@ class PrintOp final : public Operator<dtype, DeviceContext> {
   }
 
   bool RunOnDevice() {
-    Tensor<dtype, CPUContext> temp_tensor;
+    TensorCPU temp_tensor;
     for (int input_id = 0; input_id < InputSize(); ++input_id) {
       // A special case for inputs that are on CPUContext: in which case we
       // would not need to do any copy.
-      if (OperatorBase::InputIsType<Tensor<dtype, CPUContext> >(input_id)) {
-        auto& input = OperatorBase::Input<Tensor<dtype, CPUContext> >(input_id);
+      if (OperatorBase::InputIsType<TensorCPU>(input_id)) {
+        auto& input = OperatorBase::Input<TensorCPU>(input_id);
         temp_tensor.ReshapeLike(input);
         temp_tensor.ShareData(input);
       } else {
         auto& input = Input(input_id);
-        DCHECK_GT(input.size(), 0);
+        CAFFE_DCHECK_GT(input.size(), 0);
         temp_tensor.ReshapeLike(input);
-        device_context_.template Copy<dtype, DeviceContext, CPUContext>(
-            input.size(), input.data(), temp_tensor.mutable_data());
+        device_context_.template Copy<T, Context, CPUContext>(
+            input.size(), input.template data<T>(),
+            temp_tensor.template mutable_data<T>());
       }
       std::stringstream values_stream;
       int total_count = std::min(temp_tensor.size(), limit_);
-      const dtype* temp_tensor_data = temp_tensor.data();
+      const T* temp_tensor_data = temp_tensor.data<T>();
       for (int i = 0; i < total_count - 1; ++i) {
         values_stream << temp_tensor_data[i] << ",";
       }
@@ -98,7 +99,7 @@ class PrintOp final : public Operator<dtype, DeviceContext> {
           dims_stream << dim << ",";
         }
         // Log to console.
-        LOG(INFO) << "Tensor " << def().input(input_id)
+        CAFFE_LOG_INFO << "Tensor " << def().input(input_id)
             << " (" << dims_stream.str() << "): " << values_stream.str();
       }
     }
@@ -113,15 +114,16 @@ class PrintOp final : public Operator<dtype, DeviceContext> {
   DISABLE_COPY_AND_ASSIGN(PrintOp);
 };
 
-template <typename dtype, class DeviceContext>
-class AliasOp final : public Operator<dtype, DeviceContext> {
+
+template <class Context>
+class AliasOp final : public Operator<Context> {
  public:
   USE_OPERATOR_BASE_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(AliasOp);
 
   bool RunOnDevice() {
     auto& input = Input(0);
-    DCHECK_GT(input.size(), 0);
+    CAFFE_DCHECK_GT(input.size(), 0);
     if (Output(0) == &input) {
       // If one calls an AliasOp but in fact it is in-place (input and output
       // are the same tensor), we will simply skip.
@@ -137,15 +139,15 @@ class AliasOp final : public Operator<dtype, DeviceContext> {
   DISABLE_COPY_AND_ASSIGN(AliasOp);
 };
 
-template <typename dtype, class DeviceContext>
-class FlattenOp : public Operator<dtype, DeviceContext> {
+template <class Context>
+class FlattenOp : public Operator<Context> {
  public:
   USE_OPERATOR_BASE_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(FlattenOp);
 
   bool RunOnDevice() {
     auto& input = Input(0);
-    DCHECK_GT(input.size(), 0);
+    CAFFE_DCHECK_GT(input.size(), 0);
     Output(0)->Reshape(
         std::vector<int>{input.dim(0), input.size() / input.dim(0)});
     Output(0)->ShareData(input);
@@ -157,15 +159,15 @@ class FlattenOp : public Operator<dtype, DeviceContext> {
 };
 
 // Output shares the data of input(0), but reshapes it like input(1).
-template <typename dtype, class DeviceContext>
-class ReshapeLikeOp : public Operator<dtype, DeviceContext> {
+template <class Context>
+class ReshapeLikeOp : public Operator<Context> {
  public:
   USE_OPERATOR_BASE_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(ReshapeLikeOp);
 
   bool RunOnDevice() {
     auto* output = Output(0);
-    DCHECK_EQ(Input(0).size(), Input(1).size());
+    CAFFE_DCHECK_EQ(Input(0).size(), Input(1).size());
     output->ReshapeLike(Input(1));
     output->ShareData(Input(0));
     return true;
@@ -175,8 +177,8 @@ class ReshapeLikeOp : public Operator<dtype, DeviceContext> {
   DISABLE_COPY_AND_ASSIGN(ReshapeLikeOp);
 };
 
-template <typename dtype, class DeviceContext>
-class SplitOp : public Operator<dtype, DeviceContext> {
+template <class Context>
+class SplitOp : public Operator<Context> {
  public:
   USE_OPERATOR_BASE_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(SplitOp);
@@ -195,8 +197,8 @@ class SplitOp : public Operator<dtype, DeviceContext> {
   DISABLE_COPY_AND_ASSIGN(SplitOp);
 };
 
-template <typename dtype, class DeviceContext>
-class SumOp : public Operator<dtype, DeviceContext> {
+template <typename T, class Context>
+class SumOp : public Operator<Context> {
  public:
   USE_OPERATOR_BASE_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(SumOp);
@@ -205,11 +207,13 @@ class SumOp : public Operator<dtype, DeviceContext> {
     auto& input = Input(0);
     auto* output = Output(0);
     output->ReshapeLike(input);
-    device_context_.template Copy<dtype, DeviceContext, DeviceContext>(
-        input.size(), input.data(), output->mutable_data());
+    device_context_.template Copy<T, Context, Context>(
+        input.size(), input.template data<T>(),
+        output->template mutable_data<T>());
     for (int i = 1; i < InputSize(); ++i) {
-      math::Add(output->size(), output->data(), Input(i).data(),
-                output->mutable_data(), &device_context_);
+      math::Add(output->size(), output->template data<T>(),
+                Input(i).template data<T>(),
+                output->template mutable_data<T>(), &device_context_);
     }
     return true;
   }
@@ -223,39 +227,41 @@ class SumOp : public Operator<dtype, DeviceContext> {
 // shape, and weight_i are size 1 tensors that specifies the weight of each
 // vector. Note that if one wants to do in-place computation, it could only be
 // done with X_0 also as the output, but not other X_i.
-template <typename dtype, class DeviceContext>
-class WeightedSumOp : public Operator<dtype, DeviceContext> {
+template <typename T, class Context>
+class WeightedSumOp : public Operator<Context> {
  public:
   USE_OPERATOR_BASE_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(WeightedSumOp);
 
   bool RunOnDevice() {
-    DCHECK_EQ(InputSize() % 2, 0);
+    CAFFE_DCHECK_EQ(InputSize() % 2, 0);
     auto& X0 = Input(0);
     auto& weight0 = Input(1);
-    DCHECK_GT(X0.size(), 0);
-    DCHECK_EQ(weight0.size(), 1);
+    CAFFE_DCHECK_GT(X0.size(), 0);
+    CAFFE_DCHECK_EQ(weight0.size(), 1);
     int size = X0.size();
     auto* output = Output(0);
     output->ReshapeLike(X0);
-    math::Scale<dtype, DeviceContext>(
-        size, weight0.data(), X0.data(), output->mutable_data(),
+    math::Scale<T, Context>(
+        size, weight0.template data<T>(), X0.template data<T>(),
+        output->template mutable_data<T>(),
         &device_context_);
     for (int i = 2; i < InputSize(); i += 2) {
       auto& X = Input(i);
       // Do a check: if the input is the same as output, we have a problem -
       // in-place update should always only happen with the zeroth input.
       if (&X == output) {
-        LOG(ERROR) << "Input #" << i << " is the same as output. "
+        CAFFE_LOG_ERROR << "Input #" << i << " is the same as output. "
                    << "If you want to do in-place updates, put the output as "
                    << "input #0.";
         return false;
       }
       auto& weight = Input(i + 1);
-      DCHECK_EQ(X.size(), size);
-      DCHECK_EQ(weight.size(), 1);
-      math::Axpy<dtype, DeviceContext>(
-          size, weight.data(), X.data(), output->mutable_data(),
+      CAFFE_DCHECK_EQ(X.size(), size);
+      CAFFE_DCHECK_EQ(weight.size(), 1);
+      math::Axpy<T, Context>(
+          size, weight.template data<T>(), X.template data<T>(),
+          output->template mutable_data<T>(),
           &device_context_);
     }
     return true;
@@ -265,19 +271,20 @@ class WeightedSumOp : public Operator<dtype, DeviceContext> {
   DISABLE_COPY_AND_ASSIGN(WeightedSumOp);
 };
 
-template <typename dtype, class DeviceContext,
-          class DstContext, class SrcContext>
-class CopyOp : public Operator<dtype, DeviceContext> {
+template <class Context, class DstContext, class SrcContext>
+class CopyOp : public Operator<Context> {
  public:
   USE_OPERATOR_BASE_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(CopyOp);
 
   bool RunOnDevice() {
-    auto& input = OperatorBase::Input<Tensor<dtype, SrcContext> >(0);
-    auto* output = OperatorBase::Output<Tensor<dtype, DstContext> >(0);
+    auto& input = OperatorBase::Input<Tensor<SrcContext> >(0);
+    auto* output = OperatorBase::Output<Tensor<DstContext> >(0);
     output->ReshapeLike(input);
-    this->device_context_.template Copy<dtype, SrcContext, DstContext>(
-      input.size(), input.data(), output->mutable_data());
+    this->device_context_.template Memcpy<SrcContext, DstContext>(
+      input.nbytes(),
+      input.raw_data(),
+      output->raw_mutable_data(input.meta()));
     return true;
   }
 
@@ -288,15 +295,15 @@ class CopyOp : public Operator<dtype, DeviceContext> {
 // RecordShapeOp records the shape of the input tensor to a vector of int. You
 // mostly don't need this operator explicitly, and it is mostly used in the
 // autodiff process.
-template <typename dtype, class DeviceContext>
-class RecordShapeOp : public Operator<dtype, DeviceContext> {
+template <class Context>
+class RecordShapeOp : public Operator<Context> {
  public:
   USE_OPERATOR_BASE_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(RecordShapeOp);
 
   bool RunOnDevice() {
     auto& input = Input(0);
-    auto* output = OperatorBase::Output<vector<dtype, DeviceContext> >(0);
+    auto* output = OperatorBase::Output<vector<int, Context> >(0);
     *output = input.shape();
     return true;
   }

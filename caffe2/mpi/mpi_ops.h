@@ -9,24 +9,26 @@
 namespace caffe2 {
 
 // BroadcastOp does Broadcast using MPI.
-template <typename dtype, class DeviceContext>
-class BroadcastOp final : public Operator<dtype, DeviceContext> {
+template <class Context>
+class BroadcastOp final : public Operator<Context> {
  public:
   USE_OPERATOR_BASE_FUNCTIONS;
   BroadcastOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<dtype, DeviceContext>(operator_def, ws),
+      : Operator<Context>(operator_def, ws),
         root_(OperatorBase::template GetSingleArgument<int>("root", 0)) {
-    CHECK_EQ(operator_def.input(0), operator_def.output(0))
+    CAFFE_CHECK_EQ(operator_def.input(0), operator_def.output(0))
         << "Broadcast is an in-place operator.";
   }
   ~BroadcastOp() {}
 
   bool RunOnDevice() {
     auto* output = Output(0);
-    CHECK_GT(output->size(), 0);
-    MPI_CHECK(
-        MPI_Bcast(static_cast<void*>(output->mutable_data()), output->size(),
-                  MPIDataTypeWrapper<dtype>::type(), root_, MPI_COMM_WORLD));
+    // Make sure that output is already allocated.
+    CAFFE_CHECK_GT(output->size(), 0);
+    MPI_CHECK(MPI_Bcast(
+        output->raw_mutable_data(),
+        output->nbytes(), MPIDataTypeWrapper<char>::type(),
+        root_, MPI_COMM_WORLD));
     return true;
   }
 
@@ -40,8 +42,8 @@ class BroadcastOp final : public Operator<dtype, DeviceContext> {
 
 
 // AllreduceOp does Allreduce using MPI. Currently, only SUM is supported.
-template <typename dtype, class DeviceContext>
-class AllreduceOp final : public Operator<dtype, DeviceContext> {
+template <typename T, class Context>
+class AllreduceOp final : public Operator<Context> {
  public:
   USE_OPERATOR_BASE_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(AllreduceOp);
@@ -50,16 +52,17 @@ class AllreduceOp final : public Operator<dtype, DeviceContext> {
     auto& input = Input(0);
     auto* output = Output(0);
     output->ReshapeLike(input);
-    if (output->mutable_data() == input.data()) {
+    if (output->template mutable_data<T>() == input.template data<T>()) {
       // We are doing in-place call. Special case handling.
       MPI_CHECK(MPI_Allreduce(
-          MPI_IN_PLACE, output->mutable_data(), input.size(),
-          MPIDataTypeWrapper<dtype>::type(), MPI_SUM, MPI_COMM_WORLD));
+          MPI_IN_PLACE, output->template mutable_data<T>(), input.size(),
+          MPIDataTypeWrapper<T>::type(), MPI_SUM, MPI_COMM_WORLD));
     } else {
       // normal allreduce.
       MPI_CHECK(MPI_Allreduce(
-          const_cast<dtype*>(input.data()), output->mutable_data(),
-          input.size(), MPIDataTypeWrapper<dtype>::type(), MPI_SUM,
+          const_cast<T*>(input.template data<T>()),
+          output->template mutable_data<T>(),
+          input.size(), MPIDataTypeWrapper<T>::type(), MPI_SUM,
           MPI_COMM_WORLD));
     }
     return true;

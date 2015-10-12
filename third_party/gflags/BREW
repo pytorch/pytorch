@@ -1,6 +1,0 @@
-cc_thirdparty_target(
-  name="gflags",
-  srcs=["BREW"],
-  commands=[],
-  cc_obj_files=["-lgflags"],
-)

@@ -1,7 +1,7 @@
 // This script converts an image dataset to a database.
 //
-// FLAGS_input_folder is the root folder that holds all the images, and
-// FLAGS_list_file should be a list of files as well as their labels, in the
+// caffe2::FLAGS_input_folder is the root folder that holds all the images, and
+// caffe2::FLAGS_list_file should be a list of files as well as their labels, in the
 // format as
 //   subfolder1/file1.JPEG 7
 //   ....
@@ -17,21 +17,21 @@
 #include "caffe2/core/db.h"
 #include "caffe2/core/init.h"
 #include "caffe2/proto/caffe2.pb.h"
-#include "glog/logging.h"
+#include "caffe2/core/logging.h"
 
-DEFINE_bool(shuffle, false,
+CAFFE2_DEFINE_bool(shuffle, false,
     "Randomly shuffle the order of images and their labels");
-DEFINE_string(input_folder, "", "The input image file name.");
-DEFINE_string(list_file, "", "The text file containing the list of images.");
-DEFINE_string(output_db_name, "", "The output training leveldb name.");
-DEFINE_string(db, "leveldb", "The db type.");
-DEFINE_bool(raw, false,
+CAFFE2_DEFINE_string(input_folder, "", "The input image file name.");
+CAFFE2_DEFINE_string(list_file, "", "The text file containing the list of images.");
+CAFFE2_DEFINE_string(output_db_name, "", "The output training leveldb name.");
+CAFFE2_DEFINE_string(db, "leveldb", "The db type.");
+CAFFE2_DEFINE_bool(raw, false,
     "If set, we pre-read the images and store the raw buffer.");
-DEFINE_bool(color, true, "If set, load images in color.");
-DEFINE_int32(scale, 256,
-    "If FLAGS_raw is set, scale all the images' shorter edge to the given "
+CAFFE2_DEFINE_bool(color, true, "If set, load images in color.");
+CAFFE2_DEFINE_int(scale, 256,
+    "If caffe2::FLAGS_raw is set, scale all the images' shorter edge to the given "
     "value.");
-DEFINE_bool(warp, false, "If warp is set, warp the images to square.");
+CAFFE2_DEFINE_bool(warp, false, "If warp is set, warp the images to square.");
 
 
 namespace caffe2 {
@@ -46,27 +46,27 @@ void ConvertImageDataset(
   while (list_file >> filename >> file_label) {
     lines.push_back(std::make_pair(filename, file_label));
   }
-  if (FLAGS_shuffle) {
+  if (caffe2::FLAGS_shuffle) {
     // randomly shuffle data
-    LOG(INFO) << "Shuffling data";
+    CAFFE_LOG_INFO << "Shuffling data";
     std::shuffle(lines.begin(), lines.end(),
                  std::default_random_engine(1701));
   }
-  LOG(INFO) << "A total of " << lines.size() << " images.";
+  CAFFE_LOG_INFO << "A total of " << lines.size() << " images.";
 
 
-  LOG(INFO) << "Opening db " << output_db_name;
-  std::unique_ptr<db::DB> db(db::CreateDB(FLAGS_db, output_db_name, db::NEW));
+  CAFFE_LOG_INFO << "Opening db " << output_db_name;
+  std::unique_ptr<db::DB> db(db::CreateDB(caffe2::FLAGS_db, output_db_name, db::NEW));
   std::unique_ptr<db::Transaction> transaction(db->NewTransaction());
 
   TensorProtos protos;
   TensorProto* data = protos.add_protos();
   TensorProto* label = protos.add_protos();
-  if (FLAGS_raw) {
+  if (caffe2::FLAGS_raw) {
     data->set_data_type(TensorProto::BYTE);
     data->add_dims(0);
     data->add_dims(0);
-    if (FLAGS_color) {
+    if (caffe2::FLAGS_color) {
       data->add_dims(3);
     }
   } else {
@@ -85,11 +85,11 @@ void ConvertImageDataset(
   for (int item_id = 0; item_id < lines.size(); ++item_id) {
     // First, set label.
     label->set_int32_data(0, lines[item_id].second);
-    if (!FLAGS_raw) {
+    if (!caffe2::FLAGS_raw) {
       // Second, read images.
       std::ifstream image_file_stream(input_folder + lines[item_id].first);
       if (!image_file_stream) {
-        LOG(ERROR) << "Cannot open " << input_folder << lines[item_id].first
+        CAFFE_LOG_ERROR << "Cannot open " << input_folder << lines[item_id].first
                    << ". Skipping.";
       } else {
         data->mutable_string_data(0)->assign(
@@ -100,28 +100,28 @@ void ConvertImageDataset(
       // Need to do some opencv magic.
       cv::Mat img = cv::imread(
           input_folder + lines[item_id].first,
-          FLAGS_color ? CV_LOAD_IMAGE_COLOR : CV_LOAD_IMAGE_GRAYSCALE);
+          caffe2::FLAGS_color ? CV_LOAD_IMAGE_COLOR : CV_LOAD_IMAGE_GRAYSCALE);
       // Do resizing.
       cv::Mat resized_img;
       int scaled_width, scaled_height;
-      if (FLAGS_warp) {
-        scaled_width = FLAGS_scale;
-        scaled_height = FLAGS_scale;
+      if (caffe2::FLAGS_warp) {
+        scaled_width = caffe2::FLAGS_scale;
+        scaled_height = caffe2::FLAGS_scale;
       } else if (img.rows > img.cols) {
-        scaled_width = FLAGS_scale;
-        scaled_height = static_cast<float>(img.rows) * FLAGS_scale / img.cols;
+        scaled_width = caffe2::FLAGS_scale;
+        scaled_height = static_cast<float>(img.rows) * caffe2::FLAGS_scale / img.cols;
       } else {
-        scaled_height = FLAGS_scale;
-        scaled_width = static_cast<float>(img.cols) * FLAGS_scale / img.rows;
+        scaled_height = caffe2::FLAGS_scale;
+        scaled_width = static_cast<float>(img.cols) * caffe2::FLAGS_scale / img.rows;
       }
       cv::resize(img, resized_img, cv::Size(scaled_width, scaled_height), 0, 0,
                    cv::INTER_LINEAR);
       data->set_dims(0, scaled_height);
       data->set_dims(1, scaled_width);
-      DCHECK(resized_img.isContinuous());
+      CAFFE_DCHECK(resized_img.isContinuous());
       data->set_byte_data(
           resized_img.ptr(),
-          scaled_height * scaled_width * (FLAGS_color ? 3 : 1));
+          scaled_height * scaled_width * (caffe2::FLAGS_color ? 3 : 1));
     }
     snprintf(key_cstr, kMaxKeyLength, "%08d_%s", item_id,
              lines[item_id].first.c_str());
@@ -131,20 +131,19 @@ void ConvertImageDataset(
     if (++count % 1000 == 0) {
       // Commit the current writes.
       transaction->Commit();
-      LOG(INFO) << "Processed " << count << " files.";
+      CAFFE_LOG_INFO << "Processed " << count << " files.";
     }
   }
-  LOG(INFO) << "Processed a total of " << count << " files.";
+  CAFFE_LOG_INFO << "Processed a total of " << count << " files.";
 }
 
 }  // namespace caffe2
 
 
 int main(int argc, char** argv) {
-  caffe2::GlobalInit(&argc, &argv);
-  gflags::SetUsageMessage("Converts an image dataset to a db.");
+  caffe2::GlobalInit(&argc, argv);
   caffe2::ConvertImageDataset(
-      FLAGS_input_folder, FLAGS_list_file,
-      FLAGS_output_db_name, FLAGS_shuffle);
+      caffe2::FLAGS_input_folder, caffe2::FLAGS_list_file,
+      caffe2::FLAGS_output_db_name, caffe2::FLAGS_shuffle);
   return 0;
 }

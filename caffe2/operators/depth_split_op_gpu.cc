@@ -3,8 +3,8 @@
 
 namespace caffe2 {
 namespace {
-REGISTER_CUDA_OPERATOR(DepthSplit, DepthSplitOp<float, CUDAContext>)
-REGISTER_CUDA_OPERATOR(DepthConcat, DepthConcatOp<float, CUDAContext>)
+REGISTER_CUDA_OPERATOR(DepthSplit, DepthSplitOp<CUDAContext>)
+REGISTER_CUDA_OPERATOR(DepthConcat, DepthConcatOp<CUDAContext>)
 }  // namespace
 }  // namespace caffe2
 

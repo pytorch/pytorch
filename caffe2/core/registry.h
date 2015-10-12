@@ -24,15 +24,17 @@ class Registry {
 
   void Register(const SrcType& key, Creator creator) {
     // The if statement below is essentially the same as the following line:
-    // CHECK_EQ(registry_.count(key), 0) << "Key " << key
+    // CAFFE_CHECK_EQ(registry_.count(key), 0) << "Key " << key
     //                                   << " registered twice.";
-    // However, CHECK_EQ depends on google logging, and since registration is
+    // However, CAFFE_CHECK_EQ depends on google logging, and since registration is
     // carried out at static initialization time, we do not want to have an
     // explicit dependency on glog's initialization function.
     if (registry_.count(key) != 0) {
       std::cerr << "Key " << key << " already registered." << std::endl;
       std::exit(1);
     }
+    //std::cout << "Registering " << key << " for "
+    //          << typeid(ObjectType).name() << " creator.";
     registry_[key] = creator;
   }
 
@@ -40,10 +42,12 @@ class Registry {
 
   ObjectType* Create(const SrcType& key, Args ... args) {
     if (registry_.count(key) == 0) {
-      std::cerr << "Key " << key << " not found." << std::endl;
-      std::cerr << "Available keys:" << std::endl;
-      TEST_PrintRegisteredNames();
-      std::cerr << "Returning null pointer.";
+      // std::cerr << "Key " << key << " not found." << std::endl;
+      // std::cerr << "Available keys:" << std::endl;
+      // TODO: do we always want to print out the registered names? Sounds a bit
+      // too verbose.
+      //TEST_PrintRegisteredNames();
+      // std::cerr << "Returning null pointer.";
       return nullptr;
     }
     return registry_[key](args...);

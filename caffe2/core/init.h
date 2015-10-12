@@ -2,13 +2,8 @@
 #define CAFFE2_CORE_INIT_H_
 
 #include "caffe2/core/common.h"
-#include "gflags/gflags.h"
-#include "glog/logging.h"
-
-// This allows us to use legacy gflags namespaces.
-#ifndef GFLAGS_GFLAGS_H_
-  namespace gflags = google;
-#endif
+#include "caffe2/core/flags.h"
+#include "caffe2/core/logging.h"
 
 namespace caffe2 {
 
@@ -30,9 +25,9 @@ class Caffe2InitializeRegistry {
   // using logging.
   bool RunRegisteredInitFunctions() {
     for (const auto& init_pair : init_functions_) {
-      LOG(INFO) << "Running init function: " << init_pair.second;
+      CAFFE_LOG_INFO << "Running init function: " << init_pair.second;
       if (!(*init_pair.first)()) {
-        LOG(ERROR) << "Initialization function failed.";
+        CAFFE_LOG_ERROR << "Initialization function failed.";
         return false;
       }
     }
@@ -60,24 +55,13 @@ class InitRegisterer {
       function, description);                                                  \
   }  // namespace
 
+// A global initialization stream where one can write messages to. After the
+// GlobalInit() function finishes, all the messages written into the global
+// init stream is written to LOG_INFO, and in case of error, LOG_ERROR.
+std::stringstream& GlobalInitStream();
+
 // Initialize the global environment of caffe2.
-inline bool GlobalInit(int* pargc, char*** pargv) {
-  static bool global_init_was_already_run = false;
-  if (global_init_was_already_run) {
-    LOG(FATAL) << "GlobalInit has already been called: did you double-call?";
-  }
-  // Google flags.
-  ::gflags::ParseCommandLineFlags(pargc, pargv, true);
-  // Google logging.
-  ::google::InitGoogleLogging(*(pargv)[0]);
-  // Provide a backtrace on segfault.
-  ::google::InstallFailureSignalHandler();
-  // All other initialization functions.
-  bool retval = internal::Caffe2InitializeRegistry::Registry()
-      ->RunRegisteredInitFunctions();
-  global_init_was_already_run = true;
-  return retval;
-}
+bool GlobalInit(int* pargc, char** argv);
 
 
 }  // namespace caffe2

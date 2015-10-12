@@ -2,20 +2,53 @@
 #define CAFFE2_CORE_BLOB_SERIALIZATION_H_
 
 #include "caffe2/core/blob.h"
+#include "caffe2/core/typeid.h"
 
 namespace caffe2 {
 
-template <class DeviceContext>
-class TensorSerializerFloat : public BlobSerializerBase {
+// BlobSerializerBase is a class that serializes a blob to a string. This class
+// exists purely for the purpose of registering type-specific serialization
+// code.
+class BlobSerializerBase {
  public:
-  TensorSerializerFloat() : device_context_() {}
-  ~TensorSerializerFloat() {}
-  string Serialize(const Blob& blob, const string& name) {
-    CHECK((blob.IsType<Tensor<float, DeviceContext> >()));
-    auto& input = blob.Get<Tensor<float, DeviceContext> >();
-    TensorProto proto;
+  virtual string Serialize(const Blob& blob, const string& name) = 0;
+};
+
+// THe Blob serialization registry and serializer creator functions.
+DECLARE_TYPED_REGISTRY(BlobSerializerRegistry, CaffeTypeId,
+                       BlobSerializerBase);
+#define REGISTER_BLOB_SERIALIZER(name, id, ...) \
+  REGISTER_TYPED_CLASS(BlobSerializerRegistry, name, id, __VA_ARGS__)
+// Creates an operator with the given operator definition.
+inline BlobSerializerBase* CreateSerializer(CaffeTypeId id) {
+  return BlobSerializerRegistry()->Create(id);
+}
+
+// TensorSerializer is the serializer for Tensors: it puts the tensor object
+// into a TensorProto protocol buffer.
+template <class Context>
+class TensorSerializer : public BlobSerializerBase {
+ public:
+  TensorSerializer() : device_context_() {}
+  ~TensorSerializer() {}
+  string Serialize(const Blob& blob, const string& name);
+
+ private:
+  Context device_context_;
+};
+
+////////////////////////////////////////////////////////////////////////////////
+// Implementations
+////////////////////////////////////////////////////////////////////////////////
+template <class Context>
+string TensorSerializer<Context>::Serialize(
+    const Blob& blob, const string& name) {
+  CAFFE_CHECK(blob.IsType<Tensor<Context> >());
+  auto& input = blob.Get<Tensor<Context> >();
+  TensorProto proto;
+  proto.set_name(name);
+  if (input.template IsType<float>()) {
     proto.set_data_type(TensorProto::FLOAT);
-    proto.set_name(name);
     for (int dim : input.dims()) {
       proto.add_dims(dim);
     }
@@ -23,28 +56,13 @@ class TensorSerializerFloat : public BlobSerializerBase {
     for (int i = 0; i < input.size(); ++i) {
       proto.add_float_data(0);
     }
-    this->device_context_.template Copy<float, DeviceContext, CPUContext>(
-        input.size(), input.data(), proto.mutable_float_data()->mutable_data());
-    return proto.SerializeAsString();
-  }
-
- private:
-  DeviceContext device_context_;
-};
-
-template <class DeviceContext>
-class TensorSerializerInt32 : public BlobSerializerBase {
- public:
-  TensorSerializerInt32() : device_context_() {}
-  ~TensorSerializerInt32() {}
-  string Serialize(const Blob& blob, const string& name) {
+    this->device_context_.template Copy<float, Context, CPUContext>(
+        input.size(), input.template data<float>(),
+        proto.mutable_float_data()->mutable_data());
+  } else if (input.template IsType<int>()) {
     static_assert(sizeof(int) == 4,
         "int in this compiler does not equal to 4 bytes.");
-    CHECK((blob.IsType<Tensor<int, DeviceContext> >()));
-    auto& input = blob.Get<Tensor<int, DeviceContext> >();
-    TensorProto proto;
     proto.set_data_type(TensorProto::INT32);
-    proto.set_name(name);
     for (int dim : input.dims()) {
       proto.add_dims(dim);
     }
@@ -52,41 +70,15 @@ class TensorSerializerInt32 : public BlobSerializerBase {
     for (int i = 0; i < input.size(); ++i) {
       proto.add_int32_data(0);
     }
-    this->device_context_.template Copy<int, DeviceContext, CPUContext>(
-        input.size(), input.data(), proto.mutable_int32_data()->mutable_data());
-    return proto.SerializeAsString();
+    this->device_context_.template Copy<int, Context, CPUContext>(
+        input.size(), input.template data<int>(),
+        proto.mutable_int32_data()->mutable_data());
+  } else {
+    CAFFE_LOG_FATAL << "TensorSerializer does not have a serialization "
+                  "implementation for " << input.meta().name();
   }
-
- private:
-  DeviceContext device_context_;
-};
-
-template <typename dtype, class DeviceContext>
-class TensorSerializerBytes : public BlobSerializerBase {
- public:
-  TensorSerializerBytes() : device_context_(DeviceContext()) {}
-  ~TensorSerializerBytes() {}
-  string Serialize(const Blob& blob, const string& name) {
-    static_assert(sizeof(dtype) == sizeof(char),
-        "dtype in TensorSerializerBytes must be of the same size as char.");
-    CHECK((blob.IsType<Tensor<dtype, DeviceContext> >()));
-    auto& input = blob.Get<Tensor<dtype, DeviceContext> >();
-    TensorProto proto;
-    proto.set_data_type(TensorProto::BYTE);
-    proto.set_name(name);
-    for (int dim : input.dims()) {
-      proto.add_dims(dim);
-    }
-    std::unique_ptr<char[]> buffer(new char[input.size()]);
-    this->device_context_.template Copy<char, DeviceContext, CPUContext>(
-        input.size(), input.data(), buffer.get());
-    proto.set_byte_data(buffer, input.size());
-    return proto.SerializeAsString();
-  }
-
- private:
-  DeviceContext device_context_;
-};
+  return proto.SerializeAsString();
+}
 
 }  // namespace caffe2
 

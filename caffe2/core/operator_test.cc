@@ -193,9 +193,9 @@ TEST(NetTest, TestScaffoldingSimpleNet) {
   EXPECT_TRUE(net->Run());
 }
 
-TEST(NetTest, TestScaffoldingParallelNet) {
+TEST(NetTest, TestScaffoldingDAGNet) {
   NetDef net_def = GetNetDefForTest();
-  net_def.set_net_type("parallel");
+  net_def.set_net_type("dag");
   net_def.set_num_workers(1);
   Workspace ws;
   EXPECT_NE(nullptr, ws.CreateBlob("input"));
