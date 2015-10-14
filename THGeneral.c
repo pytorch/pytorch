@@ -164,7 +164,7 @@ void THHeapUpdate(long size) {
   heapDelta += size;
 
   // batch updates to global heapSize to minimize thread contention
-  if (abs(heapDelta) < heapMaxDelta) {
+  if (labs(heapDelta) < heapMaxDelta) {
     return;
   }
 
