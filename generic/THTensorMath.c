@@ -1583,6 +1583,66 @@ static void THTensor_(quickselect)(real *arr, long *idx, long k, long elements, 
 #undef REAL_SWAP
 #undef BOTH_SWAP
 
+void THTensor_(mode)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension)
+{
+  THLongStorage *dim;
+  THTensor *temp_;
+  THLongTensor *tempi_;
+  real *temp__data;
+  long *tempi__data;
+  long t_size_dim;
+
+  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimension)(t), 3, "dimension out of range");
+
+  dim = THTensor_(newSizeOf)(t);
+  THLongStorage_set(dim, dimension, 1);
+  THTensor_(resize)(values_, dim, NULL);
+  THLongTensor_resize(indices_, dim, NULL);
+  THLongStorage_free(dim);
+
+  t_size_dim = THTensor_(size)(t, dimension);
+
+  temp_ = THTensor_(new)();
+  THTensor_(resize1d)(temp_, t_size_dim);
+  temp__data = THTensor_(data)(temp_);
+
+  tempi_ = THLongTensor_new();
+  THLongTensor_resize1d(tempi_, t_size_dim);
+  tempi__data = THLongTensor_data(tempi_);
+
+  TH_TENSOR_DIM_APPLY3(real, t, real, values_, long, indices_, dimension,
+                       long i;
+                       long mode = 0;
+                       long modei = 0;
+                       long temp_freq = 0;
+                       long max_freq = 0;
+                       for(i = 0; i < t_size_dim; i++)
+                          temp__data[i] = t_data[i*t_stride];
+                       for(i = 0; i < t_size_dim; i++)
+                          tempi__data[i] = i;
+                       THTensor_(quicksortascend)(temp__data, tempi__data, t_size_dim, 1);
+
+                       for(i = 0; i < t_size_dim; i++)
+                       {
+                          temp_freq++;
+                          if ((i == t_size_dim - 1) || (temp__data[i] != temp__data[i+1]))
+                          {
+                              if (temp_freq > max_freq)
+                              {
+                                 mode = temp__data[i];
+                                 modei = tempi__data[i];
+                                 max_freq = temp_freq;
+                              }
+                              temp_freq = 0;
+                          }
+                       }
+                       *values__data = mode;
+                       *indices__data = modei;);
+
+  THTensor_(free)(temp_);
+  THLongTensor_free(tempi_);
+}
+
 void THTensor_(kthvalue)(THTensor *values_, THLongTensor *indices_, THTensor *t, long k, int dimension)
 {
   THLongStorage *dim;
