@@ -213,7 +213,7 @@ void THTensor_(indexCopy)(THTensor *tensor, int dim, THLongTensor *index, THTens
   THLongTensor_free(index);
 }
 
-void THTensor_(indexAccum)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src)
+void THTensor_(indexAdd)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src)
 {
   long i, numel;
   THTensor *tSlice, *sSlice;
