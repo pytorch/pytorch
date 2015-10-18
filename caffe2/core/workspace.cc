@@ -32,7 +32,12 @@ const Blob* Workspace::GetBlob(const string& name) const {
   }
 }
 
-bool Workspace::CreateNet(const NetDef& net_def) {
+Blob* Workspace::GetBlob(const string& name) {
+  return const_cast<Blob*>(
+      static_cast<const Workspace*>(this)->GetBlob(name));
+}
+
+NetBase* Workspace::CreateNet(const NetDef& net_def) {
   CAFFE_CHECK(net_def.has_name()) << "Net definition should have a name.";
   if (net_map_.count(net_def.name()) > 0) {
     CAFFE_LOG_WARNING << "Overwriting existing network of the same name.";
@@ -49,13 +54,14 @@ bool Workspace::CreateNet(const NetDef& net_def) {
   if (net_map_[net_def.name()].get() == nullptr) {
     CAFFE_LOG_ERROR << "Error when creating the network.";
     net_map_.erase(net_def.name());
-    return false;
+    return nullptr;
   }
   if (!net_map_[net_def.name()]->Verify()) {
     CAFFE_LOG_ERROR << "Error when setting up network " << net_def.name();
-    return false;
+    net_map_.erase(net_def.name());
+    return nullptr;
   }
-  return true;
+  return net_map_[net_def.name()].get();
 }
 
 void Workspace::DeleteNet(const string& name) {

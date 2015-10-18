@@ -13,6 +13,7 @@
 #endif  // PYCAFFE2_CPU_ONLY
 #include "caffe2/core/init.h"
 #include "caffe2/core/net.h"
+#include "caffe2/core/operator.h"
 #include "caffe2/core/workspace.h"
 #include "caffe2/proto/caffe2.pb.h"
 
@@ -147,6 +148,30 @@ PyObject* GlobalInit(PyObject* self, PyObject* args) {
   Py_RETURN_TRUE;
 }
 
+PyObject* RegisteredOperators(PyObject* self, PyObject* args) {
+  std::set<string> all_keys;
+  // CPU operators
+  for (const auto& name : caffe2::CPUOperatorRegistry()->Keys()) {
+    all_keys.insert(name);
+  }
+  // CUDA operators
+  for (const auto& name : caffe2::CUDAOperatorRegistry()->Keys()) {
+    all_keys.insert(name);
+  }
+  // CUDNN operators
+  for (const auto& name : caffe2::CUDNNOperatorRegistry()->Keys()) {
+    all_keys.insert(name);
+  }
+  // Now, add it to the list
+  PyObject* list = PyList_New(all_keys.size());
+  int idx = 0;
+  for (const string& name : all_keys) {
+    CAFFE_CHECK_EQ(PyList_SetItem(list, idx, StdStringToPyString(name)), 0);
+    ++idx;
+  }
+  return list;
+}
+
 PyObject* SwitchWorkspace(PyObject* self, PyObject* args) {
   PyObject* name = nullptr;
   PyObject* create_if_missing = nullptr;
@@ -219,7 +244,8 @@ PyObject* Blobs(PyObject* self, PyObject* args) {
   std::vector<caffe2::string> blob_strings = gWorkspace->Blobs();
   PyObject* list = PyList_New(blob_strings.size());
   for (int i = 0; i < blob_strings.size(); ++i) {
-    CAFFE_CHECK_EQ(PyList_SetItem(list, i, StdStringToPyString(blob_strings[i])), 0);
+    CAFFE_CHECK_EQ(
+        PyList_SetItem(list, i, StdStringToPyString(blob_strings[i])), 0);
   }
   return list;
 }
@@ -518,6 +544,7 @@ static PyMethodDef gPycaffe2Methods[] = {
   // Note(Yangqing): For any function that we are going to override in the
   // python file, we prepend "cc_" here.
   _PYNAME(GlobalInit),
+  _PYNAME(RegisteredOperators),
   _PYNAME(SwitchWorkspace),
   _PYNAME(CurrentWorkspace),
   _PYNAME(Workspaces),

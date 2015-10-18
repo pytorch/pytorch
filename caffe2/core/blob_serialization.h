@@ -6,15 +6,31 @@
 
 namespace caffe2 {
 
-// BlobSerializerBase is a class that serializes a blob to a string. This class
-// exists purely for the purpose of registering type-specific serialization
-// code.
+/**
+ * BlobSerializerBase is an abstract class that serializes a blob to a string.
+ *
+ * This class exists purely for the purpose of registering type-specific
+ * serialization code. If you need to serialize a specific type, you should
+ * write your own Serializer class, and then register it using
+ * REGISTER_BLOB_SERIALIZER. For a detailed example, see TensorSerializer for
+ * details.
+ */
 class BlobSerializerBase {
  public:
+  /**
+   * @brief The virtual function that returns a serialized string for the input
+   * blob.
+   * @param blob
+   *     the input blob to be serialized.
+   * @param name
+   *     the blob name to be used in the serialization implementation. It is up
+   *     to the implementation whether this name field is going to be used or
+   *     not.
+   */
   virtual string Serialize(const Blob& blob, const string& name) = 0;
 };
 
-// THe Blob serialization registry and serializer creator functions.
+// The Blob serialization registry and serializer creator functions.
 DECLARE_TYPED_REGISTRY(BlobSerializerRegistry, CaffeTypeId,
                        BlobSerializerBase);
 #define REGISTER_BLOB_SERIALIZER(name, id, ...) \
@@ -24,13 +40,21 @@ inline BlobSerializerBase* CreateSerializer(CaffeTypeId id) {
   return BlobSerializerRegistry()->Create(id);
 }
 
-// TensorSerializer is the serializer for Tensors: it puts the tensor object
-// into a TensorProto protocol buffer.
+/**
+ * @brief TensorSerializer is the serializer for Tensors.
+ *
+ * TensorSerializer takes in a blob that contains a Tensor, and serializes it
+ * into a TensorProto protocol buffer.
+ */
 template <class Context>
 class TensorSerializer : public BlobSerializerBase {
  public:
   TensorSerializer() : device_context_() {}
   ~TensorSerializer() {}
+  /**
+   * Serializes a Blob. Note that this blob has to contain Tensor<Context>,
+   * otherwise this function produces a fatal error.
+   */
   string Serialize(const Blob& blob, const string& name);
 
  private:

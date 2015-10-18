@@ -1,6 +1,7 @@
 #ifndef CAFFE2_OPERATORS_LOAD_SAVE_OP_H_
 #define CAFFE2_OPERATORS_LOAD_SAVE_OP_H_
 
+#include <cstdio>
 #include <map>
 
 #include "caffe2/core/context.h"
@@ -122,11 +123,25 @@ class SaveOp final : public OperatorBase {
 
 template <typename ... Ts>
 string FormatString(const string& pattern, Ts... values) {
+  // Note(Yangqing): We believe that 1024 is enough, but who are we to assert
+  // that?
+  // As a result, if things go wrong, we'll just throw the towel and quit loud.
+  // Yeah, I know that there is snprintf, but it is not present in *some*
+  // platforms unfortunately.
+  char buffer[1024];
+  int written = sprintf(buffer, pattern.c_str(), values...);
+  if (written < 0 || written + 1 > 1024) {
+    CAFFE_LOG_FATAL << "FormatString fails: total bytes written " << written;
+  }
+  return string(buffer);
+  /*
+   * The following is the snprintf version that is safe; enable it one day?
   unsigned int required =
       std::snprintf(nullptr, 0, pattern.c_str(), values...) + 1;
   char bytes[required];
   std::snprintf(bytes, required, pattern.c_str(), values...);
   return string(bytes);
+  */
 }
 
 // SnapshotOp is a wrapper over a SaveFloatTensorOp that basically allows

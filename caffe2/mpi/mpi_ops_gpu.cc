@@ -52,9 +52,9 @@ namespace caffe2 {
 
 namespace {
 #if CAFFE2_HAS_CUDA_MPI_BROADCAST
-REGISTER_CUDA_OPERATOR(Broadcast, BroadcastOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(Broadcast, BroadcastOp<CUDAContext>);
 #else
-REGISTER_CUDA_OPERATOR(Broadcast, FallbackBroadcastOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(Broadcast, FallbackBroadcastOp<CUDAContext>);
 #endif
 #if CAFFE2_HAS_CUDA_MPI_ALLREDUCE
 REGISTER_CUDA_OPERATOR(Allreduce, AllreduceOp<float, CUDAContext>);

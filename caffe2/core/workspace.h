@@ -15,21 +15,31 @@ namespace caffe2 {
 
 class NetBase;
 
-// Workspace is a class that holds all the blobs in this run and also runs
-// the operators.
+/**
+ * Workspace is a class that holds all the related objects created during
+ * runtime: (1) all blobs, and (2) all instantiated networks. It is the owner of
+ * all these objects and deals with the scaffolding logistics.
+ */
 class Workspace {
  public:
   typedef CaffeMap<string, unique_ptr<Blob> > BlobMap;
   typedef CaffeMap<string, unique_ptr<NetBase> > NetMap;
-  // Initializes an empty workspace.
+  /**
+   * Initializes an empty workspace.
+   */
   Workspace() : blob_map_(new BlobMap()), root_folder_(".") {}
+  /**
+   * Initializes an empty workspace with the given root folder.
+   */
   explicit Workspace(const string& root_folder)
       : blob_map_(new BlobMap()), net_map_(), root_folder_(root_folder) {}
   ~Workspace() {}
 
-  // Return a list of blob names. This may be a bit slow since it will involve
-  // creation of multiple temp variables - if possible, use HasBlob() or
-  // GetBlob() below with given names.
+  /**
+   * Return a list of blob names. This may be a bit slow since it will involve
+   * creation of multiple temp variables. For best performance, simply use
+   * HasBlob() and GetBlob().
+   */
   vector<string> Blobs() {
     vector<string> names;
     for (auto& entry : *blob_map_) {
@@ -37,23 +47,56 @@ class Workspace {
     }
     return names;
   }
-  // Return the root folder of the workspace.
+
+  /**
+   * Return the root folder of the workspace.
+   */
   const string& RootFolder() { return root_folder_; }
+  /**
+   * Checks if a blob with the given name is present in the current workspace.
+   */
   inline bool HasBlob(const string& name) const {
     return blob_map_->count(name);
   }
+  /**
+   * Creates a blob of the given name. The pointer to the blob is returned, but
+   * the workspace keeps ownership of the pointer. If a blob of the given name
+   * already exists, the creation is skipped and the existing blob is returned.
+   */
   Blob* CreateBlob(const string& name);
+  /**
+   * Gets the blob with the given name as a const pointer. If the blob does not
+   * exist, a nullptr is returned.
+   */
   const Blob* GetBlob(const string& name) const;
-  inline Blob* GetBlob(const string& name) {
-    return const_cast<Blob*>(
-        static_cast<const Workspace*>(this)->GetBlob(name));
-  }
+  /**
+   * Gets the blob with the given name as a mutable pointer. If the blob does
+   * not exist, a nullptr is returned.
+   */
+  Blob* GetBlob(const string& name);
 
   // CreateNet creates a network in the current workspace. It can then
   // be referred to by RunNet().
-  bool CreateNet(const NetDef& net_def);
+  /**
+   * Creates a network with the given NetDef, and returns the pointer to the
+   * network. If there is anything wrong during the creation of the network, a
+   * nullptr is returned. The Workspace keeps ownership of the pointer.
+   */
+  NetBase* CreateNet(const NetDef& net_def);
+  /**
+   * Deletes the instantiated network with the given name.
+   */
   void DeleteNet(const string& net_name);
+  /**
+   * Finds and runs the instantiated network with the given name. If the network
+   * does not exist or there are errors running the network, the function
+   * returns false.
+   */
   bool RunNet(const string& net_name);
+
+  /**
+   * Returns a list of names of the currently instantiated networks.
+   */
   vector<string> Nets() {
     vector<string> names;
     for (auto& entry : net_map_) {
@@ -62,7 +105,9 @@ class Workspace {
     return names;
   }
 
-  // RunPlan runs a plan that has multiple nets and execution steps.
+  /**
+   * Runs a plan that has multiple nets and execution steps.
+   */
   bool RunPlan(const PlanDef& plan_def);
 
   // RunOperatorOnce and RunNetOnce runs an operator or net once. The difference

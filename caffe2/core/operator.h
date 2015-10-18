@@ -197,13 +197,13 @@ class Operator : public OperatorBase {
   using OperatorBase::InputIsType;                                             \
   using OperatorBase::InputSize;                                               \
   using OperatorBase::OutputSize;                                              \
-  using Operator<Context>::device_context_;                              \
-  using Operator<Context>::Input;                                        \
+  using Operator<Context>::device_context_;                                    \
+  using Operator<Context>::Input;                                              \
   using Operator<Context>::Output
 
 #define USE_SIMPLE_CTOR_DTOR(name)                                             \
   name(const OperatorDef& operator_def, Workspace* ws)                         \
-      : Operator<Context>(operator_def, ws) {}                           \
+      : Operator<Context>(operator_def, ws) {}                                 \
   virtual ~name() {}
 
 // The operator registry. Since we are not expecting a great number of devices,
