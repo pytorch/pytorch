@@ -8,7 +8,7 @@
 
 namespace caffe2 {
 
-template <typename T, class Context>
+template <class Context>
 class FallbackBroadcastOp final : public Operator<Context> {
  public:
   static_assert(!std::is_same<Context, CPUContext>::value,

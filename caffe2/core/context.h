@@ -9,6 +9,38 @@
 
 namespace caffe2 {
 
+/**
+ * The CPU Context, representing the bare minimum of what a Context class in
+ * Caffe2 should implement.
+ *
+ * See opeartor.h, especially Operator<Context>, for how Context are used in
+ * actual operator implementations that are associated with specific devices.
+ * In general, the Context class is passed in as a template argument, and
+ * the operator can use the functions defined in the context to execute whatever
+ * computation it has.
+ *
+ * A Context defines all the necessities to run an operator on a specific
+ * device. Specific Context classes have the freedom to choose what functions it
+ * implements, but there are a few functions that you should consider
+ * implementing if you want to write your own context class:
+ * - void SwitchToDevice(): any necessary code to switch to the device before
+ *     running anything.
+ * - bool FinishDeviceComputation(): any wrapping-up work after all the
+ *     computation of the operator is done. If there are errors during the
+ *     execution, return false. For example, in a CUDAContext, this function
+ *     carries out a stream synchronization and spots potential errors for
+ *     the cuda kernel calls.
+ * - static void* New(size_t nbytes): allocates memory.
+ * - static void Delete(void* data): deletes memory.
+ * - template <class SrcContext, class DstContext> void Memcpy(...): does cross
+ *     context memory copy.
+ * - template <typename T, class SrcContext, class DstContext> void Copy(...):
+ *     usually a simple wrapper around the above Memcpy function.
+ *
+ * We intentionally did not create a base class for the various possible Context
+ * classes there might be, since they are intended to be specified during
+ * compile time rather than via polymorphism.
+ */
 class CPUContext {
  public:
   CPUContext() : random_generator_(0) {}
@@ -17,6 +49,7 @@ class CPUContext {
             option.has_random_seed() ? option.random_seed() : time(NULL)) {
     CAFFE_CHECK_EQ(option.device_type(), CPU);
   }
+
   virtual ~CPUContext() {}
   inline void SwitchToDevice() {}
   inline bool FinishDeviceComputation() { return true; }

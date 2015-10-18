@@ -83,7 +83,7 @@ def Allreduce4(net, blobs, reduced_affix, gpu_indices):
 def Allreduce8(net, blobs, reduced_affix, gpu_indices):
   """Allreduce for 8 gpus.
 
-  Algorithm: 3 level reduction. 
+  Algorithm: 3 level reduction.
       0r <- 0 + 1, 2r <- 2 + 3, 4r <- 4 + 5, 6r <- 6 + 7
       0r <- 0r + 2r, 4r <- 4r + 6r
       0r <- 0r + 4r

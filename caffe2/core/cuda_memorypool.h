@@ -8,6 +8,18 @@
 
 namespace caffe2 {
 
+/**
+ * A Cuda memory pool that can potentially provide a better memory management
+ * while maintaining transparency on the user side.
+ *
+ * In Caffe2, the user can control whether to use the memory pool or not. If one
+ * chooses to, BEFORE any cuda memory allocation are carried out, one should
+ * call InitializeMemoryPool() to set it up with the desired device ids and the
+ * proportion of the cuda memory to reserve for the memory pool. One is then
+ * responsible for clearing up by calling FinalizeMemoryPool() at some point.
+ *
+ * This relies on NVidia's open-source cumem library.
+ */
 class CudaMemoryPool {
  public:
   // Initializes the memory pool on the device ids, and pre-preserves the given

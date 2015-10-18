@@ -1,6 +1,11 @@
 from caffe2.proto import caffe2_pb2
 from collections import Counter, defaultdict
-from pycaffe2 import utils
+from pycaffe2 import utils, workspace
+
+_REGISTERED_OPERATORS = set(workspace.RegisteredOperators())
+
+def IsOperator(op_type):
+  return (op_type in _REGISTERED_OPERATORS)
 
 def GetGradientName(name):
   """The function that returns the gradient name for a blob."""
@@ -41,6 +46,9 @@ class BlobReference(object):
     is equivalent to doing
         net.Relu([b], ...)
     """
+    if not IsOperator(op_type):
+      raise RuntimeError(
+          'Method ' + op_type + ' is not a registered operator.')
     def _CreateAndAddToNet(inputs=[], *args, **kwargs):
       """Internal function that routes the operator generation to the network's
       __getattr__ function.
@@ -51,6 +59,7 @@ class BlobReference(object):
       inputs.insert(0, self)
       return self._from_net.__getattr__(op_type)(inputs, *args, **kwargs)
     return _CreateAndAddToNet
+
 
 def CreateOperator(operator_type):
   """A function wrapper that allows one to create operators based on the
@@ -254,11 +263,10 @@ class Net(object):
     device_option.cuda_gpu_id = gpu_id
     self._net.device_option.CopyFrom(device_option)
 
-  def __getattr__(self, operator_type):
-    if operator_type in self.__class__.operator_registry_:
-      # Not finished. Operator registry allows one to define custon functions,
-      # but so far that functionality is not complete.
-      return self.__class__.operator_registry_
+  def __getattr__(self, op_type):
+    if not IsOperator(op_type):
+      raise RuntimeError(
+          'Method ' + op_type + ' is not a registered operator.')
     def _CreateAndAddToSelf(inputs, outputs=None, **kwargs):
       if outputs is None:
         # If we do not specify an output, we will assume that this operator
@@ -268,7 +276,7 @@ class Net(object):
         # In this case, we will auto-fill the given number of outputs with
         # auto-generated names.
         outputs = [self.NextName() for i in range(outputs)]
-      op = CreateOperator(operator_type)(inputs, outputs, **kwargs)
+      op = CreateOperator(op_type)(inputs, outputs, **kwargs)
       self._net.op.extend([op])
       if len(op.output) == 0:
         return

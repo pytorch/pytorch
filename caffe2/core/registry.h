@@ -18,7 +18,6 @@ template <class SrcType, class ObjectType, class... Args>
 class Registry {
  public:
   typedef ObjectType* (*Creator)(Args ...);
-  typedef CaffeMap<SrcType, Creator> CreatorRegistry;
 
   Registry() : registry_() {}
 
@@ -38,6 +37,11 @@ class Registry {
     registry_[key] = creator;
   }
 
+  void Register(const SrcType& key, Creator creator, const string& help_msg) {
+    Register(key, creator);
+    help_message_[key] = help_msg;
+  }
+
   inline bool Has(const SrcType& key) { return (registry_.count(key) != 0); }
 
   ObjectType* Create(const SrcType& key, Args ... args) {
@@ -53,14 +57,22 @@ class Registry {
     return registry_[key](args...);
   }
 
+  /**
+   * Returns the keys currently registered as a vector.
+   */
+  vector<SrcType> Keys() {
+    vector<SrcType> keys;
+    for (const auto& it : registry_) {
+      keys.push_back(it.first);
+    }
+    return keys;
+  }
+
   // This function should only used in test code to inspect registered names.
   // You should only call this function after google glog is initialized -
   // do NOT call it in static initializations.
   void TEST_PrintRegisteredNames() {
-    std::vector<SrcType> keys;
-    for (const auto& it : registry_) {
-      keys.push_back(it.first);
-    }
+    vector<SrcType> keys = Keys();
     std::sort(keys.begin(), keys.end());
     for (const SrcType& key : keys) {
       std::cout << "Registry key: " << key << std::endl;
@@ -70,7 +82,8 @@ class Registry {
   }
 
  private:
-  CreatorRegistry registry_;
+  CaffeMap<SrcType, Creator> registry_;
+  CaffeMap<SrcType, string> help_message_;
 
   DISABLE_COPY_AND_ASSIGN(Registry);
 };
@@ -80,8 +93,9 @@ class Registerer {
  public:
   Registerer(const SrcType& key,
              Registry<SrcType, ObjectType, Args...>* registry,
-             typename Registry<SrcType, ObjectType, Args...>::Creator creator) {
-    registry->Register(key, creator);
+             typename Registry<SrcType, ObjectType, Args...>::Creator creator,
+             const string& help_msg="") {
+    registry->Register(key, creator, help_msg);
   }
 
   template <class DerivedType>

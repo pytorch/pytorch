@@ -24,6 +24,12 @@ class Env(object):
   # binary.
   #USE_SYSTEM_PROTOBUF = False
   #PROTOC_BINARY = os.path.join(GENDIR, 'third_party/google/protoc')
+
+  # Eigen constants: if set USE_SYSTEM_EIGEN, you need to make sure that Eigen
+  # is installed in your system. Otherwise, we will use the Eigen code included
+  # in the Caffe source.
+  USE_SYSTEM_EIGEN = False
+
   # CUDA directory.
   CUDA_DIR = '/usr/local/cuda'
   # Caffe defined symbols

@@ -15,6 +15,9 @@ class CNNModelHelper(object):
       raise ValueError("Cannot understand the CNN storage order %s."
                        % self.order)
 
+  def Proto(self):
+    return self.net.Proto()
+
   def Conv(self, blob_in, blob_out, dim_in, dim_out, kernel,
            weight_init, bias_init, **kwargs):
     """Convolution. We intentionally do not provide odd kernel/stride/pad
@@ -88,8 +91,11 @@ class CNNModelHelper(object):
                             order=self.order, **kwargs)[0]
 
   def AddGradientOperators(self):
-    return self.net.AddGradientOperators()
+    self.net.AddGradientOperators()
 
-  def __getattr__(self, operator_type):
+  def __getattr__(self, op_type):
     """Catch-all for all other operators, mostly those without params."""
-    return self.net.__getattr__(operator_type)
+    if not core.IsOperator(op_type):
+      raise RuntimeError(
+          'Method ' + op_type + ' is not a registered operator.')
+    return self.net.__getattr__(op_type)

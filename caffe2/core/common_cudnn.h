@@ -1,17 +1,21 @@
 #ifndef CAFFE2_CORE_COMMON_CUDNN_H_
 #define CAFFE2_CORE_COMMON_CUDNN_H_
 
+#include <cudnn.h>
+
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/core/types.h"
 #include "caffe2/proto/caffe2.pb.h"
-#include "cudnn.h"  // NOLINT
 #include "caffe2/core/logging.h"
 
 namespace caffe2 {
 
 namespace internal {
+/**
+ * A helper function to obtain cudnn error strings.
+ */
 inline const char* cudnnGetErrorString(cudnnStatus_t status) {
   switch (status) {
     case CUDNN_STATUS_SUCCESS:
@@ -40,25 +44,38 @@ inline const char* cudnnGetErrorString(cudnnStatus_t status) {
 }
 }  // namespace internal
 
+// A macro that wraps around a cudnn statement so we can check if the cudnn
+// execution finishes or not.
 #define CUDNN_CHECK(condition)                                                 \
   do {                                                                         \
     cudnnStatus_t status = condition;                                          \
-    CAFFE_CHECK_EQ(status, CUDNN_STATUS_SUCCESS) << " "                              \
+    CAFFE_CHECK_EQ(status, CUDNN_STATUS_SUCCESS) << " "                        \
         << "Error at: " << __FILE__ << ":" << __LINE__ << ": "                 \
         << ::caffe2::internal::cudnnGetErrorString(status);                    \
   } while (0)
 
 
+/**
+ * cudnnTypeWrapper is a wrapper class that allows us to refer to the cudnn type
+ * in a template function. The class is specialized explicitly for different
+ * data types below.
+ */
 template <typename T> class cudnnTypeWrapper;
+
 template<> class cudnnTypeWrapper<float>  {
  public:
   static const cudnnDataType_t type = CUDNN_DATA_FLOAT;
 };
+
 template<> class cudnnTypeWrapper<double> {
  public:
   static const cudnnDataType_t type = CUDNN_DATA_DOUBLE;
 };
 
+/**
+ * A wrapper function to convert the Caffe storage order to cudnn storage order
+ * enum values.
+ */
 inline cudnnTensorFormat_t GetCudnnTensorFormat(const StorageOrder& order) {
   switch (order) {
   case StorageOrder::NHWC:
@@ -72,8 +89,11 @@ inline cudnnTensorFormat_t GetCudnnTensorFormat(const StorageOrder& order) {
   return CUDNN_TENSOR_NCHW;
 }
 
-// cudnnDescriptorMeta is the placeholder that wraps around a
-// cudnnTensorDescriptor_t, allowing us to do descriptor change as-needed.
+/**
+ * cudnnDescriptorMeta is the placeholder that wraps around a
+ * cudnnTensorDescriptor_t, allowing us to do descriptor change as-needed during
+ * runtime.
+ */
 class cudnnDescriptorMeta {
  public:
   cudnnDescriptorMeta() {
@@ -117,9 +137,25 @@ class cudnnDescriptorMeta {
   cudnnDescriptorMeta& operator=(const cudnnDescriptorMeta&);
 };
 
+/**
+ * CuDNNWrapper is a class that wraps the cudnn handles associated with a
+ * specific CUDAContext.
+ *
+ * In caffe2, each unique CUDAContext has its own cuda stream. Since a cudnn
+ * handle needs to be associated with a cuda stream, one may need to create a
+ * cudnn wrapper for each CUDAContext.
+ *
+ * Sample usage: if you are implementing a cuda operator that uses cudnn, you
+ * can have a private member like
+ *     CudnnWrapper wrapper_;
+ * and in your constructor, initialize it with wrapper_(device_context_).
+ */
 class CuDNNWrapper {
  public:
-  // The default cuda context constructor.
+  /**
+   * Creates a cudnn wrapper associated with a CUDAContext object. Note that
+   * the CUDAContext object should outlive the CuDNNWrapper.
+   */
   explicit CuDNNWrapper(CUDAContext* context)
       : cuda_context_(context), cudnn_handle_(nullptr) {}
 
@@ -129,6 +165,9 @@ class CuDNNWrapper {
     }
   }
 
+  /**
+   * Returns the cudnn handle.
+   */
   cudnnHandle_t& cudnn_handle() {
     if (!cudnn_handle_) {
       CUDNN_CHECK(cudnnCreate(&cudnn_handle_));
@@ -138,10 +177,19 @@ class CuDNNWrapper {
     return cudnn_handle_;
   }
 
+  /**
+   * Set the number of tensor descriptors stored in this wrapper.
+   */
   void cudnnSetNumTensorDescriptors(int n) {
     cudnn_tensor_descriptors_.resize(n);
   }
 
+  /**
+   * Gets the index-th cudnnTensorDescriptor, with the given tensor format
+   * and the dimension. If the format or the dimension is different from the
+   * last call, the underlying descriptor will be re-generated and the changed
+   * bool flag will be set.
+   */
   template <typename T>
   inline cudnnTensorDescriptor_t cudnnGetTensor4dDesc(
       const int index, const cudnnTensorFormat_t cudnn_format,

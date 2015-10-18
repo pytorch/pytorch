@@ -15,6 +15,7 @@ cc_headers(
       "net.h",
       "operator.h",
       "registry.h",
+      "tensor.h",
       "typeid.h",
       "types.h",
       "workspace.h"
@@ -30,7 +31,6 @@ cc_library(
       "flags.cc",
       "init.cc",
       "logging.cc",
-      "minidb.cc",
       "net.cc",
       "operator.cc",
       "workspace.cc",
