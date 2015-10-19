@@ -39,7 +39,7 @@ __global__ void THCudaTensor_kernel_indexFill(
           srcIdx += coeff * stride[d];
         }
       }
-        tensor[srcIdx + (int)((index[i])-1)*stride[dim]] = val;
+        tensor[srcIdx + (long)((index[i])-1)*stride[dim]] = val;
     }
   }
 }
@@ -79,7 +79,47 @@ __global__ void THCudaTensor_kernel_indexCopy(
           resIdx += coeff * res_stride[d];
         }
       }
-      res[resIdx + ((int)(index[i])-1)*res_stride[dim]] = src[targetIdx + i*res_stride[dim]];
+      res[resIdx + ((long)(index[i])-1)*res_stride[dim]] = src[targetIdx + i*res_stride[dim]];
+    }
+  }
+}
+
+__global__ void THCudaTensor_kernel_indexAdd(
+   float *res, float *src, long* res_stride, float *index,
+   long res_nDim, int dim, long idx_size, long src_size, long size_dim
+)
+{
+  int thread_idx = blockIdx.x * blockDim.x * blockDim.y + threadIdx.y * blockDim.x + threadIdx.x;
+
+  long flat_size = src_size / idx_size;
+
+  if (thread_idx < flat_size)
+  {
+    long coeff = 0;
+    for (int i=0; i<idx_size; i++)
+    {
+      int leftover = thread_idx;
+      int targetIdx = 0;
+      int resIdx = 0;
+      for (int d=0; d<res_nDim; d++)
+      {
+        if (d < dim)
+        {
+          long stride_d = res_stride[d] / size_dim;
+          coeff = leftover / stride_d;
+          leftover -= coeff * stride_d;
+          targetIdx += coeff * stride_d * idx_size;
+          resIdx += coeff * res_stride[d];
+        }
+        else if (d > dim)
+        {
+          coeff = leftover / res_stride[d];
+          leftover -= coeff * res_stride[d];
+          targetIdx += coeff * res_stride[d];
+          resIdx += coeff * res_stride[d];
+        }
+      }
+      atomicAdd(&res[resIdx + ((long)(index[i])-1)*res_stride[dim]], src[targetIdx + i*res_stride[dim]]);
     }
   }
 }
@@ -119,6 +159,52 @@ void THCudaTensor_indexCopy(THCState *state, THCudaTensor *res_, int dim, THCuda
   THCudaCheck(cudaMemcpy(stride_, res_->stride, res_->nDimension * sizeof(long), cudaMemcpyHostToDevice));
 
   THCudaTensor_kernel_indexCopy<<<nblocks, nthreads, 0, THCState_getCurrentStream(state)>>>(
+    THCudaTensor_data(state, res_), THCudaTensor_data(state, src),
+    stride_, THCudaTensor_data(state, indices),
+    res_->nDimension, dim, nIndex,
+    THCudaTensor_nElement(state, src), res_->size[dim]
+  );
+
+  THCudaCheck(THCudaFree(state, stride_));
+  THCudaTensor_free(state, indices);
+  THCudaTensor_free(state, src);
+}
+
+void THCudaTensor_indexAdd_long(THCState *state, THCudaTensor *res_, int dim, THLongTensor *indices, THCudaTensor *src)
+{
+  THAssert(THCudaTensor_checkGPU(state, 1, res_));
+
+  THCudaTensor *indices_ = THCudaTensor_newWithSize1d(state, indices->size[0]);
+  THCudaTensor_copyLong(state, indices_, indices);
+
+  THCudaTensor_indexAdd(state, res_, dim, indices_, src);
+
+  THCudaTensor_free(state, indices_);
+}
+
+void THCudaTensor_indexAdd(THCState *state, THCudaTensor *res_, int dim, THCudaTensor *indices, THCudaTensor *src)
+{
+  THAssert(THCudaTensor_checkGPU(state, 2, res_, src));
+  long *stride_;
+  long nIndex = indices->size[0];
+  long nRes;
+
+  THArgCheck(indices->nDimension == 1, 3, "expecting vector of indices");
+  THArgCheck(dim < src->nDimension, 4, "Indexing dim is out of bounds");
+  THArgCheck(src->nDimension > 0, 2, "Source tensor is empty");
+  THArgCheck(nIndex == src->size[dim], 4, "length of src.size[dim] is not equal to length of indices");
+
+  src = THCudaTensor_newContiguous(state, src);
+  indices = THCudaTensor_newContiguous(state, indices);
+
+  nRes = THCudaTensor_nElement(state, res_);
+  dim3 nthreads(16, 16);
+  dim3 nblocks(ceil((float)nRes / nIndex / (16*16)));
+
+  THCudaCheck(THCudaMalloc(state, (void**)&stride_, res_->nDimension * sizeof(long)));
+  THCudaCheck(cudaMemcpy(stride_, res_->stride, res_->nDimension * sizeof(long), cudaMemcpyHostToDevice));
+
+  THCudaTensor_kernel_indexAdd<<<nblocks, nthreads, 0, THCState_getCurrentStream(state)>>>(
     THCudaTensor_data(state, res_), THCudaTensor_data(state, src),
     stride_, THCudaTensor_data(state, indices),
     res_->nDimension, dim, nIndex,
@@ -184,8 +270,8 @@ __global__ void THCudaTensor_kernel_indexSelect_contiguous(
 
   for (int idx = blockIdx.x * blockDim.y + threadIdx.y; idx < idxSize; idx += blockDim.y * MAX_DIM_SIZE) {
     for (int startIdx = threadIdx.x + blockIdx.y * VT*WARP_SIZE; startIdx < stride; startIdx += VT*WARP_SIZE*MAX_DIM_SIZE) {
-      const int srcIdx = ((int) index[idx] - 1) * stride;
-      const int targetIdx = idx * stride;
+      const long srcIdx = ((long) index[idx] - 1) * stride;
+      const long targetIdx = idx * stride;
 
       #pragma unroll
       for (int i = 0; i < VT; i++) {
