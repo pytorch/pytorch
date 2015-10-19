@@ -582,7 +582,7 @@ THFile *THPipeFile_new(const char *name, const char *mode, int isQuiet)
     if(isQuiet)
       return 0;
     else
-      THError("cannot open <%s> in mode %c%c", name, (isReadable ? 'r' : ' '), (isWritable ? 'w' : ' '));
+      THError("cannot open <%s> in mode %c%c.  This might be because eg the executable doesn't exist, but it could also be because you are out of memory.", name, (isReadable ? 'r' : ' '), (isWritable ? 'w' : ' '));
   }
 
   self = THAlloc(sizeof(THDiskFile));
