@@ -27,17 +27,14 @@ bool SoftmaxOp<float, CPUContext>::RunOnDevice() {
   device_context_.template Copy<float, CPUContext, CPUContext>(
       X.size(), X.data<float>(), Ydata);
   // Subtract the scale
-  static const float kMinusOne = -1.;
-  static const float kOne = 1.;
-  static const float kZero = 0;
   math::Gemm<float, CPUContext>(CblasNoTrans, CblasNoTrans, N, D, 1,
-      &kMinusOne, scale_.data<float>(), sum_multiplier_.data<float>(), &kOne,
+      -1, scale_.data<float>(), sum_multiplier_.data<float>(), 1,
       Ydata, &device_context_);
   // Exponentiation
   math::Exp<float, CPUContext>(Y->size(), Ydata, Ydata,
                                &device_context_);
-  math::Gemv<float, CPUContext>(CblasNoTrans, N, D, &kOne, Ydata,
-                                sum_multiplier_.data<float>(), &kZero,
+  math::Gemv<float, CPUContext>(CblasNoTrans, N, D, 1, Ydata,
+                                sum_multiplier_.data<float>(), 0,
                                 scale_.mutable_data<float>(), &device_context_);
   // Do division
   // TODO(Yangqing): maybe implement it more beautifully?
@@ -80,10 +77,8 @@ bool SoftmaxGradientOp<float, CPUContext>::RunOnDevice() {
     math::Dot<float, CPUContext>(D, Ydata + i * D, dYdata + i * D,
                                  scaledata + i, &device_context_);
   }
-  const float kMinusOne = -1.;
-  const float kOne = 1.;
-  math::Gemm<float, CPUContext>(CblasNoTrans, CblasNoTrans, N, D, 1, &kMinusOne,
-                                scaledata, sum_multiplier_.data<float>(), &kOne,
+  math::Gemm<float, CPUContext>(CblasNoTrans, CblasNoTrans, N, D, 1, -1,
+                                scaledata, sum_multiplier_.data<float>(), 1,
                                 dXdata, &device_context_);
   math::Mul<float, CPUContext>(Y.size(), dXdata, Ydata, dXdata,
                                &device_context_);

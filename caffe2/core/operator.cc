@@ -17,7 +17,9 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
     arg_map_[arg.name()] = &arg;
   }
   for (const string& input_str : operator_def_.input()) {
-    inputs_.push_back(CAFFE_CHECK_NOTNULL(ws->GetBlob(input_str)));
+    auto* blob = ws->GetBlob(input_str);
+    CAFFE_CHECK(blob) << "Non-existing blob: " << input_str;
+    inputs_.push_back(blob);
   }
   for (const string& output_str : operator_def_.output()) {
     outputs_.push_back(CAFFE_CHECK_NOTNULL(ws->CreateBlob(output_str)));
@@ -87,8 +89,9 @@ bool OperatorBase::Verify() {
   return true;
 }
 
-OperatorBase* CreateOperator(const OperatorDef& operator_def, Workspace* ws) {
-  const string& key = operator_def.type();
+namespace {
+OperatorBase* TryCreateOperator(
+    const string& key, const OperatorDef& operator_def, Workspace* ws) {
   switch (operator_def.device_option().device_type()) {
   case CPU:
     CAFFE_VLOG(1) << "Creating CPU operator " << key;
@@ -96,19 +99,28 @@ OperatorBase* CreateOperator(const OperatorDef& operator_def, Workspace* ws) {
   case CUDA:
     CAFFE_VLOG(1) << "Creating CUDA operator " << key;
     return CUDAOperatorRegistry()->Create(key, operator_def, ws);
-  case CUDNN:
-    CAFFE_VLOG(1) << "Using CuDNN implementation.";
-    return CUDNNOperatorRegistry()->Create(key, operator_def, ws);
   }
-  // Just to suppress some compiler error
-  return nullptr;
+}
+}  // namespace
+
+OperatorBase* CreateOperator(const OperatorDef& operator_def, Workspace* ws) {
+  string key = operator_def.type();
+  // First, if the user has provided an engine, try create that engine
+  if (operator_def.engine().size()) {
+    key += "_ENGINE_" + operator_def.engine();
+    OperatorBase* op = TryCreateOperator(key, operator_def, ws);
+    if (op != nullptr) {
+      return op;
+    }
+  }
+  // If the above fails, we will just return the normal case with the default
+  // implementation.
+  return TryCreateOperator(operator_def.type(), operator_def, ws);
 }
 
 DEFINE_REGISTRY(CPUOperatorRegistry, OperatorBase,
                 const OperatorDef&, Workspace*);
 DEFINE_REGISTRY(CUDAOperatorRegistry, OperatorBase,
-                const OperatorDef&, Workspace*);
-DEFINE_REGISTRY(CUDNNOperatorRegistry, OperatorBase,
                 const OperatorDef&, Workspace*);
 
 }  // namespace caffe2

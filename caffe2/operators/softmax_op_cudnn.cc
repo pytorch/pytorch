@@ -6,11 +6,11 @@
 namespace caffe2 {
 
 namespace {
-const int NUM_DESCRIPTORS = 2;
-const int GRADIENT_NUM_DESCRIPTORS = 3;
-const int BOTTOM_DESC_ID = 0;
-const int TOP_DESC_ID = 1;
-const int TOP_GRADIENT_DESC_ID = 2;
+constexpr int NUM_DESCRIPTORS = 2;
+constexpr int GRADIENT_NUM_DESCRIPTORS = 3;
+constexpr int BOTTOM_DESC_ID = 0;
+constexpr int TOP_DESC_ID = 1;
+constexpr int TOP_GRADIENT_DESC_ID = 2;
 }  // namespace
 
 
@@ -23,6 +23,7 @@ class CuDNNSoftmaxOp final : public Operator<CUDAContext> {
 
  protected:
   CuDNNWrapper cudnn_wrapper_;
+  cudnnTensorDescWrapper descriptors_[NUM_DESCRIPTORS];
   INPUT_OUTPUT_STATS(1, 1, 1, 1);
   DISABLE_COPY_AND_ASSIGN(CuDNNSoftmaxOp);
 };
@@ -37,6 +38,7 @@ class CuDNNSoftmaxGradientOp final : public Operator<CUDAContext> {
 
  protected:
   CuDNNWrapper cudnn_wrapper_;
+  cudnnTensorDescWrapper descriptors_[GRADIENT_NUM_DESCRIPTORS];
   // Input: Y, dY. Output: dX
   INPUT_OUTPUT_STATS(2, 2, 1, 1);
   DISABLE_COPY_AND_ASSIGN(CuDNNSoftmaxGradientOp);
@@ -52,14 +54,11 @@ bool CuDNNSoftmaxOp::RunOnDevice() {
   const float alpha = 1.0;
   const float beta = 0.0;
   vector<int> dims{N, D, 1, 1};
-  cudnn_wrapper_.cudnnSetNumTensorDescriptors(NUM_DESCRIPTORS);
   CUDNN_CHECK(cudnnSoftmaxForward(cudnn_wrapper_.cudnn_handle(),
       CUDNN_SOFTMAX_ACCURATE, CUDNN_SOFTMAX_MODE_INSTANCE, &alpha,
-      cudnn_wrapper_.cudnnGetTensor4dDesc<float>(
-          BOTTOM_DESC_ID, CUDNN_TENSOR_NCHW, dims, nullptr),
+      descriptors_[BOTTOM_DESC_ID].Descriptor<float>(StorageOrder::NCHW, dims),
       X.data<float>(), &beta,
-      cudnn_wrapper_.cudnnGetTensor4dDesc<float>(
-          TOP_DESC_ID, CUDNN_TENSOR_NCHW, dims, nullptr),
+      descriptors_[TOP_DESC_ID].Descriptor<float>(StorageOrder::NCHW, dims),
       Y->mutable_data<float>()));
   return true;
 }
@@ -76,18 +75,15 @@ bool CuDNNSoftmaxGradientOp::RunOnDevice() {
   dX->ReshapeLike(Y);
   const float alpha = 1.0;
   const float beta = 0.0;
-  cudnn_wrapper_.cudnnSetNumTensorDescriptors(GRADIENT_NUM_DESCRIPTORS);
   vector<int> dims{N, D, 1, 1};
   CUDNN_CHECK(cudnnSoftmaxBackward(cudnn_wrapper_.cudnn_handle(),
       CUDNN_SOFTMAX_ACCURATE, CUDNN_SOFTMAX_MODE_INSTANCE, &alpha,
-      cudnn_wrapper_.cudnnGetTensor4dDesc<float>(
-          TOP_DESC_ID, CUDNN_TENSOR_NCHW, dims, nullptr),
+      descriptors_[TOP_DESC_ID].Descriptor<float>(StorageOrder::NCHW, dims),
       Y.data<float>(),
-      cudnn_wrapper_.cudnnGetTensor4dDesc<float>(
-          TOP_GRADIENT_DESC_ID, CUDNN_TENSOR_NCHW, dims, nullptr),
+      descriptors_[TOP_GRADIENT_DESC_ID].Descriptor<float>(
+          StorageOrder::NCHW, dims),
       dY.data<float>(), &beta,
-      cudnn_wrapper_.cudnnGetTensor4dDesc<float>(
-          BOTTOM_DESC_ID, CUDNN_TENSOR_NCHW, dims, nullptr),
+      descriptors_[BOTTOM_DESC_ID].Descriptor<float>(StorageOrder::NCHW, dims),
       dX->mutable_data<float>()));
   return true;
 }

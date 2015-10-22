@@ -6,6 +6,7 @@
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/cuda_memorypool.h"
+#include "caffe2/core/tensor.h"
 #include "caffe2/core/types.h"
 #include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/core/logging.h"
@@ -70,8 +71,11 @@ class CUDAContext {
   cublasHandle_t& cublas_handle() {
     if (!cublas_handle_) {
       CUBLAS_CHECK(cublasCreate(&cublas_handle_));
+      // The default is CUBLAS_POINTER_MODE_HOST. You can override
+      // it after obtaining the cublas handle, but do that with
+      // caution.
       CUBLAS_CHECK(cublasSetPointerMode(
-          cublas_handle_, CUBLAS_POINTER_MODE_DEVICE));
+          cublas_handle_, CUBLAS_POINTER_MODE_HOST));
       CUBLAS_CHECK(cublasSetStream(cublas_handle_, cuda_stream_));
     }
     return cublas_handle_;
@@ -129,7 +133,6 @@ inline void CPUContext::Memcpy<CUDAContext, CPUContext>(
 }
 
 // For simplicity, we will typedef Tensor<CPUContext> to TensorCPU.
-template <class Context> class Tensor;
 typedef Tensor<CUDAContext> TensorCUDA;
 
 }  // namespace caffe2

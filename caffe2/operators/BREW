@@ -90,6 +90,7 @@ cc_library(
 cc_library(
   name = "core_ops_cudnn",
   srcs = [
+      "conv_op_cudnn.cc",
       "softmax_op_cudnn.cc",
   ],
   deps = [

@@ -131,14 +131,41 @@ the visualized images. If you want to save the images for example, you should
 explicitly instantiate a patch visualizer, and call those functions.
 """
 
-def ShowSingle(*args, **kwargs):
-  _default_visualizer.ShowSingle(*args, **kwargs)
+class NHWC(object):
+  @staticmethod
+  def ShowSingle(*args, **kwargs):
+    _default_visualizer.ShowSingle(*args, **kwargs)
 
-def ShowMultiple(*args, **kwargs):
-  _default_visualizer.ShowMultiple(*args, **kwargs)
+  @staticmethod
+  def ShowMultiple(*args, **kwargs):
+    _default_visualizer.ShowMultiple(*args, **kwargs)
 
-def ShowImages(*args, **kwargs):
-  _default_visualizer.ShowImages(*args, **kwargs)
+  @staticmethod
+  def ShowImages(*args, **kwargs):
+    _default_visualizer.ShowImages(*args, **kwargs)
 
-def ShowChannels(*args, **kwargs):
-  _default_visualizer.ShowChannels(*args, **kwargs)
+  @staticmethod
+  def ShowChannels(*args, **kwargs):
+    _default_visualizer.ShowChannels(*args, **kwargs)
+
+
+class NCHW(object):
+  @staticmethod
+  def ShowSingle(patch, *args, **kwargs):
+    _default_visualizer.ShowSingle(
+        ChannelLast(patch), *args, **kwargs)
+
+  @staticmethod
+  def ShowMultiple(patch, *args, **kwargs):
+    _default_visualizer.ShowMultiple(
+        ChannelLast(patch), *args, **kwargs)
+
+  @staticmethod
+  def ShowImages(patch, *args, **kwargs):
+    _default_visualizer.ShowImages(
+        ChannelLast(patch), *args, **kwargs)
+
+  @staticmethod
+  def ShowChannels(patch, *args, **kwargs):
+    _default_visualizer.ShowChannels(
+        ChannelLast(patch), *args, **kwargs)

@@ -10,6 +10,7 @@
 #include "caffe2/core/common.h"
 #include "caffe2/core/net.h"
 #include "caffe2/core/registry.h"
+#include "caffe2/core/tensor.h"
 #include "caffe2/core/workspace.h"
 #include "caffe2/proto/caffe2.pb.h"
 
@@ -220,6 +221,9 @@ DECLARE_REGISTRY(CPUOperatorRegistry, OperatorBase,
 #define REGISTER_CPU_OPERATOR(name, ...) \
   REGISTER_CLASS(CPUOperatorRegistry, name, __VA_ARGS__)
 
+#define REGISTER_CPU_OPERATOR_WITH_ENGINE(name, engine, ...) \
+  REGISTER_CLASS(CPUOperatorRegistry, name##:##engine, __VA_ARGS__)
+
 DECLARE_REGISTRY(CUDAOperatorRegistry, OperatorBase,
                  const OperatorDef&, Workspace*);
 #define REGISTER_CUDA_OPERATOR_CREATOR(key, ...) \
@@ -227,12 +231,12 @@ DECLARE_REGISTRY(CUDAOperatorRegistry, OperatorBase,
 #define REGISTER_CUDA_OPERATOR(name, ...) \
   REGISTER_CLASS(CUDAOperatorRegistry, name, __VA_ARGS__)
 
-DECLARE_REGISTRY(CUDNNOperatorRegistry, OperatorBase,
-                 const OperatorDef&, Workspace*);
-#define REGISTER_CUDNN_OPERATOR_CREATOR(key, ...) \
-  REGISTER_CREATOR(CUDNNOperatorRegistry, key, __VA_ARGS__)
+#define REGISTER_CUDA_OPERATOR_WITH_ENGINE(name, engine, ...) \
+  REGISTER_CLASS(CUDAOperatorRegistry, name##_ENGINE_##engine, __VA_ARGS__)
+
+// Macros for cudnn since we use it often
 #define REGISTER_CUDNN_OPERATOR(name, ...) \
-  REGISTER_CLASS(CUDNNOperatorRegistry, name, __VA_ARGS__)
+  REGISTER_CUDA_OPERATOR_WITH_ENGINE(name, CUDNN, __VA_ARGS__)
 
 // Creates an operator with the given operator definition.
 OperatorBase* CreateOperator(const OperatorDef& operator_def, Workspace* ws);

@@ -67,7 +67,7 @@ def CreateOperator(operator_type):
   registered with Caffe2.
   """
   def ReallyCreate(inputs, outputs, name='', device_option=None,
-                   arg=None, **kwargs):
+                   arg=None, engine=None, **kwargs):
     operator = caffe2_pb2.OperatorDef()
     operator.type = operator_type
     operator.name = name
@@ -85,15 +85,17 @@ def CreateOperator(operator_type):
                        % (str(outputs), type(outputs)))
     operator.input.extend([str(i) for i in inputs])
     operator.output.extend([str(o) for o in outputs])
-    if device_option:
+    if device_option is not None:
       operator.device_option.CopyFrom(device_option)
+    if engine is not None:
+      operator.engine = engine
     # random seed is defined in the device option, so we need to do special
     # care.
     if 'random_seed' in kwargs:
       operator.device_option.random_seed = kwargs['random_seed']
       del kwargs['random_seed']
     # Add given arguments that do not need parsing
-    if arg:
+    if arg is not None:
       operator.arg.extend(arg)
     # Add all other arguments
     for key, value in kwargs.iteritems():
@@ -127,6 +129,9 @@ class GradientRegistry(object):
     if op.HasField("device_option"):
       for gradient_op in gradient_ops:
         gradient_op.device_option.CopyFrom(op.device_option)
+    if op.HasField("engine"):
+      for gradient_op in gradient_ops:
+        gradient_op.engine = op.engine
     return gradient_ops
 
 
@@ -256,12 +261,15 @@ class Net(object):
       self._net.op.extend(additional_sum_ops)
     return
 
-  def RunAllOnGPU(self, gpu_id=0):
+  def RunAllOnGPU(self, gpu_id=0, use_cudnn=False):
     """A convenient function to run everything on the GPU."""
     device_option = caffe2_pb2.DeviceOption()
     device_option.device_type = caffe2_pb2.CUDA
     device_option.cuda_gpu_id = gpu_id
     self._net.device_option.CopyFrom(device_option)
+    if use_cudnn:
+      for op in self._net.op:
+        op.engine = "CUDNN"
 
   def __getattr__(self, op_type):
     if not IsOperator(op_type):

@@ -2,6 +2,7 @@
 #define CAFFE2_CORE_BLOB_SERIALIZATION_H_
 
 #include "caffe2/core/blob.h"
+#include "caffe2/core/tensor.h"
 #include "caffe2/core/typeid.h"
 
 namespace caffe2 {

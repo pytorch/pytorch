@@ -38,7 +38,6 @@ message Argument {
 enum DeviceType {
   CPU = 0;     // In default, we will use CPU.
   CUDA = 1;    // CUDA, with custom kernels.
-  CUDNN = 2;   // CUDA, with CUDNN implementations.
 }
 
 message DeviceOption {
@@ -60,6 +59,10 @@ message OperatorDef {
   repeated Argument arg = 5;
 
   optional DeviceOption device_option = 6;
+
+  // Optionally, one can specify an engine when there are multiple
+  // implementations available simultaneously for one device type.
+  optional string engine = 7;
 
   // For most networks, don't do extensions. Instead, pack the parameters into
   // the three categories listed above, and document them clearly in the source

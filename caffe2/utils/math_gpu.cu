@@ -128,8 +128,8 @@ void AddToCol<float, CUDAContext>(
 template <>
 void Gemm<float, CUDAContext>(
     const CBLAS_TRANSPOSE TransA, const CBLAS_TRANSPOSE TransB,
-    const int M, const int N, const int K, const float* alpha, const float* A,
-    const float* B, const float* beta, float* C, CUDAContext* context) {
+    const int M, const int N, const int K, const float alpha, const float* A,
+    const float* B, const float beta, float* C, CUDAContext* context) {
   // Note that cublas follows fortran order, so the order is different from
   // the cblas convention.
   int lda = (TransA == CblasNoTrans) ? K : M;
@@ -139,19 +139,19 @@ void Gemm<float, CUDAContext>(
   cublasOperation_t cuTransB =
       (TransB == CblasNoTrans) ? CUBLAS_OP_N : CUBLAS_OP_T;
   CUBLAS_CHECK(cublasSgemm(context->cublas_handle(), cuTransB, cuTransA,
-      N, M, K, alpha, B, ldb, A, lda, beta, C, N));
+      N, M, K, &alpha, B, ldb, A, lda, &beta, C, N));
 }
 
 
 template <>
 void Gemv<float, CUDAContext>(
-    const CBLAS_TRANSPOSE TransA, const int M, const int N, const float* alpha,
-    const float* A, const float* x, const float* beta, float* y,
+    const CBLAS_TRANSPOSE TransA, const int M, const int N, const float alpha,
+    const float* A, const float* x, const float beta, float* y,
     CUDAContext* context) {
   cublasOperation_t cuTransA =
       (TransA == CblasNoTrans) ? CUBLAS_OP_T : CUBLAS_OP_N;
-  CUBLAS_CHECK(cublasSgemv(context->cublas_handle(), cuTransA, N, M, alpha,
-      A, N, x, 1, beta, y, 1));
+  CUBLAS_CHECK(cublasSgemv(context->cublas_handle(), cuTransA, N, M, &alpha,
+      A, N, x, 1, &beta, y, 1));
 }
 
 
@@ -227,14 +227,18 @@ template<>
 void Dot<float, CUDAContext>(
     const int n, const float* a, const float* b, float* y,
     CUDAContext* context) {
-  CUBLAS_CHECK(cublasSdot(context->cublas_handle(), n, a, 1, b, 1, y));
+  float result;
+  CUBLAS_CHECK(cublasSdot(context->cublas_handle(), n, a, 1, b, 1, &result));
+  context->Copy<float, CPUContext, CUDAContext>(1, &result, y);
 }
 
 template<>
 void Dot<double, CUDAContext>(
     const int n, const double* a, const double* b, double* y,
     CUDAContext* context) {
+  double result;
   CUBLAS_CHECK(cublasDdot(context->cublas_handle(), n, a, 1, b, 1, y));
+  context->Copy<double, CPUContext, CUDAContext>(1, &result, y);
 }
 
 /*
@@ -276,6 +280,14 @@ void Select<float, CUDAContext>(
 namespace {
 template <typename T>
 __global__ void ScaleKernel(
+    const int n, const T alpha, const T* x, T* y) {
+  CUDA_1D_KERNEL_LOOP(i, n) {
+    y[i] = x[i] * alpha;
+  }
+}
+
+template <typename T>
+__global__ void ScaleKernelDeviceAlpha(
     const int n, const T* alpha, const T* x, T* y) {
   CUDA_1D_KERNEL_LOOP(i, n) {
     y[i] = x[i] * (*alpha);
@@ -285,7 +297,7 @@ __global__ void ScaleKernel(
 
 template <>
 void Scale<float, CUDAContext>(
-    const int n, const float* alpha, const float *x, float* y,
+    const int n, const float alpha, const float *x, float* y,
     CUDAContext* context) {
   ScaleKernel<float><<<CAFFE_GET_BLOCKS(n), CAFFE_CUDA_NUM_THREADS,
                        0, context->cuda_stream()>>>(n, alpha, x, y);
@@ -293,38 +305,82 @@ void Scale<float, CUDAContext>(
 
 template <>
 void Scale<double, CUDAContext>(
+    const int n, const double alpha, const double *x, double* y,
+    CUDAContext* context) {
+  ScaleKernel<double><<<
+      CAFFE_GET_BLOCKS(n), CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
+          n, alpha, x, y);
+}
+
+template <>
+void Scale<float, CUDAContext>(
+    const int n, const float* alpha, const float *x, float* y,
+    CUDAContext* context) {
+  ScaleKernelDeviceAlpha<float><<<
+      CAFFE_GET_BLOCKS(n), CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
+          n, alpha, x, y);
+}
+
+template <>
+void Scale<double, CUDAContext>(
     const int n, const double* alpha, const double *x, double* y,
     CUDAContext* context) {
-  ScaleKernel<double><<<CAFFE_GET_BLOCKS(n), CAFFE_CUDA_NUM_THREADS,
+  ScaleKernelDeviceAlpha<double><<<CAFFE_GET_BLOCKS(n), CAFFE_CUDA_NUM_THREADS,
                        0, context->cuda_stream()>>>(n, alpha, x, y);
 }
 
 template <>
-void Axpy<float, CUDAContext>(const int N, const float* alpha, const float* X,
+void Axpy<float, CUDAContext>(const int N, const float alpha, const float* X,
                               float* Y, CUDAContext* context) {
-  CUBLAS_CHECK(cublasSaxpy(context->cublas_handle(), N, alpha, X, 1, Y, 1));
+  CUBLAS_CHECK(cublasSaxpy(context->cublas_handle(), N, &alpha, X, 1, Y, 1));
 }
 
 template <>
 void Axpy<double, CUDAContext>(
-    const int N, const double* alpha, const double* X,
+    const int N, const double alpha, const double* X,
     double* Y, CUDAContext* context) {
-  CUBLAS_CHECK(cublasDaxpy(context->cublas_handle(), N, alpha, X, 1, Y, 1));
+  CUBLAS_CHECK(cublasDaxpy(context->cublas_handle(), N, &alpha, X, 1, Y, 1));
 }
 
 namespace {
 template <typename T>
-__global__ void AxpbyKernel(const int n, const T* a, const T* x,
-                             const T* b, T* y) {
+__global__ void AxpyKernel(const int n, const T* a, const T* x, T* y) {
   CUDA_1D_KERNEL_LOOP(index, n) {
-    y[index] = x[index] * (*a) + y[index] * (*b);
+    y[index] += x[index] * (*a);
+  }
+}
+}  // namespace
+
+template <>
+void Axpy<float, CUDAContext>(
+    const int n, const float* alpha, const float* X,
+    float* Y, CUDAContext* context) {
+  AxpyKernel<float><<<CAFFE_GET_BLOCKS(n), CAFFE_CUDA_NUM_THREADS,
+                       0, context->cuda_stream()>>>(n, alpha, X, Y);
+}
+
+template <>
+void Axpy<double, CUDAContext>(
+    const int n, const double* alpha, const double* X,
+    double* Y, CUDAContext* context) {
+  AxpyKernel<double><<<CAFFE_GET_BLOCKS(n), CAFFE_CUDA_NUM_THREADS,
+                       0, context->cuda_stream()>>>(n, alpha, X, Y);
+}
+
+
+namespace {
+template <typename T>
+__global__ void AxpbyKernel(const int n, const T a, const T* x,
+                             const T b, T* y) {
+  CUDA_1D_KERNEL_LOOP(index, n) {
+    y[index] = x[index] * a + y[index] * b;
   }
 }
 }  // namespace
 
 template <>
 void Axpby<float, CUDAContext>(
-    const int n, const float* a, const float* x, const float* b, float* y,
+    const int n, const float a, const float* x, const float b, float* y,
     CUDAContext* context) {
   AxpbyKernel<float><<<CAFFE_GET_BLOCKS(n), CAFFE_CUDA_NUM_THREADS,
                        0, context->cuda_stream()>>>(n, a, x, b, y);
@@ -332,7 +388,7 @@ void Axpby<float, CUDAContext>(
 
 template <>
 void Axpby<double, CUDAContext>(
-    const int n, const double* a, const double* x, const double* b, double* y,
+    const int n, const double a, const double* x, const double b, double* y,
     CUDAContext* context) {
   AxpbyKernel<double><<<CAFFE_GET_BLOCKS(n), CAFFE_CUDA_NUM_THREADS,
                         0, context->cuda_stream()>>>(n, a, x, b, y);

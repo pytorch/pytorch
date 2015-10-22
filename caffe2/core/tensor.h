@@ -261,13 +261,13 @@ class Tensor {
   /**
    * Return the number of bytes each item takes in the tensor.
    */
-  inline int itemsize() const { return meta_.itemsize(); }
+  inline size_t itemsize() const { return meta_.itemsize(); }
   /**
    * Returns the total number of bytes of the storage.
    *
    * This is equivalent to calling size() * itemsize().
    */
-  inline int nbytes() const { return size_ * meta_.itemsize(); }
+  inline size_t nbytes() const { return size_ * meta_.itemsize(); }
   /**
    * Returns the dimensions of the tensor as a vector.
    */
@@ -300,6 +300,10 @@ class Tensor {
 
   DISABLE_COPY_AND_ASSIGN(Tensor);
 };
+
+// For simplicity, we will typedef Tensor<CPUContext> to TensorCPU.
+template <class Context> class Tensor;
+typedef Tensor<CPUContext> TensorCPU;
 
 }  // namespace caffe2
 #endif  // CAFFE2_CORE_TENSOR_H_
