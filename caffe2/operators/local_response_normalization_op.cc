@@ -35,7 +35,7 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
     // Create the first channel scale
     for (int c = 0; c < size_; ++c) {
       math::Axpy<float, CPUContext>(
-          H * W, &alpha_over_size, padded_square_data + c * H * W,
+          H * W, alpha_over_size, padded_square_data + c * H * W,
           scale_data + image_size * n, &device_context_);
     }
     for (int c = 1; c < C; ++c) {
@@ -45,13 +45,12 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
           H * W, this_scale_slice - H * W, this_scale_slice);
       // add head
       math::Axpy<float, CPUContext>(
-          H * W, &alpha_over_size, padded_square_data + (c + size_ - 1) * H * W,
+          H * W, alpha_over_size, padded_square_data + (c + size_ - 1) * H * W,
           this_scale_slice, &device_context_);
       // subtract tail
-      // negative_aos is in order to cope with math::Axpy's requirement.
       const float negative_aos = -alpha_over_size;
       math::Axpy<float, CPUContext>(
-          H * W, &negative_aos, padded_square_data + (c - 1) * H * W,
+          H * W, -alpha_over_size, padded_square_data + (c - 1) * H * W,
           this_scale_slice, &device_context_);
     }
   }
@@ -159,8 +158,7 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
     math::Set<float, CPUContext>(accum_ratio.size(), 0., accum_ratio_data,
                                  &device_context_);
     for (int c = 0; c < size_ - 1; ++c) {
-      static const float kOne = 1.;
-      math::Axpy<float, CPUContext>(H * W, &(kOne),
+      math::Axpy<float, CPUContext>(H * W, 1,
                                     padded_ratio_data + c * H * W,
                                     accum_ratio_data, &device_context_);
     }

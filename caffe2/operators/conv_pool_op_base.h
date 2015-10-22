@@ -39,7 +39,7 @@ class ConvPoolOpBase : public Operator<Context> {
         stride_w_(OperatorBase::GetSingleArgument<int>(
             "stride_w", OperatorBase::GetSingleArgument<int>("stride", 1))),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<string>("order", "NHWC"))) {
+            OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
     CAFFE_CHECK_GT(kernel_h_, 0);
     CAFFE_CHECK_GT(kernel_w_, 0);
     // For the padding, they should either be the legacy padding strategy

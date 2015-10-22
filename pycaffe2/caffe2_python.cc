@@ -158,10 +158,6 @@ PyObject* RegisteredOperators(PyObject* self, PyObject* args) {
   for (const auto& name : caffe2::CUDAOperatorRegistry()->Keys()) {
     all_keys.insert(name);
   }
-  // CUDNN operators
-  for (const auto& name : caffe2::CUDNNOperatorRegistry()->Keys()) {
-    all_keys.insert(name);
-  }
   // Now, add it to the list
   PyObject* list = PyList_New(all_keys.size());
   int idx = 0;

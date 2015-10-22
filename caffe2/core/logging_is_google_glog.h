@@ -9,12 +9,12 @@ static_assert(false, "If you use CAFFE2_USE_GOOGLE_GLOG, "
                      "you should not specify CAFFE2_THROW_ON_FATAL.");
 #endif  // CAFFE2_THROW_ON_FATAL
 
-static_assert(CAFFE2_LOG_THRESHOLD <= FATAL,
+static_assert(CAFFE2_LOG_THRESHOLD <= google::FATAL,
               "CAFFE2_LOG_THRESHOLD should at most be FATAL.");
 
 // Re-route everything to glog's corresponding macros.
 #define LOG_ENABLE_COMPILE_TIME_THRESHOLD(n) \
-  if (n >= CAFFE2_LOG_THRESHOLD) LOG(n)
+  if (google::n >= CAFFE2_LOG_THRESHOLD) LOG(n)
 #define CAFFE_VLOG_IS_ON(n) ((-n) >= CAFFE2_LOG_THRESHOLD)
 #define CAFFE_LOG_INFO LOG_ENABLE_COMPILE_TIME_THRESHOLD(INFO)
 #define CAFFE_LOG_WARNING LOG_ENABLE_COMPILE_TIME_THRESHOLD(WARNING)

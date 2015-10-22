@@ -22,7 +22,7 @@ DECAY = init_net.ConstantFill([], "DECAY", shape=[1], value=0.999)
 train_net = core.Net("train")
 data, label = train_net.TensorProtosDBInput(
     [], ["data", "label"], batch_size=64,
-    db="gen/data/mnist/mnist-train-minidb", db_type="minidb")
+    db="gen/data/mnist/mnist-train-nhwc-minidb", db_type="minidb")
 
 pool1a, _ = (data.Conv([filter1a, bias1a], kernel=5, pad=0, stride=1, order="NHWC")
                 .MaxPool(outputs=2, kernel=2, stride=2, order="NHWC"))

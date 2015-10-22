@@ -12,9 +12,7 @@ class ConvOp final : public ConvPoolOpBase<Context> {
  public:
   USE_CONV_POOL_BASE_FUNCTIONS;
   ConvOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<Context>(operator_def, ws),
-        kOne(static_cast<T>(1), &device_context_),
-        kZero(static_cast<T>(0), &device_context_) {}
+      : ConvPoolOpBase<Context>(operator_def, ws) {}
   ~ConvOp() {}
 
   bool RunOnDeviceWithOrderNCHW() override;
@@ -23,8 +21,6 @@ class ConvOp final : public ConvPoolOpBase<Context> {
  private:
   Tensor<Context> col_buffer_;
   Tensor<Context> bias_multiplier_;
-  Tensor<Context> kOne;
-  Tensor<Context> kZero;
   // Input: X, W, b
   // Output: Y
   INPUT_TAGS(INPUT, FILTER, BIAS);
@@ -37,9 +33,7 @@ class ConvGradientOp final : public ConvPoolOpBase<Context> {
  public:
   USE_CONV_POOL_BASE_FUNCTIONS;
   ConvGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<Context>(operator_def, ws),
-        kOne(static_cast<T>(1), &device_context_),
-        kZero(static_cast<T>(0), &device_context_) {}
+      : ConvPoolOpBase<Context>(operator_def, ws) {}
   ~ConvGradientOp() {}
 
   bool RunOnDeviceWithOrderNCHW() override;
@@ -48,8 +42,6 @@ class ConvGradientOp final : public ConvPoolOpBase<Context> {
  private:
   Tensor<Context> col_buffer_;
   Tensor<Context> bias_multiplier_;
-  Tensor<Context> kOne;
-  Tensor<Context> kZero;
   // input: X, W, dY
   // output: dW, db, and optionally dX
   INPUT_TAGS(INPUT, FILTER, OUTPUT_GRAD);

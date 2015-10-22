@@ -57,14 +57,14 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     // Weight term
     math::Gemm<T, Context>(
         CblasNoTrans, CblasNoTrans, M, output_image_size, kernel_dim,
-        kOne.template data<T>(), filter.template data<T>(), col_buffer_data,
-        kZero.template data<T>(), Ydata,
+        1, filter.template data<T>(), col_buffer_data,
+        0, Ydata,
         &device_context_);
     // Bias term
     math::Gemm<T, Context>(
-        CblasNoTrans, CblasNoTrans, M, output_image_size, 1, kOne.template data<T>(),
+        CblasNoTrans, CblasNoTrans, M, output_image_size, 1, 1,
         bias.template data<T>(), bias_multiplier_.template data<T>(),
-        kOne.template data<T>(), Ydata,
+        1, Ydata,
         &device_context_);
     Xdata += input_offset;
     Ydata += output_offset;
@@ -117,11 +117,11 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
           bias_multiplier_.template mutable_data<T>(), &device_context_);
     }
     math::Gemm<T, Context>(
-        CblasNoTrans, CblasTrans, N * H * W, M, C, kOne.template data<T>(), Xdata,
-        filter.template data<T>(), kZero.template data<T>(), Ydata, &device_context_);
+        CblasNoTrans, CblasTrans, N * H * W, M, C, 1, Xdata,
+        filter.template data<T>(), 0, Ydata, &device_context_);
     math::Gemm<T, Context>(
-        CblasNoTrans, CblasNoTrans, N * H * W, M, 1, kOne.template data<T>(),
-        bias_multiplier_.template data<T>(), bias.template data<T>(), kOne.template data<T>(), Ydata,
+        CblasNoTrans, CblasNoTrans, N * H * W, M, 1, 1,
+        bias_multiplier_.template data<T>(), bias.template data<T>(), 1, Ydata,
         &device_context_);
   } else {
     if (bias_multiplier_.size() != output_image_size) {
@@ -144,12 +144,12 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
       // Wait, is this right....?
       math::Gemm<T, Context>(
           CblasNoTrans, CblasTrans, output_image_size, M, kernel_dim,
-          kOne.template data<T>(), col_buffer_data, filter.template data<T>(), kZero.template data<T>(), Ydata,
+          1, col_buffer_data, filter.template data<T>(), 0, Ydata,
           &device_context_);
       // Bias term
       math::Gemm<T, Context>(
-          CblasNoTrans, CblasNoTrans, output_image_size, M, 1, kOne.template data<T>(),
-          bias_multiplier_.template data<T>(), bias.template data<T>(), kOne.template data<T>(), Ydata,
+          CblasNoTrans, CblasNoTrans, output_image_size, M, 1, 1,
+          bias_multiplier_.template data<T>(), bias.template data<T>(), 1, Ydata,
           &device_context_);
       Xdata += input_offset;
       Ydata += output_offset;
@@ -213,13 +213,13 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     // Gradient with respect to filter.
     math::Gemm<T, Context>(
         CblasNoTrans, CblasTrans, M, kernel_dim, output_image_size,
-        kOne.template data<T>(), dYdata + output_offset * image_id, col_buffer_data,
-        kOne.template data<T>(), dfilter_data, &device_context_);
+        1, dYdata + output_offset * image_id, col_buffer_data,
+        1, dfilter_data, &device_context_);
     // Gradient with respect to bias
     math::Gemv<T, Context>(
-        CblasNoTrans, M, output_image_size, kOne.template data<T>(),
+        CblasNoTrans, M, output_image_size, 1,
         dYdata + output_offset * image_id, bias_multiplier_.template data<T>(),
-        kOne.template data<T>(), dbias_data, &device_context_);
+        1, dbias_data, &device_context_);
     Xdata += input_offset;
   }
   if (OutputSize() == 3) {
@@ -231,8 +231,8 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
       // Compute gradient into col_buffer.
       math::Gemm<T, Context>(
           CblasTrans, CblasNoTrans, kernel_dim, output_image_size, M,
-          kOne.template data<T>(), filter_data, dYdata + output_offset * image_id,
-          kZero.template data<T>(), col_buffer_data, &device_context_);
+          1, filter_data, dYdata + output_offset * image_id,
+          0, col_buffer_data, &device_context_);
       math::Col2im<T, Context, StorageOrder::NCHW>(
           col_buffer_data, C, H, W, kernel_h_, kernel_w_,
           pad_t_, pad_l_, pad_b_, pad_r_,
@@ -298,13 +298,13 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
     // Gradient with respect to filter.
     math::Gemm<T, Context>(
         CblasTrans, CblasNoTrans, M, kernel_dim, output_image_size,
-        kOne.template data<T>(), dYdata + output_offset * image_id, col_buffer_data,
-        kOne.template data<T>(), dfilter_data, &device_context_);
+        1, dYdata + output_offset * image_id, col_buffer_data,
+        1, dfilter_data, &device_context_);
     // Gradient with respect to bias
     math::Gemv<T, Context>(
-        CblasTrans, output_image_size, M, kOne.template data<T>(),
+        CblasTrans, output_image_size, M, 1,
         dYdata + output_offset * image_id, bias_multiplier_.template data<T>(),
-        kOne.template data<T>(), dbias_data, &device_context_);
+        1, dbias_data, &device_context_);
     Xdata += input_offset;
   }
   if (OutputSize() == 3) {
@@ -316,8 +316,8 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
       // Compute gradient into col_buffer.
       math::Gemm<T, Context>(
           CblasNoTrans, CblasNoTrans, output_image_size, kernel_dim, M,
-          kOne.template data<T>(), dYdata + output_offset * image_id, filter_data,
-          kZero.template data<T>(), col_buffer_data, &device_context_);
+          1, dYdata + output_offset * image_id, filter_data,
+          0, col_buffer_data, &device_context_);
       math::Col2im<T, Context, StorageOrder::NHWC>(
           col_buffer_data, C, H, W, kernel_h_, kernel_w_,
           pad_t_, pad_l_, pad_b_, pad_r_,

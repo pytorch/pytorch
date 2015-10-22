@@ -55,10 +55,8 @@ class SquaredL2DistanceGradientOp final
           dX->template mutable_data<T>() + i * D, &device_context_);
     }
     // The gradient of the other side is basically the negative.
-    const Tensor<Context> gNegativeOne(
-        static_cast<T>(-1), &device_context_);
     math::Scale<T, Context>(
-        X.size(), gNegativeOne.template data<T>(), dX->template data<T>(),
+        X.size(), -1, dX->template data<T>(),
         dY->template mutable_data<T>(),
         &device_context_);
     return true;

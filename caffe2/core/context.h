@@ -83,10 +83,6 @@ inline void CPUContext::Memcpy<CPUContext, CPUContext>(
   memcpy(dst, src, nbytes);
 }
 
-// For simplicity, we will typedef Tensor<CPUContext> to TensorCPU.
-template <class Context> class Tensor;
-typedef Tensor<CPUContext> TensorCPU;
-
 }  // namespace caffe2
 
 #endif  // CAFFE2_CORE_CONTEXT_H_

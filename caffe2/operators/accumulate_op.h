@@ -17,10 +17,8 @@ class AccumulateOp final : public Operator<Context> {
  public:
   AccumulateOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        kOne(static_cast<T>(1), &device_context_),
         gamma_(static_cast<T>(
-            OperatorBase::template GetSingleArgument<float>(
-                "gamma", 1.0)), &device_context_) {}
+            OperatorBase::template GetSingleArgument<float>("gamma", 1.0))) {}
   USE_OPERATOR_BASE_FUNCTIONS;
 
   bool RunOnDevice() override {
@@ -33,16 +31,15 @@ class AccumulateOp final : public Operator<Context> {
           output->size(), 0, output->template mutable_data<T>(), &device_context_);
     }
     math::Axpby<T, Context>(
-        input.size(), kOne.template data<T>(),
+        input.size(), static_cast<T>(1),
         input.template data<T>(),
-        gamma_.template data<T>(),
+        gamma_,
         output->template mutable_data<T>(), &device_context_);
     return true;
   }
 
  protected:
-  Tensor<Context> kOne;
-  Tensor<Context> gamma_;
+  T gamma_;
   INPUT_OUTPUT_STATS(1, 1, 1, 1);
   DISABLE_COPY_AND_ASSIGN(AccumulateOp);
 };

@@ -13,9 +13,7 @@ class FullyConnectedOp final : public Operator<Context> {
  public:
   USE_OPERATOR_BASE_FUNCTIONS;
   FullyConnectedOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
-        kOne(static_cast<T>(1), &device_context_),
-        kZero(static_cast<T>(0), &device_context_) {}
+      : Operator<Context>(operator_def, ws) {}
   ~FullyConnectedOp() {}
 
   bool RunOnDevice() {
@@ -41,8 +39,8 @@ class FullyConnectedOp final : public Operator<Context> {
     Y->Reshape(vector<int>{M, N});
     // W * x
     math::Gemm<T, Context>(
-        CblasNoTrans, CblasTrans, M, N, K, kOne.template data<T>(), X.template data<T>(),
-        W.template data<T>(), kZero.template data<T>(), Y->template mutable_data<T>(), &device_context_);
+        CblasNoTrans, CblasTrans, M, N, K, 1, X.template data<T>(),
+        W.template data<T>(), 0, Y->template mutable_data<T>(), &device_context_);
     // Add bias term
     if (bias_multiplier_.size() != M) {
       // If the helper bias multiplier is not M, reshape and fill it with one.
@@ -52,16 +50,14 @@ class FullyConnectedOp final : public Operator<Context> {
           &device_context_);
     }
     math::Gemm<T, Context>(
-        CblasNoTrans, CblasNoTrans, M, N, 1, kOne.template data<T>(),
-        bias_multiplier_.template data<T>(), b.template data<T>(), kOne.template data<T>(),
+        CblasNoTrans, CblasNoTrans, M, N, 1, 1,
+        bias_multiplier_.template data<T>(), b.template data<T>(), 1,
         Y->template mutable_data<T>(), &device_context_);
     return true;
   }
 
  protected:
   Tensor<Context> bias_multiplier_;
-  Tensor<Context> kOne;
-  Tensor<Context> kZero;
   // We force this Op to have 3 inputs, since that is almost always the case in
   // deep networks.
   INPUT_OUTPUT_STATS(3, 3, 1, 1);
@@ -73,9 +69,7 @@ class FullyConnectedGradientOp : public Operator<Context> {
  public:
   USE_OPERATOR_BASE_FUNCTIONS;
   FullyConnectedGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
-        kOne(static_cast<T>(1), &device_context_),
-        kZero(static_cast<T>(0), &device_context_) {}
+      : Operator<Context>(operator_def, ws) {}
   ~FullyConnectedGradientOp() {}
 
   bool RunOnDevice() {
@@ -104,9 +98,9 @@ class FullyConnectedGradientOp : public Operator<Context> {
 
     // Compute dW
     math::Gemm<T, Context>(
-        CblasTrans, CblasNoTrans, N, K, M, kOne.template data<T>(),
+        CblasTrans, CblasNoTrans, N, K, M, 1,
         dY.template data<T>(), X.template data<T>(),
-        kZero.template data<T>(), dW->template mutable_data<T>(),
+        0, dW->template mutable_data<T>(),
         &device_context_);
     if (bias_multiplier_.size() != M) {
       // If the helper bias multiplier is not M, reshape and fill it with one.
@@ -118,8 +112,8 @@ class FullyConnectedGradientOp : public Operator<Context> {
     }
     // Compute dB
     math::Gemv<T, Context>(
-        CblasTrans, M, N, kOne.template data<T>(), dY.template data<T>(),
-        bias_multiplier_.template data<T>(), kZero.template data<T>(),
+        CblasTrans, M, N, 1, dY.template data<T>(),
+        bias_multiplier_.template data<T>(), 0,
         db->template mutable_data<T>(),
         &device_context_);
     // Compute dX if necessary.
@@ -127,9 +121,9 @@ class FullyConnectedGradientOp : public Operator<Context> {
       auto* dX = Output(2);
       dX->ReshapeLike(X);
       math::Gemm<T, Context>(
-          CblasNoTrans, CblasNoTrans, M, K, N, kOne.template data<T>(),
+          CblasNoTrans, CblasNoTrans, M, K, N, 1,
           dY.template data<T>(), W.template data<T>(),
-          kZero.template data<T>(), dX->template mutable_data<T>(),
+          0, dX->template mutable_data<T>(),
           &device_context_);
     }
 
@@ -138,8 +132,6 @@ class FullyConnectedGradientOp : public Operator<Context> {
 
  protected:
   Tensor<Context> bias_multiplier_;
-  Tensor<Context> kOne;
-  Tensor<Context> kZero;
 
   // input: X, W, b, dY
   // output: dW, db, and optionally dX.

@@ -18,7 +18,7 @@ train_net = core.Net("train")
 it = train_net.Iter([], ["iter"])
 data, label = train_net.TensorProtosDBInput(
     [], ["data", "label"], batch_size=64,
-    db="gen/data/mnist/mnist-train-minidb", db_type="minidb")
+    db="gen/data/mnist/mnist-train-nchw-minidb", db_type="minidb")
 softmax = data.Flatten([], "data_flatten").FC([W, B], "pred").Softmax([], "softmax")
 xent = softmax.LabelCrossEntropy([label], "xent")
 loss, xent_grad = xent.AveragedLoss([], ["loss", xent.Grad()])

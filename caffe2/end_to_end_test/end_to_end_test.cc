@@ -1,3 +1,5 @@
+#include <iostream>
+
 #include "caffe2/core/context.h"
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/core/operator.h"
@@ -15,19 +17,19 @@ const char kMNISTLinearClassificationPath[] =
     "/data/mnist/linear_classifier_plan.pbtxt";
 const char kMNISTTwoLayerReluClassificationPath[] =
     "/data/mnist/mnist_relu_network.pbtxt";
-const char kMNISTLeNetClassificationPath[] =
-    "/data/mnist/mnist_lenet.pbtxt";
-const char kMNISTLeNetClassificationGPUPath[] =
-    "/data/mnist/mnist_lenet_gpu.pbtxt";
-const char kMNISTLeNetNHWCClassificationPath[] =
-    "/data/mnist/mnist_lenet_nhwc.pbtxt";
-const char kMNISTLeNetNHWCClassificationGPUPath[] =
-    "/data/mnist/mnist_lenet_nhwc_gpu.pbtxt";
-const char kMNISTLeNetGroupConvClassificationPath[] =
-    "/data/mnist/mnist_lenet_group_convolution.pbtxt";
-const char kMNISTLeNetGroupConvNHWCClassificationPath[] =
-    "/data/mnist/mnist_lenet_group_convolution_nhwc.pbtxt";
 
+const vector<string> kMNISTLeNetVariants {
+  "/data/mnist/mnist_lenet_nchw.pbtxt",
+  "/data/mnist/mnist_lenet_nhwc.pbtxt",
+  "/data/mnist/mnist_lenet_group_convolution_nchw.pbtxt",
+  "/data/mnist/mnist_lenet_group_convolution_nhwc.pbtxt",
+};
+
+const vector<string> kMNISTLeNetVariantsGPU {
+  "/data/mnist/mnist_lenet_nchw_gpu.pbtxt",
+  "/data/mnist/mnist_lenet_nhwc_gpu.pbtxt",
+  "/data/mnist/mnist_lenet_nchw_cudnn.pbtxt",
+};
 
 template <typename T, class Context>
 void ExpectTensorEquivalence(const Workspace& ws, const string& name_a,
@@ -88,100 +90,41 @@ TEST(MNISTTwoLayerReluClassificationTest, TestRunPlan) {
 }
 
 TEST(MNISTLeNetClassificationTest, LARGE_TestRunPlan) {
-  PlanDef plan_def;
-  CAFFE_CHECK(ReadProtoFromFile(
-      FLAGS_caffe_test_root + kMNISTLeNetClassificationPath, &plan_def));
-  Workspace workspace;
-  workspace.RunPlan(plan_def);
-  const Blob* accuracy = workspace.GetBlob("accuracy");
-  EXPECT_TRUE(accuracy != nullptr);
-  EXPECT_TRUE((accuracy->IsType<TensorCPU>()));
-  auto& accuracy_tensor = accuracy->Get<TensorCPU>();
-  EXPECT_EQ(accuracy_tensor.size(), 1);
-  // Accuracy should be above 90%.
-  EXPECT_GT(accuracy_tensor.data<float>()[0], 0.90);
+  for (const string& path : kMNISTLeNetVariants) {
+    CAFFE_LOG_ERROR << "Testing " << path;
+    PlanDef plan_def;
+    CAFFE_CHECK(ReadProtoFromFile(
+        FLAGS_caffe_test_root + path, &plan_def));
+    Workspace workspace;
+    workspace.RunPlan(plan_def);
+    const Blob* accuracy = workspace.GetBlob("accuracy");
+    EXPECT_TRUE(accuracy != nullptr);
+    EXPECT_TRUE((accuracy->IsType<TensorCPU>()));
+    auto& accuracy_tensor = accuracy->Get<TensorCPU>();
+    EXPECT_EQ(accuracy_tensor.size(), 1);
+    // Accuracy should be above 90%.
+    EXPECT_GT(accuracy_tensor.data<float>()[0], 0.90);
+  }
 }
 
 TEST(MNISTLeNetClassificationTestGPU, LARGE_TestRunPlan) {
-  PlanDef plan_def;
-  CAFFE_CHECK(ReadProtoFromFile(
-      FLAGS_caffe_test_root + kMNISTLeNetClassificationGPUPath, &plan_def));
-  Workspace workspace;
-  workspace.RunPlan(plan_def);
-  const Blob* accuracy = workspace.GetBlob("accuracy");
-  EXPECT_TRUE(accuracy != nullptr);
-  EXPECT_TRUE((accuracy->IsType<TensorCUDA>()));
-  CPUContext context;
-  TensorCPU accuracy_tensor(
-      accuracy->Get<TensorCUDA>(), &context);
-  EXPECT_EQ(accuracy_tensor.size(), 1);
-  // Accuracy should be above 90%.
-  EXPECT_GT(accuracy_tensor.data<float>()[0], 0.90);
-}
-
-
-TEST(MNISTLeNetNHWCClassificationTest, LARGE_TestRunPlan) {
-  PlanDef plan_def;
-  CAFFE_CHECK(ReadProtoFromFile(
-      FLAGS_caffe_test_root + kMNISTLeNetNHWCClassificationPath, &plan_def));
-  Workspace workspace;
-  workspace.RunPlan(plan_def);
-  const Blob* accuracy = workspace.GetBlob("accuracy");
-  EXPECT_TRUE(accuracy != nullptr);
-  EXPECT_TRUE((accuracy->IsType<TensorCPU>()));
-  auto& accuracy_tensor = accuracy->Get<TensorCPU>();
-  EXPECT_EQ(accuracy_tensor.size(), 1);
-  // Accuracy should be above 90%.
-  EXPECT_GT(accuracy_tensor.data<float>()[0], 0.90);
-}
-
-TEST(MNISTLeNetNHWCClassificationGPUTest, LARGE_TestRunPlan) {
-  PlanDef plan_def;
-  CAFFE_CHECK(ReadProtoFromFile(
-      FLAGS_caffe_test_root + kMNISTLeNetNHWCClassificationGPUPath, &plan_def));
-  Workspace workspace;
-  workspace.RunPlan(plan_def);
-  const Blob* accuracy = workspace.GetBlob("accuracy");
-  EXPECT_TRUE(accuracy != nullptr);
-  EXPECT_TRUE((accuracy->IsType<TensorCUDA>()));
-  CPUContext context;
-  TensorCPU accuracy_tensor(
-      accuracy->Get<TensorCUDA>(), &context);
-  EXPECT_EQ(accuracy_tensor.size(), 1);
-  // Accuracy should be above 90%.
-  EXPECT_GT(accuracy_tensor.data<float>()[0], 0.90);
-}
-
-TEST(MNISTLeNetGroupConvolutionClassificationTest, LARGE_TestRunPlan) {
-  PlanDef plan_def;
-  CAFFE_CHECK(ReadProtoFromFile(
-      FLAGS_caffe_test_root + kMNISTLeNetGroupConvClassificationPath,
-      &plan_def));
-  Workspace workspace;
-  workspace.RunPlan(plan_def);
-  const Blob* accuracy = workspace.GetBlob("accuracy");
-  EXPECT_TRUE(accuracy != nullptr);
-  EXPECT_TRUE((accuracy->IsType<TensorCPU>()));
-  auto& accuracy_tensor = accuracy->Get<TensorCPU>();
-  EXPECT_EQ(accuracy_tensor.size(), 1);
-  // Accuracy should be above 90%.
-  EXPECT_GT(accuracy_tensor.data<float>()[0], 0.90);
-}
-
-TEST(MNISTLeNetGroupConvolutionNHWCClassificationTest, LARGE_TestRunPlan) {
-  PlanDef plan_def;
-  CAFFE_CHECK(ReadProtoFromFile(
-      FLAGS_caffe_test_root + kMNISTLeNetGroupConvNHWCClassificationPath,
-      &plan_def));
-  Workspace workspace;
-  workspace.RunPlan(plan_def);
-  const Blob* accuracy = workspace.GetBlob("accuracy");
-  EXPECT_TRUE(accuracy != nullptr);
-  EXPECT_TRUE((accuracy->IsType<TensorCPU>()));
-  auto& accuracy_tensor = accuracy->Get<TensorCPU>();
-  EXPECT_EQ(accuracy_tensor.size(), 1);
-  // Accuracy should be above 90%.
-  EXPECT_GT(accuracy_tensor.data<float>()[0], 0.90);
+  for (const string& path : kMNISTLeNetVariantsGPU) {
+    CAFFE_LOG_ERROR << "Testing " << path;
+    PlanDef plan_def;
+    CAFFE_CHECK(ReadProtoFromFile(
+        FLAGS_caffe_test_root + path, &plan_def));
+    Workspace workspace;
+    workspace.RunPlan(plan_def);
+    const Blob* accuracy = workspace.GetBlob("accuracy");
+    EXPECT_TRUE(accuracy != nullptr);
+    EXPECT_TRUE((accuracy->IsType<TensorCUDA>()));
+    CPUContext context;
+    TensorCPU accuracy_tensor(
+        accuracy->Get<TensorCUDA>(), &context);
+    EXPECT_EQ(accuracy_tensor.size(), 1);
+    // Accuracy should be above 90%.
+    EXPECT_GT(accuracy_tensor.data<float>()[0], 0.90);
+  }
 }
 
 }  // namespace caffe2

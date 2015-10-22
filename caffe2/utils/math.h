@@ -61,8 +61,8 @@ void AddToCol(const int M, const int N, const T* x, T* y,
 // limitation that the data has to be contiguous in memory.
 template <typename T, class Context>
 void Gemm(const CBLAS_TRANSPOSE TransA, const CBLAS_TRANSPOSE TransB,
-    const int M, const int N, const int K, const T* alpha, const T* A,
-    const T* B, const T* beta, T* C, Context* context);
+    const int M, const int N, const int K, const T alpha, const T* A,
+    const T* B, const T beta, T* C, Context* context);
 
 // Gemv always takes in a M*N matrix A, and depending on whether we set TransA
 // to Trans, the output is:
@@ -70,7 +70,7 @@ void Gemm(const CBLAS_TRANSPOSE TransA, const CBLAS_TRANSPOSE TransB,
 // CblasTrans:   x is an M dim vector and y is an N dim vector.
 template <typename T, class Context>
 void Gemv(const CBLAS_TRANSPOSE TransA, const int M, const int N,
-    const T* alpha, const T* A, const T* x, const T* beta,
+    const T alpha, const T* A, const T* x, const T beta,
     T* y, Context* context);
 
 template <typename T, class Context>
@@ -99,15 +99,29 @@ void Select(const int N, const int D, const T* x, const int* idx, T* y,
             Context* context);
 
 template <typename T, class Context>
+void Scale(const int N, const T alpha, const T* x, T* y,
+           Context* context);
+
+// Different from the Scale function above, if alpha is passed in
+// as a pointer, we will assume that it lives on the Context device,
+// for example on GPU.
+template <typename T, class Context>
 void Scale(const int N, const T* alpha, const T* x, T* y,
            Context* context);
 
+template <typename T, class Context>
+void Axpy(const int N, const T alpha, const T* x, T* y,
+          Context* context);
+
+// Different from the Axpy function above, if alpha is passed in
+// as a pointer, we will assume that it lives on the Context device,
+// for example on GPU.
 template <typename T, class Context>
 void Axpy(const int N, const T* alpha, const T* x, T* y,
           Context* context);
 
 template <typename T, class Context>
-void Axpby(const int N, const T* alpha, const T* x, const T* b, T* y,
+void Axpby(const int N, const T alpha, const T* x, const T b, T* y,
            Context* context);
 
 template <typename T, class Context, int order>
