@@ -377,6 +377,9 @@ void THCudaTensor_sortImplThrust(THCState* state,
   long sliceStride = THCudaTensor_stride(state, input, dim);
   long numSlices = totalElements / sliceSize;
 
+  THArgCheck(THCudaTensor_stride(state, input, dim) == 1, 1,
+             "The dimension to be sorted must be contiguous.");
+
   // Copy input to sorted, since we sort in place
   if (sorted != input) {
     THCudaTensor_copy(state, sorted, input);
