@@ -93,7 +93,7 @@ void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTenso
   for (i=0; i<n_dist; i++)
   {
     /* Get normalized cumulative distribution from prob distribution */
-    real sum = 0;
+    accreal sum = 0;
     for (j=0; j<n_categories; j++)
     {
       sum += THStorage_(get)( \
@@ -160,7 +160,7 @@ void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTenso
         /* update cumulative distribution so that sample cannot be drawn again */
         real diff;
         real new_val = 0;
-        real sum;
+        accreal sum;
 
         if (sample_idx != 0)
         {
