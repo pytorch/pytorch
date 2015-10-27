@@ -2,12 +2,12 @@
 #include "THFilePrivate.h"
 
 #define IMPLEMENT_THFILE_RW(TYPEC, TYPE)                          \
-  long THFile_read##TYPEC##Raw(THFile *self, TYPE *data, long n)  \
+  size_t THFile_read##TYPEC##Raw(THFile *self, TYPE *data, size_t n)  \
   {                                                               \
     return (*self->vtable->read##TYPEC)(self, data, n);           \
   }                                                               \
                                                                   \
-  long THFile_write##TYPEC##Raw(THFile *self, TYPE *data, long n) \
+  size_t THFile_write##TYPEC##Raw(THFile *self, TYPE *data, size_t n) \
   {                                                               \
     return (*self->vtable->write##TYPEC)(self, data, n);          \
   }
@@ -20,12 +20,12 @@ IMPLEMENT_THFILE_RW(Long, long)
 IMPLEMENT_THFILE_RW(Float, float)
 IMPLEMENT_THFILE_RW(Double, double)
 
-long THFile_readStringRaw(THFile *self, const char *format, char **str_)
+size_t THFile_readStringRaw(THFile *self, const char *format, char **str_)
 {
   return self->vtable->readString(self, format, str_);
 }
 
-long THFile_writeStringRaw(THFile *self, const char *str, long size)
+size_t THFile_writeStringRaw(THFile *self, const char *str, size_t size)
 {
   return self->vtable->writeString(self, str, size);
 }
@@ -35,7 +35,7 @@ void THFile_synchronize(THFile *self)
   self->vtable->synchronize(self);
 }
 
-void THFile_seek(THFile *self, long position)
+void THFile_seek(THFile *self, size_t position)
 {
   self->vtable->seek(self, position);
 }
@@ -45,7 +45,7 @@ void THFile_seekEnd(THFile *self)
   self->vtable->seekEnd(self);
 }
 
-long THFile_position(THFile *self)
+size_t THFile_position(THFile *self)
 {
   return self->vtable->position(self);
 }
@@ -135,12 +135,12 @@ IMPLEMENT_THFILE_SCALAR(Float, float)
 IMPLEMENT_THFILE_SCALAR(Double, double)
 
 #define IMPLEMENT_THFILE_STORAGE(TYPEC, TYPE)                           \
-  long THFile_read##TYPEC(THFile *self, TH##TYPEC##Storage *storage)    \
+  size_t THFile_read##TYPEC(THFile *self, TH##TYPEC##Storage *storage)    \
   {                                                                     \
     return THFile_read##TYPEC##Raw(self, storage->data, storage->size); \
   }                                                                     \
                                                                         \
-  long THFile_write##TYPEC(THFile *self, TH##TYPEC##Storage *storage)   \
+  size_t THFile_write##TYPEC(THFile *self, TH##TYPEC##Storage *storage)   \
   {                                                                     \
     return THFile_write##TYPEC##Raw(self, storage->data, storage->size); \
   }

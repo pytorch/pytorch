@@ -5,8 +5,8 @@ typedef struct THMemoryFile__
 {
     THFile file;
     THCharStorage *storage;
-    long size;
-    long position;
+    size_t size;
+    size_t position;
 
 } THMemoryFile;
 
@@ -40,9 +40,9 @@ static char *THMemoryFile_strnextspace(char *str_, char *c_)
   return NULL;
 }
 
-static void THMemoryFile_grow(THMemoryFile *self, long size)
+static void THMemoryFile_grow(THMemoryFile *self, size_t size)
 {
-  long missingSpace;
+  size_t missingSpace;
 
   if(size <= self->size)
     return;
@@ -94,28 +94,28 @@ static int THMemoryFile_mode(const char *mode, int *isReadable, int *isWritable)
 /********************************************************/
 
 #define READ_WRITE_METHODS(TYPE, TYPEC, ASCII_READ_ELEM, ASCII_WRITE_ELEM, INSIDE_SPACING) \
-  static long THMemoryFile_read##TYPEC(THFile *self, TYPE *data, long n) \
+  static size_t THMemoryFile_read##TYPEC(THFile *self, TYPE *data, size_t n) \
   {                                                                     \
     THMemoryFile *mfself = (THMemoryFile*)self;                         \
-    long nread = 0L;                                                    \
+    size_t nread = 0L;                                                    \
                                                                         \
     THArgCheck(mfself->storage != NULL, 1, "attempt to use a closed file");     \
     THArgCheck(mfself->file.isReadable, 1, "attempt to read in a write-only file"); \
                                                                         \
     if(mfself->file.isBinary)                                           \
     {                                                                   \
-      long nByte = sizeof(TYPE)*n;                                      \
-      long nByteRemaining = (mfself->position + nByte <= mfself->size ? nByte : mfself->size-mfself->position); \
+      size_t nByte = sizeof(TYPE)*n;                                      \
+      size_t nByteRemaining = (mfself->position + nByte <= mfself->size ? nByte : mfself->size-mfself->position); \
       nread = nByteRemaining/sizeof(TYPE);                              \
       memmove(data, mfself->storage->data+mfself->position, nread*sizeof(TYPE)); \
       mfself->position += nread*sizeof(TYPE);                           \
     }                                                                   \
     else                                                                \
     {                                                                   \
-      long i;                                                           \
+      size_t i;                                                           \
       for(i = 0; i < n; i++)                                            \
       {                                                                 \
-        long nByteRead = 0;                                             \
+        size_t nByteRead = 0;                                             \
         char spaceChar = 0;                                             \
         char *spacePtr = THMemoryFile_strnextspace(mfself->storage->data+mfself->position, &spaceChar); \
         ASCII_READ_ELEM;                                                \
@@ -146,7 +146,7 @@ static int THMemoryFile_mode(const char *mode, int *isReadable, int *isWritable)
     return nread;                                                       \
   }                                                                     \
                                                                         \
-  static long THMemoryFile_write##TYPEC(THFile *self, TYPE *data, long n) \
+  static size_t THMemoryFile_write##TYPEC(THFile *self, TYPE *data, size_t n) \
   {                                                                     \
     THMemoryFile *mfself = (THMemoryFile*)self;                         \
                                                                         \
@@ -155,7 +155,7 @@ static int THMemoryFile_mode(const char *mode, int *isReadable, int *isWritable)
                                                                         \
     if(mfself->file.isBinary)                                           \
     {                                                                   \
-      long nByte = sizeof(TYPE)*n;                                      \
+      size_t nByte = sizeof(TYPE)*n;                                      \
       THMemoryFile_grow(mfself, mfself->position+nByte);                \
       memmove(mfself->storage->data+mfself->position, data, nByte);     \
       mfself->position += nByte;                                        \
@@ -167,10 +167,10 @@ static int THMemoryFile_mode(const char *mode, int *isReadable, int *isWritable)
     }                                                                   \
     else                                                                \
     {                                                                   \
-      long i;                                                           \
+      size_t i;                                                           \
       for(i = 0; i < n; i++)                                            \
       {                                                                 \
-        long nByteWritten;                                              \
+        size_t nByteWritten;                                              \
         while (1)                                                       \
         {                                                               \
           ASCII_WRITE_ELEM;                                             \
@@ -224,7 +224,7 @@ static void THMemoryFile_synchronize(THFile *self)
   THArgCheck(mfself->storage != NULL, 1, "attempt to use a closed file");
 }
 
-static void THMemoryFile_seek(THFile *self, long position)
+static void THMemoryFile_seek(THFile *self, size_t position)
 {
   THMemoryFile *mfself = (THMemoryFile*)self;
 
@@ -249,7 +249,7 @@ static void THMemoryFile_seekEnd(THFile *self)
   mfself->position = mfself->size;
 }
 
-static long THMemoryFile_position(THFile *self)
+static size_t THMemoryFile_position(THFile *self)
 {
   THMemoryFile *mfself = (THMemoryFile*)self;
   THArgCheck(mfself->storage != NULL, 1, "attempt to use a closed file");
@@ -280,7 +280,7 @@ static void THMemoryFile_free(THFile *self)
 /*                    1) */
 
 READ_WRITE_METHODS(unsigned char, Byte,
-                   long ret = (mfself->position + n <= mfself->size ? n : mfself->size-mfself->position);  \
+                   size_t ret = (mfself->position + n <= mfself->size ? n : mfself->size-mfself->position);  \
                    if(spacePtr) *spacePtr = spaceChar; \
                    nByteRead = ret; \
                    nread = ret; \
@@ -295,7 +295,7 @@ READ_WRITE_METHODS(unsigned char, Byte,
 /* DEBUG: we should check if %n is count or not as a element (so ret might need to be ret-- on some systems) */
 /* Note that we do a trick for char */
 READ_WRITE_METHODS(char, Char,
-                   long ret = (mfself->position + n <= mfself->size ? n : mfself->size-mfself->position);  \
+                   size_t ret = (mfself->position + n <= mfself->size ? n : mfself->size-mfself->position);  \
                    if(spacePtr) *spacePtr = spaceChar; \
                    nByteRead = ret; \
                    nread = ret; \
@@ -332,14 +332,14 @@ READ_WRITE_METHODS(double, Double,
                    nByteWritten = snprintf(mfself->storage->data+mfself->position, mfself->storage->size-mfself->position, "%.17g", data[i]),
                    1)
 
-static char* THMemoryFile_cloneString(const char *str, long size)
+static char* THMemoryFile_cloneString(const char *str, size_t size)
 {
   char *cstr = THAlloc(size);
   memcpy(cstr, str, size);
   return cstr;
 }
 
-static long THMemoryFile_readString(THFile *self, const char *format, char **str_)
+static size_t THMemoryFile_readString(THFile *self, const char *format, char **str_)
 {
   THMemoryFile *mfself = (THMemoryFile*)self;
 
@@ -359,7 +359,7 @@ static long THMemoryFile_readString(THFile *self, const char *format, char **str
   
   if(format[1] == 'a')
   {
-    long str_size = mfself->size-mfself->position;
+    size_t str_size = mfself->size-mfself->position;
 
     *str_ = THMemoryFile_cloneString(mfself->storage->data+mfself->position, str_size);
     mfself->position = mfself->size;
@@ -369,8 +369,8 @@ static long THMemoryFile_readString(THFile *self, const char *format, char **str
   else
   {
     char *p = mfself->storage->data+mfself->position;
-    long posEol = -1;
-    long i;
+    size_t posEol = -1;
+    size_t i;
     for(i = 0L; i < mfself->size-mfself->position; i++)
     {
       if(p[i] == '\n')
@@ -388,7 +388,7 @@ static long THMemoryFile_readString(THFile *self, const char *format, char **str
     }
     else /* well, we read all! */
     {
-      long str_size = mfself->size-mfself->position;
+      size_t str_size = mfself->size-mfself->position;
 
       *str_ = THMemoryFile_cloneString(mfself->storage->data+mfself->position, str_size);
       mfself->position = mfself->size;
@@ -401,7 +401,7 @@ static long THMemoryFile_readString(THFile *self, const char *format, char **str
   return 0;
 }
 
-static long THMemoryFile_writeString(THFile *self, const char *str, long size)
+static size_t THMemoryFile_writeString(THFile *self, const char *str, size_t size)
 {
   THMemoryFile *mfself = (THMemoryFile*)self;
 

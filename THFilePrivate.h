@@ -16,28 +16,28 @@ struct THFileVTable
 {
     int (*isOpened)(THFile *self);
 
-    long (*readByte)(THFile *self, unsigned char *data, long n);
-    long (*readChar)(THFile *self, char *data, long n);
-    long (*readShort)(THFile *self, short *data, long n);
-    long (*readInt)(THFile *self, int *data, long n);
-    long (*readLong)(THFile *self, long *data, long n);
-    long (*readFloat)(THFile *self, float *data, long n);
-    long (*readDouble)(THFile *self, double *data, long n);
-    long (*readString)(THFile *self, const char *format, char **str_);
+    size_t (*readByte)(THFile *self, unsigned char *data, size_t n);
+    size_t (*readChar)(THFile *self, char *data, size_t n);
+    size_t (*readShort)(THFile *self, short *data, size_t n);
+    size_t (*readInt)(THFile *self, int *data, size_t n);
+    size_t (*readLong)(THFile *self, long *data, size_t n);
+    size_t (*readFloat)(THFile *self, float *data, size_t n);
+    size_t (*readDouble)(THFile *self, double *data, size_t n);
+    size_t (*readString)(THFile *self, const char *format, char **str_);
 
-    long (*writeByte)(THFile *self, unsigned char *data, long n);
-    long (*writeChar)(THFile *self, char *data, long n);
-    long (*writeShort)(THFile *self, short *data, long n);
-    long (*writeInt)(THFile *self, int *data, long n);
-    long (*writeLong)(THFile *self, long *data, long n);
-    long (*writeFloat)(THFile *self, float *data, long n);
-    long (*writeDouble)(THFile *self, double *data, long n);
-    long (*writeString)(THFile *self, const char *str, long size);
+    size_t (*writeByte)(THFile *self, unsigned char *data, size_t n);
+    size_t (*writeChar)(THFile *self, char *data, size_t n);
+    size_t (*writeShort)(THFile *self, short *data, size_t n);
+    size_t (*writeInt)(THFile *self, int *data, size_t n);
+    size_t (*writeLong)(THFile *self, long *data, size_t n);
+    size_t (*writeFloat)(THFile *self, float *data, size_t n);
+    size_t (*writeDouble)(THFile *self, double *data, size_t n);
+    size_t (*writeString)(THFile *self, const char *str, size_t size);
 
     void (*synchronize)(THFile *self);
-    void (*seek)(THFile *self, long position);
+    void (*seek)(THFile *self, size_t position);
     void (*seekEnd)(THFile *self);
-    long (*position)(THFile *self);
+    size_t (*position)(THFile *self);
     void (*close)(THFile *self);
     void (*free)(THFile *self);
 };
