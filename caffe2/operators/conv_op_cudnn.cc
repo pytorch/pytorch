@@ -6,20 +6,38 @@ namespace caffe2 {
 
 constexpr size_t kCONV_CUDNN_WORKSPACE_LIMIT_BYTES = 8*1024*1024;
 
-template <typename T>
-class CudnnConvOp final : public ConvPoolOpBase<CUDAContext> {
+class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
  public:
-  CudnnConvOp(const OperatorDef& operator_def, Workspace* ws)
+  CudnnConvOpBase(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<CUDAContext>(operator_def, ws),
-        cudnn_wrapper_(&device_context_) {
+        cudnn_wrapper_(&device_context_),
+        cudnn_ws_nbytes_limit_(
+            OperatorBase::GetSingleArgument<int>(
+                "ws_nbytes_limit", kCONV_CUDNN_WORKSPACE_LIMIT_BYTES)),
+        shared_ws_name_(
+            OperatorBase::GetSingleArgument<string>("shared_ws_name", "")) {
     CUDNN_CHECK(cudnnCreateTensorDescriptor(&bottom_desc_));
     CUDNN_CHECK(cudnnCreateFilterDescriptor(&filter_desc_));
     CUDNN_CHECK(cudnnCreateTensorDescriptor(&bias_desc_));
     CUDNN_CHECK(cudnnCreateTensorDescriptor(&top_desc_));
     CUDNN_CHECK(cudnnCreateConvolutionDescriptor(&conv_desc_));
+    if (shared_ws_name_.size()) {
+      // We will use a shared workspace for cudnn across multiple operators,
+      // which would allow us to save memory space better.
+      // Note that this is kind of a hack: the computation logic of the shared
+      // workspace is not visible to the compute graph, so use this with care.
+      // You are essentially responsible for managing potential conflicts of the
+      // shared workspace yourself, and you need to make sure that this name
+      // does not conflict with some other blob names in the compute graph.
+      cudnn_ws_ = ws->CreateBlob(shared_ws_name_);
+    } else {
+      // We will maintain a local workspace.
+      local_cudnn_ws_.reset(new Blob());
+      cudnn_ws_ = local_cudnn_ws_.get();
+    }
   }
 
-  ~CudnnConvOp() {
+  ~CudnnConvOpBase() {
     CUDNN_CHECK(cudnnDestroyTensorDescriptor(bottom_desc_));
     CUDNN_CHECK(cudnnDestroyFilterDescriptor(filter_desc_));
     CUDNN_CHECK(cudnnDestroyTensorDescriptor(bias_desc_));
@@ -27,22 +45,45 @@ class CudnnConvOp final : public ConvPoolOpBase<CUDAContext> {
     CUDNN_CHECK(cudnnDestroyConvolutionDescriptor(conv_desc_));
   }
 
-  bool RunOnDevice() override;
+  virtual bool RunWithCudnnWorkspace(
+      CuDNNWorkspaceWrapper* cudnn_ws_wrapper) = 0;
 
- private:
+  bool RunOnDevice() final {
+    auto* cudnn_ws_wrapper = cudnn_ws_->GetMutable<CuDNNWorkspaceWrapper>();
+    std::lock_guard<std::mutex> lock(cudnn_ws_wrapper->mutex());
+    return RunWithCudnnWorkspace(cudnn_ws_wrapper);
+  }
+
+ protected:
   vector<int> cudnn_input_dims_;
   vector<int> cudnn_filter_dims_;
 
   CuDNNWrapper cudnn_wrapper_;
-  cudnnConvolutionFwdAlgo_t algo_;
   cudnnTensorDescriptor_t bottom_desc_;
   cudnnFilterDescriptor_t filter_desc_;
   cudnnTensorDescriptor_t bias_desc_;
   cudnnTensorDescriptor_t top_desc_;
   cudnnConvolutionDescriptor_t conv_desc_;
+  const size_t cudnn_ws_nbytes_limit_;
+  string shared_ws_name_;
   size_t cudnn_ws_nbytes_;
-  CuDNNWorkspaceWrapper cudnn_ws_;
+  Blob* cudnn_ws_;
+  std::unique_ptr<Blob> local_cudnn_ws_;
+  DISABLE_COPY_AND_ASSIGN(CudnnConvOpBase);
+};
 
+template <typename T>
+class CudnnConvOp final : public CudnnConvOpBase {
+ public:
+  CudnnConvOp(const OperatorDef& operator_def, Workspace* ws)
+      : CudnnConvOpBase(operator_def, ws)  {}
+
+  ~CudnnConvOp() {}
+
+  bool RunWithCudnnWorkspace(CuDNNWorkspaceWrapper* cudnn_ws_wrapper) override;
+
+ private:
+  cudnnConvolutionFwdAlgo_t algo_;
   // Input: X, W, b
   // Output: Y
   INPUT_TAGS(INPUT, FILTER, BIAS);
@@ -51,42 +92,18 @@ class CudnnConvOp final : public ConvPoolOpBase<CUDAContext> {
 };
 
 template <typename T>
-class CudnnConvGradientOp final : public ConvPoolOpBase<CUDAContext> {
+class CudnnConvGradientOp final : public CudnnConvOpBase {
  public:
   CudnnConvGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<CUDAContext>(operator_def, ws),
-        cudnn_wrapper_(&device_context_) {
-    CUDNN_CHECK(cudnnCreateTensorDescriptor(&bottom_desc_));
-    CUDNN_CHECK(cudnnCreateFilterDescriptor(&filter_desc_));
-    CUDNN_CHECK(cudnnCreateTensorDescriptor(&bias_desc_));
-    CUDNN_CHECK(cudnnCreateTensorDescriptor(&top_desc_));
-    CUDNN_CHECK(cudnnCreateConvolutionDescriptor(&conv_desc_));
-  }
+      : CudnnConvOpBase(operator_def, ws)  {}
 
-  ~CudnnConvGradientOp() {
-    CUDNN_CHECK(cudnnDestroyTensorDescriptor(bottom_desc_));
-    CUDNN_CHECK(cudnnDestroyFilterDescriptor(filter_desc_));
-    CUDNN_CHECK(cudnnDestroyTensorDescriptor(bias_desc_));
-    CUDNN_CHECK(cudnnDestroyTensorDescriptor(top_desc_));
-    CUDNN_CHECK(cudnnDestroyConvolutionDescriptor(conv_desc_));
-  }
+  ~CudnnConvGradientOp() {}
 
-  bool RunOnDevice() override;
+  bool RunWithCudnnWorkspace(CuDNNWorkspaceWrapper* cudnn_ws_wrapper) override;
 
  private:
-  vector<int> cudnn_input_dims_;
-  vector<int> cudnn_filter_dims_;
-
-  CuDNNWrapper cudnn_wrapper_;
   cudnnConvolutionBwdFilterAlgo_t bwd_filter_algo_;
   cudnnConvolutionBwdDataAlgo_t bwd_data_algo_;
-  cudnnTensorDescriptor_t bottom_desc_;
-  cudnnFilterDescriptor_t filter_desc_;
-  cudnnTensorDescriptor_t bias_desc_;
-  cudnnTensorDescriptor_t top_desc_;
-  cudnnConvolutionDescriptor_t conv_desc_;
-  size_t cudnn_ws_nbytes_;
-  CuDNNWorkspaceWrapper cudnn_ws_;
 
   // input: X, W, dY
   // output: dW, db, and optionally dX
@@ -103,7 +120,8 @@ class CudnnConvGradientOp final : public ConvPoolOpBase<CUDAContext> {
 ////////////////////////////////////////////////////////////////////////////////
 
 template <typename T>
-bool CudnnConvOp<T>::RunOnDevice() {
+bool CudnnConvOp<T>::RunWithCudnnWorkspace(
+      CuDNNWorkspaceWrapper* cudnn_ws_wrapper) {
   auto& X = Input(INPUT);
   auto& filter = Input(FILTER);
   auto& bias = Input(BIAS);
@@ -174,7 +192,7 @@ bool CudnnConvOp<T>::RunOnDevice() {
         cudnn_wrapper_.cudnn_handle(),
         bottom_desc_, filter_desc_, conv_desc_, top_desc_,
         CUDNN_CONVOLUTION_FWD_SPECIFY_WORKSPACE_LIMIT,
-        kCONV_CUDNN_WORKSPACE_LIMIT_BYTES,
+        cudnn_ws_nbytes_limit_,
         &algo_));
     CUDNN_CHECK(cudnnGetConvolutionForwardWorkspaceSize(
         cudnn_wrapper_.cudnn_handle(),
@@ -191,7 +209,7 @@ bool CudnnConvOp<T>::RunOnDevice() {
   CUDNN_CHECK(cudnnConvolutionForward(
       cudnn_wrapper_.cudnn_handle(), &kOne, bottom_desc_,
       X.template data<T>(), filter_desc_, filter.template data<T>(), conv_desc_,
-      algo_, cudnn_ws_.Get(cudnn_ws_nbytes_), cudnn_ws_nbytes_, &kZero,
+      algo_, cudnn_ws_wrapper->Get(cudnn_ws_nbytes_), cudnn_ws_nbytes_, &kZero,
       top_desc_, Y->template mutable_data<T>()));
   // Bias
   CUDNN_CHECK(cudnnAddTensor(
@@ -204,7 +222,8 @@ bool CudnnConvOp<T>::RunOnDevice() {
 // TODO(Yangqing): a lot of the function contents are very similar. Consider
 // consolidating them.
 template <typename T>
-bool CudnnConvGradientOp<T>::RunOnDevice() {
+bool CudnnConvGradientOp<T>::RunWithCudnnWorkspace(
+    CuDNNWorkspaceWrapper* cudnn_ws_wrapper) {
   auto& X = Input(INPUT);
   auto& filter = Input(FILTER);
   auto& dY = Input(OUTPUT_GRAD);
@@ -278,7 +297,7 @@ bool CudnnConvGradientOp<T>::RunOnDevice() {
         cudnn_wrapper_.cudnn_handle(),
         bottom_desc_, top_desc_, conv_desc_, filter_desc_,
         CUDNN_CONVOLUTION_BWD_FILTER_SPECIFY_WORKSPACE_LIMIT,
-        kCONV_CUDNN_WORKSPACE_LIMIT_BYTES, &bwd_filter_algo_));
+        cudnn_ws_nbytes_limit_, &bwd_filter_algo_));
     // get workspace for backwards filter algorithm
     CUDNN_CHECK(cudnnGetConvolutionBackwardFilterWorkspaceSize(
         cudnn_wrapper_.cudnn_handle(),
@@ -290,7 +309,7 @@ bool CudnnConvGradientOp<T>::RunOnDevice() {
         cudnn_wrapper_.cudnn_handle(),
         filter_desc_, top_desc_, conv_desc_, bottom_desc_,
         CUDNN_CONVOLUTION_BWD_DATA_SPECIFY_WORKSPACE_LIMIT,
-        kCONV_CUDNN_WORKSPACE_LIMIT_BYTES, &bwd_data_algo_));
+        cudnn_ws_nbytes_limit_, &bwd_data_algo_));
     CUDNN_CHECK(cudnnGetConvolutionBackwardDataWorkspaceSize(
         cudnn_wrapper_.cudnn_handle(),
         filter_desc_, top_desc_, conv_desc_, bottom_desc_,
@@ -308,7 +327,7 @@ bool CudnnConvGradientOp<T>::RunOnDevice() {
   CUDNN_CHECK(cudnnConvolutionBackwardFilter_v3(
       cudnn_wrapper_.cudnn_handle(), &kOne, bottom_desc_, X.template data<T>(),
       top_desc_, dY.template data<T>(), conv_desc_, bwd_filter_algo_,
-      cudnn_ws_.Get(cudnn_ws_nbytes_), cudnn_ws_nbytes_,
+      cudnn_ws_wrapper->Get(cudnn_ws_nbytes_), cudnn_ws_nbytes_,
       &kZero, filter_desc_, dfilter->template mutable_data<T>()));
 
   if (OutputSize() == 3) {
@@ -319,7 +338,7 @@ bool CudnnConvGradientOp<T>::RunOnDevice() {
         cudnn_wrapper_.cudnn_handle(), &kOne, filter_desc_,
         filter.template data<T>(), top_desc_, dY.template data<T>(),
         conv_desc_, bwd_data_algo_,
-        cudnn_ws_.Get(cudnn_ws_nbytes_), cudnn_ws_nbytes_,
+        cudnn_ws_wrapper->Get(cudnn_ws_nbytes_), cudnn_ws_nbytes_,
         &kZero, bottom_desc_, dX->template mutable_data<T>()));
   }
   return true;

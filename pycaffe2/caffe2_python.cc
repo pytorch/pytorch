@@ -135,11 +135,17 @@ PyObject* GlobalInit(PyObject* self, PyObject* args) {
     return NULL;
   }
   int argc = PyList_Size(list);
-  std::unique_ptr<char*> argv(new char*[argc]);
+  std::unique_ptr<char*> argv(new char*[std::max(argc, 1)]);
   char** raw_argv = argv.get();
   for (int i = 0; i < argc; ++i) {
     // Get the pointer to the string
     raw_argv[i] = PyString_AsString(PyList_GetItem(list, i));
+  }
+  // Special case for argc = 0: in this case, we will simply add a dummy
+  // argv to call caffe2's underlying code.
+  if (argc == 0) {
+    ++argc;
+    raw_argv[0] = "python";
   }
   global_init_called = true;
   if (!caffe2::GlobalInit(&argc, raw_argv)) {
