@@ -1,3 +1,5 @@
+#include <set>
+
 #include "caffe2/core/net.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/proto/caffe2.pb.h"

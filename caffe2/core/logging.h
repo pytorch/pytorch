@@ -1,6 +1,8 @@
 #ifndef CAFFE2_CORE_LOGGING_H_
 #define CAFFE2_CORE_LOGGING_H_
 
+#include <climits>
+
 #include "caffe2/core/flags.h"
 
 CAFFE2_DECLARE_int(caffe2_log_level);
