@@ -60,10 +60,10 @@ class TestMNISTLeNet(unittest.TestCase):
     gpu_device.device_type = caffe2_pb2.CUDA
 
     checker = device_checker.DeviceChecker(
-        1e-3, [cpu_device, gpu_device])
+        1e-2, [cpu_device, gpu_device])
     ret = checker.CheckNet(
         train_net.Proto(), inputs,
-        ignore=[])
+        ignore=['maxid1', 'maxid2'])
     self.assertEqual(ret, True)
 
 
