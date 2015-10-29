@@ -160,10 +160,10 @@ bool CudnnConvOp<T>::RunOnDevice() {
           top_desc_, GetCudnnTensorFormat(order_), cudnnTypeWrapper<T>::type,
           N, M, H_out, W_out));
     // Set the convolution descriptor
-    CHECK_EQ(pad_t_, pad_b_)
+    CAFFE_CHECK_EQ(pad_t_, pad_b_)
         << "The current padding scheme leads to unequal padding on the top and "
            "bottom, which is not supported by cudnn.";
-    CHECK_EQ(pad_l_, pad_r_)
+    CAFFE_CHECK_EQ(pad_l_, pad_r_)
         << "The current padding scheme leads to unequal padding on the left "
            "and right, which is not supported by cudnn.";
     CUDNN_CHECK(cudnnSetConvolution2dDescriptor(
@@ -259,10 +259,10 @@ bool CudnnConvGradientOp<T>::RunOnDevice() {
           top_desc_, GetCudnnTensorFormat(order_), cudnnTypeWrapper<T>::type,
           N, M, H_out, W_out));
     // Set the convolution descriptor
-    CHECK_EQ(pad_t_, pad_b_)
+    CAFFE_CHECK_EQ(pad_t_, pad_b_)
         << "The current padding scheme leads to unequal padding on the top and "
            "bottom, which is not supported by cudnn.";
-    CHECK_EQ(pad_l_, pad_r_)
+    CAFFE_CHECK_EQ(pad_l_, pad_r_)
         << "The current padding scheme leads to unequal padding on the left "
            "and right, which is not supported by cudnn.";
     CUDNN_CHECK(cudnnSetConvolution2dDescriptor(
