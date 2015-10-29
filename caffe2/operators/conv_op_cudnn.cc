@@ -180,6 +180,7 @@ bool CudnnConvOp<T>::RunOnDevice() {
         cudnn_wrapper_.cudnn_handle(),
         bottom_desc_, filter_desc_, conv_desc_, top_desc_,
         algo_, &cudnn_ws_nbytes_));
+    CAFFE_VLOG(1) << "CuDNN algorithm: " << algo_;
     CAFFE_VLOG(1) << "CuDNN workspace size: " << cudnn_ws_nbytes_;
   }
 
