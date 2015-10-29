@@ -60,7 +60,7 @@ class ClipGradientOp final : public Operator<Context> {
  protected:
   T min_;
   T max_;
-  // Input: X, dY; Output: dX
+  // Input: Y, dY; Output: dX
   INPUT_OUTPUT_STATS(2, 2, 1, 1);
   DISABLE_COPY_AND_ASSIGN(ClipGradientOp);
 };

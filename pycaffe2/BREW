@@ -111,3 +111,13 @@ py_test(
       ":pycaffe2",
   ],
 )
+
+py_test(
+  name = "core_gradients_test",
+  srcs = [
+      "core_gradients_test.py",
+  ],
+  deps = [
+      ":pycaffe2",
+  ],
+)

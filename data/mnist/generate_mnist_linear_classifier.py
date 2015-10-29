@@ -21,7 +21,7 @@ data, label = train_net.TensorProtosDBInput(
     db="gen/data/mnist/mnist-train-nchw-minidb", db_type="minidb")
 softmax = data.Flatten([], "data_flatten").FC([W, B], "pred").Softmax([], "softmax")
 xent = softmax.LabelCrossEntropy([label], "xent")
-loss, xent_grad = xent.AveragedLoss([], ["loss", xent.Grad()])
+loss = xent.AveragedLoss([], ["loss"])
 # Get gradient
 train_net.AddGradientOperators()
 accuracy = softmax.Accuracy([label], "accuracy")

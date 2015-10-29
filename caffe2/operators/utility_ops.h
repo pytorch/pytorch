@@ -268,6 +268,7 @@ class WeightedSumOp : public Operator<Context> {
   }
 
   INPUT_OUTPUT_STATS(2, INT_MAX, 1, 1);
+  IN_PLACE_ALLOWED({0, 0});
   DISABLE_COPY_AND_ASSIGN(WeightedSumOp);
 };
 

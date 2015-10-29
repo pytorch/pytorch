@@ -69,7 +69,7 @@ pred = (pool5_flatten.FC([W6, B6]).Relu().Dropout(outputs=2)[0]
                    .FC([W8, B8]).Softmax())
 xent = pred.LabelCrossEntropy([label], "xent")
 # The loss function.
-loss, xent_grad = xent.AveragedLoss([], ["loss", xent.Grad()])
+loss = xent.AveragedLoss([], ["loss"])
 test_net.AddGradientOperators(first=2)
 test_net.Print([loss], [])
 

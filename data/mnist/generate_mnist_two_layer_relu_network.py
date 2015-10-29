@@ -28,7 +28,7 @@ softmax = data.Flatten().FC([W1, B1]).Relu().FC([W2, B2]).Softmax()
 # Cross entropy, and accuracy
 xent = softmax.LabelCrossEntropy([label], "xent")
 # The loss function.
-loss, xent_grad = xent.AveragedLoss(outputs=["loss", xent.Grad()])
+loss = xent.AveragedLoss(outputs=["loss"])
 # Get gradient, skipping the input and flatten layers.
 train_net.AddGradientOperators()
 accuracy = softmax.Accuracy([label], "accuracy")

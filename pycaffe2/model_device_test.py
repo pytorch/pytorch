@@ -38,7 +38,7 @@ class TestMNISTLeNet(unittest.TestCase):
     # Cross entropy, and accuracy
     xent = softmax.LabelCrossEntropy([label], "xent")
     # The loss function.
-    loss, xent_grad = xent.AveragedLoss([], ["loss", xent.Grad()])
+    loss = xent.AveragedLoss([], ["loss"])
     # Get gradient, skipping the input and flatten layers.
     train_net.AddGradientOperators()
     accuracy = softmax.Accuracy([label], "accuracy")
@@ -115,7 +115,7 @@ class TestMiniAlexNet(unittest.TestCase):
                   ("ConstantFill", {"value": 0.0}))
     pred = model.Softmax(fc8, "pred")
     xent = model.LabelCrossEntropy([pred, "label"], "xent")
-    loss, xent_grad = model.AveragedLoss([xent], ["loss", xent.Grad()])
+    loss = model.AveragedLoss([xent], ["loss"])
     model.AddGradientOperators()
     return model
 

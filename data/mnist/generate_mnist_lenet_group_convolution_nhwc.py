@@ -36,7 +36,7 @@ softmax = pool2.Flatten().FC([W3, B3]).Relu().FC([W4, B4]).Softmax()
 # Cross entropy, and accuracy
 xent = softmax.LabelCrossEntropy([label], "xent")
 # The loss function.
-loss, xent_grad = xent.AveragedLoss([], ["loss", xent.Grad()])
+loss = xent.AveragedLoss([], ["loss"])
 # Get gradient
 train_net.AddGradientOperators()
 accuracy = softmax.Accuracy([label], "accuracy")

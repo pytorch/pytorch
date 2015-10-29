@@ -37,6 +37,7 @@ class BroadcastOp final : public Operator<Context> {
   // Input: X. Output: X.
   // Note that Broadcast works in-place by definition.
   INPUT_OUTPUT_STATS(1, 1, 1, 1);
+  IN_PLACE_ALLOWED({0, 0});
   DISABLE_COPY_AND_ASSIGN(BroadcastOp);
 };
 
@@ -71,6 +72,7 @@ class AllreduceOp final : public Operator<Context> {
  protected:
   // Input: X; Output: X_reduced.
   INPUT_OUTPUT_STATS(1, 1, 1, 1);
+  IN_PLACE_ALLOWED({0, 0});
   DISABLE_COPY_AND_ASSIGN(AllreduceOp);
 };
 

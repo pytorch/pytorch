@@ -1,6 +1,16 @@
 // Implementes the math functions for CPU.
+
+#include <thrust/device_ptr.h>
+#include <thrust/reduce.h>
+#include <thrust/system/cuda/detail/par.h>
+#include <thrust/version.h>
+
 #include "caffe2/utils/math.h"
 #include "caffe2/core/context_gpu.h"
+
+
+static_assert(THRUST_VERSION >= 100800,
+              "Caffe2 requires a thrust version > 1.8.");
 
 namespace caffe2 {
 namespace math {
@@ -241,23 +251,18 @@ void Dot<double, CUDAContext>(
   context->Copy<double, CPUContext, CUDAContext>(1, &result, y);
 }
 
-/*
-template<>
-void Sum<float, CPUContext>(
-    const int N, const float* x, float* y,
-    CPUContext* context) {
-  *y = 0;
-  for (int i = 0; i < N; ++i) *y += x[i];
+#define CAFFE2_MATH_SUM_FUNC(T) \
+template<> \
+void Sum<T, CUDAContext>(const int N, const T* x, T* y, CUDAContext* context) {\
+  thrust::device_ptr<const T> dev_ptr(x);                                            \
+  T result = thrust::reduce(                                                   \
+      thrust::cuda::par.on(context->cuda_stream()),                               \
+      dev_ptr, dev_ptr + N, static_cast<T>(0), thrust::plus<T>());             \
+  context->Copy<T, CPUContext, CUDAContext>(1, &result, y);                    \
 }
-
-template<>
-void Sum<double, CPUContext>(
-    const int N, const double* x, double* y,
-    CPUContext* context) {
-  *y = 0;
-  for (int i = 0; i < N; ++i) *y += x[i];
-}
-*/
+CAFFE2_MATH_SUM_FUNC(float)
+CAFFE2_MATH_SUM_FUNC(double)
+#undef CAFFE2_MATH_SUM_FUNC
 
 namespace {
 template <typename T>
