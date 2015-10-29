@@ -34,11 +34,13 @@ def AddFlattenGradient(op):
 
 @GradientRegistry.RegisterGradient("AveragedLoss")
 def CheckAveragedLossNaming(op):
-  if op.output[1] != GetGradientName(op.input[0]):
-    raise ValueError(
-        "AveragedLoss output[1] should be named as the gradient of input[0]. "
-        "Please name your output[1] to %s.", GetGradientName(op.input[0]))
-  return
+  return CreateOperator('AveragedLossGradient')(
+    [op.input[0]], [GetGradientName(op.input[0])])
+
+@GradientRegistry.RegisterGradient("WeightedSumLoss")
+def CheckAveragedLossNaming(op):
+  return CreateOperator('WeightedSumLossGradient')(
+    [op.input[1]], [GetGradientName(op.input[0])])
 
 
 @GradientRegistry.RegisterGradient("TensorProtosDBInput")
@@ -57,14 +59,14 @@ def UtilityOperatorsShouldNotBeAddedBeforeGradients(op):
 @GradientRegistry.RegisterGradient("Relu")
 def AddReluGradient(op):
   return CreateOperator("ReluGradient")(
-      [op.input[0], GetGradientName(op.output[0])],
+      [op.output[0], GetGradientName(op.output[0])],
       [GetGradientName(op.input[0])])
 
 @GradientRegistry.RegisterGradient("Clip")
 def AddReluGradient(op):
   return CreateOperator("ClipGradient")(
-      [op.input[0], GetGradientName(op.output[0])],
-      [GetGradientName(op.input[0])])
+      [op.output[0], GetGradientName(op.output[0])],
+      [GetGradientName(op.input[0])], arg=op.arg)
 
 @GradientRegistry.RegisterGradient("MaxPool")
 def AddMaxPoolGradient(op):

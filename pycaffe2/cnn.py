@@ -10,6 +10,8 @@ class CNNModelHelper(object):
     self.net = core.Net(name)
     self.param_init_net = core.Net(name + '_init')
     self.params = []
+    self.weights = []
+    self.biases = []
     self.order = order
     if self.order != "NHWC" and self.order != "NCHW":
       raise ValueError("Cannot understand the CNN storage order %s."
@@ -30,6 +32,8 @@ class CNNModelHelper(object):
     bias = self.param_init_net.__getattr__(bias_init[0])(
         [], blob_out + '_b', shape=[dim_out,], **bias_init[1])
     self.params.extend([weight, bias])
+    self.weights.append(weight)
+    self.biases.append(bias)
     return self.net.Conv([blob_in, weight, bias], blob_out, kernel=kernel,
                          order=self.order, **kwargs)
 
@@ -57,6 +61,8 @@ class CNNModelHelper(object):
           [], blob_out + '_gconv_%d_b' % i, shape=[dim_out / group],
           **bias_init[1])
       self.params.extend([weight, bias])
+      self.weights.append(weight)
+      self.biases.append(bias)
       conv_blobs.append(
           splitted_blobs[i].Conv([weight, bias], blob_out + '_gconv_%d' % i,
                                  kernel=kernel, order=self.order, **kwargs))
@@ -99,3 +105,5 @@ class CNNModelHelper(object):
       raise RuntimeError(
           'Method ' + op_type + ' is not a registered operator.')
     return self.net.__getattr__(op_type)
+
+

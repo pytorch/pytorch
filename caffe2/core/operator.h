@@ -95,12 +95,21 @@ class OperatorBase {
   inline const OperatorDef& def() { return operator_def_; }
 
  protected:
+  // Specify the minimum and maximum number of inputs and outputs.
   // Do not manually override these functions. Instead, use INPUT_OUTPUT_STATS
   // macro below.
   virtual int MinInput() { return 0; }
   virtual int MaxInput() { return INT_MAX; }
   virtual int MinOutput() { return 0; }
   virtual int MaxOutput() { return INT_MAX; }
+  // Specify whether in-place computation is allowed for a given pair of input
+  // index and output index. In-place computations are opt-in, meaning that an
+  // operator has to explicitly specify that it allows in-place computation.
+  // Otherwise, input and output MUST be different.
+  // Do not manually override this function if your operator does very simple
+  // in-place opt-ins, such as allowing input 0 and output 0 to be inplace.
+  // Use OP_IN_PLACE_ALLOWED({0, 0}) macro below.
+  virtual bool InplaceAllowed(int input_id, int output_id) { return false; }
 
  private:
   CaffeMap<string, const Argument*> arg_map_;
@@ -132,6 +141,17 @@ class OperatorBase {
   int MaxInput() override { return max_input; }                                \
   int MinOutput() override { return min_output; }                              \
   int MaxOutput() override { return max_output; }
+
+// Note that this implementation uses vector so it likely won't work well for
+// very large operators, but we should be fine since the InplaceAllowed function
+// should be very sparse.
+#define IN_PLACE_ALLOWED(...)                                                  \
+ protected:                                                                    \
+  bool InplaceAllowed(int input_id, int output_id) override {                  \
+    const vector<std::pair<int, int> > kVec{__VA_ARGS__};                      \
+    auto p = std::make_pair(input_id, output_id);                              \
+    return (std::find(kVec.begin(), kVec.end(), p) != kVec.end());             \
+  }
 
 // INPUT_TAGS and OUTPUT_TAGS are optional features to name the indices of the
 // operator's inputs and outputs, in order to avoid confusion. For example, for

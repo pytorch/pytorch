@@ -27,19 +27,20 @@ class BinaryElementwiseOp : public Operator<Context> {
   }
 
   INPUT_OUTPUT_STATS(2, 2, 1, 1);
+  IN_PLACE_ALLOWED({0, 0}, {1, 0});
   DISABLE_COPY_AND_ASSIGN(BinaryElementwiseOp);
 };
 
 
 #define CAFFE2_BINARY_FUNCTOR_WRAPPER(name)                                    \
-template <typename T, class Context>                                 \
+template <typename T, class Context>                                           \
 struct name##Functor {                                                         \
-  inline void operator()(const int n, const T* x, const T* y,          \
-                         T* output, Context* device_context) {       \
-    math::name<T, Context>(n, x, y, output, device_context);         \
+  inline void operator()(const int n, const T* x, const T* y,                  \
+                         T* output, Context* device_context) {                 \
+    math::name<T, Context>(n, x, y, output, device_context);                   \
   }                                                                            \
 };                                                                             \
-template <typename T, class DC>                                            \
+template <typename T, class DC>                                                \
 using name##Op =                                                               \
     BinaryElementwiseOp<T, DC, name##Functor<T, DC> >
 

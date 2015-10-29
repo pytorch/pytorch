@@ -6,6 +6,10 @@ namespace {
 
 REGISTER_CUDA_OPERATOR(AveragedLoss, AveragedLoss<float, CUDAContext>)
 REGISTER_CUDA_OPERATOR(WeightedSumLoss, WeightedSumLoss<float, CUDAContext>)
+REGISTER_CUDA_OPERATOR(AveragedLossGradient,
+                       AveragedLossGradient<float, CUDAContext>)
+REGISTER_CUDA_OPERATOR(WeightedSumLossGradient,
+                       WeightedSumLossGradient<float, CUDAContext>)
 
 }  // namespace
 }  // namespace caffe2

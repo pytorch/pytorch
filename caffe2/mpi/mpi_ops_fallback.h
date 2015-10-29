@@ -46,6 +46,7 @@ class FallbackBroadcastOp final : public Operator<Context> {
   // Input: X. Output: X.
   // Note that Broadcast works in-place by definition.
   INPUT_OUTPUT_STATS(1, 1, 1, 1);
+  IN_PLACE_ALLOWED({0, 0});
   DISABLE_COPY_AND_ASSIGN(FallbackBroadcastOp);
 };
 
@@ -85,6 +86,7 @@ class FallbackAllreduceOp final : public Operator<Context> {
   // Input: X; Output: X_reduced.
   TensorCPU cpu_buffer_;
   INPUT_OUTPUT_STATS(1, 1, 1, 1);
+  IN_PLACE_ALLOWED({0, 0});
   DISABLE_COPY_AND_ASSIGN(FallbackAllreduceOp);
 };
 

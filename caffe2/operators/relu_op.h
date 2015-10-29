@@ -18,6 +18,7 @@ class ReluOp final : public Operator<Context> {
 
  protected:
   INPUT_OUTPUT_STATS(1, 1, 1, 1);
+  IN_PLACE_ALLOWED({0, 0});
   DISABLE_COPY_AND_ASSIGN(ReluOp);
 };
 
@@ -30,8 +31,9 @@ class ReluGradientOp final : public Operator<Context> {
   bool RunOnDevice() override;
 
  protected:
-  // Input: X, dY; Output: dX
+  // Input: Y, dY; Output: dX
   INPUT_OUTPUT_STATS(2, 2, 1, 1);
+  IN_PLACE_ALLOWED({1, 0});
   DISABLE_COPY_AND_ASSIGN(ReluGradientOp);
 };
 

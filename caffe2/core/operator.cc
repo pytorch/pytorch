@@ -67,7 +67,7 @@ INSTANTIATE_GET_REPEATED_ARGUMENT(string, strings)
 #undef INSTANTIATE_GET_REPEATED_ARGUMENT
 
 bool OperatorBase::Verify() {
-  // Check Blob counts.
+  // (1) Check Blob counts: the input sizes and the output sizes should match.
   if (operator_def_.input_size() < MinInput() ||
       operator_def_.input_size() > MaxInput()) {
     CAFFE_LOG_ERROR << "Input size " << operator_def_.input_size()
@@ -80,11 +80,28 @@ bool OperatorBase::Verify() {
   if (operator_def_.output_size() < MinOutput() ||
       operator_def_.output_size() > MaxOutput()) {
     CAFFE_LOG_ERROR << "Output size " << operator_def_.output_size()
-               << " not in range [min=" << MinOutput() << ", max="
-               << MaxOutput() << "].";
+        << " not in range [min=" << MinOutput() << ", max="
+        << MaxOutput() << "].";
     CAFFE_LOG_ERROR << "Error at operator " << operator_def_.name() << ":"
-               << operator_def_.type();
+        << operator_def_.type();
     return false;
+  }
+  // (2) Check if input and output in-place computation are correct. Currently,
+  // this runs O(num_input * num_output), so it's relatively slow. However,
+  // verification only runs once so it's probably fine.
+  for (int in_idx = 0; in_idx < operator_def_.input_size(); ++in_idx) {
+    for (int out_idx = 0; out_idx < operator_def_.output_size(); ++out_idx) {
+      // If an input is the same as an output but in-place is not opt-in for
+      // this pair, we will fail the verification.
+      if (operator_def_.input(in_idx) == operator_def_.output(out_idx) &&
+          !InplaceAllowed(in_idx, out_idx)) {
+        CAFFE_LOG_ERROR << "Input index " << in_idx << " and output idx "
+            << out_idx << " have the same symbol, but the operator "
+            << operator_def_.type()
+            << " has not opted-in inplace computation for this pair.";
+        return false;
+      }
+    }
   }
   return true;
 }

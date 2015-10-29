@@ -11,10 +11,10 @@ __global__ void ReluKernel(const int N, const T* X, T* Y) {
 }
 
 template <typename T>
-__global__ void ReluGradientKernel(const int N, const T* X, const T* dY,
+__global__ void ReluGradientKernel(const int N, const T* Y, const T* dY,
                               T* dX) {
   CUDA_1D_KERNEL_LOOP(i, N) {
-    dX[i] = dY[i] * (X[i] > 0);
+    dX[i] = dY[i] * (Y[i] > 0);
   }
 }
 }  // namespace
@@ -33,15 +33,15 @@ bool ReluOp<float, CUDAContext>::RunOnDevice() {
 
 template <>
 bool ReluGradientOp<float, CUDAContext>::RunOnDevice() {
-  auto& X = Input(0);
+  auto& Y = Input(0);
   auto& dY = Input(1);
   auto* dX = Output(0);
-  CAFFE_DCHECK_GT(X.size(), 0);
-  CAFFE_DCHECK_EQ(dY.size(), X.size());
-  dX->ReshapeLike(X);
-  ReluGradientKernel<<<CAFFE_GET_BLOCKS(X.size()), CAFFE_CUDA_NUM_THREADS,
+  CAFFE_DCHECK_GT(Y.size(), 0);
+  CAFFE_DCHECK_EQ(dY.size(), Y.size());
+  dX->ReshapeLike(Y);
+  ReluGradientKernel<<<CAFFE_GET_BLOCKS(Y.size()), CAFFE_CUDA_NUM_THREADS,
                        0, device_context_.cuda_stream()>>>(
-      X.size(), X.data<float>(), dY.data<float>(), dX->mutable_data<float>());
+      Y.size(), Y.data<float>(), dY.data<float>(), dX->mutable_data<float>());
   return true;
 }
 
