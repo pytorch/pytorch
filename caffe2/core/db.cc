@@ -1,3 +1,5 @@
+#include <mutex>
+
 #include "caffe2/core/db.h"
 #include "caffe2/core/logging.h"
 
