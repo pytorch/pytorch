@@ -23,6 +23,7 @@ typedef struct THCudaStorage
 
 THC_API float* THCudaStorage_data(THCState *state, const THCudaStorage*);
 THC_API long THCudaStorage_size(THCState *state, const THCudaStorage*);
+THC_API int THCudaStorage_elementSize(THCState *state);
 
 /* slow access -- checks everything */
 THC_API void THCudaStorage_set(THCState *state, THCudaStorage*, long, float);

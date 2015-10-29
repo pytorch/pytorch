@@ -535,6 +535,20 @@ int THCudaTensor_isContiguous(THCState *state, const THCudaTensor *self)
   return 1;
 }
 
+int THCudaTensor_isSize(THCState *state, const THCudaTensor *self, const THLongStorage *dims)
+{
+  int d;
+  if (self->nDimension != dims->size)
+    return 0;
+
+  for (d = 0; d < self->nDimension; ++d)
+  {
+    if (self->size[d] != dims->data[d])
+      return 0;
+  }
+  return 1;
+}
+
 int THCudaTensor_isSameSizeAs(THCState *state, const THCudaTensor *self, const THCudaTensor* src)
 {
   int d;

@@ -106,6 +106,7 @@ THC_API void THCudaTensor_squeeze1d(THCState *state, THCudaTensor *self, THCudaT
 
 THC_API int THCudaTensor_isContiguous(THCState *state, const THCudaTensor *self);
 THC_API int THCudaTensor_isSameSizeAs(THCState *state, const THCudaTensor *self, const THCudaTensor *src);
+THC_API int THCudaTensor_isSize(THCState *state, const THCudaTensor *self, const THLongStorage *dims);
 THC_API long THCudaTensor_nElement(THCState *state, const THCudaTensor *self);
 
 THC_API void THCudaTensor_retain(THCState *state, THCudaTensor *self);

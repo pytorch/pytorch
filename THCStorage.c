@@ -2,6 +2,21 @@
 #include "THCGeneral.h"
 #include "THAtomic.h"
 
+float* THCudaStorage_data(THCState *state, const THCudaStorage *self)
+{
+  return self->data;
+}
+
+long THCudaStorage_size(THCState *state, const THCudaStorage *self)
+{
+  return self->size;
+}
+
+int THCudaStorage_elementSize(THCState *state)
+{
+  return sizeof(float);
+}
+
 void THCudaStorage_set(THCState *state, THCudaStorage *self, long index, float value)
 {
   THArgCheck((index >= 0) && (index < self->size), 2, "index out of bounds");
