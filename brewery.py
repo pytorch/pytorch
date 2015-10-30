@@ -483,13 +483,13 @@ class cc_target(BuildTarget):
           ' '.join([Env.LINK_STATIC, archive_file] + obj_files)]
       if self.build_binary:
         link_binary_commands = [
-            ' '.join([Env.LINK_BINARY, self.OutputName(), Env.LINKFLAGS]
-                     + self.cc_obj_files)]
+            ' '.join([Env.LINK_BINARY, self.OutputName()] + self.cc_obj_files +
+                     [Env.LINKFLAGS])]
         self.command_groups = [cpp_commands, link_commands, link_binary_commands]
       elif self.shared:
         link_shared_commands = [' '.join(
             [Env.LINK_SHARED, self.OutputName(is_library=True, is_shared=True)]
-            + obj_files + [Env.LINKFLAGS] + self.cc_obj_files[1:])]
+            + obj_files + self.cc_obj_files[1:] + [Env.LINKFLAGS])]
         self.command_groups = [cpp_commands, link_commands, link_shared_commands]
       else:
         self.command_groups = [cpp_commands, link_commands]
