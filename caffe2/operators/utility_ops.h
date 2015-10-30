@@ -136,6 +136,7 @@ class AliasOp final : public Operator<Context> {
   }
 
   INPUT_OUTPUT_STATS(1, 1, 1, 1);
+  IN_PLACE_ALLOWED({0, 0});
   DISABLE_COPY_AND_ASSIGN(AliasOp);
 };
 
