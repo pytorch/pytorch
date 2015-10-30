@@ -29,10 +29,11 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
       // You are essentially responsible for managing potential conflicts of the
       // shared workspace yourself, and you need to make sure that this name
       // does not conflict with some other blob names in the compute graph.
-      cudnn_ws_ = ws->CreateBlob(shared_ws_name_);
+      cudnn_ws_ = ws->CreateBlob(shared_ws_name_)
+          ->GetMutable<CuDNNWorkspaceWrapper>();
     } else {
       // We will maintain a local workspace.
-      local_cudnn_ws_.reset(new Blob());
+      local_cudnn_ws_.reset(new CuDNNWorkspaceWrapper());
       cudnn_ws_ = local_cudnn_ws_.get();
     }
   }
@@ -49,9 +50,12 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
       CuDNNWorkspaceWrapper* cudnn_ws_wrapper) = 0;
 
   bool RunOnDevice() final {
-    auto* cudnn_ws_wrapper = cudnn_ws_->GetMutable<CuDNNWorkspaceWrapper>();
-    std::lock_guard<std::mutex> lock(cudnn_ws_wrapper->mutex());
-    return RunWithCudnnWorkspace(cudnn_ws_wrapper);
+    std::lock_guard<std::mutex> lock(cudnn_ws_->mutex());
+    bool success = RunWithCudnnWorkspace(cudnn_ws_);
+    // Since we will release the lock guard, we need to finish all the
+    // device computation explicitly so the cudnn execution finishes.
+    success &= device_context_.FinishDeviceComputation();
+    return success;
   }
 
  protected:
@@ -67,8 +71,8 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
   const size_t cudnn_ws_nbytes_limit_;
   string shared_ws_name_;
   size_t cudnn_ws_nbytes_;
-  Blob* cudnn_ws_;
-  std::unique_ptr<Blob> local_cudnn_ws_;
+  CuDNNWorkspaceWrapper* cudnn_ws_;
+  std::unique_ptr<CuDNNWorkspaceWrapper> local_cudnn_ws_;
   DISABLE_COPY_AND_ASSIGN(CudnnConvOpBase);
 };
 
@@ -212,8 +216,8 @@ bool CudnnConvOp<T>::RunWithCudnnWorkspace(
       algo_, cudnn_ws_wrapper->Get(cudnn_ws_nbytes_), cudnn_ws_nbytes_, &kZero,
       top_desc_, Y->template mutable_data<T>()));
   // Bias
-  CUDNN_CHECK(cudnnAddTensor(
-    cudnn_wrapper_.cudnn_handle(), CUDNN_ADD_SAME_C, &kOne, bias_desc_,
+  CUDNN_CHECK(cudnnAddTensor_v3(
+    cudnn_wrapper_.cudnn_handle(), &kOne, bias_desc_,
     bias.template data<T>(), &kOne, top_desc_, Y->template mutable_data<T>()));
   // Done.
   return true;
