@@ -4,28 +4,28 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
-#include "glog/logging.h"
+#include "caffe2/core/logging.h"
 
 namespace caffe2 {
 
-template <typename dtype, class DeviceContext>
-class LabelCrossEntropyOp final : public Operator<dtype, DeviceContext> {
+template <typename T, class Context>
+class LabelCrossEntropyOp final : public Operator<Context> {
  public:
   USE_SIMPLE_CTOR_DTOR(LabelCrossEntropyOp);
   USE_OPERATOR_BASE_FUNCTIONS;
   bool RunOnDevice() override;
 
  protected:
-  static constexpr dtype kLOG_THRESHOLD() { return 1e-20; }
+  static constexpr T kLOG_THRESHOLD() { return 1e-20; }
   // Input: X, label
   // Output: Y
   INPUT_OUTPUT_STATS(2, 2, 1, 1);
   DISABLE_COPY_AND_ASSIGN(LabelCrossEntropyOp);
 };
 
-template <typename dtype, class DeviceContext>
+template <typename T, class Context>
 class LabelCrossEntropyGradientOp final
-    : public Operator<dtype, DeviceContext> {
+    : public Operator<Context> {
  public:
   USE_SIMPLE_CTOR_DTOR(LabelCrossEntropyGradientOp);
   USE_OPERATOR_BASE_FUNCTIONS;
@@ -34,7 +34,7 @@ class LabelCrossEntropyGradientOp final
  protected:
   // Input: X, label, dY
   // Ouptut: dX. There is no gradient with respect to the label.
-  static constexpr dtype kLOG_THRESHOLD() { return 1e-20; }
+  static constexpr T kLOG_THRESHOLD() { return 1e-20; }
   INPUT_OUTPUT_STATS(3, 3, 1, 1);
   DISABLE_COPY_AND_ASSIGN(LabelCrossEntropyGradientOp);
 };

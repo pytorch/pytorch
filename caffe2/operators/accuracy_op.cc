@@ -5,16 +5,16 @@ namespace caffe2 {
 template <>
 bool AccuracyOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(PREDICTION);
-  auto& label = OperatorBase::Input<Tensor<int, CPUContext> >(LABEL);
+  auto& label = Input(LABEL);
   auto* Y = Output(0);
-  DCHECK_EQ(X.ndim(), 2);
+  CAFFE_DCHECK_EQ(X.ndim(), 2);
   int N = X.dim(0);
   int D = X.dim(1);
-  DCHECK_EQ(label.ndim(), 1);
-  DCHECK_EQ(label.dim(0), N);
+  CAFFE_DCHECK_EQ(label.ndim(), 1);
+  CAFFE_DCHECK_EQ(label.dim(0), N);
   Y->Reshape(std::vector<int>{1});
-  const auto* Xdata = X.data();
-  const auto* labeldata = label.data();
+  const auto* Xdata = X.data<float>();
+  const auto* labeldata = label.data<int>();
   int correct = 0;
   for (int i = 0; i < N; ++i) {
     float maxval = std::numeric_limits<float>::lowest();
@@ -29,8 +29,8 @@ bool AccuracyOp<float, CPUContext>::RunOnDevice() {
       ++correct;
     }
   }
-  DCHECK_LE(correct, N);
-  Y->mutable_data()[0] = static_cast<float>(correct) / N;
+  CAFFE_DCHECK_LE(correct, N);
+  Y->mutable_data<float>()[0] = static_cast<float>(correct) / N;
   return true;
 }
 

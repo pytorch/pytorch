@@ -24,40 +24,40 @@ __global__ void LabelCrossEntropyGradientKernel(
 template <>
 bool LabelCrossEntropyOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
-  auto& label = OperatorBase::Input<Tensor<int, CUDAContext> >(1);
+  auto& label = Input(1);
   auto* Y = Output(0);
-  DCHECK_EQ(X.ndim(), 2);
+  CAFFE_DCHECK_EQ(X.ndim(), 2);
   int N = X.dim(0);
   int D = X.dim(1);
-  DCHECK_EQ(label.ndim(), 1);
-  DCHECK_EQ(label.dim(0), N);
+  CAFFE_DCHECK_EQ(label.ndim(), 1);
+  CAFFE_DCHECK_EQ(label.dim(0), N);
   Y->Reshape(std::vector<int>(1, N));
   LabelCrossEntropyKernel<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS,
                             0, device_context_.cuda_stream()>>>(
-      N, D, X.data(), label.data(), kLOG_THRESHOLD(), Y->mutable_data());
+      N, D, X.data<float>(), label.data<int>(), kLOG_THRESHOLD(), Y->mutable_data<float>());
   return true;
 }
 
 template <>
 bool LabelCrossEntropyGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
-  auto& label = OperatorBase::Input<Tensor<int, CUDAContext> >(1);
+  auto& label = Input(1);
   auto& dY = Input(2);
   auto* dX = Output(0);
-  DCHECK_EQ(X.ndim(), 2);
+  CAFFE_DCHECK_EQ(X.ndim(), 2);
   int N = X.dim(0);
   int D = X.dim(1);
-  DCHECK_EQ(label.ndim(), 1);
-  DCHECK_EQ(label.dim(0), N);
-  DCHECK_EQ(dY.ndim(), 1);
-  DCHECK_EQ(dY.dim(0), N);
+  CAFFE_DCHECK_EQ(label.ndim(), 1);
+  CAFFE_DCHECK_EQ(label.dim(0), N);
+  CAFFE_DCHECK_EQ(dY.ndim(), 1);
+  CAFFE_DCHECK_EQ(dY.dim(0), N);
   dX->ReshapeLike(X);
   math::Set<float, CUDAContext>(
-      dX->size(), 0.f, dX->mutable_data(), &device_context_);
+      dX->size(), 0.f, dX->mutable_data<float>(), &device_context_);
   LabelCrossEntropyGradientKernel<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS,
                                     0, device_context_.cuda_stream()>>>(
-      N, D, X.data(), label.data(), dY.data(), kLOG_THRESHOLD(),
-      dX->mutable_data());
+      N, D, X.data<float>(), label.data<int>(), dY.data<float>(), kLOG_THRESHOLD(),
+      dX->mutable_data<float>());
   return true;
 }
 

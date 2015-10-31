@@ -1,12 +1,12 @@
 #include <iostream>
 
 #include "caffe2/operators/tensor_protos_db_input.h"
-#include "gflags/gflags.h"
+#include "caffe2/core/flags.h"
 #include "gtest/gtest.h"
 
-DECLARE_string(caffe_test_root);
+CAFFE2_DECLARE_string(caffe_test_root);
 
-const char* kTestDBPath = "/data/mnist/mnist-train-minidb";
+const char* kTestDBPath = "/data/mnist/mnist-train-nhwc-minidb";
 
 namespace caffe2 {
 
@@ -36,11 +36,11 @@ static void TestMNISTLoad(const int batch_size) {
     EXPECT_TRUE(op->Run());
     // Inspect the result
     auto* data_blob = ws.GetBlob("data");
-    EXPECT_TRUE((data_blob->IsType<Tensor<float, CPUContext> >()));
+    EXPECT_TRUE((data_blob->IsType<TensorCPU>()));
     auto* label_blob = ws.GetBlob("label");
-    EXPECT_TRUE((label_blob->IsType<Tensor<int, CPUContext> >()));
-    auto& data_tensor = data_blob->Get<Tensor<float, CPUContext> >();
-    auto& label_tensor = label_blob->Get<Tensor<int, CPUContext> >();
+    EXPECT_TRUE((label_blob->IsType<TensorCPU>()));
+    auto& data_tensor = data_blob->Get<TensorCPU>();
+    auto& label_tensor = label_blob->Get<TensorCPU>();
     EXPECT_EQ(data_tensor.ndim(), 4);
     EXPECT_EQ(data_tensor.dim(0), batch_size);
     EXPECT_EQ(data_tensor.dim(1), 28);
@@ -64,7 +64,7 @@ static void TestMNISTLoad(const int batch_size) {
     */
     for (int i = 0; i < batch_size; ++i) {
       if (iter * batch_size + i < kLabelsToCheck) {
-        EXPECT_EQ(label_tensor.data()[i], kLabels[iter * batch_size + i]);
+        EXPECT_EQ(label_tensor.data<int>()[i], kLabels[iter * batch_size + i]);
       }
     }
   }

@@ -14,20 +14,20 @@ class IterOp final : public OperatorBase {
       : OperatorBase(operator_def, ws) {}
 
   bool Run() override {
-    if (!OperatorBase::OutputIsType<Tensor<int, CPUContext> >(0)) {
+    if (!OperatorBase::OutputIsType<TensorCPU>(0)) {
       // This is the first run; set the iter to start with 0.
-      auto* output = OperatorBase::Output<Tensor<int, CPUContext> >(0);
-      VLOG(1) << "Initializing iter counter with 0";
+      auto* output = OperatorBase::Output<TensorCPU>(0);
+      CAFFE_VLOG(1) << "Initializing iter counter with 0";
       output->Reshape(std::vector<int>{1});
-      output->mutable_data()[0] = 0;
+      output->mutable_data<int>()[0] = 0;
       return true;
     } else {
-      auto* output = OperatorBase::Output<Tensor<int, CPUContext> >(0);
-      CHECK_EQ(output->size(), 1)
+      auto* output = OperatorBase::Output<TensorCPU>(0);
+      CAFFE_CHECK_EQ(output->size(), 1)
           << "The output of IterOp exists, but not of the right size.";
-      int* iter = output->mutable_data();
-      CHECK_GE(*iter, 0) << "Previous iteration number is negative.";
-      CHECK_LT(*iter, INT_MAX) << "Overflow will happen!";
+      int* iter = output->mutable_data<int>();
+      CAFFE_CHECK_GE(*iter, 0) << "Previous iteration number is negative.";
+      CAFFE_CHECK_LT(*iter, INT_MAX) << "Overflow will happen!";
       (*iter)++;
       return true;
     }

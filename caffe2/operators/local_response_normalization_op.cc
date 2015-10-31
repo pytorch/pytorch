@@ -8,21 +8,21 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   auto& X = Input(0);
   auto* Y = Output(0);
   auto* scale = Output(1);
-  DCHECK_EQ(X.ndim(), 4);
+  CAFFE_DCHECK_EQ(X.ndim(), 4);
   const int N = X.dim(0);
   const int C = X.dim(1);
   const int H = X.dim(2);
   const int W = X.dim(3);
   const int image_size = C * H * W;
-  const float* Xdata = X.data();
+  const float* Xdata = X.data<float>();
   Y->ReshapeLike(X);
   scale->ReshapeLike(X);
-  float* Ydata = Y->mutable_data();
-  float* scale_data = scale->mutable_data();
+  float* Ydata = Y->mutable_data<float>();
+  float* scale_data = scale->mutable_data<float>();
   math::Set<float, CPUContext>(X.size(), bias_, scale_data, &device_context_);
-  Tensor<float, CPUContext> padded_square(
+  TensorCPU padded_square(
       std::vector<int>{C + size_ - 1, H, W});
-  float* padded_square_data = padded_square.mutable_data();
+  float* padded_square_data = padded_square.mutable_data<float>();
   math::Set<float, CPUContext>(padded_square.size(), 0., padded_square_data,
                                &device_context_);
   const float alpha_over_size = alpha_ / size_;
@@ -35,7 +35,7 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
     // Create the first channel scale
     for (int c = 0; c < size_; ++c) {
       math::Axpy<float, CPUContext>(
-          H * W, &alpha_over_size, padded_square_data + c * H * W,
+          H * W, alpha_over_size, padded_square_data + c * H * W,
           scale_data + image_size * n, &device_context_);
     }
     for (int c = 1; c < C; ++c) {
@@ -45,13 +45,12 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
           H * W, this_scale_slice - H * W, this_scale_slice);
       // add head
       math::Axpy<float, CPUContext>(
-          H * W, &alpha_over_size, padded_square_data + (c + size_ - 1) * H * W,
+          H * W, alpha_over_size, padded_square_data + (c + size_ - 1) * H * W,
           this_scale_slice, &device_context_);
       // subtract tail
-      // negative_aos is in order to cope with math::Axpy's requirement.
       const float negative_aos = -alpha_over_size;
       math::Axpy<float, CPUContext>(
-          H * W, &negative_aos, padded_square_data + (c - 1) * H * W,
+          H * W, -alpha_over_size, padded_square_data + (c - 1) * H * W,
           this_scale_slice, &device_context_);
     }
   }
@@ -68,20 +67,20 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   auto& X = Input(0);
   auto* Y = Output(0);
   auto* scale = Output(1);
-  DCHECK_EQ(X.ndim(), 4);
+  CAFFE_DCHECK_EQ(X.ndim(), 4);
   const int N = X.dim(0);
   const int H = X.dim(1);
   const int W = X.dim(2);
   const int C = X.dim(3);
   const int num_rows = N * H * W;
-  const float* Xdata = X.data();
+  const float* Xdata = X.data<float>();
   Y->ReshapeLike(X);
   scale->ReshapeLike(X);
-  float* Ydata = Y->mutable_data();
-  float* scale_data = scale->mutable_data();
+  float* Ydata = Y->mutable_data<float>();
+  float* scale_data = scale->mutable_data<float>();
 
-  Tensor<float, CPUContext> padded_square(std::vector<int>(1, C + size_ - 1));
-  float* padded_square_data = padded_square.mutable_data();
+  TensorCPU padded_square(std::vector<int>(1, C + size_ - 1));
+  float* padded_square_data = padded_square.mutable_data<float>();
   math::Set<float, CPUContext>(padded_square.size(), 0., padded_square_data,
                                &device_context_);
   const float alpha_over_size = alpha_ / size_;
@@ -114,7 +113,7 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   auto& scale = Input(2);
   auto& dY = Input(3);
   auto* dX = Output(0);
-  DCHECK_EQ(X.ndim(), 4);
+  CAFFE_DCHECK_EQ(X.ndim(), 4);
   const int N = X.dim(0);
   const int C = X.dim(1);
   const int H = X.dim(2);
@@ -122,24 +121,24 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   const int image_size = C * H * W;
   // Loosely checking the size, assuming that the shapes will be the same as
   // long as the sizes check out.
-  DCHECK_EQ(X.size(), Y.size());
-  DCHECK_EQ(X.size(), scale.size());
-  DCHECK_EQ(X.size(), dY.size());
+  CAFFE_DCHECK_EQ(X.size(), Y.size());
+  CAFFE_DCHECK_EQ(X.size(), scale.size());
+  CAFFE_DCHECK_EQ(X.size(), dY.size());
   dX->ReshapeLike(X);
 
-  const float* Xdata = X.data();
-  const float* Ydata = Y.data();
-  const float* scale_data = scale.data();
-  const float* dYdata = dY.data();
-  float* dXdata = dX->mutable_data();
+  const float* Xdata = X.data<float>();
+  const float* Ydata = Y.data<float>();
+  const float* scale_data = scale.data<float>();
+  const float* dYdata = dY.data<float>();
+  float* dXdata = dX->mutable_data<float>();
 
-  Tensor<float, CPUContext> padded_ratio(
+  TensorCPU padded_ratio(
       std::vector<int>{C + size_ - 1, H, W});
-  float* padded_ratio_data = padded_ratio.mutable_data();
+  float* padded_ratio_data = padded_ratio.mutable_data<float>();
   math::Set<float, CPUContext>(padded_ratio.size(), 0., padded_ratio_data,
                                &device_context_);
-  Tensor<float, CPUContext> accum_ratio(std::vector<int>{H, W});
-  float* accum_ratio_data = accum_ratio.mutable_data();
+  TensorCPU accum_ratio(std::vector<int>{H, W});
+  float* accum_ratio_data = accum_ratio.mutable_data<float>();
 
 
   const float cache_ratio = 2. * alpha_ * beta_ / size_;
@@ -159,8 +158,7 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
     math::Set<float, CPUContext>(accum_ratio.size(), 0., accum_ratio_data,
                                  &device_context_);
     for (int c = 0; c < size_ - 1; ++c) {
-      static const float kOne = 1.;
-      math::Axpy<float, CPUContext>(H * W, &(kOne),
+      math::Axpy<float, CPUContext>(H * W, 1,
                                     padded_ratio_data + c * H * W,
                                     accum_ratio_data, &device_context_);
     }
@@ -185,29 +183,29 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   auto& scale = Input(2);
   auto& dY = Input(3);
   auto* dX = Output(0);
-  DCHECK_EQ(X.ndim(), 4);
+  CAFFE_DCHECK_EQ(X.ndim(), 4);
   const int N = X.dim(0);
   const int H = X.dim(1);
   const int W = X.dim(2);
   const int C = X.dim(3);
   // Loosely checking the size, assuming that the shapes will be the same as
   // long as the sizes check out.
-  DCHECK_EQ(X.size(), Y.size());
-  DCHECK_EQ(X.size(), scale.size());
-  DCHECK_EQ(X.size(), dY.size());
+  CAFFE_DCHECK_EQ(X.size(), Y.size());
+  CAFFE_DCHECK_EQ(X.size(), scale.size());
+  CAFFE_DCHECK_EQ(X.size(), dY.size());
   dX->ReshapeLike(X);
-  Tensor<float, CPUContext> padded_ratio(std::vector<int>(1, C + size_ - 1));
-  float* padded_ratio_data = padded_ratio.mutable_data();
+  TensorCPU padded_ratio(std::vector<int>(1, C + size_ - 1));
+  float* padded_ratio_data = padded_ratio.mutable_data<float>();
   math::Set<float, CPUContext>(padded_ratio.size(), 0., padded_ratio_data,
                                &device_context_);
   // the ratio 2*alpha*beta/size
   const float cache_ratio = 2. * alpha_ * beta_ / size_;
   const int num_rows = N * H * W;
-  const float* Xdata = X.data();
-  const float* Ydata = Y.data();
-  const float* scale_data = scale.data();
-  const float* dYdata = dY.data();
-  float* dXdata = dX->mutable_data();
+  const float* Xdata = X.data<float>();
+  const float* Ydata = Y.data<float>();
+  const float* scale_data = scale.data<float>();
+  const float* dYdata = dY.data<float>();
+  float* dXdata = dX->mutable_data<float>();
   for (int n = 0; n < num_rows; ++n) {
     const int offset = n * C;
     for (int c = 0; c < C; ++c) {

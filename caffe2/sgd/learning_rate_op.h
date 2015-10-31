@@ -9,56 +9,56 @@
 
 namespace caffe2 {
 
-template <typename dtype, class DeviceContext>
-class LearningRateOp final : public Operator<dtype, DeviceContext> {
+template <typename T, class Context>
+class LearningRateOp final : public Operator<Context> {
  public:
   LearningRateOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<dtype, DeviceContext>(operator_def, ws), functor_(nullptr),
+      : Operator<Context>(operator_def, ws), functor_(nullptr),
         base_lr_(
             OperatorBase::template GetSingleArgument<float>(
                 "base_lr", FLT_MAX)) {
-    CHECK_NE(base_lr_, FLT_MAX) << "Base learning rate must be set.";
+    CAFFE_CHECK_NE(base_lr_, FLT_MAX) << "Base learning rate must be set.";
     const string policy = OperatorBase::GetSingleArgument<string>("policy", "");
-    CHECK(policy.size()) << "Must specify a learning rate policy.";
+    CAFFE_CHECK(policy.size()) << "Must specify a learning rate policy.";
     if (policy == "fixed") {
-      functor_.reset(new FixedLearningRate<dtype>());
+      functor_.reset(new FixedLearningRate<T>());
     } else if (policy == "step") {
       int stepsize =
           OperatorBase::template GetSingleArgument<int>("stepsize", 0);
-      dtype gamma = OperatorBase::template GetSingleArgument<float>("gamma", 0);
-      DCHECK_GT(stepsize, 0);
-      DCHECK_GT(gamma, 0);
-      functor_.reset(new StepLearningRate<dtype>(stepsize, gamma));
+      T gamma = OperatorBase::template GetSingleArgument<float>("gamma", 0);
+      CAFFE_DCHECK_GT(stepsize, 0);
+      CAFFE_DCHECK_GT(gamma, 0);
+      functor_.reset(new StepLearningRate<T>(stepsize, gamma));
     } else if (policy == "exp") {
-      dtype gamma = OperatorBase::template GetSingleArgument<float>("gamma", 0);
-      DCHECK_GT(gamma, 0);
-      functor_.reset(new ExpLearningRate<dtype>(gamma));
+      T gamma = OperatorBase::template GetSingleArgument<float>("gamma", 0);
+      CAFFE_DCHECK_GT(gamma, 0);
+      functor_.reset(new ExpLearningRate<T>(gamma));
     } else if (policy == "inv") {
-      dtype gamma = OperatorBase::template GetSingleArgument<float>("gamma", 0);
-      dtype power = OperatorBase::template GetSingleArgument<float>("power", 0);
-      DCHECK_GT(gamma, 0);
-      DCHECK_GT(power, 0);
-      functor_.reset(new InvLearningRate<dtype>(gamma, power));
+      T gamma = OperatorBase::template GetSingleArgument<float>("gamma", 0);
+      T power = OperatorBase::template GetSingleArgument<float>("power", 0);
+      CAFFE_DCHECK_GT(gamma, 0);
+      CAFFE_DCHECK_GT(power, 0);
+      functor_.reset(new InvLearningRate<T>(gamma, power));
     } else {
-      LOG(FATAL) << "Unknown learning rate policy: " << policy;
+      CAFFE_LOG_FATAL << "Unknown learning rate policy: " << policy;
     }
   }
   USE_OPERATOR_BASE_FUNCTIONS;
 
   bool RunOnDevice() override {
-    int iter = OperatorBase::Input<Tensor<int, CPUContext> >(0).data()[0];
-    dtype learning_rate = base_lr_ * (*functor_)(iter);
+    int iter = OperatorBase::Input<TensorCPU>(0).template data<int>()[0];
+    T learning_rate = base_lr_ * (*functor_)(iter);
     // Write to output.
     auto* output = Output(0);
     output->Reshape(std::vector<int>());
-    device_context_.template Copy<dtype, CPUContext, DeviceContext>(
-        1, &learning_rate, Output(0)->mutable_data());
+    device_context_.template Copy<T, CPUContext, Context>(
+        1, &learning_rate, Output(0)->template mutable_data<T>());
     return true;
   }
 
  private:
-  unique_ptr<LearningRateFunctor<dtype> > functor_;
-  dtype base_lr_;
+  unique_ptr<LearningRateFunctor<T> > functor_;
+  T base_lr_;
 
   INPUT_OUTPUT_STATS(1, 1, 1, 1);
   DISABLE_COPY_AND_ASSIGN(LearningRateOp);

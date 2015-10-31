@@ -1,3 +1,6 @@
+// Note(Yangqing): This is a very drafty class and I have not updated it for a
+// while. Only use it if you consider it necessary.
+
 // Client is a very thin wrapper over a Caffe2 interface, allowing us to do
 // a very primitive caffe network call without the need of revealing all
 // the header files inside Caffe2. Also, what we are going to deal with is

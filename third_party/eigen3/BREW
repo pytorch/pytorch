@@ -1,7 +1,24 @@
-cc_thirdparty_target(
-  name = "eigen",
-  srcs = ["BREW"],
-  commands=[],
-  # Eigen is a header-only library so there is no cc_obj_files.
-  cc_obj_files = [],
-)
+
+if Env.USE_SYSTEM_EIGEN:
+  # If we are using system eigen, this is just a dummy placeholder that does
+  # nothing.
+  cc_thirdparty_target(
+    name = "eigen",
+    srcs = ["BREW"],
+    commands=[],
+    # Eigen is a header-only library so there is no cc_obj_files.
+    cc_obj_files = [],
+  )
+else:
+  # We need to copy over the code included in Caffe.
+  cc_thirdparty_target(
+    name = "eigen",
+    srcs = ["BREW"],
+    commands=[
+      "mkdir -p $DSTDIR/include/eigen3",
+      "cp -r Eigen $DSTDIR/include/eigen3/",
+      "cp -r unsupported $DSTDIR/include/eigen3/",
+    ],
+    # Eigen is a header-only library so there is no cc_obj_files.
+    cc_obj_files = [],
+  )

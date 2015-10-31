@@ -1,0 +1,176 @@
+// Protocol Buffers - Google's data interchange format
+// Copyright 2008 Google Inc.  All rights reserved.
+// https://developers.google.com/protocol-buffers/
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are
+// met:
+//
+//     * Redistributions of source code must retain the above copyright
+// notice, this list of conditions and the following disclaimer.
+//     * Redistributions in binary form must reproduce the above
+// copyright notice, this list of conditions and the following disclaimer
+// in the documentation and/or other materials provided with the
+// distribution.
+//     * Neither the name of Google Inc. nor the names of its
+// contributors may be used to endorse or promote products derived from
+// this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+syntax = "proto3";
+
+package google.protobuf;
+
+import "google/protobuf/any.proto";
+import "google/protobuf/source_context.proto";
+
+option java_package = "com.google.protobuf";
+option java_outer_classname = "TypeProto";
+option java_multiple_files = true;
+option java_generate_equals_and_hash = true;
+option csharp_namespace = "Google.Protobuf.WellKnownTypes";
+option objc_class_prefix = "GPB";
+
+// A light-weight descriptor for a proto message type.
+message Type {
+  // The fully qualified message name.
+  string name = 1;
+  // The list of fields.
+  repeated Field fields = 2;
+  // The list of oneof definitions.
+  repeated string oneofs = 3;  // The list of oneofs declared in this Type
+  // The proto options.
+  repeated Option options = 4;
+  // The source context.
+  SourceContext source_context = 5;
+  // The source syntax.
+  Syntax syntax = 6;
+}
+
+// Field represents a single field of a message type.
+message Field {
+  // Kind represents a basic field type.
+  enum Kind {
+    // Field type unknown.
+    TYPE_UNKNOWN        = 0;
+    // Field type double.
+    TYPE_DOUBLE         = 1;
+    // Field type float.
+    TYPE_FLOAT          = 2;
+    // Field type int64.
+    TYPE_INT64          = 3;
+    // Field type uint64.
+    TYPE_UINT64         = 4;
+    // Field type int32.
+    TYPE_INT32          = 5;
+    // Field type fixed64.
+    TYPE_FIXED64        = 6;
+    // Field type fixed32.
+    TYPE_FIXED32        = 7;
+    // Field type bool.
+    TYPE_BOOL           = 8;
+    // Field type string.
+    TYPE_STRING         = 9;
+    // Field type group (deprecated proto2 type)
+    TYPE_GROUP          = 10;
+    // Field type message.
+    TYPE_MESSAGE        = 11;
+    // Field type bytes.
+    TYPE_BYTES          = 12;
+    // Field type uint32.
+    TYPE_UINT32         = 13;
+    // Field type enum.
+    TYPE_ENUM           = 14;
+    // Field type sfixed32.
+    TYPE_SFIXED32       = 15;
+    // Field type sfixed64.
+    TYPE_SFIXED64       = 16;
+    // Field type sint32.
+    TYPE_SINT32         = 17;
+    // Field type sint64.
+    TYPE_SINT64         = 18;
+  };
+
+  // Cardinality represents whether a field is optional, required, or
+  // repeated.
+  enum Cardinality {
+    // The field cardinality is unknown. Typically an error condition.
+    CARDINALITY_UNKNOWN = 0;
+    // For optional fields.
+    CARDINALITY_OPTIONAL = 1;
+    // For required fields. Not used for proto3.
+    CARDINALITY_REQUIRED = 2;
+    // For repeated fields.
+    CARDINALITY_REPEATED = 3;
+  };
+
+  // The field kind.
+  Kind kind = 1;
+  // The field cardinality, i.e. optional/required/repeated.
+  Cardinality cardinality = 2;
+  // The proto field number.
+  int32 number = 3;
+  // The field name.
+  string name = 4;
+  // The type URL (without the scheme) when the type is MESSAGE or ENUM,
+  // such as `type.googleapis.com/google.protobuf.Empty`.
+  string type_url = 6;
+  // Index in Type.oneofs. Starts at 1. Zero means no oneof mapping.
+  int32 oneof_index = 7;
+  // Whether to use alternative packed wire representation.
+  bool packed = 8;
+  // The proto options.
+  repeated Option options = 9;
+  // The JSON name for this field.
+  string json_name = 10;
+}
+
+// Enum type definition.
+message Enum {
+  // Enum type name.
+  string name = 1;
+  // Enum value definitions.
+  repeated EnumValue enumvalue = 2;
+  // Proto options for the enum type.
+  repeated Option options = 3;
+  // The source context.
+  SourceContext source_context = 4;
+  // The source syntax.
+  Syntax syntax = 5;
+}
+
+// Enum value definition.
+message EnumValue {
+  // Enum value name.
+  string name = 1;
+  // Enum value number.
+  int32 number = 2;
+  // Proto options for the enum value.
+  repeated Option options = 3;
+}
+
+// Proto option attached to messages/fields/enums etc.
+message Option {
+  // Proto option name.
+  string name = 1;
+  // Proto option value.
+  Any value = 2;
+}
+
+// Syntax specifies the syntax in which a service element was defined.
+enum Syntax {
+  // Syntax "proto2"
+  SYNTAX_PROTO2 = 0;
+  // Syntax "proto3"
+  SYNTAX_PROTO3 = 1;
+}

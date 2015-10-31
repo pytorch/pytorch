@@ -7,23 +7,20 @@
 
 namespace caffe2 {
 
-template <typename dtype, class DeviceContext>
-class ConvOp final : public ConvPoolOpBase<dtype, DeviceContext> {
+template <typename T, class Context>
+class ConvOp final : public ConvPoolOpBase<Context> {
  public:
   USE_CONV_POOL_BASE_FUNCTIONS;
   ConvOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<dtype, DeviceContext>(operator_def, ws),
-        kOne(1, &device_context_), kZero(0, &device_context_) {}
+      : ConvPoolOpBase<Context>(operator_def, ws) {}
   ~ConvOp() {}
 
   bool RunOnDeviceWithOrderNCHW() override;
   bool RunOnDeviceWithOrderNHWC() override;
 
  private:
-  Tensor<dtype, DeviceContext> col_buffer_;
-  Tensor<dtype, DeviceContext> bias_multiplier_;
-  Tensor<dtype, DeviceContext> kOne;
-  Tensor<dtype, DeviceContext> kZero;
+  Tensor<Context> col_buffer_;
+  Tensor<Context> bias_multiplier_;
   // Input: X, W, b
   // Output: Y
   INPUT_TAGS(INPUT, FILTER, BIAS);
@@ -31,23 +28,20 @@ class ConvOp final : public ConvPoolOpBase<dtype, DeviceContext> {
   DISABLE_COPY_AND_ASSIGN(ConvOp);
 };
 
-template <typename dtype, class DeviceContext>
-class ConvGradientOp final : public ConvPoolOpBase<dtype, DeviceContext> {
+template <typename T, class Context>
+class ConvGradientOp final : public ConvPoolOpBase<Context> {
  public:
   USE_CONV_POOL_BASE_FUNCTIONS;
   ConvGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<dtype, DeviceContext>(operator_def, ws),
-        kOne(1, &device_context_), kZero(0, &device_context_) {}
+      : ConvPoolOpBase<Context>(operator_def, ws) {}
   ~ConvGradientOp() {}
 
   bool RunOnDeviceWithOrderNCHW() override;
   bool RunOnDeviceWithOrderNHWC() override;
 
  private:
-  Tensor<dtype, DeviceContext> col_buffer_;
-  Tensor<dtype, DeviceContext> bias_multiplier_;
-  Tensor<dtype, DeviceContext> kOne;
-  Tensor<dtype, DeviceContext> kZero;
+  Tensor<Context> col_buffer_;
+  Tensor<Context> bias_multiplier_;
   // input: X, W, dY
   // output: dW, db, and optionally dX
   INPUT_TAGS(INPUT, FILTER, OUTPUT_GRAD);

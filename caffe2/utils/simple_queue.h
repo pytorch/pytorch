@@ -5,7 +5,7 @@
 #include <mutex>  // NOLINT
 #include <queue>
 
-#include "glog/logging.h"
+#include "caffe2/core/logging.h"
 
 namespace caffe2 {
 
@@ -39,7 +39,7 @@ class SimpleQueue {
   // Push pushes a value to the queue.
   void Push(const T& value) {
     std::unique_lock<std::mutex> mutex_lock(mutex_);
-    CHECK(!no_more_jobs_)
+    CAFFE_CHECK(!no_more_jobs_)
         << "Cannot push to a closed queue.";
     queue_.push(value);
     mutex_lock.unlock();

@@ -4,13 +4,21 @@ class CNNModelHelper(object):
   """A helper model so we can write CNN models more easily, without having to
   manually define parameter initializations and operators separately.
   """
-  def __init__(self, name, order):
+  def __init__(self, order, name=None):
+    if name is None:
+      name = "CNN"
     self.net = core.Net(name)
     self.param_init_net = core.Net(name + '_init')
     self.params = []
+    self.weights = []
+    self.biases = []
     self.order = order
     if self.order != "NHWC" and self.order != "NCHW":
-      raise ValueError("Cannot understand the CNN storage order.")
+      raise ValueError("Cannot understand the CNN storage order %s."
+                       % self.order)
+
+  def Proto(self):
+    return self.net.Proto()
 
   def Conv(self, blob_in, blob_out, dim_in, dim_out, kernel,
            weight_init, bias_init, **kwargs):
@@ -24,6 +32,8 @@ class CNNModelHelper(object):
     bias = self.param_init_net.__getattr__(bias_init[0])(
         [], blob_out + '_b', shape=[dim_out,], **bias_init[1])
     self.params.extend([weight, bias])
+    self.weights.append(weight)
+    self.biases.append(bias)
     return self.net.Conv([blob_in, weight, bias], blob_out, kernel=kernel,
                          order=self.order, **kwargs)
 
@@ -51,6 +61,8 @@ class CNNModelHelper(object):
           [], blob_out + '_gconv_%d_b' % i, shape=[dim_out / group],
           **bias_init[1])
       self.params.extend([weight, bias])
+      self.weights.append(weight)
+      self.biases.append(bias)
       conv_blobs.append(
           splitted_blobs[i].Conv([weight, bias], blob_out + '_gconv_%d' % i,
                                  kernel=kernel, order=self.order, **kwargs))
@@ -85,8 +97,13 @@ class CNNModelHelper(object):
                             order=self.order, **kwargs)[0]
 
   def AddGradientOperators(self):
-    return self.net.AddGradientOperators()
+    self.net.AddGradientOperators()
 
-  def __getattr__(self, operator_type):
+  def __getattr__(self, op_type):
     """Catch-all for all other operators, mostly those without params."""
-    return self.net.__getattr__(operator_type)
+    if not core.IsOperator(op_type):
+      raise RuntimeError(
+          'Method ' + op_type + ' is not a registered operator.')
+    return self.net.__getattr__(op_type)
+
+

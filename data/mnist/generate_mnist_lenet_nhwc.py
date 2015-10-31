@@ -18,20 +18,8 @@ DECAY = init_net.ConstantFill([], "DECAY", shape=[1], value=0.999)
 train_net = core.Net("train")
 data, label = train_net.TensorProtosDBInput(
     [], ["data", "label"], batch_size=64,
-    db="gen/data/mnist/mnist-train-minidb", db_type="minidb")
+    db="gen/data/mnist/mnist-train-nhwc-minidb", db_type="minidb")
 
-# For a fully-named version, do the following:
-"""
-conv1 = data.Conv([filter1, bias1], "conv1", kernel=5, pad=0, stride=1, order="NHWC")
-pool1, maxid1 = conv1.MaxPool([], ["pool1", "maxid1"], kernel=2, stride=2, order="NHWC")
-conv2 = pool1.Conv([filter2, bias2], "conv2", kernel=5, pad=0, stride=1, order="NHWC")
-pool2, maxid2 = conv2.MaxPool([], ["pool2", "maxid2"], kernel=2, stride=2, order="NHWC")
-flatten2 = pool2.Flatten([], "pool2_flatten")
-softmax = (flatten2.FC([W3, B3], "fc3")
-                   .Relu([], "fc3_relu")
-                   .FC([W4, B4], "pred")
-                   .Softmax([], "softmax"))
-"""
 # For an unnamed version, do the following:
 pool1, _ = (data.Conv([filter1, bias1], kernel=5, pad=0, stride=1, order="NHWC")
                 .MaxPool(outputs=2, kernel=2, stride=2, order="NHWC"))
@@ -42,16 +30,17 @@ softmax = pool2.Flatten().FC([W3, B3]).Relu().FC([W4, B4]).Softmax()
 # Cross entropy, and accuracy
 xent = softmax.LabelCrossEntropy([label], "xent")
 # The loss function.
-loss, xent_grad = xent.AveragedLoss([], ["loss", xent.Grad()])
-# Get gradient
-train_net.AddGradientOperators()
-
+loss = xent.AveragedLoss([], ["loss"])
+# Get gradient, skipping the input and flatten layers.
+train_net.AddGradientOperators(skip=1)
 accuracy = softmax.Accuracy([label], "accuracy")
 # parameter update.
 for param in [filter1, bias1, filter2, bias2, W3, B3, W4, B4]:
   train_net.WeightedSum([param, ONE, param.Grad(), LR], param)
 LR = train_net.Mul([LR, DECAY], "LR")
 train_net.Print([accuracy], [])
+train_net._net.net_type = 'dag'
+train_net._net.num_workers = 8
 
 # CPU version
 plan = core.Plan("mnist_lenet")
@@ -70,3 +59,4 @@ plan.AddStep(core.ExecutionStep("init", init_net))
 plan.AddStep(core.ExecutionStep("train", train_net, 1000))
 with open('mnist_lenet_nhwc_gpu.pbtxt', 'w') as fid:
   fid.write(str(plan.Proto()))
+

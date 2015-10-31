@@ -1193,7 +1193,7 @@ cnmemStatus_t cnmemMalloc(void **ptr, std::size_t size, cudaStream_t stream) {
         // One lock failed, quit. Reduce the damage as much as possible, though.
         if( numLocked != numChildren ) {
             for( std::size_t i = 0 ; i < numLocked ; ++i ) {
-                cnmemStatus_t lockStatus = mutexes[i]->unlock();
+                (void) mutexes[i]->unlock();
             }
             return CNMEM_STATUS_UNKNOWN_ERROR;
         }

@@ -22,7 +22,7 @@ DECAY = init_net.ConstantFill([], "DECAY", shape=[1], value=0.999)
 train_net = core.Net("train")
 data, label = train_net.TensorProtosDBInput(
     [], ["data", "label"], batch_size=64,
-    db="gen/data/mnist/mnist-train-minidb", db_type="minidb")
+    db="gen/data/mnist/mnist-train-nhwc-minidb", db_type="minidb")
 
 pool1a, _ = (data.Conv([filter1a, bias1a], kernel=5, pad=0, stride=1, order="NHWC")
                 .MaxPool(outputs=2, kernel=2, stride=2, order="NHWC"))
@@ -36,7 +36,7 @@ softmax = pool2.Flatten().FC([W3, B3]).Relu().FC([W4, B4]).Softmax()
 # Cross entropy, and accuracy
 xent = softmax.LabelCrossEntropy([label], "xent")
 # The loss function.
-loss, xent_grad = xent.AveragedLoss([], ["loss", xent.Grad()])
+loss = xent.AveragedLoss([], ["loss"])
 # Get gradient
 train_net.AddGradientOperators()
 accuracy = softmax.Accuracy([label], "accuracy")

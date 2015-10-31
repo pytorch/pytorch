@@ -5,10 +5,9 @@ cc_binary(
   ],
   deps = [
       "//caffe/proto:caffe_proto",
+      "//caffe2/core:core",
       "//caffe2/db:db",
       "//caffe2/proto:caffe2_proto",
-      "//third_party/gflags:gflags",
-      "//third_party/glog:glog",
   ],
 )
 
@@ -18,9 +17,8 @@ cc_binary(
       "convert_db.cc",
   ],
   deps = [
+      "//caffe2/core:core",
       "//caffe2/db:db",
-      "//third_party/gflags:gflags",
-      "//third_party/glog:glog",
   ],
 )
 
@@ -33,8 +31,6 @@ cc_binary(
       "//caffe2/core:core",
       "//caffe2/proto:caffe2_proto",
       "//third_party/leveldb:leveldb",
-      "//third_party/gflags:gflags",
-      "//third_party/glog:glog",
       "//third_party/opencv:opencv_core",
       "//third_party/opencv:opencv_highgui",
       "//third_party/opencv:opencv_imgproc",
@@ -47,9 +43,8 @@ cc_binary(
       "db_throughput.cc",
   ],
   deps = [
+      "//caffe2/core:core",
       "//caffe2/db:db",
-      "//third_party/gflags:gflags",
-      "//third_party/glog:glog",
   ],
 )
 
@@ -59,10 +54,9 @@ cc_binary(
       "make_cifar_db.cc",
   ],
   deps = [
+      "//caffe2/core:core",
       "//caffe2/db:db",
       "//caffe2/proto:caffe2_proto",
-      "//third_party/gflags:gflags",
-      "//third_party/glog:glog",
   ],
 )
 
@@ -72,10 +66,9 @@ cc_binary(
       "make_image_db.cc",
   ],
   deps = [
+      "//caffe2/core:core",
       "//caffe2/db:db",
       "//caffe2/proto:caffe2_proto",
-      "//third_party/gflags:gflags",
-      "//third_party/glog:glog",
       "//third_party/opencv:opencv_core",
       "//third_party/opencv:opencv_highgui",
       "//third_party/opencv:opencv_imgproc",
@@ -88,10 +81,9 @@ cc_binary(
       "make_mnist_db.cc",
   ],
   deps = [
+      "//caffe2/core:core",
       "//caffe2/db:db",
       "//caffe2/proto:caffe2_proto",
-      "//third_party/gflags:gflags",
-      "//third_party/glog:glog",
   ],
 )
 
@@ -117,8 +109,6 @@ cc_binary(
       "//caffe2:all_available_ops",
       "//caffe2/db:db",
       "//caffe2/utils:proto_utils",
-      "//third_party/gflags:gflags",
-      "//third_party/glog:glog",
   ],
 )
 
@@ -132,8 +122,6 @@ cc_binary(
       "//caffe2/core:core",
       "//caffe2/db:db",
       "//caffe2/utils:proto_utils",
-      "//third_party/gflags:gflags",
-      "//third_party/glog:glog",
   ],
 )
 
@@ -147,10 +135,8 @@ cc_binary(
       "//caffe2/core:core",
       "//caffe2/db:db",
       "//caffe2/utils:proto_utils",
-      "//third_party/gflags:gflags",
-      "//third_party/glog:glog",
+      "//third_party/openmpi:openmpi",
   ],
-  external_libs = Env.MPI_LIBS,
 )
 
 cc_binary(
@@ -159,8 +145,8 @@ cc_binary(
       "inspect_gpus.cc",
   ],
   deps = [
+      "//caffe2/core:core",
       "//caffe2/core:core_gpu",
-      "//third_party/glog:glog",
   ],
 )
 
@@ -170,9 +156,8 @@ cc_binary(
       "split_db.cc",
   ],
   deps = [
+      "//caffe2/core:core",
       "//caffe2/db:db",
-      "//third_party/gflags:gflags",
-      "//third_party/glog:glog",
   ],
 )
 
@@ -182,10 +167,9 @@ cc_binary(
       "zmq_feeder.cc",
   ],
   deps = [
+      "//caffe2/core:core",
       "//caffe2/db:db",
       "//caffe2/utils:zmq_hpp",
-      "//third_party/gflags:gflags",
-      "//third_party/glog:glog",
       "//third_party/libzmq:libzmq",
   ],
 )

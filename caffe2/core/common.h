@@ -8,8 +8,6 @@
 
 namespace caffe2 {
 
-using std::string;
-using std::unique_ptr;
 // Note(Yangqing): NVCC does not play well with unordered_map on some platforms,
 // forcing us to use std::map instead of unordered_map. This may affect speed
 // in some cases, but in most of the computation code we do not access map very
@@ -18,10 +16,20 @@ using std::unique_ptr;
 template <typename Key, typename Value>
 using CaffeMap = std::map<Key, Value>;
 // using CaffeMap = std::unordered_map;
+
+// Using statements for common classes that we refer to in caffe2 very often.
+// Note that we only place it inside caffe2 so the global namespace is not
+// polluted.
+using std::string;
+using std::unique_ptr;
 using std::vector;
 
+// Half float definition.
+static_assert(sizeof(unsigned short) == 2, "Short on this platform is not 16 bit.");
+typedef unsigned short float16;
+
 // Just in order to mark things as not implemented. Do not use in final code.
-#define NOT_IMPLEMENTED LOG(FATAL) << "Not Implemented."
+#define NOT_IMPLEMENTED CAFFE_LOG_FATAL << "Not Implemented."
 
 // suppress an unused variable.
 #define UNUSED_VARIABLE __attribute__((unused))
@@ -34,6 +42,14 @@ private:                                                                       \
   classname& operator=(const classname&)
 
 
+/**
+ * Gets the gradient name for a blob.
+ *
+ * This is a legacy function that I placed here in the initial refactoring. In
+ * retrospect, the gradient name probably should not be a first-class citizen
+ * especially in a file as common as common.h. As a result it is very likely
+ * that we will remove it or move it to a more proper location.
+ */
 inline string GetGradientName(const string& name) {
   return name + ".grad";
 }

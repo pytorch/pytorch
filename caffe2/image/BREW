@@ -19,9 +19,11 @@ cc_library(
   whole_archive = True,
 )
 
-cuda_library(
+cc_library(
   name = "image_ops_gpu",
-  srcs = Glob(["*_gpu.cc"]) + Glob(["*.cu"]),
+  srcs = [
+      "image_input_op_gpu.cc",
+  ],
   deps = [
       ":image_ops",
       "//caffe2/core:core_gpu",

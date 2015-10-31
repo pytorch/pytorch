@@ -14,7 +14,7 @@ bool HasCudaGPU() {
   // cudaGetDeviceCount() should only return the above two errors. If
   // there are other kinds of errors, maybe you have called some other
   // cuda functions before HasCudaGPU().
-  CHECK(err == cudaSuccess)
+  CAFFE_CHECK(err == cudaSuccess)
       << "Unexpected error from cudaGetDeviceCount(). Did you run some "
          "cuda functions before calling HasCudaGPU()?";
   return true;
@@ -22,7 +22,7 @@ bool HasCudaGPU() {
 
 namespace {
 int gDefaultGPUID = 0;
-}
+}  // namespace
 
 void SetDefaultGPUID(const int deviceid) { gDefaultGPUID = deviceid; }
 int GetDefaultGPUID() { return gDefaultGPUID; }
@@ -59,7 +59,7 @@ void DeviceQuery(const int device) {
      << std::endl;
   ss << "Kernel execution timeout:      "
      << (prop.kernelExecTimeoutEnabled ? "Yes" : "No") << std::endl;
-  LOG(INFO) << ss.str();
+  CAFFE_LOG_INFO << ss.str();
   return;
 }
 
@@ -69,7 +69,6 @@ bool GetCudaPeerAccessPattern(vector<vector<bool> >* pattern) {
   if (cudaGetDeviceCount(&gpu_count) != cudaSuccess) return false;
   pattern->clear();
   pattern->resize(gpu_count, vector<bool>(gpu_count, false));
-  int can_access;
   for (int i = 0; i < gpu_count; ++i) {
     for (int j = 0; j < gpu_count; ++j) {
       int can_access = true;
@@ -79,7 +78,7 @@ bool GetCudaPeerAccessPattern(vector<vector<bool> >* pattern) {
           return false;
         }
       }
-      (*pattern)[i][j] = can_access;
+      (*pattern)[i][j] = static_cast<bool>(can_access);
     }
   }
   return true;
@@ -154,7 +153,7 @@ const char* curandGetErrorString(curandStatus_t error) {
 bool Caffe2EnableCudaPeerAccess() {
   // If the current run does not have any cuda devices, do nothing.
   if (!HasCudaGPU()) {
-    LOG(INFO) << "No cuda gpu present. Skipping.";
+    CAFFE_LOG_INFO << "No cuda gpu present. Skipping.";
     return true;
   }
   int device_count;
@@ -163,7 +162,7 @@ bool Caffe2EnableCudaPeerAccess() {
   CUDA_CHECK(cudaGetDevice(&init_device));
   for (int i = 0; i < device_count; ++i) {
     if (cudaSetDevice(i) != cudaSuccess) {
-      LOG(ERROR) << "Cannot use device " << i
+      CAFFE_LOG_ERROR << "Cannot use device " << i
                  << ", skipping setting peer access for this device.";
       continue;
     }
@@ -172,7 +171,7 @@ bool Caffe2EnableCudaPeerAccess() {
       int can_access;
       CUDA_CHECK(cudaDeviceCanAccessPeer(&can_access, i, j));
       if (can_access) {
-        LOG(INFO) << "Enabling peer access from " << i << " to " << j;
+        CAFFE_LOG_INFO << "Enabling peer access from " << i << " to " << j;
         // Note: just for future reference, the 0 here is not a gpu id, it is
         // a reserved flag for cudaDeviceEnablePeerAccess that should always be
         // zero currently.

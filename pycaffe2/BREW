@@ -5,8 +5,8 @@ cc_library(
       "//caffe2:all_available_ops",
       "//caffe2/core:core",
       "//caffe2/db:db",
+      "//third_party/python_libs:python_libs",
   ],
-  external_libs = Env.PYTHON_LIBS,
   shared = True,
 )
 
@@ -17,9 +17,9 @@ cc_library(
       "//caffe2:all_available_ops",
       "//caffe2/core:core",
       "//caffe2/db:db",
+      "//third_party/python_libs:python_libs",
   ],
   cflags=["-DPYCAFFE2_CPU_ONLY"],
-  external_libs = Env.PYTHON_LIBS,
   shared = True,
 )
 
@@ -96,6 +96,26 @@ py_test(
   name = "gradient_check_test",
   srcs = [
       "gradient_check_test.py",
+  ],
+  deps = [
+      ":pycaffe2",
+  ],
+)
+
+py_test(
+  name = "model_device_test",
+  srcs = [
+      "model_device_test.py",
+  ],
+  deps = [
+      ":pycaffe2",
+  ],
+)
+
+py_test(
+  name = "core_gradients_test",
+  srcs = [
+      "core_gradients_test.py",
   ],
   deps = [
       ":pycaffe2",

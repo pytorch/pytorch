@@ -1,41 +1,53 @@
-cc_library(
-  name = "core",
+cc_headers(
+  name = "core_headers",
   srcs = [
-      "blob_serialization.cc",
-      "client.cc",
-      "db.cc",
-      "minidb.cc",
-      "net.cc",
-      "operator.cc",
-      "typeid.cc",
-      "workspace.cc",
-  ],
-  hdrs = [
       "blob.h",
       "blob_serialization.h",
       "client.h",
       "common.h",
       "context.h",
       "db.h",
+      "flags.h",
+      "logging.h",
+      "logging_is_google_glog.h",
+      "logging_is_not_google_glog.h",
       "init.h",
       "net.h",
       "operator.h",
       "registry.h",
+      "tensor.h",
       "typeid.h",
       "types.h",
       "workspace.h"
   ],
+)
+
+cc_library(
+  name = "core",
+  srcs = [
+      "blob_serialization.cc",
+      "client.cc",
+      "db.cc",
+      "flags.cc",
+      "init.cc",
+      "logging.cc",
+      "net.cc",
+      "operator.cc",
+      "workspace.cc",
+  ],
   deps = [
+    ":core_headers",
     "//caffe2/proto:caffe2_proto",
     "//caffe2/utils:proto_utils",
     "//caffe2/utils:simple_queue",
-    "//third_party/glog:glog",
-    "//third_party/gflags:gflags",
-  ],
+  ] + (
+      ["//third_party/glog:glog"]
+      if '-DCAFFE2_USE_GOOGLE_GLOG' in Env.CFLAGS else []
+  ),
   whole_archive = True,
 )
 
-cuda_library(
+cc_library(
   name = "core_gpu",
   srcs = [
     "blob_serialization_gpu.cc",
@@ -69,9 +81,12 @@ cc_test(
   srcs = [
       "blob_test.cc",
       "context_test.cc",
+      "init_test.cc",
       "operator_test.cc",
       "parallel_net_test.cc",
-      "workspace_test.cc"
+      "registry_test.cc",
+      "typeid_test.cc",
+      "workspace_test.cc",
   ],
   deps = [
       ":core",
@@ -92,6 +107,8 @@ cc_test(
   ],
 )
 
+# cuda_memorypool_test has to be run independently because the setup and
+# teardown of the memory pool operations.
 cc_test(
   name = "cuda_memorypool_test",
   srcs = [
@@ -103,24 +120,3 @@ cc_test(
       "//gtest:caffe2_gtest_main",
   ],
 )
-
-cc_test(
-  name = "registry_test",
-  srcs = ["registry_test.cc"],
-  deps = [
-      ":core",
-      "//gtest:gtest",
-      "//gtest:caffe2_gtest_main",
-  ],
-)
-
-cc_test(
-  name = "init_test",
-  srcs = ["init_test.cc"],
-  deps = [
-      ":core",
-      "//gtest:gtest",
-      "//gtest:caffe2_gtest_main",
-  ],
-)
-

@@ -5,23 +5,23 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/proto/caffe2_legacy.pb.h"
 #include "caffe2/utils/math.h"
-#include "glog/logging.h"
+#include "caffe2/core/logging.h"
 
 // This macro is here just to allow us to experiment with padding values that
 // determines, when we have an odd number of pads, which side gets the one
 // additional pad value, the head side, or the tail side. Setting it to false
 // will enable the distbelief behavior, and setting it to true will enable
 // a behavior more consistent with Caffe and CuDNN.
-const bool PAD_HEAD_MORE = false;
+const bool CAFFE2_PAD_HEAD_MORE = false;
 
 namespace caffe2 {
 
-template <typename dtype, class DeviceContext>
-class ConvPoolOpBase : public Operator<dtype, DeviceContext> {
+template <class Context>
+class ConvPoolOpBase : public Operator<Context> {
  public:
   USE_OPERATOR_BASE_FUNCTIONS;
   ConvPoolOpBase(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<dtype, DeviceContext>(operator_def, ws),
+      : Operator<Context>(operator_def, ws),
         legacy_pad_(static_cast<LegacyPadding>(
             OperatorBase::GetSingleArgument<int>(
                 "legacy_pad", LegacyPadding::NOTSET))),
@@ -39,14 +39,14 @@ class ConvPoolOpBase : public Operator<dtype, DeviceContext> {
         stride_w_(OperatorBase::GetSingleArgument<int>(
             "stride_w", OperatorBase::GetSingleArgument<int>("stride", 1))),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<string>("order", "NHWC"))) {
-    CHECK_GT(kernel_h_, 0);
-    CHECK_GT(kernel_w_, 0);
+            OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
+    CAFFE_CHECK_GT(kernel_h_, 0);
+    CAFFE_CHECK_GT(kernel_w_, 0);
     // For the padding, they should either be the legacy padding strategy
     // (VALID or SAME), or an explicit, non-negative value.
     if (legacy_pad_ == LegacyPadding::VALID ||
         legacy_pad_ == LegacyPadding::SAME) {
-      CHECK(!OperatorBase::HasArgument("pad") &&
+      CAFFE_CHECK(!OperatorBase::HasArgument("pad") &&
             !OperatorBase::HasArgument("pad_t") &&
             !OperatorBase::HasArgument("pad_l") &&
             !OperatorBase::HasArgument("pad_b") &&
@@ -54,27 +54,27 @@ class ConvPoolOpBase : public Operator<dtype, DeviceContext> {
           << "If you use legacy padding VALID or SAME, you should not specify "
              "any specific padding values.";
     }
-    CHECK_GE(pad_, 0);
-    CHECK_GE(pad_t_, 0);
-    CHECK_GE(pad_l_, 0);
-    CHECK_GE(pad_b_, 0);
-    CHECK_GE(pad_r_, 0);
-    CHECK_GT(stride_h_, 0);
-    CHECK_GT(stride_w_, 0);
+    CAFFE_CHECK_GE(pad_, 0);
+    CAFFE_CHECK_GE(pad_t_, 0);
+    CAFFE_CHECK_GE(pad_l_, 0);
+    CAFFE_CHECK_GE(pad_b_, 0);
+    CAFFE_CHECK_GE(pad_r_, 0);
+    CAFFE_CHECK_GT(stride_h_, 0);
+    CAFFE_CHECK_GT(stride_w_, 0);
   }
 
   // Sets the output size. The output channel is manually provided since
   // it may not be identical to the input channels.
   // This function can be used in the forward functions to obtain the output
   // sizes.
-  void SetOutputSize(const Tensor<dtype, DeviceContext>& input,
-                     Tensor<dtype, DeviceContext>* output,
+  void SetOutputSize(const Tensor<Context>& input,
+                     Tensor<Context>* output,
                      int output_channel) {
-    DCHECK_EQ(input.ndim(), 4);
-    DCHECK_GT(input.size(), 0);
+    CAFFE_DCHECK_EQ(input.ndim(), 4);
+    CAFFE_DCHECK_GT(input.size(), 0);
     int N = input.dim(0);
-    bool channel_first;
-    int C, H, W;
+    bool channel_first = false;  // initialized to suppress compiler warning.
+    int C = 0, H = 0, W = 0;  // initialized to suppress compiler warning.
     switch (order_) {
     case StorageOrder::NHWC:
       channel_first = false;
@@ -90,10 +90,10 @@ class ConvPoolOpBase : public Operator<dtype, DeviceContext> {
       W = input.dim(3);
       break;
     default:
-      LOG(FATAL) << "Unknown Storage order: " << order_;
+      CAFFE_LOG_FATAL << "Unknown Storage order: " << order_;
     }
-    CHECK_GE(H, kernel_h_);
-    CHECK_GE(W, kernel_w_);
+    CAFFE_CHECK_GE(H, kernel_h_);
+    CAFFE_CHECK_GE(W, kernel_w_);
     int output_height, output_width;
     ComputeSizeAndPad(H, stride_h_, kernel_h_,
                       &pad_t_, &pad_b_, &output_height);
@@ -106,9 +106,9 @@ class ConvPoolOpBase : public Operator<dtype, DeviceContext> {
       output->Reshape(
           std::vector<int>{N, output_height, output_width, output_channel});
     }
-    DVLOG(2) << "In: N " << N << " C " << C << " H " << H << " W " << W;
-    DVLOG(2) << "Out: C " << output_channel << " H " << output_height
-            << " W " << output_width;
+    //CAFFE_VLOG(2) << "In: N " << N << " C " << C << " H " << H << " W " << W;
+    //CAFFE_VLOG(2) << "Out: C " << output_channel << " H " << output_height
+    //        << " W " << output_width;
   }
 
   // ComputePads could be used in backward functions to figure out the padding
@@ -126,13 +126,13 @@ class ConvPoolOpBase : public Operator<dtype, DeviceContext> {
   bool RunOnDevice() override {
     switch (order_) {
     case StorageOrder::NHWC:
-      DVLOG(2) << "Running NHWC";
+      //CAFFE_VLOG(2) << "Running NHWC";
       return RunOnDeviceWithOrderNHWC();
     case StorageOrder::NCHW:
-      DVLOG(2) << "Running NCHW";
+      //CAFFE_VLOG(2) << "Running NCHW";
       return RunOnDeviceWithOrderNCHW();
     default:
-      LOG(FATAL) << "Unknown storage order: " << order_;
+      CAFFE_LOG_FATAL << "Unknown storage order: " << order_;
     }
     // To suppress old compiler warnings
     return true;
@@ -172,8 +172,8 @@ class ConvPoolOpBase : public Operator<dtype, DeviceContext> {
     if (legacy_pad_ == LegacyPadding::NOTSET) {
       // We will just use the direct padding head and tail values, but we
       // will verify that they are non-negative.
-      CHECK_GE(*pad_head, 0);
-      CHECK_GE(*pad_tail, 0);
+      CAFFE_CHECK_GE(*pad_head, 0);
+      CAFFE_CHECK_GE(*pad_tail, 0);
       *out_size = static_cast<int>(
           static_cast<float>(in_size + *pad_head + *pad_tail - kernel) / stride
           + 1);
@@ -181,7 +181,7 @@ class ConvPoolOpBase : public Operator<dtype, DeviceContext> {
       // This is in order to adapt Caffe's pooling padding case. In this case,
       // we will only use pad_head and will compute pad_tail to match the
       // old caffe pooling strategy.
-      CHECK_GE(*pad_head, 0);
+      CAFFE_CHECK_GE(*pad_head, 0);
       // Here, notice that caffe casts UP while caffe2 casts DOWN for the
       // output size computation.
       *out_size = std::ceil(
@@ -196,27 +196,28 @@ class ConvPoolOpBase : public Operator<dtype, DeviceContext> {
       int standard_out_size = static_cast<int>(
           static_cast<float>(in_size + *pad_head * 2 - kernel) / stride
           + 1);
-      CHECK_GE(*out_size, standard_out_size)
+      CAFFE_CHECK_GE(*out_size, standard_out_size)
           << "This should not happen. If this happens, double check the logic "
           << "above.";
       *pad_tail = *pad_head + stride * (*out_size - standard_out_size);
     } else {
-      int legacy_target_size;
+      int pad_needed = 0;
       switch (legacy_pad_) {
       case LegacyPadding::VALID:
-        legacy_target_size =
-            std::ceil(static_cast<float>(in_size - kernel + 1) / stride);
         break;
       case LegacyPadding::SAME:
-        legacy_target_size = std::ceil(static_cast<float>(in_size) / stride);
+      {
+        int legacy_target_size =
+            std::ceil(static_cast<float>(in_size) / stride);
+        pad_needed = (legacy_target_size - 1) * stride + kernel - in_size;
         break;
-      default:
-        LOG(FATAL) << "Unsupported raw pad value.";
       }
-      int pad_needed = (legacy_target_size - 1) * stride + kernel - in_size;
+      default:
+        CAFFE_LOG_FATAL << "Unsupported raw pad value.";
+      }
       // In legacy padding, if there is an odd padding value, we will need
       // to pad more on the tail side.
-      if (PAD_HEAD_MORE) {
+      if (CAFFE2_PAD_HEAD_MORE) {
         *pad_head = (pad_needed + 1) / 2;
       } else {
         *pad_head = pad_needed / 2;
@@ -233,15 +234,15 @@ class ConvPoolOpBase : public Operator<dtype, DeviceContext> {
 
 #define USE_CONV_POOL_BASE_FUNCTIONS                                           \
   USE_OPERATOR_BASE_FUNCTIONS;                                                 \
-  using ConvPoolOpBase<dtype, DeviceContext>::pad_t_;                          \
-  using ConvPoolOpBase<dtype, DeviceContext>::pad_l_;                          \
-  using ConvPoolOpBase<dtype, DeviceContext>::pad_b_;                          \
-  using ConvPoolOpBase<dtype, DeviceContext>::pad_r_;                          \
-  using ConvPoolOpBase<dtype, DeviceContext>::kernel_h_;                       \
-  using ConvPoolOpBase<dtype, DeviceContext>::kernel_w_;                       \
-  using ConvPoolOpBase<dtype, DeviceContext>::stride_h_;                       \
-  using ConvPoolOpBase<dtype, DeviceContext>::stride_w_;                       \
-  using ConvPoolOpBase<dtype, DeviceContext>::order_
+  using ConvPoolOpBase<Context>::pad_t_;                                       \
+  using ConvPoolOpBase<Context>::pad_l_;                                       \
+  using ConvPoolOpBase<Context>::pad_b_;                                       \
+  using ConvPoolOpBase<Context>::pad_r_;                                       \
+  using ConvPoolOpBase<Context>::kernel_h_;                                    \
+  using ConvPoolOpBase<Context>::kernel_w_;                                    \
+  using ConvPoolOpBase<Context>::stride_h_;                                    \
+  using ConvPoolOpBase<Context>::stride_w_;                                    \
+  using ConvPoolOpBase<Context>::order_
 
 }  // namespace caffe2
 

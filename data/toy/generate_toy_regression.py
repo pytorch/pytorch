@@ -32,7 +32,7 @@ X = train_net.GaussianFill([], "X", shape=[64, 2], mean=0.0, std=1.0)
 Y_gt = X.FC([W_gt, B_gt], "Y_gt")
 Y_pred = X.FC([W, B], "Y_pred")
 dist = train_net.SquaredL2Distance([Y_gt, Y_pred], "dist")
-loss, dist_grad = dist.AveragedLoss([], ["loss", "dist_grad"])
+loss = dist.AveragedLoss([], ["loss"])
 # Get gradients for all the computations above. Note that in fact we don't need
 # to get the gradient the Y_gt computation, but we'll just leave it there. In
 # many cases, I am expecting one to load X and Y from the disk, so there is

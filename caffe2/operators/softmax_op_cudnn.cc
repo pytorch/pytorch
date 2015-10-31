@@ -6,37 +6,39 @@
 namespace caffe2 {
 
 namespace {
-const int NUM_DESCRIPTORS = 2;
-const int GRADIENT_NUM_DESCRIPTORS = 3;
-const int BOTTOM_DESC_ID = 0;
-const int TOP_DESC_ID = 1;
-const int TOP_GRADIENT_DESC_ID = 2;
+constexpr int NUM_DESCRIPTORS = 2;
+constexpr int GRADIENT_NUM_DESCRIPTORS = 3;
+constexpr int BOTTOM_DESC_ID = 0;
+constexpr int TOP_DESC_ID = 1;
+constexpr int TOP_GRADIENT_DESC_ID = 2;
 }  // namespace
 
 
-class CuDNNSoftmaxOp final : public Operator<float, CUDAContext> {
+class CuDNNSoftmaxOp final : public Operator<CUDAContext> {
  public:
   explicit CuDNNSoftmaxOp(const OperatorDef& def, Workspace* ws)
-      : Operator<float, CUDAContext>(def, ws),
+      : Operator<CUDAContext>(def, ws),
         cudnn_wrapper_(&device_context_) {}
   bool RunOnDevice() override;
 
  protected:
   CuDNNWrapper cudnn_wrapper_;
+  cudnnTensorDescWrapper descriptors_[NUM_DESCRIPTORS];
   INPUT_OUTPUT_STATS(1, 1, 1, 1);
   DISABLE_COPY_AND_ASSIGN(CuDNNSoftmaxOp);
 };
 
 
-class CuDNNSoftmaxGradientOp final : public Operator<float, CUDAContext> {
+class CuDNNSoftmaxGradientOp final : public Operator<CUDAContext> {
  public:
   explicit CuDNNSoftmaxGradientOp(const OperatorDef& def, Workspace* ws)
-      : Operator<float, CUDAContext>(def, ws),
+      : Operator<CUDAContext>(def, ws),
         cudnn_wrapper_(&device_context_) {}
   bool RunOnDevice() override;
 
  protected:
   CuDNNWrapper cudnn_wrapper_;
+  cudnnTensorDescWrapper descriptors_[GRADIENT_NUM_DESCRIPTORS];
   // Input: Y, dY. Output: dX
   INPUT_OUTPUT_STATS(2, 2, 1, 1);
   DISABLE_COPY_AND_ASSIGN(CuDNNSoftmaxGradientOp);
@@ -45,22 +47,19 @@ class CuDNNSoftmaxGradientOp final : public Operator<float, CUDAContext> {
 bool CuDNNSoftmaxOp::RunOnDevice() {
   auto& X = Input(0);
   auto* Y = Output(0);
-  DCHECK_EQ(X.ndim(), 2);
+  CAFFE_DCHECK_EQ(X.ndim(), 2);
   int N = X.dim(0);
   int D = X.dim(1);
   Y->ReshapeLike(X);
   const float alpha = 1.0;
   const float beta = 0.0;
   vector<int> dims{N, D, 1, 1};
-  cudnn_wrapper_.cudnnSetNumTensorDescriptors(NUM_DESCRIPTORS);
   CUDNN_CHECK(cudnnSoftmaxForward(cudnn_wrapper_.cudnn_handle(),
       CUDNN_SOFTMAX_ACCURATE, CUDNN_SOFTMAX_MODE_INSTANCE, &alpha,
-      cudnn_wrapper_.cudnnGetTensor4dDesc<float>(
-          BOTTOM_DESC_ID, CUDNN_TENSOR_NCHW, dims, nullptr),
-      X.data(), &beta,
-      cudnn_wrapper_.cudnnGetTensor4dDesc<float>(
-          TOP_DESC_ID, CUDNN_TENSOR_NCHW, dims, nullptr),
-      Y->mutable_data()));
+      descriptors_[BOTTOM_DESC_ID].Descriptor<float>(StorageOrder::NCHW, dims),
+      X.data<float>(), &beta,
+      descriptors_[TOP_DESC_ID].Descriptor<float>(StorageOrder::NCHW, dims),
+      Y->mutable_data<float>()));
   return true;
 }
 
@@ -68,27 +67,24 @@ bool CuDNNSoftmaxGradientOp::RunOnDevice() {
   auto& Y = Input(0);
   auto& dY = Input(1);
   auto* dX = Output(0);
-  DCHECK_EQ(Y.ndim(), 2);
+  CAFFE_DCHECK_EQ(Y.ndim(), 2);
   int N = Y.dim(0);
   int D = Y.dim(1);
-  DCHECK_EQ(dY.dim(0), N);
-  DCHECK_EQ(dY.dim(1), D);
+  CAFFE_DCHECK_EQ(dY.dim(0), N);
+  CAFFE_DCHECK_EQ(dY.dim(1), D);
   dX->ReshapeLike(Y);
   const float alpha = 1.0;
   const float beta = 0.0;
-  cudnn_wrapper_.cudnnSetNumTensorDescriptors(GRADIENT_NUM_DESCRIPTORS);
   vector<int> dims{N, D, 1, 1};
   CUDNN_CHECK(cudnnSoftmaxBackward(cudnn_wrapper_.cudnn_handle(),
       CUDNN_SOFTMAX_ACCURATE, CUDNN_SOFTMAX_MODE_INSTANCE, &alpha,
-      cudnn_wrapper_.cudnnGetTensor4dDesc<float>(
-          TOP_DESC_ID, CUDNN_TENSOR_NCHW, dims, nullptr),
-      Y.data(),
-      cudnn_wrapper_.cudnnGetTensor4dDesc<float>(
-          TOP_GRADIENT_DESC_ID, CUDNN_TENSOR_NCHW, dims, nullptr),
-      dY.data(), &beta,
-      cudnn_wrapper_.cudnnGetTensor4dDesc<float>(
-          BOTTOM_DESC_ID, CUDNN_TENSOR_NCHW, dims, nullptr),
-      dX->mutable_data()));
+      descriptors_[TOP_DESC_ID].Descriptor<float>(StorageOrder::NCHW, dims),
+      Y.data<float>(),
+      descriptors_[TOP_GRADIENT_DESC_ID].Descriptor<float>(
+          StorageOrder::NCHW, dims),
+      dY.data<float>(), &beta,
+      descriptors_[BOTTOM_DESC_ID].Descriptor<float>(StorageOrder::NCHW, dims),
+      dX->mutable_data<float>()));
   return true;
 }
 

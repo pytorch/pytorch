@@ -9,14 +9,13 @@ template <>
 bool MaxPoolOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   auto& X = Input(0);
   auto* Y = Output(0);
-  Tensor<int, CPUContext>* index =
-      OperatorBase::template Output<Tensor<int, CPUContext> >(1);
+  auto* maxid = Output(1);
   ConvPoolOpBase::SetOutputSize(X, Y, X.dim(1));
-  index->ReshapeLike(*Y);
+  maxid->ReshapeLike(*Y);
 
-  const float* Xdata = X.data();
-  float* Ydata = Y->mutable_data();
-  int* index_data = index->mutable_data();
+  const float* Xdata = X.data<float>();
+  float* Ydata = Y->mutable_data<float>();
+  int* maxid_data = maxid->mutable_data<int>();
   math::Set<float, CPUContext>(
       Y->size(), std::numeric_limits<float>::lowest(), Ydata, &device_context_);
   // The main loop
@@ -41,7 +40,7 @@ bool MaxPoolOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
               const int input_index = h * width + w;
               if (Xdata[input_index] > Ydata[pool_index]) {
                 Ydata[pool_index] = Xdata[input_index];
-                index_data[pool_index] = c * height * width + h * width + w;
+                maxid_data[pool_index] = c * height * width + h * width + w;
               }
             }
           }
@@ -50,7 +49,7 @@ bool MaxPoolOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
       // Do offset.
       Xdata += height * width;
       Ydata += pooled_height * pooled_width;
-      index_data += pooled_height * pooled_width;
+      maxid_data += pooled_height * pooled_width;
     }
   }
   return true;
@@ -60,17 +59,16 @@ template <>
 bool MaxPoolOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   auto& X = Input(0);
   auto* Y = Output(0);
-  Tensor<int, CPUContext>* index =
-      OperatorBase::template Output<Tensor<int, CPUContext> >(1);
+  auto* maxid = Output(1);
   int height = X.dim(1);
   int width = X.dim(2);
   int channels = X.dim(3);
   ConvPoolOpBase::SetOutputSize(X, Y, channels);
-  index->ReshapeLike(*Y);
+  maxid->ReshapeLike(*Y);
 
-  const float* Xdata = X.data();
-  float* Ydata = Y->mutable_data();
-  int* index_data = index->mutable_data();
+  const float* Xdata = X.data<float>();
+  float* Ydata = Y->mutable_data<float>();
+  int* maxid_data = maxid->mutable_data<int>();
   math::Set<float, CPUContext>(
       Y->size(), std::numeric_limits<float>::lowest(), Ydata, &device_context_);
   // The main loop
@@ -93,7 +91,7 @@ bool MaxPoolOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
             for (int c = 0; c < channels; ++c) {
               if (Xdata[input_index + c] > Ydata[pool_index + c]) {
                 Ydata[pool_index + c] = Xdata[input_index + c];
-                index_data[pool_index + c] = input_index + c;
+                maxid_data[pool_index + c] = input_index + c;
               }
             }
           }
@@ -103,7 +101,7 @@ bool MaxPoolOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
     // Do offset.
     Xdata += X.size() / X.dim(0);
     Ydata += Y->size() / Y->dim(0);
-    index_data += Y->size() / Y->dim(0);
+    maxid_data += Y->size() / Y->dim(0);
   }
   return true;
 }
@@ -112,24 +110,23 @@ template <>
 bool MaxPoolGradientOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& dY = Input(1);
-  const Tensor<int, CPUContext>& maxid =
-      OperatorBase::template Input<Tensor<int, CPUContext> >(2);
-  DCHECK_EQ(maxid.size(), dY.size());
+  auto& maxid = Input(2);
+  CAFFE_DCHECK_EQ(maxid.size(), dY.size());
   auto* dX = Output(0);
   // TODO(Yangqing): Add shape checks.
   dX->ReshapeLike(X);
+  const float* dYdata = dY.data<float>();
+  const int* maxid_data = maxid.data<int>();
+  float* dXdata = dX->mutable_data<float>();
   math::Set<float, CPUContext>(
-      X.size(), 0, dX->mutable_data(), &device_context_);
-  const float* dYdata = dY.data();
-  const int* maxid_data = maxid.data();
-  float* dXdata = dX->mutable_data();
+      X.size(), 0, dX->mutable_data<float>(), &device_context_);
   // Since we have recorded all the indices, we just need to run a simple
   // assignment pass.
   const int single_input_size = X.size() / X.dim(0);
   const int single_output_size = dY.size() / dY.dim(0);
   for (int n = 0; n < dY.dim(0); ++n) {
     for (int i = 0; i < single_output_size; ++i) {
-      // DCHECK_LT(maxid_data[i], single_input_size);
+      // CAFFE_DCHECK_LT(maxid_data[i], single_input_size);
       dXdata[maxid_data[i]] += dYdata[i];
     }
     dXdata += single_input_size;

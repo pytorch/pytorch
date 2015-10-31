@@ -6,7 +6,7 @@ namespace caffe2 {
 #define CNMEM_CHECK(condition) \
   do { \
     cnmemStatus_t error = condition; \
-    CHECK_EQ(error, CNMEM_STATUS_SUCCESS) << cnmemGetErrorString(error); \
+    CAFFE_CHECK_EQ(error, CNMEM_STATUS_SUCCESS) << cnmemGetErrorString(error); \
   } while (0)
 
 bool CudaMemoryPool::is_memory_pool_setup_ = false;
@@ -18,7 +18,7 @@ bool CudaMemoryPool::InitializeMemoryPool(
     const vector<int>& device_ids,
     const float proportion_of_memory_to_reserve) {
   if (memory_allocated_before_setup_) {
-    LOG(ERROR) << "There is cuda memory allocated before we initialize the "
+    CAFFE_LOG_ERROR << "There is cuda memory allocated before we initialize the "
                   "memory pool. This should not happen: you should either "
                   "use raw cudaMalloc and cudaFree and not initialize the "
                   "pool at all, or initialize the pool before you allocate "
@@ -26,7 +26,7 @@ bool CudaMemoryPool::InitializeMemoryPool(
     return false;
   }
   if (is_memory_pool_setup_) {
-    LOG(ERROR) << "Memory pool is already set up. I cannot set up it twice.";
+    CAFFE_LOG_ERROR << "Memory pool is already set up. I cannot set up it twice.";
     return false;
   }
 
@@ -43,14 +43,14 @@ bool CudaMemoryPool::InitializeMemoryPool(
   vector<cnmemDevice_t> cnmem_devs(device_ids.size());
   for (int i = 0; i < device_ids.size(); ++i) {
     const int device_id = device_ids[i];
-    CHECK_GE(device_id, 0);
-    CHECK_LT(device_id, device_count);
+    CAFFE_CHECK_GE(device_id, 0);
+    CAFFE_CHECK_LT(device_id, device_count);
     // This ensures we do not specify the same device twice.
-    CHECK(!memory_pool_available_for_device_[device_id]);
+    CAFFE_CHECK(!memory_pool_available_for_device_[device_id]);
     CUDA_CHECK(cudaSetDevice(device_id));
     size_t free_memory, used_memory;
     CUDA_CHECK(cudaMemGetInfo(&free_memory, &used_memory));
-    LOG(INFO) << "Reserving " << proportion_of_memory_to_reserve * 100
+    CAFFE_LOG_INFO << "Reserving " << proportion_of_memory_to_reserve * 100
               << "percent of the free memory (total " << free_memory
               << ") on device " << device_id;
     // Note: we create a dummy non-null stream for memory allocations, so that
@@ -69,7 +69,7 @@ bool CudaMemoryPool::InitializeMemoryPool(
       cnmemInit(cnmem_devs.size(), cnmem_devs.data(), CNMEM_FLAGS_DEFAULT));
   // After initialization, let's set back the device.
   CUDA_CHECK(cudaSetDevice(initial_device));
-  LOG(INFO) << "Set up memory pool.";
+  CAFFE_LOG_INFO << "Set up memory pool.";
   is_memory_pool_setup_ = true;
   return true;
 }
@@ -96,7 +96,7 @@ bool CudaMemoryPool::FinalizeMemoryPool() {
 void* CudaMemoryPool::NewWithMemoryPool(size_t nbytes) {
   int device_id;
   CUDA_CHECK(cudaGetDevice(&device_id));
-  CHECK(memory_pool_available_for_device_[device_id])
+  CAFFE_CHECK(memory_pool_available_for_device_[device_id])
       << "Trying to allocate on device " << device_id
       << ", but memory pool is not initialized on that device.";
   void* ptr;
@@ -107,8 +107,8 @@ void* CudaMemoryPool::NewWithMemoryPool(size_t nbytes) {
 void CudaMemoryPool::DeleteWithMemoryPool(void* data) {
   cudaPointerAttributes attr;
   CUDA_CHECK(cudaPointerGetAttributes(&attr, data));
-  DCHECK_EQ(attr.memoryType, cudaMemoryTypeDevice);
-  CHECK(memory_pool_available_for_device_[attr.device])
+  CAFFE_DCHECK_EQ(attr.memoryType, cudaMemoryTypeDevice);
+  CAFFE_CHECK(memory_pool_available_for_device_[attr.device])
       << "Current pointer belongs to " << attr.device
       << ", but memory pool is not initialized on that device. "
       << "Was your pointer allocated using the memory pool?";

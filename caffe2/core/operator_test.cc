@@ -21,9 +21,11 @@ TEST(OperatorTest, RegistryWorks) {
   OperatorDef op_def;
   Workspace ws;
   op_def.set_type("JustTest");
-  EXPECT_NE(nullptr, CreateOperator(op_def, &ws));
+  unique_ptr<OperatorBase> op(CreateOperator(op_def, &ws));
+  EXPECT_NE(nullptr, op.get());
   op_def.mutable_device_option()->set_device_type(CUDA);
-  EXPECT_NE(nullptr, CreateOperator(op_def, &ws));
+  op.reset(CreateOperator(op_def, &ws));
+  EXPECT_NE(nullptr, op.get());
 
   CPUOperatorRegistry()->TEST_PrintRegisteredNames();
 }
@@ -193,9 +195,9 @@ TEST(NetTest, TestScaffoldingSimpleNet) {
   EXPECT_TRUE(net->Run());
 }
 
-TEST(NetTest, TestScaffoldingParallelNet) {
+TEST(NetTest, TestScaffoldingDAGNet) {
   NetDef net_def = GetNetDefForTest();
-  net_def.set_net_type("parallel");
+  net_def.set_net_type("dag");
   net_def.set_num_workers(1);
   Workspace ws;
   EXPECT_NE(nullptr, ws.CreateBlob("input"));
@@ -207,6 +209,98 @@ TEST(NetTest, TestScaffoldingParallelNet) {
   EXPECT_TRUE(ws.HasBlob("output"));
   EXPECT_TRUE(net->Run());
 }
+
+class InPlaceNotAllowed : public OperatorBase {
+ public:
+  explicit InPlaceNotAllowed(const OperatorDef& op_def, Workspace* ws)
+      : OperatorBase(op_def, ws) {}
+  bool Run() override { return true; }
+};
+REGISTER_CPU_OPERATOR(InPlaceNotAllowed, InPlaceNotAllowed);
+
+class OneInPlaceAllowed : public OperatorBase {
+ public:
+  explicit OneInPlaceAllowed(const OperatorDef& op_def, Workspace* ws)
+      : OperatorBase(op_def, ws) {}
+  bool Run() override { return true; }
+  IN_PLACE_ALLOWED({0, 0})
+};
+REGISTER_CPU_OPERATOR(OneInPlaceAllowed, OneInPlaceAllowed);
+
+class MultipleInPlaceAllowed : public OperatorBase {
+ public:
+  explicit MultipleInPlaceAllowed(const OperatorDef& op_def, Workspace* ws)
+      : OperatorBase(op_def, ws) {}
+  bool Run() override { return true; }
+  IN_PLACE_ALLOWED({0, 0}, {1, 2})
+};
+REGISTER_CPU_OPERATOR(MultipleInPlaceAllowed, MultipleInPlaceAllowed);
+
+TEST(OperatorInPlaceTest, InPlaceNotAllowedCase) {
+  OperatorDef op_def;
+  Workspace ws;
+  EXPECT_NE(nullptr, ws.CreateBlob("input"));
+  op_def.set_type("InPlaceNotAllowed");
+  op_def.add_input("input");
+  op_def.add_output("output");
+  unique_ptr<OperatorBase> op(CreateOperator(op_def, &ws));
+  EXPECT_NE(nullptr, op.get());
+  EXPECT_TRUE(op->Verify());
+  op_def.set_output(0, "input");
+  op.reset(CreateOperator(op_def, &ws));
+  EXPECT_NE(nullptr, op.get());
+  EXPECT_FALSE(op->Verify());
+}
+
+TEST(OperatorInPlaceTest, OneInPlaceAllowedCase) {
+  OperatorDef op_def;
+  Workspace ws;
+  EXPECT_NE(nullptr, ws.CreateBlob("input"));
+  op_def.set_type("OneInPlaceAllowed");
+  op_def.add_input("input");
+  op_def.add_output("output");
+  unique_ptr<OperatorBase> op(CreateOperator(op_def, &ws));
+  EXPECT_NE(nullptr, op.get());
+  EXPECT_TRUE(op->Verify());
+  // In-place case.
+  op_def.set_output(0, "input");
+  op.reset(CreateOperator(op_def, &ws));
+  EXPECT_NE(nullptr, op.get());
+  EXPECT_TRUE(op->Verify());
+  // In-place with input id 0 and output id 1: this should not be allowed.
+  op_def.set_output(0, "output");
+  op_def.add_output("input");
+  op.reset(CreateOperator(op_def, &ws));
+  EXPECT_NE(nullptr, op.get());
+  EXPECT_FALSE(op->Verify());
+}
+
+TEST(OperatorInPlaceTest, MultipleInPlaceAllowedCase) {
+  OperatorDef op_def;
+  Workspace ws;
+  EXPECT_NE(nullptr, ws.CreateBlob("input0"));
+  EXPECT_NE(nullptr, ws.CreateBlob("input1"));
+  op_def.set_type("MultipleInPlaceAllowed");
+  op_def.add_input("input0");
+  op_def.add_input("input1");
+  op_def.add_output("output0");
+  op_def.add_output("output1");
+  op_def.add_output("output2");
+  unique_ptr<OperatorBase> op(CreateOperator(op_def, &ws));
+  EXPECT_NE(nullptr, op.get());
+  EXPECT_TRUE(op->Verify());
+  // In-place {0, 0}
+  op_def.set_output(0, "input0");
+  op.reset(CreateOperator(op_def, &ws));
+  EXPECT_NE(nullptr, op.get());
+  EXPECT_TRUE(op->Verify());
+  // In-place {0, 0}, {1, 2}
+  op_def.set_output(2, "input1");
+  op.reset(CreateOperator(op_def, &ws));
+  EXPECT_NE(nullptr, op.get());
+  EXPECT_TRUE(op->Verify());
+}
+
 
 }  // namespace caffe2
 

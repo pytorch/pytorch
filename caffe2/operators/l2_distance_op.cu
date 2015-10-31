@@ -6,13 +6,13 @@ namespace caffe2 {
 namespace {
 // TODO(Yangqing): This function does very aweful memory access.
 // Need improvement.
-template <typename dtype>
+template <typename T>
 __global__ void SquaredL2DistanceKernel(
-    const int N, const int D, const dtype* X, const dtype* Y, dtype* distance) {
+    const int N, const int D, const T* X, const T* Y, T* distance) {
   CUDA_1D_KERNEL_LOOP(i, N) {
     distance[i] = 0;
     for (int j = 0; j < D; ++j) {
-      dtype diff = X[i * D + j] - Y[i * D + j];
+      T diff = X[i * D + j] - Y[i * D + j];
       distance[i] += diff * diff;
     }
     distance[i] /= 2;
@@ -25,16 +25,16 @@ bool SquaredL2DistanceOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& Y = Input(1);
   auto* distance = Output(0);
-  DCHECK_EQ(X.ndim(), Y.ndim());
+  CAFFE_DCHECK_EQ(X.ndim(), Y.ndim());
   for (int i = 0; i < X.ndim(); ++i) {
-    DCHECK_EQ(X.dim(i), Y.dim(i));
+    CAFFE_DCHECK_EQ(X.dim(i), Y.dim(i));
   }
   int N = X.dim(0);
   int D = X.size() / X.dim(0);
   distance->Reshape(std::vector<int>(1, N));
   SquaredL2DistanceKernel<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS,
                             0, device_context_.cuda_stream()>>>(
-      N, D, X.data(), Y.data(), distance->mutable_data());
+      N, D, X.data<float>(), Y.data<float>(), distance->mutable_data<float>());
   return true;
 }
 

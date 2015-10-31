@@ -6,9 +6,10 @@
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/cuda_memorypool.h"
+#include "caffe2/core/tensor.h"
 #include "caffe2/core/types.h"
 #include "caffe2/proto/caffe2.pb.h"
-#include "glog/logging.h"
+#include "caffe2/core/logging.h"
 
 namespace caffe2 {
 
@@ -31,7 +32,7 @@ class CUDAContext {
         random_seed_(
             option.has_random_seed() ? option.random_seed() : time(NULL)),
         curand_generator_(nullptr) {
-    DCHECK_EQ(option.device_type(), CUDA);
+    CAFFE_DCHECK_EQ(option.device_type(), CUDA);
     cuda_gpu_id_ = option.has_cuda_gpu_id() ?
                    option.cuda_gpu_id() : GetDefaultGPUID();
     CUDA_CHECK(cudaSetDevice(cuda_gpu_id_));
@@ -57,7 +58,7 @@ class CUDAContext {
   inline bool FinishDeviceComputation() {
     cudaError_t error = cudaStreamSynchronize(cuda_stream_);
     if (error != cudaSuccess) {
-      LOG(ERROR) << cudaGetErrorString(error);
+      CAFFE_LOG_ERROR << cudaGetErrorString(error);
       return false;
     }
     return true;
@@ -70,8 +71,11 @@ class CUDAContext {
   cublasHandle_t& cublas_handle() {
     if (!cublas_handle_) {
       CUBLAS_CHECK(cublasCreate(&cublas_handle_));
+      // The default is CUBLAS_POINTER_MODE_HOST. You can override
+      // it after obtaining the cublas handle, but do that with
+      // caution.
       CUBLAS_CHECK(cublasSetPointerMode(
-          cublas_handle_, CUBLAS_POINTER_MODE_DEVICE));
+          cublas_handle_, CUBLAS_POINTER_MODE_HOST));
       CUBLAS_CHECK(cublasSetStream(cublas_handle_, cuda_stream_));
     }
     return cublas_handle_;
@@ -97,7 +101,7 @@ class CUDAContext {
   }
 
   template <class SrcContext, class DstContext>
-  inline void Copy(size_t nbytes, const void* src, void* dst) {
+  inline void Memcpy(size_t nbytes, const void* src, void* dst) {
     CUDA_CHECK(cudaMemcpyAsync(
         dst, src, nbytes, cudaMemcpyDefault, cuda_stream_));
     // TODO(Yangqing): do we want to synchronize inside copy?
@@ -106,7 +110,7 @@ class CUDAContext {
 
   template <typename T, class SrcContext, class DstContext>
   inline void Copy(int n, const T* src, T* dst) {
-    Copy<SrcContext, DstContext>(n * sizeof(T),
+    Memcpy<SrcContext, DstContext>(n * sizeof(T),
                                  static_cast<const void*>(src),
                                  static_cast<void*>(dst));
   }
@@ -125,8 +129,11 @@ template<>
 inline void CPUContext::Memcpy<CUDAContext, CPUContext>(
     size_t nbytes, const void* src, void* dst) {
   CUDAContext context;
-  context.Copy<CUDAContext, CPUContext>(nbytes, src, dst);
+  context.Memcpy<CUDAContext, CPUContext>(nbytes, src, dst);
 }
+
+// For simplicity, we will typedef Tensor<CPUContext> to TensorCPU.
+typedef Tensor<CUDAContext> TensorCUDA;
 
 }  // namespace caffe2
 
