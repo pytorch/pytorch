@@ -24,6 +24,10 @@ using std::string;
 using std::unique_ptr;
 using std::vector;
 
+// Half float definition.
+static_assert(sizeof(unsigned short) == 2, "Short on this platform is not 16 bit.");
+typedef unsigned short float16;
+
 // Just in order to mark things as not implemented. Do not use in final code.
 #define NOT_IMPLEMENTED CAFFE_LOG_FATAL << "Not Implemented."
 
