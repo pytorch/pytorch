@@ -6,6 +6,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <sstream>
 #include <vector>
 
 #include "caffe2/core/context.h"
@@ -423,13 +424,11 @@ PyObject* FetchBlob(PyObject* self, PyObject* args) {
     }
   }
 #endif  // !PYCAFFE2_CPU_ONLY
-
-  // If all branches failed, we should throw an error.
-  CAFFE_LOG_ERROR << "Blob" << caffe2::string(name)
-                  << " has unsupported data type: "
-                  << blob.TypeName();
-  PyErr_SetString(PyExc_TypeError, "Unsupported data type.");
-  return NULL;
+  // If all branches failed, we will return a metainfo string.
+  std::stringstream ss;
+  ss << caffe2::string(name) << ", a C++ native class of type "
+     << blob.TypeName() << ".";
+  return StdStringToPyString(ss.str());
 }
 
 PyObject* FeedBlob(PyObject* self, PyObject* args) {
