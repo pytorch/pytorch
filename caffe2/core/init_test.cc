@@ -3,7 +3,7 @@
 
 #include "caffe2/core/init.h"
 #include "gtest/gtest.h"
-#include "glog/logging.h"
+#include "caffe2/core/logging.h"
 
 namespace caffe2 {
 namespace {
@@ -23,12 +23,13 @@ TEST(InitTest, TestInitFunctionHasRun) {
   EXPECT_TRUE(gTestInitFunctionHasBeenRun);
 }
 
-TEST(InitDeathTest, CannotRerunGlobalInit) {
+TEST(InitTest, CannotRerunGlobalInit) {
   int dummy_argc = 1;
   const char* dummy_name = "foo";
   char** dummy_argv = const_cast<char**>(&dummy_name);
-  EXPECT_DEATH(caffe2::GlobalInit(&dummy_argc, &dummy_argv),
-               "GlobalInit has already been called: did you double-call?");
+  // GlobalInit is called in caffe's gtest main function, so here we won't be
+  // able to re-initialize it.
+  EXPECT_FALSE(caffe2::GlobalInit(&dummy_argc, dummy_argv));
 }
 
 }  // namespace caffe2

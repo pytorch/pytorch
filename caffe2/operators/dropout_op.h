@@ -4,22 +4,22 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
-#include "glog/logging.h"
+#include "caffe2/core/logging.h"
 
 namespace caffe2 {
 
-template <typename dtype, class DeviceContext>
-class DropoutOp final : public Operator<dtype, DeviceContext> {
+template <typename T, class Context>
+class DropoutOp final : public Operator<Context> {
  public:
   USE_OPERATOR_BASE_FUNCTIONS;
   DropoutOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<dtype, DeviceContext>(operator_def, ws),
+      : Operator<Context>(operator_def, ws),
         ratio_(OperatorBase::GetSingleArgument<float>("ratio", 0.5)) {
-    DCHECK_GE(ratio_, 0);
-    DCHECK_LT(ratio_, 1);
+    CAFFE_DCHECK_GE(ratio_, 0);
+    CAFFE_DCHECK_LT(ratio_, 1);
   }
 
-  bool RunOnDevice();
+  bool RunOnDevice() override;
 
  protected:
   float ratio_;
@@ -28,18 +28,18 @@ class DropoutOp final : public Operator<dtype, DeviceContext> {
   DISABLE_COPY_AND_ASSIGN(DropoutOp);
 };
 
-template <typename dtype, class DeviceContext>
-class DropoutGradientOp final : public Operator<dtype, DeviceContext> {
+template <typename T, class Context>
+class DropoutGradientOp final : public Operator<Context> {
  public:
   USE_OPERATOR_BASE_FUNCTIONS;
   DropoutGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<dtype, DeviceContext>(operator_def, ws),
+      : Operator<Context>(operator_def, ws),
         ratio_(OperatorBase::GetSingleArgument<float>("ratio", 0.5)) {
-    DCHECK_GE(ratio_, 0);
-    DCHECK_LT(ratio_, 1);
+    CAFFE_DCHECK_GE(ratio_, 0);
+    CAFFE_DCHECK_LT(ratio_, 1);
   }
 
-  bool RunOnDevice();
+  bool RunOnDevice() override;
 
  protected:
   float ratio_;

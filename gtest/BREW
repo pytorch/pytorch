@@ -10,7 +10,7 @@ cc_library(
   srcs = ["caffe2_gtest_main.cc"],
   deps = [
       ":gtest",
-      "//caffe2/core:core"
+      "//caffe2/core:core",
   ],
   cflags = ["-DGTEST_USE_OWN_TR1_TUPLE=1"],
 )

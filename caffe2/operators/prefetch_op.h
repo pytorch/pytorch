@@ -8,14 +8,14 @@
 
 namespace caffe2 {
 
-template <class DeviceContext>
+template <class Context>
 class PrefetchOperator;
 
 namespace internal {
 // We define a prefetch function so that the prefetch function can call virtual
 // member functions of the prefetch operator.
-template <class DeviceContext>
-void PrefetchFunc(PrefetchOperator<DeviceContext>* op) {
+template <class Context>
+void PrefetchFunc(PrefetchOperator<Context>* op) {
   op->prefetch_success_ = op->Prefetch();
 }
 }
@@ -23,7 +23,7 @@ void PrefetchFunc(PrefetchOperator<DeviceContext>* op) {
 // PrefetchOperator is an operator that prefetches the next batch. It should
 // almost always be used to read things from disk, so I am setting the input to
 // zero blobs.
-template <class DeviceContext>
+template <class Context>
 class PrefetchOperator : public OperatorBase {
  public:
   PrefetchOperator(const OperatorDef& operator_def, Workspace* ws)
@@ -37,40 +37,40 @@ class PrefetchOperator : public OperatorBase {
   bool Run() {
     device_context_.SwitchToDevice();
     if (prefetch_thread_ == nullptr) {
-      VLOG(1) << "Starting a new prefetch thread.";
+      CAFFE_VLOG(1) << "Starting a new prefetch thread.";
       prefetch_thread_.reset(
           new std::thread(
-              internal::PrefetchFunc<DeviceContext>, this));
+              internal::PrefetchFunc<Context>, this));
     }
     // Join the last prefetch thread.
-    VLOG(1) << "Waiting for the prefetch thread.";
+    CAFFE_VLOG(1) << "Waiting for the prefetch thread.";
     prefetch_thread_->join();
 
     if (!prefetch_success_) {
-      LOG(ERROR) << "Prefetching failed.";
+      CAFFE_LOG_ERROR << "Prefetching failed.";
       return false;
     }
-    VLOG(1) << "Copy prefetched result.";
+    CAFFE_VLOG(1) << "Copy prefetched result.";
     if (!CopyPrefetched()) {
-      LOG(ERROR) << "Error when copying prefetched data.";
+      CAFFE_LOG_ERROR << "Error when copying prefetched data.";
       return false;
     }
     prefetch_success_ = false;
-    VLOG(1) << "Starting a new prefetch thread.";
+    CAFFE_VLOG(1) << "Starting a new prefetch thread.";
     prefetch_thread_.reset(
         new std::thread(
-            internal::PrefetchFunc<DeviceContext>, this));
+            internal::PrefetchFunc<Context>, this));
     return device_context_.FinishDeviceComputation();
   }
 
   // You will need to implement this instead of the Run function.
   virtual bool Prefetch() = 0;
   virtual bool CopyPrefetched() = 0;
-  friend void internal::PrefetchFunc<DeviceContext>(
+  friend void internal::PrefetchFunc<Context>(
       PrefetchOperator*);
 
  protected:
-  DeviceContext device_context_;
+  Context device_context_;
   unique_ptr<std::thread> prefetch_thread_;
   bool prefetch_success_;
 

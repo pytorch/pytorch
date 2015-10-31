@@ -4,3 +4,4 @@ cc_thirdparty_target(
   commands=[],
   cc_obj_files=["-lglog"],
 )
+

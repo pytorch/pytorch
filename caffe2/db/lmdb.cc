@@ -1,7 +1,7 @@
 #include <sys/stat.h>
 
 #include "caffe2/core/db.h"
-#include "glog/logging.h"
+#include "caffe2/core/logging.h"
 #include "lmdb.h"  // NOLINT
 
 namespace caffe2 {
@@ -10,7 +10,7 @@ namespace db {
 constexpr size_t LMDB_MAP_SIZE = 1099511627776;  // 1 TB
 
 inline void MDB_CHECK(int mdb_status) {
-  CHECK_EQ(mdb_status, MDB_SUCCESS) << mdb_strerror(mdb_status);
+  CAFFE_CHECK_EQ(mdb_status, MDB_SUCCESS) << mdb_strerror(mdb_status);
 }
 
 class LMDBCursor : public Cursor {
@@ -108,14 +108,14 @@ LMDB::LMDB(const string& source, Mode mode) : DB(source, mode) {
   MDB_CHECK(mdb_env_create(&mdb_env_));
   MDB_CHECK(mdb_env_set_mapsize(mdb_env_, LMDB_MAP_SIZE));
   if (mode == NEW) {
-    CHECK_EQ(mkdir(source.c_str(), 0744), 0) << "mkdir " << source << "failed";
+    CAFFE_CHECK_EQ(mkdir(source.c_str(), 0744), 0) << "mkdir " << source << "failed";
   }
   int flags = 0;
   if (mode == READ) {
     flags = MDB_RDONLY | MDB_NOTLS;
   }
   MDB_CHECK(mdb_env_open(mdb_env_, source.c_str(), flags, 0664));
-  LOG(INFO) << "Opened lmdb " << source;
+  CAFFE_LOG_INFO << "Opened lmdb " << source;
 }
 
 void LMDBTransaction::Put(const string& key, const string& value) {

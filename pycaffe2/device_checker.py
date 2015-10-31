@@ -64,7 +64,7 @@ class DeviceChecker(object):
     workspace.SwitchWorkspace("_device_check_", True)
     for i, device_option in enumerate(self._device_options):
       for name, arr in inputs.iteritems():
-        print 'feeding', name
+        #print 'feeding', name
         workspace.FeedBlob(name, arr, device_option)
       for op in net.op:
         op.device_option.CopyFrom(device_option)

@@ -4,8 +4,8 @@ namespace caffe2 {
 
 template <>
 bool RangeFillOp<float, CPUContext>::Fill(
-    Tensor<float, CPUContext>* output) {
-  float* data = output->mutable_data();
+    TensorCPU* output) {
+  float* data = output->mutable_data<float>();
   for (int i = 0; i < output->size(); ++i) {
     data[i] = i;
   }

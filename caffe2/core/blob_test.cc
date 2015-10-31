@@ -3,33 +3,15 @@
 #include "caffe2/core/blob.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/context.h"
+#include "caffe2/core/tensor.h"
 #include "caffe2/proto/caffe2.pb.h"
 #include "gtest/gtest.h"
 
 namespace caffe2 {
-
-using namespace internal;  // NOLINT
+namespace {
 
 class Foo {};
 class Bar {};
-
-TEST(BlobTest, TypeId) {
-  TypeId int_id = GetTypeId<int>();
-  TypeId float_id = GetTypeId<float>();
-  TypeId foo_id = GetTypeId<Foo>();
-  TypeId bar_id = GetTypeId<Bar>();
-  EXPECT_NE(int_id, float_id);
-  EXPECT_NE(float_id, foo_id);
-  EXPECT_NE(foo_id, bar_id);
-  EXPECT_TRUE(IsTypeId<int>(int_id));
-  EXPECT_TRUE(IsTypeId<float>(float_id));
-  EXPECT_TRUE(IsTypeId<Foo>(foo_id));
-  EXPECT_TRUE(IsTypeId<Bar>(bar_id));
-  EXPECT_FALSE(IsTypeId<int>(float_id));
-  EXPECT_FALSE(IsTypeId<int>(foo_id));
-  EXPECT_FALSE(IsTypeId<Foo>(int_id));
-  EXPECT_FALSE(IsTypeId<Foo>(bar_id));
-}
 
 TEST(BlobTest, Blob) {
   Blob blob;
@@ -58,14 +40,14 @@ TEST(BlobDeathTest, BlobWrongType) {
   ASSERT_DEATH(blob.Get<int>(), ".*wrong type for the Blob instance.*");
 }
 
-template <typename dtype> class TensorCPUTest : public ::testing::Test {};
-template <typename dtype> class TensorCPUDeathTest : public ::testing::Test {};
+template <typename T> class TensorCPUTest : public ::testing::Test {};
+template <typename T> class TensorCPUDeathTest : public ::testing::Test {};
 typedef ::testing::Types<char, int, float> TensorTypes;
 TYPED_TEST_CASE(TensorCPUTest, TensorTypes);
 TYPED_TEST_CASE(TensorCPUDeathTest, TensorTypes);
 
 TYPED_TEST(TensorCPUTest, TensorInitializedEmpty) {
-  Tensor<TypeParam, CPUContext> tensor;
+  TensorCPU tensor;
   EXPECT_EQ(tensor.ndim(), 0);
   vector<int> dims(3);
   dims[0] = 2;
@@ -77,8 +59,8 @@ TYPED_TEST(TensorCPUTest, TensorInitializedEmpty) {
   EXPECT_EQ(tensor.dim(1), 3);
   EXPECT_EQ(tensor.dim(2), 5);
   EXPECT_EQ(tensor.size(), 2 * 3 * 5);
-  EXPECT_TRUE(tensor.mutable_data() != nullptr);
-  EXPECT_TRUE(tensor.data() != nullptr);
+  EXPECT_TRUE(tensor.mutable_data<TypeParam>() != nullptr);
+  EXPECT_TRUE(tensor.data<TypeParam>() != nullptr);
 }
 
 TYPED_TEST(TensorCPUTest, TensorInitializedNonEmpty) {
@@ -86,13 +68,13 @@ TYPED_TEST(TensorCPUTest, TensorInitializedNonEmpty) {
   dims[0] = 2;
   dims[1] = 3;
   dims[2] = 5;
-  Tensor<TypeParam, CPUContext> tensor(dims);
+  TensorCPU tensor(dims);
   EXPECT_EQ(tensor.ndim(), 3);
   EXPECT_EQ(tensor.dim(0), 2);
   EXPECT_EQ(tensor.dim(1), 3);
   EXPECT_EQ(tensor.dim(2), 5);
-  EXPECT_TRUE(tensor.mutable_data() != nullptr);
-  EXPECT_TRUE(tensor.data() != nullptr);
+  EXPECT_TRUE(tensor.mutable_data<TypeParam>() != nullptr);
+  EXPECT_TRUE(tensor.data<TypeParam>() != nullptr);
   dims[0] = 7;
   dims[1] = 11;
   dims[2] = 13;
@@ -103,8 +85,8 @@ TYPED_TEST(TensorCPUTest, TensorInitializedNonEmpty) {
   EXPECT_EQ(tensor.dim(1), 11);
   EXPECT_EQ(tensor.dim(2), 13);
   EXPECT_EQ(tensor.dim(3), 17);
-  EXPECT_TRUE(tensor.mutable_data() != nullptr);
-  EXPECT_TRUE(tensor.data() != nullptr);
+  EXPECT_TRUE(tensor.mutable_data<TypeParam>() != nullptr);
+  EXPECT_TRUE(tensor.data<TypeParam>() != nullptr);
 }
 
 TYPED_TEST(TensorCPUTest, TensorShareData) {
@@ -112,17 +94,17 @@ TYPED_TEST(TensorCPUTest, TensorShareData) {
   dims[0] = 2;
   dims[1] = 3;
   dims[2] = 5;
-  Tensor<TypeParam, CPUContext> tensor(dims);
-  Tensor<TypeParam, CPUContext> other_tensor(dims);
-  EXPECT_TRUE(tensor.mutable_data() != nullptr);
+  TensorCPU tensor(dims);
+  TensorCPU other_tensor(dims);
+  EXPECT_TRUE(tensor.mutable_data<TypeParam>() != nullptr);
   other_tensor.ShareData(tensor);
-  EXPECT_TRUE(tensor.data() != nullptr);
-  EXPECT_TRUE(other_tensor.data() != nullptr);
-  EXPECT_EQ(tensor.data(), other_tensor.data());
+  EXPECT_TRUE(tensor.data<TypeParam>() != nullptr);
+  EXPECT_TRUE(other_tensor.data<TypeParam>() != nullptr);
+  EXPECT_EQ(tensor.data<TypeParam>(), other_tensor.data<TypeParam>());
   // Set one value, check the other
   for (int i = 0; i < tensor.size(); ++i) {
-    tensor.mutable_data()[i] = i;
-    EXPECT_EQ(other_tensor.data()[i], i);
+    tensor.mutable_data<TypeParam>()[i] = i;
+    EXPECT_EQ(other_tensor.data<TypeParam>()[i], i);
   }
 }
 
@@ -133,19 +115,19 @@ TYPED_TEST(TensorCPUTest, TensorShareDataCanUseDifferentShapes) {
   dims[2] = 5;
   vector<int> alternate_dims(1);
   alternate_dims[0] = 2 * 3 * 5;
-  Tensor<TypeParam, CPUContext> tensor(dims);
-  Tensor<TypeParam, CPUContext> other_tensor(alternate_dims);
-  EXPECT_TRUE(tensor.mutable_data() != nullptr);
+  TensorCPU tensor(dims);
+  TensorCPU other_tensor(alternate_dims);
+  EXPECT_TRUE(tensor.mutable_data<TypeParam>() != nullptr);
   other_tensor.ShareData(tensor);
   EXPECT_EQ(other_tensor.ndim(), 1);
   EXPECT_EQ(other_tensor.dim(0), alternate_dims[0]);
-  EXPECT_TRUE(tensor.data() != nullptr);
-  EXPECT_TRUE(other_tensor.data() != nullptr);
-  EXPECT_EQ(tensor.data(), other_tensor.data());
+  EXPECT_TRUE(tensor.data<TypeParam>() != nullptr);
+  EXPECT_TRUE(other_tensor.data<TypeParam>() != nullptr);
+  EXPECT_EQ(tensor.data<TypeParam>(), other_tensor.data<TypeParam>());
   // Set one value, check the other
   for (int i = 0; i < tensor.size(); ++i) {
-    tensor.mutable_data()[i] = i;
-    EXPECT_EQ(other_tensor.data()[i], i);
+    tensor.mutable_data<TypeParam>()[i] = i;
+    EXPECT_EQ(other_tensor.data<TypeParam>()[i], i);
   }
 }
 
@@ -155,27 +137,27 @@ TYPED_TEST(TensorCPUTest, NoLongerSharesAfterReshape) {
   dims[0] = 2;
   dims[1] = 3;
   dims[2] = 5;
-  Tensor<TypeParam, CPUContext> tensor(dims);
-  Tensor<TypeParam, CPUContext> other_tensor(dims);
-  EXPECT_TRUE(tensor.mutable_data() != nullptr);
+  TensorCPU tensor(dims);
+  TensorCPU other_tensor(dims);
+  EXPECT_TRUE(tensor.mutable_data<TypeParam>() != nullptr);
   other_tensor.ShareData(tensor);
-  EXPECT_EQ(tensor.data(), other_tensor.data());
-  auto* old_pointer = other_tensor.data();
+  EXPECT_EQ(tensor.data<TypeParam>(), other_tensor.data<TypeParam>());
+  auto* old_pointer = other_tensor.data<TypeParam>();
 
   dims[0] = 7;
   tensor.Reshape(dims);
-  EXPECT_EQ(old_pointer, other_tensor.data());
-  EXPECT_NE(old_pointer, tensor.mutable_data());
+  EXPECT_EQ(old_pointer, other_tensor.data<TypeParam>());
+  EXPECT_NE(old_pointer, tensor.mutable_data<TypeParam>());
 }
 
 
 TYPED_TEST(TensorCPUDeathTest, CannotAccessDataWhenEmpty) {
-  Tensor<TypeParam, CPUContext> tensor;
+  TensorCPU tensor;
   EXPECT_EQ(tensor.ndim(), 0);
-  ASSERT_DEATH(tensor.data(), "");
+  ASSERT_DEATH(tensor.data<TypeParam>(), "");
 }
 
-
+}  // namespace
 }  // namespace caffe2
 
 

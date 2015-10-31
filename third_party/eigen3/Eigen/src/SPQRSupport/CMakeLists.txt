@@ -1,0 +1,6 @@
+FILE(GLOB Eigen_SPQRSupport_SRCS "*.h")
+
+INSTALL(FILES
+  ${Eigen_SPQRSupport_SRCS}
+  DESTINATION ${INCLUDE_INSTALL_DIR}/Eigen/src/SPQRSupport/ COMPONENT Devel
+  )

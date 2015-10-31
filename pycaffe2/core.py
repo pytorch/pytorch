@@ -1,10 +1,24 @@
 from caffe2.proto import caffe2_pb2
 from collections import Counter, defaultdict
-from pycaffe2 import utils
+from pycaffe2 import utils, workspace
+
+_REGISTERED_OPERATORS = set(workspace.RegisteredOperators())
+
+def IsOperator(op_type):
+  return (op_type in _REGISTERED_OPERATORS)
 
 def GetGradientName(name):
   """The function that returns the gradient name for a blob."""
   return name + '_grad'
+
+def IsGradientName(name):
+  return name.endswith('_grad')
+
+def GetOriginalName(name):
+  """THe function that returns the original name for a gradient blob."""
+  if not name.endswith('_grad'):
+    raise RuntimeError('The blob ' + name + ' is not a legal gradient name.')
+  return name[:-5]
 
 class BlobReference(object):
   """A wrapper around a blob in a net.
@@ -41,6 +55,9 @@ class BlobReference(object):
     is equivalent to doing
         net.Relu([b], ...)
     """
+    if not IsOperator(op_type):
+      raise RuntimeError(
+          'Method ' + op_type + ' is not a registered operator.')
     def _CreateAndAddToNet(inputs=[], *args, **kwargs):
       """Internal function that routes the operator generation to the network's
       __getattr__ function.
@@ -52,13 +69,14 @@ class BlobReference(object):
       return self._from_net.__getattr__(op_type)(inputs, *args, **kwargs)
     return _CreateAndAddToNet
 
+
 def CreateOperator(operator_type):
   """A function wrapper that allows one to create operators based on the
   operator type. The type should be a string corresponding to an operator
   registered with Caffe2.
   """
   def ReallyCreate(inputs, outputs, name='', device_option=None,
-                   arg=None, **kwargs):
+                   arg=None, engine=None, **kwargs):
     operator = caffe2_pb2.OperatorDef()
     operator.type = operator_type
     operator.name = name
@@ -76,15 +94,17 @@ def CreateOperator(operator_type):
                        % (str(outputs), type(outputs)))
     operator.input.extend([str(i) for i in inputs])
     operator.output.extend([str(o) for o in outputs])
-    if device_option:
+    if device_option is not None:
       operator.device_option.CopyFrom(device_option)
+    if engine is not None:
+      operator.engine = engine
     # random seed is defined in the device option, so we need to do special
     # care.
     if 'random_seed' in kwargs:
       operator.device_option.random_seed = kwargs['random_seed']
       del kwargs['random_seed']
     # Add given arguments that do not need parsing
-    if arg:
+    if arg is not None:
       operator.arg.extend(arg)
     # Add all other arguments
     for key, value in kwargs.iteritems():
@@ -118,7 +138,163 @@ class GradientRegistry(object):
     if op.HasField("device_option"):
       for gradient_op in gradient_ops:
         gradient_op.device_option.CopyFrom(op.device_option)
+    if op.HasField("engine"):
+      for gradient_op in gradient_ops:
+        gradient_op.engine = op.engine
     return gradient_ops
+
+  @classmethod
+  def GetGradients(self, operators, external_gradients=[]):
+    # (1) "Play" the forward pass of the network, so we know the version of any
+    #     tensors that are being written multiple times.
+    # After running this, we will have:
+    # a) fwd_metadata: a list of [op, input_versions, output_versions]
+    #    recording the input and the output version of the operator.
+    # b) versioned_input_count: a dictionary specifying for each blob and each
+    #    of its version, how many times it is used as input for another op.
+    # c) current_versions: maintaining the current versions of the tensors we
+    #    are having in the workspace. This is useful because if a gradient is
+    #    trying to access an earlier version of a blob, we know that it is no
+    #    longer there, and thus it should not be referred to at all.
+    current_versions = defaultdict(int)
+    versioned_input_count = defaultdict(lambda: defaultdict(int))
+    fwd_metadata = []
+    for op in operators:
+      # For input, they are the current version in the dict.
+      input_versions = dict()
+      for s in op.input:
+        input_versions[s] = current_versions[s]
+        versioned_input_count[s][current_versions[s]] += 1
+      # For output, they are the current version plus one. If this is a newly
+      # created blob, its version starts with zero.
+      output_versions = dict()
+      for s in op.output:
+        if s in current_versions:
+          current_versions[s] += 1
+        output_versions[s] = current_versions[s]
+      fwd_metadata.append([op, input_versions, output_versions])
+
+    # (2) Now, after having the virtual play above, we now play the operators
+    # backwards, creating the gradients along the path. Note that although we
+    # are playing it backwards, any value being overwritten can not be
+    # recovered, and any reference to a blob already being overwritten would
+    # trigger an error.
+
+    all_gradient_ops = []
+    current_gradient_versions = dict(
+        (s, current_versions[GetOriginalName(s)]) for s in external_gradients)
+    versioned_gradient_count = defaultdict(lambda: defaultdict(int))
+    for forward_op, current_fwd_metadata in zip(operators[::-1], fwd_metadata[::-1]):
+      gradient_ops = GradientRegistry.GetGradient(forward_op)
+      # Now, the constraints for the inputs of the gradient operators are:
+      #
+      # (1) for inputs:
+      # (1a) If it is a gradient name, it should match the version of the
+      #      corresponding output.
+      # (1b) If it is an output name, the current version should match the
+      #      version when the operator was run.
+      # (1c) If it is an input name, the current version should match the
+      #      version when the operator was run.
+      # (1d) If it is none of the above, it should be a blob that is generated
+      #      locally by one of the previous gradient operators.
+      #
+      # (2) for outputs:
+      # (2a) If it is a gradient name, it must be the gradient name of an input
+      #      blob, and we will mark the gradient as being corresponding to the
+      #      version of the input.
+      # (2b) If it is anything else it is OK - we will simply "play" the op to
+      #      update the current versions of blobs.
+      locally_generated_blobs = []
+      multiuse_input_ready_to_sum = []
+      for grad_op in gradient_ops:
+        for s in grad_op.input:
+          if IsGradientName(s):
+            if s not in current_gradient_versions:
+              raise RuntimeError(
+                  'Input gradient name "%s" is referred to but '
+                  'is never generated.' % s)
+            # This is a gradient name. We will need to check if this gradient is
+            # produced already, and if this is the gradient we want.
+            original_name = GetOriginalName(s)
+            if original_name not in current_fwd_metadata[2]:
+              raise RuntimeError(
+                  'Input gradient name "%s" is not the gradient '
+                  'of any of the op\'s output.' % s)
+            if (current_fwd_metadata[2][original_name] !=
+                current_gradient_versions[s]):
+              raise RuntimeError(
+                  'Gradient name "%s" is expected to correspond to '
+                  'version %d of "%s", but currently we have version %d.' %
+                  (s, current_fwd_metadata[2][s], original_name,
+                   current_gradient_versions[s]))
+          elif s in current_fwd_metadata[2]:
+            if (current_versions[s] != current_fwd_metadata[2][s]):
+              raise RuntimeError(
+                  'Gradient operator needs output "%s" at version '
+                  '%d, but currently we have version %d.' %
+                  (s, current_fwd_metadata[2][s], current_versions[s]))
+          elif s in current_fwd_metadata[1]:
+            if (current_versions[s] != current_fwd_metadata[1][s]):
+              raise RuntimeError(
+                  'Gradient operator needs input "%s" at version '
+                  '%d, but currently we have version %d.' %
+                  (s, current_fwd_metadata[1][s], current_versions[s]))
+          else:
+            if s not in locally_generated_blobs:
+              if s not in locally_generated_blobs:
+                raise RuntimeError(
+                    'Blob name "%s" not in the scope of operator: %s\nand is '
+                    'not generated by any of the local gradient operators.' %
+                    (s, str(current_fwd_metadata[0])))
+        for idx, s in enumerate(grad_op.output):
+          if IsGradientName(s):
+            original_name = GetOriginalName(s)
+            if original_name not in current_fwd_metadata[1]:
+              raise RuntimeError(
+                  'Output gradient name "%s" is not the '
+                  'gradient of any of the op\'s input name.' % s)
+            # Set the current gradient version.
+            version = current_fwd_metadata[1][original_name]
+            current_gradient_versions[s] = version
+            # Now we should also check if the gradient we product is a multi-use
+            # input, in which case we will automatically add split nodes.
+            # TODO: Instead of adding split nodes, we can also choose to
+            # sequentially compute and accumulate gradients. Maybe implement
+            # that in the future.
+            if versioned_input_count[original_name][version] > 1:
+              grad_op.output[idx] = '_%s_autosplit_%d' % (
+                  s, versioned_gradient_count[s][version])
+              versioned_gradient_count[s][version] += 1
+              assert (versioned_gradient_count[s][version] <=
+                      versioned_input_count[original_name][version])
+              if (versioned_gradient_count[s][version] ==
+                  versioned_input_count[original_name][version]):
+                # We have calculated all the autosplit gradients. Will need to
+                # add a sum after this gradient computation.
+                multiuse_input_ready_to_sum.append(
+                    (s, versioned_gradient_count[s][version], grad_op))
+          else:
+            locally_generated_blobs.append(s)
+      # If some of the multi use inputs are ready to be summed, we will do so.
+      for s, count, source_op in multiuse_input_ready_to_sum:
+        additional_sum_op = CreateOperator('Sum')(
+            ['_%s_autosplit_%d' % (s, i) for i in range(count)], [s])
+        if source_op.HasField('device_option'):
+          additional_sum_op.device_option.CopyFrom(source_op.device_option)
+        gradient_ops.append(additional_sum_op)
+      # Now, for bookkeeping purposes, we will need to "play" the gradient
+      # operators. The reason is that the gradient operators may (although in
+      # most cases they shouldn't) change some of the existing blobs, in which
+      # case this explicit bookkeeping is going to catch them.
+      for op in gradient_ops:
+        for s in op.output:
+          if s in current_versions:
+            current_versions[s] += 1
+          output_versions[s] = current_versions[s]
+      all_gradient_ops += gradient_ops
+    # After we have done computation for each op, we now have the gradient
+    # operators ready.
+    return all_gradient_ops
 
 
 class Net(object):
@@ -159,7 +335,7 @@ class Net(object):
     self._next_name_index += 1
     return str(output_name)
 
-  def AddGradientOperators(self, skip=0):
+  def AddGradientOperators(self, skip=0, external_gradients=[]):
     """Add the gradient for operators in the net.
 
     Inputs:
@@ -172,93 +348,24 @@ class Net(object):
     inserted SplitOp is hard-coded for float (its gradient, SumOp, is float
     only). Supporting other formats is a todo item.
     """
-    # (1) Make sure that the network is "legal" in terms of computing gradients:
-    # for every blob there is only going to be one operator that generates it.
-    all_outputs = sum([list(op.output) for op in self._net.op], [])
-    if len(all_outputs) != len(set(all_outputs)):
-      # There is some output that is produced by multiple operators. This is not
-      # good.
-      raise RuntimeError("Some blobs are produced multiple times. A count is "
-                         "as follows: " + str(Counter(all_outputs)))
-    # (2) For cases when a blob is being used by multiple operators, we will
-    # need to take special care. Currently, we will ask the operators to compute
-    # the gradients, and add aggregation operators to get the final gradient.
-    input_counts = Counter(
-        sum([list(op.input) for op in self._net.op[skip:]], []))
-    multiple_use_blobs = set(
-        [key for key in input_counts if input_counts[key] > 1])
-
-    # Now, if there are multiple use blobs, it means that we are going to have
-    # shared parameters, and we want to make special care for them. The
-    # conventional strategy in Caffe is to insert a SplitLayer that splits
-    # the input into multiple blobs, with the split layer automatically
-    # accumulates gradients. This makes the AddGradientOperators stateful, in
-    # the sense that it may change existing operators, which is not desired.
-    # In this implementation we will keep the original operator, and instead
-    # manually modify the gradient names.
-    num_ops_before_grad = len(self._net.op)
-    # Obtain the gradient operators that we need. Note that these gradient
-    # operators are going to be refined, as we need to figure out shared
-    # parameters.
-    gradient_ops = sum(
-        [GradientRegistry.GetGradient(self._net.op[i])
-         for i in xrange(num_ops_before_grad - 1, skip - 1, -1)], [])
-    if len(multiple_use_blobs) == 0:
-      # There is no concern about shared parameters, so we can simply skip.
-      self._net.op.extend(gradient_ops)
-      return
-    # Now, if there are multiple use operators, we will need to figure out
-    # any gradients that are overwriting each other.
-    # To do this, we do a first pass over the gradients to count the number
-    # of occurences of the gradients.
-    gradient_occurences = defaultdict(int)
-    for blob_name in multiple_use_blobs:
-      count = 0
-      blob_gradient_name = GetGradientName(blob_name)
-      for op in gradient_ops:
-        for output_name in op.output:
-          if output_name == blob_gradient_name:
-            gradient_occurences[blob_gradient_name] += 1
-    # For anything that only has one gradient blob generated, we don't need
-    # to take any special care.
-    for key in gradient_occurences.keys():
-      if gradient_occurences[key] == 1:
-        del gradient_occurences[key]
-    # Now, we add the gradient ops back to the network, modifying the
-    # gradient names on the fly.
-    grad_encountered = defaultdict(int)
-    for op in gradient_ops:
-      additional_sum_ops = []
-      for i, grad_name in enumerate(op.output):
-        if grad_name in gradient_occurences:
-          # rename the gradient to an intermediate name
-          op.output[i] = (
-              '_%s_autosplit_%d' % (grad_name, grad_encountered[grad_name]))
-          grad_encountered[grad_name] += 1
-          if grad_encountered[grad_name] == gradient_occurences[grad_name]:
-            # We have encountered all gradient names; time to add a SumOp.
-            additional_sum_ops.append(
-                CreateOperator('Sum')(
-                    ['_%s_autosplit_%d' % (grad_name, i)
-                     for i in range(gradient_occurences[grad_name])],
-                    [grad_name]))
-      # After re-writing the outputs, we can safely add it to the network.
-      self._net.op.extend([op])
-      self._net.op.extend(additional_sum_ops)
+    grad_ops = GradientRegistry.GetGradients(self._net.op[skip:])
+    self._net.op.extend(grad_ops)
     return
 
-  def RunAllOnGPU(self, gpu_id=0):
+  def RunAllOnGPU(self, gpu_id=0, use_cudnn=False):
     """A convenient function to run everything on the GPU."""
     device_option = caffe2_pb2.DeviceOption()
     device_option.device_type = caffe2_pb2.CUDA
     device_option.cuda_gpu_id = gpu_id
     self._net.device_option.CopyFrom(device_option)
+    if use_cudnn:
+      for op in self._net.op:
+        op.engine = "CUDNN"
 
-  def __getattr__(self, operator_type):
-    if operator_type in self.__class__.operator_registry_:
-      # Not finished. Operator registry allows one to define custon functions,
-      # but so far that functionality is not complete.
-      return self.__class__.operator_registry_
+  def __getattr__(self, op_type):
+    if not IsOperator(op_type):
+      raise RuntimeError(
+          'Method ' + op_type + ' is not a registered operator.')
     def _CreateAndAddToSelf(inputs, outputs=None, **kwargs):
       if outputs is None:
         # If we do not specify an output, we will assume that this operator
@@ -268,7 +375,7 @@ class Net(object):
         # In this case, we will auto-fill the given number of outputs with
         # auto-generated names.
         outputs = [self.NextName() for i in range(outputs)]
-      op = CreateOperator(operator_type)(inputs, outputs, **kwargs)
+      op = CreateOperator(op_type)(inputs, outputs, **kwargs)
       self._net.op.extend([op])
       if len(op.output) == 0:
         return

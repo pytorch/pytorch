@@ -3,7 +3,7 @@
 namespace caffe2 {
 
 namespace {
-REGISTER_CPU_OPERATOR(Broadcast, BroadcastOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(Broadcast, BroadcastOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Allreduce, AllreduceOp<float, CPUContext>);
 }  // namespace
 

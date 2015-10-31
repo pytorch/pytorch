@@ -4,7 +4,7 @@
 
 #include "caffe2/core/db.h"
 #include "caffe2/utils/zmq.hpp"
-#include "glog/logging.h"
+#include "caffe2/core/logging.h"
 
 namespace caffe2 {
 namespace db {
@@ -30,9 +30,9 @@ class ZmqDBCursor : public Cursor {
         socket_.recv(content);
         retry = false;
       } catch(const zmq::error_t& ze) {
-        // LOG(ERROR) << "Exception: " << ze.num() << " " << ze.what();
+        // CAFFE_LOG_ERROR << "Exception: " << ze.num() << " " << ze.what();
         if (ze.num() != EINTR && ze.num() != EAGAIN) {
-          LOG(FATAL) << "ZeroMQ received error that cannot continue. Quitting.";
+          CAFFE_LOG_FATAL << "ZeroMQ received error that cannot continue. Quitting.";
         }
       }
     }
@@ -62,7 +62,7 @@ class ZmqDB : public DB {
  public:
   ZmqDB(const string& source, Mode mode)
       : DB(source, mode), source_(source) {
-    CHECK_EQ(mode, READ) << "ZeroMQ DB only supports read mode.";
+    CAFFE_CHECK_EQ(mode, READ) << "ZeroMQ DB only supports read mode.";
   }
 
   ~ZmqDB() {}
@@ -76,7 +76,7 @@ class ZmqDB : public DB {
   Transaction* NewTransaction() override {
     // TODO(Yangqing): Do I really need to do log fatal? Any elegant way to
     // warn the user?
-    LOG(FATAL) << "ZeroMQ DB does not support writing with a transaction.";
+    CAFFE_LOG_FATAL << "ZeroMQ DB does not support writing with a transaction.";
     return nullptr;  // dummy placeholder to suppress old compiler warnings.
   }
 

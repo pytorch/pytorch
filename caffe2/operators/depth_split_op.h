@@ -8,12 +8,12 @@
 
 namespace caffe2 {
 
-template <typename dtype, class DeviceContext>
-class DepthSplitOp final : public Operator<dtype, DeviceContext> {
+template <class Context>
+class DepthSplitOp final : public Operator<Context> {
  public:
   USE_OPERATOR_BASE_FUNCTIONS;
   DepthSplitOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<dtype, DeviceContext>(operator_def, ws),
+      : Operator<Context>(operator_def, ws),
         order_(StringToStorageOrder(
             OperatorBase::GetSingleArgument<string>("order", "NHWC"))),
         dimensions_(
@@ -29,11 +29,11 @@ class DepthSplitOp final : public Operator<dtype, DeviceContext> {
   DISABLE_COPY_AND_ASSIGN(DepthSplitOp);
 };
 
-template <typename dtype, class DeviceContext>
-class DepthConcatOp final : public Operator<dtype, DeviceContext> {
+template <class Context>
+class DepthConcatOp final : public Operator<Context> {
  public:
   DepthConcatOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<dtype, DeviceContext>(operator_def, ws),
+      : Operator<Context>(operator_def, ws),
         order_(StringToStorageOrder(
             OperatorBase::GetSingleArgument<string>("order", "NHWC"))) {}
   USE_OPERATOR_BASE_FUNCTIONS;
@@ -49,33 +49,32 @@ class DepthConcatOp final : public Operator<dtype, DeviceContext> {
 
 
 // Implementations
-template <typename dtype, class DeviceContext>
-bool DepthSplitOp<dtype, DeviceContext>::RunOnDevice() {
+template <class Context>
+bool DepthSplitOp<Context>::RunOnDevice() {
   auto& input = Input(0);
   const int* dim_data;
   if (InputSize() == 2) {
     // We obtain dimensions from the input tensor.
-    CHECK_EQ(dimensions_.size(), 0)
+    CAFFE_CHECK_EQ(dimensions_.size(), 0)
         << "If you set dimensions with an input blob, do not pass in "
         << "dimensions in the argument.";
-    auto& dimensions_tensor =
-        OperatorBase::Input<Tensor<int, CPUContext> >(1);
-    CHECK_EQ(dimensions_tensor.size(), OutputSize());
-    dim_data = dimensions_tensor.data();
+    auto& dimensions_tensor = OperatorBase::Input<TensorCPU>(1);
+    CAFFE_CHECK_EQ(dimensions_tensor.size(), OutputSize());
+    dim_data = dimensions_tensor.template data<int>();
   } else {
     // We obtain dimensions from the parameters.
-    CHECK_EQ(dimensions_.size(), OutputSize());
+    CAFFE_CHECK_EQ(dimensions_.size(), OutputSize());
     dim_data = dimensions_.data();
   }
   const int input_channels =
       (order_ == StorageOrder::NCHW ? input.dim(1) : input.dim(3));
-  CHECK_EQ(std::accumulate(dim_data, dim_data + OutputSize(), 0),
+  CAFFE_CHECK_EQ(std::accumulate(dim_data, dim_data + OutputSize(), 0),
            input_channels)
       << "Dimensions do not match: should be " << input_channels;
   int input_offset = 0;
   for (int i = 0; i < OutputSize(); ++i) {
     auto* output = Output(i);
-    int M, N, lda;
+    int M = 0, N = 0, lda = 0;
     switch (order_) {
       case StorageOrder::NCHW:
         output->Reshape(vector<int>{
@@ -92,23 +91,24 @@ bool DepthSplitOp<dtype, DeviceContext>::RunOnDevice() {
         lda = input.dim(3);
         break;
       default:
-        LOG(FATAL) << "Unsupported storage order: " << order_;
+        CAFFE_LOG_FATAL << "Unsupported storage order: " << order_;
     }
-    math::CopyMatrix<dtype, DeviceContext>(
-        M, N, input.data() + input_offset, lda, output->mutable_data(), N,
+    math::CopyMatrix<Context>(
+        input.itemsize(), M, N,
+        static_cast<const char*>(input.raw_data()) + input_offset,
+        lda, output->raw_mutable_data(input.meta()), N,
         &device_context_);
-    input_offset += N;
+    input_offset += N * input.itemsize();
   }
   return true;
 }
 
-template <typename dtype, class DeviceContext>
-bool DepthConcatOp<dtype, DeviceContext>::RunOnDevice() {
+template <class Context>
+bool DepthConcatOp<Context>::RunOnDevice() {
   auto* output = Output(0);
-  Tensor<int, CPUContext>* dimensions =
-      OperatorBase::Output<Tensor<int, CPUContext> >(1);
+  TensorCPU* dimensions = OperatorBase::Output<TensorCPU>(1);
   dimensions->Reshape(vector<int>(1, InputSize()));
-  int* dim_data = dimensions->mutable_data();
+  int* dim_data = dimensions->template mutable_data<int>();
   int output_channels = 0;
   for (int i = 0; i < InputSize(); ++i) {
     dim_data[i] =
@@ -124,31 +124,32 @@ bool DepthConcatOp<dtype, DeviceContext>::RunOnDevice() {
   int output_offset = 0;
   for (int i = 0; i < InputSize(); ++i) {
     auto& input = Input(i);
-    int M, N, ldb;
+    int M = 0, N = 0, ldb = 0;
     switch (order_) {
       case StorageOrder::NCHW:
-        CHECK_EQ(input.dim(0), output->dim(0));
-        CHECK_EQ(input.dim(2), output->dim(2));
-        CHECK_EQ(input.dim(3), output->dim(3));
+        CAFFE_CHECK_EQ(input.dim(0), output->dim(0));
+        CAFFE_CHECK_EQ(input.dim(2), output->dim(2));
+        CAFFE_CHECK_EQ(input.dim(3), output->dim(3));
         M = input.dim(0);
         N = input.size() / M;
         ldb = output->size() / output->dim(0);
         break;
       case StorageOrder::NHWC:
-        CHECK_EQ(input.dim(0), output->dim(0));
-        CHECK_EQ(input.dim(1), output->dim(1));
-        CHECK_EQ(input.dim(2), output->dim(2));
+        CAFFE_CHECK_EQ(input.dim(0), output->dim(0));
+        CAFFE_CHECK_EQ(input.dim(1), output->dim(1));
+        CAFFE_CHECK_EQ(input.dim(2), output->dim(2));
         M = input.dim(0) * input.dim(1) * input.dim(2);
         N = input.dim(3);
         ldb = output->dim(3);
         break;
       default:
-        LOG(FATAL) << "Unsupported storage order: " << order_;
+        CAFFE_LOG_FATAL << "Unsupported storage order: " << order_;
     }
-    math::CopyMatrix<dtype, DeviceContext>(
-        M, N, input.data(), N, output->mutable_data() + output_offset, ldb,
+    math::CopyMatrix<Context>(
+        input.itemsize(), M, N, input.raw_data(), N,
+        static_cast<char*>(output->raw_mutable_data(input.meta())) + output_offset, ldb,
         &device_context_);
-    output_offset += N;
+    output_offset += N * input.itemsize();
   }
   return true;
 }

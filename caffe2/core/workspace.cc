@@ -10,9 +10,9 @@ namespace caffe2 {
 
 Blob* Workspace::CreateBlob(const string& name) {
   if (HasBlob(name)) {
-    VLOG(1) << "Blob " << name << " already exists. Skipping.";
+    CAFFE_VLOG(1) << "Blob " << name << " already exists. Skipping.";
   } else {
-    VLOG(1) << "Creating blob " << name;
+    CAFFE_VLOG(1) << "Creating blob " << name;
     (*blob_map_)[name] = unique_ptr<Blob>(new Blob());
   }
   return (*blob_map_)[name].get();
@@ -20,11 +20,11 @@ Blob* Workspace::CreateBlob(const string& name) {
 
 const Blob* Workspace::GetBlob(const string& name) const {
   if (!HasBlob(name)) {
-    LOG(WARNING) << "Blob " << name << " not in the workspace.";
+    CAFFE_LOG_WARNING << "Blob " << name << " not in the workspace.";
     // TODO(Yangqing): do we want to always print out the list of blobs here?
-    LOG(WARNING) << "Current blobs:";
+    CAFFE_LOG_WARNING << "Current blobs:";
     for (const auto& entry : *blob_map_) {
-      LOG(WARNING) << entry.first;
+      CAFFE_LOG_WARNING << entry.first;
     }
     return nullptr;
   } else {
@@ -32,10 +32,15 @@ const Blob* Workspace::GetBlob(const string& name) const {
   }
 }
 
-bool Workspace::CreateNet(const NetDef& net_def) {
-  CHECK(net_def.has_name()) << "Net definition should have a name.";
+Blob* Workspace::GetBlob(const string& name) {
+  return const_cast<Blob*>(
+      static_cast<const Workspace*>(this)->GetBlob(name));
+}
+
+NetBase* Workspace::CreateNet(const NetDef& net_def) {
+  CAFFE_CHECK(net_def.has_name()) << "Net definition should have a name.";
   if (net_map_.count(net_def.name()) > 0) {
-    LOG(WARNING) << "Overwriting existing network of the same name.";
+    CAFFE_LOG_WARNING << "Overwriting existing network of the same name.";
     // Note(Yangqing): Why do we explicitly erase it here? Some components of
     // the old network, such as a opened LevelDB, may prevent us from creating a
     // new network before the old one is deleted. Thus we will need to first
@@ -43,19 +48,20 @@ bool Workspace::CreateNet(const NetDef& net_def) {
     net_map_.erase(net_def.name());
   }
   // Create a new net with its name.
-  LOG(INFO) << "Initializing network " << net_def.name();
+  CAFFE_LOG_INFO << "Initializing network " << net_def.name();
   net_map_[net_def.name()] =
       unique_ptr<NetBase>(caffe2::CreateNet(net_def, this));
   if (net_map_[net_def.name()].get() == nullptr) {
-    LOG(ERROR) << "Error when creating the network.";
+    CAFFE_LOG_ERROR << "Error when creating the network.";
     net_map_.erase(net_def.name());
-    return false;
+    return nullptr;
   }
   if (!net_map_[net_def.name()]->Verify()) {
-    LOG(ERROR) << "Error when setting up network " << net_def.name();
-    return false;
+    CAFFE_LOG_ERROR << "Error when setting up network " << net_def.name();
+    net_map_.erase(net_def.name());
+    return nullptr;
   }
-  return true;
+  return net_map_[net_def.name()].get();
 }
 
 void Workspace::DeleteNet(const string& name) {
@@ -66,7 +72,7 @@ void Workspace::DeleteNet(const string& name) {
 
 bool Workspace::RunNet(const string& name) {
   if (!net_map_.count(name)) {
-    LOG(ERROR) << "Network " << name << " does not exist yet.";
+    CAFFE_LOG_ERROR << "Network " << name << " does not exist yet.";
     return false;
   }
   return net_map_[name]->Run();
@@ -75,11 +81,11 @@ bool Workspace::RunNet(const string& name) {
 bool Workspace::RunOperatorOnce(const OperatorDef& op_def) {
   std::unique_ptr<OperatorBase> op(CreateOperator(op_def, this));
   if (!op->Verify()) {
-    LOG(ERROR) << "Error when setting up operator " << op_def.name();
+    CAFFE_LOG_ERROR << "Error when setting up operator " << op_def.name();
     return false;
   }
   if (!op->Run()) {
-    LOG(ERROR) << "Error when running operator " << op_def.name();
+    CAFFE_LOG_ERROR << "Error when running operator " << op_def.name();
     return false;
   }
   return true;
@@ -87,28 +93,28 @@ bool Workspace::RunOperatorOnce(const OperatorDef& op_def) {
 bool Workspace::RunNetOnce(const NetDef& net_def) {
   std::unique_ptr<NetBase> net(caffe2::CreateNet(net_def, this));
   if (!net->Verify()) {
-    LOG(ERROR) << "Error when setting up network " << net_def.name();
+    CAFFE_LOG_ERROR << "Error when setting up network " << net_def.name();
     return false;
   }
   if (!net->Run()) {
-    LOG(ERROR) << "Error when running network " << net_def.name();
+    CAFFE_LOG_ERROR << "Error when running network " << net_def.name();
     return false;
   }
   return true;
 }
 
 bool Workspace::RunPlan(const PlanDef& plan) {
-  LOG(INFO) << "Started executing plan.";
+  CAFFE_LOG_INFO << "Started executing plan.";
   if (plan.network_size() == 0 || plan.execution_step_size() == 0) {
-    LOG(WARNING) << "Nothing to run - did you define a correct plan?";
+    CAFFE_LOG_WARNING << "Nothing to run - did you define a correct plan?";
     // We will do nothing, but the plan is still legal so we will return true.
     return true;
   }
-  LOG(INFO) << "Initializing networks.";
+  CAFFE_LOG_INFO << "Initializing networks.";
 
   for (const NetDef& net_def : plan.network()) {
     if (!CreateNet(net_def)) {
-      LOG(ERROR) << "Failed initializing the networks.";
+      CAFFE_LOG_ERROR << "Failed initializing the networks.";
       return false;
     }
   }
@@ -116,30 +122,30 @@ bool Workspace::RunPlan(const PlanDef& plan) {
   for (const ExecutionStep& step : plan.execution_step()) {
     clock_t step_start_time = clock();
     if (!ExecuteStepRecursive(step)) {
-      LOG(ERROR) << "Failed initializing step " << step.name();
+      CAFFE_LOG_ERROR << "Failed initializing step " << step.name();
       return false;
     }
-    LOG(INFO) << "Step " << step.name() << " took "
+    CAFFE_LOG_INFO << "Step " << step.name() << " took "
               << static_cast<float>(clock() - step_start_time) / CLOCKS_PER_SEC
               << " seconds.";
   }
-  LOG(INFO) << "Total plan took "
+  CAFFE_LOG_INFO << "Total plan took "
             << static_cast<float>(clock() - start_time) / CLOCKS_PER_SEC
             << " seconds.";
-  LOG(INFO) << "Plan executed successfully.";
+  CAFFE_LOG_INFO << "Plan executed successfully.";
   return true;
 }
 
 bool Workspace::ExecuteStepRecursive(const ExecutionStep& step) {
-  LOG(INFO) << "Running execution step " << step.name();
+  CAFFE_LOG_INFO << "Running execution step " << step.name();
   if (!(step.substep_size() == 0 || step.network_size() == 0)) {
-    LOG(ERROR) << "An ExecutionStep should either have substep or networks "
+    CAFFE_LOG_ERROR << "An ExecutionStep should either have substep or networks "
                << "but not both.";
     return false;
   }
 
   int iterations = step.has_num_iter() ? step.num_iter() : 1;
-  VLOG(1) << "Executing step for " << iterations << " iterations.";
+  CAFFE_VLOG(1) << "Executing step for " << iterations << " iterations.";
   if (step.substep_size()) {
     for (int i = 0; i < iterations; ++i) {
       for (const ExecutionStep& substep : step.substep()) {
@@ -155,14 +161,14 @@ bool Workspace::ExecuteStepRecursive(const ExecutionStep& step) {
     // Collect the networks to run.
     for (const string& network_name : step.network()) {
       if (!net_map_.count(network_name)) {
-        LOG(ERROR) << "Network " << network_name << " not found.";
+        CAFFE_LOG_ERROR << "Network " << network_name << " not found.";
         return false;
       }
-      VLOG(1) << "Going to execute network " << network_name;
+      CAFFE_VLOG(1) << "Going to execute network " << network_name;
       networks.push_back(net_map_[network_name].get());
     }
     for (int iter = 0; iter < iterations; ++iter) {
-      VLOG(1) << "Executing network iteration " << iter;
+      CAFFE_VLOG(1) << "Executing network iteration " << iter;
       for (NetBase* network : networks) {
         if (!network->Run()) {
           return false;

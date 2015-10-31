@@ -8,7 +8,6 @@ cc_library(
   ],
   deps = [
     "//caffe2/core:core",
-    "//third_party/glog:glog",
     "//third_party/leveldb:leveldb",
   ],
   whole_archive = True,
@@ -21,7 +20,6 @@ cc_library(
   ],
   deps = [
     "//caffe2/core:core",
-    "//third_party/glog:glog",
     "//third_party/liblmdb:lmdb",
   ],
   whole_archive = True,
@@ -35,7 +33,6 @@ cc_library(
   deps = [
     "//caffe2/core:core",
     "//caffe2/utils:zmq_hpp",
-    "//third_party/glog:glog",
     "//third_party/libzmq:libzmq",
   ],
   whole_archive = True,

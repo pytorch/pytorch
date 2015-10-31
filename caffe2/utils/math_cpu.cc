@@ -25,10 +25,10 @@ using ConstEigenVectorMap =
 namespace caffe2 {
 namespace math {
 
-#define DELEGATE_SIMPLE_UNARY_FUNCTION(dtype, Funcname, OriginalFunc)          \
+#define DELEGATE_SIMPLE_UNARY_FUNCTION(T, Funcname, OriginalFunc)          \
 template <>                                                                    \
-void Funcname<dtype, CPUContext>(                                              \
-    const int N, const dtype* x, dtype* y,                                     \
+void Funcname<T, CPUContext>(                                              \
+    const int N, const T* x, T* y,                                     \
     CPUContext* context) {                                                     \
   OriginalFunc(N, x, y);                                                       \
 }
@@ -52,10 +52,10 @@ void Powx<double, CPUContext>(
 }
 
 
-#define DELEGATE_SIMPLE_BINARY_FUNCTION(dtype, Funcname, OriginalFunc)         \
+#define DELEGATE_SIMPLE_BINARY_FUNCTION(T, Funcname, OriginalFunc)         \
 template <>                                                                    \
-void Funcname<dtype, CPUContext>(                                              \
-    const int N, const dtype* a, const dtype* b, dtype* y,                     \
+void Funcname<T, CPUContext>(                                              \
+    const int N, const T* a, const T* b, T* y,                     \
     CPUContext* context) {                                                     \
   OriginalFunc(N, a, b, y);                                                    \
 }
@@ -108,88 +108,88 @@ void AddToCol<float, CPUContext>(
 template <>
 void Gemm<float, CPUContext>(
     const CBLAS_TRANSPOSE TransA, const CBLAS_TRANSPOSE TransB,
-    const int M, const int N, const int K, const float* alpha, const float* A,
-    const float* B, const float* beta, float* C, CPUContext* context) {
+    const int M, const int N, const int K, const float alpha, const float* A,
+    const float* B, const float beta, float* C, CPUContext* context) {
   auto C_mat = EigenMatrixMap<float>(C, N, M);
-  if (*beta == 0) {
+  if (beta == 0) {
     C_mat.setZero();
   } else {
-    C_mat *= (*beta);
+    C_mat *= beta;
   }
   switch (TransA) {
   case CblasNoTrans: {
     switch (TransB) {
     case CblasNoTrans:
-      C_mat.noalias() += (*alpha) * (
+      C_mat.noalias() += alpha * (
           ConstEigenMatrixMap<float>(B, N, K) *
           ConstEigenMatrixMap<float>(A, K, M));
       return;
     case CblasTrans:
-      C_mat.noalias() += (*alpha) * (
+      C_mat.noalias() += alpha * (
           ConstEigenMatrixMap<float>(B, K, N).transpose() *
           ConstEigenMatrixMap<float>(A, K, M));
       return;
     default:
-      LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for TransB";
+      CAFFE_LOG_FATAL << "Unexpected CBLAS_TRANSPOSE for TransB";
     }
   }
   case CblasTrans: {
     switch (TransB) {
     case CblasNoTrans:
-      C_mat.noalias() += (*alpha) * (
+      C_mat.noalias() += alpha * (
           ConstEigenMatrixMap<float>(B, N, K) *
           ConstEigenMatrixMap<float>(A, M, K).transpose());
       return;
     case CblasTrans:
-      C_mat.noalias() += (*alpha) * (
+      C_mat.noalias() += alpha * (
           ConstEigenMatrixMap<float>(B, K, N).transpose() *
           ConstEigenMatrixMap<float>(A, M, K).transpose());
       return;
     default:
-      LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for TransB";
+      CAFFE_LOG_FATAL << "Unexpected CBLAS_TRANSPOSE for TransB";
     }
   }
   default:
-    LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for TransA";
+    CAFFE_LOG_FATAL << "Unexpected CBLAS_TRANSPOSE for TransA";
   }
 }
 
 template <>
 void Gemv<float, CPUContext>(
-    const CBLAS_TRANSPOSE TransA, const int M, const int N, const float* alpha,
-    const float* A, const float* x, const float* beta, float* y,
+    const CBLAS_TRANSPOSE TransA, const int M, const int N, const float alpha,
+    const float* A, const float* x, const float beta, float* y,
     CPUContext* context) {
   EigenVectorMap<float> y_vec(y, TransA == CblasNoTrans ? M : N);
-  if (*beta == 0) {
+  if (beta == 0) {
     // In Caffe2 we often do a lazy initialization, which may contain NaNs in
     // the float values. As a result, if beta is 0, we explicitly do a setzero.
     y_vec.setZero();
   } else {
-    y_vec *= (*beta);
+    y_vec *= beta;
   }
   switch (TransA) {
     case CblasNoTrans: {
-      y_vec.noalias() += (*alpha) * (
+      y_vec.noalias() += alpha * (
           ConstEigenMatrixMap<float>(A, N, M).transpose() *
           ConstEigenVectorMap<float>(x, N));
       return;
     }
     case CblasTrans: {
-      y_vec.noalias() += (*alpha) * (
+      y_vec.noalias() += alpha * (
           ConstEigenMatrixMap<float>(A, N, M) *
           ConstEigenVectorMap<float>(x, M));
       return;
     }
     default:
-      LOG(FATAL) << "Gemv float found an unexpected CBLAS_TRANSPOSE input.";
+      CAFFE_LOG_FATAL << "Gemv float found an unexpected CBLAS_TRANSPOSE input.";
   }
 }
 
-#define CAFFE2_SPECIALIZED_SET(dtype)                                          \
+#define CAFFE2_SPECIALIZED_SET(T)                                          \
 template <>                                                                    \
-void Set<dtype, CPUContext>(const int N, const dtype alpha, dtype *Y,          \
+void Set<T, CPUContext>(const int N, const T alpha, T *Y,          \
                            CPUContext* context) {                              \
-  EigenVectorMap<dtype>(Y, N).setConstant(alpha);                              \
+  EigenVectorMap<T>(Y, N).setConstant(alpha);                              \
 }
 
 CAFFE2_SPECIALIZED_SET(float);
@@ -250,23 +250,50 @@ void Select<float, CPUContext>(
       const int N, const int D, const float* x, const int* idx, float* y,
       CPUContext* context) {
   for (int i = 0; i < N; ++i) {
-    DCHECK_LT(idx[i], D);
+    CAFFE_DCHECK_LT(idx[i], D);
     y[i] = x[i * D + idx[i]];
   }
 }
 
 template <>
 void Scale<float, CPUContext>(
-    const int n, const float* alpha, const float *x, float* y,
+    const int n, const float alpha, const float *x, float* y,
+    CPUContext* context) {
+  EigenVectorMap<float>(y, n) = ConstEigenVectorMap<float>(x, n) * alpha;
+}
+
+template <>
+void Scale<double, CPUContext>(
+  const int n, const double alpha, const double *x, double* y,
+  CPUContext* context) {
+  EigenVectorMap<double>(y, n) = ConstEigenVectorMap<double>(x, n) * alpha;
+}
+
+template <>
+void Scale<float, CPUContext>(
+    const int n, const float* alpha, const float* x, float* y,
     CPUContext* context) {
   EigenVectorMap<float>(y, n) = ConstEigenVectorMap<float>(x, n) * (*alpha);
 }
 
 template <>
 void Scale<double, CPUContext>(
-  const int n, const double* alpha, const double *x, double* y,
-  CPUContext* context) {
+    const int n, const double* alpha, const double* x, double* y,
+    CPUContext* context) {
   EigenVectorMap<double>(y, n) = ConstEigenVectorMap<double>(x, n) * (*alpha);
+}
+
+
+template <>
+void Axpy<float, CPUContext>(const int N, const float alpha, const float* x,
+                             float* Y, CPUContext* context) {
+  EigenVectorMap<float>(Y, N) += ConstEigenVectorMap<float>(x, N) * alpha;
+}
+
+template <>
+void Axpy<double, CPUContext>(const int N, const double alpha, const double* x,
+                             double* Y, CPUContext* context) {
+  EigenVectorMap<double>(Y, N) += ConstEigenVectorMap<double>(x, N) * alpha;
 }
 
 template <>
@@ -282,19 +309,19 @@ void Axpy<double, CPUContext>(const int N, const double* alpha, const double* x,
 }
 
 template <>
-void Axpby<float, CPUContext>(const int N, const float* alpha, const float* x,
-                              const float* beta, float* y,
+void Axpby<float, CPUContext>(const int N, const float alpha, const float* x,
+                              const float beta, float* y,
                               CPUContext* context) {
   EigenVectorMap<float> y_vec(y, N);
-  y_vec = y_vec * (*beta) + ConstEigenVectorMap<float>(x, N) * (*alpha);
+  y_vec = y_vec * beta + ConstEigenVectorMap<float>(x, N) * alpha;
 }
 
 template <>
-void Axpby<double, CPUContext>(const int N, const double* alpha,
-                               const double* x, const double* beta, double* y,
+void Axpby<double, CPUContext>(const int N, const double alpha,
+                               const double* x, const double beta, double* y,
                                CPUContext* context) {
   EigenVectorMap<double> y_vec(y, N);
-  y_vec = y_vec * (*beta) + ConstEigenVectorMap<double>(x, N) * (*alpha);
+  y_vec = y_vec * beta + ConstEigenVectorMap<double>(x, N) * alpha;
 }
 
 template <>
@@ -418,11 +445,13 @@ void Col2im<float, CPUContext, StorageOrder::NHWC>(
 }
 
 template <>
-void CopyMatrix<float, CPUContext>(
-    const int M, const int N, const float* A, const int lda, float* B,
-    const int ldb, CPUContext* context) {
+void CopyMatrix<CPUContext>(
+    const size_t itemsize, const int M, const int N, const void* A,
+    const int lda, void* B, const int ldb, CPUContext* context) {
   for (int i = 0; i < M; ++i) {
-    memcpy(B + ldb * i, A + lda * i, sizeof(float) * N);
+    memcpy(static_cast<char*>(B) + ldb * i * itemsize,
+           static_cast<const char*>(A) + lda * i * itemsize,
+           itemsize * N);
   }
 }
 

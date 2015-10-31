@@ -1,0 +1,6 @@
+cc_thirdparty_target(
+  name="python_libs",
+  srcs=["BREW"],
+  commands=[],
+  cc_obj_files=Env.PYTHON_LIBS,
+)

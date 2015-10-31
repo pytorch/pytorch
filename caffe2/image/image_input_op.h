@@ -11,12 +11,12 @@
 
 namespace caffe2 {
 
-template <class DeviceContext>
+template <class Context>
 class ImageInputOp final
-    : public PrefetchOperator<DeviceContext> {
+    : public PrefetchOperator<Context> {
  public:
   using OperatorBase::OutputSize;
-  using PrefetchOperator<DeviceContext>::prefetch_thread_;
+  using PrefetchOperator<Context>::prefetch_thread_;
   explicit ImageInputOp(const OperatorDef& operator_def,
                                     Workspace* ws);
   ~ImageInputOp() {
@@ -34,8 +34,8 @@ class ImageInputOp final
   unique_ptr<db::DB> db_;
   unique_ptr<db::Cursor> cursor_;
   CPUContext cpu_context_;
-  Tensor<float, CPUContext> prefetched_image_;
-  Tensor<int, CPUContext> prefetched_label_;
+  TensorCPU prefetched_image_;
+  TensorCPU prefetched_label_;
   int batch_size_;
   string db_name_;
   string db_type_;
@@ -52,10 +52,10 @@ class ImageInputOp final
 };
 
 
-template <class DeviceContext>
-ImageInputOp<DeviceContext>::ImageInputOp(
+template <class Context>
+ImageInputOp<Context>::ImageInputOp(
       const OperatorDef& operator_def, Workspace* ws)
-      : PrefetchOperator<DeviceContext>(operator_def, ws),
+      : PrefetchOperator<Context>(operator_def, ws),
         batch_size_(
             OperatorBase::template GetSingleArgument<int>("batch_size", 0)),
         db_name_(
@@ -71,23 +71,23 @@ ImageInputOp<DeviceContext>::ImageInputOp(
         mirror_(OperatorBase::template GetSingleArgument<int>("mirror", 0)),
         use_caffe_datum_(OperatorBase::template GetSingleArgument<int>(
               "use_caffe_datum", 0)) {
-  CHECK_GT(batch_size_, 0) << "Batch size should be nonnegative.";
-  CHECK_GT(db_name_.size(), 0) << "Must provide a leveldb name.";
-  CHECK_GT(scale_, 0) << "Must provide the scaling factor.";
-  CHECK_GT(crop_, 0) << "Must provide the cropping value.";
-  CHECK_GE(scale_, crop_)
+  CAFFE_CHECK_GT(batch_size_, 0) << "Batch size should be nonnegative.";
+  CAFFE_CHECK_GT(db_name_.size(), 0) << "Must provide a leveldb name.";
+  CAFFE_CHECK_GT(scale_, 0) << "Must provide the scaling factor.";
+  CAFFE_CHECK_GT(crop_, 0) << "Must provide the cropping value.";
+  CAFFE_CHECK_GE(scale_, crop_)
       << "The scale value must be no smaller than the crop value.";
 
-  DLOG(INFO) << "Creating an image input op with the following setting: ";
-  DLOG(INFO) << "    Outputting in batches of " << batch_size_ << " images;";
-  DLOG(INFO) << "    Treating input image as "
-             << (color_ ? "color " : "grayscale ") << "image;";
-  DLOG(INFO) << "    Scaling image to " << scale_
-             << (warp_ ? " with " : " without ") << "warping;";
-  DLOG(INFO) << "    Cropping image to " << crop_
-             << (mirror_ ? " with " : " without ") << "random mirroring;";
-  DLOG(INFO) << "    Subtract mean " << mean_ << " and divide by std " << std_
-             << ".";
+  CAFFE_LOG_INFO << "Creating an image input op with the following setting: ";
+  CAFFE_LOG_INFO << "    Outputting in batches of " << batch_size_ << " images;";
+  CAFFE_LOG_INFO << "    Treating input image as "
+            << (color_ ? "color " : "grayscale ") << "image;";
+  CAFFE_LOG_INFO << "    Scaling image to " << scale_
+            << (warp_ ? " with " : " without ") << "warping;";
+  CAFFE_LOG_INFO << "    Cropping image to " << crop_
+            << (mirror_ ? " with " : " without ") << "random mirroring;";
+  CAFFE_LOG_INFO << "    Subtract mean " << mean_ << " and divide by std " << std_
+            << ".";
   db_.reset(db::CreateDB(db_type_, db_name_, db::READ));
   cursor_.reset(db_->NewCursor());
   cursor_->SeekToFirst();
@@ -96,13 +96,13 @@ ImageInputOp<DeviceContext>::ImageInputOp(
   prefetched_label_.Reshape(vector<int>(1, batch_size_));
 }
 
-template <class DeviceContext>
-bool ImageInputOp<DeviceContext>::GetImageAndLabelFromDBValue(
+template <class Context>
+bool ImageInputOp<Context>::GetImageAndLabelFromDBValue(
       const string& value, cv::Mat* img, int* label) {
   if (use_caffe_datum_) {
     // The input is a caffe datum format.
     caffe::Datum datum;
-    CHECK(datum.ParseFromString(value));
+    CAFFE_CHECK(datum.ParseFromString(value));
     *label = datum.label();
     if (datum.encoded()) {
       // encoded image in datum.
@@ -115,8 +115,8 @@ bool ImageInputOp<DeviceContext>::GetImageAndLabelFromDBValue(
       *img = cv::Mat(datum.height(), datum.width(),
                      color_ ? CV_8UC3 : CV_8UC1);
       // Note(Yangqing): I believe that the mat should be created continuous.
-      CHECK(img->isContinuous());
-      CHECK((color_ && datum.channels() == 3) || datum.channels() == 1);
+      CAFFE_CHECK(img->isContinuous());
+      CAFFE_CHECK((color_ && datum.channels() == 3) || datum.channels() == 1);
       if (datum.channels() == 1) {
         memcpy(img->ptr<uchar>(0), datum.data().data(), datum.data().size());
       } else {
@@ -138,12 +138,12 @@ bool ImageInputOp<DeviceContext>::GetImageAndLabelFromDBValue(
   } else {
     // The input is a caffe2 format.
     TensorProtos protos;
-    CHECK(protos.ParseFromString(value));
+    CAFFE_CHECK(protos.ParseFromString(value));
     const TensorProto& image_proto = protos.protos(0);
     const TensorProto& label_proto = protos.protos(1);
     if (image_proto.data_type() == TensorProto::STRING) {
       // encoded image string.
-      DCHECK_EQ(image_proto.string_data_size(), 1);
+      CAFFE_DCHECK_EQ(image_proto.string_data_size(), 1);
       const string& encoded_image_str = image_proto.string_data(0);
       int encoded_size = encoded_image_str.size();
       // We use a cv::Mat to wrap the encoded str so we do not need a copy.
@@ -153,39 +153,39 @@ bool ImageInputOp<DeviceContext>::GetImageAndLabelFromDBValue(
           color_ ? CV_LOAD_IMAGE_COLOR : CV_LOAD_IMAGE_GRAYSCALE);
     } else if (image_proto.data_type() == TensorProto::BYTE) {
       // raw image content.
-      CHECK_EQ(image_proto.dims_size(), (color_ ? 3 : 2));
-      CHECK_GE(image_proto.dims(0), crop_)
+      CAFFE_CHECK_EQ(image_proto.dims_size(), (color_ ? 3 : 2));
+      CAFFE_CHECK_GE(image_proto.dims(0), crop_)
           << "Image height must be bigger than crop.";
-      CHECK_GE(image_proto.dims(1), crop_)
+      CAFFE_CHECK_GE(image_proto.dims(1), crop_)
           << "Image width must be bigger than crop.";
-      CHECK(!color_ || image_proto.dims(2) == 3);
+      CAFFE_CHECK(!color_ || image_proto.dims(2) == 3);
       *img = cv::Mat(
           image_proto.dims(0), image_proto.dims(1), color_ ? CV_8UC3 : CV_8UC1);
       memcpy(img->ptr<uchar>(0), image_proto.byte_data().data(),
              image_proto.byte_data().size());
     } else {
-      LOG(FATAL) << "Unknown image data type.";
+      CAFFE_LOG_FATAL << "Unknown image data type.";
     }
-    DCHECK_EQ(label_proto.data_type(), TensorProto::INT32);
-    DCHECK_EQ(label_proto.int32_data_size(), 1);
+    CAFFE_DCHECK_EQ(label_proto.data_type(), TensorProto::INT32);
+    CAFFE_DCHECK_EQ(label_proto.int32_data_size(), 1);
     *label = label_proto.int32_data(0);
   }
   // TODO(Yangqing): return false if any error happens.
   return true;
 }
 
-template <class DeviceContext>
-bool ImageInputOp<DeviceContext>::Prefetch() {
+template <class Context>
+bool ImageInputOp<Context>::Prefetch() {
   std::bernoulli_distribution mirror_this_image(0.5);
-  float* image_data = prefetched_image_.mutable_data();
+  float* image_data = prefetched_image_.mutable_data<float>();
   int channels = color_ ? 3 : 1;
   for (int item_id = 0; item_id < batch_size_; ++item_id) {
-    // LOG(INFO) << "Prefetching item " << item_id;
+    // CAFFE_LOG_INFO << "Prefetching item " << item_id;
     // process data
     cv::Mat img;
     int label;
     cv::Mat scaled_img;
-    CHECK(GetImageAndLabelFromDBValue(cursor_->value(), &img, &label));
+    CAFFE_CHECK(GetImageAndLabelFromDBValue(cursor_->value(), &img, &label));
     // deal with scaling.
     int scaled_width, scaled_height;
     if (warp_) {
@@ -208,7 +208,7 @@ bool ImageInputOp<DeviceContext>::Prefetch() {
     int height_offset =
         std::uniform_int_distribution<>(0, scaled_img.rows - crop_)(
             cpu_context_.RandGenerator());
-    // DVLOG(1) << "offset: " << height_offset << ", " << width_offset;
+    // CAFFE_VLOG(1) << "offset: " << height_offset << ", " << width_offset;
     if (mirror_ && mirror_this_image(cpu_context_.RandGenerator())) {
       // Copy mirrored image.
       for (int h = height_offset; h < height_offset + crop_; ++h) {
@@ -233,7 +233,7 @@ bool ImageInputOp<DeviceContext>::Prefetch() {
       }
     }
     // Copy the label
-    prefetched_label_.mutable_data()[item_id] = label;
+    prefetched_label_.mutable_data<int>()[item_id] = label;
     // Advance to the next item.
     cursor_->Next();
     if (!cursor_->Valid()) {
@@ -243,20 +243,20 @@ bool ImageInputOp<DeviceContext>::Prefetch() {
   return true;
 }
 
-template <class DeviceContext>
-bool ImageInputOp<DeviceContext>::CopyPrefetched() {
+template <class Context>
+bool ImageInputOp<Context>::CopyPrefetched() {
   // The first output is the image data.
-  auto* image_output = OperatorBase::Output<Tensor<float, DeviceContext> >(0);
+  auto* image_output = OperatorBase::Output<Tensor<Context> >(0);
   image_output->ReshapeLike(prefetched_image_);
-  this->device_context_.template Copy<float, CPUContext, DeviceContext>(
-      prefetched_image_.size(), prefetched_image_.data(),
-      image_output->mutable_data());
+  this->device_context_.template Copy<float, CPUContext, Context>(
+      prefetched_image_.size(), prefetched_image_.template data<float>(),
+      image_output->template mutable_data<float>());
   // The second output is the label.
-  auto* label_output = OperatorBase::Output<Tensor<int, DeviceContext> >(1);
+  auto* label_output = OperatorBase::Output<Tensor<Context> >(1);
   label_output->ReshapeLike(prefetched_label_);
-  this->device_context_.template Copy<int, CPUContext, DeviceContext>(
-      prefetched_label_.size(), prefetched_label_.data(),
-      label_output->mutable_data());
+  this->device_context_.template Copy<int, CPUContext, Context>(
+      prefetched_label_.size(), prefetched_label_.template data<int>(),
+      label_output->template mutable_data<int>());
   return true;
 }
 

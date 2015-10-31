@@ -76,10 +76,10 @@ template<>
 bool SummarizeOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
   const int N = X.size();
-  DCHECK_GT(N, 0);
+  CAFFE_DCHECK_GT(N, 0);
 
   // TODO(Yangqing): Any better way to avoid having to const cast?
-  thrust::device_ptr<float> Xdata(const_cast<float*>(X.data()));
+  thrust::device_ptr<float> Xdata(const_cast<float*>(X.data<float>()));
   summary_stats_unary_op<float> unary_op;
   summary_stats_binary_op<float> binary_op;
   SummaryStatsData<float> init;
@@ -96,12 +96,12 @@ bool SummarizeOp<float, CUDAContext>::RunOnDevice() {
                  << standard_deviation << std::endl;
   }
   if (OutputSize()) {
-    auto* Y = OperatorBase::Output<Tensor<float, CUDAContext> >(0);
+    auto* Y = OperatorBase::Output<TensorCUDA>(0);
     Y->Reshape(std::vector<int>{4});
     float output_buffer[NUM_STATS] = {result.min, result.max, result.mean,
                                standard_deviation};
     device_context_.Copy<float, CPUContext, CUDAContext>(
-        NUM_STATS, output_buffer, Y->mutable_data());
+        NUM_STATS, output_buffer, Y->mutable_data<float>());
   }
   return true;
 }

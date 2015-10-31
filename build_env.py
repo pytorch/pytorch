@@ -1,47 +1,7 @@
 """ build_env defines the general environment that we use to build.
 """
 
-import multiprocessing
-import os
-import subprocess
-import sys
-
-def _GetSubprocessOutput(commands):
-  try:
-    proc = subprocess.Popen(commands, stdout=subprocess.PIPE)
-    out, err = proc.communicate()
-  except OSError as err:
-    print 'Cannot run command', commands, '. Return empty output.'
-    return ''
-  return out.strip()
-
-def _GetCompilerType(CC):
-  # determine compiler type.
-  _COMPILER_VERSION_STR = _GetSubprocessOutput([CC, '--version'])
-  if 'clang' in _COMPILER_VERSION_STR:
-    return 'clang'
-  elif ('g++' in _COMPILER_VERSION_STR or
-        'Free Software Foundation' in _COMPILER_VERSION_STR):
-    return 'g++'
-  else:
-    raise RuntimeError('Cannot determine C++ compiler type.')
-
-def _GetPythonIncludes():
-  includes = _GetSubprocessOutput(['python-config', '--includes'])
-  # determine the numpy include directory. If any error happens, return
-  # empty.
-  try:
-    import numpy.distutils
-    includes += ' -I' + ' -I'.join(
-      numpy.distutils.misc_util.get_numpy_include_dirs())
-  except Exception as e:
-    pass
-  return includes
-
-def _GetPythonLibDirs():
-  python_root = _GetSubprocessOutput(['python-config', '--prefix'])
-  lib_dir = os.path.join(python_root, 'lib')
-  return ' -L' + lib_dir
+from build_env_internal import *
 
 class Env(object):
   """Env is the class that stores all the build variables."""
@@ -51,8 +11,83 @@ class Env(object):
   LINK_BINARY = CC + ' -o'
   LINK_SHARED = CC + ' -shared -o'
   LINK_STATIC = 'ar rcs'
-  # Protobuf constants
+
+  # The directory that contains the generated stuff.
+  GENDIR = 'gen'
+
+  # Protobuf constants: if you would like to use the protocol buffer library
+  # already installed in the system, set USE_SYSTEM_PROTOBUF to True, and
+  # specify the PROTOC_BINARY path.
+  USE_SYSTEM_PROTOBUF = True
   PROTOC_BINARY = "protoc"
+  # Otherwise, specify USE_SYSTEM_PROTOBUF = False and use the included protoc
+  # binary.
+  #USE_SYSTEM_PROTOBUF = False
+  #PROTOC_BINARY = os.path.join(GENDIR, 'third_party/google/protoc')
+
+  # Eigen constants: if set USE_SYSTEM_EIGEN, you need to make sure that Eigen
+  # is installed in your system. Otherwise, we will use the Eigen code included
+  # in the Caffe source.
+  USE_SYSTEM_EIGEN = False
+
+  # CUDA directory.
+  CUDA_DIR = '/usr/local/cuda'
+  # Caffe defined symbols
+  DEFINES = [
+      #"-DCAFFE2_USE_GOOGLE_GLOG",
+      #"-DCAFFE2_THROW_ON_FATAL",
+      "-DNDEBUG",
+  ]
+  # NVCC C flags.
+  NVCC_CFLAGS = ' '.join([
+      # add cflags here.
+      '-Xcompiler -fPIC',
+      '-O2',
+      '-std=c++11',
+      '-gencode arch=compute_20,code=sm_20',
+      '-gencode arch=compute_20,code=sm_21',
+      '-gencode arch=compute_30,code=sm_30',
+      '-gencode arch=compute_35,code=sm_35',
+      '-gencode arch=compute_50,code=sm_50',
+      '-gencode arch=compute_50,code=compute_50',
+  ] + DEFINES)
+  # General cflags that should be added in all cc arguments.
+  CFLAGS = [
+      # add cflags here.
+      '-fPIC',
+      '-DPIC',
+      #'-O0',
+      '-O2',
+      '-g',
+      #'-pg',
+      #'-msse',
+      #'-mavx',
+      '-ffast-math',
+      '-std=c++11',
+      '-Wall',
+      '-Wextra',
+      '-Wno-unused-parameter',
+      '-Wno-sign-compare',
+      #'-Werror',
+  ] + DEFINES
+  # The include directories
+  INCLUDES = [
+      '/usr/local/include',
+      '/usr/include',
+  ]
+  # The library directories.
+  LIBDIRS = [
+      '/usr/local/lib',
+      '/usr/lib',
+  ]
+  LINKFLAGS = [
+      # Add link flags here
+      '-pthread',
+      #'-pg',
+  ]
+
+  # Everything below should be automatically figured out. You most likely do not
+  # need to change them.
 
   if sys.platform == 'darwin':
     # For some reason, python on mac still recognizes the .so extensions...
@@ -63,12 +98,12 @@ class Env(object):
   else:
     raise RuntimeError('Unknown system platform.')
 
-  COMPILER_TYPE = _GetCompilerType(CC)
+  COMPILER_TYPE = GetCompilerType(CC)
 
   #determine mpi include and mpi link flags.
-  MPI_INCLUDES = _GetSubprocessOutput([MPICC, '--showme:incdirs']).split(' ')
-  MPI_LIBDIRS = _GetSubprocessOutput([MPICC, '--showme:libdirs']).split(' ')
-  MPI_LIBS = _GetSubprocessOutput([MPICC, '--showme:libs']).split(' ')
+  MPI_INCLUDES = GetSubprocessOutput([MPICC, '--showme:incdirs']).split(' ')
+  MPI_LIBDIRS = GetSubprocessOutput([MPICC, '--showme:libdirs']).split(' ')
+  MPI_LIBS = GetSubprocessOutput([MPICC, '--showme:libs']).split(' ')
   if len(MPI_INCLUDES) == 1 and MPI_INCLUDES[0] == '':
     print ('MPI not found, so some libraries and binaries that use MPI will '
            'not compile correctly. If you would like to use those, you can '
@@ -78,10 +113,19 @@ class Env(object):
     MPI_INCLUDES = []
     MPI_LIBDIRS = []
     MPI_LIBS = []
+  # Try to figure out if mpi has cuda support
+  OMPI_INFO = GetSubprocessOutput(['ompi_info', '--parsable', '--all'])
+  OMPI_CUDA_SUPPORT = [
+      r for r in OMPI_INFO.split('\n')
+      if 'mpi_built_with_cuda_support:value' in r]
+  if len(OMPI_CUDA_SUPPORT) == 1 and OMPI_CUDA_SUPPORT[0][-5:] == 'false':
+    # If this is the case, we do not have cuda compiled in MPI, even if the
+    # version forces so.
+    CFLAGS.append('-DCAFFE2_FORCE_FALLBACK_CUDA_MPI')
 
   # Determine the CUDA directory.
   # TODO(Yangqing): find a way to automatically figure out where nvcc is.
-  CUDA_DIR = '/usr/local/cuda'
+
   if not os.path.exists(CUDA_DIR):
     # Currently, we just print a warning.
     print ('Cannot find Cuda directory. NVCC will not run.')
@@ -102,20 +146,6 @@ class Env(object):
   if sys.platform.startswith('linux'):
     NVCC_LINKS += ' -l' + ' -l'.join(['rt', 'dl'])
 
-  # NVCC C flags.
-  NVCC_CFLAGS = ' '.join([
-      # add cflags here.
-      '-Xcompiler -fPIC',
-      '-O2',
-      '-std=c++11',
-      '-gencode arch=compute_20,code=sm_20',
-      '-gencode arch=compute_20,code=sm_21',
-      '-gencode arch=compute_30,code=sm_30',
-      '-gencode arch=compute_35,code=sm_35',
-      '-gencode arch=compute_50,code=sm_50',
-      '-gencode arch=compute_50,code=compute_50',
-  ])
-
   # Determine how the compiler deals with whole archives.
   if COMPILER_TYPE == 'clang':
     WHOLE_ARCHIVE_TEMPLATE = '-Wl,-force_load,%s'
@@ -124,60 +154,27 @@ class Env(object):
   else:
     raise RuntimeError('Unknown compiler type to set whole-archive template.')
 
-  # General cflags that should be added in all cc arguments.
-  CFLAGS = ' '.join([
-      # add cflags here.
-      '-fPIC',
-      '-DPIC',
-      #'-O0',
-      '-O2',
-      #'-pg',
-      '-DNDEBUG',
-      #'-msse',
-      #'-mavx',
-      '-ffast-math',
-      '-std=c++11',
-      '-W',
-      '-Wall',
-      '-Wno-unused-parameter',
-      '-Wno-sign-compare',
-      #'-Wno-c++11-extensions',
-  ])
-
-  GENDIR = 'gen'
-  # General include folders.
-  INCLUDES = NVCC_INCLUDES + MPI_INCLUDES + [
+  CFLAGS = ' '.join(CFLAGS)
+  INCLUDES += NVCC_INCLUDES + MPI_INCLUDES + [
       GENDIR,
       os.path.join(GENDIR, 'third_party'),
       os.path.join(GENDIR, 'third_party/include'),
-      '/usr/local/include',
-      '/usr/include',
   ]
-  INCLUDES = [s for s in INCLUDES if s == GENDIR or os.path.isdir(s)]
   INCLUDES = ' '.join(['-I' + s for s in INCLUDES])
   # Python
-  INCLUDES += ' ' + _GetPythonIncludes()
+  INCLUDES += ' ' + GetPythonIncludes()
 
-  # General lib folders.
-  LIBDIRS = MPI_LIBDIRS + [
-      '/usr/local/lib',
-      '/usr/lib',
-  ]
-  LIBDIRS = [s for s in LIBDIRS if os.path.isdir(s)]
+  LIBDIRS += MPI_LIBDIRS
   LIBDIRS = ' '.join(['-L' + s for s in LIBDIRS])
   # Python
-  LIBDIRS += ' ' + _GetPythonLibDirs()
+  LIBDIRS += ' ' + GetPythonLibDirs()
   # General link flags for binary targets
   LIBS = []
   LIBS = ' '.join(['-l' + s for s in LIBS])
-  LINKFLAGS = ' '.join([
-      # Add link flags here
-      '-pthread',
-      #'-pg',
-  ]) + ' ' + LIBDIRS + ' ' + LIBS
-  PYTHON_LIBS = [_GetSubprocessOutput(['python-config', '--ldflags'])]
+  LINKFLAGS = ' '.join(LINKFLAGS) + ' ' + LIBDIRS + ' ' + LIBS
+  PYTHON_LIBS = [GetSubprocessOutput(['python-config', '--ldflags'])]
 
-  CPUS = multiprocessing.cpu_count()
+  CPUS = multiprocessing.cpu_count() * 2
 
   def __init__(self):
     """ENV is a singleton and should not be instantiated."""

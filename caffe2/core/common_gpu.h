@@ -9,23 +9,47 @@
 // #include <thrust/device_vector.h>
 // #include <thrust/functional.h>
 
-#include "glog/logging.h"
+#include "caffe2/core/logging.h"
 #include "caffe2/core/common.h"
 
 namespace caffe2 {
 
-// Check if the current running session has a cuda gpu present. Note that this
-// is different from having caffe2 built with cuda - it is possible that
-// caffe2 is built with cuda but there is no cuda hardware available.
+/**
+ * Check if the current running session has a cuda gpu present.
+ *
+ * Note that this is different from having caffe2 built with cuda. Building
+ * Caffe2 with cuda only guarantees that this function exists. If there are no
+ * cuda gpus present in the machine, or there are hardware configuration
+ * problems like an insufficient driver, this function will still return false,
+ * meaning that there is no usable GPU present.
+ */
 bool HasCudaGPU();
-// Sets and gets the default GPU id. If the function is not called, we will use
-// GPU 0 ast he default gpu id. If there is an operator that says it runs on the
-// GPU but did not specify which GPU, this default gpuid is going to be used.
+
+/**
+ * Sets the default GPU id for Caffe2.
+ *
+ * If an operator is set to run on Cuda GPU but no gpu id is given, we will use
+ * the default gpu id to run the operator. Before this function is explicitly
+ * called, GPU 0 will be the default GPU id.
+ */
 void SetDefaultGPUID(const int deviceid);
+/**
+ * Gets the default GPU id for Caffe2.
+ */
 int GetDefaultGPUID();
+
+/**
+ * Runs a device query function and prints out the results to CAFFE_LOG_INFO.
+ */
 void DeviceQuery(const int deviceid);
-// Return a peer access pattern by returning a matrix (in the format of a
-// nested vector) of boolean values specifying whether peer access is possible.
+
+/**
+ * Return a peer access pattern by returning a matrix (in the format of a
+ * nested vector) of boolean values specifying whether peer access is possible.
+ *
+ * This function returns false if anything wrong happens during the query of
+ * the GPU access pattern.
+ */
 bool GetCudaPeerAccessPattern(vector<vector<bool> >* pattern);
 
 namespace internal {
@@ -37,7 +61,7 @@ const char* curandGetErrorString(curandStatus_t error);
 #define CUDA_CHECK(condition)                                                  \
   do {                                                                         \
     cudaError_t error = condition;                                             \
-    CHECK_EQ(error, cudaSuccess)                                               \
+    CAFFE_CHECK_EQ(error, cudaSuccess)                                         \
         << "Error at: " << __FILE__ << ":" << __LINE__ << ": "                 \
         << cudaGetErrorString(error);                                          \
   } while (0)
@@ -45,7 +69,7 @@ const char* curandGetErrorString(curandStatus_t error);
 #define CUBLAS_CHECK(condition)                                                \
   do {                                                                         \
     cublasStatus_t status = condition;                                         \
-    CHECK_EQ(status, CUBLAS_STATUS_SUCCESS)                                    \
+    CAFFE_CHECK_EQ(status, CUBLAS_STATUS_SUCCESS)                              \
         << "Error at: " << __FILE__ << ":" << __LINE__ << ": "                 \
         << ::caffe2::internal::cublasGetErrorString(status);                   \
   } while (0)
@@ -53,7 +77,7 @@ const char* curandGetErrorString(curandStatus_t error);
 #define CURAND_CHECK(condition)                                                \
   do {                                                                         \
     curandStatus_t status = condition;                                         \
-    CHECK_EQ(status, CURAND_STATUS_SUCCESS)                                    \
+    CAFFE_CHECK_EQ(status, CURAND_STATUS_SUCCESS)                              \
         << "Error at: " << __FILE__ << ":" << __LINE__ << ": "                 \
         << ::caffe2::internal::curandGetErrorString(status);                   \
   } while (0)
@@ -63,10 +87,13 @@ const char* curandGetErrorString(curandStatus_t error);
        i < (n);                                                                \
        i += blockDim.x * gridDim.x)
 
+// The number of threads Caffe uses for cuda. This is kind of legacy:
+// hard-coding the number of threads might not be an optimal case, and might
+// even fail for specific hardware platforms.
 // TODO(Yangqing): Yuck. Figure out a better way?
 const int CAFFE_CUDA_NUM_THREADS = 1024;
 
-// CUDA: number of blocks for threads.
+// Compute the number of blocks needed to run N threads.
 inline int CAFFE_GET_BLOCKS(const int N) {
   return (N + CAFFE_CUDA_NUM_THREADS - 1) / CAFFE_CUDA_NUM_THREADS;
 }

@@ -9,9 +9,6 @@ enum LegacyPadding {
   // the input shape as follows. For SAME, the output is:
   //   R_out = ceil(float(R) / float(S))
   //   C_out = ceil(float(C) / float(S))
-  // and for VALID, the output is:
-  //   R_out = ceil(float(R - K + 1) / float(S))
-  //   C_out = ceil(float(C - K + 1) / float(S))
   // where R and C are row and column, S is the stride, and K is the kernel.
   // The number of padded pixels is then computed as
   //   Pr = ((R_out - 1) * S + K - R)
@@ -19,7 +16,7 @@ enum LegacyPadding {
   // When Pr and Pc are even numbers, both sides (left and right, or top and
   // bottom) get half each. When Pr and Pc are odd numbers, the right and the
   // bottom gets the one additional padding pixel.
-  //
+  // For VALID, padding values of 0 are always used.
   VALID = 1;
   SAME = 2;
 

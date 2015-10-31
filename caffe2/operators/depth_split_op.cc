@@ -2,8 +2,8 @@
 
 namespace caffe2 {
 namespace {
-REGISTER_CPU_OPERATOR(DepthSplit, DepthSplitOp<float, CPUContext>)
-REGISTER_CPU_OPERATOR(DepthConcat, DepthConcatOp<float, CPUContext>)
+REGISTER_CPU_OPERATOR(DepthSplit, DepthSplitOp<CPUContext>)
+REGISTER_CPU_OPERATOR(DepthConcat, DepthConcatOp<CPUContext>)
 }  // namespace
 }  // namespace caffe2
 

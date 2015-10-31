@@ -2,6 +2,6 @@ cc_thirdparty_target(
   name = "cudnn",
   srcs = ["BREW"],
   commands=[],
-  cc_obj_files = ["-lcudnn"],
+  cc_obj_files = ["-lcudnn_static"],
 )
 

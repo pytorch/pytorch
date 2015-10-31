@@ -4,7 +4,7 @@
 #include <fstream>
 
 #include "caffe2/utils/proto_utils.h"
-#include "glog/logging.h"
+#include "caffe2/core/logging.h"
 #include "google/protobuf/io/coded_stream.h"
 #include "google/protobuf/io/zero_copy_stream_impl.h"
 #include "google/protobuf/text_format.h"
@@ -25,7 +25,7 @@ using std::ios;
 
 bool ReadProtoFromTextFile(const char* filename, Message* proto) {
   int fd = open(filename, O_RDONLY);
-  CHECK_NE(fd, -1) << "File not found: " << filename;
+  CAFFE_CHECK_NE(fd, -1) << "File not found: " << filename;
   FileInputStream* input = new FileInputStream(fd);
   bool success = google::protobuf::TextFormat::Parse(input, proto);
   delete input;
@@ -36,14 +36,14 @@ bool ReadProtoFromTextFile(const char* filename, Message* proto) {
 void WriteProtoToTextFile(const Message& proto, const char* filename) {
   int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
   FileOutputStream* output = new FileOutputStream(fd);
-  CHECK(google::protobuf::TextFormat::Print(proto, output));
+  CAFFE_CHECK(google::protobuf::TextFormat::Print(proto, output));
   delete output;
   close(fd);
 }
 
 bool ReadProtoFromBinaryFile(const char* filename, MessageLite* proto) {
   int fd = open(filename, O_RDONLY);
-  CHECK_NE(fd, -1) << "File not found: " << filename;
+  CAFFE_CHECK_NE(fd, -1) << "File not found: " << filename;
   ZeroCopyInputStream* raw_input = new FileInputStream(fd);
   CodedInputStream* coded_input = new CodedInputStream(raw_input);
   // A hack to manually allow using very large protocol buffers.
@@ -59,11 +59,11 @@ bool ReadProtoFromBinaryFile(const char* filename, MessageLite* proto) {
 
 void WriteProtoToBinaryFile(const MessageLite& proto, const char* filename) {
   int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-  CHECK_NE(fd, -1) << "File cannot be created: " << filename
+  CAFFE_CHECK_NE(fd, -1) << "File cannot be created: " << filename
                    << " error number: " << errno;
   ZeroCopyOutputStream* raw_output = new FileOutputStream(fd);
   CodedOutputStream* coded_output = new CodedOutputStream(raw_output);
-  CHECK(proto.SerializeToCodedStream(coded_output));
+  CAFFE_CHECK(proto.SerializeToCodedStream(coded_output));
   delete coded_output;
   delete raw_output;
   close(fd);

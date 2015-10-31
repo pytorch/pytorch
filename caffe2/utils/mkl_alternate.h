@@ -12,7 +12,7 @@
 extern "C" {
 #include "caffe2/utils/cblas.h"
 }
-#include "glog/logging.h"
+#include "caffe2/core/logging.h"
 
 // Functions that caffe uses but are not present if MKL is not linked.
 
@@ -21,7 +21,7 @@ extern "C" {
 #define DEFINE_VSL_UNARY_FUNC(name, operation) \
   template<typename Dtype> \
   inline void v##name(const int n, const Dtype* a, Dtype* y) { \
-    DCHECK_GT(n, 0); DCHECK(a); DCHECK(y); \
+    CAFFE_DCHECK_GT(n, 0); CAFFE_DCHECK(a); CAFFE_DCHECK(y); \
     for (int i = 0; i < n; ++i) { operation; } \
   } \
   inline void vs##name( \
@@ -43,7 +43,7 @@ DEFINE_VSL_UNARY_FUNC(Abs, y[i] = fabs(a[i]));
 #define DEFINE_VSL_UNARY_FUNC_WITH_PARAM(name, operation) \
   template<typename Dtype> \
   inline void v##name(const int n, const Dtype* a, const Dtype b, Dtype* y) { \
-    DCHECK_GT(n, 0); DCHECK(a); DCHECK(y); \
+    CAFFE_DCHECK_GT(n, 0); CAFFE_DCHECK(a); CAFFE_DCHECK(y); \
     for (int i = 0; i < n; ++i) { operation; } \
   } \
   inline void vs##name( \
@@ -62,7 +62,7 @@ DEFINE_VSL_UNARY_FUNC_WITH_PARAM(Powx, y[i] = pow(a[i], b));
 #define DEFINE_VSL_BINARY_FUNC(name, operation) \
   template<typename Dtype> \
   inline void v##name(const int n, const Dtype* a, const Dtype* b, Dtype* y) { \
-    DCHECK_GT(n, 0); DCHECK(a); DCHECK(b); DCHECK(y); \
+    CAFFE_DCHECK_GT(n, 0); CAFFE_DCHECK(a); CAFFE_DCHECK(b); CAFFE_DCHECK(y); \
     for (int i = 0; i < n; ++i) { operation; } \
   } \
   inline void vs##name( \

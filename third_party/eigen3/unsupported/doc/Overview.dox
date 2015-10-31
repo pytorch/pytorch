@@ -1,0 +1,28 @@
+/// \brief Namespace containing all symbols from the %Eigen library.
+namespace Eigen {
+
+/** \mainpage %Eigen's unsupported modules
+
+This is the API documentation for %Eigen's unsupported modules.
+
+These modules are contributions from various users. They are provided "as is", without any support.
+
+Click on the \e Modules tab at the top of this page to get a list of all unsupported modules.
+
+Don't miss the <a href="../index.html">official Eigen documentation</a>.
+
+*/
+
+/*
+
+\defgroup Unsupported_modules Unsupported modules
+
+The unsupported modules are contributions from various users. They are
+provided "as is", without any support. Nevertheless, some of them are
+subject to be included in %Eigen in the future.
+
+*/
+
+/// \internal \brief Namespace containing low-level routines from the %Eigen library.
+namespace internal {}
+}
