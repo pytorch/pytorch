@@ -68,7 +68,7 @@ inline const char* cudnnGetErrorString(cudnnStatus_t status) {
  */
 template <typename T> class cudnnTypeWrapper;
 
-template<> class cudnnTypeWrapper<float>  {
+template<> class cudnnTypeWrapper<float> {
  public:
   static const cudnnDataType_t type = CUDNN_DATA_FLOAT;
 };
@@ -76,6 +76,11 @@ template<> class cudnnTypeWrapper<float>  {
 template<> class cudnnTypeWrapper<double> {
  public:
   static const cudnnDataType_t type = CUDNN_DATA_DOUBLE;
+};
+
+template<> class cudnnTypeWrapper<float16> {
+ public:
+  static const cudnnDataType_t type = CUDNN_DATA_HALF;
 };
 
 /**

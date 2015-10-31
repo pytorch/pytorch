@@ -350,6 +350,8 @@ bool CudnnConvGradientOp<T>::RunWithCudnnWorkspace(
 
 REGISTER_CUDNN_OPERATOR(Conv, CudnnConvOp<float>)
 REGISTER_CUDNN_OPERATOR(ConvGradient, CudnnConvGradientOp<float>)
+REGISTER_CUDNN_OPERATOR(ConvFp16, CudnnConvOp<float16>)
+REGISTER_CUDNN_OPERATOR(ConvFp16Gradient, CudnnConvGradientOp<float16>)
 
 
 }  // namespace caffe2
