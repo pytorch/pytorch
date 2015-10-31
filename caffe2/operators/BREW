@@ -48,6 +48,7 @@ cuda_library(
       "cross_entropy_op.cu",
       "dropout_op.cu",
       "filler_op.cu",
+      "half_float_ops.cu",
       "l2_distance_op.cu",
       "local_response_normalization_op.cu",
       "maxpool_op.cu",
