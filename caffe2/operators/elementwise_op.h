@@ -9,6 +9,25 @@
 namespace caffe2 {
 
 template <typename T, class Context, class Functor>
+class UnaryElementwiseOp : public Operator<Context> {
+ public:
+  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_SIMPLE_CTOR_DTOR(UnaryElementwiseOp);
+
+  bool RunOnDevice() {
+    auto& input0 = Input(0);
+    auto* output = Output(0);
+    output->ReshapeLike(input0);
+    Functor()(input0.size(), input0.template data<T>(),
+              output->template mutable_data<T>(), &device_context_);
+    return true;
+  }
+
+  INPUT_OUTPUT_STATS(1, 1, 1, 1);
+  DISABLE_COPY_AND_ASSIGN(UnaryElementwiseOp);
+};
+
+template <typename T, class Context, class Functor>
 class BinaryElementwiseOp : public Operator<Context> {
  public:
   USE_OPERATOR_BASE_FUNCTIONS;
