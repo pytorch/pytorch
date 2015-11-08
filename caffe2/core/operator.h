@@ -100,10 +100,10 @@ class OperatorBase {
   // Specify the minimum and maximum number of inputs and outputs.
   // Do not manually override these functions. Instead, use INPUT_OUTPUT_STATS
   // macro below.
-  virtual int MinInput() { return 0; }
-  virtual int MaxInput() { return INT_MAX; }
-  virtual int MinOutput() { return 0; }
-  virtual int MaxOutput() { return INT_MAX; }
+  virtual int MinInput() const { return 0; }
+  virtual int MaxInput() const { return INT_MAX; }
+  virtual int MinOutput() const { return 0; }
+  virtual int MaxOutput() const { return INT_MAX; }
   // Specify whether in-place computation is allowed for a given pair of input
   // index and output index. In-place computations are opt-in, meaning that an
   // operator has to explicitly specify that it allows in-place computation.
@@ -111,7 +111,9 @@ class OperatorBase {
   // Do not manually override this function if your operator does very simple
   // in-place opt-ins, such as allowing input 0 and output 0 to be inplace.
   // Use OP_IN_PLACE_ALLOWED({0, 0}) macro below.
-  virtual bool InplaceAllowed(int input_id, int output_id) { return false; }
+  virtual bool InplaceAllowed(const int input_id, const int output_id) const {
+    return false;
+  }
 
  private:
   CaffeMap<string, const Argument*> arg_map_;
@@ -139,17 +141,18 @@ class OperatorBase {
 // TODO(Yangqing): If necessary, add ability to specify that n_input = n_output.
 #define INPUT_OUTPUT_STATS(min_input, max_input, min_output, max_output)       \
  protected:                                                                    \
-  int MinInput() override { return min_input; }                                \
-  int MaxInput() override { return max_input; }                                \
-  int MinOutput() override { return min_output; }                              \
-  int MaxOutput() override { return max_output; }
+  int MinInput() const override { return min_input; }                          \
+  int MaxInput() const override { return max_input; }                          \
+  int MinOutput() const override { return min_output; }                        \
+  int MaxOutput() const override { return max_output; }
 
 // Note that this implementation uses vector so it likely won't work well for
 // very large operators, but we should be fine since the InplaceAllowed function
 // should be very sparse.
 #define IN_PLACE_ALLOWED(...)                                                  \
  protected:                                                                    \
-  bool InplaceAllowed(int input_id, int output_id) override {                  \
+  bool InplaceAllowed(                                                         \
+      const int input_id, const int output_id) const override {                \
     const vector<std::pair<int, int> > kVec{__VA_ARGS__};                      \
     auto p = std::make_pair(input_id, output_id);                              \
     return (std::find(kVec.begin(), kVec.end(), p) != kVec.end());             \
