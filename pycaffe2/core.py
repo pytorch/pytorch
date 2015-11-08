@@ -1,6 +1,18 @@
+import atexit
 from caffe2.proto import caffe2_pb2
 from collections import Counter, defaultdict
 from pycaffe2 import utils, workspace
+
+try:
+  from .libcaffe2_python import *
+  has_gpu_support = True
+except ImportError as e:
+  print 'Pycaffe+GPU is not available. Using CPU only version.'
+  from .libcaffe2_python_nogpu import *
+  has_gpu_support = False
+# libcaffe2_python contains a global Workspace that we need to properly delete
+# when exiting. Otherwise, cudart will cause segfaults sometimes.
+atexit.register(OnModuleExit)
 
 _REGISTERED_OPERATORS = set(workspace.RegisteredOperators())
 
@@ -126,11 +138,25 @@ class GradientRegistry(object):
     return Wrapper
 
   @classmethod
-  def GetGradient(cls, op):
+  def GetGradientDefsCC(cls, op_def):
+    grad_defs_str = cc_GetGradientDefs(op_def.SerializeToString())
+    grad_defs = []
+    for grad_def_str in grad_defs_str:
+      grad_def = caffe2_pb2.OperatorDef();
+      grad_def.ParseFromString(grad_def_str)
+      grad_defs.append(grad_def)
+    return grad_defs
+
+  @classmethod
+  def GetGradientDefs(cls, op):
     try:
-      gradient_ops = cls.gradient_registry_[op.type](op)
-    except KeyError as err:
-      raise KeyError('No gradient registered for op: %s' % op.type)
+      gradient_ops = cls.GetGradientDefsCC(op)
+    except:
+      # Not supported in C++; will try python registration next.
+      try:
+        gradient_ops = cls.gradient_registry_[op.type](op)
+      except KeyError as err:
+        raise KeyError('No gradient registered for op: %s' % op.type)
     if gradient_ops is None:
       return []
     if type(gradient_ops) is not list:
@@ -144,7 +170,7 @@ class GradientRegistry(object):
     return gradient_ops
 
   @classmethod
-  def GetGradients(self, operators, external_gradients=[]):
+  def GetBackwardPass(cls, operators, external_gradients=[]):
     # (1) "Play" the forward pass of the network, so we know the version of any
     #     tensors that are being written multiple times.
     # After running this, we will have:
@@ -185,7 +211,7 @@ class GradientRegistry(object):
         (s, current_versions[GetOriginalName(s)]) for s in external_gradients)
     versioned_gradient_count = defaultdict(lambda: defaultdict(int))
     for forward_op, current_fwd_metadata in zip(operators[::-1], fwd_metadata[::-1]):
-      gradient_ops = GradientRegistry.GetGradient(forward_op)
+      gradient_ops = cls.GetGradientDefs(forward_op)
       # Now, the constraints for the inputs of the gradient operators are:
       #
       # (1) for inputs:
@@ -348,7 +374,7 @@ class Net(object):
     inserted SplitOp is hard-coded for float (its gradient, SumOp, is float
     only). Supporting other formats is a todo item.
     """
-    grad_ops = GradientRegistry.GetGradients(self._net.op[skip:])
+    grad_ops = GradientRegistry.GetBackwardPass(self._net.op[skip:])
     self._net.op.extend(grad_ops)
     return
 

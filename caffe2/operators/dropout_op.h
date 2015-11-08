@@ -14,7 +14,8 @@ class DropoutOp final : public Operator<Context> {
   USE_OPERATOR_BASE_FUNCTIONS;
   DropoutOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        ratio_(OperatorBase::GetSingleArgument<float>("ratio", 0.5)) {
+        ratio_(OperatorBase::GetSingleArgument<float>("ratio", 0.5)),
+        is_test_(OperatorBase::GetSingleArgument<int>("is_test", 0)) {
     CAFFE_DCHECK_GE(ratio_, 0);
     CAFFE_DCHECK_LT(ratio_, 1);
   }
@@ -23,6 +24,7 @@ class DropoutOp final : public Operator<Context> {
 
  protected:
   float ratio_;
+  bool is_test_;
   // Input: X; Output: Y, mask.
   INPUT_OUTPUT_STATS(1, 1, 2, 2);
   DISABLE_COPY_AND_ASSIGN(DropoutOp);
@@ -34,7 +36,8 @@ class DropoutGradientOp final : public Operator<Context> {
   USE_OPERATOR_BASE_FUNCTIONS;
   DropoutGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        ratio_(OperatorBase::GetSingleArgument<float>("ratio", 0.5)) {
+        ratio_(OperatorBase::GetSingleArgument<float>("ratio", 0.5)),
+        is_test_(OperatorBase::GetSingleArgument<int>("is_test", 0)) {
     CAFFE_DCHECK_GE(ratio_, 0);
     CAFFE_DCHECK_LT(ratio_, 1);
   }
@@ -43,6 +46,7 @@ class DropoutGradientOp final : public Operator<Context> {
 
  protected:
   float ratio_;
+  bool is_test_;
   // Input: dY, mask; Output: dX
   INPUT_OUTPUT_STATS(2, 2, 1, 1);
   DISABLE_COPY_AND_ASSIGN(DropoutGradientOp);

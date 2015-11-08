@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <iostream>
+#include <functional>
 
 #include "caffe2/core/common.h"
 #include "caffe2/core/typeid.h"
@@ -17,7 +18,7 @@ namespace caffe2 {
 template <class SrcType, class ObjectType, class... Args>
 class Registry {
  public:
-  typedef ObjectType* (*Creator)(Args ...);
+  typedef std::function<ObjectType*(Args ...)> Creator;
 
   Registry() : registry_() {}
 
@@ -28,6 +29,7 @@ class Registry {
     // However, CAFFE_CHECK_EQ depends on google logging, and since registration is
     // carried out at static initialization time, we do not want to have an
     // explicit dependency on glog's initialization function.
+    std::lock_guard<std::mutex> lock(register_mutex_);
     if (registry_.count(key) != 0) {
       std::cerr << "Key " << key << " already registered." << std::endl;
       std::exit(1);
@@ -84,6 +86,7 @@ class Registry {
  private:
   CaffeMap<SrcType, Creator> registry_;
   CaffeMap<SrcType, string> help_message_;
+  std::mutex register_mutex_;
 
   DISABLE_COPY_AND_ASSIGN(Registry);
 };
@@ -105,14 +108,14 @@ class Registerer {
 };
 
 #define DECLARE_TYPED_REGISTRY(RegistryName, SrcType, ObjectType, ...)         \
-  Registry<SrcType, ObjectType, ##__VA_ARGS__>* RegistryName();    \
-  typedef Registerer<SrcType, ObjectType, ##__VA_ARGS__>           \
+  Registry<SrcType, ObjectType, ##__VA_ARGS__>* RegistryName();                \
+  typedef Registerer<SrcType, ObjectType, ##__VA_ARGS__>                       \
       Registerer##RegistryName;
 
 #define DEFINE_TYPED_REGISTRY(RegistryName, SrcType, ObjectType, ...)          \
-  Registry<SrcType, ObjectType, ##__VA_ARGS__>* RegistryName() {   \
-    static Registry<SrcType, ObjectType, ##__VA_ARGS__>* registry =\
-        new Registry<SrcType, ObjectType, ##__VA_ARGS__>();        \
+  Registry<SrcType, ObjectType, ##__VA_ARGS__>* RegistryName() {               \
+    static Registry<SrcType, ObjectType, ##__VA_ARGS__>* registry =            \
+        new Registry<SrcType, ObjectType, ##__VA_ARGS__>();                    \
     return registry;                                                           \
   }
 
@@ -122,16 +125,12 @@ class Registerer {
 // Note(Yangqing): The __VA_ARGS__ below allows one to specify a templated
 // creator with comma in its templated arguments.
 #define REGISTER_TYPED_CREATOR(RegistryName, affix, key, ...)                  \
-  namespace {                                                                  \
   Registerer##RegistryName g_##RegistryName##_##affix(                         \
-      key, RegistryName(), __VA_ARGS__);                                      \
-  }  // namespace
+      key, RegistryName(), __VA_ARGS__)
 #define REGISTER_TYPED_CLASS(RegistryName, affix, key, ...)                    \
-  namespace {                                                                  \
   Registerer##RegistryName g_##RegistryName##_##affix(                         \
-      key, RegistryName(),                                                    \
-      Registerer##RegistryName::DefaultCreator<__VA_ARGS__>);                  \
-  }  // namespace
+      key, RegistryName(),                                                     \
+      Registerer##RegistryName::DefaultCreator<__VA_ARGS__>)
 
 
 // DECLARE_REGISTRY and DEFINE_REGISTRY are hard-wired to use string as the key

@@ -23,12 +23,12 @@ bool RangeFillOp<float, CUDAContext>::Fill(
 
 namespace {
 
-REGISTER_CUDA_OPERATOR(UniformFill, UniformFillOp<float, CUDAContext>)
-REGISTER_CUDA_OPERATOR(ConstantFill, ConstantFillOp<float, CUDAContext>)
-REGISTER_CUDA_OPERATOR(GivenTensorFill, GivenTensorFillOp<float, CUDAContext>)
-REGISTER_CUDA_OPERATOR(GaussianFill, GaussianFillOp<float, CUDAContext>)
-REGISTER_CUDA_OPERATOR(XavierFill, XavierFillOp<float, CUDAContext>)
-REGISTER_CUDA_OPERATOR(RangeFill, RangeFillOp<float, CUDAContext>)
+REGISTER_CUDA_OPERATOR(UniformFill, UniformFillOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(ConstantFill, ConstantFillOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(GivenTensorFill, GivenTensorFillOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(GaussianFill, GaussianFillOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(XavierFill, XavierFillOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(RangeFill, RangeFillOp<float, CUDAContext>);
 
 }  // namespace
 }  // namespace caffe2

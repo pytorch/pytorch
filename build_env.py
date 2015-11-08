@@ -36,6 +36,7 @@ class Env(object):
   DEFINES = [
       #"-DCAFFE2_USE_GOOGLE_GLOG",
       #"-DCAFFE2_THROW_ON_FATAL",
+      "-DGOOGLE_PROTOBUF_NO_RTTI",
       "-DNDEBUG",
   ]
   # NVCC C flags.

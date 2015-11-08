@@ -132,6 +132,8 @@ OperatorBase* CreateOperator(const OperatorDef& operator_def, Workspace* ws) {
   }
   // If the above fails, we will just return the normal case with the default
   // implementation.
+  CAFFE_VLOG(1) << "Operator with engine " << operator_def.engine()
+                << " is not available. Using default implementation.";
   return TryCreateOperator(operator_def.type(), operator_def, ws);
 }
 
@@ -139,5 +141,7 @@ DEFINE_REGISTRY(CPUOperatorRegistry, OperatorBase,
                 const OperatorDef&, Workspace*);
 DEFINE_REGISTRY(CUDAOperatorRegistry, OperatorBase,
                 const OperatorDef&, Workspace*);
+
+DEFINE_REGISTRY(GradientRegistry, vector<OperatorDef>, const OperatorDef&);
 
 }  // namespace caffe2

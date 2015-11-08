@@ -49,7 +49,7 @@ class TestGradientCalculation(unittest.TestCase):
         CreateOperator('DirectGradient')('out_grad', 'hidden_grad'),
         CreateOperator('DirectGradient')('hidden_grad', 'in_grad'),
     ]
-    gradients = GradientRegistry.GetGradients(operators)
+    gradients = GradientRegistry.GetBackwardPass(operators)
     self.assertTrue(gradients==desired_grad_operators)
 
   def testDirectButNoOutputGradient(self):
@@ -58,7 +58,7 @@ class TestGradientCalculation(unittest.TestCase):
         CreateOperator('Direct')('hidden', 'out'),
     ]
     try:
-      gradients = GradientRegistry.GetGradients(operators)
+      gradients = GradientRegistry.GetBackwardPass(operators)
     except RuntimeError as e:
       self.assertEqual(str(e),
           'Input gradient name "out_grad" is referred to but is never '
@@ -77,7 +77,7 @@ class TestGradientCalculation(unittest.TestCase):
         CreateOperator('DirectGradient')('out_grad', 'in_grad'),
         CreateOperator('DirectGradient')('in_grad', 'in_grad'),
     ]
-    gradients = GradientRegistry.GetGradients(operators)
+    gradients = GradientRegistry.GetBackwardPass(operators)
     self.assertTrue(gradients==desired_grad_operators)
 
   def testUseOutput(self):
@@ -93,7 +93,7 @@ class TestGradientCalculation(unittest.TestCase):
         CreateOperator('UseOutputGradient')(
             ['hidden', 'hidden_grad'], 'in_grad'),
     ]
-    gradients = GradientRegistry.GetGradients(operators)
+    gradients = GradientRegistry.GetBackwardPass(operators)
     self.assertTrue(gradients==desired_grad_operators)
 
   def testUseOutputInPlace(self):
@@ -109,7 +109,7 @@ class TestGradientCalculation(unittest.TestCase):
         CreateOperator('UseOutputGradient')(
             ['in', 'in_grad'], 'in_grad'),
     ]
-    gradients = GradientRegistry.GetGradients(operators)
+    gradients = GradientRegistry.GetBackwardPass(operators)
     self.assertTrue(gradients==desired_grad_operators)
 
   def testUseOutputButOutputHasBeenChanged(self):
@@ -123,7 +123,7 @@ class TestGradientCalculation(unittest.TestCase):
         CreateOperator('Sink')('out', []),
     ]
     try:
-      gradients = GradientRegistry.GetGradients(operators)
+      gradients = GradientRegistry.GetBackwardPass(operators)
     except RuntimeError as e:
       self.assertEqual(str(e),
           'Gradient operator needs output "hidden" at version 0, but currently '
@@ -144,7 +144,7 @@ class TestGradientCalculation(unittest.TestCase):
         CreateOperator('DirectGradient')(
             'hidden_grad', 'in_grad'),
     ]
-    gradients = GradientRegistry.GetGradients(operators)
+    gradients = GradientRegistry.GetBackwardPass(operators)
     self.assertTrue(gradients==desired_grad_operators)
 
   def testUseInputButInputHasBeenChanged(self):
@@ -165,7 +165,7 @@ class TestGradientCalculation(unittest.TestCase):
         CreateOperator('Sink')('in', []),
     ]
     try:
-      gradients = GradientRegistry.GetGradients(operators)
+      gradients = GradientRegistry.GetBackwardPass(operators)
     except RuntimeError as e:
       self.assertEqual(str(e),
           'Gradient operator needs input "in" at version 0, but currently we '
@@ -198,7 +198,7 @@ class TestGradientCalculation(unittest.TestCase):
         CreateOperator('Sum')(
             ['_in_grad_autosplit_0', '_in_grad_autosplit_1'], 'in_grad'),
     ]
-    gradients = GradientRegistry.GetGradients(operators)
+    gradients = GradientRegistry.GetBackwardPass(operators)
     self.assertTrue(gradients==desired_grad_operators)
 
   def testMultiUseInputAndMultipleVersions(self):
@@ -229,7 +229,7 @@ class TestGradientCalculation(unittest.TestCase):
         CreateOperator('DirectGradient')(
             'in_grad', 'in_grad'),
     ]
-    gradients = GradientRegistry.GetGradients(operators)
+    gradients = GradientRegistry.GetBackwardPass(operators)
     self.assertTrue(gradients==desired_grad_operators)
 
   def testMultiUseInputAndMultipleVersionsBig(self):
@@ -278,7 +278,7 @@ class TestGradientCalculation(unittest.TestCase):
         CreateOperator('DirectGradient')(
             'in_grad', 'in_grad'),
     ]
-    gradients = GradientRegistry.GetGradients(operators)
+    gradients = GradientRegistry.GetBackwardPass(operators)
     for s in gradients:
       print str(s)
     self.assertTrue(gradients==desired_grad_operators)

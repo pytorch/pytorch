@@ -3,5 +3,6 @@
 namespace caffe2 {
 namespace {
 REGISTER_CPU_OPERATOR(TensorProtosDBInput, TensorProtosDBInput<CPUContext>);
+NO_GRADIENT(TensorProtosDBInput);
 }  // namespace
 }  // namespace caffe2

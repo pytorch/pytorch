@@ -41,18 +41,5 @@ private:                                                                       \
   classname(const classname&);                                                 \
   classname& operator=(const classname&)
 
-
-/**
- * Gets the gradient name for a blob.
- *
- * This is a legacy function that I placed here in the initial refactoring. In
- * retrospect, the gradient name probably should not be a first-class citizen
- * especially in a file as common as common.h. As a result it is very likely
- * that we will remove it or move it to a more proper location.
- */
-inline string GetGradientName(const string& name) {
-  return name + ".grad";
-}
-
 }  // namespace caffe2
 #endif  // CAFFE2_CORE_COMMON_H_

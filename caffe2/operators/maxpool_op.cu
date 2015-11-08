@@ -144,7 +144,7 @@ bool MaxPoolGradientOp<float, CUDAContext>::RunOnDevice() {
 }
 
 namespace {
-REGISTER_CUDA_OPERATOR(MaxPool, MaxPoolOp<float, CUDAContext>)
-REGISTER_CUDA_OPERATOR(MaxPoolGradient, MaxPoolGradientOp<float, CUDAContext>)
+REGISTER_CUDA_OPERATOR(MaxPool, MaxPoolOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(MaxPoolGradient, MaxPoolGradientOp<float, CUDAContext>);
 }  // namespace
 }  // namespace caffe2

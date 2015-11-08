@@ -75,15 +75,9 @@ class FullyConnectedGradientOp : public Operator<Context> {
   bool RunOnDevice() {
     const auto& X = Input(0);
     const auto& W = Input(1);
-    const auto& b = Input(2);
-    const auto& dY = Input(3);
-    auto* dW = Output(0);
-    auto* db = Output(1);
-    dW->ReshapeLike(W);
-    db->ReshapeLike(b);
+    const auto& dY = Input(2);
     CAFFE_DCHECK_GE(X.ndim(), 2);
     CAFFE_DCHECK_GE(W.ndim(), 2);
-    CAFFE_DCHECK_EQ(b.ndim(), 1);
     CAFFE_DCHECK_EQ(dY.ndim(), 2);
     // batch size
     int M = X.dim(0);
@@ -92,9 +86,12 @@ class FullyConnectedGradientOp : public Operator<Context> {
     // number of outputs.
     int N = W.dim(0);
     CAFFE_DCHECK_EQ(K, W.size() / W.dim(0));
-    CAFFE_DCHECK_EQ(N, b.dim(0));
     CAFFE_DCHECK_EQ(M, dY.dim(0));
     CAFFE_DCHECK_EQ(N, dY.dim(1));
+    auto* dW = Output(0);
+    auto* db = Output(1);
+    dW->ReshapeLike(W);
+    db->Reshape(vector<int>{N});
 
     // Compute dW
     math::Gemm<T, Context>(
@@ -133,9 +130,9 @@ class FullyConnectedGradientOp : public Operator<Context> {
  protected:
   Tensor<Context> bias_multiplier_;
 
-  // input: X, W, b, dY
+  // input: X, W, dY
   // output: dW, db, and optionally dX.
-  INPUT_OUTPUT_STATS(4, 4, 2, 3);
+  INPUT_OUTPUT_STATS(3, 3, 2, 3);
   DISABLE_COPY_AND_ASSIGN(FullyConnectedGradientOp);
 };
 

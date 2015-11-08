@@ -25,6 +25,7 @@ using caffe2::DeviceOption;
 using caffe2::Tensor;
 using caffe2::Workspace;
 using caffe2::CPUContext;
+using caffe2::OperatorDef;
 
 #ifndef PYCAFFE2_CPU_ONLY
 using caffe2::CUDAContext;
@@ -172,6 +173,37 @@ PyObject* RegisteredOperators(PyObject* self, PyObject* args) {
   for (const string& name : all_keys) {
     CAFFE_CHECK_EQ(PyList_SetItem(list, idx, StdStringToPyString(name)), 0);
     ++idx;
+  }
+  return list;
+}
+
+PyObject* GetGradientDefs(PyObject* self, PyObject* args) {
+  PyObject* def_string = nullptr;
+  if (!PyArg_ParseTuple(args, "|S", &def_string)) {
+    PyErr_SetString(PyExc_ValueError,
+                    "GetGradientDefs requires an input that is a serialized "
+                    "OperatorDef protobuffer.");
+    return NULL;
+  }
+  OperatorDef def;
+  if (!def.ParseFromString(PyStringToStdString(def_string))) {
+    PyErr_SetString(PyExc_ValueError,
+                    "Provided string is not a valid OperatorDef protobuffer.");
+    return NULL;
+  }
+  std::unique_ptr<std::vector<OperatorDef> > grad_defs(GetGradientDefs(def));
+  if (grad_defs.get() == nullptr) {
+    PyErr_SetString(
+        PyExc_ValueError,
+        ("Gradient not registered for operator type " + def.type()).c_str());
+    return NULL;
+  }
+  PyObject* list = PyList_New(grad_defs->size());
+  int i = 0;
+  for (const OperatorDef & grad_def : *grad_defs) {
+    CAFFE_CHECK_EQ(PyList_SetItem(
+        list, i, StdStringToPyString(grad_def.SerializeAsString())), 0);
+    ++i;
   }
   return list;
 }
@@ -547,6 +579,7 @@ static PyMethodDef gPycaffe2Methods[] = {
   // python file, we prepend "cc_" here.
   _PYNAME(GlobalInit),
   _PYNAME(RegisteredOperators),
+  {"cc_GetGradientDefs", GetGradientDefs, METH_VARARGS, ""},
   _PYNAME(SwitchWorkspace),
   _PYNAME(CurrentWorkspace),
   _PYNAME(Workspaces),

@@ -212,8 +212,8 @@ bool AveragePoolGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
 
 
 namespace {
-REGISTER_CUDA_OPERATOR(AveragePool, AveragePoolOp<float, CUDAContext>)
+REGISTER_CUDA_OPERATOR(AveragePool, AveragePoolOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(AveragePoolGradient,
-                       AveragePoolGradientOp<float, CUDAContext>)
+                       AveragePoolGradientOp<float, CUDAContext>);
 }  // namespace
 }  // namespace caffe2

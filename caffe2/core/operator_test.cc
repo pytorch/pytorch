@@ -13,6 +13,7 @@ class JustTest : public OperatorBase {
   bool Run() override { return true; }
   INPUT_OUTPUT_STATS(0, 1, 0, 1);
 };
+
 REGISTER_CPU_OPERATOR(JustTest, JustTest);
 REGISTER_CUDA_OPERATOR(JustTest, JustTest);
 
@@ -300,6 +301,42 @@ TEST(OperatorInPlaceTest, MultipleInPlaceAllowedCase) {
   EXPECT_NE(nullptr, op.get());
   EXPECT_TRUE(op->Verify());
 }
+
+struct GetFooGradient : public GetGradientDefBase {
+  static vector<OperatorDef>* Create(const OperatorDef& def) {
+    return new vector<OperatorDef>{
+        CreateOperatorDef(
+            "FooGradient", "",
+            std::vector<string>{GradientName(def.output(0))},
+            std::vector<string>{GradientName(def.input(0))})};
+  }
+};
+
+REGISTER_GRADIENT(Foo, GetFooGradient);
+
+TEST(OperatorGradientRegistryTest, GradientSimple) {
+  Argument arg = MakeArgument<int>("arg", 1);
+  DeviceOption option;
+  option.set_device_type(CPU);
+  OperatorDef op = CreateOperatorDef(
+      "Foo", "", std::vector<string>{"in"}, std::vector<string>{"out"},
+      std::vector<Argument>{arg}, option, "DUMMY_ENGINE");
+  std::unique_ptr<vector<OperatorDef> > grad_ops(GetGradientDefs(op));
+  EXPECT_TRUE(grad_ops.get() != nullptr);
+  const OperatorDef& grad_op = grad_ops->at(0);
+  EXPECT_EQ(grad_op.type(), "FooGradient");
+  EXPECT_EQ(grad_op.name(), "");
+  EXPECT_EQ(grad_op.input_size(), 1);
+  EXPECT_EQ(grad_op.output_size(), 1);
+  EXPECT_EQ(grad_op.input(0), "out_grad");
+  EXPECT_EQ(grad_op.output(0), "in_grad");
+  EXPECT_EQ(grad_op.engine(), "DUMMY_ENGINE");
+  EXPECT_EQ(grad_op.device_option().device_type(), CPU);
+  EXPECT_EQ(grad_op.arg_size(), 1);
+  EXPECT_EQ(grad_op.arg(0).SerializeAsString(),
+            MakeArgument<int>("arg", 1).SerializeAsString());
+}
+
 
 
 }  // namespace caffe2

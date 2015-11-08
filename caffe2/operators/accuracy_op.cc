@@ -35,6 +35,7 @@ bool AccuracyOp<float, CPUContext>::RunOnDevice() {
 }
 
 namespace {
-REGISTER_CPU_OPERATOR(Accuracy, AccuracyOp<float, CPUContext>)
+REGISTER_CPU_OPERATOR(Accuracy, AccuracyOp<float, CPUContext>);
+SHOULD_NOT_DO_GRADIENT(Accuracy);
 }  // namespace
 }  // namespace caffe2
