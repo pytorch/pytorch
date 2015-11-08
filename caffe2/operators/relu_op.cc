@@ -49,6 +49,5 @@ struct GetReluGradient : public GetGradientDefBase {
 };
 REGISTER_GRADIENT(Relu, GetReluGradient);
 
-
 }  // namespace
 }  // namespace caffe2
