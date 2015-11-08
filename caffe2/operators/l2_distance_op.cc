@@ -34,5 +34,17 @@ REGISTER_CPU_OPERATOR(SquaredL2Distance,
 REGISTER_CPU_OPERATOR(SquaredL2DistanceGradient,
                       SquaredL2DistanceGradientOp<float, CPUContext>);
 
-}
+struct GetSquaredL2DistanceGradient : public GetGradientDefBase {
+  static vector<OperatorDef>* Create(const OperatorDef& def) {
+    return new vector<OperatorDef>{
+        CreateOperatorDef(
+            "SquaredL2DistanceGradient", "",
+            std::vector<string>{def.input(0), def.input(1),
+                                GradientName(def.output(0))},
+            std::vector<string>{GradientName(def.input(0)),
+                                GradientName(def.input(1))})};
+  }
+};
+REGISTER_GRADIENT(SquaredL2Distance, GetSquaredL2DistanceGradient);
+}  // namespace
 }  // namespace caffe2

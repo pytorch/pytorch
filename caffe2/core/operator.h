@@ -9,9 +9,11 @@
 #include "caffe2/core/blob.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/net.h"
+#include "caffe2/core/operator_gradient.h"
 #include "caffe2/core/registry.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/core/workspace.h"
+#include "caffe2/utils/proto_utils.h"
 #include "caffe2/proto/caffe2.pb.h"
 
 namespace caffe2 {

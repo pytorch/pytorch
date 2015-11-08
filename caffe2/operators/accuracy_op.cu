@@ -52,6 +52,6 @@ bool AccuracyOp<float, CUDAContext>::RunOnDevice() {
 }
 
 namespace {
-REGISTER_CUDA_OPERATOR(Accuracy, AccuracyOp<float, CUDAContext>)
+REGISTER_CUDA_OPERATOR(Accuracy, AccuracyOp<float, CUDAContext>);
 }  // namespace
 }  // namespace caffe2

@@ -137,7 +137,20 @@ bool MaxPoolGradientOp<float, CPUContext>::RunOnDevice() {
 }
 
 namespace {
-REGISTER_CPU_OPERATOR(MaxPool, MaxPoolOp<float, CPUContext>)
-REGISTER_CPU_OPERATOR(MaxPoolGradient, MaxPoolGradientOp<float, CPUContext>)
+REGISTER_CPU_OPERATOR(MaxPool, MaxPoolOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(MaxPoolGradient, MaxPoolGradientOp<float, CPUContext>);
+
+struct GetMaxPoolGradient : public GetGradientDefBase {
+  static vector<OperatorDef>* Create(const OperatorDef& def) {
+    return new vector<OperatorDef>{
+        CreateOperatorDef(
+            "MaxPoolGradient", "",
+            std::vector<string>{def.input(0), GradientName(def.output(0)),
+                                def.output(1)},
+            std::vector<string>{GradientName(def.input(0))})};
+  }
+};
+REGISTER_GRADIENT(MaxPool, GetMaxPoolGradient);
+
 }  // namespace
 }  // namespace caffe2

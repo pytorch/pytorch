@@ -43,6 +43,7 @@ bool SummarizeOp<float, CPUContext>::RunOnDevice() {
 }
 
 namespace {
-REGISTER_CPU_OPERATOR(Summarize, SummarizeOp<float, CPUContext>)
+REGISTER_CPU_OPERATOR(Summarize, SummarizeOp<float, CPUContext>);
+SHOULD_NOT_DO_GRADIENT(Summarize);
 }  // namespace
 }  // namespace caffe2

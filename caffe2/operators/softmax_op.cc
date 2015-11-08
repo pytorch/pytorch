@@ -85,6 +85,21 @@ bool SoftmaxGradientOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
-REGISTER_CPU_OPERATOR(Softmax, SoftmaxOp<float, CPUContext>)
-REGISTER_CPU_OPERATOR(SoftmaxGradient, SoftmaxGradientOp<float, CPUContext>)
+namespace {
+REGISTER_CPU_OPERATOR(Softmax, SoftmaxOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(SoftmaxGradient, SoftmaxGradientOp<float, CPUContext>);
+
+struct GetSoftmaxGradient : public GetGradientDefBase {
+  static vector<OperatorDef>* Create(const OperatorDef& def) {
+    return new vector<OperatorDef>{
+        CreateOperatorDef(
+            "SoftmaxGradient", "",
+            std::vector<string>{def.output(0),
+                                GradientName(def.output(0))},
+            std::vector<string>{GradientName(def.input(0))})};
+  }
+};
+REGISTER_GRADIENT(Softmax, GetSoftmaxGradient);
+
+}  // namespace
 }  // namespace caffe2

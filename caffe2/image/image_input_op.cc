@@ -4,4 +4,6 @@ namespace caffe2 {
 
 REGISTER_CPU_OPERATOR(ImageInput, ImageInputOp<CPUContext>);
 
+NO_GRADIENT(ImageInput);
+
 }  // namespace caffe2

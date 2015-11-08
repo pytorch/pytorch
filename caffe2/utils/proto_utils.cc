@@ -68,5 +68,42 @@ void WriteProtoToBinaryFile(const MessageLite& proto, const char* filename) {
   delete raw_output;
   close(fd);
 }
+#define CAFFE2_MAKE_SINGULAR_ARGUMENT(T, fieldname)                            \
+template <>                                                                    \
+Argument MakeArgument(const string& name, const T& value) {                    \
+  Argument arg;                                                                \
+  arg.set_name(name);                                                          \
+  arg.set_##fieldname(value);                                                  \
+  return arg;                                                                  \
+}
+
+CAFFE2_MAKE_SINGULAR_ARGUMENT(float, f)
+CAFFE2_MAKE_SINGULAR_ARGUMENT(int, i)
+CAFFE2_MAKE_SINGULAR_ARGUMENT(string, s)
+#undef CAFFE2_MAKE_SINGULAR_ARGUMENT
+
+template <>
+Argument MakeArgument(const string& name, const MessageLite& value) {
+  Argument arg;
+  arg.set_name(name);
+  arg.set_s(value.SerializeAsString());
+  return arg;
+}
+
+
+#define CAFFE2_MAKE_REPEATED_ARGUMENT(T, fieldname)                            \
+template <>                                                                    \
+Argument MakeArgument(const string& name, const vector<T>& value) {            \
+  Argument arg;                                                                \
+  arg.set_name(name);                                                          \
+  for (const auto& v : value) {                                                \
+    arg.add_##fieldname(v);                                                    \
+  }                                                                            \
+}
+
+CAFFE2_MAKE_REPEATED_ARGUMENT(float, floats)
+CAFFE2_MAKE_REPEATED_ARGUMENT(int, ints)
+CAFFE2_MAKE_REPEATED_ARGUMENT(string, strings)
+#undef CAFFE2_MAKE_REPEATED_ARGUMENT
 
 }  // namespace caffe2

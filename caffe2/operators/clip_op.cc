@@ -34,7 +34,19 @@ bool ClipGradientOp<float, CPUContext>::RunOnDevice() {
 }
 
 namespace {
-REGISTER_CPU_OPERATOR(Clip, ClipOp<float, CPUContext>)
-REGISTER_CPU_OPERATOR(ClipGradient, ClipGradientOp<float, CPUContext>)
+REGISTER_CPU_OPERATOR(Clip, ClipOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(ClipGradient, ClipGradientOp<float, CPUContext>);
+
+struct GetClipGradient : public GetGradientDefBase {
+  static vector<OperatorDef>* Create(const OperatorDef& def) {
+    return new vector<OperatorDef>{
+        CreateOperatorDef(
+            "ClipGradient", "",
+            std::vector<string>{def.output(0),
+                                GradientName(def.output(0))},
+            std::vector<string>{GradientName(def.input(0))})};
+  }
+};
+REGISTER_GRADIENT(Clip, GetClipGradient);
 }  // namespace
 }  // namespace caffe2

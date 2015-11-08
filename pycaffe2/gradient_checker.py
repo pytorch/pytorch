@@ -62,7 +62,7 @@ class GradientChecker:
 
     op.device_option.CopyFrom(self._device_option)
     if grad_ops is None:
-      grad_ops = core.GradientRegistry.GetGradient(op)
+      grad_ops = core.GradientRegistry.GetGradientDefs(op)
 
     dims_to_check = inputs[input_to_check].size
     # First, feed in the input.

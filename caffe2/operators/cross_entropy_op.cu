@@ -63,8 +63,8 @@ bool LabelCrossEntropyGradientOp<float, CUDAContext>::RunOnDevice() {
 
 namespace {
 REGISTER_CUDA_OPERATOR(LabelCrossEntropy,
-                       LabelCrossEntropyOp<float, CUDAContext>)
+                       LabelCrossEntropyOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(LabelCrossEntropyGradient,
-                       LabelCrossEntropyGradientOp<float, CUDAContext>)
+                       LabelCrossEntropyGradientOp<float, CUDAContext>);
 }  // namespace
 }  // namespace caffe2

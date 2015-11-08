@@ -3,12 +3,35 @@
 namespace caffe2 {
 namespace {
 
-REGISTER_CPU_OPERATOR(AveragedLoss, AveragedLoss<float, CPUContext>)
-REGISTER_CPU_OPERATOR(WeightedSumLoss, WeightedSumLoss<float, CPUContext>)
+REGISTER_CPU_OPERATOR(AveragedLoss, AveragedLoss<float, CPUContext>);
+REGISTER_CPU_OPERATOR(WeightedSumLoss, WeightedSumLoss<float, CPUContext>);
 REGISTER_CPU_OPERATOR(AveragedLossGradient,
-                      AveragedLossGradient<float, CPUContext>)
+                      AveragedLossGradient<float, CPUContext>);
 REGISTER_CPU_OPERATOR(WeightedSumLossGradient,
-                      WeightedSumLossGradient<float, CPUContext>)
+                      WeightedSumLossGradient<float, CPUContext>);
+
+
+struct GetAveragedLossGradient : public GetGradientDefBase {
+  static vector<OperatorDef>* Create(const OperatorDef& def) {
+    return new vector<OperatorDef>{
+        CreateOperatorDef(
+            "AveragedLossGradient", "",
+            std::vector<string>{def.input(0)},
+            std::vector<string>{GradientName(def.input(0))})};
+  }
+};
+REGISTER_GRADIENT(AveragedLoss, GetAveragedLossGradient);
+
+struct GetWeightedSumLossGradient : public GetGradientDefBase {
+  static vector<OperatorDef>* Create(const OperatorDef& def) {
+    return new vector<OperatorDef>{
+        CreateOperatorDef(
+            "WeightedSumLossGradient", "",
+            std::vector<string>{def.input(1)},
+            std::vector<string>{GradientName(def.input(0))})};
+  }
+};
+REGISTER_GRADIENT(WeightedSumLoss, GetWeightedSumLossGradient);
 
 }  // namespace
 }  // namespace caffe2

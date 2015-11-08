@@ -59,6 +59,31 @@ class HalfToFloatCUDA : public Operator<CUDAContext> {
   DISABLE_COPY_AND_ASSIGN(HalfToFloatCUDA);
 };
 
-REGISTER_CUDA_OPERATOR(FloatToHalf, FloatToHalfCUDA)
-REGISTER_CUDA_OPERATOR(HalfToFloat, HalfToFloatCUDA)
+namespace {
+REGISTER_CUDA_OPERATOR(FloatToHalf, FloatToHalfCUDA);
+REGISTER_CUDA_OPERATOR(HalfToFloat, HalfToFloatCUDA);
+
+struct GetFloatToHalfGradient : public GetGradientDefBase {
+  static vector<OperatorDef>* Create(const OperatorDef& def) {
+    return new vector<OperatorDef>{
+        CreateOperatorDef(
+            "HalfToFloat", "",
+            std::vector<string>{GradientName(def.output(0))},
+            std::vector<string>{GradientName(def.input(0))})};
+  }
+};
+REGISTER_GRADIENT(FloatToHalf, GetFloatToHalfGradient);
+
+struct GetHalfToFloatGradient : public GetGradientDefBase {
+  static vector<OperatorDef>* Create(const OperatorDef& def) {
+    return new vector<OperatorDef>{
+        CreateOperatorDef(
+            "FloatToHalf", "",
+            std::vector<string>{GradientName(def.output(0))},
+            std::vector<string>{GradientName(def.input(0))})};
+  }
+};
+REGISTER_GRADIENT(HalfToFloat, GetHalfToFloatGradient);
+
+}  // namespace
 }  // namespace caffe2

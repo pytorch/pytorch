@@ -39,7 +39,9 @@ class IterOp final : public OperatorBase {
 };
 
 namespace {
-REGISTER_CPU_OPERATOR(Iter, IterOp)
-REGISTER_CUDA_OPERATOR(Iter, IterOp)
+REGISTER_CPU_OPERATOR(Iter, IterOp);
+REGISTER_CUDA_OPERATOR(Iter, IterOp);
+
+NO_GRADIENT(Iter);
 }
 }  // namespace caffe2

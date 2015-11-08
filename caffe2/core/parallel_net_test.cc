@@ -48,8 +48,8 @@ class SleepOp final : public OperatorBase {
 };
 
 namespace {
-REGISTER_CPU_OPERATOR(Sleep, SleepOp)
-REGISTER_CUDA_OPERATOR(Sleep, SleepOp)
+REGISTER_CPU_OPERATOR(Sleep, SleepOp);
+REGISTER_CUDA_OPERATOR(Sleep, SleepOp);
 }  // namespace
 
 const char kSleepNetDefString[] =

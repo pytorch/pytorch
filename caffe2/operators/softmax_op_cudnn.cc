@@ -89,7 +89,7 @@ bool CuDNNSoftmaxGradientOp::RunOnDevice() {
 }
 
 namespace {
-REGISTER_CUDNN_OPERATOR(Softmax, CuDNNSoftmaxOp)
-REGISTER_CUDNN_OPERATOR(SoftmaxGradient, CuDNNSoftmaxGradientOp)
+REGISTER_CUDNN_OPERATOR(Softmax, CuDNNSoftmaxOp);
+REGISTER_CUDNN_OPERATOR(SoftmaxGradient, CuDNNSoftmaxGradientOp);
 }  // namespace
 }  // namespace caffe2

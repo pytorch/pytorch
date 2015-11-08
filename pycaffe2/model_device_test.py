@@ -138,7 +138,7 @@ class TestMiniAlexNet(unittest.TestCase):
     gpu_device.device_type = caffe2_pb2.CUDA
 
     checker = device_checker.DeviceChecker(
-        1e-4, [cpu_device, gpu_device])
+        1e-2, [cpu_device, gpu_device])
     ret = checker.CheckNet(
         model.net.Proto(), inputs,
         # The indices sometimes may be sensitive to small numerical differences

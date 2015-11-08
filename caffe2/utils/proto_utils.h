@@ -72,6 +72,62 @@ inline bool ReadProtoFromFile(const string& filename, MessageLite* proto) {
   return ReadProtoFromFile(filename.c_str(), proto);
 }
 
+template <class IterableInputs, class IterableOutputs, class IterableArgs>
+OperatorDef CreateOperatorDef(
+    const string& type, const string& name, const IterableInputs& inputs,
+    const IterableOutputs& outputs, const IterableArgs& args,
+    const DeviceOption& device_option, const string& engine) {
+  OperatorDef def;
+  def.set_type(type);
+  def.set_name(name);
+  for (const string& in : inputs) {
+    def.add_input(in);
+  }
+  for (const string& out : outputs) {
+    def.add_output(out);
+  }
+  for (const Argument& arg : args) {
+    def.add_arg()->CopyFrom(arg);
+  }
+  if (device_option.has_device_type()) {
+    def.mutable_device_option()->CopyFrom(device_option);
+  }
+  if (engine.size()) {
+    def.set_engine(engine);
+  }
+  return def;
+}
+
+// A simplified version compared to the full CreateOperator, if you do not need
+// to specify device option or engine.
+template <class IterableInputs, class IterableOutputs, class IterableArgs>
+inline OperatorDef CreateOperatorDef(
+    const string& type, const string& name, const IterableInputs& inputs,
+    const IterableOutputs& outputs, const IterableArgs& args) {
+  return CreateOperatorDef(
+      type, name, inputs, outputs, args, DeviceOption(), "");
+}
+
+// A simplified version compared to the full CreateOperator, if you do not need
+// to specify device option or engine or args.
+template <class IterableInputs, class IterableOutputs>
+inline OperatorDef CreateOperatorDef(
+    const string& type, const string& name, const IterableInputs& inputs,
+    const IterableOutputs& outputs) {
+  return CreateOperatorDef(type, name, inputs, outputs,
+                           std::vector<Argument>(), DeviceOption(), "");
+}
+
+
+inline bool HasArgument(const OperatorDef& def, const string& name) {
+  for (const Argument& arg : def.arg()) {
+    if (arg.name() == name) {
+      return true;
+    }
+  }
+  return false;
+}
+
 inline const Argument& GetArgument(const OperatorDef& def, const string& name) {
   for (const Argument& arg : def.arg()) {
     if (arg.name() == name) {
@@ -101,19 +157,19 @@ inline Argument* GetMutableArgument(
   }
 }
 
-// A coarse support for the Any message in proto3. I am a bit afraid of going
-// directly to proto3 yet, so let's do this first...
-class Any {
-  template <typename MessageType>
-  static MessageType Parse(const Argument& arg) {
-    CAFFE_CHECK_EQ(arg.strings_size(), 1)
-        << "An Any object should parse from a single string.";
-    MessageType message;
-    CAFFE_CHECK(message.ParseFromString(arg.strings(0)))
-        << "Faild to parse from the string";
-    return message;
+template <typename T>
+Argument MakeArgument(const string& name, const T& value) {
+  CAFFE_LOG_FATAL << "I dont' know how to add argument for type "
+                  << typeid(T).name();
+}
+
+template <typename T>
+void AddArgument(const string& name, const T& value, OperatorDef* def) {
+  if (HasArgument(*def, name)) {
+    CAFFE_LOG_FATAL << "An argument of name " << name << " already exists.";
   }
-};
+  def->add_arg()->CopyFrom(MakeArgument(name, value));
+}
 
 }  // namespace caffe2
 

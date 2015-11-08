@@ -51,8 +51,22 @@ bool LabelCrossEntropyGradientOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
+namespace {
 REGISTER_CPU_OPERATOR(LabelCrossEntropy,
-                      LabelCrossEntropyOp<float, CPUContext>)
+                      LabelCrossEntropyOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(LabelCrossEntropyGradient,
-                      LabelCrossEntropyGradientOp<float, CPUContext>)
+                      LabelCrossEntropyGradientOp<float, CPUContext>);
+
+struct GetLabelCrossEntropyGradient : public GetGradientDefBase {
+  static vector<OperatorDef>* Create(const OperatorDef& def) {
+    return new vector<OperatorDef>{
+        CreateOperatorDef(
+            "LabelCrossEntropyGradient", "",
+            std::vector<string>{def.input(0), def.input(1),
+                                GradientName(def.output(0))},
+            std::vector<string>{GradientName(def.input(0))})};
+  }
+};
+REGISTER_GRADIENT(LabelCrossEntropy, GetLabelCrossEntropyGradient);
+}  // namespace
 }  // namespace caffe2
