@@ -38,10 +38,10 @@ size_t fread__(void *ptr, size_t size, size_t nitems, FILE *stream)
 #endif
 
 #define READ_WRITE_METHODS(TYPE, TYPEC, ASCII_READ_ELEM, ASCII_WRITE_ELEM) \
-  static long THDiskFile_read##TYPEC(THFile *self, TYPE *data, long n)  \
+  static size_t THDiskFile_read##TYPEC(THFile *self, TYPE *data, size_t n)  \
   {                                                                     \
     THDiskFile *dfself = (THDiskFile*)(self);                           \
-    long nread = 0L;                                                    \
+    size_t nread = 0L;                                                    \
                                                                         \
     THArgCheck(dfself->handle != NULL, 1, "attempt to use a closed file"); \
     THArgCheck(dfself->file.isReadable, 1, "attempt to read in a write-only file"); \
@@ -54,7 +54,7 @@ size_t fread__(void *ptr, size_t size, size_t nitems, FILE *stream)
     }                                                                   \
     else                                                                \
     {                                                                   \
-      long i;                                                           \
+      size_t i;                                                           \
       for(i = 0; i < n; i++)                                            \
       {                                                                 \
         ASCII_READ_ELEM; /* increment here result and break if wrong */ \
@@ -77,10 +77,10 @@ size_t fread__(void *ptr, size_t size, size_t nitems, FILE *stream)
     return nread;                                                       \
   }                                                                     \
                                                                         \
-  static long THDiskFile_write##TYPEC(THFile *self, TYPE *data, long n) \
+  static size_t THDiskFile_write##TYPEC(THFile *self, TYPE *data, size_t n) \
   {                                                                     \
     THDiskFile *dfself = (THDiskFile*)(self);                           \
-    long nwrite = 0L;                                                   \
+    size_t nwrite = 0L;                                                   \
                                                                         \
     THArgCheck(dfself->handle != NULL, 1, "attempt to use a closed file"); \
     THArgCheck(dfself->file.isWritable, 1, "attempt to write in a read-only file"); \
@@ -106,7 +106,7 @@ size_t fread__(void *ptr, size_t size, size_t nitems, FILE *stream)
     }                                                                   \
     else                                                                \
     {                                                                   \
-      long i;                                                           \
+      size_t i;                                                           \
       for(i = 0; i < n; i++)                                            \
       {                                                                 \
         ASCII_WRITE_ELEM;                                               \
@@ -163,7 +163,7 @@ static void THDiskFile_synchronize(THFile *self)
   fflush(dfself->handle);
 }
 
-static void THDiskFile_seek(THFile *self, long position)
+static void THDiskFile_seek(THFile *self, size_t position)
 {
   THDiskFile *dfself = (THDiskFile*)(self);
 
@@ -192,7 +192,7 @@ static void THDiskFile_seekEnd(THFile *self)
   }
 }
 
-static long THDiskFile_position(THFile *self)
+static size_t THDiskFile_position(THFile *self)
 {
   THDiskFile *dfself = (THDiskFile*)(self);
   THArgCheck(dfself->handle != NULL, 1, "attempt to use a closed file");
@@ -209,14 +209,14 @@ static void THDiskFile_close(THFile *self)
 
 /* Little and Big Endian */
 
-static void THDiskFile_reverseMemory(void *dst, const void *src, long blockSize, long numBlocks)
+static void THDiskFile_reverseMemory(void *dst, const void *src, size_t blockSize, size_t numBlocks)
 {
   if(blockSize != 1)
   {
-    long halfBlockSize = blockSize/2;
+    size_t halfBlockSize = blockSize/2;
     char *charSrc = (char*)src;
     char *charDst = (char*)dst;
-    long b, i;
+    size_t b, i;
     for(b = 0; b < numBlocks; b++)
     {
       for(i = 0; i < halfBlockSize; i++)
@@ -313,7 +313,7 @@ READ_WRITE_METHODS(double, Double,
                    int ret = fscanf(dfself->handle, "%lg", &data[i]); if(ret <= 0) break; else nread++,
                    int ret = fprintf(dfself->handle, "%.17g", data[i]); if(ret <= 0) break; else nwrite++)
 
-static long THDiskFile_readString(THFile *self, const char *format, char **str_)
+static size_t THDiskFile_readString(THFile *self, const char *format, char **str_)
 {
   THDiskFile *dfself = (THDiskFile*)(self);
   THArgCheck(dfself->handle != NULL, 1, "attempt to use a closed file");
@@ -327,8 +327,8 @@ static long THDiskFile_readString(THFile *self, const char *format, char **str_)
   if(format[1] == 'a')
   {
     char *p = THAlloc(TBRS_BSZ);
-    long total = TBRS_BSZ;
-    long pos = 0L;
+    size_t total = TBRS_BSZ;
+    size_t pos = 0L;
     
     for (;;)
     {
@@ -358,9 +358,9 @@ static long THDiskFile_readString(THFile *self, const char *format, char **str_)
   else
   {
     char *p = THAlloc(TBRS_BSZ);
-    long total = TBRS_BSZ;
-    long pos = 0L;
-    long size;
+    size_t total = TBRS_BSZ;
+    size_t pos = 0L;
+    size_t size;
 
     for (;;)
     {
@@ -403,10 +403,10 @@ static long THDiskFile_readString(THFile *self, const char *format, char **str_)
 }
 
 
-static long THDiskFile_writeString(THFile *self, const char *str, long size)
+static size_t THDiskFile_writeString(THFile *self, const char *str, size_t size)
 {
   THDiskFile *dfself = (THDiskFile*)(self);
-  long nwrite;
+  size_t nwrite;
 
   THArgCheck(dfself->handle != NULL, 1, "attempt to use a closed file");
   THArgCheck(dfself->file.isWritable, 1, "attempt to write in a read-only file");

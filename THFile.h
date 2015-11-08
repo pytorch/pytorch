@@ -39,45 +39,45 @@ TH_API void THFile_writeFloatScalar(THFile *self, float scalar);
 TH_API void THFile_writeDoubleScalar(THFile *self, double scalar);
 
 /* storage */
-TH_API long THFile_readByte(THFile *self, THByteStorage *storage);
-TH_API long THFile_readChar(THFile *self, THCharStorage *storage);
-TH_API long THFile_readShort(THFile *self, THShortStorage *storage);
-TH_API long THFile_readInt(THFile *self, THIntStorage *storage);
-TH_API long THFile_readLong(THFile *self, THLongStorage *storage);
-TH_API long THFile_readFloat(THFile *self, THFloatStorage *storage);
-TH_API long THFile_readDouble(THFile *self, THDoubleStorage *storage);
+TH_API size_t THFile_readByte(THFile *self, THByteStorage *storage);
+TH_API size_t THFile_readChar(THFile *self, THCharStorage *storage);
+TH_API size_t THFile_readShort(THFile *self, THShortStorage *storage);
+TH_API size_t THFile_readInt(THFile *self, THIntStorage *storage);
+TH_API size_t THFile_readLong(THFile *self, THLongStorage *storage);
+TH_API size_t THFile_readFloat(THFile *self, THFloatStorage *storage);
+TH_API size_t THFile_readDouble(THFile *self, THDoubleStorage *storage);
 
-TH_API long THFile_writeByte(THFile *self, THByteStorage *storage);
-TH_API long THFile_writeChar(THFile *self, THCharStorage *storage);
-TH_API long THFile_writeShort(THFile *self, THShortStorage *storage);
-TH_API long THFile_writeInt(THFile *self, THIntStorage *storage);
-TH_API long THFile_writeLong(THFile *self, THLongStorage *storage);
-TH_API long THFile_writeFloat(THFile *self, THFloatStorage *storage);
-TH_API long THFile_writeDouble(THFile *self, THDoubleStorage *storage);
+TH_API size_t THFile_writeByte(THFile *self, THByteStorage *storage);
+TH_API size_t THFile_writeChar(THFile *self, THCharStorage *storage);
+TH_API size_t THFile_writeShort(THFile *self, THShortStorage *storage);
+TH_API size_t THFile_writeInt(THFile *self, THIntStorage *storage);
+TH_API size_t THFile_writeLong(THFile *self, THLongStorage *storage);
+TH_API size_t THFile_writeFloat(THFile *self, THFloatStorage *storage);
+TH_API size_t THFile_writeDouble(THFile *self, THDoubleStorage *storage);
 
 /* raw */
-TH_API long THFile_readByteRaw(THFile *self, unsigned char *data, long n);
-TH_API long THFile_readCharRaw(THFile *self, char *data, long n);
-TH_API long THFile_readShortRaw(THFile *self, short *data, long n);
-TH_API long THFile_readIntRaw(THFile *self, int *data, long n);
-TH_API long THFile_readLongRaw(THFile *self, long *data, long n);
-TH_API long THFile_readFloatRaw(THFile *self, float *data, long n);
-TH_API long THFile_readDoubleRaw(THFile *self, double *data, long n);
-TH_API long THFile_readStringRaw(THFile *self, const char *format, char **str_); /* you must deallocate str_ */
+TH_API size_t THFile_readByteRaw(THFile *self, unsigned char *data, size_t n);
+TH_API size_t THFile_readCharRaw(THFile *self, char *data, size_t n);
+TH_API size_t THFile_readShortRaw(THFile *self, short *data, size_t n);
+TH_API size_t THFile_readIntRaw(THFile *self, int *data, size_t n);
+TH_API size_t THFile_readLongRaw(THFile *self, long *data, size_t n);
+TH_API size_t THFile_readFloatRaw(THFile *self, float *data, size_t n);
+TH_API size_t THFile_readDoubleRaw(THFile *self, double *data, size_t n);
+TH_API size_t THFile_readStringRaw(THFile *self, const char *format, char **str_); /* you must deallocate str_ */
 
-TH_API long THFile_writeByteRaw(THFile *self, unsigned char *data, long n);
-TH_API long THFile_writeCharRaw(THFile *self, char *data, long n);
-TH_API long THFile_writeShortRaw(THFile *self, short *data, long n);
-TH_API long THFile_writeIntRaw(THFile *self, int *data, long n);
-TH_API long THFile_writeLongRaw(THFile *self, long *data, long n);
-TH_API long THFile_writeFloatRaw(THFile *self, float *data, long n);
-TH_API long THFile_writeDoubleRaw(THFile *self, double *data, long n);
-TH_API long THFile_writeStringRaw(THFile *self, const char *str, long size);
+TH_API size_t THFile_writeByteRaw(THFile *self, unsigned char *data, size_t n);
+TH_API size_t THFile_writeCharRaw(THFile *self, char *data, size_t n);
+TH_API size_t THFile_writeShortRaw(THFile *self, short *data, size_t n);
+TH_API size_t THFile_writeIntRaw(THFile *self, int *data, size_t n);
+TH_API size_t THFile_writeLongRaw(THFile *self, long *data, size_t n);
+TH_API size_t THFile_writeFloatRaw(THFile *self, float *data, size_t n);
+TH_API size_t THFile_writeDoubleRaw(THFile *self, double *data, size_t n);
+TH_API size_t THFile_writeStringRaw(THFile *self, const char *str, size_t size);
 
 TH_API void THFile_synchronize(THFile *self);
-TH_API void THFile_seek(THFile *self, long position);
+TH_API void THFile_seek(THFile *self, size_t position);
 TH_API void THFile_seekEnd(THFile *self);
-TH_API long THFile_position(THFile *self);
+TH_API size_t THFile_position(THFile *self);
 TH_API void THFile_close(THFile *self);
 TH_API void THFile_free(THFile *self);
 
