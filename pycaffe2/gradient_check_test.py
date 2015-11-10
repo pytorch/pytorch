@@ -231,5 +231,23 @@ class TestTanh(unittest.TestCase):
         self.assertTrue(res)
 
 
+class TestSigmoid(unittest.TestCase):
+  def setUp(self):
+    self.test_configs = [
+      (1, 1),
+      (2, 1),
+      (1, 2, 3, 4),
+    ]
+
+  def testSigmoid(self):
+    for input_size in self.test_configs:
+      op = core.CreateOperator("Sigmoid")(["X"], ["Y"])
+      X = np.random.rand(*input_size).astype(np.float32) - 0.5
+      res = device_checker.CheckSimple(op, [X], [0])
+      self.assertTrue(res)
+      for checker in gradient_checkers:
+        res, grad, grad_estimated = checker.CheckSimple(op, [X], 0, [0])
+        self.assertTrue(res)
+
 if __name__ == '__main__':
   unittest.main()
