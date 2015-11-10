@@ -9,14 +9,10 @@ REGISTER_CPU_OPERATOR(FCGradient, FullyConnectedGradientOp<float, CPUContext>);
 struct GetFCGradient : public GetGradientDefBase {
   static vector<OperatorDef>* Create(const OperatorDef& def) {
     CAFFE_CHECK_EQ(def.input_size(), 3);
-    return new vector<OperatorDef>{
-        CreateOperatorDef(
-            "FCGradient", "",
-            std::vector<string>{def.input(0), def.input(1),
-                                GradientName(def.output(0))},
-            std::vector<string>{GradientName(def.input(1)),
-                                GradientName(def.input(2)),
-                                GradientName(def.input(0))})};
+    return SingleGradientDef(
+        "FCGradient", "",
+        vector<string>{I(def, 0), I(def, 1), GO(def, 0)},
+        vector<string>{GI(def, 1), GI(def, 2), GI(def, 0)});
   }
 };
 REGISTER_GRADIENT(FC, GetFCGradient);

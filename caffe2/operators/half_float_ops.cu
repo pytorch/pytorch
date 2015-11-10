@@ -65,22 +65,20 @@ REGISTER_CUDA_OPERATOR(HalfToFloat, HalfToFloatCUDA);
 
 struct GetFloatToHalfGradient : public GetGradientDefBase {
   static vector<OperatorDef>* Create(const OperatorDef& def) {
-    return new vector<OperatorDef>{
-        CreateOperatorDef(
-            "HalfToFloat", "",
-            std::vector<string>{GradientName(def.output(0))},
-            std::vector<string>{GradientName(def.input(0))})};
+    return SingleGradientDef(
+        "HalfToFloat", "",
+        vector<string>{GO(def, 0)},
+        vector<string>{GI(def, 0)});
   }
 };
 REGISTER_GRADIENT(FloatToHalf, GetFloatToHalfGradient);
 
 struct GetHalfToFloatGradient : public GetGradientDefBase {
   static vector<OperatorDef>* Create(const OperatorDef& def) {
-    return new vector<OperatorDef>{
-        CreateOperatorDef(
-            "FloatToHalf", "",
-            std::vector<string>{GradientName(def.output(0))},
-            std::vector<string>{GradientName(def.input(0))})};
+    return SingleGradientDef(
+        "FloatToHalf", "",
+        vector<string>{GO(def, 0)},
+        vector<string>{GI(def, 0)});
   }
 };
 REGISTER_GRADIENT(HalfToFloat, GetHalfToFloatGradient);

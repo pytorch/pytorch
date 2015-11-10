@@ -39,12 +39,10 @@ REGISTER_CPU_OPERATOR(ReluGradient, ReluGradientOp<float, CPUContext>);
 
 struct GetReluGradient : public GetGradientDefBase {
   static vector<OperatorDef>* Create(const OperatorDef& def) {
-    return new vector<OperatorDef>{
-        CreateOperatorDef(
-            "ReluGradient", "",
-            std::vector<string>{def.output(0),
-                                GradientName(def.output(0))},
-            std::vector<string>{GradientName(def.input(0))})};
+    return SingleGradientDef(
+        "ReluGradient", "",
+        vector<string>{O(def, 0), GO(def, 0)},
+        vector<string>{GI(def, 0)});
   }
 };
 REGISTER_GRADIENT(Relu, GetReluGradient);

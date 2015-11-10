@@ -7,6 +7,11 @@
 
 namespace caffe2 {
 
+// Utility functions for gradient computation.
+inline string GradientName(const string& name) {
+  return name + "_grad";
+}
+
 DECLARE_REGISTRY(GradientRegistry, vector<OperatorDef>, const OperatorDef&);
 
 template <class GetGradientDef>
@@ -51,6 +56,22 @@ struct GetGradientDefBaseVerbose {
   constexpr bool CopyDeviceOption() const { return copy_device_option; }
   constexpr bool CopyEngine() const { return copy_engine; }
   constexpr bool CopyArguments() const { return copy_args; }
+  inline static string I(const OperatorDef& def, const int i) {
+    return def.input(i);
+  }
+  inline static string O(const OperatorDef& def, const int i) {
+    return def.output(i);
+  }
+  inline static string GI(const OperatorDef& def, const int i) {
+    return GradientName(def.input(i));
+  }
+  inline static string GO(const OperatorDef& def, const int i) {
+    return GradientName(def.output(i));
+  }
+  template <class... Args>
+  inline static vector<OperatorDef>* SingleGradientDef(Args ... args) {
+    return new vector<OperatorDef>{CreateOperatorDef(args...)};
+  }
 };
 typedef struct GetGradientDefBaseVerbose<true, true, true> GetGradientDefBase;
 
@@ -100,11 +121,6 @@ struct GradientNotImplementedYet : public GetGradientDefBase {
 #define GRADIENT_NOT_IMPLEMENTED_YET(name)                                     \
   GradientRegisterer<GradientNotImplementedYet>                                \
       g_GradientRegisterer_##name(#name)
-
-// Utility functions for gradient computation.
-inline string GradientName(const string& name) {
-  return name + "_grad";
-}
 
 // Creates the gradient operators of a given operator definition.
 inline vector<OperatorDef>* GetGradientDefs(const OperatorDef& def) {

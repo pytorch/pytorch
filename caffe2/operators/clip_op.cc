@@ -39,12 +39,10 @@ REGISTER_CPU_OPERATOR(ClipGradient, ClipGradientOp<float, CPUContext>);
 
 struct GetClipGradient : public GetGradientDefBase {
   static vector<OperatorDef>* Create(const OperatorDef& def) {
-    return new vector<OperatorDef>{
-        CreateOperatorDef(
-            "ClipGradient", "",
-            std::vector<string>{def.output(0),
-                                GradientName(def.output(0))},
-            std::vector<string>{GradientName(def.input(0))})};
+    return SingleGradientDef(
+        "ClipGradient", "",
+        vector<string>{O(def, 0), GO(def, 0)},
+        vector<string>{GI(def, 0)});
   }
 };
 REGISTER_GRADIENT(Clip, GetClipGradient);
