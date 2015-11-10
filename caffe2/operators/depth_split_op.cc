@@ -11,12 +11,9 @@ struct GetDepthSplitGradient : public GetGradientDefBase {
     for (const string& out : def.output()) {
       grad_inputs.push_back(GradientName(out));
     }
-    return new vector<OperatorDef>{
-        CreateOperatorDef(
-            "DepthConcat", "", grad_inputs,
-            std::vector<string>{
-                GradientName(def.input(0)),
-                "_" + GradientName(def.input(0)) + "_dims"})};
+    return SingleGradientDef(
+        "DepthConcat", "", grad_inputs,
+        vector<string>{GI(def, 0), "_" + GI(def, 0) + "_dims"});
   }
 };
 REGISTER_GRADIENT(DepthSplit, GetDepthSplitGradient);
@@ -27,11 +24,8 @@ struct GetDepthConcatGradient : public GetGradientDefBase {
     for (const string& in : def.input()) {
       grad_outputs.push_back(GradientName(in));
     }
-    return new vector<OperatorDef>{
-        CreateOperatorDef(
-            "DepthSplit", "",
-            std::vector<string>{GradientName(def.output(0)), def.output(1)},
-            grad_outputs)};
+    return SingleGradientDef(
+        "DepthSplit", "", vector<string>{GO(def, 0), O(def, 1)}, grad_outputs);
   }
 };
 REGISTER_GRADIENT(DepthConcat, GetDepthConcatGradient);

@@ -233,12 +233,10 @@ REGISTER_CPU_OPERATOR(LRNGradient, LRNGradientOp<float, CPUContext>);
 
 struct GetLRNGradient : public GetGradientDefBase {
   static vector<OperatorDef>* Create(const OperatorDef& def) {
-    return new vector<OperatorDef>{
-        CreateOperatorDef(
-            "LRNGradient", "",
-            std::vector<string>{def.input(0), def.output(0), def.output(1),
-                                GradientName(def.output(0))},
-            std::vector<string>{GradientName(def.input(0))})};
+    return SingleGradientDef(
+        "LRNGradient", "",
+        vector<string>{I(def, 0), O(def, 0), O(def, 1), GO(def, 0)},
+        vector<string>{GI(def, 0)});
   }
 };
 REGISTER_GRADIENT(LRN, GetLRNGradient);

@@ -62,11 +62,10 @@ REGISTER_CPU_OPERATOR(DropoutGrad, DropoutGradientOp<float, CPUContext>);
 
 struct GetDropoutGradient : public GetGradientDefBase {
   static vector<OperatorDef>* Create(const OperatorDef& def) {
-    return new vector<OperatorDef>{
-        CreateOperatorDef(
-            "DropoutGrad", "",
-            std::vector<string>{GradientName(def.output(0)), def.output(1)},
-            std::vector<string>{GradientName(def.input(0))})};
+    return SingleGradientDef(
+        "DropoutGrad", "",
+        vector<string>{GO(def, 0), O(def, 1)},
+        vector<string>{GI(def, 0)});
   }
 };
 REGISTER_GRADIENT(Dropout, GetDropoutGradient);

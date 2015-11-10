@@ -20,22 +20,20 @@ SHOULD_NOT_DO_GRADIENT(PrintInt);
 
 struct GetFlattenGradient : public GetGradientDefBase {
   static vector<OperatorDef>* Create(const OperatorDef& def) {
-    return new vector<OperatorDef>{
-        CreateOperatorDef(
-            "ReshapeLike", "",
-            std::vector<string>{GradientName(def.output(0)), def.input(0)},
-            std::vector<string>{GradientName(def.input(0))})};
+    return SingleGradientDef(
+        "ReshapeLike", "",
+        vector<string>{GO(def, 0), I(def, 0)},
+        vector<string>{GI(def, 0)});
   }
 };
 REGISTER_GRADIENT(Flatten, GetFlattenGradient);
 
 struct GetAliasGradient : public GetGradientDefBase {
   static vector<OperatorDef>* Create(const OperatorDef& def) {
-    return new vector<OperatorDef>{
-        CreateOperatorDef(
-            "Alias", "",
-            std::vector<string>{GradientName(def.output(0))},
-            std::vector<string>{GradientName(def.input(0))})};
+    return SingleGradientDef(
+        "Alias", "",
+        vector<string>{GO(def, 0)},
+        vector<string>{GI(def, 0)});
   }
 };
 REGISTER_GRADIENT(Alias, GetAliasGradient);
@@ -48,10 +46,9 @@ struct GetSplitGradient : public GetGradientDefBase {
     for (const string out : def.output()) {
       grad_input.push_back(GradientName(out));
     }
-    return new vector<OperatorDef>{
-        CreateOperatorDef(
-            "Sum", "", grad_input,
-            std::vector<string>{GradientName(def.input(0))})};
+    return SingleGradientDef(
+        "Sum", "", grad_input,
+        vector<string>{GI(def, 0)});
   }
 };
 REGISTER_GRADIENT(Split, GetSplitGradient);
