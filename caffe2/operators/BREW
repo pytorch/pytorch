@@ -26,6 +26,7 @@ cc_library(
       "relu_op.cc",
       "softmax_op.cc",
       "summarize_op.cc",
+      "tanh_op.cc",
       "tensor_protos_db_input.cc",
       "utility_ops.cc",
   ],
@@ -56,6 +57,7 @@ cuda_library(
       "relu_op.cu",
       "softmax_op.cu",
       "summarize_op.cu",
+      "tanh_op.cu",
   ],
   deps = [
       ":operators_headers",
