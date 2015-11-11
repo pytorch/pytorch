@@ -12,7 +12,7 @@ namespace caffe2 {
 template <class Context>
 class BroadcastOp final : public Operator<Context> {
  public:
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
   BroadcastOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         root_(OperatorBase::template GetSingleArgument<int>("root", 0)) {
@@ -46,7 +46,7 @@ class BroadcastOp final : public Operator<Context> {
 template <typename T, class Context>
 class AllreduceOp final : public Operator<Context> {
  public:
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(AllreduceOp);
 
   bool RunOnDevice() {

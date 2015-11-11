@@ -43,7 +43,7 @@ class LearningRateOp final : public Operator<Context> {
       CAFFE_LOG_FATAL << "Unknown learning rate policy: " << policy;
     }
   }
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override {
     int iter = OperatorBase::Input<TensorCPU>(0).template data<int>()[0];

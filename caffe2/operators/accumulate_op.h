@@ -19,7 +19,7 @@ class AccumulateOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws),
         gamma_(static_cast<T>(
             OperatorBase::template GetSingleArgument<float>("gamma", 1.0))) {}
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override {
     auto& input = Input(0);

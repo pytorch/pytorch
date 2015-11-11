@@ -14,7 +14,7 @@ template <typename T, class Context>
 class AveragedLoss final : public Operator<Context> {
  public:
   USE_SIMPLE_CTOR_DTOR(AveragedLoss);
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override {
     auto& X = Input(0);
@@ -41,7 +41,7 @@ template <typename T, class Context>
 class AveragedLossGradient final : public Operator<Context> {
  public:
   USE_SIMPLE_CTOR_DTOR(AveragedLossGradient);
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override {
     auto& X = Input(0);
@@ -64,7 +64,7 @@ template <typename T, class Context>
 class WeightedSumLoss final : public Operator<Context> {
  public:
   USE_SIMPLE_CTOR_DTOR(WeightedSumLoss);
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override {
     auto& X = Input(0);
@@ -88,7 +88,7 @@ template <typename T, class Context>
 class WeightedSumLossGradient final : public Operator<Context> {
  public:
   USE_SIMPLE_CTOR_DTOR(WeightedSumLossGradient);
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override {
     auto& W = Input(0);

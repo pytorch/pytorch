@@ -11,7 +11,7 @@ namespace caffe2 {
 template <typename T, class Context>
 class LRNOpBase : public Operator<Context> {
  public:
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
   LRNOpBase(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         size_(OperatorBase::GetSingleArgument<int>("size", 0)),
@@ -58,7 +58,7 @@ class LRNOpBase : public Operator<Context> {
 template <typename T, class Context>
 class LRNOp final : public LRNOpBase<T, Context> {
  public:
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
   LRNOp(const OperatorDef& operator_def, Workspace* ws)
       : LRNOpBase<T, Context>(operator_def, ws) {}
 
@@ -75,7 +75,7 @@ class LRNOp final : public LRNOpBase<T, Context> {
 template <typename T, class Context>
 class LRNGradientOp final : public LRNOpBase<T, Context> {
  public:
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
   LRNGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : LRNOpBase<T, Context>(operator_def, ws) {}
 

@@ -71,16 +71,19 @@ template <typename T> class cudnnTypeWrapper;
 template<> class cudnnTypeWrapper<float> {
  public:
   static const cudnnDataType_t type = CUDNN_DATA_FLOAT;
+  typedef float ScalingParamType;
 };
 
 template<> class cudnnTypeWrapper<double> {
  public:
   static const cudnnDataType_t type = CUDNN_DATA_DOUBLE;
+  typedef double ScalingParamType;
 };
 
 template<> class cudnnTypeWrapper<float16> {
  public:
   static const cudnnDataType_t type = CUDNN_DATA_HALF;
+  typedef float ScalingParamType;
 };
 
 /**

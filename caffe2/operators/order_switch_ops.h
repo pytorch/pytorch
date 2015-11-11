@@ -13,7 +13,7 @@ template <typename T, class Context>
 class NHWC2NCHWOp final : public Operator<Context> {
  public:
   USE_SIMPLE_CTOR_DTOR(NHWC2NCHWOp);
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
   bool RunOnDevice() override;
 
  protected:
@@ -25,7 +25,7 @@ template <typename T, class Context>
 class NCHW2NHWCOp final : public Operator<Context> {
  public:
   USE_SIMPLE_CTOR_DTOR(NCHW2NHWCOp);
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
   bool RunOnDevice() override;
 
  protected:

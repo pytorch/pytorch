@@ -12,7 +12,7 @@ template <typename T, class Context>
 class SoftmaxOp final : public Operator<Context> {
  public:
   USE_SIMPLE_CTOR_DTOR(SoftmaxOp);
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
   bool RunOnDevice() override;
 
  protected:
@@ -26,7 +26,7 @@ template <typename T, class Context>
 class SoftmaxGradientOp final : public Operator<Context> {
  public:
   USE_SIMPLE_CTOR_DTOR(SoftmaxGradientOp);
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
   bool RunOnDevice() override;
 
  protected:

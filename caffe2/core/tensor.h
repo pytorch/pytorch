@@ -129,6 +129,14 @@ class Tensor {
   }
 
   /**
+   * @brief Reshapes a tensor to 1-dimensional.
+   *
+   * This is a simple wrapper over the vector version by not needing to require
+   * the user to create a vector.
+   */
+  inline void Reshape(const int n) { Reshape(vector<int>{n}); }
+
+  /**
    * Reshape the tensor like the source tensor. Note that this is just a
    * sugar wrapper that essentially calls Reshape(src_tensor.dims()).
    */

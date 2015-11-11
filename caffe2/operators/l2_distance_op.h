@@ -12,7 +12,7 @@ class SquaredL2DistanceOp : public Operator<Context> {
  public:
   SquaredL2DistanceOp(const OperatorDef& def, Workspace* ws)
       : Operator<Context>(def, ws) {}
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override;
 
@@ -28,7 +28,7 @@ class SquaredL2DistanceGradientOp final
  public:
   SquaredL2DistanceGradientOp(const OperatorDef& def, Workspace* ws)
       : Operator<Context>(def, ws) {}
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override {
     auto& X = Input(0);

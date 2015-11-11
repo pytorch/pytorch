@@ -11,7 +11,7 @@ namespace caffe2 {
 template <typename T, class Context, class Functor>
 class UnaryElementwiseOp : public Operator<Context> {
  public:
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(UnaryElementwiseOp);
 
   bool RunOnDevice() override {
@@ -34,7 +34,7 @@ class UnaryElementwiseOp : public Operator<Context> {
 template <typename T, class Context, class Functor>
 class BinaryElementwiseOp : public Operator<Context> {
  public:
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(BinaryElementwiseOp);
 
   bool RunOnDevice() override {
