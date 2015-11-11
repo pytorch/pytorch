@@ -11,7 +11,7 @@
   {                                                               \
     return (*self->vtable->write##TYPEC)(self, data, n);          \
   }
-  
+
 IMPLEMENT_THFILE_RW(Byte, unsigned char)
 IMPLEMENT_THFILE_RW(Char, char)
 IMPLEMENT_THFILE_RW(Short, short)

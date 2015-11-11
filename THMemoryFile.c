@@ -97,10 +97,13 @@ static int THMemoryFile_mode(const char *mode, int *isReadable, int *isWritable)
   static size_t THMemoryFile_read##TYPEC(THFile *self, TYPE *data, size_t n) \
   {                                                                     \
     THMemoryFile *mfself = (THMemoryFile*)self;                         \
-    size_t nread = 0L;                                                    \
+    size_t nread = 0;                                                    \
                                                                         \
     THArgCheck(mfself->storage != NULL, 1, "attempt to use a closed file");     \
     THArgCheck(mfself->file.isReadable, 1, "attempt to read in a write-only file"); \
+                                                                        \
+    if (n == 0)                                                         \
+        return 0;                                                       \
                                                                         \
     if(mfself->file.isBinary)                                           \
     {                                                                   \
@@ -153,6 +156,9 @@ static int THMemoryFile_mode(const char *mode, int *isReadable, int *isWritable)
     THArgCheck(mfself->storage != NULL, 1, "attempt to use a closed file");     \
     THArgCheck(mfself->file.isWritable, 1, "attempt to write in a read-only file"); \
                                                                         \
+    if (n == 0)                                                         \
+        return 0;                                                       \
+                                                                        \
     if(mfself->file.isBinary)                                           \
     {                                                                   \
       size_t nByte = sizeof(TYPE)*n;                                      \
@@ -170,7 +176,7 @@ static int THMemoryFile_mode(const char *mode, int *isReadable, int *isWritable)
       size_t i;                                                           \
       for(i = 0; i < n; i++)                                            \
       {                                                                 \
-        size_t nByteWritten;                                              \
+        ssize_t nByteWritten;                                           \
         while (1)                                                       \
         {                                                               \
           ASCII_WRITE_ELEM;                                             \
@@ -237,7 +243,7 @@ static void THMemoryFile_seek(THFile *self, size_t position)
   {
     mfself->file.hasError = 1;
     if(!mfself->file.isQuiet)
-      THError("unable to seek at position %d", position);
+      THError("unable to seek at position %zu", position);
   }
 }
 
@@ -356,7 +362,7 @@ static size_t THMemoryFile_readString(THFile *self, const char *format, char **s
     *str_ = NULL;
     return 0;
   }
-  
+
   if(format[1] == 'a')
   {
     size_t str_size = mfself->size-mfself->position;
@@ -369,18 +375,20 @@ static size_t THMemoryFile_readString(THFile *self, const char *format, char **s
   else
   {
     char *p = mfself->storage->data+mfself->position;
-    size_t posEol = -1;
+    int eolFound = 0;
+    size_t posEol;
     size_t i;
-    for(i = 0L; i < mfself->size-mfself->position; i++)
+    for(i = 0; i < mfself->size-mfself->position; i++)
     {
       if(p[i] == '\n')
       {
         posEol = i;
+        eolFound = 1;
         break;
       }
     }
 
-    if(posEol >= 0)
+    if(eolFound)
     {
       *str_ = THMemoryFile_cloneString(mfself->storage->data+mfself->position, posEol);
       mfself->position += posEol+1;

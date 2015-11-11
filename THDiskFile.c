@@ -169,12 +169,13 @@ static void THDiskFile_seek(THFile *self, size_t position)
 
   THArgCheck(dfself->handle != NULL, 1, "attempt to use a closed file");
   THArgCheck(position >= 0, 2, "position must be positive");
+  THArgCheck(position < (size_t)LONG_MAX, 2, "DiskFile position must be smaller than LONG_MAX");
 
-  if(fseek(dfself->handle, position, SEEK_SET) < 0)
+  if(fseek(dfself->handle, (long)position, SEEK_SET) < 0)
   {
     dfself->file.hasError = 1;
     if(!dfself->file.isQuiet)
-      THError("unable to seek at position %d", position);
+      THError("unable to seek at position %zu", position);
   }
 }
 
@@ -196,7 +197,14 @@ static size_t THDiskFile_position(THFile *self)
 {
   THDiskFile *dfself = (THDiskFile*)(self);
   THArgCheck(dfself->handle != NULL, 1, "attempt to use a closed file");
-  return ftell(dfself->handle);
+
+  long offset = ftell(dfself->handle);
+  if (offset > -1)
+      return (size_t)offset;
+  else if(!dfself->file.isQuiet)
+      THError("unable to obtain disk file offset (maybe a long overflow occured)");
+
+  return 0;
 }
 
 static void THDiskFile_close(THFile *self)
@@ -211,7 +219,7 @@ static void THDiskFile_close(THFile *self)
 
 static void THDiskFile_reverseMemory(void *dst, const void *src, size_t blockSize, size_t numBlocks)
 {
-  if(blockSize != 1)
+  if(blockSize > 1)
   {
     size_t halfBlockSize = blockSize/2;
     char *charSrc = (char*)src;
@@ -328,8 +336,8 @@ static size_t THDiskFile_readString(THFile *self, const char *format, char **str
   {
     char *p = THAlloc(TBRS_BSZ);
     size_t total = TBRS_BSZ;
-    size_t pos = 0L;
-    
+    size_t pos = 0;
+
     for (;;)
     {
       if(total-pos == 0) /* we need more space! */
@@ -340,7 +348,7 @@ static size_t THDiskFile_readString(THFile *self, const char *format, char **str
       pos += fread(p+pos, 1, total-pos, dfself->handle);
       if (pos < total) /* eof? */
       {
-        if(pos == 0L)
+        if(pos == 0)
         {
           THFree(p);
           dfself->file.hasError = 1;
@@ -353,13 +361,13 @@ static size_t THDiskFile_readString(THFile *self, const char *format, char **str
         *str_ = p;
         return pos;
       }
-    }    
+    }
   }
   else
   {
     char *p = THAlloc(TBRS_BSZ);
     size_t total = TBRS_BSZ;
-    size_t pos = 0L;
+    size_t pos = 0;
     size_t size;
 
     for (;;)
@@ -371,7 +379,7 @@ static size_t THDiskFile_readString(THFile *self, const char *format, char **str
       }
       if (fgets(p+pos, total-pos, dfself->handle) == NULL) /* eof? */
       {
-        if(pos == 0L)
+        if(pos == 0)
         {
           THFree(p);
           dfself->file.hasError = 1;
@@ -385,13 +393,13 @@ static size_t THDiskFile_readString(THFile *self, const char *format, char **str
         return pos;
       }
       size = strlen(p+pos);
-      if (size == 0L || (p+pos)[size-1] != '\n')
+      if (size == 0 || (p+pos)[size-1] != '\n')
       {
         pos += size;
       }
       else
       {
-        pos += size-1L; /* do not include `eol' */
+        pos += size-1; /* do not include `eol' */
         *str_ = p;
         return pos;
       }
@@ -416,7 +424,7 @@ static size_t THDiskFile_writeString(THFile *self, const char *str, size_t size)
   {
     dfself->file.hasError = 1;
     if(!dfself->file.isQuiet)
-      THError("write error: wrote %ld blocks instead of %ld", nwrite, size);
+      THError("write error: wrote %zu blocks instead of %zu", nwrite, size);
   }
 
   return nwrite;
