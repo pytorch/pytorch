@@ -11,7 +11,7 @@ namespace caffe2 {
 template <class Context>
 class DepthSplitOp final : public Operator<Context> {
  public:
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
   DepthSplitOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         order_(StringToStorageOrder(
@@ -36,7 +36,7 @@ class DepthConcatOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws),
         order_(StringToStorageOrder(
             OperatorBase::GetSingleArgument<string>("order", "NHWC"))) {}
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
   bool RunOnDevice() override;
 
  protected:

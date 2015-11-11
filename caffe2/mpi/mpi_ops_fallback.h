@@ -14,7 +14,7 @@ class FallbackBroadcastOp final : public Operator<Context> {
   static_assert(!std::is_same<Context, CPUContext>::value,
                 "You should not FallbackBroadcastOp for CPUContext. Use "
                 "BroadcastOp directly.");
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
   FallbackBroadcastOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         root_(OperatorBase::template GetSingleArgument<int>("root", 0)) {
@@ -59,7 +59,7 @@ class FallbackAllreduceOp final : public Operator<Context> {
   static_assert(!std::is_same<Context, CPUContext>::value,
                 "You should not run FallbackAllreduceOp for CPUContext. Use "
                 "AllreduceOp directly.");
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
   FallbackAllreduceOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws) {
     CAFFE_VLOG(1) << "Using FallbackAllreduceOp.";

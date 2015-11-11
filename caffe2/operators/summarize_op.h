@@ -35,7 +35,7 @@ class SummarizeOp final : public Operator<Context> {
     }
   }
   ~SummarizeOp() { if (to_file_) log_file_->close(); }
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
   bool RunOnDevice() override;
 
   static constexpr int MIN_IDX = 0;

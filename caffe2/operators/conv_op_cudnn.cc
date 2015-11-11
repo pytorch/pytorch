@@ -207,8 +207,8 @@ bool CudnnConvOp<T>::RunWithCudnnWorkspace(
   }
 
   // Now, actually run the computation.
-  const T kOne = 1;
-  const T kZero = 0;
+  const typename cudnnTypeWrapper<T>::ScalingParamType kOne = 1;
+  const typename cudnnTypeWrapper<T>::ScalingParamType kZero = 0;
   // Filter
   CUDNN_CHECK(cudnnConvolutionForward(
       cudnn_wrapper_.cudnn_handle(), &kOne, bottom_desc_,
@@ -323,8 +323,8 @@ bool CudnnConvGradientOp<T>::RunWithCudnnWorkspace(
   }
 
   // Now, actually run the computation.
-  const T kOne = 1;
-  const T kZero = 0;
+  const typename cudnnTypeWrapper<T>::ScalingParamType kOne = 1;
+  const typename cudnnTypeWrapper<T>::ScalingParamType kZero = 0;
   CUDNN_CHECK(cudnnConvolutionBackwardBias(
       cudnn_wrapper_.cudnn_handle(), &kOne, top_desc_, dY.template data<T>(),
       &kZero, bias_desc_, dbias->template mutable_data<T>()));

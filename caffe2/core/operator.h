@@ -222,10 +222,15 @@ class Operator : public OperatorBase {
   using OperatorBase::def;                                                     \
   using OperatorBase::InputIsType;                                             \
   using OperatorBase::InputSize;                                               \
-  using OperatorBase::OutputSize;                                              \
-  using Operator<Context>::device_context_;                                    \
-  using Operator<Context>::Input;                                              \
-  using Operator<Context>::Output
+  using OperatorBase::OutputSize
+
+#define USE_OPERATOR_FUNCTIONS(context)                                        \
+  USE_OPERATOR_BASE_FUNCTIONS;                                                 \
+  using Operator<context>::device_context_;                                    \
+  using Operator<context>::Input;                                              \
+  using Operator<context>::Output
+
+#define USE_OPERATOR_CONTEXT_FUNCTIONS USE_OPERATOR_FUNCTIONS(Context)
 
 #define USE_SIMPLE_CTOR_DTOR(name)                                             \
   name(const OperatorDef& operator_def, Workspace* ws)                         \

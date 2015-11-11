@@ -13,7 +13,7 @@ namespace caffe2 {
 template <typename T, class Context>
 class ClipOp final : public Operator<Context> {
  public:
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
   ClipOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         min_(std::numeric_limits<T>::min()),
@@ -40,7 +40,7 @@ class ClipOp final : public Operator<Context> {
 template <typename T, class Context>
 class ClipGradientOp final : public Operator<Context> {
  public:
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
   ClipGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         min_(std::numeric_limits<T>::min()),

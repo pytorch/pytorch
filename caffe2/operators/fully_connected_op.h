@@ -11,7 +11,7 @@ namespace caffe2 {
 template <typename T, class Context>
 class FullyConnectedOp final : public Operator<Context> {
  public:
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
   FullyConnectedOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws) {}
   ~FullyConnectedOp() {}
@@ -67,7 +67,7 @@ class FullyConnectedOp final : public Operator<Context> {
 template <typename T, class Context>
 class FullyConnectedGradientOp : public Operator<Context> {
  public:
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
   FullyConnectedGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws) {}
   ~FullyConnectedGradientOp() {}

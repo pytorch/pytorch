@@ -11,7 +11,7 @@ namespace caffe2 {
 template <typename T, class Context>
 class DropoutOp final : public Operator<Context> {
  public:
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
   DropoutOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         ratio_(OperatorBase::GetSingleArgument<float>("ratio", 0.5)),
@@ -33,7 +33,7 @@ class DropoutOp final : public Operator<Context> {
 template <typename T, class Context>
 class DropoutGradientOp final : public Operator<Context> {
  public:
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
   DropoutGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         ratio_(OperatorBase::GetSingleArgument<float>("ratio", 0.5)),

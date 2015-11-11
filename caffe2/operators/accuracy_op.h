@@ -10,7 +10,7 @@ template <typename T, class Context>
 class AccuracyOp final : public Operator<Context> {
  public:
   USE_SIMPLE_CTOR_DTOR(AccuracyOp);
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
   bool RunOnDevice() override;
 
  protected:

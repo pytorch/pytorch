@@ -19,7 +19,7 @@ namespace caffe2 {
 template <class Context>
 class ConvPoolOpBase : public Operator<Context> {
  public:
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
   ConvPoolOpBase(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         legacy_pad_(static_cast<LegacyPadding>(
@@ -233,7 +233,7 @@ class ConvPoolOpBase : public Operator<Context> {
 };
 
 #define USE_CONV_POOL_BASE_FUNCTIONS                                           \
-  USE_OPERATOR_BASE_FUNCTIONS;                                                 \
+  USE_OPERATOR_CONTEXT_FUNCTIONS;                                                 \
   using ConvPoolOpBase<Context>::pad_t_;                                       \
   using ConvPoolOpBase<Context>::pad_l_;                                       \
   using ConvPoolOpBase<Context>::pad_b_;                                       \

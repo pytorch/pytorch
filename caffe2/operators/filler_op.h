@@ -17,7 +17,7 @@ class FillerOp : public Operator<Context> {
         run_once_(OperatorBase::GetSingleArgument<int>("run_once", true)),
         already_run_(false) {}
   virtual ~FillerOp() {}
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override {
     if (run_once_ && already_run_) {
@@ -55,7 +55,7 @@ class FillerOp : public Operator<Context> {
 template <typename T, class Context>
 class UniformFillOp final : public FillerOp<Context> {
  public:
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
   UniformFillOp(const OperatorDef& operator_def, Workspace* ws)
       : FillerOp<Context>(operator_def, ws),
         min_(OperatorBase::template GetSingleArgument<float>("min", 0)),
@@ -79,7 +79,7 @@ class UniformFillOp final : public FillerOp<Context> {
 template <typename T, class Context>
 class ConstantFillOp final : public FillerOp<Context> {
  public:
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
   ConstantFillOp(const OperatorDef& operator_def, Workspace* ws)
       : FillerOp<Context>(operator_def, ws),
         value_(OperatorBase::template GetSingleArgument<float>("value", 0)) {}
@@ -98,7 +98,7 @@ class ConstantFillOp final : public FillerOp<Context> {
 template <typename T, class Context>
 class GivenTensorFillOp final : public FillerOp<Context> {
  public:
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
   GivenTensorFillOp(const OperatorDef& operator_def, Workspace* ws)
       : FillerOp<Context>(operator_def, ws) {
     auto source_values = OperatorBase::template GetRepeatedArgument<float>(
@@ -125,7 +125,7 @@ class GivenTensorFillOp final : public FillerOp<Context> {
 template <typename T, class Context>
 class GaussianFillOp final : public FillerOp<Context> {
  public:
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
   GaussianFillOp(const OperatorDef& operator_def, Workspace* ws)
       : FillerOp<Context>(operator_def, ws),
         mean_(OperatorBase::template GetSingleArgument<float>("mean", 0)),
@@ -150,7 +150,7 @@ class GaussianFillOp final : public FillerOp<Context> {
 template <typename T, class Context>
 class XavierFillOp final : public FillerOp<Context> {
  public:
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
   XavierFillOp(const OperatorDef& operator_def, Workspace* ws)
       : FillerOp<Context>(operator_def, ws) {}
 
@@ -172,7 +172,7 @@ class XavierFillOp final : public FillerOp<Context> {
 template <typename T, class Context>
 class RangeFillOp final : public FillerOp<Context> {
  public:
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
   RangeFillOp(const OperatorDef& operator_def, Workspace* ws)
       : FillerOp<Context>(operator_def, ws) {}
 

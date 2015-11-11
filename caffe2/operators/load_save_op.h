@@ -20,7 +20,7 @@ using db::Transaction;
 template <class Context>
 class LoadTensorOp final : public Operator<Context> {
  public:
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
   LoadTensorOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         db_name_(OperatorBase::GetSingleArgument<string>("db", "")),

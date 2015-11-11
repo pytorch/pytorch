@@ -34,7 +34,7 @@ class FreeOp : public OperatorBase {
 template <typename T, class Context>
 class PrintOp final : public Operator<Context> {
  public:
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
   PrintOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         to_file_(OperatorBase::GetSingleArgument<int>("to_file", 0)),
@@ -118,7 +118,7 @@ class PrintOp final : public Operator<Context> {
 template <class Context>
 class AliasOp final : public Operator<Context> {
  public:
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(AliasOp);
 
   bool RunOnDevice() {
@@ -143,7 +143,7 @@ class AliasOp final : public Operator<Context> {
 template <class Context>
 class FlattenOp : public Operator<Context> {
  public:
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(FlattenOp);
 
   bool RunOnDevice() {
@@ -163,7 +163,7 @@ class FlattenOp : public Operator<Context> {
 template <class Context>
 class ReshapeLikeOp : public Operator<Context> {
  public:
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(ReshapeLikeOp);
 
   bool RunOnDevice() {
@@ -181,7 +181,7 @@ class ReshapeLikeOp : public Operator<Context> {
 template <class Context>
 class SplitOp : public Operator<Context> {
  public:
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(SplitOp);
 
   bool RunOnDevice() {
@@ -201,7 +201,7 @@ class SplitOp : public Operator<Context> {
 template <typename T, class Context>
 class SumOp : public Operator<Context> {
  public:
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(SumOp);
 
   bool RunOnDevice() {
@@ -231,7 +231,7 @@ class SumOp : public Operator<Context> {
 template <typename T, class Context>
 class WeightedSumOp : public Operator<Context> {
  public:
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(WeightedSumOp);
 
   bool RunOnDevice() {
@@ -276,7 +276,7 @@ class WeightedSumOp : public Operator<Context> {
 template <class Context, class DstContext, class SrcContext>
 class CopyOp : public Operator<Context> {
  public:
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(CopyOp);
 
   bool RunOnDevice() {
@@ -300,7 +300,7 @@ class CopyOp : public Operator<Context> {
 template <class Context>
 class RecordShapeOp : public Operator<Context> {
  public:
-  USE_OPERATOR_BASE_FUNCTIONS;
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(RecordShapeOp);
 
   bool RunOnDevice() {
