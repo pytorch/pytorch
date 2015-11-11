@@ -4,7 +4,7 @@ class CNNModelHelper(object):
   """A helper model so we can write CNN models more easily, without having to
   manually define parameter initializations and operators separately.
   """
-  def __init__(self, order, name=None):
+  def __init__(self, order="NCHW", name=None):
     if name is None:
       name = "CNN"
     self.net = core.Net(name)
