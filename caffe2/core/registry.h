@@ -3,8 +3,9 @@
 
 #include <algorithm>
 #include <cstdlib>
-#include <iostream>
 #include <functional>
+#include <iostream>
+#include <mutex>
 
 #include "caffe2/core/common.h"
 #include "caffe2/core/typeid.h"

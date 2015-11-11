@@ -21,3 +21,12 @@ cc_library(
       "//caffe2/sgd:sgd_ops_gpu",
     ],
 )
+
+cc_library(
+    name = "caffe2",
+    srcs = [],
+    deps = [
+        "all_available_ops",
+    ],
+    shared=True,
+)

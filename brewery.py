@@ -440,7 +440,7 @@ class cc_target(BuildTarget):
     BuildTarget.__init__(self, name, srcs, other_files=self.hdrs, deps=deps, **kwargs)
 
   def OutputName(self, is_library=False, is_shared=False):
-    if len(self.srcs) == 0:
+    if len(self.srcs) == 0 and not is_shared:
       # This is just a collection of dependencies, so we will not need
       # any output file. Returning an empty string.
       return ''
@@ -467,20 +467,25 @@ class cc_target(BuildTarget):
       self.cc_obj_files.insert(0, Env.WHOLE_ARCHIVE_TEMPLATE % archive_file)
     else:
       self.cc_obj_files.insert(0, archive_file)
-    if len(self.srcs) == 0:
+    if len(self.srcs) == 0 and not self.shared:
       # There is nothing to build if there is no source files.
       self.command_groups = []
     else:
-      obj_files = [GenFilename(src, 'o') for src in self.srcs]
-      cpp_commands = [
-          ' '.join([Env.CC, Env.CFLAGS, Env.INCLUDES, ' '.join(self.cflags),
-                    '-c', src, '-o', obj])
-          for src, obj in zip(self.srcs, obj_files)]
-      # Also remove the current archive.
-      cpp_commands.append('rm -f ' + archive_file)
-      # Create the archive
-      link_commands = [
-          ' '.join([Env.LINK_STATIC, archive_file] + obj_files)]
+      if len(self.srcs):
+        obj_files = [GenFilename(src, 'o') for src in self.srcs]
+        cpp_commands = [
+            ' '.join([Env.CC, Env.CFLAGS, Env.INCLUDES, ' '.join(self.cflags),
+                      '-c', src, '-o', obj])
+            for src, obj in zip(self.srcs, obj_files)]
+        # Also remove the current archive.
+        cpp_commands.append('rm -f ' + archive_file)
+        # Create the archive
+        link_commands = [
+            ' '.join([Env.LINK_STATIC, archive_file] + obj_files)]
+      else:
+        obj_files = []
+        cpp_commands = []
+        link_commands = []
       if self.build_binary:
         link_binary_commands = [
             ' '.join([Env.LINK_BINARY, self.OutputName()] + self.cc_obj_files +

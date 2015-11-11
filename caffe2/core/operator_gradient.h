@@ -20,7 +20,7 @@ class GradientRegisterer {
   static vector<OperatorDef>* Creator(const OperatorDef& def) {
     CAFFE_VLOG(1) << "Creator: " << def.DebugString();
     vector<OperatorDef>* grad_defs = GetGradientDef::Create(def);
-    CHECK(grad_defs != nullptr);
+    CAFFE_CHECK(grad_defs != nullptr);
     // Copy device option if needed.
     if (GetGradientDef().CopyDeviceOption() && def.has_device_option()) {
       for (OperatorDef& grad_def : *grad_defs) {
