@@ -26,6 +26,7 @@ cc_library(
       "relu_op.cc",
       "sigmoid_op.cc",
       "softmax_op.cc",
+      "spatial_batch_norm_op.cc",
       "summarize_op.cc",
       "tanh_op.cc",
       "tensor_protos_db_input.cc",
@@ -97,6 +98,7 @@ cc_library(
   srcs = [
       "conv_op_cudnn.cc",
       "softmax_op_cudnn.cc",
+      "spatial_batch_norm_op_cudnn.cc",
   ],
   deps = [
       ":operators_headers",
