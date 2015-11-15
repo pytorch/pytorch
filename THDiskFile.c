@@ -168,14 +168,18 @@ static void THDiskFile_seek(THFile *self, size_t position)
   THDiskFile *dfself = (THDiskFile*)(self);
 
   THArgCheck(dfself->handle != NULL, 1, "attempt to use a closed file");
-  THArgCheck(position >= 0, 2, "position must be positive");
-  THArgCheck(position < (size_t)LONG_MAX, 2, "DiskFile position must be smaller than LONG_MAX");
 
+#ifdef _WIN32
+  THArgCheck(position <= (size_t)LONG_MAX, 2, "position must be smaller than LONG_MAX");
   if(fseek(dfself->handle, (long)position, SEEK_SET) < 0)
+#else
+  THArgCheck(position <= (size_t)LLONG_MAX, 2, "position must be smaller than LLONG_MAX");
+  if(fseeko(dfself->handle, (off_t)position, SEEK_SET) < 0)
+#endif
   {
     dfself->file.hasError = 1;
     if(!dfself->file.isQuiet)
-      THError("unable to seek at position %zu", position);
+      THError("unable to seek to position %zu", position);
   }
 }
 
