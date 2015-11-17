@@ -29,7 +29,7 @@ include(CheckFortranFunctionExists)
 
 macro(Check_Lapack_Libraries LIBRARIES _prefix _name _flags _list _blas)
   # This macro checks for the existence of the combination of fortran libraries
-  # given by _list.  If the combination is found, this macro checks (using the 
+  # given by _list.  If the combination is found, this macro checks (using the
   # Check_Fortran_Function_Exists macro) whether can link against that library
   # combination using the name of a routine given by _name using the linker
   # flags given by _flags.  If the combination of libraries is found and passes
@@ -50,12 +50,12 @@ macro(Check_Lapack_Libraries LIBRARIES _prefix _name _flags _list _blas)
         if(APPLE)
           find_library(${_prefix}_${_library}_LIBRARY
             NAMES ${_library}
-            PATHS /usr/local/lib /usr/lib /usr/local/lib64 /usr/lib64 
+            PATHS /usr/local/lib /usr/lib /usr/local/lib64 /usr/lib64
             ENV DYLD_LIBRARY_PATH)
         else(APPLE)
           find_library(${_prefix}_${_library}_LIBRARY
             NAMES ${_library}
-            PATHS /usr/local/lib /usr/lib /usr/local/lib64 /usr/lib64 
+            PATHS /usr/local/lib /usr/lib /usr/local/lib64 /usr/lib64
             ENV LD_LIBRARY_PATH)
         endif(APPLE)
       endif(WIN32)
@@ -94,7 +94,7 @@ if(BLAS_FOUND)
     SET(LAPACK_INCLUDE_DIR ${MKL_INCLUDE_DIR})
     SET(LAPACK_INFO "mkl")
   ENDIF()
-  
+
   # OpenBlas
   IF((NOT LAPACK_INFO) AND (BLAS_INFO STREQUAL "open"))
     SET(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
@@ -124,7 +124,7 @@ if(BLAS_FOUND)
     if(ACML_LAPACK_WORKS)
       SET(LAPACK_INFO "acml")
     else()
-      message(STATUS "Strangely, this ACML library does not support Lapack?!")  
+      message(STATUS "Strangely, this ACML library does not support Lapack?!")
     endif()
   endif()
 
@@ -135,7 +135,7 @@ if(BLAS_FOUND)
     if(ACCELERATE_LAPACK_WORKS)
       SET(LAPACK_INFO "accelerate")
     else()
-      message(STATUS "Strangely, this Accelerate library does not support Lapack?!")  
+      message(STATUS "Strangely, this Accelerate library does not support Lapack?!")
     endif()
   endif()
 
@@ -146,12 +146,12 @@ if(BLAS_FOUND)
     if(VECLIB_LAPACK_WORKS)
       SET(LAPACK_INFO "veclib")
     else()
-      message(STATUS "Strangely, this vecLib library does not support Lapack?!")  
+      message(STATUS "Strangely, this vecLib library does not support Lapack?!")
     endif()
   endif()
 
   # Generic LAPACK library?
-  IF((NOT LAPACK_INFO) AND (BLAS_INFO STREQUAL "generic"))
+  IF((NOT LAPACK_INFO) AND ((BLAS_INFO STREQUAL "generic") OR (BLAS_INFO STREQUAL "open")))
     check_lapack_libraries(
       LAPACK_LIBRARIES
       LAPACK
