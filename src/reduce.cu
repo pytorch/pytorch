@@ -182,18 +182,14 @@ __global__ void ReduceKernel(const ReduceKernelArgs<T> args) {
   // First wait for args.PrevPtrToThisOutput to become nullptr to ensure that
   // the previous GPU is done with a previous collective operation.
   if (tid == 0) {
-    if (ROLE != BEGIN) {
-      Wait([=] {
-        return *((T * volatile *)args.PrevPtrToThisData) == nullptr; // Wait for previous processor to be done
-      });
+    Wait([=] {
+      return *((T * volatile *)args.PrevPtrToThisData) == nullptr; // Wait for previous processor to be done
+    });
 
-      *((T * volatile *)args.PrevPtrToThisData) = (T*)args.ThisData; // Tell Previous I'm starting
-    }
-    if (ROLE != END) {
-      Wait([=] {
-        return *((T * volatile *)args.ThisPtrToNextData) != nullptr;  // Wait till I've been told next started
-      });
-    }
+    *((T * volatile *)args.PrevPtrToThisData) = (T*)args.ThisData; // Tell Previous I'm starting
+    Wait([=] {
+      return *((T * volatile *)args.ThisPtrToNextData) != nullptr;  // Wait till I've been told next started
+    });
   }
   __syncthreads();
 

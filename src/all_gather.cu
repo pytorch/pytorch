@@ -59,7 +59,7 @@
 // subchunks, we interleave the independent subchunks so that more data can be
 // transferred while the sync is in progress. This is the number of subchunks
 // that are active at the same time
-#define NUM_SUBCHUNKS   1
+#define NUM_SUBCHUNKS   2
 
 // If this is called with STEP, it means that we just finished processing the
 // data for step STEP on this GPU, which is the data required on the next GPU
