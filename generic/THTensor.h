@@ -104,6 +104,7 @@ TH_API void THTensor_(squeeze1d)(THTensor *self, THTensor *src, int dimension_);
 
 TH_API int THTensor_(isContiguous)(const THTensor *self);
 TH_API int THTensor_(isSameSizeAs)(const THTensor *self, const THTensor *src);
+TH_API int THTensor_(isSetTo)(const THTensor *self, const THTensor *src);
 TH_API int THTensor_(isSize)(const THTensor *self, const THLongStorage *dims);
 TH_API long THTensor_(nElement)(const THTensor *self);
 
