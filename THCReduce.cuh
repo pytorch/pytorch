@@ -268,12 +268,18 @@ bool THCudaTensor_reduceDim(THCState* state,
   if (THC_canUse32BitIndexMath(state, out) &&
       THC_canUse32BitIndexMath(state, in)) {
     TensorInfo<unsigned int> outInfo(state, out);
+    outInfo.collapseDims();
+
     TensorInfo<unsigned int> inInfo(state, in, dim);
+    inInfo.collapseDims();
 
     HANDLE_OUT_CASE(unsigned int, outInfo.dims, inInfo.dims);
   } else {
     TensorInfo<unsigned long> outInfo(state, out);
+    outInfo.collapseDims();
+
     TensorInfo<unsigned long> inInfo(state, in, dim);
+    inInfo.collapseDims();
 
     // For large tensors, we only compile the completely contiguous
     // version and the completely generic version, to reduce

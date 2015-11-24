@@ -197,10 +197,12 @@ bool THCudaTensor_pointwiseApply1(THCState* state,
   // additional overhead.
   if (THC_canUse32BitIndexMath(state, a)) {
     TensorInfo<unsigned int> aInfo(state, a);
+    aInfo.collapseDims();
 
     HANDLE_A_CASE(unsigned int, aInfo.dims);
   } else {
     TensorInfo<unsigned long> aInfo(state, a);
+    aInfo.collapseDims();
 
     // For large tensors, we only compile the completely contiguous
     // version and the completely generic version, to reduce
@@ -343,12 +345,18 @@ bool THCudaTensor_pointwiseApply2(THCState* state,
   if (THC_canUse32BitIndexMath(state, a) &&
       THC_canUse32BitIndexMath(state, b)) {
     TensorInfo<unsigned int> aInfo(state, a);
+    aInfo.collapseDims();
+
     TensorInfo<unsigned int> bInfo(state, b);
+    bInfo.collapseDims();
 
     HANDLE_A_CASE(unsigned int, aInfo.dims, bInfo.dims);
   } else {
     TensorInfo<unsigned long> aInfo(state, a);
+    aInfo.collapseDims();
+
     TensorInfo<unsigned long> bInfo(state, b);
+    bInfo.collapseDims();
 
     // For large tensors, we only compile the completely contiguous
     // version and the completely generic version, to reduce
@@ -528,14 +536,24 @@ bool THCudaTensor_pointwiseApply3(THCState* state,
       THC_canUse32BitIndexMath(state, b) &&
       THC_canUse32BitIndexMath(state, c)) {
     TensorInfo<unsigned int> aInfo(state, a);
+    aInfo.collapseDims();
+
     TensorInfo<unsigned int> bInfo(state, b);
+    bInfo.collapseDims();
+
     TensorInfo<unsigned int> cInfo(state, c);
+    cInfo.collapseDims();
 
     HANDLE_A_CASE(unsigned int, aInfo.dims, bInfo.dims, cInfo.dims);
   } else {
     TensorInfo<unsigned long> aInfo(state, a);
+    aInfo.collapseDims();
+
     TensorInfo<unsigned long> bInfo(state, b);
+    bInfo.collapseDims();
+
     TensorInfo<unsigned long> cInfo(state, c);
+    cInfo.collapseDims();
 
     // For large tensors, we only compile the completely contiguous
     // version and the completely generic version, to reduce

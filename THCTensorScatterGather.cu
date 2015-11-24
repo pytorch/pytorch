@@ -145,9 +145,9 @@ void THCudaTensor_gather(THCState* state, THCudaTensor *tensor, THCudaTensor *sr
   if (THC_canUse32BitIndexMath(state, tensor) &&
       THC_canUse32BitIndexMath(state, src) &&
       THC_canUse32BitIndexMath(state, index)) {
-    TensorInfo<unsigned int> tensorInfo(state, tensor, NoCollapseDims);
-    TensorInfo<unsigned int> srcInfo(state, src, NoCollapseDims);
-    TensorInfo<unsigned int> indexInfo(state, index, NoCollapseDims);
+    TensorInfo<unsigned int> tensorInfo(state, tensor);
+    TensorInfo<unsigned int> srcInfo(state, src);
+    TensorInfo<unsigned int> indexInfo(state, index);
 
     // Specialize for a small number of dimensions.
     switch (indexInfo.dims) {
@@ -165,9 +165,9 @@ void THCudaTensor_gather(THCState* state, THCudaTensor *tensor, THCudaTensor *sr
         break;
     }
   } else {
-    TensorInfo<unsigned long> tensorInfo(state, tensor, NoCollapseDims);
-    TensorInfo<unsigned long> srcInfo(state, src, NoCollapseDims);
-    TensorInfo<unsigned long> indexInfo(state, index, NoCollapseDims);
+    TensorInfo<unsigned long> tensorInfo(state, tensor);
+    TensorInfo<unsigned long> srcInfo(state, src);
+    TensorInfo<unsigned long> indexInfo(state, index);
 
     RUN(unsigned long, -1)
   }
@@ -252,9 +252,9 @@ void THCudaTensor_scatter(THCState* state, THCudaTensor *tensor, int dim, THCuda
   if (THC_canUse32BitIndexMath(state, tensor) &&
       THC_canUse32BitIndexMath(state, src) &&
       THC_canUse32BitIndexMath(state, index)) {
-    TensorInfo<unsigned int> tensorInfo(state, tensor, NoCollapseDims);
-    TensorInfo<unsigned int> srcInfo(state, src, NoCollapseDims);
-    TensorInfo<unsigned int> indexInfo(state, index, NoCollapseDims);
+    TensorInfo<unsigned int> tensorInfo(state, tensor);
+    TensorInfo<unsigned int> srcInfo(state, src);
+    TensorInfo<unsigned int> indexInfo(state, index);
 
     // Specialize for a small number of dimensions.
     switch (indexInfo.dims) {
@@ -272,9 +272,9 @@ void THCudaTensor_scatter(THCState* state, THCudaTensor *tensor, int dim, THCuda
         break;
     }
   } else {
-    TensorInfo<unsigned long> tensorInfo(state, tensor, NoCollapseDims);
-    TensorInfo<unsigned long> srcInfo(state, src, NoCollapseDims);
-    TensorInfo<unsigned long> indexInfo(state, index, NoCollapseDims);
+    TensorInfo<unsigned long> tensorInfo(state, tensor);
+    TensorInfo<unsigned long> srcInfo(state, src);
+    TensorInfo<unsigned long> indexInfo(state, index);
 
     RUN(unsigned long, -1)
   }
@@ -352,8 +352,8 @@ void THCudaTensor_scatterFill(THCState* state, THCudaTensor *tensor, int dim, TH
 
   if (THC_canUse32BitIndexMath(state, tensor) &&
       THC_canUse32BitIndexMath(state, index)) {
-    TensorInfo<unsigned int> tensorInfo(state, tensor, NoCollapseDims);
-    TensorInfo<unsigned int> indexInfo(state, index, NoCollapseDims);
+    TensorInfo<unsigned int> tensorInfo(state, tensor);
+    TensorInfo<unsigned int> indexInfo(state, index);
 
     // Specialize for a small number of dimensions.
     switch (indexInfo.dims) {
@@ -371,8 +371,8 @@ void THCudaTensor_scatterFill(THCState* state, THCudaTensor *tensor, int dim, TH
         break;
     }
   } else {
-    TensorInfo<unsigned long> tensorInfo(state, tensor, NoCollapseDims);
-    TensorInfo<unsigned long> indexInfo(state, index, NoCollapseDims);
+    TensorInfo<unsigned long> tensorInfo(state, tensor);
+    TensorInfo<unsigned long> indexInfo(state, index);
 
     RUN(unsigned long, -1);
   }

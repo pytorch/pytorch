@@ -109,7 +109,6 @@ __global__ void
 THCudaTensor_bitonicSortWithIndex(TensorInfo<IndexType> sorted,
                                   TensorInfo<IndexType> indices,
                                   TensorInfo<IndexType> input,
-                                  int dim,
                                   IndexType totalSlices,
                                   IndexType sliceSize,
                                   IndexType sliceStride,
@@ -221,7 +220,6 @@ bool THCudaTensor_sortImpl(THCState* state,
     THCudaTensor_bitonicSortWithIndex<GTComp<float>, TYPE, A, SIZE>     \
       <<<grid, block, 0, THCState_getCurrentStream(state)>>>(           \
         sortedInfo, indicesInfo, inputInfo,                             \
-        dim,                                                            \
         slices, (TYPE) sliceSize, (TYPE) sliceStride,                   \
         (TYPE) outSize, (TYPE) outStride,                               \
         GTComp<float>());                                               \
@@ -229,7 +227,6 @@ bool THCudaTensor_sortImpl(THCState* state,
     THCudaTensor_bitonicSortWithIndex<LTComp<float>, TYPE, A, SIZE>     \
       <<<grid, block, 0, THCState_getCurrentStream(state)>>>(           \
         sortedInfo, indicesInfo, inputInfo,                             \
-        dim,                                                            \
         slices, (TYPE) sliceSize, (TYPE) sliceStride,                   \
         (TYPE) outSize, (TYPE) outStride,                               \
         LTComp<float>());                                               \
@@ -305,16 +302,26 @@ bool THCudaTensor_sortImpl(THCState* state,
     // In order to get to the right offset for the slice we are
     // sorting, set `dim` size to 1 (the `dropDim` argument)
     TensorInfo<unsigned int> sortedInfo(state, sorted, dim);
+    sortedInfo.collapseDims();
+
     TensorInfo<unsigned int> indicesInfo(state, indices, dim);
+    indicesInfo.collapseDims();
+
     TensorInfo<unsigned int> inputInfo(state, input, dim);
+    inputInfo.collapseDims();
 
     HANDLE_A_CASE(unsigned int, inputInfo.dims);
   } else {
     // In order to get to the right offset for the slice we are
     // sorting, set `dim` size to 1 (the `dropDim` argument)
     TensorInfo<unsigned long> sortedInfo(state, sorted, dim);
+    sortedInfo.collapseDims();
+
     TensorInfo<unsigned long> indicesInfo(state, indices, dim);
+    indicesInfo.collapseDims();
+
     TensorInfo<unsigned long> inputInfo(state, input, dim);
+    inputInfo.collapseDims();
 
     // long case is rare, just instantiate these versions
     if (inputInfo.isContiguous()) {
@@ -386,7 +393,10 @@ void THCudaTensor_sortImplThrust(THCState* state,
   }
 
   TensorInfo<unsigned long> sortedInfo(state, sorted, dim);
+  sortedInfo.collapseDims();
+
   TensorInfo<unsigned long> indicesInfo(state, indices, dim);
+  indicesInfo.collapseDims();
 
   dim3 grid;
   THC_getGridFromTiles(numSlices, grid);

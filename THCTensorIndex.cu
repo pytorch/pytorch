@@ -257,78 +257,83 @@ void THCudaTensor_indexFill(THCState *state, THCudaTensor *res_, int dim, THCuda
   THCudaTensor_free(state, indices);
 }
 
-__global__ void THCudaTensor_kernel_indexSelect_contiguous(
-  float *tensor, float *src, long stride, float *index, long idxSize)
-{
-  // In the typical case, each block of 128 threads handles a 4x128
-  // section of the output with each warp handling a single 1x128 row.
-  // The outer loops handle inputs larger than 4*65535 or strides larger
-  // than 128*65535.
-  const int VT = 4;
-  const int WARP_SIZE = 32;
-  const int MAX_DIM_SIZE = 65535;
+// We prefer this kernel to avoid reloading index points if the number
+// of indices is a small number.
+// This kernel in fact works for all choices of problem size, but if
+// the number of indices chosen is large, then the
+// indexSelectLargeIndex kernel is a better choice to increase
+// parallelism.
+template <typename IndexType, int DstDim, int SrcDim, int IdxDim>
+__global__ void indexSelectSmallIndex(TensorInfo<IndexType> dst,
+                                      TensorInfo<IndexType> src,
+                                      TensorInfo<IndexType> indices,
+                                      int dstSelectDim,
+                                      int srcSelectDim,
+                                      IndexType totalSize,
+                                      IndexType innerSize) {
+  // In order to avoid reloading the index that we are copying, load
+  // it once to handle all of the points that are being selected, so
+  // it can be reused as much as possible. This kernel is chosen when
+  // this is a good choice (small number of chosen indices), since
+  // re-accessing indices in addition to src elements can be slow.
+  for (IndexType dstIndex = 0; dstIndex < indices.sizes[0]; ++dstIndex) {
+    // Lua indices begin at 1
+    IndexType srcIndex =
+      indices.data[IndexToOffset<IndexType, IdxDim>::get(dstIndex, indices)] - 1;
 
-  for (int idx = blockIdx.x * blockDim.y + threadIdx.y; idx < idxSize; idx += blockDim.y * MAX_DIM_SIZE) {
-    for (int startIdx = threadIdx.x + blockIdx.y * VT*WARP_SIZE; startIdx < stride; startIdx += VT*WARP_SIZE*MAX_DIM_SIZE) {
-      const long srcIdx = ((long) index[idx] - 1) * stride;
-      const long targetIdx = idx * stride;
+    // We stride over the output ignoring the indexed dimension
+    // (innerSize), whose offset calculation is handled differently
+    for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+         linearIndex < innerSize;
+         linearIndex += gridDim.x * blockDim.x) {
+      IndexType dstOffset =
+        IndexToOffset<IndexType, DstDim>::get(linearIndex, dst);
+      dstOffset += dstIndex * dst.strides[dstSelectDim];
 
-      #pragma unroll
-      for (int i = 0; i < VT; i++) {
-        const int featureIdx = startIdx + i * WARP_SIZE;
-        if (featureIdx < stride) {
-          tensor[targetIdx + featureIdx] = src[srcIdx + featureIdx];
-        }
-      }
+      IndexType srcOffset =
+        IndexToOffset<IndexType, SrcDim>::get(linearIndex, src);
+      srcOffset += srcIndex * src.strides[srcSelectDim];
+
+      dst.data[dstOffset] = src.data[srcOffset];
     }
   }
 }
 
-__global__ void THCudaTensor_kernel_indexSelect(
-  TensorInfo<unsigned long> dest,
-  TensorInfo<unsigned long> src,
-  TensorInfo<unsigned long> indices,
-  long totalSize,
-  int indexDim
-)
-{
-  for (unsigned long linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+// We prefer this kernel to balance parallelism across index points,
+// if there are a large number of indices.
+// This kernel in fact works for all choices of problem size, but if
+// the number of indices chosen is small, then the
+// indexSelectSmallIndex kernel is a better choice to reduce memory
+// accesses.
+template <typename IndexType, int DstDim, int SrcDim, int IdxDim>
+__global__ void indexSelectLargeIndex(TensorInfo<IndexType> dst,
+                                      TensorInfo<IndexType> src,
+                                      TensorInfo<IndexType> indices,
+                                      int dstSelectDim,
+                                      int srcSelectDim,
+                                      IndexType totalSize,
+                                      IndexType innerSize) {
+  // We stride over the output including the indexed dimension
+  // (totalSize), and calculate the destination index point based on that
+  for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
        linearIndex < totalSize;
        linearIndex += gridDim.x * blockDim.x) {
+    IndexType dstIndex = linearIndex / innerSize;
+    IndexType elementInSlice = linearIndex % innerSize;
 
-    unsigned long destOffset =
-      IndexToOffset<unsigned long, -1>::get(linearIndex, dest);
+    // Lua indices begin at 1
+    IndexType srcIndex =
+      indices.data[IndexToOffset<IndexType, IdxDim>::get(dstIndex, indices)] - 1;
 
-    // Calculate the index in the dimension we're selecting in.
-    unsigned long offset = destOffset;
+    IndexType dstOffset =
+      IndexToOffset<IndexType, DstDim>::get(elementInSlice, dst);
+    dstOffset += dstIndex * dst.strides[dstSelectDim];
 
-    // In the process of doing so, we'll calculate indices in all lower
-    // dimensions. We need to save these so we can reconstruct a linear index in
-    // the source tensor. MAX_CUTORCH_DIMS is usually an overestimate (we only
-    // need to save dims - indexDim indices) but this avoids dynamic memory
-    // allocation.
-    unsigned long unraveledIndices[MAX_CUTORCH_DIMS];
+    IndexType srcOffset =
+      IndexToOffset<IndexType, SrcDim>::get(elementInSlice, src);
+    srcOffset += srcIndex * src.strides[srcSelectDim];
 
-    for (int i = dest.dims - 1; i >= indexDim; --i) {
-      unraveledIndices[i] = offset % dest.sizes[i];
-      offset /= dest.sizes[i];
-    }
-
-    unsigned long destSliceIndex = unraveledIndices[indexDim];
-    unsigned long destSliceOffset =
-      IndexToOffset<unsigned long, 1>::get(destSliceIndex, indices);
-    unsigned long srcSliceIndex =
-      (unsigned long)indices.data[destSliceOffset] - 1;
-
-    // Rebuild index in the source tensor by doing the reverse of the above
-    unsigned long srcIndex = offset * src.sizes[indexDim] + srcSliceIndex;
-    for (int i = indexDim + 1; i < dest.dims; ++i) {
-      srcIndex = srcIndex * src.sizes[i] + unraveledIndices[i];
-    }
-
-    unsigned long srcOffset =
-      IndexToOffset<unsigned long, -1>::get(srcIndex, src);
-    dest.data[destOffset] = src.data[srcOffset];
+    dst.data[dstOffset] = src.data[srcOffset];
   }
 }
 
@@ -344,15 +349,16 @@ void THCudaTensor_indexSelect_long(THCState *state, THCudaTensor *res_, THCudaTe
   THCudaTensor_free(state, indices_);
 }
 
-void THCudaTensor_indexSelect(THCState *state, THCudaTensor *res, THCudaTensor *src, int dim, THCudaTensor *indices)
+void THCudaTensor_indexSelect(THCState *state, THCudaTensor *dst, THCudaTensor *src, int dim, THCudaTensor *indices)
 {
-  THAssert(THCudaTensor_checkGPU(state, 2, res, src));
+  THAssert(THCudaTensor_checkGPU(state, 2, dst, src));
 
-  THCCheckTensorDims(state, res, 2);
+  THCCheckTensorDims(state, dst, 2);
   THCCheckTensorDims(state, src, 3);
   THCCheckTensorDims(state, indices, 5);
 
-  long nIndex = THCudaTensor_size(state, indices, 0);
+  long numIndices = THCudaTensor_nElement(state, indices);
+
   long srcDims = THCudaTensor_nDimension(state, src);
   cudaStream_t stream = THCState_getCurrentStream(state);
 
@@ -362,48 +368,92 @@ void THCudaTensor_indexSelect(THCState *state, THCudaTensor *res, THCudaTensor *
   THArgCheck(srcDims > 0, 2, "Source tensor is empty");
 
   THLongStorage *newSize = THCudaTensor_newSizeOf(state, src);
-  THLongStorage_set(newSize, dim, nIndex);
-  THCudaTensor_resize(state, res, newSize, NULL);
+  THLongStorage_set(newSize, dim, numIndices);
+  THCudaTensor_resize(state, dst, newSize, NULL);
   THLongStorage_free(newSize);
 
-  if (THCudaTensor_isContiguous(state, src) &&
-      THCudaTensor_isContiguous(state, res) &&
-      THCudaTensor_isContiguous(state, indices) &&
-      dim == 0)
-  {
-    long stride = THCudaTensor_stride(state, src, 0);
+  int indContig = THCudaTensor_isContiguous(state, indices);
 
-    int blockX = std::min(THCCeilDiv(nIndex, 4L), 65535L);
-    int blockY = std::min(THCCeilDiv(stride, 128L), 65535L);
-
-    dim3 nthreads(32, 4);
-    dim3 nblocks(blockX, blockY);
-
-    THCudaTensor_kernel_indexSelect_contiguous<<<nblocks, nthreads, 0, stream>>>(
-      THCudaTensor_data(state, res),
-      THCudaTensor_data(state, src),
-      stride,
-      THCudaTensor_data(state, indices),
-      nIndex);
-
-    return;
-  }
-
-  long nRes = THCudaTensor_nElement(state, res);
+  // The `src` is partitioned into two parts:
+  // -the size of each slice we are indexing, which is the
+  // total size of the tensor ignoring dimension `dim`;
+  // -the number of indices we are choosing, which is the total size
+  // of the tensor `indices`.
+  long totalSize = THCudaTensor_nElement(state, dst);
+  long sliceSize = totalSize / numIndices;
 
   int mpc = THCState_getCurrentDeviceProperties(state)->multiProcessorCount;
-  dim3 nthreads(std::min(nRes, 128L));
-  dim3 nblocks(std::min(THCCeilDiv(nRes, 128L), (long)(mpc * 8)));
 
-  TensorInfo<unsigned long> destInfo(state, res, NoCollapseDims);
-  TensorInfo<unsigned long> srcInfo(state, src, NoCollapseDims);
-  TensorInfo<unsigned long> indicesInfo(state, indices);
+#define SMALL_INDEX(TYPE, DST_DIM, SRC_DIM, IDX_DIM)            \
+  indexSelectSmallIndex<TYPE, DST_DIM, SRC_DIM, IDX_DIM>        \
+    <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(           \
+      dstInfo, srcInfo, indicesInfo,                            \
+      dstSelectDim, srcSelectDim, totalSize, sliceSize);
 
-  THCudaTensor_kernel_indexSelect<<<nthreads, nblocks, 0, stream>>>(
-    destInfo,
-    srcInfo,
-    indicesInfo,
-    nRes,
-    dim
-  );
+#define LARGE_INDEX(TYPE, DST_DIM, SRC_DIM, IDX_DIM)            \
+  indexSelectLargeIndex<TYPE, DST_DIM, SRC_DIM, IDX_DIM>        \
+    <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(           \
+      dstInfo, srcInfo, indicesInfo,                            \
+      dstSelectDim, srcSelectDim, totalSize, sliceSize);
+
+  dim3 smallIndexGrid(std::min(THCCeilDiv(sliceSize, 128L), (long)(mpc * 8)));
+  dim3 smallIndexBlock(std::min(sliceSize, 128L));
+
+  dim3 largeIndexGrid(std::min(THCCeilDiv(totalSize, 128L), (long)(mpc * 8)));
+  dim3 largeIndexBlock(std::min(totalSize, 128L));
+
+  if (THC_canUse32BitIndexMath(state, dst) &&
+      THC_canUse32BitIndexMath(state, src) &&
+      THC_canUse32BitIndexMath(state, indices)) {
+    TensorInfo<unsigned int> dstInfo(state, dst);
+    int dstSelectDim = dstInfo.collapseDims(dim);
+    dstInfo.sizes[dstSelectDim] = 1;
+
+    TensorInfo<unsigned int> srcInfo(state, src);
+    int srcSelectDim = srcInfo.collapseDims(dim);
+    srcInfo.sizes[srcSelectDim] = 1;
+
+    TensorInfo<unsigned int> indicesInfo(state, indices);
+    indicesInfo.collapseDims();
+
+    // A reasonable choice for when to have each thread iterate over
+    // indices to choose
+    if (numIndices <= 16) {
+      if (dstInfo.dims == 1 && srcInfo.dims == 1 && indContig) {
+        SMALL_INDEX(unsigned int, 1, 1, -2);
+      } else if (dstInfo.dims == 2 && srcInfo.dims == 2 && indContig) {
+        SMALL_INDEX(unsigned int, 2, 2, -2);
+      } else if (dstInfo.dims == 3 && srcInfo.dims == 3 && indContig) {
+        SMALL_INDEX(unsigned int, 3, 3, -2);
+      } else {
+        SMALL_INDEX(unsigned int, -1, -1, -1);
+      }
+    } else {
+      if (dstInfo.dims == 1 && srcInfo.dims == 1 && indContig) {
+        LARGE_INDEX(unsigned int, 1, 1, -2);
+      } else if (dstInfo.dims == 2 && srcInfo.dims == 2 && indContig) {
+        LARGE_INDEX(unsigned int, 2, 2, -2);
+      } else if (dstInfo.dims == 3 && srcInfo.dims == 3 && indContig) {
+        LARGE_INDEX(unsigned int, 3, 3, -2);
+      } else {
+        LARGE_INDEX(unsigned int, -1, -1, -1);
+      }
+    }
+  } else {
+    TensorInfo<unsigned long> dstInfo(state, dst);
+    int dstSelectDim = dstInfo.collapseDims(dim);
+    dstInfo.sizes[dstSelectDim] = 1;
+
+    TensorInfo<unsigned long> srcInfo(state, src);
+    int srcSelectDim = srcInfo.collapseDims(dim);
+    srcInfo.sizes[srcSelectDim] = 1;
+
+    TensorInfo<unsigned long> indicesInfo(state, indices);
+    indicesInfo.collapseDims();
+
+    LARGE_INDEX(unsigned long, -1, -1, -1);
+  }
+
+#undef SMALL_INDEX
+#undef LARGE_INDEX
 }
