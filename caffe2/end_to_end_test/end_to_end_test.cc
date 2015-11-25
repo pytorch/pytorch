@@ -56,7 +56,7 @@ TEST(ToyRegressionTest, TestRunPlan) {
       FLAGS_caffe_test_root + kToyRegressionTestPlanPath, &plan_def));
   Workspace workspace;
   workspace.RunPlan(plan_def);
-  ExpectTensorEquivalence<float, CPUContext>(workspace, "W", "W_gt", 0.005);
+  ExpectTensorEquivalence<float, CPUContext>(workspace, "W", "W_gt", 0.01);
 }
 
 TEST(MNISTLinearClassificationTest, TestRunPlan) {
