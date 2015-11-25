@@ -158,18 +158,10 @@ inline Argument* GetMutableArgument(
 }
 
 template <typename T>
-Argument MakeArgument(const string& name, const T& value) {
-  CAFFE_LOG_FATAL << "I dont' know how to add argument for type "
-                  << typeid(T).name();
-}
+Argument MakeArgument(const string& name, const T& value);
 
 template <typename T>
-void AddArgument(const string& name, const T& value, OperatorDef* def) {
-  if (HasArgument(*def, name)) {
-    CAFFE_LOG_FATAL << "An argument of name " << name << " already exists.";
-  }
-  def->add_arg()->CopyFrom(MakeArgument(name, value));
-}
+void AddArgument(const string& name, const T& value, OperatorDef* def);
 
 }  // namespace caffe2
 
