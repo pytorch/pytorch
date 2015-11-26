@@ -194,6 +194,20 @@ void THLapack_(potri)(char uplo, int n, real *a, int lda, int *info)
 #endif
 }
 
+/* Cholesky factorization with complete pivoting */
+void THLapack_(pstrf)(char uplo, int n, real *a, int lda, int *piv, int *rank, real tol, real *work, int *info)
+{
+#ifdef  USE_LAPACK
+#if defined(TH_REAL_IS_DOUBLE)
+  dpstrf_(&uplo, &n, a, &lda, piv, rank, &tol, work, info);
+#else
+  spstrf_(&uplo, &n, a, &lda, piv, rank, &tol, work, info);
+#endif
+#else
+  THError("pstrf: Lapack library not found at compile time\n");
+#endif
+}
+
 /* QR decomposition */
 void THLapack_(geqrf)(int m, int n, real *a, int lda, real *tau, real *work, int lwork, int *info)
 {
