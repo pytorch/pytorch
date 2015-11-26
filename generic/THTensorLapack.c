@@ -593,7 +593,7 @@ void THTensor_(pstrf)(THTensor *ra_, THIntTensor *rpiv_, THTensor *a, const char
   int n = a->size[0];
 
   THTensor *ra__ = THTensor_(cloneColumnMajor)(ra_, a);
-  THTensor_(resize1d)(rpiv_, n);
+  THIntTensor_resize1d(rpiv_, n);
 
   // Allocate working tensor
   THTensor *work = THTensor_(newWithSize1d)(2 * n);
