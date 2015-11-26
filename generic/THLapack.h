@@ -26,6 +26,8 @@ void THLapack_(potrf)(char uplo, int n, real *a, int lda, int *info);
 void THLapack_(potri)(char uplo, int n, real *a, int lda, int *info);
 /* Solve A*X = B with a symmetric positive definite matrix A using the Cholesky factorization */
 void THLapack_(potrs)(char uplo, int n, int nrhs, real *a, int lda, real *b, int ldb, int *info);
+/* Cholesky factorization with complete pivoting. */
+void THLapack_(pstrf)(char uplo, int n, real *a, int lda, int *piv, int *rank, real tol, real *work, int *info);
 
 /* QR decomposition */
 void THLapack_(geqrf)(int m, int n, real *a, int lda, real *tau, real *work, int lwork, int *info);
