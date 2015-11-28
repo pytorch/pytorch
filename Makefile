@@ -1,16 +1,13 @@
 # This makefile does nothing but delegating the actual compilation to build.py.
 
 all:
-	@python brewery.py build
+	@python build.py build
 
 clean:
-	@python brewery.py clean
-
-reallyclean:
-	@python brewery.py reallyclean
+	@python build.py clean
 
 test:
-	@python brewery.py test
+	@python build.py test
 
 lint:
 	@find caffe2 -type f -exec python cpplint.py {} \;
