@@ -1,10 +1,21 @@
-cc_thirdparty_target(
-  name = "cuda",
-  cc_obj_files = [
-      "-lcublas",
-      "-lcurand",
-      "-lcudart",
-      #"-lculibos",
-      #"-lcuda",
-  ],
-)
+if Brewery.Env.Config.LINK_CUDA_STATIC:
+  cc_thirdparty_target(
+    name = "cuda",
+    cc_obj_files = [
+        "-lcublas_static",
+        "-lcurand_static",
+        "-lcudart_static",
+        "-lculibos",
+        "-ldl",
+        "-lrt",
+    ],
+  )
+else:
+  cc_thirdparty_target(
+    name = "cuda",
+    cc_obj_files = [
+        "-lcublas",
+        "-lcurand",
+        "-lcudart",
+    ],
+  )

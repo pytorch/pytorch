@@ -1,8 +1,14 @@
-cc_headers(
+cc_library(
   name = "mpi_common",
   srcs = [
+      "mpi_common.cc",
+  ],
+  hdrs = [
       "mpi_common.h",
   ],
+  deps = [
+    "//caffe2/core:core",
+  ]
 )
 
 cc_library(

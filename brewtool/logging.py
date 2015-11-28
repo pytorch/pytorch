@@ -2,6 +2,13 @@
 """
 import sys
 
+_VERBOSE = True
+
+
+def SetVerboseLogging(value):
+    global _VERBOSE
+    _VERBOSE = value
+
 
 class Colors(object):
     """A simple class that wraps some color codes. Old good ASCII art stuff."""
@@ -24,19 +31,20 @@ def _PrintColor(color, message, *args, **kwargs):
 
 
 def BuildPrint(message, *args, **kwargs):
-    return _PrintColor(None, message, *args, **kwargs)
+    _PrintColor(None, message, *args, **kwargs)
 
 
 def BuildDebug(message, *args, **kwargs):
-    return _PrintColor(Colors.OKBLUE, "DEBUG: " + message, *args, **kwargs)
+    if _VERBOSE:
+        _PrintColor(Colors.OKBLUE, "DEBUG: " + message, *args, **kwargs)
 
 
 def BuildLog(message, *args, **kwargs):
-    return _PrintColor(Colors.OKGREEN, "LOG: " + message, *args, **kwargs)
+    _PrintColor(Colors.OKGREEN, "LOG: " + message, *args, **kwargs)
 
 
 def BuildWarning(message, *args, **kwargs):
-    return _PrintColor(Colors.WARNING, "WARNING: " + message, *args, **kwargs)
+    _PrintColor(Colors.WARNING, "WARNING: " + message, *args, **kwargs)
 
 
 def BuildFatal(message, *args, **kwargs):
@@ -45,6 +53,6 @@ def BuildFatal(message, *args, **kwargs):
     sys.exit(1)
 
 
-def BuildFatalIf(predicate, message, *args, **kwargs):
-    if predicate:
+def BuildFatalIf(condition, message, *args, **kwargs):
+    if condition:
         BuildFatal(message, *args, **kwargs)

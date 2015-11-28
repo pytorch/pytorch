@@ -88,7 +88,7 @@ class Brewery(object):
         # Load the signature file.
         signature_file = join(cls.Env.GENDIR, cls._SIGNATURE_FILENAME)
         if os.path.exists(signature_file):
-            BuildDebug('Loading the signature file.')
+            BuildDebug('Loading signatures.')
             with open(signature_file) as fid:
                 cls._signatures = pickle.load(fid)
 
@@ -96,7 +96,7 @@ class Brewery(object):
     def Finalize(cls):
         """Finalizes the brew process."""
         with open(join(cls.Env.GENDIR, cls._SIGNATURE_FILENAME), 'w') as fid:
-            BuildDebug('Saving the signature file.')
+            BuildDebug('Saving signatures.')
             pickle.dump(cls._signatures, fid)
 
     @classmethod
@@ -176,7 +176,7 @@ class Brewery(object):
                 BuildFatalIf(
                     d not in cls._targets,
                     "Dependency {0} for target {1} does not exist.", d, name)
-        if targets is None:
+        if targets is None or len(targets) == 0:
             targets = cls._targets
         else:
             # Get all targets that we need to build, including all dependencies.
@@ -222,38 +222,16 @@ class Brewery(object):
     @classmethod
     def Build(cls, targets):
         """Build all the targets, using their topological order."""
-        BuildDebug("Start building.")
+        BuildDebug("Actually start building.")
         build_order = cls._GetExecutionChain(targets)
         for t in build_order:
             BuildLog("Building {0}", t)
             cls._success[t], changed, new_signature = (
                 cls._targets[t].SetUpAndBuild(cls._signatures[t]))
-            if cls._success[t]:
+            if cls._success[t] and changed:
+                BuildDebug("Updating signature for {0}: {1}.",
+                           t, new_signature[:6])
                 cls._signatures[t] = new_signature
-        # Finally, print a summary of the build results.
-        BuildDebug("Successfully built {0} targets.",
-                   sum(cls._success.values()))
-        failed = [key for key in cls._success if not cls._success[key]]
-        failed.sort()
-        if len(failed) > 0:
-            BuildWarning("Failed to build {0} targets:", len(failed))
-            for key in failed:
-                BuildWarning(key)
-
-    @classmethod
-    def Run(cls, Config, command):
-        cls.InitBrewery(Config)
-        # Find and parse all the build files in caffe's library.
-        cls.FindAndParseBuildFiles()
-        # TODO: optional targets.
-        BuildDebug("Start Building.")
-        build_order = cls._GetExecutionChain()
-        for t in build_order:
-            BuildLog("Building {0}", t)
-            cls._success[t], changed, new_signature = (
-                cls._targets[t].SetUpAndBuild(cls._signatures[t]))
-        if cls._success[t]:
-            cls._signatures[t] = new_signature
         # Finally, print a summary of the build results.
         succeeded = [key for key in cls._success if cls._success[key]]
         BuildDebug("Successfully built {0} targets.", len(succeeded))
@@ -263,7 +241,26 @@ class Brewery(object):
             BuildWarning("Failed to build:")
             for key in failed:
                 BuildWarning(key)
-        cls.Finalize()
+
+    @classmethod
+    def Run(cls, Config, argv):
+        BuildLog("Brewing Caffe2. Running command:\n{0}", argv)
+        cls.InitBrewery(Config)
+        # Find and parse all the build files in caffe's library.
+        cls.FindAndParseBuildFiles()
+        command = argv[1] if len(argv) > 1 else 'build'
+        if command == 'build':
+            cls.Build(argv[2:])
+            cls.Finalize()
+        elif command == 'clean':
+            os.system('rm -rf ' + cls.Env.GENDIR)
+        elif command == 'test':
+            cls.Env.IS_TEST = True
+            cls.Build(argv[2:])
+            cls.Finalize()
+        else:
+            BuildFatal('Unknown command: {0}', command)
+        BuildLog("Brewing done.")
 
 
 class BuildTarget(object):
@@ -309,7 +306,7 @@ class BuildTarget(object):
         # do not need to do anything.
         if signature != built_signature:
             BuildDebug("Signature changed: {0} -> {1}. Rebuild.",
-                       built_signature, signature)
+                       built_signature[:6], signature[:6])
             # Need to actually build this target.
             return self.Build(), True, signature
         else:
@@ -338,7 +335,7 @@ class BuildTarget(object):
                 [(command, Brewery.Env.ENV) for command in command_group])
             if any([s[0] for s in run_stats]):
                 # Something failed.
-                BuildWarning("Build failed: {0}. Fail message are as follows.",
+                BuildWarning("Build failed: {0}. Fail messages are as follows:",
                              self.name)
                 for stat in run_stats:
                     if stat[0]:

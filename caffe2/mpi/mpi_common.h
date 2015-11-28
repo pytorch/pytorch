@@ -1,7 +1,10 @@
 #ifndef CAFFE2_MPI_MPI_COMMON_H_
 #define CAFFE2_MPI_MPI_COMMON_H_
 
+#include <mutex>
 #include <mpi.h>
+
+#include "caffe2/core/logging.h"
 
 namespace caffe2 {
 
@@ -25,8 +28,12 @@ MPI_DATATYPE_WRAPPER(double, MPI_DOUBLE)
 // Note(Yangqing): as necessary, add more specializations.
 #undef MPI_DATATYPE_WRAPPER
 
+// For all Caffe MPI calls, we will wrap it inside an MPI mutex lock guard.
+std::mutex& MPIMutex();
+
 #define MPI_CHECK(condition)                                                   \
   do {                                                                         \
+    std::lock_guard<std::mutex> guard(::caffe2::MPIMutex());                   \
     int error = (condition);                                                   \
     CAFFE_CHECK_EQ(error, MPI_SUCCESS)                                         \
         << "Caffe2 MPI Error at: " << __FILE__ << ":" << __LINE__ << ": "      \

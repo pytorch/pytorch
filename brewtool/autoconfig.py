@@ -117,6 +117,8 @@ class Env(object):
         self.GENDIR = os.path.abspath(Config.GENDIR)
         self.Config = Config
 
+        SetVerboseLogging(Config.VERBOSE_BUILD)
+
         # Default values, with things to be added incrementally.
         self.DEFINES = [
             "-DGTEST_USE_OWN_TR1_TUPLE=1",  # Needed by gtest
@@ -310,7 +312,6 @@ class Env(object):
             ['-l' + s for s in self.LIBS])
         # After all are done, we print out the Env setting.
         BuildDebug("Finished autoconfiguring the build environment.")
-        pprint.pprint(self.__dict__)
 
     def _format(self, template, src, dst=''):
         if type(src) is list:
