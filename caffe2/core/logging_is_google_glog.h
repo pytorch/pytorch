@@ -2,7 +2,7 @@
 #define CAFFE2_CORE_LOGGING_IS_GOOGLE_GLOG_H_
 
 // Using google glog.
-#include "glog/logging.h"
+#include <glog/logging.h>
 
 #ifdef CAFFE2_THROW_ON_FATAL
 static_assert(false, "If you use CAFFE2_USE_GOOGLE_GLOG, "

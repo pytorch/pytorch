@@ -56,8 +56,7 @@ shell_script(
       "generate_mnist_lenet_nhwc.py",
   ],
   commands = [
-      "export PYTHONPATH=$GENDIR:$PYTHONPATH",
-      "cd $CWD",
+      "cd $CAFFE2_CWD",
       "python generate_mnist_linear_classifier.py",
       "python generate_mnist_two_layer_relu_network.py",
       "python generate_mnist_lenet_group_convolution_nchw.py",

@@ -8,7 +8,6 @@ cc_library(
       "math.h",
       "mkl_alternate.h",
   ],
-  cflags = [ "-DEIGEN_NO_DEBUG", ],
   deps = [
       "//third_party/eigen3:eigen",
       "//caffe2/core:core",

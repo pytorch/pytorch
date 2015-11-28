@@ -23,12 +23,14 @@ namespace caffe2 {
     // In the case of openmpi 1.x, we don't have compile-time flags to figure
     // out if cuda is built; as a result, we will assume that the user has built
     // openmpi with cuda.
+    // CUDA-aware Broadcast is introduced after openmpi 1.7.
     #if CAFFE2_OMPI_VERSION >= 10700
     #define CAFFE2_HAS_CUDA_MPI_BROADCAST 1
     #else  // CAFFE2_OMPI_VERSION >= 10700
     #define CAFFE2_HAS_CUDA_MPI_BROADCAST 0
     #endif  // CAFFE2_OMPI_VERSION >= 10700
 
+    // CUDA-aware Allreduce is introduced after openmpi 1.8.5.
     #if CAFFE2_OMPI_VERSION >= 10805
     #define CAFFE2_HAS_CUDA_MPI_ALLREDUCE 1
     #else  // CAFFE2_OMPI_VERSION >= 10805

@@ -1,0 +1,10 @@
+cc_thirdparty_target(
+  name = "cuda",
+  cc_obj_files = [
+      "-lcublas",
+      "-lcurand",
+      "-lcudart",
+      #"-lculibos",
+      #"-lcuda",
+  ],
+)

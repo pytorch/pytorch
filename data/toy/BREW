@@ -4,8 +4,8 @@ shell_script(
       "generate_toy_regression.py",
   ],
   commands = [
-      "export PYTHONPATH=$GENDIR:$PYTHONPATH",
-      "cd $CWD",
+      "echo $PYTHONPATH",
+      "cd $CAFFE2_CWD",
       "python generate_toy_regression.py",
   ],
   deps = [

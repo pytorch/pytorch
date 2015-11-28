@@ -6,4 +6,7 @@ cuda_library(
   hdrs = [
     "cnmem.h",
   ],
+  deps = [
+      "//third_party/cuda:cuda",
+  ]
 )

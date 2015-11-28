@@ -1,15 +1,13 @@
-
-if Env.USE_SYSTEM_EIGEN:
+if Brewery.Env.Config.USE_SYSTEM_EIGEN:
   # If we are using system eigen, this is just a dummy placeholder that does
-  # nothing.
+  # nothing. Also, Eigen is a header-only library so there is no cc_obj_files.
   cc_thirdparty_target(
     name = "eigen",
-    srcs = ["BREW"],
-    commands=[],
-    # Eigen is a header-only library so there is no cc_obj_files.
     cc_obj_files = [],
   )
 else:
+  raise NotImplementedError("TBD")
+  """
   # We need to copy over the code included in Caffe.
   cc_thirdparty_target(
     name = "eigen",
@@ -22,3 +20,4 @@ else:
     # Eigen is a header-only library so there is no cc_obj_files.
     cc_obj_files = [],
   )
+  """

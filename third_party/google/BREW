@@ -1,16 +1,12 @@
 
-if Env.USE_SYSTEM_PROTOBUF:
+if Brewery.Env.Config.USE_SYSTEM_PROTOBUF:
   # Use system-installed protobuf.
   cc_thirdparty_target(
     name = "protobuf",
-    srcs = ["BREW"],
-    commands=[],
     cc_obj_files=["-lprotobuf"],
   )
   cc_thirdparty_target(
     name = "protoc",
-    srcs = ["BREW"],
-    commands=[],
     cc_obj_files=[],
   )
 else:
@@ -53,7 +49,6 @@ else:
         "protobuf/stubs/time.cc",
         "protobuf/wire_format_lite.cc",
     ],
-    cflags = ["-DHAVE_PTHREAD"],
   )
 
   cc_library(
@@ -114,7 +109,6 @@ else:
         "protobuf/wrappers.pb.cc",
     ],
     deps = [":protobuf_lite"],
-    cflags = ["-DHAVE_PTHREAD"],
   )
 
   cc_library(
@@ -212,12 +206,10 @@ else:
         "protobuf/compiler/zip_writer.cc",
     ],
     deps = [":protobuf"],
-    cflags = ["-DHAVE_PTHREAD"],
   )
 
   cc_binary(
     name = "protoc",
     srcs = ["protobuf/compiler/main.cc"],
     deps = [":protoc_lib"],
-    cflags = ["-DHAVE_PTHREAD"],
   )
