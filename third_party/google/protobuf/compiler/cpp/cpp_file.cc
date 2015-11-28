@@ -846,7 +846,7 @@ void FileGenerator::GenerateLibraryIncludes(io::Printer* printer) {
 
   if (IsAnyMessage(file_)) {
     printer->Print(
-      "#include \"google/protobuf/any.h\"\n");
+      "#include <google/protobuf/any.h>\n");
   }
 }
 

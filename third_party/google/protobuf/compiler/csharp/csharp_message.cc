@@ -119,7 +119,7 @@ void MessageGenerator::Generate(io::Printer* printer) {
 
   // Access the message descriptor via the relevant file descriptor or containing message descriptor.
   if (!descriptor_->containing_type()) {
-    vars["descriptor_accessor"] = GetUmbrellaClassName(descriptor_->file())
+    vars["descriptor_accessor"] = GetReflectionClassName(descriptor_->file())
         + ".Descriptor.MessageTypes[" + SimpleItoa(descriptor_->index()) + "]";
   } else {
     vars["descriptor_accessor"] = GetClassName(descriptor_->containing_type())
@@ -323,6 +323,10 @@ void MessageGenerator::GenerateFrameworkMethods(io::Printer* printer) {
             CreateFieldGeneratorInternal(descriptor_->field(i)));
         generator->WriteEquals(printer);
     }
+    for (int i = 0; i < descriptor_->oneof_decl_count(); i++) {
+        printer->Print("if ($property_name$Case != other.$property_name$Case) return false;\n",
+            "property_name", UnderscoresToCamelCase(descriptor_->oneof_decl(i)->name(), true));
+    }
     printer->Outdent();
     printer->Print(
         "  return true;\n"
@@ -338,6 +342,10 @@ void MessageGenerator::GenerateFrameworkMethods(io::Printer* printer) {
         scoped_ptr<FieldGeneratorBase> generator(
             CreateFieldGeneratorInternal(descriptor_->field(i)));
         generator->WriteHash(printer);
+    }
+    for (int i = 0; i < descriptor_->oneof_decl_count(); i++) {
+        printer->Print("hash ^= (int) $name$Case_;\n",
+            "name", UnderscoresToCamelCase(descriptor_->oneof_decl(i)->name(), false));
     }
     printer->Print("return hash;\n");
     printer->Outdent();

@@ -172,11 +172,11 @@ static void MergeFromFail(int line) {
 
 // ===================================================================
 
-#ifndef _MSC_VER
+#if !defined(_MSC_VER) || _MSC_VER >= 1900
 const int CodeGeneratorRequest::kFileToGenerateFieldNumber;
 const int CodeGeneratorRequest::kParameterFieldNumber;
 const int CodeGeneratorRequest::kProtoFileFieldNumber;
-#endif  // !_MSC_VER
+#endif  // !defined(_MSC_VER) || _MSC_VER >= 1900
 
 CodeGeneratorRequest::CodeGeneratorRequest()
   : ::google::protobuf::Message(), _internal_metadata_(NULL) {
@@ -656,11 +656,11 @@ CodeGeneratorRequest::proto_file() const {
 
 // ===================================================================
 
-#ifndef _MSC_VER
+#if !defined(_MSC_VER) || _MSC_VER >= 1900
 const int CodeGeneratorResponse_File::kNameFieldNumber;
 const int CodeGeneratorResponse_File::kInsertionPointFieldNumber;
 const int CodeGeneratorResponse_File::kContentFieldNumber;
-#endif  // !_MSC_VER
+#endif  // !defined(_MSC_VER) || _MSC_VER >= 1900
 
 CodeGeneratorResponse_File::CodeGeneratorResponse_File()
   : ::google::protobuf::Message(), _internal_metadata_(NULL) {
@@ -1021,10 +1021,10 @@ void CodeGeneratorResponse_File::InternalSwap(CodeGeneratorResponse_File* other)
 
 // -------------------------------------------------------------------
 
-#ifndef _MSC_VER
+#if !defined(_MSC_VER) || _MSC_VER >= 1900
 const int CodeGeneratorResponse::kErrorFieldNumber;
 const int CodeGeneratorResponse::kFileFieldNumber;
-#endif  // !_MSC_VER
+#endif  // !defined(_MSC_VER) || _MSC_VER >= 1900
 
 CodeGeneratorResponse::CodeGeneratorResponse()
   : ::google::protobuf::Message(), _internal_metadata_(NULL) {

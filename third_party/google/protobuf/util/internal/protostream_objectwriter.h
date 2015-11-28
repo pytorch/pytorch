@@ -305,7 +305,7 @@ class LIBPROTOBUF_EXPORT ProtoStreamObjectWriter : public StructuredObjectWriter
 
     // Set of map keys already seen for the type_. Used to validate incoming
     // messages so no map key appears more than once.
-    hash_set<StringPiece> map_keys_;
+    hash_set<string> map_keys_;
 
     GOOGLE_DISALLOW_IMPLICIT_CONSTRUCTORS(ProtoElement);
   };

@@ -88,7 +88,7 @@ class MessageLogger {
     __android_log_print(level, tag_, stream_.str().c_str());
     // Indicate termination if needed.
     if (severity_ == CAFFE_FATAL) {
-      __android_log_print(ANDROID_LOG_FATAL, tag_.c_str(), "terminating.\n");
+      __android_log_print(ANDROID_LOG_FATAL, tag_, "terminating.\n");
     }
 #else  // !ANDROID
     if (severity_ >= FLAGS_caffe2_log_level) {

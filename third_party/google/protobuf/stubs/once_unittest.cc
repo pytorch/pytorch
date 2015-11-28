@@ -43,6 +43,7 @@
 
 namespace google {
 namespace protobuf {
+using internal::NewCallback;
 namespace {
 
 class OnceInitTest : public testing::Test {
@@ -127,10 +128,11 @@ class OnceInitTest : public testing::Test {
   };
 
   TestThread* RunInitOnceInNewThread() {
-    return new TestThread(NewCallback(this, &OnceInitTest::InitOnce));
+    return new TestThread(internal::NewCallback(this, &OnceInitTest::InitOnce));
   }
   TestThread* RunInitRecursiveOnceInNewThread() {
-    return new TestThread(NewCallback(this, &OnceInitTest::InitRecursiveOnce));
+    return new TestThread(
+        internal::NewCallback(this, &OnceInitTest::InitRecursiveOnce));
   }
 
   enum State {

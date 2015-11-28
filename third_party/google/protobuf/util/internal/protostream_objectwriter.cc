@@ -602,7 +602,7 @@ void ProtoStreamObjectWriter::ProtoElement::TakeOneofIndex(int32 index) {
 
 bool ProtoStreamObjectWriter::ProtoElement::InsertMapKeyIfNotPresent(
     StringPiece map_key) {
-  return InsertIfNotPresent(&map_keys_, map_key);
+  return InsertIfNotPresent(&map_keys_, map_key.ToString());
 }
 
 inline void ProtoStreamObjectWriter::InvalidName(StringPiece unknown_name,
@@ -1129,7 +1129,7 @@ Status ProtoStreamObjectWriter::RenderFieldMask(ProtoStreamObjectWriter* ow,
 // conversions as much as possible. Because ToSnakeCase sometimes returns the
 // wrong value.
   google::protobuf::scoped_ptr<ResultCallback1<util::Status, StringPiece> > callback(
-      NewPermanentCallback(&RenderOneFieldPath, ow));
+      google::protobuf::internal::NewPermanentCallback(&RenderOneFieldPath, ow));
   return DecodeCompactFieldMaskPaths(data.str(), callback.get());
 }
 

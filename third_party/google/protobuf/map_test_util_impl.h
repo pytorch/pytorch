@@ -64,7 +64,7 @@ class MapTestUtilImpl {
   template <typename MapMessage>
   static void SetMapFieldsInitialized(MapMessage* message);
 
-  // Modify all the map fields of the messsage (which should already have been
+  // Modify all the map fields of the message (which should already have been
   // initialized with SetMapFields()).
   template <typename EnumType, EnumType enum_value, typename MapMessage>
   static void ModifyMapFields(MapMessage* message);

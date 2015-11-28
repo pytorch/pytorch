@@ -117,43 +117,18 @@ std::string GetFileNamespace(const FileDescriptor* descriptor) {
   return UnderscoresToCamelCase(descriptor->package(), true, true);
 }
 
-std::string GetUmbrellaClassUnqualifiedName(const FileDescriptor* descriptor) {
-  // We manually rename Descriptor to DescriptorProtoFile to avoid collisions with
-  // the static Descriptor property. It would be nice to be able to do this with an
-  // option, but it would be rarely used.
-  if (IsDescriptorProto(descriptor)) {
-    return "DescriptorProtoFile";
-  }
-  // umbrella_classname can no longer be set using message option.
-  std::string proto_file = descriptor->name();
-  int lastslash = proto_file.find_last_of("/");
-  std::string base = proto_file.substr(lastslash + 1);
-  return UnderscoresToPascalCase(StripDotProto(base));
+// Returns the Pascal-cased last part of the proto file. For example,
+// input of "google/protobuf/foo_bar.proto" would result in "FooBar".
+std::string GetFileNameBase(const FileDescriptor* descriptor) {
+    std::string proto_file = descriptor->name();
+    int lastslash = proto_file.find_last_of("/");
+    std::string base = proto_file.substr(lastslash + 1);
+    return UnderscoresToPascalCase(StripDotProto(base));
 }
 
-std::string GetUmbrellaClassNestedNamespace(const FileDescriptor* descriptor) {
-  // TODO(jtattermusch): reintroduce csharp_umbrella_namespace option
-  bool collision = false;
-  std::string umbrella_classname = GetUmbrellaClassUnqualifiedName(descriptor);
-  for(int i = 0; i < descriptor->message_type_count(); i++) {
-    if (descriptor->message_type(i)->name() == umbrella_classname) {
-      collision = true;
-      break;
-    }
-  }
-  for (int i = 0; i < descriptor->service_count(); i++) {
-    if (descriptor->service(i)->name() == umbrella_classname) {
-      collision = true;
-      break;
-    }
-  }
-  for (int i = 0; i < descriptor->enum_type_count(); i++) {
-    if (descriptor->enum_type(i)->name() == umbrella_classname) {
-      collision = true;
-      break;
-    }
-  }
-  return collision ? "Proto" : "";
+std::string GetReflectionClassUnqualifiedName(const FileDescriptor* descriptor) {
+  // TODO: Detect collisions with existing messages, and append an underscore if necessary.
+  return GetFileNameBase(descriptor) + "Reflection";
 }
 
 // TODO(jtattermusch): can we reuse a utility function?
@@ -218,16 +193,12 @@ std::string ToCSharpName(const std::string& name, const FileDescriptor* file) {
   return "global::" + result;
 }
 
-std::string GetUmbrellaClassName(const FileDescriptor* descriptor) {
+std::string GetReflectionClassName(const FileDescriptor* descriptor) {
   std::string result = GetFileNamespace(descriptor);
   if (!result.empty()) {
     result += '.';
   }
-  std::string umbrellaNamespace = GetUmbrellaClassNestedNamespace(descriptor);
-  if (!umbrellaNamespace.empty()) {
-      result += umbrellaNamespace + ".";
-  }
-  result += GetUmbrellaClassUnqualifiedName(descriptor);
+  result += GetReflectionClassUnqualifiedName(descriptor);
   return "global::" + result;
 }
 
@@ -267,6 +238,41 @@ std::string GetPropertyName(const FieldDescriptor* descriptor) {
     property_name += "_";
   }
   return property_name;
+}
+
+std::string GetOutputFile(
+    const google::protobuf::FileDescriptor* descriptor,
+    const std::string file_extension,
+    const bool generate_directories,
+    const std::string base_namespace,
+    string* error) {
+  string relative_filename = GetFileNameBase(descriptor) + file_extension;
+  if (!generate_directories) {
+    return relative_filename;
+  }
+  string ns = GetFileNamespace(descriptor);
+  string namespace_suffix = ns;
+  if (!base_namespace.empty()) {
+    // Check that the base_namespace is either equal to or a leading part of
+    // the file namespace. This isn't just a simple prefix; "Foo.B" shouldn't
+    // be regarded as a prefix of "Foo.Bar". The simplest option is to add "."
+    // to both.
+    string extended_ns = ns + ".";
+    if (extended_ns.find(base_namespace + ".") != 0) {
+      *error = "Namespace " + ns + " is not a prefix namespace of base namespace " + base_namespace;
+      return ""; // This will be ignored, because we've set an error.
+    }
+    namespace_suffix = ns.substr(base_namespace.length());
+    if (namespace_suffix.find(".") == 0) {
+      namespace_suffix = namespace_suffix.substr(1);
+    }
+  }
+
+  string namespace_dir = StringReplace(namespace_suffix, ".", "/", true);
+  if (!namespace_dir.empty()) {
+    namespace_dir += "/";
+  }
+  return namespace_dir + relative_filename;
 }
 
 // TODO: c&p from Java protoc plugin

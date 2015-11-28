@@ -41,6 +41,8 @@
 
 namespace google {
 namespace protobuf {
+using internal::NewCallback;
+using internal::NewPermanentCallback;
 namespace {
 
 // TODO(kenton):  More tests.

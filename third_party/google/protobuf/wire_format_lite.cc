@@ -49,8 +49,10 @@ namespace google {
 namespace protobuf {
 namespace internal {
 
-#ifndef _MSC_VER    // MSVC doesn't like definitions of inline constants, GCC
-                    // requires them.
+
+#if !defined(_MSC_VER) || _MSC_VER >= 1900
+// Old version of MSVC doesn't like definitions of inline constants, GCC
+// requires them.
 const int WireFormatLite::kMessageSetItemStartTag;
 const int WireFormatLite::kMessageSetItemEndTag;
 const int WireFormatLite::kMessageSetTypeIdTag;

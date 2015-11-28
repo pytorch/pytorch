@@ -41,7 +41,7 @@
 #include <google/protobuf/compiler/csharp/csharp_generator.h>
 #include <google/protobuf/compiler/csharp/csharp_helpers.h>
 #include <google/protobuf/compiler/csharp/csharp_names.h>
-#include <google/protobuf/compiler/csharp/csharp_umbrella_class.h>
+#include <google/protobuf/compiler/csharp/csharp_reflection_class.h>
 
 using google::protobuf::internal::scoped_ptr;
 
@@ -50,45 +50,10 @@ namespace protobuf {
 namespace compiler {
 namespace csharp {
 
-std::string GetOutputFile(
-    const google::protobuf::FileDescriptor* file,
-    const std::string file_extension,
-    const bool generate_directories,
-    const std::string base_namespace,
-    string* error) {
-  string relative_filename = GetUmbrellaClassUnqualifiedName(file) + file_extension;
-  if (!generate_directories) {
-    return relative_filename;
-  }
-  string ns = GetFileNamespace(file);
-  string namespace_suffix = ns;
-  if (!base_namespace.empty()) {
-    // Check that the base_namespace is either equal to or a leading part of
-    // the file namespace. This isn't just a simple prefix; "Foo.B" shouldn't
-    // be regarded as a prefix of "Foo.Bar". The simplest option is to add "."
-    // to both.
-    string extended_ns = ns + ".";
-    if (extended_ns.find(base_namespace + ".") != 0) {
-      *error = "Namespace " + ns + " is not a prefix namespace of base namespace " + base_namespace;
-      return ""; // This will be ignored, because we've set an error.
-    }
-    namespace_suffix = ns.substr(base_namespace.length());
-    if (namespace_suffix.find(".") == 0) {
-      namespace_suffix = namespace_suffix.substr(1);
-    }
-  }
-
-  string namespace_dir = StringReplace(namespace_suffix, ".", "/", true);
-  if (!namespace_dir.empty()) {
-    namespace_dir += "/";
-  }
-  return namespace_dir + relative_filename;
-}
-
 void GenerateFile(const google::protobuf::FileDescriptor* file,
                   io::Printer* printer) {
-  UmbrellaClassGenerator umbrellaGenerator(file);
-  umbrellaGenerator.Generate(printer);
+  ReflectionClassGenerator reflectionClassGenerator(file);
+  reflectionClassGenerator.Generate(printer);
 }
 
 bool Generator::Generate(
@@ -123,7 +88,7 @@ bool Generator::Generate(
 
   string filename_error = "";
   std::string filename = GetOutputFile(file, file_extension, generate_directories, base_namespace, &filename_error);
-  if (!filename_error.empty()) {
+  if (filename.empty()) {
     *error = filename_error;
     return false;
   }

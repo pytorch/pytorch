@@ -155,7 +155,7 @@ class LIBPROTOBUF_EXPORT MapKey {
                "MapKey::GetUInt32Value");
     return val_.uint32_value_;
   }
-  int32 GetBoolValue() const {
+  bool GetBoolValue() const {
     TYPE_CHECK(FieldDescriptor::CPPTYPE_BOOL,
                "MapKey::GetBoolValue");
     return val_.bool_value_;
@@ -190,6 +190,8 @@ class LIBPROTOBUF_EXPORT MapKey {
         GOOGLE_LOG(FATAL) << "Can't get here.";
         return false;
     }
+    GOOGLE_LOG(FATAL) << "Can't get here.";
+    return false;
   }
 
   void CopyFrom(const MapKey& other) {
@@ -273,7 +275,7 @@ class LIBPROTOBUF_EXPORT MapValueRef {
                "MapValueRef::SetInt32Value");
     *reinterpret_cast<int32*>(data_) = value;
   }
-  void SetUInt32Value(uint64 value) {
+  void SetUInt32Value(uint32 value) {
     TYPE_CHECK(FieldDescriptor::CPPTYPE_UINT32,
                "MapValueRef::SetUInt32Value");
     *reinterpret_cast<uint32*>(data_) = value;
@@ -544,7 +546,9 @@ class Map {
     }
 
 #if __cplusplus >= 201103L && !defined(GOOGLE_PROTOBUF_OS_APPLE) && \
-    !defined(GOOGLE_PROTOBUF_OS_NACL) && !defined(GOOGLE_PROTOBUF_OS_ANDROID)
+    !defined(GOOGLE_PROTOBUF_OS_NACL) &&                            \
+    !defined(GOOGLE_PROTOBUF_OS_ANDROID) &&                         \
+    !defined(GOOGLE_PROTOBUF_OS_EMSCRIPTEN)
     template<class NodeType, class... Args>
     void construct(NodeType* p, Args&&... args) {
       new (static_cast<void*>(p)) NodeType(std::forward<Args>(args)...);
@@ -852,6 +856,8 @@ struct hash<google::protobuf::MapKey> {
         GOOGLE_LOG(FATAL) << "Can't get here.";
         return 0;
     }
+    GOOGLE_LOG(FATAL) << "Can't get here.";
+    return 0;
   }
   bool
   operator()(const google::protobuf::MapKey& map_key1,
@@ -875,6 +881,8 @@ struct hash<google::protobuf::MapKey> {
         GOOGLE_LOG(FATAL) << "Can't get here.";
         return true;
     }
+    GOOGLE_LOG(FATAL) << "Can't get here.";
+    return true;
   }
 };
 GOOGLE_PROTOBUF_HASH_NAMESPACE_DECLARATION_END

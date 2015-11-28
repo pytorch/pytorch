@@ -73,7 +73,7 @@ class Config(object):
         'arch=compute_50,code=sm_50',
     ]
     # additional CUDA cflags to pass to nvcc.
-    CUDA_CFLAGS = ["-m32"],
+    CUDA_CFLAGS = []
 
     # You can choose to add the path of the cuda libraries to the rpath, so that
     # during runtime you do not need to hard-code the library paths. You can,

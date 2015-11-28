@@ -1356,7 +1356,7 @@ void ImmutableMessageGenerator::GenerateAnyMethods(io::Printer* printer) {
     "    throws com.google.protobuf.InvalidProtocolBufferException {\n"
     "  if (!is(clazz)) {\n"
     "    throw new com.google.protobuf.InvalidProtocolBufferException(\n"
-    "        \"Type of the Any messsage does not match the given class.\");\n"
+    "        \"Type of the Any message does not match the given class.\");\n"
     "  }\n"
     "  if (cachedUnpackValue != null) {\n"
     "    return (T) cachedUnpackValue;\n"

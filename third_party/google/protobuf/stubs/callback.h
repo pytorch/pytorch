@@ -325,8 +325,6 @@ class MethodResultCallback_5_2 : public ResultCallback2<R, A1, A2> {
   typename remove_reference<P5>::type p5_;
 };
 
-}  // namespace internal
-
 // See Closure.
 inline Closure* NewCallback(void (*function)()) {
   return new internal::FunctionClosure0(function, true);
@@ -451,6 +449,8 @@ inline ResultCallback2<R, A1, A2>* NewPermanentCallback(
                                                 A2>(object, function, false, p1,
                                                     p2, p3, p4, p5);
 }
+
+}  // namespace internal
 
 // A function which does nothing.  Useful for creating no-op callbacks, e.g.:
 //   Closure* nothing = NewCallback(&DoNothing);

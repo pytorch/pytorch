@@ -155,7 +155,7 @@ void ExtensionGenerator::GenerateDefinition(io::Printer* printer) {
   // Likewise, class members need to declare the field constant variable.
   if (descriptor_->extension_scope() != NULL) {
     printer->Print(vars,
-      "#ifndef _MSC_VER\n"
+      "#if !defined(_MSC_VER) || _MSC_VER >= 1900\n"
       "const int $scope$$constant_name$;\n"
       "#endif\n");
   }

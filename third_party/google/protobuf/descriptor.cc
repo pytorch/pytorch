@@ -156,7 +156,7 @@ const char* FileDescriptor::SyntaxName(FileDescriptor::Syntax syntax) {
 
 static const char * const kNonLinkedWeakMessageReplacementName = "google.protobuf.Empty";
 
-#ifndef _MSC_VER  // MSVC doesn't need these and won't even accept them.
+#if !defined(_MSC_VER) || _MSC_VER >= 1900
 const int FieldDescriptor::kMaxNumber;
 const int FieldDescriptor::kFirstReservedNumber;
 const int FieldDescriptor::kLastReservedNumber;

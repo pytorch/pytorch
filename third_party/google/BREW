@@ -24,7 +24,6 @@ else:
   cc_library(
     name = "protobuf_lite",
     srcs = [
-        # AUTOGEN(protobuf_lite_srcs)
         "protobuf/arena.cc",
         "protobuf/arenastring.cc",
         "protobuf/extension_set.cc",
@@ -57,7 +56,6 @@ else:
   cc_library(
     name = "protobuf",
     srcs = [
-        # AUTOGEN(protobuf_srcs)
         "protobuf/any.cc",
         "protobuf/any.pb.cc",
         "protobuf/api.pb.cc",
@@ -117,7 +115,6 @@ else:
   cc_library(
     name = "protoc_lib",
     srcs = [
-        # AUTOGEN(protoc_lib_srcs)
         "protobuf/compiler/code_generator.cc",
         "protobuf/compiler/command_line_interface.cc",
         "protobuf/compiler/cpp/cpp_enum.cc",
@@ -143,11 +140,11 @@ else:
         "protobuf/compiler/csharp/csharp_message.cc",
         "protobuf/compiler/csharp/csharp_message_field.cc",
         "protobuf/compiler/csharp/csharp_primitive_field.cc",
+        "protobuf/compiler/csharp/csharp_reflection_class.cc",
         "protobuf/compiler/csharp/csharp_repeated_enum_field.cc",
         "protobuf/compiler/csharp/csharp_repeated_message_field.cc",
         "protobuf/compiler/csharp/csharp_repeated_primitive_field.cc",
         "protobuf/compiler/csharp/csharp_source_generator_base.cc",
-        "protobuf/compiler/csharp/csharp_umbrella_class.cc",
         "protobuf/compiler/csharp/csharp_wrapper_field.cc",
         "protobuf/compiler/java/java_context.cc",
         "protobuf/compiler/java/java_doc_comment.cc",

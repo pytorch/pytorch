@@ -1807,7 +1807,7 @@ GenerateClassMethods(io::Printer* printer) {
   }
 
   // Generate field number constants.
-  printer->Print("#ifndef _MSC_VER\n");
+  printer->Print("#if !defined(_MSC_VER) || _MSC_VER >= 1900\n");
   for (int i = 0; i < descriptor_->field_count(); i++) {
     const FieldDescriptor *field = descriptor_->field(i);
     printer->Print(
@@ -1816,7 +1816,7 @@ GenerateClassMethods(io::Printer* printer) {
       "constant_name", FieldConstantName(field));
   }
   printer->Print(
-    "#endif  // !_MSC_VER\n"
+    "#endif  // !defined(_MSC_VER) || _MSC_VER >= 1900\n"
     "\n");
 
   // Define extension identifiers.

@@ -65,7 +65,7 @@ class TestUtil {
   static void SetOneof2(unittest::TestOneof2* message);
 
   // Use the repeated versions of the set_*() accessors to modify all the
-  // repeated fields of the messsage (which should already have been
+  // repeated fields of the message (which should already have been
   // initialized with Set*Fields()).  Set*Fields() itself only tests
   // the add_*() accessors.
   static void ModifyRepeatedFields(unittest::TestAllTypes* message);

@@ -47,7 +47,7 @@ class MapLiteTestUtil {
   // Set every field in the message to a default value.
   static void SetMapFieldsInitialized(protobuf_unittest::TestMapLite* message);
 
-  // Modify all the map fields of the messsage (which should already have been
+  // Modify all the map fields of the message (which should already have been
   // initialized with SetMapFields()).
   static void ModifyMapFields(protobuf_unittest::TestMapLite* message);
 

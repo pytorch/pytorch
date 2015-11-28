@@ -56,10 +56,26 @@ void WriteDocCommentBodyImpl(io::Printer* printer, SourceLocation location) {
     // node of a summary element, not part of an attribute.
     comments = StringReplace(comments, "&", "&amp;", true);
     comments = StringReplace(comments, "<", "&lt;", true);
-    vector<string> lines = Split(comments, "\n");
+    vector<string> lines = Split(comments, "\n", false /* skip_empty */);
+    // TODO: We really should work out which part to put in the summary and which to put in the remarks...
+    // but that needs to be part of a bigger effort to understand the markdown better anyway.
     printer->Print("/// <summary>\n");
+    bool last_was_empty = false;
+    // We squash multiple blank lines down to one, and remove any trailing blank lines. We need
+    // to preserve the blank lines themselves, as this is relevant in the markdown.
+    // Note that we can't remove leading or trailing whitespace as *that's* relevant in markdown too.
+    // (We don't skip "just whitespace" lines, either.)
     for (std::vector<string>::iterator it = lines.begin(); it != lines.end(); ++it) {
-        printer->Print("/// $line$\n", "line", *it);
+        string line = *it;
+        if (line.empty()) {
+            last_was_empty = true;
+        } else {
+            if (last_was_empty) {
+                printer->Print("///\n");
+            }
+            last_was_empty = false;
+            printer->Print("/// $line$\n", "line", *it);
+        }
     }
     printer->Print("/// </summary>\n");
 }

@@ -937,41 +937,17 @@ bool ValidateObjCClassPrefix(const FileDescriptor* file, string* out_error) {
   // NOTE: src/google/protobuf/compiler/plugin.cc makes use of cerr for some
   // error cases, so it seems to be ok to use as a back door for warnings.
 
-  // First Check: Warning - if there is a prefix, ensure it is is a reasonable
-  // value according to Apple's rules.
-  if (prefix.length()) {
-    if (!ascii_isupper(prefix[0])) {
-      cerr << endl
-           << "protoc:0: warning: Invalid 'option objc_class_prefix = \""
-           << prefix << "\";' in '" << file->name() << "';"
-           << " it should start with a capital letter." << endl;
-      cerr.flush();
-    }
-    if (prefix.length() < 3) {
-      cerr << endl
-           << "protoc:0: warning: Invalid 'option objc_class_prefix = \""
-           << prefix << "\";' in '" << file->name() << "';"
-           << " Apple recommends they should be at least 3 characters long."
-           << endl;
-      cerr.flush();
-    }
-  }
-
   // Load any expected package prefixes to validate against those.
   map<string, string> expected_package_prefixes;
   string expect_file_path;
   if (!LoadExpectedPackagePrefixes(&expected_package_prefixes,
                                    &expect_file_path, out_error)) {
-    return false;
+    // Any error, clear the entries that were read.
+    expected_package_prefixes.clear();
   }
 
-  // If there are no expected prefixes, out of here.
-  if (expected_package_prefixes.size() == 0) {
-    return true;
-  }
-
-  // Second Check: Error - See if there was an expected prefix for the package
-  // and report if it doesn't match.
+  // Check: Error - See if there was an expected prefix for the package and
+  // report if it doesn't match (wrong or missing).
   map<string, string>::iterator package_match =
       expected_package_prefixes.find(package);
   if (package_match != expected_package_prefixes.end()) {
@@ -991,32 +967,57 @@ bool ValidateObjCClassPrefix(const FileDescriptor* file, string* out_error) {
     }
   }
 
-  // Third Check: Error - If there was a prefix make sure it wasn't expected
-  // for a different package instead (overlap is allowed, but it has to be
-  // listed as an expected overlap).
-  if (prefix.length()) {
-    for (map<string, string>::iterator i = expected_package_prefixes.begin();
-         i != expected_package_prefixes.end(); ++i) {
-      if (i->second == prefix) {
-        *out_error =
-            "protoc:0: error: Found 'option objc_class_prefix = \"" + prefix +
-            "\";' in '" + file->name() +
-            "'; that prefix is already used for 'package " + i->first +
-            ";'. It can only be reused by listing it in the expected file (" +
-            expect_file_path + ").";
-        return false;  // Only report first usage of the prefix.
-      }
+  // If there was no prefix option, we're done at this point.
+  if (prefix.length() == 0) {
+    // No prefix, nothing left to check.
+    return true;
+  }
+
+  // Check: Error - Make sure the prefix wasn't expected for a different
+  // package (overlap is allowed, but it has to be listed as an expected
+  // overlap).
+  for (map<string, string>::iterator i = expected_package_prefixes.begin();
+       i != expected_package_prefixes.end(); ++i) {
+    if (i->second == prefix) {
+      *out_error =
+          "protoc:0: error: Found 'option objc_class_prefix = \"" + prefix +
+          "\";' in '" + file->name() +
+          "'; that prefix is already used for 'package " + i->first +
+          ";'. It can only be reused by listing it in the expected file (" +
+          expect_file_path + ").";
+      return false;  // Only report first usage of the prefix.
     }
   }
 
-  // Fourth Check: Warning - If there was a prefix, and it wasn't expected,
-  // issue a warning suggesting it gets added to the file.
-  if (prefix.length()) {
+  // Check: Warning - Make sure the prefix is is a reasonable value according
+  // to Apple's rules (the checks above implicitly whitelist anything that
+  // doesn't meet these rules).
+  if (!ascii_isupper(prefix[0])) {
     cerr << endl
-         << "protoc:0: warning: Found 'option objc_class_prefix = \"" << prefix
-         << "\";' in '" << file->name() << "';"
-         << " should you add it to the expected prefixes file ("
-         << expect_file_path << ")?" << endl;
+         << "protoc:0: warning: Invalid 'option objc_class_prefix = \""
+         << prefix << "\";' in '" << file->name() << "';"
+         << " it should start with a capital letter." << endl;
+    cerr.flush();
+  }
+  if (prefix.length() < 3) {
+    // Apple reserves 2 character prefixes for themselves. They do use some
+    // 3 character prefixes, but they haven't updated the rules/docs.
+    cerr << endl
+         << "protoc:0: warning: Invalid 'option objc_class_prefix = \""
+         << prefix << "\";' in '" << file->name() << "';"
+         << " Apple recommends they should be at least 3 characters long."
+         << endl;
+    cerr.flush();
+  }
+
+  // Check: Warning - If the given package/prefix pair wasn't expected, issue a
+  // warning issue a warning suggesting it gets added to the file.
+  if (!expected_package_prefixes.empty()) {
+    cerr << endl
+         << "protoc:0: warning: Found unexpected 'option objc_class_prefix = \""
+         << prefix << "\";' in '" << file->name() << "';"
+         << " consider adding it to the expected prefixes file ("
+         << expect_file_path << ")." << endl;
     cerr.flush();
   }
 

@@ -28,35 +28,42 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-// Definitions of protos for testing cross-version compatibility.  The
-// UpRevision message acts as if it were a newer version of the DownRevision
-// message.  That is, UpRevision shares all the same fields as DownRevision,
-// but UpRevision can add fields and add enum values.
-syntax = "proto2";
+#ifndef GOOGLE_PROTOBUF_COMPILER_CSHARP_REFLECTION_CLASS_H__
+#define GOOGLE_PROTOBUF_COMPILER_CSHARP_REFLECTION_CLASS_H__
 
-package google.protobuf.util;
+#include <string>
 
-option csharp_namespace = "Google.ProtocolBuffers.TestProtos";
+#include <google/protobuf/compiler/code_generator.h>
+#include <google/protobuf/compiler/csharp/csharp_source_generator_base.h>
 
-message DownRevision {
-  enum Enum {
-    DEFAULT_VALUE = 2;
-    NONDEFAULT_VALUE = 3;
-  }
+namespace google {
+namespace protobuf {
+namespace compiler {
+namespace csharp {
 
-  optional Enum value = 1 [default = DEFAULT_VALUE];
-  repeated Enum values = 2;
-}
+class ReflectionClassGenerator : public SourceGeneratorBase {
+ public:
+  ReflectionClassGenerator(const FileDescriptor* file);
+  ~ReflectionClassGenerator();
 
-message UpRevision {
-  enum Enum {
-    DEFAULT_VALUE = 2;
-    NONDEFAULT_VALUE = 3;
-    NEW_VALUE = 4;
-    NEW_VALUE_2 = 5;
-    NEW_VALUE_3 = 6;
-  }
+  void Generate(io::Printer* printer);
 
-  optional Enum value = 1 [default = DEFAULT_VALUE];
-  repeated Enum values = 2;
-}
+ private:
+  const FileDescriptor* file_;
+
+  std::string namespace_;
+  std::string reflectionClassname_;
+
+  void WriteIntroduction(io::Printer* printer);
+  void WriteDescriptor(io::Printer* printer);
+  void WriteGeneratedCodeInfo(const Descriptor* descriptor, io::Printer* printer, bool last);
+
+  GOOGLE_DISALLOW_EVIL_CONSTRUCTORS(ReflectionClassGenerator);
+};
+
+}  // namespace csharp
+}  // namespace compiler
+}  // namespace protobuf
+}  // namespace google
+
+#endif  // GOOGLE_PROTOBUF_COMPILER_CSHARP_REFLECTION_CLASS_H__

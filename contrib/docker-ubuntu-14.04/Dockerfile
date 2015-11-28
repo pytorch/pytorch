@@ -36,7 +36,6 @@ RUN nvcc --version
 RUN apt-get update && apt-get install -q -y \
   git \
   libeigen3-dev \
-  libgflags-dev \
   libgoogle-glog-dev \
   libleveldb-dev \
   liblmdb-dev \
@@ -53,7 +52,7 @@ RUN cd /tmp && \
   wget http://www.open-mpi.org/software/ompi/v1.10/downloads/openmpi-1.10.0.tar.gz && \
   tar xzvf openmpi-1.10.0.tar.gz && \
   cd /tmp/openmpi-1.10.0 && \
-  ./configure --with-cuda --with-threads --enable-mpi-thread-multiple && \
+  ./configure --with-cuda --with-threads && \
   make && make install && \
   cd / && \
   rm -rf /tmp/openmpi-1.10.0 && \

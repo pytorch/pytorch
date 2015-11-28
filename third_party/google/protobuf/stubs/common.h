@@ -146,7 +146,7 @@ namespace internal {
 LIBPROTOBUF_EXPORT bool IsStructurallyValidUTF8(const char* buf, int len);
 
 inline bool IsStructurallyValidUTF8(const std::string& str) {
-  return IsStructurallyValidUTF8(str.data(), str.length());
+  return IsStructurallyValidUTF8(str.data(), static_cast<int>(str.length()));
 }
 
 // Returns initial number of bytes of structually valid UTF-8.

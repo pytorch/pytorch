@@ -806,7 +806,7 @@ Status ProtoStreamObjectSource::RenderField(
           ow->RenderString(field_name, enum_value->name());
         }
       } else {
-        GOOGLE_LOG(INFO) << "Unkown enum skipped: " << field->type_url();
+        GOOGLE_LOG(INFO) << "Unknown enum skipped: " << field->type_url();
       }
       break;
     }
