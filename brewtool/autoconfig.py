@@ -171,6 +171,7 @@ class Env(object):
         if not Config.USE_SYSTEM_PROTOBUF:
             # If we are building protobuf, disable RTTI.
             self.DEFINES.append("-DGOOGLE_PROTOBUF_NO_RTTI")
+            self.DEFINES.append("-DHAVE_PTHREAD")
         if Config.USE_GLOG:
             # If we are building with GLOG, enable the glog macro.
             self.DEFINES.append("-DCAFFE2_USE_GOOGLE_GLOG")

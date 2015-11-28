@@ -49,6 +49,9 @@ else:
         "protobuf/stubs/time.cc",
         "protobuf/wire_format_lite.cc",
     ],
+    deps = [
+        ":protobuf_headers",
+    ]
   )
 
   cc_library(
