@@ -1,10 +1,14 @@
 """Configuration for the Caffe2 installation.
 """
 
+
 class Config(object):
     ############################################################################
     # Common settings that are necessary to build Caffe2's core functionality.
     ############################################################################
+    # If you want to show a lot of the build details, set VERBOSE_BUILD to True.
+    # This will show the detailed commands being run during the build process.
+    VERBOSE_BUILD = True
     # Specify your compiler.
     CC = "c++"
     # Specify your archiver.
@@ -69,6 +73,8 @@ class Config(object):
     # during runtime you do not need to hard-code the library paths. You can,
     # of course, set this to False.
     CUDA_ADD_TO_RPATH = True
+    # Specify if you want to link cuda as static libraries.
+    LINK_CUDA_STATIC = True
 
     ############################################################################
     # (optional) MPI setting.

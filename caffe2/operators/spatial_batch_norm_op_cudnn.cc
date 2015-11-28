@@ -2,10 +2,14 @@
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/spatial_batch_norm_op.h"
 
-namespace caffe2 {
+// Note: Instead of directly failing, we will choose to not build this operator
+// if cudnn version is not high enough.
+//static_assert(CUDNN_VERSION >= 4000,
+//              "CudnnSpatialBN requires cudnn version 4.0 or above.");
 
-static_assert(CUDNN_VERSION >= 4000,
-              "CudnnSpatialBN requires cudnn version 4.0 or above.");
+#if CUDNN_VERSION >= 4000
+
+namespace caffe2 {
 
 constexpr cudnnBatchNormMode_t kSpatialBNMode = CUDNN_BATCHNORM_SPATIAL;
 
@@ -236,3 +240,27 @@ REGISTER_CUDNN_OPERATOR(SpatialBN, CudnnSpatialBNOp<float>);
 REGISTER_CUDNN_OPERATOR(SpatialBNGradient, CudnnSpatialBNGradientOp<float>);
 }  // namespace
 }  // namespace caffe2
+
+#else // CUDNN_VERSION >= 4000
+
+namespace caffe2 {
+class CudnnVersionTooLowForSpatialBN final : public OperatorBase {
+ public:
+  explicit CudnnVersionTooLowForSpatialBN(
+      const OperatorDef& operator_def, Workspace* ws)
+      : OperatorBase(operator_def, ws) {
+    CAFFE_LOG_FATAL << "Your cudnn version is under V4, so cudnn Spatial "
+                       "Batch normalization is not available.";
+  }
+};
+namespace {
+REGISTER_CUDA_OPERATOR(SpatialBN, CudnnVersionTooLowForSpatialBN);
+REGISTER_CUDA_OPERATOR(SpatialBNGradient, CudnnVersionTooLowForSpatialBN);
+
+REGISTER_CUDNN_OPERATOR(SpatialBN, CudnnVersionTooLowForSpatialBN);
+REGISTER_CUDNN_OPERATOR(SpatialBNGradient, CudnnVersionTooLowForSpatialBN);
+}
+}  // namespace caffe2
+
+
+#endif // CUDNN_VERSION >= 4000
