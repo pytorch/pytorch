@@ -2,7 +2,9 @@
 """
 
 
-STANDALONE_TCHAIN_ROOT = '/home/jiayq/NVPACK/android-ndk-r10e/toolchains/arm-linux-androideabi-4.6/gen_standalone/linux-x86_64/'
+STANDALONE_TCHAIN_ROOT = (
+    '/home/jiayq/NVPACK/android-ndk-r10e/toolchains/'
+    'arm-linux-androideabi-4.9/gen_standalone/linux-x86_64/')
 
 
 class Config(object):
@@ -16,9 +18,6 @@ class Config(object):
 
     USE_SYSTEM_PROTOBUF = False
     PROTOC_BINARY = 'gen/third_party/google/protoc'
-    # Note for the line above: if you are doing things like cross-compilation,
-    # the built protoc compiler will not work on the host, in which case you
-    # will need to provide a protoc binary that can run on the host environment.
 
     # Eigen: Eigen is a third party library that Caffe2 uses for some numerical
     # operations. If you have eigen installed in your system, you can simply use
@@ -33,9 +32,7 @@ class Config(object):
     USE_GLOG = False
 
     # Manually specified defines.
-    DEFINES = [
-        "-DANDROID",
-    ]
+    DEFINES = []
 
     # Manually specified include paths. These include paths are searched before
     # any auto-generated include paths.
@@ -64,7 +61,7 @@ class Config(object):
         'arch=compute_32,code=sm_32',
     ]
     # additional CUDA cflags to pass to nvcc.
-    CUDA_CFLAGS = ["-m32"],
+    CUDA_CFLAGS = ["-m32"]
     # You can choose to add the path of the cuda libraries to the rpath, so that
     # during runtime you do not need to hard-code the library paths. You can,
     # of course, set this to False.

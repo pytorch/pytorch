@@ -31,7 +31,7 @@ class Env(object):
   GENDIR = 'gen-android'
 
   USE_SYSTEM_PROTOBUF = False
-  PROTOC_BINARY = "protoc"
+  PROTOC = "protoc"
 
   USE_SYSTEM_EIGEN = False
 
