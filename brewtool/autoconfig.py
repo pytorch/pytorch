@@ -114,6 +114,11 @@ def GetRpathTemplate(cc, env):
 class Env(object):
     def __init__(self, Config):
         """Figures out the invoking details for a bunch of stuff."""
+        if not Config.GENDIR.startswith('gen'):
+            BuildFatal('The generated directory does not start with gen: '
+                       'Currently the build system hard-codes this prefix. '
+                       'Please consider renaming the GENDIR to something like '
+                       '{0}', 'gen-' + Config.GENDIR)
         self.GENDIR = os.path.abspath(Config.GENDIR)
         self.Config = Config
 
@@ -124,7 +129,7 @@ class Env(object):
             "-DGTEST_USE_OWN_TR1_TUPLE=1",  # Needed by gtest
             "-DEIGEN_NO_DEBUG",  # So that Eigen is in optimized mode.
             "-DPIC",  # Position independent code
-        ]
+        ] + Config.DEFINES
         self.CFLAGS = [
             '-fPIC',
             '-ffast-math',
@@ -160,6 +165,8 @@ class Env(object):
             os.path.join(self.GENDIR, "third_party"), self.GENDIR,
             self.ENV['PYTHONPATH'])
         self.ENV['CAFFE2_GENDIR'] = os.path.abspath(self.GENDIR)
+        self.ENV['CAFFE2_SRCDIR'] = os.path.abspath('.')
+
 
         # Set C++11 flag. The reason we do not simply add it to the CFLAGS list
         # above is that NVCC cannot pass -std=c++11 via Xcompiler, otherwise the
@@ -297,6 +304,7 @@ class Env(object):
              '--gtest_filter=-*.LARGE_*'])
         self.TEMPLATE_NVCC = ' '.join(
             [NVCC, '-ccbin', Config.CC, '-std=c++11', '-O2'] +
+            Config.CUDA_CFLAGS +
             ['-Xcompiler', '"' + ' '.join(self.CFLAGS) + '"'] +
             ['-I' + s for s in self.INCLUDES] +
             self.DEFINES + ['-c', '{src}', '-o', '{dst}'])

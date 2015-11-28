@@ -104,7 +104,7 @@ class Brewery(object):
         """Find and parse all the BREW files in the subfolders."""
         build_files = [
             join(d[2:], f) for (d, _, files) in os.walk('.')
-            if not d.startswith(cls.Env.GENDIR)
+            if not d.startswith('./gen')
             for f in files if f.endswith('BREW')]
         for build_file in build_files:
             # Set the current working directory, and parse the build file.

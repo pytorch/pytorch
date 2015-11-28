@@ -6,18 +6,14 @@ if Brewery.Env.Config.USE_SYSTEM_EIGEN:
     cc_obj_files = [],
   )
 else:
-  raise NotImplementedError("TBD")
-  """
   # We need to copy over the code included in Caffe.
-  cc_thirdparty_target(
+  shell_script(
     name = "eigen",
     srcs = ["BREW"],
     commands=[
-      "mkdir -p $DSTDIR/include/eigen3",
-      "cp -r Eigen $DSTDIR/include/eigen3/",
-      "cp -r unsupported $DSTDIR/include/eigen3/",
+      "DST=$CAFFE2_GENDIR/third_party/include/eigen3",
+      "mkdir -p $DST",
+      "cp -r $CAFFE2_SRCDIR/$CAFFE2_CWD/Eigen $DST/",
+      "cp -r $CAFFE2_SRCDIR/$CAFFE2_CWD/unsupported $DST/",
     ],
-    # Eigen is a header-only library so there is no cc_obj_files.
-    cc_obj_files = [],
   )
-  """
