@@ -1,7 +1,5 @@
 cc_thirdparty_target(
   name = "snappy",
-  srcs = ["BREW"],
-  commands=[],
   cc_obj_files = [
     "-lsnappy"
   ],

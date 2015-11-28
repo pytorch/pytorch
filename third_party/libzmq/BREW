@@ -1,6 +1,4 @@
 cc_thirdparty_target(
   name = "libzmq",
-  srcs = ["BREW"],
-  commands=[],
   cc_obj_files = [ "-lzmq" ],
 )

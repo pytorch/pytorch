@@ -41,10 +41,8 @@ cc_library(
     "//caffe2/proto:caffe2_proto",
     "//caffe2/utils:proto_utils",
     "//caffe2/utils:simple_queue",
-  ] + (
-      ["//third_party/glog:glog"]
-      if '-DCAFFE2_USE_GOOGLE_GLOG' in Env.CFLAGS else []
-  ),
+    "//third_party/glog:glog",
+  ],
   whole_archive = True,
 )
 
@@ -63,6 +61,7 @@ cc_library(
   deps = [
     ":core",
     "//third_party/cnmem:cnmem",
+    "//third_party/cuda:cuda",
   ],
   whole_archive = True,
 )

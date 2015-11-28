@@ -1,7 +1,5 @@
 cc_thirdparty_target(
   name = "leveldb",
-  srcs = ["BREW"],
-  commands=[],
   deps = ["//third_party/snappy:snappy"],
   cc_obj_files = [ "-lleveldb" ],
 )

@@ -1,26 +1,23 @@
-cc_library(
+python_cc_extension(
   name = "caffe2_python",
   srcs = ["caffe2_python.cc"],
   deps = [
       "//caffe2:all_available_ops",
       "//caffe2/core:core",
       "//caffe2/db:db",
-      "//third_party/python_libs:python_libs",
   ],
-  shared = True,
 )
 
-cc_library(
+python_cc_extension(
   name = "caffe2_python_nogpu",
   srcs = ["caffe2_python.cc"],
   deps = [
       "//caffe2:all_available_ops",
       "//caffe2/core:core",
       "//caffe2/db:db",
-      "//third_party/python_libs:python_libs",
   ],
-  cflags=["-DPYCAFFE2_CPU_ONLY"],
-  shared = True,
+  # TODO: fix.
+  #cflags=["-DPYCAFFE2_CPU_ONLY"],
 )
 
 py_library(

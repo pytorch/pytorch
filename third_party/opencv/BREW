@@ -1,20 +1,14 @@
 cc_thirdparty_target(
   name="opencv_core",
-  srcs=["BREW"],
-  commands=[],
   cc_obj_files=["-lopencv_core"],
 )
 
 cc_thirdparty_target(
   name="opencv_highgui",
-  srcs=["BREW"],
-  commands=[],
   cc_obj_files=["-lopencv_highgui"],
 )
 
 cc_thirdparty_target(
   name="opencv_imgproc",
-  srcs=["BREW"],
-  commands=[],
   cc_obj_files=["-lopencv_imgproc"],
 )

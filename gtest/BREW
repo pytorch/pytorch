@@ -2,7 +2,6 @@ cc_library(
   name = "gtest",
   srcs = ["gtest-all.cpp"],
   hdrs = ["gtest.h"],
-  cflags = ["-DGTEST_USE_OWN_TR1_TUPLE=1"],
 )
 
 cc_library(
@@ -12,7 +11,6 @@ cc_library(
       ":gtest",
       "//caffe2/core:core",
   ],
-  cflags = ["-DGTEST_USE_OWN_TR1_TUPLE=1"],
 )
 
 cc_test(
@@ -22,5 +20,4 @@ cc_test(
       ":gtest",
       "//caffe2/core:core",
   ],
-  cflags = ["-DGTEST_USE_OWN_TR1_TUPLE=1"],
 )

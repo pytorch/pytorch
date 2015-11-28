@@ -1,7 +1,11 @@
-cc_thirdparty_target(
-  name="glog",
-  srcs=["BREW"],
-  commands=[],
-  cc_obj_files=["-lglog"],
-)
-
+if Brewery.Env.Config.USE_GLOG:
+  cc_thirdparty_target(
+    name="glog",
+    cc_obj_files=["-lglog"],
+  )
+else:
+  # A dummy dependency that has no effect.
+  cc_thirdparty_target(
+    name="glog",
+    cc_obj_files=[],
+  )

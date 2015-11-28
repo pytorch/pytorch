@@ -125,15 +125,17 @@ OperatorBase* CreateOperator(const OperatorDef& operator_def, Workspace* ws) {
   // First, if the user has provided an engine, try create that engine
   if (operator_def.engine().size()) {
     key += "_ENGINE_" + operator_def.engine();
+    CAFFE_VLOG(1) << "Trying to create operator " << operator_def.type()
+                  << " with engine " << operator_def.engine();
     OperatorBase* op = TryCreateOperator(key, operator_def, ws);
     if (op != nullptr) {
       return op;
     }
+    // If the above fails, we will just return the normal case with the default
+    // implementation.
+    CAFFE_VLOG(1) << "Operator with engine " << operator_def.engine()
+                  << " is not available. Using default implementation.";
   }
-  // If the above fails, we will just return the normal case with the default
-  // implementation.
-  CAFFE_VLOG(1) << "Operator with engine " << operator_def.engine()
-                << " is not available. Using default implementation.";
   return TryCreateOperator(operator_def.type(), operator_def, ws);
 }
 
