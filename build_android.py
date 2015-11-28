@@ -1,30 +1,21 @@
-"""Configuration for the Caffe2 installation.
+"""Configuration for the Caffe2 installation targeted for Android.
 """
 
 
+STANDALONE_TCHAIN_ROOT = '/home/jiayq/NVPACK/android-ndk-r10e/toolchains/arm-linux-androideabi-4.6/gen_standalone/linux-x86_64/'
+
+
 class Config(object):
-    ############################################################################
-    # Common settings that are necessary to build Caffe2's core functionality.
-    ############################################################################
-    # If you want to show a lot of the build details, set VERBOSE_BUILD to True.
-    # This will show the detailed commands being run during the build process.
     VERBOSE_BUILD = True
     # Specify your compiler.
-    CC = "c++"
+    CC = STANDALONE_TCHAIN_ROOT + 'bin/arm-linux-androideabi-g++'
     # Specify your archiver.
-    AR = "ar"
+    AR = STANDALONE_TCHAIN_ROOT + 'bin/arm-linux-androideabi-ar'
     # Specify your output folder.
-    GENDIR = "gen"
+    GENDIR = "gen-android"
 
-    # Specify if you want to use the system protocol buffer or not.
-    # If you have protobuf installed, use the following two lines usually
-    # suffice:
-    #USE_SYSTEM_PROTOBUF = True
-    #PROTOC_BINARY = "protoc"
-    # Otherwise, use the following line: we will build protobuf using the
-    # included source file.
     USE_SYSTEM_PROTOBUF = False
-    PROTOC_BINARY = GENDIR + '/third_party/google/protoc'
+    PROTOC_BINARY = 'gen/third_party/google/protoc'
     # Note for the line above: if you are doing things like cross-compilation,
     # the built protoc compiler will not work on the host, in which case you
     # will need to provide a protoc binary that can run on the host environment.
@@ -33,7 +24,7 @@ class Config(object):
     # operations. If you have eigen installed in your system, you can simply use
     # USE_SYSTEM_EIGEN = True. Otherwise (for example when you are cross
     # compiling) you may want to set USE_SYSTEM_EIGEN to False.
-    USE_SYSTEM_EIGEN = True
+    USE_SYSTEM_EIGEN = False
 
     # google-glog: Caffe can choose to use google glog, which will allow a more
     # sophisticated logging scheme. It also comes with a minimal logging tool
@@ -42,7 +33,9 @@ class Config(object):
     USE_GLOG = False
 
     # Manually specified defines.
-    DEFINES = []
+    DEFINES = [
+        "-DANDROID",
+    ]
 
     # Manually specified include paths. These include paths are searched before
     # any auto-generated include paths.
@@ -63,22 +56,19 @@ class Config(object):
     # not be available.
     ############################################################################
     # Specify the cuda directory.
-    CUDA_DIR = "/usr/local/cuda"
+    CUDA_DIR = "/home/jiayq/NVPACK/cuda-7.0"
     # If you are cross compiling, you may need to add paths where the cuda
     # libraries for the target platform can be found. Otherwise, leave it empty.
     MANUAL_CUDA_LIB_DIRS = []
     CUDA_GENCODE = [
-        'arch=compute_30,code=sm_30',
-        'arch=compute_35,code=sm_35',
-        'arch=compute_50,code=sm_50',
+        'arch=compute_32,code=sm_32',
     ]
     # additional CUDA cflags to pass to nvcc.
     CUDA_CFLAGS = ["-m32"],
-
     # You can choose to add the path of the cuda libraries to the rpath, so that
     # during runtime you do not need to hard-code the library paths. You can,
     # of course, set this to False.
-    CUDA_ADD_TO_RPATH = True
+    CUDA_ADD_TO_RPATH = False
     # Specify if you want to link cuda as static libraries.
     LINK_CUDA_STATIC = True
 
@@ -86,10 +76,10 @@ class Config(object):
     # (optional) MPI setting.
     ############################################################################
     # Specify the MPI c++ compiler. You usually don't need to change this.
-    MPICC = "mpic++"
-    MPIRUN = "mpirun"
+    MPICC = "non-existing"
+    MPIRUN = "non-existing"
     # Specify ompi_info if you are using openmpi.
-    OMPI_INFO = 'ompi_info'
+    OMPI_INFO = "non-existing"
     # Now, the cuda MPI suport is available after certain versions (such as
     # OpenMPI 1.7), but it is possible that the MPI is built without cuda
     # support. We will try to figure out if cuda support is available, but
@@ -98,13 +88,13 @@ class Config(object):
     # memory copy followed by MPI in the CPU space.
     FORCE_FALLBACK_CUDA_MPI = False
     # Whether to add the MPI library to rpath.
-    MPI_ADD_TO_RPATH = True
+    MPI_ADD_TO_RPATH = False
 
     ################################################################################
     # (optional) Python.
     ################################################################################
     # Specify the python config command.
-    PYTHON_CONFIG = "python-config"
+    PYTHON_CONFIG = "non-existing"
 
     ################################################################################
     # Very rarely used configurations.
