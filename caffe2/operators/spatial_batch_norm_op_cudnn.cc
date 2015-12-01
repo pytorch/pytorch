@@ -2,10 +2,9 @@
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/spatial_batch_norm_op.h"
 
-namespace caffe2 {
+#if CUDNN_VERSION >= 4000
 
-static_assert(CUDNN_VERSION >= 4000,
-              "CudnnSpatialBN requires cudnn version 4.0 or above.");
+namespace caffe2 {
 
 constexpr cudnnBatchNormMode_t kSpatialBNMode = CUDNN_BATCHNORM_SPATIAL;
 
@@ -236,3 +235,6 @@ REGISTER_CUDNN_OPERATOR(SpatialBN, CudnnSpatialBNOp<float>);
 REGISTER_CUDNN_OPERATOR(SpatialBNGradient, CudnnSpatialBNGradientOp<float>);
 }  // namespace
 }  // namespace caffe2
+
+#endif  // CUDNN_VERSION >= 4000
+
