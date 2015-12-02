@@ -21,21 +21,21 @@ class FullyConnectedOp final : public Operator<Context> {
     const auto& W = Input(1);
     const auto& b = Input(2);
     auto* Y = Output(0);
-    CAFFE_DCHECK_GE(X.ndim(), 2);
-    CAFFE_DCHECK_GE(W.ndim(), 2);
+    CAFFE_CHECK_GE(X.ndim(), 2);
+    CAFFE_CHECK_GE(W.ndim(), 2);
     if (X.ndim() > 2 || W.ndim() > 2) {
       CAFFE_VLOG(1) << "Using legacy support for arbitrary input and weight "
                 << "dimensions.";
     }
-    CAFFE_DCHECK_EQ(b.ndim(), 1);
+    CAFFE_CHECK_EQ(b.ndim(), 1);
     // batch size
     int M = X.dim(0);
     // Feature dimension
     int K = X.size() / X.dim(0);
     // number of outputs.
     int N = W.dim(0);
-    CAFFE_DCHECK_EQ(K, W.size() / W.dim(0));
-    CAFFE_DCHECK_EQ(N, b.dim(0));
+    CAFFE_CHECK_EQ(K, W.size() / W.dim(0));
+    CAFFE_CHECK_EQ(N, b.dim(0));
     Y->Reshape(vector<int>{M, N});
     // W * x
     math::Gemm<T, Context>(
