@@ -13,8 +13,8 @@
 #include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/core/logging.h"
 
-static_assert(CUDNN_VERSION >= 3000,
-              "Caffe2 requires cudnn version 3.0 or above.");
+static_assert(CUDNN_VERSION >= 2000,
+              "Caffe2 requires cudnn version 2.0 or above.");
 
 namespace caffe2 {
 
@@ -78,10 +78,12 @@ template<> class cudnnTypeWrapper<double> {
   static const cudnnDataType_t type = CUDNN_DATA_DOUBLE;
 };
 
+#if CUDNN_VERSION >= 3000
 template<> class cudnnTypeWrapper<float16> {
  public:
   static const cudnnDataType_t type = CUDNN_DATA_HALF;
 };
+#endif  // CUDNN_VERSION >= 3000
 
 /**
  * A wrapper function to convert the Caffe storage order to cudnn storage order
