@@ -76,6 +76,20 @@ def GetCpp11Flag(cc, env):
                        "Does it support C++11?", cc)
 
 
+def NeedLibrtOrNot(cc, env):
+    command = [cc, _TestFilename("test.cc"), "-o", _TempFilename(".out"),
+               "-lrt"]
+    ret, _ = GetSubprocessOutput(command, env)
+    if ret == 0:
+        BuildDebug("The linker seem to have librt present.")
+        return True
+    else:
+        BuildDebug("The linker cannot find librt. This is expected on e.g. "
+                   "Android platforms. But double check if you think librt "
+                   "should be present.")
+        return False
+
+
 def GetCompilerType(cc, env):
     _, out = GetSubprocessOutput([cc, '--version'], env)
     if 'clang' in out:
@@ -125,12 +139,12 @@ class Env(object):
         SetVerboseLogging(Config.VERBOSE_BUILD)
 
         # Default values, with things to be added incrementally.
-        self.DEFINES = [
+        self.DEFINES = Config.DEFINES + [
             "-DGTEST_USE_OWN_TR1_TUPLE=1",  # Needed by gtest
             "-DEIGEN_NO_DEBUG",  # So that Eigen is in optimized mode.
             "-DPIC",  # Position independent code
-        ] + Config.DEFINES
-        self.CFLAGS = [
+        ]
+        self.CFLAGS = Config.CFLAGS + [
             '-fPIC',
             '-ffast-math',
             '-pthread',
@@ -139,13 +153,13 @@ class Env(object):
             '-Wno-unused-parameter',  # needed by some third_party code
             '-Wno-sign-compare',  # needed by some third_party code
         ] + Config.OPTIMIZATION_FLAGS
-        self.INCLUDES = [
+        self.INCLUDES = Config.INCLUDES + [
             self.GENDIR,
             os.path.join(self.GENDIR, 'third_party'),
             os.path.join(self.GENDIR, 'third_party', 'include'),
         ]
-        self.LIBDIRS = []
-        self.LINKFLAGS = [
+        self.LIBDIRS = Config.LIBDIRS + []
+        self.LINKFLAGS = Config.LINKFLAGS + [
             '-pthread',
         ]
         self.LIBS = []
@@ -167,12 +181,13 @@ class Env(object):
         self.ENV['CAFFE2_GENDIR'] = os.path.abspath(self.GENDIR)
         self.ENV['CAFFE2_SRCDIR'] = os.path.abspath('.')
 
-
         # Set C++11 flag. The reason we do not simply add it to the CFLAGS list
         # above is that NVCC cannot pass -std=c++11 via Xcompiler, otherwise the
         # host compiler usually produces an error (clang) or warning (g++)
         # complaining that the code does not work well
         self.CPP11_FLAG = GetCpp11Flag(Config.CC, self.ENV)
+        # Determine if we need librt: for example, Android does not need it.
+        self.NEED_LIBRT = NeedLibrtOrNot(Config.CC, self.ENV)
 
         # Third party flags.
         if not Config.USE_SYSTEM_PROTOBUF:
@@ -182,6 +197,7 @@ class Env(object):
         if Config.USE_GLOG:
             # If we are building with GLOG, enable the glog macro.
             self.DEFINES.append("-DCAFFE2_USE_GOOGLE_GLOG")
+
 
         # MPI
         self.MPIRUN = Config.MPIRUN
@@ -243,13 +259,15 @@ class Env(object):
             # Figure out all CUDA details.
             version = re.search('release \d', out)
             if version is None or int(version.group()[-1]) < 7:
-                BuildFatal("Caffe2 requires CUDA 7 or above.")
+                BuildWarning("Caffe2 is only tested against CUDA 7 and above. "
+                             "For any low versions, it may or may not compile.")
             # Add the include and lib directories
             self.INCLUDES.append(os.path.join(Config.CUDA_DIR, "include"))
-            cuda_dirs = Config.MANUAL_CUDA_LIB_DIRS + [
-                os.path.join(Config.CUDA_DIR, "lib"),
-                os.path.join(Config.CUDA_DIR, "lib64"),
-            ]
+            if len(Config.MANUAL_CUDA_LIB_DIRS):
+                cuda_dirs = Config.MANUAL_CUDA_LIB_DIRS
+            else:
+                cuda_dirs = [os.path.join(Config.CUDA_DIR, "lib"),
+                             os.path.join(Config.CUDA_DIR, "lib64")]
             self.LIBDIRS += cuda_dirs
             if Config.CUDA_ADD_TO_RPATH:
                 rpath_template = GetRpathTemplate(Config.CC, self.ENV)

@@ -17,7 +17,6 @@
 # should be figured out yet.
 
 from pycaffe2 import core
-from pycaffe2 import core_gradients
 
 init_net = core.Net("init")
 W = init_net.UniformFill([], "W", shape=[1, 2], min=-1., max=1.)
@@ -43,16 +42,23 @@ train_net.WeightedSum([W, ONE, "W_grad", LR], W)
 train_net.WeightedSum([B, ONE, "B_grad", LR], B)
 train_net.Print([loss, W, B], [])
 
-# Run all on GPU.
-#init_net.RunAllOnGPU()
-#train_net.RunAllOnGPU()
 
-
+# the CPU part.
 plan = core.Plan("toy_regression")
 plan.AddNets([init_net, train_net])
 plan.AddStep(core.ExecutionStep("init", init_net))
 plan.AddStep(core.ExecutionStep("train", train_net, 100))
 
 with open('toy_regression.pbtxt', 'w') as fid:
-  fid.write(str(plan.Proto()))
+    fid.write(str(plan.Proto()))
 
+# the GPU part
+init_net.RunAllOnGPU()
+train_net.RunAllOnGPU()
+plan = core.Plan("toy_regression")
+plan.AddNets([init_net, train_net])
+plan.AddStep(core.ExecutionStep("init", init_net))
+plan.AddStep(core.ExecutionStep("train", train_net, 100))
+
+with open('toy_regression_gpu.pbtxt', 'w') as fid:
+    fid.write(str(plan.Proto()))

@@ -4,7 +4,7 @@
 
 STANDALONE_TCHAIN_ROOT = (
     '/home/jiayq/NVPACK/android-ndk-r10e/toolchains/'
-    'arm-linux-androideabi-4.9/gen_standalone/linux-x86_64/')
+    'arm-linux-androideabi-4.8/gen_standalone/linux-x86_64/')
 
 
 class Config(object):
@@ -17,7 +17,7 @@ class Config(object):
     GENDIR = "gen-android"
 
     USE_SYSTEM_PROTOBUF = False
-    PROTOC_BINARY = 'gen/third_party/google/protoc'
+    PROTOC_BINARY = 'brewtool/prebuilt/protoc-Linux-x86_64'
 
     # Eigen: Eigen is a third party library that Caffe2 uses for some numerical
     # operations. If you have eigen installed in your system, you can simply use
@@ -46,7 +46,9 @@ class Config(object):
     CFLAGS = []
 
     # Additional link flags you would like to add to the compilation.
-    LINKFLAGS = []
+    LINKFLAGS = [
+        "-pie",
+    ]
 
     ###########################################################################
     # (optional) CUDA. If you do not specify this, the GPU part of Caffe2 will
@@ -56,7 +58,9 @@ class Config(object):
     CUDA_DIR = "/home/jiayq/NVPACK/cuda-7.0"
     # If you are cross compiling, you may need to add paths where the cuda
     # libraries for the target platform can be found. Otherwise, leave it empty.
-    MANUAL_CUDA_LIB_DIRS = []
+    MANUAL_CUDA_LIB_DIRS = [
+        "/home/jiayq/NVPACK/cuda-6.5/targets/armv7-linux-androideabi/lib"
+    ]
     CUDA_GENCODE = [
         'arch=compute_32,code=sm_32',
     ]
@@ -67,7 +71,7 @@ class Config(object):
     # of course, set this to False.
     CUDA_ADD_TO_RPATH = False
     # Specify if you want to link cuda as static libraries.
-    LINK_CUDA_STATIC = True
+    LINK_CUDA_STATIC = False
 
     ############################################################################
     # (optional) MPI setting.
