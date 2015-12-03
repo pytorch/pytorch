@@ -96,6 +96,11 @@ class CNNModelHelper(object):
     return self.net.MaxPool(blob_in, [blob_out, "_" + blob_out + "_idx"],
                             order=self.order, **kwargs)[0]
 
+  def DepthConcat(self, blobs_in, blob_out, **kwargs):
+    """Depth Concat."""
+    return self.net.DepthConcat(blobs_in, [blob_out, "_" + blob_out + "_condat_dims"],
+                                order=self.order)[0]
+
   def AddGradientOperators(self):
     self.net.AddGradientOperators()
 
