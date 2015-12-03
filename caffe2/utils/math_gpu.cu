@@ -8,26 +8,26 @@
 #include "caffe2/utils/math.h"
 #include "caffe2/core/context_gpu.h"
 
-
-static_assert(THRUST_VERSION >= 100800,
-              "Caffe2 requires a thrust version > 1.8.");
+#if THRUST_VERSION >= 100800
+#define THRUST_SUPPORTS_PER_THREAD
+#endif  // THRUST_VERSION >= 100800
 
 namespace caffe2 {
 namespace math {
 
 // TODO(Yangqing): Yuck again. Maybe change it to templated functors?
-#define DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(T, Funcname, function)         \
+#define DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(T, Funcname, function)             \
 __global__                                                                     \
-void _Kernel_##T##_##Funcname(const int N, const T* x, T* y) {     \
+void _Kernel_##T##_##Funcname(const int N, const T* x, T* y) {                 \
   CUDA_1D_KERNEL_LOOP(i, N) {                                                  \
     y[i] = function(x[i]);                                                     \
   }                                                                            \
 }                                                                              \
 template <>                                                                    \
-void Funcname<T, CUDAContext>(                                             \
-    const int N, const T* x, T* y,                                     \
+void Funcname<T, CUDAContext>(                                                 \
+    const int N, const T* x, T* y,                                             \
     CUDAContext* context) {                                                    \
-  _Kernel_##T##_##Funcname<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS,  \
+  _Kernel_##T##_##Funcname<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS,      \
                                  0, context->cuda_stream()>>>(                 \
       N, x, y);                                                                \
 }
@@ -251,15 +251,53 @@ void Dot<double, CUDAContext>(
   context->Copy<double, CPUContext, CUDAContext>(1, &result, y);
 }
 
-#define CAFFE2_MATH_SUM_FUNC(T) \
-template<> \
+#ifdef THRUST_SUPPORTS_PER_THREAD
+
+#define CAFFE2_MATH_SUM_FUNC(T)                                                \
+template<>                                                                     \
 void Sum<T, CUDAContext>(const int N, const T* x, T* y, CUDAContext* context) {\
-  thrust::device_ptr<const T> dev_ptr(x);                                            \
+  thrust::device_ptr<const T> dev_ptr(x);                                      \
   T result = thrust::reduce(                                                   \
-      thrust::cuda::par.on(context->cuda_stream()),                               \
+      thrust::cuda::par.on(context->cuda_stream()),                            \
       dev_ptr, dev_ptr + N, static_cast<T>(0), thrust::plus<T>());             \
   context->Copy<T, CPUContext, CUDAContext>(1, &result, y);                    \
 }
+
+#else  // THRUST_SUPPORTS_PER_THREAD
+
+// Really, for any real use you should not be invoking this but should use the
+// thrust version, so I was not very careful in tuning the performance of the
+// sum kernel.
+#define SUM_KERNEL_NTHREADS 128
+template <typename T>
+__global__ void SumKernel(const int N, const T* X, T* Y) {
+  const int idx = threadIdx.x;
+  __shared__ T reduction_buffer[SUM_KERNEL_NTHREADS];
+
+  reduction_buffer[idx] = 0;
+
+  // A two-level reduction to get the sum.
+  for (int i = idx; i < N; i += SUM_KERNEL_NTHREADS) {
+    reduction_buffer[idx] += X[i];
+  }
+  __syncthreads();
+  if (idx == 0) {
+    float tmp = 0;
+    for (int i = 0; i < SUM_KERNEL_NTHREADS; ++i) {
+      tmp += reduction_buffer[i];
+    }
+    *Y = tmp;
+  }
+}
+
+#define CAFFE2_MATH_SUM_FUNC(T)                                                \
+template<>                                                                     \
+void Sum<T, CUDAContext>(const int N, const T* x, T* y, CUDAContext* context) {\
+  SumKernel<<<1, SUM_KERNEL_NTHREADS, 0, context->cuda_stream()>>>(N, x, y);   \
+}
+
+#endif  // THRUST_SUPPORTS_PER_THREAD
+
 CAFFE2_MATH_SUM_FUNC(float)
 CAFFE2_MATH_SUM_FUNC(double)
 #undef CAFFE2_MATH_SUM_FUNC
@@ -267,7 +305,7 @@ CAFFE2_MATH_SUM_FUNC(double)
 namespace {
 template <typename T>
 __global__ void SelectKernel(
-    const int N, const int D, const float* x, const int* idx, float* y) {
+    const int N, const int D, const T* x, const int* idx, T* y) {
   CUDA_1D_KERNEL_LOOP(i, N) {
     y[i] = x[i * D + idx[i]];
   }

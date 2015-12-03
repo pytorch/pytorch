@@ -19,12 +19,12 @@ class Config(object):
     # Specify if you want to use the system protocol buffer or not.
     # If you have protobuf installed, use the following two lines usually
     # suffice:
-    #USE_SYSTEM_PROTOBUF = True
-    #PROTOC_BINARY = "protoc"
+    USE_SYSTEM_PROTOBUF = True
+    PROTOC_BINARY = "protoc"
     # Otherwise, use the following line: we will build protobuf using the
     # included source file.
-    USE_SYSTEM_PROTOBUF = False
-    PROTOC_BINARY = GENDIR + '/third_party/google/protoc'
+    #USE_SYSTEM_PROTOBUF = False
+    #PROTOC_BINARY = 'brewtool/prebuilt/protobuf-Linux-x86_64'
     # Note for the line above: if you are doing things like cross-compilation,
     # the built protoc compiler will not work on the host, in which case you
     # will need to provide a protoc binary that can run on the host environment.
@@ -115,7 +115,10 @@ class Config(object):
     # If you would like to pass in any specific environmental variables to the
     # build command, do it here.
     ENVIRONMENTAL_VARS = {}
-    # Optimization flags: -O2 in default.
+    # Optimization flags: -O2 in default. The reason we do not include it
+    # directly in the CFLAGS option is because it will be inserted to both
+    # c++ and nvcc: some cflags may not be compatible with nvcc so we do not
+    # want to put all cflags into nvcc.
     OPTIMIZATION_FLAGS = ["-O2"]
 
 

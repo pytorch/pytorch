@@ -86,9 +86,9 @@ bool SummarizeOp<float, CUDAContext>::RunOnDevice() {
   init.initialize();
   // compute summary statistics
   SummaryStatsData<float> result = thrust::transform_reduce(
-#if CUDA_VERSION >= 7000
+#if THRUST_VERSION >= 100800
       thrust::cuda::par.on(device_context_.cuda_stream()),
-#endif  // CUDA_VERSION
+#endif  // THRUST_VERSION >= 100800
       Xdata, Xdata + N, unary_op, init, binary_op);
   float standard_deviation = std::sqrt(result.variance());
   if (to_file_) {

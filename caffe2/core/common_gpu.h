@@ -6,8 +6,6 @@
 #include <cuda_runtime.h>
 #include <curand.h>
 #include <driver_types.h>  // cuda driver types
-// #include <thrust/device_vector.h>
-// #include <thrust/functional.h>
 
 #include "caffe2/core/logging.h"
 #include "caffe2/core/common.h"
