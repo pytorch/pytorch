@@ -224,6 +224,8 @@ int main(int argc, char* argv[]) {
 #endif
   RunTests<float>(N / sizeof(float), ncclFloat, comms, dList);
   RunTests<double>(N / sizeof(double), ncclDouble, comms, dList);
+  RunTests<long long>(N / sizeof(long long), ncclInt64, comms, dList);
+  RunTests<unsigned long long>(N / sizeof(unsigned long long), ncclUint64, comms, dList);
 
   printf("\n");
 

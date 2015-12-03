@@ -477,6 +477,12 @@ public:
     case ncclDouble:
       return ncclAllGatherWithType<double>(sendbuff, recvbuff, count, comm,
           numUnroll, stream);
+    case ncclInt64:
+      return ncclAllGatherWithType<long long>(sendbuff, recvbuff, count, comm,
+          numUnroll, stream);
+    case ncclUint64:
+      return ncclAllGatherWithType<unsigned long long>(sendbuff, recvbuff, count, comm,
+          numUnroll, stream);
     }
     return ncclInvalidType;
   }

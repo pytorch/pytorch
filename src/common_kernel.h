@@ -174,6 +174,26 @@ struct MULTI<FUNC, double> {
   }
 };
 
+template<class FUNC>
+struct MULTI<FUNC, unsigned long long> {
+  static_assert(sizeof(PackType) == sizeof(unsigned long long),
+      "PackType must be the same size as unsigned long long.");
+  __device__ PackType operator()(const PackType x, const PackType y) const {
+    unsigned long long rv = FUNC()(x, y);
+    return rv;
+  }
+};
+
+template<class FUNC>
+struct MULTI<FUNC, long long> {
+  static_assert(sizeof(PackType) == sizeof(long long),
+      "PackType must be the same size as long long.");
+  __device__ PackType operator()(const PackType x, const PackType y) const {
+    long long rv = FUNC()((long long)x, (long long)y);
+    return rv;
+  }
+};
+
 template<typename T, bool FETCHTWO>
 __device__ inline void FetchOneOrTwo64b(PackType& s0,
     const volatile T * __restrict__ const src0, PackType& s1,
