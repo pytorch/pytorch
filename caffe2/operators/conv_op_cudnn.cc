@@ -163,7 +163,7 @@ bool CudnnConvOp<T>::RunWithCudnnWorkspace(
   bool input_changed = (X.dims() != cudnn_input_dims_);
   bool filter_changed = (filter.dims() != cudnn_filter_dims_);
   if (input_changed || filter_changed) {
-    CAFFE_LOG_INFO << "Changing the cudnn descriptor configurations.";
+    CAFFE_VLOG(1) << "Changing the cudnn descriptor configurations.";
     if (input_changed) {
       cudnn_input_dims_ = X.dims();
       CUDNN_CHECK(cudnnSetTensor4dDescriptor(
@@ -271,7 +271,7 @@ bool CudnnConvGradientOp<T>::RunWithCudnnWorkspace(
   bool input_changed = (X.dims() != cudnn_input_dims_);
   bool filter_changed = (filter.dims() != cudnn_filter_dims_);
   if (input_changed || filter_changed) {
-    CAFFE_LOG_INFO << "Changing the cudnn descriptor configurations.";
+    CAFFE_VLOG(1) << "Changing the cudnn descriptor configurations.";
     if (input_changed) {
       cudnn_input_dims_ = X.dims();
       CUDNN_CHECK(cudnnSetTensor4dDescriptor(
