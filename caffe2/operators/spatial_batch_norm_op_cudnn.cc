@@ -262,5 +262,4 @@ REGISTER_CUDNN_OPERATOR(SpatialBNGradient, CudnnVersionTooLowForSpatialBN);
 }
 }  // namespace caffe2
 
-
 #endif // CUDNN_VERSION >= 4000
