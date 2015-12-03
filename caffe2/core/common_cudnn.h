@@ -13,8 +13,8 @@
 #include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/core/logging.h"
 
-static_assert(CUDNN_VERSION >= 3000,
-              "Caffe2 requires cudnn version 3.0 or above.");
+static_assert(CUDNN_VERSION >= 2000,
+              "Caffe2 requires cudnn version 2.0 or above.");
 
 namespace caffe2 {
 
@@ -80,11 +80,13 @@ template<> class cudnnTypeWrapper<double> {
   typedef double ScalingParamType;
 };
 
+#if CUDNN_VERSION >= 3000
 template<> class cudnnTypeWrapper<float16> {
  public:
   static const cudnnDataType_t type = CUDNN_DATA_HALF;
   typedef float ScalingParamType;
 };
+#endif  // CUDNN_VERSION >= 3000
 
 /**
  * A wrapper function to convert the Caffe storage order to cudnn storage order
@@ -242,6 +244,7 @@ class CuDNNWrapper {
   // Pointer to an external cuda context that the cudnn wrapper will use.
   CUDAContext* cuda_context_;
   cudnnHandle_t cudnn_handle_;
+  DISABLE_COPY_AND_ASSIGN(CuDNNWrapper);
 };
 
 /**
@@ -275,6 +278,7 @@ class CuDNNWorkspaceWrapper {
   void* data_;
   size_t nbytes_;
   std::mutex mutex_;
+  DISABLE_COPY_AND_ASSIGN(CuDNNWorkspaceWrapper);
 };
 
 }  // namespace caffe2

@@ -89,7 +89,7 @@ const char* curandGetErrorString(curandStatus_t error);
 // hard-coding the number of threads might not be an optimal case, and might
 // even fail for specific hardware platforms.
 // TODO(Yangqing): Yuck. Figure out a better way?
-const int CAFFE_CUDA_NUM_THREADS = 1024;
+const int CAFFE_CUDA_NUM_THREADS = 512;
 
 // Compute the number of blocks needed to run N threads.
 inline int CAFFE_GET_BLOCKS(const int N) {
