@@ -169,7 +169,6 @@ cc_binary(
   deps = [
       "//caffe2/core:core",
       "//caffe2/db:db",
-      "//caffe2/utils:zmq_hpp",
-      "//third_party/libzmq:libzmq",
+      "//caffe2/utils:zmq_helper",
   ],
 )

@@ -3,7 +3,7 @@
 #include <cstdint>
 
 #include "caffe2/core/db.h"
-#include "caffe2/utils/zmq.hpp"
+#include "caffe2/utils/zmq_helper.h"
 #include "caffe2/core/logging.h"
 
 namespace caffe2 {
@@ -12,38 +12,23 @@ namespace db {
 class ZmqDBCursor : public Cursor {
  public:
   explicit ZmqDBCursor(const string& source)
-      : source_(source), context_(1), socket_(context_, ZMQ_PULL), key_("") {
-    socket_.connect(source);
+      : source_(source), socket_(ZMQ_PULL) {
+    socket_.Connect(source_);
     // obtain the first value.
     Next();
   }
 
   ~ZmqDBCursor() {
-    socket_.disconnect(source_);
+    socket_.Disconnect(source_);
   }
   void SeekToFirst() override { /* do nothing */ }
 
-  inline void ReceiveWithRetry(zmq::message_t* content) {
-    bool retry = true;
-    while (retry) {
-      try {
-        socket_.recv(content);
-        retry = false;
-      } catch(const zmq::error_t& ze) {
-        // CAFFE_LOG_ERROR << "Exception: " << ze.num() << " " << ze.what();
-        if (ze.num() != EINTR && ze.num() != EAGAIN) {
-          CAFFE_LOG_FATAL << "ZeroMQ received error that cannot continue. Quitting.";
-        }
-      }
-    }
-  }
-
   void Next() override {
-    zmq::message_t content;
-    ReceiveWithRetry(&content);
-    key_.assign(static_cast<char*>(content.data()), content.size());
-    ReceiveWithRetry(&content);
-    value_.assign(static_cast<char*>(content.data()), content.size());
+    ZmqMessage msg;
+    socket_.RecvTillSuccess(&msg);
+    key_.assign(static_cast<char*>(msg.data()), msg.size());
+    socket_.RecvTillSuccess(&msg);
+    value_.assign(static_cast<char*>(msg.data()), msg.size());
   }
 
   string key() override { return key_; }
@@ -52,8 +37,7 @@ class ZmqDBCursor : public Cursor {
 
  private:
   string source_;
-  zmq::context_t context_;
-  zmq::socket_t socket_;
+  ZmqSocket socket_;
   string key_;
   string value_;
 };

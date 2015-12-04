@@ -23,10 +23,19 @@ cc_library(
 )
 
 cc_library(
+    name = "caffe2_core",
+    srcs = [],
+    deps = [
+      "//caffe2/operators:core_ops",
+    ],
+    build_shared = True,
+)
+
+cc_library(
     name = "caffe2",
     srcs = [],
     deps = [
         "all_available_ops",
     ],
-    shared=True,
+    build_shared=True,
 )

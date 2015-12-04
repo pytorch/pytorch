@@ -32,8 +32,7 @@ cc_library(
   ],
   deps = [
     "//caffe2/core:core",
-    "//caffe2/utils:zmq_hpp",
-    "//third_party/libzmq:libzmq",
+    "//caffe2/utils:zmq_helper",
   ],
   whole_archive = True,
 )

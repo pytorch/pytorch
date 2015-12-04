@@ -69,8 +69,12 @@ cc_test(
 )
 
 cc_headers(
-  name = "zmq_hpp",
+  name = "zmq_helper",
   srcs = [
-      "zmq.hpp"
+      "zmq_helper.h"
   ],
+  deps = [
+      "//caffe2/core:core",
+      "//third_party/libzmq:libzmq",
+  ]
 )
