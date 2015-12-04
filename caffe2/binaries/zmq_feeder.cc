@@ -6,8 +6,8 @@
 
 #include "caffe2/core/db.h"
 #include "caffe2/core/init.h"
-#include "caffe2/utils/zmq.hpp"
 #include "caffe2/core/logging.h"
+#include "caffe2/utils/zmq_helper.h"
 
 CAFFE2_DEFINE_string(server, "tcp://*:5555", "The server address.");
 CAFFE2_DEFINE_string(input_db, "", "The input db.");
@@ -33,30 +33,14 @@ int main(int argc, char** argv) {
   CAFFE_LOG_INFO << "Starting ZeroMQ server...";
 
   //  Socket to talk to clients
-  zmq::context_t context(1);
-  zmq::socket_t sender(context, ZMQ_PUSH);
-  try {
-    sender.bind(caffe2::FLAGS_server);
-    CAFFE_LOG_INFO << "Server created at " << caffe2::FLAGS_server;
-  } catch (const zmq::error_t& ze) {
-    CAFFE_LOG_FATAL << "ZeroMQ error: " << ze.num() << " " << ze.what();
-  }
+  caffe2::ZmqSocket sender(ZMQ_PUSH);
+  sender.Bind(caffe2::FLAGS_server);
+  CAFFE_LOG_INFO << "Server created at " << caffe2::FLAGS_server;
 
   while (1) {
     CAFFE_VLOG(1) << "Sending " << cursor->key();
-
-    string key = cursor->key();
-    zmq::message_t key_msg(key.size());
-    memcpy(key_msg.data(), key.data(), key.size());
-    string value = cursor->value();
-    zmq::message_t value_msg(value.size());
-    memcpy(value_msg.data(), value.data(), value.size());
-    while (!sender.send(key_msg, ZMQ_SNDMORE)) {
-      CAFFE_VLOG(1) << "Trying re-sending key...";
-    }
-    while (!sender.send(value_msg)) {
-      CAFFE_VLOG(1) << "Trying re-sending...";
-    }
+    sender.SendTillSuccess(cursor->key(), ZMQ_SNDMORE);
+    sender.SendTillSuccess(cursor->value(), 0);
     cursor->Next();
     if (!cursor->Valid()) {
       cursor->SeekToFirst();

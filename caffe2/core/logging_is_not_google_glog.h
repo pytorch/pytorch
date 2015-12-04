@@ -1,11 +1,6 @@
 #ifndef CAFFE2_CORE_LOGGING_IS_NOT_GOOGLE_GLOG_H_
 #define CAFFE2_CORE_LOGGING_IS_NOT_GOOGLE_GLOG_H_
 
-#ifdef ANDROID
-#include <android/log.h>
-#endif  // ANDROID
-
-#include <algorithm>
 #include <chrono>
 #include <climits>
 #include <ctime>
@@ -15,9 +10,6 @@
 #include <fstream>
 #include <set>
 #include <sstream>
-#ifdef CAFFE2_THROW_ON_FATAL
-#include <stdexcept>
-#endif  // CAFFE2_THROW_ON_FATAL
 #include <vector>
 
 #include "caffe2/core/flags.h"
@@ -33,98 +25,16 @@ const char CAFFE_SEVERITY_PREFIX[] = "FEWIV";
 namespace caffe2 {
 class MessageLogger {
  public:
-  MessageLogger(const char *file, int line, int severity)
-    : severity_(severity) {
-    if (severity_ < FLAGS_caffe2_log_level) {
-      // Nothing needs to be logged.
-      return;
-    }
-#ifdef ANDROID
-    tag_ = "native";
-#else  // !ANDROID
-    tag_ = "";
-#endif  // ANDROID
-    // Pre-pend the stream with the file and line number.
-    StripBasename(std::string(file), &filename_only_);
-    /*
-    time_t rawtime;
-    struct tm * timeinfo;
-    time(&rawtime);
-    timeinfo = localtime(&rawtime);
-    std::chrono::nanoseconds ns =
-        std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::high_resolution_clock::now().time_since_epoch());
-    */
-    stream_ << "["
-            << CAFFE_SEVERITY_PREFIX[std::min(4, CAFFE_FATAL - severity_)]
-            //<< (timeinfo->tm_mon + 1) * 100 + timeinfo->tm_mday
-            //<< std::setfill('0')
-            //<< " " << std::setw(2) << timeinfo->tm_hour
-            //<< ":" << std::setw(2) << timeinfo->tm_min
-            //<< ":" << std::setw(2) << timeinfo->tm_sec
-            //<< "." << std::setw(9) << ns.count() % 1000000000
-            << " " << filename_only_ << ":" << line << "] ";
-  }
-
-  // Output the contents of the stream to the proper channel on destruction.
-  ~MessageLogger() {
-    if (severity_ < FLAGS_caffe2_log_level) {
-      // Nothing needs to be logged.
-      return;
-    }
-    stream_ << "\n";
-#ifdef ANDROID
-    static const int android_log_levels[] = {
-        ANDROID_LOG_FATAL,    // CAFFE_LOG_FATAL
-        ANDROID_LOG_ERROR,    // CAFFE_LOG_ERROR
-        ANDROID_LOG_WARN,     // CAFFE_LOG_WARNING
-        ANDROID_LOG_INFO,     // CAFFE_LOG_INFO
-        ANDROID_LOG_DEBUG,    // CAFFE_VLOG(1)
-        ANDROID_LOG_VERBOSE,  // CAFFE_VLOG(2) .. CAFFE_VLOG(N)
-    };
-    int android_level_index = CAFFE_FATAL - std::min(CAFFE_FATAL, severity_);
-    int level = android_log_levels[std::min(android_level_index, 5)];
-    // Output the log string the Android log at the appropriate level.
-    __android_log_print(level, tag_, stream_.str().c_str());
-    // Indicate termination if needed.
-    if (severity_ == CAFFE_FATAL) {
-      __android_log_print(ANDROID_LOG_FATAL, tag_, "terminating.\n");
-    }
-#else  // !ANDROID
-    if (severity_ >= FLAGS_caffe2_log_level) {
-      // If not building on Android, log all output to std::cerr.
-      std::cerr << stream_.str();
-    }
-#endif  // ANDROID
-    if (severity_ == CAFFE_FATAL) {
-      DealWithFatal();
-    }
-  }
-
+  MessageLogger(const char *file, int line, int severity);
+  ~MessageLogger();
   // Return the stream associated with the logger object.
   std::stringstream &stream() { return stream_; }
 
  private:
-  void StripBasename(const std::string &full_path, std::string *filename) {
-    const char kSeparator = '/';
-    size_t pos = full_path.rfind(kSeparator);
-    if (pos != std::string::npos) {
-      *filename = full_path.substr(pos + 1, std::string::npos);
-    } else {
-      *filename = full_path;
-    }
-  }
+  void StripBasename(const std::string &full_path, std::string *filename);
 
-#ifdef CAFFE2_THROW_ON_FATAL
-  void DealWithFatal() {
-    throw std::runtime_error("Caffe2 threw a log fatal.");
-  }
-#else
   // When there is a fatal log, we simply abort.
-  void DealWithFatal() {
-    abort();
-  }
-#endif
+  void DealWithFatal() { abort(); }
 
   std::string filename_only_;
   const char* tag_;

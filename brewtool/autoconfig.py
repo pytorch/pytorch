@@ -152,6 +152,8 @@ class Env(object):
             '-Wextra',
             '-Wno-unused-parameter',  # needed by some third_party code
             '-Wno-sign-compare',  # needed by some third_party code
+            '-ffunction-sections',
+            '-fdata-sections',
         ] + Config.OPTIMIZATION_FLAGS
         self.INCLUDES = Config.INCLUDES + [
             self.GENDIR,
@@ -161,6 +163,7 @@ class Env(object):
         self.LIBDIRS = Config.LIBDIRS + []
         self.LINKFLAGS = Config.LINKFLAGS + [
             '-pthread',
+            '-Wl,--gc-sections',
         ]
         self.LIBS = []
         self.SHARED_LIB_EXT = (

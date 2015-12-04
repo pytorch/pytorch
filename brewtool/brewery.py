@@ -415,7 +415,7 @@ class proto_library(BuildTarget):
 class cc_target(BuildTarget):
     def __init__(self, name, srcs, hdrs=[], deps=[], build_shared=False,
                  build_binary=False, is_test=False, whole_archive=False,
-                 shared=False, **kwargs):
+                 **kwargs):
         BuildTarget.__init__(self, name, srcs, other_files=hdrs,
                              deps=deps, **kwargs)
         self.hdrs = [Brewery.RectifyFileName(s) for s in hdrs]
@@ -423,7 +423,6 @@ class cc_target(BuildTarget):
         self.build_binary = build_binary
         self.is_test = is_test
         self.whole_archive = whole_archive
-        self.shared = shared
 
     def _OutputName(self, is_library=False, is_shared=False):
         if len(self.srcs) == 0 and not is_shared:
@@ -502,6 +501,16 @@ def cc_binary(*args, **kwargs):
 def cc_test(*args, **kwargs):
     return cc_target(*args, build_binary=True, is_test=True,
                      whole_archive=True, **kwargs)
+
+
+class cc_headers(BuildTarget):
+    def __init__(self, name, srcs, deps=[], **kwargs):
+        BuildTarget.__init__(self, name, srcs, deps=deps, **kwargs)
+
+    def SetUp(self):
+        Brewery.CopyToGenDir(self.srcs)
+        self.cc_obj_files = MergeOrderedObjs(
+            [Brewery.Get(dep).cc_obj_files for dep in self.deps])
 
 
 class python_cc_extension(BuildTarget):
@@ -587,10 +596,6 @@ class filegroup(BuildTarget):
 
 
 def py_library(*args, **kwargs):
-    return filegroup(*args, **kwargs)
-
-
-def cc_headers(*args, **kwargs):
     return filegroup(*args, **kwargs)
 
 

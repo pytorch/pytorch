@@ -44,10 +44,6 @@ bool ParseCaffeCommandLineFlags(int* pargc, char** argv) {
     }
     std::unique_ptr<Caffe2FlagParser> parser(
         Caffe2FlagsRegistry()->Create(key, value));
-    // Since we have checked that the key is in Caffe2FlagsRegistry, this
-    // should not happen.
-    CAFFE_CHECK(parser != nullptr) << "This should not happen with key=" << key
-                                   << " and value=" << value;
     if (!parser->success()) {
       // TODO: quit elegantly.
       GlobalInitStream() << "Caffe2 flag fatal: illegal argument: "
@@ -72,6 +68,7 @@ bool Caffe2FlagParser::Parse<string>(const string& content, string* value) {
 
 template <>
 bool Caffe2FlagParser::Parse<int>(const string& content, int* value) {
+  /*
   try {
     *value = std::atoi(content.c_str());
     return true;
@@ -80,10 +77,15 @@ bool Caffe2FlagParser::Parse<int>(const string& content, int* value) {
                        << content << std::endl;
     return false;
   }
+  */
+  // Now compiling without exceptions...
+  *value = std::atoi(content.c_str());
+  return true;
 }
 
 template <>
 bool Caffe2FlagParser::Parse<double>(const string& content, double* value) {
+  /*
   try {
     *value = std::atof(content.c_str());
     return true;
@@ -93,6 +95,10 @@ bool Caffe2FlagParser::Parse<double>(const string& content, double* value) {
         << content << std::endl;
     return false;
   }
+  */
+  *value = std::atof(content.c_str());
+  return true;
+
 }
 
 template <>
