@@ -380,7 +380,7 @@ REGISTER_CUDNN_OPERATOR(ConvFp16, CudnnConvOp<float16>);
 REGISTER_CUDNN_OPERATOR(ConvFp16Gradient, CudnnConvGradientOp<float16>);
 
 struct GetConvFp16Gradient : public GetGradientDefBase {
-  static vector<OperatorDef>* Create(const OperatorDef& def) {
+  vector<OperatorDef>* Create(const OperatorDef& def) override {
     CAFFE_CHECK_EQ(def.input_size(), 3);
     return SingleGradientDef(
         "ConvFp16Gradient", "",

@@ -50,7 +50,7 @@ REGISTER_CPU_OPERATOR(NHWC2NCHW, NHWC2NCHWOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(NCHW2NHWC, NCHW2NHWCOp<float, CPUContext>);
 
 struct GetNHWC2NCHWGradient : public GetGradientDefBase {
-  static vector<OperatorDef>* Create(const OperatorDef& def) {
+  vector<OperatorDef>* Create(const OperatorDef& def) override {
     return SingleGradientDef(
         "NCHW2NHWC", "",
         vector<string>{GO(def, 0)},
@@ -60,7 +60,7 @@ struct GetNHWC2NCHWGradient : public GetGradientDefBase {
 REGISTER_GRADIENT(NHWC2NCHW, GetNHWC2NCHWGradient);
 
 struct GetNCHW2NHWCGradient : public GetGradientDefBase {
-  static vector<OperatorDef>* Create(const OperatorDef& def) {
+  vector<OperatorDef>* Create(const OperatorDef& def) override {
     return SingleGradientDef(
         "NHWC2NCHW", "",
         vector<string>{GO(def, 0)},

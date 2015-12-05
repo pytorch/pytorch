@@ -35,7 +35,7 @@ REGISTER_CPU_OPERATOR(SquaredL2DistanceGradient,
                       SquaredL2DistanceGradientOp<float, CPUContext>);
 
 struct GetSquaredL2DistanceGradient : public GetGradientDefBase {
-  static vector<OperatorDef>* Create(const OperatorDef& def) {
+  vector<OperatorDef>* Create(const OperatorDef& def) override {
     return SingleGradientDef(
         "SquaredL2DistanceGradient", "",
         vector<string>{I(def, 0), I(def, 1), GO(def, 0)},

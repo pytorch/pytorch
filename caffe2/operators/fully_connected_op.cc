@@ -7,7 +7,7 @@ REGISTER_CPU_OPERATOR(FC, FullyConnectedOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(FCGradient, FullyConnectedGradientOp<float, CPUContext>);
 
 struct GetFCGradient : public GetGradientDefBase {
-  static vector<OperatorDef>* Create(const OperatorDef& def) {
+  vector<OperatorDef>* Create(const OperatorDef& def) override {
     CAFFE_CHECK_EQ(def.input_size(), 3);
     return SingleGradientDef(
         "FCGradient", "",

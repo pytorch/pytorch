@@ -303,7 +303,7 @@ TEST(OperatorInPlaceTest, MultipleInPlaceAllowedCase) {
 }
 
 struct GetFooGradient : public GetGradientDefBase {
-  static vector<OperatorDef>* Create(const OperatorDef& def) {
+  vector<OperatorDef>* Create(const OperatorDef& def) override {
     return new vector<OperatorDef>{
         CreateOperatorDef(
             "FooGradient", "",

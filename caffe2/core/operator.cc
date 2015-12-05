@@ -3,6 +3,7 @@
 
 #include "caffe2/core/net.h"
 #include "caffe2/core/operator.h"
+#include "caffe2/core/operator_gradient.h"
 #include "caffe2/core/workspace.h"
 #include "caffe2/proto/caffe2.pb.h"
 
@@ -145,5 +146,51 @@ DEFINE_REGISTRY(CUDAOperatorRegistry, OperatorBase,
                 const OperatorDef&, Workspace*);
 
 DEFINE_REGISTRY(GradientRegistry, vector<OperatorDef>, const OperatorDef&);
+
+
+vector<OperatorDef>* CreateGradientDefsInternal(
+    const OperatorDef& def, GetGradientDefBaseVerbose* obj) {
+  CAFFE_DCHECK_NOTNULL(obj);
+  vector<OperatorDef>* grad_defs = obj->Create(def);
+  CAFFE_CHECK(grad_defs != nullptr);
+  // Copy device option if needed.
+  if (obj->CopyDeviceOption() && def.has_device_option()) {
+    for (OperatorDef& grad_def : *grad_defs) {
+      grad_def.mutable_device_option()->CopyFrom(def.device_option());
+    }
+  }
+  // Copy engine if needed.
+  if (obj->CopyEngine() && def.has_engine()) {
+    for (OperatorDef& grad_def : *grad_defs) {
+      grad_def.set_engine(def.engine());
+    }
+  }
+  // Copy arguments if needed.
+  if (obj->CopyArguments() && def.arg_size()) {
+    for (OperatorDef& grad_def : *grad_defs) {
+      grad_def.mutable_arg()->CopyFrom(def.arg());
+    }
+  }
+  for (const OperatorDef& grad_def : *grad_defs) {
+    CAFFE_VLOG(1) << "Gradient: " << grad_def.DebugString();
+  }
+  delete obj;
+  return grad_defs;
+}
+
+vector<OperatorDef>* ThrowTheTowelIfGradientIsCalled::Create(
+    const OperatorDef& def) {
+  CAFFE_LOG_FATAL << "You should not call the gradient of operator of type "
+                  << def.type();
+  // Just to suppress compiler warnings
+  return new vector<OperatorDef>();
+}
+
+vector<OperatorDef>* GradientNotImplementedYet::Create(
+    const OperatorDef& def) {
+  CAFFE_LOG_FATAL << "Gradient for operator type "
+                  << def.type() << " has not been implemented yet.";
+  return nullptr;
+}
 
 }  // namespace caffe2

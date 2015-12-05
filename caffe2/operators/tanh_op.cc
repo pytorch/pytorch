@@ -42,7 +42,7 @@ REGISTER_CPU_OPERATOR(
                                      TanhGradientCPUFunctor<float> >);
 
 struct GetTanhGradient : public GetGradientDefBase {
-  static vector<OperatorDef>* Create(const OperatorDef& def) {
+  vector<OperatorDef>* Create(const OperatorDef& def) override {
     return SingleGradientDef(
         "TanhGradient", "",
         std::vector<string>{O(def, 0), GO(def, 0)},

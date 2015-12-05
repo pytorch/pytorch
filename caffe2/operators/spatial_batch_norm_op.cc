@@ -8,7 +8,7 @@ namespace caffe2 {
 // is a bit more complex than usual gradient operators.
 namespace {
 struct GetSpatialBNGradient : public GetGradientDefBase {
-  static vector<OperatorDef>* Create(const OperatorDef& def) {
+  vector<OperatorDef>* Create(const OperatorDef& def) override {
     // Check if we are in training or testing mode.
     bool is_test = false;
     if (HasArgument(def, "is_test")) {

@@ -141,7 +141,7 @@ REGISTER_CPU_OPERATOR(MaxPool, MaxPoolOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(MaxPoolGradient, MaxPoolGradientOp<float, CPUContext>);
 
 struct GetMaxPoolGradient : public GetGradientDefBase {
-  static vector<OperatorDef>* Create(const OperatorDef& def) {
+  vector<OperatorDef>* Create(const OperatorDef& def) override {
     return SingleGradientDef(
         "MaxPoolGradient", "",
         vector<string>{I(def, 0), GO(def, 0), O(def, 1)},

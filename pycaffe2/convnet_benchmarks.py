@@ -259,7 +259,7 @@ if __name__ == '__main__':
   if (not args.batch_size or not args.model or not args.order or not args.cudnn_ws):
     parser.print_help()
 
-  workspace.GlobalInit(['caffe2', '--caffe2_log_level=0'])
+  workspace.GlobalInit(['caffe2', '--caffe2_log_level=-1'])
   model_map = {'AlexNet': AlexNet, 'OverFeat': OverFeat, 'VGGA': VGGA, 'Inception': Inception}
   Benchmark(model_map[args.model], args.order, args.batch_size, args.cudnn_ws,
             args.forward_only, args.iterations)

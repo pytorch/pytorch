@@ -232,7 +232,7 @@ REGISTER_CPU_OPERATOR(LRN, LRNOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(LRNGradient, LRNGradientOp<float, CPUContext>);
 
 struct GetLRNGradient : public GetGradientDefBase {
-  static vector<OperatorDef>* Create(const OperatorDef& def) {
+  vector<OperatorDef>* Create(const OperatorDef& def) override {
     return SingleGradientDef(
         "LRNGradient", "",
         vector<string>{I(def, 0), O(def, 0), O(def, 1), GO(def, 0)},

@@ -90,7 +90,7 @@ REGISTER_CPU_OPERATOR(Softmax, SoftmaxOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(SoftmaxGradient, SoftmaxGradientOp<float, CPUContext>);
 
 struct GetSoftmaxGradient : public GetGradientDefBase {
-  static vector<OperatorDef>* Create(const OperatorDef& def) {
+  vector<OperatorDef>* Create(const OperatorDef& def) override {
     return SingleGradientDef(
         "SoftmaxGradient", "",
         vector<string>{O(def, 0), GO(def, 0)},

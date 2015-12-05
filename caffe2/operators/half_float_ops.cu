@@ -64,7 +64,7 @@ REGISTER_CUDA_OPERATOR(FloatToHalf, FloatToHalfCUDA);
 REGISTER_CUDA_OPERATOR(HalfToFloat, HalfToFloatCUDA);
 
 struct GetFloatToHalfGradient : public GetGradientDefBase {
-  static vector<OperatorDef>* Create(const OperatorDef& def) {
+  vector<OperatorDef>* Create(const OperatorDef& def) override {
     return SingleGradientDef(
         "HalfToFloat", "",
         vector<string>{GO(def, 0)},
@@ -74,7 +74,7 @@ struct GetFloatToHalfGradient : public GetGradientDefBase {
 REGISTER_GRADIENT(FloatToHalf, GetFloatToHalfGradient);
 
 struct GetHalfToFloatGradient : public GetGradientDefBase {
-  static vector<OperatorDef>* Create(const OperatorDef& def) {
+  vector<OperatorDef>* Create(const OperatorDef& def) override {
     return SingleGradientDef(
         "FloatToHalf", "",
         vector<string>{GO(def, 0)},
