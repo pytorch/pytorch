@@ -19,7 +19,7 @@ SHOULD_NOT_DO_GRADIENT(Print);
 SHOULD_NOT_DO_GRADIENT(PrintInt);
 
 struct GetFlattenGradient : public GetGradientDefBase {
-  static vector<OperatorDef>* Create(const OperatorDef& def) {
+  vector<OperatorDef>* Create(const OperatorDef& def) override {
     return SingleGradientDef(
         "ReshapeLike", "",
         vector<string>{GO(def, 0), I(def, 0)},
@@ -29,7 +29,7 @@ struct GetFlattenGradient : public GetGradientDefBase {
 REGISTER_GRADIENT(Flatten, GetFlattenGradient);
 
 struct GetAliasGradient : public GetGradientDefBase {
-  static vector<OperatorDef>* Create(const OperatorDef& def) {
+  vector<OperatorDef>* Create(const OperatorDef& def) override {
     return SingleGradientDef(
         "Alias", "",
         vector<string>{GO(def, 0)},
@@ -41,7 +41,7 @@ REGISTER_GRADIENT(Alias, GetAliasGradient);
 SHOULD_NOT_DO_GRADIENT(ReshapeLike);
 
 struct GetSplitGradient : public GetGradientDefBase {
-  static vector<OperatorDef>* Create(const OperatorDef& def) {
+  vector<OperatorDef>* Create(const OperatorDef& def) override {
     vector<string> grad_input;
     for (const string out : def.output()) {
       grad_input.push_back(GradientName(out));

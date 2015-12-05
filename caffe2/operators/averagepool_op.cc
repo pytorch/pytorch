@@ -193,7 +193,7 @@ REGISTER_CPU_OPERATOR(AveragePoolGradient,
                       AveragePoolGradientOp<float, CPUContext>);
 
 struct GetAveragePoolGradient : public GetGradientDefBase {
-  static vector<OperatorDef>* Create(const OperatorDef& def) {
+  vector<OperatorDef>* Create(const OperatorDef& def) override {
     return SingleGradientDef(
         "AveragePoolGradient", "",
         vector<string>{I(def, 0), GO(def, 0)},

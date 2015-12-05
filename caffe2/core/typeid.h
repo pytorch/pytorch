@@ -2,7 +2,9 @@
 #define CAFFE2_CORE_TYPEID_H_
 
 #include <map>
+#ifdef __GXX_RTTI
 #include <typeinfo>
+#endif
 
 #include "caffe2/core/common.h"
 
@@ -79,7 +81,13 @@ class TypeMeta {
    * Returns the printable name of the type.
    */
   template <typename T>
-  static const char* Name() { return typeid(T).name(); }
+  static const char* Name() {
+#ifdef __GXX_RTTI
+    return typeid(T).name();
+#else  // __GXX_RTTI
+    return "(RTTI disabled, cannot show name)";
+#endif
+  }
   /**
    * Returns a TypeMeta object that corresponds to the typename T.
    */

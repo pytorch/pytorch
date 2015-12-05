@@ -61,7 +61,7 @@ REGISTER_CPU_OPERATOR(Dropout, DropoutOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(DropoutGrad, DropoutGradientOp<float, CPUContext>);
 
 struct GetDropoutGradient : public GetGradientDefBase {
-  static vector<OperatorDef>* Create(const OperatorDef& def) {
+  vector<OperatorDef>* Create(const OperatorDef& def) override {
     return SingleGradientDef(
         "DropoutGrad", "",
         vector<string>{GO(def, 0), O(def, 1)},

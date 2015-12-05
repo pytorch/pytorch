@@ -38,7 +38,7 @@ REGISTER_CPU_OPERATOR(Clip, ClipOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(ClipGradient, ClipGradientOp<float, CPUContext>);
 
 struct GetClipGradient : public GetGradientDefBase {
-  static vector<OperatorDef>* Create(const OperatorDef& def) {
+  vector<OperatorDef>* Create(const OperatorDef& def) override {
     return SingleGradientDef(
         "ClipGradient", "",
         vector<string>{O(def, 0), GO(def, 0)},

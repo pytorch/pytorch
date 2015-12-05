@@ -6,7 +6,7 @@ REGISTER_CPU_OPERATOR(DepthSplit, DepthSplitOp<CPUContext>);
 REGISTER_CPU_OPERATOR(DepthConcat, DepthConcatOp<CPUContext>);
 
 struct GetDepthSplitGradient : public GetGradientDefBase {
-  static vector<OperatorDef>* Create(const OperatorDef& def) {
+  vector<OperatorDef>* Create(const OperatorDef& def) override {
     vector<string> grad_inputs;
     for (const string& out : def.output()) {
       grad_inputs.push_back(GradientName(out));
@@ -19,7 +19,7 @@ struct GetDepthSplitGradient : public GetGradientDefBase {
 REGISTER_GRADIENT(DepthSplit, GetDepthSplitGradient);
 
 struct GetDepthConcatGradient : public GetGradientDefBase {
-  static vector<OperatorDef>* Create(const OperatorDef& def) {
+  vector<OperatorDef>* Create(const OperatorDef& def) override {
     vector<string> grad_outputs;
     for (const string& in : def.input()) {
       grad_outputs.push_back(GradientName(in));

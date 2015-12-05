@@ -12,7 +12,7 @@ REGISTER_CPU_OPERATOR(WeightedSumLossGradient,
 
 
 struct GetAveragedLossGradient : public GetGradientDefBase {
-  static vector<OperatorDef>* Create(const OperatorDef& def) {
+  vector<OperatorDef>* Create(const OperatorDef& def) override {
     return SingleGradientDef(
         "AveragedLossGradient", "",
         vector<string>{I(def, 0)},
@@ -22,7 +22,7 @@ struct GetAveragedLossGradient : public GetGradientDefBase {
 REGISTER_GRADIENT(AveragedLoss, GetAveragedLossGradient);
 
 struct GetWeightedSumLossGradient : public GetGradientDefBase {
-  static vector<OperatorDef>* Create(const OperatorDef& def) {
+  vector<OperatorDef>* Create(const OperatorDef& def) override {
     return SingleGradientDef(
         "WeightedSumLossGradient", "",
         vector<string>{I(def, 1)},

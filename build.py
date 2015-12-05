@@ -41,6 +41,11 @@ class Config(object):
     # True.
     USE_GLOG = False
 
+    # Whether to use RTTI or not. Note that this might not always work; to
+    # disable RTTI means that all your dependencies, most notably protobuf, have
+    # to be built without RTTI. If you don't know, leave USE_RTTI True.
+    USE_RTTI = False
+
     # Manually specified defines.
     DEFINES = []
 

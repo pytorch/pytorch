@@ -7,7 +7,7 @@ REGISTER_CPU_OPERATOR(Conv, ConvOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(ConvGradient, ConvGradientOp<float, CPUContext>);
 
 struct GetConvGradient : public GetGradientDefBase {
-  static vector<OperatorDef>* Create(const OperatorDef& def) {
+  vector<OperatorDef>* Create(const OperatorDef& def) override {
     CAFFE_CHECK_EQ(def.input_size(), 3);
     return SingleGradientDef(
         "ConvGradient", "",

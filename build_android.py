@@ -31,6 +31,11 @@ class Config(object):
     # True.
     USE_GLOG = False
 
+    # Whether to use RTTI or not. Note that this might not always work; to
+    # disable RTTI means that all your dependencies, most notably protobuf, have
+    # to be built without RTTI. If you don't know, leave USE_RTTI True.
+    USE_RTTI = False
+
     # Manually specified defines.
     DEFINES = []
 
@@ -46,9 +51,7 @@ class Config(object):
     CFLAGS = []
 
     # Additional link flags you would like to add to the compilation.
-    LINKFLAGS = [
-        "-pie",
-    ]
+    LINKFLAGS = []
 
     ###########################################################################
     # (optional) CUDA. If you do not specify this, the GPU part of Caffe2 will
@@ -107,7 +110,7 @@ class Config(object):
     # build command, do it here.
     ENVIRONMENTAL_VARS = {}
     # Optimization flags: -O2 in default.
-    OPTIMIZATION_FLAGS = ["-O2"]
+    OPTIMIZATION_FLAGS = ["-Os"]
 
 
 # brew.py
