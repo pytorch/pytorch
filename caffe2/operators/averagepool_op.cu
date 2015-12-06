@@ -179,7 +179,7 @@ bool AveragePoolOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
 template <>
 bool AveragePoolGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   auto& X = Input(0);
-  auto& dY = Input(1);
+  auto& dY = Input(2);
   CAFFE_CHECK_EQ(dY.ndim(), 4);
   auto* dX = Output(0);
   dX->ReshapeLike(X);
@@ -196,7 +196,7 @@ bool AveragePoolGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
 template <>
 bool AveragePoolGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   auto& X = Input(0);
-  auto& dY = Input(1);
+  auto& dY = Input(2);
   CAFFE_CHECK_EQ(dY.ndim(), 4);
   auto* dX = Output(0);
   dX->ReshapeLike(X);

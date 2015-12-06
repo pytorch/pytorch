@@ -97,7 +97,7 @@ bool AveragePoolOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
 template <>
 bool AveragePoolGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   auto& X = Input(0);
-  auto& dY = Input(1);
+  auto& dY = Input(2);
   auto* dX = Output(0);
   // TODO(Yangqing): Add shape checks.
   dX->ReshapeLike(X);
@@ -143,7 +143,7 @@ bool AveragePoolGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
 template <>
 bool AveragePoolGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   auto& X = Input(0);
-  auto& dY = Input(1);
+  auto& dY = Input(2);
   CAFFE_CHECK_EQ(dY.ndim(), 4);
   auto* dX = Output(0);
   // TODO(Yangqing): Add shape checks.
@@ -196,7 +196,7 @@ struct GetAveragePoolGradient : public GetGradientDefBase {
   vector<OperatorDef>* Create(const OperatorDef& def) override {
     return SingleGradientDef(
         "AveragePoolGradient", "",
-        vector<string>{I(def, 0), GO(def, 0)},
+        vector<string>{I(def, 0), O(def, 0), GO(def, 0)},
         vector<string>{GI(def, 0)});
   }
 };
