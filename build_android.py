@@ -18,7 +18,7 @@ class Config(object):
 
     USE_SYSTEM_PROTOBUF = False
     PROTOC_BINARY = 'brewtool/prebuilt/protoc-Linux-x86_64'
-    USE_LITE_PROTO = True
+    USE_LITE_PROTO = False
 
     # Eigen: Eigen is a third party library that Caffe2 uses for some numerical
     # operations. If you have eigen installed in your system, you can simply use
