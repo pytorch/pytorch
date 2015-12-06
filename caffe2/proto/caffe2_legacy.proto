@@ -26,5 +26,7 @@ enum LegacyPadding {
   // additional output. If you set LegacyPadding to this, we will compute the
   // equivalent padding strategy in caffe2 so that the output size is
   // backward compatible with Caffe.
+  // THIS IS NOW DEPRECATED. ANY non-conventional use has to be manually
+  // converted.
   CAFFE_LEGACY_POOLING = 3;
 }
