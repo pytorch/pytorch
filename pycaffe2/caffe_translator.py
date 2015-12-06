@@ -220,7 +220,11 @@ def TranslatePool(layer, pretrained_blobs):
   AddArgument(caffe_op, "kernel", int(param.kernel_size))
   AddArgument(caffe_op, "pad", int(param.pad))
   AddArgument(caffe_op, "order", "NCHW")
-  AddArgument(caffe_op, "legacy_pad", caffe2_legacy_pb2.CAFFE_LEGACY_POOLING)
+  # TODO: Figure out how we deal with the legacy padding behavior. For now,
+  # we will silently ignore the legacy padding behavior and hope for the best.
+  # Basically, we will need to explicitly run a Caffe script to figure out if
+  # the legacy padding is triggered, and deal with that explicitly.
+  #AddArgument(caffe_op, "legacy_pad", caffe2_legacy_pb2.CAFFE_LEGACY_POOLING)
   return caffe_op, []
 
 @CacaRegistry.Register("LRN")

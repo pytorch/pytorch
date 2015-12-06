@@ -169,62 +169,37 @@ class ConvPoolOpBase : public Operator<Context> {
   inline void ComputeSizeAndPad(
       const int in_size, const int stride, const int kernel,
       int* pad_head, int* pad_tail, int* out_size) {
-    if (legacy_pad_ == LegacyPadding::NOTSET) {
-      // We will just use the direct padding head and tail values, but we
-      // will verify that they are non-negative.
-      CAFFE_CHECK_GE(*pad_head, 0);
-      CAFFE_CHECK_GE(*pad_tail, 0);
-      *out_size = static_cast<int>(
-          static_cast<float>(in_size + *pad_head + *pad_tail - kernel) / stride
-          + 1);
-    } else if (legacy_pad_ == LegacyPadding::CAFFE_LEGACY_POOLING) {
-      // This is in order to adapt Caffe's pooling padding case. In this case,
-      // we will only use pad_head and will compute pad_tail to match the
-      // old caffe pooling strategy.
-      CAFFE_CHECK_GE(*pad_head, 0);
-      // Here, notice that caffe casts UP while caffe2 casts DOWN for the
-      // output size computation.
-      *out_size = std::ceil(
-          static_cast<float>(in_size + *pad_head * 2 - kernel) / stride
-          + 1);
-      // If we have padding, ensure that the last pooling starts strictly
-      // inside the image (instead of at the padding); otherwise clip the last.
-      if (*pad_head > 0 && (*out_size - 1) * stride >= in_size + *pad_head) {
-        --*out_size;
-      }
-      // Now, compare the output size with the standard Caffe2 output size.
-      int standard_out_size = static_cast<int>(
-          static_cast<float>(in_size + *pad_head * 2 - kernel) / stride
-          + 1);
-      CAFFE_CHECK_GE(*out_size, standard_out_size)
-          << "This should not happen. If this happens, double check the logic "
-          << "above.";
-      *pad_tail = *pad_head + stride * (*out_size - standard_out_size);
-    } else {
-      int pad_needed = 0;
-      switch (legacy_pad_) {
+    switch (legacy_pad_) {
+      case LegacyPadding::NOTSET:
+        // We will just use the direct padding head and tail values, but we
+        // will verify that they are non-negative.
+        CAFFE_CHECK_GE(*pad_head, 0);
+        CAFFE_CHECK_GE(*pad_tail, 0);
+        *out_size = static_cast<int>(
+            static_cast<float>(in_size + *pad_head + *pad_tail - kernel) / stride
+            + 1);
+        break;
       case LegacyPadding::VALID:
+        *pad_head = 0;
+        *pad_tail = 0;
+        *out_size = (in_size - kernel) / stride + 1;
         break;
       case LegacyPadding::SAME:
       {
-        int legacy_target_size =
-            std::ceil(static_cast<float>(in_size) / stride);
-        pad_needed = (legacy_target_size - 1) * stride + kernel - in_size;
+        int legacy_target_size = (in_size + stride - 1) / stride;
+        int pad_needed = (legacy_target_size - 1) * stride + kernel - in_size;
+        if (CAFFE2_PAD_HEAD_MORE) {
+          *pad_head = (pad_needed + 1) / 2;
+        } else {
+          *pad_head = pad_needed / 2;
+        }
+        *pad_tail = pad_needed - *pad_head;
+        *out_size = (in_size + pad_needed - kernel) / stride + 1;
         break;
       }
-      default:
-        CAFFE_LOG_FATAL << "Unsupported raw pad value.";
-      }
-      // In legacy padding, if there is an odd padding value, we will need
-      // to pad more on the tail side.
-      if (CAFFE2_PAD_HEAD_MORE) {
-        *pad_head = (pad_needed + 1) / 2;
-      } else {
-        *pad_head = pad_needed / 2;
-      }
-      *pad_tail = pad_needed - *pad_head;
-      *out_size = static_cast<int>(
-          static_cast<float>(in_size + pad_needed - kernel) / stride + 1);
+      case LegacyPadding::CAFFE_LEGACY_POOLING:
+        CAFFE_LOG_FATAL << "CAFFE_LEGACY_POOLING is no longer supported.";
+        break;
     }
   }
 
@@ -233,7 +208,7 @@ class ConvPoolOpBase : public Operator<Context> {
 };
 
 #define USE_CONV_POOL_BASE_FUNCTIONS                                           \
-  USE_OPERATOR_CONTEXT_FUNCTIONS;                                                 \
+  USE_OPERATOR_CONTEXT_FUNCTIONS;                                              \
   using ConvPoolOpBase<Context>::pad_t_;                                       \
   using ConvPoolOpBase<Context>::pad_l_;                                       \
   using ConvPoolOpBase<Context>::pad_b_;                                       \
