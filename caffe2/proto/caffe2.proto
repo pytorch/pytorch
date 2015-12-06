@@ -1,8 +1,4 @@
-syntax = "proto2";
-
 package caffe2;
-
-// option optimize_for = LITE_RUNTIME;
 
 message TensorProto {
   // The dimensions in the tensor.
