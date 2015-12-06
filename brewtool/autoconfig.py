@@ -323,7 +323,7 @@ class Env(object):
             ['-L' + s for s in self.LIBDIRS] + ['{src}'] +
             ['-l' + s for s in self.LIBS])
         self.TEMPLATE_LINK_BINARY = ' '.join(
-            [Config.CC, '-o', '{dst}'] + self.LINKFLAGS +
+            [Config.CC, '-pie -o', '{dst}'] + self.LINKFLAGS +
             ['-L' + s for s in self.LIBDIRS] + ['{src}'] +
             ['-l' + s for s in self.LIBS])
         self.TEMPLATE_CC_TEST = ' '.join(
