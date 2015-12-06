@@ -4,7 +4,7 @@
 
 STANDALONE_TCHAIN_ROOT = (
     '/home/jiayq/NVPACK/android-ndk-r10e/toolchains/'
-    'arm-linux-androideabi-4.8/gen_standalone/linux-x86_64/')
+    'arm-linux-androideabi-4.6/gen_standalone/linux-x86_64/')
 
 
 class Config(object):
@@ -59,17 +59,22 @@ class Config(object):
     # not be available.
     ############################################################################
     # Specify the cuda directory.
-    CUDA_DIR = "/home/jiayq/NVPACK/cuda-7.0"
+    CUDA_DIR = "/home/jiayq/NVPACK/cuda-6.5"
     # If you are cross compiling, you may need to add paths where the cuda
     # libraries for the target platform can be found. Otherwise, leave it empty.
     MANUAL_CUDA_LIB_DIRS = [
-        "/home/jiayq/NVPACK/cuda-7.0/targets/armv7-linux-androideabi/lib"
+        "/home/jiayq/NVPACK/cuda-6.5/targets/armv7-linux-androideabi/lib"
     ]
     CUDA_GENCODE = [
         'arch=compute_32,code=sm_32',
     ]
     # additional CUDA cflags to pass to nvcc.
-    CUDA_CFLAGS = ["-m32"]
+    CUDA_CFLAGS = [
+        "-m32",
+        "-target-cpu-arch=ARM",
+        "-target-os-variant=Android",
+        '-Xptxas -dlcm=ca',
+    ]
     # You can choose to add the path of the cuda libraries to the rpath, so that
     # during runtime you do not need to hard-code the library paths. You can,
     # of course, set this to False.

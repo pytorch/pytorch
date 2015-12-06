@@ -835,12 +835,14 @@ inline int WireFormatLite::EnumSize(int value) {
 }
 
 inline int WireFormatLite::StringSize(const string& value) {
-  return io::CodedOutputStream::VarintSize32(value.size()) +
-         value.size();
+  return static_cast<int>(
+      io::CodedOutputStream::VarintSize32(static_cast<uint32>(value.size())) +
+      value.size());
 }
 inline int WireFormatLite::BytesSize(const string& value) {
-  return io::CodedOutputStream::VarintSize32(value.size()) +
-         value.size();
+  return static_cast<int>(
+      io::CodedOutputStream::VarintSize32(static_cast<uint32>(value.size())) +
+      value.size());
 }
 
 
