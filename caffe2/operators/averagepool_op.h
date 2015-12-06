@@ -38,9 +38,11 @@ class AveragePoolGradientOp final :
   bool RunOnDeviceWithOrderNCHW() override;
   bool RunOnDeviceWithOrderNHWC() override;
 
-  // Input: X, Y_grad
+  // Input: X, Y, Y_grad. Y is in fact not used, but to keep compatibility
+  // with CuDNN we keep it here. Definitely not optimal, but probably does not
+  // hurt that much.
   // Output: X_grad
-  INPUT_OUTPUT_STATS(2, 2, 1, 1);
+  INPUT_OUTPUT_STATS(3, 3, 1, 1);
   DISABLE_COPY_AND_ASSIGN(AveragePoolGradientOp);
 };
 
