@@ -265,7 +265,14 @@ class Brewery(object):
 
 class BuildTarget(object):
     """A build target that can be executed with the Build() function."""
-    def __init__(self, name, srcs, other_files=[], deps=[], optional_deps=[]):
+    def __init__(self, name, srcs, other_files=None, deps=None,
+                 optional_deps=None):
+        if other_files is None:
+            other_files = []
+        if deps is None:
+            deps = []
+        if optional_deps is None:
+            optional_deps = []
         self.name = Brewery.RectifyTarget(name)
         self.srcs = [Brewery.RectifyFileName(n) for n in sorted(srcs)]
         self.all_files = self.srcs + [
@@ -379,6 +386,9 @@ def MergeOrderedObjs(dep_lists):
 # A hard-coded name that specifies the google protocol buffer compiler - this
 # is required for proto libraries.
 PROTOC_TARGET = "//third_party/google:protoc"
+PROTOBUF_LITE_TARGET = "//third_party/google:protobuf_lite"
+PROTOBUF_TARGET = "//third_party/google:protobuf"
+
 # A hard-coded name that specifies the cuda dependency.
 CUDA_TARGET = "//third_party/cuda:cuda"
 
@@ -389,20 +399,46 @@ class proto_library(BuildTarget):
     A protobuffer library builds a set of protobuffer source files to its cc and
     python source files, as well as the static library named "libname.a".
     """
-    def __init__(self, name, srcs, deps=[], **kwargs):
-        if PROTOC_TARGET not in deps:
-            deps.append(PROTOC_TARGET)
+    def __init__(self, name, srcs, deps=None, **kwargs):
+        if deps is None:
+            deps = []
+        if (PROTOC_TARGET in deps or PROTOBUF_LITE_TARGET in deps
+                or PROTOBUF_TARGET in deps):
+            raise RuntimeError('')
+            BuildFatal("For proto_library targets, you should not manually add "
+                       "the third party protobuf targets. We automatically "
+                       "figure it out depending on your compilation config.")
+        # Determine what protobuf we want to depend on
+        if Brewery.Env.Config.USE_LITE_PROTO:
+            self.optimize_option = "LITE_RUNTIME"
+            deps.append(PROTOBUF_LITE_TARGET)
+        else:
+            self.optimize_option = "SPEED"
+            deps.append(PROTOBUF_TARGET)
         BuildTarget.__init__(self, name, srcs, deps=deps, **kwargs)
 
+    def AddOptimizationOption(self, name):
+        with open(name, 'r') as fid:
+            content = fid.read()
+        with open(name, 'w') as fid:
+            fid.write(
+                'option optimize_for = {0};\n'.format(self.optimize_option))
+            fid.write(content)
+
     def SetUp(self):
-        Brewery.MakeGenDirs(self.srcs)
-        pbcc_files = [Brewery.GenFilename(f, 'pb.cc') for f in self.srcs]
-        pbo_files = [Brewery.GenFilename(f, 'pb.o') for f in self.srcs]
+        Brewery.CopyToGenDir(self.srcs)
+        gen_srcs = [Brewery.GenFilename(s) for s in self.srcs]
+        # Depending on whether we are building lite or full proto, we add the
+        # optimization flags to the source file.
+        for name in gen_srcs:
+            self.AddOptimizationOption(name)
+        pbcc_files = [Brewery.GenFilename(f, 'pb.cc') for f in gen_srcs]
+        pbo_files = [Brewery.GenFilename(f, 'pb.o') for f in gen_srcs]
         self.cc_obj_files = pbo_files + MergeOrderedObjs(
             [Brewery.Get(dep).cc_obj_files for dep in self.deps])
         self.command_groups = [
             # protocol buffer commands
-            [Brewery.Env.protoc(s) for s in self.srcs],
+            [Brewery.Env.protoc(s) for s in gen_srcs],
             # cc commands
             [Brewery.Env.cc(s, d) for s, d in zip(pbcc_files, pbo_files)],
         ]
@@ -413,9 +449,13 @@ class proto_library(BuildTarget):
 
 
 class cc_target(BuildTarget):
-    def __init__(self, name, srcs, hdrs=[], deps=[], build_shared=False,
+    def __init__(self, name, srcs, hdrs=None, deps=None, build_shared=False,
                  build_binary=False, is_test=False, whole_archive=False,
                  **kwargs):
+        if hdrs is None:
+            hdrs = []
+        if deps is None:
+            deps = []
         BuildTarget.__init__(self, name, srcs, other_files=hdrs,
                              deps=deps, **kwargs)
         self.hdrs = [Brewery.RectifyFileName(s) for s in hdrs]
@@ -504,7 +544,7 @@ def cc_test(*args, **kwargs):
 
 
 class cc_headers(BuildTarget):
-    def __init__(self, name, srcs, deps=[], **kwargs):
+    def __init__(self, name, srcs, deps=None, **kwargs):
         BuildTarget.__init__(self, name, srcs, deps=deps, **kwargs)
 
     def SetUp(self):
@@ -514,7 +554,7 @@ class cc_headers(BuildTarget):
 
 
 class python_cc_extension(BuildTarget):
-    def __init__(self, name, srcs, deps=[], **kwargs):
+    def __init__(self, name, srcs, deps=None, **kwargs):
         BuildTarget.__init__(self, name, srcs, deps=deps, **kwargs)
 
     def SetUp(self):
@@ -552,8 +592,10 @@ class mpi_test(cc_target):
 
 
 class cuda_library(BuildTarget):
-    def __init__(self, name, srcs, hdrs=[], deps=[],
+    def __init__(self, name, srcs, hdrs=None, deps=None,
                  whole_archive=False, **kwargs):
+        if hdrs is None:
+            hdrs = []
         BuildTarget.__init__(self, name, srcs, other_files=hdrs,
                              deps=deps, **kwargs)
         self.hdrs = [Brewery.RectifyFileName(s) for s in hdrs]
@@ -587,7 +629,7 @@ class cuda_library(BuildTarget):
 
 
 class filegroup(BuildTarget):
-    def __init__(self, name, srcs, deps=[], **kwargs):
+    def __init__(self, name, srcs, deps=None, **kwargs):
         self.cc_obj_files = []
         BuildTarget.__init__(self, name, srcs, deps=deps, **kwargs)
 
@@ -600,7 +642,7 @@ def py_library(*args, **kwargs):
 
 
 class py_test(BuildTarget):
-    def __init__(self, name, srcs, deps=[], **kwargs):
+    def __init__(self, name, srcs, deps=None, **kwargs):
         BuildTarget.__init__(self, name, srcs, deps=deps, **kwargs)
 
     def SetUp(self):
@@ -616,7 +658,7 @@ class shell_script(BuildTarget):
     """Shell scripts are directly run to generate data files. It is run from the
     root of the gendir.
     """
-    def __init__(self, name, srcs, commands, deps=[], **kwargs):
+    def __init__(self, name, srcs, commands, deps=None, **kwargs):
         BuildTarget.__init__(self, name, srcs, deps=deps, **kwargs)
         self.cwd = Brewery.CWD
         self.commands = [
@@ -645,7 +687,7 @@ class cc_thirdparty_target(BuildTarget):
     """cc_thirdparty_target does nothing but specifying what link targets such
     third party library requires. It should not run any script.
     """
-    def __init__(self, name, cc_obj_files, deps=[], **kwargs):
+    def __init__(self, name, cc_obj_files, deps=None, **kwargs):
         BuildTarget.__init__(self, name, srcs=["BREW"], deps=deps, **kwargs)
         self.cc_obj_files = cc_obj_files
 

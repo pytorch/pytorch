@@ -18,6 +18,7 @@ class Config(object):
 
     USE_SYSTEM_PROTOBUF = False
     PROTOC_BINARY = 'brewtool/prebuilt/protoc-Linux-x86_64'
+    USE_LITE_PROTO = True
 
     # Eigen: Eigen is a third party library that Caffe2 uses for some numerical
     # operations. If you have eigen installed in your system, you can simply use
@@ -62,7 +63,7 @@ class Config(object):
     # If you are cross compiling, you may need to add paths where the cuda
     # libraries for the target platform can be found. Otherwise, leave it empty.
     MANUAL_CUDA_LIB_DIRS = [
-        "/home/jiayq/NVPACK/cuda-6.5/targets/armv7-linux-androideabi/lib"
+        "/home/jiayq/NVPACK/cuda-7.0/targets/armv7-linux-androideabi/lib"
     ]
     CUDA_GENCODE = [
         'arch=compute_32,code=sm_32',
@@ -74,7 +75,7 @@ class Config(object):
     # of course, set this to False.
     CUDA_ADD_TO_RPATH = False
     # Specify if you want to link cuda as static libraries.
-    LINK_CUDA_STATIC = False
+    LINK_CUDA_STATIC = True
 
     ############################################################################
     # (optional) MPI setting.

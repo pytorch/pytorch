@@ -2,7 +2,6 @@
 """
 import atexit
 import os
-import pprint
 import re
 import shlex
 import shutil
@@ -199,6 +198,10 @@ class Env(object):
             # If we are building with GLOG, enable the glog macro.
             self.DEFINES.append("-DCAFFE2_USE_GOOGLE_GLOG")
 
+        # Proto-lite or Proto.
+        if Config.USE_LITE_PROTO:
+            self.DEFINES.append("-DCAFFE2_USE_LITE_PROTO")
+
         # RTTI
         if not Config.USE_RTTI:
             # If we are building protobuf, disable RTTI.
@@ -307,7 +310,7 @@ class Env(object):
         # Now, after all the above commands, we will assemble the templates used
         # for all the commands.
         self.TEMPLATE_PROTOC = ' '.join(
-            [Config.PROTOC_BINARY, '-I.', '--cpp_out', self.GENDIR,
+            [Config.PROTOC_BINARY, '-I' + self.GENDIR, '--cpp_out', self.GENDIR,
              '--python_out', self.GENDIR, '{src}'])
         self.TEMPLATE_CC = ' '.join(
             [Config.CC] + self.DEFINES + self.CFLAGS + [self.CPP11_FLAG] +

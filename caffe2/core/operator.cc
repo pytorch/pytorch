@@ -172,7 +172,7 @@ vector<OperatorDef>* CreateGradientDefsInternal(
     }
   }
   for (const OperatorDef& grad_def : *grad_defs) {
-    CAFFE_VLOG(1) << "Gradient: " << grad_def.DebugString();
+    CAFFE_VLOG(1) << "Gradient: " << ProtoDebugString(grad_def);
   }
   delete obj;
   return grad_defs;

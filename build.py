@@ -29,6 +29,12 @@ class Config(object):
     # the built protoc compiler will not work on the host, in which case you
     # will need to provide a protoc binary that can run on the host environment.
 
+    # Choose if Caffe2 uses only lite proto or not. Note that this will turn off
+    # quite a few capabilities in Caffe2's generated protobuf, notably the text
+    # format support. But, if you are using lite proto already, you don't want
+    # text format anyway, do you?
+    USE_LITE_PROTO = False
+
     # Eigen: Eigen is a third party library that Caffe2 uses for some numerical
     # operations. If you have eigen installed in your system, you can simply use
     # USE_SYSTEM_EIGEN = True. Otherwise (for example when you are cross

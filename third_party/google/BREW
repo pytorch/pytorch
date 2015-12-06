@@ -2,6 +2,10 @@
 if Brewery.Env.Config.USE_SYSTEM_PROTOBUF:
   # Use system-installed protobuf.
   cc_thirdparty_target(
+    name = "protobuf_lite",
+    cc_obj_files=["-lprotobuf-lite"],
+  )
+  cc_thirdparty_target(
     name = "protobuf",
     cc_obj_files=["-lprotobuf"],
   )

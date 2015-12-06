@@ -3,9 +3,6 @@
 proto_library(
     name = 'caffe2_proto',
     srcs = Glob(['*.proto']),
-    deps = [
-      "//third_party/google:protobuf",
-    ]
 )
 
 filegroup(
