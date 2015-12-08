@@ -33,7 +33,7 @@ shell_script(
           "--input_folder=data/lena/ "
           "--list_file=data/lena/lena_toy_leveldb.txt "
           "--output_db_name=data/lena/toy_leveldb_raw "
-          "--raw --scale=256",
+          "--raw=True --scale=256",
   ],
   deps = [
       ":lena",

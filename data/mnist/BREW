@@ -29,13 +29,13 @@ for db in ["minidb", "leveldb", "lmdb"]:
             "--image_file=data/mnist/train-images-idx3-ubyte "
             "--label_file=data/mnist/train-labels-idx1-ubyte "
             "--output_file=data/mnist/mnist-train-nchw-%s "
-            "--channel_first "
+            "--channel_first=True "
             "--db=%s" % (db, db),
         "caffe2/binaries/make_mnist_db "
             "--image_file=data/mnist/t10k-images-idx3-ubyte "
             "--label_file=data/mnist/t10k-labels-idx1-ubyte "
             "--output_file=data/mnist/mnist-test-nchw-%s "
-            "--channel_first "
+            "--channel_first=True "
             "--db=%s" % (db, db),
     ],
     deps = [
