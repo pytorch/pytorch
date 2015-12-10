@@ -264,6 +264,8 @@ class Env(object):
         ret, out = GetSubprocessOutput([NVCC, "--version"], self.ENV)
         if ret != 0:
             BuildWarning("NVCC not found. I will not build CUDA.")
+            # When nvcc is not present, do not build pycaffe2 with cuda.
+            self.DEFINES.append('-DPYCAFFE2_CPU_ONLY')
         else:
             # Figure out all CUDA details.
             version = re.search('release \d', out)

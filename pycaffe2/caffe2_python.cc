@@ -514,6 +514,14 @@ PyObject* FeedBlob(PyObject* self, PyObject* args) {
   }
 }
 
+PyObject* HasGPUSupport(PyObject* self, PyObject* args) {
+#ifdef PYCAFFE2_CPU_ONLY
+  return Py_BuildValue("i", 0);
+#else  // PYCAFFE2_CPU_ONLY
+  return Py_BuildValue("i", 1);
+#endif  // PYCAFFE2_CPU_ONLY
+}
+
 #ifndef PYCAFFE2_CPU_ONLY
 // Here are functions that are purely GPU-based functions to be filled.
 
@@ -598,6 +606,7 @@ static PyMethodDef gPycaffe2Methods[] = {
   _PYNAME(CreateBlob),
   _PYNAME(FetchBlob),
   {"cc_FeedBlob", FeedBlob, METH_VARARGS, ""},
+  _PYNAME(HasGPUSupport),
 #ifndef PYCAFFE2_CPU_ONLY
   _PYNAME(NumberOfGPUs),
   _PYNAME(SetDefaultGPUID),

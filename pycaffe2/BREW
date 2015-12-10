@@ -8,18 +8,6 @@ python_cc_extension(
   ],
 )
 
-python_cc_extension(
-  name = "caffe2_python_nogpu",
-  srcs = ["caffe2_python.cc"],
-  deps = [
-      "//caffe2:all_available_ops",
-      "//caffe2/core:core",
-      "//caffe2/db:db",
-  ],
-  # TODO: fix.
-  #cflags=["-DPYCAFFE2_CPU_ONLY"],
-)
-
 py_library(
   name = "pycaffe2",
   srcs = [
@@ -37,16 +25,11 @@ py_library(
       "workspace.py",
   ],
   deps = [
-      ":caffe2_python_nogpu",
+      ":caffe2_python",
       "//caffe/proto:caffe_proto_py",
       "//caffe2/proto:caffe2_proto_py",
       "//pycaffe2/mint:mint",
   ],
-  # We add the caffe2_python with GPU dep as optional, so that
-  # we can at least have non-gpu pycaffe running.
-  optional_deps = [
-      ":caffe2_python",
-  ]
 )
 
 py_test(

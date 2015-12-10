@@ -9,11 +9,11 @@ from pycaffe2 import utils
 
 try:
   from .libcaffe2_python import *
-  has_gpu_support = True
+  has_gpu_support = HasGPUSupport()
 except ImportError as e:
-  print 'Pycaffe+GPU is not available. Using CPU only version.'
-  from .libcaffe2_python_nogpu import *
-  has_gpu_support = False
+  print('Cannot load pycaffe2. Error: {0}'.format(str(e)))
+  sys.exit(1)
+
 # libcaffe2_python contains a global Workspace that we need to properly delete
 # when exiting. Otherwise, cudart will cause segfaults sometimes.
 atexit.register(OnModuleExit)
@@ -22,7 +22,8 @@ try:
   import pycaffe2.mint.app
   _has_mint = True
 except ImportError as err:
-  print 'Mint is not available, possibly due to some downstream dependencies.'
+  print('Mint is not available, possibly due to some downstream '
+        'dependencies. Error is: {0}.'.format(str(err)))
   _has_mint = False
 
 def _GetFreeFlaskPort():
