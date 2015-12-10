@@ -2,7 +2,7 @@
 // source: google/protobuf/duration.proto
 
 #define INTERNAL_SUPPRESS_PROTOBUF_FIELD_DEPRECATION
-#include "google/protobuf/duration.pb.h"
+#include <google/protobuf/duration.pb.h>
 
 #include <algorithm>
 
@@ -111,10 +111,10 @@ static void MergeFromFail(int line) {
 
 // ===================================================================
 
-#ifndef _MSC_VER
+#if !defined(_MSC_VER) || _MSC_VER >= 1900
 const int Duration::kSecondsFieldNumber;
 const int Duration::kNanosFieldNumber;
-#endif  // !_MSC_VER
+#endif  // !defined(_MSC_VER) || _MSC_VER >= 1900
 
 Duration::Duration()
   : ::google::protobuf::Message(), _internal_metadata_(NULL) {

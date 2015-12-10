@@ -511,8 +511,7 @@ class LIBPROTOBUF_EXPORT Arena {
   struct is_arena_constructable :
       public google::protobuf::internal::integral_constant<bool,
           sizeof(InternalIsArenaConstructableHelper::ArenaConstructable<
-                 const T>(static_cast<const T*>(0))) ==
-          sizeof(char)> {
+                 const T>(static_cast<const T*>(0))) == sizeof(char)> {
   };
 
  private:
@@ -574,6 +573,7 @@ class LIBPROTOBUF_EXPORT Arena {
     return google::protobuf::internal::has_trivial_destructor<T>::value;
   }
 
+ private:
   struct InternalIsDestructorSkippableHelper {
     template<typename U>
     static char DestructorSkippable(
@@ -582,6 +582,7 @@ class LIBPROTOBUF_EXPORT Arena {
     static double DestructorSkippable(...);
   };
 
+ public:
   // Helper typetrait that indicates whether the desctructor of type T should be
   // called when arena is destroyed at compile time. This is only to allow
   // construction of higher-level templated utilities.
@@ -778,10 +779,10 @@ class LIBPROTOBUF_EXPORT Arena {
   // which needs to declare google::protobuf::Map as friend of generated message.
   template <typename T>
   static void CreateInArenaStorage(T* ptr, Arena* arena) {
-    CreateInArenaStorageInternal(
-        ptr, arena, typename is_arena_constructable<T>::type());
-    RegisterDestructorInternal(
-        ptr, arena, typename is_destructor_skippable<T>::type());
+    CreateInArenaStorageInternal(ptr, arena,
+                                 typename is_arena_constructable<T>::type());
+    RegisterDestructorInternal(ptr, arena,
+                               typename is_destructor_skippable<T>::type());
   }
 
   template <typename T>

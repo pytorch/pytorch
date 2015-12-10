@@ -2,7 +2,7 @@
 // source: google/protobuf/empty.proto
 
 #define INTERNAL_SUPPRESS_PROTOBUF_FIELD_DEPRECATION
-#include "google/protobuf/empty.pb.h"
+#include <google/protobuf/empty.pb.h>
 
 #include <algorithm>
 
@@ -108,8 +108,8 @@ static void MergeFromFail(int line) {
 
 // ===================================================================
 
-#ifndef _MSC_VER
-#endif  // !_MSC_VER
+#if !defined(_MSC_VER) || _MSC_VER >= 1900
+#endif  // !defined(_MSC_VER) || _MSC_VER >= 1900
 
 Empty::Empty()
   : ::google::protobuf::Message(), _internal_metadata_(NULL) {

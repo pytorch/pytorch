@@ -27,8 +27,8 @@
 #include <google/protobuf/repeated_field.h>
 #include <google/protobuf/extension_set.h>
 #include <google/protobuf/unknown_field_set.h>
-#include "google/protobuf/source_context.pb.h"
-#include "google/protobuf/type.pb.h"
+#include <google/protobuf/source_context.pb.h>
+#include <google/protobuf/type.pb.h>
 // @@protoc_insertion_point(includes)
 
 namespace google {

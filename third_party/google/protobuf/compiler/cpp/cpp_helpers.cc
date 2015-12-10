@@ -54,6 +54,7 @@ namespace {
 
 static const char kAnyMessageName[] = "Any";
 static const char kAnyProtoFile[] = "google/protobuf/any.proto";
+static const char kGoogleProtobufPrefix[] = "google/protobuf/";
 
 string DotsToUnderscores(const string& name) {
   return StringReplace(name, ".", "_", true);
@@ -598,6 +599,10 @@ bool IsAnyMessage(const FileDescriptor* descriptor) {
 bool IsAnyMessage(const Descriptor* descriptor) {
   return descriptor->name() == kAnyMessageName &&
          descriptor->file()->name() == kAnyProtoFile;
+}
+
+bool IsWellKnownMessage(const FileDescriptor* descriptor) {
+  return !descriptor->name().compare(0, 16, kGoogleProtobufPrefix);
 }
 
 enum Utf8CheckMode {

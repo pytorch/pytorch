@@ -237,6 +237,7 @@ void FileGenerator::GeneratePBHeader(io::Printer* printer) {
 }
 
 void FileGenerator::GenerateSource(io::Printer* printer) {
+  bool well_known = IsWellKnownMessage(file_);
   string header =
       StripProto(file_->name()) + (options_.proto_h ? ".proto.h" : ".pb.h");
   printer->Print(
@@ -246,7 +247,7 @@ void FileGenerator::GenerateSource(io::Printer* printer) {
     // The generated code calls accessors that might be deprecated. We don't
     // want the compiler to warn in generated code.
     "#define INTERNAL_SUPPRESS_PROTOBUF_FIELD_DEPRECATION\n"
-    "#include \"$header$\"\n"
+    "#include $left$$header$$right$\n"
     "\n"
     "#include <algorithm>\n"    // for swap()
     "\n"
@@ -255,7 +256,9 @@ void FileGenerator::GenerateSource(io::Printer* printer) {
     "#include <google/protobuf/io/coded_stream.h>\n"
     "#include <google/protobuf/wire_format_lite_inl.h>\n",
     "filename", file_->name(),
-    "header", header);
+    "header", header,
+    "left", well_known ? "<" : "\"",
+    "right", well_known ? ">" : "\"");
 
   // Unknown fields implementation in lite mode uses StringOutputStream
   if (!UseUnknownFieldSet(file_) && file_->message_type_count() > 0) {
@@ -857,14 +860,16 @@ void FileGenerator::GenerateDependencyIncludes(io::Printer* printer) {
   }
 
   for (int i = 0; i < file_->dependency_count(); i++) {
+    bool well_known = IsWellKnownMessage(file_->dependency(i));
     const string& name = file_->dependency(i)->name();
     bool public_import = (public_import_names.count(name) != 0);
 
-
     printer->Print(
-      "#include \"$dependency$.pb.h\"$iwyu$\n",
+      "#include $left$$dependency$.pb.h$right$$iwyu$\n",
       "dependency", StripProto(name),
-      "iwyu", (public_import) ? "  // IWYU pragma: export" : "");
+      "iwyu", (public_import) ? "  // IWYU pragma: export" : "",
+      "left", well_known ? "<" : "\"",
+      "right", well_known ? ">" : "\"");
   }
 }
 

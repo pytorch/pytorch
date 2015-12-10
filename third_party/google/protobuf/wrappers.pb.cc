@@ -2,7 +2,7 @@
 // source: google/protobuf/wrappers.proto
 
 #define INTERNAL_SUPPRESS_PROTOBUF_FIELD_DEPRECATION
-#include "google/protobuf/wrappers.pb.h"
+#include <google/protobuf/wrappers.pb.h>
 
 #include <algorithm>
 
@@ -308,9 +308,9 @@ static void MergeFromFail(int line) {
 
 // ===================================================================
 
-#ifndef _MSC_VER
+#if !defined(_MSC_VER) || _MSC_VER >= 1900
 const int DoubleValue::kValueFieldNumber;
-#endif  // !_MSC_VER
+#endif  // !defined(_MSC_VER) || _MSC_VER >= 1900
 
 DoubleValue::DoubleValue()
   : ::google::protobuf::Message(), _internal_metadata_(NULL) {
@@ -532,9 +532,9 @@ void DoubleValue::clear_value() {
 
 // ===================================================================
 
-#ifndef _MSC_VER
+#if !defined(_MSC_VER) || _MSC_VER >= 1900
 const int FloatValue::kValueFieldNumber;
-#endif  // !_MSC_VER
+#endif  // !defined(_MSC_VER) || _MSC_VER >= 1900
 
 FloatValue::FloatValue()
   : ::google::protobuf::Message(), _internal_metadata_(NULL) {
@@ -756,9 +756,9 @@ void FloatValue::clear_value() {
 
 // ===================================================================
 
-#ifndef _MSC_VER
+#if !defined(_MSC_VER) || _MSC_VER >= 1900
 const int Int64Value::kValueFieldNumber;
-#endif  // !_MSC_VER
+#endif  // !defined(_MSC_VER) || _MSC_VER >= 1900
 
 Int64Value::Int64Value()
   : ::google::protobuf::Message(), _internal_metadata_(NULL) {
@@ -982,9 +982,9 @@ void Int64Value::clear_value() {
 
 // ===================================================================
 
-#ifndef _MSC_VER
+#if !defined(_MSC_VER) || _MSC_VER >= 1900
 const int UInt64Value::kValueFieldNumber;
-#endif  // !_MSC_VER
+#endif  // !defined(_MSC_VER) || _MSC_VER >= 1900
 
 UInt64Value::UInt64Value()
   : ::google::protobuf::Message(), _internal_metadata_(NULL) {
@@ -1208,9 +1208,9 @@ void UInt64Value::clear_value() {
 
 // ===================================================================
 
-#ifndef _MSC_VER
+#if !defined(_MSC_VER) || _MSC_VER >= 1900
 const int Int32Value::kValueFieldNumber;
-#endif  // !_MSC_VER
+#endif  // !defined(_MSC_VER) || _MSC_VER >= 1900
 
 Int32Value::Int32Value()
   : ::google::protobuf::Message(), _internal_metadata_(NULL) {
@@ -1434,9 +1434,9 @@ void Int32Value::clear_value() {
 
 // ===================================================================
 
-#ifndef _MSC_VER
+#if !defined(_MSC_VER) || _MSC_VER >= 1900
 const int UInt32Value::kValueFieldNumber;
-#endif  // !_MSC_VER
+#endif  // !defined(_MSC_VER) || _MSC_VER >= 1900
 
 UInt32Value::UInt32Value()
   : ::google::protobuf::Message(), _internal_metadata_(NULL) {
@@ -1660,9 +1660,9 @@ void UInt32Value::clear_value() {
 
 // ===================================================================
 
-#ifndef _MSC_VER
+#if !defined(_MSC_VER) || _MSC_VER >= 1900
 const int BoolValue::kValueFieldNumber;
-#endif  // !_MSC_VER
+#endif  // !defined(_MSC_VER) || _MSC_VER >= 1900
 
 BoolValue::BoolValue()
   : ::google::protobuf::Message(), _internal_metadata_(NULL) {
@@ -1884,9 +1884,9 @@ void BoolValue::clear_value() {
 
 // ===================================================================
 
-#ifndef _MSC_VER
+#if !defined(_MSC_VER) || _MSC_VER >= 1900
 const int StringValue::kValueFieldNumber;
-#endif  // !_MSC_VER
+#endif  // !defined(_MSC_VER) || _MSC_VER >= 1900
 
 StringValue::StringValue()
   : ::google::protobuf::Message(), _internal_metadata_(NULL) {
@@ -2155,9 +2155,9 @@ void StringValue::clear_value() {
 
 // ===================================================================
 
-#ifndef _MSC_VER
+#if !defined(_MSC_VER) || _MSC_VER >= 1900
 const int BytesValue::kValueFieldNumber;
-#endif  // !_MSC_VER
+#endif  // !defined(_MSC_VER) || _MSC_VER >= 1900
 
 BytesValue::BytesValue()
   : ::google::protobuf::Message(), _internal_metadata_(NULL) {

@@ -3364,7 +3364,7 @@ GenerateSerializeWithCachedSizesBody(io::Printer* printer, bool to_array) {
     } else {
       printer->Print(
         "output->WriteRaw(unknown_fields().data(),\n"
-        "                 unknown_fields().size());\n");
+        "                 static_cast<int>(unknown_fields().size()));\n");
     }
   }
 }

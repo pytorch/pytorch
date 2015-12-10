@@ -2,7 +2,7 @@
 // source: google/protobuf/any.proto
 
 #define INTERNAL_SUPPRESS_PROTOBUF_FIELD_DEPRECATION
-#include "google/protobuf/any.pb.h"
+#include <google/protobuf/any.pb.h>
 
 #include <algorithm>
 
@@ -119,10 +119,10 @@ bool Any::UnpackTo(::google::protobuf::Message* message) const {
   return _any_metadata_.UnpackTo(message);
 }
 
-#ifndef _MSC_VER
+#if !defined(_MSC_VER) || _MSC_VER >= 1900
 const int Any::kTypeUrlFieldNumber;
 const int Any::kValueFieldNumber;
-#endif  // !_MSC_VER
+#endif  // !defined(_MSC_VER) || _MSC_VER >= 1900
 
 Any::Any()
   : ::google::protobuf::Message(), _internal_metadata_(NULL), _any_metadata_(&type_url_, &value_) {

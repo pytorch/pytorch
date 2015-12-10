@@ -28,8 +28,8 @@
 #include <google/protobuf/extension_set.h>
 #include <google/protobuf/generated_enum_reflection.h>
 #include <google/protobuf/unknown_field_set.h>
-#include "google/protobuf/any.pb.h"
-#include "google/protobuf/source_context.pb.h"
+#include <google/protobuf/any.pb.h>
+#include <google/protobuf/source_context.pb.h>
 // @@protoc_insertion_point(includes)
 
 namespace google {
