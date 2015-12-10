@@ -9,7 +9,7 @@ from pycaffe2 import utils
 
 try:
   from .libcaffe2_python import *
-  has_gpu_support = HasGPUSupport()
+  has_gpu_support = bool(HasGPUSupport())
 except ImportError as e:
   print('Cannot load pycaffe2. Error: {0}'.format(str(e)))
   sys.exit(1)
