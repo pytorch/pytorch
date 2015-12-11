@@ -474,6 +474,12 @@ public:
     case ncclDouble:
       return ncclReduceScatterWithType<double>(sendbuff, recvbuff, recvcount,
           op, comm, stream);
+    case ncclInt64:
+      return ncclReduceScatterWithType<long long>(sendbuff, recvbuff, recvcount,
+          op, comm, stream);
+    case ncclUint64:
+      return ncclReduceScatterWithType<unsigned long long>(sendbuff, recvbuff, recvcount,
+          op, comm, stream);
     }
     return ncclInvalidType;
   }

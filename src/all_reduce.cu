@@ -489,6 +489,12 @@ public:
     case ncclDouble:
       return ncclAllReduceWithType<double>(sendbuff, recvbuff, count, op,
           comm, stream);
+    case ncclInt64:
+      return ncclAllReduceWithType<long long>(sendbuff, recvbuff, count, op,
+          comm, stream);
+    case ncclUint64:
+      return ncclAllReduceWithType<unsigned long long int>(sendbuff, recvbuff, count, op,
+          comm, stream);
     }
 
     return ncclInvalidType;

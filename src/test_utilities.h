@@ -89,6 +89,12 @@ void GenerateRandom<double>(curandGenerator_t generator, double * const dest,
   CURAND_CHK(curandGenerateUniformDouble(generator, dest, N));
 }
 
+template<>
+void GenerateRandom<unsigned long long>(curandGenerator_t generator, unsigned long long * const dest,
+    const int N) {
+  CURAND_CHK(curandGenerateLongLong(generator, dest, N));
+}
+
 
 template<typename T>
 void Randomize(T* const dest, const int N, const int randomSeed) {
@@ -96,6 +102,24 @@ void Randomize(T* const dest, const int N, const int randomSeed) {
   CURAND_CHK(curandCreateGenerator(&gen, CURAND_RNG_PSEUDO_MT19937));
   CURAND_CHK(curandSetPseudoRandomGeneratorSeed(gen, randomSeed));
   GenerateRandom<T>(gen, dest, N);
+  CURAND_CHK(curandDestroyGenerator(gen));
+  CUDACHECK(cudaDeviceSynchronize());
+}
+
+template<>
+void Randomize(unsigned long long* const dest, const int N, const int randomSeed) {
+  curandGenerator_t gen;
+  CURAND_CHK(curandCreateGenerator(&gen, CURAND_RNG_QUASI_SOBOL64));
+  GenerateRandom<unsigned long long>(gen, dest, N);
+  CURAND_CHK(curandDestroyGenerator(gen));
+  CUDACHECK(cudaDeviceSynchronize());
+}
+
+template<>
+void Randomize(long long* const dest, const int N, const int randomSeed) {
+  curandGenerator_t gen;
+  CURAND_CHK(curandCreateGenerator(&gen, CURAND_RNG_QUASI_SOBOL64));
+  GenerateRandom<unsigned long long>(gen, (unsigned long long *)dest, N);
   CURAND_CHK(curandDestroyGenerator(gen));
   CUDACHECK(cudaDeviceSynchronize());
 }
@@ -268,6 +292,8 @@ std::string TypeName(const ncclDataType_t type) {
 #endif
     case ncclFloat:  return "float";
     case ncclDouble: return "double";
+    case ncclInt64:  return "int64";
+    case ncclUint64: return "uint64";
     default:         return "unknown";
   }
 }

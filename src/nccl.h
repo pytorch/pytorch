@@ -117,7 +117,9 @@ typedef enum { ncclChar       = 0,
 #endif
                ncclFloat      = 3,
                ncclDouble     = 4,
-               nccl_NUM_TYPES = 5 } ncclDataType_t;
+               ncclInt64      = 5,
+               ncclUint64     = 6,
+               nccl_NUM_TYPES = 7 } ncclDataType_t;
 
 /* Reduces data arrays of length count in sendbuff into recvbuf using op operation.
  * recvbuf may be NULL on all calls except for root device.

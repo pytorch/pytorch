@@ -396,6 +396,10 @@ public:
       return ncclBcastWithType<float>(buff, count, root, comm, numUnroll, stream);
     case ncclDouble:
       return ncclBcastWithType<double>(buff, count, root, comm, numUnroll, stream);
+    case ncclInt64:
+      return ncclBcastWithType<long long>(buff, count, root, comm, numUnroll, stream);
+    case ncclUint64:
+      return ncclBcastWithType<unsigned long long>(buff, count, root, comm, numUnroll, stream);
     }
     return ncclInvalidType;
   }

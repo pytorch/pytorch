@@ -393,6 +393,10 @@ public:
       return ncclReduceWithType<float>(sendbuff, recvbuff, count, op, root, comm, stream);
     case ncclDouble:
       return ncclReduceWithType<double>(sendbuff, recvbuff, count, op, root, comm, stream);
+    case ncclInt64:
+      return ncclReduceWithType<long long>(sendbuff, recvbuff, count, op, root, comm, stream);
+    case ncclUint64:
+      return ncclReduceWithType<unsigned long long>(sendbuff, recvbuff, count, op, root, comm, stream);
     }
     return ncclInvalidType;
   }
