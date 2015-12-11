@@ -2,7 +2,9 @@
 
 #include "caffe2/core/net.h"
 #include "caffe2/core/operator.h"
+#include "caffe2/core/timer.h"
 #include "caffe2/proto/caffe2.pb.h"
+
 
 namespace caffe2 {
 
@@ -54,13 +56,45 @@ bool SimpleNet::Verify() {
 
 bool SimpleNet::Run() {
   CAFFE_VLOG(1) << "Running net.";
-  for (const auto& op : operators_) {
+  for (auto& op : operators_) {
     CAFFE_VLOG(1) << "Running operator " << op->def().name()
             << "(" << op->def().type() << ").";
-    // TODO(Yangqing): convert this sequential run to event-based.
     if (!op->Run()) return false;
   }
   return true;
+}
+
+void SimpleNet::TEST_Benchmark(const int warmup_runs, const int main_runs,
+                               const bool run_individual) {
+  CAFFE_LOG_INFO << "Starting benchmark.";
+  CAFFE_LOG_INFO << "Running warmup runs.";
+  CAFFE_CHECK_GE(warmup_runs, 0);
+  for (int i = 0; i < warmup_runs; ++i) {
+    CAFFE_CHECK(Run());
+  }
+
+  CAFFE_LOG_INFO << "Main runs.";
+  CAFFE_CHECK_GE(main_runs, 0);
+  Timer timer;
+  for (int i = 0; i < main_runs; ++i) {
+    CAFFE_CHECK(Run());
+  }
+  CAFFE_LOG_INFO << "Main run finished. Milliseconds per iter: "
+                 << timer.MilliSeconds() / main_runs;
+  int idx = 0;
+  if (run_individual) {
+    for (auto& op : operators_) {
+      CAFFE_LOG_INFO << "Running operator #" << idx << " ("
+                     << op->def().name() << ", " << op->def().type()
+                     << ")";
+      timer.Start();
+      for (int i = 0; i < main_runs; ++i) {
+        CAFFE_CHECK(op->Run());
+      }
+      CAFFE_LOG_INFO << "    Finished. Milliseconds per iter: "
+                     << timer.MilliSeconds() / main_runs;
+    }
+  }
 }
 
 DAGNet::DAGNet(const NetDef& net_def, Workspace* ws)
