@@ -27,6 +27,10 @@ class NetBase {
   virtual ~NetBase() {}
   virtual bool Verify() = 0;
   virtual bool Run() = 0;
+  virtual void TEST_Benchmark(const int warmup_runs, const int main_runs,
+                              const bool run_individual) {
+    CAFFE_LOG_ERROR << "Benchmark not implemented for this net type.";
+  }
 
   DISABLE_COPY_AND_ASSIGN(NetBase);
 };
@@ -44,6 +48,8 @@ class SimpleNet final : public NetBase {
   SimpleNet(const NetDef& net_def, Workspace* ws);
   bool Verify() override;
   bool Run() override;
+  void TEST_Benchmark(const int warmup_runs, const int main_runs,
+                      const bool run_individual) override;
 
  protected:
   vector<unique_ptr<OperatorBase> > operators_;
