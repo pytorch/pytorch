@@ -459,9 +459,6 @@ static ncclResult_t commBuildMaps(ncclComm_t comm, ncclUniqueId* commId, int ran
         commClearMaps(comm);
         return ncclUnhandledCudaError;
       }
-      if (shmUnlink(rankname) != ncclSuccess) {
-        INFO("rank %d failed to unlink sysmem beffer of rank %d, %s", rank, iRank, rankname);
-      }
       if (cudaHostGetDevicePointer(comm->remote+i, comm->cleanup[i].handle, 0) != cudaSuccess) {
         WARN("rank %d failed to obtain dev ptr for rank %d", rank, iRank);
         commClearMaps(comm);
