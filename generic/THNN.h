@@ -16,4 +16,17 @@ TH_API void THNN_(Abs_updateGradInput)(
           THTensor *gradOutput,
           THTensor *gradInput);
 
+TH_API void THNN_(AbsCriterion_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *target,
+          real *output,
+          bool sizeAverage);
+TH_API void THNN_(AbsCriterion_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *target,
+          THTensor *gradInput,
+          bool sizeAverage);
+
 #endif
