@@ -45,9 +45,14 @@ SimpleNet::SimpleNet(const NetDef& net_def, Workspace* ws)
 
 bool SimpleNet::Verify() {
   for (auto& op : operators_) {
+    if (op.get() == nullptr) {
+      CAFFE_LOG_ERROR << "Found empty operator.";
+      return false;
+    }
     CAFFE_VLOG(1) << "Verifying operator " << op->def().name()
             << "(" << op->def().type() << ").";
-    if (op.get() == nullptr || !op->Verify()) {
+    if (!op->Verify()) {
+      CAFFE_LOG_ERROR << "Failed to verify operator.";
       return false;
     }
   }
