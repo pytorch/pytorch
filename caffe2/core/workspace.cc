@@ -81,15 +81,15 @@ bool Workspace::RunNet(const string& name) {
 bool Workspace::RunOperatorOnce(const OperatorDef& op_def) {
   std::unique_ptr<OperatorBase> op(CreateOperator(op_def, this));
   if (op.get() == nullptr) {
-    CAFFE_LOG_ERROR << "Cannot create operator of type " << op_def.name();
+    CAFFE_LOG_ERROR << "Cannot create operator of type " << op_def.type();
     return false;
   }
   if (!op->Verify()) {
-    CAFFE_LOG_ERROR << "Error when setting up operator " << op_def.name();
+    CAFFE_LOG_ERROR << "Error when setting up operator " << op_def.type();
     return false;
   }
   if (!op->Run()) {
-    CAFFE_LOG_ERROR << "Error when running operator " << op_def.name();
+    CAFFE_LOG_ERROR << "Error when running operator " << op_def.type();
     return false;
   }
   return true;
