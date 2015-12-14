@@ -56,9 +56,11 @@ class CUDAContext {
   }
 
   inline bool FinishDeviceComputation() {
-    cudaError_t error = cudaStreamSynchronize(cuda_stream_);
+    cudaStreamSynchronize(cuda_stream_);
+    cudaError_t error = cudaGetLastError();
     if (error != cudaSuccess) {
-      CAFFE_LOG_ERROR << cudaGetErrorString(error);
+      CAFFE_LOG_ERROR << "Encountered CUDA error: "
+                      << cudaGetErrorString(error);
       return false;
     }
     return true;
