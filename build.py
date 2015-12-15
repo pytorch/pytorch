@@ -50,7 +50,7 @@ class Config(object):
     # Whether to use RTTI or not. Note that this might not always work; to
     # disable RTTI means that all your dependencies, most notably protobuf, have
     # to be built without RTTI. If you don't know, leave USE_RTTI True.
-    USE_RTTI = False
+    USE_RTTI = True
 
     # Manually specified defines.
     DEFINES = []
