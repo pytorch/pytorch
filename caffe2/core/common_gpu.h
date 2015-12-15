@@ -31,6 +31,7 @@ bool HasCudaGPU();
  * called, GPU 0 will be the default GPU id.
  */
 void SetDefaultGPUID(const int deviceid);
+
 /**
  * Gets the default GPU id for Caffe2.
  */
@@ -85,15 +86,35 @@ const char* curandGetErrorString(curandStatus_t error);
        i < (n);                                                                \
        i += blockDim.x * gridDim.x)
 
-// The number of threads Caffe uses for cuda. This is kind of legacy:
-// hard-coding the number of threads might not be an optimal case, and might
-// even fail for specific hardware platforms.
-// TODO(Yangqing): Yuck. Figure out a better way?
-const int CAFFE_CUDA_NUM_THREADS = 512;
+// The following helper functions are here so that you can write a kernel call
+// when you are not particularly interested in maxing out the kernels'
+// performance. Usually, this will give you a reasonable speed, but if you
+// really want to find the best performance, it is advised that you tune the
+// size of the blocks and grids more reasonably.
+// A legacy note: this is derived from the old good Caffe days, when I simply
+// hard-coded the number of threads and wanted to keep backward compability for
+// different computation capabilities.
+// For more info on CUDA compute capabilities, visit the NVidia website at:
+//    http://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#compute-capabilities
 
-// Compute the number of blocks needed to run N threads.
+// The number of cuda threads to use. 512 is used for backward compatibility,
+// and it is observed that setting it to 1024 usually does not bring much
+// performance gain (which makes sense, because warp size being 32 means that
+// blindly setting a huge block for a random kernel isn't optimal).
+constexpr int CAFFE_CUDA_NUM_THREADS = 512;
+// The maximum number of blocks to use in the default kernel call. We set it to
+// 32768 which would work for compute capability 2.x (where 65536 is the limit).
+// This number is very carelessly chosen. Ideally, one would like to look at
+// the hardware at runtime, and pick the number of blocks that makes most
+// sense for the specific runtime environment. This is a todo item.
+constexpr int CAFFE_MAXIMUM_NUM_BLOCKS = 32768;
+
+/**
+ * @brief Compute the number of blocks needed to run N threads.
+ */
 inline int CAFFE_GET_BLOCKS(const int N) {
-  return (N + CAFFE_CUDA_NUM_THREADS - 1) / CAFFE_CUDA_NUM_THREADS;
+  return std::min((N + CAFFE_CUDA_NUM_THREADS - 1) / CAFFE_CUDA_NUM_THREADS,
+                  CAFFE_MAXIMUM_NUM_BLOCKS);
 }
 
 }  // namespace caffe2
