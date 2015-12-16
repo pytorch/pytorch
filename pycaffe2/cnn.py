@@ -101,6 +101,10 @@ class CNNModelHelper(object):
     return self.net.DepthConcat(blobs_in, [blob_out, "_" + blob_out + "_condat_dims"],
                                 order=self.order)[0]
 
+  def Relu(self, blob_in, blob_out, **kwargs):
+    """Relu."""
+    return self.net.Relu(blob_in, blob_out, order=self.order, **kwargs)
+
   def AddGradientOperators(self):
     self.net.AddGradientOperators()
 

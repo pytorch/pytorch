@@ -207,6 +207,8 @@ def Benchmark(model_gen, order, batch_size, cudnn_limit, forward_only,
       op.engine = 'CUDNN'
       op.arg.add().CopyFrom(utils.MakeArgument('ws_nbytes_limit', cudnn_limit))
       op.arg.add().CopyFrom(utils.MakeArgument('shared_ws_name', 'cudnn_workspace'))
+    elif op.type in ['Relu', 'Softmax']:
+      op.engine = 'CUDNN'
   if forward_only:
     print 'Running forward only.'
   else:
@@ -243,6 +245,9 @@ def Benchmark(model_gen, order, batch_size, cudnn_limit, forward_only,
   for i in range(iterations):
     workspace.RunNet(model.net.Proto().name)
   print 'Spent: ', (time.time() - start) / iterations
+  print 'Layer-wise benchmark.'
+  workspace.BenchmarkNet(model.net.Proto().name, 10, 50, True)
+  print 'Done.'
 
 
 if __name__ == '__main__':

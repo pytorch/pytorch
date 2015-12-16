@@ -97,6 +97,7 @@ cc_library(
   name = "core_ops_cudnn",
   srcs = [
       "conv_op_cudnn.cc",
+      "relu_op_cudnn.cc",
       "softmax_op_cudnn.cc",
       "spatial_batch_norm_op_cudnn.cc",
   ],
