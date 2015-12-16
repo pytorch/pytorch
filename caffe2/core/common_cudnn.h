@@ -265,6 +265,12 @@ class CuDNNWorkspaceWrapper {
 
   std::mutex& mutex() { return mutex_; }
 
+  void Reset() {
+    if (data_) CUDAContext::Delete(data_);
+    data_ = nullptr;
+    nbytes_ = 0;
+  }
+
   void* Get(const size_t nbytes) {
     if (nbytes > nbytes_) {
       if (data_) CUDAContext::Delete(data_);
