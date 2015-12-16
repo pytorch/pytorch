@@ -87,17 +87,31 @@ void SimpleNet::TEST_Benchmark(const int warmup_runs, const int main_runs,
   CAFFE_LOG_INFO << "Main run finished. Milliseconds per iter: "
                  << timer.MilliSeconds() / main_runs;
   int idx = 0;
+  float total = 0.;
+  CaffeMap<string, float> time_per_op_type;
   if (run_individual) {
     for (auto& op : operators_) {
+      const string& op_type = op->def().type();
       CAFFE_LOG_INFO << "Running operator #" << idx << " ("
-                     << op->def().name() << ", " << op->def().type()
-                     << ")";
+                     << op->def().name() << ", " << op_type << ")";
       timer.Start();
       for (int i = 0; i < main_runs; ++i) {
         CAFFE_CHECK(op->Run());
       }
+      float spent = timer.MilliSeconds() / main_runs;
+      total += spent;
       CAFFE_LOG_INFO << "    Finished. Milliseconds per iter: "
-                     << timer.MilliSeconds() / main_runs;
+                     << spent;
+      //if (time_per_op_type.count(op_type) == 0) {
+      //  time_per_op_type[op_type] = 0.;
+      //}
+      time_per_op_type[op_type] += spent;
+      ++idx;
+    }
+    CAFFE_LOG_INFO << "Per-op run total: " << total;
+    CAFFE_LOG_INFO << "Time per operator type:";
+    for (const auto& item : time_per_op_type) {
+      CAFFE_LOG_INFO << "\t" << item.second << "\t" << item.first;
     }
   }
 }
