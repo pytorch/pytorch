@@ -652,9 +652,10 @@ void Col2im<float, CUDAContext, StorageOrder::NHWC>(
 }
 
 namespace {
+template <typename T>
 __global__ void CopyMatrixKernel(
-    const int M, const int N, const char* A, const int lda,
-    char* B, const int ldb) {
+    const int M, const int N, const T* A, const int lda,
+    T* B, const int ldb) {
   CUDA_1D_KERNEL_LOOP(i, M * N) {
     int r = i / N;
     int c = i % N;
@@ -667,10 +668,20 @@ template <>
 void CopyMatrix<CUDAContext>(
     const size_t itemsize, const int M, const int N, const void* A,
     const int lda, void* B, const int ldb, CUDAContext* context) {
-  CopyMatrixKernel<<<CAFFE_GET_BLOCKS(M * N), CAFFE_CUDA_NUM_THREADS, 0,
-                     context->cuda_stream()>>>(
-      M, N * itemsize, static_cast<const char*>(A), lda * itemsize,
-      static_cast<char*>(B), ldb * itemsize);
+  // We will specialize some paths so things could be faster.
+  if (itemsize == sizeof(float)) {
+    // This should be a catch-all that will deal with any item size.
+    CopyMatrixKernel<float><<<CAFFE_GET_BLOCKS(M * N), CAFFE_CUDA_NUM_THREADS,
+                              0, context->cuda_stream()>>>(
+        M, N, static_cast<const float*>(A), lda, static_cast<float*>(B), ldb);
+    // If needed, add more specialized paths here.
+  } else {
+    // This should be a catch-all that will deal with any item size.
+    CopyMatrixKernel<char><<<CAFFE_GET_BLOCKS(M * N), CAFFE_CUDA_NUM_THREADS, 0,
+                       context->cuda_stream()>>>(
+        M, N * itemsize, static_cast<const char*>(A), lda * itemsize,
+        static_cast<char*>(B), ldb * itemsize);
+  }
 }
 
 }  // namespace math
