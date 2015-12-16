@@ -333,6 +333,28 @@ PyObject* RunNet(PyObject* self, PyObject* args) {
   Py_RETURN_TRUE;
 }
 
+
+PyObject* BenchmarkNet(PyObject* self, PyObject* args) {
+  char* name;
+  int warmup_runs = 0;
+  int main_runs = 0;
+  PyObject* run_individual = nullptr;
+  if (!PyArg_ParseTuple(args, "siiO", &name, &warmup_runs,
+                        &main_runs, &run_individual)) {
+    PyErr_SetString(PyExc_ValueError,
+                    "Incorrect argument.");
+    return NULL;
+  }
+  caffe2::NetBase* net = gWorkspace->GetNet(caffe2::string(name));
+  if (net == nullptr) {
+    PyErr_SetString(PyExc_RuntimeError, "Cannot find network.");
+    return NULL;
+  }
+  net->TEST_Benchmark(warmup_runs, main_runs,
+                      PyObject_IsTrue(run_individual));
+  Py_RETURN_TRUE;
+}
+
 PyObject* DeleteNet(PyObject* self, PyObject* args) {
   char* name;
   if (!PyArg_ParseTuple(args, "s", &name)) {
@@ -598,6 +620,7 @@ static PyMethodDef gPycaffe2Methods[] = {
   _PYNAME(HasBlob),
   {"cc_CreateNet", CreateNet, METH_VARARGS, ""},
   _PYNAME(RunNet),
+  _PYNAME(BenchmarkNet),
   _PYNAME(DeleteNet),
   _PYNAME(Nets),
   {"cc_RunOperatorOnce", RunOperatorOnce, METH_VARARGS, ""},

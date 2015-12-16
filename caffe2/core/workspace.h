@@ -83,6 +83,12 @@ class Workspace {
    * nullptr is returned. The Workspace keeps ownership of the pointer.
    */
   NetBase* CreateNet(const NetDef& net_def);
+
+  /**
+   * Gets the pointer to a created net. The workspace keeps ownership of the
+   * network.
+   */
+  NetBase* GetNet(const string& net_name);
   /**
    * Deletes the instantiated network with the given name.
    */

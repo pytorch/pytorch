@@ -64,6 +64,14 @@ NetBase* Workspace::CreateNet(const NetDef& net_def) {
   return net_map_[net_def.name()].get();
 }
 
+NetBase* Workspace::GetNet(const string& name) {
+  if (!net_map_.count(name)) {
+    return nullptr;
+  } else {
+    return net_map_[name].get();
+  }
+}
+
 void Workspace::DeleteNet(const string& name) {
   if (net_map_.count(name)) {
     net_map_.erase(name);
