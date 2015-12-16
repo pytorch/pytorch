@@ -73,6 +73,9 @@ class Brewery(object):
     # The current working directory when working with build files. The target
     # prefix changes with cwd as well.
     _cwd = ''
+    
+    # Whether in test_mode or not. In default no testing.
+    is_test = False
 
     @classmethod
     def Get(cls, target):
@@ -249,6 +252,10 @@ class Brewery(object):
         # Find and parse all the build files in caffe's library.
         cls.FindAndParseBuildFiles()
         command = argv[1] if len(argv) > 1 else 'build'
+        if command == 'test':
+            cls.is_test = True
+            cls.Build(argv[2:])
+            cls.Finalize()
         if command == 'build':
             cls.Build(argv[2:])
             cls.Finalize()
@@ -523,9 +530,8 @@ class cc_target(BuildTarget):
                 [Brewery.Env.link_shared(
                     cc_obj_files, self._OutputName(True, True))])
 
-        if self.is_test:
+        if self.is_test and Brewery.is_test:
             # Runs the test.
-            # Should I move this command generation to autoconfig as well?
             self.command_groups.append(
                 [Brewery.Env.cc_test(self._OutputName())])
 
@@ -586,9 +592,10 @@ class mpi_test(cc_target):
 
     def SetUp(self):
         cc_target.SetUp(self)
-        self.command_groups.append(
-            [Brewery.Env.MPIRUN + ' -n ' + str(self.mpi_size) + ' ' +
-             Brewery.Env.cc_test(self._OutputName())])
+        if Brewery.is_test:
+            self.command_groups.append(
+                [Brewery.Env.MPIRUN + ' -n ' + str(self.mpi_size) + ' ' +
+                 Brewery.Env.cc_test(self._OutputName())])
 
 
 class cuda_library(BuildTarget):
@@ -649,9 +656,10 @@ class py_test(BuildTarget):
         Brewery.CopyToGenDir(self.srcs)
         if len(self.srcs) > 1:
             raise RuntimeError('py_test should only take one python source file.')
-        # Add test command
-        self.command_groups = [
-            ['python {0}'.format(Brewery.GenFilename(self.srcs[0]))]]
+        if Brewery.is_test:
+            # Add test command
+            self.command_groups = [
+                ['python {0}'.format(Brewery.GenFilename(self.srcs[0]))]]
 
 
 class shell_script(BuildTarget):
