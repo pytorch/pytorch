@@ -103,11 +103,11 @@ const char* curandGetErrorString(curandStatus_t error);
 // blindly setting a huge block for a random kernel isn't optimal).
 constexpr int CAFFE_CUDA_NUM_THREADS = 512;
 // The maximum number of blocks to use in the default kernel call. We set it to
-// 32768 which would work for compute capability 2.x (where 65536 is the limit).
+// 4096 which would work for compute capability 2.x (where 65536 is the limit).
 // This number is very carelessly chosen. Ideally, one would like to look at
 // the hardware at runtime, and pick the number of blocks that makes most
 // sense for the specific runtime environment. This is a todo item.
-constexpr int CAFFE_MAXIMUM_NUM_BLOCKS = 32768;
+constexpr int CAFFE_MAXIMUM_NUM_BLOCKS = 4096;
 
 /**
  * @brief Compute the number of blocks needed to run N threads.
