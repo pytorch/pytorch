@@ -196,6 +196,7 @@ bool CudnnConvOp<T>::RunWithCudnnWorkspace(
           conv_desc_, pad_t_, pad_l_, stride_h_, stride_w_, 1, 1,
           CUDNN_CROSS_CORRELATION));
     if (exhaustive_search_) {
+      CAFFE_VLOG(1) << "CUDNN Convolution: doing exhaustive search.";
       // When we do an exhaustive search, we will ignore the workspace size
       // limit and simply go for the fastest algorithm. If you happen to run
       // out of memory later, you will be on your own...
@@ -326,28 +327,56 @@ bool CudnnConvGradientOp<T>::RunWithCudnnWorkspace(
     size_t bwd_filter_ws_size, bwd_data_ws_size;
 
 #if CUDNN_VERSION >= 3000
-    // choose backward algorithm for filter
-    CUDNN_CHECK(cudnnGetConvolutionBackwardFilterAlgorithm(
-        cudnn_wrapper_.cudnn_handle(),
-        bottom_desc_, top_desc_, conv_desc_, filter_desc_,
-        CUDNN_CONVOLUTION_BWD_FILTER_SPECIFY_WORKSPACE_LIMIT,
-        cudnn_ws_nbytes_limit_, &bwd_filter_algo_));
+    if (exhaustive_search_) {
+      CAFFE_VLOG(1) << "CUDNN Convolution bwd: doing exhaustive search.";
+      // When we do an exhaustive search, we will ignore the workspace size
+      // limit and simply go for the fastest algorithm. If you happen to run
+      // out of memory later, you will be on your own...
+      int returned_algo_count;
+      // We clean up the current workspace memory so that the forward algorithm
+      // is free to allocate memory.
+      cudnn_ws_wrapper->Reset();
+      // Actually run the search.
+      cudnnConvolutionBwdFilterAlgoPerf_t filter_perf_stat;
+      CUDNN_CHECK(cudnnFindConvolutionBackwardFilterAlgorithm(
+          cudnn_wrapper_.cudnn_handle(),
+          bottom_desc_, top_desc_, conv_desc_, filter_desc_,
+          1, &returned_algo_count, &filter_perf_stat));
+      CAFFE_DCHECK_EQ(returned_algo_count, 1);
+      bwd_filter_algo_ = filter_perf_stat.algo;
+      cudnnConvolutionBwdDataAlgoPerf_t data_perf_stat;
+      CUDNN_CHECK(cudnnFindConvolutionBackwardDataAlgorithm(
+          cudnn_wrapper_.cudnn_handle(),
+          filter_desc_, top_desc_, conv_desc_, bottom_desc_,
+          1, &returned_algo_count, &data_perf_stat));
+      CAFFE_DCHECK_EQ(returned_algo_count, 1);
+      bwd_data_algo_ = data_perf_stat.algo;
+    } else {
+      // choose backward algorithm for filter
+      CUDNN_CHECK(cudnnGetConvolutionBackwardFilterAlgorithm(
+          cudnn_wrapper_.cudnn_handle(),
+          bottom_desc_, top_desc_, conv_desc_, filter_desc_,
+          CUDNN_CONVOLUTION_BWD_FILTER_SPECIFY_WORKSPACE_LIMIT,
+          cudnn_ws_nbytes_limit_, &bwd_filter_algo_));
+      // choose backward algo for data
+      CUDNN_CHECK(cudnnGetConvolutionBackwardDataAlgorithm(
+          cudnn_wrapper_.cudnn_handle(),
+          filter_desc_, top_desc_, conv_desc_, bottom_desc_,
+          CUDNN_CONVOLUTION_BWD_DATA_SPECIFY_WORKSPACE_LIMIT,
+          cudnn_ws_nbytes_limit_, &bwd_data_algo_));
+    }
     // get workspace for backwards filter algorithm
     CUDNN_CHECK(cudnnGetConvolutionBackwardFilterWorkspaceSize(
         cudnn_wrapper_.cudnn_handle(),
         bottom_desc_, top_desc_, conv_desc_, filter_desc_,
         bwd_filter_algo_, &bwd_filter_ws_size));
-
-    // choose backward algo for data
-    CUDNN_CHECK(cudnnGetConvolutionBackwardDataAlgorithm(
-        cudnn_wrapper_.cudnn_handle(),
-        filter_desc_, top_desc_, conv_desc_, bottom_desc_,
-        CUDNN_CONVOLUTION_BWD_DATA_SPECIFY_WORKSPACE_LIMIT,
-        cudnn_ws_nbytes_limit_, &bwd_data_algo_));
+    // get workspace for backwards data algorithm
     CUDNN_CHECK(cudnnGetConvolutionBackwardDataWorkspaceSize(
         cudnn_wrapper_.cudnn_handle(),
         filter_desc_, top_desc_, conv_desc_, bottom_desc_,
         bwd_data_algo_, &bwd_data_ws_size));
+
+
     cudnn_ws_nbytes_ = std::max(bwd_filter_ws_size, bwd_data_ws_size);
     CAFFE_VLOG(1) << "CuDNN workspace size: " << cudnn_ws_nbytes_;
 #endif  // CUDNN_VERSION >= 3000
