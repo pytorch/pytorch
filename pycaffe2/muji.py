@@ -65,7 +65,7 @@ def Allreduce4(net, blobs, reduced_affix, gpu_indices):
   # a_reduced <- a+b, c_reduced <- c + d
   a_reduced = net.Add([a, b], str(a) + reduced_affix,
                       device_option=OnGPU(gpu_a))
-  c_reduced = net.Add([c, d], str(d) + reduced_affix,
+  c_reduced = net.Add([c, d], str(c) + reduced_affix,
                       device_option=OnGPU(gpu_c))
   # a_reduced <- a_reduced + c_reduced
   a_reduced = a_reduced.Add(c_reduced, a_reduced,
