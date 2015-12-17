@@ -86,33 +86,36 @@ void SimpleNet::TEST_Benchmark(const int warmup_runs, const int main_runs,
   }
   CAFFE_LOG_INFO << "Main run finished. Milliseconds per iter: "
                  << timer.MilliSeconds() / main_runs;
-  int idx = 0;
-  float total = 0.;
+
+  vector<float> time_per_op(operators_.size(), 0);
   CaffeMap<string, float> time_per_op_type;
   if (run_individual) {
-    for (auto& op : operators_) {
-      const string& op_type = op->def().type();
-      CAFFE_LOG_INFO << "Running operator #" << idx << " ("
-                     << op->def().name() << ", " << op_type << ")";
-      timer.Start();
-      for (int i = 0; i < main_runs; ++i) {
+    for (int i = 0; i < main_runs; ++i) {
+      int idx = 0;
+      for (auto& op : operators_) {
+        const string& op_type = op->def().type();
+        timer.Start();
         CAFFE_CHECK(op->Run());
+        float spent = timer.MilliSeconds();
+        time_per_op[idx] += spent;
+        time_per_op_type[op_type] += spent;
+        ++idx;
       }
-      float spent = timer.MilliSeconds() / main_runs;
-      total += spent;
-      CAFFE_LOG_INFO << "    Finished. Milliseconds per iter: "
-                     << spent;
-      //if (time_per_op_type.count(op_type) == 0) {
-      //  time_per_op_type[op_type] = 0.;
-      //}
-      time_per_op_type[op_type] += spent;
-      ++idx;
     }
-    CAFFE_LOG_INFO << "Per-op run total: " << total;
-    CAFFE_LOG_INFO << "Time per operator type:";
-    for (const auto& item : time_per_op_type) {
-      CAFFE_LOG_INFO << "\t" << item.second << "\t" << item.first;
-    }
+  }
+  int idx = 0;
+  for (auto& op : operators_) {
+    const string& op_type = op->def().type();
+    CAFFE_LOG_INFO << "Operator #" << idx << " ("
+                   << op->def().name() << ", " << op_type << ") "
+                   << time_per_op[idx] / main_runs << " ms/iter";
+    ++idx;
+  }
+  CAFFE_LOG_INFO << "Time per operator type:";
+  for (const auto& item : time_per_op_type) {
+    CAFFE_LOG_INFO << std::setw(15) << std::setfill(' ')
+                   << item.second / main_runs
+                   << " " << item.first;
   }
 }
 
