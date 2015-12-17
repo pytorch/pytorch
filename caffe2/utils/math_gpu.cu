@@ -668,20 +668,8 @@ template <>
 void CopyMatrix<CUDAContext>(
     const size_t itemsize, const int M, const int N, const void* A,
     const int lda, void* B, const int ldb, CUDAContext* context) {
-  // We will specialize some paths so things could be faster.
-  if (itemsize == sizeof(float)) {
-    // This should be a catch-all that will deal with any item size.
-    CopyMatrixKernel<float><<<CAFFE_GET_BLOCKS(M * N), CAFFE_CUDA_NUM_THREADS,
-                              0, context->cuda_stream()>>>(
-        M, N, static_cast<const float*>(A), lda, static_cast<float*>(B), ldb);
-    // If needed, add more specialized paths here.
-  } else {
-    // This should be a catch-all that will deal with any item size.
-    CopyMatrixKernel<char><<<CAFFE_GET_BLOCKS(M * N), CAFFE_CUDA_NUM_THREADS, 0,
-                       context->cuda_stream()>>>(
-        M, N * itemsize, static_cast<const char*>(A), lda * itemsize,
-        static_cast<char*>(B), ldb * itemsize);
-  }
+  cudaMemcpy2DAsync(B, ldb * itemsize, A, lda * itemsize, N, M,
+                    cudaMemcpyDeviceToDevice, context->cuda_stream());
 }
 
 }  // namespace math
