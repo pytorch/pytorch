@@ -1,4 +1,0 @@
-usr/lib
-usr/lib/libnccl.so
-usr/include
-usr/include/nccl.h

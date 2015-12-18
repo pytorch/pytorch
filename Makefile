@@ -58,7 +58,7 @@ LIBSRCFILES := libwrap.cu core.cu all_gather.cu all_reduce.cu broadcast.cu reduc
 LIBNAME     := libnccl.so
 VER_MAJOR   := 1
 VER_MINOR   := 0
-VER_PATCH   := 0
+VER_PATCH   := 2
 TESTS       := all_gather_test all_reduce_test broadcast_test reduce_test reduce_scatter_test
 MPITESTS    := mpi_test
 

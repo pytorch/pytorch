@@ -1,3 +1,9 @@
+nccl (1.0.2-2) trusty; urgency=medium
+
+  * Packages are now libnccl1 and libnccl-dev
+
+ -- Luke Yeager <lyeager@nvidia.com>  Fri, 18 Dec 2015 13:45:16 -0800
+
 nccl (1.0.2) trusty; urgency=medium
 
   * Merged latest upstream changes.
