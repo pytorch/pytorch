@@ -188,7 +188,7 @@ def Inception(order):
                            256, [160, 320], [32, 128], 128)
   inc11 = _InceptionModule(model, inc10, 832, "inc11",
                            384, [192, 384], [48, 128], 128)
-  pool11 = model.MaxPool(inc11, "pool11", kernel=7, stride=1)
+  pool11 = model.AveragePool(inc11, "pool11", kernel=7, stride=1)
   fc = model.FC(pool11, "fc", 1024, 1000,
                 ('XavierFill', {}), ('ConstantFill', {}))
   # It seems that Soumith's benchmark does not have softmax on top

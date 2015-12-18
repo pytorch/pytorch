@@ -93,8 +93,8 @@ class CNNModelHelper(object):
 
   def MaxPool(self, blob_in, blob_out, **kwargs):
     """Max pooling"""
-    return self.net.MaxPool(blob_in, [blob_out, "_" + blob_out + "_idx"],
-                            order=self.order, **kwargs)[0]
+    return self.net.MaxPool(blob_in, blob_out,
+                            order=self.order, **kwargs)
 
   def DepthConcat(self, blobs_in, blob_out, **kwargs):
     """Depth Concat."""

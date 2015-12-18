@@ -27,9 +27,9 @@ class TestMNISTLeNet(unittest.TestCase):
 
     train_net = core.Net("train")
     conv1 = train_net.Conv([data, filter1, bias1], "conv1", kernel=5, pad=0, stride=1, order="NCHW")
-    pool1, maxid1 = conv1.MaxPool([], ["pool1", "maxid1"], kernel=2, stride=2, order="NCHW")
+    pool1 = conv1.MaxPool([], ["pool1"], kernel=2, stride=2, order="NCHW")
     conv2 = pool1.Conv([filter2, bias2], "conv2", kernel=5, pad=0, stride=1, order="NCHW")
-    pool2, maxid2 = conv2.MaxPool([], ["pool2", "maxid2"], kernel=2, stride=2, order="NCHW")
+    pool2 = conv2.MaxPool([], ["pool2"], kernel=2, stride=2, order="NCHW")
     flatten2 = pool2.Flatten([], "pool2_flatten")
     softmax = (flatten2.FC([W3, B3], "fc3")
                        .Relu([], "fc3_relu")
@@ -62,8 +62,7 @@ class TestMNISTLeNet(unittest.TestCase):
     checker = device_checker.DeviceChecker(
         1e-2, [cpu_device, gpu_device])
     ret = checker.CheckNet(
-        train_net.Proto(), inputs,
-        ignore=['maxid1', 'maxid2'])
+        train_net.Proto(), inputs)
     self.assertEqual(ret, True)
 
 
