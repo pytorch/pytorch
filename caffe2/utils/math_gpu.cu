@@ -668,7 +668,7 @@ template <>
 void CopyMatrix<CUDAContext>(
     const size_t itemsize, const int M, const int N, const void* A,
     const int lda, void* B, const int ldb, CUDAContext* context) {
-  cudaMemcpy2DAsync(B, ldb * itemsize, A, lda * itemsize, N, M,
+  cudaMemcpy2DAsync(B, ldb * itemsize, A, lda * itemsize, N * itemsize, M,
                     cudaMemcpyDeviceToDevice, context->cuda_stream());
 }
 
