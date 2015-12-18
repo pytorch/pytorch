@@ -91,7 +91,7 @@ class TestMaxPoolingLegacyPadding(unittest.TestCase):
     for stride, kernel, legacy_pad, size, order in self.test_configs:
       print 'MaxPool', stride, kernel, legacy_pad, size, order
       op = core.CreateOperator("MaxPool")(
-          ["X"], ["Y", "Y_maxid"], stride=stride, kernel=kernel,
+          ["X"], ["Y"], stride=stride, kernel=kernel,
           legacy_pad=legacy_pad, order=order)
       # In order to avoid the problem of race conditions, we will do a randperm
       # so that the values will be apart at least 0.01

@@ -205,16 +205,24 @@ class SumOp : public Operator<Context> {
   USE_SIMPLE_CTOR_DTOR(SumOp);
 
   bool RunOnDevice() {
-    auto& input = Input(0);
+    auto& input0 = Input(0);
     auto* output = Output(0);
-    output->ReshapeLike(input);
-    device_context_.template Copy<T, Context, Context>(
-        input.size(), input.template data<T>(),
-        output->template mutable_data<T>());
-    for (int i = 1; i < InputSize(); ++i) {
-      math::Add(output->size(), output->template data<T>(),
-                Input(i).template data<T>(),
-                output->template mutable_data<T>(), &device_context_);
+    output->ReshapeLike(input0);
+    T* output_data = output->template mutable_data<T>();
+    if (InputSize() == 1) {
+      device_context_.template Copy<T, Context, Context>(
+          input0.size(), input0.template data<T>(),
+          output_data);
+    } else {
+      // Add the first two
+      math::Add(output->size(), input0.template data<T>(),
+                Input(1).template data<T>(),
+                output_data, &device_context_);
+      // Add remaining.
+      for (int i = 2; i < InputSize(); ++i) {
+        math::Add(output->size(), output_data, Input(i).template data<T>(),
+                  output_data, &device_context_);
+      }
     }
     return true;
   }
