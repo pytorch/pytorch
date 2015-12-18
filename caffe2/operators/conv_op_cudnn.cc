@@ -230,23 +230,23 @@ bool CudnnConvOp<T>::RunWithCudnnWorkspace(
   }
 
   // Now, actually run the computation.
-  const typename cudnnTypeWrapper<T>::ScalingParamType kOne = 1;
-  const typename cudnnTypeWrapper<T>::ScalingParamType kZero = 0;
   // Filter
   CUDNN_CHECK(cudnnConvolutionForward(
-      cudnn_wrapper_.cudnn_handle(), &kOne, bottom_desc_,
+      cudnn_wrapper_.cudnn_handle(), cudnnTypeWrapper<T>::kOne(), bottom_desc_,
       X.template data<T>(), filter_desc_, filter.template data<T>(), conv_desc_,
-      algo_, cudnn_ws_wrapper->Get(cudnn_ws_nbytes_), cudnn_ws_nbytes_, &kZero,
-      top_desc_, Y->template mutable_data<T>()));
+      algo_, cudnn_ws_wrapper->Get(cudnn_ws_nbytes_), cudnn_ws_nbytes_,
+      cudnnTypeWrapper<T>::kZero(), top_desc_, Y->template mutable_data<T>()));
   // Bias
 #if CUDNN_VERSION >= 3000
   CUDNN_CHECK(cudnnAddTensor_v3(
-      cudnn_wrapper_.cudnn_handle(), &kOne, bias_desc_,
-      bias.template data<T>(), &kOne, top_desc_, Y->template mutable_data<T>()));
+      cudnn_wrapper_.cudnn_handle(), cudnnTypeWrapper<T>::kOne(), bias_desc_,
+      bias.template data<T>(), cudnnTypeWrapper<T>::kOne(), top_desc_,
+      Y->template mutable_data<T>()));
 #else  // CUDNN_VERSION >= 3000
   CUDNN_CHECK(cudnnAddTensor(
       cudnn_wrapper_.cudnn_handle(), CUDNN_ADD_SAME_C,
-      &kOne, bias_desc_, bias.template data<T>(), &kOne, top_desc_,
+      cudnnTypeWrapper<T>::kOne(), bias_desc_, bias.template data<T>(),
+      cudnnTypeWrapper<T>::kOne(), top_desc_,
       Y->template mutable_data<T>()));
 #endif
   // Done.
@@ -383,22 +383,24 @@ bool CudnnConvGradientOp<T>::RunWithCudnnWorkspace(
   }
 
   // Now, actually run the computation.
-  const typename cudnnTypeWrapper<T>::ScalingParamType kOne = 1;
-  const typename cudnnTypeWrapper<T>::ScalingParamType kZero = 0;
   CUDNN_CHECK(cudnnConvolutionBackwardBias(
-      cudnn_wrapper_.cudnn_handle(), &kOne, top_desc_, dY.template data<T>(),
-      &kZero, bias_desc_, dbias->template mutable_data<T>()));
+      cudnn_wrapper_.cudnn_handle(), cudnnTypeWrapper<T>::kOne(), top_desc_,
+      dY.template data<T>(), cudnnTypeWrapper<T>::kZero(), bias_desc_,
+      dbias->template mutable_data<T>()));
 #if CUDNN_VERSION >= 3000
   CUDNN_CHECK(cudnnConvolutionBackwardFilter_v3(
-      cudnn_wrapper_.cudnn_handle(), &kOne, bottom_desc_, X.template data<T>(),
+      cudnn_wrapper_.cudnn_handle(), cudnnTypeWrapper<T>::kOne(),
+      bottom_desc_, X.template data<T>(),
       top_desc_, dY.template data<T>(), conv_desc_, bwd_filter_algo_,
       cudnn_ws_wrapper->Get(cudnn_ws_nbytes_), cudnn_ws_nbytes_,
-      &kZero, filter_desc_, dfilter->template mutable_data<T>()));
+      cudnnTypeWrapper<T>::kZero(), filter_desc_,
+      dfilter->template mutable_data<T>()));
 #else  // CUDNN_VERSION >= 3000
   CUDNN_CHECK(cudnnConvolutionBackwardFilter(
-      cudnn_wrapper_.cudnn_handle(), &kOne, bottom_desc_, X.template data<T>(),
+      cudnn_wrapper_.cudnn_handle(), cudnnTypeWrapper<T>::kOne(),
+      bottom_desc_, X.template data<T>(),
       top_desc_, dY.template data<T>(), conv_desc_,
-      &kZero, filter_desc_, dfilter->template mutable_data<T>()));
+      cudnnTypeWrapper<T>::kZero(), filter_desc_, dfilter->template mutable_data<T>()));
 #endif  // CUDNN_VERSION >= 3000
 
   if (OutputSize() == 3) {
@@ -407,16 +409,17 @@ bool CudnnConvGradientOp<T>::RunWithCudnnWorkspace(
     dX->ReshapeLike(X);
 #if CUDNN_VERSION >= 3000
     CUDNN_CHECK(cudnnConvolutionBackwardData_v3(
-        cudnn_wrapper_.cudnn_handle(), &kOne, filter_desc_,
+        cudnn_wrapper_.cudnn_handle(), cudnnTypeWrapper<T>::kOne(), filter_desc_,
         filter.template data<T>(), top_desc_, dY.template data<T>(),
         conv_desc_, bwd_data_algo_,
         cudnn_ws_wrapper->Get(cudnn_ws_nbytes_), cudnn_ws_nbytes_,
-        &kZero, bottom_desc_, dX->template mutable_data<T>()));
+        cudnnTypeWrapper<T>::kZero(), bottom_desc_, dX->template mutable_data<T>()));
 #else  // CUDNN_VERSION >= 3000
     CUDNN_CHECK(cudnnConvolutionBackwardData(
-        cudnn_wrapper_.cudnn_handle(), &kOne, filter_desc_,
+        cudnn_wrapper_.cudnn_handle(), cudnnTypeWrapper<T>::kOne(), filter_desc_,
         filter.template data<T>(), top_desc_, dY.template data<T>(),
-        conv_desc_, &kZero, bottom_desc_, dX->template mutable_data<T>()));
+        conv_desc_, cudnnTypeWrapper<T>::kZero(), bottom_desc_,
+        dX->template mutable_data<T>()));
 #endif  // CUDNN_VERSION >= 3000
   }
   return true;

@@ -51,13 +51,12 @@ bool CuDNNSoftmaxOp::RunOnDevice() {
   int N = X.dim(0);
   int D = X.dim(1);
   Y->ReshapeLike(X);
-  const float alpha = 1.0;
-  const float beta = 0.0;
   vector<int> dims{N, D, 1, 1};
   CUDNN_CHECK(cudnnSoftmaxForward(cudnn_wrapper_.cudnn_handle(),
-      CUDNN_SOFTMAX_ACCURATE, CUDNN_SOFTMAX_MODE_INSTANCE, &alpha,
+      CUDNN_SOFTMAX_ACCURATE, CUDNN_SOFTMAX_MODE_INSTANCE,
+      cudnnTypeWrapper<float>::kOne(),
       descriptors_[BOTTOM_DESC_ID].Descriptor<float>(StorageOrder::NCHW, dims),
-      X.data<float>(), &beta,
+      X.data<float>(), cudnnTypeWrapper<float>::kZero(),
       descriptors_[TOP_DESC_ID].Descriptor<float>(StorageOrder::NCHW, dims),
       Y->mutable_data<float>()));
   return true;
@@ -73,16 +72,15 @@ bool CuDNNSoftmaxGradientOp::RunOnDevice() {
   CAFFE_DCHECK_EQ(dY.dim(0), N);
   CAFFE_DCHECK_EQ(dY.dim(1), D);
   dX->ReshapeLike(Y);
-  const float alpha = 1.0;
-  const float beta = 0.0;
   vector<int> dims{N, D, 1, 1};
   CUDNN_CHECK(cudnnSoftmaxBackward(cudnn_wrapper_.cudnn_handle(),
-      CUDNN_SOFTMAX_ACCURATE, CUDNN_SOFTMAX_MODE_INSTANCE, &alpha,
+      CUDNN_SOFTMAX_ACCURATE, CUDNN_SOFTMAX_MODE_INSTANCE,
+      cudnnTypeWrapper<float>::kOne(),
       descriptors_[TOP_DESC_ID].Descriptor<float>(StorageOrder::NCHW, dims),
       Y.data<float>(),
       descriptors_[TOP_GRADIENT_DESC_ID].Descriptor<float>(
           StorageOrder::NCHW, dims),
-      dY.data<float>(), &beta,
+      dY.data<float>(), cudnnTypeWrapper<float>::kZero(),
       descriptors_[BOTTOM_DESC_ID].Descriptor<float>(StorageOrder::NCHW, dims),
       dX->mutable_data<float>()));
   return true;

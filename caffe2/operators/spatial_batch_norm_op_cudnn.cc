@@ -111,8 +111,6 @@ bool CudnnSpatialBNOp<T>::RunOnDevice() {
   }
 
   // Now, depending on whether we are running test or not, we have two paths.
-  const typename cudnnTypeWrapper<T>::ScalingParamType kOne = 1;
-  const typename cudnnTypeWrapper<T>::ScalingParamType kZero = 0;
   if (is_test_) {
     // Run inference mode.
     const auto& est_mean = Input(EST_MEAN);
@@ -125,7 +123,8 @@ bool CudnnSpatialBNOp<T>::RunOnDevice() {
     auto* Y = Output(OUTPUT);
     Y->ReshapeLike(X);
     CUDNN_CHECK(cudnnBatchNormalizationForwardInference(
-        cudnn_wrapper_.cudnn_handle(), kSpatialBNMode, &kOne, &kZero,
+        cudnn_wrapper_.cudnn_handle(), kSpatialBNMode,
+        cudnnTypeWrapper<T>::kOne(), cudnnTypeWrapper<T>::kZero(),
         data_desc_, X.template data<T>(),
         data_desc_, Y->template mutable_data<T>(),
         bn_param_desc_, scale.template data<T>(), bias.template data<T>(),
@@ -167,7 +166,8 @@ bool CudnnSpatialBNOp<T>::RunOnDevice() {
     }
 
     CUDNN_CHECK(cudnnBatchNormalizationForwardTraining(
-        cudnn_wrapper_.cudnn_handle(), kSpatialBNMode, &kOne, &kZero,
+        cudnn_wrapper_.cudnn_handle(), kSpatialBNMode,
+        cudnnTypeWrapper<T>::kOne(), cudnnTypeWrapper<T>::kZero(),
         data_desc_, X.template data<T>(),
         data_desc_, Y->template mutable_data<T>(),
         bn_param_desc_, scale.template data<T>(), bias.template data<T>(),
@@ -218,10 +218,9 @@ bool CudnnSpatialBNGradientOp<T>::RunOnDevice() {
     saved_inv_var_data = saved_inv_var.template data<T>();
   }
 
-  const typename cudnnTypeWrapper<T>::ScalingParamType kOne = 1;
-  const typename cudnnTypeWrapper<T>::ScalingParamType kZero = 0;
   CUDNN_CHECK(cudnnBatchNormalizationBackward(
-      cudnn_wrapper_.cudnn_handle(), kSpatialBNMode, &kOne, &kZero,
+      cudnn_wrapper_.cudnn_handle(), kSpatialBNMode,
+      cudnnTypeWrapper<T>::kOne(), cudnnTypeWrapper<T>::kZero(),
       data_desc_, X.template data<T>(), data_desc_, dY.template data<T>(),
       data_desc_, dX->template mutable_data<T>(),
       bn_param_desc_, scale.template data<T>(),
