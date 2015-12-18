@@ -479,7 +479,7 @@ static size_t THMemoryFile_writeLong(THFile *self, long *data, size_t n)
     size_t i;
     for(i = 0; i < n; i++)
     {
-      size_t nByteWritten;
+      ssize_t nByteWritten;
       while (1)
       {
         nByteWritten = snprintf(mfself->storage->data+mfself->position, mfself->storage->size-mfself->position, "%ld", data[i]);
