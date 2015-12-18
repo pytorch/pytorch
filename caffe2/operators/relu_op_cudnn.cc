@@ -39,10 +39,9 @@ class CuDNNReluOp final : public Operator<CUDAContext> {
           data_desc_, GetCudnnTensorFormat(order_),
           cudnnTypeWrapper<T>::type, X.dim(0), C, H, W));
     }
-    const typename cudnnTypeWrapper<T>::ScalingParamType kOne = 1;
-    const typename cudnnTypeWrapper<T>::ScalingParamType kZero = 0;
     CUDNN_CHECK(cudnnActivationForward(cudnn_wrapper_.cudnn_handle(),
-        CUDNN_ACTIVATION_RELU, &kOne, data_desc_, X.template data<T>(), &kZero,
+        CUDNN_ACTIVATION_RELU, cudnnTypeWrapper<T>::kOne(), data_desc_,
+        X.template data<T>(), cudnnTypeWrapper<T>::kZero(),
         data_desc_, Y->template mutable_data<T>()));
     return true;
   }

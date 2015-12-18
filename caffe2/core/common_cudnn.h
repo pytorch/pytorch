@@ -71,20 +71,44 @@ template <typename T> class cudnnTypeWrapper;
 template<> class cudnnTypeWrapper<float> {
  public:
   static const cudnnDataType_t type = CUDNN_DATA_FLOAT;
-  typedef float ScalingParamType;
+  typedef const float ScalingParamType;
+  static ScalingParamType* kOne() {
+    static ScalingParamType v = 1.0;
+    return &v;
+  }
+  static const ScalingParamType* kZero() {
+    static ScalingParamType v = 0.0;
+    return &v;
+  }
 };
 
 template<> class cudnnTypeWrapper<double> {
  public:
   static const cudnnDataType_t type = CUDNN_DATA_DOUBLE;
-  typedef double ScalingParamType;
+  typedef const double ScalingParamType;
+  static ScalingParamType* kOne() {
+    static ScalingParamType v = 1.0;
+    return &v;
+  }
+  static ScalingParamType* kZero() {
+    static ScalingParamType v = 0.0;
+    return &v;
+  }
 };
 
 #if CUDNN_VERSION >= 3000
 template<> class cudnnTypeWrapper<float16> {
  public:
   static const cudnnDataType_t type = CUDNN_DATA_HALF;
-  typedef float ScalingParamType;
+  typedef const float ScalingParamType;
+  static ScalingParamType* kOne() {
+    static ScalingParamType v = 1.0;
+    return &v;
+  }
+  static ScalingParamType* kZero() {
+    static ScalingParamType v = 0.0;
+    return &v;
+  }
 };
 #endif  // CUDNN_VERSION >= 3000
 
