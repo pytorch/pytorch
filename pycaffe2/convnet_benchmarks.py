@@ -209,7 +209,7 @@ def Benchmark(model_gen, order, batch_size, cudnn_limit, forward_only,
       #op.arg.add().CopyFrom(utils.MakeArgument('ws_nbytes_limit', cudnn_limit))
       op.arg.add().CopyFrom(utils.MakeArgument('exhaustive_search', 1))
       op.arg.add().CopyFrom(utils.MakeArgument('shared_ws_name', 'cudnn_workspace'))
-    elif op.type in ['Relu', 'Softmax']:
+    elif op.type in ['MaxPool', 'AveragePool', 'Relu', 'Softmax']:
       op.engine = 'CUDNN'
   if forward_only:
     print 'Running forward only.'
