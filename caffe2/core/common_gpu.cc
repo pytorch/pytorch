@@ -171,7 +171,7 @@ bool Caffe2EnableCudaPeerAccess() {
       int can_access;
       CUDA_CHECK(cudaDeviceCanAccessPeer(&can_access, i, j));
       if (can_access) {
-        CAFFE_LOG_INFO << "Enabling peer access from " << i << " to " << j;
+        CAFFE_VLOG(1) << "Enabling peer access from " << i << " to " << j;
         // Note: just for future reference, the 0 here is not a gpu id, it is
         // a reserved flag for cudaDeviceEnablePeerAccess that should always be
         // zero currently.

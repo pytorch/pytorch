@@ -58,12 +58,13 @@ class CUDAContext {
   inline bool FinishDeviceComputation() {
     cudaStreamSynchronize(cuda_stream_);
     cudaError_t error = cudaGetLastError();
-    if (error != cudaSuccess) {
+    if (error == cudaSuccess) {
+      return true;
+    } else {
       CAFFE_LOG_ERROR << "Encountered CUDA error: "
                       << cudaGetErrorString(error);
       return false;
     }
-    return true;
   }
 
   int cuda_gpu_id() { return cuda_gpu_id_; }
@@ -71,7 +72,9 @@ class CUDAContext {
   inline cudaStream_t& cuda_stream() { return cuda_stream_; }
 
   cublasHandle_t& cublas_handle() {
-    if (!cublas_handle_) {
+    if (cublas_handle_) {
+      return cublas_handle_;
+    } else {
       CUBLAS_CHECK(cublasCreate(&cublas_handle_));
       // The default is CUBLAS_POINTER_MODE_HOST. You can override
       // it after obtaining the cublas handle, but do that with
@@ -79,19 +82,22 @@ class CUDAContext {
       CUBLAS_CHECK(cublasSetPointerMode(
           cublas_handle_, CUBLAS_POINTER_MODE_HOST));
       CUBLAS_CHECK(cublasSetStream(cublas_handle_, cuda_stream_));
+      return cublas_handle_;
     }
-    return cublas_handle_;
   }
 
   curandGenerator_t& curand_generator() {
-    if (!curand_generator_) {
+    if (curand_generator_) {
+      return curand_generator_;
+    } else {
       CURAND_CHECK(curandCreateGenerator(
           &curand_generator_, CURAND_RNG_PSEUDO_DEFAULT));
       CURAND_CHECK(curandSetPseudoRandomGeneratorSeed(
           curand_generator_, random_seed_));
       CURAND_CHECK(curandSetStream(curand_generator_, cuda_stream_));
+      return curand_generator_;
     }
-    return curand_generator_;
+
   }
 
   static inline void* New(size_t nbytes) {
@@ -106,8 +112,6 @@ class CUDAContext {
   inline void Memcpy(size_t nbytes, const void* src, void* dst) {
     CUDA_CHECK(cudaMemcpyAsync(
         dst, src, nbytes, cudaMemcpyDefault, cuda_stream_));
-    // TODO(Yangqing): do we want to synchronize inside copy?
-    CUDA_CHECK(cudaStreamSynchronize(cuda_stream_));
   }
 
   template <typename T, class SrcContext, class DstContext>

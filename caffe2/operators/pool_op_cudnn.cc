@@ -47,7 +47,7 @@ class CuDNNPoolOp : public ConvPoolOpBase<CUDAContext> {
 
     if (cudnn_input_dims_ != X.dims()) {
       // Dimensions changed; we will need to re-initialize things.
-      CAFFE_LOG_INFO << "Changing the cudnn descriptor configurations.";
+      CAFFE_VLOG(1) << "Changing the cudnn descriptor configurations.";
       cudnn_input_dims_ = X.dims();
       CUDNN_CHECK(cudnnSetTensor4dDescriptor(
           bottom_desc_, GetCudnnTensorFormat(order_),
@@ -135,7 +135,7 @@ class CuDNNPoolGradientOp : public ConvPoolOpBase<CUDAContext> {
 
     if (cudnn_input_dims_ != X.dims()) {
       // Dimensions changed; we will need to re-initialize things.
-      CAFFE_LOG_INFO << "Changing the cudnn descriptor configurations.";
+      CAFFE_VLOG(1) << "Changing the cudnn descriptor configurations.";
       cudnn_input_dims_ = X.dims();
       CUDNN_CHECK(cudnnSetTensor4dDescriptor(
           bottom_desc_, GetCudnnTensorFormat(order_),
