@@ -121,8 +121,6 @@ class CudnnConvGradientOp final : public CudnnConvOpBase {
   DISABLE_COPY_AND_ASSIGN(CudnnConvGradientOp);
 };
 
-
-
 ////////////////////////////////////////////////////////////////////////////////
 // Implementations
 ////////////////////////////////////////////////////////////////////////////////
@@ -195,6 +193,7 @@ bool CudnnConvOp<T>::RunWithCudnnWorkspace(
     CUDNN_CHECK(cudnnSetConvolution2dDescriptor(
           conv_desc_, pad_t_, pad_l_, stride_h_, stride_w_, 1, 1,
           CUDNN_CROSS_CORRELATION));
+#if CUDNN_VERSION >= 3000
     if (exhaustive_search_) {
       CAFFE_VLOG(1) << "CUDNN Convolution: doing exhaustive search.";
       // When we do an exhaustive search, we will ignore the workspace size
@@ -221,6 +220,14 @@ bool CudnnConvOp<T>::RunWithCudnnWorkspace(
           cudnn_ws_nbytes_limit_,
           &algo_));
     }
+#else  // CUDNN_VERSION >= 3000
+    CUDNN_CHECK(cudnnGetConvolutionForwardAlgorithm(
+        cudnn_wrapper_.cudnn_handle(),
+        bottom_desc_, filter_desc_, conv_desc_, top_desc_,
+        CUDNN_CONVOLUTION_FWD_SPECIFY_WORKSPACE_LIMIT,
+        cudnn_ws_nbytes_limit_,
+        &algo_));
+#endif  // CUDNN_VERSION >= 3000
     CUDNN_CHECK(cudnnGetConvolutionForwardWorkspaceSize(
         cudnn_wrapper_.cudnn_handle(),
         bottom_desc_, filter_desc_, conv_desc_, top_desc_,
