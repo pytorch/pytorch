@@ -208,6 +208,17 @@ void RandUniform<float, CPUContext>(
 }
 
 template <>
+void RandUniform<int, CPUContext>(
+    const int n, const int a, const int b, int* r,
+    CPUContext* context) {
+  std::uniform_int_distribution<int> distribution(a, b);
+  for (int i = 0; i < n; ++i) {
+    r[i] = distribution(context->RandGenerator());
+  }
+}
+
+
+template <>
 void RandGaussian<float, CPUContext>(
     const int n, const float mean, const float std, float* r,
     CPUContext* context) {

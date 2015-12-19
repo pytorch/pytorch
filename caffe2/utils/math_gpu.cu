@@ -196,6 +196,15 @@ __global__ void UniformShift(const int N, const T min, const T max,
     x[i] = x[i] * scale + min;
   }
 }
+
+__global__ void UniformIntFit(const int N, const int min, const int max,
+                              unsigned int* x) {
+  int* x_int = reinterpret_cast<int*>(x);
+  int range = (max - min + 1);
+  CUDA_1D_KERNEL_LOOP(i, N) {
+    x_int[i] = min + static_cast<int>(x[i] % range);
+  }
+}
 }  // namespace
 
 template <>
@@ -214,6 +223,17 @@ void RandUniform<double, CUDAContext>(
   CURAND_CHECK(curandGenerateUniformDouble(context->curand_generator(), r, n));
   UniformShift<double><<<CAFFE_GET_BLOCKS(n), CAFFE_CUDA_NUM_THREADS,
                          0, context->cuda_stream()>>>(n, min, max, r);
+}
+
+template <>
+void RandUniform<int, CUDAContext>(
+    const int n, const int min, const int max, int* r,
+    CUDAContext* context) {
+  CURAND_CHECK(curandGenerate(context->curand_generator(),
+                              reinterpret_cast<unsigned int*>(r), n));
+  UniformIntFit<<<CAFFE_GET_BLOCKS(n), CAFFE_CUDA_NUM_THREADS,
+                  0, context->cuda_stream()>>>(
+      n, min, max, reinterpret_cast<unsigned int*>(r));
 }
 
 template <>

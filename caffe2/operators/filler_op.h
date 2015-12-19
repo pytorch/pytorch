@@ -58,8 +58,8 @@ class UniformFillOp final : public FillerOp<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   UniformFillOp(const OperatorDef& operator_def, Workspace* ws)
       : FillerOp<Context>(operator_def, ws),
-        min_(OperatorBase::template GetSingleArgument<float>("min", 0)),
-        max_(OperatorBase::template GetSingleArgument<float>("max", 1)) {
+        min_(OperatorBase::template GetSingleArgument<T>("min", 0)),
+        max_(OperatorBase::template GetSingleArgument<T>("max", 1)) {
     CAFFE_DCHECK_LT(min_, max_) << "Max value should be bigger than min value.";
   }
 
@@ -86,7 +86,8 @@ class ConstantFillOp final : public FillerOp<Context> {
 
   bool Fill(Tensor<Context>* output) override {
     math::Set<T, Context>(
-        output->size(), value_, output->template mutable_data<T>(), &device_context_);
+        output->size(), value_, output->template mutable_data<T>(),
+        &device_context_);
     return true;
   }
 
