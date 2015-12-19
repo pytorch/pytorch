@@ -119,6 +119,16 @@ THCudaStorage* THCudaStorage_newWithData(THCState *state, float *data, long size
   return storage;
 }
 
+void THCudaStorage_setFlag(THCState *state, THCudaStorage *storage, const char flag)
+{
+  storage->flag |= flag;
+}
+
+void THCudaStorage_clearFlag(THCState *state, THCudaStorage *storage, const char flag)
+{
+  storage->flag &= ~flag;
+}
+
 void THCudaStorage_retain(THCState *state, THCudaStorage *self)
 {
   if(self && (self->flag & TH_STORAGE_REFCOUNTED))
