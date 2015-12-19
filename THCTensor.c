@@ -549,6 +549,23 @@ int THCudaTensor_isSize(THCState *state, const THCudaTensor *self, const THLongS
   return 1;
 }
 
+int THCudaTensor_isSetTo(THCState *state, const THCudaTensor *self, const THCudaTensor *src)
+{
+  if (self->storage == src->storage &&
+      self->storageOffset == src->storageOffset &&
+      self->nDimension == src->nDimension)
+  {
+    int d;
+    for (d = 0; d < self->nDimension; ++d)
+    {
+      if (self->size[d] != src->size[d] || self->stride[d] != src->stride[d])
+        return 0;
+    }
+    return 1;
+  }
+  return 0;
+}
+
 int THCudaTensor_isSameSizeAs(THCState *state, const THCudaTensor *self, const THCudaTensor* src)
 {
   int d;
