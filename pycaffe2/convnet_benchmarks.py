@@ -1,3 +1,37 @@
+"""
+Benchmark for common convnets.
+
+Speed on Titan X, with 10 warmup steps and 10 main steps and with different
+versions of cudnn, are as follows:
+
+                          V3              v4
+AlexNet         32.5 / 108.0    27.4 /  90.1
+OverFeat       113.0 / 342.3    91.7 / 276.5
+Inception      134.5 / 485.8   125.7 / 450.6
+VGG (batch 64) 200.8 / 650.0   164.1 / 551.7
+
+(Note that these numbers involve a "full" backprop, i.e. the gradient
+with respect to the input image is also computed.)
+
+To get the numbers, simply run:
+
+for MODEL in AlexNet OverFeat Inception; do
+  PYTHONPATH=../gen:$PYTHONPATH python convnet_benchmarks.py \
+    --batch_size 128 --model $MODEL --forward_only True
+done
+for MODEL in AlexNet OverFeat Inception; do
+  PYTHONPATH=../gen:$PYTHONPATH python convnet_benchmarks.py \
+    --batch_size 128 --model $MODEL
+done
+PYTHONPATH=../gen:$PYTHONPATH python convnet_benchmarks.py \
+  --batch_size 64 --model VGGA --forward_only True
+PYTHONPATH=../gen:$PYTHONPATH python convnet_benchmarks.py \
+  --batch_size 64 --model VGGA
+
+Note that VGG needs to be run at batch 64 due to memory limit on the backward
+pass.
+"""
+
 import argparse
 import numpy as np
 import time
@@ -200,23 +234,22 @@ def Inception(order):
   return model, 224
 
 
-def Benchmark(model_gen, order, batch_size, cudnn_limit, forward_only,
-              iterations):
-  model, input_size = model_gen(order)
+def Benchmark(model_gen, arg):
+  model, input_size = model_gen(arg.order)
   for op in model.net._net.op:
     if op.type == 'Conv':
       op.engine = 'CUDNN'
-      #op.arg.add().CopyFrom(utils.MakeArgument('ws_nbytes_limit', cudnn_limit))
+      #op.arg.add().CopyFrom(utils.MakeArgument('ws_nbytes_limit', arg.cudnn_limit))
       op.arg.add().CopyFrom(utils.MakeArgument('exhaustive_search', 1))
       op.arg.add().CopyFrom(utils.MakeArgument('shared_ws_name', 'cudnn_workspace'))
     elif op.type in ['MaxPool', 'AveragePool', 'Relu', 'Softmax']:
       op.engine = 'CUDNN'
-  if forward_only:
-    print 'Running forward only.'
+  if arg.forward_only:
+    print arg.model, ': running forward only.'
   else:
-    print 'Running forward-backward.'
+    print arg.model, ': running forward-backward.'
     model.AddGradientOperators()
-    if order == 'NHWC':
+    if arg.order == 'NHWC':
       print ('==WARNING==\n'
              'NHWC order with CuDNN may not be supported yet, so I might\n'
              'exit suddenly.')
@@ -224,49 +257,58 @@ def Benchmark(model_gen, order, batch_size, cudnn_limit, forward_only,
   model.net.RunAllOnGPU()
 
   workspace.ResetWorkspace()
-  if order == 'NCHW':
-    data_shape = (batch_size, 3, input_size, input_size)
+  if arg.order == 'NCHW':
+    data_shape = (arg.batch_size, 3, input_size, input_size)
   else:
-    data_shape = (batch_size, input_size, input_size, 3)
+    data_shape = (arg.batch_size, input_size, input_size, 3)
   device_option = model.net.Proto().device_option
   workspace.FeedBlob("data", np.random.randn(*data_shape).astype(np.float32),
                      device_option)
-  workspace.FeedBlob("label", np.asarray(range(batch_size)).astype(np.int32),
+  workspace.FeedBlob("label", np.asarray(range(arg.batch_size)).astype(np.int32),
                      device_option)
 
   workspace.RunNetOnce(model.param_init_net)
   workspace.CreateNet(model.net)
-  workspace.RunNet(model.net.Proto().name)
-
-  # Print out all the tensors.
-  #for name in workspace.Blobs():
-  #  content = workspace.FetchBlob(name)
-  #  print name, content if type(content) is str else content.shape
+  for i in range(arg.warmup_iterations):
+    workspace.RunNet(model.net.Proto().name)
 
   start = time.time()
-  for i in range(iterations):
+  for i in range(arg.iterations):
     workspace.RunNet(model.net.Proto().name)
-  print 'Spent: ', (time.time() - start) / iterations
-  print 'Layer-wise benchmark.'
-  workspace.BenchmarkNet(model.net.Proto().name, 10, 50, True)
-  print 'Done.'
+  print 'Spent: ', (time.time() - start) / arg.iterations
+  if arg.layer_wise_benchmark:
+    print 'Layer-wise benchmark.'
+    workspace.BenchmarkNet(
+        model.net.Proto().name, 1, arg.iterations, True)
 
 
 if __name__ == '__main__':
   parser = argparse.ArgumentParser(description="Caffe2 benchmark.")
-  parser.add_argument("--batch_size", type=int, help="The batch size.")
-  parser.add_argument("--model", type=str, help="The model to benchmark.")
-  parser.add_argument("--order", type=str, help="The order to evaluate.")
-  parser.add_argument("--cudnn_ws", type=int, help="The cudnn workspace size.")
-  parser.add_argument("--iterations", type=int, default=100,
+  parser.add_argument("--batch_size", type=int, default=128,
+                      help="The batch size.")
+  parser.add_argument("--model", type=str,
+                      help="The model to benchmark.")
+  parser.add_argument("--order", type=str, default="NCHW",
+                      help="The order to evaluate.")
+  parser.add_argument("--cudnn_ws", type=int, default=-1,
+                      help="The cudnn workspace size.")
+  parser.add_argument("--iterations", type=int, default=10,
                       help="Number of iterations to run the network.")
+  parser.add_argument("--warmup_iterations", type=int, default=10,
+                      help="Number of warm-up iterations before benchmarking.")
   parser.add_argument("--forward_only", type=bool, default=False,
                       help="If set, only run the forward pass.")
+  parser.add_argument("--layer_wise_benchmark", type=bool, default=False,
+                      help="If True, run the layer-wise benchmark as well.")
   args = parser.parse_args()
   if (not args.batch_size or not args.model or not args.order or not args.cudnn_ws):
     parser.print_help()
 
   workspace.GlobalInit(['caffe2', '--caffe2_log_level=0'])
-  model_map = {'AlexNet': AlexNet, 'OverFeat': OverFeat, 'VGGA': VGGA, 'Inception': Inception}
-  Benchmark(model_map[args.model], args.order, args.batch_size, args.cudnn_ws,
-            args.forward_only, args.iterations)
+  model_map = {
+      'AlexNet': AlexNet,
+      'OverFeat': OverFeat,
+      'VGGA': VGGA,
+      'Inception': Inception
+      }
+  Benchmark(model_map[args.model], args)

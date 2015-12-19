@@ -177,8 +177,8 @@ class Tensor {
     CAFFE_CHECK_EQ(src.size_, size_)
         << "Size mismatch - did you call reshape before sharing the data?";
     // It is possible that the source tensor hasn't called mutable_data() yet,
-    // in which case ShareData() does make much sense since we don't really know
-    // what to share yet.
+    // in which case ShareData() doesn't make much sense since we don't really
+    // know what to share yet.
     CAFFE_CHECK(src.data_.get()) << "Source tensor has no content yet.";
     // Finally, do sharing.
     data_ = src.data_;
@@ -218,13 +218,13 @@ class Tensor {
    * and a new storage will be created.
    */
   inline void* raw_mutable_data(const TypeMeta& meta) {
-    if (!data_.get() || meta_ != meta) {
+    if (meta_ == meta && data_.get()) {
+      return data_.get();
+    } else {
       meta_ = meta;
       CAFFE_CHECK_GT(size_, 0);
       data_.reset(static_cast<void*>(Context::New(size_ * meta_.itemsize())),
                   Context::Delete);
-      return data_.get();
-    } else {
       return data_.get();
     }
   }
@@ -294,8 +294,8 @@ class Tensor {
    * this function will produce a fatal message.
    */
   inline int dim(const int i) const {
-    CAFFE_CHECK_LT(i, dims_.size()) << "Exceeding ndim limit " << dims_.size();
-    CAFFE_CHECK_GE(i, 0) << "Cannot have negative index";
+    CAFFE_DCHECK_LT(i, dims_.size()) << "Exceeding ndim limit " << dims_.size();
+    CAFFE_DCHECK_GE(i, 0) << "Cannot have negative index";
     return dims_[i];
   }
 

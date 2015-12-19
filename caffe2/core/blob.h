@@ -58,10 +58,11 @@ class Blob {
    */
   template <class T>
   T* GetMutable() {
-    if (!IsType<T>()) {
+    if (IsType<T>()) {
+      return static_cast<T*>(pointer_);
+    } else {
       return Reset<T>(new T());
     }
-    return static_cast<T*>(pointer_);
   }
 
   /**
