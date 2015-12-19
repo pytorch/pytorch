@@ -3,6 +3,9 @@
 all:
 	@python build.py build
 
+android:
+	@python build_android.py build
+
 clean:
 	@python build.py clean
 
