@@ -469,7 +469,7 @@ static size_t THDiskFile_writeLong(THFile *self, long *data, size_t n)
   return nwrite;
 }
 
-static long THDiskFile_readString(THFile *self, const char *format, char **str_)
+static size_t THDiskFile_readString(THFile *self, const char *format, char **str_)
 {
   THDiskFile *dfself = (THDiskFile*)(self);
   THArgCheck(dfself->handle != NULL, 1, "attempt to use a closed file");
