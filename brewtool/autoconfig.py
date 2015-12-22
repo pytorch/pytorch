@@ -176,7 +176,7 @@ class Env(object):
         ]
         if GetCompilerType(Config.CC, self.ENV) == 'g++':
             self.LINKFLAGS.append('-Wl,--gc-sections')
-        self.LIBS = []
+        self.LIBS = Config.ADDITIONAL_LIBS
         self.SHARED_LIB_EXT = (
             Config.SHARED_LIB_EXT if len(Config.SHARED_LIB_EXT) else ".so")
 

@@ -264,6 +264,9 @@ def Benchmark(model_gen, arg):
   model.param_init_net.UniformIntFill([], "label", shape=[arg.batch_size,],
                                       min=0, max=999)
 
+  # Note: even when we are running things on CPU, adding a few engine related
+  # argument will not hurt since the CPU operator registy will simply ignore
+  # these options and go the default path.
   for op in model.net.Proto().op:
     if op.type == 'Conv':
       op.engine = 'CUDNN'
@@ -281,8 +284,10 @@ def Benchmark(model_gen, arg):
       print ('==WARNING==\n'
              'NHWC order with CuDNN may not be supported yet, so I might\n'
              'exit suddenly.')
-  model.param_init_net.RunAllOnGPU()
-  model.net.RunAllOnGPU()
+
+  if not arg.cpu:
+    model.param_init_net.RunAllOnGPU()
+    model.net.RunAllOnGPU()
 
   workspace.RunNetOnce(model.param_init_net)
   workspace.CreateNet(model.net)
@@ -323,6 +328,8 @@ if __name__ == '__main__':
                       help="If set, only run the forward pass.")
   parser.add_argument("--layer_wise_benchmark", type=bool, default=False,
                       help="If True, run the layer-wise benchmark as well.")
+  parser.add_argument("--cpu", type=bool, default=False,
+                      help="If True, run testing on CPU instead of GPU.")
   args = parser.parse_args()
   if (not args.batch_size or not args.model or not args.order or not args.cudnn_ws):
     parser.print_help()

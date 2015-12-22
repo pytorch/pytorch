@@ -69,6 +69,10 @@ class Config(object):
     # Additional link flags you would like to add to the compilation.
     LINKFLAGS = []
 
+    # Additional libraries to link against. This will be appended to each link
+    # link command.
+    ADDITIONAL_LIBS = []
+
     ###########################################################################
     # (optional) CUDA. If you do not specify this, the GPU part of Caffe2 will
     # not be available.
