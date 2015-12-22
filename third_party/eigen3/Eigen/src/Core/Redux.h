@@ -50,20 +50,14 @@ public:
 
 public:
   enum {
-    Cost = (  Derived::SizeAtCompileTime == Dynamic
-           || Derived::CoeffReadCost == Dynamic
-           || (Derived::SizeAtCompileTime!=1 && functor_traits<Func>::Cost == Dynamic)
-           ) ? Dynamic
-           : Derived::SizeAtCompileTime * Derived::CoeffReadCost
-               + (Derived::SizeAtCompileTime-1) * functor_traits<Func>::Cost,
+    Cost = Derived::SizeAtCompileTime == Dynamic ? HugeCost
+         : Derived::SizeAtCompileTime * Derived::CoeffReadCost + (Derived::SizeAtCompileTime-1) * functor_traits<Func>::Cost,
     UnrollingLimit = EIGEN_UNROLLING_LIMIT * (int(Traversal) == int(DefaultTraversal) ? 1 : int(PacketSize))
   };
 
 public:
   enum {
-    Unrolling = Cost != Dynamic && Cost <= UnrollingLimit
-              ? CompleteUnrolling
-              : NoUnrolling
+    Unrolling = Cost <= UnrollingLimit ? CompleteUnrolling : NoUnrolling
   };
   
 #ifdef EIGEN_DEBUG_ASSIGN
@@ -269,8 +263,9 @@ struct redux_impl<Func, Derived, LinearVectorizedTraversal, NoUnrolling>
   }
 };
 
-template<typename Func, typename Derived>
-struct redux_impl<Func, Derived, SliceVectorizedTraversal, NoUnrolling>
+// NOTE: for SliceVectorizedTraversal we simply bypass unrolling
+template<typename Func, typename Derived, int Unrolling>
+struct redux_impl<Func, Derived, SliceVectorizedTraversal, Unrolling>
 {
   typedef typename Derived::Scalar Scalar;
   typedef typename packet_traits<Scalar>::type PacketType;
@@ -414,17 +409,7 @@ typename internal::traits<Derived>::Scalar
 DenseBase<Derived>::redux(const Func& func) const
 {
   eigen_assert(this->rows()>0 && this->cols()>0 && "you are using an empty matrix");
-  
-  // FIXME, eval_nest should be handled by redux_evaluator, however:
-  //  - it is currently difficult to provide the right Flags since they are still handled by the expressions
-  //  - handling it here might reduce the number of template instantiations
-//   typedef typename internal::nested_eval<Derived,1>::type ThisNested;
-//   typedef typename internal::remove_all<ThisNested>::type ThisNestedCleaned;
-//   typedef typename internal::redux_evaluator<ThisNestedCleaned> ThisEvaluator;
-//   
-//   ThisNested thisNested(derived());
-//   ThisEvaluator thisEval(thisNested);
-  
+
   typedef typename internal::redux_evaluator<Derived> ThisEvaluator;
   ThisEvaluator thisEval(derived());
   

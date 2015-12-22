@@ -122,7 +122,8 @@ template<typename _MatrixType> class ComplexEigenSolver
       *
       * This constructor calls compute() to compute the eigendecomposition.
       */
-    explicit ComplexEigenSolver(const MatrixType& matrix, bool computeEigenvectors = true)
+    template<typename InputType>
+    explicit ComplexEigenSolver(const EigenBase<InputType>& matrix, bool computeEigenvectors = true)
             : m_eivec(matrix.rows(),matrix.cols()),
               m_eivalues(matrix.cols()),
               m_schur(matrix.rows()),
@@ -130,7 +131,7 @@ template<typename _MatrixType> class ComplexEigenSolver
               m_eigenvectorsOk(false),
               m_matX(matrix.rows(),matrix.cols())
     {
-      compute(matrix, computeEigenvectors);
+      compute(matrix.derived(), computeEigenvectors);
     }
 
     /** \brief Returns the eigenvectors of given matrix.
@@ -208,7 +209,8 @@ template<typename _MatrixType> class ComplexEigenSolver
       * Example: \include ComplexEigenSolver_compute.cpp
       * Output: \verbinclude ComplexEigenSolver_compute.out
       */
-    ComplexEigenSolver& compute(const MatrixType& matrix, bool computeEigenvectors = true);
+    template<typename InputType>
+    ComplexEigenSolver& compute(const EigenBase<InputType>& matrix, bool computeEigenvectors = true);
 
     /** \brief Reports whether previous computation was successful.
       *
@@ -254,8 +256,9 @@ template<typename _MatrixType> class ComplexEigenSolver
 
 
 template<typename MatrixType>
+template<typename InputType>
 ComplexEigenSolver<MatrixType>& 
-ComplexEigenSolver<MatrixType>::compute(const MatrixType& matrix, bool computeEigenvectors)
+ComplexEigenSolver<MatrixType>::compute(const EigenBase<InputType>& matrix, bool computeEigenvectors)
 {
   check_template_parameters();
   
@@ -264,13 +267,13 @@ ComplexEigenSolver<MatrixType>::compute(const MatrixType& matrix, bool computeEi
 
   // Do a complex Schur decomposition, A = U T U^*
   // The eigenvalues are on the diagonal of T.
-  m_schur.compute(matrix, computeEigenvectors);
+  m_schur.compute(matrix.derived(), computeEigenvectors);
 
   if(m_schur.info() == Success)
   {
     m_eivalues = m_schur.matrixT().diagonal();
     if(computeEigenvectors)
-      doComputeEigenvectors(matrix.norm());
+      doComputeEigenvectors(m_schur.matrixT().norm());
     sortEigenvalues(computeEigenvectors);
   }
 

@@ -71,6 +71,11 @@ class SimplicialCholeskyBase : public SparseSolverBase<Derived>
     typedef Matrix<Scalar,Dynamic,1> VectorType;
     typedef Matrix<StorageIndex,Dynamic,1> VectorI;
 
+    enum {
+      ColsAtCompileTime = MatrixType::ColsAtCompileTime,
+      MaxColsAtCompileTime = MatrixType::MaxColsAtCompileTime
+    };
+
   public:
     
     using Base::derived;
@@ -319,6 +324,8 @@ template<typename _MatrixType, int _UpLo, typename _Ordering> struct traits<Simp
   *               or Upper. Default is Lower.
   * \tparam _Ordering The ordering method to use, either AMDOrdering<> or NaturalOrdering<>. Default is AMDOrdering<>
   *
+  * \implsparsesolverconcept
+  *
   * \sa class SimplicialLDLT, class AMDOrdering, class NaturalOrdering
   */
 template<typename _MatrixType, int _UpLo, typename _Ordering>
@@ -407,6 +414,8 @@ public:
   * \tparam _UpLo the triangular part that will be used for the computations. It can be Lower
   *               or Upper. Default is Lower.
   * \tparam _Ordering The ordering method to use, either AMDOrdering<> or NaturalOrdering<>. Default is AMDOrdering<>
+  *
+  * \implsparsesolverconcept
   *
   * \sa class SimplicialLLT, class AMDOrdering, class NaturalOrdering
   */

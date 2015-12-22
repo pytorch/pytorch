@@ -145,7 +145,7 @@ template<typename _MatrixType> class GeneralizedEigenSolver
       *
       * \sa compute()
       */
-    explicit GeneralizedEigenSolver(const MatrixType& A, const MatrixType& B, bool computeEigenvectors = true)
+    GeneralizedEigenSolver(const MatrixType& A, const MatrixType& B, bool computeEigenvectors = true)
       : m_eivec(A.rows(), A.cols()),
         m_alphas(A.cols()),
         m_betas(A.cols()),

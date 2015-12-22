@@ -12,7 +12,7 @@
 
 namespace Eigen {
 
-template<typename Scalar_, std::size_t NumIndices_, int Options_ = 0, typename IndexType = DenseIndex> class Tensor;
+template<typename Scalar_, int NumIndices_, int Options_ = 0, typename IndexType = DenseIndex> class Tensor;
 template<typename Scalar_, typename Dimensions, int Options_ = 0, typename IndexType = DenseIndex> class TensorFixedSize;
 template<typename PlainObjectType, int Options_ = Unaligned> class TensorMap;
 template<typename PlainObjectType> class TensorRef;
@@ -29,6 +29,7 @@ template<typename Axis, typename LeftXprType, typename RightXprType> class Tenso
 template<typename Dimensions, typename LeftXprType, typename RightXprType> class TensorContractionOp;
 template<typename TargetType, typename XprType> class TensorConversionOp;
 template<typename Dimensions, typename InputXprType, typename KernelXprType> class TensorConvolutionOp;
+template<typename FFT, typename XprType, int FFTDataType, int FFTDirection> class TensorFFTOp;
 template<typename PatchDim, typename XprType> class TensorPatchOp;
 template<DenseIndex Rows, DenseIndex Cols, typename XprType> class TensorImagePatchOp;
 template<DenseIndex Planes, DenseIndex Rows, DenseIndex Cols, typename XprType> class TensorVolumePatchOp;
@@ -57,6 +58,18 @@ template<typename Derived, typename Device> struct TensorEvaluator;
 struct DefaultDevice;
 struct ThreadPoolDevice;
 struct GpuDevice;
+
+enum FFTResultType {
+  RealPart = 0,
+  ImagPart = 1,
+  BothParts = 2
+};
+
+enum FFTDirection {
+    FFT_FORWARD = 0,
+    FFT_REVERSE = 1
+};
+
 
 namespace internal {
 

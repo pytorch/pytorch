@@ -30,6 +30,14 @@ const int DynamicIndex = 0xffffff;
   */
 const int Infinity = -1;
 
+/** This value means that the cost to evaluate an expression coefficient is either very expensive or
+  * cannot be known at compile time.
+  *
+  * This value has to be positive to (1) simplify cost computation, and (2) allow to distinguish between a very expensive and very very expensive expressions.
+  * It thus must also be large enough to make sure unrolling won't happen and that sub expressions will be evaluated, but not too large to avoid overflow.
+  */
+const int HugeCost = 10000;
+
 /** \defgroup flags Flags
   * \ingroup Core_Module
   *
@@ -189,8 +197,8 @@ const unsigned int HereditaryBits = RowMajorBit
   */
 
 /** \ingroup enums
-  * Enum containing possible values for the \p Mode parameter of 
-  * MatrixBase::selfadjointView() and MatrixBase::triangularView(). */
+  * Enum containing possible values for the \c Mode or \c UpLo parameter of
+  * MatrixBase::selfadjointView() and MatrixBase::triangularView(), and selfadjoint solvers. */
 enum {
   /** View matrix as a lower triangular matrix. */
   Lower=0x1,                      
@@ -484,6 +492,9 @@ struct Dense {};
 /** The type used to identify a general sparse storage. */
 struct Sparse {};
 
+/** The type used to identify a general solver (foctored) storage. */
+struct SolverStorage {};
+
 /** The type used to identify a permutation storage. */
 struct PermutationStorage {};
 
@@ -498,6 +509,7 @@ struct ArrayXpr {};
 
 // An evaluator must define its shape. By default, it can be one of the following:
 struct DenseShape             { static std::string debugName() { return "DenseShape"; } };
+struct SolverShape            { static std::string debugName() { return "SolverShape"; } };
 struct HomogeneousShape       { static std::string debugName() { return "HomogeneousShape"; } };
 struct DiagonalShape          { static std::string debugName() { return "DiagonalShape"; } };
 struct BandShape              { static std::string debugName() { return "BandShape"; } };
@@ -523,7 +535,9 @@ enum ComparisonName {
   cmp_LT = 1,
   cmp_LE = 2,
   cmp_UNORD = 3,
-  cmp_NEQ = 4
+  cmp_NEQ = 4,
+  cmp_GT = 5,
+  cmp_GE = 6
 };
 } // end namespace internal
 

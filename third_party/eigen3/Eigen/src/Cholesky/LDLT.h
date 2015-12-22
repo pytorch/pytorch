@@ -99,14 +99,15 @@ template<typename _MatrixType, int _UpLo> class LDLT
       * This calculates the decomposition for the input \a matrix.
       * \sa LDLT(Index size)
       */
-    explicit LDLT(const MatrixType& matrix)
+    template<typename InputType>
+    explicit LDLT(const EigenBase<InputType>& matrix)
       : m_matrix(matrix.rows(), matrix.cols()),
         m_transpositions(matrix.rows()),
         m_temporary(matrix.rows()),
         m_sign(internal::ZeroSign),
         m_isInitialized(false)
     {
-      compute(matrix);
+      compute(matrix.derived());
     }
 
     /** Clear any existing decomposition
@@ -188,7 +189,8 @@ template<typename _MatrixType, int _UpLo> class LDLT
     template<typename Derived>
     bool solveInPlace(MatrixBase<Derived> &bAndX) const;
 
-    LDLT& compute(const MatrixType& matrix);
+    template<typename InputType>
+    LDLT& compute(const EigenBase<InputType>& matrix);
 
     template <typename Derived>
     LDLT& rankUpdate(const MatrixBase<Derived>& w, const RealScalar& alpha=1);
@@ -427,14 +429,15 @@ template<typename MatrixType> struct LDLT_Traits<MatrixType,Upper>
 /** Compute / recompute the LDLT decomposition A = L D L^* = U^* D U of \a matrix
   */
 template<typename MatrixType, int _UpLo>
-LDLT<MatrixType,_UpLo>& LDLT<MatrixType,_UpLo>::compute(const MatrixType& a)
+template<typename InputType>
+LDLT<MatrixType,_UpLo>& LDLT<MatrixType,_UpLo>::compute(const EigenBase<InputType>& a)
 {
   check_template_parameters();
   
   eigen_assert(a.rows()==a.cols());
   const Index size = a.rows();
 
-  m_matrix = a;
+  m_matrix = a.derived();
 
   m_transpositions.resize(size);
   m_isInitialized = false;

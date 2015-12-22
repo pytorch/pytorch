@@ -15,6 +15,20 @@ namespace internal {
 
 
 /** \internal
+ * \brief Template functor to compute the modulo between an array and a scalar.
+ */
+template <typename Scalar>
+struct scalar_mod_op {
+  EIGEN_DEVICE_FUNC scalar_mod_op(const Scalar& divisor) : m_divisor(divisor) {}
+  EIGEN_DEVICE_FUNC inline Scalar operator() (const Scalar& a) const { return a % m_divisor; }
+  const Scalar m_divisor;
+};
+template <typename Scalar>
+struct functor_traits<scalar_mod_op<Scalar> >
+{ enum { Cost = 2 * NumTraits<Scalar>::MulCost, PacketAccess = false }; };
+
+
+/** \internal
   * \brief Template functor to compute the sigmoid of a scalar
   * \sa class CwiseUnaryOp, ArrayBase::sigmoid()
   */
@@ -26,8 +40,8 @@ struct scalar_sigmoid_op {
     return one / (one + std::exp(-x));
   }
 
-  template <typename Packet>
-  inline Packet packetOp(const Packet& x) const {
+  template <typename Packet> EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE
+  Packet packetOp(const Packet& x) const {
     const Packet one = pset1<Packet>(1);
     return pdiv(one, padd(one, pexp(pnegate(x))));
   }
@@ -82,6 +96,7 @@ template <typename T> struct MeanReducer
   static const bool PacketAccess = true;
   static const bool IsStateful = true;
 
+  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE
   MeanReducer() : scalarCount_(0), packetCount_(0) { }
 
   EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE void reduce(const T t, T* accum) {
@@ -218,6 +233,33 @@ template <typename T> struct ProdReducer
   }
 };
 
+
+struct AndReducer
+{
+  static const bool PacketAccess = false;
+  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE void reduce(bool t, bool* accum) const {
+    *accum = *accum && t;
+  }
+  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE bool initialize() const {
+    return true;
+  }
+  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE bool finalize(bool accum) const {
+    return accum;
+  }
+};
+
+struct OrReducer {
+  static const bool PacketAccess = false;
+  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE void reduce(bool t, bool* accum) const {
+    *accum = *accum || t;
+  }
+  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE bool initialize() const {
+    return false;
+  }
+  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE bool finalize(bool accum) const {
+    return accum;
+  }
+};
 
 // Argmin/Argmax reducers
 template <typename T> struct ArgMaxTupleReducer

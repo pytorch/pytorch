@@ -217,29 +217,6 @@ class ProductImpl<Lhs,Rhs,Option,Dense>
   
 };
 
-/***************************************************************************
-* Implementation of matrix base methods
-***************************************************************************/
-
-
-/** \internal used to test the evaluator only
-  */
-template<typename Lhs,typename Rhs>
-const Product<Lhs,Rhs>
-prod(const Lhs& lhs, const Rhs& rhs)
-{
-  return Product<Lhs,Rhs>(lhs,rhs);
-}
-
-/** \internal used to test the evaluator only
-  */
-template<typename Lhs,typename Rhs>
-const Product<Lhs,Rhs,LazyProduct>
-lazyprod(const Lhs& lhs, const Rhs& rhs)
-{
-  return Product<Lhs,Rhs,LazyProduct>(lhs,rhs);
-}
-
 } // end namespace Eigen
 
 #endif // EIGEN_PRODUCT_H

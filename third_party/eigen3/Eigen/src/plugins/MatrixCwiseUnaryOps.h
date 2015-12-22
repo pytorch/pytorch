@@ -14,6 +14,7 @@
 typedef CwiseUnaryOp<internal::scalar_abs_op<Scalar>, const Derived> CwiseAbsReturnType;
 typedef CwiseUnaryOp<internal::scalar_abs2_op<Scalar>, const Derived> CwiseAbs2ReturnType;
 typedef CwiseUnaryOp<internal::scalar_sqrt_op<Scalar>, const Derived> CwiseSqrtReturnType;
+typedef CwiseUnaryOp<internal::scalar_sign_op<Scalar>, const Derived> CwiseSignReturnType;
 typedef CwiseUnaryOp<internal::scalar_inverse_op<Scalar>, const Derived> CwiseInverseReturnType;
 
 /** \returns an expression of the coefficient-wise absolute value of \c *this
@@ -48,6 +49,17 @@ cwiseAbs2() const { return CwiseAbs2ReturnType(derived()); }
 EIGEN_DEVICE_FUNC
 inline const CwiseSqrtReturnType
 cwiseSqrt() const { return CwiseSqrtReturnType(derived()); }
+
+/** \returns an expression of the coefficient-wise signum of *this.
+  *
+  * Example: \include MatrixBase_cwiseSign.cpp
+  * Output: \verbinclude MatrixBase_cwiseSign.out
+  *
+  */
+EIGEN_DEVICE_FUNC
+inline const CwiseSignReturnType
+cwiseSign() const { return CwiseSignReturnType(derived()); }
+
 
 /** \returns an expression of the coefficient-wise inverse of *this.
   *

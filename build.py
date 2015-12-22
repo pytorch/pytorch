@@ -39,7 +39,7 @@ class Config(object):
     # operations. If you have eigen installed in your system, you can simply use
     # USE_SYSTEM_EIGEN = True. Otherwise (for example when you are cross
     # compiling) you may want to set USE_SYSTEM_EIGEN to False.
-    USE_SYSTEM_EIGEN = True
+    USE_SYSTEM_EIGEN = False
 
     # google-glog: Caffe can choose to use google glog, which will allow a more
     # sophisticated logging scheme. It also comes with a minimal logging tool
@@ -52,8 +52,13 @@ class Config(object):
     # to be built without RTTI. If you don't know, leave USE_RTTI True.
     USE_RTTI = True
 
+    # Whether to use openmp or not. Note that currently, a lot of Caffe2's code
+    # is not using openmp, but the underlying Eigen library can take advantage
+    # of that.
+    USE_OPENMP = False
+
     # Manually specified defines.
-    DEFINES = []
+    DEFINES = ["-DNDEBUG"]
 
     # Manually specified include paths. These include paths are searched before
     # any auto-generated include paths.
@@ -64,7 +69,7 @@ class Config(object):
     LIBDIRS = []
 
     # Additional cflags you would like to add to the compilation.
-    CFLAGS = []
+    CFLAGS = ["-mavx", "-mavx2", "-mfma"]
 
     # Additional link flags you would like to add to the compilation.
     LINKFLAGS = []

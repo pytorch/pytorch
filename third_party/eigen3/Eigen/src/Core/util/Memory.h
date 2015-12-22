@@ -732,7 +732,7 @@ template<typename T> void swap(scoped_array<T> &a,scoped_array<T> &b)
 
 #if EIGEN_MAX_ALIGN_BYTES!=0
   #define EIGEN_MAKE_ALIGNED_OPERATOR_NEW_NOTHROW(NeedsToAlign) \
-      void* operator new(size_t size, const std::nothrow_t&) throw() { \
+      void* operator new(size_t size, const std::nothrow_t&) EIGEN_NO_THROW { \
         EIGEN_TRY { return Eigen::internal::conditional_aligned_malloc<NeedsToAlign>(size); } \
         EIGEN_CATCH (...) { return 0; } \
       }
@@ -743,20 +743,20 @@ template<typename T> void swap(scoped_array<T> &a,scoped_array<T> &b)
       void *operator new[](size_t size) { \
         return Eigen::internal::conditional_aligned_malloc<NeedsToAlign>(size); \
       } \
-      void operator delete(void * ptr) throw() { Eigen::internal::conditional_aligned_free<NeedsToAlign>(ptr); } \
-      void operator delete[](void * ptr) throw() { Eigen::internal::conditional_aligned_free<NeedsToAlign>(ptr); } \
-      void operator delete(void * ptr, std::size_t /* sz */) throw() { Eigen::internal::conditional_aligned_free<NeedsToAlign>(ptr); } \
-      void operator delete[](void * ptr, std::size_t /* sz */) throw() { Eigen::internal::conditional_aligned_free<NeedsToAlign>(ptr); } \
+      void operator delete(void * ptr) EIGEN_NO_THROW { Eigen::internal::conditional_aligned_free<NeedsToAlign>(ptr); } \
+      void operator delete[](void * ptr) EIGEN_NO_THROW { Eigen::internal::conditional_aligned_free<NeedsToAlign>(ptr); } \
+      void operator delete(void * ptr, std::size_t /* sz */) EIGEN_NO_THROW { Eigen::internal::conditional_aligned_free<NeedsToAlign>(ptr); } \
+      void operator delete[](void * ptr, std::size_t /* sz */) EIGEN_NO_THROW { Eigen::internal::conditional_aligned_free<NeedsToAlign>(ptr); } \
       /* in-place new and delete. since (at least afaik) there is no actual   */ \
       /* memory allocated we can safely let the default implementation handle */ \
       /* this particular case. */ \
       static void *operator new(size_t size, void *ptr) { return ::operator new(size,ptr); } \
       static void *operator new[](size_t size, void* ptr) { return ::operator new[](size,ptr); } \
-      void operator delete(void * memory, void *ptr) throw() { return ::operator delete(memory,ptr); } \
-      void operator delete[](void * memory, void *ptr) throw() { return ::operator delete[](memory,ptr); } \
+      void operator delete(void * memory, void *ptr) EIGEN_NO_THROW { return ::operator delete(memory,ptr); } \
+      void operator delete[](void * memory, void *ptr) EIGEN_NO_THROW { return ::operator delete[](memory,ptr); } \
       /* nothrow-new (returns zero instead of std::bad_alloc) */ \
       EIGEN_MAKE_ALIGNED_OPERATOR_NEW_NOTHROW(NeedsToAlign) \
-      void operator delete(void *ptr, const std::nothrow_t&) throw() { \
+      void operator delete(void *ptr, const std::nothrow_t&) EIGEN_NO_THROW { \
         Eigen::internal::conditional_aligned_free<NeedsToAlign>(ptr); \
       } \
       typedef void eigen_aligned_operator_new_marker_type;

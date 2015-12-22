@@ -32,6 +32,7 @@ class SparseView : public SparseMatrixBase<SparseView<MatrixType> >
 {
   typedef typename MatrixType::Nested MatrixTypeNested;
   typedef typename internal::remove_all<MatrixTypeNested>::type _MatrixTypeNested;
+  typedef SparseMatrixBase<SparseView > Base;
 public:
   EIGEN_SPARSE_PUBLIC_INTERFACE(SparseView)
   typedef typename internal::remove_all<MatrixType>::type NestedExpression;

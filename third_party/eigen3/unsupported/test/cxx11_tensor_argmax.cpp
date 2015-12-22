@@ -61,14 +61,14 @@ static void test_argmax_tuple_reducer()
   Tensor<Tuple<DenseIndex, float>, 4, DataLayout> index_tuples(2,3,5,7);
   index_tuples = tensor.index_tuples();
 
-  Tensor<Tuple<DenseIndex, float>, 1, DataLayout> reduced(1);
+  Tensor<Tuple<DenseIndex, float>, 0, DataLayout> reduced;
   DimensionList<DenseIndex, 4> dims;
   reduced = index_tuples.reduce(
       dims, internal::ArgMaxTupleReducer<Tuple<DenseIndex, float>>());
 
-  Tensor<float, 1, DataLayout> maxi = tensor.maximum();
+  Tensor<float, 0, DataLayout> maxi = tensor.maximum();
 
-  VERIFY_IS_EQUAL(maxi(0), reduced(0).second);
+  VERIFY_IS_EQUAL(maxi(), reduced(0).second);
 
   array<DenseIndex, 3> reduce_dims;
   for (int d = 0; d < 3; ++d) reduce_dims[d] = d;
@@ -93,14 +93,14 @@ static void test_argmin_tuple_reducer()
   Tensor<Tuple<DenseIndex, float>, 4, DataLayout> index_tuples(2,3,5,7);
   index_tuples = tensor.index_tuples();
 
-  Tensor<Tuple<DenseIndex, float>, 1, DataLayout> reduced(1);
+  Tensor<Tuple<DenseIndex, float>, 0, DataLayout> reduced;
   DimensionList<DenseIndex, 4> dims;
   reduced = index_tuples.reduce(
       dims, internal::ArgMinTupleReducer<Tuple<DenseIndex, float>>());
 
-  Tensor<float, 1, DataLayout> mini = tensor.minimum();
+  Tensor<float, 0, DataLayout> mini = tensor.minimum();
 
-  VERIFY_IS_EQUAL(mini(0), reduced(0).second);
+  VERIFY_IS_EQUAL(mini(), reduced(0).second);
 
   array<DenseIndex, 3> reduce_dims;
   for (int d = 0; d < 3; ++d) reduce_dims[d] = d;
@@ -123,7 +123,7 @@ static void test_simple_argmax()
   tensor = (tensor + tensor.constant(0.5)).log();
   tensor(0,0,0,0) = 10.0;
 
-  Tensor<DenseIndex, 1, DataLayout> tensor_argmax(1);
+  Tensor<DenseIndex, 0, DataLayout> tensor_argmax;
 
   tensor_argmax = tensor.argmax();
 
@@ -144,7 +144,7 @@ static void test_simple_argmin()
   tensor = (tensor + tensor.constant(0.5)).log();
   tensor(0,0,0,0) = -10.0;
 
-  Tensor<DenseIndex, 1, DataLayout> tensor_argmin(1);
+  Tensor<DenseIndex, 0, DataLayout> tensor_argmin;
 
   tensor_argmin = tensor.argmin();
 
@@ -184,9 +184,9 @@ static void test_argmax_dim()
 
     tensor_argmax = tensor.argmax(dim);
 
-    VERIFY_IS_EQUAL(tensor_argmax.dimensions().TotalSize(),
-                    size_t(2*3*5*7 / tensor.dimension(dim)));
-    for (size_t n = 0; n < tensor_argmax.dimensions().TotalSize(); ++n) {
+    VERIFY_IS_EQUAL(tensor_argmax.size(),
+                    ptrdiff_t(2*3*5*7 / tensor.dimension(dim)));
+    for (ptrdiff_t n = 0; n < tensor_argmax.size(); ++n) {
       // Expect max to be in the first index of the reduced dimension
       VERIFY_IS_EQUAL(tensor_argmax.data()[n], 0);
     }
@@ -206,9 +206,9 @@ static void test_argmax_dim()
 
     tensor_argmax = tensor.argmax(dim);
 
-    VERIFY_IS_EQUAL(tensor_argmax.dimensions().TotalSize(),
-                    size_t(2*3*5*7 / tensor.dimension(dim)));
-    for (size_t n = 0; n < tensor_argmax.dimensions().TotalSize(); ++n) {
+    VERIFY_IS_EQUAL(tensor_argmax.size(),
+                    ptrdiff_t(2*3*5*7 / tensor.dimension(dim)));
+    for (ptrdiff_t n = 0; n < tensor_argmax.size(); ++n) {
       // Expect max to be in the last index of the reduced dimension
       VERIFY_IS_EQUAL(tensor_argmax.data()[n], tensor.dimension(dim) - 1);
     }
@@ -242,9 +242,9 @@ static void test_argmin_dim()
 
     tensor_argmin = tensor.argmin(dim);
 
-    VERIFY_IS_EQUAL(tensor_argmin.dimensions().TotalSize(),
-                    size_t(2*3*5*7 / tensor.dimension(dim)));
-    for (size_t n = 0; n < tensor_argmin.dimensions().TotalSize(); ++n) {
+    VERIFY_IS_EQUAL(tensor_argmin.size(),
+                    ptrdiff_t(2*3*5*7 / tensor.dimension(dim)));
+    for (ptrdiff_t n = 0; n < tensor_argmin.size(); ++n) {
       // Expect min to be in the first index of the reduced dimension
       VERIFY_IS_EQUAL(tensor_argmin.data()[n], 0);
     }
@@ -264,9 +264,9 @@ static void test_argmin_dim()
 
     tensor_argmin = tensor.argmin(dim);
 
-    VERIFY_IS_EQUAL(tensor_argmin.dimensions().TotalSize(),
-                    size_t(2*3*5*7 / tensor.dimension(dim)));
-    for (size_t n = 0; n < tensor_argmin.dimensions().TotalSize(); ++n) {
+    VERIFY_IS_EQUAL(tensor_argmin.size(),
+                    ptrdiff_t(2*3*5*7 / tensor.dimension(dim)));
+    for (ptrdiff_t n = 0; n < tensor_argmin.size(); ++n) {
       // Expect min to be in the last index of the reduced dimension
       VERIFY_IS_EQUAL(tensor_argmin.data()[n], tensor.dimension(dim) - 1);
     }

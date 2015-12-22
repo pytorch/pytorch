@@ -121,7 +121,8 @@ template<typename _MatrixType> class FullPivHouseholderQR
       * 
       * \sa compute()
       */
-    explicit FullPivHouseholderQR(const MatrixType& matrix)
+    template<typename InputType>
+    explicit FullPivHouseholderQR(const EigenBase<InputType>& matrix)
       : m_qr(matrix.rows(), matrix.cols()),
         m_hCoeffs((std::min)(matrix.rows(), matrix.cols())),
         m_rows_transpositions((std::min)(matrix.rows(), matrix.cols())),
@@ -131,7 +132,7 @@ template<typename _MatrixType> class FullPivHouseholderQR
         m_isInitialized(false),
         m_usePrescribedThreshold(false)
     {
-      compute(matrix);
+      compute(matrix.derived());
     }
 
     /** This method finds a solution x to the equation Ax=b, where A is the matrix of which
@@ -172,7 +173,8 @@ template<typename _MatrixType> class FullPivHouseholderQR
       return m_qr;
     }
 
-    FullPivHouseholderQR& compute(const MatrixType& matrix);
+    template<typename InputType>
+    FullPivHouseholderQR& compute(const EigenBase<InputType>& matrix);
 
     /** \returns a const reference to the column permutation matrix */
     const PermutationType& colsPermutation() const
@@ -386,6 +388,8 @@ template<typename _MatrixType> class FullPivHouseholderQR
       EIGEN_STATIC_ASSERT_NON_INTEGER(Scalar);
     }
     
+    void computeInPlace();
+    
     MatrixType m_qr;
     HCoeffsType m_hCoeffs;
     IntDiagSizeVectorType m_rows_transpositions;
@@ -423,16 +427,27 @@ typename MatrixType::RealScalar FullPivHouseholderQR<MatrixType>::logAbsDetermin
   * \sa class FullPivHouseholderQR, FullPivHouseholderQR(const MatrixType&)
   */
 template<typename MatrixType>
-FullPivHouseholderQR<MatrixType>& FullPivHouseholderQR<MatrixType>::compute(const MatrixType& matrix)
+template<typename InputType>
+FullPivHouseholderQR<MatrixType>& FullPivHouseholderQR<MatrixType>::compute(const EigenBase<InputType>& matrix)
 {
   check_template_parameters();
   
+  m_qr = matrix.derived();
+  
+  computeInPlace();
+  
+  return *this;
+}
+
+template<typename MatrixType>
+void FullPivHouseholderQR<MatrixType>::computeInPlace()
+{
   using std::abs;
-  Index rows = matrix.rows();
-  Index cols = matrix.cols();
+  Index rows = m_qr.rows();
+  Index cols = m_qr.cols();
   Index size = (std::min)(rows,cols);
 
-  m_qr = matrix;
+  
   m_hCoeffs.resize(size);
 
   m_temp.resize(cols);
@@ -503,8 +518,6 @@ FullPivHouseholderQR<MatrixType>& FullPivHouseholderQR<MatrixType>::compute(cons
 
   m_det_pq = (number_of_transpositions%2) ? -1 : 1;
   m_isInitialized = true;
-
-  return *this;
 }
 
 #ifndef EIGEN_PARSED_BY_DOXYGEN

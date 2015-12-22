@@ -328,23 +328,26 @@ template<typename Derived> class MatrixBase
 
 /////////// LU module ///////////
 
-    EIGEN_DEVICE_FUNC const FullPivLU<PlainObject> fullPivLu() const;
-    EIGEN_DEVICE_FUNC const PartialPivLU<PlainObject> partialPivLu() const;
-
-    const PartialPivLU<PlainObject> lu() const;
+    EIGEN_DEVICE_FUNC
+    inline const FullPivLU<PlainObject> fullPivLu() const;
+    EIGEN_DEVICE_FUNC
+    inline const PartialPivLU<PlainObject> partialPivLu() const;
 
     EIGEN_DEVICE_FUNC
-    const Inverse<Derived> inverse() const;
+    inline const PartialPivLU<PlainObject> lu() const;
+
+    EIGEN_DEVICE_FUNC
+    inline const Inverse<Derived> inverse() const;
     
     template<typename ResultType>
-    void computeInverseAndDetWithCheck(
+    inline void computeInverseAndDetWithCheck(
       ResultType& inverse,
       typename ResultType::Scalar& determinant,
       bool& invertible,
       const RealScalar& absDeterminantThreshold = NumTraits<Scalar>::dummy_precision()
     ) const;
     template<typename ResultType>
-    void computeInverseWithCheck(
+    inline void computeInverseWithCheck(
       ResultType& inverse,
       bool& invertible,
       const RealScalar& absDeterminantThreshold = NumTraits<Scalar>::dummy_precision()
@@ -353,22 +356,24 @@ template<typename Derived> class MatrixBase
 
 /////////// Cholesky module ///////////
 
-    const LLT<PlainObject>  llt() const;
-    const LDLT<PlainObject> ldlt() const;
+    inline const LLT<PlainObject>  llt() const;
+    inline const LDLT<PlainObject> ldlt() const;
 
 /////////// QR module ///////////
 
-    const HouseholderQR<PlainObject> householderQr() const;
-    const ColPivHouseholderQR<PlainObject> colPivHouseholderQr() const;
-    const FullPivHouseholderQR<PlainObject> fullPivHouseholderQr() const;
+    inline const HouseholderQR<PlainObject> householderQr() const;
+    inline const ColPivHouseholderQR<PlainObject> colPivHouseholderQr() const;
+    inline const FullPivHouseholderQR<PlainObject> fullPivHouseholderQr() const;
 
-    EigenvaluesReturnType eigenvalues() const;
-    RealScalar operatorNorm() const;
+/////////// Eigenvalues module ///////////
+
+    inline EigenvaluesReturnType eigenvalues() const;
+    inline RealScalar operatorNorm() const;
 
 /////////// SVD module ///////////
 
-    JacobiSVD<PlainObject> jacobiSvd(unsigned int computationOptions = 0) const;
-    BDCSVD<PlainObject>    bdcSvd(unsigned int computationOptions = 0) const;
+    inline JacobiSVD<PlainObject> jacobiSvd(unsigned int computationOptions = 0) const;
+    inline BDCSVD<PlainObject>    bdcSvd(unsigned int computationOptions = 0) const;
 
 /////////// Geometry module ///////////
 
@@ -381,24 +386,24 @@ template<typename Derived> class MatrixBase
     #endif // EIGEN_PARSED_BY_DOXYGEN
     template<typename OtherDerived>
     EIGEN_DEVICE_FUNC
-    typename cross_product_return_type<OtherDerived>::type
+    inline typename cross_product_return_type<OtherDerived>::type
     cross(const MatrixBase<OtherDerived>& other) const;
     
     template<typename OtherDerived>
     EIGEN_DEVICE_FUNC
-    PlainObject cross3(const MatrixBase<OtherDerived>& other) const;
+    inline PlainObject cross3(const MatrixBase<OtherDerived>& other) const;
     
     EIGEN_DEVICE_FUNC
-    PlainObject unitOrthogonal(void) const;
+    inline PlainObject unitOrthogonal(void) const;
     
-    Matrix<Scalar,3,1> eulerAngles(Index a0, Index a1, Index a2) const;
+    inline Matrix<Scalar,3,1> eulerAngles(Index a0, Index a1, Index a2) const;
     
-    ScalarMultipleReturnType operator*(const UniformScaling<Scalar>& s) const;
+    inline ScalarMultipleReturnType operator*(const UniformScaling<Scalar>& s) const;
     // put this as separate enum value to work around possible GCC 4.3 bug (?)
     enum { HomogeneousReturnTypeDirection = ColsAtCompileTime==1&&RowsAtCompileTime==1 ? ((internal::traits<Derived>::Flags&RowMajorBit)==RowMajorBit ? Horizontal : Vertical)
                                           : ColsAtCompileTime==1 ? Vertical : Horizontal };
     typedef Homogeneous<Derived, HomogeneousReturnTypeDirection> HomogeneousReturnType;
-    HomogeneousReturnType homogeneous() const;
+    inline HomogeneousReturnType homogeneous() const;
     
     enum {
       SizeMinusOne = SizeAtCompileTime==Dynamic ? Dynamic : SizeAtCompileTime-1
@@ -409,7 +414,7 @@ template<typename Derived> class MatrixBase
     typedef CwiseUnaryOp<internal::scalar_quotient1_op<typename internal::traits<Derived>::Scalar>,
                 const ConstStartMinusOne > HNormalizedReturnType;
 
-    const HNormalizedReturnType hnormalized() const;
+    inline const HNormalizedReturnType hnormalized() const;
 
 ////////// Householder module ///////////
 
@@ -432,6 +437,15 @@ template<typename Derived> class MatrixBase
     void applyOnTheLeft(Index p, Index q, const JacobiRotation<OtherScalar>& j);
     template<typename OtherScalar>
     void applyOnTheRight(Index p, Index q, const JacobiRotation<OtherScalar>& j);
+
+///////// SparseCore module /////////
+
+    template<typename OtherDerived>
+    EIGEN_STRONG_INLINE const typename SparseMatrixBase<OtherDerived>::template CwiseProductDenseReturnType<Derived>::Type
+    cwiseProduct(const SparseMatrixBase<OtherDerived> &other) const
+    {
+      return other.cwiseProduct(derived());
+    }
 
 ///////// MatrixFunctions module /////////
 

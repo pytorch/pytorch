@@ -44,7 +44,7 @@ class compute_tensor_flags
 };
 
 
-template<typename Scalar_, std::size_t NumIndices_, int Options_, typename IndexType_>
+template<typename Scalar_, int NumIndices_, int Options_, typename IndexType_>
 struct traits<Tensor<Scalar_, NumIndices_, Options_, IndexType_> >
 {
   typedef Scalar_ Scalar;
@@ -107,13 +107,13 @@ struct traits<TensorRef<PlainObjectType> >
 };
 
 
-template<typename _Scalar, std::size_t NumIndices_, int Options, typename IndexType_>
+template<typename _Scalar, int NumIndices_, int Options, typename IndexType_>
 struct eval<Tensor<_Scalar, NumIndices_, Options, IndexType_>, Eigen::Dense>
 {
   typedef const Tensor<_Scalar, NumIndices_, Options, IndexType_>& type;
 };
 
-template<typename _Scalar, std::size_t NumIndices_, int Options, typename IndexType_>
+template<typename _Scalar, int NumIndices_, int Options, typename IndexType_>
 struct eval<const Tensor<_Scalar, NumIndices_, Options, IndexType_>, Eigen::Dense>
 {
   typedef const Tensor<_Scalar, NumIndices_, Options, IndexType_>& type;
@@ -161,13 +161,13 @@ template<typename T, int n=1, typename PlainObject = void> struct nested
   typedef typename ref_selector<T>::type type;
 };
 
-template <typename Scalar_, std::size_t NumIndices_, int Options_, typename IndexType_>
+template <typename Scalar_, int NumIndices_, int Options_, typename IndexType_>
 struct nested<Tensor<Scalar_, NumIndices_, Options_, IndexType_> >
 {
   typedef const Tensor<Scalar_, NumIndices_, Options_, IndexType_>& type;
 };
 
-template <typename Scalar_, std::size_t NumIndices_, int Options_, typename IndexType_>
+template <typename Scalar_, int NumIndices_, int Options_, typename IndexType_>
 struct nested<const Tensor<Scalar_, NumIndices_, Options_, IndexType_> >
 {
   typedef const Tensor<Scalar_, NumIndices_, Options_, IndexType_>& type;

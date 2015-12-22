@@ -32,13 +32,28 @@ template <> struct max_n_1<0> {
 };
 
 
+// Default packet types
+template <typename Scalar, typename Device>
+struct PacketType {
+  typedef typename internal::packet_traits<Scalar>::type type;
+  static const int size = internal::unpacket_traits<type>::size;
+};
 
-
-#if defined(EIGEN_HAS_CONSTEXPR)
-#define EIGEN_CONSTEXPR constexpr
-#else
-#define EIGEN_CONSTEXPR
+// For CUDA packet types when using a GpuDevice
+#if defined(EIGEN_USE_GPU) && defined(__CUDACC__)
+template <>
+struct PacketType<float, GpuDevice> {
+  typedef float4 type;
+  static const int size = 4;
+};
+template <>
+struct PacketType<double, GpuDevice> {
+  typedef double2 type;
+  static const int size = 2;
+};
 #endif
+
+
 
 // Tuple mimics std::pair but works on e.g. nvcc.
 template <typename U, typename V> struct Tuple {
@@ -83,7 +98,50 @@ bool operator!=(const Tuple<U, V>& x, const Tuple<U, V>& y) {
   return !(x == y);
 }
 
-#undef EIGEN_CONSTEXPR
+
+
+#ifdef EIGEN_HAS_SFINAE
+namespace internal{
+
+  template<typename IndexType, Index... Is>
+  EIGEN_CONSTEXPR EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE
+  array<Index, sizeof...(Is)> customIndices2Array(IndexType& idx, numeric_list<Index, Is...>) {
+    return { idx[Is]... };
+  }
+
+  /** Make an array (for index/dimensions) out of a custom index */
+  template<typename Index, std::size_t NumIndices, typename IndexType>
+  EIGEN_CONSTEXPR EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE
+  array<Index, NumIndices> customIndices2Array(IndexType& idx) {
+    return customIndices2Array(idx, typename gen_numeric_list<Index, NumIndices>::type{});
+  }
+
+
+  template <typename B, typename D>
+  struct is_base_of
+  {
+
+    typedef char (&yes)[1];
+    typedef char (&no)[2];
+
+    template <typename BB, typename DD>
+    struct Host
+    {
+      operator BB*() const;
+      operator DD*();
+    };
+
+    template<typename T>
+    static yes check(D*, T);
+    static no check(B*, int);
+
+    static const bool value = sizeof(check(Host<B,D>(), int())) == sizeof(yes);
+  };
+
+}
+#endif
+
+
 
 }  // namespace Eigen
 

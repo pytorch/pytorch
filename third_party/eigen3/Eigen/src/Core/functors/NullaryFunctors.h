@@ -21,12 +21,11 @@ struct scalar_constant_op {
   template<typename Index>
   EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE const Scalar operator() (Index, Index = 0) const { return m_other; }
   template<typename Index, typename PacketType>
-  EIGEN_STRONG_INLINE const PacketType packetOp(Index, Index = 0) const { return internal::pset1<PacketType>(m_other); }
+  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE const PacketType packetOp(Index, Index = 0) const { return internal::pset1<PacketType>(m_other); }
   const Scalar m_other;
 };
 template<typename Scalar>
 struct functor_traits<scalar_constant_op<Scalar> >
-// FIXME replace this packet test by a safe one
 { enum { Cost = 1, PacketAccess = packet_traits<Scalar>::Vectorizable, IsRepeatable = true }; };
 
 template<typename Scalar> struct scalar_identity_op {
@@ -64,7 +63,7 @@ struct linspaced_op_impl<Scalar,Packet,false>
   }
 
   template<typename Index>
-  EIGEN_STRONG_INLINE const Packet packetOp(Index) const { return m_base = padd(m_base,m_packetStep); }
+  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE const Packet packetOp(Index) const { return m_base = padd(m_base,m_packetStep); }
 
   const Scalar m_low;
   const Scalar m_step;
@@ -86,7 +85,7 @@ struct linspaced_op_impl<Scalar,Packet,true>
   EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE const Scalar operator() (Index i) const { return m_low+i*m_step; }
 
   template<typename Index>
-  EIGEN_STRONG_INLINE const Packet packetOp(Index i) const
+  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE const Packet packetOp(Index i) const
   { return internal::padd(m_lowPacket, pmul(m_stepPacket, padd(pset1<Packet>(Scalar(i)),m_interPacket))); }
 
   const Scalar m_low;
@@ -121,12 +120,12 @@ template <typename Scalar, typename PacketType, bool RandomAccess> struct linspa
   }
 
   template<typename Index, typename Packet>
-  EIGEN_STRONG_INLINE const Packet packetOp(Index i) const { return impl.packetOp(i); }
+  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE const Packet packetOp(Index i) const { return impl.packetOp(i); }
 
   // We need this function when assigning e.g. a RowVectorXd to a MatrixXd since
   // there row==0 and col is used for the actual iteration.
   template<typename Index, typename Packet>
-  EIGEN_STRONG_INLINE const Packet packetOp(Index row, Index col) const
+  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE const Packet packetOp(Index row, Index col) const
   {
     eigen_assert(col==0 || row==0);
     return impl.packetOp(col + row);
@@ -135,14 +134,12 @@ template <typename Scalar, typename PacketType, bool RandomAccess> struct linspa
   // This proxy object handles the actual required temporaries, the different
   // implementations (random vs. sequential access) as well as the
   // correct piping to size 2/4 packet operations.
-  // TODO find a way to make the packet type configurable
   const linspaced_op_impl<Scalar,PacketType,RandomAccess> impl;
 };
 
 // all functors allow linear access, except scalar_identity_op. So we fix here a quick meta
 // to indicate whether a functor allows linear access, just always answering 'yes' except for
 // scalar_identity_op.
-// FIXME move this to functor_traits adding a functor_default
 template<typename Functor> struct functor_has_linear_access { enum { ret = 1 }; };
 template<typename Scalar> struct functor_has_linear_access<scalar_identity_op<Scalar> > { enum { ret = 0 }; };
 

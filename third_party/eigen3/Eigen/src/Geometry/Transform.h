@@ -118,15 +118,15 @@ template<int Mode> struct transform_make_affine;
   *
   * However, unlike a plain matrix, the Transform class provides many features
   * simplifying both its assembly and usage. In particular, it can be composed
-  * with any other transformations (Transform,Translation,RotationBase,Matrix)
+  * with any other transformations (Transform,Translation,RotationBase,DiagonalMatrix)
   * and can be directly used to transform implicit homogeneous vectors. All these
   * operations are handled via the operator*. For the composition of transformations,
   * its principle consists to first convert the right/left hand sides of the product
   * to a compatible (Dim+1)^2 matrix and then perform a pure matrix product.
   * Of course, internally, operator* tries to perform the minimal number of operations
   * according to the nature of each terms. Likewise, when applying the transform
-  * to non homogeneous vectors, the latters are automatically promoted to homogeneous
-  * one before doing the matrix product. The convertions to homogeneous representations
+  * to points, the latters are automatically promoted to homogeneous vectors
+  * before doing the matrix product. The conventions to homogeneous representations
   * are performed as follow:
   *
   * \b Translation t (Dim)x(1):
@@ -140,7 +140,7 @@ template<int Mode> struct transform_make_affine;
   * R & 0\\
   * 0\,...\,0 & 1
   * \end{array} \right) \f$
-  *
+  *<!--
   * \b Linear \b Matrix L (Dim)x(Dim):
   * \f$ \left( \begin{array}{cc}
   * L & 0\\
@@ -152,14 +152,20 @@ template<int Mode> struct transform_make_affine;
   * A\\
   * 0\,...\,0\,1
   * \end{array} \right) \f$
+  *-->
+  * \b Scaling \b DiagonalMatrix S (Dim)x(Dim):
+  * \f$ \left( \begin{array}{cc}
+  * S & 0\\
+  * 0\,...\,0 & 1
+  * \end{array} \right) \f$
   *
-  * \b Column \b vector v (Dim)x(1):
+  * \b Column \b point v (Dim)x(1):
   * \f$ \left( \begin{array}{c}
   * v\\
   * 1
   * \end{array} \right) \f$
   *
-  * \b Set \b of \b column \b vectors V1...Vn (Dim)x(n):
+  * \b Set \b of \b column \b points V1...Vn (Dim)x(n):
   * \f$ \left( \begin{array}{ccc}
   * v_1 & ... & v_n\\
   * 1 & ... & 1
@@ -404,26 +410,39 @@ public:
   /** \returns a writable expression of the translation vector of the transformation */
   inline TranslationPart translation() { return TranslationPart(m_matrix,0,Dim); }
 
-  /** \returns an expression of the product between the transform \c *this and a matrix expression \a other
+  /** \returns an expression of the product between the transform \c *this and a matrix expression \a other.
     *
-    * The right hand side \a other might be either:
-    * \li a vector of size Dim,
+    * The right-hand-side \a other can be either:
     * \li an homogeneous vector of size Dim+1,
-    * \li a set of vectors of size Dim x Dynamic,
-    * \li a set of homogeneous vectors of size Dim+1 x Dynamic,
-    * \li a linear transformation matrix of size Dim x Dim,
-    * \li an affine transformation matrix of size Dim x Dim+1,
+    * \li a set of homogeneous vectors of size Dim+1 x N,
     * \li a transformation matrix of size Dim+1 x Dim+1.
+    *
+    * Moreover, if \c *this represents an affine transformation (i.e., Mode!=Projective), then \a other can also be:
+    * \li a point of size Dim (computes: \code this->linear() * other + this->translation()\endcode),
+    * \li a set of N points as a Dim x N matrix (computes: \code (this->linear() * other).colwise() + this->translation()\endcode),
+    *
+    * In all cases, the return type is a matrix or vector of same sizes as the right-hand-side \a other.
+    *
+    * If you want to interpret \a other as a linear or affine transformation, then first convert it to a Transform<> type,
+    * or do your own cooking.
+    *
+    * Finally, if you want to apply Affine transformations to vectors, then explicitly apply the linear part only:
+    * \code
+    * Affine3f A;
+    * Vector3f v1, v2;
+    * v2 = A.linear() * v1;
+    * \endcode
+    *
     */
   // note: this function is defined here because some compilers cannot find the respective declaration
   template<typename OtherDerived>
-  EIGEN_STRONG_INLINE const typename internal::transform_right_product_impl<Transform, OtherDerived>::ResultType
+  EIGEN_STRONG_INLINE const typename OtherDerived::PlainObject
   operator * (const EigenBase<OtherDerived> &other) const
   { return internal::transform_right_product_impl<Transform, OtherDerived>::run(*this,other.derived()); }
 
   /** \returns the product expression of a transformation matrix \a a times a transform \a b
     *
-    * The left hand side \a other might be either:
+    * The left hand side \a other can be either:
     * \li a linear transformation matrix of size Dim x Dim,
     * \li an affine transformation matrix of size Dim x Dim+1,
     * \li a general transformation matrix of size Dim+1 x Dim+1.

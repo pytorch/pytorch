@@ -25,7 +25,7 @@
 #ifndef NUMBER_DIRECTIONS
 # define NUMBER_DIRECTIONS 2
 #endif
-#include <adolc/adouble.h>
+#include <adolc/adtl.h>
 
 // adolc defines some very stupid macros:
 #if defined(malloc)

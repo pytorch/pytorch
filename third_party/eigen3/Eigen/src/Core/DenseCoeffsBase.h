@@ -138,6 +138,8 @@ class DenseCoeffsBase<Derived,ReadOnlyAccessors> : public EigenBase<Derived>
     EIGEN_STRONG_INLINE CoeffReturnType
     coeff(Index index) const
     {
+      EIGEN_STATIC_ASSERT(internal::evaluator<Derived>::Flags & LinearAccessBit,
+                          THIS_COEFFICIENT_ACCESSOR_TAKING_ONE_ACCESS_IS_ONLY_FOR_EXPRESSIONS_ALLOWING_LINEAR_ACCESS)
       eigen_internal_assert(index >= 0 && index < size());
       return internal::evaluator<Derived>(derived()).coeff(index);
     }
@@ -243,6 +245,8 @@ class DenseCoeffsBase<Derived,ReadOnlyAccessors> : public EigenBase<Derived>
     template<int LoadMode>
     EIGEN_STRONG_INLINE PacketReturnType packet(Index index) const
     {
+      EIGEN_STATIC_ASSERT(internal::evaluator<Derived>::Flags & LinearAccessBit,
+                          THIS_COEFFICIENT_ACCESSOR_TAKING_ONE_ACCESS_IS_ONLY_FOR_EXPRESSIONS_ALLOWING_LINEAR_ACCESS)
       typedef typename internal::packet_traits<Scalar>::type DefaultPacketType;
       eigen_internal_assert(index >= 0 && index < size());
       return internal::evaluator<Derived>(derived()).template packet<LoadMode,DefaultPacketType>(index);
@@ -370,6 +374,8 @@ class DenseCoeffsBase<Derived, WriteAccessors> : public DenseCoeffsBase<Derived,
     EIGEN_STRONG_INLINE Scalar&
     coeffRef(Index index)
     {
+      EIGEN_STATIC_ASSERT(internal::evaluator<Derived>::Flags & LinearAccessBit,
+                          THIS_COEFFICIENT_ACCESSOR_TAKING_ONE_ACCESS_IS_ONLY_FOR_EXPRESSIONS_ALLOWING_LINEAR_ACCESS)
       eigen_internal_assert(index >= 0 && index < size());
       return internal::evaluator<Derived>(derived()).coeffRef(index);
     }
@@ -617,7 +623,7 @@ static inline Index first_default_aligned(const DenseBase<Derived>& m)
 {
   typedef typename Derived::Scalar Scalar;
   typedef typename packet_traits<Scalar>::type DefaultPacketType;
-  return first_aligned<unpacket_traits<DefaultPacketType>::alignment>(m);
+  return internal::first_aligned<int(unpacket_traits<DefaultPacketType>::alignment),Derived>(m);
 }
 
 template<typename Derived, bool HasDirectAccess = has_direct_access<Derived>::ret>

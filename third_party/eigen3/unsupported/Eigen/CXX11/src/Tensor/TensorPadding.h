@@ -98,6 +98,11 @@ struct TensorEvaluator<const TensorPaddingOp<PaddingDimensions, ArgType>, Device
   EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE TensorEvaluator(const XprType& op, const Device& device)
       : m_impl(op.expression(), device), m_padding(op.padding())
   {
+    // The padding op doesn't change the rank of the tensor. Directly padding a scalar would lead
+    // to a vector, which doesn't make sense. Instead one should reshape the scalar into a vector
+    // of 1 element first and then pad.
+    EIGEN_STATIC_ASSERT(NumDims > 0, YOU_MADE_A_PROGRAMMING_MISTAKE);
+
     // Compute dimensions
     m_dimensions = m_impl.dimensions();
     for (int i = 0; i < NumDims; ++i) {

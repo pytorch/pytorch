@@ -109,14 +109,11 @@ void DenseBase<Derived>::visit(Visitor& visitor) const
   typedef typename internal::visitor_evaluator<Derived> ThisEvaluator;
   ThisEvaluator thisEval(derived());
   
-  enum { unroll =   SizeAtCompileTime != Dynamic
-                &&  ThisEvaluator::CoeffReadCost != Dynamic
-                &&  (SizeAtCompileTime == 1 || internal::functor_traits<Visitor>::Cost != Dynamic)
-                &&  SizeAtCompileTime * ThisEvaluator::CoeffReadCost + (SizeAtCompileTime-1) * internal::functor_traits<Visitor>::Cost
-                <= EIGEN_UNROLLING_LIMIT };
-  return internal::visitor_impl<Visitor, ThisEvaluator,
-      unroll ? int(SizeAtCompileTime) : Dynamic
-    >::run(thisEval, visitor);
+  enum {
+    unroll =  SizeAtCompileTime != Dynamic
+           && SizeAtCompileTime * ThisEvaluator::CoeffReadCost + (SizeAtCompileTime-1) * internal::functor_traits<Visitor>::Cost <= EIGEN_UNROLLING_LIMIT
+  };
+  return internal::visitor_impl<Visitor, ThisEvaluator, unroll ? int(SizeAtCompileTime) : Dynamic>::run(thisEval, visitor);
 }
 
 namespace internal {

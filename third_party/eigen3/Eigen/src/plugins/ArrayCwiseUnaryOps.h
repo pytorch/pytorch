@@ -4,6 +4,8 @@ typedef CwiseUnaryOp<internal::scalar_abs_op<Scalar>, const Derived> AbsReturnTy
 typedef CwiseUnaryOp<internal::scalar_arg_op<Scalar>, const Derived> ArgReturnType;
 typedef CwiseUnaryOp<internal::scalar_abs2_op<Scalar>, const Derived> Abs2ReturnType;
 typedef CwiseUnaryOp<internal::scalar_sqrt_op<Scalar>, const Derived> SqrtReturnType;
+typedef CwiseUnaryOp<internal::scalar_rsqrt_op<Scalar>, const Derived> RsqrtReturnType;
+typedef CwiseUnaryOp<internal::scalar_sign_op<Scalar>, const Derived> SignReturnType;
 typedef CwiseUnaryOp<internal::scalar_inverse_op<Scalar>, const Derived> InverseReturnType;
 typedef CwiseUnaryOp<internal::scalar_boolean_not_op<Scalar>, const Derived> BooleanNotReturnType;
 
@@ -19,6 +21,9 @@ typedef CwiseUnaryOp<internal::scalar_atan_op<Scalar>, const Derived> AtanReturn
 typedef CwiseUnaryOp<internal::scalar_tanh_op<Scalar>, const Derived> TanhReturnType;
 typedef CwiseUnaryOp<internal::scalar_sinh_op<Scalar>, const Derived> SinhReturnType;
 typedef CwiseUnaryOp<internal::scalar_cosh_op<Scalar>, const Derived> CoshReturnType;
+typedef CwiseUnaryOp<internal::scalar_lgamma_op<Scalar>, const Derived> LgammaReturnType;
+typedef CwiseUnaryOp<internal::scalar_erf_op<Scalar>, const Derived> ErfReturnType;
+typedef CwiseUnaryOp<internal::scalar_erfc_op<Scalar>, const Derived> ErfcReturnType;
 typedef CwiseUnaryOp<internal::scalar_pow_op<Scalar>, const Derived> PowReturnType;
 typedef CwiseUnaryOp<internal::scalar_square_op<Scalar>, const Derived> SquareReturnType;
 typedef CwiseUnaryOp<internal::scalar_cube_op<Scalar>, const Derived> CubeReturnType;
@@ -137,6 +142,39 @@ sqrt() const
 {
   return SqrtReturnType(derived());
 }
+
+/** \returns an expression of the coefficient-wise inverse square root of *this.
+  *
+  * This function computes the coefficient-wise inverse square root.
+  *
+  * Example: \include Cwise_sqrt.cpp
+  * Output: \verbinclude Cwise_sqrt.out
+  *
+  * \sa pow(), square()
+  */
+EIGEN_DEVICE_FUNC
+inline const RsqrtReturnType
+rsqrt() const
+{
+  return RsqrtReturnType(derived());
+}
+
+/** \returns an expression of the coefficient-wise signum of *this.
+  *
+  * This function computes the coefficient-wise signum.
+  *
+  * Example: \include Cwise_sign.cpp
+  * Output: \verbinclude Cwise_sign.out
+  *
+  * \sa pow(), square()
+  */
+EIGEN_DEVICE_FUNC
+inline const SignReturnType
+sign() const
+{
+  return SignReturnType(derived());
+}
+
 
 /** \returns an expression of the coefficient-wise cosine of *this.
   *
@@ -265,6 +303,47 @@ inline const CoshReturnType
 cosh() const
 {
   return CoshReturnType(derived());
+}
+
+/** \returns an expression of the coefficient-wise ln(|gamma(*this)|).
+ *
+ * Example: \include Cwise_lgamma.cpp
+ * Output: \verbinclude Cwise_lgamma.out
+ *
+ * \sa cos(), sin(), tan()
+ */
+inline const LgammaReturnType
+lgamma() const
+{
+  return LgammaReturnType(derived());
+}
+
+/** \returns an expression of the coefficient-wise Gauss error
+ * function of *this.
+ *
+ * Example: \include Cwise_erf.cpp
+ * Output: \verbinclude Cwise_erf.out
+ *
+ * \sa cos(), sin(), tan()
+ */
+inline const ErfReturnType
+erf() const
+{
+  return ErfReturnType(derived());
+}
+
+/** \returns an expression of the coefficient-wise Complementary error
+ * function of *this.
+ *
+ * Example: \include Cwise_erfc.cpp
+ * Output: \verbinclude Cwise_erfc.out
+ *
+ * \sa cos(), sin(), tan()
+ */
+inline const ErfcReturnType
+erfc() const
+{
+  return ErfcReturnType(derived());
 }
 
 /** \returns an expression of the coefficient-wise power of *this to the given exponent.

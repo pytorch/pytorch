@@ -114,10 +114,18 @@ static void test_expr_reverse(bool LValue)
 
   Tensor<float, 4, DataLayout> result(2,3,5,7);
 
-  array<ptrdiff_t, 4> src_slice_dim{{2,3,1,7}};
-  array<ptrdiff_t, 4> src_slice_start{{0,0,0,0}};
-  array<ptrdiff_t, 4> dst_slice_dim{{2,3,1,7}};
-  array<ptrdiff_t, 4> dst_slice_start{{0,0,0,0}};
+  array<ptrdiff_t, 4> src_slice_dim;
+  src_slice_dim[0] = 2;
+  src_slice_dim[1] = 3;
+  src_slice_dim[2] = 1;
+  src_slice_dim[3] = 7;
+  array<ptrdiff_t, 4> src_slice_start;
+  src_slice_start[0] = 0;
+  src_slice_start[1] = 0;
+  src_slice_start[2] = 0;
+  src_slice_start[3] = 0;
+  array<ptrdiff_t, 4> dst_slice_dim = src_slice_dim;
+  array<ptrdiff_t, 4> dst_slice_start = src_slice_start;
 
   for (int i = 0; i < 5; ++i) {
     if (LValue) {

@@ -67,6 +67,8 @@ Index QuickSplit(VectorV &row, VectorI &ind, Index ncut)
   * \class IncompleteLUT
   * \brief Incomplete LU factorization with dual-threshold strategy
   *
+  * \implsparsesolverconcept
+  *
   * During the numerical factorization, two dropping rules are used :
   *  1) any element whose magnitude is less than some tolerance is dropped.
   *    This tolerance is obtained by multiplying the input tolerance @p droptol 
@@ -107,10 +109,12 @@ class IncompleteLUT : public SparseSolverBase<IncompleteLUT<_Scalar, _StorageInd
     typedef Matrix<StorageIndex,Dynamic,1> VectorI;
     typedef SparseMatrix<Scalar,RowMajor,StorageIndex> FactorType;
 
+    enum {
+      ColsAtCompileTime = Dynamic,
+      MaxColsAtCompileTime = Dynamic
+    };
+
   public:
-    
-    // this typedef is only to export the scalar type and compile-time dimensions to solve_retval
-    typedef Matrix<Scalar,Dynamic,Dynamic> MatrixType;
     
     IncompleteLUT()
       : m_droptol(NumTraits<Scalar>::dummy_precision()), m_fillfactor(10),
@@ -166,7 +170,7 @@ class IncompleteLUT : public SparseSolverBase<IncompleteLUT<_Scalar, _StorageInd
     template<typename Rhs, typename Dest>
     void _solve_impl(const Rhs& b, Dest& x) const
     {
-      x = m_Pinv * b;  
+      x = m_Pinv * b;
       x = m_lu.template triangularView<UnitLower>().solve(x);
       x = m_lu.template triangularView<Upper>().solve(x);
       x = m_P * x; 
@@ -219,16 +223,25 @@ template<typename _MatrixType>
 void IncompleteLUT<Scalar,StorageIndex>::analyzePattern(const _MatrixType& amat)
 {
   // Compute the Fill-reducing permutation
+  // Since ILUT does not perform any numerical pivoting,
+  // it is highly preferable to keep the diagonal through symmetric permutations.
+#ifndef EIGEN_MPL2_ONLY
+  // To this end, let's symmetrize the pattern and perform AMD on it.
   SparseMatrix<Scalar,ColMajor, StorageIndex> mat1 = amat;
   SparseMatrix<Scalar,ColMajor, StorageIndex> mat2 = amat.transpose();
-  // Symmetrize the pattern
   // FIXME for a matrix with nearly symmetric pattern, mat2+mat1 is the appropriate choice.
   //       on the other hand for a really non-symmetric pattern, mat2*mat1 should be prefered...
   SparseMatrix<Scalar,ColMajor, StorageIndex> AtA = mat2 + mat1;
-  AtA.prune(keep_diag());
-  internal::minimum_degree_ordering<Scalar, StorageIndex>(AtA, m_P);  // Then compute the AMD ordering...
-
-  m_Pinv  = m_P.inverse(); // ... and the inverse permutation
+  AMDOrdering<StorageIndex> ordering;
+  ordering(AtA,m_P);
+  m_Pinv  = m_P.inverse(); // cache the inverse permutation
+#else
+  // If AMD is not available, (MPL2-only), then let's use the slower COLAMD routine.
+  SparseMatrix<Scalar,ColMajor, StorageIndex> mat1 = amat;
+  COLAMDOrdering<StorageIndex> ordering;
+  ordering(mat1,m_Pinv);
+  m_P = m_Pinv.inverse();
+#endif
 
   m_analysisIsOk = true;
   m_factorizationIsOk = false;

@@ -64,6 +64,16 @@ public:
   /** Default constructor wihtout initialization. The represented rotation is undefined. */
   Rotation2D() {}
 
+  /** Construct a 2D rotation from a 2x2 rotation matrix \a mat.
+    *
+    * \sa fromRotationMatrix()
+    */
+  template<typename Derived>
+  explicit Rotation2D(const MatrixBase<Derived>& m)
+  {
+    fromRotationMatrix(m.derived());
+  }
+
   /** \returns the rotation angle */
   inline Scalar angle() const { return m_angle; }
 
@@ -102,6 +112,17 @@ public:
   template<typename Derived>
   Rotation2D& fromRotationMatrix(const MatrixBase<Derived>& m);
   Matrix2 toRotationMatrix() const;
+
+  /** Set \c *this from a 2x2 rotation matrix \a mat.
+    * In other words, this function extract the rotation angle from the rotation matrix.
+    *
+    * This method is an alias for fromRotationMatrix()
+    *
+    * \sa fromRotationMatrix()
+    */
+  template<typename Derived>
+  Rotation2D& operator=(const  MatrixBase<Derived>& m)
+  { return fromRotationMatrix(m.derived()); }
 
   /** \returns the spherical interpolation between \c *this and \a other using
     * parameter \a t. It is in fact equivalent to a linear interpolation.

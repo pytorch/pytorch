@@ -11,7 +11,7 @@
 #ifndef EIGEN_PARTIAL_REDUX_H
 #define EIGEN_PARTIAL_REDUX_H
 
-namespace Eigen { 
+namespace Eigen {
 
 /** \class PartialReduxExpr
   * \ingroup Core_Module
@@ -41,8 +41,6 @@ struct traits<PartialReduxExpr<MatrixType, MemberOp, Direction> >
   typedef typename traits<MatrixType>::StorageKind StorageKind;
   typedef typename traits<MatrixType>::XprKind XprKind;
   typedef typename MatrixType::Scalar InputScalar;
-  typedef typename ref_selector<MatrixType>::type MatrixTypeNested;
-  typedef typename remove_all<MatrixTypeNested>::type _MatrixTypeNested;
   enum {
     RowsAtCompileTime = Direction==Vertical   ? 1 : MatrixType::RowsAtCompileTime,
     ColsAtCompileTime = Direction==Horizontal ? 1 : MatrixType::ColsAtCompileTime,
@@ -62,8 +60,6 @@ class PartialReduxExpr : public internal::dense_xpr_base< PartialReduxExpr<Matri
 
     typedef typename internal::dense_xpr_base<PartialReduxExpr>::type Base;
     EIGEN_DENSE_PUBLIC_INTERFACE(PartialReduxExpr)
-    typedef typename internal::traits<PartialReduxExpr>::MatrixTypeNested MatrixTypeNested;
-    typedef typename internal::traits<PartialReduxExpr>::_MatrixTypeNested _MatrixTypeNested;
 
     EIGEN_DEVICE_FUNC
     explicit PartialReduxExpr(const MatrixType& mat, const MemberOp& func = MemberOp())
@@ -74,24 +70,14 @@ class PartialReduxExpr : public internal::dense_xpr_base< PartialReduxExpr<Matri
     EIGEN_DEVICE_FUNC
     Index cols() const { return (Direction==Horizontal ? 1 : m_matrix.cols()); }
 
-    EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE const Scalar coeff(Index i, Index j) const
-    {
-      if (Direction==Vertical)
-        return m_functor(m_matrix.col(j));
-      else
-        return m_functor(m_matrix.row(i));
-    }
+    EIGEN_DEVICE_FUNC
+    typename MatrixType::Nested nestedExpression() const { return m_matrix; }
 
-    EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE const Scalar coeff(Index index) const
-    {
-      if (Direction==Vertical)
-        return m_functor(m_matrix.col(index));
-      else
-        return m_functor(m_matrix.row(index));
-    }
+    EIGEN_DEVICE_FUNC
+    const MemberOp& functor() const { return m_functor; }
 
   protected:
-    MatrixTypeNested m_matrix;
+    typename MatrixType::Nested m_matrix;
     const MemberOp m_functor;
 };
 
@@ -124,6 +110,16 @@ EIGEN_MEMBER_FUNCTOR(any, (Size-1)*NumTraits<Scalar>::AddCost);
 EIGEN_MEMBER_FUNCTOR(count, (Size-1)*NumTraits<Scalar>::AddCost);
 EIGEN_MEMBER_FUNCTOR(prod, (Size-1)*NumTraits<Scalar>::MulCost);
 
+template <int p, typename ResultType>
+struct member_lpnorm {
+  typedef ResultType result_type;
+  template<typename Scalar, int Size> struct Cost
+  { enum { value = (Size+5) * NumTraits<Scalar>::MulCost + (Size-1)*NumTraits<Scalar>::AddCost }; };
+  EIGEN_DEVICE_FUNC member_lpnorm() {}
+  template<typename XprType>
+  EIGEN_DEVICE_FUNC inline ResultType operator()(const XprType& mat) const
+  { return mat.template lpNorm<p>(); }
+};
 
 template <typename BinaryOp, typename Scalar>
 struct member_redux {
@@ -230,7 +226,7 @@ template<typename ExpressionType, int Direction> class VectorwiseOp
                        isVertical   ? 1 : m_matrix.rows(),
                        isHorizontal ? 1 : m_matrix.cols());
     }
-    
+
     template<typename OtherDerived> struct OppositeExtendedType {
       typedef Replicate<OtherDerived,
                         isHorizontal ? 1 : ExpressionType::RowsAtCompileTime,
@@ -290,9 +286,13 @@ template<typename ExpressionType, int Direction> class VectorwiseOp
     typedef typename ReturnType<internal::member_prod>::Type ProdReturnType;
     typedef Reverse<ExpressionType, Direction> ReverseReturnType;
 
+    template<int p> struct LpNormReturnType {
+      typedef PartialReduxExpr<ExpressionType, internal::member_lpnorm<p,RealScalar>,Direction> Type;
+    };
+
     /** \returns a row (or column) vector expression of the smallest coefficient
       * of each column (or row) of the referenced expression.
-      * 
+      *
       * \warning the result is undefined if \c *this contains NaN.
       *
       * Example: \include PartialRedux_minCoeff.cpp
@@ -305,7 +305,7 @@ template<typename ExpressionType, int Direction> class VectorwiseOp
 
     /** \returns a row (or column) vector expression of the largest coefficient
       * of each column (or row) of the referenced expression.
-      * 
+      *
       * \warning the result is undefined if \c *this contains NaN.
       *
       * Example: \include PartialRedux_maxCoeff.cpp
@@ -340,10 +340,23 @@ template<typename ExpressionType, int Direction> class VectorwiseOp
     const NormReturnType norm() const
     { return NormReturnType(_expression()); }
 
+    /** \returns a row (or column) vector expression of the norm
+      * of each column (or row) of the referenced expression.
+      * This is a vector with real entries, even if the original matrix has complex entries.
+      *
+      * Example: \include PartialRedux_norm.cpp
+      * Output: \verbinclude PartialRedux_norm.out
+      *
+      * \sa DenseBase::norm() */
+    template<int p>
+    EIGEN_DEVICE_FUNC
+    const typename LpNormReturnType<p>::Type lpNorm() const
+    { return typename LpNormReturnType<p>::Type(_expression()); }
+
 
     /** \returns a row (or column) vector expression of the norm
       * of each column (or row) of the referenced expression, using
-      * Blue's algorithm. 
+      * Blue's algorithm.
       * This is a vector with real entries, even if the original matrix has complex entries.
       *
       * \sa DenseBase::blueNorm() */
@@ -408,7 +421,7 @@ template<typename ExpressionType, int Direction> class VectorwiseOp
       * \sa DenseBase::any() */
     EIGEN_DEVICE_FUNC
     const AnyReturnType any() const
-    { return Any(_expression()); }
+    { return AnyReturnType(_expression()); }
 
     /** \returns a row (or column) vector expression representing
       * the number of \c true coefficients of each respective column (or row).
@@ -579,7 +592,7 @@ template<typename ExpressionType, int Direction> class VectorwiseOp
       EIGEN_STATIC_ASSERT_SAME_XPR_KIND(ExpressionType, OtherDerived)
       return m_matrix / extendedTo(other.derived());
     }
-    
+
     /** \returns an expression where each column of row of the referenced matrix are normalized.
       * The referenced matrix is \b not modified.
       * \sa MatrixBase::normalized(), normalize()
@@ -589,8 +602,8 @@ template<typename ExpressionType, int Direction> class VectorwiseOp
                   const ExpressionTypeNestedCleaned,
                   const typename OppositeExtendedType<typename ReturnType<internal::member_norm,RealScalar>::Type>::Type>
     normalized() const { return m_matrix.cwiseQuotient(extendedToOpposite(this->norm())); }
-    
-    
+
+
     /** Normalize in-place each row or columns of the referenced matrix.
       * \sa MatrixBase::normalize(), normalized()
       */

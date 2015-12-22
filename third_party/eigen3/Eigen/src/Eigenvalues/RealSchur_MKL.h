@@ -40,14 +40,13 @@ namespace Eigen {
 /** \internal Specialization for the data types supported by MKL */
 
 #define EIGEN_MKL_SCHUR_REAL(EIGTYPE, MKLTYPE, MKLPREFIX, MKLPREFIX_U, EIGCOLROW, MKLCOLROW) \
-template<> inline \
+template<> template<typename InputType> inline \
 RealSchur<Matrix<EIGTYPE, Dynamic, Dynamic, EIGCOLROW> >& \
-RealSchur<Matrix<EIGTYPE, Dynamic, Dynamic, EIGCOLROW> >::compute(const Matrix<EIGTYPE, Dynamic, Dynamic, EIGCOLROW>& matrix, bool computeU) \
+RealSchur<Matrix<EIGTYPE, Dynamic, Dynamic, EIGCOLROW> >::compute(const EigenBase<InputType>& matrix, bool computeU) \
 { \
   eigen_assert(matrix.cols() == matrix.rows()); \
 \
   lapack_int n = matrix.cols(), sdim, info; \
-  lapack_int lda = matrix.outerStride(); \
   lapack_int matrix_order = MKLCOLROW; \
   char jobvs, sort='N'; \
   LAPACK_##MKLPREFIX_U##_SELECT2 select = 0; \
@@ -55,6 +54,7 @@ RealSchur<Matrix<EIGTYPE, Dynamic, Dynamic, EIGCOLROW> >::compute(const Matrix<E
   m_matU.resize(n, n); \
   lapack_int ldvs  = m_matU.outerStride(); \
   m_matT = matrix; \
+  lapack_int lda = m_matT.outerStride(); \
   Matrix<EIGTYPE, Dynamic, Dynamic> wr, wi; \
   wr.resize(n, 1); wi.resize(n, 1); \
   info = LAPACKE_##MKLPREFIX##gees( matrix_order, jobvs, sort, select, n, (MKLTYPE*)m_matT.data(), lda, &sdim, (MKLTYPE*)wr.data(), (MKLTYPE*)wi.data(), (MKLTYPE*)m_matU.data(), ldvs ); \

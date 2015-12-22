@@ -99,6 +99,10 @@ struct TensorEvaluator<const TensorBroadcastingOp<Broadcast, ArgType>, Device>
   EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE TensorEvaluator(const XprType& op, const Device& device)
     : m_impl(op.expression(), device)
   {
+    // The broadcasting op doesn't change the rank of the tensor. One can't broadcast a scalar
+    // and store the result in a scalar. Instead one should reshape the scalar into a a N-D
+    // tensor with N >= 1 of 1 element first and then broadcast.
+    EIGEN_STATIC_ASSERT(NumDims > 0, YOU_MADE_A_PROGRAMMING_MISTAKE);
     const typename TensorEvaluator<ArgType, Device>::Dimensions& input_dims = m_impl.dimensions();
     const Broadcast& broadcast = op.broadcast();
     for (int i = 0; i < NumDims; ++i) {
@@ -152,11 +156,11 @@ struct TensorEvaluator<const TensorBroadcastingOp<Broadcast, ArgType>, Device>
     Index inputIndex = 0;
     for (int i = NumDims - 1; i > 0; --i) {
       const Index idx = index / m_outputStrides[i];
-      if (internal::index_statically_eq<Broadcast>()(i, 1)) {
+      if (internal::index_statically_eq<Broadcast>(i, 1)) {
         eigen_assert(idx < m_impl.dimensions()[i]);
         inputIndex += idx * m_inputStrides[i];
       } else {
-        if (internal::index_statically_eq<InputDimensions>()(i, 1)) {
+        if (internal::index_statically_eq<InputDimensions>(i, 1)) {
           eigen_assert(idx % m_impl.dimensions()[i] == 0);
         } else {
           inputIndex += (idx % m_impl.dimensions()[i]) * m_inputStrides[i];
@@ -164,11 +168,11 @@ struct TensorEvaluator<const TensorBroadcastingOp<Broadcast, ArgType>, Device>
       }
       index -= idx * m_outputStrides[i];
     }
-    if (internal::index_statically_eq<Broadcast>()(0, 1)) {
+    if (internal::index_statically_eq<Broadcast>(0, 1)) {
       eigen_assert(index < m_impl.dimensions()[0]);
       inputIndex += index;
     } else {
-      if (internal::index_statically_eq<InputDimensions>()(0, 1)) {
+      if (internal::index_statically_eq<InputDimensions>(0, 1)) {
         eigen_assert(index % m_impl.dimensions()[0] == 0);
       } else {
         inputIndex += (index % m_impl.dimensions()[0]);
@@ -182,11 +186,11 @@ struct TensorEvaluator<const TensorBroadcastingOp<Broadcast, ArgType>, Device>
     Index inputIndex = 0;
     for (int i = 0; i < NumDims - 1; ++i) {
       const Index idx = index / m_outputStrides[i];
-      if (internal::index_statically_eq<Broadcast>()(i, 1)) {
+      if (internal::index_statically_eq<Broadcast>(i, 1)) {
         eigen_assert(idx < m_impl.dimensions()[i]);
         inputIndex += idx * m_inputStrides[i];
       } else {
-        if (internal::index_statically_eq<InputDimensions>()(i, 1)) {
+        if (internal::index_statically_eq<InputDimensions>(i, 1)) {
           eigen_assert(idx % m_impl.dimensions()[i] == 0);
         } else {
           inputIndex += (idx % m_impl.dimensions()[i]) * m_inputStrides[i];
@@ -194,11 +198,11 @@ struct TensorEvaluator<const TensorBroadcastingOp<Broadcast, ArgType>, Device>
       }
       index -= idx * m_outputStrides[i];
     }
-    if (internal::index_statically_eq<Broadcast>()(NumDims-1, 1)) {
+    if (internal::index_statically_eq<Broadcast>(NumDims-1, 1)) {
       eigen_assert(index < m_impl.dimensions()[NumDims-1]);
       inputIndex += index;
     } else {
-      if (internal::index_statically_eq<InputDimensions>()(NumDims-1, 1)) {
+      if (internal::index_statically_eq<InputDimensions>(NumDims-1, 1)) {
         eigen_assert(index % m_impl.dimensions()[NumDims-1] == 0);
       } else {
         inputIndex += (index % m_impl.dimensions()[NumDims-1]);
@@ -231,11 +235,11 @@ struct TensorEvaluator<const TensorBroadcastingOp<Broadcast, ArgType>, Device>
     Index inputIndex = 0;
     for (int i = NumDims - 1; i > 0; --i) {
       const Index idx = index / m_outputStrides[i];
-      if (internal::index_statically_eq<Broadcast>()(i, 1)) {
+      if (internal::index_statically_eq<Broadcast>(i, 1)) {
         eigen_assert(idx < m_impl.dimensions()[i]);
         inputIndex += idx * m_inputStrides[i];
       } else {
-        if (internal::index_statically_eq<InputDimensions>()(i, 1)) {
+        if (internal::index_statically_eq<InputDimensions>(i, 1)) {
           eigen_assert(idx % m_impl.dimensions()[i] == 0);
         } else {
           inputIndex += (idx % m_impl.dimensions()[i]) * m_inputStrides[i];
@@ -244,11 +248,11 @@ struct TensorEvaluator<const TensorBroadcastingOp<Broadcast, ArgType>, Device>
       index -= idx * m_outputStrides[i];
     }
     Index innermostLoc;
-    if (internal::index_statically_eq<Broadcast>()(0, 1)) {
+    if (internal::index_statically_eq<Broadcast>(0, 1)) {
       eigen_assert(index < m_impl.dimensions()[0]);
       innermostLoc = index;
     } else {
-      if (internal::index_statically_eq<InputDimensions>()(0, 1)) {
+      if (internal::index_statically_eq<InputDimensions>(0, 1)) {
         eigen_assert(index % m_impl.dimensions()[0] == 0);
         innermostLoc = 0;
       } else {
@@ -284,11 +288,11 @@ struct TensorEvaluator<const TensorBroadcastingOp<Broadcast, ArgType>, Device>
     Index inputIndex = 0;
     for (int i = 0; i < NumDims - 1; ++i) {
       const Index idx = index / m_outputStrides[i];
-      if (internal::index_statically_eq<Broadcast>()(i, 1)) {
+      if (internal::index_statically_eq<Broadcast>(i, 1)) {
         eigen_assert(idx < m_impl.dimensions()[i]);
         inputIndex += idx * m_inputStrides[i];
       } else {
-        if (internal::index_statically_eq<InputDimensions>()(i, 1)) {
+        if (internal::index_statically_eq<InputDimensions>(i, 1)) {
           eigen_assert(idx % m_impl.dimensions()[i] == 0);
         } else {
           inputIndex += (idx % m_impl.dimensions()[i]) * m_inputStrides[i];
@@ -297,11 +301,11 @@ struct TensorEvaluator<const TensorBroadcastingOp<Broadcast, ArgType>, Device>
       index -= idx * m_outputStrides[i];
     }
     Index innermostLoc;
-    if (internal::index_statically_eq<Broadcast>()(NumDims-1, 1)) {
+    if (internal::index_statically_eq<Broadcast>(NumDims-1, 1)) {
       eigen_assert(index < m_impl.dimensions()[NumDims-1]);
       innermostLoc = index;
     } else {
-      if (internal::index_statically_eq<InputDimensions>()(NumDims-1, 1)) {
+      if (internal::index_statically_eq<InputDimensions>(NumDims-1, 1)) {
         eigen_assert(index % m_impl.dimensions()[NumDims-1] == 0);
         innermostLoc = 0;
       } else {

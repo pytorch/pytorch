@@ -67,7 +67,6 @@ template<> EIGEN_STRONG_INLINE Packet2cf pconj(const Packet2cf& a)
 
 template<> EIGEN_STRONG_INLINE Packet2cf pmul<Packet2cf>(const Packet2cf& a, const Packet2cf& b)
 {
-  // TODO optimize it for SSE3 and 4
   #ifdef EIGEN_VECTORIZE_SSE3
   return Packet2cf(_mm_addsub_ps(_mm_mul_ps(_mm_moveldup_ps(a.v), b.v),
                                  _mm_mul_ps(_mm_movehdup_ps(a.v),
@@ -310,9 +309,8 @@ template<> EIGEN_STRONG_INLINE Packet1cd pconj(const Packet1cd& a)
 
 template<> EIGEN_STRONG_INLINE Packet1cd pmul<Packet1cd>(const Packet1cd& a, const Packet1cd& b)
 {
-  // TODO optimize it for SSE3 and 4
   #ifdef EIGEN_VECTORIZE_SSE3
-  return Packet1cd(_mm_addsub_pd(_mm_mul_pd(vec2d_swizzle1(a.v, 0, 0), b.v),
+  return Packet1cd(_mm_addsub_pd(_mm_mul_pd(_mm_movedup_pd(a.v), b.v),
                                  _mm_mul_pd(vec2d_swizzle1(a.v, 1, 1),
                                             vec2d_swizzle1(b.v, 1, 0))));
   #else

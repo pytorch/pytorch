@@ -240,7 +240,7 @@ struct traits<KroneckerProductSparse<_Lhs,_Rhs> >
 
     Flags = ((LhsFlags | RhsFlags) & HereditaryBits & RemovedBits)
           | EvalBeforeNestingBit | EvalBeforeAssigningBit,
-    CoeffReadCost = Dynamic
+    CoeffReadCost = HugeCost
   };
 
   typedef SparseMatrix<Scalar, 0, StorageIndex> ReturnType;

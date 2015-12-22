@@ -49,6 +49,9 @@ namespace Eigen
   EIGEN_ARRAY_DECLARE_GLOBAL_UNARY(sinh,scalar_sinh_op)
   EIGEN_ARRAY_DECLARE_GLOBAL_UNARY(cosh,scalar_cosh_op)
   EIGEN_ARRAY_DECLARE_GLOBAL_UNARY(tanh,scalar_tanh_op)
+  EIGEN_ARRAY_DECLARE_GLOBAL_UNARY(lgamma,scalar_lgamma_op)
+  EIGEN_ARRAY_DECLARE_GLOBAL_UNARY(erf,scalar_erf_op)
+  EIGEN_ARRAY_DECLARE_GLOBAL_UNARY(erfc,scalar_erfc_op)
   EIGEN_ARRAY_DECLARE_GLOBAL_UNARY(exp,scalar_exp_op)
   EIGEN_ARRAY_DECLARE_GLOBAL_UNARY(log,scalar_log_op)
   EIGEN_ARRAY_DECLARE_GLOBAL_UNARY(log10,scalar_log10_op)
@@ -64,6 +67,7 @@ namespace Eigen
   EIGEN_ARRAY_DECLARE_GLOBAL_UNARY(isnan,scalar_isnan_op)
   EIGEN_ARRAY_DECLARE_GLOBAL_UNARY(isinf,scalar_isinf_op)
   EIGEN_ARRAY_DECLARE_GLOBAL_UNARY(isfinite,scalar_isfinite_op)
+  EIGEN_ARRAY_DECLARE_GLOBAL_UNARY(sign,scalar_sign_op)
   
   template<typename Derived>
   inline const Eigen::CwiseUnaryOp<Eigen::internal::scalar_pow_op<typename Derived::Scalar>, const Derived>

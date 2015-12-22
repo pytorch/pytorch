@@ -1,7 +1,7 @@
 // This file is part of Eigen, a lightweight C++ template library
 // for linear algebra.
 //
-// Copyright (C) 2009-2014 Gael Guennebaud <gael.guennebaud@inria.fr>
+// Copyright (C) 2009-2015 Gael Guennebaud <gael.guennebaud@inria.fr>
 // Copyright (C) 2012 Désiré Nuentsa-Wakam <desire.nuentsa_wakam@inria.fr>
 //
 // This Source Code Form is subject to the terms of the Mozilla
@@ -34,10 +34,11 @@ template<typename MatrixType, unsigned int Mode> class TriangularViewImpl<Matrix
     
     typedef TriangularView<MatrixType,Mode> TriangularViewType;
     
-protected:
+  protected:
     // dummy solve function to make TriangularView happy.
     void solve() const;
 
+    typedef SparseMatrixBase<TriangularViewType> Base;
   public:
     
     EIGEN_SPARSE_PUBLIC_INTERFACE(TriangularViewType)

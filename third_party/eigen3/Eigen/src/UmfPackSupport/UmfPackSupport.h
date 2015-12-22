@@ -16,6 +16,13 @@ namespace Eigen {
 
 // generic double/complex<double> wrapper functions:
 
+
+inline void umfpack_defaults(double control[UMFPACK_CONTROL], double) 
+{ umfpack_di_defaults(control); }
+
+inline void umfpack_defaults(double control[UMFPACK_CONTROL], std::complex<double>) 
+{ umfpack_zi_defaults(control); }
+
 inline void umfpack_free_numeric(void **Numeric, double)
 { umfpack_di_free_numeric(Numeric); *Numeric = 0; }
 
@@ -139,8 +146,14 @@ class UmfPackLU : public SparseSolverBase<UmfPackLU<_MatrixType> >
     typedef SparseMatrix<Scalar> LUMatrixType;
     typedef SparseMatrix<Scalar,ColMajor,int> UmfpackMatrixType;
     typedef Ref<const UmfpackMatrixType, StandardCompressedFormat> UmfpackMatrixRef;
+    enum {
+      ColsAtCompileTime = MatrixType::ColsAtCompileTime,
+      MaxColsAtCompileTime = MatrixType::MaxColsAtCompileTime
+    };
 
   public:
+
+    typedef Array<double, UMFPACK_CONTROL, 1> UmfpackControl;
 
     UmfPackLU()
       : m_dummy(0,0), mp_matrix(m_dummy)
@@ -148,7 +161,8 @@ class UmfPackLU : public SparseSolverBase<UmfPackLU<_MatrixType> >
       init();
     }
 
-    explicit UmfPackLU(const MatrixType& matrix)
+    template<typename InputMatrixType>
+    explicit UmfPackLU(const InputMatrixType& matrix)
       : mp_matrix(matrix)
     {
       init();
@@ -230,6 +244,39 @@ class UmfPackLU : public SparseSolverBase<UmfPackLU<_MatrixType> >
       analyzePattern_impl();
     }
 
+    /** Provides the return status code returned by UmfPack during the numeric
+      * factorization.
+      *
+      * \sa factorize(), compute()
+      */
+    inline int umfpackFactorizeReturncode() const
+    {
+      eigen_assert(m_numeric && "UmfPackLU: you must first call factorize()");
+      return m_fact_errorCode;
+    }
+
+    /** Provides access to the control settings array used by UmfPack.
+      *
+      * If this array contains NaN's, the default values are used.
+      *
+      * See UMFPACK documentation for details.
+      */
+    inline const UmfpackControl& umfpackControl() const
+    {
+      return m_control;
+    }
+    
+    /** Provides access to the control settings array used by UmfPack.
+      *
+      * If this array contains NaN's, the default values are used.
+      *
+      * See UMFPACK documentation for details.
+      */
+    inline UmfpackControl& umfpackControl()
+    {
+      return m_control;
+    }
+    
     /** Performs a numeric decomposition of \a matrix
       *
       * The given matrix must has the same sparcity than the matrix on which the pattern anylysis has been performed.
@@ -269,11 +316,12 @@ class UmfPackLU : public SparseSolverBase<UmfPackLU<_MatrixType> >
     
     void analyzePattern_impl()
     {
+      umfpack_defaults(m_control.data(), Scalar());
       int errorCode = 0;
       errorCode = umfpack_symbolic(internal::convert_index<int>(mp_matrix.rows()),
                                    internal::convert_index<int>(mp_matrix.cols()),
                                    mp_matrix.outerIndexPtr(), mp_matrix.innerIndexPtr(), mp_matrix.valuePtr(),
-                                   &m_symbolic, 0, 0);
+                                   &m_symbolic, m_control.data(), 0);
 
       m_isInitialized = true;
       m_info = errorCode ? InvalidInput : Success;
@@ -284,11 +332,10 @@ class UmfPackLU : public SparseSolverBase<UmfPackLU<_MatrixType> >
     
     void factorize_impl()
     {
-      int errorCode;
-      errorCode = umfpack_numeric(mp_matrix.outerIndexPtr(), mp_matrix.innerIndexPtr(), mp_matrix.valuePtr(),
-                                  m_symbolic, &m_numeric, 0, 0);
+      m_fact_errorCode = umfpack_numeric(mp_matrix.outerIndexPtr(), mp_matrix.innerIndexPtr(), mp_matrix.valuePtr(),
+                                         m_symbolic, &m_numeric, m_control.data(), 0);
 
-      m_info = errorCode ? NumericalIssue : Success;
+      m_info = m_fact_errorCode == UMFPACK_OK ? Success : NumericalIssue;
       m_factorizationIsOk = true;
       m_extractedDataAreDirty = true;
     }
@@ -311,6 +358,9 @@ class UmfPackLU : public SparseSolverBase<UmfPackLU<_MatrixType> >
   
     // cached data to reduce reallocation, etc.
     mutable LUMatrixType m_l;
+    int m_fact_errorCode;
+    UmfpackControl m_control;
+    
     mutable LUMatrixType m_u;
     mutable IntColVectorType m_p;
     mutable IntRowVectorType m_q;
@@ -390,7 +440,7 @@ bool UmfPackLU<MatrixType>::_solve_impl(const MatrixBase<BDerived> &b, MatrixBas
       x_ptr = &x.col(j).coeffRef(0);
     errorCode = umfpack_solve(UMFPACK_A,
         mp_matrix.outerIndexPtr(), mp_matrix.innerIndexPtr(), mp_matrix.valuePtr(),
-        x_ptr, &b.const_cast_derived().col(j).coeffRef(0), m_numeric, 0, 0);
+        x_ptr, &b.const_cast_derived().col(j).coeffRef(0), m_numeric, m_control.data(), 0);
     if(x.innerStride()!=1)
       x.col(j) = x_tmp;
     if (errorCode!=0)

@@ -40,9 +40,9 @@ namespace Eigen {
 /** \internal Specialization for the data types supported by MKL */
 
 #define EIGEN_MKL_EIG_SELFADJ(EIGTYPE, MKLTYPE, MKLRTYPE, MKLNAME, EIGCOLROW, MKLCOLROW ) \
-template<> inline \
+template<> template<typename InputType> inline \
 SelfAdjointEigenSolver<Matrix<EIGTYPE, Dynamic, Dynamic, EIGCOLROW> >& \
-SelfAdjointEigenSolver<Matrix<EIGTYPE, Dynamic, Dynamic, EIGCOLROW> >::compute(const Matrix<EIGTYPE, Dynamic, Dynamic, EIGCOLROW>& matrix, int options) \
+SelfAdjointEigenSolver<Matrix<EIGTYPE, Dynamic, Dynamic, EIGCOLROW> >::compute(const EigenBase<InputType>& matrix, int options) \
 { \
   eigen_assert(matrix.cols() == matrix.rows()); \
   eigen_assert((options&~(EigVecMask|GenEigMask))==0 \
@@ -56,7 +56,7 @@ SelfAdjointEigenSolver<Matrix<EIGTYPE, Dynamic, Dynamic, EIGCOLROW> >::compute(c
 \
   if(n==1) \
   { \
-    m_eivalues.coeffRef(0,0) = numext::real(matrix.coeff(0,0)); \
+    m_eivalues.coeffRef(0,0) = numext::real(m_eivec.coeff(0,0)); \
     if(computeEigenvectors) m_eivec.setOnes(n,n); \
     m_info = Success; \
     m_isInitialized = true; \
@@ -64,7 +64,7 @@ SelfAdjointEigenSolver<Matrix<EIGTYPE, Dynamic, Dynamic, EIGCOLROW> >::compute(c
     return *this; \
   } \
 \
-  lda = matrix.outerStride(); \
+  lda = m_eivec.outerStride(); \
   matrix_order=MKLCOLROW; \
   char jobz, uplo='L'/*, range='A'*/; \
   jobz = computeEigenvectors ? 'V' : 'N'; \

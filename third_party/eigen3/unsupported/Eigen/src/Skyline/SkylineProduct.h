@@ -49,7 +49,7 @@ struct internal::traits<SkylineProduct<LhsNested, RhsNested, ProductMode> > {
         | EvalBeforeAssigningBit
         | EvalBeforeNestingBit,
 
-        CoeffReadCost = Dynamic
+        CoeffReadCost = HugeCost
     };
 
     typedef typename internal::conditional<ResultIsSkyline,

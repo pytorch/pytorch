@@ -110,7 +110,7 @@ template<typename _MatrixType> class EigenSolver
       *
       * \sa compute() for an example.
       */
- EigenSolver() : m_eivec(), m_eivalues(), m_isInitialized(false), m_realSchur(), m_matT(), m_tmp() {}
+    EigenSolver() : m_eivec(), m_eivalues(), m_isInitialized(false), m_realSchur(), m_matT(), m_tmp() {}
 
     /** \brief Default constructor with memory preallocation
       *
@@ -143,7 +143,8 @@ template<typename _MatrixType> class EigenSolver
       *
       * \sa compute()
       */
-    explicit EigenSolver(const MatrixType& matrix, bool computeEigenvectors = true)
+    template<typename InputType>
+    explicit EigenSolver(const EigenBase<InputType>& matrix, bool computeEigenvectors = true)
       : m_eivec(matrix.rows(), matrix.cols()),
         m_eivalues(matrix.cols()),
         m_isInitialized(false),
@@ -152,7 +153,7 @@ template<typename _MatrixType> class EigenSolver
         m_matT(matrix.rows(), matrix.cols()), 
         m_tmp(matrix.cols())
     {
-      compute(matrix, computeEigenvectors);
+      compute(matrix.derived(), computeEigenvectors);
     }
 
     /** \brief Returns the eigenvectors of given matrix. 
@@ -273,7 +274,8 @@ template<typename _MatrixType> class EigenSolver
       * Example: \include EigenSolver_compute.cpp
       * Output: \verbinclude EigenSolver_compute.out
       */
-    EigenSolver& compute(const MatrixType& matrix, bool computeEigenvectors = true);
+    template<typename InputType>
+    EigenSolver& compute(const EigenBase<InputType>& matrix, bool computeEigenvectors = true);
 
     /** \returns NumericalIssue if the input contains INF or NaN values or overflow occured. Returns Success otherwise. */
     ComputationInfo info() const
@@ -370,8 +372,9 @@ typename EigenSolver<MatrixType>::EigenvectorsType EigenSolver<MatrixType>::eige
 }
 
 template<typename MatrixType>
+template<typename InputType>
 EigenSolver<MatrixType>& 
-EigenSolver<MatrixType>::compute(const MatrixType& matrix, bool computeEigenvectors)
+EigenSolver<MatrixType>::compute(const EigenBase<InputType>& matrix, bool computeEigenvectors)
 {
   check_template_parameters();
   
@@ -381,7 +384,7 @@ EigenSolver<MatrixType>::compute(const MatrixType& matrix, bool computeEigenvect
   eigen_assert(matrix.cols() == matrix.rows());
 
   // Reduce to real Schur form.
-  m_realSchur.compute(matrix, computeEigenvectors);
+  m_realSchur.compute(matrix.derived(), computeEigenvectors);
   
   m_info = m_realSchur.info();
 

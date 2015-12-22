@@ -87,11 +87,12 @@ template<typename _MatrixType, int _UpLo> class LLT
     explicit LLT(Index size) : m_matrix(size, size),
                     m_isInitialized(false) {}
 
-    explicit LLT(const MatrixType& matrix)
+    template<typename InputType>
+    explicit LLT(const EigenBase<InputType>& matrix)
       : m_matrix(matrix.rows(), matrix.cols()),
         m_isInitialized(false)
     {
-      compute(matrix);
+      compute(matrix.derived());
     }
 
     /** \returns a view of the upper triangular matrix U */
@@ -131,7 +132,8 @@ template<typename _MatrixType, int _UpLo> class LLT
     template<typename Derived>
     void solveInPlace(MatrixBase<Derived> &bAndX) const;
 
-    LLT& compute(const MatrixType& matrix);
+    template<typename InputType>
+    LLT& compute(const EigenBase<InputType>& matrix);
 
     /** \returns the LLT decomposition matrix
       *
@@ -283,7 +285,7 @@ template<typename Scalar> struct llt_inplace<Scalar, Lower>
         return k;
       mat.coeffRef(k,k) = x = sqrt(x);
       if (k>0 && rs>0) A21.noalias() -= A20 * A10.adjoint();
-      if (rs>0) A21 *= RealScalar(1)/x;
+      if (rs>0) A21 /= x;
     }
     return -1;
   }
@@ -381,14 +383,15 @@ template<typename MatrixType> struct LLT_Traits<MatrixType,Upper>
   * Output: \verbinclude TutorialLinAlgComputeTwice.out
   */
 template<typename MatrixType, int _UpLo>
-LLT<MatrixType,_UpLo>& LLT<MatrixType,_UpLo>::compute(const MatrixType& a)
+template<typename InputType>
+LLT<MatrixType,_UpLo>& LLT<MatrixType,_UpLo>::compute(const EigenBase<InputType>& a)
 {
   check_template_parameters();
   
   eigen_assert(a.rows()==a.cols());
   const Index size = a.rows();
   m_matrix.resize(size, size);
-  m_matrix = a;
+  m_matrix = a.derived();
 
   m_isInitialized = true;
   bool ok = Traits::inplace_decomposition(m_matrix);

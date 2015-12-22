@@ -23,7 +23,14 @@ namespace Eigen {
   * This class can be extended with the help of the plugin mechanism described on the page
   * \ref TopicCustomizingEigen by defining the preprocessor symbol \c EIGEN_SPARSEMATRIXBASE_PLUGIN.
   */
-template<typename Derived> class SparseMatrixBase : public EigenBase<Derived>
+template<typename Derived> class SparseMatrixBase
+#ifndef EIGEN_PARSED_BY_DOXYGEN
+  : public internal::special_scalar_op_base<Derived,typename internal::traits<Derived>::Scalar,
+                                            typename NumTraits<typename internal::traits<Derived>::Scalar>::Real,
+                                            EigenBase<Derived> >
+#else
+  : public EigenBase<Derived>
+#endif // not EIGEN_PARSED_BY_DOXYGEN
 {
   public:
 
@@ -42,7 +49,7 @@ template<typename Derived> class SparseMatrixBase : public EigenBase<Derived>
                      >::type PacketReturnType;
 
     typedef SparseMatrixBase StorageBaseType;
-    typedef EigenBase<Derived> Base;
+
     typedef Matrix<StorageIndex,Dynamic,1> IndexVector;
     typedef Matrix<Scalar,Dynamic,1> ScalarVector;
     
@@ -134,6 +141,10 @@ template<typename Derived> class SparseMatrixBase : public EigenBase<Derived>
     inline Derived& derived() { return *static_cast<Derived*>(this); }
     inline Derived& const_cast_derived() const
     { return *static_cast<Derived*>(const_cast<SparseMatrixBase*>(this)); }
+
+    typedef internal::special_scalar_op_base<Derived, Scalar, RealScalar, EigenBase<Derived> > Base;
+    using Base::operator*;
+    using Base::operator/;
 #endif // not EIGEN_PARSED_BY_DOXYGEN
 
 #define EIGEN_CURRENT_STORAGE_BASE_CLASS Eigen::SparseMatrixBase
@@ -251,20 +262,18 @@ template<typename Derived> class SparseMatrixBase : public EigenBase<Derived>
     Derived& operator*=(const Scalar& other);
     Derived& operator/=(const Scalar& other);
 
-    #define EIGEN_SPARSE_CWISE_PRODUCT_RETURN_TYPE \
-      CwiseBinaryOp< \
-        internal::scalar_product_op< \
-          typename internal::scalar_product_traits< \
-            typename internal::traits<Derived>::Scalar, \
-            typename internal::traits<OtherDerived>::Scalar \
-          >::ReturnType \
-        >, \
-        const Derived, \
-        const OtherDerived \
-      >
+    template<typename OtherDerived> struct CwiseProductDenseReturnType {
+      typedef CwiseBinaryOp<internal::scalar_product_op<typename internal::scalar_product_traits<
+                                                          typename internal::traits<Derived>::Scalar,
+                                                          typename internal::traits<OtherDerived>::Scalar
+                                                        >::ReturnType>,
+                            const Derived,
+                            const OtherDerived
+                          > Type;
+    };
 
     template<typename OtherDerived>
-    EIGEN_STRONG_INLINE const EIGEN_SPARSE_CWISE_PRODUCT_RETURN_TYPE
+    EIGEN_STRONG_INLINE const typename CwiseProductDenseReturnType<OtherDerived>::Type
     cwiseProduct(const MatrixBase<OtherDerived> &other) const;
 
     // sparse * diagonal
@@ -281,7 +290,7 @@ template<typename Derived> class SparseMatrixBase : public EigenBase<Derived>
     
     // sparse * sparse
     template<typename OtherDerived>
-    const Product<Derived,OtherDerived>
+    const Product<Derived,OtherDerived,AliasFreeProduct>
     operator*(const SparseMatrixBase<OtherDerived> &other) const;
     
     // sparse * dense

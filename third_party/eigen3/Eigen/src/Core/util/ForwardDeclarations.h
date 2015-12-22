@@ -132,6 +132,7 @@ template<typename MatrixType> struct CommaInitializer;
 template<typename Derived> class ReturnByValue;
 template<typename ExpressionType> class ArrayWrapper;
 template<typename ExpressionType> class MatrixWrapper;
+template<typename Derived> class SolverBase;
 template<typename XprType> class InnerIterator;
 
 namespace internal {
@@ -160,8 +161,7 @@ template< typename T,
           typename LhsShape = typename evaluator_traits<typename T::Lhs>::Shape,
           typename RhsShape = typename evaluator_traits<typename T::Rhs>::Shape,
           typename LhsScalar = typename traits<typename T::Lhs>::Scalar,
-          typename RhsScalar = typename traits<typename T::Rhs>::Scalar,
-          typename = EnableIf<true> // extra template parameter for SFINAE-based specialization
+          typename RhsScalar = typename traits<typename T::Rhs>::Scalar
         > struct product_evaluator;
 }
 
@@ -209,6 +209,7 @@ template<typename Scalar> struct scalar_random_op;
 template<typename Scalar> struct scalar_add_op;
 template<typename Scalar> struct scalar_constant_op;
 template<typename Scalar> struct scalar_identity_op;
+template<typename Scalar,bool iscpx> struct scalar_sign_op;
 
 template<typename LhsScalar,typename RhsScalar=LhsScalar> struct scalar_product_op;
 template<typename LhsScalar,typename RhsScalar> struct scalar_multiple2_op;
@@ -266,13 +267,15 @@ template<typename Scalar> class Rotation2D;
 template<typename Scalar> class AngleAxis;
 template<typename Scalar,int Dim> class Translation;
 template<typename Scalar,int Dim> class AlignedBox;
-
 template<typename Scalar, int Options = AutoAlign> class Quaternion;
 template<typename Scalar,int Dim,int Mode,int _Options=AutoAlign> class Transform;
 template <typename _Scalar, int _AmbientDim, int Options=AutoAlign> class ParametrizedLine;
 template <typename _Scalar, int _AmbientDim, int Options=AutoAlign> class Hyperplane;
 template<typename Scalar> class UniformScaling;
 template<typename MatrixType,int Direction> class Homogeneous;
+
+// Sparse module:
+template<typename Derived> class SparseMatrixBase;
 
 // MatrixFunctions module
 template<typename Derived> struct MatrixExponentialReturnValue;

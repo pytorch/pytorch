@@ -137,14 +137,14 @@ template<typename MatrixType, unsigned int _Mode> class SparseSelfAdjointView
 
     SparseSelfAdjointView& operator=(const SparseSelfAdjointView& src)
     {
-      PermutationMatrix<Dynamic> pnull;
+      PermutationMatrix<Dynamic,Dynamic,StorageIndex> pnull;
       return *this = src.twistedBy(pnull);
     }
 
     template<typename SrcMatrixType,unsigned int SrcMode>
     SparseSelfAdjointView& operator=(const SparseSelfAdjointView<SrcMatrixType,SrcMode>& src)
     {
-      PermutationMatrix<Dynamic> pnull;
+      PermutationMatrix<Dynamic,Dynamic,StorageIndex> pnull;
       return *this = src.twistedBy(pnull);
     }
     
@@ -336,7 +336,7 @@ struct generic_product_impl<Lhs, RhsView, DenseShape, SparseSelfAdjointShape, Pr
 // TODO: maybe the copy could be handled by generic_product_impl so that these overloads would not be needed anymore
 
 template<typename LhsView, typename Rhs, int ProductTag>
-struct product_evaluator<Product<LhsView, Rhs, DefaultProduct>, ProductTag, SparseSelfAdjointShape, SparseShape, typename traits<LhsView>::Scalar, typename traits<Rhs>::Scalar>
+struct product_evaluator<Product<LhsView, Rhs, DefaultProduct>, ProductTag, SparseSelfAdjointShape, SparseShape>
   : public evaluator<typename Product<typename Rhs::PlainObject, Rhs, DefaultProduct>::PlainObject>
 {
   typedef Product<LhsView, Rhs, DefaultProduct> XprType;
@@ -356,7 +356,7 @@ protected:
 };
 
 template<typename Lhs, typename RhsView, int ProductTag>
-struct product_evaluator<Product<Lhs, RhsView, DefaultProduct>, ProductTag, SparseShape, SparseSelfAdjointShape, typename traits<Lhs>::Scalar, typename traits<RhsView>::Scalar>
+struct product_evaluator<Product<Lhs, RhsView, DefaultProduct>, ProductTag, SparseShape, SparseSelfAdjointShape>
   : public evaluator<typename Product<Lhs, typename Lhs::PlainObject, DefaultProduct>::PlainObject>
 {
   typedef Product<Lhs, RhsView, DefaultProduct> XprType;

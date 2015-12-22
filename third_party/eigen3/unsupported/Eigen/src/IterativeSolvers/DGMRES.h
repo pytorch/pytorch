@@ -40,7 +40,6 @@ void sortWithPermutation (VectorType& vec, IndexType& perm, typename IndexType::
 {
   eigen_assert(vec.size() == perm.size());
   typedef typename IndexType::Scalar Index; 
-  typedef typename VectorType::Scalar Scalar; 
   bool flag; 
   for (Index k  = 0; k < ncut; k++)
   {
@@ -84,6 +83,8 @@ void sortWithPermutation (VectorType& vec, IndexType& perm, typename IndexType::
  * x = solver.solve(b);
  * \endcode
  * 
+ * DGMRES can also be used in a matrix-free context, see the following \link MatrixfreeSolverExample example \endlink.
+ *
  * References :
  * [1] D. NUENTSA WAKAM and F. PACULL, Memory Efficient Hybrid
  *  Algebraic Solvers for Linear Systems Arising from Compressible
@@ -101,7 +102,7 @@ template< typename _MatrixType, typename _Preconditioner>
 class DGMRES : public IterativeSolverBase<DGMRES<_MatrixType,_Preconditioner> >
 {
     typedef IterativeSolverBase<DGMRES> Base;
-    using Base::mp_matrix;
+    using Base::matrix;
     using Base::m_error;
     using Base::m_iterations;
     using Base::m_info;
@@ -112,6 +113,7 @@ class DGMRES : public IterativeSolverBase<DGMRES<_MatrixType,_Preconditioner> >
     typedef _MatrixType MatrixType;
     typedef typename MatrixType::Scalar Scalar;
     typedef typename MatrixType::Index Index;
+    typedef typename MatrixType::StorageIndex StorageIndex;
     typedef typename MatrixType::RealScalar RealScalar;
     typedef _Preconditioner Preconditioner;
     typedef Matrix<Scalar,Dynamic,Dynamic> DenseMatrix; 
@@ -134,8 +136,8 @@ class DGMRES : public IterativeSolverBase<DGMRES<_MatrixType,_Preconditioner> >
     * this class becomes invalid. Call compute() to update it with the new
     * matrix A, or modify a copy of A.
     */
-  DGMRES(const MatrixType& A) : Base(A),m_restart(30),m_neig(0),m_r(0),m_maxNeig(5),m_isDeflAllocated(false),m_isDeflInitialized(false)
-  {}
+  template<typename MatrixDerived>
+  explicit DGMRES(const EigenBase<MatrixDerived>& A) : Base(A.derived()), m_restart(30),m_neig(0),m_r(0),m_maxNeig(5),m_isDeflAllocated(false),m_isDeflInitialized(false) {}
 
   ~DGMRES() {}
   
@@ -150,7 +152,7 @@ class DGMRES : public IterativeSolverBase<DGMRES<_MatrixType,_Preconditioner> >
       m_error = Base::m_tolerance;
       
       typename Dest::ColXpr xj(x,j);
-      dgmres(mp_matrix, b.col(j), xj, Base::m_preconditioner);
+      dgmres(matrix(), b.col(j), xj, Base::m_preconditioner);
     }
     m_info = failed ? NumericalIssue
            : m_error <= Base::m_tolerance ? Success
@@ -202,7 +204,7 @@ class DGMRES : public IterativeSolverBase<DGMRES<_MatrixType,_Preconditioner> >
     template<typename Dest>
     int dgmresCycle(const MatrixType& mat, const Preconditioner& precond, Dest& x, DenseVector& r0, RealScalar& beta, const RealScalar& normRhs, int& nbIts) const; 
     // Compute data to use for deflation 
-    int dgmresComputeDeflationData(const MatrixType& mat, const Preconditioner& precond, const Index& it, Index& neig) const;
+    int dgmresComputeDeflationData(const MatrixType& mat, const Preconditioner& precond, const Index& it, StorageIndex& neig) const;
     // Apply deflation to a vector
     template<typename RhsType, typename DestType>
     int dgmresApplyDeflation(const RhsType& In, DestType& Out) const; 
@@ -218,7 +220,7 @@ class DGMRES : public IterativeSolverBase<DGMRES<_MatrixType,_Preconditioner> >
     mutable DenseMatrix m_MU; // matrix operator applied to m_U (for next cycles)
     mutable DenseMatrix m_T; /* T=U^T*M^{-1}*A*U */
     mutable PartialPivLU<DenseMatrix> m_luT; // LU factorization of m_T
-    mutable int m_neig; //Number of eigenvalues to extract at each restart
+    mutable StorageIndex m_neig; //Number of eigenvalues to extract at each restart
     mutable int m_r; // Current number of deflated eigenvalues, size of m_U
     mutable int m_maxNeig; // Maximum number of eigenvalues to deflate
     mutable RealScalar m_lambdaN; //Modulus of the largest eigenvalue of A
@@ -338,7 +340,7 @@ int DGMRES<_MatrixType, _Preconditioner>::dgmresCycle(const MatrixType& mat, con
     
     beta = std::abs(g(it+1));
     m_error = beta/normRhs; 
-    std::cerr << nbIts << " Relative Residual Norm " << m_error << std::endl;
+    // std::cerr << nbIts << " Relative Residual Norm " << m_error << std::endl;
     it++; nbIts++; 
     
     if (m_error < m_tolerance)
@@ -416,7 +418,7 @@ inline typename DGMRES<_MatrixType, _Preconditioner>::ComplexVector DGMRES<_Matr
 }
 
 template< typename _MatrixType, typename _Preconditioner>
-int DGMRES<_MatrixType, _Preconditioner>::dgmresComputeDeflationData(const MatrixType& mat, const Preconditioner& precond, const Index& it, Index& neig) const
+int DGMRES<_MatrixType, _Preconditioner>::dgmresComputeDeflationData(const MatrixType& mat, const Preconditioner& precond, const Index& it, StorageIndex& neig) const
 {
   // First, find the Schur form of the Hessenberg matrix H
   typename internal::conditional<NumTraits<Scalar>::IsComplex, ComplexSchur<DenseMatrix>, RealSchur<DenseMatrix> >::type schurofH; 
@@ -426,7 +428,7 @@ int DGMRES<_MatrixType, _Preconditioner>::dgmresComputeDeflationData(const Matri
   schurofH.computeFromHessenberg(m_Hes.topLeftCorner(it,it), matrixQ, computeU); 
   
   ComplexVector eig(it);
-  Matrix<Index,Dynamic,1>perm(it); 
+  Matrix<StorageIndex,Dynamic,1>perm(it);
   eig = this->schurValues(schurofH);
   
   // Reorder the absolute values of Schur values

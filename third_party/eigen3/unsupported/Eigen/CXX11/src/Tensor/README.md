@@ -1149,6 +1149,19 @@ are the smallest of the reduced values.
 Reduce a tensor using the prod() operator.  The resulting values
 are the product of the reduced values.
 
+### &lt;Operation&gt; all(const Dimensions& new_dims)
+### &lt;Operation&gt; all()
+Reduce a tensor using the all() operator.  Casts tensor to bool and then checks
+whether all elements are true.  Runs through all elements rather than
+short-circuiting, so may be significantly inefficient.
+
+### &lt;Operation&gt; any(const Dimensions& new_dims)
+### &lt;Operation&gt; any()
+Reduce a tensor using the any() operator.  Casts tensor to bool and then checks
+whether any element is true.  Runs through all elements rather than
+short-circuiting, so may be significantly inefficient.
+
+
 ### &lt;Operation&gt; reduce(const Dimensions& new_dims, const Reducer& reducer)
 
 Reduce a tensor using a user-defined reduction operator.  See ```SumReducer```

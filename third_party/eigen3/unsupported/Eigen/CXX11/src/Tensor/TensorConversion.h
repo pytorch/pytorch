@@ -52,6 +52,7 @@ struct nested<TensorConversionOp<TargetType, XprType>, 1, typename eval<TensorCo
 
 template <typename TensorEvaluator, typename SrcPacket, typename TgtPacket, int SrcCoeffRatio, int TgtCoeffRatio>
 struct PacketConverter {
+  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE
   PacketConverter(const TensorEvaluator& impl)
       : m_impl(impl) {}
 
@@ -67,6 +68,7 @@ struct PacketConverter {
 
 template <typename TensorEvaluator, typename SrcPacket, typename TgtPacket>
 struct PacketConverter<TensorEvaluator, SrcPacket, TgtPacket, 2, 1> {
+  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE
   PacketConverter(const TensorEvaluator& impl)
       : m_impl(impl) {}
 
@@ -87,6 +89,7 @@ struct PacketConverter<TensorEvaluator, SrcPacket, TgtPacket, 2, 1> {
 
 template <typename TensorEvaluator, typename SrcPacket, typename TgtPacket>
 struct PacketConverter<TensorEvaluator, SrcPacket, TgtPacket, 1, 2> {
+  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE
   PacketConverter(const TensorEvaluator& impl)
       : m_impl(impl), m_maxIndex(impl.dimensions().TotalSize()) {}
 
@@ -124,8 +127,8 @@ class TensorConversionOp : public TensorBase<TensorConversionOp<TargetType, XprT
     typedef typename internal::traits<TensorConversionOp>::StorageKind StorageKind;
     typedef typename internal::traits<TensorConversionOp>::Index Index;
     typedef typename internal::nested<TensorConversionOp>::type Nested;
-    typedef typename XprType::CoeffReturnType CoeffReturnType;
-    typedef typename XprType::PacketReturnType PacketReturnType;
+    typedef Scalar CoeffReturnType;
+    typedef Packet PacketReturnType;
     typedef typename NumTraits<Scalar>::Real RealScalar;
 
     EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE TensorConversionOp(const XprType& xpr)

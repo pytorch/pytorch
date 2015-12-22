@@ -1,7 +1,7 @@
 // This file is part of Eigen, a lightweight C++ template library
 // for linear algebra.
 //
-// Copyright (C) 2008-2014 Gael Guennebaud <gael.guennebaud@inria.fr>
+// Copyright (C) 2008-2015 Gael Guennebaud <gael.guennebaud@inria.fr>
 //
 // This Source Code Form is subject to the terms of the Mozilla
 // Public License v. 2.0. If a copy of the MPL was not distributed
@@ -14,12 +14,11 @@ namespace Eigen {
 
 #define DECL_GSSVX(PREFIX,FLOATTYPE,KEYTYPE)		\
     extern "C" {                                                                                          \
-      typedef struct { FLOATTYPE for_lu; FLOATTYPE total_needed; int expansions; } PREFIX##mem_usage_t;   \
       extern void PREFIX##gssvx(superlu_options_t *, SuperMatrix *, int *, int *, int *,                  \
                                 char *, FLOATTYPE *, FLOATTYPE *, SuperMatrix *, SuperMatrix *,           \
                                 void *, int, SuperMatrix *, SuperMatrix *,                                \
                                 FLOATTYPE *, FLOATTYPE *, FLOATTYPE *, FLOATTYPE *,                       \
-                                PREFIX##mem_usage_t *, SuperLUStat_t *, int *);                           \
+                                mem_usage_t *, SuperLUStat_t *, int *);                           \
     }                                                                                                     \
     inline float SuperLU_gssvx(superlu_options_t *options, SuperMatrix *A,                                \
          int *perm_c, int *perm_r, int *etree, char *equed,                                               \
@@ -29,7 +28,7 @@ namespace Eigen {
          FLOATTYPE *recip_pivot_growth,                                                                   \
          FLOATTYPE *rcond, FLOATTYPE *ferr, FLOATTYPE *berr,                                              \
          SuperLUStat_t *stats, int *info, KEYTYPE) {                                                      \
-    PREFIX##mem_usage_t mem_usage;                                                                        \
+    mem_usage_t mem_usage;                                                                        \
     PREFIX##gssvx(options, A, perm_c, perm_r, etree, equed, R, C, L,                                      \
          U, work, lwork, B, X, recip_pivot_growth, rcond,                                                 \
          ferr, berr, &mem_usage, stats, info);                                                            \
@@ -53,7 +52,7 @@ DECL_GSSVX(z,double,std::complex<double>)
       extern void PREFIX##gsisx(superlu_options_t *, SuperMatrix *, int *, int *, int *,        \
                          char *, FLOATTYPE *, FLOATTYPE *, SuperMatrix *, SuperMatrix *,        \
                          void *, int, SuperMatrix *, SuperMatrix *, FLOATTYPE *, FLOATTYPE *,   \
-                         PREFIX##mem_usage_t *, SuperLUStat_t *, int *);                        \
+                         mem_usage_t *, SuperLUStat_t *, int *);                        \
     }                                                                                           \
     inline float SuperLU_gsisx(superlu_options_t *options, SuperMatrix *A,                      \
          int *perm_c, int *perm_r, int *etree, char *equed,                                     \
@@ -63,7 +62,7 @@ DECL_GSSVX(z,double,std::complex<double>)
          FLOATTYPE *recip_pivot_growth,                                                         \
          FLOATTYPE *rcond,                                                                      \
          SuperLUStat_t *stats, int *info, KEYTYPE) {                                            \
-    PREFIX##mem_usage_t mem_usage;                                                              \
+    mem_usage_t mem_usage;                                                              \
     PREFIX##gsisx(options, A, perm_c, perm_r, etree, equed, R, C, L,                            \
          U, work, lwork, B, X, recip_pivot_growth, rcond,                                       \
          &mem_usage, stats, info);                                                              \
@@ -305,6 +304,10 @@ class SuperLUBase : public SparseSolverBase<Derived>
     typedef Matrix<int, MatrixType::RowsAtCompileTime, 1> IntColVectorType;    
     typedef Map<PermutationMatrix<Dynamic,Dynamic,int> > PermutationMap;
     typedef SparseMatrix<Scalar> LUMatrixType;
+    enum {
+      ColsAtCompileTime = MatrixType::ColsAtCompileTime,
+      MaxColsAtCompileTime = MatrixType::MaxColsAtCompileTime
+    };
 
   public:
 
@@ -448,6 +451,10 @@ class SuperLUBase : public SparseSolverBase<Derived>
   * X and B can be either dense or sparse.
   *
   * \tparam _MatrixType the type of the sparse matrix A, it must be a SparseMatrix<>
+  *
+  * \warning This class is only for the 4.x versions of SuperLU. The 3.x and 5.x versions are not supported.
+  *
+  * \implsparsesolverconcept
   *
   * \sa \ref TutorialSparseDirectSolvers
   */
@@ -657,7 +664,7 @@ void SuperLU<MatrixType>::_solve_impl(const MatrixBase<Rhs> &b, MatrixBase<Dest>
                 &m_sluStat, &info, Scalar());
   StatFree(&m_sluStat);
   
-  if(&x.coeffRef(0) != x_ref.data())
+  if(x.derived().data() != x_ref.data())
     x = x_ref;
   
   m_info = info==0 ? Success : NumericalIssue;
@@ -796,9 +803,11 @@ typename SuperLU<MatrixType>::Scalar SuperLU<MatrixType>::determinant() const
   * This class allows to solve for an approximate solution of A.X = B sparse linear problems via an incomplete LU factorization
   * using the SuperLU library. This class is aimed to be used as a preconditioner of the iterative linear solvers.
   *
-  * \warning This class requires SuperLU 4 or later.
+  * \warning This class is only for the 4.x versions of SuperLU. The 3.x and 5.x versions are not supported.
   *
   * \tparam _MatrixType the type of the sparse matrix A, it must be a SparseMatrix<>
+  *
+  * \implsparsesolverconcept
   *
   * \sa \ref TutorialSparseDirectSolvers, class ConjugateGradient, class BiCGSTAB
   */

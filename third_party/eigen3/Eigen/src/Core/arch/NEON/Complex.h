@@ -73,7 +73,7 @@ template<> EIGEN_STRONG_INLINE Packet2cf pmul<Packet2cf>(const Packet2cf& a, con
 
   // Get the real values of a | a1_re | a1_re | a2_re | a2_re |
   v1 = vcombine_f32(vdup_lane_f32(vget_low_f32(a.v), 0), vdup_lane_f32(vget_high_f32(a.v), 0));
-  // Get the real values of a | a1_im | a1_im | a2_im | a2_im |
+  // Get the imag values of a | a1_im | a1_im | a2_im | a2_im |
   v2 = vcombine_f32(vdup_lane_f32(vget_low_f32(a.v), 1), vdup_lane_f32(vget_high_f32(a.v), 1));
   // Multiply the real a with b
   v1 = vmulq_f32(v1, b.v);
@@ -325,8 +325,8 @@ template<> EIGEN_STRONG_INLINE Packet1cd pmul<Packet1cd>(const Packet1cd& a, con
 
   // Get the real values of a 
   v1 = vdupq_lane_f64(vget_low_f64(a.v), 0);
-  // Get the real values of a 
-  v2 = vdupq_lane_f64(vget_high_f64(a.v), 1);
+  // Get the imag values of a
+  v2 = vdupq_lane_f64(vget_high_f64(a.v), 0);
   // Multiply the real a with b
   v1 = vmulq_f64(v1, b.v);
   // Multiply the imag a with b

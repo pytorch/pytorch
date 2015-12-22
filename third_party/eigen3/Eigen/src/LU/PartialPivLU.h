@@ -11,12 +11,14 @@
 #ifndef EIGEN_PARTIALLU_H
 #define EIGEN_PARTIALLU_H
 
-namespace Eigen { 
+namespace Eigen {
 
 namespace internal {
 template<typename _MatrixType> struct traits<PartialPivLU<_MatrixType> >
  : traits<_MatrixType>
 {
+  typedef MatrixXpr XprKind;
+  typedef SolverStorage StorageKind;
   typedef traits<_MatrixType> BaseTraits;
   enum {
     Flags = BaseTraits::Flags & RowMajorBit,
@@ -58,33 +60,29 @@ template<typename _MatrixType> struct traits<PartialPivLU<_MatrixType> >
   * \sa MatrixBase::partialPivLu(), MatrixBase::determinant(), MatrixBase::inverse(), MatrixBase::computeInverse(), class FullPivLU
   */
 template<typename _MatrixType> class PartialPivLU
+  : public SolverBase<PartialPivLU<_MatrixType> >
 {
   public:
 
     typedef _MatrixType MatrixType;
+    typedef SolverBase<PartialPivLU> Base;
+    EIGEN_GENERIC_PUBLIC_INTERFACE(PartialPivLU)
+    // FIXME StorageIndex defined in EIGEN_GENERIC_PUBLIC_INTERFACE should be int
     enum {
-      RowsAtCompileTime = MatrixType::RowsAtCompileTime,
-      ColsAtCompileTime = MatrixType::ColsAtCompileTime,
-      Options = MatrixType::Options,
       MaxRowsAtCompileTime = MatrixType::MaxRowsAtCompileTime,
       MaxColsAtCompileTime = MatrixType::MaxColsAtCompileTime
     };
-    typedef typename MatrixType::Scalar Scalar;
-    typedef typename NumTraits<typename MatrixType::Scalar>::Real RealScalar;
-    typedef typename internal::traits<MatrixType>::StorageKind StorageKind;
-    // FIXME should be int
-    typedef typename MatrixType::StorageIndex StorageIndex;
     typedef PermutationMatrix<RowsAtCompileTime, MaxRowsAtCompileTime> PermutationType;
     typedef Transpositions<RowsAtCompileTime, MaxRowsAtCompileTime> TranspositionType;
     typedef typename MatrixType::PlainObject PlainObject;
 
 
     /**
-    * \brief Default Constructor.
-    *
-    * The default constructor is useful in cases in which the user intends to
-    * perform decompositions via PartialPivLU::compute(const MatrixType&).
-    */
+      * \brief Default Constructor.
+      *
+      * The default constructor is useful in cases in which the user intends to
+      * perform decompositions via PartialPivLU::compute(const MatrixType&).
+      */
     PartialPivLU();
 
     /** \brief Default Constructor with memory preallocation
@@ -102,9 +100,11 @@ template<typename _MatrixType> class PartialPivLU
       * \warning The matrix should have full rank (e.g. if it's square, it should be invertible).
       * If you need to deal with non-full rank, use class FullPivLU instead.
       */
-    explicit PartialPivLU(const MatrixType& matrix);
+    template<typename InputType>
+    explicit PartialPivLU(const EigenBase<InputType>& matrix);
 
-    PartialPivLU& compute(const MatrixType& matrix);
+    template<typename InputType>
+    PartialPivLU& compute(const EigenBase<InputType>& matrix);
 
     /** \returns the LU decomposition matrix: the upper-triangular part is U, the
       * unit-lower-triangular part is L (at least for square matrices; in the non-square
@@ -143,6 +143,7 @@ template<typename _MatrixType> class PartialPivLU
       *
       * \sa TriangularView::solve(), inverse(), computeInverse()
       */
+    // FIXME this is a copy-paste of the base-class member to add the isInitialized assertion.
     template<typename Rhs>
     inline const Solve<PartialPivLU, Rhs>
     solve(const MatrixBase<Rhs>& b) const
@@ -183,7 +184,7 @@ template<typename _MatrixType> class PartialPivLU
 
     inline Index rows() const { return m_lu.rows(); }
     inline Index cols() const { return m_lu.cols(); }
-    
+
     #ifndef EIGEN_PARSED_BY_DOXYGEN
     template<typename RhsType, typename DstType>
     EIGEN_DEVICE_FUNC
@@ -204,17 +205,44 @@ template<typename _MatrixType> class PartialPivLU
       m_lu.template triangularView<UnitLower>().solveInPlace(dst);
 
       // Step 3
-      m_lu.template triangularView<Upper>().solveInPlace(dst); 
+      m_lu.template triangularView<Upper>().solveInPlace(dst);
+    }
+
+    template<bool Conjugate, typename RhsType, typename DstType>
+    EIGEN_DEVICE_FUNC
+    void _solve_impl_transposed(const RhsType &rhs, DstType &dst) const {
+     /* The decomposition PA = LU can be rewritten as A = P^{-1} L U.
+      * So we proceed as follows:
+      * Step 1: compute c = Pb.
+      * Step 2: replace c by the solution x to Lx = c.
+      * Step 3: replace c by the solution x to Ux = c.
+      */
+
+      eigen_assert(rhs.rows() == m_lu.cols());
+
+      if (Conjugate) {
+        // Step 1
+        dst = m_lu.template triangularView<Upper>().adjoint().solve(rhs);
+        // Step 2
+        m_lu.template triangularView<UnitLower>().adjoint().solveInPlace(dst);
+      } else {
+        // Step 1
+        dst = m_lu.template triangularView<Upper>().transpose().solve(rhs);
+        // Step 2
+        m_lu.template triangularView<UnitLower>().transpose().solveInPlace(dst);
+      }
+      // Step 3
+      dst = permutationP().transpose() * dst;
     }
     #endif
 
   protected:
-    
+
     static void check_template_parameters()
     {
       EIGEN_STATIC_ASSERT_NON_INTEGER(Scalar);
     }
-    
+
     MatrixType m_lu;
     PermutationType m_p;
     TranspositionType m_rowsTranspositions;
@@ -243,14 +271,15 @@ PartialPivLU<MatrixType>::PartialPivLU(Index size)
 }
 
 template<typename MatrixType>
-PartialPivLU<MatrixType>::PartialPivLU(const MatrixType& matrix)
+template<typename InputType>
+PartialPivLU<MatrixType>::PartialPivLU(const EigenBase<InputType>& matrix)
   : m_lu(matrix.rows(), matrix.rows()),
     m_p(matrix.rows()),
     m_rowsTranspositions(matrix.rows()),
     m_det_p(0),
     m_isInitialized(false)
 {
-  compute(matrix);
+  compute(matrix.derived());
 }
 
 namespace internal {
@@ -292,7 +321,7 @@ struct partial_lu_impl
     {
       Index rrows = rows-k-1;
       Index rcols = cols-k-1;
-        
+
       Index row_of_biggest_in_col;
       Score biggest_in_corner
         = lu.col(k).tail(rows-k).unaryExpr(Scoring()).maxCoeff(&row_of_biggest_in_col);
@@ -429,14 +458,15 @@ void partial_lu_inplace(MatrixType& lu, TranspositionType& row_transpositions, t
 } // end namespace internal
 
 template<typename MatrixType>
-PartialPivLU<MatrixType>& PartialPivLU<MatrixType>::compute(const MatrixType& matrix)
+template<typename InputType>
+PartialPivLU<MatrixType>& PartialPivLU<MatrixType>::compute(const EigenBase<InputType>& matrix)
 {
   check_template_parameters();
-  
+
   // the row permutation is stored as int indices, so just to be sure:
   eigen_assert(matrix.rows()<NumTraits<int>::highest());
-  
-  m_lu = matrix;
+
+  m_lu = matrix.derived();
 
   eigen_assert(matrix.rows() == matrix.cols() && "PartialPivLU is only for square (and moreover invertible) matrices");
   const Index size = matrix.rows();
@@ -477,7 +507,7 @@ MatrixType PartialPivLU<MatrixType>::reconstructedMatrix() const
   return res;
 }
 
-/***** Implementation of solve() *****************************************************/
+/***** Implementation details *****************************************************/
 
 namespace internal {
 
@@ -488,7 +518,7 @@ struct Assignment<DstXprType, Inverse<PartialPivLU<MatrixType> >, internal::assi
   typedef PartialPivLU<MatrixType> LuType;
   typedef Inverse<LuType> SrcXprType;
   static void run(DstXprType &dst, const SrcXprType &src, const internal::assign_op<Scalar> &)
-  {    
+  {
     dst = src.nestedExpression().solve(MatrixType::Identity(src.rows(), src.cols()));
   }
 };

@@ -24,12 +24,12 @@ static void test_simple_cast()
   cplextensor.setRandom();
 
   chartensor = ftensor.cast<char>();
-  cplextensor = ftensor.cast<std::complex<float>>();
+  cplextensor = ftensor.cast<std::complex<float> >();
 
   for (int i = 0; i < 20; ++i) {
     for (int j = 0; j < 30; ++j) {
       VERIFY_IS_EQUAL(chartensor(i,j), static_cast<char>(ftensor(i,j)));
-      VERIFY_IS_EQUAL(cplextensor(i,j), static_cast<std::complex<float>>(ftensor(i,j)));
+      VERIFY_IS_EQUAL(cplextensor(i,j), static_cast<std::complex<float> >(ftensor(i,j)));
     }
   }
 }

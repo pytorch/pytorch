@@ -445,6 +445,11 @@ struct generic_product_impl<Transform<Scalar,Dim,Mode,Options>, Homogeneous<RhsA
   }
 };
 
+template<typename ExpressionType, int Side, bool Transposed>
+struct permutation_matrix_product<ExpressionType, Side, Transposed, HomogeneousShape>
+  : public permutation_matrix_product<ExpressionType, Side, Transposed, DenseShape>
+{};
+
 } // end namespace internal
 
 } // end namespace Eigen

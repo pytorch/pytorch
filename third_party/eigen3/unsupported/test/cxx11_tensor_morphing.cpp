@@ -114,6 +114,16 @@ static void test_simple_slice()
   }
 }
 
+static void test_const_slice()
+{
+  const float b[1] = {42};
+  TensorMap<Tensor<const float, 1> > m(b, 1);
+  DSizes<DenseIndex, 1> offsets;
+  offsets[0] = 0;
+  TensorRef<Tensor<const float, 1> > slice_ref(m.slice(offsets, m.dimensions()));
+  VERIFY_IS_EQUAL(slice_ref(0), 42);
+}
+
 template<int DataLayout>
 static void test_slice_in_expr() {
   typedef Matrix<float, Dynamic, Dynamic, DataLayout> Mtx;
@@ -333,6 +343,7 @@ void test_cxx11_tensor_morphing()
 
   CALL_SUBTEST(test_simple_slice<ColMajor>());
   CALL_SUBTEST(test_simple_slice<RowMajor>());
+  CALL_SUBTEST(test_const_slice());
   CALL_SUBTEST(test_slice_in_expr<ColMajor>());
   CALL_SUBTEST(test_slice_in_expr<RowMajor>());
   CALL_SUBTEST(test_slice_as_lvalue<ColMajor>());

@@ -149,7 +149,7 @@ static void run(Index rows, Index cols, Index depth,
       {
       for(Index i=0; i<threads; ++i)
         #pragma omp atomic
-        --(info[i].users);
+        info[i].users -= 1;
       }
     }
   }

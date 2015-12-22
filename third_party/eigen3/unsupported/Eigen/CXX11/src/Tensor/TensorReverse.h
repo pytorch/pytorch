@@ -66,7 +66,7 @@ class TensorReverseOp : public TensorBase<TensorReverseOp<ReverseDimensions,
 
   EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE TensorReverseOp(
       const XprType& expr, const ReverseDimensions& reverse_dims)
-      : m_xpr(expr), m_reverse_dims(reverse_dims) {}
+      : m_xpr(expr), m_reverse_dims(reverse_dims) { }
 
     EIGEN_DEVICE_FUNC
     const ReverseDimensions& reverse() const { return m_reverse_dims; }
@@ -119,6 +119,9 @@ struct TensorEvaluator<const TensorReverseOp<ReverseDimensions, ArgType>, Device
                                                         const Device& device)
       : m_impl(op.expression(), device), m_reverse(op.reverse())
   {
+    // Reversing a scalar isn't supported yet. It would be a no-op anyway.
+    EIGEN_STATIC_ASSERT(NumDims > 0, YOU_MADE_A_PROGRAMMING_MISTAKE);
+
     // Compute strides
     m_dimensions = m_impl.dimensions();
     if (static_cast<int>(Layout) == static_cast<int>(ColMajor)) {

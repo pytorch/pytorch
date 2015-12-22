@@ -64,7 +64,8 @@ template <typename MatrixLType, typename MatrixUType> struct SparseLUMatrixURetu
   * 
   * \tparam _MatrixType The type of the sparse matrix. It must be a column-major SparseMatrix<>
   * \tparam _OrderingType The ordering method to use, either AMD, COLAMD or METIS. Default is COLMAD
-  * 
+  *
+  * \implsparsesolverconcept
   * 
   * \sa \ref TutorialSparseDirectSolvers
   * \sa \ref OrderingMethods_Module
@@ -89,13 +90,19 @@ class SparseLU : public SparseSolverBase<SparseLU<_MatrixType,_OrderingType> >, 
     typedef Matrix<StorageIndex,Dynamic,1> IndexVector;
     typedef PermutationMatrix<Dynamic, Dynamic, StorageIndex> PermutationType;
     typedef internal::SparseLUImpl<Scalar, StorageIndex> Base;
+
+    enum {
+      ColsAtCompileTime = MatrixType::ColsAtCompileTime,
+      MaxColsAtCompileTime = MatrixType::MaxColsAtCompileTime
+    };
     
   public:
     SparseLU():m_lastError(""),m_Ustore(0,0,0,0,0,0),m_symmetricmode(false),m_diagpivotthresh(1.0),m_detPermR(1)
     {
       initperfvalues(); 
     }
-    explicit SparseLU(const MatrixType& matrix):m_lastError(""),m_Ustore(0,0,0,0,0,0),m_symmetricmode(false),m_diagpivotthresh(1.0),m_detPermR(1)
+    explicit SparseLU(const MatrixType& matrix)
+      : m_lastError(""),m_Ustore(0,0,0,0,0,0),m_symmetricmode(false),m_diagpivotthresh(1.0),m_detPermR(1)
     {
       initperfvalues(); 
       compute(matrix);
@@ -713,7 +720,7 @@ template<typename MatrixLType, typename MatrixUType>
 struct SparseLUMatrixUReturnType : internal::no_assignment_operator
 {
   typedef typename MatrixLType::Scalar Scalar;
-  explicit SparseLUMatrixUReturnType(const MatrixLType& mapL, const MatrixUType& mapU)
+  SparseLUMatrixUReturnType(const MatrixLType& mapL, const MatrixUType& mapU)
   : m_mapL(mapL),m_mapU(mapU)
   { }
   Index rows() { return m_mapL.rows(); }

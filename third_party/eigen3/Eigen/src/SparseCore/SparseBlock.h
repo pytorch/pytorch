@@ -23,6 +23,8 @@ public:
     enum { IsRowMajor = internal::traits<BlockType>::IsRowMajor };
 protected:
     enum { OuterSize = IsRowMajor ? BlockRows : BlockCols };
+    typedef SparseMatrixBase<BlockType> Base;
+    using Base::convert_index;
 public:
     EIGEN_SPARSE_PUBLIC_INTERFACE(BlockType)
 
@@ -88,10 +90,11 @@ class sparse_matrix_block_impl
 {
     typedef typename internal::remove_all<typename SparseMatrixType::Nested>::type _MatrixTypeNested;
     typedef Block<SparseMatrixType, BlockRows, BlockCols, true> BlockType;
+    typedef SparseCompressedBase<Block<SparseMatrixType,BlockRows,BlockCols,true> > Base;
+    using Base::convert_index;
 public:
     enum { IsRowMajor = internal::traits<BlockType>::IsRowMajor };
-    typedef SparseCompressedBase<Block<SparseMatrixType,BlockRows,BlockCols,true> > Base;
-    _EIGEN_SPARSE_PUBLIC_INTERFACE(BlockType)
+    EIGEN_SPARSE_PUBLIC_INTERFACE(BlockType)
 protected:
     typedef typename Base::IndexVector IndexVector;
     enum { OuterSize = IsRowMajor ? BlockRows : BlockCols };
@@ -114,7 +117,8 @@ public:
       // and/or it is not at the end of the nonzeros of the underlying matrix.
 
       // 1 - eval to a temporary to avoid transposition and/or aliasing issues
-      SparseMatrix<Scalar, IsRowMajor ? RowMajor : ColMajor, StorageIndex> tmp(other);
+      Ref<const SparseMatrix<Scalar, IsRowMajor ? RowMajor : ColMajor, StorageIndex> > tmp(other.derived());
+      eigen_internal_assert(tmp.outerSize()==m_outerSize.value());
 
       // 2 - let's check whether there is enough allocated memory
       Index nnz           = tmp.nonZeros();
@@ -127,6 +131,7 @@ public:
                           ? Index(matrix.data().allocatedSize()) + block_size
                           : block_size;
 
+      bool update_trailing_pointers = false;
       if(nnz>free_size) 
       {
         // realloc manually to reduce copies
@@ -135,8 +140,8 @@ public:
         internal::smart_copy(&m_matrix.data().value(0),  &m_matrix.data().value(0) + start, &newdata.value(0));
         internal::smart_copy(&m_matrix.data().index(0),  &m_matrix.data().index(0) + start, &newdata.index(0));
 
-        internal::smart_copy(&tmp.data().value(0),  &tmp.data().value(0) + nnz, &newdata.value(start));
-        internal::smart_copy(&tmp.data().index(0),  &tmp.data().index(0) + nnz, &newdata.index(start));
+        internal::smart_copy(tmp.valuePtr(), tmp.valuePtr() + nnz, &newdata.value(start));
+        internal::smart_copy(tmp.innerIndexPtr(), tmp.innerIndexPtr() + nnz, &newdata.index(start));
 
         internal::smart_copy(&matrix.data().value(end),  &matrix.data().value(end) + tail_size, &newdata.value(start+nnz));
         internal::smart_copy(&matrix.data().index(end),  &matrix.data().index(end) + tail_size, &newdata.index(start+nnz));
@@ -144,35 +149,53 @@ public:
         newdata.resize(m_matrix.outerIndexPtr()[m_matrix.outerSize()] - block_size + nnz);
 
         matrix.data().swap(newdata);
+
+        update_trailing_pointers = true;
       }
       else
       {
-        // no need to realloc, simply copy the tail at its respective position and insert tmp
-        matrix.data().resize(start + nnz + tail_size);
+        if(m_matrix.isCompressed())
+        {
+          // no need to realloc, simply copy the tail at its respective position and insert tmp
+          matrix.data().resize(start + nnz + tail_size);
 
-        internal::smart_memmove(&matrix.data().value(end),  &matrix.data().value(end) + tail_size, &matrix.data().value(start + nnz));
-        internal::smart_memmove(&matrix.data().index(end),  &matrix.data().index(end) + tail_size, &matrix.data().index(start + nnz));
+          internal::smart_memmove(&matrix.data().value(end),  &matrix.data().value(end) + tail_size, &matrix.data().value(start + nnz));
+          internal::smart_memmove(&matrix.data().index(end),  &matrix.data().index(end) + tail_size, &matrix.data().index(start + nnz));
 
-        internal::smart_copy(&tmp.data().value(0),  &tmp.data().value(0) + nnz, &matrix.data().value(start));
-        internal::smart_copy(&tmp.data().index(0),  &tmp.data().index(0) + nnz, &matrix.data().index(start));
+          update_trailing_pointers = true;
+        }
+
+        internal::smart_copy(tmp.valuePtr(),  tmp.valuePtr() + nnz, &matrix.data().value(start));
+        internal::smart_copy(tmp.innerIndexPtr(),  tmp.innerIndexPtr() + nnz, &matrix.data().index(start));
       }
-      
-      // update innerNonZeros
-      if(!m_matrix.isCompressed())
-        for(Index j=0; j<m_outerSize.value(); ++j)
-          matrix.innerNonZeroPtr()[m_outerStart+j] = StorageIndex(tmp.innerVector(j).nonZeros());
 
-      // update outer index pointers
-      StorageIndex p = StorageIndex(start);
-      for(Index k=0; k<m_outerSize.value(); ++k)
+      // update outer index pointers and innerNonZeros
+      if(IsVectorAtCompileTime)
       {
-        matrix.outerIndexPtr()[m_outerStart+k] = p;
-        p += tmp.innerVector(k).nonZeros();
+        if(!m_matrix.isCompressed())
+          matrix.innerNonZeroPtr()[m_outerStart] = StorageIndex(nnz);
+        matrix.outerIndexPtr()[m_outerStart] = StorageIndex(start);
       }
-      StorageIndex offset = internal::convert_index<StorageIndex>(nnz - block_size);
-      for(Index k = m_outerStart + m_outerSize.value(); k<=matrix.outerSize(); ++k)
+      else
       {
-        matrix.outerIndexPtr()[k] += offset;
+        StorageIndex p = StorageIndex(start);
+        for(Index k=0; k<m_outerSize.value(); ++k)
+        {
+          Index nnz_k = tmp.innerVector(k).nonZeros();
+          if(!m_matrix.isCompressed())
+            matrix.innerNonZeroPtr()[m_outerStart+k] = StorageIndex(nnz_k);
+          matrix.outerIndexPtr()[m_outerStart+k] = p;
+          p += nnz_k;
+        }
+      }
+
+      if(update_trailing_pointers)
+      {
+        StorageIndex offset = internal::convert_index<StorageIndex>(nnz - block_size);
+        for(Index k = m_outerStart + m_outerSize.value(); k<=matrix.outerSize(); ++k)
+        {
+          matrix.outerIndexPtr()[k] += offset;
+        }
       }
 
       return derived();
@@ -289,7 +312,7 @@ private:
   template<typename Derived> BlockImpl(const SparseMatrixBase<Derived>& xpr, Index i);
   template<typename Derived> BlockImpl(const SparseMatrixBase<Derived>& xpr);
 };
-  
+
 //----------
 
 /** \returns the \a outer -th column (resp. row) of the matrix \c *this if \c *this
@@ -339,7 +362,9 @@ template<typename XprType, int BlockRows, int BlockCols, bool InnerPanel>
 class BlockImpl<XprType,BlockRows,BlockCols,InnerPanel,Sparse>
   : public SparseMatrixBase<Block<XprType,BlockRows,BlockCols,InnerPanel> >, internal::no_assignment_operator
 {
-  typedef Block<XprType, BlockRows, BlockCols, InnerPanel> BlockType;
+    typedef Block<XprType, BlockRows, BlockCols, InnerPanel> BlockType;
+    typedef SparseMatrixBase<BlockType> Base;
+    using Base::convert_index;
 public:
     enum { IsRowMajor = internal::traits<BlockType>::IsRowMajor };
     EIGEN_SPARSE_PUBLIC_INTERFACE(BlockType)
