@@ -107,32 +107,32 @@ struct triangular_solver_selector<Lhs,Rhs,Side,Mode,NoUnrolling,Dynamic>
 * meta-unrolling implementation
 ***************************************************************************/
 
-template<typename Lhs, typename Rhs, int Mode, int Index, int Size,
-         bool Stop = Index==Size>
+template<typename Lhs, typename Rhs, int Mode, int LoopIndex, int Size,
+         bool Stop = LoopIndex==Size>
 struct triangular_solver_unroller;
 
-template<typename Lhs, typename Rhs, int Mode, int Index, int Size>
-struct triangular_solver_unroller<Lhs,Rhs,Mode,Index,Size,false> {
+template<typename Lhs, typename Rhs, int Mode, int LoopIndex, int Size>
+struct triangular_solver_unroller<Lhs,Rhs,Mode,LoopIndex,Size,false> {
   enum {
     IsLower = ((Mode&Lower)==Lower),
-    I = IsLower ? Index : Size - Index - 1,
-    S = IsLower ? 0     : I+1
+    DiagIndex  = IsLower ? LoopIndex : Size - LoopIndex - 1,
+    StartIndex = IsLower ? 0         : DiagIndex+1
   };
   static void run(const Lhs& lhs, Rhs& rhs)
   {
-    if (Index>0)
-      rhs.coeffRef(I) -= lhs.row(I).template segment<Index>(S).transpose()
-                         .cwiseProduct(rhs.template segment<Index>(S)).sum();
+    if (LoopIndex>0)
+      rhs.coeffRef(DiagIndex) -= lhs.row(DiagIndex).template segment<LoopIndex>(StartIndex).transpose()
+                                .cwiseProduct(rhs.template segment<LoopIndex>(StartIndex)).sum();
 
     if(!(Mode & UnitDiag))
-      rhs.coeffRef(I) /= lhs.coeff(I,I);
+      rhs.coeffRef(DiagIndex) /= lhs.coeff(DiagIndex,DiagIndex);
 
-    triangular_solver_unroller<Lhs,Rhs,Mode,Index+1,Size>::run(lhs,rhs);
+    triangular_solver_unroller<Lhs,Rhs,Mode,LoopIndex+1,Size>::run(lhs,rhs);
   }
 };
 
-template<typename Lhs, typename Rhs, int Mode, int Index, int Size>
-struct triangular_solver_unroller<Lhs,Rhs,Mode,Index,Size,true> {
+template<typename Lhs, typename Rhs, int Mode, int LoopIndex, int Size>
+struct triangular_solver_unroller<Lhs,Rhs,Mode,LoopIndex,Size,true> {
   static void run(const Lhs&, Rhs&) {}
 };
 
@@ -161,13 +161,6 @@ struct triangular_solver_selector<Lhs,Rhs,OnTheRight,Mode,CompleteUnrolling,1> {
 * TriangularView methods
 ***************************************************************************/
 
-/** "in-place" version of TriangularView::solve() where the result is written in \a other
-  *
-  * \warning The parameter is only marked 'const' to make the C++ compiler accept a temporary expression here.
-  * This function will const_cast it, so constness isn't honored here.
-  *
-  * See TriangularView:solve() for the details.
-  */
 template<typename MatrixType, unsigned int Mode>
 template<int Side, typename OtherDerived>
 void TriangularViewImpl<MatrixType,Mode,Dense>::solveInPlace(const MatrixBase<OtherDerived>& _other) const
@@ -188,27 +181,6 @@ void TriangularViewImpl<MatrixType,Mode,Dense>::solveInPlace(const MatrixBase<Ot
     other = otherCopy;
 }
 
-/** \returns the product of the inverse of \c *this with \a other, \a *this being triangular.
-  *
-  * This function computes the inverse-matrix matrix product inverse(\c *this) * \a other if
-  * \a Side==OnTheLeft (the default), or the right-inverse-multiply  \a other * inverse(\c *this) if
-  * \a Side==OnTheRight.
-  *
-  * The matrix \c *this must be triangular and invertible (i.e., all the coefficients of the
-  * diagonal must be non zero). It works as a forward (resp. backward) substitution if \c *this
-  * is an upper (resp. lower) triangular matrix.
-  *
-  * Example: \include Triangular_solve.cpp
-  * Output: \verbinclude Triangular_solve.out
-  *
-  * This function returns an expression of the inverse-multiply and can works in-place if it is assigned
-  * to the same matrix or vector \a other.
-  *
-  * For users coming from BLAS, this function (and more specifically solveInPlace()) offer
-  * all the operations supported by the \c *TRSV and \c *TRSM BLAS routines.
-  *
-  * \sa TriangularView::solveInPlace()
-  */
 template<typename Derived, unsigned int Mode>
 template<int Side, typename Other>
 const internal::triangular_solve_retval<Side,TriangularView<Derived,Mode>,Other>

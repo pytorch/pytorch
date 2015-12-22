@@ -119,6 +119,8 @@ struct traits<LeastSquaresConjugateGradient<_MatrixType,_Preconditioner> >
   * \tparam _MatrixType the type of the matrix A, can be a dense or a sparse matrix.
   * \tparam _Preconditioner the type of the preconditioner. Default is LeastSquareDiagonalPreconditioner
   *
+  * \implsparsesolverconcept
+  * 
   * The maximal number of iterations and tolerance value can be controlled via the setMaxIterations()
   * and setTolerance() methods. The defaults are the size of the problem for the maximal number of iterations
   * and NumTraits<Scalar>::epsilon() for the tolerance.
@@ -147,7 +149,7 @@ template< typename _MatrixType, typename _Preconditioner>
 class LeastSquaresConjugateGradient : public IterativeSolverBase<LeastSquaresConjugateGradient<_MatrixType,_Preconditioner> >
 {
   typedef IterativeSolverBase<LeastSquaresConjugateGradient> Base;
-  using Base::mp_matrix;
+  using Base::matrix;
   using Base::m_error;
   using Base::m_iterations;
   using Base::m_info;
@@ -173,7 +175,8 @@ public:
     * this class becomes invalid. Call compute() to update it with the new
     * matrix A, or modify a copy of A.
     */
-  explicit LeastSquaresConjugateGradient(const MatrixType& A) : Base(A) {}
+  template<typename MatrixDerived>
+  explicit LeastSquaresConjugateGradient(const EigenBase<MatrixDerived>& A) : Base(A.derived()) {}
 
   ~LeastSquaresConjugateGradient() {}
 
@@ -190,7 +193,7 @@ public:
       m_error = Base::m_tolerance;
 
       typename Dest::ColXpr xj(x,j);
-      internal::least_square_conjugate_gradient(mp_matrix, b.col(j), xj, Base::m_preconditioner, m_iterations, m_error);
+      internal::least_square_conjugate_gradient(matrix(), b.col(j), xj, Base::m_preconditioner, m_iterations, m_error);
     }
 
     m_isInitialized = true;

@@ -1,7 +1,7 @@
 // This file is part of Eigen, a lightweight C++ template library
 // for linear algebra.
 //
-// Copyright (C) 2008-2014 Gael Guennebaud <gael.guennebaud@inria.fr>
+// Copyright (C) 2008-2015 Gael Guennebaud <gael.guennebaud@inria.fr>
 //
 // This Source Code Form is subject to the terms of the Mozilla
 // Public License v. 2.0. If a copy of the MPL was not distributed
@@ -138,7 +138,7 @@ struct conservative_sparse_sparse_product_selector<Lhs,Rhs,ResultType,ColMajor,C
   {
     typedef SparseMatrix<typename ResultType::Scalar,RowMajor,typename ResultType::StorageIndex> RowMajorMatrix;
     typedef SparseMatrix<typename ResultType::Scalar,ColMajor,typename ResultType::StorageIndex> ColMajorMatrixAux;
-    typedef typename sparse_eval<ColMajorMatrixAux,ResultType::RowsAtCompileTime,ResultType::ColsAtCompileTime>::type ColMajorMatrix;
+    typedef typename sparse_eval<ColMajorMatrixAux,ResultType::RowsAtCompileTime,ResultType::ColsAtCompileTime,ColMajorMatrixAux::Flags>::type ColMajorMatrix;
     
     // If the result is tall and thin (in the extreme case a column vector)
     // then it is faster to sort the coefficients inplace instead of transposing twice.
@@ -254,6 +254,89 @@ struct conservative_sparse_sparse_product_selector<Lhs,Rhs,ResultType,RowMajor,R
     res = resCol;
   }
 };
+
+} // end namespace internal
+
+
+namespace internal {
+
+template<typename Lhs, typename Rhs, typename ResultType>
+static void sparse_sparse_to_dense_product_impl(const Lhs& lhs, const Rhs& rhs, ResultType& res)
+{
+  typedef typename remove_all<Lhs>::type::Scalar Scalar;
+  Index cols = rhs.outerSize();
+  eigen_assert(lhs.outerSize() == rhs.innerSize());
+
+  evaluator<Lhs> lhsEval(lhs);
+  evaluator<Rhs> rhsEval(rhs);
+
+  for (Index j=0; j<cols; ++j)
+  {
+    for (typename evaluator<Rhs>::InnerIterator rhsIt(rhsEval, j); rhsIt; ++rhsIt)
+    {
+      Scalar y = rhsIt.value();
+      Index k = rhsIt.index();
+      for (typename evaluator<Lhs>::InnerIterator lhsIt(lhsEval, k); lhsIt; ++lhsIt)
+      {
+        Index i = lhsIt.index();
+        Scalar x = lhsIt.value();
+        res.coeffRef(i,j) += x * y;
+      }
+    }
+  }
+}
+
+
+} // end namespace internal
+
+namespace internal {
+
+template<typename Lhs, typename Rhs, typename ResultType,
+  int LhsStorageOrder = (traits<Lhs>::Flags&RowMajorBit) ? RowMajor : ColMajor,
+  int RhsStorageOrder = (traits<Rhs>::Flags&RowMajorBit) ? RowMajor : ColMajor>
+struct sparse_sparse_to_dense_product_selector;
+
+template<typename Lhs, typename Rhs, typename ResultType>
+struct sparse_sparse_to_dense_product_selector<Lhs,Rhs,ResultType,ColMajor,ColMajor>
+{
+  static void run(const Lhs& lhs, const Rhs& rhs, ResultType& res)
+  {
+    internal::sparse_sparse_to_dense_product_impl<Lhs,Rhs,ResultType>(lhs, rhs, res);
+  }
+};
+
+template<typename Lhs, typename Rhs, typename ResultType>
+struct sparse_sparse_to_dense_product_selector<Lhs,Rhs,ResultType,RowMajor,ColMajor>
+{
+  static void run(const Lhs& lhs, const Rhs& rhs, ResultType& res)
+  {
+    typedef SparseMatrix<typename ResultType::Scalar,ColMajor,typename ResultType::StorageIndex> ColMajorMatrix;
+    ColMajorMatrix lhsCol(lhs);
+    internal::sparse_sparse_to_dense_product_impl<ColMajorMatrix,Rhs,ResultType>(lhsCol, rhs, res);
+  }
+};
+
+template<typename Lhs, typename Rhs, typename ResultType>
+struct sparse_sparse_to_dense_product_selector<Lhs,Rhs,ResultType,ColMajor,RowMajor>
+{
+  static void run(const Lhs& lhs, const Rhs& rhs, ResultType& res)
+  {
+    typedef SparseMatrix<typename ResultType::Scalar,ColMajor,typename ResultType::StorageIndex> ColMajorMatrix;
+    ColMajorMatrix rhsCol(rhs);
+    internal::sparse_sparse_to_dense_product_impl<Lhs,ColMajorMatrix,ResultType>(lhs, rhsCol, res);
+  }
+};
+
+template<typename Lhs, typename Rhs, typename ResultType>
+struct sparse_sparse_to_dense_product_selector<Lhs,Rhs,ResultType,RowMajor,RowMajor>
+{
+  static void run(const Lhs& lhs, const Rhs& rhs, ResultType& res)
+  {
+    Transpose<ResultType> trRes(res);
+    internal::sparse_sparse_to_dense_product_impl<Rhs,Lhs,Transpose<ResultType> >(rhs, lhs, trRes);
+  }
+};
+
 
 } // end namespace internal
 

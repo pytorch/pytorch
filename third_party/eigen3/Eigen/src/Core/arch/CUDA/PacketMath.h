@@ -39,6 +39,9 @@ template<> struct packet_traits<float> : default_packet_traits
     HasExp  = 1,
     HasSqrt = 1,
     HasRsqrt = 1,
+    HasLGamma = 1,
+    HasErf = 1,
+    HasErfc = 1,
 
     HasBlend = 0,
   };
@@ -59,6 +62,9 @@ template<> struct packet_traits<double> : default_packet_traits
     HasExp  = 1,
     HasSqrt = 1,
     HasRsqrt = 1,
+    HasLGamma = 1,
+    HasErf = 1,
+    HasErfc = 1,
 
     HasBlend = 0,
   };
@@ -177,7 +183,7 @@ template<> EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE void pstoreu<double>(double* to
   to[1] = from.y;
 }
 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 350
 template<>
 EIGEN_DEVICE_FUNC EIGEN_ALWAYS_INLINE float4 ploadt_ro<float4, Aligned>(const float* from) {
   return __ldg((const float4*)from);
@@ -242,6 +248,13 @@ template<> EIGEN_DEVICE_FUNC inline float  predux_min<float4>(const float4& a) {
 }
 template<> EIGEN_DEVICE_FUNC inline double predux_min<double2>(const double2& a) {
   return fmin(a.x, a.y);
+}
+
+template<> EIGEN_DEVICE_FUNC inline float  predux_mul<float4>(const float4& a) {
+  return a.x * a.y * a.z * a.w;
+}
+template<> EIGEN_DEVICE_FUNC inline double predux_mul<double2>(const double2& a) {
+  return a.x * a.y;
 }
 
 template<> EIGEN_DEVICE_FUNC inline float4  pabs<float4>(const float4& a) {

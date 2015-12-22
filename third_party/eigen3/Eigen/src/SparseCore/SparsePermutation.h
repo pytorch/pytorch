@@ -16,15 +16,17 @@ namespace Eigen {
 
 namespace internal {
 
-template<typename MatrixType, int Side, bool Transposed>
-struct permutation_matrix_product<MatrixType, Side, Transposed, SparseShape>
+template<typename ExpressionType, int Side, bool Transposed>
+struct permutation_matrix_product<ExpressionType, Side, Transposed, SparseShape>
 {
-    typedef typename remove_all<typename MatrixType::Nested>::type MatrixTypeNestedCleaned;
-    typedef typename MatrixTypeNestedCleaned::Scalar Scalar;
-    typedef typename MatrixTypeNestedCleaned::StorageIndex StorageIndex;
+    typedef typename nested_eval<ExpressionType, 1>::type MatrixType;
+    typedef typename remove_all<MatrixType>::type MatrixTypeCleaned;
+
+    typedef typename MatrixTypeCleaned::Scalar Scalar;
+    typedef typename MatrixTypeCleaned::StorageIndex StorageIndex;
 
     enum {
-      SrcStorageOrder = MatrixTypeNestedCleaned::Flags&RowMajorBit ? RowMajor : ColMajor,
+      SrcStorageOrder = MatrixTypeCleaned::Flags&RowMajorBit ? RowMajor : ColMajor,
       MoveOuter = SrcStorageOrder==RowMajor ? Side==OnTheLeft : Side==OnTheRight
     };
     
@@ -33,8 +35,9 @@ struct permutation_matrix_product<MatrixType, Side, Transposed, SparseShape>
         SparseMatrix<Scalar,int(SrcStorageOrder)==RowMajor?ColMajor:RowMajor,StorageIndex> >::type ReturnType;
 
     template<typename Dest,typename PermutationType>
-    static inline void run(Dest& dst, const PermutationType& perm, const MatrixType& mat)
+    static inline void run(Dest& dst, const PermutationType& perm, const ExpressionType& xpr)
     {
+      MatrixType mat(xpr);
       if(MoveOuter)
       {
         SparseMatrix<Scalar,SrcStorageOrder,StorageIndex> tmp(mat.rows(), mat.cols());
@@ -50,7 +53,7 @@ struct permutation_matrix_product<MatrixType, Side, Transposed, SparseShape>
           Index jp = perm.indices().coeff(j);
           Index jsrc = ((Side==OnTheRight) ^ Transposed) ? jp : j;
           Index jdst = ((Side==OnTheLeft) ^ Transposed) ? jp : j;
-          for(typename MatrixTypeNestedCleaned::InnerIterator it(mat,jsrc); it; ++it)
+          for(typename MatrixTypeCleaned::InnerIterator it(mat,jsrc); it; ++it)
             tmp.insertByOuterInner(jdst,it.index()) = it.value();
         }
         dst = tmp;
@@ -67,11 +70,11 @@ struct permutation_matrix_product<MatrixType, Side, Transposed, SparseShape>
           perm_cpy = perm.transpose();
 
         for(Index j=0; j<mat.outerSize(); ++j)
-          for(typename MatrixTypeNestedCleaned::InnerIterator it(mat,j); it; ++it)
+          for(typename MatrixTypeCleaned::InnerIterator it(mat,j); it; ++it)
             sizes[perm_cpy.indices().coeff(it.index())]++;
         tmp.reserve(sizes);
         for(Index j=0; j<mat.outerSize(); ++j)
-          for(typename MatrixTypeNestedCleaned::InnerIterator it(mat,j); it; ++it)
+          for(typename MatrixTypeCleaned::InnerIterator it(mat,j); it; ++it)
             tmp.insertByOuterInner(perm_cpy.indices().coeff(it.index()),j) = it.value();
         dst = tmp;
       }
@@ -90,12 +93,16 @@ template <int ProductTag> struct product_promote_storage_type<PermutationStorage
 // whereas it should be correctly handled by traits<Product<> >::PlainObject
 
 template<typename Lhs, typename Rhs, int ProductTag>
-struct product_evaluator<Product<Lhs, Rhs, AliasFreeProduct>, ProductTag, PermutationShape, SparseShape, typename traits<Lhs>::Scalar, typename traits<Rhs>::Scalar> 
-  : public evaluator<typename permutation_matrix_product<Rhs,OnTheRight,false,SparseShape>::ReturnType>
+struct product_evaluator<Product<Lhs, Rhs, AliasFreeProduct>, ProductTag, PermutationShape, SparseShape>
+  : public evaluator<typename permutation_matrix_product<Rhs,OnTheLeft,false,SparseShape>::ReturnType>
 {
   typedef Product<Lhs, Rhs, AliasFreeProduct> XprType;
-  typedef typename permutation_matrix_product<Rhs,OnTheRight,false,SparseShape>::ReturnType PlainObject;
+  typedef typename permutation_matrix_product<Rhs,OnTheLeft,false,SparseShape>::ReturnType PlainObject;
   typedef evaluator<PlainObject> Base;
+
+  enum {
+    Flags = Base::Flags | EvalBeforeNestingBit
+  };
 
   explicit product_evaluator(const XprType& xpr)
     : m_result(xpr.rows(), xpr.cols())
@@ -103,18 +110,22 @@ struct product_evaluator<Product<Lhs, Rhs, AliasFreeProduct>, ProductTag, Permut
     ::new (static_cast<Base*>(this)) Base(m_result);
     generic_product_impl<Lhs, Rhs, PermutationShape, SparseShape, ProductTag>::evalTo(m_result, xpr.lhs(), xpr.rhs());
   }
-  
-protected:  
+
+protected:
   PlainObject m_result;
 };
 
 template<typename Lhs, typename Rhs, int ProductTag>
-struct product_evaluator<Product<Lhs, Rhs, AliasFreeProduct>, ProductTag, SparseShape, PermutationShape, typename traits<Lhs>::Scalar, typename traits<Rhs>::Scalar> 
+struct product_evaluator<Product<Lhs, Rhs, AliasFreeProduct>, ProductTag, SparseShape, PermutationShape >
   : public evaluator<typename permutation_matrix_product<Lhs,OnTheRight,false,SparseShape>::ReturnType>
 {
   typedef Product<Lhs, Rhs, AliasFreeProduct> XprType;
   typedef typename permutation_matrix_product<Lhs,OnTheRight,false,SparseShape>::ReturnType PlainObject;
   typedef evaluator<PlainObject> Base;
+
+  enum {
+    Flags = Base::Flags | EvalBeforeNestingBit
+  };
 
   explicit product_evaluator(const XprType& xpr)
     : m_result(xpr.rows(), xpr.cols())
@@ -122,8 +133,8 @@ struct product_evaluator<Product<Lhs, Rhs, AliasFreeProduct>, ProductTag, Sparse
     ::new (static_cast<Base*>(this)) Base(m_result);
     generic_product_impl<Lhs, Rhs, SparseShape, PermutationShape, ProductTag>::evalTo(m_result, xpr.lhs(), xpr.rhs());
   }
-  
-protected:  
+
+protected:
   PlainObject m_result;
 };
 
@@ -132,35 +143,34 @@ protected:
 /** \returns the matrix with the permutation applied to the columns
   */
 template<typename SparseDerived, typename PermDerived>
-inline const Product<SparseDerived, PermDerived>
+inline const Product<SparseDerived, PermDerived, AliasFreeProduct>
 operator*(const SparseMatrixBase<SparseDerived>& matrix, const PermutationBase<PermDerived>& perm)
-{ return Product<SparseDerived, PermDerived>(matrix.derived(), perm.derived()); }
+{ return Product<SparseDerived, PermDerived, AliasFreeProduct>(matrix.derived(), perm.derived()); }
 
 /** \returns the matrix with the permutation applied to the rows
   */
 template<typename SparseDerived, typename PermDerived>
-inline const Product<PermDerived, SparseDerived>
+inline const Product<PermDerived, SparseDerived, AliasFreeProduct>
 operator*( const PermutationBase<PermDerived>& perm, const SparseMatrixBase<SparseDerived>& matrix)
-{ return  Product<PermDerived, SparseDerived>(perm.derived(), matrix.derived()); }
+{ return  Product<PermDerived, SparseDerived, AliasFreeProduct>(perm.derived(), matrix.derived()); }
 
 
-// TODO, the following specializations should not be needed as Transpose<Permutation*> should be a PermutationBase.
 /** \returns the matrix with the inverse permutation applied to the columns.
   */
-template<typename SparseDerived, typename PermDerived>
-inline const Product<SparseDerived, Transpose<PermutationBase<PermDerived> > >
-operator*(const SparseMatrixBase<SparseDerived>& matrix, const Transpose<PermutationBase<PermDerived> >& tperm)
+template<typename SparseDerived, typename PermutationType>
+inline const Product<SparseDerived, Inverse<PermutationType>, AliasFreeProduct>
+operator*(const SparseMatrixBase<SparseDerived>& matrix, const InverseImpl<PermutationType, PermutationStorage>& tperm)
 {
-  return Product<SparseDerived, Transpose<PermutationBase<PermDerived> > >(matrix.derived(), tperm);
+  return Product<SparseDerived, Inverse<PermutationType>, AliasFreeProduct>(matrix.derived(), tperm.derived());
 }
 
 /** \returns the matrix with the inverse permutation applied to the rows.
   */
-template<typename SparseDerived, typename PermDerived>
-inline const Product<Transpose<PermutationBase<PermDerived> >, SparseDerived>
-operator*(const Transpose<PermutationBase<PermDerived> >& tperm, const SparseMatrixBase<SparseDerived>& matrix)
+template<typename SparseDerived, typename PermutationType>
+inline const Product<Inverse<PermutationType>, SparseDerived, AliasFreeProduct>
+operator*(const InverseImpl<PermutationType,PermutationStorage>& tperm, const SparseMatrixBase<SparseDerived>& matrix)
 {
-  return Product<Transpose<PermutationBase<PermDerived> >, SparseDerived>(tperm, matrix.derived());
+  return Product<Inverse<PermutationType>, SparseDerived, AliasFreeProduct>(tperm.derived(), matrix.derived());
 }
 
 } // end namespace Eigen

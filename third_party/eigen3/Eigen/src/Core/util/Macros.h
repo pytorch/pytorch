@@ -13,7 +13,7 @@
 
 #define EIGEN_WORLD_VERSION 3
 #define EIGEN_MAJOR_VERSION 2
-#define EIGEN_MINOR_VERSION 91
+#define EIGEN_MINOR_VERSION 92
 
 #define EIGEN_VERSION_AT_LEAST(x,y,z) (EIGEN_WORLD_VERSION>x || (EIGEN_WORLD_VERSION>=x && \
                                       (EIGEN_MAJOR_VERSION>y || (EIGEN_MAJOR_VERSION>=y && \
@@ -341,6 +341,13 @@
   #define EIGEN_HAVE_RVALUE_REFERENCES
 #endif
 
+// Does the compiler support C99?
+#if (defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 199901))       \
+  || (defined(__GNUC__) && defined(_GLIBCXX_USE_C99)) \
+  || (defined(_LIBCPP_VERSION) && !defined(_MSC_VER))
+#define EIGEN_HAS_C99_MATH 1
+#endif
+
 // Does the compiler support result_of?
 #if (__has_feature(cxx_lambdas) || (defined(__cplusplus) && __cplusplus >= 201103L))
 #define EIGEN_HAS_STD_RESULT_OF 1
@@ -353,16 +360,19 @@
 
 // Does the compiler support const expressions?
 #ifdef __CUDACC__
-  // Const expressions are not supported regardless of what host compiler is used 
+// Const expressions are supported provided that c++11 is enabled and we're using nvcc 7.5 or above
+#if defined(__CUDACC_VER__) &&  __CUDACC_VER__ >= 70500 && __cplusplus > 199711L
+  #define EIGEN_HAS_CONSTEXPR 1
+#endif
 #elif (defined(__cplusplus) && __cplusplus >= 201402L) || \
-    EIGEN_GNUC_AT_LEAST(4,9)
+    EIGEN_GNUC_AT_LEAST(4,8)
 #define EIGEN_HAS_CONSTEXPR 1
 #endif
 
 // Does the compiler support C++11 math?
 // Let's be conservative and enable the default C++11 implementation only if we are sure it exists
 #ifndef EIGEN_HAS_CXX11_MATH
-  #if (__cplusplus >= 201103L) && (EIGEN_COMP_GNUC_STRICT || EIGEN_COMP_CLANG || EIGEN_COMP_MSVC || EIGEN_COMP_ICC)  \
+  #if (__cplusplus > 201103L) || (__cplusplus >= 201103L) && (EIGEN_COMP_GNUC_STRICT || EIGEN_COMP_CLANG || EIGEN_COMP_MSVC || EIGEN_COMP_ICC)  \
       && (EIGEN_ARCH_i386_OR_x86_64) && (EIGEN_OS_GNULINUX || EIGEN_OS_WIN_STRICT || EIGEN_OS_MAC)
     #define EIGEN_HAS_CXX11_MATH 1
   #else
@@ -372,17 +382,30 @@
 
 // Does the compiler support proper C++11 containers?
 #ifndef EIGEN_HAS_CXX11_CONTAINERS
-  #if ((__cplusplus >= 201103L) && (EIGEN_COMP_GNUC_STRICT || EIGEN_COMP_CLANG)) || EIGEN_COMP_MSVC >= 1900
+  #if    (__cplusplus > 201103L) \
+      || ((__cplusplus >= 201103L) && (EIGEN_COMP_GNUC_STRICT || EIGEN_COMP_CLANG || EIGEN_COMP_ICC>=1400)) \
+      || EIGEN_COMP_MSVC >= 1900
     #define EIGEN_HAS_CXX11_CONTAINERS 1
   #else
     #define EIGEN_HAS_CXX11_CONTAINERS 0
   #endif
 #endif
 
+// Does the compiler support C++11 noexcept?
+#ifndef EIGEN_HAS_CXX11_NOEXCEPT
+  #if    (__cplusplus > 201103L) \
+      || ((__cplusplus >= 201103L) && (EIGEN_COMP_GNUC_STRICT || EIGEN_COMP_CLANG || EIGEN_COMP_ICC>=1400)) \
+      || EIGEN_COMP_MSVC >= 1900
+    #define EIGEN_HAS_CXX11_NOEXCEPT 1
+  #else
+    #define EIGEN_HAS_CXX11_NOEXCEPT 0
+  #endif
+#endif
+
 /** Allows to disable some optimizations which might affect the accuracy of the result.
   * Such optimization are enabled by default, and set EIGEN_FAST_MATH to 0 to disable them.
   * They currently include:
-  *   - single precision ArrayBase::sin() and ArrayBase::cos() when SSE vectorization is enabled.
+  *   - single precision ArrayBase::sin() and ArrayBase::cos() for SSE and AVX vectorization.
   */
 #ifndef EIGEN_FAST_MATH
 #define EIGEN_FAST_MATH 1
@@ -609,10 +632,14 @@ namespace Eigen {
   // 16 byte alignment on all platforms where vectorization might be enabled. In theory we could always
   // enable alignment, but it can be a cause of problems on some platforms, so we just disable it in
   // certain common platform (compiler+architecture combinations) to avoid these problems.
-  // Only static alignment is really problematic (relies on nonstandard compiler extensions that don't
-  // work everywhere, for example don't work on GCC/ARM), try to keep heap alignment even
-  // when we have to disable static alignment.
-  #if EIGEN_COMP_GNUC && !(EIGEN_ARCH_i386_OR_x86_64 || EIGEN_ARCH_PPC || EIGEN_ARCH_IA64)
+  // Only static alignment is really problematic (relies on nonstandard compiler extensions),
+  // try to keep heap alignment even when we have to disable static alignment.
+  #if EIGEN_COMP_GNUC && !(EIGEN_ARCH_i386_OR_x86_64 || EIGEN_ARCH_ARM_OR_ARM64 || EIGEN_ARCH_PPC || EIGEN_ARCH_IA64)
+  #define EIGEN_GCC_AND_ARCH_DOESNT_WANT_STACK_ALIGNMENT 1
+  #elif EIGEN_ARCH_ARM_OR_ARM64 && EIGEN_COMP_GNUC_STRICT && EIGEN_GNUC_AT_MOST(4, 6)
+  // Old versions of GCC on ARM, at least 4.4, were once seen to have buggy static alignment support.
+  // Not sure which version fixed it, hopefully it doesn't affect 4.7, which is still somewhat in use.
+  // 4.8 and newer seem definitely unaffected.
   #define EIGEN_GCC_AND_ARCH_DOESNT_WANT_STACK_ALIGNMENT 1
   #else
   #define EIGEN_GCC_AND_ARCH_DOESNT_WANT_STACK_ALIGNMENT 0
@@ -747,8 +774,6 @@ namespace Eigen {
 * documentation in a single line.
 **/
 
-// TODO The EIGEN_DENSE_PUBLIC_INTERFACE should not exists anymore
-  
 #define EIGEN_GENERIC_PUBLIC_INTERFACE(Derived) \
   typedef typename Eigen::internal::traits<Derived>::Scalar Scalar; /*!< \brief Numeric type, e.g. float, double, int or std::complex<float>. */ \
   typedef typename Eigen::NumTraits<Scalar>::Real RealScalar; /*!< \brief The underlying numeric type for composed scalar types. \details In cases where Scalar is e.g. std::complex<T>, T were corresponding to RealScalar. */ \
@@ -761,16 +786,16 @@ namespace Eigen {
         Flags = Eigen::internal::traits<Derived>::Flags, \
         SizeAtCompileTime = Base::SizeAtCompileTime, \
         MaxSizeAtCompileTime = Base::MaxSizeAtCompileTime, \
-        IsVectorAtCompileTime = Base::IsVectorAtCompileTime };
-
-
-#define EIGEN_DENSE_PUBLIC_INTERFACE(Derived) \
-  EIGEN_GENERIC_PUBLIC_INTERFACE(Derived) \
-  typedef typename Base::PacketScalar PacketScalar; \
-  enum { MaxRowsAtCompileTime = Eigen::internal::traits<Derived>::MaxRowsAtCompileTime, \
-        MaxColsAtCompileTime = Eigen::internal::traits<Derived>::MaxColsAtCompileTime}; \
+        IsVectorAtCompileTime = Base::IsVectorAtCompileTime }; \
   using Base::derived; \
   using Base::const_cast_derived;
+
+
+// FIXME Maybe the EIGEN_DENSE_PUBLIC_INTERFACE could be removed as importing PacketScalar is rarely needed
+#define EIGEN_DENSE_PUBLIC_INTERFACE(Derived) \
+  EIGEN_GENERIC_PUBLIC_INTERFACE(Derived) \
+  typedef typename Base::PacketScalar PacketScalar;
+
 
 #define EIGEN_PLAIN_ENUM_MIN(a,b) (((int)a <= (int)b) ? (int)a : (int)b)
 #define EIGEN_PLAIN_ENUM_MAX(a,b) (((int)a >= (int)b) ? (int)a : (int)b)
@@ -835,6 +860,14 @@ namespace Eigen {
 #  endif
 #  define EIGEN_TRY if (true)
 #  define EIGEN_CATCH(X) else
+#endif
+
+#if EIGEN_HAS_CXX11_NOEXCEPT
+#   define EIGEN_NO_THROW noexcept(true)
+#   define EIGEN_EXCEPTION_SPEC(X) noexcept(false)
+#else
+#   define EIGEN_NO_THROW throw()
+#   define EIGEN_EXCEPTION_SPEC(X) throw(X)
 #endif
 
 #endif // EIGEN_MACROS_H

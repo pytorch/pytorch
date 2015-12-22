@@ -38,10 +38,10 @@ psin<Packet8f>(const Packet8f& _x) {
   _EIGEN_DECLARE_CONST_Packet8f(two, 2.0f);
   _EIGEN_DECLARE_CONST_Packet8f(one_over_four, 0.25f);
   _EIGEN_DECLARE_CONST_Packet8f(one_over_pi, 3.183098861837907e-01f);
-  _EIGEN_DECLARE_CONST_Packet8f(neg_pi_first, -3.140625000000000e+00);
-  _EIGEN_DECLARE_CONST_Packet8f(neg_pi_second, -9.670257568359375e-04);
-  _EIGEN_DECLARE_CONST_Packet8f(neg_pi_third, -6.278329571784980e-07);
-  _EIGEN_DECLARE_CONST_Packet8f(four_over_pi, 1.273239544735163e+00);
+  _EIGEN_DECLARE_CONST_Packet8f(neg_pi_first, -3.140625000000000e+00f);
+  _EIGEN_DECLARE_CONST_Packet8f(neg_pi_second, -9.670257568359375e-04f);
+  _EIGEN_DECLARE_CONST_Packet8f(neg_pi_third, -6.278329571784980e-07f);
+  _EIGEN_DECLARE_CONST_Packet8f(four_over_pi, 1.273239544735163e+00f);
 
   // Map x from [-Pi/4,3*Pi/4] to z in [-1,3] and subtract the shifted period.
   Packet8f z = pmul(x, p8f_one_over_pi);
@@ -55,14 +55,14 @@ psin<Packet8f>(const Packet8f& _x) {
   // is odd.
   Packet8i shift_ints = _mm256_cvtps_epi32(shift);
   Packet8i shift_isodd =
-      (__m256i)_mm256_and_ps((__m256)shift_ints, (__m256)p8i_one);
+      _mm256_castps_si256(_mm256_and_ps(_mm256_castsi256_ps(shift_ints), _mm256_castsi256_ps(p8i_one)));
 #ifdef EIGEN_VECTORIZE_AVX2
   Packet8i sign_flip_mask = _mm256_slli_epi32(shift_isodd, 31);
 #else
   __m128i lo =
-      _mm_slli_epi32(_mm256_extractf128_si256((__m256i)shift_isodd, 0), 31);
+      _mm_slli_epi32(_mm256_extractf128_si256(shift_isodd, 0), 31);
   __m128i hi =
-      _mm_slli_epi32(_mm256_extractf128_si256((__m256i)shift_isodd, 1), 31);
+      _mm_slli_epi32(_mm256_extractf128_si256(shift_isodd, 1), 31);
   Packet8i sign_flip_mask = _mm256_setr_m128(lo, hi);
 #endif
 
@@ -72,9 +72,9 @@ psin<Packet8f>(const Packet8f& _x) {
 
   // Evaluate the polynomial for the interval [1,3] in z.
   _EIGEN_DECLARE_CONST_Packet8f(coeff_right_0, 9.999999724233232e-01f);
-  _EIGEN_DECLARE_CONST_Packet8f(coeff_right_2, -3.084242535619928e-01);
-  _EIGEN_DECLARE_CONST_Packet8f(coeff_right_4, 1.584991525700324e-02);
-  _EIGEN_DECLARE_CONST_Packet8f(coeff_right_6, -3.188805084631342e-04);
+  _EIGEN_DECLARE_CONST_Packet8f(coeff_right_2, -3.084242535619928e-01f);
+  _EIGEN_DECLARE_CONST_Packet8f(coeff_right_4, 1.584991525700324e-02f);
+  _EIGEN_DECLARE_CONST_Packet8f(coeff_right_6, -3.188805084631342e-04f);
   Packet8f z_minus_two = psub(z, p8f_two);
   Packet8f z_minus_two2 = pmul(z_minus_two, z_minus_two);
   Packet8f right = pmadd(p8f_coeff_right_6, z_minus_two2, p8f_coeff_right_4);
@@ -82,10 +82,10 @@ psin<Packet8f>(const Packet8f& _x) {
   right = pmadd(right, z_minus_two2, p8f_coeff_right_0);
 
   // Evaluate the polynomial for the interval [-1,1] in z.
-  _EIGEN_DECLARE_CONST_Packet8f(coeff_left_1, 7.853981525427295e-01);
-  _EIGEN_DECLARE_CONST_Packet8f(coeff_left_3, -8.074536727092352e-02);
-  _EIGEN_DECLARE_CONST_Packet8f(coeff_left_5, 2.489871967827018e-03);
-  _EIGEN_DECLARE_CONST_Packet8f(coeff_left_7, -3.587725841214251e-05);
+  _EIGEN_DECLARE_CONST_Packet8f(coeff_left_1, 7.853981525427295e-01f);
+  _EIGEN_DECLARE_CONST_Packet8f(coeff_left_3, -8.074536727092352e-02f);
+  _EIGEN_DECLARE_CONST_Packet8f(coeff_left_5, 2.489871967827018e-03f);
+  _EIGEN_DECLARE_CONST_Packet8f(coeff_left_7, -3.587725841214251e-05f);
   Packet8f z2 = pmul(z, z);
   Packet8f left = pmadd(p8f_coeff_left_7, z2, p8f_coeff_left_5);
   left = pmadd(left, z2, p8f_coeff_left_3);
@@ -98,7 +98,7 @@ psin<Packet8f>(const Packet8f& _x) {
   Packet8f res = _mm256_or_ps(left, right);
 
   // Flip the sign on the odd intervals and return the result.
-  res = _mm256_xor_ps(res, (__m256)sign_flip_mask);
+  res = _mm256_xor_ps(res, _mm256_castsi256_ps(sign_flip_mask));
   return res;
 }
 
@@ -145,10 +145,10 @@ plog<Packet8f>(const Packet8f& _x) {
 // Extract the shifted exponents (No bitwise shifting in regular AVX, so
 // convert to SSE and do it there).
 #ifdef EIGEN_VECTORIZE_AVX2
-  Packet8f emm0 = _mm256_cvtepi32_ps(_mm256_srli_epi32((__m256i)x, 23));
+  Packet8f emm0 = _mm256_cvtepi32_ps(_mm256_srli_epi32(_mm256_castps_si256(x), 23));
 #else
-  __m128i lo = _mm_srli_epi32(_mm256_extractf128_si256((__m256i)x, 0), 23);
-  __m128i hi = _mm_srli_epi32(_mm256_extractf128_si256((__m256i)x, 1), 23);
+  __m128i lo = _mm_srli_epi32(_mm256_extractf128_si256(_mm256_castps_si256(x), 0), 23);
+  __m128i hi = _mm_srli_epi32(_mm256_extractf128_si256(_mm256_castps_si256(x), 1), 23);
   Packet8f emm0 = _mm256_cvtepi32_ps(_mm256_setr_m128(lo, hi));
 #endif
   Packet8f e = _mm256_sub_ps(emm0, p8f_126f);
@@ -348,7 +348,7 @@ pexp<Packet4d>(const Packet4d& _x) {
 
   // Construct the result 2^n * exp(g) = e * x. The max is used to catch
   // non-finite values in the input.
-  return pmax(pmul(x, Packet4d(e)), _x);
+  return pmax(pmul(x, _mm256_castsi256_pd(e)), _x);
 }
 
 // Functions for sqrt.
@@ -393,7 +393,7 @@ Packet4d psqrt<Packet4d>(const Packet4d& x) {
 
 template<> EIGEN_DEFINE_FUNCTION_ALLOWING_MULTIPLE_DEFINITIONS EIGEN_UNUSED
 Packet8f prsqrt<Packet8f>(const Packet8f& _x) {
- _EIGEN_DECLARE_CONST_Packet8f_FROM_INT(inf, 0x7f800000);
+  _EIGEN_DECLARE_CONST_Packet8f_FROM_INT(inf, 0x7f800000);
   _EIGEN_DECLARE_CONST_Packet8f_FROM_INT(nan, 0x7fc00000);
   _EIGEN_DECLARE_CONST_Packet8f(one_point_five, 1.5f);
   _EIGEN_DECLARE_CONST_Packet8f(minus_half, -0.5f);

@@ -87,6 +87,12 @@ class TensorBase<Derived, ReadOnlyAccessors>
     }
 
     EIGEN_DEVICE_FUNC
+    EIGEN_STRONG_INLINE const TensorCwiseUnaryOp<internal::scalar_sign_op<Scalar>, const Derived>
+    sign() const {
+      return unaryExpr(internal::scalar_sign_op<Scalar>());
+    }
+
+    EIGEN_DEVICE_FUNC
     EIGEN_STRONG_INLINE const TensorCwiseUnaryOp<internal::scalar_rsqrt_op<Scalar>, const Derived>
     rsqrt() const {
       return unaryExpr(internal::scalar_rsqrt_op<Scalar>());
@@ -114,6 +120,24 @@ class TensorBase<Derived, ReadOnlyAccessors>
     EIGEN_STRONG_INLINE const TensorCwiseUnaryOp<internal::scalar_tanh_op<Scalar>, const Derived>
     tanh() const {
       return unaryExpr(internal::scalar_tanh_op<Scalar>());
+    }
+
+    EIGEN_DEVICE_FUNC
+    EIGEN_STRONG_INLINE const TensorCwiseUnaryOp<internal::scalar_lgamma_op<Scalar>, const Derived>
+    lgamma() const {
+      return unaryExpr(internal::scalar_lgamma_op<Scalar>());
+    }
+
+    EIGEN_DEVICE_FUNC
+    EIGEN_STRONG_INLINE const TensorCwiseUnaryOp<internal::scalar_erf_op<Scalar>, const Derived>
+    erf() const {
+      return unaryExpr(internal::scalar_erf_op<Scalar>());
+    }
+
+    EIGEN_DEVICE_FUNC
+    EIGEN_STRONG_INLINE const TensorCwiseUnaryOp<internal::scalar_erfc_op<Scalar>, const Derived>
+    erfc() const {
+      return unaryExpr(internal::scalar_erfc_op<Scalar>());
     }
 
     EIGEN_DEVICE_FUNC
@@ -155,7 +179,7 @@ class TensorBase<Derived, ReadOnlyAccessors>
     EIGEN_DEVICE_FUNC
     EIGEN_STRONG_INLINE const TensorCwiseUnaryOp<internal::scalar_sub_op<Scalar>, const Derived>
     operator- (Scalar rhs) const {
-      EIGEN_STATIC_ASSERT((std::numeric_limits<Scalar>::is_signed || internal::is_same<Scalar, const std::complex<float> >::value), YOU_MADE_A_PROGRAMMING_MISTAKE);
+      EIGEN_STATIC_ASSERT((NumTraits<Scalar>::IsSigned || internal::is_same<Scalar, const std::complex<float> >::value), YOU_MADE_A_PROGRAMMING_MISTAKE);
       return unaryExpr(internal::scalar_sub_op<Scalar>(rhs));
     }
 
@@ -168,8 +192,14 @@ class TensorBase<Derived, ReadOnlyAccessors>
     EIGEN_DEVICE_FUNC
     EIGEN_STRONG_INLINE const TensorCwiseUnaryOp<internal::scalar_quotient1_op<Scalar>, const Derived>
     operator/ (Scalar rhs) const {
-      // EIGEN_STATIC_ASSERT(!std::numeric_limits<Scalar>::is_integer, YOU_MADE_A_PROGRAMMING_MISTAKE);
       return unaryExpr(internal::scalar_quotient1_op<Scalar>(rhs));
+    }
+
+    EIGEN_DEVICE_FUNC
+    EIGEN_STRONG_INLINE const TensorCwiseUnaryOp<internal::scalar_mod_op<Scalar>, const Derived>
+    operator% (Scalar rhs) const {
+      EIGEN_STATIC_ASSERT(NumTraits<Scalar>::IsInteger, YOU_MADE_A_PROGRAMMING_MISTAKE_TRY_MOD);
+      return unaryExpr(internal::scalar_mod_op<Scalar>(rhs));
     }
 
     EIGEN_DEVICE_FUNC
@@ -248,35 +278,67 @@ class TensorBase<Derived, ReadOnlyAccessors>
 
     // Comparisons and tests.
     template<typename OtherDerived> EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE
-    const TensorCwiseBinaryOp<std::less<Scalar>, const Derived, const OtherDerived>
+    const TensorCwiseBinaryOp<internal::scalar_cmp_op<Scalar, internal::cmp_LT>, const Derived, const OtherDerived>
     operator<(const OtherDerived& other) const {
-      return binaryExpr(other.derived(), std::less<Scalar>());
+      return binaryExpr(other.derived(), internal::scalar_cmp_op<Scalar, internal::cmp_LT>());
     }
     template<typename OtherDerived> EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE
-    const TensorCwiseBinaryOp<std::less_equal<Scalar>, const Derived, const OtherDerived>
+    const TensorCwiseBinaryOp<internal::scalar_cmp_op<Scalar, internal::cmp_LE>, const Derived, const OtherDerived>
     operator<=(const OtherDerived& other) const {
-      return binaryExpr(other.derived(), std::less_equal<Scalar>());
+      return binaryExpr(other.derived(), internal::scalar_cmp_op<Scalar, internal::cmp_LE>());
     }
     template<typename OtherDerived> EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE
-    const TensorCwiseBinaryOp<std::greater<Scalar>, const Derived, const OtherDerived>
+    const TensorCwiseBinaryOp<internal::scalar_cmp_op<Scalar, internal::cmp_GT>, const Derived, const OtherDerived>
     operator>(const OtherDerived& other) const {
-      return binaryExpr(other.derived(), std::greater<Scalar>());
+      return binaryExpr(other.derived(), internal::scalar_cmp_op<Scalar, internal::cmp_GT>());
     }
     template<typename OtherDerived> EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE
-    const TensorCwiseBinaryOp<std::greater_equal<Scalar>, const Derived, const OtherDerived>
+    const TensorCwiseBinaryOp<internal::scalar_cmp_op<Scalar, internal::cmp_GE>, const Derived, const OtherDerived>
     operator>=(const OtherDerived& other) const {
-      return binaryExpr(other.derived(), std::greater_equal<Scalar>());
+      return binaryExpr(other.derived(), internal::scalar_cmp_op<Scalar, internal::cmp_GE>());
     }
 
     template<typename OtherDerived> EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE
-    const TensorCwiseBinaryOp<std::equal_to<Scalar>, const Derived, const OtherDerived>
+    const TensorCwiseBinaryOp<internal::scalar_cmp_op<Scalar, internal::cmp_EQ>, const Derived, const OtherDerived>
     operator==(const OtherDerived& other) const {
-      return binaryExpr(other.derived(), std::equal_to<Scalar>());
+      return binaryExpr(other.derived(), internal::scalar_cmp_op<Scalar, internal::cmp_EQ>());
     }
     template<typename OtherDerived> EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE
-    const TensorCwiseBinaryOp<std::not_equal_to<Scalar>, const Derived, const OtherDerived>
+    const TensorCwiseBinaryOp<internal::scalar_cmp_op<Scalar, internal::cmp_NEQ>, const Derived, const OtherDerived>
     operator!=(const OtherDerived& other) const {
-      return binaryExpr(other.derived(), std::not_equal_to<Scalar>());
+      return binaryExpr(other.derived(), internal::scalar_cmp_op<Scalar, internal::cmp_NEQ>());
+    }
+
+    // comparisons and tests for Scalars
+    EIGEN_DEVICE_FUNC
+    EIGEN_STRONG_INLINE const TensorCwiseBinaryOp<internal::scalar_cmp_op<Scalar, internal::cmp_LT>, const Derived, const TensorCwiseNullaryOp<internal::scalar_constant_op<Scalar>, const Derived> >
+    operator<(Scalar threshold) const {
+      return operator<(constant(threshold));
+    }
+    EIGEN_DEVICE_FUNC
+    EIGEN_STRONG_INLINE const TensorCwiseBinaryOp<internal::scalar_cmp_op<Scalar, internal::cmp_LE>, const Derived, const TensorCwiseNullaryOp<internal::scalar_constant_op<Scalar>, const Derived> >
+    operator<=(Scalar threshold) const {
+      return operator<=(constant(threshold));
+    }
+    EIGEN_DEVICE_FUNC
+    EIGEN_STRONG_INLINE const TensorCwiseBinaryOp<internal::scalar_cmp_op<Scalar, internal::cmp_GT>, const Derived, const TensorCwiseNullaryOp<internal::scalar_constant_op<Scalar>, const Derived> >
+    operator>(Scalar threshold) const {
+      return operator>(constant(threshold));
+    }
+    EIGEN_DEVICE_FUNC
+    EIGEN_STRONG_INLINE const TensorCwiseBinaryOp<internal::scalar_cmp_op<Scalar, internal::cmp_GE>, const Derived, const TensorCwiseNullaryOp<internal::scalar_constant_op<Scalar>, const Derived> >
+    operator>=(Scalar threshold) const {
+      return operator>=(constant(threshold));
+    }
+    EIGEN_DEVICE_FUNC
+    EIGEN_STRONG_INLINE const TensorCwiseBinaryOp<internal::scalar_cmp_op<Scalar, internal::cmp_EQ>, const Derived, const TensorCwiseNullaryOp<internal::scalar_constant_op<Scalar>, const Derived> >
+    operator==(Scalar threshold) const {
+      return operator==(constant(threshold));
+    }
+    EIGEN_DEVICE_FUNC
+    EIGEN_STRONG_INLINE const TensorCwiseBinaryOp<internal::scalar_cmp_op<Scalar, internal::cmp_NEQ>, const Derived, const TensorCwiseNullaryOp<internal::scalar_constant_op<Scalar>, const Derived> >
+    operator!=(Scalar threshold) const {
+      return operator!=(constant(threshold));
     }
 
     // Coefficient-wise ternary operators.
@@ -300,6 +362,13 @@ class TensorBase<Derived, ReadOnlyAccessors>
     const TensorConvolutionOp<const Dimensions, const Derived, const KernelDerived>
     convolve(const KernelDerived& kernel, const Dimensions& dims) const {
       return TensorConvolutionOp<const Dimensions, const Derived, const KernelDerived>(derived(), kernel.derived(), dims);
+    }
+
+    // Fourier transforms
+    template <int FFTDataType, int FFTDirection, typename FFT> EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE
+    const TensorFFTOp<const FFT, const Derived, FFTDataType, FFTDirection>
+    fft(const FFT& fft) const {
+      return TensorFFTOp<const FFT, const Derived, FFTDataType, FFTDirection>(derived(), fft);
     }
 
     // Reductions.
@@ -361,6 +430,32 @@ class TensorBase<Derived, ReadOnlyAccessors>
     minimum() const {
       DimensionList<Index, NumDimensions> in_dims;
       return TensorReductionOp<internal::MinReducer<CoeffReturnType>, const DimensionList<Index, NumDimensions>, const Derived>(derived(), in_dims, internal::MinReducer<CoeffReturnType>());
+    }
+
+    template <typename Dims> EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE
+    const TensorReductionOp<internal::AndReducer, const Dims, const TensorConversionOp<bool, const Derived> >
+    all(const Dims& dims) const {
+      return cast<bool>().reduce(dims, internal::AndReducer());
+    }
+
+    EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE
+    const TensorReductionOp<internal::AndReducer, const DimensionList<Index, NumDimensions>, const TensorConversionOp<bool, const Derived> >
+    all() const {
+      DimensionList<Index, NumDimensions> in_dims;
+      return cast<bool>().reduce(in_dims, internal::AndReducer());
+    }
+
+    template <typename Dims> EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE
+    const TensorReductionOp<internal::OrReducer, const Dims, const TensorConversionOp<bool, const Derived> >
+    any(const Dims& dims) const {
+      return cast<bool>().reduce(dims, internal::OrReducer());
+    }
+
+    EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE
+    const TensorReductionOp<internal::OrReducer, const DimensionList<Index, NumDimensions>, const TensorConversionOp<bool, const Derived> >
+    any() const {
+      DimensionList<Index, NumDimensions> in_dims;
+      return cast<bool>().reduce(in_dims, internal::OrReducer());
     }
 
    EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE
@@ -561,8 +656,8 @@ class TensorBase<Derived, ReadOnlyAccessors>
     }
 
   protected:
-    template <typename Scalar, std::size_t NumIndices, int Options, typename IndexType> friend class Tensor;
-   template <typename Scalar, typename Dimensions, int Option, typename IndexTypes> friend class TensorFixedSize;
+    template <typename Scalar, int NumIndices, int Options, typename IndexType> friend class Tensor;
+    template <typename Scalar, typename Dimensions, int Option, typename IndexTypes> friend class TensorFixedSize;
     template <typename OtherDerived, int AccessLevel> friend class TensorBase;
     EIGEN_DEVICE_FUNC
     EIGEN_STRONG_INLINE const Derived& derived() const { return *static_cast<const Derived*>(this); }
@@ -578,7 +673,7 @@ class TensorBase<Derived, WriteAccessors> : public TensorBase<Derived, ReadOnlyA
     typedef typename internal::packet_traits<Scalar>::type PacketReturnType;
     static const int NumDimensions = DerivedTraits::NumDimensions;
 
-    template <typename Scalar, std::size_t NumIndices, int Options, typename IndexType> friend class Tensor;
+    template <typename Scalar, int NumIndices, int Options, typename IndexType> friend class Tensor;
     template <typename Scalar, typename Dimensions, int Option, typename IndexTypes> friend class TensorFixedSize;
     template <typename OtherDerived, int AccessLevel> friend class TensorBase;
 

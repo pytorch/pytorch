@@ -463,8 +463,8 @@ struct TensorEvaluator<const TensorSlicingOp<StartIndices, Sizes, ArgType>, Devi
     return m_impl.coeff(inputCoords);
   }
 
-  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE CoeffReturnType* data() const {
-    CoeffReturnType* result = m_impl.data();
+  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE Scalar* data() const {
+    Scalar* result = m_impl.data();
     if (result) {
       Index offset = 0;
       if (static_cast<int>(Layout) == static_cast<int>(ColMajor)) {

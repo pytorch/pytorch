@@ -39,45 +39,15 @@
 
 namespace Eigen {
 
-// Use std::array as Eigen array
-template <typename T, std::size_t N> using array = std::array<T, N>;
-
 namespace internal {
 
 /* std::get is only constexpr in C++14, not yet in C++11
- *     - libstdc++ from version 4.7 onwards has it nevertheless,
- *                                          so use that
- *     - libstdc++ older versions: use _M_instance directly
- *     - libc++ all versions so far: use __elems_ directly
- *     - all other libs: use std::get to be portable, but
- *                       this may not be constexpr
  */
-#if defined(__GLIBCXX__) && __GLIBCXX__ < 20120322
-#define STD_GET_ARR_HACK             a._M_instance[I]
-#elif defined(_LIBCPP_VERSION)
-#define STD_GET_ARR_HACK             a.__elems_[I]
-#else
-#define STD_GET_ARR_HACK             std::template get<I, T, N>(a)
-#endif
 
-template<std::size_t I, class T, std::size_t N> constexpr inline T&       array_get(std::array<T,N>&       a) { return (T&)       STD_GET_ARR_HACK; }
-template<std::size_t I, class T, std::size_t N> constexpr inline T&&      array_get(std::array<T,N>&&      a) { return (T&&)      STD_GET_ARR_HACK; }
-template<std::size_t I, class T, std::size_t N> constexpr inline T const& array_get(std::array<T,N> const& a) { return (T const&) STD_GET_ARR_HACK; }
 
 template<std::size_t I, class T> constexpr inline T&       array_get(std::vector<T>&       a) { return a[I]; }
 template<std::size_t I, class T> constexpr inline T&&      array_get(std::vector<T>&&      a) { return a[I]; }
 template<std::size_t I, class T> constexpr inline T const& array_get(std::vector<T> const& a) { return a[I]; }
-
-#undef STD_GET_ARR_HACK
-
-template <typename T> struct array_size;
-template<class T, std::size_t N> struct array_size<const std::array<T,N> > {
-  static const size_t value = N;
-};
-template <typename T> struct array_size;
-template<class T, std::size_t N> struct array_size<std::array<T,N> > {
-  static const size_t value = N;
-};
 
 /* Suppose you have a template of the form
  * template<typename T> struct X;

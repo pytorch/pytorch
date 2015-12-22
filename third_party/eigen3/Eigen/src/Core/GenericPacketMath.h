@@ -43,7 +43,7 @@ struct default_packet_traits
 {
   enum {
     HasHalfPacket = 0,
-    
+
     HasAdd    = 1,
     HasSub    = 1,
     HasMul    = 1,
@@ -74,10 +74,15 @@ struct default_packet_traits
     HasSinh    = 0,
     HasCosh    = 0,
     HasTanh    = 0,
+    HasLGamma = 0,
+    HasErf = 0,
+    HasErfc = 0,
 
     HasRound  = 0,
     HasFloor  = 0,
-    HasCeil   = 0
+    HasCeil   = 0,
+
+    HasSign   = 0
   };
 };
 
@@ -429,6 +434,18 @@ Packet pfloor(const Packet& a) { using numext::floor; return floor(a); }
 /** \internal \returns the ceil of \a a (coeff-wise) */
 template<typename Packet> EIGEN_DECLARE_FUNCTION_ALLOWING_MULTIPLE_DEFINITIONS
 Packet pceil(const Packet& a) { using numext::ceil; return ceil(a); }
+
+/** \internal \returns the ln(|gamma(\a a)|) (coeff-wise) */
+template<typename Packet> EIGEN_DECLARE_FUNCTION_ALLOWING_MULTIPLE_DEFINITIONS
+Packet plgamma(const Packet& a) { using numext::lgamma; return lgamma(a); }
+
+/** \internal \returns the erf(\a a) (coeff-wise) */
+template<typename Packet> EIGEN_DECLARE_FUNCTION_ALLOWING_MULTIPLE_DEFINITIONS
+Packet perf(const Packet& a) { using numext::erf; return erf(a); }
+
+/** \internal \returns the erfc(\a a) (coeff-wise) */
+template<typename Packet> EIGEN_DECLARE_FUNCTION_ALLOWING_MULTIPLE_DEFINITIONS
+Packet perfc(const Packet& a) { using numext::erfc; return erfc(a); }
 
 /***************************************************************************
 * The following functions might not have to be overwritten for vectorized types

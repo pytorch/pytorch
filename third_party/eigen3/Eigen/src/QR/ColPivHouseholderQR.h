@@ -118,7 +118,8 @@ template<typename _MatrixType> class ColPivHouseholderQR
       * 
       * \sa compute()
       */
-    explicit ColPivHouseholderQR(const MatrixType& matrix)
+    template<typename InputType>
+    explicit ColPivHouseholderQR(const EigenBase<InputType>& matrix)
       : m_qr(matrix.rows(), matrix.cols()),
         m_hCoeffs((std::min)(matrix.rows(),matrix.cols())),
         m_colsPermutation(PermIndexType(matrix.cols())),
@@ -128,7 +129,7 @@ template<typename _MatrixType> class ColPivHouseholderQR
         m_isInitialized(false),
         m_usePrescribedThreshold(false)
     {
-      compute(matrix);
+      compute(matrix.derived());
     }
 
     /** This method finds a solution x to the equation Ax=b, where A is the matrix of which
@@ -185,7 +186,8 @@ template<typename _MatrixType> class ColPivHouseholderQR
       return m_qr;
     }
     
-    ColPivHouseholderQR& compute(const MatrixType& matrix);
+    template<typename InputType>
+    ColPivHouseholderQR& compute(const EigenBase<InputType>& matrix);
 
     /** \returns a const reference to the column permutation matrix */
     const PermutationType& colsPermutation() const
@@ -404,6 +406,8 @@ template<typename _MatrixType> class ColPivHouseholderQR
       EIGEN_STATIC_ASSERT_NON_INTEGER(Scalar);
     }
     
+    void computeInPlace();
+    
     MatrixType m_qr;
     HCoeffsType m_hCoeffs;
     PermutationType m_colsPermutation;
@@ -440,24 +444,34 @@ typename MatrixType::RealScalar ColPivHouseholderQR<MatrixType>::logAbsDetermina
   * \sa class ColPivHouseholderQR, ColPivHouseholderQR(const MatrixType&)
   */
 template<typename MatrixType>
-ColPivHouseholderQR<MatrixType>& ColPivHouseholderQR<MatrixType>::compute(const MatrixType& matrix)
+template<typename InputType>
+ColPivHouseholderQR<MatrixType>& ColPivHouseholderQR<MatrixType>::compute(const EigenBase<InputType>& matrix)
 {
   check_template_parameters();
   
-  using std::abs;
-  Index rows = matrix.rows();
-  Index cols = matrix.cols();
-  Index size = matrix.diagonalSize();
-  
   // the column permutation is stored as int indices, so just to be sure:
-  eigen_assert(cols<=NumTraits<int>::highest());
+  eigen_assert(matrix.cols()<=NumTraits<int>::highest());
 
   m_qr = matrix;
+  
+  computeInPlace();
+  
+  return *this;
+}
+
+template<typename MatrixType>
+void ColPivHouseholderQR<MatrixType>::computeInPlace()
+{
+  using std::abs;
+  Index rows = m_qr.rows();
+  Index cols = m_qr.cols();
+  Index size = m_qr.diagonalSize();
+  
   m_hCoeffs.resize(size);
 
   m_temp.resize(cols);
 
-  m_colsTranspositions.resize(matrix.cols());
+  m_colsTranspositions.resize(m_qr.cols());
   Index number_of_transpositions = 0;
 
   m_colSqNorms.resize(cols);
@@ -522,8 +536,6 @@ ColPivHouseholderQR<MatrixType>& ColPivHouseholderQR<MatrixType>::compute(const 
 
   m_det_pq = (number_of_transpositions%2) ? -1 : 1;
   m_isInitialized = true;
-
-  return *this;
 }
 
 #ifndef EIGEN_PARSED_BY_DOXYGEN

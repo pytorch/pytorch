@@ -109,7 +109,8 @@ template<typename _MatrixType> class ComplexSchur
       *
       * \sa matrixT() and matrixU() for examples.
       */
-    explicit ComplexSchur(const MatrixType& matrix, bool computeU = true)
+    template<typename InputType>
+    explicit ComplexSchur(const EigenBase<InputType>& matrix, bool computeU = true)
       : m_matT(matrix.rows(),matrix.cols()),
         m_matU(matrix.rows(),matrix.cols()),
         m_hess(matrix.rows()),
@@ -117,7 +118,7 @@ template<typename _MatrixType> class ComplexSchur
         m_matUisUptodate(false),
         m_maxIters(-1)
     {
-      compute(matrix, computeU);
+      compute(matrix.derived(), computeU);
     }
 
     /** \brief Returns the unitary matrix in the Schur decomposition. 
@@ -186,7 +187,8 @@ template<typename _MatrixType> class ComplexSchur
       *
       * \sa compute(const MatrixType&, bool, Index)
       */
-    ComplexSchur& compute(const MatrixType& matrix, bool computeU = true);
+    template<typename InputType>
+    ComplexSchur& compute(const EigenBase<InputType>& matrix, bool computeU = true);
     
     /** \brief Compute Schur decomposition from a given Hessenberg matrix
      *  \param[in] matrixH Matrix in Hessenberg form H
@@ -313,14 +315,15 @@ typename ComplexSchur<MatrixType>::ComplexScalar ComplexSchur<MatrixType>::compu
 
 
 template<typename MatrixType>
-ComplexSchur<MatrixType>& ComplexSchur<MatrixType>::compute(const MatrixType& matrix, bool computeU)
+template<typename InputType>
+ComplexSchur<MatrixType>& ComplexSchur<MatrixType>::compute(const EigenBase<InputType>& matrix, bool computeU)
 {
   m_matUisUptodate = false;
   eigen_assert(matrix.cols() == matrix.rows());
 
   if(matrix.cols() == 1)
   {
-    m_matT = matrix.template cast<ComplexScalar>();
+    m_matT = matrix.derived().template cast<ComplexScalar>();
     if(computeU)  m_matU = ComplexMatrixType::Identity(1,1);
     m_info = Success;
     m_isInitialized = true;
@@ -328,7 +331,7 @@ ComplexSchur<MatrixType>& ComplexSchur<MatrixType>::compute(const MatrixType& ma
     return *this;
   }
 
-  internal::complex_schur_reduce_to_hessenberg<MatrixType, NumTraits<Scalar>::IsComplex>::run(*this, matrix, computeU);
+  internal::complex_schur_reduce_to_hessenberg<MatrixType, NumTraits<Scalar>::IsComplex>::run(*this, matrix.derived(), computeU);
   computeFromHessenberg(m_matT, m_matU, computeU);
   return *this;
 }

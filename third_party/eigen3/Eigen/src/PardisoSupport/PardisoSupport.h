@@ -117,7 +117,9 @@ class PardisoImpl : public SparseSolverBase<Derived>
     typedef Matrix<StorageIndex, MatrixType::RowsAtCompileTime, 1> IntColVectorType;
     typedef Array<StorageIndex,64,1,DontAlign> ParameterType;
     enum {
-      ScalarIsComplex = NumTraits<Scalar>::IsComplex
+      ScalarIsComplex = NumTraits<Scalar>::IsComplex,
+      ColsAtCompileTime = Dynamic,
+      MaxColsAtCompileTime = Dynamic
     };
 
     PardisoImpl()
@@ -371,6 +373,8 @@ void PardisoImpl<Derived>::_solve_impl(const MatrixBase<BDerived> &b, MatrixBase
   *
   * \tparam _MatrixType the type of the sparse matrix A, it must be a SparseMatrix<>
   *
+  * \implsparsesolverconcept
+  *
   * \sa \ref TutorialSparseDirectSolvers
   */
 template<typename MatrixType>
@@ -420,6 +424,8 @@ class PardisoLU : public PardisoImpl< PardisoLU<MatrixType> >
   * \tparam MatrixType the type of the sparse matrix A, it must be a SparseMatrix<>
   * \tparam UpLo can be any bitwise combination of Upper, Lower. The default is Upper, meaning only the upper triangular part has to be used.
   *         Upper|Lower can be used to tell both triangular parts can be used as input.
+  *
+  * \implsparsesolverconcept
   *
   * \sa \ref TutorialSparseDirectSolvers
   */
@@ -478,6 +484,8 @@ class PardisoLLT : public PardisoImpl< PardisoLLT<MatrixType,_UpLo> >
   * \tparam Options can be any bitwise combination of Upper, Lower, and Symmetric. The default is Upper, meaning only the upper triangular part has to be used.
   *         Symmetric can be used for symmetric, non-selfadjoint complex matrices, the default being to assume a selfadjoint matrix.
   *         Upper|Lower can be used to tell both triangular parts can be used as input.
+  *
+  * \implsparsesolverconcept
   *
   * \sa \ref TutorialSparseDirectSolvers
   */

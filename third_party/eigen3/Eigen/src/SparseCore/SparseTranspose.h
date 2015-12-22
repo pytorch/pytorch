@@ -27,12 +27,14 @@ namespace internal {
     using Base::derived;
     typedef typename Base::Scalar Scalar;
     typedef typename Base::StorageIndex StorageIndex;
+
+    inline Index nonZeros() const { return derived().nestedExpression().nonZeros(); }
     
     inline const Scalar* valuePtr() const { return derived().nestedExpression().valuePtr(); }
     inline const StorageIndex* innerIndexPtr() const { return derived().nestedExpression().innerIndexPtr(); }
     inline const StorageIndex* outerIndexPtr() const { return derived().nestedExpression().outerIndexPtr(); }
     inline const StorageIndex* innerNonZeroPtr() const { return derived().nestedExpression().innerNonZeroPtr(); }
-    
+
     inline Scalar* valuePtr() { return derived().nestedExpression().valuePtr(); }
     inline StorageIndex* innerIndexPtr() { return derived().nestedExpression().innerIndexPtr(); }
     inline StorageIndex* outerIndexPtr() { return derived().nestedExpression().outerIndexPtr(); }

@@ -102,21 +102,17 @@ void parallelize_gemm(const Functor& func, Index rows, Index cols, bool transpos
   // - we are not already in a parallel code
   // - the sizes are large enough
 
-  // 1- are we already in a parallel session?
-  // FIXME omp_get_num_threads()>1 only works for openmp, what if the user does not use openmp?
-  if((!Condition) || (omp_get_num_threads()>1))
-    return func(0,rows, 0,cols);
-
-  Index size = transpose ? rows : cols;
-
-  // 2- compute the maximal number of threads from the size of the product:
+  // compute the maximal number of threads from the size of the product:
   // FIXME this has to be fine tuned
-  Index max_threads = std::max<Index>(1,size / 32);
+  Index size = transpose ? rows : cols;
+  Index pb_max_threads = std::max<Index>(1,size / 32);
+  // compute the number of threads we are going to use
+  Index threads = std::min<Index>(nbThreads(), pb_max_threads);
 
-  // 3 - compute the number of threads we are going to use
-  Index threads = std::min<Index>(nbThreads(), max_threads);
-
-  if(threads==1)
+  // if multi-threading is explicitely disabled, not useful, or if we already are in a parallel session,
+  // then abort multi-threading
+  // FIXME omp_get_num_threads()>1 only works for openmp, what if the user does not use openmp?
+  if((!Condition) || (threads==1) || (omp_get_num_threads()>1))
     return func(0,rows, 0,cols);
 
   Eigen::initParallel();

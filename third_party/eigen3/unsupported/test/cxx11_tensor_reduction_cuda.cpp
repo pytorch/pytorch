@@ -28,7 +28,7 @@ static void test_full_reductions() {
   Tensor<float, 2, DataLayout> in(num_rows, num_cols);
   in.setRandom();
 
-  Tensor<float, 1, DataLayout> full_redux(1);
+  Tensor<float, 0, DataLayout> full_redux;
   full_redux = in.sum();
 
   std::size_t in_bytes = in.size() * sizeof(float);
@@ -38,16 +38,16 @@ static void test_full_reductions() {
   gpu_device.memcpyHostToDevice(gpu_in_ptr, in.data(), in_bytes);
 
   TensorMap<Tensor<float, 2, DataLayout> > in_gpu(gpu_in_ptr, num_rows, num_cols);
-  TensorMap<Tensor<float, 1, DataLayout> > out_gpu(gpu_out_ptr, 1);
+  TensorMap<Tensor<float, 0, DataLayout> > out_gpu(gpu_out_ptr);
 
   out_gpu.device(gpu_device) = in_gpu.sum();
 
-  Tensor<float, 1, DataLayout> full_redux_gpu(1);
+  Tensor<float, 0, DataLayout> full_redux_gpu;
   gpu_device.memcpyDeviceToHost(full_redux_gpu.data(), gpu_out_ptr, out_bytes);
   gpu_device.synchronize();
 
   // Check that the CPU and GPU reductions return the same result.
-  VERIFY_IS_APPROX(full_redux(0), full_redux_gpu(0));
+  VERIFY_IS_APPROX(full_redux(), full_redux_gpu());
 }
 
 void test_cxx11_tensor_reduction_cuda() {

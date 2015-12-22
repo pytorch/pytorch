@@ -55,6 +55,18 @@ struct Initializer<Derived, 1> {
   }
 };
 
+template <typename Derived>
+struct Initializer<Derived, 0> {
+  typedef typename traits<Derived>::Scalar InitList;
+
+  static void run(TensorEvaluator<Derived, DefaultDevice>& tensor,
+                  Eigen::array<typename traits<Derived>::Index, traits<Derived>::NumDimensions>*/* indices*/,
+                  const InitList& v) {
+    tensor.coeffRef(0) = v;
+  }
+};
+
+
 template <typename Derived, int N>
 void initialize_tensor(TensorEvaluator<Derived, DefaultDevice>& tensor,
                        const typename Initializer<Derived, traits<Derived>::NumDimensions>::InitList& vals) {

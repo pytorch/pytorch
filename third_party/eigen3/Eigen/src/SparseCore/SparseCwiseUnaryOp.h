@@ -1,7 +1,7 @@
 // This file is part of Eigen, a lightweight C++ template library
 // for linear algebra.
 //
-// Copyright (C) 2008-2014 Gael Guennebaud <gael.guennebaud@inria.fr>
+// Copyright (C) 2008-2015 Gael Guennebaud <gael.guennebaud@inria.fr>
 //
 // This Source Code Form is subject to the terms of the Mozilla
 // Public License v. 2.0. If a copy of the MPL was not distributed
@@ -29,7 +29,11 @@ struct unary_evaluator<CwiseUnaryOp<UnaryOp,ArgType>, IteratorBased>
       Flags = XprType::Flags
     };
     
-    explicit unary_evaluator(const XprType& op) : m_functor(op.functor()), m_argImpl(op.nestedExpression()) {}
+    explicit unary_evaluator(const XprType& op) : m_functor(op.functor()), m_argImpl(op.nestedExpression())
+    {
+      EIGEN_INTERNAL_CHECK_COST_VALUE(functor_traits<UnaryOp>::Cost);
+      EIGEN_INTERNAL_CHECK_COST_VALUE(CoeffReadCost);
+    }
     
     inline Index nonZerosEstimate() const {
       return m_argImpl.nonZerosEstimate();
@@ -108,7 +112,11 @@ struct unary_evaluator<CwiseUnaryView<ViewOp,ArgType>, IteratorBased>
       Flags = XprType::Flags
     };
     
-    explicit unary_evaluator(const XprType& op) : m_functor(op.functor()), m_argImpl(op.nestedExpression()) {}
+    explicit unary_evaluator(const XprType& op) : m_functor(op.functor()), m_argImpl(op.nestedExpression())
+    {
+      EIGEN_INTERNAL_CHECK_COST_VALUE(functor_traits<ViewOp>::Cost);
+      EIGEN_INTERNAL_CHECK_COST_VALUE(CoeffReadCost);
+    }
 
   protected:
     typedef typename evaluator<ArgType>::InnerIterator        EvalIterator;

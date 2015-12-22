@@ -278,6 +278,10 @@ public:
   inline const Coefficients& coeffs() const { return m_coeffs;}
 
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(NeedsAlignment)
+  
+#ifdef EIGEN_QUATERNION_PLUGIN
+# include EIGEN_QUATERNION_PLUGIN
+#endif
 
 protected:
   Coefficients m_coeffs;
@@ -735,8 +739,9 @@ template<typename Other>
 struct quaternionbase_assign_impl<Other,3,3>
 {
   typedef typename Other::Scalar Scalar;
-  template<class Derived> static inline void run(QuaternionBase<Derived>& q, const Other& mat)
+  template<class Derived> static inline void run(QuaternionBase<Derived>& q, const Other& a_mat)
   {
+    const typename internal::nested_eval<Other,2>::type mat(a_mat);
     using std::sqrt;
     // This algorithm comes from  "Quaternion Calculus and Fast Animation",
     // Ken Shoemake, 1987 SIGGRAPH course notes

@@ -300,6 +300,7 @@ using std::ptrdiff_t;
 
 #include "src/Core/NumTraits.h"
 #include "src/Core/MathFunctions.h"
+#include "src/Core/SpecialFunctions.h"
 #include "src/Core/GenericPacketMath.h"
 
 #if defined EIGEN_VECTORIZE_AVX
@@ -382,8 +383,6 @@ using std::ptrdiff_t;
 #include "src/Core/DiagonalMatrix.h"
 #include "src/Core/Diagonal.h"
 #include "src/Core/DiagonalProduct.h"
-#include "src/Core/PermutationMatrix.h"
-#include "src/Core/Transpositions.h"
 #include "src/Core/Redux.h"
 #include "src/Core/Visitor.h"
 #include "src/Core/Fuzzy.h"
@@ -393,6 +392,9 @@ using std::ptrdiff_t;
 #include "src/Core/GeneralProduct.h"
 #include "src/Core/Solve.h"
 #include "src/Core/Inverse.h"
+#include "src/Core/SolverBase.h"
+#include "src/Core/PermutationMatrix.h"
+#include "src/Core/Transpositions.h"
 #include "src/Core/TriangularMatrix.h"
 #include "src/Core/SelfAdjointView.h"
 #include "src/Core/products/GeneralBlockPanelKernel.h"

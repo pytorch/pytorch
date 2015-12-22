@@ -92,13 +92,14 @@ template<typename _MatrixType> class HouseholderQR
       * 
       * \sa compute()
       */
-    explicit HouseholderQR(const MatrixType& matrix)
+    template<typename InputType>
+    explicit HouseholderQR(const EigenBase<InputType>& matrix)
       : m_qr(matrix.rows(), matrix.cols()),
         m_hCoeffs((std::min)(matrix.rows(),matrix.cols())),
         m_temp(matrix.cols()),
         m_isInitialized(false)
     {
-      compute(matrix);
+      compute(matrix.derived());
     }
 
     /** This method finds a solution x to the equation Ax=b, where A is the matrix of which
@@ -149,7 +150,8 @@ template<typename _MatrixType> class HouseholderQR
         return m_qr;
     }
 
-    HouseholderQR& compute(const MatrixType& matrix);
+    template<typename InputType>
+    HouseholderQR& compute(const EigenBase<InputType>& matrix);
 
     /** \returns the absolute value of the determinant of the matrix of which
       * *this is the QR decomposition. It has only linear complexity
@@ -352,7 +354,8 @@ void HouseholderQR<_MatrixType>::_solve_impl(const RhsType &rhs, DstType &dst) c
   * \sa class HouseholderQR, HouseholderQR(const MatrixType&)
   */
 template<typename MatrixType>
-HouseholderQR<MatrixType>& HouseholderQR<MatrixType>::compute(const MatrixType& matrix)
+template<typename InputType>
+HouseholderQR<MatrixType>& HouseholderQR<MatrixType>::compute(const EigenBase<InputType>& matrix)
 {
   check_template_parameters();
   
@@ -360,7 +363,7 @@ HouseholderQR<MatrixType>& HouseholderQR<MatrixType>::compute(const MatrixType& 
   Index cols = matrix.cols();
   Index size = (std::min)(rows,cols);
 
-  m_qr = matrix;
+  m_qr = matrix.derived();
   m_hCoeffs.resize(size);
 
   m_temp.resize(cols);

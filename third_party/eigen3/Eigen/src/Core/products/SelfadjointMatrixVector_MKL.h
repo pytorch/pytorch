@@ -52,16 +52,16 @@ template<typename Index, int StorageOrder, int UpLo, bool ConjugateLhs, bool Con
 struct selfadjoint_matrix_vector_product<Scalar,Index,StorageOrder,UpLo,ConjugateLhs,ConjugateRhs,Specialized> { \
 static void run( \
   Index size, const Scalar*  lhs, Index lhsStride, \
-  const Scalar* _rhs, Index rhsIncr, Scalar* res, Scalar alpha) { \
+  const Scalar* _rhs, Scalar* res, Scalar alpha) { \
     enum {\
       IsColMajor = StorageOrder==ColMajor \
     }; \
     if (IsColMajor == ConjugateLhs) {\
       selfadjoint_matrix_vector_product<Scalar,Index,StorageOrder,UpLo,ConjugateLhs,ConjugateRhs,BuiltIn>::run( \
-        size, lhs, lhsStride, _rhs, rhsIncr, res, alpha);  \
+        size, lhs, lhsStride, _rhs, res, alpha);  \
     } else {\
       selfadjoint_matrix_vector_product_symv<Scalar,Index,StorageOrder,UpLo,ConjugateLhs,ConjugateRhs>::run( \
-        size, lhs, lhsStride, _rhs, rhsIncr, res, alpha);  \
+        size, lhs, lhsStride, _rhs, res, alpha);  \
     }\
   } \
 }; \
@@ -79,13 +79,13 @@ typedef Matrix<EIGTYPE,Dynamic,1,ColMajor> SYMVVector;\
 \
 static void run( \
 Index size, const EIGTYPE*  lhs, Index lhsStride, \
-const EIGTYPE* _rhs, Index rhsIncr, EIGTYPE* res, EIGTYPE alpha) \
+const EIGTYPE* _rhs, EIGTYPE* res, EIGTYPE alpha) \
 { \
   enum {\
     IsRowMajor = StorageOrder==RowMajor ? 1 : 0, \
     IsLower = UpLo == Lower ? 1 : 0 \
   }; \
-  MKL_INT n=size, lda=lhsStride, incx=rhsIncr, incy=1; \
+  MKL_INT n=size, lda=lhsStride, incx=1, incy=1; \
   MKLTYPE alpha_, beta_; \
   const EIGTYPE *x_ptr, myone(1); \
   char uplo=(IsRowMajor) ? (IsLower ? 'U' : 'L') : (IsLower ? 'L' : 'U'); \
@@ -93,10 +93,9 @@ const EIGTYPE* _rhs, Index rhsIncr, EIGTYPE* res, EIGTYPE alpha) \
   assign_scalar_eig2mkl(beta_, myone); \
   SYMVVector x_tmp; \
   if (ConjugateRhs) { \
-    Map<const SYMVVector, 0, InnerStride<> > map_x(_rhs,size,1,InnerStride<>(incx)); \
+    Map<const SYMVVector, 0 > map_x(_rhs,size,1); \
     x_tmp=map_x.conjugate(); \
     x_ptr=x_tmp.data(); \
-    incx=1; \
   } else x_ptr=_rhs; \
   MKLFUNC(&uplo, &n, &alpha_, (const MKLTYPE*)lhs, &lda, (const MKLTYPE*)x_ptr, &incx, &beta_, (MKLTYPE*)res, &incy); \
 }\

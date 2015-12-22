@@ -63,7 +63,7 @@ class TensorStorage<T, FixedDimensions, Options_>
 
 
 // pure dynamic
-template<typename T, int Options_, typename IndexType, std::size_t NumIndices_>
+template<typename T, int Options_, typename IndexType, int NumIndices_>
 class TensorStorage<T, DSizes<IndexType, NumIndices_>, Options_>
 {
   public:
@@ -71,7 +71,11 @@ class TensorStorage<T, DSizes<IndexType, NumIndices_>, Options_>
     typedef DSizes<IndexType, NumIndices_> Dimensions;
     typedef TensorStorage<T, DSizes<IndexType, NumIndices_>, Options_> Self;
 
-    EIGEN_DEVICE_FUNC TensorStorage() : m_data(0), m_dimensions() {}
+    EIGEN_DEVICE_FUNC TensorStorage() : m_data(0), m_dimensions() {
+      if (NumIndices_ == 0) {
+	m_data = internal::conditional_aligned_new_auto<T,(Options_&DontAlign)==0>(1);
+      }
+    }
     EIGEN_DEVICE_FUNC TensorStorage(internal::constructor_without_unaligned_array_assert)
       : m_data(0), m_dimensions(internal::template repeat<NumIndices_, Index>(0)) {}
     EIGEN_DEVICE_FUNC TensorStorage(Index size, const array<Index, NumIndices_>& dimensions)
@@ -101,13 +105,17 @@ class TensorStorage<T, DSizes<IndexType, NumIndices_>, Options_>
 
     EIGEN_DEVICE_FUNC void resize(Index size, const array<Index, NumIndices_>& nbDimensions)
     {
+      eigen_assert(size >= 1);
       const Index currentSz = internal::array_prod(m_dimensions);
       if(size != currentSz)
       {
         internal::conditional_aligned_delete_auto<T,(Options_&DontAlign)==0>(m_data, currentSz);
         if (size)
           m_data = internal::conditional_aligned_new_auto<T,(Options_&DontAlign)==0>(size);
-        else
+        else if (NumIndices_ == 0) {
+	  m_data = internal::conditional_aligned_new_auto<T,(Options_&DontAlign)==0>(1);
+	}
+	else 
           m_data = 0;
         EIGEN_INTERNAL_DENSE_STORAGE_CTOR_PLUGIN
       }

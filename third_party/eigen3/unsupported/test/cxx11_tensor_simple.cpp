@@ -14,6 +14,35 @@
 using Eigen::Tensor;
 using Eigen::RowMajor;
 
+static void test_0d()
+{
+  Tensor<int, 0> scalar1;
+  Tensor<int, 0, RowMajor> scalar2;
+  Tensor<int, 0> scalar3;
+  Tensor<int, 0, RowMajor> scalar4;
+
+  scalar3.resize();
+  scalar4.resize();
+
+  scalar1() = 7;
+  scalar2() = 13;
+  scalar3.setValues(17);
+  scalar4.setZero();
+
+  VERIFY_IS_EQUAL(scalar1.rank(), 0);
+  VERIFY_IS_EQUAL(scalar1.size(), 1);
+
+  VERIFY_IS_EQUAL(scalar1(), 7);
+  VERIFY_IS_EQUAL(scalar2(), 13);
+  VERIFY_IS_EQUAL(scalar3(), 17);
+  VERIFY_IS_EQUAL(scalar4(), 0);
+
+  Tensor<int, 0> scalar5(scalar1);
+
+  VERIFY_IS_EQUAL(scalar5(), 7);
+  VERIFY_IS_EQUAL(scalar5.data()[0], 7);
+}
+
 static void test_1d()
 {
   Tensor<int, 1> vec1(6);
@@ -287,13 +316,10 @@ static void test_resize()
 
 void test_cxx11_tensor_simple()
 {
+  CALL_SUBTEST(test_0d());
   CALL_SUBTEST(test_1d());
   CALL_SUBTEST(test_2d());
   CALL_SUBTEST(test_3d());
   CALL_SUBTEST(test_simple_assign());
   CALL_SUBTEST(test_resize());
 }
-
-/*
- * kate: space-indent on; indent-width 2; mixedindent off; indent-mode cstyle;
- */

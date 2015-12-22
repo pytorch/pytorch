@@ -1,3 +1,10 @@
+// This file is part of Eigen, a lightweight C++ template library
+// for linear algebra.
+//
+// This Source Code Form is subject to the terms of the Mozilla
+// Public License v. 2.0. If a copy of the MPL was not distributed
+// with this file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
 #ifndef EIGEN_SUPERLUSUPPORT_MODULE_H
 #define EIGEN_SUPERLUSUPPORT_MODULE_H
 
@@ -35,6 +42,8 @@ namespace Eigen { struct SluMatrix; }
   * It provides the following factorization class:
   * - class SuperLU: a supernodal sequential LU factorization.
   * - class SuperILU: a supernodal sequential incomplete LU factorization (to be used as a preconditioner for iterative methods).
+  *
+  * \warning This wrapper is only for the 4.x versions of SuperLU. The 3.x and 5.x versions are not supported.
   *
   * \warning When including this module, you have to use SUPERLU_EMPTY instead of EMPTY which is no longer defined because it is too polluting.
   *

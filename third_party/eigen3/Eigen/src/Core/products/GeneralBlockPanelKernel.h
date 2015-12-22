@@ -36,37 +36,40 @@ const std::ptrdiff_t defaultL3CacheSize = 512*1024;
 #endif
 
 /** \internal */
-inline void manage_caching_sizes(Action action, std::ptrdiff_t* l1, std::ptrdiff_t* l2, std::ptrdiff_t* l3)
-{
-  static bool m_cache_sizes_initialized = false;
-  static std::ptrdiff_t m_l1CacheSize = 0;
-  static std::ptrdiff_t m_l2CacheSize = 0;
-  static std::ptrdiff_t m_l3CacheSize = 0;
-
-  if(!m_cache_sizes_initialized)
-  {
+struct CacheSizes { 
+  CacheSizes(): m_l1(-1),m_l2(-1),m_l3(-1) {
     int l1CacheSize, l2CacheSize, l3CacheSize;
     queryCacheSizes(l1CacheSize, l2CacheSize, l3CacheSize);
-    m_l1CacheSize = manage_caching_sizes_helper(l1CacheSize, defaultL1CacheSize);
-    m_l2CacheSize = manage_caching_sizes_helper(l2CacheSize, defaultL2CacheSize);
-    m_l3CacheSize = manage_caching_sizes_helper(l3CacheSize, defaultL3CacheSize);
-    m_cache_sizes_initialized = true;
+    m_l1 = manage_caching_sizes_helper(l1CacheSize, defaultL1CacheSize);
+    m_l2 = manage_caching_sizes_helper(l2CacheSize, defaultL2CacheSize);
+    m_l3 = manage_caching_sizes_helper(l3CacheSize, defaultL3CacheSize);
   }
+
+  std::ptrdiff_t m_l1;
+  std::ptrdiff_t m_l2;
+  std::ptrdiff_t m_l3;
+};
+
+
+/** \internal */
+inline void manage_caching_sizes(Action action, std::ptrdiff_t* l1, std::ptrdiff_t* l2, std::ptrdiff_t* l3)
+{
+  static CacheSizes m_cacheSizes;
 
   if(action==SetAction)
   {
     // set the cpu cache size and cache all block sizes from a global cache size in byte
     eigen_internal_assert(l1!=0 && l2!=0);
-    m_l1CacheSize = *l1;
-    m_l2CacheSize = *l2;
-    m_l3CacheSize = *l3;
+    m_cacheSizes.m_l1 = *l1;
+    m_cacheSizes.m_l2 = *l2;
+    m_cacheSizes.m_l3 = *l3;
   }
   else if(action==GetAction)
   {
     eigen_internal_assert(l1!=0 && l2!=0);
-    *l1 = m_l1CacheSize;
-    *l2 = m_l2CacheSize;
-    *l3 = m_l3CacheSize;
+    *l1 = m_cacheSizes.m_l1;
+    *l2 = m_cacheSizes.m_l2;
+    *l3 = m_cacheSizes.m_l3;
   }
   else
   {
@@ -199,8 +202,6 @@ void evaluateProductBlockingSizesHeuristic(Index& k, Index& m, Index& n, Index n
     #else
     const Index actual_l2 = 1572864; // == 1.5 MB
     #endif
-    
-    
     
     // Here, nc is chosen such that a block of kc x nc of the rhs fit within half of L2.
     // The second half is implicitly reserved to access the result and lhs coefficients.

@@ -507,6 +507,115 @@ static void test_cuda_convolution_3d()
   }
 }
 
+
+template <typename Scalar>
+void test_cuda_lgamma(const Scalar stddev)
+{
+  Tensor<Scalar, 2> in(72,97);
+  in.setRandom();
+  in *= in.constant(stddev);
+  Tensor<Scalar, 2> out(72,97);
+  out.setZero();
+
+  std::size_t bytes = in.size() * sizeof(Scalar);
+
+  Scalar* d_in;
+  Scalar* d_out;
+  cudaMalloc((void**)(&d_in), bytes);
+  cudaMalloc((void**)(&d_out), bytes);
+
+  cudaMemcpy(d_in, in.data(), bytes, cudaMemcpyHostToDevice);
+
+  Eigen::CudaStreamDevice stream;
+  Eigen::GpuDevice gpu_device(&stream);
+
+  Eigen::TensorMap<Eigen::Tensor<Scalar, 2> > gpu_in(d_in, 72, 97);
+  Eigen::TensorMap<Eigen::Tensor<Scalar, 2> > gpu_out(d_out, 72, 97);
+
+  gpu_out.device(gpu_device) = gpu_in.lgamma();
+
+  assert(cudaMemcpyAsync(out.data(), d_out, bytes, cudaMemcpyDeviceToHost, gpu_device.stream()) == cudaSuccess);
+  assert(cudaStreamSynchronize(gpu_device.stream()) == cudaSuccess);
+
+  for (int i = 0; i < 72; ++i) {
+    for (int j = 0; j < 97; ++j) {
+      VERIFY_IS_APPROX(out(i,j), (std::lgamma)(in(i,j)));
+    }
+  }
+}
+
+template <typename Scalar>
+void test_cuda_erf(const Scalar stddev)
+{
+  Tensor<Scalar, 2> in(72,97);
+  in.setRandom();
+  in *= in.constant(stddev);
+  Tensor<Scalar, 2> out(72,97);
+  out.setZero();
+
+  std::size_t bytes = in.size() * sizeof(Scalar);
+
+  Scalar* d_in;
+  Scalar* d_out;
+  cudaMalloc((void**)(&d_in), bytes);
+  cudaMalloc((void**)(&d_out), bytes);
+
+  cudaMemcpy(d_in, in.data(), bytes, cudaMemcpyHostToDevice);
+
+  Eigen::CudaStreamDevice stream;
+  Eigen::GpuDevice gpu_device(&stream);
+
+  Eigen::TensorMap<Eigen::Tensor<Scalar, 2> > gpu_in(d_in, 72, 97);
+  Eigen::TensorMap<Eigen::Tensor<Scalar, 2> > gpu_out(d_out, 72, 97);
+
+  gpu_out.device(gpu_device) = gpu_in.erf();
+
+  assert(cudaMemcpyAsync(out.data(), d_out, bytes, cudaMemcpyDeviceToHost, gpu_device.stream()) == cudaSuccess);
+  assert(cudaStreamSynchronize(gpu_device.stream()) == cudaSuccess);
+
+  for (int i = 0; i < 72; ++i) {
+    for (int j = 0; j < 97; ++j) {
+      VERIFY_IS_APPROX(out(i,j), (std::erf)(in(i,j)));
+    }
+  }
+}
+
+template <typename Scalar>
+void test_cuda_erfc(const Scalar stddev)
+{
+  Tensor<Scalar, 2> in(72,97);
+  in.setRandom();
+  in *= in.constant(stddev);
+  Tensor<Scalar, 2> out(72,97);
+  out.setZero();
+
+  std::size_t bytes = in.size() * sizeof(Scalar);
+
+  Scalar* d_in;
+  Scalar* d_out;
+  cudaMalloc((void**)(&d_in), bytes);
+  cudaMalloc((void**)(&d_out), bytes);
+
+  cudaMemcpy(d_in, in.data(), bytes, cudaMemcpyHostToDevice);
+
+  Eigen::CudaStreamDevice stream;
+  Eigen::GpuDevice gpu_device(&stream);
+
+  Eigen::TensorMap<Eigen::Tensor<Scalar, 2> > gpu_in(d_in, 72, 97);
+  Eigen::TensorMap<Eigen::Tensor<Scalar, 2> > gpu_out(d_out, 72, 97);
+
+  gpu_out.device(gpu_device) = gpu_in.erfc();
+
+  assert(cudaMemcpyAsync(out.data(), d_out, bytes, cudaMemcpyDeviceToHost, gpu_device.stream()) == cudaSuccess);
+  assert(cudaStreamSynchronize(gpu_device.stream()) == cudaSuccess);
+
+  for (int i = 0; i < 72; ++i) {
+    for (int j = 0; j < 97; ++j) {
+      VERIFY_IS_APPROX(out(i,j), (std::erfc)(in(i,j)));
+    }
+  }
+}
+
 void test_cxx11_tensor_cuda()
 {
   CALL_SUBTEST(test_cuda_elementwise_small());
@@ -522,4 +631,34 @@ void test_cxx11_tensor_cuda()
   CALL_SUBTEST(test_cuda_convolution_2d<RowMajor>());
   CALL_SUBTEST(test_cuda_convolution_3d<ColMajor>());
   CALL_SUBTEST(test_cuda_convolution_3d<RowMajor>());
+  CALL_SUBTEST(test_cuda_lgamma<float>(1.0f));
+  CALL_SUBTEST(test_cuda_lgamma<float>(100.0f));
+  CALL_SUBTEST(test_cuda_lgamma<float>(0.01f));
+  CALL_SUBTEST(test_cuda_lgamma<float>(0.001f));
+  CALL_SUBTEST(test_cuda_erf<float>(1.0f));
+  CALL_SUBTEST(test_cuda_erf<float>(100.0f));
+  CALL_SUBTEST(test_cuda_erf<float>(0.01f));
+  CALL_SUBTEST(test_cuda_erf<float>(0.001f));
+  CALL_SUBTEST(test_cuda_erfc<float>(1.0f));
+  // CALL_SUBTEST(test_cuda_erfc<float>(100.0f));
+  CALL_SUBTEST(test_cuda_erfc<float>(5.0f)); // CUDA erfc lacks precision for large inputs
+  CALL_SUBTEST(test_cuda_erfc<float>(0.01f));
+  CALL_SUBTEST(test_cuda_erfc<float>(0.001f));
+  CALL_SUBTEST(test_cuda_tanh<double>(1.0));
+  CALL_SUBTEST(test_cuda_tanh<double>(100.0));
+  CALL_SUBTEST(test_cuda_tanh<double>(0.01));
+  CALL_SUBTEST(test_cuda_tanh<double>(0.001));
+  CALL_SUBTEST(test_cuda_lgamma<double>(1.0));
+  CALL_SUBTEST(test_cuda_lgamma<double>(100.0));
+  CALL_SUBTEST(test_cuda_lgamma<double>(0.01));
+  CALL_SUBTEST(test_cuda_lgamma<double>(0.001));
+  CALL_SUBTEST(test_cuda_erf<double>(1.0));
+  CALL_SUBTEST(test_cuda_erf<double>(100.0));
+  CALL_SUBTEST(test_cuda_erf<double>(0.01));
+  CALL_SUBTEST(test_cuda_erf<double>(0.001));
+  CALL_SUBTEST(test_cuda_erfc<double>(1.0));
+  // CALL_SUBTEST(test_cuda_erfc<double>(100.0));
+  CALL_SUBTEST(test_cuda_erfc<double>(5.0)); // CUDA erfc lacks precision for large inputs
+  CALL_SUBTEST(test_cuda_erfc<double>(0.01));
+  CALL_SUBTEST(test_cuda_erfc<double>(0.001));
 }

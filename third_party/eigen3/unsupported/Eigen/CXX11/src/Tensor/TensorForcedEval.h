@@ -104,7 +104,7 @@ struct TensorEvaluator<const TensorForcedEvalOp<ArgType>, Device>
 
   EIGEN_DEVICE_FUNC const Dimensions& dimensions() const { return m_impl.dimensions(); }
 
-  EIGEN_STRONG_INLINE bool evalSubExprsIfNeeded(CoeffReturnType*) {
+  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE bool evalSubExprsIfNeeded(CoeffReturnType*) {
     m_impl.evalSubExprsIfNeeded(NULL);
     const Index numValues = m_impl.dimensions().TotalSize();
     m_buffer = (CoeffReturnType*)m_device.allocate(numValues * sizeof(CoeffReturnType));
@@ -121,7 +121,7 @@ struct TensorEvaluator<const TensorForcedEvalOp<ArgType>, Device>
     m_impl.cleanup();
     return true;
   }
-  EIGEN_STRONG_INLINE void cleanup() {
+  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE void cleanup() {
     m_device.deallocate(m_buffer);
     m_buffer = NULL;
   }
@@ -132,7 +132,7 @@ struct TensorEvaluator<const TensorForcedEvalOp<ArgType>, Device>
   }
 
   template<int LoadMode>
-  EIGEN_STRONG_INLINE PacketReturnType packet(Index index) const
+  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE PacketReturnType packet(Index index) const
   {
     return internal::ploadt<Packet, LoadMode>(m_buffer + index);
   }

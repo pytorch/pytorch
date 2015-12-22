@@ -14,105 +14,6 @@
 
 namespace Eigen {
 
-// The array class is only available starting with cxx11. Emulate our own here
-// if needed
-template <typename T, size_t n> class array {
- public:
-  EIGEN_DEVICE_FUNC
-  EIGEN_STRONG_INLINE T& operator[] (size_t index) { return values[index]; }
-  EIGEN_DEVICE_FUNC
-  EIGEN_STRONG_INLINE const T& operator[] (size_t index) const { return values[index]; }
-
-  static const std::size_t size() { return n; }
-
-  T values[n];
-
-  EIGEN_DEVICE_FUNC
-  EIGEN_STRONG_INLINE array() { }
-  explicit EIGEN_DEVICE_FUNC
-  EIGEN_STRONG_INLINE array(const T& v) {
-    EIGEN_STATIC_ASSERT(n==1, YOU_MADE_A_PROGRAMMING_MISTAKE)
-    values[0] = v;
-  }
-  EIGEN_DEVICE_FUNC
-  EIGEN_STRONG_INLINE array(const T& v1, const T& v2) {
-    EIGEN_STATIC_ASSERT(n==2, YOU_MADE_A_PROGRAMMING_MISTAKE)
-    values[0] = v1;
-    values[1] = v2;
-  }
-  EIGEN_DEVICE_FUNC
-  EIGEN_STRONG_INLINE array(const T& v1, const T& v2, const T& v3) {
-    EIGEN_STATIC_ASSERT(n==3, YOU_MADE_A_PROGRAMMING_MISTAKE)
-    values[0] = v1;
-    values[1] = v2;
-    values[2] = v3;
-  }
-  EIGEN_DEVICE_FUNC
-  EIGEN_STRONG_INLINE array(const T& v1, const T& v2, const T& v3,
-                            const T& v4) {
-    EIGEN_STATIC_ASSERT(n==4, YOU_MADE_A_PROGRAMMING_MISTAKE)
-    values[0] = v1;
-    values[1] = v2;
-    values[2] = v3;
-    values[3] = v4;
-  }
-  EIGEN_DEVICE_FUNC
-  EIGEN_STRONG_INLINE array(const T& v1, const T& v2, const T& v3, const T& v4,
-                            const T& v5) {
-    EIGEN_STATIC_ASSERT(n==5, YOU_MADE_A_PROGRAMMING_MISTAKE)
-    values[0] = v1;
-    values[1] = v2;
-    values[2] = v3;
-    values[3] = v4;
-    values[4] = v5;
-  }
-  EIGEN_DEVICE_FUNC
-  EIGEN_STRONG_INLINE array(const T& v1, const T& v2, const T& v3, const T& v4,
-                            const T& v5, const T& v6) {
-    EIGEN_STATIC_ASSERT(n==6, YOU_MADE_A_PROGRAMMING_MISTAKE)
-    values[0] = v1;
-    values[1] = v2;
-    values[2] = v3;
-    values[3] = v4;
-    values[4] = v5;
-    values[5] = v6;
-  }
-  EIGEN_DEVICE_FUNC
-  EIGEN_STRONG_INLINE array(const T& v1, const T& v2, const T& v3, const T& v4,
-                            const T& v5, const T& v6, const T& v7) {
-    EIGEN_STATIC_ASSERT(n==7, YOU_MADE_A_PROGRAMMING_MISTAKE)
-    values[0] = v1;
-    values[1] = v2;
-    values[2] = v3;
-    values[3] = v4;
-    values[4] = v5;
-    values[5] = v6;
-    values[6] = v7;
-  }
-  EIGEN_DEVICE_FUNC
-  EIGEN_STRONG_INLINE array(
-      const T& v1, const T& v2, const T& v3, const T& v4,
-      const T& v5, const T& v6, const T& v7, const T& v8) {
-    EIGEN_STATIC_ASSERT(n==8, YOU_MADE_A_PROGRAMMING_MISTAKE)
-    values[0] = v1;
-    values[1] = v2;
-    values[2] = v3;
-    values[3] = v4;
-    values[4] = v5;
-    values[5] = v6;
-    values[6] = v7;
-    values[7] = v8;
-  }
-
-#ifdef EIGEN_HAS_VARIADIC_TEMPLATES
-  array(std::initializer_list<T> l) {
-    eigen_assert(l.size() == n);
-    internal::smart_copy(l.begin(), l.end(), values);
-  }
-#endif
-};
-
-
 namespace internal {
 
 /** \internal
@@ -279,7 +180,7 @@ EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE typename NList::HeadType::type array_prod(
   return arg_prod<NList>::value;
 }
 
-template<std::size_t n, typename t>
+template<typename t, std::size_t n>
 EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE t array_prod(const array<t, n>& a) {
   t prod = 1;
   for (size_t i = 0; i < n; ++i) { prod *= a[i]; }
@@ -298,14 +199,6 @@ EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE t array_prod(const std::vector<t>& a) {
   return prod;
 }
 
-template<std::size_t I, class T, std::size_t N>
-EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE T& array_get(array<T,N>& a) {
-  return a[I];
-}
-template<std::size_t I, class T, std::size_t N>
-EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE const T& array_get(const array<T,N>& a) {
-  return a[I];
-}
 
 template<std::size_t I, class T>
 EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE T& array_get(std::vector<T>& a) {
@@ -315,23 +208,6 @@ template<std::size_t I, class T>
 EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE const T& array_get(const std::vector<T>& a) {
   return a[I];
 }
-
-template <typename T> struct array_size;
-template<class T, std::size_t N> struct array_size<array<T,N> > {
-  static const size_t value = N;
-};
-template <typename T> struct array_size;
-template<class T, std::size_t N> struct array_size<array<T,N>& > {
-  static const size_t value = N;
-};
-template <typename T> struct array_size;
-template<class T, std::size_t N> struct array_size<const array<T,N> > {
-  static const size_t value = N;
-};
-template <typename T> struct array_size;
-template<class T, std::size_t N> struct array_size<const array<T,N>& > {
-  static const size_t value = N;
-};
 
 struct sum_op {
   template<typename A, typename B> static inline bool run(A a, B b) { return a + b; }

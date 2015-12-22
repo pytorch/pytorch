@@ -126,8 +126,9 @@ template<typename _MatrixType> class Tridiagonalization
       * Example: \include Tridiagonalization_Tridiagonalization_MatrixType.cpp
       * Output: \verbinclude Tridiagonalization_Tridiagonalization_MatrixType.out
       */
-    explicit Tridiagonalization(const MatrixType& matrix)
-      : m_matrix(matrix),
+    template<typename InputType>
+    explicit Tridiagonalization(const EigenBase<InputType>& matrix)
+      : m_matrix(matrix.derived()),
         m_hCoeffs(matrix.cols() > 1 ? matrix.cols()-1 : 1),
         m_isInitialized(false)
     {
@@ -152,9 +153,10 @@ template<typename _MatrixType> class Tridiagonalization
       * Example: \include Tridiagonalization_compute.cpp
       * Output: \verbinclude Tridiagonalization_compute.out
       */
-    Tridiagonalization& compute(const MatrixType& matrix)
+    template<typename InputType>
+    Tridiagonalization& compute(const EigenBase<InputType>& matrix)
     {
-      m_matrix = matrix;
+      m_matrix = matrix.derived();
       m_hCoeffs.resize(matrix.rows()-1, 1);
       internal::tridiagonalization_inplace(m_matrix, m_hCoeffs);
       m_isInitialized = true;

@@ -251,13 +251,15 @@ struct traits<GMRES<_MatrixType,_Preconditioner> >
   * By default the iterations start with x=0 as an initial guess of the solution.
   * One can control the start using the solveWithGuess() method.
   * 
+  * GMRES can also be used in a matrix-free context, see the following \link MatrixfreeSolverExample example \endlink.
+  *
   * \sa class SimplicialCholesky, DiagonalPreconditioner, IdentityPreconditioner
   */
 template< typename _MatrixType, typename _Preconditioner>
 class GMRES : public IterativeSolverBase<GMRES<_MatrixType,_Preconditioner> >
 {
   typedef IterativeSolverBase<GMRES> Base;
-  using Base::mp_matrix;
+  using Base::matrix;
   using Base::m_error;
   using Base::m_iterations;
   using Base::m_info;
@@ -288,7 +290,8 @@ public:
     * this class becomes invalid. Call compute() to update it with the new
     * matrix A, or modify a copy of A.
     */
-  GMRES(const MatrixType& A) : Base(A), m_restart(30) {}
+  template<typename MatrixDerived>
+  explicit GMRES(const EigenBase<MatrixDerived>& A) : Base(A.derived()), m_restart(30) {}
 
   ~GMRES() {}
 
@@ -312,7 +315,7 @@ public:
       m_error = Base::m_tolerance;
 
       typename Dest::ColXpr xj(x,j);
-      if(!internal::gmres(mp_matrix, b.col(j), xj, Base::m_preconditioner, m_iterations, m_restart, m_error))
+      if(!internal::gmres(matrix(), b.col(j), xj, Base::m_preconditioner, m_iterations, m_restart, m_error))
         failed = true;
     }
     m_info = failed ? NumericalIssue

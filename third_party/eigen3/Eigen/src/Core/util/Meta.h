@@ -1,7 +1,7 @@
 // This file is part of Eigen, a lightweight C++ template library
 // for linear algebra.
 //
-// Copyright (C) 2008-2009 Gael Guennebaud <gael.guennebaud@inria.fr>
+// Copyright (C) 2008-2015 Gael Guennebaud <gael.guennebaud@inria.fr>
 // Copyright (C) 2006-2008 Benoit Jacob <jacob.benoit.1@gmail.com>
 //
 // This Source Code Form is subject to the terms of the Mozilla
@@ -10,6 +10,11 @@
 
 #ifndef EIGEN_META_H
 #define EIGEN_META_H
+
+#if defined(__CUDA_ARCH__)
+#include <cfloat>
+#include <math_constants.h>
+#endif
 
 namespace Eigen {
 
@@ -67,6 +72,18 @@ template<> struct is_arithmetic<signed int>    { enum { value = true }; };
 template<> struct is_arithmetic<unsigned int>  { enum { value = true }; };
 template<> struct is_arithmetic<signed long>   { enum { value = true }; };
 template<> struct is_arithmetic<unsigned long> { enum { value = true }; };
+
+template<typename T> struct is_integral        { enum { value = false }; };
+template<> struct is_integral<bool>            { enum { value = true }; };
+template<> struct is_integral<char>            { enum { value = true }; };
+template<> struct is_integral<signed char>     { enum { value = true }; };
+template<> struct is_integral<unsigned char>   { enum { value = true }; };
+template<> struct is_integral<signed short>    { enum { value = true }; };
+template<> struct is_integral<unsigned short>  { enum { value = true }; };
+template<> struct is_integral<signed int>      { enum { value = true }; };
+template<> struct is_integral<unsigned int>    { enum { value = true }; };
+template<> struct is_integral<signed long>     { enum { value = true }; };
+template<> struct is_integral<unsigned long>   { enum { value = true }; };
 
 template <typename T> struct add_const { typedef const T type; };
 template <typename T> struct add_const<T&> { typedef T& type; };
@@ -138,16 +155,16 @@ template<> struct numeric_limits<float>
   EIGEN_DEVICE_FUNC
   static float (max)() { return CUDART_MAX_NORMAL_F; }
   EIGEN_DEVICE_FUNC
-  static float (min)() { return __FLT_EPSILON__; }
+  static float (min)() { return FLT_MIN; }
 };
 template<> struct numeric_limits<double>
 {
   EIGEN_DEVICE_FUNC
   static double epsilon() { return __DBL_EPSILON__; }
   EIGEN_DEVICE_FUNC
-  static double (max)() { return CUDART_INF; }
+  static double (max)() { return DBL_MAX; }
   EIGEN_DEVICE_FUNC
-  static double (min)() { return __DBL_EPSILON__; }
+  static double (min)() { return DBL_MIN; }
 };
 template<> struct numeric_limits<int>
 {
@@ -158,6 +175,15 @@ template<> struct numeric_limits<int>
   EIGEN_DEVICE_FUNC
   static int (min)() { return INT_MIN; }
 };
+template<> struct numeric_limits<unsigned int>
+{
+  EIGEN_DEVICE_FUNC
+  static unsigned int epsilon() { return 0; }
+  EIGEN_DEVICE_FUNC
+  static unsigned int (max)() { return UINT_MAX; }
+  EIGEN_DEVICE_FUNC
+  static unsigned int (min)() { return 0; }
+};
 template<> struct numeric_limits<long>
 {
   EIGEN_DEVICE_FUNC
@@ -167,6 +193,15 @@ template<> struct numeric_limits<long>
   EIGEN_DEVICE_FUNC
   static long (min)() { return LONG_MIN; }
 };
+template<> struct numeric_limits<unsigned long>
+{
+  EIGEN_DEVICE_FUNC
+  static unsigned long epsilon() { return 0; }
+  EIGEN_DEVICE_FUNC
+  static unsigned long (max)() { return ULONG_MAX; }
+  EIGEN_DEVICE_FUNC
+  static unsigned long (min)() { return 0; }
+};
 template<> struct numeric_limits<long long>
 {
   EIGEN_DEVICE_FUNC
@@ -175,6 +210,15 @@ template<> struct numeric_limits<long long>
   static long long (max)() { return LLONG_MAX; }
   EIGEN_DEVICE_FUNC
   static long long (min)() { return LLONG_MIN; }
+};
+template<> struct numeric_limits<unsigned long long>
+{
+  EIGEN_DEVICE_FUNC
+  static unsigned long long epsilon() { return 0; }
+  EIGEN_DEVICE_FUNC
+  static unsigned long long (max)() { return ULLONG_MAX; }
+  EIGEN_DEVICE_FUNC
+  static unsigned long long (min)() { return 0; }
 };
 
 }
@@ -192,7 +236,6 @@ protected:
   EIGEN_DEVICE_FUNC noncopyable() {}
   EIGEN_DEVICE_FUNC ~noncopyable() {}
 };
-
 
 /** \internal
   * Convenient struct to get the result type of a unary or binary functor.

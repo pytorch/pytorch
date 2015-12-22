@@ -539,7 +539,7 @@ template<typename _MatrixType, int QRPreconditioner> class JacobiSVD
       * according to the specified problem size.
       * \sa JacobiSVD()
       */
-    explicit JacobiSVD(Index rows, Index cols, unsigned int computationOptions = 0)
+    JacobiSVD(Index rows, Index cols, unsigned int computationOptions = 0)
     {
       allocate(rows, cols, computationOptions);
     }
@@ -666,7 +666,7 @@ void JacobiSVD<MatrixType, QRPreconditioner>::allocate(Index rows, Index cols, u
   
   if(m_cols>m_rows)   m_qr_precond_morecols.allocate(*this);
   if(m_rows>m_cols)   m_qr_precond_morerows.allocate(*this);
-  if(m_cols!=m_cols)  m_scaledMatrix.resize(rows,cols);
+  if(m_rows!=m_cols)  m_scaledMatrix.resize(rows,cols);
 }
 
 template<typename MatrixType, int QRPreconditioner>

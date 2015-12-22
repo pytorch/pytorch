@@ -34,12 +34,11 @@ template<typename Decomposition, typename RhsType,typename StorageKind> struct s
 template<typename Decomposition, typename RhsType>
 struct solve_traits<Decomposition,RhsType,Dense>
 {
-  typedef typename Decomposition::MatrixType MatrixType;
   typedef Matrix<typename RhsType::Scalar,
-                 MatrixType::ColsAtCompileTime,
+                 Decomposition::ColsAtCompileTime,
                  RhsType::ColsAtCompileTime,
                  RhsType::PlainObject::Options,
-                 MatrixType::MaxColsAtCompileTime,
+                 Decomposition::MaxColsAtCompileTime,
                  RhsType::MaxColsAtCompileTime> PlainObject;  
 };
 
@@ -52,7 +51,7 @@ struct traits<Solve<Decomposition, RhsType> >
   typedef traits<PlainObject> BaseTraits;
   enum {
     Flags = BaseTraits::Flags & RowMajorBit,
-    CoeffReadCost = Dynamic
+    CoeffReadCost = HugeCost
   };
 };
 
@@ -118,6 +117,8 @@ struct evaluator<Solve<Decomposition,RhsType> >
   typedef Solve<Decomposition,RhsType> SolveType;
   typedef typename SolveType::PlainObject PlainObject;
   typedef evaluator<PlainObject> Base;
+
+  enum { Flags = Base::Flags | EvalBeforeNestingBit };
   
   EIGEN_DEVICE_FUNC explicit evaluator(const SolveType& solve)
     : m_result(solve.rows(), solve.cols())
@@ -140,6 +141,28 @@ struct Assignment<DstXprType, Solve<DecType,RhsType>, internal::assign_op<Scalar
   {
     // FIXME shall we resize dst here?
     src.dec()._solve_impl(src.rhs(), dst);
+  }
+};
+
+// Specialization for "dst = dec.transpose().solve(rhs)"
+template<typename DstXprType, typename DecType, typename RhsType, typename Scalar>
+struct Assignment<DstXprType, Solve<Transpose<const DecType>,RhsType>, internal::assign_op<Scalar>, Dense2Dense, Scalar>
+{
+  typedef Solve<Transpose<const DecType>,RhsType> SrcXprType;
+  static void run(DstXprType &dst, const SrcXprType &src, const internal::assign_op<Scalar> &)
+  {
+    src.dec().nestedExpression().template _solve_impl_transposed<false>(src.rhs(), dst);
+  }
+};
+
+// Specialization for "dst = dec.adjoint().solve(rhs)"
+template<typename DstXprType, typename DecType, typename RhsType, typename Scalar>
+struct Assignment<DstXprType, Solve<CwiseUnaryOp<internal::scalar_conjugate_op<typename DecType::Scalar>, const Transpose<const DecType> >,RhsType>, internal::assign_op<Scalar>, Dense2Dense, Scalar>
+{
+  typedef Solve<CwiseUnaryOp<internal::scalar_conjugate_op<typename DecType::Scalar>, const Transpose<const DecType> >,RhsType> SrcXprType;
+  static void run(DstXprType &dst, const SrcXprType &src, const internal::assign_op<Scalar> &)
+  {
+    src.dec().nestedExpression().nestedExpression().template _solve_impl_transposed<true>(src.rhs(), dst);
   }
 };
 

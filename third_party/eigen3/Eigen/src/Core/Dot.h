@@ -178,9 +178,11 @@ struct lpNorm_selector<Derived, Infinity>
 
 } // end namespace internal
 
-/** \returns the \f$ \ell^p \f$ norm of *this, that is, returns the p-th root of the sum of the p-th powers of the absolute values
-  *          of the coefficients of *this. If \a p is the special value \a Eigen::Infinity, this function returns the \f$ \ell^\infty \f$
-  *          norm, that is the maximum of the absolute values of the coefficients of *this.
+/** \returns the \b coefficient-wise \f$ \ell^p \f$ norm of \c *this, that is, returns the p-th root of the sum of the p-th powers of the absolute values
+  *          of the coefficients of \c *this. If \a p is the special value \a Eigen::Infinity, this function returns the \f$ \ell^\infty \f$
+  *          norm, that is the maximum of the absolute values of the coefficients of \c *this.
+  *
+  * \note For matrices, this function does not compute the <a href="https://en.wikipedia.org/wiki/Operator_norm">operator-norm</a>. That is, if \c *this is a matrix, then its coefficients are interpreted as a 1D vector. Nonetheless, you can easily compute the 1-norm and \f$\infty\f$-norm matrix operator norms using \link TutorialReductionsVisitorsBroadcastingReductionsNorm partial reductions \endlink.
   *
   * \sa norm()
   */

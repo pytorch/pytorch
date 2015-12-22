@@ -39,7 +39,7 @@ struct traits<Transpose<MatrixType> > : public traits<MatrixType>
     MaxRowsAtCompileTime = MatrixType::MaxColsAtCompileTime,
     MaxColsAtCompileTime = MatrixType::MaxRowsAtCompileTime,
     FlagsLvalueBit = is_lvalue<MatrixType>::value ? LvalueBit : 0,
-    Flags0 = MatrixTypeNestedPlain::Flags & ~(LvalueBit | NestByRefBit),
+    Flags0 = traits<MatrixTypeNestedPlain>::Flags & ~(LvalueBit | NestByRefBit),
     Flags1 = Flags0 | FlagsLvalueBit,
     Flags = Flags1 ^ RowMajorBit,
     InnerStrideAtCompileTime = inner_stride_at_compile_time<MatrixType>::ret,

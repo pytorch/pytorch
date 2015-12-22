@@ -50,6 +50,7 @@ class TensorExecutor<Expression, DefaultDevice, true>
 {
  public:
   typedef typename Expression::Index Index;
+  EIGEN_DEVICE_FUNC
   static inline void run(const Expression& expr, const DefaultDevice& device = DefaultDevice())
   {
     TensorEvaluator<Expression, DefaultDevice> evaluator(expr, device);
@@ -57,7 +58,7 @@ class TensorExecutor<Expression, DefaultDevice, true>
     if (needs_assign)
     {
       const Index size = array_prod(evaluator.dimensions());
-      static const int PacketSize = unpacket_traits<typename TensorEvaluator<Expression, DefaultDevice>::PacketReturnType>::size;
+      const int PacketSize = unpacket_traits<typename TensorEvaluator<Expression, DefaultDevice>::PacketReturnType>::size;
       const Index VectorizedSize = (size / PacketSize) * PacketSize;
 
       for (Index i = 0; i < VectorizedSize; i += PacketSize) {
@@ -149,7 +150,24 @@ class TensorExecutor<Expression, ThreadPoolDevice, Vectorizable>
 
 
 // GPU: the evaluation of the expression is offloaded to a GPU.
-#if defined(EIGEN_USE_GPU) && defined(__CUDACC__)
+#if defined(EIGEN_USE_GPU)
+
+template <typename Expression>
+class TensorExecutor<Expression, GpuDevice, false> {
+ public:
+  typedef typename Expression::Index Index;
+  static void run(const Expression& expr, const GpuDevice& device);
+};
+
+template <typename Expression>
+class TensorExecutor<Expression, GpuDevice, true> {
+ public:
+  typedef typename Expression::Index Index;
+  static void run(const Expression& expr, const GpuDevice& device);
+};
+
+#if defined(__CUDACC__)
+
 template <typename Evaluator, typename Index>
 __global__ void
 __launch_bounds__(1024)
@@ -193,48 +211,45 @@ EigenMetaKernel_Vectorizable(Evaluator memcopied_eval, Index size) {
   }
 }
 
-
-template<typename Expression>
-class TensorExecutor<Expression, GpuDevice, false>
+/*static*/
+template <typename Expression>
+inline void TensorExecutor<Expression, GpuDevice, false>::run(const Expression& expr, const GpuDevice& device)
 {
- public:
-  typedef typename Expression::Index Index;
-  static inline void run(const Expression& expr, const GpuDevice& device)
+  TensorEvaluator<Expression, GpuDevice> evaluator(expr, device);
+  const bool needs_assign = evaluator.evalSubExprsIfNeeded(NULL);
+  if (needs_assign)
   {
-    TensorEvaluator<Expression, GpuDevice> evaluator(expr, device);
-    const bool needs_assign = evaluator.evalSubExprsIfNeeded(NULL);
-    if (needs_assign)
-    {
-      const int num_blocks = device.getNumCudaMultiProcessors() * device.maxCudaThreadsPerMultiProcessor() / device.maxCudaThreadsPerBlock();
-      const int block_size = device.maxCudaThreadsPerBlock();
-      const Index size = array_prod(evaluator.dimensions());
-      LAUNCH_CUDA_KERNEL((EigenMetaKernel_NonVectorizable<TensorEvaluator<Expression, GpuDevice>, Index>), num_blocks, block_size, 0, device, evaluator, size);
-    }
-    evaluator.cleanup();
+    const int block_size = device.maxCudaThreadsPerBlock();
+    const int max_blocks = device.getNumCudaMultiProcessors() * device.maxCudaThreadsPerMultiProcessor() / block_size;
+    const Index size = array_prod(evaluator.dimensions());
+    // Create a least one block to ensure we won't crash if we're called with tensors of size 0.
+    const int num_blocks = numext::maxi<int>(numext::mini<int>(max_blocks, (size + block_size - 1) / block_size), 1);
+    LAUNCH_CUDA_KERNEL((EigenMetaKernel_NonVectorizable<TensorEvaluator<Expression, GpuDevice>, Index>), num_blocks, block_size, 0, device, evaluator, size);
   }
-};
+  evaluator.cleanup();
+}
 
+
+/*static*/
 template<typename Expression>
-class TensorExecutor<Expression, GpuDevice, true>
+inline void TensorExecutor<Expression, GpuDevice, true>::run(const Expression& expr, const GpuDevice& device)
 {
- public:
-  typedef typename Expression::Index Index;
-  static inline void run(const Expression& expr, const GpuDevice& device)
+  TensorEvaluator<Expression, GpuDevice> evaluator(expr, device);
+  const bool needs_assign = evaluator.evalSubExprsIfNeeded(NULL);
+  if (needs_assign)
   {
-    TensorEvaluator<Expression, GpuDevice> evaluator(expr, device);
-    const bool needs_assign = evaluator.evalSubExprsIfNeeded(NULL);
-    if (needs_assign)
-    {
-      const int num_blocks = device.getNumCudaMultiProcessors() * device.maxCudaThreadsPerMultiProcessor() / device.maxCudaThreadsPerBlock();
-      const int block_size = device.maxCudaThreadsPerBlock();
-      const Index size = array_prod(evaluator.dimensions());
-      LAUNCH_CUDA_KERNEL((EigenMetaKernel_Vectorizable<TensorEvaluator<Expression, GpuDevice>, Index>), num_blocks, block_size, 0, device, evaluator, size);
-    }
-    evaluator.cleanup();
+    const int block_size = device.maxCudaThreadsPerBlock();
+    const int max_blocks = device.getNumCudaMultiProcessors() * device.maxCudaThreadsPerMultiProcessor() / block_size;
+    const Index size = array_prod(evaluator.dimensions());
+    // Create a least one block to ensure we won't crash if we're called with tensors of size 0.
+    const int num_blocks = numext::maxi<int>(numext::mini<int>(max_blocks, (size + block_size - 1) / block_size), 1);
+    LAUNCH_CUDA_KERNEL((EigenMetaKernel_Vectorizable<TensorEvaluator<Expression, GpuDevice>, Index>), num_blocks, block_size, 0, device, evaluator, size);
   }
-};
+  evaluator.cleanup();
+}
 
-#endif
+#endif  // __CUDACC__
+#endif  // EIGEN_USE_GPU
 
 } // end namespace internal
 

@@ -348,7 +348,7 @@ void matrix_exp_compute(const MatrixType& arg, ResultType &result)
   typedef typename NumTraits<Scalar>::Real RealScalar;
   typedef typename std::complex<RealScalar> ComplexScalar;
   if (sizeof(RealScalar) > 14) {
-    result = arg.matrixFunction(StdStemFunctions<ComplexScalar>::exp);
+    result = arg.matrixFunction(internal::stem_function_exp<ComplexScalar>);
     return;
   }
 #endif

@@ -37,6 +37,11 @@ class Config(object):
     # to be built without RTTI. If you don't know, leave USE_RTTI True.
     USE_RTTI = False
 
+    # Whether to use openmp or not. Note that currently, a lot of Caffe2's code
+    # is not using openmp, but the underlying Eigen library can take advantage
+    # of that.
+    USE_OPENMP = False
+
     # Manually specified defines.
     DEFINES = []
 

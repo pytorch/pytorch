@@ -39,32 +39,16 @@ EIGEN_STRONG_INLINE Derived& operator Op(const Other& scalar) \
 #define EIGEN_SPARSE_INHERIT_ASSIGNMENT_OPERATORS(Derived) \
 EIGEN_SPARSE_INHERIT_ASSIGNMENT_OPERATOR(Derived, =)
 
-// TODO this is mostly the same as EIGEN_GENERIC_PUBLIC_INTERFACE
-#define _EIGEN_SPARSE_PUBLIC_INTERFACE(Derived) \
-  typedef typename Eigen::internal::traits<Derived >::Scalar Scalar; \
-  typedef typename Eigen::NumTraits<Scalar>::Real RealScalar; \
-  typedef typename Eigen::internal::ref_selector<Derived >::type Nested; \
-  typedef typename Eigen::internal::traits<Derived >::StorageKind StorageKind; \
-  typedef typename Eigen::internal::traits<Derived >::StorageIndex StorageIndex; \
-  enum { RowsAtCompileTime = Eigen::internal::traits<Derived >::RowsAtCompileTime, \
-        ColsAtCompileTime = Eigen::internal::traits<Derived >::ColsAtCompileTime, \
-        Flags = Eigen::internal::traits<Derived>::Flags, \
-        SizeAtCompileTime = Base::SizeAtCompileTime, \
-        IsVectorAtCompileTime = Base::IsVectorAtCompileTime }; \
-  using Base::derived; \
-  using Base::const_cast_derived; \
-  using Base::convert_index;
-  
-#define EIGEN_SPARSE_PUBLIC_INTERFACE(Derived) \
-  typedef Eigen::SparseMatrixBase<Derived > Base; \
-  _EIGEN_SPARSE_PUBLIC_INTERFACE(Derived)
 
+#define EIGEN_SPARSE_PUBLIC_INTERFACE(Derived) \
+  EIGEN_GENERIC_PUBLIC_INTERFACE(Derived)
+
+  
 const int CoherentAccessPattern     = 0x1;
 const int InnerRandomAccessPattern  = 0x2 | CoherentAccessPattern;
 const int OuterRandomAccessPattern  = 0x4 | CoherentAccessPattern;
 const int RandomAccessPattern       = 0x8 | OuterRandomAccessPattern | InnerRandomAccessPattern;
 
-template<typename Derived> class SparseMatrixBase;
 template<typename _Scalar, int _Flags = 0, typename _StorageIndex = int>  class SparseMatrix;
 template<typename _Scalar, int _Flags = 0, typename _StorageIndex = int>  class DynamicSparseMatrix;
 template<typename _Scalar, int _Flags = 0, typename _StorageIndex = int>  class SparseVector;
@@ -89,20 +73,20 @@ template<typename MatrixType,int UpLo> class SparseSymmetricPermutationProduct;
 
 namespace internal {
 
-template<typename T,int Rows,int Cols> struct sparse_eval;
+template<typename T,int Rows,int Cols,int Flags> struct sparse_eval;
 
 template<typename T> struct eval<T,Sparse>
-  : public sparse_eval<T, traits<T>::RowsAtCompileTime,traits<T>::ColsAtCompileTime>
+  : sparse_eval<T, traits<T>::RowsAtCompileTime,traits<T>::ColsAtCompileTime,traits<T>::Flags>
 {};
 
-template<typename T,int Cols> struct sparse_eval<T,1,Cols> {
+template<typename T,int Cols,int Flags> struct sparse_eval<T,1,Cols,Flags> {
     typedef typename traits<T>::Scalar _Scalar;
     typedef typename traits<T>::StorageIndex _StorageIndex;
   public:
     typedef SparseVector<_Scalar, RowMajor, _StorageIndex> type;
 };
 
-template<typename T,int Rows> struct sparse_eval<T,Rows,1> {
+template<typename T,int Rows,int Flags> struct sparse_eval<T,Rows,1,Flags> {
     typedef typename traits<T>::Scalar _Scalar;
     typedef typename traits<T>::StorageIndex _StorageIndex;
   public:
@@ -110,15 +94,15 @@ template<typename T,int Rows> struct sparse_eval<T,Rows,1> {
 };
 
 // TODO this seems almost identical to plain_matrix_type<T, Sparse>
-template<typename T,int Rows,int Cols> struct sparse_eval {
+template<typename T,int Rows,int Cols,int Flags> struct sparse_eval {
     typedef typename traits<T>::Scalar _Scalar;
     typedef typename traits<T>::StorageIndex _StorageIndex;
-    enum { _Options = ((traits<T>::Flags&RowMajorBit)==RowMajorBit) ? RowMajor : ColMajor };
+    enum { _Options = ((Flags&RowMajorBit)==RowMajorBit) ? RowMajor : ColMajor };
   public:
     typedef SparseMatrix<_Scalar, _Options, _StorageIndex> type;
 };
 
-template<typename T> struct sparse_eval<T,1,1> {
+template<typename T,int Flags> struct sparse_eval<T,1,1,Flags> {
     typedef typename traits<T>::Scalar _Scalar;
   public:
     typedef Matrix<_Scalar, 1, 1> type;
@@ -133,10 +117,15 @@ template<typename T> struct plain_matrix_type<T,Sparse>
     typedef SparseMatrix<_Scalar, _Options, _StorageIndex> type;
 };
 
+template<typename T>
+struct plain_object_eval<T,Sparse>
+  : sparse_eval<T, traits<T>::RowsAtCompileTime,traits<T>::ColsAtCompileTime, evaluator<T>::Flags>
+{};
+
 template<typename Decomposition, typename RhsType>
 struct solve_traits<Decomposition,RhsType,Sparse>
 {
-  typedef typename sparse_eval<RhsType, RhsType::RowsAtCompileTime, RhsType::ColsAtCompileTime>::type PlainObject;
+  typedef typename sparse_eval<RhsType, RhsType::RowsAtCompileTime, RhsType::ColsAtCompileTime,traits<RhsType>::Flags>::type PlainObject;
 };
 
 template<typename Derived>

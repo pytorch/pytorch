@@ -209,6 +209,11 @@ class Env(object):
             self.DEFINES.append("-DGOOGLE_PROTOBUF_NO_RTTI")
             self.CFLAGS.append("-fno-rtti")
 
+        # OpenMP
+        if Config.USE_OPENMP:
+            self.CFLAGS.append("-fopenmp")
+            self.LIBS.append("gomp")
+
         # MPI
         self.MPIRUN = Config.MPIRUN
         ret, out = GetSubprocessOutput(

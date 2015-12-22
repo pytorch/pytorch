@@ -56,6 +56,8 @@ template<typename _Scalar, int _Options, typename _StorageIndex>
  class  DynamicSparseMatrix
   : public SparseMatrixBase<DynamicSparseMatrix<_Scalar, _Options, _StorageIndex> >
 {
+    typedef SparseMatrixBase<DynamicSparseMatrix> Base;
+    using Base::convert_index;
   public:
     EIGEN_SPARSE_PUBLIC_INTERFACE(DynamicSparseMatrix)
     // FIXME: why are these operator already alvailable ???

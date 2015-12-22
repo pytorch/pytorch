@@ -15,6 +15,33 @@ using Eigen::Tensor;
 using Eigen::RowMajor;
 
 
+static void test_0d()
+{
+  TensorFixedSize<float, Sizes<> > scalar1;
+  TensorFixedSize<float, Sizes<>, RowMajor> scalar2;
+  VERIFY_IS_EQUAL(scalar1.rank(), 0);
+
+  scalar1() = 7.0;
+  scalar2() = 13.0;
+
+  // Test against shallow copy.
+  TensorFixedSize<float, Sizes<> > copy = scalar1;
+  VERIFY_IS_NOT_EQUAL(scalar1.data(), copy.data());
+  VERIFY_IS_APPROX(scalar1(), copy());
+  copy = scalar1;
+  VERIFY_IS_NOT_EQUAL(scalar1.data(), copy.data());
+  VERIFY_IS_APPROX(scalar1(), copy());
+
+  TensorFixedSize<float, Sizes<> > scalar3 = scalar1.sqrt();
+  TensorFixedSize<float, Sizes<>, RowMajor> scalar4 = scalar2.sqrt();
+  VERIFY_IS_EQUAL(scalar3.rank(), 0);
+  VERIFY_IS_APPROX(scalar3(), sqrtf(7.0));
+  VERIFY_IS_APPROX(scalar4(), sqrtf(13.0));
+
+  scalar3 = scalar1 + scalar2;
+  VERIFY_IS_APPROX(scalar3(), 7.0f + 13.0f);
+}
+
 static void test_1d()
 {
   TensorFixedSize<float, Sizes<6> > vec1;
@@ -223,6 +250,7 @@ static void test_array()
 
 void test_cxx11_tensor_fixed_size()
 {
+  CALL_SUBTEST(test_0d());
   CALL_SUBTEST(test_1d());
   CALL_SUBTEST(test_tensor_map());
   CALL_SUBTEST(test_2d());

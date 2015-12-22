@@ -157,14 +157,15 @@ template<typename _MatrixType> class SelfAdjointEigenSolver
       *
       * \sa compute(const MatrixType&, int)
       */
+    template<typename InputType>
     EIGEN_DEVICE_FUNC
-    explicit SelfAdjointEigenSolver(const MatrixType& matrix, int options = ComputeEigenvectors)
+    explicit SelfAdjointEigenSolver(const EigenBase<InputType>& matrix, int options = ComputeEigenvectors)
       : m_eivec(matrix.rows(), matrix.cols()),
         m_eivalues(matrix.cols()),
         m_subdiag(matrix.rows() > 1 ? matrix.rows() - 1 : 1),
         m_isInitialized(false)
     {
-      compute(matrix, options);
+      compute(matrix.derived(), options);
     }
 
     /** \brief Computes eigendecomposition of given matrix.
@@ -197,8 +198,9 @@ template<typename _MatrixType> class SelfAdjointEigenSolver
       *
       * \sa SelfAdjointEigenSolver(const MatrixType&, int)
       */
+    template<typename InputType>
     EIGEN_DEVICE_FUNC
-    SelfAdjointEigenSolver& compute(const MatrixType& matrix, int options = ComputeEigenvectors);
+    SelfAdjointEigenSolver& compute(const EigenBase<InputType>& matrix, int options = ComputeEigenvectors);
     
     /** \brief Computes eigendecomposition of given matrix using a closed-form algorithm
       *
@@ -389,11 +391,14 @@ static void tridiagonal_qr_step(RealScalar* diag, RealScalar* subdiag, Index sta
 }
 
 template<typename MatrixType>
+template<typename InputType>
 EIGEN_DEVICE_FUNC
 SelfAdjointEigenSolver<MatrixType>& SelfAdjointEigenSolver<MatrixType>
-::compute(const MatrixType& matrix, int options)
+::compute(const EigenBase<InputType>& a_matrix, int options)
 {
   check_template_parameters();
+  
+  const InputType &matrix(a_matrix.derived());
   
   using std::abs;
   eigen_assert(matrix.cols() == matrix.rows());
@@ -406,7 +411,7 @@ SelfAdjointEigenSolver<MatrixType>& SelfAdjointEigenSolver<MatrixType>
 
   if(n==1)
   {
-    m_eivalues.coeffRef(0,0) = numext::real(matrix.coeff(0,0));
+    m_eivalues.coeffRef(0,0) = numext::real(matrix(0,0));
     if(computeEigenvectors)
       m_eivec.setOnes(n,n);
     m_info = Success;

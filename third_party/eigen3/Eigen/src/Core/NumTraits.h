@@ -157,9 +157,9 @@ struct NumTraits<Array<Scalar, Rows, Cols, Options, MaxRows, MaxCols> >
     IsInteger = NumTraits<Scalar>::IsInteger,
     IsSigned  = NumTraits<Scalar>::IsSigned,
     RequireInitialization = 1,
-    ReadCost = ArrayType::SizeAtCompileTime==Dynamic ? Dynamic : ArrayType::SizeAtCompileTime * NumTraits<Scalar>::ReadCost,
-    AddCost  = ArrayType::SizeAtCompileTime==Dynamic ? Dynamic : ArrayType::SizeAtCompileTime * NumTraits<Scalar>::AddCost,
-    MulCost  = ArrayType::SizeAtCompileTime==Dynamic ? Dynamic : ArrayType::SizeAtCompileTime * NumTraits<Scalar>::MulCost
+    ReadCost = ArrayType::SizeAtCompileTime==Dynamic ? HugeCost : ArrayType::SizeAtCompileTime * NumTraits<Scalar>::ReadCost,
+    AddCost  = ArrayType::SizeAtCompileTime==Dynamic ? HugeCost : ArrayType::SizeAtCompileTime * NumTraits<Scalar>::AddCost,
+    MulCost  = ArrayType::SizeAtCompileTime==Dynamic ? HugeCost : ArrayType::SizeAtCompileTime * NumTraits<Scalar>::MulCost
   };
   
   static inline RealScalar epsilon() { return NumTraits<RealScalar>::epsilon(); }

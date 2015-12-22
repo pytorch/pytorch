@@ -8,8 +8,8 @@
 // Public License v. 2.0. If a copy of the MPL was not distributed
 // with this file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-#ifndef EIGEN_CXX11_TENSOR_MODULE
-#define EIGEN_CXX11_TENSOR_MODULE
+//#ifndef EIGEN_CXX11_TENSOR_MODULE
+//#define EIGEN_CXX11_TENSOR_MODULE
 
 #include "Core"
 
@@ -57,15 +57,19 @@
 #endif
 
 
+#include "src/Tensor/TensorMacros.h"
 #include "src/Tensor/TensorForwardDeclarations.h"
 #include "src/Tensor/TensorMeta.h"
-#include "src/Tensor/TensorDeviceType.h"
+#include "src/Tensor/TensorDeviceDefault.h"
+#include "src/Tensor/TensorDeviceThreadPool.h"
+#include "src/Tensor/TensorDeviceCuda.h"
 #include "src/Tensor/TensorIndexList.h"
 #include "src/Tensor/TensorDimensionList.h"
 #include "src/Tensor/TensorDimensions.h"
 #include "src/Tensor/TensorInitializer.h"
 #include "src/Tensor/TensorTraits.h"
 #include "src/Tensor/TensorFunctors.h"
+#include "src/Tensor/TensorUInt128.h"
 #include "src/Tensor/TensorIntDiv.h"
 
 #include "src/Tensor/TensorBase.h"
@@ -73,6 +77,7 @@
 #include "src/Tensor/TensorEvaluator.h"
 #include "src/Tensor/TensorExpr.h"
 #include "src/Tensor/TensorReduction.h"
+#include "src/Tensor/TensorReductionCuda.h"
 #include "src/Tensor/TensorArgMax.h"
 #include "src/Tensor/TensorConcatenation.h"
 #include "src/Tensor/TensorContraction.h"
@@ -80,6 +85,7 @@
 #include "src/Tensor/TensorContractionCuda.h"
 #include "src/Tensor/TensorConversion.h"
 #include "src/Tensor/TensorConvolution.h"
+#include "src/Tensor/TensorFFT.h"
 #include "src/Tensor/TensorPatch.h"
 #include "src/Tensor/TensorImagePatch.h"
 #include "src/Tensor/TensorVolumePatch.h"
@@ -111,4 +117,4 @@
 
 #include <Eigen/src/Core/util/ReenableStupidWarnings.h>
 
-#endif // EIGEN_CXX11_TENSOR_MODULE
+//#endif // EIGEN_CXX11_TENSOR_MODULE

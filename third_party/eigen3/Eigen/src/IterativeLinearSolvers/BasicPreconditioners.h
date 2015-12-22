@@ -23,6 +23,8 @@ namespace Eigen {
   *
   * \tparam _Scalar the type of the scalar.
   *
+  * \implsparsesolverconcept
+  *
   * This preconditioner is suitable for both selfadjoint and general problems.
   * The diagonal entries are pre-inverted and stored into a dense vector.
   *
@@ -37,8 +39,10 @@ class DiagonalPreconditioner
     typedef Matrix<Scalar,Dynamic,1> Vector;
   public:
     typedef typename Vector::StorageIndex StorageIndex;
-    // this typedef is only to export the scalar type and compile-time dimensions to solve_retval
-    typedef Matrix<Scalar,Dynamic,Dynamic> MatrixType;
+    enum {
+      ColsAtCompileTime = Dynamic,
+      MaxColsAtCompileTime = Dynamic
+    };
 
     DiagonalPreconditioner() : m_isInitialized(false) {}
 
@@ -114,6 +118,8 @@ class DiagonalPreconditioner
   *
   * \tparam _Scalar the type of the scalar.
   *
+  * \implsparsesolverconcept
+  *
   * The diagonal entries are pre-inverted and stored into a dense vector.
   * 
   * \sa class LeastSquaresConjugateGradient, class DiagonalPreconditioner
@@ -171,6 +177,8 @@ class LeastSquareDiagonalPreconditioner : public DiagonalPreconditioner<_Scalar>
 
 /** \ingroup IterativeLinearSolvers_Module
   * \brief A naive preconditioner which approximates any matrix as the identity matrix
+  *
+  * \implsparsesolverconcept
   *
   * \sa class DiagonalPreconditioner
   */

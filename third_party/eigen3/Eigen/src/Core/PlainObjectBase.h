@@ -263,7 +263,6 @@ class PlainObjectBase : public internal::dense_xpr_base<Derived>::type
         m_storage.resize(size, rows, cols);
         if(size_changed) EIGEN_INITIALIZE_COEFFS_IF_THAT_OPTION_IS_ENABLED
       #else
-        internal::check_rows_cols_for_overflow<MaxSizeAtCompileTime>::run(rows, cols);
         m_storage.resize(rows*cols, rows, cols);
       #endif
     }
@@ -450,6 +449,10 @@ class PlainObjectBase : public internal::dense_xpr_base<Derived>::type
       return Base::operator=(func);
     }
 
+    // Prevent user from trying to instantiate PlainObjectBase objects
+    // by making all its constructor protected. See bug 1074.
+  protected:
+
     EIGEN_DEVICE_FUNC
     EIGEN_STRONG_INLINE PlainObjectBase() : m_storage()
     {
@@ -496,17 +499,6 @@ class PlainObjectBase : public internal::dense_xpr_base<Derived>::type
 //       EIGEN_INITIALIZE_COEFFS_IF_THAT_OPTION_IS_ENABLED
     }
 
-    /** \copydoc MatrixBase::operator=(const EigenBase<OtherDerived>&)
-      */
-    template<typename OtherDerived>
-    EIGEN_DEVICE_FUNC 
-    EIGEN_STRONG_INLINE Derived& operator=(const EigenBase<OtherDerived> &other)
-    {
-      _resize_to_match(other);
-      Base::operator=(other.derived());
-      return this->derived();
-    }
-
     /** \sa PlainObjectBase::operator=(const EigenBase<OtherDerived>&) */
     template<typename OtherDerived>
     EIGEN_DEVICE_FUNC
@@ -520,7 +512,7 @@ class PlainObjectBase : public internal::dense_xpr_base<Derived>::type
 
     /** \sa PlainObjectBase::operator=(const EigenBase<OtherDerived>&) */
     template<typename OtherDerived>
-    EIGEN_DEVICE_FUNC 
+    EIGEN_DEVICE_FUNC
     EIGEN_STRONG_INLINE PlainObjectBase(const EigenBase<OtherDerived> &other)
       : m_storage()
     {
@@ -537,6 +529,19 @@ class PlainObjectBase : public internal::dense_xpr_base<Derived>::type
       // FIXME this does not automatically transpose vectors if necessary
       resize(other.rows(), other.cols());
       other.evalTo(this->derived());
+    }
+
+  public:
+
+    /** \copydoc MatrixBase::operator=(const EigenBase<OtherDerived>&)
+      */
+    template<typename OtherDerived>
+    EIGEN_DEVICE_FUNC 
+    EIGEN_STRONG_INLINE Derived& operator=(const EigenBase<OtherDerived> &other)
+    {
+      _resize_to_match(other);
+      Base::operator=(other.derived());
+      return this->derived();
     }
 
     /** \name Map

@@ -1,7 +1,7 @@
 // This file is part of Eigen, a lightweight C++ template library
 // for linear algebra.
 //
-// Copyright (C) 2008-2014 Gael Guennebaud <gael.guennebaud@inria.fr>
+// Copyright (C) 2008-2015 Gael Guennebaud <gael.guennebaud@inria.fr>
 //
 // This Source Code Form is subject to the terms of the Mozilla
 // Public License v. 2.0. If a copy of the MPL was not distributed
@@ -160,8 +160,8 @@ struct generic_product_impl<Lhs, Rhs, SparseShape, DenseShape, ProductType>
   template<typename Dest>
   static void scaleAndAddTo(Dest& dst, const Lhs& lhs, const Rhs& rhs, const Scalar& alpha)
   {
-    typedef typename nested_eval<Lhs,Dynamic>::type LhsNested;
-    typedef typename nested_eval<Rhs,Dynamic>::type RhsNested;
+    typedef typename nested_eval<Lhs,((Rhs::Flags&RowMajorBit)==0) ? 1 : Rhs::ColsAtCompileTime>::type LhsNested;
+    typedef typename nested_eval<Rhs,((Lhs::Flags&RowMajorBit)==0) ? 1 : Dynamic>::type RhsNested;
     LhsNested lhsNested(lhs);
     RhsNested rhsNested(rhs);
     internal::sparse_time_dense_product(lhsNested, rhsNested, dst, alpha);
@@ -182,8 +182,8 @@ struct generic_product_impl<Lhs, Rhs, DenseShape, SparseShape, ProductType>
   template<typename Dst>
   static void scaleAndAddTo(Dst& dst, const Lhs& lhs, const Rhs& rhs, const Scalar& alpha)
   {
-    typedef typename nested_eval<Lhs,Dynamic>::type LhsNested;
-    typedef typename nested_eval<Rhs,Dynamic>::type RhsNested;
+    typedef typename nested_eval<Lhs,((Rhs::Flags&RowMajorBit)==0) ? Dynamic : 1>::type LhsNested;
+    typedef typename nested_eval<Rhs,((Lhs::Flags&RowMajorBit)==RowMajorBit) ? 1 : Lhs::RowsAtCompileTime>::type RhsNested;
     LhsNested lhsNested(lhs);
     RhsNested rhsNested(rhs);
     
@@ -221,7 +221,7 @@ protected:
 public:
   enum {
     Flags = NeedToTranspose ? RowMajorBit : 0,
-    CoeffReadCost = Dynamic
+    CoeffReadCost = HugeCost
   };
   
   class InnerIterator : public LhsIterator
@@ -263,12 +263,16 @@ public:
   
   sparse_dense_outer_product_evaluator(const Lhs1 &lhs, const ActualRhs &rhs)
      : m_lhs(lhs), m_lhsXprImpl(m_lhs), m_rhsXprImpl(rhs)
-  {}
+  {
+    EIGEN_INTERNAL_CHECK_COST_VALUE(CoeffReadCost);
+  }
   
   // transpose case
   sparse_dense_outer_product_evaluator(const ActualRhs &rhs, const Lhs1 &lhs)
      : m_lhs(lhs), m_lhsXprImpl(m_lhs), m_rhsXprImpl(rhs)
-  {}
+  {
+    EIGEN_INTERNAL_CHECK_COST_VALUE(CoeffReadCost);
+  }
     
 protected:
   const LhsArg m_lhs;
@@ -278,7 +282,7 @@ protected:
 
 // sparse * dense outer product
 template<typename Lhs, typename Rhs>
-struct product_evaluator<Product<Lhs, Rhs, DefaultProduct>, OuterProduct, SparseShape, DenseShape, typename traits<Lhs>::Scalar, typename traits<Rhs>::Scalar> 
+struct product_evaluator<Product<Lhs, Rhs, DefaultProduct>, OuterProduct, SparseShape, DenseShape>
   : sparse_dense_outer_product_evaluator<Lhs,Rhs, Lhs::IsRowMajor>
 {
   typedef sparse_dense_outer_product_evaluator<Lhs,Rhs, Lhs::IsRowMajor> Base;
@@ -293,7 +297,7 @@ struct product_evaluator<Product<Lhs, Rhs, DefaultProduct>, OuterProduct, Sparse
 };
 
 template<typename Lhs, typename Rhs>
-struct product_evaluator<Product<Lhs, Rhs, DefaultProduct>, OuterProduct, DenseShape, SparseShape, typename traits<Lhs>::Scalar, typename traits<Rhs>::Scalar> 
+struct product_evaluator<Product<Lhs, Rhs, DefaultProduct>, OuterProduct, DenseShape, SparseShape>
   : sparse_dense_outer_product_evaluator<Lhs,Rhs, Rhs::IsRowMajor>
 {
   typedef sparse_dense_outer_product_evaluator<Lhs,Rhs, Rhs::IsRowMajor> Base;

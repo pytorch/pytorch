@@ -33,7 +33,10 @@ std::ostream& operator << (std::ostream& os, const TensorBase<T, ReadOnlyAccesso
   const Index total_size = internal::array_prod(tensor.dimensions());
 
   // Print the tensor as a 1d vector or a 2d matrix.
-  if (internal::array_size<Dimensions>::value == 1) {
+  static const int rank = internal::array_size<Dimensions>::value;
+  if (rank == 0) {
+    os << tensor.coeff(0);
+  } else if (rank == 1) {
     Map<const Array<Scalar, Dynamic, 1> > array(const_cast<Scalar*>(tensor.data()), total_size);
     os << array;
   } else {

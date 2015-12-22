@@ -1,3 +1,10 @@
+// This file is part of Eigen, a lightweight C++ template library
+// for linear algebra.
+//
+// This Source Code Form is subject to the terms of the Mozilla
+// Public License v. 2.0. If a copy of the MPL was not distributed
+// with this file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
 #ifndef EIGEN_PARDISOSUPPORT_MODULE_H
 #define EIGEN_PARDISOSUPPORT_MODULE_H
 
@@ -6,8 +13,6 @@
 #include "src/Core/util/DisableStupidWarnings.h"
 
 #include <mkl_pardiso.h>
-
-#include <unsupported/Eigen/SparseExtra>
 
 /** \ingroup Support_modules
   * \defgroup PardisoSupport_Module PardisoSupport module
