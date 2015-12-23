@@ -36,7 +36,7 @@ Test binaries are located in the subdirectories nccl/build/test and nccl/build/m
 
 ```shell
 $ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:./build/lib
-$ ./build/test/allreduce_test
+$ ./build/test/all_reduce_test
 Error: must specify at least data size in bytes!
 
 Tests nccl AllReduce with user supplied arguments.
