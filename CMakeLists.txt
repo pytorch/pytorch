@@ -134,6 +134,7 @@ INSTALL(FILES
           THCDeviceTensor-inl.cuh       
           THCDeviceTensorUtils.cuh
           THCDeviceTensorUtils-inl.cuh
+          THCGenerateAllTypes.h
           DESTINATION "${THC_INSTALL_INCLUDE_SUBDIR}/THC")
 
 INSTALL(FILES
