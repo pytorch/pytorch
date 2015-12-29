@@ -83,6 +83,7 @@ TH_API void THTensor_(randperm)(THTensor *r_, THGenerator *_generator, long n);
 
 TH_API void THTensor_(reshape)(THTensor *r_, THTensor *t, THLongStorage *size);
 TH_API void THTensor_(sort)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int dimension, int descendingOrder);
+TH_API void THTensor_(topk)(THTensor *rt_, THLongTensor *ri_, THTensor *t, long k, int dim, int dir, int sorted);
 TH_API void THTensor_(tril)(THTensor *r_, THTensor *t, long k);
 TH_API void THTensor_(triu)(THTensor *r_, THTensor *t, long k);
 TH_API void THTensor_(cat)(THTensor *r_, THTensor *ta, THTensor *tb, int dimension);

@@ -1746,6 +1746,32 @@ void THTensor_(median)(THTensor *values_, THLongTensor *indices_, THTensor *t, i
   THTensor_(kthvalue)(values_, indices_, t, k, dimension);
 }
 
+void THTensor_(topk)(THTensor *rt_, THLongTensor *ri_, THTensor *t, long k, int dim, int dir, int sorted)
+{
+  int numDims = THTensor_(nDimension)(t);
+  THArgCheck(dim >= 0 && dim < numDims, 3, "dim not in range");
+
+  long sliceSize = THTensor_(size)(t, dim);
+  THArgCheck(k > 0 && k <= sliceSize, 2, "k not in range for dimension");
+
+  /* Just implement in terms of sort and narrow for now */
+  THTensor* tmpResults = THTensor_(new)();
+  THLongTensor* tmpIndices = THLongTensor_new();
+
+  THLongStorage* topKSize = THTensor_(newSizeOf)(t);
+  THLongStorage_set(topKSize, dim, k);
+  THTensor_(resize)(rt_, topKSize, NULL);
+  THLongTensor_resize(ri_, topKSize, NULL);
+  THLongStorage_free(topKSize);
+
+  THTensor_(sort)(tmpResults, tmpIndices, t, dim, dir);
+  THTensor_(narrow)(tmpResults, NULL, dim, 0, k);
+  THLongTensor_narrow(tmpIndices, NULL, dim, 0, k);
+
+  THTensor_(freeCopyTo)(tmpResults, rt_);
+  THLongTensor_freeCopyTo(tmpIndices, ri_);
+}
+
 void THTensor_(tril)(THTensor *r_, THTensor *t, long k)
 {
   long t_size_0, t_size_1;
