@@ -2,23 +2,12 @@
 #define TH_GENERIC_FILE "generic/ClassNLLCriterion.c"
 #else
 
-
-static int nn_(ClassNLLCriterion_updateOutput)(lua_State *L)
+void THNN_(ClassNLLCriterion_updateOutput)(THNNState *state, THTensor *input, THIndexTensor *target, THTensor *output, bool sizeAverage, THTensor *weights, THTensor *total_weight)
 {
-  THTensor *input = luaT_checkudata(L, 1, torch_Tensor);
-  THLongTensor *target = luaT_checkudata(L, 2, "torch.LongTensor");
-  THTensor *weights = NULL;
-  if (!lua_isnil(L, 3)) {
-    weights = luaT_checkudata(L, 3, torch_Tensor);
-  }
   int n_dims = THTensor_(nDimension)(input);
   int n_classes = THTensor_(size)(input, n_dims - 1);
 
-  int sizeAverage = lua_toboolean(L, 4);
-  THTensor *output = luaT_checkudata(L, 5, torch_Tensor);
-  THTensor *total_weight = luaT_checkudata(L, 6, torch_Tensor);
-
-  if (THLongTensor_nDimension(target) > 1) {
+  if (THIndexTensor_(nDimension)(target) > 1) {
     THError("multi-target not supported");
   }
   if (THTensor_(nDimension)(input) > 2) {
@@ -26,11 +15,11 @@ static int nn_(ClassNLLCriterion_updateOutput)(lua_State *L)
   }
 
   input = THTensor_(newContiguous)(input);
-  target = THLongTensor_newContiguous(target);
+  target = THIndexTensor_(newContiguous)(target);
   weights = weights ? THTensor_(newContiguous)(weights) : NULL;
 
   real *input_data = THTensor_(data)(input);
-  long *target_data = THLongTensor_data(target);
+  TH_index_t *target_data = THIndexTensor_(data)(target);
   real *weights_data = weights ? THTensor_(data)(weights) : NULL;
   real *output_data = THTensor_(data)(output);
   real *total_weight_data = THTensor_(data)(total_weight);
@@ -65,40 +54,25 @@ static int nn_(ClassNLLCriterion_updateOutput)(lua_State *L)
     THTensor_(free)(weights);
   }
   THTensor_(free)(input);
-  THLongTensor_free(target);
-
-  return 0;
+  THIndexTensor_(free)(target);
 }
 
-static int nn_(ClassNLLCriterion_updateGradInput)(lua_State *L)
+void THNN_(ClassNLLCriterion_updateGradInput)(THNNState *state, THTensor *input, THIndexTensor *target, THTensor *gradInput, bool sizeAverage, THTensor *weights, THTensor *total_weight)
 {
-  THTensor *input = luaT_checkudata(L, 1, torch_Tensor);
-  THLongTensor *target = luaT_checkudata(L, 2, "torch.LongTensor");
-  THTensor *weights = NULL;
-  if (!lua_isnil(L, 3)) {
-    weights = luaT_checkudata(L, 3, torch_Tensor);
-  }
-
   int n_dims = THTensor_(nDimension)(input);
   int n_classes = THTensor_(size)(input, n_dims - 1);
 
-  int sizeAverage = lua_toboolean(L, 4);
-  THTensor *total_weight = luaT_checkudata(L, 5, torch_Tensor);
-  THTensor *gradInput = luaT_checkudata(L, 6, torch_Tensor);
-  luaL_argcheck(
-    L,
-    THTensor_(isContiguous)(gradInput),
-    6,
-    "gradInput must be contiguous"
-  );
-
-  real* total_weight_data = THTensor_(data)(total_weight);
-
-  if (!(*total_weight_data > 0)) {
-    return 0;
+  if (!THTensor_(isContiguous)(gradInput)) {
+    THError("gradInput must be contiguous");
   }
 
-  if (THLongTensor_nDimension(target) > 1) {
+  real *total_weight_data = THTensor_(data)(total_weight);
+
+  if (!(*total_weight_data > 0)) {
+    return;
+  }
+
+  if (THIndexTensor_(nDimension)(target) > 1) {
     THError("multi-target not supported");
   }
 
@@ -106,10 +80,10 @@ static int nn_(ClassNLLCriterion_updateGradInput)(lua_State *L)
     THError("input tensor should be 1D or 2D");
   }
 
-  target = THLongTensor_newContiguous(target);
+  target = THIndexTensor_(newContiguous)(target);
   weights = weights ? THTensor_(newContiguous)(weights) : NULL;
 
-  long *target_data = THLongTensor_data(target);
+  TH_index_t *target_data = THIndexTensor_(data)(target);
   real *weights_data = weights ? THTensor_(data)(weights) : NULL;
   real *gradInput_data = THTensor_(data)(gradInput);
 
@@ -125,7 +99,7 @@ static int nn_(ClassNLLCriterion_updateGradInput)(lua_State *L)
     int n_target = THTensor_(size)(input, 1);
 
     int i;
-    for(i = 0; i < batch_size; i++){
+    for (i = 0; i < batch_size; i++){
       int cur_target = target_data[i] - 1;
 
       THAssert(cur_target >= 0 && cur_target < n_classes);
@@ -139,25 +113,10 @@ static int nn_(ClassNLLCriterion_updateGradInput)(lua_State *L)
     }
   }
 
-  THLongTensor_free(target);
+  THIndexTensor_(free)(target);
   if (weights) {
     THTensor_(free)(weights);
   }
-
-  return 0;
-}
-
-static const struct luaL_Reg nn_(ClassNLLCriterion__) [] = {
-  {"ClassNLLCriterion_updateOutput", nn_(ClassNLLCriterion_updateOutput)},
-  {"ClassNLLCriterion_updateGradInput", nn_(ClassNLLCriterion_updateGradInput)},
-  {NULL, NULL}
-};
-
-static void nn_(ClassNLLCriterion_init)(lua_State *L)
-{
-  luaT_pushmetatable(L, torch_Tensor);
-  luaT_registeratname(L, nn_(ClassNLLCriterion__), "nn");
-  lua_pop(L,1);
 }
 
 #endif

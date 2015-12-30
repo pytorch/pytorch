@@ -2,10 +2,6 @@
 #define TH_GENERIC_FILE "generic/THNN.h"
 #else
 
-#ifndef THIndexTensor
-#define THIndexTensor THLongTensor
-#endif
-
 TH_API void THNN_(Abs_updateOutput)(
           THNNState *state,
           THTensor *input,
@@ -28,5 +24,22 @@ TH_API void THNN_(AbsCriterion_updateGradInput)(
           THTensor *target,
           THTensor *gradInput,
           bool sizeAverage);
+
+TH_API void THNN_(ClassNLLCriterion_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THIndexTensor *target,
+          THTensor *output,
+          bool sizeAverage,
+          THTensor *weights,
+          THTensor *total_weight);
+TH_API void THNN_(ClassNLLCriterion_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THIndexTensor *target,
+          THTensor *gradInput,
+          bool sizeAverage,
+          THTensor *weights,
+          THTensor *total_weight);
 
 #endif
