@@ -1,4 +1,4 @@
-#include "utils.h"
+#include "THCUNN.h"
 #include <stdio.h>
 #include <assert.h>
 
@@ -105,34 +105,13 @@ __global__ void cunn_ClassNLLCriterion_updateGradInput_kernel(
   }
 }
 
-static int cunn_ClassNLLCriterion_updateOutput(lua_State *L) {
-  THCState *state = getCutorchState(L);
-  
-  THCudaTensor *input =
-    (THCudaTensor *)luaT_checkudata(L, 1, "torch.CudaTensor");
-  
-  THCudaTensor *target =
-    (THCudaTensor*)luaT_checkudata(L, 2, "torch.CudaTensor");
-
+void THNN_CudaClassNLLCriterion_updateOutput(THCState *state, THCudaTensor *input, THCudaTensor *target, THCudaTensor *output, bool sizeAverage, THCudaTensor *weights, THCudaTensor *total_weight) {
   if (THCudaTensor_nDimension(state, target) > 1) {
     THError("multi-target not supported");
-  }
-  
-  THCudaTensor *weights = NULL;
-  if (!lua_isnil(L, 3)) {
-    weights = (THCudaTensor *)luaT_checkudata(L, 3, "torch.CudaTensor");
   }
 
   int n_dims = THCudaTensor_nDimension(state, input);
   int n_classes = THCudaTensor_size(state, input, n_dims - 1);
-
-  int sizeAverage = lua_toboolean(L, 4);
-  
-  THCudaTensor *output = 
-    (THCudaTensor*)luaT_checkudata(L, 5, "torch.CudaTensor");
-  
-  THCudaTensor *total_weight = 
-    (THCudaTensor*)luaT_checkudata(L, 6, "torch.CudaTensor");
 
   if (weights) {
     THAssert(THCudaTensor_checkGPU(
@@ -143,7 +122,6 @@ static int cunn_ClassNLLCriterion_updateOutput(lua_State *L) {
       state, 4, input, target, output, total_weight
     ));
   }
-  
 
   if (THCudaTensor_nDimension(state, input) > 2) {
     THArgCheck(0, 2, "vector or matrix expected");
@@ -195,42 +173,17 @@ static int cunn_ClassNLLCriterion_updateOutput(lua_State *L) {
   }
   THCudaTensor_free(state, target);
   THCudaTensor_free(state, input);
-
-  return 0;
 }
 
-static int cunn_ClassNLLCriterion_updateGradInput(lua_State *L) {
-  THCState *state = getCutorchState(L);
-
-  THCudaTensor *input =
-      (THCudaTensor *)luaT_checkudata(L, 1, "torch.CudaTensor");
-
-  THCudaTensor *target = 
-    (THCudaTensor*)luaT_checkudata(L, 2, "torch.CudaTensor");
-
+void THNN_CudaClassNLLCriterion_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *target, THCudaTensor *gradInput, bool sizeAverage, THCudaTensor *weights, THCudaTensor *total_weight) {
   if (THCudaTensor_nDimension(state, target) > 1) {
     THError("multi-target not supported");
   }
   
-  THCudaTensor *weights = NULL;
-  if (!lua_isnil(L, 3)) {
-    weights = (THCudaTensor *)luaT_checkudata(L, 3, "torch.CudaTensor");
-  }
   int n_dims = THCudaTensor_nDimension(state, input);
   int n_classes = THCudaTensor_size(state, input, n_dims - 1);
-  
-  int sizeAverage = lua_toboolean(L, 4);
-  THCudaTensor *total_weight = 
-    (THCudaTensor*)luaT_checkudata(L, 5, "torch.CudaTensor");
-  THCudaTensor *gradInput = 
-    (THCudaTensor *)luaT_checkudata(L, 6, "torch.CudaTensor");
-  
-  luaL_argcheck(
-    L,
-    THCudaTensor_isContiguous(state, gradInput),
-    6,
-    "gradInput must be contiguous"
-  );
+
+  THArgCheck(THCudaTensor_isContiguous(state, gradInput), 4, "gradInput must be contiguous");
 
   if (weights) {
     THAssert(THCudaTensor_checkGPU(
@@ -286,18 +239,4 @@ static int cunn_ClassNLLCriterion_updateGradInput(lua_State *L) {
     THCudaTensor_free(state, weights);
   }
   THCudaTensor_free(state, target);
-  
-  return 0;
-}
-
-static const struct luaL_Reg cunn_ClassNLLCriterion__[] = {
-    {"ClassNLLCriterion_updateOutput", cunn_ClassNLLCriterion_updateOutput},
-    {"ClassNLLCriterion_updateGradInput",
-     cunn_ClassNLLCriterion_updateGradInput},
-    {NULL, NULL}};
-
-void cunn_ClassNLLCriterion_init(lua_State *L) {
-  luaT_pushmetatable(L, "torch.CudaTensor");
-  luaT_registeratname(L, cunn_ClassNLLCriterion__, "nn");
-  lua_pop(L, 1);
 }
