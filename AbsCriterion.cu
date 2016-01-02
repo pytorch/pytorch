@@ -8,16 +8,14 @@
 
 struct abs_functor
 {
-  abs_functor() {}
-
   __host__ __device__ float operator()(const float& x, const float& y) const
-    {
-      float z = x-y;
-      return z >= 0 ? z : -z;
-    }
+  {
+    float z = x-y;
+    return z >= 0 ? z : -z;
+  }
 };
 
-void THNN_CudaAbsCriterion_updateOutput(THCState *state, THCudaTensor *input, THCudaTensor *target, float *output, bool sizeAverage)
+void THNN_CudaAbsCriterion_updateOutput(THCState *state, THCudaTensor *input, THCudaTensor *target, THCudaTensor *output, bool sizeAverage)
 {
   THAssert(THCudaTensor_checkGPU(state, 2, input, target));
 
@@ -36,20 +34,21 @@ void THNN_CudaAbsCriterion_updateOutput(THCState *state, THCudaTensor *input, TH
   THCudaTensor_free(state, input);
   THCudaTensor_free(state, target);
 
-  *output = sum;
+  THCudaTensor_set1d(state, output, 0, sum);
 }
-
 
 struct abs_updateGradInput_functor
 {
   const float norm;
 
-  abs_updateGradInput_functor(float norm_) : norm(norm_) {}
+  abs_updateGradInput_functor(float norm_)
+    : norm(norm_)
+  {}
 
   __host__ __device__ float operator()(const float& x, const float& y) const
-    {
-      return (x - y) >= 0 ? norm : -norm;
-    }
+  {
+    return (x - y) >= 0 ? norm : -norm;
+  }
 };
 
 void THNN_CudaAbsCriterion_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *target, THCudaTensor *gradInput, bool sizeAverage)
