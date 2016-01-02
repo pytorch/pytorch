@@ -2,7 +2,7 @@
 #define TH_GENERIC_FILE "generic/AbsCriterion.c"
 #else
 
-void THNN_(AbsCriterion_updateOutput)(THNNState *state, THTensor *input, THTensor *target, real *output, bool sizeAverage)
+void THNN_(AbsCriterion_updateOutput)(THNNState *state, THTensor *input, THTensor *target, THTensor *output, bool sizeAverage)
 {
   real sum = 0;
 
@@ -13,7 +13,7 @@ void THNN_(AbsCriterion_updateOutput)(THNNState *state, THTensor *input, THTenso
   if (sizeAverage)
     sum /= THTensor_(nElement)(input);
 
-  *output = sum;
+  THTensor_(set1d)(output, 0, sum);
 }
 
 void THNN_(AbsCriterion_updateGradInput)(THNNState *state, THTensor *input, THTensor *target, THTensor *gradInput, bool sizeAverage)
