@@ -42,4 +42,17 @@ TH_API void THNN_(ClassNLLCriterion_updateGradInput)(
           THTensor *weights,
           THTensor *total_weight);
 
+TH_API void THNN_(DistKLDivCriterion_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *target,
+          real *output,
+          bool sizeAverage);
+TH_API void THNN_(DistKLDivCriterion_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *target,
+          THTensor *gradInput,
+          bool sizeAverage);
+
 #endif

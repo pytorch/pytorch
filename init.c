@@ -12,3 +12,6 @@
 
 #include "generic/ClassNLLCriterion.c"
 #include "THGenerateFloatTypes.h"
+
+#include "generic/DistKLDivCriterion.c"
+#include "THGenerateFloatTypes.h"
