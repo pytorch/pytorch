@@ -67,4 +67,18 @@ TH_API void THNN_(HardShrink_updateGradInput)(
           THTensor *gradInput,
           real lambda);
 
+TH_API void THNN_(HardTanh_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          real min_val,
+          real max_val);
+TH_API void THNN_(HardTanh_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          real min_val,
+          real max_val);
+
 #endif

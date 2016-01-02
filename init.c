@@ -18,3 +18,6 @@
 
 #include "generic/HardShrink.c"
 #include "THGenerateFloatTypes.h"
+
+#include "generic/HardTanh.c"
+#include "THGenerateFloatTypes.h"
