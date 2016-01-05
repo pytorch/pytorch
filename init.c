@@ -16,6 +16,9 @@
 #include "generic/DistKLDivCriterion.c"
 #include "THGenerateFloatTypes.h"
 
+#include "generic/ELU.c"
+#include "THGenerateFloatTypes.h"
+
 #include "generic/HardShrink.c"
 #include "THGenerateFloatTypes.h"
 
@@ -23,4 +26,16 @@
 #include "THGenerateFloatTypes.h"
 
 #include "generic/L1Cost.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/LeakyReLU.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/LogSigmoid.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/LogSoftMax.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/LookupTable.c"
 #include "THGenerateFloatTypes.h"
