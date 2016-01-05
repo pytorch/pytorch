@@ -153,9 +153,11 @@ class OperatorBase {
  protected:                                                                    \
   bool InplaceAllowed(                                                         \
       const int input_id, const int output_id) const override {                \
-    const vector<std::pair<int, int> > kVec{__VA_ARGS__};                      \
-    auto p = std::make_pair(input_id, output_id);                              \
-    return (std::find(kVec.begin(), kVec.end(), p) != kVec.end());             \
+    const int kVec[][2] = {__VA_ARGS__, {-1, -1}};                             \
+    for (int i = 0; kVec[i][0] != -1; ++i) {                                   \
+      if (kVec[i][0] == input_id && kVec[i][1] == output_id) return true;      \
+    }                                                                          \
+    return false;                                                              \
   }
 
 // INPUT_TAGS and OUTPUT_TAGS are optional features to name the indices of the

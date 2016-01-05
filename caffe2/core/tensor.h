@@ -133,7 +133,26 @@ class Tensor {
    * This is a simple wrapper over the vector version by not needing to require
    * the user to create a vector.
    */
-  inline void Reshape(const int n) { Reshape(vector<int>{n}); }
+  inline void Reshape(const int n) { Reshape(vector<int>(1, n)); }
+
+  // TODO: the following functions are provided so one can avoid using
+  // initializer list, a C++11 feature that does not work well with some NVCC
+  // versions (currently cuda 7.0 on tegra). Revisit if necessary.
+  inline void Reshape(const int d0, const int d1) {
+    std::vector<int> v(2);
+    v[0] = d0; v[1] = d1;
+    Reshape(v);
+  }
+  inline void Reshape(const int d0, const int d1, const int d2) {
+    std::vector<int> v(3);
+    v[0] = d0; v[1] = d1; v[2] = d2;
+    Reshape(v);
+  }
+  inline void Reshape(const int d0, const int d1, const int d2, const int d3) {
+    std::vector<int> v(4);
+    v[0] = d0; v[1] = d1; v[2] = d2; v[3] = d3;
+    Reshape(v);
+  }
 
   /**
    * Reshape the tensor like the source tensor. Note that this is just a

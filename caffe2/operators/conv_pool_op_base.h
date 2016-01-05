@@ -100,11 +100,9 @@ class ConvPoolOpBase : public Operator<Context> {
     ComputeSizeAndPad(W, stride_w_, kernel_w_,
                       &pad_l_, &pad_r_, &output_width);
     if (channel_first) {
-      output->Reshape(
-          std::vector<int>{N, output_channel, output_height, output_width});
+      output->Reshape(N, output_channel, output_height, output_width);
     } else {
-      output->Reshape(
-          std::vector<int>{N, output_height, output_width, output_channel});
+      output->Reshape(N, output_height, output_width, output_channel);
     }
     //CAFFE_VLOG(2) << "In: N " << N << " C " << C << " H " << H << " W " << W;
     //CAFFE_VLOG(2) << "Out: C " << output_channel << " H " << output_height

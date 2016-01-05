@@ -67,6 +67,29 @@ inline PyObject* StdStringToPyString(const string& str) {
   return PyString_FromStringAndSize(str.c_str(), str.size());
 }
 
+template <typename T>
+inline void MakeStringInternal(std::stringstream& ss, const T& t) {
+  ss << t;
+}
+
+template <typename T, typename ... Args>
+inline void MakeStringInternal(std::stringstream& ss, const T& t, const Args&... args) {
+  MakeStringInternal(ss, t);
+  MakeStringInternal(ss, args...);
+}
+
+template <typename... Args>
+string MakeString(const Args&... args) {
+  std::stringstream ss;
+  MakeStringInternal(ss, args...);
+  return string(ss.str());
+}
+
+
+inline void PyErr_SetString(PyObject* type, const string& str) {
+  PyErr_SetString(type, str.c_str());
+}
+
 static_assert(sizeof(int) == sizeof(int32_t),
               "Yangqing made a loose assumption that int will always be int32 "
               "for numpy type mapping");
@@ -510,23 +533,31 @@ PyObject* FeedBlob(PyObject* self, PyObject* args) {
   switch (option.device_type()) {
   case caffe2::CPU:
     switch (data_type) {
+      case NPY_LONG:
+        static_assert(sizeof(long) == sizeof(int), "TODO: handle with platforms where long!=int");
+        // The actual computation is delegated to the NPY_INT case below.
       case NPY_INT:
         return FeedTensor<int, caffe2::CPUContext>(option, array, blob);
       case NPY_FLOAT:
         return FeedTensor<float, caffe2::CPUContext>(option, array, blob);
       default:
-        PyErr_SetString(PyExc_TypeError, "Unsupported numpy data type.");
+        PyErr_SetString(PyExc_TypeError,
+                        MakeString("Unsupported numpy data type: ", data_type, "."));
         return NULL;
     }
 #ifndef PYCAFFE2_CPU_ONLY
   case caffe2::CUDA:
     switch (data_type) {
+      case NPY_LONG:
+        static_assert(sizeof(long) == sizeof(int), "TODO: handle with platforms where long!=int");
+        // The actual computation is delegated to the NPY_INT case below.
       case NPY_INT:
         return FeedTensor<int, caffe2::CUDAContext>(option, array, blob);
       case NPY_FLOAT:
         return FeedTensor<float, caffe2::CUDAContext>(option, array, blob);
       default:
-        PyErr_SetString(PyExc_TypeError, "Unsupported numpy data type.");
+        PyErr_SetString(PyExc_TypeError,
+                        MakeString("Unsupported numpy data type: ", data_type, "."));
         return NULL;
     }
 #endif  // !PYCAFFE2_CPU_ONLY
