@@ -2,7 +2,7 @@
 #define TH_GENERIC_FILE "generic/LookupTable.c"
 #else
 
-static void nn_(LookupTable_resetCount)(int *count_data, THLongTensor *input)
+void THNN_(LookupTable_resetCount)(long *count_data, THLongTensor *input)
 {
   int i;
   long *input_data = THLongTensor_data(input);
@@ -20,28 +20,23 @@ static void nn_(LookupTable_resetCount)(int *count_data, THLongTensor *input)
   }
 }
 
-static int nn_(LookupTable_accGradParameters)(lua_State *L)
+void THNN_(LookupTable_accGradParameters)(THNNState *state, THLongTensor *input, THTensor *gradOutput, THTensor *gradWeight, real lr, bool shouldScaleGradByFreq, THLongTensor* count)
 {
   long i;
-  THLongTensor *input = luaT_checkudata(L, 2, "torch.LongTensor");
-  THTensor *gradOutput = luaT_checkudata(L, 3, torch_Tensor);
-  real lr = luaL_optnumber(L, 4, 1);
-  THTensor *gradWeight = luaT_getfieldcheckudata(L, 1, "gradWeight", torch_Tensor);
-  int *count_data = NULL;
-
-  if (luaT_getfieldcheckboolean(L, 1, "shouldScaleGradByFreq"))
+  long *count_data = NULL;
+  
+  if (shouldScaleGradByFreq)
   {
-    THIntTensor *count = luaT_getfieldcheckudata(L, 1, "_count", "torch.IntTensor");
-    THIntTensor_resize1d(count, gradWeight->size[0]);
-    count_data = THIntTensor_data(count);
+    THLongTensor_resize1d(count, gradWeight->size[0]);
+    count_data = THLongTensor_data(count);
   }
 
   if (!THTensor_(isContiguous)(gradWeight))
-    luaL_error(L, "gradWeight must be contiguous");
+    THError("gradWeight must be contiguous");
   if (!THLongTensor_isContiguous(input))
-    luaL_error(L, "input must be contiguous");
+    THError("input must be contiguous");
   if (input->nDimension != 1 && input->nDimension != 2)
-    luaL_error(L, "input must be a vector or matrix");
+    THError("input must be a vector or matrix");
 
   long *input_data = THLongTensor_data(input);
   long numel = THLongTensor_nElement(input);
@@ -59,7 +54,7 @@ static int nn_(LookupTable_accGradParameters)(lua_State *L)
   long stride = THTensor_(stride)(gradWeight, 0);
 
   if (count_data)
-    nn_(LookupTable_resetCount)(count_data, input);
+    THNN_(LookupTable_resetCount)(count_data, input);
 
 #ifdef _OPENMP
   if (numel > 1000)
@@ -81,14 +76,15 @@ static int nn_(LookupTable_accGradParameters)(lua_State *L)
         if (k >= start && k < end)
         {
           real scale = lr;
-          if (count_data) scale /= count_data[k];
+          if (count_data)
+            scale /= count_data[k];
           THBlas_(axpy)(stride, scale, go + i*stride, 1, gw + k*stride, 1);
         }
       }
     }
 
     THTensor_(free)(gradOutput);
-    return 0;
+    return;
   }
 #endif
 
@@ -96,24 +92,12 @@ static int nn_(LookupTable_accGradParameters)(lua_State *L)
   {
     long k = input_data[i] - 1;
     real scale = lr;
-    if (count_data) scale /= count_data[k];
+    if (count_data)
+      scale /= count_data[k];
     THBlas_(axpy)(stride, scale, go + i*stride, 1, gw + k*stride, 1);
   }
 
   THTensor_(free)(gradOutput);
-  return 0;
-}
-
-static const struct luaL_Reg nn_(LookupTable__) [] = {
-  {"LookupTable_accGradParameters", nn_(LookupTable_accGradParameters)},
-  {NULL, NULL}
-};
-
-static void nn_(LookupTable_init)(lua_State *L)
-{
-  luaT_pushmetatable(L, torch_Tensor);
-  luaT_registeratname(L, nn_(LookupTable__), "nn");
-  lua_pop(L,1);
 }
 
 #endif

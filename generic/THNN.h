@@ -42,6 +42,19 @@ TH_API void THNN_(ClassNLLCriterion_updateGradInput)(
           THTensor *weights,
           THTensor *total_weight);
 
+TH_API void THNN_(ELU_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          real alpha);
+TH_API void THNN_(ELU_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          THTensor *output,
+          real alpha);
+
 TH_API void THNN_(DistKLDivCriterion_updateOutput)(
           THNNState *state,
           THTensor *input,
@@ -90,5 +103,51 @@ TH_API void THNN_(L1Cost_updateGradInput)(
           THTensor *input,
           THTensor *gradOutput,
           THTensor *gradInput);
+
+TH_API void THNN_(LeakyReLU_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          real negval,
+          bool inplace);
+TH_API void THNN_(LeakyReLU_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          real negval,
+          bool inplace);
+
+TH_API void THNN_(LogSigmoid_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          THTensor *buffer);
+TH_API void THNN_(LogSigmoid_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          THTensor *buffer);
+
+TH_API void THNN_(LogSoftMax_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output);
+TH_API void THNN_(LogSoftMax_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          THTensor *output);
+
+TH_API void THNN_(LookupTable_accGradParameters)(
+          THNNState *state,
+          THLongTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradWeight,
+          real lr,
+          bool shouldScaleGradByFreq,
+          THLongTensor* count);
 
 #endif
