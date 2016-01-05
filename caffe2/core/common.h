@@ -24,9 +24,19 @@ using std::string;
 using std::unique_ptr;
 using std::vector;
 
-// Half float definition.
-static_assert(sizeof(unsigned short) == 2, "Short on this platform is not 16 bit.");
-typedef unsigned short float16;
+// Half float definition. Currently half float operators are mainly on CUDA
+// gpus.
+// The reason we do not directly use the cuda __half data type is because that
+// requires compilation with nvcc. The float16 data type should be compatible
+// with the cuda __half data type, but will allow us to refer to the data type
+// without the need of cuda.
+static_assert(sizeof(unsigned short) == 2,
+              "Short on this platform is not 16 bit.");
+typedef struct __f16 {
+  unsigned short x;
+} __attribute__((aligned(2))) float16;
+static_assert(sizeof(float16) == 2,
+              "This should always be satisfied - float16 safeguard.");
 
 // Just in order to mark things as not implemented. Do not use in final code.
 #define NOT_IMPLEMENTED CAFFE_LOG_FATAL << "Not Implemented."
