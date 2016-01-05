@@ -116,7 +116,7 @@ def GetWholeArchiveTemplate(cc, env):
 def GetRpathTemplate(cc, env):
     compiler_type = GetCompilerType(cc, env)
     if compiler_type == 'clang':
-        return '-rpath={path}'
+        return '-rpath {path}'
     elif compiler_type == 'g++':
         return '-Wl,-rpath={path}'
     else:
@@ -134,6 +134,17 @@ class Env(object):
                        '{0}', 'gen-' + Config.GENDIR)
         self.GENDIR = os.path.abspath(Config.GENDIR)
         self.Config = Config
+
+        self.ENV = dict(os.environ)
+        for key in Config.ENVIRONMENTAL_VARS:
+            self.ENV[key] = Config.ENVIRONMENTAL_VARS[key]
+        if 'PYTHONPATH' not in self.ENV:
+            self.ENV['PYTHONPATH'] = ''
+        self.ENV['PYTHONPATH'] = '{0}:{1}:{2}'.format(
+            os.path.join(self.GENDIR, "third_party"), self.GENDIR,
+            self.ENV['PYTHONPATH'])
+        self.ENV['CAFFE2_GENDIR'] = os.path.abspath(self.GENDIR)
+        self.ENV['CAFFE2_SRCDIR'] = os.path.abspath('.')
 
         SetVerboseLogging(Config.VERBOSE_BUILD)
 
@@ -162,8 +173,9 @@ class Env(object):
         self.LIBDIRS = Config.LIBDIRS + []
         self.LINKFLAGS = Config.LINKFLAGS + [
             '-pthread',
-            '-Wl,--gc-sections',
         ]
+        if GetCompilerType(Config.CC, self.ENV) == 'g++':
+            self.LINKFLAGS.append('-Wl,--gc-sections')
         self.LIBS = []
         self.SHARED_LIB_EXT = (
             Config.SHARED_LIB_EXT if len(Config.SHARED_LIB_EXT) else ".so")
@@ -171,17 +183,6 @@ class Env(object):
         self.NVCC_CFLAGS = [
             '-std=c++11',
         ] + ['-gencode ' + s for s in Config.CUDA_GENCODE] + Config.OPTIMIZATION_FLAGS
-
-        self.ENV = dict(os.environ)
-        for key in Config.ENVIRONMENTAL_VARS:
-            self.ENV[key] = Config.ENVIRONMENTAL_VARS[key]
-        if 'PYTHONPATH' not in self.ENV:
-            self.ENV['PYTHONPATH'] = ''
-        self.ENV['PYTHONPATH'] = '{0}:{1}:{2}'.format(
-            os.path.join(self.GENDIR, "third_party"), self.GENDIR,
-            self.ENV['PYTHONPATH'])
-        self.ENV['CAFFE2_GENDIR'] = os.path.abspath(self.GENDIR)
-        self.ENV['CAFFE2_SRCDIR'] = os.path.abspath('.')
 
         # Set C++11 flag. The reason we do not simply add it to the CFLAGS list
         # above is that NVCC cannot pass -std=c++11 via Xcompiler, otherwise the
