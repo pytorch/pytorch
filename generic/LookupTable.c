@@ -2,11 +2,11 @@
 #define TH_GENERIC_FILE "generic/LookupTable.c"
 #else
 
-void THNN_(LookupTable_resetCount)(long *count_data, THLongTensor *input)
+static void THNN_(LookupTable_resetCount)(THInteger_t *count_data, THIndexTensor *input)
 {
   int i;
-  long *input_data = THLongTensor_data(input);
-  long numel = THLongTensor_nElement(input);
+  THIndex_t *input_data = THIndexTensor_(data)(input);
+  long numel = THIndexTensor_(nElement)(input);
 
   for (i = 0; i<numel; i++)
   {
@@ -20,26 +20,26 @@ void THNN_(LookupTable_resetCount)(long *count_data, THLongTensor *input)
   }
 }
 
-void THNN_(LookupTable_accGradParameters)(THNNState *state, THLongTensor *input, THTensor *gradOutput, THTensor *gradWeight, real lr, bool shouldScaleGradByFreq, THLongTensor* count)
+void THNN_(LookupTable_accGradParameters)(THNNState *state, THIndexTensor *input, THTensor *gradOutput, THTensor *gradWeight, real lr, bool shouldScaleGradByFreq, THIntegerTensor *count)
 {
   long i;
-  long *count_data = NULL;
+  THInteger_t *count_data = NULL;
   
   if (shouldScaleGradByFreq)
   {
-    THLongTensor_resize1d(count, gradWeight->size[0]);
-    count_data = THLongTensor_data(count);
+    THIntegerTensor_(resize1d)(count, gradWeight->size[0]);
+    count_data = THIntegerTensor_(data)(count);
   }
 
   if (!THTensor_(isContiguous)(gradWeight))
     THError("gradWeight must be contiguous");
-  if (!THLongTensor_isContiguous(input))
+  if (!THIndexTensor_(isContiguous)(input))
     THError("input must be contiguous");
-  if (input->nDimension != 1 && input->nDimension != 2)
+  if (THIndexTensor_(nDimension)(input) != 1 && THIndexTensor_(nDimension)(input) != 2)
     THError("input must be a vector or matrix");
 
-  long *input_data = THLongTensor_data(input);
-  long numel = THLongTensor_nElement(input);
+  THIndex_t *input_data = THIndexTensor_(data)(input);
+  long numel = THIndexTensor_(nElement)(input);
   long numw = THTensor_(size)(gradWeight, 0);
 
   // check that inputs are all within range

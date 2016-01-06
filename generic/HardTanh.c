@@ -40,10 +40,10 @@ void THNN_(HardTanh_updateGradInput)(THNNState *state, THTensor *input, THTensor
 {
   THTensor_(resizeAs)(gradInput, input);
 
-  if (input->nDimension == 1 || 
-      !THTensor_(isContiguous)(input) || 
-      !THTensor_(isContiguous)(gradOutput) ||
-      !THTensor_(isContiguous)(gradInput))
+  if (input->nDimension == 1 ||
+    !THTensor_(isContiguous)(input) ||
+    !THTensor_(isContiguous)(gradOutput) ||
+    !THTensor_(isContiguous)(gradInput))
   {
     TH_TENSOR_APPLY3(real, gradInput, real, gradOutput, real, input,
       if (*input_data < min_val || *input_data > max_val)

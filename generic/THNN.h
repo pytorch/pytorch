@@ -143,11 +143,11 @@ TH_API void THNN_(LogSoftMax_updateGradInput)(
 
 TH_API void THNN_(LookupTable_accGradParameters)(
           THNNState *state,
-          THLongTensor *input,
+          THIndexTensor *input,
           THTensor *gradOutput,
           THTensor *gradWeight,
           real lr,
           bool shouldScaleGradByFreq,
-          THLongTensor* count);
+          THIntegerTensor *count);
 
 #endif
