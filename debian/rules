@@ -1,0 +1,8 @@
+#!/usr/bin/make -f
+
+%:
+	dh $@ --parallel
+
+override_dh_auto_install:
+	PREFIX=debian/tmp dh_auto_install
+
