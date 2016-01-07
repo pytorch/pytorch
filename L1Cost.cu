@@ -1,5 +1,4 @@
 #include "THCUNN.h"
-
 #include <thrust/device_ptr.h>
 #include <thrust/reduce.h>
 #include <thrust/transform.h>

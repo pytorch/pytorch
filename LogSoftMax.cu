@@ -1,37 +1,51 @@
-#include "utils.h"
+#include "THCUNN.h"
 
-struct MaxFloat {
-  __device__ __forceinline__ float operator()(float max, float v) const {
+struct MaxFloat
+{
+  __device__ __forceinline__ float operator()(float max, float v) const
+  {
     return fmaxf(max, v);
   }
 };
 
-struct SumFloat {
-  __device__ __forceinline__ float operator()(float sum, float v) const {
+struct SumFloat
+{
+  __device__ __forceinline__ float operator()(float sum, float v) const
+  {
     return sum + v;
   }
 };
 
-struct SumExpFloat {
-  __device__ __forceinline__ SumExpFloat(float v) : max_k(v) {}
+struct SumExpFloat
+{
+  __device__ __forceinline__ SumExpFloat(float v)
+    : max_k(v)
+  {}
 
-  __device__ __forceinline__ float operator()(float sum, float v) const {
+  __device__ __forceinline__ float operator()(float sum, float v) const
+  {
     return sum + expf(v - max_k);
   }
 
   const float max_k;
 };
 
-struct NoFinal {
-  __device__ __forceinline__ float operator()(float v) const {
+struct NoFinal
+{
+  __device__ __forceinline__ float operator()(float v) const
+  {
     return v;
   }
 };
 
-struct LSMFinal {
-  __device__ __forceinline__ LSMFinal(float m) : max_k(m) {}
+struct LSMFinal
+{
+  __device__ __forceinline__ LSMFinal(float m)
+    : max_k(m)
+  {}
 
-  __device__ __forceinline__ float operator()(float v) const {
+  __device__ __forceinline__ float operator()(float v) const
+  {
     return max_k + logf(v);
   }
 
@@ -43,7 +57,8 @@ __device__ __forceinline__ float
 blockReduce(float* smem, float val,
             const Reduction& r,
             float defaultVal,
-            const Finalize& f) {
+            const Finalize& f)
+{
   // To avoid RaW races from chaning blockReduce calls together, we
   // need a sync here
   __syncthreads();
@@ -55,12 +70,15 @@ blockReduce(float* smem, float val,
   float warpVal = defaultVal;
 
   // First warp will perform per-warp reductions for the remaining warps
-  if ((threadIdx.x / 32) == 0) {
+  if ((threadIdx.x / 32) == 0)
+  {
     int lane = threadIdx.x % 32;
 
-    if (lane < blockDim.x / 32) {
+    if (lane < blockDim.x / 32)
+    {
 #pragma unroll
-      for (int i = 0; i < 32; ++i) {
+      for (int i = 0; i < 32; ++i)
+      {
         warpVal = r(warpVal, smem[lane * 32 + i]);
       }
 
@@ -73,8 +91,10 @@ blockReduce(float* smem, float val,
   // First thread will perform a reduction of the above per-warp reductions
   float blockVal = defaultVal;
 
-  if (threadIdx.x == 0) {
-    for (int i = 0; i < blockDim.x / 32; ++i) {
+  if (threadIdx.x == 0)
+  {
+    for (int i = 0; i < blockDim.x / 32; ++i)
+    {
       blockVal = r(blockVal, smem[i]);
     }
 
@@ -90,7 +110,8 @@ template <typename Reduction>
 __device__ __forceinline__ float
 blockReduce(float* smem, float val,
             const Reduction& r,
-            float defaultVal) {
+            float defaultVal)
+{
   return blockReduce<Reduction, NoFinal>(smem, val, r, defaultVal, NoFinal());
 }
 
@@ -99,30 +120,34 @@ __device__ __forceinline__ float
 ilpReduce(float* data,
           int size,
           const Reduction& r,
-          float defaultVal) {
+          float defaultVal)
+{
   float threadVal = defaultVal;
   int offset = threadIdx.x;
 
   int last = size % (ILP * blockDim.x);
 
   // Body (unroll by ILP times)
-  for (; offset < size - last;
-       offset += blockDim.x * ILP) {
-  float tmp[ILP];
+  for (; offset < size - last; offset += blockDim.x * ILP)
+  {
+    float tmp[ILP];
 
 #pragma unroll
-    for (int j = 0; j < ILP; ++j) {
+    for (int j = 0; j < ILP; ++j)
+    {
       tmp[j] = data[offset + j * blockDim.x];
     }
 
 #pragma unroll
-    for (int j = 0; j < ILP; ++j) {
+    for (int j = 0; j < ILP; ++j)
+    {
       threadVal = r(threadVal, tmp[j]);
     }
   }
 
   // Epilogue
-  for (; offset < size; offset += blockDim.x) {
+  for (; offset < size; offset += blockDim.x)
+  {
     threadVal = r(threadVal, data[offset]);
   }
 
@@ -131,7 +156,8 @@ ilpReduce(float* data,
 
 template <int ILP>
 __global__ void
-cunn_LogSoftMax_updateOutput_kernel(float *output, float *input, int classes) {
+cunn_LogSoftMax_updateOutput_kernel(float *output, float *input, int classes)
+{
   extern __shared__ float buffer[];
   input += blockIdx.x * classes;
   output += blockIdx.x * classes;
@@ -151,7 +177,8 @@ cunn_LogSoftMax_updateOutput_kernel(float *output, float *input, int classes) {
   int offset = threadIdx.x;
 
   int last = classes % (ILP * blockDim.x);
-  for ( ; offset < classes - last; offset += blockDim.x * ILP) {
+  for (; offset < classes - last; offset += blockDim.x * ILP)
+  {
     float tmp[ILP];
 
 #pragma unroll
@@ -160,12 +187,14 @@ cunn_LogSoftMax_updateOutput_kernel(float *output, float *input, int classes) {
     }
 
 #pragma unroll
-    for (int j = 0; j < ILP; ++j) {
+    for (int j = 0; j < ILP; ++j)
+    {
       output[offset + j * blockDim.x] = tmp[j] - logsum_k;
     }
   }
 
-  for (; offset < classes; offset += blockDim.x) {
+  for (; offset < classes; offset += blockDim.x)
+  {
     output[offset] = input[offset] - logsum_k;
   }
 }
@@ -175,7 +204,8 @@ __global__ void
 cunn_LogSoftMax_updateGradInput_kernel(float *gradInput,
                                        float *output,
                                        float *gradOutput,
-                                       int classes) {
+                                       int classes)
+{
   extern __shared__ float buffer[];
   gradInput += blockIdx.x * classes;
   output += blockIdx.x * classes;
@@ -189,35 +219,35 @@ cunn_LogSoftMax_updateGradInput_kernel(float *gradInput,
   // Update gradInput (hand ILP)
   int offset = threadIdx.x;
   int last = classes % (ILP * blockDim.x);
-  for ( ; offset < classes - last; offset += blockDim.x * ILP) {
+  for (; offset < classes - last; offset += blockDim.x * ILP)
+  {
     float tmpGradOutput[ILP];
     float tmpOutput[ILP];
 
 #pragma unroll
-    for (int j = 0; j < ILP; ++j) {
+    for (int j = 0; j < ILP; ++j)
+    {
       tmpGradOutput[j] = gradOutput[offset + j * blockDim.x];
       tmpOutput[j] = output[offset + j * blockDim.x];
     }
 
 #pragma unroll
-    for (int j = 0; j < ILP; ++j) {
+    for (int j = 0; j < ILP; ++j)
+    {
       gradInput[offset + j * blockDim.x] =
         tmpGradOutput[j] - __expf(tmpOutput[j]) * sum_k;
     }
   }
 
-  for (; offset < classes; offset += blockDim.x) {
+  for (; offset < classes; offset += blockDim.x)
+  {
     gradInput[offset] =
       gradOutput[offset] - __expf(output[offset]) * sum_k;
   }
 }
 
-static int cunn_LogSoftMax_updateOutput(lua_State *L) {
-  THCState *state = getCutorchState(L);
-  THCudaTensor *input =
-    (THCudaTensor*)luaT_checkudata(L, 2, "torch.CudaTensor");
-  THCudaTensor *output =
-    (THCudaTensor*)luaT_getfieldcheckudata(L, 1, "output", "torch.CudaTensor");
+void THNN_CudaLogSoftMax_updateOutput(THCState *state, THCudaTensor *input, THCudaTensor *output)
+{
   THAssert(THCudaTensor_checkGPU(state, 2, input, output));
 
   input = THCudaTensor_newContiguous(state, input);
@@ -226,12 +256,17 @@ static int cunn_LogSoftMax_updateOutput(lua_State *L) {
   int batchSize = 1;
   int classSize = 0;
 
-  if (THCudaTensor_nDimension(state, input) == 1) {
+  if (THCudaTensor_nDimension(state, input) == 1)
+  {
     classSize = THCudaTensor_size(state, input, 0);
-  } else if (THCudaTensor_nDimension(state, input) == 2) {
+  }
+  else if (THCudaTensor_nDimension(state, input) == 2)
+  {
     batchSize = THCudaTensor_size(state, input, 0);
     classSize = THCudaTensor_size(state, input, 1);
-  } else {
+  }
+  else
+  {
     THError("vector or matrix expected");
   }
 
@@ -242,25 +277,21 @@ static int cunn_LogSoftMax_updateOutput(lua_State *L) {
     <<<grid, block, block.x * sizeof(float), THCState_getCurrentStream(state)>>>(
       THCudaTensor_data(state, output),
       THCudaTensor_data(state, input),
-      classSize);
+      classSize
+  );
 
   cudaError errcode = cudaGetLastError();
-  if (errcode != cudaSuccess) {
+  if (errcode != cudaSuccess)
+  {
     THError(cudaGetErrorString(errcode));
   }
 
   THCudaTensor_free(state, input);
-  return 1;
 }
 
-static int cunn_LogSoftMax_updateGradInput(lua_State *L) {
-  THCState *state = getCutorchState(L);
-  THCudaTensor *gradOutput =
-    (THCudaTensor*)luaT_checkudata(L, 3, "torch.CudaTensor");
-  THCudaTensor *output =
-    (THCudaTensor*)luaT_getfieldcheckudata(L, 1, "output", "torch.CudaTensor");
-  THCudaTensor *gradInput =
-    (THCudaTensor*)luaT_getfieldcheckudata(L, 1, "gradInput", "torch.CudaTensor");
+void THNN_CudaLogSoftMax_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput, 
+  THCudaTensor *gradInput,THCudaTensor *output)
+{
   THAssert(THCudaTensor_checkGPU(state, 3, output, gradOutput, gradInput));
 
   output = THCudaTensor_newContiguous(state, output);
@@ -271,12 +302,17 @@ static int cunn_LogSoftMax_updateGradInput(lua_State *L) {
   int batchSize = 1;
   int classSize = 0;
 
-  if (THCudaTensor_nDimension(state, gradInput) == 1) {
+  if (THCudaTensor_nDimension(state, gradInput) == 1)
+  {
     classSize = THCudaTensor_size(state, gradInput, 0);
-  } else if (THCudaTensor_nDimension(state, gradInput) == 2) {
+  }
+  else if (THCudaTensor_nDimension(state, gradInput) == 2)
+  {
     batchSize = THCudaTensor_size(state, gradInput, 0);
     classSize = THCudaTensor_size(state, gradInput, 1);
-  } else {
+  }
+  else
+  {
     THError("vector or matrix expected");
   }
 
@@ -288,27 +324,15 @@ static int cunn_LogSoftMax_updateGradInput(lua_State *L) {
       THCudaTensor_data(state, gradInput),
       THCudaTensor_data(state, output),
       THCudaTensor_data(state, gradOutput),
-      classSize);
+      classSize
+  );
 
   cudaError errcode = cudaGetLastError();
-  if (errcode != cudaSuccess) {
+  if (errcode != cudaSuccess)
+  {
     THError(cudaGetErrorString(errcode));
   }
 
   THCudaTensor_free(state, gradOutput);
   THCudaTensor_free(state, output);
-  return 1;
-}
-
-static const struct luaL_Reg cunn_LogSoftMax__ [] = {
-  {"LogSoftMax_updateOutput", cunn_LogSoftMax_updateOutput},
-  {"LogSoftMax_updateGradInput", cunn_LogSoftMax_updateGradInput},
-  {NULL, NULL}
-};
-
-void cunn_LogSoftMax_init(lua_State *L)
-{
-  luaT_pushmetatable(L, "torch.CudaTensor");
-  luaT_registeratname(L, cunn_LogSoftMax__, "nn");
-  lua_pop(L,1);
 }
