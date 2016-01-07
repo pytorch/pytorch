@@ -97,6 +97,7 @@ SET(src-cuda
   THCTensorScatterGather.cu
   THCApply.cu
   THCTensorSort.cu
+  THCTensorTopK.cu
   )
 
 CUDA_ADD_LIBRARY(THC SHARED ${src} ${src-cuda})
@@ -124,14 +125,18 @@ INSTALL(FILES
           THCTensorMath.h
           THCTensorConv.h
           THCTensorSort.h
+          THCTensorTopK.h
           THCApply.cuh
           THCReduce.cuh
           THCReduceAll.cuh
           THCReduceApplyUtils.cuh
+          THCAsmUtils.cuh
+          THCScanUtils.cuh
+          THCSortUtils.cuh
           THCAllocator.h
           THCDeviceUtils.cuh
           THCDeviceTensor.cuh
-          THCDeviceTensor-inl.cuh       
+          THCDeviceTensor-inl.cuh
           THCDeviceTensorUtils.cuh
           THCDeviceTensorUtils-inl.cuh
           THCGenerateAllTypes.h
