@@ -20,12 +20,14 @@ static void THNN_(LookupTable_resetCount)(THInteger_t *count_data, THIndexTensor
   }
 }
 
-void THNN_(LookupTable_accGradParameters)(THNNState *state, THIndexTensor *input, THTensor *gradOutput, THTensor *gradWeight, real lr, bool shouldScaleGradByFreq, THIntegerTensor *count)
+void THNN_(LookupTable_accGradParameters)(THNNState *state, THIndexTensor *input, THTensor *gradOutput, 
+  THTensor *gradWeight, real scale, bool scaleGradByFreq, THIntegerTensor *count,
+  THTensor *sorted, THTensor *indices)
 {
   long i;
   THInteger_t *count_data = NULL;
   
-  if (shouldScaleGradByFreq)
+  if (scaleGradByFreq)
   {
     THIntegerTensor_(resize1d)(count, gradWeight->size[0]);
     count_data = THIntegerTensor_(data)(count);
@@ -75,10 +77,10 @@ void THNN_(LookupTable_accGradParameters)(THNNState *state, THIndexTensor *input
         long k = input_data[i] - 1;
         if (k >= start && k < end)
         {
-          real scale = lr;
+          real lr = scale;
           if (count_data)
-            scale /= count_data[k];
-          THBlas_(axpy)(stride, scale, go + i*stride, 1, gw + k*stride, 1);
+            lr /= count_data[k];
+          THBlas_(axpy)(stride, lr, go + i*stride, 1, gw + k*stride, 1);
         }
       }
     }
@@ -91,10 +93,10 @@ void THNN_(LookupTable_accGradParameters)(THNNState *state, THIndexTensor *input
   for (i=0; i<numel; i++)
   {
     long k = input_data[i] - 1;
-    real scale = lr;
+    real lr = scale;
     if (count_data)
-      scale /= count_data[k];
-    THBlas_(axpy)(stride, scale, go + i*stride, 1, gw + k*stride, 1);
+      lr /= count_data[k];
+    THBlas_(axpy)(stride, lr, go + i*stride, 1, gw + k*stride, 1);
   }
 
   THTensor_(free)(gradOutput);
