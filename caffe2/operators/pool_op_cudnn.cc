@@ -14,9 +14,9 @@ class CuDNNPoolOp : public ConvPoolOpBase<CUDAContext> {
     CUDNN_CHECK(cudnnCreateTensorDescriptor(&top_desc_));
     CUDNN_CHECK(cudnnCreatePoolingDescriptor(&pooling_desc_));
     // Figure out the pooling descriptor.
-    if (def().type() == "MaxPool") {
+    if (def().type().substr(0, 7) == "MaxPool") {
       mode_ = CUDNN_POOLING_MAX;
-    } else if (def().type() == "AveragePool") {
+    } else if (def().type().substr(0, 11) == "AveragePool") {
       mode_ = CUDNN_POOLING_AVERAGE_COUNT_EXCLUDE_PADDING;
     } else {
       CAFFE_LOG_FATAL << "Unsupported pooling method: " << def().type();
@@ -182,5 +182,26 @@ REGISTER_CUDNN_OPERATOR(AveragePool, CuDNNPoolOp<float>);
 REGISTER_CUDNN_OPERATOR(AveragePoolGradient, CuDNNPoolGradientOp<float>);
 REGISTER_CUDNN_OPERATOR(MaxPool, CuDNNPoolOp<float>);
 REGISTER_CUDNN_OPERATOR(MaxPoolGradient, CuDNNPoolGradientOp<float>);
+
+#if CUDNN_VERSION >= 3000
+REGISTER_CUDNN_OPERATOR(AveragePoolFp16, CuDNNPoolOp<float16>);
+REGISTER_CUDNN_OPERATOR(AveragePoolFp16Gradient, CuDNNPoolGradientOp<float16>);
+REGISTER_CUDNN_OPERATOR(MaxPoolFp16, CuDNNPoolOp<float16>);
+REGISTER_CUDNN_OPERATOR(MaxPoolFp16Gradient, CuDNNPoolGradientOp<float16>);
+
+
+struct GetPoolGradient : public GetGradientDefBase {
+  vector<OperatorDef>* Create(const OperatorDef& def) override {
+    return SingleGradientDef(
+        def.type() + "Gradient", "",
+        vector<string>{I(def, 0), O(def, 0), GO(def, 0)},
+        vector<string>{GI(def, 0)});
+  }
+};
+REGISTER_GRADIENT(AveragePoolFp16, GetPoolGradient);
+REGISTER_GRADIENT(MaxPoolFp16, GetPoolGradient);
+#endif  // CUDNN_VERSION >= 3000
+
+
 }  // namespace
 }  // namespace caffe2
