@@ -67,14 +67,18 @@ cc_library(
   whole_archive = True,
 )
 
-cc_headers(
+cc_library(
   name = "core_cudnn",
   srcs = [
+    "common_cudnn.cc",
+  ],
+  hdrs = [
     "common_cudnn.h",
   ],
   deps = [
       "//third_party/cudnn:cudnn",
   ],
+  whole_archive = True,
 )
 
 cc_test(
