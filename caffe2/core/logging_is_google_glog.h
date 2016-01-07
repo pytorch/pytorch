@@ -1,6 +1,7 @@
 #ifndef CAFFE2_CORE_LOGGING_IS_GOOGLE_GLOG_H_
 #define CAFFE2_CORE_LOGGING_IS_GOOGLE_GLOG_H_
 
+#include <iomanip>  // because some of the caffe2 code uses e.g. std::setw
 // Using google glog.
 #include <glog/logging.h>
 
@@ -37,5 +38,6 @@ static_assert(CAFFE2_LOG_THRESHOLD <= google::FATAL,
 #define CAFFE_DCHECK_GE(...) DCHECK_GE(__VA_ARGS__)
 #define CAFFE_DCHECK_GT(...) DCHECK_GT(__VA_ARGS__)
 #define CAFFE_CHECK_NOTNULL(...) CHECK_NOTNULL(__VA_ARGS__)
+#define CAFFE_DCHECK_NOTNULL(...) DCHECK_NOTNULL(__VA_ARGS__)
 
 #endif  // CAFFE2_CORE_LOGGING_IS_GOOGLE_GLOG_H_

@@ -102,20 +102,21 @@ void SimpleNet::TEST_Benchmark(const int warmup_runs, const int main_runs,
         ++idx;
       }
     }
-  }
-  int idx = 0;
-  for (auto& op : operators_) {
-    const string& op_type = op->def().type();
-    CAFFE_LOG_INFO << "Operator #" << idx << " ("
-                   << op->def().name() << ", " << op_type << ") "
-                   << time_per_op[idx] / main_runs << " ms/iter";
-    ++idx;
-  }
-  CAFFE_LOG_INFO << "Time per operator type:";
-  for (const auto& item : time_per_op_type) {
-    CAFFE_LOG_INFO << std::setw(15) << std::setfill(' ')
-                   << item.second / main_runs
-                   << " " << item.first;
+
+    int idx = 0;
+    for (auto& op : operators_) {
+      const string& op_type = op->def().type();
+      CAFFE_LOG_INFO << "Operator #" << idx << " ("
+                     << op->def().name() << ", " << op_type << ") "
+                     << time_per_op[idx] / main_runs << " ms/iter";
+      ++idx;
+    }
+    CAFFE_LOG_INFO << "Time per operator type:";
+    for (const auto& item : time_per_op_type) {
+      CAFFE_LOG_INFO << std::setw(15) << std::setfill(' ')
+                     << item.second / main_runs
+                     << " " << item.first;
+    }
   }
 }
 
