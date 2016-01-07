@@ -180,9 +180,9 @@ class Env(object):
         self.SHARED_LIB_EXT = (
             Config.SHARED_LIB_EXT if len(Config.SHARED_LIB_EXT) else ".so")
 
-        self.NVCC_CFLAGS = [
-            '-std=c++11',
-        ] + ['-gencode ' + s for s in Config.CUDA_GENCODE] + Config.OPTIMIZATION_FLAGS
+        self.NVCC_CFLAGS = Config.CUDA_CFLAGS + ['-std=c++11'] + [
+            '-gencode ' + s for s in Config.CUDA_GENCODE
+        ] + Config.OPTIMIZATION_FLAGS
 
         # Set C++11 flag. The reason we do not simply add it to the CFLAGS list
         # above is that NVCC cannot pass -std=c++11 via Xcompiler, otherwise the
@@ -331,15 +331,14 @@ class Env(object):
             ['-L' + s for s in self.LIBDIRS] + ['{src}'] +
             ['-l' + s for s in self.LIBS])
         self.TEMPLATE_LINK_BINARY = ' '.join(
-            [Config.CC, '-pie -o', '{dst}'] + self.LINKFLAGS +
+            [Config.CC, '-o', '{dst}'] + self.LINKFLAGS +
             ['-L' + s for s in self.LIBDIRS] + ['{src}'] +
             ['-l' + s for s in self.LIBS])
         self.TEMPLATE_CC_TEST = ' '.join(
             ['{src}', '--caffe_test_root=' + os.path.abspath(self.GENDIR),
              '--gtest_filter=-*.LARGE_*'])
         self.TEMPLATE_NVCC = ' '.join(
-            [NVCC, '-ccbin', Config.CC, '-std=c++11', '-O2'] +
-            Config.CUDA_CFLAGS +
+            [NVCC, '-ccbin', Config.CC] + self.NVCC_CFLAGS +
             ['-Xcompiler', '"' + ' '.join(self.CFLAGS) + '"'] +
             ['-I' + s for s in self.INCLUDES] +
             self.DEFINES + ['-c', '{src}', '-o', '{dst}'])

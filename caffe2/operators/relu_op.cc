@@ -40,12 +40,13 @@ REGISTER_CPU_OPERATOR(ReluGradient, ReluGradientOp<float, CPUContext>);
 struct GetReluGradient : public GetGradientDefBase {
   vector<OperatorDef>* Create(const OperatorDef& def) override {
     return SingleGradientDef(
-        "ReluGradient", "",
+        def.type() + "Gradient", "",
         vector<string>{O(def, 0), GO(def, 0)},
         vector<string>{GI(def, 0)});
   }
 };
 REGISTER_GRADIENT(Relu, GetReluGradient);
+REGISTER_GRADIENT(ReluFp16, GetReluGradient);
 
 }  // namespace
 }  // namespace caffe2

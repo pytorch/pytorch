@@ -9,6 +9,7 @@ CAFFE2_DEFINE_string(init_net, "",
                      "The given net to initialize any parameters.");
 CAFFE2_DEFINE_int(warmup, 0, "The number of iterations to warm up.");
 CAFFE2_DEFINE_int(iter, 10, "The number of iterations to run.");
+CAFFE2_DEFINE_bool(run_individual, false, "Whether to benchmark individual operators.");
 
 int main(int argc, char** argv) {
   caffe2::GlobalInit(&argc, argv);
@@ -21,6 +22,6 @@ int main(int argc, char** argv) {
   caffe2::NetBase* net = workspace->CreateNet(net_def);
   CAFFE_CHECK_NOTNULL(net);
   CAFFE_CHECK(net->Run());
-  net->TEST_Benchmark(caffe2::FLAGS_warmup, caffe2::FLAGS_iter, true);
+  net->TEST_Benchmark(caffe2::FLAGS_warmup, caffe2::FLAGS_iter, caffe2::FLAGS_run_individual);
   return 0;
 }
