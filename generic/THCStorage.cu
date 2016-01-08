@@ -17,7 +17,7 @@ void THCStorage_(resize)(THCState *state, THCStorage *self, long size)
   THArgCheck(size >= 0, 2, "invalid size");
 
   if(!(self->flag & TH_STORAGE_RESIZABLE))
-    return;
+    THError("Trying to resize storage that is not resizable");
 
   if(size == 0)
   {
