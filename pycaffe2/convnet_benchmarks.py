@@ -268,12 +268,13 @@ def Benchmark(model_gen, arg):
   # argument will not hurt since the CPU operator registy will simply ignore
   # these options and go the default path.
   for op in model.net.Proto().op:
-    if op.type == 'Conv':
+    if op.type == 'Conv' or op.type == 'ConvFp16':
       op.engine = 'CUDNN'
       #op.arg.add().CopyFrom(utils.MakeArgument('ws_nbytes_limit', arg.cudnn_limit))
       op.arg.add().CopyFrom(utils.MakeArgument('exhaustive_search', 1))
       op.arg.add().CopyFrom(utils.MakeArgument('shared_ws_name', 'cudnn_workspace'))
-    elif op.type in ['MaxPool', 'AveragePool', 'Relu', 'Softmax']:
+    elif op.type in ['MaxPool', 'MaxPoolFp16', 'AveragePool', 'AveragePoolFp16',
+                     'Relu', 'ReluFp16', 'Softmax', 'SoftmaxFp16']:
       op.engine = 'CUDNN'
   if arg.forward_only:
     print arg.model, ': running forward only.'
