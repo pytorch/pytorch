@@ -20,4 +20,8 @@ THC_API void THCudaBlas_gemmBatched(THCState *state, char transa, char transb, l
                                     float alpha, const float *a[], long lda, const float *b[], long ldb,
                                     float beta, float *c[], long ldc, long batchCount);
 
+/* Inverse */
+THC_API void THCudaBlas_getrf(THCState *state, int n, float **a, int lda, int *pivot, int *info, int batchSize);
+THC_API void THCudaBlas_getri(THCState *state, int n, const float **a, int lda, int *pivot, float **c, int ldc, int *info, int batchSize);
+
 #endif
