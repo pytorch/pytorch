@@ -17,7 +17,10 @@ else:
         "-lcublas",
         "-lcurand",
         "-lcudart",
-    ],
+        "-lculibos",
+        "-ldl",
+    ] +
+    (["-lrt"] if Brewery.Env.NEED_LIBRT else [])
   )
 
 cc_thirdparty_target(
