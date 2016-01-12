@@ -534,8 +534,12 @@ PyObject* FeedBlob(PyObject* self, PyObject* args) {
   case caffe2::CPU:
     switch (data_type) {
       case NPY_LONG:
-        static_assert(sizeof(long) == sizeof(int), "TODO: handle with platforms where long!=int");
-        // The actual computation is delegated to the NPY_INT case below.
+        if (sizeof(long) != sizeof(int)) {
+          CAFFE_LOG_FATAL << "On this platform NPY_LONG does not equal to "
+                             "NPY_INT and such type is not supported yet.";
+        } else {
+          return FeedTensor<int, caffe2::CPUContext>(option, array, blob);
+        }
       case NPY_INT:
         return FeedTensor<int, caffe2::CPUContext>(option, array, blob);
       case NPY_FLOAT:
@@ -549,8 +553,12 @@ PyObject* FeedBlob(PyObject* self, PyObject* args) {
   case caffe2::CUDA:
     switch (data_type) {
       case NPY_LONG:
-        static_assert(sizeof(long) == sizeof(int), "TODO: handle with platforms where long!=int");
-        // The actual computation is delegated to the NPY_INT case below.
+        if (sizeof(long) != sizeof(int)) {
+          CAFFE_LOG_FATAL << "On this platform NPY_LONG does not equal to "
+                             "NPY_INT and such type is not supported yet.";
+        } else {
+          return FeedTensor<int, caffe2::CUDAContext>(option, array, blob);
+        }
       case NPY_INT:
         return FeedTensor<int, caffe2::CUDAContext>(option, array, blob);
       case NPY_FLOAT:

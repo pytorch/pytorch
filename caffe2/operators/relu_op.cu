@@ -36,7 +36,13 @@ __global__ void ReluKernel<half>(const int N, const half* X, half* Y) {
 __global__ void ReluKernelHalf2(const int N, const half2* X, half2* Y) {
   const half2 kZero = __float2half2_rn(0.0);
   CUDA_1D_KERNEL_LOOP(i, N) {
+#if __CUDA_ARCH__ >= 530
     Y[i] = __hmul2(__hgt2(X[i], kZero), X[i]);
+#else
+    float2 xx = __half22float2(X[i]);
+    Y[i] = __floats2half2_rn(xx.x > 0 ? xx.x : 0.f,
+                             xx.y > 0 ? xx.y : 0.f);
+#endif
   }
 }
 
