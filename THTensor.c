@@ -5,6 +5,7 @@
 #include "THLapack.h"
 #include "THRandom.h"
 #include "THTensorDimApply.h"
+#include "THMath.h"
 
 #include "generic/THTensor.c"
 #include "THGenerateAllTypes.h"

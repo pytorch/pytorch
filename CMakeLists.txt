@@ -112,11 +112,11 @@ IF(C_AVX_FOUND)
 ENDIF(C_AVX_FOUND)
 
 SET(hdr
-  THGeneral.h THAllocator.h THStorage.h THTensor.h THTensorApply.h THBlas.h
+  THGeneral.h THAllocator.h THStorage.h THTensor.h THTensorApply.h THBlas.h THMath.h
   THLapack.h THLogAdd.h THRandom.h THVector.h THAtomic.h)
 
 SET(src
-  THGeneral.c THAllocator.c THStorage.c THTensor.c THBlas.c THLapack.c
+  THGeneral.c THAllocator.c THStorage.c THTensor.c THBlas.c THLapack.c THMath.c
   THLogAdd.c THRandom.c THFile.c THDiskFile.c THMemoryFile.c THAtomic.c)
 
 SET(src ${src} ${hdr} ${simd})
@@ -263,6 +263,7 @@ INSTALL(TARGETS TH
 INSTALL(FILES
   TH.h
   THAllocator.h
+  THMath.h
   THBlas.h
   THDiskFile.h
   THFile.h
