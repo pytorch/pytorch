@@ -41,7 +41,6 @@ class CudaRTCFunction {
     // Compile the program.
     // TODO(Yangqing): how to find the current gpu architecture instead of hard
     // coding it?
-    CAFFE_LOG_ERROR << "NVRTC version: " << major << minor;
     const char *nvrtc_opts[] = {"--gpu-architecture=compute_35",
                                 "--use_fast_math"};
     nvrtcResult compile_result = nvrtcCompileProgram(
