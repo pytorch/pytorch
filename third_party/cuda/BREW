@@ -19,3 +19,14 @@ else:
         "-lcudart",
     ],
   )
+
+cc_thirdparty_target(
+  name = "nvrtc",
+  deps = [
+    ":cuda",
+  ],
+  cc_obj_files = [
+    "-lnvrtc",
+    "-lcuda",
+  ],
+)
