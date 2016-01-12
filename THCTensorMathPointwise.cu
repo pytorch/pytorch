@@ -54,6 +54,33 @@ IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(neg, -)
 
 #undef IMPLEMENT_CUDA_TENSOR_BASIC_FUNC
 
+struct TensorSigmoidOp {
+  __device__ __forceinline__ void operator()(float* out, float* in) const {
+    *out = 1.0f / (1.0f + expf(- *in));
+  }
+
+  __device__ __forceinline__ void operator()(float* v) const {
+    *v = 1.0f / (1.0f + expf(- *v));
+  }
+};
+
+void THCudaTensor_sigmoid(THCState* state, THCudaTensor* self_, THCudaTensor* src) {
+  THAssert(THCudaTensor_checkGPU(state, 2, self_, src));
+  if (self_ == src) {
+    if (!THCudaTensor_pointwiseApply1(state, self_, TensorSigmoidOp())) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  } else {
+    THCudaTensor_resizeAs(state, self_, src);
+
+    if (!THCudaTensor_pointwiseApply2(state, self_, src, TensorSigmoidOp())) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  }
+
+  THCudaCheck(cudaGetLastError());
+}
+
 struct TensorAddOp {
   __device__ __forceinline__ void operator()(float* out, float* in) {
     *out += *in;

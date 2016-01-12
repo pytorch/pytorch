@@ -53,6 +53,7 @@ THC_API void THCudaTensor_baddbmm(THCState *state, THCudaTensor *result, float b
 
 THC_API void THCudaTensor_log(THCState *state, THCudaTensor *self, THCudaTensor *src);
 THC_API void THCudaTensor_log1p(THCState *state, THCudaTensor *self, THCudaTensor *src);
+THC_API void THCudaTensor_sigmoid(THCState *state, THCudaTensor *self, THCudaTensor *src);
 THC_API void THCudaTensor_exp(THCState *state, THCudaTensor *self, THCudaTensor *src);
 THC_API void THCudaTensor_cos(THCState *state, THCudaTensor *self, THCudaTensor *src);
 THC_API void THCudaTensor_acos(THCState *state, THCudaTensor *self, THCudaTensor *src);
