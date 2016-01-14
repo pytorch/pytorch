@@ -6,9 +6,8 @@
 #include "caffe2/operators/relu_op.h"
 
 namespace caffe2 {
-
-template <>
-__global__ void ReluKernel<half>(const int N, const half* X, half* Y) {
+namespace {
+__global__ void ReluKernelHalf(const int N, const half* X, half* Y) {
   const half kZero = __float2half(0.0);
   CUDA_1D_KERNEL_LOOP(i, N) {
 #if __CUDA_ARCH__ >= 530
@@ -32,9 +31,7 @@ __global__ void ReluKernelHalf2(const int N, const half2* X, half2* Y) {
   }
 }
 
-
-template <>
-__global__ void ReluGradientKernel<half>(
+__global__ void ReluGradientKernelHalf(
     const int N, const half* Y, const half* dY, half* dX) {
   const half kZero = __float2half(0.0);
   CUDA_1D_KERNEL_LOOP(i, N) {
@@ -45,7 +42,6 @@ __global__ void ReluGradientKernel<half>(
 #endif
   }
 }
-
 }  // namespace
 
 template <>
@@ -61,8 +57,8 @@ bool ReluOp<float16, CUDAContext>::RunOnDevice() {
         reinterpret_cast<half2*>(Y->mutable_data<float16>()));
     return true;
   } else {
-    ReluKernel<<<CAFFE_GET_BLOCKS(X.size()), CAFFE_CUDA_NUM_THREADS,
-                 0, device_context_.cuda_stream()>>>(
+    ReluKernelHalf<<<CAFFE_GET_BLOCKS(X.size()), CAFFE_CUDA_NUM_THREADS,
+                     0, device_context_.cuda_stream()>>>(
         X.size(), reinterpret_cast<const half*>(X.data<float16>()),
         reinterpret_cast<half*>(Y->mutable_data<float16>()));
     return true;
@@ -77,8 +73,8 @@ bool ReluGradientOp<float16, CUDAContext>::RunOnDevice() {
   CAFFE_DCHECK_GT(Y.size(), 0);
   CAFFE_DCHECK_EQ(dY.size(), Y.size());
   dX->ReshapeLike(Y);
-  ReluGradientKernel<<<CAFFE_GET_BLOCKS(Y.size()), CAFFE_CUDA_NUM_THREADS,
-                       0, device_context_.cuda_stream()>>>(
+  ReluGradientKernelHalf<<<CAFFE_GET_BLOCKS(Y.size()), CAFFE_CUDA_NUM_THREADS,
+                           0, device_context_.cuda_stream()>>>(
       Y.size(), reinterpret_cast<const half*>(Y.data<float16>()),
       reinterpret_cast<const half*>(dY.data<float16>()),
       reinterpret_cast<half*>(dX->mutable_data<float16>()));
