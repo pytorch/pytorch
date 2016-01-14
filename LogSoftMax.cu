@@ -1,6 +1,105 @@
 #include "THCUNN.h"
 #include "common.h"
 
+#define LOGSOFTMAX_THREADS 128
+
+__global__ void cunn_SpatialLogSoftMax_updateOutput_kernel(float *output, float *input, int nframe, int dim, int stride)
+{
+  __shared__ float buffer[LOGSOFTMAX_THREADS+1];
+  int k = blockIdx.x;
+  float *input_k = input + k*dim*stride + blockIdx.y;
+  float *output_k = output + k*dim*stride + blockIdx.y;
+  int tx = threadIdx.x;
+
+  int i_start = threadIdx.x;
+  int i_end = dim;
+  int i_step = blockDim.x;
+
+  // max?
+  buffer[tx] = -FLT_MAX;
+  for (int i=i_start; i<i_end; i+=i_step)
+  {
+    float z = input_k[i*stride];
+    if(buffer[tx] < z)
+      buffer[tx] = z;
+  }
+
+  // reduce
+  for (unsigned int stride_ = blockDim.x >> 1; stride_ > 0; stride_ >>= 1)
+  {
+    __syncthreads();
+    if ((tx < stride_) && (buffer[tx] < buffer[tx+stride_]))
+      buffer[tx] = buffer[tx+stride_];
+  }
+  if (tx == 0)
+  {
+    float max_k = -FLT_MAX;
+    if(max_k < buffer[0])
+      max_k = buffer[0];
+    buffer[LOGSOFTMAX_THREADS] = max_k;
+  }
+
+  __syncthreads();
+
+  // logadd?
+  float max_k = buffer[LOGSOFTMAX_THREADS];
+  buffer[tx] = 0;
+  for (int i=i_start; i<i_end; i+=i_step)
+    buffer[tx] += expf(input_k[i*stride]-max_k);
+
+  // reduce
+  for (unsigned int stride_ = blockDim.x >> 1; stride_ > 0; stride_ >>= 1)
+  {
+    __syncthreads();
+    if (tx < stride_)
+      buffer[tx] += buffer[tx+stride_];
+  }
+  if (tx == 0)
+    buffer[LOGSOFTMAX_THREADS] = max_k + logf(buffer[0]);
+
+  __syncthreads();
+
+  // logsoftmax
+  float logsum_k = buffer[LOGSOFTMAX_THREADS];
+  for (int i=i_start; i<i_end; i+=i_step)
+    output_k[i*stride] = input_k[i*stride] - logsum_k;
+}
+
+
+__global__ void cunn_SpatialLogSoftMax_updateGradInput_kernel(float *gradInput, float *output, float *gradOutput, int nframe, int dim, int stride)
+{
+  __shared__ float buffer[LOGSOFTMAX_THREADS];
+  int k = blockIdx.x;
+  float *gradInput_k = gradInput + k*dim*stride + blockIdx.y;
+  float *output_k = output + k*dim*stride + blockIdx.y;
+  float *gradOutput_k = gradOutput + k*dim*stride + blockIdx.y;
+  int tx = threadIdx.x;
+
+  int i_end = dim;
+  int i_step = blockDim.x;
+
+  // sum?
+  buffer[tx] = 0;
+  for (int i=tx; i<i_end; i+=i_step)
+    buffer[tx] += gradOutput_k[i*stride];
+
+  // reduce
+  for (unsigned int stride_ = blockDim.x >> 1; stride_ > 0; stride_ >>= 1)
+  {
+    __syncthreads();
+    if (tx < stride_)
+      buffer[tx] += buffer[tx+stride_];
+  }
+
+  __syncthreads();
+
+  float sum_k = buffer[0];
+  for (int i=tx; i<i_end; i+=i_step)
+    gradInput_k[i*stride] = gradOutput_k[i*stride] - __expf(output_k[i*stride])*sum_k;
+}
+
+// here starts the 1D/2D implementation
+
 struct MaxFloat
 {
   __device__ __forceinline__ float operator()(float max, float v) const
@@ -261,6 +360,7 @@ void THNN_CudaLogSoftMax_updateOutput(THCState *state, THCudaTensor *input, THCu
 
   int batchSize = 1;
   int classSize = 0;
+  int stride    = 1;
 
   if (THCudaTensor_nDimension(state, input) == 1)
   {
@@ -271,21 +371,51 @@ void THNN_CudaLogSoftMax_updateOutput(THCState *state, THCudaTensor *input, THCu
     batchSize = THCudaTensor_size(state, input, 0);
     classSize = THCudaTensor_size(state, input, 1);
   }
+  else if (THCudaTensor_nDimension(state, input) == 3)
+  {
+    classSize = THCudaTensor_size(state, input, 0);
+    stride = THCudaTensor_size(state, input, 1)*
+             THCudaTensor_size(state, input, 2);
+  }
+  else if (THCudaTensor_nDimension(state, input) == 4)
+  {
+    batchSize = THCudaTensor_size(state, input, 0);
+    classSize = THCudaTensor_size(state, input, 1);
+    stride = THCudaTensor_size(state, input, 2)*
+             THCudaTensor_size(state, input, 3);
+  }
   else
   {
-    THError("vector or matrix expected");
+    THError("1D, 2D, 3D or 4D Tensor expected");
   }
 
-  dim3 grid(batchSize);
-  dim3 block(1024);
+  if (stride == 1)
+  {
+    dim3 grid(batchSize);
+    dim3 block(1024);
 
-  cunn_LogSoftMax_updateOutput_kernel<2>
-    <<<grid, block, block.x * sizeof(float), THCState_getCurrentStream(state)>>>(
-      THCudaTensor_data(state, output),
-      THCudaTensor_data(state, input),
-      classSize
-  );
-  THCudaCheck(cudaGetLastError());
+    cunn_LogSoftMax_updateOutput_kernel<2>
+      <<<grid, block, block.x * sizeof(float), THCState_getCurrentStream(state)>>>(
+        THCudaTensor_data(state, output),
+        THCudaTensor_data(state, input),
+        classSize
+    );
+  }
+  else
+  {
+    dim3 blocks(batchSize, stride);
+    dim3 threads(LOGSOFTMAX_THREADS);
+    cunn_SpatialLogSoftMax_updateOutput_kernel<<<blocks,threads,
+      0, THCState_getCurrentStream(state)>>>(THCudaTensor_data(state, output),
+                                             THCudaTensor_data(state, input),
+                                             batchSize, classSize, stride);
+  }
+  cudaError errcode = cudaGetLastError();
+  if (errcode != cudaSuccess)
+  {
+    THError(cudaGetErrorString(errcode));
+  }
+
   THCudaTensor_free(state, input);
 }
 
@@ -301,6 +431,7 @@ void THNN_CudaLogSoftMax_updateGradInput(THCState *state, THCudaTensor *input, T
 
   int batchSize = 1;
   int classSize = 0;
+  int stride = 1;
 
   if (THCudaTensor_nDimension(state, gradInput) == 1)
   {
@@ -311,22 +442,56 @@ void THNN_CudaLogSoftMax_updateGradInput(THCState *state, THCudaTensor *input, T
     batchSize = THCudaTensor_size(state, gradInput, 0);
     classSize = THCudaTensor_size(state, gradInput, 1);
   }
+  else if (THCudaTensor_nDimension(state, input) == 3)
+  {
+    classSize = THCudaTensor_size(state, input, 0);
+    stride = THCudaTensor_size(state, input, 1)*
+             THCudaTensor_size(state, input, 2);
+  }
+  else if (THCudaTensor_nDimension(state, input) == 4)
+  {
+    batchSize = THCudaTensor_size(state, input, 0);
+    classSize = THCudaTensor_size(state, input, 1);
+    stride = THCudaTensor_size(state, input, 2)*
+             THCudaTensor_size(state, input, 3);
+  }
   else
   {
-    THError("vector or matrix expected");
+    THError("1D, 2D, 3D or 4D Tensor expected");
   }
 
-  dim3 grid(batchSize);
-  dim3 block(1024);
+  if (stride == 1)
+  {
+    dim3 grid(batchSize);
+    dim3 block(1024);
 
-  cunn_LogSoftMax_updateGradInput_kernel<2>
-    <<<grid, block, block.x * sizeof(float), THCState_getCurrentStream(state)>>>(
-      THCudaTensor_data(state, gradInput),
-      THCudaTensor_data(state, output),
-      THCudaTensor_data(state, gradOutput),
-      classSize
-  );
-  THCudaCheck(cudaGetLastError());
+    cunn_LogSoftMax_updateGradInput_kernel<2>
+      <<<grid, block, block.x * sizeof(float), THCState_getCurrentStream(state)>>>(
+        THCudaTensor_data(state, gradInput),
+        THCudaTensor_data(state, output),
+        THCudaTensor_data(state, gradOutput),
+        classSize
+    );
+  }
+  else
+  {
+    dim3 blocks(batchSize, stride);
+    dim3 threads(LOGSOFTMAX_THREADS);
+    cunn_SpatialLogSoftMax_updateGradInput_kernel<<<blocks,threads,
+      0, THCState_getCurrentStream(state)>>>(THCudaTensor_data(state, gradInput),
+                                             THCudaTensor_data(state, output),
+                                             THCudaTensor_data(state, gradOutput),
+                                             batchSize, classSize, stride);
+  }
+
+  cudaError errcode = cudaGetLastError();
+  if (errcode != cudaSuccess)
+  {
+    THError(cudaGetErrorString(errcode));
+  }
+
   THCudaTensor_free(state, gradOutput);
   THCudaTensor_free(state, output);
 }
+
+#undef LOGSOFTMAX_THREADS
