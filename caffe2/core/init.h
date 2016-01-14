@@ -55,11 +55,6 @@ class InitRegisterer {
       function, description);                                                  \
   }  // namespace
 
-// A global initialization stream where one can write messages to. After the
-// GlobalInit() function finishes, all the messages written into the global
-// init stream is written to LOG_INFO, and in case of error, LOG_ERROR.
-std::stringstream& GlobalInitStream();
-
 // Initialize the global environment of caffe2.
 bool GlobalInit(int* pargc, char** argv);
 

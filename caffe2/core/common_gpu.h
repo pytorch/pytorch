@@ -13,6 +13,16 @@
 namespace caffe2 {
 
 /**
+ * A runtime function to report the cuda version that Caffe2 is built with.
+ */
+inline int CudaVersion() { return CUDA_VERSION; }
+
+/**
+ * Returns the number of devices.
+ */
+int NumCudaDevices();
+
+/**
  * Check if the current running session has a cuda gpu present.
  *
  * Note that this is different from having caffe2 built with cuda. Building
@@ -21,7 +31,7 @@ namespace caffe2 {
  * problems like an insufficient driver, this function will still return false,
  * meaning that there is no usable GPU present.
  */
-bool HasCudaGPU();
+inline bool HasCudaGPU() { return NumCudaDevices() > 0; }
 
 /**
  * Sets the default GPU id for Caffe2.
@@ -36,6 +46,11 @@ void SetDefaultGPUID(const int deviceid);
  * Gets the default GPU id for Caffe2.
  */
 int GetDefaultGPUID();
+
+/**
+ * Gets the device property for the given device.
+ */
+const cudaDeviceProp& GetDeviceProperty(const int device);
 
 /**
  * Runs a device query function and prints out the results to CAFFE_LOG_INFO.

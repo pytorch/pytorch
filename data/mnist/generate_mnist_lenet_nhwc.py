@@ -21,10 +21,10 @@ data, label = train_net.TensorProtosDBInput(
     db="gen/data/mnist/mnist-train-nhwc-minidb", db_type="minidb")
 
 # For an unnamed version, do the following:
-pool1, _ = (data.Conv([filter1, bias1], kernel=5, pad=0, stride=1, order="NHWC")
-                .MaxPool(outputs=2, kernel=2, stride=2, order="NHWC"))
-pool2, _ = (pool1.Conv([filter2, bias2], kernel=5, pad=0, stride=1, order="NHWC")
-                 .MaxPool(outputs=2, kernel=2, stride=2, order="NHWC"))
+pool1 = (data.Conv([filter1, bias1], kernel=5, pad=0, stride=1, order="NHWC")
+             .MaxPool([], kernel=2, stride=2, order="NHWC"))
+pool2 = (pool1.Conv([filter2, bias2], kernel=5, pad=0, stride=1, order="NHWC")
+              .MaxPool([], kernel=2, stride=2, order="NHWC"))
 softmax = pool2.Flatten().FC([W3, B3]).Relu().FC([W4, B4]).Softmax()
 
 # Cross entropy, and accuracy

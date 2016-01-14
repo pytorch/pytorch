@@ -1,34 +1,12 @@
 cc_headers(
   name = "core_headers",
-  srcs = [
-      "blob.h",
-      "blob_serialization.h",
-      "client.h",
-      "common.h",
-      "context.h",
-      "db.h",
-      "flags.h",
-      "logging.h",
-      "logging_is_google_glog.h",
-      "logging_is_not_google_glog.h",
-      "init.h",
-      "net.h",
-      "operator.h",
-      "operator_gradient.h",
-      "registry.h",
-      "tensor.h",
-      "timer.h",
-      "typeid.h",
-      "types.h",
-      "workspace.h"
-  ],
+  srcs = Glob(["*.h"]),
 )
 
 cc_library(
   name = "core",
   srcs = [
       "blob_serialization.cc",
-      "client.cc",
       "db.cc",
       "flags.cc",
       "init.cc",

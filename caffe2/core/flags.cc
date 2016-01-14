@@ -6,10 +6,21 @@
 namespace caffe2 {
 DEFINE_REGISTRY(Caffe2FlagsRegistry, Caffe2FlagParser, const string&);
 
+namespace {
 static bool gCommandLineFlagsParsed = false;
+// Since caffe flags is going to be loaded before caffe logging, we would
+// need to have a stringstream to hold the messages instead of directly
+// using caffe logging.
+std::stringstream& GlobalInitStream() {
+  static std::stringstream ss;
+  return ss;
+}
+static string gUsageMessage = "(Usage message not set.)";
+}
 
-// The function is defined in init.cc.
-extern std::stringstream& GlobalInitStream();
+
+void SetUsageMessage(const string& str) { gUsageMessage = str; }
+const string& UsageMessage() { return gUsageMessage; }
 
 bool ParseCaffeCommandLineFlags(int* pargc, char** argv) {
   bool success = true;
@@ -19,7 +30,18 @@ bool ParseCaffeCommandLineFlags(int* pargc, char** argv) {
   int write_head = 1;
   for (int i = 1; i < *pargc; ++i) {
     string arg(argv[i]);
-    // If the arg does not start with "--", and we will ignore it.
+
+    if (arg == "--help") {
+      // Print the help message, and quit.
+      std::cout << UsageMessage() << std::endl;
+      std::cout << "Arguments: " << std::endl;
+      for (const auto& help_msg : Caffe2FlagsRegistry()->HelpMessage()) {
+        std::cout << "    " << help_msg.first << ": " << help_msg.second
+                  << std::endl;
+      }
+      exit(0);
+    }
+    // If the arg does not start with "--", we will ignore it.
     if (arg[0] != '-' || arg[1] != '-') {
       GlobalInitStream()
           << "Caffe2 flag: commandline argument does not match --name=var "
@@ -40,7 +62,7 @@ bool ParseCaffeCommandLineFlags(int* pargc, char** argv) {
       if (i == *pargc) {
         GlobalInitStream()
             << "Caffe2 flag: reached the last commandline argument, but "
-               "I am expecting a value for it.";
+               "I am expecting a value for " << arg;
         success = false;
         break;
       }
@@ -74,6 +96,11 @@ bool ParseCaffeCommandLineFlags(int* pargc, char** argv) {
   // since there are failures in parsing, it is very likely that some
   // downstream things will break, in which case it makes sense to quit loud
   // and early.
+  if (!success) {
+    std::cerr << GlobalInitStream().str();
+  }
+  // Clear the global init stream.
+  GlobalInitStream().str(std::string());
   return success;
 }
 

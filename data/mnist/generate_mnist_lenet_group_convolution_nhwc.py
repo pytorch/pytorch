@@ -24,13 +24,13 @@ data, label = train_net.TensorProtosDBInput(
     [], ["data", "label"], batch_size=64,
     db="gen/data/mnist/mnist-train-nhwc-minidb", db_type="minidb")
 
-pool1a, _ = (data.Conv([filter1a, bias1a], kernel=5, pad=0, stride=1, order="NHWC")
-                .MaxPool(outputs=2, kernel=2, stride=2, order="NHWC"))
-pool1b, _ = (data.Conv([filter1b, bias1b], kernel=5, pad=0, stride=1, order="NHWC")
-                .MaxPool(outputs=2, kernel=2, stride=2, order="NHWC"))
+pool1a = (data.Conv([filter1a, bias1a], kernel=5, pad=0, stride=1, order="NHWC")
+              .MaxPool([], kernel=2, stride=2, order="NHWC"))
+pool1b = (data.Conv([filter1b, bias1b], kernel=5, pad=0, stride=1, order="NHWC")
+              .MaxPool([], kernel=2, stride=2, order="NHWC"))
 pool1, _ = pool1a.DepthConcat([pool1b], outputs=2, order="NHWC", channels=[10, 10])
-pool2, _ = (pool1.Conv([filter2, bias2], kernel=5, pad=0, stride=1, order="NHWC")
-                 .MaxPool(outputs=2, kernel=2, stride=2, order="NHWC"))
+pool2 = (pool1.Conv([filter2, bias2], kernel=5, pad=0, stride=1, order="NHWC")
+              .MaxPool([], kernel=2, stride=2, order="NHWC"))
 softmax = pool2.Flatten().FC([W3, B3]).Relu().FC([W4, B4]).Softmax()
 
 # Cross entropy, and accuracy

@@ -9,11 +9,13 @@
 CAFFE2_DEFINE_string(plan, "", "The given path to the plan protobuffer.");
 
 int main(int argc, char** argv) {
+  caffe2::SetUsageMessage("Runs a caffe2 plan that has MPI operators in it.");
   int mpi_ret;
   MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &mpi_ret);
-  if (mpi_ret != MPI_THREAD_MULTIPLE) {
+  if (mpi_ret != MPI_THREAD_MULTIPLE &&
+      mpi_ret != MPI_THREAD_SERIALIZED) {
     std::cerr << "Caffe2 MPI requires the underlying MPI to support the "
-                 "MPI_THREAD_MULTIPLE mode";
+                 "MPI_THREAD_SERIALIZED or MPI_THREAD_MULTIPLE mode.\n";
     return 1;
   }
   caffe2::GlobalInit(&argc, argv);

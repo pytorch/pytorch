@@ -33,10 +33,10 @@ softmax = (flatten2.FC([W3, B3], "fc3")
                    .Softmax([], "softmax"))
 """
 # For an unnamed version, do the following:
-pool1, _ = (data.Conv([filter1, bias1], kernel=5, pad=0, stride=1, order="NCHW")
-                .MaxPool(outputs=2, kernel=2, stride=2, order="NCHW"))
-pool2, _ = (pool1.Conv([filter2, bias2], kernel=5, pad=0, stride=1, order="NCHW")
-                 .MaxPool(outputs=2, kernel=2, stride=2, order="NCHW"))
+pool1 = (data.Conv([filter1, bias1], kernel=5, pad=0, stride=1, order="NCHW")
+             .MaxPool([], kernel=2, stride=2, order="NCHW"))
+pool2 = (pool1.Conv([filter2, bias2], kernel=5, pad=0, stride=1, order="NCHW")
+              .MaxPool([], kernel=2, stride=2, order="NCHW"))
 softmax = pool2.Flatten().FC([W3, B3]).Relu().FC([W4, B4]).Softmax()
 
 # Cross entropy, and accuracy

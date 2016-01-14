@@ -12,6 +12,12 @@ static_assert(false, "If you use CAFFE2_USE_GOOGLE_GLOG, "
 
 static_assert(CAFFE2_LOG_THRESHOLD <= google::FATAL,
               "CAFFE2_LOG_THRESHOLD should at most be FATAL.");
+// Log severity level constants.
+const int CAFFE_FATAL   = google::FATAL;
+const int CAFFE_ERROR   = google::ERROR;
+const int CAFFE_WARNING = google::WARNING;
+const int CAFFE_INFO    = google::INFO;
+c
 
 // Re-route everything to glog's corresponding macros.
 #define LOG_ENABLE_COMPILE_TIME_THRESHOLD(n) \

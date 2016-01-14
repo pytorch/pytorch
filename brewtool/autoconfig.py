@@ -19,7 +19,6 @@ def CleanScratch():
 
 atexit.register(CleanScratch)
 
-
 def _TestFilename(name):
     """Get the internal test file name as its absolute path."""
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), name)
@@ -27,7 +26,6 @@ def _TestFilename(name):
 
 def _TempFilename(ext=''):
     return os.path.join(_SCRATCH_DIRECTORY, str(uuid.uuid4()) + ext)
-
 
 def GetSubprocessOutput(command, env):
     """Runs a subprocess command, and tries to get the result. Return None if the
@@ -55,6 +53,21 @@ def GetSubprocessOutput(command, env):
         return -1, None
     return proc.returncode, out.strip()
 
+
+def GetGitBuildString(env):
+    ret, out = GetSubprocessOutput(['git', 'describe', '--always'], env)
+    if ret:
+        # Cannot really run git stuff. Will simply say unknown.
+        return 'unknown_git_version'
+    ret, head_status = GetSubprocessOutput(['git', 'status', '--porcelain'], env)
+    if ret:
+        # For some reason we cannot get git status porcelain.
+        return out + ',unknown_head_status'
+    else:
+        if len(head_status):
+            return out + ',with_local_changes'
+        else:
+            return out + ',clean_head'
 
 def GetCpp11Flag(cc, env):
     """Gets the flag for c++11 for the current compiler."""
@@ -154,6 +167,10 @@ class Env(object):
             "-DEIGEN_NO_DEBUG",  # So that Eigen is in optimized mode.
             "-DPIC",  # Position independent code
         ]
+
+        # Add a macro for the caffe2 build message.
+        self.DEFINES.append(
+            r'-DCAFFE2_BUILD_STRING=\"' + GetGitBuildString(self.ENV) + r'\"')
         self.CFLAGS = Config.CFLAGS + [
             '-fPIC',
             '-ffast-math',

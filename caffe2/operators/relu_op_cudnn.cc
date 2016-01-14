@@ -121,7 +121,7 @@ class CuDNNReluGradientOp final : public Operator<CUDAContext> {
 namespace {
 REGISTER_CUDNN_OPERATOR(Relu, CuDNNReluOp<float>);
 REGISTER_CUDNN_OPERATOR(ReluGradient, CuDNNReluGradientOp<float>);
-//REGISTER_CUDNN_OPERATOR(ReluFp16, CuDNNReluOp<float16>);
-//REGISTER_CUDNN_OPERATOR(ReluFp16Gradient, CuDNNReluGradientOp<float16>);
+REGISTER_CUDNN_OPERATOR(ReluFp16, CuDNNReluOp<float16>);
+REGISTER_CUDNN_OPERATOR(ReluFp16Gradient, CuDNNReluGradientOp<float16>);
 }  // namespace
 }  // namespace caffe2
