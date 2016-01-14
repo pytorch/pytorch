@@ -131,7 +131,7 @@ void THCTensor_(copyAsyncCPU)(THCState *state, THCTensor *self, struct THTensor 
 
 void THTensor_(copyAsyncCuda)(THCState *state, THTensor *self, struct THCTensor *src)
 {
-  THArgCheck(THTensor_(nElement)(self) == THCudaTensor_nElement(state, src), 2, "sizes do not match");
+  THArgCheck(THTensor_(nElement)(self) == THCTensor_(nElement)(state, src), 2, "sizes do not match");
   THArgCheck(THTensor_(isContiguous)(self), 2, "Target tensor must be contiguous");
   THArgCheck(THCTensor_(isContiguous)(state, src), 3, "Source tensor must be contiguous");
 
