@@ -123,12 +123,3 @@ message PlanDef {
   repeated ExecutionStep execution_step = 3;
 }
 
-// ClientDef is a model we use to ship a pre-trained model. This contains two
-// parts basically: one set of parameters, and one network.
-message SimpleClientDef {
-  optional string name = 1;
-  optional NetDef init_net = 2;
-  optional NetDef main_net = 3;
-  optional string input = 4;
-  optional string output = 5;
-}

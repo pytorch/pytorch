@@ -55,6 +55,7 @@ cuda_library(
       "order_switch_ops.cu",
       "pool_op.cu",
       "relu_op.cu",
+      "relu_op_fp16.cu",
       "sigmoid_op.cu",
       "softmax_op.cu",
       "summarize_op.cu",

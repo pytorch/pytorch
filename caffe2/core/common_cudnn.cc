@@ -11,7 +11,7 @@ bool PrintCuDNNInfo() {
 }
 
 REGISTER_CAFFE2_INIT_FUNCTION(PrintCuDNNInfo, &PrintCuDNNInfo,
-                              "Print CuDNN Info for possible inspection.");
+                              "Print CuDNN Info.");
 
 }  // namespace
 }  // namespace caffe2

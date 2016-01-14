@@ -100,19 +100,6 @@ cc_binary(
 )
 
 cc_binary(
-  name = "run_client",
-  srcs = [
-      "run_client.cc",
-  ],
-  deps = [
-      "//caffe2/core:core",
-      "//caffe2:all_available_ops",
-      "//caffe2/db:db",
-      "//caffe2/utils:proto_utils",
-  ],
-)
-
-cc_binary(
   name = "run_plan",
   srcs = [
       "run_plan.cc",

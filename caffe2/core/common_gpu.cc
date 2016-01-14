@@ -5,31 +5,54 @@
 
 namespace caffe2 {
 
-bool HasCudaGPU() {
-  int count;
-  auto err = cudaGetDeviceCount(&count);
-  if (err == cudaErrorNoDevice || err == cudaErrorInsufficientDriver) {
-    return false;
+int NumCudaDevices() {
+  static int count = -1;
+  if (count < 0) {
+    auto err = cudaGetDeviceCount(&count);
+    if (err == cudaErrorNoDevice || err == cudaErrorInsufficientDriver) {
+      count = 0;
+    } else {
+      // cudaGetDeviceCount() should only return the above two errors. If
+      // there are other kinds of errors, maybe you have called some other
+      // cuda functions before HasCudaGPU().
+      CAFFE_CHECK(err == cudaSuccess)
+          << "Unexpected error from cudaGetDeviceCount(). Did you run some "
+             "cuda functions before calling NumCudaDevices() that might "
+             "have already set an error?";
+    }
   }
-  // cudaGetDeviceCount() should only return the above two errors. If
-  // there are other kinds of errors, maybe you have called some other
-  // cuda functions before HasCudaGPU().
-  CAFFE_CHECK(err == cudaSuccess)
-      << "Unexpected error from cudaGetDeviceCount(). Did you run some "
-         "cuda functions before calling HasCudaGPU()?";
-  return true;
+  return count;
 }
 
 namespace {
 int gDefaultGPUID = 0;
 }  // namespace
 
-void SetDefaultGPUID(const int deviceid) { gDefaultGPUID = deviceid; }
+void SetDefaultGPUID(const int deviceid) {
+  CAFFE_CHECK_LT(deviceid, NumCudaDevices())
+      << "The default gpu id should be smaller than the number of gpus "
+         "on this machine: " << deviceid << " vs " << NumCudaDevices();
+  gDefaultGPUID = deviceid;
+}
 int GetDefaultGPUID() { return gDefaultGPUID; }
 
+
+const cudaDeviceProp& GetDeviceProperty(const int deviceid) {
+  static vector<cudaDeviceProp> props;
+  CAFFE_CHECK_LT(deviceid, NumCudaDevices())
+      << "The gpu id should be smaller than the number of gpus "
+         "on this machine: " << deviceid << " vs " << NumCudaDevices();
+  if (props.size() == 0) {
+    props.resize(NumCudaDevices());
+    for (int i = 0; i < NumCudaDevices(); ++i) {
+      CUDA_CHECK(cudaGetDeviceProperties(&props[i], i));
+    }
+  }
+  return props[deviceid];
+}
+
 void DeviceQuery(const int device) {
-  cudaDeviceProp prop;
-  CUDA_CHECK(cudaGetDeviceProperties(&prop, device));
+  const cudaDeviceProp& prop = GetDeviceProperty(device);
   std::stringstream ss;
   ss << std::endl;
   ss << "Device id:                     " << device << std::endl;
@@ -62,7 +85,6 @@ void DeviceQuery(const int device) {
   CAFFE_LOG_INFO << ss.str();
   return;
 }
-
 
 bool GetCudaPeerAccessPattern(vector<vector<bool> >* pattern) {
   int gpu_count;
@@ -150,23 +172,27 @@ const char* curandGetErrorString(curandStatus_t error) {
   return "Unrecognized curand error string";
 }
 
-bool Caffe2EnableCudaPeerAccess() {
+bool Caffe2InitializeCuda() {
   // If the current run does not have any cuda devices, do nothing.
   if (!HasCudaGPU()) {
     CAFFE_LOG_INFO << "No cuda gpu present. Skipping.";
     return true;
   }
-  int device_count;
-  CUDA_CHECK(cudaGetDeviceCount(&device_count));
+  // Save the current device so we can restore it after moving across
+  // different devices.
   int init_device;
   CUDA_CHECK(cudaGetDevice(&init_device));
-  for (int i = 0; i < device_count; ++i) {
-    if (cudaSetDevice(i) != cudaSuccess) {
-      CAFFE_LOG_ERROR << "Cannot use device " << i
-                 << ", skipping setting peer access for this device.";
+
+  for (int i = 0; i < NumCudaDevices(); ++i) {
+    auto err = cudaSetDevice(i);
+    if (err != cudaSuccess) {
+      CAFFE_LOG_WARNING
+          << "Cannot use device " << i
+          << "due to the following error: " << cudaGetErrorString(err);
       continue;
     }
-    for (int j = 0; j < device_count; ++j) {
+    // Enable peer access.
+    for (int j = 0; j < NumCudaDevices(); ++j) {
       if (i == j) continue;
       int can_access;
       CUDA_CHECK(cudaDeviceCanAccessPeer(&can_access, i, j));
@@ -179,13 +205,14 @@ bool Caffe2EnableCudaPeerAccess() {
       }
     }
   }
+  // Restore the current device.
   CUDA_CHECK(cudaSetDevice(init_device));
   return true;
 }
 
-REGISTER_CAFFE2_INIT_FUNCTION(Caffe2EnableCudaPeerAccess,
-                              &Caffe2EnableCudaPeerAccess,
-                              "Enable cuda peer access.");
+REGISTER_CAFFE2_INIT_FUNCTION(Caffe2InitializeCuda,
+                              &Caffe2InitializeCuda,
+                              "Enable cuda for caffe2.");
 
 }  // namespace internal
 }  // namespace caffe2

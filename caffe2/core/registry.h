@@ -71,6 +71,8 @@ class Registry {
     return keys;
   }
 
+  const CaffeMap<SrcType, string>& HelpMessage() { return help_message_; }
+
   // This function should only used in test code to inspect registered names.
   // You should only call this function after google glog is initialized -
   // do NOT call it in static initializations.
