@@ -422,6 +422,8 @@ class proto_library(BuildTarget):
         else:
             self.optimize_option = "SPEED"
             deps.append(PROTOBUF_TARGET)
+        # PROTOC_TARGET is here just for controlling the build order.
+        deps.append(PROTOC_TARGET)
         BuildTarget.__init__(self, name, srcs, deps=deps, **kwargs)
 
     def AddOptimizationOption(self, name):

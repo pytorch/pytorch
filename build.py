@@ -8,7 +8,7 @@ class Config(object):
     ############################################################################
     # If you want to show a lot of the build details, set VERBOSE_BUILD to True.
     # This will show the detailed commands being run during the build process.
-    VERBOSE_BUILD = True
+    VERBOSE_BUILD = False
     # Specify your compiler.
     CC = "c++"
     # Specify your archiver.
@@ -69,7 +69,11 @@ class Config(object):
     LIBDIRS = []
 
     # Additional cflags you would like to add to the compilation.
-    CFLAGS = ["-mavx", "-mavx2", "-mfma"]
+    CFLAGS = []
+    # If you have a nice CPU, you can enable several intrinsics. Make sure you know
+    # that these are available on your CPU though, otherwise you will get illegal
+    # instruction errors.
+    #CFLAGS = ["-mavx", "-mavx2", "-mfma"]
 
     # Additional link flags you would like to add to the compilation.
     LINKFLAGS = []
