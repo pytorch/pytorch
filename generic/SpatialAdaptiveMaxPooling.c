@@ -2,7 +2,7 @@
 #define TH_GENERIC_FILE "generic/SpatialAdaptiveMaxPooling.c"
 #else
 
-static void nn_(SpatialAdaptiveMaxPooling_updateOutput_frame)(real *input_p,real *output_p,
+static void THNN_(SpatialAdaptiveMaxPooling_updateOutput_frame)(real *input_p,real *output_p,
                                                               real *indx_p, real *indy_p,
                                                               long nslices,
                                                               long iwidth, long iheight,
@@ -65,13 +65,8 @@ static void nn_(SpatialAdaptiveMaxPooling_updateOutput_frame)(real *input_p,real
   }
 }
 
-static int nn_(SpatialAdaptiveMaxPooling_updateOutput)(lua_State *L)
+void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(THNNState *state, THTensor *input, THTensor *output, int owidth, int oheight, THTensor *indices)
 {
-  THTensor *input = luaT_checkudata(L, 2, torch_Tensor);
-  long oheight = luaT_getfieldcheckint(L, 1, "H");
-  long owidth = luaT_getfieldcheckint(L, 1, "W");
-  THTensor *indices = luaT_getfieldcheckudata(L, 1, "indices", torch_Tensor);
-  THTensor *output = luaT_getfieldcheckudata(L, 1, "output", torch_Tensor);
   int dimw = 2;
   int dimh = 1;
   long nbatch = 1;
@@ -89,7 +84,7 @@ static int nn_(SpatialAdaptiveMaxPooling_updateOutput)(lua_State *L)
   real *indices_data;
 
 
-  luaL_argcheck(L, input->nDimension == 3 || input->nDimension == 4 , 2, "3D or 4D (batch mode) tensor expected");
+  THArgCheck(input->nDimension == 3 || input->nDimension == 4 , 2, "3D or 4D (batch mode) tensor expected");
 
   if (input->nDimension == 4) 
   {
@@ -119,7 +114,7 @@ static int nn_(SpatialAdaptiveMaxPooling_updateOutput)(lua_State *L)
     output_data = THTensor_(data)(output);
     indices_data = THTensor_(data)(indices);
 
-    nn_(SpatialAdaptiveMaxPooling_updateOutput_frame)(input_data, output_data,
+    THNN_(SpatialAdaptiveMaxPooling_updateOutput_frame)(input_data, output_data,
                                                       indices_data+nslices*owidth*oheight, indices_data,
                                                       nslices,
                                                       iwidth, iheight,
@@ -142,7 +137,7 @@ static int nn_(SpatialAdaptiveMaxPooling_updateOutput)(lua_State *L)
 #pragma omp parallel for private(p)
     for (p = 0; p < nbatch; p++)
     {
-      nn_(SpatialAdaptiveMaxPooling_updateOutput_frame)(input_data+p*istride_b, output_data+p*nslices*owidth*oheight,
+      THNN_(SpatialAdaptiveMaxPooling_updateOutput_frame)(input_data+p*istride_b, output_data+p*nslices*owidth*oheight,
                                                         indices_data+(p+nbatch)*nslices*owidth*oheight, indices_data+p*nslices*owidth*oheight,
                                                         nslices,
                                                         iwidth, iheight,
@@ -151,13 +146,11 @@ static int nn_(SpatialAdaptiveMaxPooling_updateOutput)(lua_State *L)
                                                         istride_d);
     }
   }
-
-  return 1;
 }
 
 
 
-static void nn_(SpatialAdaptiveMaxPooling_updateGradInput_frame)(real *gradInput_p, real *gradOutput_p,
+static void THNN_(SpatialAdaptiveMaxPooling_updateGradInput_frame)(real *gradInput_p, real *gradOutput_p,
                                                                  real *indx_p, real *indy_p,
                                                                  long nslices,
                                                                  long iwidth, long iheight,
@@ -191,12 +184,8 @@ static void nn_(SpatialAdaptiveMaxPooling_updateGradInput_frame)(real *gradInput
   }
 }
 
-static int nn_(SpatialAdaptiveMaxPooling_updateGradInput)(lua_State *L)
+void THNN_(SpatialAdaptiveMaxPooling_updateGradInput)(THNNState *state, THTensor *input, THTensor *gradOutput, THTensor *gradInput, THTensor *indices)
 {
-  THTensor *input = luaT_checkudata(L, 2, torch_Tensor);
-  THTensor *gradOutput = luaT_checkudata(L, 3, torch_Tensor);
-  THTensor *indices = luaT_getfieldcheckudata(L, 1, "indices", torch_Tensor);
-  THTensor *gradInput = luaT_getfieldcheckudata(L, 1, "gradInput", torch_Tensor);
   int dimw = 2;
   int dimh = 1;
   long nbatch = 1;
@@ -237,7 +226,7 @@ static int nn_(SpatialAdaptiveMaxPooling_updateGradInput)(lua_State *L)
   /* backprop */
   if (input->nDimension == 3)
   {
-    nn_(SpatialAdaptiveMaxPooling_updateGradInput_frame)(gradInput_data, gradOutput_data,
+    THNN_(SpatialAdaptiveMaxPooling_updateGradInput_frame)(gradInput_data, gradOutput_data,
                                                          indices_data+nslices*owidth*oheight, indices_data,
                                                          nslices,
                                                          iwidth, iheight,
@@ -249,7 +238,7 @@ static int nn_(SpatialAdaptiveMaxPooling_updateGradInput)(lua_State *L)
 #pragma omp parallel for private(p)
     for (p = 0; p < nbatch; p++)
     {
-      nn_(SpatialAdaptiveMaxPooling_updateGradInput_frame)(gradInput_data+p*nslices*iwidth*iheight, gradOutput_data+p*nslices*owidth*oheight,
+      THNN_(SpatialAdaptiveMaxPooling_updateGradInput_frame)(gradInput_data+p*nslices*iwidth*iheight, gradOutput_data+p*nslices*owidth*oheight,
                                                            indices_data+(p+nbatch)*nslices*owidth*oheight, indices_data+p*nslices*owidth*oheight,
                                                            nslices,
                                                            iwidth, iheight,
@@ -259,21 +248,6 @@ static int nn_(SpatialAdaptiveMaxPooling_updateGradInput)(lua_State *L)
 
   /* cleanup */
   THTensor_(free)(gradOutput);
-
-  return 1;
-}
-
-static const struct luaL_Reg nn_(SpatialAdaptiveMaxPooling__) [] = {
-  {"SpatialAdaptiveMaxPooling_updateOutput", nn_(SpatialAdaptiveMaxPooling_updateOutput)},
-  {"SpatialAdaptiveMaxPooling_updateGradInput", nn_(SpatialAdaptiveMaxPooling_updateGradInput)},
-  {NULL, NULL}
-};
-
-static void nn_(SpatialAdaptiveMaxPooling_init)(lua_State *L)
-{
-  luaT_pushmetatable(L, torch_Tensor);
-  luaT_registeratname(L, nn_(SpatialAdaptiveMaxPooling__), "nn");
-  lua_pop(L,1);
 }
 
 #endif

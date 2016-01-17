@@ -42,3 +42,12 @@
 
 #include "generic/SpatialConvolutionMM.c"
 #include "THGenerateFloatTypes.h"
+
+#include "generic/SpatialAdaptiveMaxPooling.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/SpatialAveragePooling.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/SpatialMaxPooling.c"
+#include "THGenerateFloatTypes.h"

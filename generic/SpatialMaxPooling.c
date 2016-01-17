@@ -2,7 +2,7 @@
 #define TH_GENERIC_FILE "generic/SpatialMaxPooling.c"
 #else
 
-static void nn_(SpatialMaxPooling_updateOutput_frame)(real *input_p, real *output_p,
+static void THNN_(SpatialMaxPooling_updateOutput_frame)(real *input_p, real *output_p,
                                                       real *ind_p,
                                                       long nslices,
                                                       long iwidth, long iheight,
@@ -61,18 +61,8 @@ static void nn_(SpatialMaxPooling_updateOutput_frame)(real *input_p, real *outpu
   }
 }
 
-static int nn_(SpatialMaxPooling_updateOutput)(lua_State *L)
+void THNN_(SpatialMaxPooling_updateOutput)(THNNState *state, THTensor *input, THTensor *output, int kW, int kH, int dW, int dH, int padW, int padH, int ceil_mode, THTensor *indices)
 {
-  THTensor *input = luaT_checkudata(L, 2, torch_Tensor);
-  int kW = luaT_getfieldcheckint(L, 1, "kW");
-  int kH = luaT_getfieldcheckint(L, 1, "kH");
-  int dW = luaT_getfieldcheckint(L, 1, "dW");
-  int dH = luaT_getfieldcheckint(L, 1, "dH");
-  int padW = luaT_getfieldcheckint(L, 1, "padW");
-  int padH = luaT_getfieldcheckint(L, 1, "padH");
-  int ceil_mode = luaT_getfieldcheckboolean(L,1,"ceil_mode");
-  THTensor *indices = luaT_getfieldcheckudata(L, 1, "indices", torch_Tensor);
-  THTensor *output = luaT_getfieldcheckudata(L, 1, "output", torch_Tensor);
   int dimw = 2;
   int dimh = 1;
   long nbatch = 1;
@@ -86,7 +76,7 @@ static int nn_(SpatialMaxPooling_updateOutput)(lua_State *L)
   real *indices_data;
 
 
-  luaL_argcheck(L, input->nDimension == 3 || input->nDimension == 4 , 2, "3D or 4D (batch mode) tensor expected");
+  THArgCheck(input->nDimension == 3 || input->nDimension == 4 , 2, "3D or 4D (batch mode) tensor expected");
 
   if (input->nDimension == 4) 
   {
@@ -94,9 +84,9 @@ static int nn_(SpatialMaxPooling_updateOutput)(lua_State *L)
     dimw++;
     dimh++;
   }
-  luaL_argcheck(L, input->size[dimw] >= kW - padW && input->size[dimh] >= kH - padH, 2, "input image smaller than kernel size");
+  THArgCheck(input->size[dimw] >= kW - padW && input->size[dimh] >= kH - padH, 2, "input image smaller than kernel size");
 
-  luaL_argcheck(L, kW/2 >= padW && kH/2 >= padH, 2, "pad should be smaller than half of kernel size");
+  THArgCheck(kW/2 >= padW && kH/2 >= padH, 2, "pad should be smaller than half of kernel size");
 
   /* sizes */
   nslices = input->size[dimh-1];
@@ -136,7 +126,7 @@ static int nn_(SpatialMaxPooling_updateOutput)(lua_State *L)
     output_data = THTensor_(data)(output);
     indices_data = THTensor_(data)(indices);
 
-    nn_(SpatialMaxPooling_updateOutput_frame)(input_data, output_data,
+    THNN_(SpatialMaxPooling_updateOutput_frame)(input_data, output_data,
                                               indices_data,
                                               nslices,
                                               iwidth, iheight,
@@ -159,7 +149,7 @@ static int nn_(SpatialMaxPooling_updateOutput)(lua_State *L)
 #pragma omp parallel for private(p)
     for (p = 0; p < nbatch; p++)
     {
-      nn_(SpatialMaxPooling_updateOutput_frame)(input_data+p*nslices*iwidth*iheight, output_data+p*nslices*owidth*oheight,
+      THNN_(SpatialMaxPooling_updateOutput_frame)(input_data+p*nslices*iwidth*iheight, output_data+p*nslices*owidth*oheight,
                                                 indices_data+p*nslices*owidth*oheight,
                                                 nslices,
                                                 iwidth, iheight,
@@ -171,10 +161,9 @@ static int nn_(SpatialMaxPooling_updateOutput)(lua_State *L)
 
   /* cleanup */
   THTensor_(free)(input);
-  return 1;
 }
 
-static void nn_(SpatialMaxPooling_updateGradInput_frame)(real *gradInput_p, real *gradOutput_p,
+static void THNN_(SpatialMaxPooling_updateGradInput_frame)(real *gradInput_p, real *gradOutput_p,
                                                          real *ind_p,
                                                          long nslices,
                                                          long iwidth, long iheight,
@@ -204,14 +193,8 @@ static void nn_(SpatialMaxPooling_updateGradInput_frame)(real *gradInput_p, real
   }
 }
 
-static int nn_(SpatialMaxPooling_updateGradInput)(lua_State *L)
+void THNN_(SpatialMaxPooling_updateGradInput)(THNNState *state, THTensor *input, THTensor *gradOutput, THTensor *gradInput, int dW, int dH, THTensor *indices)
 {
-  THTensor *input = luaT_checkudata(L, 2, torch_Tensor);
-  THTensor *gradOutput = luaT_checkudata(L, 3, torch_Tensor);
-  int dW = luaT_getfieldcheckint(L, 1, "dW");
-  int dH = luaT_getfieldcheckint(L, 1, "dH");
-  THTensor *indices = luaT_getfieldcheckudata(L, 1, "indices", torch_Tensor);
-  THTensor *gradInput = luaT_getfieldcheckudata(L, 1, "gradInput", torch_Tensor);
   int dimw = 2;
   int dimh = 1;
   long nbatch = 1;
@@ -252,7 +235,7 @@ static int nn_(SpatialMaxPooling_updateGradInput)(lua_State *L)
   /* backprop */
   if (input->nDimension == 3)
   {
-    nn_(SpatialMaxPooling_updateGradInput_frame)(gradInput_data, gradOutput_data,
+    THNN_(SpatialMaxPooling_updateGradInput_frame)(gradInput_data, gradOutput_data,
                                                  indices_data,
                                                  nslices,
                                                  iwidth, iheight,
@@ -265,7 +248,7 @@ static int nn_(SpatialMaxPooling_updateGradInput)(lua_State *L)
 #pragma omp parallel for private(p)
     for (p = 0; p < nbatch; p++)
     {
-      nn_(SpatialMaxPooling_updateGradInput_frame)(gradInput_data+p*nslices*iwidth*iheight, gradOutput_data+p*nslices*owidth*oheight,
+      THNN_(SpatialMaxPooling_updateGradInput_frame)(gradInput_data+p*nslices*iwidth*iheight, gradOutput_data+p*nslices*owidth*oheight,
                                                    indices_data+p*nslices*owidth*oheight,
                                                    nslices,
                                                    iwidth, iheight,
@@ -276,21 +259,6 @@ static int nn_(SpatialMaxPooling_updateGradInput)(lua_State *L)
 
   /* cleanup */
   THTensor_(free)(gradOutput);
-
-  return 1;
-}
-
-static const struct luaL_Reg nn_(SpatialMaxPooling__) [] = {
-  {"SpatialMaxPooling_updateOutput", nn_(SpatialMaxPooling_updateOutput)},
-  {"SpatialMaxPooling_updateGradInput", nn_(SpatialMaxPooling_updateGradInput)},
-  {NULL, NULL}
-};
-
-static void nn_(SpatialMaxPooling_init)(lua_State *L)
-{
-  luaT_pushmetatable(L, torch_Tensor);
-  luaT_registeratname(L, nn_(SpatialMaxPooling__), "nn");
-  lua_pop(L,1);
 }
 
 #endif

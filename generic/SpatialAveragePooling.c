@@ -2,20 +2,8 @@
 #define TH_GENERIC_FILE "generic/SpatialAveragePooling.c"
 #else
 
-static int nn_(SpatialAveragePooling_updateOutput)(lua_State *L)
+void THNN_(SpatialAveragePooling_updateOutput)(THNNState *state, THTensor *input, THTensor *output, int kW, int kH, int dW, int dH, int padW, int padH, int ceil_mode, int count_include_pad)
 {
-  THTensor *input = luaT_checkudata(L, 2, torch_Tensor);
-  int kW = luaT_getfieldcheckint(L, 1, "kW");
-  int kH = luaT_getfieldcheckint(L, 1, "kH");
-  int dW = luaT_getfieldcheckint(L, 1, "dW");
-  int dH = luaT_getfieldcheckint(L, 1, "dH");
-  int padW = luaT_getfieldcheckint(L, 1, "padW");
-  int padH = luaT_getfieldcheckint(L, 1, "padH");
-  int ceil_mode = luaT_getfieldcheckboolean(L,1,"ceil_mode");
-  int count_include_pad = luaT_getfieldcheckboolean(L,1,"count_include_pad");
-
-  THTensor *output = luaT_getfieldcheckudata(L, 1, "output", torch_Tensor);
-
   real *output_data;
   real *input_data;
 
@@ -32,8 +20,8 @@ static int nn_(SpatialAveragePooling_updateOutput)(lua_State *L)
 
   long k;
 
-  luaL_argcheck(L, input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D(batch mode) tensor expected");
-  luaL_argcheck(L, kW/2 >= padW && kH/2 >= padH, 2, "pad should be smaller than half of kernel size");
+  THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D(batch mode) tensor expected");
+  THArgCheck(kW/2 >= padW && kH/2 >= padH, 2, "pad should be smaller than half of kernel size");
 
   if (input->nDimension == 4) {
     nbatch = input->size[0];
@@ -66,7 +54,7 @@ static int nn_(SpatialAveragePooling_updateOutput)(lua_State *L)
       --outputWidth;
   }
 
-  luaL_argcheck(L, inputWidth >= kW - 2 * padW && inputHeight >= kH - 2 * padH, 2, "input image smaller than kernel size");
+  THArgCheck(inputWidth >= kW - 2 * padW && inputHeight >= kH - 2 * padH, 2, "input image smaller than kernel size");
 
   if (input->nDimension == 3)
     THTensor_(resize3d)(output, nInputPlane, outputHeight, outputWidth);
@@ -74,7 +62,7 @@ static int nn_(SpatialAveragePooling_updateOutput)(lua_State *L)
     THTensor_(resize4d)(output, input->size[0], nInputPlane, outputHeight, outputWidth);
   
   input = THTensor_(newContiguous)(input);
-  luaL_argcheck(L, THTensor_(isContiguous)(output), 1, "");
+  THArgCheck(THTensor_(isContiguous)(output), 1, "");
   input_data = THTensor_(data)(input);
   output_data = THTensor_(data)(output);
   
@@ -129,25 +117,10 @@ static int nn_(SpatialAveragePooling_updateOutput)(lua_State *L)
     }
   }
   THTensor_(free)(input);
-
-  return 1;
 }
 
-static int nn_(SpatialAveragePooling_updateGradInput)(lua_State *L)
+void THNN_(SpatialAveragePooling_updateGradInput)(THNNState *state, THTensor *input, THTensor *gradOutput, THTensor *gradInput, int kW, int kH, int dW, int dH, int padW, int padH, int ceil_mode, int count_include_pad)
 {
-  THTensor *input = luaT_checkudata(L, 2, torch_Tensor);
-  THTensor *gradOutput = luaT_checkudata(L, 3, torch_Tensor);
-  int kW = luaT_getfieldcheckint(L, 1, "kW");
-  int kH = luaT_getfieldcheckint(L, 1, "kH");
-  int dW = luaT_getfieldcheckint(L, 1, "dW");
-  int dH = luaT_getfieldcheckint(L, 1, "dH");
-  int padW = luaT_getfieldcheckint(L, 1, "padW");
-  int padH = luaT_getfieldcheckint(L, 1, "padH");
-  int ceil_mode = luaT_getfieldcheckboolean(L,1,"ceil_mode");
-  int count_include_pad = luaT_getfieldcheckboolean(L,1,"count_include_pad");
-
-  THTensor *gradInput = luaT_getfieldcheckudata(L, 1, "gradInput", torch_Tensor);
-
   int dimw = 2;
   int dimh = 1;
   int dimc = 0;
@@ -201,7 +174,7 @@ static int nn_(SpatialAveragePooling_updateGradInput)(lua_State *L)
 
   input = THTensor_(newContiguous)(input);
   gradOutput = THTensor_(newContiguous)(gradOutput);
-  luaL_argcheck(L, THTensor_(isContiguous)(gradInput), 1, "");
+  THArgCheck(THTensor_(isContiguous)(gradInput), 1, "");
 
   gradInput_data = THTensor_(data)(gradInput);
   gradOutput_data = THTensor_(data)(gradOutput);
@@ -257,20 +230,6 @@ static int nn_(SpatialAveragePooling_updateGradInput)(lua_State *L)
 
   THTensor_(free)(input);
   THTensor_(free)(gradOutput);
-  return 1;
-}
-
-static const struct luaL_Reg nn_(SpatialAveragePooling__) [] = {
-  {"SpatialAveragePooling_updateOutput", nn_(SpatialAveragePooling_updateOutput)},
-  {"SpatialAveragePooling_updateGradInput", nn_(SpatialAveragePooling_updateGradInput)},
-  {NULL, NULL}
-};
-
-static void nn_(SpatialAveragePooling_init)(lua_State *L)
-{
-  luaT_pushmetatable(L, torch_Tensor);
-  luaT_registeratname(L, nn_(SpatialAveragePooling__), "nn");
-  lua_pop(L,1);
 }
 
 #endif
