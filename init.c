@@ -39,3 +39,6 @@
 
 #include "generic/LookupTable.c"
 #include "THGenerateFloatTypes.h"
+
+#include "generic/SpatialConvolutionMM.c"
+#include "THGenerateFloatTypes.h"
