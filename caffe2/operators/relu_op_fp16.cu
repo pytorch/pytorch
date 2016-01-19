@@ -1,6 +1,5 @@
-#include <cuda.h>
-#if CAFFE_HAS_CUDA_FP16
-#include <cuda_fp16.h>
+#include "caffe2/core/common_gpu.h"
+#ifdef CAFFE_HAS_CUDA_FP16
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/relu_op.h"
