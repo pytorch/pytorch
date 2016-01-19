@@ -9,9 +9,7 @@ cc_headers(
 
 cc_library(
   name = "rtc_ops",
-  srcs = [
-    "pool_op_rtc.cc",
-  ],
+  srcs = Glob(["*.cc"]),
   deps = [
     ":common_rtc",
     "//caffe2/core:core_gpu",

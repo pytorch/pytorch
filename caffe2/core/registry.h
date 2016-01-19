@@ -73,19 +73,6 @@ class Registry {
 
   const CaffeMap<SrcType, string>& HelpMessage() { return help_message_; }
 
-  // This function should only used in test code to inspect registered names.
-  // You should only call this function after google glog is initialized -
-  // do NOT call it in static initializations.
-  void TEST_PrintRegisteredNames() {
-    vector<SrcType> keys = Keys();
-    std::sort(keys.begin(), keys.end());
-    for (const SrcType& key : keys) {
-      std::cout << "Registry key: " << key << std::endl;
-    }
-    std::cout << "A total of " << keys.size() << " registered keys."
-              << std::endl;
-  }
-
  private:
   CaffeMap<SrcType, Creator> registry_;
   CaffeMap<SrcType, string> help_message_;
@@ -124,7 +111,7 @@ class Registerer {
 
 // For the typed creators, since we cannot affix the key as a simple string to
 // the registerer object, we ask the user to provide an affix that we can
-// affix to the registerer name.
+// affix to the registerer name to ensure uniqueness.
 // Note(Yangqing): The __VA_ARGS__ below allows one to specify a templated
 // creator with comma in its templated arguments.
 #define REGISTER_TYPED_CREATOR(RegistryName, affix, key, ...)                  \
@@ -135,9 +122,8 @@ class Registerer {
       key, RegistryName(),                                                     \
       Registerer##RegistryName::DefaultCreator<__VA_ARGS__>)
 
-
 // DECLARE_REGISTRY and DEFINE_REGISTRY are hard-wired to use string as the key
-// type, because that is the most commonly used one.
+// type, because that is the most commonly used cases.
 #define DECLARE_REGISTRY(RegistryName, ObjectType, ...)                        \
   DECLARE_TYPED_REGISTRY(RegistryName, std::string,                            \
                          ObjectType, ##__VA_ARGS__)
@@ -146,6 +132,8 @@ class Registerer {
   DEFINE_TYPED_REGISTRY(RegistryName, std::string,                             \
                         ObjectType, ##__VA_ARGS__)
 
+// REGISTER_CREATOR and REGISTER_CLASS are hard-wired to use string as the key
+// type, because that is the most commonly used cases.
 #define REGISTER_CREATOR(RegistryName, key, ...)                               \
   REGISTER_TYPED_CREATOR(RegistryName, key, #key, __VA_ARGS__)
 

@@ -6,7 +6,16 @@
 int main(int argc, char** argv) {
   caffe2::GlobalInit(&argc, argv);
   std::cout << "CPU operator registry:" << std::endl;
-  caffe2::CPUOperatorRegistry()->TEST_PrintRegisteredNames();
+  for (const auto& key : caffe2::CPUOperatorRegistry()->Keys()) {
+    std::cout << "\t" << key << std::endl;
+  }
   std::cout << "CUDA operator registry:" << std::endl;
-  caffe2::CUDAOperatorRegistry()->TEST_PrintRegisteredNames();
+  for (const auto& key : caffe2::CUDAOperatorRegistry()->Keys()) {
+    std::cout << "\t" << key << std::endl;
+  }
+  std::cout << "Operators that have gradients registered:" << std::endl;
+  for (const auto& key : caffe2::GradientRegistry()->Keys()) {
+    std::cout << "\t" << key << std::endl;
+  }
 }
+

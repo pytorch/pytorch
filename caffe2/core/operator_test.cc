@@ -27,8 +27,6 @@ TEST(OperatorTest, RegistryWorks) {
   op_def.mutable_device_option()->set_device_type(CUDA);
   op.reset(CreateOperator(op_def, &ws));
   EXPECT_NE(nullptr, op.get());
-
-  CPUOperatorRegistry()->TEST_PrintRegisteredNames();
 }
 
 TEST(OperatorDeathTest, CannotUseUninitializedBlob) {
