@@ -1,4 +1,5 @@
 #include "THCReduceApplyUtils.cuh"
+#include "THCSortUtils.cuh"
 #include "THCTensorCopy.h"
 
 #include <thrust/device_ptr.h>
@@ -6,13 +7,6 @@
 #if CUDA_VERSION >= 7000
 #include <thrust/system/cuda/execution_policy.h>
 #endif
-
-template <typename IndexType, int Power2SortSize>
-__device__ __forceinline__ IndexType
-getSortSliceLinearIndex() {
-  // linear block ID -> slice we are sorting (one per block)
-  return getLinearBlockId<IndexType>();
-}
 
 // Returns 2^(ceil(lg(n)) from Stanford bit twiddling hacks
 unsigned long nextHighestPowerOf2(unsigned long n) {
@@ -28,303 +22,242 @@ unsigned long nextHighestPowerOf2(unsigned long n) {
   return n;
 }
 
-template <typename T>
-struct LTComp {
-  __device__ __forceinline__ bool operator()(const T& a, const T& b) const {
-    return (a < b);
-  }
-};
-
-template <typename T>
-struct GTComp {
-  __device__ __forceinline__ bool operator()(const T& a, const T& b) const {
-    return (a > b);
-  }
-};
-
-template <typename Comparator, typename K, typename V>
-__device__ __forceinline__ void bitonicSwap(K& kA, V& vA,
-                                            K& kB, V& vB,
-                                            bool dir,
-                                            const Comparator& comp) {
-  // Entries with -1 indices (not real data; out of bounds) always
-  // sort to the end
-  bool val = (comp(kA, kB) && (vA != -1)) || (vB == -1);
-  if (val == dir) {
-    K k = kA;
-    kA = kB;
-    kB = k;
-
-    V v = vA;
-    vA = vB;
-    vB = v;
-  }
-};
-
-template <typename Comparator, typename K, typename V,
-          typename IndexType, int Power2SortSize>
-__device__ inline void bitonicSort(K keys[Power2SortSize],
-                                   V values[Power2SortSize],
-                                   const Comparator& comp) {
-#pragma unroll
-  for (unsigned int size = 2; size < Power2SortSize; size *= 2) {
-    bool flag = ((threadIdx.x & (size / 2)) != 0);
-
-#pragma unroll
-    for (unsigned int stride = size / 2; stride > 0; stride /= 2) {
-
-      // Single warp per slice is completely synchronous
-      if (Power2SortSize > 64) {
-        __syncthreads();
-      }
-
-      unsigned int pos = 2 * threadIdx.x - (threadIdx.x & (stride - 1));
-      bitonicSwap<Comparator, K, V>(
-        keys[pos], values[pos], keys[pos + stride], values[pos + stride],
-        flag, comp);
-    }
-  }
-
-#pragma unroll
-  for (unsigned int stride = Power2SortSize / 2; stride > 0; stride /= 2) {
-    // Single warp per slice is completely synchronous
-    if (Power2SortSize > 64) {
-      __syncthreads();
-    }
-
-    unsigned int pos = 2 * threadIdx.x - (threadIdx.x & (stride - 1));
-    bitonicSwap<Comparator, K, V>(
-      keys[pos], values[pos], keys[pos + stride], values [pos + stride],
-      false, comp);
-  }
-
-  // Single warp per slice is completely synchronous
-  if (Power2SortSize > 64) {
-    __syncthreads();
-  }
-}
-
-template <typename Comparator, typename IndexType, int Dims, int Power2SortSize>
+// `base` is the base address of a tensor
+// For each slice (defined as a linear point of `out`, from 0 ->
+// (sliceSize - 1) * sliceStride, we fill that slice from `0` to
+// `sliceSize - 1`.
+template <typename IndexType, int Dim>
 __global__ void
-THCudaTensor_bitonicSortWithIndex(TensorInfo<IndexType> sorted,
-                                  TensorInfo<IndexType> indices,
-                                  TensorInfo<IndexType> input,
-                                  IndexType totalSlices,
-                                  IndexType sliceSize,
-                                  IndexType sliceStride,
-                                  IndexType outSize,
-                                  IndexType outStride,
-                                  const Comparator comp) {
-  // Find the slice of the tensor that we are sorting
-  const IndexType linearIndex =
-    getSortSliceLinearIndex<IndexType, Power2SortSize>();
+fillSliceWithIndex(TensorInfo<IndexType> out,
+                   IndexType totalSlices,
+                   IndexType sliceSize,
+                   IndexType sliceStride) {
+  IndexType slice = getLinearBlockId<IndexType>();
 
-  // Tiling the slices could have us be out of bounds, if there are a
-  // lot of slices to sort
-  if (linearIndex >= totalSlices) {
+  if (slice >= totalSlices) {
     return;
   }
 
-  __shared__ float keys[Power2SortSize];
-  __shared__ int values[Power2SortSize];
+  const unsigned long offset =
+    IndexToOffset<IndexType, Dim>::get(slice, out);
+  float* base = &out.data[offset];
 
-  // Read unsorted values
-  const IndexType inputStartOffset =
-    IndexToOffset<IndexType, Dims>::get(linearIndex, input);
-
-  // Each thread is responsible for loading and storing 2 elements
-  const int elem1 = threadIdx.x;
-  const int elem2 = threadIdx.x + (Power2SortSize / 2);
-
-  keys[elem1] = (elem1 < sliceSize) ?
-    input.data[inputStartOffset + elem1 * sliceStride] :
-    0.0f; // doesn't matter, element val out of bounds
-  // Torch indices are 1-based (hence the +1)
-  values[elem1] = (elem1 < sliceSize) ? (elem1 + 1) :
-    -1; // out of bounds
-  keys[elem2] = (elem2 < sliceSize) ?
-    input.data[inputStartOffset + elem2 * sliceStride] :
-    0.0f; // doesn't matter, element val out of bounds
-  // Torch indices are 1-based (hence the +1)
-  values[elem2] = (elem2 < sliceSize) ? (elem2 + 1) :
-    -1; // out of bounds
-
-  // Sort!
-  bitonicSort<Comparator, float, int, IndexType, Power2SortSize>(
-    keys, values, comp);
-
-  // Write sorted values; indices have same layout
-  const IndexType sortedStartOffset =
-    IndexToOffset<IndexType, -1>::get(linearIndex, sorted);
-
-  const IndexType out1 = sortedStartOffset + elem1 * outStride;
-  // elem1 values are always valid, since otherwise we would have
-  // chosen the next smallest power-of-2 for sorting
-  sorted.data[out1] = keys[elem1];
-  indices.data[out1] = values[elem1];
-
-  const IndexType out2 = sortedStartOffset + elem2 * outStride;
-  // elem2 values might be out-of-range, if the data size we are
-  // sorting is not a power-of-2
-  if (values[elem2] != -1) {
-    sorted.data[out2] = keys[elem2];
-    indices.data[out2] = values[elem2];
+  for (long i = threadIdx.x; i < sliceSize; i += blockDim.x) {
+    // Torch indices are 1-based (hence the +1)
+    base[i * sliceStride] = (float) i + 1.0f;
   }
 }
 
-bool THCudaTensor_sortImpl(THCState* state,
-                           THCudaTensor* sorted,
-                           THCudaTensor* indices,
-                           THCudaTensor* input,
-                           int dim, bool dir) {
-  long inElements = THCudaTensor_nElement(state, input);
+void THCudaTensor_fillSliceWithIndex(THCState* state,
+                                     THCudaTensor* t,
+                                     int dim) {
+  THCCheckTensorDims(state, t, 2);
 
-  long sliceSize = THCudaTensor_size(state, input, dim);
-  long sliceStride = THCudaTensor_stride(state, input, dim);
-  long slices = inElements / sliceSize;
+  long inElements = THCudaTensor_nElement(state, t);
+  long sliceSize = THCudaTensor_size(state, t, dim);
+  long numSlices = inElements / sliceSize;
 
-  long outSize = THCudaTensor_size(state, sorted, dim);
-  long outStride = THCudaTensor_stride(state, sorted, dim);
-
-  if (THCudaTensor_nDimension(state, input) > MAX_CUTORCH_DIMS) {
-    // Too many dimensions
-    return false;
+  dim3 grid;
+  if (!THC_getGridFromTiles(numSlices, grid)) {
+    THError("Slice to fill with indices is too large");
   }
 
-  if (THCudaTensor_nDimension(state, input) == 0) {
+  long maxThreads =
+    THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
+  long numThreads = sliceSize;
+  if (numThreads > maxThreads) {
+    numThreads = maxThreads;
+  }
+
+  dim3 block(numThreads);
+
+#define FILL_INDEX(T, DIM)                                       \
+  fillSliceWithIndex<T, DIM>                                     \
+    <<<grid, block, 0, THCState_getCurrentStream(state)>>>(      \
+      info, numSlices, sliceSize, info.strides[collapseDim])
+
+  if (THC_canUse32BitIndexMath(state, t)) {
+    TensorInfo<unsigned int> info(state, t, dim);
+    info.sizes[dim] = 1;
+    int collapseDim = info.collapseDims(dim);
+
+    if (info.isContiguous()) {
+      FILL_INDEX(unsigned int, -2);
+    } else {
+      if (info.dims == 1) {
+        FILL_INDEX(unsigned int, 1);
+      } else if (info.dims == 2) {
+        FILL_INDEX(unsigned int, 2);
+      } else if (info.dims == 3) {
+        FILL_INDEX(unsigned int, 3);
+      } else {
+        FILL_INDEX(unsigned int, -1);
+      }
+    }
+  } else {
+    TensorInfo<unsigned long> info(state, t, dim);
+    info.sizes[dim] = 1;
+    int collapseDim = info.collapseDims(dim);
+
+    // catch-all implementation
+    FILL_INDEX(unsigned long, -1);
+  }
+
+#undef FILL_INDEX
+
+  THCudaCheck(cudaGetLastError());
+}
+
+THC_API void THCudaTensor_sortKeyValueInplace(THCState* state,
+                                              THCudaTensor* key,
+                                              THCudaTensor* value,
+                                              int dim, bool dir) {
+  THArgCheck(THCudaTensor_isSameSizeAs(state, key, value), 2,
+             "Key tensor must have same size as value tensor");
+  THCCheckTensorDims(state, key, 2);
+  THCCheckTensorDims(state, value, 3);
+
+  long inElements = THCudaTensor_nElement(state, key);
+  long keySliceSize = THCudaTensor_size(state, key, dim);
+  long keySlices = inElements / keySliceSize;
+
+  if (THCudaTensor_nDimension(state, key) == 0) {
     // Zero-dim tensor; do nothing
-    return true;
+    return;
   }
 
   // The amount of shared memory and block size is based on
   // 2^ceil(lg(n)); we choose that sorting implementation for a given
   // size.
-  long ceilPowerOf2 = nextHighestPowerOf2(sliceSize);
+  long ceilPowerOf2 = nextHighestPowerOf2(keySliceSize);
 
-  // Only handle 1-2048 at the moment
+  // FIXME: We'd have to find some other trick with Thrust to perform a
+  // vectorized (key, value) sort by slice segment
   if (ceilPowerOf2 > 2048) {
-    return false;
+    THError("sortKeyValueInplace only works for sizes <= 2048 at present");
   }
 
-  const dim3 block(ceilPowerOf2 / 2);
+  int blockSize = (int) ceilPowerOf2 / 2;
+  if (blockSize < 1) {
+    blockSize = 1;
+  }
+
+  dim3 block(blockSize);
 
   // The grid is based on the number of independent slices that we
   // have to sort; one block per slice
   dim3 grid;
-  if (!THC_getGridFromTiles(slices, grid)) {
-    return false;
+  if (!THC_getGridFromTiles(keySlices, grid)) {
+    THError("Slice to sort is too large");
   }
 
 #define HANDLE_CASE(TYPE, A, SIZE)                                      \
   if (dir) {                                                            \
-    THCudaTensor_bitonicSortWithIndex<GTComp<float>, TYPE, A, SIZE>     \
+    bitonicSortKVInPlace<float, float, A, -1, GTComp<float>, TYPE, SIZE> \
       <<<grid, block, 0, THCState_getCurrentStream(state)>>>(           \
-        sortedInfo, indicesInfo, inputInfo,                             \
-        slices, (TYPE) sliceSize, (TYPE) sliceStride,                   \
-        (TYPE) outSize, (TYPE) outStride,                               \
+        keyInfo,                                                        \
+        keySlices,                                                      \
+        (TYPE) keySliceSize,                                            \
+        (TYPE) keyInfo.strides[collapseKeyDim],                         \
+        valueInfo,                                                      \
+        (TYPE) valueInfo.strides[collapseValueDim],                     \
         GTComp<float>());                                               \
   } else {                                                              \
-    THCudaTensor_bitonicSortWithIndex<LTComp<float>, TYPE, A, SIZE>     \
+    bitonicSortKVInPlace<float, float, A, -1, LTComp<float>, TYPE, SIZE> \
       <<<grid, block, 0, THCState_getCurrentStream(state)>>>(           \
-        sortedInfo, indicesInfo, inputInfo,                             \
-        slices, (TYPE) sliceSize, (TYPE) sliceStride,                   \
-        (TYPE) outSize, (TYPE) outStride,                               \
+        keyInfo,                                                        \
+        keySlices,                                                      \
+        (TYPE) keySliceSize,                                            \
+        (TYPE) keyInfo.strides[collapseKeyDim],                         \
+        valueInfo,                                                      \
+        (TYPE) valueInfo.strides[collapseValueDim],                     \
         LTComp<float>());                                               \
   }
 
-#define HANDLE_SORT_CASE(TYPE, A)               \
-  {                                             \
-    switch (ceilPowerOf2) {                     \
-      case 2048:                                \
-      HANDLE_CASE(TYPE, A, 2048);               \
-      break;                                    \
-      case 1024:                                \
-      HANDLE_CASE(TYPE, A, 1024);               \
-      break;                                    \
-      case 512:                                 \
-      HANDLE_CASE(TYPE, A, 512);                \
-      break;                                    \
-      case 256:                                 \
-      HANDLE_CASE(TYPE, A, 256);                \
-      break;                                    \
-      case 128:                                 \
-      HANDLE_CASE(TYPE, A, 128);                \
-      break;                                    \
-      case 64:                                  \
-      HANDLE_CASE(TYPE, A, 64);                 \
-      break;                                    \
-      case 32:                                  \
-      HANDLE_CASE(TYPE, A, 32);                 \
-      break;                                    \
-      case 16:                                  \
-      HANDLE_CASE(TYPE, A, 16);                 \
-      break;                                    \
-      case 8:                                   \
-      HANDLE_CASE(TYPE, A, 8);                  \
-      break;                                    \
-      case 4:                                   \
-      HANDLE_CASE(TYPE, A, 4);                  \
-      break;                                    \
-      case 2:                                   \
-      HANDLE_CASE(TYPE, A, 2);                  \
-      break;                                    \
-      case 1:                                   \
-      HANDLE_CASE(TYPE, A, 1);                  \
-      break;                                    \
-      default:                                  \
-      assert(false);                            \
-    }                                           \
+#define HANDLE_SORT_CASE(TYPE, A)                       \
+  {                                                     \
+    switch (ceilPowerOf2) {                             \
+      case 2048:                                        \
+      HANDLE_CASE(TYPE, A, 2048);                       \
+      break;                                            \
+      case 1024:                                        \
+      HANDLE_CASE(TYPE, A, 1024);                       \
+      break;                                            \
+      case 512:                                         \
+      HANDLE_CASE(TYPE, A, 512);                        \
+      break;                                            \
+      case 256:                                         \
+      HANDLE_CASE(TYPE, A, 256);                        \
+      break;                                            \
+      case 128:                                         \
+      HANDLE_CASE(TYPE, A, 128);                        \
+      break;                                            \
+      case 64:                                          \
+      HANDLE_CASE(TYPE, A, 64);                         \
+      break;                                            \
+      case 32:                                          \
+      HANDLE_CASE(TYPE, A, 32);                         \
+      break;                                            \
+      case 16:                                          \
+      HANDLE_CASE(TYPE, A, 16);                         \
+      break;                                            \
+      case 8:                                           \
+      HANDLE_CASE(TYPE, A, 8);                          \
+      break;                                            \
+      case 4:                                           \
+      HANDLE_CASE(TYPE, A, 4);                          \
+      break;                                            \
+      case 2:                                           \
+      HANDLE_CASE(TYPE, A, 2);                          \
+      break;                                            \
+      case 1:                                           \
+      /* Nothing to do, data already sorted */          \
+      break;                                            \
+      default:                                          \
+      assert(false);                                    \
+    }                                                   \
   }
 
-#define HANDLE_A_CASE(TYPE, A)                      \
-  {                                                 \
-    if (inputInfo.isContiguous()) {                 \
-      HANDLE_SORT_CASE(TYPE, -2);                   \
-    } else {                                        \
-      switch (A) {                                  \
-        case 1:                                     \
-        HANDLE_SORT_CASE(TYPE, 1);                  \
-          break;                                    \
-        case 2:                                     \
-        HANDLE_SORT_CASE(TYPE, 2);                  \
-          break;                                    \
-        case 3:                                     \
-        HANDLE_SORT_CASE(TYPE, 3);                  \
-          break;                                    \
-        default:                                    \
-        HANDLE_SORT_CASE(TYPE, -1);                 \
-          break;                                    \
-      }                                             \
-    }                                               \
-  }
+  // The constructed key/value tensor info is used to select the slice
+  // we are sorting on a per-block basis
+  if (THC_canUse32BitIndexMath(state, key)) {
+    TensorInfo<unsigned int> keyInfo(state, key);
+    keyInfo.sizes[dim] = 1;
+    int collapseKeyDim = keyInfo.collapseDims(dim);
 
-  if (THC_canUse32BitIndexMath(state, input)) {
-    // In order to get to the right offset for the slice we are
-    // sorting, set `dim` size to 1 (the `dropDim` argument)
-    TensorInfo<unsigned int> sortedInfo(state, sorted, dim);
-    sortedInfo.collapseDims();
+    TensorInfo<unsigned int> valueInfo(state, value);
+    valueInfo.sizes[dim] = 1;
+    int collapseValueDim = valueInfo.collapseDims(dim);
 
-    TensorInfo<unsigned int> indicesInfo(state, indices, dim);
-    indicesInfo.collapseDims();
-
-    TensorInfo<unsigned int> inputInfo(state, input, dim);
-    inputInfo.collapseDims();
-
-    HANDLE_A_CASE(unsigned int, inputInfo.dims);
+    if (keyInfo.isContiguous()) {
+      HANDLE_SORT_CASE(unsigned int, -2);
+    } else {
+      switch (keyInfo.dims) {
+        case 1:
+          HANDLE_SORT_CASE(unsigned int, 1);
+          break;
+        case 2:
+          HANDLE_SORT_CASE(unsigned int, 2);
+          break;
+        case 3:
+          HANDLE_SORT_CASE(unsigned int, 3);
+          break;
+        default:
+          HANDLE_SORT_CASE(unsigned int, -1);
+          break;
+      }
+    }
   } else {
-    // In order to get to the right offset for the slice we are
-    // sorting, set `dim` size to 1 (the `dropDim` argument)
-    TensorInfo<unsigned long> sortedInfo(state, sorted, dim);
-    sortedInfo.collapseDims();
+    TensorInfo<unsigned long> keyInfo(state, key);
+    keyInfo.sizes[dim] = 1;
+    int collapseKeyDim = keyInfo.collapseDims(dim);
 
-    TensorInfo<unsigned long> indicesInfo(state, indices, dim);
-    indicesInfo.collapseDims();
-
-    TensorInfo<unsigned long> inputInfo(state, input, dim);
-    inputInfo.collapseDims();
+    TensorInfo<unsigned long> valueInfo(state, value);
+    valueInfo.sizes[dim] = 1;
+    int collapseValueDim = valueInfo.collapseDims(dim);
 
     // long case is rare, just instantiate these versions
-    if (inputInfo.isContiguous()) {
+    if (keyInfo.isContiguous()) {
       HANDLE_SORT_CASE(unsigned long, -2);
     } else {
       HANDLE_SORT_CASE(unsigned long, -1);
@@ -334,110 +267,149 @@ bool THCudaTensor_sortImpl(THCState* state,
 #undef HANDLE_SORT_CASE
 #undef HANDLE_A_CASE
 
-  return true;
+  THCudaCheck(cudaGetLastError());
 }
 
-// `base` is the base address of a tensor
-// For each slice (defined as a linear point of `out`, from 0 ->
-// (sliceSize - 1) * sliceStride, we fill that slice from `0` to
-// `sliceSize - 1`.
-__global__ void
-THCudaTensor_fillSliceWithIndex(TensorInfo<unsigned long> out,
-                                long totalSlices,
-                                long sliceSize,
-                                long sliceStride) {
-  long slice = getLinearBlockId<long>();
+// For slice sorting in Thrust; extracts a slice index from a linear
+// index and uses that for comparison
+struct SliceComp {
+  SliceComp(int size) : sliceSize(size) {}
 
-  if (slice >= totalSlices) {
-    return;
+  __host__ __device__ bool operator()(const float& a, const float& b) const {
+    // Since the slices are guaranteed to be innermost, the segment is
+    // just via integer division
+    int segA = (int) a / sliceSize;
+    int segB = (int) b / sliceSize;
+    return segA < segB;
   }
 
-  const unsigned long offset =
-    IndexToOffset<unsigned long, -1>::get(slice, out);
+  const int sliceSize;
+};
 
-  for (long i = threadIdx.x; i < sliceSize; i += blockDim.x) {
-    // Torch indices are 1-based (hence the +1)
-    out.data[offset + i * sliceStride] = (float) i + 1;
+// For sorting in Thurst; extracts a within-slice index from a linear index
+struct GlobalIndexToPerSliceIndex {
+  GlobalIndexToPerSliceIndex(int size) : sliceSize(size) {}
+
+  __host__ __device__ void operator()(float& v) const {
+    // +1 to Lua index
+    v = (float) ((int) v % sliceSize) + 1;
   }
-}
 
-bool shouldSortThrust(THCState* state, THCudaTensor* input, int dim) {
-  long totalElements = THCudaTensor_nElement(state, input);
-  long sliceSize = THCudaTensor_size(state, input, dim);
-  long numSlices = totalElements / sliceSize;
+  const int sliceSize;
+};
 
-  // Only bother deferring to Thrust if the sort slice is contiguous,
-  // the number of slices are small, and they are large
-  return ((THCudaTensor_stride(state, input, dim) == 1) &&
-          numSlices <= 16 &&
-          sliceSize > 2048);
-}
+void sortViaThrust(THCState* state,
+                   THCudaTensor* sorted,
+                   THCudaTensor* indices,
+                   THCudaTensor* input,
+                   int dim, bool dir) {
+  long nDims = THCudaTensor_nDimension(state, input);
 
-void THCudaTensor_sortImplThrust(THCState* state,
-                                 THCudaTensor* sorted,
-                                 THCudaTensor* indices,
-                                 THCudaTensor* input,
-                                 int dim, bool dir) {
-  // Fill the indices as values that Thrust can use for key/value sorting
   long totalElements = THCudaTensor_nElement(state, input);
   long sliceSize = THCudaTensor_size(state, input, dim);
   long sliceStride = THCudaTensor_stride(state, input, dim);
-  long numSlices = totalElements / sliceSize;
 
-  THArgCheck(THCudaTensor_stride(state, input, dim) == 1, 1,
-             "The dimension to be sorted must be contiguous.");
+  // We perform a vectorized segmented sort in Thrust.
+  // Say we are sorting a (2, 3) tensor. We have in flattened form:
+  // values 0.4 1.2 5.3 6.2 1.3 2.3
+  // indices  0   1   2   3   4   5
+  // where indices is a global index (across all slices)
 
-  // Copy input to sorted, since we sort in place
-  if (sorted != input) {
-    THCudaTensor_copy(state, sorted, input);
+  // First we sort by values, globally:
+  // values 6.2 5.3 2.3 1.2 1.3 0.4
+  // indices  3   2   5   1   4   0
+
+  // Then we stable sort by segment, which is index / 3:
+  // values 5.3 1.2 0.4 6.2 2.3 1.3
+  // indices  2   1   0   3   5   4
+
+  // Then we translate the global index to a per-slice Lua index
+  // (index % 3) + 1:
+  // values 5.3 1.2 0.4 6.2 2.3 1.3
+  // indices  3   2   1   1   3   2
+
+  // This method can only work if the slice we are sorting (`dim`) is
+  // innermost, and both values and indices are contiguous. We do this
+  // by re-arranging the input into this form as needed, which will
+  // unfortunately allocate memory if the request is not in this form.
+  // Vectorized sort is slower than iterated sort if the number of
+  // slices is small (since we're sorting twice, instead of invoking a
+  // smaller sort `numSlices` times), but the Thrust sort
+  // implementation here is a catch-all, so we're not looking for
+  // efficiency, but instead correctness.
+  THCudaTensor_copy(state, sorted, input);
+  THCudaTensor* trKeys = THCudaTensor_newWithTensor(state, sorted);
+  THCudaTensor* trIndices = THCudaTensor_newWithTensor(state, indices);
+
+  // Transpose dim to innermost
+  if (dim != nDims - 1) {
+    THCudaTensor_transpose(state, trKeys, NULL, dim, nDims - 1);
+    THCudaTensor_transpose(state, trIndices, NULL, dim, nDims - 1);
   }
 
-  TensorInfo<unsigned long> sortedInfo(state, sorted, dim);
-  sortedInfo.collapseDims();
+  // Thrust must operate on a contiguous layout
+  THCudaTensor* trContigKey = THCudaTensor_newContiguous(state, trKeys);
+  THCudaTensor* trContigIndices = THCudaTensor_newContiguous(state, trIndices);
 
-  TensorInfo<unsigned long> indicesInfo(state, indices, dim);
-  indicesInfo.collapseDims();
+  THCudaTensor_free(state, trKeys);
+  THCudaTensor_free(state, trIndices);
 
-  dim3 grid;
-  THC_getGridFromTiles(numSlices, grid);
+  thrust::device_ptr<float> keyIter(THCudaTensor_data(state, trContigKey));
+  thrust::device_ptr<float> indexIter(THCudaTensor_data(state, trContigIndices));
 
-  THCudaTensor_fillSliceWithIndex<<<grid, min((long long)sliceSize, 1024LL),
-                                    0, THCState_getCurrentStream(state)>>>(
-    indicesInfo, numSlices, sliceSize, sliceStride);
-  THCudaCheck(cudaGetLastError());
+  // Fill the indices with a global index across all slices
+  thrust::counting_iterator<float> countIter(0.0f);
 
-  for (long slice = 0; slice < numSlices; ++slice) {
-    unsigned long sortedStart =
-      IndexToOffset<unsigned long, -1>::get(slice, sortedInfo);
-    unsigned long indicesStart =
-      IndexToOffset<unsigned long, -1>::get(slice, indicesInfo);
-
-    thrust::device_ptr<float>
-      sortedSliceStart(THCudaTensor_data(state, sorted) +
-                       sortedStart);
-    thrust::device_ptr<float>
-      sortedSliceEnd(THCudaTensor_data(state, sorted) +
-                     sortedStart + sliceSize);
-    thrust::device_ptr<float>
-      indicesSliceStart(THCudaTensor_data(state, indices) +
-                        indicesStart);
-
-    if (dir) {
-      thrust::sort_by_key(
+  thrust::copy(
 #if CUDA_VERSION >= 7000
-        thrust::cuda::par.on(THCState_getCurrentStream(state)),
+    thrust::cuda::par.on(THCState_getCurrentStream(state)),
 #endif
-        sortedSliceStart, sortedSliceEnd, indicesSliceStart,
-        thrust::greater<float>());
-    } else {
-      thrust::sort_by_key(
+    countIter, countIter + totalElements, indexIter);
+
+  // First, we sort globally (across all slices) according to key
+  // (the values we're sorting)
+  if (dir) {
+    thrust::stable_sort_by_key(
 #if CUDA_VERSION >= 7000
-        thrust::cuda::par.on(THCState_getCurrentStream(state)),
+      thrust::cuda::par.on(THCState_getCurrentStream(state)),
 #endif
-        sortedSliceStart, sortedSliceEnd, indicesSliceStart,
-        thrust::less<float>());
-    }
+      keyIter, keyIter + totalElements, indexIter, thrust::greater<float>());
+  } else {
+    thrust::stable_sort_by_key(
+#if CUDA_VERSION >= 7000
+      thrust::cuda::par.on(THCState_getCurrentStream(state)),
+#endif
+      keyIter, keyIter + totalElements, indexIter, thrust::less<float>());
   }
+
+  // Then, re-sort according to slice that each index is
+  // in. This completes the segment sort in Thrust, since we're
+  // stably sorting here, preserving the relative order of values
+  // per each slice
+  thrust::stable_sort_by_key(
+#if CUDA_VERSION >= 7000
+    thrust::cuda::par.on(THCState_getCurrentStream(state)),
+#endif
+    indexIter, indexIter + totalElements, keyIter,
+    SliceComp(sliceSize));
+
+  // Translate the global 0-based index to a per-slice Lua index
+  thrust::for_each(
+#if CUDA_VERSION >= 7000
+    thrust::cuda::par.on(THCState_getCurrentStream(state)),
+#endif
+    indexIter, indexIter + totalElements,
+    GlobalIndexToPerSliceIndex(sliceSize));
+
+  // Reverse the transposition as needed
+  if (dim != nDims - 1) {
+    THCudaTensor_transpose(state, trContigKey, NULL, dim, nDims - 1);
+    THCudaTensor_transpose(state, trContigIndices, NULL, dim, nDims - 1);
+  }
+
+  // Then copy back to the expected output
+  THCudaTensor_freeCopyTo(state, trContigKey, sorted);
+  THCudaTensor_freeCopyTo(state, trContigIndices, indices);
 }
 
 THC_API void THCudaTensor_sort(THCState* state,
@@ -446,26 +418,45 @@ THC_API void THCudaTensor_sort(THCState* state,
                                THCudaTensor *input,
                                int dim, int order) {
   THAssert(THCudaTensor_checkGPU(state, 3, sorted, indices, input));
+  THCCheckTensorDims(state, sorted, 2);
+  THCCheckTensorDims(state, indices, 3);
+  THCCheckTensorDims(state, input, 4);
+
   // Make sure sufficient output space is allocated
   THCudaTensor_resizeAs(state, sorted, input);
   THCudaTensor_resizeAs(state, indices, input);
 
-  // If we think Thrust will be more efficient, use that
-  if (shouldSortThrust(state, input, dim)) {
-    THCudaTensor_sortImplThrust(state, sorted, indices, input,
-                                dim, (bool) order);
-    return;
-  }
+  // How large are the slices that we are sorting?
+  long totalElements = THCudaTensor_nElement(state, input);
+  long sliceSize = THCudaTensor_size(state, input, dim);
 
-  // Otherwise, try to use our blockwide sort kernel per each reduction slice
-  if (THCudaTensor_sortImpl(state, sorted, indices, input,
-                            dim, (bool) order)) {
-    return;
-  }
+  // We're using THCudaTensor to write out indices, so if the slice
+  // size that we're sorting has more elements than can be
+  // represented in fp32, warn the user
+  // FIXME: this isn't a real restriction of either our code or of
+  // Thrust, but we have to switch to a CUDA long tensor to support
+  // larger slice sizes. Otherwise the indices will contain garbage.
+  THArgCheck(sliceSize <= (long) FLOAT32_MAX_CONSECUTIVE_INT, 5,
+             "The sort dimension exceeds single-precision float "
+             "consecutive integer precision size (2^24), since float "
+             "is used for indices");
 
-  // Fall back to Thrust if our kernel can't handle the input
-  THCudaTensor_sortImplThrust(state, sorted, indices, input,
-                              dim, (bool) order);
+  if (sliceSize <= 2048) {
+    // Fill `indices` (the values) with the
+    // slice-relative index.
+    THCudaTensor_fillSliceWithIndex(state, indices, dim);
+
+    // We sort k/v pairs in-place; copy unsorted input to output
+    THCudaTensor_copy(state, sorted, input);
+
+    // Sort using our in-place k/v kernel that supports arbitrary
+    // layout
+    THCudaTensor_sortKeyValueInplace(state, sorted, indices, dim, order);
+  } else {
+    // Otherwise, fall back upon Thrust, which handles all other cases
+    // (potentially slowly, with extra copies/memory allocations)
+    sortViaThrust(state, sorted, indices, input, dim, (bool) order);
+  }
 
   THCudaCheck(cudaGetLastError());
 }
