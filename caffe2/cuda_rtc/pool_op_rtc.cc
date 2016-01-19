@@ -1,4 +1,3 @@
-// TODO: reduce the apparent redundancy of all the code below.
 #include <cfloat>
 #include <cstdio>
 
@@ -16,89 +15,89 @@ class MaxPool {};
 namespace {
 
 // The max pool forward function, with parameters written in const int.
-const char kMaxPoolForwardNCHWSource[] = "                                   \n\
-extern \"C\"                                                                 \n\
-__global__ void %s(const float* bottom_data, float* top_data) {              \n\
-  const int nthreads = %d;                                                   \n\
-  const int channels = %d;                                                   \n\
-  const int height = %d;                                                     \n\
-  const int width = %d;                                                      \n\
-  const int pooled_height = %d;                                              \n\
-  const int pooled_width = %d;                                               \n\
-  const int kernel_h = %d;                                                   \n\
-  const int kernel_w = %d;                                                   \n\
-  const int stride_h = %d;                                                   \n\
-  const int stride_w = %d;                                                   \n\
-  const int pad_t = %d;                                                      \n\
-  const int pad_l = %d;                                                      \n\
-  for (int index = blockIdx.x * blockDim.x + threadIdx.x;                    \n\
-       index < nthreads; index += blockDim.x * gridDim.x) {                  \n\
-    int pw = index %% pooled_width;                                          \n\
-    int ph = (index / pooled_width) %% pooled_height;                        \n\
-    int c = (index / (pooled_width * pooled_height)) %% channels;            \n\
-    int n = index / (pooled_width * pooled_height * channels);               \n\
-    int hstart = ph * stride_h - pad_t;                                      \n\
-    int wstart = pw * stride_w - pad_l;                                      \n\
-    int hend = min(hstart + kernel_h, height);                               \n\
-    int wend = min(wstart + kernel_w, width);                                \n\
-    hstart = max(hstart, 0);                                                 \n\
-    wstart = max(wstart, 0);                                                 \n\
-    float maxval = -1.0e37f;                                                 \n\
-    const float* bdata_offset = bottom_data + n * channels * height * width; \n\
-    for (int h = hstart; h < hend; ++h) {                                    \n\
-      for (int w = wstart; w < wend; ++w) {                                  \n\
-        maxval = fmaxf(                                                      \n\
-            bdata_offset[c * height * width + h * width + w], maxval);       \n\
-      }                                                                      \n\
-    }                                                                        \n\
-    top_data[index] = maxval;                                                \n\
-  }                                                                          \n\
-}                                                                            \n\
-";
+const char kMaxPoolForwardNCHWSource[] = R"(
+extern "C"
+__global__ void %s(const float* bottom_data, float* top_data) {
+  const int nthreads = %d;
+  const int channels = %d;
+  const int height = %d;
+  const int width = %d;
+  const int pooled_height = %d;
+  const int pooled_width = %d;
+  const int kernel_h = %d;
+  const int kernel_w = %d;
+  const int stride_h = %d;
+  const int stride_w = %d;
+  const int pad_t = %d;
+  const int pad_l = %d;
+  for (int index = blockIdx.x * blockDim.x + threadIdx.x;
+       index < nthreads; index += blockDim.x * gridDim.x) {
+    int pw = index %% pooled_width;
+    int ph = (index / pooled_width) %% pooled_height;
+    int c = (index / (pooled_width * pooled_height)) %% channels;
+    int n = index / (pooled_width * pooled_height * channels);
+    int hstart = ph * stride_h - pad_t;
+    int wstart = pw * stride_w - pad_l;
+    int hend = min(hstart + kernel_h, height);
+    int wend = min(wstart + kernel_w, width);
+    hstart = max(hstart, 0);
+    wstart = max(wstart, 0);
+    float maxval = -1.0e37f;
+    const float* bdata_offset = bottom_data + n * channels * height * width;
+    for (int h = hstart; h < hend; ++h) {
+      for (int w = wstart; w < wend; ++w) {
+        maxval = fmaxf(
+            bdata_offset[c * height * width + h * width + w], maxval);
+      }
+    }
+    top_data[index] = maxval;
+  }
+}
+)";
 
 // The max pool forward function, with parameters written in const int.
-const char kMaxPoolBackwardNCHWSource[] = "                                   \n\
-extern \"C\" \n\
-__global__ void %s( \n\
-    const float* const bottom_data, const float* const top_data, \n\
-    const float* const top_diff, float* const bottom_diff) { \n\
-  const int nthreads = %d; \n\
-  const int num = %d; \n\
-  const int channels = %d; \n\
-  const int height = %d; \n\
-  const int width = %d; \n\
-  const int pooled_height = %d; \n\
-  const int pooled_width = %d; \n\
-  const int kernel_h = %d; \n\
-  const int kernel_w = %d; \n\
-  const int stride_h = %d; \n\
-  const int stride_w = %d; \n\
-  const int pad_t = %d; \n\
-  const int pad_l = %d; \n\
-  for (int index = blockIdx.x * blockDim.x + threadIdx.x;                    \n\
-       index < nthreads; index += blockDim.x * gridDim.x) {                  \n\
-    const int w = index % width + pad_l; \n\
-    const int h = (index / width) %% height + pad_t; \n\
-    const int c = (index / width / height) %% channels; \n\
-    const int n = index / width / height / channels; \n\
-    const int phstart = (h < kernel_h) ? 0 : (h - kernel_h) / stride_h + 1; \n\
-    const int phend = min(h / stride_h + 1, pooled_height); \n\
-    const int pwstart = (w < kernel_w) ? 0 : (w - kernel_w) / stride_w + 1; \n\
-    const int pwend = min(w / stride_w + 1, pooled_width); \n\
-    const int top_offset = \n\
-        (n * channels + c) * pooled_height * pooled_width; \n\
-    bottom_diff[index] = 0; \n\
-    for (int ph = phstart; ph < phend; ++ph) { \n\
-      for (int pw = pwstart; pw < pwend; ++pw) { \n\
-        int top_local_offset = top_offset + ph * pooled_width + pw; \n\
-        if (bottom_data[index] == top_data[top_local_offset]) { \n\
-          bottom_diff[index] += top_diff[top_local_offset]; \n\
-        } \n\
-      } \n\
-    } \n\
-  } \n\
-} \n\
-";
+const char kMaxPoolBackwardNCHWSource[] = R"(
+extern "C"
+__global__ void %s(
+    const float* const bottom_data, const float* const top_data,
+    const float* const top_diff, float* const bottom_diff) {
+  const int nthreads = %d;
+  const int num = %d;
+  const int channels = %d;
+  const int height = %d;
+  const int width = %d;
+  const int pooled_height = %d;
+  const int pooled_width = %d;
+  const int kernel_h = %d;
+  const int kernel_w = %d;
+  const int stride_h = %d;
+  const int stride_w = %d;
+  const int pad_t = %d;
+  const int pad_l = %d;
+  for (int index = blockIdx.x * blockDim.x + threadIdx.x;
+       index < nthreads; index += blockDim.x * gridDim.x) {
+    const int w = index % width + pad_l;
+    const int h = (index / width) %% height + pad_t;
+    const int c = (index / width / height) %% channels;
+    const int n = index / width / height / channels;
+    const int phstart = (h < kernel_h) ? 0 : (h - kernel_h) / stride_h + 1;
+    const int phend = min(h / stride_h + 1, pooled_height);
+    const int pwstart = (w < kernel_w) ? 0 : (w - kernel_w) / stride_w + 1;
+    const int pwend = min(w / stride_w + 1, pooled_width);
+    const int top_offset =
+        (n * channels + c) * pooled_height * pooled_width;
+    bottom_diff[index] = 0;
+    for (int ph = phstart; ph < phend; ++ph) {
+      for (int pw = pwstart; pw < pwend; ++pw) {
+        int top_local_offset = top_offset + ph * pooled_width + pw;
+        if (bottom_data[index] == top_data[top_local_offset]) {
+          bottom_diff[index] += top_diff[top_local_offset];
+        }
+      }
+    }
+  }
+}
+)";
 
 
 class MaxPoolRTCFunction : public CudaRTCFunction<MaxPoolRTCFunction> {

@@ -92,12 +92,13 @@ REGISTER_CPU_OPERATOR(SoftmaxGradient, SoftmaxGradientOp<float, CPUContext>);
 struct GetSoftmaxGradient : public GetGradientDefBase {
   vector<OperatorDef>* Create(const OperatorDef& def) override {
     return SingleGradientDef(
-        "SoftmaxGradient", "",
+        def.type() + "Gradient", "",
         vector<string>{O(def, 0), GO(def, 0)},
         vector<string>{GI(def, 0)});
   }
 };
 REGISTER_GRADIENT(Softmax, GetSoftmaxGradient);
+REGISTER_GRADIENT(SoftmaxFp16, GetSoftmaxGradient);
 
 }  // namespace
 }  // namespace caffe2

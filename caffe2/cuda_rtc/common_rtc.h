@@ -81,6 +81,17 @@ class CudaRTCFunction {
         args_voidp, 0));
   }
 
+  void LaunchEx(unsigned int gx, unsigned int gy, unsigned int gz,
+                unsigned int bx, unsigned int by, unsigned int bz,
+                unsigned int shared_mem, cudaStream_t stream,
+                void** extra) {
+    CAFFE_CHECK(module_loaded_)
+        << "Cannot call Launch before a module is loaded.";
+    CUDA_DRIVERAPI_CHECK(cuLaunchKernel(
+        kernel_, gx, gy, gz, bx, by, bz, shared_mem, stream,
+        nullptr, extra));
+  }
+
  private:
   bool module_loaded_;
   CUmodule module_;
