@@ -22,6 +22,10 @@
 #endif  // CUDA_VERSION >= 7050
 #endif  // CAFFE_HAS_CUDA_FP16
 
+#ifdef CAFFE_HAS_CUDA_FP16
+#include <cuda_fp16.h>
+#endif
+
 namespace caffe2 {
 
 /**
