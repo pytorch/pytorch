@@ -1,6 +1,4 @@
-#include <cuda.h>
-// fp16 is only present when cuda version is 7.5 or above.
-#if CUDA_VERSION >= 7050
+#if CAFFE_HAS_CUDA_FP16
 
 #include <cuda_fp16.h>
 
@@ -92,4 +90,4 @@ REGISTER_GRADIENT(HalfToFloat, GetHalfToFloatGradient);
 }  // namespace
 }  // namespace caffe2
 
-#endif // CUDA_VERSION >= 7050
+#endif // CAFFE_HAS_CUDA_FP16

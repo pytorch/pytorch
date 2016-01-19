@@ -10,6 +10,18 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/common.h"
 
+// This is a macro defined for cuda fp16 support. In default, cuda fp16 is
+// supported by NVCC 7.5, but it is also included in the Tegra X1 platform with
+// a (custom?) NVCC 7.0. As a result, we would normally just check the cuda
+// version here, but would also allow a use to pass in the flag
+// CAFFE_HAS_CUDA_FP16 manually.
+
+#ifndef CAFFE_HAS_CUDA_FP16
+#if CUDA_VERSION >= 7050
+#define CAFFE_HAS_CUDA_FP16
+#endif  // CUDA_VERSION >= 7050
+#endif  // CAFFE_HAS_CUDA_FP16
+
 namespace caffe2 {
 
 /**

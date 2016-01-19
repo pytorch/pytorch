@@ -1,5 +1,5 @@
 #include <cuda.h>
-#if CUDA_VERSION >= 7050
+#if CAFFE_HAS_CUDA_FP16
 #include <cuda_fp16.h>
 
 #include "caffe2/core/context_gpu.h"
@@ -87,4 +87,4 @@ REGISTER_CUDA_OPERATOR(ReluFp16Gradient, ReluGradientOp<float16, CUDAContext>);
 }  // namespace
 }  // namespace caffe2
 
-#endif  // CUDA_VERSION >= 7050
+#endif  // CAFFE_HAS_CUDA_FP16
