@@ -72,6 +72,7 @@ THC_API void THCudaTensor_ceil(THCState *state, THCudaTensor *self, THCudaTensor
 THC_API void THCudaTensor_floor(THCState *state, THCudaTensor *self, THCudaTensor *src);
 THC_API void THCudaTensor_abs(THCState *state, THCudaTensor *self, THCudaTensor *src);
 THC_API void THCudaTensor_neg(THCState *state, THCudaTensor *self, THCudaTensor *src);
+THC_API void THCudaTensor_cinv(THCState *state, THCudaTensor *self, THCudaTensor *src);
 THC_API void THCudaTensor_sign(THCState *state, THCudaTensor *self, THCudaTensor *src);
 THC_API void THCudaTensor_round(THCState *state, THCudaTensor *self, THCudaTensor *src);
 THC_API void THCudaTensor_atan2(THCState *state, THCudaTensor *r_, THCudaTensor *tx, THCudaTensor *ty);
