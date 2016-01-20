@@ -671,19 +671,6 @@ void Col2im<float, CUDAContext, StorageOrder::NHWC>(
       pad_t, pad_l, stride_h, stride_w, height_col, width_col, data_im);
 }
 
-namespace {
-template <typename T>
-__global__ void CopyMatrixKernel(
-    const int M, const int N, const T* A, const int lda,
-    T* B, const int ldb) {
-  CUDA_1D_KERNEL_LOOP(i, M * N) {
-    int r = i / N;
-    int c = i % N;
-    B[r * ldb + c] = A[r * lda + c];
-  }
-}
-}  // namespace
-
 template <>
 void CopyMatrix<CUDAContext>(
     const size_t itemsize, const int M, const int N, const void* A,
