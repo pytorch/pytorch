@@ -116,7 +116,7 @@ SET(hdr
   THLapack.h THLogAdd.h THRandom.h THVector.h THAtomic.h)
 
 SET(src
-  THGeneral.c THAllocator.c THStorage.c THTensor.c THBlas.c THLapack.c THMath.c
+  THGeneral.c THAllocator.c THStorage.c THTensor.c THBlas.c THLapack.c
   THLogAdd.c THRandom.c THFile.c THDiskFile.c THMemoryFile.c THAtomic.c)
 
 SET(src ${src} ${hdr} ${simd})
