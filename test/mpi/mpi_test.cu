@@ -28,18 +28,22 @@
 
 #include <sys/types.h>
 #include <unistd.h>
+#include <stdio.h>
 
 #include "nccl.h"
 #include "mpi.h"
 
 #define CUDACHECK(cmd) do {                              \
-    cudaError_t e = cmd;                                 \
-    if( e != cudaSuccess ) {                             \
-        printf("Cuda failure %s:%d '%s'\n",              \
-               __FILE__,__LINE__,cudaGetErrorString(e)); \
-        exit(EXIT_FAILURE);                              \
-    }                                                    \
+  cudaError_t e = cmd;                                 \
+  if( e != cudaSuccess ) {                             \
+    printf("Cuda failure %s:%d '%s'\n",              \
+        __FILE__,__LINE__,cudaGetErrorString(e)); \
+    exit(EXIT_FAILURE);                              \
+  }                                                    \
 } while(false)
+
+#define SIZE 128
+#define NITERS 1
 
 int main(int argc, char *argv[]) {
   ncclUniqueId commId;
@@ -50,14 +54,18 @@ int main(int argc, char *argv[]) {
   MPI_Comm_size(MPI_COMM_WORLD, &size);
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
+  if (argc < size) {
+    printf("Usage : %s <GPU list per rank>\n", argv[0]);
+  }
+
   int gpu = atoi(argv[rank+1]);
-  printf("MPI Rank %d running on GPU %d\n", rank, gpu);
+
   // We have to set our device before NCCL init
   CUDACHECK(cudaSetDevice(gpu));
   MPI_Barrier(MPI_COMM_WORLD);
 
+  // NCCL Communicator creation
   ncclComm_t comm;
-  // Let's use rank 0 PID as job ID
   ncclGetUniqueId(&commId);
   MPI_Bcast(&commId, NCCL_UNIQUE_ID_BYTES, MPI_CHAR, 0, MPI_COMM_WORLD);
   ret = ncclCommInitRank(&comm, size, commId, rank);
@@ -66,18 +74,48 @@ int main(int argc, char *argv[]) {
     exit(1);
   }
 
+  // CUDA stream creation
+  cudaStream_t stream;
+  cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking);
+
+  // Initialize input values
   int *dptr;
-  CUDACHECK(cudaMalloc(&dptr, 1024*2*sizeof(int)));
-  int val = rank;
-  CUDACHECK(cudaMemcpy(dptr, &val, sizeof(int), cudaMemcpyHostToDevice));
+  CUDACHECK(cudaMalloc(&dptr, SIZE*2*sizeof(int)));
+  int *val = (int*) malloc(SIZE*sizeof(int));
+  for (int v=0; v<SIZE; v++) {
+    val[v] = rank + 1;
+  }
+  CUDACHECK(cudaMemcpy(dptr, val, SIZE*sizeof(int), cudaMemcpyHostToDevice));
 
-  ncclAllReduce((const void*)dptr, (void*)(dptr+1024), 1024, ncclInt, ncclSum, comm, cudaStreamDefault);
+  // Compute final value
+  int ref = size*(size+1)/2;
 
-  CUDACHECK(cudaMemcpy(&val, (dptr+1024), sizeof(int), cudaMemcpyDeviceToHost));
-  printf("Sum is %d\n", val);
+  // Run allreduce
+  int errors = 0;
+  for (int i=0; i<NITERS; i++) {
+    ncclAllReduce((const void*)dptr, (void*)(dptr+SIZE), SIZE, ncclInt, ncclSum, comm, stream);
+  }
+
+  // Check results
+  cudaStreamSynchronize(stream);
+  CUDACHECK(cudaMemcpy(val, (dptr+SIZE), SIZE*sizeof(int), cudaMemcpyDeviceToHost));
+  for (int v=0; v<SIZE; v++) {
+    if (val[v] != ref) {
+      errors++;
+      printf("[%d] Error at %d : got %d instead of %d\n", rank, v, val[v], ref);
+    }
+  }
   CUDACHECK(cudaFree(dptr));
+
+  MPI_Allreduce(MPI_IN_PLACE, &errors, 1, MPI_INTEGER, MPI_SUM, MPI_COMM_WORLD);
+  if (rank == 0) {
+    if (errors)
+      printf("%d errors. Test FAILED.\n", errors);
+    else
+      printf("Test PASSED.\n");
+  }
 
   MPI_Finalize();
   ncclCommDestroy(comm);
-  return 0;
+  return errors ? 1 : 0;
 }

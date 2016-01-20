@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2015, NVIDIA CORPORATION. All rights reserved.
+# Copyright (c) 2015-2016, NVIDIA CORPORATION. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -49,6 +49,7 @@ endif
 
 LDFLAGS    := -L$(CUDA_HOME)/lib64 -lcudart
 MPIFLAGS   := -I$(MPI_HOME)/include -L$(MPI_HOME)/lib -lmpi
+TSTINC     := -Ibuild/include -Itest/include
 
 .PHONY : lib clean test mpitest install
 .DEFAULT : lib
@@ -65,8 +66,8 @@ MPITESTS    := mpi_test
 INCDIR := $(BUILDDIR)/include
 LIBDIR := $(BUILDDIR)/lib
 OBJDIR := $(BUILDDIR)/obj
-TSTDIR := $(BUILDDIR)/test
-MPITSTDIR := $(BUILDDIR)/mpitest
+TSTDIR := $(BUILDDIR)/test/single
+MPITSTDIR := $(BUILDDIR)/test/mpi
 
 INCTARGETS := $(patsubst %, $(INCDIR)/%, $(INCEXPORTS))
 LIBSONAME  := $(patsubst %,%.$(VER_MAJOR),$(LIBNAME))
@@ -108,11 +109,11 @@ clean :
 
 test : lib $(TESTBINS)
 
-$(TSTDIR)/% : src/%.cu lib
+$(TSTDIR)/% : test/single/%.cu lib
 	@printf "Building  %-25s > %-24s\n" $< $@
 	@mkdir -p $(TSTDIR)
-	@$(NVCC) -Ibuild/include $(CPPFLAGS) $(NVCUFLAGS) --compiler-options "$(CXXFLAGS)" -o $@ $< -Lbuild/lib $(LIBLINK) $(LDFLAGS) -lcuda -lcurand -lnvToolsExt
-	@$(NVCC) -M -Ibuild/include $(CPPFLAGS) $(NVCUFLAGS) --compiler-options "$(CXXFLAGS)" $< -Lbuild/lib $(LIBLINK) $(LDFLAGS) -lcuda -lcurand -lnvToolsExt > $(@:%=%.d.tmp)
+	@$(NVCC) $(TSTINC) $(CPPFLAGS) $(NVCUFLAGS) --compiler-options "$(CXXFLAGS)" -o $@ $< -Lbuild/lib $(LIBLINK) $(LDFLAGS) -lcuda -lcurand -lnvToolsExt
+	@$(NVCC) -M $(TSTINC) $(CPPFLAGS) $(NVCUFLAGS) --compiler-options "$(CXXFLAGS)" $< -Lbuild/lib $(LIBLINK) $(LDFLAGS) -lcuda -lcurand -lnvToolsExt > $(@:%=%.d.tmp)
 	@sed "0,/^.*:/s//$(subst /,\/,$@):/" $(@:%=%.d.tmp) > $(@:%=%.d)
 	@sed -e 's/.*://' -e 's/\\$$//' < $(@:%=%.d.tmp) | fmt -1 | \
                 sed -e 's/^ *//' -e 's/$$/:/' >> $(@:%=%.d)
@@ -120,11 +121,11 @@ $(TSTDIR)/% : src/%.cu lib
 
 mpitest : lib $(MPITESTBINS)
 
-$(MPITSTDIR)/% : src/%.cu lib
+$(MPITSTDIR)/% : test/mpi/%.cu lib
 	@printf "Building  %-25s > %-24s\n" $< $@
 	@mkdir -p $(MPITSTDIR)
-	@$(NVCC) $(MPIFLAGS) -Ibuild/include $(CPPFLAGS) $(NVCUFLAGS) --compiler-options "$(CXXFLAGS)" -o $@ $< -Lbuild/lib $(LIBLINK) $(LDFLAGS)
-	@$(NVCC) $(MPIFLAGS) -M -Ibuild/include $(CPPFLAGS) $(NVCUFLAGS) --compiler-options "$(CXXFLAGS)" $< -Lbuild/lib $(LIBLINK) $(LDFLAGS) > $(@:%=%.d.tmp)
+	@$(NVCC) $(MPIFLAGS) $(TSTINC) $(CPPFLAGS) $(NVCUFLAGS) --compiler-options "$(CXXFLAGS)" -o $@ $< -Lbuild/lib $(LIBLINK) $(LDFLAGS)
+	@$(NVCC) $(MPIFLAGS) -M $(TSTINC) $(CPPFLAGS) $(NVCUFLAGS) --compiler-options "$(CXXFLAGS)" $< -Lbuild/lib $(LIBLINK) $(LDFLAGS) > $(@:%=%.d.tmp)
 	@sed "0,/^.*:/s//$(subst /,\/,$@):/" $(@:%=%.d.tmp) > $(@:%=%.d)
 	@sed -e 's/.*://' -e 's/\\$$//' < $(@:%=%.d.tmp) | fmt -1 | \
                 sed -e 's/^ *//' -e 's/$$/:/' >> $(@:%=%.d)
