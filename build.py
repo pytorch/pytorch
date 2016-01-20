@@ -41,6 +41,18 @@ class Config(object):
     # compiling) you may want to set USE_SYSTEM_EIGEN to False.
     USE_SYSTEM_EIGEN = False
 
+    # BLAS functions: whether to use Eigen for all the BLAS calls. In platforms
+    # that do not have an optimized BLAS library, this would usually solve the
+    # problem as Eigen will generate all the code. Optionally, one can specify
+    # a separately compiled BLAS library (such as MKL) and we will use that
+    # library for all BLAS calls.
+    USE_EIGEN_FOR_BLAS = True
+    # If you have set the above flag to False, you should specify a BLAS backend
+    # here. Note that, if the BLAS backend is MKL, we will also assume that the
+    # MKL VSL library is present, and we will use the VSL function calls as
+    # well. If USE_EIGEN_FOR_BLAS is True, this config has no effect.
+    BLAS_BACKEND = "atlas"
+
     # google-glog: Caffe can choose to use google glog, which will allow a more
     # sophisticated logging scheme. It also comes with a minimal logging tool
     # that does not depend on glog. If you wish to use glog, set USE_GLOG to

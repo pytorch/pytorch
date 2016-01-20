@@ -201,6 +201,13 @@ class Env(object):
             '-gencode ' + s for s in Config.CUDA_GENCODE
         ] + Config.OPTIMIZATION_FLAGS
 
+        # Check BLAS
+        if Config.USE_EIGEN_FOR_BLAS:
+          self.DEFINES.append('-DCAFFE2_USE_EIGEN_FOR_BLAS')
+        else:
+          if Config.BLAS_BACKEND == "mkl":
+            self.DEFINES.append('-DCAFFE2_USE_MKL')
+
         # Set C++11 flag. The reason we do not simply add it to the CFLAGS list
         # above is that NVCC cannot pass -std=c++11 via Xcompiler, otherwise the
         # host compiler usually produces an error (clang) or warning (g++)

@@ -252,17 +252,13 @@ class Brewery(object):
         # Find and parse all the build files in caffe's library.
         cls.FindAndParseBuildFiles()
         command = argv[1] if len(argv) > 1 else 'build'
-        if command == 'test':
-            cls.is_test = True
-            cls.Build(argv[2:])
-            cls.Finalize()
         if command == 'build':
             cls.Build(argv[2:])
             cls.Finalize()
         elif command == 'clean':
             os.system('rm -rf ' + cls.Env.GENDIR)
         elif command == 'test':
-            cls.Env.IS_TEST = True
+            cls.is_test = True
             cls.Build(argv[2:])
             cls.Finalize()
         else:

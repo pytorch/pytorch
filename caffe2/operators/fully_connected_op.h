@@ -25,7 +25,7 @@ class FullyConnectedOp final : public Operator<Context> {
     CAFFE_CHECK_GE(W.ndim(), 2);
     if (X.ndim() > 2 || W.ndim() > 2) {
       CAFFE_VLOG(1) << "Using legacy support for arbitrary input and weight "
-                << "dimensions.";
+                       "dimensions.";
     }
     CAFFE_CHECK_EQ(b.ndim(), 1);
     // batch size
