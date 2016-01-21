@@ -13,31 +13,14 @@
 
 #include <random>
 
+#ifdef CAFFE2_USE_MKL
+#include <mkl.h>
+#endif  // CAFFE2_USE_MKL
+
 #include "caffe2/utils/math.h"
 #include "caffe2/core/context.h"
 #include "eigen3/Eigen/Core"
 #include "eigen3/Eigen/Dense"
-
-#ifdef CAFFE2_USE_MKL
-#include <mkl.h>
-#else  // CAFFE2_USE_MKL
-#include "caffe2/utils/cblas.h"
-#endif  // CAFFE2_USE_MKL
-
-// Common Eigen types that we will often use
-namespace {
-template <typename T>
-using EigenMatrixMap =
-    Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> >;
-template <typename T>
-using EigenVectorMap = Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, 1> >;
-template <typename T>
-using ConstEigenMatrixMap =
-    Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> >;
-template <typename T>
-using ConstEigenVectorMap =
-    Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, 1> >;
-}  // namespace
 
 namespace caffe2 {
 namespace math {

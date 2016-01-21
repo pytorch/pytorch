@@ -209,7 +209,7 @@ class SumOp : public Operator<Context> {
     auto* output = Output(0);
     output->ReshapeLike(input0);
     T* output_data = output->template mutable_data<T>();
-    if (InputSize() == 1) {
+    if (InputSize() == 1 && (&input0 != output)) {
       device_context_.template Copy<T, Context, Context>(
           input0.size(), input0.template data<T>(),
           output_data);

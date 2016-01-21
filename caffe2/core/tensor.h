@@ -160,7 +160,10 @@ class Tensor {
    */
   template <class OtherContext>
   inline void ReshapeLike(const Tensor<OtherContext>& src_tensor) {
-    Reshape(src_tensor.dims());
+    // Note: need casting for different context types.
+    if (static_cast<void*>(this) != static_cast<const void*>(&src_tensor)) {
+      Reshape(src_tensor.dims());
+    }
   }
 
   /**
