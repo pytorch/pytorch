@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2015, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2015-2016, NVIDIA CORPORATION. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,6 +31,7 @@
 #define REDUCE_KERNEL_H_
 
 #include "common_kernel.h"
+#include <limits>
 
 template<typename T>
 struct FuncSum {
@@ -135,14 +136,23 @@ struct FuncMax<char> {
   __device__ uint32_t operator()(const uint32_t x, const uint32_t y) const {
 #if (__CUDA_ARCH__ >= 300) && (__CUDA_ARCH__ < 500)
     int32_t rv, z=0;
-    asm("vmax4.s32.s32.s32 %0, %1, %2, %3;" : "=r"(rv) : "r"(x), "r"(y), "r"(z));
+    if (std::numeric_limits<char>::is_signed)
+      asm("vmax4.s32.s32.s32 %0, %1, %2, %3;" : "=r"(rv) : "r"(x), "r"(y), "r"(z));
+    else
+      asm("vmax4.u32.u32.u32 %0, %1, %2, %3;" : "=r"(rv) : "r"(x), "r"(y), "r"(z));
     return rv;
 #elif (__CUDA_ARCH__ >= 500)
     int32_t rv;
-    asm("vmax.s32.s32.s32 %0,    %1.b0, %2.b0;    \n\t"
-        "vmax.s32.s32.s32 %0.b1, %1.b1, %2.b1, %0;\n\t"
-        "vmax.s32.s32.s32 %0.b2, %1.b2, %2.b2, %0;\n\t"
-        "vmax.s32.s32.s32 %0.b3, %1.b3, %2.b3, %0;" : "=r"(rv) : "r"(x), "r"(y));
+    if (std::numeric_limits<char>::is_signed)
+      asm("vmax.s32.s32.s32 %0,    %1.b0, %2.b0;    \n\t"
+          "vmax.s32.s32.s32 %0.b1, %1.b1, %2.b1, %0;\n\t"
+          "vmax.s32.s32.s32 %0.b2, %1.b2, %2.b2, %0;\n\t"
+          "vmax.s32.s32.s32 %0.b3, %1.b3, %2.b3, %0;" : "=r"(rv) : "r"(x), "r"(y));
+    else
+      asm("vmax.u32.u32.u32 %0,    %1.b0, %2.b0;    \n\t"
+          "vmax.u32.u32.u32 %0.b1, %1.b1, %2.b1, %0;\n\t"
+          "vmax.u32.u32.u32 %0.b2, %1.b2, %2.b2, %0;\n\t"
+          "vmax.u32.u32.u32 %0.b3, %1.b3, %2.b3, %0;" : "=r"(rv) : "r"(x), "r"(y));
     return rv;
 #else
     converter cx, cy, cr;
@@ -166,14 +176,23 @@ struct FuncMin<char> {
   __device__ uint32_t operator()(const uint32_t x, const uint32_t y) const {
 #if (__CUDA_ARCH__ >= 300) && (__CUDA_ARCH__ < 500)
     int32_t rv, z=0;
-    asm("vmin4.s32.s32.s32 %0, %1, %2, %3;" : "=r"(rv) : "r"(x), "r"(y), "r"(z));
+    if (std::numeric_limits<char>::is_signed)
+      asm("vmin4.s32.s32.s32 %0, %1, %2, %3;" : "=r"(rv) : "r"(x), "r"(y), "r"(z));
+    else
+      asm("vmin4.u32.u32.u32 %0, %1, %2, %3;" : "=r"(rv) : "r"(x), "r"(y), "r"(z));
     return rv;
 #elif (__CUDA_ARCH__ >= 500)
     int32_t rv;
-    asm("vmin.s32.s32.s32 %0,    %1.b0, %2.b0;    \n\t"
-        "vmin.s32.s32.s32 %0.b1, %1.b1, %2.b1, %0;\n\t"
-        "vmin.s32.s32.s32 %0.b2, %1.b2, %2.b2, %0;\n\t"
-        "vmin.s32.s32.s32 %0.b3, %1.b3, %2.b3, %0;" : "=r"(rv) : "r"(x), "r"(y));
+    if (std::numeric_limits<char>::is_signed)
+      asm("vmin.s32.s32.s32 %0,    %1.b0, %2.b0;    \n\t"
+          "vmin.s32.s32.s32 %0.b1, %1.b1, %2.b1, %0;\n\t"
+          "vmin.s32.s32.s32 %0.b2, %1.b2, %2.b2, %0;\n\t"
+          "vmin.s32.s32.s32 %0.b3, %1.b3, %2.b3, %0;" : "=r"(rv) : "r"(x), "r"(y));
+    else
+      asm("vmin.u32.u32.u32 %0,    %1.b0, %2.b0;    \n\t"
+          "vmin.u32.u32.u32 %0.b1, %1.b1, %2.b1, %0;\n\t"
+          "vmin.u32.u32.u32 %0.b2, %1.b2, %2.b2, %0;\n\t"
+          "vmin.u32.u32.u32 %0.b3, %1.b3, %2.b3, %0;" : "=r"(rv) : "r"(x), "r"(y));
     return rv;
 #else
     converter cx, cy, cr;
