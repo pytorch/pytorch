@@ -4,14 +4,30 @@
 // still keep it simple, so all platforms would be able to support it fairly
 // easily.
 
+// We include the cblas header here so that we can obtain the macros from cblas.
 extern "C" {
 #include "caffe2/utils/cblas.h"
 }
 
 #include "caffe2/core/common.h"
 #include "caffe2/core/types.h"
+#include "eigen3/Eigen/Core"
+#include "eigen3/Eigen/Dense"
 
 namespace caffe2 {
+
+// Common Eigen types that we will often use
+template <typename T>
+using EigenMatrixMap =
+    Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> >;
+template <typename T>
+using EigenVectorMap = Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, 1> >;
+template <typename T>
+using ConstEigenMatrixMap =
+    Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> >;
+template <typename T>
+using ConstEigenVectorMap =
+    Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, 1> >;
 
 namespace math {
 
@@ -144,6 +160,4 @@ void CopyMatrix(const size_t item_size, const int M, const int N, const void* A,
 
 }  // namespace math
 }  // namespace caffe2
-
-
 #endif  // CAFFE2_UTILS_MATH_H_
