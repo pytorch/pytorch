@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2015, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2015-2016, NVIDIA CORPORATION. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,7 +33,6 @@
 #include <cstdio>
 #include <cuda_runtime.h>
 
-#define MAXPEERS 8 // Maximum number of devices.
 #define MAXFLAGS 8
 #define MAXQUEUE 4 // Maximum number of queued collectives per communicator.
 #define DEFAULT_BUFFER_SIZE_BYTES (1UL << 21)
@@ -67,6 +66,13 @@ struct ncclMem {
   char buff[NCCL_MEM_PAD_ALIGN];
 };
 
+struct ncclNodeRef {
+  ncclMem* remote;
+  ncclMem* local;
+  int remoteCleanup;
+  void* cleanupHandle;
+};
+
 struct ncclComm {
   int nDev;    // number of devices in communicator
   int cudaDev; // cuda device index
@@ -77,29 +83,19 @@ struct ncclComm {
   ncclMem* hostMem;
   int hostMemState;
 
-  // Device-to-device communication structures to access remote or local device
-  // memory.
-  ncclMem* remote[MAXPEERS];
-  ncclMem* local[MAXPEERS];
-  struct {
-    int type;
-    void* handle;
-  } cleanup[MAXPEERS];
-  //int remoteCleanup[MAXPEERS]; // 0 is raw ptr, 1 is unregister/unmap, 2 is ipc close
-
   // Placed between calling and internal device streams.
   EventQueue events;
 
   // Maps an internal nccl index to user-specified rank order. This is necessary
   // since we need to know how the user expects data to be ordered across
   // devices.
-  int userFromRing[MAXPEERS];
+  int* userFromRing;
 
   // copy of the above stored on each device
   int* devUserFromRing;
 
   // Inverse of userFromRing. Maps user specified index to internal nccl index.
-  int ringFromUser[MAXPEERS];
+  int* ringFromUser;
 
   // Size of temp buffer in bytes.
   size_t buffSize;
@@ -108,6 +104,10 @@ struct ncclComm {
   // GPUs. In single process mode this can be used as long as QPI links are
   // not present. In multi-process, we never push to a remote recvbuff.
   int useRemoteRecv;
+
+  // Device-to-device communication structures to access remote or local device
+  // memory. Actual allocation larger than 1.
+  ncclNodeRef ptrs[1];
 };
 
 typedef enum {NONE=0, WARN=1, INFO=2, ABORT=3} DebugLevel;

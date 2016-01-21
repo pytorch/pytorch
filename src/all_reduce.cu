@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2015, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2015-2016, NVIDIA CORPORATION. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -420,19 +420,19 @@ ncclResult_t ncclAllReduceWithTypeAndFunc(const void* sendbuff, void* recvbuff,
     args.NumChunks = (args.N + args.ChunkSize - 1) / args.ChunkSize;
   }
 
-  args.ThisPtrToNextOutput = (T**)&(comm->local[nextId]->recvPtrs[0]);
-  args.PrevPtrToThisOutput = (T**)&(comm->remote[prevId]->recvPtrs[0]);
+  args.ThisPtrToNextOutput = (T**)&(comm->ptrs[nextId].local->recvPtrs[0]);
+  args.PrevPtrToThisOutput = (T**)&(comm->ptrs[prevId].remote->recvPtrs[0]);
 
   args.ThisInput = (const T*)sendbuff;
   args.ThisOutput = (volatile T*)recvbuff;
-  args.ThisBuffer = (volatile T*)comm->local[prevId]->buff;
-  args.NextBuffer = (volatile T*)comm->remote[nextId]->buff;
+  args.ThisBuffer = (volatile T*)comm->ptrs[prevId].local->buff;
+  args.NextBuffer = (volatile T*)comm->ptrs[nextId].remote->buff;
 
-  args.ThisNewDataAvailableFlag = comm->local[prevId]->flags;
-  args.NextNewDataAvailableFlag = comm->remote[nextId]->flags;
+  args.ThisNewDataAvailableFlag = comm->ptrs[prevId].local->flags;
+  args.NextNewDataAvailableFlag = comm->ptrs[nextId].remote->flags;
 
-  args.ThisChunkDoneFlag = comm->local[nextId]->flags + 1; 
-  args.PrevChunkDoneFlag = comm->remote[prevId]->flags + 1;
+  args.ThisChunkDoneFlag = comm->ptrs[nextId].local->flags + 1;
+  args.PrevChunkDoneFlag = comm->ptrs[prevId].remote->flags + 1;
 
   if( comm->useRemoteRecv ) {
     AllReduceKernel<NUM_THREADS, UNROLL_COUNT, FUNC, true, T>

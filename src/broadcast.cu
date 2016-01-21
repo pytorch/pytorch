@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2015, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2015-2016, NVIDIA CORPORATION. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -335,20 +335,20 @@ ncclResult_t ncclBcastWithType(void* buff, const int count, const int root,
 
 //  printf("sliceSize = %i, chunkSize = %i, numChunks = %i\n", args.SliceSize, args.ChunkSize, args.NumChunks);
 
-  args.ThisPtrToNextData = (T**)&(comm->local[nextId]->recvPtrs[0]);
-  args.PrevPtrToThisData = (T**)&(comm->remote[prevId]->recvPtrs[0]);
+  args.ThisPtrToNextData = (T**)&(comm->ptrs[nextId].local->recvPtrs[0]);
+  args.PrevPtrToThisData = (T**)&(comm->ptrs[prevId].remote->recvPtrs[0]);
 
   args.ThisData = (T*)buff;
-  args.ThisBuffer = (volatile T*)comm->local[prevId]->buff;
-  args.NextBuffer = (volatile T*)comm->remote[nextId]->buff;
+  args.ThisBuffer = (volatile T*)comm->ptrs[prevId].local->buff;
+  args.NextBuffer = (volatile T*)comm->ptrs[nextId].remote->buff;
 
   // we need 2 * NUM_SUBCHUNKS flags, so use the first NUM_SUBCHUNKS flags
   // to signal the next GPU that new data is available and the following
   // NUM_SUBCHUNKS to signal the previous GPU that a chunk is finished
-  args.ThisNewDataAvailableFlag = comm->local[prevId]->flags;
-  args.NextNewDataAvailableFlag = comm->remote[nextId]->flags;
-  args.ThisChunkDoneFlag = comm->local[nextId]->flags + 1;
-  args.PrevChunkDoneFlag = comm->remote[prevId]->flags + 1;
+  args.ThisNewDataAvailableFlag = comm->ptrs[prevId].local->flags;
+  args.NextNewDataAvailableFlag = comm->ptrs[nextId].remote->flags;
+  args.ThisChunkDoneFlag = comm->ptrs[nextId].local->flags + 1;
+  args.PrevChunkDoneFlag = comm->ptrs[prevId].remote->flags + 1;
 
   if (comm->useRemoteRecv) {
     if (index == (rootId + comm->nDev - 1) % comm->nDev) {

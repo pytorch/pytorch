@@ -324,19 +324,19 @@ ncclResult_t ncclReduceWithTypeAndFunc(const void* sendbuff, void* recvbuff,
     args.NumChunks = (args.N + args.ChunkSize - 1) / args.ChunkSize;
   }
 
-  args.ThisPtrToNextData = (T**)&(comm->local[nextId]->recvPtrs[0]);
-  args.PrevPtrToThisData = (T**)&(comm->remote[prevId]->recvPtrs[0]);
+  args.ThisPtrToNextData = (T**)&(comm->ptrs[nextId].local->recvPtrs[0]);
+  args.PrevPtrToThisData = (T**)&(comm->ptrs[prevId].remote->recvPtrs[0]);
 
   args.Output = (T*)recvbuff;
   args.ThisData = (const T*) sendbuff;
-  args.ThisBuffer = (volatile T*)comm->local[prevId]->buff;
-  args.NextBuffer = (volatile T*)comm->remote[nextId]->buff;
+  args.ThisBuffer = (volatile T*)comm->ptrs[prevId].local->buff;
+  args.NextBuffer = (volatile T*)comm->ptrs[nextId].remote->buff;
 
-  args.ThisNewDataAvailableFlag = comm->local[prevId]->flags;
-  args.NextNewDataAvailableFlag = comm->remote[nextId]->flags;
+  args.ThisNewDataAvailableFlag = comm->ptrs[prevId].local->flags;
+  args.NextNewDataAvailableFlag = comm->ptrs[nextId].remote->flags;
 
-  args.ThisChunkDoneFlag = comm->local[nextId]->flags + 1; 
-  args.PrevChunkDoneFlag = comm->remote[prevId]->flags + 1;
+  args.ThisChunkDoneFlag = comm->ptrs[nextId].local->flags + 1;
+  args.PrevChunkDoneFlag = comm->ptrs[prevId].remote->flags + 1;
 
   if (index == (rootId + 1) % comm->nDev) {
     ReduceKernel<NUM_THREADS, UNROLL_COUNT, FUNC, BEGIN, T>
