@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2015, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2015-2016, NVIDIA CORPORATION. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -124,7 +124,7 @@ typedef enum { ncclChar       = 0,
 /* Reduces data arrays of length count in sendbuff into recvbuf using op operation.
  * recvbuf may be NULL on all calls except for root device.
  * On the root device, sendbuff and recvbuff are assumed to reside on
- * the same device. 
+ * the same device.
  * Must be called separately for each communicator in communicator clique.
 */
 ncclResult_t ncclReduce(const void* sendbuff, void* recvbuf, int count, ncclDataType_t datatype,
@@ -137,11 +137,11 @@ ncclResult_t ncclReduce(const void* sendbuff, void* recvbuf, int count, ncclData
 ncclResult_t ncclAllReduce(const void* sendbuff, void* recvbuff, int count,
     ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, cudaStream_t stream);
 
-/* Reduces data in sendbuff using op operation and leaves reduced result scattered 
- * over the devices so that recvbuff on the i-th GPU will contain the i-th block of 
- * the result. Sendbuff and recvbuff are assumed to reside on same device. Assumes  
- * sendbuff has size at least ndev*recvcount elements, where ndev is number of 
- * communicators in communicator clique 
+/* Reduces data in sendbuff using op operation and leaves reduced result scattered
+ * over the devices so that recvbuff on the i-th GPU will contain the i-th block of
+ * the result. Sendbuff and recvbuff are assumed to reside on same device. Assumes
+ * sendbuff has size at least ndev*recvcount elements, where ndev is number of
+ * communicators in communicator clique
  * Must be called separately for each communicator in communicator clique.*/
 ncclResult_t ncclReduceScatter(const void* sendbuff, void* recvbuff,
     int recvcount, ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm,

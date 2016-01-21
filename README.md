@@ -88,7 +88,7 @@ typedef struct {
   int size;
   cudaStream_t stream;
 } PerThreadData;
- 
+
 int main(int argc, char* argv[])
 {
   int nGPUs;
@@ -96,20 +96,26 @@ int main(int argc, char* argv[])
   ncclComm_t* comms = (ncclComm_t*)malloc(sizeof(ncclComm_t)*nGPUs);
   ncclCommInitAll(comms, nGPUs); // initialize communicator
                                 // One communicator per process
- 
+
   PerThreadData* data;
- 
+
   ... // Allocate data and issue work to each GPU's
       // perDevStream to populate the sendBuffs.
- 
+
   for(int i=0; i<nGPUs; ++i) {
     cudaSetDevice(i); // Correct device must be set
                       // prior to each collective call.
     ncclAllReduce(data[i].sendBuff, data[i].recvBuff, size,
         ncclDouble, ncclSum, comms[i], data[i].stream);
   }
- 
+
   ... // Issue work into data[*].stream to consume buffers, etc.
 }
 ```
+
+## Copyright and License
+
+NCCL is provided under the [BSD licence](LICENSE.txt). All source code and
+accompanying documentation is copyright (c) 2015-2016, NVIDIA CORPORATION. All
+rights reserved.
 

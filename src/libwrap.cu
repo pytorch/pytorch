@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2015, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2015-2016, NVIDIA CORPORATION. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -51,7 +51,7 @@ ncclResult_t wrapSymbols(void) {
 
   if (symbolsLoaded)
     return ncclSuccess;
- 
+
   static void* nvmlhandle = NULL;
   static void* cuhandle = NULL;
   void* tmp;
@@ -91,7 +91,7 @@ ncclResult_t wrapSymbols(void) {
   LOAD_SYM(cuhandle, "cuIpcGetMemHandle", cuInternalIpcGetMemHandle);
   LOAD_SYM(cuhandle, "cuIpcOpenMemHandle", cuInternalIpcOpenMemHandle);
   LOAD_SYM(cuhandle, "cuIpcCloseMemHandle", cuInternalIpcCloseMemHandle);
-  
+
   symbolsLoaded = 1;
   return ncclSuccess;
 
@@ -102,7 +102,7 @@ ncclResult_t wrapSymbols(void) {
   nvmlInternalDeviceGetIndex = NULL;
   nvmlInternalDeviceSetCpuAffinity = NULL;
   nvmlInternalDeviceClearCpuAffinity = NULL;
-  
+
   cuInternalGetErrorString = NULL;
   cuInternalIpcGetMemHandle = NULL;
   cuInternalIpcOpenMemHandle = NULL;

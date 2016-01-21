@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2015, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2015-2016, NVIDIA CORPORATION. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -164,6 +164,9 @@ struct ReduceScatterKernelArgs {
   int BufferSliceStride;
   int BufferMisalignedN;
 
+  T ** ThisPtrToNextOutput;
+  T ** PrevPtrToThisOutput;
+
   // local and remote input, output, and buffer
   const T * __restrict__ ThisInput;
   volatile T * __restrict__ ThisOutput;
@@ -186,6 +189,20 @@ template<int THREADS, int UNROLL, class FUNC, typename T>
 __global__ void ReduceScatterKernel(const ReduceScatterKernelArgs<T> args) {
   if (args.N == 0) return;
   int tid = threadIdx.x;
+
+  // First wait for args.PrevPtrToThisOutput to become nullptr to ensure that
+  // the previous GPU is done with a previous collective operation.
+  if (tid == 0) {
+    Wait([=] {
+      return *((T * volatile *)args.PrevPtrToThisOutput) == nullptr; // Wait for previous processor to be done
+    });
+
+    *((T * volatile *)args.PrevPtrToThisOutput) = (T*)args.ThisOutput; // Tell Previous I'm starting
+    Wait([=] {
+      return *((T * volatile *)args.ThisPtrToNextOutput) != nullptr;  // Wait till I've been told next started
+    });
+  }
+  __syncthreads();
 
   for (int chunk = 0; chunk < args.NumChunks; ++chunk) {
     // calculate slice size.  for all chunks except (possibly) the last one,
@@ -311,6 +328,7 @@ __global__ void ReduceScatterKernel(const ReduceScatterKernelArgs<T> args) {
     if (tid == 0) {
       args.ThisNewDataAvailableFlag[tid] = 0;
       args.ThisChunkDoneFlag[tid] = 0;
+      *args.ThisPtrToNextOutput = nullptr;
     }
   }
 }
@@ -410,7 +428,8 @@ ncclResult_t ncclReduceScatterWithTypeAndFunc(const void* sendbuff,
     args.NumChunks = (args.N + args.ChunkSize - 1) / args.ChunkSize;
   }
 
-//  printf("sliceSize = %i, chunkSize = %i, numChunks = %i, sliceStride = %i, misalignedN = %i\n", args.SliceSize, args.ChunkSize, args.NumChunks, args.BufferSliceStride, args.BufferMisalignedN);
+  args.ThisPtrToNextOutput = (T**)&(comm->local[nextId]->recvPtrs[0]);
+  args.PrevPtrToThisOutput = (T**)&(comm->remote[prevId]->recvPtrs[0]);
 
   args.ThisInput = (const T*)sendbuff;
   args.ThisOutput = (volatile T*)recvbuff;
@@ -426,7 +445,7 @@ ncclResult_t ncclReduceScatterWithTypeAndFunc(const void* sendbuff,
   args.PrevChunkDoneFlag = comm->remote[prevId]->flags + 1;
 
   ReduceScatterKernel<NUM_THREADS, UNROLL_COUNT, FUNC, T>
-      <<<1, NUM_THREADS + NUM_SUBCHUNKS * WARP_SIZE, 0, stream>>>(args);
+      <<<1, NUM_THREADS + 1, 0, stream>>>(args);
   return ncclSuccess;
 }
 

@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2015, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2015-2016, NVIDIA CORPORATION. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -218,7 +218,7 @@ __global__ void AllGatherKernel(const AllGatherKernelArgs<T> args) {
 
         if (!PUSHRECV)
           WAIT_FOR_PREV_CHUNK(chunk, s);
-          
+
         if (PUSHRECV) {
           DoubleCopy<UNROLL, THREADS>(
               args.ThisOutput + outputOffset,

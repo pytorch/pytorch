@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2015, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2015-2016, NVIDIA CORPORATION. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -52,7 +52,7 @@ void RunTest(T** sendbuff, T** recvbuff, const int N, const ncclDataType_t type,
   int nDev = 0;
   ncclCommCount(comms[0], &nDev);
   cudaStream_t* s = (cudaStream_t*)malloc(sizeof(cudaStream_t)*nDev);
-  
+
   for (int i = 0; i < nDev; ++i) {
     CUDACHECK(cudaSetDevice(dList[i]));
     CUDACHECK(cudaStreamCreate(s+i));
@@ -68,7 +68,7 @@ void RunTest(T** sendbuff, T** recvbuff, const int N, const ncclDataType_t type,
   // warm up GPU
   for (int i = 0; i < nDev; ++i) {
     CUDACHECK(cudaSetDevice(dList[i]));
-    ncclReduce((const void*)sendbuff[i], (void*)recvbuff[i], std::min(N, 1024 * 1024), 
+    ncclReduce((const void*)sendbuff[i], (void*)recvbuff[i], std::min(N, 1024 * 1024),
         type, op, root, comms[i], s[i]);
   }
 
@@ -270,7 +270,7 @@ int main(int argc, char* argv[]) {
     printf("\n");
 
     printf("# %10s  %12s  %6s  %6s  %4s        out-of-place                    in-place\n", "", "", "", "", "");
-    printf("# %10s  %12s  %6s  %6s  %4s %7s  %5s  %5s  %7s  %7s  %5s  %5s  %7s\n", 
+    printf("# %10s  %12s  %6s  %6s  %4s %7s  %5s  %5s  %7s  %7s  %5s  %5s  %7s\n",
                "bytes", "N", "type", "op", "root",
                "time", "algbw", "busbw", "res", "time", "algbw", "busbw", "res");
   }

@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2015, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2015-2016, NVIDIA CORPORATION. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -271,7 +271,7 @@ __global__ void ReduceKernel(const ReduceKernelArgs<T> args) {
 }
 
 template<class FUNC, typename T>
-ncclResult_t ncclReduceWithTypeAndFunc(const void* sendbuff, void* recvbuff, 
+ncclResult_t ncclReduceWithTypeAndFunc(const void* sendbuff, void* recvbuff,
     const int count, const int root, ncclComm* comm, cudaStream_t stream) {
   if (count == 0)
     return ncclSuccess;

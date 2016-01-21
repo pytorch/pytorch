@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2015, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2015-2016, NVIDIA CORPORATION. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -139,7 +139,7 @@ typedef struct {
    RankEntry ranks[1];
 } RankGather;
 
-static ncclResult_t initGather(RankGather** gather, ncclUniqueId commId, 
+static ncclResult_t initGather(RankGather** gather, ncclUniqueId commId,
     int ndev, int rank, RankEntry myInfo) {
   size_t bytes = offsetof(RankGather, ranks) + ndev*sizeof(RankEntry);
   RankGather* tmp = NULL;
@@ -164,7 +164,7 @@ static ncclResult_t initGather(RankGather** gather, ncclUniqueId commId,
         shmUnmap(tmp, bytes);
         return res;
       }
-      
+
       orderRanks(tmp->ranks, ndev);
     }
     swapped = __sync_bool_compare_and_swap(&tmp->bar, bar_tmp, bar_tmp+1);
@@ -264,7 +264,7 @@ static ncclResult_t populateRankInfo(RankEntry* info, int rank, ncclComm_t comm)
     return ncclUnhandledCudaError;
   }
   INFO("rank %d using device %d (%s)", rank, comm->cudaDev, busId);
-    
+
   if (wrapNvmlDeviceGetHandleByPciBusId(busId, &nvmlHandle) != ncclSuccess) {
     WARN("rank %d failed to get nvml handle for device %s", rank, busId);
     return ncclUnhandledCudaError;
@@ -306,7 +306,7 @@ static ncclResult_t commClearMaps(ncclComm_t comm) {
       case CLEANUP_CUIPC:
         res = wrapCuIpcCloseMemHandle((CUdeviceptr)comm->cleanup[d].handle);
         if (res != ncclSuccess) {
-          WARN("rank %d failed to close IPC handle to rank %d", 
+          WARN("rank %d failed to close IPC handle to rank %d",
             comm->userFromRing[comm->ncclId], comm->userFromRing[d]);
           retval = (retval == ncclSuccess) ? res : retval;
         }
@@ -382,7 +382,7 @@ static ncclResult_t commBuildMaps(ncclComm_t comm, ncclUniqueId* commId, int ran
     return ncclInvalidRank;
   }
   comm->ncclId = myId;
-  
+
   int myDev = ranks[myId].cudaDev;
   pid_t myPid = ranks[myId].pid;
   comm->useRemoteRecv = 1; // Assume we directly write to result ptrs.
@@ -407,7 +407,7 @@ static ncclResult_t commBuildMaps(ncclComm_t comm, ncclUniqueId* commId, int ran
       } else if (err != cudaSuccess) {
         INFO("peer access failed between rank %d (dev %d) and rank %d (dev %d)\n",
           rank, myDev, iRank, iDev);
-        
+
         canpeer = 0;
       }
     }
@@ -609,7 +609,7 @@ static ncclResult_t commUnlinkHostMem(ncclComm_t comm, ncclUniqueId commId, int 
 
 extern "C" DSOGLOBAL
 ncclResult_t ncclCommInitRank(ncclComm_t* newcomm, int ndev, ncclUniqueId commId, int myrank) {
-  if (strlen(commId.internal) < 1 || 
+  if (strlen(commId.internal) < 1 ||
       strlen(commId.internal) >= NCCL_UNIQUE_ID_BYTES) {
     WARN("rank %d invalid commId", myrank);
     return ncclInvalidArgument;
@@ -675,7 +675,7 @@ ncclResult_t ncclCommInitRank(ncclComm_t* newcomm, int ndev, ncclUniqueId commId
     if (commUnlinkHostMem(*newcomm, commId, myrank) != ncclSuccess)
       INFO("rank %d failed to unlink host mem shm segment", myrank);
   }
-  
+
   if (wrapNvmlShutdown() != ncclSuccess)
     INFO("rank %d did not shutdown nvml properly", myrank);
   return res;
@@ -739,8 +739,8 @@ ncclResult_t ncclCommInitAll(ncclComm_t* comms, int ndev, int* devlist) {
       INFO("rank %d failed to set affinity", rank);
       goto skipaffinity;
     }
-    affinity_set = 1; 
-    skipaffinity: 
+    affinity_set = 1;
+    skipaffinity:
 
     res = commAlloc(&comm, ndev, NULL, rank);
     if (res != ncclSuccess) {
