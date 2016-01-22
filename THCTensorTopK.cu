@@ -3,6 +3,7 @@
 #include "THCTensorSort.h"
 #include "THCAsmUtils.cuh"
 #include "THCScanUtils.cuh"
+#include <algorithm> // for std::min
 
 #if CUDA_VERSION >= 7000
 #include <thrust/system/cuda/execution_policy.h>
