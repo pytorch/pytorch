@@ -40,6 +40,21 @@
 #include "generic/LookupTable.c"
 #include "THGenerateFloatTypes.h"
 
+#include "generic/MSECriterion.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/MarginCriterion.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/MultiLabelMarginCriterion.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/MultiMarginCriterion.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/PReLU.c"
+#include "THGenerateFloatTypes.h"
+
 #include "generic/unfold.c"
 #include "THGenerateFloatTypes.h"
 
