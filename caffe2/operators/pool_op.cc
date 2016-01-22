@@ -7,6 +7,8 @@ using std::max;
 using std::min;
 
 namespace {
+// These two classe are just used as template arguments passed to the PoolOp
+// template to instantiate the different algorithms.
 class AveragePool {};
 class MaxPool {};
 }  // namespace
@@ -249,39 +251,35 @@ bool PoolOp<float, CPUContext, MaxPool>::RunOnDeviceWithOrderNHWC() {
   int channels = X.dim(3);
   ConvPoolOpBase::SetOutputSize(X, Y, channels);
 
-  const float* Xdata = X.data<float>();
-  float* Ydata = Y->mutable_data<float>();
-  math::Set<float, CPUContext>(
-      Y->size(), std::numeric_limits<float>::lowest(), Ydata, &device_context_);
-  // The main loop
+  EigenMatrixMap<float> Ymat(
+      Y->mutable_data<float>(), channels, Y->size() / channels);
+  ConstEigenMatrixMap<float> Xmat(
+      X.data<float>(), channels, X.size() / channels);
   int pooled_height = Y->dim(1);
   int pooled_width = Y->dim(2);
+
+  // The main loop
+  // TODO: figure out the best location to put the omp parallel for command.
+  #pragma omp parallel for
   for (int n = 0; n < X.dim(0); ++n) {
     for (int ph = 0; ph < pooled_height; ++ph) {
+      int hstart = ph * stride_h_ - pad_t_;
+      int hend = min(hstart + kernel_h_, height);
+      hstart = max(hstart, 0);
       for (int pw = 0; pw < pooled_width; ++pw) {
-        int hstart = ph * stride_h_ - pad_t_;
         int wstart = pw * stride_w_ - pad_l_;
-        int hend = min(hstart + kernel_h_, height);
         int wend = min(wstart + kernel_w_, width);
-        hstart = max(hstart, 0);
         wstart = max(wstart, 0);
         // compute max in range X[n, hstart:hend, wstart:wend, :]
-        const int pool_index = (ph * pooled_width + pw) * channels;
+        auto Y_col = Ymat.col((n * pooled_height + ph) * pooled_width + pw);
+        Y_col.setConstant(std::numeric_limits<float>::lowest());
         for (int h = hstart; h < hend; ++h) {
           for (int w = wstart; w < wend; ++w) {
-            const int input_index = (h * width + w) * channels;
-            for (int c = 0; c < channels; ++c) {
-              if (Xdata[input_index + c] > Ydata[pool_index + c]) {
-                Ydata[pool_index + c] = Xdata[input_index + c];
-              }
-            }
+            Y_col = Y_col.cwiseMax(Xmat.col((n * height + h) * width + w));
           }
         }
       }
     }
-    // Do offset.
-    Xdata += X.size() / X.dim(0);
-    Ydata += Y->size() / Y->dim(0);
   }
   return true;
 }
@@ -337,7 +335,6 @@ bool PoolGradientOp<float, CPUContext, MaxPool>::RunOnDeviceWithOrderNCHW() {
       dYdata += pooled_height * pooled_width;
     }
   }
- 
   return true;
 }
 
@@ -346,23 +343,31 @@ bool PoolGradientOp<float, CPUContext, MaxPool>::RunOnDeviceWithOrderNHWC() {
   auto& X = Input(0);
   auto& Y = Input(1);
   auto& dY = Input(2);
-  CAFFE_CHECK_EQ(dY.ndim(), 4);
+  CAFFE_DCHECK_EQ(dY.ndim(), 4);
   auto* dX = Output(0);
   dX->ReshapeLike(X);
-  math::Set<float, CPUContext>(
-      X.size(), 0, dX->mutable_data<float>(), &device_context_);
-  const float* Xdata = X.data<float>();
-  const float* Ydata = Y.data<float>();
-  const float* dYdata = dY.data<float>();
-  float* dXdata = dX->mutable_data<float>();
+
+  int channels = X.dim(3);
+  CAFFE_CHECK_EQ(channels, dY.dim(3));
+  ConstEigenArrayMap<float> Ymat(
+      Y.data<float>(), channels, Y.size() / channels);
+  ConstEigenArrayMap<float> dYmat(
+      dY.data<float>(), channels, Y.size() / channels);
+  ConstEigenArrayMap<float> Xmat(
+      X.data<float>(), channels, X.size() / channels);
+  EigenArrayMap<float> dXmat(
+      dX->mutable_data<float>(), channels, X.size() / channels);
+  dXmat.setZero();
   int height = X.dim(1);
   int width = X.dim(2);
   ConvPoolOpBase<CPUContext>::ComputePads(height, width);
   int pooled_height = dY.dim(1);
   int pooled_width = dY.dim(2);
-  int channels = X.dim(3);
-  CAFFE_CHECK_EQ(channels, dY.dim(3));
-  // the main loop
+
+  // The main loop
+  // Do not do openmp here: the following for loops are looping over the pooled
+  // output, so if one parallelizes the outer loops, race conditions could
+  // happen in the inner loops.
   for (int n = 0; n < X.dim(0); ++n) {
     for (int ph = 0; ph < pooled_height; ++ph) {
       for (int pw = 0; pw < pooled_width; ++pw) {
@@ -372,26 +377,18 @@ bool PoolGradientOp<float, CPUContext, MaxPool>::RunOnDeviceWithOrderNHWC() {
         int wend = min(wstart + kernel_w_, width);
         hstart = max(hstart, 0);
         wstart = max(wstart, 0);
-        const int pool_index = (ph * pooled_width + pw) * channels;
+        const int pool_index = (n * pooled_height + ph) * pooled_width + pw;
         for (int h = hstart; h < hend; ++h) {
           for (int w = wstart; w < wend; ++w) {
-            const int input_index = (h * width + w) * channels;
-            for (int c = 0; c < channels; ++c) {
-              // OK here is a trick: this may multi-assign gradients.
-              // which is not ideal.
-              if (Xdata[input_index + c] == Ydata[pool_index + c]) {
-                dXdata[input_index + c] += dYdata[pool_index + c];
-              }
-            }
+            const int input_index = (n * height + h) * width + w;
+            dXmat.col(input_index) +=
+                dYmat.col(pool_index) *
+                (Xmat.col(input_index).cwiseEqual(Ymat.col(pool_index))
+                    .cast<float>());
           }
         }
       }
     }
-    // Do offset.
-    Xdata += X.size() / X.dim(0);
-    Ydata += Y.size() / Y.dim(0);
-    dYdata += dY.size() / dY.dim(0);
-    dXdata += dX->size() / dX->dim(0);
   }
   return true;
 }
