@@ -32,15 +32,7 @@
 
 #include "nccl.h"
 #include "mpi.h"
-
-#define CUDACHECK(cmd) do {                              \
-  cudaError_t e = cmd;                                 \
-  if( e != cudaSuccess ) {                             \
-    printf("Cuda failure %s:%d '%s'\n",              \
-        __FILE__,__LINE__,cudaGetErrorString(e)); \
-    exit(EXIT_FAILURE);                              \
-  }                                                    \
-} while(false)
+#include "test_utilities.h"
 
 #define SIZE 128
 #define NITERS 1
@@ -48,7 +40,7 @@
 int main(int argc, char *argv[]) {
   ncclUniqueId commId;
   int size, rank;
-  int ret;
+  ncclResult_t ret;
 
   MPI_Init(&argc, &argv);
   MPI_Comm_size(MPI_COMM_WORLD, &size);
@@ -66,11 +58,11 @@ int main(int argc, char *argv[]) {
 
   // NCCL Communicator creation
   ncclComm_t comm;
-  ncclGetUniqueId(&commId);
+  NCCLCHECK(ncclGetUniqueId(&commId));
   MPI_Bcast(&commId, NCCL_UNIQUE_ID_BYTES, MPI_CHAR, 0, MPI_COMM_WORLD);
   ret = ncclCommInitRank(&comm, size, commId, rank);
   if (ret != ncclSuccess) {
-    printf("NCCL Init failed : %d\n", ret);
+    printf("NCCL Init failed (%d) '%s'\n", ret, ncclGetErrorString(ret));
     exit(1);
   }
 
@@ -93,7 +85,7 @@ int main(int argc, char *argv[]) {
   // Run allreduce
   int errors = 0;
   for (int i=0; i<NITERS; i++) {
-    ncclAllReduce((const void*)dptr, (void*)(dptr+SIZE), SIZE, ncclInt, ncclSum, comm, stream);
+    NCCLCHECK(ncclAllReduce((const void*)dptr, (void*)(dptr+SIZE), SIZE, ncclInt, ncclSum, comm, stream));
   }
 
   // Check results

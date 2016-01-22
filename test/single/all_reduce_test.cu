@@ -48,7 +48,7 @@ void RunTest(T** sendbuff, T** recvbuff, const int N, const ncclDataType_t type,
   memset(result, 0, N * sizeof(T));
 
   int nDev = 0;
-  ncclCommCount(comms[0], &nDev);
+  NCCLCHECK(ncclCommCount(comms[0], &nDev));
   cudaStream_t* s = (cudaStream_t*)malloc(sizeof(cudaStream_t)*nDev);
 
   for (int i = 0; i < nDev; ++i) {
@@ -66,7 +66,7 @@ void RunTest(T** sendbuff, T** recvbuff, const int N, const ncclDataType_t type,
   // warm up GPU
   for (int i = 0; i < nDev; ++i) {
     CUDACHECK(cudaSetDevice(dList[i]));
-    ncclAllReduce((const void*)sendbuff[i], (void*)recvbuff[i], std::min(N, 1024 * 1024), type, op, comms[i], s[i]);
+    NCCLCHECK(ncclAllReduce((const void*)sendbuff[i], (void*)recvbuff[i], std::min(N, 1024 * 1024), type, op, comms[i], s[i]));
   }
 
   for (int i = 0; i < nDev; ++i) {
@@ -87,8 +87,8 @@ void RunTest(T** sendbuff, T** recvbuff, const int N, const ncclDataType_t type,
     //for (int i=0; i<100; i++) {
       for (int i = 0; i < nDev; ++i) {
         CUDACHECK(cudaSetDevice(dList[i]));
-        ncclAllReduce((const void*)sendbuff[i], (void*)recvbuff[i], n, type, op,
-            comms[i], s[i]);
+        NCCLCHECK(ncclAllReduce((const void*)sendbuff[i], (void*)recvbuff[i], n, type, op,
+            comms[i], s[i]));
       }
     //}
 
@@ -130,8 +130,8 @@ void RunTest(T** sendbuff, T** recvbuff, const int N, const ncclDataType_t type,
     //for (int i=0; i<100; i++) {
       for (int i = 0; i < nDev; ++i) {
         CUDACHECK(cudaSetDevice(dList[i]));
-        ncclAllReduce((const void*)sendbuff[i], (void*)sendbuff[i], n, type, op,
-            comms[i], s[i]);
+        NCCLCHECK(ncclAllReduce((const void*)sendbuff[i], (void*)sendbuff[i], n, type, op,
+            comms[i], s[i]));
       }
     //}
 
@@ -176,7 +176,7 @@ template<typename T>
 void RunTests(const int N, const ncclDataType_t type, ncclComm_t* comms,
     const std::vector<int>& dList) {
   int nDev = 0;
-  ncclCommCount(comms[0], &nDev);
+  NCCLCHECK(ncclCommCount(comms[0], &nDev));
   T** sendbuff = (T**)malloc(nDev * sizeof(T*));
   T** recvbuff = (T**)malloc(nDev * sizeof(T*));
 
@@ -256,7 +256,7 @@ int main(int argc, char* argv[]) {
   }
 
   ncclComm_t* comms = (ncclComm_t*)malloc(sizeof(ncclComm_t)*nDev);
-  ncclCommInitAll(comms, nDev, dList.data());
+  NCCLCHECK(ncclCommInitAll(comms, nDev, dList.data()));
 
   if (!csv) {
     printf("# Using devices\n");
@@ -264,8 +264,8 @@ int main(int argc, char* argv[]) {
       int cudaDev;
       int rank;
       cudaDeviceProp prop;
-      ncclCommCuDevice(comms[g], &cudaDev);
-      ncclCommUserRank(comms[g], &rank);
+      NCCLCHECK(ncclCommCuDevice(comms[g], &cudaDev));
+      NCCLCHECK(ncclCommUserRank(comms[g], &rank));
       CUDACHECK(cudaGetDeviceProperties(&prop, cudaDev));
       printf("#   Rank %2d uses device %2d [0x%02x] %s\n", rank, cudaDev,
           prop.pciBusID, prop.name);

@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2015, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2015-2016, NVIDIA CORPORATION. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -41,7 +41,7 @@ void RunTest(T** buff, const int N, const ncclDataType_t type, const int root,
     ncclComm_t* const comms, const std::vector<int>& dList) {
   // initialize data
   int nDev = 0;
-  ncclCommCount(comms[0], &nDev);
+  NCCLCHECK(ncclCommCount(comms[0], &nDev));
   cudaStream_t* s = (cudaStream_t*)malloc(sizeof(cudaStream_t)*nDev);
   T* buffer = (T*)malloc(N * sizeof(T));
   T* result = (T*)malloc(N * sizeof(T));
@@ -65,7 +65,7 @@ void RunTest(T** buff, const int N, const ncclDataType_t type, const int root,
   // warm up GPU
   for (int i = 0; i < nDev; ++i) {
     CUDACHECK(cudaSetDevice(dList[i]));
-    ncclBcast((void*)buff[i], std::min(32 * 1024, N), type, root, comms[i], s[i]);
+    NCCLCHECK(ncclBcast((void*)buff[i], std::min(32 * 1024, N), type, root, comms[i], s[i]));
   }
 
   for (int i = 0; i < nDev; ++i) {
@@ -83,7 +83,7 @@ void RunTest(T** buff, const int N, const ncclDataType_t type, const int root,
 
     for (int i = 0; i < nDev; ++i) {
       CUDACHECK(cudaSetDevice(dList[i]));
-      ncclBcast((void*)buff[i], n, type, root, comms[i], s[i]);
+      NCCLCHECK(ncclBcast((void*)buff[i], n, type, root, comms[i], s[i]));
     }
 
     for (int i = 0; i < nDev; ++i) {
@@ -123,7 +123,7 @@ template<typename T>
 void RunTests(const int N, const ncclDataType_t type, ncclComm_t* const comms,
     const std::vector<int>& dList) {
   int nDev = 0;
-  ncclCommCount(comms[0], &nDev);
+  NCCLCHECK(ncclCommCount(comms[0], &nDev));
   T** buff = (T**)malloc(nDev * sizeof(T*));
 
   for (int i = 0; i < nDev; ++i) {
@@ -199,15 +199,15 @@ int main(int argc, char* argv[]) {
   }
 
   ncclComm_t* comms = (ncclComm_t*)malloc(sizeof(ncclComm_t)*nDev);;
-  ncclCommInitAll(comms, nDev, dList.data());
+  NCCLCHECK(ncclCommInitAll(comms, nDev, dList.data()));
 
   printf("# Using devices\n");
   for (int g = 0; g < nDev; ++g) {
     int cudaDev;
     int rank;
     cudaDeviceProp prop;
-    ncclCommCuDevice(comms[g], &cudaDev);
-    ncclCommUserRank(comms[g], &rank);
+    NCCLCHECK(ncclCommCuDevice(comms[g], &cudaDev));
+    NCCLCHECK(ncclCommUserRank(comms[g], &rank));
     CUDACHECK(cudaGetDeviceProperties(&prop, cudaDev));
     printf("#   Rank %2d uses device %2d [0x%02x] %s\n", rank, cudaDev,
         prop.pciBusID, prop.name);
