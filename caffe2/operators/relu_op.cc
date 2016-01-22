@@ -1,3 +1,4 @@
+#include "caffe2/utils/math.h"
 #include "caffe2/operators/relu_op.h"
 
 namespace caffe2 {
@@ -8,11 +9,16 @@ bool ReluOp<float, CPUContext>::RunOnDevice() {
   auto* Y = Output(0);
   CAFFE_DCHECK_GT(X.size(), 0);
   Y->ReshapeLike(X);
+  EigenVectorMap<float>(Y->mutable_data<float>(), X.size()) =
+      ConstEigenVectorMap<float>(X.data<float>(), X.size()).cwiseMax(0.f);
+
+  /* Naive implementation
   const float* Xdata = X.data<float>();
   float* Ydata = Y->mutable_data<float>();
   for (int i = 0; i < X.size(); ++i) {
     Ydata[i] = std::max(Xdata[i], 0.f);
   }
+  */
   return true;
 }
 
@@ -24,11 +30,13 @@ bool ReluGradientOp<float, CPUContext>::RunOnDevice() {
   CAFFE_DCHECK_GT(Y.size(), 0);
   CAFFE_DCHECK_EQ(dY.size(), Y.size());
   dX->ReshapeLike(Y);
+
   const float* Ydata = Y.data<float>();
   const float* dYdata = dY.data<float>();
   float* dXdata = dX->mutable_data<float>();
+  #pragma omp parallel for
   for (int i = 0; i < Y.size(); ++i) {
-    dXdata[i] = dYdata[i] * (Ydata[i] > 0);
+    dXdata[i] = Ydata[i] > 0 ? dYdata[i] : 0;
   }
   return true;
 }
