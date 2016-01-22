@@ -59,14 +59,20 @@ ncclResult_t wrapSymbols(void) {
 
   nvmlhandle=dlopen("libnvidia-ml.so", RTLD_NOW);
   if (!nvmlhandle) {
-    WARN("Failed to open libnvidia-ml.so");
-    goto teardown;
+    nvmlhandle=dlopen("libnvidia-ml.so.1", RTLD_NOW);
+    if (!nvmlhandle) {
+      WARN("Failed to open libnvidia-ml.so[.1]");
+      goto teardown;
+    }
   }
 
   cuhandle = dlopen("libcuda.so", RTLD_NOW);
   if (!cuhandle) {
-    WARN("Failed to open libcuda.so");
-    goto teardown;
+    cuhandle = dlopen("libcuda.so.1", RTLD_NOW);
+    if (!cuhandle) {
+      WARN("Failed to open libcuda.so[.1]");
+      goto teardown;
+    }
   }
 
   #define LOAD_SYM(handle, symbol, funcptr) do {         \
