@@ -74,7 +74,7 @@ TH_API void THNN_CudaELU_updateGradInput(
           float alpha);
 
 TH_API void THNN_CudaHardTanh_updateOutput(
-          THCState *state, 
+          THCState *state,
           THCudaTensor *input,
           THCudaTensor *output,
           float min_val,
@@ -143,6 +143,75 @@ TH_API void THNN_CudaLookupTable_accGradParameters(
           THIntegerTensor *count,
           THCudaTensor *sorted,
           THCudaTensor *indices);
+
+
+TH_API void THNN_CudaMarginCriterion_updateOutput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *target,
+          THCudaTensor *output,
+          bool sizeAverage,
+          float margin);
+TH_API void THNN_CudaMarginCriterion_updateGradInput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *target,
+          THCudaTensor *gradInput,
+          bool sizeAverage,
+          float margin);
+
+TH_API void THNN_CudaMSECriterion_updateOutput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *target,
+          THCudaTensor *output,
+          bool sizeAverage);
+TH_API void THNN_CudaMSECriterion_updateGradInput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *target,
+          THCudaTensor *gradInput,
+          bool sizeAverage);
+
+TH_API void THNN_CudaMultiMarginCriterion_updateOutput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *target,
+          THCudaTensor *output,
+          bool sizeAverage,
+          int p);
+TH_API void THNN_CudaMultiMarginCriterion_updateGradInput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *target,
+          THCudaTensor *gradInput,
+          bool sizeAverage,
+          int p);
+
+TH_API void THNN_CudaPReLU_updateOutput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *output,
+          THCudaTensor *weight,
+          long nOutputPlane);
+TH_API void THNN_CudaPReLU_updateGradInput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *gradOutput,
+          THCudaTensor *gradInput,
+          THCudaTensor *weight,
+          long nOutputPlane);
+TH_API void THNN_CudaPReLU_accGradParameters(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *gradOutput,
+          THCudaTensor *gradInput,
+          THCudaTensor *weight,
+          THCudaTensor *gradWeight,
+          THCudaTensor *gradWeightBuf,
+          THCudaTensor *gradWeightBuf2,
+          long nOutputPlane,
+          float scale);
 
 TH_API void THNN_CudaSpatialConvolutionMM_updateOutput(
           THCState *state,
