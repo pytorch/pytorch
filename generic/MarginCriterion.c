@@ -2,7 +2,7 @@
 #define TH_GENERIC_FILE "generic/MarginCriterion.c"
 #else
 
-void THNN_(MarginCriterion_updateOutput)(THNNState *state, THTensor *input, THTensor *target, THTensor *output, real margin, bool sizeAverage)
+void THNN_(MarginCriterion_updateOutput)(THNNState *state, THTensor *input, THTensor *target, THTensor *output, bool sizeAverage, real margin)
 {
   real sum = 0;
 
@@ -17,7 +17,7 @@ void THNN_(MarginCriterion_updateOutput)(THNNState *state, THTensor *input, THTe
   THTensor_(set1d)(output, 0, sum);
 }
 
-void THNN_(MarginCriterion_updateGradInput)(THNNState *state, THTensor *input, THTensor *target, THTensor *gradInput, real margin, bool sizeAverage)
+void THNN_(MarginCriterion_updateGradInput)(THNNState *state, THTensor *input, THTensor *target, THTensor *gradInput, bool sizeAverage, real margin)
 {
   real norm = (sizeAverage ? 1./((real)THTensor_(nElement)(input)) : 1.);
 

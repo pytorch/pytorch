@@ -158,15 +158,15 @@ TH_API void THNN_(MarginCriterion_updateOutput)(
           THTensor *input,
           THTensor *target,
           THTensor *output,
-          real margin,
-          bool sizeAverage);
+          bool sizeAverage,
+          real margin);
 TH_API void THNN_(MarginCriterion_updateGradInput)(
           THNNState *state,
           THTensor *input,
           THTensor *target,
           THTensor *gradInput,
-          real margin,
-          bool sizeAverage);
+          bool sizeAverage,
+          real margin);
 
 TH_API void THNN_(MSECriterion_updateOutput)(
           THNNState *state,
@@ -229,6 +229,8 @@ TH_API void THNN_(PReLU_accGradParameters)(
           THTensor* gradInput,
           THTensor *weight,
           THTensor *gradWeight,
+          THTensor *gradWeightBuf,
+          THTensor *gradWeightBuf2,
           THIndex_t nOutputPlane,
           real scale);
           
