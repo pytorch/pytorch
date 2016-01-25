@@ -55,6 +55,21 @@
 #include "generic/PReLU.c"
 #include "THGenerateFloatTypes.h"
 
+#include "generic/RReLU.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/Sigmoid.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/SmoothL1Criterion.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/SoftMax.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/SoftPlus.c"
+#include "THGenerateFloatTypes.h"
+
 #include "generic/unfold.c"
 #include "THGenerateFloatTypes.h"
 

@@ -233,7 +233,7 @@ TH_API void THNN_(PReLU_accGradParameters)(
           THTensor *gradWeightBuf2,
           THIndex_t nOutputPlane,
           real scale);
-          
+
 TH_API void THNN_(SpatialConvolutionMM_updateOutput)(
           THNNState *state,
           THTensor *input,
