@@ -2,7 +2,7 @@
 #define TH_GENERIC_FILE "generic/MultiMarginCriterion.c"
 #else
 
-void THNN_(MultiMarginCriterion_updateOutput)(THNNState *state, THTensor *input, THTensor *target, THTensor* output, bool sizeAverage, int p)
+void THNN_(MultiMarginCriterion_updateOutput)(THNNState *state, THTensor *input, THTensor *target, THTensor *output, bool sizeAverage, int p)
 {
   real *input_data, *target_data;
   long nframe, dim;

@@ -234,6 +234,77 @@ TH_API void THNN_(PReLU_accGradParameters)(
           THIndex_t nOutputPlane,
           real scale);
 
+TH_API void THNN_(RReLU_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          THTensor *noise,
+          real lower,
+          real upper,
+          bool train,
+          bool inplace,
+          THGenerator *generator);
+TH_API void THNN_(RReLU_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          THTensor *noise,
+          real lower,
+          real upper,
+          bool train,
+          bool inplace);
+
+TH_API void THNN_(Sigmoid_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output);
+TH_API void THNN_(Sigmoid_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          THTensor *output);
+
+TH_API void THNN_(SmoothL1Criterion_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *target,
+          THTensor *output,
+          bool sizeAverage);
+TH_API void THNN_(SmoothL1Criterion_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *target,
+          THTensor *gradInput,
+          bool sizeAverage);
+
+TH_API void THNN_(SoftMax_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output);
+TH_API void THNN_(SoftMax_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          THTensor *output);
+
+TH_API void THNN_(SoftPlus_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          real beta,
+          real threshold);
+TH_API void THNN_(SoftPlus_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          THTensor *output,
+          real beta,
+          real threshold);
+
 TH_API void THNN_(SpatialConvolutionMM_updateOutput)(
           THNNState *state,
           THTensor *input,
