@@ -70,6 +70,21 @@
 #include "generic/SoftPlus.c"
 #include "THGenerateFloatTypes.h"
 
+#include "generic/SoftShrink.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/Sqrt.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/Square.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/Tanh.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/Threshold.c"
+#include "THGenerateFloatTypes.h"
+
 #include "generic/unfold.c"
 #include "THGenerateFloatTypes.h"
 
