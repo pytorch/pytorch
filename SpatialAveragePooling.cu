@@ -1,4 +1,4 @@
-#include "utils.h"
+#include "THCUNN.h"
 #include "common.h"
 
 template <typename Dtype, bool COUNT_INCLUDE_PAD>
@@ -37,23 +37,10 @@ __global__ void AvePoolForward(const int nthreads,
 }
 
 
-static int cunn_SpatialAveragePooling_updateOutput(lua_State *L)
+void THNN_CudaSpatialAveragePooling_updateOutput(THCState *state, THCudaTensor *input, THCudaTensor *output, int kW, int kH, int dW, int dH, int padW, int padH, bool ceil_mode, bool count_include_pad)
 {
-  THCState *state = getCutorchState(L);
-  THCudaTensor *input = (THCudaTensor *)luaT_checkudata(L, 2, "torch.CudaTensor");
-  int kW = luaT_getfieldcheckint(L, 1, "kW");
-  int kH = luaT_getfieldcheckint(L, 1, "kH");
-  int dW = luaT_getfieldcheckint(L, 1, "dW");
-  int dH = luaT_getfieldcheckint(L, 1, "dH");
-  int padW = luaT_getfieldcheckint(L, 1, "padW");
-  int padH = luaT_getfieldcheckint(L, 1, "padH");
-  bool ceil_mode = luaT_getfieldcheckboolean(L, 1, "ceil_mode");
-  bool count_include_pad = luaT_getfieldcheckboolean(L, 1, "count_include_pad");
-
-  THCudaTensor *output = (THCudaTensor *)luaT_getfieldcheckudata(L, 1, "output", "torch.CudaTensor");
-
   THAssert(THCudaTensor_checkGPU(state, 2, input, output));
-  luaL_argcheck(L, input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch) tensor expected");
+  THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch) tensor expected");
 
   long nInputCols, nInputRows, nInputPlane, batchSize;
   long nOutputCols, nOutputRows;
@@ -72,8 +59,8 @@ static int cunn_SpatialAveragePooling_updateOutput(lua_State *L)
     batchSize = input->size[0];
   }
 
-  luaL_argcheck(L, nInputCols >= kW - 2*padW && nInputRows >= kH - 2*padH, 2, "input image smaller than kernel size");
-  luaL_argcheck(L, kW/2 >= padW && kH/2 >= padH, 2, "pad should be smaller than half of kernel size");
+  THArgCheck(nInputCols >= kW - 2*padW && nInputRows >= kH - 2*padH, 2, "input image smaller than kernel size");
+  THArgCheck(kW/2 >= padW && kH/2 >= padH, 2, "pad should be smaller than half of kernel size");
 
   if(ceil_mode) {
     nOutputCols = ceil(float(nInputCols - kW + 2*padW) / float(dW)) + 1;
@@ -126,7 +113,6 @@ static int cunn_SpatialAveragePooling_updateOutput(lua_State *L)
     printf("error in SpatialAveragePooling.updateOutput: %s\n", cudaGetErrorString(err));
     THError("aborting");
   }
-  return 1;
 }
 
 template <typename Dtype, bool COUNT_INCLUDE_PAD>
@@ -172,22 +158,8 @@ __global__ void AvePoolBackward(const int nthreads, const Dtype* const top_diff,
   }
 }
 
-static int cunn_SpatialAveragePooling_updateGradInput(lua_State *L)
+void THNN_CudaSpatialAveragePooling_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput, THCudaTensor *gradInput, int kW, int kH, int dW, int dH, int padW, int padH, bool ceil_mode, bool count_include_pad)
 {
-  THCState *state = getCutorchState(L);
-  THCudaTensor *input = (THCudaTensor *)luaT_checkudata(L, 2, "torch.CudaTensor");
-  THCudaTensor *gradOutput = (THCudaTensor *)luaT_checkudata(L, 3, "torch.CudaTensor");
-  int kW = luaT_getfieldcheckint(L, 1, "kW");
-  int kH = luaT_getfieldcheckint(L, 1, "kH");
-  int dW = luaT_getfieldcheckint(L, 1, "dW");
-  int dH = luaT_getfieldcheckint(L, 1, "dH");
-  int padW = luaT_getfieldcheckint(L, 1, "padW");
-  int padH = luaT_getfieldcheckint(L, 1, "padH");
-  bool ceil_mode = luaT_getfieldcheckboolean(L, 1, "ceil_mode");
-  bool count_include_pad = luaT_getfieldcheckboolean(L, 1, "count_include_pad");
-
-  THCudaTensor *gradInput = (THCudaTensor *)luaT_getfieldcheckudata(L, 1, "gradInput", "torch.CudaTensor");
-
   THAssert(THCudaTensor_checkGPU(state, 3, input, gradOutput, gradInput));
 
   input = THCudaTensor_newContiguous(state, input);
@@ -258,20 +230,5 @@ static int cunn_SpatialAveragePooling_updateGradInput(lua_State *L)
   // clean
   THCudaTensor_free(state, input);
   THCudaTensor_free(state, gradOutput);
-
-  return 1;
 }
 
-
-static const struct luaL_Reg cunn_SpatialAveragePooling__ [] = {
-  {"SpatialAveragePooling_updateOutput", cunn_SpatialAveragePooling_updateOutput},
-  {"SpatialAveragePooling_updateGradInput", cunn_SpatialAveragePooling_updateGradInput},
-  {NULL, NULL}
-};
-
-void cunn_SpatialAveragePooling_init(lua_State *L)
-{
-  luaT_pushmetatable(L, "torch.CudaTensor");
-  luaT_registeratname(L, cunn_SpatialAveragePooling__, "nn");
-  lua_pop(L,1);
-}

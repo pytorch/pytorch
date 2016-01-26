@@ -1,4 +1,4 @@
-#include "utils.h"
+#include "THCUNN.h"
 
 #define CUDA_MAX_THREADS 1024   // this is safe, in reality 256 is our limit
 
@@ -184,23 +184,15 @@ __global__ void atomicadaptivemaxgradinput(
   }
 }
 
-static int cunn_SpatialAdaptiveMaxPooling_updateOutput(lua_State *L)
+void THNN_CudaSpatialAdaptiveMaxPooling_updateOutput(THCState *state, THCudaTensor *input, THCudaTensor *output, THCudaTensor *indices, int nOutputCols, int nOutputRows)
 {
-  THCState *state = getCutorchState(L);
-  THCudaTensor *input = (THCudaTensor *)luaT_checkudata(L, 2, "torch.CudaTensor");
-
-  long nOutputCols = luaT_getfieldcheckint(L, 1, "W");
-  long nOutputRows = luaT_getfieldcheckint(L, 1, "H");
-
-  THCudaTensor *output = (THCudaTensor *)luaT_getfieldcheckudata(L, 1, "output", "torch.CudaTensor");
-  THCudaTensor *indices = (THCudaTensor *)luaT_getfieldcheckudata(L, 1, "indices", "torch.CudaTensor");
   THAssert(THCudaTensor_checkGPU(state, 3, input, output, indices));
 
   float *indices_data;
   float *output_data;
   float *input_data;
 
-  luaL_argcheck(L, input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch) tensor expected");
+  THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch) tensor expected");
 
   if (input->nDimension == 3) {
     long nInputCols = input->size[2];
@@ -271,19 +263,12 @@ static int cunn_SpatialAdaptiveMaxPooling_updateOutput(lua_State *L)
     printf("error in SpatialAdaptiveMaxPooling.updateOutput: %s\n", cudaGetErrorString(err));
     THError("aborting");
   }
-  return 1;
 }
 
-static int cunn_SpatialAdaptiveMaxPooling_updateGradInput(lua_State *L)
+void THNN_CudaSpatialAdaptiveMaxPooling_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput, THCudaTensor *gradInput, THCudaTensor *indices)
 {
-  THCState *state = getCutorchState(L);
-  THCudaTensor *input = (THCudaTensor *)luaT_checkudata(L, 2, "torch.CudaTensor");
-  THCudaTensor *gradOutput = (THCudaTensor *)luaT_checkudata(L, 3, "torch.CudaTensor");
-
   bool atomic = true; // suboptimal, but without atomic it doesn't pass the tests
 
-  THCudaTensor *gradInput = (THCudaTensor *)luaT_getfieldcheckudata(L, 1, "gradInput", "torch.CudaTensor");
-  THCudaTensor *indices = (THCudaTensor *)luaT_getfieldcheckudata(L, 1, "indices", "torch.CudaTensor");
   THAssert(THCudaTensor_checkGPU(state, 4, input, indices, gradOutput, gradInput));
 
   float *indices_data;
@@ -376,20 +361,6 @@ static int cunn_SpatialAdaptiveMaxPooling_updateGradInput(lua_State *L)
     printf("error in SpatialAdaptiveMaxPooling.updateGradInput: %s\n", cudaGetErrorString(err));
     THError("aborting");
   }
-  return 1;
-}
-
-static const struct luaL_Reg cunn_SpatialAdaptiveMaxPooling__ [] = {
-  {"SpatialAdaptiveMaxPooling_updateOutput", cunn_SpatialAdaptiveMaxPooling_updateOutput},
-  {"SpatialAdaptiveMaxPooling_updateGradInput", cunn_SpatialAdaptiveMaxPooling_updateGradInput},
-  {NULL, NULL}
-};
-
-void cunn_SpatialAdaptiveMaxPooling_init(lua_State *L)
-{
-  luaT_pushmetatable(L, "torch.CudaTensor");
-  luaT_registeratname(L, cunn_SpatialAdaptiveMaxPooling__, "nn");
-  lua_pop(L,1);
 }
 
 #undef CUDA_MAX_THREADS

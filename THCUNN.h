@@ -143,3 +143,93 @@ TH_API void THNN_CudaLookupTable_accGradParameters(
           THIntegerTensor *count,
           THCudaTensor *sorted,
           THCudaTensor *indices);
+
+TH_API void THNN_CudaSpatialConvolutionMM_updateOutput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *output,
+          THCudaTensor *weight,
+          THCudaTensor *bias,
+          THCudaTensor *columns,
+          THCudaTensor *ones,
+          int kW, int kH,
+          int dW, int dH,
+          int padW, int padH);
+TH_API void THNN_CudaSpatialConvolutionMM_updateGradInput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *gradOutput,
+          THCudaTensor *gradInput,
+          THCudaTensor *weight,
+          THCudaTensor *bias,
+          THCudaTensor *columns,
+          THCudaTensor *ones,
+          int kW, int kH,
+          int dW, int dH,
+          int padW, int padH);
+TH_API void THNN_CudaSpatialConvolutionMM_accGradParameters(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *gradOutput,
+          THCudaTensor *gradWeight,
+          THCudaTensor *gradBias,
+          THCudaTensor *columns,
+          THCudaTensor *ones,
+          int kW, int kH,
+          int dW, int dH,
+          int padW, int padH,
+          float scale);
+
+TH_API void THNN_CudaSpatialAdaptiveMaxPooling_updateOutput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *output,
+          THCudaTensor *indices,
+          int nOutputCols,
+          int nOutputRows);
+TH_API void THNN_CudaSpatialAdaptiveMaxPooling_updateGradInput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *gradOutput,
+          THCudaTensor *gradInput,
+          THCudaTensor *indices);
+
+TH_API void THNN_CudaSpatialAveragePooling_updateOutput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *output,
+          int kW, int kH,
+          int dW, int dH,
+          int padW, int padH,
+          bool ceil_mode,
+          bool count_include_pad);
+TH_API void THNN_CudaSpatialAveragePooling_updateGradInput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *gradOutput,
+          THCudaTensor *gradInput,
+          int kW, int kH,
+          int dW, int dH,
+          int padW, int padH,
+          bool ceil_mode,
+          bool count_include_pad);
+
+TH_API void THNN_CudaSpatialMaxPooling_updateOutput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *output,
+          THCudaTensor *indices,
+          int kW, int kH,
+          int dW, int dH,
+          int padW, int padH,
+          bool ceil_mode);
+TH_API void THNN_CudaSpatialMaxPooling_updateGradInput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *gradOutput,
+          THCudaTensor *gradInput,
+          THCudaTensor *indices,
+          int kW, int kH,
+          int dW, int dH,
+          int padW, int padH,
+          bool ceil_mode);

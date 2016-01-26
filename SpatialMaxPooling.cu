@@ -1,4 +1,4 @@
-#include "utils.h"
+#include "THCUNN.h"
 #include "common.h"
 
 // kernels borrowed from Caffe
@@ -72,23 +72,11 @@ __global__ void MaxPoolBackward(const int nthreads, const Dtype* top_diff,
   }
 }
 
-static int cunn_SpatialMaxPooling_updateOutput(lua_State *L)
+void THNN_CudaSpatialMaxPooling_updateOutput(THCState *state, THCudaTensor *input, THCudaTensor *output, THCudaTensor *indices, int kW, int kH, int dW, int dH, int padW, int padH, bool ceil_mode)
 {
-  THCState *state = getCutorchState(L);
-  THCudaTensor *input = (THCudaTensor *)luaT_checkudata(L, 2, "torch.CudaTensor");
-  int kW = luaT_getfieldcheckint(L, 1, "kW");
-  int kH = luaT_getfieldcheckint(L, 1, "kH");
-  int dW = luaT_getfieldcheckint(L, 1, "dW");
-  int dH = luaT_getfieldcheckint(L, 1, "dH");
-  int padW = luaT_getfieldcheckint(L, 1, "padW");
-  int padH = luaT_getfieldcheckint(L, 1, "padH");
-  bool ceil_mode = luaT_getfieldcheckboolean(L, 1, "ceil_mode");
-
-  THCudaTensor *output = (THCudaTensor *)luaT_getfieldcheckudata(L, 1, "output", "torch.CudaTensor");
-  THCudaTensor *indices = (THCudaTensor *)luaT_getfieldcheckudata(L, 1, "indices", "torch.CudaTensor");
 
   THAssert(THCudaTensor_checkGPU(state, 3, input, output, indices));
-  luaL_argcheck(L, input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch) tensor expected");
+  THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch) tensor expected");
 
   long nInputCols, nInputRows, nInputPlane, batchSize;
   long nOutputCols, nOutputRows;
@@ -107,8 +95,8 @@ static int cunn_SpatialMaxPooling_updateOutput(lua_State *L)
     batchSize = input->size[0];
   }
 
-  luaL_argcheck(L, nInputCols >= kW - padW && nInputRows >= kH - padH, 2, "input image smaller than kernel size");
-  luaL_argcheck(L, kW/2 >= padW && kH/2 >= padH, 2, "pad should be smaller than half of kernel size");
+  THArgCheck(nInputCols >= kW - padW && nInputRows >= kH - padH, 2, "input image smaller than kernel size");
+  THArgCheck(kW/2 >= padW && kH/2 >= padH, 2, "pad should be smaller than half of kernel size");
 
   if(ceil_mode) {
     nOutputCols = ceil(float(nInputCols - kW + 2*padW) / float(dW)) + 1;
@@ -155,25 +143,10 @@ static int cunn_SpatialMaxPooling_updateOutput(lua_State *L)
     printf("error in SpatialMaxPooling.updateOutput: %s\n", cudaGetErrorString(err));
     THError("aborting");
   }
-  return 1;
 }
 
-static int cunn_SpatialMaxPooling_updateGradInput(lua_State *L)
+void THNN_CudaSpatialMaxPooling_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput, THCudaTensor *gradInput, THCudaTensor *indices, int kW, int kH, int dW, int dH, int padW, int padH, bool ceil_mode)
 {
-  THCState *state = getCutorchState(L);
-  THCudaTensor *input = (THCudaTensor *)luaT_checkudata(L, 2, "torch.CudaTensor");
-  THCudaTensor *gradOutput = (THCudaTensor *)luaT_checkudata(L, 3, "torch.CudaTensor");
-  int kW = luaT_getfieldcheckint(L, 1, "kW");
-  int kH = luaT_getfieldcheckint(L, 1, "kH");
-  int dW = luaT_getfieldcheckint(L, 1, "dW");
-  int dH = luaT_getfieldcheckint(L, 1, "dH");
-  int padW = luaT_getfieldcheckint(L, 1, "padW");
-  int padH = luaT_getfieldcheckint(L, 1, "padH");
-  bool ceil_mode = luaT_getfieldcheckboolean(L, 1, "ceil_mode");
-
-  THCudaTensor *gradInput = (THCudaTensor *)luaT_getfieldcheckudata(L, 1, "gradInput", "torch.CudaTensor");
-  THCudaTensor *indices = (THCudaTensor *)luaT_getfieldcheckudata(L, 1, "indices", "torch.CudaTensor");
-
   THAssert(THCudaTensor_checkGPU(state, 4, input, gradOutput, indices, gradInput));
 
   input = THCudaTensor_newContiguous(state, input);
@@ -230,19 +203,5 @@ static int cunn_SpatialMaxPooling_updateGradInput(lua_State *L)
   // clean
   THCudaTensor_free(state, input);
   THCudaTensor_free(state, gradOutput);
-
-  return 1;
 }
 
-static const struct luaL_Reg cunn_SpatialMaxPooling__ [] = {
-  {"SpatialMaxPooling_updateOutput", cunn_SpatialMaxPooling_updateOutput},
-  {"SpatialMaxPooling_updateGradInput", cunn_SpatialMaxPooling_updateGradInput},
-  {NULL, NULL}
-};
-
-void cunn_SpatialMaxPooling_init(lua_State *L)
-{
-  luaT_pushmetatable(L, "torch.CudaTensor");
-  luaT_registeratname(L, cunn_SpatialMaxPooling__, "nn");
-  lua_pop(L,1);
-}
