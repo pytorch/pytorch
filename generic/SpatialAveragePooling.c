@@ -2,7 +2,7 @@
 #define TH_GENERIC_FILE "generic/SpatialAveragePooling.c"
 #else
 
-void THNN_(SpatialAveragePooling_updateOutput)(THNNState *state, THTensor *input, THTensor *output, int kW, int kH, int dW, int dH, int padW, int padH, int ceil_mode, int count_include_pad)
+void THNN_(SpatialAveragePooling_updateOutput)(THNNState *state, THTensor *input, THTensor *output, int kW, int kH, int dW, int dH, int padW, int padH, bool ceil_mode, bool count_include_pad)
 {
   real *output_data;
   real *input_data;
@@ -62,7 +62,7 @@ void THNN_(SpatialAveragePooling_updateOutput)(THNNState *state, THTensor *input
     THTensor_(resize4d)(output, input->size[0], nInputPlane, outputHeight, outputWidth);
   
   input = THTensor_(newContiguous)(input);
-  THArgCheck(THTensor_(isContiguous)(output), 1, "");
+  THArgCheck(THTensor_(isContiguous)(output), 3, "output must be contiguous");
   input_data = THTensor_(data)(input);
   output_data = THTensor_(data)(output);
   
@@ -119,7 +119,7 @@ void THNN_(SpatialAveragePooling_updateOutput)(THNNState *state, THTensor *input
   THTensor_(free)(input);
 }
 
-void THNN_(SpatialAveragePooling_updateGradInput)(THNNState *state, THTensor *input, THTensor *gradOutput, THTensor *gradInput, int kW, int kH, int dW, int dH, int padW, int padH, int ceil_mode, int count_include_pad)
+void THNN_(SpatialAveragePooling_updateGradInput)(THNNState *state, THTensor *input, THTensor *gradOutput, THTensor *gradInput, int kW, int kH, int dW, int dH, int padW, int padH, bool ceil_mode, bool count_include_pad)
 {
   int dimw = 2;
   int dimh = 1;
@@ -174,7 +174,7 @@ void THNN_(SpatialAveragePooling_updateGradInput)(THNNState *state, THTensor *in
 
   input = THTensor_(newContiguous)(input);
   gradOutput = THTensor_(newContiguous)(gradOutput);
-  THArgCheck(THTensor_(isContiguous)(gradInput), 1, "");
+  THArgCheck(THTensor_(isContiguous)(gradInput), 4, "gradInput must be contiguous");
 
   gradInput_data = THTensor_(data)(gradInput);
   gradOutput_data = THTensor_(data)(gradOutput);

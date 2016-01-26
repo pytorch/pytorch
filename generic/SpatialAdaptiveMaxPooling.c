@@ -65,7 +65,7 @@ static void THNN_(SpatialAdaptiveMaxPooling_updateOutput_frame)(real *input_p,re
   }
 }
 
-void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(THNNState *state, THTensor *input, THTensor *output, int owidth, int oheight, THTensor *indices)
+void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(THNNState *state, THTensor *input, THTensor *output, THTensor *indices, int owidth, int oheight)
 {
   int dimw = 2;
   int dimh = 1;

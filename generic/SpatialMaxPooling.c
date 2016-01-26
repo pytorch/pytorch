@@ -61,7 +61,7 @@ static void THNN_(SpatialMaxPooling_updateOutput_frame)(real *input_p, real *out
   }
 }
 
-void THNN_(SpatialMaxPooling_updateOutput)(THNNState *state, THTensor *input, THTensor *output, int kW, int kH, int dW, int dH, int padW, int padH, int ceil_mode, THTensor *indices)
+void THNN_(SpatialMaxPooling_updateOutput)(THNNState *state, THTensor *input, THTensor *output, THTensor *indices, int kW, int kH, int dW, int dH, int padW, int padH, bool ceil_mode)
 {
   int dimw = 2;
   int dimh = 1;
@@ -193,7 +193,7 @@ static void THNN_(SpatialMaxPooling_updateGradInput_frame)(real *gradInput_p, re
   }
 }
 
-void THNN_(SpatialMaxPooling_updateGradInput)(THNNState *state, THTensor *input, THTensor *gradOutput, THTensor *gradInput, int dW, int dH, THTensor *indices)
+void THNN_(SpatialMaxPooling_updateGradInput)(THNNState *state, THTensor *input, THTensor *gradOutput, THTensor *gradInput, THTensor *indices, int kW, int kH, int dW, int dH, int padW, int padH, bool ceil_mode)
 {
   int dimw = 2;
   int dimh = 1;
