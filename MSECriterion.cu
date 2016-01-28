@@ -70,7 +70,7 @@ void THNN_CudaMSECriterion_updateGradInput(THCState *state, THCudaTensor *input,
   THArgCheck(THCudaTensor_nElement(state, input) == THCudaTensor_nElement(state, target), 2,
     "input and target need to have the same number of elements"
   );
-  
+
   long size = THCudaTensor_nElement(state, input);
   float norm = sizeAverage ? 2.f/size : 2.f;
 

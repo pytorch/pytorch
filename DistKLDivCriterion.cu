@@ -45,7 +45,7 @@ struct kl_updateGradInput_functor
 {
   const float norm;
 
-  kl_updateGradInput_functor(float norm_) 
+  kl_updateGradInput_functor(float norm_)
     : norm(norm_)
   {}
 

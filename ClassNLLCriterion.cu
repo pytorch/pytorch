@@ -27,7 +27,7 @@ __global__ void cunn_ClassNLLCriterion_updateOutput_kernel1(float *output,
 }
 
 __global__ void cunn_ClassNLLCriterion_updateOutput_kernel(float *output,
-                                                           float *total_weight, 
+                                                           float *total_weight,
                                                            float *input,
                                                            float *target,
                                                            float *weights,
@@ -52,7 +52,7 @@ __global__ void cunn_ClassNLLCriterion_updateOutput_kernel(float *output,
 
   // TODO: T4951791 Reuse code between updateOutput_kernel1 and
   // updateOutput_kernel
-  
+
   if (threadIdx.x == 0) {
     *output = *total_weight = 0;
     for (i = 0; i < NTHREADS; ++i){
@@ -138,7 +138,7 @@ void THNN_CudaClassNLLCriterion_updateOutput(THCState *state, THCudaTensor *inpu
   float *total_weight_data = THCudaTensor_data(state, total_weight);
 
   if (THCudaTensor_nDimension(state, input) == 1) {
-    cunn_ClassNLLCriterion_updateOutput_kernel1 
+    cunn_ClassNLLCriterion_updateOutput_kernel1
       <<<1, 1, 0, THCState_getCurrentStream(state)>>>(
         output_data,
         total_weight_data,
@@ -153,7 +153,7 @@ void THNN_CudaClassNLLCriterion_updateOutput(THCState *state, THCudaTensor *inpu
     cunn_ClassNLLCriterion_updateOutput_kernel
       <<<1, NTHREADS, 0, THCState_getCurrentStream(state)>>>(
         output_data,
-        total_weight_data, 
+        total_weight_data,
         input_data,
         target_data,
         weights_data,
@@ -179,7 +179,7 @@ void THNN_CudaClassNLLCriterion_updateGradInput(THCState *state, THCudaTensor *i
   if (THCudaTensor_nDimension(state, target) > 1) {
     THError("multi-target not supported");
   }
-  
+
   int n_dims = THCudaTensor_nDimension(state, input);
   int n_classes = THCudaTensor_size(state, input, n_dims - 1);
 

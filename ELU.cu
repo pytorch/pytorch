@@ -35,7 +35,7 @@ struct ELUupdateGradInput_functor
   }
 };
 
-void THNN_CudaELU_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput, 
+void THNN_CudaELU_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput,
   THCudaTensor *gradInput, THCudaTensor *output, float alpha)
 {
   THAssert(THCudaTensor_checkGPU(state, 3, output, gradOutput, gradInput));

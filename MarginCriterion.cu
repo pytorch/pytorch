@@ -39,7 +39,7 @@ void THNN_CudaMarginCriterion_updateOutput(THCState *state, THCudaTensor *input,
 
   THCudaTensor_free(state, input);
   THCudaTensor_free(state, target);
-  
+
   THCudaTensor_set1d(state, output, 0, sum);
 }
 
@@ -47,7 +47,7 @@ struct margin_updateGradInput_functor
 {
   const float margin, norm;
 
-  margin_updateGradInput_functor(float margin_, float norm_) 
+  margin_updateGradInput_functor(float margin_, float norm_)
     : margin(margin_)
     , norm(norm_)
   {}

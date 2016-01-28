@@ -161,7 +161,7 @@ void THNN_CudaMultiMarginCriterion_updateGradInput(THCState *state, THCudaTensor
   THAssert(THCudaTensor_checkGPU(state, 3, input, gradInput, target));
   input = THCudaTensor_newContiguous(state, input);
   THCudaTensor_resizeAs(state, gradInput, input);
-  
+
   if (input->nDimension == 1)
   {
     dim3 blocks(1);

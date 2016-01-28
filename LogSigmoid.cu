@@ -25,7 +25,7 @@ struct logSigmoid_updateGradInput_functor
   }
 };
 
-void THNN_CudaLogSigmoid_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput, 
+void THNN_CudaLogSigmoid_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput,
   THCudaTensor *gradInput , THCudaTensor *buffer)
 {
   THAssert(THCudaTensor_checkGPU(state, 3, input, gradOutput, gradInput));

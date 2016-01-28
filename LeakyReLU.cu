@@ -30,7 +30,7 @@ struct LeakyReLUUpdateOutputIP
   }
 };
 
-void THNN_CudaLeakyReLU_updateOutput(THCState *state, THCudaTensor *input, THCudaTensor *output, 
+void THNN_CudaLeakyReLU_updateOutput(THCState *state, THCudaTensor *input, THCudaTensor *output,
   double negval, bool inplace)
 {
   THAssert(THCudaTensor_checkGPU(state, 2, input, output));
@@ -82,7 +82,7 @@ struct LeakyReLUUpdateGradInputIP
   }
 };
 
-void THNN_CudaLeakyReLU_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput, 
+void THNN_CudaLeakyReLU_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput,
   THCudaTensor *gradInput, double negval, bool inplace)
 {
   THAssert(THCudaTensor_checkGPU(state, 4, input, gradInput, gradOutput));

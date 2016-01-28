@@ -62,7 +62,7 @@ void THNN_CudaPReLU_updateOutput(
       w,
       n, nElemsPerSample, mapSize
     );
-    
+
     THCudaTensor_free(state, input);
   }
 }
@@ -99,7 +99,7 @@ __global__ void preluBackward(
 void THNN_CudaPReLU_updateGradInput(
   THCState *state,
   THCudaTensor *input,
-  THCudaTensor *gradOutput, 
+  THCudaTensor *gradOutput,
   THCudaTensor *gradInput,
   THCudaTensor *weight,
   long nOutputPlane)
@@ -148,7 +148,7 @@ struct PReLUAccGradParametersShared
 struct PReLUAccGradParameters
 {
   float scale;
-  
+
   PReLUAccGradParameters(float scale)
     : scale(scale)
   {}
@@ -162,7 +162,7 @@ struct PReLUAccGradParameters
 struct PReLUAccGradParameters1to1
 {
   float scale;
-  
+
   PReLUAccGradParameters1to1(float scale)
     : scale(scale)
   {}
@@ -176,7 +176,7 @@ struct PReLUAccGradParameters1to1
 void THNN_CudaPReLU_accGradParameters(
   THCState *state,
   THCudaTensor *input,
-  THCudaTensor *gradOutput, 
+  THCudaTensor *gradOutput,
   THCudaTensor *gradInput,
   THCudaTensor *weight,
   THCudaTensor *gradWeight,
@@ -190,7 +190,7 @@ void THNN_CudaPReLU_accGradParameters(
   if (nOutputPlane == 0)
   {
     THCudaTensor_pointwiseApply3(state, gradInput, input, gradOutput, PReLUAccGradParametersShared());
-    
+
     // introduces a sync point
     float sum = THCudaTensor_sumall(state, gradInput);
     float w = THCudaTensor_get1d(state, gradWeight, 0);
