@@ -20,9 +20,16 @@ static void THNN_(LookupTable_resetCount)(THInteger_t *count_data, THIndexTensor
   }
 }
 
-void THNN_(LookupTable_accGradParameters)(THNNState *state, THIndexTensor *input, THTensor *gradOutput, 
-  THTensor *gradWeight, real scale, bool scaleGradByFreq, THIntegerTensor *count,
-  THTensor *sorted, THTensor *indices)
+void THNN_(LookupTable_accGradParameters)(
+  THNNState *state,
+  THIndexTensor *input,
+  THTensor *gradOutput,
+  THTensor *gradWeight,
+  THIntegerTensor *count,
+  THTensor *sorted,
+  THTensor *indices,
+  bool scaleGradByFreq,
+  real scale)
 {
   long i;
   THInteger_t *count_data = NULL;

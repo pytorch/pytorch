@@ -2,19 +2,25 @@
 #define TH_GENERIC_FILE "generic/VolumetricAveragePooling.c"
 #else
 
-static void nn_(VolumetricAveragePooling_updateOutput_frame)(
+static void THNN_(VolumetricAveragePooling_updateOutput_frame)(
   real *input_p, real *output_p, long nslices,
   long itime, long iwidth, long iheight,
   long otime, long owidth, long oheight,
-  int kT, int kW, int kH, int dT, int dW, int dH) {
+  int kT, int kW, int kH,
+  int dT, int dW, int dH)
+{
   long k;
 #pragma omp parallel for private(k)
-  for (k = 0; k < nslices; k++)  {
+  for (k = 0; k < nslices; k++)
+  {
     /* loop over output */
     long i, j, ti;
-    for(ti = 0; ti < otime; ti++) {
-      for(i = 0; i < oheight; i++) {
-        for(j = 0; j < owidth; j++) {
+    for (ti = 0; ti < otime; ti++)
+    {
+      for (i = 0; i < oheight; i++)
+      {
+        for (j = 0; j < owidth; j++)
+        {
           /* local pointers */
           real *ip = input_p + k * itime * iwidth * iheight
             + ti * iwidth * iheight * dT +  i * iwidth * dH + j * dW;
@@ -23,11 +29,14 @@ static void nn_(VolumetricAveragePooling_updateOutput_frame)(
 
           /* compute local sum: */
           real sum = 0.0;
-          int x,y,z;
+          int x, y, z;
 
-          for(z=0; z < kT; z++) {
-            for(y = 0; y < kH; y++) {
-              for(x = 0; x < kW; x++) {
+          for (z=0; z < kT; z++)
+          {
+            for (y = 0; y < kH; y++)
+            {
+              for (x = 0; x < kW; x++)
+              {
                 sum +=  *(ip + z * iwidth * iheight + y * iwidth + x);
               }
             }
@@ -41,15 +50,11 @@ static void nn_(VolumetricAveragePooling_updateOutput_frame)(
   }
 }
 
-static int nn_(VolumetricAveragePooling_updateOutput)(lua_State *L) {
-  THTensor *input = luaT_checkudata(L, 2, torch_Tensor);
-  int kT = luaT_getfieldcheckint(L, 1, "kT");
-  int kW = luaT_getfieldcheckint(L, 1, "kW");
-  int kH = luaT_getfieldcheckint(L, 1, "kH");
-  int dT = luaT_getfieldcheckint(L, 1, "dT");
-  int dW = luaT_getfieldcheckint(L, 1, "dW");
-  int dH = luaT_getfieldcheckint(L, 1, "dH");
-  THTensor *output = luaT_getfieldcheckudata(L, 1, "output", torch_Tensor);
+void THNN_(VolumetricAveragePooling_updateOutput)(
+  THNNState *state, THTensor *input, THTensor *output,
+  int kT, int kW, int kH,
+  int dT, int dW, int dH)
+{
   long nslices;
   long itime;
   long iheight;
@@ -60,24 +65,26 @@ static int nn_(VolumetricAveragePooling_updateOutput)(lua_State *L) {
   real *input_data;
   real *output_data;
 
-  luaL_argcheck(L, input->nDimension == 4 || input->nDimension == 5, 2,
-                "4D or 5D (batch-mode) tensor expected");
+  THArgCheck(input->nDimension == 4 || input->nDimension == 5, 2,
+    "4D or 5D (batch-mode) tensor expected"
+  );
 
   int dimN = 0;
   int dimt = 1;
   int dimh = 2;
   int dimw = 3;
 
-  if (input->nDimension == 5) {
+  if (input->nDimension == 5)
+  {
     dimN++;
     dimt++;
     dimh++;
     dimw++;
   }
 
-  luaL_argcheck(L, input->size[dimw] >= kW && input->size[dimh] >= kH &&
-                input->size[dimt] >= kT, 2,
-                "input image smaller than kernel size");
+  THArgCheck(input->size[dimw] >= kW && input->size[dimh] >= kH && input->size[dimt] >= kT, 2,
+    "input image smaller than kernel size"
+  );
 
   /* sizes */
   nslices = input->size[dimN];
@@ -91,19 +98,24 @@ static int nn_(VolumetricAveragePooling_updateOutput)(lua_State *L) {
   /* get contiguous input */
   input = THTensor_(newContiguous)(input);
 
-  if (input->nDimension == 4) { /* non-batch mode */
+  if (input->nDimension == 4) /* non-batch mode */
+  {
     /* resize output */
     THTensor_(resize4d)(output, nslices, otime, oheight, owidth);
 
     input_data = THTensor_(data)(input);
     output_data = THTensor_(data)(output);
 
-    nn_(VolumetricAveragePooling_updateOutput_frame)(input_data, output_data,
-                                                     nslices,
-                                                     itime, iwidth, iheight,
-                                                     otime, owidth, oheight,
-                                                     kT, kW, kH, dT, dW, dH);
-  } else { /* batch mode */
+    THNN_(VolumetricAveragePooling_updateOutput_frame)(
+      input_data, output_data, nslices,
+      itime, iwidth, iheight,
+      otime, owidth, oheight,
+      kT, kW, kH,
+      dT, dW, dH
+    );
+  }
+  else  /* batch mode */
+  {
     long p;
     long nBatch = input->size[0];
 
@@ -117,32 +129,41 @@ static int nn_(VolumetricAveragePooling_updateOutput)(lua_State *L) {
     output_data = THTensor_(data)(output);
 
 #pragma omp parallel for private(p)
-    for (p=0; p < nBatch; p++) {
-      nn_(VolumetricAveragePooling_updateOutput_frame)(
-        input_data + p * istride, output_data + p * ostride,
-        nslices, itime, iwidth, iheight, otime, owidth, oheight,
-        kT, kW, kH, dT, dW, dH);
+    for (p=0; p < nBatch; p++)
+    {
+      THNN_(VolumetricAveragePooling_updateOutput_frame)(
+        input_data + p * istride, output_data + p * ostride, nslices,
+        itime, iwidth, iheight,
+        otime, owidth, oheight,
+        kT, kW, kH,
+        dT, dW, dH
+      );
     }
   }
 
   /* cleanup */
   THTensor_(free)(input);
-  return 1;
 }
 
-static void nn_(VolumetricAveragePooling_updateGradInput_frame)(
+static void THNN_(VolumetricAveragePooling_updateGradInput_frame)(
   real *gradInput_p, real *gradOutput_p, long nslices,
   long itime, long iwidth, long iheight,
   long otime, long owidth, long oheight,
-  int kT, int kW, int kH, int dT, int dW, int dH) {
+  int kT, int kW, int kH,
+  int dT, int dW, int dH)
+{
   long k;
 #pragma omp parallel for private(k)
-  for (k = 0; k < nslices; k++)  {
+  for (k = 0; k < nslices; k++)
+  {
     /* loop over output */
     long i, j, ti;
-    for(ti = 0; ti < otime; ti++) {
-      for(i = 0; i < oheight; i++) {
-        for(j = 0; j < owidth; j++) {
+    for (ti = 0; ti < otime; ti++)
+    {
+      for (i = 0; i < oheight; i++)
+      {
+        for (j = 0; j < owidth; j++)
+        {
           /* local pointers */
           real *ip = gradInput_p + k * itime * iwidth * iheight
             + ti * iwidth * iheight * dT +  i * iwidth * dH + j * dW;
@@ -152,9 +173,12 @@ static void nn_(VolumetricAveragePooling_updateGradInput_frame)(
           /* scatter gradients out to footprint: */
           real val  = *op / (kT * kW * kH);
           int x,y,z;
-          for(z=0; z < kT; z++) {
-            for(y = 0; y < kH; y++) {
-              for(x = 0; x < kW; x++) {
+          for (z=0; z < kT; z++)
+          {
+            for (y = 0; y < kH; y++)
+            {
+              for (x = 0; x < kW; x++)
+              {
                 *(ip + z * iwidth * iheight + y * iwidth + x) += val;
               }
             }
@@ -165,17 +189,14 @@ static void nn_(VolumetricAveragePooling_updateGradInput_frame)(
   }
 }
 
-static int nn_(VolumetricAveragePooling_updateGradInput)(lua_State *L) {
-  THTensor *input = luaT_checkudata(L, 2, torch_Tensor);
-  THTensor *gradOutput = luaT_checkudata(L, 3, torch_Tensor);
-  int dT = luaT_getfieldcheckint(L, 1, "dT");
-  int dW = luaT_getfieldcheckint(L, 1, "dW");
-  int dH = luaT_getfieldcheckint(L, 1, "dH");
-  int kT = luaT_getfieldcheckint(L, 1, "kT");
-  int kW = luaT_getfieldcheckint(L, 1, "kW");
-  int kH = luaT_getfieldcheckint(L, 1, "kH");
-  THTensor *gradInput = luaT_getfieldcheckudata(L, 1, "gradInput",
-                                                torch_Tensor);
+void THNN_(VolumetricAveragePooling_updateGradInput)(
+  THNNState *state,
+  THTensor *input,
+  THTensor *gradOutput,
+  THTensor *gradInput,
+  int kT, int kW, int kH,
+  int dT, int dW, int dH)
+{
   int nslices;
   int itime;
   int iheight;
@@ -198,7 +219,8 @@ static int nn_(VolumetricAveragePooling_updateGradInput)(lua_State *L) {
   THTensor_(resizeAs)(gradInput, input);
   THTensor_(zero)(gradInput);
 
-  if (input->nDimension == 5) {
+  if (input->nDimension == 5)
+  {
     dimN++;
     dimt++;
     dimh++;
@@ -219,12 +241,18 @@ static int nn_(VolumetricAveragePooling_updateGradInput)(lua_State *L) {
   gradOutput_data = THTensor_(data)(gradOutput);
 
   /* backprop */
-  if (input->nDimension == 4) { /* non-batch mode*/
-    nn_(VolumetricAveragePooling_updateGradInput_frame)(
+  if (input->nDimension == 4) /* non-batch mode*/
+  {
+    THNN_(VolumetricAveragePooling_updateGradInput_frame)(
       gradInput_data, gradOutput_data, nslices,
-      itime, iwidth, iheight, otime, owidth, oheight,
-      kT, kW, kH, dT, dW, dH);
-  } else { /* batch mode */
+      itime, iwidth, iheight,
+      otime, owidth, oheight,
+      kT, kW, kH,
+      dT, dW, dH
+    );
+  }
+  else /* batch mode */
+  {
     long p;
     long nBatch = input->size[0];
 
@@ -232,31 +260,20 @@ static int nn_(VolumetricAveragePooling_updateGradInput)(lua_State *L) {
     long ostride = nslices * otime * owidth * oheight;
 
 #pragma omp parallel for private(p)
-    for (p = 0; p < nBatch; p++) {
-      nn_(VolumetricAveragePooling_updateGradInput_frame)(
+    for (p = 0; p < nBatch; p++)
+    {
+      THNN_(VolumetricAveragePooling_updateGradInput_frame)(
         gradInput_data  + p * istride, gradOutput_data + p * ostride, nslices,
-        itime, iwidth, iheight, otime, owidth, oheight,
-        kT, kW, kH, dT, dW, dH);
+        itime, iwidth, iheight,
+        otime, owidth, oheight,
+        kT, kW, kH,
+        dT, dW, dH
+      );
     }
   }
 
   /* cleanup */
   THTensor_(free)(gradOutput);
-  return 1;
-}
-
-static const struct luaL_Reg nn_(VolumetricAveragePooling__) [] = {
-  {"VolumetricAveragePooling_updateOutput",
-   nn_(VolumetricAveragePooling_updateOutput)},
-  {"VolumetricAveragePooling_updateGradInput",
-   nn_(VolumetricAveragePooling_updateGradInput)},
-  {NULL, NULL}
-};
-
-static void nn_(VolumetricAveragePooling_init)(lua_State *L) {
-  luaT_pushmetatable(L, torch_Tensor);
-  luaT_registeratname(L, nn_(VolumetricAveragePooling__), "nn");
-  lua_pop(L,1);
 }
 
 #endif

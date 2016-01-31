@@ -99,3 +99,21 @@
 
 #include "generic/SpatialMaxPooling.c"
 #include "THGenerateFloatTypes.h"
+
+#include "generic/VolumetricAveragePooling.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/VolumetricConvolution.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/VolumetricConvolutionMM.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/VolumetricFullConvolution.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/VolumetricMaxPooling.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/VolumetricMaxUnpooling.c"
+#include "THGenerateFloatTypes.h"
