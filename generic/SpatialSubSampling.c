@@ -2,19 +2,16 @@
 #define TH_GENERIC_FILE "generic/SpatialSubSampling.c"
 #else
 
-static int nn_(SpatialSubSampling_updateOutput)(lua_State *L)
+void THNN_(SpatialSubSampling_updateOutput)(
+    THNNState *state,
+    THTensor *input,
+    THTensor *output,
+    THTensor *weight,
+    THTensor *bias,
+    int kW, int kH,
+    int dW, int dH)
 {
-  THTensor *input = luaT_checkudata(L, 2, torch_Tensor);
-  int kW = luaT_getfieldcheckint(L, 1, "kW");
-  int kH = luaT_getfieldcheckint(L, 1, "kH");
-  int dW = luaT_getfieldcheckint(L, 1, "dW");
-  int dH = luaT_getfieldcheckint(L, 1, "dH");
-  int nInputPlane = luaT_getfieldcheckint(L, 1, "nInputPlane");
-
-  THTensor *weight = luaT_getfieldcheckudata(L, 1, "weight", torch_Tensor);
-  THTensor *bias = luaT_getfieldcheckudata(L, 1, "bias", torch_Tensor);
-  THTensor *output = luaT_getfieldcheckudata(L, 1, "output", torch_Tensor);
-
+  
   real *weight_data = THTensor_(data)(weight);
   real *bias_data = THTensor_(data)(bias);
   real *output_data;
@@ -29,9 +26,11 @@ static int nn_(SpatialSubSampling_updateOutput)(lua_State *L)
   long outputWidth;
   long outputHeight;
 
+  int nInputPlane = THTensor_(size)(weight,0);
+
   long k;
 
-  luaL_argcheck(L, input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D(batch mode) tensor expected");
+  THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D(batch mode) tensor expected");
 
   if (input->nDimension == 4) {
     nbatch = input->size[0];
@@ -44,8 +43,8 @@ static int nn_(SpatialSubSampling_updateOutput)(lua_State *L)
   outputWidth = (inputWidth - kW) / dW + 1;
   outputHeight = (inputHeight - kH) / dH + 1;
 
-  luaL_argcheck(L, input->size[dimh-1] == nInputPlane, 2, "invalid number of input planes");
-  luaL_argcheck(L, inputWidth >= kW && inputHeight >= kH, 2, "input image smaller than kernel size");
+  THArgCheck(input->size[dimh-1] == nInputPlane, 2, "invalid number of input planes");
+  THArgCheck(inputWidth >= kW && inputHeight >= kH, 2, "input image smaller than kernel size");
 
   if (input->nDimension == 3)
     THTensor_(resize3d)(output, nInputPlane, outputHeight, outputWidth);
@@ -95,23 +94,18 @@ static int nn_(SpatialSubSampling_updateOutput)(lua_State *L)
     }
   }
   THTensor_(free)(input);
-
-  return 1;
 }
 
-static int nn_(SpatialSubSampling_updateGradInput)(lua_State *L)
+void THNN_(SpatialSubSampling_updateGradInput)(
+    THNNState *state,
+    THTensor *input,
+    THTensor *gradOutput,
+    THTensor *gradInput,
+    THTensor *weight,
+    int kW, int kH,
+    int dW, int dH)
 {
-  THTensor *input = luaT_checkudata(L, 2, torch_Tensor);
-  THTensor *gradOutput = luaT_checkudata(L, 3, torch_Tensor);
-  int kW = luaT_getfieldcheckint(L, 1, "kW");
-  int kH = luaT_getfieldcheckint(L, 1, "kH");
-  int dW = luaT_getfieldcheckint(L, 1, "dW");
-  int dH = luaT_getfieldcheckint(L, 1, "dH");
-  int nInputPlane = luaT_getfieldcheckint(L, 1, "nInputPlane");
-
-  THTensor *weight = luaT_getfieldcheckudata(L, 1, "weight", torch_Tensor);
-  THTensor *gradInput = luaT_getfieldcheckudata(L, 1, "gradInput", torch_Tensor);
-
+  
   int dimw = 2;
   int dimh = 1;
   long nbatch = 1;
@@ -120,6 +114,8 @@ static int nn_(SpatialSubSampling_updateGradInput)(lua_State *L)
   long inputHeight;
   long outputWidth;
   long outputHeight;
+
+  int nInputPlane = THTensor_(size)(weight,0);
 
   real *weight_data;
   real *gradOutput_data;
@@ -180,24 +176,18 @@ static int nn_(SpatialSubSampling_updateGradInput)(lua_State *L)
       }
     }
   }
-
-  return 1;
 }
 
-static int nn_(SpatialSubSampling_accGradParameters)(lua_State *L)
+void THNN_(SpatialSubSampling_accGradParameters)(
+    THNNState *state,
+    THTensor *input,
+    THTensor *gradOutput,
+    THTensor *gradWeight,
+    THTensor *gradBias,
+    int kW, int kH,
+    int dW, int dH,
+    real scale)
 {
-  THTensor *input = luaT_checkudata(L, 2, torch_Tensor);
-  THTensor *gradOutput = luaT_checkudata(L, 3, torch_Tensor);
-  real scale = luaL_optnumber(L, 4, 1);
-  int kW = luaT_getfieldcheckint(L, 1, "kW");
-  int kH = luaT_getfieldcheckint(L, 1, "kH");
-  int dW = luaT_getfieldcheckint(L, 1, "dW");
-  int dH = luaT_getfieldcheckint(L, 1, "dH");
-  int nInputPlane = luaT_getfieldcheckint(L, 1, "nInputPlane");
-
-  THTensor *gradWeight = luaT_getfieldcheckudata(L, 1, "gradWeight", torch_Tensor);
-  THTensor *gradBias = luaT_getfieldcheckudata(L, 1, "gradBias", torch_Tensor);
-
   long nbatch = 1;
   long dimw = 2;
   long dimh = 1;
@@ -206,6 +196,8 @@ static int nn_(SpatialSubSampling_accGradParameters)(lua_State *L)
   long inputHeight;
   long outputWidth;
   long outputHeight;
+
+  int nInputPlane = THTensor_(size)(gradWeight,0);
 
   real *gradWeight_data;
   real *gradBias_data;
@@ -270,22 +262,6 @@ static int nn_(SpatialSubSampling_accGradParameters)(lua_State *L)
   }
 
   THTensor_(free)(input);
-
-  return 0;
-}
-
-static const struct luaL_Reg nn_(SpatialSubSampling__) [] = {
-  {"SpatialSubSampling_updateOutput", nn_(SpatialSubSampling_updateOutput)},
-  {"SpatialSubSampling_updateGradInput", nn_(SpatialSubSampling_updateGradInput)},
-  {"SpatialSubSampling_accGradParameters", nn_(SpatialSubSampling_accGradParameters)},
-  {NULL, NULL}
-};
-
-static void nn_(SpatialSubSampling_init)(lua_State *L)
-{
-  luaT_pushmetatable(L, torch_Tensor);
-  luaT_registeratname(L, nn_(SpatialSubSampling__), "nn");
-  lua_pop(L,1);
 }
 
 #endif

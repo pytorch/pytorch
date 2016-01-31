@@ -3,7 +3,7 @@
 #else
 
 
-static void nn_(im2col)(const real* data_im, const int channels,
+static void THNN_(im2col)(const real* data_im, const int channels,
     const int height, const int width, const int kernel_h, const int kernel_w,
     const int pad_h, const int pad_w,
     const int stride_h, const int stride_w,
@@ -30,7 +30,7 @@ static void nn_(im2col)(const real* data_im, const int channels,
   }
 }
 
-static void nn_(col2im)(const real* data_col, const int channels,
+static void THNN_(col2im)(const real* data_col, const int channels,
     const int height, const int width, const int patch_h, const int patch_w,
     const int pad_h, const int pad_w,
     const int stride_h, const int stride_w,
@@ -56,38 +56,32 @@ static void nn_(col2im)(const real* data_col, const int channels,
   }
 }
 
-static int nn_(SpatialFullConvolution_updateOutput)(lua_State *L) {
-  // Input
-  THTensor *input = (THTensor*)luaT_checkudata(L, 2, torch_Tensor);
+void THNN_(SpatialFullConvolution_updateOutput)(
+    THNNState *state,
+    THTensor *input,
+    THTensor *output,
+    THTensor *weight,
+    THTensor *bias,
+    THTensor *columns,
+    THTensor *ones,
+    int kW, int kH,
+    int dW, int dH,
+    int padW, int padH,
+    int adjW, int adjH)
+{  
+  int nInputPlane = THTensor_(size)(weight,0);
+  int nOutputPlane = THTensor_(size)(weight,1);
 
-  // Params:
-  int dW = luaT_getfieldcheckint(L, 1, "dW");
-  int dH = luaT_getfieldcheckint(L, 1, "dH");
-  int kW = luaT_getfieldcheckint(L, 1, "kW");
-  int kH = luaT_getfieldcheckint(L, 1, "kH");
-  int nInputPlane = luaT_getfieldcheckint(L, 1, "nInputPlane");
-  int nOutputPlane = luaT_getfieldcheckint(L, 1, "nOutputPlane");
-  int padW = luaT_getfieldcheckint(L, 1, "padW");
-  int padH = luaT_getfieldcheckint(L, 1, "padH");
-  int adjW = luaT_getfieldcheckint(L, 1, "adjW");
-  int adjH = luaT_getfieldcheckint(L, 1, "adjH");
-
-  THTensor *weight  = (THTensor*)luaT_getfieldcheckudata(L, 1, "weight", torch_Tensor);
-  THTensor *bias    = (THTensor*)luaT_getfieldcheckudata(L, 1, "bias", torch_Tensor);
-  THTensor *columns = (THTensor*)luaT_getfieldcheckudata(L, 1, "finput", torch_Tensor);
-  THTensor *ones    = (THTensor*)luaT_getfieldcheckudata(L, 1, "fgradInput", torch_Tensor);
-  THTensor *output  = (THTensor*)luaT_getfieldcheckudata(L, 1, "output", torch_Tensor);
-
-  luaL_argcheck(L, input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch mode) tensor is expected");
+  THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch mode) tensor is expected");
 
   int batch = 1;
   if (input->nDimension == 3) {
-    luaL_argcheck(L, input->size[0] == nInputPlane, 2, "input channels and nInputPlane dont match");
+    THArgCheck(input->size[0] == nInputPlane, 2, "input channels and nInputPlane dont match");
     // Force batch
     batch = 0;
     THTensor_(resize4d)(input, 1, input->size[0], input->size[1], input->size[2]);
   } else {
-    luaL_argcheck(L, input->size[1] == nInputPlane, 2, "input channels and nInputPlane dont match");
+    THArgCheck(input->size[1] == nInputPlane, 2, "input channels and nInputPlane dont match");
   }
 
   long inputWidth   = input->size[3];
@@ -142,7 +136,7 @@ static int nn_(SpatialFullConvolution_updateOutput)(lua_State *L) {
     );
 
     // Unpack columns back into input:
-    nn_(col2im)(
+    THNN_(col2im)(
       THTensor_(data)(columns),
       nOutputPlane, outputHeight, outputWidth, kH, kW, padH, padW, dH, dW,
       THTensor_(data)(output_n)
@@ -177,33 +171,24 @@ static int nn_(SpatialFullConvolution_updateOutput)(lua_State *L) {
     THTensor_(resize3d)(output, nOutputPlane, outputHeight, outputWidth);
     THTensor_(resize3d)(input, nInputPlane, inputHeight, inputWidth);
   }
-
-  // return output
-  return 1;
 }
 
-static int nn_(SpatialFullConvolution_updateGradInput)(lua_State *L) {
-  // Inputs
-  THTensor *input = (THTensor *)luaT_checkudata(L, 2, torch_Tensor);
-  THTensor *gradOutput = (THTensor *)luaT_checkudata(L, 3, torch_Tensor);
+void THNN_(SpatialFullConvolution_updateGradInput)(
+    THNNState *state,
+    THTensor *input,
+    THTensor *gradOutput,
+    THTensor *gradInput,
+    THTensor *weight,
+    THTensor *gradColumns,
+    int kW, int kH,
+    int dW, int dH,
+    int padW, int padH,
+    int adjW, int adjH)
+{
+  int nInputPlane = THTensor_(size)(weight,0);
+  int nOutputPlane = THTensor_(size)(weight,1);
 
-  // Params
-  int dW = luaT_getfieldcheckint(L, 1, "dW");
-  int dH = luaT_getfieldcheckint(L, 1, "dH");
-  int kW = luaT_getfieldcheckint(L, 1, "kW");
-  int kH = luaT_getfieldcheckint(L, 1, "kH");
-  int nInputPlane = luaT_getfieldcheckint(L, 1, "nInputPlane");
-  int nOutputPlane = luaT_getfieldcheckint(L, 1, "nOutputPlane");
-  int padW = luaT_getfieldcheckint(L, 1, "padW");
-  int padH = luaT_getfieldcheckint(L, 1, "padH");
-  int adjW = luaT_getfieldcheckint(L, 1, "adjW");
-  int adjH = luaT_getfieldcheckint(L, 1, "adjH");
-
-  THTensor *weight = (THTensor *)luaT_getfieldcheckudata(L, 1, "weight", torch_Tensor);
-  THTensor *gradColumns = (THTensor*)luaT_getfieldcheckudata(L, 1, "finput", torch_Tensor);
-  THTensor *gradInput = (THTensor *)luaT_getfieldcheckudata(L, 1, "gradInput", torch_Tensor);
-
-  luaL_argcheck(L, input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch mode) tensor is expected");
+  THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch mode) tensor is expected");
 
   int batch = 1;
   if (input->nDimension == 3) {
@@ -239,7 +224,7 @@ static int nn_(SpatialFullConvolution_updateGradInput)(lua_State *L) {
     THTensor_(select)(gradOutput_n, gradOutput, 0, elt);
 
     // Extract columns:
-    nn_(im2col)(
+    THNN_(im2col)(
       THTensor_(data)(gradOutput_n),
       nOutputPlane, outputHeight, outputWidth, kH, kW, padH, padW, dH, dW,
       THTensor_(data)(gradColumns)
@@ -275,36 +260,27 @@ static int nn_(SpatialFullConvolution_updateGradInput)(lua_State *L) {
     THTensor_(resize3d)(input, nInputPlane, inputHeight, inputWidth);
     THTensor_(resize3d)(gradInput, nInputPlane, inputHeight, inputWidth);
   }
-
-  // Return gradInput
-  return 1;
 }
 
 
-static int nn_(SpatialFullConvolution_accGradParameters)(lua_State *L) {
-  // Inputs
-  THTensor *input = (THTensor *)luaT_checkudata(L, 2, torch_Tensor);
-  THTensor *gradOutput = (THTensor *)luaT_checkudata(L, 3, torch_Tensor);
+void THNN_(SpatialFullConvolution_accGradParameters)(
+    THNNState *state,
+    THTensor *input,
+    THTensor *gradOutput,
+    THTensor *gradWeight,
+    THTensor *gradBias,
+    THTensor *columns,
+    THTensor *ones,
+    int kW, int kH,
+    int dW, int dH,
+    int padW, int padH,
+    int adjW, int adjH,
+    real scale)
+{
+  int nInputPlane = THTensor_(size)(gradWeight,0);
+  int nOutputPlane = THTensor_(size)(gradWeight,1);
 
-  // Params
-  int dW = luaT_getfieldcheckint(L, 1, "dW");
-  int dH = luaT_getfieldcheckint(L, 1, "dH");
-  int kW = luaT_getfieldcheckint(L, 1, "kW");
-  int kH = luaT_getfieldcheckint(L, 1, "kH");
-  int nInputPlane = luaT_getfieldcheckint(L, 1, "nInputPlane");
-  int nOutputPlane = luaT_getfieldcheckint(L, 1, "nOutputPlane");
-  int padW = luaT_getfieldcheckint(L, 1, "padW");
-  int padH = luaT_getfieldcheckint(L, 1, "padH");
-  int adjW = luaT_getfieldcheckint(L, 1, "adjW");
-  int adjH = luaT_getfieldcheckint(L, 1, "adjH");
-  float scale = luaL_optnumber(L, 4, 1);
-
-  THTensor *gradWeight = (THTensor *)luaT_getfieldcheckudata(L, 1, "gradWeight", torch_Tensor);
-  THTensor *gradBias = (THTensor *)luaT_getfieldcheckudata(L, 1, "gradBias", torch_Tensor);
-  THTensor *columns = (THTensor*)luaT_getfieldcheckudata(L, 1, "finput", torch_Tensor);
-  THTensor *ones = (THTensor*)luaT_getfieldcheckudata(L, 1, "fgradInput", torch_Tensor);
-
-  luaL_argcheck(L, input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch mode) tensor is expected");
+  THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch mode) tensor is expected");
 
   int batch = 1;
   if (input->nDimension == 3) {
@@ -344,7 +320,7 @@ static int nn_(SpatialFullConvolution_accGradParameters)(lua_State *L) {
     THTensor_(select)(gradOutput_n, gradOutput, 0, elt);
 
     // Extract columns:
-    nn_(im2col)(
+    THNN_(im2col)(
       THTensor_(data)(gradOutput_n),
       nOutputPlane, outputHeight, outputWidth, kH, kW, padH, padW, dH, dW,
       THTensor_(data)(columns)
@@ -395,23 +371,6 @@ static int nn_(SpatialFullConvolution_accGradParameters)(lua_State *L) {
     THTensor_(resize3d)(gradOutput, nOutputPlane, outputHeight, outputWidth);
     THTensor_(resize3d)(input, nInputPlane, inputHeight, inputWidth);
   }
-
-  // Return nothing
-  return 0;
-}
-
-static const struct luaL_Reg nn_(SpatialFullConvolution__) [] = {
-  {"SpatialFullConvolution_updateOutput", nn_(SpatialFullConvolution_updateOutput)},
-  {"SpatialFullConvolution_updateGradInput", nn_(SpatialFullConvolution_updateGradInput)},
-  {"SpatialFullConvolution_accGradParameters", nn_(SpatialFullConvolution_accGradParameters)},
-  {NULL, NULL}
-};
-
-static void nn_(SpatialFullConvolution_init)(lua_State *L)
-{
-  luaT_pushmetatable(L, torch_Tensor);
-  luaT_registeratname(L, nn_(SpatialFullConvolution__), "nn");
-  lua_pop(L,1);
 }
 
 #endif

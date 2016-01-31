@@ -2,16 +2,16 @@
 #define TH_GENERIC_FILE "generic/SpatialUpSamplingNearest.c"
 #else
 
-static int nn_(SpatialUpSamplingNearest_updateOutput)(lua_State *L)
+void THNN_(SpatialUpSamplingNearest_updateOutput)(
+    THNNState *state,
+    THTensor *input,
+    THTensor *output,
+    int scale_factor)
 {
-  // get all params
-  THTensor *input = luaT_checkudata(L, 2, torch_Tensor);
-  int scale_factor = luaT_getfieldcheckint(L, 1, "scale_factor");
   int dW = scale_factor;
   int dH = scale_factor;
   int xDim = input->nDimension-2;
   int yDim = input->nDimension-1;
-  THTensor *output = luaT_getfieldcheckudata(L, 1, "output", torch_Tensor);
 
   // dims
   int idim = input->nDimension;  // Gauranteed to be between 3 and 5
@@ -65,17 +65,15 @@ static int nn_(SpatialUpSamplingNearest_updateOutput)(lua_State *L)
       }
     }
   }
-  return 1;
 }
 
-static int nn_(SpatialUpSamplingNearest_updateGradInput)(lua_State *L)
+void THNN_(SpatialUpSamplingNearest_updateGradInput)(
+    THNNState *state,
+    THTensor *input,
+    THTensor *gradOutput,
+    THTensor *gradInput,
+    int scale_factor)
 {
-  // get all params
-  //THTensor *input = luaT_checkudata(L,2, torch_Tensor);
-  THTensor *gradOutput = luaT_checkudata(L,3, torch_Tensor);
-  THTensor *gradInput = luaT_getfieldcheckudata(L,1, "gradInput", torch_Tensor);
-
-  int scale_factor = luaT_getfieldcheckint(L, 1, "scale_factor");
   int dW = scale_factor;
   int dH = scale_factor;
   int xDim = gradInput->nDimension-2;
@@ -140,20 +138,6 @@ static int nn_(SpatialUpSamplingNearest_updateGradInput)(lua_State *L)
       }
     }
   }
-  return 1;
-}
-
-static const struct luaL_Reg nn_(SpatialUpSamplingNearest__) [] = {
-  {"SpatialUpSamplingNearest_updateOutput", nn_(SpatialUpSamplingNearest_updateOutput)},
-  {"SpatialUpSamplingNearest_updateGradInput", nn_(SpatialUpSamplingNearest_updateGradInput)},
-  {NULL, NULL}
-};
-
-static void nn_(SpatialUpSamplingNearest_init)(lua_State *L)
-{
-  luaT_pushmetatable(L, torch_Tensor);
-  luaT_registeratname(L, nn_(SpatialUpSamplingNearest__), "nn");
-  lua_pop(L,1);
 }
 
 #endif
