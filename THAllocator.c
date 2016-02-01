@@ -177,8 +177,12 @@ static void *THMapAllocator_alloc(void* ctx_, long size)
     }
     else if (ctx->shared == TH_ALLOCATOR_MAPPED_SHAREDMEM)
     {
+#ifdef HAVE_SHM_OPEN
       if((fd = shm_open(ctx->filename, O_RDWR | O_CREAT, (mode_t)0600)) == -1)
         THError("unable to open file <%s> in read-write mode", ctx->filename);
+#else
+      THError("unable to open file <%s> in sharedmem mode, shm_open unavailable on this platform");
+#endif
     }
     else
     {
@@ -259,10 +263,14 @@ static void THMapAllocator_free(void* ctx_, void* data) {
 #else
   if (munmap(data, ctx->size))
     THError("could not unmap the shared memory file");
-  if (ctx->shared == TH_ALLOCATOR_MAPPED_SHAREDMEM &&
-      shm_unlink(ctx->filename) == -1)
+  if (ctx->shared == TH_ALLOCATOR_MAPPED_SHAREDMEM)
   {
-    THError("could not unlink the shared memory file %s", ctx->filename);
+#ifdef HAVE_SHM_UNLINK
+    if (shm_unlink(ctx->filename) == -1)
+      THError("could not unlink the shared memory file %s", ctx->filename);
+#else
+    THError("could not unlink the shared memory file %s, shm_unlink not available on platform", ctx->filename);
+#endif
   }
 #endif
 

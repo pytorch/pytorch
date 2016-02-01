@@ -125,7 +125,7 @@ void THSetGCHandler( void (*torchGCFunction_)(void *data), void *data )
 }
 
 static long getAllocSize(void *ptr) {
-#if defined(__unix)
+#if defined(__unix) && defined(HAVE_MALLOC_USABLE_SIZE)
   return malloc_usable_size(ptr);
 #elif defined(__APPLE__)
   return malloc_size(ptr);
