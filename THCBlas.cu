@@ -234,3 +234,23 @@ void THCudaBlas_gemmBatched(THCState *state, char transa, char transb, long m, l
                                    &alpha, a, (int)lda, b, (int)ldb, &beta, c, (int)ldc,
                                    (int)batchCount));
 }
+
+/* Inverse */
+void THCudaBlas_getrf(THCState *state, int n, float **a, int lda, int *pivot, int *info, int batchSize) {
+  if( (n >= INT_MAX) || (lda >= INT_MAX) || (batchSize >= INT_MAX) )
+  {
+    THError("Cublas_getrf only supports n, lda, batchSize"
+            "with the bound [val] <= %d", INT_MAX);
+  }
+  THCublasCheck(cublasSgetrfBatched(THCState_getCurrentBlasHandle(state), n, a, lda, pivot, info, batchSize));
+}
+
+void THCudaBlas_getri(THCState *state, int n, const float **a, int lda, int *pivot, float **c, int ldc, int *info, int batchSize) {
+
+  if( (n >= INT_MAX) || (lda >= INT_MAX)|| (ldc >= INT_MAX) || (batchSize >= INT_MAX) )
+  {
+    THError("Cublas_getrf only supports n, lda, ldc, batchSize"
+            "with the bound [val] <= %d", INT_MAX);
+  }
+  THCublasCheck(cublasSgetriBatched(THCState_getCurrentBlasHandle(state), n, a, lda, pivot, c, ldc, info, batchSize));
+}

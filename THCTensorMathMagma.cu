@@ -5,6 +5,8 @@
 
 #ifdef USE_MAGMA
 #include <magma.h>
+#else
+#include "THCBlas.h"
 #endif
 
 #ifndef DIVUP
@@ -66,6 +68,8 @@ static void THCudaTensor_copyTensor2d(THCState *state, float *dst, THCudaTensor 
   THCudaTensor_free(state, selfc);
 }
 
+#endif
+
 static THCudaTensor* THCudaTensor_newColumnMajor(THCState *state, THCudaTensor *self, THCudaTensor *src)
 {
   THAssert(src->nDimension == 2);
@@ -87,7 +91,7 @@ static THCudaTensor* THCudaTensor_newColumnMajor(THCState *state, THCudaTensor *
   THCudaTensor_copy(state, self, src);
   return self;
 }
-#endif
+
 
 void THCudaTensor_gesv(THCState *state, THCudaTensor *rb_, THCudaTensor *ra_, THCudaTensor *b_, THCudaTensor *a_)
 {
@@ -365,9 +369,69 @@ void THCudaTensor_getri(THCState *state, THCudaTensor *ra_, THCudaTensor *a)
   magma_free_pinned(ipiv);
   THCudaTensor_freeCopyTo(state, input, ra_);
 #else
-  THError(NoMagma(getri));
+  THArgCheck(a->nDimension == 2, 2, "A should be 2 dimensional");
+  THArgCheck(a->size[0] == a->size[1], 2, "A should be square");
+
+  int n = a->size[0];
+
+  // input
+  THCudaTensor *input = THCudaTensor_newColumnMajor(state, ra_, a);
+  // output
+  THCudaTensor *output = THCudaTensor_newColumnMajor(state, ra_, a);
+
+  size_t matrices_size = sizeof(float*);
+
+  float **matrices1 = (float **)THAlloc(matrices_size);
+  const float **matrices1_const = (const float **)THAlloc(matrices_size);
+  float **matrices2 = (float **)THAlloc(matrices_size);
+  matrices1[0] = THCudaTensor_data(state, input);
+  matrices1_const[0] = THCudaTensor_data(state, input);
+  matrices2[0] = THCudaTensor_data(state, output);
+
+  // Copy pointers to device.
+  float **d_matrices1, **d_matrices2;
+  const float **d_matrices1_const;
+  THCudaCheck(THCudaMalloc(state, (void**)&d_matrices1, matrices_size));
+  THCudaCheck(THCudaMalloc(state, (void**)&d_matrices1_const, matrices_size));
+  THCudaCheck(THCudaMalloc(state, (void**)&d_matrices2, matrices_size));
+
+  THCudaCheck(cudaMemcpyAsync(d_matrices1, matrices1, matrices_size,
+                              cudaMemcpyHostToDevice, THCState_getCurrentStream(state)));
+  THCudaCheck(cudaMemcpyAsync(d_matrices1_const, matrices1_const, matrices_size,
+                              cudaMemcpyHostToDevice, THCState_getCurrentStream(state)));
+  THCudaCheck(cudaMemcpyAsync(d_matrices2, matrices2, matrices_size,
+                              cudaMemcpyHostToDevice, THCState_getCurrentStream(state)));
+  int info;
+  int *info_gpu;
+  THCudaCheck(THCudaMalloc(state, (void**)&info_gpu, sizeof(int)));
+
+  int *ipiv_gpu;
+  THCudaCheck(THCudaMalloc(state, (void**)&ipiv_gpu, n * sizeof(int)));
+
+  // Run LU
+  THCudaBlas_getrf(state, n, d_matrices1, n, ipiv_gpu, info_gpu, 1);
+
+  THCudaCheck(cudaMemcpy(&info, info_gpu, sizeof(int), cudaMemcpyDeviceToHost));
+
+  if (info > 0)
+    THError("CUBLAS getrf : U(%d,%d) is 0, U is singular", info, info);
+  else if (info < 0)
+    THError("CUBLAS getrf : Argument %d : illegal value", -info);
+
+  // Inverse
+  THCudaBlas_getri(state, n, d_matrices1_const, n, ipiv_gpu, d_matrices2, n, info_gpu, 1);
+  if (info > 0)
+    THError("CUBLAS getri : U(%d,%d) is 0, U is singular", info, info);
+  else if (info < 0)
+    THError("CUBLAS getri : Argument %d : illegal value", -info);
+
+  THCudaCheck(THCudaFree(state, ipiv_gpu));
+  THCudaCheck(THCudaFree(state, info_gpu));
+  THCudaTensor_freeCopyTo(state, output, input);
 #endif
+
 }
+
 
 __global__ void THCudaTensor_copyUpperSymmetric(float *input, int n, int len)
 {
