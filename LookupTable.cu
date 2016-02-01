@@ -153,9 +153,16 @@ __global__ void cunn_LookupTable_accGradParametersKernel(
   }
 }
 
-void THNN_CudaLookupTable_accGradParameters(THCState *state, THIndexTensor *input, THCudaTensor *gradOutput, 
-  THCudaTensor *gradWeight, float scale, bool scaleGradByFreq, THIntegerTensor *count,
-  THCudaTensor *sorted, THCudaTensor *indices)
+void THNN_CudaLookupTable_accGradParameters(
+  THCState *state,
+  THIndexTensor *input,
+  THCudaTensor *gradOutput,
+  THCudaTensor *gradWeight,
+  THIntegerTensor *count,
+  THCudaTensor *sorted,
+  THCudaTensor *indices,
+  bool scaleGradByFreq,
+  float scale)
 {
   THAssert(THCudaTensor_checkGPU(state, 5, input, gradOutput, gradWeight, sorted, indices));
   if (!(THCudaTensor_isContiguous(state, input) &&

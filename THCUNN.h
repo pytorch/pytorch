@@ -138,11 +138,11 @@ TH_API void THNN_CudaLookupTable_accGradParameters(
           THIndexTensor *input,
           THCudaTensor *gradOutput,
           THCudaTensor *gradWeight,
-          float scale,
-          bool scaleGradByFreq,
           THIntegerTensor *count,
           THCudaTensor *sorted,
-          THCudaTensor *indices);
+          THCudaTensor *indices,
+          bool scaleGradByFreq,
+          float scale);
 
 TH_API void THNN_CudaMarginCriterion_updateOutput(
           THCState *state,
