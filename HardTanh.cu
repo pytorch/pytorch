@@ -10,7 +10,7 @@ struct hardtanhupdateOutput_functor
     , max_val_(max_val)
   {}
 
-  __device__ void operator()(float* output, const float* input) const
+  __device__ void operator()(float *output, const float *input) const
   {
     if (*input < min_val_)
       *output = min_val_;
@@ -39,7 +39,7 @@ struct hardtanhupdateGradInput_functor
     , max_val_(max_val)
   {}
 
-  __device__ void operator()(float* gradInput, const float* input, const float* gradOutput) const
+  __device__ void operator()(float *gradInput, const float *input, const float *gradOutput) const
   {
     if (*input < min_val_ || *input > max_val_)
       *gradInput = 0;

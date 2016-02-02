@@ -289,8 +289,8 @@ void THNN_CudaLogSoftMax_updateOutput(THCState *state, THCudaTensor *input, THCu
   THCudaTensor_free(state, input);
 }
 
-void THNN_CudaLogSoftMax_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput, 
-  THCudaTensor *gradInput,THCudaTensor *output)
+void THNN_CudaLogSoftMax_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput,
+  THCudaTensor *gradInput, THCudaTensor *output)
 {
   THAssert(THCudaTensor_checkGPU(state, 3, output, gradOutput, gradInput));
 

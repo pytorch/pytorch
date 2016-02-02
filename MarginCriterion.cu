@@ -6,22 +6,24 @@
 #include <thrust/reduce.h>
 #include <thrust/inner_product.h>
 
-struct kl_functor
+struct margin_functor
 {
-  __host__ __device__ float operator()(const float& x, const float& y) const
+  margin_functor(float margin)
+    : margin(margin)
+  {}
+
+  __host__ __device__ float operator()(const float &x, const float &y) const
   {
-      return y > 0 ? y * (log(y) - x) : 0;
+    float z = margin - x * y;
+    return z >= 0 ? z : 0;
   }
+
+  const float margin;
 };
 
-void THNN_CudaDistKLDivCriterion_updateOutput(THCState *state, THCudaTensor *input, THCudaTensor *target, THCudaTensor *output, bool sizeAverage)
+void THNN_CudaMarginCriterion_updateOutput(THCState *state, THCudaTensor *input, THCudaTensor *target, THCudaTensor *output, bool sizeAverage, float margin)
 {
   THAssert(THCudaTensor_checkGPU(state, 2, input, target));
-
-  THArgCheck(THCudaTensor_nElement(state, input) == THCudaTensor_nElement(state, target), 2,
-             "input and target need to have the same number of elements");
-
-  float sum;
 
   long size = THCudaTensor_nElement(state, input);
 
@@ -30,7 +32,7 @@ void THNN_CudaDistKLDivCriterion_updateOutput(THCState *state, THCudaTensor *inp
 
   thrust::device_ptr<float> input_data(THCudaTensor_data(state, input));
   thrust::device_ptr<float> target_data(THCudaTensor_data(state, target));
-  sum = thrust::inner_product(input_data, input_data+size, target_data, (float) 0, thrust::plus<float>(), kl_functor());
+  float sum = thrust::inner_product(input_data, input_data+size, target_data, (float) 0, thrust::plus<float>(), margin_functor(margin));
 
   if (sizeAverage)
     sum /= size;
@@ -41,29 +43,27 @@ void THNN_CudaDistKLDivCriterion_updateOutput(THCState *state, THCudaTensor *inp
   THCudaTensor_set1d(state, output, 0, sum);
 }
 
-struct kl_updateGradInput_functor
+struct margin_updateGradInput_functor
 {
-  const float norm;
+  const float margin, norm;
 
-  kl_updateGradInput_functor(float norm_)
-    : norm(norm_)
+  margin_updateGradInput_functor(float margin_, float norm_)
+    : margin(margin_)
+    , norm(norm_)
   {}
 
-  __host__ __device__ float operator()(const float& x, const float& y) const
+  __host__ __device__ float operator()(const float &x, const float &y) const
   {
-      return y > 0 ? norm * (-y) : 0;
+    return (x * y) < margin ? -norm * y : 0;
   }
 };
 
-void THNN_CudaDistKLDivCriterion_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *target, THCudaTensor *gradInput, bool sizeAverage)
+void THNN_CudaMarginCriterion_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *target, THCudaTensor *gradInput, bool sizeAverage, float margin)
 {
   THAssert(THCudaTensor_checkGPU(state, 3, input, target, gradInput));
 
-  THArgCheck(THCudaTensor_nElement(state, input) == THCudaTensor_nElement(state, target), 2,
-             "input and target need to have the same number of elements");
-
   long size = THCudaTensor_nElement(state, input);
-  float norm = (sizeAverage ? 2./size : 2.);
+  float norm = sizeAverage ? 1.f/size : 1;
 
   input = THCudaTensor_newContiguous(state, input);
   target = THCudaTensor_newContiguous(state, target);
@@ -74,7 +74,7 @@ void THNN_CudaDistKLDivCriterion_updateGradInput(THCState *state, THCudaTensor *
   thrust::device_ptr<float> target_data(THCudaTensor_data(state, target));
   thrust::device_ptr<float> gradInput_data(THCudaTensor_data(state, gradInput));
 
-  thrust::transform(input_data, input_data+size, target_data, gradInput_data, kl_updateGradInput_functor(norm));
+  thrust::transform(input_data, input_data+size, target_data, gradInput_data, margin_updateGradInput_functor(margin, norm));
 
   THCudaTensor_free(state, input);
   THCudaTensor_free(state, target);
