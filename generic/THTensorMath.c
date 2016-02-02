@@ -358,24 +358,11 @@ accreal THTensor_(dot)(THTensor *tensor, THTensor *src)
   return sum;
 }
 
-void THTensor_(flatIndexToFullIndex)(long ind, long *index_data, long nDim, long *sizes){
-    long total = 1;
-    long i;
-    for (i = 0; i < nDim; i++){
-      total = total * sizes[i];
-    }
-    for (i = 0; i < nDim; i++){
-      total = total / sizes[i];
-      index_data[i] = ind / total;
-      ind = ind - (index_data[i]) * total;
-    }
-}
-
-real THTensor_(minall)(THLongTensor *index, THTensor *tensor)
+real THTensor_(minall)(THTensor *tensor)
 {
-  real value;
   real theMin;
-  long theIndex = 0;
+  real value;
+
   THArgCheck(tensor->nDimension > 0, 1, "tensor must have one dimension");
   theMin = THTensor_(data)(tensor)[0];
   TH_TENSOR_APPLY(real, tensor,
@@ -384,44 +371,28 @@ real THTensor_(minall)(THLongTensor *index, THTensor *tensor)
                   if(!(value >= theMin))
                   {
                     theMin = value;
-                    theIndex = tensor_i;
                     if (isnan(value))
                       break;
                   });
-
-  if(index != NULL){
-    THLongTensor_resize1d(index, tensor->nDimension);
-    long *index_data = THLongTensor_data(index);
-    long nDimensions = THLongTensor_nElement(index);
-    THTensor_(flatIndexToFullIndex)(theIndex, index_data, nDimensions, tensor->size);
-  }
   return theMin;
 }
 
-real THTensor_(maxall)(THLongTensor *index, THTensor *tensor)
+real THTensor_(maxall)(THTensor *tensor)
 {
-  real value;
   real theMax;
-  long theIndex = 0;
+  real value;
+
   THArgCheck(tensor->nDimension > 0, 1, "tensor must have one dimension");
   theMax = THTensor_(data)(tensor)[0];
   TH_TENSOR_APPLY(real, tensor,
                   value = *tensor_data;
-                  /* This is not the same as value<theMax in the case of NaNs */
+                  /* This is not the same as value>theMax in the case of NaNs */
                   if(!(value <= theMax))
                   {
                     theMax = value;
-                    theIndex = tensor_i;
                     if (isnan(value))
                       break;
                   });
-
-  if(index != NULL){
-    THLongTensor_resize1d(index, tensor->nDimension);
-    long *index_data = THLongTensor_data(index);
-    long nDimensions = THLongTensor_nElement(index);
-    THTensor_(flatIndexToFullIndex)(theIndex, index_data, nDimensions, tensor->size);
-  }
   return theMax;
 }
 
@@ -2328,8 +2299,8 @@ void THTensor_(histc)(THTensor *hist, THTensor *tensor, long nbins, real minvalu
   maxval = maxvalue;
   if (minval == maxval)
   {
-    minval = THTensor_(minall)(NULL, tensor);
-    maxval = THTensor_(maxall)(NULL, tensor);
+    minval = THTensor_(minall)(tensor);
+    maxval = THTensor_(maxall)(tensor);
   }
   if (minval == maxval)
   {
