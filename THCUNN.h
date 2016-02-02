@@ -432,3 +432,98 @@ TH_API void THNN_CudaSpatialMaxPooling_updateGradInput(
           int dW, int dH,
           int padW, int padH,
           bool ceil_mode);
+
+TH_API void THNN_CudaVolumetricAveragePooling_updateOutput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *output,
+          int kT, int kW, int kH,
+          int dT, int dW, int dH);
+TH_API void THNN_CudaVolumetricAveragePooling_updateGradInput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *gradOutput,
+          THCudaTensor *gradInput,
+          int kT, int kW, int kH,
+          int dT, int dW, int dH);
+
+TH_API void THNN_CudaVolumetricConvolution_updateOutput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *output,
+          THCudaTensor *weight,
+          THCudaTensor *bias,
+          THCudaTensor *finput,
+          THCudaTensor *fgradInput,
+          int dT, int dW, int dH,
+          int padT, int padW, int padH);
+TH_API void THNN_CudaVolumetricConvolution_updateGradInput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *gradOutput,
+          THCudaTensor *gradInput,
+          THCudaTensor *weight,
+          THCudaTensor *finput,
+          int dT, int dW, int dH,
+          int padT, int padW, int padH);
+TH_API void THNN_CudaVolumetricConvolution_accGradParameters(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *gradOutput,
+          THCudaTensor *gradWeight,
+          THCudaTensor *gradBias,
+          THCudaTensor *finput,
+          THCudaTensor *fgradInput,
+          int dT, int dW, int dH,
+          int padT, int padW, int padH,
+          float scale);
+
+TH_API void THNN_CudaVolumetricFullConvolution_updateOutput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *output,
+          THCudaTensor *weight,
+          THCudaTensor *bias,
+          THCudaTensor *finput,
+          THCudaTensor *fgradInput,
+          int dT, int dW, int dH,
+          int pT, int pW, int pH);
+TH_API void THNN_CudaVolumetricFullConvolution_updateGradInput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *gradOutput,
+          THCudaTensor *gradInput,
+          THCudaTensor *weight,
+          THCudaTensor *finput,
+          THCudaTensor *fgradInput,
+          int dT, int dW, int dH,
+          int pT, int pW, int pH);
+TH_API void THNN_CudaVolumetricFullConvolution_accGradParameters(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *gradOutput,
+          THCudaTensor *gradWeight,
+          THCudaTensor *gradBias,
+          THCudaTensor *finput,
+          THCudaTensor *fgradInput,
+          int dT, int dW, int dH,
+          int pT, int pW, int pH,
+          float scale);
+
+TH_API void THNN_CudaVolumetricMaxPooling_updateOutput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *output,
+          THCudaTensor *indices,
+          int kT, int kW, int kH,
+          int dT, int dW, int dH,
+          int padT, int padW, int padH,
+          bool ceilMode);
+TH_API void THNN_CudaVolumetricMaxPooling_updateGradInput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *gradOutput,
+          THCudaTensor *gradInput,
+          THCudaTensor *indices,
+          int dT, int dW, int dH,
+          int padT, int padW, int padH);

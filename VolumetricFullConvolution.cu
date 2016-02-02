@@ -1,25 +1,28 @@
-#include "utils.h"
+#include "THCUNN.h"
 #include "common.h"
-
 
 #define CUDA_KERNEL_LOOP(i, n) \
 for (int i = blockIdx.x * blockDim.x + threadIdx.x; \
   i < (n); \
   i += blockDim.x * gridDim.x)
 
-#define CUDA_CHECK(L, condition) \
+#define CUDA_CHECK(condition) \
 /* Code block avoids redefinition of cudaError_t error */ \
  do { \
    cudaError_t error = condition; \
-   luaL_argcheck(L, error == cudaSuccess, 2, cudaGetErrorString(error)); \
+   THArgCheck(error == cudaSuccess, 2, cudaGetErrorString(error)); \
  } while (0)
 
 template <typename Dtype>
 __global__ void vol2col_kernel(const int n, const Dtype* data_im,
-    const int length, const int height, const int width, const int ksize, const int kdepth, const int pad,
-    const int temporal_pad, const int stride, const int temporal_stride, const int length_col, const int height_col, const int width_col,
-    Dtype* data_col) {
-  CUDA_KERNEL_LOOP(index, n) {
+    const int length, const int height, const int width,
+    const int ksize, const int kdepth, const int pad,
+    const int temporal_pad, const int stride, const int temporal_stride,
+    const int length_col, const int height_col, const int width_col,
+    Dtype* data_col)
+{
+  CUDA_KERNEL_LOOP(index, n)
+  {
     int w_out = index % width_col;
     int h_out = (index / width_col ) % height_col;
     int l_out = (index / width_col / height_col) % length_col;
@@ -31,9 +34,12 @@ __global__ void vol2col_kernel(const int n, const Dtype* data_im,
 
     data_col += ((channel_out * length_col + l_out) * height_col + h_out) * width_col + w_out;
     data_im += ((channel_in * length + l_in) * height + h_in) * width + w_in;
-    for (int k = 0; k < kdepth; ++k) {
-      for (int i = 0; i < ksize; ++i) {
-        for (int j = 0; j < ksize; ++j) {
+    for (int k = 0; k < kdepth; ++k)
+    {
+      for (int i = 0; i < ksize; ++i)
+      {
+        for (int j = 0; j < ksize; ++j)
+        {
           int l = l_in + k;
           int h = h_in + i;
           int w = w_in + j;
@@ -49,7 +55,8 @@ __global__ void vol2col_kernel(const int n, const Dtype* data_im,
 template <typename Dtype>
 void vol2col(const Dtype* data_im, const int channels, const int length,
     const int height, const int width, const int ksize, const int kdepth, const int pad,
-    const int temporal_pad, const int stride, const int temporal_stride, Dtype* data_col) {
+    const int temporal_pad, const int stride, const int temporal_stride, Dtype* data_col)
+{
 
   int length_col = (length + 2 * temporal_pad - kdepth) / temporal_stride + 1;
   int height_col = (height + 2 * pad - ksize) / stride + 1;
@@ -72,10 +79,14 @@ template void vol2col<double>(const double* data_im, const int channels, const i
 
 template <typename Dtype>
 __global__ void col2vol_kernel(const int n, const Dtype* data_col,
-    const int length, const int height, const int width, const int channels, const int ksize, const int kdepth,
-    const int pad, const int temporal_pad, const int stride, const int temporal_stride, const int length_col, const int height_col, const int width_col,
-    Dtype* data_im) {
-  CUDA_KERNEL_LOOP(index, n) {
+    const int length, const int height, const int width, const int channels,
+    const int ksize, const int kdepth,
+    const int pad, const int temporal_pad, const int stride, const int temporal_stride,
+    const int length_col, const int height_col, const int width_col,
+    Dtype* data_im)
+{
+  CUDA_KERNEL_LOOP(index, n)
+  {
     Dtype val = 0;
     int w = index % width + pad;
     int h = (index / width) % height + pad;
@@ -109,8 +120,8 @@ __global__ void col2vol_kernel(const int n, const Dtype* data_col,
 template <typename Dtype>
 void col2vol(const Dtype* data_col, const int channels, const int length,
     const int height, const int width, const int ksize, const int kdepth, const int pad,
-    const int temporal_pad, const int stride, const int temporal_stride, Dtype* data_im) {
-
+    const int temporal_pad, const int stride, const int temporal_stride, Dtype* data_im)
+{
   int length_col = (length + 2 * temporal_pad - kdepth) / temporal_stride + 1;
   int height_col = (height + 2 * pad - ksize) / stride + 1;
   int width_col = (width + 2 * pad - ksize) / stride + 1;
@@ -129,42 +140,42 @@ template void col2vol<double>(const double* data_col, const int channels, const 
     const int height, const int width, const int ksize, const int kdepth, const int pad,
     const int temporal_pad, const int stride, const int temporal_stride, double* data_im);
 
-static int cunn_VolumetricFullConvolution_updateOutput(lua_State *L) {
-  THCState *state = getCutorchState(L);
+void THNN_CudaVolumetricFullConvolution_updateOutput(
+  THCState *state,
+  THCudaTensor *input,
+  THCudaTensor *output,
+  THCudaTensor *weight,
+  THCudaTensor *bias,
+  THCudaTensor *finput,
+  THCudaTensor *fgradInput,
+  int dT, int dW, int dH,
+  int pT, int pW, int pH)
+{
+  // number of input/output planes and kernel size is indirectly defined by the weight tensor
+  THArgCheck(weight->nDimension == 5, 4,
+    "5D weight tensor is expected (nOutputPlane x nInputPlane x kT x kH x kW)"
+  );
 
-  // Input
-  THCudaTensor *input = (THCudaTensor*)luaT_checkudata(L, 2, "torch.CudaTensor");
-  // Params:
-  int dT = luaT_getfieldcheckint(L, 1, "dT");
-  int dH = luaT_getfieldcheckint(L, 1, "dH");
-  int dW = luaT_getfieldcheckint(L, 1, "dW");
-  int kT = luaT_getfieldcheckint(L, 1, "kT");
-  int kH = luaT_getfieldcheckint(L, 1, "kH");
-  int kW = luaT_getfieldcheckint(L, 1, "kW");
-  int pT = luaT_getfieldcheckint(L, 1, "pT");
-  int pH = luaT_getfieldcheckint(L, 1, "pH");
-  int pW = luaT_getfieldcheckint(L, 1, "pW");
-  int nInputPlane = luaT_getfieldcheckint(L, 1, "nInputPlane");
-  int nOutputPlane = luaT_getfieldcheckint(L, 1, "nOutputPlane");
+  int nOutputPlane = (int)weight->size[0];
+  int nInputPlane  = (int)weight->size[1];
+  int kT           = (int)weight->size[2];
+  int kW           = (int)weight->size[3];
+  int kH           = (int)weight->size[4];
 
-  THCudaTensor *weight = (THCudaTensor*)luaT_getfieldcheckudata(L, 1, "weight", "torch.CudaTensor");
-  THCudaTensor *bias = (THCudaTensor*)luaT_getfieldcheckudata(L, 1, "bias", "torch.CudaTensor");
-  THCudaTensor *columns = (THCudaTensor*)luaT_getfieldcheckudata(L, 1, "finput", "torch.CudaTensor");
-  THCudaTensor *ones = (THCudaTensor*)luaT_getfieldcheckudata(L, 1, "fgradInput", "torch.CudaTensor");
-  THCudaTensor *output = (THCudaTensor*)luaT_getfieldcheckudata(L, 1, "output", "torch.CudaTensor");
+  THCudaTensor *columns = finput;
+  THCudaTensor *ones = fgradInput;
 
   int inputDepth   = input->size[2];
   int inputHeight  = input->size[3];
   int inputWidth   = input->size[4];
 
-  int outputDepth  = (inputDepth - 1) * dT - 2 * pT + kT;
+  int outputDepth  = (inputDepth - 1)  * dT - 2 * pT + kT;
   int outputHeight = (inputHeight - 1) * dH - 2 * pH + kH;
-  int outputWidth  = (inputWidth - 1) * dW - 2 * pW + kW;
+  int outputWidth  = (inputWidth - 1)  * dW - 2 * pW + kW;
 
-  THAssert(THCudaTensor_checkGPU(state, 6, input, output, weight,
-                                 bias, columns, ones));
-  luaL_argcheck(L, input->nDimension == 5, 2, "5D (batch mode) tensor is expected");
-  luaL_argcheck(L, kH == kW && pH == pW, 2, "kH == kW && pH == pW is expected");
+  THAssert(THCudaTensor_checkGPU(state, 6, input, output, weight, bias, columns, ones));
+  THArgCheck(input->nDimension == 5, 2, "5D (batch mode) tensor is expected");
+  THArgCheck(kH == kW && pH == pW, 2, "kH == kW && pH == pW is expected");
 
   // Batch size
   long batchSize = input->size[0];
@@ -186,7 +197,8 @@ static int cunn_VolumetricFullConvolution_updateOutput(lua_State *L) {
   // Note: this buffer can be shared with other modules, it only ever gets increased,
   // and always contains ones.
   if (ones->nDimension != 3 ||
-    ones->size[0] * ones->size[1] * ones->size[2] < outputDepth * outputHeight * outputWidth) {
+    ones->size[0] * ones->size[1] * ones->size[2] < outputDepth * outputHeight * outputWidth)
+  {
     // Resize plane and fill with ones...
     THCudaTensor_resize3d(state, ones, outputDepth, outputHeight, outputWidth);
     THCudaTensor_fill(state, ones, 1);
@@ -196,7 +208,8 @@ static int cunn_VolumetricFullConvolution_updateOutput(lua_State *L) {
   THCudaTensor *input_n = THCudaTensor_new(state);
   THCudaTensor *output_n = THCudaTensor_new(state);
 
-  for (int n = 0; n < batchSize; ++n) {
+  for (int n = 0; n < batchSize; ++n)
+  {
     THCudaTensor_select(state, input_n, input, 0, n);
     THCudaTensor_select(state, output_n, output, 0, n);
 
@@ -221,39 +234,36 @@ static int cunn_VolumetricFullConvolution_updateOutput(lua_State *L) {
   }
   THCudaTensor_free(state, input_n);
   THCudaTensor_free(state, output_n);
-
-  // return output
-  return 1;
 }
 
-static int cunn_VolumetricFullConvolution_updateGradInput(lua_State *L) {
-  THCState *state = getCutorchState(L);
+void THNN_CudaVolumetricFullConvolution_updateGradInput(
+  THCState *state,
+  THCudaTensor *input,
+  THCudaTensor *gradOutput,
+  THCudaTensor *gradInput,
+  THCudaTensor *weight,
+  THCudaTensor *finput,
+  THCudaTensor *fgradInput,
+  int dT, int dW, int dH,
+  int pT, int pW, int pH)
+{
+  // number of input/output planes and kernel size is indirectly defined by the weight tensor
+  THArgCheck(weight->nDimension == 5, 4,
+    "5D weight tensor is expected (nOutputPlane x nInputPlane x kT x kH x kW)"
+  );
 
-  // Inputs
-  THCudaTensor *input = (THCudaTensor *)luaT_checkudata(L, 2, "torch.CudaTensor");
-  THCudaTensor *gradOutput = (THCudaTensor *)luaT_checkudata(L, 3, "torch.CudaTensor");
+  int nOutputPlane = (int)weight->size[0];
+  int nInputPlane  = (int)weight->size[1];
+  int kT           = (int)weight->size[2];
+  int kW           = (int)weight->size[3];
+  int kH           = (int)weight->size[4];
 
-  // Params
-  int dT = luaT_getfieldcheckint(L, 1, "dT");
-  int dH = luaT_getfieldcheckint(L, 1, "dH");
-  int dW = luaT_getfieldcheckint(L, 1, "dW");
-  int kT = luaT_getfieldcheckint(L, 1, "kT");
-  int kH = luaT_getfieldcheckint(L, 1, "kH");
-  int kW = luaT_getfieldcheckint(L, 1, "kW");
-  int pT = luaT_getfieldcheckint(L, 1, "pT");
-  int pH = luaT_getfieldcheckint(L, 1, "pH");
-  int pW = luaT_getfieldcheckint(L, 1, "pW");
-  int nInputPlane = luaT_getfieldcheckint(L, 1, "nInputPlane");
-  int nOutputPlane = luaT_getfieldcheckint(L, 1, "nOutputPlane");
-
-  THCudaTensor *weight = (THCudaTensor *)luaT_getfieldcheckudata(L, 1, "weight", "torch.CudaTensor");
-  THCudaTensor *gradColumns = (THCudaTensor*)luaT_getfieldcheckudata(L, 1, "finput", "torch.CudaTensor");
-  THCudaTensor *gradInput = (THCudaTensor *)luaT_getfieldcheckudata(L, 1, "gradInput", "torch.CudaTensor");
+  THCudaTensor *gradColumns = finput;
 
   THAssert(THCudaTensor_checkGPU(state, 5, input, gradOutput, weight,
                                  gradColumns, gradInput));
-  luaL_argcheck(L, input->nDimension == 5, 2, "5D (batch mode) tensor is expected");
-  luaL_argcheck(L, kH == kW && pH == pW, 2, "kH == kW && pH == pW is expected");
+  THArgCheck(input->nDimension == 5, 2, "5D (batch mode) tensor is expected");
+  THArgCheck(kH == kW && pH == pW, 2, "kH == kW && pH == pW is expected");
 
   int inputDepth   = input->size[2];
   int inputHeight  = input->size[3];
@@ -282,59 +292,65 @@ static int cunn_VolumetricFullConvolution_updateGradInput(lua_State *L) {
   THCudaTensor *gradOutput_n = THCudaTensor_new(state);
 
   // For each n in batch, do:
-  for (int n = 0; n < batchSize; n++) {
+  for (int n = 0; n < batchSize; n++)
+  {
     THCudaTensor_select(state, gradInput_n, gradInput, 0, n);
     THCudaTensor_select(state, gradOutput_n, gradOutput, 0, n);
 
     // vol2col from gradOutput to gradColumns
-    vol2col<float>(THCudaTensor_data(state, gradOutput_n),
-          nOutputPlane, outputDepth, outputHeight, outputWidth,
-          kH, kT, pH, pT, dH, dT, THCudaTensor_data(state, gradColumns));
+    vol2col<float>(
+      THCudaTensor_data(state, gradOutput_n),
+      nOutputPlane,
+      outputDepth, outputHeight, outputWidth,
+      kH, kT, pH,
+      pT, dH, dT,
+      THCudaTensor_data(state, gradColumns)
+    );
 
     // gemm to compute gradInput
-    THCudaBlas_gemm(state, 'n', 'n', N_, M_, K_,
-    				  1, THCudaTensor_data(state, gradColumns), N_,
-              THCudaTensor_data(state, weight), K_,
-    				  0, THCudaTensor_data(state, gradInput_n), N_);
+    THCudaBlas_gemm(
+      state, 'n', 'n', N_, M_, K_,
+      1, THCudaTensor_data(state, gradColumns), N_,
+      THCudaTensor_data(state, weight), K_,
+      0, THCudaTensor_data(state, gradInput_n), N_
+    );
   }
 
   // Free
   THCudaTensor_free(state, gradInput_n);
   THCudaTensor_free(state, gradOutput_n);
-
-  // Return gradInput
-  return 1;
 }
 
-static int cunn_VolumetricFullConvolution_accGradParameters(lua_State *L) {
-  THCState *state = getCutorchState(L);
+void THNN_CudaVolumetricFullConvolution_accGradParameters(
+  THCState *state,
+  THCudaTensor *input,
+  THCudaTensor *gradOutput,
+  THCudaTensor *gradWeight,
+  THCudaTensor *gradBias,
+  THCudaTensor *finput,
+  THCudaTensor *fgradInput,
+  int dT, int dW, int dH,
+  int pT, int pW, int pH,
+  float scale)
+{
+  // number of input/output planes and kernel size is indirectly defined by the gradWeight tensor
+  THArgCheck(gradWeight->nDimension == 5, 4,
+    "5D gradWeight tensor is expected (nOutputPlane x nInputPlane x kT x kH x kW)"
+  );
 
-  // Inputs
-  THCudaTensor *input = (THCudaTensor *)luaT_checkudata(L, 2, "torch.CudaTensor");
-  THCudaTensor *gradOutput = (THCudaTensor *)luaT_checkudata(L, 3, "torch.CudaTensor");
+  int nOutputPlane = (int)gradWeight->size[0];
+  int nInputPlane  = (int)gradWeight->size[1];
+  int kT           = (int)gradWeight->size[2];
+  int kW           = (int)gradWeight->size[3];
+  int kH           = (int)gradWeight->size[4];
 
-  // Params
-  int dT = luaT_getfieldcheckint(L, 1, "dT");
-  int dH = luaT_getfieldcheckint(L, 1, "dH");
-  int dW = luaT_getfieldcheckint(L, 1, "dW");
-  int kT = luaT_getfieldcheckint(L, 1, "kT");
-  int kH = luaT_getfieldcheckint(L, 1, "kH");
-  int kW = luaT_getfieldcheckint(L, 1, "kW");
-  int pT = luaT_getfieldcheckint(L, 1, "pT");
-  int pH = luaT_getfieldcheckint(L, 1, "pH");
-  int pW = luaT_getfieldcheckint(L, 1, "pW");
-  int nInputPlane = luaT_getfieldcheckint(L, 1, "nInputPlane");
-  int nOutputPlane = luaT_getfieldcheckint(L, 1, "nOutputPlane");
-
-  THCudaTensor *gradWeight = (THCudaTensor *)luaT_getfieldcheckudata(L, 1, "gradWeight", "torch.CudaTensor");
-  THCudaTensor *gradBias = (THCudaTensor *)luaT_getfieldcheckudata(L, 1, "gradBias", "torch.CudaTensor");
-  THCudaTensor *gradColumns = (THCudaTensor*)luaT_getfieldcheckudata(L, 1, "finput", "torch.CudaTensor");
-  THCudaTensor *ones = (THCudaTensor*)luaT_getfieldcheckudata(L, 1, "fgradInput", "torch.CudaTensor");
+  THCudaTensor *gradColumns = finput;
+  THCudaTensor *ones = fgradInput;
 
   THAssert(THCudaTensor_checkGPU(state, 6, input, gradOutput, gradWeight,
                                  gradBias, gradColumns, ones));
-  luaL_argcheck(L, input->nDimension == 5, 2, "5D (batch mode) tensor is expected");
-  luaL_argcheck(L, kH == kW && pH == pW, 2, "kH == kW && pH == pW is expected");
+  THArgCheck(input->nDimension == 5, 2, "5D (batch mode) tensor is expected");
+  THArgCheck(kH == kW && pH == pW, 2, "kH == kW && pH == pW is expected");
 
   THCudaTensor_resize1d(state, gradBias, nOutputPlane);
   THCudaTensor_resize5d(state, gradWeight, nOutputPlane, nInputPlane, kT, kH, kW);
@@ -360,7 +376,8 @@ static int cunn_VolumetricFullConvolution_accGradParameters(lua_State *L) {
   THCudaTensor_resize5d(state, gradColumns, 1, nOutputPlane * kT * kH * kW, inputDepth, inputHeight, inputWidth);
 
   if (ones->nDimension != 3 ||
-    ones->size[0] * ones->size[1] * ones->size[2] < outputDepth * outputHeight * outputWidth) {
+    ones->size[0] * ones->size[1] * ones->size[2] < outputDepth * outputHeight * outputWidth)
+  {
     // Resize plane and fill with ones...
     THCudaTensor_resize3d(state, ones, outputDepth, outputHeight, outputWidth);
     THCudaTensor_fill(state, ones, 1);
@@ -371,53 +388,47 @@ static int cunn_VolumetricFullConvolution_accGradParameters(lua_State *L) {
   THCudaTensor *gradOutput_n = THCudaTensor_new(state);
 
   // reset gradBias = 0
-  CUDA_CHECK(L, cudaMemset(THCudaTensor_data(state, gradBias), 0,
+  CUDA_CHECK(cudaMemset(THCudaTensor_data(state, gradBias), 0,
       sizeof(float) * nOutputPlane));
+
   // reset gradWeight = 0
-  CUDA_CHECK(L, cudaMemset(THCudaTensor_data(state, gradWeight), 0,
+  CUDA_CHECK(cudaMemset(THCudaTensor_data(state, gradWeight), 0,
               sizeof(float) * M_ * K_));
 
   // For each n in batch, do:
-  for (int n = 0; n < batchSize; n++) {
+  for (int n = 0; n < batchSize; n++)
+  {
     THCudaTensor_select(state, input_n, input, 0, n);
     THCudaTensor_select(state, gradOutput_n, gradOutput, 0, n);
 
     // accumulate gradBias
-    THCudaBlas_gemv(state, 't', N0_, nOutputPlane, 1,
-                    THCudaTensor_data(state, gradOutput_n), N0_,
-  	                THCudaTensor_data(state, ones), 1,
-                    1,
-  	                THCudaTensor_data(state, gradBias), 1);
+    THCudaBlas_gemv(
+      state, 't', N0_, nOutputPlane, 1,
+      THCudaTensor_data(state, gradOutput_n), N0_,
+      THCudaTensor_data(state, ones), 1,
+      1,
+      THCudaTensor_data(state, gradBias), 1
+    );
 
-    vol2col<float>(THCudaTensor_data(state, gradOutput_n),
-          nOutputPlane, outputDepth, outputHeight, outputWidth,
-          kH, kT, pH, pT, dH, dT, THCudaTensor_data(state, gradColumns));
+    vol2col<float>(
+      THCudaTensor_data(state, gradOutput_n),
+      nOutputPlane,
+      outputDepth, outputHeight, outputWidth,
+      kH, kT, pH,
+      pT, dH, dT,
+      THCudaTensor_data(state, gradColumns)
+    );
 
     // accummulate gradWeight
-    THCudaBlas_gemm(state, 't', 'n', K_, M_, N_,
-          1, THCudaTensor_data(state, gradColumns), N_,
-          THCudaTensor_data(state, input_n), N_,
-          1, THCudaTensor_data(state, gradWeight), K_);
+    THCudaBlas_gemm(
+      state, 't', 'n', K_, M_, N_,
+      1, THCudaTensor_data(state, gradColumns), N_,
+      THCudaTensor_data(state, input_n), N_,
+      1, THCudaTensor_data(state, gradWeight), K_
+    );
   }
 
   // Free
   THCudaTensor_free(state, input_n);
   THCudaTensor_free(state, gradOutput_n);
-
-  // Return nothing
-  return 0;
-}
-
-static const struct luaL_Reg cunn_VolumetricFullConvolution__ [] = {
-  {"VolumetricFullConvolution_updateOutput", cunn_VolumetricFullConvolution_updateOutput},
-  {"VolumetricFullConvolution_updateGradInput", cunn_VolumetricFullConvolution_updateGradInput},
-  {"VolumetricFullConvolution_accGradParameters", cunn_VolumetricFullConvolution_accGradParameters},
-  {NULL, NULL}
-};
-
-void cunn_VolumetricFullConvolution_init(lua_State *L)
-{
-  luaT_pushmetatable(L, "torch.CudaTensor");
-  luaT_registeratname(L, cunn_VolumetricFullConvolution__, "nn");
-  lua_pop(L,1);
 }
