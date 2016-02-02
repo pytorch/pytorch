@@ -40,8 +40,8 @@ void THNN_(unfolded_acc)(THTensor *finput, THTensor *input,
             } else {
               if (dW==1){
                  ix = (long long)(0 - padW + kw);
-                 lpad = fmaxf(0,padW-kw);
-                 rpad = fmaxf(0,padW-(kW-kw-1));
+                 lpad = fmaxf(0,(int)(padW-kw));
+                 rpad = fmaxf(0,(int)(padW-(kW-kw-1)));
                  THVector_(add)(dst+(size_t)(iy*inputWidth+ix+lpad), src+(size_t)(y*outputWidth+lpad), 1, outputWidth - lpad - rpad); /* note: THVector_add could handle 1 value better */
               }
               else{
@@ -100,8 +100,8 @@ void THNN_(unfolded_copy)(THTensor *finput, THTensor *input,
         } else {
           if (dW==1){
              ix = (long long)(0 - padW + kw);
-             lpad = fmaxf(0,padW-kw);
-             rpad = fmaxf(0,padW-(kW-kw-1));
+             lpad = fmaxf(0,(int)(padW-kw));
+             rpad = fmaxf(0,(int)(padW-(kW-kw-1)));
              if (outputWidth-rpad-lpad <= 0) {
                 memset(dst+(size_t)(y*outputWidth), 0, sizeof(real)*outputWidth);
              } else {
