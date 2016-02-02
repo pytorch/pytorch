@@ -3,7 +3,6 @@
 
 #include <cuda.h>
 #include <assert.h>
-#include "THGeneral.h"
 #include "THCGeneral.h"
 #include "THCTensor.h"
 #include "THCDeviceUtils.cuh"
