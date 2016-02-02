@@ -8,6 +8,8 @@ void THNN_(VolumetricConvolution_updateOutput)(
   THTensor *output,
   THTensor *weight,
   THTensor *bias,
+  THTensor *finput,       // only used by cuda impl
+  THTensor *fgradInput,   // only used by cuda impl
   int dT, int dW, int dH,
   int pT, int pW, int pH)
 {
@@ -90,6 +92,7 @@ void THNN_(VolumetricConvolution_updateGradInput)(
   THTensor *gradOutput,
   THTensor *gradInput,
   THTensor *weight,
+  THTensor *finput,       // only used by cuda impl
   int dT, int dW, int dH,
   int pT, int pW, int pH)
 {
@@ -152,6 +155,8 @@ void THNN_(VolumetricConvolution_accGradParameters)(
   THTensor *gradOutput,
   THTensor *gradWeight,
   THTensor *gradBias,
+  THTensor *finput,       // only used by cuda impl
+  THTensor *fgradInput,   // only used by cuda impl
   int dT, int dW, int dH,
   int pT, int pW, int pH,
   real scale)
