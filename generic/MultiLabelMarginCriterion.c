@@ -24,8 +24,8 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(THNNState *state, THTensor *i
     THArgCheck((target->nDimension == 2) && (target->size[0] == nframe) && (target->size[1] == dim), 3, "inconsistent target size");
   }
 
-  THArgCheck(THTensor_(minall)(NULL, target) >= 0, 3, "target out of range");
-  THArgCheck(THTensor_(maxall)(NULL, target) <= dim, 3, "target out of range");
+  THArgCheck(THTensor_(minall)(target) >= 0, 3, "target out of range");
+  THArgCheck(THTensor_(maxall)(target) <= dim, 3, "target out of range");
 
   target = THTensor_(newContiguous)(target);
   input = THTensor_(newContiguous)(input);
@@ -99,8 +99,8 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(THNNState *state, THTensor
     THArgCheck((target->nDimension == 2) && (target->size[0] == nframe) && (target->size[1] == dim), 3, "inconsistent target size");
   }
 
-  THArgCheck(THTensor_(minall)(NULL, target) >= 0, 3, "target out of range");
-  THArgCheck(THTensor_(maxall)(NULL, target) <= dim, 3, "target out of range");
+  THArgCheck(THTensor_(minall)(target) >= 0, 3, "target out of range");
+  THArgCheck(THTensor_(maxall)(target) <= dim, 3, "target out of range");
 
   target = THTensor_(newContiguous)(target);
   input = THTensor_(newContiguous)(input);
