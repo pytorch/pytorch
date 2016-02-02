@@ -24,8 +24,10 @@ TH_API void THTensor_(scatterFill)(THTensor *tensor, int dim, THLongTensor *inde
 
 TH_API accreal THTensor_(dot)(THTensor *t, THTensor *src);
 
-TH_API real THTensor_(minall)(THTensor *t);
-TH_API real THTensor_(maxall)(THTensor *t);
+TH_API void THTensor_(flatIndexToFullIndex)(long ind, long *index_data, long nDim, long *sizes);
+TH_API real THTensor_(minall)(THLongTensor *index, THTensor *tensor);
+TH_API real THTensor_(maxall)(THLongTensor *index, THTensor *tensor);
+
 TH_API accreal THTensor_(sumall)(THTensor *t);
 TH_API accreal THTensor_(prodall)(THTensor *t);
 
