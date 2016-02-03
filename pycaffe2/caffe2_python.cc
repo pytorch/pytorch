@@ -118,6 +118,7 @@ PyObject* FetchTensor(const Tensor<DeviceContext>& tensor) {
   context.template Copy<T, DeviceContext, caffe2::CPUContext>(
       tensor.size(), tensor.template data<T>(),
       static_cast<T*>(PyArray_DATA(reinterpret_cast<PyArrayObject*>(array))));
+  context.FinishDeviceComputation();
   return array;
 }
 
@@ -140,6 +141,7 @@ PyObject* FeedTensor(const DeviceOption& option, PyArrayObject* original_array,
   context.template Copy<T, caffe2::CPUContext, DeviceContext>(
       tensor->size(), static_cast<T*>(PyArray_DATA(array)),
       tensor->template mutable_data<T>());
+  context.FinishDeviceComputation();
   Py_XDECREF(array);
   Py_RETURN_TRUE;
 }
