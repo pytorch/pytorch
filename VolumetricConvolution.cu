@@ -172,17 +172,9 @@ void THNN_CudaVolumetricConvolution_updateOutput(
 
   int nOutputPlane = (int)weight->size[0];
   int nInputPlane  = (int)weight->size[1];
-
-  // reorder dimensions
-  int dD = dW;
-  dW = dH;
-  dH = dT;
-  int padD = padW;
-  padW = padH;
-  padH = padT;
-  int kH = (int)weight->size[2];  // kT
-  int kW = (int)weight->size[3];  // kH
-  int kD = (int)weight->size[4];  // kW
+  int kT           = (int)weight->size[2];
+  int kH           = (int)weight->size[3];
+  int kW           = (int)weight->size[4];
 
   int batch = 1;
   if (input->nDimension == 4)
@@ -196,9 +188,9 @@ void THNN_CudaVolumetricConvolution_updateOutput(
   long inputWidth   = input->size[3];
   long inputHeight  = input->size[2];
   long inputDepth   = input->size[4];
-  long outputWidth  = (inputWidth + 2*padW  - kW) / dW + 1;
-  long outputHeight = (inputHeight + 2*padH - kH) / dH + 1;
-  long outputDepth  = (inputDepth + 2*padD - kD) / dD + 1;
+  long outputWidth  = (inputWidth  + 2*padH - kH) / dH + 1;
+  long outputHeight = (inputHeight + 2*padT - kT) / dT + 1;
+  long outputDepth  = (inputDepth  + 2*padW - kW) / dW + 1;
 
   // Batch size + input planes
   long batchSize = input->size[0];
@@ -208,7 +200,7 @@ void THNN_CudaVolumetricConvolution_updateOutput(
                         outputHeight, outputWidth, outputDepth);
 
   // Resize temporary columns
-  THCudaTensor_resize2d(state, columns, nInputPlane*kD*kW*kH, outputDepth*outputHeight*outputWidth);
+  THCudaTensor_resize2d(state, columns, nInputPlane*kW*kH*kT, outputDepth*outputHeight*outputWidth);
 
   // Define a buffer of ones, for bias accumulation
   // Note: this buffer can be shared with other modules, it only ever gets increased,
@@ -254,7 +246,7 @@ void THNN_CudaVolumetricConvolution_updateOutput(
     im3d2col(
       THCState_getCurrentStream(state),
       THCudaTensor_data(state, input_n),
-      nInputPlane, inputHeight, inputWidth, inputDepth, kH, kW, kD, padH, padW, padD, dH, dW, dD,
+      nInputPlane, inputHeight, inputWidth, inputDepth, kT, kH, kW, padT, padH, padW, dT, dH, dW,
       THCudaTensor_data(state, columns)
     );
 
@@ -305,17 +297,9 @@ void THNN_CudaVolumetricConvolution_updateGradInput(
 
   int nOutputPlane = (int)weight->size[0];
   int nInputPlane  = (int)weight->size[1];
-
-  // reorder dimensions
-  int dD = dW;
-  dW = dH;
-  dH = dT;
-  int padD = padW;
-  padW = padH;
-  padH = padT;
-  int kH = (int)weight->size[2];  // kT
-  int kW = (int)weight->size[3];  // kH
-  int kD = (int)weight->size[4];  // kW
+  int kT           = (int)weight->size[2];
+  int kH           = (int)weight->size[3];
+  int kW           = (int)weight->size[4];
 
   THCudaTensor *gradColumns = finput;
 
@@ -336,9 +320,9 @@ void THNN_CudaVolumetricConvolution_updateGradInput(
   long inputWidth   = input->size[3];
   long inputHeight  = input->size[2];
   long inputDepth   = input->size[4];
-  long outputWidth  = (inputWidth + 2*padW  - kW) / dW + 1;
-  long outputHeight = (inputHeight + 2*padH - kH) / dH + 1;
-  long outputDepth  = (inputDepth + 2*padD - kD) / dD + 1;
+  long outputWidth  = (inputWidth  + 2*padH - kH) / dH + 1;
+  long outputHeight = (inputHeight + 2*padT - kT) / dT + 1;
+  long outputDepth  = (inputDepth  + 2*padW - kW) / dW + 1;
 
   // Batch size + input planes
   long batchSize = input->size[0];
@@ -347,7 +331,7 @@ void THNN_CudaVolumetricConvolution_updateGradInput(
   THCudaTensor_resize5d(state, gradInput, batchSize, nInputPlane, inputHeight, inputWidth, inputDepth);
 
   // Resize temporary columns
-  THCudaTensor_resize2d(state, gradColumns, nInputPlane*kW*kH*kD, outputDepth*outputHeight*outputWidth);
+  THCudaTensor_resize2d(state, gradColumns, nInputPlane*kH*kT*kW, outputDepth*outputHeight*outputWidth);
 
   // Helpers
   THCudaTensor *input_n = THCudaTensor_new(state);
@@ -384,7 +368,7 @@ void THNN_CudaVolumetricConvolution_updateGradInput(
     col2im3d(
       THCState_getCurrentStream(state),
       THCudaTensor_data(state, gradColumns),
-      nInputPlane, inputHeight, inputWidth, inputDepth, kH, kW, kD, padH, padW, padD, dH, dW, dD,
+      nInputPlane, inputHeight, inputWidth, inputDepth, kT, kH, kW, padT, padH, padW, dT, dH, dW,
       THCudaTensor_data(state, gradInput_n)
     );
   }
@@ -425,17 +409,9 @@ void THNN_CudaVolumetricConvolution_accGradParameters(
 
   int nOutputPlane = (int)gradWeight->size[0];
   int nInputPlane  = (int)gradWeight->size[1];
-
-  // reorder dimensions
-  int dD = dW;
-  dW = dH;
-  dH = dT;
-  int padD = padW;
-  padW = padH;
-  padH = padT;
-  int kH = (int)gradWeight->size[2];  // kT
-  int kW = (int)gradWeight->size[3];  // kH
-  int kD = (int)gradWeight->size[4];  // kW
+  int kT           = (int)gradWeight->size[2];
+  int kH           = (int)gradWeight->size[3];
+  int kW           = (int)gradWeight->size[4];
 
   THArgCheck(
     input->nDimension == 4 || input->nDimension == 5, 2,
@@ -454,9 +430,9 @@ void THNN_CudaVolumetricConvolution_accGradParameters(
   long inputWidth   = input->size[3];
   long inputHeight  = input->size[2];
   long inputDepth   = input->size[4];
-  long outputWidth  = (inputWidth  + 2*padW - kW) / dW + 1;
-  long outputHeight = (inputHeight + 2*padH - kH) / dH + 1;
-  long outputDepth  = (inputDepth  + 2*padD - kD) / dD + 1;
+  long outputWidth  = (inputWidth  + 2*padH - kH) / dH + 1;
+  long outputHeight = (inputHeight + 2*padT - kT) / dT + 1;
+  long outputDepth  = (inputDepth  + 2*padW - kW) / dW + 1;
 
   // Batch size + input planes
   long batchSize = input->size[0];
@@ -470,7 +446,7 @@ void THNN_CudaVolumetricConvolution_accGradParameters(
   }
 
   // Resize temporary columns
-  THCudaTensor_resize2d(state, columns, nInputPlane*kW*kH*kD, outputDepth*outputHeight*outputWidth);
+  THCudaTensor_resize2d(state, columns, nInputPlane*kH*kT*kW, outputDepth*outputHeight*outputWidth);
 
   // Helpers
   THCudaTensor *input_n = THCudaTensor_new(state);
@@ -487,7 +463,7 @@ void THNN_CudaVolumetricConvolution_accGradParameters(
     im3d2col(
       THCState_getCurrentStream(state),
       THCudaTensor_data(state, input_n),
-      nInputPlane, inputHeight, inputWidth, inputDepth, kH, kW, kD, padH, padW, padD, dH, dW, dD,
+      nInputPlane, inputHeight, inputWidth, inputDepth, kT, kH, kW, padT, padH, padW, dT, dH, dW,
       THCudaTensor_data(state, columns)
     );
 

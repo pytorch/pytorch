@@ -105,8 +105,8 @@ void THNN_CudaSpatialMaxPooling_updateOutput(THCState *state, THCudaTensor *inpu
   else {
     nOutputCols = floor(float(nInputCols - kW + 2*padW) / float(dW)) + 1;
     nOutputRows = floor(float(nInputRows - kH + 2*padH) / float(dH)) + 1;
-  }  
-  
+  }
+
   if (padW || padH)
   {
     // ensure that the last pooling starts inside the image
@@ -121,7 +121,7 @@ void THNN_CudaSpatialMaxPooling_updateOutput(THCState *state, THCudaTensor *inpu
 
   THCudaTensor_resize4d(state, output, batchSize, nInputPlane, nOutputRows, nOutputCols);
   THCudaTensor_resizeAs(state, indices, output);
-  
+
   float* indices_data = THCudaTensor_data(state, indices);
   float* output_data = THCudaTensor_data(state, output);
 
@@ -181,10 +181,10 @@ void THNN_CudaSpatialMaxPooling_updateGradInput(THCState *state, THCudaTensor *i
 
   gradOutput = THCudaTensor_newContiguous(state, gradOutput);
   THCudaTensor_resizeAs(state, gradInput, input);
-  
+
   int count = THCudaTensor_nElement(state, input);
 
-  MaxPoolBackward <<< GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state) >>> 
+  MaxPoolBackward <<< GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state) >>>
       (count,
       THCudaTensor_data(state, gradOutput),
       THCudaTensor_data(state, indices),

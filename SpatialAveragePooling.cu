@@ -84,7 +84,7 @@ void THNN_CudaSpatialAveragePooling_updateOutput(THCState *state, THCudaTensor *
   float* input_data = THCudaTensor_data(state, input);
 
   THCudaTensor_resize4d(state, output, batchSize, nInputPlane, nOutputRows, nOutputCols);
-  
+
   float* output_data = THCudaTensor_data(state, output);
 
   int count = THCudaTensor_nElement(state, output);
@@ -201,12 +201,12 @@ void THNN_CudaSpatialAveragePooling_updateGradInput(THCState *state, THCudaTenso
   }
 
   THCudaTensor_resizeAs(state, gradInput, input);
-  
+
   int count = THCudaTensor_nElement(state, input);
 
   if(count_include_pad)
     AvePoolBackward<float, true>
-      <<< GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state) >>> 
+      <<< GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state) >>>
         (count,
         THCudaTensor_data(state, gradOutput),
         batchSize, nInputPlane, nInputRows, nInputCols, nOutputRows, nOutputCols,
@@ -214,7 +214,7 @@ void THNN_CudaSpatialAveragePooling_updateGradInput(THCState *state, THCudaTenso
         THCudaTensor_data(state, gradInput));
   else
     AvePoolBackward<float, false>
-      <<< GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state) >>> 
+      <<< GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state) >>>
         (count,
         THCudaTensor_data(state, gradOutput),
         batchSize, nInputPlane, nInputRows, nInputCols, nOutputRows, nOutputCols,
