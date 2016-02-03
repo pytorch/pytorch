@@ -9,7 +9,7 @@ typedef struct THDiskFile__
     FILE *handle;
     char *name;
     int isNativeEncoding;
-	int longSize;
+    int longSize;
 
 } THDiskFile;
 
@@ -748,6 +748,7 @@ THFile *THPipeFile_new(const char *name, const char *mode, int isQuiet)
   self->name = THAlloc(strlen(name)+1);
   strcpy(self->name, name);
   self->isNativeEncoding = 1;
+  self->longSize = 0;
 
   self->file.vtable = &vtable;
   self->file.isQuiet = isQuiet;
