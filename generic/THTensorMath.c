@@ -1996,12 +1996,12 @@ LAB_IMPLEMENT_BASIC_FUNCTION(abs,abs)
   { \
     THArgCheck(tensor->nDimension > 0, 1, "empty Tensor"); \
     int sum = INIT_VALUE;                               \
-    TH_TENSOR_APPLY(real, tensor, sum OP *tensor_data;); \
+    TH_TENSOR_APPLY(real, tensor, sum = sum OP *tensor_data;); \
     return sum; \
   }
 
-TENSOR_IMPLEMENT_LOGICAL_SUM(logicalall, &=, 1)
-TENSOR_IMPLEMENT_LOGICAL_SUM(logicalany, |=, 0)
+TENSOR_IMPLEMENT_LOGICAL_SUM(logicalall, &&, 1)
+TENSOR_IMPLEMENT_LOGICAL_SUM(logicalany, ||, 0)
 
 #endif /* Byte only part */
 
