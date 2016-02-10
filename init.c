@@ -85,6 +85,15 @@
 #include "generic/Threshold.c"
 #include "THGenerateFloatTypes.h"
 
+#include "generic/TemporalConvolution.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/TemporalSubSampling.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/TemporalMaxPooling.c"
+#include "THGenerateFloatTypes.h"
+
 #include "generic/unfold.c"
 #include "THGenerateFloatTypes.h"
 
