@@ -343,6 +343,48 @@ TH_API void THNN_CudaThreshold_updateGradInput(
           double threshold,
           bool inplace);
 
+TH_API void THNN_CudaTemporalConvolution_updateOutput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *output,
+          THCudaTensor *weight,
+          THCudaTensor *bias,
+          int kW, int dW,
+          int inputFrameSize,
+          int outputFrameSize);
+
+TH_API void THNN_CudaTemporalConvolution_updateGradInput(
+          THCState* state,
+          THCudaTensor *input,
+          THCudaTensor *gradOutput,
+          THCudaTensor *gradInput,
+          THCudaTensor *weight,
+          int kW, int dW);
+
+TH_API void THNN_CudaTemporalConvolution_accGradParameters(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *gradOutput,
+          THCudaTensor *gradWeight,
+          THCudaTensor *gradBias,
+          int kW, int dW,
+          float scale);
+
+TH_API void THNN_CudaTemporalMaxPooling_updateOutput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *output,
+          THCudaTensor *indices,
+          int kW, int dW);
+
+TH_API void THNN_CudaTemporalMaxPooling_updateGradInput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *gradOutput,
+          THCudaTensor *gradInput,
+          THCudaTensor *indices,
+          int kW, int dW);
+
 TH_API void THNN_CudaSpatialConvolutionMM_updateOutput(
           THCState *state,
           THCudaTensor *input,
