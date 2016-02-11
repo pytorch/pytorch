@@ -19,8 +19,16 @@ void THTensor_(zero)(THTensor *r_)
 void THTensor_(maskedFill)(THTensor *tensor, THByteTensor *mask, real value)
 {
   TH_TENSOR_APPLY2(real, tensor, unsigned char, mask,
-                   if (*mask_data > 1) THError("Mask tensor can take 0 and 1 values only");
-                   else if (*mask_data == 1) *tensor_data = value;);
+                   if (*mask_data > 1)
+                   {
+                     THFree(mask_counter);
+                     THFree(tensor_counter);
+                     THError("Mask tensor can take 0 and 1 values only");
+                   }
+                   else if (*mask_data == 1)
+                   {
+                     *tensor_data = value;
+                   });
 }
 
 void THTensor_(maskedCopy)(THTensor *tensor, THByteTensor *mask, THTensor* src )
@@ -38,12 +46,17 @@ void THTensor_(maskedCopy)(THTensor *tensor, THByteTensor *mask, THTensor* src )
                    if (*mask_data > 1)
                    {
                      THTensor_(free)(srct);
+                     THFree(mask_counter);
+                     THFree(tensor_counter);
                      THError("Mask tensor can take 0 and 1 values only");
                    }
                    else if (*mask_data == 1)
                    {
-                     if (cntr == nelem) {
+                     if (cntr == nelem)
+                     {
                        THTensor_(free)(srct);
+                       THFree(mask_counter);
+                       THFree(tensor_counter);
                        THError("Number of elements of src < number of ones in mask");
                      }
                      *tensor_data = *src_data;
@@ -63,6 +76,8 @@ void THTensor_(maskedSelect)(THTensor *tensor, THTensor *src, THByteTensor *mask
   TH_TENSOR_APPLY2(real, src, unsigned char, mask,
                    if (*mask_data > 1)
                    {
+                     THFree(mask_counter);
+                     THFree(src_counter);
                      THError("Mask tensor can take 0 and 1 values only");
                    }
                    else if (*mask_data == 1)
@@ -298,7 +313,11 @@ void THTensor_(gather)(THTensor *tensor, THTensor *src, int dim, THLongTensor *i
                        for (i = 0; i < elems_per_row; ++i)
                        {
                          idx = *(index_data + i*index_stride);
-                         if (idx < 1 || idx > src_size) THError("Invalid index in gather");
+                         if (idx < 1 || idx > src_size)
+                         {
+                           THFree(TH_TENSOR_DIM_APPLY_counter);
+                           THError("Invalid index in gather");
+                         }
                          *(tensor_data + i*tensor_stride) = src_data[(idx - 1) * src_stride];
                        })
 }
@@ -319,7 +338,11 @@ void THTensor_(scatter)(THTensor *tensor, int dim, THLongTensor *index, THTensor
                        for (i = 0; i < elems_per_row; ++i)
                        {
                          idx = *(index_data + i*index_stride);
-                         if (idx < 1 || idx > tensor_size) THError("Invalid index in scatter");
+                         if (idx < 1 || idx > tensor_size)
+                         {
+                           THFree(TH_TENSOR_DIM_APPLY_counter);
+                           THError("Invalid index in scatter");
+                         }
                          tensor_data[(idx - 1) * tensor_stride] = *(src_data + i*src_stride);
                        })
 }
@@ -338,7 +361,11 @@ void THTensor_(scatterFill)(THTensor *tensor, int dim, THLongTensor *index, real
                        for (i = 0; i < elems_per_row; ++i)
                        {
                          idx = *(index_data + i*index_stride);
-                         if (idx < 1 || idx > tensor_size) THError("Invalid index in scatter");
+                         if (idx < 1 || idx > tensor_size)
+                         {
+                           THFree(TH_TENSOR_DIM_APPLY_counter);
+                           THError("Invalid index in scatter");
+                         }
                          tensor_data[(idx - 1) * tensor_stride] = val;
                        })
 }
