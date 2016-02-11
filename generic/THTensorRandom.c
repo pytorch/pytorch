@@ -106,7 +106,8 @@ void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTenso
         sum \
       );
     }
-    THArgCheck((sum > 0), 2, "invalid multinomial distribution (sum of probabilities <= 0)");
+    THArgCheckWithCleanup((sum > 0), THCleanup(THTensor_(free)(cum_dist);), 2,
+                          "invalid multinomial distribution (sum of probabilities <= 0)");
     /* normalize cumulative probability distribution so that last val is 1
     i.e. dosen't assume original prob_dist row sums to one */
     if ( (sum > 0) || ( ( sum < 1.00001) && (sum > 0.99999) ) )
