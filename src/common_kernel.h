@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2015, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2015-2016, NVIDIA CORPORATION. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -274,7 +274,7 @@ __device__ inline void ReduceOrCopy(const int tid,
   const int UNROLL2 = (UNROLL >= 2) ? (UNROLL / 2) : 1;
   const bool NOUNROLL2 = ((UNROLL / 2) == 0);
 
-  int Npreamble = AlignUp(dest0, alignof(PackType)) - dest0;
+  int Npreamble = (N<alignof(PackType)) ? N : AlignUp(dest0, alignof(PackType)) - dest0;
 
   // stage 0: check if we'll be able to use the fast, 64-bit aligned path.
   // If not, we'll just use the slow preamble path for the whole operation
