@@ -73,6 +73,9 @@
 #include "generic/SoftShrink.c"
 #include "THGenerateFloatTypes.h"
 
+#include "generic/SparseLinear.c"
+#include "THGenerateFloatTypes.h"
+
 #include "generic/Sqrt.c"
 #include "THGenerateFloatTypes.h"
 

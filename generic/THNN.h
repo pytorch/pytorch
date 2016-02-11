@@ -316,6 +316,43 @@ TH_API void THNN_(SoftShrink_updateGradInput)(
           THTensor *gradInput,
           real lambda);
 
+TH_API void THNN_(SparseLinear_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          THTensor *weight,
+          THTensor *bias,
+          THTensor *shardBuffer);
+TH_API void THNN_(SparseLinear_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          THTensor *weight);
+TH_API void THNN_(SparseLinear_accGradParameters)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradWeight,
+          THTensor *gradBias,
+          THTensor *weight,
+          THTensor *bias,
+          real weightDecay,
+          real scale);
+TH_API void THNN_(SparseLinear_zeroGradParameters)(
+          THNNState *state,
+          THTensor *gradWeight,
+          THTensor *gradBias,
+          THTensor *lastInput);
+TH_API void THNN_(SparseLinear_updateParameters)(
+          THNNState *state,
+          THTensor *weight,
+          THTensor *bias,
+          THTensor *gradWeight,
+          THTensor *gradBias,
+          THTensor *lastInput,
+          real learningRate);
+
 TH_API void THNN_(Sqrt_updateOutput)(
           THNNState *state,
           THTensor *input,
