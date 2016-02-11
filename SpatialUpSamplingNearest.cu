@@ -1,6 +1,4 @@
-#include "luaT.h"
-#include "THC.h"
-#include "utils.h"
+#include "THCUNN.h"
 
 #include <thrust/transform.h>
 #include <thrust/reduce.h>
@@ -59,13 +57,9 @@ __global__ void upscale(float *input, float *output, long no_elements,
 }
 
 
-static int cunn_SpatialUpSamplingNearest_updateOutput(lua_State *L)
+void THNN_CudaSpatialUpSamplingNearest_updateOutput(THCState *state, THCudaTensor *input, THCudaTensor *output, int scale_factor)
 {
-  THCState *state = getCutorchState(L);
-  THCudaTensor *input = (THCudaTensor *)luaT_checkudata(L, 2, "torch.CudaTensor");
-  THCudaTensor *output = (THCudaTensor *)luaT_getfieldcheckudata(L, 1, "output", "torch.CudaTensor");
   THCudaTensor_zero(state, output);
-  int scale_factor = luaT_getfieldcheckint(L, 1, "scale_factor");
 
   THAssert(THCudaTensor_checkGPU(state, 2, input, output));
 
@@ -119,8 +113,6 @@ static int cunn_SpatialUpSamplingNearest_updateOutput(lua_State *L)
 
   // final cut:
   THCudaTensor_free(state, input);
-
-  return 1;
 }
 
 /*
@@ -142,13 +134,8 @@ __global__ void downscale(float *gradInput_data, float *gradOutput_data, long no
 }
 
 
-static int cunn_SpatialUpSamplingNearest_updateGradInput(lua_State *L)
+void THNN_CudaSpatialUpSamplingNearest_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput, THCudaTensor *gradInput, int scale_factor)
 {
-  THCState *state = getCutorchState(L);
-  THCudaTensor *gradOutput = (THCudaTensor *)luaT_checkudata(L, 3, "torch.CudaTensor");
-  THCudaTensor *gradInput  = (THCudaTensor *)luaT_getfieldcheckudata(L, 1, "gradInput", "torch.CudaTensor");
-  int scale_factor = luaT_getfieldcheckint(L, 1, "scale_factor");
-
   THAssert(THCudaTensor_checkGPU(state, 2, gradOutput, gradInput));
 
   THCudaTensor_zero(state, gradInput);
@@ -198,19 +185,4 @@ static int cunn_SpatialUpSamplingNearest_updateGradInput(lua_State *L)
     printf("error in SpatialUpSamplingNearest.updateOutput: %s\n", cudaGetErrorString(err));
     THError("aborting");
   }
-
-  return 1;
-}
-
-static const struct luaL_Reg cunn_SpatialUpSamplingNearest__ [] = {
-  {"SpatialUpSamplingNearest_updateOutput", cunn_SpatialUpSamplingNearest_updateOutput},
-  {"SpatialUpSamplingNearest_updateGradInput", cunn_SpatialUpSamplingNearest_updateGradInput},
-  {NULL, NULL}
-};
-
-void cunn_SpatialUpSamplingNearest_init(lua_State *L)
-{
-  luaT_pushmetatable(L, "torch.CudaTensor");
-  luaT_registeratname(L, cunn_SpatialUpSamplingNearest__, "nn");
-  lua_pop(L,1);
 }

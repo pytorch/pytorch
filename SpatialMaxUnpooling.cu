@@ -1,4 +1,4 @@
-#include "utils.h"
+#include "THCUNN.h"
 #include "common.h"
 
 template <typename Dtype>
@@ -27,17 +27,10 @@ __global__ void MaxUnpoolBackward(const int nthreads, const Dtype* top_diff, con
   }
 }
 
-static int cunn_SpatialMaxUnpooling_updateOutput(lua_State *L)
+void THNN_CudaSpatialMaxUnpooling_updateOutput(THCState *state, THCudaTensor *input, THCudaTensor *output, THCudaTensor *indices, int owidth, int oheight)
 {
-  THCState *state = getCutorchState(L);
-  THCudaTensor *input = (THCudaTensor *)luaT_checkudata(L, 2, "torch.CudaTensor");
-  int owidth = luaT_getfieldcheckint(L, 1, "owidth");
-  int oheight = luaT_getfieldcheckint(L, 1, "oheight");
-  THCudaTensor *output = (THCudaTensor *)luaT_getfieldcheckudata(L, 1, "output", "torch.CudaTensor");
-  THCudaTensor *indices = (THCudaTensor *)luaT_getfieldcheckudata(L, 1, "indices", "torch.CudaTensor");
-
   THAssert(THCudaTensor_checkGPU(state, 3, input, output, indices));
-  luaL_argcheck(L, input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch) tensor expected");
+  THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch) tensor expected");
 
   long nInputCols, nInputRows, nInputPlane, batchSize;
 
@@ -77,19 +70,10 @@ static int cunn_SpatialMaxUnpooling_updateOutput(lua_State *L)
     printf("error in SpatialMaxUnpooling.updateOutput: %s\n", cudaGetErrorString(err));
     THError("aborting");
   }
-  return 1;
 }
 
-static int cunn_SpatialMaxUnpooling_updateGradInput(lua_State *L)
+void THNN_CudaSpatialMaxUnpooling_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput, THCudaTensor *gradInput, THCudaTensor *indices, int owidth, int oheight)
 {
-  THCState *state = getCutorchState(L);
-  THCudaTensor *input = (THCudaTensor *)luaT_checkudata(L, 2, "torch.CudaTensor");
-  THCudaTensor *gradOutput = (THCudaTensor *)luaT_checkudata(L, 3, "torch.CudaTensor");
-  int owidth = luaT_getfieldcheckint(L, 1, "owidth");
-  int oheight = luaT_getfieldcheckint(L, 1, "oheight");
-  THCudaTensor *gradInput = (THCudaTensor *)luaT_getfieldcheckudata(L, 1, "gradInput", "torch.CudaTensor");
-  THCudaTensor *indices = (THCudaTensor *)luaT_getfieldcheckudata(L, 1, "indices", "torch.CudaTensor");
-
   THAssert(THCudaTensor_checkGPU(state, 4, input, gradOutput, indices, gradInput));
 
   long nInputCols, nInputRows, nInputPlane, batchSize;
@@ -128,19 +112,4 @@ static int cunn_SpatialMaxUnpooling_updateGradInput(lua_State *L)
   // clean
   THCudaTensor_free(state, input);
   THCudaTensor_free(state, gradOutput);
-
-  return 1;
-}
-
-static const struct luaL_Reg cunn_SpatialMaxUnpooling__ [] = {
-  {"SpatialMaxUnpooling_updateOutput", cunn_SpatialMaxUnpooling_updateOutput},
-  {"SpatialMaxUnpooling_updateGradInput", cunn_SpatialMaxUnpooling_updateGradInput},
-  {NULL, NULL}
-};
-
-void cunn_SpatialMaxUnpooling_init(lua_State *L)
-{
-  luaT_pushmetatable(L, "torch.CudaTensor");
-  luaT_registeratname(L, cunn_SpatialMaxUnpooling__, "nn");
-  lua_pop(L,1);
 }

@@ -1,32 +1,25 @@
-#include "utils.h"
+#include "THCUNN.h"
 #include "im2col.h"
 
-static int cunn_SpatialConvolutionLocal_updateOutput(lua_State *L) {
-  THCState *state = getCutorchState(L);
-  // Input
-  THCudaTensor *input = (THCudaTensor*)luaT_checkudata(L, 2, "torch.CudaTensor");
-
-  // Params:
-  long inputWidth = luaT_getfieldcheckint(L, 1, "iW");
-  long inputHeight = luaT_getfieldcheckint(L, 1, "iH");
-  long outputWidth = luaT_getfieldcheckint(L, 1, "oW");
-  long outputHeight = luaT_getfieldcheckint(L, 1, "oH");
-  int dW = luaT_getfieldcheckint(L, 1, "dW");
-  int dH = luaT_getfieldcheckint(L, 1, "dH");
-  int kW = luaT_getfieldcheckint(L, 1, "kW");
-  int kH = luaT_getfieldcheckint(L, 1, "kH");
-  long nInputPlane = luaT_getfieldcheckint(L, 1, "nInputPlane");
-  long nOutputPlane = luaT_getfieldcheckint(L, 1, "nOutputPlane");
-  int padW = luaT_getfieldcheckint(L, 1, "padW");
-  int padH = luaT_getfieldcheckint(L, 1, "padH");
-
-  THCudaTensor *weight = (THCudaTensor*)luaT_getfieldcheckudata(L, 1, "weight", "torch.CudaTensor");
-  THCudaTensor *bias = (THCudaTensor*)luaT_getfieldcheckudata(L, 1, "bias", "torch.CudaTensor");
-  THCudaTensor *finput = (THCudaTensor*)luaT_getfieldcheckudata(L, 1, "finput", "torch.CudaTensor");
-  THCudaTensor *output = (THCudaTensor*)luaT_getfieldcheckudata(L, 1, "output", "torch.CudaTensor");
-
+void THNN_CudaSpatialConvolutionLocal_updateOutput(
+    THCState *state,
+    THCudaTensor *input,
+    THCudaTensor *output,
+    THCudaTensor *weight,
+    THCudaTensor *bias,
+    THCudaTensor *finput,
+    THCudaTensor *fgradInput,
+    int kW, int kH,
+    int dW, int dH,
+    int padW, int padH,
+    long inputWidth, long inputHeight,
+    long outputWidth, long outputHeight)
+{
   THAssert(THCudaTensor_checkGPU(state, 5, input, output, weight,
                                  bias, finput));
+
+  long nInputPlane = THCudaTensor_size(state,weight,2)/(kW*kH);
+  long nOutputPlane = THCudaTensor_size(state,weight,1);
 
   int batch = 1;
   if (input->nDimension == 3) {
@@ -114,38 +107,28 @@ static int cunn_SpatialConvolutionLocal_updateOutput(lua_State *L) {
     THCudaTensor_resize3d(state, output, nOutputPlane, outputHeight, outputWidth);
     THCudaTensor_resize3d(state, input, nInputPlane, inputHeight, inputWidth);
   }
-
-  // return output
-  return 1;
 }
 
-static int cunn_SpatialConvolutionLocal_updateGradInput(lua_State *L) {
-  THCState *state = getCutorchState(L);
-  // Inputs
-  THCudaTensor *input = (THCudaTensor *)luaT_checkudata(L, 2, "torch.CudaTensor");
-  THCudaTensor *gradOutput = (THCudaTensor *)luaT_checkudata(L, 3, "torch.CudaTensor");
-
-  // Params
-  long inputWidth = luaT_getfieldcheckint(L, 1, "iW");
-  long inputHeight = luaT_getfieldcheckint(L, 1, "iH");
-  long outputWidth = luaT_getfieldcheckint(L, 1, "oW");
-  long outputHeight = luaT_getfieldcheckint(L, 1, "oH");
-  int dW = luaT_getfieldcheckint(L, 1, "dW");
-  int dH = luaT_getfieldcheckint(L, 1, "dH");
-  int kW = luaT_getfieldcheckint(L, 1, "kW");
-  int kH = luaT_getfieldcheckint(L, 1, "kH");
-  long nInputPlane = luaT_getfieldcheckint(L, 1, "nInputPlane");
-  long nOutputPlane = luaT_getfieldcheckint(L, 1, "nOutputPlane");
-  int padW = luaT_getfieldcheckint(L, 1, "padW");
-  int padH = luaT_getfieldcheckint(L, 1, "padH");
-
-  THCudaTensor *weight = (THCudaTensor *)luaT_getfieldcheckudata(L, 1, "weight", "torch.CudaTensor");
-  THCudaTensor *fgradInput = (THCudaTensor*)luaT_getfieldcheckudata(L, 1, "fgradInput", "torch.CudaTensor");
-  THCudaTensor *gradInput = (THCudaTensor *)luaT_getfieldcheckudata(L, 1, "gradInput", "torch.CudaTensor");
-
+void THNN_CudaSpatialConvolutionLocal_updateGradInput(
+    THCState *state,
+    THCudaTensor *input,
+    THCudaTensor *gradOutput,
+    THCudaTensor *gradInput,
+    THCudaTensor *weight,
+    THCudaTensor *finput,
+    THCudaTensor *fgradInput,
+    int kW, int kH,
+    int dW, int dH,
+    int padW, int padH,
+    long inputWidth, long inputHeight,
+    long outputWidth, long outputHeight)
+{
   THAssert(THCudaTensor_checkGPU(state, 5, input, gradOutput, weight,
                                  fgradInput, gradInput));
                                  
+  long nInputPlane = THCudaTensor_size(state,weight,2)/(kW*kH);
+  long nOutputPlane = THCudaTensor_size(state,weight,1);
+
   int batch = 1;
   if (input->nDimension == 3) {
     // Force batch
@@ -234,38 +217,28 @@ static int cunn_SpatialConvolutionLocal_updateGradInput(lua_State *L) {
   }
 
   THCudaTensor_transpose(state, weight, weight, 1, 2);
-
-  // Return gradInput
-  return 1;
 }
 
-static int cunn_SpatialConvolutionLocal_accGradParameters(lua_State *L) {
-  THCState *state = getCutorchState(L);
-  // Inputs
-  THCudaTensor *input = (THCudaTensor *)luaT_checkudata(L, 2, "torch.CudaTensor");
-  THCudaTensor *gradOutput = (THCudaTensor *)luaT_checkudata(L, 3, "torch.CudaTensor");
-
-  // Params
-  long inputWidth = luaT_getfieldcheckint(L, 1, "iW");
-  long inputHeight = luaT_getfieldcheckint(L, 1, "iH");
-  long outputWidth = luaT_getfieldcheckint(L, 1, "oW");
-  long outputHeight = luaT_getfieldcheckint(L, 1, "oH");
-  int dW = luaT_getfieldcheckint(L, 1, "dW");
-  int dH = luaT_getfieldcheckint(L, 1, "dH");
-  int kW = luaT_getfieldcheckint(L, 1, "kW");
-  int kH = luaT_getfieldcheckint(L, 1, "kH");
-  long nInputPlane = luaT_getfieldcheckint(L, 1, "nInputPlane");
-  long nOutputPlane = luaT_getfieldcheckint(L, 1, "nOutputPlane");
-  int padW = luaT_getfieldcheckint(L, 1, "padW");
-  int padH = luaT_getfieldcheckint(L, 1, "padH");
-  float scale = luaL_optnumber(L, 4, 1);
-
-  THCudaTensor *gradWeight = (THCudaTensor *)luaT_getfieldcheckudata(L, 1, "gradWeight", "torch.CudaTensor");
-  THCudaTensor *gradBias = (THCudaTensor *)luaT_getfieldcheckudata(L, 1, "gradBias", "torch.CudaTensor");
-  THCudaTensor *finput = (THCudaTensor*)luaT_getfieldcheckudata(L, 1, "finput", "torch.CudaTensor");
-
+void THNN_CudaSpatialConvolutionLocal_accGradParameters(
+    THCState *state,
+    THCudaTensor *input,
+    THCudaTensor *gradOutput,
+    THCudaTensor *gradWeight,
+    THCudaTensor *gradBias,
+    THCudaTensor *finput,
+    THCudaTensor *fgradInput,
+    int kW, int kH,
+    int dW, int dH,
+    int padW, int padH,
+    long inputWidth, long inputHeight,
+    long outputWidth, long outputHeight,
+    float scale)
+{  
   THAssert(THCudaTensor_checkGPU(state, 5, input, gradOutput, gradWeight,
                                  gradBias, finput));
+
+  long nInputPlane = THCudaTensor_size(state,gradWeight,2)/(kW*kH);
+  long nOutputPlane = THCudaTensor_size(state,gradWeight,1);
 
   int batch = 1;
   if (input->nDimension == 3) {
@@ -345,21 +318,4 @@ static int cunn_SpatialConvolutionLocal_accGradParameters(lua_State *L) {
     THCudaTensor_resize3d(state, gradOutput, nOutputPlane, outputHeight, outputWidth);
     THCudaTensor_resize3d(state, input, nInputPlane, inputHeight, inputWidth);
   }
-
-  // Return nothing
-  return 0;
-}
-
-static const struct luaL_Reg cunn_SpatialConvolutionLocal__ [] = {
-  {"SpatialConvolutionLocal_updateOutput", cunn_SpatialConvolutionLocal_updateOutput},
-  {"SpatialConvolutionLocal_updateGradInput", cunn_SpatialConvolutionLocal_updateGradInput},
-  {"SpatialConvolutionLocal_accGradParameters", cunn_SpatialConvolutionLocal_accGradParameters},
-  {NULL, NULL}
-};
-
-void cunn_SpatialConvolutionLocal_init(lua_State *L)
-{
-  luaT_pushmetatable(L, "torch.CudaTensor");
-  luaT_registeratname(L, cunn_SpatialConvolutionLocal__, "nn");
-  lua_pop(L,1);
 }

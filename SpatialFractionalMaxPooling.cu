@@ -1,4 +1,4 @@
-#include "utils.h"
+#include "THCUNN.h"
 #include "common.h"
 #include "THCDeviceTensor.cuh"
 #include "THCDeviceTensorUtils.cuh"
@@ -71,24 +71,22 @@ __global__ void SpatialFractionalMaxPooling_updateOutput(
   }
 }
 
-static int cunn_SpatialFractionalMaxPooling_updateOutput(lua_State *L) {
-  THCState *state = getCutorchState(L);
-  THCudaTensor* output = (THCudaTensor*) luaT_checkudata(L, 1, "torch.CudaTensor");
-  THCudaTensor* input = (THCudaTensor*) luaT_checkudata(L, 2, "torch.CudaTensor");
-  int outputW = luaL_checknumber(L, 3);
-  int outputH = luaL_checknumber(L, 4);
-  int poolSizeW = luaL_checknumber(L, 5);
-  int poolSizeH = luaL_checknumber(L, 6);
-  THCudaTensor* indices = (THCudaTensor*) luaT_checkudata(L, 7, "torch.CudaTensor");
-  THCudaTensor* randomSamples = (THCudaTensor*) luaT_checkudata(L, 8, "torch.CudaTensor");
-
+void THNN_CudaSpatialFractionalMaxPooling_updateOutput(
+    THCState *state,
+    THCudaTensor *input,
+    THCudaTensor *output,
+    int outputW, int outputH,
+    int poolSizeW, int poolSizeH,
+    THCudaTensor *indices,
+    THCudaTensor *randomSamples)
+{
   int planeDim = 0;
   int dimh = 1;
   int dimw = 2;
   long numBatch = 1;
 
   long numInputDims = THCudaTensor_nDimension(state, input);
-  luaL_argcheck(L, numInputDims == 3 || numInputDims == 4, 2,
+  THArgCheck(numInputDims == 3 || numInputDims == 4, 2,
                 "3D or 4D (batch mode) tensor expected");
 
   if (numInputDims == 4) {
@@ -103,9 +101,9 @@ static int cunn_SpatialFractionalMaxPooling_updateOutput(lua_State *L) {
   long inputH = THCudaTensor_size(state, input, dimh);
   long inputW = THCudaTensor_size(state, input, dimw);
 
-  luaL_argcheck(L, outputH + poolSizeH - 1 < inputH, 6,
+  THArgCheck(outputH + poolSizeH - 1 < inputH, 6,
                 "poolSizeH too large relative to input height");
-  luaL_argcheck(L, outputW + poolSizeW - 1 < inputW, 5,
+  THArgCheck(outputW + poolSizeW - 1 < inputW, 5,
                 "poolSizeW too large relative to input width");
 
   THCDeviceTensor<float, 4> devInput;
@@ -160,8 +158,6 @@ static int cunn_SpatialFractionalMaxPooling_updateOutput(lua_State *L) {
       // dynamic pool width
       SFMP_UPDATE_OUTPUT_CASE(-1);
   }
-
-  return 0;
 }
 
 __global__ void SpatialFractionalMaxPooling_updateGradInput(
@@ -189,17 +185,15 @@ __global__ void SpatialFractionalMaxPooling_updateGradInput(
   }
 }
 
-static int cunn_SpatialFractionalMaxPooling_updateGradInput(lua_State *L) {
-  THCState *state = getCutorchState(L);
-  THCudaTensor* gradInput = (THCudaTensor*) luaT_checkudata(L, 1, "torch.CudaTensor");
-  THCudaTensor* input = (THCudaTensor*) luaT_checkudata(L, 2, "torch.CudaTensor");
-  THCudaTensor* gradOutput = (THCudaTensor*) luaT_checkudata(L, 3, "torch.CudaTensor");
-  long outputW = luaL_checknumber(L, 4);
-  long outputH = luaL_checknumber(L, 5);
-  int poolSizeW = luaL_checknumber(L, 6);
-  int poolSizeH = luaL_checknumber(L, 7);
-  THCudaTensor* indices = (THCudaTensor*) luaT_checkudata(L, 8, "torch.CudaTensor");
-
+void THNN_CudaSpatialFractionalMaxPooling_updateGradInput(
+    THCState *state,
+    THCudaTensor *input,
+    THCudaTensor *gradOutput,
+    THCudaTensor *gradInput,
+    int outputW, int outputH,
+    int poolSizeW, int poolSizeH,
+    THCudaTensor *indices)
+{
   int dimh = 1;
   int dimw = 2;
 
@@ -213,9 +207,9 @@ static int cunn_SpatialFractionalMaxPooling_updateGradInput(lua_State *L) {
   long inputH = THCudaTensor_size(state, input, dimh);
   long inputW = THCudaTensor_size(state, input, dimw);
 
-  luaL_argcheck(L, outputH == THCudaTensor_size(state, gradOutput, dimh), 3,
+  THArgCheck(outputH == THCudaTensor_size(state, gradOutput, dimh), 3,
                 "gradOutput height unexpected");
-  luaL_argcheck(L, outputW == THCudaTensor_size(state, gradOutput, dimw), 3,
+  THArgCheck(outputW == THCudaTensor_size(state, gradOutput, dimw), 3,
                 "gradOutput width unexpected");
 
   /* resize */
@@ -248,19 +242,4 @@ static int cunn_SpatialFractionalMaxPooling_updateGradInput(lua_State *L) {
   SpatialFractionalMaxPooling_updateGradInput
     <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
       devGradInput, devGradOutput, devIndices);
-
-  return 0;
-}
-
-static const struct luaL_Reg cunn_SpatialFractionalMaxPooling__ [] = {
-  {"SpatialFractionalMaxPooling_updateOutput", cunn_SpatialFractionalMaxPooling_updateOutput},
-  {"SpatialFractionalMaxPooling_updateGradInput", cunn_SpatialFractionalMaxPooling_updateGradInput},
-  {NULL, NULL}
-};
-
-void cunn_SpatialFractionalMaxPooling_init(lua_State *L)
-{
-  luaT_pushmetatable(L, "torch.CudaTensor");
-  luaT_registeratname(L, cunn_SpatialFractionalMaxPooling__, "nn");
-  lua_pop(L,1);
 }

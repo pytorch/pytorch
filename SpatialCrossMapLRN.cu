@@ -1,4 +1,4 @@
-#include "utils.h"
+#include "THCUNN.h"
 #include "common.h"
 
 template <typename Dtype>
@@ -192,47 +192,30 @@ void LRNbackward(THCState* state, THCudaTensor* input, THCudaTensor* output,
   THCudaTensor_free(state, gradOutput);
 }
 
-static int cunn_SpatialCrossMapLRN_updateOutput(lua_State *L)
+void THNN_CudaSpatialCrossMapLRN_updateOutput(
+    THCState *state,
+    THCudaTensor *input,
+    THCudaTensor *output,
+    THCudaTensor *scale,
+    int size,
+    float alpha,
+    float beta,
+    float k)
 {
-  THCState *state = getCutorchState(L);
-  THCudaTensor *input = (THCudaTensor *)luaT_checkudata(L, 2, "torch.CudaTensor");
-  int size = luaT_getfieldcheckint(L, 1, "size");
-  float alpha = luaT_getfieldchecknumber(L, 1, "alpha");
-  float beta = luaT_getfieldchecknumber(L, 1, "beta");
-  float k = luaT_getfieldchecknumber(L, 1, "k");
-  THCudaTensor *output = (THCudaTensor *)luaT_getfieldcheckudata(L, 1, "output", "torch.CudaTensor");
-  THCudaTensor *scale = (THCudaTensor *)luaT_getfieldcheckudata(L, 1, "scale", "torch.CudaTensor");
-
   LRNforward(state, input, output, scale, size, alpha, beta, k);
-  return 1;
 }
 
-static int cunn_SpatialCrossMapLRN_updateGradInput(lua_State *L)
+void THNN_CudaSpatialCrossMapLRN_updateGradInput(
+    THCState *state,
+    THCudaTensor *input,
+    THCudaTensor *gradOutput,
+    THCudaTensor *gradInput,
+    THCudaTensor *scale,
+    THCudaTensor *output,
+    int size,
+    float alpha,
+    float beta,
+    float k)
 {
-  THCState *state = getCutorchState(L);
-  THCudaTensor *input = (THCudaTensor *)luaT_checkudata(L, 2, "torch.CudaTensor");
-  THCudaTensor *gradOutput = (THCudaTensor *)luaT_checkudata(L, 3, "torch.CudaTensor");
-  int size = luaT_getfieldcheckint(L, 1, "size");
-  float alpha = luaT_getfieldchecknumber(L, 1, "alpha");
-  float beta = luaT_getfieldchecknumber(L, 1, "beta");
-  float k = luaT_getfieldchecknumber(L, 1, "k");
-  THCudaTensor *output = (THCudaTensor *)luaT_getfieldcheckudata(L, 1, "output", "torch.CudaTensor");
-  THCudaTensor *scale = (THCudaTensor *)luaT_getfieldcheckudata(L, 1, "scale", "torch.CudaTensor");
-  THCudaTensor *gradInput = (THCudaTensor *)luaT_getfieldcheckudata(L, 1, "gradInput", "torch.CudaTensor");
-
   LRNbackward(state, input, output, gradOutput, gradInput, scale, size, alpha, beta, k);
-  return 1;
-}
-
-static const struct luaL_Reg cunn_SpatialCrossMapLRN__ [] = {
-  {"SpatialCrossMapLRN_updateOutput", cunn_SpatialCrossMapLRN_updateOutput},
-  {"SpatialCrossMapLRN_updateGradInput", cunn_SpatialCrossMapLRN_updateGradInput},
-  {NULL, NULL}
-};
-
-void cunn_SpatialCrossMapLRN_init(lua_State *L)
-{
-  luaT_pushmetatable(L, "torch.CudaTensor");
-  luaT_registeratname(L, cunn_SpatialCrossMapLRN__, "nn");
-  lua_pop(L,1);
 }

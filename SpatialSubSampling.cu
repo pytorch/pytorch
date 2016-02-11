@@ -1,4 +1,4 @@
-#include "utils.h"
+#include "THCUNN.h"
 
 #define CUDA_MAX_THREADS 1024   // this is safe, in reality 256 is our limit
 
@@ -240,27 +240,17 @@ __global__ void subgradinputAtomic(float *gradInput, float *gradOutput, float *w
   }
 }
 
-static int cunn_SpatialSubSampling_updateOutput(lua_State *L)
+void THNN_CudaSpatialSubSampling_updateOutput(THCState *state, THCudaTensor *input, THCudaTensor *output, THCudaTensor *weight, THCudaTensor *bias, int kW, int kH, int dW, int dH)
 {
-  THCState *state = getCutorchState(L);
-  THCudaTensor *input = (THCudaTensor *)luaT_checkudata(L, 2, "torch.CudaTensor");
-  int kW = luaT_getfieldcheckint(L, 1, "kW");
-  int kH = luaT_getfieldcheckint(L, 1, "kH");
-  int dW = luaT_getfieldcheckint(L, 1, "dW");
-  int dH = luaT_getfieldcheckint(L, 1, "dH");
-  int nInputPlane = luaT_getfieldcheckint(L, 1, "nInputPlane");
-
-  THCudaTensor *weight = (THCudaTensor *)luaT_getfieldcheckudata(L, 1, "weight", "torch.CudaTensor");
-  THCudaTensor *bias = (THCudaTensor *)luaT_getfieldcheckudata(L, 1, "bias", "torch.CudaTensor");
-  THCudaTensor *output = (THCudaTensor *)luaT_getfieldcheckudata(L, 1, "output", "torch.CudaTensor");
-
   float *weight_data = THCudaTensor_data(state, weight);
   float *bias_data = THCudaTensor_data(state, bias);
   float *output_data;
   float *input_data;
 
+  int nInputPlane = THCudaTensor_size(state, weight, 0);
+
   THAssert(THCudaTensor_checkGPU(state, 4, input, output, weight, bias));
-  luaL_argcheck(L, input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch) tensor expected");
+  THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch) tensor expected");
 
   if (input->nDimension == 3) {
     long nInputCols = input->size[2];
@@ -268,8 +258,8 @@ static int cunn_SpatialSubSampling_updateOutput(lua_State *L)
     long nOutputCols = (nInputCols - kW) / dW + 1;
     long nOutputRows = (nInputRows - kH) / dH + 1;
 
-    luaL_argcheck(L, input->size[0] == nInputPlane, 2, "invalid number of input planes");
-    luaL_argcheck(L, nInputCols >= kW && nInputRows >= kH, 2, "input image smaller than kernel size");
+    THArgCheck(input->size[0] == nInputPlane, 2, "invalid number of input planes");
+    THArgCheck(nInputCols >= kW && nInputRows >= kH, 2, "input image smaller than kernel size");
 
     input = THCudaTensor_newContiguous(state, input);
     input_data = THCudaTensor_data(state, input);
@@ -294,8 +284,8 @@ static int cunn_SpatialSubSampling_updateOutput(lua_State *L)
     long nOutputCols = (nInputCols - kW) / dW + 1;
     long nOutputRows = (nInputRows - kH) / dH + 1;
 
-    luaL_argcheck(L, input->size[1] == nInputPlane, 2, "invalid number of input planes");
-    luaL_argcheck(L, nInputCols >= kW && nInputRows >= kH, 2, "input image smaller than kernel size");
+    THArgCheck(input->size[1] == nInputPlane, 2, "invalid number of input planes");
+    THArgCheck(nInputCols >= kW && nInputRows >= kH, 2, "input image smaller than kernel size");
 
     input = THCudaTensor_newContiguous(state, input);
     input_data = THCudaTensor_data(state, input);
@@ -324,24 +314,14 @@ static int cunn_SpatialSubSampling_updateOutput(lua_State *L)
     printf("error in SpatialSubsampling.updateOutput: %s\n", cudaGetErrorString(err));
     THError("aborting");
   }
-  return 1;
 }
 
-static int cunn_SpatialSubSampling_updateGradInput(lua_State *L)
+void THNN_CudaSpatialSubSampling_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput, THCudaTensor *gradInput, THCudaTensor *weight, int kW, int kH, int dW, int dH)
 {
-  THCState *state = getCutorchState(L);
-  THCudaTensor *input = (THCudaTensor *)luaT_checkudata(L, 2, "torch.CudaTensor");
-  THCudaTensor *gradOutput = (THCudaTensor *)luaT_checkudata(L, 3, "torch.CudaTensor");
-  int kW = luaT_getfieldcheckint(L, 1, "kW");
-  int kH = luaT_getfieldcheckint(L, 1, "kH");
-  int dW = luaT_getfieldcheckint(L, 1, "dW");
-  int dH = luaT_getfieldcheckint(L, 1, "dH");
-  int nInputPlane = luaT_getfieldcheckint(L, 1, "nInputPlane");
-
-  THCudaTensor *weight = (THCudaTensor *)luaT_getfieldcheckudata(L, 1, "weight", "torch.CudaTensor");
-  THCudaTensor *gradInput = (THCudaTensor *)luaT_getfieldcheckudata(L, 1, "gradInput", "torch.CudaTensor");
-
   THAssert(THCudaTensor_checkGPU(state, 4, input, gradOutput, weight, gradInput));
+
+  int nInputPlane = THCudaTensor_size(state, weight, 0);
+
   if (input->nDimension == 3) {
     long nInputCols = input->size[2];
     long nInputRows = input->size[1];
@@ -402,25 +382,13 @@ static int cunn_SpatialSubSampling_updateGradInput(lua_State *L)
     printf("error in SpatialSubsampling.updateGradInput: %s\n", cudaGetErrorString(err));
     THError("aborting");
   }
-  return 1;
 }
 
-static int cunn_SpatialSubSampling_accGradParameters(lua_State *L)
+void THNN_CudaSpatialSubSampling_accGradParameters(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput, THCudaTensor *gradWeight, THCudaTensor *gradBias, int kW, int kH, int dW, int dH, float scale)
 {
-  THCState *state = getCutorchState(L);
-  THCudaTensor *input = (THCudaTensor *)luaT_checkudata(L, 2, "torch.CudaTensor");
-  THCudaTensor *gradOutput = (THCudaTensor *)luaT_checkudata(L, 3, "torch.CudaTensor");
-  int kW = luaT_getfieldcheckint(L, 1, "kW");
-  int kH = luaT_getfieldcheckint(L, 1, "kH");
-  int dW = luaT_getfieldcheckint(L, 1, "dW");
-  int dH = luaT_getfieldcheckint(L, 1, "dH");
-  int nInputPlane = luaT_getfieldcheckint(L, 1, "nInputPlane");
-  float scale = luaL_optnumber(L, 4, 1);
-
-  THCudaTensor *gradWeight = (THCudaTensor *)luaT_getfieldcheckudata(L, 1, "gradWeight", "torch.CudaTensor");
-  THCudaTensor *gradBias = (THCudaTensor *)luaT_getfieldcheckudata(L, 1, "gradBias", "torch.CudaTensor");
-
   THAssert(THCudaTensor_checkGPU(state, 4, input, gradOutput, gradWeight, gradBias));
+
+  int nInputPlane = THCudaTensor_size(state, gradWeight, 0);
 
   if (input->nDimension == 3) {
     long nInputCols = input->size[2];
@@ -479,21 +447,6 @@ static int cunn_SpatialSubSampling_accGradParameters(lua_State *L)
     printf("error in SpatialSubsampling.accGradParameters: %s\n", cudaGetErrorString(err));
     THError("aborting");
   }
-  return 0;
-}
-
-static const struct luaL_Reg cunn_SpatialSubSampling__ [] = {
-  {"SpatialSubSampling_updateOutput", cunn_SpatialSubSampling_updateOutput},
-  {"SpatialSubSampling_updateGradInput", cunn_SpatialSubSampling_updateGradInput},
-  {"SpatialSubSampling_accGradParameters", cunn_SpatialSubSampling_accGradParameters},
-  {NULL, NULL}
-};
-
-void cunn_SpatialSubSampling_init(lua_State *L)
-{
-  luaT_pushmetatable(L, "torch.CudaTensor");
-  luaT_registeratname(L, cunn_SpatialSubSampling__, "nn");
-  lua_pop(L,1);
 }
 
 #undef CUDA_MAX_THREADS

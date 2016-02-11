@@ -1,4 +1,4 @@
-#include "utils.h"
+#include "THCUNN.h"
 
 #include "THCDeviceTensor.cuh"
 #include "THCDeviceTensorUtils.cuh"
@@ -113,12 +113,11 @@ __device__ T reduce(Op op, DeviceTensor4 tensor, int plane) {
 }
 
 template <int Dim>
-static THCDeviceTensor<float, Dim> checktensor(lua_State* L, int index) {
-  THCudaTensor *t = (THCudaTensor*)luaT_toudata(L, index, "torch.CudaTensor");
+static THCDeviceTensor<float, Dim> checktensor(THCState *state, THCudaTensor *t) {
   if (!t) {
     return THCDeviceTensor<float, Dim>();
   }
-  return toDeviceTensor<float, Dim>(getCutorchState(L), t);
+  return toDeviceTensor<float, Dim>(state, t);
 }
 
 template<int NumThreads>
@@ -201,20 +200,16 @@ __global__ void SpatialBatchNormalizationUpdateOutput_kernel(
   }
 }
 
-static int cunn_SpatialBatchNormalization_updateOutput(lua_State *L) {
-  THCState *state = getCutorchState(L);
+void THNN_CudaSpatialBatchNormalization_updateOutput(THCState *state, THCudaTensor *input_, THCudaTensor *output_, THCudaTensor *weight_, THCudaTensor *bias_, THCudaTensor *runningMean_, THCudaTensor *runningVar_, THCudaTensor *saveMean_, THCudaTensor *saveStd_, bool train, double momentum, double eps) {
 
-  DeviceTensor4 input = checktensor<4>(L, 1);
-  DeviceTensor4 output = checktensor<4>(L, 2);
-  DeviceTensor1 weight = checktensor<1>(L, 3);
-  DeviceTensor1 bias = checktensor<1>(L, 4);
-  int train = lua_toboolean(L, 5);
-  double eps = lua_tonumber(L, 6);
-  double momentum = lua_tonumber(L, 7);
-  DeviceTensor1 runningMean = checktensor<1>(L, 8);
-  DeviceTensor1 runningVar = checktensor<1>(L, 9);
-  DeviceTensor1 saveMean = checktensor<1>(L, 10);
-  DeviceTensor1 saveStd = checktensor<1>(L, 11);
+  DeviceTensor4 input = checktensor<4>(state, input_);
+  DeviceTensor4 output = checktensor<4>(state, output_);
+  DeviceTensor1 weight = checktensor<1>(state, weight_);
+  DeviceTensor1 bias = checktensor<1>(state, bias_);
+  DeviceTensor1 runningMean = checktensor<1>(state, runningMean_);
+  DeviceTensor1 runningVar = checktensor<1>(state, runningVar_);
+  DeviceTensor1 saveMean = checktensor<1>(state, saveMean_);
+  DeviceTensor1 saveStd = checktensor<1>(state, saveStd_);
 
   cudaStream_t s = THCState_getCurrentStream(state);
   cudaDeviceProp *prop = THCState_getCurrentDeviceProperties(state);
@@ -248,8 +243,6 @@ static int cunn_SpatialBatchNormalization_updateOutput(lua_State *L) {
          saveMean, saveStd);
     }
   }
-
-  return 0;
 }
 
 template<int NumThreads>
@@ -313,17 +306,15 @@ __global__ void SpatialBatchNormalizationBackward_kernel(
   }
 }
 
-static int cunn_SpatialBatchNormalization_backward(lua_State *L) {
-  THCState *state = getCutorchState(L);
-  DeviceTensor4 input = checktensor<4>(L, 1);
-  DeviceTensor4 gradOutput = checktensor<4>(L, 2);
-  DeviceTensor4 gradInput = checktensor<4>(L, 3);
-  DeviceTensor1 gradWeight = checktensor<1>(L, 4);
-  DeviceTensor1 gradBias = checktensor<1>(L, 5);
-  DeviceTensor1 weight = checktensor<1>(L, 6);
-  DeviceTensor1 saveMean = checktensor<1>(L, 7);
-  DeviceTensor1 saveStd = checktensor<1>(L, 8);
-  float scale = (float) lua_tonumber(L, 9);
+void THNN_CudaSpatialBatchNormalization_backward(THCState *state, THCudaTensor *input_, THCudaTensor *gradOutput_, THCudaTensor *gradInput_, THCudaTensor *gradWeight_, THCudaTensor *gradBias_, THCudaTensor *weight_, THCudaTensor *saveMean_, THCudaTensor *saveStd_, float scale) {
+  DeviceTensor4 input = checktensor<4>(state, input_);
+  DeviceTensor4 gradOutput = checktensor<4>(state, gradOutput_);
+  DeviceTensor4 gradInput = checktensor<4>(state, gradInput_);
+  DeviceTensor1 gradWeight = checktensor<1>(state, gradWeight_);
+  DeviceTensor1 gradBias = checktensor<1>(state, gradBias_);
+  DeviceTensor1 weight = checktensor<1>(state, weight_);
+  DeviceTensor1 saveMean = checktensor<1>(state, saveMean_);
+  DeviceTensor1 saveStd = checktensor<1>(state, saveStd_);
 
   cudaStream_t s = THCState_getCurrentStream(state);
 
@@ -341,19 +332,4 @@ static int cunn_SpatialBatchNormalization_backward(lua_State *L) {
       (input, gradOutput, gradInput, gradWeight, gradBias, weight,
        saveMean, saveStd, scale);
   }
-
-  return 0;
-}
-
-static const struct luaL_Reg cunn_SpatialBatchNormalization__ [] = {
-  {"SpatialBatchNormalization_updateOutput", cunn_SpatialBatchNormalization_updateOutput},
-  {"SpatialBatchNormalization_backward", cunn_SpatialBatchNormalization_backward},
-  {NULL, NULL}
-};
-
-void cunn_SpatialBatchNormalization_init(lua_State *L)
-{
-  luaT_pushmetatable(L, "torch.CudaTensor");
-  luaT_registeratname(L, cunn_SpatialBatchNormalization__, "nn");
-  lua_pop(L,1);
 }

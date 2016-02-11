@@ -385,6 +385,31 @@ TH_API void THNN_CudaTemporalMaxPooling_updateGradInput(
           THCudaTensor *indices,
           int kW, int dW);
 
+TH_API void THNN_CudaSpatialBatchNormalization_updateOutput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *output,
+          THCudaTensor *weight,
+          THCudaTensor *bias,
+          THCudaTensor *runningMean,
+          THCudaTensor *runningVar,
+          THCudaTensor *saveMean,
+          THCudaTensor *saveStd,
+          bool train,
+          double momentum,
+          double eps);
+TH_API void THNN_CudaSpatialBatchNormalization_backward(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *gradOutput,
+          THCudaTensor *gradInput,
+          THCudaTensor *gradWeight,
+          THCudaTensor *gradBias,
+          THCudaTensor *weight,
+          THCudaTensor *saveMean,
+          THCudaTensor *saveStd,
+          float scale);
+
 TH_API void THNN_CudaSpatialConvolutionMM_updateOutput(
           THCState *state,
           THCudaTensor *input,
@@ -420,6 +445,105 @@ TH_API void THNN_CudaSpatialConvolutionMM_accGradParameters(
           int dW, int dH,
           int padW, int padH,
           float scale);
+
+TH_API void THNN_CudaSpatialConvolutionLocal_updateOutput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *output,
+          THCudaTensor *weight,
+          THCudaTensor *bias,
+          THCudaTensor *finput,
+          THCudaTensor *fgradInput,
+          int kW, int kH,
+          int dW, int dH,
+          int padW, int padH,
+          long inputWidth, long inputHeight,
+          long outputWidth, long outputHeight);
+TH_API void THNN_CudaSpatialConvolutionLocal_updateGradInput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *gradOutput,
+          THCudaTensor *gradInput,
+          THCudaTensor *weight,
+          THCudaTensor *finput,
+          THCudaTensor *fgradInput,
+          int kW, int kH,
+          int dW, int dH,
+          int padW, int padH,
+          long inputWidth, long inputHeight,
+          long outputWidth, long outputHeight);
+TH_API void THNN_CudaSpatialConvolutionLocal_accGradParameters(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *gradOutput,
+          THCudaTensor *gradWeight,
+          THCudaTensor *gradBias,
+          THCudaTensor *finput,
+          THCudaTensor *fgradInput,
+          int kW, int kH,
+          int dW, int dH,
+          int padW, int padH,
+          long inputWidth, long inputHeight,
+          long outputWidth, long outputHeight,
+          float scale);
+
+TH_API void THNN_CudaSpatialFullConvolution_updateOutput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *output,
+          THCudaTensor *weight,
+          THCudaTensor *bias,
+          THCudaTensor *columns,
+          THCudaTensor *ones,
+          int kW, int kH,
+          int dW, int dH,
+          int padW, int padH,
+          int adjW, int adjH);
+TH_API void THNN_CudaSpatialFullConvolution_updateGradInput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *gradOutput,
+          THCudaTensor *gradInput,
+          THCudaTensor *weight,
+          THCudaTensor *gradColumns,
+          int kW, int kH,
+          int dW, int dH,
+          int padW, int padH,
+          int adjW, int adjH);
+TH_API void THNN_CudaSpatialFullConvolution_accGradParameters(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *gradOutput,
+          THCudaTensor *gradWeight,
+          THCudaTensor *gradBias,
+          THCudaTensor *columns,
+          THCudaTensor *ones,
+          int kW, int kH,
+          int dW, int dH,
+          int padW, int padH,
+          int adjW, int adjH,
+          float scale);
+
+TH_API void THNN_CudaSpatialCrossMapLRN_updateOutput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *output,
+          THCudaTensor *scale,
+          int size,
+          float alpha,
+          float beta,
+          float k);
+TH_API void THNN_CudaSpatialCrossMapLRN_updateGradInput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *gradOutput,
+          THCudaTensor *gradInput,
+          THCudaTensor *scale,
+          THCudaTensor *output,
+          int size,
+          float alpha,
+          float beta,
+          float k);
 
 TH_API void THNN_CudaSpatialAdaptiveMaxPooling_updateOutput(
           THCState *state,
@@ -474,6 +598,75 @@ TH_API void THNN_CudaSpatialMaxPooling_updateGradInput(
           int dW, int dH,
           int padW, int padH,
           bool ceil_mode);
+
+TH_API void THNN_CudaSpatialMaxUnpooling_updateOutput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *output,
+          THCudaTensor *indices,
+          int owidth, int oheight);
+TH_API void THNN_CudaSpatialMaxUnpooling_updateGradInput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *gradOutput,
+          THCudaTensor *gradInput,
+          THCudaTensor *indices,
+          int owidth, int oheight);
+
+TH_API void THNN_CudaSpatialFractionalMaxPooling_updateOutput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *output,
+          int outputW, int outputH,
+          int poolSizeW, int poolSizeH,
+          THCudaTensor *indices,
+          THCudaTensor *randomSamples);
+TH_API void THNN_CudaSpatialFractionalMaxPooling_updateGradInput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *gradOutput,
+          THCudaTensor *gradInput,
+          int outputW, int outputH,
+          int poolSizeW, int poolSizeH,
+          THCudaTensor *indices);
+
+TH_API void THNN_CudaSpatialSubSampling_updateOutput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *output,
+          THCudaTensor *weight,
+          THCudaTensor *bias,
+          int kW, int kH,
+          int dW, int dH);
+TH_API void THNN_CudaSpatialSubSampling_updateGradInput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *gradOutput,
+          THCudaTensor *gradInput,
+          THCudaTensor *weight,
+          int kW, int kH,
+          int dW, int dH);
+TH_API void THNN_CudaSpatialSubSampling_accGradParameters(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *gradOutput,
+          THCudaTensor *gradWeight,
+          THCudaTensor *gradBias,
+          int kW, int kH,
+          int dW, int dH,
+          float scale);
+
+TH_API void THNN_CudaSpatialUpSamplingNearest_updateOutput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *output,
+          int scale_factor);
+TH_API void THNN_CudaSpatialUpSamplingNearest_updateGradInput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *gradOutput,
+          THCudaTensor *gradInput,
+          int scale_factor);
 
 TH_API void THNN_CudaVolumetricAveragePooling_updateOutput(
           THCState *state,

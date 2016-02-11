@@ -1,42 +1,36 @@
-#include "utils.h"
+#include "THCUNN.h"
 #include "im2col.h"
 
 
-int cunn_SpatialFullConvolution_updateOutput(lua_State *L) {
-  THCState *state = getCutorchState(L);
-  // Input
-  THCudaTensor *input = (THCudaTensor*)luaT_checkudata(L, 2, "torch.CudaTensor");
-
-  // Params:
-  int dW = luaT_getfieldcheckint(L, 1, "dW");
-  int dH = luaT_getfieldcheckint(L, 1, "dH");
-  int kW = luaT_getfieldcheckint(L, 1, "kW");
-  int kH = luaT_getfieldcheckint(L, 1, "kH");
-  int nOutputPlane = luaT_getfieldcheckint(L, 1, "nOutputPlane");
-  int nInputPlane = luaT_getfieldcheckint(L, 1, "nInputPlane");
-  int padW = luaT_getfieldcheckint(L, 1, "padW");
-  int padH = luaT_getfieldcheckint(L, 1, "padH");
-  int adjW = luaT_getfieldcheckint(L, 1, "adjW");
-  int adjH = luaT_getfieldcheckint(L, 1, "adjH");
-
-  THCudaTensor *weight  = (THCudaTensor*)luaT_getfieldcheckudata(L, 1, "weight", "torch.CudaTensor");
-  THCudaTensor *bias    = (THCudaTensor*)luaT_getfieldcheckudata(L, 1, "bias", "torch.CudaTensor");
-  THCudaTensor *columns = (THCudaTensor*)luaT_getfieldcheckudata(L, 1, "finput", "torch.CudaTensor");
-  THCudaTensor *ones    = (THCudaTensor*)luaT_getfieldcheckudata(L, 1, "fgradInput", "torch.CudaTensor");
-  THCudaTensor *output  = (THCudaTensor*)luaT_getfieldcheckudata(L, 1, "output", "torch.CudaTensor");
+void THNN_CudaSpatialFullConvolution_updateOutput(
+    THCState *state,
+    THCudaTensor *input,
+    THCudaTensor *output,
+    THCudaTensor *weight,
+    THCudaTensor *bias,
+    THCudaTensor *columns,
+    THCudaTensor *ones,
+    int kW, int kH,
+    int dW, int dH,
+    int padW, int padH,
+    int adjW, int adjH)
+{
+  
+  int nInputPlane = THCudaTensor_size(state, weight, 0);
+  int nOutputPlane = THCudaTensor_size(state, weight, 1);
 
   THAssert(THCudaTensor_checkGPU(state, 6, input, output, weight,
                                  bias, columns, ones));
-  luaL_argcheck(L, input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch mode) tensor is expected");
+  THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch mode) tensor is expected");
 
   int batch = 1;
   if (input->nDimension == 3) {
-    luaL_argcheck(L, input->size[0] == nInputPlane, 2, "input channels and nInputPlane dont match");
+    THArgCheck(input->size[0] == nInputPlane, 2, "input channels and nInputPlane dont match");
     // Force batch
     batch = 0;
     THCudaTensor_resize4d(state, input, 1, input->size[0], input->size[1], input->size[2]);
   } else {
-    luaL_argcheck(L, input->size[1] == nInputPlane, 2, "input channels and nInputPlane dont match");
+    THArgCheck(input->size[1] == nInputPlane, 2, "input channels and nInputPlane dont match");
   }
 
   long inputWidth   = input->size[3];
@@ -128,36 +122,26 @@ int cunn_SpatialFullConvolution_updateOutput(lua_State *L) {
     THCudaTensor_resize3d(state, output, nOutputPlane, outputHeight, outputWidth);
     THCudaTensor_resize3d(state, input, nInputPlane, inputHeight, inputWidth);
   }
-
-  // return output
-  return 1;
 }
 
-static int cunn_SpatialFullConvolution_updateGradInput(lua_State *L) {
-  THCState *state = getCutorchState(L);
-  // Inputs
-  THCudaTensor *input = (THCudaTensor *)luaT_checkudata(L, 2, "torch.CudaTensor");
-  THCudaTensor *gradOutput = (THCudaTensor *)luaT_checkudata(L, 3, "torch.CudaTensor");
-
-  // Params
-  int dW = luaT_getfieldcheckint(L, 1, "dW");
-  int dH = luaT_getfieldcheckint(L, 1, "dH");
-  int kW = luaT_getfieldcheckint(L, 1, "kW");
-  int kH = luaT_getfieldcheckint(L, 1, "kH");
-  int nOutputPlane = luaT_getfieldcheckint(L, 1, "nOutputPlane");
-  int nInputPlane = luaT_getfieldcheckint(L, 1, "nInputPlane");
-  int padW = luaT_getfieldcheckint(L, 1, "padW");
-  int padH = luaT_getfieldcheckint(L, 1, "padH");
-  int adjW = luaT_getfieldcheckint(L, 1, "adjW");
-  int adjH = luaT_getfieldcheckint(L, 1, "adjH");
-
-  THCudaTensor *weight = (THCudaTensor *)luaT_getfieldcheckudata(L, 1, "weight", "torch.CudaTensor");
-  THCudaTensor *gradColumns = (THCudaTensor*)luaT_getfieldcheckudata(L, 1, "finput", "torch.CudaTensor");
-  THCudaTensor *gradInput = (THCudaTensor *)luaT_getfieldcheckudata(L, 1, "gradInput", "torch.CudaTensor");
+void THNN_CudaSpatialFullConvolution_updateGradInput(
+    THCState *state,
+    THCudaTensor *input,
+    THCudaTensor *gradOutput,
+    THCudaTensor *gradInput,
+    THCudaTensor *weight,
+    THCudaTensor *gradColumns,
+    int kW, int kH,
+    int dW, int dH,
+    int padW, int padH,
+    int adjW, int adjH)
+{
+  int nInputPlane = THCudaTensor_size(state, weight, 0);
+  int nOutputPlane = THCudaTensor_size(state, weight, 1);
 
   THAssert(THCudaTensor_checkGPU(state, 5, input, gradOutput, weight,
                                  gradColumns, gradInput));
-  luaL_argcheck(L, input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch mode) tensor is expected");
+  THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch mode) tensor is expected");
 
   int batch = 1;
   if (input->nDimension == 3) {
@@ -230,39 +214,29 @@ static int cunn_SpatialFullConvolution_updateGradInput(lua_State *L) {
     THCudaTensor_resize3d(state, input, nInputPlane, inputHeight, inputWidth);
     THCudaTensor_resize3d(state, gradInput, nInputPlane, inputHeight, inputWidth);
   }
-
-  // Return gradInput
-  return 1;
 }
 
 
-static int cunn_SpatialFullConvolution_accGradParameters(lua_State *L) {
-  THCState *state = getCutorchState(L);
-  // Inputs
-  THCudaTensor *input = (THCudaTensor *)luaT_checkudata(L, 2, "torch.CudaTensor");
-  THCudaTensor *gradOutput = (THCudaTensor *)luaT_checkudata(L, 3, "torch.CudaTensor");
-
-  // Params
-  int dW = luaT_getfieldcheckint(L, 1, "dW");
-  int dH = luaT_getfieldcheckint(L, 1, "dH");
-  int kW = luaT_getfieldcheckint(L, 1, "kW");
-  int kH = luaT_getfieldcheckint(L, 1, "kH");
-  int nInputPlane = luaT_getfieldcheckint(L, 1, "nInputPlane");
-  int nOutputPlane = luaT_getfieldcheckint(L, 1, "nOutputPlane");
-  int padW = luaT_getfieldcheckint(L, 1, "padW");
-  int padH = luaT_getfieldcheckint(L, 1, "padH");
-  int adjW = luaT_getfieldcheckint(L, 1, "adjW");
-  int adjH = luaT_getfieldcheckint(L, 1, "adjH");
-  float scale = luaL_optnumber(L, 4, 1);
-
-  THCudaTensor *gradWeight = (THCudaTensor *)luaT_getfieldcheckudata(L, 1, "gradWeight", "torch.CudaTensor");
-  THCudaTensor *gradBias = (THCudaTensor *)luaT_getfieldcheckudata(L, 1, "gradBias", "torch.CudaTensor");
-  THCudaTensor *columns = (THCudaTensor*)luaT_getfieldcheckudata(L, 1, "finput", "torch.CudaTensor");
-  THCudaTensor *ones = (THCudaTensor*)luaT_getfieldcheckudata(L, 1, "fgradInput", "torch.CudaTensor");
+void THNN_CudaSpatialFullConvolution_accGradParameters(
+    THCState *state,
+    THCudaTensor *input,
+    THCudaTensor *gradOutput,
+    THCudaTensor *gradWeight,
+    THCudaTensor *gradBias,
+    THCudaTensor *columns,
+    THCudaTensor *ones,
+    int kW, int kH,
+    int dW, int dH,
+    int padW, int padH,
+    int adjW, int adjH,
+    float scale)
+{
+  int nInputPlane = THCudaTensor_size(state, gradWeight, 0);
+  int nOutputPlane = THCudaTensor_size(state, gradWeight, 1);
 
   THAssert(THCudaTensor_checkGPU(state, 6, input, gradOutput, gradWeight,
                                  gradBias, columns, ones));
-  luaL_argcheck(L, input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch mode) tensor is expected");
+  THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch mode) tensor is expected");
 
   int batch = 1;
   if (input->nDimension == 3) {
@@ -354,21 +328,4 @@ static int cunn_SpatialFullConvolution_accGradParameters(lua_State *L) {
     THCudaTensor_resize3d(state, gradOutput, nOutputPlane, outputHeight, outputWidth);
     THCudaTensor_resize3d(state, input, nInputPlane, inputHeight, inputWidth);
   }
-
-  // Return nothing
-  return 0;
-}
-
-const struct luaL_Reg cunn_SpatialFullConvolution__ [] = {
-  {"SpatialFullConvolution_updateOutput", cunn_SpatialFullConvolution_updateOutput},
-  {"SpatialFullConvolution_updateGradInput", cunn_SpatialFullConvolution_updateGradInput},
-  {"SpatialFullConvolution_accGradParameters", cunn_SpatialFullConvolution_accGradParameters},
-  {NULL, NULL}
-};
-
-void cunn_SpatialFullConvolution_init(lua_State *L)
-{
-  luaT_pushmetatable(L, "torch.CudaTensor");
-  luaT_registeratname(L, cunn_SpatialFullConvolution__, "nn");
-  lua_pop(L,1);
 }
