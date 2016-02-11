@@ -57,13 +57,27 @@ TH_API void THSetGCHandler( void (*torchGCHandlerFunction)(void *data), void *da
 TH_API void THHeapUpdate(long size);
 
 #define THError(...) _THError(__FILE__, __LINE__, __VA_ARGS__)
-#define THArgCheck(...) _THArgCheck(__FILE__, __LINE__, __VA_ARGS__)
+
+#define THCleanup(...) __VA_ARGS__
+
+#define THArgCheck(...)                                               \
+do {                                                                  \
+  _THArgCheck(__FILE__, __LINE__, __VA_ARGS__);                       \
+} while(0)
+
+#define THArgCheckWithCleanup(condition, cleanup, ...)                \
+do if (!(condition)) {                                                \
+  cleanup                                                             \
+  _THArgCheck(__FILE__, __LINE__, 0, __VA_ARGS__);                    \
+} while(0)
+
 #define THAssert(exp)                                                 \
 do {                                                                  \
   if (!(exp)) {                                                       \
     _THAssertionFailed(__FILE__, __LINE__, #exp, "");                 \
   }                                                                   \
 } while(0)
+
 #define THAssertMsg(exp, ...)                                         \
 do {                                                                  \
   if (!(exp)) {                                                       \
