@@ -128,7 +128,12 @@ void THTensor_(gesv)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
 		  THTensor_(data)(ra__), lda, THIntTensor_data(ipiv),
 		  THTensor_(data)(rb__), ldb, &info);
 
-  THLapackCheck("Lapack Error in %s : U(%d,%d) is zero, singular U.", "gesv", info, info);
+  THLapackCheckWithCleanup("Lapack Error in %s : U(%d,%d) is zero, singular U.",
+                           THCleanup(
+                               THTensor_(free)(ra__);
+                               THTensor_(free)(rb__);
+                               THIntTensor_free(ipiv);),
+                           "gesv", info, info);
 
   THTensor_(freeCopyTo)(ra__, ra_);
   THTensor_(freeCopyTo)(rb__, rb_);
@@ -162,7 +167,9 @@ void THTensor_(trtrs)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a,
                    THTensor_(data)(rb__), ldb, &info);
 
 
-  THLapackCheck("Lapack Error in %s : A(%d,%d) is zero, singular A", "trtrs", info, info);
+  THLapackCheckWithCleanup("Lapack Error in %s : A(%d,%d) is zero, singular A",
+                           THCleanup(THTensor_(free)(ra__); THTensor_(free)(rb__);),
+                           "trtrs", info, info);
 
   THTensor_(freeCopyTo)(ra__, ra_);
   THTensor_(freeCopyTo)(rb__, rb_);
@@ -207,7 +214,11 @@ void THTensor_(gels)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
 		  THTensor_(data)(rb__), ldb, 
 		  THTensor_(data)(work), lwork, &info);
 
-  THLapackCheck("Lapack Error in %s : The %d-th diagonal element of the triangular factor of A is zero", "gels", info);
+  THLapackCheckWithCleanup("Lapack Error in %s : The %d-th diagonal element of the triangular factor of A is zero",
+                           THCleanup(THTensor_(free)(ra__);
+                                     THTensor_(free)(rb__);
+                                     THTensor_(free)(work);),
+                           "gels", info);
 
   /* rb__ is currently ldb by nrhs; resize it to n by nrhs */
   rb__->size[0] = n;
@@ -265,7 +276,14 @@ void THTensor_(geev)(THTensor *re_, THTensor *rv_, THTensor *a_, const char *job
   THLapack_(geev)('N', jobvr[0], n, THTensor_(data)(a), lda, THTensor_(data)(wr), THTensor_(data)(wi), 
       NULL, 1, rv_data, ldvr, THTensor_(data)(work), lwork, &info);
 
-  THLapackCheck(" Lapack Error in %s : %d off-diagonal elements of an didn't converge to zero", "geev", info);
+  THLapackCheckWithCleanup(" Lapack Error in %s : %d off-diagonal elements of an didn't converge to zero",
+                           THCleanup(THTensor_(free)(re__);
+                                     THTensor_(free)(rv__);
+                                     THTensor_(free)(a);
+                                     THTensor_(free)(wi);
+                                     THTensor_(free)(wr);
+                                     THTensor_(free)(work);),
+                           "geev", info);
 
   {
     real *re_data = THTensor_(data)(re__);
@@ -318,7 +336,11 @@ void THTensor_(syev)(THTensor *re_, THTensor *rv_, THTensor *a, const char *jobz
   THLapack_(syev)(jobz[0], uplo[0], n, THTensor_(data)(rv__), lda,
 		  THTensor_(data)(re_), THTensor_(data)(work), lwork, &info);
 
-  THLapackCheck("Lapack Error %s : %d off-diagonal elements didn't converge to zero", "syev", info);
+  THLapackCheckWithCleanup("Lapack Error %s : %d off-diagonal elements didn't converge to zero",
+                           THCleanup(THTensor_(free)(rv__);
+                                     THTensor_(free)(re__);
+                                     THTensor_(free)(work);),
+                           "syev", info);
 
   THTensor_(freeCopyTo)(rv__, rv_);
   THTensor_(freeCopyTo)(re__, re_);
@@ -387,7 +409,14 @@ void THTensor_(gesvd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *ra
 		   THTensor_(data)(rv__), ldvt,
 		   THTensor_(data)(work),lwork, &info);
 
-  THLapackCheck(" Lapack Error %s : %d superdiagonals failed to converge.", "gesvd", info);
+  THLapackCheckWithCleanup(" Lapack Error %s : %d superdiagonals failed to converge.",
+                           THCleanup(
+                               THTensor_(free)(ru__);
+                               THTensor_(free)(rs__);
+                               THTensor_(free)(rv__);
+                               THTensor_(free)(ra__);
+                               THTensor_(free)(work);),
+                           "gesvd", info);
 
   THTensor_(freeCopyTo)(ru__, ru_);
   THTensor_(freeCopyTo)(rs__, rs_);
@@ -417,14 +446,23 @@ void THTensor_(getri)(THTensor *ra_, THTensor *a)
 
   /* Run LU */
   THLapack_(getrf)(n, n, THTensor_(data)(ra__), lda, THIntTensor_data(ipiv), &info);
-  THLapackCheck("Lapack Error %s : U(%d,%d) is 0, U is singular","getrf", info, info);
+  THLapackCheckWithCleanup("Lapack Error %s : U(%d,%d) is 0, U is singular",
+                           THCleanup(
+                               THTensor_(free)(ra__);
+                               THIntTensor_free(ipiv);),
+                           "getrf", info, info);
 
   /* Run inverse */
   THLapack_(getri)(n, THTensor_(data)(ra__), lda, THIntTensor_data(ipiv), &wkopt, -1, &info);
   lwork = (int)wkopt;
   work = THTensor_(newWithSize1d)(lwork);
   THLapack_(getri)(n, THTensor_(data)(ra__), lda, THIntTensor_data(ipiv), THTensor_(data)(work), lwork, &info);
-  THLapackCheck("Lapack Error %s : U(%d,%d) is 0, U is singular","getri", info, info);
+  THLapackCheckWithCleanup("Lapack Error %s : U(%d,%d) is 0, U is singular",
+                           THCleanup(
+                               THTensor_(free)(ra__);
+                               THTensor_(free)(work);
+                               THIntTensor_free(ipiv);),
+                           "getri", info, info);
 
   THTensor_(freeCopyTo)(ra__, ra_);
   THTensor_(free)(work);
@@ -513,7 +551,9 @@ void THTensor_(potrf)(THTensor *ra_, THTensor *a, const char *uplo)
 
   /* Run Factorization */
   THLapack_(potrf)(uplo[0], n, THTensor_(data)(ra__), lda, &info);
-  THLapackCheck("Lapack Error %s : A(%d,%d) is 0, A cannot be factorized", "potrf", info, info);
+  THLapackCheckWithCleanup("Lapack Error %s : A(%d,%d) is 0, A cannot be factorized",
+                           THCleanup(THTensor_(free)(ra__);),
+                           "potrf", info, info);
 
   THTensor_(clearUpLoTriangle)(ra__, uplo);
   THTensor_(freeCopyTo)(ra__, ra_);
@@ -542,7 +582,11 @@ void THTensor_(potrs)(THTensor *rb_, THTensor *b, THTensor *a, const char *uplo)
                    lda, THTensor_(data)(rb__), ldb, &info);
 
 
-  THLapackCheck("Lapack Error in %s : A(%d,%d) is zero, singular A", "potrs", info, info);
+  THLapackCheckWithCleanup("Lapack Error in %s : A(%d,%d) is zero, singular A",
+                           THCleanup(
+                               THTensor_(free)(ra__);
+                               THTensor_(free)(rb__);),
+                           "potrs", info, info);
 
   THTensor_(free)(ra__);
   THTensor_(freeCopyTo)(rb__, rb_);
@@ -564,7 +608,9 @@ void THTensor_(potri)(THTensor *ra_, THTensor *a, const char *uplo)
 
   /* Run inverse */
   THLapack_(potri)(uplo[0], n, THTensor_(data)(ra__), lda, &info);
-  THLapackCheck("Lapack Error %s : A(%d,%d) is 0, A cannot be factorized", "potri", info, info);
+  THLapackCheckWithCleanup("Lapack Error %s : A(%d,%d) is 0, A cannot be factorized",
+                           THCleanup(THTensor_(free)(ra__);),
+                           "potri", info, info);
 
   THTensor_(copyUpLoTriangle)(ra__, uplo);
   THTensor_(freeCopyTo)(ra__, ra_);
@@ -606,7 +652,11 @@ void THTensor_(pstrf)(THTensor *ra_, THIntTensor *rpiv_, THTensor *a, const char
                    THIntTensor_data(rpiv_), &rank, tol,
                    THTensor_(data)(work), &info);
 
-  THLapackCheck("Lapack Error %s : matrix is rank deficient or not positive semidefinite", "pstrf", info);
+  THLapackCheckWithCleanup("Lapack Error %s : matrix is rank deficient or not positive semidefinite",
+                           THCleanup(
+                               THTensor_(free)(ra__);
+                               THTensor_(free)(work);),
+                           "pstrf", info);
 
   THTensor_(clearUpLoTriangle)(ra__, uplo);
 
@@ -696,7 +746,11 @@ void THTensor_(geqrf)(THTensor *ra_, THTensor *rtau_, THTensor *a)
                    THTensor_(data)(rtau_),
                    THTensor_(data)(work), lwork, &info);
 
-  THLapackCheck("Lapack Error %s : unknown Lapack error. info = %i", "geqrf", info);
+  THLapackCheckWithCleanup("Lapack Error %s : unknown Lapack error. info = %i",
+                           THCleanup(
+                               THTensor_(free)(ra__);
+                               THTensor_(free)(work);),
+                           "geqrf", info);
 
   THTensor_(freeCopyTo)(ra__, ra_);
   THTensor_(free)(work);
@@ -745,7 +799,11 @@ void THTensor_(orgqr)(THTensor *ra_, THTensor *a, THTensor *tau)
                    THTensor_(data)(tau),
                    THTensor_(data)(work), lwork, &info);
 
-  THLapackCheck(" Lapack Error %s : unknown Lapack error. info = %i", "orgqr", info);
+  THLapackCheckWithCleanup(" Lapack Error %s : unknown Lapack error. info = %i",
+                           THCleanup(
+                               THTensor_(free)(ra__);
+                               THTensor_(free)(work);),
+                           "orgqr", info);
   THTensor_(freeCopyTo)(ra__, ra_);
   THTensor_(free)(work);
 }
@@ -804,7 +862,11 @@ void THTensor_(ormqr)(THTensor *ra_, THTensor *a, THTensor *tau, THTensor *c, co
                    THTensor_(data)(tau), THTensor_(data)(ra__), ldc,
                    THTensor_(data)(work), lwork, &info);
 
-  THLapackCheck(" Lapack Error %s : unknown Lapack error. info = %i", "ormqr", info);
+  THLapackCheckWithCleanup(" Lapack Error %s : unknown Lapack error. info = %i",
+                           THCleanup(
+                               THTensor_(free)(ra__);
+                               THTensor_(free)(work);),
+                           "ormqr", info);
   THTensor_(freeCopyTo)(ra__, ra_);
   THTensor_(free)(work);
 }
