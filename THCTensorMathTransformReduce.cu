@@ -188,7 +188,7 @@ void THCudaTensor_max(THCState *state, THCudaTensor *values, THCudaTensor *indic
 {
   THAssert(THCudaTensor_checkGPU(state, 3, values, indices, src));
   const float minfloat32 = -3.402823466e+38f;
-  thrust::pair<float,float> init = thrust::make_pair<float,float>(minfloat32, -1);
+  thrust::pair<float,float> init = thrust::make_pair<float,float>(minfloat32, 1);
   return THCudaTensor_reduceDimIndex(state, values, indices, src, dimension, init,
                                  maxvalue_functor());
 }
@@ -207,7 +207,7 @@ void THCudaTensor_min(THCState *state, THCudaTensor *values, THCudaTensor *indic
 {
   THAssert(THCudaTensor_checkGPU(state, 3, values, indices, src));
   const float maxfloat32 = 3.402823466e+38f;
-  thrust::pair<float,float> init = thrust::make_pair<float,float>(maxfloat32, -1);
+  thrust::pair<float,float> init = thrust::make_pair<float,float>(maxfloat32, 1);
   return THCudaTensor_reduceDimIndex(state, values, indices, src, dimension, init,
                                      minvalue_functor());
 }
