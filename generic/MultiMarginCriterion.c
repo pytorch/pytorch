@@ -9,7 +9,8 @@ void THNN_(MultiMarginCriterion_updateOutput)(
           THTensor *output,
           bool sizeAverage,
           int p,
-          THTensor *weights)
+          THTensor *weights,
+          real margin)
 {
   real *input_data, *target_data, *weights_data;
   long nframe, dim;
@@ -50,7 +51,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
     real input_target = input_data[target_idx];
     for (d = 0; d < dim; d++)
     {
-      real z = 1 - input_target + input_data[d];
+      real z = margin - input_target + input_data[d];
       if (d == target_idx)
         continue;
 
@@ -83,7 +84,8 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
           THTensor *gradInput,
           bool sizeAverage,
           int p,
-          THTensor *weights)
+          THTensor *weights,
+          real margin)
 {
   real *input_data;
   real *gradInput_data;
@@ -127,7 +129,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
     real gradInput_target = 0;
     for (d = 0; d < dim; d++)
     {
-      real z = 1 - input_target + input_data[d];
+      real z = margin - input_target + input_data[d];
       if (d == target_idx)
         continue;
 
