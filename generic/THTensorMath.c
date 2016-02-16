@@ -1956,6 +1956,31 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
   }
 }
 
+int THTensor_(equal)(THTensor *ta, THTensor* tb)
+{
+  int equal = 1;
+  if(!THTensor_(isSameSizeAs)(ta, tb))
+    return 0;
+
+  if (THTensor_(isContiguous)(ta) && THTensor_(isContiguous)(tb)) {
+    real *tap = THTensor_(data)(ta);
+    real *tbp = THTensor_(data)(tb);
+    long sz = THTensor_(nElement)(ta);
+    long i;
+    for (i=0; i<sz; ++i){
+      if(tap[i] != tbp[i]) return 0;
+    }
+  } else {
+    // Short-circuit the apply function on inequality
+    TH_TENSOR_APPLY2(real, ta, real, tb,
+                     if (equal && *ta_data != *tb_data) {
+                        equal = 0;
+                        TH_TENSOR_APPLY_hasFinished = 1; break;
+                     })
+  }
+  return equal;
+}
+
 #define TENSOR_IMPLEMENT_LOGICAL(NAME,OP)				\
   void THTensor_(NAME##Value)(THByteTensor *r_, THTensor* t, real value)	\
   {									\
