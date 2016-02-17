@@ -565,38 +565,6 @@ TH_API void THNN_(VolumetricConvolutionMM_accGradParameters)(
           THTensor *finput,
           real scale);
 
-TH_API void THNN_(VolumetricFullConvolution_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *output,
-          THTensor *weight,
-          THTensor *bias,
-          THTensor *finput,
-          THTensor *fgradInput,
-          int dT, int dW, int dH,
-          int pT, int pW, int pH);
-TH_API void THNN_(VolumetricFullConvolution_updateGradInput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          THTensor *weight,
-          THTensor *finput,
-          THTensor *fgradInput,
-          int dT, int dW, int dH,
-          int pT, int pW, int pH);
-TH_API void THNN_(VolumetricFullConvolution_accGradParameters)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *gradOutput,
-          THTensor *gradWeight,
-          THTensor *gradBias,
-          THTensor *finput,
-          THTensor *fgradInput,
-          int dT, int dW, int dH,
-          int pT, int pW, int pH,
-          real scale);
-
 TH_API void THNN_(VolumetricMaxPooling_updateOutput)(
           THNNState *state,
           THTensor *input,

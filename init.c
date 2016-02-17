@@ -121,9 +121,6 @@
 #include "generic/VolumetricConvolutionMM.c"
 #include "THGenerateFloatTypes.h"
 
-#include "generic/VolumetricFullConvolution.c"
-#include "THGenerateFloatTypes.h"
-
 #include "generic/VolumetricMaxPooling.c"
 #include "THGenerateFloatTypes.h"
 
