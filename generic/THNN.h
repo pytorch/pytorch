@@ -565,6 +565,41 @@ TH_API void THNN_(VolumetricConvolutionMM_accGradParameters)(
           THTensor *finput,
           real scale);
 
+TH_API void THNN_(VolumetricFullConvolution_updateOutput)(
+          THNNState *state,         // library state
+          THTensor *input,          // 4D or 5D (batch) tensor
+          THTensor *output,         // [OUT] volumetric convolution output
+          THTensor *weight,         // weight tensor (nInputPlane x nOutputPlane x kT x kH x kW)
+          THTensor *bias,           // gradBias tensor (nOutputPlane)
+          THTensor *finput,         // [OUT] internal columns buffer
+          THTensor *fgradInput,     // [OUT] internal ones buffer
+          int dT, int dW, int dH,   // stride of the convolution
+          int pT, int pW, int pH,   // padding
+          int aT, int aW, int aH);  // extra output adjustment
+TH_API void THNN_(VolumetricFullConvolution_updateGradInput)(
+          THNNState *state,         // library state
+          THTensor *input,          // 4D or 5D (batch) tensor
+          THTensor *gradOutput,     // gradient w.r.t. output
+          THTensor *gradInput,      // [OUT] gradient w.r.t. input
+          THTensor *weight,         // weight tensor (nInputPlane x nOutputPlane x kT x kH x kW)
+          THTensor *finput,         // internal columns buffer
+          THTensor *fgradInput,     // internal ones buffer
+          int dT, int dW, int dH,   // stride
+          int pT, int pW, int pH,   // padding
+          int aT, int aW, int aH);  // extra output adjustment
+TH_API void THNN_(VolumetricFullConvolution_accGradParameters)(
+          THNNState *state,         // library state
+          THTensor *input,          // 4D or 5D (batch) tensor
+          THTensor *gradOutput,     // gradient w.r.t. output
+          THTensor *gradWeight,     // gradWeight tensor (nInputPlane x nOutputPlane x kT x kH x kW)
+          THTensor *gradBias,       // gradBias tensor (nOutputPlane)
+          THTensor *finput,         // internal columns buffer
+          THTensor *fgradInput,     // internal ones buffer
+          int dT, int dW, int dH,   // stride
+          int pT, int pW, int pH,   // padding
+          int aT, int aW, int aH,   // extra output adjustment
+          real scale);              // scaling factor
+
 TH_API void THNN_(VolumetricMaxPooling_updateOutput)(
           THNNState *state,
           THTensor *input,
