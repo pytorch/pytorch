@@ -103,6 +103,9 @@
 #include "generic/unfold.c"
 #include "THGenerateFloatTypes.h"
 
+#include "generic/SpatialConvolutionMap.c"
+#include "THGenerateFloatTypes.h"
+
 #include "generic/SpatialConvolutionMM.c"
 #include "THGenerateFloatTypes.h"
 
@@ -110,6 +113,9 @@
 #include "THGenerateFloatTypes.h"
 
 #include "generic/SpatialFullConvolution.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/SpatialFullConvolutionMap.c"
 #include "THGenerateFloatTypes.h"
 
 #include "generic/SpatialAdaptiveMaxPooling.c"
