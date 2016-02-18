@@ -133,6 +133,7 @@ typedef struct {
   union {
     struct {
       volatile int bar;
+      int ringDirectFail;
     };
     char pad[16];
    };
@@ -178,6 +179,22 @@ static ncclResult_t initGather(RankGather** gather, ncclUniqueId commId,
   return ncclSuccess;
 }
 
+static void syncRingDirect(RankGather* gather, int* ringDirectOk) {
+  int bar_tmp = gather->bar - 1;
+  int ndev = gather->ranks[0].ndev;
+  bool swapped;
+  do {
+    bar_tmp += 1;
+    swapped = __sync_bool_compare_and_swap(&gather->bar, bar_tmp, bar_tmp+1);
+  } while(!swapped);
+
+  while (gather->bar != 2*ndev) // Wait for all ranks to arrive at this second barrier
+    sched_yield();
+  __sync_synchronize();
+
+  *ringDirectOk = gather->ringDirectFail ? 0 : 1;
+}
+
 static ncclResult_t closeGather(RankGather* gather, int ndev) {
   int bar_tmp = gather->bar - 1;
   bool swapped;
@@ -186,7 +203,7 @@ static ncclResult_t closeGather(RankGather* gather, int ndev) {
     swapped = __sync_bool_compare_and_swap(&gather->bar, bar_tmp, bar_tmp+1);
   } while(!swapped);
 
-  while (gather->bar != 2*ndev)
+  while (gather->bar != 3*ndev) // Wait for all ranks to arrive at this third barrier
     sched_yield();
   __sync_synchronize();
 
@@ -347,7 +364,7 @@ static ncclResult_t commClearMaps(ncclComm_t comm) {
   return retval;
 }
 
-static ncclResult_t commBuildMaps(ncclComm_t comm, ncclUniqueId* commId, int rank, RankEntry* ranks) {
+static ncclResult_t commBuildMaps(ncclComm_t comm, ncclUniqueId* commId, int rank, RankEntry* ranks, int* ringDirectFailed) {
   int ndev = comm->nDev;
   for(int i=0; i<ndev; ++i) {
     // Check for inconsistencies between ranks
@@ -418,64 +435,65 @@ static ncclResult_t commBuildMaps(ncclComm_t comm, ncclUniqueId* commId, int ran
       }
     }
 
-    if (iPid == myPid && (canpeer || myDev == iDev)) {
-      INFO("rank access %d -> %d via P2P device mem", rank, iRank);
-      comm->ptrs[i].local  = ranks[myId].devptr;
-      comm->ptrs[i].remote = ranks[i].devptr;
-      comm->ptrs[i].remoteCleanup = CLEANUP_NONE;
-    } else if (iPid == myPid) {
-      INFO("rank access %d -> %d via zero-copy host mem", rank, iRank);
-      if (j <= 2) {
-        comm->useRemoteRecv = 0;
+    if (iPid == myPid) {
+      if (canpeer || myDev == iDev) {
+        INFO("rank access %d -> %d via P2P device mem", rank, iRank);
+        comm->ptrs[i].local  = ranks[myId].devptr;
+        comm->ptrs[i].remote = ranks[i].devptr;
+        comm->ptrs[i].remoteCleanup = CLEANUP_NONE;
+      } else { // go through hostmem
+        INFO("rank access %d -> %d via zero-copy host mem", rank, iRank);
+        if (j <= 2)
+          *ringDirectFailed = 1;
+        if (cudaHostGetDevicePointer(&comm->ptrs[i].local, ranks[myId].hostptr, 0) != cudaSuccess) {
+          WARN("rank %d failed to map zero copy buffer to device", rank);
+          commClearMaps(comm);
+          return ncclUnhandledCudaError;
+        }
+        if (cudaHostGetDevicePointer(&comm->ptrs[i].remote, ranks[i].hostptr, 0) != cudaSuccess) {
+          WARN("rank %d failed to map %d's zero copy buffer to device", rank, iRank);
+          commClearMaps(comm);
+          return ncclUnhandledCudaError;
+        }
+        comm->ptrs[i].remoteCleanup = CLEANUP_NONE;
       }
-      if (cudaHostGetDevicePointer(&comm->ptrs[i].local, ranks[myId].hostptr, 0) != cudaSuccess) {
-        WARN("rank %d failed to map zero copy buffer to device", rank);
-        commClearMaps(comm);
-        return ncclUnhandledCudaError;
+    } else { // multi-process!
+      *ringDirectFailed = 1;
+      if (canpeer || myDev == iDev) {
+        INFO("rank access %d -> %d via Ipc P2P device mem", rank, iRank);
+        comm->ptrs[i].local = ranks[myId].devptr;
+        if (wrapCuIpcOpenMemHandle((CUdeviceptr*)(&comm->ptrs[i].remote),
+            ranks[i].devipc, CU_IPC_MEM_LAZY_ENABLE_PEER_ACCESS) != ncclSuccess) {
+          WARN("rank %d failed to open Ipc handle to rank %d", rank, iRank);
+          commClearMaps(comm);
+          return ncclUnhandledCudaError;
+        }
+        comm->ptrs[i].remoteCleanup = CLEANUP_CUIPC;
+        comm->ptrs[i].cleanupHandle = comm->ptrs[i].remote;
+      } else { // go through hostmem
+        INFO("rank access %d -> %d via zero copy host shm", rank, iRank);
+        if (cudaHostGetDevicePointer(&comm->ptrs[i].local, ranks[myId].hostptr, 0) != cudaSuccess) {
+          WARN("rank %d failed to obtain dev ptr to sysmem buffer", rank);
+          commClearMaps(comm);
+          return ncclUnhandledCudaError;
+        }
+        char rankname[1024];
+        sprintf(rankname, "%s-%d", commId->internal, ranks[i].rank);
+        if (openHostMemShm(rankname, (ncclMem**)&comm->ptrs[i].cleanupHandle, ranks[i].buffSize)
+            != ncclSuccess) {
+          WARN("rank %d failed to open sysmem buffer of rank %d", rank, iRank);
+          commClearMaps(comm);
+          return ncclUnhandledCudaError;
+        }
+        if (cudaHostGetDevicePointer(&comm->ptrs[i].remote, comm->ptrs[i].cleanupHandle, 0) != cudaSuccess) {
+          WARN("rank %d failed to obtain dev ptr for rank %d", rank, iRank);
+          commClearMaps(comm);
+          return ncclUnhandledCudaError;
+        }
+        comm->ptrs[i].remoteCleanup = CLEANUP_UNMAP;
       }
-      if (cudaHostGetDevicePointer(&comm->ptrs[i].remote, ranks[i].hostptr, 0) != cudaSuccess) {
-        WARN("rank %d failed to map %d's zero copy buffer to device", rank, iRank);
-        commClearMaps(comm);
-        return ncclUnhandledCudaError;
-      }
-      comm->ptrs[i].remoteCleanup = CLEANUP_NONE;
-    } else if (canpeer || myDev == iDev) {
-      INFO("rank access %d -> %d via Ipc P2P device mem", rank, iRank);
-      comm->useRemoteRecv = 0;
-      comm->ptrs[i].local = ranks[myId].devptr;
-      if (wrapCuIpcOpenMemHandle((CUdeviceptr*)(&comm->ptrs[i].remote),
-          ranks[i].devipc, CU_IPC_MEM_LAZY_ENABLE_PEER_ACCESS) != ncclSuccess) {
-        WARN("rank %d failed to open Ipc handle to rank %d", rank, iRank);
-        commClearMaps(comm);
-        return ncclUnhandledCudaError;
-      }
-      comm->ptrs[i].remoteCleanup = CLEANUP_CUIPC;
-      comm->ptrs[i].cleanupHandle = comm->ptrs[i].remote;
-    } else {
-      INFO("rank access %d -> %d via zero copy host shm", rank, iRank);
-      comm->useRemoteRecv = 0;
-      if (cudaHostGetDevicePointer(&comm->ptrs[i].local, ranks[myId].hostptr, 0) != cudaSuccess) {
-        WARN("rank %d failed to obtain dev ptr to sysmem buffer", rank);
-        commClearMaps(comm);
-        return ncclUnhandledCudaError;
-      }
-      char rankname[1024];
-      sprintf(rankname, "%s-%d", commId->internal, ranks[i].rank);
-      if (openHostMemShm(rankname, (ncclMem**)&comm->ptrs[i].cleanupHandle, ranks[i].buffSize)
-          != ncclSuccess) {
-        WARN("rank %d failed to open sysmem buffer of rank %d", rank, iRank);
-        commClearMaps(comm);
-        return ncclUnhandledCudaError;
-      }
-      if (cudaHostGetDevicePointer(&comm->ptrs[i].remote, comm->ptrs[i].cleanupHandle, 0) != cudaSuccess) {
-        WARN("rank %d failed to obtain dev ptr for rank %d", rank, iRank);
-        commClearMaps(comm);
-        return ncclUnhandledCudaError;
-      }
-      comm->ptrs[i].remoteCleanup = CLEANUP_UNMAP;
     }
   }
-  INFO("PushToRecv algos are %s\n", (comm->useRemoteRecv) ? "enabled" : "disabled");
   return ncclSuccess;
 }
 
@@ -679,11 +697,14 @@ ncclResult_t ncclCommInitRank(ncclComm_t* newcomm, int ndev, ncclUniqueId commId
     goto cleanup;
   }
 
-  res = commBuildMaps(*newcomm, &commId, myrank, gath->ranks);
+  res = commBuildMaps(*newcomm, &commId, myrank, gath->ranks, &gath->ringDirectFail);
   if (res != ncclSuccess) {
     WARN("rank %d failed to build comm maps", myrank);
     goto cleanup;
   }
+
+  syncRingDirect(gath, &((*newcomm)->useRemoteRecv));
+  INFO("PushToRecv algos are %s\n", (*newcomm)->useRemoteRecv ? "enabled" : "disabled");
 
   res = closeGather(gath, ndev); // includes a barrier
   gath = NULL;
@@ -722,6 +743,7 @@ ncclResult_t ncclCommInitAll(ncclComm_t* comms, int ndev, int* devlist) {
   char busId[13];
   nvmlDevice_t nvmlHandle;
   int affinity_set = 0;
+  int ringDirectFail = 0; // Assume direct access to recv ptr OK
 
   res = wrapSymbols();
   if (res != ncclSuccess) {
@@ -792,11 +814,16 @@ ncclResult_t ncclCommInitAll(ncclComm_t* comms, int ndev, int* devlist) {
   for(rank=0; rank<ndev; ++rank) {
     comm = comms[rank];
     cudaSetDevice(comm->cudaDev);
-    res = commBuildMaps(comm, NULL, rank, ranks);
+    res = commBuildMaps(comm, NULL, rank, ranks, &ringDirectFail);
     if (res != ncclSuccess) {
       WARN("rank %d failed to build comm maps", rank);
       goto cleanup;
     }
+  }
+
+  INFO("PushToRecv algos are %s\n", (ringDirectFail) ? "disabled" : "enabled");
+  for(rank=0; rank<ndev; ++rank) {
+    comms[rank]->useRemoteRecv = ringDirectFail ? 0 : 1;
   }
 
   free(ranks);
