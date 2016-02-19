@@ -37,7 +37,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(THNNState *state, THTensor *input,
     output_data[0] = -input_data[cur_target] * total_weight_data[0];
   } else if (THTensor_(nDimension)(input) == 2) {
     int batch_size = THTensor_(size)(input, 0);
-    THAssert(THTensor_(size)(target, 0) == batch_size);
+    THAssert(THIndexTensor_(size)(target, 0) == batch_size);
 
     int n_target = THTensor_(size)(input, 1);
 
@@ -107,7 +107,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(THNNState *state, THTensor *input,
 
   } else if (THTensor_(nDimension)(input) == 2) {
     int batch_size = THTensor_(size)(input, 0);
-    THAssert(THTensor_(size)(target, 0) == batch_size);
+    THAssert(THIndexTensor_(size)(target, 0) == batch_size);
 
     int n_target = THTensor_(size)(input, 1);
 
