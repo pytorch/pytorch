@@ -150,6 +150,7 @@ TH_API void THNN_(LookupTable_accGradParameters)(
           THTensor *sorted,
           THTensor *indices,
           bool scaleGradByFreq,
+          int paddingValue,
           real scale);
 
 TH_API void THNN_(MarginCriterion_updateOutput)(
