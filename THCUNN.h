@@ -142,6 +142,7 @@ TH_API void THNN_CudaLookupTable_accGradParameters(
           THCudaTensor *sorted,
           THCudaTensor *indices,
           bool scaleGradByFreq,
+          int paddingValue,
           float scale);
 
 TH_API void THNN_CudaMarginCriterion_updateOutput(
