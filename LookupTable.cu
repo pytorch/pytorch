@@ -2,6 +2,9 @@
 #include <thrust/device_ptr.h>
 #include <thrust/execution_policy.h>
 #include <thrust/iterator/constant_iterator.h>
+#if CUDA_VERSION >= 7000
+#include <thrust/system/cuda/execution_policy.h>
+#endif
 
 #ifndef DIVUP
 #define DIVUP(x, y) (((x) + (y) - 1) / (y))
@@ -43,12 +46,13 @@ __device__ __forceinline__ bool warpHasCollision(int val)
 }
 
 __global__ void cunn_LookupTable_accGradParametersKernelByFeature(
-  float *input, float *gradOutput, float *gradWeight, float scale, long numel, long stride)
-{
+  float *input, float *gradOutput, float *gradWeight, float scale, long numel,
+  long stride, int paddingValue) {
 
   const int featureDim = blockIdx.x * 4 + threadIdx.x / 32;
-  if (featureDim >= stride)
+  if (featureDim >= stride) {
     return;
+  }
 
   // The strategy here is that each warp handles a single feature
   // dimension.
@@ -64,25 +68,23 @@ __global__ void cunn_LookupTable_accGradParametersKernelByFeature(
   // updates are serialized in their order of execution by using the
   // warp-wide collision detector `warpHasCollision`.
   const int laneId = threadIdx.x % 32;
-  for (int i = laneId; i < numel; i += WARP_SIZE)
-  {
-    int weightIndex = (int) (input[i] - 1);
+  for (int i = laneId; i < numel; i += WARP_SIZE) {
+    const int weightIndex = (int) (input[i] - 1);
+    if (weightIndex == paddingValue - 1) {
+      continue;
+    }
+
     float update = gradOutput[i*stride + featureDim] * scale;
 
     // Check for collision
-    if (warpHasCollision(weightIndex))
-    {
+    if (warpHasCollision(weightIndex)) {
       // Run all lanes sequentially; warp divergence
-      for (int i = 0; i < WARP_SIZE; ++i)
-      {
-        if (laneId == i)
-        {
+      for (int i = 0; i < WARP_SIZE; ++i) {
+        if (laneId == i) {
           gradWeight[weightIndex*stride + featureDim] += update;
         }
       }
-    }
-    else
-    {
+    } else {
       // No collision; warp coherence
       gradWeight[weightIndex*stride + featureDim] += update;
     }
@@ -90,9 +92,9 @@ __global__ void cunn_LookupTable_accGradParametersKernelByFeature(
 }
 
 __global__ void cunn_LookupTable_accGradParametersKernel(
-  float *input,  float *indices, float *gradOutput, float *gradWeight,
-  float *count, float defaultScale, long numel, long stride)
-{
+  float *input, float *indices, float *gradOutput, float *gradWeight,
+  float *count, float defaultScale, long numel, long stride, int paddingValue) {
+
   int idx = blockIdx.x * 4 + threadIdx.y;
 
   // Each warp is responsible for an input into the LookupTable.
@@ -109,10 +111,10 @@ __global__ void cunn_LookupTable_accGradParametersKernel(
   // Number of values proceessed by each thread (grain size)
   const int SZ = 4;
 
-  if (idx < numel && (idx == 0 || input[idx] != input[idx - 1]))
-  {
-    do
-    {
+  if (idx < numel
+      && (idx == 0 || input[idx] != input[idx - 1])
+      && input[idx] != paddingValue) {
+    do {
       const int startFeature = threadIdx.x + blockIdx.y * blockDim.x * SZ;
       const int weightRow = ((int) input[idx] - 1) * stride;
       const int gradOutputRow = ((int) indices[idx] - 1) * stride;
@@ -162,6 +164,7 @@ void THNN_CudaLookupTable_accGradParameters(
   THCudaTensor *sorted,
   THCudaTensor *indices,
   bool scaleGradByFreq,
+  int paddingValue,
   float scale)
 {
   THAssert(THCudaTensor_checkGPU(state, 5, input, gradOutput, gradWeight, sorted, indices));
@@ -181,16 +184,15 @@ void THNN_CudaLookupTable_accGradParameters(
 
   cudaStream_t stream = THCState_getCurrentStream(state);
 
-  if (numel <= 768 && !scaleGradByFreq)
-  {
+  if (numel <= 768 && !scaleGradByFreq) {
     cunn_LookupTable_accGradParametersKernelByFeature<<<DIVUP(stride,4), 128, 0, stream>>>(
       THCudaTensor_data(state, input),
       THCudaTensor_data(state, gradOutput),
       THCudaTensor_data(state, gradWeight),
       scale,
       numel,
-      stride
-    );
+      stride,
+      paddingValue);
 
     return;
   }
@@ -217,6 +219,9 @@ void THNN_CudaLookupTable_accGradParameters(
     // sorted: 2 5 5 5 7 7 8 9 9
     //  count: 1 1 2 3 1 2 1 1 2
     thrust::inclusive_scan_by_key(
+#if CUDA_VERSION >= 7000
+      thrust::cuda::par.on(THCState_getCurrentStream(state)),
+#endif
       sorted_ptr,
       sorted_ptr + numel,
       thrust::make_constant_iterator(1),
@@ -227,6 +232,9 @@ void THNN_CudaLookupTable_accGradParameters(
     // sorted: 2 5 5 5 7 7 8 9 9
     //  count: 1 3 3 3 2 2 1 2 2
     thrust::inclusive_scan_by_key(
+#if CUDA_VERSION >= 7000
+      thrust::cuda::par.on(THCState_getCurrentStream(state)),
+#endif
       thrust::make_reverse_iterator(sorted_ptr + numel),
       thrust::make_reverse_iterator(sorted_ptr),
       thrust::make_reverse_iterator(count_ptr + numel),
@@ -246,6 +254,7 @@ void THNN_CudaLookupTable_accGradParameters(
     count_data,
     scale,
     numel,
-    stride
+    stride,
+    paddingValue
   );
 }
