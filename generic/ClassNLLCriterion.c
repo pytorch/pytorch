@@ -2,7 +2,11 @@
 #define TH_GENERIC_FILE "generic/ClassNLLCriterion.c"
 #else
 
-void THNN_(ClassNLLCriterion_updateOutput)(THNNState *state, THTensor *input, THIndexTensor *target, THTensor *output, bool sizeAverage, THTensor *weights, THTensor *total_weight)
+void THNN_(ClassNLLCriterion_updateOutput)(THNNState *state, THTensor *input,
+                                           THIndexTensor *target,
+                                           THTensor *output, bool sizeAverage,
+                                           THTensor *weights,
+                                           THTensor *total_weight)
 {
   int n_dims = THTensor_(nDimension)(input);
   int n_classes = THTensor_(size)(input, n_dims - 1);
@@ -33,6 +37,8 @@ void THNN_(ClassNLLCriterion_updateOutput)(THNNState *state, THTensor *input, TH
     output_data[0] = -input_data[cur_target] * total_weight_data[0];
   } else if (THTensor_(nDimension)(input) == 2) {
     int batch_size = THTensor_(size)(input, 0);
+    THAssert(THTensor_(size)(target, 0) == batch_size);
+
     int n_target = THTensor_(size)(input, 1);
 
     int i;
@@ -57,7 +63,12 @@ void THNN_(ClassNLLCriterion_updateOutput)(THNNState *state, THTensor *input, TH
   THIndexTensor_(free)(target);
 }
 
-void THNN_(ClassNLLCriterion_updateGradInput)(THNNState *state, THTensor *input, THIndexTensor *target, THTensor *gradInput, bool sizeAverage, THTensor *weights, THTensor *total_weight)
+void THNN_(ClassNLLCriterion_updateGradInput)(THNNState *state, THTensor *input,
+                                              THIndexTensor *target,
+                                              THTensor *gradInput,
+                                              bool sizeAverage,
+                                              THTensor *weights,
+                                              THTensor *total_weight)
 {
   int n_dims = THTensor_(nDimension)(input);
   int n_classes = THTensor_(size)(input, n_dims - 1);
@@ -96,6 +107,8 @@ void THNN_(ClassNLLCriterion_updateGradInput)(THNNState *state, THTensor *input,
 
   } else if (THTensor_(nDimension)(input) == 2) {
     int batch_size = THTensor_(size)(input, 0);
+    THAssert(THTensor_(size)(target, 0) == batch_size);
+
     int n_target = THTensor_(size)(input, 1);
 
     int i;
