@@ -51,8 +51,9 @@ void THNN_(MultiMarginCriterion_updateOutput)(THNNState *state, THTensor *input,
     input_data += dim;
   }
 
-  if (sizeAverage)
-    sum /= dim;
+  sum /= dim;
+  if(sizeAverage)
+    sum /= nframe;
 
   THTensor_(set1d)(output, 0, sum);
 
@@ -83,7 +84,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(THNNState *state, THTensor *inp
     THArgCheck((target->nDimension == 1) && (target->size[0] == nframe), 3, "inconsistent target size");
   }
 
-  g = (sizeAverage ? 1./((real)dim) : 1.);
+  g = (sizeAverage ? 1./((real)(nframe*dim)) : 1./((real)dim));
 
   input = THTensor_(newContiguous)(input);
   target = THTensor_(newContiguous)(target);
