@@ -2,7 +2,13 @@
 #define TH_GENERIC_FILE "generic/Threshold.c"
 #else
 
-void THNN_(Threshold_updateOutput)(THNNState *state, THTensor *input, THTensor *output, real threshold, real val, bool inplace)
+void THNN_(Threshold_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          real threshold,
+          real val,
+          bool inplace)
 {
   if (inplace)
   {
@@ -21,7 +27,13 @@ void THNN_(Threshold_updateOutput)(THNNState *state, THTensor *input, THTensor *
   }
 }
 
-void THNN_(Threshold_updateGradInput)(THNNState *state, THTensor *input, THTensor *gradOutput, THTensor *gradInput, real threshold, bool inplace)
+void THNN_(Threshold_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          real threshold,
+          bool inplace)
 {
   if (inplace)
   {

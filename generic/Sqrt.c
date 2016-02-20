@@ -2,13 +2,22 @@
 #define TH_GENERIC_FILE "generic/Sqrt.c"
 #else
 
-void THNN_(Sqrt_updateOutput)(THNNState *state, THTensor *input, THTensor *output, real eps)
+void THNN_(Sqrt_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          real eps)
 {
   THTensor_(resizeAs)(output, input);
   THTensor_(sqrt)(output, input);
 }
 
-void THNN_(Sqrt_updateGradInput)(THNNState *state, THTensor *input, THTensor *gradOutput, THTensor *gradInput, THTensor *output)
+void THNN_(Sqrt_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          THTensor *output)
 {
   THTensor_(resizeAs)(gradInput, input);
 

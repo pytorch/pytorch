@@ -3,11 +3,21 @@
 #else
 
 static void THNN_(VolumetricAveragePooling_updateOutput_frame)(
-  real *input_p, real *output_p, long nslices,
-  long itime, long iwidth, long iheight,
-  long otime, long owidth, long oheight,
-  int kT, int kW, int kH,
-  int dT, int dW, int dH)
+          real *input_p,
+          real *output_p,
+          long nslices,
+          long itime,
+          long iwidth,
+          long iheight,
+          long otime,
+          long owidth,
+          long oheight,
+          int kT,
+          int kW,
+          int kH,
+          int dT,
+          int dW,
+          int dH)
 {
   long k;
 #pragma omp parallel for private(k)
@@ -51,9 +61,15 @@ static void THNN_(VolumetricAveragePooling_updateOutput_frame)(
 }
 
 void THNN_(VolumetricAveragePooling_updateOutput)(
-  THNNState *state, THTensor *input, THTensor *output,
-  int kT, int kW, int kH,
-  int dT, int dW, int dH)
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          int kT,
+          int kW,
+          int kH,
+          int dT,
+          int dW,
+          int dH)
 {
   long nslices;
   long itime;
@@ -146,11 +162,21 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
 }
 
 static void THNN_(VolumetricAveragePooling_updateGradInput_frame)(
-  real *gradInput_p, real *gradOutput_p, long nslices,
-  long itime, long iwidth, long iheight,
-  long otime, long owidth, long oheight,
-  int kT, int kW, int kH,
-  int dT, int dW, int dH)
+          real *gradInput_p,
+          real *gradOutput_p,
+          long nslices,
+          long itime,
+          long iwidth,
+          long iheight,
+          long otime,
+          long owidth,
+          long oheight,
+          int kT,
+          int kW,
+          int kH,
+          int dT,
+          int dW,
+          int dH)
 {
   long k;
 #pragma omp parallel for private(k)
@@ -190,12 +216,16 @@ static void THNN_(VolumetricAveragePooling_updateGradInput_frame)(
 }
 
 void THNN_(VolumetricAveragePooling_updateGradInput)(
-  THNNState *state,
-  THTensor *input,
-  THTensor *gradOutput,
-  THTensor *gradInput,
-  int kT, int kW, int kH,
-  int dT, int dW, int dH)
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          int kT,
+          int kW,
+          int kH,
+          int dT,
+          int dW,
+          int dH)
 {
   int nslices;
   int itime;

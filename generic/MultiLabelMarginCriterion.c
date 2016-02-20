@@ -2,7 +2,12 @@
 #define TH_GENERIC_FILE "generic/MultiLabelMarginCriterion.c"
 #else
 
-void THNN_(MultiLabelMarginCriterion_updateOutput)(THNNState *state, THTensor *input, THTensor *target, THTensor *output, bool sizeAverage)
+void THNN_(MultiLabelMarginCriterion_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *target,
+          THTensor *output,
+          bool sizeAverage)
 {
   real *input_data, *target_data;
   long nframe, dim;
@@ -76,7 +81,12 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(THNNState *state, THTensor *i
   THTensor_(free)(target);
 }
 
-void THNN_(MultiLabelMarginCriterion_updateGradInput)(THNNState *state, THTensor *input, THTensor *target, THTensor *gradInput, bool sizeAverage)
+void THNN_(MultiLabelMarginCriterion_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *target,
+          THTensor *gradInput,
+          bool sizeAverage)
 {
   real *input_data;
   real *gradInput_data;

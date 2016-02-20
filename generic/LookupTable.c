@@ -2,7 +2,9 @@
 #define TH_GENERIC_FILE "generic/LookupTable.c"
 #else
 
-static void THNN_(LookupTable_resetCount)(THInteger_t *count_data, THIndexTensor *input)
+static void THNN_(LookupTable_resetCount)(
+          THInteger_t *count_data,
+          THIndexTensor *input)
 {
   int i;
   THIndex_t *input_data = THIndexTensor_(data)(input);
@@ -21,16 +23,16 @@ static void THNN_(LookupTable_resetCount)(THInteger_t *count_data, THIndexTensor
 }
 
 void THNN_(LookupTable_accGradParameters)(
-  THNNState *state,
-  THIndexTensor *input,
-  THTensor *gradOutput,
-  THTensor *gradWeight,
-  THIntegerTensor *count,
-  THTensor *sorted,
-  THTensor *indices,
-  bool scaleGradByFreq,
-  int paddingValue,
-  real scale)
+          THNNState *state,
+          THIndexTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradWeight,
+          THIntegerTensor *count,
+          THTensor *sorted,
+          THTensor *indices,
+          bool scaleGradByFreq,
+          int paddingValue,
+          real scale)
 {
   long i;
   THInteger_t *count_data = NULL;

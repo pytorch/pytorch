@@ -7,10 +7,20 @@
 #endif
 
 /* note: due to write issues, this one cannot be parallelized as well as unfolded_copy */
-void THNN_(unfolded_acc)(THTensor *finput, THTensor *input,
-                         int kW, int kH, int dW, int dH, int padW, int padH,
-                         int nInputPlane, int inputWidth, int inputHeight,
-                         int outputWidth, int outputHeight)
+void THNN_(unfolded_acc)(
+          THTensor *finput,
+          THTensor *input,
+          int kW,
+          int kH,
+          int dW,
+          int dH,
+          int padW,
+          int padH,
+          int nInputPlane,
+          int inputWidth,
+          int inputHeight,
+          int outputWidth,
+          int outputHeight)
 {
 #ifdef _WIN32
   LONG_PTR nip;
@@ -24,7 +34,7 @@ void THNN_(unfolded_acc)(THTensor *finput, THTensor *input,
 #pragma omp parallel for private(nip)
   for(nip = 0; nip < nInputPlane; nip++)
   {
-    size_t kw, kh, y, x; 
+    size_t kw, kh, y, x;
     long long ix = 0, iy = 0;
     for(kh = 0; kh < kH; kh++)
     {
@@ -71,11 +81,20 @@ void THNN_(unfolded_acc)(THTensor *finput, THTensor *input,
   }
 }
 
-
-void THNN_(unfolded_copy)(THTensor *finput, THTensor *input,
-                          int kW, int kH, int dW, int dH, int padW, int padH,
-                          int nInputPlane, int inputWidth, int inputHeight,
-                          int outputWidth, int outputHeight)
+void THNN_(unfolded_copy)(
+          THTensor *finput,
+          THTensor *input,
+          int kW,
+          int kH,
+          int dW,
+          int dH,
+          int padW,
+          int padH,
+          int nInputPlane,
+          int inputWidth,
+          int inputHeight,
+          int outputWidth,
+          int outputHeight)
 {
   long k;
   real *input_data = THTensor_(data)(input);

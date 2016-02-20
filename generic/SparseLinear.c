@@ -21,7 +21,13 @@ static bool THNN_(checkSize1D)(THTensor* t, long size0)
   return t->nDimension == 1 && t->size[0] == size0;
 }
 
-void THNN_(SparseLinear_updateOutput)(THNNState *state, THTensor *input, THTensor *output, THTensor *weight, THTensor *bias, THTensor *shardBuffer)
+void THNN_(SparseLinear_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          THTensor *weight,
+          THTensor *bias,
+          THTensor *shardBuffer)
 {
   long i;
   long outDim = weight->size[0];
@@ -100,15 +106,15 @@ void THNN_(SparseLinear_updateOutput)(THNNState *state, THTensor *input, THTenso
 }
 
 void THNN_(SparseLinear_accGradParameters)(
-  THNNState *state,
-  THTensor *input,
-  THTensor *gradOutput,
-  THTensor *gradWeight,
-  THTensor *gradBias,
-  THTensor *weight,
-  THTensor *bias,
-  real weightDecay,
-  real scale)
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradWeight,
+          THTensor *gradBias,
+          THTensor *weight,
+          THTensor *bias,
+          real weightDecay,
+          real scale)
 {
   long i;
   long nnz = input->size[0];
@@ -167,13 +173,13 @@ void THNN_(SparseLinear_accGradParameters)(
 }
 
 void THNN_(SparseLinear_updateParameters)(
-  THNNState *state,
-  THTensor *weight,
-  THTensor *bias,
-  THTensor *gradWeight,
-  THTensor *gradBias,
-  THTensor *lastInput,
-  real learningRate)
+          THNNState *state,
+          THTensor *weight,
+          THTensor *bias,
+          THTensor *gradWeight,
+          THTensor *gradBias,
+          THTensor *lastInput,
+          real learningRate)
 {
   long i;
   long nnz = lastInput->size[0];
@@ -212,7 +218,11 @@ void THNN_(SparseLinear_updateParameters)(
   }
 }
 
-void THNN_(SparseLinear_zeroGradParameters)(THNNState *state, THTensor *gradWeight, THTensor *gradBias, THTensor *lastInput)
+void THNN_(SparseLinear_zeroGradParameters)(
+          THNNState *state,
+          THTensor *gradWeight,
+          THTensor *gradBias,
+          THTensor *lastInput)
 {
   long i;
   long nnz = lastInput->size[0];
@@ -252,11 +262,11 @@ void THNN_(SparseLinear_zeroGradParameters)(THNNState *state, THTensor *gradWeig
 }
 
 void THNN_(SparseLinear_updateGradInput)(
-  THNNState *state,
-  THTensor *input,
-  THTensor *gradOutput,
-  THTensor *gradInput,
-  THTensor *weight)
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          THTensor *weight)
 {
   long i;
   long nnz = input->size[0];

@@ -3,15 +3,19 @@
 #else
 
 void THNN_(VolumetricFullConvolution_updateOutput)(
-  THNNState *state,
-  THTensor *input,
-  THTensor *output,
-  THTensor *weight,
-  THTensor *bias,
-  THTensor *finput,         // only used by cuda impl
-  THTensor *fgradInput,     // only used by cuda impl
-  int dT, int dW, int dH,
-  int pT, int pW, int pH)
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          THTensor *weight,
+          THTensor *bias,
+          THTensor *finput,     // only used by cuda impl
+          THTensor *fgradInput, // only used by cuda impl
+          int dT,
+          int dW,
+          int dH,
+          int pT,
+          int pW,
+          int pH)
 {
   // number of input & output planes and kernel size is indirectly defined by the weight tensor
   THArgCheck(weight->nDimension == 5, 4,
@@ -100,16 +104,19 @@ void THNN_(VolumetricFullConvolution_updateOutput)(
 }
 
 void THNN_(VolumetricFullConvolution_updateGradInput)(
-  THNNState *state,
-  THTensor *input,
-  THTensor *gradOutput,
-  THTensor *gradInput,
-  THTensor *weight,
-  THTensor *finput,         // only used by cuda impl
-  THTensor *fgradInput,     // only used by cuda impl
-  int dT, int dW, int dH,
-  int pT, int pW, int pH
-)
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          THTensor *weight,
+          THTensor *finput,     // only used by cuda impl
+          THTensor *fgradInput, // only used by cuda impl
+          int dT,
+          int dW,
+          int dH,
+          int pT,
+          int pW,
+          int pH)
 {
   // number of input/output planes and kernel size is indirectly defined by the weight tensor
   THArgCheck(weight->nDimension == 5, 4,
@@ -188,16 +195,20 @@ void THNN_(VolumetricFullConvolution_updateGradInput)(
 }
 
 void THNN_(VolumetricFullConvolution_accGradParameters)(
-  THNNState *state,
-  THTensor *input,
-  THTensor *gradOutput,
-  THTensor *gradWeight,
-  THTensor *gradBias,
-  THTensor *finput,         // only used by cuda impl
-  THTensor *fgradInput,     // only used by cuda impl
-  int dT, int dW, int dH,
-  int pT, int pW, int pH,
-  real scale)
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradWeight,
+          THTensor *gradBias,
+          THTensor *finput,     // only used by cuda impl
+          THTensor *fgradInput, // only used by cuda impl
+          int dT,
+          int dW,
+          int dH,
+          int pT,
+          int pW,
+          int pH,
+          real scale)
 {
   // number of input/output planes and kernel size is indirectly defined by the gradWeight tensor
   THArgCheck(gradWeight->nDimension == 5, 4,

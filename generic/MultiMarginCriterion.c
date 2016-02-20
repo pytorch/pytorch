@@ -2,9 +2,14 @@
 #define TH_GENERIC_FILE "generic/MultiMarginCriterion.c"
 #else
 
-void THNN_(MultiMarginCriterion_updateOutput)(THNNState *state, THTensor *input,
-                                              THTensor *target, THTensor *output,
-                                              bool sizeAverage, int p, THTensor *weights)
+void THNN_(MultiMarginCriterion_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *target,
+          THTensor *output,
+          bool sizeAverage,
+          int p,
+          THTensor *weights)
 {
   real *input_data, *target_data, *weights_data;
   long nframe, dim;
@@ -71,9 +76,14 @@ void THNN_(MultiMarginCriterion_updateOutput)(THNNState *state, THTensor *input,
     THTensor_(free)(weights);
 }
 
-void THNN_(MultiMarginCriterion_updateGradInput)(THNNState *state, THTensor *input,
-                                                 THTensor *target, THTensor *gradInput,
-                                                 bool sizeAverage, int p, THTensor *weights)
+void THNN_(MultiMarginCriterion_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *target,
+          THTensor *gradInput,
+          bool sizeAverage,
+          int p,
+          THTensor *weights)
 {
   real *input_data;
   real *gradInput_data;

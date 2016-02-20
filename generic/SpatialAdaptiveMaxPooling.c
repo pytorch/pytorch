@@ -2,13 +2,19 @@
 #define TH_GENERIC_FILE "generic/SpatialAdaptiveMaxPooling.c"
 #else
 
-static void THNN_(SpatialAdaptiveMaxPooling_updateOutput_frame)(real *input_p,real *output_p,
-                                                              real *indx_p, real *indy_p,
-                                                              long nslices,
-                                                              long iwidth, long iheight,
-                                                              long owidth, long oheight,
-                                                              long stridew,long strideh,
-                                                              long strided)
+static void THNN_(SpatialAdaptiveMaxPooling_updateOutput_frame)(
+          real *input_p,
+          real *output_p,
+          real *indx_p,
+          real *indy_p,
+          long nslices,
+          long iwidth,
+          long iheight,
+          long owidth,
+          long oheight,
+          long stridew,
+          long strideh,
+          long strided)
 {
   long k;
 #pragma omp parallel for private(k)
@@ -65,7 +71,13 @@ static void THNN_(SpatialAdaptiveMaxPooling_updateOutput_frame)(real *input_p,re
   }
 }
 
-void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(THNNState *state, THTensor *input, THTensor *output, THTensor *indices, int owidth, int oheight)
+void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          THTensor *indices,
+          int owidth,
+          int oheight)
 {
   int dimw = 2;
   int dimh = 1;
@@ -148,13 +160,16 @@ void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(THNNState *state, THTensor *i
   }
 }
 
-
-
-static void THNN_(SpatialAdaptiveMaxPooling_updateGradInput_frame)(real *gradInput_p, real *gradOutput_p,
-                                                                 real *indx_p, real *indy_p,
-                                                                 long nslices,
-                                                                 long iwidth, long iheight,
-                                                                 long owidth, long oheight)
+static void THNN_(SpatialAdaptiveMaxPooling_updateGradInput_frame)(
+          real *gradInput_p,
+          real *gradOutput_p,
+          real *indx_p,
+          real *indy_p,
+          long nslices,
+          long iwidth,
+          long iheight,
+          long owidth,
+          long oheight)
 {
   long k;
 #pragma omp parallel for private(k)
@@ -184,7 +199,12 @@ static void THNN_(SpatialAdaptiveMaxPooling_updateGradInput_frame)(real *gradInp
   }
 }
 
-void THNN_(SpatialAdaptiveMaxPooling_updateGradInput)(THNNState *state, THTensor *input, THTensor *gradOutput, THTensor *gradInput, THTensor *indices)
+void THNN_(SpatialAdaptiveMaxPooling_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          THTensor *indices)
 {
   int dimw = 2;
   int dimh = 1;

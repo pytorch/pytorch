@@ -2,7 +2,10 @@
 #define TH_GENERIC_FILE "generic/Sigmoid.c"
 #else
 
-void THNN_(Sigmoid_updateOutput)(THNNState *state, THTensor *input, THTensor *output)
+void THNN_(Sigmoid_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output)
 {
   THTensor_(resizeAs)(output, input);
 
@@ -11,7 +14,12 @@ void THNN_(Sigmoid_updateOutput)(THNNState *state, THTensor *input, THTensor *ou
   );
 }
 
-void THNN_(Sigmoid_updateGradInput)(THNNState *state, THTensor *input, THTensor *gradOutput, THTensor *gradInput, THTensor *output)
+void THNN_(Sigmoid_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          THTensor *output)
 {
   THTensor_(resizeAs)(gradInput, output);
   TH_TENSOR_APPLY3(real, gradInput, real, gradOutput, real, output,

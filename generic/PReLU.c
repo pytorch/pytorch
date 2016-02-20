@@ -2,7 +2,12 @@
 #define TH_GENERIC_FILE "generic/PReLU.c"
 #else
 
-void THNN_(PReLU_updateOutput)(THNNState *state, THTensor *input, THTensor *output, THTensor *weight, THIndex_t nOutputPlane)
+void THNN_(PReLU_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          THTensor *weight,
+          THIndex_t nOutputPlane)
 {
   THTensor_(resizeAs)(output, input);
 
@@ -63,7 +68,13 @@ void THNN_(PReLU_updateOutput)(THNNState *state, THTensor *input, THTensor *outp
   }
 }
 
-void THNN_(PReLU_updateGradInput)(THNNState *state, THTensor *input, THTensor *gradOutput, THTensor *gradInput, THTensor *weight, THIndex_t nOutputPlane)
+void THNN_(PReLU_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          THTensor *weight,
+          THIndex_t nOutputPlane)
 {
   THTensor_(resizeAs)(gradInput, input);
 
@@ -138,16 +149,16 @@ void THNN_(PReLU_updateGradInput)(THNNState *state, THTensor *input, THTensor *g
 }
 
 void THNN_(PReLU_accGradParameters)(
-  THNNState *state,
-  THTensor *input,
-  THTensor *gradOutput,
-  THTensor *gradInput,
-  THTensor *weight,
-  THTensor *gradWeight,
-  THTensor *gradWeightBuf,
-  THTensor *gradWeightBuf2,
-  THIndex_t nOutputPlane,
-  real scale)
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          THTensor *weight,
+          THTensor *gradWeight,
+          THTensor *gradWeightBuf,
+          THTensor *gradWeightBuf2,
+          THIndex_t nOutputPlane,
+          real scale)
 {
   real *gradWeight_data = THTensor_(data)(gradWeight);
 
