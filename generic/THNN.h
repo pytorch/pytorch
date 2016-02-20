@@ -200,14 +200,16 @@ TH_API void THNN_(MultiMarginCriterion_updateOutput)(
           THTensor *target,
           THTensor *output,
           bool sizeAverage,
-          int p);
+          int p,
+          THTensor* weights);
 TH_API void THNN_(MultiMarginCriterion_updateGradInput)(
           THNNState *state,
           THTensor *input,
           THTensor *target,
           THTensor *gradInput,
           bool sizeAverage,
-          int p);
+          int p,
+          THTensor *weights);
 
 TH_API void THNN_(PReLU_updateOutput)(
           THNNState *state,

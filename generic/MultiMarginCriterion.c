@@ -2,9 +2,11 @@
 #define TH_GENERIC_FILE "generic/MultiMarginCriterion.c"
 #else
 
-void THNN_(MultiMarginCriterion_updateOutput)(THNNState *state, THTensor *input, THTensor *target, THTensor *output, bool sizeAverage, int p)
+void THNN_(MultiMarginCriterion_updateOutput)(THNNState *state, THTensor *input,
+                                              THTensor *target, THTensor *output,
+                                              bool sizeAverage, int p, THTensor *weights)
 {
-  real *input_data, *target_data;
+  real *input_data, *target_data, *weights_data;
   long nframe, dim;
   long t, d;
   real sum;
@@ -14,7 +16,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(THNNState *state, THTensor *input,
   if (input->nDimension == 1)
   {
     nframe = 1;
-    dim = input->size[0]; 
+    dim = input->size[0];
   }
   else
   {
@@ -31,8 +33,10 @@ void THNN_(MultiMarginCriterion_updateOutput)(THNNState *state, THTensor *input,
 
   input = THTensor_(newContiguous)(input);
   target = THTensor_(newContiguous)(target);
+  weights = weights ? THTensor_(newContiguous)(weights) : NULL;
   input_data = THTensor_(data)(input);
   target_data = THTensor_(data)(target);
+  weights_data = weights ? THTensor_(data)(weights) : NULL;
 
   sum = 0;
   for (t = 0; t < nframe; t++)
@@ -44,9 +48,13 @@ void THNN_(MultiMarginCriterion_updateOutput)(THNNState *state, THTensor *input,
       real z = 1 - input_target + input_data[d];
       if (d == target_idx)
         continue;
-    
-      if (z > 0)
-        sum += (p == 1) ? z : z*z;
+
+      if (z > 0) {
+        real h = (p==1) ? z : z*z;
+        if(weights_data)
+          h *= weights_data[target_idx];
+        sum += h;
+      }
     }
     input_data += dim;
   }
@@ -59,13 +67,18 @@ void THNN_(MultiMarginCriterion_updateOutput)(THNNState *state, THTensor *input,
 
   THTensor_(free)(input);
   THTensor_(free)(target);
+  if(weights)
+    THTensor_(free)(weights);
 }
 
-void THNN_(MultiMarginCriterion_updateGradInput)(THNNState *state, THTensor *input, THTensor *target, THTensor *gradInput, bool sizeAverage, int p)
+void THNN_(MultiMarginCriterion_updateGradInput)(THNNState *state, THTensor *input,
+                                                 THTensor *target, THTensor *gradInput,
+                                                 bool sizeAverage, int p, THTensor *weights)
 {
   real *input_data;
   real *gradInput_data;
   real *target_data;
+  real *weights_data;
   long nframe, dim;
   long t, d;
   real g;
@@ -75,7 +88,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(THNNState *state, THTensor *inp
   if (input->nDimension == 1)
   {
     nframe = 1;
-    dim = input->size[0]; 
+    dim = input->size[0];
   }
   else
   {
@@ -94,7 +107,9 @@ void THNN_(MultiMarginCriterion_updateGradInput)(THNNState *state, THTensor *inp
   gradInput_data = THTensor_(data)(gradInput);
 
   target_data = THTensor_(data)(target);
-    
+  weights = weights ? THTensor_(newContiguous)(weights) : NULL;
+  weights_data = weights ? THTensor_(data)(weights) : NULL;
+
   for (t = 0; t < nframe; t++)
   {
     long target_idx = (long)(target_data[t])-1;
@@ -105,10 +120,12 @@ void THNN_(MultiMarginCriterion_updateGradInput)(THNNState *state, THTensor *inp
       real z = 1 - input_target + input_data[d];
       if (d == target_idx)
         continue;
-    
+
       if (z > 0)
       {
         real h = (p == 1) ? g : 2*g*z;
+        if(weights_data)
+          h *= weights_data[target_idx];
         gradInput_target -= h;
         gradInput_data[d] = h;
       }
@@ -116,13 +133,15 @@ void THNN_(MultiMarginCriterion_updateGradInput)(THNNState *state, THTensor *inp
         gradInput_data[d] = 0;
     }
     gradInput_data[target_idx] = gradInput_target;
-    
+
     input_data += dim;
     gradInput_data += dim;
   }
 
-  THTensor_(free)(input);  
+  THTensor_(free)(input);
   THTensor_(free)(target);
+  if(weights)
+    THTensor_(free)(weights);
 }
 
 #endif
