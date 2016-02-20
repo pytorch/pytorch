@@ -482,7 +482,7 @@ __global__ void indexFillLargeIndex(TensorInfo<IndexType> dst,
         IndexToOffset<IndexType, DstDim>::get(elementInSlice, dst);
       dstOffset += dstIndex_ * dst.strides[dstFillDim];
 
-      dst.data[dstOffset] = 1;
+      dst.data[dstOffset] = val;
     }
   }
 }
