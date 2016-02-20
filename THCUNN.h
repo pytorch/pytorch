@@ -179,14 +179,16 @@ TH_API void THNN_CudaMultiMarginCriterion_updateOutput(
           THCudaTensor *target,
           THCudaTensor *output,
           bool sizeAverage,
-          int p);
+          int p,
+          THCudaTensor *weights);
 TH_API void THNN_CudaMultiMarginCriterion_updateGradInput(
           THCState *state,
           THCudaTensor *input,
           THCudaTensor *target,
           THCudaTensor *gradInput,
           bool sizeAverage,
-          int p);
+          int p,
+          THCudaTensor *weights);
 
 TH_API void THNN_CudaPReLU_updateOutput(
           THCState *state,

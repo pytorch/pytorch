@@ -3,7 +3,7 @@
 #define MULTIMARGIN_THREADS 128
 
 template <int P>
-__global__ void cunn_MultiMarginCriterion_updateOutput_kernel(float *output, float *input, float *target, int nframe, int dim, bool sizeAverage)
+__global__ void cunn_MultiMarginCriterion_updateOutput_kernel(float *output, float *input, float *target, float *weights, int nframe, int dim, bool sizeAverage)
 {
   __shared__ float buffer[MULTIMARGIN_THREADS];
   int k = blockIdx.x;
@@ -23,8 +23,12 @@ __global__ void cunn_MultiMarginCriterion_updateOutput_kernel(float *output, flo
     if (i == target_k)
       continue;
 
-    if (z > 0)
-      buffer[threadIdx.x] += (P==1) ? z : z*z;
+    if (z > 0) {
+      float h = (P==1) ? z : z*z;
+      if(weights)
+        h *= weights[target_k];
+      buffer[threadIdx.x] += h;
+    }
   }
   __syncthreads();
 
@@ -42,7 +46,7 @@ __global__ void cunn_MultiMarginCriterion_updateOutput_kernel(float *output, flo
 }
 
 template <int P>
-__global__ void cunn_MultiMarginCriterion_updateGradInput_kernel(float *gradInput, float *input, float *target, int nframe, int dim, bool sizeAverage)
+__global__ void cunn_MultiMarginCriterion_updateGradInput_kernel(float *gradInput, float *input, float *target, float *weights, int nframe, int dim, bool sizeAverage)
 {
   __shared__ float buffer[MULTIMARGIN_THREADS];
   int k = blockIdx.x;
@@ -66,6 +70,8 @@ __global__ void cunn_MultiMarginCriterion_updateGradInput_kernel(float *gradInpu
     if (z > 0)
     {
       float h = (P == 1) ? g : 2*g*z;
+      if(weights)
+        h *= weights[target_k];
       buffer[threadIdx.x] -= h;
       gradInput_k[i] = h;
     }
@@ -85,10 +91,14 @@ __global__ void cunn_MultiMarginCriterion_updateGradInput_kernel(float *gradInpu
   }
 }
 
-void THNN_CudaMultiMarginCriterion_updateOutput(THCState *state, THCudaTensor *input, THCudaTensor *target, THCudaTensor *output, bool sizeAverage, int p)
+void THNN_CudaMultiMarginCriterion_updateOutput(THCState *state, THCudaTensor *input,
+                                                THCudaTensor *target, THCudaTensor *output,
+                                                bool sizeAverage, int p, THCudaTensor *weights)
 {
   THAssert(THCudaTensor_checkGPU(state, 2, input, target));
   input = THCudaTensor_newContiguous(state, input);
+  if(weights)
+    weights = THCudaTensor_newContiguous(state, weights);
   if (input->nDimension == 1)
   {
     dim3 blocks(1);
@@ -99,6 +109,7 @@ void THNN_CudaMultiMarginCriterion_updateOutput(THCState *state, THCudaTensor *i
         THCudaTensor_data(state, output),
         THCudaTensor_data(state, input),
         THCudaTensor_data(state, target),
+        weights ? THCudaTensor_data(state, weights) : NULL,
         1, input->size[0],
         sizeAverage
       );
@@ -109,6 +120,7 @@ void THNN_CudaMultiMarginCriterion_updateOutput(THCState *state, THCudaTensor *i
         THCudaTensor_data(state, output),
         THCudaTensor_data(state, input),
         THCudaTensor_data(state, target),
+        weights ? THCudaTensor_data(state, weights) : NULL,
         1, input->size[0],
         sizeAverage
       );
@@ -125,6 +137,7 @@ void THNN_CudaMultiMarginCriterion_updateOutput(THCState *state, THCudaTensor *i
         THCudaTensor_data(state, output_),
         THCudaTensor_data(state, input),
         THCudaTensor_data(state, target),
+        weights ? THCudaTensor_data(state, weights) : NULL,
         input->size[0], input->size[1],
         sizeAverage
       );
@@ -135,6 +148,7 @@ void THNN_CudaMultiMarginCriterion_updateOutput(THCState *state, THCudaTensor *i
         THCudaTensor_data(state, output_),
         THCudaTensor_data(state, input),
         THCudaTensor_data(state, target),
+        weights ? THCudaTensor_data(state, weights) : NULL,
         input->size[0], input->size[1],
         sizeAverage
       );
@@ -153,13 +167,19 @@ void THNN_CudaMultiMarginCriterion_updateOutput(THCState *state, THCudaTensor *i
     THError(cudaGetErrorString(errcode));
 
   THCudaTensor_free(state, input);
+  if(weights)
+    THCudaTensor_free(state, weights);
 }
 
-void THNN_CudaMultiMarginCriterion_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *target, THCudaTensor *gradInput, bool sizeAverage, int p)
+void THNN_CudaMultiMarginCriterion_updateGradInput(THCState *state, THCudaTensor *input,
+                                                   THCudaTensor *target, THCudaTensor *gradInput,
+                                                   bool sizeAverage, int p, THCudaTensor *weights)
 {
   THAssert(THCudaTensor_checkGPU(state, 3, input, gradInput, target));
   input = THCudaTensor_newContiguous(state, input);
   THCudaTensor_resizeAs(state, gradInput, input);
+  if(weights)
+    weights = THCudaTensor_newContiguous(state, weights);
 
   if (input->nDimension == 1)
   {
@@ -172,6 +192,7 @@ void THNN_CudaMultiMarginCriterion_updateGradInput(THCState *state, THCudaTensor
         THCudaTensor_data(state, gradInput),
         THCudaTensor_data(state, input),
         THCudaTensor_data(state, target),
+        weights ? THCudaTensor_data(state, weights) : NULL,
         1, gradInput->size[0],
         sizeAverage
       );
@@ -182,6 +203,7 @@ void THNN_CudaMultiMarginCriterion_updateGradInput(THCState *state, THCudaTensor
         THCudaTensor_data(state, gradInput),
         THCudaTensor_data(state, input),
         THCudaTensor_data(state, target),
+        weights ? THCudaTensor_data(state, weights) : NULL,
         1, gradInput->size[0],
         sizeAverage
       );
@@ -198,6 +220,7 @@ void THNN_CudaMultiMarginCriterion_updateGradInput(THCState *state, THCudaTensor
         THCudaTensor_data(state, gradInput),
         THCudaTensor_data(state, input),
         THCudaTensor_data(state, target),
+        weights ? THCudaTensor_data(state, weights) : NULL,
         gradInput->size[0], gradInput->size[1],
         sizeAverage
       );
@@ -208,6 +231,7 @@ void THNN_CudaMultiMarginCriterion_updateGradInput(THCState *state, THCudaTensor
         THCudaTensor_data(state, gradInput),
         THCudaTensor_data(state, input),
         THCudaTensor_data(state, target),
+        weights ? THCudaTensor_data(state, weights) : NULL,
         gradInput->size[0], gradInput->size[1],
         sizeAverage
       );
@@ -223,4 +247,6 @@ void THNN_CudaMultiMarginCriterion_updateGradInput(THCState *state, THCudaTensor
     THError(cudaGetErrorString(errcode));
 
   THCudaTensor_free(state, input);
+  if(weights)
+    THCudaTensor_free(state, weights);
 }
