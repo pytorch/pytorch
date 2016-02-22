@@ -2,11 +2,13 @@
 #define TH_GENERIC_FILE "generic/TemporalMaxPooling.c"
 #else
 
-void THNN_(TemporalMaxPooling_updateOutput)(THNNState *state,
-					    THTensor *input,
-					    THTensor *output,
-					    THTensor *indices,
-					    int kW, int dW)
+void THNN_(TemporalMaxPooling_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          THTensor *indices,
+          int kW,
+          int dW)
 {
   long niframe;
   long framesize;
@@ -138,12 +140,14 @@ void THNN_(TemporalMaxPooling_updateOutput)(THNNState *state,
 
 }
 
-void THNN_(TemporalMaxPooling_updateGradInput)(THNNState *state,
-					       THTensor *input,
-					       THTensor *gradOutput,
-					       THTensor *gradInput,
-					       THTensor *indices,
-					       int kW, int dW)
+void THNN_(TemporalMaxPooling_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          THTensor *indices,
+          int kW,
+          int dW)
 {
   long niframe;
   int noframe;

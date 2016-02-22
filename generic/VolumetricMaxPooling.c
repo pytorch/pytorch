@@ -3,12 +3,25 @@
 #else
 
 static void THNN_(VolumetricMaxPooling_updateOutput_frame)(
-  real *input_p, real *output_p, real *indz_p,
-  long nslices, long itime, long iwidth, long iheight,
-  long otime, long owidth, long oheight,
-  int kT, int kW, int kH,
-  int dT, int dW, int dH,
-  int pT, int pW, int pH)
+          real *input_p,
+          real *output_p,
+          real *indz_p,
+          long nslices,
+          long itime,
+          long iwidth,
+          long iheight,
+          long otime,
+          long owidth,
+          long oheight,
+          int kT,
+          int kW,
+          int kH,
+          int dT,
+          int dW,
+          int dH,
+          int pT,
+          int pW,
+          int pH)
 {
   long k;
 #pragma omp parallel for private(k)
@@ -85,11 +98,20 @@ static void THNN_(VolumetricMaxPooling_updateOutput_frame)(
 }
 
 void THNN_(VolumetricMaxPooling_updateOutput)(
-  THNNState *state, THTensor *input, THTensor *output, THTensor *indices,
-  int kT, int kW, int kH,
-  int dT, int dW, int dH,
-  int pT, int pW, int pH,
-  bool ceilMode)
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          THTensor *indices,
+          int kT,
+          int kW,
+          int kH,
+          int dT,
+          int dW,
+          int dH,
+          int pT,
+          int pW,
+          int pH,
+          bool ceilMode)
 {
   long nslices;
   long itime;
@@ -220,12 +242,22 @@ void THNN_(VolumetricMaxPooling_updateOutput)(
 }
 
 static void THNN_(VolumetricMaxPooling_updateGradInput_frame)(
-  real *gradInput_p, real *gradOutput_p, real *indz_p,
-  long nslices,
-  long itime, long iwidth, long iheight,
-  long otime, long owidth, long oheight,
-  int dT, int dW, int dH,
-  int pT, int pW, int pH)
+          real *gradInput_p,
+          real *gradOutput_p,
+          real *indz_p,
+          long nslices,
+          long itime,
+          long iwidth,
+          long iheight,
+          long otime,
+          long owidth,
+          long oheight,
+          int dT,
+          int dW,
+          int dH,
+          int pT,
+          int pW,
+          int pH)
 {
   long k;
 #pragma omp parallel for private(k)
@@ -259,9 +291,17 @@ static void THNN_(VolumetricMaxPooling_updateGradInput_frame)(
 }
 
 void THNN_(VolumetricMaxPooling_updateGradInput)(
-  THNNState *state, THTensor *input, THTensor *gradOutput, THTensor *gradInput, THTensor *indices,
-  int dT, int dW, int dH,
-  int pT, int pW, int pH)
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          THTensor *indices,
+          int dT,
+          int dW,
+          int dH,
+          int pT,
+          int pW,
+          int pH)
 {
   int nslices;
   int itime;

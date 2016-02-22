@@ -3,14 +3,22 @@
 #else
 
 static void THNN_(VolumetricMaxUnpooling_updateOutput_frame)(
-  real *input_p,
-  real *output_p,
-  real *ind_p,
-  long nslices,
-  long iT, long iW, long iH,
-  long oT, long oW, long oH,
-  int dT, int dW, int dH,
-  int pT, int pW, int pH)
+          real *input_p,
+          real *output_p,
+          real *ind_p,
+          long nslices,
+          long iT,
+          long iW,
+          long iH,
+          long oT,
+          long oW,
+          long oH,
+          int dT,
+          int dW,
+          int dH,
+          int pT,
+          int pW,
+          int pH)
 {
   long k;
 #pragma omp parallel for private(k)
@@ -50,13 +58,19 @@ static void THNN_(VolumetricMaxUnpooling_updateOutput_frame)(
 }
 
 void THNN_(VolumetricMaxUnpooling_updateOutput)(
-  THNNState *state,
-  THTensor *input,
-  THTensor *output,
-  THTensor *indices,
-  int oT, int oW, int oH,
-  int dT, int dW, int dH,
-  int pT, int pW, int pH)
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          THTensor *indices,
+          int oT,
+          int oW,
+          int oH,
+          int dT,
+          int dW,
+          int dH,
+          int pT,
+          int pW,
+          int pH)
 {
   int dimw = 3;
   int dimh = 2;
@@ -149,13 +163,22 @@ void THNN_(VolumetricMaxUnpooling_updateOutput)(
 }
 
 static void THNN_(VolumetricMaxUnpooling_updateGradInput_frame)(
-  real *gradInput_p, real *gradOutput_p,
-  real *ind_p,
-  long nslices,
-  long iT, long iW, long iH,
-  long oT, long oW, long oH,
-  int dT, int dW, int dH,
-  int pT, int pW, int pH)
+          real *gradInput_p,
+          real *gradOutput_p,
+          real *ind_p,
+          long nslices,
+          long iT,
+          long iW,
+          long iH,
+          long oT,
+          long oW,
+          long oH,
+          int dT,
+          int dW,
+          int dH,
+          int pT,
+          int pW,
+          int pH)
 {
   long k;
 #pragma omp parallel for private(k)
@@ -195,14 +218,20 @@ static void THNN_(VolumetricMaxUnpooling_updateGradInput_frame)(
 }
 
 void THNN_(VolumetricMaxUnpooling_updateGradInput)(
-  THNNState *state,
-  THTensor *input,
-  THTensor *gradOutput,
-  THTensor *gradInput,
-  THTensor *indices,
-  int oT, int oW, int oH,
-  int dT, int dW, int dH,
-  int pT, int pW, int pH)
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          THTensor *indices,
+          int oT,
+          int oW,
+          int oH,
+          int dT,
+          int dW,
+          int dH,
+          int pT,
+          int pW,
+          int pH)
 {
   int dimw = 3;
   int dimh = 2;

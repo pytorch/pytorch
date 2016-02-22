@@ -2,7 +2,18 @@
 #define TH_GENERIC_FILE "generic/SpatialAveragePooling.c"
 #else
 
-void THNN_(SpatialAveragePooling_updateOutput)(THNNState *state, THTensor *input, THTensor *output, int kW, int kH, int dW, int dH, int padW, int padH, bool ceil_mode, bool count_include_pad)
+void THNN_(SpatialAveragePooling_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          int kW,
+          int kH,
+          int dW,
+          int dH,
+          int padW,
+          int padH,
+          bool ceil_mode,
+          bool count_include_pad)
 {
   real *output_data;
   real *input_data;
@@ -119,7 +130,19 @@ void THNN_(SpatialAveragePooling_updateOutput)(THNNState *state, THTensor *input
   THTensor_(free)(input);
 }
 
-void THNN_(SpatialAveragePooling_updateGradInput)(THNNState *state, THTensor *input, THTensor *gradOutput, THTensor *gradInput, int kW, int kH, int dW, int dH, int padW, int padH, bool ceil_mode, bool count_include_pad)
+void THNN_(SpatialAveragePooling_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          int kW,
+          int kH,
+          int dW,
+          int dH,
+          int padW,
+          int padH,
+          bool ceil_mode,
+          bool count_include_pad)
 {
   int dimw = 2;
   int dimh = 1;

@@ -2,7 +2,10 @@
 #define TH_GENERIC_FILE "generic/L1Cost.c"
 #else
 
-void THNN_(L1Cost_updateOutput)(THNNState *state, THTensor *input, THTensor *output)
+void THNN_(L1Cost_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output)
 {
   accreal sum = 0;
 
@@ -13,7 +16,11 @@ void THNN_(L1Cost_updateOutput)(THNNState *state, THTensor *input, THTensor *out
   THTensor_(set1d)(output, 0, sum);
 }
 
-void THNN_(L1Cost_updateGradInput)(THNNState *state, THTensor *input, THTensor *gradOutput, THTensor *gradInput)
+void THNN_(L1Cost_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput)
 {
   THTensor_(resizeAs)(gradInput, input);
   TH_TENSOR_APPLY2(real, gradInput, real, input,

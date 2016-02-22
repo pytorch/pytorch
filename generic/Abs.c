@@ -2,13 +2,20 @@
 #define TH_GENERIC_FILE "generic/Abs.c"
 #else
 
-void THNN_(Abs_updateOutput)(THNNState *state, THTensor *input, THTensor *output)
+void THNN_(Abs_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output)
 {
   THTensor_(resizeAs)(output, input);
   THTensor_(abs)(output, input);
 }
 
-void THNN_(Abs_updateGradInput)(THNNState *state, THTensor *input, THTensor *gradOutput, THTensor *gradInput)
+void THNN_(Abs_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput)
 {
   THTensor_(resizeAs)(gradInput, input);
   TH_TENSOR_APPLY3(real, gradInput, real, gradOutput, real, input,

@@ -3,15 +3,19 @@
 #else
 
 void THNN_(VolumetricConvolution_updateOutput)(
-  THNNState *state,
-  THTensor *input,
-  THTensor *output,
-  THTensor *weight,
-  THTensor *bias,
-  THTensor *finput,       // only used by cuda impl
-  THTensor *fgradInput,   // only used by cuda impl
-  int dT, int dW, int dH,
-  int pT, int pW, int pH)
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          THTensor *weight,
+          THTensor *bias,
+          THTensor *finput,     // only used by cuda impl
+          THTensor *fgradInput, // only used by cuda impl
+          int dT,
+          int dW,
+          int dH,
+          int pT,
+          int pW,
+          int pH)
 {
   THArgCheck(pT != 0 || pW != 0 || pH != 0, 9, "padding not supported by CPU backend");   // sharing signature with CUDA version
 
@@ -87,14 +91,18 @@ void THNN_(VolumetricConvolution_updateOutput)(
 }
 
 void THNN_(VolumetricConvolution_updateGradInput)(
-  THNNState *state,
-  THTensor *input,
-  THTensor *gradOutput,
-  THTensor *gradInput,
-  THTensor *weight,
-  THTensor *finput,       // only used by cuda impl
-  int dT, int dW, int dH,
-  int pT, int pW, int pH)
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          THTensor *weight,
+          THTensor *finput, // only used by cuda impl
+          int dT,
+          int dW,
+          int dH,
+          int pT,
+          int pW,
+          int pH)
 {
   THArgCheck(pT != 0 || pW != 0 || pH != 0, 9, "padding not supported by CPU backend");   // sharing signature with CUDA version
 
@@ -150,16 +158,20 @@ void THNN_(VolumetricConvolution_updateGradInput)(
 }
 
 void THNN_(VolumetricConvolution_accGradParameters)(
-  THNNState *state,
-  THTensor *input,
-  THTensor *gradOutput,
-  THTensor *gradWeight,
-  THTensor *gradBias,
-  THTensor *finput,       // only used by cuda impl
-  THTensor *fgradInput,   // only used by cuda impl
-  int dT, int dW, int dH,
-  int pT, int pW, int pH,
-  real scale)
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradWeight,
+          THTensor *gradBias,
+          THTensor *finput,     // only used by cuda impl
+          THTensor *fgradInput, // only used by cuda impl
+          int dT,
+          int dW,
+          int dH,
+          int pT,
+          int pW,
+          int pH,
+          real scale)
 {
   THArgCheck(pT != 0 || pW != 0 || pH != 0, 9, "padding not supported by CPU backend");   // sharing signature with CUDA version
 

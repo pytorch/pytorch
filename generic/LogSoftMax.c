@@ -2,7 +2,10 @@
 #define TH_GENERIC_FILE "generic/LogSoftMax.c"
 #else
 
-void THNN_(LogSoftMax_updateOutput)(THNNState *state, THTensor *input, THTensor *output)
+void THNN_(LogSoftMax_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output)
 {
   real *input_data, *output_data;
   long nframe = 0, dim = 0;
@@ -53,7 +56,12 @@ void THNN_(LogSoftMax_updateOutput)(THNNState *state, THTensor *input, THTensor 
   THTensor_(free)(input);
 }
 
-void THNN_(LogSoftMax_updateGradInput)(THNNState *state, THTensor *input, THTensor *gradOutput, THTensor *gradInput, THTensor *output)
+void THNN_(LogSoftMax_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          THTensor *output)
 {
   real *gradInput_data, *gradOutput_data, *output_data;
   long nframe = 0, dim = 0;

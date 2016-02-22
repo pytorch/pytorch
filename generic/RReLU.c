@@ -2,7 +2,16 @@
 #define TH_GENERIC_FILE "generic/RReLU.c"
 #else
 
-void THNN_(RReLU_updateOutput)(THNNState *state, THTensor *input, THTensor *output, THTensor *noise, real lower, real upper, bool train, bool inplace, THGenerator *generator)
+void THNN_(RReLU_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          THTensor *noise,
+          real lower,
+          real upper,
+          bool train,
+          bool inplace,
+          THGenerator *generator)
 {
   if (train)
   {
@@ -66,7 +75,16 @@ void THNN_(RReLU_updateOutput)(THNNState *state, THTensor *input, THTensor *outp
   }  
 }
 
-void THNN_(RReLU_updateGradInput)(THNNState *state, THTensor *input, THTensor *gradOutput, THTensor *gradInput, THTensor *noise, real lower, real upper, bool train, bool inplace)
+void THNN_(RReLU_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          THTensor *noise,
+          real lower,
+          real upper,
+          bool train,
+          bool inplace)
 {
   if (train && upper - lower > 1E-6)    // e.g. if upper == lower, RReLU behaves like LeakyReLU
   {

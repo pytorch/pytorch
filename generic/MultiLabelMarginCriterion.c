@@ -2,7 +2,12 @@
 #define TH_GENERIC_FILE "generic/MultiLabelMarginCriterion.c"
 #else
 
-void THNN_(MultiLabelMarginCriterion_updateOutput)(THNNState *state, THTensor *input, THTensor *target, THTensor *output, bool sizeAverage)
+void THNN_(MultiLabelMarginCriterion_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *target,
+          THTensor *output,
+          bool sizeAverage)
 {
   real *input_data, *target_data;
   long nframe, dim;
@@ -66,8 +71,9 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(THNNState *state, THTensor *i
     target_data += dim;
   }
 
-  if (sizeAverage)
-    sum /= dim;
+  sum /= dim;
+  if(sizeAverage)
+    sum /= nframe;
 
   THTensor_(set1d)(output, 0, sum);
 
@@ -75,7 +81,12 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(THNNState *state, THTensor *i
   THTensor_(free)(target);
 }
 
-void THNN_(MultiLabelMarginCriterion_updateGradInput)(THNNState *state, THTensor *input, THTensor *target, THTensor *gradInput, bool sizeAverage)
+void THNN_(MultiLabelMarginCriterion_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *target,
+          THTensor *gradInput,
+          bool sizeAverage)
 {
   real *input_data;
   real *gradInput_data;
@@ -107,7 +118,7 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(THNNState *state, THTensor
   input_data = THTensor_(data)(input);
   target_data = THTensor_(data)(target);
 
-  g = (sizeAverage ? 1./((real)dim) : 1.);
+  g = (sizeAverage ? 1./((real)(nframe*dim)) : 1./((real)nframe));
 
   THTensor_(resizeAs)(gradInput, input);
   THTensor_(zero)(gradInput);

@@ -2,14 +2,15 @@
 #define TH_GENERIC_FILE "generic/TemporalSubSampling.c"
 #else
 
-void THNN_(TemporalSubSampling_updateOutput)(THNNState *state,
-					     THTensor *input,
-					     THTensor *output,
-					     THTensor *weight,
-					     THTensor *bias,
-					     int kW, int dW,
-					     int inputFrameSize
-					     )
+void THNN_(TemporalSubSampling_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          THTensor *weight,
+          THTensor *bias,
+          int kW,
+          int dW,
+          int inputFrameSize)
 {
   THTensor *outputFrame, *inputWindow;
   int nInputFrame, nOutputFrame;
@@ -42,13 +43,14 @@ void THNN_(TemporalSubSampling_updateOutput)(THNNState *state,
   THTensor_(free)(inputWindow);
 }
 
-void THNN_(TemporalSubSampling_updateGradInput)(THNNState *state,
-					      THTensor *input,
-					      THTensor *gradOutput,
-					      THTensor *gradInput,
-					      THTensor *weight,
-					      int kW, int dW
-					      )
+void THNN_(TemporalSubSampling_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          THTensor *weight,
+          int kW,
+          int dW)
 {
 
   THTensor *gradOutputFrame;
@@ -78,13 +80,15 @@ void THNN_(TemporalSubSampling_updateGradInput)(THNNState *state,
   THTensor_(free)(kwunit);
 }
 
-void THNN_(TemporalSubSampling_accGradParameters)(THNNState *state,
-						THTensor *input,
-						THTensor *gradOutput,
-						THTensor *gradWeight,
-						THTensor *gradBias,
-						int kW, int dW,
-						real scale)
+void THNN_(TemporalSubSampling_accGradParameters)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradWeight,
+          THTensor *gradBias,
+          int kW,
+          int dW,
+          real scale)
 {
   THTensor *gradOutputFrame;
   THTensor *inputWindow, *buffer;

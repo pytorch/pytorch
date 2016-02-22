@@ -2,7 +2,12 @@
 #define TH_GENERIC_FILE "generic/LeakyReLU.c"
 #else
 
-void THNN_(LeakyReLU_updateOutput)(THNNState *state, THTensor *input, THTensor *output, real negval, bool inplace)
+void THNN_(LeakyReLU_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          real negval,
+          bool inplace)
 {
   if (inplace)
   {
@@ -21,7 +26,13 @@ void THNN_(LeakyReLU_updateOutput)(THNNState *state, THTensor *input, THTensor *
   }
 }
 
-void THNN_(LeakyReLU_updateGradInput)(THNNState *state, THTensor *input, THTensor *gradOutput, THTensor *gradInput, real negval, bool inplace)
+void THNN_(LeakyReLU_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          real negval,
+          bool inplace)
 {
   if (inplace)
   {

@@ -2,13 +2,21 @@
 #define TH_GENERIC_FILE "generic/Tanh.c"
 #else
 
-void THNN_(Tanh_updateOutput)(THNNState *state, THTensor *input, THTensor *output)
+void THNN_(Tanh_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output)
 {
   THTensor_(resizeAs)(output, input);
   THTensor_(tanh)(output, input);
 }
 
-void THNN_(Tanh_updateGradInput)(THNNState *state, THTensor *input, THTensor *gradOutput, THTensor *gradInput, THTensor *output)
+void THNN_(Tanh_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          THTensor *output)
 {
   THTensor_(resizeAs)(gradInput, output);
 

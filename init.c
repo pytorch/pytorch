@@ -97,10 +97,25 @@
 #include "generic/TemporalMaxPooling.c"
 #include "THGenerateFloatTypes.h"
 
+#include "generic/SpatialBatchNormalization.c"
+#include "THGenerateFloatTypes.h"
+
 #include "generic/unfold.c"
 #include "THGenerateFloatTypes.h"
 
+#include "generic/SpatialConvolutionMap.c"
+#include "THGenerateFloatTypes.h"
+
 #include "generic/SpatialConvolutionMM.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/SpatialConvolutionLocal.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/SpatialFullConvolution.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/SpatialFullConvolutionMap.c"
 #include "THGenerateFloatTypes.h"
 
 #include "generic/SpatialAdaptiveMaxPooling.c"
@@ -109,7 +124,19 @@
 #include "generic/SpatialAveragePooling.c"
 #include "THGenerateFloatTypes.h"
 
+#include "generic/SpatialFractionalMaxPooling.c"
+#include "THGenerateFloatTypes.h"
+
 #include "generic/SpatialMaxPooling.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/SpatialMaxUnpooling.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/SpatialSubSampling.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/SpatialUpSamplingNearest.c"
 #include "THGenerateFloatTypes.h"
 
 #include "generic/VolumetricAveragePooling.c"

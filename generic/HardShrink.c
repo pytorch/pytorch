@@ -2,7 +2,11 @@
 #define TH_GENERIC_FILE "generic/HardShrink.c"
 #else
 
-void THNN_(HardShrink_updateOutput)(THNNState *state, THTensor *input, THTensor *output, real lambda)
+void THNN_(HardShrink_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          real lambda)
 {
   THTensor_(resizeAs)(output, input);
 
@@ -16,7 +20,12 @@ void THNN_(HardShrink_updateOutput)(THNNState *state, THTensor *input, THTensor 
   );
 }
 
-void THNN_(HardShrink_updateGradInput)(THNNState *state, THTensor *input, THTensor *gradOutput, THTensor *gradInput, real lambda)
+void THNN_(HardShrink_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          real lambda)
 {
   THTensor_(resizeAs)(gradInput, input);
   TH_TENSOR_APPLY3(real, gradInput, real, gradOutput, real, input,

@@ -1,72 +1,34 @@
-## API design guidelines
+# THNN
 
-All functions should accept arguments in the following order. Dots represent any module-specific parameters or buffers, disregarding whether they are used for writing or reading. They should follow the order
-```
-[weight], [bias], [any buffers], [additional arguments], [optional arugments]
-```
+THNN is a library that gathers nn's C implementations of neural network modules. It's entirely free of Lua dependency and therefore can be used in any application that has a C FFI. Please note that it only contains quite low level functions, and an object oriented C/C++ wrapper will be created soon as another library.
 
-### Modules
-```
-updateOutput: state, input, output, ...
-updateGradInput: state, input, gradOutput, gradInput, ...
-accGradParameters: state, input, gradOutput, [gradWeight], [gradBias], ...
-```
+There is also a CUDA counterpart of THNN (CUTHNN) in the [cunn repository](https://github.com/torch/cunn/tree/master/lib/THCUNN).
 
-e.g.
-```C
-void THNN_(HardShrink_updateGradInput)(
-          THNNState* state,
-          THTensor *input,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          real lambda)
-```
+## Links
 
-### Criterions
-```
-updateOutput: state, input, target, output, ...
-updateGradInput: state, input, target, gradInput, ...
-```
+* [API reference](doc/api_reference.md)
+* [Style guidelines](doc/style_guidelines.md)
 
-e.g.
+## Motivation
 
-```C
-void THNN_(ClassNLLCriterion_updateOutput)(
-          THNNState* state,
-          THTensor *input,
-          THLongTensor *target,
-          THTensor *output,
-          THTensor *weights,
-          THTensor *total_weight,
-          bool sizeAverage)
-```
+Torch's nn module provided many optimized C implementations of modules, but the source files contained Lua specific code and headers so they couldn't be easily compiled and included anywhere else.
 
-## Code style guide
+THNN is based on the same code, but is written in pure C, so it can be easily included in other code. **Future C implementations should be committed to THNN.**
 
-```C
-void THNN_Linear_updateOutput(
-          THTensor *input,
-          THTensor *output,
-          THTensor *weight,
-          THTensor *bias);
-//<- 10 ->
-```
+## API
 
-All arguments should start on a new line after function name, and they should be indented using 10 spaces.
+THNN is a purely functional library. It provides 2-3 functions for each module, that perform the most important operations:
 
-Use 2 spaces for block indentation.
+* **updateOutput** - applies the module to an input
+* **updateGradInput** - accepts gradient w.r.t. output and previous module input, and computes a gradient w.r.t. that input
+* **accGradParameters** - *(optional, only modules with parameters)* accepts gradient w.r.t. output and previous module input, and computes gradient w.r.t. the parameters
 
+For information on argument types please check the [API reference](doc/api_reference.md).
 
-### Conversion Steps
+This is all THNN library provides. An object oriented implementation similar to nn will be provided in a separate library. This one is just a set of CPU kernels.
 
-1. copy old .c file to lib/THNN/generic 
-  - replace static int nn_ -> void THNN_
-  - replace lua_State \*L with 'actual' parameters (+ add THNNState\* state)
-  - remove any numeric values from return statements, remove the return at the end of the function body
-  - remove old luaL_Reg & _init function
-2. add forward declarations to generic/THNN.h
-3. include the generic/xyz.c file in init.c
-4. add functions to ffi.lua
-5. copy & adapt lua file: specify module THNN for torch.class(), use THNN.errcheck
-6. include module lua file in init.lua
-7. add & run unit test to lua/tests/test.lua
+## Developer docs
+
+* [Style guidelines](doc/style_guidelines.md)
+
+This section will be expanded when FFI refactoring will be finished.

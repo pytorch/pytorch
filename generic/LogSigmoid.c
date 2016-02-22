@@ -2,7 +2,11 @@
 #define TH_GENERIC_FILE "generic/LogSigmoid.c"
 #else
 
-void THNN_(LogSigmoid_updateOutput)(THNNState *state, THTensor *input, THTensor *output, THTensor *buffer)
+void THNN_(LogSigmoid_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          THTensor *buffer)
 {
   THTensor_(resizeAs)(output, input);
   THTensor_(resizeAs)(buffer, input);
@@ -14,7 +18,12 @@ void THNN_(LogSigmoid_updateOutput)(THNNState *state, THTensor *input, THTensor 
   );
 }
 
-void THNN_(LogSigmoid_updateGradInput)(THNNState *state, THTensor *input, THTensor *gradOutput, THTensor *gradInput, THTensor *buffer)
+void THNN_(LogSigmoid_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          THTensor *buffer)
 {
   THTensor_(resizeAs)(gradInput, buffer);
   TH_TENSOR_APPLY3(real, gradInput, real, gradOutput, real, buffer,

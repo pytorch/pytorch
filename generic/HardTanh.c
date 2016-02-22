@@ -2,7 +2,12 @@
 #define TH_GENERIC_FILE "generic/HardTanh.c"
 #else
 
-void THNN_(HardTanh_updateOutput)(THNNState *state, THTensor *input, THTensor *output, real min_val, real max_val)
+void THNN_(HardTanh_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          real min_val,
+          real max_val)
 {
   THTensor_(resizeAs)(output, input);
   
@@ -36,7 +41,13 @@ void THNN_(HardTanh_updateOutput)(THNNState *state, THTensor *input, THTensor *o
   }
 }
 
-void THNN_(HardTanh_updateGradInput)(THNNState *state, THTensor *input, THTensor *gradOutput, THTensor *gradInput, real min_val, real max_val)
+void THNN_(HardTanh_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          real min_val,
+          real max_val)
 {
   THTensor_(resizeAs)(gradInput, input);
 

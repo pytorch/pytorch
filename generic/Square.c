@@ -2,7 +2,10 @@
 #define TH_GENERIC_FILE "generic/Square.c"
 #else
 
-void THNN_(Square_updateOutput)(THNNState *state, THTensor *input, THTensor *output)
+void THNN_(Square_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output)
 {
   THTensor_(resizeAs)(output, input);
   
@@ -23,7 +26,11 @@ void THNN_(Square_updateOutput)(THNNState *state, THTensor *input, THTensor *out
   }
 }
 
-void THNN_(Square_updateGradInput)(THNNState *state, THTensor *input, THTensor *gradOutput, THTensor *gradInput)
+void THNN_(Square_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput)
 {
   THTensor_(resizeAs)(gradInput, input);
 

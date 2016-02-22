@@ -2,16 +2,17 @@
 #define TH_GENERIC_FILE "generic/TemporalConvolution.c"
 #else
 
-void THNN_(TemporalConvolution_updateOutput)(THNNState *state,
-					     THTensor *input,
-					     THTensor *output,
-					     THTensor *weight,
-					     THTensor *bias,
-					     int kW, int dW,
-					     int inputFrameSize,
-					     int outputFrameSize
-					     )
-{  
+void THNN_(TemporalConvolution_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          THTensor *weight,
+          THTensor *bias,
+          int kW,
+          int dW,
+          int inputFrameSize,
+          int outputFrameSize)
+{
   THTensor *outputWindow, *inputWindow;
   int nInputFrame, nOutputFrame;
   long k, i;
@@ -129,12 +130,14 @@ void THNN_(TemporalConvolution_updateOutput)(THNNState *state,
 
 }
 
-void THNN_(TemporalConvolution_updateGradInput)(THNNState* state,
-						THTensor *input,
-						THTensor *gradOutput,
-						THTensor *gradInput,
-						THTensor *weight,
-						int kW, int dW)
+void THNN_(TemporalConvolution_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          THTensor *weight,
+          int kW,
+          int dW)
 {
   long nInputFrame;
   long nOutputFrame;
@@ -226,13 +229,15 @@ void THNN_(TemporalConvolution_updateGradInput)(THNNState* state,
 
 }
 
-void THNN_(TemporalConvolution_accGradParameters)(THNNState *state,
-						  THTensor *input,
-						  THTensor *gradOutput,
-						  THTensor *gradWeight,
-						  THTensor *gradBias,
-						  int kW, int dW,
-						  real scale)
+void THNN_(TemporalConvolution_accGradParameters)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradWeight,
+          THTensor *gradBias,
+          int kW,
+          int dW,
+          real scale)
 {
   long nInputFrame;
   long nOutputFrame;

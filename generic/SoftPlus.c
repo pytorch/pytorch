@@ -2,7 +2,12 @@
 #define TH_GENERIC_FILE "generic/SoftPlus.c"
 #else
 
-void THNN_(SoftPlus_updateOutput)(THNNState *state, THTensor *input, THTensor *output, real beta, real threshold)
+void THNN_(SoftPlus_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          real beta,
+          real threshold)
 {
   THTensor_(resizeAs)(output, input);
 
@@ -12,7 +17,14 @@ void THNN_(SoftPlus_updateOutput)(THNNState *state, THTensor *input, THTensor *o
   );
 }
 
-void THNN_(SoftPlus_updateGradInput)(THNNState *state, THTensor *input, THTensor *gradOutput, THTensor *gradInput, THTensor *output, real beta, real threshold)
+void THNN_(SoftPlus_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          THTensor *output,
+          real beta,
+          real threshold)
 {
   THTensor_(resizeAs)(gradInput, output);
   

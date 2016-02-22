@@ -2,7 +2,10 @@
 #define TH_GENERIC_FILE "generic/SoftMax.c"
 #else
 
-void THNN_(SoftMax_updateOutput)(THNNState *state, THTensor *input, THTensor *output)
+void THNN_(SoftMax_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output)
 {
   real *input_data, *output_data;
   long nframe = 0, dim = 0, stride = 0;
@@ -75,7 +78,12 @@ void THNN_(SoftMax_updateOutput)(THNNState *state, THTensor *input, THTensor *ou
   THTensor_(free)(input);
 }
 
-void THNN_(SoftMax_updateGradInput)(THNNState *state, THTensor *input, THTensor *gradOutput, THTensor *gradInput, THTensor *output)
+void THNN_(SoftMax_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          THTensor *output)
 {
   real *gradInput_data, *gradOutput_data, *output_data;
   long nframe = 0, dim = 0, stride = 0;

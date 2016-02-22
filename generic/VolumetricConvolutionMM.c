@@ -4,13 +4,24 @@
 
 /* note: due to write issues, this one cannot be parallelized as well as unfolded_copy */
 static void THNN_(unfolded_acc_vol)(
-  THTensor *finput, THTensor *input,
-  int kT, int kW, int kH,
-  int dT, int dW, int dH,
-  int pT, int pW, int pH,
-  int nInputPlane,
-  int inputDepth, int inputWidth, int inputHeight,
-  int outputDepth, int outputWidth, int outputHeight)
+          THTensor *finput,
+          THTensor *input,
+          int kT,
+          int kW,
+          int kH,
+          int dT,
+          int dW,
+          int dH,
+          int pT,
+          int pW,
+          int pH,
+          int nInputPlane,
+          int inputDepth,
+          int inputWidth,
+          int inputHeight,
+          int outputDepth,
+          int outputWidth,
+          int outputHeight)
 {
   int nip;
   real *input_data = THTensor_(data)(input);
@@ -78,13 +89,24 @@ static void THNN_(unfolded_acc_vol)(
 }
 
 static void THNN_(unfolded_copy_vol)(
-  THTensor *finput, THTensor *input,
-  int kT, int kW, int kH,
-  int dT, int dW, int dH,
-  int pT, int pW, int pH,
-  int nInputPlane,
-  int inputDepth, int inputWidth, int inputHeight,
-  int outputDepth, int outputWidth, int outputHeight)
+          THTensor *finput,
+          THTensor *input,
+          int kT,
+          int kW,
+          int kH,
+          int dT,
+          int dW,
+          int dH,
+          int pT,
+          int pW,
+          int pH,
+          int nInputPlane,
+          int inputDepth,
+          int inputWidth,
+          int inputHeight,
+          int outputDepth,
+          int outputWidth,
+          int outputHeight)
 {
   long k;
   real *input_data = THTensor_(data)(input);
@@ -145,12 +167,28 @@ static void THNN_(unfolded_copy_vol)(
 }
 
 static void THNN_(VolumetricConvolutionMM_updateOutput_frame)(
-  THTensor *input, THTensor *output, THTensor *weight, THTensor *bias, THTensor *finput,
-  int kT, int kW, int kH,
-  int dT, int dW, int dH,
-  int pT,int pW, int pH,
-  long nInputPlane, long inputDepth, long inputWidth, long inputHeight,
-  long nOutputPlane, long outputDepth, long outputWidth, long outputHeight)
+          THTensor *input,
+          THTensor *output,
+          THTensor *weight,
+          THTensor *bias,
+          THTensor *finput,
+          int kT,
+          int kW,
+          int kH,
+          int dT,
+          int dW,
+          int dH,
+          int pT,
+          int pW,
+          int pH,
+          long nInputPlane,
+          long inputDepth,
+          long inputWidth,
+          long inputHeight,
+          long nOutputPlane,
+          long outputDepth,
+          long outputWidth,
+          long outputHeight)
 {
   long i;
   THTensor *output2d;
@@ -185,15 +223,21 @@ static void THNN_(VolumetricConvolutionMM_updateOutput_frame)(
 }
 
 void THNN_(VolumetricConvolutionMM_updateOutput)(
-  THNNState *state,
-  THTensor *input,
-  THTensor *output,
-  THTensor *weight,
-  THTensor *bias,
-  THTensor *finput,
-  int kT, int kW, int kH,
-  int dT, int dW, int dH,
-  int pT, int pW, int pH)
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          THTensor *weight,
+          THTensor *bias,
+          THTensor *finput,
+          int kT,
+          int kW,
+          int kH,
+          int dT,
+          int dW,
+          int dH,
+          int pT,
+          int pW,
+          int pH)
 {
   int dimf = 0;
   int dimt = 1;
@@ -285,10 +329,19 @@ void THNN_(VolumetricConvolutionMM_updateOutput)(
 }
 
 static void THNN_(VolumetricConvolutionMM_updateGradInput_frame)(
-  THTensor *gradInput, THTensor *gradOutput, THTensor *weight, THTensor *fgradInput,
-  int kT, int kW, int kH,
-  int dT, int dW, int dH,
-  int pT, int pW, int pH)
+          THTensor *gradInput,
+          THTensor *gradOutput,
+          THTensor *weight,
+          THTensor *fgradInput,
+          int kT,
+          int kW,
+          int kH,
+          int dT,
+          int dW,
+          int dH,
+          int pT,
+          int pW,
+          int pH)
 {
   THTensor *gradOutput2d = THTensor_(newWithStorage2d)(
     gradOutput->storage, gradOutput->storageOffset,
@@ -312,16 +365,22 @@ static void THNN_(VolumetricConvolutionMM_updateGradInput_frame)(
 }
 
 void THNN_(VolumetricConvolutionMM_updateGradInput)(
-  THNNState *state,
-  THTensor *input,
-  THTensor *gradOutput,
-  THTensor *gradInput,
-  THTensor *weight,
-  THTensor *finput,
-  THTensor *fgradInput,
-  int kT, int kW, int kH,
-  int dT, int dW, int dH,
-  int pT, int pW, int pH)
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          THTensor *weight,
+          THTensor *finput,
+          THTensor *fgradInput,
+          int kT,
+          int kW,
+          int kH,
+          int dT,
+          int dW,
+          int dH,
+          int pT,
+          int pW,
+          int pH)
 {
   // number of input/output planes and kernel size is indirectly defined by the weight tensor
   THArgCheck(weight->nDimension == 2, 4,
@@ -376,7 +435,11 @@ void THNN_(VolumetricConvolutionMM_updateGradInput)(
 }
 
 static void THNN_(VolumetricConvolutionMM_accGradParameters_frame)(
-  THTensor *gradOutput, THTensor *gradWeight, THTensor *gradBias, THTensor *finput, real scale)
+          THTensor *gradOutput,
+          THTensor *gradWeight,
+          THTensor *gradBias,
+          THTensor *finput,
+          real scale)
 {
   long i;
   THTensor *gradOutput2d = THTensor_(newWithStorage2d)(
@@ -404,13 +467,13 @@ static void THNN_(VolumetricConvolutionMM_accGradParameters_frame)(
 }
 
 void THNN_(VolumetricConvolutionMM_accGradParameters)(
-  THNNState *state,
-  THTensor *input,
-  THTensor *gradOutput,
-  THTensor *gradWeight,
-  THTensor *gradBias,
-  THTensor *finput,
-  real scale)
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradWeight,
+          THTensor *gradBias,
+          THTensor *finput,
+          real scale)
 {
   THArgCheck(gradWeight->nDimension == 2, 4,
     "2D gradWeight tensor is expected (nOutputPlane x (nInputPlane * kT * kH * kW))"
