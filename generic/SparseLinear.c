@@ -27,6 +27,7 @@ void THNN_(SparseLinear_updateOutput)(
           THTensor *output,
           THTensor *weight,
           THTensor *bias,
+          THTensor *cudaBuffer,
           THTensor *shardBuffer)
 {
   long i;
@@ -286,7 +287,7 @@ void THNN_(SparseLinear_updateGradInput)(
 
     if (offset >= 0 && offset < inDim)
     {
-      real val = 
+      real val =
         THBlas_(dot)(
           outDim,
           THTensor_(data)(gradOutput),

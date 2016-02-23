@@ -327,6 +327,7 @@ TH_API void THNN_(SparseLinear_updateOutput)(
           THTensor *output,
           THTensor *weight,
           THTensor *bias,
+          THTensor *cudaBuffer,
           THTensor *shardBuffer);
 TH_API void THNN_(SparseLinear_updateGradInput)(
           THNNState *state,
