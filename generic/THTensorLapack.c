@@ -418,6 +418,9 @@ void THTensor_(gesvd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *ra
                                THTensor_(free)(work);),
                            "gesvd", info);
 
+  if (*jobu == 'S')
+    THTensor_(narrow)(rv__,NULL,1,0,k);
+
   THTensor_(freeCopyTo)(ru__, ru_);
   THTensor_(freeCopyTo)(rs__, rs_);
   THTensor_(freeCopyTo)(rv__, rv_);
