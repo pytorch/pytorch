@@ -97,7 +97,7 @@
 #include "generic/TemporalMaxPooling.c"
 #include "THGenerateFloatTypes.h"
 
-#include "generic/SpatialBatchNormalization.c"
+#include "generic/BatchNormalization.c"
 #include "THGenerateFloatTypes.h"
 
 #include "generic/unfold.c"
