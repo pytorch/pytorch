@@ -2,7 +2,7 @@
 
 THNN is a library that gathers nn's C implementations of neural network modules. It's entirely free of Lua dependency and therefore can be used in any application that has a C FFI. Please note that it only contains quite low level functions, and an object oriented C/C++ wrapper will be created soon as another library.
 
-There is also a CUDA counterpart of THNN (CUTHNN) in the [cunn repository](https://github.com/torch/cunn/tree/master/lib/THCUNN).
+There is also a CUDA counterpart of THNN (THCUNN) in the [cunn repository](https://github.com/torch/cunn/tree/master/lib/THCUNN).
 
 ## Links
 
@@ -11,7 +11,7 @@ There is also a CUDA counterpart of THNN (CUTHNN) in the [cunn repository](https
 
 ## Motivation
 
-Torch's nn module provided many optimized C implementations of modules, but the source files contained Lua specific code and headers so they couldn't be easily compiled and included anywhere else.
+Torch's neural network package (nn) provided many optimized C implementations of modules, but the source files contained Lua specific code and headers so they couldn't be easily compiled and included anywhere else.
 
 THNN is based on the same code, but is written in pure C, so it can be easily included in other code. **Future C implementations should be committed to THNN.**
 
@@ -24,8 +24,6 @@ THNN is a purely functional library. It provides 2-3 functions for each module, 
 * **accGradParameters** - *(optional, only modules with parameters)* accepts gradient w.r.t. output and previous module input, and computes gradient w.r.t. the parameters
 
 For information on argument types please check the [API reference](doc/api_reference.md).
-
-This is all THNN library provides. An object oriented implementation similar to nn will be provided in a separate library. This one is just a set of CPU kernels.
 
 ## Developer docs
 
