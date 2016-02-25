@@ -899,5 +899,30 @@ TH_API void THNN_(VolumetricMaxUnpooling_updateGradInput)(
           int dT, int dW, int dH,
           int pT, int pW, int pH);
 
+TH_API void THNN_(SpatialReflectionPadding_updateOutput)(THNNState *state,
+                                                         THTensor *input,
+                                                         THTensor *output,
+                                                         int pad_l, int pad_r,
+                                                         int pad_t, int pad_b);
+
+TH_API void THNN_(SpatialReflectionPadding_updateGradInput)(THNNState *state,
+                                                            THTensor *input,
+                                                            THTensor *gradOutput,
+                                                            THTensor *gradInput,
+                                                            int pad_l, int pad_r,
+                                                            int pad_t, int pad_b);
+
+TH_API void THNN_(SpatialReplicationPadding_updateOutput)(THNNState *state,
+                                                         THTensor *input,
+                                                         THTensor *output,
+                                                         int pad_l, int pad_r,
+                                                         int pad_t, int pad_b);
+
+TH_API void THNN_(SpatialReplicationPadding_updateGradInput)(THNNState *state,
+                                                            THTensor *input,
+                                                            THTensor *gradOutput,
+                                                            THTensor *gradInput,
+                                                            int pad_l, int pad_r,
+                                                            int pad_t, int pad_b);
 
 #endif

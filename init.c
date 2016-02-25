@@ -156,3 +156,9 @@
 
 #include "generic/VolumetricMaxUnpooling.c"
 #include "THGenerateFloatTypes.h"
+
+#include "generic/SpatialReflectionPadding.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/SpatialReplicationPadding.c"
+#include "THGenerateFloatTypes.h"
