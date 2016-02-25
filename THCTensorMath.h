@@ -48,6 +48,8 @@ THC_API void THCudaTensor_cmaxValue(THCState *state, THCudaTensor *self, THCudaT
 THC_API void THCudaTensor_addmv(THCState *state, THCudaTensor *self, float beta, THCudaTensor *t, float alpha, THCudaTensor *mat, THCudaTensor *vec);
 THC_API void THCudaTensor_addmm(THCState *state, THCudaTensor *self, float beta, THCudaTensor *t, float alpha, THCudaTensor *mat1, THCudaTensor *mat2);
 THC_API void THCudaTensor_addr(THCState *state, THCudaTensor *self, float beta, THCudaTensor *t, float alpha, THCudaTensor *vec1, THCudaTensor *vec2);
+THC_API void THCudaTensor_addbmm(THCState *state, THCudaTensor *result, float beta, THCudaTensor *t,
+                                  float alpha, THCudaTensor *batch1, THCudaTensor *batch2);
 THC_API void THCudaTensor_baddbmm(THCState *state, THCudaTensor *result, float beta, THCudaTensor *t,
                                   float alpha, THCudaTensor *batch1, THCudaTensor *batch2);
 

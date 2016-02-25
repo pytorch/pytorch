@@ -233,6 +233,46 @@ void THCudaTensor_addr(THCState *state, THCudaTensor *r_, float beta, THCudaTens
   }
 }
 
+void THCudaTensor_addbmm(THCState *state, THCudaTensor *result, float beta, THCudaTensor *t,
+    float alpha, THCudaTensor *batch1, THCudaTensor *batch2) {
+  THAssert(THCudaTensor_checkGPU(state, 4, result, t, batch1, batch2));
+  THArgCheck(THCudaTensor_nDimension(state, t) == 2, 4, "expected 2D tensor");
+  THArgCheck(THCudaTensor_nDimension(state, batch1) == 3, 6, "expected 3D tensor");
+  THArgCheck(THCudaTensor_nDimension(state, batch2) == 3, 7, "expected 3D tensor");
+
+  long batchnum = THCudaTensor_size(state, batch1, 0);
+  long m1d1 = THCudaTensor_size(state, batch1, 1);
+  long innerdim = THCudaTensor_size(state, batch1, 2);
+  long m2d2 = THCudaTensor_size(state, batch2, 2);
+
+  THArgCheck(batchnum == THCudaTensor_size(state, batch2, 0), 7,
+      "equal number of batches expected");
+  // M is t, as listed in the docs under addbmm
+  THArgCheck(m1d1 == THCudaTensor_size(state, t, 0), 6,
+      "first dimension must match first dimension of M");
+  THArgCheck(m2d2 == THCudaTensor_size(state, t, 1), 7,
+      "second dimension must match second dimension of M");
+  THArgCheck(innerdim == THCudaTensor_size(state, batch2, 1), 6,
+      "second dimension must match first dimension of batch2");
+
+  if (t != result) {
+    THCudaTensor_resizeAs(state, result, t);
+    THCudaTensor_copy(state, result, t);
+  }
+
+  THCudaTensor *slice1 = THCudaTensor_new(state);
+  THCudaTensor *slice2 = THCudaTensor_new(state);
+  for (long i=0; i<batchnum; i++) {
+    THCudaTensor_select(state, slice1, batch1, 0, i);
+    THCudaTensor_select(state, slice2, batch2, 0, i);
+
+    THCudaTensor_addmm(state, result, beta, result, alpha, slice1, slice2);
+    beta = 1;
+  }
+  THCudaTensor_free(state, slice1);
+  THCudaTensor_free(state, slice2);
+}
+
 void THCudaTensor_baddbmm(THCState *state, THCudaTensor *result, float beta, THCudaTensor *t,
                           float alpha, THCudaTensor *batch1, THCudaTensor *batch2) {
   THAssert(THCudaTensor_checkGPU(state, 4, result, t, batch1, batch2));
