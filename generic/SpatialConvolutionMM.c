@@ -64,7 +64,9 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
   long outputWidth;
   long outputHeight;
 
-  THArgCheck( input->nDimension == 3 || input->nDimension == 4, 1, "3D or 4D (batch mode) tensor expected");
+  THArgCheck( input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch mode) tensor expected");
+  THArgCheck(kW > 0 && kH > 0, 8, "kernel size should be greater than zero");
+  THArgCheck(dW > 0 && dH > 0, 10, "stride should be greater than zero");
 
   if (input->nDimension == 4) {
     dimf++;
@@ -164,7 +166,9 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
 {
   long nOutputPlane = weight->size[0];
 
-  THArgCheck( nOutputPlane == gradOutput->size[input->nDimension == 4 ? 1 : 0], 1, "Number of output features is not equal to nOutputPlane" );
+  THArgCheck( nOutputPlane == gradOutput->size[input->nDimension == 4 ? 1 : 0], 3, "Number of output features is not equal to nOutputPlane" );
+  THArgCheck(kW > 0 && kH > 0, 9, "kernel size should be greater than zero");
+  THArgCheck(dW > 0 && dH > 0, 11, "stride should be greater than zero");
 
   THTensor_(resizeAs)(gradInput, input);
   THTensor_(resizeAs)(fgradInput, finput);
@@ -243,7 +247,9 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
           real scale)
 {
   long nOutputPlane = gradWeight->size[0];
-  THArgCheck( nOutputPlane == gradOutput->size[input->nDimension == 4 ? 1 : 0], 1, "Number of output features is not equal to nOutputPlane" );
+  THArgCheck( nOutputPlane == gradOutput->size[input->nDimension == 4 ? 1 : 0], 3, "Number of output features is not equal to nOutputPlane" );
+  THArgCheck(kW > 0 && kH > 0, 8, "kernel size should be greater than zero");
+  THArgCheck(dW > 0 && dH > 0, 10, "stride should be greater than zero");
 
   if(input->nDimension == 3)
   {
