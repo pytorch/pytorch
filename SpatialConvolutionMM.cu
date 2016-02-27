@@ -9,6 +9,8 @@ void THNN_CudaSpatialConvolutionMM_updateOutput(THCState *state, THCudaTensor *i
   THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch mode) tensor is expected");
   THArgCheck(weight->nDimension == 2, 4, "weight tensor must be 2D (nOutputPlane,nInputPlane*kH*kW)");
   THArgCheck(weight->size[0] == bias->size[0], 4, "nOutputPlane mismatch in weight and bias");
+  THArgCheck(kW > 0 && kH > 0, 8, "kernel size should be greater than zero");
+  THArgCheck(dW > 0 && dH > 0, 10, "stride should be greater than zero");
 
   // Params:
   int nInputPlane = weight->size[1]/(kH*kW);
@@ -125,6 +127,8 @@ void THNN_CudaSpatialConvolutionMM_updateGradInput(THCState *state, THCudaTensor
   THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch mode) tensor is expected");
   THArgCheck(weight->nDimension == 2, 4, "weight tensor must be 2D (nOutputPlane,nInputPlane*kH*kW)");
   THArgCheck(weight->size[0] == bias->size[0], 4, "nOutputPlane mismatch in weight and bias");
+  THArgCheck(kW > 0 && kH > 0, 9, "kernel size should be greater than zero");
+  THArgCheck(dW > 0 && dH > 0, 11, "stride should be greater than zero");
 
   // Params
   int nInputPlane = weight->size[1]/(kW*kH);
@@ -208,6 +212,8 @@ void THNN_CudaSpatialConvolutionMM_accGradParameters(THCState *state, THCudaTens
   THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch mode) tensor is expected");
   THArgCheck(gradWeight->nDimension == 2, 4, "gradWeight tensor must be 2D (nOutputPlane,nInputPlane*kH*kW)");
   THArgCheck(gradWeight->size[0] == gradBias->size[0], 4, "nOutputPlane mismatch in gradWeight and gradBias");
+  THArgCheck(kW > 0 && kH > 0, 8, "kernel size should be greater than zero");
+  THArgCheck(dW > 0 && dH > 0, 10, "stride should be greater than zero");
 
   // Params
   int nInputPlane = gradWeight->size[1]/(kW*kH);
