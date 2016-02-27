@@ -72,14 +72,18 @@ THC_API void THCudaTensor_pow(THCState *state, THCudaTensor *self, THCudaTensor 
 THC_API void THCudaTensor_tpow(THCState *state, THCudaTensor *self, float value, THCudaTensor *src);
 THC_API void THCudaTensor_clamp(THCState *state, THCudaTensor *self, THCudaTensor *src, float min_value, float max_value);
 THC_API void THCudaTensor_sqrt(THCState *state, THCudaTensor *self, THCudaTensor *src);
+THC_API void THCudaTensor_rsqrt(THCState *state, THCudaTensor *self, THCudaTensor *src);
 THC_API void THCudaTensor_ceil(THCState *state, THCudaTensor *self, THCudaTensor *src);
 THC_API void THCudaTensor_floor(THCState *state, THCudaTensor *self, THCudaTensor *src);
 THC_API void THCudaTensor_abs(THCState *state, THCudaTensor *self, THCudaTensor *src);
+THC_API void THCudaTensor_trunc(THCState *state, THCudaTensor *self, THCudaTensor *src);
+THC_API void THCudaTensor_frac(THCState *state, THCudaTensor *self, THCudaTensor *src);
 THC_API void THCudaTensor_neg(THCState *state, THCudaTensor *self, THCudaTensor *src);
 THC_API void THCudaTensor_cinv(THCState *state, THCudaTensor *self, THCudaTensor *src);
 THC_API void THCudaTensor_sign(THCState *state, THCudaTensor *self, THCudaTensor *src);
 THC_API void THCudaTensor_round(THCState *state, THCudaTensor *self, THCudaTensor *src);
 THC_API void THCudaTensor_atan2(THCState *state, THCudaTensor *r_, THCudaTensor *tx, THCudaTensor *ty);
+THC_API void THCudaTensor_lerp(THCState *state, THCudaTensor *result, THCudaTensor *a, THCudaTensor *b, float w);
 
 // MAGMA (i.e. CUDA implementation of LAPACK functions)
 THC_API void THCudaTensor_gesv(THCState *state, THCudaTensor *rb_, THCudaTensor *ra_, THCudaTensor *b_, THCudaTensor *a_);

@@ -175,6 +175,30 @@ THCudaTensor_mean(THCState *state, THCudaTensor *self, THCudaTensor *src, long d
   THCudaTensor_div(state, self, self, THCudaTensor_size(state, src, dim));
 }
 
+struct TensorLerpOp {
+  TensorLerpOp(float w) : w(w) {}
+
+  __device__ __forceinline__ void operator()(float *out, float *a, float *b) {
+    *out = *a + w * (*b - *a);
+  }
+
+  const float w;
+};
+
+void THCudaTensor_lerp(THCState *state, THCudaTensor *result, THCudaTensor *a, THCudaTensor *b, float w)
+{
+  THAssert(THCudaTensor_checkGPU(state, 3, result, a, b));
+  THArgCheck(THCudaTensor_nElement(state, a) ==
+             THCudaTensor_nElement(state, b), 3, "sizes do not match");
+  THCudaTensor_resizeAs(state, result, a);
+
+  if (!THCudaTensor_pointwiseApply3(state, result, a, b, TensorLerpOp(w))) {
+    THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+  }
+
+  THCudaCheck(cudaGetLastError());
+}
+
 struct square_functor
 {
   const float mean;
