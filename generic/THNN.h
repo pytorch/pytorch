@@ -423,7 +423,68 @@ TH_API void THNN_(Threshold_updateGradInput)(
           real threshold,
           bool inplace);
 
-TH_API void THNN_(SpatialBatchNormalization_updateOutput)(
+TH_API void THNN_(TemporalConvolution_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          THTensor *weight,
+          THTensor *bias,
+          int kW, int dW,
+          int inputFrameSize,
+          int outputFrameSize);
+TH_API void THNN_(TemporalConvolution_updateGradInput)(
+          THNNState* state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          THTensor *weight,
+          int kW, int dW);
+TH_API void THNN_(TemporalConvolution_accGradParameters)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradWeight,
+          THTensor *gradBias,
+          int kW, int dW,
+          real scale);
+TH_API void THNN_(TemporalMaxPooling_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          THTensor *indices,
+          int kW, int dW);
+TH_API void THNN_(TemporalMaxPooling_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          THTensor *indices,
+          int kW, int dW);
+TH_API void THNN_(TemporalSubSampling_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          THTensor *weight,
+          THTensor *bias,
+          int kW, int dW,
+          int inputFrameSize);
+TH_API void THNN_(TemporalSubSampling_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          THTensor *weight,
+          int kW, int dW);
+TH_API void THNN_(TemporalSubSampling_accGradParameters)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradWeight,
+          THTensor *gradBias,
+          int kW, int dW,
+          real scale);
+
+TH_API void THNN_(BatchNormalization_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
@@ -436,7 +497,7 @@ TH_API void THNN_(SpatialBatchNormalization_updateOutput)(
           bool train,
           double momentum,
           double eps);
-TH_API void THNN_(SpatialBatchNormalization_backward)(
+TH_API void THNN_(BatchNormalization_backward)(
           THNNState *state,
           THTensor *input,
           THTensor *gradOutput,
