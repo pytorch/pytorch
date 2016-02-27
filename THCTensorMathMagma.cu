@@ -516,7 +516,12 @@ void THCudaTensor_qr(THCState *state, THCudaTensor *rq_, THCudaTensor *rr_, THCu
   int m = a->size[0];
   int n = a->size[1];
   int k = (m < n ? m : n);
+
+#ifdef MAGMA_V2
+  int nb = magma_get_sgeqrf_nb(m, n);
+#else
   int nb = magma_get_sgeqrf_nb(m);
+#endif
 
   float *a_data = THCudaTensor_data(state, a);
   float *tau_data = th_magma_smalloc_pinned(n*n);
