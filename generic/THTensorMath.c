@@ -2097,10 +2097,13 @@ LAB_IMPLEMENT_BASIC_FUNCTION(atan,atan)
 LAB_IMPLEMENT_BASIC_FUNCTION(tanh,tanh)
 LAB_IMPLEMENT_BASIC_FUNCTION_VALUE(pow,pow)
 LAB_IMPLEMENT_BASIC_FUNCTION(sqrt,sqrt)
+LAB_IMPLEMENT_BASIC_FUNCTION(rsqrt,TH_rsqrt)
 LAB_IMPLEMENT_BASIC_FUNCTION(ceil,ceil)
 LAB_IMPLEMENT_BASIC_FUNCTION(floor,floor)
 LAB_IMPLEMENT_BASIC_FUNCTION(round,round)
 LAB_IMPLEMENT_BASIC_FUNCTION(abs,fabs)
+LAB_IMPLEMENT_BASIC_FUNCTION(trunc,trunc)
+LAB_IMPLEMENT_BASIC_FUNCTION(frac,TH_frac)
 LAB_IMPLEMENT_BASIC_FUNCTION(neg,-)
 LAB_IMPLEMENT_BASIC_FUNCTION(cinv, 1.0 / )
 
@@ -2108,6 +2111,13 @@ void THTensor_(atan2)(THTensor *r_, THTensor *tx, THTensor *ty)
 {
   THTensor_(resizeAs)(r_, tx);
   TH_TENSOR_APPLY3(real, r_, real, tx, real, ty, *r__data = atan2(*tx_data,*ty_data););
+}
+
+void THTensor_(lerp)(THTensor *r_, THTensor *a, THTensor *b, real weight)
+{
+  THArgCheck(THTensor_(nElement)(a) == THTensor_(nElement)(b), 2, "sizes do not match");
+  THTensor_(resizeAs)(r_, a);
+  TH_TENSOR_APPLY3(real, r_, real, a, real, b, *r__data = TH_lerp(*a_data, *b_data, weight););
 }
 
 void THTensor_(mean)(THTensor *r_, THTensor *t, int dimension)
