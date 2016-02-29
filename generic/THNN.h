@@ -170,6 +170,20 @@ TH_API void THNN_(MarginCriterion_updateGradInput)(
           bool sizeAverage,            // if true, the gradient is normalized by **total number of elements**
           real margin);                // a margin that is required for the loss to be 0
 
+TH_API void THNN_(SoftMarginCriterion_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *target,
+          THTensor *output,
+          bool sizeAverage);
+
+TH_API void THNN_(SoftMarginCriterion_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *target,
+          THTensor *gradInput,
+          bool sizeAverage);
+
 TH_API void THNN_(MSECriterion_updateOutput)(
           THNNState *state,
           THTensor *input,

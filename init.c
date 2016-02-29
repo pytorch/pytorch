@@ -46,6 +46,9 @@
 #include "generic/MarginCriterion.c"
 #include "THGenerateFloatTypes.h"
 
+#include "generic/SoftMarginCriterion.c"
+#include "THGenerateFloatTypes.h"
+
 #include "generic/MultiLabelMarginCriterion.c"
 #include "THGenerateFloatTypes.h"
 
