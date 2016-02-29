@@ -160,6 +160,20 @@ TH_API void THNN_CudaMarginCriterion_updateGradInput(
           bool sizeAverage,
           float margin);
 
+TH_API void THNN_CudaSoftMarginCriterion_updateOutput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *target,
+          THCudaTensor *output,
+          int sizeAverage);
+
+TH_API void THNN_CudaSoftMarginCriterion_updateGradInput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *target,
+          THCudaTensor *gradInput,
+          int sizeAverage);
+
 TH_API void THNN_CudaMSECriterion_updateOutput(
           THCState *state,
           THCudaTensor *input,
