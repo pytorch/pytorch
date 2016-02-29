@@ -2,7 +2,7 @@ Source: nccl
 Section: universe/libs
 Maintainer: Boris Fomitchev <bfomitchev@nvidia.com>
 Priority: optional
-Build-depends: debhelper(>=9), cuda-toolkit-7-0,
+Build-depends: debhelper(>=9), go-md2man, cuda-toolkit-7-0,
                cuda-curand-dev-7-0, cuda-cublas-dev-7-0, cuda-cudart-dev-7-0, cuda-ld-conf-7-0
 Standards-Version: 3.9.5
 
@@ -28,4 +28,3 @@ Description: NVIDIA Communication Collectives Library (NCCL) Development Files
  been optimized to achieve high bandwidth over PCIe. NCCL supports up to eight
  GPUs and can be used in either single- or multi-process (e.g., MPI)
  applications.
-

@@ -37,6 +37,7 @@ CUDACODE := -gencode=arch=compute_35,code=sm_35 \
 BUILDDIR := build
 
 NVCC       := $(CUDA_HOME)/bin/nvcc
+
 GPP        := g++
 CPPFLAGS   := -I$(CUDA_HOME)/include
 CXXFLAGS   := -O3 -fPIC -fvisibility=hidden
@@ -58,8 +59,8 @@ INCEXPORTS  := nccl.h
 LIBSRCFILES := libwrap.cu core.cu all_gather.cu all_reduce.cu broadcast.cu reduce.cu reduce_scatter.cu
 LIBNAME     := libnccl.so
 VER_MAJOR   := 1
-VER_MINOR   := 0
-VER_PATCH   := 2
+VER_MINOR   := 1
+VER_PATCH   := 0
 TESTS       := all_gather_test all_reduce_test broadcast_test reduce_test reduce_scatter_test
 MPITESTS    := mpi_test
 
@@ -136,4 +137,3 @@ install : lib
 	@mkdir -p $(PREFIX)/include
 	@cp -P -v build/lib/* $(PREFIX)/lib/
 	@cp -v build/include/* $(PREFIX)/include/
-
