@@ -50,7 +50,6 @@ void THNN_(SparseLinear_updateOutput)(
   long inDim = THTensor_(size)(weight, 1);
 
   THArgCheck(THNN_(checkInput)(input), 2, "input size must be batchsize x nnz x 2");
-  THArgCheck(THNN_(checkSize1D)(output, outDim), 3, "output size wrong");
   THArgCheck(THTensor_(isContiguous)(output), 3, "output must be contiguous");
   THArgCheck(THNN_(checkSize1D)(bias, outDim), 5, "bias size wrong");
 
