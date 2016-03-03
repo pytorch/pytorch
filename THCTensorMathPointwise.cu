@@ -143,6 +143,70 @@ void THCudaTensor_cadd(THCState *state, THCudaTensor *self_, THCudaTensor* src1,
   THCudaCheck(cudaGetLastError());
 }
 
+struct TensorSubOp {
+  __device__ __forceinline__ void operator()(float* out, float* in) {
+    *out -= *in;
+  }
+
+  __device__ __forceinline__ void operator()(float* out, float* in1, float* in2) {
+    *out = *in1 - *in2;
+  }
+};
+
+
+struct TensorCSubOp {
+  TensorCSubOp(float v) : val(v) {}
+
+  __device__ __forceinline__ void operator()(float* out, float* in) {
+    *out -= val * *in;
+  }
+
+  __device__ __forceinline__ void operator()(float* out, float* in1, float* in2) {
+    *out = *in1 - val * *in2;
+  }
+
+  float val;
+};
+
+
+void THCudaTensor_csub(THCState *state, THCudaTensor *self_, THCudaTensor* src1, float value, THCudaTensor *src2)
+{
+  THAssert(THCudaTensor_checkGPU(state, 3, self_, src1, src2));
+  THArgCheck(THCudaTensor_nElement(state, src1) ==
+             THCudaTensor_nElement(state, src2), 3, "sizes do not match");
+
+  if (self_ == src1) {
+    if (value == 1.0f) {
+      // self -= src2
+      if (!THCudaTensor_pointwiseApply2(state, self_, src2, TensorSubOp())) {
+        THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+      }
+    } else {
+      // self += -value * src2
+      if (!THCudaTensor_pointwiseApply2(state, self_, src2, TensorCAddOp(-value))) {
+        THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+      }
+    }
+  } else {
+    THCudaTensor_resizeAs(state, self_, src1);
+
+    if (value == 1.0f) {
+      // self = src1 - src2
+      if (!THCudaTensor_pointwiseApply3(state, self_, src1, src2, TensorSubOp())) {
+        THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+      }
+    } else {
+      // self = src1 - value * src2
+      if (!THCudaTensor_pointwiseApply3(state, self_, src1, src2, TensorCAddOp(-value))) {
+        THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+      }
+    }
+  }
+
+  THCudaCheck(cudaGetLastError());
+}
+
+
 struct TensorMulOp {
   __device__ __forceinline__ void operator()(float* out, float* in) {
     *out *= *in;

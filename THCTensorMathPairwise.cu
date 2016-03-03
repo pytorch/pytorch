@@ -36,6 +36,11 @@ void THCudaTensor_add(THCState *state, THCudaTensor *self_, THCudaTensor *src_, 
   THCudaCheck(cudaGetLastError());
 }
 
+void THCudaTensor_sub(THCState *state, THCudaTensor *self_, THCudaTensor *src_, float value)
+{
+  THCudaTensor_add(state, self_, src_, -value);
+}
+
 struct TensorMulConstantOp {
   TensorMulConstantOp(float v) : val(v) {}
   __device__ __forceinline__ void operator()(float* out, float* in) {
