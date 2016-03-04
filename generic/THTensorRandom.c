@@ -33,6 +33,16 @@ void THTensor_(bernoulli)(THTensor *self, THGenerator *_generator, double p)
   TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_bernoulli(_generator, p););
 }
 
+void THTensor_(bernoulli_FloatTensor)(THTensor *self, THGenerator *_generator, THFloatTensor *p)
+{
+  TH_TENSOR_APPLY2(real, self, float, p, *self_data = (real)THRandom_bernoulli(_generator, (double)*p_data););
+}
+
+void THTensor_(bernoulli_DoubleTensor)(THTensor *self, THGenerator *_generator, THDoubleTensor *p)
+{
+  TH_TENSOR_APPLY2(real, self, double, p, *self_data = (real)THRandom_bernoulli(_generator, (double)*p_data););
+}
+
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
 
 void THTensor_(uniform)(THTensor *self, THGenerator *_generator, double a, double b)
