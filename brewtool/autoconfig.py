@@ -47,6 +47,7 @@ def GetSubprocessOutput(command, env):
             command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             env=env)
         out, err = proc.communicate()
+        out = out.decode('ascii')
     except OSError as e:
         BuildDebug('Exception found in command {0}. Exception is: {1}',
                    repr(command), str(e))
@@ -60,6 +61,7 @@ def GetGitBuildString(env):
         # Cannot really run git stuff. Will simply say unknown.
         return 'unknown_git_version'
     ret, head_status = GetSubprocessOutput(['git', 'status', '--porcelain'], env)
+    out = str(out)
     if ret:
         # For some reason we cannot get git status porcelain.
         return out + ',unknown_head_status'

@@ -2,7 +2,7 @@
 
 Brewery
 """
-import cPickle as pickle
+import pickle
 from collections import defaultdict
 import glob
 import hashlib
@@ -40,7 +40,7 @@ def RunSingleCommand(command_and_env):
             shlex.split(command), stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT, env=env)
         stdout, _ = proc.communicate()
-        return proc.returncode, stdout
+        return proc.returncode, stdout.decode('ascii')
     except OSError as e:
         out = 'Exception found in command {0}. Exception is: {1}.'.format(
             repr(command), str(e))
@@ -92,15 +92,17 @@ class Brewery(object):
         signature_file = join(cls.Env.GENDIR, cls._SIGNATURE_FILENAME)
         if os.path.exists(signature_file):
             BuildDebug('Loading signatures.')
-            with open(signature_file) as fid:
+            with open(signature_file, 'rb') as fid:
                 cls._signatures = pickle.load(fid)
 
     @classmethod
     def Finalize(cls):
         """Finalizes the brew process."""
-        with open(join(cls.Env.GENDIR, cls._SIGNATURE_FILENAME), 'w') as fid:
+        with open(join(cls.Env.GENDIR, cls._SIGNATURE_FILENAME), 'wb') as fid:
             BuildDebug('Saving signatures.')
-            pickle.dump(cls._signatures, fid)
+            # we use protocol 2 in case one uses both python 2 and 3 to run
+            # build in a mixed way. Unlikely, but just to be safe.
+            pickle.dump(cls._signatures, fid, protocol=2)
 
     @classmethod
     def FindAndParseBuildFiles(cls):
@@ -113,7 +115,7 @@ class Brewery(object):
             # Set the current working directory, and parse the build file.
             BuildDebug("Parsing {0}", build_file)
             cls.CWD = os.path.dirname(build_file)
-            execfile(build_file)
+            exec(open(build_file).read())
         cls.CWD = ''
 
     @classmethod
@@ -173,7 +175,7 @@ class Brewery(object):
     def _GetExecutionChain(cls, targets=None):
         """Gets the execution chain."""
         # First, verify all dependencies.
-        for name, target in cls._targets.iteritems():
+        for name, target in cls._targets.items():
             cls._deps_map[name] = target.deps + target.optional_deps
             for d in cls._deps_map[name]:
                 BuildFatalIf(
@@ -295,7 +297,7 @@ class BuildTarget(object):
         dep_digest = ''.join([Brewery.Signature(d) for d in self.deps])
         command_digest = str(self.command_groups)
         return hashlib.sha256(
-            src_digest + dep_digest + command_digest).hexdigest()
+            (src_digest + dep_digest + command_digest).encode('utf-8')).hexdigest()
 
     def SetUpAndBuild(self, built_signature):
         """SetUp and Build the target."""
@@ -684,7 +686,7 @@ class shell_script(BuildTarget):
         stdout, _ = proc.communicate()
         if proc.returncode:
             BuildWarning("Script failed. Failure message:")
-            BuildPrint("\n{0}\n", stdout)
+            BuildPrint("\n{0}\n", stdout.decode('ascii'))
             return False
         return True
 
