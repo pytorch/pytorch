@@ -547,6 +547,8 @@ int THTensor_(isSameSizeAs)(const THTensor *self, const THTensor* src)
 
 int THTensor_(isSetTo)(const THTensor *self, const THTensor* src)
 {
+  if (!self->storage)
+    return 0;
   if (self->storage == src->storage &&
       self->storageOffset == src->storageOffset &&
       self->nDimension == src->nDimension)
