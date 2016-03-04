@@ -13,6 +13,8 @@ namespace caffe2 {
 bool InitCaffeLogging(int* argc, char** argv) {
   ::google::InitGoogleLogging(argv[0]);
   ::google::InstallFailureSignalHandler();
+  // TODO(Yangqing): add a compatibility support for caffe2_log_level
+  // instead of having to use glog's specifications.
   return true;
 }
 }  // namespace caffe2
