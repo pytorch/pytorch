@@ -13,7 +13,6 @@
 #include <vector>
 
 #include "caffe2/core/flags.h"
-CAFFE2_DECLARE_int(caffe2_log_level);
 
 // Log severity level constants.
 const int CAFFE_FATAL   = 3;
