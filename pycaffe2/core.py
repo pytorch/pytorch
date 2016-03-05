@@ -7,7 +7,7 @@ try:
   from .libcaffe2_python import *
   has_gpu_support = True
 except ImportError as e:
-  print 'Pycaffe+GPU is not available. Using CPU only version.'
+  print('Pycaffe+GPU is not available. Using CPU only version.')
   from .libcaffe2_python_nogpu import *
   has_gpu_support = False
 # libcaffe2_python contains a global Workspace that we need to properly delete
