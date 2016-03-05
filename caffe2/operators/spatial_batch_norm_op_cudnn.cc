@@ -221,6 +221,7 @@ bool CudnnSpatialBNGradientOp<T>::RunOnDevice() {
   CUDNN_CHECK(cudnnBatchNormalizationBackward(
       cudnn_wrapper_.cudnn_handle(), kSpatialBNMode,
       cudnnTypeWrapper<T>::kOne(), cudnnTypeWrapper<T>::kZero(),
+      cudnnTypeWrapper<T>::kOne(), cudnnTypeWrapper<T>::kZero(),
       data_desc_, X.template data<T>(), data_desc_, dY.template data<T>(),
       data_desc_, dX->template mutable_data<T>(),
       bn_param_desc_, scale.template data<T>(),
