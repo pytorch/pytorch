@@ -9,8 +9,8 @@ cc_test(
       "//caffe2/core:core_gpu",
       "//caffe2/db:db",
       "//caffe2/utils:proto_utils",
-      "//data/toy:toy_models",
-      "//data/mnist:mnist_models",
+      "//caffe2/data/toy:toy_models",
+      "//caffe2/data/mnist:mnist_models",
       "//gtest:caffe2_gtest_main",
   ],
 )

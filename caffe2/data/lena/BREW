@@ -12,11 +12,11 @@ shell_script(
   name = "lena_leveldb",
   srcs = [],
   commands = [
-      "rm -rf data/lena/toy_leveldb",
+      "rm -rf caffe2/data/lena/toy_leveldb",
       "caffe2/binaries/make_image_db "
-          "--input_folder=data/lena/ "
-          "--list_file=data/lena/lena_toy_leveldb.txt "
-          "--output_db_name=data/lena/toy_leveldb",
+          "--input_folder=caffe2/data/lena/ "
+          "--list_file=caffe2/data/lena/lena_toy_leveldb.txt "
+          "--output_db_name=caffe2/data/lena/toy_leveldb",
   ],
   deps = [
       ":lena",
@@ -28,11 +28,11 @@ shell_script(
   name = "lena_leveldb_raw",
   srcs = [],
   commands = [
-      "rm -rf data/lena/toy_leveldb_raw",
+      "rm -rf caffe2/data/lena/toy_leveldb_raw",
       "caffe2/binaries/make_image_db "
-          "--input_folder=data/lena/ "
-          "--list_file=data/lena/lena_toy_leveldb.txt "
-          "--output_db_name=data/lena/toy_leveldb_raw "
+          "--input_folder=caffe2/data/lena/ "
+          "--list_file=caffe2/data/lena/lena_toy_leveldb.txt "
+          "--output_db_name=caffe2/data/lena/toy_leveldb_raw "
           "--raw=True --scale=256",
   ],
   deps = [
