@@ -143,10 +143,14 @@ TH_API void THTensor_(tanh)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(pow)(THTensor *r_, THTensor *t, real value);
 TH_API void THTensor_(tpow)(THTensor *r_, real value, THTensor *t);
 TH_API void THTensor_(sqrt)(THTensor *r_, THTensor *t);
+TH_API void THTensor_(rsqrt)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(ceil)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(floor)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(round)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(abs)(THTensor *r_, THTensor *t);
+TH_API void THTensor_(trunc)(THTensor *r_, THTensor *t);
+TH_API void THTensor_(frac)(THTensor *r_, THTensor *t);
+TH_API void THTensor_(lerp)(THTensor *r_, THTensor *a, THTensor *b, real weight);
 
 TH_API void THTensor_(mean)(THTensor *r_, THTensor *t, int dimension);
 TH_API void THTensor_(std)(THTensor *r_, THTensor *t, int dimension, int flag);
