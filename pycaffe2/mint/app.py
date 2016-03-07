@@ -105,7 +105,6 @@ def index():
 @app.route('/visualization/<string:name>')
 def visualization(name):
   ret = visualize_file(name)
-  print 'debug:', ret
   return ret
 
 def main(argv):
@@ -126,7 +125,7 @@ def main(argv):
   args = parser.parse_args(argv)
   server = tornado.httpserver.HTTPServer(tornado.wsgi.WSGIContainer(app))
   server.listen(args.port)
-  print "Tornado server starting on port {}.".format(args.port)
+  print("Tornado server starting on port {}.".format(args.port))
   tornado.ioloop.IOLoop.instance().start()
 
 if __name__ == '__main__':

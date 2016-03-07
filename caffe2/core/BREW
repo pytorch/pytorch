@@ -54,6 +54,7 @@ cc_library(
     "common_cudnn.h",
   ],
   deps = [
+      ":core",
       "//third_party/cudnn:cudnn",
   ],
   whole_archive = True,
