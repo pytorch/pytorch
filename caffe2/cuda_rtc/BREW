@@ -13,6 +13,7 @@ cc_library(
   deps = [
     ":common_rtc",
     "//caffe2/core:core_gpu",
+    "//caffe2/utils:math",
   ],
   whole_archive = True,
 )
