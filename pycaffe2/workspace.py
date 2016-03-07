@@ -52,7 +52,7 @@ def StartMint(root_folder=None, port=None):
   writing up some fix is a todo item.
   """
   if not _has_mint:
-    print 'Mint is not available. Not starting the server.'
+    print('Mint is not available. Not starting the server.')
     return None
   if root_folder is None:
     root_folder = RootFolder()
@@ -61,7 +61,7 @@ def StartMint(root_folder=None, port=None):
   process = Process(target=pycaffe2.mint.app.main, args=(
       ['-p', str(port), '-r', root_folder],))
   process.start()
-  print 'Mint running at http://{}:{}'.format(socket.getfqdn(), port)
+  print('Mint running at http://{}:{}'.format(socket.getfqdn(), port))
   return process
 
 def StringfyProto(obj):
@@ -157,7 +157,7 @@ class Model(object):
     # blobs ready. The construction is in two steps: feed in all the parameters
     # first, and then create the network object.
     for param in parameters.protos:
-      #print 'Feeding parameter', param.name
+      print('Feeding parameter {}'.format(param.name))
       FeedBlob(param.name, param, net.device_option)
     if not CreateNet(net, inputs):
       raise RuntimeError("Error when creating the model.")
