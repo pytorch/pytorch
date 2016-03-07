@@ -21,7 +21,9 @@ THC_API void THCStorage_(copyCudaInt)(THCState *state, THCStorage *storage, stru
 THC_API void THCStorage_(copyCudaLong)(THCState *state, THCStorage *storage, struct THCudaLongStorage *src);
 THC_API void THCStorage_(copyCudaFloat)(THCState *state, THCStorage *storage, struct THCudaStorage *src);
 THC_API void THCStorage_(copyCudaDouble)(THCState *state, THCStorage *storage, struct THCudaDoubleStorage *src);
-
+#if CUDA_VERSION >= 7050
+THC_API void THCStorage_(copyCudaHalf)(THCState *state, THCStorage *storage, struct THCudaHalfStorage *src);
+#endif
 
 THC_API void TH_CONCAT_2(THByteStorage_copyCuda  , Real)(THCState *state, THByteStorage *self, struct THCStorage *src);
 THC_API void TH_CONCAT_2(THCharStorage_copyCuda  , Real)(THCState *state, THCharStorage *self, struct THCStorage *src);
@@ -30,8 +32,12 @@ THC_API void TH_CONCAT_2(THIntStorage_copyCuda   , Real)(THCState *state, THIntS
 THC_API void TH_CONCAT_2(THLongStorage_copyCuda  , Real)(THCState *state, THLongStorage *self, struct THCStorage *src);
 THC_API void TH_CONCAT_2(THFloatStorage_copyCuda , Real)(THCState *state, THFloatStorage *self, struct THCStorage *src);
 THC_API void TH_CONCAT_2(THDoubleStorage_copyCuda, Real)(THCState *state, THDoubleStorage *self, struct THCStorage *src);
+
+/* There is no THHalfStorage */
+#ifndef THC_REAL_IS_HALF
 THC_API void THStorage_(copyCuda)(THCState *state, THStorage *self, THCStorage *src);
 THC_API void THCStorage_(copyCuda)(THCState *state, THCStorage *self, THCStorage *src);
 THC_API void THCStorage_(copyCPU)(THCState *state, THCStorage *self, THStorage *src);
+#endif
 
 #endif

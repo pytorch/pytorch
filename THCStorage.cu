@@ -6,5 +6,7 @@
 #include <thrust/system/cuda/execution_policy.h>
 #endif
 
+#include "THCHalf.h"
+
 #include "generic/THCStorage.cu"
 #include "THCGenerateAllTypes.h"
