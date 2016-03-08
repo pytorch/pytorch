@@ -9,7 +9,7 @@ cc_library(
   ],
   deps = [
       "//third_party/eigen3:eigen",
-      "//third_party/blas:blas",
+      "//third_party:blas",
       "//caffe2/core:core",
   ],
 )
@@ -75,6 +75,6 @@ cc_headers(
   ],
   deps = [
       "//caffe2/core:core",
-      "//third_party/libzmq:libzmq",
+      "//third_party:libzmq",
   ]
 )

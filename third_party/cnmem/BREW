@@ -7,6 +7,6 @@ cuda_library(
     "cnmem.h",
   ],
   deps = [
-      "//third_party/cuda:cuda",
+      "//third_party:cuda",
   ]
 )

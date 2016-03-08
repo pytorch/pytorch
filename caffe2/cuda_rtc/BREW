@@ -2,8 +2,8 @@ cc_headers(
   name = "common_rtc",
   srcs = ["common_rtc.h"],
   deps = [
-    "//third_party/cuda:cuda",
-    "//third_party/cuda:nvrtc",
+    "//third_party:cuda",
+    "//third_party:nvrtc",
   ]
 )
 

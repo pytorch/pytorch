@@ -1,4 +1,0 @@
-cc_thirdparty_target(
-  name="openmpi",
-  cc_obj_files = ['-l' + s for s in Brewery.Env.MPI_LIBS]
-)

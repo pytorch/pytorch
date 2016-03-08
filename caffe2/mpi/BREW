@@ -22,7 +22,7 @@ cc_library(
   deps = [
       ":mpi_common",
       "//caffe2/core:core",
-      "//third_party/openmpi:openmpi",
+      "//third_party:openmpi",
   ],
   whole_archive = True,
 )
@@ -39,7 +39,7 @@ cc_library(
   deps = [
       ":mpi_common",
       "//caffe2/core:core_gpu",
-      "//third_party/openmpi:openmpi",
+      "//third_party:openmpi",
   ],
   whole_archive = True,
 )
