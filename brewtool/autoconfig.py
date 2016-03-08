@@ -6,6 +6,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import sysconfig
 import tempfile
 import uuid
 
@@ -326,20 +327,21 @@ class Env(object):
             BuildWarning("Cannot find numpy. Pycaffe2 based code will not "
                          "compile correctly. Error is: {0}.", str(e))
             numpy_includes = []
-        ret, out = GetSubprocessOutput(
-            [Config.PYTHON_CONFIG, '--cflags'], self.ENV)
-        if ret != 0:
-            BuildWarning("Cannot run python-config. Pycaffe2 based code will "
-                         "not compile correctly.")
-            self.PYTHON_CFLAGS = []
-            self.PYTHON_LDFLAGS = []
-        else:
-            self.PYTHON_CFLAGS = (
-                re.sub("\s\s+", " ", out).split(" ") +
-                ['-I' + s for s in numpy_includes])
-            ret, out = GetSubprocessOutput(
-                [Config.PYTHON_CONFIG, '--ldflags'], self.ENV)
-            self.PYTHON_LDFLAGS = re.sub("\s\s+", " ", out).split(" ")
+        self.PYTHON_CFLAGS = (
+            [s for s in sysconfig.get_config_var('CFLAGS').split(' ') if s] +
+            ['-I' + s for s in sysconfig.get_config_var('INCLUDEPY').split(' ')] +
+            ['-I' + s for s in numpy_includes])
+        self.PYTHON_LDFLAGS = [
+            s for s in sysconfig.get_config_var('LDFLAGS').split(' ') if s]
+        # Add the actual target
+        python_target = sysconfig.get_config_var('LDLIBRARY')
+        if python_target[:3] != 'lib':
+            BuildWarning('Cannot understand python library. Pycaffe2 may not '
+                         'compile correctly.')
+        python_target = python_target[3:]
+        python_target = python_target[:python_target.rfind('.')]
+        self.PYTHON_LIBS = [python_target]
+
 
         # Now, after all the above commands, we will assemble the templates used
         # for all the commands.
@@ -378,7 +380,8 @@ class Env(object):
             [Config.CC, '-shared', '-o', '{dst}'] + self.LINKFLAGS +
             self.PYTHON_LDFLAGS +
             ['-L' + s for s in self.LIBDIRS] + ['{src}'] +
-            ['-l' + s for s in self.LIBS])
+            ['-l' + s for s in self.LIBS] +
+            ['-l' + s for s in self.PYTHON_LIBS])
         # After all are done, we print out the Env setting.
         BuildDebug("Finished autoconfiguring the build environment.")
 

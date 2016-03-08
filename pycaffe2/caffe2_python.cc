@@ -59,12 +59,12 @@ bool SwitchWorkspaceInternal(const string& name, const bool create_if_missing) {
   }
 }
 
-inline string PyStringToStdString(PyObject* pystring) {
-  return string(PyString_AsString(pystring), PyString_Size(pystring));
+inline string PyBytesToStdString(PyObject* pystring) {
+  return string(PyBytes_AsString(pystring), PyBytes_Size(pystring));
 }
 
-inline PyObject* StdStringToPyString(const string& str) {
-  return PyString_FromStringAndSize(str.c_str(), str.size());
+inline PyObject* StdStringToPyBytes(const string& str) {
+  return PyBytes_FromStringAndSize(str.c_str(), str.size());
 }
 
 template <typename T>
@@ -166,7 +166,7 @@ PyObject* GlobalInit(PyObject* self, PyObject* args) {
   char** raw_argv = argv.get();
   for (int i = 0; i < argc; ++i) {
     // Get the pointer to the string
-    raw_argv[i] = PyString_AsString(PyList_GetItem(list, i));
+    raw_argv[i] = PyBytes_AsString(PyList_GetItem(list, i));
   }
   // Special case for argc = 0: in this case, we will simply add a dummy
   // argv to call caffe2's underlying code.
@@ -196,7 +196,7 @@ PyObject* RegisteredOperators(PyObject* self, PyObject* args) {
   PyObject* list = PyList_New(all_keys.size());
   int idx = 0;
   for (const string& name : all_keys) {
-    CAFFE_CHECK_EQ(PyList_SetItem(list, idx, StdStringToPyString(name)), 0);
+    CAFFE_CHECK_EQ(PyList_SetItem(list, idx, StdStringToPyBytes(name)), 0);
     ++idx;
   }
   return list;
@@ -211,7 +211,7 @@ PyObject* GetGradientDefs(PyObject* self, PyObject* args) {
     return NULL;
   }
   OperatorDef def;
-  if (!def.ParseFromString(PyStringToStdString(def_string))) {
+  if (!def.ParseFromString(PyBytesToStdString(def_string))) {
     PyErr_SetString(PyExc_ValueError,
                     "Provided string is not a valid OperatorDef protobuffer.");
     return NULL;
@@ -227,7 +227,7 @@ PyObject* GetGradientDefs(PyObject* self, PyObject* args) {
   int i = 0;
   for (const OperatorDef & grad_def : *grad_defs) {
     CAFFE_CHECK_EQ(PyList_SetItem(
-        list, i, StdStringToPyString(grad_def.SerializeAsString())), 0);
+        list, i, StdStringToPyBytes(grad_def.SerializeAsString())), 0);
     ++i;
   }
   return list;
@@ -244,7 +244,7 @@ PyObject* SwitchWorkspace(PyObject* self, PyObject* args) {
     return NULL;
   }
   bool success = SwitchWorkspaceInternal(
-      PyStringToStdString(name),
+      PyBytesToStdString(name),
       (create_if_missing != nullptr) && PyObject_IsTrue(create_if_missing));
   if (!success) {
     PyErr_SetString(
@@ -257,14 +257,14 @@ PyObject* SwitchWorkspace(PyObject* self, PyObject* args) {
 }
 
 PyObject* CurrentWorkspace(PyObject* self, PyObject* args) {
-  return StdStringToPyString(gCurrentWorkspaceName);
+  return StdStringToPyBytes(gCurrentWorkspaceName);
 }
 
 PyObject* Workspaces(PyObject* self, PyObject* args) {
   PyObject* list = PyList_New(gWorkspaces.size());
   int i = 0;
   for (auto const & it : gWorkspaces) {
-    CAFFE_CHECK_EQ(PyList_SetItem(list, i, StdStringToPyString(it.first)), 0);
+    CAFFE_CHECK_EQ(PyList_SetItem(list, i, StdStringToPyBytes(it.first)), 0);
     i += 1;
   }
   return list;
@@ -284,14 +284,14 @@ PyObject* ResetWorkspace(PyObject* self, PyObject* args) {
         new Workspace());
   } else {
     gWorkspaces[gCurrentWorkspaceName].reset(
-        new Workspace(PyStringToStdString(root_folder)));
+        new Workspace(PyBytesToStdString(root_folder)));
   }
   gWorkspace = gWorkspaces[gCurrentWorkspaceName].get();
   Py_RETURN_TRUE;
 }
 
 PyObject* RootFolder(PyObject* self, PyObject* args) {
-  return StdStringToPyString(gWorkspace->RootFolder());
+  return StdStringToPyBytes(gWorkspace->RootFolder());
 }
 
 // This function should not be called by the user - only used during the
@@ -306,7 +306,7 @@ PyObject* Blobs(PyObject* self, PyObject* args) {
   PyObject* list = PyList_New(blob_strings.size());
   for (int i = 0; i < blob_strings.size(); ++i) {
     CAFFE_CHECK_EQ(
-        PyList_SetItem(list, i, StdStringToPyString(blob_strings[i])), 0);
+        PyList_SetItem(list, i, StdStringToPyBytes(blob_strings[i])), 0);
   }
   return list;
 }
@@ -329,7 +329,7 @@ PyObject* CreateNet(PyObject* self, PyObject* args) {
     return NULL;
   }
   caffe2::NetDef proto;
-  if (!proto.ParseFromString(PyStringToStdString(proto_string))) {
+  if (!proto.ParseFromString(PyBytesToStdString(proto_string))) {
     PyErr_SetString(PyExc_ValueError, "Cannot parse input net string.");
     return NULL;
   }
@@ -395,7 +395,7 @@ PyObject* Nets(PyObject* self, PyObject* args) {
   std::vector<caffe2::string> net_strings = gWorkspace->Nets();
   PyObject* list = PyList_New(net_strings.size());
   for (int i = 0; i < net_strings.size(); ++i) {
-    CAFFE_CHECK_EQ(PyList_SetItem(list, i, StdStringToPyString(net_strings[i])), 0);
+    CAFFE_CHECK_EQ(PyList_SetItem(list, i, StdStringToPyBytes(net_strings[i])), 0);
   }
   return list;
 }
@@ -408,7 +408,7 @@ PyObject* RunOperatorOnce(PyObject* self, PyObject* args) {
     return NULL;
   }
   caffe2::OperatorDef proto;
-  if (!proto.ParseFromString(PyStringToStdString(proto_string))) {
+  if (!proto.ParseFromString(PyBytesToStdString(proto_string))) {
     PyErr_SetString(PyExc_ValueError, "Cannot parse input operator proto.");
     return NULL;
   }
@@ -429,7 +429,7 @@ PyObject* RunNetOnce(PyObject* self, PyObject* args) {
     return NULL;
   }
   caffe2::NetDef proto;
-  if (!proto.ParseFromString(PyStringToStdString(proto_string))) {
+  if (!proto.ParseFromString(PyBytesToStdString(proto_string))) {
     PyErr_SetString(PyExc_ValueError, "Cannot parse input net proto.");
     return NULL;
   }
@@ -450,7 +450,7 @@ PyObject* RunPlan(PyObject* self, PyObject* args) {
     return NULL;
   }
   caffe2::PlanDef proto;
-  if (!proto.ParseFromString(PyStringToStdString(proto_string))) {
+  if (!proto.ParseFromString(PyBytesToStdString(proto_string))) {
     PyErr_SetString(PyExc_ValueError, "Cannot parse input plan proto.");
     return NULL;
   }
@@ -507,7 +507,7 @@ PyObject* FetchBlob(PyObject* self, PyObject* args) {
   std::stringstream ss;
   ss << caffe2::string(name) << ", a C++ native class of type "
      << blob.TypeName() << ".";
-  return StdStringToPyString(ss.str());
+  return StdStringToPyBytes(ss.str());
 }
 
 PyObject* FeedBlob(PyObject* self, PyObject* args) {
@@ -523,7 +523,7 @@ PyObject* FeedBlob(PyObject* self, PyObject* args) {
   DeviceOption option;
   if (device_option_string != nullptr) {
     // If we have a device option passed in, read it.
-    if (!option.ParseFromString(PyStringToStdString(device_option_string))) {
+    if (!option.ParseFromString(PyBytesToStdString(device_option_string))) {
       PyErr_SetString(PyExc_ValueError, "Cannot parse device option string.");
       return NULL;
     }
@@ -642,8 +642,6 @@ PyObject* GetCudaPeerAccessPattern(PyObject* self, PyObject* args) {
 
 // A simple macro to avoid writing repeated symbols.
 #define _PYNAME(name) {#name, name, METH_VARARGS, ""}
-
-
 static PyMethodDef gPycaffe2Methods[] = {
   // TODO(Yangqing): write the methods string.
   // Note(Yangqing): For any function that we are going to override in the
@@ -681,19 +679,86 @@ static PyMethodDef gPycaffe2Methods[] = {
 };
 #undef _PYNAME
 
+// This is a workaround so we can deal with numpy's import_array behavior.
+// Despite the fact that you may think import_array() is a function call,
+// it seems that (as of 1.10) that is defined as a macro. As a result, we
+// wrap it inside a function to make everythings safe, as well as checking
+// the different behaviors in python 2 and 3.
+#if PY_MAJOR_VERSION >= 3
+#define CAFFE2_NUMPY_RETURN_TYPE int
+#else
+#define CAFFE2_NUMPY_RETURN_TYPE void
+#endif
 
-#ifdef PYCAFFE2_CPU_ONLY
-void initlibcaffe2_python_nogpu(void) {
-  (void) Py_InitModule("libcaffe2_python_nogpu", gPycaffe2Methods);
-#else  // !PYCAFFE2_CPU_ONPY
-void initlibcaffe2_python(void) {
-  (void) Py_InitModule("libcaffe2_python", gPycaffe2Methods);
-#endif  // PYCAFFE2_CPU_ONPY
-  import_array();  // for numpy
+CAFFE2_NUMPY_RETURN_TYPE caffe2_init_numpy_wrapper() {
+  import_array();
+}
+
+void common_init_libcaffe2_python(void) {
+  caffe2_init_numpy_wrapper();  // for numpy
   // We will create a default workspace for us to run stuff.
   SwitchWorkspaceInternal("default", true);
   gCurrentWorkspaceName = "default";
 }
+
+// The initialization code.
+#if PY_MAJOR_VERSION >= 3
+
+struct module_state {
+  PyObject* error;
+};
+
+inline static struct module_state* ModuleGetState(PyObject* module) {
+  return (struct module_state*)PyModule_GetState(module);
+}
+static int caffe2_python_traverse(PyObject* m, visitproc visit, void* arg) {
+  Py_VISIT(ModuleGetState(m)->error);
+  return 0;
+}
+
+static int caffe2_python_clear(PyObject* m) {
+  Py_CLEAR(ModuleGetState(m)->error);
+  return 0;
+}
+
+static struct PyModuleDef gModuleDef = {
+  PyModuleDef_HEAD_INIT,
+  "libcaffe2_python",
+  NULL,
+  sizeof(struct module_state),
+  gPycaffe2Methods,
+  NULL,
+  caffe2_python_traverse,
+  caffe2_python_clear,
+  NULL
+};
+
+PyObject* PyInit_libcaffe2_python(void) {
+  PyObject* module = PyModule_Create(&gModuleDef);
+  if (module == nullptr) {
+    return NULL;
+  }
+  struct module_state* st = ModuleGetState(module);
+  st->error = PyErr_NewException("libcaffe2_python.Error", NULL, NULL);
+  if (st->error == NULL) {
+    Py_DECREF(module);
+    return NULL;
+  }
+  return module;
+  common_init_libcaffe2_python();
+}
+
+#else  // PY_MAJOR_VERSION >= 3
+
+void initlibcaffe2_python(void) {
+  PyObject* module = Py_InitModule("libcaffe2_python", gPycaffe2Methods);
+  if (module == nullptr) {
+    return;
+  }
+  common_init_libcaffe2_python();
+}
+
+#endif  // PY_MAJOR_VERSION >= 3
 
 }  // extern "C"
 

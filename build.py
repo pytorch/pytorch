@@ -137,12 +137,6 @@ class Config(object):
     MPI_ADD_TO_RPATH = True
 
     ################################################################################
-    # (optional) Python.
-    ################################################################################
-    # Specify the python config command.
-    PYTHON_CONFIG = "python-config"
-
-    ################################################################################
     # Very rarely used configurations.
     ################################################################################
     # If the platform uses a non-conventional shared library extension, manually

@@ -679,7 +679,7 @@ class shell_script(BuildTarget):
         Brewery.CopyToGenDir(self.srcs)
 
     def Build(self):
-        BuildDebug("script: {0}", str(self.commands))
+        BuildDebug("script: {0}", '\n' + '\n'.join(self.commands))
         proc = subprocess.Popen(
             ' && '.join(self.commands), stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT, shell=True, env=Brewery.Env.ENV)

@@ -6,7 +6,7 @@
 
 CAFFE2_DECLARE_string(caffe_test_root);
 
-const char* kTestDBPath = "/data/mnist/mnist-train-nhwc-minidb";
+const char* kTestDBPath = "/caffe2/data/mnist/mnist-train-nhwc-minidb";
 
 namespace caffe2 {
 

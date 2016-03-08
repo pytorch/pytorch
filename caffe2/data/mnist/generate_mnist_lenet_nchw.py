@@ -18,7 +18,7 @@ DECAY = init_net.ConstantFill([], "DECAY", shape=[1], value=0.999)
 train_net = core.Net("train")
 data, label = train_net.TensorProtosDBInput(
     [], ["data", "label"], batch_size=64,
-    db="gen/data/mnist/mnist-train-nchw-minidb", db_type="minidb")
+    db="gen/caffe2/data/mnist/mnist-train-nchw-minidb", db_type="minidb")
 
 # For a fully-named version, do the following:
 """
