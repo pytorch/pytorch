@@ -109,6 +109,12 @@ cc_thirdparty_target(
 )
 
 cc_thirdparty_target(
+  name = "gtest",
+  deps = ["//third_party/gtest:gtest"],
+  cc_obj_files = [],
+)
+
+cc_thirdparty_target(
   name = "leveldb",
   deps = [":snappy"],
   cc_obj_files = [ "-lleveldb" ],

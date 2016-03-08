@@ -52,7 +52,7 @@ mpi_test(
   deps = [
     ":mpi_ops",
     "//caffe2:all_available_ops",
-    "//gtest:gtest",
+    "//third_party:gtest",
   ]
 )
 
@@ -64,6 +64,6 @@ mpi_test(
   deps = [
     ":mpi_ops",
     "//caffe2:all_available_ops",
-    "//gtest:gtest",
+    "//third_party:gtest",
   ]
 )
