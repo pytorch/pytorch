@@ -12,23 +12,24 @@ CAFFE2_DECLARE_string(caffe_test_root);
 
 namespace caffe2 {
 
-const char kToyRegressionTestPlanPath[] = "/data/toy/toy_regression.pbtxt";
+const char kToyRegressionTestPlanPath[] =
+    "/caffe2/data/toy/toy_regression.pbtxt";
 const char kMNISTLinearClassificationPath[] =
-    "/data/mnist/linear_classifier_plan.pbtxt";
+    "/caffe2/data/mnist/linear_classifier_plan.pbtxt";
 const char kMNISTTwoLayerReluClassificationPath[] =
-    "/data/mnist/mnist_relu_network.pbtxt";
+    "/caffe2/data/mnist/mnist_relu_network.pbtxt";
 
 const vector<string> kMNISTLeNetVariants {
-  "/data/mnist/mnist_lenet_nchw.pbtxt",
-  "/data/mnist/mnist_lenet_nhwc.pbtxt",
-  "/data/mnist/mnist_lenet_group_convolution_nchw.pbtxt",
-  "/data/mnist/mnist_lenet_group_convolution_nhwc.pbtxt",
+  "/caffe2/data/mnist/mnist_lenet_nchw.pbtxt",
+  "/caffe2/data/mnist/mnist_lenet_nhwc.pbtxt",
+  "/caffe2/data/mnist/mnist_lenet_group_convolution_nchw.pbtxt",
+  "/caffe2/data/mnist/mnist_lenet_group_convolution_nhwc.pbtxt",
 };
 
 const vector<string> kMNISTLeNetVariantsGPU {
-  "/data/mnist/mnist_lenet_nchw_gpu.pbtxt",
-  "/data/mnist/mnist_lenet_nhwc_gpu.pbtxt",
-  "/data/mnist/mnist_lenet_nchw_cudnn.pbtxt",
+  "/caffe2/data/mnist/mnist_lenet_nchw_gpu.pbtxt",
+  "/caffe2/data/mnist/mnist_lenet_nhwc_gpu.pbtxt",
+  "/caffe2/data/mnist/mnist_lenet_nchw_cudnn.pbtxt",
 };
 
 template <typename T, class Context>

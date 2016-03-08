@@ -1,20 +1,22 @@
 import atexit
-from caffe2.proto import caffe2_pb2
-from collections import Counter, defaultdict
-from pycaffe2 import utils, workspace
+import sys
 
 try:
   from .libcaffe2_python import *
-  has_gpu_support = True
 except ImportError as e:
-  print('Pycaffe+GPU is not available. Using CPU only version.')
-  from .libcaffe2_python_nogpu import *
-  has_gpu_support = False
+  print(str(e))
+  print('Pycaffe is not available. Exiting.')
+  sys.exit(1)
 # libcaffe2_python contains a global Workspace that we need to properly delete
 # when exiting. Otherwise, cudart will cause segfaults sometimes.
 atexit.register(OnModuleExit)
 
-_REGISTERED_OPERATORS = set(workspace.RegisteredOperators())
+from caffe2.proto import caffe2_pb2
+from collections import Counter, defaultdict
+from pycaffe2 import utils, workspace
+
+_REGISTERED_OPERATORS = set(
+    s.decode() for s in workspace.RegisteredOperators())
 
 def IsOperator(op_type):
   return (op_type in _REGISTERED_OPERATORS)
@@ -94,8 +96,6 @@ def CreateOperator(operator_type):
     operator.name = name
     if type(inputs) is str or type(inputs) is BlobReference:
       inputs = [inputs]
-    elif type(inputs) is unicode:
-      inputs = [str(inputs)]
     elif type(inputs) is not list:
       raise ValueError("Unknown input format: %s of type %s."
                        % (str(inputs), type(inputs)))
@@ -119,7 +119,7 @@ def CreateOperator(operator_type):
     if arg is not None:
       operator.arg.extend(arg)
     # Add all other arguments
-    for key, value in kwargs.iteritems():
+    for key, value in kwargs.items():
       operator.arg.add().CopyFrom(utils.MakeArgument(key, value))
     return operator
   return ReallyCreate
