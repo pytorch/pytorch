@@ -1,0 +1,14 @@
+cc_library(
+  name = "caffe2_gtest_main",
+  srcs = ["caffe2_gtest_main.cc"],
+  deps = [
+      "//third_party:gtest",
+      "//caffe2/core:core",
+  ],
+)
+
+cc_test(
+  name = "caffe2_gtest_main_binary",
+  srcs = [],
+  deps = [":caffe2_gtest_main"],
+)

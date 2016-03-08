@@ -11,6 +11,6 @@ cc_test(
       "//caffe2/utils:proto_utils",
       "//caffe2/data/toy:toy_models",
       "//caffe2/data/mnist:mnist_models",
-      "//gtest:caffe2_gtest_main",
+      "//caffe2/test:caffe2_gtest_main",
   ],
 )

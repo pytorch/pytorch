@@ -118,6 +118,6 @@ cc_test(
       ":core_ops",
       ":core_ops_gpu",
       "//caffe2/data/mnist:mnist_minidb",
-      "//gtest:caffe2_gtest_main",
+      "//caffe2/test:caffe2_gtest_main",
   ]
 )

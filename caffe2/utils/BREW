@@ -45,7 +45,7 @@ cc_test(
   deps = [
       ":math",
       "//caffe2/proto:caffe2_proto",
-      "//gtest:caffe2_gtest_main",
+      "//caffe2/test:caffe2_gtest_main",
       "//caffe2/core:core",
   ],
 )
@@ -64,7 +64,7 @@ cc_test(
   ],
   deps = [
       ":simple_queue",
-      "//gtest:caffe2_gtest_main",
+      "//caffe2/test:caffe2_gtest_main",
   ],
 )
 
