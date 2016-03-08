@@ -205,10 +205,9 @@ class Env(object):
         ] + Config.OPTIMIZATION_FLAGS
 
         # Check BLAS
-        if Config.USE_EIGEN_FOR_BLAS:
+        if Config.BLAS_BACKEND == 'eigen':
           self.DEFINES.append('-DCAFFE2_USE_EIGEN_FOR_BLAS')
-        else:
-          if Config.BLAS_BACKEND == "mkl":
+        elif Config.BLAS_BACKEND == "mkl":
             self.DEFINES.append('-DCAFFE2_USE_MKL')
 
         # Set C++11 flag. The reason we do not simply add it to the CFLAGS list

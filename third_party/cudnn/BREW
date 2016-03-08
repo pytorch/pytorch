@@ -1,8 +1,0 @@
-cc_thirdparty_target(
-  name = "cudnn",
-  cc_obj_files = ["-lcudnn_static"],
-  deps = [
-      "//third_party/cuda:cuda",
-  ]
-)
-

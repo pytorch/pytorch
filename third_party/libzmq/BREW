@@ -1,4 +1,0 @@
-cc_thirdparty_target(
-  name = "libzmq",
-  cc_obj_files = [ "-lzmq" ],
-)

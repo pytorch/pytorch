@@ -30,10 +30,8 @@ cc_binary(
   deps = [
       "//caffe2/core:core",
       "//caffe2/proto:caffe2_proto",
-      "//third_party/leveldb:leveldb",
-      "//third_party/opencv:opencv_core",
-      "//third_party/opencv:opencv_highgui",
-      "//third_party/opencv:opencv_imgproc",
+      "//third_party:leveldb",
+      "//third_party:opencv",
   ],
 )
 
@@ -69,9 +67,7 @@ cc_binary(
       "//caffe2/core:core",
       "//caffe2/db:db",
       "//caffe2/proto:caffe2_proto",
-      "//third_party/opencv:opencv_core",
-      "//third_party/opencv:opencv_highgui",
-      "//third_party/opencv:opencv_imgproc",
+      "//third_party:opencv",
   ],
 )
 
@@ -122,7 +118,7 @@ cc_binary(
       "//caffe2/core:core",
       "//caffe2/db:db",
       "//caffe2/utils:proto_utils",
-      "//third_party/openmpi:openmpi",
+      "//third_party:openmpi",
   ],
 )
 

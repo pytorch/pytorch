@@ -1,0 +1,162 @@
+# Subfolders in the third_party folder are used to help install things more
+# easily and you should pre-install them on your machine.
+
+###############################################################################
+# BLAS
+# This section is intended to be the central location that hosts all possible
+# BLAS backends. Note that all these are only linking flags, so if one of the
+# libraries is not used, don't bother installing it - Caffe2 will still build
+# normally.
+##############################################################################
+
+# A catch-all target: all the targets should link to this instead of the
+# specific libraries below.
+cc_library(
+  name = "blas",
+  srcs = [],
+  deps = [":" + Brewery.Env.Config.BLAS_BACKEND],
+)
+
+# Atlas
+cc_thirdparty_target(
+  name = "atlas",
+  cc_obj_files = [ "-lcblas -latlas" ],
+)
+
+# Eigen
+cc_thirdparty_target(
+  name = "eigen",
+  deps = ["//third_party/eigen3:eigen"],
+  cc_obj_files = [],
+)
+
+# Intel MKL.
+cc_thirdparty_target(
+  name = "mkl",
+  cc_obj_files = [ "-lmkl_rt" ],
+)
+
+# OpenBLAS
+cc_thirdparty_target(
+  name = "openblas",
+  cc_obj_files = [ "-lopenblas" ],
+)
+
+# TODO: add the OS X veclib/Accelerate framework backend.
+
+
+###############################################################################
+# CUDA
+# This section includes all cuda-related dependencies.
+##############################################################################
+
+if Brewery.Env.Config.LINK_CUDA_STATIC:
+  cc_thirdparty_target(
+    name = "cuda",
+    cc_obj_files = [
+        "-lcublas_static",
+        "-lcurand_static",
+        "-lcudart_static",
+        "-lculibos",
+        "-ldl",
+    ] +
+    (["-lrt"] if Brewery.Env.NEED_LIBRT else [])
+  )
+else:
+  cc_thirdparty_target(
+    name = "cuda",
+    cc_obj_files = [
+        "-lcublas",
+        "-lcurand",
+        "-lcudart",
+        "-lculibos",
+        "-ldl",
+    ] +
+    (["-lrt"] if Brewery.Env.NEED_LIBRT else [])
+  )
+
+cc_thirdparty_target(
+  name = "cudnn",
+  deps = [":cuda"],
+  cc_obj_files = ["-lcudnn_static"],
+)
+
+cc_thirdparty_target(
+  name = "nvrtc",
+  deps = [
+    ":cuda",
+  ],
+  cc_obj_files = [
+    "-lnvrtc",
+    "-lcuda",
+  ],
+)
+
+cc_thirdparty_target(
+  name="cnmen",
+  deps=["//third_party/cnmem:cnmem"],
+  cc_obj_files = [],
+)
+
+###############################################################################
+# Other libraries
+# This section includes all other libraries in alphabet order.
+##############################################################################
+
+cc_thirdparty_target(
+  name="glog",
+  cc_obj_files = ["-lglog"] if Brewery.Env.Config.USE_GLOG else [],
+)
+
+cc_thirdparty_target(
+  name = "leveldb",
+  deps = [":snappy"],
+  cc_obj_files = [ "-lleveldb" ],
+)
+
+cc_thirdparty_target(
+  name = "lmdb",
+  cc_obj_files = ["-llmdb"],
+)
+
+cc_thirdparty_target(
+  name = "libzmq",
+  cc_obj_files = [ "-lzmq" ],
+)
+
+cc_thirdparty_target(
+  name="opencv",
+  cc_obj_files=[
+    "-lopencv_core",
+    "-lopencv_highgui",
+    "-lopencv_imgproc",
+  ],
+)
+
+cc_thirdparty_target(
+  name="openmpi",
+  cc_obj_files = ['-l' + s for s in Brewery.Env.MPI_LIBS]
+)
+
+cc_thirdparty_target(
+  name="protobuf_lite",
+  deps=["//third_party/google:protobuf_lite"],
+  cc_obj_files = [],
+)
+
+cc_thirdparty_target(
+  name="protobuf",
+  deps=["//third_party/google:protobuf"],
+  cc_obj_files = [],
+)
+
+cc_thirdparty_target(
+  name="protoc",
+  deps=["//third_party/google:protoc"],
+  cc_obj_files = [],
+)
+
+cc_thirdparty_target(
+  name = "snappy",
+  cc_obj_files = ["-lsnappy"],
+)

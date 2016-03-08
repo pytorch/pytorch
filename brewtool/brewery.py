@@ -115,7 +115,11 @@ class Brewery(object):
             # Set the current working directory, and parse the build file.
             BuildDebug("Parsing {0}", build_file)
             cls.CWD = os.path.dirname(build_file)
-            exec(open(build_file).read())
+            try:
+                exec(open(build_file).read())
+            except Exception as e:
+                BuildFatal('Error parsing build file {0}. Error is: {1}'
+                           .format(build_file, str(e)))
         cls.CWD = ''
 
     @classmethod
@@ -390,12 +394,12 @@ def MergeOrderedObjs(dep_lists):
 
 # A hard-coded name that specifies the google protocol buffer compiler - this
 # is required for proto libraries.
-PROTOC_TARGET = "//third_party/google:protoc"
-PROTOBUF_LITE_TARGET = "//third_party/google:protobuf_lite"
-PROTOBUF_TARGET = "//third_party/google:protobuf"
+PROTOC_TARGET = "//third_party:protoc"
+PROTOBUF_LITE_TARGET = "//third_party:protobuf_lite"
+PROTOBUF_TARGET = "//third_party:protobuf"
 
 # A hard-coded name that specifies the cuda dependency.
-CUDA_TARGET = "//third_party/cuda:cuda"
+CUDA_TARGET = "//third_party:cuda"
 
 
 class proto_library(BuildTarget):

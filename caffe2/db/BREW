@@ -8,7 +8,7 @@ cc_library(
   ],
   deps = [
     "//caffe2/core:core",
-    "//third_party/leveldb:leveldb",
+    "//third_party:leveldb",
   ],
   whole_archive = True,
 )
@@ -20,7 +20,7 @@ cc_library(
   ],
   deps = [
     "//caffe2/core:core",
-    "//third_party/liblmdb:lmdb",
+    "//third_party:lmdb",
   ],
   whole_archive = True,
 )

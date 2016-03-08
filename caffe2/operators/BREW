@@ -106,7 +106,7 @@ cc_library(
       "//caffe2/core:core_cudnn",
       "//caffe2/core:core_gpu",
       "//caffe2/utils:math_gpu",
-      "//third_party/cudnn:cudnn",
+      "//third_party:cudnn",
   ],
   whole_archive = True,
 )
