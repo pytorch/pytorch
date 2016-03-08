@@ -1,4 +1,5 @@
 #include "THCUNN.h"
+#include "common.h"
 
 #include <thrust/fill.h>
 #include <thrust/functional.h>
@@ -22,7 +23,7 @@ struct mse_functor
 
 void THNN_CudaMSECriterion_updateOutput(THCState *state, THCudaTensor *input, THCudaTensor *target, THCudaTensor *output, bool sizeAverage)
 {
-  THAssert(THCudaTensor_checkGPU(state, 2, input, target));
+  THNN_assertSameGPU(state, 2, input, target);
   THArgCheck(THCudaTensor_nElement(state, input) == THCudaTensor_nElement(state, target), 2,
     "input and target need to have the same number of elements"
   );
@@ -66,7 +67,7 @@ struct mse_updateGradInput_functor
 
 void THNN_CudaMSECriterion_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *target, THCudaTensor *gradInput, bool sizeAverage)
 {
-  THAssert(THCudaTensor_checkGPU(state, 3, input, target, gradInput));
+  THNN_assertSameGPU(state, 3, input, target, gradInput);
   THArgCheck(THCudaTensor_nElement(state, input) == THCudaTensor_nElement(state, target), 2,
     "input and target need to have the same number of elements"
   );

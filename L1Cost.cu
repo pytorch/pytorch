@@ -1,4 +1,6 @@
 #include "THCUNN.h"
+#include "common.h"
+
 #include <thrust/device_ptr.h>
 #include <thrust/reduce.h>
 #include <thrust/transform.h>
@@ -13,7 +15,7 @@ struct l1cost_functor
 
 void THNN_CudaL1Cost_updateOutput(THCState *state, THCudaTensor *input, THCudaTensor *output)
 {
-  THAssert(THCudaTensor_checkGPU(state, 1, input));
+  THNN_assertSameGPU(state, 1, input);
   float sum;
   long size = THCudaTensor_nElement(state, input);
   input = THCudaTensor_newContiguous(state, input);
@@ -40,7 +42,7 @@ struct l1cost_updateGradInput_functor
 
 void THNN_CudaL1Cost_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput, THCudaTensor *gradInput)
 {
-  THAssert(THCudaTensor_checkGPU(state, 2, input, gradInput));
+  THNN_assertSameGPU(state, 2, input, gradInput);
   long size = THCudaTensor_nElement(state, input);
 
   input = THCudaTensor_newContiguous(state, input);

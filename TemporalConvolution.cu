@@ -1,4 +1,5 @@
 #include "THCUNN.h"
+#include "common.h"
 
 void THNN_CudaTemporalConvolution_updateOutput(
           THCState *state,
@@ -17,7 +18,7 @@ void THNN_CudaTemporalConvolution_updateOutput(
   int dimS = 0; // sequence dimension
   int dimF = 1; // feature dimension
 
-  THAssert(THCudaTensor_checkGPU(state, 4, input, output, weight, bias));
+  THNN_assertSameGPU(state, 4, input, output, weight, bias);
   THArgCheck( input->nDimension == 2 || input->nDimension == 3, 2, "2D or 3D(batch mode) tensor expected");
 
   if (input->nDimension == 3)
@@ -146,7 +147,7 @@ void THNN_CudaTemporalConvolution_updateGradInput(
 
   int dimS = 0; // sequence dimension
 
-  THAssert(THCudaTensor_checkGPU(state, 4, input, gradOutput, weight, gradInput));
+  THNN_assertSameGPU(state, 4, input, gradOutput, weight, gradInput);
 
   if (gradOutput->nDimension == 3)
   {

@@ -1,4 +1,5 @@
 #include "THCUNN.h"
+#include "common.h"
 
 #include <thrust/fill.h>
 #include <thrust/functional.h>
@@ -22,7 +23,7 @@ void THNN_CudaSoftMarginCriterion_updateOutput(THCState *state,
                                                int sizeAverage
                                               )
 {
-  THAssert(THCudaTensor_checkGPU(state, 2, input, target));
+  THNN_assertSameGPU(state, 2, input, target);
   float sum;
 
   long size = THCudaTensor_nElement(state, input);
@@ -65,7 +66,7 @@ void THNN_CudaSoftMarginCriterion_updateGradInput(THCState *state,
                                                   int sizeAverage
                                                  )
 {
-  THAssert(THCudaTensor_checkGPU(state, 3, input, target, gradInput));
+  THNN_assertSameGPU(state, 3, input, target, gradInput);
 
   long size = THCudaTensor_nElement(state, input);
   float norm = (sizeAverage ? 1./size : 1.);

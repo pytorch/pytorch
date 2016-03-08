@@ -1,4 +1,6 @@
 #include "THCUNN.h"
+#include "common.h"
+
 #include <stdio.h>
 #include <assert.h>
 
@@ -114,13 +116,13 @@ void THNN_CudaClassNLLCriterion_updateOutput(THCState *state, THCudaTensor *inpu
   int n_classes = THCudaTensor_size(state, input, n_dims - 1);
 
   if (weights) {
-    THAssert(THCudaTensor_checkGPU(
+    THNN_assertSameGPU(
       state, 5, input, target, weights, output, total_weight
-    ));
+    );
   } else {
-    THAssert(THCudaTensor_checkGPU(
+    THNN_assertSameGPU(
       state, 4, input, target, output, total_weight
-    ));
+    );
   }
 
   if (THCudaTensor_nDimension(state, input) > 2) {
@@ -186,14 +188,14 @@ void THNN_CudaClassNLLCriterion_updateGradInput(THCState *state, THCudaTensor *i
   THArgCheck(THCudaTensor_isContiguous(state, gradInput), 4, "gradInput must be contiguous");
 
   if (weights) {
-    THAssert(THCudaTensor_checkGPU(
+    THNN_assertSameGPU(
       state, 5, weights, input, target, gradInput, total_weight
-    ));
+    );
   }
   else {
-    THAssert(THCudaTensor_checkGPU(
+    THNN_assertSameGPU(
       state, 4, input, target, gradInput, total_weight
-    ));
+    );
   }
 
   if (THCudaTensor_nDimension(state, input) > 2) {

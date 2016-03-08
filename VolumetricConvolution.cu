@@ -160,7 +160,7 @@ void THNN_CudaVolumetricConvolution_updateOutput(
 {
   THCudaTensor *columns = finput;
   THCudaTensor *ones = fgradInput;
-  THAssert(THCudaTensor_checkGPU(state, 6, input, output, weight, bias, columns, ones));
+  THNN_assertSameGPU(state, 6, input, output, weight, bias, columns, ones);
 
   THArgCheck(input->nDimension == 4 || input->nDimension == 5, 2,
     "4D or 5D (batch mode) tensor is expected"
@@ -303,7 +303,7 @@ void THNN_CudaVolumetricConvolution_updateGradInput(
 
   THCudaTensor *gradColumns = finput;
 
-  THAssert(THCudaTensor_checkGPU(state, 5, input, gradOutput, weight, gradColumns, gradInput));
+  THNN_assertSameGPU(state, 5, input, gradOutput, weight, gradColumns, gradInput);
   THArgCheck(input->nDimension == 4 || input->nDimension == 5, 2,
     "4D or 5D (batch mode) tensor is expected"
   );
@@ -401,7 +401,7 @@ void THNN_CudaVolumetricConvolution_accGradParameters(
 {
   THCudaTensor *columns = finput;
   THCudaTensor *ones = fgradInput;
-  THAssert(THCudaTensor_checkGPU(state, 6, input, gradOutput, gradWeight, gradBias, columns, ones));
+  THNN_assertSameGPU(state, 6, input, gradOutput, gradWeight, gradBias, columns, ones);
 
   THArgCheck(gradWeight->nDimension == 5, 4,
     "5D gradWeight tensor is expected (nOutputPlane x nInputPlane x kT x kH x kW)"

@@ -1,4 +1,5 @@
 #include "THCUNN.h"
+#include "common.h"
 
 #include <thrust/transform.h>
 #include <thrust/reduce.h>
@@ -61,7 +62,7 @@ void THNN_CudaSpatialUpSamplingNearest_updateOutput(THCState *state, THCudaTenso
 {
   THCudaTensor_zero(state, output);
 
-  THAssert(THCudaTensor_checkGPU(state, 2, input, output));
+  THNN_assertSameGPU(state, 2, input, output);
 
   input = THCudaTensor_newContiguous(state, input);
   // This is for allocating output Tensor
@@ -136,7 +137,7 @@ __global__ void downscale(float *gradInput_data, float *gradOutput_data, long no
 
 void THNN_CudaSpatialUpSamplingNearest_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput, THCudaTensor *gradInput, int scale_factor)
 {
-  THAssert(THCudaTensor_checkGPU(state, 2, gradOutput, gradInput));
+  THNN_assertSameGPU(state, 2, gradOutput, gradInput);
 
   THCudaTensor_zero(state, gradInput);
 

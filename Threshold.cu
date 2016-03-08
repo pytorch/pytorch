@@ -1,4 +1,5 @@
 #include "THCUNN.h"
+#include "common.h"
 
 struct ThresholdUpdateOutput
 {
@@ -37,7 +38,7 @@ struct ThresholdUpdateOutputIP
 void THNN_CudaThreshold_updateOutput(THCState *state, THCudaTensor *input, THCudaTensor *output,
   double threshold, double val, bool inplace)
 {
-  THAssert(THCudaTensor_checkGPU(state, 2, input, output));
+  THNN_assertSameGPU(state, 2, input, output);
 
   if (inplace)
   {
@@ -90,7 +91,7 @@ struct ThresholdUpdateGradInputIP
 void THNN_CudaThreshold_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput,
   THCudaTensor *gradInput, double threshold, bool inplace)
 {
-  THAssert(THCudaTensor_checkGPU(state, 3, input, gradInput, gradOutput));
+  THNN_assertSameGPU(state, 3, input, gradInput, gradOutput);
 
   if (inplace)
   {

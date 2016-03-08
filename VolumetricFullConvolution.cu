@@ -1,4 +1,5 @@
 #include "THCUNN.h"
+#include "common.h"
 #include "vol2col.h"
 
 
@@ -24,8 +25,8 @@ void THNN_CudaVolumetricFullConvolution_updateOutput(
   const int kH           = (int)weight->size[3];
   const int kW           = (int)weight->size[4];
 
-  THAssert(THCudaTensor_checkGPU(state, 6, input, output, weight,
-                                 bias, columns, ones));
+  THNN_assertSameGPU(state, 6, input, output, weight,
+                                 bias, columns, ones);
   THArgCheck(input->nDimension == 4 || input->nDimension == 5, 2, "4D or 5D (batch mode) tensor is expected");
 
   int batch = 1;
@@ -151,8 +152,8 @@ void THNN_CudaVolumetricFullConvolution_updateGradInput(
   const int kH           = (int)weight->size[3];
   const int kW           = (int)weight->size[4];
 
-  THAssert(THCudaTensor_checkGPU(state, 5, input, gradOutput, weight,
-                                 gradColumns, gradInput));
+  THNN_assertSameGPU(state, 5, input, gradOutput, weight,
+                                 gradColumns, gradInput);
   THArgCheck(input->nDimension == 4 || input->nDimension == 5, 2, "4D or 5D (batch mode) tensor is expected");
 
   int batch = 1;
@@ -253,8 +254,8 @@ void THNN_CudaVolumetricFullConvolution_accGradParameters(
   const int kH           = (int)gradWeight->size[3];
   const int kW           = (int)gradWeight->size[4];
 
-  THAssert(THCudaTensor_checkGPU(state, 6, input, gradOutput, gradWeight,
-                                 gradBias, columns, ones));
+  THNN_assertSameGPU(state, 6, input, gradOutput, gradWeight,
+                                 gradBias, columns, ones);
   THArgCheck(input->nDimension == 4 || input->nDimension == 5, 2, "4D or 5D (batch mode) tensor is expected");
 
   int batch = 1;

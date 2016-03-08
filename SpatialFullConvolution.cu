@@ -15,12 +15,12 @@ void THNN_CudaSpatialFullConvolution_updateOutput(
     int padW, int padH,
     int adjW, int adjH)
 {
-  
+
   int nInputPlane = THCudaTensor_size(state, weight, 0);
   int nOutputPlane = THCudaTensor_size(state, weight, 1);
 
-  THAssert(THCudaTensor_checkGPU(state, 6, input, output, weight,
-                                 bias, columns, ones));
+  THNN_assertSameGPU(state, 6, input, output, weight,
+                                 bias, columns, ones);
   THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch mode) tensor is expected");
 
   int batch = 1;
@@ -139,8 +139,8 @@ void THNN_CudaSpatialFullConvolution_updateGradInput(
   int nInputPlane = THCudaTensor_size(state, weight, 0);
   int nOutputPlane = THCudaTensor_size(state, weight, 1);
 
-  THAssert(THCudaTensor_checkGPU(state, 5, input, gradOutput, weight,
-                                 gradColumns, gradInput));
+  THNN_assertSameGPU(state, 5, input, gradOutput, weight,
+                                 gradColumns, gradInput);
   THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch mode) tensor is expected");
 
   int batch = 1;
@@ -234,8 +234,8 @@ void THNN_CudaSpatialFullConvolution_accGradParameters(
   int nInputPlane = THCudaTensor_size(state, gradWeight, 0);
   int nOutputPlane = THCudaTensor_size(state, gradWeight, 1);
 
-  THAssert(THCudaTensor_checkGPU(state, 6, input, gradOutput, gradWeight,
-                                 gradBias, columns, ones));
+  THNN_assertSameGPU(state, 6, input, gradOutput, gradWeight,
+                                 gradBias, columns, ones);
   THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch mode) tensor is expected");
 
   int batch = 1;

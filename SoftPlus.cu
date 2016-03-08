@@ -1,4 +1,5 @@
 #include "THCUNN.h"
+#include "common.h"
 
 struct softPlusupdateOutput_functor
 {
@@ -19,7 +20,7 @@ struct softPlusupdateOutput_functor
 
 void THNN_CudaSoftPlus_updateOutput(THCState *state, THCudaTensor *input, THCudaTensor *output, float beta, float threshold)
 {
-  THAssert(THCudaTensor_checkGPU(state, 2, input, output));
+  THNN_assertSameGPU(state, 2, input, output);
   THCudaTensor_resizeAs(state, output, input);
   THCudaTensor_pointwiseApply2(state, output, input, softPlusupdateOutput_functor(threshold, beta));
 }
@@ -45,7 +46,7 @@ struct softPlusupdateGradInput_functor
 void THNN_CudaSoftPlus_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput, THCudaTensor *gradInput,
   THCudaTensor *output, float beta, float threshold)
 {
-  THAssert(THCudaTensor_checkGPU(state, 4, input, output, gradOutput, gradInput));
+  THNN_assertSameGPU(state, 4, input, output, gradOutput, gradInput);
   THCudaTensor_resizeAs(state, gradInput, output);
   THCudaTensor_pointwiseApply3(state, gradInput, output, gradOutput, softPlusupdateGradInput_functor(threshold, beta));
 }

@@ -1,4 +1,6 @@
 #include "THCUNN.h"
+#include "common.h"
+
 #include <thrust/device_ptr.h>
 #include <thrust/execution_policy.h>
 #include <thrust/iterator/constant_iterator.h>
@@ -167,7 +169,7 @@ void THNN_CudaLookupTable_accGradParameters(
   int paddingValue,
   float scale)
 {
-  THAssert(THCudaTensor_checkGPU(state, 5, input, gradOutput, gradWeight, sorted, indices));
+  THNN_assertSameGPU(state, 5, input, gradOutput, gradWeight, sorted, indices);
   if (!(THCudaTensor_isContiguous(state, input) &&
         THCudaTensor_isContiguous(state, gradOutput) &&
         THCudaTensor_isContiguous(state, gradWeight)))

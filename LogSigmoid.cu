@@ -1,4 +1,5 @@
 #include "THCUNN.h"
+#include "common.h"
 
 struct logSigmoid_updateOutput_functor
 {
@@ -11,7 +12,7 @@ struct logSigmoid_updateOutput_functor
 
 void THNN_CudaLogSigmoid_updateOutput(THCState *state, THCudaTensor *input, THCudaTensor *output, THCudaTensor *buffer)
 {
-  THAssert(THCudaTensor_checkGPU(state, 2, input, output));
+  THNN_assertSameGPU(state, 2, input, output);
   THCudaTensor_resizeAs(state, output, input);
   THCudaTensor_pointwiseApply2(state, output, input, logSigmoid_updateOutput_functor());
 }
@@ -28,7 +29,7 @@ struct logSigmoid_updateGradInput_functor
 void THNN_CudaLogSigmoid_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput,
   THCudaTensor *gradInput , THCudaTensor *buffer)
 {
-  THAssert(THCudaTensor_checkGPU(state, 3, input, gradOutput, gradInput));
+  THNN_assertSameGPU(state, 3, input, gradOutput, gradInput);
   THCudaTensor_resizeAs(state, gradInput, input);
   THCudaTensor_pointwiseApply3(state, gradInput, input, gradOutput, logSigmoid_updateGradInput_functor());
 }

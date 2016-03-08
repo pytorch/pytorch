@@ -1,4 +1,5 @@
 #include "THCUNN.h"
+#include "common.h"
 
 struct LeakyReLUUpdateOutput
 {
@@ -33,7 +34,7 @@ struct LeakyReLUUpdateOutputIP
 void THNN_CudaLeakyReLU_updateOutput(THCState *state, THCudaTensor *input, THCudaTensor *output,
   double negval, bool inplace)
 {
-  THAssert(THCudaTensor_checkGPU(state, 2, input, output));
+  THNN_assertSameGPU(state, 2, input, output);
 
   if (inplace)
   {
@@ -85,7 +86,7 @@ struct LeakyReLUUpdateGradInputIP
 void THNN_CudaLeakyReLU_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput,
   THCudaTensor *gradInput, double negval, bool inplace)
 {
-  THAssert(THCudaTensor_checkGPU(state, 3, input, gradInput, gradOutput));
+  THNN_assertSameGPU(state, 3, input, gradInput, gradOutput);
 
   if (inplace)
   {

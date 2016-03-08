@@ -64,7 +64,7 @@ struct RReLUUpdateOutputEvalIP_functor
 void THNN_CudaRReLU_updateOutput(THCState *state, THCudaTensor *input, THCudaTensor *output,
   THCudaTensor *noise, double lower, double upper, bool train, bool inplace, void *generator)
 {
-  THAssert(THCudaTensor_checkGPU(state, 3, input, output, noise));
+  THNN_assertSameGPU(state, 3, input, output, noise);
   if (state->rngState->current_gen == NULL)
   {
     THError("Random number generators have not been initialized.");
@@ -144,7 +144,7 @@ struct RReLUupdateGradInputEvalIP_functor
 void THNN_CudaRReLU_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput,
   THCudaTensor *gradInput, THCudaTensor *noise, double lower, double upper, bool train, bool inplace)
 {
-  THAssert(THCudaTensor_checkGPU(state, 4, input, gradOutput, gradInput, noise));
+  THNN_assertSameGPU(state, 4, input, gradOutput, gradInput, noise);
 
   gradOutput = THCudaTensor_newContiguous(state, gradOutput);
 

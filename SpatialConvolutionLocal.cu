@@ -1,4 +1,5 @@
 #include "THCUNN.h"
+#include "common.h"
 #include "im2col.h"
 
 void THNN_CudaSpatialConvolutionLocal_updateOutput(
@@ -15,8 +16,8 @@ void THNN_CudaSpatialConvolutionLocal_updateOutput(
     long inputWidth, long inputHeight,
     long outputWidth, long outputHeight)
 {
-  THAssert(THCudaTensor_checkGPU(state, 5, input, output, weight,
-                                 bias, finput));
+  THNN_assertSameGPU(state, 5, input, output, weight,
+                                 bias, finput);
 
   long nInputPlane = THCudaTensor_size(state,weight,2)/(kW*kH);
   long nOutputPlane = THCudaTensor_size(state,weight,1);
@@ -48,7 +49,7 @@ void THNN_CudaSpatialConvolutionLocal_updateOutput(
     THCudaTensor *wslice = THCudaTensor_new(state);
     THCudaTensor *islice = THCudaTensor_new(state);
     THCudaTensor *oslice = THCudaTensor_new(state);
-  
+
     // Matrix mulitply per output:
     THCudaTensor_select(state, input_n, input, 0, elt);
     THCudaTensor_select(state, finput_n, finput, 0, elt);
@@ -61,19 +62,19 @@ void THNN_CudaSpatialConvolutionLocal_updateOutput(
       nInputPlane, inputHeight, inputWidth, kH, kW, padH, padW, dH, dW,
       THCudaTensor_data(state, finput_n)
     );
-    
+
     output3d = THCudaTensor_newWithStorage3d(state, output_n->storage, output_n->storageOffset,
                                              outputHeight*outputWidth, 1,
                                              nOutputPlane, outputHeight*outputWidth,
                                              1, nOutputPlane*outputHeight*outputWidth);
- 
+
     finput3d = THCudaTensor_newWithStorage3d(state, finput_n->storage, finput_n->storageOffset,
                                              outputHeight*outputWidth, 1,
                                              kW*kH*nInputPlane, outputHeight*outputWidth,
                                              1, kW*kH*nInputPlane*outputHeight*outputWidth);
-                            
+
     THCudaTensor_copy(state, output_n, bias);
-                                            
+
     for (int i = 0; i < outputHeight; i++) {
       for(int j = 0; j < outputWidth; j++) {
         int sliceidx = i * outputWidth + j;
@@ -83,13 +84,13 @@ void THNN_CudaSpatialConvolutionLocal_updateOutput(
         THCudaTensor_addmm(state, oslice, 1.0, oslice, 1.0, wslice, islice);
       }
     }
-    
-    
+
+
     // weight:    oH*oW x nOutputPlane x nInputPlane*kH*kW
-    // finput3d:  oH*oW x nInputPlane*kH*kW x 1  
+    // finput3d:  oH*oW x nInputPlane*kH*kW x 1
     // THCudaTensor_baddbmm(state, output3d, 1.0, output3d, 1.0, weight, finput3d);
     // output3d:  oH*oW x nOutputPlane x 1
-    
+
     THCudaTensor_free(state, output3d);
     THCudaTensor_free(state, finput3d);
     THCudaTensor_free(state, wslice);
@@ -123,9 +124,9 @@ void THNN_CudaSpatialConvolutionLocal_updateGradInput(
     long inputWidth, long inputHeight,
     long outputWidth, long outputHeight)
 {
-  THAssert(THCudaTensor_checkGPU(state, 5, input, gradOutput, weight,
-                                 fgradInput, gradInput));
-                                 
+  THNN_assertSameGPU(state, 5, input, gradOutput, weight,
+                                 fgradInput, gradInput);
+
   long nInputPlane = THCudaTensor_size(state,weight,2)/(kW*kH);
   long nOutputPlane = THCudaTensor_size(state,weight,1);
 
@@ -156,15 +157,15 @@ void THNN_CudaSpatialConvolutionLocal_updateGradInput(
   // For each elt in batch, do:
   for (int elt = 0; elt < batchSize; elt ++) {
     THCudaTensor *gradOutput3d, *fgradInput3d;
-    THCudaTensor *wslice = THCudaTensor_new(state); 
-    THCudaTensor *gislice = THCudaTensor_new(state); 
+    THCudaTensor *wslice = THCudaTensor_new(state);
+    THCudaTensor *gislice = THCudaTensor_new(state);
     THCudaTensor *goslice = THCudaTensor_new(state);
-        
+
     // Matrix mulitply per sample:
     THCudaTensor_select(state, gradInput_n, gradInput, 0, elt);
     THCudaTensor_select(state, fgradInput_n, fgradInput, 0, elt);
     THCudaTensor_select(state, gradOutput_n, gradOutput, 0, elt);
-    
+
     gradOutput3d = THCudaTensor_newWithStorage3d(state, gradOutput_n->storage, gradOutput_n->storageOffset,
                                                outputHeight*outputWidth, 1,
                                                nOutputPlane, outputHeight*outputWidth,
@@ -185,9 +186,9 @@ void THNN_CudaSpatialConvolutionLocal_updateGradInput(
     }
 
     // weight:        oH*oW x nInputPlane*kH*kW x nOutputPlane
-    // gradOutput3d:  oH*oW x nOutputPlane x 1         
+    // gradOutput3d:  oH*oW x nOutputPlane x 1
     //THCudaTensor_baddbmm(state, fgradInput3d, 0.0, fgradInput3d, 1.0, weight, gradOutput3d);
-    // fgradInput3d:  oH*oW x nInputPlane*kH*kW x 1  
+    // fgradInput3d:  oH*oW x nInputPlane*kH*kW x 1
 
     // Unpack columns back into input:
     col2im(
@@ -196,7 +197,7 @@ void THNN_CudaSpatialConvolutionLocal_updateGradInput(
       nInputPlane, inputHeight, inputWidth, kH, kW, padH, padW, dH, dW,
       THCudaTensor_data(state, gradInput_n)
     );
-    
+
     THCudaTensor_free(state, gradOutput3d);
     THCudaTensor_free(state, fgradInput3d);
     THCudaTensor_free(state, wslice);
@@ -233,9 +234,9 @@ void THNN_CudaSpatialConvolutionLocal_accGradParameters(
     long inputWidth, long inputHeight,
     long outputWidth, long outputHeight,
     float scale)
-{  
-  THAssert(THCudaTensor_checkGPU(state, 5, input, gradOutput, gradWeight,
-                                 gradBias, finput));
+{
+  THNN_assertSameGPU(state, 5, input, gradOutput, gradWeight,
+                                 gradBias, finput);
 
   long nInputPlane = THCudaTensor_size(state,gradWeight,2)/(kW*kH);
   long nOutputPlane = THCudaTensor_size(state,gradWeight,1);
@@ -247,10 +248,10 @@ void THNN_CudaSpatialConvolutionLocal_accGradParameters(
     THCudaTensor_resize4d(state, input, 1, nInputPlane, inputHeight, inputWidth);
     THCudaTensor_resize4d(state, gradOutput, 1, nOutputPlane, outputHeight, outputWidth);
   }
-  
+
   // Batch size + input planes
   long batchSize = input->size[0];
-  
+
   // Helpers
   THCudaTensor *input_n = THCudaTensor_new(state);
   THCudaTensor *finput_n = THCudaTensor_new(state);
@@ -258,11 +259,11 @@ void THNN_CudaSpatialConvolutionLocal_accGradParameters(
 
   // For each elt in batch, do:
   for (int elt = 0; elt < batchSize; elt ++) {
-    THCudaTensor *gradOutput3d, *finput3d;    
-    THCudaTensor *gwslice = THCudaTensor_new(state); 
-    THCudaTensor *islice = THCudaTensor_new(state); 
-    THCudaTensor *goslice = THCudaTensor_new(state); 
-    
+    THCudaTensor *gradOutput3d, *finput3d;
+    THCudaTensor *gwslice = THCudaTensor_new(state);
+    THCudaTensor *islice = THCudaTensor_new(state);
+    THCudaTensor *goslice = THCudaTensor_new(state);
+
     // Matrix mulitply per output:
     THCudaTensor_select(state, input_n, input, 0, elt);
     THCudaTensor_select(state, finput_n, finput, 0, elt);
@@ -294,13 +295,13 @@ void THNN_CudaSpatialConvolutionLocal_accGradParameters(
         THCudaTensor_addmm(state, gwslice, 1.0, gwslice, scale, goslice, islice);
       }
     }
-    // gradOutput3d:  oH*oW x nOutputPlane x 1  
+    // gradOutput3d:  oH*oW x nOutputPlane x 1
     // finput3d:      oH*oW x 1 x kW*kH*nInputPlane
     //THCudaTensor_baddbmm(state, gradWeight, 1.0, gradWeight, scale, gradOutput3d, finput3d);
     // gradWeight:    oH*oW x nOutputPlane x kW*kH*nInputPlane
-    
+
     THCudaTensor_cadd(state, gradBias, gradBias, scale, gradOutput_n);
-    
+
     THCudaTensor_free(state, gradOutput3d);
     THCudaTensor_free(state, finput3d);
     THCudaTensor_free(state, gwslice);

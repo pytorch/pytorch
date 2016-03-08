@@ -1,4 +1,5 @@
 #include "THCUNN.h"
+#include "common.h"
 
 struct tanhupdateOutput_functor
 {
@@ -10,7 +11,7 @@ struct tanhupdateOutput_functor
 
 void THNN_CudaTanh_updateOutput(THCState *state, THCudaTensor *input, THCudaTensor *output)
 {
-  THAssert(THCudaTensor_checkGPU(state, 2, input, output));
+  THNN_assertSameGPU(state, 2, input, output);
   THCudaTensor_resizeAs(state, output, input);
   THCudaTensor_pointwiseApply2(state, output, input, tanhupdateOutput_functor());
 }
@@ -25,7 +26,7 @@ struct tanhupdateGradInput_functor
 
 void THNN_CudaTanh_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput, THCudaTensor *gradInput, THCudaTensor *output)
 {
-  THAssert(THCudaTensor_checkGPU(state, 3, output, gradOutput, gradInput));
+  THNN_assertSameGPU(state, 3, output, gradOutput, gradInput);
   THCudaTensor_resizeAs(state, gradInput, output);
   THCudaTensor_pointwiseApply3(state, gradInput, output, gradOutput, tanhupdateGradInput_functor());
 }

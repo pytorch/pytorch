@@ -1,4 +1,5 @@
 #include "THCUNN.h"
+#include "common.h"
 
 #define CUDA_MAX_THREADS 1024   // this is safe, in reality 256 is our limit
 
@@ -249,7 +250,7 @@ void THNN_CudaSpatialSubSampling_updateOutput(THCState *state, THCudaTensor *inp
 
   int nInputPlane = THCudaTensor_size(state, weight, 0);
 
-  THAssert(THCudaTensor_checkGPU(state, 4, input, output, weight, bias));
+  THNN_assertSameGPU(state, 4, input, output, weight, bias);
   THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch) tensor expected");
 
   if (input->nDimension == 3) {
@@ -318,7 +319,7 @@ void THNN_CudaSpatialSubSampling_updateOutput(THCState *state, THCudaTensor *inp
 
 void THNN_CudaSpatialSubSampling_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput, THCudaTensor *gradInput, THCudaTensor *weight, int kW, int kH, int dW, int dH)
 {
-  THAssert(THCudaTensor_checkGPU(state, 4, input, gradOutput, weight, gradInput));
+  THNN_assertSameGPU(state, 4, input, gradOutput, weight, gradInput);
 
   int nInputPlane = THCudaTensor_size(state, weight, 0);
 
@@ -386,7 +387,7 @@ void THNN_CudaSpatialSubSampling_updateGradInput(THCState *state, THCudaTensor *
 
 void THNN_CudaSpatialSubSampling_accGradParameters(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput, THCudaTensor *gradWeight, THCudaTensor *gradBias, int kW, int kH, int dW, int dH, float scale)
 {
-  THAssert(THCudaTensor_checkGPU(state, 4, input, gradOutput, gradWeight, gradBias));
+  THNN_assertSameGPU(state, 4, input, gradOutput, gradWeight, gradBias);
 
   int nInputPlane = THCudaTensor_size(state, gradWeight, 0);
 
