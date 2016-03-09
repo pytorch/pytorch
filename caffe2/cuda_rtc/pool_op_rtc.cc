@@ -76,7 +76,7 @@ __global__ void %s(
   const int pad_l = %d;
   for (int index = blockIdx.x * blockDim.x + threadIdx.x;
        index < nthreads; index += blockDim.x * gridDim.x) {
-    const int w = index % width + pad_l;
+    const int w = index %% width + pad_l;
     const int h = (index / width) %% height + pad_t;
     const int c = (index / width / height) %% channels;
     const int n = index / width / height / channels;

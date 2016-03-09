@@ -138,7 +138,7 @@ bool CudnnConvOp<T>::RunWithCudnnWorkspace(
   CAFFE_DCHECK_EQ(filter.ndim(), 4);
   const int M = filter.dim(0);
   ConvPoolOpBase<CUDAContext>::SetOutputSize(X, Y, M);
-  int N, C, H, W, H_out, W_out;
+  int N = 0, C = 0, H = 0, W = 0, H_out = 0, W_out = 0;
   switch (order_) {
   case StorageOrder::NHWC:
     N = X.dim(0); H = X.dim(1); W = X.dim(2); C = X.dim(3);
@@ -273,7 +273,7 @@ bool CudnnConvGradientOp<T>::RunWithCudnnWorkspace(
   CAFFE_DCHECK_EQ(X.ndim(), 4);
   CAFFE_DCHECK_EQ(filter.ndim(), 4);
   const int M = filter.dim(0);
-  int N, C, H, W, H_out, W_out;
+  int N = 0, C = 0, H = 0, W = 0, H_out = 0, W_out = 0;
   switch (order_) {
   case StorageOrder::NHWC:
     N = X.dim(0); H = X.dim(1); W = X.dim(2); C = X.dim(3);

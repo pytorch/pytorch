@@ -24,7 +24,7 @@ class FallbackBroadcastOp final : public Operator<Context> {
   }
   ~FallbackBroadcastOp() {}
 
-  bool RunOnDevice() {
+  bool RunOnDevice() override {
     auto* output = Output(0);
     int nbytes = output->nbytes();
     CAFFE_CHECK_GT(nbytes, 0);
@@ -65,7 +65,7 @@ class FallbackAllreduceOp final : public Operator<Context> {
     CAFFE_VLOG(1) << "Using FallbackAllreduceOp.";
   }
 
-  bool RunOnDevice() {
+  bool RunOnDevice() override {
     auto& input = Input(0);
     auto* output = Output(0);
     cpu_buffer_.ReshapeLike(input);

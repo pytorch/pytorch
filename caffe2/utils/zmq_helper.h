@@ -91,6 +91,7 @@ class ZmqSocket {
     } else {
       CAFFE_LOG_FATAL << "Cannot send zmq message. Error number: "
                       << zmq_errno();
+      return 0;
     }
   }
 
@@ -112,6 +113,7 @@ class ZmqSocket {
     } else {
       CAFFE_LOG_FATAL << "Cannot receive zmq message. Error number: "
                       << zmq_errno();
+      return 0;
     }
   }
 

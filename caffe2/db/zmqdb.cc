@@ -33,7 +33,7 @@ class ZmqDBCursor : public Cursor {
 
   string key() override { return key_; }
   string value() override { return value_; }
-  virtual bool Valid() { return true; }
+  bool Valid() override { return true; }
 
  private:
   string source_;

@@ -27,7 +27,7 @@ class FloatToHalfCUDA : public Operator<CUDAContext> {
       : Operator<CUDAContext>(def, ws) {}
   ~FloatToHalfCUDA() {}
 
-  bool RunOnDevice() {
+  bool RunOnDevice() override {
     auto& X = Input(0);
     auto* Y = Output(0);
     Y->ReshapeLike(X);
@@ -48,7 +48,7 @@ class HalfToFloatCUDA : public Operator<CUDAContext> {
       : Operator<CUDAContext>(def, ws) {}
   ~HalfToFloatCUDA() {}
 
-  bool RunOnDevice() {
+  bool RunOnDevice() override {
     auto& X = Input(0);
     auto* Y = Output(0);
     Y->ReshapeLike(X);

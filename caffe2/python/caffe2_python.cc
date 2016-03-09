@@ -172,7 +172,8 @@ PyObject* GlobalInit(PyObject* self, PyObject* args) {
   // argv to call caffe2's underlying code.
   if (argc == 0) {
     ++argc;
-    raw_argv[0] = "python";
+    static char dummy_argv[] = "python";
+    raw_argv[0] = dummy_argv;
   }
   global_init_called = true;
   if (!caffe2::GlobalInit(&argc, raw_argv)) {
@@ -761,4 +762,3 @@ void initlibcaffe2_python(void) {
 #endif  // PY_MAJOR_VERSION >= 3
 
 }  // extern "C"
-

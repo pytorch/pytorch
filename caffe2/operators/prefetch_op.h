@@ -34,7 +34,7 @@ class PrefetchOperator : public OperatorBase {
   }
   virtual ~PrefetchOperator() {}
 
-  bool Run() {
+  bool Run() override {
     device_context_.SwitchToDevice();
     if (prefetch_thread_ == nullptr) {
       CAFFE_VLOG(1) << "Starting a new prefetch thread.";

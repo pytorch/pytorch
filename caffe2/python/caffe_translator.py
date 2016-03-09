@@ -213,7 +213,6 @@ def TranslatePool(layer, pretrained_blobs):
   param = layer.pooling_param
   if param.pool == caffe_pb2.PoolingParameter.MAX:
     caffe_op = BaseTranslate(layer, "MaxPool")
-    caffe_op.output.extend(['_' + caffe_op.output[0] + '_maxid'])
   elif param.pool == caffe_pb2.PoolingParameter.AVE:
     caffe_op = BaseTranslate(layer, "AveragePool")
   AddArgument(caffe_op, "stride", int(param.stride))
