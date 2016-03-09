@@ -1,5 +1,5 @@
 import numpy as np
-from pycaffe2 import core, workspace
+from caffe2.python import core, workspace
 
 class DeviceChecker(object):
   """A device checker in Python to check consistency across multiple devices.

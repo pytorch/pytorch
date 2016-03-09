@@ -2,7 +2,7 @@ import numpy as np
 import unittest
 
 from caffe2.proto import caffe2_pb2
-from pycaffe2 import core, workspace, muji
+from caffe2.python import core, workspace, muji
 
 class TestMuji(unittest.TestCase):
   """Test class for Muji."""

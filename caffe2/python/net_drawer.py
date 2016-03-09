@@ -1,5 +1,5 @@
 from collections import defaultdict
-from pycaffe2 import utils
+from caffe2.python import utils
 import sys
 import subprocess
 

@@ -13,7 +13,7 @@ atexit.register(OnModuleExit)
 
 from caffe2.proto import caffe2_pb2
 from collections import Counter, defaultdict
-from pycaffe2 import utils, workspace
+from caffe2.python import utils, workspace
 
 _REGISTERED_OPERATORS = set(
     s.decode() for s in workspace.RegisteredOperators())

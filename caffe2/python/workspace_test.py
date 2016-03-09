@@ -2,7 +2,7 @@ import numpy as np
 import unittest
 
 from caffe2.proto import caffe2_pb2
-from pycaffe2 import core, workspace
+from caffe2.python import core, workspace
 
 class TestWorkspace(unittest.TestCase):
   def setUp(self):

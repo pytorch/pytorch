@@ -3,7 +3,7 @@ import unittest
 import sys
 
 from caffe2.proto import caffe2_pb2, caffe2_legacy_pb2
-from pycaffe2 import core, cnn, workspace, device_checker
+from caffe2.python import core, cnn, workspace, device_checker
 
 class TestMNISTLeNet(unittest.TestCase):
   def setUp(self):

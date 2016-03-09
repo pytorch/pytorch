@@ -2,7 +2,7 @@ from caffe2.proto import caffe2_pb2, caffe2_legacy_pb2
 from caffe.proto import caffe_pb2
 from google.protobuf import text_format
 import numpy as np
-from pycaffe2 import core, utils
+from caffe2.python import core, utils
 
 
 def _StateMeetsRule(state, rule):

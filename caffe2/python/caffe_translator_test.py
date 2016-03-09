@@ -8,7 +8,7 @@ from caffe.proto import caffe_pb2
 from google.protobuf import text_format
 import numpy as np
 import os
-from pycaffe2 import caffe_translator, utils, workspace
+from caffe2.python import caffe_translator, utils, workspace
 import sys
 import unittest
 

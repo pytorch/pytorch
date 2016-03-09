@@ -52,7 +52,7 @@ import argparse
 import numpy as np
 import time
 
-from pycaffe2 import cnn, utils, workspace
+from caffe2.python import cnn, utils, workspace
 
 
 def AlexNet(order):
