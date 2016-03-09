@@ -187,7 +187,7 @@ __global__ void atomicadaptivemaxgradinput(
 
 void THNN_CudaSpatialAdaptiveMaxPooling_updateOutput(THCState *state, THCudaTensor *input, THCudaTensor *output, THCudaTensor *indices, int nOutputCols, int nOutputRows)
 {
-  THNN_assertSameGPU(state, 3, input, output, indices);
+  THCUNN_assertSameGPU(state, 3, input, output, indices);
 
   float *indices_data;
   float *output_data;
@@ -270,7 +270,7 @@ void THNN_CudaSpatialAdaptiveMaxPooling_updateGradInput(THCState *state, THCudaT
 {
   bool atomic = true; // suboptimal, but without atomic it doesn't pass the tests
 
-  THNN_assertSameGPU(state, 4, input, indices, gradOutput, gradInput);
+  THCUNN_assertSameGPU(state, 4, input, indices, gradOutput, gradInput);
 
   float *indices_data;
   float *gradInput_data;

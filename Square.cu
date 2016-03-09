@@ -11,7 +11,7 @@ struct squareupdateOutput_functor
 
 void THNN_CudaSquare_updateOutput(THCState *state, THCudaTensor *input, THCudaTensor *output)
 {
-  THNN_assertSameGPU(state, 2, input, output);
+  THCUNN_assertSameGPU(state, 2, input, output);
   THCudaTensor_resizeAs(state, output, input);
   THCudaTensor_pointwiseApply2(state, output, input, squareupdateOutput_functor());
 }
@@ -26,7 +26,7 @@ struct squareupdateGradInput_functor
 
 void THNN_CudaSquare_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput, THCudaTensor *gradInput)
 {
-  THNN_assertSameGPU(state, 3, input, gradOutput, gradInput);
+  THCUNN_assertSameGPU(state, 3, input, gradOutput, gradInput);
   THCudaTensor_resizeAs(state, gradInput, input);
   THCudaTensor_pointwiseApply3(state, gradInput, input, gradOutput, squareupdateGradInput_functor());
 }

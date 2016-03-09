@@ -24,7 +24,7 @@ struct margin_functor
 
 void THNN_CudaMarginCriterion_updateOutput(THCState *state, THCudaTensor *input, THCudaTensor *target, THCudaTensor *output, bool sizeAverage, float margin)
 {
-  THNN_assertSameGPU(state, 2, input, target);
+  THCUNN_assertSameGPU(state, 2, input, target);
 
   long size = THCudaTensor_nElement(state, input);
 
@@ -61,7 +61,7 @@ struct margin_updateGradInput_functor
 
 void THNN_CudaMarginCriterion_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *target, THCudaTensor *gradInput, bool sizeAverage, float margin)
 {
-  THNN_assertSameGPU(state, 3, input, target, gradInput);
+  THCUNN_assertSameGPU(state, 3, input, target, gradInput);
 
   long size = THCudaTensor_nElement(state, input);
   float norm = sizeAverage ? 1.f/size : 1;

@@ -18,7 +18,7 @@ struct abs_functor
 
 void THNN_CudaAbsCriterion_updateOutput(THCState *state, THCudaTensor *input, THCudaTensor *target, THCudaTensor *output, bool sizeAverage)
 {
-  THNN_assertSameGPU(state, 2, input, target);
+  THCUNN_assertSameGPU(state, 2, input, target);
 
   long size = THCudaTensor_nElement(state, input);
 
@@ -54,7 +54,7 @@ struct abs_updateGradInput_functor
 
 void THNN_CudaAbsCriterion_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *target, THCudaTensor *gradInput, bool sizeAverage)
 {
-  THNN_assertSameGPU(state, 3, input, target, gradInput);
+  THCUNN_assertSameGPU(state, 3, input, target, gradInput);
 
   long size = THCudaTensor_nElement(state, input);
   float norm = (sizeAverage ? 1./size : 1.);

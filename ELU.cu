@@ -17,7 +17,7 @@ struct ELUupdateOutput_functor
 
 void THNN_CudaELU_updateOutput(THCState *state, THCudaTensor *input, THCudaTensor *output, float alpha)
 {
-  THNN_assertSameGPU(state, 2, input, output);
+  THCUNN_assertSameGPU(state, 2, input, output);
   THCudaTensor_resizeAs(state, output, input);
   THCudaTensor_pointwiseApply2(state, output, input, ELUupdateOutput_functor(alpha));
 }
@@ -39,7 +39,7 @@ struct ELUupdateGradInput_functor
 void THNN_CudaELU_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput,
   THCudaTensor *gradInput, THCudaTensor *output, float alpha)
 {
-  THNN_assertSameGPU(state, 3, output, gradOutput, gradInput);
+  THCUNN_assertSameGPU(state, 3, output, gradOutput, gradInput);
   THCudaTensor_resizeAs(state, gradInput, output);
   THCudaTensor_pointwiseApply3(state, gradInput, output, gradOutput, ELUupdateGradInput_functor(alpha));
 }

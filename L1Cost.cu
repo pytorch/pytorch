@@ -15,7 +15,7 @@ struct l1cost_functor
 
 void THNN_CudaL1Cost_updateOutput(THCState *state, THCudaTensor *input, THCudaTensor *output)
 {
-  THNN_assertSameGPU(state, 1, input);
+  THCUNN_assertSameGPU(state, 1, input);
   float sum;
   long size = THCudaTensor_nElement(state, input);
   input = THCudaTensor_newContiguous(state, input);
@@ -42,7 +42,7 @@ struct l1cost_updateGradInput_functor
 
 void THNN_CudaL1Cost_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput, THCudaTensor *gradInput)
 {
-  THNN_assertSameGPU(state, 2, input, gradInput);
+  THCUNN_assertSameGPU(state, 2, input, gradInput);
   long size = THCudaTensor_nElement(state, input);
 
   input = THCudaTensor_newContiguous(state, input);

@@ -29,7 +29,7 @@ __global__ void MaxUnpoolBackward(const int nthreads, const Dtype* top_diff, con
 
 void THNN_CudaSpatialMaxUnpooling_updateOutput(THCState *state, THCudaTensor *input, THCudaTensor *output, THCudaTensor *indices, int owidth, int oheight)
 {
-  THNN_assertSameGPU(state, 3, input, output, indices);
+  THCUNN_assertSameGPU(state, 3, input, output, indices);
   THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch) tensor expected");
 
   long nInputCols, nInputRows, nInputPlane, batchSize;
@@ -74,7 +74,7 @@ void THNN_CudaSpatialMaxUnpooling_updateOutput(THCState *state, THCudaTensor *in
 
 void THNN_CudaSpatialMaxUnpooling_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput, THCudaTensor *gradInput, THCudaTensor *indices, int owidth, int oheight)
 {
-  THNN_assertSameGPU(state, 4, input, gradOutput, indices, gradInput);
+  THCUNN_assertSameGPU(state, 4, input, gradOutput, indices, gradInput);
 
   long nInputCols, nInputRows, nInputPlane, batchSize;
 

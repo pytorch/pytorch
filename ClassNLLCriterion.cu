@@ -116,11 +116,11 @@ void THNN_CudaClassNLLCriterion_updateOutput(THCState *state, THCudaTensor *inpu
   int n_classes = THCudaTensor_size(state, input, n_dims - 1);
 
   if (weights) {
-    THNN_assertSameGPU(
+    THCUNN_assertSameGPU(
       state, 5, input, target, weights, output, total_weight
     );
   } else {
-    THNN_assertSameGPU(
+    THCUNN_assertSameGPU(
       state, 4, input, target, output, total_weight
     );
   }
@@ -188,12 +188,12 @@ void THNN_CudaClassNLLCriterion_updateGradInput(THCState *state, THCudaTensor *i
   THArgCheck(THCudaTensor_isContiguous(state, gradInput), 4, "gradInput must be contiguous");
 
   if (weights) {
-    THNN_assertSameGPU(
+    THCUNN_assertSameGPU(
       state, 5, weights, input, target, gradInput, total_weight
     );
   }
   else {
-    THNN_assertSameGPU(
+    THCUNN_assertSameGPU(
       state, 4, input, target, gradInput, total_weight
     );
   }

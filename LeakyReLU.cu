@@ -34,7 +34,7 @@ struct LeakyReLUUpdateOutputIP
 void THNN_CudaLeakyReLU_updateOutput(THCState *state, THCudaTensor *input, THCudaTensor *output,
   double negval, bool inplace)
 {
-  THNN_assertSameGPU(state, 2, input, output);
+  THCUNN_assertSameGPU(state, 2, input, output);
 
   if (inplace)
   {
@@ -86,7 +86,7 @@ struct LeakyReLUUpdateGradInputIP
 void THNN_CudaLeakyReLU_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput,
   THCudaTensor *gradInput, double negval, bool inplace)
 {
-  THNN_assertSameGPU(state, 3, input, gradInput, gradOutput);
+  THCUNN_assertSameGPU(state, 3, input, gradInput, gradOutput);
 
   if (inplace)
   {

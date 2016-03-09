@@ -169,7 +169,7 @@ void THNN_CudaLookupTable_accGradParameters(
   int paddingValue,
   float scale)
 {
-  THNN_assertSameGPU(state, 5, input, gradOutput, gradWeight, sorted, indices);
+  THCUNN_assertSameGPU(state, 5, input, gradOutput, gradWeight, sorted, indices);
   if (!(THCudaTensor_isContiguous(state, input) &&
         THCudaTensor_isContiguous(state, gradOutput) &&
         THCudaTensor_isContiguous(state, gradWeight)))

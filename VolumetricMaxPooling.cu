@@ -151,7 +151,7 @@ void THNN_CudaVolumetricMaxPooling_updateOutput(
   int outputHeight;
   int outputWidth;
 
-  THNN_assertSameGPU(state, 3, input, indices, output);
+  THCUNN_assertSameGPU(state, 3, input, indices, output);
 
   if (THCudaTensor_nDimension(state, input) == 4)
   {
@@ -333,7 +333,7 @@ void THNN_CudaVolumetricMaxPooling_updateGradInput(
   int outputHeight;
   int outputWidth;
 
-  THNN_assertSameGPU(state, 4, input, indices, gradOutput, gradInput);
+  THCUNN_assertSameGPU(state, 4, input, indices, gradOutput, gradInput);
 
   if (THCudaTensor_nDimension(state, input) == 4) /* 4D */
   {

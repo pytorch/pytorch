@@ -5,7 +5,7 @@
 
 void THNN_CudaSpatialConvolutionMM_updateOutput(THCState *state, THCudaTensor *input, THCudaTensor *output, THCudaTensor *weight, THCudaTensor *bias, THCudaTensor *columns, THCudaTensor *ones, int kW, int kH, int dW, int dH, int padW, int padH) {
 
-  THNN_assertSameGPU(state, 6, input, output, weight,
+  THCUNN_assertSameGPU(state, 6, input, output, weight,
                                  bias, columns, ones);
   THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch mode) tensor is expected");
   THArgCheck(weight->nDimension == 2, 4, "weight tensor must be 2D (nOutputPlane,nInputPlane*kH*kW)");
@@ -123,7 +123,7 @@ void THNN_CudaSpatialConvolutionMM_updateOutput(THCState *state, THCudaTensor *i
 
 void THNN_CudaSpatialConvolutionMM_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput, THCudaTensor *gradInput, THCudaTensor *weight, THCudaTensor *bias, THCudaTensor *gradColumns, THCudaTensor *ones, int kW, int kH, int dW, int dH, int padW, int padH) {
 
-  THNN_assertSameGPU(state, 5, input, gradOutput, weight,
+  THCUNN_assertSameGPU(state, 5, input, gradOutput, weight,
                                  gradColumns, gradInput);
   THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch mode) tensor is expected");
   THArgCheck(weight->nDimension == 2, 4, "weight tensor must be 2D (nOutputPlane,nInputPlane*kH*kW)");
@@ -208,7 +208,7 @@ void THNN_CudaSpatialConvolutionMM_updateGradInput(THCState *state, THCudaTensor
 
 void THNN_CudaSpatialConvolutionMM_accGradParameters(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput, THCudaTensor *gradWeight, THCudaTensor *gradBias, THCudaTensor *columns, THCudaTensor *ones, int kW, int kH, int dW, int dH, int padW, int padH, float scale) {
 
-  THNN_assertSameGPU(state, 6, input, gradOutput, gradWeight,
+  THCUNN_assertSameGPU(state, 6, input, gradOutput, gradWeight,
                                  gradBias, columns, ones);
   THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch mode) tensor is expected");
   THArgCheck(gradWeight->nDimension == 2, 4, "gradWeight tensor must be 2D (nOutputPlane,nInputPlane*kH*kW)");

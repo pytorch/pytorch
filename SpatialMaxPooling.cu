@@ -75,7 +75,7 @@ __global__ void MaxPoolBackward(const int nthreads, const Dtype* top_diff,
 void THNN_CudaSpatialMaxPooling_updateOutput(THCState *state, THCudaTensor *input, THCudaTensor *output, THCudaTensor *indices, int kW, int kH, int dW, int dH, int padW, int padH, bool ceil_mode)
 {
 
-  THNN_assertSameGPU(state, 3, input, output, indices);
+  THCUNN_assertSameGPU(state, 3, input, output, indices);
   THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch) tensor expected");
 
   long nInputCols, nInputRows, nInputPlane, batchSize;
@@ -147,7 +147,7 @@ void THNN_CudaSpatialMaxPooling_updateOutput(THCState *state, THCudaTensor *inpu
 
 void THNN_CudaSpatialMaxPooling_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput, THCudaTensor *gradInput, THCudaTensor *indices, int kW, int kH, int dW, int dH, int padW, int padH, bool ceil_mode)
 {
-  THNN_assertSameGPU(state, 4, input, gradOutput, indices, gradInput);
+  THCUNN_assertSameGPU(state, 4, input, gradOutput, indices, gradInput);
 
   input = THCudaTensor_newContiguous(state, input);
   gradOutput = THCudaTensor_newContiguous(state, gradOutput);

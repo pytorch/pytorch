@@ -16,7 +16,7 @@ void THNN_CudaSpatialConvolutionLocal_updateOutput(
     long inputWidth, long inputHeight,
     long outputWidth, long outputHeight)
 {
-  THNN_assertSameGPU(state, 5, input, output, weight,
+  THCUNN_assertSameGPU(state, 5, input, output, weight,
                                  bias, finput);
 
   long nInputPlane = THCudaTensor_size(state,weight,2)/(kW*kH);
@@ -124,7 +124,7 @@ void THNN_CudaSpatialConvolutionLocal_updateGradInput(
     long inputWidth, long inputHeight,
     long outputWidth, long outputHeight)
 {
-  THNN_assertSameGPU(state, 5, input, gradOutput, weight,
+  THCUNN_assertSameGPU(state, 5, input, gradOutput, weight,
                                  fgradInput, gradInput);
 
   long nInputPlane = THCudaTensor_size(state,weight,2)/(kW*kH);
@@ -235,7 +235,7 @@ void THNN_CudaSpatialConvolutionLocal_accGradParameters(
     long outputWidth, long outputHeight,
     float scale)
 {
-  THNN_assertSameGPU(state, 5, input, gradOutput, gradWeight,
+  THCUNN_assertSameGPU(state, 5, input, gradOutput, gradWeight,
                                  gradBias, finput);
 
   long nInputPlane = THCudaTensor_size(state,gradWeight,2)/(kW*kH);

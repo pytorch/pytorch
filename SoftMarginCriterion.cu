@@ -23,7 +23,7 @@ void THNN_CudaSoftMarginCriterion_updateOutput(THCState *state,
                                                int sizeAverage
                                               )
 {
-  THNN_assertSameGPU(state, 2, input, target);
+  THCUNN_assertSameGPU(state, 2, input, target);
   float sum;
 
   long size = THCudaTensor_nElement(state, input);
@@ -66,7 +66,7 @@ void THNN_CudaSoftMarginCriterion_updateGradInput(THCState *state,
                                                   int sizeAverage
                                                  )
 {
-  THNN_assertSameGPU(state, 3, input, target, gradInput);
+  THCUNN_assertSameGPU(state, 3, input, target, gradInput);
 
   long size = THCudaTensor_nElement(state, input);
   float norm = (sizeAverage ? 1./size : 1.);

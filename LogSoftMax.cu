@@ -249,7 +249,7 @@ cunn_LogSoftMax_updateGradInput_kernel(float *gradInput,
 
 void THNN_CudaLogSoftMax_updateOutput(THCState *state, THCudaTensor *input, THCudaTensor *output)
 {
-  THNN_assertSameGPU(state, 2, input, output);
+  THCUNN_assertSameGPU(state, 2, input, output);
 
   input = THCudaTensor_newContiguous(state, input);
   THCudaTensor_resizeAs(state, output, input);
@@ -293,7 +293,7 @@ void THNN_CudaLogSoftMax_updateOutput(THCState *state, THCudaTensor *input, THCu
 void THNN_CudaLogSoftMax_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput,
   THCudaTensor *gradInput, THCudaTensor *output)
 {
-  THNN_assertSameGPU(state, 3, output, gradOutput, gradInput);
+  THCUNN_assertSameGPU(state, 3, output, gradOutput, gradInput);
 
   output = THCudaTensor_newContiguous(state, output);
   gradOutput = THCudaTensor_newContiguous(state, gradOutput);

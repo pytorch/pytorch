@@ -17,7 +17,7 @@ struct sqrtupdateOutput_functor
 
 void THNN_CudaSqrt_updateOutput(THCState *state, THCudaTensor *input, THCudaTensor *output, float eps)
 {
-  THNN_assertSameGPU(state, 2, input, output);
+  THCUNN_assertSameGPU(state, 2, input, output);
   THCudaTensor_resizeAs(state, output, input);
   THCudaTensor_pointwiseApply2(state, output, input, sqrtupdateOutput_functor(eps));
 }
@@ -34,7 +34,7 @@ struct sqrtupdateGradInput_functor
 
 void THNN_CudaSqrt_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput, THCudaTensor *gradInput, THCudaTensor *output)
 {
-  THNN_assertSameGPU(state, 3, output, gradOutput, gradInput);
+  THCUNN_assertSameGPU(state, 3, output, gradOutput, gradInput);
   THCudaTensor_resizeAs(state, gradInput, output);
   THCudaTensor_pointwiseApply3(state, gradInput, output, gradOutput, sqrtupdateGradInput_functor());
 }

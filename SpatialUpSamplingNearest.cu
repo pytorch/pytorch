@@ -62,7 +62,7 @@ void THNN_CudaSpatialUpSamplingNearest_updateOutput(THCState *state, THCudaTenso
 {
   THCudaTensor_zero(state, output);
 
-  THNN_assertSameGPU(state, 2, input, output);
+  THCUNN_assertSameGPU(state, 2, input, output);
 
   input = THCudaTensor_newContiguous(state, input);
   // This is for allocating output Tensor
@@ -137,7 +137,7 @@ __global__ void downscale(float *gradInput_data, float *gradOutput_data, long no
 
 void THNN_CudaSpatialUpSamplingNearest_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput, THCudaTensor *gradInput, int scale_factor)
 {
-  THNN_assertSameGPU(state, 2, gradOutput, gradInput);
+  THCUNN_assertSameGPU(state, 2, gradOutput, gradInput);
 
   THCudaTensor_zero(state, gradInput);
 

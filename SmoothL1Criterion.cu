@@ -23,7 +23,7 @@ struct smoothl1_functor
 
 void THNN_CudaSmoothL1Criterion_updateOutput(THCState *state, THCudaTensor *input, THCudaTensor *target, THCudaTensor *output, bool sizeAverage)
 {
-  THNN_assertSameGPU(state, 2, input, target);
+  THCUNN_assertSameGPU(state, 2, input, target);
   THArgCheck(
     THCudaTensor_nElement(state, input) == THCudaTensor_nElement(state, target), 2,
     "input and target need to have the same number of elements"
@@ -75,7 +75,7 @@ struct smoothl1_updateGradInput_functor
 
 void THNN_CudaSmoothL1Criterion_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *target, THCudaTensor *gradInput, bool sizeAverage)
 {
-  THNN_assertSameGPU(state, 3, input, target, gradInput);
+  THCUNN_assertSameGPU(state, 3, input, target, gradInput);
   THArgCheck(
     THCudaTensor_nElement(state, input) == THCudaTensor_nElement(state, target), 2,
     "input and target need to have the same number of elements"

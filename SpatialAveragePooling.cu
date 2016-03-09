@@ -39,7 +39,7 @@ __global__ void AvePoolForward(const int nthreads,
 
 void THNN_CudaSpatialAveragePooling_updateOutput(THCState *state, THCudaTensor *input, THCudaTensor *output, int kW, int kH, int dW, int dH, int padW, int padH, bool ceil_mode, bool count_include_pad)
 {
-  THNN_assertSameGPU(state, 2, input, output);
+  THCUNN_assertSameGPU(state, 2, input, output);
   THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch) tensor expected");
 
   long nInputCols, nInputRows, nInputPlane, batchSize;
@@ -160,7 +160,7 @@ __global__ void AvePoolBackward(const int nthreads, const Dtype* const top_diff,
 
 void THNN_CudaSpatialAveragePooling_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput, THCudaTensor *gradInput, int kW, int kH, int dW, int dH, int padW, int padH, bool ceil_mode, bool count_include_pad)
 {
-  THNN_assertSameGPU(state, 3, input, gradOutput, gradInput);
+  THCUNN_assertSameGPU(state, 3, input, gradOutput, gradInput);
 
   input = THCudaTensor_newContiguous(state, input);
   gradOutput = THCudaTensor_newContiguous(state, gradOutput);

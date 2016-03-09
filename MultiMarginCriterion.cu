@@ -96,7 +96,7 @@ void THNN_CudaMultiMarginCriterion_updateOutput(THCState *state, THCudaTensor *i
                                                 THCudaTensor *target, THCudaTensor *output,
                                                 bool sizeAverage, int p, THCudaTensor *weights)
 {
-  THNN_assertSameGPU(state, 2, input, target);
+  THCUNN_assertSameGPU(state, 2, input, target);
   input = THCudaTensor_newContiguous(state, input);
   if(weights)
     weights = THCudaTensor_newContiguous(state, weights);
@@ -176,7 +176,7 @@ void THNN_CudaMultiMarginCriterion_updateGradInput(THCState *state, THCudaTensor
                                                    THCudaTensor *target, THCudaTensor *gradInput,
                                                    bool sizeAverage, int p, THCudaTensor *weights)
 {
-  THNN_assertSameGPU(state, 3, input, gradInput, target);
+  THCUNN_assertSameGPU(state, 3, input, gradInput, target);
   input = THCudaTensor_newContiguous(state, input);
   THCudaTensor_resizeAs(state, gradInput, input);
   if(weights)
