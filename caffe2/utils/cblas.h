@@ -2,6 +2,9 @@
 // the enums.
 
 #ifndef CBLAS_H
+#ifdef CAFFE2_USE_MKL
+#include <mkl_cblas.h>
+#else  // CAFFE2_USE_MKL
 
 #ifndef CBLAS_ENUM_DEFINED_H
    #define CBLAS_ENUM_DEFINED_H
@@ -597,4 +600,5 @@ void cblas_zher2k(const enum CBLAS_ORDER Order, const enum CBLAS_UPLO Uplo,
 int cblas_errprn(int ierr, int info, char *form, ...);
 
 #endif  /* end #ifdef CBLAS_ENUM_ONLY */
+#endif  // CAFFE2_USE_MKL
 #endif

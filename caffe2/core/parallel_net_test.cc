@@ -25,7 +25,7 @@ class SleepOp final : public OperatorBase {
     CAFFE_DCHECK_LT(ms_, 3600 * 1000) << "Really? This long?";
   }
 
-  bool Run() {
+  bool Run() override {
     clock_t start = clock();
     std::this_thread::sleep_for(std::chrono::milliseconds(ms_));
     clock_t end = clock();
@@ -265,6 +265,3 @@ TEST(SimpleNetTest, TestSimpleNetTimingWriteAfterRead) {
 }
 
 }  // namespace caffe2
-
-
-

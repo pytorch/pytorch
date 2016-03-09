@@ -20,7 +20,7 @@ class FreeOp : public OperatorBase {
  public:
   USE_SIMPLE_BASE_CTOR_DTOR(FreeOp);
 
-  bool Run() {
+  bool Run() override {
     for (Blob* output : Outputs()) {
       output->Reset();
     }
@@ -64,7 +64,7 @@ class PrintOp final : public Operator<Context> {
     }
   }
 
-  bool RunOnDevice() {
+  bool RunOnDevice() override {
     TensorCPU temp_tensor;
     for (int input_id = 0; input_id < InputSize(); ++input_id) {
       // A special case for inputs that are on CPUContext: in which case we
@@ -121,7 +121,7 @@ class AliasOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(AliasOp);
 
-  bool RunOnDevice() {
+  bool RunOnDevice() override {
     auto& input = Input(0);
     CAFFE_DCHECK_GT(input.size(), 0);
     if (Output(0) == &input) {
@@ -146,7 +146,7 @@ class FlattenOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(FlattenOp);
 
-  bool RunOnDevice() {
+  bool RunOnDevice() override {
     auto& input = Input(0);
     CAFFE_DCHECK_GT(input.size(), 0);
     Output(0)->Reshape(
@@ -166,7 +166,7 @@ class ReshapeLikeOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(ReshapeLikeOp);
 
-  bool RunOnDevice() {
+  bool RunOnDevice() override {
     auto* output = Output(0);
     CAFFE_DCHECK_EQ(Input(0).size(), Input(1).size());
     output->ReshapeLike(Input(1));
@@ -184,7 +184,7 @@ class SplitOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(SplitOp);
 
-  bool RunOnDevice() {
+  bool RunOnDevice() override {
     const auto& input = Input(0);
     for (int i = 0; i < OutputSize(); ++i) {
       auto* output = Output(i);
@@ -204,7 +204,7 @@ class SumOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(SumOp);
 
-  bool RunOnDevice() {
+  bool RunOnDevice() override {
     auto& input0 = Input(0);
     auto* output = Output(0);
     output->ReshapeLike(input0);
@@ -242,7 +242,7 @@ class WeightedSumOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(WeightedSumOp);
 
-  bool RunOnDevice() {
+  bool RunOnDevice() override {
     CAFFE_DCHECK_EQ(InputSize() % 2, 0);
     auto& X0 = Input(0);
     auto& weight0 = Input(1);
@@ -287,7 +287,7 @@ class CopyOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(CopyOp);
 
-  bool RunOnDevice() {
+  bool RunOnDevice() override {
     auto& input = OperatorBase::Input<Tensor<SrcContext> >(0);
     auto* output = OperatorBase::Output<Tensor<DstContext> >(0);
     output->ReshapeLike(input);
@@ -311,7 +311,7 @@ class RecordShapeOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(RecordShapeOp);
 
-  bool RunOnDevice() {
+  bool RunOnDevice() override {
     auto& input = Input(0);
     auto* output = OperatorBase::Output<vector<int, Context> >(0);
     *output = input.shape();

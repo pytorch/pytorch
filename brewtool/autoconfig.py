@@ -180,6 +180,11 @@ class Env(object):
             '-pthread',
             '-Wall',
             '-Wextra',
+            '-Werror',
+            '-Wno-unused-private-field',
+            '-Wno-unused-local-typedef',  # needed by some third_party code
+            '-Wno-unused-variable',
+            '-Wno-unused-function',
             '-Wno-unused-parameter',  # needed by some third_party code
             '-Wno-sign-compare',  # needed by some third_party code
             '-ffunction-sections',

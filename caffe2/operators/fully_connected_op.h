@@ -16,7 +16,7 @@ class FullyConnectedOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws) {}
   ~FullyConnectedOp() {}
 
-  bool RunOnDevice() {
+  bool RunOnDevice() override {
     const auto& X = Input(0);
     const auto& W = Input(1);
     const auto& b = Input(2);
@@ -72,7 +72,7 @@ class FullyConnectedGradientOp : public Operator<Context> {
       : Operator<Context>(operator_def, ws) {}
   ~FullyConnectedGradientOp() {}
 
-  bool RunOnDevice() {
+  bool RunOnDevice() override {
     const auto& X = Input(0);
     const auto& W = Input(1);
     const auto& dY = Input(2);

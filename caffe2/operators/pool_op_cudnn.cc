@@ -32,7 +32,7 @@ class CuDNNPoolOp : public ConvPoolOpBase<CUDAContext> {
   bool RunOnDevice() final {
     auto& X = Input(0);
     auto* Y = Output(0);
-    int N, C, H, W;
+    int N = 0, C = 0, H = 0, W = 0;
     switch (order_) {
     case StorageOrder::NHWC:
       N = X.dim(0); H = X.dim(1); W = X.dim(2); C = X.dim(3);
@@ -120,7 +120,7 @@ class CuDNNPoolGradientOp : public ConvPoolOpBase<CUDAContext> {
     auto& dY = Input(2);
     auto* dX = Output(0);
     dX->ReshapeLike(X);
-    int N, C, H, W;
+    int N = 0, C = 0, H = 0, W = 0;
     switch (order_) {
     case StorageOrder::NHWC:
       N = X.dim(0); H = X.dim(1); W = X.dim(2); C = X.dim(3);

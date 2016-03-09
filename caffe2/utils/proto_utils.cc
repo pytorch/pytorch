@@ -151,6 +151,7 @@ Argument MakeArgument(const string& name, const vector<T>& value) {            \
   for (const auto& v : value) {                                                \
     arg.add_##fieldname(v);                                                    \
   }                                                                            \
+  return arg;                                                                  \
 }
 
 CAFFE2_MAKE_REPEATED_ARGUMENT(float, floats)

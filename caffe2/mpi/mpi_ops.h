@@ -21,7 +21,7 @@ class BroadcastOp final : public Operator<Context> {
   }
   ~BroadcastOp() {}
 
-  bool RunOnDevice() {
+  bool RunOnDevice() override {
     auto* output = Output(0);
     // Make sure that output is already allocated.
     CAFFE_CHECK_GT(output->size(), 0);
@@ -49,7 +49,7 @@ class AllreduceOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(AllreduceOp);
 
-  bool RunOnDevice() {
+  bool RunOnDevice() override {
     auto& input = Input(0);
     auto* output = Output(0);
     output->ReshapeLike(input);
