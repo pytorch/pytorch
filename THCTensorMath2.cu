@@ -660,3 +660,49 @@ void THCudaTensor_randn(THCState *state, THCudaTensor *r_, THLongStorage *size)
   THCudaTensor_resize(state, r_, size, NULL);
   THCudaTensor_normal(state, r_, 0, 1);
 }
+
+struct TensorCrossOp {
+  TensorCrossOp(long sx, long sy, long so) : sx(sx), sy(sy), so(so) {}
+
+  __device__ __forceinline__ void operator()(float* out, float* x, float*y) {
+    out[0 * so] = x[1 * sx] * y[2 * sy] - x[2 * sx] * y[1 * sy];
+    out[1 * so] = x[2 * sx] * y[0 * sy] - x[0 * sx] * y[2 * sy];
+    out[2 * so] = x[0 * sx] * y[1 * sy] - x[1 * sx] * y[0 * sy];
+  }
+
+  const long sx, sy, so;
+};
+
+THC_API void THCudaTensor_cross(THCState *state, THCudaTensor *self, THCudaTensor *x, THCudaTensor *y, int dimension)
+{
+  THAssert(THCudaTensor_checkGPU(state, 3, self, x, y));
+
+  int i;
+  long nd = THCudaTensor_nDimension(state, x);
+  long nelem = THCudaTensor_nElement(state, x);
+  THArgCheck(nd == THCudaTensor_nDimension(state, y), 1, "tensors must have same number of dimensions");
+  for (i = 0; i < nd; i++) {
+    THArgCheck(THCudaTensor_size(state, x, i) == THCudaTensor_size(state, y, i), 1, "dimension %i of x and y does not match", i);
+    if (dimension < 0 && THCudaTensor_size(state, x, i) == 3) {
+      dimension = i; 
+    }
+  }
+
+  THArgCheck(dimension >= 0 && dimension < nd, 3, "dimension %d out of range", dimension+1);
+  THArgCheck(THCudaTensor_size(state, x, dimension) == 3, 3,
+      "dimension %d does not have size 3", dimension+1);
+  THCudaTensor_resizeAs(state, self, x);
+
+  long sx = THCudaTensor_stride(state, x, dimension);
+  long sy = THCudaTensor_stride(state, y, dimension);
+  long so = THCudaTensor_stride(state, self, dimension);
+  THCudaTensor *nx = THCudaTensor_newNarrow(state, x, dimension, 0, 1);
+  THCudaTensor *ny = THCudaTensor_newNarrow(state, y, dimension, 0, 1);
+  THCudaTensor *nself = THCudaTensor_newNarrow(state, self, dimension, 0, 1);
+  if (!THCudaTensor_pointwiseApply3(state, nself, nx, ny, TensorCrossOp(sx, sy, so))) {
+    THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+  }
+  THCudaTensor_free(state, nx);
+  THCudaTensor_free(state, ny);
+  THCudaTensor_free(state, nself);
+}

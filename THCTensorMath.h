@@ -84,6 +84,7 @@ THC_API void THCudaTensor_sign(THCState *state, THCudaTensor *self, THCudaTensor
 THC_API void THCudaTensor_round(THCState *state, THCudaTensor *self, THCudaTensor *src);
 THC_API void THCudaTensor_atan2(THCState *state, THCudaTensor *r_, THCudaTensor *tx, THCudaTensor *ty);
 THC_API void THCudaTensor_lerp(THCState *state, THCudaTensor *result, THCudaTensor *a, THCudaTensor *b, float w);
+THC_API void THCudaTensor_cross(THCState *state, THCudaTensor *self, THCudaTensor *src1, THCudaTensor *src2, int dimension);
 
 // MAGMA (i.e. CUDA implementation of LAPACK functions)
 THC_API void THCudaTensor_gesv(THCState *state, THCudaTensor *rb_, THCudaTensor *ra_, THCudaTensor *b_, THCudaTensor *a_);
