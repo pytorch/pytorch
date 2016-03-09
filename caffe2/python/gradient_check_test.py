@@ -1,5 +1,5 @@
 import numpy as np
-from pycaffe2 import core, device_checker, gradient_checker, workspace
+from caffe2.python import core, device_checker, gradient_checker, workspace
 from caffe2.proto import caffe2_pb2, caffe2_legacy_pb2
 
 import sys

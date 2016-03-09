@@ -8,7 +8,7 @@ Currently, here are the assumptions: we only support the following use cases:
     between {1, 2, 3, 4} and {5, 6, 7, 8}.
 """
 
-from pycaffe2 import core
+from caffe2.python import core
 from caffe2.proto import caffe2_pb2
 
 def OnGPU(gpu_id):

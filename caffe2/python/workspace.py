@@ -5,13 +5,13 @@ from multiprocessing import Process
 import os
 import sys
 import socket
-from pycaffe2 import utils
+from caffe2.python import utils
 
 try:
   from .libcaffe2_python import *
   has_gpu_support = bool(HasGPUSupport())
 except ImportError as e:
-  print('Cannot load pycaffe2. Error: {0}'.format(str(e)))
+  print('Cannot load caffe2.python. Error: {0}'.format(str(e)))
   sys.exit(1)
 
 # libcaffe2_python contains a global Workspace that we need to properly delete
@@ -19,7 +19,7 @@ except ImportError as e:
 atexit.register(OnModuleExit)
 
 try:
-  import pycaffe2.mint.app
+  import caffe2.python.mint.app
   _has_mint = True
 except ImportError as err:
   print('Mint is not available, possibly due to some downstream '
@@ -58,7 +58,7 @@ def StartMint(root_folder=None, port=None):
     root_folder = RootFolder()
   if port is None:
     port = _GetFreeFlaskPort()
-  process = Process(target=pycaffe2.mint.app.main, args=(
+  process = Process(target=caffe2.python.mint.app.main, args=(
       ['-p', str(port), '-r', root_folder],))
   process.start()
   print('Mint running at http://{}:{}'.format(socket.getfqdn(), port))

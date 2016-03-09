@@ -1,6 +1,6 @@
 import os
-from pycaffe2 import core
-from pycaffe2 import core_gradients
+from caffe2.python import core
+from caffe2.python import core_gradients
 # We adopt the tempfile module so we can do a snapshot test.
 import tempfile
 

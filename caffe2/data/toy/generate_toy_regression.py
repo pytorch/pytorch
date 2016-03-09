@@ -16,7 +16,7 @@
 # to during parameter update. I haven't got a good thought on how dependency
 # should be figured out yet.
 
-from pycaffe2 import core
+from caffe2.python import core
 
 init_net = core.Net("init")
 W = init_net.UniformFill([], "W", shape=[1, 2], min=-1., max=1.)

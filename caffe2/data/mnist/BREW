@@ -66,6 +66,6 @@ shell_script(
   ],
   deps = [
       ":mnist_minidb",
-      "//pycaffe2:pycaffe2",
+      "//caffe2/python:pycaffe2",
   ],
 )

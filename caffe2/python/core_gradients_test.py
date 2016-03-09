@@ -5,8 +5,8 @@
 
 import unittest
 
-import pycaffe2
-from pycaffe2.core import *
+import caffe2.python
+from caffe2.python.core import *
 
 # First, we will set up a few gradient registry entries so that we can manually construct some
 # test cases.

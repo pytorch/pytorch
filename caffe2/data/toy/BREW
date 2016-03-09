@@ -9,6 +9,6 @@ shell_script(
       "python generate_toy_regression.py",
   ],
   deps = [
-      "//pycaffe2:pycaffe2",
+      "//caffe2/python:pycaffe2",
   ],
 )

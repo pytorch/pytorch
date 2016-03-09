@@ -28,7 +28,7 @@ py_library(
       ":caffe2_python",
       "//caffe/proto:caffe_proto_py",
       "//caffe2/proto:caffe2_proto_py",
-      "//pycaffe2/mint:mint",
+      "//caffe2/python/mint:mint",
   ],
 )
 

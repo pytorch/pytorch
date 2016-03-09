@@ -1,5 +1,5 @@
 import numpy as np
-from pycaffe2 import core, workspace
+from caffe2.python import core, workspace
 from caffe2.proto import caffe2_pb2
 
 class GradientChecker:

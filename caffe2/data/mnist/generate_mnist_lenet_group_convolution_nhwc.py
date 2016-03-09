@@ -1,5 +1,5 @@
-from pycaffe2 import core
-from pycaffe2 import core_gradients
+from caffe2.python import core
+from caffe2.python import core_gradients
 
 init_net = core.Net("init")
 filter1a = init_net.XavierFill([], "filter1a", shape=[10, 5, 5, 1])

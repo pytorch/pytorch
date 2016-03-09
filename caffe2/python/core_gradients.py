@@ -1,5 +1,5 @@
 from caffe2.proto import caffe2_pb2
-from pycaffe2.core import *  # I know, I know... will fix later
+from caffe2.python.core import *  # I know, I know... will fix later
 
 """
 @GradientRegistry.RegisterGradient('FC')

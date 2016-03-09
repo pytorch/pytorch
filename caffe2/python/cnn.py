@@ -1,4 +1,4 @@
-from pycaffe2 import core
+from caffe2.python import core
 
 class CNNModelHelper(object):
   """A helper model so we can write CNN models more easily, without having to
