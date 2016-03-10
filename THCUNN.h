@@ -64,14 +64,16 @@ TH_API void THNN_CudaELU_updateOutput(
           THCState *state,
           THCudaTensor *input,
           THCudaTensor *output,
-          float alpha);
+          float alpha,
+          bool inplace);
 TH_API void THNN_CudaELU_updateGradInput(
           THCState *state,
           THCudaTensor *input,
           THCudaTensor *gradOutput,
           THCudaTensor *gradInput,
           THCudaTensor *output,
-          float alpha);
+          float alpha,
+          bool inplace);
 
 TH_API void THNN_CudaHardTanh_updateOutput(
           THCState *state,
