@@ -215,6 +215,11 @@ class Env(object):
         elif Config.BLAS_BACKEND == "mkl":
             self.DEFINES.append('-DCAFFE2_USE_MKL')
 
+        if Config.USE_SYSTEM_EIGEN:
+            # Add common eigen include path.
+            if os.path.exists('/usr/local/include/eigen3'):
+                self.INCLUDES.append('/usr/local/include/eigen3')
+
         # Set C++11 flag. The reason we do not simply add it to the CFLAGS list
         # above is that NVCC cannot pass -std=c++11 via Xcompiler, otherwise the
         # host compiler usually produces an error (clang) or warning (g++)
