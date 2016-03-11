@@ -9,7 +9,7 @@ namespace caffe2 {
 
 class ZmqContext {
  public:
-  ZmqContext(int io_threads) : ptr_(zmq_ctx_new()) {
+  explicit ZmqContext(int io_threads) : ptr_(zmq_ctx_new()) {
     CAFFE_CHECK(ptr_ != nullptr) << "Failed to create zmq context.";
     int rc = zmq_ctx_set(ptr_, ZMQ_IO_THREADS, io_threads);
     CAFFE_CHECK_EQ(rc, 0);
@@ -53,7 +53,8 @@ class ZmqMessage {
 
 class ZmqSocket {
  public:
-  ZmqSocket(int type) : context_(1), ptr_(zmq_socket(context_.ptr(), type)) {
+  explicit ZmqSocket(int type)
+      : context_(1), ptr_(zmq_socket(context_.ptr(), type)) {
     CAFFE_CHECK(ptr_ != nullptr) << "Faild to create zmq socket.";
   }
 
