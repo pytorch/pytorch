@@ -11,7 +11,7 @@ else:
     name = "eigen",
     srcs = ["BREW"],
     commands=[
-      "DST=$CAFFE2_GENDIR/third_party/include/eigen3",
+      "DST=$CAFFE2_GENDIR/third_party/include/",
       "mkdir -p $DST",
       "cp -r $CAFFE2_SRCDIR/$CAFFE2_CWD/Eigen $DST/",
       "cp -r $CAFFE2_SRCDIR/$CAFFE2_CWD/unsupported $DST/",
