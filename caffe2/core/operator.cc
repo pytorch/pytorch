@@ -117,6 +117,10 @@ OperatorBase* TryCreateOperator(
   case CUDA:
     CAFFE_VLOG(1) << "Creating CUDA operator " << key;
     return CUDAOperatorRegistry()->Create(key, operator_def, ws);
+  default:
+    CAFFE_LOG_FATAL << "Unknown device type: "
+                << operator_def.device_option().device_type();
+    return nullptr;
   }
 }
 }  // namespace
@@ -150,8 +154,7 @@ DEFINE_REGISTRY(GradientRegistry, vector<OperatorDef>, const OperatorDef&);
 
 vector<OperatorDef>* CreateGradientDefsInternal(
     const OperatorDef& def, GetGradientDefBaseVerbose* obj) {
-  CAFFE_DCHECK_NOTNULL(obj);
-  vector<OperatorDef>* grad_defs = obj->Create(def);
+  vector<OperatorDef>* grad_defs = CAFFE_CHECK_NOTNULL(obj)->Create(def);
   CAFFE_CHECK(grad_defs != nullptr);
   // Copy device option if needed.
   if (obj->CopyDeviceOption() && def.has_device_option()) {
