@@ -46,6 +46,8 @@ inline const char* cudnnGetErrorString(cudnnStatus_t status) {
       return "CUDNN_STATUS_NOT_SUPPORTED";
     case CUDNN_STATUS_LICENSE_ERROR:
       return "CUDNN_STATUS_LICENSE_ERROR";
+    default:
+      return "Unknown cudnn error number";
   }
 }
 }  // namespace internal

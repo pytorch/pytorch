@@ -4,6 +4,7 @@
 #include <iomanip>  // because some of the caffe2 code uses e.g. std::setw
 // Using google glog.
 #include <glog/logging.h>
+#include <glog/stl_logging.h>
 
 #ifdef CAFFE2_THROW_ON_FATAL
 static_assert(false, "If you use CAFFE2_USE_GOOGLE_GLOG, "

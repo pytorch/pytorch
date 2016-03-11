@@ -19,8 +19,8 @@
 
 #include "caffe2/utils/math.h"
 #include "caffe2/core/context.h"
-#include "eigen3/Eigen/Core"
-#include "eigen3/Eigen/Dense"
+#include "Eigen/Core"
+#include "Eigen/Dense"
 
 namespace caffe2 {
 namespace math {
@@ -241,7 +241,7 @@ CAFFE2_SPECIALIZED_AXPY(double, d)
 template <>                                                                    \
 void Axpby<T, CPUContext>(const int N, const T alpha, const T* x,              \
                           const T beta, T* y, CPUContext* context) {           \
-  cblas_##prefix##axpby(N, alpha, X, 1, beta, Y, 1);                           \
+  cblas_##prefix##axpby(N, alpha, x, 1, beta, y, 1);                           \
 }
 #else  // CAFFE2_USE_MKL
 #define CAFFE2_SPECIALIZED_AXPBY(T, prefix)                                    \

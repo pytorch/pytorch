@@ -7,6 +7,13 @@ from caffe2.python import core, workspace, muji
 class TestMuji(unittest.TestCase):
   """Test class for Muji."""
 
+  def setUp(self):
+    try:
+      workspace.GlobalInit(['python'])
+    except:
+      # swallow errors from multiple initialization
+      pass
+
   def RunningAllreduceWithGPUs(self, gpu_ids, allreduce_function):
     """A base function to test different scenarios."""
     workspace.ResetWorkspace()
@@ -61,11 +68,3 @@ class TestMuji(unittest.TestCase):
     else:
       print 'Skipping allreduce with 8 gpus. Not peer access ready.'
 
-if __name__ == '__main__':
-  if not workspace.has_gpu_support:
-    print 'No GPU support. skipping muji test.'
-  elif workspace.NumberOfGPUs() == 0:
-    print 'No GPU device. Skipping gpu test.'
-  else:
-    workspace.GlobalInit(['python'])
-    unittest.main()

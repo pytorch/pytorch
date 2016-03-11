@@ -1,4 +1,5 @@
 #include <cstdlib>
+#include <sstream>
 
 #include "caffe2/core/flags.h"
 #include "caffe2/core/logging.h"

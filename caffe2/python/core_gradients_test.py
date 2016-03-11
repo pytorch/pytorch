@@ -8,8 +8,8 @@ import unittest
 import caffe2.python
 from caffe2.python.core import *
 
-# First, we will set up a few gradient registry entries so that we can manually construct some
-# test cases.
+# First, we will set up a few gradient registry entries so that we can manually
+# construct some test cases.
 
 # First gradient: (in -> out) leading to (out_grad -> in_grad)
 @GradientRegistry.RegisterGradient('Direct')
@@ -285,9 +285,3 @@ class TestGradientCalculation(unittest.TestCase):
 
 if __name__ == '__main__':
   unittest.main()
-else:
-  # Guard against accidental imports. This script is only intended to run
-  # as a testing script. This is because we are changing the gradient registry,
-  # and we do not want these dummy operators to pollute the actual gradient
-  # registry during normal execution.
-  raise RuntimeError('You are importing a test script! Do NOT do that.')
