@@ -507,6 +507,33 @@ void THCudaTensor_potrf(THCState *state, THCudaTensor *ra_, THCudaTensor *a)
 #endif
 }
 
+void THCudaTensor_potrs(THCState *state, THCudaTensor *rb_, THCudaTensor *b, THCudaTensor *a)
+{
+#ifdef USE_MAGMA
+  THArgCheck(a->size[0] == a->size[1], 2, "A should be square");
+
+  int n = a->size[0];
+  int nrhs = b->size[1];
+
+  THCudaTensor *b_ = THCudaTensor_newColumnMajor(state, rb_, b);
+  float *b_data = THCudaTensor_data(state, b_);
+  THCudaTensor *a_ = THCudaTensor_newColumnMajor(state, a, a);
+  float *a_data = THCudaTensor_data(state, a_);
+
+  int info;
+  magma_spotrs_gpu(MagmaUpper, n, nrhs, a_data, n, b_data, n, &info);
+
+  // check error value
+  if (info < 0)
+    THError("MAGMA potrs : Argument %d : illegal value", -info);
+
+  THCudaTensor_freeCopyTo(state, b_, rb_);
+  THCudaTensor_free(state, a_);
+#else
+  THError(NoMagma(potrs));
+#endif
+}
+
 void THCudaTensor_qr(THCState *state, THCudaTensor *rq_, THCudaTensor *rr_, THCudaTensor *a_)
 {
 #ifdef USE_MAGMA
