@@ -564,7 +564,6 @@ void THTensor_(potrs)(THTensor *rb_, THTensor *b, THTensor *a, const char *uplo)
   if (b == NULL) b = rb_;
 
   THArgCheck(a->size[0] == a->size[1], 2, "A should be square");
-  THArgCheck(b->size[0] >= b->size[1], 2, "Matrix B is rank-deficient");
 
   int n, nrhs, lda, ldb, info;
   THTensor *ra__; // working version of A matrix to be passed into lapack TRTRS
