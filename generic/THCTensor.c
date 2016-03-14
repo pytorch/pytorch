@@ -788,9 +788,14 @@ real THCTensor_(get4d)(THCState *state, const THCTensor *tensor, long x0, long x
 
 int THCTensor_(checkGPU)(THCState *state, unsigned int nTensors, ...)
 {
+  /* FIXME: remove this flag after any users stop using it since it is
+     now superseded by the runtime option */
 #ifdef DISABLE_CHECK_GPU
-  return 1;  // Disable GPU checks.
+  return 1;
 #else
+  int kernelP2PEnabled =
+    THCState_getKernelPeerToPeerAccessEnabled(state);
+
   int curDev = -1;
   THCudaCheck(cudaGetDevice(&curDev));
   va_list(args);
@@ -802,14 +807,30 @@ int THCTensor_(checkGPU)(THCState *state, unsigned int nTensors, ...)
       continue;
     }
     int tensorDev = THCTensor_(getDevice)(state, tensor);
-    if (tensorDev != -1 && tensorDev != curDev) {
-      valid = 0;
-      break;
+    if (tensorDev == -1) {
+      /* This tensor does not have GPU memory (empty) */
+      continue;
+    }
+
+    if (tensorDev != curDev) {
+      if (kernelP2PEnabled) {
+        /* Kernel p2p access is allowed */
+        /* Can `curDev` access `tensorDev` directly? */
+        if (!THCState_getPeerToPeerAccess(state, curDev, tensorDev)) {
+          valid = 0;
+          break;
+        }
+      } else {
+        /* No kernel p2p access allowed */
+        valid = 0;
+        break;
+      }
     }
   }
+
   va_end(args);
   return valid;
-#endif
+#endif // DISABLE_CHECK_GPU
 }
 
 #endif

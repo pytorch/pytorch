@@ -127,6 +127,12 @@ void THCudaShutdown(THCState* state)
 
 void THCudaEnablePeerToPeerAccess(THCState* state)
 {
+  /* By default, all direct p2p kernel access (besides copy) is disallowed, */
+  /* since direct access without knowing whether or not a certain operation */
+  /* should be cross-GPU leads to synchronization errors. The user can choose */
+  /* to disable this functionality, however. */
+  state->p2pKernelAccessEnabled = 0;
+
   int prevDev = -1;
   THCudaCheck(cudaGetDevice(&prevDev));
 
@@ -140,7 +146,6 @@ void THCudaEnablePeerToPeerAccess(THCState* state)
 
   /* Build a table of all allowed p2p accesses, to avoid checking the p2p
      status at runtime. */
-
   for (int i = 0; i < numDevices; ++i) {
     THCudaCheck(cudaSetDevice(i));
 
@@ -230,6 +235,14 @@ void THCState_setPeerToPeerAccess(THCState* state, int dev, int devToAccess,
   }
 }
 
+int THCState_getKernelPeerToPeerAccessEnabled(THCState* state) {
+  return state->p2pKernelAccessEnabled;
+}
+
+void THCState_setKernelPeerToPeerAccessEnabled(THCState* state, int val) {
+  state->p2pKernelAccessEnabled = val;
+}
+
 struct cudaDeviceProp* THCState_getCurrentDeviceProperties(THCState* state)
 {
   int curDev = -1;
@@ -243,7 +256,7 @@ int THCState_getNumDevices(THCState *state)
   return state->numDevices;
 }
 
-void THCState_reserveStreams(THCState* state, int numStreams)
+void THCState_reserveStreams(THCState* state, int numStreams, int nonBlocking)
 {
   if (numStreams <= state->numUserStreams)
   {
@@ -275,10 +288,12 @@ void THCState_reserveStreams(THCState* state, int numStreams)
 
     /* Allocate new stream resources */
     size_t scratchSpaceSize = THCState_getDeviceScratchSpaceSize(state, dev);
+    unsigned int flags =
+      nonBlocking ? cudaStreamNonBlocking : cudaStreamDefault;
 
     for (int stream = state->numUserStreams + 1; stream <= numStreams; ++stream) {
       newStreams[stream] = NULL;
-      THCudaCheck(cudaStreamCreate(newStreams + stream));
+      THCudaCheck(cudaStreamCreateWithFlags(newStreams + stream, flags));
       newScratchSpace[stream] = NULL;
       THCudaCheck(THCudaMalloc(state, &newScratchSpace[stream], scratchSpaceSize));
     }
