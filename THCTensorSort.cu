@@ -88,8 +88,6 @@ void THCudaTensor_fillSliceWithIndex(THCState* state,
         FILL_INDEX(unsigned int, 1);
       } else if (info.dims == 2) {
         FILL_INDEX(unsigned int, 2);
-      } else if (info.dims == 3) {
-        FILL_INDEX(unsigned int, 3);
       } else {
         FILL_INDEX(unsigned int, -1);
       }
@@ -239,9 +237,6 @@ THC_API void THCudaTensor_sortKeyValueInplace(THCState* state,
         case 2:
           HANDLE_SORT_CASE(unsigned int, 2);
           break;
-        case 3:
-          HANDLE_SORT_CASE(unsigned int, 3);
-          break;
         default:
           HANDLE_SORT_CASE(unsigned int, -1);
           break;
@@ -275,11 +270,11 @@ THC_API void THCudaTensor_sortKeyValueInplace(THCState* state,
 struct SliceComp {
   SliceComp(int size) : sliceSize(size) {}
 
-  __host__ __device__ bool operator()(const float& a, const float& b) const {
+  __device__ bool operator()(const int& a, const int& b) const {
     // Since the slices are guaranteed to be innermost, the segment is
     // just via integer division
-    int segA = (int) a / sliceSize;
-    int segB = (int) b / sliceSize;
+    int segA = a / sliceSize;
+    int segB = b / sliceSize;
     return segA < segB;
   }
 
@@ -290,9 +285,10 @@ struct SliceComp {
 struct GlobalIndexToPerSliceIndex {
   GlobalIndexToPerSliceIndex(int size) : sliceSize(size) {}
 
-  __host__ __device__ void operator()(float& v) const {
-    // +1 to Lua index
-    v = (float) ((int) v % sliceSize) + 1;
+  __device__ inline void operator()(int& v) const {
+    // Thrust is operating on this index array as an array of type
+    // int, but to Torch it should be a float array.
+    v = __float_as_int((float) (v % sliceSize + 1));
   }
 
   const int sliceSize;
@@ -355,10 +351,16 @@ void sortViaThrust(THCState* state,
   THCudaTensor_free(state, trIndices);
 
   thrust::device_ptr<float> keyIter(THCudaTensor_data(state, trContigKey));
-  thrust::device_ptr<float> indexIter(THCudaTensor_data(state, trContigIndices));
+
+  // Since we are composing a global index across all segments rather
+  // than a per-segment index, we treat the memory as int so we don't
+  // have problems sorting slices < 2^24 but where the entire tensor
+  // has more than 2^24 elements
+  thrust::device_ptr<int>
+    indexIter((int*) THCudaTensor_data(state, trContigIndices));
 
   // Fill the indices with a global index across all slices
-  thrust::counting_iterator<float> countIter(0.0f);
+  thrust::counting_iterator<int> countIter(0);
 
   thrust::copy(
 #if CUDA_VERSION >= 7000
@@ -393,7 +395,8 @@ void sortViaThrust(THCState* state,
     indexIter, indexIter + totalElements, keyIter,
     SliceComp(sliceSize));
 
-  // Translate the global 0-based index to a per-slice Lua index
+  // Translate the global integer 0-based index to a per-slice float
+  // Lua index
   thrust::for_each(
 #if CUDA_VERSION >= 7000
     thrust::cuda::par.on(THCState_getCurrentStream(state)),
