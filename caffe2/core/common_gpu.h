@@ -82,10 +82,26 @@ void DeviceQuery(const int deviceid);
  */
 bool GetCudaPeerAccessPattern(vector<vector<bool> >* pattern);
 
-namespace internal {
+/**
+ * Return a human readable cublas error string.
+ */
 const char* cublasGetErrorString(cublasStatus_t error);
+
+/**
+ * Return a human readable curand error string.
+ */
 const char* curandGetErrorString(curandStatus_t error);
-}  // namespace internal
+
+/**
+ * Caffe2's CUDA initialization function.
+ *
+ * This is going to be run once when caffe2's GlobalInit() function is called.
+ * If you have an initialization function that depends on CUDA's initialization
+ * first, you can call this function inside your init function - this will
+ * ensure that CUDA is initialized before any of your custom initialization is
+ * carried out. This function is NOT thread safe.
+ */
+bool Caffe2InitializeCuda();
 
 // CUDA: various checks for different function calls.
 #define CUDA_CHECK(condition)                                                  \
@@ -112,7 +128,7 @@ const char* curandGetErrorString(curandStatus_t error);
     cublasStatus_t status = condition;                                         \
     CAFFE_CHECK_EQ(status, CUBLAS_STATUS_SUCCESS)                              \
         << "Error at: " << __FILE__ << ":" << __LINE__ << ": "                 \
-        << ::caffe2::internal::cublasGetErrorString(status);                   \
+        << ::caffe2::cublasGetErrorString(status);                             \
   } while (0)
 
 #define CURAND_CHECK(condition)                                                \
@@ -120,7 +136,7 @@ const char* curandGetErrorString(curandStatus_t error);
     curandStatus_t status = condition;                                         \
     CAFFE_CHECK_EQ(status, CURAND_STATUS_SUCCESS)                              \
         << "Error at: " << __FILE__ << ":" << __LINE__ << ": "                 \
-        << ::caffe2::internal::curandGetErrorString(status);                   \
+        << ::caffe2::curandGetErrorString(status);                             \
   } while (0)
 
 #define CUDA_1D_KERNEL_LOOP(i, n)                                              \

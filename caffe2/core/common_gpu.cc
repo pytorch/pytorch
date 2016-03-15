@@ -1,3 +1,4 @@
+#include <atomic>
 #include <sstream>
 
 #include "caffe2/core/common_gpu.h"
@@ -106,8 +107,6 @@ bool GetCudaPeerAccessPattern(vector<vector<bool> >* pattern) {
   return true;
 }
 
-namespace internal {
-
 const char* cublasGetErrorString(cublasStatus_t error) {
   switch (error) {
   case CUBLAS_STATUS_SUCCESS:
@@ -173,9 +172,15 @@ const char* curandGetErrorString(curandStatus_t error) {
 }
 
 bool Caffe2InitializeCuda() {
+  static bool g_initialization_function_called = false;
+  if (g_initialization_function_called == true) {
+    CAFFE_VLOG(1) << "Initialization already called. Ignoring duplicated calls.";
+    return true;
+  }
+  g_initialization_function_called = true;
   // If the current run does not have any cuda devices, do nothing.
   if (!HasCudaGPU()) {
-    CAFFE_LOG_INFO << "No cuda gpu present. Skipping.";
+    CAFFE_VLOG(1) << "No cuda gpu present. Skipping.";
     return true;
   }
   // Save the current device so we can restore it after moving across
@@ -214,5 +219,4 @@ REGISTER_CAFFE2_INIT_FUNCTION(Caffe2InitializeCuda,
                               &Caffe2InitializeCuda,
                               "Enable cuda for caffe2.");
 
-}  // namespace internal
 }  // namespace caffe2
