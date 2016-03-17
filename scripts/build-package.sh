@@ -7,4 +7,4 @@ git commit -a -m 'Preparing for pbuild'
 # && git push
 git clean -f
 
-gbp buildpackage --git-dist=trusty $1 $2 $3 $4 $5
+gbp buildpackage --git-pbuilder --git-dist=nvidia-7-5 $1 $2 $3 $4 $5

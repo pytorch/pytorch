@@ -2,7 +2,7 @@ Source: nccl
 Section: universe/libs
 Maintainer: Boris Fomitchev <bfomitchev@nvidia.com>
 Priority: optional
-Build-depends: debhelper(>=9), go-md2man, cuda-core-7-5, cuda-toolkit-7-5,
+Build-depends: debhelper(>=9), cuda-core-7-5, cuda-toolkit-7-5,
                cuda-curand-dev-7-5, cuda-cublas-dev-7-5, cuda-cudart-dev-7-5, cuda-ld-conf-7-5
 Standards-Version: 3.9.5
 
