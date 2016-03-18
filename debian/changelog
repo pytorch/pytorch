@@ -1,4 +1,4 @@
-nccl (1.1.1+cuda7.5) trusty; urgency=medium
+nccl (1.1.1-1+cuda7.5) trusty; urgency=medium
 
   * Rebuilding with 7.5
 
