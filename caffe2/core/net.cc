@@ -8,19 +8,17 @@
 
 namespace caffe2 {
 
+DEFINE_REGISTRY(NetRegistry, NetBase, const NetDef&, Workspace*);
+REGISTER_NET(simple, SimpleNet);
+REGISTER_NET(dag, DAGNet);
+
 NetBase* CreateNet(const NetDef& net_def, Workspace* ws) {
-  if (!net_def.has_net_type() || net_def.net_type() == "simple") {
-    CAFFE_VLOG(1) << "Creating simple net.";
+  // In default, we will return a simple network that just runs all operators
+  // sequentially.
+  if (!net_def.has_net_type()) {
     return new SimpleNet(net_def, ws);
-  } else if (net_def.net_type() == "dag") {
-    CAFFE_VLOG(1) << "Creating parallel net.";
-    return new DAGNet(net_def, ws);
-  } else {
-    CAFFE_LOG_ERROR << "Unknown net type: " << net_def.net_type();
-    return nullptr;
   }
-  // Just to suppress compiler warning
-  return nullptr;
+  return NetRegistry()->Create(net_def.net_type(), net_def, ws);
 }
 
 SimpleNet::SimpleNet(const NetDef& net_def, Workspace* ws)

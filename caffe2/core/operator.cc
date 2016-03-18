@@ -126,10 +126,9 @@ OperatorBase* TryCreateOperator(
 }  // namespace
 
 OperatorBase* CreateOperator(const OperatorDef& operator_def, Workspace* ws) {
-  string key = operator_def.type();
   // First, if the user has provided an engine, try create that engine
   if (operator_def.engine().size()) {
-    key += "_ENGINE_" + operator_def.engine();
+    string key = operator_def.type() +  "_ENGINE_" + operator_def.engine();
     CAFFE_VLOG(1) << "Trying to create operator " << operator_def.type()
                   << " with engine " << operator_def.engine();
     OperatorBase* op = TryCreateOperator(key, operator_def, ws);
