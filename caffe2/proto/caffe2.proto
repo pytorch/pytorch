@@ -77,14 +77,20 @@ message NetDef {
   // to pass to specialized implementations. If you do not care about this, you
   // don't need to set them.
   optional string net_type = 3; // the type of network that we run this with.
+
   // the number of workers, if the operators in the network is to be carried out
   // in parallel.
-  optional int32 num_workers = 4;
+  // Note(Yangqing): I am planning to deprecate this and use the arg field so
+  // we can put more flexible arguments.
+  optional int32 num_workers = 4 [deprecated=true];
+
   // The device option for the network. If a network has a specific device
   // option and one of its operators does not have it set, we will copy over the
   // device option to the operator. This allows us to basically avoid putting
   // device options at every operator.
   optional DeviceOption device_option = 5;
+
+  repeated Argument arg = 6;
 }
 
 // ExecutionStep is actually a sort-of-hacky way we simulate iteration right

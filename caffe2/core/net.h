@@ -35,9 +35,12 @@ class NetBase {
   DISABLE_COPY_AND_ASSIGN(NetBase);
 };
 
-// Essentially, we won't expect too many Net instances, so we will simply
-// have a function that produces different net implementations. If needed we can
-// switch to a registration pattern later.
+
+DECLARE_REGISTRY(NetRegistry, NetBase, const NetDef&, Workspace*);
+#define REGISTER_NET_CREATOR(key, ...) \
+  REGISTER_CREATOR(NetRegistry, key, __VA_ARGS__)
+#define REGISTER_NET(name, ...) \
+  REGISTER_CLASS(NetRegistry, name, __VA_ARGS__)
 NetBase* CreateNet(const NetDef& net_def, Workspace* ws);
 
 // This is the very basic structure you need to run a network - all it
