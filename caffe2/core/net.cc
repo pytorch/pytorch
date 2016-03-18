@@ -328,4 +328,28 @@ void DAGNet::WorkerFunction() {
   }
 }
 
+void DAGNet::TEST_Benchmark(const int warmup_runs, const int main_runs,
+                            const bool run_individual) {
+  CAFFE_LOG_INFO << "Starting benchmark.";
+  CAFFE_LOG_INFO << "Running warmup runs.";
+  CAFFE_CHECK_GE(warmup_runs, 0);
+  for (int i = 0; i < warmup_runs; ++i) {
+    CAFFE_CHECK(Run());
+  }
+
+  CAFFE_LOG_INFO << "Main runs.";
+  CAFFE_CHECK_GE(main_runs, 0);
+  Timer timer;
+  for (int i = 0; i < main_runs; ++i) {
+    CAFFE_CHECK(Run());
+  }
+  CAFFE_LOG_INFO << "Main run finished. Milliseconds per iter: "
+                 << timer.MilliSeconds() / main_runs;
+
+  if (run_individual) {
+    CAFFE_LOG_INFO << "DAGNet does not do per-op benchmark. To do so, "
+                      "switch to a simple net type.";
+  }
+}
+
 }  // namespace caffe2

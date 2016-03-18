@@ -23,11 +23,11 @@ def _PrintColor(color, message, *args, **kwargs):
     if args == () and kwargs == {}:
         out = message
     else:
-        out = message.format(*args, **kwargs)
+        out = unicode(message).format(*args, **kwargs)
     if color is None:
-        print(out)
+        print(unicode(out))
     else:
-        print(color + out + Colors.ENDCOLOR)
+        print(unicode(color + out + Colors.ENDCOLOR))
 
 
 def BuildPrint(message, *args, **kwargs):
