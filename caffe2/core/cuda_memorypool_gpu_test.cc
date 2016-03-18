@@ -1,4 +1,4 @@
-#include "caffe2/core/cuda_memorypool.h"
+#include "caffe2/core/cuda_memorypool_gpu.h"
 #include "caffe2/core/context_gpu.h"
 #include "gtest/gtest.h"
 #include "caffe2/core/logging.h"
