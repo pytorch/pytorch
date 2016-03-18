@@ -80,6 +80,8 @@ class DAGNet final : public NetBase {
   // notifies all its children, and for any children that is ready, enqueues
   // it to the job queue.
   void WorkerFunction();
+  void TEST_Benchmark(const int warmup_runs, const int main_runs,
+                      const bool run_individual) override;
 
  protected:
   vector<internal::OperatorNode> operator_nodes_;
