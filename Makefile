@@ -32,8 +32,8 @@ VERBOSE ?= 0
 
 CUDACODE := -gencode=arch=compute_35,code=sm_35 \
             -gencode=arch=compute_50,code=sm_50 \
-            -gencode=arch=compute_52,code=sm_52 \
-            -gencode=arch=compute_53,code=sm_53
+            -gencode=arch=compute_52,code=sm_52
+
 
 
 BUILDDIR := build
