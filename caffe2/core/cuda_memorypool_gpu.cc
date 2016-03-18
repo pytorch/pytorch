@@ -1,5 +1,5 @@
 #include "third_party/cnmem/cnmem.h"
-#include "caffe2/core/cuda_memorypool.h"
+#include "caffe2/core/cuda_memorypool_gpu.h"
 
 namespace caffe2 {
 
