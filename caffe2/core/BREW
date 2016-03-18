@@ -30,12 +30,12 @@ cc_library(
   srcs = [
     "blob_serialization_gpu.cc",
     "common_gpu.cc",
-    "cuda_memorypool.cc",
+    "cuda_memorypool_gpu.cc",
   ],
   hdrs = [
     "common_gpu.h",
     "context_gpu.h",
-    "cuda_memorypool.h",
+    "cuda_memorypool_gpu.h",
   ],
   deps = [
     ":core",
@@ -92,12 +92,12 @@ cc_test(
   ],
 )
 
-# cuda_memorypool_test has to be run independently because the setup and
+# cuda_memorypool_gpu_test has to be run independently because the setup and
 # teardown of the memory pool operations.
 cc_test(
-  name = "cuda_memorypool_test",
+  name = "cuda_memorypool_gpu_test",
   srcs = [
-      "cuda_memorypool_test.cc",
+      "cuda_memorypool_gpu_test.cc",
   ],
   deps = [
       ":core_gpu",
