@@ -5,7 +5,6 @@
 #ifdef _OPENMP
 #include <omp.h>
 #endif
-#include <stdio.h>
 
 #define ROW_PTR2(t, r) (THTensor_(data)(t) + (r) * (t)->stride[0])
 #define COL_PTR2(t, c) (THTensor_(data)(t) + (c) * (t)->stride[1])
@@ -284,6 +283,79 @@ void THNN_(SparseLinear_updateParameters)(
   THArgCheck(THNN_(checkSize1D)(bias, outDim), 3, "bias size wrong");
   THArgCheck(THNN_(checkSize1D)(gradBias, outDim), 5, "gradBias size wrong");
   THArgCheck(THNN_(checkInput)(lastInput), 6,
+             "input must be in coo format, nnz x 3");
+
+
+  long nnz = THTensor_(size)(lastInput, 0);
+
+  // collect unique offsets of non-0 val in input
+  THTensor* offsets = THTensor_(newWithSize1d)(nnz);
+  long cnt = 0;
+  for (i = 0; i < nnz; i++) {
+    real val = THNN_(get2d)(lastInput, i, 2);
+    if (val == 0) {
+      continue;
+    }
+    long offset = (long)(THNN_(get2d)(lastInput, i, 1)) - 1;
+    if (offset >= 0 && offset < inDim) {
+      THNN_(set1d)(offsets, cnt++, offset);
+    } else {
+      THError(
+          "index out of bound. updateParameters: %d not between 1 and %d",
+          offset + 1,
+          inDim);
+    }
+  }
+  if (cnt == 0) return;
+  THTensor_(resize1d)(offsets, cnt);
+
+  THTensor* uniqueOffsets = THTensor_(new)();
+  THLongTensor* ri = THLongTensor_new();
+  THTensor_(sort)(uniqueOffsets, ri, offsets, 0, 0);
+  THLongTensor_free(ri);
+  THTensor_(free)(offsets);
+
+  cnt = 1;
+  real* uniqueOffsets_p = THTensor_(data)(uniqueOffsets);
+  for (i = 1; i < THTensor_(size)(uniqueOffsets, 0); i++) {
+    if (uniqueOffsets_p[i] != uniqueOffsets_p[i - 1]) {
+      uniqueOffsets_p[cnt++] = uniqueOffsets_p[i];
+    }
+  }
+  THTensor_(resize1d)(uniqueOffsets, cnt);
+
+  // weight += -learningRate * gradWeight
+  THTensor_(cadd)(bias, bias, -learningRate, gradBias);
+#pragma omp parallel for private(i) schedule(static) if (cnt * outDim > 10000)
+  for (i = 0; i < cnt; i++) {
+    long offset = (long)uniqueOffsets_p[i];
+    THBlas_(axpy)(outDim,
+                  -learningRate,
+                  COL_PTR2(gradWeight, offset), gradWeight->stride[0],
+                  COL_PTR2(weight, offset), weight->stride[0]);
+  }
+
+  THTensor_(free)(uniqueOffsets);
+}
+
+void THNN_(SparseLinear_legacyUpdateParameters)(
+          THNNState *state,
+          THTensor *weight,
+          THTensor *bias,
+          THTensor *gradWeight,
+          THTensor *gradBias,
+          THTensor *lastInput,
+          real learningRate)
+{
+  long h, i;
+  long outDim = weight->size[0];
+  long inDim = weight->size[1];
+
+  THArgCheck(THNN_(checkSize2D)(gradWeight, outDim, inDim), 4,
+             "gradWeight size wrong");
+  THArgCheck(THNN_(checkSize1D)(bias, outDim), 3, "bias size wrong");
+  THArgCheck(THNN_(checkSize1D)(gradBias, outDim), 5, "gradBias size wrong");
+  THArgCheck(THNN_(checkLegacyInput)(lastInput), 6,
              "input size must be batchsize x nnz x 2");
 
 
@@ -354,6 +426,52 @@ void THNN_(SparseLinear_zeroGradParameters)(
 
   THArgCheck(THNN_(checkSize1D)(gradBias, outDim), 3, "gradBias size wrong");
   THArgCheck(THNN_(checkInput)(lastInput), 4,
+             "input must be in coo format, nnz x 3");
+
+  THTensor_(zero)(gradBias);
+
+  long nnz = THTensor_(size)(lastInput, 0);
+
+#pragma omp parallel for private(i, j) schedule(static) if (   \
+  nnz * outDim > 10000)
+  for (i = 0; i < nnz; i++) {
+    if (THNN_(get2d)(lastInput, i, 2) == 0 ) {
+      continue;
+    }
+
+    long offset = (long)(THNN_(get2d)(lastInput, i, 0)) - 1;
+    if (offset >= 0 && offset < inDim) {
+      real* pGradWeight = COL_PTR2(gradWeight, offset);
+      if (gradWeight->stride[0] == 1) {
+        THVector_(fill)(pGradWeight, 0, outDim);
+      } else {
+        long stride = gradWeight->stride[0];
+        for (j = 0; j < outDim; ++j) {
+          pGradWeight[j * stride] = 0;
+        }
+      }
+    } else {
+      THError(
+          "index out of bound. zeroGradParameters: %d not between 1 and %d",
+          offset + 1,
+          inDim);
+    }
+  }
+}
+
+void THNN_(SparseLinear_legacyZeroGradParameters)(
+          THNNState *state,
+          THTensor *gradWeight,
+          THTensor *gradBias,
+          THTensor *lastInput)
+{
+  long h, i, j;
+
+  long outDim = gradWeight->size[0];
+  long inDim = gradWeight->size[1];
+
+  THArgCheck(THNN_(checkSize1D)(gradBias, outDim), 3, "gradBias size wrong");
+  THArgCheck(THNN_(checkLegacyInput)(lastInput), 4,
              "input size must be batchsize x nnz x 2");
 
   THTensor_(zero)(gradBias);
@@ -389,8 +507,6 @@ void THNN_(SparseLinear_zeroGradParameters)(
     }
   }
 }
-
-void THNN_(SparseLinear_cudaClearState)(THNNState *state) {}
 
 #undef ROW_PTR2
 #undef COL_PTR2
