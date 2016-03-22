@@ -4,7 +4,7 @@
 #define MULTIMARGIN_THREADS 128
 
 template <int P>
-__global__ void cunn_MultiMarginCriterion_updateOutput_kernel(float *output, float *input, float *target, float *weights, int nframe, int dim, bool sizeAverage)
+__global__ void cunn_MultiMarginCriterion_updateOutput_kernel(float *output, float *input, float *target, float *weights, int nframe, int dim, bool sizeAverage, float margin)
 {
   __shared__ float buffer[MULTIMARGIN_THREADS];
   int k = blockIdx.x;
@@ -20,7 +20,7 @@ __global__ void cunn_MultiMarginCriterion_updateOutput_kernel(float *output, flo
   buffer[threadIdx.x] = 0;
   for (int i = i_start; i < i_end; i += i_step)
   {
-    float z = 1 - input_target_k + input_k[i];
+    float z = margin - input_target_k + input_k[i];
     if (i == target_k)
       continue;
 
@@ -47,7 +47,7 @@ __global__ void cunn_MultiMarginCriterion_updateOutput_kernel(float *output, flo
 }
 
 template <int P>
-__global__ void cunn_MultiMarginCriterion_updateGradInput_kernel(float *gradInput, float *input, float *target, float *weights, int nframe, int dim, bool sizeAverage)
+__global__ void cunn_MultiMarginCriterion_updateGradInput_kernel(float *gradInput, float *input, float *target, float *weights, int nframe, int dim, bool sizeAverage, float margin)
 {
   __shared__ float buffer[MULTIMARGIN_THREADS];
   int k = blockIdx.x;
@@ -64,7 +64,7 @@ __global__ void cunn_MultiMarginCriterion_updateGradInput_kernel(float *gradInpu
   buffer[threadIdx.x] = 0;
   for (int i=i_start; i<i_end; i+=i_step)
   {
-    float z = 1 - input_target_k + input_k[i];
+    float z = margin - input_target_k + input_k[i];
     if (i == target_k)
       continue;
 
@@ -94,7 +94,8 @@ __global__ void cunn_MultiMarginCriterion_updateGradInput_kernel(float *gradInpu
 
 void THNN_CudaMultiMarginCriterion_updateOutput(THCState *state, THCudaTensor *input,
                                                 THCudaTensor *target, THCudaTensor *output,
-                                                bool sizeAverage, int p, THCudaTensor *weights)
+                                                bool sizeAverage, int p, THCudaTensor *weights,
+                                                float margin)
 {
   THCUNN_assertSameGPU(state, 2, input, target);
   input = THCudaTensor_newContiguous(state, input);
@@ -112,7 +113,8 @@ void THNN_CudaMultiMarginCriterion_updateOutput(THCState *state, THCudaTensor *i
         THCudaTensor_data(state, target),
         weights ? THCudaTensor_data(state, weights) : NULL,
         1, input->size[0],
-        sizeAverage
+        sizeAverage,
+        margin
       );
     }
     else if (p == 2)
@@ -123,7 +125,8 @@ void THNN_CudaMultiMarginCriterion_updateOutput(THCState *state, THCudaTensor *i
         THCudaTensor_data(state, target),
         weights ? THCudaTensor_data(state, weights) : NULL,
         1, input->size[0],
-        sizeAverage
+        sizeAverage,
+        margin
       );
     }
   }
@@ -140,7 +143,8 @@ void THNN_CudaMultiMarginCriterion_updateOutput(THCState *state, THCudaTensor *i
         THCudaTensor_data(state, target),
         weights ? THCudaTensor_data(state, weights) : NULL,
         input->size[0], input->size[1],
-        sizeAverage
+        sizeAverage,
+        margin
       );
     }
     else if (p == 2)
@@ -151,7 +155,8 @@ void THNN_CudaMultiMarginCriterion_updateOutput(THCState *state, THCudaTensor *i
         THCudaTensor_data(state, target),
         weights ? THCudaTensor_data(state, weights) : NULL,
         input->size[0], input->size[1],
-        sizeAverage
+        sizeAverage,
+        margin
       );
     }
     float sum = THCudaTensor_sumall(state, output_);
@@ -174,7 +179,8 @@ void THNN_CudaMultiMarginCriterion_updateOutput(THCState *state, THCudaTensor *i
 
 void THNN_CudaMultiMarginCriterion_updateGradInput(THCState *state, THCudaTensor *input,
                                                    THCudaTensor *target, THCudaTensor *gradInput,
-                                                   bool sizeAverage, int p, THCudaTensor *weights)
+                                                   bool sizeAverage, int p, THCudaTensor *weights,
+                                                   float margin)
 {
   THCUNN_assertSameGPU(state, 3, input, gradInput, target);
   input = THCudaTensor_newContiguous(state, input);
@@ -195,7 +201,8 @@ void THNN_CudaMultiMarginCriterion_updateGradInput(THCState *state, THCudaTensor
         THCudaTensor_data(state, target),
         weights ? THCudaTensor_data(state, weights) : NULL,
         1, gradInput->size[0],
-        sizeAverage
+        sizeAverage,
+        margin
       );
     }
     else if (p == 2)
@@ -206,7 +213,8 @@ void THNN_CudaMultiMarginCriterion_updateGradInput(THCState *state, THCudaTensor
         THCudaTensor_data(state, target),
         weights ? THCudaTensor_data(state, weights) : NULL,
         1, gradInput->size[0],
-        sizeAverage
+        sizeAverage,
+        margin
       );
     }
   }
@@ -223,7 +231,8 @@ void THNN_CudaMultiMarginCriterion_updateGradInput(THCState *state, THCudaTensor
         THCudaTensor_data(state, target),
         weights ? THCudaTensor_data(state, weights) : NULL,
         gradInput->size[0], gradInput->size[1],
-        sizeAverage
+        sizeAverage,
+        margin
       );
     }
     else if (p == 2)
@@ -234,7 +243,8 @@ void THNN_CudaMultiMarginCriterion_updateGradInput(THCState *state, THCudaTensor
         THCudaTensor_data(state, target),
         weights ? THCudaTensor_data(state, weights) : NULL,
         gradInput->size[0], gradInput->size[1],
-        sizeAverage
+        sizeAverage,
+        margin
       );
     }
   }

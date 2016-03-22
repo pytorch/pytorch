@@ -196,7 +196,8 @@ TH_API void THNN_CudaMultiMarginCriterion_updateOutput(
           THCudaTensor *output,
           bool sizeAverage,
           int p,
-          THCudaTensor *weights);
+          THCudaTensor *weights,
+          float margin);
 TH_API void THNN_CudaMultiMarginCriterion_updateGradInput(
           THCState *state,
           THCudaTensor *input,
@@ -204,7 +205,8 @@ TH_API void THNN_CudaMultiMarginCriterion_updateGradInput(
           THCudaTensor *gradInput,
           bool sizeAverage,
           int p,
-          THCudaTensor *weights);
+          THCudaTensor *weights,
+          float margin);
 
 TH_API void THNN_CudaPReLU_updateOutput(
           THCState *state,
