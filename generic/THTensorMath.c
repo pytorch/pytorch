@@ -1372,7 +1372,9 @@ void THTensor_(range)(THTensor *r_, accreal xmin, accreal xmax, accreal step)
 
   size = (long) (((xmax - xmin) / step) + 1);
 
-  THTensor_(resize1d)(r_, size);
+  if (THTensor_(nElement)(r_) != size) {
+    THTensor_(resize1d)(r_, size);
+  }
 
   TH_TENSOR_APPLY(real, r_, *r__data = xmin + (i++)*step;);
 }
@@ -2352,9 +2354,10 @@ void THTensor_(linspace)(THTensor *r_, real a, real b, long n)
   real i = 0;
 
   THArgCheck(n > 1 || (n == 1 && (a == b)), 3, "invalid number of points");
-  THArgCheck(a <= b, 2, "end range should be greater than start range");
 
-  THTensor_(resize1d)(r_, n);
+  if (THTensor_(nElement)(r_) != n) {
+    THTensor_(resize1d)(r_, n);
+  }
 
   if(n == 1) {
      TH_TENSOR_APPLY(real, r_,
@@ -2374,9 +2377,11 @@ void THTensor_(logspace)(THTensor *r_, real a, real b, long n)
   real i = 0;
 
   THArgCheck(n > 1 || (n == 1 && (a == b)), 3, "invalid number of points");
-  THArgCheck(a <= b, 2, "end range should be greater than start range");
 
-  THTensor_(resize1d)(r_, n);
+  if (THTensor_(nElement)(r_) != n) {
+    THTensor_(resize1d)(r_, n);
+  }
+
   if(n == 1) {
     TH_TENSOR_APPLY(real, r_,
         *r__data = pow(10.0, a);
