@@ -439,7 +439,7 @@ void THNN_(SparseLinear_zeroGradParameters)(
       continue;
     }
 
-    long offset = (long)(THNN_(get2d)(lastInput, i, 0)) - 1;
+    long offset = (long)(THNN_(get2d)(lastInput, i, 1)) - 1;
     if (offset >= 0 && offset < inDim) {
       real* pGradWeight = COL_PTR2(gradWeight, offset);
       if (gradWeight->stride[0] == 1) {
