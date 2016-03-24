@@ -14,5 +14,6 @@ TH_API void THDiskFile_nativeEndianEncoding(THFile *self);
 TH_API void THDiskFile_littleEndianEncoding(THFile *self);
 TH_API void THDiskFile_bigEndianEncoding(THFile *self);
 TH_API void THDiskFile_longSize(THFile *self, int size);
+TH_API void THDiskFile_noBuffer(THFile *self);
 
 #endif

@@ -291,6 +291,15 @@ void THDiskFile_longSize(THFile *self, int size)
   dfself->longSize = size;
 }
 
+void THDiskFile_noBuffer(THFile *self)
+{
+  THDiskFile *dfself = (THDiskFile*)(self);
+  THArgCheck(dfself->handle != NULL, 1, "attempt to use a closed file");
+  if (setvbuf(dfself->handle, NULL, _IONBF, 0)) {
+    THError("error: cannot disable buffer");
+  }
+}
+
 static void THDiskFile_free(THFile *self)
 {
   THDiskFile *dfself = (THDiskFile*)(self);
