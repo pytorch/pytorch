@@ -2,6 +2,10 @@
 #define TH_GENERIC_FILE "generic/THTensorMath.c"
 #else
 
+#ifndef NAN
+  #define NAN (nan(NULL))
+#endif
+
 #ifdef _OPENMP
 #include <omp.h>
 #endif
