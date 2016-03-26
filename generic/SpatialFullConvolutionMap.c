@@ -3,7 +3,7 @@
 #else
 
 void THNN_(SpatialFullConvolutionMap_updateOutput)(
-  THNNState *state, THTensor *input, THTensor *output, THTensor *weight, THTensor *bias,
+  THNNState *state, THTensor *input, THTensor *output_, THTensor *weight, THTensor *bias,
   THTensor *connTable, int nInputPlane, int nOutputPlane,
   int dW, int dH)
 {
@@ -20,14 +20,14 @@ void THNN_(SpatialFullConvolutionMap_updateOutput)(
   THArgCheck(input->size[0] >= nInputPlane, 2, "invalid number of input planes");
 
   THTensor_(resize3d)(
-    output, nOutputPlane,
+    output_, nOutputPlane,
     (input->size[1] - 1) * dH + kH,
     (input->size[2] - 1) * dW + kW
   );
 
   /* contiguous */
   input = THTensor_(newContiguous)(input);
-  output = THTensor_(newContiguous)(output);
+  THTensor* output = THTensor_(newContiguous)(output_);
 
   /* get raw pointers */
   real *input_data = THTensor_(data)(input);
@@ -80,11 +80,11 @@ void THNN_(SpatialFullConvolutionMap_updateOutput)(
 
   /* clean up */
   THTensor_(free)(input);
-  THTensor_(free)(output);
+  THTensor_(freeCopyTo)(output, output_);
 }
 
 void THNN_(SpatialFullConvolutionMap_updateGradInput)(
-  THNNState *state, THTensor *input, THTensor *gradOutput, THTensor *gradInput, THTensor *weight, THTensor *bias,
+  THNNState *state, THTensor *input, THTensor *gradOutput, THTensor *gradInput_, THTensor *weight, THTensor *bias,
   THTensor *connTable, int nInputPlane, int nOutputPlane,
   int dW, int dH)
 {
@@ -95,7 +95,7 @@ void THNN_(SpatialFullConvolutionMap_updateGradInput)(
   );
 
   /* contiguous */
-  gradInput = THTensor_(newContiguous)(gradInput);
+  THTensor* gradInput = THTensor_(newContiguous)(gradInput_);
   gradOutput = THTensor_(newContiguous)(gradOutput);
 
   /* Resize/Zero */
@@ -142,7 +142,7 @@ void THNN_(SpatialFullConvolutionMap_updateGradInput)(
   }
 
   /* clean up */
-  THTensor_(free)(gradInput);
+  THTensor_(freeCopyTo)(gradInput, gradInput_);
   THTensor_(free)(gradOutput);
 }
 
