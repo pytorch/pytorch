@@ -175,6 +175,7 @@ THCTensor_(copy)(THCState* state, THCTensor* dst, THCTensor* src) {
 
 // conversions are mediated by the CPU
 // yes, this is slow; feel free to write CUDA kernels for this
+#ifndef THC_REAL_IS_HALF
 #define THC_CUDA_TENSOR_IMPLEMENT_COPY(TYPEC,TYPECUDA)                  \
   void THCTensor_(copyCuda##TYPEC)(THCState *state, THCTensor *self, struct THCuda##TYPECUDA##Tensor *src)  \
   {                                                                     \
@@ -193,6 +194,31 @@ THCTensor_(copy)(THCState* state, THCTensor* dst, THCTensor* src) {
       THTensor_(free)(buffer2);                                         \
     }                                                                   \
   }
+#else
+#define THC_CUDA_TENSOR_IMPLEMENT_COPY(TYPEC,TYPECUDA)                  \
+  void THCTensor_(copyCuda##TYPEC)(THCState *state, THCTensor *self, struct THCuda##TYPECUDA##Tensor *src)  \
+  {                                                                     \
+    THArgCheck(THCTensor_(nElement)(state, self) == THCuda##TYPECUDA##Tensor_nElement(state, src), 2, "size does not match");    \
+    if (THCTypeIdx_(TYPEC) == THCTypeIdxFloat) {                        \
+      THCudaTensor *csrc = THCudaTensor_newContiguous(state, (THCudaTensor*) src); /* cast removes compiler error */             \
+      THCFloat2Half(state,                                              \
+          THCTensor_(data)(state, self),                                \
+          THCudaTensor_data(state, csrc),                               \
+          THCudaTensor_nElement(state, csrc));                          \
+      THCudaTensor_free(state, csrc);                                   \
+    } else {                                                            \
+      THLongStorage *size = THCuda##TYPECUDA##Tensor_newSizeOf(state, src); \
+      THCudaTensor *buffer = THCudaTensor_newWithSize(state, size, NULL); \
+      THCudaTensor_copyCuda##TYPEC(state, buffer, src);                 \
+      THCFloat2Half(state,                                              \
+          THCTensor_(data)(state, self),                                \
+          THCudaTensor_data(state, buffer),                             \
+          THCudaTensor_nElement(state, buffer));                        \
+      THCudaTensor_free(state, buffer);                                 \
+      THLongStorage_free(size);                                         \
+    }                                                                   \
+  }
+#endif
 
 THC_CUDA_TENSOR_IMPLEMENT_COPY(Byte,Byte)
 THC_CUDA_TENSOR_IMPLEMENT_COPY(Char,Char)
@@ -201,5 +227,28 @@ THC_CUDA_TENSOR_IMPLEMENT_COPY(Int,Int)
 THC_CUDA_TENSOR_IMPLEMENT_COPY(Long,Long)
 THC_CUDA_TENSOR_IMPLEMENT_COPY(Float,)  // i.e. float
 THC_CUDA_TENSOR_IMPLEMENT_COPY(Double,Double)
+
+#if CUDA_VERSION >= 7050
+#define FLOAT_COPY(TYPE) TH_CONCAT_3(TH, CReal, Tensor_copyCudaFloat)
+void THCTensor_(copyCudaHalf)(THCState *state, THCTensor *self, struct THCudaHalfTensor *src)
+{
+    if(THCTypeIdx_(Real) == THCTypeIdxHalf) {
+      THCTensor_(copy)(state, self, (THCTensor*) src);   /* cast removes compiler error */
+    } else {
+        THArgCheck(THCTensor_(nElement)(state, self) == THCudaHalfTensor_nElement(state, src), 2, "size does not match");
+        src = THCudaHalfTensor_newContiguous(state, src);
+        THLongStorage *size = THCudaHalfTensor_newSizeOf(state, src);
+        THCudaTensor *buffer = THCudaTensor_newWithSize(state, size, NULL);
+        THCHalf2Float(state, THCudaTensor_data(state, buffer), THCudaHalfTensor_data(state, src), THCudaHalfTensor_nElement(state, src));
+        FLOAT_COPY(Real)(state, self, buffer);
+        THCudaTensor_free(state, buffer);
+        THCudaHalfTensor_free(state, src);
+        THLongStorage_free(size);
+    }
+}
+#undef FLOAT_COPY
+#endif // CUDA_VERSION >= 7050
+
+#undef THC_CUDA_TENSOR_IMPLEMENT_COPY
 
 #endif

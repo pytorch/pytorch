@@ -2,9 +2,10 @@
 #define THC_GENERIC_FILE "generic/THCStorage.cu"
 #else
 
-void THCStorage_(fill)(THCState *state, THCStorage *self, real value)
+void THCStorage_(fill)(THCState *state, THCStorage *self, hostreal _value)
 {
   thrust::device_ptr<real> self_data(self->data);
+  real value = hostrealToReal(_value);
   thrust::fill(
 #if CUDA_VERSION >= 7000
     thrust::cuda::par.on(THCState_getCurrentStream(state)),

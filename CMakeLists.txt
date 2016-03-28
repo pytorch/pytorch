@@ -114,6 +114,10 @@ SET(src-cuda
   THCTensorTopK.cu
   )
 
+IF(NOT ${CUDA_VERSION} LESS 7.5)
+  LIST(APPEND src-cuda THCHalf.cu)
+ENDIF()
+
 CUDA_ADD_LIBRARY(THC SHARED ${src} ${src-cuda})
 CUDA_ADD_CUBLAS_TO_TARGET(THC)
 TARGET_LINK_LIBRARIES(THC TH ${CUDA_curand_LIBRARY})
@@ -154,6 +158,7 @@ INSTALL(FILES
           THCDeviceTensorUtils.cuh
           THCDeviceTensorUtils-inl.cuh
           THCGenerateAllTypes.h
+          THCHalf.h
           DESTINATION "${THC_INSTALL_INCLUDE_SUBDIR}/THC")
 
 INSTALL(FILES

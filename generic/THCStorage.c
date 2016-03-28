@@ -17,18 +17,29 @@ int THCStorage_(elementSize)(THCState *state)
   return sizeof(real);
 }
 
-void THCStorage_(set)(THCState *state, THCStorage *self, long index, real value)
+void THCStorage_(set)(THCState *state, THCStorage *self, long index, hostreal _value)
 {
   THArgCheck((index >= 0) && (index < self->size), 2, "index out of bounds");
+  real value = hostrealToReal(_value);
   THCudaCheck(cudaMemcpy(self->data + index, &value, sizeof(real), cudaMemcpyHostToDevice));
 }
 
-real THCStorage_(get)(THCState *state, const THCStorage *self, long index)
+hostreal THCStorage_(get)(THCState *state, const THCStorage *self, long index)
 {
-  real value;
   THArgCheck((index >= 0) && (index < self->size), 2, "index out of bounds");
+#ifndef THC_REAL_IS_HALF
+  real value;
   THCudaCheck(cudaMemcpy(&value, self->data + index, sizeof(real), cudaMemcpyDeviceToHost));
-  return value;
+  return realToHostreal(value);
+#else
+  float *ret_d;
+  float ret;
+  THCudaCheck(THCudaMalloc(state, (void**)&ret_d, sizeof(float)));
+  THCHalf2Float(state, ret_d, self->data + index, 1);
+  THCudaCheck(cudaMemcpy(&ret, ret_d, sizeof(float), cudaMemcpyDeviceToHost));
+  THCudaFree(state, ret_d);
+  return ret;
+#endif
 }
 
 THCStorage* THCStorage_(new)(THCState *state)
@@ -69,14 +80,14 @@ THCStorage* THCStorage_(newWithSize)(THCState *state, long size)
   }
 }
 
-THCStorage* THCStorage_(newWithSize1)(THCState *state, real data0)
+THCStorage* THCStorage_(newWithSize1)(THCState *state, hostreal data0)
 {
   THCStorage *self = THCStorage_(newWithSize)(state, 1);
   THCStorage_(set)(state, self, 0, data0);
   return self;
 }
 
-THCStorage* THCStorage_(newWithSize2)(THCState *state, real data0, real data1)
+THCStorage* THCStorage_(newWithSize2)(THCState *state, hostreal data0, hostreal data1)
 {
   THCStorage *self = THCStorage_(newWithSize)(state, 2);
   THCStorage_(set)(state, self, 0, data0);
@@ -84,7 +95,7 @@ THCStorage* THCStorage_(newWithSize2)(THCState *state, real data0, real data1)
   return self;
 }
 
-THCStorage* THCStorage_(newWithSize3)(THCState *state, real data0, real data1, real data2)
+THCStorage* THCStorage_(newWithSize3)(THCState *state, hostreal data0, hostreal data1, hostreal data2)
 {
   THCStorage *self = THCStorage_(newWithSize)(state, 3);
   THCStorage_(set)(state, self, 0, data0);
@@ -93,7 +104,7 @@ THCStorage* THCStorage_(newWithSize3)(THCState *state, real data0, real data1, r
   return self;
 }
 
-THCStorage* THCStorage_(newWithSize4)(THCState *state, real data0, real data1, real data2, real data3)
+THCStorage* THCStorage_(newWithSize4)(THCState *state, hostreal data0, hostreal data1, hostreal data2, hostreal data3)
 {
   THCStorage *self = THCStorage_(newWithSize)(state, 4);
   THCStorage_(set)(state, self, 0, data0);

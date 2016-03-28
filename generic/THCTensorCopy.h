@@ -18,6 +18,9 @@ THC_API void THCTensor_(copyCudaInt)(THCState *state, THCTensor *storage, struct
 THC_API void THCTensor_(copyCudaLong)(THCState *state, THCTensor *storage, struct THCudaLongTensor *src);
 THC_API void THCTensor_(copyCudaFloat)(THCState *state, THCTensor *storage, struct THCudaTensor *src);
 THC_API void THCTensor_(copyCudaDouble)(THCState *state, THCTensor *storage, struct THCudaDoubleTensor *src);
+#if CUDA_VERSION >= 7050
+THC_API void THCTensor_(copyCudaHalf)(THCState *state, THCTensor *storage, struct THCudaHalfTensor *src);
+#endif
 
 THC_API void TH_CONCAT_2(THByteTensor_copyCuda  , Real)  (THCState *state, THByteTensor *self, THCTensor *src);
 THC_API void TH_CONCAT_2(THCharTensor_copyCuda  , Real)  (THCState *state, THCharTensor *self, THCTensor *src);
@@ -27,10 +30,14 @@ THC_API void TH_CONCAT_2(THLongTensor_copyCuda  , Real)  (THCState *state, THLon
 THC_API void TH_CONCAT_2(THFloatTensor_copyCuda , Real)  (THCState *state, THFloatTensor *self, THCTensor *src);
 THC_API void TH_CONCAT_2(THDoubleTensor_copyCuda, Real)  (THCState *state, THDoubleTensor *self, THCTensor *src);
 THC_API void THCTensor_(copyCuda) (THCState *state, THCTensor *self, THCTensor *src);
+
+/* There is no THHalfTensor */
+#ifndef THC_REAL_IS_HALF
 THC_API void THTensor_(copyCuda) (THCState *state, THTensor *self, THCTensor *src);
 THC_API void THCTensor_(copyCPU) (THCState *state, THCTensor *self, THTensor *src);
 
 THC_API void THCTensor_(copyAsyncCPU)(THCState *state, THCTensor *self, THTensor *src);
 THC_API void THTensor_(copyAsyncCuda)(THCState *state, THTensor *self, THCTensor *src);
+#endif
 
 #endif
