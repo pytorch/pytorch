@@ -3,6 +3,7 @@
 #include "THCTensorRandom.h"
 #include "THCBlas.h"
 #include "THCAllocator.h"
+#include <stdlib.h>
 
 /* Size of scratch space available in global memory per each SM + stream */
 #define GLOBAL_SCRATCH_SPACE_PER_SM_STREAM 4 * sizeof(float)
@@ -630,7 +631,7 @@ static void maybeTriggerGC(THCState *state, long curHeapSize) {
 void THCHeapUpdate(THCState *state, long size) {
   state->heapDelta += size;
   // batch updates to global heapSize to minimize thread contention
-  if (abs(state->heapDelta) < heapMaxDelta) {
+  if (labs(state->heapDelta) < heapMaxDelta) {
     return;
   }
 
