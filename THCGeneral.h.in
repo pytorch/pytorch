@@ -79,6 +79,15 @@ typedef struct THCState
      If i accessing allocs on j is enabled, p2pAccess[i][j] is 1; 0 otherwise. */
   int** p2pAccessEnabled;
 
+  /* Is direct cross-kernel p2p access allowed? Normally, only cross-GPU
+     copies are allowed via p2p if p2p access is enabled at all for
+     the pair of GPUs in question, but if this flag is true, then
+     all cross-GPU access checks are disabled, allowing kernels to
+     directly access memory on another GPUs.
+     Note that p2p access must exist and be enabled for the pair of
+     GPUs in question. */
+  int p2pKernelAccessEnabled;
+
   void (*cutorchGCFunction)(void *data);
   void *cutorchGCData;
   long heapSoftmax;
@@ -97,13 +106,20 @@ THC_API int THCState_getPeerToPeerAccess(THCState* state, int dev, int devToAcce
 /* access. */
 THC_API void THCState_setPeerToPeerAccess(THCState* state, int dev, int devToAccess,
                                           int enable);
+
+/* By default, direct in-kernel access to memory on remote GPUs is
+   disabled. When set, this allows direct in-kernel access to remote
+   GPUs where GPU/GPU p2p access is enabled and allowed. */
+THC_API int THCState_getKernelPeerToPeerAccessEnabled(THCState* state);
+THC_API void THCState_setKernelPeerToPeerAccessEnabled(THCState* state, int val);
+
 THC_API struct cudaDeviceProp* THCState_getCurrentDeviceProperties(THCState* state);
 
 THC_API void THCMagma_init(THCState *state);
 
 /* State manipulators and accessors */
 THC_API int THCState_getNumDevices(THCState* state);
-THC_API void THCState_reserveStreams(THCState* state, int numStreams);
+THC_API void THCState_reserveStreams(THCState* state, int numStreams, int nonBlocking);
 THC_API int THCState_getNumStreams(THCState* state);
 
 THC_API cudaStream_t THCState_getDeviceStream(THCState *state, int device, int stream);
