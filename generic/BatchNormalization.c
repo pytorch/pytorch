@@ -12,7 +12,7 @@ void THNN_(BatchNormalization_updateOutput)(
   long nInput = THTensor_(size)(input, 1);
   long n = THTensor_(nElement)(input) / nInput;
 
-  #pragma parallel for
+  #pragma omp parallel for
   for (long f = 0; f < nInput; ++f) {
     THTensor *in = THTensor_(newSelect)(input, 1, f);
     THTensor *out = THTensor_(newSelect)(output, 1, f);
@@ -75,7 +75,7 @@ void THNN_(BatchNormalization_backward)(
   // Y = Q(X) / σ    ; i.e. BN output before weight and bias
   // dL/dX = (Q(dL/dY) - dot(Y, dL/dY) * Y) / σ * w
 
-  #pragma parallel for
+  #pragma omp parallel for
   for (long f = 0; f < nInput; ++f) {
     THTensor *in = THTensor_(newSelect)(input, 1, f);
     THTensor *gradOut = THTensor_(newSelect)(gradOutput, 1, f);
