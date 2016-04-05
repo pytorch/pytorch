@@ -13,6 +13,9 @@ THCCudaResourcesPerDevice* THCState_getDeviceResourcePtr(
 
 void THCudaInit(THCState* state)
 {
+  state->cutorchGCFunction = NULL;
+  state->cutorchGCData = NULL;
+
   int count = 0;
   THCudaCheck(cudaGetDeviceCount(&count));
 
@@ -73,8 +76,6 @@ void THCudaInit(THCState* state)
   state->currentPerDeviceBlasHandle = 1;
   state->currentBlasHandle = THCState_getDeviceBlasHandle(state, device, 1);
 
-  state->cutorchGCFunction = NULL;
-  state->cutorchGCData = NULL;
   state->heapSoftmax = 3e8; // 300MB, adjusted upward dynamically
   state->heapDelta = 0;
 }
