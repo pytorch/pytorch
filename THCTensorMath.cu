@@ -7,6 +7,7 @@
 #include "THCReduceAll.cuh"
 
 #include <thrust/functional.h>
+#include <cfloat>
 
 struct TensorFillOp {
   TensorFillOp(float v) : val(v) {}
@@ -277,11 +278,11 @@ void THCudaTensor_addcdiv(THCState *state, THCudaTensor *self_, THCudaTensor *t,
 float THCudaTensor_minall(THCState *state, THCudaTensor *self)
 {
   THAssert(THCudaTensor_checkGPU(state, 1, self));
-  float val = (float) THInf;
+  float val = FLT_MAX;
   if (!THCudaTensor_reduceAll(state, self,
                               thrust::identity<float>(),
                               thrust::minimum<float>(),
-                              (float) THInf, &val, 0)) {
+                              FLT_MAX, &val, 0)) {
     THArgCheck(false, 1, CUTORCH_DIM_WARNING);
   }
 
@@ -292,11 +293,11 @@ float THCudaTensor_minall(THCState *state, THCudaTensor *self)
 float THCudaTensor_maxall(THCState *state, THCudaTensor *self)
 {
   THAssert(THCudaTensor_checkGPU(state, 1, self));
-  float val = (float) -THInf;
+  float val = -FLT_MAX;
   if (!THCudaTensor_reduceAll(state, self,
                               thrust::identity<float>(),
                               thrust::maximum<float>(),
-                              (float) -THInf, &val, 0)) {
+                              -FLT_MAX, &val, 0)) {
     THArgCheck(false, 1, CUTORCH_DIM_WARNING);
   }
 
