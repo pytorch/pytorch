@@ -5,23 +5,27 @@
 #define real float
 #define accreal double
 #define Real Float
+#define THInf FLT_MAX
 #define TH_REAL_IS_FLOAT
 #line 1 TH_GENERIC_FILE
 #include TH_GENERIC_FILE
 #undef accreal
 #undef real
 #undef Real
+#undef THInf
 #undef TH_REAL_IS_FLOAT
 
 #define real double
 #define accreal double
 #define Real Double
+#define THInf DBL_MAX
 #define TH_REAL_IS_DOUBLE
 #line 1 TH_GENERIC_FILE
 #include TH_GENERIC_FILE
 #undef accreal
 #undef real
 #undef Real
+#undef THInf
 #undef TH_REAL_IS_DOUBLE
 
 #undef TH_GENERIC_FILE

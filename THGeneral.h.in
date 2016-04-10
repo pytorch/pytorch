@@ -31,8 +31,6 @@
 # define TH_API TH_EXTERNC
 #endif
 
-#define THInf DBL_MAX
-
 #define TH_INLINE @TH_INLINE@
 
 #ifndef __cplusplus

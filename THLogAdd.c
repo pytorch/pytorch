@@ -1,5 +1,7 @@
 #include "THLogAdd.h"
 
+#include <float.h>
+
 #ifdef USE_DOUBLE
 #define MINUS_LOG_THRESHOLD -39.14
 #else
@@ -7,7 +9,7 @@
 #endif
 
 const double THLog2Pi=1.83787706640934548355;
-const double THLogZero=-THInf;
+const double THLogZero=-DBL_MAX;
 const double THLogOne=0;
 
 double THLogAdd(double log_a, double log_b)
