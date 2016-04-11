@@ -147,6 +147,13 @@ TH_API void THNN_CudaLookupTable_accGradParameters(
           int paddingValue,
           float scale);
 
+TH_API void THNN_CudaLookupTable_renorm(
+          THCState *state,
+          THIndexTensor *idx,
+          THCudaTensor *weight,
+          float maxNorm,
+          float normType);
+
 TH_API void THNN_CudaMarginCriterion_updateOutput(
           THCState *state,
           THCudaTensor *input,

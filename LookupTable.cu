@@ -4,9 +4,11 @@
 #include <thrust/device_ptr.h>
 #include <thrust/execution_policy.h>
 #include <thrust/iterator/constant_iterator.h>
+#include <thrust/transform_reduce.h>
 #if CUDA_VERSION >= 7000
 #include <thrust/system/cuda/execution_policy.h>
 #endif
+#include <thrust/unique.h>
 
 #ifndef DIVUP
 #define DIVUP(x, y) (((x) + (y) - 1) / (y))
@@ -259,4 +261,79 @@ void THNN_CudaLookupTable_accGradParameters(
     stride,
     paddingValue
   );
+}
+
+/*
+ * Keep the norm of weight smaller than maxNorm
+ */
+template <typename T>
+struct pow_v
+{
+  T normType;
+  pow_v(T v) : normType(v) {}
+  __host__ __device__
+  T operator()(const T& x) const {
+    if (normType == 1)
+      return std::abs(x);
+    else if (normType == 2)
+      return x * x;
+    else
+      return std::pow(std::abs(x), normType);
+  }
+};
+
+template <typename T>
+struct multiply_s
+{
+  T scale;
+  multiply_s(T s) : scale(s) {}
+  __host__ __device__
+  T operator()(const T& x) const {
+    return x * scale;
+  }
+};
+
+void THNN_CudaLookupTable_renorm(
+  THCState *state,
+  THIndexTensor *idx,
+  THCudaTensor *weight,
+  float maxNorm,
+  float normType)
+{
+  THCUNN_assertSameGPU(state, 2, idx, weight);
+  if (!(THCudaTensor_isContiguous(state, idx) &&
+        THCudaTensor_isContiguous(state, weight)))
+  {
+    THError("Tensors must be contiguous");
+  }
+  if (THCudaTensor_nDimension(state, idx) != 1)
+    THError("idx must be a vector");
+  if (normType <= 0)
+    THError("non-positive-norm not supported");
+
+  long numel = THCudaTensor_nElement(state, idx);
+  long stride = weight->stride[0];
+
+  // get the unique indices
+  thrust::device_ptr<float> weight_ptr(THCudaTensor_data(state, weight));
+  thrust::device_ptr<float> idx_ptr(THCudaTensor_data(state, idx));
+  thrust::device_ptr<float> end_ptr = thrust::unique(idx_ptr, idx_ptr+numel);
+  numel = end_ptr - idx_ptr;
+
+  pow_v<float> unary_pow(normType);
+  thrust::plus<float> binary_plus;
+  // numel << stride, since idx usually contains sparse row indices
+  for (long i = 0; i < numel; i++)
+  {
+    long k = idx_ptr[i] - 1;
+    thrust::device_ptr<float> row_ptr = weight_ptr + k * stride;
+    float norm = thrust::transform_reduce(row_ptr, row_ptr + stride,
+      unary_pow, 0, binary_plus);
+    norm = std::pow(norm, 1.0 / normType);
+    if (norm > maxNorm)
+    {
+      multiply_s<float> unary_mul(maxNorm / (norm + 1e-7));
+      thrust::transform(row_ptr, row_ptr + stride, row_ptr, unary_mul);
+    }
+  }
 }
