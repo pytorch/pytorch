@@ -116,4 +116,98 @@ void THNN_(LookupTable_accGradParameters)(
   THTensor_(free)(gradOutput);
 }
 
+/*
+ * Keep the norm of weight smaller than maxNorm
+ */
+
+static void THNN_(LookupTable_renormRow)(
+          real *row_data,
+          long stride,
+          real maxNorm,
+          real normType)
+{
+  real norm = 0;
+  real new_norm;
+  long j;
+  for (j=0; j<stride; j++)
+  {
+    if (normType == 1) {
+      norm += fabs(row_data[j]);
+    } else if (normType == 2) {
+      norm += row_data[j] * row_data[j];
+    } else {
+      norm += pow(fabs(row_data[j]), normType);
+    }
+  }
+  norm = pow(norm, 1.0 / normType);
+  if (norm > maxNorm)
+  {
+    new_norm = maxNorm / (norm + 1e-7);
+    for (j=0; j<stride; j++) {
+      row_data[j] *= new_norm;
+    }
+  }
+}
+
+static int THNN_(compare_THIndex)(const void* a, const void* b)
+{
+   return *(const THIndex_t*)a < *(const THIndex_t*)b ? -1 : 1;
+}
+
+void THNN_(LookupTable_renorm)(
+          THNNState *state,
+          THIndexTensor *idx,
+          THTensor *weight,
+          real maxNorm,
+          real normType)
+{
+  if (!THTensor_(isContiguous)(weight))
+    THError("weight must be contiguous");
+  if (!THIndexTensor_(isContiguous)(idx))
+    THError("input must be contiguous");
+  if (THIndexTensor_(nDimension)(idx) != 1)
+    THError("idx must be a vector");
+  if (normType <= 0)
+    THError("non-positive-norm not supported");
+
+  long i;
+  THIndex_t *row_idx = THIndexTensor_(data)(idx);
+  long numel = THIndexTensor_(nElement)(idx);
+
+  long numw = THTensor_(size)(weight, 0);
+  long stride = THTensor_(stride)(weight, 0);
+  real *gw = THTensor_(data)(weight);
+  for (i=0; i<numel; i++)
+    if (row_idx[i] < 1 || row_idx[i] > numw)
+      THError("input out of range");
+  // get unique indices
+  qsort(row_idx, numel, sizeof(THIndex_t), THNN_(compare_THIndex));
+  long ptr = 0;
+  for (i=0; i<numel; i++)
+    if (i == 0 || row_idx[i] != row_idx[i-1])
+      row_idx[ptr++] = row_idx[i];
+  numel = ptr;
+
+#ifdef _OPENMP
+  if (numel > 1000)
+  {
+    // The strategy is to parallelize over the rows that appear in
+    // row_idx, so that thread 1 handles the rows in row_idx[0..numel/nThreads].
+    // This distributes the work evenly to each thread.
+    #pragma omp parallel for private(i)
+    for (i=0; i<numel; i++)
+    {
+      long k = row_idx[i] - 1;
+      THNN_(LookupTable_renormRow)(gw + k*stride, stride, maxNorm, normType);
+    }
+    return;
+  }
+#endif
+  for (i=0; i<numel; i++)
+  {
+    long k = row_idx[i] - 1;
+    THNN_(LookupTable_renormRow)(gw + k*stride, stride, maxNorm, normType);
+  }
+}
+
 #endif
