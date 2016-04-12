@@ -4,6 +4,8 @@
 #include "THCDeviceTensorUtils.cuh"
 #include "THCDeviceUtils.cuh"
 
+#include <cfloat>
+
 __device__ inline float getInterval(float sample,
                                     int index,
                                     int inputSize,
@@ -41,7 +43,7 @@ __global__ void SpatialFractionalMaxPooling_updateOutput(
     int poolH = getInterval(samples[batch][plane][1], outputH,
                             input.getSize(2), output.getSize(2), poolSizeH);
 
-    float maxVal = -THInf;
+    float maxVal = -FLT_MAX;
     int maxIndex = -1;
 
     for (int h = poolH; h < poolH + poolSizeH; ++h) {
@@ -62,7 +64,7 @@ __global__ void SpatialFractionalMaxPooling_updateOutput(
       }
     }
 
-    assert(maxVal != -THInf);
+    assert(maxVal != -FLT_MAX);
     assert(maxIndex != -1);
 
     // +1 for Lua index

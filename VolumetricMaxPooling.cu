@@ -4,6 +4,8 @@
 #include "THCDeviceTensorUtils.cuh"
 #include "THCDeviceUtils.cuh"
 
+#include <cfloat>
+
 __global__ void cuda_VolumetricMaxPooling_updateOutput(
   THCDeviceTensor<float, 4> input,
   THCDeviceTensor<float, 4> indices,
@@ -27,7 +29,7 @@ __global__ void cuda_VolumetricMaxPooling_updateOutput(
     int maxRow = 0;
     int maxFrame = 0;
 
-    float max = -THInf;
+    float max = -FLT_MAX;
 
     for (int frame = 0; frame < kT; ++frame)
     {
@@ -89,7 +91,7 @@ __global__ void cuda_VolumetricMaxPooling_updateOutput(
     int maxRow = 0;
     int maxFrame;
 
-    float max = -THInf;
+    float max = -FLT_MAX;
 
     for (int frame = 0; frame < kT; ++frame)
     {
