@@ -40,10 +40,10 @@ BUILDDIR := build
 
 NVCC       := $(CUDA_HOME)/bin/nvcc
 
-GPP        := g++
+GPP        ?= g++
 CPPFLAGS   := -I$(CUDA_HOME)/include
 CXXFLAGS   := -O3 -fPIC -fvisibility=hidden
-NVCUFLAGS  := $(CUDACODE) -O3 -lineinfo -std=c++11 -maxrregcount 96
+NVCUFLAGS  := $(CUDACODE) -O3 -lineinfo -std=c++11 -maxrregcount 96 -ccbin=${GPP}
 
 ifneq ($(VERBOSE), 0)
 NVCUFLAGS += -Xptxas -v -Xcompiler -Wall,-Wextra
