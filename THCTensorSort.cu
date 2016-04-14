@@ -430,7 +430,6 @@ THC_API void THCudaTensor_sort(THCState* state,
   THCudaTensor_resizeAs(state, indices, input);
 
   // How large are the slices that we are sorting?
-  long totalElements = THCudaTensor_nElement(state, input);
   long sliceSize = THCudaTensor_size(state, input, dim);
 
   // We're using THCudaTensor to write out indices, so if the slice

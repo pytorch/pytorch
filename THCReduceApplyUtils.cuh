@@ -187,8 +187,8 @@ TensorInfo<IndexType>::collapseDims(int excludeDim) {
   }
 
   for (int i = firstNonOneDim - 1; i >= 0; --i) {
-    long sizeOuter = sizes[i];
-    long strideOuter = strides[i];
+    IndexType sizeOuter = sizes[i];
+    IndexType strideOuter = strides[i];
 
     if ((excludeDim != i) && (excludeDim != i + 1)) {
       if (sizeOuter == 1) {
