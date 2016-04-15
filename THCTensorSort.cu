@@ -106,6 +106,9 @@ void THCudaTensor_fillSliceWithIndex(THCState* state,
   THCudaCheck(cudaGetLastError());
 }
 
+// In alignment with default sort on a c++ map, this function
+// will permute key and value tensors identically, and
+// in such a way that the 'key' tensor is ordered numerically
 THC_API void THCudaTensor_sortKeyValueInplace(THCState* state,
                                               THCudaTensor* key,
                                               THCudaTensor* value,
