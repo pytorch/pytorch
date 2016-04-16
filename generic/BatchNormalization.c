@@ -73,7 +73,7 @@ void THNN_(BatchNormalization_backward)(
 
   // Q(X) = X - E[x] ; i.e. input centered to zero mean
   // Y = Q(X) / σ    ; i.e. BN output before weight and bias
-  // dL/dX = (Q(dL/dY) - dot(Y, dL/dY) * Y) / σ * w
+  // dL/dX = (Q(dL/dY) - dot(Y, dL/dY) * Y / n) / σ * w
 
   #pragma omp parallel for
   for (long f = 0; f < nInput; ++f) {
