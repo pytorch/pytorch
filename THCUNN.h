@@ -480,9 +480,13 @@ TH_API void THNN_CudaBatchNormalization_backward(
           THCudaTensor *gradWeight,
           THCudaTensor *gradBias,
           THCudaTensor *weight,
-          THCudaTensor *saveMean,
-          THCudaTensor *saveStd,
-          float scale);
+          THCudaTensor *running_mean,
+          THCudaTensor *running_var,
+          THCudaTensor *save_mean,
+          THCudaTensor *save_std,
+          bool train,
+          float scale,
+          double eps);
 
 TH_API void THNN_CudaSpatialConvolutionMM_updateOutput(
           THCState *state,
