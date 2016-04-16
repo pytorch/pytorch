@@ -130,7 +130,7 @@ static long getAllocSize(void *ptr) {
 #elif defined(__APPLE__)
   return malloc_size(ptr);
 #elif defined(_WIN32)
-  return _msize(ptr);
+  if(ptr) { return _msize(ptr); } else { return 0; }
 #else
   return 0;
 #endif
