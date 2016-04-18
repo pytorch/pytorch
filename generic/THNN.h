@@ -593,7 +593,6 @@ TH_API void THNN_(SpatialConvolutionMM_updateGradInput)(
           THTensor *gradOutput,
           THTensor *gradInput,
           THTensor *weight,
-          THTensor *bias,
           THTensor *finput,
           THTensor *fgradInput,
           int kW, int kH,
