@@ -5,11 +5,13 @@
 
 void THNN_CudaSpatialConvolutionMM_updateOutput(THCState *state, THCudaTensor *input, THCudaTensor *output, THCudaTensor *weight, THCudaTensor *bias, THCudaTensor *columns, THCudaTensor *ones, int kW, int kH, int dW, int dH, int padW, int padH) {
 
-  THCUNN_assertSameGPU(state, 6, input, output, weight,
-                                 bias, columns, ones);
+  THCUNN_assertSameGPU(state, 5, input, output, weight, columns, ones);
+  if (bias) {
+    THCUNN_assertSameGPU(state, 2, weight, bias);
+  }
   THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch mode) tensor is expected");
   THArgCheck(weight->nDimension == 2, 4, "weight tensor must be 2D (nOutputPlane,nInputPlane*kH*kW)");
-  THArgCheck(weight->size[0] == bias->size[0], 4, "nOutputPlane mismatch in weight and bias");
+  THArgCheck(!bias || weight->size[0] == bias->size[0], 4, "nOutputPlane mismatch in weight and bias");
   THArgCheck(kW > 0 && kH > 0, 8, "kernel size should be greater than zero");
   THArgCheck(dW > 0 && dH > 0, 10, "stride should be greater than zero");
 
@@ -72,16 +74,20 @@ void THNN_CudaSpatialConvolutionMM_updateOutput(THCState *state, THCudaTensor *i
     long k_ = 1;
 
     // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
-    THCudaBlas_gemm(
-        state,
-        't', 'n',
-        n_, m_, k_,
-        1,
-        THCudaTensor_data(state, ones), k_,
-        THCudaTensor_data(state, bias), k_,
-        0,
-        THCudaTensor_data(state, output_n), n_
-    );
+    if (bias) {
+      THCudaBlas_gemm(
+          state,
+          't', 'n',
+          n_, m_, k_,
+          1,
+          THCudaTensor_data(state, ones), k_,
+          THCudaTensor_data(state, bias), k_,
+          0,
+          THCudaTensor_data(state, output_n), n_
+      );
+    } else {
+      THCudaTensor_zero(state, output_n);
+    }
 
     // Extract columns:
     im2col(
@@ -121,13 +127,12 @@ void THNN_CudaSpatialConvolutionMM_updateOutput(THCState *state, THCudaTensor *i
   }
 }
 
-void THNN_CudaSpatialConvolutionMM_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput, THCudaTensor *gradInput, THCudaTensor *weight, THCudaTensor *bias, THCudaTensor *gradColumns, THCudaTensor *ones, int kW, int kH, int dW, int dH, int padW, int padH) {
+void THNN_CudaSpatialConvolutionMM_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput, THCudaTensor *gradInput, THCudaTensor *weight, THCudaTensor *gradColumns, THCudaTensor *ones, int kW, int kH, int dW, int dH, int padW, int padH) {
 
   THCUNN_assertSameGPU(state, 5, input, gradOutput, weight,
                                  gradColumns, gradInput);
   THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch mode) tensor is expected");
   THArgCheck(weight->nDimension == 2, 4, "weight tensor must be 2D (nOutputPlane,nInputPlane*kH*kW)");
-  THArgCheck(weight->size[0] == bias->size[0], 4, "nOutputPlane mismatch in weight and bias");
   THArgCheck(kW > 0 && kH > 0, 9, "kernel size should be greater than zero");
   THArgCheck(dW > 0 && dH > 0, 11, "stride should be greater than zero");
 
@@ -208,11 +213,13 @@ void THNN_CudaSpatialConvolutionMM_updateGradInput(THCState *state, THCudaTensor
 
 void THNN_CudaSpatialConvolutionMM_accGradParameters(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput, THCudaTensor *gradWeight, THCudaTensor *gradBias, THCudaTensor *columns, THCudaTensor *ones, int kW, int kH, int dW, int dH, int padW, int padH, float scale) {
 
-  THCUNN_assertSameGPU(state, 6, input, gradOutput, gradWeight,
-                                 gradBias, columns, ones);
+  THCUNN_assertSameGPU(state, 5, input, gradOutput, gradWeight, columns, ones);
+  if (gradBias) {
+   THCUNN_assertSameGPU(state, 2, gradWeight, gradBias);
+  }
   THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch mode) tensor is expected");
   THArgCheck(gradWeight->nDimension == 2, 4, "gradWeight tensor must be 2D (nOutputPlane,nInputPlane*kH*kW)");
-  THArgCheck(gradWeight->size[0] == gradBias->size[0], 4, "nOutputPlane mismatch in gradWeight and gradBias");
+  THArgCheck(!gradBias || gradWeight->size[0] == gradBias->size[0], 4, "nOutputPlane mismatch in gradWeight and gradBias");
   THArgCheck(kW > 0 && kH > 0, 8, "kernel size should be greater than zero");
   THArgCheck(dW > 0 && dH > 0, 10, "stride should be greater than zero");
 
@@ -289,16 +296,18 @@ void THNN_CudaSpatialConvolutionMM_accGradParameters(THCState *state, THCudaTens
     long k_ = outputHeight * outputWidth;
 
     // Do GEMV (note: this is a bit confusing because gemv assumes column-major matrices)
-    THCudaBlas_gemv(
-        state,
-        't',
-        k_, m_,
-        scale,
-        THCudaTensor_data(state, gradOutput_n), k_,
-        THCudaTensor_data(state, ones), 1,
-        1,
-        THCudaTensor_data(state, gradBias), 1
-    );
+    if (gradBias) {
+      THCudaBlas_gemv(
+          state,
+          't',
+          k_, m_,
+          scale,
+          THCudaTensor_data(state, gradOutput_n), k_,
+          THCudaTensor_data(state, ones), 1,
+          1,
+          THCudaTensor_data(state, gradBias), 1
+      );
+    }
   }
 
   // Free
