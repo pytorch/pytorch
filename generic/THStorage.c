@@ -150,11 +150,35 @@ void THStorage_(resize)(THStorage *storage, long size)
 {
   if(storage->flag & TH_STORAGE_RESIZABLE)
   {
-    storage->data = storage->allocator->realloc(
-        storage->allocatorContext,
-        storage->data,
-        sizeof(real)*size);
-    storage->size = size;
+    if(storage->allocator->realloc == NULL) {
+      /* case when the allocator does not have a realloc defined */
+      real *old_data = storage->data;
+      long  old_size = storage->size;
+      if (size == 0) {
+	storage->data = NULL;
+      } else {
+	storage->data = storage->allocator->malloc(
+						   storage->allocatorContext,
+						   sizeof(real)*size);
+      }
+      storage->size = size;
+      if (old_data != NULL) {
+	long copy_size = old_size;
+	if (storage->size < copy_size) {
+	  copy_size = storage->size;
+	}
+	if (copy_size > 0) {
+	  memcpy(storage->data, old_data, sizeof(real)*copy_size);
+	}
+	storage->allocator->free(storage->allocatorContext, old_data);
+      }
+    } else {
+      storage->data = storage->allocator->realloc(
+						  storage->allocatorContext,
+						  storage->data,
+						  sizeof(real)*size);
+      storage->size = size;
+    }
   } else {
     THError("Trying to resize storage that is not resizable");
   }
