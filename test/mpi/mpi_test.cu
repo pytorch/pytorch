@@ -47,7 +47,9 @@ int main(int argc, char *argv[]) {
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
   if (argc < size) {
-    printf("Usage : %s <GPU list per rank>\n", argv[0]);
+    if (rank == 0)
+      printf("Usage : %s <GPU list per rank>\n", argv[0]);
+    exit(1);
   }
 
   int gpu = atoi(argv[rank+1]);
