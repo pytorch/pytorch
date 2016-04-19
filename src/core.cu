@@ -188,7 +188,7 @@ static void syncRingDirect(RankGather* gather, int* ringDirectOk) {
     swapped = __sync_bool_compare_and_swap(&gather->bar, bar_tmp, bar_tmp+1);
   } while(!swapped);
 
-  while (gather->bar != 2*ndev) // Wait for all ranks to arrive at this second barrier
+  while (gather->bar < 2*ndev) // Wait for all ranks to arrive at this second barrier
     sched_yield();
   __sync_synchronize();
 
@@ -203,7 +203,7 @@ static ncclResult_t closeGather(RankGather* gather, int ndev) {
     swapped = __sync_bool_compare_and_swap(&gather->bar, bar_tmp, bar_tmp+1);
   } while(!swapped);
 
-  while (gather->bar != 3*ndev) // Wait for all ranks to arrive at this third barrier
+  while (gather->bar < 3*ndev) // Wait for all ranks to arrive at this third barrier
     sched_yield();
   __sync_synchronize();
 
