@@ -32,17 +32,17 @@ $ cd nccl
 $ make CUDA_HOME=<cuda install path> test
 ```
 
-Test binaries are located in the subdirectories nccl/build/test and nccl/build/mpitest.
+Test binaries are located in the subdirectories nccl/build/test/{single,mpi}.
 
 ```shell
 $ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:./build/lib
-$ ./build/test/all_reduce_test
+$ ./build/test/single/all_reduce_test
 Error: must specify at least data size in bytes!
 
 Tests nccl AllReduce with user supplied arguments.
     Usage: all_reduce_test <data size in bytes> [number of GPUs] [GPU 0] [GPU 1] ...
 
-$ ./build/test/all_reduce_test 10000000
+$ ./build/test/single/all_reduce_test 10000000
 # Using devices
 #   Device  0 ->  0 [0x0a] GeForce GTX TITAN X
 #   Device  1 ->  1 [0x09] GeForce GTX TITAN X
