@@ -31,6 +31,7 @@
 #define SRC_TEST_UTILITIES_H_
 
 #include <curand.h>
+#include <string>
 
 #define CUDACHECK(cmd) do {                         \
   cudaError_t e = cmd;                              \

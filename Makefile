@@ -50,7 +50,7 @@ NVCUFLAGS += -Xptxas -v -Xcompiler -Wall,-Wextra
 CXXFLAGS  += -Wall -Wextra
 endif
 
-LDFLAGS    := -Wl,--no-as-needed -L$(CUDA_HOME)/lib64 -lcudart
+LDFLAGS    := -L$(CUDA_HOME)/lib64 -lcudart
 MPIFLAGS   := -I$(MPI_HOME)/include -L$(MPI_HOME)/lib -lmpi
 TSTINC     := -Ibuild/include -Itest/include
 
@@ -88,7 +88,7 @@ lib : $(INCTARGETS) $(LIBDIR)/$(LIBTARGET)
 $(LIBDIR)/$(LIBTARGET) : $(LIBOBJ)
 	@printf "Linking   %-25s\n" $@
 	@mkdir -p $(LIBDIR)
-	@$(GPP) $(CPPFLAGS) $(CXXFLAGS) -shared -Wl,-soname,$(LIBSONAME) -o $@ $(LDFLAGS) $(LIBOBJ)
+	@$(GPP) $(CPPFLAGS) $(CXXFLAGS) -shared -Wl,--no-as-needed -Wl,-soname,$(LIBSONAME) -o $@ $(LDFLAGS) $(LIBOBJ)
 	@ln -sf $(LIBSONAME) $(LIBDIR)/$(LIBNAME)
 	@ln -sf $(LIBTARGET) $(LIBDIR)/$(LIBSONAME)
 
