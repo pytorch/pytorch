@@ -73,7 +73,7 @@ THCTensor_(copy)(THCState* state, THCTensor* dst, THCTensor* src) {
                                 cudaMemcpyDeviceToDevice,
                                 copyStream));
   } else {
-#ifdef THC_REAL_IS_FLOAT
+#if defined(THC_REAL_IS_FLOAT)
     // Non-contiguous copy
 
     // We avoid creating temporary memory copies if possible.
