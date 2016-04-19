@@ -50,7 +50,7 @@ NVCUFLAGS += -Xptxas -v -Xcompiler -Wall,-Wextra
 CXXFLAGS  += -Wall -Wextra
 endif
 
-LDFLAGS    := -L$(CUDA_HOME)/lib64 -lcudart
+LDFLAGS    := -Wl,--no-as-needed -L$(CUDA_HOME)/lib64 -lcudart
 MPIFLAGS   := -I$(MPI_HOME)/include -L$(MPI_HOME)/lib -lmpi
 TSTINC     := -Ibuild/include -Itest/include
 
