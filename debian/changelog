@@ -1,3 +1,9 @@
+nccl (1.1.2-1+cuda7.5) trusty; urgency=medium
+
+  * Merged public bugfixes
+
+ -- Boris Fomitchev <bfomitchev@nvidia.com>  Thu, 21 Apr 2016 10:07:01 -0800
+
 nccl (1.1.1-1+cuda7.5) trusty; urgency=medium
 
   * Rebuilding with 7.5
