@@ -34,7 +34,7 @@ typedef struct THStorage
 
 TH_API real* THStorage_(data)(const THStorage*);
 TH_API long THStorage_(size)(const THStorage*);
-TH_API int THStorage_(elementSize)();
+TH_API int THStorage_(elementSize)(void);
 
 /* slow access -- checks everything */
 TH_API void THStorage_(set)(THStorage*, long, real);
