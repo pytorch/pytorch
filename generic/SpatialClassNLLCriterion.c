@@ -102,7 +102,7 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
 
   real normalize = sizeAverage ? *total_weight_data : 1.0f;
 
-#pragma omp parallel for private(i)
+#pragma omp parallel for
   for (int b = 0; b < batch_size; b++) {
     for (int elem = 0; elem < map_size; elem++) {
       int cur_target = target_data[b * map_size + elem] - 1;
