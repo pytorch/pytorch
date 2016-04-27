@@ -46,7 +46,7 @@ void THNN_(LogSoftMax_updateOutput)(
       maxInput = THMax(maxInput, input_data[d]);
 
     for (d = 0; d < dim; d++)
-      logsum += THExpMinusApprox(maxInput-input_data[d]);
+      logsum += exp(input_data[d] - maxInput);
     logsum = maxInput + log(logsum);
 
     for (d = 0; d < dim; d++)
