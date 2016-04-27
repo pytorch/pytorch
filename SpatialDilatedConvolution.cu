@@ -1,27 +1,27 @@
 #include "THCUNN.h"
+#include "common.h"
 #include "im2col.h"
 
 
-void THNN_CudaSpatialFullConvolution_updateOutput(
-    THCState *state,
-    THCudaTensor *input,
-    THCudaTensor *output,
-    THCudaTensor *weight,
-    THCudaTensor *bias,
-    THCudaTensor *columns,
-    THCudaTensor *ones,
-    int kW, int kH,
-    int dW, int dH,
-    int padW, int padH,
-    int adjW, int adjH)
-{
+void THNN_CudaSpatialDilatedConvolution_updateOutput(THCState *state,
+            THCudaTensor *input, THCudaTensor *output, THCudaTensor *weight,
+            THCudaTensor *bias, THCudaTensor *columns,
+            THCudaTensor *ones, int kW, int kH, int dW, int dH,
+            int padW, int padH, int dilationW, int dilationH) {
 
-  int nInputPlane = THCudaTensor_size(state, weight, 0);
-  int nOutputPlane = THCudaTensor_size(state, weight, 1);
-
-  THCUNN_assertSameGPU(state, 6, input, output, weight,
-                                 bias, columns, ones);
+  THCUNN_assertSameGPU(state, 5, input, output, weight, columns, ones);
+  if (bias) {
+    THCUNN_assertSameGPU(state, 2, weight, bias);
+  }
   THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch mode) tensor is expected");
+  THArgCheck(weight->nDimension == 4, 4, "weight tensor must be 4D (nOutputPlane,nInputPlane,kH,kW)");
+  THArgCheck(!bias || weight->size[0] == bias->size[0], 4, "nOutputPlane mismatch in weight and bias");
+  THArgCheck(kW > 0 && kH > 0, 8, "kernel size should be greater than zero");
+  THArgCheck(dW > 0 && dH > 0, 10, "stride should be greater than zero");
+
+  // Params:
+  int nInputPlane = weight->size[1];
+  int nOutputPlane = weight->size[0];
 
   int batch = 1;
   if (input->nDimension == 3) {
@@ -35,8 +35,12 @@ void THNN_CudaSpatialFullConvolution_updateOutput(
 
   long inputWidth   = input->size[3];
   long inputHeight  = input->size[2];
-  long outputWidth  = (inputWidth - 1) * dW - 2*padW + kW + adjW;
-  long outputHeight = (inputHeight - 1) * dH - 2*padH + kH + adjH;
+  long outputWidth  = (inputWidth + 2*padW - (dilationW * (kW - 1) + 1)) / dW + 1;
+  long outputHeight = (inputHeight + 2*padH - (dilationH * (kH - 1) + 1)) / dH + 1;
+
+  if (outputWidth < 1 || outputHeight < 1)
+    THError("Given input size: (%dx%dx%d). Calculated output size: (%dx%dx%d). Output size is too small",
+        nInputPlane,inputHeight,inputWidth,nOutputPlane,outputHeight,outputWidth);
 
   // Batch size + input planes
   long batchSize = input->size[0];
@@ -45,7 +49,7 @@ void THNN_CudaSpatialFullConvolution_updateOutput(
   THCudaTensor_resize4d(state, output, batchSize, nOutputPlane, outputHeight, outputWidth);
 
   // Resize temporary columns
-  THCudaTensor_resize2d(state, columns, nOutputPlane*kW*kH, inputHeight*inputWidth);
+  THCudaTensor_resize2d(state, columns, nInputPlane*kW*kH, outputHeight*outputWidth);
 
   // Define a buffer of ones, for bias accumulation
   // Note: this buffer can be shared with other modules, it only ever gets increased,
@@ -66,33 +70,7 @@ void THNN_CudaSpatialFullConvolution_updateOutput(
     THCudaTensor_select(state, input_n, input, 0, elt);
     THCudaTensor_select(state, output_n, output, 0, elt);
 
-    // M,N,K are dims of matrix A and B
-    // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
-    long m = weight->size[1] * weight->size[2] * weight->size[3];
-    long n = columns->size[1];
-    long k = weight->size[0];
-
-    // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
-    THCudaBlas_gemm(
-        state,
-        'n', 't',
-        n, m, k,
-        1,
-        THCudaTensor_data(state, input_n), n,
-        THCudaTensor_data(state, weight), m,
-        0,
-        THCudaTensor_data(state, columns), n
-    );
-
-    // Unpack columns back into input:
-    col2im(
-      THCState_getCurrentStream(state),
-      THCudaTensor_data(state, columns),
-      nOutputPlane, outputHeight, outputWidth, kH, kW, padH, padW, dH, dW,
-      1, 1, THCudaTensor_data(state, output_n)
-    );
-
-    // Do Bias after:
+    // Do Bias first:
     // M,N,K are dims of matrix A and B
     // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
     long m_ = nOutputPlane;
@@ -100,17 +78,47 @@ void THNN_CudaSpatialFullConvolution_updateOutput(
     long k_ = 1;
 
     // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
-    THCudaBlas_gemm(
-        state,
-        't', 'n',
-        n_, m_, k_,
-        1,
-        THCudaTensor_data(state, ones), k_,
-        THCudaTensor_data(state, bias), k_,
-        1,
-        THCudaTensor_data(state, output_n), n_
+    if (bias) {
+      THCudaBlas_gemm(
+          state,
+          't', 'n',
+          n_, m_, k_,
+          1,
+          THCudaTensor_data(state, ones), k_,
+          THCudaTensor_data(state, bias), k_,
+          0,
+          THCudaTensor_data(state, output_n), n_
+      );
+    } else {
+      THCudaTensor_zero(state, output_n);
+    }
+
+    // Extract columns:
+    im2col(
+      THCState_getCurrentStream(state),
+      THCudaTensor_data(state, input_n),
+      nInputPlane, inputHeight, inputWidth, kH, kW, padH, padW, dH, dW,
+      dilationH, dilationW,
+      THCudaTensor_data(state, columns)
     );
 
+    // M,N,K are dims of matrix A and B
+    // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
+    long m = nOutputPlane;
+    long n = columns->size[1];
+    long k = nInputPlane*kH*kW;
+
+    // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
+    THCudaBlas_gemm(
+        state,
+        'n', 'n',
+        n, m, k,
+        1,
+        THCudaTensor_data(state, columns), n,
+        THCudaTensor_data(state, weight), k,
+        1,
+        THCudaTensor_data(state, output_n), n
+    );
   }
 
   // Free
@@ -124,24 +132,23 @@ void THNN_CudaSpatialFullConvolution_updateOutput(
   }
 }
 
-void THNN_CudaSpatialFullConvolution_updateGradInput(
-    THCState *state,
-    THCudaTensor *input,
-    THCudaTensor *gradOutput,
-    THCudaTensor *gradInput,
-    THCudaTensor *weight,
-    THCudaTensor *gradColumns,
-    int kW, int kH,
-    int dW, int dH,
-    int padW, int padH,
-    int adjW, int adjH)
-{
-  int nInputPlane = THCudaTensor_size(state, weight, 0);
-  int nOutputPlane = THCudaTensor_size(state, weight, 1);
+void THNN_CudaSpatialDilatedConvolution_updateGradInput(THCState *state,
+               THCudaTensor *input, THCudaTensor *gradOutput,
+               THCudaTensor *gradInput, THCudaTensor *weight,
+               THCudaTensor *gradColumns,
+               int kW, int kH, int dW, int dH, int padW, int padH,
+               int dilationW, int dilationH ) {
 
   THCUNN_assertSameGPU(state, 5, input, gradOutput, weight,
                                  gradColumns, gradInput);
   THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch mode) tensor is expected");
+  THArgCheck(weight->nDimension == 4, 4, "weight tensor must be 4D (nOutputPlane,nInputPlane,kH,kW)");
+  THArgCheck(kW > 0 && kH > 0, 9, "kernel size should be greater than zero");
+  THArgCheck(dW > 0 && dH > 0, 11, "stride should be greater than zero");
+
+  // Params
+  int nInputPlane = weight->size[1];
+  int nOutputPlane = weight->size[0];
 
   int batch = 1;
   if (input->nDimension == 3) {
@@ -153,8 +160,8 @@ void THNN_CudaSpatialFullConvolution_updateGradInput(
 
   long inputWidth   = input->size[3];
   long inputHeight  = input->size[2];
-  long outputWidth  = (inputWidth - 1) * dW - 2*padW + kW + adjW;
-  long outputHeight = (inputHeight - 1) * dH - 2*padH + kH + adjH;
+  long outputWidth  = (inputWidth + 2*padW - (dilationW * (kW - 1) + 1)) / dW + 1;
+  long outputHeight = (inputHeight + 2*padH - (dilationH * (kH - 1) + 1)) / dH + 1;
 
   // Batch size + input planes
   long batchSize = input->size[0];
@@ -163,7 +170,7 @@ void THNN_CudaSpatialFullConvolution_updateGradInput(
   THCudaTensor_resize4d(state, gradInput, batchSize, nInputPlane, inputHeight, inputWidth);
 
   // Resize temporary columns
-  THCudaTensor_resize2d(state, gradColumns, nOutputPlane*kW*kH, inputHeight*inputWidth);
+  THCudaTensor_resize2d(state, gradColumns, nInputPlane*kW*kH, outputHeight*outputWidth);
 
   // Helpers
   THCudaTensor *gradInput_n = THCudaTensor_new(state);
@@ -175,34 +182,33 @@ void THNN_CudaSpatialFullConvolution_updateGradInput(
     THCudaTensor_select(state, gradInput_n, gradInput, 0, elt);
     THCudaTensor_select(state, gradOutput_n, gradOutput, 0, elt);
 
-    // Extract columns:
-    im2col(
-      THCState_getCurrentStream(state),
-      THCudaTensor_data(state, gradOutput_n),
-      nOutputPlane, outputHeight, outputWidth, kH, kW, padH, padW, dH, dW,
-      1, 1, THCudaTensor_data(state, gradColumns)
-    );
-
-
     // M,N,K are dims of matrix A and B
     // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
-    long m = weight->size[0];
+    long m = nInputPlane*kW*kH;
     long n = gradColumns->size[1];
-    long k = weight->size[1] * weight->size[2] * weight->size[3];
+    long k = nOutputPlane;
 
     // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
     THCudaBlas_gemm(
         state,
-        'n', 'n',
+        'n', 't',
         n, m, k,
         1,
-        THCudaTensor_data(state, gradColumns), n,
-        THCudaTensor_data(state, weight), k,
+        THCudaTensor_data(state, gradOutput_n), n,
+        THCudaTensor_data(state, weight), m,
         0,
-        THCudaTensor_data(state, gradInput_n), n
+        THCudaTensor_data(state, gradColumns), n
+    );
+
+    // Unpack columns back into input:
+    col2im(
+      THCState_getCurrentStream(state),
+      THCudaTensor_data(state, gradColumns),
+      nInputPlane, inputHeight, inputWidth, kH, kW, padH, padW, dH, dW,
+      dilationH, dilationW,
+      THCudaTensor_data(state, gradInput_n)
     );
   }
-
 
   // Free
   THCudaTensor_free(state, gradInput_n);
@@ -216,27 +222,26 @@ void THNN_CudaSpatialFullConvolution_updateGradInput(
   }
 }
 
+void THNN_CudaSpatialDilatedConvolution_accGradParameters(THCState *state,
+                     THCudaTensor *input, THCudaTensor *gradOutput,
+                     THCudaTensor *gradWeight, THCudaTensor *gradBias,
+                     THCudaTensor *columns, THCudaTensor *ones,
+                     int kW, int kH, int dW, int dH,
+                     int padW, int padH, int dilationW, int dilationH, float scale) {
 
-void THNN_CudaSpatialFullConvolution_accGradParameters(
-    THCState *state,
-    THCudaTensor *input,
-    THCudaTensor *gradOutput,
-    THCudaTensor *gradWeight,
-    THCudaTensor *gradBias,
-    THCudaTensor *columns,
-    THCudaTensor *ones,
-    int kW, int kH,
-    int dW, int dH,
-    int padW, int padH,
-    int adjW, int adjH,
-    float scale)
-{
-  int nInputPlane = THCudaTensor_size(state, gradWeight, 0);
-  int nOutputPlane = THCudaTensor_size(state, gradWeight, 1);
-
-  THCUNN_assertSameGPU(state, 6, input, gradOutput, gradWeight,
-                                 gradBias, columns, ones);
+  THCUNN_assertSameGPU(state, 5, input, gradOutput, gradWeight, columns, ones);
+  if (gradBias) {
+   THCUNN_assertSameGPU(state, 2, gradWeight, gradBias);
+  }
   THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch mode) tensor is expected");
+  THArgCheck(gradWeight->nDimension == 4, 4, "gradWeight tensor must be 4D (nOutputPlane,nInputPlane,kH,kW)");
+  THArgCheck(!gradBias || gradWeight->size[0] == gradBias->size[0], 4, "nOutputPlane mismatch in gradWeight and gradBias");
+  THArgCheck(kW > 0 && kH > 0, 8, "kernel size should be greater than zero");
+  THArgCheck(dW > 0 && dH > 0, 10, "stride should be greater than zero");
+
+  // Params
+  int nInputPlane = gradWeight->size[1];
+  int nOutputPlane = gradWeight->size[0];
 
   int batch = 1;
   if (input->nDimension == 3) {
@@ -248,8 +253,8 @@ void THNN_CudaSpatialFullConvolution_accGradParameters(
 
   long inputWidth   = input->size[3];
   long inputHeight  = input->size[2];
-  long outputWidth  = (inputWidth - 1) * dW - 2*padW + kW + adjW;
-  long outputHeight = (inputHeight - 1) * dH - 2*padH + kH + adjH;
+  long outputWidth  = (inputWidth + 2*padW - (dilationW * (kW - 1) + 1)) / dW + 1;
+  long outputHeight = (inputHeight + 2*padH - (dilationH * (kH - 1) + 1)) / dH + 1;
 
   // Batch size + input planes
   long batchSize = input->size[0];
@@ -262,7 +267,7 @@ void THNN_CudaSpatialFullConvolution_accGradParameters(
   }
 
   // Resize temporary columns
-  THCudaTensor_resize2d(state, columns, nOutputPlane*kW*kH, inputHeight*inputWidth);
+  THCudaTensor_resize2d(state, columns, nInputPlane*kW*kH, outputHeight*outputWidth);
 
   // Helpers
   THCudaTensor *input_n = THCudaTensor_new(state);
@@ -277,16 +282,17 @@ void THNN_CudaSpatialFullConvolution_accGradParameters(
     // Extract columns:
     im2col(
       THCState_getCurrentStream(state),
-      THCudaTensor_data(state, gradOutput_n),
-      nOutputPlane, outputHeight, outputWidth, kH, kW, padH, padW, dH, dW,
-      1, 1, THCudaTensor_data(state, columns)
+      THCudaTensor_data(state, input_n),
+      nInputPlane, inputHeight, inputWidth, kH, kW, padH, padW, dH, dW,
+      dilationH, dilationW,
+      THCudaTensor_data(state, columns)
     );
 
     // M,N,K are dims of matrix A and B
     // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
-    long n = columns->size[0];   // nOutputPlane * kh * kw
-    long m = input_n->size[0];   // nInputPlane
-    long k = columns->size[1];   // inputHeight * inputWidth
+    long m = nOutputPlane;
+    long n = nInputPlane*kW*kH;
+    long k = columns->size[1];
 
     // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
     THCudaBlas_gemm(
@@ -295,7 +301,7 @@ void THNN_CudaSpatialFullConvolution_accGradParameters(
         n, m, k,
         scale,
         THCudaTensor_data(state, columns), k,
-        THCudaTensor_data(state, input_n), k,
+        THCudaTensor_data(state, gradOutput_n), k,
         1,
         THCudaTensor_data(state, gradWeight), n
     );
@@ -307,16 +313,18 @@ void THNN_CudaSpatialFullConvolution_accGradParameters(
     long k_ = outputHeight * outputWidth;
 
     // Do GEMV (note: this is a bit confusing because gemv assumes column-major matrices)
-    THCudaBlas_gemv(
-        state,
-        't',
-        k_, m_,
-        scale,
-        THCudaTensor_data(state, gradOutput_n), k_,
-        THCudaTensor_data(state, ones), 1,
-        1,
-        THCudaTensor_data(state, gradBias), 1
-    );
+    if (gradBias) {
+      THCudaBlas_gemv(
+          state,
+          't',
+          k_, m_,
+          scale,
+          THCudaTensor_data(state, gradOutput_n), k_,
+          THCudaTensor_data(state, ones), 1,
+          1,
+          THCudaTensor_data(state, gradBias), 1
+      );
+    }
   }
 
   // Free

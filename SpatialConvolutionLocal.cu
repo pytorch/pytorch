@@ -60,7 +60,7 @@ void THNN_CudaSpatialConvolutionLocal_updateOutput(
       THCState_getCurrentStream(state),
       THCudaTensor_data(state, input_n),
       nInputPlane, inputHeight, inputWidth, kH, kW, padH, padW, dH, dW,
-      THCudaTensor_data(state, finput_n)
+      1, 1, THCudaTensor_data(state, finput_n)
     );
 
     output3d = THCudaTensor_newWithStorage3d(state, output_n->storage, output_n->storageOffset,
@@ -195,7 +195,7 @@ void THNN_CudaSpatialConvolutionLocal_updateGradInput(
       THCState_getCurrentStream(state),
       THCudaTensor_data(state, fgradInput_n),
       nInputPlane, inputHeight, inputWidth, kH, kW, padH, padW, dH, dW,
-      THCudaTensor_data(state, gradInput_n)
+      1, 1, THCudaTensor_data(state, gradInput_n)
     );
 
     THCudaTensor_free(state, gradOutput3d);
@@ -283,7 +283,7 @@ void THNN_CudaSpatialConvolutionLocal_accGradParameters(
       THCState_getCurrentStream(state),
       THCudaTensor_data(state, input_n),
       nInputPlane, inputHeight, inputWidth, kH, kW, padH, padW, dH, dW,
-      THCudaTensor_data(state, finput_n)
+      1, 1, THCudaTensor_data(state, finput_n)
     );
 
     for (int i = 0; i < outputHeight; i++) {
