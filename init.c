@@ -121,6 +121,9 @@
 #include "generic/SpatialFullConvolutionMap.c"
 #include "THGenerateFloatTypes.h"
 
+#include "generic/SpatialDilatedConvolution.c"
+#include "THGenerateFloatTypes.h"
+
 #include "generic/SpatialAdaptiveMaxPooling.c"
 #include "THGenerateFloatTypes.h"
 
