@@ -791,6 +791,45 @@ TH_API void THNN_(SpatialFullConvolutionMap_accGradParameters)(
           int dW, int dH,         // stride
           real scale);            // scaling factor
 
+TH_API void THNN_(SpatialDilatedConvolution_updateOutput)(
+    THNNState *state,
+    THTensor *input,
+    THTensor *output,
+    THTensor *weight,
+    THTensor *bias,
+    THTensor *columns,
+    THTensor *ones,
+    int kW, int kH,
+    int dW, int dH,
+    int padW, int padH,
+    int dilationW, int dilationH);
+
+TH_API void THNN_(SpatialDilatedConvolution_updateGradInput)(
+    THNNState *state,
+    THTensor *input,
+    THTensor *gradOutput,
+    THTensor *gradInput,
+    THTensor *weight,
+    THTensor *gradColumns,
+    int kW, int kH,
+    int dW, int dH,
+    int padW, int padH,
+    int dilationW, int dilationH);
+
+TH_API void THNN_(SpatialDilatedConvolution_accGradParameters)(
+    THNNState *state,
+    THTensor *input,
+    THTensor *gradOutput,
+    THTensor *gradWeight,
+    THTensor *gradBias,
+    THTensor *columns,
+    THTensor *ones,
+    int kW, int kH,
+    int dW, int dH,
+    int padW, int padH,
+    int dilationW, int dilationH,
+    real scale);
+
 TH_API void THNN_(SpatialMaxPooling_updateOutput)(
           THNNState *state,
           THTensor *input,
