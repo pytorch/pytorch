@@ -632,6 +632,23 @@ TH_API void THNN_CudaSpatialFullConvolution_accGradParameters(
           int padW, int padH,
           int adjW, int adjH,
           float scale);
+TH_API void THNN_CudaSpatialDilatedConvolution_updateOutput(THCState *state,
+            THCudaTensor *input, THCudaTensor *output, THCudaTensor *weight,
+            THCudaTensor *bias, THCudaTensor *columns,
+            THCudaTensor *ones, int kW, int kH, int dW, int dH,
+            int padW, int padH, int dilationW, int dilationH);
+TH_API void THNN_CudaSpatialDilatedConvolution_updateGradInput(THCState *state,
+               THCudaTensor *input, THCudaTensor *gradOutput,
+               THCudaTensor *gradInput, THCudaTensor *weight,
+               THCudaTensor *gradColumns,
+               int kW, int kH, int dW, int dH, int padW, int padH,
+               int dilationW, int dilationH );
+TH_API void THNN_CudaSpatialDilatedConvolution_accGradParameters(THCState *state,
+                     THCudaTensor *input, THCudaTensor *gradOutput,
+                     THCudaTensor *gradWeight, THCudaTensor *gradBias,
+                     THCudaTensor *columns, THCudaTensor *ones,
+                     int kW, int kH, int dW, int dH,
+                     int padW, int padH, int dilationW, int dilationH, float scale);
 
 TH_API void THNN_CudaSpatialCrossMapLRN_updateOutput(
           THCState *state,

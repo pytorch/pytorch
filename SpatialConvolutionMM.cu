@@ -94,7 +94,7 @@ void THNN_CudaSpatialConvolutionMM_updateOutput(THCState *state, THCudaTensor *i
       THCState_getCurrentStream(state),
       THCudaTensor_data(state, input_n),
       nInputPlane, inputHeight, inputWidth, kH, kW, padH, padW, dH, dW,
-      THCudaTensor_data(state, columns)
+      1, 1, THCudaTensor_data(state, columns)
     );
 
     // M,N,K are dims of matrix A and B
@@ -195,7 +195,7 @@ void THNN_CudaSpatialConvolutionMM_updateGradInput(THCState *state, THCudaTensor
       THCState_getCurrentStream(state),
       THCudaTensor_data(state, gradColumns),
       nInputPlane, inputHeight, inputWidth, kH, kW, padH, padW, dH, dW,
-      THCudaTensor_data(state, gradInput_n)
+      1, 1, THCudaTensor_data(state, gradInput_n)
     );
   }
 
@@ -268,7 +268,7 @@ void THNN_CudaSpatialConvolutionMM_accGradParameters(THCState *state, THCudaTens
       THCState_getCurrentStream(state),
       THCudaTensor_data(state, input_n),
       nInputPlane, inputHeight, inputWidth, kH, kW, padH, padW, dH, dW,
-      THCudaTensor_data(state, columns)
+      1, 1, THCudaTensor_data(state, columns)
     );
 
     // M,N,K are dims of matrix A and B
