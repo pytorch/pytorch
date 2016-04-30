@@ -682,6 +682,8 @@ void THCudaTensor_indexSelect_long(THCState *state, THCudaTensor *dst, THCudaTen
 {
   THAssert(THCudaTensor_checkGPU(state, 2, dst, src));
 
+  THArgCheck(indices->nDimension == 1, 3, "Index is supposed to be a vector");
+
   THCudaTensor *indices_ = THCudaTensor_newWithSize1d(state, indices->size[0]);
   THCudaTensor_copyLong(state, indices_, indices);
 
