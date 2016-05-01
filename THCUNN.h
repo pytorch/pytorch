@@ -47,23 +47,6 @@ TH_API void THNN_CudaClassNLLCriterion_updateGradInput(
           THCudaTensor *weights,
           THCudaTensor *total_weight);
 
-TH_API void THNN_CudaSpatialClassNLLCriterion_updateOutput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *target,
-          THCudaTensor *output,
-          bool sizeAverage,
-          THCudaTensor *weights,
-          THCudaTensor *total_weight);
-TH_API void THNN_CudaSpatialClassNLLCriterion_updateGradInput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *target,
-          THCudaTensor *gradInput,
-          bool sizeAverage,
-          THCudaTensor *weights,
-          THCudaTensor *total_weight);
-
 TH_API void THNN_CudaDistKLDivCriterion_updateOutput(
           THCState *state,
           THCudaTensor *input,
