@@ -64,7 +64,7 @@ void THNN_(SoftMax_updateOutput)(
     sum = 0;
     for (d = 0; d < dim; d++)
     {
-      real z = THExpMinusApprox(inputMax - input_ptr[d*stride]);
+      real z = exp(input_ptr[d*stride] - inputMax);
       output_ptr[d*stride] = z;
       sum += z;
     }
