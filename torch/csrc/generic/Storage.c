@@ -41,7 +41,7 @@ static void THPStorage_(dealloc)(THPStorage* self)
 
 static PyObject * THPStorage_(new)(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
-  static char *keywords[] = {"cdata"};
+  static char *keywords[] = {"cdata", NULL};
   PyObject *pointer_obj;
   if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|O!", keywords, &PyLong_Type, &pointer_obj))
     return NULL;
