@@ -63,11 +63,19 @@ static Py_ssize_t THPStorage_(length)(PyObject *_self)
   return THStorage_(size)(self->cdata);
 }
 
+static PyObject * THPStorage_(size)(PyObject *_self)
+{
+  GET_SELF;
+  return PyLong_FromLong(THStorage_(size)(self->cdata));
+}
+
 static PyObject * THPStorage_(get)(PyObject *_self, PyObject *index)
 {
   GET_SELF;
-  if (!PyLong_Check(index))
+  if (!PyLong_Check(index)) {
+    PyErr_SetString(PyExc_RuntimeError, "Only indexing with integers supported at the moment");
     return NULL;
+  }
   size_t nindex = PyLong_AsSize_t(index);
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
   return PyFloat_FromDouble(THStorage_(get)(self->cdata, nindex));
@@ -78,7 +86,23 @@ static PyObject * THPStorage_(get)(PyObject *_self, PyObject *index)
 
 static int THPStorage_(set)(PyObject *_self, PyObject *index, PyObject *value)
 {
-  return -1;
+  GET_SELF;
+  if (!PyLong_Check(index)) {
+    PyErr_SetString(PyExc_RuntimeError, "Only indexing with integers supported at the moment");
+    return -1;
+  }
+  real rvalue;
+  // TODO: overflow checks
+  if (PyLong_Check(value)) {
+      rvalue = PyLong_AsLongLong(value);
+  } else if (PyFloat_Check(value)) {
+      rvalue = PyFloat_AsDouble(value);
+  } else {
+    PyErr_SetString(PyExc_RuntimeError, "Only assignment of floats and integers supported at the moment");
+    return -1;
+  }
+  THStorage_(set)(self->cdata, PyLong_AsSize_t(index), rvalue);
+  return 0;
 }
 
 static struct PyMemberDef THPStorage_(members)[] = {
@@ -87,6 +111,7 @@ static struct PyMemberDef THPStorage_(members)[] = {
 };
 
 static PyMethodDef THPStorage_(methods)[] = {
+  {"size", (PyCFunction)THPStorage_(size), METH_NOARGS, NULL},
   {NULL}
 };
 
