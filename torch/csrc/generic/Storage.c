@@ -101,29 +101,25 @@ static PyObject * THPStorage_(new)(THPStorage *self)
   return THPStorage_(newObject)(THStorage_(new)());
 }
 
-static PyObject * THPStorage_(resize)(THPStorage *self, PyObject *args)
+static PyObject * THPStorage_(resize)(THPStorage *self, PyObject *number_arg)
 {
-  // TODO: causes segfaults...
-  PyObject *number_arg = NULL;
-  if (!PyArg_ParseTuple(args, "O!", &PyLong_Type, &number_arg))
+  if (!PyLong_Check(number_arg))
     return NULL;
   size_t newsize = PyLong_AsSize_t(number_arg);
   if (PyErr_Occurred())
     return NULL;
   THStorage_(resize)(self->cdata, newsize);
+  Py_INCREF(self);
   return (PyObject*)self;
 }
 
-static PyObject * THPStorage_(fill)(THPStorage *self, PyObject *args)
+static PyObject * THPStorage_(fill)(THPStorage *self, PyObject *number_arg)
 {
-  // TODO: causes segfaults...
   real rvalue;
-  PyObject *number_arg = NULL;
-  if (!PyArg_ParseTuple(args, "O", &number_arg))
-    return NULL;
   if (!THPStorage_(parseReal)(number_arg, &rvalue))
     return NULL;
   THStorage_(fill)(self->cdata, rvalue);
+  Py_INCREF(self);
   return (PyObject*)self;
 }
 
@@ -185,7 +181,7 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
 
     real *data = THStorage_(data)(self->cdata);
     real *new_data = THAlloc(slicelength * sizeof(real));
-    // TODO: maybe somethig faster than memcpy?
+    // TODO: maybe something faster than memcpy?
     memcpy(new_data, data + start, slicelength * sizeof(real));
     THStorage *new_storage = THStorage_(newWithData)(new_data, slicelength);
     return THPStorage_(newObject)(new_storage);
@@ -227,10 +223,10 @@ static struct PyMemberDef THPStorage_(members)[] = {
 
 static PyMethodDef THPStorage_(methods)[] = {
   {"elementSize", (PyCFunction)THPStorage_(elementSize), METH_NOARGS, NULL},
-  {"fill", (PyCFunction)THPStorage_(fill), METH_VARARGS, NULL},
+  {"fill", (PyCFunction)THPStorage_(fill), METH_O, NULL},
   {"free", (PyCFunction)THPStorage_(free), METH_NOARGS, NULL},
   {"new", (PyCFunction)THPStorage_(new), METH_NOARGS, NULL},
-  {"resize", (PyCFunction)THPStorage_(resize), METH_VARARGS, NULL},
+  {"resize", (PyCFunction)THPStorage_(resize), METH_O, NULL},
   {"retain", (PyCFunction)THPStorage_(retain), METH_NOARGS, NULL},
   {"size", (PyCFunction)THPStorage_(size), METH_NOARGS, NULL},
   {NULL}
