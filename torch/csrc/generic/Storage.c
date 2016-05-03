@@ -42,13 +42,20 @@ static void THPStorage_(dealloc)(THPStorage* self)
 static PyObject * THPStorage_(new)(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
   static char *keywords[] = {"cdata", NULL};
-  PyObject *pointer_obj;
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|O!", keywords, &PyLong_Type, &pointer_obj))
+  PyObject *number_arg = NULL;
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|O!", keywords, &PyLong_Type, &number_arg))
     return NULL;
 
   THPStorage *self = (THPStorage *)type->tp_alloc(type, 0);
   if (self != NULL) {
-    self->cdata = pointer_obj ? PyLong_AsVoidPtr(pointer_obj) : THLongStorage_new();
+    if (kwargs) {
+      self->cdata = PyLong_AsVoidPtr(number_arg);
+    } else if (/* !kwargs && */ number_arg) {
+      self->cdata = THStorage_(newWithSize)(PyLong_AsLong(number_arg));
+    } else {
+      self->cdata = THStorage_(new)();
+    }
+
     if (self->cdata == NULL) {
       Py_DECREF(self);
       return NULL;
