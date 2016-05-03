@@ -195,6 +195,7 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
   if (self != NULL) {
     if (kwargs) {
       self->cdata = PyLong_AsVoidPtr(number_arg);
+      THStorage_(retain)(self->cdata);
     } else if (/* !kwargs && */ number_arg) {
       self->cdata = THStorage_(newWithSize)(PyLong_AsLong(number_arg));
     } else {
