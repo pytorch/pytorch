@@ -70,6 +70,12 @@ static bool THPStorage_(parseReal)(PyObject *value, real *result)
   return true;
 }
 
+static PyTypeObject THPStorageType;
+static bool THPStorage_(IsSubclass)(PyObject *storage)
+{
+  return PyObject_IsSubclass((PyObject*)Py_TYPE(storage), (PyObject*)&THPStorageType);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // TH WRAPPERS
 ////////////////////////////////////////////////////////////////////////////////
@@ -122,6 +128,51 @@ static PyObject * THPStorage_(fill)(THPStorage *self, PyObject *number_arg)
   Py_INCREF(self);
   return (PyObject*)self;
 }
+
+static bool THPDoubleStorage_IsSubclass(PyObject *);
+static bool THPFloatStorage_IsSubclass(PyObject *);
+static bool THPLongStorage_IsSubclass(PyObject *);
+static bool THPIntStorage_IsSubclass(PyObject *);
+static bool THPShortStorage_IsSubclass(PyObject *);
+static bool THPCharStorage_IsSubclass(PyObject *);
+static bool THPByteStorage_IsSubclass(PyObject *);
+// TODO: error checking
+#define GET_CDATA                                                              \
+  PyObject *attr = PyObject_GetAttrString(other_storage, "_cdata");            \
+  void *cdata = PyLong_AsVoidPtr(attr);                                        \
+  Py_DECREF(attr);
+static PyObject * THPStorage_(copy)(THPStorage *self, PyObject *other_storage)
+{
+  if (THPDoubleStorage_IsSubclass(other_storage)) {
+    GET_CDATA;
+    THStorage_(copyDouble)(self->cdata, cdata);
+  } else if (THPFloatStorage_IsSubclass(other_storage)) {
+    GET_CDATA;
+    THStorage_(copyFloat)(self->cdata, cdata);
+  } else if (THPLongStorage_IsSubclass(other_storage)) {
+    GET_CDATA;
+    THStorage_(copyLong)(self->cdata, cdata);
+  } else if (THPIntStorage_IsSubclass(other_storage)) {
+    GET_CDATA;
+    THStorage_(copyInt)(self->cdata, cdata);
+  } else if (THPShortStorage_IsSubclass(other_storage)) {
+    GET_CDATA;
+    THStorage_(copyShort)(self->cdata, cdata);
+  } else if (THPCharStorage_IsSubclass(other_storage)) {
+    GET_CDATA;
+    THStorage_(copyChar)(self->cdata, cdata);
+  } else if (THPByteStorage_IsSubclass(other_storage)) {
+    GET_CDATA;
+    THStorage_(copyByte)(self->cdata, cdata);
+  } else {
+    // TODO: better error message
+    PyErr_SetString(PyExc_RuntimeError, "Copy not implemented for this type");
+    return NULL;
+  }
+  Py_INCREF(self);
+  return (PyObject*)self;
+}
+#undef GET_CDATA
 
 ////////////////////////////////////////////////////////////////////////////////
 // PYTHON METHODS
@@ -222,6 +273,7 @@ static struct PyMemberDef THPStorage_(members)[] = {
 };
 
 static PyMethodDef THPStorage_(methods)[] = {
+  {"copy", (PyCFunction)THPStorage_(copy), METH_O, NULL},
   {"elementSize", (PyCFunction)THPStorage_(elementSize), METH_NOARGS, NULL},
   {"fill", (PyCFunction)THPStorage_(fill), METH_O, NULL},
   {"free", (PyCFunction)THPStorage_(free), METH_NOARGS, NULL},
