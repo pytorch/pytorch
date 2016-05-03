@@ -20,11 +20,29 @@ static bool THPTensor_(IsSubclass)(PyObject *tensor)
 ////////////////////////////////////////////////////////////////////////////////
 // TH WRAPPERS
 ////////////////////////////////////////////////////////////////////////////////
+//
+#if !defined(TH_REAL_IS_BYTE) && !defined(TH_REAL_IS_SHORT) && !defined(TH_REAL_IS_CHAR)
+static PyObject * THPTensor_(abs)(THPTensor *self, PyObject *args)
+{
+  THTensor *source = self->cdata;
+  if (!PyArg_ParseTuple(args, "|O!", &THPTensorType, &source))
+      return NULL;
+  THTensor_(abs)(self->cdata, source);
+  Py_INCREF(self);
+  return (PyObject*)self;
+}
+#endif
+
 
 static PyObject * THPTensor_(size)(THPTensor *self)
 {
   THLongStorage *size = THTensor_(newSizeOf)(self->cdata);
   return THPLongStorage_newObject(size);
+}
+
+static PyObject * THPTensor_(storage)(THPTensor *self)
+{
+    return THPStorage_(newObject)(THTensor_(storage)(self->cdata));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -64,7 +82,11 @@ static struct PyMemberDef THPTensor_(members)[] = {
 };
 
 static PyMethodDef THPTensor_(methods)[] = {
+#if !defined(TH_REAL_IS_BYTE) && !defined(TH_REAL_IS_SHORT) && !defined(TH_REAL_IS_CHAR)
+  {"abs", (PyCFunction)THPTensor_(abs), METH_VARARGS, NULL},
+#endif
   {"size", (PyCFunction)THPTensor_(size), METH_NOARGS, NULL},
+  {"storage", (PyCFunction)THPTensor_(storage), METH_NOARGS, NULL},
   {NULL}
 };
 
