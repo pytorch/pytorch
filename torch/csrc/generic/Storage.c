@@ -2,8 +2,12 @@
 #define TH_GENERIC_FILE "generic/Storage.c"
 #else
 
-#define GET_SELF THPStorage *self = (THPStorage *)_self
+typedef struct {
+  PyObject_HEAD
+  THStorage *cdata;
+} THPStorage;
 
+/* A pointer to RealStorage class defined later in Python */
 static PyObject *THPStorageClass = NULL;
 
 static void THPStorage_(getClass)()
@@ -28,10 +32,104 @@ PyObject * THPStorage_(newObject)(THStorage *ptr)
   return instance;
 }
 
-typedef struct {
-  PyObject_HEAD
-  THStorage *cdata;
-} THPStorage;
+////////////////////////////////////////////////////////////////////////////////
+// HELPERS
+////////////////////////////////////////////////////////////////////////////////
+
+static Py_ssize_t THPStorage_(length)(THPStorage *);
+static bool THPStorage_(parseSlice)(THPStorage *self, PyObject *slice, Py_ssize_t *ostart, Py_ssize_t *ostop, Py_ssize_t *oslicelength)
+{
+  Py_ssize_t start, stop, step, slicelength, len;
+  len = THPStorage_(length)(self);
+  if (PySlice_GetIndicesEx(slice, len, &start, &stop, &step, &slicelength) < 0) {
+    PyErr_SetString(PyExc_RuntimeError, "Got an invalid slice");
+    return false;
+  }
+  if (step != 1) {
+    PyErr_SetString(PyExc_RuntimeError, "Only step == 1 supported");
+    return false;
+  }
+  *ostart = start;
+  *ostop = stop;
+  if(oslicelength)
+    *oslicelength = slicelength;
+  return true;
+}
+
+static bool THPStorage_(parseReal)(PyObject *value, real *result)
+{
+  if (PyLong_Check(value)) {
+    *result = PyLong_AsLongLong(value);
+  } else if (PyFloat_Check(value)) {
+    *result = PyFloat_AsDouble(value);
+  } else {
+    // TODO: meaningful error
+    PyErr_SetString(PyExc_RuntimeError, "Unrecognized object");
+    return false;
+  }
+  return true;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// TH WRAPPERS
+////////////////////////////////////////////////////////////////////////////////
+
+static PyObject * THPStorage_(size)(THPStorage *self)
+{
+  return PyLong_FromLong(THStorage_(size)(self->cdata));
+}
+
+static PyObject * THPStorage_(elementSize)(THPStorage *self)
+{
+  return PyLong_FromLong(THStorage_(elementSize)());
+}
+
+static PyObject * THPStorage_(retain)(THPStorage *self)
+{
+  THStorage_(retain)(self->cdata);
+  return (PyObject*)self;
+}
+
+static PyObject * THPStorage_(free)(THPStorage *self)
+{
+  THStorage_(free)(self->cdata);
+  return (PyObject*)self;
+}
+
+static PyObject * THPStorage_(new)(THPStorage *self)
+{
+  return THPStorage_(newObject)(THStorage_(new)());
+}
+
+static PyObject * THPStorage_(resize)(THPStorage *self, PyObject *args)
+{
+  // TODO: causes segfaults...
+  PyObject *number_arg = NULL;
+  if (!PyArg_ParseTuple(args, "O!", &PyLong_Type, &number_arg))
+    return NULL;
+  size_t newsize = PyLong_AsSize_t(number_arg);
+  if (PyErr_Occurred())
+    return NULL;
+  THStorage_(resize)(self->cdata, newsize);
+  return (PyObject*)self;
+}
+
+static PyObject * THPStorage_(fill)(THPStorage *self, PyObject *args)
+{
+  // TODO: causes segfaults...
+  real rvalue;
+  PyObject *number_arg = NULL;
+  if (!PyArg_ParseTuple(args, "O", &number_arg))
+    return NULL;
+  if (!THPStorage_(parseReal)(number_arg, &rvalue))
+    return NULL;
+  THStorage_(fill)(self->cdata, rvalue);
+  return (PyObject*)self;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// PYTHON METHODS
+////////////////////////////////////////////////////////////////////////////////
 
 static void THPStorage_(dealloc)(THPStorage* self)
 {
@@ -39,7 +137,7 @@ static void THPStorage_(dealloc)(THPStorage* self)
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
-static PyObject * THPStorage_(new)(PyTypeObject *type, PyObject *args, PyObject *kwargs)
+static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
   static char *keywords[] = {"cdata", NULL};
   PyObject *number_arg = NULL;
@@ -64,42 +162,13 @@ static PyObject * THPStorage_(new)(PyTypeObject *type, PyObject *args, PyObject 
   return (PyObject *)self;
 }
 
-static Py_ssize_t THPStorage_(length)(PyObject *_self)
+static Py_ssize_t THPStorage_(length)(THPStorage *self)
 {
-  GET_SELF;
   return THStorage_(size)(self->cdata);
 }
 
-static PyObject * THPStorage_(size)(PyObject *_self)
+static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
 {
-  GET_SELF;
-  return PyLong_FromLong(THStorage_(size)(self->cdata));
-}
-
-static bool THPStorage_(parseSlice)(PyObject *_self, PyObject *slice, Py_ssize_t *ostart, Py_ssize_t *ostop, Py_ssize_t *oslicelength)
-{
-  Py_ssize_t start, stop, step, slicelength, len;
-  len = THPStorage_(length)(_self);
-  if (PySlice_GetIndicesEx(slice, len, &start, &stop, &step, &slicelength) < 0) {
-    PyErr_SetString(PyExc_RuntimeError, "Got an invalid slice");
-    return false;
-  }
-  if (step != 1) {
-    PyErr_SetString(PyExc_RuntimeError, "Only step == 1 supported");
-    return false;
-  }
-  *ostart = start;
-  *ostop = stop;
-  if(oslicelength)
-    *oslicelength = slicelength;
-  return true;
-}
-
-
-static PyObject * THPStorage_(get)(PyObject *_self, PyObject *index)
-{
-  GET_SELF;
-
   /* Integer index */
   if (PyLong_Check(index)) {
     size_t nindex = PyLong_AsSize_t(index);
@@ -111,7 +180,7 @@ static PyObject * THPStorage_(get)(PyObject *_self, PyObject *index)
   /* Slice index */
   } else if (PySlice_Check(index)) {
     Py_ssize_t start, stop, slicelength;
-    if (!THPStorage_(parseSlice)(_self, index, &start, &stop, &slicelength))
+    if (!THPStorage_(parseSlice)(self, index, &start, &stop, &slicelength))
       return NULL;
 
     real *data = THStorage_(data)(self->cdata);
@@ -125,26 +194,18 @@ static PyObject * THPStorage_(get)(PyObject *_self, PyObject *index)
   return NULL;
 }
 
-static int THPStorage_(set)(PyObject *_self, PyObject *index, PyObject *value)
+static int THPStorage_(set)(THPStorage *self, PyObject *index, PyObject *value)
 {
-  GET_SELF;
   real rvalue;
-  // TODO: overflow checks
-  if (PyLong_Check(value)) {
-    rvalue = PyLong_AsLongLong(value);
-  } else if (PyFloat_Check(value)) {
-    rvalue = PyFloat_AsDouble(value);
-  } else {
-    PyErr_SetString(PyExc_RuntimeError, "Only assignment of floats and integers supported");
+  if (!THPStorage_(parseReal)(value, &rvalue))
     return -1;
-  }
 
   if (PyLong_Check(index)) {
     THStorage_(set)(self->cdata, PyLong_AsSize_t(index), rvalue);
     return 0;
   } else if (PySlice_Check(index)) {
     Py_ssize_t start, stop;
-    if (!THPStorage_(parseSlice)(_self, index, &start, &stop, NULL))
+    if (!THPStorage_(parseSlice)(self, index, &start, &stop, NULL))
       return -1;
     // TODO: check the bounds only once
     for (;start < stop; start++)
@@ -155,20 +216,30 @@ static int THPStorage_(set)(PyObject *_self, PyObject *index, PyObject *value)
   return -1;
 }
 
+////////////////////////////////////////////////////////////////////////////////
+// PYTHON DECLARATIONS
+////////////////////////////////////////////////////////////////////////////////
+
 static struct PyMemberDef THPStorage_(members)[] = {
-  {"_cdata", T_ULONGLONG, offsetof(THPStorage, cdata), 0, "C struct pointer"},
+  {"_cdata", T_ULONGLONG, offsetof(THPStorage, cdata), READONLY, "C struct pointer"},
   {NULL}
 };
 
 static PyMethodDef THPStorage_(methods)[] = {
+  {"elementSize", (PyCFunction)THPStorage_(elementSize), METH_NOARGS, NULL},
+  {"fill", (PyCFunction)THPStorage_(fill), METH_VARARGS, NULL},
+  {"free", (PyCFunction)THPStorage_(free), METH_NOARGS, NULL},
+  {"new", (PyCFunction)THPStorage_(new), METH_NOARGS, NULL},
+  {"resize", (PyCFunction)THPStorage_(resize), METH_VARARGS, NULL},
+  {"retain", (PyCFunction)THPStorage_(retain), METH_NOARGS, NULL},
   {"size", (PyCFunction)THPStorage_(size), METH_NOARGS, NULL},
   {NULL}
 };
 
 static PyMappingMethods THPStorage_(mappingmethods) = {
-  THPStorage_(length),
-  THPStorage_(get),
-  THPStorage_(set)
+  (lenfunc)THPStorage_(length),
+  (binaryfunc)THPStorage_(get),
+  (objobjargproc)THPStorage_(set)
 };
 
 static PyTypeObject THPStorageType = {
@@ -209,7 +280,7 @@ static PyTypeObject THPStorageType = {
   0,                                     /* tp_dictoffset */
   0,                                     /* tp_init */
   0,                                     /* tp_alloc */
-  THPStorage_(new),                      /* tp_new */
+  THPStorage_(pynew),                    /* tp_new */
 };
 
 bool THPStorage_(init)(PyObject *module)
