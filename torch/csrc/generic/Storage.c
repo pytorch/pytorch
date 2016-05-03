@@ -76,40 +76,83 @@ static PyObject * THPStorage_(size)(PyObject *_self)
   return PyLong_FromLong(THStorage_(size)(self->cdata));
 }
 
+static bool THPStorage_(parseSlice)(PyObject *_self, PyObject *slice, Py_ssize_t *ostart, Py_ssize_t *ostop, Py_ssize_t *oslicelength)
+{
+  Py_ssize_t start, stop, step, slicelength, len;
+  len = THPStorage_(length)(_self);
+  if (PySlice_GetIndicesEx(slice, len, &start, &stop, &step, &slicelength) < 0) {
+    PyErr_SetString(PyExc_RuntimeError, "Got an invalid slice");
+    return false;
+  }
+  if (step != 1) {
+    PyErr_SetString(PyExc_RuntimeError, "Only step == 1 supported");
+    return false;
+  }
+  *ostart = start;
+  *ostop = stop;
+  if(oslicelength)
+    *oslicelength = slicelength;
+  return true;
+}
+
+
 static PyObject * THPStorage_(get)(PyObject *_self, PyObject *index)
 {
   GET_SELF;
-  if (!PyLong_Check(index)) {
-    PyErr_SetString(PyExc_RuntimeError, "Only indexing with integers supported at the moment");
-    return NULL;
-  }
-  size_t nindex = PyLong_AsSize_t(index);
+
+  /* Integer index */
+  if (PyLong_Check(index)) {
+    size_t nindex = PyLong_AsSize_t(index);
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-  return PyFloat_FromDouble(THStorage_(get)(self->cdata, nindex));
+    return PyFloat_FromDouble(THStorage_(get)(self->cdata, nindex));
 #else
-  return PyLong_FromLong(THStorage_(get)(self->cdata, nindex));
+    return PyLong_FromLong(THStorage_(get)(self->cdata, nindex));
 #endif
+  /* Slice index */
+  } else if (PySlice_Check(index)) {
+    Py_ssize_t start, stop, slicelength;
+    if (!THPStorage_(parseSlice)(_self, index, &start, &stop, &slicelength))
+      return NULL;
+
+    real *data = THStorage_(data)(self->cdata);
+    real *new_data = THAlloc(slicelength * sizeof(real));
+    // TODO: maybe somethig faster than memcpy?
+    memcpy(new_data, data + start, slicelength * sizeof(real));
+    THStorage *new_storage = THStorage_(newWithData)(new_data, slicelength);
+    return THPStorage_(newObject)(new_storage);
+  }
+  PyErr_SetString(PyExc_RuntimeError, "Only indexing with integers and slices supported");
+  return NULL;
 }
 
 static int THPStorage_(set)(PyObject *_self, PyObject *index, PyObject *value)
 {
   GET_SELF;
-  if (!PyLong_Check(index)) {
-    PyErr_SetString(PyExc_RuntimeError, "Only indexing with integers supported at the moment");
-    return -1;
-  }
   real rvalue;
   // TODO: overflow checks
   if (PyLong_Check(value)) {
-      rvalue = PyLong_AsLongLong(value);
+    rvalue = PyLong_AsLongLong(value);
   } else if (PyFloat_Check(value)) {
-      rvalue = PyFloat_AsDouble(value);
+    rvalue = PyFloat_AsDouble(value);
   } else {
-    PyErr_SetString(PyExc_RuntimeError, "Only assignment of floats and integers supported at the moment");
+    PyErr_SetString(PyExc_RuntimeError, "Only assignment of floats and integers supported");
     return -1;
   }
-  THStorage_(set)(self->cdata, PyLong_AsSize_t(index), rvalue);
-  return 0;
+
+  if (PyLong_Check(index)) {
+    THStorage_(set)(self->cdata, PyLong_AsSize_t(index), rvalue);
+    return 0;
+  } else if (PySlice_Check(index)) {
+    Py_ssize_t start, stop;
+    if (!THPStorage_(parseSlice)(_self, index, &start, &stop, NULL))
+      return -1;
+    // TODO: check the bounds only once
+    for (;start < stop; start++)
+      THStorage_(set)(self->cdata, start, rvalue);
+    return 0;
+  }
+  PyErr_SetString(PyExc_RuntimeError, "Only indexing with integers and slices supported at the moment");
+  return -1;
 }
 
 static struct PyMemberDef THPStorage_(members)[] = {
