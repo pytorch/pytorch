@@ -6,7 +6,7 @@ from setuptools import setup, Extension
 in_init = "torch/__init__.py.in"
 out_init = "torch/__init__.py"
 templates = ["torch/Tensor.py", "torch/Storage.py"]
-types = ['Double', 'Float', 'Long', 'Int', 'Char', 'Byte']
+types = ['Double', 'Float', 'Long', 'Int', 'Short', 'Char', 'Byte']
 generated = ''
 
 for template in templates:

@@ -28,6 +28,7 @@ PyMODINIT_FUNC PyInit_C()
   ASSERT_TRUE(THPFloatStorage_init(m));
   ASSERT_TRUE(THPLongStorage_init(m));
   ASSERT_TRUE(THPIntStorage_init(m));
+  ASSERT_TRUE(THPShortStorage_init(m));
   ASSERT_TRUE(THPCharStorage_init(m));
   ASSERT_TRUE(THPByteStorage_init(m));
 
@@ -35,6 +36,7 @@ PyMODINIT_FUNC PyInit_C()
   ASSERT_TRUE(THPFloatTensor_init(m));
   ASSERT_TRUE(THPLongTensor_init(m));
   ASSERT_TRUE(THPIntTensor_init(m));
+  ASSERT_TRUE(THPShortTensor_init(m));
   ASSERT_TRUE(THPCharTensor_init(m));
   ASSERT_TRUE(THPByteTensor_init(m));
 

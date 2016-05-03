@@ -2,12 +2,34 @@
 #define TH_GENERIC_FILE "generic/Tensor.c"
 #else
 
-#define GET_SELF THPTensor *self = (THPTensor*)_self;
-
 typedef struct {
   PyObject_HEAD
   THTensor *cdata;
 } THPTensor;
+
+////////////////////////////////////////////////////////////////////////////////
+// HELPERS
+////////////////////////////////////////////////////////////////////////////////
+
+static PyTypeObject THPTensorType;
+static bool THPTensor_(IsSubclass)(PyObject *tensor)
+{
+  return PyObject_IsSubclass((PyObject*)Py_TYPE(tensor), (PyObject*)&THPTensorType);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// TH WRAPPERS
+////////////////////////////////////////////////////////////////////////////////
+
+static PyObject * THPTensor_(size)(THPTensor *self)
+{
+  THLongStorage *size = THTensor_(newSizeOf)(self->cdata);
+  return THPLongStorage_newObject(size);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// PYTHON METHODS
+////////////////////////////////////////////////////////////////////////////////
 
 static void THPTensor_(dealloc)(THPTensor* self)
 {
@@ -15,7 +37,7 @@ static void THPTensor_(dealloc)(THPTensor* self)
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
-static PyObject * THPTensor_(new)(PyTypeObject *type, PyObject *args, PyObject *kwargs)
+static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
   long long sizes[] = {-1, -1, -1, -1};
   if (!PyArg_ParseTuple(args, "|LLLL", &sizes[0], &sizes[1], &sizes[2], &sizes[3]))
@@ -32,15 +54,12 @@ static PyObject * THPTensor_(new)(PyTypeObject *type, PyObject *args, PyObject *
   return (PyObject *)self;
 }
 
-static PyObject * THPTensor_(size)(PyObject *_self)
-{
-  GET_SELF;
-  THLongStorage *size = THTensor_(newSizeOf)(self->cdata);
-  return THPLongStorage_newObject(size);
-}
+////////////////////////////////////////////////////////////////////////////////
+// PYTHON DECLARATIONS
+////////////////////////////////////////////////////////////////////////////////
 
 static struct PyMemberDef THPTensor_(members)[] = {
-  {"_cdata", T_ULONGLONG, offsetof(THPTensor, cdata), 0, "C struct pointer"},
+  {"_cdata", T_ULONGLONG, offsetof(THPTensor, cdata), READONLY, "C struct pointer"},
   {NULL}
 };
 
@@ -88,7 +107,7 @@ static PyTypeObject THPTensorType = {
   0,                                     /* tp_dictoffset */
   0,                                     /* tp_init */
   0,                                     /* tp_alloc */
-  THPTensor_(new),                       /* tp_new */
+  THPTensor_(pynew),                     /* tp_new */
 };
 
 bool THPTensor_(init)(PyObject *module)
