@@ -7,3 +7,6 @@
 
 #include "generic/Tensor.cpp"
 #include <TH/THGenerateAllTypes.h>
+
+#include "generic/TensorCopy.cpp"
+#include <TH/THGenerateAllTypes.h>

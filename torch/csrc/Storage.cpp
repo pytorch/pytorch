@@ -8,3 +8,6 @@
 #include "generic/Storage.cpp"
 #include <TH/THGenerateAllTypes.h>
 
+#include "generic/StorageCopy.cpp"
+#include <TH/THGenerateAllTypes.h>
+

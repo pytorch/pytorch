@@ -2,10 +2,10 @@
 #define TH_GENERIC_FILE "generic/Tensor.cpp"
 #else
 
-typedef struct {
-  PyObject_HEAD
-  THTensor *cdata;
-} THPTensor;
+bool THPTensor_(IsSubclass)(PyObject *tensor)
+{
+  return PyObject_IsSubclass((PyObject*)Py_TYPE(tensor), (PyObject*)&THPTensorType);
+}
 
 static void THPTensor_(dealloc)(THPTensor* self)
 {
@@ -16,13 +16,26 @@ static void THPTensor_(dealloc)(THPTensor* self)
 static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
   HANDLE_TH_ERRORS
+  THPLongStorage *storage_obj = NULL;
   long long sizes[] = {-1, -1, -1, -1};
-  if (!PyArg_ParseTuple(args, "|LLLL", &sizes[0], &sizes[1], &sizes[2], &sizes[3]))
+  // Check if it's a long storage
+  if (PyTuple_Size(args) == 1) {
+    PyObject *arg = PyTuple_GetItem(args, 0);
+    if (THPLongStorage_IsSubclass(arg)) {
+      storage_obj = (THPLongStorage*)arg;
+    }
+  }
+  // If not, try to parse integers
+#define ERRMSG ";Expected torch.LongStorage or up to 4 integers as arguments"
+  if (!storage_obj && !PyArg_ParseTuple(args, "|LLLL" ERRMSG, &sizes[0], &sizes[1], &sizes[2], &sizes[3]))
     return NULL;
 
   THPTensor *self = (THPTensor *)type->tp_alloc(type, 0);
   if (self != NULL) {
-    self->cdata = THTensor_(newWithSize4d)(sizes[0], sizes[1], sizes[2], sizes[3]);
+    if (storage_obj)
+        self->cdata = THTensor_(newWithSize)(storage_obj->cdata, NULL);
+    else
+        self->cdata = THTensor_(newWithSize4d)(sizes[0], sizes[1], sizes[2], sizes[3]);
     if (self->cdata == NULL) {
       Py_DECREF(self);
       return NULL;
@@ -33,7 +46,7 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
   END_HANDLE_TH_ERRORS
 }
 
-static PyTypeObject THPTensorType = {
+PyTypeObject THPTensorType = {
   PyVarObject_HEAD_INIT(NULL, 0)
   "torch.C." THPTensorBaseStr,           /* tp_name */
   sizeof(THPTensor),                     /* tp_basicsize */

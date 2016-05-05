@@ -2,15 +2,9 @@
 #define TH_GENERIC_FILE "generic/Storage.cpp"
 #else
 
-typedef struct {
-  PyObject_HEAD
-  THStorage *cdata;
-} THPStorage;
-
 static bool THPStorage_(parseSlice)(THPStorage *self, PyObject *slice,
         Py_ssize_t *ostart, Py_ssize_t *ostop, Py_ssize_t *oslicelength);
 static bool THPStorage_(parseReal)(PyObject *, real *);
-static bool THPStorage_(IsSubclass)(PyObject *storage);
 
 /* A pointer to RealStorage class defined later in Python */
 static PyObject *THPStorageClass = NULL;
@@ -35,6 +29,11 @@ PyObject * THPStorage_(newObject)(THStorage *ptr)
   Py_DECREF(args);
   Py_DECREF(kwargs);
   return instance;
+}
+
+bool THPStorage_(IsSubclass)(PyObject *storage)
+{
+  return PyObject_IsSubclass((PyObject*)Py_TYPE(storage), (PyObject*)&THPStorageType);
 }
 
 static void THPStorage_(dealloc)(THPStorage* self)
@@ -138,7 +137,7 @@ static PyMappingMethods THPStorage_(mappingmethods) = {
   (objobjargproc)THPStorage_(set)
 };
 
-static PyTypeObject THPStorageType = {
+PyTypeObject THPStorageType = {
   PyVarObject_HEAD_INIT(NULL, 0)
   "torch.C." THPStorageBaseStr,          /* tp_name */
   sizeof(THPStorage),                    /* tp_basicsize */
