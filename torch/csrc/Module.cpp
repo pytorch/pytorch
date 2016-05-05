@@ -19,6 +19,22 @@ static struct PyModuleDef torchmodule = {
    TorchMethods
 };
 
+static void errorHandler(const char *msg, void *data)
+{
+  throw THException(msg);
+}
+
+static void errorHandlerArg(int argNumber, const char *msg, void *data)
+{
+  throw THArgException(msg, argNumber);
+}
+
+static void updateErrorHandlers()
+{
+  THSetErrorHandler(errorHandler, NULL);
+  THSetArgErrorHandler(errorHandlerArg, NULL);
+}
+
 PyMODINIT_FUNC PyInit_C()
 {
   PyObject* m;
@@ -39,6 +55,8 @@ PyMODINIT_FUNC PyInit_C()
   ASSERT_TRUE(THPShortTensor_init(m));
   ASSERT_TRUE(THPCharTensor_init(m));
   ASSERT_TRUE(THPByteTensor_init(m));
+
+  updateErrorHandlers();
 
   return m;
 }

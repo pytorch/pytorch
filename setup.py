@@ -32,8 +32,9 @@ with open(out_init, 'w') as f:
 ################################################################################
 # WARNING
 # This file is generated automatically. Do not edit it, as it will be
-# regenerated at next build
+# regenerated during next build
 ################################################################################
+
 """)
     f.write(header)
     f.write(generated)
@@ -41,9 +42,15 @@ with open(out_init, 'w') as f:
 ################################################################################
 # Declare the package
 ################################################################################
+sources = [
+    "torch/csrc/Module.cpp",
+    "torch/csrc/Tensor.cpp",
+    "torch/csrc/Storage.cpp",
+]
 C = Extension("torch.C",
               libraries=['TH'],
-              sources=["torch/csrc/Module.c", "torch/csrc/Tensor.c", "torch/csrc/Storage.c"],
+              sources=sources,
+              language='c++',
               include_dirs=["torch/csrc"])
 
 

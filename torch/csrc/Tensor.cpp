@@ -5,5 +5,5 @@
 #include <TH/TH.h>
 #include "THP.h"
 
-#include "generic/Tensor.c"
+#include "generic/Tensor.cpp"
 #include <TH/THGenerateAllTypes.h>
