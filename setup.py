@@ -46,6 +46,7 @@ sources = [
     "torch/csrc/Module.cpp",
     "torch/csrc/Tensor.cpp",
     "torch/csrc/Storage.cpp",
+    "torch/csrc/utils.cpp",
 ]
 C = Extension("torch.C",
               libraries=['TH'],

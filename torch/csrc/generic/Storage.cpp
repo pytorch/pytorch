@@ -2,10 +2,6 @@
 #define TH_GENERIC_FILE "generic/Storage.cpp"
 #else
 
-static bool THPStorage_(parseSlice)(THPStorage *self, PyObject *slice,
-        Py_ssize_t *ostart, Py_ssize_t *ostop, Py_ssize_t *oslicelength);
-static bool THPStorage_(parseReal)(PyObject *, real *);
-
 /* A pointer to RealStorage class defined later in Python */
 static PyObject *THPStorageClass = NULL;
 
@@ -91,8 +87,9 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
 #endif
   /* Slice index */
   } else if (PySlice_Check(index)) {
-    Py_ssize_t start, stop, slicelength;
-    if (!THPStorage_(parseSlice)(self, index, &start, &stop, &slicelength))
+    Py_ssize_t start, stop, slicelength, len;
+    len = THStorage_(size)(self->cdata);
+    if (!THPUtils_(parseSlice)(index, len, &start, &stop, &slicelength))
       return NULL;
 
     real *data = THStorage_(data)(self->cdata);
@@ -111,15 +108,16 @@ static int THPStorage_(set)(THPStorage *self, PyObject *index, PyObject *value)
 {
   HANDLE_TH_ERRORS
   real rvalue;
-  if (!THPStorage_(parseReal)(value, &rvalue))
+  if (!THPUtils_(parseReal)(value, &rvalue))
     return -1;
 
   if (PyLong_Check(index)) {
     THStorage_(set)(self->cdata, PyLong_AsSize_t(index), rvalue);
     return 0;
   } else if (PySlice_Check(index)) {
-    Py_ssize_t start, stop;
-    if (!THPStorage_(parseSlice)(self, index, &start, &stop, NULL))
+    Py_ssize_t start, stop, len;
+    len = THStorage_(size)(self->cdata);
+    if (!THPUtils_(parseSlice)(index, len, &start, &stop, NULL))
       return -1;
     // TODO: check the bounds only once
     for (;start < stop; start++)

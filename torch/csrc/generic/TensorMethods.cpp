@@ -1,7 +1,5 @@
 
-////////////////////////////////////////////////////////////////////////////////
-
-#define IMPLEMENT_POINTWISE_OP(name)                                           \
+#define POINTWISE_OP(name)                                                     \
 static PyObject * THPTensor_(name)(THPTensor *self, PyObject *args)            \
 {                                                                              \
   HANDLE_TH_ERRORS                                                             \
@@ -14,78 +12,92 @@ static PyObject * THPTensor_(name)(THPTensor *self, PyObject *args)            \
   END_HANDLE_TH_ERRORS                                                         \
 }
 
+#define SIMPLE_OP(name, expr)                                                  \
+static PyObject * THPTensor_(name)(THPTensor *self)                            \
+{                                                                              \
+  HANDLE_TH_ERRORS                                                             \
+  return (expr);                                                               \
+  END_HANDLE_TH_ERRORS                                                         \
+}
+
+#define SIMPLE_RETURN_SELF(name, expr)                                         \
+static PyObject * THPTensor_(name)(THPTensor *self)                            \
+{                                                                              \
+  HANDLE_TH_ERRORS                                                             \
+  expr;                                                                        \
+  Py_INCREF(self);                                                             \
+  return (PyObject*)self;                                                      \
+  END_HANDLE_TH_ERRORS                                                         \
+}
+
+#define TENSOR_OR_DIM_WISE(name, expr_tensor, expr_dim)                        \
+static PyObject * THPTensor_(name)(THPTensor *self, PyObject *arg)             \
+{                                                                              \
+  HANDLE_TH_ERRORS                                                             \
+  int dim = -1;                                                                \
+  if (!PyArg_ParseTuple(arg, "|i", &dim))                                      \
+    return NULL;                                                               \
+                                                                               \
+  if (dim != -1) {                                                             \
+    expr_dim;                                                                  \
+  } else {                                                                     \
+    expr_tensor;                                                               \
+  }                                                                            \
+  END_HANDLE_TH_ERRORS                                                         \
+}
+
 #if defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_LONG)
-IMPLEMENT_POINTWISE_OP(abs)
+POINTWISE_OP(abs)
 #endif
 
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-IMPLEMENT_POINTWISE_OP(sigmoid)
-IMPLEMENT_POINTWISE_OP(log)
-IMPLEMENT_POINTWISE_OP(log1p)
-IMPLEMENT_POINTWISE_OP(exp)
-IMPLEMENT_POINTWISE_OP(cos)
-IMPLEMENT_POINTWISE_OP(acos)
-IMPLEMENT_POINTWISE_OP(cosh)
-IMPLEMENT_POINTWISE_OP(sin)
-IMPLEMENT_POINTWISE_OP(asin)
-IMPLEMENT_POINTWISE_OP(sinh)
-IMPLEMENT_POINTWISE_OP(tan)
-IMPLEMENT_POINTWISE_OP(atan)
-IMPLEMENT_POINTWISE_OP(tanh)
-IMPLEMENT_POINTWISE_OP(sqrt)
-IMPLEMENT_POINTWISE_OP(rsqrt)
-IMPLEMENT_POINTWISE_OP(ceil)
-IMPLEMENT_POINTWISE_OP(floor)
-IMPLEMENT_POINTWISE_OP(round)
-IMPLEMENT_POINTWISE_OP(abs)
-IMPLEMENT_POINTWISE_OP(trunc)
-IMPLEMENT_POINTWISE_OP(frac)
+POINTWISE_OP(sigmoid)
+POINTWISE_OP(log)
+POINTWISE_OP(log1p)
+POINTWISE_OP(exp)
+POINTWISE_OP(cos)
+POINTWISE_OP(acos)
+POINTWISE_OP(cosh)
+POINTWISE_OP(sin)
+POINTWISE_OP(asin)
+POINTWISE_OP(sinh)
+POINTWISE_OP(tan)
+POINTWISE_OP(atan)
+POINTWISE_OP(tanh)
+POINTWISE_OP(sqrt)
+POINTWISE_OP(rsqrt)
+POINTWISE_OP(ceil)
+POINTWISE_OP(floor)
+POINTWISE_OP(round)
+POINTWISE_OP(abs)
+POINTWISE_OP(trunc)
+POINTWISE_OP(frac)
 #endif
 
-static PyObject * THPTensor_(elementSize)(THPTensor *self)
-{
-  HANDLE_TH_ERRORS
-  return PyLong_FromLong(THStorage_(elementSize)());
-  END_HANDLE_TH_ERRORS
-}
+SIMPLE_OP(elementSize,      PyLong_FromLong(THStorage_(elementSize)()))
+SIMPLE_OP(storage,          THPStorage_(newObject)(THTensor_(storage)(self->cdata)))
+SIMPLE_OP(storageOffset,    PyLong_FromLong(THTensor_(storageOffset)(self->cdata)))
+SIMPLE_OP(numel,            PyLong_FromLong(THTensor_(numel)(self->cdata)))
+SIMPLE_OP(nDimension,       PyLong_FromLong(THTensor_(nDimension)(self->cdata)))
 
-static PyObject * THPTensor_(free)(THPTensor *self)
-{
-  HANDLE_TH_ERRORS
-  THTensor_(free)(self->cdata);
-  Py_INCREF(self);
-  return (PyObject*)self;
-  END_HANDLE_TH_ERRORS
-}
+SIMPLE_RETURN_SELF(free,    THTensor_(free)(self->cdata))
+SIMPLE_RETURN_SELF(retain,  THTensor_(retain)(self->cdata))
+SIMPLE_RETURN_SELF(zero,    THTensor_(zero)(self->cdata))
 
-static PyObject * THPTensor_(size)(THPTensor *self, PyObject *arg)
-{
-  HANDLE_TH_ERRORS
-  int dim = -1;
-  if (!PyArg_ParseTuple(arg, "|i", &dim))
-    return NULL;
-
-  if (dim != -1) {
-    return PyLong_FromLong(THTensor_(size)(self->cdata, dim));
-  } else {
-    return THPLongStorage_newObject(THTensor_(newSizeOf)(self->cdata));
-  }
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject * THPTensor_(storage)(THPTensor *self)
-{
-  HANDLE_TH_ERRORS
-  return THPStorage_(newObject)(THTensor_(storage)(self->cdata));
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject * THPTensor_(storageOffset)(THPTensor *self)
-{
-  HANDLE_TH_ERRORS
-  return PyLong_FromLong(THTensor_(storageOffset)(self->cdata));
-  END_HANDLE_TH_ERRORS
-}
+// TENSOR_OR_DIM_WISE
+// Name
+// Operation on the whole tensor
+// Operation on selected dim (available in dim variable)
+TENSOR_OR_DIM_WISE(
+  size,
+  return THPLongStorage_newObject(THTensor_(newSizeOf)(self->cdata)),
+  return PyLong_FromLong(THTensor_(size)(self->cdata, dim))
+)
+TENSOR_OR_DIM_WISE(
+  stride,
+  return THPLongStorage_newObject(THTensor_(newStrideOf)(self->cdata)),
+  return PyLong_FromLong(THTensor_(stride)(self->cdata, dim))
+)
 
 static PyObject * THPTensor_(isSameSizeAs)(THPTensor *self, PyObject *args)
 {
@@ -97,39 +109,13 @@ static PyObject * THPTensor_(isSameSizeAs)(THPTensor *self, PyObject *args)
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPTensor_(numel)(THPTensor *self)
+static PyObject * THPTensor_(fill)(THPTensor *self, PyObject *arg)
 {
   HANDLE_TH_ERRORS
-  return PyLong_FromLong(THTensor_(numel)(self->cdata));
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject * THPTensor_(nDimension)(THPTensor *self)
-{
-  HANDLE_TH_ERRORS
-  return PyLong_FromLong(THTensor_(nDimension)(self->cdata));
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject * THPTensor_(stride)(THPTensor *self, PyObject *arg)
-{
-  HANDLE_TH_ERRORS
-  int dim = -1;
-  if (!PyArg_ParseTuple(arg, "|i", &dim))
+  real rvalue;
+  if (!THPUtils_(parseReal)(arg, &rvalue))
     return NULL;
-
-  if (dim != -1) {
-    return PyLong_FromLong(THTensor_(stride)(self->cdata, dim));
-  } else {
-    return THPLongStorage_newObject(THTensor_(newStrideOf)(self->cdata));
-  }
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject * THPTensor_(retain)(THPTensor *self)
-{
-  HANDLE_TH_ERRORS
-  THTensor_(retain)(self->cdata);
+  THTensor_(fill)(self->cdata, rvalue);
   Py_INCREF(self);
   return (PyObject*)self;
   END_HANDLE_TH_ERRORS
@@ -166,6 +152,7 @@ static PyMethodDef THPTensor_(methods)[] = {
   {"frac",            (PyCFunction)THPTensor_(frac),            METH_VARARGS, NULL},
 #endif
   {"elementSize",     (PyCFunction)THPTensor_(elementSize),     METH_NOARGS,  NULL},
+  {"fill",            (PyCFunction)THPTensor_(fill),            METH_O,       NULL},
   {"free",            (PyCFunction)THPTensor_(free),            METH_NOARGS,  NULL},
   {"dim",             (PyCFunction)THPTensor_(nDimension),      METH_NOARGS,  NULL},
   {"copy",            (PyCFunction)THPTensor_(copy),            METH_O,       NULL},
@@ -178,5 +165,6 @@ static PyMethodDef THPTensor_(methods)[] = {
   {"storageOffset",   (PyCFunction)THPTensor_(storageOffset),   METH_NOARGS,  NULL},
   {"stride",          (PyCFunction)THPTensor_(stride),          METH_VARARGS, NULL},
   {"retain",          (PyCFunction)THPTensor_(retain),          METH_NOARGS,  NULL},
+  {"zero",            (PyCFunction)THPTensor_(zero),            METH_NOARGS,  NULL},
   {NULL}
 };
