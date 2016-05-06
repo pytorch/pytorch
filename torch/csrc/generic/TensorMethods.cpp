@@ -1,11 +1,12 @@
+#define PARSE_TUPLE(...) if (!PyArg_ParseTuple(__VA_ARGS__)) return NULL
+#define RETURN_SELF Py_INCREF(self); return (PyObject*)self
 
 #define POINTWISE_OP(name)                                                     \
 static PyObject * THPTensor_(name)(THPTensor *self, PyObject *args)            \
 {                                                                              \
   HANDLE_TH_ERRORS                                                             \
   THPTensor *source = self;                                                    \
-  if (!PyArg_ParseTuple(args, "|O!", &THPTensorType, &source))                 \
-    return NULL;                                                               \
+  PARSE_TUPLE(args, "|O!", &THPTensorType, &source);                           \
   THTensor_(name)(self->cdata, source->cdata);                                 \
   Py_INCREF(self);                                                             \
   return (PyObject*)self;                                                      \
@@ -35,13 +36,33 @@ static PyObject * THPTensor_(name)(THPTensor *self, PyObject *arg)             \
 {                                                                              \
   HANDLE_TH_ERRORS                                                             \
   int dim = -1;                                                                \
-  if (!PyArg_ParseTuple(arg, "|i", &dim))                                      \
-    return NULL;                                                               \
-                                                                               \
+  PARSE_TUPLE(arg, "|i", &dim);                                                \
+  /* TODO: check dim? */                                                       \
   if (dim != -1) {                                                             \
     expr_dim;                                                                  \
   } else {                                                                     \
     expr_tensor;                                                               \
+  }                                                                            \
+  END_HANDLE_TH_ERRORS                                                         \
+}
+
+#define TENSOR_OR_DIM_WISE2(name, expr_tensor, expr_dim)                       \
+static PyObject * THPTensor_(name)(THPTensor *self, PyObject *args)            \
+{                                                                              \
+  HANDLE_TH_ERRORS                                                             \
+  int dim = -1;                                                                \
+  THPTensor *source = self;                                                    \
+  int argc = PyTuple_Size(args);                                               \
+  if (argc == 1) {                                                             \
+    PARSE_TUPLE(args, "i", &dim);                                              \
+  } else if (argc == 2) {                                                      \
+    PARSE_TUPLE(args, "O!i", &THPTensorType, &source, &dim);                   \
+  }                                                                            \
+  /* TODO: check dim? */                                                       \
+  if (dim == -1) {                                                             \
+    expr_tensor;                                                               \
+  } else {                                                                     \
+    expr_dim;                                                                  \
   }                                                                            \
   END_HANDLE_TH_ERRORS                                                         \
 }
@@ -99,6 +120,24 @@ TENSOR_OR_DIM_WISE(
   return PyLong_FromLong(THTensor_(stride)(self->cdata, dim))
 )
 
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+TENSOR_OR_DIM_WISE2(
+  mean,
+  return PyFloat_FromDouble(THTensor_(meanall)(self->cdata)),
+  THTensor_(mean)(self->cdata, source->cdata, dim); RETURN_SELF
+)
+TENSOR_OR_DIM_WISE2(
+  var,
+  return PyFloat_FromDouble(THTensor_(varall)(self->cdata)),
+  THTensor_(var)(self->cdata, source->cdata, dim, false); RETURN_SELF
+)
+TENSOR_OR_DIM_WISE2(
+  std,
+  return PyFloat_FromDouble(THTensor_(stdall)(self->cdata)),
+  THTensor_(std)(self->cdata, source->cdata, dim, false); RETURN_SELF
+)
+#endif
+
 static PyObject * THPTensor_(isSameSizeAs)(THPTensor *self, PyObject *args)
 {
   HANDLE_TH_ERRORS
@@ -150,6 +189,9 @@ static PyMethodDef THPTensor_(methods)[] = {
   {"abs",             (PyCFunction)THPTensor_(abs),             METH_VARARGS, NULL},
   {"trunc",           (PyCFunction)THPTensor_(trunc),           METH_VARARGS, NULL},
   {"frac",            (PyCFunction)THPTensor_(frac),            METH_VARARGS, NULL},
+  {"mean",            (PyCFunction)THPTensor_(mean),            METH_VARARGS, NULL},
+  {"std",             (PyCFunction)THPTensor_(std),             METH_VARARGS, NULL},
+  {"var",             (PyCFunction)THPTensor_(var),             METH_VARARGS, NULL},
 #endif
   {"elementSize",     (PyCFunction)THPTensor_(elementSize),     METH_NOARGS,  NULL},
   {"fill",            (PyCFunction)THPTensor_(fill),            METH_O,       NULL},
