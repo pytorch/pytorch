@@ -843,6 +843,7 @@ void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
 
     THTensor *transp_r_ = THTensor_(newTranspose)(r_, 0, 1);
     r__ = THTensor_(newClone)(transp_r_);
+    THTensor_(free)(transp_r_);
     THTensor_(transpose)(r__, NULL, 0, 1);
   }
 
