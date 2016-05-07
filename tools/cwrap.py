@@ -50,6 +50,7 @@ DEFINITION_END = """
 # these are mostly, so that the * can be omitted for convenience and clarity
 TYPE_TRANSFORMS = {
     'THTensor': 'THPTensor*',
+    'accreal': 'double',
 }
 
 # Code that will be used to generate each of argument options
@@ -127,7 +128,7 @@ def parse_lines(lines):
             thname, _, rettype = line.partition(OPTION_SEPARATOR)
             arg_options.append({
                 'thname': thname,
-                'return_type': rettype,
+                'return_type': TYPE_TRANSFORMS.get(rettype, rettype),
                 'arguments': []
             })
         else:
