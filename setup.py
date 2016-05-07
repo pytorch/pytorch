@@ -1,4 +1,5 @@
 from setuptools import setup, Extension
+from tools.cwrap import cwrap
 
 ################################################################################
 # Generate __init__.py from templates
@@ -38,6 +39,11 @@ with open(out_init, 'w') as f:
 """)
     f.write(header)
     f.write(generated)
+
+cwrap_src = ['torch/csrc/generic/TensorMethods.cwrap.cpp']
+for src in cwrap_src:
+    print("Generating code for " + src)
+    cwrap(src)
 
 ################################################################################
 # Declare the package

@@ -14,3 +14,5 @@ clean:
 	@rm -rf build
 	@rm -rf dist
 	@rm -rf torch.egg-info
+	@rm -rf torch/__init__.py
+	@rm -rf torch/csrc/generic/TensorMethods.cpp

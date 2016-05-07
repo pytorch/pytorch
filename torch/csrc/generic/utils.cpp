@@ -23,9 +23,9 @@ bool THPUtils_(parseSlice)(PyObject *slice, Py_ssize_t len, Py_ssize_t *ostart, 
 bool THPUtils_(parseReal)(PyObject *value, real *result)
 {
   if (PyLong_Check(value)) {
-    *result = PyLong_AsLongLong(value);
+    *result = (real)PyLong_AsLongLong(value);
   } else if (PyFloat_Check(value)) {
-    *result = PyFloat_AsDouble(value);
+    *result = (real)PyFloat_AsDouble(value);
   } else {
     // TODO: meaningful error
     PyErr_SetString(PyExc_RuntimeError, "Unrecognized object");
