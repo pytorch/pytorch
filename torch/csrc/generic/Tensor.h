@@ -8,6 +8,7 @@ typedef struct {
 } THPTensor;
 
 extern PyTypeObject THPTensorType;
+extern PyTypeObject THPTensorStatelessType;
 
 bool THPTensor_(init)(PyObject *module);
 bool THPTensor_(IsSubclass)(PyObject *tensor);

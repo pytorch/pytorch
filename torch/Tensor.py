@@ -1,4 +1,4 @@
-class RealTensor(C.RealTensorBase):
+class RealTensor(RealTensorBase):
     def __str__(self):
         return "RealTensor"
 
@@ -12,8 +12,9 @@ class RealTensor(C.RealTensorBase):
         if t == current:
             return self
         _, _, typename = t.partition('.')
-        assert hasattr(torch, typename)
-        return getattr(torch, typename)(self.size()).copy(self)
+        # TODO: this is ugly
+        assert hasattr(sys.modules['torch'], typename)
+        return getattr(sys.modules['torch'], typename)(self.size()).copy(self)
 
     def double(self):
         return self.type('torch.DoubleTensor')

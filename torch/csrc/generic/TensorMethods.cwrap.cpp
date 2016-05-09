@@ -1,18 +1,3 @@
-#define PARSE_TUPLE(...) if (!PyArg_ParseTuple(__VA_ARGS__)) return NULL
-#define RETURN_SELF Py_INCREF(self); return (PyObject*)self
-
-#define POINTWISE_OP(name)                                                     \
-static PyObject * THPTensor_(name)(THPTensor *self, PyObject *args)            \
-{                                                                              \
-  HANDLE_TH_ERRORS                                                             \
-  THPTensor *source = self;                                                    \
-  PARSE_TUPLE(args, "|O!", &THPTensorType, &source);                           \
-  THTensor_(name)(self->cdata, source->cdata);                                 \
-  Py_INCREF(self);                                                             \
-  return (PyObject*)self;                                                      \
-  END_HANDLE_TH_ERRORS                                                         \
-}
-
 #define SIMPLE_OP(name, expr)                                                  \
 static PyObject * THPTensor_(name)(THPTensor *self)                            \
 {                                                                              \
@@ -31,63 +16,262 @@ static PyObject * THPTensor_(name)(THPTensor *self)                            \
   END_HANDLE_TH_ERRORS                                                         \
 }
 
-#if defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_LONG)
-POINTWISE_OP(abs)
-#endif
-
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-POINTWISE_OP(sigmoid)
-POINTWISE_OP(log)
-POINTWISE_OP(log1p)
-POINTWISE_OP(exp)
-POINTWISE_OP(cos)
-POINTWISE_OP(acos)
-POINTWISE_OP(cosh)
-POINTWISE_OP(sin)
-POINTWISE_OP(asin)
-POINTWISE_OP(sinh)
-POINTWISE_OP(tan)
-POINTWISE_OP(atan)
-POINTWISE_OP(tanh)
-POINTWISE_OP(sqrt)
-POINTWISE_OP(rsqrt)
-POINTWISE_OP(ceil)
-POINTWISE_OP(floor)
-POINTWISE_OP(round)
-POINTWISE_OP(abs)
-POINTWISE_OP(trunc)
-POINTWISE_OP(frac)
-#endif
-
 SIMPLE_OP(elementSize,      PyLong_FromLong(THStorage_(elementSize)()))
 SIMPLE_OP(storage,          THPStorage_(newObject)(THTensor_(storage)(self->cdata)))
 SIMPLE_OP(storageOffset,    PyLong_FromLong(THTensor_(storageOffset)(self->cdata)))
-SIMPLE_OP(numel,            PyLong_FromLong(THTensor_(numel)(self->cdata)))
 SIMPLE_OP(nDimension,       PyLong_FromLong(THTensor_(nDimension)(self->cdata)))
 
 SIMPLE_RETURN_SELF(free,    THTensor_(free)(self->cdata))
 SIMPLE_RETURN_SELF(retain,  THTensor_(retain)(self->cdata))
-SIMPLE_RETURN_SELF(zero,    THTensor_(zero)(self->cdata))
 
 [[
-  size
-  size -> long
-    - self
-    - long dim
-  newSizeOf -> THLongStorage
+  numel
+  numel -> long
     - self
 ]]
 
+#if defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_LONG)
 [[
-  stride
-  stride -> long
+  abs
+  abs -> self
     - self
-    - long dim
-  newStrideOf -> THLongStorage
     - self
+  abs -> self OPTIONAL_SELF
+    - self
+    - THTensor source
 ]]
+#endif
 
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+[[
+  sigmoid
+  sigmoid -> self
+    - self
+    - self
+  sigmoid -> self OPTIONAL_SELF
+    - self
+    - THTensor source
+]]
+
+[[
+  log
+  log -> self
+    - self
+    - self
+  log -> self OPTIONAL_SELF
+    - self
+    - THTensor source
+]]
+
+
+[[
+  log1p
+  log1p -> self
+    - self
+    - self
+  log1p -> self OPTIONAL_SELF
+    - self
+    - THTensor other
+]]
+
+
+[[
+  exp
+  exp -> self
+    - self
+    - self
+  exp -> self OPTIONAL_SELF
+    - self
+    - THTensor other
+]]
+
+
+[[
+  cos
+  cos -> self
+    - self
+    - self
+  cos -> self OPTIONAL_SELF
+    - self
+    - THTensor other
+]]
+
+
+[[
+  acos
+  acos -> self
+    - self
+    - self
+  acos -> self OPTIONAL_SELF
+    - self
+    - THTensor other
+]]
+
+
+[[
+  cosh
+  cosh -> self
+    - self
+    - self
+  cosh -> self OPTIONAL_SELF
+    - self
+    - THTensor other
+]]
+
+
+[[
+  sin
+  sin -> self
+    - self
+    - self
+  sin -> self OPTIONAL_SELF
+    - self
+    - THTensor other
+]]
+
+
+[[
+  asin
+  asin -> self
+    - self
+    - self
+  asin -> self OPTIONAL_SELF
+    - self
+    - THTensor other
+]]
+
+
+[[
+  sinh
+  sinh -> self
+    - self
+    - self
+  sinh -> self OPTIONAL_SELF
+    - self
+    - THTensor other
+]]
+
+
+[[
+  tan
+  tan -> self
+    - self
+    - self
+  tan -> self OPTIONAL_SELF
+    - self
+    - THTensor other
+]]
+
+
+[[
+  atan
+  atan -> self
+    - self
+    - self
+  atan -> self OPTIONAL_SELF
+    - self
+    - THTensor other
+]]
+
+
+[[
+  tanh
+  tanh -> self
+    - self
+    - self
+  tanh -> self OPTIONAL_SELF
+    - self
+    - THTensor other
+]]
+
+
+[[
+  sqrt
+  sqrt -> self
+    - self
+    - self
+  sqrt -> self OPTIONAL_SELF
+    - self
+    - THTensor other
+]]
+
+
+[[
+  rsqrt
+  rsqrt -> self
+    - self
+    - self
+  rsqrt -> self OPTIONAL_SELF
+    - self
+    - THTensor other
+]]
+
+
+[[
+  ceil
+  ceil -> self
+    - self
+    - self
+  ceil -> self OPTIONAL_SELF
+    - self
+    - THTensor other
+]]
+
+
+[[
+  floor
+  floor -> self
+    - self
+    - self
+  floor -> self OPTIONAL_SELF
+    - self
+    - THTensor other
+]]
+
+
+[[
+  round
+  round -> self
+    - self
+    - self
+  round -> self OPTIONAL_SELF
+    - self
+    - THTensor other
+]]
+
+
+[[
+  abs
+  abs -> self
+    - self
+    - self
+  abs -> self OPTIONAL_SELF
+    - self
+    - THTensor other
+]]
+
+
+[[
+  trunc
+  trunc -> self
+    - self
+    - self
+  trunc -> self OPTIONAL_SELF
+    - self
+    - THTensor other
+]]
+
+
+[[
+  frac
+  frac -> self
+    - self
+    - self
+  frac -> self OPTIONAL_SELF
+    - self
+    - THTensor other
+]]
+
 [[
   mean
   meanall -> accreal
@@ -96,7 +280,7 @@ SIMPLE_RETURN_SELF(zero,    THTensor_(zero)(self->cdata))
     - self
     - self
     - long dim
-  mean -> self
+  mean -> self OPTIONAL_SELF
     - self
     - THTensor source
     - long dim
@@ -111,7 +295,7 @@ SIMPLE_RETURN_SELF(zero,    THTensor_(zero)(self->cdata))
     - self
     - long dim
     - CONSTANT false
-  var -> self
+  var -> self OPTIONAL_SELF
     - self
     - THTensor source
     - long dim
@@ -127,7 +311,7 @@ SIMPLE_RETURN_SELF(zero,    THTensor_(zero)(self->cdata))
     - self
     - long dim
     - CONSTANT false
-  std -> self
+  std -> self OPTIONAL_SELF
     - self
     - THTensor source
     - long dim
@@ -144,7 +328,7 @@ SIMPLE_RETURN_SELF(zero,    THTensor_(zero)(self->cdata))
     - self
     - real p
     - long dim
-  norm -> self
+  norm -> self OPTIONAL_SELF
     - self
     - THTensor source
     - real p
@@ -156,7 +340,7 @@ SIMPLE_RETURN_SELF(zero,    THTensor_(zero)(self->cdata))
   cinv -> self
     - self
     - self
-  cinv -> self
+  cinv -> self OPTIONAL_SELF
     - self
     - THTensor source
 ]]
@@ -166,11 +350,35 @@ SIMPLE_RETURN_SELF(zero,    THTensor_(zero)(self->cdata))
   neg -> self
     - self
     - self
-  neg -> self
+  neg -> self OPTIONAL_SELF
     - self
     - THTensor source
 ]]
 #endif
+
+[[
+  zero
+  zero -> self
+    - self
+]]
+
+[[
+  size STATEFUL_ONLY
+  size -> long
+    - self
+    - long dim
+  newSizeOf -> THLongStorage
+    - self
+]]
+
+[[
+  stride STATEFUL_ONLY
+  stride -> long
+    - self
+    - long dim
+  newStrideOf -> THLongStorage
+    - self
+]]
 
 [[
   fill
@@ -180,10 +388,10 @@ SIMPLE_RETURN_SELF(zero,    THTensor_(zero)(self->cdata))
 ]]
 
 [[
-  isSameSizeAs
+  isSameSizeAs STATEFUL_ONLY
   isSameSizeAs -> bool
     - self
-    - THTensor source
+    - THTensor other
 ]]
 
 [[
@@ -192,11 +400,11 @@ SIMPLE_RETURN_SELF(zero,    THTensor_(zero)(self->cdata))
     - self
     - self
     - THTensor a
-  cmax -> self
+  cmax -> self OPTIONAL_SELF
     - self
     - THTensor a
     - THTensor b
-  cmaxValue -> self
+  cmaxValue -> self OPTIONAL_SELF
     - self
     - THTensor b
     - real value
@@ -212,11 +420,11 @@ SIMPLE_RETURN_SELF(zero,    THTensor_(zero)(self->cdata))
     - self
     - self
     - THTensor a
-  cmin -> self
+  cmin -> self OPTIONAL_SELF
     - self
     - THTensor a
     - THTensor b
-  cminValue -> self
+  cminValue -> self OPTIONAL_SELF
     - self
     - THTensor b
     - real value
@@ -234,7 +442,7 @@ SIMPLE_RETURN_SELF(zero,    THTensor_(zero)(self->cdata))
     - self
     - self
     - long dim
-  sum -> self
+  sum -> self OPTIONAL_SELF
     - self
     - THTensor source
     - long dim
@@ -248,7 +456,7 @@ SIMPLE_RETURN_SELF(zero,    THTensor_(zero)(self->cdata))
     - self
     - self
     - long dim
-  prod -> self
+  prod -> self OPTIONAL_SELF
     - self
     - THTensor source
     - long dim
@@ -256,7 +464,7 @@ SIMPLE_RETURN_SELF(zero,    THTensor_(zero)(self->cdata))
 
 [[
   cumsum
-  cumsum -> self
+  cumsum -> self OPTIONAL_SELF
     - self
     - THTensor source
     - long dim
@@ -268,7 +476,7 @@ SIMPLE_RETURN_SELF(zero,    THTensor_(zero)(self->cdata))
 
 [[
   cumprod
-  cumprod -> self
+  cumprod -> self OPTIONAL_SELF
     - self
     - THTensor source
     - long dim
@@ -280,7 +488,7 @@ SIMPLE_RETURN_SELF(zero,    THTensor_(zero)(self->cdata))
 
 [[
   sign
-  sign -> self
+  sign -> self OPTIONAL_SELF
     - self
     - THTensor source
   sign -> self
@@ -300,7 +508,7 @@ SIMPLE_RETURN_SELF(zero,    THTensor_(zero)(self->cdata))
     - self
     - self
     - real value
-  add -> self
+  add -> self OPTIONAL_SELF
     - self
     - THTensor a
     - real value
@@ -314,12 +522,12 @@ SIMPLE_RETURN_SELF(zero,    THTensor_(zero)(self->cdata))
     - self
     - real value
     - THTensor a
-  cadd -> self
+  cadd -> self OPTIONAL_SELF
     - self
     - THTensor a
     - CONSTANT 1
     - THTensor b
-  cadd -> self
+  cadd -> self OPTIONAL_SELF
     - self
     - THTensor a
     - real value
@@ -332,7 +540,7 @@ SIMPLE_RETURN_SELF(zero,    THTensor_(zero)(self->cdata))
     - self
     - self
     - real value
-  sub -> self
+  sub -> self OPTIONAL_SELF
     - self
     - THTensor a
     - real value
@@ -346,12 +554,12 @@ SIMPLE_RETURN_SELF(zero,    THTensor_(zero)(self->cdata))
     - self
     - real value
     - THTensor a
-  csub -> self
+  csub -> self OPTIONAL_SELF
     - self
     - THTensor a
     - CONSTANT 1
     - THTensor b
-  csub -> self
+  csub -> self OPTIONAL_SELF
     - self
     - THTensor a
     - real value
@@ -364,7 +572,7 @@ SIMPLE_RETURN_SELF(zero,    THTensor_(zero)(self->cdata))
     - self
     - self
     - real value
-  mul -> self
+  mul -> self OPTIONAL_SELF
     - self
     - THTensor a
     - real value
@@ -376,7 +584,7 @@ SIMPLE_RETURN_SELF(zero,    THTensor_(zero)(self->cdata))
     - self
     - self
     - THTensor a
-  cmul -> self
+  cmul -> self OPTIONAL_SELF
     - self
     - THTensor a
     - THTensor b
@@ -388,7 +596,7 @@ SIMPLE_RETURN_SELF(zero,    THTensor_(zero)(self->cdata))
     - self
     - self
     - real value
-  div -> self
+  div -> self OPTIONAL_SELF
     - self
     - THTensor a
     - real value
@@ -400,7 +608,7 @@ SIMPLE_RETURN_SELF(zero,    THTensor_(zero)(self->cdata))
     - self
     - self
     - THTensor a
-  cdiv -> self
+  cdiv -> self OPTIONAL_SELF
     - self
     - THTensor a
     - THTensor b
@@ -412,7 +620,7 @@ SIMPLE_RETURN_SELF(zero,    THTensor_(zero)(self->cdata))
     - self
     - self
     - real value
-  fmod -> self
+  fmod -> self OPTIONAL_SELF
     - self
     - THTensor source
     - real value
@@ -424,7 +632,7 @@ SIMPLE_RETURN_SELF(zero,    THTensor_(zero)(self->cdata))
     - self
     - self
     - THTensor div
-  cfmod -> self
+  cfmod -> self OPTIONAL_SELF
     - self
     - THTensor source
     - THTensor div
@@ -436,7 +644,7 @@ SIMPLE_RETURN_SELF(zero,    THTensor_(zero)(self->cdata))
     - self
     - self
     - real value
-  remainder -> self
+  remainder -> self OPTIONAL_SELF
     - self
     - THTensor source
     - real value
@@ -448,20 +656,19 @@ SIMPLE_RETURN_SELF(zero,    THTensor_(zero)(self->cdata))
     - self
     - self
     - THTensor div
-  cremainder -> self
+  cremainder -> self OPTIONAL_SELF
     - self
     - THTensor source
     - THTensor div
 ]]
 
-// TODO: why pow isn't always available
 [[
   cpow
   cpow -> self
     - self
     - self
     - THTensor pow
-  cpow -> self
+  cpow -> self OPTIONAL_SELF
     - self
     - THTensor source
     - THTensor pow
@@ -474,7 +681,7 @@ SIMPLE_RETURN_SELF(zero,    THTensor_(zero)(self->cdata))
     - self
     - real min
     - real max
-  clamp -> self
+  clamp -> self OPTIONAL_SELF
     - self
     - THTensor source
     - real min
@@ -483,10 +690,10 @@ SIMPLE_RETURN_SELF(zero,    THTensor_(zero)(self->cdata))
 
 [[
   dot
-  dot -> self
+  dot -> accreal
     - self
     - THTensor a
-  dot -> self
+  dot -> accreal
     - THTensor a
     - THTensor b
 ]]
@@ -504,7 +711,7 @@ SIMPLE_RETURN_SELF(zero,    THTensor_(zero)(self->cdata))
     - self
     - self
     - long k
-  tril -> self
+  tril -> self OPTIONAL_SELF
     - self
     - THTensor source
     - long k
@@ -516,7 +723,7 @@ SIMPLE_RETURN_SELF(zero,    THTensor_(zero)(self->cdata))
     - self
     - self
     - long k
-  triu -> self
+  triu -> self OPTIONAL_SELF
     - self
     - THTensor source
     - long k
@@ -524,11 +731,11 @@ SIMPLE_RETURN_SELF(zero,    THTensor_(zero)(self->cdata))
 
 [[
   eye
-  eye -> self
+  eye -> self OPTIONAL_SELF
     - self
     - long n
     - long n
-  eye -> self
+  eye -> self OPTIONAL_SELF
     - self
     - long n
     - long m
@@ -540,7 +747,7 @@ SIMPLE_RETURN_SELF(zero,    THTensor_(zero)(self->cdata))
     - self
     - self
     - CONSTANT 0
-  diag -> self
+  diag -> self OPTIONAL_SELF
     - self
     - THTensor other
     - CONSTANT 0
@@ -548,18 +755,31 @@ SIMPLE_RETURN_SELF(zero,    THTensor_(zero)(self->cdata))
     - self
     - self
     - long k
-  diag -> self
+  diag -> self OPTIONAL_SELF
     - self
     - THTensor other
     - long k
 ]]
 
-// TODO: fmod, reminder, clamp
-
 // Declared in TensorCopy.cpp
 static PyObject * THPTensor_(copy)(THPTensor *self, PyObject *other);
 
 static PyMethodDef THPTensor_(methods)[] = {
+  //////////////////////////////////////////////////////////////////////////////
+  // These methods are stateful only
+  {"elementSize",     (PyCFunction)THPTensor_(elementSize),     METH_NOARGS,  NULL},
+  {"isSameSizeAs",    (PyCFunction)THPTensor_(isSameSizeAs),    METH_VARARGS, NULL},
+  {"dim",             (PyCFunction)THPTensor_(nDimension),      METH_NOARGS,  NULL},
+  {"stride",          (PyCFunction)THPTensor_(stride),          METH_VARARGS, NULL},
+  {"storage",         (PyCFunction)THPTensor_(storage),         METH_NOARGS,  NULL},
+  {"storageOffset",   (PyCFunction)THPTensor_(storageOffset),   METH_NOARGS,  NULL},
+  {"nElement",        (PyCFunction)THPTensor_(numel),           METH_NOARGS,  NULL},
+  {"nDimension",      (PyCFunction)THPTensor_(nDimension),      METH_NOARGS,  NULL},
+  {"copy",            (PyCFunction)THPTensor_(copy),            METH_O,       NULL},
+  {"free",            (PyCFunction)THPTensor_(free),            METH_NOARGS,  NULL},
+  {"retain",          (PyCFunction)THPTensor_(retain),          METH_NOARGS,  NULL},
+  {"size",            (PyCFunction)THPTensor_(size),            METH_VARARGS, NULL},
+  //////////////////////////////////////////////////////////////////////////////
 #if defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_LONG)
   {"abs",             (PyCFunction)THPTensor_(abs),             METH_VARARGS, NULL},
 #endif
@@ -615,25 +835,80 @@ static PyMethodDef THPTensor_(methods)[] = {
   {"clamp",           (PyCFunction)THPTensor_(clamp),           METH_VARARGS, NULL},
   {"equal",           (PyCFunction)THPTensor_(equal),           METH_VARARGS, NULL},
   {"eye",             (PyCFunction)THPTensor_(eye),             METH_VARARGS, NULL},
-  {"elementSize",     (PyCFunction)THPTensor_(elementSize),     METH_NOARGS,  NULL},
   {"fill",            (PyCFunction)THPTensor_(fill),            METH_VARARGS, NULL},
-  {"free",            (PyCFunction)THPTensor_(free),            METH_NOARGS,  NULL},
-  {"dim",             (PyCFunction)THPTensor_(nDimension),      METH_NOARGS,  NULL},
-  {"diag",            (PyCFunction)THPTensor_(diag),            METH_NOARGS,  NULL},
-  {"copy",            (PyCFunction)THPTensor_(copy),            METH_O,       NULL},
-  {"isSameSizeAs",    (PyCFunction)THPTensor_(isSameSizeAs),    METH_VARARGS, NULL},
-  {"numel",           (PyCFunction)THPTensor_(numel),           METH_NOARGS,  NULL},
-  {"nElement",        (PyCFunction)THPTensor_(numel),           METH_NOARGS,  NULL},
-  {"nDimension",      (PyCFunction)THPTensor_(nDimension),      METH_NOARGS,  NULL},
+  {"diag",            (PyCFunction)THPTensor_(diag),            METH_VARARGS,  NULL},
+  {"numel",           (PyCFunction)THPTensor_(numel),           METH_VARARGS,  NULL},
   {"sign",            (PyCFunction)THPTensor_(sign),            METH_VARARGS, NULL},
-  {"size",            (PyCFunction)THPTensor_(size),            METH_VARARGS, NULL},
-  {"storage",         (PyCFunction)THPTensor_(storage),         METH_NOARGS,  NULL},
-  {"storageOffset",   (PyCFunction)THPTensor_(storageOffset),   METH_NOARGS,  NULL},
-  {"stride",          (PyCFunction)THPTensor_(stride),          METH_VARARGS, NULL},
-  {"retain",          (PyCFunction)THPTensor_(retain),          METH_NOARGS,  NULL},
   {"trace",           (PyCFunction)THPTensor_(trace),           METH_VARARGS, NULL},
   {"tril",            (PyCFunction)THPTensor_(tril),            METH_VARARGS, NULL},
   {"triu",            (PyCFunction)THPTensor_(triu),            METH_VARARGS, NULL},
-  {"zero",            (PyCFunction)THPTensor_(zero),            METH_NOARGS,  NULL},
+  {"zero",            (PyCFunction)THPTensor_(zero),            METH_VARARGS,  NULL},
+  {NULL}
+};
+
+static PyMethodDef THPTensorStatelessMethods[] = {
+#if defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_LONG)
+  {"abs",             (PyCFunction)THPTensor_stateless_(abs),             METH_VARARGS, NULL},
+#endif
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  {"sigmoid",         (PyCFunction)THPTensor_stateless_(sigmoid),         METH_VARARGS, NULL},
+  {"log",             (PyCFunction)THPTensor_stateless_(log),             METH_VARARGS, NULL},
+  {"log1p",           (PyCFunction)THPTensor_stateless_(log1p),           METH_VARARGS, NULL},
+  {"exp",             (PyCFunction)THPTensor_stateless_(exp),             METH_VARARGS, NULL},
+  {"cos",             (PyCFunction)THPTensor_stateless_(cos),             METH_VARARGS, NULL},
+  {"acos",            (PyCFunction)THPTensor_stateless_(acos),            METH_VARARGS, NULL},
+  {"cosh",            (PyCFunction)THPTensor_stateless_(cosh),            METH_VARARGS, NULL},
+  {"sin",             (PyCFunction)THPTensor_stateless_(sin),             METH_VARARGS, NULL},
+  {"asin",            (PyCFunction)THPTensor_stateless_(asin),            METH_VARARGS, NULL},
+  {"sinh",            (PyCFunction)THPTensor_stateless_(sinh),            METH_VARARGS, NULL},
+  {"tan",             (PyCFunction)THPTensor_stateless_(tan),             METH_VARARGS, NULL},
+  {"atan",            (PyCFunction)THPTensor_stateless_(atan),            METH_VARARGS, NULL},
+  {"tanh",            (PyCFunction)THPTensor_stateless_(tanh),            METH_VARARGS, NULL},
+  {"sqrt",            (PyCFunction)THPTensor_stateless_(sqrt),            METH_VARARGS, NULL},
+  {"rsqrt",           (PyCFunction)THPTensor_stateless_(rsqrt),           METH_VARARGS, NULL},
+  {"ceil",            (PyCFunction)THPTensor_stateless_(ceil),            METH_VARARGS, NULL},
+  {"floor",           (PyCFunction)THPTensor_stateless_(floor),           METH_VARARGS, NULL},
+  {"round",           (PyCFunction)THPTensor_stateless_(round),           METH_VARARGS, NULL},
+  {"abs",             (PyCFunction)THPTensor_stateless_(abs),             METH_VARARGS, NULL},
+  {"trunc",           (PyCFunction)THPTensor_stateless_(trunc),           METH_VARARGS, NULL},
+  {"frac",            (PyCFunction)THPTensor_stateless_(frac),            METH_VARARGS, NULL},
+  {"mean",            (PyCFunction)THPTensor_stateless_(mean),            METH_VARARGS, NULL},
+  {"std",             (PyCFunction)THPTensor_stateless_(std),             METH_VARARGS, NULL},
+  {"var",             (PyCFunction)THPTensor_stateless_(var),             METH_VARARGS, NULL},
+  {"norm",            (PyCFunction)THPTensor_stateless_(norm),            METH_VARARGS, NULL},
+  {"cinv",            (PyCFunction)THPTensor_stateless_(cinv),            METH_VARARGS, NULL},
+  {"neg",             (PyCFunction)THPTensor_stateless_(neg),             METH_VARARGS, NULL},
+#endif
+  {"add",             (PyCFunction)THPTensor_stateless_(add),             METH_VARARGS, NULL},
+  {"csub",            (PyCFunction)THPTensor_stateless_(csub),            METH_VARARGS, NULL},
+  {"mul",             (PyCFunction)THPTensor_stateless_(mul),             METH_VARARGS, NULL},
+  {"div",             (PyCFunction)THPTensor_stateless_(div),             METH_VARARGS, NULL},
+  {"fmod",            (PyCFunction)THPTensor_stateless_(fmod),            METH_VARARGS, NULL},
+  {"mod",             (PyCFunction)THPTensor_stateless_(fmod),            METH_VARARGS, NULL},
+  {"cmul",            (PyCFunction)THPTensor_stateless_(cmul),            METH_VARARGS, NULL},
+  {"cdiv",            (PyCFunction)THPTensor_stateless_(cdiv),            METH_VARARGS, NULL},
+  {"cfmod",           (PyCFunction)THPTensor_stateless_(cfmod),           METH_VARARGS, NULL},
+  {"cmod",            (PyCFunction)THPTensor_stateless_(cfmod),           METH_VARARGS, NULL},
+  {"cmax",            (PyCFunction)THPTensor_stateless_(cmax),            METH_VARARGS, NULL},
+  {"cmin",            (PyCFunction)THPTensor_stateless_(cmin),            METH_VARARGS, NULL},
+  {"cpow",            (PyCFunction)THPTensor_stateless_(cpow),            METH_VARARGS, NULL},
+  {"dot",             (PyCFunction)THPTensor_stateless_(dot),             METH_VARARGS, NULL},
+  {"sum",             (PyCFunction)THPTensor_stateless_(sum),             METH_VARARGS, NULL},
+  {"prod",            (PyCFunction)THPTensor_stateless_(prod),            METH_VARARGS, NULL},
+  {"remainder",       (PyCFunction)THPTensor_stateless_(remainder),       METH_VARARGS, NULL},
+  {"cremainder",      (PyCFunction)THPTensor_stateless_(cremainder),      METH_VARARGS, NULL},
+  {"cumsum",          (PyCFunction)THPTensor_stateless_(cumsum),          METH_VARARGS, NULL},
+  {"cumprod",         (PyCFunction)THPTensor_stateless_(cumprod),         METH_VARARGS, NULL},
+  {"clamp",           (PyCFunction)THPTensor_stateless_(clamp),           METH_VARARGS, NULL},
+  {"equal",           (PyCFunction)THPTensor_stateless_(equal),           METH_VARARGS, NULL},
+  {"eye",             (PyCFunction)THPTensor_stateless_(eye),             METH_VARARGS, NULL},
+  {"fill",            (PyCFunction)THPTensor_stateless_(fill),            METH_VARARGS, NULL},
+  {"diag",            (PyCFunction)THPTensor_stateless_(diag),            METH_VARARGS,  NULL},
+  {"numel",           (PyCFunction)THPTensor_stateless_(numel),           METH_VARARGS,  NULL},
+  {"sign",            (PyCFunction)THPTensor_stateless_(sign),            METH_VARARGS, NULL},
+  {"trace",           (PyCFunction)THPTensor_stateless_(trace),           METH_VARARGS, NULL},
+  {"tril",            (PyCFunction)THPTensor_stateless_(tril),            METH_VARARGS, NULL},
+  {"triu",            (PyCFunction)THPTensor_stateless_(triu),            METH_VARARGS, NULL},
+  {"zero",            (PyCFunction)THPTensor_stateless_(zero),            METH_VARARGS,  NULL},
   {NULL}
 };

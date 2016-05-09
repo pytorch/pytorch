@@ -3,22 +3,10 @@
 #else
 
 /* A pointer to RealStorage class defined later in Python */
-static PyObject *THPStorageClass = NULL;
-
-static void THPStorage_(getClass)()
-{
-  // TODO: error checking
-  if (THPStorageClass)
-    return;
-  PyObject *torch_module = PyImport_ImportModule("torch");
-  PyObject* module_dict = PyModule_GetDict(torch_module);
-  THPStorageClass = PyMapping_GetItemString(module_dict, THPStorageStr);
-}
-
+extern PyObject *THPStorageClass;
 PyObject * THPStorage_(newObject)(THStorage *ptr)
 {
   // TODO: error checking
-  THPStorage_(getClass)();
   PyObject *args = PyTuple_New(0);
   PyObject *kwargs = Py_BuildValue("{s:N}", "cdata", PyLong_FromVoidPtr(ptr));
   PyObject *instance = PyObject_Call(THPStorageClass, args, kwargs);

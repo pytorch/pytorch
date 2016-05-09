@@ -1,1 +1,21 @@
-import torch.C
+from torch.C import *
+import sys
+
+# GENERATED CODE GOES HERE
+
+C._initExtension()
+
+del DoubleStorageBase
+del FloatStorageBase
+del LongStorageBase
+del IntStorageBase
+del ShortStorageBase
+del CharStorageBase
+del ByteStorageBase
+del DoubleTensorBase
+del FloatTensorBase
+del LongTensorBase
+del IntTensorBase
+del ShortTensorBase
+del CharTensorBase
+del ByteTensorBase

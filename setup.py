@@ -26,7 +26,7 @@ for template in templates:
         generated += '\n{}\n'.format(new_content)
 
 with open(in_init, 'r') as i:
-    header = i.read()
+    header, _, suffix = i.read().partition('# GENERATED CODE GOES HERE')
 
 with open(out_init, 'w') as f:
     f.write("""
@@ -39,6 +39,7 @@ with open(out_init, 'w') as f:
 """)
     f.write(header)
     f.write(generated)
+    f.write(suffix)
 
 cwrap_src = ['torch/csrc/generic/TensorMethods.cwrap.cpp']
 for src in cwrap_src:
