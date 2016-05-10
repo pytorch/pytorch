@@ -67,7 +67,9 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
   HANDLE_TH_ERRORS
   /* Integer index */
   if (PyLong_Check(index)) {
-    size_t nindex = PyLong_AsSize_t(index);
+    long nindex = PyLong_AsLong(index);
+    if (nindex < 0)
+      nindex += THStorage_(size)(self->cdata);
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
     return PyFloat_FromDouble(THStorage_(get)(self->cdata, nindex));
 #else

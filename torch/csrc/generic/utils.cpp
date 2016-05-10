@@ -34,4 +34,13 @@ bool THPUtils_(parseReal)(PyObject *value, real *result)
   return true;
 }
 
+PyObject * THPUtils_(newReal)(real value)
+{
+#if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
+  return PyFloat_FromDouble(value);
+#else
+  return PyLong_FromLong(value);
+#endif
+}
+
 #endif

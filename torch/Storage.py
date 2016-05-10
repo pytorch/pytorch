@@ -6,3 +6,6 @@ class RealStorage(RealStorageBase):
     def __repr__(self):
         return str(self)
 
+    def __iter__(self):
+        return map(lambda i: self[i], range(self.size()))
+

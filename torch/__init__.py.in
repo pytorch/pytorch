@@ -1,10 +1,16 @@
 from torch.C import *
+from . import printing as _printing
 import sys
+
+def typename(o):
+    return o.__module__ + "." + o.__class__.__name__
+
 
 # GENERATED CODE GOES HERE
 
 C._initExtension()
 
+# Remove unnecessary members
 del DoubleStorageBase
 del FloatStorageBase
 del LongStorageBase

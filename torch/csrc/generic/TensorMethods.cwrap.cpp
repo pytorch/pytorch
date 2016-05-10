@@ -24,6 +24,26 @@ SIMPLE_OP(nDimension,       PyLong_FromLong(THTensor_(nDimension)(self->cdata)))
 SIMPLE_RETURN_SELF(free,    THTensor_(free)(self->cdata))
 SIMPLE_RETURN_SELF(retain,  THTensor_(retain)(self->cdata))
 
+static PyObject * THPTensor_(select)(THPTensor *self, PyObject *args)
+{
+  HANDLE_TH_ERRORS
+  long dim, idx;
+  if (!PyArg_ParseTuple(args, "ll", &dim, &idx))
+    return NULL;
+
+  int ndim = THTensor_(nDimension)(self->cdata);
+  if(ndim > 1) {
+    THTensor *selected = THTensor_(newWithTensor)(self->cdata);
+    THTensor_(select)(selected, NULL, dim, idx);
+    return THPTensor_(newObject)(selected);
+  }
+  else {
+    THArgCheck(ndim == 1, 1, "empty Tensor");
+    return THPUtils_(newReal)(THTensor_(get1d)(self->cdata, idx));
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 [[
   numel
   numel -> long
@@ -779,6 +799,7 @@ static PyMethodDef THPTensor_(methods)[] = {
   {"free",            (PyCFunction)THPTensor_(free),            METH_NOARGS,  NULL},
   {"retain",          (PyCFunction)THPTensor_(retain),          METH_NOARGS,  NULL},
   {"size",            (PyCFunction)THPTensor_(size),            METH_VARARGS, NULL},
+  {"select",          (PyCFunction)THPTensor_(select),          METH_VARARGS, NULL},
   //////////////////////////////////////////////////////////////////////////////
 #if defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_LONG)
   {"abs",             (PyCFunction)THPTensor_(abs),             METH_VARARGS, NULL},

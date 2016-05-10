@@ -1,3 +1,4 @@
+
 class RealTensor(RealTensorBase):
     def __str__(self):
         return "RealTensor"
@@ -36,3 +37,9 @@ class RealTensor(RealTensorBase):
 
     def byte(self):
         return self.type('torch.ByteTensor')
+
+    def __str__(self):
+        return _printing.printTensor(self)
+
+    def __iter__(self):
+        return map(lambda i: self.select(0, i), range(self.size(0)))

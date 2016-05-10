@@ -64,6 +64,29 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPTensor_(get)(THPTensor *self, PyObject *index)
+{
+  HANDLE_TH_ERRORS
+  int ndim = THTensor_(nDimension)(self->cdata);
+  /* Integer index */
+  if (PyLong_Check(index)) {
+    if (ndim == 1) {
+      size_t nindex = PyLong_AsSize_t(index);
+      return THPUtils_(newReal)(THTensor_(get1d)(self->cdata, nindex));
+    }
+  }
+  PyErr_SetString(PyExc_RuntimeError, "Only indexing 1D tensors with integers supported");
+  return NULL;
+  END_HANDLE_TH_ERRORS
+}
+
+
+static PyMappingMethods THPTensor_(mappingmethods) = {
+  NULL,
+  (binaryfunc)THPTensor_(get),
+  NULL
+};
+
 PyTypeObject THPTensorType = {
   PyVarObject_HEAD_INIT(NULL, 0)
   "torch.C." THPTensorBaseStr,           /* tp_name */
@@ -77,7 +100,7 @@ PyTypeObject THPTensorType = {
   0,                                     /* tp_repr */
   0,                                     /* tp_as_number */
   0,                                     /* tp_as_sequence */
-  0,                                     /* tp_as_mapping */
+  &THPTensor_(mappingmethods),           /* tp_as_mapping */
   0,                                     /* tp_hash  */
   0,                                     /* tp_call */
   0,                                     /* tp_str */
