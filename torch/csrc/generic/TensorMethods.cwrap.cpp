@@ -781,6 +781,114 @@ static PyObject * THPTensor_(select)(THPTensor *self, PyObject *args)
     - long k
 ]]
 
+[[
+  lt
+  ltValue -> new THByteTensor
+    - self
+    - real value
+  ltValueT -> self
+    - self
+    - THTensor other
+    - real value
+  ltTensor -> new THByteTensor
+    - self
+    - THTensor other
+  ltTensorT -> self
+    - self
+    - THTensor other
+    - THTensor other2
+]]
+
+[[
+  gt
+  gtValue -> new THByteTensor
+    - self
+    - real value
+  gtValueT -> self
+    - self
+    - THTensor other
+    - real value
+  gtTensor -> new THByteTensor
+    - self
+    - THTensor other
+  gtTensorT -> self
+    - self
+    - THTensor other
+    - THTensor other2
+]]
+
+[[
+  le
+  leValue -> new THByteTensor
+    - self
+    - real value
+  leValueT -> self
+    - self
+    - THTensor other
+    - real value
+  leTensor -> new THByteTensor
+    - self
+    - THTensor other
+  leTensorT -> self
+    - self
+    - THTensor other
+    - THTensor other2
+]]
+
+[[
+  ge
+  geValue -> new THByteTensor
+    - self
+    - real value
+  geValueT -> self
+    - self
+    - THTensor other
+    - real value
+  geTensor -> new THByteTensor
+    - self
+    - THTensor other
+  geTensorT -> self
+    - self
+    - THTensor other
+    - THTensor other2
+]]
+
+[[
+  eq
+  eqValue -> new THByteTensor
+    - self
+    - real value
+  eqValueT -> self
+    - self
+    - THTensor other
+    - real value
+  eqTensor -> new THByteTensor
+    - self
+    - THTensor other
+  eqTensorT -> self
+    - self
+    - THTensor other
+    - THTensor other2
+]]
+
+[[
+  ne
+  neValue -> new THByteTensor
+    - self
+    - real value
+  neValueT -> self
+    - self
+    - THTensor other
+    - real value
+  neTensor -> new THByteTensor
+    - self
+    - THTensor other
+  neTensorT -> self
+    - self
+    - THTensor other
+    - THTensor other2
+]]
+
 // Declared in TensorCopy.cpp
 static PyObject * THPTensor_(copy)(THPTensor *self, PyObject *other);
 
@@ -864,6 +972,12 @@ static PyMethodDef THPTensor_(methods)[] = {
   {"tril",            (PyCFunction)THPTensor_(tril),            METH_VARARGS, NULL},
   {"triu",            (PyCFunction)THPTensor_(triu),            METH_VARARGS, NULL},
   {"zero",            (PyCFunction)THPTensor_(zero),            METH_VARARGS,  NULL},
+  {"gt",              (PyCFunction)THPTensor_(gt),              METH_VARARGS,  NULL},
+  {"lt",              (PyCFunction)THPTensor_(lt),              METH_VARARGS,  NULL},
+  {"ge",              (PyCFunction)THPTensor_(ge),              METH_VARARGS,  NULL},
+  {"le",              (PyCFunction)THPTensor_(le),              METH_VARARGS,  NULL},
+  {"eq",              (PyCFunction)THPTensor_(eq),              METH_VARARGS,  NULL},
+  {"ne",              (PyCFunction)THPTensor_(ne),              METH_VARARGS,  NULL},
   {NULL}
 };
 
@@ -931,5 +1045,11 @@ static PyMethodDef THPTensorStatelessMethods[] = {
   {"tril",            (PyCFunction)THPTensor_stateless_(tril),            METH_VARARGS, NULL},
   {"triu",            (PyCFunction)THPTensor_stateless_(triu),            METH_VARARGS, NULL},
   {"zero",            (PyCFunction)THPTensor_stateless_(zero),            METH_VARARGS,  NULL},
+  {"gt",              (PyCFunction)THPTensor_stateless_(gt),              METH_VARARGS,  NULL},
+  {"lt",              (PyCFunction)THPTensor_stateless_(lt),              METH_VARARGS,  NULL},
+  {"ge",              (PyCFunction)THPTensor_stateless_(ge),              METH_VARARGS,  NULL},
+  {"le",              (PyCFunction)THPTensor_stateless_(le),              METH_VARARGS,  NULL},
+  {"eq",              (PyCFunction)THPTensor_stateless_(eq),              METH_VARARGS,  NULL},
+  {"ne",              (PyCFunction)THPTensor_stateless_(ne),              METH_VARARGS,  NULL},
   {NULL}
 };

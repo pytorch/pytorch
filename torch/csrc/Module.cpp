@@ -177,6 +177,12 @@ IMPLEMENT_STATELESS(trace)
 IMPLEMENT_STATELESS(tril)
 IMPLEMENT_STATELESS(triu)
 IMPLEMENT_STATELESS(zero)
+IMPLEMENT_STATELESS(gt)
+IMPLEMENT_STATELESS(lt)
+IMPLEMENT_STATELESS(ge)
+IMPLEMENT_STATELESS(le)
+IMPLEMENT_STATELESS(eq)
+IMPLEMENT_STATELESS(ne)
 
 static PyMethodDef TorchMethods[] = {
   {"_initExtension",  (PyCFunction)THPModule_initExtension,     METH_NOARGS,  NULL},
@@ -240,6 +246,12 @@ static PyMethodDef TorchMethods[] = {
   {"tril",            (PyCFunction)THPModule_tril,              METH_VARARGS, NULL},
   {"triu",            (PyCFunction)THPModule_triu,              METH_VARARGS, NULL},
   {"zero",            (PyCFunction)THPModule_zero,              METH_VARARGS, NULL},
+  {"gt",              (PyCFunction)THPModule_gt,                METH_VARARGS, NULL},
+  {"lt",              (PyCFunction)THPModule_lt,                METH_VARARGS, NULL},
+  {"ge",              (PyCFunction)THPModule_ge,                METH_VARARGS, NULL},
+  {"le",              (PyCFunction)THPModule_le,                METH_VARARGS, NULL},
+  {"eq",              (PyCFunction)THPModule_eq,                METH_VARARGS, NULL},
+  {"ne",              (PyCFunction)THPModule_ne,                METH_VARARGS, NULL},
   {NULL, NULL, 0, NULL}
 };
 
