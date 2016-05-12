@@ -156,6 +156,8 @@ IMPLEMENT_STATELESS(fmod)
 IMPLEMENT_STATELESS(cmul)
 IMPLEMENT_STATELESS(cdiv)
 IMPLEMENT_STATELESS(cfmod)
+IMPLEMENT_STATELESS(min)
+IMPLEMENT_STATELESS(max)
 IMPLEMENT_STATELESS(cmax)
 IMPLEMENT_STATELESS(cmin)
 IMPLEMENT_STATELESS(cpow)
@@ -183,6 +185,12 @@ IMPLEMENT_STATELESS(ge)
 IMPLEMENT_STATELESS(le)
 IMPLEMENT_STATELESS(eq)
 IMPLEMENT_STATELESS(ne)
+IMPLEMENT_STATELESS(kthvalue)
+IMPLEMENT_STATELESS(mode)
+IMPLEMENT_STATELESS(median)
+IMPLEMENT_STATELESS(cross)
+IMPLEMENT_STATELESS(sort)
+IMPLEMENT_STATELESS(topk)
 
 static PyMethodDef TorchMethods[] = {
   {"_initExtension",  (PyCFunction)THPModule_initExtension,     METH_NOARGS,  NULL},
@@ -225,6 +233,8 @@ static PyMethodDef TorchMethods[] = {
   {"cdiv",            (PyCFunction)THPModule_cdiv,              METH_VARARGS, NULL},
   {"cfmod",           (PyCFunction)THPModule_cfmod,             METH_VARARGS, NULL},
   {"cmod",            (PyCFunction)THPModule_cfmod,             METH_VARARGS, NULL},
+  {"min",             (PyCFunction)THPModule_min,               METH_VARARGS, NULL},
+  {"max",             (PyCFunction)THPModule_max,               METH_VARARGS, NULL},
   {"cmax",            (PyCFunction)THPModule_cmax,              METH_VARARGS, NULL},
   {"cmin",            (PyCFunction)THPModule_cmin,              METH_VARARGS, NULL},
   {"cpow",            (PyCFunction)THPModule_cpow,              METH_VARARGS, NULL},
@@ -252,6 +262,12 @@ static PyMethodDef TorchMethods[] = {
   {"le",              (PyCFunction)THPModule_le,                METH_VARARGS, NULL},
   {"eq",              (PyCFunction)THPModule_eq,                METH_VARARGS, NULL},
   {"ne",              (PyCFunction)THPModule_ne,                METH_VARARGS, NULL},
+  {"kthvalue",        (PyCFunction)THPModule_kthvalue,          METH_VARARGS, NULL},
+  {"mode",            (PyCFunction)THPModule_mode,              METH_VARARGS, NULL},
+  {"median",          (PyCFunction)THPModule_median,            METH_VARARGS, NULL},
+  {"cross",           (PyCFunction)THPModule_cross,             METH_VARARGS, NULL},
+  {"sort",            (PyCFunction)THPModule_sort,              METH_VARARGS, NULL},
+  {"topk",            (PyCFunction)THPModule_topk,              METH_VARARGS, NULL},
   {NULL, NULL, 0, NULL}
 };
 

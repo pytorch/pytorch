@@ -4,7 +4,7 @@
 
 all: torch install
 
-torch: #clean
+torch: clean
 	python3 setup.py build
 
 install:

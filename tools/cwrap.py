@@ -53,6 +53,9 @@ class Option(object):
     def add_argument(self, arg):
         self.arguments.append(arg)
 
+    def insert_argument(self, idx, arg):
+        self.arguments.insert(idx, arg)
+
     def map_arguments(self, fn):
         self.arguments = list(map(fn, self.arguments))
 
@@ -90,7 +93,7 @@ DEFINITION_END = """
 # these are mostly, so that the * can be omitted for convenience and clarity
 TYPE_TRANSFORMS = {
     'THTensor': 'THPTensor*',
-    'accreal': 'double',
+    'THByteTensor': 'THPByteTensor*'
 }
 
 # Code that will be used to generate each of argument options
@@ -103,14 +106,19 @@ OPTION_CODE = Template("""
 # Used to build format string for PyArg_ParseTuple
 FORMAT_STR_MAP = {
     'THPTensor*': 'O!',
+    'THPLongTensor*': 'O!',
+    'THPByteTensor*': 'O!',
     'real': 'O&',
     'long': 'l',
+    'bool': 'p',
 }
 
 # If O! is specified for any type in FORMAT_STR_MAP you should specify it's
 # type here
 ARGPARSE_TYPE_CHECK = {
     'THPTensor*': 'THPTensorType',
+    'THPLongTensor*': 'THPLongTensorType',
+    'THPByteTensor*': 'THPByteTensorType',
     'real': 'THPUtils_(parseReal)',
 }
 
@@ -123,29 +131,63 @@ RETURN_WRAPPER = {
     'long':                 Template('return PyLong_FromLong($expr)'),
     'double':               Template('return PyFloat_FromDouble($expr)'),
     'self':                 Template('$expr; Py_INCREF(self); return (PyObject*)self'),
+    # TODO
+    'accreal':              Template('return PyFloat_FromDouble($expr)'),
+    'real':                 Template('return THPUtils_(newReal)($expr)'),
     'new THByteTensor':     Template("""
         THByteTensor *_t = THByteTensor_new();
         THPByteTensor *_ret = (THPByteTensor*)THPByteTensor_newObject(_t);
         $expr;
         return (PyObject*)_ret"""),
+    'new ValueIndexPair':   Template("""
+        THTensor *_value = THTensor_(new)();
+        THLongTensor *_indices = THLongTensor_new();
+        THPTensor *_v = (THPTensor*)THPTensor_(newObject)(_value);
+        THPLongTensor *_i = (THPLongTensor*)THPLongTensor_newObject(_indices);
+        $expr;
+        return Py_BuildValue("NN", (PyObject*)_v, (PyObject*)_i)"""),
+    'new SelfIndexPair':    Template("""
+        THLongTensor *_indices = THLongTensor_new();
+        THPLongTensor *_i = (THPLongTensor*)THPLongTensor_newObject(_indices);
+        $expr;
+        return Py_BuildValue("ON", (PyObject*)self, (PyObject*)_i)"""),
+    'new THTensor':         Template("""
+        THTensor *_value = THTensor_(new)();
+        THPTensor *_ret = (THPTensor*)THPTensor_(newObject)(_value);
+        $expr;
+        return (PyObject*)_ret"""),
 
     # Stateless mode
-    'stateless_provided':   Template('$expr; Py_INCREF(_res); return (PyObject*)_res'),
-    'stateless_new':        Template("""
+    'STATELESS PROV new SelfIndexPair': Template("""
+        THLongTensor *_indices = THLongTensor_new();
+        THPLongTensor *_i = (THPLongTensor*)THPLongTensor_newObject(_indices);
+        $expr;
+        return Py_BuildValue("ON", (PyObject*)_res, (PyObject*)_i)"""),
+    'STATELESS PROV2 new SelfIndexPair': Template("""
+        $expr;
+        return Py_BuildValue("OO", (PyObject*)_res, (PyObject*)_res_ind)"""),
+
+    'STATELESS PROV self':   Template('$expr; Py_INCREF(_res); return (PyObject*)_res'),
+    'STATELESS NEW self':        Template("""
         THTensor *_t = THTensor_(new)();
         THPTensor *_res_new = (THPTensor*)THPTensor_(newObject)(_t);
         $expr;
         return (PyObject*)_res_new"""),
 }
 
-# Additional args that are prepended to TH call (TH either returns via return
-# value, or it uses some of it's first arguments as output).
-RETURN_ARGS = {
-    'new THByteTensor': [Argument('THPByteTensor*', '_ret')]
+# Additional args that are added to TH call
+# tuples  are prepended
+# dicts use integer keys to specify where to insert arguments
+ADDITIONAL_ARGS = {
+    'new THByteTensor': (Argument('THPByteTensor*', '_ret'),),
+    'new THTensor':     (Argument('THPTensor*', '_ret'),),
+    'new ValueIndexPair': (Argument('THPTensor*', '_v'), Argument('THPLongTensor*', '_i')),
+    'new SelfIndexPair': (Argument('THPTensor*', 'self'), Argument('THPLongTensor*', '_i')),
+    'STATELESS PROV new SelfIndexPair': {1: Argument('THPTensor*', '_i')},
 }
 
 # Types for which it's necessary to extract cdata
-CDATA_TYPES = set(('THPTensor*', 'THPByteTensor*', 'THPStorage*'))
+CDATA_TYPES = set(('THPTensor*', 'THPByteTensor*', 'THPLongTensor*', 'THPStorage*'))
 
 def generate_function(lines, stateless):
     assert len(lines) > 1
@@ -195,7 +237,6 @@ def parse_lines(lines, stateless):
         if match:
             thname, rettype, flags = match.group(1, 2, 3)
             optional_self = 'OPTIONAL_SELF' in flags
-            rettype = TYPE_TRANSFORMS.get(rettype, rettype)
             arg_options.append(Option(thname, rettype, optional_self))
         else:
             assert line.startswith(ARGUMENT_PREFIX)
@@ -242,14 +283,20 @@ def make_stateless(arg_options):
             new = option.copy()
             new.map_arguments(self_to_('_res_new'))
             if new.return_type == 'self':
-                new.return_type = 'stateless_new'
+                new.return_type = 'STATELESS NEW self'
             stateless_options.append(new)
 
     for option in arg_options:
         provided = option.copy()
         provided.map_arguments(self_to_('_res'))
         if provided.return_type == 'self':
-            provided.return_type = 'stateless_provided'
+            provided.return_type = 'STATELESS PROV self'
+        if provided.return_type == 'new SelfIndexPair':
+            provided.insert_argument(0, Argument('THPTensor*', '_res'))
+            provided.return_type = 'STATELESS PROV new SelfIndexPair'
+            stateless_options.append(provided.copy())
+            provided.insert_argument(1, Argument('THPLongTensor*', '_res_ind'))
+            provided.return_type = 'STATELESS PROV2 new SelfIndexPair'
         stateless_options.append(provided)
 
     return stateless_options
@@ -327,6 +374,7 @@ def argfilter():
         ret |= arg.name == 'self'
         ret |= arg.name == '_res_new'
         ret |= arg.type == 'CONSTANT'
+        ret |= arg.type == 'EXPRESSION'
         ret |= arg.name in provided
         provided.add(arg.name)
         return ret
@@ -356,10 +404,19 @@ def build_expression(option):
        function that wraps it's return value in a Python object.
     """
     def make_arg(arg):
+        if arg.type == 'EXPRESSION':
+            return arg.name.format(*tuple(a.name for a in all_args))
         return arg.name + ('->cdata' if arg.type in CDATA_TYPES else '')
-    additional_args = RETURN_ARGS.get(option.return_type, ())
-    arg_iter = chain(additional_args, option.arguments)
-    args = ', '.join(make_arg(arg) for arg in arg_iter)
+    additional_args = ADDITIONAL_ARGS.get(option.return_type, ())
+    if isinstance(additional_args, dict):
+        arg_iter = deepcopy(option.arguments)
+        for k,v in additional_args.items():
+            arg_iter.insert(k, v)
+    else:
+        arg_iter = chain(additional_args, option.arguments)
+    all_args = list(arg_iter)
+
+    args = ', '.join(make_arg(arg) for arg in all_args)
 
     th_call = 'THTensor_({})({})'.format(option.thname, args)
 

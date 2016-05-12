@@ -889,6 +889,227 @@ static PyObject * THPTensor_(select)(THPTensor *self, PyObject *args)
     - THTensor other2
 ]]
 
+
+[[
+  min
+  minall -> real
+    - self
+  min -> new ValueIndexPair
+    - self
+    - long index
+  min -> new SelfIndexPair
+    - THTensor other
+    - long index
+]]
+
+[[
+  max
+  maxall -> real
+    - self
+  max -> new ValueIndexPair
+    - self
+    - long index
+  max -> new SelfIndexPair
+    - THTensor other
+    - long index
+]]
+
+[[
+  kthvalue
+  kthvalue -> new ValueIndexPair
+    - self
+    - long k
+    - EXPRESSION THTensor_(size)({2}->cdata,THTensor_(nDimension)({2}->cdata)-1)
+  kthvalue -> new ValueIndexPair
+    - self
+    - long k
+    - long dim
+  kthvalue -> new SelfIndexPair
+    - THTensor other
+    - long k
+    - EXPRESSION THTensor_(size)({2}->cdata,THTensor_(nDimension)({2}->cdata)-1)
+  kthvalue -> new SelfIndexPair
+    - THTensor other
+    - long k
+    - long dim
+]]
+
+[[
+  mode
+  mode -> new ValueIndexPair
+    - self
+    - EXPRESSION THTensor_(size)({2}->cdata,THTensor_(nDimension)({2}->cdata)-1)
+  mode -> new ValueIndexPair
+    - self
+    - long dim
+  mode -> new SelfIndexPair
+    - THTensor other
+    - EXPRESSION THTensor_(size)({2}->cdata,THTensor_(nDimension)({2}->cdata)-1)
+  mode -> new SelfIndexPair
+    - THTensor other
+    - long dim
+]]
+
+[[
+  median
+  median -> new ValueIndexPair
+    - self
+    - EXPRESSION THTensor_(size)({2}->cdata,THTensor_(nDimension)({2}->cdata)-1)
+  median -> new ValueIndexPair
+    - self
+    - long dim
+  median -> new SelfIndexPair
+    - THTensor other
+    - EXPRESSION THTensor_(size)({2}->cdata,THTensor_(nDimension)({2}->cdata)-1)
+  median -> new SelfIndexPair
+    - THTensor other
+    - long dim
+]]
+
+[[
+  cross
+  cross -> self
+    - self
+    - self
+    - THTensor a
+    - CONSTANT 0
+  cross -> self
+    - self
+    - self
+    - THTensor a
+    - long dim
+  cross -> self OPTIONAL_SELF
+    - self
+    - THTensor a
+    - THTensor b
+    - CONSTANT 0
+  cross -> self OPTIONAL_SELF
+    - self
+    - THTensor a
+    - THTensor b
+    - long dim
+]]
+
+[[
+  sort
+  sort -> new ValueIndexPair
+    - self
+    - EXPRESSION THTensor_(size)({2}->cdata,THTensor_(nDimension)({2}->cdata)-1)
+    - CONSTANT false
+  sort -> new ValueIndexPair
+    - self
+    - long dim
+    - CONSTANT false
+  sort -> new ValueIndexPair
+    - self
+    - long dim
+    - bool descending
+  sort -> new SelfIndexPair
+    - THTensor source
+    - EXPRESSION THTensor_(size)({2}->cdata,THTensor_(nDimension)({2}->cdata)-1)
+    - CONSTANT false
+  sort -> new SelfIndexPair
+    - THTensor source
+    - long dim
+    - CONSTANT false
+  sort -> new SelfIndexPair
+    - THTensor source
+    - long dim
+    - bool descending
+]]
+
+[[
+  topk
+  topk -> new ValueIndexPair
+    - self
+    - CONSTANT 1
+    - EXPRESSION THTensor_(size)({2}->cdata,THTensor_(nDimension)({2}->cdata)-1)
+    - CONSTANT false
+    - CONSTANT false
+  topk -> new ValueIndexPair
+    - self
+    - long k
+    - EXPRESSION THTensor_(size)({2}->cdata,THTensor_(nDimension)({2}->cdata)-1)
+    - CONSTANT false
+    - CONSTANT false
+  topk -> new ValueIndexPair
+    - self
+    - long k
+    - long dim
+    - CONSTANT false
+    - CONSTANT false
+  topk -> new ValueIndexPair
+    - self
+    - long k
+    - long dim
+    - bool smallest
+    - CONSTANT false
+  topk -> new ValueIndexPair
+    - self
+    - long k
+    - long dim
+    - bool smallest
+    - bool sorted
+  topk -> new SelfIndexPair
+    - THTensor source
+    - CONSTANT 1
+    - EXPRESSION THTensor_(size)({2}->cdata,THTensor_(nDimension)({2}->cdata)-1)
+    - CONSTANT false
+    - CONSTANT false
+  topk -> new SelfIndexPair
+    - THTensor source
+    - long k
+    - EXPRESSION THTensor_(size)({2}->cdata,THTensor_(nDimension)({2}->cdata)-1)
+    - CONSTANT false
+    - CONSTANT false
+  topk -> new SelfIndexPair
+    - THTensor source
+    - long k
+    - long dim
+    - CONSTANT false
+    - CONSTANT false
+  topk -> new SelfIndexPair
+    - THTensor source
+    - long k
+    - long dim
+    - bool smallest
+    - CONSTANT false
+  topk -> new SelfIndexPair
+    - THTensor source
+    - long k
+    - long dim
+    - bool smallest
+    - bool sorted
+]]
+
+// TODO: why are these stateful only?
+[[
+  maskedFill STATEFUL_ONLY
+  maskedFill -> self
+    - self
+    - THByteTensor mask
+    - real value
+]]
+
+[[
+  maskedCopy STATEFUL_ONLY
+  maskedCopy -> self
+    - self
+    - THByteTensor mask
+    - THTensor source
+]]
+
+[[
+  maskedSelect STATEFUL_ONLY
+  maskedSelect -> new THTensor
+    - self
+    - THByteTensor mask
+  maskedSelect -> self
+    - self
+    - THTensor source
+    - THByteTensor mask
+]]
+
 // Declared in TensorCopy.cpp
 static PyObject * THPTensor_(copy)(THPTensor *self, PyObject *other);
 
@@ -908,6 +1129,9 @@ static PyMethodDef THPTensor_(methods)[] = {
   {"retain",          (PyCFunction)THPTensor_(retain),          METH_NOARGS,  NULL},
   {"size",            (PyCFunction)THPTensor_(size),            METH_VARARGS, NULL},
   {"select",          (PyCFunction)THPTensor_(select),          METH_VARARGS, NULL},
+  {"maskedFill",      (PyCFunction)THPTensor_(maskedFill),      METH_VARARGS, NULL},
+  {"maskedCopy",      (PyCFunction)THPTensor_(maskedCopy),      METH_VARARGS, NULL},
+  {"maskedSelect",    (PyCFunction)THPTensor_(maskedSelect),    METH_VARARGS, NULL},
   //////////////////////////////////////////////////////////////////////////////
 #if defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_LONG)
   {"abs",             (PyCFunction)THPTensor_(abs),             METH_VARARGS, NULL},
@@ -951,6 +1175,8 @@ static PyMethodDef THPTensor_(methods)[] = {
   {"cdiv",            (PyCFunction)THPTensor_(cdiv),            METH_VARARGS, NULL},
   {"cfmod",           (PyCFunction)THPTensor_(cfmod),           METH_VARARGS, NULL},
   {"cmod",            (PyCFunction)THPTensor_(cfmod),           METH_VARARGS, NULL},
+  {"min",             (PyCFunction)THPTensor_(min),             METH_VARARGS, NULL},
+  {"max",             (PyCFunction)THPTensor_(max),             METH_VARARGS, NULL},
   {"cmax",            (PyCFunction)THPTensor_(cmax),            METH_VARARGS, NULL},
   {"cmin",            (PyCFunction)THPTensor_(cmin),            METH_VARARGS, NULL},
   {"cpow",            (PyCFunction)THPTensor_(cpow),            METH_VARARGS, NULL},
@@ -965,19 +1191,25 @@ static PyMethodDef THPTensor_(methods)[] = {
   {"equal",           (PyCFunction)THPTensor_(equal),           METH_VARARGS, NULL},
   {"eye",             (PyCFunction)THPTensor_(eye),             METH_VARARGS, NULL},
   {"fill",            (PyCFunction)THPTensor_(fill),            METH_VARARGS, NULL},
-  {"diag",            (PyCFunction)THPTensor_(diag),            METH_VARARGS,  NULL},
-  {"numel",           (PyCFunction)THPTensor_(numel),           METH_VARARGS,  NULL},
+  {"diag",            (PyCFunction)THPTensor_(diag),            METH_VARARGS, NULL},
+  {"numel",           (PyCFunction)THPTensor_(numel),           METH_VARARGS, NULL},
   {"sign",            (PyCFunction)THPTensor_(sign),            METH_VARARGS, NULL},
   {"trace",           (PyCFunction)THPTensor_(trace),           METH_VARARGS, NULL},
   {"tril",            (PyCFunction)THPTensor_(tril),            METH_VARARGS, NULL},
   {"triu",            (PyCFunction)THPTensor_(triu),            METH_VARARGS, NULL},
-  {"zero",            (PyCFunction)THPTensor_(zero),            METH_VARARGS,  NULL},
-  {"gt",              (PyCFunction)THPTensor_(gt),              METH_VARARGS,  NULL},
-  {"lt",              (PyCFunction)THPTensor_(lt),              METH_VARARGS,  NULL},
-  {"ge",              (PyCFunction)THPTensor_(ge),              METH_VARARGS,  NULL},
-  {"le",              (PyCFunction)THPTensor_(le),              METH_VARARGS,  NULL},
-  {"eq",              (PyCFunction)THPTensor_(eq),              METH_VARARGS,  NULL},
-  {"ne",              (PyCFunction)THPTensor_(ne),              METH_VARARGS,  NULL},
+  {"zero",            (PyCFunction)THPTensor_(zero),            METH_VARARGS, NULL},
+  {"gt",              (PyCFunction)THPTensor_(gt),              METH_VARARGS, NULL},
+  {"lt",              (PyCFunction)THPTensor_(lt),              METH_VARARGS, NULL},
+  {"ge",              (PyCFunction)THPTensor_(ge),              METH_VARARGS, NULL},
+  {"le",              (PyCFunction)THPTensor_(le),              METH_VARARGS, NULL},
+  {"eq",              (PyCFunction)THPTensor_(eq),              METH_VARARGS, NULL},
+  {"ne",              (PyCFunction)THPTensor_(ne),              METH_VARARGS, NULL},
+  {"kthvalue",        (PyCFunction)THPTensor_(kthvalue),        METH_VARARGS, NULL},
+  {"mode",            (PyCFunction)THPTensor_(mode),            METH_VARARGS, NULL},
+  {"median",          (PyCFunction)THPTensor_(median),          METH_VARARGS, NULL},
+  {"cross",           (PyCFunction)THPTensor_(cross),           METH_VARARGS, NULL},
+  {"sort",            (PyCFunction)THPTensor_(sort),            METH_VARARGS, NULL},
+  {"topk",            (PyCFunction)THPTensor_(topk),            METH_VARARGS, NULL},
   {NULL}
 };
 
@@ -1024,6 +1256,8 @@ static PyMethodDef THPTensorStatelessMethods[] = {
   {"cdiv",            (PyCFunction)THPTensor_stateless_(cdiv),            METH_VARARGS, NULL},
   {"cfmod",           (PyCFunction)THPTensor_stateless_(cfmod),           METH_VARARGS, NULL},
   {"cmod",            (PyCFunction)THPTensor_stateless_(cfmod),           METH_VARARGS, NULL},
+  {"min",             (PyCFunction)THPTensor_stateless_(min),             METH_VARARGS, NULL},
+  {"max",             (PyCFunction)THPTensor_stateless_(max),             METH_VARARGS, NULL},
   {"cmax",            (PyCFunction)THPTensor_stateless_(cmax),            METH_VARARGS, NULL},
   {"cmin",            (PyCFunction)THPTensor_stateless_(cmin),            METH_VARARGS, NULL},
   {"cpow",            (PyCFunction)THPTensor_stateless_(cpow),            METH_VARARGS, NULL},
@@ -1038,18 +1272,24 @@ static PyMethodDef THPTensorStatelessMethods[] = {
   {"equal",           (PyCFunction)THPTensor_stateless_(equal),           METH_VARARGS, NULL},
   {"eye",             (PyCFunction)THPTensor_stateless_(eye),             METH_VARARGS, NULL},
   {"fill",            (PyCFunction)THPTensor_stateless_(fill),            METH_VARARGS, NULL},
-  {"diag",            (PyCFunction)THPTensor_stateless_(diag),            METH_VARARGS,  NULL},
-  {"numel",           (PyCFunction)THPTensor_stateless_(numel),           METH_VARARGS,  NULL},
+  {"diag",            (PyCFunction)THPTensor_stateless_(diag),            METH_VARARGS, NULL},
+  {"numel",           (PyCFunction)THPTensor_stateless_(numel),           METH_VARARGS, NULL},
   {"sign",            (PyCFunction)THPTensor_stateless_(sign),            METH_VARARGS, NULL},
   {"trace",           (PyCFunction)THPTensor_stateless_(trace),           METH_VARARGS, NULL},
   {"tril",            (PyCFunction)THPTensor_stateless_(tril),            METH_VARARGS, NULL},
   {"triu",            (PyCFunction)THPTensor_stateless_(triu),            METH_VARARGS, NULL},
-  {"zero",            (PyCFunction)THPTensor_stateless_(zero),            METH_VARARGS,  NULL},
-  {"gt",              (PyCFunction)THPTensor_stateless_(gt),              METH_VARARGS,  NULL},
-  {"lt",              (PyCFunction)THPTensor_stateless_(lt),              METH_VARARGS,  NULL},
-  {"ge",              (PyCFunction)THPTensor_stateless_(ge),              METH_VARARGS,  NULL},
-  {"le",              (PyCFunction)THPTensor_stateless_(le),              METH_VARARGS,  NULL},
-  {"eq",              (PyCFunction)THPTensor_stateless_(eq),              METH_VARARGS,  NULL},
-  {"ne",              (PyCFunction)THPTensor_stateless_(ne),              METH_VARARGS,  NULL},
+  {"zero",            (PyCFunction)THPTensor_stateless_(zero),            METH_VARARGS, NULL},
+  {"gt",              (PyCFunction)THPTensor_stateless_(gt),              METH_VARARGS, NULL},
+  {"lt",              (PyCFunction)THPTensor_stateless_(lt),              METH_VARARGS, NULL},
+  {"ge",              (PyCFunction)THPTensor_stateless_(ge),              METH_VARARGS, NULL},
+  {"le",              (PyCFunction)THPTensor_stateless_(le),              METH_VARARGS, NULL},
+  {"eq",              (PyCFunction)THPTensor_stateless_(eq),              METH_VARARGS, NULL},
+  {"ne",              (PyCFunction)THPTensor_stateless_(ne),              METH_VARARGS, NULL},
+  {"kthvalue",        (PyCFunction)THPTensor_stateless_(kthvalue),        METH_VARARGS, NULL},
+  {"mode",            (PyCFunction)THPTensor_stateless_(mode),            METH_VARARGS, NULL},
+  {"median",          (PyCFunction)THPTensor_stateless_(median),          METH_VARARGS, NULL},
+  {"cross",           (PyCFunction)THPTensor_stateless_(cross),           METH_VARARGS, NULL},
+  {"sort",            (PyCFunction)THPTensor_stateless_(sort),            METH_VARARGS, NULL},
+  {"topk",            (PyCFunction)THPTensor_stateless_(topk),            METH_VARARGS, NULL},
   {NULL}
 };
