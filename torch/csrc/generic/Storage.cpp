@@ -9,6 +9,7 @@ PyObject * THPStorage_(newObject)(THStorage *ptr)
   // TODO: error checking
   PyObject *args = PyTuple_New(0);
   PyObject *kwargs = Py_BuildValue("{s:N}", "cdata", PyLong_FromVoidPtr(ptr));
+    
   PyObject *instance = PyObject_Call(THPStorageClass, args, kwargs);
   Py_DECREF(args);
   Py_DECREF(kwargs);
@@ -30,17 +31,17 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
 {
   HANDLE_TH_ERRORS
   static const char *keywords[] = {"cdata", NULL};
-  PyObject *number_arg = NULL;
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|O!", (char **)keywords, &PyLong_Type, &number_arg))
+  void* number_arg = NULL;
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|O&", (char **)keywords, 
+				   THPUtils_getLong, &number_arg))
     return NULL;
-
   THPStorage *self = (THPStorage *)type->tp_alloc(type, 0);
   if (self != NULL) {
     if (kwargs) {
-      self->cdata = (THStorage*)PyLong_AsVoidPtr(number_arg);
+      self->cdata = (THStorage*)number_arg;
       THStorage_(retain)(self->cdata);
     } else if (/* !kwargs && */ number_arg) {
-      self->cdata = THStorage_(newWithSize)(PyLong_AsLong(number_arg));
+      self->cdata = THStorage_(newWithSize)((long) number_arg);
     } else {
       self->cdata = THStorage_(new)();
     }
@@ -66,8 +67,9 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
 {
   HANDLE_TH_ERRORS
   /* Integer index */
-  if (PyLong_Check(index)) {
-    long nindex = PyLong_AsLong(index);
+  long nindex;
+  if ((PyLong_Check(index) || PyInt_Check(index))
+      && THPUtils_getLong(index, &nindex) == 1 ) {
     if (nindex < 0)
       nindex += THStorage_(size)(self->cdata);
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
@@ -89,7 +91,11 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
     THStorage *new_storage = THStorage_(newWithData)(new_data, slicelength);
     return THPStorage_(newObject)(new_storage);
   }
-  PyErr_SetString(PyExc_RuntimeError, "Only indexing with integers and slices supported");
+  char err_string[512];
+  snprintf (err_string, 512, 
+	    "%s %s", "Only indexing with integers and slices supported, but got type: ",
+	    index->ob_type->tp_name);
+  PyErr_SetString(PyExc_RuntimeError, err_string);
   return NULL;
   END_HANDLE_TH_ERRORS
 }
@@ -101,8 +107,10 @@ static int THPStorage_(set)(THPStorage *self, PyObject *index, PyObject *value)
   if (!THPUtils_(parseReal)(value, &rvalue))
     return -1;
 
-  if (PyLong_Check(index)) {
-    THStorage_(set)(self->cdata, PyLong_AsSize_t(index), rvalue);
+  long nindex;
+  if ((PyLong_Check(index) || PyInt_Check(index))
+      && THPUtils_getLong(index, &nindex) == 1) {
+    THStorage_(set)(self->cdata, nindex, rvalue);
     return 0;
   } else if (PySlice_Check(index)) {
     Py_ssize_t start, stop, len;
@@ -114,7 +122,11 @@ static int THPStorage_(set)(THPStorage *self, PyObject *index, PyObject *value)
       THStorage_(set)(self->cdata, start, rvalue);
     return 0;
   }
-  PyErr_SetString(PyExc_RuntimeError, "Only indexing with integers and slices supported at the moment");
+  char err_string[512];
+  snprintf (err_string, 512, "%s %s", 
+	    "Only indexing with integers and slices supported, but got type: ",
+	    index->ob_type->tp_name);
+  PyErr_SetString(PyExc_RuntimeError, err_string);
   return -1;
   END_HANDLE_TH_ERRORS_RET(-1)
 }

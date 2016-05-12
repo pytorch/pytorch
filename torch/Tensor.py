@@ -42,4 +42,4 @@ class RealTensor(RealTensorBase):
         return _printing.printTensor(self)
 
     def __iter__(self):
-        return map(lambda i: self.select(0, i), range(self.size(0)))
+        return iter(map(lambda i: self.select(0, i), range(self.size(0))))

@@ -151,7 +151,7 @@ RETURN_WRAPPER = {
     'THStorage':            Template('return THPStorage_(newObject)($expr)'),
     'THLongStorage':        Template('return THPLongStorage_newObject($expr)'),
     'bool':                 Template('return PyBool_FromLong($expr)'),
-    'long':                 Template('return PyLong_FromLong($expr)'),
+    'long':                 Template('return PyInt_FromLong($expr)'),
     'double':               Template('return PyFloat_FromDouble($expr)'),
     'self':                 Template('$expr; Py_INCREF(self); return (PyObject*)self'),
     # TODO
@@ -397,16 +397,19 @@ def argfilter():
        CONSTANT arguments are literals.
        Repeated arguments do not need to be specified twice.
     """
-    provided = set()
+    # use class rather than nonlocal to maintain 2.7 compat
+    # see http://stackoverflow.com/questions/3190706/nonlocal-keyword-in-python-2-x
+    # TODO: check this works
+    class context: 
+        provided = set()
     def is_already_provided(arg):
-        nonlocal provided
         ret = False
         ret |= arg.name == 'self'
         ret |= arg.name == '_res_new'
         ret |= arg.type == 'CONSTANT'
         ret |= arg.type == 'EXPRESSION'
-        ret |= arg.name in provided
-        provided.add(arg.name)
+        ret |= arg.name in context.provided
+        context.provided.add(arg.name)
         return ret
     return is_already_provided
 

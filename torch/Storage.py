@@ -7,5 +7,5 @@ class RealStorage(RealStorageBase):
         return str(self)
 
     def __iter__(self):
-        return map(lambda i: self[i], range(self.size()))
+        return iter(map(lambda i: self[i], range(self.size())))
 
