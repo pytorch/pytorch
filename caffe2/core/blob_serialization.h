@@ -18,6 +18,7 @@ namespace caffe2 {
  */
 class BlobSerializerBase {
  public:
+   virtual ~BlobSerializerBase() {}
   /**
    * @brief The virtual function that returns a serialized string for the input
    * blob.
@@ -32,10 +33,12 @@ class BlobSerializerBase {
 };
 
 // The Blob serialization registry and serializer creator functions.
-DECLARE_TYPED_REGISTRY(BlobSerializerRegistry, CaffeTypeId,
-                       BlobSerializerBase);
-#define REGISTER_BLOB_SERIALIZER(name, id, ...) \
-  REGISTER_TYPED_CLASS(BlobSerializerRegistry, name, id, __VA_ARGS__)
+CAFFE_DECLARE_TYPED_REGISTRY(
+    BlobSerializerRegistry,
+    CaffeTypeId,
+    BlobSerializerBase);
+#define REGISTER_BLOB_SERIALIZER(id, ...) \
+  CAFFE_REGISTER_TYPED_CLASS(BlobSerializerRegistry, id, __VA_ARGS__)
 // Creates an operator with the given operator definition.
 inline BlobSerializerBase* CreateSerializer(CaffeTypeId id) {
   return BlobSerializerRegistry()->Create(id);
@@ -50,7 +53,7 @@ inline BlobSerializerBase* CreateSerializer(CaffeTypeId id) {
 template <class Context>
 class TensorSerializer : public BlobSerializerBase {
  public:
-  TensorSerializer() : device_context_() {}
+  TensorSerializer() : context_() {}
   ~TensorSerializer() {}
   /**
    * Serializes a Blob. Note that this blob has to contain Tensor<Context>,
@@ -59,7 +62,9 @@ class TensorSerializer : public BlobSerializerBase {
   string Serialize(const Blob& blob, const string& name);
 
  private:
-  Context device_context_;
+  // A utility function to store the device context detauls.
+  void StoreDeviceDetail(const Tensor<Context>& input, TensorProto* proto);
+  Context context_;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -81,7 +86,7 @@ string TensorSerializer<Context>::Serialize(
     for (int i = 0; i < input.size(); ++i) {
       proto.add_float_data(0);
     }
-    this->device_context_.template Copy<float, Context, CPUContext>(
+    this->context_.template Copy<float, Context, CPUContext>(
         input.size(), input.template data<float>(),
         proto.mutable_float_data()->mutable_data());
   } else if (input.template IsType<int>()) {
@@ -95,13 +100,14 @@ string TensorSerializer<Context>::Serialize(
     for (int i = 0; i < input.size(); ++i) {
       proto.add_int32_data(0);
     }
-    this->device_context_.template Copy<int, Context, CPUContext>(
+    this->context_.template Copy<int, Context, CPUContext>(
         input.size(), input.template data<int>(),
         proto.mutable_int32_data()->mutable_data());
   } else {
     CAFFE_LOG_FATAL << "TensorSerializer does not have a serialization "
                   "implementation for " << input.meta().name();
   }
+  StoreDeviceDetail(input, &proto);
   return proto.SerializeAsString();
 }
 

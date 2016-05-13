@@ -1,5 +1,6 @@
-#include "third_party/cnmem/cnmem.h"
 #include "caffe2/core/cuda_memorypool_gpu.h"
+
+#include "third_party/cnmem/cnmem.h"
 
 namespace caffe2 {
 
@@ -18,12 +19,14 @@ bool CudaMemoryPool::InitializeMemoryPool(
     const vector<int>& device_ids,
     const float proportion_of_memory_to_reserve) {
   if (memory_allocated_before_setup_) {
-    CAFFE_LOG_ERROR << "There is cuda memory allocated before we initialize the "
-                  "memory pool. This should not happen: you should either "
-                  "use raw cudaMalloc and cudaFree and not initialize the "
-                  "pool at all, or initialize the pool before you allocate "
-                  "anything.";
-    return false;
+    CAFFE_LOG_ERROR <<
+        "There is cuda memory allocated before we initialize the memory pool. "
+        "This should usually not happen: you should either use raw cudaMalloc "
+        "and cudaFree and not initialize the pool at all, or initialize the "
+        "pool before you allocate anything in caffe2. I am going to set up the "
+        "memory pool anyway, but you would manually make sure that "
+        "deallocation for any custom-allocated data happens after the memory "
+        "pool is finalized.";
   }
   if (is_memory_pool_setup_) {
     CAFFE_LOG_ERROR << "Memory pool is already set up. I cannot set up it twice.";
@@ -51,7 +54,7 @@ bool CudaMemoryPool::InitializeMemoryPool(
     size_t free_memory, used_memory;
     CUDA_CHECK(cudaMemGetInfo(&free_memory, &used_memory));
     CAFFE_LOG_INFO << "Reserving " << proportion_of_memory_to_reserve * 100
-              << "percent of the free memory (total " << free_memory
+              << " percent of the free memory (total " << free_memory
               << ") on device " << device_id;
     // Note: we create a dummy non-null stream for memory allocations, so that
     // any malloc can be called from any cuda stream, since caffe2 uses a lot of

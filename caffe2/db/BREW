@@ -2,6 +2,18 @@
 # dependencies.
 
 cc_library(
+  name = "rocksdb",
+  srcs = [
+      "rocksdb.cc",
+  ],
+  deps = [
+      "//caffe2/core:core",
+      "//third_party:rocksdb",
+  ],
+  whole_archive = True,
+)
+
+cc_library(
   name = "leveldb",
   srcs = [
       "leveldb.cc",

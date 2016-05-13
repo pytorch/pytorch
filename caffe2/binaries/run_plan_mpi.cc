@@ -18,7 +18,7 @@ int main(int argc, char** argv) {
                  "MPI_THREAD_SERIALIZED or MPI_THREAD_MULTIPLE mode.\n";
     return 1;
   }
-  caffe2::GlobalInit(&argc, argv);
+  caffe2::GlobalInit(&argc, &argv);
   CAFFE_LOG_INFO << "Loading plan: " << caffe2::FLAGS_plan;
   caffe2::PlanDef plan_def;
   CAFFE_CHECK(ReadProtoFromFile(caffe2::FLAGS_plan, &plan_def));

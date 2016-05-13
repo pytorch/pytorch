@@ -17,7 +17,6 @@ class NHWC2NCHWOp final : public Operator<Context> {
   bool RunOnDevice() override;
 
  protected:
-  INPUT_OUTPUT_STATS(1, 1, 1, 1);
   DISABLE_COPY_AND_ASSIGN(NHWC2NCHWOp);
 };
 
@@ -29,7 +28,6 @@ class NCHW2NHWCOp final : public Operator<Context> {
   bool RunOnDevice() override;
 
  protected:
-  INPUT_OUTPUT_STATS(1, 1, 1, 1);
   DISABLE_COPY_AND_ASSIGN(NCHW2NHWCOp);
 };
 

@@ -14,7 +14,6 @@ class AccuracyOp final : public Operator<Context> {
   bool RunOnDevice() override;
 
  protected:
-  INPUT_OUTPUT_STATS(2, 2, 1, 1);
   INPUT_TAGS(PREDICTION, LABEL);
   DISABLE_COPY_AND_ASSIGN(AccuracyOp);
 };

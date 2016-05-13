@@ -1,8 +1,11 @@
+#include "lmdb.h"  // NOLINT
+
 #include <sys/stat.h>
+
+#include <string>
 
 #include "caffe2/core/db.h"
 #include "caffe2/core/logging.h"
-#include "lmdb.h"  // NOLINT
 
 namespace caffe2 {
 namespace db {
@@ -27,19 +30,44 @@ class LMDBCursor : public Cursor {
     mdb_dbi_close(mdb_env_, mdb_dbi_);
     mdb_txn_abort(mdb_txn_);
   }
-  void SeekToFirst() override { Seek(MDB_FIRST); }
-  void Next() override { Seek(MDB_NEXT); }
+
+  void Seek(const string& key) override {
+    if (key.size() == 0) {
+      SeekToFirst();
+      return;
+    }
+    // a key of 16k size should be enough? I am not sure though.
+    mdb_key_.mv_size = key.size();
+    mdb_key_.mv_data = const_cast<char*>(key.c_str());
+    int mdb_status = mdb_cursor_get(
+        mdb_cursor_, &mdb_key_, &mdb_value_, MDB_SET_RANGE);
+    if (mdb_status == MDB_NOTFOUND) {
+      valid_ = false;
+    } else {
+      MDB_CHECK(mdb_status);
+      valid_ = true;
+    }
+  }
+
+  bool SupportsSeek() override { return true; }
+
+  void SeekToFirst() override { SeekLMDB(MDB_FIRST); }
+
+  void Next() override { SeekLMDB(MDB_NEXT); }
+
   string key() override {
     return string(static_cast<const char*>(mdb_key_.mv_data), mdb_key_.mv_size);
   }
+
   string value() override {
     return string(static_cast<const char*>(mdb_value_.mv_data),
         mdb_value_.mv_size);
   }
+
   bool Valid() override { return valid_; }
 
  private:
-  void Seek(MDB_cursor_op op) {
+  void SeekLMDB(MDB_cursor_op op) {
     int mdb_status = mdb_cursor_get(mdb_cursor_, &mdb_key_, &mdb_value_, op);
     if (mdb_status == MDB_NOTFOUND) {
       valid_ = false;
@@ -108,14 +136,15 @@ LMDB::LMDB(const string& source, Mode mode) : DB(source, mode) {
   MDB_CHECK(mdb_env_create(&mdb_env_));
   MDB_CHECK(mdb_env_set_mapsize(mdb_env_, LMDB_MAP_SIZE));
   if (mode == NEW) {
-    CAFFE_CHECK_EQ(mkdir(source.c_str(), 0744), 0) << "mkdir " << source << "failed";
+    CAFFE_CHECK_EQ(mkdir(source.c_str(), 0744), 0)
+        << "mkdir " << source << "failed";
   }
   int flags = 0;
   if (mode == READ) {
     flags = MDB_RDONLY | MDB_NOTLS;
   }
   MDB_CHECK(mdb_env_open(mdb_env_, source.c_str(), flags, 0664));
-  CAFFE_LOG_INFO << "Opened lmdb " << source;
+  CAFFE_VLOG(1) << "Opened lmdb " << source;
 }
 
 void LMDBTransaction::Put(const string& key, const string& value) {

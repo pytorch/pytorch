@@ -1,3 +1,5 @@
+#include "caffe2/utils/proto_utils.h"
+
 #include <fcntl.h>
 #include <unistd.h>
 #include <cerrno>
@@ -10,7 +12,6 @@
 #include "google/protobuf/text_format.h"
 #endif  // !CAFFE2_USE_LITE_PROTO
 
-#include "caffe2/utils/proto_utils.h"
 #include "caffe2/core/logging.h"
 
 using ::google::protobuf::Message;
@@ -18,8 +19,34 @@ using ::google::protobuf::MessageLite;
 
 namespace caffe2 {
 
-// IO-specific functions: we will deal with the protocol buffer lite and full
-// versions differently.
+bool ReadStringFromFile(const char* filename, string* str) {
+  std::ifstream ifs(filename, std::ios::in);
+  if (!ifs) {
+    CAFFE_LOG_ERROR << "File cannot be opened: " << filename
+                    << " error: " << ifs.rdstate();
+    return false;
+  }
+  ifs.seekg(0, std::ios::end);
+  size_t n = ifs.tellg();
+  str->resize(n);
+  ifs.seekg(0);
+  ifs.read(&(*str)[0], n);
+  return true;
+}
+
+bool WriteStringToFile(const string& str, const char* filename) {
+  std::ofstream ofs(filename, std::ios::out | std::ios::trunc);
+  if (!ofs.is_open()) {
+    CAFFE_LOG_ERROR << "File cannot be created: " << filename
+                    << " error: " << ofs.rdstate();
+    return false;
+  }
+  ofs << str;
+  return true;
+}
+
+// IO-specific proto functions: we will deal with the protocol buffer lite and
+// full versions differently.
 
 #ifdef CAFFE2_USE_LITE_PROTO
 

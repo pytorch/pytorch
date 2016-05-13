@@ -26,6 +26,11 @@
 #include <cuda_fp16.h>
 #endif
 
+/**
+ * The maximum number of GPUs that caffe2 recognizes.
+ */
+#define CAFFE2_COMPILE_TIME_MAX_GPUS 8
+
 namespace caffe2 {
 
 /**
@@ -62,6 +67,16 @@ void SetDefaultGPUID(const int deviceid);
  * Gets the default GPU id for Caffe2.
  */
 int GetDefaultGPUID();
+
+/**
+ * Gets the current GPU id. This is a simple wrapper around cudaGetDevice().
+ */
+int GetCurrentGPUID();
+
+/**
+ * Gets the GPU id that the current pointer is located at.
+ */
+int GetGPUIDForPointer(const void* ptr);
 
 /**
  * Gets the device property for the given device.
@@ -174,6 +189,23 @@ inline int CAFFE_GET_BLOCKS(const int N) {
   return std::min((N + CAFFE_CUDA_NUM_THREADS - 1) / CAFFE_CUDA_NUM_THREADS,
                   CAFFE_MAXIMUM_NUM_BLOCKS);
 }
+
+class DeviceGuard {
+ public:
+  explicit DeviceGuard(int newDevice)
+      : previous_(GetCurrentGPUID()) {
+    if (previous_ != newDevice) {
+      CUDA_CHECK(cudaSetDevice(newDevice));
+    }
+  }
+
+  ~DeviceGuard() {
+    CUDA_CHECK(cudaSetDevice(previous_));
+  }
+
+ private:
+  int previous_;
+};
 
 }  // namespace caffe2
 #endif  // CAFFE2_CORE_COMMON_GPU_H_

@@ -14,7 +14,7 @@ using caffe2::db::DB;
 using caffe2::db::Transaction;
 
 int main(int argc, char** argv) {
-  caffe2::GlobalInit(&argc, argv);
+  caffe2::GlobalInit(&argc, &argv);
 
   std::unique_ptr<DB> in_db(caffe2::db::CreateDB(
       caffe2::FLAGS_input_db_type, caffe2::FLAGS_input_db, caffe2::db::READ));

@@ -4,40 +4,51 @@
 
 namespace caffe2 {
 
-constexpr size_t kCONV_CUDNN_WORKSPACE_LIMIT_BYTES = 8*1024*1024;
+// Earlier in the days Caffe sets the default cudnn workspace to 8MB. We bump
+// it up to 64MB in Caffe2, as this enables the use of Winograd in many cases,
+// something very beneficial to more recent CNN models.
+static constexpr size_t kCONV_CUDNN_WORKSPACE_LIMIT_BYTES = 64*1024*1024;
+
+// Manually specified number of algorithms implemented in CuDNN.
+// This does not have any performance implications, as we will always find the
+// fastest algorithm; setting them to the right number of algorithms will enable
+// us to best report the statistics when doing an exhaustive search, though.
+static constexpr size_t kNUM_CUDNN_FWD_ALGS = 7;
+static constexpr size_t kNUM_CUDNN_BWD_FILTER_ALGS = 4;
+static constexpr size_t kNUM_CUDNN_BWD_DATA_ALGS = 5;
+
+namespace {
+template <typename ArrayOfcudnnConvolutionAlgoPerf_t>
+inline void LogCuDNNPerfStats(
+    const ArrayOfcudnnConvolutionAlgoPerf_t& perf_stat,
+    int returned_algo_count) {
+  CAFFE_LOG_INFO << "Perf result: (algo: stat, time, memory)";
+  for (int i = 0; i < returned_algo_count; ++i) {
+    const auto& stat = perf_stat[i];
+    CAFFE_LOG_INFO << stat.algo << ": " << stat.status
+                   << " " << stat.time << " " << stat.memory;
+  }
+}
+}  // namespace
 
 class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
  public:
   CudnnConvOpBase(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<CUDAContext>(operator_def, ws),
-        cudnn_wrapper_(&device_context_),
+        cudnn_wrapper_(&context_),
         cudnn_ws_nbytes_limit_(
             OperatorBase::GetSingleArgument<int>(
                 "ws_nbytes_limit", kCONV_CUDNN_WORKSPACE_LIMIT_BYTES)),
-        shared_ws_name_(
-            OperatorBase::GetSingleArgument<string>("shared_ws_name", "")),
         exhaustive_search_(
-            OperatorBase::GetSingleArgument<int>("exhaustive_search", 0)) {
+            OperatorBase::GetSingleArgument<int>("exhaustive_search", 0)),
+        deterministic_(
+            OperatorBase::GetSingleArgument<int>("deterministic", 0)) {
+    CHECK(!deterministic_ || !exhaustive_search_);
     CUDNN_CHECK(cudnnCreateTensorDescriptor(&bottom_desc_));
     CUDNN_CHECK(cudnnCreateFilterDescriptor(&filter_desc_));
     CUDNN_CHECK(cudnnCreateTensorDescriptor(&bias_desc_));
     CUDNN_CHECK(cudnnCreateTensorDescriptor(&top_desc_));
     CUDNN_CHECK(cudnnCreateConvolutionDescriptor(&conv_desc_));
-    if (shared_ws_name_.size()) {
-      // We will use a shared workspace for cudnn across multiple operators,
-      // which would allow us to save memory space better.
-      // Note that this is kind of a hack: the computation logic of the shared
-      // workspace is not visible to the compute graph, so use this with care.
-      // You are essentially responsible for managing potential conflicts of the
-      // shared workspace yourself, and you need to make sure that this name
-      // does not conflict with some other blob names in the compute graph.
-      cudnn_ws_ = ws->CreateBlob(shared_ws_name_)
-          ->GetMutable<CuDNNWorkspaceWrapper>();
-    } else {
-      // We will maintain a local workspace.
-      local_cudnn_ws_.reset(new CuDNNWorkspaceWrapper());
-      cudnn_ws_ = local_cudnn_ws_.get();
-    }
   }
 
   ~CudnnConvOpBase() {
@@ -48,21 +59,20 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
     CUDNN_CHECK(cudnnDestroyConvolutionDescriptor(conv_desc_));
   }
 
-  virtual bool RunWithCudnnWorkspace(
-      CuDNNWorkspaceWrapper* cudnn_ws_wrapper) = 0;
+  virtual bool RunWithCudnnWorkspace() = 0;
 
   bool RunOnDevice() final {
-    std::lock_guard<std::mutex> lock(cudnn_ws_->mutex());
-    bool success = RunWithCudnnWorkspace(cudnn_ws_);
+    std::lock_guard<std::mutex> lock(cudnn_wrapper_.mutex());
+    bool success = RunWithCudnnWorkspace();
     // Since we will release the lock guard, we need to finish all the
     // device computation explicitly so the cudnn execution finishes.
-    success &= device_context_.FinishDeviceComputation();
+    success &= context_.FinishDeviceComputation();
     return success;
   }
 
  protected:
-  vector<int> cudnn_input_dims_;
-  vector<int> cudnn_filter_dims_;
+  vector<TIndex> cudnn_input_dims_;
+  vector<TIndex> cudnn_filter_dims_;
 
   CuDNNWrapper cudnn_wrapper_;
   cudnnTensorDescriptor_t bottom_desc_;
@@ -71,11 +81,9 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
   cudnnTensorDescriptor_t top_desc_;
   cudnnConvolutionDescriptor_t conv_desc_;
   const size_t cudnn_ws_nbytes_limit_;
-  string shared_ws_name_;
   size_t cudnn_ws_nbytes_;
-  CuDNNWorkspaceWrapper* cudnn_ws_;
   bool exhaustive_search_;
-  std::unique_ptr<CuDNNWorkspaceWrapper> local_cudnn_ws_;
+  bool deterministic_;
   DISABLE_COPY_AND_ASSIGN(CudnnConvOpBase);
 };
 
@@ -87,14 +95,13 @@ class CudnnConvOp final : public CudnnConvOpBase {
 
   ~CudnnConvOp() {}
 
-  bool RunWithCudnnWorkspace(CuDNNWorkspaceWrapper* cudnn_ws_wrapper) override;
+  bool RunWithCudnnWorkspace() override;
 
  private:
   cudnnConvolutionFwdAlgo_t algo_;
   // Input: X, W, b
   // Output: Y
   INPUT_TAGS(INPUT, FILTER, BIAS);
-  INPUT_OUTPUT_STATS(3, 3, 1, 1);
   DISABLE_COPY_AND_ASSIGN(CudnnConvOp);
 };
 
@@ -106,18 +113,15 @@ class CudnnConvGradientOp final : public CudnnConvOpBase {
 
   ~CudnnConvGradientOp() {}
 
-  bool RunWithCudnnWorkspace(CuDNNWorkspaceWrapper* cudnn_ws_wrapper) override;
+  bool RunWithCudnnWorkspace() override;
 
  private:
-#if CUDNN_VERSION >= 3000
   cudnnConvolutionBwdFilterAlgo_t bwd_filter_algo_;
   cudnnConvolutionBwdDataAlgo_t bwd_data_algo_;
-#endif  // CUDNN_VERSION >= 3000
   // input: X, W, dY
   // output: dW, db, and optionally dX
   INPUT_TAGS(INPUT, FILTER, OUTPUT_GRAD);
   OUTPUT_TAGS(FILTER_GRAD, BIAS_GRAD, INPUT_GRAD);
-  INPUT_OUTPUT_STATS(3, 3, 2, 3);
   DISABLE_COPY_AND_ASSIGN(CudnnConvGradientOp);
 };
 
@@ -126,8 +130,7 @@ class CudnnConvGradientOp final : public CudnnConvOpBase {
 ////////////////////////////////////////////////////////////////////////////////
 
 template <typename T>
-bool CudnnConvOp<T>::RunWithCudnnWorkspace(
-      CuDNNWorkspaceWrapper* cudnn_ws_wrapper) {
+bool CudnnConvOp<T>::RunWithCudnnWorkspace() {
   auto& X = Input(INPUT);
   auto& filter = Input(FILTER);
   auto& bias = Input(BIAS);
@@ -136,29 +139,29 @@ bool CudnnConvOp<T>::RunWithCudnnWorkspace(
   // Figure out the output shape
   CAFFE_DCHECK_EQ(X.ndim(), 4);
   CAFFE_DCHECK_EQ(filter.ndim(), 4);
-  const int M = filter.dim(0);
+  const int M = filter.dim32(0);
   ConvPoolOpBase<CUDAContext>::SetOutputSize(X, Y, M);
   int N = 0, C = 0, H = 0, W = 0, H_out = 0, W_out = 0;
   switch (order_) {
   case StorageOrder::NHWC:
-    N = X.dim(0); H = X.dim(1); W = X.dim(2); C = X.dim(3);
-    H_out = Y->dim(1); W_out = Y->dim(2);
-    CAFFE_DCHECK_EQ(filter.dim(1), kernel_h_);
-    CAFFE_DCHECK_EQ(filter.dim(2), kernel_w_);
-    CAFFE_DCHECK_EQ(filter.dim(3), C);
+    N = X.dim32(0); H = X.dim32(1); W = X.dim32(2); C = X.dim32(3);
+    H_out = Y->dim32(1); W_out = Y->dim32(2);
+    CAFFE_DCHECK_EQ(filter.dim32(1), kernel_h_);
+    CAFFE_DCHECK_EQ(filter.dim32(2), kernel_w_);
+    CAFFE_DCHECK_EQ(filter.dim32(3), C);
     break;
   case StorageOrder::NCHW:
-    N = X.dim(0); C = X.dim(1); H = X.dim(2); W = X.dim(3);
-    H_out = Y->dim(2); W_out = Y->dim(3);
-    CAFFE_DCHECK_EQ(filter.dim(1), C);
-    CAFFE_DCHECK_EQ(filter.dim(2), kernel_h_);
-    CAFFE_DCHECK_EQ(filter.dim(3), kernel_w_);
+    N = X.dim32(0); C = X.dim32(1); H = X.dim32(2); W = X.dim32(3);
+    H_out = Y->dim32(2); W_out = Y->dim32(3);
+    CAFFE_DCHECK_EQ(filter.dim32(1), C);
+    CAFFE_DCHECK_EQ(filter.dim32(2), kernel_h_);
+    CAFFE_DCHECK_EQ(filter.dim32(3), kernel_w_);
     break;
   default:
     CAFFE_LOG_FATAL << "Unknown storage order: " << order_;
   }
   CAFFE_DCHECK_EQ(bias.ndim(), 1);
-  CAFFE_DCHECK_EQ(bias.dim(0), M);
+  CAFFE_DCHECK_EQ(bias.dim32(0), M);
 
   // Set up the cudnn algorithms & workspace if necessary
   bool input_changed = (X.dims() != cudnn_input_dims_);
@@ -174,7 +177,13 @@ bool CudnnConvOp<T>::RunWithCudnnWorkspace(
     if (filter_changed) {
       cudnn_filter_dims_ = filter.dims();
       CUDNN_CHECK(cudnnSetFilter4dDescriptor(
-          filter_desc_, cudnnTypeWrapper<T>::type, M, C, kernel_h_, kernel_w_));
+          filter_desc_,
+          cudnnTypeWrapper<T>::type,
+          GetCudnnTensorFormat(order_),
+          M,
+          C,
+          kernel_h_,
+          kernel_w_));
       CUDNN_CHECK(cudnnSetTensor4dDescriptor(
           bias_desc_, GetCudnnTensorFormat(order_), cudnnTypeWrapper<T>::type,
           1, M, 1, 1));
@@ -193,24 +202,25 @@ bool CudnnConvOp<T>::RunWithCudnnWorkspace(
     CUDNN_CHECK(cudnnSetConvolution2dDescriptor(
           conv_desc_, pad_t_, pad_l_, stride_h_, stride_w_, 1, 1,
           CUDNN_CROSS_CORRELATION));
-#if CUDNN_VERSION >= 3000
-    if (exhaustive_search_) {
-      CAFFE_VLOG(1) << "CUDNN Convolution: doing exhaustive search.";
+    if (deterministic_) {
+      algo_ = CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM;
+    } else if (exhaustive_search_) {
+      CAFFE_LOG_INFO << "CUDNN Convolution: doing exhaustive search.";
       // When we do an exhaustive search, we will ignore the workspace size
       // limit and simply go for the fastest algorithm. If you happen to run
       // out of memory later, you will be on your own...
       int returned_algo_count;
-      cudnnConvolutionFwdAlgoPerf_t perf_stat;
+      std::array<cudnnConvolutionFwdAlgoPerf_t, kNUM_CUDNN_FWD_ALGS> perf_stat;
       // We clean up the current workspace memory so that the forward algorithm
       // is free to allocate memory.
-      cudnn_ws_wrapper->Reset();
+      cudnn_wrapper_.ResetWorkspace();
       // Actually run the search.
       CUDNN_CHECK(cudnnFindConvolutionForwardAlgorithm(
           cudnn_wrapper_.cudnn_handle(),
           bottom_desc_, filter_desc_, conv_desc_, top_desc_,
-          1, &returned_algo_count, &perf_stat));
-      CAFFE_DCHECK_EQ(returned_algo_count, 1);
-      algo_ = perf_stat.algo;
+          kNUM_CUDNN_FWD_ALGS, &returned_algo_count, perf_stat.data()));
+      algo_ = perf_stat[0].algo;
+      LogCuDNNPerfStats(perf_stat, returned_algo_count);
     } else {
       // Get the convolution algorithm based on the workspace limit.
       CUDNN_CHECK(cudnnGetConvolutionForwardAlgorithm(
@@ -220,20 +230,12 @@ bool CudnnConvOp<T>::RunWithCudnnWorkspace(
           cudnn_ws_nbytes_limit_,
           &algo_));
     }
-#else  // CUDNN_VERSION >= 3000
-    CUDNN_CHECK(cudnnGetConvolutionForwardAlgorithm(
-        cudnn_wrapper_.cudnn_handle(),
-        bottom_desc_, filter_desc_, conv_desc_, top_desc_,
-        CUDNN_CONVOLUTION_FWD_SPECIFY_WORKSPACE_LIMIT,
-        cudnn_ws_nbytes_limit_,
-        &algo_));
-#endif  // CUDNN_VERSION >= 3000
     CUDNN_CHECK(cudnnGetConvolutionForwardWorkspaceSize(
         cudnn_wrapper_.cudnn_handle(),
         bottom_desc_, filter_desc_, conv_desc_, top_desc_,
         algo_, &cudnn_ws_nbytes_));
-    CAFFE_VLOG(1) << "CuDNN algorithm: " << algo_;
-    CAFFE_VLOG(1) << "CuDNN workspace size: " << cudnn_ws_nbytes_;
+    CAFFE_LOG_INFO << "CuDNN algorithm: " << algo_;
+    CAFFE_LOG_INFO << "CuDNN workspace size: " << cudnn_ws_nbytes_;
   }
 
   // Now, actually run the computation.
@@ -241,21 +243,13 @@ bool CudnnConvOp<T>::RunWithCudnnWorkspace(
   CUDNN_CHECK(cudnnConvolutionForward(
       cudnn_wrapper_.cudnn_handle(), cudnnTypeWrapper<T>::kOne(), bottom_desc_,
       X.template data<T>(), filter_desc_, filter.template data<T>(), conv_desc_,
-      algo_, cudnn_ws_wrapper->Get(cudnn_ws_nbytes_), cudnn_ws_nbytes_,
+      algo_, cudnn_wrapper_.GetWorkspace(cudnn_ws_nbytes_), cudnn_ws_nbytes_,
       cudnnTypeWrapper<T>::kZero(), top_desc_, Y->template mutable_data<T>()));
   // Bias
-#if CUDNN_VERSION >= 3000
-  CUDNN_CHECK(cudnnAddTensor_v3(
+  CUDNN_CHECK(cudnnAddTensor(
       cudnn_wrapper_.cudnn_handle(), cudnnTypeWrapper<T>::kOne(), bias_desc_,
       bias.template data<T>(), cudnnTypeWrapper<T>::kOne(), top_desc_,
       Y->template mutable_data<T>()));
-#else  // CUDNN_VERSION >= 3000
-  CUDNN_CHECK(cudnnAddTensor(
-      cudnn_wrapper_.cudnn_handle(), CUDNN_ADD_SAME_C,
-      cudnnTypeWrapper<T>::kOne(), bias_desc_, bias.template data<T>(),
-      cudnnTypeWrapper<T>::kOne(), top_desc_,
-      Y->template mutable_data<T>()));
-#endif
   // Done.
   return true;
 }
@@ -263,8 +257,7 @@ bool CudnnConvOp<T>::RunWithCudnnWorkspace(
 // TODO(Yangqing): a lot of the function contents are very similar. Consider
 // consolidating them.
 template <typename T>
-bool CudnnConvGradientOp<T>::RunWithCudnnWorkspace(
-    CuDNNWorkspaceWrapper* cudnn_ws_wrapper) {
+bool CudnnConvGradientOp<T>::RunWithCudnnWorkspace() {
   auto& X = Input(INPUT);
   auto& filter = Input(FILTER);
   auto& dY = Input(OUTPUT_GRAD);
@@ -272,29 +265,29 @@ bool CudnnConvGradientOp<T>::RunWithCudnnWorkspace(
   auto* dbias = Output(BIAS_GRAD);
   CAFFE_DCHECK_EQ(X.ndim(), 4);
   CAFFE_DCHECK_EQ(filter.ndim(), 4);
-  const int M = filter.dim(0);
+  const int M = filter.dim32(0);
   int N = 0, C = 0, H = 0, W = 0, H_out = 0, W_out = 0;
   switch (order_) {
   case StorageOrder::NHWC:
-    N = X.dim(0); H = X.dim(1); W = X.dim(2); C = X.dim(3);
-    H_out = dY.dim(1); W_out = dY.dim(2);
-    CAFFE_DCHECK_EQ(filter.dim(1), kernel_h_);
-    CAFFE_DCHECK_EQ(filter.dim(2), kernel_w_);
-    CAFFE_DCHECK_EQ(filter.dim(3), C);
+    N = X.dim32(0); H = X.dim32(1); W = X.dim32(2); C = X.dim32(3);
+    H_out = dY.dim32(1); W_out = dY.dim32(2);
+    CAFFE_DCHECK_EQ(filter.dim32(1), kernel_h_);
+    CAFFE_DCHECK_EQ(filter.dim32(2), kernel_w_);
+    CAFFE_DCHECK_EQ(filter.dim32(3), C);
     break;
   case StorageOrder::NCHW:
-    N = X.dim(0); C = X.dim(1); H = X.dim(2); W = X.dim(3);
-    H_out = dY.dim(2); W_out = dY.dim(3);
-    CAFFE_DCHECK_EQ(filter.dim(1), C);
-    CAFFE_DCHECK_EQ(filter.dim(2), kernel_h_);
-    CAFFE_DCHECK_EQ(filter.dim(3), kernel_w_);
+    N = X.dim32(0); C = X.dim32(1); H = X.dim32(2); W = X.dim32(3);
+    H_out = dY.dim32(2); W_out = dY.dim32(3);
+    CAFFE_DCHECK_EQ(filter.dim32(1), C);
+    CAFFE_DCHECK_EQ(filter.dim32(2), kernel_h_);
+    CAFFE_DCHECK_EQ(filter.dim32(3), kernel_w_);
     break;
   default:
     CAFFE_LOG_FATAL << "Unknown storage order: " << order_;
   }
   ConvPoolOpBase<CUDAContext>::ComputePads(H, W);
   dfilter->ReshapeLike(filter);
-  dbias->Reshape(std::vector<int>{M});
+  dbias->Reshape(vector<TIndex>{TIndex(M)});
 
   // Set up the cudnn algorithms & workspace if necessary
   bool input_changed = (X.dims() != cudnn_input_dims_);
@@ -310,7 +303,13 @@ bool CudnnConvGradientOp<T>::RunWithCudnnWorkspace(
     if (filter_changed) {
       cudnn_filter_dims_ = filter.dims();
       CUDNN_CHECK(cudnnSetFilter4dDescriptor(
-          filter_desc_, cudnnTypeWrapper<T>::type, M, C, kernel_h_, kernel_w_));
+          filter_desc_,
+          cudnnTypeWrapper<T>::type,
+          GetCudnnTensorFormat(order_),
+          M,
+          C,
+          kernel_h_,
+          kernel_w_));
       CUDNN_CHECK(cudnnSetTensor4dDescriptor(
           bias_desc_, GetCudnnTensorFormat(order_), cudnnTypeWrapper<T>::type,
           1, M, 1, 1));
@@ -333,31 +332,38 @@ bool CudnnConvGradientOp<T>::RunWithCudnnWorkspace(
 
     size_t bwd_filter_ws_size, bwd_data_ws_size;
 
-#if CUDNN_VERSION >= 3000
-    if (exhaustive_search_) {
-      CAFFE_VLOG(1) << "CUDNN Convolution bwd: doing exhaustive search.";
+    if (deterministic_) {
+      bwd_data_algo_ = CUDNN_CONVOLUTION_BWD_DATA_ALGO_1;
+      bwd_filter_algo_ = CUDNN_CONVOLUTION_BWD_FILTER_ALGO_1;
+    } else if (exhaustive_search_) {
+      CAFFE_LOG_INFO << "CUDNN Convolution bwd: doing exhaustive search.";
       // When we do an exhaustive search, we will ignore the workspace size
       // limit and simply go for the fastest algorithm. If you happen to run
       // out of memory later, you will be on your own...
       int returned_algo_count;
       // We clean up the current workspace memory so that the forward algorithm
       // is free to allocate memory.
-      cudnn_ws_wrapper->Reset();
+      cudnn_wrapper_.ResetWorkspace();
       // Actually run the search.
-      cudnnConvolutionBwdFilterAlgoPerf_t filter_perf_stat;
+      std::array<cudnnConvolutionBwdFilterAlgoPerf_t,
+                 kNUM_CUDNN_BWD_FILTER_ALGS> filter_perf_stat;
       CUDNN_CHECK(cudnnFindConvolutionBackwardFilterAlgorithm(
           cudnn_wrapper_.cudnn_handle(),
           bottom_desc_, top_desc_, conv_desc_, filter_desc_,
-          1, &returned_algo_count, &filter_perf_stat));
-      CAFFE_DCHECK_EQ(returned_algo_count, 1);
-      bwd_filter_algo_ = filter_perf_stat.algo;
-      cudnnConvolutionBwdDataAlgoPerf_t data_perf_stat;
+          kNUM_CUDNN_BWD_FILTER_ALGS, &returned_algo_count,
+          filter_perf_stat.data()));
+      LogCuDNNPerfStats(filter_perf_stat, returned_algo_count);
+      bwd_filter_algo_ = filter_perf_stat[0].algo;
+      cudnn_wrapper_.ResetWorkspace();
+      std::array<cudnnConvolutionBwdDataAlgoPerf_t,
+                 kNUM_CUDNN_BWD_DATA_ALGS> data_perf_stat;
       CUDNN_CHECK(cudnnFindConvolutionBackwardDataAlgorithm(
           cudnn_wrapper_.cudnn_handle(),
           filter_desc_, top_desc_, conv_desc_, bottom_desc_,
-          1, &returned_algo_count, &data_perf_stat));
-      CAFFE_DCHECK_EQ(returned_algo_count, 1);
-      bwd_data_algo_ = data_perf_stat.algo;
+          kNUM_CUDNN_BWD_DATA_ALGS, &returned_algo_count,
+          data_perf_stat.data()));
+      LogCuDNNPerfStats(data_perf_stat, returned_algo_count);
+      bwd_data_algo_ = data_perf_stat[0].algo;
     } else {
       // choose backward algorithm for filter
       CUDNN_CHECK(cudnnGetConvolutionBackwardFilterAlgorithm(
@@ -382,11 +388,11 @@ bool CudnnConvGradientOp<T>::RunWithCudnnWorkspace(
         cudnn_wrapper_.cudnn_handle(),
         filter_desc_, top_desc_, conv_desc_, bottom_desc_,
         bwd_data_algo_, &bwd_data_ws_size));
-
-
     cudnn_ws_nbytes_ = std::max(bwd_filter_ws_size, bwd_data_ws_size);
-    CAFFE_VLOG(1) << "CuDNN workspace size: " << cudnn_ws_nbytes_;
-#endif  // CUDNN_VERSION >= 3000
+
+    CAFFE_LOG_INFO << "CuDNN bwd algorithm: " << bwd_filter_algo_ << ", "
+                   << bwd_data_algo_;
+    CAFFE_LOG_INFO << "CuDNN workspace size: " << cudnn_ws_nbytes_;
   }
 
   // Now, actually run the computation.
@@ -394,40 +400,26 @@ bool CudnnConvGradientOp<T>::RunWithCudnnWorkspace(
       cudnn_wrapper_.cudnn_handle(), cudnnTypeWrapper<T>::kOne(), top_desc_,
       dY.template data<T>(), cudnnTypeWrapper<T>::kZero(), bias_desc_,
       dbias->template mutable_data<T>()));
-#if CUDNN_VERSION >= 3000
-  CUDNN_CHECK(cudnnConvolutionBackwardFilter_v3(
-      cudnn_wrapper_.cudnn_handle(), cudnnTypeWrapper<T>::kOne(),
-      bottom_desc_, X.template data<T>(),
-      top_desc_, dY.template data<T>(), conv_desc_, bwd_filter_algo_,
-      cudnn_ws_wrapper->Get(cudnn_ws_nbytes_), cudnn_ws_nbytes_,
-      cudnnTypeWrapper<T>::kZero(), filter_desc_,
-      dfilter->template mutable_data<T>()));
-#else  // CUDNN_VERSION >= 3000
   CUDNN_CHECK(cudnnConvolutionBackwardFilter(
       cudnn_wrapper_.cudnn_handle(), cudnnTypeWrapper<T>::kOne(),
       bottom_desc_, X.template data<T>(),
-      top_desc_, dY.template data<T>(), conv_desc_,
-      cudnnTypeWrapper<T>::kZero(), filter_desc_, dfilter->template mutable_data<T>()));
-#endif  // CUDNN_VERSION >= 3000
+      top_desc_, dY.template data<T>(), conv_desc_, bwd_filter_algo_,
+      cudnn_wrapper_.GetWorkspace(cudnn_ws_nbytes_), cudnn_ws_nbytes_,
+      cudnnTypeWrapper<T>::kZero(), filter_desc_,
+      dfilter->template mutable_data<T>()));
 
   if (OutputSize() == 3) {
     // Compute the gradient w.r.t. the input.
     auto *dX = Output(INPUT_GRAD);
     dX->ReshapeLike(X);
-#if CUDNN_VERSION >= 3000
-    CUDNN_CHECK(cudnnConvolutionBackwardData_v3(
-        cudnn_wrapper_.cudnn_handle(), cudnnTypeWrapper<T>::kOne(), filter_desc_,
-        filter.template data<T>(), top_desc_, dY.template data<T>(),
-        conv_desc_, bwd_data_algo_,
-        cudnn_ws_wrapper->Get(cudnn_ws_nbytes_), cudnn_ws_nbytes_,
-        cudnnTypeWrapper<T>::kZero(), bottom_desc_, dX->template mutable_data<T>()));
-#else  // CUDNN_VERSION >= 3000
     CUDNN_CHECK(cudnnConvolutionBackwardData(
-        cudnn_wrapper_.cudnn_handle(), cudnnTypeWrapper<T>::kOne(), filter_desc_,
-        filter.template data<T>(), top_desc_, dY.template data<T>(),
-        conv_desc_, cudnnTypeWrapper<T>::kZero(), bottom_desc_,
+        cudnn_wrapper_.cudnn_handle(), cudnnTypeWrapper<T>::kOne(),
+        filter_desc_, filter.template data<T>(),
+        top_desc_, dY.template data<T>(),
+        conv_desc_, bwd_data_algo_,
+        cudnn_wrapper_.GetWorkspace(cudnn_ws_nbytes_), cudnn_ws_nbytes_,
+        cudnnTypeWrapper<T>::kZero(), bottom_desc_,
         dX->template mutable_data<T>()));
-#endif  // CUDNN_VERSION >= 3000
   }
   return true;
 }
@@ -435,20 +427,19 @@ bool CudnnConvGradientOp<T>::RunWithCudnnWorkspace(
 REGISTER_CUDNN_OPERATOR(Conv, CudnnConvOp<float>);
 REGISTER_CUDNN_OPERATOR(ConvGradient, CudnnConvGradientOp<float>);
 
-#if CUDNN_VERSION >= 3000
 REGISTER_CUDNN_OPERATOR(ConvFp16, CudnnConvOp<float16>);
 REGISTER_CUDNN_OPERATOR(ConvFp16Gradient, CudnnConvGradientOp<float16>);
 
-struct GetConvFp16Gradient : public GetGradientDefBase {
-  vector<OperatorDef>* Create(const OperatorDef& def) override {
-    CAFFE_CHECK_EQ(def.input_size(), 3);
+class GetConvFp16Gradient : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  vector<OperatorDef> GetGradientDefs() override {
+    CAFFE_CHECK_EQ(def_.input_size(), 3);
     return SingleGradientDef(
         "ConvFp16Gradient", "",
-        vector<string>{I(def, 0), I(def, 1), GO(def, 0)},
-        vector<string>{GI(def, 1), GI(def, 2), GI(def, 0)});
+        vector<string>{I(0), I(1), GO(0)},
+        vector<string>{GI(1), GI(2), GI(0)});
   }
 };
 REGISTER_GRADIENT(ConvFp16, GetConvFp16Gradient);
-#endif  // CUDNN_VERSION >= 3000
 
 }  // namespace caffe2

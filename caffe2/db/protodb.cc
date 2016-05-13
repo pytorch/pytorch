@@ -12,6 +12,11 @@ class ProtoDBCursor : public Cursor {
   explicit ProtoDBCursor(const TensorProtos* proto)
     : proto_(proto), iter_(0) {}
   ~ProtoDBCursor() {}
+
+  void Seek(const string& str) override {
+    CAFFE_LOG_FATAL << "ProtoDB is not designed to support seeking.";
+  }
+
   void SeekToFirst() override { iter_ = 0; }
   void Next() override { ++iter_; }
   string key() override { return proto_->protos(iter_).name(); }

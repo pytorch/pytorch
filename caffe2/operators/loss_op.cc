@@ -10,23 +10,29 @@ REGISTER_CPU_OPERATOR(AveragedLossGradient,
 REGISTER_CPU_OPERATOR(WeightedSumLossGradient,
                       WeightedSumLossGradient<float, CPUContext>);
 
+OPERATOR_SCHEMA(AveragedLoss).NumInputs(1).NumOutputs(1);
+OPERATOR_SCHEMA(WeightedSumLoss).NumInputs(2).NumOutputs(1);
+OPERATOR_SCHEMA(AveragedLossGradient).NumInputs(1).NumOutputs(1);
+OPERATOR_SCHEMA(WeightedSumLossGradient).NumInputs(1).NumOutputs(1);
 
-struct GetAveragedLossGradient : public GetGradientDefBase {
-  vector<OperatorDef>* Create(const OperatorDef& def) override {
+class GetAveragedLossGradient : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  vector<OperatorDef> GetGradientDefs() override {
     return SingleGradientDef(
         "AveragedLossGradient", "",
-        vector<string>{I(def, 0)},
-        vector<string>{GI(def, 0)});
+        vector<string>{I(0)},
+        vector<string>{GI(0)});
   }
 };
 REGISTER_GRADIENT(AveragedLoss, GetAveragedLossGradient);
 
-struct GetWeightedSumLossGradient : public GetGradientDefBase {
-  vector<OperatorDef>* Create(const OperatorDef& def) override {
+class GetWeightedSumLossGradient : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  vector<OperatorDef> GetGradientDefs() override {
     return SingleGradientDef(
         "WeightedSumLossGradient", "",
-        vector<string>{I(def, 1)},
-        vector<string>{GI(def, 0)});
+        vector<string>{I(1)},
+        vector<string>{GI(0)});
   }
 };
 REGISTER_GRADIENT(WeightedSumLoss, GetWeightedSumLossGradient);

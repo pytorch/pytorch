@@ -1,7 +1,8 @@
+#include "caffe2/core/common_gpu.h"
+
 #include <atomic>
 #include <sstream>
 
-#include "caffe2/core/common_gpu.h"
 #include "caffe2/core/init.h"
 
 namespace caffe2 {
@@ -37,6 +38,17 @@ void SetDefaultGPUID(const int deviceid) {
 }
 int GetDefaultGPUID() { return gDefaultGPUID; }
 
+int GetCurrentGPUID() {
+  int gpu_id = 0;
+  CUDA_CHECK(cudaGetDevice(&gpu_id));
+  return gpu_id;
+}
+
+int GetGPUIDForPointer(const void* ptr) {
+  cudaPointerAttributes attr;
+  CUDA_CHECK(cudaPointerGetAttributes(&attr, ptr));
+  return attr.device;
+}
 
 const cudaDeviceProp& GetDeviceProperty(const int deviceid) {
   static vector<cudaDeviceProp> props;
@@ -171,7 +183,7 @@ const char* curandGetErrorString(curandStatus_t error) {
   return "Unrecognized curand error string";
 }
 
-bool Caffe2InitializeCuda() {
+bool Caffe2InitializeCuda(int*, char***) {
   static bool g_initialization_function_called = false;
   if (g_initialization_function_called == true) {
     CAFFE_VLOG(1) << "Initialization already called. Ignoring duplicated calls.";
@@ -183,6 +195,13 @@ bool Caffe2InitializeCuda() {
     CAFFE_VLOG(1) << "No cuda gpu present. Skipping.";
     return true;
   }
+  // Check if the number of GPUs matches the expected compile-time max number
+  // of GPUs.
+  CAFFE_CHECK_LE(NumCudaDevices(), CAFFE2_COMPILE_TIME_MAX_GPUS)
+      << "Number of CUDA devices on the machine is larger than the compiled "
+         "max number of gpus expected ("
+      << CAFFE2_COMPILE_TIME_MAX_GPUS
+      << "). Increase that and recompile the caffe binary.";
   // Save the current device so we can restore it after moving across
   // different devices.
   int init_device;

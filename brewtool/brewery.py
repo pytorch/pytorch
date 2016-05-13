@@ -40,7 +40,7 @@ def RunSingleCommand(command_and_env):
             shlex.split(command), stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT, env=env)
         stdout, _ = proc.communicate()
-        return proc.returncode, stdout.decode('utf-8')
+        return proc.returncode, stdout.decode('ascii')
     except OSError as e:
         out = 'Exception found in command {0}. Exception is: {1}.'.format(
             repr(command), str(e))
@@ -73,7 +73,7 @@ class Brewery(object):
     # The current working directory when working with build files. The target
     # prefix changes with cwd as well.
     _cwd = ''
-
+    
     # Whether in test_mode or not. In default no testing.
     is_test = False
 
@@ -690,7 +690,7 @@ class shell_script(BuildTarget):
         stdout, _ = proc.communicate()
         if proc.returncode:
             BuildWarning("Script failed. Failure message:")
-            BuildPrint("\n{0}\n", stdout.decode('utf-8'))
+            BuildPrint("\n{0}\n", stdout.decode('ascii'))
             return False
         return True
 

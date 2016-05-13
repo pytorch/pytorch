@@ -23,7 +23,7 @@ class OperatorBase;
 // contexts.
 class NetBase {
  public:
-  NetBase(const NetDef& net_def, Workspace* ws) {}
+  NetBase(const NetDef& net_def, Workspace* ws);
   virtual ~NetBase() {}
   virtual bool Verify() = 0;
   virtual bool Run() = 0;
@@ -32,15 +32,18 @@ class NetBase {
     CAFFE_LOG_ERROR << "Benchmark not implemented for this net type.";
   }
 
+ protected:
+  vector<string> external_input_;
+  vector<string> external_output_;
+
   DISABLE_COPY_AND_ASSIGN(NetBase);
 };
 
-
-DECLARE_REGISTRY(NetRegistry, NetBase, const NetDef&, Workspace*);
+CAFFE_DECLARE_REGISTRY(NetRegistry, NetBase, const NetDef&, Workspace*);
 #define REGISTER_NET_CREATOR(key, ...) \
-  REGISTER_CREATOR(NetRegistry, key, __VA_ARGS__)
+  CAFFE_REGISTER_CREATOR(NetRegistry, key, __VA_ARGS__)
 #define REGISTER_NET(name, ...) \
-  REGISTER_CLASS(NetRegistry, name, __VA_ARGS__)
+  CAFFE_REGISTER_CLASS(NetRegistry, name, __VA_ARGS__)
 NetBase* CreateNet(const NetDef& net_def, Workspace* ws);
 
 // This is the very basic structure you need to run a network - all it

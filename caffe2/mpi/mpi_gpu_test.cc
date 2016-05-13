@@ -30,7 +30,7 @@ const char kBcastNet[] =
 "  op {"
 "    input: \"X\""
 "    output: \"X\""
-"    type: \"Broadcast\""
+"    type: \"MPIBroadcast\""
 "    arg {"
 "      name: \"root\""
 "      i: 0"
@@ -40,7 +40,7 @@ const char kBcastNet[] =
 "    device_type: CUDA"
 "  }";
 
-TEST(MPITest, TestBroadcast) {
+TEST(MPITest, TestMPIBroadcast) {
   NetDef net_def;
   CAFFE_CHECK(google::protobuf::TextFormat::ParseFromString(
       string(kBcastNet), &net_def));
@@ -70,7 +70,131 @@ TEST(MPITest, TestBroadcast) {
   }
 }
 
-const char kAllreduceNet[] =
+
+const char kReduceNet[] =
+"  name: \"reduce\""
+"  op {"
+"    output: \"X\""
+"    type: \"ConstantFill\""
+"    arg {"
+"      name: \"shape\""
+"      ints: 10"
+"    }"
+"    arg {"
+"      name: \"value\""
+"      f: 0.0"
+"    }"
+"  }"
+"  op {"
+"    input: \"X\""
+"    output: \"X_reduced\""
+"    type: \"MPIReduce\""
+"    arg {"
+"      name: \"root\""
+"      i: 0"
+"    }"
+"  }"
+"  device_option {"
+"    device_type: CUDA"
+"  }";
+
+TEST(MPITest, TestMPIReduce) {
+  NetDef net_def;
+  CAFFE_CHECK(google::protobuf::TextFormat::ParseFromString(
+      string(kReduceNet), &net_def));
+  // Let's set the network's constant fill value to be the mpi rank.
+  auto* arg = net_def.mutable_op(0)->mutable_arg(1);
+  CAFFE_CHECK_EQ(arg->name(), "value");
+  int rank;
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  arg->set_f(rank);
+  int size;
+  MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+  for (int root = 0; root < size; ++root) {
+    net_def.mutable_op(1)->mutable_arg(0)->set_i(root);
+    Workspace ws;
+    unique_ptr<NetBase> net(CreateNet(net_def, &ws));
+    EXPECT_NE(nullptr, net.get());
+    EXPECT_TRUE(net->Verify());
+    EXPECT_TRUE(net->Run());
+    int rank;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    int size;
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    if (rank == 0) {
+      // Let's test the value.
+      auto& X = ws.GetBlob("X_reduced")->Get<TensorCUDA>();
+      TensorCPU X_cpu(X);
+      EXPECT_EQ(X.size(), 10);
+      int expected_result = size * (size - 1) / 2;
+      for (int i = 0; i < X.size(); ++i) {
+        EXPECT_EQ(X_cpu.data<float>()[i], expected_result);
+      }
+    }
+  }
+}
+
+const char kMPIAllgatherNet[] =
+"  name: \"allgather\""
+"  op {"
+"    output: \"X\""
+"    type: \"ConstantFill\""
+"    arg {"
+"      name: \"shape\""
+"      ints: 2"
+"      ints: 10"
+"    }"
+"    arg {"
+"      name: \"value\""
+"      f: 0.0"
+"    }"
+"  }"
+"  op {"
+"    input: \"X\""
+"    output: \"X_gathered\""
+"    type: \"MPIAllgather\""
+"  }"
+"  device_option {"
+"    device_type: CUDA"
+"  }";
+
+TEST(MPITest, TestMPIAllgather) {
+  NetDef net_def;
+  CAFFE_CHECK(google::protobuf::TextFormat::ParseFromString(
+      string(kMPIAllgatherNet), &net_def));
+  // Let's set the network's constant fill value to be the mpi rank.
+  auto* arg = net_def.mutable_op(0)->mutable_arg(1);
+  CAFFE_CHECK_EQ(arg->name(), "value");
+  int rank;
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  arg->set_f(rank);
+  int size;
+  MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+  Workspace ws;
+  unique_ptr<NetBase> net(CreateNet(net_def, &ws));
+  EXPECT_NE(nullptr, net.get());
+  EXPECT_TRUE(net->Verify());
+  EXPECT_TRUE(net->Run());
+  // Let's test the value.
+  auto& X = ws.GetBlob("X")->Get<TensorCUDA>();
+  TensorCPU X_cpu(X);
+  EXPECT_EQ(X.size(), 20);
+  for (int i = 0; i < X.size(); ++i) {
+    EXPECT_EQ(X_cpu.data<float>()[i], rank);
+  }
+  auto& X_gathered = ws.GetBlob("X_gathered")->Get<TensorCUDA>();
+  TensorCPU X_gathered_cpu(X_gathered);
+  EXPECT_EQ(X_gathered.size(), 20 * size);
+  EXPECT_EQ(X_gathered.dim(0), 2 * size);
+  EXPECT_EQ(X_gathered.dim(1), 10);
+  for (int i = 0; i < X_gathered.size(); ++i) {
+    EXPECT_EQ(X_gathered_cpu.data<float>()[i], i / 20);
+  }
+}
+
+const char kMPIAllreduceNet[] =
 "  name: \"allreduce\""
 "  op {"
 "    output: \"X\""
@@ -87,16 +211,16 @@ const char kAllreduceNet[] =
 "  op {"
 "    input: \"X\""
 "    output: \"X_reduced\""
-"    type: \"Allreduce\""
+"    type: \"MPIAllreduce\""
 "  }"
 "  device_option {"
 "    device_type: CUDA"
 "  }";
 
-TEST(MPITest, TestAllreduce) {
+TEST(MPITest, TestMPIAllreduce) {
   NetDef net_def;
   CAFFE_CHECK(google::protobuf::TextFormat::ParseFromString(
-      string(kAllreduceNet), &net_def));
+      string(kMPIAllreduceNet), &net_def));
   // Let's set the network's constant fill value to be the mpi rank.
   auto* arg = net_def.mutable_op(0)->mutable_arg(1);
   CAFFE_CHECK_EQ(arg->name(), "value");
@@ -127,7 +251,7 @@ TEST(MPITest, TestAllreduce) {
   }
 }
 
-const char kInPlaceAllreduceNet[] =
+const char kInPlaceMPIAllreduceNet[] =
 "  name: \"allreduce\""
 "  op {"
 "    output: \"X\""
@@ -144,16 +268,16 @@ const char kInPlaceAllreduceNet[] =
 "  op {"
 "    input: \"X\""
 "    output: \"X\""
-"    type: \"Allreduce\""
+"    type: \"MPIAllreduce\""
 "  }"
 "  device_option {"
 "    device_type: CUDA"
 "  }";
 
-TEST(MPITest, TestInPlaceAllreduce) {
+TEST(MPITest, TestInPlaceMPIAllreduce) {
   NetDef net_def;
   CAFFE_CHECK(google::protobuf::TextFormat::ParseFromString(
-      string(kInPlaceAllreduceNet), &net_def));
+      string(kInPlaceMPIAllreduceNet), &net_def));
   // Let's set the network's constant fill value to be the mpi rank.
   auto* arg = net_def.mutable_op(0)->mutable_arg(1);
   CAFFE_CHECK_EQ(arg->name(), "value");
@@ -184,7 +308,7 @@ GTEST_API_ int main(int argc, char **argv) {
   int mpi_ret;
   MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &mpi_ret);
   testing::InitGoogleTest(&argc, argv);
-  caffe2::GlobalInit(&argc, argv);
+  caffe2::GlobalInit(&argc, &argv);
   int test_result = RUN_ALL_TESTS();
   MPI_Finalize();
   return test_result;

@@ -1,7 +1,11 @@
 #ifndef CAFFE2_CORE_TYPEID_H_
 #define CAFFE2_CORE_TYPEID_H_
 
+#include <cstdlib>
+
+#include <iostream>
 #include <map>
+#include <type_traits>
 #ifdef __GXX_RTTI
 #include <typeinfo>
 #endif
@@ -11,6 +15,27 @@
 namespace caffe2 {
 
 typedef intptr_t CaffeTypeId;
+std::map<CaffeTypeId, const char*>& gTypeNames();
+
+// A utility function to demangle a function name.
+const char* Demangle(const char* name);
+
+template <typename T>
+struct TypeNameRegisterer {
+  TypeNameRegisterer() {
+    gTypeNames()[reinterpret_cast<CaffeTypeId>(Id())] =
+#ifdef __GXX_RTTI
+        Demangle(typeid(T).name());
+#else  // __GXX_RTTI
+        "(RTTI disabled, cannot show name)";
+#endif  // __GXX_RTTI
+  }
+
+  static CaffeTypeId Id() {
+    static bool type_id_bit[1];
+    return reinterpret_cast<CaffeTypeId>(type_id_bit);
+  }
+};
 
 /**
  * TypeMeta is a thin class that allows us to store the type of a container such
@@ -20,15 +45,21 @@ typedef intptr_t CaffeTypeId;
  */
 class TypeMeta {
  public:
+  typedef void (*PlacementNew)(void*, size_t);
+  typedef void (*TypedCopy)(const void*, void*, size_t);
+  typedef void (*TypedDestructor)(void*, size_t);
   /** Create a dummy TypeMeta object. To create a TypeMeta object for a specific
    * type, use TypeMeta::Make<T>().
    */
-  TypeMeta() : id_(0), itemsize_(0), name_("Unknown type") {}
+  TypeMeta() : id_(0), itemsize_(0), ctor_(nullptr), copy_(nullptr),
+               dtor_(nullptr) {}
+
   /**
    * Copy constructor.
    */
   TypeMeta(const TypeMeta& src)
-      : id_(src.id_), itemsize_(src.itemsize_), name_(src.name_) {}
+      : id_(src.id_), itemsize_(src.itemsize_),
+        ctor_(src.ctor_), copy_(src.copy_), dtor_(src.dtor_) {}
   /**
    * Assignment operator.
    */
@@ -36,10 +67,20 @@ class TypeMeta {
     if (this == &src) return *this;
     id_ = src.id_;
     itemsize_ = src.itemsize_;
-    name_ = src.name_;
+    ctor_ = src.ctor_;
+    copy_ = src.copy_;
+    dtor_ = src.dtor_;
     return *this;
   }
 
+ private:
+  // TypeMeta can only be created by Make, making sure that we do not
+  // create incorrectly mixed up TypeMeta objects.
+  TypeMeta(CaffeTypeId i, size_t s, PlacementNew ctor, TypedCopy copy,
+           TypedDestructor dtor)
+      : id_(i), itemsize_(s), ctor_(ctor), copy_(copy), dtor_(dtor) {}
+
+ public:
   /**
    * Returns the type id.
    */
@@ -49,9 +90,21 @@ class TypeMeta {
    */
   inline const size_t& itemsize() const { return itemsize_; }
   /**
+   * Returns the placement new function pointer for individual items.
+   */
+  inline PlacementNew ctor() const { return ctor_; }
+  /**
+   * Returns the typed copy function pointer for individual iterms.
+   */
+  inline TypedCopy copy() const { return copy_; }
+  /**
+   * Returns the destructor function pointer for individual items.
+   */
+  inline TypedDestructor dtor() const { return dtor_; }
+  /**
    * Returns a printable name for the type.
    */
-  inline const char* const& name() const { return name_; }
+  inline const char* const& name() const { return gTypeNames()[id_]; }
   bool operator==(const TypeMeta& other) const { return (id_ == other.id_); }
   bool operator!=(const TypeMeta& other) const { return (id_ != other.id_); }
 
@@ -69,8 +122,8 @@ class TypeMeta {
    */
   template <typename T>
   static CaffeTypeId Id() {
-    static bool type_id_bit[1];
-    return reinterpret_cast<CaffeTypeId>(type_id_bit);
+    static TypeNameRegisterer<T> registerer;
+    return TypeNameRegisterer<T>::Id();
   }
   /**
    * Returns the item size of the type. This is equivalent to sizeof(T).
@@ -81,29 +134,86 @@ class TypeMeta {
    * Returns the printable name of the type.
    */
   template <typename T>
-  static const char* Name() {
-#ifdef __GXX_RTTI
-    return typeid(T).name();
-#else  // __GXX_RTTI
-    return "(RTTI disabled, cannot show name)";
-#endif
+  static const char* Name() { return gTypeNames()[Id<T>()]; }
+
+  /**
+   * Placement new function for the type.
+   */
+  template <typename T>
+  static void _Ctor(void* ptr, size_t n) {
+    T* typed_ptr = static_cast<T*>(ptr);
+    for (int i = 0; i < n; ++i) {
+      new(typed_ptr + i) T;
+    }
   }
+
+
+  /**
+   * Typed copy function for classes.
+   */
+  template <typename T>
+  static void _Copy(const void* src, void* dst, size_t n) {
+    const T* typed_src = static_cast<const T*>(src);
+    T* typed_dst = static_cast<T*>(dst);
+    for (int i = 0; i < n; ++i) {
+      typed_dst[i] = typed_src[i];
+    }
+  }
+
+  /**
+   * A placeholder function for types that do not allow assignment.
+   */
+  template <typename T>
+  static void _CopyNotAllowed(const void* src, void* dst, size_t n) {
+    std::cerr << "Type " << Name<T>() << " does not allow assignment.";
+    // This is an error by design, so we will quit loud.
+    abort();
+  }
+
+  /**
+   * Destructor for non-fundamental types.
+   */
+  template <typename T>
+  static void _Dtor(void* ptr, size_t n) {
+    T* typed_ptr = static_cast<T*>(ptr);
+    for (int i = 0; i < n; ++i) {
+      typed_ptr[i].~T();
+    }
+  }
+
   /**
    * Returns a TypeMeta object that corresponds to the typename T.
    */
   template <typename T>
+  static typename std::enable_if<std::is_fundamental<T>::value, TypeMeta>::type
+  Make() {
+    return TypeMeta(Id<T>(), ItemSize<T>(), nullptr, nullptr, nullptr);
+  }
+
+  template <typename T,
+            typename std::enable_if<
+                !std::is_fundamental<T>::value &&
+                std::is_copy_assignable<T>::value>::type* = nullptr>
   static TypeMeta Make() {
-    return TypeMeta(Id<T>(), ItemSize<T>(), Name<T>());
+    return TypeMeta(
+        Id<T>(), ItemSize<T>(), _Ctor<T>, _Copy<T>, _Dtor<T>);
+  }
+
+  template <typename T>
+  static TypeMeta Make(
+      typename std::enable_if<
+          !std::is_fundamental<T>::value && !std::is_copy_assignable<T>::value
+      >::type* = 0) {
+    return TypeMeta(
+        Id<T>(), ItemSize<T>(), _Ctor<T>, _CopyNotAllowed<T>, _Dtor<T>);
   }
 
  private:
-  // TypeMeta can only be created by Make, making sure that we do not
-  // create incorrectly mixed up TypeMeta objects.
-  TypeMeta(CaffeTypeId i, size_t s, const char* n)
-      : id_(i), itemsize_(s), name_(n) {}
   CaffeTypeId id_;
   size_t itemsize_;
-  const char* name_;
+  PlacementNew ctor_;
+  TypedCopy copy_;
+  TypedDestructor dtor_;
 };
 
 }  // namespace caffe2

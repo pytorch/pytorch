@@ -37,12 +37,16 @@ namespace {
 REGISTER_CPU_OPERATOR(Clip, ClipOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(ClipGradient, ClipGradientOp<float, CPUContext>);
 
-struct GetClipGradient : public GetGradientDefBase {
-  vector<OperatorDef>* Create(const OperatorDef& def) override {
+OPERATOR_SCHEMA(Clip).NumInputs(1).NumOutputs(1);
+OPERATOR_SCHEMA(ClipGradient).NumInputs(2).NumOutputs(1);
+
+class GetClipGradient : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  vector<OperatorDef> GetGradientDefs() override {
     return SingleGradientDef(
         "ClipGradient", "",
-        vector<string>{O(def, 0), GO(def, 0)},
-        vector<string>{GI(def, 0)});
+        vector<string>{O(0), GO(0)},
+        vector<string>{GI(0)});
   }
 };
 REGISTER_GRADIENT(Clip, GetClipGradient);

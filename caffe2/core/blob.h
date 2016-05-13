@@ -33,6 +33,12 @@ class Blob {
    */
   template <class T>
   bool IsType() const { return meta_.Match<T>(); }
+
+  /**
+   * Returns the meta info of the blob.
+   */
+  inline const TypeMeta& meta() const { return meta_; }
+
   /**
    * Returns a printable typename of the blob.
    */

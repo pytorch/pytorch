@@ -50,8 +50,8 @@ class LearningRateOp final : public Operator<Context> {
     T learning_rate = base_lr_ * (*functor_)(iter);
     // Write to output.
     auto* output = Output(0);
-    output->Reshape(std::vector<int>());
-    device_context_.template Copy<T, CPUContext, Context>(
+    output->Reshape(vector<TIndex>());
+    context_.template Copy<T, CPUContext, Context>(
         1, &learning_rate, Output(0)->template mutable_data<T>());
     return true;
   }
@@ -60,7 +60,6 @@ class LearningRateOp final : public Operator<Context> {
   unique_ptr<LearningRateFunctor<T> > functor_;
   T base_lr_;
 
-  INPUT_OUTPUT_STATS(1, 1, 1, 1);
   DISABLE_COPY_AND_ASSIGN(LearningRateOp);
 };
 

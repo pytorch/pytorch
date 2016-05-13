@@ -15,6 +15,10 @@ namespace caffe2 {
 using std::string;
 using ::google::protobuf::MessageLite;
 
+// Common interfaces that reads file contents into a string.
+bool ReadStringFromFile(const char* filename, string* str);
+bool WriteStringToFile(const string& str, const char* filename);
+
 // Common interfaces that are supported by both lite and full protobuf.
 bool ReadProtoFromBinaryFile(const char* filename, MessageLite* proto);
 inline bool ReadProtoFromBinaryFile(const string filename, MessageLite* proto) {

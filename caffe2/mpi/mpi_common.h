@@ -19,7 +19,7 @@ template <typename T> class MPIDataTypeWrapper;
 #define MPI_DATATYPE_WRAPPER(c_type, mpi_type)                                 \
   template<> class MPIDataTypeWrapper<c_type> {                                \
    public:                                                                     \
-    inline static MPI_Datatype type() { return  mpi_type; }                    \
+    inline static MPI_Datatype type() { return mpi_type; }                     \
   };
 
 MPI_DATATYPE_WRAPPER(char, MPI_CHAR)
@@ -30,6 +30,10 @@ MPI_DATATYPE_WRAPPER(double, MPI_DOUBLE)
 
 // For all Caffe MPI calls, we will wrap it inside an MPI mutex lock guard.
 std::mutex& MPIMutex();
+
+MPI_Comm MPIComm();
+void SetMPIComm(MPI_Comm new_mpi_comm);
+size_t MPISize();
 
 #define MPI_CHECK(condition)                                                   \
   do {                                                                         \

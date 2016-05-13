@@ -6,25 +6,27 @@
 
 namespace caffe2 {
 
-bool GlobalInit(int* pargc, char** argv) {
+bool GlobalInit(int* pargc, char*** pargv) {
   static bool global_init_was_already_run = false;
-  bool success = true;
   if (global_init_was_already_run) {
-    std::cerr << "GlobalInit has already been called: did you double-call?";
-    return false;
+    CAFFE_VLOG(1) << "GlobalInit has already been called: did you double-call?";
+    return true;
   }
-  success &= ParseCaffeCommandLineFlags(pargc, argv);
-  success &= InitCaffeLogging(pargc, argv);
+  bool success = true;
+  success &= internal::Caffe2InitializeRegistry::Registry()
+      ->RunRegisteredEarlyInitFunctions(pargc, pargv);
+  CHECK(success) << "Failed to run some early init functions for caffe.";
+  success &= ParseCaffeCommandLineFlags(pargc, pargv);
+  success &= InitCaffeLogging(pargc, *pargv);
   // Print out the current build version.
-  CAFFE_LOG_INFO << "Caffe2 build version: " << CAFFE2_BUILD_STRING;
+  CAFFE_VLOG(1) << "Caffe2 build version: " << CAFFE2_BUILD_STRING;
   // All other initialization functions.
   success &= internal::Caffe2InitializeRegistry::Registry()
-      ->RunRegisteredInitFunctions();
+      ->RunRegisteredInitFunctions(pargc, pargv);
+  CHECK(success) << "Failed to run some early init functions for caffe.";
   global_init_was_already_run = true;
-  if (!success) {
-    // TODO: if we fail GlobalInit(), should we continue?
-    abort();
-  }
+  // TODO: if we fail GlobalInit(), should we continue?
+
   return success;
 }
 }  // namespace caffe2

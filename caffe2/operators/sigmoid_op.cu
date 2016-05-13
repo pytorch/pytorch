@@ -28,9 +28,6 @@ struct SigmoidCUDAFunctor {
                     0, device_context->cuda_stream()>>>(n, x, y);
     return;
   }
-  inline bool InplaceAllowed() {
-    return true;
-  }
 };
 
 template <typename T>
@@ -41,18 +38,12 @@ struct SigmoidGradientCUDAFunctor {
                             0, device_context->cuda_stream()>>>(n, y, dy, dx);
     return;
   }
-  inline bool InplaceAllowed(const int input_id, const int output_id) {
-    if (input_id == 1 && output_id == 0) {
-      return true;
-    } else {
-      return false;
-    }
-  }
 };
 
 namespace {
 REGISTER_CUDA_OPERATOR(
-    Sigmoid, UnaryElementwiseOp<float, CUDAContext, SigmoidCUDAFunctor<float> >);
+    Sigmoid,
+    UnaryElementwiseOp<float, CUDAContext, SigmoidCUDAFunctor<float> >);
 REGISTER_CUDA_OPERATOR(
     SigmoidGradient, BinaryElementwiseOp<float, CUDAContext,
                                      SigmoidGradientCUDAFunctor<float> >);

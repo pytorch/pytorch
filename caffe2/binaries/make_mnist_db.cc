@@ -114,7 +114,7 @@ void convert_dataset(const char* image_filename, const char* label_filename,
 }  // namespace caffe2
 
 int main(int argc, char** argv) {
-  caffe2::GlobalInit(&argc, argv);
+  caffe2::GlobalInit(&argc, &argv);
   caffe2::convert_dataset(caffe2::FLAGS_image_file.c_str(), caffe2::FLAGS_label_file.c_str(),
                           caffe2::FLAGS_output_file.c_str(), caffe2::FLAGS_data_limit);
   return 0;

@@ -14,33 +14,37 @@ class IterOp final : public OperatorBase {
       : OperatorBase(operator_def, ws) {}
 
   bool Run() override {
-    if (!OperatorBase::OutputIsType<TensorCPU>(0)) {
-      // This is the first run; set the iter to start with 0.
-      auto* output = OperatorBase::Output<TensorCPU>(0);
-      CAFFE_VLOG(1) << "Initializing iter counter with 0";
-      output->Reshape(std::vector<int>{1});
-      output->mutable_data<int>()[0] = 0;
-      return true;
-    } else {
-      auto* output = OperatorBase::Output<TensorCPU>(0);
-      CAFFE_CHECK_EQ(output->size(), 1)
-          << "The output of IterOp exists, but not of the right size.";
-      int* iter = output->mutable_data<int>();
-      CAFFE_CHECK_GE(*iter, 0) << "Previous iteration number is negative.";
-      CAFFE_CHECK_LT(*iter, INT_MAX) << "Overflow will happen!";
-      (*iter)++;
-      return true;
+    if (InputSize() == 0) {
+      CAFFE_LOG_ERROR << "You are using an old definition of IterOp that will "
+                         "be deprecated soon. More specifically, IterOp now "
+                         "requires an explicit in-place input and output.";
+      if (!OperatorBase::OutputIsType<TensorCPU>(0)) {
+        // This is the first run; set the iter to start with 0.
+        auto* output = OperatorBase::Output<TensorCPU>(0);
+        CAFFE_VLOG(1) << "Initializing iter counter.";
+        output->Reshape(vector<TIndex>{1});
+        output->mutable_data<int>()[0] = 0;
+      }
     }
+    auto* output = OperatorBase::Output<TensorCPU>(0);
+    CAFFE_CHECK_EQ(output->size(), 1)
+        << "The output of IterOp exists, but not of the right size.";
+    int* iter = output->mutable_data<int>();
+    CAFFE_CHECK_GE(*iter, 0) << "Previous iteration number is negative.";
+    CAFFE_CHECK_LT(*iter, INT_MAX) << "Overflow will happen!";
+    (*iter)++;
+    return true;
   }
 
  private:
-  INPUT_OUTPUT_STATS(0, 0, 1, 1);
   DISABLE_COPY_AND_ASSIGN(IterOp);
 };
 
 namespace {
 REGISTER_CPU_OPERATOR(Iter, IterOp);
 REGISTER_CUDA_OPERATOR(Iter, IterOp);
+
+OPERATOR_SCHEMA(Iter).NumInputs(0, 1).NumOutputs(1).EnforceInplace({{0, 0}});
 
 NO_GRADIENT(Iter);
 }

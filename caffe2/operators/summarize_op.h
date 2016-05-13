@@ -42,14 +42,12 @@ class SummarizeOp final : public Operator<Context> {
   static constexpr int MAX_IDX = 1;
   static constexpr int MEAN_IDX = 2;
   static constexpr int STD_IDX = 3;
+
   static constexpr int NUM_STATS = 4;
 
  protected:
   bool to_file_;
   std::unique_ptr<std::ofstream> log_file_;
-  // Input: X; output: if set, a summarized vector of shape 4, with the values
-  // being min, max, mean and std respectively.
-  INPUT_OUTPUT_STATS(1, 1, 0, 1);
   DISABLE_COPY_AND_ASSIGN(SummarizeOp);
 };
 

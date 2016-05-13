@@ -2,12 +2,41 @@
 #define CAFFE2_CORE_CONTEXT_H_
 
 #include <ctime>
+#include <cstdlib>
 #include <random>
 
 #include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/core/logging.h"
 
 namespace caffe2 {
+
+// Use 32-byte alignment should be enough for computation up to AVX512.
+constexpr size_t gCaffe2Alignment = 32;
+
+// A virtual allocator class to do memory allocation and deallocation.
+struct CPUAllocator {
+  CPUAllocator() {}
+  virtual ~CPUAllocator() {}
+  virtual void* New(size_t nbytes) = 0;
+  virtual void Delete(void* data) = 0;
+};
+
+struct DefaultCPUAllocator final : CPUAllocator {
+  DefaultCPUAllocator() {}
+  ~DefaultCPUAllocator() {}
+  void* New(size_t nbytes) override {
+    void* data;
+    CAFFE_CHECK_EQ(posix_memalign(&data, gCaffe2Alignment, nbytes), 0);
+    return data;
+  }
+  void Delete(void* data) override { free(data); }
+};
+
+// Get the CPU Alloctor.
+CPUAllocator* GetCPUAllocator();
+// Sets the CPU allocator to the given allocator: the caller gives away the
+// ownership of the pointer.
+void SetCPUAllocator(CPUAllocator* alloc);
 
 /**
  * The CPU Context, representing the bare minimum of what a Context class in
@@ -43,10 +72,10 @@ namespace caffe2 {
  */
 class CPUContext {
  public:
-  CPUContext() : random_generator_(0) {}
+  CPUContext() {}
   explicit CPUContext(const DeviceOption& option)
-      : random_generator_(
-            option.has_random_seed() ? option.random_seed() : time(NULL)) {
+      : random_seed_(
+          option.has_random_seed() ? option.random_seed() : time(nullptr)) {
     CAFFE_CHECK_EQ(option.device_type(), CPU);
   }
 
@@ -54,27 +83,38 @@ class CPUContext {
   inline void SwitchToDevice() {}
   inline bool FinishDeviceComputation() { return true; }
 
-  inline std::mt19937& RandGenerator() { return random_generator_; }
-
-  static void* New(size_t nbytes) {
-    void* data = new char[nbytes];
-    // memset(data, 0, nbytes);
-    return data;
+  inline std::mt19937& RandGenerator() {
+    if (!random_generator_.get()) {
+      random_generator_.reset(new std::mt19937(random_seed_));
+    }
+    return *random_generator_.get();
   }
-  static void Delete(void* data) { delete[] static_cast<char*>(data); }
+
+  inline static void* New(size_t nbytes) {
+    return GetCPUAllocator()->New(nbytes);
+  }
+  inline static void Delete(void* data) { GetCPUAllocator()->Delete(data); }
 
   // Two copy functions that deals with cross-device copies.
   template <class SrcContext, class DstContext>
   inline void Memcpy(size_t nbytes, const void* src, void* dst);
   template <typename T, class SrcContext, class DstContext>
   inline void Copy(int n, const T* src, T* dst) {
-    Memcpy<SrcContext, DstContext>(n * sizeof(T),
-                                   static_cast<const void*>(src),
-                                   static_cast<void*>(dst));
+    if (std::is_fundamental<T>::value) {
+      Memcpy<SrcContext, DstContext>(n * sizeof(T),
+                                     static_cast<const void*>(src),
+                                     static_cast<void*>(dst));
+    } else {
+      for (int i = 0; i < n; ++i) {
+        dst[i] = src[i];
+      }
+    }
   }
 
  protected:
-  std::mt19937 random_generator_;
+  // TODO(jiayq): instead of hard-coding a generator, make it more flexible.
+  unsigned int random_seed_;
+  std::unique_ptr<std::mt19937> random_generator_;
 };
 
 template<>

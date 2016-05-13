@@ -16,7 +16,7 @@ bool RangeFillOp<float, CUDAContext>::Fill(
     TensorCUDA* output) {
   int N = output->size();
   FillRangeKernel<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS,
-                    0, device_context_.cuda_stream()>>>(
+                    0, context_.cuda_stream()>>>(
       N, output->mutable_data<float>());
   return true;
 }
@@ -29,6 +29,7 @@ REGISTER_CUDA_OPERATOR(ConstantFill, ConstantFillOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(GivenTensorFill, GivenTensorFillOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(GaussianFill, GaussianFillOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(XavierFill, XavierFillOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(MSRAFill, MSRAFillOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(RangeFill, RangeFillOp<float, CUDAContext>);
 
 }  // namespace

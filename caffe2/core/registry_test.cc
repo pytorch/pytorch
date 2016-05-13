@@ -12,10 +12,10 @@ class Foo {
   explicit Foo(int x) { CAFFE_LOG_INFO << "Foo " << x; }
 };
 
-DECLARE_REGISTRY(FooRegistry, Foo, int);
-DEFINE_REGISTRY(FooRegistry, Foo, int);
+CAFFE_DECLARE_REGISTRY(FooRegistry, Foo, int);
+CAFFE_DEFINE_REGISTRY(FooRegistry, Foo, int);
 #define REGISTER_FOO(clsname) \
-  REGISTER_CLASS(FooRegistry, clsname, clsname)
+  CAFFE_REGISTER_CLASS(FooRegistry, clsname, clsname)
 
 class Bar : public Foo {
  public:

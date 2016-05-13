@@ -24,7 +24,7 @@ bool DropoutOp<float, CUDAContext>::RunOnDevice() {
   mask->Reshape(X.dims());
   CAFFE_DCHECK_GT(X.size(), 0);
   if (is_test_) {
-    device_context_.Copy<float, CUDAContext, CUDAContext>(
+    context_.Copy<float, CUDAContext, CUDAContext>(
       X.size(), X.data<float>(), Y->mutable_data<float>());
     return true;
   } else {
@@ -33,9 +33,9 @@ bool DropoutOp<float, CUDAContext>::RunOnDevice() {
     // mask.
     float* Ydata = Y->mutable_data<float>();
     CURAND_CHECK(curandGenerateUniform(
-        device_context_.curand_generator(), Ydata, X.size()));
+        context_.curand_generator(), Ydata, X.size()));
     DropoutKernel<<<CAFFE_GET_BLOCKS(X.size()), CAFFE_CUDA_NUM_THREADS,
-                    0, device_context_.cuda_stream()>>>(
+                    0, context_.cuda_stream()>>>(
         X.size(), ratio_, X.data<float>(), Ydata, mask->mutable_data<bool>());
     return true;
   }
@@ -60,14 +60,14 @@ bool DropoutGradientOp<float, CUDAContext>::RunOnDevice() {
   CAFFE_DCHECK_EQ(dY.size(), mask.size());
   dX->Reshape(dY.dims());
   if (is_test_) {
-    device_context_.Copy<float, CUDAContext, CUDAContext>(
+    context_.Copy<float, CUDAContext, CUDAContext>(
       dY.size(), dY.data<float>(), dX->mutable_data<float>());
     return true;
   } else {
     const float scale = 1. / (1. - ratio_);
     DropoutGradientKernel<<<CAFFE_GET_BLOCKS(dY.size()),
                             CAFFE_CUDA_NUM_THREADS,
-                            0, device_context_.cuda_stream()>>>(
+                            0, context_.cuda_stream()>>>(
         dY.size(), dY.data<float>(), mask.data<bool>(), scale,
         dX->mutable_data<float>());
     return true;

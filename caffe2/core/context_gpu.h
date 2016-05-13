@@ -13,50 +13,89 @@
 
 namespace caffe2 {
 
+// A virtual allocator class to do memory allocation and deallocation.
+struct PinnedCPUAllocator final : CPUAllocator {
+  PinnedCPUAllocator() {}
+  ~PinnedCPUAllocator() {}
+  void* New(size_t nbytes) override {
+    void* data;
+    CUDA_CHECK(cudaMallocHost(&data, nbytes));
+    return data;
+  }
+  void Delete(void* data) override {
+    CUDA_CHECK(cudaFreeHost(data));
+  }
+};
+
+class CUDAContext;
+
+/**
+ * A struct to host thread-local cuda objects.
+ *
+ * In Caffe2, each thread has its own non-default cuda stream as well as
+ * related objects such as cublas and curand handles. This is achieved by
+ * having the ThreadLocalCUDAObjects wrapper that takes care of allocating
+ * and deallocating these objects at the thread scope. This class is solely
+ * used inside CUDAContext and should not be used externally.
+ */
+class ThreadLocalCUDAObjects {
+  friend class CUDAContext;
+ private:
+  ThreadLocalCUDAObjects() {
+    for (int i = 0; i < CAFFE2_COMPILE_TIME_MAX_GPUS; ++i) {
+      cuda_stream_[i] = nullptr;
+      cublas_handle_[i] = nullptr;
+      curand_generator_[i] = nullptr;
+    }
+    for (int i = 0; i < NumCudaDevices(); ++i) {
+      DeviceGuard guard(i);
+      CUDA_CHECK(cudaStreamCreateWithFlags(
+          &cuda_stream_[i], cudaStreamNonBlocking));
+    }
+  }
+
+  ~ThreadLocalCUDAObjects() {
+    for (int i = 0; i < CAFFE2_COMPILE_TIME_MAX_GPUS; ++i) {
+      if (curand_generator_[i]) {
+        curandDestroyGenerator(curand_generator_[i]);
+      }
+      if (cublas_handle_[i]) {
+        cublasDestroy(cublas_handle_[i]);
+      }
+      cudaStreamDestroy(cuda_stream_[i]);
+    }
+  }
+  cudaStream_t cuda_stream_[CAFFE2_COMPILE_TIME_MAX_GPUS];
+  cublasHandle_t cublas_handle_[CAFFE2_COMPILE_TIME_MAX_GPUS];
+  curandGenerator_t curand_generator_[CAFFE2_COMPILE_TIME_MAX_GPUS];
+};
+
+
 class CUDAContext {
  public:
   // The default cuda context constructor.
   explicit CUDAContext(const int gpu_id = -1)
-      : cuda_gpu_id_(gpu_id), cuda_stream_(nullptr),
-        cublas_handle_(nullptr), random_seed_(1701),
-        curand_generator_(nullptr) {
-    if (gpu_id == -1) {
-      cuda_gpu_id_ = GetDefaultGPUID();
-    }
-    CUDA_CHECK(cudaSetDevice(cuda_gpu_id_));
-    CUDA_CHECK(cudaStreamCreate(&cuda_stream_));
+      : gpu_id_(gpu_id == -1 ? GetDefaultGPUID() : gpu_id), random_seed_(1701) {
   }
 
   explicit CUDAContext(const DeviceOption& option)
-      : cuda_stream_(nullptr), cublas_handle_(nullptr),
-        random_seed_(
-            option.has_random_seed() ? option.random_seed() : time(NULL)),
-        curand_generator_(nullptr) {
+      : gpu_id_(option.has_cuda_gpu_id() ?
+                option.cuda_gpu_id() : GetDefaultGPUID()),
+        random_seed_(option.has_random_seed() ?
+                     option.random_seed() : time(nullptr)) {
     CAFFE_DCHECK_EQ(option.device_type(), CUDA);
-    cuda_gpu_id_ = option.has_cuda_gpu_id() ?
-                   option.cuda_gpu_id() : GetDefaultGPUID();
-    CUDA_CHECK(cudaSetDevice(cuda_gpu_id_));
-    CUDA_CHECK(cudaStreamCreate(&cuda_stream_));
   }
 
   virtual ~CUDAContext() {
-    if (curand_generator_) {
-      CURAND_CHECK(curandDestroyGenerator(curand_generator_));
-    }
-    if (cublas_handle_) {
-      CUBLAS_CHECK(cublasDestroy(cublas_handle_));
-    }
-    if (cuda_stream_) {
-      CUDA_CHECK(cudaStreamDestroy(cuda_stream_));
-    }
+    CAFFE_CHECK(FinishDeviceComputation());
   }
 
   inline void SwitchToDevice() {
-    CUDA_CHECK(cudaSetDevice(cuda_gpu_id_));
+    CUDA_CHECK(cudaSetDevice(gpu_id_));
   }
 
-  inline bool FinishDeviceComputation() {
-    cudaStreamSynchronize(cuda_stream_);
+  bool FinishDeviceComputation() {
+    cudaStreamSynchronize(cuda_objects_.cuda_stream_[gpu_id_]);
     cudaError_t error = cudaGetLastError();
     if (error == cudaSuccess) {
       return true;
@@ -67,14 +106,23 @@ class CUDAContext {
     }
   }
 
-  int cuda_gpu_id() { return cuda_gpu_id_; }
+  inline int cuda_gpu_id() { return gpu_id_; }
 
-  inline cudaStream_t& cuda_stream() { return cuda_stream_; }
+  inline cudaStream_t& cuda_stream() {
+    return cuda_objects_.cuda_stream_[gpu_id_];
+  }
+
+  inline const cudaStream_t& cuda_stream() const {
+    return cuda_objects_.cuda_stream_[gpu_id_];
+  }
 
   cublasHandle_t& cublas_handle() {
+    auto& cublas_handle_ = cuda_objects_.cublas_handle_[gpu_id_];
     if (cublas_handle_) {
       return cublas_handle_;
     } else {
+      DeviceGuard guard(gpu_id_);
+      auto& cuda_stream_ = cuda_objects_.cuda_stream_[gpu_id_];
       CUBLAS_CHECK(cublasCreate(&cublas_handle_));
       // The default is CUBLAS_POINTER_MODE_HOST. You can override
       // it after obtaining the cublas handle, but do that with
@@ -87,17 +135,19 @@ class CUDAContext {
   }
 
   curandGenerator_t& curand_generator() {
+    auto& curand_generator_ = cuda_objects_.curand_generator_[gpu_id_];
     if (curand_generator_) {
       return curand_generator_;
     } else {
+      DeviceGuard guard(gpu_id_);
+      auto& cuda_stream_ = cuda_objects_.cuda_stream_[gpu_id_];
       CURAND_CHECK(curandCreateGenerator(
           &curand_generator_, CURAND_RNG_PSEUDO_DEFAULT));
       CURAND_CHECK(curandSetPseudoRandomGeneratorSeed(
-          curand_generator_, random_seed_));
+          curand_generator_, random_seed_ + gpu_id_));
       CURAND_CHECK(curandSetStream(curand_generator_, cuda_stream_));
       return curand_generator_;
     }
-
   }
 
   static inline void* New(size_t nbytes) {
@@ -111,7 +161,8 @@ class CUDAContext {
   template <class SrcContext, class DstContext>
   inline void Memcpy(size_t nbytes, const void* src, void* dst) {
     CUDA_CHECK(cudaMemcpyAsync(
-        dst, src, nbytes, cudaMemcpyDefault, cuda_stream_));
+        dst, src, nbytes, cudaMemcpyDefault,
+        cuda_objects_.cuda_stream_[gpu_id_]));
   }
 
   template <typename T, class SrcContext, class DstContext>
@@ -122,20 +173,27 @@ class CUDAContext {
   }
 
  protected:
-  int cuda_gpu_id_;
-  cudaStream_t cuda_stream_;
-  cublasHandle_t cublas_handle_;
+  int gpu_id_;
   int random_seed_;
-  curandGenerator_t curand_generator_;
+  static thread_local ThreadLocalCUDAObjects cuda_objects_;
 };
 
 // For the CPU context, we also allow a (probably expensive) function
-// to copy the data from a cuda context.
+// to copy the data from a cuda context. Inside the function, we create
+// a temporary CUDAContext object to carry out the copy. From the caller's
+// side, these functions are synchronous with respect to the host, similar
+// to a normal CPUContext::Memcpy<CPUContext, CPUContext> call.
 template<>
 inline void CPUContext::Memcpy<CUDAContext, CPUContext>(
     size_t nbytes, const void* src, void* dst) {
-  CUDAContext context;
+  CUDAContext context(GetGPUIDForPointer(src));
   context.Memcpy<CUDAContext, CPUContext>(nbytes, src, dst);
+}
+template<>
+inline void CPUContext::Memcpy<CPUContext, CUDAContext>(
+    size_t nbytes, const void* src, void* dst) {
+  CUDAContext context(GetGPUIDForPointer(dst));
+  context.Memcpy<CPUContext, CUDAContext>(nbytes, src, dst);
 }
 
 // For simplicity, we will typedef Tensor<CPUContext> to TensorCPU.

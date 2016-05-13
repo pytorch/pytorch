@@ -12,11 +12,14 @@ template <>
 __device__ float cuda_min(float x, float y) { return fminf(x, y); }
 template <>
 __device__ float cuda_max(float x, float y) { return fmaxf(x, y); }
+
+// Disabled since we don't use it right now.
+/*
 template <>
 __device__ double cuda_min(double x, double y) { return fmin(x, y); }
 template <>
 __device__ double cuda_max(double x, double y) { return fmax(x, y); }
-
+*/
 
 
 template <typename T>
@@ -44,7 +47,7 @@ bool ClipOp<float, CUDAContext>::RunOnDevice() {
   CAFFE_DCHECK_GT(X.size(), 0);
   Y->ReshapeLike(X);
   ClipKernel<<<CAFFE_GET_BLOCKS(X.size()), CAFFE_CUDA_NUM_THREADS,
-               0, device_context_.cuda_stream()>>>(
+               0, context_.cuda_stream()>>>(
       X.size(), min_, max_, X.data<float>(), Y->mutable_data<float>());
   return true;
 }
@@ -58,7 +61,7 @@ bool ClipGradientOp<float, CUDAContext>::RunOnDevice() {
   CAFFE_DCHECK_EQ(dY.size(), Y.size());
   dX->ReshapeLike(Y);
   ClipGradientKernel<<<CAFFE_GET_BLOCKS(Y.size()), CAFFE_CUDA_NUM_THREADS,
-                       0, device_context_.cuda_stream()>>>(
+                       0, context_.cuda_stream()>>>(
       Y.size(), min_, max_, Y.data<float>(), dY.data<float>(),
       dX->mutable_data<float>());
   return true;

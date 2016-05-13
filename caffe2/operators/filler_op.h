@@ -8,12 +8,17 @@
 
 namespace caffe2 {
 
+
+// FillerOp takes in either zero or one input. If the number of input is
+// 1, the shape will be identical to that of the input at run time, and
+// in that case the "shape" parameter should not be set.
 template <class Context>
 class FillerOp : public Operator<Context> {
  public:
   FillerOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        shape_(OperatorBase::GetRepeatedArgument<int>("shape")),
+        shape_(ToVectorTIndex(
+            OperatorBase::GetRepeatedArgument<int>("shape"))),
         run_once_(OperatorBase::GetSingleArgument<int>("run_once", true)),
         already_run_(false) {}
   virtual ~FillerOp() {}
@@ -42,13 +47,9 @@ class FillerOp : public Operator<Context> {
   virtual bool Fill(Tensor<Context>* output) = 0;
 
  protected:
-  vector<int> shape_;
+  vector<TIndex> shape_;
   bool run_once_;
   bool already_run_;
-  // FillerOp takes in either zero or one input. If the number of input is
-  // 1, the shape will be identical to that of the input at run time, and
-  // in that case the "shape" parameter should not be set.
-  INPUT_OUTPUT_STATS(0, 1, 1, 1);
   DISABLE_COPY_AND_ASSIGN(FillerOp);
 };
 
@@ -66,7 +67,7 @@ class UniformFillOp final : public FillerOp<Context> {
   bool Fill(Tensor<Context>* output) override {
     math::RandUniform<T, Context>(
         output->size(), min_, max_,
-        output->template mutable_data<T>(), &device_context_);
+        output->template mutable_data<T>(), &context_);
     return true;
   }
 
@@ -87,7 +88,7 @@ class ConstantFillOp final : public FillerOp<Context> {
   bool Fill(Tensor<Context>* output) override {
     math::Set<T, Context>(
         output->size(), value_, output->template mutable_data<T>(),
-        &device_context_);
+        &context_);
     return true;
   }
 
@@ -113,7 +114,7 @@ class GivenTensorFillOp final : public FillerOp<Context> {
     CAFFE_DCHECK_EQ(output->size(), values_.size())
         << "output size: " << output->size() << " given size: "
         << values_.size();
-    device_context_.template Copy<T, CPUContext, Context>(
+    context_.template Copy<T, CPUContext, Context>(
         output->size(), values_.data(), output->template mutable_data<T>());
     return true;
   }
@@ -138,7 +139,7 @@ class GaussianFillOp final : public FillerOp<Context> {
   bool Fill(Tensor<Context>* output) override {
     math::RandGaussian<T, Context>(
         output->size(), mean_, std_, output->template mutable_data<T>(),
-        &device_context_);
+        &context_);
     return true;
   }
 
@@ -156,15 +157,34 @@ class XavierFillOp final : public FillerOp<Context> {
       : FillerOp<Context>(operator_def, ws) {}
 
   bool Fill(Tensor<Context>* output) override {
-    const int fan_in = output->size() / output->dim(0);
+    const int fan_in = output->size() / output->dim32(0);
     T scale = sqrt(T(3) / fan_in);
     math::RandUniform<T, Context>(
         output->size(), -scale, scale,
-        output->template mutable_data<T>(), &device_context_);
+        output->template mutable_data<T>(), &context_);
     return true;
   }
 
   DISABLE_COPY_AND_ASSIGN(XavierFillOp);
+};
+
+template <typename T, class Context>
+class MSRAFillOp final : public FillerOp<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  MSRAFillOp(const OperatorDef& operator_def, Workspace* ws)
+      : FillerOp<Context>(operator_def, ws) {}
+
+  bool Fill(Tensor<Context>* output) override {
+    const int fan_in = output->size() / output->dim32(0);
+    T scale = sqrt(T(2) / fan_in);
+    math::RandUniform<T, Context>(
+        output->size(), -scale, scale,
+        output->template mutable_data<T>(), &context_);
+    return true;
+  }
+
+  DISABLE_COPY_AND_ASSIGN(MSRAFillOp);
 };
 
 // This is mostly used just as a debugging purpose stuff: it fills a tensor

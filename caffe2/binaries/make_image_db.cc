@@ -141,7 +141,7 @@ void ConvertImageDataset(
 
 
 int main(int argc, char** argv) {
-  caffe2::GlobalInit(&argc, argv);
+  caffe2::GlobalInit(&argc, &argv);
   caffe2::ConvertImageDataset(
       caffe2::FLAGS_input_folder, caffe2::FLAGS_list_file,
       caffe2::FLAGS_output_db_name, caffe2::FLAGS_shuffle);

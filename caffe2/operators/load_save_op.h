@@ -51,12 +51,12 @@ class LoadTensorOp final : public Operator<Context> {
         int idx = output_indices_[key];
         auto* output = Output(idx);
         output->Reshape(
-            vector<int>(proto.dims().begin(), proto.dims().end()));
+            vector<TIndex>(proto.dims().begin(), proto.dims().end()));
         switch (proto.data_type()) {
         case TensorProto::FLOAT:
         {
           CAFFE_CHECK_EQ(output->size(), proto.float_data_size());
-          this->device_context_.template Copy<float, CPUContext, Context>(
+          this->context_.template Copy<float, CPUContext, Context>(
               output->size(), proto.float_data().data(),
               output->template mutable_data<float>());
           CAFFE_VLOG(1) << "Loaded float tensor " << key << ".";
@@ -67,7 +67,7 @@ class LoadTensorOp final : public Operator<Context> {
           static_assert(sizeof(int) == 4,
                         "int in this compiler does not equal to 4 bytes.");
           CAFFE_CHECK_EQ(output->size(), proto.int32_data_size());
-          this->device_context_.template Copy<int, CPUContext, Context>(
+          this->context_.template Copy<int, CPUContext, Context>(
               output->size(), proto.int32_data().data(),
               output->template mutable_data<int>());
           CAFFE_VLOG(1) << "Loaded int32 tensor " << key << ".";
@@ -86,7 +86,6 @@ class LoadTensorOp final : public Operator<Context> {
   string db_name_;
   string db_type_;
   std::map<string, int> output_indices_;
-  INPUT_OUTPUT_STATS(0, 0, 1, INT_MAX);
   DISABLE_COPY_AND_ASSIGN(LoadTensorOp);
 };
 
@@ -117,7 +116,6 @@ class SaveOp final : public OperatorBase {
  private:
   string db_name_;
   string db_type_;
-  INPUT_OUTPUT_STATS(1, INT_MAX, 0, 0);
   DISABLE_COPY_AND_ASSIGN(SaveOp);
 };
 

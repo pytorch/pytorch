@@ -7,7 +7,11 @@
 CAFFE2_DEFINE_string(plan, "", "The given path to the plan protobuffer.");
 
 int main(int argc, char** argv) {
-  caffe2::GlobalInit(&argc, argv);
+  caffe2::GlobalInit(&argc, &argv);
+  if (caffe2::FLAGS_plan.size() == 0) {
+    CAFFE_LOG_ERROR << "No plan specified. Use --plan=/path/to/plan.";
+    return 0;
+  }
   CAFFE_LOG_INFO << "Loading plan: " << caffe2::FLAGS_plan;
   caffe2::PlanDef plan_def;
   CAFFE_CHECK(ReadProtoFromFile(caffe2::FLAGS_plan, &plan_def));

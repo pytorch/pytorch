@@ -15,6 +15,11 @@ message TensorProto {
   optional bytes byte_data = 5;
   repeated bytes string_data = 6;
   optional string name = 7;
+
+  // Optionally, a TensorProto can contain the details about the device that
+  // it was serialized from. This is useful in cases like snapshotting a whole
+  // workspace in a multi-GPU environment.
+  optional DeviceOption device_detail = 8;
 }
 
 message TensorProtos {
@@ -91,6 +96,20 @@ message NetDef {
   optional DeviceOption device_option = 5;
 
   repeated Argument arg = 6;
+
+  // Two optional fields to declare external input and output of a net.
+  // If these two are set, when a net is created, we will sanity check for
+  // every op whether its input is declared (either as an external input,
+  // or as an intermediate blob created by one of the ops), and sanity check
+  // if all blobs in external_output are produced.
+  //
+  // In cases of memory optimization, declaring external_input and
+  // external_output also ensures that storage of these blobs are persistent:
+  // for any blob in external_input and external_output, after a network run
+  // finishes, their content are actually the right content. Any intermediate
+  // blobs' contents may be overwritten.
+  repeated string external_input = 7;
+  repeated string external_output = 8;
 }
 
 // ExecutionStep is actually a sort-of-hacky way we simulate iteration right
@@ -105,7 +124,7 @@ message ExecutionStep {
   repeated ExecutionStep substep = 2;
   // Alternatively, an execution step could involve one or more networks.
   // Note that you cannot have both substeps and networks. Choose one.
-  // Note that an executionstep refers networks by their name. The actual
+  // Note that an execution step refers networks by their name. The actual
   // network definition of the same name should be included in the network field
   // of the plan. The reason is that a network object might hold internal states
   // (think of a data layer), so we want to have the same network object that
@@ -120,7 +139,7 @@ message ExecutionStep {
 
 message PlanDef {
   // All the networks that are used in this execution. Note that networks should
-  // be orderd in the way they are executed, i.e. for a layer in a network, all
+  // be ordered in the way they are executed, i.e. for a layer in a network, all
   // its input blobs should already have been initialized by the layers or
   // networks defined before it.
   optional string name = 1;
@@ -129,3 +148,16 @@ message PlanDef {
   repeated ExecutionStep execution_step = 3;
 }
 
+// Protobuf format to serialize DB. Note that only read-only DBs are supported,
+// because it is semantically unclear how to serialize a DB that is being
+// written to halfways.
+message DBProto {
+  // The name for the DB object in the workspace.
+  optional string name = 1;
+  // The source of the DB
+  optional string source = 2;
+  // The type of the DB
+  optional string db_type = 3;
+  // The current key of the DB if the DB supports seeking.
+  optional string key = 4;
+}

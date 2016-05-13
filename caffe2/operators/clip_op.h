@@ -33,7 +33,6 @@ class ClipOp final : public Operator<Context> {
  protected:
   T min_;
   T max_;
-  INPUT_OUTPUT_STATS(1, 1, 1, 1);
   DISABLE_COPY_AND_ASSIGN(ClipOp);
 };
 

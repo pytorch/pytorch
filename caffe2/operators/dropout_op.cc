@@ -11,7 +11,7 @@ bool DropoutOp<float, CPUContext>::RunOnDevice() {
   mask->Reshape(X.dims());
   CAFFE_DCHECK_GT(X.size(), 0);
   if (is_test_) {
-    device_context_.Copy<float, CPUContext, CPUContext>(
+    context_.Copy<float, CPUContext, CPUContext>(
       X.size(), X.data<float>(), Y->mutable_data<float>());
     return true;
   } else {
@@ -22,7 +22,7 @@ bool DropoutOp<float, CPUContext>::RunOnDevice() {
     const float* Xdata = X.data<float>();
     float* Ydata = Y->mutable_data<float>();
     bool* mask_data = mask->mutable_data<bool>();
-    auto& gen = device_context_.RandGenerator();
+    auto& gen = context_.RandGenerator();
     for (int i = 0; i < X.size(); ++i) {
       mask_data[i] = dist(gen);
       Ydata[i] = Xdata[i] * scale * mask_data[i];
@@ -40,7 +40,7 @@ bool DropoutGradientOp<float, CPUContext>::RunOnDevice() {
   CAFFE_DCHECK_EQ(dY.size(), mask.size());
   dX->Reshape(dY.dims());
   if (is_test_) {
-    device_context_.Copy<float, CPUContext, CPUContext>(
+    context_.Copy<float, CPUContext, CPUContext>(
       dY.size(), dY.data<float>(), dX->mutable_data<float>());
     return true;
   } else {
@@ -60,12 +60,16 @@ namespace {
 REGISTER_CPU_OPERATOR(Dropout, DropoutOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(DropoutGrad, DropoutGradientOp<float, CPUContext>);
 
-struct GetDropoutGradient : public GetGradientDefBase {
-  vector<OperatorDef>* Create(const OperatorDef& def) override {
+OPERATOR_SCHEMA(Dropout).NumInputs(1).NumOutputs(2);
+OPERATOR_SCHEMA(DropoutGrad).NumInputs(2).NumOutputs(1);
+
+class GetDropoutGradient : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  vector<OperatorDef> GetGradientDefs() override {
     return SingleGradientDef(
         "DropoutGrad", "",
-        vector<string>{GO(def, 0), O(def, 1)},
-        vector<string>{GI(def, 0)});
+        vector<string>{GO(0), O(1)},
+        vector<string>{GI(0)});
   }
 };
 REGISTER_GRADIENT(Dropout, GetDropoutGradient);

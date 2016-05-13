@@ -1,7 +1,11 @@
 #include "caffe2/core/db.h"
 #include "caffe2/core/logging.h"
+#include "caffe2/core/flags.h"
 #include "leveldb/db.h"
 #include "leveldb/write_batch.h"
+
+CAFFE2_DEFINE_int(caffe2_leveldb_block_size, 65536,
+                  "The caffe2 leveldb block size when writing a leveldb.");
 
 namespace caffe2 {
 namespace db {
@@ -11,6 +15,8 @@ class LevelDBCursor : public Cursor {
   explicit LevelDBCursor(leveldb::Iterator* iter)
     : iter_(iter) { SeekToFirst(); }
   ~LevelDBCursor() { delete iter_; }
+  void Seek(const string& key) override { iter_->Seek(key); }
+  bool SupportsSeek() override { return true; }
   void SeekToFirst() override { iter_->SeekToFirst(); }
   void Next() override { iter_->Next(); }
   string key() override { return iter_->key().ToString(); }
@@ -49,7 +55,7 @@ class LevelDB : public DB {
  public:
   LevelDB(const string& source, Mode mode) : DB(source, mode) {
     leveldb::Options options;
-    options.block_size = 65536;
+    options.block_size = FLAGS_caffe2_leveldb_block_size;
     options.write_buffer_size = 268435456;
     options.max_open_files = 100;
     options.error_if_exists = mode == NEW;

@@ -48,7 +48,7 @@ def GetSubprocessOutput(command, env):
             command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             env=env)
         out, err = proc.communicate()
-        OUT = out.decode('utf-8')
+        out = out.decode('ascii')
     except OSError as e:
         BuildDebug('Exception found in command {0}. Exception is: {1}',
                    repr(command), str(e))
@@ -180,6 +180,12 @@ class Env(object):
             '-pthread',
             '-Wall',
             '-Wextra',
+            '-Werror',
+            '-Wno-unused-private-field',
+            '-Wno-unused-local-typedef',  # needed by some third_party code
+            '-Wno-unused-variable',
+            '-Wno-unused-function',
+            '-Wno-unused-parameter',  # needed by some third_party code
             '-Wno-sign-compare',  # needed by some third_party code
             '-ffunction-sections',
             '-fdata-sections',

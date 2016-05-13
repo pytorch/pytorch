@@ -1,11 +1,13 @@
+#include "caffe2/core/operator.h"
+
 #include <algorithm>
 #include <ctime>
 
 #include "caffe2/core/net.h"
-#include "caffe2/core/operator.h"
 #include "caffe2/core/operator_gradient.h"
 #include "caffe2/core/workspace.h"
 #include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/utils/proto_utils.h"
 
 namespace caffe2 {
 
@@ -35,12 +37,13 @@ template <>                                                                    \
 T OperatorBase::GetSingleArgument<T>(                                          \
     const string& name, const T& default_value) {                              \
   if (arg_map_.count(name) == 0) {                                             \
-    CAFFE_VLOG(1) << "Using default parameter value " << default_value;        \
+    CAFFE_VLOG(1) << "Using default parameter value " << default_value         \
+                  << " for parameter " << name;                                \
     return default_value;                                                      \
   }                                                                            \
   CAFFE_CHECK(arg_map_[name]->has_##fieldname())                               \
-      << "Argument does not have the right field: expected "                   \
-      << #fieldname;                                                           \
+      << "Argument " << name << " does not have the right field: expected "    \
+      << "field " << #fieldname;                                               \
   return arg_map_[name]->fieldname();                                          \
 }
 
@@ -67,46 +70,6 @@ INSTANTIATE_GET_REPEATED_ARGUMENT(int, ints)
 INSTANTIATE_GET_REPEATED_ARGUMENT(string, strings)
 #undef INSTANTIATE_GET_REPEATED_ARGUMENT
 
-bool OperatorBase::Verify() {
-  // (1) Check Blob counts: the input sizes and the output sizes should match.
-  if (operator_def_.input_size() < MinInput() ||
-      operator_def_.input_size() > MaxInput()) {
-    CAFFE_LOG_ERROR << "Input size " << operator_def_.input_size()
-               << " not in range [min=" << MinInput() << ", max="
-               << MaxInput() << "].";
-    CAFFE_LOG_ERROR << "Error at operator " << operator_def_.name() << ":"
-               << operator_def_.type();
-    return false;
-  }
-  if (operator_def_.output_size() < MinOutput() ||
-      operator_def_.output_size() > MaxOutput()) {
-    CAFFE_LOG_ERROR << "Output size " << operator_def_.output_size()
-        << " not in range [min=" << MinOutput() << ", max="
-        << MaxOutput() << "].";
-    CAFFE_LOG_ERROR << "Error at operator " << operator_def_.name() << ":"
-        << operator_def_.type();
-    return false;
-  }
-  // (2) Check if input and output in-place computation are correct. Currently,
-  // this runs O(num_input * num_output), so it's relatively slow. However,
-  // verification only runs once so it's probably fine.
-  for (int in_idx = 0; in_idx < operator_def_.input_size(); ++in_idx) {
-    for (int out_idx = 0; out_idx < operator_def_.output_size(); ++out_idx) {
-      // If an input is the same as an output but in-place is not opt-in for
-      // this pair, we will fail the verification.
-      if (operator_def_.input(in_idx) == operator_def_.output(out_idx) &&
-          !InplaceAllowed(in_idx, out_idx)) {
-        CAFFE_LOG_ERROR << "Input index " << in_idx << " and output idx "
-            << out_idx << " have the same symbol, but the operator "
-            << operator_def_.type()
-            << " has not opted-in inplace computation for this pair.";
-        return false;
-      }
-    }
-  }
-  return true;
-}
-
 namespace {
 OperatorBase* TryCreateOperator(
     const string& key, const OperatorDef& operator_def, Workspace* ws) {
@@ -126,7 +89,24 @@ OperatorBase* TryCreateOperator(
 }  // namespace
 
 OperatorBase* CreateOperator(const OperatorDef& operator_def, Workspace* ws) {
-  // First, if the user has provided an engine, try create that engine
+  // first, check with OpSchema if the operator is legal.
+  auto* schema = OpSchemaRegistry::Schema(operator_def.type());
+  if (schema) {
+    if (!schema->Verify(operator_def)) {
+      CAFFE_LOG_ERROR << "Operator def did not pass schema checking: "
+                      << ProtoDebugString(operator_def);
+      return nullptr;
+    }
+  } else {
+    // We would like to recommend every op to register its schema, so if there
+    // is not one, we print a LOG_ERROR. But we will still allow the operator
+    // to be constructed.
+    CAFFE_LOG_ERROR << "Cannot find operator schema for "
+                    << operator_def.type()
+                    << ". Will skip schema checking.";
+  }
+
+  // Second, if the user has provided an engine, try create that engine
   if (operator_def.engine().size()) {
     string key = operator_def.type() +  "_ENGINE_" + operator_def.engine();
     CAFFE_VLOG(1) << "Trying to create operator " << operator_def.type()
@@ -140,59 +120,83 @@ OperatorBase* CreateOperator(const OperatorDef& operator_def, Workspace* ws) {
     CAFFE_VLOG(1) << "Operator with engine " << operator_def.engine()
                   << " is not available. Using default implementation.";
   }
-  return TryCreateOperator(operator_def.type(), operator_def, ws);
+
+  // Lastly, if the engine does not work here, try using the default engine.
+  OperatorBase* op = TryCreateOperator(operator_def.type(), operator_def, ws);
+  if (op == nullptr) {
+    CAFFE_LOG_ERROR << "Cannot create op from def: "
+                    << ProtoDebugString(operator_def);
+  }
+  return op;
 }
 
-DEFINE_REGISTRY(CPUOperatorRegistry, OperatorBase,
-                const OperatorDef&, Workspace*);
-DEFINE_REGISTRY(CUDAOperatorRegistry, OperatorBase,
-                const OperatorDef&, Workspace*);
+CAFFE_DEFINE_REGISTRY(
+    CPUOperatorRegistry,
+    OperatorBase,
+    const OperatorDef&,
+    Workspace*);
+CAFFE_DEFINE_REGISTRY(
+    CUDAOperatorRegistry,
+    OperatorBase,
+    const OperatorDef&,
+    Workspace*);
 
-DEFINE_REGISTRY(GradientRegistry, vector<OperatorDef>, const OperatorDef&);
+CAFFE_DEFINE_REGISTRY(
+    GradientRegistry,
+    GradientMakerBase,
+    const OperatorDef&, const vector<GradientWrapper>&);
 
-
-vector<OperatorDef>* CreateGradientDefsInternal(
-    const OperatorDef& def, GetGradientDefBaseVerbose* obj) {
-  vector<OperatorDef>* grad_defs = CAFFE_CHECK_NOTNULL(obj)->Create(def);
-  CAFFE_CHECK(grad_defs != nullptr);
-  // Copy device option if needed.
-  if (obj->CopyDeviceOption() && def.has_device_option()) {
-    for (OperatorDef& grad_def : *grad_defs) {
+GradientOpsMeta GetGradientForOp(
+    const OperatorDef& def, const vector<GradientWrapper>& g_output) {
+  std::unique_ptr<GradientMakerBase> maker(
+      GradientRegistry()->Create(def.type(), def, g_output));
+  if (maker.get() == nullptr) {
+    CAFFE_LOG_FATAL << "Gradient maker for operator " << def.type()
+                    << "not implemented.";
+  }
+  GradientOpsMeta meta = maker->Get();
+  // Copy device option, engine, and arguments if needed.
+  if (maker->CopyDeviceOption() && def.has_device_option()) {
+    for (OperatorDef& grad_def : meta.ops_) {
       grad_def.mutable_device_option()->CopyFrom(def.device_option());
     }
   }
   // Copy engine if needed.
-  if (obj->CopyEngine() && def.has_engine()) {
-    for (OperatorDef& grad_def : *grad_defs) {
+  if (maker->CopyEngine() && def.has_engine()) {
+    for (OperatorDef& grad_def : meta.ops_) {
       grad_def.set_engine(def.engine());
     }
   }
   // Copy arguments if needed.
-  if (obj->CopyArguments() && def.arg_size()) {
-    for (OperatorDef& grad_def : *grad_defs) {
+  if (maker->CopyArguments() && def.arg_size()) {
+    for (OperatorDef& grad_def : meta.ops_) {
       grad_def.mutable_arg()->CopyFrom(def.arg());
     }
   }
-  for (const OperatorDef& grad_def : *grad_defs) {
-    CAFFE_VLOG(1) << "Gradient: " << ProtoDebugString(grad_def);
+  // VLOG for debugging purposes.
+  for (const OperatorDef& grad_def : meta.ops_) {
+    CAFFE_VLOG(1) << "Gradient ops: " << ProtoDebugString(grad_def);
   }
-  delete obj;
-  return grad_defs;
-}
-
-vector<OperatorDef>* ThrowTheTowelIfGradientIsCalled::Create(
-    const OperatorDef& def) {
-  CAFFE_LOG_FATAL << "You should not call the gradient of operator of type "
-                  << def.type();
-  // Just to suppress compiler warnings
-  return new vector<OperatorDef>();
-}
-
-vector<OperatorDef>* GradientNotImplementedYet::Create(
-    const OperatorDef& def) {
-  CAFFE_LOG_FATAL << "Gradient for operator type "
-                  << def.type() << " has not been implemented yet.";
-  return nullptr;
+  // Check if the gradient computation has returned the right size for the
+  // gradient vector.
+  CAFFE_CHECK_EQ(meta.g_input_.size(), def.input_size());
+  CAFFE_VLOG(1) << "Gradients:";
+  for (const GradientWrapper& grad : meta.g_input_) {
+    // The gradient should either be (1) not set, or (2) dense, or (3) sparse,
+    // but cannot be both dense and sparse.
+    if (!grad.IsDense() && !grad.IsSparse()) {
+      CAFFE_VLOG(1) << "\t [no gradient]";
+    } else if (grad.IsDense()) {
+      CAFFE_VLOG(1) << "\t [dense]" << grad.dense_;
+    } else {
+      CAFFE_CHECK(grad.indices_.size() && grad.values_.size())
+          << "For sparse gradient, one should set both indices and values. "
+          << "Currently we have: (" << grad.indices_ << ", " << grad.values_
+          << ").";
+      CAFFE_VLOG(1) << "\t [sparse] " << grad.indices_ << ", " << grad.values_;
+    }
+  }
+  return meta;
 }
 
 }  // namespace caffe2

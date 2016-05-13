@@ -1,16 +1,54 @@
+#include "caffe2/core/net.h"
+
 #include <set>
 
-#include "caffe2/core/net.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/timer.h"
 #include "caffe2/proto/caffe2.pb.h"
 
-
 namespace caffe2 {
 
-DEFINE_REGISTRY(NetRegistry, NetBase, const NetDef&, Workspace*);
+CAFFE_DEFINE_REGISTRY(NetRegistry, NetBase, const NetDef&, Workspace*);
 REGISTER_NET(simple, SimpleNet);
 REGISTER_NET(dag, DAGNet);
+
+NetBase::NetBase(const NetDef& def, Workspace* /* unused */)
+    : external_input_(def.external_input().begin(),
+                      def.external_input().end()),
+      external_output_(def.external_output().begin(),
+                       def.external_output().end()) {
+  // Go through the operators and make sure that blobs are correctly made.
+  std::set<string> known_blobs(
+      external_input_.begin(), external_input_.end());
+  std::set<string> remaining_output(
+      external_output_.begin(), external_output_.end());
+  for (const OperatorDef& op : def.op()) {
+    for (const string& in : op.input()) {
+      if (!known_blobs.count(in)) {
+        if (external_input_.size()) {
+          CAFFE_LOG_FATAL << "Source for input " << in << " is unknown.";
+        } else {
+          // If we are not declaring input and output, we will simply VLOG it
+          // for debugging purposes.
+          CAFFE_VLOG(1) << "Source for input " << in << " is unknown.";
+        }
+      }
+    }
+    for (const string& out : op.output()) {
+      known_blobs.insert(out);
+      remaining_output.erase(out);
+    }
+  }
+  // Finally, check if all declared outputs are being created.
+  if (remaining_output.size()) {
+    CAFFE_LOG_ERROR
+        << "The following blobs:";
+    for (const string& name : remaining_output) {
+      CAFFE_LOG_ERROR << "\t" << name;
+    }
+    CAFFE_LOG_FATAL << "are declared as output but not produced:";
+  }
+}
 
 NetBase* CreateNet(const NetDef& net_def, Workspace* ws) {
   // In default, we will return a simple network that just runs all operators
@@ -42,15 +80,10 @@ SimpleNet::SimpleNet(const NetDef& net_def, Workspace* ws)
 }
 
 bool SimpleNet::Verify() {
-  for (auto& op : operators_) {
+  for (int i = 0; i < operators_.size(); ++i) {
+    auto& op = operators_[i];
     if (op.get() == nullptr) {
-      CAFFE_LOG_ERROR << "Found empty operator.";
-      return false;
-    }
-    CAFFE_VLOG(1) << "Verifying operator " << op->def().name()
-            << "(" << op->def().type() << ").";
-    if (!op->Verify()) {
-      CAFFE_LOG_ERROR << "Failed to verify operator.";
+      CAFFE_LOG_ERROR << "Found empty operator #" << i << ".";
       return false;
     }
   }
@@ -62,7 +95,11 @@ bool SimpleNet::Run() {
   for (auto& op : operators_) {
     CAFFE_VLOG(1) << "Running operator " << op->def().name()
             << "(" << op->def().type() << ").";
-    if (!op->Run()) return false;
+    if (!op->Run()) {
+      CAFFE_LOG_ERROR << "Operator failed: "
+                      << ProtoDebugString(op->def());
+      return false;
+    }
   }
   return true;
 }
@@ -82,8 +119,10 @@ void SimpleNet::TEST_Benchmark(const int warmup_runs, const int main_runs,
   for (int i = 0; i < main_runs; ++i) {
     CAFFE_CHECK(Run());
   }
+  auto millis = timer.MilliSeconds();
   CAFFE_LOG_INFO << "Main run finished. Milliseconds per iter: "
-                 << timer.MilliSeconds() / main_runs;
+                 << millis / main_runs
+                 << ". Iters per second: " << 1000.0 * main_runs / millis;
 
   vector<float> time_per_op(operators_.size(), 0);
   CaffeMap<string, float> time_per_op_type;
@@ -156,9 +195,6 @@ DAGNet::DAGNet(const NetDef& net_def, Workspace* ws)
     // Check the outputs.
     for (const string& output : op_def.output()) {
       if (blob_creator.count(output) != 0) {
-        CAFFE_LOG_WARNING << "Output " << output << " produced again. "
-                     << "Such operation is not strictly tested. "
-                     << "Use at your own risk.";
         // This addresses the write after write case - we will assume that all
         // writes are inherently sequential.
         int waw_parent = blob_creator[output];
@@ -185,25 +221,25 @@ DAGNet::DAGNet(const NetDef& net_def, Workspace* ws)
     }
 
     // Explicitly specified dependency with execution_chain.
-    for (const auto& arg : op_def.arg()) {
-      if (arg.name() == "execution_chain") {
-        for (const string& name : arg.strings()) {
-          if (execution_chains.count(name) == 0) {
-            // New execution chain. Do nothing but add it.
-            execution_chains[name] = idx;
-          } else {
-            int parent = execution_chains[name];
-            CAFFE_VLOG(1) << "op dependency due to execution chain " << name
-                    << ": " << parent << "->" << idx;
-            operator_nodes_[idx].parents_.push_back(parent);
-            operator_nodes_[parent].children_.push_back(idx);
-            // update the tail of the current execution chain.
-            execution_chains[name] = idx;
-          }
+    if (HasArgument(op_def, "execution_chain")) {
+      const auto& arg = GetArgument(op_def, "execution_chain");
+      for (const string& name : arg.strings()) {
+        if (execution_chains.count(name) == 0) {
+          // New execution chain. Do nothing but add it.
+          execution_chains[name] = idx;
+        } else {
+          int parent = execution_chains[name];
+          CAFFE_VLOG(1) << "op dependency due to execution chain " << name
+                  << ": " << parent << "->" << idx;
+          operator_nodes_[idx].parents_.push_back(parent);
+          operator_nodes_[parent].children_.push_back(idx);
+          // update the tail of the current execution chain.
+          execution_chains[name] = idx;
         }
       }
     }
   }
+
   // Now, make sure that the parent list and the children list do not contain
   // duplicated items.
   for (int i = 0; i < operator_nodes_.size(); ++i) {
@@ -254,11 +290,9 @@ DAGNet::~DAGNet() {
 }
 
 bool DAGNet::Verify() {
-  for (auto& op_node : operator_nodes_) {
-    auto& op = op_node.operator_;
-    CAFFE_VLOG(1) << "Verifying operator " << op->def().name()
-            << "(" << op->def().type() << ").";
-    if (op.get() == nullptr || !op->Verify()) {
+  for (int i = 0; i < operator_nodes_.size(); ++i) {
+    if (operator_nodes_[i].operator_.get() == nullptr) {
+      CAFFE_LOG_ERROR << "Found empty operator #" << i << ".";
       return false;
     }
   }
@@ -305,6 +339,10 @@ void DAGNet::WorkerFunction() {
             << operator_nodes_[idx].operator_->def().name()
             << "(" << operator_nodes_[idx].operator_->def().type() << ").";
     bool this_success = operator_nodes_[idx].operator_->Run();
+    if (!this_success) {
+      CAFFE_LOG_ERROR << "Operator failed: "
+                      << ProtoDebugString(operator_nodes_[idx].operator_->def());
+    }
     for (int child : operator_nodes_[idx].children_) {
       int count = --operator_nodes_[child].runtime_parent_count_;
       // The count should never be smaller than zero.
@@ -319,10 +357,12 @@ void DAGNet::WorkerFunction() {
       }
     }
     // Notify that the processed op is incremented by one.
-    std::unique_lock<std::mutex> mutex_lock(remaining_ops_mutex_);
-    --remaining_ops_;
-    success_ &= this_success;
-    CAFFE_DCHECK_GE(remaining_ops_, 0);
+    {
+      std::unique_lock<std::mutex> mutex_lock(remaining_ops_mutex_);
+      --remaining_ops_;
+      success_ &= this_success;
+      CAFFE_DCHECK_GE(remaining_ops_, 0);
+    }
     cv_.notify_one();
     CAFFE_VLOG(2) << "Finished executing operator #" << idx;
   }
@@ -343,8 +383,10 @@ void DAGNet::TEST_Benchmark(const int warmup_runs, const int main_runs,
   for (int i = 0; i < main_runs; ++i) {
     CAFFE_CHECK(Run());
   }
+  auto millis = timer.MilliSeconds();
   CAFFE_LOG_INFO << "Main run finished. Milliseconds per iter: "
-                 << timer.MilliSeconds() / main_runs;
+                 << millis / main_runs
+                 << ". Iters per second: " << 1000.0 * main_runs / millis;
 
   if (run_individual) {
     CAFFE_LOG_INFO << "DAGNet does not do per-op benchmark. To do so, "

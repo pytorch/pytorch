@@ -42,12 +42,12 @@ static void TestMNISTLoad(const int batch_size) {
     auto& data_tensor = data_blob->Get<TensorCPU>();
     auto& label_tensor = label_blob->Get<TensorCPU>();
     EXPECT_EQ(data_tensor.ndim(), 4);
-    EXPECT_EQ(data_tensor.dim(0), batch_size);
-    EXPECT_EQ(data_tensor.dim(1), 28);
-    EXPECT_EQ(data_tensor.dim(2), 28);
-    EXPECT_EQ(data_tensor.dim(3), 1);
+    EXPECT_EQ(data_tensor.dim32(0), batch_size);
+    EXPECT_EQ(data_tensor.dim32(1), 28);
+    EXPECT_EQ(data_tensor.dim32(2), 28);
+    EXPECT_EQ(data_tensor.dim32(3), 1);
     EXPECT_EQ(label_tensor.ndim(), 1);
-    EXPECT_EQ(label_tensor.dim(0), batch_size);
+    EXPECT_EQ(label_tensor.dim32(0), batch_size);
     /*
     // Visualization just for inspection purpose.
     int idx = 0;

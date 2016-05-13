@@ -24,7 +24,6 @@ class ConvOp final : public ConvPoolOpBase<Context> {
   // Input: X, W, b
   // Output: Y
   INPUT_TAGS(INPUT, FILTER, BIAS);
-  INPUT_OUTPUT_STATS(3, 3, 1, 1);
   DISABLE_COPY_AND_ASSIGN(ConvOp);
 };
 
@@ -46,7 +45,6 @@ class ConvGradientOp final : public ConvPoolOpBase<Context> {
   // output: dW, db, and optionally dX
   INPUT_TAGS(INPUT, FILTER, OUTPUT_GRAD);
   OUTPUT_TAGS(FILTER_GRAD, BIAS_GRAD, INPUT_GRAD);
-  INPUT_OUTPUT_STATS(3, 3, 2, 3);
   DISABLE_COPY_AND_ASSIGN(ConvGradientOp);
 };
 

@@ -16,6 +16,10 @@ extern "C" {
 
 namespace caffe2 {
 
+// An empty class as a placeholder for a math function that has no specific
+// engine specified.
+class DefaultEngine {};
+
 // Common Eigen types that we will often use
 template <typename T>
 using EigenMatrixMap =
@@ -81,7 +85,7 @@ void AddToCol(const int M, const int N, const T* x, T* y,
 
 // Decaf gemm provides a simpler interface to the gemm functions, with the
 // limitation that the data has to be contiguous in memory.
-template <typename T, class Context>
+template <typename T, class Context, class Engine=DefaultEngine>
 void Gemm(const CBLAS_TRANSPOSE TransA, const CBLAS_TRANSPOSE TransB,
     const int M, const int N, const int K, const T alpha, const T* A,
     const T* B, const T beta, T* C, Context* context);
@@ -90,7 +94,7 @@ void Gemm(const CBLAS_TRANSPOSE TransA, const CBLAS_TRANSPOSE TransB,
 // to Trans, the output is:
 // CblasNoTrans: x is an N dim vector and y is an M dim vector.
 // CblasTrans:   x is an M dim vector and y is an N dim vector.
-template <typename T, class Context>
+template <typename T, class Context, class Engine=DefaultEngine>
 void Gemv(const CBLAS_TRANSPOSE TransA, const int M, const int N,
     const T alpha, const T* A, const T* x, const T beta,
     T* y, Context* context);

@@ -97,48 +97,66 @@ class Registerer {
   }
 };
 
-#define DECLARE_TYPED_REGISTRY(RegistryName, SrcType, ObjectType, ...)         \
-  Registry<SrcType, ObjectType, ##__VA_ARGS__>* RegistryName();                \
-  typedef Registerer<SrcType, ObjectType, ##__VA_ARGS__>                       \
+/**
+ * CAFFE_ANONYMOUS_VARIABLE(str) introduces an identifier starting with
+ * str and ending with a number that varies with the line.
+ * Pretty much a copy from 'folly/Preprocessor.h'
+ */
+#define CAFFE_CONCATENATE_IMPL(s1, s2) s1##s2
+#define CAFFE_CONCATENATE(s1, s2) CAFFE_CONCATENATE_IMPL(s1, s2)
+#ifdef __COUNTER__
+#define CAFFE_ANONYMOUS_VARIABLE(str) CAFFE_CONCATENATE(str, __COUNTER__)
+#else
+#define CAFFE_ANONYMOUS_VARIABLE(str) CAFFE_CONCATENATE(str, __LINE__)
+#endif
+
+#define CAFFE_DECLARE_TYPED_REGISTRY(RegistryName, SrcType, ObjectType, ...) \
+  Registry<SrcType, ObjectType, ##__VA_ARGS__>* RegistryName();              \
+  typedef Registerer<SrcType, ObjectType, ##__VA_ARGS__>                     \
       Registerer##RegistryName;
 
-#define DEFINE_TYPED_REGISTRY(RegistryName, SrcType, ObjectType, ...)          \
-  Registry<SrcType, ObjectType, ##__VA_ARGS__>* RegistryName() {               \
-    static Registry<SrcType, ObjectType, ##__VA_ARGS__>* registry =            \
-        new Registry<SrcType, ObjectType, ##__VA_ARGS__>();                    \
-    return registry;                                                           \
+#define CAFFE_DEFINE_TYPED_REGISTRY(RegistryName, SrcType, ObjectType, ...) \
+  Registry<SrcType, ObjectType, ##__VA_ARGS__>* RegistryName() {            \
+    static Registry<SrcType, ObjectType, ##__VA_ARGS__>* registry =         \
+        new Registry<SrcType, ObjectType, ##__VA_ARGS__>();                 \
+    return registry;                                                        \
   }
 
-// For the typed creators, since we cannot affix the key as a simple string to
-// the registerer object, we ask the user to provide an affix that we can
-// affix to the registerer name to ensure uniqueness.
 // Note(Yangqing): The __VA_ARGS__ below allows one to specify a templated
 // creator with comma in its templated arguments.
-#define REGISTER_TYPED_CREATOR(RegistryName, affix, key, ...)                  \
-  Registerer##RegistryName g_##RegistryName##_##affix(                         \
-      key, RegistryName(), __VA_ARGS__)
-#define REGISTER_TYPED_CLASS(RegistryName, affix, key, ...)                    \
-  Registerer##RegistryName g_##RegistryName##_##affix(                         \
-      key, RegistryName(),                                                     \
-      Registerer##RegistryName::DefaultCreator<__VA_ARGS__>)
+#define CAFFE_REGISTER_TYPED_CREATOR(RegistryName, key, ...)                  \
+  namespace {                                                                 \
+  static Registerer##RegistryName CAFFE_ANONYMOUS_VARIABLE(g_##RegistryName)( \
+      key, RegistryName(), __VA_ARGS__);                                      \
+  }
 
-// DECLARE_REGISTRY and DEFINE_REGISTRY are hard-wired to use string as the key
+#define CAFFE_REGISTER_TYPED_CLASS(RegistryName, key, ...)                    \
+  namespace {                                                                 \
+  static Registerer##RegistryName CAFFE_ANONYMOUS_VARIABLE(g_##RegistryName)( \
+      key,                                                                    \
+      RegistryName(),                                                         \
+      Registerer##RegistryName::DefaultCreator<__VA_ARGS__>);                 \
+  }
+
+// CAFFE_DECLARE_REGISTRY and CAFFE_DEFINE_REGISTRY are hard-wired to use string
+// as the key
 // type, because that is the most commonly used cases.
-#define DECLARE_REGISTRY(RegistryName, ObjectType, ...)                        \
-  DECLARE_TYPED_REGISTRY(RegistryName, std::string,                            \
-                         ObjectType, ##__VA_ARGS__)
+#define CAFFE_DECLARE_REGISTRY(RegistryName, ObjectType, ...) \
+  CAFFE_DECLARE_TYPED_REGISTRY(                               \
+      RegistryName, std::string, ObjectType, ##__VA_ARGS__)
 
-#define DEFINE_REGISTRY(RegistryName, ObjectType, ...)                         \
-  DEFINE_TYPED_REGISTRY(RegistryName, std::string,                             \
-                        ObjectType, ##__VA_ARGS__)
+#define CAFFE_DEFINE_REGISTRY(RegistryName, ObjectType, ...) \
+  CAFFE_DEFINE_TYPED_REGISTRY(                               \
+      RegistryName, std::string, ObjectType, ##__VA_ARGS__)
 
-// REGISTER_CREATOR and REGISTER_CLASS are hard-wired to use string as the key
+// CAFFE_REGISTER_CREATOR and CAFFE_REGISTER_CLASS are hard-wired to use string
+// as the key
 // type, because that is the most commonly used cases.
-#define REGISTER_CREATOR(RegistryName, key, ...)                               \
-  REGISTER_TYPED_CREATOR(RegistryName, key, #key, __VA_ARGS__)
+#define CAFFE_REGISTER_CREATOR(RegistryName, key, ...) \
+  CAFFE_REGISTER_TYPED_CREATOR(RegistryName, #key, __VA_ARGS__)
 
-#define REGISTER_CLASS(RegistryName, key, ...)                                 \
-  REGISTER_TYPED_CLASS(RegistryName, key, #key, __VA_ARGS__)
+#define CAFFE_REGISTER_CLASS(RegistryName, key, ...) \
+  CAFFE_REGISTER_TYPED_CLASS(RegistryName, #key, __VA_ARGS__)
 
 }  // namespace caffe2
 #endif  // CAFFE2_CORE_REGISTRY_H_

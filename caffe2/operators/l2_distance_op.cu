@@ -27,13 +27,13 @@ bool SquaredL2DistanceOp<float, CUDAContext>::RunOnDevice() {
   auto* distance = Output(0);
   CAFFE_DCHECK_EQ(X.ndim(), Y.ndim());
   for (int i = 0; i < X.ndim(); ++i) {
-    CAFFE_DCHECK_EQ(X.dim(i), Y.dim(i));
+    CAFFE_DCHECK_EQ(X.dim32(i), Y.dim32(i));
   }
-  int N = X.dim(0);
-  int D = X.size() / X.dim(0);
-  distance->Reshape(std::vector<int>(1, N));
+  int N = X.dim32(0);
+  int D = X.size() / X.dim32(0);
+  distance->Reshape(vector<TIndex>(1, N));
   SquaredL2DistanceKernel<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS,
-                            0, device_context_.cuda_stream()>>>(
+                            0, context_.cuda_stream()>>>(
       N, D, X.data<float>(), Y.data<float>(), distance->mutable_data<float>());
   return true;
 }

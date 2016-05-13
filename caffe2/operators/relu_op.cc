@@ -1,5 +1,6 @@
-#include "caffe2/utils/math.h"
 #include "caffe2/operators/relu_op.h"
+
+#include "caffe2/utils/math.h"
 
 namespace caffe2 {
 
@@ -45,12 +46,16 @@ namespace {
 REGISTER_CPU_OPERATOR(Relu, ReluOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(ReluGradient, ReluGradientOp<float, CPUContext>);
 
-struct GetReluGradient : public GetGradientDefBase {
-  vector<OperatorDef>* Create(const OperatorDef& def) override {
+OPERATOR_SCHEMA(Relu).NumInputs(1).NumOutputs(1).AllowInplace({{0, 0}});
+OPERATOR_SCHEMA(ReluGradient).NumInputs(2).NumOutputs(1).AllowInplace({{1, 0}});
+
+class GetReluGradient : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  vector<OperatorDef> GetGradientDefs() override {
     return SingleGradientDef(
-        def.type() + "Gradient", "",
-        vector<string>{O(def, 0), GO(def, 0)},
-        vector<string>{GI(def, 0)});
+        def_.type() + "Gradient", "",
+        vector<string>{O(0), GO(0)},
+        vector<string>{GI(0)});
   }
 };
 REGISTER_GRADIENT(Relu, GetReluGradient);

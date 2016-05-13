@@ -1,7 +1,11 @@
 #ifndef CAFFE2_CORE_DB_H_
 #define CAFFE2_CORE_DB_H_
 
+#include <mutex>
+
+#include "caffe2/core/blob_serialization.h"
 #include "caffe2/core/registry.h"
+#include "caffe2/proto/caffe2.pb.h"
 
 namespace caffe2 {
 namespace db {
@@ -19,6 +23,13 @@ class Cursor {
  public:
   Cursor() { }
   virtual ~Cursor() { }
+  /**
+   * Seek to a specific key (or if the key does not exist, seek to the
+   * immediate next). This is optional for dbs, and in default, SupportsSeek()
+   * returns false meaning that the db cursor does not support it.
+   */
+  virtual void Seek(const string& key) = 0;
+  virtual bool SupportsSeek() { return false; }
   /**
    * Seek to the first key in the database.
    */
@@ -93,9 +104,9 @@ class DB {
 
 // Database classes are registered by their names so we can do optional
 // dependencies.
-DECLARE_REGISTRY(Caffe2DBRegistry, DB, const string&, Mode);
+CAFFE_DECLARE_REGISTRY(Caffe2DBRegistry, DB, const string&, Mode);
 #define REGISTER_CAFFE2_DB(name, ...) \
-  REGISTER_CLASS(Caffe2DBRegistry, name, __VA_ARGS__)
+  CAFFE_REGISTER_CLASS(Caffe2DBRegistry, name, __VA_ARGS__)
 
 /**
  * Returns a database object of the given database type, source and mode. The
@@ -106,6 +117,110 @@ DECLARE_REGISTRY(Caffe2DBRegistry, DB, const string&, Mode);
 inline DB* CreateDB(const string& db_type, const string& source, Mode mode) {
   return Caffe2DBRegistry()->Create(db_type, source, mode);
 }
+
+
+class DBReaderSerializer : public BlobSerializerBase {
+ public:
+  /**
+   * Serializes a DBReader. Note that this blob has to contain DBReader,
+   * otherwise this function produces a fatal error.
+   */
+  string Serialize(const Blob& blob, const string& name);
+};
+
+/**
+ * A reader wrapper for DB that also allows us to serialize it.
+ */
+class DBReader {
+ public:
+
+  friend class DBReaderSerializer;
+  DBReader() {}
+
+  DBReader(const string& db_type, const string& source) {
+    Open(db_type, source);
+  }
+
+  explicit DBReader(const DBProto& proto) {
+    Open(proto.db_type(), proto.source());
+    if (proto.has_key()) {
+      CAFFE_DCHECK(cursor_->SupportsSeek())
+          << "Encountering a proto that needs seeking but the db type "
+             "does not support it.";
+      cursor_->Seek(proto.key());
+    }
+  }
+
+  void Open(const string& db_type, const string& source) {
+    if (cursor_.get()) {
+      cursor_.reset();
+    }
+    db_type_ = db_type;
+    source_ = source;
+    db_.reset(CreateDB(db_type_, source_, READ));
+    CAFFE_CHECK(db_.get() != nullptr)
+        << "Cannot open db: " << source_ << " of type " << db_type_;
+    cursor_.reset(db_->NewCursor());
+  }
+
+  /**
+   * Read a set of key and value from the db and move to next. Thread safe.
+   *
+   * The string objects key and value must be created by the caller and
+   * explicitly passed in to this function. This saves one additional object
+   * copy.
+   *
+   * If the cursor reaches its end, the reader will go back to the head of
+   * the db. This function can be used to enable multiple input ops to read
+   * the same db.
+   *
+   * Note(jiayq): we loosen the definition of a const function here a little
+   * bit: the state of the cursor is actually changed. However, this allows
+   * us to pass in a DBReader to an Operator without the need of a duplicated
+   * output blob.
+   */
+  void Read(string* key, string* value) const {
+    CAFFE_DCHECK(cursor_ != nullptr) << "Reader not initialized.";
+    std::unique_lock<std::mutex> mutex_lock(reader_mutex_);
+    *key = cursor_->key();
+    *value = cursor_->value();
+    cursor_->Next();
+    if (!cursor_->Valid()) {
+      cursor_->SeekToFirst();
+    }
+  }
+
+  /**
+   * @brief Seeks to the first key. Thread safe.
+   */
+  void SeekToFirst() const {
+    CAFFE_DCHECK(cursor_ != nullptr) << "Reader not initialized.";
+    std::unique_lock<std::mutex> mutex_lock(reader_mutex_);
+    cursor_->SeekToFirst();
+  }
+
+  /**
+   * Returns the underlying cursor of the db reader.
+   *
+   * Note that if you directly use the cursor, the read will not be thread
+   * safe, because there is no mechanism to stop multiple threads from
+   * accessing the same cursor. You should consider using Read() explicitly.
+   */
+  inline Cursor* cursor() const {
+    CAFFE_LOG_ERROR << "Usually for a DBReader you should use Read() to be "
+                       "thread safe. Consider refactoring your code.";
+    return cursor_.get();
+  }
+
+ private:
+  string db_type_;
+  string source_;
+  unique_ptr<DB> db_;
+  unique_ptr<Cursor> cursor_;
+  mutable std::mutex reader_mutex_;
+
+  DISABLE_COPY_AND_ASSIGN(DBReader);
+};
 
 }  // namespace db
 }  // namespace caffe2

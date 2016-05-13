@@ -11,6 +11,7 @@ namespace caffe2 {
 template <typename T>
 class LearningRateFunctor {
  public:
+  virtual ~LearningRateFunctor() {}
   virtual T operator()(const int iter) const = 0;
 };
 
