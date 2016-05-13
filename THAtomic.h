@@ -64,6 +64,11 @@ TH_API int THAtomicDecrementRef(int volatile *a);
  ******************************************************************************/
 
 /*
+ * *a = newvalue
+*/
+TH_API void THAtomicSetLong(long volatile *a, long newvalue);
+
+/*
  * return *a
 */
 TH_API long THAtomicGetLong(long volatile *a);
