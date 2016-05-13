@@ -356,6 +356,110 @@ static PyObject * THPTensor_(select)(THPTensor *self, PyObject *args)
 ]]
 
 [[
+  renorm
+  renorm -> self
+    - self
+    - self
+    - real p
+    - long dim
+    - real maxnorm
+  renorm -> self OPTIONAL_SELF
+    - self
+    - THTensor source
+    - real p
+    - long dim
+    - real maxnorm
+]]
+
+[[
+  dist
+  dist -> accreal
+    - self
+    - THTensor a
+    - CONSTANT 2
+  dist -> accreal
+    - self
+    - THTensor a
+    - real p
+]]
+
+[[
+  linspace
+  linspace -> self OPTIONAL_SELF
+    - self
+    - real start
+    - real end
+    - CONSTANT 100
+  linspace -> self OPTIONAL_SELF
+    - self
+    - real start
+    - real end
+    - long steps
+]]
+
+[[
+  logspace
+  logspace -> self OPTIONAL_SELF
+    - self
+    - real start
+    - real end
+    - CONSTANT 100
+  logspace -> self OPTIONAL_SELF
+    - self
+    - real start
+    - real end
+    - long steps
+]]
+
+[[
+  histc
+  histc -> self
+    - self
+    - THTensor src
+    - CONSTANT 100
+    - CONSTANT 0
+    - CONSTANT 0
+  histc -> self
+    - self
+    - THTensor src
+    - long bins
+    - CONSTANT 0
+    - CONSTANT 0
+  histc -> self
+    - self
+    - THTensor src
+    - long bins
+    - real min
+    - CONSTANT 0
+  histc -> self
+    - self
+    - THTensor src
+    - long bins
+    - real min
+    - real max
+  histc -> new THTensor
+    - self
+    - CONSTANT 100
+    - CONSTANT 0
+    - CONSTANT 0
+  histc -> new THTensor
+    - self
+    - long bins
+    - CONSTANT 0
+    - CONSTANT 0
+  histc -> new THTensor
+    - self
+    - long bins
+    - real min
+    - CONSTANT 0
+  histc -> new THTensor
+    - self
+    - long bins
+    - real min
+    - real max
+]]
+
+[[
   cinv
   cinv -> self
     - self
@@ -373,6 +477,87 @@ static PyObject * THPTensor_(select)(THPTensor *self, PyObject *args)
   neg -> self OPTIONAL_SELF
     - self
     - THTensor source
+]]
+
+[[
+  atan2 STATEFUL_ONLY
+  atan2 -> self
+    - self
+    - self
+    - THTensor other
+  atan2 -> self
+    - self
+    - THTensor other
+    - THTensor other2
+]]
+
+[[
+  atan2 STATELESS_ONLY
+  atan2 -> self OPTIONAL_SELF
+    - self
+    - THTensor other
+    - THTensor other2
+  atan2 -> real PLAIN_CALL
+    - real a
+    - real b
+]]
+
+[[
+  pow STATEFUL_ONLY
+  pow -> self
+    - self
+    - self
+    - real power
+  pow -> self
+    - self
+    - THTensor source
+    - real power
+  tpow -> self
+    - self
+    - real value
+    - THTensor source
+]]
+
+[[
+  pow STATELESS_ONLY
+  pow -> self OPTIONAL_SELF
+    - self
+    - THTensor source
+    - real power
+  tpow -> self OPTIONAL_SELF
+    - self
+    - real value
+    - THTensor source
+  pow -> real PLAIN_CALL
+    - real value
+    - real power
+]]
+
+[[
+  lerp STATEFUL_ONLY
+  lerp -> self
+    - self
+    - self
+    - THTensor a
+    - real weight
+  lerp -> self
+    - self
+    - THTensor a
+    - THTensor b
+    - real weight
+]]
+
+[[
+  lerp STATELESS_ONLY
+  lerp -> self OPTIONAL_SELF
+    - self
+    - THTensor a
+    - THTensor b
+    - real weight
+  TH_lerp -> real PLAIN_CALL
+    - real start
+    - real end
+    - real weight
 ]]
 #endif
 
@@ -412,6 +597,26 @@ static PyObject * THPTensor_(select)(THPTensor *self, PyObject *args)
   isSameSizeAs -> bool
     - self
     - THTensor other
+]]
+
+[[
+  isContiguous STATEFUL_ONLY
+  isContiguous -> bool
+    - self
+]]
+
+[[
+  isSetTo STATEFUL_ONLY
+  isSetTo -> bool
+    - self
+    - THTensor other
+]]
+
+[[
+  isSize STATEFUL_ONLY
+  isSize -> bool
+    - self
+    - THLongStorage other
 ]]
 
 [[
@@ -1110,6 +1315,52 @@ static PyObject * THPTensor_(select)(THPTensor *self, PyObject *args)
     - THByteTensor mask
 ]]
 
+// TODO: why not inplace?
+[[
+  t
+  newTranspose -> THTensor
+    - self
+    - long dim0
+    - long dim1
+]]
+
+[[
+  transpose
+  newTranspose -> THTensor
+    - self
+    - CONSTANT 0
+    - CONSTANT 1
+]]
+
+// TODO: inconsistent with lua - doesn't return a number when one-elemtn tensor
+// collapses to one dimension
+[[
+  squeeze
+  squeeze -> self
+    - self
+    - self
+  squeeze -> self OPTIONAL_SELF
+    - self
+    - THTensor other
+  squeeze1d -> self
+    - self
+    - self
+    - long dim
+  squeeze1d -> self OPTIONAL_SELF
+    - self
+    - THTensor other
+    - long dim
+]]
+
+[[
+  nonzero
+  nonzero -> new THLongTensor
+    - self
+  nonzero -> CUSTOM {expr}; Py_INCREF(indices); return (PyObject*)indices
+    - THLongTensor indices
+    - self
+]]
+
 // Declared in TensorCopy.cpp
 static PyObject * THPTensor_(copy)(THPTensor *self, PyObject *other);
 
@@ -1118,6 +1369,9 @@ static PyMethodDef THPTensor_(methods)[] = {
   // These methods are stateful only
   {"elementSize",     (PyCFunction)THPTensor_(elementSize),     METH_NOARGS,  NULL},
   {"isSameSizeAs",    (PyCFunction)THPTensor_(isSameSizeAs),    METH_VARARGS, NULL},
+  {"isContiguous",    (PyCFunction)THPTensor_(isContiguous),    METH_VARARGS, NULL},
+  {"isSetTo",         (PyCFunction)THPTensor_(isSetTo),         METH_VARARGS, NULL},
+  {"isSize",          (PyCFunction)THPTensor_(isSize),          METH_VARARGS, NULL},
   {"dim",             (PyCFunction)THPTensor_(nDimension),      METH_NOARGS,  NULL},
   {"stride",          (PyCFunction)THPTensor_(stride),          METH_VARARGS, NULL},
   {"storage",         (PyCFunction)THPTensor_(storage),         METH_NOARGS,  NULL},
@@ -1164,6 +1418,14 @@ static PyMethodDef THPTensor_(methods)[] = {
   {"norm",            (PyCFunction)THPTensor_(norm),            METH_VARARGS, NULL},
   {"cinv",            (PyCFunction)THPTensor_(cinv),            METH_VARARGS, NULL},
   {"neg",             (PyCFunction)THPTensor_(neg),             METH_VARARGS, NULL},
+  {"renorm",          (PyCFunction)THPTensor_(renorm),          METH_VARARGS, NULL},
+  {"dist",            (PyCFunction)THPTensor_(dist),            METH_VARARGS, NULL},
+  {"linspace",        (PyCFunction)THPTensor_(linspace),        METH_VARARGS, NULL},
+  {"logspace",        (PyCFunction)THPTensor_(logspace),        METH_VARARGS, NULL},
+  {"histc",           (PyCFunction)THPTensor_(histc),           METH_VARARGS, NULL},
+  {"atan2",           (PyCFunction)THPTensor_(atan2),           METH_VARARGS, NULL},
+  {"pow",             (PyCFunction)THPTensor_(pow),             METH_VARARGS, NULL},
+  {"lerp",            (PyCFunction)THPTensor_(lerp),            METH_VARARGS, NULL},
 #endif
   {"add",             (PyCFunction)THPTensor_(add),             METH_VARARGS, NULL},
   {"csub",            (PyCFunction)THPTensor_(csub),            METH_VARARGS, NULL},
@@ -1210,6 +1472,10 @@ static PyMethodDef THPTensor_(methods)[] = {
   {"cross",           (PyCFunction)THPTensor_(cross),           METH_VARARGS, NULL},
   {"sort",            (PyCFunction)THPTensor_(sort),            METH_VARARGS, NULL},
   {"topk",            (PyCFunction)THPTensor_(topk),            METH_VARARGS, NULL},
+  {"t",               (PyCFunction)THPTensor_(t),               METH_VARARGS, NULL},
+  {"transpose",       (PyCFunction)THPTensor_(transpose),       METH_VARARGS, NULL},
+  {"squeeze",         (PyCFunction)THPTensor_(squeeze),         METH_VARARGS, NULL},
+  {"nonzero",         (PyCFunction)THPTensor_(nonzero),         METH_VARARGS, NULL},
   {NULL}
 };
 
@@ -1245,6 +1511,14 @@ static PyMethodDef THPTensorStatelessMethods[] = {
   {"norm",            (PyCFunction)THPTensor_stateless_(norm),            METH_VARARGS, NULL},
   {"cinv",            (PyCFunction)THPTensor_stateless_(cinv),            METH_VARARGS, NULL},
   {"neg",             (PyCFunction)THPTensor_stateless_(neg),             METH_VARARGS, NULL},
+  {"renorm",          (PyCFunction)THPTensor_stateless_(renorm),          METH_VARARGS, NULL},
+  {"dist",            (PyCFunction)THPTensor_stateless_(dist),            METH_VARARGS, NULL},
+  {"linspace",        (PyCFunction)THPTensor_stateless_(linspace),        METH_VARARGS, NULL},
+  {"logspace",        (PyCFunction)THPTensor_stateless_(logspace),        METH_VARARGS, NULL},
+  {"histc",           (PyCFunction)THPTensor_stateless_(histc),           METH_VARARGS, NULL},
+  {"atan2",           (PyCFunction)THPTensor_stateless_(atan2),           METH_VARARGS, NULL},
+  {"pow",             (PyCFunction)THPTensor_stateless_(pow),             METH_VARARGS, NULL},
+  {"lerp",            (PyCFunction)THPTensor_stateless_(lerp),            METH_VARARGS, NULL},
 #endif
   {"add",             (PyCFunction)THPTensor_stateless_(add),             METH_VARARGS, NULL},
   {"csub",            (PyCFunction)THPTensor_stateless_(csub),            METH_VARARGS, NULL},
@@ -1291,5 +1565,9 @@ static PyMethodDef THPTensorStatelessMethods[] = {
   {"cross",           (PyCFunction)THPTensor_stateless_(cross),           METH_VARARGS, NULL},
   {"sort",            (PyCFunction)THPTensor_stateless_(sort),            METH_VARARGS, NULL},
   {"topk",            (PyCFunction)THPTensor_stateless_(topk),            METH_VARARGS, NULL},
+  {"t",               (PyCFunction)THPTensor_stateless_(t),               METH_VARARGS, NULL},
+  {"transpose",       (PyCFunction)THPTensor_stateless_(transpose),       METH_VARARGS, NULL},
+  {"squeeze",         (PyCFunction)THPTensor_stateless_(squeeze),         METH_VARARGS, NULL},
+  {"nonzero",         (PyCFunction)THPTensor_stateless_(nonzero),         METH_VARARGS, NULL},
   {NULL}
 };

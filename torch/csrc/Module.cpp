@@ -191,6 +191,37 @@ IMPLEMENT_STATELESS(median)
 IMPLEMENT_STATELESS(cross)
 IMPLEMENT_STATELESS(sort)
 IMPLEMENT_STATELESS(topk)
+IMPLEMENT_STATELESS(t)
+IMPLEMENT_STATELESS(transpose)
+IMPLEMENT_STATELESS(squeeze)
+IMPLEMENT_STATELESS(renorm)
+IMPLEMENT_STATELESS(dist)
+IMPLEMENT_STATELESS(linspace)
+IMPLEMENT_STATELESS(logspace)
+IMPLEMENT_STATELESS(histc)
+IMPLEMENT_STATELESS(atan2)
+IMPLEMENT_STATELESS(pow)
+IMPLEMENT_STATELESS(lerp)
+
+// In nonzero, the first argument might be a LongTensor that will be used
+// for indices output, so we should pick a function based on second
+// tensor's type.
+static PyObject * THPModule_nonzero(PyObject *_unused, PyObject *args)
+{
+  PyObject *tensor = THPDefaultTensorClass;
+  if (PyTuple_Size(args) == 1)
+    tensor = PyTuple_GET_ITEM(args, 0);
+  else if (PyTuple_Size(args) == 2)
+    tensor = PyTuple_GET_ITEM(args, 1);
+
+  PyObject *methods = PyObject_GetAttrString(tensor, "_torch");
+  PyObject *method = PyObject_GetAttrString(methods, "nonzero");
+  if (!method)
+    return NULL;
+  return PyObject_Call(method, args, NULL);
+  /* TODO: error handling */
+  return NULL;
+}
 
 static PyMethodDef TorchMethods[] = {
   {"_initExtension",  (PyCFunction)THPModule_initExtension,     METH_NOARGS,  NULL},
@@ -268,6 +299,18 @@ static PyMethodDef TorchMethods[] = {
   {"cross",           (PyCFunction)THPModule_cross,             METH_VARARGS, NULL},
   {"sort",            (PyCFunction)THPModule_sort,              METH_VARARGS, NULL},
   {"topk",            (PyCFunction)THPModule_topk,              METH_VARARGS, NULL},
+  {"t",               (PyCFunction)THPModule_t,                 METH_VARARGS, NULL},
+  {"transpose",       (PyCFunction)THPModule_transpose,         METH_VARARGS, NULL},
+  {"squeeze",         (PyCFunction)THPModule_squeeze,           METH_VARARGS, NULL},
+  {"nonzero",         (PyCFunction)THPModule_nonzero,           METH_VARARGS, NULL},
+  {"renorm",          (PyCFunction)THPModule_renorm,            METH_VARARGS, NULL},
+  {"dist",            (PyCFunction)THPModule_dist,              METH_VARARGS, NULL},
+  {"linspace",        (PyCFunction)THPModule_linspace,          METH_VARARGS, NULL},
+  {"logspace",        (PyCFunction)THPModule_logspace,          METH_VARARGS, NULL},
+  {"histc",           (PyCFunction)THPModule_histc,             METH_VARARGS, NULL},
+  {"atan2",           (PyCFunction)THPModule_atan2,             METH_VARARGS, NULL},
+  {"pow",             (PyCFunction)THPModule_pow,               METH_VARARGS, NULL},
+  {"lerp",            (PyCFunction)THPModule_lerp,              METH_VARARGS, NULL},
   {NULL, NULL, 0, NULL}
 };
 

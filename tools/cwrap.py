@@ -44,11 +44,11 @@ class Argument(object):
         return (self.type + '#' + self.name).__hash__()
 
 class Option(object):
-    def __init__(self, thname, return_type, optional_self):
-        self.thname = thname
+    def __init__(self, funcname, return_type, flags):
+        self.funcname = funcname
+        self.flags = flags
         self.return_type = return_type
         self.arguments = []
-        self.optional_self = optional_self
 
     def add_argument(self, arg):
         self.arguments.append(arg)
@@ -59,6 +59,26 @@ class Option(object):
     def map_arguments(self, fn):
         self.arguments = list(map(fn, self.arguments))
 
+    def is_self_optional(self):
+        return 'OPTIONAL_SELF' in self.flags
+
+    def wrap(self, args):
+        if 'PLAIN_CALL' in self.flags:
+            return self._wrap_plain(args)
+        else:
+            return self._wrap_th(args)
+
+    def _wrap_th(self, args):
+        th_call = 'THTensor_({})({})'.format(self.funcname, args)
+        if self.return_type == 'CUSTOM':
+            return self.flags.format(expr=th_call)
+        else:
+            return RETURN_WRAPPER[self.return_type].substitute({'expr': th_call})
+
+    def _wrap_plain(self, args):
+        call = '{}({})'.format(self.funcname, args)
+        return RETURN_WRAPPER[self.return_type].substitute({'expr': call})
+
     def copy(self):
         return deepcopy(self)
 
@@ -66,7 +86,6 @@ class Option(object):
         is_already_provided = argfilter()
         s = '#'.join(arg.type for arg in self.arguments if not is_already_provided(arg))
         return s.__hash__()
-
 
 # Basic templates for declarations
 DEFINITION_START = Template("""
@@ -93,7 +112,9 @@ DEFINITION_END = """
 # these are mostly, so that the * can be omitted for convenience and clarity
 TYPE_TRANSFORMS = {
     'THTensor': 'THPTensor*',
-    'THByteTensor': 'THPByteTensor*'
+    'THByteTensor': 'THPByteTensor*',
+    'THLongTensor': 'THPLongTensor*',
+    'THLongStorage': 'THPLongStorage*',
 }
 
 # Code that will be used to generate each of argument options
@@ -108,6 +129,7 @@ FORMAT_STR_MAP = {
     'THPTensor*': 'O!',
     'THPLongTensor*': 'O!',
     'THPByteTensor*': 'O!',
+    'THPLongStorage*': 'O!',
     'real': 'O&',
     'long': 'l',
     'bool': 'p',
@@ -119,6 +141,7 @@ ARGPARSE_TYPE_CHECK = {
     'THPTensor*': 'THPTensorType',
     'THPLongTensor*': 'THPLongTensorType',
     'THPByteTensor*': 'THPByteTensorType',
+    'THPLongStorage*': 'THPLongStorageType',
     'real': 'THPUtils_(parseReal)',
 }
 
@@ -156,6 +179,11 @@ RETURN_WRAPPER = {
         THPTensor *_ret = (THPTensor*)THPTensor_(newObject)(_value);
         $expr;
         return (PyObject*)_ret"""),
+    'new THLongTensor':     Template("""
+        THLongTensor *_i = THLongTensor_new();
+        THPLongTensor *_ret = (THPLongTensor*)THPLongTensor_newObject(_i);
+        $expr;
+        return (PyObject*)_ret"""),
 
     # Stateless mode
     'STATELESS PROV new SelfIndexPair': Template("""
@@ -180,6 +208,7 @@ RETURN_WRAPPER = {
 # dicts use integer keys to specify where to insert arguments
 ADDITIONAL_ARGS = {
     'new THByteTensor': (Argument('THPByteTensor*', '_ret'),),
+    'new THLongTensor': (Argument('THPLongTensor*', '_ret'),),
     'new THTensor':     (Argument('THPTensor*', '_ret'),),
     'new ValueIndexPair': (Argument('THPTensor*', '_v'), Argument('THPLongTensor*', '_i')),
     'new SelfIndexPair': (Argument('THPTensor*', 'self'), Argument('THPLongTensor*', '_i')),
@@ -187,7 +216,7 @@ ADDITIONAL_ARGS = {
 }
 
 # Types for which it's necessary to extract cdata
-CDATA_TYPES = set(('THPTensor*', 'THPByteTensor*', 'THPLongTensor*', 'THPStorage*'))
+CDATA_TYPES = set(('THPTensor*', 'THPByteTensor*', 'THPLongTensor*', 'THPStorage*', 'THPLongStorage*'))
 
 def generate_function(lines, stateless):
     assert len(lines) > 1
@@ -231,13 +260,14 @@ def parse_lines(lines, stateless):
     function_name, options = FUNCTION_NAME_REGEX.match(lines[0]).group(1, 2)
     if stateless and 'STATEFUL_ONLY' in options:
         return function_name, []  # Ignore function
+    if not stateless and 'STATELESS_ONLY' in options:
+        return function_name, []  # Ignore function
 
     for line in lines[1:]:
         match = OPTION_REGEX.match(line)
         if match:
             thname, rettype, flags = match.group(1, 2, 3)
-            optional_self = 'OPTIONAL_SELF' in flags
-            arg_options.append(Option(thname, rettype, optional_self))
+            arg_options.append(Option(thname, rettype, flags.strip()))
         else:
             assert line.startswith(ARGUMENT_PREFIX)
             arg = line.replace(ARGUMENT_PREFIX, '').strip()
@@ -279,7 +309,7 @@ def make_stateless(arg_options):
 
     # This has to go first, because it will be favored during unique
     for option in arg_options:
-        if option.optional_self:
+        if option.is_self_optional():
             new = option.copy()
             new.map_arguments(self_to_('_res_new'))
             if new.return_type == 'self':
@@ -418,6 +448,4 @@ def build_expression(option):
 
     args = ', '.join(make_arg(arg) for arg in all_args)
 
-    th_call = 'THTensor_({})({})'.format(option.thname, args)
-
-    return RETURN_WRAPPER[option.return_type].substitute({'expr': th_call})
+    return option.wrap(args)
