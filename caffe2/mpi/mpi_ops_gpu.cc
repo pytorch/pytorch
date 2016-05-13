@@ -23,14 +23,14 @@ namespace caffe2 {
     // In the case of openmpi 1.x, we don't have compile-time flags to figure
     // out if cuda is built; as a result, we will assume that the user has built
     // openmpi with cuda.
-    // CUDA-aware Broadcast is introduced after openmpi 1.7.
+    // CUDA-aware MPIBroadcast is introduced after openmpi 1.7.
     #if CAFFE2_OMPI_VERSION >= 10700
     #define CAFFE2_HAS_CUDA_MPI_BROADCAST 1
     #else  // CAFFE2_OMPI_VERSION >= 10700
     #define CAFFE2_HAS_CUDA_MPI_BROADCAST 0
     #endif  // CAFFE2_OMPI_VERSION >= 10700
 
-    // CUDA-aware Allreduce is introduced after openmpi 1.8.5.
+    // CUDA-aware MPIAllreduce is introduced after openmpi 1.8.5.
     #if CAFFE2_OMPI_VERSION >= 10805
     #define CAFFE2_HAS_CUDA_MPI_ALLREDUCE 1
     #else  // CAFFE2_OMPI_VERSION >= 10805
@@ -54,14 +54,22 @@ namespace caffe2 {
 
 namespace {
 #if CAFFE2_HAS_CUDA_MPI_BROADCAST
-REGISTER_CUDA_OPERATOR(Broadcast, BroadcastOp<CUDAContext>);
+REGISTER_CUDA_OPERATOR(MPIBroadcast, MPIBroadcastOp<CUDAContext>);
+REGISTER_CUDA_OPERATOR(MPIReduce, MPIReduceOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(MPIAllgather, MPIAllgatherOp<float, CUDAContext>);
 #else
-REGISTER_CUDA_OPERATOR(Broadcast, FallbackBroadcastOp<CUDAContext>);
+REGISTER_CUDA_OPERATOR(MPIBroadcast, FallbackMPIBroadcastOp<CUDAContext>);
+REGISTER_CUDA_OPERATOR(MPIReduce,
+                       FallbackMPIReduceOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(MPIAllgather,
+                       FallbackMPIAllgatherOp<float, CUDAContext>);
 #endif
+
 #if CAFFE2_HAS_CUDA_MPI_ALLREDUCE
-REGISTER_CUDA_OPERATOR(Allreduce, AllreduceOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(MPIAllreduce, MPIAllreduceOp<float, CUDAContext>);
 #else
-REGISTER_CUDA_OPERATOR(Allreduce, FallbackAllreduceOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(MPIAllreduce,
+                       FallbackMPIAllreduceOp<float, CUDAContext>);
 #endif
 }  // namespace
 

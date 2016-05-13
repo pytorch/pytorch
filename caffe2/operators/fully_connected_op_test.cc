@@ -8,7 +8,7 @@ CAFFE2_DECLARE_string(caffe_test_root);
 
 namespace caffe2 {
 
-static void AddConstInput(const std::vector<int>& shape, const float value,
+static void AddConstInput(const vector<TIndex>& shape, const float value,
                           const string& name, Workspace* ws) {
   DeviceOption option;
   CPUContext context(option);
@@ -30,9 +30,9 @@ TEST(FullyConnectedTest, Test) {
   def.add_input("W");
   def.add_input("B");
   def.add_output("Y");
-  AddConstInput(std::vector<int>{5, 10}, 1., "X", &ws);
-  AddConstInput(std::vector<int>{6, 10}, 1., "W", &ws);
-  AddConstInput(std::vector<int>{6}, 0.1, "B", &ws);
+  AddConstInput(vector<TIndex>{5, 10}, 1., "X", &ws);
+  AddConstInput(vector<TIndex>{6, 10}, 1., "W", &ws);
+  AddConstInput(vector<TIndex>{6}, 0.1, "B", &ws);
   unique_ptr<OperatorBase> op(CreateOperator(def, &ws));
   EXPECT_NE(nullptr, op.get());
   EXPECT_TRUE(op->Run());

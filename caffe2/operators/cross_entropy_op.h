@@ -19,7 +19,6 @@ class LabelCrossEntropyOp final : public Operator<Context> {
   static constexpr T kLOG_THRESHOLD() { return 1e-20; }
   // Input: X, label
   // Output: Y
-  INPUT_OUTPUT_STATS(2, 2, 1, 1);
   DISABLE_COPY_AND_ASSIGN(LabelCrossEntropyOp);
 };
 
@@ -35,8 +34,36 @@ class LabelCrossEntropyGradientOp final
   // Input: X, label, dY
   // Ouptut: dX. There is no gradient with respect to the label.
   static constexpr T kLOG_THRESHOLD() { return 1e-20; }
-  INPUT_OUTPUT_STATS(3, 3, 1, 1);
   DISABLE_COPY_AND_ASSIGN(LabelCrossEntropyGradientOp);
+};
+
+// Hacky: turns a vector of probabilities into a 2-column matrix with
+// complimentary probabilities for binary classification
+template <typename T, class Context>
+class MakeTwoClassOp final : public Operator<Context> {
+ public:
+  USE_SIMPLE_CTOR_DTOR(MakeTwoClassOp);
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  bool RunOnDevice() override;
+
+ protected:
+  // Input: X
+  // Output: Y = vstack(1-X, X)
+  DISABLE_COPY_AND_ASSIGN(MakeTwoClassOp);
+};
+
+template <typename T, class Context>
+class MakeTwoClassGradientOp final
+    : public Operator<Context> {
+ public:
+  USE_SIMPLE_CTOR_DTOR(MakeTwoClassGradientOp);
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  bool RunOnDevice() override;
+
+ protected:
+  // Input: dY
+  // Ouptut: dX
+  DISABLE_COPY_AND_ASSIGN(MakeTwoClassGradientOp);
 };
 
 }  // namespace caffe2

@@ -12,9 +12,6 @@ struct SigmoidCPUFunctor {
       y[i] = 1. / (1. + exp(-x[i]));
     }
   }
-  inline bool InplaceAllowed() {
-    return true;
-  }
 };
 
 template <typename T>
@@ -23,13 +20,6 @@ struct SigmoidGradientCPUFunctor {
                          T* dx, CPUContext* device_context) {
     for (int i = 0; i < n; ++i) {
       dx[i] = dy[i] * y[i] * (1. - y[i]);
-    }
-  }
-  inline bool InplaceAllowed(const int input_id, const int output_id) {
-    if (input_id == 1 && output_id == 0) {
-      return true;
-    } else {
-      return false;
     }
   }
 };
@@ -41,12 +31,19 @@ REGISTER_CPU_OPERATOR(
     SigmoidGradient, BinaryElementwiseOp<float, CPUContext,
                                      SigmoidGradientCPUFunctor<float> >);
 
-struct GetSigmoidGradient : public GetGradientDefBase {
-  vector<OperatorDef>* Create(const OperatorDef& def) override {
+// Input: X, output: Y
+OPERATOR_SCHEMA(Sigmoid).NumInputs(1).NumOutputs(1).AllowInplace({{0, 0}});
+// Input: Y, dY, output: dX
+OPERATOR_SCHEMA(SigmoidGradient)
+    .NumInputs(2).NumOutputs(1).AllowInplace({{1, 0}});
+
+class GetSigmoidGradient : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  vector<OperatorDef> GetGradientDefs() override {
     return SingleGradientDef(
         "SigmoidGradient", "",
-        vector<string>{O(def, 0), GO(def, 0)},
-        vector<string>{GI(def, 0)});
+        vector<string>{O(0), GO(0)},
+        vector<string>{GI(0)});
   }
 };
 REGISTER_GRADIENT(Sigmoid, GetSigmoidGradient);

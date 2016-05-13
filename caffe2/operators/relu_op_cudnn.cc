@@ -10,14 +10,18 @@ class CuDNNReluOp final : public Operator<CUDAContext> {
  public:
   CuDNNReluOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<CUDAContext>(operator_def, ws),
-        cudnn_wrapper_(&device_context_),
+        cudnn_wrapper_(&context_),
         order_(StringToStorageOrder(
             OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
     CUDNN_CHECK(cudnnCreateTensorDescriptor(&data_desc_));
+    CUDNN_CHECK(cudnnCreateActivationDescriptor(&activ_desc_));
+    CUDNN_CHECK(cudnnSetActivationDescriptor(
+        activ_desc_, CUDNN_ACTIVATION_RELU, CUDNN_PROPAGATE_NAN, 0.0));
   }
 
   ~CuDNNReluOp() {
     CUDNN_CHECK(cudnnDestroyTensorDescriptor(data_desc_));
+    CUDNN_CHECK(cudnnDestroyActivationDescriptor(activ_desc_));
   }
 
   bool RunOnDevice() override {
@@ -28,19 +32,19 @@ class CuDNNReluOp final : public Operator<CUDAContext> {
     if (X.dims() != cudnn_input_dims_) {
       CAFFE_VLOG(1) << "Setting descriptors.";
       cudnn_input_dims_ = X.dims();
-      int C = (order_ == StorageOrder::NCHW ? X.dim(1) : X.dim(3));
+      int C = (order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(3));
       int H = 1;
       int W = 1;
       if (X.ndim() == 4) {
-        H = (order_ == StorageOrder::NCHW ? X.dim(2) : X.dim(1));
-        W = (order_ == StorageOrder::NCHW ? X.dim(3) : X.dim(2));
+        H = (order_ == StorageOrder::NCHW ? X.dim32(2) : X.dim32(1));
+        W = (order_ == StorageOrder::NCHW ? X.dim32(3) : X.dim32(2));
       }
       CUDNN_CHECK(cudnnSetTensor4dDescriptor(
           data_desc_, GetCudnnTensorFormat(order_),
-          cudnnTypeWrapper<T>::type, X.dim(0), C, H, W));
+          cudnnTypeWrapper<T>::type, X.dim32(0), C, H, W));
     }
     CUDNN_CHECK(cudnnActivationForward(cudnn_wrapper_.cudnn_handle(),
-        CUDNN_ACTIVATION_RELU, cudnnTypeWrapper<T>::kOne(), data_desc_,
+        activ_desc_, cudnnTypeWrapper<T>::kOne(), data_desc_,
         X.template data<T>(), cudnnTypeWrapper<T>::kZero(),
         data_desc_, Y->template mutable_data<T>()));
     return true;
@@ -49,7 +53,8 @@ class CuDNNReluOp final : public Operator<CUDAContext> {
  protected:
   CuDNNWrapper cudnn_wrapper_;
   cudnnTensorDescriptor_t data_desc_;
-  vector<int> cudnn_input_dims_;
+  cudnnActivationDescriptor_t activ_desc_;
+  vector<TIndex> cudnn_input_dims_;
   StorageOrder order_;
   INPUT_OUTPUT_STATS(1, 1, 1, 1);
   IN_PLACE_ALLOWED({0, 0});
@@ -68,14 +73,18 @@ class CuDNNReluGradientOp final : public Operator<CUDAContext> {
  public:
   CuDNNReluGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<CUDAContext>(operator_def, ws),
-        cudnn_wrapper_(&device_context_),
+        cudnn_wrapper_(&context_),
         order_(StringToStorageOrder(
             OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
     CUDNN_CHECK(cudnnCreateTensorDescriptor(&data_desc_));
+    CUDNN_CHECK(cudnnCreateActivationDescriptor(&activ_desc_));
+    CUDNN_CHECK(cudnnSetActivationDescriptor(
+        activ_desc_, CUDNN_ACTIVATION_RELU, CUDNN_PROPAGATE_NAN, 0.0));
   }
 
   ~CuDNNReluGradientOp() {
     CUDNN_CHECK(cudnnDestroyTensorDescriptor(data_desc_));
+    CUDNN_CHECK(cudnnDestroyActivationDescriptor(activ_desc_));
   }
 
   bool RunOnDevice() override {
@@ -87,21 +96,21 @@ class CuDNNReluGradientOp final : public Operator<CUDAContext> {
     if (Y.dims() != cudnn_input_dims_) {
       CAFFE_VLOG(1) << "Setting descriptors.";
       cudnn_input_dims_ = Y.dims();
-      int C = (order_ == StorageOrder::NCHW ? Y.dim(1) : Y.dim(3));
+      int C = (order_ == StorageOrder::NCHW ? Y.dim32(1) : Y.dim32(3));
       int H = 1;
       int W = 1;
       if (Y.ndim() == 4) {
-        H = (order_ == StorageOrder::NCHW ? Y.dim(2) : Y.dim(1));
-        W = (order_ == StorageOrder::NCHW ? Y.dim(3) : Y.dim(2));
+        H = (order_ == StorageOrder::NCHW ? Y.dim32(2) : Y.dim32(1));
+        W = (order_ == StorageOrder::NCHW ? Y.dim32(3) : Y.dim32(2));
       }
       CUDNN_CHECK(cudnnSetTensor4dDescriptor(
           data_desc_, GetCudnnTensorFormat(order_),
-          cudnnTypeWrapper<T>::type, Y.dim(0), C, H, W));
+          cudnnTypeWrapper<T>::type, Y.dim32(0), C, H, W));
     }
     const typename cudnnTypeWrapper<T>::ScalingParamType kOne = 1;
     const typename cudnnTypeWrapper<T>::ScalingParamType kZero = 0;
     CUDNN_CHECK(cudnnActivationBackward(cudnn_wrapper_.cudnn_handle(),
-        CUDNN_ACTIVATION_RELU, &kOne, data_desc_, Y.template data<T>(),
+        activ_desc_, &kOne, data_desc_, Y.template data<T>(),
         data_desc_, dY.template data<T>(), data_desc_, Y.template data<T>(),
         &kZero, data_desc_, dX->template mutable_data<T>()));
     return true;
@@ -110,7 +119,8 @@ class CuDNNReluGradientOp final : public Operator<CUDAContext> {
  protected:
   CuDNNWrapper cudnn_wrapper_;
   cudnnTensorDescriptor_t data_desc_;
-  vector<int> cudnn_input_dims_;
+  cudnnActivationDescriptor_t activ_desc_;
+  vector<TIndex> cudnn_input_dims_;
   StorageOrder order_;
   // Input: Y, dY; Output: dX
   INPUT_OUTPUT_STATS(2, 2, 1, 1);

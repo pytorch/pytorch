@@ -18,7 +18,6 @@ class SoftmaxOp final : public Operator<Context> {
  protected:
   Tensor<Context> scale_;
   Tensor<Context> sum_multiplier_;
-  INPUT_OUTPUT_STATS(1, 1, 1, 1);
   DISABLE_COPY_AND_ASSIGN(SoftmaxOp);
 };
 
@@ -32,8 +31,6 @@ class SoftmaxGradientOp final : public Operator<Context> {
  protected:
   Tensor<Context> scale_;
   Tensor<Context> sum_multiplier_;
-  // Input: Y, dY. Output: dX
-  INPUT_OUTPUT_STATS(2, 2, 1, 1);
   DISABLE_COPY_AND_ASSIGN(SoftmaxGradientOp);
 };
 

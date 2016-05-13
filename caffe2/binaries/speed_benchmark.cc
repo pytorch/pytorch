@@ -12,7 +12,7 @@ CAFFE2_DEFINE_int(iter, 10, "The number of iterations to run.");
 CAFFE2_DEFINE_bool(run_individual, false, "Whether to benchmark individual operators.");
 
 int main(int argc, char** argv) {
-  caffe2::GlobalInit(&argc, argv);
+  caffe2::GlobalInit(&argc, &argv);
   std::unique_ptr<caffe2::Workspace> workspace(new caffe2::Workspace());
   // Run initialization network.
   caffe2::NetDef net_def;

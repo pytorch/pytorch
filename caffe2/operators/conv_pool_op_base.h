@@ -54,6 +54,9 @@ class ConvPoolOpBase : public Operator<Context> {
           << "If you use legacy padding VALID or SAME, you should not specify "
              "any specific padding values.";
     }
+
+    CHECK_LE(stride_h_, kernel_h_);
+    CHECK_LE(stride_w_, kernel_h_);
     CAFFE_CHECK_GE(pad_, 0);
     CAFFE_CHECK_GE(pad_t_, 0);
     CAFFE_CHECK_GE(pad_l_, 0);
@@ -72,22 +75,20 @@ class ConvPoolOpBase : public Operator<Context> {
                      int output_channel) {
     CAFFE_DCHECK_EQ(input.ndim(), 4);
     CAFFE_DCHECK_GT(input.size(), 0);
-    int N = input.dim(0);
+    int N = input.dim32(0);
     bool channel_first = false;  // initialized to suppress compiler warning.
-    int C = 0, H = 0, W = 0;  // initialized to suppress compiler warning.
+    int H = 0, W = 0;  // initialized to suppress compiler warning.
     switch (order_) {
     case StorageOrder::NHWC:
       channel_first = false;
-      H = input.dim(1);
-      W = input.dim(2);
-      C = input.dim(3);
+      H = input.dim32(1);
+      W = input.dim32(2);
       break;
     case StorageOrder::NCHW:
       // Old Caffe order.
       channel_first = true;
-      C = input.dim(1);
-      H = input.dim(2);
-      W = input.dim(3);
+      H = input.dim32(2);
+      W = input.dim32(3);
       break;
     default:
       CAFFE_LOG_FATAL << "Unknown Storage order: " << order_;
@@ -138,8 +139,14 @@ class ConvPoolOpBase : public Operator<Context> {
 
   // The actual function that does the computation, if the different
   // storage order leads to different implementations.
-  virtual bool RunOnDeviceWithOrderNHWC() { NOT_IMPLEMENTED; return false; }
-  virtual bool RunOnDeviceWithOrderNCHW() { NOT_IMPLEMENTED; return false; }
+  virtual bool RunOnDeviceWithOrderNHWC() {
+    CAFFE_NOT_IMPLEMENTED;
+    return false;
+  }
+  virtual bool RunOnDeviceWithOrderNCHW() {
+    CAFFE_NOT_IMPLEMENTED;
+    return false;
+  }
 
   virtual ~ConvPoolOpBase() {}
 

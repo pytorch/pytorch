@@ -33,6 +33,10 @@ class Timer {
    * @brief Returns the elapsed time in microseconds.
    */
   inline float MicroSeconds() { return NanoSeconds() / 1000.f; }
+  /**
+   * @brief Returns the elapsed time in seconds.
+   */
+  inline float Seconds() { return NanoSeconds() / 1000000000.f; }
 
  protected:
   std::chrono::time_point<clock> start_time_;

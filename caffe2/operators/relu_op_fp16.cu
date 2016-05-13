@@ -51,13 +51,13 @@ bool ReluOp<float16, CUDAContext>::RunOnDevice() {
   Y->ReshapeLike(X);
   if (X.size() % 2 == 0) {
     ReluKernelHalf2<<<CAFFE_GET_BLOCKS(X.size() / 2), CAFFE_CUDA_NUM_THREADS,
-                      0, device_context_.cuda_stream()>>>(
+                      0, context_.cuda_stream()>>>(
         X.size() / 2, reinterpret_cast<const half2*>(X.data<float16>()),
         reinterpret_cast<half2*>(Y->mutable_data<float16>()));
     return true;
   } else {
     ReluKernelHalf<<<CAFFE_GET_BLOCKS(X.size()), CAFFE_CUDA_NUM_THREADS,
-                     0, device_context_.cuda_stream()>>>(
+                     0, context_.cuda_stream()>>>(
         X.size(), reinterpret_cast<const half*>(X.data<float16>()),
         reinterpret_cast<half*>(Y->mutable_data<float16>()));
     return true;
@@ -73,7 +73,7 @@ bool ReluGradientOp<float16, CUDAContext>::RunOnDevice() {
   CAFFE_DCHECK_EQ(dY.size(), Y.size());
   dX->ReshapeLike(Y);
   ReluGradientKernelHalf<<<CAFFE_GET_BLOCKS(Y.size()), CAFFE_CUDA_NUM_THREADS,
-                           0, device_context_.cuda_stream()>>>(
+                           0, context_.cuda_stream()>>>(
       Y.size(), reinterpret_cast<const half*>(Y.data<float16>()),
       reinterpret_cast<const half*>(dY.data<float16>()),
       reinterpret_cast<half*>(dX->mutable_data<float16>()));

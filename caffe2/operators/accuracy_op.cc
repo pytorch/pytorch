@@ -8,11 +8,11 @@ bool AccuracyOp<float, CPUContext>::RunOnDevice() {
   auto& label = Input(LABEL);
   auto* Y = Output(0);
   CAFFE_DCHECK_EQ(X.ndim(), 2);
-  int N = X.dim(0);
-  int D = X.dim(1);
+  int N = X.dim32(0);
+  int D = X.dim32(1);
   CAFFE_DCHECK_EQ(label.ndim(), 1);
-  CAFFE_DCHECK_EQ(label.dim(0), N);
-  Y->Reshape(std::vector<int>{1});
+  CAFFE_DCHECK_EQ(label.dim32(0), N);
+  Y->Reshape(vector<TIndex>{1});
   const auto* Xdata = X.data<float>();
   const auto* labeldata = label.data<int>();
   int correct = 0;
@@ -36,6 +36,9 @@ bool AccuracyOp<float, CPUContext>::RunOnDevice() {
 
 namespace {
 REGISTER_CPU_OPERATOR(Accuracy, AccuracyOp<float, CPUContext>);
+
+OPERATOR_SCHEMA(Accuracy).NumInputs(2).NumOutputs(1);
+
 SHOULD_NOT_DO_GRADIENT(Accuracy);
 }  // namespace
 }  // namespace caffe2

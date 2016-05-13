@@ -2,17 +2,37 @@
 #define CAFFE2_CORE_TENSOR_H_
 
 #include <cstddef>
+#include <cstdint>
 #include <sstream>
 #include <typeinfo>
 #include <type_traits>
 #include <vector>
 
 #include "caffe2/core/common.h"
+#include "caffe2/core/flags.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/typeid.h"
 #include "caffe2/core/logging.h"
 
+// A global boolean variable to control whether we free memory when a Tensor
+// is shrinked to a smaller size. As a result, a Tensor is always going to
+// keep the memory allocated for its maximum capacity reshaped to so far.
+// This is disabled by default unless explicitly enabled by the commandline
+// argument.
+CAFFE2_DECLARE_bool(caffe2_keep_on_shrink);
+
 namespace caffe2 {
+
+// Data type for Tensor Index. We use size_t to be safe here as well as for
+// large matrices that are common in sparse math.
+typedef int64_t TIndex;
+
+/**
+ * A utility function to convert vector<int> to vector<TIndex>.
+ */
+inline vector<TIndex> ToVectorTIndex(const std::vector<int>& src) {
+  return vector<TIndex>(src.begin(), src.end());
+}
 
 /**
  * @brief Tensor is the basic class in Caffe2 that stores a contiguous memory
@@ -29,7 +49,7 @@ class Tensor {
   /**
    * Initializes an empty tensor.
    */
-  Tensor() : size_(0), data_(nullptr) {}
+  Tensor() {}
 
   /**
    * @brief Creates a tensor of the given dimension.
@@ -37,6 +57,7 @@ class Tensor {
    * Note that the actual data allocation is not going to be carried out until
    * the first time mutable_data() is called.
    */
+  explicit Tensor(const vector<TIndex>& dims) { Reshape(dims); }
   explicit Tensor(const vector<int>& dims) { Reshape(dims); }
 
   /**
@@ -50,11 +71,8 @@ class Tensor {
    * be noted that this will cause a potential performance hit.
    */
   template <class SrcContext, class ContextForCopy>
-  Tensor(const Tensor<SrcContext>& src, ContextForCopy* context)
-      : meta_(src.meta()) {
-    Reshape(src.dims());
-    context->template Memcpy<SrcContext, Context>(
-        nbytes(), src.raw_data(), raw_mutable_data());
+  Tensor(const Tensor<SrcContext>& src, ContextForCopy* context) {
+    CopyFrom(src, context);
   }
 
   /**
@@ -65,24 +83,22 @@ class Tensor {
    * providing a context for copy if you can.
    */
   template <class SrcContext>
-  Tensor(const Tensor<SrcContext>& src)
-      : meta_(src.meta()) {
-    Reshape(src.dims());
-    SrcContext tmp_context;
-    tmp_context.template Memcpy<SrcContext, Context>(
-        nbytes(), src.raw_data(), raw_mutable_data());
+  Tensor(const Tensor<SrcContext>& src) {
+    CopyFrom(src);
   }
 
   /**
    * @brief Creates a tensor, and fills its contents with the given values.
    */
   template <typename T>
-  Tensor(const vector<int>& dims, const vector<T>& values, Context* context)
+  Tensor(const vector<TIndex>& dims, const vector<T>& values, Context* context)
       : meta_(TypeMeta::Make<T>()) {
     Reshape(dims);
     CAFFE_CHECK_EQ(values.size(), size_);
-    context->template Copy<T, CPUContext, Context>(
-        values.size(), values.data(), mutable_data<T>());
+    T* data = mutable_data<T>();
+    for (TIndex i = 0; i < size_; ++i) {
+      data[i] = values[i];
+    }
   }
 
   /**
@@ -91,9 +107,40 @@ class Tensor {
   template <typename T,
             typename = typename std::enable_if<std::is_scalar<T>::value>::type>
   Tensor(const T& value, Context* context) {
-    Reshape(vector<int>{});
-    context->template Copy<T, CPUContext, Context>(
-        1, &value, mutable_data<T>());
+    Reshape(vector<TIndex>{});
+    T* data = mutable_data<T>();
+    for (TIndex i = 0; i < size_; ++i) {
+      data[i] = value;
+    }
+  }
+
+  /**
+   * @brief Copies the data from a source tensor, with a contex provided to
+   * carry out the underlying memcpy operation.
+   */
+  template <class SrcContext, class ContextForCopy>
+  void CopyFrom(const Tensor<SrcContext>& src, ContextForCopy* context) {
+    meta_ = src.meta();
+    Reshape(src.dims());
+    if (meta_.copy()) {
+      meta_.copy()(src.raw_data(), raw_mutable_data(), size());
+    } else {
+      context->template Memcpy<SrcContext, Context>(
+          nbytes(), src.raw_data(), raw_mutable_data());
+    }
+  }
+
+  /**
+   * @brief Copies the data from a source tensor.
+   *
+   * Note that this may have a potential performance hit, since a temporary
+   * context object will be created for the memory copy. Prefer explicitly
+   * providing a context for copy if you can.
+   */
+  template <class SrcContext>
+  inline void CopyFrom(const Tensor<SrcContext>& src) {
+    SrcContext tmp_context;
+    CopyFrom(src, &tmp_context);
   }
 
   virtual ~Tensor() {}
@@ -111,20 +158,27 @@ class Tensor {
    * mutable_data(). However, if the shape is different but the total number of
    * items is the same, the underlying storage is kept.
    */
-  void Reshape(const vector<int>& dims) {
+  void Reshape(const vector<TIndex>& dims) {
     dims_ = dims;
     // Calculate the size.
-    int new_size = 1;
-    for (int d : dims_) {
+    TIndex new_size = 1;
+    for (auto d : dims_) {
       CAFFE_CHECK_GT(d, 0);
       new_size *= d;
     }
-    // If the size changes, we will free the data. the next mutable_data() call
+    // If needed, we will free the data. the next mutable_data() call
     // will create the data storage.
-    if (data_.get() && size_ != new_size) {
+    if (size_ != new_size &&
+        (capacity_ < new_size * meta_.itemsize() ||
+         !FLAGS_caffe2_keep_on_shrink)) {
       data_.reset();
+      capacity_ = 0;
     }
     size_ = new_size;
+  }
+
+  inline void Reshape(const vector<int>& dims) {
+    Reshape(ToVectorTIndex(dims));
   }
 
   /**
@@ -133,23 +187,23 @@ class Tensor {
    * This is a simple wrapper over the vector version by not needing to require
    * the user to create a vector.
    */
-  inline void Reshape(const int n) { Reshape(vector<int>(1, n)); }
+  inline void Reshape(const int n) { Reshape(vector<TIndex>(1, n)); }
 
   // TODO: the following functions are provided so one can avoid using
   // initializer list, a C++11 feature that does not work well with some NVCC
   // versions (currently cuda 7.0 on tegra). Revisit if necessary.
   inline void Reshape(const int d0, const int d1) {
-    std::vector<int> v(2);
+    vector<TIndex> v(2);
     v[0] = d0; v[1] = d1;
     Reshape(v);
   }
   inline void Reshape(const int d0, const int d1, const int d2) {
-    std::vector<int> v(3);
+    vector<TIndex> v(3);
     v[0] = d0; v[1] = d1; v[2] = d2;
     Reshape(v);
   }
   inline void Reshape(const int d0, const int d1, const int d2, const int d3) {
-    std::vector<int> v(4);
+    vector<TIndex> v(4);
     v[0] = d0; v[1] = d1; v[2] = d2; v[3] = d3;
     Reshape(v);
   }
@@ -204,6 +258,30 @@ class Tensor {
     CAFFE_CHECK(src.data_.get()) << "Source tensor has no content yet.";
     // Finally, do sharing.
     data_ = src.data_;
+    capacity_ = src.capacity_;
+  }
+
+  /**
+   * @brief Shares the data with an externally managed pointer.
+   *
+   * This is similar to SharData() but the tensor does not take over ownership
+   * of the pointer, so the caller can explicitly manage the memory storage.
+   * One needs to make sure that the external memory is deallocated only after
+   * the tensor finishes using it.
+   */
+  template <typename T>
+  void ShareExternalPointer(T* src, size_t capacity = 0) {
+    meta_ = TypeMeta::Make<T>();
+    CAFFE_CHECK(size_ > 0)
+        << "To share data with a raw pointer, you need to set shape first.";
+    data_.reset(src, [](void*)->void {});
+    // Sets capacity. If not specified, we will implicitly assume that
+    // the capacity is the current size.
+    if (capacity) {
+      capacity_ = capacity;
+    } else {
+      capacity_ = nbytes();
+    }
   }
 
   /**
@@ -224,7 +302,8 @@ class Tensor {
   template <typename T>
   inline const T* data() const {
     CAFFE_CHECK_NOTNULL(data_.get());
-    CAFFE_CHECK(IsType<T>());
+    CAFFE_CHECK(IsType<T>()) << "Expected " << TypeMeta::Name<T>() << " have "
+                             << meta_.name();
     return static_cast<T*>(data_.get());
   }
 
@@ -245,8 +324,25 @@ class Tensor {
     } else {
       meta_ = meta;
       CAFFE_CHECK_GT(size_, 0);
-      data_.reset(static_cast<void*>(Context::New(size_ * meta_.itemsize())),
-                  Context::Delete);
+      if (meta.ctor()) {
+        // For types that need placement new, we will call it, as well as
+        // making sure that when the data is freed, it calls the right
+        // destruction procedure.
+        auto size = size_;
+        auto dtor = meta_.dtor();
+        data_.reset(
+            static_cast<void*>(Context::New(size_ * meta_.itemsize())),
+            [size, dtor](void* ptr) -> void {
+                dtor(ptr, size);
+                Context::Delete(ptr);
+            });
+        meta_.ctor()(data_.get(), size_);
+      } else {
+        // For fundamental type, new and delete is easier.
+        data_.reset(static_cast<void*>(Context::New(size_ * meta_.itemsize())),
+                    Context::Delete);
+      }
+      capacity_ = size_ * meta_.itemsize();
       return data_.get();
     }
   }
@@ -275,9 +371,12 @@ class Tensor {
    */
   template <typename T>
   inline T* mutable_data() {
-    return static_cast<T*>(
-        raw_mutable_data(TypeMeta::Make<T>()));
+    if (data_.get() && IsType<T>()) {
+      return static_cast<T*>(data_.get());
+    }
+    return static_cast<T*>(raw_mutable_data(TypeMeta::Make<T>()));
   }
+
 
   /**
    * Returns the number of dimensions of the data.
@@ -286,7 +385,7 @@ class Tensor {
   /**
    * Returns the size (i.e. the number of items) of the tensor.
    */
-  inline int size() const { return size_; }
+  inline TIndex size() const { return size_; }
   /**
    * Return the number of bytes each item takes in the tensor.
    */
@@ -300,7 +399,17 @@ class Tensor {
   /**
    * Returns the dimensions of the tensor as a vector.
    */
-  inline const vector<int>& dims() const { return dims_; }
+  inline const vector<TIndex>& dims() const { return dims_; }
+  /**
+   * Return product of all dimensions starting from K
+   */
+  inline TIndex size_from_dim(int k) const {
+    TIndex r = 1;
+    for (int i = k; i < dims_.size(); ++i) {
+      r *= dims_[i];
+    }
+    return r;
+  }
   /**
    * Checks if the tensor content is of the given data type.
    */
@@ -310,28 +419,45 @@ class Tensor {
    * Returns the TypeMeta object associated with the current data type.
    */
   inline const TypeMeta& meta() const { return meta_; }
+
+  /**
+   * Returns the i-th dimension of the tensor in int.
+   *
+   * This function returns an int value instead of TIndex, which depending on
+   * the typedef could be int64. If you want int64 dim values, make sure you
+   * call dim() instead.
+   */
+  inline int dim32(const int i) const {
+    CAFFE_DCHECK_LT(i, dims_.size()) << "Exceeding ndim limit " << dims_.size();
+    CAFFE_DCHECK_GE(i, 0) << "Cannot have negative index";
+    CAFFE_CHECK_LT(dims_[i], std::numeric_limits<int>::max());
+    return static_cast<int>(dims_[i]);
+  }
+
   /**
    * Returns the i-th dimension of the tensor. Note that the passed in index
    * must be between 0 (inclusive) and the number of dimensions, otherwise
    * this function will produce a fatal message.
    */
-  inline int dim(const int i) const {
+  inline TIndex dim(const int i) const {
     CAFFE_DCHECK_LT(i, dims_.size()) << "Exceeding ndim limit " << dims_.size();
     CAFFE_DCHECK_GE(i, 0) << "Cannot have negative index";
     return dims_[i];
   }
 
  protected:
-  vector<int> dims_;
-  int size_;
+  vector<TIndex> dims_;
+  TIndex size_ = 0;
   TypeMeta meta_;
   std::shared_ptr<void> data_;
+  size_t capacity_ = 0;
 
-  DISABLE_COPY_AND_ASSIGN(Tensor);
+  // Note(jiayq): possibly a rule-of-three violation, but we explicitly
+  // discourage the use of = for Tensors.
+  Tensor& operator=(const Tensor& src) = delete;
 };
 
 // For simplicity, we will typedef Tensor<CPUContext> to TensorCPU.
-template <class Context> class Tensor;
 typedef Tensor<CPUContext> TensorCPU;
 
 }  // namespace caffe2

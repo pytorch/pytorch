@@ -42,9 +42,18 @@ RUN apt-get update && apt-get install -q -y \
   libopencv-dev \
   libprotobuf-dev \
   libsnappy-dev \
+  zlib1g-dev \
+  libbz2-dev \
   protobuf-compiler \
   python-dev \
   python-pip
+
+RUN cd /tmp && \
+  git clone https://github.com/facebook/rocksdb.git && \
+  cd /tmp/rocksdb && \
+  make && make install && \
+  cd / && \
+  rm -rf /tmp/rocksdb
 
 # Caffe2 works best with openmpi 1.8.5 or above (which has cuda support).
 # If you do not need openmpi, skip this step.

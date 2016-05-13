@@ -1,5 +1,6 @@
-#include "caffe2/core/blob.h"
 #include "caffe2/core/blob_serialization.h"
+
+#include "caffe2/core/blob.h"
 
 namespace caffe2 {
 
@@ -9,14 +10,22 @@ string Blob::Serialize(const string& name) const {
   return serializer->Serialize(*this, name);
 }
 
+// Specialization for StoreDeviceDetail for CPU - nothing needs to be done.
+template <>
+void TensorSerializer<CPUContext>::StoreDeviceDetail(
+    const Tensor<CPUContext>& input, TensorProto* proto) {}
+
 // The actual BlobSerializerRegistry object.
-DEFINE_TYPED_REGISTRY(BlobSerializerRegistry, CaffeTypeId, BlobSerializerBase);
+CAFFE_DEFINE_TYPED_REGISTRY(
+    BlobSerializerRegistry,
+    CaffeTypeId,
+    BlobSerializerBase);
 
 namespace {
 // Serialize TensorCPU.
-REGISTER_BLOB_SERIALIZER(tensor_cpu,
-                         (TypeMeta::Id<TensorCPU>()),
-                         TensorSerializer<CPUContext>);
+REGISTER_BLOB_SERIALIZER(
+    (TypeMeta::Id<TensorCPU>()),
+    TensorSerializer<CPUContext>);
 }  // namespace
 }  // namespace caffe2
 

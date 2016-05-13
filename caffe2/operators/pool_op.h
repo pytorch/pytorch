@@ -22,7 +22,6 @@ class PoolOp final : public ConvPoolOpBase<Context> {
 
   // Input: X
   // Output: Y
-  INPUT_OUTPUT_STATS(1, 1, 1, 1);
   DISABLE_COPY_AND_ASSIGN(PoolOp);
 };
 
@@ -40,7 +39,6 @@ class PoolGradientOp final : public ConvPoolOpBase<Context> {
 
   // Input: X, Y, dY
   // Output: dX
-  INPUT_OUTPUT_STATS(3, 3, 1, 1);
   DISABLE_COPY_AND_ASSIGN(PoolGradientOp);
 };
 

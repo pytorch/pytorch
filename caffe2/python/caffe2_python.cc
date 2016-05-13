@@ -1,35 +1,14 @@
-#include <Python.h>
-#define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
-#include <numpy/arrayobject.h>
+#include "caffe2/python/caffe2_python.h"
 
-#include <cstdint>
-#include <memory>
-#include <set>
-#include <string>
-#include <sstream>
-#include <vector>
+// TODO(Yangqing): avoid carpet-bombing "using namespace".
+using namespace caffe2;  // NOLINT
 
-#include "caffe2/core/context.h"
-#ifndef PYCAFFE2_CPU_ONLY
-#include "caffe2/core/context_gpu.h"
-#endif  // PYCAFFE2_CPU_ONLY
-#include "caffe2/core/init.h"
-#include "caffe2/core/net.h"
-#include "caffe2/core/operator.h"
-#include "caffe2/core/workspace.h"
-#include "caffe2/proto/caffe2.pb.h"
-
-//using namespace caffe2;  // NOLINT
 using caffe2::Blob;
 using caffe2::DeviceOption;
 using caffe2::Tensor;
 using caffe2::Workspace;
 using caffe2::CPUContext;
 using caffe2::OperatorDef;
-
-#ifndef PYCAFFE2_CPU_ONLY
-using caffe2::CUDAContext;
-#endif  // PYCAFFE2_CPU_ONLY
 
 // gWorkspaces allows us to define and switch between multiple workspaces in
 // Python.
@@ -39,11 +18,74 @@ static std::map<std::string, std::unique_ptr<Workspace> > gWorkspaces;
 static Workspace* gWorkspace = nullptr;
 static std::string gCurrentWorkspaceName;
 
-namespace {
+namespace caffe2 {
 
-using caffe2::string;
+BlobFetcherBase::~BlobFetcherBase() {}
+BlobFeederBase::~BlobFeederBase() {}
 
-bool SwitchWorkspaceInternal(const string& name, const bool create_if_missing) {
+CAFFE_DEFINE_TYPED_REGISTRY(
+    BlobFetcherRegistry,
+    CaffeTypeId,
+    BlobFetcherBase);
+CAFFE_DEFINE_TYPED_REGISTRY(
+    BlobFeederRegistry,
+    int,
+    BlobFeederBase);
+
+REGISTER_BLOB_FETCHER(
+    (TypeMeta::Id<TensorCPU>()),
+    TensorFetcher<CPUContext>);
+REGISTER_BLOB_FEEDER(
+    CPU,
+    TensorFeeder<CPUContext>);
+
+class StringFetcher : public BlobFetcherBase {
+ public:
+  PyObject* Fetch(const Blob& blob) override {
+    return StdStringToPyBytes(blob.Get<string>());
+  }
+};
+REGISTER_BLOB_FETCHER(
+    (TypeMeta::Id<string>()),
+    StringFetcher);
+
+static_assert(sizeof(int) == sizeof(int32_t),
+              "We make an assumption that int is always int32 for numpy "
+              "type mapping.");
+int CaffeToNumpyType(const TypeMeta& meta) {
+  static std::map<CaffeTypeId, int> numpy_type_map {
+    {TypeMeta::Id<float>(), NPY_FLOAT},
+    {TypeMeta::Id<float16>(), NPY_FLOAT16},
+    {TypeMeta::Id<int>(), NPY_INT},
+    {TypeMeta::Id<int64_t>(), NPY_LONGLONG},
+    // TODO(jiayq): Add more types here.
+  };
+  const auto it = numpy_type_map.find(meta.id());
+  return it == numpy_type_map.end() ? -1 : it->second;
+}
+
+const TypeMeta& NumpyTypeToCaffe(int numpy_type) {
+  static std::map<int, TypeMeta> caffe_type_map {
+    {NPY_FLOAT, TypeMeta::Make<float>()},
+    {NPY_FLOAT16, TypeMeta::Make<float16>()},
+    {NPY_INT, TypeMeta::Make<int>()},
+    {NPY_INT64, TypeMeta::Make<int64_t>()},
+    {NPY_LONG, sizeof(long) == sizeof(int) ?
+               TypeMeta::Make<int>() : TypeMeta::Make<int64_t>()},
+    {NPY_LONGLONG, TypeMeta::Make<int64_t>()},
+    // TODO(jiayq): Add more types here.
+  };
+  static TypeMeta unknown_type;
+  const auto it = caffe_type_map.find(numpy_type);
+  return it == caffe_type_map.end() ? unknown_type : it->second;
+}
+
+}  // namespace caffe2
+
+extern "C" {
+
+static bool SwitchWorkspaceInternal(
+    const string& name, const bool create_if_missing) {
   if (gWorkspaces.count(name)) {
     gCurrentWorkspaceName = name;
     gWorkspace = gWorkspaces[name].get();
@@ -59,110 +101,14 @@ bool SwitchWorkspaceInternal(const string& name, const bool create_if_missing) {
   }
 }
 
-inline string PyBytesToStdString(PyObject* pystring) {
-  return string(PyBytes_AsString(pystring), PyBytes_Size(pystring));
-}
-
-inline PyObject* StdStringToPyBytes(const string& str) {
-  return PyBytes_FromStringAndSize(str.c_str(), str.size());
-}
-
-template <typename T>
-inline void MakeStringInternal(std::stringstream& ss, const T& t) {
-  ss << t;
-}
-
-template <typename T, typename ... Args>
-inline void MakeStringInternal(std::stringstream& ss, const T& t, const Args&... args) {
-  MakeStringInternal(ss, t);
-  MakeStringInternal(ss, args...);
-}
-
-template <typename... Args>
-string MakeString(const Args&... args) {
-  std::stringstream ss;
-  MakeStringInternal(ss, args...);
-  return string(ss.str());
-}
-
-
-inline void PyErr_SetString(PyObject* type, const string& str) {
-  PyErr_SetString(type, str.c_str());
-}
-
-static_assert(sizeof(int) == sizeof(int32_t),
-              "Yangqing made a loose assumption that int will always be int32 "
-              "for numpy type mapping");
-
-template <typename T> struct NumpyTypeWrapper;
-template<> struct NumpyTypeWrapper<float> {
-  static const int type = NPY_FLOAT;
-};
-template<> struct NumpyTypeWrapper<int> {
-  static const int type = NPY_INT32;
-};
-
-template <typename T, class DeviceContext>
-PyObject* FetchTensor(const Tensor<DeviceContext>& tensor) {
-  DeviceContext context;
-  CAFFE_CHECK_GT(tensor.size(), 0);
-  std::vector<npy_intp> npy_dims;
-  for (const int dim : tensor.dims()) {
-    npy_dims.push_back(dim);
-  }
-  PyObject* array = PyArray_SimpleNew(
-      tensor.ndim(), npy_dims.data(), NumpyTypeWrapper<T>::type);
-  // Now, copy the data to the tensor.
-  // TODO(Yangqing): Is there an easier way to convert PyObject to
-  // PyArrayObject?
-  context.template Copy<T, DeviceContext, caffe2::CPUContext>(
-      tensor.size(), tensor.template data<T>(),
-      static_cast<T*>(PyArray_DATA(reinterpret_cast<PyArrayObject*>(array))));
-  context.FinishDeviceComputation();
-  return array;
-}
-
-template <typename T, class DeviceContext>
-PyObject* FeedTensor(const DeviceOption& option, PyArrayObject* original_array,
-                     Blob* blob) {
-  PyArrayObject* array = PyArray_GETCONTIGUOUS(original_array);
-  DeviceContext context(option);
-  Tensor<DeviceContext>* tensor =
-      blob->GetMutable<Tensor<DeviceContext> >();
-  // numpy requires long int as its dims.
-  int ndim = PyArray_NDIM(array);
-  npy_intp* npy_dims = PyArray_DIMS(array);
-  std::vector<int> dims;
-  for (int i = 0; i < ndim; ++i) {
-    dims.push_back(npy_dims[i]);
-  }
-  tensor->Reshape(dims);
-  // Now, copy the data to the tensor.
-  context.template Copy<T, caffe2::CPUContext, DeviceContext>(
-      tensor->size(), static_cast<T*>(PyArray_DATA(array)),
-      tensor->template mutable_data<T>());
-  context.FinishDeviceComputation();
-  Py_XDECREF(array);
-  Py_RETURN_TRUE;
-}
-
-}  // namespace
-
-extern "C" {
-
 PyObject* GlobalInit(PyObject* self, PyObject* args) {
-  static bool global_init_called = false;
-  if (global_init_called) {
-    PyErr_SetString(PyExc_RuntimeError, "GlobalInit already called.");
-    return NULL;
-  }
   PyObject* list;
   if (!PyArg_ParseTuple(args, "O!", &PyList_Type, &list)) {
     PyErr_SetString(PyExc_ValueError, "Incorrect arguments.");
-    return NULL;
+    return nullptr;
   }
   int argc = PyList_Size(list);
-  std::unique_ptr<char*> argv(new char*[std::max(argc, 1)]);
+  std::unique_ptr<char*[]> argv(new char*[std::max(argc, 1)]);
   char** raw_argv = argv.get();
   for (int i = 0; i < argc; ++i) {
     // Get the pointer to the string
@@ -175,10 +121,9 @@ PyObject* GlobalInit(PyObject* self, PyObject* args) {
     static char dummy_argv[] = "python";
     raw_argv[0] = dummy_argv;
   }
-  global_init_called = true;
-  if (!caffe2::GlobalInit(&argc, raw_argv)) {
+  if (!caffe2::GlobalInit(&argc, &raw_argv)) {
     PyErr_SetString(PyExc_RuntimeError, "Error in global init.");
-    return NULL;
+    return nullptr;
   }
   Py_RETURN_TRUE;
 }
@@ -203,35 +148,94 @@ PyObject* RegisteredOperators(PyObject* self, PyObject* args) {
   return list;
 }
 
+static bool GradientWrappersFromPyList(
+    PyObject* g_output_py, vector<GradientWrapper>* pgrad) {
+  // Just to be safe... we clear and resize grad. If the grad is passed in
+  // empty, this won't hurt much performance either.
+  vector<GradientWrapper>& grad = *pgrad;
+  grad.clear();
+  int size = PyList_Size(g_output_py);
+  grad.resize(size);
+  for (int i = 0; i < size; ++i) {
+    PyObject* obj = PyList_GetItem(g_output_py, i);
+    if (obj == Py_None) {
+      // No gradient info provided.
+      continue;
+    } else if (PyTuple_Check(obj)) {
+      // Is tuple: should be sparse containing indices and gradients.
+      if (PyTuple_Size(obj) != 2) {
+        PyErr_SetString(PyExc_TypeError,
+                       "Encountered a gradient tuple that is not of size 2");
+        return false;
+      }
+      grad[i].indices_ =
+          PyString_AsString(PyObject_Str(PyTuple_GetItem(obj, 0)));
+      grad[i].values_ =
+          PyString_AsString(PyObject_Str(PyTuple_GetItem(obj, 1)));
+    } else {
+      // Is dense type.
+      // TODO(jiayq): this could go really wrong because PyObject_Str can do
+      // any object. Consider sanity check?
+      grad[i].dense_ = PyString_AsString(PyObject_Str(obj));
+    }
+  }
+  return true;
+}
+
+static PyObject* PyListFromGradientWrappers(
+    const vector<GradientWrapper>& grad) {
+  PyObject* g_output_py = PyList_New(grad.size());
+  for (int i = 0; i < grad.size(); ++i) {
+    PyObject* obj = nullptr;
+    if (grad[i].IsEmpty()) {
+      // Return None
+      obj = Py_BuildValue("");
+    } else if (grad[i].IsDense()) {
+      // Return dense string
+      obj = StdStringToPyBytes(grad[i].dense_);
+    } else {
+      // Return sparse tuple
+      obj = PyTuple_Pack(2, StdStringToPyBytes(grad[i].indices_),
+                         StdStringToPyBytes(grad[i].values_));
+    }
+    CAFFE_CHECK_EQ(PyList_SetItem(g_output_py, i, obj), 0);
+  }
+  //TODO(jiayq): implement
+  return g_output_py;
+}
+
 PyObject* GetGradientDefs(PyObject* self, PyObject* args) {
   PyObject* def_string = nullptr;
-  if (!PyArg_ParseTuple(args, "|S", &def_string)) {
+  PyObject* g_output_py = nullptr;
+  if (!PyArg_ParseTuple(args, "SO!", &def_string, &PyList_Type, &g_output_py)) {
     PyErr_SetString(PyExc_ValueError,
                     "GetGradientDefs requires an input that is a serialized "
-                    "OperatorDef protobuffer.");
-    return NULL;
+                    "OperatorDef protobuffer, and a list containing the "
+                    "gradient of the original op's output.");
+    return nullptr;
   }
   OperatorDef def;
   if (!def.ParseFromString(PyBytesToStdString(def_string))) {
     PyErr_SetString(PyExc_ValueError,
                     "Provided string is not a valid OperatorDef protobuffer.");
-    return NULL;
+    return nullptr;
   }
-  std::unique_ptr<std::vector<OperatorDef> > grad_defs(GetGradientDefs(def));
-  if (grad_defs.get() == nullptr) {
-    PyErr_SetString(
-        PyExc_ValueError,
-        ("Gradient not registered for operator type " + def.type()).c_str());
-    return NULL;
+  if (!caffe2::GradientRegistry()->Has(def.type())) {
+    PyErr_SetString(PyExc_KeyError, "Gradient not registered.");
+    return nullptr;
   }
-  PyObject* list = PyList_New(grad_defs->size());
-  int i = 0;
-  for (const OperatorDef & grad_def : *grad_defs) {
+  vector<GradientWrapper> g_output;
+  if (!GradientWrappersFromPyList(g_output_py, &g_output)) {
+    return nullptr;
+  }
+  GradientOpsMeta meta = GetGradientForOp(def, g_output);
+  PyObject* grad_ops = PyList_New(meta.ops_.size());
+  for (int i = 0; i < meta.ops_.size(); ++i) {
     CAFFE_CHECK_EQ(PyList_SetItem(
-        list, i, StdStringToPyBytes(grad_def.SerializeAsString())), 0);
-    ++i;
+        grad_ops, i, StdStringToPyBytes(meta.ops_[i].SerializeAsString())), 0);
   }
-  return list;
+  PyObject* g_input_py = PyListFromGradientWrappers(meta.g_input_);
+  return PyTuple_Pack(2, grad_ops, g_input_py);
 }
 
 PyObject* SwitchWorkspace(PyObject* self, PyObject* args) {
@@ -242,7 +246,7 @@ PyObject* SwitchWorkspace(PyObject* self, PyObject* args) {
                     "SwitchWorkspace takes in a workspace name, and "
                     "an optional boolean value that specifies whether "
                     "we want to create the workspace if it is missing.");
-    return NULL;
+    return nullptr;
   }
   bool success = SwitchWorkspaceInternal(
       PyBytesToStdString(name),
@@ -252,7 +256,7 @@ PyObject* SwitchWorkspace(PyObject* self, PyObject* args) {
         PyExc_RuntimeError,
         "Workspace of the given name does not exist, and I am not instructed "
         "to create it either.");
-    return NULL;
+    return nullptr;
   }
   Py_RETURN_TRUE;
 }
@@ -277,7 +281,7 @@ PyObject* ResetWorkspace(PyObject* self, PyObject* args) {
     PyErr_SetString(PyExc_ValueError,
                     "ResetWorkspace takes in either no argument, or a string "
                     "specifying the root folder of the workspace.");
-    return NULL;
+    return nullptr;
   }
   CAFFE_VLOG(1) << "Resetting workspace.";
   if (root_folder == nullptr) {
@@ -315,7 +319,7 @@ PyObject* Blobs(PyObject* self, PyObject* args) {
 PyObject* HasBlob(PyObject* self, PyObject* args) {
   char* name;
   if (!PyArg_ParseTuple(args, "s", &name)) {
-    return NULL;
+    return nullptr;
   }
   if (gWorkspace->HasBlob(caffe2::string(name))) {
     Py_RETURN_TRUE;
@@ -327,34 +331,41 @@ PyObject* HasBlob(PyObject* self, PyObject* args) {
 PyObject* CreateNet(PyObject* self, PyObject* args) {
   PyObject* proto_string;
   if (!PyArg_ParseTuple(args, "S", &proto_string)) {
-    return NULL;
+    return nullptr;
   }
   caffe2::NetDef proto;
   if (!proto.ParseFromString(PyBytesToStdString(proto_string))) {
     PyErr_SetString(PyExc_ValueError, "Cannot parse input net string.");
-    return NULL;
+    return nullptr;
   }
   if (!gWorkspace->CreateNet(proto)) {
     PyErr_SetString(
         PyExc_RuntimeError,
         "Cannot create network. See console log for error messages.");
-    return NULL;
+    return nullptr;
   }
   Py_RETURN_TRUE;
 }
 
 PyObject* RunNet(PyObject* self, PyObject* args) {
-  char* name;
-  if (!PyArg_ParseTuple(args, "s", &name)) {
+  char* cname;
+  if (!PyArg_ParseTuple(args, "s", &cname)) {
     PyErr_SetString(PyExc_ValueError,
                     "Incorrect argument. Must pass in a single string.");
-    return NULL;
+    return nullptr;
   }
-  if (!gWorkspace->RunNet(caffe2::string(name))) {
+  caffe2::string name(cname);
+
+  bool result;
+  Py_BEGIN_ALLOW_THREADS;
+  result = gWorkspace->RunNet(name);
+  Py_END_ALLOW_THREADS;
+
+  if (!result) {
     PyErr_SetString(
         PyExc_RuntimeError,
         "Cannot run network. See console log for error messages.");
-    return NULL;
+    return nullptr;
   }
   Py_RETURN_TRUE;
 }
@@ -364,20 +375,24 @@ PyObject* BenchmarkNet(PyObject* self, PyObject* args) {
   char* name;
   int warmup_runs = 0;
   int main_runs = 0;
-  PyObject* run_individual = nullptr;
+  PyObject* run_individual_obj = nullptr;
   if (!PyArg_ParseTuple(args, "siiO", &name, &warmup_runs,
-                        &main_runs, &run_individual)) {
+                        &main_runs, &run_individual_obj)) {
     PyErr_SetString(PyExc_ValueError,
                     "Incorrect argument.");
-    return NULL;
+    return nullptr;
   }
   caffe2::NetBase* net = gWorkspace->GetNet(caffe2::string(name));
   if (net == nullptr) {
     PyErr_SetString(PyExc_RuntimeError, "Cannot find network.");
-    return NULL;
+    return nullptr;
   }
-  net->TEST_Benchmark(warmup_runs, main_runs,
-                      PyObject_IsTrue(run_individual));
+  bool run_individual = PyObject_IsTrue(run_individual_obj);
+
+  Py_BEGIN_ALLOW_THREADS;
+  net->TEST_Benchmark(warmup_runs, main_runs, run_individual_obj);
+  Py_END_ALLOW_THREADS;
+
   Py_RETURN_TRUE;
 }
 
@@ -386,7 +401,7 @@ PyObject* DeleteNet(PyObject* self, PyObject* args) {
   if (!PyArg_ParseTuple(args, "s", &name)) {
     PyErr_SetString(PyExc_ValueError,
                     "Incorrect argument. Must pass in a single string.");
-    return NULL;
+    return nullptr;
   }
   gWorkspace->DeleteNet(caffe2::string(name));
   Py_RETURN_TRUE;
@@ -406,18 +421,24 @@ PyObject* RunOperatorOnce(PyObject* self, PyObject* args) {
   if (!PyArg_ParseTuple(args, "S", &proto_string)) {
     PyErr_SetString(PyExc_ValueError,
                     "Incorrect argument. Must pass in a single string.");
-    return NULL;
+    return nullptr;
   }
   caffe2::OperatorDef proto;
   if (!proto.ParseFromString(PyBytesToStdString(proto_string))) {
     PyErr_SetString(PyExc_ValueError, "Cannot parse input operator proto.");
-    return NULL;
+    return nullptr;
   }
-  if (!gWorkspace->RunOperatorOnce(proto)) {
+
+  bool result;
+  Py_BEGIN_ALLOW_THREADS;
+  result = gWorkspace->RunOperatorOnce(proto);
+  Py_END_ALLOW_THREADS;
+
+  if (!result) {
     PyErr_SetString(
         PyExc_RuntimeError,
         "Cannot run operator. See console log for error messages.");
-    return NULL;
+    return nullptr;
   }
   Py_RETURN_TRUE;
 }
@@ -427,18 +448,24 @@ PyObject* RunNetOnce(PyObject* self, PyObject* args) {
   if (!PyArg_ParseTuple(args, "S", &proto_string)) {
     PyErr_SetString(PyExc_ValueError,
                     "Incorrect argument. Must pass in a single string.");
-    return NULL;
+    return nullptr;
   }
   caffe2::NetDef proto;
   if (!proto.ParseFromString(PyBytesToStdString(proto_string))) {
     PyErr_SetString(PyExc_ValueError, "Cannot parse input net proto.");
-    return NULL;
+    return nullptr;
   }
-  if (!gWorkspace->RunNetOnce(proto)) {
+
+  bool result;
+  Py_BEGIN_ALLOW_THREADS;
+  result = gWorkspace->RunNetOnce(proto);
+  Py_END_ALLOW_THREADS;
+
+  if (!result) {
     PyErr_SetString(
         PyExc_RuntimeError,
         "Cannot run net. See console log for error messages.");
-    return NULL;
+    return nullptr;
   }
   Py_RETURN_TRUE;
 }
@@ -448,18 +475,24 @@ PyObject* RunPlan(PyObject* self, PyObject* args) {
   if (!PyArg_ParseTuple(args, "S", &proto_string)) {
     PyErr_SetString(PyExc_ValueError,
                     "Incorrect argument. Must pass in a single string.");
-    return NULL;
+    return nullptr;
   }
   caffe2::PlanDef proto;
   if (!proto.ParseFromString(PyBytesToStdString(proto_string))) {
     PyErr_SetString(PyExc_ValueError, "Cannot parse input plan proto.");
-    return NULL;
+    return nullptr;
   }
-  if (!gWorkspace->RunPlan(proto)) {
+
+  bool result;
+  Py_BEGIN_ALLOW_THREADS;
+  result = gWorkspace->RunPlan(proto);
+  Py_END_ALLOW_THREADS;
+
+  if (!result) {
     PyErr_SetString(
         PyExc_RuntimeError,
         "Cannot run plan. See console log for error messages.");
-    return NULL;
+    return nullptr;
   }
   Py_RETURN_TRUE;
 }
@@ -468,7 +501,7 @@ PyObject* CreateBlob(PyObject* self, PyObject* args) {
   char* name_char;
   if (!PyArg_ParseTuple(args, "s", &name_char)) {
     PyErr_SetString(PyExc_ValueError, "Incorrect arguments.");
-    return NULL;
+    return nullptr;
   }
   caffe2::string name(name_char);
   (void) gWorkspace->CreateBlob(name);
@@ -479,46 +512,36 @@ PyObject* FetchBlob(PyObject* self, PyObject* args) {
   char* name;
   if (!PyArg_ParseTuple(args, "s", &name)) {
     PyErr_SetString(PyExc_ValueError, "Incorrect arguments.");
-    return NULL;
+    return nullptr;
   }
   if (!gWorkspace->HasBlob(caffe2::string(name))) {
     PyErr_SetString(PyExc_ValueError, "Requested blob does not exist.");
-    return NULL;
+    return nullptr;
   }
   const caffe2::Blob& blob = *(gWorkspace->GetBlob(caffe2::string(name)));
-  if (blob.IsType<Tensor<CPUContext> >()) {
-    const Tensor<CPUContext>& tensor = blob.Get<Tensor<CPUContext> >();
-    if (tensor.IsType<float>()) {
-      return FetchTensor<float, CPUContext>(tensor);
-    } else if (tensor.IsType<int>()) {
-      return FetchTensor<int, CPUContext>(tensor);
-    }
+  std::unique_ptr<BlobFetcherBase> fetcher(
+      CreateFetcher(blob.meta().id()));
+  if (fetcher.get()) {
+    return fetcher->Fetch(blob);
+  } else {
+    // If there is no fetcher registered, return a metainfo string.
+    // If all branches failed, we will return a metainfo string.
+    std::stringstream ss;
+    ss << caffe2::string(name) << ", a C++ native class of type "
+       << blob.TypeName() << ".";
+    return StdStringToPyBytes(ss.str());
   }
-#ifndef PYCAFFE2_CPU_ONLY
-  if (blob.IsType<Tensor<CUDAContext> >()) {
-    const Tensor<CUDAContext>& tensor = blob.Get<Tensor<CUDAContext> >();
-    if (tensor.IsType<float>()) {
-      return FetchTensor<float, CUDAContext>(tensor);
-    } else if (tensor.IsType<int>()) {
-      return FetchTensor<int, CUDAContext>(tensor);
-    }
-  }
-#endif  // !PYCAFFE2_CPU_ONLY
-  // If all branches failed, we will return a metainfo string.
-  std::stringstream ss;
-  ss << caffe2::string(name) << ", a C++ native class of type "
-     << blob.TypeName() << ".";
-  return StdStringToPyBytes(ss.str());
 }
 
 PyObject* FeedBlob(PyObject* self, PyObject* args) {
   char* name_char;
   PyArrayObject* array = nullptr;
   PyObject* device_option_string = nullptr;
+  // TODO(dzhulgakov): implement accepting other types (at least string)
   if (!PyArg_ParseTuple(args, "sO!|O", &name_char, &PyArray_Type, &array,
                         &device_option_string)) {
     PyErr_SetString(PyExc_ValueError, "Incorrect arguments.");
-    return NULL;
+    return nullptr;
   }
   caffe2::string name(name_char);
   DeviceOption option;
@@ -526,180 +549,80 @@ PyObject* FeedBlob(PyObject* self, PyObject* args) {
     // If we have a device option passed in, read it.
     if (!option.ParseFromString(PyBytesToStdString(device_option_string))) {
       PyErr_SetString(PyExc_ValueError, "Cannot parse device option string.");
-      return NULL;
+      return nullptr;
     }
   }
   Blob* blob = gWorkspace->CreateBlob(name);
-  int data_type = PyArray_TYPE(array);
 
-  // Since there is really no polymorphism, we will have to do so...
-  switch (option.device_type()) {
-  case caffe2::CPU:
-    switch (data_type) {
-      case NPY_LONG:
-        if (sizeof(long) != sizeof(int)) {
-          CAFFE_LOG_FATAL << "On this platform NPY_LONG does not equal to "
-                             "NPY_INT and such type is not supported yet.";
-        } else {
-          return FeedTensor<int, caffe2::CPUContext>(option, array, blob);
-        }
-      case NPY_INT:
-        return FeedTensor<int, caffe2::CPUContext>(option, array, blob);
-      case NPY_FLOAT:
-        return FeedTensor<float, caffe2::CPUContext>(option, array, blob);
-      default:
-        PyErr_SetString(PyExc_TypeError,
-                        MakeString("Unsupported numpy data type: ", data_type, "."));
-        return NULL;
-    }
-#ifndef PYCAFFE2_CPU_ONLY
-  case caffe2::CUDA:
-    switch (data_type) {
-      case NPY_LONG:
-        if (sizeof(long) != sizeof(int)) {
-          CAFFE_LOG_FATAL << "On this platform NPY_LONG does not equal to "
-                             "NPY_INT and such type is not supported yet.";
-        } else {
-          return FeedTensor<int, caffe2::CUDAContext>(option, array, blob);
-        }
-      case NPY_INT:
-        return FeedTensor<int, caffe2::CUDAContext>(option, array, blob);
-      case NPY_FLOAT:
-        return FeedTensor<float, caffe2::CUDAContext>(option, array, blob);
-      default:
-        PyErr_SetString(PyExc_TypeError,
-                        MakeString("Unsupported numpy data type: ", data_type, "."));
-        return NULL;
-    }
-#endif  // !PYCAFFE2_CPU_ONLY
-  default:
-    PyErr_SetString(PyExc_TypeError, "Unknown device type.");
-    return NULL;
+  std::unique_ptr<BlobFeederBase> feeder(
+      CreateFeeder(option.device_type()));
+  if (!feeder.get()) {
+    PyErr_SetString(PyExc_TypeError,
+                    "Unknown device type encountered in FeedBlob.");
+    return nullptr;
   }
+  return feeder->Feed(option, array, blob);
 }
-
-PyObject* HasGPUSupport(PyObject* self, PyObject* args) {
-#ifdef PYCAFFE2_CPU_ONLY
-  return Py_BuildValue("i", 0);
-#else  // PYCAFFE2_CPU_ONLY
-  return Py_BuildValue("i", 1);
-#endif  // PYCAFFE2_CPU_ONLY
-}
-
-#ifndef PYCAFFE2_CPU_ONLY
-// Here are functions that are purely GPU-based functions to be filled.
-
-PyObject* NumberOfGPUs(PyObject* self, PyObject* args) {
-  int num_devices = 0;
-  auto err = cudaGetDeviceCount(&num_devices);
-  if (err == cudaErrorNoDevice || err == cudaErrorInsufficientDriver) {
-    return Py_BuildValue("i", 0);
-  } else if (err != cudaSuccess) {
-    PyErr_SetString(PyExc_RuntimeError, "Runtime CUDA error.");
-    return NULL;
-  }
-  return Py_BuildValue("i", num_devices);
-}
-
-PyObject* SetDefaultGPUID(PyObject* self, PyObject* args) {
-  int device_id;
-  if (!PyArg_ParseTuple(args, "i", &device_id)) {
-    PyErr_SetString(PyExc_ValueError, "Incorrect arguments: must pass an int.");
-    return NULL;
-  }
-  caffe2::SetDefaultGPUID(device_id);
-  Py_RETURN_TRUE;
-}
-
-PyObject* GetDefaultGPUID(PyObject* self, PyObject* args) {
-  int device_id = caffe2::GetDefaultGPUID();
-  return Py_BuildValue("i", device_id);
-}
-
-PyObject* GetCudaPeerAccessPattern(PyObject* self, PyObject* args) {
-  std::vector<std::vector<bool> > pattern;
-  if (!caffe2::GetCudaPeerAccessPattern(&pattern)) {
-    PyErr_SetString(PyExc_RuntimeError,
-                    "Error in running caffe2::GetCudaPeerAccessPattern.");
-    return NULL;
-  }
-  std::vector<npy_intp> npy_dims;
-  int num_devices = pattern.size();
-  npy_dims.push_back(num_devices);
-  npy_dims.push_back(num_devices);
-
-  PyObject* array = PyArray_SimpleNew(2, npy_dims.data(), NPY_BOOL);
-  bool* npy_data = static_cast<bool*>(
-      PyArray_DATA(reinterpret_cast<PyArrayObject*>(array)));
-  for (int i = 0; i < num_devices; ++i) {
-    for (int j = 0; j < num_devices; ++j) {
-      *(npy_data++) = pattern[i][j];
-    }
-  }
-  return array;
-}
-
-#endif  // !PYCAFFE2_CPU_ONLY
 
 // A simple macro to avoid writing repeated symbols.
 #define _PYNAME(name) {#name, name, METH_VARARGS, ""}
-static PyMethodDef gPycaffe2Methods[] = {
-  // TODO(Yangqing): write the methods string.
-  // Note(Yangqing): For any function that we are going to override in the
-  // python file, we prepend "cc_" here.
-  _PYNAME(GlobalInit),
-  _PYNAME(RegisteredOperators),
-  {"cc_GetGradientDefs", GetGradientDefs, METH_VARARGS, ""},
-  _PYNAME(SwitchWorkspace),
-  _PYNAME(CurrentWorkspace),
-  _PYNAME(Workspaces),
-  {"cc_ResetWorkspace", ResetWorkspace, METH_VARARGS, ""},
-  _PYNAME(RootFolder),
-  _PYNAME(OnModuleExit),
-  _PYNAME(Blobs),
-  _PYNAME(HasBlob),
-  {"cc_CreateNet", CreateNet, METH_VARARGS, ""},
-  _PYNAME(RunNet),
-  _PYNAME(BenchmarkNet),
-  _PYNAME(DeleteNet),
-  _PYNAME(Nets),
-  {"cc_RunOperatorOnce", RunOperatorOnce, METH_VARARGS, ""},
-  {"cc_RunNetOnce", RunNetOnce, METH_VARARGS, ""},
-  {"cc_RunPlan", RunPlan, METH_VARARGS, ""},
-  _PYNAME(CreateBlob),
-  _PYNAME(FetchBlob),
-  {"cc_FeedBlob", FeedBlob, METH_VARARGS, ""},
-  _PYNAME(HasGPUSupport),
-#ifndef PYCAFFE2_CPU_ONLY
-  _PYNAME(NumberOfGPUs),
-  _PYNAME(SetDefaultGPUID),
-  _PYNAME(GetDefaultGPUID),
-  _PYNAME(GetCudaPeerAccessPattern),
-#endif   // !PYCAFFE2_CPU_ONLY
-  {NULL, NULL, 0, NULL},  // end of python methods.
-};
+PyMethodDef* GetCaffe2PythonMethods() {
+  static PyMethodDef gCaffe2PythonMethods[] = {
+    // Note(Yangqing): For any function that we are going to override in the
+    // python file, we prepend "cc_" here.
+    _PYNAME(GlobalInit),
+    _PYNAME(RegisteredOperators),
+    {"cc_GetGradientDefs", GetGradientDefs, METH_VARARGS, ""},
+    _PYNAME(SwitchWorkspace),
+    _PYNAME(CurrentWorkspace),
+    _PYNAME(Workspaces),
+    {"cc_ResetWorkspace", ResetWorkspace, METH_VARARGS, ""},
+    _PYNAME(RootFolder),
+    _PYNAME(OnModuleExit),
+    _PYNAME(Blobs),
+    _PYNAME(HasBlob),
+    {"cc_CreateNet", CreateNet, METH_VARARGS, ""},
+    _PYNAME(RunNet),
+    _PYNAME(BenchmarkNet),
+    _PYNAME(DeleteNet),
+    _PYNAME(Nets),
+    {"cc_RunOperatorOnce", RunOperatorOnce, METH_VARARGS, ""},
+    {"cc_RunNetOnce", RunNetOnce, METH_VARARGS, ""},
+    {"cc_RunPlan", RunPlan, METH_VARARGS, ""},
+    _PYNAME(CreateBlob),
+    _PYNAME(FetchBlob),
+    {"cc_FeedBlob", FeedBlob, METH_VARARGS, ""},
+    {nullptr, nullptr, 0, nullptr},  // end of python methods.
+  };
+  return gCaffe2PythonMethods;
+}
 #undef _PYNAME
 
 // This is a workaround so we can deal with numpy's import_array behavior.
 // Despite the fact that you may think import_array() is a function call,
-// it seems that (as of 1.10) that is defined as a macro. As a result, we
-// wrap it inside a function to make everythings safe, as well as checking
-// the different behaviors in python 2 and 3.
+// it is defined as a macro (as of 1.10). As a result, we wrap it inside a
+// function to make everythings safe, as well as dealing with  the different
+// behaviors in python 2 and 3.
 #if PY_MAJOR_VERSION >= 3
 #define CAFFE2_NUMPY_RETURN_TYPE int
 #else
 #define CAFFE2_NUMPY_RETURN_TYPE void
 #endif
 
-CAFFE2_NUMPY_RETURN_TYPE caffe2_init_numpy_wrapper() {
+static CAFFE2_NUMPY_RETURN_TYPE import_array_wrapper() {
   import_array();
 }
 
-void common_init_libcaffe2_python(void) {
-  caffe2_init_numpy_wrapper();  // for numpy
+void common_init_libcaffe2_python_cpu() {
+  import_array_wrapper();
+  static bool initialized = false;
+  if (initialized) {
+    return;
+  }
   // We will create a default workspace for us to run stuff.
   SwitchWorkspaceInternal("default", true);
   gCurrentWorkspaceName = "default";
+  initialized = true;
 }
 
 // The initialization code.
@@ -724,39 +647,41 @@ static int caffe2_python_clear(PyObject* m) {
 
 static struct PyModuleDef gModuleDef = {
   PyModuleDef_HEAD_INIT,
-  "libcaffe2_python",
-  NULL,
+  "libcaffe2_python_cpu",
+  nullptr,
   sizeof(struct module_state),
-  gPycaffe2Methods,
-  NULL,
+  GetCaffe2PythonMethods(),
+  nullptr,
   caffe2_python_traverse,
   caffe2_python_clear,
-  NULL
+  nullptr
 };
 
-PyObject* PyInit_libcaffe2_python(void) {
+PyObject* PyInit_libcaffe2_python_cpu(void) {
   PyObject* module = PyModule_Create(&gModuleDef);
   if (module == nullptr) {
-    return NULL;
+    return nullptr;
   }
   struct module_state* st = ModuleGetState(module);
-  st->error = PyErr_NewException("libcaffe2_python.Error", NULL, NULL);
-  if (st->error == NULL) {
+  st->error = PyErr_NewException(
+      "libcaffe2_python_cpu.Error", nullptr, nullptr);
+  if (st->error == nullptr) {
     Py_DECREF(module);
-    return NULL;
+    return nullptr;
   }
+  common_init_libcaffe2_python_cpu();
   return module;
-  common_init_libcaffe2_python();
 }
 
 #else  // PY_MAJOR_VERSION >= 3
 
-void initlibcaffe2_python(void) {
-  PyObject* module = Py_InitModule("libcaffe2_python", gPycaffe2Methods);
+void initlibcaffe2_python_cpu(void) {
+  PyObject* module = Py_InitModule(
+      "libcaffe2_python_cpu", GetCaffe2PythonMethods());
   if (module == nullptr) {
     return;
   }
-  common_init_libcaffe2_python();
+  common_init_libcaffe2_python_cpu();
 }
 
 #endif  // PY_MAJOR_VERSION >= 3

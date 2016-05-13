@@ -1,9 +1,11 @@
+#include "caffe2/core/workspace.h"
+
 #include <algorithm>
 #include <ctime>
 
 #include "caffe2/core/operator.h"
 #include "caffe2/core/net.h"
-#include "caffe2/core/workspace.h"
+#include "caffe2/core/timer.h"
 #include "caffe2/proto/caffe2.pb.h"
 
 namespace caffe2 {
@@ -92,10 +94,6 @@ bool Workspace::RunOperatorOnce(const OperatorDef& op_def) {
     CAFFE_LOG_ERROR << "Cannot create operator of type " << op_def.type();
     return false;
   }
-  if (!op->Verify()) {
-    CAFFE_LOG_ERROR << "Error when setting up operator " << op_def.type();
-    return false;
-  }
   if (!op->Run()) {
     CAFFE_LOG_ERROR << "Error when running operator " << op_def.type();
     return false;
@@ -117,7 +115,7 @@ bool Workspace::RunNetOnce(const NetDef& net_def) {
 
 bool Workspace::RunPlan(const PlanDef& plan) {
   CAFFE_LOG_INFO << "Started executing plan.";
-  if (plan.network_size() == 0 || plan.execution_step_size() == 0) {
+  if (plan.execution_step_size() == 0) {
     CAFFE_LOG_WARNING << "Nothing to run - did you define a correct plan?";
     // We will do nothing, but the plan is still legal so we will return true.
     return true;
@@ -130,20 +128,17 @@ bool Workspace::RunPlan(const PlanDef& plan) {
       return false;
     }
   }
-  clock_t start_time = clock();
+  Timer plan_timer;
   for (const ExecutionStep& step : plan.execution_step()) {
-    clock_t step_start_time = clock();
+    Timer step_timer;
     if (!ExecuteStepRecursive(step)) {
       CAFFE_LOG_ERROR << "Failed initializing step " << step.name();
       return false;
     }
-    CAFFE_LOG_INFO << "Step " << step.name() << " took "
-              << static_cast<float>(clock() - step_start_time) / CLOCKS_PER_SEC
-              << " seconds.";
+    CAFFE_LOG_INFO << "Step " << step.name() << " took " << step_timer.Seconds()
+                   << " seconds.";
   }
-  CAFFE_LOG_INFO << "Total plan took "
-            << static_cast<float>(clock() - start_time) / CLOCKS_PER_SEC
-            << " seconds.";
+  CAFFE_LOG_INFO << "Total plan took " << plan_timer.Seconds() << " seconds.";
   CAFFE_LOG_INFO << "Plan executed successfully.";
   return true;
 }

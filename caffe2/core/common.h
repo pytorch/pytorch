@@ -1,9 +1,11 @@
 #ifndef CAFFE2_CORE_COMMON_H_
 #define CAFFE2_CORE_COMMON_H_
 
-#include <memory>
-#include <string>
 #include <map>
+#include <memory>
+#include <set>
+#include <string>
+#include <type_traits>
 #include <vector>
 
 namespace caffe2 {
@@ -20,6 +22,8 @@ using CaffeMap = std::map<Key, Value>;
 // Using statements for common classes that we refer to in caffe2 very often.
 // Note that we only place it inside caffe2 so the global namespace is not
 // polluted.
+/* using override */
+using std::set;
 using std::string;
 using std::unique_ptr;
 using std::vector;
@@ -39,7 +43,7 @@ static_assert(sizeof(float16) == 2,
               "This should always be satisfied - float16 safeguard.");
 
 // Just in order to mark things as not implemented. Do not use in final code.
-#define NOT_IMPLEMENTED CAFFE_LOG_FATAL << "Not Implemented."
+#define CAFFE_NOT_IMPLEMENTED CAFFE_LOG_FATAL << "Not Implemented."
 
 // suppress an unused variable.
 #define UNUSED_VARIABLE __attribute__((unused))
@@ -48,8 +52,16 @@ static_assert(sizeof(float16) == 2,
 // disable the usage of the class in std containers.
 #define DISABLE_COPY_AND_ASSIGN(classname)                                     \
 private:                                                                       \
-  classname(const classname&);                                                 \
-  classname& operator=(const classname&)
+  classname(const classname&) = delete;                                        \
+  classname& operator=(const classname&) = delete
 
 }  // namespace caffe2
+
+
+namespace std {
+template<>
+struct is_fundamental<caffe2::__f16> : std::integral_constant<bool, true> {
+};
+}  // namespace std
+
 #endif  // CAFFE2_CORE_COMMON_H_

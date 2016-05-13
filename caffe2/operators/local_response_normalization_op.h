@@ -51,7 +51,6 @@ class LRNOpBase : public Operator<Context> {
   const StorageOrder order_;
   const int pre_pad_;
   // Input: X; Output: Y, scale.
-  INPUT_OUTPUT_STATS(1, 1, 2, 2);
   DISABLE_COPY_AND_ASSIGN(LRNOpBase);
 };
 
@@ -85,7 +84,6 @@ class LRNGradientOp final : public LRNOpBase<T, Context> {
  protected:
   // Input: X, Y, scale, dY; Output: dX
   INPUT_TAGS(INPUT, OUTPUT, SCALE, OUTPUT_GRAD);
-  INPUT_OUTPUT_STATS(4, 4, 1, 1);
   DISABLE_COPY_AND_ASSIGN(LRNGradientOp);
 };
 

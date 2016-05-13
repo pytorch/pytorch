@@ -1,12 +1,14 @@
+#include "caffe2/core/db.h"
+
 #include <mutex>
 
-#include "caffe2/core/db.h"
+#include "caffe2/core/blob_serialization.h"
 #include "caffe2/core/logging.h"
 
 namespace caffe2 {
 namespace db {
 
-DEFINE_REGISTRY(Caffe2DBRegistry, DB, const string&, Mode);
+CAFFE_DEFINE_REGISTRY(Caffe2DBRegistry, DB, const string&, Mode);
 
 // Below, we provide a bare minimum database "minidb" as a reference
 // implementation as well as a portable choice to store data.
@@ -22,6 +24,10 @@ class MiniDBCursor : public Cursor {
   }
   ~MiniDBCursor() {}
 
+  void Seek(const string& key) override {
+    CAFFE_LOG_FATAL << "MiniDB does not support seeking to a specifi key.";
+  }
+
   void SeekToFirst() override {
     fseek(file_, 0, SEEK_SET);
     CAFFE_CHECK(!feof(file_)) << "Hmm, empty file?";
@@ -34,7 +40,7 @@ class MiniDBCursor : public Cursor {
     // First, read in the key and value length.
     if (fread(&key_len_, sizeof(int), 1, file_) == 0) {
       // Reaching EOF.
-      CAFFE_LOG_INFO << "EOF reached, setting valid to false";
+      CAFFE_VLOG(1) << "EOF reached, setting valid to false";
       valid_ = false;
       return;
     }
@@ -148,6 +154,25 @@ class MiniDB : public DB {
 
 REGISTER_CAFFE2_DB(MiniDB, MiniDB);
 REGISTER_CAFFE2_DB(minidb, MiniDB);
+
+string DBReaderSerializer::Serialize(const Blob& blob, const string& name) {
+  CAFFE_CHECK(blob.IsType<DBReader>());
+  auto& reader = blob.Get<DBReader>();
+  DBProto proto;
+  proto.set_name(name);
+  proto.set_source(reader.source_);
+  proto.set_db_type(reader.db_type_);
+  if (reader.cursor() && reader.cursor()->SupportsSeek()) {
+    proto.set_key(reader.cursor()->key());
+  }
+  return proto.SerializeAsString();
+}
+
+namespace {
+// Serialize TensorCPU.
+REGISTER_BLOB_SERIALIZER((TypeMeta::Id<DBReader>()),
+                         DBReaderSerializer);
+}  // namespace
 
 }  // namespacd db
 }  // namespace caffe2

@@ -4,10 +4,8 @@
 
 // Note: Instead of directly failing, we will choose to not build this operator
 // if cudnn version is not high enough.
-//static_assert(CUDNN_VERSION >= 4000,
-//              "CudnnSpatialBN requires cudnn version 4.0 or above.");
-
-#if CUDNN_VERSION >= 4000
+static_assert(CUDNN_VERSION >= 5000,
+             "CudnnSpatialBN requires cudnn version 5.0 or above.");
 
 namespace caffe2 {
 
@@ -19,7 +17,7 @@ class CudnnSpatialBNOp final : public SpatialBNOpBase<CUDAContext> {
   USE_OPERATOR_FUNCTIONS(CUDAContext);
   CudnnSpatialBNOp(const OperatorDef& operator_def, Workspace* ws)
       : SpatialBNOpBase<CUDAContext>(operator_def, ws),
-        cudnn_wrapper_(&device_context_) {
+        cudnn_wrapper_(&context_) {
     CUDNN_CHECK(cudnnCreateTensorDescriptor(&data_desc_));
     CUDNN_CHECK(cudnnCreateTensorDescriptor(&bn_param_desc_));
     if (epsilon_ < CUDNN_BN_MIN_EPSILON) {
@@ -41,7 +39,7 @@ class CudnnSpatialBNOp final : public SpatialBNOpBase<CUDAContext> {
   CuDNNWrapper cudnn_wrapper_;
   cudnnTensorDescriptor_t data_desc_;
   cudnnTensorDescriptor_t bn_param_desc_;
-  vector<int> cudnn_input_dims_;
+  vector<TIndex> cudnn_input_dims_;
   DISABLE_COPY_AND_ASSIGN(CudnnSpatialBNOp);
 };
 
@@ -53,7 +51,7 @@ class CudnnSpatialBNGradientOp final
   USE_OPERATOR_FUNCTIONS(CUDAContext);
   CudnnSpatialBNGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : SpatialBNGradientOpBase<CUDAContext>(operator_def, ws),
-        cudnn_wrapper_(&device_context_) {
+        cudnn_wrapper_(&context_) {
     CUDNN_CHECK(cudnnCreateTensorDescriptor(&data_desc_));
     CUDNN_CHECK(cudnnCreateTensorDescriptor(&bn_param_desc_));
     if (epsilon_ < CUDNN_BN_MIN_EPSILON) {
@@ -75,7 +73,7 @@ class CudnnSpatialBNGradientOp final
   CuDNNWrapper cudnn_wrapper_;
   cudnnTensorDescriptor_t data_desc_;
   cudnnTensorDescriptor_t bn_param_desc_;
-  vector<int> cudnn_input_dims_;
+  vector<TIndex> cudnn_input_dims_;
   DISABLE_COPY_AND_ASSIGN(CudnnSpatialBNGradientOp);
 };
 
@@ -91,14 +89,14 @@ bool CudnnSpatialBNOp<T>::RunOnDevice() {
   const auto& bias = Input(BIAS);
 
   CAFFE_DCHECK_EQ(X.ndim(), 4);
-  const int N = X.dim(0);
-  const int C = (order_ == StorageOrder::NCHW ? X.dim(1) : X.dim(3));
-  const int H = (order_ == StorageOrder::NCHW ? X.dim(2) : X.dim(1));
-  const int W = (order_ == StorageOrder::NCHW ? X.dim(3) : X.dim(2));
+  const int N = X.dim32(0);
+  const int C = (order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(3));
+  const int H = (order_ == StorageOrder::NCHW ? X.dim32(2) : X.dim32(1));
+  const int W = (order_ == StorageOrder::NCHW ? X.dim32(3) : X.dim32(2));
   CAFFE_DCHECK_EQ(scale.ndim(), 1);
   CAFFE_DCHECK_EQ(bias.ndim(), 1);
-  CAFFE_DCHECK_EQ(scale.dim(0), C);
-  CAFFE_DCHECK_EQ(bias.dim(0), C);
+  CAFFE_DCHECK_EQ(scale.dim32(0), C);
+  CAFFE_DCHECK_EQ(bias.dim32(0), C);
   // See if we need to reshape.
   if (X.dims() != cudnn_input_dims_) {
     CAFFE_VLOG(1) << "Setting descriptors.";
@@ -117,8 +115,8 @@ bool CudnnSpatialBNOp<T>::RunOnDevice() {
     const auto& est_inv_var = Input(EST_INV_VAR);
     CAFFE_DCHECK_EQ(est_mean.ndim(), 1);
     CAFFE_DCHECK_EQ(est_inv_var.ndim(), 1);
-    CAFFE_DCHECK_EQ(est_mean.dim(0), C);
-    CAFFE_DCHECK_EQ(est_inv_var.dim(0), C);
+    CAFFE_DCHECK_EQ(est_mean.dim32(0), C);
+    CAFFE_DCHECK_EQ(est_inv_var.dim32(0), C);
 
     auto* Y = Output(OUTPUT);
     Y->ReshapeLike(X);
@@ -149,8 +147,8 @@ bool CudnnSpatialBNOp<T>::RunOnDevice() {
       // Does not need to do initialization.
       CAFFE_DCHECK_EQ(running_mean->ndim(), 1);
       CAFFE_DCHECK_EQ(running_inv_var->ndim(), 1);
-      CAFFE_DCHECK_EQ(running_mean->dim(0), C);
-      CAFFE_DCHECK_EQ(running_inv_var->dim(0), C);
+      CAFFE_DCHECK_EQ(running_mean->dim32(0), C);
+      CAFFE_DCHECK_EQ(running_inv_var->dim32(0), C);
       this_momentum = momentum_;
     }
     // If specified, save the mean and inv var results.
@@ -186,12 +184,12 @@ bool CudnnSpatialBNGradientOp<T>::RunOnDevice() {
   const auto& dY = Input(OUTPUT_GRAD);
 
   CAFFE_DCHECK_EQ(X.ndim(), 4);
-  const int N = X.dim(0);
-  const int C = (order_ == StorageOrder::NCHW ? X.dim(1) : X.dim(3));
-  const int H = (order_ == StorageOrder::NCHW ? X.dim(2) : X.dim(1));
-  const int W = (order_ == StorageOrder::NCHW ? X.dim(3) : X.dim(2));
+  const int N = X.dim32(0);
+  const int C = (order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(3));
+  const int H = (order_ == StorageOrder::NCHW ? X.dim32(2) : X.dim32(1));
+  const int W = (order_ == StorageOrder::NCHW ? X.dim32(3) : X.dim32(2));
   CAFFE_DCHECK_EQ(scale.ndim(), 1);
-  CAFFE_DCHECK_EQ(scale.dim(0), C);
+  CAFFE_DCHECK_EQ(scale.dim32(0), C);
   // See if we need to reshape.
   if (X.dims() != cudnn_input_dims_) {
     cudnn_input_dims_ = X.dims();
@@ -240,26 +238,3 @@ REGISTER_CUDNN_OPERATOR(SpatialBN, CudnnSpatialBNOp<float>);
 REGISTER_CUDNN_OPERATOR(SpatialBNGradient, CudnnSpatialBNGradientOp<float>);
 }  // namespace
 }  // namespace caffe2
-
-#else // CUDNN_VERSION >= 4000
-
-namespace caffe2 {
-class CudnnVersionTooLowForSpatialBN final : public OperatorBase {
- public:
-  explicit CudnnVersionTooLowForSpatialBN(
-      const OperatorDef& operator_def, Workspace* ws)
-      : OperatorBase(operator_def, ws) {
-    CAFFE_LOG_FATAL << "Your cudnn version is under V4, so cudnn Spatial "
-                       "Batch normalization is not available.";
-  }
-};
-namespace {
-REGISTER_CUDA_OPERATOR(SpatialBN, CudnnVersionTooLowForSpatialBN);
-REGISTER_CUDA_OPERATOR(SpatialBNGradient, CudnnVersionTooLowForSpatialBN);
-
-REGISTER_CUDNN_OPERATOR(SpatialBN, CudnnVersionTooLowForSpatialBN);
-REGISTER_CUDNN_OPERATOR(SpatialBNGradient, CudnnVersionTooLowForSpatialBN);
-}
-}  // namespace caffe2
-
-#endif // CUDNN_VERSION >= 4000

@@ -10,6 +10,7 @@
 #include "caffe2/core/common.h"
 #include "caffe2/core/net.h"
 #include "caffe2/core/operator_gradient.h"
+#include "caffe2/core/operator_schema.h"
 #include "caffe2/core/registry.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/core/workspace.h"
@@ -26,16 +27,11 @@ class OperatorBase {
   explicit OperatorBase(const OperatorDef& operator_def, Workspace* ws);
   virtual ~OperatorBase() {}
 
-  // Verify return true if an operator is set up correctly. This cannot be
-  // implemented in the constructor, because there will be calls to overridden
-  // functions.
-  virtual bool Verify();
-
   // Parameter getters. You can use these to get the arguments that you want.
   bool HasArgument(const string& name) { return (arg_map_.count(name) > 0); }
 
   // Functions that deal with arguments. Basically, this allows us to map an
-  // argument mane to a specific type of argument that we are trying to access.
+  // argument name to a specific type of argument that we are trying to access.
   template <typename T>
   T GetSingleArgument(const string& name, const T& default_value);
   template <typename T>
@@ -92,7 +88,7 @@ class OperatorBase {
   inline const vector<const Blob*>& Inputs() const { return inputs_; }
   inline const vector<Blob*>& Outputs() { return outputs_; }
 
-  virtual bool Run() { NOT_IMPLEMENTED; return false; }
+  virtual bool Run() { CAFFE_NOT_IMPLEMENTED; return false; }
 
   inline const OperatorDef& def() { return operator_def_; }
 
@@ -187,10 +183,10 @@ class Operator : public OperatorBase {
   // SetUp() function.
   explicit Operator(const OperatorDef& operator_def, Workspace* ws)
       : OperatorBase(operator_def, ws),
-        device_context_(operator_def.device_option()) {
+        context_(operator_def.device_option()) {
     // In the constructor, we switch to the device so that the child class
     // constructors will run on that device.
-    device_context_.SwitchToDevice();
+    context_.SwitchToDevice();
   }
   virtual ~Operator() {}
 
@@ -203,17 +199,24 @@ class Operator : public OperatorBase {
   // The run function of Operator switches to the device, and then carries out
   // the actual computation with RunOnDevice(). You should implement RunOnDevice
   // instead of Run().
-  bool Run() override {
-    device_context_.SwitchToDevice();
-    bool result = RunOnDevice();
-    result &= device_context_.FinishDeviceComputation();
-    return result;
+  bool Run() final {
+    context_.SwitchToDevice();
+    bool started = RunOnDevice();
+    bool finished = context_.FinishDeviceComputation();
+    if (!finished) {
+      // FinishDeviceComputation() returning error basically means that there is
+      // something wrong with the device (like CUDA) that usually cannot be
+      // recovered, so we should log FATAL.
+      CAFFE_LOG_FATAL << "Computation on device returned error in operator\n"
+                      << ProtoDebugString(this->def());
+    }
+    return (started && finished);
   }
 
   virtual bool RunOnDevice() = 0;
 
  protected:
-  Context device_context_;
+  Context context_;
   DISABLE_COPY_AND_ASSIGN(Operator);
 };
 
@@ -228,7 +231,7 @@ class Operator : public OperatorBase {
 
 #define USE_OPERATOR_FUNCTIONS(context)                                        \
   USE_OPERATOR_BASE_FUNCTIONS;                                                 \
-  using Operator<context>::device_context_;                                    \
+  using Operator<context>::context_;                                    \
   using Operator<context>::Input;                                              \
   using Operator<context>::Output
 
@@ -246,25 +249,36 @@ class Operator : public OperatorBase {
 // not depend on specific cuda or cudnn libraries. This means that we will be
 // able to compile it even when there is no cuda available - we simply do not
 // link any cuda or cudnn operators.
-DECLARE_REGISTRY(CPUOperatorRegistry, OperatorBase,
-                 const OperatorDef&, Workspace*);
+CAFFE_DECLARE_REGISTRY(
+    CPUOperatorRegistry,
+    OperatorBase,
+    const OperatorDef&,
+    Workspace*);
 #define REGISTER_CPU_OPERATOR_CREATOR(key, ...) \
-  REGISTER_CREATOR(CPUOperatorRegistry, key, __VA_ARGS__)
+  CAFFE_REGISTER_CREATOR(CPUOperatorRegistry, key, __VA_ARGS__)
 #define REGISTER_CPU_OPERATOR(name, ...) \
-  REGISTER_CLASS(CPUOperatorRegistry, name, __VA_ARGS__)
+  CAFFE_REGISTER_CLASS(CPUOperatorRegistry, name, __VA_ARGS__)
+#define REGISTER_CPU_OPERATOR_STR(str_name, ...) \
+  CAFFE_REGISTER_TYPED_CLASS(CPUOperatorRegistry, str_name, __VA_ARGS__)
 
 #define REGISTER_CPU_OPERATOR_WITH_ENGINE(name, engine, ...) \
-  REGISTER_CLASS(CPUOperatorRegistry, name##:##engine, __VA_ARGS__)
+  CAFFE_REGISTER_CLASS(CPUOperatorRegistry, name##_ENGINE_##engine, __VA_ARGS__)
 
-DECLARE_REGISTRY(CUDAOperatorRegistry, OperatorBase,
-                 const OperatorDef&, Workspace*);
+CAFFE_DECLARE_REGISTRY(
+    CUDAOperatorRegistry,
+    OperatorBase,
+    const OperatorDef&,
+    Workspace*);
 #define REGISTER_CUDA_OPERATOR_CREATOR(key, ...) \
-  REGISTER_CREATOR(CUDAOperatorRegistry, key, __VA_ARGS__)
+  CAFFE_REGISTER_CREATOR(CUDAOperatorRegistry, key, __VA_ARGS__)
 #define REGISTER_CUDA_OPERATOR(name, ...) \
-  REGISTER_CLASS(CUDAOperatorRegistry, name, __VA_ARGS__)
+  CAFFE_REGISTER_CLASS(CUDAOperatorRegistry, name, __VA_ARGS__)
+#define REGISTER_CUDA_OPERATOR_STR(str_name, ...) \
+  CAFFE_REGISTER_CLASS_STR(CUDAOperatorRegistry, str_name, __VA_ARGS__)
 
 #define REGISTER_CUDA_OPERATOR_WITH_ENGINE(name, engine, ...) \
-  REGISTER_CLASS(CUDAOperatorRegistry, name##_ENGINE_##engine, __VA_ARGS__)
+  CAFFE_REGISTER_CLASS(                                       \
+      CUDAOperatorRegistry, name##_ENGINE_##engine, __VA_ARGS__)
 
 // Macros for cudnn since we use it often
 #define REGISTER_CUDNN_OPERATOR(name, ...) \

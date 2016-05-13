@@ -19,21 +19,20 @@ class AveragedLoss final : public Operator<Context> {
   bool RunOnDevice() override {
     auto& X = Input(0);
     auto* Loss = Output(0);
-    Loss->Reshape(std::vector<int>());
+    Loss->Reshape(vector<TIndex>());
     T* loss_data = Loss->template mutable_data<T>();
     // Well... technically we won't need to sum and scale, but I am too lazy
     // to write an average function.
     math::Sum<T, Context>(
-        X.size(), X.template data<T>(), loss_data, &device_context_);
+        X.size(), X.template data<T>(), loss_data, &context_);
     math::Scale<T, Context>(
         1, static_cast<T>(1.) / X.size(), loss_data, loss_data,
-        &device_context_);
+        &context_);
     return true;
   }
 
  protected:
   // Input: X, output: Loss
-  INPUT_OUTPUT_STATS(1, 1, 1, 1);
   DISABLE_COPY_AND_ASSIGN(AveragedLoss);
 };
 
@@ -48,14 +47,14 @@ class AveragedLossGradient final : public Operator<Context> {
     auto* dX = Output(0);
     dX->ReshapeLike(X);
     math::Set<T, Context>(
-        dX->size(), static_cast<T>(1.) / X.size(), dX->template mutable_data<T>(),
-        &device_context_);
+        dX->size(), static_cast<T>(1.) / X.size(),
+        dX->template mutable_data<T>(),
+        &context_);
     return true;
   }
 
  protected:
   // Input: X, output: dX
-  INPUT_OUTPUT_STATS(1, 1, 1, 1);
   DISABLE_COPY_AND_ASSIGN(AveragedLossGradient);
 };
 
@@ -71,15 +70,14 @@ class WeightedSumLoss final : public Operator<Context> {
     auto& W = Input(1);
     CAFFE_DCHECK_EQ(X.size(), W.size());
     auto* Loss = Output(0);
-    Loss->Reshape(std::vector<int>());
+    Loss->Reshape(vector<TIndex>());
     math::Dot<T, Context>(
         X.size(), X.template data<T>(), W.template data<T>(),
-        Loss->template mutable_data<T>(), &device_context_);
+        Loss->template mutable_data<T>(), &context_);
     return true;
   }
 
  protected:
-  INPUT_OUTPUT_STATS(2, 2, 1, 1);
   DISABLE_COPY_AND_ASSIGN(WeightedSumLoss);
 };
 
@@ -99,7 +97,6 @@ class WeightedSumLossGradient final : public Operator<Context> {
   }
 
  protected:
-  INPUT_OUTPUT_STATS(1, 1, 1, 1);
   DISABLE_COPY_AND_ASSIGN(WeightedSumLossGradient);
 };
 

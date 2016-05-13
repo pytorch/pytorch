@@ -13,10 +13,10 @@ using std::vector;
 CAFFE2_DECLARE_int(caffe2_log_level);
 
 int main(int argc, char** argv) {
+  caffe2::GlobalInit(&argc, &argv);
   caffe2::SetUsageMessage(
       "Inspects the GPUs on the current machine and prints out their details "
       "provided by cuda.");
-  caffe2::GlobalInit(&argc, argv);
   // Set log level to CAFFE_INFO since things will be printed there.
   caffe2::FLAGS_caffe2_log_level = CAFFE_INFO;
 

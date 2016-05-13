@@ -7,116 +7,235 @@
 
 namespace caffe2 {
 
-// Utility functions for gradient computation.
-inline string GradientName(const string& name) {
-  return name + "_grad";
-}
+/* @brief A struct that abstracts on top of dense and sparse blobs.
+ *
+ * For a dense blob, its gradient name should be written into dense_, and for
+ * a sparse blob, its gradient name should be written into indice_ for
+ * the sparse indices and value_ for the values.
+ */
+struct GradientWrapper {
+ string dense_;
+ string indices_;
+ string values_;
 
-DECLARE_REGISTRY(GradientRegistry, vector<OperatorDef>, const OperatorDef&);
+ inline bool IsDense() const { return dense_.size(); }
+ inline bool IsSparse() const { return (indices_.size() || values_.size()); }
+ inline bool IsEmpty() const { return (!IsDense() && !IsSparse()); }
+};
+
+/**
+ * A struct that holds the gradient operators and related gradient maps.
+ */
+struct GradientOpsMeta {
+  vector<OperatorDef> ops_;
+  vector<GradientWrapper> g_input_;
+
+  GradientOpsMeta() {}
+  GradientOpsMeta(const vector<OperatorDef>& ops,
+                  const vector<GradientWrapper>& v)
+      : ops_(ops), g_input_(v) {}
+};
 
 
-struct GetGradientDefBaseVerbose {
+class GradientMakerBase {
  public:
-  GetGradientDefBaseVerbose(
-      const bool copy_device_option, const bool copy_engine,
-      const bool copy_args)
-      : copy_device_option_(copy_device_option), copy_engine_(copy_engine),
-      copy_args_(copy_args) {}
-  virtual ~GetGradientDefBaseVerbose() {}
+  GradientMakerBase(const OperatorDef& def,
+                    const vector<GradientWrapper>& g_output)
+      : def_(def), g_output_(g_output), g_input_(def.input_size()) {};
+  virtual ~GradientMakerBase() {}
+  virtual bool CopyDeviceOption() const { return true; }
+  virtual bool CopyEngine() const { return true; }
+  virtual bool CopyArguments() const { return true; }
 
-  bool CopyDeviceOption() const { return copy_device_option_; }
-  bool CopyEngine() const { return copy_engine_; }
-  bool CopyArguments() const { return copy_args_; }
-  inline static string I(const OperatorDef& def, const int i) {
-    return def.input(i);
-  }
-  inline static string O(const OperatorDef& def, const int i) {
-    return def.output(i);
-  }
-  inline static string GI(const OperatorDef& def, const int i) {
-    return GradientName(def.input(i));
-  }
-  inline static string GO(const OperatorDef& def, const int i) {
-    return GradientName(def.output(i));
+  /**
+   * @brief Returns the gradient ops meta.
+   *
+   * If your gradient op generator only use standard input and output
+   * manipulations, you can simply implement GetGradientDefs() that
+   * returns vector<OperatorDef>. In that, you can call GI, GI_V and GI_I
+   * that will automatically create the gradient registration for you.
+   *
+   * If you need to do custom gradient name registration, overload this
+   * function directly.
+   */
+  virtual GradientOpsMeta Get() {
+    vector<OperatorDef> new_defs = GetGradientDefs();
+    return GradientOpsMeta(new_defs, g_input_);
+  };
+
+ protected:
+
+  virtual vector<OperatorDef> GetGradientDefs() {
+    CAFFE_LOG_FATAL << "Not Implemented.";
+    return vector<OperatorDef>();
   }
 
-  virtual vector<OperatorDef>* Create(const OperatorDef& def) {
-    NOT_IMPLEMENTED;
-    return nullptr;
+  // Helper functions to return names for the gradient computation.
+  // I(idx), O(idx): return the input and output names.
+  // GO(idx): return the name of the gradient for output idx.
+  // GI(idx), GI_I(idx), GI_V(idx): return the name of the gradient for
+  //     input idx, and also registers that name into the gradient
+  //     registry to be returned.
+  string I(const int i) {
+    return def_.input(i);
+  }
+  string O(const int i) {
+    return def_.output(i);
+  }
+  string GI(const int i) {
+    CAFFE_CHECK(!g_input_[i].IsSparse())
+        << "Input " << def_.input(i) << " already set to sparse.";
+    g_input_[i].dense_ = GradientName(def_.input(i));
+    return GradientName(def_.input(i));
+  }
+  string GI_I(const int i) {
+    CAFFE_CHECK(!g_input_[i].IsDense())
+        << "Input " << def_.input(i) << " already set to dense.";
+    g_input_[i].indices_ = GradientSliceIndices(def_.input(i));
+    return GradientSliceIndices(def_.input(i));
+  }
+  string GI_V(const int i) {
+    CAFFE_CHECK(!g_input_[i].IsDense())
+        << "Input " << def_.input(i) << " already set to dense.";
+    g_input_[i].values_ = GradientSliceValues(def_.input(i));
+    return GradientSliceValues(def_.input(i));
+  }
+  string GO(const int i) {
+    CAFFE_CHECK(g_output_[i].IsDense())
+        << "Gradient of output " << def_.output(i)
+        << "is either sparse or not provided.";
+    return g_output_[i].dense_;
+  }
+  string GO_I(const int i) {
+    CAFFE_CHECK(g_output_[i].IsSparse())
+        << "Gradient of output " << def_.output(i)
+        << "is either dense or not provided.";
+    return g_output_[i].indices_;
+  }
+  string GO_V(const int i) {
+    CAFFE_CHECK(g_output_[i].IsSparse())
+        << "Gradient of output " << def_.output(i)
+        << "is either dense or not provided.";
+    return g_output_[i].values_;
   }
 
+  // Function to add a gradient pair to map.
+  void SetDense(const int i, const string& name) {
+    CAFFE_CHECK(!g_input_[i].IsSparse())
+        << "Input " << def_.input(i) << " already set to sparse.";
+    g_input_[i].dense_ = name;
+  }
+  void SetSparse(const int i, const string& indices, const string& values) {
+    CAFFE_CHECK(!g_input_[i].IsDense())
+        << "Input " << def_.input(i) << " already set to dense.";
+    g_input_[i].indices_ = indices;
+    g_input_[i].values_ = values;
+  }
+
+  /**
+   * @brief a helper function to allow one to create one single operator
+   * def, which is usually the case for many simple operators.
+   */
   template <class... Args>
-  inline static vector<OperatorDef>* SingleGradientDef(Args ... args) {
-    return new vector<OperatorDef>{CreateOperatorDef(args...)};
+  inline static vector<OperatorDef> SingleGradientDef(const Args& ... args) {
+    return vector<OperatorDef>{CreateOperatorDef(args...)};
   }
 
-  bool copy_device_option_;
-  bool copy_engine_;
-  bool copy_args_;
-};
-
-
-struct GetGradientDefBase : public GetGradientDefBaseVerbose {
- public:
-  GetGradientDefBase() : GetGradientDefBaseVerbose(true, true, true) {}
-};
-
-struct NoGradient : public GetGradientDefBase {
-  vector<OperatorDef>* Create(const OperatorDef& def) override {
-    return new vector<OperatorDef>();
-  }
-};
-
-// This is used when the operator definition is designed to not have a gradient.
-// Calling a gradient on this operator def will cause Caffe2 to throw the towel.
-struct ThrowTheTowelIfGradientIsCalled : public GetGradientDefBase {
-  vector<OperatorDef>* Create(const OperatorDef& def) override;
-};
-
-// This should only be used sparsely when the gradient does exist, but we have
-// not implemented it yet.
-struct GradientNotImplementedYet : public GetGradientDefBase {
-  vector<OperatorDef>* Create(const OperatorDef& def) override;
-};
-
-vector<OperatorDef>* CreateGradientDefsInternal(
-    const OperatorDef& def, GetGradientDefBaseVerbose* obj);
-
-template <class GetGradientDef>
-class GradientRegisterer {
- public:
-  GradientRegisterer(const string& key) {
-    GradientRegistry()->Register(
-        key, GradientRegisterer<GetGradientDef>::Creator);
+private:
+  // Utility functions for gradient name computation. We don't expose them
+  // in order to discourage the use of such names explicitly.
+  static string GradientName(const string& name) {
+    return name + "_grad";
   }
 
-  static vector<OperatorDef>* Creator(const OperatorDef& def) {
-    return CreateGradientDefsInternal(def, new GetGradientDef());
+  static string GradientSliceIndices(const string& name) {
+    return name + "_grad_indices";
+  }
+
+  static string GradientSliceValues(const string& name) {
+    return name + "_grad_values";
+  }
+
+protected:
+  // We make the member variables protected in case someone wants to write
+  // a fully custom Get() function.
+  const OperatorDef& def_;
+  const vector<GradientWrapper>& g_output_;
+  vector<GradientWrapper> g_input_;
+};
+
+
+/**
+ * @brief A helper class to indicate that the operator does not need gradient
+ * computation.
+ */
+class NoGradient : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  vector<OperatorDef> GetGradientDefs() override {
+    return vector<OperatorDef>();
   }
 };
 
-#define REGISTER_GRADIENT(name, GetGradientDef)                                \
-  GradientRegisterer<GetGradientDef> g_GradientRegisterer_##name(#name)
+
+/**
+ * @brief A helper class to indicate that the operator should have no gradient.
+ *
+ * This is used when the operator definition is designed to not have a gradient.
+ * Calling a gradient on this operator def will cause Caffe2 to quit.
+ */
+struct ThrowInTheTowelIfGradientIsCalled : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  GradientOpsMeta Get() override {
+    CAFFE_LOG_FATAL << "One should not call gradient for operator "
+                    << def_.type() << ".";
+    return GradientOpsMeta();
+  }
+};
+
+
+/**
+ * @brief A helper class to indicate that the gradient mechanism is not ready.
+ *
+ * This should only be used sparsely when the gradient does exist, but we have
+ * not implemented it yet and are using this as a lazy excuse.
+ */
+struct GradientNotImplementedYet : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  GradientOpsMeta Get() override {
+    CAFFE_LOG_FATAL << "Operator " << def_.type() << " should have a gradient "
+                    << "but is still a TODO item.";
+    return GradientOpsMeta();
+  }
+};
+
+CAFFE_DECLARE_REGISTRY(
+    GradientRegistry,
+    GradientMakerBase,
+    const OperatorDef&, const vector<GradientWrapper>&);
+
+#define REGISTER_GRADIENT(name, ...) \
+  CAFFE_REGISTER_CLASS(GradientRegistry, name, __VA_ARGS__)
+#define REGISTER_GRADIENT_STR(str_name, ...) \
+  CAFFE_REGISTER_TYPED_CLASS(GradientRegistry, str_name, __VA_ARGS__)
 
 // NO_GRADIENT means that the operator does not need any gradient computation.
 #define NO_GRADIENT(name)                                                      \
-  GradientRegisterer<NoGradient> g_GradientRegisterer_##name(#name)
+  REGISTER_GRADIENT(name, NoGradient)
 
 // SHOULD_NOT_DO_GRADIENT means that the operator is not designed to have
 // gradient operators. If you attempt to call the gradient, a log fatal will
 // occur.
 #define SHOULD_NOT_DO_GRADIENT(name)                                           \
-  GradientRegisterer<ThrowTheTowelIfGradientIsCalled>                          \
-      g_GradientRegisterer_##name(#name)
+  REGISTER_GRADIENT(name, ThrowInTheTowelIfGradientIsCalled)
 
 #define GRADIENT_NOT_IMPLEMENTED_YET(name)                                     \
-  GradientRegisterer<GradientNotImplementedYet>                                \
-      g_GradientRegisterer_##name(#name)
+  REGISTER_GRADIENT(name, GradientNotImplementedYet)
 
-// Creates the gradient operators of a given operator definition.
-inline vector<OperatorDef>* GetGradientDefs(const OperatorDef& def) {
-  return GradientRegistry()->Create(def.type(), def);
-}
+/**
+ * @brief Gets the GradientOpsMeta for the given operator def.
+ */
+GradientOpsMeta GetGradientForOp(
+    const OperatorDef& def, const vector<GradientWrapper>& g_output);
 
 }  // namespace caffe2
 

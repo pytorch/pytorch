@@ -271,23 +271,10 @@ void Dot<double, CUDAContext>(
   context->Copy<double, CPUContext, CUDAContext>(1, &result, y);
 }
 
-#ifdef THRUST_SUPPORTS_PER_THREAD
-
-#define CAFFE2_MATH_SUM_FUNC(T)                                                \
-template<>                                                                     \
-void Sum<T, CUDAContext>(const int N, const T* x, T* y, CUDAContext* context) {\
-  thrust::device_ptr<const T> dev_ptr(x);                                      \
-  T result = thrust::reduce(                                                   \
-      thrust::cuda::par.on(context->cuda_stream()),                            \
-      dev_ptr, dev_ptr + N, static_cast<T>(0), thrust::plus<T>());             \
-  context->Copy<T, CPUContext, CUDAContext>(1, &result, y);                    \
-}
-
-#else  // THRUST_SUPPORTS_PER_THREAD
-
-// Really, for any real use you should not be invoking this but should use the
-// thrust version, so I was not very careful in tuning the performance of the
-// sum kernel.
+// A previous version of caffe2 used Thrust but it turns out that thrust
+// reduction has an implicit scratch space allocation and deallocation, which
+// may interfere with NCCL and create a deadlock. Hence we are using a custom
+// reduction here.
 #define SUM_KERNEL_NTHREADS 128
 template <typename T>
 __global__ void SumKernel(const int N, const T* X, T* Y) {
@@ -296,14 +283,24 @@ __global__ void SumKernel(const int N, const T* X, T* Y) {
 
   reduction_buffer[idx] = 0;
 
-  // A two-level reduction to get the sum.
+  // A multilevel reduction.
+  // N -> 128
   for (int i = idx; i < N; i += SUM_KERNEL_NTHREADS) {
     reduction_buffer[idx] += X[i];
   }
   __syncthreads();
+  // 128 -> 32
+  if (idx < 32) {
+    reduction_buffer[idx] +=
+        reduction_buffer[idx + 32] +
+        reduction_buffer[idx + 64] +
+        reduction_buffer[idx + 96];
+  }
+  __syncthreads();
+  // 32 -> 1
   if (idx == 0) {
     float tmp = 0;
-    for (int i = 0; i < SUM_KERNEL_NTHREADS; ++i) {
+    for (int i = 0; i < 32; ++i) {
       tmp += reduction_buffer[i];
     }
     *Y = tmp;
@@ -315,8 +312,6 @@ template<>                                                                     \
 void Sum<T, CUDAContext>(const int N, const T* x, T* y, CUDAContext* context) {\
   SumKernel<<<1, SUM_KERNEL_NTHREADS, 0, context->cuda_stream()>>>(N, x, y);   \
 }
-
-#endif  // THRUST_SUPPORTS_PER_THREAD
 
 CAFFE2_MATH_SUM_FUNC(float)
 CAFFE2_MATH_SUM_FUNC(double)

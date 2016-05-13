@@ -51,10 +51,19 @@ RUN apt-get update && apt-get install -q -y \
   libopencv-dev \
   libprotobuf-dev \
   libsnappy-dev \
+  zlib1g-dev \
+  libbz2-dev \
   protobuf-compiler \
   python-dev \
   python-pip \
   unzip
+
+RUN cd /tmp && \
+  git clone https://github.com/facebook/rocksdb.git && \
+  cd /tmp/rocksdb && \
+  make && make install && \
+  cd / && \
+  rm -rf /tmp/rocksdb
 
 # cmake. Ubuntu 12.04 ships a too old cmake version, so we build from source.
 # This is needed by the most recent version of gflags.

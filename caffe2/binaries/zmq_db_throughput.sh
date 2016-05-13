@@ -1,6 +1,6 @@
 #!/bin/bash
 
-INPUT_DB=gen/data/mnist/mnist-train-nchw-leveldb/ 
+INPUT_DB=gen/data/mnist/mnist-train-nchw-leveldb/
 INPUT_DB_TYPE=leveldb
 
 echo "Starting zmq feeder..."

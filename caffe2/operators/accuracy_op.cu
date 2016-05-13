@@ -34,19 +34,19 @@ bool AccuracyOp<float, CUDAContext>::RunOnDevice() {
   auto& label = Input(LABEL);
   auto* Y = Output(0);
   CAFFE_DCHECK_EQ(X.ndim(), 2);
-  int N = X.dim(0);
-  int D = X.dim(1);
+  int N = X.dim32(0);
+  int D = X.dim32(1);
   CAFFE_DCHECK_EQ(label.ndim(), 1);
-  CAFFE_DCHECK_EQ(label.dim(0), N);
-  Y->Reshape(std::vector<int>(1, 1));
+  CAFFE_DCHECK_EQ(label.dim32(0), N);
+  Y->Reshape(vector<TIndex>(1, 1));
   float* Ydata = Y->mutable_data<float>();
-  math::Set<float, CUDAContext>(1, 0, Ydata, &device_context_);
+  math::Set<float, CUDAContext>(1, 0, Ydata, &context_);
   AccuracyKernel<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS,
-                   0, device_context_.cuda_stream()>>>(
+                   0, context_.cuda_stream()>>>(
       N, D, X.data<float>(), label.data<int>(), Ydata);
   // This is going to be executed only in one single kernel. Not very beautiful,
   // but probably we have to do this?
-  AccuracyDivideKernel<<<1, 1, 0, device_context_.cuda_stream()>>>(
+  AccuracyDivideKernel<<<1, 1, 0, context_.cuda_stream()>>>(
       N, Ydata);
   return true;
 }

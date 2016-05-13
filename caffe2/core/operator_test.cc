@@ -11,8 +11,10 @@ class JustTest : public OperatorBase {
   explicit JustTest(const OperatorDef& op_def, Workspace* ws)
       : OperatorBase(op_def, ws) {}
   bool Run() override { return true; }
-  INPUT_OUTPUT_STATS(0, 1, 0, 1);
 };
+
+OPERATOR_SCHEMA(JustTest)
+    .NumInputs(0, 1).NumOutputs(0, 1);
 
 REGISTER_CPU_OPERATOR(JustTest, JustTest);
 REGISTER_CUDA_OPERATOR(JustTest, JustTest);
@@ -64,7 +66,6 @@ TEST(OperatorTest, TestParameterAccess) {
   }
   EXPECT_NE(ws.CreateBlob("input"), nullptr);
   OperatorBase op(op_def, &ws);
-  EXPECT_TRUE(op.Verify());
   EXPECT_FLOAT_EQ(op.GetSingleArgument<float>("arg0", 0.0), 0.1);
   vector<int> i = op.GetRepeatedArgument<int>("arg1");
   EXPECT_EQ(i.size(), 2);
@@ -88,10 +89,9 @@ TEST(OperatorDeathTest, CannotAccessParameterWithWrongType) {
   }
   EXPECT_NE(ws.CreateBlob("input"), nullptr);
   OperatorBase op(op_def, &ws);
-  EXPECT_TRUE(op.Verify());
   EXPECT_FLOAT_EQ(op.GetSingleArgument<float>("arg0", 0.0), 0.1);
   EXPECT_DEATH(op.GetSingleArgument<int>("arg0", 0),
-               "Argument does not have the right field: expected i");
+               "Argument arg0 does not have the right field: expected field i");
 }
 
 TEST(OperatorDeathTest, DISABLED_CannotAccessRepeatedParameterWithWrongType) {
@@ -108,7 +108,6 @@ TEST(OperatorDeathTest, DISABLED_CannotAccessRepeatedParameterWithWrongType) {
   }
   EXPECT_NE(ws.CreateBlob("input"), nullptr);
   OperatorBase op(op_def, &ws);
-  EXPECT_TRUE(op.Verify());
   auto args = op.GetRepeatedArgument<float>("arg0");
   EXPECT_EQ(args.size(), 1);
   EXPECT_FLOAT_EQ(args[0], 0.1);
@@ -134,7 +133,6 @@ TEST(OperatorTest, TestSetUp) {
   EXPECT_NE(nullptr, ws.CreateBlob("input"));
   unique_ptr<OperatorBase> op(CreateOperator(op_def, &ws));
   EXPECT_NE(nullptr, op.get());
-  EXPECT_TRUE(op->Verify());
   EXPECT_TRUE(ws.HasBlob("output"));
 }
 
@@ -149,19 +147,15 @@ TEST(OperatorTest, TestSetUpInputOutputCount) {
   EXPECT_NE(nullptr, ws.CreateBlob("input"));
   EXPECT_NE(nullptr, ws.CreateBlob("input2"));
   unique_ptr<OperatorBase> op(CreateOperator(op_def, &ws));
-  EXPECT_NE(nullptr, op.get());
-  EXPECT_TRUE(ws.HasBlob("output"));
-  // Because JustTest will only accept one single input, this will return false.
-  EXPECT_FALSE(op->Verify());
+  // JustTest will only accept one single input.
+  EXPECT_EQ(nullptr, op.get());
 
   op_def.clear_input();
   op_def.add_input("input");
   op_def.add_output("output2");
   op.reset(CreateOperator(op_def, &ws));
-  EXPECT_NE(nullptr, op.get());
-  // Because JustTest will only produce one single output, this will return
-  // false.
-  EXPECT_FALSE(op->Verify());
+  // JustTest will only produce one single output.
+  EXPECT_EQ(nullptr, op.get());
 }
 
 NetDef GetNetDefForTest() {
@@ -209,104 +203,14 @@ TEST(NetTest, TestScaffoldingDAGNet) {
   EXPECT_TRUE(net->Run());
 }
 
-class InPlaceNotAllowed : public OperatorBase {
- public:
-  explicit InPlaceNotAllowed(const OperatorDef& op_def, Workspace* ws)
-      : OperatorBase(op_def, ws) {}
-  bool Run() override { return true; }
-};
-REGISTER_CPU_OPERATOR(InPlaceNotAllowed, InPlaceNotAllowed);
-
-class OneInPlaceAllowed : public OperatorBase {
- public:
-  explicit OneInPlaceAllowed(const OperatorDef& op_def, Workspace* ws)
-      : OperatorBase(op_def, ws) {}
-  bool Run() override { return true; }
-  IN_PLACE_ALLOWED({0, 0})
-};
-REGISTER_CPU_OPERATOR(OneInPlaceAllowed, OneInPlaceAllowed);
-
-class MultipleInPlaceAllowed : public OperatorBase {
- public:
-  explicit MultipleInPlaceAllowed(const OperatorDef& op_def, Workspace* ws)
-      : OperatorBase(op_def, ws) {}
-  bool Run() override { return true; }
-  IN_PLACE_ALLOWED({0, 0}, {1, 2})
-};
-REGISTER_CPU_OPERATOR(MultipleInPlaceAllowed, MultipleInPlaceAllowed);
-
-TEST(OperatorInPlaceTest, InPlaceNotAllowedCase) {
-  OperatorDef op_def;
-  Workspace ws;
-  EXPECT_NE(nullptr, ws.CreateBlob("input"));
-  op_def.set_type("InPlaceNotAllowed");
-  op_def.add_input("input");
-  op_def.add_output("output");
-  unique_ptr<OperatorBase> op(CreateOperator(op_def, &ws));
-  EXPECT_NE(nullptr, op.get());
-  EXPECT_TRUE(op->Verify());
-  op_def.set_output(0, "input");
-  op.reset(CreateOperator(op_def, &ws));
-  EXPECT_NE(nullptr, op.get());
-  EXPECT_FALSE(op->Verify());
-}
-
-TEST(OperatorInPlaceTest, OneInPlaceAllowedCase) {
-  OperatorDef op_def;
-  Workspace ws;
-  EXPECT_NE(nullptr, ws.CreateBlob("input"));
-  op_def.set_type("OneInPlaceAllowed");
-  op_def.add_input("input");
-  op_def.add_output("output");
-  unique_ptr<OperatorBase> op(CreateOperator(op_def, &ws));
-  EXPECT_NE(nullptr, op.get());
-  EXPECT_TRUE(op->Verify());
-  // In-place case.
-  op_def.set_output(0, "input");
-  op.reset(CreateOperator(op_def, &ws));
-  EXPECT_NE(nullptr, op.get());
-  EXPECT_TRUE(op->Verify());
-  // In-place with input id 0 and output id 1: this should not be allowed.
-  op_def.set_output(0, "output");
-  op_def.add_output("input");
-  op.reset(CreateOperator(op_def, &ws));
-  EXPECT_NE(nullptr, op.get());
-  EXPECT_FALSE(op->Verify());
-}
-
-TEST(OperatorInPlaceTest, MultipleInPlaceAllowedCase) {
-  OperatorDef op_def;
-  Workspace ws;
-  EXPECT_NE(nullptr, ws.CreateBlob("input0"));
-  EXPECT_NE(nullptr, ws.CreateBlob("input1"));
-  op_def.set_type("MultipleInPlaceAllowed");
-  op_def.add_input("input0");
-  op_def.add_input("input1");
-  op_def.add_output("output0");
-  op_def.add_output("output1");
-  op_def.add_output("output2");
-  unique_ptr<OperatorBase> op(CreateOperator(op_def, &ws));
-  EXPECT_NE(nullptr, op.get());
-  EXPECT_TRUE(op->Verify());
-  // In-place {0, 0}
-  op_def.set_output(0, "input0");
-  op.reset(CreateOperator(op_def, &ws));
-  EXPECT_NE(nullptr, op.get());
-  EXPECT_TRUE(op->Verify());
-  // In-place {0, 0}, {1, 2}
-  op_def.set_output(2, "input1");
-  op.reset(CreateOperator(op_def, &ws));
-  EXPECT_NE(nullptr, op.get());
-  EXPECT_TRUE(op->Verify());
-}
-
-struct GetFooGradient : public GetGradientDefBase {
-  vector<OperatorDef>* Create(const OperatorDef& def) override {
-    return new vector<OperatorDef>{
+class GetFooGradient : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  vector<OperatorDef> GetGradientDefs() override {
+    return vector<OperatorDef>{
         CreateOperatorDef(
             "FooGradient", "",
-            std::vector<string>{GradientName(def.output(0))},
-            std::vector<string>{GradientName(def.input(0))})};
+            std::vector<string>{GO(0)},
+            std::vector<string>{GI(0)})};
   }
 };
 
@@ -316,23 +220,31 @@ TEST(OperatorGradientRegistryTest, GradientSimple) {
   Argument arg = MakeArgument<int>("arg", 1);
   DeviceOption option;
   option.set_device_type(CPU);
-  OperatorDef op = CreateOperatorDef(
+  OperatorDef def = CreateOperatorDef(
       "Foo", "", std::vector<string>{"in"}, std::vector<string>{"out"},
       std::vector<Argument>{arg}, option, "DUMMY_ENGINE");
-  std::unique_ptr<vector<OperatorDef> > grad_ops(GetGradientDefs(op));
-  EXPECT_TRUE(grad_ops.get() != nullptr);
-  const OperatorDef& grad_op = grad_ops->at(0);
+  vector<GradientWrapper> g_output(1);
+  g_output[0].dense_ = "out_grad";
+  GradientOpsMeta meta = GetGradientForOp(def, g_output);
+  // Check the names, input and output.
+  EXPECT_EQ(meta.ops_.size(), 1);
+  const OperatorDef& grad_op = meta.ops_[0];
   EXPECT_EQ(grad_op.type(), "FooGradient");
   EXPECT_EQ(grad_op.name(), "");
   EXPECT_EQ(grad_op.input_size(), 1);
   EXPECT_EQ(grad_op.output_size(), 1);
   EXPECT_EQ(grad_op.input(0), "out_grad");
   EXPECT_EQ(grad_op.output(0), "in_grad");
+  // Checks the engine, device option and arguments.
   EXPECT_EQ(grad_op.engine(), "DUMMY_ENGINE");
   EXPECT_EQ(grad_op.device_option().device_type(), CPU);
   EXPECT_EQ(grad_op.arg_size(), 1);
   EXPECT_EQ(grad_op.arg(0).SerializeAsString(),
             MakeArgument<int>("arg", 1).SerializeAsString());
+  // Checks the gradient name for input.
+  EXPECT_EQ(meta.g_input_.size(), 1);
+  EXPECT_TRUE(meta.g_input_[0].IsDense());
+  EXPECT_EQ(meta.g_input_[0].dense_, "in_grad");
 }
 
 

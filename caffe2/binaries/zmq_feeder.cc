@@ -21,7 +21,7 @@ std::unique_ptr<DB> in_db;
 std::unique_ptr<Cursor> cursor;
 
 int main(int argc, char** argv) {
-  caffe2::GlobalInit(&argc, argv);
+  caffe2::GlobalInit(&argc, &argv);
 
   CAFFE_LOG_INFO << "Opening DB...";
   in_db.reset(caffe2::db::CreateDB(

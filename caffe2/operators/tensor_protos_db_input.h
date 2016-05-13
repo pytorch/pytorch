@@ -2,6 +2,7 @@
 #define CAFFE2_OPERATORS_TENSOR_PROTOS_DB_INPUT_H_
 
 #include <iostream>
+#include <mutex>
 
 #include "caffe2/core/db.h"
 #include "caffe2/operators/prefetch_op.h"
@@ -20,23 +21,21 @@ class TensorProtosDBInput final
   using PrefetchOperator<Context>::prefetch_thread_;
   explicit TensorProtosDBInput(const OperatorDef& operator_def, Workspace* ws);
   ~TensorProtosDBInput() {
-    if (prefetch_thread_.get() != nullptr) {
-      prefetch_thread_->join();
-    }
+    PrefetchOperator<Context>::Finalize();
   }
 
   bool Prefetch() override;
   bool CopyPrefetched() override;
 
  private:
-  unique_ptr<db::DB> db_;
-  unique_ptr<db::Cursor> cursor_;
+  void InferDataTypes();
   // Prefetch will always just happen on the CPU side.
   vector<unique_ptr<Blob> > prefetched_blobs_;
   vector<TensorProto::DataType> data_types_;
+  bool infer_data_type_called_;
   int batch_size_;
-  string db_name_;
-  string db_type_;
+  string key_;
+  string value_;
   DISABLE_COPY_AND_ASSIGN(TensorProtosDBInput);
 };
 
@@ -44,28 +43,22 @@ template <class Context>
 TensorProtosDBInput<Context>::TensorProtosDBInput(
       const OperatorDef& operator_def, Workspace* ws)
       : PrefetchOperator<Context>(operator_def, ws),
+        infer_data_type_called_(false),
         batch_size_(
-            OperatorBase::template GetSingleArgument<int>("batch_size", 0)),
-        db_name_(
-            OperatorBase::template GetSingleArgument<string>("db", "")),
-        db_type_(OperatorBase::template GetSingleArgument<string>(
-            "db_type", "leveldb")) {
+            OperatorBase::template GetSingleArgument<int>("batch_size", 0)) {
   CAFFE_CHECK_GT(batch_size_, 0) << "Batch size should be nonnegative.";
-  CAFFE_CHECK_GT(db_name_.size(), 0) << "Must provide a leveldb name.";
+}
 
-  db_.reset(db::CreateDB(db_type_, db_name_, db::READ));
-  cursor_.reset(db_->NewCursor());
-  cursor_->SeekToFirst();
-
-  // Now, we want to read a data point to initialize the contents.
+template <class Context>
+void TensorProtosDBInput<Context>::InferDataTypes() {
   TensorProtos protos;
-  protos.ParseFromString(cursor_->value());
+  protos.ParseFromString(value_);
   CAFFE_CHECK_EQ(protos.protos_size(), OutputSize());
   prefetched_blobs_.resize(protos.protos_size());
   data_types_.resize(protos.protos_size());
   CAFFE_VLOG(1) << "Figuring data types.";
   for (int i = 0; i < protos.protos_size(); ++i) {
-    vector<int> dims;
+    vector<TIndex> dims;
     for (const int dim : protos.protos(i).dims()) {
       dims.push_back(dim);
     }
@@ -88,16 +81,21 @@ TensorProtosDBInput<Context>::TensorProtosDBInput(
       CAFFE_LOG_FATAL << "Not expecting string.";
     }
   }
-  cursor_->SeekToFirst();
 }
 
 template <class Context>
 bool TensorProtosDBInput<Context>::Prefetch() {
+  const db::DBReader& reader = OperatorBase::Input<db::DBReader>(0);
   for (int item_id = 0; item_id < batch_size_; ++item_id) {
     // CAFFE_LOG_INFO << "Prefetching item " << item_id;
     // process data
+    reader.Read(&key_, &value_);
+    if (!infer_data_type_called_) {
+      InferDataTypes();
+      infer_data_type_called_ = true;
+    }
     TensorProtos protos;
-    protos.ParseFromString(cursor_->value());
+    protos.ParseFromString(value_);
     // TODO(Yangqing): do we want to do anything to sanity check the data?
     for (int i = 0; i < protos.protos_size(); ++i) {
       const TensorProto& proto = protos.protos(i);
@@ -140,10 +138,6 @@ bool TensorProtosDBInput<Context>::Prefetch() {
         return false;
       }
     }
-    cursor_->Next();
-    if (!cursor_->Valid()) {
-      cursor_->SeekToFirst();
-    }
   }
   return true;
 }
@@ -159,7 +153,7 @@ bool TensorProtosDBInput<Context>::CopyPrefetched() {
     case TensorProto::BYTE:
     {
       output->ReshapeLike(input);
-      this->device_context_.template Copy<float, CPUContext, Context>(
+      this->context_.template Copy<float, CPUContext, Context>(
           input.size(), input.template data<float>(),
           output->template mutable_data<float>());
       break;
@@ -167,7 +161,7 @@ bool TensorProtosDBInput<Context>::CopyPrefetched() {
     case TensorProto::INT32:
     {
       output->ReshapeLike(input);
-      this->device_context_.template Copy<int, CPUContext, Context>(
+      this->context_.template Copy<int, CPUContext, Context>(
           input.size(), input.template data<int>(),
           output->template mutable_data<int>());
       break;

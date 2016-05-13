@@ -26,7 +26,7 @@ bool ReluOp<float, CUDAContext>::RunOnDevice() {
   CAFFE_DCHECK_GT(X.size(), 0);
   Y->ReshapeLike(X);
   ReluKernel<<<CAFFE_GET_BLOCKS(X.size()), CAFFE_CUDA_NUM_THREADS,
-               0, device_context_.cuda_stream()>>>(
+               0, context_.cuda_stream()>>>(
       X.size(), X.data<float>(), Y->mutable_data<float>());
   return true;
 }
@@ -40,7 +40,7 @@ bool ReluGradientOp<float, CUDAContext>::RunOnDevice() {
   CAFFE_DCHECK_EQ(dY.size(), Y.size());
   dX->ReshapeLike(Y);
   ReluGradientKernel<<<CAFFE_GET_BLOCKS(Y.size()), CAFFE_CUDA_NUM_THREADS,
-                       0, device_context_.cuda_stream()>>>(
+                       0, context_.cuda_stream()>>>(
       Y.size(), Y.data<float>(), dY.data<float>(), dX->mutable_data<float>());
   return true;
 }

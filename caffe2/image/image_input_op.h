@@ -7,6 +7,7 @@
 
 #include "caffe/proto/caffe.pb.h"
 #include "caffe2/core/db.h"
+#include "caffe2/utils/math.h"
 #include "caffe2/operators/prefetch_op.h"
 
 namespace caffe2 {
@@ -16,13 +17,12 @@ class ImageInputOp final
     : public PrefetchOperator<Context> {
  public:
   using OperatorBase::OutputSize;
+  using PrefetchOperator<Context>::context_;
   using PrefetchOperator<Context>::prefetch_thread_;
   explicit ImageInputOp(const OperatorDef& operator_def,
                                     Workspace* ws);
   ~ImageInputOp() {
-    if (prefetch_thread_.get() != nullptr) {
-      prefetch_thread_->join();
-    }
+    PrefetchOperator<Context>::Finalize();
   }
 
   bool Prefetch() override;
@@ -31,14 +31,14 @@ class ImageInputOp final
  private:
   bool GetImageAndLabelFromDBValue(
       const string& value, cv::Mat* img, int* label);
-  unique_ptr<db::DB> db_;
-  unique_ptr<db::Cursor> cursor_;
+  unique_ptr<db::DBReader> owned_reader_;
+  const db::DBReader* reader_;
   CPUContext cpu_context_;
   TensorCPU prefetched_image_;
   TensorCPU prefetched_label_;
+  Tensor<Context> prefetched_image_on_device_;
+  Tensor<Context> prefetched_label_on_device_;
   int batch_size_;
-  string db_name_;
-  string db_type_;
   float mean_;
   float std_;
   bool color_;
@@ -47,7 +47,6 @@ class ImageInputOp final
   int crop_;
   bool mirror_;
   bool use_caffe_datum_;
-  INPUT_OUTPUT_STATS(0, 0, 2, 2);
   DISABLE_COPY_AND_ASSIGN(ImageInputOp);
 };
 
@@ -56,12 +55,9 @@ template <class Context>
 ImageInputOp<Context>::ImageInputOp(
       const OperatorDef& operator_def, Workspace* ws)
       : PrefetchOperator<Context>(operator_def, ws),
+        reader_(nullptr),
         batch_size_(
             OperatorBase::template GetSingleArgument<int>("batch_size", 0)),
-        db_name_(
-            OperatorBase::template GetSingleArgument<string>("db", "")),
-        db_type_(OperatorBase::template GetSingleArgument<string>(
-            "db_type", "leveldb")),
         mean_(OperatorBase::template GetSingleArgument<float>("mean", 0.)),
         std_(OperatorBase::template GetSingleArgument<float>("std", 1.)),
         color_(OperatorBase::template GetSingleArgument<int>("color", 1)),
@@ -71,8 +67,20 @@ ImageInputOp<Context>::ImageInputOp(
         mirror_(OperatorBase::template GetSingleArgument<int>("mirror", 0)),
         use_caffe_datum_(OperatorBase::template GetSingleArgument<int>(
               "use_caffe_datum", 0)) {
+  if (operator_def.input_size() == 0) {
+    CAFFE_LOG_ERROR << "You are using an old ImageInputOp format that creates "
+                       "a local db reader. Consider moving to the new style "
+                       "that takes in a DBReader blob instead.";
+    string db_name =
+        OperatorBase::template GetSingleArgument<string>("db", "");
+    CAFFE_CHECK_GT(db_name.size(), 0) << "Must specify a db name.";
+    owned_reader_.reset(new db::DBReader(
+        OperatorBase::template GetSingleArgument<string>(
+            "db_type", "leveldb"),
+        db_name));
+    reader_ = owned_reader_.get();
+  }
   CAFFE_CHECK_GT(batch_size_, 0) << "Batch size should be nonnegative.";
-  CAFFE_CHECK_GT(db_name_.size(), 0) << "Must provide a leveldb name.";
   CAFFE_CHECK_GT(scale_, 0) << "Must provide the scaling factor.";
   CAFFE_CHECK_GT(crop_, 0) << "Must provide the cropping value.";
   CAFFE_CHECK_GE(scale_, crop_)
@@ -88,12 +96,10 @@ ImageInputOp<Context>::ImageInputOp(
             << (mirror_ ? " with " : " without ") << "random mirroring;";
   CAFFE_LOG_INFO << "    Subtract mean " << mean_ << " and divide by std " << std_
             << ".";
-  db_.reset(db::CreateDB(db_type_, db_name_, db::READ));
-  cursor_.reset(db_->NewCursor());
-  cursor_->SeekToFirst();
   prefetched_image_.Reshape(
-      vector<int>{batch_size_, crop_, crop_, (color_ ? 3 : 1)});
-  prefetched_label_.Reshape(vector<int>(1, batch_size_));
+      vector<TIndex>{TIndex(batch_size_), TIndex(crop_), TIndex(crop_),
+                     TIndex(color_ ? 3 : 1)});
+  prefetched_label_.Reshape(vector<TIndex>(1, batch_size_));
 }
 
 template <class Context>
@@ -149,7 +155,7 @@ bool ImageInputOp<Context>::GetImageAndLabelFromDBValue(
       // We use a cv::Mat to wrap the encoded str so we do not need a copy.
       *img = cv::imdecode(
           cv::Mat(1, &encoded_size, CV_8UC1,
-          const_cast<char*>(encoded_image_str.data())),
+              const_cast<char*>(encoded_image_str.data())),
           color_ ? CV_LOAD_IMAGE_COLOR : CV_LOAD_IMAGE_GRAYSCALE);
     } else if (image_proto.data_type() == TensorProto::BYTE) {
       // raw image content.
@@ -176,16 +182,37 @@ bool ImageInputOp<Context>::GetImageAndLabelFromDBValue(
 
 template <class Context>
 bool ImageInputOp<Context>::Prefetch() {
-  std::bernoulli_distribution mirror_this_image(0.5);
-  float* image_data = prefetched_image_.mutable_data<float>();
-  int channels = color_ ? 3 : 1;
+  if (!owned_reader_.get()) {
+    // if we are not owning the reader, we will get the reader pointer from
+    // input. Otherwise the constructor should have already set the reader
+    // pointer.
+    reader_ = &OperatorBase::Input<db::DBReader>(0);
+  }
+  const int channels = color_ ? 3 : 1;
+  // Call mutable_data() once to allocate the underlying memory.
+  prefetched_image_.mutable_data<float>();
+  prefetched_label_.mutable_data<int>();
+  // TODO(jiayq): Handle this prefetching with a real thread pool. Currently,
+  // with 4 threads we should be able to get a decent sheed for AlexNet type
+  // training already.
+  std::mt19937 meta_randgen(time(nullptr));
+  std::vector<std::mt19937> randgen_per_thread;
+  for (int i = 0; i < 4; ++i) {
+    randgen_per_thread.emplace_back(meta_randgen());
+  }
+  #pragma omp parallel for num_threads(4)
   for (int item_id = 0; item_id < batch_size_; ++item_id) {
-    // CAFFE_LOG_INFO << "Prefetching item " << item_id;
-    // process data
+    std::bernoulli_distribution mirror_this_image(0.5);
+    std::mt19937& randgen = randgen_per_thread[omp_get_thread_num()];
+    float* image_data = prefetched_image_.mutable_data<float>()
+        + crop_ * crop_ * channels * item_id;
+    string key, value;
     cv::Mat img;
     int label;
     cv::Mat scaled_img;
-    CAFFE_CHECK(GetImageAndLabelFromDBValue(cursor_->value(), &img, &label));
+    // process data
+    reader_->Read(&key, &value);
+    CAFFE_CHECK(GetImageAndLabelFromDBValue(value, &img, &label));
     // deal with scaling.
     int scaled_width, scaled_height;
     if (warp_) {
@@ -198,18 +225,20 @@ bool ImageInputOp<Context>::Prefetch() {
       scaled_height = scale_;
       scaled_width = static_cast<float>(img.cols) * scale_ / img.rows;
     }
-    cv::resize(img, scaled_img, cv::Size(scaled_width, scaled_height),
-               0, 0, cv::INTER_LINEAR);
+    if (scaled_height != img.rows || scaled_width != img.cols) {
+      cv::resize(img, scaled_img, cv::Size(scaled_width, scaled_height),
+                 0, 0, cv::INTER_LINEAR);
+    } else {
+      // No scaling needs to be done.
+      scaled_img = img;
+    }
     // find the cropped region, and copy it to the destination matrix with
     // mean subtraction and scaling.
     int width_offset =
-        std::uniform_int_distribution<>(0, scaled_img.cols - crop_)(
-            cpu_context_.RandGenerator());
+        std::uniform_int_distribution<>(0, scaled_img.cols - crop_)(randgen);
     int height_offset =
-        std::uniform_int_distribution<>(0, scaled_img.rows - crop_)(
-            cpu_context_.RandGenerator());
-    // CAFFE_VLOG(1) << "offset: " << height_offset << ", " << width_offset;
-    if (mirror_ && mirror_this_image(cpu_context_.RandGenerator())) {
+        std::uniform_int_distribution<>(0, scaled_img.rows - crop_)(randgen);
+    if (mirror_ && mirror_this_image(randgen)) {
       // Copy mirrored image.
       for (int h = height_offset; h < height_offset + crop_; ++h) {
         for (int w = width_offset + crop_ - 1; w >= width_offset; --w) {
@@ -234,32 +263,32 @@ bool ImageInputOp<Context>::Prefetch() {
     }
     // Copy the label
     prefetched_label_.mutable_data<int>()[item_id] = label;
-    // Advance to the next item.
-    cursor_->Next();
-    if (!cursor_->Valid()) {
-      cursor_->SeekToFirst();
-    }
+  }
+
+  // If the context is not CPUContext, we will need to do a copy in the
+  // prefetch function as well.
+  if (!std::is_same<Context, CPUContext>::value) {
+    prefetched_image_on_device_.CopyFrom(prefetched_image_, &context_);
+    prefetched_label_on_device_.CopyFrom(prefetched_label_, &context_);
   }
   return true;
 }
 
 template <class Context>
 bool ImageInputOp<Context>::CopyPrefetched() {
-  // The first output is the image data.
   auto* image_output = OperatorBase::Output<Tensor<Context> >(0);
-  image_output->ReshapeLike(prefetched_image_);
-  this->device_context_.template Copy<float, CPUContext, Context>(
-      prefetched_image_.size(), prefetched_image_.template data<float>(),
-      image_output->template mutable_data<float>());
-  // The second output is the label.
   auto* label_output = OperatorBase::Output<Tensor<Context> >(1);
-  label_output->ReshapeLike(prefetched_label_);
-  this->device_context_.template Copy<int, CPUContext, Context>(
-      prefetched_label_.size(), prefetched_label_.template data<int>(),
-      label_output->template mutable_data<int>());
+  // Note(jiayq): The if statement below should be optimized away by the
+  // compiler since std::is_same is a constexpr.
+  if (std::is_same<Context, CPUContext>::value) {
+    image_output->CopyFrom(prefetched_image_, &context_);
+    label_output->CopyFrom(prefetched_label_, &context_);
+  } else {
+    image_output->CopyFrom(prefetched_image_on_device_, &context_);
+    label_output->CopyFrom(prefetched_label_on_device_, &context_);
+  }
   return true;
 }
-
 }  // namespace caffe2
 
 #endif  // CAFFE2_IMAGE_IMAGE_INPUT_OP_H_

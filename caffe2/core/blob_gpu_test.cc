@@ -25,9 +25,9 @@ TYPED_TEST(TensorGPUTest, TensorInitializedEmpty) {
   dims[2] = 5;
   tensor.Reshape(dims);
   EXPECT_EQ(tensor.ndim(), 3);
-  EXPECT_EQ(tensor.dim(0), 2);
-  EXPECT_EQ(tensor.dim(1), 3);
-  EXPECT_EQ(tensor.dim(2), 5);
+  EXPECT_EQ(tensor.dim32(0), 2);
+  EXPECT_EQ(tensor.dim32(1), 3);
+  EXPECT_EQ(tensor.dim32(2), 5);
   EXPECT_TRUE(tensor.mutable_data<TypeParam>() != nullptr);
   EXPECT_TRUE(tensor.data<TypeParam>() != nullptr);
 }
@@ -40,9 +40,9 @@ TYPED_TEST(TensorGPUTest, TensorInitializedNonEmpty) {
   dims[2] = 5;
   TensorCUDA tensor(dims);
   EXPECT_EQ(tensor.ndim(), 3);
-  EXPECT_EQ(tensor.dim(0), 2);
-  EXPECT_EQ(tensor.dim(1), 3);
-  EXPECT_EQ(tensor.dim(2), 5);
+  EXPECT_EQ(tensor.dim32(0), 2);
+  EXPECT_EQ(tensor.dim32(1), 3);
+  EXPECT_EQ(tensor.dim32(2), 5);
   EXPECT_TRUE(tensor.mutable_data<TypeParam>() != nullptr);
   EXPECT_TRUE(tensor.data<TypeParam>() != nullptr);
   dims[0] = 7;
@@ -51,10 +51,10 @@ TYPED_TEST(TensorGPUTest, TensorInitializedNonEmpty) {
   dims.push_back(17);
   tensor.Reshape(dims);
   EXPECT_EQ(tensor.ndim(), 4);
-  EXPECT_EQ(tensor.dim(0), 7);
-  EXPECT_EQ(tensor.dim(1), 11);
-  EXPECT_EQ(tensor.dim(2), 13);
-  EXPECT_EQ(tensor.dim(3), 17);
+  EXPECT_EQ(tensor.dim32(0), 7);
+  EXPECT_EQ(tensor.dim32(1), 11);
+  EXPECT_EQ(tensor.dim32(2), 13);
+  EXPECT_EQ(tensor.dim32(3), 17);
   EXPECT_TRUE(tensor.mutable_data<TypeParam>() != nullptr);
   EXPECT_TRUE(tensor.data<TypeParam>() != nullptr);
 }
@@ -87,7 +87,7 @@ TYPED_TEST(TensorGPUTest, TensorShareDataCanUseDifferentShapes) {
   EXPECT_TRUE(tensor.mutable_data<TypeParam>() != nullptr);
   other_tensor.ShareData(tensor);
   EXPECT_EQ(other_tensor.ndim(), 1);
-  EXPECT_EQ(other_tensor.dim(0), alternate_dims[0]);
+  EXPECT_EQ(other_tensor.dim32(0), alternate_dims[0]);
   EXPECT_TRUE(tensor.data<TypeParam>() != nullptr);
   EXPECT_TRUE(other_tensor.data<TypeParam>() != nullptr);
   EXPECT_EQ(tensor.data<TypeParam>(), other_tensor.data<TypeParam>());
@@ -118,6 +118,32 @@ TYPED_TEST(TensorGPUDeathTest, CannotAccessDataWhenEmpty) {
   TensorCUDA tensor;
   EXPECT_EQ(tensor.ndim(), 0);
   ASSERT_DEATH(tensor.data<TypeParam>(), "");
+}
+
+TEST(TensorTest, TensorSerialization) {
+  Blob blob;
+  TensorCPU tensor;
+  tensor.Reshape(2, 3);
+  for (int i = 0; i < 6; ++i) {
+    tensor.mutable_data<float>()[i] = i;
+  }
+  for (int gpu_id = 0; gpu_id < NumCudaDevices(); ++gpu_id) {
+    DeviceGuard guard(gpu_id);
+    CUDAContext context(gpu_id);
+    blob.Reset(new TensorCUDA(tensor, &context));
+    string serialized = blob.Serialize("test");
+    TensorProto proto;
+    CAFFE_CHECK(proto.ParseFromString(serialized));
+    EXPECT_EQ(proto.name(), "test");
+    EXPECT_EQ(proto.data_type(), TensorProto::FLOAT);
+    EXPECT_EQ(proto.float_data_size(), 6);
+    for (int i = 0; i < 6; ++i) {
+      EXPECT_EQ(proto.float_data(i), i);
+    }
+    EXPECT_TRUE(proto.has_device_detail());
+    EXPECT_EQ(proto.device_detail().device_type(), CUDA);
+    EXPECT_EQ(proto.device_detail().cuda_gpu_id(), gpu_id);
+  }
 }
 
 }  // namespace

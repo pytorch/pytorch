@@ -1,11 +1,40 @@
+#include "caffe2/core/flags.h"
+
 #include <cstdlib>
 #include <sstream>
 
-#include "caffe2/core/flags.h"
 #include "caffe2/core/logging.h"
 
 namespace caffe2 {
-DEFINE_REGISTRY(Caffe2FlagsRegistry, Caffe2FlagParser, const string&);
+
+#ifdef CAFFE2_USE_GFLAGS
+
+void SetUsageMessage(const string& str) {
+  if (UsageMessage() != nullptr) {
+    // Usage message has already been set, so we will simply return.
+    return;
+  }
+  google::SetUsageMessage(str);
+}
+
+const char* UsageMessage() {
+  return google::ProgramUsage();
+}
+
+bool ParseCaffeCommandLineFlags(int* pargc, char*** pargv) {
+  if (*pargc == 0) return true;
+  return google::ParseCommandLineFlags(pargc, pargv, true);
+}
+
+bool CommandLineFlagsHasBeenParsed() {
+  // There is no way we query gflags right now, so we will simply return true.
+  return true;
+}
+
+#else  // CAFFE2_USE_GFLAGS
+
+
+CAFFE_DEFINE_REGISTRY(Caffe2FlagsRegistry, Caffe2FlagParser, const string&);
 
 namespace {
 static bool gCommandLineFlagsParsed = false;
@@ -21,9 +50,11 @@ static string gUsageMessage = "(Usage message not set.)";
 
 
 void SetUsageMessage(const string& str) { gUsageMessage = str; }
-const string& UsageMessage() { return gUsageMessage; }
+const char* UsageMessage() { return gUsageMessage.c_str(); }
 
-bool ParseCaffeCommandLineFlags(int* pargc, char** argv) {
+bool ParseCaffeCommandLineFlags(int* pargc, char*** pargv) {
+  if (*pargc == 0) return true;
+  char** argv = *pargv;
   bool success = true;
   GlobalInitStream() << "Parsing commandline arguments for caffe2."
                      << std::endl;
@@ -163,5 +194,6 @@ bool Caffe2FlagParser::Parse<bool>(const string& content, bool* value) {
   }
 }
 
+#endif  // CAFFE2_USE_GFLAGS
 
 }  // namespace caffe2

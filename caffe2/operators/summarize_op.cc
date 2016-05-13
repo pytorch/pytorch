@@ -32,7 +32,7 @@ bool SummarizeOp<float, CPUContext>::RunOnDevice() {
   }
   if (OutputSize()) {
     auto* Y = Output(0);
-    Y->Reshape(std::vector<int>{NUM_STATS});
+    Y->Reshape(vector<TIndex>{NUM_STATS});
     float* Ydata = Y->mutable_data<float>();
     Ydata[MIN_IDX] = min;
     Ydata[MAX_IDX] = max;
@@ -44,6 +44,11 @@ bool SummarizeOp<float, CPUContext>::RunOnDevice() {
 
 namespace {
 REGISTER_CPU_OPERATOR(Summarize, SummarizeOp<float, CPUContext>);
+
+// Input: X; output: if set, a summarized Tensor of shape 4, with the values
+// being min, max, mean and std respectively.
+OPERATOR_SCHEMA(Summarize).NumInputs(1).NumOutputs(0, 1);
+
 SHOULD_NOT_DO_GRADIENT(Summarize);
 }  // namespace
 }  // namespace caffe2

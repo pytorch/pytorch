@@ -12,9 +12,6 @@ struct TanhCPUFunctor {
       y[i] = tanh(x[i]);
     }
   }
-  inline bool InplaceAllowed() {
-    return true;
-  }
 };
 
 template <typename T>
@@ -23,13 +20,6 @@ struct TanhGradientCPUFunctor {
                          T* dx, CPUContext* device_context) {
     for (int i = 0; i < n; ++i) {
       dx[i] = dy[i] * (1 - y[i] * y[i]);
-    }
-  }
-  inline bool InplaceAllowed(const int input_id, const int output_id) {
-    if (input_id == 1 && output_id == 0) {
-      return true;
-    } else {
-      return false;
     }
   }
 };
@@ -41,12 +31,16 @@ REGISTER_CPU_OPERATOR(
     TanhGradient, BinaryElementwiseOp<float, CPUContext,
                                      TanhGradientCPUFunctor<float> >);
 
-struct GetTanhGradient : public GetGradientDefBase {
-  vector<OperatorDef>* Create(const OperatorDef& def) override {
+OPERATOR_SCHEMA(Tanh).NumInputs(1).NumOutputs(1).AllowInplace({{0, 0}});
+OPERATOR_SCHEMA(TanhGradient).NumInputs(2).NumOutputs(1).AllowInplace({{1, 0}});
+
+class GetTanhGradient : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  vector<OperatorDef> GetGradientDefs() override {
     return SingleGradientDef(
         "TanhGradient", "",
-        std::vector<string>{O(def, 0), GO(def, 0)},
-        std::vector<string>{GI(def, 0)});
+        std::vector<string>{O(0), GO(0)},
+        std::vector<string>{GI(0)});
   }
 };
 REGISTER_GRADIENT(Tanh, GetTanhGradient);

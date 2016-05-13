@@ -1,9 +1,74 @@
 #ifndef CAFFE2_CORE_FLAGS_H_
 #define CAFFE2_CORE_FLAGS_H_
 // A lightweighted commandline flags tool for caffe2, so we do not need to rely
-// on gflags.
+// on gflags. If you have gflags installed, set the macro CAFFE2_USE_GFLAGS will
+// seamlessly route everything to gflags.
+
+#ifdef CAFFE2_USE_GFLAGS
+#include <gflags/gflags.h>
+#endif
 
 #include "caffe2/core/registry.h"
+
+namespace caffe2 {
+/**
+ * Sets the usage message when a commandline tool is called with "--help".
+ */
+void SetUsageMessage(const string& str);
+
+/**
+ * Returns the usage message for the commandline tool set by SetUsageMessage.
+ */
+const char* UsageMessage();
+
+/**
+ * Parses the commandline flags.
+ *
+ * This command parses all the commandline arguments passed in via pargc
+ * and argv. Once it is finished, partc and argv will contain the remaining
+ * commandline args that caffe2 does not deal with. Note that following
+ * convention, argv[0] contains the binary name and is not parsed.
+ */
+bool ParseCaffeCommandLineFlags(int* pargc, char*** pargv);
+/**
+ * Checks if the commandline flags has already been passed.
+ */
+bool CommandLineFlagsHasBeenParsed();
+
+}  // namespace caffe2
+
+
+////////////////////////////////////////////////////////////////////////////////
+// Below are gflags and non-gflags specific implementations.
+////////////////////////////////////////////////////////////////////////////////
+
+#ifdef CAFFE2_USE_GFLAGS
+
+#define CAFFE2_GFLAGS_DEF_WRAPPER(type, name, default_value, help_str)         \
+  DEFINE_##type(name, default_value, help_str);                                \
+  namespace caffe2 {                                                           \
+    using ::FLAGS_##name;                                                      \
+  }
+
+#define CAFFE2_DEFINE_int(...)    CAFFE2_GFLAGS_DEF_WRAPPER(int32, __VA_ARGS__)
+#define CAFFE2_DEFINE_double(...) CAFFE2_GFLAGS_DEF_WRAPPER(double, __VA_ARGS__)
+#define CAFFE2_DEFINE_bool(...)   CAFFE2_GFLAGS_DEF_WRAPPER(bool, __VA_ARGS__)
+#define CAFFE2_DEFINE_string(name, default_value, help_str) \
+    CAFFE2_GFLAGS_DEF_WRAPPER(string, name, default_value, help_str)
+
+// DECLARE_typed_var should be used in header files and in the global namespace.
+#define CAFFE2_GFLAGS_DECLARE_WRAPPER(type, name)                             \
+  DECLARE_##type(name);                                                       \
+  namespace caffe2 {                                                          \
+    using ::FLAGS_##name;                                                     \
+  }  // namespace caffe2
+
+#define CAFFE2_DECLARE_int(name) CAFFE2_GFLAGS_DECLARE_WRAPPER(int32, name)
+#define CAFFE2_DECLARE_double(name) CAFFE2_GFLAGS_DECLARE_WRAPPER(double, name)
+#define CAFFE2_DECLARE_bool(name) CAFFE2_GFLAGS_DECLARE_WRAPPER(bool, name)
+#define CAFFE2_DECLARE_string(name) CAFFE2_GFLAGS_DECLARE_WRAPPER(string, name)
+
+#else   // CAFFE2_USE_GFLAGS
 
 namespace caffe2 {
 
@@ -18,34 +83,9 @@ class Caffe2FlagParser {
   bool success_;
 };
 
-DECLARE_REGISTRY(Caffe2FlagsRegistry, Caffe2FlagParser, const string&);
-
-/**
- * Sets the usage message when a commandline tool is called with "--help".
- */
-void SetUsageMessage(const string& str);
-
-/**
- * Returns the usage message for the commandline tool set by SetUsageMessage.
- */
-const string& UsageMessage();
-
-/**
- * Parses the commandline flags.
- *
- * This command parses all the commandline arguments passed in via pargc
- * and argv. Once it is finished, partc and argv will contain the remaining
- * commandline args that caffe2 does not deal with. Note that following
- * convention, argv[0] contains the binary name and is not parsed.
- */
-bool ParseCaffeCommandLineFlags(int* pargc, char** argv);
-/**
- * Checks if the commandline flags has already been passed.
- */
-bool CommandLineFlagsHasBeenParsed();
+CAFFE_DECLARE_REGISTRY(Caffe2FlagsRegistry, Caffe2FlagParser, const string&);
 
 }  // namespace caffe2
-
 
 // The macros are defined outside the caffe2 namespace. In your code, you should
 // write the CAFFE2_DEFINE_* and CAFFE2_DECLARE_* macros outside any namespace
@@ -87,5 +127,7 @@ bool CommandLineFlagsHasBeenParsed();
 #define CAFFE2_DECLARE_double(name) CAFFE2_DECLARE_typed_var(double, name)
 #define CAFFE2_DECLARE_bool(name) CAFFE2_DECLARE_typed_var(bool, name)
 #define CAFFE2_DECLARE_string(name) CAFFE2_DECLARE_typed_var(string, name)
+
+#endif  // CAFFE2_USE_GFLAGS
 
 #endif  // CAFFE2_CORE_FLAGS_H_

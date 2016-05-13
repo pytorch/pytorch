@@ -28,19 +28,18 @@ class AccumulateOp final : public Operator<Context> {
       CAFFE_LOG_INFO << "Reshaping and initializing output.";
       output->ReshapeLike(input);
       math::Set<T, Context>(
-          output->size(), 0, output->template mutable_data<T>(), &device_context_);
+          output->size(), 0, output->template mutable_data<T>(), &context_);
     }
     math::Axpby<T, Context>(
         input.size(), static_cast<T>(1),
         input.template data<T>(),
         gamma_,
-        output->template mutable_data<T>(), &device_context_);
+        output->template mutable_data<T>(), &context_);
     return true;
   }
 
  protected:
   T gamma_;
-  INPUT_OUTPUT_STATS(1, 1, 1, 1);
   DISABLE_COPY_AND_ASSIGN(AccumulateOp);
 };
 

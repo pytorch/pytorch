@@ -1,6 +1,7 @@
 #ifndef CAFFE2_CORE_COMMON_CUDNN_H_
 #define CAFFE2_CORE_COMMON_CUDNN_H_
 
+#include <array>
 #include <mutex>
 
 #include <cudnn.h>
@@ -13,8 +14,8 @@
 #include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/core/logging.h"
 
-static_assert(CUDNN_VERSION >= 2000,
-              "Caffe2 requires cudnn version 2.0 or above.");
+static_assert(CUDNN_VERSION >= 5000,
+              "Caffe2 requires cudnn version 5.0 or above.");
 
 namespace caffe2 {
 
@@ -98,7 +99,6 @@ template<> class cudnnTypeWrapper<double> {
   }
 };
 
-#if CUDNN_VERSION >= 3000
 template<> class cudnnTypeWrapper<float16> {
  public:
   static const cudnnDataType_t type = CUDNN_DATA_HALF;
@@ -112,7 +112,6 @@ template<> class cudnnTypeWrapper<float16> {
     return &v;
   }
 };
-#endif  // CUDNN_VERSION >= 3000
 
 /**
  * A wrapper function to convert the Caffe storage order to cudnn storage order
@@ -181,7 +180,6 @@ class cudnnTensorDescWrapper {
 };
 
 
-
 class cudnnFilterDescWrapper {
  public:
   cudnnFilterDescWrapper() {
@@ -203,10 +201,14 @@ class cudnnFilterDescWrapper {
         << "Currently only 4-dimensional descriptor supported.";
     order_ = order; type_ = type; dims_ = dims;
     CUDNN_CHECK(cudnnSetFilter4dDescriptor(
-        desc_, type, dims_[0],
-        (order == StorageOrder::NCHW? dims_[1] : dims_[3]),
-        (order == StorageOrder::NCHW? dims_[2] : dims_[1]),
-        (order == StorageOrder::NCHW? dims_[3] : dims_[2])));
+        desc_,
+        type,
+        GetCudnnTensorFormat(order),
+        dims_[0],
+        // TODO - confirm that this is correct for NHWC
+        (order == StorageOrder::NCHW ? dims_[1] : dims_[3]),
+        (order == StorageOrder::NCHW ? dims_[2] : dims_[1]),
+        (order == StorageOrder::NCHW ? dims_[3] : dims_[2])));
     if (changed) *changed = true;
     return desc_;
   }
@@ -226,18 +228,67 @@ class cudnnFilterDescWrapper {
 };
 
 
+class CuDNNWrapper;
 /**
- * CuDNNWrapper is a class that wraps the cudnn handles associated with a
- * specific CUDAContext.
+ * ThreadLocalCuDNNObjects wraps around cudnnHandle_t so they can be
+ * properly destructed when threads exit.
+ */
+class ThreadLocalCuDNNObjects {
+  friend class CuDNNWrapper;
+ private:
+  ThreadLocalCuDNNObjects() {
+    for (int i = 0; i < CAFFE2_COMPILE_TIME_MAX_GPUS; ++i) {
+      cudnn_handle_[i] = nullptr;
+    }
+  }
+
+  ~ThreadLocalCuDNNObjects() {
+    for (int i = 0; i < CAFFE2_COMPILE_TIME_MAX_GPUS; ++i) {
+      if (cudnn_handle_[i]) {
+        CUDNN_CHECK(cudnnDestroy(cudnn_handle_[i]));
+      }
+    }
+  }
+
+  cudnnHandle_t cudnn_handle_[CAFFE2_COMPILE_TIME_MAX_GPUS];
+};
+
+/**
+ * CuDNNWorkspace is a wrapper around a raw cuda pointer that holds the cudnn
+ * scratch space. This struct is meant to be only used in CuDNNWrapper to
+ * provide a program-wide scratch space for CuDNN. The reason behind it is that
+ * cudnn function calls are usually very efficient, hence one probably does not
+ * want to run multiple cudnn calls at the same time. As a result, one should
+ * not need more than one cudnn workspace per device.
+ */
+struct CuDNNWorkspace {
+  CuDNNWorkspace() : data_(nullptr) {};
+  ~CuDNNWorkspace() {
+    if (data_) CUDAContext::Delete(data_);
+  }
+  void Reset(void* new_data=nullptr) {
+    if (data_) CUDAContext::Delete(data_);
+    data_ = new_data;
+  }
+  void* data_;
+};
+
+/**
+ * CuDNNWrapper is a class that wraps the cudnn handles and cudnn workspaces.
  *
- * In caffe2, each unique CUDAContext has its own cuda stream. Since a cudnn
- * handle needs to be associated with a cuda stream, one may need to create a
- * cudnn wrapper for each CUDAContext.
+ * The wrapper ensures that for each thread and each gpu, there is one
+ * identical cudnn handle, which is also associated with the thread-local
+ * per-device cuda stream. The wrapper also hosts the device-specific cudnn
+ * workspace (scratch space for some cudnn functions).
  *
  * Sample usage: if you are implementing a cuda operator that uses cudnn, you
  * can have a private member like
  *     CudnnWrapper wrapper_;
- * and in your constructor, initialize it with wrapper_(device_context_).
+ * and in your constructor, initialize it with wrapper_(context_). If
+ * you will need to use cudnn workspace, you should access it via a lock like:
+ *     std::lock_guard<std::mutex> lock(wrapper_.mutex());
+ *     void* workspace = wrapper_.GetWorkspace(nbytes_needed);
+ *     // release the mutex once computation is finished.
  */
 class CuDNNWrapper {
  public:
@@ -246,71 +297,60 @@ class CuDNNWrapper {
    * the CUDAContext object should outlive the CuDNNWrapper.
    */
   explicit CuDNNWrapper(CUDAContext* context)
-      : cuda_context_(context), cudnn_handle_(nullptr) {}
+      : context_(context) {}
 
-  virtual ~CuDNNWrapper() {
-    if (cudnn_handle_) {
-      CUDNN_CHECK(cudnnDestroy(cudnn_handle_));
-    }
-  }
+  virtual ~CuDNNWrapper() {}
 
   /**
    * Returns the cudnn handle.
    */
   cudnnHandle_t& cudnn_handle() {
-    if (!cudnn_handle_) {
+    int gpu_id = context_->cuda_gpu_id();
+    auto& cudnn_handle_ = tls_cudnn_objects_.cudnn_handle_[gpu_id];
+    if (cudnn_handle_) {
+      return cudnn_handle_;
+    } else {
+      context_->SwitchToDevice();
       CUDNN_CHECK(cudnnCreate(&cudnn_handle_));
       CUDNN_CHECK(cudnnSetStream(
-          cudnn_handle_, cuda_context_->cuda_stream()));
+          cudnn_handle_, context_->cuda_stream()));
     }
     return cudnn_handle_;
   }
 
+  std::mutex& mutex() {
+    return mutex_[context_->cuda_gpu_id()];
+  }
+
+  void ResetWorkspace() {
+    int gpu_id = context_->cuda_gpu_id();
+    scratch_[gpu_id].Reset();
+    nbytes_[gpu_id] = 0;
+  }
+
+  void* GetWorkspace(const size_t nbytes) {
+    int gpu_id = context_->cuda_gpu_id();
+    if (nbytes > nbytes_[gpu_id]) {
+      CAFFE_VLOG(1) << "Resizing CuDNN workspace from " << nbytes_[gpu_id]
+                    << " to " << nbytes << " bytes.";
+      DeviceGuard guard(gpu_id);
+      scratch_[gpu_id].Reset(CUDAContext::New(nbytes));
+      nbytes_[gpu_id] = nbytes;
+    }
+    return scratch_[gpu_id].data_;
+  }
+
  protected:
   // Pointer to an external cuda context that the cudnn wrapper will use.
-  CUDAContext* cuda_context_;
-  cudnnHandle_t cudnn_handle_;
+  CUDAContext* context_;
+  static thread_local ThreadLocalCuDNNObjects tls_cudnn_objects_;
+
+  // Objects to hold workspaces for CuDNN.
+  static std::array<CuDNNWorkspace, CAFFE2_COMPILE_TIME_MAX_GPUS> scratch_;
+  static std::array<size_t, CAFFE2_COMPILE_TIME_MAX_GPUS> nbytes_;
+  static std::array<std::mutex, CAFFE2_COMPILE_TIME_MAX_GPUS> mutex_;
+
   DISABLE_COPY_AND_ASSIGN(CuDNNWrapper);
-};
-
-/**
- * CuDNNWorkspaceWrapper is a wrapper class that guards a chunk of cudnn raw
- * memory used by cudnn. It provides a lock so that different potential
- * users can make sure they do not stomp on each other.
- */
-class CuDNNWorkspaceWrapper {
- public:
-  CuDNNWorkspaceWrapper() : data_(nullptr), nbytes_(0) {}
-  ~CuDNNWorkspaceWrapper() {
-    // Make sure that all usage of the workspace finishes.
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (data_) {
-      CUDAContext::Delete(data_);
-    }
-  }
-
-  std::mutex& mutex() { return mutex_; }
-
-  void Reset() {
-    if (data_) CUDAContext::Delete(data_);
-    data_ = nullptr;
-    nbytes_ = 0;
-  }
-
-  void* Get(const size_t nbytes) {
-    if (nbytes > nbytes_) {
-      if (data_) CUDAContext::Delete(data_);
-      data_ = CUDAContext::New(nbytes);
-      nbytes_ = nbytes;
-    }
-    return data_;
-  }
-
- private:
-  void* data_;
-  size_t nbytes_;
-  std::mutex mutex_;
-  DISABLE_COPY_AND_ASSIGN(CuDNNWorkspaceWrapper);
 };
 
 }  // namespace caffe2

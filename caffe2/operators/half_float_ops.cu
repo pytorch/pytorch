@@ -32,13 +32,12 @@ class FloatToHalfCUDA : public Operator<CUDAContext> {
     auto* Y = Output(0);
     Y->ReshapeLike(X);
     FloatToHalfKernel<<<CAFFE_GET_BLOCKS(X.size()), CAFFE_CUDA_NUM_THREADS,
-                        0, device_context_.cuda_stream()>>>(
+                        0, context_.cuda_stream()>>>(
       X.size(), X.data<float>(),
       reinterpret_cast<half*>(Y->mutable_data<float16>()));
     return true;
   }
 
-  INPUT_OUTPUT_STATS(1, 1, 1, 1);
   DISABLE_COPY_AND_ASSIGN(FloatToHalfCUDA);
 };
 
@@ -53,13 +52,12 @@ class HalfToFloatCUDA : public Operator<CUDAContext> {
     auto* Y = Output(0);
     Y->ReshapeLike(X);
     HalfToFloatKernel<<<CAFFE_GET_BLOCKS(X.size()), CAFFE_CUDA_NUM_THREADS,
-                        0, device_context_.cuda_stream()>>>(
+                        0, context_.cuda_stream()>>>(
       X.size(), reinterpret_cast<const half*>(X.data<float16>()),
       Y->mutable_data<float>());
     return true;
   }
 
-  INPUT_OUTPUT_STATS(1, 1, 1, 1);
   DISABLE_COPY_AND_ASSIGN(HalfToFloatCUDA);
 };
 
@@ -67,22 +65,27 @@ namespace {
 REGISTER_CUDA_OPERATOR(FloatToHalf, FloatToHalfCUDA);
 REGISTER_CUDA_OPERATOR(HalfToFloat, HalfToFloatCUDA);
 
-struct GetFloatToHalfGradient : public GetGradientDefBase {
-  vector<OperatorDef>* Create(const OperatorDef& def) override {
+OPERATOR_SCHEMA(FloatToHalf).NumInputs(1).NumOutputs(1);
+OPERATOR_SCHEMA(HalfToFloat).NumInputs(1).NumOutputs(1);
+
+class GetFloatToHalfGradient : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  vector<OperatorDef> GetGradientDefs() override {
     return SingleGradientDef(
         "HalfToFloat", "",
-        vector<string>{GO(def, 0)},
-        vector<string>{GI(def, 0)});
+        vector<string>{GO(0)},
+        vector<string>{GI(0)});
   }
 };
 REGISTER_GRADIENT(FloatToHalf, GetFloatToHalfGradient);
 
-struct GetHalfToFloatGradient : public GetGradientDefBase {
-  vector<OperatorDef>* Create(const OperatorDef& def) override {
+class GetHalfToFloatGradient : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  vector<OperatorDef> GetGradientDefs() override {
     return SingleGradientDef(
         "FloatToHalf", "",
-        vector<string>{GO(def, 0)},
-        vector<string>{GI(def, 0)});
+        vector<string>{GO(0)},
+        vector<string>{GI(0)});
   }
 };
 REGISTER_GRADIENT(HalfToFloat, GetHalfToFloatGradient);

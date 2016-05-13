@@ -1,20 +1,43 @@
+#include "caffe2/core/logging.h"
+
 #ifdef ANDROID
 #include <android/log.h>
 #endif  // ANDROID
 
-#include "caffe2/core/logging.h"
-
 #ifdef CAFFE2_USE_GOOGLE_GLOG
+
+// GLOG's minloglevel
+DECLARE_int32(minloglevel);
+// GLOG's verbose log value.
+DECLARE_int32(v);
 
 CAFFE2_DEFINE_int(caffe2_log_level, google::ERROR,
                   "The minimum log level that caffe2 will output.");
 
+// Google glog's api does not have an external function that allows one to check
+// if glog is initialized or not. It does have an internal function - so we are
+// declaring it here. This is a hack but has been used by a bunch of others too
+// (e.g. Torch).
+namespace google {
+namespace glog_internal_namespace_ {
+bool IsGoogleLoggingInitialized();
+}  // namespace glog_internal_namespace_
+}  // namespace google
+
+
 namespace caffe2 {
 bool InitCaffeLogging(int* argc, char** argv) {
-  ::google::InitGoogleLogging(argv[0]);
-  ::google::InstallFailureSignalHandler();
-  // TODO(Yangqing): add a compatibility support for caffe2_log_level
-  // instead of having to use glog's specifications.
+  if (*argc == 0) return true;
+  if (!::google::glog_internal_namespace_::IsGoogleLoggingInitialized()) {
+    ::google::InitGoogleLogging(argv[0]);
+    ::google::InstallFailureSignalHandler();
+  }
+  // Transfer the caffe2_log_level setting to glog.
+  FLAGS_minloglevel = FLAGS_caffe2_log_level;
+  // Transfer the caffe2_log_level verbose setting to glog.
+  if (FLAGS_caffe2_log_level < 0) {
+    FLAGS_v = -FLAGS_caffe2_log_level;
+  }
   return true;
 }
 }  // namespace caffe2
@@ -28,6 +51,7 @@ namespace caffe2 {
 bool InitCaffeLogging(int* argc, char** argv) {
   // When doing InitCaffeLogging, we will assume that caffe's flag paser has
   // already finished.
+  if (*argc == 0) return true;
   if (!CommandLineFlagsHasBeenParsed()) {
     std::cerr << "InitCaffeLogging() has to be called after "
                  "ParseCaffeCommandLineFlags. Modify your program to make sure "

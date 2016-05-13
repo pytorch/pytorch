@@ -29,6 +29,7 @@ In addition, Caffe2 has several optional dependencies: not having these will not
 * [OpenCV](http://opencv.org/), which is needed for image-related operations. If you work with images, you most likely want this.
 * [OpenMPI](http://www.open-mpi.org/), needed for MPI-related Caffe2 operators.
 * `leveldb`, needed for Caffe2's LevelDB IO backend. LevelDB also depends on `snappy`.
+* `rocksdb`, needed for Caffe2's RocksDB IO backend. RocksDB also depends on `snappy`, `bzip2`, and `zlib`.
 * `lmdb`, needed for Caffe2's LMDB IO backend.
 * [ZeroMQ](http://zeromq.org/), needed for Caffe2's ZmqDB IO backend (serving data through a socket).
 * [cuDNN](https://developer.nvidia.com/cudnn), needed for Caffe2's cuDNN operators.

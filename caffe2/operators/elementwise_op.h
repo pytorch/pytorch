@@ -19,15 +19,10 @@ class UnaryElementwiseOp : public Operator<Context> {
     auto* output = Output(0);
     output->ReshapeLike(input);
     Functor()(input.size(), input.template data<T>(),
-              output->template mutable_data<T>(), &device_context_);
+              output->template mutable_data<T>(), &context_);
     return true;
   }
 
-  bool InplaceAllowed(const int input_id, const int output_id) const override {
-    return Functor().InplaceAllowed();
-  }
-
-  INPUT_OUTPUT_STATS(1, 1, 1, 1);
   DISABLE_COPY_AND_ASSIGN(UnaryElementwiseOp);
 };
 
@@ -45,15 +40,10 @@ class BinaryElementwiseOp : public Operator<Context> {
     output->ReshapeLike(input0);
     Functor()(input0.size(), input0.template data<T>(),
               input1.template data<T>(),
-              output->template mutable_data<T>(), &device_context_);
+              output->template mutable_data<T>(), &context_);
     return true;
   }
 
-  bool InplaceAllowed(const int input_id, const int output_id) const override {
-    return Functor().InplaceAllowed(input_id, output_id);
-  }
-
-  INPUT_OUTPUT_STATS(2, 2, 1, 1);
   DISABLE_COPY_AND_ASSIGN(BinaryElementwiseOp);
 };
 
@@ -79,8 +69,6 @@ CAFFE2_BINARY_FUNCTOR_WRAPPER(Sub);
 CAFFE2_BINARY_FUNCTOR_WRAPPER(Mul);
 CAFFE2_BINARY_FUNCTOR_WRAPPER(Div);
 #undef CAFFE2_BINARY_FUNCTOR_WRAPPER
-
-
 
 }  // namespace caffe2
 

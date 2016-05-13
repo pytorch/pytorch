@@ -6,22 +6,12 @@
 
 namespace caffe2 {
 
-// This is a test that make sure the random number generator works as expected,
-// with a specific seed that generates specific responses. I think it should
-// be the same number across platforms since we use mt19937 explicitly.
-TEST(CPUContextTest, TestRandomNumberGenerator) {
-  DeviceOption option;
-  option.set_random_seed(1701);
-  CPUContext context(option);
-  std::uniform_int_distribution<int> dist(0, 100);
-  /*
-  // These numbers are manually verified off-line.
-  EXPECT_EQ(dist(context.RandGenerator()), 46);
-  EXPECT_EQ(dist(context.RandGenerator()), 4);
-  EXPECT_EQ(dist(context.RandGenerator()), 94);
-  EXPECT_EQ(dist(context.RandGenerator()), 26);
-  EXPECT_EQ(dist(context.RandGenerator()), 67);
-  */
+TEST(CPUContextTest, TestAllocAlignment) {
+  for (int i = 1; i < 10; ++i) {
+    void* data = CPUContext::New(i);
+    EXPECT_EQ((reinterpret_cast<size_t>(data) % gCaffe2Alignment), 0);
+    CPUContext::Delete(data);
+  }
 }
 
 TEST(CPUContextTest, TestAllocDealloc) {

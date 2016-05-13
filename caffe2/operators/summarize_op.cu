@@ -87,7 +87,7 @@ bool SummarizeOp<float, CUDAContext>::RunOnDevice() {
   // compute summary statistics
   SummaryStatsData<float> result = thrust::transform_reduce(
 #if THRUST_VERSION >= 100800
-      thrust::cuda::par.on(device_context_.cuda_stream()),
+      thrust::cuda::par.on(context_.cuda_stream()),
 #endif  // THRUST_VERSION >= 100800
       Xdata, Xdata + N, unary_op, init, binary_op);
   float standard_deviation = std::sqrt(result.variance());
@@ -97,10 +97,10 @@ bool SummarizeOp<float, CUDAContext>::RunOnDevice() {
   }
   if (OutputSize()) {
     auto* Y = OperatorBase::Output<TensorCUDA>(0);
-    Y->Reshape(std::vector<int>{4});
+    Y->Reshape(vector<TIndex>{4});
     float output_buffer[NUM_STATS] = {result.min, result.max, result.mean,
                                standard_deviation};
-    device_context_.Copy<float, CPUContext, CUDAContext>(
+    context_.Copy<float, CPUContext, CUDAContext>(
         NUM_STATS, output_buffer, Y->mutable_data<float>());
   }
   return true;

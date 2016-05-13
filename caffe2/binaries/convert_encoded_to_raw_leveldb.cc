@@ -131,7 +131,7 @@ void ConvertToRawDataset(
 
 
 int main(int argc, char** argv) {
-  caffe2::GlobalInit(&argc, argv);
+  caffe2::GlobalInit(&argc, &argv);
   caffe2::ConvertToRawDataset(
       caffe2::FLAGS_input_db_name, caffe2::FLAGS_output_db_name);
   return 0;

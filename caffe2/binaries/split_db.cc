@@ -27,7 +27,7 @@ std::string to_string(T v) {
 }
 
 int main(int argc, char** argv) {
-  caffe2::GlobalInit(&argc, argv);
+  caffe2::GlobalInit(&argc, &argv);
 
   std::unique_ptr<DB> in_db(caffe2::db::CreateDB(
       caffe2::FLAGS_db_type, caffe2::FLAGS_input_db, caffe2::db::READ));

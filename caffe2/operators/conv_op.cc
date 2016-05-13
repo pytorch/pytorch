@@ -6,13 +6,17 @@ namespace {
 REGISTER_CPU_OPERATOR(Conv, ConvOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(ConvGradient, ConvGradientOp<float, CPUContext>);
 
-struct GetConvGradient : public GetGradientDefBase {
-  vector<OperatorDef>* Create(const OperatorDef& def) override {
-    CAFFE_CHECK_EQ(def.input_size(), 3);
+OPERATOR_SCHEMA(Conv).NumInputs(3).NumOutputs(1);
+OPERATOR_SCHEMA(ConvGradient).NumInputs(3).NumOutputs(2, 3);
+
+class GetConvGradient : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  vector<OperatorDef> GetGradientDefs() override {
+    CAFFE_CHECK_EQ(def_.input_size(), 3);
     return SingleGradientDef(
         "ConvGradient", "",
-        vector<string>{I(def, 0), I(def, 1), GO(def, 0)},
-        vector<string>{GI(def, 1), GI(def, 2), GI(def, 0)});
+        vector<string>{I(0), I(1), GO(0)},
+        vector<string>{GI(1), GI(2), GI(0)});
   }
 };
 REGISTER_GRADIENT(Conv, GetConvGradient);
