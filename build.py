@@ -54,7 +54,7 @@ class Config(object):
     # sophisticated logging scheme. It also comes with a minimal logging tool
     # that does not depend on glog. If you wish to use glog, set USE_GLOG to
     # True.
-    USE_GLOG = False
+    USE_GLOG = True
 
     # Whether to use RTTI or not. Note that this might not always work; to
     # disable RTTI means that all your dependencies, most notably protobuf, have
