@@ -107,7 +107,7 @@ class SumReducerGradient {
  public:
   // which of the original inputs are required for gradient computation
   static constexpr std::array<int, 0> originalInputs() {
-    return {};
+    return std::array<int, 0>();
   }
 
   struct Meta {

@@ -1,6 +1,21 @@
 python_cc_extension(
-  name = "caffe2_python",
-  srcs = ["caffe2_python.cc"],
+  name="caffe2_python",
+  srcs=["caffe2_python.cc"],
+  hdrs=["caffe2_python.h"],
+  deps = [
+      "//caffe2:all_available_ops",
+      "//caffe2/core:core",
+      "//caffe2/db:db",
+  ],
+)
+
+python_cc_extension(
+  name="caffe2_python_gpu",
+  srcs=[
+    "caffe2_python.cc",
+    "caffe2_python_gpu.cc",
+  ],
+  hdrs=["caffe2_python.h"],
   deps = [
       "//caffe2:all_available_ops",
       "//caffe2/core:core",
@@ -9,95 +24,23 @@ python_cc_extension(
 )
 
 py_library(
-  name = "pycaffe2",
-  srcs = [
-      "__init__.py",
-      "caffe_translator.py",
-      "cnn.py",
-      "core.py",
-      "core_gradients.py",
-      "device_checker.py",
-      "gradient_checker.py",
-      "muji.py",
-      "net_drawer.py",
-      "utils.py",
-      "visualize.py",
-      "workspace.py",
-  ],
-  deps = [
+  name="pycaffe2",
+  srcs=Glob(["*.py"], excludes=["*_test.py"]),
+  deps=[
       ":caffe2_python",
+      ":caffe2_python_gpu",
       "//caffe/proto:caffe_proto_py",
       "//caffe2/proto:caffe2_proto_py",
       "//caffe2/python/mint:mint",
   ],
 )
 
-py_test(
-  name = "workspace_test",
-  srcs = [
-      "workspace_test.py",
-  ],
-  deps = [
-      ":pycaffe2",
-  ],
-)
+for src in Glob(["*_test.py", "*/*_test.py"]):
+    py_test(
+        name=src[:-3],
+        srcs=[src],
+        deps=[
+            ":pycaffe2",
+        ],
+    )
 
-py_test(
-  name = "workspace_gpu_test",
-  srcs = [
-      "workspace_gpu_test.py",
-  ],
-  deps = [
-      ":pycaffe2",
-  ],
-)
-
-py_test(
-  name = "muji_test",
-  srcs = [
-      "muji_test.py",
-  ],
-  deps = [
-      ":pycaffe2",
-  ],
-)
-
-py_test(
-  name = "caffe_translator_test",
-  srcs = [
-      "caffe_translator_test.py",
-  ],
-  deps = [
-      ":pycaffe2",
-  ],
-)
-
-py_test(
-  name = "gradient_check_test",
-  srcs = [
-      "gradient_check_test.py",
-  ],
-  deps = [
-      ":pycaffe2",
-  ],
-)
-
-py_test(
-  name = "model_device_test",
-  srcs = [
-      "model_device_test.py",
-  ],
-  deps = [
-      ":pycaffe2",
-  ],
-)
-
-py_test(
-  name = "core_gradients_test",
-  srcs = [
-      "core_gradients_test.py",
-  ],
-  deps = [
-      ":pycaffe2",
-  ],
-)

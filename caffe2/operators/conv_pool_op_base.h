@@ -55,8 +55,8 @@ class ConvPoolOpBase : public Operator<Context> {
              "any specific padding values.";
     }
 
-    CHECK_LE(stride_h_, kernel_h_);
-    CHECK_LE(stride_w_, kernel_h_);
+    CAFFE_CHECK_LE(stride_h_, kernel_h_);
+    CAFFE_CHECK_LE(stride_w_, kernel_h_);
     CAFFE_CHECK_GE(pad_, 0);
     CAFFE_CHECK_GE(pad_t_, 0);
     CAFFE_CHECK_GE(pad_l_, 0);
@@ -95,7 +95,7 @@ class ConvPoolOpBase : public Operator<Context> {
     }
     CAFFE_CHECK_GE(H, kernel_h_);
     CAFFE_CHECK_GE(W, kernel_w_);
-    int output_height, output_width;
+    int output_height = 0, output_width = 0;
     ComputeSizeAndPad(H, stride_h_, kernel_h_,
                       &pad_t_, &pad_b_, &output_height);
     ComputeSizeAndPad(W, stride_w_, kernel_w_,

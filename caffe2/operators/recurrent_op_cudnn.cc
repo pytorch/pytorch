@@ -10,7 +10,7 @@ TensorDescriptors<T>::TensorDescriptors(
     const std::vector<int>& dim,
     const std::vector<int>& stride) {
   descs_.resize(n);
-  CHECK_EQ(dim.size(), stride.size());
+  CAFFE_CHECK_EQ(dim.size(), stride.size());
   for (auto i = 0; i < n; ++i) {
     CUDNN_CHECK(cudnnCreateTensorDescriptor(&descs_[i]));
     CUDNN_CHECK(cudnnSetTensorNdDescriptor(
@@ -62,28 +62,28 @@ void RecurrentBaseOp<T>::initialize(
     Tensor<CUDAContext>* output,
     Tensor<CUDAContext>* hiddenOutput,
     Tensor<CUDAContext>* cellOutput) {
-  CHECK_GE(input.ndim(), 3);
+  CAFFE_CHECK_GE(input.ndim(), 3);
   const int seqLength = input.dim(0);
   const int batchSize = input.dim(1);
   const int inputDim = input.dim(2);
   const int hiddenSize = OperatorBase::GetSingleArgument<int>("hidden_size", 0);
-  CHECK_GT(hiddenSize, 0);
+  CAFFE_CHECK_GT(hiddenSize, 0);
   const auto bidirectional =
       OperatorBase::GetSingleArgument<int>("bidirectional", 0);
-  CHECK(bidirectional == 0 || bidirectional == 1);
+  CAFFE_CHECK(bidirectional == 0 || bidirectional == 1);
   const auto numDirections = bidirectional == 1 ? 2 : 1;
   const auto outputDim = hiddenSize * numDirections;
   const auto rnnDirection =
       bidirectional == 1 ? CUDNN_BIDIRECTIONAL : CUDNN_UNIDIRECTIONAL;
   const auto numLayers = OperatorBase::GetSingleArgument<int>("num_layers", 0);
-  CHECK_GT(numLayers, 0);
+  CAFFE_CHECK_GT(numLayers, 0);
   const auto& rnnModeStr =
       OperatorBase::GetSingleArgument<string>("rnn_mode", "");
-  CHECK(rnnModeStr == "lstm" || rnnModeStr == "gru");
+  CAFFE_CHECK(rnnModeStr == "lstm" || rnnModeStr == "gru");
   const auto rnnMode = rnnModeStr == "lstm" ? CUDNN_LSTM : CUDNN_GRU;
   const auto& rnnInputStr =
       OperatorBase::GetSingleArgument<string>("input_mode", "");
-  CHECK(rnnInputStr == "linear" || rnnInputStr == "skip");
+  CAFFE_CHECK(rnnInputStr == "linear" || rnnInputStr == "skip");
   const auto rnnInput =
       rnnInputStr == "linear" ? CUDNN_LINEAR_INPUT : CUDNN_SKIP_INPUT;
   // Dropout setup
@@ -195,7 +195,7 @@ bool RecurrentOp<T>::RunWithCudnnWorkspace() {
   size_t weightsSize;
   CUDNN_CHECK(cudnnGetRNNParamsSize(
       cudnnWrapper_.cudnn_handle(), rnnDesc_, xDesc_->descs(), &weightsSize));
-  CHECK_EQ(Input(WEIGHT).nbytes(), weightsSize);
+  CAFFE_CHECK_EQ(Input(WEIGHT).nbytes(), weightsSize);
 
   // Training reserve size
   CUDNN_CHECK(cudnnGetRNNTrainingReserveSize(
@@ -265,7 +265,7 @@ bool RecurrentGradientOp<T>::RunWithCudnnWorkspace() {
       rnnDesc_,
       xDesc_->descs(),
       &reserveNbytes_));
-  CHECK_EQ(reserveNbytes_, Input(RNN_SCRATCH).nbytes());
+  CAFFE_CHECK_EQ(reserveNbytes_, Input(RNN_SCRATCH).nbytes());
   Output(GRAD_INPUT)->ReshapeLike(Input(INPUT));
   Output(GRAD_HIDDEN_INPUT)->ReshapeLike(Input(HIDDEN_INPUT));
   Output(GRAD_CELL_INPUT)->ReshapeLike(Input(CELL_INPUT));
@@ -362,7 +362,7 @@ bool RecurrentInitOp<T>::RunWithCudnnWorkspace() {
     // For some reason, the CuDNN Bias tensor is 3 dimensional
     CUDNN_CHECK(cudnnGetFilterNdDescriptor(
         biasDesc, 3, &dt, &tf, &numBiasDims, biasDims.data()));
-    CHECK_EQ(numBiasDims, 3);
+    CAFFE_CHECK_EQ(numBiasDims, 3);
     math::Set<T, CUDAContext>(
         biasDims[0] * biasDims[1] * biasDims[2],
         1.0,

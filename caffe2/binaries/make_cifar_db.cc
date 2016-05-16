@@ -6,6 +6,7 @@
 // The CIFAR dataset could be downloaded at
 //    http://www.cs.toronto.edu/~kriz/cifar.html
 
+#include <array>
 #include <fstream>  // NOLINT(readability/streams)
 #include <sstream>
 #include <string>

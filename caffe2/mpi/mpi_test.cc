@@ -111,7 +111,7 @@ TEST(MPITest, TestMPIReduce) {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     int size;
     MPI_Comm_size(MPI_COMM_WORLD, &size);
-    if (rank == 0) {
+    if (rank == root) {
       // Let's test the value.
       auto& X = ws.GetBlob("X_reduced")->Get<TensorCPU>();
       EXPECT_EQ(X.size(), 10);

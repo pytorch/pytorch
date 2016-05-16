@@ -5,16 +5,7 @@ cc_headers(
 
 cc_library(
   name = "core",
-  srcs = [
-      "blob_serialization.cc",
-      "db.cc",
-      "flags.cc",
-      "init.cc",
-      "logging.cc",
-      "net.cc",
-      "operator.cc",
-      "workspace.cc",
-  ],
+  srcs = Glob(["*.cc"], excludes=["*gpu*", "*cudnn*", "*test*"]),
   deps = [
     ":core_headers",
     "//caffe2/proto:caffe2_proto",
@@ -27,16 +18,7 @@ cc_library(
 
 cc_library(
   name = "core_gpu",
-  srcs = [
-    "blob_serialization_gpu.cc",
-    "common_gpu.cc",
-    "cuda_memorypool_gpu.cc",
-  ],
-  hdrs = [
-    "common_gpu.h",
-    "context_gpu.h",
-    "cuda_memorypool_gpu.h",
-  ],
+  srcs = Glob(["*_gpu.cc"]),
   deps = [
     ":core",
     "//third_party/cnmem:cnmem",
@@ -47,14 +29,9 @@ cc_library(
 
 cc_library(
   name = "core_cudnn",
-  srcs = [
-    "common_cudnn.cc",
-  ],
-  hdrs = [
-    "common_cudnn.h",
-  ],
+  srcs = Glob(["*_cudnn.cc"]),
   deps = [
-      ":core",
+      ":core_gpu",
       "//third_party:cudnn",
   ],
   whole_archive = True,
@@ -62,17 +39,7 @@ cc_library(
 
 cc_test(
   name = "core_test",
-  srcs = [
-      "blob_test.cc",
-      "context_test.cc",
-      "init_test.cc",
-      "operator_test.cc",
-      "parallel_net_test.cc",
-      "registry_test.cc",
-      "timer_test.cc",
-      "typeid_test.cc",
-      "workspace_test.cc",
-  ],
+  srcs = Glob(["*_test.cc"], excludes=["*gpu_test*"]),
   deps = [
       ":core",
       "//third_party:gtest",
@@ -82,9 +49,7 @@ cc_test(
 
 cc_test(
   name = "core_gpu_test",
-  srcs = [
-      "blob_gpu_test.cc",
-  ],
+  srcs = Glob(["*_gpu_test.cc"]),
   deps = [
       ":core_gpu",
       "//third_party:gtest",
@@ -92,16 +57,3 @@ cc_test(
   ],
 )
 
-# cuda_memorypool_gpu_test has to be run independently because the setup and
-# teardown of the memory pool operations.
-cc_test(
-  name = "cuda_memorypool_gpu_test",
-  srcs = [
-      "cuda_memorypool_gpu_test.cc",
-  ],
-  deps = [
-      ":core_gpu",
-      "//third_party:gtest",
-      "//caffe2/test:caffe2_gtest_main",
-  ],
-)

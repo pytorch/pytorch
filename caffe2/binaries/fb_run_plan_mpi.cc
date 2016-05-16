@@ -110,18 +110,21 @@ MPI_Comm connect() {
   MPI_Comm icomm;
   CAFFE_LOG_INFO << "Connecting to port name: " << port_name;
   MPI_CHECK(MPI_Comm_connect(
-      port_name.c_str(), MPI_INFO_NULL, 0, caffe2::MPIComm(), &icomm));
+      const_cast<char*>(port_name.c_str()), MPI_INFO_NULL, 0,
+      caffe2::MPIComm(), &icomm));
   CAFFE_LOG_INFO << "Connected";
   return icomm;
 }
 
 MPI_Comm accept() {
   std::string port_name;
-  CHECK(caffe2::ReadStringFromFile(caffe2::FLAGS_job_path.c_str(), &port_name));
+  CAFFE_CHECK(caffe2::ReadStringFromFile(
+      caffe2::FLAGS_job_path.c_str(), &port_name));
   MPI_Comm icomm;
   CAFFE_LOG_INFO << "Accepting a client on port name: " << port_name;
   MPI_CHECK(MPI_Comm_accept(
-      port_name.c_str(), MPI_INFO_NULL, 0, MPI_COMM_SELF, &icomm));
+      const_cast<char*>(port_name.c_str()), MPI_INFO_NULL, 0,
+      MPI_COMM_SELF, &icomm));
   CAFFE_LOG_INFO << "Finished accepting";
   return icomm;
 }
@@ -155,7 +158,7 @@ int main(int argc, char** argv) {
   caffe2::GlobalInit(&argc, &argv);
 
   // Initialize client/server
-  CHECK(caffe2::FLAGS_role == "server" || caffe2::FLAGS_role == "client");
+  CAFFE_CHECK(caffe2::FLAGS_role == "server" || caffe2::FLAGS_role == "client");
   if (caffe2::FLAGS_role == "server") {
     CAFFE_LOG_INFO << "Registering server";
     registerServer();

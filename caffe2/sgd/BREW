@@ -1,26 +1,29 @@
 cc_library(
   name = "sgd_ops",
-  srcs = [
-      "iter_op.cc",
-      "learning_rate_op.cc",
-  ],
-  hdrs = [
-      "learning_rate_functors.h",
-      "learning_rate_op.h"
-  ],
+  srcs = Glob(["*.cc"], excludes=["*gpu*"]),
+  hdrs = Glob(["*.h"]),
   deps = [
     "//caffe2/core:core",
   ],
   whole_archive = True,
 )
 
-cc_library(
-  name = "sgd_ops_gpu",
-  srcs = [
-      "learning_rate_op_gpu.cc",
-  ],
+cuda_library(
+  name = "sgd_ops_gpu_cu",
+  srcs = Glob(["*.cu"]),
   deps = [
       ":sgd_ops",
+      "//caffe2/core:core_gpu",
+  ],
+  whole_archive = True,
+)
+
+cc_library(
+  name = "sgd_ops_gpu",
+  srcs = Glob(["*_gpu.cc"]),
+  deps = [
+      ":sgd_ops",
+      ":sgd_ops_gpu_cu",
       "//caffe2/core:core_gpu",
   ],
   whole_archive = True,

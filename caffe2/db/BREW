@@ -52,6 +52,7 @@ cc_library(
 cc_library(
   name = "db",
   srcs = [
+    "create_db_op.cc",
     "protodb.cc",
   ],
   deps = [
@@ -60,7 +61,19 @@ cc_library(
   optional_deps = [
     ":leveldb",
     ":lmdb",
+    ":rocksdb",
     ":zmqdb",
   ],
   whole_archive = True,
 )
+
+cc_test(
+  name = "db_test",
+  srcs = Glob(["*_test.cc"]),
+  deps = [
+      ":db",
+      "//third_party:gtest",
+      "//caffe2/test:caffe2_gtest_main",
+  ],
+)
+  

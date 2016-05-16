@@ -1,19 +1,12 @@
-cc_headers(
-  name = "common_rtc",
-  srcs = ["common_rtc.h"],
-  deps = [
-    "//third_party:cuda",
-    "//third_party:nvrtc",
-  ]
-)
-
 cc_library(
   name = "rtc_ops",
   srcs = Glob(["*.cc"]),
+  hdrs = Glob(["*.h"]),
   deps = [
-    ":common_rtc",
     "//caffe2/core:core_gpu",
     "//caffe2/utils:math",
+    "//third_party:cuda",
+    "//third_party:nvrtc",
   ],
   whole_archive = True,
 )

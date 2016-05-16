@@ -121,6 +121,11 @@ cc_thirdparty_target(
 )
 
 cc_thirdparty_target(
+  name = "rocksdb",
+  cc_obj_files = [ "-lrocksdb" ],
+)
+
+cc_thirdparty_target(
   name = "lmdb",
   cc_obj_files = ["-llmdb"],
 )

@@ -43,7 +43,7 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
             OperatorBase::GetSingleArgument<int>("exhaustive_search", 0)),
         deterministic_(
             OperatorBase::GetSingleArgument<int>("deterministic", 0)) {
-    CHECK(!deterministic_ || !exhaustive_search_);
+    CAFFE_CHECK(!deterministic_ || !exhaustive_search_);
     CUDNN_CHECK(cudnnCreateTensorDescriptor(&bottom_desc_));
     CUDNN_CHECK(cudnnCreateFilterDescriptor(&filter_desc_));
     CUDNN_CHECK(cudnnCreateTensorDescriptor(&bias_desc_));

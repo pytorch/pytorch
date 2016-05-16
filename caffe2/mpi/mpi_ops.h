@@ -48,19 +48,11 @@ class MPIReduceOp final : public Operator<Context> {
     auto& input = Input(0);
     auto* output = Output(0);
     output->ReshapeLike(input);
-    if (output->template mutable_data<T>() == input.template data<T>()) {
-      // We are doing in-place call. Special case handling.
-      MPI_CHECK(MPI_Reduce(
-          MPI_IN_PLACE, output->template mutable_data<T>(), input.size(),
-          MPIDataTypeWrapper<T>::type(), MPI_SUM, root_, MPIComm()));
-    } else {
-      // normal allreduce.
-      MPI_CHECK(MPI_Reduce(
-          const_cast<T*>(input.template data<T>()),
-          output->template mutable_data<T>(),
-          input.size(), MPIDataTypeWrapper<T>::type(),
-          MPI_SUM, root_, MPIComm()));
-    }
+    MPI_CHECK(MPI_Reduce(
+        const_cast<T*>(input.template data<T>()),
+        output->template mutable_data<T>(),
+        input.size(), MPIDataTypeWrapper<T>::type(),
+        MPI_SUM, root_, MPIComm()));
     return true;
   }
 
