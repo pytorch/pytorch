@@ -187,12 +187,13 @@ class Env(object):
             '-Wall',
             '-Wextra',
             '-Werror',
+            '-Wno-deprecated',  # needed by glog
             '-Wno-unknown-warning-option',
             '-Wno-unused-but-set-variable',  # needed by cnmem
-            '-Wno-unused-private-field',
+            '-Wno-unused-private-field',  # needed by some third_party code
             '-Wno-unused-local-typedef',  # needed by some third_party code
-            '-Wno-unused-variable',
-            '-Wno-unused-function',
+            '-Wno-unused-variable',  # needed by registration mechanism
+            '-Wno-unused-function',  # needed by some third_party code
             '-Wno-unused-parameter',  # needed by some third_party code
             '-Wno-sign-compare',  # needed by some third_party code
             '-ffunction-sections',

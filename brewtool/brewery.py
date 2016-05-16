@@ -14,6 +14,7 @@ import os
 from os.path import join
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 
@@ -57,6 +58,9 @@ def RunSingleCommand(command_and_env):
 # The main brewery class.
 ################################################################################
 
+def init_worker():
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+
 
 class Brewery(object):
     """A singleton class that will hold all the build targets."""
@@ -74,7 +78,7 @@ class Brewery(object):
     _SIGNATURE_FILENAME = 'brewery.signature'
     # Pool is the compute pool that one can use to run a list of commands in
     # parallel.
-    Pool = multiprocessing.Pool(multiprocessing.cpu_count() * 2)
+    Pool = multiprocessing.Pool(multiprocessing.cpu_count() * 2, init_worker)
     Env = None
     # The current working directory when working with build files. The target
     # prefix changes with cwd as well.
@@ -365,9 +369,15 @@ class BuildTarget(object):
             BuildDebug("Stage:\n{0}", command_group)
             if len(command_group) == 0:
                 continue
-            run_stats = Brewery.Pool.map(
-                RunSingleCommand,
-                [(command, Brewery.Env.ENV) for command in command_group])
+            try:
+                run_stats = Brewery.Pool.map(
+                    RunSingleCommand,
+                    [(command, Brewery.Env.ENV) for command in command_group])
+            except KeyboardInterrupt:
+                BuildWarning("Received ctrl-c. Finishing.")
+                Brewery.Pool.terminate()
+                Brewery.Pool.join()
+                sys.exit(1)
             if any([s[0] for s in run_stats]):
                 # Something failed.
                 BuildWarning("Build failed: {0}. Fail messages are as follows:",
