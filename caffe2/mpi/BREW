@@ -34,11 +34,11 @@ cc_library(
   ],
   hdrs = [
       "mpi_ops.h",
-      "mpi_ops_fallback.h",
   ],
   deps = [
       ":mpi_common",
       "//caffe2/core:core_gpu",
+      "//caffe2/operators:operators_headers",
       "//third_party:openmpi",
   ],
   whole_archive = True,

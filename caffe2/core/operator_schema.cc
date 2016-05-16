@@ -1,6 +1,6 @@
-#include "caffe2/caffe2/core/operator_schema.h"
+#include "caffe2/core/operator_schema.h"
 
-#include "caffe2/caffe2/core/logging.h"
+#include "caffe2/core/logging.h"
 
 namespace caffe2 {
 

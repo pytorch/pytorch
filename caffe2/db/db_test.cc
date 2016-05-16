@@ -14,9 +14,13 @@ namespace db {
 
 constexpr int kMaxItems = 10;
 
-static void CreateAndFill(const string& db_type, const string& name) {
+static bool CreateAndFill(const string& db_type, const string& name) {
   CAFFE_VLOG(1) << "Creating db: " << name;
   std::unique_ptr<DB> db(CreateDB(db_type, name, NEW));
+  if (!db.get()) {
+    CAFFE_LOG_ERROR << "Cannot create db of type " << db_type;
+    return false;
+  }
   std::unique_ptr<Transaction> trans(db->NewTransaction());
   for (int i = 0; i < kMaxItems; ++i) {
     std::stringstream ss;
@@ -26,6 +30,7 @@ static void CreateAndFill(const string& db_type, const string& name) {
   trans->Commit();
   trans.reset();
   db.reset();
+  return true;
 }
 
 static void TestCursor(Cursor* cursor) {
@@ -57,34 +62,34 @@ static void TestCursor(Cursor* cursor) {
   EXPECT_EQ(cursor->key(), "00");
 }
 
-TEST(DBSeekTest, RocksDB) {
+static void DBSeekTestWrapper(const string& db_type) {
   std::string name = std::tmpnam(nullptr);
-  CreateAndFill("rocksdb", name);
-  std::unique_ptr<DB> db(CreateDB("rocksdb", name, READ));
-  std::unique_ptr<Cursor> cursor(db->NewCursor());
-  TestCursor(cursor.get());
+  if (!CreateAndFill(db_type, name)) {
+    // Manually fail the test, and not do anything onwards.
+    EXPECT_TRUE(0);
+  } else {
+    std::unique_ptr<DB> db(CreateDB(db_type, name, READ));
+    std::unique_ptr<Cursor> cursor(db->NewCursor());
+    TestCursor(cursor.get());
+  }
+}
+
+TEST(DBSeekTest, RocksDB) {
+  DBSeekTestWrapper("rocksdb");
 }
 
 TEST(DBSeekTest, LevelDB) {
-  std::string name = std::tmpnam(nullptr);
-  CreateAndFill("leveldb", name);
-  std::unique_ptr<DB> db(CreateDB("leveldb", name, READ));
-  std::unique_ptr<Cursor> cursor(db->NewCursor());
-  TestCursor(cursor.get());
+  DBSeekTestWrapper("leveldb");
 }
 
 TEST(DBSeekTest, LMDB) {
-  std::string name = std::tmpnam(nullptr);
-  CreateAndFill("lmdb", name);
-  std::unique_ptr<DB> db(CreateDB("lmdb", name, READ));
-  std::unique_ptr<Cursor> cursor(db->NewCursor());
-  TestCursor(cursor.get());
+  DBSeekTestWrapper("lmdb");
 }
 
 TEST(DBReaderTest, Reader) {
   std::string name = std::tmpnam(nullptr);
-  CreateAndFill("lmdb", name);
-  std::unique_ptr<DBReader> reader(new DBReader("lmdb", name));
+  CreateAndFill("leveldb", name);
+  std::unique_ptr<DBReader> reader(new DBReader("leveldb", name));
   EXPECT_TRUE(reader->cursor() != nullptr);
   // DBReader should have a full-fledged cursor.
   TestCursor(reader->cursor());
@@ -107,11 +112,13 @@ TEST(DBReaderTest, Reader) {
   Blob reader_blob;
   reader_blob.Reset(reader.release());
   std::string str = reader_blob.Serialize("saved_reader");
+  // Release to close the old reader.
+  reader_blob.Reset();
   DBProto proto;
   CAFFE_CHECK(proto.ParseFromString(str));
   EXPECT_EQ(proto.name(), "saved_reader");
   EXPECT_EQ(proto.source(), name);
-  EXPECT_EQ(proto.db_type(), "lmdb");
+  EXPECT_EQ(proto.db_type(), "leveldb");
   EXPECT_EQ(proto.key(), "05");
   // Test restoring the reader from the serialized proto.
   DBReader new_reader(proto);

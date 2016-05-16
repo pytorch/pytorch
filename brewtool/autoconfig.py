@@ -1,5 +1,11 @@
 """autoconfig tries to figure out a bunch of platform-specific stuff.
 """
+
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+from __future__ import unicode_literals
+
 import atexit
 import os
 import re
@@ -48,11 +54,11 @@ def GetSubprocessOutput(command, env):
             command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             env=env)
         out, err = proc.communicate()
-        out = out.decode('ascii')
+        out = out.decode('utf-8')
     except OSError as e:
-        BuildDebug('Exception found in command {0}. Exception is: {1}',
-                   repr(command), str(e))
-        return -1, None
+        BuildWarning('Exception found in command {0}. Exception is: {1}',
+                     repr(command), str(e))
+        return -1, ''
     return proc.returncode, out.strip()
 
 
@@ -181,6 +187,8 @@ class Env(object):
             '-Wall',
             '-Wextra',
             '-Werror',
+            '-Wno-unknown-warning-option',
+            '-Wno-unused-but-set-variable',  # needed by cnmem
             '-Wno-unused-private-field',
             '-Wno-unused-local-typedef',  # needed by some third_party code
             '-Wno-unused-variable',
@@ -249,6 +257,8 @@ class Env(object):
         if Config.USE_OPENMP:
             self.CFLAGS.append("-fopenmp")
             self.LIBS.append("gomp")
+        else:
+            self.CFLAGS.append("-Wno-unknown-pragmas")
 
         # MPI
         self.MPIRUN = Config.MPIRUN
@@ -340,6 +350,9 @@ class Env(object):
             [s for s in sysconfig.get_config_var('CFLAGS').split(' ') if s] +
             ['-I' + s for s in sysconfig.get_config_var('INCLUDEPY').split(' ')] +
             ['-I' + s for s in numpy_includes])
+        # Special case for flags not supported:
+        if '-Wstrict-prototypes' in self.PYTHON_CFLAGS:
+            self.PYTHON_CFLAGS.remove('-Wstrict-prototypes')
         self.PYTHON_LDFLAGS = [
             s for s in sysconfig.get_config_var('LDFLAGS').split(' ') if s]
         # Add the actual target

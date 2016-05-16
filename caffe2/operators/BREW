@@ -5,32 +5,7 @@ cc_headers(
 
 cc_library(
   name = "core_ops",
-  srcs = [
-      "accumulate_op.cc",
-      "accuracy_op.cc",
-      "clip_op.cc",
-      "conv_op.cc",
-      "cross_entropy_op.cc",
-      "depth_split_op.cc",
-      "dropout_op.cc",
-      "elementwise_op.cc",
-      "filler_op.cc",
-      "fully_connected_op.cc",
-      "l2_distance_op.cc",
-      "load_save_op.cc",
-      "local_response_normalization_op.cc",
-      "loss_op.cc",
-      "order_switch_ops.cc",
-      "pool_op.cc",
-      "relu_op.cc",
-      "sigmoid_op.cc",
-      "softmax_op.cc",
-      "spatial_batch_norm_op.cc",
-      "summarize_op.cc",
-      "tanh_op.cc",
-      "tensor_protos_db_input.cc",
-      "utility_ops.cc",
-  ],
+  srcs = Glob(["*.cc"], excludes=["*gpu*", "*test*", "*cudnn*"]),
   deps = [
     ":operators_headers",
     "//caffe2/core:core",
@@ -42,25 +17,7 @@ cc_library(
 
 cuda_library(
   name = "core_ops_gpu_cu",
-  srcs = [
-      "accumulate_op.cu",
-      "accuracy_op.cu",
-      "clip_op.cu",
-      "cross_entropy_op.cu",
-      "dropout_op.cu",
-      "filler_op.cu",
-      "half_float_ops.cu",
-      "l2_distance_op.cu",
-      "local_response_normalization_op.cu",
-      "order_switch_ops.cu",
-      "pool_op.cu",
-      "relu_op.cu",
-      "relu_op_fp16.cu",
-      "sigmoid_op.cu",
-      "softmax_op.cu",
-      "summarize_op.cu",
-      "tanh_op.cu",
-  ],
+  srcs = Glob(["*.cu"]),
   deps = [
       ":operators_headers",
       "//caffe2/core:core_gpu",
@@ -72,16 +29,7 @@ cuda_library(
 
 cc_library(
   name = "core_ops_gpu",
-  srcs = [
-      "conv_op_gpu.cc",
-      "depth_split_op_gpu.cc",
-      "elementwise_op_gpu.cc",
-      "fully_connected_op_gpu.cc",
-      "load_save_op_gpu.cc",
-      "loss_op_gpu.cc",
-      "tensor_protos_db_input_gpu.cc",
-      "utility_ops_gpu.cc",
-  ],
+  srcs = Glob(["*_gpu.cc"]),
   deps = [
       ":core_ops_gpu_cu",
       ":operators_headers",
@@ -94,13 +42,7 @@ cc_library(
 
 cc_library(
   name = "core_ops_cudnn",
-  srcs = [
-      "conv_op_cudnn.cc",
-      "pool_op_cudnn.cc",
-      "relu_op_cudnn.cc",
-      "softmax_op_cudnn.cc",
-      "spatial_batch_norm_op_cudnn.cc",
-  ],
+  srcs = Glob(["*_cudnn.cc"]),
   deps = [
       ":operators_headers",
       "//caffe2/core:core_cudnn",
@@ -117,7 +59,6 @@ cc_test(
   deps = [
       ":core_ops",
       ":core_ops_gpu",
-      "//caffe2/data/mnist:mnist_minidb",
       "//caffe2/test:caffe2_gtest_main",
   ]
 )

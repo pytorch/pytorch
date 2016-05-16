@@ -23,7 +23,7 @@ static void AddConstInput(const vector<TIndex>& shape, const float value,
   return;
 }
 
-TEST(FullyConnectedTest, Test) {
+TEST(FullyConnectedGPUTest, Test) {
   Workspace ws;
   OperatorDef def;
   def.set_name("test");

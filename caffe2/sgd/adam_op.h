@@ -1,6 +1,6 @@
 #pragma once
 
-#include "caffe2/caffe2/core/operator.h"
+#include "caffe2/core/operator.h"
 
 namespace caffe2 {
 
@@ -38,12 +38,12 @@ class AdamOp final : public Operator<Context> {
         epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5)) {}
   bool RunOnDevice() override {
     // LR and iter live on the CPU
-    CHECK(OperatorBase::InputIsType<TensorCPU>(LR)) << "LR wrong type";
-    CHECK(OperatorBase::InputIsType<TensorCPU>(ITER)) << "Iter wrong type";
+    CAFFE_CHECK(OperatorBase::InputIsType<TensorCPU>(LR)) << "LR wrong type";
+    CAFFE_CHECK(OperatorBase::InputIsType<TensorCPU>(ITER)) << "Iter wrong type";
     const auto lr = OperatorBase::Input<TensorCPU>(LR).template data<T>()[0];
     const auto iter =
         OperatorBase::Input<TensorCPU>(ITER).template data<int>()[0];
-    LOG_IF(ERROR, !OperatorBase::InputIsType<Tensor<Context>>(GRAD))
+    CAFFE_CHECK(OperatorBase::InputIsType<Tensor<Context>>(GRAD))
         << "Grad wrong type";
     CAFFE_CHECK_EQ(Input(GRAD).size(), Input(MOMENT_1).size());
     CAFFE_CHECK_EQ(Input(GRAD).size(), Input(MOMENT_2).size());

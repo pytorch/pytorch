@@ -1,3 +1,0 @@
-lena.png 0
-lena.png 2
-lena.png 1

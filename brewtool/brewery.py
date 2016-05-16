@@ -1,7 +1,10 @@
 """The build system scaffolding.
-
-Brewery
 """
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+from __future__ import unicode_literals
+
 import pickle
 from collections import defaultdict
 import glob
@@ -40,7 +43,7 @@ def RunSingleCommand(command_and_env):
             shlex.split(command), stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT, env=env)
         stdout, _ = proc.communicate()
-        return proc.returncode, stdout.decode('ascii')
+        return proc.returncode, stdout.decode('utf-8')
     except OSError as e:
         out = 'Exception found in command {0}. Exception is: {1}.'.format(
             repr(command), str(e))
@@ -65,6 +68,9 @@ class Brewery(object):
     _deps_map = dict()
     # signature_map is the map that stores the signatures for build targets.
     _signatures = defaultdict(str)
+    # registered files - this will help us to find any file that is not
+    # referred to by any of the targets.
+    _registered_files = set()
     _SIGNATURE_FILENAME = 'brewery.signature'
     # Pool is the compute pool that one can use to run a list of commands in
     # parallel.
@@ -72,7 +78,7 @@ class Brewery(object):
     Env = None
     # The current working directory when working with build files. The target
     # prefix changes with cwd as well.
-    _cwd = ''
+    CWD = ''
     
     # Whether in test_mode or not. In default no testing.
     is_test = False
@@ -111,6 +117,7 @@ class Brewery(object):
             join(d[2:], f) for (d, _, files) in os.walk('.')
             if not d.startswith('./gen')
             for f in files if f.endswith('BREW')]
+        cls._registered_files.update(build_files)
         for build_file in build_files:
             # Set the current working directory, and parse the build file.
             BuildDebug("Parsing {0}", build_file)
@@ -168,6 +175,7 @@ class Brewery(object):
                      "{0} already in build target.", name)
         BuildDebug("Registered build target {0} deps {1}", name, str(target.deps))
         cls._targets[name] = target
+        cls._registered_files.update(target.all_files)
         # Note that we do not add the dependencies to the deps_map yet during
         # the registration process, because Registration happens at the base
         # BuildTarget level, so it is possible that the derived classes may add
@@ -270,6 +278,17 @@ class Brewery(object):
         else:
             BuildFatal('Unknown command: {0}', command)
         BuildLog("Brewing done.")
+        BuildLog("Performing post-brewing checks.")
+        # check if all files in the folder has been properly registered.
+        all_files = set()
+        for root, _, files in os.walk("caffe2"):
+            all_files.update([os.path.join(root, f) for f in files])
+        not_declared = all_files.difference(cls._registered_files)
+        if len(not_declared):
+            BuildWarning("You have the following files not being registered "
+                         "by any BREW files:")
+            for name in not_declared:
+                print(name)
 
 
 class BuildTarget(object):
@@ -364,16 +383,22 @@ class BuildTarget(object):
 ################################################################################
 
 
-def Glob(patterns):
+def Glob(patterns, excludes=None):
     """Globs all files with the given patterns, relative to the path of the BREW
     file."""
-    files = []
+    excludes = excludes if excludes is not None else []
+    files = set()
     if type(patterns) is str:
         patterns = [patterns]
     for pattern in patterns:
         full_pattern = os.path.join(Brewery.CWD, pattern)
-        files += glob.glob(full_pattern)
-    prefix_len = len(Brewery.CWD) + 1
+        files.update(glob.glob(full_pattern))
+    for pattern in excludes:
+        full_pattern = os.path.join(Brewery.CWD, pattern)
+        files.difference_update(glob.glob(full_pattern))
+    # If CWD is empty, we don't need to cut prefix; else, we will cut
+    # CWD as well as the first separator symbol.
+    prefix_len = len(Brewery.CWD) + 1 if len(Brewery.CWD) else 0
     return [f[prefix_len:] for f in files if os.path.isfile(f)]
 
 
@@ -564,12 +589,16 @@ class cc_headers(BuildTarget):
 
 
 class python_cc_extension(BuildTarget):
-    def __init__(self, name, srcs, deps=None, **kwargs):
-        BuildTarget.__init__(self, name, srcs, deps=deps, **kwargs)
+    def __init__(self, name, srcs, hdrs=None, deps=None, **kwargs):
+        if hdrs is None:
+            hdrs = []
+        self.hdrs = [Brewery.RectifyFileName(s) for s in hdrs]
+        BuildTarget.__init__(self, name, srcs, other_files=hdrs,
+                             deps=deps, **kwargs)
 
     def SetUp(self):
         Brewery.MakeGenDirs(self.srcs)
-
+        Brewery.CopyToGenDir(self.hdrs)
         self.command_groups = []
         obj_files = [Brewery.GenFilename(s, 'o') for s in self.srcs]
         if len(self.srcs):
@@ -690,7 +719,7 @@ class shell_script(BuildTarget):
         stdout, _ = proc.communicate()
         if proc.returncode:
             BuildWarning("Script failed. Failure message:")
-            BuildPrint("\n{0}\n", stdout.decode('ascii'))
+            BuildPrint("\n{0}\n", stdout.decode('utf-8'))
             return False
         return True
 

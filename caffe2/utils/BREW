@@ -38,6 +38,17 @@ cc_library(
 )
 
 cc_test(
+  name = "proto_utils_test",
+  srcs = [
+      "proto_utils_test.cc",
+  ],
+  deps = [
+      ":proto_utils",
+      "//caffe2/test:caffe2_gtest_main",
+  ],
+)
+
+cc_test(
   name = "math_test",
   srcs = [
       "math_test.cc",

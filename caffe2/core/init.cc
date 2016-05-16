@@ -15,7 +15,7 @@ bool GlobalInit(int* pargc, char*** pargv) {
   bool success = true;
   success &= internal::Caffe2InitializeRegistry::Registry()
       ->RunRegisteredEarlyInitFunctions(pargc, pargv);
-  CHECK(success) << "Failed to run some early init functions for caffe.";
+  CAFFE_CHECK(success) << "Failed to run some early init functions for caffe2.";
   success &= ParseCaffeCommandLineFlags(pargc, pargv);
   success &= InitCaffeLogging(pargc, *pargv);
   // Print out the current build version.
@@ -23,7 +23,7 @@ bool GlobalInit(int* pargc, char*** pargv) {
   // All other initialization functions.
   success &= internal::Caffe2InitializeRegistry::Registry()
       ->RunRegisteredInitFunctions(pargc, pargv);
-  CHECK(success) << "Failed to run some early init functions for caffe.";
+  CAFFE_CHECK(success) << "Failed to run some init functions for caffe2.";
   global_init_was_already_run = true;
   // TODO: if we fail GlobalInit(), should we continue?
 

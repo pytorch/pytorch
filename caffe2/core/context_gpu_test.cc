@@ -19,7 +19,7 @@ TEST(CUDAContextTest, TestAllocDealloc) {
 cudaStream_t getStreamForHandle(cublasHandle_t handle) {
   cudaStream_t stream = nullptr;
   CUBLAS_CHECK(cublasGetStream(handle, &stream));
-  CHECK_NOTNULL(stream);
+  CAFFE_CHECK_NOTNULL(stream);
   return stream;
 }
 

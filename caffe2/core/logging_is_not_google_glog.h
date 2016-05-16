@@ -4,7 +4,6 @@
 #include <chrono>
 #include <climits>
 #include <ctime>
-#include <iostream>
 #include <iomanip>
 #include <string>
 #include <fstream>
@@ -156,5 +155,52 @@ static_assert(CAFFE2_LOG_THRESHOLD <= CAFFE_FATAL,
 // Optimized version - generates no code.
 #define CAFFE_DCHECK_NOTNULL(val) if (false) CAFFE_CHECK_NOTNULL(val)
 #endif  // NDEBUG
+
+// ---------------------- Support for std objects --------------------------
+// These are adapted from glog to support a limited set of logging capability
+// for STL objects.
+
+namespace caffe2 {
+// Forward declare these two, and define them after all the container streams
+// operators so that we can recurse from pair -> container -> container -> pair
+// properly.
+template<class First, class Second>
+std::ostream& operator<<(
+    std::ostream& out, const std::pair<First, Second>& p);
+template <class Iter>
+void PrintSequence(std::ostream& ss, Iter begin, Iter end);
+
+#define INSTANTIATE_FOR_CONTAINER(container) \
+template <class... Types> \
+std::ostream& operator<<( \
+    std::ostream& out, const container<Types...>& seq) { \
+  PrintSequence(out, seq.begin(), seq.end()); \
+  return out; \
+}
+
+INSTANTIATE_FOR_CONTAINER(std::vector)
+INSTANTIATE_FOR_CONTAINER(std::map)
+INSTANTIATE_FOR_CONTAINER(std::set)
+#undef INSTANTIATE_FOR_CONTAINER
+
+template<class First, class Second>
+inline std::ostream& operator<<(
+    std::ostream& out, const std::pair<First, Second>& p) {
+  out << '(' << p.first << ", " << p.second << ')';
+  return out;
+}
+
+template <class Iter>
+inline void PrintSequence(std::ostream& out, Iter begin, Iter end) {
+  // Output at most 100 elements -- appropriate if used for logging.
+  for (int i = 0; begin != end && i < 100; ++i, ++begin) {
+    if (i > 0) out << ' ';
+    out << *begin;
+  }
+  if (begin != end) {
+    out << " ...";
+  }
+}
+}  // namespace caffe2
 
 #endif  // CAFFE2_CORE_LOGGING_IS_NOT_GOOGLE_GLOG_H_

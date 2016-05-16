@@ -8,6 +8,7 @@ cc_library(
     srcs = [],
     # core_ops should always be available. Otherwise, we have a problem.
     deps = [
+      "//caffe2/db:db",
       "//caffe2/operators:core_ops",
     ],
     optional_deps = [

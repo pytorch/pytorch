@@ -64,7 +64,7 @@ class Config(object):
     # Whether to use openmp or not. Note that currently, a lot of Caffe2's code
     # is not using openmp, but the underlying Eigen library can take advantage
     # of that.
-    USE_OPENMP = False
+    USE_OPENMP = True
 
     # Manually specified defines.
     DEFINES = ["-DNDEBUG"]

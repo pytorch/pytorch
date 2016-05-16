@@ -329,7 +329,7 @@ bool DAGNet::Run() {
 void DAGNet::WorkerFunction() {
   // WorkerFunctions() is an infinite loop until there are no more jobs to run.
   while (true) {
-    int idx;
+    int idx = 0;
     // If there is no more jobs - meaning that the DAGNet is destructing -
     // we will exit safely.
     if (!job_queue_.Pop(&idx)) {
