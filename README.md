@@ -12,8 +12,6 @@ Some highlights of the Caffe refactoring idea can also be found at [the slides f
 
 Note that this is not meant for a complete replacement for Caffe right now. You are more than welcome to try it and we appreciate much if you could contribute back, but a lot of things may still be missing (e.g. CuDNN) so expect a few bumps as an early adopter. Caffe is still stably supported and for a production environment you may want to continue using it.
 
-I (Yangqing) would also like to personally thank Google, my current employer, to allow me to continue devoting my personal time to work on open-source projects like Caffe.
-
 ## License and Citation
 
 Caffe2 is released under the [BSD 2-Clause license](https://github.com/Yangqing/caffe2/blob/master/LICENSE).
