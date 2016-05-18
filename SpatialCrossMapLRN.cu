@@ -2,7 +2,11 @@
 #include "common.h"
 
 template <typename Dtype>
-__global__ void LRNFillScale(const int nthreads, const Dtype* const in,
+__global__ void
+#if __CUDA_ARCH__ >= 320
+__launch_bounds__(CUDA_NUM_THREADS)
+#endif
+LRNFillScale(const int nthreads, const Dtype* const in,
     const int num, const int channels, const int height,
     const int width, const int size, const Dtype alpha_over_size,
     const Dtype k, Dtype* const scale) {
