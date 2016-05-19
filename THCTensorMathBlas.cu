@@ -115,8 +115,9 @@ void THCudaTensor_addmm(THCState *state, THCudaTensor *r_, float beta, THCudaTen
   {
     transpose_r = 'n';
 
-    r__ = THCudaTensor_newWithSize2d(state, r_->size[1], r_->size[0]);
-    THCudaTensor_copy(state, r__, r_);
+    THCudaTensor *transp_r_ = THCudaTensor_newTranspose(state, r_, 0, 1);
+    r__ = THCudaTensor_newClone(state, transp_r_);
+    THCudaTensor_free(state, transp_r_);
     THCudaTensor_transpose(state, r__, NULL, 0, 1);
   }
 
