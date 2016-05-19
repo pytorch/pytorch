@@ -321,8 +321,9 @@ void THCudaTensor_baddbmm(THCState *state, THCudaTensor *result, float beta, THC
   {
     transpose_result = false;
 
-    result_ = THCudaTensor_newWithSize3d(state, result->size[0], result->size[2], result->size[1]);
-    THCudaTensor_copy(state, result_, result);
+    THCudaTensor *transp_r_ = THCudaTensor_newTranspose(state, result, 1, 2);
+    result_ = THCudaTensor_newClone(state, transp_r_);
+    THCudaTensor_free(state, transp_r_);
     THCudaTensor_transpose(state, result_, NULL, 1, 2);
 
     ldc = result_->stride[2];
