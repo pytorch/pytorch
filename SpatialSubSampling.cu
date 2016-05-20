@@ -342,9 +342,15 @@ void THNN_CudaSpatialSubSampling_updateGradInput(THCState *state, THCudaTensor *
     dim3 threads(32,8);
 
     // run updateGradInput kernel
-    subgradinput <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (
-      gradInput_data, gradOutput_data, weight_data,
-      nInputPlane, nInputRows, nInputCols, kH, kW, dH, dW);
+    if (kH <= dH && kW <= dW) {
+      subgradinput <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (
+        gradInput_data, gradOutput_data, weight_data,
+        nInputPlane, nInputRows, nInputCols, kH, kW, dH, dW);
+    } else {
+      subgradinputAtomic <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (
+        gradInput_data, gradOutput_data, weight_data,
+        nInputPlane, nInputRows, nInputCols, kH, kW, dH, dW);
+    }
   } else {
     long nInputCols = input->size[3];
     long nInputRows = input->size[2];
@@ -365,15 +371,14 @@ void THNN_CudaSpatialSubSampling_updateGradInput(THCState *state, THCudaTensor *
     dim3 threads(32,8);
 
     // run updateGradInput kernel
-    if (kH == dH && kW == dW) {
+    if (kH <= dH && kW <= dW) {
       subgradinput <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (
         gradInput_data, gradOutput_data, weight_data,
         nInputPlane, nInputRows, nInputCols, kH, kW, dH, dW);
     } else {
       subgradinputAtomic <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (
         gradInput_data, gradOutput_data, weight_data,
-        nInputPlane, nInputRows, nInputCols,
-        kH, kW, dH, dW);
+        nInputPlane, nInputRows, nInputCols, kH, kW, dH, dW);
     }
   }
 
