@@ -63,6 +63,8 @@ void THNN_(LogSoftMax_updateGradInput)(
           THTensor *gradInput,
           THTensor *output)
 {
+
+  gradOutput = THTensor_(newContiguous)(gradOutput);
   real *gradInput_data, *gradOutput_data, *output_data;
   long nframe = 0, dim = 0;
   long t, d;
@@ -101,6 +103,8 @@ void THNN_(LogSoftMax_updateGradInput)(
     for (d = 0; d < dim; d++)
       gradInput_data[d] = gradOutput_data[d] - exp(output_data[d])*sum;
   }
+
+  THTensor_(free)(gradOutput);
 }
 
 #endif
