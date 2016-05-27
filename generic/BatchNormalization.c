@@ -10,10 +10,10 @@ void THNN_(BatchNormalization_updateOutput)(
   bool train, double momentum, double eps)
 {
   long nInput = THTensor_(size)(input, 1);
-  long n = THTensor_(nElement)(input) / nInput;
+  long f,n = THTensor_(nElement)(input) / nInput;
 
   #pragma omp parallel for
-  for (long f = 0; f < nInput; ++f) {
+  for (f = 0; f < nInput; ++f) {
     THTensor *in = THTensor_(newSelect)(input, 1, f);
     THTensor *out = THTensor_(newSelect)(output, 1, f);
 
@@ -71,10 +71,10 @@ void THNN_(BatchNormalization_backward)(
   bool train, double scale, double eps)
 {
   long nInput = THTensor_(size)(input, 1);
-  long n = THTensor_(nElement)(input) / nInput;
+  long f,n = THTensor_(nElement)(input) / nInput;
 
   #pragma omp parallel for
-  for (long f = 0; f < nInput; ++f) {
+  for (f = 0; f < nInput; ++f) {
     THTensor *in = THTensor_(newSelect)(input, 1, f);
     THTensor *gradOut = THTensor_(newSelect)(gradOutput, 1, f);
     real w = weight ? THTensor_(get1d)(weight, f) : 1;
