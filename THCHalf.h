@@ -3,7 +3,7 @@
 
 #include "THCGeneral.h"
 
-#if CUDA_VERSION >= 7050 || CUDA_HAS_FP16
+#if CUDA_VERSION >= 7050
 
 #include <cuda_fp16.h>
 #include <stdint.h>
