@@ -109,6 +109,8 @@ do {                                                                  \
 #define snprintf _snprintf
 #define popen _popen
 #define pclose _pclose
+#include <BaseTsd.h>
+typedef SSIZE_T ssize_t;
 #endif
 
 #endif

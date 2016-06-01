@@ -218,7 +218,7 @@ void THTensor_(gels)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
                            THCleanup(THTensor_(free)(ra__);
                                      THTensor_(free)(rb__);
                                      THTensor_(free)(work);),
-                           "gels", info);
+                           "gels", info,"");
 
   /* rb__ is currently ldb by nrhs; resize it to n by nrhs */
   rb__->size[0] = n;
@@ -283,7 +283,7 @@ void THTensor_(geev)(THTensor *re_, THTensor *rv_, THTensor *a_, const char *job
                                      THTensor_(free)(wi);
                                      THTensor_(free)(wr);
                                      THTensor_(free)(work);),
-                           "geev", info);
+                           "geev", info,"");
 
   {
     real *re_data = THTensor_(data)(re__);
@@ -340,7 +340,7 @@ void THTensor_(syev)(THTensor *re_, THTensor *rv_, THTensor *a, const char *jobz
                            THCleanup(THTensor_(free)(rv__);
                                      THTensor_(free)(re__);
                                      THTensor_(free)(work);),
-                           "syev", info);
+                           "syev", info,"");
 
   THTensor_(freeCopyTo)(rv__, rv_);
   THTensor_(freeCopyTo)(re__, re_);
@@ -417,7 +417,7 @@ void THTensor_(gesvd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *ra
                                THTensor_(free)(rv__);
                                THTensor_(free)(ra__);
                                THTensor_(free)(work);),
-                           "gesvd", info);
+                           "gesvd", info,"");
 
   if (*jobu == 'S')
     THTensor_(narrow)(rv__,NULL,1,0,k);
@@ -666,7 +666,7 @@ void THTensor_(pstrf)(THTensor *ra_, THIntTensor *rpiv_, THTensor *a, const char
                            THCleanup(
                                THTensor_(free)(ra__);
                                THTensor_(free)(work);),
-                           "pstrf", info);
+                           "pstrf", info,"");
 
   THTensor_(clearUpLoTriangle)(ra__, uplo);
 
@@ -760,7 +760,7 @@ void THTensor_(geqrf)(THTensor *ra_, THTensor *rtau_, THTensor *a)
                            THCleanup(
                                THTensor_(free)(ra__);
                                THTensor_(free)(work);),
-                           "geqrf", info);
+                           "geqrf", info,"");
 
   THTensor_(freeCopyTo)(ra__, ra_);
   THTensor_(free)(work);
@@ -813,7 +813,7 @@ void THTensor_(orgqr)(THTensor *ra_, THTensor *a, THTensor *tau)
                            THCleanup(
                                THTensor_(free)(ra__);
                                THTensor_(free)(work);),
-                           "orgqr", info);
+                           "orgqr", info,"");
   THTensor_(freeCopyTo)(ra__, ra_);
   THTensor_(free)(work);
 }
@@ -876,7 +876,7 @@ void THTensor_(ormqr)(THTensor *ra_, THTensor *a, THTensor *tau, THTensor *c, co
                            THCleanup(
                                THTensor_(free)(ra__);
                                THTensor_(free)(work);),
-                           "ormqr", info);
+                           "ormqr", info,"");
   THTensor_(freeCopyTo)(ra__, ra_);
   THTensor_(free)(work);
 }
