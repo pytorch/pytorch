@@ -29,30 +29,37 @@
 CUDA_HOME ?= /usr/local/cuda
 PREFIX ?= /usr/local
 VERBOSE ?= 0
+DEBUG ?= 0
+BUILDDIR ?= build
 
-CUDACODE := -gencode=arch=compute_35,code=sm_35 \
+CUDA_LIB ?= $(CUDA_HOME)/lib64
+CUDA_INC ?= $(CUDA_HOME)/include
+NVCC ?= $(CUDA_HOME)/bin/nvcc
+
+CUDACODE ?= -gencode=arch=compute_35,code=sm_35 \
             -gencode=arch=compute_50,code=sm_50 \
             -gencode=arch=compute_52,code=sm_52
 
+CXXFLAGS   := -I$(CUDA_INC) -fPIC -fvisibility=hidden
+NVCUFLAGS  := -ccbin $(CXX) $(CUDACODE) -lineinfo -std=c++11 -maxrregcount 96
+# Use addprefix so that we can specify more than one path
+LDFLAGS    := $(addprefix -L,${CUDA_LIB}) -lcudart
 
-
-BUILDDIR := build
-
-NVCC       := $(CUDA_HOME)/bin/nvcc
-
-GPP        ?= g++
-CPPFLAGS   := -I$(CUDA_HOME)/include
-CXXFLAGS   := -O3 -fPIC -fvisibility=hidden
-NVCUFLAGS  := $(CUDACODE) -O3 -lineinfo -std=c++11 -maxrregcount 96 -ccbin=${GPP}
+ifeq ($(DEBUG), 0)
+NVCUFLAGS += -O3
+CXXFLAGS  += -O3
+else
+NVCUFLAGS += -O0 -G
+CXXFLAGS  += -O0 -g -ggdb3
+endif
 
 ifneq ($(VERBOSE), 0)
 NVCUFLAGS += -Xptxas -v -Xcompiler -Wall,-Wextra
 CXXFLAGS  += -Wall -Wextra
+else
+.SILENT:
 endif
 
-LDFLAGS    := -L$(CUDA_HOME)/lib64 -lcudart
-MPIFLAGS   := -I$(MPI_HOME)/include -L$(MPI_HOME)/lib -lmpi
-TSTINC     := -Ibuild/include -Itest/include
 
 .PHONY : lib clean test mpitest install
 .DEFAULT : lib
@@ -63,22 +70,16 @@ LIBNAME     := libnccl.so
 VER_MAJOR   := 1
 VER_MINOR   := 2
 VER_PATCH   := 1
-TESTS       := all_gather_test all_reduce_test broadcast_test reduce_test reduce_scatter_test
-MPITESTS    := mpi_test
 
 INCDIR := $(BUILDDIR)/include
 LIBDIR := $(BUILDDIR)/lib
 OBJDIR := $(BUILDDIR)/obj
-TSTDIR := $(BUILDDIR)/test/single
-MPITSTDIR := $(BUILDDIR)/test/mpi
 
 INCTARGETS := $(patsubst %, $(INCDIR)/%, $(INCEXPORTS))
 LIBSONAME  := $(patsubst %,%.$(VER_MAJOR),$(LIBNAME))
 LIBTARGET  := $(patsubst %,%.$(VER_MAJOR).$(VER_MINOR).$(VER_PATCH),$(LIBNAME))
 LIBLINK    := $(patsubst lib%.so, -l%, $(LIBNAME))
 LIBOBJ     := $(patsubst %.cu, $(OBJDIR)/%.o, $(filter %.cu, $(LIBSRCFILES)))
-TESTBINS   := $(patsubst %, $(TSTDIR)/%, $(TESTS))
-MPITESTBINS:= $(patsubst %, $(MPITSTDIR)/%, $(MPITESTS))
 DEPFILES   := $(patsubst %.o, %.d, $(LIBOBJ)) $(patsubst %, %.d, $(TESTBINS)) $(patsubst %, %.d, $(MPITESTBINS))
 
 lib : $(INCTARGETS) $(LIBDIR)/$(LIBTARGET)
@@ -87,55 +88,82 @@ lib : $(INCTARGETS) $(LIBDIR)/$(LIBTARGET)
 
 $(LIBDIR)/$(LIBTARGET) : $(LIBOBJ)
 	@printf "Linking   %-25s\n" $@
-	@mkdir -p $(LIBDIR)
-	@$(GPP) $(CPPFLAGS) $(CXXFLAGS) -shared -Wl,--no-as-needed -Wl,-soname,$(LIBSONAME) -o $@ $(LDFLAGS) $(LIBOBJ)
-	@ln -sf $(LIBSONAME) $(LIBDIR)/$(LIBNAME)
-	@ln -sf $(LIBTARGET) $(LIBDIR)/$(LIBSONAME)
+	mkdir -p $(LIBDIR)
+	$(CXX) $(CXXFLAGS) -shared -Wl,--no-as-needed -Wl,-soname,$(LIBSONAME) -o $@ $(LDFLAGS) $(LIBOBJ)
+	ln -sf $(LIBSONAME) $(LIBDIR)/$(LIBNAME)
+	ln -sf $(LIBTARGET) $(LIBDIR)/$(LIBSONAME)
 
 $(INCDIR)/%.h : src/%.h
 	@printf "Grabbing  %-25s > %-25s\n" $< $@
-	@mkdir -p $(INCDIR)
-	@cp -f $< $@
+	mkdir -p $(INCDIR)
+	cp -f $< $@
 
 $(OBJDIR)/%.o : src/%.cu
 	@printf "Compiling %-25s > %-25s\n" $< $@
-	@mkdir -p $(OBJDIR)
-	@$(NVCC) -c $(CPPFLAGS) $(NVCUFLAGS) --compiler-options "$(CXXFLAGS)" $< -o $@
-	@$(NVCC) -M $(CPPFLAGS) $(NVCUFLAGS) --compiler-options "$(CXXFLAGS)" $< > $(@:%.o=%.d.tmp)
+	mkdir -p $(OBJDIR)
+	$(NVCC) -c $(NVCUFLAGS) --compiler-options "$(CXXFLAGS)" $< -o $@
+	@$(NVCC) -M $(NVCUFLAGS) --compiler-options "$(CXXFLAGS)" $< > $(@:%.o=%.d.tmp)
 	@sed "0,/^.*:/s//$(subst /,\/,$@):/" $(@:%.o=%.d.tmp) > $(@:%.o=%.d)
 	@sed -e 's/.*://' -e 's/\\$$//' < $(@:%.o=%.d.tmp) | fmt -1 | \
                 sed -e 's/^ *//' -e 's/$$/:/' >> $(@:%.o=%.d)
 	@rm -f $(@:%.o=%.d.tmp)
 
 clean :
-	rm -rf build
-
-test : lib $(TESTBINS)
-
-$(TSTDIR)/% : test/single/%.cu $(LIBDIR)/$(LIBTARGET)
-	@printf "Building  %-25s > %-24s\n" $< $@
-	@mkdir -p $(TSTDIR)
-	@$(NVCC) $(TSTINC) $(CPPFLAGS) $(NVCUFLAGS) --compiler-options "$(CXXFLAGS)" -o $@ $< -Lbuild/lib $(LIBLINK) $(LDFLAGS) -lcuda -lcurand -lnvToolsExt
-	@$(NVCC) -M $(TSTINC) $(CPPFLAGS) $(NVCUFLAGS) --compiler-options "$(CXXFLAGS)" $< -Lbuild/lib $(LIBLINK) $(LDFLAGS) -lcuda -lcurand -lnvToolsExt > $(@:%=%.d.tmp)
-	@sed "0,/^.*:/s//$(subst /,\/,$@):/" $(@:%=%.d.tmp) > $(@:%=%.d)
-	@sed -e 's/.*://' -e 's/\\$$//' < $(@:%=%.d.tmp) | fmt -1 | \
-                sed -e 's/^ *//' -e 's/$$/:/' >> $(@:%=%.d)
-	@rm -f $(@:%=%.d.tmp)
-
-mpitest : lib $(MPITESTBINS)
-
-$(MPITSTDIR)/% : test/mpi/%.cu $(LIBDIR)/$(LIBTARGET)
-	@printf "Building  %-25s > %-24s\n" $< $@
-	@mkdir -p $(MPITSTDIR)
-	@$(NVCC) $(MPIFLAGS) $(TSTINC) $(CPPFLAGS) $(NVCUFLAGS) --compiler-options "$(CXXFLAGS)" -o $@ $< -Lbuild/lib $(LIBLINK) $(LDFLAGS) -lcurand
-	@$(NVCC) $(MPIFLAGS) -M $(TSTINC) $(CPPFLAGS) $(NVCUFLAGS) --compiler-options "$(CXXFLAGS)" $< -Lbuild/lib $(LIBLINK) $(LDFLAGS) -lcurand > $(@:%=%.d.tmp)
-	@sed "0,/^.*:/s//$(subst /,\/,$@):/" $(@:%=%.d.tmp) > $(@:%=%.d)
-	@sed -e 's/.*://' -e 's/\\$$//' < $(@:%=%.d.tmp) | fmt -1 | \
-                sed -e 's/^ *//' -e 's/$$/:/' >> $(@:%=%.d)
-	@rm -f $(@:%=%.d.tmp)
+	rm -rf $(BUILDDIR)
 
 install : lib
-	@mkdir -p $(PREFIX)/lib
-	@mkdir -p $(PREFIX)/include
-	@cp -P -v build/lib/* $(PREFIX)/lib/
-	@cp -v build/include/* $(PREFIX)/include/
+	mkdir -p $(PREFIX)/lib
+	mkdir -p $(PREFIX)/include
+	cp -P -v build/lib/* $(PREFIX)/lib/
+	cp -v build/include/* $(PREFIX)/include/
+
+#### TESTS ####
+
+TEST_ONLY ?= 0
+
+# Tests depend on lib, except in TEST_ONLY mode.
+ifeq ($(TEST_ONLY), 0)
+TSTDEP = $(INCTARGETS) $(LIBDIR)/$(LIBTARGET)
+endif
+
+NCCL_LIB ?= $(LIBDIR)
+NCCL_INC ?= $(INCDIR)
+
+MPI_HOME ?= /usr
+MPI_INC ?= $(MPI_HOME)/include
+MPI_LIB ?= $(MPI_HOME)/lib
+MPIFLAGS   := -I$(MPI_INC) -L$(MPI_LIB) -lmpi
+
+TESTS       := all_gather_test all_reduce_test broadcast_test reduce_test reduce_scatter_test
+MPITESTS    := mpi_test
+
+TSTINC     := -I$(NCCL_INC) -Itest/include
+TSTLIB     := -L$(NCCL_LIB) $(LIBLINK) $(LDFLAGS)
+TSTDIR     := $(BUILDDIR)/test/single
+MPITSTDIR  := $(BUILDDIR)/test/mpi
+TESTBINS   := $(patsubst %, $(TSTDIR)/%, $(TESTS))
+MPITESTBINS:= $(patsubst %, $(MPITSTDIR)/%, $(MPITESTS))
+
+test : $(TESTBINS)
+
+$(TSTDIR)/% : test/single/%.cu $(TSTDEP) 
+	@printf "Building  %-25s > %-24s\n" $< $@
+	mkdir -p $(TSTDIR)
+	$(NVCC) $(TSTINC) $(NVCUFLAGS) --compiler-options "$(CXXFLAGS)" -o $@ $< $(TSTLIB) -lcuda -lcurand -lnvToolsExt
+	@$(NVCC) -M $(TSTINC) $(NVCUFLAGS) --compiler-options "$(CXXFLAGS)" $< $(TSTLIB) -lcuda -lcurand -lnvToolsExt > $(@:%=%.d.tmp)
+	@sed "0,/^.*:/s//$(subst /,\/,$@):/" $(@:%=%.d.tmp) > $(@:%=%.d)
+	@sed -e 's/.*://' -e 's/\\$$//' < $(@:%=%.d.tmp) | fmt -1 | \
+                sed -e 's/^ *//' -e 's/$$/:/' >> $(@:%=%.d)
+	@rm -f $(@:%=%.d.tmp)
+
+mpitest : $(MPITESTBINS)
+
+$(MPITSTDIR)/% : test/mpi/%.cu $(TSTDEP) 
+	@printf "Building  %-25s > %-24s\n" $< $@
+	mkdir -p $(MPITSTDIR)
+	$(NVCC) $(MPIFLAGS) $(TSTINC) $(NVCUFLAGS) --compiler-options "$(CXXFLAGS)" -o $@ $< $(TSTLIB) -lcurand
+	@$(NVCC) $(MPIFLAGS) -M $(TSTINC) $(NVCUFLAGS) --compiler-options "$(CXXFLAGS)" $< $(TSTLIB) -lcurand > $(@:%=%.d.tmp)
+	@sed "0,/^.*:/s//$(subst /,\/,$@):/" $(@:%=%.d.tmp) > $(@:%=%.d)
+	@sed -e 's/.*://' -e 's/\\$$//' < $(@:%=%.d.tmp) | fmt -1 | \
+                sed -e 's/^ *//' -e 's/$$/:/' >> $(@:%=%.d)
+	@rm -f $(@:%=%.d.tmp)
