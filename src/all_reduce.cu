@@ -26,8 +26,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  ************************************************************************/
 
-#include <nvToolsExt.h>
-
 #include "core.h"
 #include "common_kernel.h"
 #include "copy_kernel.h"

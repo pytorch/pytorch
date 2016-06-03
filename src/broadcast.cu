@@ -28,8 +28,6 @@
 
 #include <algorithm>
 
-#include <nvToolsExt.h>
-
 #include "core.h"
 #include "common_kernel.h"
 #include "copy_kernel.h"
