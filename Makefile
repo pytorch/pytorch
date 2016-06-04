@@ -69,7 +69,7 @@ LIBSRCFILES := libwrap.cu core.cu all_gather.cu all_reduce.cu broadcast.cu reduc
 LIBNAME     := libnccl.so
 VER_MAJOR   := 1
 VER_MINOR   := 2
-VER_PATCH   := 1
+VER_PATCH   := 2
 
 INCDIR := $(BUILDDIR)/include
 LIBDIR := $(BUILDDIR)/lib
