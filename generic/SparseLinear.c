@@ -105,6 +105,7 @@ void THNN_(SparseLinear_updateOutput)(
     THTensor_(cadd)(output_row, bias, 1.0, output_row);
   }
   THTensor_(free)(output_row);
+  THLongTensor_free(csr);
 }
 
 void THNN_(SparseLinear_legacyUpdateOutput)(
@@ -227,6 +228,7 @@ void THNN_(SparseLinear_accGradParameters)(
   THTensor_(sum)(buf, gradOutput, 0);
   THTensor_(cadd)(gradBias, gradBias, scale, buf);
   THTensor_(free)(buf);
+  THLongTensor_free(csc);
 
   if (weightDecay != 0) {
     THTensor_(cadd)(gradWeight, gradWeight, weightDecay, weight);
