@@ -12,12 +12,12 @@ __global__ void cuda_VolumetricMaxPooling_updateOutput(
   THCDeviceTensor<float, 4> output,
   int kT, int kH, int kW,
   int dT, int dH, int dW,
-  int padT, int padH, int padW)
+  int padT, int padH, int padW, int offsetZ)
 {
   int oColumn = blockIdx.x * blockDim.x + threadIdx.x;
   int oRow    = blockIdx.y * blockDim.y + threadIdx.y;
-  int oFrame  = blockIdx.z % output.getSize(1); // output frame/time
-  int slice   = blockIdx.z / output.getSize(1); // output slice/feature
+  int oFrame  = (blockIdx.z + offsetZ) % output.getSize(1); // output frame/time
+  int slice   = (blockIdx.z + offsetZ) / output.getSize(1); // output slice/feature
 
   if (oRow < output.getSize(2) && oColumn < output.getSize(3))
   {
@@ -74,12 +74,12 @@ __global__ void cuda_VolumetricMaxPooling_updateOutput(
   THCDeviceTensor<float, 4> output,
   int kT, int kH,
   int dT, int dH, int dW,
-  int padT, int padH, int padW)
+  int padT, int padH, int padW, int offsetZ)
 {
   int oColumn = blockIdx.x * blockDim.x + threadIdx.x;
   int oRow    = blockIdx.y * blockDim.y + threadIdx.y;
-  int oFrame  = blockIdx.z % output.getSize(1); // output frame/time
-  int slice   = blockIdx.z / output.getSize(1); // output slice/feature
+  int oFrame  = (blockIdx.z + offsetZ) % output.getSize(1); // output frame/time
+  int slice   = (blockIdx.z + offsetZ) / output.getSize(1); // output slice/feature
 
   if (oRow < output.getSize(2) && oColumn < output.getSize(3))
   {
@@ -130,10 +130,10 @@ __global__ void cuda_VolumetricMaxPooling_updateOutput(
   }
 }
 
-#define UPDATE_OUTPUT_KERNEL_WIDTH(KW) case KW:                                   \
-  cuda_VolumetricMaxPooling_updateOutput<KW><<<grid, block,                       \
-                                0, THCState_getCurrentStream(state)>>>(           \
-      cudaInput, cudaIndices, cudaOutput, kT, kH, dT, dH, dW, padT, padH, padW);  \
+#define UPDATE_OUTPUT_KERNEL_WIDTH(KW) case KW:                         \
+  cuda_VolumetricMaxPooling_updateOutput<KW><<<grid, block,             \
+    0, THCState_getCurrentStream(state)>>>(                             \
+    cudaInput, cudaIndices, cudaOutput, kT, kH, dT, dH, dW, padT, padH, padW, offsetZ); \
     break
 
 
@@ -269,26 +269,35 @@ void THNN_CudaVolumetricMaxPooling_updateOutput(
   THCDeviceTensor<float, 4> cudaIndices =
     toDeviceTensor<float, 4>(state, indices1);
 
+  int totalZ = outputTime * inputSlices * batchSize;
+  int offsetZ = 0;
   dim3 block(32, 8);
-  dim3 grid(THCCeilDiv(outputWidth, static_cast<int>(block.x)),
-            THCCeilDiv(outputHeight, static_cast<int>(block.y)),
-            outputTime * inputSlices * batchSize);
 
-  switch (kW)
-  {
-    UPDATE_OUTPUT_KERNEL_WIDTH(1);
-    UPDATE_OUTPUT_KERNEL_WIDTH(2);
-    UPDATE_OUTPUT_KERNEL_WIDTH(3);
-    UPDATE_OUTPUT_KERNEL_WIDTH(4);
-    UPDATE_OUTPUT_KERNEL_WIDTH(5);
-    UPDATE_OUTPUT_KERNEL_WIDTH(6);
-    UPDATE_OUTPUT_KERNEL_WIDTH(7);
-    default:
-      cuda_VolumetricMaxPooling_updateOutput<<<grid, block,
-        0, THCState_getCurrentStream(state)>>>(
-        cudaInput, cudaIndices, cudaOutput, kT, kH, kW, dT, dH, dW, padT, padH, padW);
+  while (totalZ > 0) {
+    dim3 grid(THCCeilDiv(outputWidth, static_cast<int>(block.x)),
+              THCCeilDiv(outputHeight, static_cast<int>(block.y)),
+              totalZ > 65535 ? 65535 : totalZ);
+
+    switch (kW)
+      {
+        UPDATE_OUTPUT_KERNEL_WIDTH(1);
+        UPDATE_OUTPUT_KERNEL_WIDTH(2);
+        UPDATE_OUTPUT_KERNEL_WIDTH(3);
+        UPDATE_OUTPUT_KERNEL_WIDTH(4);
+        UPDATE_OUTPUT_KERNEL_WIDTH(5);
+        UPDATE_OUTPUT_KERNEL_WIDTH(6);
+        UPDATE_OUTPUT_KERNEL_WIDTH(7);
+      default:
+        cuda_VolumetricMaxPooling_updateOutput<<<grid, block,
+          0, THCState_getCurrentStream(state)>>>(
+                             cudaInput, cudaIndices, cudaOutput,
+                             kT, kH, kW, dT, dH, dW,
+                             padT, padH, padW, offsetZ);
+      }
+    THCudaCheck(cudaGetLastError());
+    totalZ -= 65535;
+    offsetZ += 65535;
   }
-  THCudaCheck(cudaGetLastError());
 
   THCudaTensor_free(state, input);
   THCudaTensor_free(state, indices1);
@@ -301,12 +310,12 @@ __global__ void cuda_VolumetricMaxPooling_updateGradInput(
   THCDeviceTensor<float, 4> indices,
   THCDeviceTensor<float, 4> gradInput,
   int dT, int dH, int dW,
-  int padT, int padH, int padW)
+  int padT, int padH, int padW, int offsetZ)
 {
   int oColumn = blockIdx.x * blockDim.x + threadIdx.x;
   int oRow    = blockIdx.y * blockDim.y + threadIdx.y;
-  int oFrame  = blockIdx.z % gradOutput.getSize(1); // output frame/time
-  int slice   = blockIdx.z / gradOutput.getSize(1); // output slice/feature
+  int oFrame  = (blockIdx.z + offsetZ) % gradOutput.getSize(1); // output frame/time
+  int slice   = (blockIdx.z + offsetZ) / gradOutput.getSize(1); // output slice/feature
 
   if (oRow < gradOutput.getSize(2) && oColumn < gradOutput.getSize(3))
   {
@@ -387,19 +396,26 @@ void THNN_CudaVolumetricMaxPooling_updateGradInput(
   THCDeviceTensor<float, 4> cudaIndices =
     toDeviceTensor<float, 4>(state, indices1);
 
+  int totalZ = outputTime * inputSlices * batchSize;
+  int offsetZ = 0;
   dim3 block(32, 8);
-  dim3 grid(THCCeilDiv(outputWidth, static_cast<int>(block.x)),
-            THCCeilDiv(outputHeight, static_cast<int>(block.y)),
-            outputTime * inputSlices * batchSize);
 
-  cuda_VolumetricMaxPooling_updateGradInput<<<grid, block,
-    0, THCState_getCurrentStream(state)>>>(
-    cudaGradOutput,
-    cudaIndices,
-    cudaGradInput,
-    dT, dH, dW,
-    padT, padH, padW);
-  THCudaCheck(cudaGetLastError());
+  while (totalZ > 0) {
+    dim3 grid(THCCeilDiv(outputWidth, static_cast<int>(block.x)),
+              THCCeilDiv(outputHeight, static_cast<int>(block.y)),
+              totalZ > 65535 ? 65535 : totalZ);
+
+    cuda_VolumetricMaxPooling_updateGradInput<<<grid, block,
+      0, THCState_getCurrentStream(state)>>>(
+                                             cudaGradOutput,
+                                             cudaIndices,
+                                             cudaGradInput,
+                                             dT, dH, dW,
+                                             padT, padH, padW, offsetZ);
+    THCudaCheck(cudaGetLastError());
+    totalZ -= 65535;
+    offsetZ += 65535;
+  }
 
   // cleanup
   THCudaTensor_free(state, gradOutput);
