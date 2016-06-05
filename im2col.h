@@ -56,6 +56,7 @@ void im2col(cudaStream_t stream, const Dtype* data_im, const int channels,
       dilation_h, dilation_w,
       height_col, width_col, data_col
   );
+  THCudaCheck(cudaGetLastError());
 }
 
 template <typename Dtype>
@@ -118,6 +119,7 @@ void col2im(cudaStream_t stream, const Dtype* data_col, const int channels,
       dilation_h, dilation_w,
       height_col, width_col, data_im
   );
+  THCudaCheck(cudaGetLastError());
 }
 
 #endif

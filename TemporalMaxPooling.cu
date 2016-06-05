@@ -143,7 +143,7 @@ void THNN_CudaTemporalMaxPooling_updateOutput(
   dim3 threads(nthreads);
   cunn_TemporalMaxPooling_updateOutputKernel <<< blocks, threads, 0, THCState_getCurrentStream(state) >>>(
       input_data, output_data, indices_data, input_w, input_n, output_w, kW, dW);
-
+  THCudaCheck(cudaGetLastError());
   THCudaTensor_free(state, input);
 
 }
@@ -215,7 +215,7 @@ void THNN_CudaTemporalMaxPooling_updateGradInput(
     cunn_TemporalMaxPooling_updateGradInputKernelAtomic <<< blocks, threads, 0, THCState_getCurrentStream(state) >>>(
         gradInput_data, gradOutput_data, indices_data, input_w, input_n, output_w, kW, dW);
   }
-
+  THCudaCheck(cudaGetLastError());
   THCudaTensor_free(state, gradOutput);
 
 }

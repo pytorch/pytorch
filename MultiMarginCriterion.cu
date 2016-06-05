@@ -129,6 +129,7 @@ void THNN_CudaMultiMarginCriterion_updateOutput(THCState *state, THCudaTensor *i
         margin
       );
     }
+    THCudaCheck(cudaGetLastError());
   }
   else if (input->nDimension == 2)
   {
@@ -159,6 +160,7 @@ void THNN_CudaMultiMarginCriterion_updateOutput(THCState *state, THCudaTensor *i
         margin
       );
     }
+    THCudaCheck(cudaGetLastError());
     float sum = THCudaTensor_sumall(state, output_);
     THCudaTensor_set1d(state, output, 0, sum);
     THCudaTensor_free(state, output_);
@@ -167,10 +169,6 @@ void THNN_CudaMultiMarginCriterion_updateOutput(THCState *state, THCudaTensor *i
   {
     THError("vector or matrix expected");
   }
-
-  cudaError errcode = cudaGetLastError();
-  if (errcode != cudaSuccess)
-    THError(cudaGetErrorString(errcode));
 
   THCudaTensor_free(state, input);
   if(weights)
@@ -217,6 +215,7 @@ void THNN_CudaMultiMarginCriterion_updateGradInput(THCState *state, THCudaTensor
         margin
       );
     }
+    THCudaCheck(cudaGetLastError());
   }
   else if (input->nDimension == 2)
   {
@@ -247,15 +246,12 @@ void THNN_CudaMultiMarginCriterion_updateGradInput(THCState *state, THCudaTensor
         margin
       );
     }
+    THCudaCheck(cudaGetLastError());
   }
   else
   {
     THError("vector or matrix expected");
   }
-
-  cudaError errcode = cudaGetLastError();
-  if (errcode != cudaSuccess)
-    THError(cudaGetErrorString(errcode));
 
   THCudaTensor_free(state, input);
   if(weights)

@@ -58,6 +58,7 @@ void vol2col(cudaStream_t stream, const Dtype* data_vol, const int channels,
       pad_t, pad_h, pad_w, stride_t, stride_h, stride_w,
       depth_col, height_col, width_col, data_col
   );
+  THCudaCheck(cudaGetLastError());
 }
 
 template <typename Dtype>
@@ -115,6 +116,7 @@ void col2vol(cudaStream_t stream, const Dtype* data_col, const int channels,
       patch_t, patch_h, patch_w, pad_t, pad_h, pad_w, stride_t, stride_h, stride_w,
       depth_col, height_col, width_col, data_vol
   );
+  THCudaCheck(cudaGetLastError());
 }
 
 #endif

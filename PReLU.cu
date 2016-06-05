@@ -62,7 +62,7 @@ void THNN_CudaPReLU_updateOutput(
       w,
       n, nElemsPerSample, mapSize
     );
-
+    THCudaCheck(cudaGetLastError());
     THCudaTensor_free(state, input);
   }
 }
@@ -131,7 +131,7 @@ void THNN_CudaPReLU_updateGradInput(
       THCudaTensor_data(state, gradOutput),
       n, nElemsPerSample, mapSize
     );
-
+    THCudaCheck(cudaGetLastError());
     THCudaTensor_free(state, input);
     THCudaTensor_free(state, gradOutput);
   }

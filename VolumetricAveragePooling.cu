@@ -203,6 +203,7 @@ void THNN_CudaVolumetricAveragePooling_updateOutput(
       );
       break;
   }
+  THCudaCheck(cudaGetLastError());
 
   THCudaTensor_free(state, input);
 }
@@ -399,6 +400,7 @@ void THNN_CudaVolumetricAveragePooling_updateGradInput(
         cudaGradOutput, cudaGradInput, kT, kH, kW, dT, dH, dW);
     }
   }
+  THCudaCheck(cudaGetLastError());
 
   THCudaTensor_free(state, gradOutput);
 }

@@ -278,6 +278,7 @@ void THNN_CudaSpatialSubSampling_updateOutput(THCState *state, THCudaTensor *inp
     subsample <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (
       input_data, output_data, weight_data, bias_data,
       nInputPlane, nInputRows, nInputCols, kH, kW, dH, dW);
+    THCudaCheck(cudaGetLastError());
   } else {
     long nInputCols = input->size[3];
     long nInputRows = input->size[2];
@@ -304,17 +305,12 @@ void THNN_CudaSpatialSubSampling_updateOutput(THCState *state, THCudaTensor *inp
     subsample <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (
       input_data, output_data, weight_data, bias_data,
       nInputPlane, nInputRows, nInputCols, kH, kW, dH, dW);
+    THCudaCheck(cudaGetLastError());
   }
 
   // clean
   THCudaTensor_free(state, input);
 
-  // check for errors
-  cudaError_t err = cudaGetLastError();
-  if (err != cudaSuccess) {
-    printf("error in SpatialSubsampling.updateOutput: %s\n", cudaGetErrorString(err));
-    THError("aborting");
-  }
 }
 
 void THNN_CudaSpatialSubSampling_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput, THCudaTensor *gradInput, THCudaTensor *weight, int kW, int kH, int dW, int dH)
@@ -351,6 +347,7 @@ void THNN_CudaSpatialSubSampling_updateGradInput(THCState *state, THCudaTensor *
         gradInput_data, gradOutput_data, weight_data,
         nInputPlane, nInputRows, nInputCols, kH, kW, dH, dW);
     }
+    THCudaCheck(cudaGetLastError());
   } else {
     long nInputCols = input->size[3];
     long nInputRows = input->size[2];
@@ -380,13 +377,7 @@ void THNN_CudaSpatialSubSampling_updateGradInput(THCState *state, THCudaTensor *
         gradInput_data, gradOutput_data, weight_data,
         nInputPlane, nInputRows, nInputCols, kH, kW, dH, dW);
     }
-  }
-
-  // check for errors
-  cudaError_t err = cudaGetLastError();
-  if (err != cudaSuccess) {
-    printf("error in SpatialSubsampling.updateGradInput: %s\n", cudaGetErrorString(err));
-    THError("aborting");
+    THCudaCheck(cudaGetLastError());
   }
 }
 
@@ -416,6 +407,7 @@ void THNN_CudaSpatialSubSampling_accGradParameters(THCState *state, THCudaTensor
     subgradweight <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (
       input_data, gradOutput_data, gradWeight_data, gradBias_data,
       nInputPlane, nInputRows, nInputCols, kH, kW, dH, dW, scale);
+    THCudaCheck(cudaGetLastError());
   } else {
     long nInputCols = input->size[3];
     long nInputRows = input->size[2];
@@ -442,17 +434,12 @@ void THNN_CudaSpatialSubSampling_accGradParameters(THCState *state, THCudaTensor
         gradWeight_data, gradBias_data,
         nInputPlane, nInputRows, nInputCols, kH, kW, dH, dW, scale);
     }
+    THCudaCheck(cudaGetLastError());
   }
 
   // clean
   THCudaTensor_free(state, input);
 
-  // check for errors
-  cudaError_t err = cudaGetLastError();
-  if (err != cudaSuccess) {
-    printf("error in SpatialSubsampling.accGradParameters: %s\n", cudaGetErrorString(err));
-    THError("aborting");
-  }
 }
 
 #undef CUDA_MAX_THREADS

@@ -165,11 +165,8 @@ void THNN_CudaClassNLLCriterion_updateOutput(THCState *state, THCudaTensor *inpu
         n_classes
     );
   }
+  THCudaCheck(cudaGetLastError());
 
-  cudaError errcode = cudaGetLastError();
-  if (errcode != cudaSuccess) {
-    THError(cudaGetErrorString(errcode));
-  }
   if (weights) {
     THCudaTensor_free(state, weights);
   }
@@ -233,10 +230,8 @@ void THNN_CudaClassNLLCriterion_updateGradInput(THCState *state, THCudaTensor *i
         n_classes
     );
   }
-  cudaError errcode = cudaGetLastError();
-  if (errcode != cudaSuccess) {
-    THError(cudaGetErrorString(errcode));
-  }
+  THCudaCheck(cudaGetLastError());
+
   if (weights) {
     THCudaTensor_free(state, weights);
   }

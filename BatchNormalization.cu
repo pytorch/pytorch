@@ -254,6 +254,7 @@ void THNN_CudaBatchNormalization_updateOutput(
       input, output, weight, bias, eps, momentum, runningMean, runningVar,
       saveMean, saveStd);
   }
+  THCudaCheck(cudaGetLastError());
 }
 
 __global__ void BatchNormalizationBackward_kernel(
@@ -347,6 +348,7 @@ void THNN_CudaBatchNormalization_backward(
   dim3 blocks(gradOutput.getSize(1));
   dim3 threads(getNumThreads(gradOutput.getSize(2)));
   BatchNormalizationBackward_kernel<<<blocks, threads, 0, s>>>(
-    input, gradOutput, gradInput, gradWeight, gradBias, weight, runningMean, runningVar, 
+    input, gradOutput, gradInput, gradWeight, gradBias, weight, runningMean, runningVar,
     saveMean, saveStd, train, scale, eps);
+  THCudaCheck(cudaGetLastError());
 }

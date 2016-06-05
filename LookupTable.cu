@@ -197,7 +197,7 @@ void THNN_CudaLookupTable_accGradParameters(
       numel,
       stride,
       paddingValue);
-
+    THCudaCheck(cudaGetLastError());
     return;
   }
 
@@ -261,6 +261,7 @@ void THNN_CudaLookupTable_accGradParameters(
     stride,
     paddingValue
   );
+  THCudaCheck(cudaGetLastError());
 }
 
 /*

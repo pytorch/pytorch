@@ -131,18 +131,12 @@ void THNN_CudaSpatialMaxPooling_updateOutput(THCState *state, THCudaTensor *inpu
       (count, input_data,
       batchSize, nInputPlane, nInputRows, nInputCols, nOutputRows, nOutputCols,
       kH, kW, dH, dW, padH, padW, output_data, indices_data);
+  THCudaCheck(cudaGetLastError());
 
   if(input->nDimension == 3)
     THCudaTensor_resize3d(state, output, nInputPlane, nOutputRows, nOutputCols);
 
   THCudaTensor_free(state, input);
-
-  // check for errors
-  cudaError_t err = cudaGetLastError();
-  if (err != cudaSuccess) {
-    printf("error in SpatialMaxPooling.updateOutput: %s\n", cudaGetErrorString(err));
-    THError("aborting");
-  }
 }
 
 void THNN_CudaSpatialMaxPooling_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput, THCudaTensor *gradInput, THCudaTensor *indices, int kW, int kH, int dW, int dH, int padW, int padH, bool ceil_mode)
@@ -191,15 +185,10 @@ void THNN_CudaSpatialMaxPooling_updateGradInput(THCState *state, THCudaTensor *i
       batchSize, nInputPlane, nInputRows, nInputCols, nOutputRows, nOutputCols,
       kH, kW, dH, dW, padH, padW,
       THCudaTensor_data(state, gradInput));
+  THCudaCheck(cudaGetLastError());
 
   THCudaTensor_free(state, gradOutput);
 
-  // check for errors
-  cudaError_t err = cudaGetLastError();
-  if (err != cudaSuccess) {
-    printf("error in SpatialMaxPooling.updateGradInput: %s\n", cudaGetErrorString(err));
-    THError("aborting");
-  }
   // clean
   THCudaTensor_free(state, input);
   THCudaTensor_free(state, gradOutput);

@@ -94,7 +94,7 @@ void THNN_CudaSpatialReflectionPadding_updateOutput(THCState *state,
 
   SpatialReflectionPadding_updateOutput<<<gridSize, blockSize, 0, THCState_getCurrentStream(state)>>>(
     devInput, devOutput, padT, padB, padL, padR);
-
+  THCudaCheck(cudaGetLastError());
 }
 
 __global__ void SpatialReflectionPadding_updateGradInput(
@@ -177,5 +177,5 @@ void THNN_CudaSpatialReflectionPadding_updateGradInput(THCState *state,
 
   SpatialReflectionPadding_updateGradInput<<<gridSize, blockSize, 0, THCState_getCurrentStream(state)>>>(
     devGradInput, devGradOutput, padT, padB, padL, padR);
-
+  THCudaCheck(cudaGetLastError());
 }

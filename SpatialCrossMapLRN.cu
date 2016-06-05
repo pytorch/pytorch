@@ -149,8 +149,10 @@ void LRNforward(THCState* state, THCudaTensor* input, THCudaTensor* output,
       n_threads, THCudaTensor_data(state, input), batchSize, nInputPlane, imsize_h, imsize_w, local_size,
       alpha / local_size, k, THCudaTensor_data(state, scale));
   n_threads *= nInputPlane;
+  THCudaCheck(cudaGetLastError());
   LRNComputeOutput<<<GET_BLOCKS(n_threads), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state)>>>(
     n_threads, THCudaTensor_data(state, input), THCudaTensor_data(state, scale), -beta, THCudaTensor_data(state, output));
+  THCudaCheck(cudaGetLastError());
 
   THCudaTensor_free(state, input);
 }
@@ -191,6 +193,7 @@ void LRNbackward(THCState* state, THCudaTensor* input, THCudaTensor* output,
       THCudaTensor_data(state, scale), THCudaTensor_data(state, gradOutput), batchSize, nInputPlane, imsize_h, imsize_w,
       local_size, -beta, float(2. * alpha * beta / local_size),
       THCudaTensor_data(state, gradInput));
+  THCudaCheck(cudaGetLastError());
 
   THCudaTensor_free(state, input);
   THCudaTensor_free(state, gradOutput);

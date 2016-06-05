@@ -288,6 +288,7 @@ void THNN_CudaVolumetricMaxPooling_updateOutput(
         0, THCState_getCurrentStream(state)>>>(
         cudaInput, cudaIndices, cudaOutput, kT, kH, kW, dT, dH, dW, padT, padH, padW);
   }
+  THCudaCheck(cudaGetLastError());
 
   THCudaTensor_free(state, input);
   THCudaTensor_free(state, indices1);
@@ -398,6 +399,7 @@ void THNN_CudaVolumetricMaxPooling_updateGradInput(
     cudaGradInput,
     dT, dH, dW,
     padT, padH, padW);
+  THCudaCheck(cudaGetLastError());
 
   // cleanup
   THCudaTensor_free(state, gradOutput);

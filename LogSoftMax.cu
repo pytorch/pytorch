@@ -280,13 +280,7 @@ void THNN_CudaLogSoftMax_updateOutput(THCState *state, THCudaTensor *input, THCu
       THCudaTensor_data(state, input),
       classSize
   );
-
-  cudaError errcode = cudaGetLastError();
-  if (errcode != cudaSuccess)
-  {
-    THError(cudaGetErrorString(errcode));
-  }
-
+  THCudaCheck(cudaGetLastError());
   THCudaTensor_free(state, input);
 }
 
@@ -327,13 +321,7 @@ void THNN_CudaLogSoftMax_updateGradInput(THCState *state, THCudaTensor *input, T
       THCudaTensor_data(state, gradOutput),
       classSize
   );
-
-  cudaError errcode = cudaGetLastError();
-  if (errcode != cudaSuccess)
-  {
-    THError(cudaGetErrorString(errcode));
-  }
-
+  THCudaCheck(cudaGetLastError());
   THCudaTensor_free(state, gradOutput);
   THCudaTensor_free(state, output);
 }

@@ -134,11 +134,8 @@ void THNN_CudaSpatialClassNLLCriterion_updateOutput(
       THCudaTensor_size(state, input, 2) * THCudaTensor_size(state, input, 3),
       blocks_per_sample
   );
+  THCudaCheck(cudaGetLastError());
 
-  cudaError errcode = cudaGetLastError();
-  if (errcode != cudaSuccess) {
-    THError(cudaGetErrorString(errcode));
-  }
   if (weights)
     THCudaTensor_free(state, weights);
   THCudaTensor_free(state, target);
@@ -193,10 +190,8 @@ void THNN_CudaSpatialClassNLLCriterion_updateGradInput(
       THCudaTensor_size(state, input, 2) *THCudaTensor_size(state, input, 3),
       blocks_per_sample
   );
-  cudaError errcode = cudaGetLastError();
-  if (errcode != cudaSuccess) {
-    THError(cudaGetErrorString(errcode));
-  }
+  THCudaCheck(cudaGetLastError());
+
   if (weights)
     THCudaTensor_free(state, weights);
   THCudaTensor_free(state, target);

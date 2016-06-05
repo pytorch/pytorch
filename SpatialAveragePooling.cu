@@ -101,18 +101,13 @@ void THNN_CudaSpatialAveragePooling_updateOutput(THCState *state, THCudaTensor *
         count, input_data,
         batchSize, nInputPlane, nInputRows, nInputCols, nOutputRows, nOutputCols,
         kH, kW, dH, dW, padH, padW, output_data);
+  THCudaCheck(cudaGetLastError());
 
   if(input->nDimension == 3)
     THCudaTensor_resize3d(state, output, nInputPlane, nOutputRows, nOutputCols);
 
   THCudaTensor_free(state, input);
 
-  // check for errors
-  cudaError_t err = cudaGetLastError();
-  if (err != cudaSuccess) {
-    printf("error in SpatialAveragePooling.updateOutput: %s\n", cudaGetErrorString(err));
-    THError("aborting");
-  }
 }
 
 template <typename Dtype, bool COUNT_INCLUDE_PAD>
@@ -220,13 +215,8 @@ void THNN_CudaSpatialAveragePooling_updateGradInput(THCState *state, THCudaTenso
         batchSize, nInputPlane, nInputRows, nInputCols, nOutputRows, nOutputCols,
         kH, kW, dH, dW, padH, padW,
         THCudaTensor_data(state, gradInput));
+  THCudaCheck(cudaGetLastError());
 
-  // check for errors
-  cudaError_t err = cudaGetLastError();
-  if (err != cudaSuccess) {
-    printf("error in SpatialAveragePooling.updateGradInput: %s\n", cudaGetErrorString(err));
-    THError("aborting");
-  }
   // clean
   THCudaTensor_free(state, input);
   THCudaTensor_free(state, gradOutput);

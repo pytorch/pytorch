@@ -223,6 +223,7 @@ void THNN_CudaSpatialAdaptiveMaxPooling_updateOutput(THCState *state, THCudaTens
                                    indices_data+nInputPlane*nOutputCols*nOutputRows, indices_data,
                                    nInputPlane, nInputRows, nInputCols, nOutputRows, nOutputCols,
                                    istride_h, istride_w, istride_d);
+    THCudaCheck(cudaGetLastError());
 
   } else {
     long nInputCols = input->size[3];
@@ -254,15 +255,9 @@ void THNN_CudaSpatialAdaptiveMaxPooling_updateOutput(THCState *state, THCudaTens
                                    indices_data+nbatch*nInputPlane*nOutputCols*nOutputRows, indices_data,
                                    nInputPlane, nInputRows, nInputCols, nOutputRows, nOutputCols,
                                    istride_h, istride_w, istride_d);
+    THCudaCheck(cudaGetLastError());
     // clean
     THCudaTensor_free(state, input);
-  }
-
-  // check for errors
-  cudaError_t err = cudaGetLastError();
-  if (err != cudaSuccess) {
-    printf("error in SpatialAdaptiveMaxPooling.updateOutput: %s\n", cudaGetErrorString(err));
-    THError("aborting");
   }
 }
 
@@ -314,6 +309,7 @@ void THNN_CudaSpatialAdaptiveMaxPooling_updateGradInput(THCState *state, THCudaT
                                           indices_data+nInputPlane*nOutputCols*nOutputRows, indices_data,
                                           nInputPlane, nInputRows, nInputCols, nOutputRows, nOutputCols);
     }
+    THCudaCheck(cudaGetLastError());
   } else {
     long nInputCols = input->size[3];
     long nInputRows = input->size[2];
@@ -351,17 +347,12 @@ void THNN_CudaSpatialAdaptiveMaxPooling_updateGradInput(THCState *state, THCudaT
                                           indices_data+nbatch*nInputPlane*nOutputCols*nOutputRows, indices_data,
                                           nInputPlane, nInputRows, nInputCols, nOutputRows, nOutputCols);
     }
+    THCudaCheck(cudaGetLastError());
   }
 
   // clean
   THCudaTensor_free(state,gradOutput);
 
-  // check for errors
-  cudaError_t err = cudaGetLastError();
-  if (err != cudaSuccess) {
-    printf("error in SpatialAdaptiveMaxPooling.updateGradInput: %s\n", cudaGetErrorString(err));
-    THError("aborting");
-  }
 }
 
 #undef CUDA_MAX_THREADS

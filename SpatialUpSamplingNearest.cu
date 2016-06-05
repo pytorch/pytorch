@@ -104,13 +104,7 @@ void THNN_CudaSpatialUpSamplingNearest_updateOutput(THCState *state, THCudaTenso
 
   // kernel:
   upscale<<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (input_data, output_data, no_elements, scale_factor, d1, d2, d3);
-
-  // check for errors
-  cudaError_t err = cudaGetLastError();
-  if (err != cudaSuccess) {
-    printf("error in SpatialUpSamplingNearest.updateOutput: %s\n", cudaGetErrorString(err));
-    THError("aborting");
-  }
+  THCudaCheck(cudaGetLastError());
 
   // final cut:
   THCudaTensor_free(state, input);
@@ -179,11 +173,5 @@ void THNN_CudaSpatialUpSamplingNearest_updateGradInput(THCState *state, THCudaTe
   // kernel:
   downscale<<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (gradInput_data, gradOutput_data, no_elements,
     scale_factor, d1, d2, d3);
-
-  // check for errors
-  cudaError_t err = cudaGetLastError();
-  if (err != cudaSuccess) {
-    printf("error in SpatialUpSamplingNearest.updateOutput: %s\n", cudaGetErrorString(err));
-    THError("aborting");
-  }
+  THCudaCheck(cudaGetLastError());
 }

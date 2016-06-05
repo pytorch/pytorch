@@ -77,6 +77,7 @@ void im3d2col(cudaStream_t stream, const float* data_im, const int channels,
                                    stride_h, stride_w, stride_d,
                                    height_col, width_col, depth_col,
                                    data_col);
+  THCudaCheck(cudaGetLastError());
 }
 
 
@@ -145,6 +146,7 @@ void col2im3d(cudaStream_t stream, const float* data_col, const int channels,
                                    stride_h, stride_w, stride_d,
                                    height_col, width_col, depth_col,
                                    data_im);
+  THCudaCheck(cudaGetLastError());
 }
 
 void THNN_CudaVolumetricConvolution_updateOutput(

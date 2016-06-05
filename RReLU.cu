@@ -92,6 +92,7 @@ void THNN_CudaRReLU_updateOutput(THCState *state, THCudaTensor *input, THCudaTen
         n, state->rngState->current_gen->gen_states,
         input_data, noise_data, output_data, lower, upper);
     }
+    THCudaCheck(cudaGetLastError());
     THCudaTensor_free(state, input);
   }
   else

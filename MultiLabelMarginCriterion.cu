@@ -159,6 +159,7 @@ void THNN_CudaMultiLabelMarginCriterion_updateOutput(
         1, input->size[0],
         sizeaverage
         );
+    THCudaCheck(cudaGetLastError());
   }
   else if(input->nDimension == 2)
   {
@@ -175,16 +176,13 @@ void THNN_CudaMultiLabelMarginCriterion_updateOutput(
         input->size[0], input->size[1],
         sizeaverage
         );
+    THCudaCheck(cudaGetLastError());
     THCudaTensor_resize1d(state, output, 1);
     THCudaTensor_set1d(state, output, 0, THCudaTensor_sumall(state, output_tmp));
     THCudaTensor_free(state, output_tmp);
   }
   else
     THError("vector or matrix expected");
-
-  cudaError errcode = cudaGetLastError();
-  if(errcode != cudaSuccess)
-    THError(cudaGetErrorString(errcode));
 
   THCudaTensor_free(state, input);
   THCudaTensor_free(state, target);
@@ -232,9 +230,7 @@ void THNN_CudaMultiLabelMarginCriterion_updateGradInput(
   else
     THError("vector or matrix expected");
 
-  cudaError errcode = cudaGetLastError();
-  if(errcode != cudaSuccess)
-    THError(cudaGetErrorString(errcode));
+  THCudaCheck(cudaGetLastError());
 
   THCudaTensor_free(state, input);
   THCudaTensor_free(state, target);
