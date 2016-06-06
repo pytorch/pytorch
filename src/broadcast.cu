@@ -348,27 +348,29 @@ ncclResult_t ncclBcastWithType(void* buff, const int count, const int root,
   args.ThisChunkDoneFlag = comm->ptrs[nextId].local->flags + 1;
   args.PrevChunkDoneFlag = comm->ptrs[prevId].remote->flags + 1;
 
-  if (comm->useRemoteRecv) {
-    if (index == (rootId + comm->nDev - 1) % comm->nDev) {
-      BroadcastKernel<NUM_THREADS, UNROLL_COUNT, true, END, T>
-          <<<1, NUM_THREADS + 1, 0, stream>>>(args);
-    } else if (index == rootId) {
-      BroadcastKernel<NUM_THREADS, UNROLL_COUNT, true, ROOT, T>
-          <<<1, NUM_THREADS + 1, 0, stream>>>(args);
+  if (comm->nDev != 1) {
+    if (comm->useRemoteRecv) {
+      if (index == (rootId + comm->nDev - 1) % comm->nDev) {
+	BroadcastKernel<NUM_THREADS, UNROLL_COUNT, true, END, T>
+	  <<<1, NUM_THREADS + 1, 0, stream>>>(args);
+      } else if (index == rootId) {
+	BroadcastKernel<NUM_THREADS, UNROLL_COUNT, true, ROOT, T>
+	  <<<1, NUM_THREADS + 1, 0, stream>>>(args);
+      } else {
+	BroadcastKernel<NUM_THREADS, UNROLL_COUNT, true, MIDDLE, T>
+	  <<<1, NUM_THREADS + 1, 0, stream>>>(args);
+      }
     } else {
-      BroadcastKernel<NUM_THREADS, UNROLL_COUNT, true, MIDDLE, T>
-          <<<1, NUM_THREADS + 1, 0, stream>>>(args);
-    }
-  } else {
-    if (index == (rootId + comm->nDev - 1) % comm->nDev) {
-      BroadcastKernel<NUM_THREADS, UNROLL_COUNT, false, END, T>
-          <<<1, NUM_THREADS + 1, 0, stream>>>(args);
-    } else if (index == rootId) {
-      BroadcastKernel<NUM_THREADS, UNROLL_COUNT, false, ROOT, T>
-          <<<1, NUM_THREADS + 1, 0, stream>>>(args);
-    } else {
-      BroadcastKernel<NUM_THREADS, UNROLL_COUNT, false, MIDDLE, T>
-          <<<1, NUM_THREADS + 1, 0, stream>>>(args);
+      if (index == (rootId + comm->nDev - 1) % comm->nDev) {
+	BroadcastKernel<NUM_THREADS, UNROLL_COUNT, false, END, T>
+	  <<<1, NUM_THREADS + 1, 0, stream>>>(args);
+      } else if (index == rootId) {
+	BroadcastKernel<NUM_THREADS, UNROLL_COUNT, false, ROOT, T>
+	  <<<1, NUM_THREADS + 1, 0, stream>>>(args);
+      } else {
+	BroadcastKernel<NUM_THREADS, UNROLL_COUNT, false, MIDDLE, T>
+	  <<<1, NUM_THREADS + 1, 0, stream>>>(args);
+      }
     }
   }
   return ncclSuccess;

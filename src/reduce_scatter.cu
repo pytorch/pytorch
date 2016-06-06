@@ -444,8 +444,13 @@ ncclResult_t ncclReduceScatterWithTypeAndFunc(const void* sendbuff,
   args.ThisChunkDoneFlag = comm->ptrs[nextId].local->flags + 1;
   args.PrevChunkDoneFlag = comm->ptrs[prevId].remote->flags + 1;
 
-  ReduceScatterKernel<NUM_THREADS, UNROLL_COUNT, FUNC, T>
+  if (comm->nDev == 1) {
+    if (sendbuff != recvbuff)
+      CUDACHECK(cudaMemcpyAsync(recvbuff, sendbuff, recvcount*sizeof(T), cudaMemcpyDeviceToDevice, stream));
+  } else {
+    ReduceScatterKernel<NUM_THREADS, UNROLL_COUNT, FUNC, T>
       <<<1, NUM_THREADS + 1, 0, stream>>>(args);
+  }
   return ncclSuccess;
 }
 

@@ -442,12 +442,17 @@ ncclResult_t ncclAllGatherWithType(const void* sendbuff, void* recvbuff,
   args.ThisChunkDoneFlag = comm->ptrs[nextId].local->flags + 1;
   args.PrevChunkDoneFlag = comm->ptrs[prevId].remote->flags + 1;
 
-  if( comm->useRemoteRecv ) {
-    AllGatherKernel<NUM_THREADS, UNROLL_COUNT, true, T>
-        <<<1, NUM_THREADS + 1, 0, stream>>>(args);
+  if (comm->nDev == 1) {
+    if (sendbuff != recvbuff)
+      CUDACHECK(cudaMemcpyAsync(recvbuff, sendbuff, count*sizeof(T), cudaMemcpyDeviceToDevice, stream));
   } else {
-    AllGatherKernel<NUM_THREADS, UNROLL_COUNT, false, T>
-        <<<1, NUM_THREADS + 1, 0, stream>>>(args);
+    if( comm->useRemoteRecv ) {
+      AllGatherKernel<NUM_THREADS, UNROLL_COUNT, true, T>
+	<<<1, NUM_THREADS + 1, 0, stream>>>(args);
+    } else {
+      AllGatherKernel<NUM_THREADS, UNROLL_COUNT, false, T>
+	<<<1, NUM_THREADS + 1, 0, stream>>>(args);
+    }
   }
   return ncclSuccess;
 }

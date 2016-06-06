@@ -336,15 +336,20 @@ ncclResult_t ncclReduceWithTypeAndFunc(const void* sendbuff, void* recvbuff,
   args.ThisChunkDoneFlag = comm->ptrs[nextId].local->flags + 1;
   args.PrevChunkDoneFlag = comm->ptrs[prevId].remote->flags + 1;
 
-  if (index == (rootId + 1) % comm->nDev) {
-    ReduceKernel<NUM_THREADS, UNROLL_COUNT, FUNC, BEGIN, T>
-        <<<1, NUM_THREADS + 1, 0, stream>>>(args);
-  } else if (index == rootId) {
-    ReduceKernel<NUM_THREADS, UNROLL_COUNT, FUNC, END, T>
-        <<<1, NUM_THREADS + 1, 0, stream>>>(args);
+  if (comm->nDev == 1) {
+    if (sendbuff != recvbuff)
+      CUDACHECK(cudaMemcpyAsync(recvbuff, sendbuff, count*sizeof(T), cudaMemcpyDeviceToDevice, stream));
   } else {
-    ReduceKernel<NUM_THREADS, UNROLL_COUNT, FUNC, MIDDLE, T>
-        <<<1, NUM_THREADS + 1, 0, stream>>>(args);
+    if (index == (rootId + 1) % comm->nDev) {
+      ReduceKernel<NUM_THREADS, UNROLL_COUNT, FUNC, BEGIN, T>
+	<<<1, NUM_THREADS + 1, 0, stream>>>(args);
+    } else if (index == rootId) {
+      ReduceKernel<NUM_THREADS, UNROLL_COUNT, FUNC, END, T>
+	<<<1, NUM_THREADS + 1, 0, stream>>>(args);
+    } else {
+      ReduceKernel<NUM_THREADS, UNROLL_COUNT, FUNC, MIDDLE, T>
+	<<<1, NUM_THREADS + 1, 0, stream>>>(args);
+    }
   }
   return ncclSuccess;
 }
