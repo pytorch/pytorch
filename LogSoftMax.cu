@@ -60,7 +60,7 @@ blockReduce(float* smem, float val,
             float defaultVal,
             const Finalize& f)
 {
-  // To avoid RaW races from chaning blockReduce calls together, we
+  // To avoid RaW races from chaining blockReduce calls together, we
   // need a sync here
   __syncthreads();
 
@@ -71,11 +71,12 @@ blockReduce(float* smem, float val,
   float warpVal = defaultVal;
 
   // First warp will perform per-warp reductions for the remaining warps
-  if ((threadIdx.x / 32) == 0)
+  if ((threadIdx.x / 32) == 0) // only threads in warp1 go into this (if)
   {
-    int lane = threadIdx.x % 32;
+    int lane = threadIdx.x % 32; // from 0 to 31
 
-    if (lane < blockDim.x / 32)
+    // if less than 1024 threads per block, then only activate the relevant lanes
+    if (lane < blockDim.x / 32) 
     {
 #pragma unroll
       for (int i = 0; i < 32; ++i)
@@ -160,11 +161,15 @@ __global__ void
 cunn_LogSoftMax_updateOutput_kernel(float *output, float *input, int classes)
 {
   extern __shared__ float buffer[];
+  // forward pointers to batch[blockIdx.x]
+  // each block handles a sample in the mini-batch
   input += blockIdx.x * classes;
   output += blockIdx.x * classes;
 
+  // find the max of the batch
   float threadMax =
     ilpReduce<MaxFloat, ILP>(input, classes, MaxFloat(), -FLT_MAX);
+  // find the max over all batches
   float max_k =
     blockReduce<MaxFloat>(buffer, threadMax, MaxFloat(), -FLT_MAX);
 
