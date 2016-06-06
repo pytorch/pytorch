@@ -1,3 +1,10 @@
+nccl (1.2.2-1+cuda7.5) trusty; urgency=medium
+
+  * Gencodes changed to NV recommended
+  * Minor Makefile changes
+
+ -- Boris Fomitchev <bfomitchev@nvidia.com>  Mon, 06 Jun 2016 1:07:01 -0800
+
 nccl (1.2.1-1+cuda7.5) trusty; urgency=medium
 
   * Merged public bugfixes
