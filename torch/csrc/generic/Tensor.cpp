@@ -216,21 +216,23 @@ int THPTensor_(set)(THPTensor *self, PyObject *index, PyObject *value)
           THTensor_(fill)(tresult, v);
         } else {
           if (THPByteTensor_IsSubclass(value))
-            THTensor_(copyByte)(self->cdata, ((THPByteTensor*)value)->cdata);
+            THTensor_(copyByte)(tresult, ((THPByteTensor*)value)->cdata);
           else if (THPCharTensor_IsSubclass(value))
-            THTensor_(copyChar)(self->cdata, ((THPCharTensor*)value)->cdata);
+            THTensor_(copyChar)(tresult, ((THPCharTensor*)value)->cdata);
           else if (THPShortTensor_IsSubclass(value))
-            THTensor_(copyShort)(self->cdata, ((THPShortTensor*)value)->cdata);
+            THTensor_(copyShort)(tresult, ((THPShortTensor*)value)->cdata);
           else if (THPIntTensor_IsSubclass(value))
-            THTensor_(copyInt)(self->cdata, ((THPIntTensor*)value)->cdata);
+            THTensor_(copyInt)(tresult, ((THPIntTensor*)value)->cdata);
           else if (THPLongTensor_IsSubclass(value))
-            THTensor_(copyLong)(self->cdata, ((THPLongTensor*)value)->cdata);
+            THTensor_(copyLong)(tresult, ((THPLongTensor*)value)->cdata);
           else if (THPFloatTensor_IsSubclass(value))
-            THTensor_(copyFloat)(self->cdata, ((THPFloatTensor*)value)->cdata);
+            THTensor_(copyFloat)(tresult, ((THPFloatTensor*)value)->cdata);
           else if (THPDoubleTensor_IsSubclass(value))
-            THTensor_(copyDouble)(self->cdata, ((THPDoubleTensor*)value)->cdata);
-          else
+            THTensor_(copyDouble)(tresult, ((THPDoubleTensor*)value)->cdata);
+          else {
             PyErr_SetString(PyExc_RuntimeError, "Expected a number or tensor");
+            return -1;
+          }
         }
       } catch(...) {
         THTensor_(free)(tresult);
