@@ -51,7 +51,7 @@ def _printVector(tensor):
     strt = ''
     if scale != 1:
         strt += SCALE_FORMAT.format(scale)
-    return '\n'.join(fmt.format(val/scale) for val in tensor.storage()) + '\n'
+    return '\n'.join(fmt.format(val/scale) for val in tensor) + '\n'
 
 def printTensor(self):
     if self.nDimension() == 0:
