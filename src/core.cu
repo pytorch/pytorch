@@ -36,7 +36,6 @@
 #include <sched.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <cuda.h>
 #include <cuda_runtime.h>
 #include <string.h>
 #include <errno.h>
@@ -110,7 +109,7 @@ typedef struct {
   pid_t pid;
   ncclMem* hostptr;
   ncclMem* devptr;
-  CUipcMemHandle devipc;
+  cudaIpcMemHandle_t devipc;
   size_t buffSize;
 } RankEntry;
 
@@ -299,7 +298,7 @@ static ncclResult_t populateRankInfo(RankEntry* info, int rank, ncclComm_t comm)
   info->buffSize = comm->buffSize;
   info->hostptr = comm->hostMem;
   info->devptr = comm->devMem;
-  if (wrapCuIpcGetMemHandle(&info->devipc, (CUdeviceptr)comm->devMem) != ncclSuccess) {
+  if (cudaIpcGetMemHandle(&info->devipc, (void*)comm->devMem) != cudaSuccess) {
     WARN("rank %d failed to open CUDA IPC handle", rank);
     return ncclUnhandledCudaError;
   }
@@ -321,11 +320,11 @@ static ncclResult_t commClearMaps(ncclComm_t comm) {
       case CLEANUP_NONE:
         break;
       case CLEANUP_CUIPC:
-        res = wrapCuIpcCloseMemHandle((CUdeviceptr)comm->ptrs[d].cleanupHandle);
-        if (res != ncclSuccess) {
+        cures = cudaIpcCloseMemHandle((void*)comm->ptrs[d].cleanupHandle);
+        if (cures != cudaSuccess) {
           WARN("rank %d failed to close IPC handle to rank %d",
             comm->userFromRing[comm->ncclId], comm->userFromRing[d]);
-          retval = (retval == ncclSuccess) ? res : retval;
+          retval = (retval == ncclSuccess) ? ncclUnhandledCudaError : retval;
         }
         break;
       case CLEANUP_UNMAP:
@@ -333,13 +332,13 @@ static ncclResult_t commClearMaps(ncclComm_t comm) {
         if (cures != cudaSuccess) {
           WARN("rank %d failed to unregister handle to rank %d",
             comm->userFromRing[comm->ncclId], comm->userFromRing[d]);
-            retval = (retval == ncclSuccess) ? ncclUnhandledCudaError : retval;
+          retval = (retval == ncclSuccess) ? ncclUnhandledCudaError : retval;
         }
         res = shmUnmap(comm->ptrs[d].cleanupHandle, offsetof(ncclMem, buff) + comm->buffSize);
         if (res != ncclSuccess) {
           WARN("rank %d failed to unmap handle to rank %d",
             comm->userFromRing[comm->ncclId], comm->userFromRing[d]);
-            retval = (retval == ncclSuccess) ? res : retval;
+          retval = (retval == ncclSuccess) ? res : retval;
         }
         break;
       default:
@@ -462,8 +461,8 @@ static ncclResult_t commBuildMaps(ncclComm_t comm, ncclUniqueId* commId, int ran
       if (canpeer || myDev == iDev) {
         INFO("rank access %d -> %d via Ipc P2P device mem", rank, iRank);
         comm->ptrs[i].local = ranks[myId].devptr;
-        if (wrapCuIpcOpenMemHandle((CUdeviceptr*)(&comm->ptrs[i].remote),
-            ranks[i].devipc, CU_IPC_MEM_LAZY_ENABLE_PEER_ACCESS) != ncclSuccess) {
+        if (cudaIpcOpenMemHandle((void**)(&comm->ptrs[i].remote),
+            ranks[i].devipc, cudaIpcMemLazyEnablePeerAccess) != cudaSuccess) {
           WARN("rank %d failed to open Ipc handle to rank %d", rank, iRank);
           commClearMaps(comm);
           return ncclUnhandledCudaError;
