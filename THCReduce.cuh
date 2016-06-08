@@ -20,17 +20,21 @@ __device__ __forceinline__ IndexType getReduceNoncontigDimSliceIndex() {
 }
 
 // Kernel that handles an entire reduction of a slice of a tensor per each thread
-template <typename ModifyOp, typename ReduceOp, typename IndexType, int ADims, int BDims>
+template <typename ModifyOp,
+          typename ReduceOp,
+          typename T,
+          typename IndexType,
+          int ADims, int BDims>
 #if __CUDA_ARCH__ >= 350
 __launch_bounds__(32 * 16, 4)
 #endif
 __global__ void
-THCudaTensor_reduceNoncontigDim(TensorInfo<IndexType> out,
-                                TensorInfo<IndexType> in,
+THCudaTensor_reduceNoncontigDim(TensorInfo<T, IndexType> out,
+                                TensorInfo<T, IndexType> in,
                                 IndexType reductionStride,
                                 IndexType reductionSize,
                                 IndexType totalSlices,
-                                float init,
+                                T init,
                                 ModifyOp modifyOp,
                                 ReduceOp reduceOp) {
   const IndexType sliceIndex = getReduceNoncontigDimSliceIndex<IndexType>();
@@ -42,13 +46,13 @@ THCudaTensor_reduceNoncontigDim(TensorInfo<IndexType> out,
   // Each thread picks a point in `out` and `in` for which it is
   // producing the reduction
   const IndexType outOffset =
-    IndexToOffset<IndexType, ADims>::get(sliceIndex, out);
+    IndexToOffset<T, IndexType, ADims>::get(sliceIndex, out);
   const IndexType inBaseOffset =
-    IndexToOffset<IndexType, BDims>::get(sliceIndex, in);
+    IndexToOffset<T, IndexType, BDims>::get(sliceIndex, in);
 
   // For each point in reductionSize, reduce into `r`
   IndexType inOffset = inBaseOffset;
-  float r = init;
+  T r = init;
 
   for (IndexType i = 0; i < reductionSize; ++i) {
     r = reduceOp(r, modifyOp(in.data[inOffset]));
@@ -67,13 +71,17 @@ __device__ __forceinline__ IndexType getReduceContigDimSliceIndex() {
 
 // Kernel that handles an entire reduction of a slice of a tensor per
 // each block
-template <typename ModifyOp, typename ReduceOp, typename IndexType, int ADims, int BDims>
+template <typename ModifyOp,
+          typename ReduceOp,
+          typename T,
+          typename IndexType,
+          int ADims, int BDims>
 __global__ void
-THCudaTensor_reduceContigDim(TensorInfo<IndexType> out,
-                             TensorInfo<IndexType> in,
+THCudaTensor_reduceContigDim(TensorInfo<T, IndexType> out,
+                             TensorInfo<T, IndexType> in,
                              IndexType reductionSize,
                              IndexType totalSlices,
-                             float init,
+                             T init,
                              ModifyOp modifyOp,
                              ReduceOp reduceOp) {
   const IndexType sliceIndex = getReduceContigDimSliceIndex<IndexType>();
@@ -84,23 +92,23 @@ THCudaTensor_reduceContigDim(TensorInfo<IndexType> out,
 
   // Get the offset in `out` for the reduction
   const IndexType outOffset =
-    IndexToOffset<IndexType, ADims>::get(sliceIndex, out);
+    IndexToOffset<T, IndexType, ADims>::get(sliceIndex, out);
 
   // Get the base offset in `in` for this block's reduction
   const IndexType inBaseOffset =
-    IndexToOffset<IndexType, BDims>::get(sliceIndex, in);
+    IndexToOffset<T, IndexType, BDims>::get(sliceIndex, in);
 
   // Each thread in the block will reduce some subset of elements in
   // the slice. The elements are guaranteed contiguous starting at
   // `inBaseOffset`.
-  float r = init;
+  T r = init;
   for (IndexType i = threadIdx.x; i < reductionSize; i += blockDim.x) {
     r = reduceOp(r, modifyOp(in.data[inBaseOffset + i]));
   }
 
   // Reduce within the block
-  extern __shared__ float smem[];
-  r = reduceBlock<float, ReduceOp>(smem, blockDim.x, r, reduceOp, init);
+  extern __shared__ T smem[];
+  r = reduceBlock<T, ReduceOp>(smem, blockDim.x, r, reduceOp, init);
 
   if (threadIdx.x == 0) {
     // Write out reduced value
@@ -208,86 +216,92 @@ bool THCudaTensor_reduceDim(THCState* state,
   // (or vice versa), the contiguous tensor can be collapsed to one
   // dimension, and the loop to translate the linear index to the array
   // index can be similarly collapsed. That is what this unrolling is for.
-#define HANDLE_CASE(TYPE, OUT, IN)                                      \
+#define HANDLE_CASE(T, TYPE, OUT, IN)                                   \
   if (contigReduction) {                                                \
-    THCudaTensor_reduceContigDim<ModifyOp, ReduceOp, TYPE, OUT, IN>     \
+    THCudaTensor_reduceContigDim<ModifyOp, ReduceOp, T, TYPE, OUT, IN>  \
       <<<grid, block, smemSize, THCState_getCurrentStream(state)>>>(    \
         outInfo, inInfo, reductionSize,                                 \
         (TYPE) outElements, init, modifyOp, reduceOp);                  \
   } else {                                                              \
-    THCudaTensor_reduceNoncontigDim<ModifyOp, ReduceOp, TYPE, OUT, IN>  \
+    THCudaTensor_reduceNoncontigDim<ModifyOp, ReduceOp, T, TYPE, OUT, IN> \
       <<<grid, block, 0, THCState_getCurrentStream(state)>>>(           \
         outInfo, inInfo, reductionStride, reductionSize,                \
         (TYPE) outElements, init, modifyOp, reduceOp);                  \
   }                                                                     \
 
-#define HANDLE_IN_CASE(TYPE, OUT, IN)                   \
-  {                                                     \
-    if (inInfo.isContiguous()) {                        \
-      HANDLE_CASE(TYPE, OUT, -2);                       \
-    } else {                                            \
-      switch (IN) {                                     \
-        case 1:                                         \
-          HANDLE_CASE(TYPE, OUT, 1);                    \
-          break;                                        \
-        case 2:                                         \
-          HANDLE_CASE(TYPE, OUT, 2);                    \
-          break;                                        \
-        case 3:                                         \
-          HANDLE_CASE(TYPE, OUT, 3);                    \
-          break;                                        \
-        default:                                        \
-          HANDLE_CASE(TYPE, OUT, -1);                   \
-          break;                                        \
-      }                                                 \
-    }                                                   \
+#define HANDLE_IN_CASE(T, TYPE, OUT, IN)                  \
+  {                                                       \
+    if (inInfo.isContiguous()) {                          \
+      HANDLE_CASE(T, TYPE, OUT, -2);                      \
+    } else {                                              \
+      switch (IN) {                                       \
+        case 1:                                           \
+          HANDLE_CASE(T, TYPE, OUT, 1);                   \
+          break;                                          \
+        case 2:                                           \
+          HANDLE_CASE(T, TYPE, OUT, 2);                   \
+          break;                                          \
+        default:                                          \
+          HANDLE_CASE(T, TYPE, OUT, -1);                  \
+          break;                                          \
+      }                                                   \
+    }                                                     \
   }
 
-#define HANDLE_OUT_CASE(TYPE, OUT, IN)                \
-  {                                                   \
-    if (outInfo.isContiguous()) {                     \
-      HANDLE_IN_CASE(TYPE, -2, IN);                   \
-    } else {                                          \
-      switch (OUT) {                                  \
-        case 1:                                       \
-          HANDLE_IN_CASE(TYPE, 1, IN);                \
-          break;                                      \
-        case 2:                                       \
-          HANDLE_IN_CASE(TYPE, 2, IN);                \
-          break;                                      \
-        case 3:                                       \
-          HANDLE_IN_CASE(TYPE, 3, IN);                \
-          break;                                      \
-        default:                                      \
-          HANDLE_IN_CASE(TYPE, -1, IN);               \
-          break;                                      \
-      }                                               \
-    }                                                 \
+#define HANDLE_OUT_CASE(T, TYPE, OUT, IN)              \
+  {                                                    \
+    if (outInfo.isContiguous()) {                      \
+      HANDLE_IN_CASE(T, TYPE, -2, IN);                 \
+    } else {                                           \
+      switch (OUT) {                                   \
+        case 1:                                        \
+          HANDLE_IN_CASE(T, TYPE, 1, IN);              \
+          break;                                       \
+        case 2:                                        \
+          HANDLE_IN_CASE(T, TYPE, 2, IN);              \
+          break;                                       \
+        case 3:                                        \
+          HANDLE_IN_CASE(T, TYPE, 3, IN);              \
+          break;                                       \
+        default:                                       \
+          HANDLE_IN_CASE(T, TYPE, -1, IN);             \
+          break;                                       \
+      }                                                \
+    }                                                  \
   }
 
-  if (THC_canUse32BitIndexMath(state, out) &&
-      THC_canUse32BitIndexMath(state, in)) {
-    TensorInfo<unsigned int> outInfo(state, out);
+  if (TensorUtils<THCudaTensor>::canUse32BitIndexMath(state, out) &&
+      TensorUtils<THCudaTensor>::canUse32BitIndexMath(state, in)) {
+    TensorInfo<float, unsigned int> outInfo =
+      getTensorInfo<THCudaTensor, unsigned int>(state, out);
     outInfo.collapseDims();
 
-    TensorInfo<unsigned int> inInfo(state, in, dim);
+    TensorInfo<float, unsigned int> inInfo =
+      getTensorInfo<THCudaTensor, unsigned int>(state, in);
+    inInfo.reduceDim(dim);
     inInfo.collapseDims();
 
-    HANDLE_OUT_CASE(unsigned int, outInfo.dims, inInfo.dims);
+    HANDLE_OUT_CASE(typename TensorUtils<THCudaTensor>::DataType,
+                    unsigned int, outInfo.dims, inInfo.dims);
   } else {
-    TensorInfo<unsigned long> outInfo(state, out);
+    TensorInfo<float, unsigned long> outInfo =
+      getTensorInfo<THCudaTensor, unsigned long>(state, out);
     outInfo.collapseDims();
 
-    TensorInfo<unsigned long> inInfo(state, in, dim);
+    TensorInfo<float, unsigned long> inInfo =
+      getTensorInfo<THCudaTensor, unsigned long>(state, in);
+    inInfo.reduceDim(dim);
     inInfo.collapseDims();
 
     // For large tensors, we only compile the completely contiguous
     // version and the completely generic version, to reduce
     // compilation time.
     if (outInfo.isContiguous() && inInfo.isContiguous()) {
-      HANDLE_CASE(unsigned long, -2, -2);
+      HANDLE_CASE(typename TensorUtils<THCudaTensor>::DataType,
+                  unsigned long, -2, -2);
     } else {
-      HANDLE_CASE(unsigned long, -1, -1);
+      HANDLE_CASE(typename TensorUtils<THCudaTensor>::DataType,
+                  unsigned long, -1, -1);
     }
   }
 #undef HANDLE_CASE

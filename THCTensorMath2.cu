@@ -31,13 +31,13 @@ void THCudaTensor_pow(THCState *state, THCudaTensor *self_, THCudaTensor *src, f
 {
   THAssert(THCudaTensor_checkGPU(state, 2, self_, src));
   if (self_ == src) {
-    if (!THCudaTensor_pointwiseApply1(state, self_, TensorPowOp(value))) {
+    if (!THC_pointwiseApply1(state, self_, TensorPowOp(value))) {
       THArgCheck(false, 2, CUTORCH_DIM_WARNING);
     }
   } else {
     THCudaTensor_resizeAs(state, self_, src);
 
-    if (!THCudaTensor_pointwiseApply2(state, self_, src, TensorPowOp(value))) {
+    if (!THC_pointwiseApply2(state, self_, src, TensorPowOp(value))) {
       THArgCheck(false, 2, CUTORCH_DIM_WARNING);
     }
   }
@@ -63,13 +63,13 @@ void THCudaTensor_tpow(THCState *state, THCudaTensor *self_, float value, THCuda
 {
   THAssert(THCudaTensor_checkGPU(state, 2, self_, src));
   if (self_ == src) {
-    if (!THCudaTensor_pointwiseApply1(state, self_, TensorTPowOp(value))) {
+    if (!THC_pointwiseApply1(state, self_, TensorTPowOp(value))) {
       THArgCheck(false, 2, CUTORCH_DIM_WARNING);
     }
   } else {
     THCudaTensor_resizeAs(state, self_, src);
 
-    if (!THCudaTensor_pointwiseApply2(state, self_, src, TensorTPowOp(value))) {
+    if (!THC_pointwiseApply2(state, self_, src, TensorTPowOp(value))) {
       THArgCheck(false, 2, CUTORCH_DIM_WARNING);
     }
   }
@@ -90,7 +90,7 @@ void THCudaTensor_atan2(THCState *state, THCudaTensor *self_, THCudaTensor *tx, 
              THCudaTensor_nElement(state, ty), 3, "sizes do not match");
   THCudaTensor_resizeAs(state, self_, tx);
 
-  if (!THCudaTensor_pointwiseApply3(state, self_, tx, ty, TensorATan2Op())) {
+  if (!THC_pointwiseApply3(state, self_, tx, ty, TensorATan2Op())) {
     THArgCheck(false, 2, CUTORCH_DIM_WARNING);
   }
 
@@ -116,13 +116,13 @@ void THCudaTensor_clamp(THCState *state, THCudaTensor *self_, THCudaTensor *src,
 {
   THAssert(THCudaTensor_checkGPU(state, 2, self_, src));
   if (self_ == src) {
-    if (!THCudaTensor_pointwiseApply1(state, self_, TensorClampOp(min_value, max_value))) {
+    if (!THC_pointwiseApply1(state, self_, TensorClampOp(min_value, max_value))) {
       THArgCheck(false, 2, CUTORCH_DIM_WARNING);
     }
   } else {
     THCudaTensor_resizeAs(state, self_, src);
 
-    if (!THCudaTensor_pointwiseApply2(state, self_, src, TensorClampOp(min_value, max_value))) {
+    if (!THC_pointwiseApply2(state, self_, src, TensorClampOp(min_value, max_value))) {
       THArgCheck(false, 2, CUTORCH_DIM_WARNING);
     }
   }
@@ -146,13 +146,13 @@ void THCudaTensor_sign(THCState *state, THCudaTensor *self_, THCudaTensor *src)
 {
   THAssert(THCudaTensor_checkGPU(state, 2, self_, src));
   if (self_ == src) {
-    if (!THCudaTensor_pointwiseApply1(state, self_, TensorSignOp())) {
+    if (!THC_pointwiseApply1(state, self_, TensorSignOp())) {
       THArgCheck(false, 2, CUTORCH_DIM_WARNING);
     }
   } else {
     THCudaTensor_resizeAs(state, self_, src);
 
-    if (!THCudaTensor_pointwiseApply2(state, self_, src, TensorSignOp())) {
+    if (!THC_pointwiseApply2(state, self_, src, TensorSignOp())) {
       THArgCheck(false, 2, CUTORCH_DIM_WARNING);
     }
   }
@@ -192,7 +192,7 @@ void THCudaTensor_lerp(THCState *state, THCudaTensor *result, THCudaTensor *a, T
              THCudaTensor_nElement(state, b), 3, "sizes do not match");
   THCudaTensor_resizeAs(state, result, a);
 
-  if (!THCudaTensor_pointwiseApply3(state, result, a, b, TensorLerpOp(w))) {
+  if (!THC_pointwiseApply3(state, result, a, b, TensorLerpOp(w))) {
     THArgCheck(false, 2, CUTORCH_DIM_WARNING);
   }
 
@@ -699,7 +699,7 @@ THC_API void THCudaTensor_cross(THCState *state, THCudaTensor *self, THCudaTenso
   THCudaTensor *nx = THCudaTensor_newNarrow(state, x, dimension, 0, 1);
   THCudaTensor *ny = THCudaTensor_newNarrow(state, y, dimension, 0, 1);
   THCudaTensor *nself = THCudaTensor_newNarrow(state, self, dimension, 0, 1);
-  if (!THCudaTensor_pointwiseApply3(state, nself, nx, ny, TensorCrossOp(sx, sy, so))) {
+  if (!THC_pointwiseApply3(state, nself, nx, ny, TensorCrossOp(sx, sy, so))) {
     THArgCheck(false, 2, CUTORCH_DIM_WARNING);
   }
   THCudaTensor_free(state, nx);

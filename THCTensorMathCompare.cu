@@ -11,7 +11,7 @@ void THCudaTensor_logicalValue(THCState *state, THCudaTensor *self_, THCudaTenso
 {
   THCudaTensor_resizeAs(state, self_, src);
 
-  if (!THCudaTensor_pointwiseApply2(state, self_, src, op)) {
+  if (!THC_pointwiseApply2(state, self_, src, op)) {
     THArgCheck(false, 2, CUTORCH_DIM_WARNING);
   }
 

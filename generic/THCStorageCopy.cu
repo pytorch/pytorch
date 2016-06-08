@@ -62,7 +62,7 @@ THC_CUDA_STORAGE_IMPLEMENT_COPY(Long,Long)
 THC_CUDA_STORAGE_IMPLEMENT_COPY(Float,)  // i.e. float
 THC_CUDA_STORAGE_IMPLEMENT_COPY(Double,Double)
 
-#if CUDA_VERSION >= 7050
+#ifdef CUDA_HALF_TENSOR
 #define FLOAT_COPY(TYPE) TH_CONCAT_3(TH, CReal, Storage_copyCudaFloat)
 void THCStorage_(copyCudaHalf)(THCState *state, THCStorage *self, struct THCudaHalfStorage *src)
 {
@@ -77,7 +77,7 @@ void THCStorage_(copyCudaHalf)(THCState *state, THCStorage *self, struct THCudaH
     }
 }
 #undef FLOAT_COPY
-#endif // CUDA_VERSION >= 7050
+#endif // CUDA_HALF_TENSOR
 
 #undef THC_CUDA_STORAGE_IMPLEMENT_COPY
 

@@ -126,7 +126,6 @@ IMPLEMENT_TH_CUDA_TENSOR_COPY_TO(Long)
 IMPLEMENT_TH_CUDA_TENSOR_COPY_TO(Float)
 IMPLEMENT_TH_CUDA_TENSOR_COPY_TO(Double)
 
-// FIXME: add within-CUDA conversions
 void THCTensor_(copyCuda)(THCState *state, THCTensor *self, THCTensor *src)
 {
   THCTensor_(copy)(state, self, src);

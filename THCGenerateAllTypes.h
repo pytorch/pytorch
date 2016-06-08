@@ -2,6 +2,8 @@
 #error "You must define THC_GENERIC_FILE before including THGenerateAllTypes.h"
 #endif
 
+#include "THCHalf.h"
+
 #define THCTypeIdxByte   1
 #define THCTypeIdxChar   2
 #define THCTypeIdxShort  3
@@ -11,10 +13,6 @@
 #define THCTypeIdxDouble 7
 #define THCTypeIdxHalf   8
 #define THCTypeIdx_(T) TH_CONCAT_2(THCTypeIdx,T)
-
-#define hostreal real
-#define hostrealToReal(x) (x)
-#define realToHostreal(x) (x)
 
 #define real unsigned char
 #define accreal long
@@ -108,14 +106,7 @@
 #undef CReal
 #undef THC_REAL_IS_DOUBLE
 
-#if CUDA_VERSION >= 7050
-
-#undef hostreal
-#undef hostrealToReal
-#undef realToHostreal
-#define hostreal float
-#define hostrealToReal(x) THC_float2half(x);
-#define realToHostreal(x) THC_half2float(x);
+#ifdef CUDA_HALF_TENSOR
 
 #define real half
 #define accreal half
@@ -130,11 +121,7 @@
 #undef CReal
 #undef THC_REAL_IS_HALF
 
-#endif // CUDA_VERSION >= 7050
-
-#undef hostreal
-#undef hostrealToReal
-#undef realToHostreal
+#endif // CUDA_HALF_TENSOR
 
 #undef THCTypeIdxByte
 #undef THCTypeIdxChar

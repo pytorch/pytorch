@@ -124,16 +124,21 @@ SET(src-cuda
   THCTensorConv.cu
   THCTensorRandom.cu
   THCTensorScatterGather.cu
-  THCApply.cu
   THCTensorSort.cu
   THCTensorTopK.cu
+  THCTensorTypeUtils.cu
   )
 
+MESSAGE(STATUS "got cuda version " ${CUDA_VERSION})
+
 IF(CUDA_HAS_FP16 OR NOT ${CUDA_VERSION} LESS 7.5)
+  MESSAGE(STATUS "Found CUDA with FP16 support, compiling with torch.CudaHalfTensor")
   LIST(APPEND src-cuda THCHalf.cu)
   LIST(APPEND CUDA_NVCC_FLAGS "-DCUDA_HAS_FP16=1")
   SET(CMAKE_C_FLAGS "-DCUDA_HAS_FP16=1 ${CMAKE_C_FLAGS}")
-ENDIF()
+ELSE(CUDA_HAS_FP16 OR NOT ${CUDA_VERSION} LESS 7.5)
+  MESSAGE(STATUS "Could not find CUDA with FP16 support, compiling without torch.CudaHalfTensor")
+ENDIF(CUDA_HAS_FP16 OR NOT ${CUDA_VERSION} LESS 7.5)
 
 CUDA_ADD_LIBRARY(THC SHARED ${src} ${src-cuda})
 CUDA_ADD_CUBLAS_TO_TARGET(THC)
@@ -176,6 +181,8 @@ INSTALL(FILES
           THCDeviceTensorUtils-inl.cuh
           THCGenerateAllTypes.h
           THCHalf.h
+          THCTensorInfo.cuh
+          THCTensorTypeUtils.cuh
           DESTINATION "${THC_INSTALL_INCLUDE_SUBDIR}/THC")
 
 INSTALL(FILES
@@ -191,4 +198,10 @@ INSTALL(FILES
           generic/THCTensorCopy.c
           generic/THCTensorCopy.cu
           generic/THCTensorCopy.h
+          generic/THCTensorMath.h
+          generic/THCTensorMath.cu
+          generic/THCTensorMathPairwise.h
+          generic/THCTensorMathPairwise.cu
+          generic/THCTensorMathPointwise.h
+          generic/THCTensorMathPointwise.cu
           DESTINATION "${THC_INSTALL_INCLUDE_SUBDIR}/THC/generic")

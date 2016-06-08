@@ -4,27 +4,18 @@
 #include "THCTensor.h"
 #include "THCGeneral.h"
 
-THC_API void THCudaTensor_fill(THCState *state, THCudaTensor *self, float value);
-THC_API void THCudaTensor_zero(THCState *state, THCudaTensor *self);
+#include "generic/THCTensorMath.h"
+#include "THCGenerateAllTypes.h"
 
-THC_API void THCudaTensor_zeros(THCState *state, THCudaTensor *r_, THLongStorage *size);
-THC_API void THCudaTensor_ones(THCState *state, THCudaTensor *r_, THLongStorage *size);
-THC_API void THCudaTensor_reshape(THCState *state, THCudaTensor *r_, THCudaTensor *t, THLongStorage *size);
-THC_API long THCudaTensor_numel(THCState *state, THCudaTensor *t);
+#include "generic/THCTensorMathPairwise.h"
+#include "THCGenerateAllTypes.h"
 
-THC_API void THCudaTensor_add(THCState *state, THCudaTensor *self, THCudaTensor *src, float value);
-THC_API void THCudaTensor_sub(THCState *state, THCudaTensor *self, THCudaTensor *src, float value);
-THC_API void THCudaTensor_mul(THCState *state, THCudaTensor *self, THCudaTensor *src, float value);
-THC_API void THCudaTensor_div(THCState *state, THCudaTensor *self, THCudaTensor *src, float value);
+#include "generic/THCTensorMathPointwise.h"
+#include "THCGenerateAllTypes.h"
+
 
 THC_API void THCudaTensor_tril(THCState *state, THCudaTensor *self, THCudaTensor *src, long k);
 THC_API void THCudaTensor_triu(THCState *state, THCudaTensor *self, THCudaTensor *src, long k);
-
-THC_API void THCudaTensor_cadd(THCState *state, THCudaTensor *self, THCudaTensor *src1, float value, THCudaTensor *src2);
-THC_API void THCudaTensor_csub(THCState *state, THCudaTensor *self, THCudaTensor *src1, float value, THCudaTensor *src2);
-THC_API void THCudaTensor_cmul(THCState *state, THCudaTensor *self, THCudaTensor *src1, THCudaTensor *src2);
-THC_API void THCudaTensor_cpow(THCState *state, THCudaTensor *self, THCudaTensor *src1, THCudaTensor *src2);
-THC_API void THCudaTensor_cdiv(THCState *state, THCudaTensor *self, THCudaTensor *src1, THCudaTensor *src2);
 
 THC_API void THCudaTensor_addcmul(THCState *state, THCudaTensor *self, THCudaTensor* t, float value, THCudaTensor *src1, THCudaTensor *src2);
 THC_API void THCudaTensor_addcdiv(THCState *state, THCudaTensor *self, THCudaTensor* t, float value, THCudaTensor *src1, THCudaTensor *src2);
