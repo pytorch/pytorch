@@ -23,15 +23,15 @@ THC_API long THCStorage_(size)(THCState *state, const THCStorage*);
 THC_API int THCStorage_(elementSize)(THCState *state);
 
 /* slow access -- checks everything */
-THC_API void THCStorage_(set)(THCState *state, THCStorage*, long, hostreal);
-THC_API hostreal THCStorage_(get)(THCState *state, const THCStorage*, long);
+THC_API void THCStorage_(set)(THCState *state, THCStorage*, long, real);
+THC_API real THCStorage_(get)(THCState *state, const THCStorage*, long);
 
 THC_API THCStorage* THCStorage_(new)(THCState *state);
 THC_API THCStorage* THCStorage_(newWithSize)(THCState *state, long size);
-THC_API THCStorage* THCStorage_(newWithSize1)(THCState *state, hostreal);
-THC_API THCStorage* THCStorage_(newWithSize2)(THCState *state, hostreal, hostreal);
-THC_API THCStorage* THCStorage_(newWithSize3)(THCState *state, hostreal, hostreal, hostreal);
-THC_API THCStorage* THCStorage_(newWithSize4)(THCState *state, hostreal, hostreal, hostreal, hostreal);
+THC_API THCStorage* THCStorage_(newWithSize1)(THCState *state, real);
+THC_API THCStorage* THCStorage_(newWithSize2)(THCState *state, real, real);
+THC_API THCStorage* THCStorage_(newWithSize3)(THCState *state, real, real, real);
+THC_API THCStorage* THCStorage_(newWithSize4)(THCState *state, real, real, real, real);
 THC_API THCStorage* THCStorage_(newWithMapping)(THCState *state, const char *filename, long size, int shared);
 
 /* takes ownership of data */
@@ -49,6 +49,6 @@ THC_API void THCStorage_(retain)(THCState *state, THCStorage *storage);
 
 THC_API void THCStorage_(free)(THCState *state, THCStorage *storage);
 THC_API void THCStorage_(resize)(THCState *state, THCStorage *storage, long size);
-THC_API void THCStorage_(fill)(THCState *state, THCStorage *storage, hostreal value);
+THC_API void THCStorage_(fill)(THCState *state, THCStorage *storage, real value);
 
 #endif

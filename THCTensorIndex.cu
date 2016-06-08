@@ -15,13 +15,13 @@
 // indexCopyLargeIndex kernel is a better choice to increase
 // parallelism.
 template <typename IndexType, int DstDim, int SrcDim, int IdxDim>
-__global__ void indexCopySmallIndex(TensorInfo<IndexType> dst,
-                                      TensorInfo<IndexType> src,
-                                      TensorInfo<IndexType> indices,
-                                      int dstCopyDim,
-                                      int srcCopyDim,
-                                      IndexType innerSize,
-                                      long dstCopyDimSize) {
+__global__ void indexCopySmallIndex(TensorInfo<float, IndexType> dst,
+                                    TensorInfo<float, IndexType> src,
+                                    TensorInfo<float, IndexType> indices,
+                                    int dstCopyDim,
+                                    int srcCopyDim,
+                                    IndexType innerSize,
+                                    long dstCopyDimSize) {
   // In order to avoid reloading the index that we are copying, load
   // it once to handle all of the points that are being selected, so
   // it can be reused as much as possible. This kernel is chosen when
@@ -30,7 +30,7 @@ __global__ void indexCopySmallIndex(TensorInfo<IndexType> dst,
   for (IndexType srcIndex = 0; srcIndex < indices.sizes[0]; ++srcIndex) {
     // Lua indices begin at 1
     IndexType dstIndex =
-      indices.data[IndexToOffset<IndexType, IdxDim>::get(srcIndex, indices)] - 1;
+      indices.data[IndexToOffset<float, IndexType, IdxDim>::get(srcIndex, indices)] - 1;
 
     if (dstIndex < dstCopyDimSize) {
       // We stride over the output ignoring the indexed dimension
@@ -39,12 +39,12 @@ __global__ void indexCopySmallIndex(TensorInfo<IndexType> dst,
            linearIndex < innerSize;
            linearIndex += gridDim.x * blockDim.x) {
         IndexType dstOffset =
-          IndexToOffset<IndexType, DstDim>::get(linearIndex, dst);
+          IndexToOffset<float, IndexType, DstDim>::get(linearIndex, dst);
 
         dstOffset += dstIndex * dst.strides[dstCopyDim];
 
         IndexType srcOffset =
-          IndexToOffset<IndexType, SrcDim>::get(linearIndex, src);
+          IndexToOffset<float, IndexType, SrcDim>::get(linearIndex, src);
         srcOffset += srcIndex * src.strides[srcCopyDim];
 
         dst.data[dstOffset] = src.data[srcOffset];
@@ -60,13 +60,13 @@ __global__ void indexCopySmallIndex(TensorInfo<IndexType> dst,
 // indexCopySmallIndex kernel is a better choice to reduce memory
 // accesses.
 template <typename IndexType, int DstDim, int SrcDim, int IdxDim>
-__global__ void indexCopyLargeIndex(TensorInfo<IndexType> dst,
-                                      TensorInfo<IndexType> src,
-                                      TensorInfo<IndexType> indices,
-                                      int dstCopyDim,
-                                      int srcCopyDim,
-                                      IndexType innerSize,
-                                      long dstCopyDimSize) {
+__global__ void indexCopyLargeIndex(TensorInfo<float, IndexType> dst,
+                                    TensorInfo<float, IndexType> src,
+                                    TensorInfo<float, IndexType> indices,
+                                    int dstCopyDim,
+                                    int srcCopyDim,
+                                    IndexType innerSize,
+                                    long dstCopyDimSize) {
   // We stride over the output including the indexed dimension
   // (totalSize), and calculate the destination index point based on that
   for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
@@ -77,15 +77,15 @@ __global__ void indexCopyLargeIndex(TensorInfo<IndexType> dst,
 
     // Lua indices begin at 1
     IndexType dstIndex =
-      indices.data[IndexToOffset<IndexType, IdxDim>::get(srcIndex, indices)] - 1;
+      indices.data[IndexToOffset<float, IndexType, IdxDim>::get(srcIndex, indices)] - 1;
 
     if (dstIndex < dstCopyDimSize) {
       IndexType dstOffset =
-        IndexToOffset<IndexType, DstDim>::get(elementInSlice, dst);
+        IndexToOffset<float, IndexType, DstDim>::get(elementInSlice, dst);
       dstOffset += dstIndex * dst.strides[dstCopyDim];
 
       IndexType srcOffset =
-        IndexToOffset<IndexType, SrcDim>::get(elementInSlice, src);
+        IndexToOffset<float, IndexType, SrcDim>::get(elementInSlice, src);
       srcOffset += srcIndex * src.strides[srcCopyDim];
 
       dst.data[dstOffset] = src.data[srcOffset];
@@ -138,13 +138,13 @@ void THCudaTensor_indexCopy(THCState *state, THCudaTensor *dst, int dim, THCudaT
   int mpc = THCState_getCurrentDeviceProperties(state)->multiProcessorCount;
 
 #define SMALL_INDEX(TYPE, DST_DIM, SRC_DIM, IDX_DIM)            \
-  indexCopySmallIndex<TYPE, DST_DIM, SRC_DIM, IDX_DIM>        \
+  indexCopySmallIndex<TYPE, DST_DIM, SRC_DIM, IDX_DIM>          \
     <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(           \
       dstInfo, srcInfo, indicesInfo,                            \
       dstCopyDim, srcCopyDim, sliceSize, dstCopyDimSize);
 
 #define LARGE_INDEX(TYPE, DST_DIM, SRC_DIM, IDX_DIM)            \
-  indexCopyLargeIndex<TYPE, DST_DIM, SRC_DIM, IDX_DIM>        \
+  indexCopyLargeIndex<TYPE, DST_DIM, SRC_DIM, IDX_DIM>          \
     <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(           \
       dstInfo, srcInfo, indicesInfo,                            \
       dstCopyDim, srcCopyDim, sliceSize, dstCopyDimSize);
@@ -155,18 +155,21 @@ void THCudaTensor_indexCopy(THCState *state, THCudaTensor *dst, int dim, THCudaT
   dim3 largeIndexGrid(std::min(THCCeilDiv(srcTotalSize, 128L), (long)(mpc * 8)));
   dim3 largeIndexBlock(std::min(srcTotalSize, 128L));
 
-  if (THC_canUse32BitIndexMath(state, dst) &&
-      THC_canUse32BitIndexMath(state, src) &&
-      THC_canUse32BitIndexMath(state, indices)) {
-    TensorInfo<unsigned int> dstInfo(state, dst);
+  if (TensorUtils<THCudaTensor>::canUse32BitIndexMath(state, dst) &&
+      TensorUtils<THCudaTensor>::canUse32BitIndexMath(state, src) &&
+      TensorUtils<THCudaTensor>::canUse32BitIndexMath(state, indices)) {
+    TensorInfo<float, unsigned int> dstInfo =
+      getTensorInfo<THCudaTensor, unsigned int>(state, dst);
     int dstCopyDim = dstInfo.collapseDims(dim);
-    dstInfo.sizes[dstCopyDim] = 1;
+    dstInfo.reduceDim(dstCopyDim);
 
-    TensorInfo<unsigned int> srcInfo(state, src);
+    TensorInfo<float, unsigned int> srcInfo =
+      getTensorInfo<THCudaTensor, unsigned int>(state, src);
     int srcCopyDim = srcInfo.collapseDims(dim);
-    srcInfo.sizes[srcCopyDim] = 1;
+    srcInfo.reduceDim(srcCopyDim);
 
-    TensorInfo<unsigned int> indicesInfo(state, indices);
+    TensorInfo<float, unsigned int> indicesInfo =
+      getTensorInfo<THCudaTensor, unsigned int>(state, indices);
     indicesInfo.collapseDims();
 
     // A reasonable choice for when to have each thread iterate over
@@ -193,15 +196,18 @@ void THCudaTensor_indexCopy(THCState *state, THCudaTensor *dst, int dim, THCudaT
       }
     }
   } else {
-    TensorInfo<unsigned long> dstInfo(state, dst);
+    TensorInfo<float, unsigned long> dstInfo =
+      getTensorInfo<THCudaTensor, unsigned long>(state, dst);
     int dstCopyDim = dstInfo.collapseDims(dim);
-    dstInfo.sizes[dstCopyDim] = 1;
+    dstInfo.reduceDim(dstCopyDim);
 
-    TensorInfo<unsigned long> srcInfo(state, src);
+    TensorInfo<float, unsigned long> srcInfo =
+      getTensorInfo<THCudaTensor, unsigned long>(state, src);
     int srcCopyDim = srcInfo.collapseDims(dim);
-    srcInfo.sizes[srcCopyDim] = 1;
+    srcInfo.reduceDim(srcCopyDim);
 
-    TensorInfo<unsigned long> indicesInfo(state, indices);
+    TensorInfo<float, unsigned long> indicesInfo =
+      getTensorInfo<THCudaTensor, unsigned long>(state, indices);
     indicesInfo.collapseDims();
 
     LARGE_INDEX(unsigned long, -1, -1, -1);
@@ -218,13 +224,13 @@ void THCudaTensor_indexCopy(THCState *state, THCudaTensor *dst, int dim, THCudaT
 // indexAddLargeIndex kernel is a better choice to increase
 // parallelism.
 template <typename IndexType, int DstDim, int SrcDim, int IdxDim>
-__global__ void indexAddSmallIndex(TensorInfo<IndexType> dst,
-                                      TensorInfo<IndexType> src,
-                                      TensorInfo<IndexType> indices,
-                                      int dstAddDim,
-                                      int srcAddDim,
-                                      IndexType innerSize,
-                                      long dstAddDimSize) {
+__global__ void indexAddSmallIndex(TensorInfo<float, IndexType> dst,
+                                   TensorInfo<float, IndexType> src,
+                                   TensorInfo<float, IndexType> indices,
+                                   int dstAddDim,
+                                   int srcAddDim,
+                                   IndexType innerSize,
+                                   long dstAddDimSize) {
   // In order to avoid reloading the index that we are copying, load
   // it once to handle all of the points that are being selected, so
   // it can be reused as much as possible. This kernel is chosen when
@@ -233,7 +239,7 @@ __global__ void indexAddSmallIndex(TensorInfo<IndexType> dst,
   for (IndexType srcIndex = 0; srcIndex < indices.sizes[0]; ++srcIndex) {
     // Lua indices begin at 1
     IndexType dstIndex =
-      indices.data[IndexToOffset<IndexType, IdxDim>::get(srcIndex, indices)] - 1;
+      indices.data[IndexToOffset<float, IndexType, IdxDim>::get(srcIndex, indices)] - 1;
 
     if (dstIndex < dstAddDimSize) {
       // We stride over the output ignoring the indexed dimension
@@ -242,11 +248,11 @@ __global__ void indexAddSmallIndex(TensorInfo<IndexType> dst,
            linearIndex < innerSize;
            linearIndex += gridDim.x * blockDim.x) {
         IndexType dstOffset =
-          IndexToOffset<IndexType, DstDim>::get(linearIndex, dst);
+          IndexToOffset<float, IndexType, DstDim>::get(linearIndex, dst);
         dstOffset += dstIndex * dst.strides[dstAddDim];
 
         IndexType srcOffset =
-          IndexToOffset<IndexType, SrcDim>::get(linearIndex, src);
+          IndexToOffset<float, IndexType, SrcDim>::get(linearIndex, src);
         srcOffset += srcIndex * src.strides[srcAddDim];
 
         atomicAdd(&dst.data[dstOffset], src.data[srcOffset]);
@@ -262,32 +268,32 @@ __global__ void indexAddSmallIndex(TensorInfo<IndexType> dst,
 // indexAddSmallIndex kernel is a better choice to reduce memory
 // accesses.
 template <typename IndexType, int DstDim, int SrcDim, int IdxDim>
-__global__ void indexAddLargeIndex(TensorInfo<IndexType> dst,
-                                      TensorInfo<IndexType> src,
-                                      TensorInfo<IndexType> indices,
-                                      int dstAddDim,
-                                      int srcAddDim,
-                                      IndexType innerSize,
-                                      long dstAddDimSize) {
+__global__ void indexAddLargeIndex(TensorInfo<float, IndexType> dst,
+                                   TensorInfo<float, IndexType> src,
+                                   TensorInfo<float, IndexType> indices,
+                                   int dstAddDim,
+                                   int srcAddDim,
+                                   IndexType innerSize,
+                                   long dstAddDimSize) {
   // We stride over the output including the indexed dimension
   // (totalSize), and calculate the destination index point based on that
   for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
-    linearIndex < innerSize * indices.sizes[0];
+       linearIndex < innerSize * indices.sizes[0];
        linearIndex += gridDim.x * blockDim.x) {
     IndexType srcIndex = linearIndex / innerSize;
     IndexType elementInSlice = linearIndex % innerSize;
 
     // Lua indices begin at 1
     IndexType dstIndex =
-      indices.data[IndexToOffset<IndexType, IdxDim>::get(srcIndex, indices)] - 1;
+      indices.data[IndexToOffset<float, IndexType, IdxDim>::get(srcIndex, indices)] - 1;
 
     if (dstIndex < dstAddDimSize) {
       IndexType dstOffset =
-        IndexToOffset<IndexType, DstDim>::get(elementInSlice, dst);
+        IndexToOffset<float, IndexType, DstDim>::get(elementInSlice, dst);
       dstOffset += dstIndex * dst.strides[dstAddDim];
 
       IndexType srcOffset =
-        IndexToOffset<IndexType, SrcDim>::get(elementInSlice, src);
+        IndexToOffset<float, IndexType, SrcDim>::get(elementInSlice, src);
       srcOffset += srcIndex * src.strides[srcAddDim];
 
       atomicAdd(&dst.data[dstOffset], src.data[srcOffset]);
@@ -339,16 +345,16 @@ void THCudaTensor_indexAdd(THCState *state, THCudaTensor *dst, int dim, THCudaTe
 
   int mpc = THCState_getCurrentDeviceProperties(state)->multiProcessorCount;
 
-#define SMALL_INDEX(TYPE, DST_DIM, SRC_DIM, IDX_DIM)            \
-  indexAddSmallIndex<TYPE, DST_DIM, SRC_DIM, IDX_DIM>           \
-    <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(           \
-      dstInfo, srcInfo, indicesInfo,                            \
+#define SMALL_INDEX(TYPE, DST_DIM, SRC_DIM, IDX_DIM)    \
+  indexAddSmallIndex<TYPE, DST_DIM, SRC_DIM, IDX_DIM>   \
+    <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(   \
+      dstInfo, srcInfo, indicesInfo,                    \
       dstAddDim, srcAddDim, sliceSize, dstAddDimSize);
 
-#define LARGE_INDEX(TYPE, DST_DIM, SRC_DIM, IDX_DIM)            \
-  indexAddLargeIndex<TYPE, DST_DIM, SRC_DIM, IDX_DIM>           \
-    <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(           \
-      dstInfo, srcInfo, indicesInfo,                            \
+#define LARGE_INDEX(TYPE, DST_DIM, SRC_DIM, IDX_DIM)    \
+  indexAddLargeIndex<TYPE, DST_DIM, SRC_DIM, IDX_DIM>   \
+    <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(   \
+      dstInfo, srcInfo, indicesInfo,                    \
       dstAddDim, srcAddDim, sliceSize, dstAddDimSize);
 
   dim3 smallIndexGrid(std::min(THCCeilDiv(sliceSize, 128L), (long)(mpc * 8)));
@@ -357,18 +363,21 @@ void THCudaTensor_indexAdd(THCState *state, THCudaTensor *dst, int dim, THCudaTe
   dim3 largeIndexGrid(std::min(THCCeilDiv(srcTotalSize, 128L), (long)(mpc * 8)));
   dim3 largeIndexBlock(std::min(srcTotalSize, 128L));
 
-  if (THC_canUse32BitIndexMath(state, dst) &&
-      THC_canUse32BitIndexMath(state, src) &&
-      THC_canUse32BitIndexMath(state, indices)) {
-    TensorInfo<unsigned int> dstInfo(state, dst);
+  if (TensorUtils<THCudaTensor>::canUse32BitIndexMath(state, dst) &&
+      TensorUtils<THCudaTensor>::canUse32BitIndexMath(state, src) &&
+      TensorUtils<THCudaTensor>::canUse32BitIndexMath(state, indices)) {
+    TensorInfo<float, unsigned int> dstInfo =
+      getTensorInfo<THCudaTensor, unsigned int>(state, dst);
     int dstAddDim = dstInfo.collapseDims(dim);
-    dstInfo.sizes[dstAddDim] = 1;
+    dstInfo.reduceDim(dstAddDim);
 
-    TensorInfo<unsigned int> srcInfo(state, src);
+    TensorInfo<float, unsigned int> srcInfo =
+      getTensorInfo<THCudaTensor, unsigned int>(state, src);
     int srcAddDim = srcInfo.collapseDims(dim);
-    srcInfo.sizes[srcAddDim] = 1;
+    srcInfo.reduceDim(srcAddDim);
 
-    TensorInfo<unsigned int> indicesInfo(state, indices);
+    TensorInfo<float, unsigned int> indicesInfo =
+      getTensorInfo<THCudaTensor, unsigned int>(state, indices);
     indicesInfo.collapseDims();
 
     // A reasonable choice for when to have each thread iterate over
@@ -395,15 +404,18 @@ void THCudaTensor_indexAdd(THCState *state, THCudaTensor *dst, int dim, THCudaTe
       }
     }
   } else {
-    TensorInfo<unsigned long> dstInfo(state, dst);
+    TensorInfo<float, unsigned long> dstInfo =
+      getTensorInfo<THCudaTensor, unsigned long>(state, dst);
     int dstAddDim = dstInfo.collapseDims(dim);
-    dstInfo.sizes[dstAddDim] = 1;
+    dstInfo.reduceDim(dstAddDim);
 
-    TensorInfo<unsigned long> srcInfo(state, src);
+    TensorInfo<float, unsigned long> srcInfo =
+      getTensorInfo<THCudaTensor, unsigned long>(state, src);
     int srcAddDim = srcInfo.collapseDims(dim);
-    srcInfo.sizes[srcAddDim] = 1;
+    srcInfo.reduceDim(srcAddDim);
 
-    TensorInfo<unsigned long> indicesInfo(state, indices);
+    TensorInfo<float, unsigned long> indicesInfo =
+      getTensorInfo<THCudaTensor, unsigned long>(state, indices);
     indicesInfo.collapseDims();
 
     LARGE_INDEX(unsigned long, -1, -1, -1);
@@ -420,12 +432,12 @@ void THCudaTensor_indexAdd(THCState *state, THCudaTensor *dst, int dim, THCudaTe
 // indexFillLargeIndex kernel is a better choice to increase
 // parallelism.
 template <typename IndexType, int DstDim, int IdxDim>
-__global__ void indexFillSmallIndex(TensorInfo<IndexType> dst,
-                                      TensorInfo<IndexType> indices,
-                                      int dstFillDim,
-                                      IndexType innerSize,
-                                      long dstFillDimSize,
-                                      float val) {
+__global__ void indexFillSmallIndex(TensorInfo<float, IndexType> dst,
+                                    TensorInfo<float, IndexType> indices,
+                                    int dstFillDim,
+                                    IndexType innerSize,
+                                    long dstFillDimSize,
+                                    float val) {
   // In order to avoid reloading the index that we are copying, load
   // it once to handle all of the points that are being selected, so
   // it can be reused as much as possible. This kernel is chosen when
@@ -434,7 +446,7 @@ __global__ void indexFillSmallIndex(TensorInfo<IndexType> dst,
   for (IndexType dstIndex = 0; dstIndex < indices.sizes[0]; ++dstIndex) {
     // Lua indices begin at 1
     IndexType dstIndex_ =
-      indices.data[IndexToOffset<IndexType, IdxDim>::get(dstIndex, indices)] - 1;
+      indices.data[IndexToOffset<float, IndexType, IdxDim>::get(dstIndex, indices)] - 1;
 
     if (dstIndex < dstFillDimSize) {
       // We stride over the output ignoring the indexed dimension
@@ -443,7 +455,7 @@ __global__ void indexFillSmallIndex(TensorInfo<IndexType> dst,
            linearIndex < innerSize;
            linearIndex += gridDim.x * blockDim.x) {
         IndexType dstOffset =
-          IndexToOffset<IndexType, DstDim>::get(linearIndex, dst);
+          IndexToOffset<float, IndexType, DstDim>::get(linearIndex, dst);
         dstOffset += dstIndex_ * dst.strides[dstFillDim];
 
         dst.data[dstOffset] = val;
@@ -459,27 +471,27 @@ __global__ void indexFillSmallIndex(TensorInfo<IndexType> dst,
 // indexFillSmallIndex kernel is a better choice to reduce memory
 // accesses.
 template <typename IndexType, int DstDim, int IdxDim>
-__global__ void indexFillLargeIndex(TensorInfo<IndexType> dst,
-                                      TensorInfo<IndexType> indices,
-                                      int dstFillDim,
-                                      IndexType innerSize,
-                                      long dstFillDimSize,
-                                      float val) {
+__global__ void indexFillLargeIndex(TensorInfo<float, IndexType> dst,
+                                    TensorInfo<float, IndexType> indices,
+                                    int dstFillDim,
+                                    IndexType innerSize,
+                                    long dstFillDimSize,
+                                    float val) {
   // We stride over the output including the indexed dimension
   // (totalSize), and calculate the destination index point based on that
   for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
-    linearIndex < innerSize * indices.sizes[0];
+       linearIndex < innerSize * indices.sizes[0];
        linearIndex += gridDim.x * blockDim.x) {
     IndexType dstIndex = linearIndex / innerSize;
     IndexType elementInSlice = linearIndex % innerSize;
 
     // Lua indices begin at 1
     IndexType dstIndex_ =
-      indices.data[IndexToOffset<IndexType, IdxDim>::get(dstIndex, indices)] - 1;
+      indices.data[IndexToOffset<float, IndexType, IdxDim>::get(dstIndex, indices)] - 1;
 
     if (dstIndex_ < dstFillDimSize) {
       IndexType dstOffset =
-        IndexToOffset<IndexType, DstDim>::get(elementInSlice, dst);
+        IndexToOffset<float, IndexType, DstDim>::get(elementInSlice, dst);
       dstOffset += dstIndex_ * dst.strides[dstFillDim];
 
       dst.data[dstOffset] = val;
@@ -528,16 +540,16 @@ void THCudaTensor_indexFill(THCState *state, THCudaTensor *dst, int dim, THCudaT
 
   int mpc = THCState_getCurrentDeviceProperties(state)->multiProcessorCount;
 
-#define SMALL_INDEX(TYPE, DST_DIM, IDX_DIM)            \
-  indexFillSmallIndex<TYPE, DST_DIM, IDX_DIM>          \
-    <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(  \
-      dstInfo, indicesInfo,                            \
+#define SMALL_INDEX(TYPE, DST_DIM, IDX_DIM)             \
+  indexFillSmallIndex<TYPE, DST_DIM, IDX_DIM>           \
+    <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(   \
+      dstInfo, indicesInfo,                             \
       dstFillDim, sliceSize, dstFillDimSize, val);
 
-#define LARGE_INDEX(TYPE, DST_DIM, IDX_DIM)            \
-  indexFillLargeIndex<TYPE, DST_DIM, IDX_DIM>          \
-    <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(  \
-      dstInfo, indicesInfo,                            \
+#define LARGE_INDEX(TYPE, DST_DIM, IDX_DIM)             \
+  indexFillLargeIndex<TYPE, DST_DIM, IDX_DIM>           \
+    <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(   \
+      dstInfo, indicesInfo,                             \
       dstFillDim, sliceSize, dstFillDimSize, val);
 
   dim3 smallIndexGrid(std::min(THCCeilDiv(sliceSize, 128L), (long)(mpc * 8)));
@@ -546,13 +558,15 @@ void THCudaTensor_indexFill(THCState *state, THCudaTensor *dst, int dim, THCudaT
   dim3 largeIndexGrid(std::min(THCCeilDiv(dstTotalSize, 128L), (long)(mpc * 8)));
   dim3 largeIndexBlock(std::min(dstTotalSize, 128L));
 
-  if (THC_canUse32BitIndexMath(state, dst) &&
-      THC_canUse32BitIndexMath(state, indices)) {
-    TensorInfo<unsigned int> dstInfo(state, dst);
+  if (TensorUtils<THCudaTensor>::canUse32BitIndexMath(state, dst) &&
+      TensorUtils<THCudaTensor>::canUse32BitIndexMath(state, indices)) {
+    TensorInfo<float, unsigned int> dstInfo =
+      getTensorInfo<THCudaTensor, unsigned int>(state, dst);
     int dstFillDim = dstInfo.collapseDims(dim);
-    dstInfo.sizes[dstFillDim] = 1;
+    dstInfo.reduceDim(dstFillDim);
 
-    TensorInfo<unsigned int> indicesInfo(state, indices);
+    TensorInfo<float, unsigned int> indicesInfo =
+      getTensorInfo<THCudaTensor, unsigned int>(state, indices);
     indicesInfo.collapseDims();
 
     // A reasonable choice for when to have each thread iterate over
@@ -579,11 +593,13 @@ void THCudaTensor_indexFill(THCState *state, THCudaTensor *dst, int dim, THCudaT
       }
     }
   } else {
-    TensorInfo<unsigned long> dstInfo(state, dst);
+    TensorInfo<float, unsigned long> dstInfo =
+      getTensorInfo<THCudaTensor, unsigned long>(state, dst);
     int dstFillDim = dstInfo.collapseDims(dim);
-    dstInfo.sizes[dstFillDim] = 1;
+    dstInfo.reduceDim(dstFillDim);
 
-    TensorInfo<unsigned long> indicesInfo(state, indices);
+    TensorInfo<float, unsigned long> indicesInfo =
+      getTensorInfo<THCudaTensor, unsigned long>(state, indices);
     indicesInfo.collapseDims();
 
     LARGE_INDEX(unsigned long, -1, -1);
@@ -600,9 +616,9 @@ void THCudaTensor_indexFill(THCState *state, THCudaTensor *dst, int dim, THCudaT
 // indexSelectLargeIndex kernel is a better choice to increase
 // parallelism.
 template <typename IndexType, int DstDim, int SrcDim, int IdxDim>
-__global__ void indexSelectSmallIndex(TensorInfo<IndexType> dst,
-                                      TensorInfo<IndexType> src,
-                                      TensorInfo<IndexType> indices,
+__global__ void indexSelectSmallIndex(TensorInfo<float, IndexType> dst,
+                                      TensorInfo<float, IndexType> src,
+                                      TensorInfo<float, IndexType> indices,
                                       int dstSelectDim,
                                       int srcSelectDim,
                                       IndexType innerSize,
@@ -615,7 +631,7 @@ __global__ void indexSelectSmallIndex(TensorInfo<IndexType> dst,
   for (IndexType dstIndex = 0; dstIndex < indices.sizes[0]; ++dstIndex) {
     // Lua indices begin at 1
     IndexType srcIndex =
-      indices.data[IndexToOffset<IndexType, IdxDim>::get(dstIndex, indices)] - 1;
+      indices.data[IndexToOffset<float, IndexType, IdxDim>::get(dstIndex, indices)] - 1;
 
     if (srcIndex < srcSelectDimSize) {
       // We stride over the output ignoring the indexed dimension
@@ -624,11 +640,11 @@ __global__ void indexSelectSmallIndex(TensorInfo<IndexType> dst,
            linearIndex < innerSize;
            linearIndex += gridDim.x * blockDim.x) {
         IndexType dstOffset =
-          IndexToOffset<IndexType, DstDim>::get(linearIndex, dst);
+          IndexToOffset<float, IndexType, DstDim>::get(linearIndex, dst);
         dstOffset += dstIndex * dst.strides[dstSelectDim];
 
         IndexType srcOffset =
-          IndexToOffset<IndexType, SrcDim>::get(linearIndex, src);
+          IndexToOffset<float, IndexType, SrcDim>::get(linearIndex, src);
         srcOffset += srcIndex * src.strides[srcSelectDim];
 
         dst.data[dstOffset] = src.data[srcOffset];
@@ -644,9 +660,9 @@ __global__ void indexSelectSmallIndex(TensorInfo<IndexType> dst,
 // indexSelectSmallIndex kernel is a better choice to reduce memory
 // accesses.
 template <typename IndexType, int DstDim, int SrcDim, int IdxDim>
-__global__ void indexSelectLargeIndex(TensorInfo<IndexType> dst,
-                                      TensorInfo<IndexType> src,
-                                      TensorInfo<IndexType> indices,
+__global__ void indexSelectLargeIndex(TensorInfo<float, IndexType> dst,
+                                      TensorInfo<float, IndexType> src,
+                                      TensorInfo<float, IndexType> indices,
                                       int dstSelectDim,
                                       int srcSelectDim,
                                       IndexType totalSize,
@@ -662,15 +678,15 @@ __global__ void indexSelectLargeIndex(TensorInfo<IndexType> dst,
 
     // Lua indices begin at 1
     IndexType srcIndex =
-      indices.data[IndexToOffset<IndexType, IdxDim>::get(dstIndex, indices)] - 1;
+      indices.data[IndexToOffset<float, IndexType, IdxDim>::get(dstIndex, indices)] - 1;
 
     if (srcIndex < srcSelectDimSize) {
       IndexType dstOffset =
-        IndexToOffset<IndexType, DstDim>::get(elementInSlice, dst);
+        IndexToOffset<float, IndexType, DstDim>::get(elementInSlice, dst);
       dstOffset += dstIndex * dst.strides[dstSelectDim];
 
       IndexType srcOffset =
-        IndexToOffset<IndexType, SrcDim>::get(elementInSlice, src);
+        IndexToOffset<float, IndexType, SrcDim>::get(elementInSlice, src);
       srcOffset += srcIndex * src.strides[srcSelectDim];
 
       dst.data[dstOffset] = src.data[srcOffset];
@@ -734,10 +750,10 @@ void THCudaTensor_indexSelect(THCState *state, THCudaTensor *dst, THCudaTensor *
       dstInfo, srcInfo, indicesInfo,                            \
       dstSelectDim, srcSelectDim, sliceSize, srcSelectDimSize);
 
-#define LARGE_INDEX(TYPE, DST_DIM, SRC_DIM, IDX_DIM)            \
-  indexSelectLargeIndex<TYPE, DST_DIM, SRC_DIM, IDX_DIM>        \
-    <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(           \
-      dstInfo, srcInfo, indicesInfo,                            \
+#define LARGE_INDEX(TYPE, DST_DIM, SRC_DIM, IDX_DIM)                    \
+  indexSelectLargeIndex<TYPE, DST_DIM, SRC_DIM, IDX_DIM>                \
+    <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(                   \
+      dstInfo, srcInfo, indicesInfo,                                    \
       dstSelectDim, srcSelectDim, dstTotalSize, sliceSize, srcSelectDimSize);
 
   dim3 smallIndexGrid(std::min(THCCeilDiv(sliceSize, 128L), (long)(mpc * 8)));
@@ -746,18 +762,21 @@ void THCudaTensor_indexSelect(THCState *state, THCudaTensor *dst, THCudaTensor *
   dim3 largeIndexGrid(std::min(THCCeilDiv(dstTotalSize, 128L), (long)(mpc * 8)));
   dim3 largeIndexBlock(std::min(dstTotalSize, 128L));
 
-  if (THC_canUse32BitIndexMath(state, dst) &&
-      THC_canUse32BitIndexMath(state, src) &&
-      THC_canUse32BitIndexMath(state, indices)) {
-    TensorInfo<unsigned int> dstInfo(state, dst);
+  if (TensorUtils<THCudaTensor>::canUse32BitIndexMath(state, dst) &&
+      TensorUtils<THCudaTensor>::canUse32BitIndexMath(state, src) &&
+      TensorUtils<THCudaTensor>::canUse32BitIndexMath(state, indices)) {
+    TensorInfo<float, unsigned int> dstInfo =
+      getTensorInfo<THCudaTensor, unsigned int>(state, dst);
     int dstSelectDim = dstInfo.collapseDims(dim);
-    dstInfo.sizes[dstSelectDim] = 1;
+    dstInfo.reduceDim(dstSelectDim);
 
-    TensorInfo<unsigned int> srcInfo(state, src);
+    TensorInfo<float, unsigned int> srcInfo =
+      getTensorInfo<THCudaTensor, unsigned int>(state, src);
     int srcSelectDim = srcInfo.collapseDims(dim);
-    srcInfo.sizes[srcSelectDim] = 1;
+    srcInfo.reduceDim(srcSelectDim);
 
-    TensorInfo<unsigned int> indicesInfo(state, indices);
+    TensorInfo<float, unsigned int> indicesInfo =
+      getTensorInfo<THCudaTensor, unsigned int>(state, indices);
     indicesInfo.collapseDims();
 
     // A reasonable choice for when to have each thread iterate over
@@ -784,15 +803,18 @@ void THCudaTensor_indexSelect(THCState *state, THCudaTensor *dst, THCudaTensor *
       }
     }
   } else {
-    TensorInfo<unsigned long> dstInfo(state, dst);
+    TensorInfo<float, unsigned long> dstInfo =
+      getTensorInfo<THCudaTensor, unsigned long>(state, dst);
     int dstSelectDim = dstInfo.collapseDims(dim);
-    dstInfo.sizes[dstSelectDim] = 1;
+    dstInfo.reduceDim(dstSelectDim);
 
-    TensorInfo<unsigned long> srcInfo(state, src);
+    TensorInfo<float, unsigned long> srcInfo =
+      getTensorInfo<THCudaTensor, unsigned long>(state, src);
     int srcSelectDim = srcInfo.collapseDims(dim);
-    srcInfo.sizes[srcSelectDim] = 1;
+    srcInfo.reduceDim(srcSelectDim);
 
-    TensorInfo<unsigned long> indicesInfo(state, indices);
+    TensorInfo<float, unsigned long> indicesInfo =
+      getTensorInfo<THCudaTensor, unsigned long>(state, indices);
     indicesInfo.collapseDims();
 
     LARGE_INDEX(unsigned long, -1, -1, -1);

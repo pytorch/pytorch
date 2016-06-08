@@ -3,6 +3,7 @@
 #else
 
 THC_API void THCTensor_(copy)(THCState *state, THCTensor *self, THCTensor *src);
+THC_API void THCTensor_(copyIgnoringOverlaps)(THCState *state, THCTensor *self, THCTensor *src);
 THC_API void THCTensor_(copyByte)(THCState *state, THCTensor *self, THByteTensor *src);
 THC_API void THCTensor_(copyChar)(THCState *state, THCTensor *self, THCharTensor *src);
 THC_API void THCTensor_(copyShort)(THCState *state, THCTensor *self, THShortTensor *src);
@@ -18,7 +19,7 @@ THC_API void THCTensor_(copyCudaInt)(THCState *state, THCTensor *storage, struct
 THC_API void THCTensor_(copyCudaLong)(THCState *state, THCTensor *storage, struct THCudaLongTensor *src);
 THC_API void THCTensor_(copyCudaFloat)(THCState *state, THCTensor *storage, struct THCudaTensor *src);
 THC_API void THCTensor_(copyCudaDouble)(THCState *state, THCTensor *storage, struct THCudaDoubleTensor *src);
-#if CUDA_VERSION >= 7050
+#ifdef CUDA_HALF_TENSOR
 THC_API void THCTensor_(copyCudaHalf)(THCState *state, THCTensor *storage, struct THCudaHalfTensor *src);
 #endif
 

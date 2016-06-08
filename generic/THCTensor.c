@@ -730,56 +730,56 @@ void THCTensor_(rawResize)(THCState *state, THCTensor *self, int nDimension, lon
     self->nDimension = 0;
 }
 
-void THCTensor_(set1d)(THCState *state, THCTensor *tensor, long x0, hostreal value)
+void THCTensor_(set1d)(THCState *state, THCTensor *tensor, long x0, real value)
 {
   THArgCheck(tensor->nDimension == 1, 1, "tensor must have one dimension");
   THArgCheck( (x0 >= 0) && (x0 < tensor->size[0]), 2, "out of range");
   THCStorage_(set)(state, tensor->storage, tensor->storageOffset+x0*tensor->stride[0], value);
 }
 
-hostreal THCTensor_(get1d)(THCState *state, const THCTensor *tensor, long x0)
+real THCTensor_(get1d)(THCState *state, const THCTensor *tensor, long x0)
 {
   THArgCheck(tensor->nDimension == 1, 1, "tensor must have one dimension");
   THArgCheck( (x0 >= 0) && (x0 < tensor->size[0]), 2, "out of range");
   return THCStorage_(get)(state, tensor->storage, tensor->storageOffset+x0*tensor->stride[0]);
 }
 
-void THCTensor_(set2d)(THCState *state, THCTensor *tensor, long x0, long x1, hostreal value)
+void THCTensor_(set2d)(THCState *state, THCTensor *tensor, long x0, long x1, real value)
 {
   THArgCheck(tensor->nDimension == 2, 1, "tensor must have two dimensions");
   THArgCheck((x0 >= 0) && (x0 < tensor->size[0]) && (x1 >= 0) && (x1 < tensor->size[1]), 2, "out of range");
   THCStorage_(set)(state, tensor->storage, tensor->storageOffset+x0*tensor->stride[0]+x1*tensor->stride[1], value);
 }
 
-hostreal THCTensor_(get2d)(THCState *state, const THCTensor *tensor, long x0, long x1)
+real THCTensor_(get2d)(THCState *state, const THCTensor *tensor, long x0, long x1)
 {
   THArgCheck(tensor->nDimension == 2, 1, "tensor must have two dimensions");
   THArgCheck((x0 >= 0) && (x0 < tensor->size[0]) && (x1 >= 0) && (x1 < tensor->size[1]), 2, "out of range");
   return THCStorage_(get)(state, tensor->storage, tensor->storageOffset+x0*tensor->stride[0]+x1*tensor->stride[1]);
 }
 
-void THCTensor_(set3d)(THCState *state, THCTensor *tensor, long x0, long x1, long x2, hostreal value)
+void THCTensor_(set3d)(THCState *state, THCTensor *tensor, long x0, long x1, long x2, real value)
 {
   THArgCheck(tensor->nDimension == 3, 1, "tensor must have three dimensions");
   THArgCheck( (x0 >= 0) && (x0 < tensor->size[0]) && (x1 >= 0) && (x1 < tensor->size[1]) && (x2 >= 0) && (x2 < tensor->size[2]), 2, "out of range");
   THCStorage_(set)(state, tensor->storage, tensor->storageOffset+x0*tensor->stride[0]+x1*tensor->stride[1]+x2*tensor->stride[2], value);
 }
 
-hostreal THCTensor_(get3d)(THCState *state, const THCTensor *tensor, long x0, long x1, long x2)
+real THCTensor_(get3d)(THCState *state, const THCTensor *tensor, long x0, long x1, long x2)
 {
   THArgCheck(tensor->nDimension == 3, 1, "tensor must have three dimensions");
   THArgCheck( (x0 >= 0) && (x0 < tensor->size[0]) && (x1 >= 0) && (x1 < tensor->size[1]) && (x2 >= 0) && (x2 < tensor->size[2]), 2, "out of range");
   return THCStorage_(get)(state, tensor->storage, tensor->storageOffset+x0*tensor->stride[0]+x1*tensor->stride[1]+x2*tensor->stride[2]);
 }
 
-void THCTensor_(set4d)(THCState *state, THCTensor *tensor, long x0, long x1, long x2, long x3, hostreal value)
+void THCTensor_(set4d)(THCState *state, THCTensor *tensor, long x0, long x1, long x2, long x3, real value)
 {
   THArgCheck(tensor->nDimension == 4, 1, "tensor must have four dimensions");
   THArgCheck((x0 >= 0) && (x0 < tensor->size[0]) && (x1 >= 0) && (x1 < tensor->size[1]) && (x2 >= 0) && (x2 < tensor->size[2]) && (x3 >= 0) && (x3 < tensor->size[3]), 2, "out of range");
   THCStorage_(set)(state, tensor->storage, tensor->storageOffset+x0*tensor->stride[0]+x1*tensor->stride[1]+x2*tensor->stride[2]+x3*tensor->stride[3], value);
 }
 
-hostreal THCTensor_(get4d)(THCState *state, const THCTensor *tensor, long x0, long x1, long x2, long x3)
+real THCTensor_(get4d)(THCState *state, const THCTensor *tensor, long x0, long x1, long x2, long x3)
 {
   THArgCheck(tensor->nDimension == 4, 1, "tensor must have four dimensions");
   THArgCheck((x0 >= 0) && (x0 < tensor->size[0]) && (x1 >= 0) && (x1 < tensor->size[1]) && (x2 >= 0) && (x2 < tensor->size[2]) && (x3 >= 0) && (x3 < tensor->size[3]), 2, "out of range");

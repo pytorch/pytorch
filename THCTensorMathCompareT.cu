@@ -11,7 +11,7 @@ void THCudaTensor_logicalTensor(THCState *state, THCudaTensor *self_, THCudaTens
   THCudaTensor_resizeAs(state, self_, src1);
   THArgCheck(THCudaTensor_nElement(state, src1) == THCudaTensor_nElement(state, src2), 3, "sizes do not match");
 
-  if (!THCudaTensor_pointwiseApply3(state, self_, src1, src2, op)) {
+  if (!THC_pointwiseApply3(state, self_, src1, src2, op)) {
     THArgCheck(false, 2, CUTORCH_DIM_WARNING);
   }
 

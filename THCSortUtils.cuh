@@ -2,6 +2,7 @@
 #define THC_SORT_UTILS_INC
 
 #include "THCReduceApplyUtils.cuh"
+#include "THCTensorTypeUtils.cuh"
 
 // Collection of kernel sort routines
 template <typename T>
@@ -91,11 +92,11 @@ template <typename K, typename V,
           int KeyDims, int ValueDims,
           typename Comparator, typename IndexType, int Power2SortSize>
 __global__ void
-bitonicSortKVInPlace(TensorInfo<IndexType> keys,
+bitonicSortKVInPlace(TensorInfo<K, IndexType> keys,
                      IndexType keySlices,
                      IndexType keySliceSize,
                      IndexType keySliceStride,
-                     TensorInfo<IndexType> values,
+                     TensorInfo<V, IndexType> values,
                      IndexType valueSliceStride,
                      const Comparator& comp) {
   // Find the slice of the tensor that we are sorting
@@ -111,9 +112,9 @@ bitonicSortKVInPlace(TensorInfo<IndexType> keys,
   __shared__ bool sharedValid[Power2SortSize];
 
   const IndexType keyStartOffset =
-    IndexToOffset<IndexType, KeyDims>::get(linearIndex, keys);
+    IndexToOffset<K, IndexType, KeyDims>::get(linearIndex, keys);
   const IndexType valueStartOffset =
-    IndexToOffset<IndexType, ValueDims>::get(linearIndex, values);
+    IndexToOffset<V, IndexType, ValueDims>::get(linearIndex, values);
 
   // If the sort size is 1, the data is already sorted
   if (Power2SortSize == 1) {

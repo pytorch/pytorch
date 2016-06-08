@@ -33,7 +33,7 @@ void THCudaTensor_maskedFill(THCState* state,
              THCudaTensor_nElement(state, mask),
              2, "sizes do not match");
 
-  if (!THCudaTensor_pointwiseApply2(state, tensor, mask, TensorMaskedFillOp(value))) {
+  if (!THC_pointwiseApply2(state, tensor, mask, TensorMaskedFillOp(value))) {
     THArgCheck(false, 2, CUTORCH_DIM_WARNING);
   }
 
@@ -106,7 +106,7 @@ void THCudaTensor_maskedCopy(THCState* state,
 
   // update `tensor` where `mask` == 1 but pull from `src` at
   // maskPrefixSum
-  bool status = THCudaTensor_pointwiseApply3(
+  bool status = THC_pointwiseApply3(
     state, tensor, contigMask, maskPrefixSum,
     TensorMaskedCopyOp(THCudaTensor_data(state, contigSrc)));
 
@@ -169,7 +169,7 @@ void THCudaTensor_maskedSelect(THCState* state,
                          maskPrefixSumData);
 
   // Then copy over the masked elements at their desired output index
-  bool status = THCudaTensor_pointwiseApply3(
+  bool status = THC_pointwiseApply3(
     state, contigMask, maskPrefixSum,
     src, TensorMaskedSelectOp(THCudaTensor_data(state, tensor)));
 

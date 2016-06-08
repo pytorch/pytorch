@@ -32,8 +32,25 @@ void THCHalf2Float(THCState *state, float *out, half *in, long len) {
 
 float THC_half2float(half a)
 {
-  THError("half2float not implemented yet");
-  return 0;
+  unsigned int bits = a.x & 0x7fff;
+  unsigned int sign = a.x & 0x8000;
+  unsigned int exp = a.x & 0x7c00;
+
+  bits <<= 13;
+  sign <<= 16;
+
+  bits += 0x38000000U;
+
+  // flush denormals to 0
+  bits = (exp == 0 ? 0 : bits) | sign;
+
+  union {
+    float f;
+    unsigned int v;
+  } conv;
+  conv.v = bits;
+
+  return conv.f;
 }
 
 /*

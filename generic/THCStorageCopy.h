@@ -21,7 +21,7 @@ THC_API void THCStorage_(copyCudaInt)(THCState *state, THCStorage *storage, stru
 THC_API void THCStorage_(copyCudaLong)(THCState *state, THCStorage *storage, struct THCudaLongStorage *src);
 THC_API void THCStorage_(copyCudaFloat)(THCState *state, THCStorage *storage, struct THCudaStorage *src);
 THC_API void THCStorage_(copyCudaDouble)(THCState *state, THCStorage *storage, struct THCudaDoubleStorage *src);
-#if CUDA_VERSION >= 7050
+#ifdef CUDA_HALF_TENSOR
 THC_API void THCStorage_(copyCudaHalf)(THCState *state, THCStorage *storage, struct THCudaHalfStorage *src);
 #endif
 
