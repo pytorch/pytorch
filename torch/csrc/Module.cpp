@@ -5,7 +5,11 @@
 
 #include "THP.h"
 
+#if PY_MAJOR_VERSION == 2
+#define ASSERT_TRUE(cmd) if (!(cmd)) {PyErr_SetString(PyExc_ImportError, "initialization error"); return;}
+#else
 #define ASSERT_TRUE(cmd) if (!(cmd)) return NULL
+#endif
 
 static PyObject* module;
 static PyObject* tensor_classes;
@@ -34,21 +38,21 @@ static bool THPModule_loadClasses(PyObject *self)
   PyObject *torch_module = PyImport_ImportModule("torch");
   PyObject* module_dict = PyModule_GetDict(torch_module);
 
-  THPDoubleStorageClass = PyMapping_GetItemString(module_dict, "DoubleStorage");
-  THPFloatStorageClass  = PyMapping_GetItemString(module_dict, "FloatStorage");
-  THPLongStorageClass   = PyMapping_GetItemString(module_dict, "LongStorage");
-  THPIntStorageClass    = PyMapping_GetItemString(module_dict, "IntStorage");
-  THPShortStorageClass  = PyMapping_GetItemString(module_dict, "ShortStorage");
-  THPCharStorageClass   = PyMapping_GetItemString(module_dict, "CharStorage");
-  THPByteStorageClass   = PyMapping_GetItemString(module_dict, "ByteStorage");
+  THPDoubleStorageClass = PyMapping_GetItemString(module_dict,(char*)"DoubleStorage");
+  THPFloatStorageClass  = PyMapping_GetItemString(module_dict,(char*)"FloatStorage");
+  THPLongStorageClass   = PyMapping_GetItemString(module_dict,(char*)"LongStorage");
+  THPIntStorageClass    = PyMapping_GetItemString(module_dict,(char*)"IntStorage");
+  THPShortStorageClass  = PyMapping_GetItemString(module_dict,(char*)"ShortStorage");
+  THPCharStorageClass   = PyMapping_GetItemString(module_dict,(char*)"CharStorage");
+  THPByteStorageClass   = PyMapping_GetItemString(module_dict,(char*)"ByteStorage");
 
-  THPDoubleTensorClass  = PyMapping_GetItemString(module_dict, "DoubleTensor");
-  THPFloatTensorClass   = PyMapping_GetItemString(module_dict, "FloatTensor");
-  THPLongTensorClass    = PyMapping_GetItemString(module_dict, "LongTensor");
-  THPIntTensorClass     = PyMapping_GetItemString(module_dict, "IntTensor");
-  THPShortTensorClass   = PyMapping_GetItemString(module_dict, "ShortTensor");
-  THPCharTensorClass    = PyMapping_GetItemString(module_dict, "CharTensor");
-  THPByteTensorClass    = PyMapping_GetItemString(module_dict, "ByteTensor");
+  THPDoubleTensorClass  = PyMapping_GetItemString(module_dict,(char*)"DoubleTensor");
+  THPFloatTensorClass   = PyMapping_GetItemString(module_dict,(char*)"FloatTensor");
+  THPLongTensorClass    = PyMapping_GetItemString(module_dict,(char*)"LongTensor");
+  THPIntTensorClass     = PyMapping_GetItemString(module_dict,(char*)"IntTensor");
+  THPShortTensorClass   = PyMapping_GetItemString(module_dict,(char*)"ShortTensor");
+  THPCharTensorClass    = PyMapping_GetItemString(module_dict,(char*)"CharTensor");
+  THPByteTensorClass    = PyMapping_GetItemString(module_dict,(char*)"ByteTensor");
   PySet_Add(tensor_classes, THPDoubleTensorClass);
   PySet_Add(tensor_classes, THPFloatTensorClass);
   PySet_Add(tensor_classes, THPLongTensorClass);
@@ -314,6 +318,7 @@ static PyMethodDef TorchMethods[] = {
   {NULL, NULL, 0, NULL}
 };
 
+#if PY_MAJOR_VERSION != 2
 static struct PyModuleDef torchmodule = {
    PyModuleDef_HEAD_INIT,
    "torch.C",
@@ -321,6 +326,7 @@ static struct PyModuleDef torchmodule = {
    -1,
    TorchMethods
 };
+#endif
 
 static void errorHandler(const char *msg, void *data)
 {
@@ -338,10 +344,17 @@ static void updateErrorHandlers()
   THSetArgErrorHandler(errorHandlerArg, NULL);
 }
 
+#if PY_MAJOR_VERSION == 2
+PyMODINIT_FUNC initC()
+#else
 PyMODINIT_FUNC PyInit_C()
+#endif
 {
+#if PY_MAJOR_VERSION == 2
+  ASSERT_TRUE(module = Py_InitModule("torch.C", TorchMethods));
+#else
   ASSERT_TRUE(module = PyModule_Create(&torchmodule));
-
+#endif
   ASSERT_TRUE(tensor_classes = PySet_New(NULL));
   ASSERT_TRUE(PyObject_SetAttrString(module, "_tensorclasses", tensor_classes) == 0);
 
@@ -363,5 +376,10 @@ PyMODINIT_FUNC PyInit_C()
 
   updateErrorHandlers();
 
+#if PY_MAJOR_VERSION == 2
+#else
   return module;
+#endif
 }
+
+#undef ASSERT_TRUE

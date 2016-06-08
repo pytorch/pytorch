@@ -40,7 +40,7 @@ static PyObject * THPStorage_(resize)(THPStorage *self, PyObject *number_arg)
   HANDLE_TH_ERRORS
   if (!PyLong_Check(number_arg))
     return NULL;
-  size_t newsize = PyLong_AsSize_t(number_arg);
+  long newsize = PyLong_AsLong(number_arg);
   if (PyErr_Occurred())
     return NULL;
   THStorage_(resize)(self->cdata, newsize);

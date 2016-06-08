@@ -6,5 +6,7 @@
 #include "generic/utils.h"
 #include <TH/THGenerateAllTypes.h>
 
+int THPUtils_getLong(PyObject *index, long *result);
+
 #endif
 

@@ -7,7 +7,7 @@ PyObject * THPTensor_(newObject)(THTensor *ptr)
 {
   // TODO: error checking
   PyObject *args = PyTuple_New(0);
-  PyObject *kwargs = Py_BuildValue("{s:N}", "cdata", PyLong_FromVoidPtr(ptr));
+  PyObject *kwargs = Py_BuildValue("{s:K}", "cdata", (unsigned long long) ptr);
   PyObject *instance = PyObject_Call(THPTensorClass, args, kwargs);
   Py_DECREF(args);
   Py_DECREF(kwargs);
@@ -41,9 +41,11 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
   THTensor *cdata_ptr = NULL;
   // If not, try to parse integers
 #define ERRMSG ";Expected torch.LongStorage or up to 4 integers as arguments"
+  // TODO: check that cdata_ptr is a keyword arg
   if (!storage_obj &&
-      !PyArg_ParseTupleAndKeywords(args, kwargs, "|LLLL$k" ERRMSG, (char**)keywords,
+      !PyArg_ParseTupleAndKeywords(args, kwargs, "|LLLLL" ERRMSG, (char**)keywords,
           &sizes[0], &sizes[1], &sizes[2], &sizes[3], &cdata_ptr))
+#undef ERRMSG
     return NULL;
 
   THPTensor *self = (THPTensor *)type->tp_alloc(type, 0);
@@ -64,21 +66,24 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
   END_HANDLE_TH_ERRORS
 }
 
-#define INDEX_LONG(DIM, IDX_VARIABLE, TENSOR_VARIABLE, CASE_1D, CASE_MD)       \
-long idx = PyLong_AsLong(IDX_VARIABLE);                                        \
-long dimsize = THTensor_(size)(TENSOR_VARIABLE, DIM);                          \
-idx = (idx < 0) ? dimsize + idx : idx;                                         \
-                                                                               \
-THArgCheck(dimsize > 0, 1, "empty tensor");                                    \
-THArgCheck(idx >= 0 && idx < dimsize, 2, "out of range");                      \
-                                                                               \
-if(THTensor_(nDimension)(TENSOR_VARIABLE) == 1) {                              \
-  CASE_1D;                                                                     \
-} else {                                                                       \
-  CASE_MD;                                                                     \
-}
-#define GET_PTR_1D(t, idx)                                                     \
+#define INDEX_LONG(DIM, IDX_VARIABLE, TENSOR_VARIABLE, CASE_1D, CASE_MD) \
+  long idx;								\
+  THPUtils_getLong(IDX_VARIABLE, &idx);					\
+  long dimsize = THTensor_(size)(TENSOR_VARIABLE, DIM);			\
+  idx = (idx < 0) ? dimsize + idx : idx;				\
+									\
+  THArgCheck(dimsize > 0, 1, "empty tensor");				\
+  THArgCheck(idx >= 0 && idx < dimsize, 2, "out of range");		\
+									\
+  if(THTensor_(nDimension)(TENSOR_VARIABLE) == 1) {			\
+    CASE_1D;								\
+  } else {								\
+    CASE_MD;								\
+  }
+
+#define GET_PTR_1D(t, idx)					\
   t->storage->data + t->storageOffset + t->stride[0] * idx;
+
 static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
     THTensor * &tresult, real * &rresult)
 {
@@ -86,7 +91,7 @@ static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
   rresult = NULL;
   try {
     // Indexing with an integer
-    if(PyLong_Check(index)) {
+    if(PyLong_Check(index) || PyInt_Check(index)) {
       THTensor *self_t = self->cdata;
       INDEX_LONG(0, index, self_t,
         // 1D tensor
@@ -97,8 +102,9 @@ static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
       )
     // Indexing with a single element tuple
     } else if (PyTuple_Check(index) &&
-              PyTuple_Size(index) == 1 &&
-              PyLong_Check(PyTuple_GET_ITEM(index, 0))) {
+	       PyTuple_Size(index) == 1 &&
+	       (PyLong_Check(PyTuple_GET_ITEM(index, 0))
+		|| PyInt_Check(PyTuple_GET_ITEM(index, 0)))) {
       PyObject *index_obj = PyTuple_GET_ITEM(index, 0);
       tresult = THTensor_(newWithTensor)(self->cdata);
       INDEX_LONG(0, index_obj, tresult,
@@ -121,7 +127,7 @@ static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
 
       for(int dim = 0; dim < PyTuple_Size(index); dim++) {
         PyObject *dimidx = PyTuple_GET_ITEM(index, dim);
-        if(PyLong_Check(dimidx)) {
+        if(PyLong_Check(dimidx) || PyInt_Check(dimidx)) {
           INDEX_LONG(t_dim, dimidx, tresult,
               // 1D tensor
               rresult = GET_PTR_1D(tresult, idx);
@@ -132,7 +138,9 @@ static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
               THTensor_(select)(tresult, NULL, t_dim, idx)
             )
         } else if (PyTuple_Check(dimidx)) {
-          if (PyTuple_Size(dimidx) != 1 || !PyLong_Check(PyTuple_GET_ITEM(dimidx, 0))) {
+          if (PyTuple_Size(dimidx) != 1 
+	      || !(PyLong_Check(PyTuple_GET_ITEM(dimidx, 0))
+		   || PyInt_Check(PyTuple_GET_ITEM(dimidx, 0)))) {
             PyErr_SetString(PyExc_RuntimeError, "Expected a single integer");
             return false;
           }
@@ -177,7 +185,11 @@ static PyObject * THPTensor_(get)(THPTensor *self, PyObject *index)
       return THPTensor_(newObject)(tresult);
     if (rresult)
       return THPUtils_(newReal)(*rresult);
-    PyErr_SetString(PyExc_RuntimeError, "Unknown exception");
+    char err_string[512];
+    snprintf (err_string, 512, 
+	      "%s %s", "Unknown exception in THPTensor_(get). Index type is: ",
+	      index->ob_type->tp_name);
+    PyErr_SetString(PyExc_RuntimeError, err_string);
     return NULL;
   }
   END_HANDLE_TH_ERRORS
@@ -312,7 +324,7 @@ PyTypeObject THPTensorStatelessType = {
   0,                                     /* tp_print */
   0,                                     /* tp_getattr */
   0,                                     /* tp_setattr */
-  0,                                     /* tp_reserved */
+  0,                                     /* tp_reserved / tp_compare */
   0,                                     /* tp_repr */
   0,                                     /* tp_as_number */
   0,                                     /* tp_as_sequence */
@@ -342,6 +354,13 @@ PyTypeObject THPTensorStatelessType = {
   0,                                     /* tp_init */
   0,                                     /* tp_alloc */
   0,                                     /* tp_new */
+  0,                                     /* tp_free */
+  0,                                     /* tp_is_gc */
+  0,                                     /* tp_bases */
+  0,                                     /* tp_mro */
+  0,                                     /* tp_cache */
+  0,                                     /* tp_subclasses */
+  0,                                     /* tp_weaklist */
 };
 
 bool THPTensor_(init)(PyObject *module)
@@ -353,6 +372,7 @@ bool THPTensor_(init)(PyObject *module)
   THPTensorStatelessType.tp_new = PyType_GenericNew;
   if (PyType_Ready(&THPTensorStatelessType) < 0)
     return false;
+
   PyModule_AddObject(module, THPTensorBaseStr, (PyObject *)&THPTensorType);
   return true;
 }
