@@ -44,6 +44,100 @@ static PyObject * THPTensor_(select)(THPTensor *self, PyObject *args)
   END_HANDLE_TH_ERRORS
 }
 
+#if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
+#define BUILD_REAL_FMT "d"
+#else
+#define BUILD_REAL_FMT "L"
+#endif
+
+static PyObject * THPTensor_(apply)(THPTensor *self, PyObject *arg)
+{
+  HANDLE_TH_ERRORS
+  // TODO: error message
+  if (!PyCallable_Check(arg))
+    return NULL;
+
+  real v;
+  THTensor *tensor = self->cdata;
+  TH_TENSOR_APPLY(real, tensor,
+                  PyObject *ret =
+                      PyObject_CallFunction(arg, BUILD_REAL_FMT, *tensor_data);
+                  if (!ret)
+                    return NULL;
+                  bool success = THPUtils_(parseReal)(ret, &v);
+                  Py_DECREF(ret);
+                  if (!success)
+                    THError("given function should return a number");
+                  *tensor_data = v;
+                  );
+
+  Py_INCREF(self);
+  return (PyObject*)self;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPTensor_(map)(THPTensor *self, PyObject *args)
+{
+  HANDLE_TH_ERRORS
+	PyObject *fn;
+	THPTensor *src_object;
+	if (!PyArg_ParseTuple(args, "O!O&", &THPTensorType, &src_object, THPUtils_getCallable, &fn))
+	  return NULL;
+
+  real v;
+  THTensor *tensor = self->cdata;
+  THTensor *src = src_object->cdata;
+  TH_TENSOR_APPLY2(real, tensor, real, src,
+                  PyObject *ret =
+                      PyObject_CallFunction(fn, BUILD_REAL_FMT BUILD_REAL_FMT,
+                                            *tensor_data, *src_data);
+                  if (!ret)
+                    return NULL;
+                  bool success = THPUtils_(parseReal)(ret, &v);
+                  Py_DECREF(ret);
+                  if (!success)
+                    THError("given function should return a number");
+                  *tensor_data = v;
+                  );
+
+  Py_INCREF(self);
+  return (PyObject*)self;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
+{
+  HANDLE_TH_ERRORS
+	PyObject *fn;
+	THPTensor *src1_object;
+	THPTensor *src2_object;
+	if (!PyArg_ParseTuple(args, "O!O!O&", &THPTensorType, &src1_object, &THPTensorType, &src2_object, THPUtils_getCallable, &fn))
+	  return NULL;
+
+  real v;
+  THTensor *tensor = self->cdata;
+  THTensor *src1 = src1_object->cdata;
+  THTensor *src2 = src2_object->cdata;
+  TH_TENSOR_APPLY3(real, tensor, real, src1, real, src2,
+                  PyObject *ret =
+                      PyObject_CallFunction(fn, BUILD_REAL_FMT BUILD_REAL_FMT BUILD_REAL_FMT,
+                                            *tensor_data, *src1_data, *src2_data);
+                  if (!ret)
+                    return NULL;
+                  bool success = THPUtils_(parseReal)(ret, &v);
+                  Py_DECREF(ret);
+                  if (!success)
+                    THError("given function should return a number");
+                  *tensor_data = v;
+                  );
+
+  Py_INCREF(self);
+  return (PyObject*)self;
+  END_HANDLE_TH_ERRORS
+}
+
+#undef BUILD_REAL_FMT
+
 [[
   numel
   numel -> long
@@ -1361,6 +1455,18 @@ static PyObject * THPTensor_(select)(THPTensor *self, PyObject *args)
     - self
 ]]
 
+[[
+  contiguous
+  newContiguous -> THTensor
+    - self
+]]
+
+[[
+  clone
+  newClone -> THTensor
+    - self
+]]
+
 // Declared in TensorCopy.cpp
 static PyObject * THPTensor_(copy)(THPTensor *self, PyObject *other);
 
@@ -1476,6 +1582,11 @@ static PyMethodDef THPTensor_(methods)[] = {
   {"transpose",       (PyCFunction)THPTensor_(transpose),       METH_VARARGS, NULL},
   {"squeeze",         (PyCFunction)THPTensor_(squeeze),         METH_VARARGS, NULL},
   {"nonzero",         (PyCFunction)THPTensor_(nonzero),         METH_VARARGS, NULL},
+  {"contiguous",      (PyCFunction)THPTensor_(contiguous),      METH_VARARGS, NULL},
+  {"clone",           (PyCFunction)THPTensor_(clone),           METH_VARARGS, NULL},
+  {"apply",           (PyCFunction)THPTensor_(apply),           METH_O,       NULL},
+  {"map",             (PyCFunction)THPTensor_(map),             METH_VARARGS, NULL},
+  {"map2",            (PyCFunction)THPTensor_(map2),            METH_VARARGS, NULL},
   {NULL}
 };
 
@@ -1569,5 +1680,8 @@ static PyMethodDef THPTensorStatelessMethods[] = {
   {"transpose",       (PyCFunction)THPTensor_stateless_(transpose),       METH_VARARGS, NULL},
   {"squeeze",         (PyCFunction)THPTensor_stateless_(squeeze),         METH_VARARGS, NULL},
   {"nonzero",         (PyCFunction)THPTensor_stateless_(nonzero),         METH_VARARGS, NULL},
+  {"contiguous",      (PyCFunction)THPTensor_stateless_(contiguous),      METH_VARARGS, NULL},
+  {"clone",           (PyCFunction)THPTensor_stateless_(clone),           METH_VARARGS, NULL},
   {NULL}
 };
+

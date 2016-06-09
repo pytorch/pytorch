@@ -7,6 +7,7 @@
 #include <TH/THGenerateAllTypes.h>
 
 int THPUtils_getLong(PyObject *index, long *result);
+int THPUtils_getCallable(PyObject *arg, PyObject **result);
 
 #endif
 

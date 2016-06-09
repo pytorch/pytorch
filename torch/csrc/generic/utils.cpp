@@ -7,7 +7,7 @@ bool THPUtils_(parseSlice)(PyObject *slice, Py_ssize_t len, Py_ssize_t *ostart, 
   Py_ssize_t start, stop, step, slicelength;
   if (PySlice_GetIndicesEx(
 // https://bugsfiles.kde.org/attachment.cgi?id=61186
-#if PY_VERSION_HEX >= 0x03020000 
+#if PY_VERSION_HEX >= 0x03020000
 			   slice,
 #else
 			   (PySliceObject *)slice,
@@ -37,7 +37,7 @@ bool THPUtils_(parseReal)(PyObject *value, real *result)
     *result = (real)PyFloat_AsDouble(value);
   } else {
    char err_string[512];
-   snprintf (err_string, 512, "%s %s", 
+   snprintf (err_string, 512, "%s %s",
 	     "parseReal expected long or float, but got type: ",
 	     value->ob_type->tp_name);
     PyErr_SetString(PyExc_RuntimeError, err_string);

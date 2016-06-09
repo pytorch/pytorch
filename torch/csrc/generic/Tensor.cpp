@@ -138,7 +138,7 @@ static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
               THTensor_(select)(tresult, NULL, t_dim, idx)
             )
         } else if (PyTuple_Check(dimidx)) {
-          if (PyTuple_Size(dimidx) != 1 
+          if (PyTuple_Size(dimidx) != 1
 	      || !(PyLong_Check(PyTuple_GET_ITEM(dimidx, 0))
 		   || PyInt_Check(PyTuple_GET_ITEM(dimidx, 0)))) {
             PyErr_SetString(PyExc_RuntimeError, "Expected a single integer");
@@ -186,7 +186,7 @@ static PyObject * THPTensor_(get)(THPTensor *self, PyObject *index)
     if (rresult)
       return THPUtils_(newReal)(*rresult);
     char err_string[512];
-    snprintf (err_string, 512, 
+    snprintf (err_string, 512,
 	      "%s %s", "Unknown exception in THPTensor_(get). Index type is: ",
 	      index->ob_type->tp_name);
     PyErr_SetString(PyExc_RuntimeError, err_string);
