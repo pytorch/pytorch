@@ -892,6 +892,24 @@ TH_API void THNN_CudaVolumetricMaxPooling_updateGradInput(
           int dT, int dW, int dH,
           int padT, int padW, int padH);
 
+TH_API void THNN_CudaVolumetricMaxUnpooling_updateOutput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *output,
+          THCudaTensor *indices,
+          int outputTime, int outputWidth, int outputHeight,
+          int dT, int dW, int dH,
+          int padT, int padW, int padH);
+TH_API void THNN_CudaVolumetricMaxUnpooling_updateGradInput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *gradOutput,
+          THCudaTensor *gradInput,
+          THCudaTensor *indices,
+          int outputTime, int outputWidth, int outputHeight,
+          int dT, int dW, int dH,
+          int padT, int padW, int padH);
+
 TH_API void THNN_CudaSpatialReflectionPadding_updateOutput(THCState *state,
                                                     THCudaTensor *input,
                                                     THCudaTensor *output,
