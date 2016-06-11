@@ -1,12 +1,9 @@
 #include "THCTensorMath.h"
 #include "THCGeneral.h"
 #include "THCTensorCopy.h"
-#include "THCTensorRandom.h"
 #include "THCApply.cuh"
-#include "THCReduce.cuh"
-#include "THCReduceAll.cuh"
+#include "THCNumerics.cuh"
 
-#include <thrust/functional.h>
 #include <cfloat>
 
 void THCudaTensor_cat(THCState *state, THCudaTensor *result, THCudaTensor *ta, THCudaTensor *tb, int dimension)
@@ -145,132 +142,6 @@ void THCudaTensor_addcdiv(THCState *state, THCudaTensor *self_, THCudaTensor *t,
   }
 
   THCudaCheck(cudaGetLastError());
-}
-
-float THCudaTensor_minall(THCState *state, THCudaTensor *self)
-{
-  THAssert(THCudaTensor_checkGPU(state, 1, self));
-  float val = FLT_MAX;
-  if (!THCudaTensor_reduceAll(state, self,
-                              thrust::identity<float>(),
-                              thrust::minimum<float>(),
-                              FLT_MAX, &val, 0)) {
-    THArgCheck(false, 1, CUTORCH_DIM_WARNING);
-  }
-
-  THCudaCheck(cudaGetLastError());
-  return val;
-}
-
-float THCudaTensor_maxall(THCState *state, THCudaTensor *self)
-{
-  THAssert(THCudaTensor_checkGPU(state, 1, self));
-  float val = -FLT_MAX;
-  if (!THCudaTensor_reduceAll(state, self,
-                              thrust::identity<float>(),
-                              thrust::maximum<float>(),
-                              -FLT_MAX, &val, 0)) {
-    THArgCheck(false, 1, CUTORCH_DIM_WARNING);
-  }
-
-  THCudaCheck(cudaGetLastError());
-  return val;
-}
-
-float THCudaTensor_sumall(THCState *state, THCudaTensor *self)
-{
-  THAssert(THCudaTensor_checkGPU(state, 1, self));
-  float val = 0.0f;
-  if (!THCudaTensor_reduceAll(state, self,
-                              thrust::identity<float>(),
-                              thrust::plus<float>(),
-                              0.0f, &val, 0)) {
-    THArgCheck(false, 1, CUTORCH_DIM_WARNING);
-  }
-
-  THCudaCheck(cudaGetLastError());
-  return val;
-}
-
-float THCudaTensor_prodall(THCState *state, THCudaTensor *self)
-{
-  THAssert(THCudaTensor_checkGPU(state, 1, self));
-  float val = 1.0f;
-  if (!THCudaTensor_reduceAll(state, self,
-                              thrust::identity<float>(),
-                              thrust::multiplies<float>(),
-                              1.0f, &val, 0)) {
-    THArgCheck(false, 1, CUTORCH_DIM_WARNING);
-  }
-
-  THCudaCheck(cudaGetLastError());
-  return val;
-}
-
-void THCudaTensor_sum(THCState* state, THCudaTensor *self, THCudaTensor *src, long dimension)
-{
-  THAssert(THCudaTensor_checkGPU(state, 2, self, src));
-  if (!THCudaTensor_reduceDim(
-        state, self, src,
-        thrust::identity<float>(), thrust::plus<float>(), 0.0f, dimension)) {
-    THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-  }
-
-  THCudaCheck(cudaGetLastError());
-}
-
-void THCudaTensor_prod(THCState* state, THCudaTensor *self, THCudaTensor *src, long dimension)
-{
-  THAssert(THCudaTensor_checkGPU(state, 2, self, src));
-  if (!THCudaTensor_reduceDim(
-        state, self, src,
-        thrust::identity<float>(), thrust::multiplies<float>(), 1.0f, dimension)) {
-    THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-  }
-
-  THCudaCheck(cudaGetLastError());
-}
-
-struct logicalall_functor
-{
-  __device__ inline float operator()(float x, float y) const
-  {
-    return x && y;
-  }
-};
-
-struct logicalany_functor
-{
-  __device__ float operator()(float x, float y) const
-  {
-    return x || y;
-  }
-};
-
-int THCudaTensor_logicalall(THCState *state, THCudaTensor *self) {
-  THAssert(THCudaTensor_checkGPU(state, 1, self));
-  float result = 0.0f;
-  if (!THCudaTensor_reduceAll(state, self,
-                              thrust::identity<float>(),
-                              logicalall_functor(),
-                              1.0f, &result, 0)) {
-    THArgCheck(false, 1, CUTORCH_DIM_WARNING);
-  }
-
-  return (int) result;
-}
-
-int THCudaTensor_logicalany(THCState *state, THCudaTensor *self) {
-  THAssert(THCudaTensor_checkGPU(state, 1, self));
-  float result = 0.0f;
-  if (!THCudaTensor_reduceAll(state, self,
-                              thrust::identity<float>(),
-                              logicalany_functor(),
-                              0.0f, &result, 0)) {
-    THArgCheck(false, 1, CUTORCH_DIM_WARNING);
-  }
-
-  return (int) result;
 }
 
 template <typename T>
