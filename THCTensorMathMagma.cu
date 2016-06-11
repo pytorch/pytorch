@@ -409,7 +409,7 @@ void THCudaTensor_getri(THCState *state, THCudaTensor *ra_, THCudaTensor *a)
   THCudaCheck(THCudaMalloc(state, (void**)&ipiv_gpu, n * sizeof(int)));
 
   // Run LU
-  THCudaBlas_getrf(state, n, d_matrices1, n, ipiv_gpu, info_gpu, 1);
+  THCudaBlas_Sgetrf(state, n, d_matrices1, n, ipiv_gpu, info_gpu, 1);
 
   THCudaCheck(cudaMemcpy(&info, info_gpu, sizeof(int), cudaMemcpyDeviceToHost));
 
@@ -419,7 +419,7 @@ void THCudaTensor_getri(THCState *state, THCudaTensor *ra_, THCudaTensor *a)
     THError("CUBLAS getrf : Argument %d : illegal value", -info);
 
   // Inverse
-  THCudaBlas_getri(state, n, d_matrices1_const, n, ipiv_gpu, d_matrices2, n, info_gpu, 1);
+  THCudaBlas_Sgetri(state, n, d_matrices1_const, n, ipiv_gpu, d_matrices2, n, info_gpu, 1);
   if (info > 0)
     THError("CUBLAS getri : U(%d,%d) is 0, U is singular", info, info);
   else if (info < 0)

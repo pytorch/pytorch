@@ -525,24 +525,24 @@ void THCudaTensor_norm(THCState *state, THCudaTensor* self, THCudaTensor* src, f
 {
   THAssert(THCudaTensor_checkGPU(state, 2, self, src));
   if (value == 0.0f) {
-    THCudaTensor_reduceDim(state, self, src,
-                           TensorNonZeroOp(), thrust::plus<float>(),
-                           0.0f, dimension);
+    THC_reduceDim(state, self, src,
+                  TensorNonZeroOp(), thrust::plus<float>(),
+                  0.0f, dimension);
   } else if (value == 1.0f) {
-    THCudaTensor_reduceDim(state, self, src,
-                           TensorNormOp<1>(value), thrust::plus<float>(),
-                           0.0f, dimension);
+    THC_reduceDim(state, self, src,
+                  TensorNormOp<1>(value), thrust::plus<float>(),
+                  0.0f, dimension);
 
   } else if (value == 2.0f) {
-    THCudaTensor_reduceDim(state, self, src,
-                           TensorNormOp<2>(value), thrust::plus<float>(),
-                           0.0f, dimension);
+    THC_reduceDim(state, self, src,
+                  TensorNormOp<2>(value), thrust::plus<float>(),
+                  0.0f, dimension);
     THCudaTensor_pow(state, self, self, 0.5f);
 
   } else {
-    THCudaTensor_reduceDim(state, self, src,
-                           TensorNormOp<-1>(value), thrust::plus<float>(),
-                           0.0f, dimension);
+    THC_reduceDim(state, self, src,
+                  TensorNormOp<-1>(value), thrust::plus<float>(),
+                  0.0f, dimension);
     THCudaTensor_pow(state, self, self, 1.0f / value);
   }
 
@@ -684,7 +684,7 @@ THC_API void THCudaTensor_cross(THCState *state, THCudaTensor *self, THCudaTenso
   for (i = 0; i < nd; i++) {
     THArgCheck(THCudaTensor_size(state, x, i) == THCudaTensor_size(state, y, i), 1, "dimension %i of x and y does not match", i);
     if (dimension < 0 && THCudaTensor_size(state, x, i) == 3) {
-      dimension = i; 
+      dimension = i;
     }
   }
 

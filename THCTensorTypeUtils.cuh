@@ -31,17 +31,22 @@ template <typename TensorType>
 struct TensorUtils {
 };
 
-#define TENSOR_UTILS(TENSOR_TYPE, DATA_TYPE)                            \
+#define TENSOR_UTILS(TENSOR_TYPE, DATA_TYPE, ACC_DATA_TYPE)             \
   template <>                                                           \
   struct TensorUtils<TENSOR_TYPE> {                                     \
     typedef DATA_TYPE DataType;                                         \
+    typedef ACC_DATA_TYPE AccDataType;                                  \
                                                                         \
     static TENSOR_TYPE* newTensor(THCState* state);                     \
     static TENSOR_TYPE* newContiguous(THCState* state, TENSOR_TYPE* t); \
+    static THLongStorage* newSizeOf(THCState* state, TENSOR_TYPE* t);   \
     static void retain(THCState* state, TENSOR_TYPE* t);                \
     static void free(THCState* state, TENSOR_TYPE* t);                  \
     static void freeCopyTo(THCState* state, TENSOR_TYPE* src,           \
                            TENSOR_TYPE* dst);                           \
+    static void resize(THCState* state, TENSOR_TYPE* out,               \
+                       THLongStorage* sizes,                            \
+                       THLongStorage* strides);                         \
     static void resizeAs(THCState* state, TENSOR_TYPE* dst,             \
                          TENSOR_TYPE* src);                             \
     static DATA_TYPE* getData(THCState* state, TENSOR_TYPE* t);         \
@@ -61,16 +66,16 @@ struct TensorUtils {
     static bool canUse32BitIndexMath(THCState* state, TENSOR_TYPE* t);  \
   }
 
-TENSOR_UTILS(THCudaByteTensor, unsigned char);
-TENSOR_UTILS(THCudaCharTensor, char);
-TENSOR_UTILS(THCudaShortTensor, short);
-TENSOR_UTILS(THCudaIntTensor, int);
-TENSOR_UTILS(THCudaLongTensor, long);
-TENSOR_UTILS(THCudaTensor, float);
-TENSOR_UTILS(THCudaDoubleTensor, double);
+TENSOR_UTILS(THCudaByteTensor, unsigned char, long);
+TENSOR_UTILS(THCudaCharTensor, char, long);
+TENSOR_UTILS(THCudaShortTensor, short, long);
+TENSOR_UTILS(THCudaIntTensor, int, long);
+TENSOR_UTILS(THCudaLongTensor, long, long);
+TENSOR_UTILS(THCudaTensor, float, float);
+TENSOR_UTILS(THCudaDoubleTensor, double, double);
 
 #ifdef CUDA_HALF_TENSOR
-TENSOR_UTILS(THCudaHalfTensor, half);
+TENSOR_UTILS(THCudaHalfTensor, half, float);
 #endif
 
 #undef TENSOR_UTILS
@@ -91,15 +96,6 @@ getTensorInfo(THCState* state, TensorType* t) {
     TensorUtils<TensorType>::getData(state, t), dims, sz, st);
 }
 
-/// `half` has some type conversion issues associated with it, since it
-/// is a struct without a constructor/implicit conversion constructor.
-/// We use this to convert scalar values to the given type that the
-/// tensor expects.
-template <typename In, typename Out>
-struct ScalarConvert {
-  static __host__ __device__ Out to(const In v) { return (Out) v; }
-};
-
 template <typename T>
 struct ScalarNegate {
   static __host__ __device__ T to(const T v) { return -v; }
@@ -111,36 +107,6 @@ struct ScalarInv {
 };
 
 #ifdef CUDA_HALF_TENSOR
-
-template <typename Out>
-struct ScalarConvert<half, Out> {
-  static __host__ __device__ Out to(const half v) {
-#ifdef __CUDA_ARCH__
-    return (Out) __half2float(v);
-#else
-    return (Out) THC_half2float(v);
-#endif
-  }
-};
-
-template <typename In>
-struct ScalarConvert<In, half> {
-  static __host__ __device__ half to(const In v) {
-#ifdef __CUDA_ARCH__
-    return __float2half((float) v);
-#else
-    return THC_float2half((float) v);
-#endif
-  }
-};
-
-template <>
-struct ScalarConvert<half, half> {
-  static __host__ __device__ half to(const half v) {
-    return v;
-  }
-};
-
 template <>
 struct ScalarNegate<half> {
   static __host__ __device__ half to(const half v) {
