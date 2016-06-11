@@ -100,13 +100,13 @@ void THNN_CudaRReLU_updateOutput(THCState *state, THCudaTensor *input, THCudaTen
     const double negSlope = (lower + upper) / 2;
     if (inplace)
     {
-      THCudaTensor_pointwiseApply1(state, input, RReLUUpdateOutputEvalIP_functor(negSlope));
+      THC_pointwiseApply1(state, input, RReLUUpdateOutputEvalIP_functor(negSlope));
       THCudaTensor_set(state, output, input);
     }
     else
     {
       THCudaTensor_resizeAs(state, output, input);
-      THCudaTensor_pointwiseApply2(state, output, input, RReLUUpdateOutputEval_functor(negSlope));
+      THC_pointwiseApply2(state, output, input, RReLUUpdateOutputEval_functor(negSlope));
     }
   }
 }
@@ -169,13 +169,13 @@ void THNN_CudaRReLU_updateGradInput(THCState *state, THCudaTensor *input, THCuda
     const double negSlope = (lower + upper) / 2;
     if (inplace)
     {
-      THCudaTensor_pointwiseApply2(state, gradOutput, input, RReLUupdateGradInputEvalIP_functor(negSlope));
+      THC_pointwiseApply2(state, gradOutput, input, RReLUupdateGradInputEvalIP_functor(negSlope));
       THCudaTensor_set(state, gradInput, gradOutput);
     }
     else
     {
       THCudaTensor_resizeAs(state, gradInput, input);
-      THCudaTensor_pointwiseApply3(state, gradInput, gradOutput, input, RReLUupdateGradInputEval_functor(negSlope));
+      THC_pointwiseApply3(state, gradInput, gradOutput, input, RReLUupdateGradInputEval_functor(negSlope));
     }
   }
 

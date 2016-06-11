@@ -26,7 +26,7 @@ void THNN_CudaHardTanh_updateOutput(THCState *state, THCudaTensor *input, THCuda
 {
   THCUNN_assertSameGPU(state, 2, input, output);
   THCudaTensor_resizeAs(state, output, input);
-  THCudaTensor_pointwiseApply2(state, output, input,
+  THC_pointwiseApply2(state, output, input,
                                hardtanhupdateOutput_functor(min_val, max_val));
 }
 
@@ -54,6 +54,6 @@ void THNN_CudaHardTanh_updateGradInput(THCState *state, THCudaTensor *input, THC
   THCUNN_assertSameGPU(state, 3, input, gradOutput, gradInput);
 
   THCudaTensor_resizeAs(state, gradInput, input);
-  THCudaTensor_pointwiseApply3(state, gradInput, input, gradOutput,
+  THC_pointwiseApply3(state, gradInput, input, gradOutput,
                                hardtanhupdateGradInput_functor(min_val, max_val));
 }

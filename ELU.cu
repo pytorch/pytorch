@@ -37,13 +37,13 @@ void THNN_CudaELU_updateOutput(THCState *state, THCudaTensor *input, THCudaTenso
 
   if (inplace)
   {
-    THCudaTensor_pointwiseApply1(state, input, ELUupdateOutputIP_functor(alpha));
+    THC_pointwiseApply1(state, input, ELUupdateOutputIP_functor(alpha));
     THCudaTensor_set(state, output, input);
   }
   else
   {
     THCudaTensor_resizeAs(state, output, input);
-    THCudaTensor_pointwiseApply2(state, output, input, ELUupdateOutput_functor(alpha));
+    THC_pointwiseApply2(state, output, input, ELUupdateOutput_functor(alpha));
   }
 }
 
@@ -82,12 +82,12 @@ void THNN_CudaELU_updateGradInput(THCState *state, THCudaTensor *input, THCudaTe
 
   if (inplace)
   {
-    THCudaTensor_pointwiseApply2(state, gradOutput, output, ELUupdateGradInputIP_functor(alpha));
+    THC_pointwiseApply2(state, gradOutput, output, ELUupdateGradInputIP_functor(alpha));
     THCudaTensor_set(state, gradInput, gradOutput);
   }
   else
   {
     THCudaTensor_resizeAs(state, gradInput, output);
-    THCudaTensor_pointwiseApply3(state, gradInput, output, gradOutput, ELUupdateGradInput_functor(alpha));
+    THC_pointwiseApply3(state, gradInput, output, gradOutput, ELUupdateGradInput_functor(alpha));
   }
 }

@@ -13,7 +13,7 @@ void THNN_CudaAbs_updateOutput(THCState *state, THCudaTensor *input, THCudaTenso
 {
   THCUNN_assertSameGPU(state, 2, input, output);
   THCudaTensor_resizeAs(state, output, input);
-  THCudaTensor_pointwiseApply2(state, output, input, absupdateOutput_functor());
+  THC_pointwiseApply2(state, output, input, absupdateOutput_functor());
 }
 
 struct absupdateGradInput_functor
@@ -28,5 +28,5 @@ void THNN_CudaAbs_updateGradInput(THCState *state, THCudaTensor *input, THCudaTe
 {
   THCUNN_assertSameGPU(state, 3, input, gradOutput, gradInput);
   THCudaTensor_resizeAs(state, gradInput, input);
-  THCudaTensor_pointwiseApply3(state, gradInput, input, gradOutput, absupdateGradInput_functor());
+  THC_pointwiseApply3(state, gradInput, input, gradOutput, absupdateGradInput_functor());
 }
