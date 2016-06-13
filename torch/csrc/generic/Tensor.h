@@ -2,10 +2,10 @@
 #define TH_GENERIC_FILE "generic/Tensor.h"
 #else
 
-typedef struct {
+struct THPTensor {
   PyObject_HEAD
   THTensor *cdata;
-} THPTensor;
+};
 
 extern PyTypeObject THPTensorType;
 extern PyTypeObject THPTensorStatelessType;

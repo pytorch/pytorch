@@ -9,7 +9,7 @@ PyObject * THPStorage_(newObject)(THStorage *ptr)
   // TODO: error checking
   PyObject *args = PyTuple_New(0);
   PyObject *kwargs = Py_BuildValue("{s:N}", "cdata", PyLong_FromVoidPtr(ptr));
-    
+
   PyObject *instance = PyObject_Call(THPStorageClass, args, kwargs);
   Py_DECREF(args);
   Py_DECREF(kwargs);
@@ -32,7 +32,7 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
   HANDLE_TH_ERRORS
   static const char *keywords[] = {"cdata", NULL};
   void* number_arg = NULL;
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|O&", (char **)keywords, 
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|O&", (char **)keywords,
 				   THPUtils_getLong, &number_arg))
     return NULL;
   THPStorage *self = (THPStorage *)type->tp_alloc(type, 0);
@@ -92,7 +92,7 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
     return THPStorage_(newObject)(new_storage);
   }
   char err_string[512];
-  snprintf (err_string, 512, 
+  snprintf (err_string, 512,
 	    "%s %s", "Only indexing with integers and slices supported, but got type: ",
 	    index->ob_type->tp_name);
   PyErr_SetString(PyExc_RuntimeError, err_string);
@@ -123,7 +123,7 @@ static int THPStorage_(set)(THPStorage *self, PyObject *index, PyObject *value)
     return 0;
   }
   char err_string[512];
-  snprintf (err_string, 512, "%s %s", 
+  snprintf (err_string, 512, "%s %s",
 	    "Only indexing with integers and slices supported, but got type: ",
 	    index->ob_type->tp_name);
   PyErr_SetString(PyExc_RuntimeError, err_string);
@@ -137,6 +137,7 @@ static PyMappingMethods THPStorage_(mappingmethods) = {
   (objobjargproc)THPStorage_(set)
 };
 
+// TODO: implement equality
 PyTypeObject THPStorageType = {
   PyVarObject_HEAD_INIT(NULL, 0)
   "torch.C." THPStorageBaseStr,          /* tp_name */

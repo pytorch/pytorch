@@ -24,6 +24,182 @@ SIMPLE_OP(nDimension,       PyLong_FromLong(THTensor_(nDimension)(self->cdata)))
 SIMPLE_RETURN_SELF(free,    THTensor_(free)(self->cdata))
 SIMPLE_RETURN_SELF(retain,  THTensor_(retain)(self->cdata))
 
+static PyObject * THPTensor_(resize)(THPTensor *self, PyObject *args)
+{
+  HANDLE_TH_ERRORS
+  THLongStoragePtr size = THPUtils_getLongStorage(args);
+  THTensor_(resize)(self->cdata, size, NULL);
+
+  Py_INCREF(self);
+  return (PyObject*)self;
+  END_HANDLE_TH_ERRORS
+}
+
+static void THPTensor_(doReshape)(THTensor *result, THTensor *src,
+        PyObject *args, int indices_offset)
+{
+  THLongStoragePtr size = THPUtils_getLongStorage(args, indices_offset);
+  THTensor_(reshape)(result, src, size);
+}
+
+static PyObject * THPTensor_(reshape)(THPTensor *self, PyObject *args)
+{
+  HANDLE_TH_ERRORS
+  if (PyTuple_Size(args) == 0) {
+    THPUtils_setError("reshape requires at least one argument");
+    return NULL;
+  }
+  PyObject *first_arg = PyTuple_GET_ITEM(args, 0);
+  THPTensorPtr returned;
+
+  // TODO: this behaviour is quite weird...
+  // m.reshape(x, 2, 2) will alter m with x elements :/
+  if (!THPTensor_(IsSubclass)(first_arg)) {
+    THTensorPtr _ret = THTensor_(new)();
+    returned = (THPTensor*)THPTensor_(newObject)(_ret);
+    _ret.release();
+    THPTensor_(doReshape)(returned->cdata, self->cdata, args, 0);
+  } else {
+    Py_INCREF(self);
+    returned = self;
+    THPTensor_(doReshape)(self->cdata, ((THPTensor*)first_arg)->cdata, args, 1);
+  }
+
+  return (PyObject *)returned.release();
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPTensor_stateless_(reshape)(PyObject *_unused, PyObject *args)
+{
+  HANDLE_TH_ERRORS
+  if (PyTuple_Size(args) < 2) {
+    THPUtils_setError("reshape requires at least two arguments");
+    return NULL;
+  }
+  THPTensor *first_arg = (THPTensor*)PyTuple_GET_ITEM(args, 0);
+  PyObject *second_arg = PyTuple_GET_ITEM(args, 1);
+  THPTensorPtr returned;
+  if (!THPTensor_(IsSubclass)((PyObject*)first_arg)) {
+    THPUtils_setError("reshape requires it's first argument to be a Tensor");
+    return NULL;
+  }
+
+  if (!THPTensor_(IsSubclass)(second_arg)) {
+    THTensorPtr _ret = THTensor_(new)();
+    returned = (THPTensor*)THPTensor_(newObject)(_ret);
+    _ret.release();
+    THPTensor_(doReshape)(returned->cdata, first_arg->cdata, args, 1);
+  } else {
+    Py_INCREF(first_arg);
+    returned = first_arg;
+    THPTensor_(doReshape)(returned->cdata, ((THPTensor*)second_arg)->cdata, args, 2);
+  }
+
+  return (PyObject *)returned.release();
+  END_HANDLE_TH_ERRORS
+}
+
+#define IMPLEMENT_FILLER(NAME)                                                 \
+static PyObject * THPTensor_(NAME)(THPTensor *self, PyObject *args)            \
+{                                                                              \
+  HANDLE_TH_ERRORS                                                             \
+  THLongStorage *size = THPUtils_getLongStorage(args, 0);                      \
+  try {                                                                        \
+    THTensor_(NAME)(self->cdata, size);                                        \
+  } catch(...) {                                                               \
+    THLongStorage_free(size);                                                  \
+    throw;                                                                     \
+  }                                                                            \
+  THLongStorage_free(size);                                                    \
+                                                                               \
+  Py_INCREF(self);                                                             \
+  return (PyObject*)self;                                                      \
+  END_HANDLE_TH_ERRORS                                                         \
+}
+
+#define IMPLEMENT_STATELESS_FILLER(NAME)                                       \
+static PyObject * THPTensor_stateless_(NAME)(PyObject *_unused, PyObject *args)\
+{                                                                              \
+  HANDLE_TH_ERRORS                                                             \
+  if (PyTuple_Size(args) == 0) {                                               \
+    THPUtils_setError(#NAME " requires at least one argument");                \
+    return NULL;                                                               \
+  }                                                                            \
+  PyObject *first_arg = PyTuple_GET_ITEM(args, 0);                             \
+  THPTensor *returned;                                                         \
+  THLongStorage *size;                                                         \
+  if (THPTensor_(IsSubclass)(first_arg)) {                                     \
+    Py_INCREF(first_arg);                                                      \
+    returned = (THPTensor*)first_arg;                                          \
+    size = THPUtils_getLongStorage(args, 1);                                   \
+  } else {                                                                     \
+    THTensor *_ret = THTensor_(new)();                                         \
+    returned = (THPTensor*)THPTensor_(newObject)(_ret);                        \
+    size = THPUtils_getLongStorage(args, 0);                                   \
+  }                                                                            \
+  try {                                                                        \
+    THTensor_(NAME)(returned->cdata, size);                                    \
+  } catch(...) {                                                               \
+    THLongStorage_free(size);                                                  \
+    Py_DECREF(returned);                                                       \
+    throw;                                                                     \
+  }                                                                            \
+  THLongStorage_free(size);                                                    \
+                                                                               \
+  return (PyObject*)returned;                                                  \
+  END_HANDLE_TH_ERRORS                                                         \
+}
+
+IMPLEMENT_FILLER(zeros)
+IMPLEMENT_FILLER(ones)
+IMPLEMENT_STATELESS_FILLER(zeros)
+IMPLEMENT_STATELESS_FILLER(ones)
+
+static PyObject * THPTensor_(set)(THPTensor *self, PyObject *args)
+{
+  HANDLE_TH_ERRORS
+  Py_ssize_t num_args = PyTuple_Size(args);
+  PyObject *first_arg = num_args == 0 ? NULL : PyTuple_GET_ITEM(args, 0);
+
+  if (num_args == 1 && THPTensor_(IsSubclass)(first_arg)) {
+    THTensor_(set)(self->cdata, ((THPTensor*)first_arg)->cdata);
+    Py_INCREF(self);
+    return (PyObject*)self;
+
+  } else if (num_args <= 4 && THPStorage_(IsSubclass)(first_arg)) {
+    THLongStoragePtr sizes, strides;
+    THPStorage *storage = (THPStorage*)first_arg;
+    long storageOffset = 0;
+
+    if (num_args >= 2 && !THPUtils_getLong(PyTuple_GET_ITEM(args, 1), &storageOffset))
+      return NULL;
+
+    if (num_args >= 3) {
+      PyObject *third_arg = PyTuple_GET_ITEM(args, 2);
+      THPUtils_assert(THPLongStorage_IsSubclass(third_arg), "set expects a LongStorage as its third argument");
+      sizes = ((THPLongStorage*)third_arg)->cdata;
+      THLongStorage_retain(sizes);
+    } else {
+      sizes = THLongStorage_newWithSize1(THStorage_(size)(storage->cdata));
+    }
+
+    if (num_args >= 4) {
+      PyObject *fourth_arg = PyTuple_GET_ITEM(args, 2);
+      THPUtils_assert(THPLongStorage_IsSubclass(fourth_arg), "set expects a LongStorage as its third argument");
+      strides = ((THPLongStorage*)fourth_arg)->cdata;
+      THLongStorage_retain(strides);
+    }
+
+    THTensor_(setStorage)(self->cdata, storage->cdata, storageOffset, sizes, strides);
+    Py_INCREF(self);
+    return (PyObject*)self;
+  }
+
+  // TODO: Inform about possible arg configurations
+  return NULL;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPTensor_(select)(THPTensor *self, PyObject *args)
 {
   HANDLE_TH_ERRORS
@@ -53,9 +229,10 @@ static PyObject * THPTensor_(select)(THPTensor *self, PyObject *args)
 static PyObject * THPTensor_(apply)(THPTensor *self, PyObject *arg)
 {
   HANDLE_TH_ERRORS
-  // TODO: error message
-  if (!PyCallable_Check(arg))
+  if (!PyCallable_Check(arg)) {
+    THPUtils_setError("apply requires a callable as it's first argument");
     return NULL;
+  }
 
   real v;
   THTensor *tensor = self->cdata;
@@ -1467,6 +1644,13 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
     - self
 ]]
 
+[[
+  resizeAs STATEFUL_ONLY
+  resizeAs -> self
+    - self
+    - THTensor other
+]]
+
 // Declared in TensorCopy.cpp
 static PyObject * THPTensor_(copy)(THPTensor *self, PyObject *other);
 
@@ -1587,6 +1771,12 @@ static PyMethodDef THPTensor_(methods)[] = {
   {"apply",           (PyCFunction)THPTensor_(apply),           METH_O,       NULL},
   {"map",             (PyCFunction)THPTensor_(map),             METH_VARARGS, NULL},
   {"map2",            (PyCFunction)THPTensor_(map2),            METH_VARARGS, NULL},
+  {"resize",          (PyCFunction)THPTensor_(resize),          METH_VARARGS, NULL},
+  {"resizeAs",        (PyCFunction)THPTensor_(resizeAs),        METH_VARARGS, NULL},
+  {"reshape",         (PyCFunction)THPTensor_(reshape),         METH_VARARGS, NULL},
+  {"zeros",           (PyCFunction)THPTensor_(zeros),           METH_VARARGS, NULL},
+  {"ones",            (PyCFunction)THPTensor_(ones),            METH_VARARGS, NULL},
+  {"set",             (PyCFunction)THPTensor_(set),             METH_VARARGS, NULL},
   {NULL}
 };
 
@@ -1682,6 +1872,9 @@ static PyMethodDef THPTensorStatelessMethods[] = {
   {"nonzero",         (PyCFunction)THPTensor_stateless_(nonzero),         METH_VARARGS, NULL},
   {"contiguous",      (PyCFunction)THPTensor_stateless_(contiguous),      METH_VARARGS, NULL},
   {"clone",           (PyCFunction)THPTensor_stateless_(clone),           METH_VARARGS, NULL},
+  {"reshape",         (PyCFunction)THPTensor_stateless_(reshape),         METH_VARARGS, NULL},
+  {"zeros",           (PyCFunction)THPTensor_stateless_(zeros),           METH_VARARGS, NULL},
+  {"ones",            (PyCFunction)THPTensor_stateless_(ones),            METH_VARARGS, NULL},
   {NULL}
 };
 

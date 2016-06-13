@@ -169,7 +169,7 @@ static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
 #undef INDEX_LONG
 #undef GET_PTR_1D
 
-static PyObject * THPTensor_(get)(THPTensor *self, PyObject *index)
+static PyObject * THPTensor_(getValue)(THPTensor *self, PyObject *index)
 {
   HANDLE_TH_ERRORS
   if(THPByteTensor_IsSubclass(index)) {
@@ -195,7 +195,7 @@ static PyObject * THPTensor_(get)(THPTensor *self, PyObject *index)
   END_HANDLE_TH_ERRORS
 }
 
-int THPTensor_(set)(THPTensor *self, PyObject *index, PyObject *value)
+int THPTensor_(setValue)(THPTensor *self, PyObject *index, PyObject *value)
 {
   HANDLE_TH_ERRORS
   if (THPByteTensor_IsSubclass(index)) {
@@ -259,10 +259,11 @@ int THPTensor_(set)(THPTensor *self, PyObject *index, PyObject *value)
 
 static PyMappingMethods THPTensor_(mappingmethods) = {
   NULL,
-  (binaryfunc)THPTensor_(get),
-  (objobjargproc)THPTensor_(set)
+  (binaryfunc)THPTensor_(getValue),
+  (objobjargproc)THPTensor_(setValue)
 };
 
+// TODO: implement equality
 PyTypeObject THPTensorType = {
   PyVarObject_HEAD_INIT(NULL, 0)
   "torch.C." THPTensorBaseStr,           /* tp_name */

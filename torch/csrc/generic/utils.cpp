@@ -60,4 +60,31 @@ PyObject * THPUtils_(newReal)(real value)
 #endif
 }
 
+template<>
+void THPPointer<THStorage>::free() {
+  if (ptr)
+    THStorage_(free)(ptr);
+}
+
+template<>
+void THPPointer<THTensor>::free() {
+  if (ptr)
+    THTensor_(free)(ptr);
+}
+
+template<>
+void THPPointer<THPStorage>::free() {
+  Py_DECREF(ptr);
+}
+
+template<>
+void THPPointer<THPTensor>::free() {
+  Py_DECREF(ptr);
+}
+
+template class THPPointer<THStorage>;
+template class THPPointer<THTensor>;
+template class THPPointer<THPStorage>;
+template class THPPointer<THPTensor>;
+
 #endif

@@ -11,7 +11,9 @@
 #endif
 
 #include "Exceptions.h"
-#include "utils.h"
 
 #include "Storage.h"
 #include "Tensor.h"
+
+// This requires defined Storage and Tensor types
+#include "utils.h"

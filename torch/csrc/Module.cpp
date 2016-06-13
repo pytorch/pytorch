@@ -206,6 +206,9 @@ IMPLEMENT_STATELESS(histc)
 IMPLEMENT_STATELESS(atan2)
 IMPLEMENT_STATELESS(pow)
 IMPLEMENT_STATELESS(lerp)
+IMPLEMENT_STATELESS(reshape)
+IMPLEMENT_STATELESS(zeros)
+IMPLEMENT_STATELESS(ones)
 
 // In nonzero, the first argument might be a LongTensor that will be used
 // for indices output, so we should pick a function based on second
@@ -315,6 +318,9 @@ static PyMethodDef TorchMethods[] = {
   {"atan2",           (PyCFunction)THPModule_atan2,             METH_VARARGS, NULL},
   {"pow",             (PyCFunction)THPModule_pow,               METH_VARARGS, NULL},
   {"lerp",            (PyCFunction)THPModule_lerp,              METH_VARARGS, NULL},
+  {"reshape",         (PyCFunction)THPModule_reshape,           METH_VARARGS, NULL},
+  {"zeros",           (PyCFunction)THPModule_zeros,             METH_VARARGS, NULL},
+  {"ones",            (PyCFunction)THPModule_ones,              METH_VARARGS, NULL},
   {NULL, NULL, 0, NULL}
 };
 
@@ -330,11 +336,13 @@ static struct PyModuleDef torchmodule = {
 
 static void errorHandler(const char *msg, void *data)
 {
+  fprintf(stderr, "%s\n", msg);
   throw THException(msg);
 }
 
 static void errorHandlerArg(int argNumber, const char *msg, void *data)
 {
+  fprintf(stderr, "%s\n", msg);
   throw THArgException(msg, argNumber);
 }
 

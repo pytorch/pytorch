@@ -400,7 +400,7 @@ def argfilter():
     # use class rather than nonlocal to maintain 2.7 compat
     # see http://stackoverflow.com/questions/3190706/nonlocal-keyword-in-python-2-x
     # TODO: check this works
-    class context: 
+    class context:
         provided = set()
     def is_already_provided(arg):
         ret = False
