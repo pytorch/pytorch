@@ -1651,6 +1651,49 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
     - THTensor other
 ]]
 
+// TODO: index* methods expect 1-based indexing
+// this has to be fixed in TH
+[[
+  index
+  indexSelect -> self
+    - self
+    - self
+    - long dim
+    - THLongTensor index
+  indexSelect -> self OPTIONAL_SELF
+    - self
+    - THTensor source
+    - long dim
+    - THLongTensor index
+]]
+
+[[
+  indexCopy
+  indexCopy -> self
+    - self
+    - long dim
+    - THLongTensor index
+    - THTensor source
+]]
+
+[[
+  indexAdd
+  indexAdd -> self
+    - self
+    - long dim
+    - THLongTensor index
+    - THTensor source
+]]
+
+[[
+  indexFill
+  indexFill -> self
+    - self
+    - long dim
+    - THLongTensor index
+    - real value
+]]
+
 // Declared in TensorCopy.cpp
 static PyObject * THPTensor_(copy)(THPTensor *self, PyObject *other);
 
@@ -1777,6 +1820,10 @@ static PyMethodDef THPTensor_(methods)[] = {
   {"zeros",           (PyCFunction)THPTensor_(zeros),           METH_VARARGS, NULL},
   {"ones",            (PyCFunction)THPTensor_(ones),            METH_VARARGS, NULL},
   {"set",             (PyCFunction)THPTensor_(set),             METH_VARARGS, NULL},
+  {"index",           (PyCFunction)THPTensor_(index),           METH_VARARGS, NULL},
+  {"indexCopy",       (PyCFunction)THPTensor_(indexCopy),       METH_VARARGS, NULL},
+  {"indexAdd",        (PyCFunction)THPTensor_(indexAdd),        METH_VARARGS, NULL},
+  {"indexFill",       (PyCFunction)THPTensor_(indexFill),       METH_VARARGS, NULL},
   {NULL}
 };
 
@@ -1875,6 +1922,10 @@ static PyMethodDef THPTensorStatelessMethods[] = {
   {"reshape",         (PyCFunction)THPTensor_stateless_(reshape),         METH_VARARGS, NULL},
   {"zeros",           (PyCFunction)THPTensor_stateless_(zeros),           METH_VARARGS, NULL},
   {"ones",            (PyCFunction)THPTensor_stateless_(ones),            METH_VARARGS, NULL},
+  {"index",           (PyCFunction)THPTensor_stateless_(index),           METH_VARARGS, NULL},
+  {"indexCopy",       (PyCFunction)THPTensor_stateless_(indexCopy),       METH_VARARGS, NULL},
+  {"indexAdd",        (PyCFunction)THPTensor_stateless_(indexAdd),        METH_VARARGS, NULL},
+  {"indexFill",       (PyCFunction)THPTensor_stateless_(indexFill),       METH_VARARGS, NULL},
   {NULL}
 };
 

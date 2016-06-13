@@ -209,6 +209,10 @@ IMPLEMENT_STATELESS(lerp)
 IMPLEMENT_STATELESS(reshape)
 IMPLEMENT_STATELESS(zeros)
 IMPLEMENT_STATELESS(ones)
+IMPLEMENT_STATELESS(index)
+IMPLEMENT_STATELESS(indexCopy)
+IMPLEMENT_STATELESS(indexAdd)
+IMPLEMENT_STATELESS(indexFill)
 
 // In nonzero, the first argument might be a LongTensor that will be used
 // for indices output, so we should pick a function based on second
@@ -321,6 +325,10 @@ static PyMethodDef TorchMethods[] = {
   {"reshape",         (PyCFunction)THPModule_reshape,           METH_VARARGS, NULL},
   {"zeros",           (PyCFunction)THPModule_zeros,             METH_VARARGS, NULL},
   {"ones",            (PyCFunction)THPModule_ones,              METH_VARARGS, NULL},
+  {"index",           (PyCFunction)THPModule_index,             METH_VARARGS, NULL},
+  {"indexCopy",       (PyCFunction)THPModule_indexCopy,         METH_VARARGS, NULL},
+  {"indexAdd",        (PyCFunction)THPModule_indexAdd,          METH_VARARGS, NULL},
+  {"indexFill",       (PyCFunction)THPModule_indexFill,         METH_VARARGS, NULL},
   {NULL, NULL, 0, NULL}
 };
 
