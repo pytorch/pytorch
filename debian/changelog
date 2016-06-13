@@ -1,3 +1,11 @@
+nccl (1.2.3-1+cuda7.5) trusty; urgency=medium
+
+  * Make NCCL collectives work on communicators with only one rank
+  * Changed CURAND generator to work on a wider set of platforms.
+  * Only call the CUDA runtime.
+
+ -- Sylvain Jeaugey <sjeaugey@nvidia.com> Mon, 13 Jun 2016 1:45:01 -0800
+
 nccl (1.2.2-1+cuda7.5) trusty; urgency=medium
 
   * Gencodes changed to NV recommended

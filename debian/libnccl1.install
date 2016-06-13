@@ -1,2 +1,2 @@
 lib/libnccl.so.1 /usr/lib/x86_64-linux-gnu
-lib/libnccl.so.1.2.2 /usr/lib/x86_64-linux-gnu
+lib/libnccl.so.1.2.3 /usr/lib/x86_64-linux-gnu
