@@ -403,6 +403,18 @@ TH_API void THNN_CudaThreshold_updateGradInput(
           double threshold,
           bool inplace);
 
+TH_API void THNN_CudaReLU6_updateOutput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *output,
+          bool inplace);
+TH_API void THNN_CudaReLU6_updateGradInput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *gradOutput,
+          THCudaTensor *gradInput,
+          bool inplace);
+
 TH_API void THNN_CudaTemporalConvolution_updateOutput(
           THCState *state,
           THCudaTensor *input,
