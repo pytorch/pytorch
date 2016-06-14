@@ -94,6 +94,9 @@
 #include "generic/Threshold.c"
 #include "THGenerateFloatTypes.h"
 
+#include "generic/ReLU6.c"
+#include "THGenerateFloatTypes.h"
+
 #include "generic/TemporalConvolution.c"
 #include "THGenerateFloatTypes.h"
 
