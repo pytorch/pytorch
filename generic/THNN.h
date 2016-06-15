@@ -106,14 +106,16 @@ TH_API void THNN_(HardTanh_updateOutput)(
           THTensor *input,             // input tensor
           THTensor *output,            // [OUT] output tensor
           real min_val,                // lower threshold
-          real max_val);               // upper threshold
+          real max_val,
+          bool inplace);               // upper threshold
 TH_API void THNN_(HardTanh_updateGradInput)(
           THNNState *state,            // library's state
           THTensor *input,             // input tensor
           THTensor *gradOutput,        // gradient w.r.t. module's output
           THTensor *gradInput,         // [OUT] gradient w.r.t. the input
           real min_val,                // lower threshold
-          real max_val);               // upper threshold
+          real max_val,
+          bool inplace);               // upper threshold
 
 TH_API void THNN_(L1Cost_updateOutput)(
           THNNState *state,            // library's state
@@ -470,18 +472,6 @@ TH_API void THNN_(Threshold_updateGradInput)(
           THTensor *gradOutput,
           THTensor *gradInput,
           real threshold,
-          bool inplace);
-
-TH_API void THNN_(ReLU6_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *output,
-          bool inplace);
-TH_API void THNN_(ReLU6_updateGradInput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *gradOutput,
-          THTensor *gradInput,
           bool inplace);
 
 TH_API void THNN_(TemporalConvolution_updateOutput)(

@@ -7,37 +7,59 @@ void THNN_(HardTanh_updateOutput)(
           THTensor *input,
           THTensor *output,
           real min_val,
-          real max_val)
+          real max_val,
+          bool inplace)
 {
-  THTensor_(resizeAs)(output, input);
+  if (inplace)
+    THTensor_(set)(output, input);
+  else
+    THTensor_(resizeAs)(output, input);
   
   if (input->nDimension == 1 || !THTensor_(isContiguous)(input) || !THTensor_(isContiguous)(output))
   {
-    TH_TENSOR_APPLY2(real, output, real, input,
-      if (*input_data < min_val)
-        *output_data = min_val;
-      else if (*input_data <= max_val)
-        *output_data = *input_data;
-      else
-        *output_data = max_val;
-    );
+    if (inplace)
+      TH_TENSOR_APPLY(real, input,
+        if (*input_data < min_val)
+          *input_data = min_val;
+        else if (*input_data > max_val)
+          *input_data = max_val;
+      );
+      TH_TENSOR_APPLY2(real, output, real, input,
+        if (*input_data < min_val)
+          *output_data = min_val;
+        else if (*input_data <= max_val)
+          *output_data = *input_data;
+        else
+          *output_data = max_val;
+      );
   }
   else
   {
-    real* ptr_output = THTensor_(data)(output);
     real* ptr_input  = THTensor_(data)(input);
+    real* ptr_output = THTensor_(data)(output);
     long i;
+    long n = THTensor_(nElement)(input);
 
+    if (inplace)
 #pragma omp parallel for private(i)
-    for (i = 0; i < THTensor_(nElement)(input); i++)
-    {
-      if (ptr_input[i] < min_val)
-        ptr_output[i] = min_val;
-      else if (ptr_input[i] <= max_val)
-        ptr_output[i] = ptr_input[i];
-      else
-        ptr_output[i] = max_val;
-    }
+      for (i = 0; i < n; i++)
+      {
+        if (ptr_input[i] < min_val)
+          ptr_input[i] = min_val;
+        else if (ptr_input[i] > max_val)
+          ptr_input[i] = max_val;
+      }
+    else
+#pragma omp parallel for private(i)
+      for (i = 0; i < n; i++)
+      {
+        if (ptr_input[i] < min_val)
+          ptr_output[i] = min_val;
+        else if (ptr_input[i] <= max_val)
+          ptr_output[i] = ptr_input[i];
+        else
+          ptr_output[i] = max_val;
+      }
   }
 }
 
@@ -47,21 +69,33 @@ void THNN_(HardTanh_updateGradInput)(
           THTensor *gradOutput,
           THTensor *gradInput,
           real min_val,
-          real max_val)
+          real max_val,
+          bool inplace)
 {
-  THTensor_(resizeAs)(gradInput, input);
+  if (inplace)
+    THTensor_(set)(gradInput, gradOutput);
+  else
+    THTensor_(resizeAs)(gradInput, input);
 
   if (input->nDimension == 1 ||
     !THTensor_(isContiguous)(input) ||
     !THTensor_(isContiguous)(gradOutput) ||
     !THTensor_(isContiguous)(gradInput))
   {
-    TH_TENSOR_APPLY3(real, gradInput, real, gradOutput, real, input,
-      if (*input_data < min_val || *input_data > max_val)
-        *gradInput_data = 0;
-      else
-        *gradInput_data = *gradOutput_data;
-    );
+    if (inplace)
+    {
+      TH_TENSOR_APPLY2(real, gradOutput, real, input,
+        if (*input_data < min_val || *input_data > max_val)
+          *gradOutput_data = 0;
+      );
+    }
+    else
+      TH_TENSOR_APPLY3(real, gradInput, real, gradOutput, real, input,
+        if (*input_data < min_val || *input_data > max_val)
+          *gradInput_data = 0;
+        else
+          *gradInput_data = *gradOutput_data;
+      );
   }
   else
   {
@@ -69,15 +103,24 @@ void THNN_(HardTanh_updateGradInput)(
     real* ptr_gradInput  = THTensor_(data)(gradInput);
     real* ptr_input      = THTensor_(data)(input);
     long i;
+    long n = THTensor_(nElement)(input);
 
+    if (inplace)
 #pragma omp parallel for private(i)
-    for (i = 0; i < THTensor_(nElement)(input); i++)
-    {
-      if (ptr_input[i] < min_val || ptr_input[i] > max_val)
-        ptr_gradInput[i] = 0;
-      else
-        ptr_gradInput[i] = ptr_gradOutput[i];
-    }
+      for (i = 0; i < n; i++)
+      {
+        if (ptr_input[i] <= min_val || ptr_input[i] >= max_val)
+          ptr_gradInput[i] = 0;
+      }
+    else
+#pragma omp parallel for private(i)
+      for (i = 0; i < n; i++)
+      {
+        if (ptr_input[i] < min_val || ptr_input[i] > max_val)
+          ptr_gradInput[i] = 0;
+        else
+          ptr_gradInput[i] = ptr_gradOutput[i];
+      }
   }
 }
 
