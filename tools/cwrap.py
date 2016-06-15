@@ -92,13 +92,13 @@ DEFINITION_START = Template("""
 static PyObject * THPTensor_(${name})(THPTensor *self, PyObject *args)
 {
   HANDLE_TH_ERRORS
-  Py_ssize_t _argcount = PyTuple_Size(args);
+  Py_ssize_t _argcount = args ? PyTuple_Size(args) : 0;
 """)
 STATELESS_DEFINITION_START = Template("""
 static PyObject * THPTensor_stateless_(${name})(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
-  Py_ssize_t _argcount = PyTuple_Size(args);
+  Py_ssize_t _argcount = args ? PyTuple_Size(args) : 0;
 """)
 # TODO: Better error handling when error happens (there are memory leaks now)
 DEFINITION_END = """
@@ -366,6 +366,9 @@ def generate_option(option):
     format_str = make_format_str(option.arguments)
     argparse_args = argparse_arguments(option.arguments)
     expression = build_expression(option)
+    is_already_provided = argfilter()
+    if sum(1 for arg in option.arguments if not is_already_provided(arg)) == 0:
+        return expression + ';'
     return OPTION_CODE.substitute({
         'format': format_str,
         'parse_args': argparse_args,

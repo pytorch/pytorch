@@ -1,9 +1,39 @@
 from torch.C import *
 from . import printing as _printing
 import sys
+import math
 
 def typename(o):
     return o.__module__ + "." + o.__class__.__name__
+
+def isTensor(obj):
+    return isinstance(obj, DoubleTensor) or isinstance(obj, FloatTensor) or \
+        isinstance(obj, LongTensor) or isinstance(obj, IntTensor) or \
+        isinstance(obj, ShortTensor) or isinstance(obj, CharTensor) or \
+        isinstance(obj, ByteTensor)
+
+def isStorage(obj):
+    return isinstance(obj, DoubleStorage) or isinstance(obj, FloatStorage) or \
+        isinstance(obj, LongStorage) or isinstance(obj, IntStorage) or \
+        isinstance(obj, ShortStorage) or isinstance(obj, CharStorage) or \
+        isinstance(obj, ByteStorage)
+
+def isLongStorage(obj):
+    return isinstance(obj, LongStorage)
+
+def infer_sizes(sizes, total):
+    to_infer = -1
+    total_sizes = 1
+    for i, size in enumerate(sizes):
+        total_sizes *= size
+        if size == -1:
+            if to_infer >= 0:
+                raise RuntimeError
+            to_infer = i
+    if to_infer >= 0:
+        assert total % total_sizes == 0, "Can't make sizes have exactly %d elements" % total
+        sizes[to_infer] = total / total_sizes
+    return sizes
 
 
 # GENERATED CODE GOES HERE

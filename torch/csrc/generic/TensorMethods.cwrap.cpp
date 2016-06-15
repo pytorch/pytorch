@@ -184,7 +184,7 @@ static PyObject * THPTensor_(set)(THPTensor *self, PyObject *args)
     }
 
     if (num_args >= 4) {
-      PyObject *fourth_arg = PyTuple_GET_ITEM(args, 2);
+      PyObject *fourth_arg = PyTuple_GET_ITEM(args, 3);
       THPUtils_assert(THPLongStorage_IsSubclass(fourth_arg), "set expects a LongStorage as its third argument");
       strides = ((THPLongStorage*)fourth_arg)->cdata;
       THLongStorage_retain(strides);
@@ -1588,7 +1588,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 // TODO: why not inplace?
 [[
-  t
+  transpose
   newTranspose -> THTensor
     - self
     - long dim0
@@ -1596,7 +1596,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 ]]
 
 [[
-  transpose
+  t
   newTranspose -> THTensor
     - self
     - CONSTANT 0
@@ -1692,6 +1692,15 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
     - long dim
     - THLongTensor index
     - real value
+]]
+
+[[
+  narrow
+  narrow -> new THTensor
+    - self
+    - long dimension
+    - long firstIndex
+    - long size
 ]]
 
 // Declared in TensorCopy.cpp
@@ -1824,6 +1833,7 @@ static PyMethodDef THPTensor_(methods)[] = {
   {"indexCopy",       (PyCFunction)THPTensor_(indexCopy),       METH_VARARGS, NULL},
   {"indexAdd",        (PyCFunction)THPTensor_(indexAdd),        METH_VARARGS, NULL},
   {"indexFill",       (PyCFunction)THPTensor_(indexFill),       METH_VARARGS, NULL},
+  {"narrow",          (PyCFunction)THPTensor_(narrow),          METH_VARARGS, NULL},
   {NULL}
 };
 
@@ -1926,6 +1936,7 @@ static PyMethodDef THPTensorStatelessMethods[] = {
   {"indexCopy",       (PyCFunction)THPTensor_stateless_(indexCopy),       METH_VARARGS, NULL},
   {"indexAdd",        (PyCFunction)THPTensor_stateless_(indexAdd),        METH_VARARGS, NULL},
   {"indexFill",       (PyCFunction)THPTensor_stateless_(indexFill),       METH_VARARGS, NULL},
+  {"narrow",          (PyCFunction)THPTensor_stateless_(narrow),          METH_VARARGS, NULL},
   {NULL}
 };
 

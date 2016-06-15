@@ -30,29 +30,74 @@ static void THPStorage_(dealloc)(THPStorage* self)
 static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
   HANDLE_TH_ERRORS
-  static const char *keywords[] = {"cdata", NULL};
-  void* number_arg = NULL;
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|O&", (char **)keywords,
-				   THPUtils_getLong, &number_arg))
+  PyObject *cdata_ptr = NULL;
+  THPObjectPtr iterator;
+  long size = -1;
+  bool args_ok = true;
+  if (kwargs != NULL && PyDict_Size(kwargs) == 1) {
+    cdata_ptr = PyDict_GetItemString(kwargs, "cdata");
+    args_ok = cdata_ptr != NULL;
+  } else if (args != NULL && PyTuple_Size(args) == 1) {
+    PyObject *arg = PyTuple_GET_ITEM(args, 0);
+    if (THPUtils_checkLong(arg)) {
+      args_ok = THPUtils_getLong(PyTuple_GET_ITEM(args, 0), &size);
+    } else {
+      iterator = PyObject_GetIter(arg);
+      args_ok = iterator != nullptr;
+      if (args_ok) {
+        size = PyObject_Length(arg);
+        args_ok = size != -1;
+      }
+    }
+  } else if (args && PyTuple_Size(args) != 0) {
+    args_ok = false;
+  }
+  if (!args_ok) {
+    // TODO: nice error mossage
+    THPUtils_setError("invalid arguments");
     return NULL;
-  THPStorage *self = (THPStorage *)type->tp_alloc(type, 0);
-  if (self != NULL) {
-    if (kwargs) {
-      self->cdata = (THStorage*)number_arg;
+  }
+  THPStoragePtr self = (THPStorage *)type->tp_alloc(type, 0);
+  if (self != nullptr) {
+    if (cdata_ptr) {
+      self->cdata = (THStorage*)PyLong_AsVoidPtr(cdata_ptr);
       THStorage_(retain)(self->cdata);
-    } else if (/* !kwargs && */ number_arg) {
-      self->cdata = THStorage_(newWithSize)((long) number_arg);
+    } else if (iterator == nullptr && size >= 0) {
+      self->cdata = THStorage_(newWithSize)(size);
+    } else if (iterator != nullptr) {
+      self->cdata = THStorage_(newWithSize)(size);
+      // TODO: make sure newWithSize never returns NULL
+      long items_processed = 0;
+      THPObjectPtr item;
+      real v;
+      while ((item = PyIter_Next(iterator))) {
+        if (!THPUtils_(parseReal)(item, &v)) {
+          THPUtils_setError("expected a numeric type, but got %s", Py_TYPE(item)->tp_name);
+          return NULL;
+        }
+        if (items_processed == size) {
+          // TODO: error - iterator has too many items
+          return NULL;
+        }
+        self->cdata->data[items_processed++] = v;
+      }
+      // Iterator has raised an exception
+      if (PyErr_Occurred()) {
+        return NULL;
+      }
+      // Iterator was too short
+      if (items_processed < size) {
+        // TODO; error message
+        return NULL;
+      }
     } else {
       self->cdata = THStorage_(new)();
     }
 
-    if (self->cdata == NULL) {
-      Py_DECREF(self);
+    if (self->cdata == NULL)
       return NULL;
-    }
   }
-  return (PyObject *)self;
-  // TODO: cleanup on error
+  return (PyObject *)self.release();
   END_HANDLE_TH_ERRORS
 }
 

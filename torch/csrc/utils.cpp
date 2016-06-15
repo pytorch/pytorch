@@ -5,6 +5,10 @@
 #include "generic/utils.cpp"
 #include <TH/THGenerateAllTypes.h>
 
+bool THPUtils_checkLong(PyObject *index) {
+    return PyLong_Check(index) || PyInt_Check(index);
+}
+
 int THPUtils_getLong(PyObject *index, long *result) {
   if (PyLong_Check(index)) {
     *result = PyLong_AsLong(index);
@@ -64,4 +68,10 @@ void THPUtils_setError(const char *format, ...)
   vsnprintf(buffer, ERROR_BUFFER_SIZE, format, fmt_args);
   va_end(fmt_args);
   PyErr_SetString(PyExc_RuntimeError, buffer);
+}
+
+template<>
+void THPPointer<PyObject>::free() {
+  if (ptr)
+    Py_DECREF(ptr);
 }

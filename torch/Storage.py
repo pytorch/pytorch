@@ -9,3 +9,5 @@ class RealStorage(RealStorageBase):
     def __iter__(self):
         return iter(map(lambda i: self[i], range(self.size())))
 
+    def tolist(self):
+        return [v for v in self]

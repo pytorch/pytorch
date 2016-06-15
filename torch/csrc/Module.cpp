@@ -213,6 +213,7 @@ IMPLEMENT_STATELESS(index)
 IMPLEMENT_STATELESS(indexCopy)
 IMPLEMENT_STATELESS(indexAdd)
 IMPLEMENT_STATELESS(indexFill)
+IMPLEMENT_STATELESS(narrow)
 
 // In nonzero, the first argument might be a LongTensor that will be used
 // for indices output, so we should pick a function based on second
@@ -329,6 +330,7 @@ static PyMethodDef TorchMethods[] = {
   {"indexCopy",       (PyCFunction)THPModule_indexCopy,         METH_VARARGS, NULL},
   {"indexAdd",        (PyCFunction)THPModule_indexAdd,          METH_VARARGS, NULL},
   {"indexFill",       (PyCFunction)THPModule_indexFill,         METH_VARARGS, NULL},
+  {"narrow",          (PyCFunction)THPModule_narrow,            METH_VARARGS, NULL},
   {NULL, NULL, 0, NULL}
 };
 

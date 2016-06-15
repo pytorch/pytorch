@@ -74,12 +74,14 @@ void THPPointer<THTensor>::free() {
 
 template<>
 void THPPointer<THPStorage>::free() {
-  Py_DECREF(ptr);
+  if (ptr)
+    Py_DECREF(ptr);
 }
 
 template<>
 void THPPointer<THPTensor>::free() {
-  Py_DECREF(ptr);
+  if (ptr)
+    Py_DECREF(ptr);
 }
 
 template class THPPointer<THStorage>;
