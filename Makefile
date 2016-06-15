@@ -62,7 +62,7 @@ else
 endif
 
 
-.PHONY : lib clean test mpitest install
+.PHONY : lib clean debclean test mpitest install
 .DEFAULT : lib
 
 INCEXPORTS  := nccl.h
@@ -168,3 +168,31 @@ $(MPITSTDIR)/% : test/mpi/%.cu $(TSTDEP)
 	@sed -e 's/.*://' -e 's/\\$$//' < $(@:%=%.d.tmp) | fmt -1 | \
                 sed -e 's/^ *//' -e 's/$$/:/' >> $(@:%=%.d)
 	@rm -f $(@:%=%.d.tmp)
+
+#### PACKAGING ####
+
+CUDA_VERSION ?= $(shell ls $(CUDA_LIB)/libcudart.so.* | head -1 | rev | cut -d "." -f -2 | rev)
+
+
+DEB_GEN_IN := $(shell ls debian/*.in)
+DEB_GEN    := $(DEB_GEN_IN:.in=)
+
+DEB_REVISION   ?= 1
+DEB_TIMESTAMP  := $(shell date -R)
+
+deb : lib $(DEB_GEN)
+	@printf "Building Debian package"
+	debuild -eLD_LIBRARY_PATH -uc -us -d -b
+
+debclean :
+	rm -f $(DEB_GEN)
+
+debian/% : debian/%.in
+	@printf "Generating %-25s > %-24s\n" $< $@
+	sed -e "s/\$${nccl:Major}/$(VER_MAJOR)/g" \
+	    -e "s/\$${nccl:Minor}/$(VER_MINOR)/g" \
+	    -e "s/\$${nccl:Patch}/$(VER_PATCH)/g" \
+	    -e "s/\$${nccl:Cuda}/$(CUDA_VERSION)/g" \
+	    -e "s/\$${nccl:Debian}/$(DEB_REVISION)/g" \
+	    -e "s/\$${nccl:Timestamp}/$(DEB_TIMESTAMP)/g" \
+	    $< > $@
