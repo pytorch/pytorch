@@ -97,14 +97,16 @@ TH_API void THNN_CudaHardTanh_updateOutput(
           THCudaTensor *input,
           THCudaTensor *output,
           float min_val,
-          float max_val);
+          float max_val,
+          bool inplace);
 TH_API void THNN_CudaHardTanh_updateGradInput(
           THCState *state,
           THCudaTensor *input,
           THCudaTensor *gradOutput,
           THCudaTensor *gradInput,
           float min_val,
-          float max_val);
+          float max_val,
+          bool inplace);
 
 TH_API void THNN_CudaL1Cost_updateOutput(
           THCState *state,
@@ -401,18 +403,6 @@ TH_API void THNN_CudaThreshold_updateGradInput(
           THCudaTensor *gradOutput,
           THCudaTensor *gradInput,
           double threshold,
-          bool inplace);
-
-TH_API void THNN_CudaReLU6_updateOutput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *output,
-          bool inplace);
-TH_API void THNN_CudaReLU6_updateGradInput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *gradOutput,
-          THCudaTensor *gradInput,
           bool inplace);
 
 TH_API void THNN_CudaTemporalConvolution_updateOutput(
