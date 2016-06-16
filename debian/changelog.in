@@ -1,4 +1,4 @@
-nccl (${nccl:Major}.${nccl:Minor}.${nccl:Patch}-${nccl:Debian}+cuda${nccl:Cuda}) trusty; urgency=medium
+nccl (${nccl:Major}.${nccl:Minor}.${nccl:Patch}-${nccl:Debian}+cuda${cuda:Major}.${cuda:Minor}) trusty; urgency=medium
 
   * Automatic Debian package from build
 

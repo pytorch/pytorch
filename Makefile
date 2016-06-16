@@ -172,7 +172,8 @@ $(MPITSTDIR)/% : test/mpi/%.cu $(TSTDEP)
 #### PACKAGING ####
 
 CUDA_VERSION ?= $(shell ls $(CUDA_LIB)/libcudart.so.* | head -1 | rev | cut -d "." -f -2 | rev)
-
+CUDA_MAJOR = $(shell echo $(CUDA_VERSION) | cut -d "." -f 1)
+CUDA_MINOR = $(shell echo $(CUDA_VERSION) | cut -d "." -f 2)
 
 DEB_GEN_IN := $(shell ls debian/*.in)
 DEB_GEN    := $(DEB_GEN_IN:.in=)
@@ -194,7 +195,8 @@ debian/% : debian/%.in
 	sed -e "s/\$${nccl:Major}/$(VER_MAJOR)/g" \
 	    -e "s/\$${nccl:Minor}/$(VER_MINOR)/g" \
 	    -e "s/\$${nccl:Patch}/$(VER_PATCH)/g" \
-	    -e "s/\$${nccl:Cuda}/$(CUDA_VERSION)/g" \
+	    -e "s/\$${cuda:Major}/$(CUDA_MAJOR)/g" \
+	    -e "s/\$${cuda:Minor}/$(CUDA_MINOR)/g" \
 	    -e "s/\$${nccl:Debian}/$(DEB_REVISION)/g" \
 	    -e "s/\$${nccl:Timestamp}/$(DEB_TIMESTAMP)/g" \
 	    $< > $@
