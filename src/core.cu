@@ -501,6 +501,8 @@ static void initDebug() {
   const char* nccl_debug = getenv("NCCL_DEBUG");
   if (nccl_debug == NULL) {
     ncclDebugLevel = NONE;
+  } else if (strcmp(nccl_debug, "VERSION") == 0) {
+    ncclDebugLevel = VERSION;
   } else if (strcmp(nccl_debug, "WARN") == 0) {
     ncclDebugLevel = WARN;
   } else if (strcmp(nccl_debug, "INFO") == 0) {
@@ -654,8 +656,19 @@ static ncclResult_t commUnlinkHostMem(ncclComm_t comm, ncclUniqueId commId, int 
   return shmUnlink(rankname);
 }
 
+static void showVersion() {
+  static int shown = 0;
+  if (shown == 0 && ncclDebugLevel >= VERSION) {
+    printf("NCCL version %d.%d.%d compiled with CUDA %d.%d\n", NCCL_MAJOR, NCCL_MINOR, NCCL_PATCH, CUDA_MAJOR, CUDA_MINOR);
+    fflush(stdout);                                              \
+    shown = 1;
+  }
+}
+
 extern "C" DSOGLOBAL
 ncclResult_t ncclCommInitRank(ncclComm_t* newcomm, int ndev, ncclUniqueId commId, int myrank) {
+  if (myrank == 0) showVersion();
+
   if (strlen(commId.internal) < 1 ||
       strlen(commId.internal) >= NCCL_UNIQUE_ID_BYTES) {
     WARN("rank %d invalid commId", myrank);
@@ -734,6 +747,8 @@ ncclResult_t ncclCommInitRank(ncclComm_t* newcomm, int ndev, ncclUniqueId commId
 extern "C" DSOGLOBAL
 ncclResult_t ncclCommInitAll(ncclComm_t* comms, int ndev, int* devlist) {
   initDebug();
+
+  showVersion();
 
   ncclResult_t res;
   int savedDevice;

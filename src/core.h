@@ -110,7 +110,7 @@ struct ncclComm {
   ncclNodeRef ptrs[1];
 };
 
-typedef enum {NONE=0, WARN=1, INFO=2, ABORT=3} DebugLevel;
+typedef enum {NONE=0, VERSION=1, WARN=2, INFO=3, ABORT=4} DebugLevel;
 extern DebugLevel ncclDebugLevel;
 
 #define WARN(...) do {                                           \
