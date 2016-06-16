@@ -115,8 +115,8 @@ clean :
 install : lib
 	mkdir -p $(PREFIX)/lib
 	mkdir -p $(PREFIX)/include
-	cp -P -v build/lib/* $(PREFIX)/lib/
-	cp -v build/include/* $(PREFIX)/include/
+	cp -P -v $(BUILDDIR)/lib/* $(PREFIX)/lib/
+	cp -v $(BUILDDIR)/include/* $(PREFIX)/include/
 
 #### TESTS ####
 
@@ -181,8 +181,8 @@ DEB_REVISION   ?= 1
 DEB_TIMESTAMP  := $(shell date -R)
 
 deb : lib $(DEB_GEN)
-	@printf "Building Debian package"
-	debuild -eLD_LIBRARY_PATH -uc -us -d -b
+	@printf "Building Debian package\n"
+	debuild -eBUILDDIR -eLD_LIBRARY_PATH -uc -us -d -b
 
 debclean :
 	rm -f $(DEB_GEN)
