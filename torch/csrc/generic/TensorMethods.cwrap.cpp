@@ -647,11 +647,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
   dist -> accreal
     - self
     - THTensor a
-    - CONSTANT 2
-  dist -> accreal
-    - self
-    - THTensor a
-    - real p
+    - real p OPTIONAL 2
 ]]
 
 [[
@@ -1703,6 +1699,116 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
     - long size
 ]]
 
+// TODO: torch docs provide 7 args
+[[
+  addmm
+  addmm -> self OPTIONAL_SELF
+    - self
+    - real beta OPTIONAL 1
+    - THTensor M
+    - real alpha OPTIONAL 1
+    - THTensor mat1
+    - THTensor mat2
+]]
+
+[[
+  addmv
+  addmv -> self OPTIONAL_SELF
+    - self
+    - real beta OPTIONAL 1
+    - THTensor M
+    - real alpha OPTIONAL 1
+    - THTensor mat
+    - THTensor vec
+]]
+
+[[
+  addr
+  addr -> self OPTIONAL_SELF
+    - self
+    - real beta OPTIONAL 1
+    - THTensor M
+    - real alpha OPTIONAL 1
+    - THTensor vec1
+    - THTensor vec2
+]]
+
+[[
+  addbmm
+  addbmm -> self OPTIONAL_SELF
+    - self
+    - real beta OPTIONAL 1
+    - THTensor M
+    - real alpha OPTIONAL 1
+    - THTensor batch1
+    - THTensor batch2
+]]
+
+[[
+  baddbmm
+  baddbmm -> self OPTIONAL_SELF
+    - self
+    - real beta OPTIONAL 1
+    - THTensor M
+    - real alpha OPTIONAL 1
+    - THTensor batch1
+    - THTensor batch2
+]]
+
+[[
+  addcmul
+  addcmul -> self OPTIONAL_SELF
+    - self
+    - self
+    - real value OPTIONAL 1
+    - THTensor t1
+    - THTensor t2
+  addcmul -> self OPTIONAL_SELF
+    - self
+    - THTensor M
+    - real value OPTIONAL 1
+    - THTensor t1
+    - THTensor t2
+]]
+
+[[
+  addcdiv
+  addcdiv -> self
+    - self
+    - self
+    - real value OPTIONAL 1
+    - THTensor t1
+    - THTensor t2
+  addcdiv -> self OPTIONAL_SELF
+    - self
+    - THTensor M
+    - real value OPTIONAL 1
+    - THTensor t1
+    - THTensor t2
+]]
+
+[[
+  mm
+  addmm -> self OPTIONAL_SELF
+    - self
+    - CONSTANT 0
+    - THTensor mat1
+    - CONSTANT 1
+    - THTensor mat1
+    - THTensor mat2
+]]
+
+[[
+  bmm
+  addbmm -> self OPTIONAL_SELF
+    - self
+    - CONSTANT 0
+    - THTensor mat1
+    - CONSTANT 1
+    - THTensor mat1
+    - THTensor mat2
+]]
+
 // Declared in TensorCopy.cpp
 static PyObject * THPTensor_(copy)(THPTensor *self, PyObject *other);
 
@@ -1834,6 +1940,15 @@ static PyMethodDef THPTensor_(methods)[] = {
   {"indexAdd",        (PyCFunction)THPTensor_(indexAdd),        METH_VARARGS, NULL},
   {"indexFill",       (PyCFunction)THPTensor_(indexFill),       METH_VARARGS, NULL},
   {"narrow",          (PyCFunction)THPTensor_(narrow),          METH_VARARGS, NULL},
+  {"addmm",           (PyCFunction)THPTensor_(addmm),           METH_VARARGS, NULL},
+  {"addmv",           (PyCFunction)THPTensor_(addmv),           METH_VARARGS, NULL},
+  {"addr",            (PyCFunction)THPTensor_(addr),            METH_VARARGS, NULL},
+  {"addbmm",          (PyCFunction)THPTensor_(addbmm),          METH_VARARGS, NULL},
+  {"baddbmm",         (PyCFunction)THPTensor_(baddbmm),         METH_VARARGS, NULL},
+  {"addcmul",         (PyCFunction)THPTensor_(addcmul),         METH_VARARGS, NULL},
+  {"addcdiv",         (PyCFunction)THPTensor_(addcdiv),         METH_VARARGS, NULL},
+  {"mm",              (PyCFunction)THPTensor_(mm),              METH_VARARGS, NULL},
+  {"bmm",             (PyCFunction)THPTensor_(bmm),             METH_VARARGS, NULL},
   {NULL}
 };
 
@@ -1937,6 +2052,15 @@ static PyMethodDef THPTensorStatelessMethods[] = {
   {"indexAdd",        (PyCFunction)THPTensor_stateless_(indexAdd),        METH_VARARGS, NULL},
   {"indexFill",       (PyCFunction)THPTensor_stateless_(indexFill),       METH_VARARGS, NULL},
   {"narrow",          (PyCFunction)THPTensor_stateless_(narrow),          METH_VARARGS, NULL},
+  {"addmm",           (PyCFunction)THPTensor_stateless_(addmm),           METH_VARARGS, NULL},
+  {"addmv",           (PyCFunction)THPTensor_stateless_(addmv),           METH_VARARGS, NULL},
+  {"addr",            (PyCFunction)THPTensor_stateless_(addr),            METH_VARARGS, NULL},
+  {"addbmm",          (PyCFunction)THPTensor_stateless_(addbmm),          METH_VARARGS, NULL},
+  {"baddbmm",         (PyCFunction)THPTensor_stateless_(baddbmm),         METH_VARARGS, NULL},
+  {"addcmul",         (PyCFunction)THPTensor_stateless_(addcmul),         METH_VARARGS, NULL},
+  {"addcdiv",         (PyCFunction)THPTensor_stateless_(addcdiv),         METH_VARARGS, NULL},
+  {"mm",              (PyCFunction)THPTensor_stateless_(mm),              METH_VARARGS, NULL},
+  {"bmm",             (PyCFunction)THPTensor_stateless_(bmm),             METH_VARARGS, NULL},
   {NULL}
 };
 

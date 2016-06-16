@@ -6,8 +6,8 @@ class RealTensor(RealTensorBase):
     def __repr__(self):
         return str(self)
 
-    def new(self):
-        return self.__class__()
+    def new(self, *args, **kwargs):
+        return self.__class__(*args, **kwargs)
 
     def type(self, t):
         current = "torch." + self.__class__.__name__
@@ -110,14 +110,14 @@ class RealTensor(RealTensorBase):
         if not isTensor(src):
             if isStorage(src) and len(args) == 0:
                 sizes = src
-                src = self
             else:
                 # TODO: concat iters
                 sizes = LongStorage([src] + list(args))
-                src = self
+            src = self
             result = self.new()
         else:
             sizes = LongStorage(args)
+            result = self
 
         src_dim = src.dim()
         src_stride = src.stride()

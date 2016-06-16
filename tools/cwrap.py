@@ -1,12 +1,13 @@
 from string import Template
 from pprint import pprint
-from itertools import chain
+from itertools import chain, product
 from copy import deepcopy
 import re
 
 ARGUMENT_PREFIX = '  -'
 OPTION_REGEX = re.compile('^\s*([a-zA-z0-9]+) -> (new [a-zA-Z]+|[a-zA-Z]+)(.*)')
 FUNCTION_NAME_REGEX = re.compile('^\s*([a-zA-Z0-9]+)(.*)')
+OPTIONAL_ARGUMENT_REGEX = re.compile('.* OPTIONAL (.*)$')
 
 def cwrap(filename):
     """Parses and generates code for a .cwrap file
@@ -42,6 +43,9 @@ class Argument(object):
 
     def __hash__(self):
         return (self.type + '#' + self.name).__hash__()
+
+    def copy(self):
+        return deepcopy(self)
 
 class Option(object):
     def __init__(self, funcname, return_type, flags):
@@ -263,20 +267,45 @@ def parse_lines(lines, stateless):
     if not stateless and 'STATELESS_ONLY' in options:
         return function_name, []  # Ignore function
 
+    def resolve_optional_args():
+        if not arg_options or not optional_args:
+            return
+        option = arg_options.pop()
+        for enabled_bits in product('01', repeat=len(optional_args)):
+            new_option = option.copy()
+            for enabled, default in zip(enabled_bits, optional_args):
+                if enabled == '1':
+                    continue
+                new_option.arguments[default[0]] = Argument('CONSTANT', default[1])
+            arg_options.append(new_option)
+
     for line in lines[1:]:
         match = OPTION_REGEX.match(line)
         if match:
             thname, rettype, flags = match.group(1, 2, 3)
+            resolve_optional_args()
             arg_options.append(Option(thname, rettype, flags.strip()))
+            optional_args = []
         else:
             assert line.startswith(ARGUMENT_PREFIX)
             arg = line.replace(ARGUMENT_PREFIX, '').strip()
+            option = arg_options[-1]
+
+            # Check for default values
+            default_value = OPTIONAL_ARGUMENT_REGEX.match(arg)
+            if default_value:
+                arg_nr = len(option.arguments)
+                optional_args.append((arg_nr, default_value.group(1)))
+                arg = arg[:arg.find(' OPTIONAL')]
+
+            # Save argument
             if arg == 'self':
                 t, name = 'THTensor', 'self'
             else:
                 t, name = arg.split(' ')
             t = TYPE_TRANSFORMS.get(t, t)
-            arg_options[-1].add_argument(Argument(t, name))
+            option.add_argument(Argument(t, name))
+    resolve_optional_args()
 
     if stateless:
         arg_options = make_stateless(arg_options)
@@ -366,6 +395,8 @@ def generate_option(option):
     format_str = make_format_str(option.arguments)
     argparse_args = argparse_arguments(option.arguments)
     expression = build_expression(option)
+    # This is not only an optimization, but also prevents PyArg_ParseTuple from
+    # segfaulting - it doesn't handle args == NULL case.
     is_already_provided = argfilter()
     if sum(1 for arg in option.arguments if not is_already_provided(arg)) == 0:
         return expression + ';'

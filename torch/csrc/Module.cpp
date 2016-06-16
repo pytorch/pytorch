@@ -214,6 +214,15 @@ IMPLEMENT_STATELESS(indexCopy)
 IMPLEMENT_STATELESS(indexAdd)
 IMPLEMENT_STATELESS(indexFill)
 IMPLEMENT_STATELESS(narrow)
+IMPLEMENT_STATELESS(addmm)
+IMPLEMENT_STATELESS(addmv)
+IMPLEMENT_STATELESS(addr)
+IMPLEMENT_STATELESS(addbmm)
+IMPLEMENT_STATELESS(baddbmm)
+IMPLEMENT_STATELESS(addcmul)
+IMPLEMENT_STATELESS(addcdiv)
+IMPLEMENT_STATELESS(mm)
+IMPLEMENT_STATELESS(bmm)
 
 // In nonzero, the first argument might be a LongTensor that will be used
 // for indices output, so we should pick a function based on second
@@ -331,6 +340,15 @@ static PyMethodDef TorchMethods[] = {
   {"indexAdd",        (PyCFunction)THPModule_indexAdd,          METH_VARARGS, NULL},
   {"indexFill",       (PyCFunction)THPModule_indexFill,         METH_VARARGS, NULL},
   {"narrow",          (PyCFunction)THPModule_narrow,            METH_VARARGS, NULL},
+  {"addmm",           (PyCFunction)THPModule_addmm,             METH_VARARGS, NULL},
+  {"addmv",           (PyCFunction)THPModule_addmv,             METH_VARARGS, NULL},
+  {"addr",            (PyCFunction)THPModule_addr,              METH_VARARGS, NULL},
+  {"addbmm",          (PyCFunction)THPModule_addbmm,            METH_VARARGS, NULL},
+  {"baddbmm",         (PyCFunction)THPModule_baddbmm,           METH_VARARGS, NULL},
+  {"addcmul",         (PyCFunction)THPModule_addcmul,           METH_VARARGS, NULL},
+  {"addcdiv",         (PyCFunction)THPModule_addcdiv,           METH_VARARGS, NULL},
+  {"mm",              (PyCFunction)THPModule_mm,                METH_VARARGS, NULL},
+  {"bmm",             (PyCFunction)THPModule_bmm,               METH_VARARGS, NULL},
   {NULL, NULL, 0, NULL}
 };
 
