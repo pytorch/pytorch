@@ -183,6 +183,8 @@ DEB_TIMESTAMP  := $(shell date -R)
 deb : lib $(DEB_GEN)
 	@printf "Building Debian package\n"
 	debuild -eBUILDDIR -eLD_LIBRARY_PATH -uc -us -d -b
+	mkdir -p $(BUILDDIR)/deb/
+	mv ../libnccl*.deb $(BUILDDIR)/deb/
 
 debclean :
 	rm -f $(DEB_GEN)
