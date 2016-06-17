@@ -174,3 +174,7 @@
 
 #include "generic/SpatialReplicationPadding.c"
 #include "THGenerateFloatTypes.h"
+
+#include "generic/VolumetricReplicationPadding.c"
+#include "THGenerateFloatTypes.h"
+

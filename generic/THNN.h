@@ -1105,4 +1105,13 @@ TH_API void THNN_(SpatialReplicationPadding_updateGradInput)(THNNState *state,
                                                             int pad_l, int pad_r,
                                                             int pad_t, int pad_b);
 
+TH_API void THNN_(VolumetricReplicationPadding_updateOutput)(
+          THNNState *state, THTensor *input, THTensor *output, int pleft,
+          int pright, int ptop, int pbottom, int pfront, int pback);
+
+TH_API void THNN_(VolumetricReplicationPadding_updateGradInput)(
+          THNNState *state, THTensor *input, THTensor *gradOutput,
+          THTensor *gradInput, int pleft, int pright, int ptop, int pbottom,
+          int pfront, int pback);
+
 #endif
