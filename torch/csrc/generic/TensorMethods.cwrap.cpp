@@ -1699,6 +1699,105 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
     - long size
 ]]
 
+[[
+  unfold
+  unfold -> new THTensor
+    - self
+    - long dimension
+    - long size
+    - long step
+]]
+
+[[
+  range
+  range -> self OPTIONAL_SELF
+    - self
+    - accreal xmin
+    - accreal xmax
+    - accreal step
+]]
+
+[[
+  scatter
+  scatter -> self OPTIONAL_SELF
+    - self
+    - long dim
+    - THLongTensor index
+    - THTensor src
+  scatterFill -> self OPTIONAL_SELF
+    - self
+    - long dim
+    - THLongTensor index
+    - real value
+]]
+
+static PyObject * THPTensor_(gather)(THPTensor *self, PyObject *args)
+{
+  HANDLE_TH_ERRORS
+  int _argcount = args ? PyTuple_Size(args) : 0;
+  if (_argcount != 2) {
+    THPUtils_setError("Provided %d args, but gather expects two or three!", _argcount);
+    return NULL;
+  }
+  long dim;
+  THPLongTensor *index;
+  THPTensor *src_ptr = self;
+  THPTensorPtr result;
+  if (_argcount == 2 && PyArg_ParseTuple(args, "lO!", &dim, &THPLongTensorType, &index)) {
+    THTensorPtr _tmp = THTensor_(new)();
+    result = (THPTensor*)THPTensor_(newObject)(_tmp);
+    _tmp.release();
+  } else if (_argcount == 3 && PyArg_ParseTuple(args, "O!lO!", &THPTensorType, &src_ptr, &dim, &THPLongTensorType, &index)) {
+    Py_INCREF(self);
+    result = self;
+  } else {
+    // TODO: write something more
+    THPUtils_setError("Invalid arguments");
+    return NULL;
+  }
+
+  THLongStoragePtr size = THLongTensor_newSizeOf(index->cdata);
+  THTensor_(resize)(result->cdata, size, NULL);
+  THTensor_(gather)(result->cdata, src_ptr->cdata, dim, index->cdata);
+
+  return (PyObject*)result.release();
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPTensor_stateless_(gather)(THPTensor *self, PyObject *args)
+{
+  HANDLE_TH_ERRORS
+  int _argcount = args ? PyTuple_Size(args) : 0;
+  if (_argcount != 2) {
+    THPUtils_setError("Provided %d args, but gather expects three or four!", _argcount);
+    return NULL;
+  }
+  long dim;
+  THPLongTensor *index;
+  THPTensor *src_ptr;
+  THPTensor *result_ptr;
+  THPTensorPtr result;
+  if (_argcount == 3 && PyArg_ParseTuple(args, "O!lO!", &THPTensorType, &src_ptr, &dim, &THPLongTensorType, &index)) {
+    THTensorPtr _tmp = THTensor_(new)();
+    result = (THPTensor*)THPTensor_(newObject)(_tmp);
+    _tmp.release();
+  } else if (_argcount == 4 && PyArg_ParseTuple(args, "O!O!lO!", &THPTensorType, &result_ptr, &THPTensorType, &src_ptr, &dim, &THPLongTensorType, &index)) {
+    Py_INCREF(result_ptr);
+    result = result_ptr;
+  } else {
+    // TODO: write something more
+    THPUtils_setError("Invalid arguments");
+    return NULL;
+  }
+
+  THLongStoragePtr size = THLongTensor_newSizeOf(index->cdata);
+  THTensor_(resize)(result->cdata, size, NULL);
+  THTensor_(gather)(result->cdata, src_ptr->cdata, dim, index->cdata);
+
+  return (PyObject*)result.release();
+  END_HANDLE_TH_ERRORS
+}
+
 // TODO: torch docs provide 7 args
 [[
   addmm
@@ -1732,6 +1831,90 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
     - THTensor vec1
     - THTensor vec2
 ]]
+
+#define IMPLEMENT_TWO_MAT_OP(NAME, TH_NAME, PRE_CALL)                          \
+static PyObject * THPTensor_(NAME)(THPTensor *self, PyObject *args)            \
+{                                                                              \
+  HANDLE_TH_ERRORS                                                             \
+  int _argcount = args ? PyTuple_Size(args) : 0;                               \
+  if (_argcount != 2) {                                                        \
+    THPUtils_setError("Provided %d args, but " #NAME "expects exactly two!", _argcount); \
+    return NULL;                                                               \
+  }                                                                            \
+  THPTensor *t1 = (THPTensor*)PyTuple_GET_ITEM(args, 0);                       \
+  THPTensor *t2 = (THPTensor*)PyTuple_GET_ITEM(args, 1);                       \
+  if (!THPTensor_(IsSubclass)((PyObject*)t1) || !THPTensor_(IsSubclass)((PyObject*)t2)) { \
+    THPUtils_setError("Expected two " THPTensorBaseStr);                       \
+    return NULL;                                                               \
+  }                                                                            \
+  PRE_CALL;                                                                    \
+  THTensor_(TH_NAME)(self->cdata, 0, self->cdata, 1, t1->cdata, t2->cdata);    \
+                                                                               \
+  Py_INCREF(self);                                                             \
+  return (PyObject*)self;                                                      \
+  END_HANDLE_TH_ERRORS                                                         \
+}
+
+
+#define IMPLEMENT_TWO_MAT_OP_STATELESS(NAME, TH_NAME, PRE_CALL)                \
+static PyObject * THPTensor_stateless_(NAME)(PyObject *_unused, PyObject *args)\
+{                                                                              \
+  HANDLE_TH_ERRORS                                                             \
+  int _argcount = args ? PyTuple_Size(args) : 0;                               \
+  THPTensor *t1;                                                               \
+  THPTensor *t2;                                                               \
+  THPTensorPtr self_ptr;                                                       \
+  if (_argcount < 2 || _argcount > 3) {                                        \
+    THPUtils_setError("Provided %d args, but expects two or three!", _argcount); \
+    return NULL;                                                               \
+  }                                                                            \
+  if (_argcount == 2) {                                                        \
+    t1 = (THPTensor*)PyTuple_GET_ITEM(args, 0);                                \
+    t2 = (THPTensor*)PyTuple_GET_ITEM(args, 1);                                \
+    if (!THPTensor_(IsSubclass)((PyObject*)t1) || !THPTensor_(IsSubclass)((PyObject*)t2)) { \
+      THPUtils_setError("Expected two " THPTensorBaseStr);                     \
+      return NULL;                                                             \
+    }                                                                          \
+    THTensorPtr _tmp = THTensor_(new)();                                       \
+    self_ptr = (THPTensor*)THPTensor_(newObject)(_tmp);                        \
+    _tmp.release();                                                            \
+  } else {                                                                     \
+    THPTensor *self = (THPTensor*)PyTuple_GET_ITEM(args, 0);                   \
+    Py_INCREF(self);                                                           \
+    self_ptr = self;                                                           \
+    t1 = (THPTensor*)PyTuple_GET_ITEM(args, 1);                                \
+    t2 = (THPTensor*)PyTuple_GET_ITEM(args, 2);                                \
+    if (!THPTensor_(IsSubclass)((PyObject*)t1) || !THPTensor_(IsSubclass)((PyObject*)t2) || !THPTensor_(IsSubclass)((PyObject*)self)) { \
+      THPUtils_setError("Expected three " THPTensorBaseStr);                   \
+      return NULL;                                                             \
+    }                                                                          \
+  }                                                                            \
+  PRE_CALL;                                                                    \
+  THTensor_(TH_NAME)(self_ptr->cdata, 0, self_ptr->cdata, 1, t1->cdata, t2->cdata); \
+                                                                               \
+  return (PyObject*)self_ptr.release();                                        \
+  END_HANDLE_TH_ERRORS                                                         \
+}
+
+IMPLEMENT_TWO_MAT_OP(ger, addr,
+  long s1 = THTensor_(size)(t1->cdata, 0);
+  long s2 = THTensor_(size)(t2->cdata, 0);
+  THTensor_(resize2d)(self->cdata, s1, s2)
+  );
+IMPLEMENT_TWO_MAT_OP(mv, addmv,
+  long s = THTensor_(size)(t1->cdata, 0);
+  THTensor_(resize1d)(self->cdata, s)
+  );
+
+IMPLEMENT_TWO_MAT_OP_STATELESS(ger, addr,
+  long s1 = THTensor_(size)(t1->cdata, 0);
+  long s2 = THTensor_(size)(t2->cdata, 0);
+  THTensor_(resize2d)(self_ptr->cdata, s1, s2)
+  );
+IMPLEMENT_TWO_MAT_OP_STATELESS(mv, addmv,
+  long s = THTensor_(size)(t1->cdata, 0);
+  THTensor_(resize1d)(self_ptr->cdata, s)
+  );
 
 [[
   addbmm
@@ -2048,12 +2231,18 @@ static PyMethodDef THPTensor_(methods)[] = {
   {"addmm",           (PyCFunction)THPTensor_(addmm),           METH_VARARGS, NULL},
   {"addmv",           (PyCFunction)THPTensor_(addmv),           METH_VARARGS, NULL},
   {"addr",            (PyCFunction)THPTensor_(addr),            METH_VARARGS, NULL},
+  {"ger",             (PyCFunction)THPTensor_(ger),             METH_VARARGS, NULL},
+  {"mv",              (PyCFunction)THPTensor_(mv),              METH_VARARGS, NULL},
   {"addbmm",          (PyCFunction)THPTensor_(addbmm),          METH_VARARGS, NULL},
   {"baddbmm",         (PyCFunction)THPTensor_(baddbmm),         METH_VARARGS, NULL},
   {"addcmul",         (PyCFunction)THPTensor_(addcmul),         METH_VARARGS, NULL},
   {"addcdiv",         (PyCFunction)THPTensor_(addcdiv),         METH_VARARGS, NULL},
   {"mm",              (PyCFunction)THPTensor_(mm),              METH_VARARGS, NULL},
   {"bmm",             (PyCFunction)THPTensor_(bmm),             METH_VARARGS, NULL},
+  {"unfold",          (PyCFunction)THPTensor_(unfold),          METH_VARARGS, NULL},
+  {"range",           (PyCFunction)THPTensor_(range),           METH_VARARGS, NULL},
+  {"gather",          (PyCFunction)THPTensor_(gather),          METH_VARARGS, NULL},
+  {"scatter",         (PyCFunction)THPTensor_(scatter),         METH_VARARGS, NULL},
   {NULL}
 };
 
@@ -2170,12 +2359,18 @@ static PyMethodDef THPTensorStatelessMethods[] = {
   {"addmm",           (PyCFunction)THPTensor_stateless_(addmm),           METH_VARARGS, NULL},
   {"addmv",           (PyCFunction)THPTensor_stateless_(addmv),           METH_VARARGS, NULL},
   {"addr",            (PyCFunction)THPTensor_stateless_(addr),            METH_VARARGS, NULL},
+  {"ger",             (PyCFunction)THPTensor_stateless_(ger),             METH_VARARGS, NULL},
+  {"mv",              (PyCFunction)THPTensor_stateless_(mv),              METH_VARARGS, NULL},
   {"addbmm",          (PyCFunction)THPTensor_stateless_(addbmm),          METH_VARARGS, NULL},
   {"baddbmm",         (PyCFunction)THPTensor_stateless_(baddbmm),         METH_VARARGS, NULL},
   {"addcmul",         (PyCFunction)THPTensor_stateless_(addcmul),         METH_VARARGS, NULL},
   {"addcdiv",         (PyCFunction)THPTensor_stateless_(addcdiv),         METH_VARARGS, NULL},
   {"mm",              (PyCFunction)THPTensor_stateless_(mm),              METH_VARARGS, NULL},
   {"bmm",             (PyCFunction)THPTensor_stateless_(bmm),             METH_VARARGS, NULL},
+  {"unfold",          (PyCFunction)THPTensor_stateless_(unfold),          METH_VARARGS, NULL},
+  {"range",           (PyCFunction)THPTensor_stateless_(range),           METH_VARARGS, NULL},
+  {"gather",          (PyCFunction)THPTensor_stateless_(gather),          METH_VARARGS, NULL},
+  {"scatter",         (PyCFunction)THPTensor_stateless_(scatter),         METH_VARARGS, NULL},
   {NULL}
 };
 

@@ -9,6 +9,7 @@ struct THPTensor {
 
 extern PyTypeObject THPTensorType;
 extern PyTypeObject THPTensorStatelessType;
+extern PyObject *THPTensorClass;
 
 bool THPTensor_(init)(PyObject *module);
 PyObject * THPTensor_(newObject)(THTensor *tensor);

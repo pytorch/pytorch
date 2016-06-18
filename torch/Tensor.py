@@ -48,7 +48,7 @@ class RealTensor(RealTensorBase):
         return _printing.printTensor(self)
 
     def __iter__(self):
-        return iter(map(lambda i: self.select(0, i), range(self.size(0))))
+        return iter(map(lambda i: self.select(0, i), pyrange(self.size(0))))
 
     def split(self, split_size, dim=0):
         result = []
@@ -58,7 +58,7 @@ class RealTensor(RealTensorBase):
         def get_split_size(i):
             return split_size if i < num_splits-1 else last_split_size
         return [self.narrow(dim, i*split_size, get_split_size(i)) for i
-                in range(0, num_splits)]
+                in pyrange(0, num_splits)]
 
     def chunk(self, n_chunks, dim=0):
         split_size = math.ceil(tensor.size(dim)/n_chunks)
@@ -158,16 +158,16 @@ class RealTensor(RealTensorBase):
 
         xtensor = src.new().set(src)
         xsize = xtensor.size().tolist()
-        for i in range(len(repeats)-src.dim()):
+        for i in pyrange(len(repeats)-src.dim()):
             xsize = [1] + xsize
 
         size = LongStorage([a * b for a, b in zip(xsize, repeats)])
         xtensor.resize(LongStorage(xsize))
         result.resize(size)
         urtensor = result.new(result)
-        for i in range(xtensor.dim()):
+        for i in pyrange(xtensor.dim()):
             urtensor = urtensor.unfold(i,xtensor.size(i),xtensor.size(i))
-        for i in range(urtensor.dim()-xtensor.dim()):
+        for i in pyrange(urtensor.dim()-xtensor.dim()):
             xsize = [1] + xsize
         xtensor.resize(LongStorage(xsize))
         xxtensor = xtensor.expandAs(urtensor)

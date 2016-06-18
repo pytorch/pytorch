@@ -222,6 +222,8 @@ IMPLEMENT_STATELESS(narrow)
 IMPLEMENT_STATELESS(addmm)
 IMPLEMENT_STATELESS(addmv)
 IMPLEMENT_STATELESS(addr)
+IMPLEMENT_STATELESS(ger)
+IMPLEMENT_STATELESS(mv)
 IMPLEMENT_STATELESS(addbmm)
 IMPLEMENT_STATELESS(baddbmm)
 IMPLEMENT_STATELESS(addcmul)
@@ -239,6 +241,10 @@ IMPLEMENT_STATELESS(random)
 IMPLEMENT_STATELESS(geometric)
 IMPLEMENT_STATELESS(bernoulli)
 IMPLEMENT_STATELESS(randperm)
+IMPLEMENT_STATELESS(unfold)
+IMPLEMENT_STATELESS(range)
+IMPLEMENT_STATELESS(gather)
+IMPLEMENT_STATELESS(scatter)
 
 // In nonzero, the first argument might be a LongTensor that will be used
 // for indices output, so we should pick a function based on second
@@ -359,6 +365,8 @@ static PyMethodDef TorchMethods[] = {
   {"addmm",           (PyCFunction)THPModule_addmm,             METH_VARARGS, NULL},
   {"addmv",           (PyCFunction)THPModule_addmv,             METH_VARARGS, NULL},
   {"addr",            (PyCFunction)THPModule_addr,              METH_VARARGS, NULL},
+  {"ger",             (PyCFunction)THPModule_ger,               METH_VARARGS, NULL},
+  {"mv",              (PyCFunction)THPModule_mv,                METH_VARARGS, NULL},
   {"addbmm",          (PyCFunction)THPModule_addbmm,            METH_VARARGS, NULL},
   {"baddbmm",         (PyCFunction)THPModule_baddbmm,           METH_VARARGS, NULL},
   {"addcmul",         (PyCFunction)THPModule_addcmul,           METH_VARARGS, NULL},
@@ -375,6 +383,10 @@ static PyMethodDef TorchMethods[] = {
   {"geometric",       (PyCFunction)THPModule_geometric,         METH_VARARGS, NULL},
   {"bernoulli",       (PyCFunction)THPModule_bernoulli,         METH_VARARGS, NULL},
   {"randperm",        (PyCFunction)THPModule_randperm,          METH_VARARGS, NULL},
+  {"unfold",          (PyCFunction)THPModule_unfold,            METH_VARARGS, NULL},
+  {"range",           (PyCFunction)THPModule_range,             METH_VARARGS, NULL},
+  {"gather",          (PyCFunction)THPModule_gather,            METH_VARARGS, NULL},
+  {"scatter",         (PyCFunction)THPModule_scatter,           METH_VARARGS, NULL},
   {NULL, NULL, 0, NULL}
 };
 

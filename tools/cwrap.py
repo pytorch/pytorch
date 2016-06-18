@@ -122,6 +122,8 @@ TYPE_TRANSFORMS = {
     'THDoubleTensor': 'THPDoubleTensor*',
     'THLongStorage': 'THPLongStorage*',
     'THGenerator': 'THPGenerator*',
+    # TODO
+    'accreal': 'double',
 }
 
 # Code that will be used to generate each of argument options

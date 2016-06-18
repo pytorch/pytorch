@@ -3,6 +3,10 @@ from . import printing as _printing
 import sys
 import math
 
+# This gets shadowed by torch.range
+def pyrange(*args, **kwargs):
+    return __builtins__['range'](*args, **kwargs)
+
 def typename(o):
     return o.__module__ + "." + o.__class__.__name__
 
