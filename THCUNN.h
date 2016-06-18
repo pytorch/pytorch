@@ -937,3 +937,19 @@ TH_API void THNN_CudaSpatialReplicationPadding_updateGradInput(THCState *state,
                                                        THCudaTensor *gradInput,
                                                        int padL, int padR,
                                                        int padT, int padB);
+
+TH_API void THNN_CudaVolumetricReplicationPadding_updateOutput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *output,
+          int pleft, int pright,
+          int ptop, int pbottom,
+          int pfront, int pback);
+TH_API void THNN_CudaVolumetricReplicationPadding_updateGradInput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *gradOutput,
+          THCudaTensor *gradInput,
+          int pleft, int pright,
+          int ptop, int pbottom,
+          int pfront, int pback);
