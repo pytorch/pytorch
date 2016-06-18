@@ -1809,6 +1809,101 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
     - THTensor mat2
 ]]
 
+[[
+  randperm
+  randperm -> self OPTIONAL_SELF
+    - self
+    - THGenerator generator OPTIONAL THPDefaultGenerator->cdata
+    - long n
+]]
+
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+[[
+  multinomial
+  multinomial -> new THLongTensor
+    - THGenerator generator OPTIONAL THPDefaultGenerator->cdata
+    - self
+    - long n
+    - bool replacement OPTIONAL false
+]]
+
+[[
+  uniform
+  uniform -> self
+    - self
+    - THGenerator generator OPTIONAL THPDefaultGenerator->cdata
+    - real a OPTIONAL 0
+    - real b OPTIONAL 1
+]]
+
+[[
+  normal
+  normal -> self
+    - self
+    - THGenerator generator OPTIONAL THPDefaultGenerator->cdata
+    - real a OPTIONAL 0
+    - real b OPTIONAL 1
+]]
+
+[[
+  cauchy
+  cauchy -> self
+    - self
+    - THGenerator generator OPTIONAL THPDefaultGenerator->cdata
+    - real a OPTIONAL 0
+    - real b OPTIONAL 1
+]]
+
+[[
+  logNormal
+  logNormal -> self
+    - self
+    - THGenerator generator OPTIONAL THPDefaultGenerator->cdata
+    - real a OPTIONAL 1
+    - real b OPTIONAL 2
+]]
+
+[[
+  exponential
+  exponential -> self
+    - self
+    - THGenerator generator OPTIONAL THPDefaultGenerator->cdata
+    - real lambda OPTIONAL 1
+]]
+#endif
+
+// TODO: can't handle sampling from [a, b]
+[[
+  random
+  random -> self
+    - self
+    - THGenerator generator OPTIONAL THPDefaultGenerator->cdata
+]]
+
+[[
+  geometric
+  geometric -> self
+    - self
+    - THGenerator generator OPTIONAL THPDefaultGenerator->cdata
+    - double p
+]]
+
+[[
+  bernoulli
+  bernoulli -> self
+    - self
+    - THGenerator generator OPTIONAL THPDefaultGenerator->cdata
+    - double p OPTIONAL 0.5
+  bernoulli_FloatTensor -> self
+    - self
+    - THGenerator generator OPTIONAL THPDefaultGenerator->cdata
+    - THFloatTensor float_probabilities
+  bernoulli_DoubleTensor -> self
+    - self
+    - THGenerator generator OPTIONAL THPDefaultGenerator->cdata
+    - THDoubleTensor double_probabilities
+]]
+
 // Declared in TensorCopy.cpp
 static PyObject * THPTensor_(copy)(THPTensor *self, PyObject *other);
 
@@ -1874,7 +1969,17 @@ static PyMethodDef THPTensor_(methods)[] = {
   {"atan2",           (PyCFunction)THPTensor_(atan2),           METH_VARARGS, NULL},
   {"pow",             (PyCFunction)THPTensor_(pow),             METH_VARARGS, NULL},
   {"lerp",            (PyCFunction)THPTensor_(lerp),            METH_VARARGS, NULL},
+  {"multinomial",     (PyCFunction)THPTensor_(multinomial),     METH_VARARGS, NULL},
+  {"uniform",         (PyCFunction)THPTensor_(uniform),         METH_VARARGS, NULL},
+  {"normal",          (PyCFunction)THPTensor_(normal),          METH_VARARGS, NULL},
+  {"cauchy",          (PyCFunction)THPTensor_(cauchy),          METH_VARARGS, NULL},
+  {"logNormal",       (PyCFunction)THPTensor_(logNormal),       METH_VARARGS, NULL},
+  {"exponential",     (PyCFunction)THPTensor_(exponential),     METH_VARARGS, NULL},
 #endif
+  {"randperm",        (PyCFunction)THPTensor_(randperm),        METH_VARARGS, NULL},
+  {"random",          (PyCFunction)THPTensor_(random),          METH_VARARGS, NULL},
+  {"geometric",       (PyCFunction)THPTensor_(geometric),       METH_VARARGS, NULL},
+  {"bernoulli",       (PyCFunction)THPTensor_(bernoulli),       METH_VARARGS, NULL},
   {"add",             (PyCFunction)THPTensor_(add),             METH_VARARGS, NULL},
   {"csub",            (PyCFunction)THPTensor_(csub),            METH_VARARGS, NULL},
   {"mul",             (PyCFunction)THPTensor_(mul),             METH_VARARGS, NULL},
@@ -1992,7 +2097,17 @@ static PyMethodDef THPTensorStatelessMethods[] = {
   {"atan2",           (PyCFunction)THPTensor_stateless_(atan2),           METH_VARARGS, NULL},
   {"pow",             (PyCFunction)THPTensor_stateless_(pow),             METH_VARARGS, NULL},
   {"lerp",            (PyCFunction)THPTensor_stateless_(lerp),            METH_VARARGS, NULL},
+  {"multinomial",     (PyCFunction)THPTensor_stateless_(multinomial),     METH_VARARGS, NULL},
+  {"uniform",         (PyCFunction)THPTensor_stateless_(uniform),         METH_VARARGS, NULL},
+  {"normal",          (PyCFunction)THPTensor_stateless_(normal),          METH_VARARGS, NULL},
+  {"cauchy",          (PyCFunction)THPTensor_stateless_(cauchy),          METH_VARARGS, NULL},
+  {"logNormal",       (PyCFunction)THPTensor_stateless_(logNormal),       METH_VARARGS, NULL},
+  {"exponential",     (PyCFunction)THPTensor_stateless_(exponential),     METH_VARARGS, NULL},
 #endif
+  {"randperm",        (PyCFunction)THPTensor_stateless_(randperm),        METH_VARARGS, NULL},
+  {"random",          (PyCFunction)THPTensor_stateless_(random),          METH_VARARGS, NULL},
+  {"geometric",       (PyCFunction)THPTensor_stateless_(geometric),       METH_VARARGS, NULL},
+  {"bernoulli",       (PyCFunction)THPTensor_stateless_(bernoulli),       METH_VARARGS, NULL},
   {"add",             (PyCFunction)THPTensor_stateless_(add),             METH_VARARGS, NULL},
   {"csub",            (PyCFunction)THPTensor_stateless_(csub),            METH_VARARGS, NULL},
   {"mul",             (PyCFunction)THPTensor_stateless_(mul),             METH_VARARGS, NULL},

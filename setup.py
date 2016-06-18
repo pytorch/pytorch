@@ -63,6 +63,7 @@ if platform.system() == 'Darwin':
 
 sources = [
     "torch/csrc/Module.cpp",
+    "torch/csrc/Generator.cpp",
     "torch/csrc/Tensor.cpp",
     "torch/csrc/Storage.cpp",
     "torch/csrc/utils.cpp",

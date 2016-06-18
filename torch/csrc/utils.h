@@ -39,6 +39,7 @@ private:
 #include <TH/THGenerateAllTypes.h>
 
 typedef THPPointer<PyObject> THPObjectPtr;
+typedef THPPointer<THPGenerator> THPGeneratorPtr;
 
 #define THPUtils_assert(cond, ...)                                             \
 if (!(cond)) { THPUtils_setError(__VA_ARGS__); return NULL; }

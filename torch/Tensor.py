@@ -137,3 +137,39 @@ class RealTensor(RealTensorBase):
         result.set(src.storage(), src.storageOffset(),
                                 src_size, src_stride)
         return result
+
+    def repeatTensor(self, src, *args):
+        if not isTensor(src):
+            if isStorage(src) and len(args) == 0:
+                repeats = src.tolist()
+            else:
+                repeats = [src] + list(args)
+            src = self
+            result = self.new()
+        else:
+            repeats = list(args)
+            result = self
+
+        if not src.isContiguous():
+            src = src.clone()
+
+        if len(repeats) < src.dim():
+            raise ValueError('Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor')
+
+        xtensor = src.new().set(src)
+        xsize = xtensor.size().tolist()
+        for i in range(len(repeats)-src.dim()):
+            xsize = [1] + xsize
+
+        size = LongStorage([a * b for a, b in zip(xsize, repeats)])
+        xtensor.resize(LongStorage(xsize))
+        result.resize(size)
+        urtensor = result.new(result)
+        for i in range(xtensor.dim()):
+            urtensor = urtensor.unfold(i,xtensor.size(i),xtensor.size(i))
+        for i in range(urtensor.dim()-xtensor.dim()):
+            xsize = [1] + xsize
+        xtensor.resize(LongStorage(xsize))
+        xxtensor = xtensor.expandAs(urtensor)
+        urtensor.copy(xxtensor)
+        return result

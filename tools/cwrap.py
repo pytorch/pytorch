@@ -118,7 +118,10 @@ TYPE_TRANSFORMS = {
     'THTensor': 'THPTensor*',
     'THByteTensor': 'THPByteTensor*',
     'THLongTensor': 'THPLongTensor*',
+    'THFloatTensor': 'THPFloatTensor*',
+    'THDoubleTensor': 'THPDoubleTensor*',
     'THLongStorage': 'THPLongStorage*',
+    'THGenerator': 'THPGenerator*',
 }
 
 # Code that will be used to generate each of argument options
@@ -133,19 +136,27 @@ FORMAT_STR_MAP = {
     'THPTensor*': 'O!',
     'THPLongTensor*': 'O!',
     'THPByteTensor*': 'O!',
+    'THPFloatTensor*': 'O!',
+    'THPDoubleTensor*': 'O!',
     'THPLongStorage*': 'O!',
+    'THPGenerator*': 'O!',
     'real': 'O&',
     'long': 'l',
+    'double': 'd',
     'bool': 'p',
 }
 
 # If O! is specified for any type in FORMAT_STR_MAP you should specify it's
 # type here
+# TODO: change to THP*Class or use a parser function
 ARGPARSE_TYPE_CHECK = {
     'THPTensor*': 'THPTensorType',
     'THPLongTensor*': 'THPLongTensorType',
     'THPByteTensor*': 'THPByteTensorType',
+    'THPFloatTensor*': 'THPFloatTensorType',
+    'THPDoubleTensor*': 'THPDoubleTensorType',
     'THPLongStorage*': 'THPLongStorageType',
+    'THPGenerator*': 'THPGeneratorType',
     'real': 'THPUtils_(parseReal)',
 }
 
@@ -220,7 +231,16 @@ ADDITIONAL_ARGS = {
 }
 
 # Types for which it's necessary to extract cdata
-CDATA_TYPES = set(('THPTensor*', 'THPByteTensor*', 'THPLongTensor*', 'THPStorage*', 'THPLongStorage*'))
+CDATA_TYPES = set((
+    'THPTensor*',
+    'THPByteTensor*',
+    'THPLongTensor*',
+    'THPFloatTensor*',
+    'THPDoubleTensor*',
+    'THPStorage*',
+    'THPLongStorage*',
+    'THPGenerator*',
+))
 
 def generate_function(lines, stateless):
     assert len(lines) > 1

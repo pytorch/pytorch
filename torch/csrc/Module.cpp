@@ -31,6 +31,11 @@ PyObject *THPCharTensorClass    = NULL;
 PyObject *THPByteTensorClass    = NULL;
 
 PyObject *THPDefaultTensorClass = NULL;
+PyObject *THPGeneratorClass     = NULL;
+
+// Used if no other generator is provided
+// TODO: this won't be thread-safe anymore
+THPGenerator *THPDefaultGenerator   = NULL;
 
 static bool THPModule_loadClasses(PyObject *self)
 {
@@ -223,6 +228,17 @@ IMPLEMENT_STATELESS(addcmul)
 IMPLEMENT_STATELESS(addcdiv)
 IMPLEMENT_STATELESS(mm)
 IMPLEMENT_STATELESS(bmm)
+// TODO: this doesn't implement options that return numbers!
+IMPLEMENT_STATELESS(multinomial)
+IMPLEMENT_STATELESS(uniform)
+IMPLEMENT_STATELESS(normal)
+IMPLEMENT_STATELESS(cauchy)
+IMPLEMENT_STATELESS(logNormal)
+IMPLEMENT_STATELESS(exponential)
+IMPLEMENT_STATELESS(random)
+IMPLEMENT_STATELESS(geometric)
+IMPLEMENT_STATELESS(bernoulli)
+IMPLEMENT_STATELESS(randperm)
 
 // In nonzero, the first argument might be a LongTensor that will be used
 // for indices output, so we should pick a function based on second
@@ -349,6 +365,16 @@ static PyMethodDef TorchMethods[] = {
   {"addcdiv",         (PyCFunction)THPModule_addcdiv,           METH_VARARGS, NULL},
   {"mm",              (PyCFunction)THPModule_mm,                METH_VARARGS, NULL},
   {"bmm",             (PyCFunction)THPModule_bmm,               METH_VARARGS, NULL},
+  {"multinomial",     (PyCFunction)THPModule_multinomial,       METH_VARARGS, NULL},
+  {"uniform",         (PyCFunction)THPModule_uniform,           METH_VARARGS, NULL},
+  {"normal",          (PyCFunction)THPModule_normal,            METH_VARARGS, NULL},
+  {"cauchy",          (PyCFunction)THPModule_cauchy,            METH_VARARGS, NULL},
+  {"logNormal",       (PyCFunction)THPModule_logNormal,         METH_VARARGS, NULL},
+  {"exponential",     (PyCFunction)THPModule_exponential,       METH_VARARGS, NULL},
+  {"random",          (PyCFunction)THPModule_random,            METH_VARARGS, NULL},
+  {"geometric",       (PyCFunction)THPModule_geometric,         METH_VARARGS, NULL},
+  {"bernoulli",       (PyCFunction)THPModule_bernoulli,         METH_VARARGS, NULL},
+  {"randperm",        (PyCFunction)THPModule_randperm,          METH_VARARGS, NULL},
   {NULL, NULL, 0, NULL}
 };
 
@@ -394,6 +420,8 @@ PyMODINIT_FUNC PyInit_C()
   ASSERT_TRUE(tensor_classes = PySet_New(NULL));
   ASSERT_TRUE(PyObject_SetAttrString(module, "_tensorclasses", tensor_classes) == 0);
 
+  ASSERT_TRUE(THPGenerator_init(module));
+
   ASSERT_TRUE(THPDoubleStorage_init(module));
   ASSERT_TRUE(THPFloatStorage_init(module));
   ASSERT_TRUE(THPLongStorage_init(module));
@@ -409,6 +437,9 @@ PyMODINIT_FUNC PyInit_C()
   ASSERT_TRUE(THPShortTensor_init(module));
   ASSERT_TRUE(THPCharTensor_init(module));
   ASSERT_TRUE(THPByteTensor_init(module));
+
+  THPDefaultGenerator = (THPGenerator*)THPGenerator_newObject();
+  ASSERT_TRUE(THPDefaultGenerator != nullptr);
 
   updateErrorHandlers();
 

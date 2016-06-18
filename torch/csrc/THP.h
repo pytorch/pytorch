@@ -12,8 +12,12 @@
 
 #include "Exceptions.h"
 
+#include "Generator.h"
 #include "Storage.h"
 #include "Tensor.h"
+
+// TODO: this won't be thread-safe anymore
+extern THPGenerator *THPDefaultGenerator;
 
 // This requires defined Storage and Tensor types
 #include "utils.h"

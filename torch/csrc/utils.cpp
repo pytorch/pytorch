@@ -5,6 +5,14 @@
 #include "generic/utils.cpp"
 #include <TH/THGenerateAllTypes.h>
 
+template<>
+void THPPointer<THPGenerator>::free() {
+  if (ptr)
+    Py_DECREF(ptr);
+}
+
+template class THPPointer<THPGenerator>;
+
 bool THPUtils_checkLong(PyObject *index) {
     return PyLong_Check(index) || PyInt_Check(index);
 }
