@@ -106,6 +106,11 @@ class RealTensor(RealTensorBase):
                 perm[j] = -1
         return tensor
 
+    def expandAs(self, src, template=None):
+        if template is not None:
+            return self.expand(src, template.size())
+        return self.expand(src.size())
+
     def expand(self, src, *args):
         if not isTensor(src):
             if isStorage(src) and len(args) == 0:
@@ -132,10 +137,24 @@ class RealTensor(RealTensorBase):
                 src_size[i] = sizes[i]
                 src_stride[i] = 0
             elif size != sizes[i]:
-                ValueError('incorrect size: only supporting singleton expansion (size=1)')
+                raise ValueError('incorrect size: only supporting singleton expansion (size=1)')
 
         result.set(src.storage(), src.storageOffset(),
                                 src_size, src_stride)
+        return result
+
+    def sub(self, *sizes):
+        if len(sizes) == 0:
+            raise ValueError('sub requires at least two arguments')
+        if len(sizes) % 2 != 0:
+            raise ValueError('sub requires an even number of arguments')
+        result = self
+        pairs = int(len(sizes)/2)
+        for dim, start, end in zip(pyrange(pairs), sizes[::2], sizes[1::2]):
+            dim_size = result.size(dim)
+            start = start + dim_size if start < 0 else start
+            end = end + dim_size if end < 0 else end
+            result = result.narrow(dim, start, end-start+1)
         return result
 
     def repeatTensor(self, src, *args):
