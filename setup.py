@@ -72,6 +72,7 @@ C = Extension("torch.C",
               libraries=['TH'],
               sources=sources,
               language='c++',
+              extra_compile_args=['-std=c++11'],
               include_dirs=(["torch/csrc", th_header_path]),
               extra_link_args = extra_link_args,
 )

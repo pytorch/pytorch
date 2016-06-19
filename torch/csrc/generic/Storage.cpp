@@ -30,10 +30,12 @@ static void THPStorage_(dealloc)(THPStorage* self)
 static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
   HANDLE_TH_ERRORS
-  PyObject *cdata_ptr = NULL;
-  THPObjectPtr iterator;
-  long size = -1;
+  PyObject *cdata_ptr = NULL;     // keyword-only arg - cdata pointer value
+  THPStorage *storage_arg = NULL; // storage to be viewed on
+  THPObjectPtr iterator;          // not null iff got a single iterable
+  long size = -1;                 // non-negative iff got a number - new storage size
   bool args_ok = true;
+
   if (kwargs != NULL && PyDict_Size(kwargs) == 1) {
     cdata_ptr = PyDict_GetItemString(kwargs, "cdata");
     args_ok = cdata_ptr != NULL;
@@ -41,6 +43,8 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
     PyObject *arg = PyTuple_GET_ITEM(args, 0);
     if (THPUtils_checkLong(arg)) {
       args_ok = THPUtils_getLong(PyTuple_GET_ITEM(args, 0), &size);
+    } else if (THPStorage_(IsSubclass)(arg)) {
+      storage_arg = (THPStorage*)arg;
     } else {
       iterator = PyObject_GetIter(arg);
       args_ok = iterator != nullptr;
@@ -57,11 +61,16 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
     THPUtils_setError("invalid arguments");
     return NULL;
   }
+
   THPStoragePtr self = (THPStorage *)type->tp_alloc(type, 0);
   if (self != nullptr) {
     if (cdata_ptr) {
-      self->cdata = (THStorage*)PyLong_AsVoidPtr(cdata_ptr);
-      THStorage_(retain)(self->cdata);
+      THStorage *ptr = (THStorage*)PyLong_AsVoidPtr(cdata_ptr);
+      THStorage_(retain)(ptr);
+      self->cdata = ptr;
+    } else if (storage_arg) {
+      THStorage_(retain)(storage_arg->cdata);
+      self->cdata = storage_arg->cdata;
     } else if (iterator == nullptr && size >= 0) {
       self->cdata = THStorage_(newWithSize)(size);
     } else if (iterator != nullptr) {
@@ -81,7 +90,7 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
         }
         self->cdata->data[items_processed++] = v;
       }
-      // Iterator has raised an exception
+      // Iterator raised an exception
       if (PyErr_Occurred()) {
         return NULL;
       }

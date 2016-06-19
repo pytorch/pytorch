@@ -2,6 +2,8 @@
 #include <structmember.h>
 
 #include <stdbool.h>
+#include <vector>
+#include <stack>
 #include <TH/TH.h>
 #include <TH/THMath.h>
 #include "THP.h"

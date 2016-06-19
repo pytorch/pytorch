@@ -28,41 +28,145 @@ static void THPTensor_(dealloc)(THPTensor* self)
 static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
   HANDLE_TH_ERRORS
-  THPLongStorage *storage_obj = NULL;
-  long long sizes[] = {-1, -1, -1, -1};
-  // Check if it's a long storage
-  if (PyTuple_Size(args) == 1) {
-    PyObject *arg = PyTuple_GetItem(args, 0);
-    if (THPLongStorage_IsSubclass(arg)) {
-      storage_obj = (THPLongStorage*)arg;
-    }
-  }
-  const char *keywords[] = {"dim0", "dim1", "dim2", "dim3", "cdata", NULL};
-  THTensor *cdata_ptr = NULL;
-  // If not, try to parse integers
-#define ERRMSG ";Expected torch.LongStorage or up to 4 integers as arguments"
-  // TODO: check that cdata_ptr is a keyword arg
-  if (!storage_obj &&
-      !PyArg_ParseTupleAndKeywords(args, kwargs, "|LLLLL" ERRMSG, (char**)keywords,
-          &sizes[0], &sizes[1], &sizes[2], &sizes[3], &cdata_ptr))
-#undef ERRMSG
-    return NULL;
+  PyObject *cdata_arg = NULL;                 // keyword-only arg - cdata pointer value
+  THLongStorage *sizes_arg = NULL;            // a storage with sizes for a new tensor
+  THTensor *tensor_arg = NULL;                // a tensor to be viewed on
+  PyObject *iterable_arg = NULL;              // an iterable, with new tensor contents
+  std::vector<size_t> iterator_lengths;       // a queue storing lengths of iterables at each depth
+  bool args_ok = true;
 
-  THPTensor *self = (THPTensor *)type->tp_alloc(type, 0);
-  if (self != NULL) {
-    if (storage_obj)
-        self->cdata = THTensor_(newWithSize)(storage_obj->cdata, NULL);
-    else if (cdata_ptr)
-        self->cdata = cdata_ptr;
-    else
-        self->cdata = THTensor_(newWithSize4d)(sizes[0], sizes[1], sizes[2], sizes[3]);
-    if (self->cdata == NULL) {
-      Py_DECREF(self);
-      return NULL;
+  if (kwargs && PyDict_Size(kwargs) == 1) {
+    cdata_arg = PyDict_GetItemString(kwargs, "cdata");
+    args_ok = cdata_arg != NULL;
+  } else if (args && PyTuple_Size(args) == 1) {
+    PyObject *arg = PyTuple_GET_ITEM(args, 0);
+    if (THPTensor_(IsSubclass)(arg)) {
+      tensor_arg = ((THPTensor*)arg)->cdata;
+    } else if (THPLongStorage_IsSubclass(arg)) {
+      sizes_arg = ((THPLongStorage*)arg)->cdata;
+    } else {
+      iterable_arg = arg;
+      Py_INCREF(arg);
+      THPObjectPtr item = arg;
+      THPObjectPtr iter;
+      while ((iter = PyObject_GetIter(item)) != nullptr) {
+        Py_ssize_t length = PyObject_Length(item);
+        iterator_lengths.push_back(length);
+        // TODO length == 0 is an error too
+        if (length == -1) {
+          // TODO: error
+          return NULL;
+        }
+        item = PyIter_Next(iter);
+        if (item == nullptr) {
+          // TODO: set error
+          return NULL;
+        }
+      }
+      args_ok = iterator_lengths.size() > 0;
+      // We have accumulated some errors along the way
+      // Since, we did all checking and ignored only the non-important
+      // ones it's safe to clear them here
+      PyErr_Clear();
     }
+  } else if (args && PyTuple_Size(args) > 0) {
+    sizes_arg = THPUtils_getLongStorage(args);
+    args_ok = sizes_arg != nullptr;
   }
-  return (PyObject *)self;
-  // TODO: cleanup on error
+
+  if (!args_ok) {
+    // TODO: nice error mossage
+    THPUtils_setError("invalid arguments");
+    return NULL;
+  }
+
+  THPTensorPtr self = (THPTensor *)type->tp_alloc(type, 0);
+  if (self != nullptr) {
+    if (cdata_arg) {
+      THTensor *ptr = (THTensor*)PyLong_AsVoidPtr(cdata_arg);
+      THTensor_(retain)(ptr);
+      self->cdata = ptr;
+    } else if (sizes_arg) {
+      self->cdata = THTensor_(newWithSize)(sizes_arg, nullptr);
+    } else if (tensor_arg) {
+      self->cdata = THTensor_(newWithTensor)(tensor_arg);
+    } else if (iterable_arg) {
+      size_t iter_depth = iterator_lengths.size();
+      std::stack<THPObjectPtr> iterator_stack;
+      std::vector<size_t> items_processed(iter_depth);
+      Py_INCREF(iterable_arg);
+      THPObjectPtr item = iterable_arg;
+      PyObject *iter;
+      while (iterator_stack.size() != iter_depth) {
+        iter = PyObject_GetIter(item);
+        if (!iter) {
+          THPUtils_setError("inconsistent iterator depth");
+          return NULL;
+        }
+        iterator_stack.emplace(iter);
+        item = PyIter_Next(iter);
+        if (item == nullptr) {
+          THPUtils_setError("error or empty iter");
+          return NULL;
+        }
+      }
+      THLongStoragePtr sizes = THLongStorage_newWithSize(iter_depth);
+      long *sizes_data = sizes->data;
+      for (size_t s: iterator_lengths) {
+        *sizes_data++ = s;
+      }
+      THTensorPtr tensor = THTensor_(newWithSize)(sizes, NULL);
+
+      real *data = tensor->storage->data;
+      if (!THPUtils_(parseReal)(item, data++))
+        return NULL;
+      items_processed[iter_depth-1]++;
+
+      while (!iterator_stack.empty()) {
+        PyObject *iter = iterator_stack.top().get();
+        // Parse items
+        if (iterator_stack.size() == iter_depth) {
+          while ((item = PyIter_Next(iter))) {
+            if (!THPUtils_(parseReal)(item, data++))
+              return NULL;
+            items_processed[iter_depth-1]++;
+          }
+          if (items_processed[iter_depth-1] != iterator_lengths[iter_depth-1]) {
+            THPUtils_setError("inconsistent size");
+            return NULL;
+          }
+          iterator_stack.pop(); // this deallocates the iter
+        // Iterate on lower depths
+        } else {
+          item = PyIter_Next(iter);
+          if (item == nullptr) {
+            if (PyErr_Occurred())
+              return NULL;
+            if (items_processed[iterator_stack.size()-1]) {
+              THPUtils_setError("inconsistent size");
+              return NULL;
+            }
+            iterator_stack.pop(); // this deallocates the iter
+          } else {
+            PyObject *new_iter = PyObject_GetIter(item);
+            if (!new_iter) {
+              THPUtils_setError("non-iterable item");
+              return NULL;
+            }
+            items_processed[iterator_stack.size()] = 0;
+            iterator_stack.emplace(new_iter);
+          }
+        }
+      }
+      self->cdata = tensor.release();
+    } else {
+      self->cdata = THTensor_(new)();
+    }
+
+    if (self->cdata == NULL)
+      return NULL;
+  }
+  return (PyObject *)self.release();
   END_HANDLE_TH_ERRORS
 }
 
