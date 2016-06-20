@@ -44,6 +44,9 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
       tensor_arg = ((THPTensor*)arg)->cdata;
     } else if (THPLongStorage_IsSubclass(arg)) {
       sizes_arg = ((THPLongStorage*)arg)->cdata;
+    } else if (THPUtils_checkLong(arg)) {
+      sizes_arg = THPUtils_getLongStorage(args);
+      args_ok = sizes_arg != nullptr;
     } else {
       iterable_arg = arg;
       Py_INCREF(arg);
