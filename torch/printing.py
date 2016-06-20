@@ -2,9 +2,52 @@ import math
 import torch
 from functools import reduce
 
-#TODO
+pyrange = torch.pyrange
+
 def _printformat(storage):
-    return '{:.2f}', 1, 5
+    int_mode = True
+    if isinstance(storage, torch.FloatStorage) or isinstance(storage, torch.DoubleStorage):
+        for value in storage:
+            if value != math.ceil(value):
+                int_mode = False
+                break
+    tensor = torch.DoubleTensor(torch.DoubleStorage(storage.size()).copy(storage)).abs()
+    exp_min = tensor.min()
+    if exp_min != 0:
+        exp_min = math.floor(math.log10(exp_min)) + 1
+    else:
+        exp_min = 1
+    exp_max = tensor.max()
+    if exp_max != 0:
+        exp_max = math.floor(math.log10(exp_max)) + 1
+    else:
+        exp_max = 1
+
+    scale = 1
+    if int_mode:
+        if exp_max > 9:
+            format = '{:11.4e}'
+            sz = 11
+        else:
+            sz = exp_max + 1
+            format = '{:' + str(sz) + '.0f}'
+    else:
+        if exp_max - exp_min > 4:
+            sz = 11
+            if abs(exp_max) > 99 or abs(exp_min) > 99:
+                sz = sz + 1
+            format = '{:' + str(sz) + '.4e}'
+        else:
+            if exp_max > 5 or exp_max < 0:
+                sz = 7
+                scale = math.pow(10, exp_max-1)
+            else:
+                if exp_max == 0:
+                    sz = 7
+                else:
+                    sz = exp_max + 6
+            format = '{:' + str(sz) + '.4f}'
+    return format, scale, sz
 
 SCALE_FORMAT = '{:.5f} *\n'
 
@@ -20,7 +63,7 @@ def _printMatrix(self, indent=''):
             strt += 'Columns {} to {} \n{}'.format(firstColumn, lastColumn, indent)
         if scale != 1:
             strt += SCALE_FORMAT.format(scale)
-        for l in range(self.size(0)):
+        for l in pyrange(self.size(0)):
             strt += indent + (' ' if scale != 1 else '')
             strt += ' '.join(fmt.format(val/scale) for val in self.select(0, l)) + '\n'
         firstColumn = lastColumn + 1
@@ -32,13 +75,17 @@ def _printTensor(self):
     counter[0] = -1
     finished = False
     strt = ''
-    while counter[-1] < self.size(0)-1:
-        for i in range(counter_dim):
+    while True:
+        for i in pyrange(counter_dim):
             counter[i] += 1
             if counter[i] == self.size(i):
+                if i == counter_dim-1:
+                    finished = True
                 counter[i] = 0
             else:
                 break
+        if finished:
+            break
         if strt != '':
            strt += '\n'
         strt += '({},.,.) = \n'.format(','.join(str(i) for i in counter))

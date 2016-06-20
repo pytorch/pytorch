@@ -1,5 +1,4 @@
 from torch.C import *
-from . import printing as _printing
 import sys
 import math
 
@@ -39,6 +38,7 @@ def infer_sizes(sizes, total):
         sizes[to_infer] = total / total_sizes
     return sizes
 
+from . import printing as _printing
 
 # GENERATED CODE GOES HERE
 

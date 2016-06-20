@@ -1,11 +1,5 @@
 
 class RealTensor(RealTensorBase):
-    def __str__(self):
-        return "RealTensor"
-
-    def __repr__(self):
-        return str(self)
-
     def new(self, *args, **kwargs):
         return self.__class__(*args, **kwargs)
 
@@ -43,6 +37,9 @@ class RealTensor(RealTensorBase):
 
     def byte(self):
         return self.type('torch.ByteTensor')
+
+    def __repr__(self):
+        return str(self)
 
     def __str__(self):
         return _printing.printTensor(self)
