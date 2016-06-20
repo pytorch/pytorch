@@ -143,6 +143,7 @@ class RealTensor(RealTensorBase):
                                 src_size, src_stride)
         return result
 
+    # TODO: maybe drop this in favour of csub? :(
     def sub(self, *sizes):
         if len(sizes) == 0:
             raise ValueError('sub requires at least two arguments')
@@ -192,3 +193,43 @@ class RealTensor(RealTensorBase):
         xxtensor = xtensor.expandAs(urtensor)
         urtensor.copy(xxtensor)
         return result
+
+    def __add__(self, other):
+        return self.clone().add(other)
+    __radd__ = __add__
+
+    def __sub__(self, other):
+        return self.clone().csub(other)
+    __rsub__ = __sub__
+
+    def __mul__(self, other):
+        # TODO: isTensor checks many cases, while it might be faster to only
+        # see if other is a number. It's a weird thing in Python, so share
+        # some THPUtils functions in C namespace in the future.
+        if isTensor(other):
+            dim_self = self.dim()
+            dim_other = other.dim()
+            if dim_self == 1 and dim_other == 1:
+                return self.dot(other)
+            elif dim_self == 2 and dim_other == 1:
+                return self.new().mv(self, other)
+            elif dim_self == 2 and dim_other == 2:
+                return self.new().mm(self, other)
+        else:
+            return self.clone().mul(other)
+
+    def __rmul__(self, other):
+        # No need to check for tensor on lhs - it would execute it's __mul__
+        return self.clone().mul(other)
+
+    def __div__(self, other):
+        return self.clone().div(other)
+    __rdiv__ = __div__
+
+    def __mod__(self, other):
+        return self.clone().remainder(other)
+
+    def __neg__(self):
+        return self.clone().mul(-1)
+
+
