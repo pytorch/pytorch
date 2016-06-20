@@ -1,3 +1,9 @@
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+#define RealStr "float"
+#else
+#define RealStr "int"
+#endif
+
 #define SIMPLE_OP(name, expr)                                                  \
 static PyObject * THPTensor_(name)(THPTensor *self)                            \
 {                                                                              \
@@ -2374,3 +2380,4 @@ static PyMethodDef THPTensorStatelessMethods[] = {
   {NULL}
 };
 
+#undef RealStr

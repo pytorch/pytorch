@@ -104,12 +104,12 @@ static PyObject * THPTensor_stateless_(${name})(PyObject *_unused, PyObject *arg
   HANDLE_TH_ERRORS
   Py_ssize_t _argcount = args ? PyTuple_Size(args) : 0;
 """)
-# TODO: Better error handling when error happens (there are memory leaks now)
-DEFINITION_END = """
+DEFINITION_END = Template("""
+  THPUtils_invalidArguments(args, ${expected_args});
   return NULL;
   END_HANDLE_TH_ERRORS
 }
-"""
+""")
 
 # TODO: accreal
 # Transforms applied to argument types declared in the definition
@@ -175,49 +175,63 @@ RETURN_WRAPPER = {
     'accreal':              Template('return PyFloat_FromDouble($expr)'),
     'real':                 Template('return THPUtils_(newReal)($expr)'),
     'new THByteTensor':     Template("""
-        THByteTensor *_t = THByteTensor_new();
-        THPByteTensor *_ret = (THPByteTensor*)THPByteTensor_newObject(_t);
+        THByteTensorPtr _t = THByteTensor_new();
+        THPByteTensorPtr _ret = (THPByteTensor*)THPByteTensor_newObject(_t);
+        _t.release();
         $expr;
-        return (PyObject*)_ret"""),
+        return (PyObject*)_ret.release()"""),
     'new ValueIndexPair':   Template("""
-        THTensor *_value = THTensor_(new)();
-        THLongTensor *_indices = THLongTensor_new();
-        THPTensor *_v = (THPTensor*)THPTensor_(newObject)(_value);
-        THPLongTensor *_i = (THPLongTensor*)THPLongTensor_newObject(_indices);
+        THTensorPtr _value = THTensor_(new)();
+        THLongTensorPtr _indices = THLongTensor_new();
+        THPTensorPtr _v = (THPTensor*)THPTensor_(newObject)(_value);
+        THPLongTensorPtr _i = (THPLongTensor*)THPLongTensor_newObject(_indices);
+        _value.release();
+        _indices.release();
         $expr;
-        return Py_BuildValue("NN", (PyObject*)_v, (PyObject*)_i)"""),
+        PyObject *ret = Py_BuildValue("NN", (PyObject*)_v.get(), (PyObject*)_i.get());
+        _v.release(); _i.release();
+        return ret;"""),
     'new SelfIndexPair':    Template("""
-        THLongTensor *_indices = THLongTensor_new();
-        THPLongTensor *_i = (THPLongTensor*)THPLongTensor_newObject(_indices);
+        THLongTensorPtr _indices = THLongTensor_new();
+        THPLongTensorPtr _i = (THPLongTensor*)THPLongTensor_newObject(_indices);
+        _indices.release();
         $expr;
-        return Py_BuildValue("ON", (PyObject*)self, (PyObject*)_i)"""),
+        PyObject *ret = Py_BuildValue("ON", (PyObject*)self, (PyObject*)_i.get());
+        _i.release();
+        return ret"""),
     'new THTensor':         Template("""
-        THTensor *_value = THTensor_(new)();
-        THPTensor *_ret = (THPTensor*)THPTensor_(newObject)(_value);
+        THTensorPtr _value = THTensor_(new)();
+        THPTensorPtr _ret = (THPTensor*)THPTensor_(newObject)(_value);
+        _value.release();
         $expr;
-        return (PyObject*)_ret"""),
+        return (PyObject*)_ret.release()"""),
     'new THLongTensor':     Template("""
-        THLongTensor *_i = THLongTensor_new();
-        THPLongTensor *_ret = (THPLongTensor*)THPLongTensor_newObject(_i);
+        THLongTensorPtr _i = THLongTensor_new();
+        THPLongTensorPtr _ret = (THPLongTensor*)THPLongTensor_newObject(_i);
+        _i.release();
         $expr;
-        return (PyObject*)_ret"""),
+        return (PyObject*)_ret.release()"""),
 
     # Stateless mode
     'STATELESS PROV new SelfIndexPair': Template("""
-        THLongTensor *_indices = THLongTensor_new();
-        THPLongTensor *_i = (THPLongTensor*)THPLongTensor_newObject(_indices);
+        THLongTensorPtr _indices = THLongTensor_new();
+        THPLongTensorPtr _i = (THPLongTensor*)THPLongTensor_newObject(_indices);
+        _indices.release();
         $expr;
-        return Py_BuildValue("ON", (PyObject*)_res, (PyObject*)_i)"""),
+        PyObject *ret = Py_BuildValue("ON", (PyObject*)_res, (PyObject*)_i.get());
+        _i.release();
+        return ret;"""),
     'STATELESS PROV2 new SelfIndexPair': Template("""
         $expr;
         return Py_BuildValue("OO", (PyObject*)_res, (PyObject*)_res_ind)"""),
 
     'STATELESS PROV self':   Template('$expr; Py_INCREF(_res); return (PyObject*)_res'),
     'STATELESS NEW self':        Template("""
-        THTensor *_t = THTensor_(new)();
-        THPTensor *_res_new = (THPTensor*)THPTensor_(newObject)(_t);
+        THTensorPtr _t = THTensor_(new)();
+        THPTensorPtr _res_new = (THPTensor*)THPTensor_(newObject)(_t);
+        _t.release();
         $expr;
-        return (PyObject*)_res_new"""),
+        return (PyObject*)_res_new.release()"""),
 }
 
 # Additional args that are added to TH call
@@ -244,6 +258,19 @@ CDATA_TYPES = set((
     'THPGenerator*',
 ))
 
+TYPE_DESCRIPTIONS = {
+    'THPTensor*': '" THPTensorStr "',
+    'THPByteTensor*': 'ByteTensor',
+    'THPLongTensor*': 'LongTensor',
+    'THPFloatTensor*': 'FloatTensor',
+    'THPDoubleTensor*': 'DoubleTensor',
+    'THPStorage*': '" THPStorageStr "',
+    'THPLongStorage*': 'LongStorage',
+    'THPGenerator*': 'Generator',
+    'real': '" RealStr "',
+    'accreal': '" RealStr "',
+}
+
 def generate_function(lines, stateless):
     assert len(lines) > 1
     lines = remove_indentation(lines)
@@ -265,8 +292,25 @@ def generate_function(lines, stateless):
     # Generate function body
     definition += generate_all_options(arg_options)
 
-    definition += DEFINITION_END
+    accepted_args_str = describe_options(arg_options, stateless)
+    definition += DEFINITION_END.substitute(expected_args=accepted_args_str)
     return definition
+
+def describe_options(options, is_stateless):
+    def describe_arg(arg):
+        return TYPE_DESCRIPTIONS.get(arg.type, arg.type) + ' ' + arg.name
+    result = '"'
+    for option in options:
+        is_provided = argfilter()
+        args = list(filter(lambda arg: not is_provided(arg), option.arguments))
+        if args:
+            result += '('
+            result += ', '.join(map(describe_arg, args))
+            result += ')'
+        else:
+            result += 'no arguments'
+        result += ' or '
+    return result[:-4] + '"'
 
 def remove_indentation(lines):
     """Removes 2 spaces from the left from each line.

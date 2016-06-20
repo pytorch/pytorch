@@ -8,6 +8,7 @@ int THPUtils_getLong(PyObject *index, long *result);
 int THPUtils_getCallable(PyObject *arg, PyObject **result);
 THLongStorage * THPUtils_getLongStorage(PyObject *args, int ignore_first=0);
 void THPUtils_setError(const char *format, ...);
+void THPUtils_invalidArguments(PyObject *given_args, const char *expected_args_desc);
 
 #define THStoragePtr TH_CONCAT_3(TH,Real,StoragePtr)
 #define THTensorPtr  TH_CONCAT_3(TH,Real,TensorPtr)

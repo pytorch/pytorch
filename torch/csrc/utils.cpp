@@ -1,5 +1,6 @@
 #include <Python.h>
 #include <stdarg.h>
+#include <string>
 #include "THP.h"
 
 #include "generic/utils.cpp"
@@ -82,4 +83,30 @@ template<>
 void THPPointer<PyObject>::free() {
   if (ptr)
     Py_DECREF(ptr);
+}
+
+void THPUtils_invalidArguments(PyObject *given_args, const char *expected_args_desc) {
+  static const size_t BUFFER_SIZE = 10000;
+  static const std::string PREFIX = "Invalid arguments! Got ";
+  std::string error_msg;
+  error_msg.reserve(2000);
+  error_msg += PREFIX;
+
+  // TODO: assert that args is a tuple?
+  Py_ssize_t num_args = PyTuple_Size(given_args);
+  if (num_args == 0) {
+    error_msg += "no arguments";
+  } else {
+    error_msg += "(";
+    for (int i = 0; i < num_args; i++) {
+      PyObject *arg = PyTuple_GET_ITEM(given_args, i);
+      if (i > 0)
+        error_msg += ", ";
+      error_msg += Py_TYPE(arg)->tp_name;
+    }
+    error_msg += ")";
+  }
+  error_msg += ", but expected ";
+  error_msg += expected_args_desc;
+  PyErr_SetString(PyExc_ValueError, error_msg.c_str());
 }
