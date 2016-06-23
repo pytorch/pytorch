@@ -1,10 +1,11 @@
 #include <exception>
+#include <string>
 
 #define HANDLE_TH_ERRORS                                                       \
   try {
 
 #define END_HANDLE_TH_ERRORS_RET(retval)                                       \
-  } catch (THException &e) {                                                   \
+  } catch (std::exception &e) {                                                \
     PyErr_SetString(PyExc_RuntimeError, e.what());                             \
     return retval;                                                             \
   }
@@ -15,10 +16,10 @@ struct THException: public std::exception {
   THException(const char* msg): msg(msg) {};
 
   virtual const char* what() const throw() {
-    return msg;
+    return msg.c_str();
   }
 
-  const char* msg;
+  std::string msg;
 };
 
 struct THArgException: public THException {

@@ -11,8 +11,10 @@
 #define ASSERT_TRUE(cmd) if (!(cmd)) return NULL
 #endif
 
+#define STATELESS_ATTR_NAME "_torch"
+
 static PyObject* module;
-static PyObject* tensor_classes;
+PyObject* tensor_classes;
 
 PyObject *THPDoubleStorageClass = NULL;
 PyObject *THPFloatStorageClass  = NULL;
@@ -34,49 +36,53 @@ PyObject *THPDefaultTensorClass = NULL;
 PyObject *THPGeneratorClass     = NULL;
 
 // Used if no other generator is provided
-// TODO: this won't be thread-safe anymore
 THPGenerator *THPDefaultGenerator   = NULL;
 
 static bool THPModule_loadClasses(PyObject *self)
 {
-  // TODO: error checking
+#define ASSERT_NOT_NULL(ptr) if (!(ptr)) { THPUtils_setError("couldn't load classes"); return false; }
   PyObject *torch_module = PyImport_ImportModule("torch");
+  if (!torch_module) {
+    THPUtils_setError("class loader couldn't access torch module");
+    return false;
+  }
   PyObject* module_dict = PyModule_GetDict(torch_module);
 
-  THPDoubleStorageClass = PyMapping_GetItemString(module_dict,(char*)"DoubleStorage");
-  THPFloatStorageClass  = PyMapping_GetItemString(module_dict,(char*)"FloatStorage");
-  THPLongStorageClass   = PyMapping_GetItemString(module_dict,(char*)"LongStorage");
-  THPIntStorageClass    = PyMapping_GetItemString(module_dict,(char*)"IntStorage");
-  THPShortStorageClass  = PyMapping_GetItemString(module_dict,(char*)"ShortStorage");
-  THPCharStorageClass   = PyMapping_GetItemString(module_dict,(char*)"CharStorage");
-  THPByteStorageClass   = PyMapping_GetItemString(module_dict,(char*)"ByteStorage");
+  ASSERT_NOT_NULL(tensor_classes = PyMapping_GetItemString(module_dict, (char*)"_tensor_classes"));
 
-  THPDoubleTensorClass  = PyMapping_GetItemString(module_dict,(char*)"DoubleTensor");
-  THPFloatTensorClass   = PyMapping_GetItemString(module_dict,(char*)"FloatTensor");
-  THPLongTensorClass    = PyMapping_GetItemString(module_dict,(char*)"LongTensor");
-  THPIntTensorClass     = PyMapping_GetItemString(module_dict,(char*)"IntTensor");
-  THPShortTensorClass   = PyMapping_GetItemString(module_dict,(char*)"ShortTensor");
-  THPCharTensorClass    = PyMapping_GetItemString(module_dict,(char*)"CharTensor");
-  THPByteTensorClass    = PyMapping_GetItemString(module_dict,(char*)"ByteTensor");
-  PySet_Add(tensor_classes, THPDoubleTensorClass);
-  PySet_Add(tensor_classes, THPFloatTensorClass);
-  PySet_Add(tensor_classes, THPLongTensorClass);
-  PySet_Add(tensor_classes, THPIntTensorClass);
-  PySet_Add(tensor_classes, THPShortTensorClass);
-  PySet_Add(tensor_classes, THPCharTensorClass);
-  PySet_Add(tensor_classes, THPByteTensorClass);
+  ASSERT_NOT_NULL(THPDoubleStorageClass = PyMapping_GetItemString(module_dict,(char*)"DoubleStorage"));
+  ASSERT_NOT_NULL(THPFloatStorageClass  = PyMapping_GetItemString(module_dict,(char*)"FloatStorage"));
+  ASSERT_NOT_NULL(THPLongStorageClass   = PyMapping_GetItemString(module_dict,(char*)"LongStorage"));
+  ASSERT_NOT_NULL(THPIntStorageClass    = PyMapping_GetItemString(module_dict,(char*)"IntStorage"));
+  ASSERT_NOT_NULL(THPShortStorageClass  = PyMapping_GetItemString(module_dict,(char*)"ShortStorage"));
+  ASSERT_NOT_NULL(THPCharStorageClass   = PyMapping_GetItemString(module_dict,(char*)"CharStorage"));
+  ASSERT_NOT_NULL(THPByteStorageClass   = PyMapping_GetItemString(module_dict,(char*)"ByteStorage"));
+
+  ASSERT_NOT_NULL(THPDoubleTensorClass  = PyMapping_GetItemString(module_dict,(char*)"DoubleTensor"));
+  ASSERT_NOT_NULL(THPFloatTensorClass   = PyMapping_GetItemString(module_dict,(char*)"FloatTensor"));
+  ASSERT_NOT_NULL(THPLongTensorClass    = PyMapping_GetItemString(module_dict,(char*)"LongTensor"));
+  ASSERT_NOT_NULL(THPIntTensorClass     = PyMapping_GetItemString(module_dict,(char*)"IntTensor"));
+  ASSERT_NOT_NULL(THPShortTensorClass   = PyMapping_GetItemString(module_dict,(char*)"ShortTensor"));
+  ASSERT_NOT_NULL(THPCharTensorClass    = PyMapping_GetItemString(module_dict,(char*)"CharTensor"));
+  ASSERT_NOT_NULL(THPByteTensorClass    = PyMapping_GetItemString(module_dict,(char*)"ByteTensor"));
 
   THPDefaultTensorClass = THPDoubleTensorClass;
 
   return true;
+#undef ASSERT_NOT_NULL
 }
 
-#define INIT_STATELESS(type)                                                   \
-  stateless = PyObject_Call((PyObject*)&TH_CONCAT_2(type, TensorStatelessType), arg, NULL); \
-  PyObject_SetAttrString(TH_CONCAT_3(THP,type,TensorClass), "_torch", stateless);
 static bool THPModule_assignStateless(PyObject *self)
 {
-  // TODO: error checking
+#define INIT_STATELESS(type)                                                   \
+  stateless = PyObject_Call((PyObject*)&TH_CONCAT_2(type, TensorStatelessType), arg, NULL); \
+  if (!stateless) {                                                            \
+    THPUtils_setError("stateless method initialization error");                \
+    return false;                                                              \
+  }                                                                            \
+  if (PyObject_SetAttrString(TH_CONCAT_3(THP,type,TensorClass), STATELESS_ATTR_NAME, stateless) == -1) { \
+    THPUtils_setError("stateless method initialization error (on assignment)");\
+  }
   PyObject *arg = PyTuple_New(0);
   PyObject *stateless;
   INIT_STATELESS(Double);
@@ -88,20 +94,23 @@ static bool THPModule_assignStateless(PyObject *self)
   INIT_STATELESS(Byte);
   Py_DECREF(arg);
   return true;
-}
 #undef INIT_STATELESS
+}
 
+// Callback for python part. Used for additional initialization of python classes
 static PyObject * THPModule_initExtension(PyObject *self)
 {
-  THPModule_loadClasses(self);
-  THPModule_assignStateless(self);
+  if (!THPModule_loadClasses(self))         return NULL;
+  if (!THPModule_assignStateless(self))     return NULL;
   return PyBool_FromLong(true);
 }
 
 static bool THPModule_isTensor(PyObject *obj)
 {
-  // TODO: error handling
-  return PySet_Contains(tensor_classes, (PyObject*)Py_TYPE(obj));
+  int result = PySet_Contains(tensor_classes, (PyObject*)Py_TYPE(obj));
+  if (result == -1)
+    throw std::logic_error("FATAL: tensor_classes isn't a set!");
+  return result;
 }
 
 static PyObject * THPModule_tensorCheck(PyObject *module, PyObject *obj)
@@ -121,13 +130,13 @@ static PyObject * TH_CONCAT_2(THPModule_, name)(PyObject *_unused, PyObject *arg
     }                                                                          \
   }                                                                            \
                                                                                \
-  PyObject *methods = PyObject_GetAttrString(tensor, "_torch");                \
+  PyObject *methods = PyObject_GetAttrString(tensor, STATELESS_ATTR_NAME);                \
+  THPUtils_assert(methods, "Type %s doesn't implement statless methods",       \
+      Py_TYPE(tensor)->tp_name);                                               \
   PyObject *method = PyObject_GetAttrString(methods, #name);                   \
-  if (!method)                                                                 \
-    return NULL;                                                               \
+  THPUtils_assert(method, "Type %s doesn't implement stateless method " #name, \
+      Py_TYPE(tensor)->tp_name);                                               \
   return PyObject_Call(method, args, NULL);                                    \
-  /* TODO: error handling */                                                   \
-  return NULL;                                                                 \
 }
 
 IMPLEMENT_STATELESS(sigmoid)
@@ -246,6 +255,8 @@ IMPLEMENT_STATELESS(range)
 IMPLEMENT_STATELESS(gather)
 IMPLEMENT_STATELESS(scatter)
 
+#undef IMPLEMENT_STATELESS
+
 // In nonzero, the first argument might be a LongTensor that will be used
 // for indices output, so we should pick a function based on second
 // tensor's type.
@@ -257,13 +268,13 @@ static PyObject * THPModule_nonzero(PyObject *_unused, PyObject *args)
   else if (PyTuple_Size(args) == 2)
     tensor = PyTuple_GET_ITEM(args, 1);
 
-  PyObject *methods = PyObject_GetAttrString(tensor, "_torch");
+  PyObject *methods = PyObject_GetAttrString(tensor, STATELESS_ATTR_NAME);
+  THPUtils_assert(methods, "Type %s doesn't implement statless methods",
+      Py_TYPE(tensor)->tp_name);
   PyObject *method = PyObject_GetAttrString(methods, "nonzero");
-  if (!method)
-    return NULL;
+  THPUtils_assert(method, "Type %s doesn't implement stateless method nonzero",
+      Py_TYPE(tensor)->tp_name);
   return PyObject_Call(method, args, NULL);
-  /* TODO: error handling */
-  return NULL;
 }
 
 static PyMethodDef TorchMethods[] = {
@@ -393,7 +404,7 @@ static PyMethodDef TorchMethods[] = {
 #if PY_MAJOR_VERSION != 2
 static struct PyModuleDef torchmodule = {
    PyModuleDef_HEAD_INIT,
-   "torch.C",
+   "torch._C",
    NULL,
    -1,
    TorchMethods
@@ -402,13 +413,11 @@ static struct PyModuleDef torchmodule = {
 
 static void errorHandler(const char *msg, void *data)
 {
-  fprintf(stderr, "%s\n", msg);
   throw THException(msg);
 }
 
 static void errorHandlerArg(int argNumber, const char *msg, void *data)
 {
-  fprintf(stderr, "%s\n", msg);
   throw THArgException(msg, argNumber);
 }
 
@@ -419,19 +428,16 @@ static void updateErrorHandlers()
 }
 
 #if PY_MAJOR_VERSION == 2
-PyMODINIT_FUNC initC()
+PyMODINIT_FUNC init_C()
 #else
-PyMODINIT_FUNC PyInit_C()
+PyMODINIT_FUNC PyInit__C()
 #endif
 {
 #if PY_MAJOR_VERSION == 2
-  ASSERT_TRUE(module = Py_InitModule("torch.C", TorchMethods));
+  ASSERT_TRUE(module = Py_InitModule("torch._C", TorchMethods));
 #else
   ASSERT_TRUE(module = PyModule_Create(&torchmodule));
 #endif
-  ASSERT_TRUE(tensor_classes = PySet_New(NULL));
-  ASSERT_TRUE(PyObject_SetAttrString(module, "_tensorclasses", tensor_classes) == 0);
-
   ASSERT_TRUE(THPGenerator_init(module));
 
   ASSERT_TRUE(THPDoubleStorage_init(module));
@@ -462,3 +468,4 @@ PyMODINIT_FUNC PyInit_C()
 }
 
 #undef ASSERT_TRUE
+#undef STATELESS_ATTR_NAME

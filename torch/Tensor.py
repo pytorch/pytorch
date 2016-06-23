@@ -1,5 +1,25 @@
+import torch
+from . import TensorPrinting
+from functools import reduce
+from itertools import chain
 
-class RealTensor(RealTensorBase):
+
+def _infer_sizes(sizes, total):
+    to_infer = -1
+    total_sizes = 1
+    for i, size in enumerate(sizes):
+        total_sizes *= size
+        if size == -1:
+            if to_infer >= 0:
+                raise RuntimeError
+            to_infer = i
+    if to_infer >= 0:
+        assert total % total_sizes == 0, "Can't make sizes have exactly %d elements" % total
+        sizes[to_infer] = total / total_sizes
+    return sizes
+
+
+class _TensorBase(object):
     def new(self, *args, **kwargs):
         return self.__class__(*args, **kwargs)
 
@@ -10,7 +30,6 @@ class RealTensor(RealTensorBase):
         if t == current:
             return self
         _, _, typename = t.partition('.')
-        # TODO: this is ugly
         assert hasattr(sys.modules['torch'], typename)
         return getattr(sys.modules['torch'], typename)(self.size()).copy(self)
 
@@ -42,10 +61,10 @@ class RealTensor(RealTensorBase):
         return str(self)
 
     def __str__(self):
-        return _printing.printTensor(self)
+        return TensorPrinting.printTensor(self)
 
     def __iter__(self):
-        return iter(map(lambda i: self.select(0, i), pyrange(self.size(0))))
+        return iter(map(lambda i: self.select(0, i), torch._pyrange(self.size(0))))
 
     def split(self, split_size, dim=0):
         result = []
@@ -55,7 +74,7 @@ class RealTensor(RealTensorBase):
         def get_split_size(i):
             return split_size if i < num_splits-1 else last_split_size
         return [self.narrow(dim, i*split_size, get_split_size(i)) for i
-                in pyrange(0, num_splits)]
+                in torch._pyrange(0, num_splits)]
 
     def chunk(self, n_chunks, dim=0):
         split_size = math.ceil(tensor.size(dim)/n_chunks)
@@ -70,19 +89,25 @@ class RealTensor(RealTensorBase):
         return []
 
     def view(self, src, *args):
-        assert isTensor(src)
-        if len(args) == 1 and isStorage(args[0]):
+        assert torch.isTensor(src)
+        if len(args) == 1 and torch.isStorage(args[0]):
             sizes = args[0]
         else:
-            sizes = LongStorage(args)
-        sizes = infer_sizes(sizes, src.nElement())
+            sizes = torch.LongStorage(args)
+        sizes = _infer_sizes(sizes, src.nElement())
+
+        if reduce(lambda a,b: a *b, sizes) != src.nElement():
+            raise RuntimeError('Invalid size for view. Input size: ' +
+                    'x'.join(map(lambda v: str(v), src.size())) +
+                    ', output size: ' +
+                    'x'.join(map(lambda v: str(v), sizes)) + '.')
 
         assert src.isContiguous(), "expecting a contiguous tensor"
         self.set(src.storage(), src.storageOffset(), sizes)
         return self
 
     def viewAs(self, src, template):
-        if not isTensor(src) and isLongStorage(template):
+        if not torch.isTensor(src) and torch.isLongStorage(template):
             raise ValueError('viewAs is expecting a Tensor and LongStorage')
         return self.view(src, template.size())
 
@@ -109,16 +134,15 @@ class RealTensor(RealTensorBase):
         return self.expand(src.size())
 
     def expand(self, src, *args):
-        if not isTensor(src):
-            if isStorage(src) and len(args) == 0:
+        if not torch.isTensor(src):
+            if torch.isStorage(src) and len(args) == 0:
                 sizes = src
             else:
-                # TODO: concat iters
-                sizes = LongStorage([src] + list(args))
+                sizes = torch.LongStorage((src,) + args)
             src = self
             result = self.new()
         else:
-            sizes = LongStorage(args)
+            sizes = torch.LongStorage(args)
             result = self
 
         src_dim = src.dim()
@@ -148,7 +172,7 @@ class RealTensor(RealTensorBase):
             raise ValueError('sub requires an even number of arguments')
         result = self
         pairs = int(len(sizes)/2)
-        for dim, start, end in zip(pyrange(pairs), sizes[::2], sizes[1::2]):
+        for dim, start, end in zip(torch._pyrange(pairs), sizes[::2], sizes[1::2]):
             dim_size = result.size(dim)
             start = start + dim_size if start < 0 else start
             end = end + dim_size if end < 0 else end
@@ -156,8 +180,8 @@ class RealTensor(RealTensorBase):
         return result
 
     def repeatTensor(self, src, *args):
-        if not isTensor(src):
-            if isStorage(src) and len(args) == 0:
+        if not torch.isTensor(src):
+            if torch.isStorage(src) and len(args) == 0:
                 repeats = src.tolist()
             else:
                 repeats = [src] + list(args)
@@ -175,18 +199,18 @@ class RealTensor(RealTensorBase):
 
         xtensor = src.new().set(src)
         xsize = xtensor.size().tolist()
-        for i in pyrange(len(repeats)-src.dim()):
+        for i in torch._pyrange(len(repeats)-src.dim()):
             xsize = [1] + xsize
 
-        size = LongStorage([a * b for a, b in zip(xsize, repeats)])
-        xtensor.resize(LongStorage(xsize))
+        size = torch.LongStorage([a * b for a, b in zip(xsize, repeats)])
+        xtensor.resize(torch.LongStorage(xsize))
         result.resize(size)
         urtensor = result.new(result)
-        for i in pyrange(xtensor.dim()):
+        for i in torch._pyrange(xtensor.dim()):
             urtensor = urtensor.unfold(i,xtensor.size(i),xtensor.size(i))
-        for i in pyrange(urtensor.dim()-xtensor.dim()):
+        for i in torch._pyrange(urtensor.dim()-xtensor.dim()):
             xsize = [1] + xsize
-        xtensor.resize(LongStorage(xsize))
+        xtensor.resize(torch.LongStorage(xsize))
         xxtensor = xtensor.expandAs(urtensor)
         urtensor.copy(xxtensor)
         return result
@@ -200,10 +224,7 @@ class RealTensor(RealTensorBase):
     __rsub__ = __sub__
 
     def __mul__(self, other):
-        # TODO: isTensor checks many cases, while it might be faster to only
-        # see if other is a number. It's a weird thing in Python, so share
-        # some THPUtils functions in C namespace in the future.
-        if isTensor(other):
+        if torch.isTensor(other):
             dim_self = self.dim()
             dim_other = other.dim()
             if dim_self == 1 and dim_other == 1:
@@ -228,5 +249,3 @@ class RealTensor(RealTensorBase):
 
     def __neg__(self):
         return self.clone().mul(-1)
-
-

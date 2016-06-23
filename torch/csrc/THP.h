@@ -16,7 +16,6 @@
 #include "Storage.h"
 #include "Tensor.h"
 
-// TODO: this won't be thread-safe anymore
 extern THPGenerator *THPDefaultGenerator;
 
 // This requires defined Storage and Tensor types

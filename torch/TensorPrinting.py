@@ -2,7 +2,7 @@ import math
 import torch
 from functools import reduce
 
-pyrange = torch.pyrange
+_pyrange = torch._pyrange
 
 def _printformat(storage):
     int_mode = True
@@ -63,7 +63,7 @@ def _printMatrix(self, indent=''):
             strt += 'Columns {} to {} \n{}'.format(firstColumn, lastColumn, indent)
         if scale != 1:
             strt += SCALE_FORMAT.format(scale)
-        for l in pyrange(self.size(0)):
+        for l in _pyrange(self.size(0)):
             strt += indent + (' ' if scale != 1 else '')
             strt += ' '.join(fmt.format(val/scale) for val in self.select(0, l)) + '\n'
         firstColumn = lastColumn + 1
@@ -76,7 +76,7 @@ def _printTensor(self):
     finished = False
     strt = ''
     while True:
-        for i in pyrange(counter_dim):
+        for i in _pyrange(counter_dim):
             counter[i] += 1
             if counter[i] == self.size(i):
                 if i == counter_dim-1:
