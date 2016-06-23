@@ -152,16 +152,17 @@ void THNN_(SpatialFullConvolution_updateOutput)(
     long k_ = 1;
 
     // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
-    THBlas_(gemm)(
-        't', 'n',
-        n_, m_, k_,
-        1,
-        THTensor_(data)(ones), k_,
-        THTensor_(data)(bias), k_,
-        1,
-        THTensor_(data)(output_n), n_
-    );
-
+    if (bias) {
+      THBlas_(gemm)(
+          't', 'n',
+          n_, m_, k_,
+          1,
+          THTensor_(data)(ones), k_,
+          THTensor_(data)(bias), k_,
+          1,
+          THTensor_(data)(output_n), n_
+      );
+    }
   }
 
   // Free
@@ -355,15 +356,17 @@ void THNN_(SpatialFullConvolution_accGradParameters)(
     long k_ = outputHeight * outputWidth;
 
     // Do GEMV (note: this is a bit confusing because gemv assumes column-major matrices)
-    THBlas_(gemv)(
-        't',
-        k_, m_,
-        scale,
-        THTensor_(data)(gradOutput_n), k_,
-        THTensor_(data)(ones), 1,
-        1,
-        THTensor_(data)(gradBias), 1
-    );
+    if (gradBias) {
+      THBlas_(gemv)(
+          't',
+          k_, m_,
+          scale,
+          THTensor_(data)(gradOutput_n), k_,
+          THTensor_(data)(ones), 1,
+          1,
+          THTensor_(data)(gradBias), 1
+      );
+    }
   }
 
   // Free
