@@ -4,207 +4,99 @@
 #define RealStr "int"
 #endif
 
-#define SIMPLE_OP(name, expr)                                                  \
-static PyObject * THPTensor_(name)(THPTensor *self)                            \
-{                                                                              \
-  HANDLE_TH_ERRORS                                                             \
-  return (expr);                                                               \
-  END_HANDLE_TH_ERRORS                                                         \
-}
+[[
+  elementSize STATEFUL_ONLY
+  elementSize -> long STORAGE_CALL
+]]
 
-#define SIMPLE_RETURN_SELF(name, expr)                                         \
-static PyObject * THPTensor_(name)(THPTensor *self)                            \
-{                                                                              \
-  HANDLE_TH_ERRORS                                                             \
-  expr;                                                                        \
-  Py_INCREF(self);                                                             \
-  return (PyObject*)self;                                                      \
-  END_HANDLE_TH_ERRORS                                                         \
-}
+[[
+  storage STATEFUL_ONLY
+  storage -> THStorage
+    - self
+]]
 
-SIMPLE_OP(elementSize,      PyLong_FromLong(THStorage_(elementSize)()))
-SIMPLE_OP(storage,          THPStorage_(newObject)(THTensor_(storage)(self->cdata)))
-SIMPLE_OP(storageOffset,    PyLong_FromLong(THTensor_(storageOffset)(self->cdata)))
-SIMPLE_OP(nDimension,       PyLong_FromLong(THTensor_(nDimension)(self->cdata)))
+[[
+  storageOffset STATEFUL_ONLY
+  storageOffset -> long
+    - self
+]]
 
-SIMPLE_RETURN_SELF(free,    THTensor_(free)(self->cdata))
-SIMPLE_RETURN_SELF(retain,  THTensor_(retain)(self->cdata))
+[[
+  nDimension STATEFUL_ONLY
+  nDimension -> long
+    - self
+]]
 
-static PyObject * THPTensor_(resize)(THPTensor *self, PyObject *args)
-{
-  HANDLE_TH_ERRORS
-  THLongStoragePtr size = THPUtils_getLongStorage(args);
-  THTensor_(resize)(self->cdata, size, NULL);
+[[
+  free STATEFUL_ONLY
+  free -> self
+    - self
+]]
 
-  Py_INCREF(self);
-  return (PyObject*)self;
-  END_HANDLE_TH_ERRORS
-}
+[[
+  retain STATEFUL_ONLY
+  retain -> self
+    - self
+]]
 
-static void THPTensor_(doReshape)(THTensor *result, THTensor *src,
-        PyObject *args, int indices_offset)
-{
-  THLongStoragePtr size = THPUtils_getLongStorage(args, indices_offset);
-  THTensor_(reshape)(result, src, size);
-}
+[[
+  reshape
+  reshape -> self LONG_ARGS
+    - self
+    - self
+    - CONSTANT _long_args
+  reshape -> self LONG_ARGS OPTIONAL_SELF
+    - self
+    - THTensor src
+    - CONSTANT _long_args
+]]
 
-static PyObject * THPTensor_(reshape)(THPTensor *self, PyObject *args)
-{
-  HANDLE_TH_ERRORS
-  if (PyTuple_Size(args) == 0) {
-    THPUtils_setError("reshape requires at least one argument");
-    return NULL;
-  }
-  PyObject *first_arg = PyTuple_GET_ITEM(args, 0);
-  THPTensorPtr returned;
+[[
+  resize STATEFUL_ONLY
+  resize -> self LONG_ARGS
+    - self
+    - CONSTANT _long_args
+    - CONSTANT NULL
+]]
 
-  // TODO: this behaviour is quite weird...
-  // m.reshape(x, 2, 2) will alter m with x elements :/
-  if (!THPTensor_(IsSubclass)(first_arg)) {
-    THTensorPtr _ret = THTensor_(new)();
-    returned = (THPTensor*)THPTensor_(newObject)(_ret);
-    _ret.release();
-    THPTensor_(doReshape)(returned->cdata, self->cdata, args, 0);
-  } else {
-    Py_INCREF(self);
-    returned = self;
-    THPTensor_(doReshape)(self->cdata, ((THPTensor*)first_arg)->cdata, args, 1);
-  }
+[[
+  zeros
+  zeros -> self LONG_ARGS OPTIONAL_SELF
+    - self
+    - CONSTANT _long_args
+]]
 
-  return (PyObject *)returned.release();
-  END_HANDLE_TH_ERRORS
-}
+[[
+  ones
+  ones -> self LONG_ARGS OPTIONAL_SELF
+    - self
+    - CONSTANT _long_args
+]]
 
-static PyObject * THPTensor_stateless_(reshape)(PyObject *_unused, PyObject *args)
-{
-  HANDLE_TH_ERRORS
-  if (PyTuple_Size(args) < 2) {
-    THPUtils_setError("reshape requires at least two arguments");
-    return NULL;
-  }
-  THPTensor *first_arg = (THPTensor*)PyTuple_GET_ITEM(args, 0);
-  PyObject *second_arg = PyTuple_GET_ITEM(args, 1);
-  THPTensorPtr returned;
-  if (!THPTensor_(IsSubclass)((PyObject*)first_arg)) {
-    THPUtils_setError("reshape requires it's first argument to be a Tensor");
-    return NULL;
-  }
-
-  if (!THPTensor_(IsSubclass)(second_arg)) {
-    THTensorPtr _ret = THTensor_(new)();
-    returned = (THPTensor*)THPTensor_(newObject)(_ret);
-    _ret.release();
-    THPTensor_(doReshape)(returned->cdata, first_arg->cdata, args, 1);
-  } else {
-    Py_INCREF(first_arg);
-    returned = first_arg;
-    THPTensor_(doReshape)(returned->cdata, ((THPTensor*)second_arg)->cdata, args, 2);
-  }
-
-  return (PyObject *)returned.release();
-  END_HANDLE_TH_ERRORS
-}
-
-#define IMPLEMENT_FILLER(NAME)                                                 \
-static PyObject * THPTensor_(NAME)(THPTensor *self, PyObject *args)            \
-{                                                                              \
-  HANDLE_TH_ERRORS                                                             \
-  THLongStorage *size = THPUtils_getLongStorage(args, 0);                      \
-  try {                                                                        \
-    THTensor_(NAME)(self->cdata, size);                                        \
-  } catch(...) {                                                               \
-    THLongStorage_free(size);                                                  \
-    throw;                                                                     \
-  }                                                                            \
-  THLongStorage_free(size);                                                    \
-                                                                               \
-  Py_INCREF(self);                                                             \
-  return (PyObject*)self;                                                      \
-  END_HANDLE_TH_ERRORS                                                         \
-}
-
-#define IMPLEMENT_STATELESS_FILLER(NAME)                                       \
-static PyObject * THPTensor_stateless_(NAME)(PyObject *_unused, PyObject *args)\
-{                                                                              \
-  HANDLE_TH_ERRORS                                                             \
-  if (PyTuple_Size(args) == 0) {                                               \
-    THPUtils_setError(#NAME " requires at least one argument");                \
-    return NULL;                                                               \
-  }                                                                            \
-  PyObject *first_arg = PyTuple_GET_ITEM(args, 0);                             \
-  THPTensor *returned;                                                         \
-  THLongStorage *size;                                                         \
-  if (THPTensor_(IsSubclass)(first_arg)) {                                     \
-    Py_INCREF(first_arg);                                                      \
-    returned = (THPTensor*)first_arg;                                          \
-    size = THPUtils_getLongStorage(args, 1);                                   \
-  } else {                                                                     \
-    THTensor *_ret = THTensor_(new)();                                         \
-    returned = (THPTensor*)THPTensor_(newObject)(_ret);                        \
-    size = THPUtils_getLongStorage(args, 0);                                   \
-  }                                                                            \
-  try {                                                                        \
-    THTensor_(NAME)(returned->cdata, size);                                    \
-  } catch(...) {                                                               \
-    THLongStorage_free(size);                                                  \
-    Py_DECREF(returned);                                                       \
-    throw;                                                                     \
-  }                                                                            \
-  THLongStorage_free(size);                                                    \
-                                                                               \
-  return (PyObject*)returned;                                                  \
-  END_HANDLE_TH_ERRORS                                                         \
-}
-
-IMPLEMENT_FILLER(zeros)
-IMPLEMENT_FILLER(ones)
-IMPLEMENT_STATELESS_FILLER(zeros)
-IMPLEMENT_STATELESS_FILLER(ones)
-
-static PyObject * THPTensor_(set)(THPTensor *self, PyObject *args)
-{
-  HANDLE_TH_ERRORS
-  Py_ssize_t num_args = PyTuple_Size(args);
-  PyObject *first_arg = num_args == 0 ? NULL : PyTuple_GET_ITEM(args, 0);
-
-  if (num_args == 1 && THPTensor_(IsSubclass)(first_arg)) {
-    THTensor_(set)(self->cdata, ((THPTensor*)first_arg)->cdata);
-    Py_INCREF(self);
-    return (PyObject*)self;
-
-  } else if (num_args <= 4 && THPStorage_(IsSubclass)(first_arg)) {
-    THLongStoragePtr sizes, strides;
-    THPStorage *storage = (THPStorage*)first_arg;
-    long storageOffset = 0;
-
-    if (num_args >= 2 && !THPUtils_getLong(PyTuple_GET_ITEM(args, 1), &storageOffset))
-      return NULL;
-
-    if (num_args >= 3) {
-      PyObject *third_arg = PyTuple_GET_ITEM(args, 2);
-      THPUtils_assert(THPLongStorage_IsSubclass(third_arg), "set expects a LongStorage as its third argument");
-      sizes = ((THPLongStorage*)third_arg)->cdata;
-      THLongStorage_retain(sizes);
-    } else {
-      sizes = THLongStorage_newWithSize1(THStorage_(size)(storage->cdata));
-    }
-
-    if (num_args >= 4) {
-      PyObject *fourth_arg = PyTuple_GET_ITEM(args, 3);
-      THPUtils_assert(THPLongStorage_IsSubclass(fourth_arg), "set expects a LongStorage as its third argument");
-      strides = ((THPLongStorage*)fourth_arg)->cdata;
-      THLongStorage_retain(strides);
-    }
-
-    THTensor_(setStorage)(self->cdata, storage->cdata, storageOffset, sizes, strides);
-    Py_INCREF(self);
-    return (PyObject*)self;
-  }
-
-  // TODO: Inform about possible arg configurations
-  return NULL;
-  END_HANDLE_TH_ERRORS
-}
+[[
+  set STATEFUL_ONLY
+  set -> self
+    - self
+    - THTensor source
+  setStorage -> self
+    - self
+    - THStorage sourceStorage
+    - CONSTANT 0
+    - EXPRESSION THLongStorage_newWithSize1(THStorage_(size)(sourceStorage->cdata))
+    - CONSTANT NULL
+  setStorage -> self
+    - self
+    - THStorage sourceStorage
+    - long storageOffset
+    - THLongStorage sizes
+    - THLongStorage strides OPTIONAL NULL
+  setStorage -> self LONG_ARGS
+    - self
+    - THStorage sourceStorage
+    - long storageOffset
+    - CONSTANT _long_args
+    - CONSTANT NULL
+]]
 
 static PyObject * THPTensor_(select)(THPTensor *self, PyObject *args)
 {
@@ -1737,72 +1629,18 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
     - real value
 ]]
 
-static PyObject * THPTensor_(gather)(THPTensor *self, PyObject *args)
-{
-  HANDLE_TH_ERRORS
-  int _argcount = args ? PyTuple_Size(args) : 0;
-  if (_argcount != 2) {
-    THPUtils_setError("Provided %d args, but gather expects two or three!", _argcount);
-    return NULL;
-  }
-  long dim;
-  THPLongTensor *index;
-  THPTensor *src_ptr = self;
-  THPTensorPtr result;
-  if (_argcount == 2 && PyArg_ParseTuple(args, "lO!", &dim, &THPLongTensorType, &index)) {
-    THTensorPtr _tmp = THTensor_(new)();
-    result = (THPTensor*)THPTensor_(newObject)(_tmp);
-    _tmp.release();
-  } else if (_argcount == 3 && PyArg_ParseTuple(args, "O!lO!", &THPTensorType, &src_ptr, &dim, &THPLongTensorType, &index)) {
-    Py_INCREF(self);
-    result = self;
-  } else {
-    // TODO: write something more
-    THPUtils_setError("Invalid arguments");
-    return NULL;
-  }
-
-  THLongStoragePtr size = THLongTensor_newSizeOf(index->cdata);
-  THTensor_(resize)(result->cdata, size, NULL);
-  THTensor_(gather)(result->cdata, src_ptr->cdata, dim, index->cdata);
-
-  return (PyObject*)result.release();
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject * THPTensor_stateless_(gather)(THPTensor *self, PyObject *args)
-{
-  HANDLE_TH_ERRORS
-  int _argcount = args ? PyTuple_Size(args) : 0;
-  if (_argcount != 2) {
-    THPUtils_setError("Provided %d args, but gather expects three or four!", _argcount);
-    return NULL;
-  }
-  long dim;
-  THPLongTensor *index;
-  THPTensor *src_ptr;
-  THPTensor *result_ptr;
-  THPTensorPtr result;
-  if (_argcount == 3 && PyArg_ParseTuple(args, "O!lO!", &THPTensorType, &src_ptr, &dim, &THPLongTensorType, &index)) {
-    THTensorPtr _tmp = THTensor_(new)();
-    result = (THPTensor*)THPTensor_(newObject)(_tmp);
-    _tmp.release();
-  } else if (_argcount == 4 && PyArg_ParseTuple(args, "O!O!lO!", &THPTensorType, &result_ptr, &THPTensorType, &src_ptr, &dim, &THPLongTensorType, &index)) {
-    Py_INCREF(result_ptr);
-    result = result_ptr;
-  } else {
-    // TODO: write something more
-    THPUtils_setError("Invalid arguments");
-    return NULL;
-  }
-
-  THLongStoragePtr size = THLongTensor_newSizeOf(index->cdata);
-  THTensor_(resize)(result->cdata, size, NULL);
-  THTensor_(gather)(result->cdata, src_ptr->cdata, dim, index->cdata);
-
-  return (PyObject*)result.release();
-  END_HANDLE_TH_ERRORS
-}
+[[
+  gather
+  gather -> new THTensor
+    - self
+    - long dim
+    - THLongTensor index
+  gather -> self OPTIONAL_SELF
+    - self
+    - THTensor src
+    - long dim
+    - THLongTensor index
+]]
 
 // TODO: torch docs provide 7 args
 [[
@@ -1976,6 +1814,7 @@ IMPLEMENT_TWO_MAT_OP_STATELESS(mv, addmv,
     - THTensor t2
 ]]
 
+// TODO: mm and bmm will fail if mat1 and mat2 aren't square
 [[
   mm
   addmm -> self OPTIONAL_SELF
