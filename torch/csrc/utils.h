@@ -3,6 +3,9 @@
 
 #define THPUtils_(NAME) TH_CONCAT_4(THP,Real,Utils_,NAME)
 
+#define THPUtils_assert(cond, ...)                                             \
+if (!(cond)) { THPUtils_setError(__VA_ARGS__); return NULL; }
+
 bool THPUtils_checkLong(PyObject *index);
 int THPUtils_getLong(PyObject *index, long *result);
 int THPUtils_getCallable(PyObject *arg, PyObject **result);
@@ -41,9 +44,6 @@ private:
 
 typedef THPPointer<PyObject> THPObjectPtr;
 typedef THPPointer<THPGenerator> THPGeneratorPtr;
-
-#define THPUtils_assert(cond, ...)                                             \
-if (!(cond)) { THPUtils_setError(__VA_ARGS__); return NULL; }
 
 #endif
 

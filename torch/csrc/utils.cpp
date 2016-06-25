@@ -6,14 +6,6 @@
 #include "generic/utils.cpp"
 #include <TH/THGenerateAllTypes.h>
 
-template<>
-void THPPointer<THPGenerator>::free() {
-  if (ptr)
-    Py_DECREF(ptr);
-}
-
-template class THPPointer<THPGenerator>;
-
 bool THPUtils_checkLong(PyObject *index) {
     return PyLong_Check(index) || PyInt_Check(index);
 }
@@ -42,29 +34,29 @@ int THPUtils_getCallable(PyObject *arg, PyObject **result) {
 }
 
 THLongStorage * THPUtils_getLongStorage(PyObject *args, int ignore_first) {
-  // TODO: add error handling
-  // TODO: throw on error
   long value;
+
   Py_ssize_t length = PyTuple_Size(args);
-  if (length < ignore_first+1) {
-    return NULL;
-  }
+  if (length < ignore_first+1)
+      return NULL;
+
+  // Maybe there's a LongStorage
   PyObject *first_arg = PyTuple_GET_ITEM(args, ignore_first);
   if (length == ignore_first+1 && THPLongStorage_IsSubclass(first_arg)) {
     THPLongStorage *storage = (THPLongStorage*)first_arg;
     THLongStorage_retain(storage->cdata);
     return storage->cdata;
   }
-  THLongStorage *result = THLongStorage_newWithSize(length-ignore_first);
+
+  // If not, let's try to parse the numbers
+  THLongStoragePtr result = THLongStorage_newWithSize(length-ignore_first);
   for (Py_ssize_t i = ignore_first; i < length; ++i) {
     PyObject *arg = PyTuple_GET_ITEM(args, i);
-    if (!THPUtils_getLong(arg, &value)) {
-      THLongStorage_free(result);
-      return NULL;
-    }
+    if (!THPUtils_getLong(arg, &value))
+        return NULL;
     result->data[i-ignore_first] = value;
   }
-  return result;
+  return result.release();
 }
 
 void THPUtils_setError(const char *format, ...)
@@ -79,11 +71,6 @@ void THPUtils_setError(const char *format, ...)
   PyErr_SetString(PyExc_RuntimeError, buffer);
 }
 
-template<>
-void THPPointer<PyObject>::free() {
-  if (ptr)
-    Py_DECREF(ptr);
-}
 
 void THPUtils_invalidArguments(PyObject *given_args, const char *expected_args_desc) {
   static const size_t BUFFER_SIZE = 10000;
@@ -110,3 +97,18 @@ void THPUtils_invalidArguments(PyObject *given_args, const char *expected_args_d
   error_msg += expected_args_desc;
   PyErr_SetString(PyExc_ValueError, error_msg.c_str());
 }
+
+template<>
+void THPPointer<THPGenerator>::free() {
+  if (ptr)
+    Py_DECREF(ptr);
+}
+
+template<>
+void THPPointer<PyObject>::free() {
+  if (ptr)
+    Py_DECREF(ptr);
+}
+
+template class THPPointer<THPGenerator>;
+template class THPPointer<PyObject>;
