@@ -75,7 +75,7 @@ void THNN_CudaSpatialConvolutionMM_updateOutput(THCState *state, THCudaTensor *i
 
     // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
     if (bias) {
-      THCudaBlas_gemm(
+      THCudaBlas_Sgemm(
           state,
           't', 'n',
           n_, m_, k_,
@@ -104,7 +104,7 @@ void THNN_CudaSpatialConvolutionMM_updateOutput(THCState *state, THCudaTensor *i
     long k = nInputPlane*kH*kW;
 
     // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
-    THCudaBlas_gemm(
+    THCudaBlas_Sgemm(
         state,
         'n', 'n',
         n, m, k,
@@ -179,7 +179,7 @@ void THNN_CudaSpatialConvolutionMM_updateGradInput(THCState *state, THCudaTensor
     long k = nOutputPlane;
 
     // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
-    THCudaBlas_gemm(
+    THCudaBlas_Sgemm(
         state,
         'n', 't',
         n, m, k,
@@ -278,7 +278,7 @@ void THNN_CudaSpatialConvolutionMM_accGradParameters(THCState *state, THCudaTens
     long k = columns->size[1];
 
     // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
-    THCudaBlas_gemm(
+    THCudaBlas_Sgemm(
         state,
         't', 'n',
         n, m, k,
@@ -297,7 +297,7 @@ void THNN_CudaSpatialConvolutionMM_accGradParameters(THCState *state, THCudaTens
 
     // Do GEMV (note: this is a bit confusing because gemv assumes column-major matrices)
     if (gradBias) {
-      THCudaBlas_gemv(
+      THCudaBlas_Sgemv(
           state,
           't',
           k_, m_,
