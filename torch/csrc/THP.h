@@ -1,3 +1,6 @@
+#ifndef THP_H
+#define THP_H
+
 #include <stdbool.h>
 #include <TH/TH.h>
 
@@ -10,13 +13,15 @@
 #define PyInt_Type              PyLong_Type
 #endif
 
-#include "Exceptions.h"
+// By default, don't specify library state (TH doesn't use one)
+#define LIBRARY_STATE
+#define LIBRARY_STATE_NOARGS
 
+#include "Exceptions.h"
 #include "Generator.h"
 #include "Storage.h"
 #include "Tensor.h"
+#include "Module.h"
+#include "utils.h" // This requires defined Storage and Tensor types
 
-extern THPGenerator *THPDefaultGenerator;
-
-// This requires defined Storage and Tensor types
-#include "utils.h"
+#endif

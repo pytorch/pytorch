@@ -13,5 +13,4 @@ bool THPStorage_(init)(PyObject *module);
 PyObject * THPStorage_(newObject)(THStorage *storage);
 bool THPStorage_(IsSubclass)(PyObject *storage);
 
-
 #endif

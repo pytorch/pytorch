@@ -3,6 +3,9 @@ from os.path import expanduser
 from tools.cwrap import cwrap
 import platform
 
+# TODO: detect CUDA
+WITH_CUDA = False
+
 ################################################################################
 # Monkey-patch setuptools to compile in parallel
 ################################################################################
@@ -41,12 +44,15 @@ extra_link_args = []
 
 # TODO: remove and properly submodule TH in the repo itself
 th_path = expanduser("~/torch/install/")
-th_header_path = th_path + "include"
+torch_headers = th_path + "include"
+th_header_path = th_path + "include/TH"
 th_lib_path = th_path + "lib"
+extra_link_args.append('-L' + th_lib_path)
 if platform.system() == 'Darwin':
-    extra_link_args.append('-L' + th_lib_path)
     extra_link_args.append('-Wl,-rpath,' + th_lib_path)
 
+libraries = ['TH']
+extra_compile_args = ['-std=c++11']
 sources = [
     "torch/csrc/Module.cpp",
     "torch/csrc/Generator.cpp",
@@ -54,18 +60,26 @@ sources = [
     "torch/csrc/Storage.cpp",
     "torch/csrc/utils.cpp",
 ]
+
+if WITH_CUDA:
+    libraries += ['THC']
+    extra_compile_args += ['-DWITH_CUDA']
+    sources += [
+        "torch/csrc/cuda/Module.cpp",
+        "torch/csrc/cuda/Storage.cpp",
+        "torch/csrc/cuda/Tensor.cpp",
+        "torch/csrc/cuda/utils.cpp",
+    ]
 C = Extension("torch._C",
-              libraries=['TH'],
-              sources=sources,
-              language='c++',
-              extra_compile_args=['-std=c++11'],
-              include_dirs=(["torch/csrc", th_header_path]),
-              extra_link_args = extra_link_args,
+             libraries=libraries,
+             sources=sources,
+             language='c++',
+             extra_compile_args=extra_compile_args,
+             include_dirs=([".", "torch/csrc", "cutorch/csrc", torch_headers, th_header_path, "/Developer/NVIDIA/CUDA-7.5/include"]),
+             extra_link_args = extra_link_args,
 )
 
-
-
 setup(name="torch", version="0.1",
-      ext_modules=[C],
-      packages=['torch'],
+     ext_modules=[C],
+      packages=['torch', 'torch.cuda'],
 )

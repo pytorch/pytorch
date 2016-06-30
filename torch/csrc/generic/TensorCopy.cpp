@@ -2,32 +2,55 @@
 #define TH_GENERIC_FILE "generic/TensorCopy.cpp"
 #else
 
-static PyObject * THPTensor_(copy)(THPTensor *self, PyObject *other)
-{
-  HANDLE_TH_ERRORS
-  if (THPDoubleTensor_IsSubclass(other)) {
-    THTensor_(copyDouble)(self->cdata, ((THPDoubleTensor*)other)->cdata);
-  } else if (THPFloatTensor_IsSubclass(other)) {
-    THTensor_(copyFloat)(self->cdata, ((THPFloatTensor*)other)->cdata);
-  } else if (THPLongTensor_IsSubclass(other)) {
-    THTensor_(copyLong)(self->cdata, ((THPLongTensor*)other)->cdata);
-  } else if (THPIntTensor_IsSubclass(other)) {
-    THTensor_(copyInt)(self->cdata, ((THPIntTensor*)other)->cdata);
-  } else if (THPShortTensor_IsSubclass(other)) {
-    THTensor_(copyShort)(self->cdata, ((THPShortTensor*)other)->cdata);
-  } else if (THPCharTensor_IsSubclass(other)) {
-    THTensor_(copyChar)(self->cdata, ((THPCharTensor*)other)->cdata);
-  } else if (THPByteTensor_IsSubclass(other)) {
-    THTensor_(copyByte)(self->cdata, ((THPByteTensor*)other)->cdata);
-  } else {
-    // TODO: better error message
-    PyErr_SetString(PyExc_RuntimeError, Py_TYPE(other)->tp_name);
-    return NULL;
-  }
-  Py_INCREF(self);
-  return (PyObject*)self;
-  END_HANDLE_TH_ERRORS
+#define IMPLEMENT_COPY_WRAPPER(NAME,TYPEA,TYPEB)                               \
+    IMPLEMENT_COPY_WRAPPER_FULLNAME(THTensor_(NAME), TYPEA, TYPEB)
+
+#define IMPLEMENT_COPY_WRAPPER_FULLNAME(NAME,TYPEA,TYPEB)                      \
+void TH_CONCAT_2(_THPCopy_,NAME)(PyObject *dst, PyObject *src)                 \
+{                                                                              \
+  NAME(LIBRARY_STATE ((TYPEA *)dst)->cdata,                                    \
+          ((TYPEB *)src)->cdata);                                              \
 }
 
+IMPLEMENT_COPY_WRAPPER(copy,        THPTensor,          THPTensor)
+IMPLEMENT_COPY_WRAPPER(copyByte,    THPTensor,          THPByteTensor)
+IMPLEMENT_COPY_WRAPPER(copyChar,    THPTensor,          THPCharTensor)
+IMPLEMENT_COPY_WRAPPER(copyShort,   THPTensor,          THPShortTensor)
+IMPLEMENT_COPY_WRAPPER(copyInt,     THPTensor,          THPIntTensor)
+IMPLEMENT_COPY_WRAPPER(copyLong,    THPTensor,          THPLongTensor)
+IMPLEMENT_COPY_WRAPPER(copyFloat,   THPTensor,          THPFloatTensor)
+IMPLEMENT_COPY_WRAPPER(copyDouble,  THPTensor,          THPDoubleTensor)
+
+#ifdef THC_GENERIC_FILE
+IMPLEMENT_COPY_WRAPPER(copyCuda,        THCPTensor,     THCPTensor)
+IMPLEMENT_COPY_WRAPPER(copyCudaByte,    THCPTensor,     THCPByteTensor)
+IMPLEMENT_COPY_WRAPPER(copyCudaChar,    THCPTensor,     THCPCharTensor)
+IMPLEMENT_COPY_WRAPPER(copyCudaShort,   THCPTensor,     THCPShortTensor)
+IMPLEMENT_COPY_WRAPPER(copyCudaInt,     THCPTensor,     THCPIntTensor)
+IMPLEMENT_COPY_WRAPPER(copyCudaLong,    THCPTensor,     THCPLongTensor)
+IMPLEMENT_COPY_WRAPPER(copyCudaFloat,   THCPTensor,     THCPFloatTensor)
+IMPLEMENT_COPY_WRAPPER(copyCudaDouble,  THCPTensor,     THCPDoubleTensor)
+#ifdef CUDA_HALF_TENSOR
+IMPLEMENT_COPY_WRAPPER(copyCudaHalf,    THCPTensor,     THCPHalfTensor)
 #endif
 
+IMPLEMENT_COPY_WRAPPER_FULLNAME(TH_CONCAT_2(THByteTensor_copyCuda  , Real), THPByteTensor,   THCPTensor);
+IMPLEMENT_COPY_WRAPPER_FULLNAME(TH_CONCAT_2(THCharTensor_copyCuda  , Real), THPCharTensor,   THCPTensor);
+IMPLEMENT_COPY_WRAPPER_FULLNAME(TH_CONCAT_2(THShortTensor_copyCuda , Real), THPShortTensor,  THCPTensor);
+IMPLEMENT_COPY_WRAPPER_FULLNAME(TH_CONCAT_2(THIntTensor_copyCuda   , Real), THPIntTensor,    THCPTensor);
+IMPLEMENT_COPY_WRAPPER_FULLNAME(TH_CONCAT_2(THLongTensor_copyCuda  , Real), THPLongTensor,   THCPTensor);
+IMPLEMENT_COPY_WRAPPER_FULLNAME(TH_CONCAT_2(THFloatTensor_copyCuda , Real), THPFloatTensor,  THCPTensor);
+IMPLEMENT_COPY_WRAPPER_FULLNAME(TH_CONCAT_2(THDoubleTensor_copyCuda, Real), THPDoubleTensor, THCPTensor);
+
+// There is no THHalfTensor
+#ifndef THC_REAL_IS_HALF
+//IMPLEMENT_COPY_WRAPPER_FULLNAME(THTensor_(copyCuda), THPTensor,  THCPTensor);
+//IMPLEMENT_COPY_WRAPPER_FULLNAME(THCTensor_(copyCPU), THCPTensor, THPTensor);
+
+// TODO
+//THC_API void THCTensor_(copyAsyncCPU)(THCState *state, THCTensor *self, THTensor *src);
+//THC_API void THTensor_(copyAsyncCuda)(THCState *state, THTensor *self, THCTensor *src);
+#endif
+#endif
+
+#endif

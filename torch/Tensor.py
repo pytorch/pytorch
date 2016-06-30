@@ -2,6 +2,7 @@ import torch
 from . import TensorPrinting
 from functools import reduce
 from itertools import chain
+import sys
 
 
 def _infer_sizes(sizes, total):
@@ -56,6 +57,10 @@ class _TensorBase(object):
 
     def byte(self):
         return self.type('torch.ByteTensor')
+
+    def copy(self, other):
+        torch._C._tensorCopy(self, other)
+        return self
 
     def __repr__(self):
         return str(self)

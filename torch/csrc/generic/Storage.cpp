@@ -4,6 +4,7 @@
 
 /* A pointer to RealStorage class defined later in Python */
 extern PyObject *THPStorageClass;
+
 PyObject * THPStorage_(newObject)(THStorage *ptr)
 {
   // TODO: error checking
@@ -23,7 +24,7 @@ bool THPStorage_(IsSubclass)(PyObject *storage)
 
 static void THPStorage_(dealloc)(THPStorage* self)
 {
-  THStorage_(free)(self->cdata);
+  THStorage_(free)(LIBRARY_STATE self->cdata);
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
@@ -66,16 +67,15 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
   if (self != nullptr) {
     if (cdata_ptr) {
       THStorage *ptr = (THStorage*)PyLong_AsVoidPtr(cdata_ptr);
-      THStorage_(retain)(ptr);
+      THStorage_(retain)(LIBRARY_STATE ptr);
       self->cdata = ptr;
     } else if (storage_arg) {
-      THStorage_(retain)(storage_arg->cdata);
+      THStorage_(retain)(LIBRARY_STATE storage_arg->cdata);
       self->cdata = storage_arg->cdata;
     } else if (iterator == nullptr && size >= 0) {
-      self->cdata = THStorage_(newWithSize)(size);
+      self->cdata = THStorage_(newWithSize)(LIBRARY_STATE size);
     } else if (iterator != nullptr) {
-      self->cdata = THStorage_(newWithSize)(size);
-      // TODO: make sure newWithSize never returns NULL
+      self->cdata = THStorage_(newWithSize)(LIBRARY_STATE size);
       long items_processed = 0;
       THPObjectPtr item;
       real v;
@@ -88,7 +88,12 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
           // TODO: error - iterator has too many items
           return NULL;
         }
+#ifndef THC_GENERIC_FILE
         self->cdata->data[items_processed++] = v;
+#else
+        // TODO: this might be slow - consider batched updates?
+        THCStorage_(set)(LIBRARY_STATE self->cdata, items_processed++, v);
+#endif
       }
       // Iterator raised an exception
       if (PyErr_Occurred()) {
@@ -100,7 +105,7 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
         return NULL;
       }
     } else {
-      self->cdata = THStorage_(new)();
+      self->cdata = THStorage_(new)(LIBRARY_STATE_NOARGS);
     }
 
     if (self->cdata == NULL)
@@ -113,7 +118,7 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
 static Py_ssize_t THPStorage_(length)(THPStorage *self)
 {
   HANDLE_TH_ERRORS
-  return THStorage_(size)(self->cdata);
+  return THStorage_(size)(LIBRARY_STATE self->cdata);
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
@@ -125,25 +130,37 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
   if ((PyLong_Check(index) || PyInt_Check(index))
       && THPUtils_getLong(index, &nindex) == 1 ) {
     if (nindex < 0)
-      nindex += THStorage_(size)(self->cdata);
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-    return PyFloat_FromDouble(THStorage_(get)(self->cdata, nindex));
+      nindex += THStorage_(size)(LIBRARY_STATE self->cdata);
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || \
+    defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
+    return PyFloat_FromDouble(THStorage_(get)(LIBRARY_STATE self->cdata, nindex));
+#elif defined(THC_REAL_IS_HALF)
+    return PyFloat_FromDouble(THC_half2float(THStorage_(get)(LIBRARY_STATE self->cdata, nindex)));
 #else
-    return PyLong_FromLong(THStorage_(get)(self->cdata, nindex));
+    return PyLong_FromLong(THStorage_(get)(LIBRARY_STATE self->cdata, nindex));
 #endif
   /* Slice index */
   } else if (PySlice_Check(index)) {
     Py_ssize_t start, stop, slicelength, len;
-    len = THStorage_(size)(self->cdata);
+    len = THStorage_(size)(LIBRARY_STATE self->cdata);
     if (!THPUtils_(parseSlice)(index, len, &start, &stop, &slicelength))
       return NULL;
 
-    real *data = THStorage_(data)(self->cdata);
+    real *data = THStorage_(data)(LIBRARY_STATE self->cdata);
+#ifndef THC_GENERIC_FILE
+    // TODO: this can leak memory if newWithData fails
     real *new_data = (real*)THAlloc(slicelength * sizeof(real));
-    // TODO: maybe something faster than memcpy?
     memcpy(new_data, data + start, slicelength * sizeof(real));
-    THStorage *new_storage = THStorage_(newWithData)(new_data, slicelength);
-    return THPStorage_(newObject)(new_storage);
+    THStoragePtr new_storage = THStorage_(newWithData)(LIBRARY_STATE new_data, slicelength);
+#else
+    THStoragePtr new_storage = THStorage_(newWithSize)(LIBRARY_STATE slicelength);
+    THStoragePtr view = THStorage_(newWithData)(LIBRARY_STATE data + start, slicelength);
+    THStorage_(clearFlag)(LIBRARY_STATE view, TH_STORAGE_FREEMEM);
+    THStorage_(copy)(LIBRARY_STATE new_storage, view);
+#endif
+    PyObject *_ret = THPStorage_(newObject)(new_storage);
+    new_storage.release();
+    return _ret;
   }
   char err_string[512];
   snprintf (err_string, 512,
@@ -164,16 +181,16 @@ static int THPStorage_(set)(THPStorage *self, PyObject *index, PyObject *value)
   long nindex;
   if ((PyLong_Check(index) || PyInt_Check(index))
       && THPUtils_getLong(index, &nindex) == 1) {
-    THStorage_(set)(self->cdata, nindex, rvalue);
+    THStorage_(set)(LIBRARY_STATE self->cdata, nindex, rvalue);
     return 0;
   } else if (PySlice_Check(index)) {
     Py_ssize_t start, stop, len;
-    len = THStorage_(size)(self->cdata);
+    len = THStorage_(size)(LIBRARY_STATE self->cdata);
     if (!THPUtils_(parseSlice)(index, len, &start, &stop, NULL))
       return -1;
     // TODO: check the bounds only once
     for (;start < stop; start++)
-      THStorage_(set)(self->cdata, start, rvalue);
+      THStorage_(set)(LIBRARY_STATE self->cdata, start, rvalue);
     return 0;
   }
   char err_string[512];
@@ -194,7 +211,7 @@ static PyMappingMethods THPStorage_(mappingmethods) = {
 // TODO: implement equality
 PyTypeObject THPStorageType = {
   PyVarObject_HEAD_INIT(NULL, 0)
-  "torch.C." THPStorageBaseStr,          /* tp_name */
+  "torch._C." THPStorageBaseStr,         /* tp_name */
   sizeof(THPStorage),                    /* tp_basicsize */
   0,                                     /* tp_itemsize */
   (destructor)THPStorage_(dealloc),      /* tp_dealloc */

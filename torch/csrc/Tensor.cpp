@@ -4,8 +4,8 @@
 #include <stdbool.h>
 #include <vector>
 #include <stack>
-#include <TH/TH.h>
 #include <TH/THMath.h>
+
 #include "THP.h"
 
 #include "generic/Tensor.cpp"

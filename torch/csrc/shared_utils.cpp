@@ -1,11 +1,3 @@
-#include <Python.h>
-#include <stdarg.h>
-#include <string>
-#include "THP.h"
-
-#include "generic/utils.cpp"
-#include <TH/THGenerateAllTypes.h>
-
 bool THPUtils_checkLong(PyObject *index) {
     return PyLong_Check(index) || PyInt_Check(index);
 }
@@ -73,6 +65,7 @@ void THPUtils_setError(const char *format, ...)
 
 
 void THPUtils_invalidArguments(PyObject *given_args, const char *expected_args_desc) {
+  static const size_t BUFFER_SIZE = 10000;
   static const std::string PREFIX = "Invalid arguments! Got ";
   std::string error_msg;
   error_msg.reserve(2000);

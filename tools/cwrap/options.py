@@ -127,28 +127,35 @@ class Option(object):
         """
         return argcount(self)
 
+    def _library_state_macro(self, argstr):
+        return 'LIBRARY_STATE' if argstr else 'LIBRARY_STATE_NOARGS'
+
 
 class PlainOption(Option):
     def _make_call(self, argstr):
+        library_state = self._library_state_macro(argstr)
         call = '{}({})'.format(self.funcname, argstr)
         return RETURN_WRAPPER[self.return_type].substitute({'expr': call})
 
 
 class THOption(Option):
     def _make_call(self, argstr):
-        th_call = 'THTensor_({})({})'.format(self.funcname, argstr)
+        library_state = self._library_state_macro(argstr)
+        th_call = 'THTensor_({})({} {})'.format(self.funcname, library_state, argstr)
         return RETURN_WRAPPER[self.return_type].substitute({'expr': th_call})
 
 
 class THStorageOption(Option):
     def _make_call(self, argstr):
-        th_call = 'THStorage_({})({})'.format(self.funcname, argstr)
+        library_state = self._library_state_macro(argstr)
+        th_call = 'THStorage_({})({} {})'.format(self.funcname, library_state, argstr)
         return RETURN_WRAPPER[self.return_type].substitute({'expr': th_call})
 
 
 class CustomTHOption(Option):
     def _make_call(self, argstr):
-        th_call = 'THTensor_({})({})'.format(self.funcname, argstr)
+        library_state = self._library_state_macro(argstr)
+        th_call = 'THTensor_({})({} {})'.format(self.funcname, library_state, argstr)
         return self.flags.format(expr=th_call)
 
 

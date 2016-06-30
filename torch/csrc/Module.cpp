@@ -3,17 +3,10 @@
 #include <stdbool.h>
 #include <TH/TH.h>
 
+#include <unordered_map>
 #include "THP.h"
 
-#if PY_MAJOR_VERSION == 2
-#define ASSERT_TRUE(cmd) if (!(cmd)) {PyErr_SetString(PyExc_ImportError, "initialization error"); return;}
-#else
-#define ASSERT_TRUE(cmd) if (!(cmd)) return NULL
-#endif
-
-#define STATELESS_ATTR_NAME "_torch"
-
-static PyObject* module;
+PyObject* module;
 PyObject* tensor_classes;
 
 PyObject *THPDoubleStorageClass = NULL;
@@ -72,6 +65,53 @@ static bool THPModule_loadClasses(PyObject *self)
 #undef ASSERT_NOT_NULL
 }
 
+////////////////////////////////////////////////////////////////////////////////
+// COPY METHODS
+////////////////////////////////////////////////////////////////////////////////
+
+#include "ModuleCopy.h"
+
+std::unordered_map<std::pair<PyObject *, PyObject *>, THPCopyFunction, pair_hasher> tensor_copy_handlers;
+std::unordered_map<std::pair<PyObject *, PyObject *>, THPCopyFunction, pair_hasher> storage_copy_handlers;
+
+#define COPY_METHODS(name) TH_CONCAT_2(name,_copy_handlers)
+#define IMPLEMENT_COPY_WITH_WRAPPER(name)                                      \
+bool TH_CONCAT_3(THPModule_,name,Copy)(PyObject *dst, PyObject *src)           \
+{                                                                              \
+  /* TODO: this won't work for subclasses, but is that a problem? */           \
+  auto it = COPY_METHODS(name).find(std::make_pair((PyObject*)Py_TYPE(dst), (PyObject*)Py_TYPE(src))); \
+  if (it == COPY_METHODS(name).end()) {                                        \
+    THPUtils_setError("Copy function from %s to %s isn't implemented!", Py_TYPE(src)->tp_name, Py_TYPE(dst)->tp_name); \
+    return false;                                                              \
+  }                                                                            \
+  (it->second)(dst, src);                                                      \
+  return true;                                                                 \
+}                                                                              \
+                                                                               \
+static PyObject * TH_CONCAT_3(THPModule_,name,CopyWrapper)(PyObject *unused, PyObject *args)\
+{                                                                              \
+  HANDLE_TH_ERRORS                                                             \
+  /* TODO: check args */                                                       \
+  PyObject *dst = PyTuple_GET_ITEM(args, 0);                                   \
+  PyObject *src = PyTuple_GET_ITEM(args, 1);                                   \
+  if (!TH_CONCAT_3(THPModule_,name,Copy)(dst, src)) {                          \
+    return NULL;                                                               \
+  }                                                                            \
+  /* TODO: return dst? */                                                      \
+  Py_RETURN_NONE;                                                              \
+  END_HANDLE_TH_ERRORS                                                         \
+}
+
+IMPLEMENT_COPY_WITH_WRAPPER(tensor)
+IMPLEMENT_COPY_WITH_WRAPPER(storage)
+#undef COPY_METHODS
+#undef IMPLEMENT_COPY_WITH_WRAPPER
+
+#include "ModuleCopy.cpp"
+
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+
 static bool THPModule_assignStateless(PyObject *self)
 {
 #define INIT_STATELESS(type)                                                   \
@@ -80,7 +120,7 @@ static bool THPModule_assignStateless(PyObject *self)
     THPUtils_setError("stateless method initialization error");                \
     return false;                                                              \
   }                                                                            \
-  if (PyObject_SetAttrString(TH_CONCAT_3(THP,type,TensorClass), STATELESS_ATTR_NAME, stateless) == -1) { \
+  if (PyObject_SetAttrString(TH_CONCAT_3(THP,type,TensorClass), STATELESS_ATTRIBUTE_NAME, stateless) == -1) { \
     THPUtils_setError("stateless method initialization error (on assignment)");\
   }
   PyObject *arg = PyTuple_New(0);
@@ -102,6 +142,7 @@ static PyObject * THPModule_initExtension(PyObject *self)
 {
   if (!THPModule_loadClasses(self))         return NULL;
   if (!THPModule_assignStateless(self))     return NULL;
+  if (!THPModule_initCopy(self))            return NULL;
   return PyBool_FromLong(true);
 }
 
@@ -130,7 +171,7 @@ static PyObject * TH_CONCAT_2(THPModule_, name)(PyObject *_unused, PyObject *arg
     }                                                                          \
   }                                                                            \
                                                                                \
-  PyObject *methods = PyObject_GetAttrString(tensor, STATELESS_ATTR_NAME);                \
+  PyObject *methods = PyObject_GetAttrString(tensor, STATELESS_ATTRIBUTE_NAME);     \
   THPUtils_assert(methods, "Type %s doesn't implement statless methods",       \
       Py_TYPE(tensor)->tp_name);                                               \
   PyObject *method = PyObject_GetAttrString(methods, #name);                   \
@@ -270,7 +311,7 @@ static PyObject * THPModule_nonzero(PyObject *_unused, PyObject *args)
   else if (PyTuple_Size(args) == 2)
     tensor = PyTuple_GET_ITEM(args, 1);
 
-  PyObject *methods = PyObject_GetAttrString(tensor, STATELESS_ATTR_NAME);
+  PyObject *methods = PyObject_GetAttrString(tensor, STATELESS_ATTRIBUTE_NAME);
   THPUtils_assert(methods, "Type %s doesn't implement statless methods",
       Py_TYPE(tensor)->tp_name);
   PyObject *method = PyObject_GetAttrString(methods, "nonzero");
@@ -279,8 +320,15 @@ static PyObject * THPModule_nonzero(PyObject *_unused, PyObject *args)
   return PyObject_Call(method, args, NULL);
 }
 
+extern PyObject * THCPModule_initExtension(PyObject *self);
+
 static PyMethodDef TorchMethods[] = {
   {"_initExtension",  (PyCFunction)THPModule_initExtension,     METH_NOARGS,  NULL},
+#ifdef WITH_CUDA
+  {"_initCuda",       (PyCFunction)THCPModule_initExtension,    METH_NOARGS,  NULL},
+#endif
+  {"_tensorCopy",     (PyCFunction)THPModule_tensorCopyWrapper, METH_VARARGS, NULL},
+  {"_storageCopy",    (PyCFunction)THPModule_storageCopyWrapper, METH_VARARGS, NULL},
   {"isTensor",        (PyCFunction)THPModule_tensorCheck,       METH_O,       NULL},
 
   {"sigmoid",         (PyCFunction)THPModule_sigmoid,           METH_VARARGS, NULL},
@@ -431,12 +479,37 @@ static void updateErrorHandlers()
   THSetArgErrorHandler(errorHandlerArg, NULL);
 }
 
+bool THCPDoubleStorage_init(PyObject *module);
+bool THCPFloatStorage_init(PyObject *module);
+bool THCPHalfStorage_init(PyObject *module);
+bool THCPLongStorage_init(PyObject *module);
+bool THCPIntStorage_init(PyObject *module);
+bool THCPShortStorage_init(PyObject *module);
+bool THCPCharStorage_init(PyObject *module);
+bool THCPByteStorage_init(PyObject *module);
+
+bool THCPDoubleTensor_init(PyObject *module);
+bool THCPFloatTensor_init(PyObject *module);
+bool THCPHalfTensor_init(PyObject *module);
+bool THCPLongTensor_init(PyObject *module);
+bool THCPIntTensor_init(PyObject *module);
+bool THCPShortTensor_init(PyObject *module);
+bool THCPCharTensor_init(PyObject *module);
+bool THCPByteTensor_init(PyObject *module);
+
 #if PY_MAJOR_VERSION == 2
 PyMODINIT_FUNC init_C()
 #else
 PyMODINIT_FUNC PyInit__C()
 #endif
 {
+
+#if PY_MAJOR_VERSION == 2
+#define ASSERT_TRUE(cmd) if (!(cmd)) {PyErr_SetString(PyExc_ImportError, "initialization error"); return;}
+#else
+#define ASSERT_TRUE(cmd) if (!(cmd)) return NULL
+#endif
+
 #if PY_MAJOR_VERSION == 2
   ASSERT_TRUE(module = Py_InitModule("torch._C", TorchMethods));
 #else
@@ -460,6 +533,31 @@ PyMODINIT_FUNC PyInit__C()
   ASSERT_TRUE(THPCharTensor_init(module));
   ASSERT_TRUE(THPByteTensor_init(module));
 
+#ifdef WITH_CUDA
+  // This will only initialise base classes and attach them to library namespace
+  // They won't be ready for real usage until importing cuda module, that will
+  // complete the process (but it defines Python classes before calling back into
+  // C, so these lines have to execute first)..
+  ASSERT_TRUE(THCPDoubleStorage_init(module));
+  ASSERT_TRUE(THCPFloatStorage_init(module));
+  ASSERT_TRUE(THCPHalfStorage_init(module));
+  ASSERT_TRUE(THCPLongStorage_init(module));
+  ASSERT_TRUE(THCPIntStorage_init(module));
+  ASSERT_TRUE(THCPShortStorage_init(module));
+  ASSERT_TRUE(THCPCharStorage_init(module));
+  ASSERT_TRUE(THCPByteStorage_init(module));
+  ASSERT_TRUE(THCPHalfStorage_init(module));
+
+  ASSERT_TRUE(THCPDoubleTensor_init(module));
+  ASSERT_TRUE(THCPFloatTensor_init(module));
+  ASSERT_TRUE(THCPHalfTensor_init(module));
+  ASSERT_TRUE(THCPLongTensor_init(module));
+  ASSERT_TRUE(THCPIntTensor_init(module));
+  ASSERT_TRUE(THCPShortTensor_init(module));
+  ASSERT_TRUE(THCPCharTensor_init(module));
+  ASSERT_TRUE(THCPByteTensor_init(module));
+#endif
+
   THPDefaultGenerator = (THPGenerator*)THPGenerator_newObject();
   ASSERT_TRUE(THPDefaultGenerator != nullptr);
 
@@ -469,7 +567,7 @@ PyMODINIT_FUNC PyInit__C()
 #else
   return module;
 #endif
-}
 
 #undef ASSERT_TRUE
-#undef STATELESS_ATTR_NAME
+}
+

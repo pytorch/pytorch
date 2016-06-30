@@ -155,7 +155,14 @@ static PyObject * THPTensor_(${name})(THPTensor *self, PyObject *args)
                     arg = arg[:arg.find(' OPTIONAL')]
 
                 # Parse argument
-                t, name = arg.split() if arg != 'self' else ('THTensor', 'self')
+                if arg == 'self':
+                    t, name = 'THTensor', 'self'
+                else:
+                    splits = arg.split()
+                    if splits[0] == 'EXPRESSION':
+                        t, name = splits[0], ' '.join(splits[1:])
+                    else:
+                        t, name = splits
                 t = TYPE_TRANSFORMS.get(t, t)
                 option.add_argument(Argument(t, name))
         self._resolve_optional_args()
@@ -235,6 +242,14 @@ static PyObject * THPTensor_stateless_(${name})(PyObject *_unused, PyObject *arg
                 stateless_options.append(provided.copy())
                 # Reuse option from case 1. to make 2.
                 provided.insert_argument(1, Argument('THPLongTensor*', '_res_ind'))
+                provided.return_type = 'STATELESS PROV2 new SelfIndexPair'
+            if provided.return_type == 'new SelfValuePair':
+                # Case 1.
+                provided.insert_argument(0, Argument('THPTensor*', '_res'))
+                provided.return_type = 'STATELESS PROV new SelfValuePair'
+                stateless_options.append(provided.copy())
+                # Reuse option from case 1. to make 2.
+                provided.insert_argument(1, Argument('THPTensor*', '_res_ind'))
                 provided.return_type = 'STATELESS PROV2 new SelfIndexPair'
             stateless_options.append(provided)
 

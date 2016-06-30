@@ -32,8 +32,6 @@ from .Tensor import _TensorBase
 # Define Storage and Tensor classes
 ################################################################################
 
-# These have to be defined here, so that they are correctly displayed as torch.*Tensor
-
 class DoubleStorage(_C.DoubleStorageBase, _StorageBase):
     pass
 class FloatStorage(_C.FloatStorageBase, _StorageBase):
