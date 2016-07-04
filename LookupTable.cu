@@ -330,7 +330,7 @@ void THNN_CudaLookupTable_renorm(
     thrust::device_ptr<float> row_ptr = weight_ptr + k * stride;
     float norm = thrust::transform_reduce(row_ptr, row_ptr + stride,
       unary_pow, 0, binary_plus);
-    norm = std::pow(norm, 1.0 / normType);
+    norm = std::pow(norm, (float) (1.0 / normType));
     if (norm > maxNorm)
     {
       multiply_s<float> unary_mul(maxNorm / (norm + 1e-7));
