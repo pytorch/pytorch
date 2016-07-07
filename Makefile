@@ -178,28 +178,42 @@ $(MPITSTDIR)/% : test/mpi/%.cu $(TSTDEP)
 
 #### PACKAGING ####
 
-DEB_GEN_IN := $(shell ls debian/*.in)
-DEB_GEN    := $(DEB_GEN_IN:.in=)
+DEBIANDIR  := $(BUILDDIR)/debian
+
+DEBGEN_IN  := $(shell (cd debian ; ls *.in))
+DEBGEN     := $(DEBGEN_IN:.in=)
+DEBFILES   := compat copyright libnccl-dev.install libnccl-dev.manpages nccl.7 rules $(DEBGEN)
+DEBTARGETS := $(patsubst %, $(DEBIANDIR)/%, $(DEBFILES))
 
 DEB_REVISION   ?= 1
 DEB_TIMESTAMP  := $(shell date -R)
+DEB_ARCH       ?= amd64
 
-deb : lib $(DEB_GEN)
+debian : $(DEBTARGETS)
+
+deb : lib debian
 	@printf "Building Debian package\n"
-	debuild -eBUILDDIR -eLD_LIBRARY_PATH -uc -us -d -b
+	(cd $(BUILDDIR); debuild -eLD_LIBRARY_PATH -uc -us -d -b)
 	mkdir -p $(BUILDDIR)/deb/
-	mv ../libnccl*.deb $(BUILDDIR)/deb/
+	mv $(BUILDDIR)/../libnccl*.deb $(BUILDDIR)/deb/
 
 debclean :
-	rm -f $(DEB_GEN)
+	rm -Rf $(DEBIANDIR)
 
-debian/% : debian/%.in
+$(DEBIANDIR)/% : debian/%.in
 	@printf "Generating %-25s > %-24s\n" $< $@
 	sed -e "s/\$${nccl:Major}/$(NCCL_MAJOR)/g" \
 	    -e "s/\$${nccl:Minor}/$(NCCL_MINOR)/g" \
 	    -e "s/\$${nccl:Patch}/$(NCCL_PATCH)/g" \
 	    -e "s/\$${cuda:Major}/$(CUDA_MAJOR)/g" \
 	    -e "s/\$${cuda:Minor}/$(CUDA_MINOR)/g" \
-	    -e "s/\$${nccl:Debian}/$(DEB_REVISION)/g" \
-	    -e "s/\$${nccl:Timestamp}/$(DEB_TIMESTAMP)/g" \
+	    -e "s/\$${deb:Revision}/$(DEB_REVISION)/g" \
+	    -e "s/\$${deb:Timestamp}/$(DEB_TIMESTAMP)/g" \
+	    -e "s/\$${deb:Arch}/$(DEB_ARCH)/g" \
 	    $< > $@
+
+$(DEBIANDIR)/% : debian/%
+	@printf "Grabbing  %-25s > %-25s\n" $< $@
+	mkdir -p $(DEBIANDIR)
+	cp -f $< $@
+

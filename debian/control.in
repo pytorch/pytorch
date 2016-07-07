@@ -7,7 +7,7 @@ Standards-Version: 3.9.5
 
 Package: libnccl${nccl:Major}
 Section: libs
-Architecture: amd64
+Architecture: ${deb:Arch}
 Depends: ${misc:Depends}, ${shlibs:Depends}
 Description: NVIDIA Collectives Communication Library (NCCL) Runtime
  NCCL (pronounced "Nickel") is a stand-alone library of standard collective
@@ -18,7 +18,7 @@ Description: NVIDIA Collectives Communication Library (NCCL) Runtime
 
 Package: libnccl-dev
 Section: libdevel
-Architecture: amd64
+Architecture: ${deb:Arch}
 Depends: ${misc:Depends}, ${shlibs:Depends}, libnccl${nccl:Major} (= ${binary:Version})
 Description: NVIDIA Collectives Communication Library (NCCL) Development Files
  NCCL (pronounced "Nickel") is a stand-alone library of standard collective
