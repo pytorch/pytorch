@@ -326,12 +326,6 @@ IMPLEMENT_STATELESS(trace)
 IMPLEMENT_STATELESS(tril)
 IMPLEMENT_STATELESS(triu)
 IMPLEMENT_STATELESS(zero)
-IMPLEMENT_STATELESS(gt)
-IMPLEMENT_STATELESS(lt)
-IMPLEMENT_STATELESS(ge)
-IMPLEMENT_STATELESS(le)
-IMPLEMENT_STATELESS(eq)
-IMPLEMENT_STATELESS(ne)
 IMPLEMENT_STATELESS(kthvalue)
 IMPLEMENT_STATELESS(mode)
 IMPLEMENT_STATELESS(median)
@@ -387,6 +381,38 @@ IMPLEMENT_STATELESS(rand)
 IMPLEMENT_STATELESS(randn)
 IMPLEMENT_STATELESS(all)
 IMPLEMENT_STATELESS(any)
+
+#undef IMPLEMENT_STATELESS
+
+// For logical functions a reverse type search is required (if the first argument
+// is a ByteTensor (result), it shouldn't pick it's version).
+#define IMPLEMENT_STATELESS_REVERSED(name)                                     \
+static PyObject * TH_CONCAT_2(THPModule_, name)(PyObject *_unused, PyObject *args) \
+{                                                                              \
+  PyObject *tensor = THPDefaultTensorClass;                                    \
+  for (int i = PyTuple_Size(args)-1; i >= 0; i--) {                            \
+    PyObject *item = PyTuple_GET_ITEM(args, i);                                \
+    if (THPModule_isTensor(item)) {                                            \
+      tensor = item;                                                           \
+      break;                                                                   \
+    }                                                                          \
+  }                                                                            \
+                                                                               \
+  PyObject *methods = PyObject_GetAttrString(tensor, STATELESS_ATTRIBUTE_NAME);     \
+  THPUtils_assert(methods, "Type %s doesn't implement statless methods",       \
+      Py_TYPE(tensor)->tp_name);                                               \
+  PyObject *method = PyObject_GetAttrString(methods, #name);                   \
+  THPUtils_assert(method, "Type %s doesn't implement stateless method " #name, \
+      Py_TYPE(tensor)->tp_name);                                               \
+  return PyObject_Call(method, args, NULL);                                    \
+}
+
+IMPLEMENT_STATELESS_REVERSED(gt)
+IMPLEMENT_STATELESS_REVERSED(lt)
+IMPLEMENT_STATELESS_REVERSED(ge)
+IMPLEMENT_STATELESS_REVERSED(le)
+IMPLEMENT_STATELESS_REVERSED(eq)
+IMPLEMENT_STATELESS_REVERSED(ne)
 
 #undef IMPLEMENT_STATELESS
 

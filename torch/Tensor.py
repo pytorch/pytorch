@@ -25,9 +25,9 @@ class _TensorBase(object):
     def new(self, *args, **kwargs):
         return self.__class__(*args, **kwargs)
 
-    def type(self, t):
+    def type(self, t=None):
         current = "torch." + self.__class__.__name__
-        if not t:
+        if t is None:
             return current
         if t == current:
             return self

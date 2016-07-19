@@ -166,6 +166,7 @@ RETURN_WRAPPER = {
         _t.release();
         $expr;
         return (PyObject*)_res_new.release()"""),
+    'STATELESS PROV new THPByteTensor':   Template('$expr; Py_INCREF(_ret); return (PyObject*)_ret'),
 }
 
 # Additional args that are added to TH call

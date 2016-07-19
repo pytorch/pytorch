@@ -202,6 +202,7 @@ static PyObject * THPTensor_stateless_(${name})(PyObject *_unused, PyObject *arg
                 return False
             signatures.add(h)
             return True
+        return self.options
         return list(filter(uniq_signatures, self.options))
 
 
@@ -237,6 +238,7 @@ static PyObject * THPTensor_stateless_(${name})(PyObject *_unused, PyObject *arg
             provided.map_arguments(self_to_('_res'))
             if provided.return_type == 'self':
                 provided.return_type = 'STATELESS PROV self'
+            # TODO: TIDY THIS UP
             # This is where it gets tricky. There are two cases:
             # 1. User only provides an output tensor
             # 2. User provides both an output tensor, as well as an index tensor
@@ -256,6 +258,11 @@ static PyObject * THPTensor_stateless_(${name})(PyObject *_unused, PyObject *arg
                 # Reuse option from case 1. to make 2.
                 provided.insert_argument(1, Argument('THPTensor*', '_res_ind'))
                 provided.return_type = 'STATELESS PROV2 new SelfIndexPair'
+            if provided.return_type == 'new THByteTensor':
+                # Case 1.
+                provided.insert_argument(0, Argument('THPByteTensor*', '_ret'))
+                provided.return_type = 'STATELESS PROV new THPByteTensor'
+                stateless_options.append(provided.copy())
             stateless_options.append(provided)
 
         return stateless_options
