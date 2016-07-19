@@ -63,24 +63,24 @@ static PyObject * THPTensor_(${name})(THPTensor *self, PyObject *args)
         calls add some overhead).
         """
         impl = ''
-        prev_arg_count = -1
+        prev_option = None
         for option in sorted(self.options, key=lambda o: o.num_required_args()):
             num_args = option.num_required_args()
-            if num_args > prev_arg_count:
+            prev_num_args = prev_option.num_required_args() if prev_option else -1
+            if num_args > prev_num_args:
                 # Nothing to close if it's the first option
-                if prev_arg_count != -1 and prev_arg_count < math.inf:
+                if prev_num_args != -1 and prev_option.check_argcount():
                     impl += '  }\n'
-                if num_args < math.inf:
+                if option.check_argcount():
                     impl += Template('  if (_argcount == $numargs) {') \
                                 .substitute({'numargs': num_args})
-                prev_arg_count = num_args
-            else:
-                impl += '    PyErr_Clear();'
             impl += '\n    {'
             impl += option.generate()
             impl += '    }\n'
+            impl += '    PyErr_Clear();'
+            prev_option = option
         # Close last argcount block
-        if prev_arg_count < math.inf:
+        if prev_option.check_argcount():
             impl += '  }\n'
         return impl
 
@@ -107,6 +107,7 @@ static PyObject * THPTensor_(${name})(THPTensor *self, PyObject *args)
         for option, optional_args in zip(self.options, self.optional_args):
             if not optional_args:
                 resolved_options.append(option)
+                continue
             # Generate options with all possible configurations of optional args
             for enabled_bits in product((True, False), repeat=len(optional_args)):
                 new_option = option.copy()

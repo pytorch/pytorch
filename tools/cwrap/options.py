@@ -128,6 +128,9 @@ class Option(object):
         """
         return argcount(self)
 
+    def check_argcount(self):
+        return True
+
     def _library_state_macro(self, argstr):
         return 'LIBRARY_STATE' if argstr else 'LIBRARY_STATE_NOARGS'
 
@@ -206,5 +209,11 @@ class LongArgsTHOption(THOption):
             arg_idx += 1
         return init
 
+    def check_argcount(self):
+        return False
+
     def num_required_args(self):
-        return math.inf
+        # TODO: this is an ugly hack
+        # LONG_ARG options have to be sorted decreasingly w.r.t. number of arguments
+        # (ones with larger counts are more specific)
+        return 100000 - argcount(self)

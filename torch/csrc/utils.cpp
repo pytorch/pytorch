@@ -34,11 +34,12 @@ int THPUtils_getCallable(PyObject *arg, PyObject **result) {
 }
 
 THLongStorage * THPUtils_getLongStorage(PyObject *args, int ignore_first) {
+// TODO: error messages
   long value;
 
   Py_ssize_t length = PyTuple_Size(args);
   if (length < ignore_first+1)
-      return NULL;
+    throw std::logic_error("Provided too few arguments");
 
   // Maybe there's a LongStorage
   PyObject *first_arg = PyTuple_GET_ITEM(args, ignore_first);
@@ -53,7 +54,7 @@ THLongStorage * THPUtils_getLongStorage(PyObject *args, int ignore_first) {
   for (Py_ssize_t i = ignore_first; i < length; ++i) {
     PyObject *arg = PyTuple_GET_ITEM(args, i);
     if (!THPUtils_getLong(arg, &value))
-        return NULL;
+        throw std::invalid_argument("Expected a numeric argument");
     result->data[i-ignore_first] = value;
   }
   return result.release();
