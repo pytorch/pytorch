@@ -254,6 +254,8 @@ IMPLEMENT_STATELESS(unfold)
 IMPLEMENT_STATELESS(range)
 IMPLEMENT_STATELESS(gather)
 IMPLEMENT_STATELESS(scatter)
+IMPLEMENT_STATELESS(rand)
+IMPLEMENT_STATELESS(randn)
 
 #undef IMPLEMENT_STATELESS
 
@@ -393,6 +395,8 @@ static PyMethodDef TorchMethods[] = {
   {"random",          (PyCFunction)THPModule_random,            METH_VARARGS, NULL},
   {"geometric",       (PyCFunction)THPModule_geometric,         METH_VARARGS, NULL},
   {"bernoulli",       (PyCFunction)THPModule_bernoulli,         METH_VARARGS, NULL},
+  {"rand",            (PyCFunction)THPModule_rand,              METH_VARARGS, NULL},
+  {"randn",           (PyCFunction)THPModule_randn,             METH_VARARGS, NULL},
   {"randperm",        (PyCFunction)THPModule_randperm,          METH_VARARGS, NULL},
   {"unfold",          (PyCFunction)THPModule_unfold,            METH_VARARGS, NULL},
   {"range",           (PyCFunction)THPModule_range,             METH_VARARGS, NULL},
