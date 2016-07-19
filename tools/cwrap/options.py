@@ -10,6 +10,7 @@ def make_option(name, rettype, flags):
         return CustomTHOption(name, rettype, flags)
     if 'PLAIN_CALL' in flags:
         return PlainOption(name, rettype, flags)
+    # TODO: do we really want to implement this in tensor stateless methods?
     if 'STORAGE_CALL' in flags:
         return THStorageOption(name, rettype, flags)
     if 'LONG_ARGS' in flags:
@@ -207,4 +208,3 @@ class LongArgsTHOption(THOption):
 
     def num_required_args(self):
         return math.inf
-

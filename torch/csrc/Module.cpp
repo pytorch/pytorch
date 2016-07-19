@@ -1,9 +1,9 @@
 #include <Python.h>
 
 #include <stdbool.h>
+#include <unordered_map>
 #include <TH/TH.h>
 
-#include <unordered_map>
 #include "THP.h"
 
 PyObject* module;
@@ -66,7 +66,7 @@ static bool THPModule_loadClasses(PyObject *self)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// COPY METHODS
+// Copy handlers
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "ModuleCopy.h"
@@ -144,6 +144,25 @@ static PyObject * THPModule_initExtension(PyObject *self)
   if (!THPModule_assignStateless(self))     return NULL;
   if (!THPModule_initCopy(self))            return NULL;
   return PyBool_FromLong(true);
+}
+
+static PyObject * THPModule_getNumThreads(PyObject *module)
+{
+#ifdef _OPENMP
+  return PyLong_FromLong(omp_get_max_threads());
+#else
+  return PyLong_FromLong(1);
+#endif
+}
+
+static PyObject * THPModule_setNumThreads(PyObject *module, PyObject *arg)
+{
+  if (!THPUtils_checkLong(arg))
+    return NULL;
+#ifdef _OPENMP
+  omp_set_num_threads(THPUtils_getLong(arg));
+#endif
+  return 0;
 }
 
 static bool THPModule_isTensor(PyObject *obj)
@@ -330,6 +349,8 @@ static PyMethodDef TorchMethods[] = {
   {"_tensorCopy",     (PyCFunction)THPModule_tensorCopyWrapper, METH_VARARGS, NULL},
   {"_storageCopy",    (PyCFunction)THPModule_storageCopyWrapper, METH_VARARGS, NULL},
   {"isTensor",        (PyCFunction)THPModule_tensorCheck,       METH_O,       NULL},
+  {"getNumThreads",   (PyCFunction)THPModule_getNumThreads,     METH_NOARGS,  NULL},
+  {"setNumThreads",   (PyCFunction)THPModule_setNumThreads,     METH_O,       NULL},
 
   {"sigmoid",         (PyCFunction)THPModule_sigmoid,           METH_VARARGS, NULL},
   {"log",             (PyCFunction)THPModule_log,               METH_VARARGS, NULL},

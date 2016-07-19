@@ -9,6 +9,13 @@ _storage_classes = set()
 # Define basic utilities
 ################################################################################
 
+def _import_dotted_name(name):
+    components = name.split('.')
+    obj = __import__(components[0])
+    for component in components[1:]:
+        obj = getattr(obj, component)
+    return obj
+
 # range gets shadowed by torch.range
 def _pyrange(*args, **kwargs):
     return __builtins__['range'](*args, **kwargs)
@@ -24,6 +31,17 @@ def isStorage(obj):
 
 def isLongStorage(obj):
     return isinstance(obj, LongStorage)
+
+def setDefaultTensorType(t):
+    global Tensor
+    global Storage
+    global _defaultTensorTypeName
+    _defaultTensorTypeName = t
+    Tensor = _import_dotted_name(t)
+    Storage = _import_dotted_name(t.replace('Tensor', 'Storage'))
+
+def getDefaultTensorType():
+    return _defaultTensorTypeName
 
 from .Storage import _StorageBase
 from .Tensor import _TensorBase
@@ -77,6 +95,9 @@ _tensor_classes.add(IntTensor)
 _tensor_classes.add(ShortTensor)
 _tensor_classes.add(CharTensor)
 _tensor_classes.add(ByteTensor)
+
+# This shadows Torch.py and Storage.py
+setDefaultTensorType('torch.DoubleTensor')
 
 ################################################################################
 # Initialize extension

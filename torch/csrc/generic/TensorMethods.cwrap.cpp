@@ -2111,6 +2111,17 @@ IMPLEMENT_TWO_MAT_OP(mv, addmv,
   long s = THTensor_(size)(LIBRARY_STATE t1->cdata, 0);
   THTensor_(resize1d)(LIBRARY_STATE self->cdata, s)
   );
+IMPLEMENT_TWO_MAT_OP(mm, addmm,
+  long s1 = THTensor_(size)(LIBRARY_STATE t1->cdata, 0);
+  long s2 = THTensor_(size)(LIBRARY_STATE t2->cdata, 1);
+  THTensor_(resize2d)(LIBRARY_STATE self->cdata, s1, s2)
+  );
+IMPLEMENT_TWO_MAT_OP(bmm, addmm,
+  long s1 = THTensor_(size)(LIBRARY_STATE t1->cdata, 0);
+  long s2 = THTensor_(size)(LIBRARY_STATE t1->cdata, 1);
+  long s3 = THTensor_(size)(LIBRARY_STATE t2->cdata, 2);
+  THTensor_(resize3d)(LIBRARY_STATE self->cdata, s1, s2, s3)
+  );
 
 IMPLEMENT_TWO_MAT_OP_STATELESS(ger, addr,
   long s1 = THTensor_(size)(LIBRARY_STATE t1->cdata, 0);
@@ -2121,6 +2132,18 @@ IMPLEMENT_TWO_MAT_OP_STATELESS(mv, addmv,
   long s = THTensor_(size)(LIBRARY_STATE t1->cdata, 0);
   THTensor_(resize1d)(LIBRARY_STATE self_ptr->cdata, s)
   );
+IMPLEMENT_TWO_MAT_OP_STATELESS(mm, addmm,
+  long s1 = THTensor_(size)(LIBRARY_STATE t1->cdata, 0);
+  long s2 = THTensor_(size)(LIBRARY_STATE t2->cdata, 1);
+  THTensor_(resize2d)(LIBRARY_STATE self_ptr->cdata, s1, s2)
+  );
+IMPLEMENT_TWO_MAT_OP_STATELESS(bmm, addmm,
+  long s1 = THTensor_(size)(LIBRARY_STATE t1->cdata, 0);
+  long s2 = THTensor_(size)(LIBRARY_STATE t1->cdata, 1);
+  long s3 = THTensor_(size)(LIBRARY_STATE t2->cdata, 2);
+  THTensor_(resize3d)(LIBRARY_STATE self_ptr->cdata, s1, s2, s3)
+  );
+
 
 [[
   addbmm
@@ -2175,29 +2198,6 @@ IMPLEMENT_TWO_MAT_OP_STATELESS(mv, addmv,
     - THTensor t1
     - THTensor t2
 ]]
-
-// TODO: mm and bmm will fail if mat1 and mat2 aren't square
-[[
-  mm
-  addmm -> self OPTIONAL_SELF
-    - self
-    - CONSTANT 0
-    - THTensor mat1
-    - CONSTANT 1
-    - THTensor mat1
-    - THTensor mat2
-]]
-
-[[
-  bmm
-  addbmm -> self OPTIONAL_SELF
-    - self
-    - CONSTANT 0
-    - THTensor mat1
-    - CONSTANT 1
-    - THTensor mat1
-    - THTensor mat2
-]]
 #endif
 
 #if !IS_CUDA
@@ -2209,11 +2209,32 @@ IMPLEMENT_TWO_MAT_OP_STATELESS(mv, addmv,
     - long n
 ]]
 
+static void THTensor_(random2__)(THTensor *self, THGenerator *gen, long a, long b)
+{
+  THArgCheck(b >= a, 2, "upper bound must be larger than lower bound");
+  TH_TENSOR_APPLY(real, self, *self_data = ((THRandom_random(gen) % (b+1-a)) + a);)
+}
+
+static void THTensor_(random1__)(THTensor *self, THGenerator *gen, long b)
+{
+  THArgCheck(b > 0, 1, "upper bound must be strictly positive");
+  TH_TENSOR_APPLY(real, self, *self_data = (THRandom_random(gen) % b + 1);)
+}
+
 [[
   random
   random -> self
     - self
     - THGenerator generator OPTIONAL THPDefaultGenerator->cdata
+  random1__ -> self
+    - self
+    - THGenerator generator OPTIONAL THPDefaultGenerator->cdata
+    - long a
+  random2__ -> self
+    - self
+    - THGenerator generator OPTIONAL THPDefaultGenerator->cdata
+    - long a
+    - long b
 ]]
 #endif
 

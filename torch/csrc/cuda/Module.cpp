@@ -1,8 +1,8 @@
 #include <Python.h>
 
 #include <stdbool.h>
-#include <TH/TH.h>
 #include <unordered_map>
+#include <TH/TH.h>
 
 #include "THCP.h"
 
