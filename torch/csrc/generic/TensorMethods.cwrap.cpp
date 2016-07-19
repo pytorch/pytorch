@@ -1845,6 +1845,8 @@ IMPLEMENT_TWO_MAT_OP_STATELESS(mv, addmv,
     - long n
 ]]
 
+
+
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
 [[
   multinomial
@@ -1897,6 +1899,22 @@ IMPLEMENT_TWO_MAT_OP_STATELESS(mv, addmv,
     - self
     - THGenerator generator OPTIONAL THPDefaultGenerator->cdata
     - real lambda OPTIONAL 1
+]]
+
+[[
+  rand
+  rand -> self LONG_ARGS OPTIONAL_SELF
+    - self
+    - THGenerator generator OPTIONAL THPDefaultGenerator->cdata
+    - CONSTANT _long_args
+]]
+
+[[
+  randn
+  randn -> self LONG_ARGS OPTIONAL_SELF
+    - self
+    - THGenerator generator OPTIONAL THPDefaultGenerator->cdata
+    - CONSTANT _long_args
 ]]
 #endif
 
@@ -2003,6 +2021,8 @@ static PyMethodDef THPTensor_(methods)[] = {
   {"cauchy",          (PyCFunction)THPTensor_(cauchy),          METH_VARARGS, NULL},
   {"logNormal",       (PyCFunction)THPTensor_(logNormal),       METH_VARARGS, NULL},
   {"exponential",     (PyCFunction)THPTensor_(exponential),     METH_VARARGS, NULL},
+  {"rand",            (PyCFunction)THPTensor_(rand),            METH_VARARGS, NULL},
+  {"randn",           (PyCFunction)THPTensor_(randn),           METH_VARARGS, NULL},
 #endif
   {"randperm",        (PyCFunction)THPTensor_(randperm),        METH_VARARGS, NULL},
   {"random",          (PyCFunction)THPTensor_(random),          METH_VARARGS, NULL},
@@ -2137,6 +2157,8 @@ static PyMethodDef THPTensorStatelessMethods[] = {
   {"cauchy",          (PyCFunction)THPTensor_stateless_(cauchy),          METH_VARARGS, NULL},
   {"logNormal",       (PyCFunction)THPTensor_stateless_(logNormal),       METH_VARARGS, NULL},
   {"exponential",     (PyCFunction)THPTensor_stateless_(exponential),     METH_VARARGS, NULL},
+  {"rand",            (PyCFunction)THPTensor_stateless_(rand),            METH_VARARGS, NULL},
+  {"randn",           (PyCFunction)THPTensor_stateless_(randn),           METH_VARARGS, NULL},
 #endif
   {"randperm",        (PyCFunction)THPTensor_stateless_(randperm),        METH_VARARGS, NULL},
   {"random",          (PyCFunction)THPTensor_stateless_(random),          METH_VARARGS, NULL},

@@ -57,6 +57,7 @@ ARGPARSE_TYPE_CHECK = {
 TYPE_CHECK = {
     'THPTensor*':       lambda arg: 'THPTensor_(IsSubclass)((PyObject*){})'.format(arg),
     'THPLongTensor*':   lambda arg: 'THPLongTensor_IsSubclass((PyObject*){})'.format(arg),
+    'THPGenerator*':    lambda arg: 'THPGenerator_Check({})'.format(arg),
     'THPStorage*':      lambda arg: 'THPStorage_(IsSubclass)((PyObject*){})'.format(arg),
     'real':             lambda arg: 'THPUtils_(checkReal)({})'.format(arg),
     'long':             lambda arg: 'THPUtils_checkLong({})'.format(arg),
