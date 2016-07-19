@@ -1,8 +1,28 @@
-from setuptools import setup, Extension
+from setuptools import setup, Extension, distutils
 from os.path import expanduser
 from tools.cwrap import cwrap
 import platform
 
+################################################################################
+# Monkey-patch setuptools to compile in parallel
+################################################################################
+
+def parallelCCompile(self, sources, output_dir=None, macros=None, include_dirs=None, debug=0, extra_preargs=None, extra_postargs=None, depends=None):
+    # those lines are copied from distutils.ccompiler.CCompiler directly
+    macros, objects, extra_postargs, pp_opts, build = self._setup_compile(output_dir, macros, include_dirs, sources, depends, extra_postargs)
+    cc_args = self._get_cc_args(pp_opts, debug, extra_preargs)
+
+    # compile using a thread pool
+    import multiprocessing.pool
+    def _single_compile(obj):
+        src, ext = build[obj]
+        self._compile(obj, src, ext, cc_args, extra_postargs, pp_opts)
+    num_jobs = multiprocessing.cpu_count()
+    multiprocessing.pool.ThreadPool(num_jobs).map(_single_compile, objects)
+
+    return objects
+
+distutils.ccompiler.CCompiler.compile = parallelCCompile
 
 ################################################################################
 # Generate Tensor methods
