@@ -41,6 +41,10 @@
 # define M_PI 3.14159265358979323846
 #endif
 
+#ifndef TH_INDEX_BASE
+#define TH_INDEX_BASE 1
+#endif
+
 TH_API double THLog1p(const double x);
 TH_API void _THError(const char *file, const int line, const char *fmt, ...);
 TH_API void _THAssertionFailed(const char *file, const int line, const char *exp, const char *fmt, ...);
