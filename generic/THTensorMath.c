@@ -1804,7 +1804,7 @@ void THTensor_(kthvalue)(THTensor *values_, THLongTensor *indices_, THTensor *t,
   long t_size_dim;
 
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimension)(t), 3, "dimension out of range");
-  THArgCheck(k >= 0 && k < t->size[dimension], 2, "selected index out of range");
+  THArgCheck(k > 0 && k <= t->size[dimension], 2, "selected index out of range");
 
   dim = THTensor_(newSizeOf)(t);
   THLongStorage_set(dim, dimension, 1);
@@ -1828,9 +1828,9 @@ void THTensor_(kthvalue)(THTensor *values_, THLongTensor *indices_, THTensor *t,
                           temp__data[i] = t_data[i*t_stride];
                        for(i = 0; i < t_size_dim; i++)
                           tempi__data[i] = i;
-                       THTensor_(quickselect)(temp__data, tempi__data, k, t_size_dim, 1);
-                       *values__data = temp__data[k];
-                       *indices__data = tempi__data[k];);
+                       THTensor_(quickselect)(temp__data, tempi__data, k - 1, t_size_dim, 1);
+                       *values__data = temp__data[k-1];
+                       *indices__data = tempi__data[k-1];);
 
   THTensor_(free)(temp_);
   THLongTensor_free(tempi_);
@@ -1845,7 +1845,7 @@ void THTensor_(median)(THTensor *values_, THLongTensor *indices_, THTensor *t, i
   t_size_dim = THTensor_(size)(t, dimension);
   k = (t_size_dim-1) >> 1; /* take middle or one-before-middle element */
 
-  THTensor_(kthvalue)(values_, indices_, t, k, dimension);
+  THTensor_(kthvalue)(values_, indices_, t, k+1, dimension);
 }
 
 void THTensor_(topk)(THTensor *rt_, THLongTensor *ri_, THTensor *t, long k, int dim, int dir, int sorted)
