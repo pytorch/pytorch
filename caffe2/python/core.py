@@ -3,66 +3,53 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-import atexit
-import sys
 from collections import namedtuple
+from collections import OrderedDict
 
-from ._import_c_extension import *
+from ._import_c_extension import *  # NOQA
 
 from caffe2.proto import caffe2_pb2
-from collections import Counter, defaultdict
-from caffe2.python import utils, workspace
+from collections import defaultdict
+from caffe2.python import scope, utils, workspace, extension_loader
 
-import logging
 
-_REGISTERED_OPERATORS = set(s.decode() for s in workspace.RegisteredOperators())
+# Convenience redirections to functions inside scope.
+DeviceScope = scope.DeviceScope
+NameScope = scope.NameScope
+
+
+# Bring datatype enums to the main namespace
+class DataType:
+    pass
+
+
+def _InitDataType():
+    for name, value in caffe2_pb2.TensorProto.DataType.items():
+        setattr(DataType, name, value)
+
+_InitDataType()
+
+# Python 2 and 3 compatibility: test if basestring exists
+try:
+    basestring  # NOQA
+except NameError:
+    # This is python3 so we define basestring.
+    basestring = str
+
+
+def _GetRegisteredOperators():
+    return set(s.decode() for s in workspace.RegisteredOperators())
+
+_REGISTERED_OPERATORS = _GetRegisteredOperators()
+
+
+def RefreshRegisteredOperators():
+    global _REGISTERED_OPERATORS
+    _REGISTERED_OPERATORS = _GetRegisteredOperators()
+
 
 def IsOperator(op_type):
     return (op_type in _REGISTERED_OPERATORS)
-
-# The name scope and device scope when creating a new operator.
-_NAMESCOPE = ''
-_DEVICESCOPE = None
-
-
-class NameScope(object):
-    """Helper class to create embedded name scopes."""
-    # SEPARATOR is defined to be "/" so it is consistent with TensorFlow's
-    # visualization tools.
-    SEPARATOR = '/'
-    def __init__(self, prefix):
-        assert isinstance(prefix, basestring), \
-            "NameScope takes in a string as its argument."
-        self._prefix = prefix + NameScope.SEPARATOR
-
-    def __enter__(self):
-        global _NAMESCOPE
-        _NAMESCOPE += self._prefix
-
-    def __exit__(self, type, value, traceback):
-        global _NAMESCOPE
-        assert _NAMESCOPE.endswith(self._prefix), \
-            "The namescope variable is changed from outside NameScope() calls."
-        _NAMESCOPE = _NAMESCOPE[:-len(self._prefix)]
-
-
-class DeviceScope(object):
-    """Helper class to switch device scopes."""
-    def __init__(self, scope):
-        assert isinstance(scope, caffe2_pb2.DeviceOption), \
-            "DeviceScope takes in a caffe2_pb2.DeviceOption as its argument."
-        self._scope = scope
-
-    def __enter__(self):
-        global _DEVICESCOPE
-        self._old_scope = _DEVICESCOPE
-        _DEVICESCOPE = self._scope
-
-    def __exit__(self, type, value, traceback):
-        global _DEVICESCOPE
-        assert _DEVICESCOPE == self._scope, \
-            "The device scope is changed from outside DeviceScope() calls."
-        _DEVICESCOPE = self._old_scope
 
 
 def DeviceOption(device_type, cuda_gpu_id, random_seed=None):
@@ -86,6 +73,11 @@ class BlobReference(object):
     """
 
     def __init__(self, name, net=None):
+        """Initializes a blob reference.
+
+        Note that this does not prepends the namescope. If needed, use
+        ScopedBlobReference() to prepend the existing namespace.
+        """
         self._name = name
         self._from_net = net
         # meta allows helper functions to put whatever metainformation needed
@@ -148,14 +140,21 @@ class BlobReference(object):
         return lambda *args, **kwargs: self._CreateAndAddToNet(
             op_type, *args, **kwargs)
 
+
+def ScopedBlobReference(name, *args, **kwargs):
+    """Returns a blob reference with scope prefixed."""
+    return BlobReference(scope.NAMESCOPE + name, *args, **kwargs)
+
+
 def _RectifyInputOutput(blobs):
     """A helper function to rectify the input or output of the CreateOperator
     interface.
     """
     if isinstance(blobs, basestring):
-        # If blobs is a single string, prepend _NAMESCOPE and put it as a list.
+        # If blobs is a single string, prepend scope.NAMESCOPE and put it as a
+        # list.
         # TODO(jiayq): enforce using BlobReference instead of raw strings.
-        return [BlobReference(_NAMESCOPE + blobs)]
+        return [ScopedBlobReference(blobs)]
     elif type(blobs) is BlobReference:
         # If blob is a BlobReference, simply put it as a list.
         return [BlobReference(str(blobs))]
@@ -164,7 +163,7 @@ def _RectifyInputOutput(blobs):
         rectified = []
         for blob in blobs:
             if isinstance(blob, basestring):
-                rectified.append(BlobReference(_NAMESCOPE + blob))
+                rectified.append(ScopedBlobReference(blob))
             elif type(blob) is BlobReference:
                 rectified.append(BlobReference(str(blob)))
             else:
@@ -175,7 +174,7 @@ def _RectifyInputOutput(blobs):
     else:
         raise TypeError(
             "Unknown input/output type: %s of type %s." %
-            (str(inputs), type(inputs))
+            (str(blobs), type(blobs))
         )
 
 
@@ -184,6 +183,7 @@ def CreateOperator(
     inputs,
     outputs,
     name='',
+    control_input=None,
     device_option=None,
     arg=None,
     engine=None,
@@ -201,14 +201,17 @@ def CreateOperator(
     outputs = _RectifyInputOutput(outputs)
     operator.input.extend([str(i) for i in inputs])
     operator.output.extend([str(o) for o in outputs])
+    if control_input:
+        control_input = _RectifyInputOutput(control_input)
+        operator.control_input.extend([str(i) for i in control_input])
     # Set device option:
     # (1) If device_option is explicitly set, use device_option.
-    # (2) If not, but _DEVICESCOPE is set, then we use the _DEVICESCOPE.
+    # (2) If not, but scope.DEVICESCOPE is set, then we use scope.DEVICESCOPE.
     # (3) Otherwise, do not set device option.
     if device_option is not None:
         operator.device_option.CopyFrom(device_option)
-    elif _DEVICESCOPE is not None:
-        operator.device_option.CopyFrom(_DEVICESCOPE)
+    elif scope.DEVICESCOPE is not None:
+        operator.device_option.CopyFrom(scope.DEVICESCOPE)
     if engine is not None:
         operator.engine = engine
     # random seed is defined in the device option, so we need to do special
@@ -222,7 +225,293 @@ def CreateOperator(
     # Add all other arguments
     for key, value in kwargs.items():
         operator.arg.add().CopyFrom(utils.MakeArgument(key, value))
+
+    if workspace.IsImmediate():
+        workspace.RunOperatorImmediate(operator)
     return operator
+
+
+def GetIndexFromGradientList(g_list, name):
+    """A helper function to get the index from a gradient list, None if not
+    matching."""
+    for i, g in enumerate(g_list):
+        if g == name:
+            return i
+        elif type(g) is GradientSlice:
+            if (g.indices == name or g.values == name):
+                return i
+    return None
+
+
+OpSSA = namedtuple('OpSSA', ['op', 'in_versions', 'out_versions'])
+GradGenMeta = namedtuple('GradGenMeta', ['grad_op', 'idx', 'gradient'])
+
+
+class IR(object):
+    """A simple IR class to keep track of all intermediate representations used
+    in the gradient computation.
+    """
+
+    def __init__(self, operators):
+        # The IR class holds multiple metadata from the forward pass:
+        # a) ssa: a list of [op, in_versions, out_versions] recording the
+        #    input and the output version of each operator, similar
+        #    to a normal SSA form.
+        # b) input_count: a dictionary specifying for each blob and
+        #    each of its version, how many times it is used as input for another
+        #    op.
+        # c) frontier: maintaining the current versions of the blobs
+        #    we are having in the workspace, after the execution of all the ops
+        #    added to the IR so far. This is useful because if a gradient is
+        #    trying to access an earlier version of a blob, we can sanity check
+        #    that it is no longer there, and thus throw an error.
+        # d) gradient_frontier: maps the names of blobs to its version that the
+        #    gradient corresponds to.
+        # e) gradient_generators: for each blob and each of its version, maps to
+        #    a list of operators that generates its gradient together with the
+        #    gradient name.
+        self.ssa = []
+        self.input_usages = defaultdict(lambda: defaultdict(list))
+        self.frontier = defaultdict(int)
+        self.gradient_frontier = {}
+        self.gradient_generators = defaultdict(lambda: defaultdict(list))
+
+        for op in operators:
+            self.Play(op)
+
+    def Play(self, op):
+        """"Adds an op to the current IR, and update the internal states to
+        reflect the blobs and versions after the execution of the op.
+        """
+        # For input, they are the current version in the dict.
+        in_versions = {}
+        for s in op.input:
+            in_versions[s] = self.frontier[s]
+            self.input_usages[s][self.frontier[s]].append(len(self.ssa))
+        # For output, they are the current version plus one. If this is a
+        # newly created blob, its version starts with zero.
+        out_versions = {}
+        for s in op.output:
+            if s in self.frontier:
+                self.frontier[s] += 1
+            out_versions[s] = self.frontier[s]
+        # Add to SSA for bookkeeping.
+        self.ssa.append(OpSSA(op, in_versions, out_versions))
+
+    def CheckGradientOperators(  # NOQA
+            self, fwd_op_idx, gradient_ops, g_output, g_input):
+        """Checks if the gradient operators can be correctly carried out."""
+        forward_op, in_versions, out_versions = self.ssa[fwd_op_idx]
+        locally_generated_blobs = []
+
+        for grad_op in gradient_ops:
+            # (1) for inputs:
+            # (1a) If it is a dense or sparse gradient name, it should match the
+            #      version of the corresponding output.
+            # (1b) If it is an output name, the current version should match the
+            #      version when the operator was run.
+            # (1c) If it is an input name, the current version should match the
+            #      version when the operator was run.
+            # (1d) If it is none of the above, it should be a blob that is
+            #      generated locally by one of the previous gradient operators.
+            for s in grad_op.input:  # (1)
+                original_index = GetIndexFromGradientList(g_output, s)
+                if original_index is not None:  # (1a)
+                    original_name = forward_op.output[original_index]
+                    if (out_versions[original_name] !=
+                            self.gradient_frontier[original_name]):
+                        raise RuntimeError(
+                            'Gradient name "%s" is expected to correspond '
+                            'to version %d of "%s", but currently we have '
+                            'version %d.' % (
+                                s, out_versions[original_name],
+                                original_name,
+                                self.gradient_frontier[original_name]))
+                elif s in out_versions:  # (1b)
+                    if self.frontier[s] != out_versions[s]:
+                        raise RuntimeError(
+                            'Gradient operator needs output "%s" at version'
+                            ' %d, but currently we have version %d.' % (
+                                s, out_versions[s],
+                                self.frontier[s]
+                            )
+                        )
+                elif s in in_versions:  # (1c)
+                    if (self.frontier[s] != in_versions[s]):
+                        raise RuntimeError(
+                            'Gradient operator needs input "%s" at version '
+                            '%d, but currently we have version %d.' % (
+                                s, in_versions[s],
+                                self.frontier[s]
+                            )
+                        )
+                else:  # (1d)
+                    if s not in locally_generated_blobs:
+                        raise RuntimeError(
+                            'Blob name "%s" not in the scope of operator: '
+                            '%s\nand is not generated by any of the local '
+                            'gradient operators.' % (s, str(forward_op))
+                        )
+            # (2) for outputs: we will simply add them to locally generated
+            # blobs. We will also record the output to gradient_generators for
+            # bookkeeping, if the output corresponds to the input of a gradient.
+            for i, s in enumerate(grad_op.output):  # (1)
+                locally_generated_blobs.extend(grad_op.output)
+                input_index = GetIndexFromGradientList(g_input, s)
+                if input_index is not None:
+                    input_name = forward_op.input[input_index]
+                    input_version = in_versions[input_name]
+                    self.gradient_generators[input_name][input_version].append(
+                        GradGenMeta(grad_op, i, g_input[input_index]))
+        # Finally, for the gradients specified in g_input, we update the
+        # gradient frontier to reflect the input versions that the gradients
+        # correspond to.
+        for i, g in enumerate(g_input):
+            if g is not None:
+                input_name = forward_op.input[i]
+                input_version = in_versions[input_name]
+                self.gradient_frontier[input_name] = input_version
+
+    def DoGradientAccumulation(
+            self, fwd_op_idx, gradient_ops, g_output, g_input):
+        """For each input name in the forward op, check if we will need to
+        add gradient accumulation. If so, do gradient accumulation and return
+        the list of gradient operators.
+
+        The criteria for doing gradient accumulation is:
+        (1) the specific input version has been used by multiple operators.
+        (2) the current fwd_op_idx is the first to use that input, i.e. in the
+            backward pass, is the last to optionally generate the gradient for
+            the op.
+        (3) For the operators that used the input, their gradient operators
+            have generated more than 1 gradient.
+
+        When accumulating operators, our current solution is to rename all the
+        created gradients with an internal intermediate name, and then add a
+        Sum() operator that adds up all the gradients. This may use more memory
+        due to intermediate storage, but is usually the fastest approach as one
+        can do one single sum for multiple intermediate gradients.
+        """
+        forward_op, in_versions, out_versions = self.ssa[fwd_op_idx]
+        additional_sum_ops = []
+        grad_map = {}
+        for i, input_name in enumerate(forward_op.input):
+            input_version = in_versions[input_name]
+            input_usage = self.input_usages[input_name][input_version]
+            if (len(input_usage) <= 1 or fwd_op_idx != input_usage[0]):
+                # We do not need to do gradient accumulation yet.
+                continue
+            generator = self.gradient_generators[input_name][input_version]
+            # (1) check if we are dealing with dense gradients. Sparse gradients
+            # do not support automatic aggregation yet.
+            if any(type(g[2]) is GradientSlice for g in generator):
+                raise RuntimeError(
+                    'Automatic gradient aggregation does not work with sparse '
+                    'gradients yet.')
+            # If for all the operators that used the operator, none or only one
+            # produced the gradient, then no additional sum needs to be carried
+            # out.
+            if len(generator) < 2:
+                continue
+            # Check if all grad names are the same.
+            if len(set([g.grad_op.output[g.idx] for g in generator])) != 1:
+                raise RuntimeError('Unexpected behavior: not all grad output '
+                                   'names are the same.')
+            # Check if all grad op device options are the same.
+            all_device_options = [g.grad_op.device_option for g in generator]
+            if not all(d == all_device_options[0]
+                       for d in all_device_options[1:]):
+                raise RuntimeError('Unexpected behavior: not all grad ops'
+                                   'have the same device option.')
+            # Finally, let's create the sum operator.
+            sum_op_input = []
+            sum_op_output = generator[0].grad_op.output[generator[0].idx]
+            current = 0
+            for grad_op, idx, _ in generator:
+                grad_op.output[idx] = ('_' + grad_op.output[idx] +
+                                       '_autosplit_{}'.format(current))
+                sum_op_input.append(grad_op.output[idx])
+                current += 1
+            sum_op = CreateOperator("Sum", sum_op_input, sum_op_output)
+            if generator[0][0].HasField('device_option'):
+                sum_op.device_option.CopyFrom(generator[0][0].device_option)
+            additional_sum_ops.append(sum_op)
+            grad_map[input_name] = sum_op_output
+        return additional_sum_ops, grad_map
+
+    def GetBackwardPass(self, ys):
+        """Gets the backward pass that computes the derivatives of given blobs.
+
+        Inputs:
+          ys: a list or a dictionary specifying what blobs we want to compute
+              derivatives of. If the input is a list, we will automatically
+              generate their gradients with all-one values; if the input is a
+              dictionary, for any dictionary entries that are not None, we will
+              take the corresponding blobs as their gradients; for all those
+              that are None, we will auto-fill them with 1.
+        """
+        all_input_to_grad = {}
+        all_gradient_ops = []
+        if isinstance(ys, list):
+            ys = dict((y, None) for y in ys)
+        elif not isinstance(ys, dict):
+            raise TypeError("ys should either be a list or a dict.")
+        for y, g in ys.items():
+            if g is None:
+                autograd_op = CreateOperator(
+                    "ConstantFill", [y], [str(y) + "_autogen_grad"],
+                    value=1.0)
+                all_gradient_ops.append(autograd_op)
+                g = autograd_op.output[0]
+            # Since the C++ gradient registry does not have notion of
+            # NameScopes, we will convert all references to strings.
+            all_input_to_grad[str(y)] = (
+                GradientSlice(str(g[0]), str(g[1]))
+                if isinstance(g, GradientSlice) else str(g))
+            # Set the gradient frontier with the initialized external
+            # gradients.
+            self.gradient_frontier[y] = self.frontier[y]
+
+        # (2) Now, after having the virtual play above, we now play the ops
+        # backwards, creating the gradients along the path. Note that although
+        # we are playing it backwards, we cannot refer to variables that are
+        # at a version older than current_versions because it is already been
+        # overwritten.
+        for forward_op_idx in reversed(range(len(self.ssa))):
+            forward_op, in_versions, out_versions = self.ssa[forward_op_idx]
+            g_output = list(
+                all_input_to_grad.get(name, None) for name in forward_op.output)
+            if all(g is None for g in g_output):
+                # this operator will not produce any gradients. Skipping.
+                continue
+            gradient_ops, g_input = GradientRegistry.GetGradientForOp(
+                forward_op, g_output)
+            # Checks if the gradient operators are legal
+            self.CheckGradientOperators(
+                forward_op_idx, gradient_ops, g_output, g_input)
+            # Record the gradient map to all_input_to_grad.
+            for name, grad in zip(forward_op.input, g_input):
+                all_input_to_grad[name] = grad
+            # If there are multiple use blobs, do gradient accumulation.
+            additional_sum_ops, grad_map = self.DoGradientAccumulation(
+                forward_op_idx, gradient_ops, g_output, g_input)
+            # This line is so that if in an accumulation some of the operators
+            # have not produced gradients, they still do not overwrite the
+            # general all_input_to_grad map.
+            all_input_to_grad.update(grad_map)
+            all_gradient_ops += gradient_ops
+            all_gradient_ops += additional_sum_ops
+        # (3) Post-processing.
+        # After we have done computation for each op, we now have the gradient
+        # operators ready. For the output map, we will convert everything to
+        # BlobReferences for easier handling in python.
+        all_input_to_grad_out = {}
+        for key, val in all_input_to_grad.items():
+            if val is not None:
+                all_input_to_grad_out[BlobReference(key)] = (
+                    BlobReference(val) if isinstance(val, basestring) else
+                    GradientSlice(BlobReference(val[0]), BlobReference(val[1])))
+        return all_gradient_ops, all_input_to_grad_out
 
 
 class GradientRegistry(object):
@@ -241,7 +530,7 @@ class GradientRegistry(object):
 
     @classmethod
     def _GetGradientForOpCC(cls, op_def, g_output):
-        grad_defs_str, g_input = cc_GetGradientDefs(
+        grad_defs_str, g_input = cc_GetGradientDefs(  # NOQA
             op_def.SerializeToString(), g_output)
         # C++ return tuple for sparse gradients, and we will convert it to
         # namedtuple here.
@@ -260,264 +549,142 @@ class GradientRegistry(object):
     def GetGradientForOp(cls, op, g_output):
         try:
             gradient_ops, g_input = cls._GetGradientForOpCC(op, g_output)
-        except Exception as err:
+        except Exception:
             # Not supported in C++; will try python registration next.
             try:
                 gradient_ops, g_input = cls.gradient_registry_[op.type](
                     op, g_output)
-            except KeyError as err:
+            except KeyError:
                 raise KeyError('No gradient registered for op: %s' % op.type)
         if gradient_ops is None:
             return [], g_input
         if type(gradient_ops) is not list:
             gradient_ops = [gradient_ops]
-        if op.HasField("device_option"):
-            for gradient_op in gradient_ops:
-                gradient_op.device_option.CopyFrom(op.device_option)
-        if op.HasField("engine"):
-            for gradient_op in gradient_ops:
-                gradient_op.engine = op.engine
         return gradient_ops, g_input
 
     @classmethod
-    def GetBackwardPass(cls, operators, external_gradients=None):
-        # external_gradients should be a map of {blob -> gradient} where gradient
-        # can be either a single blob or GradientSlice.
+    def GetBackwardPass(cls, operators, ys):
+        """Gets the backward pass for the list of operators.
 
-        all_input_to_grad = {}
-        if external_gradients is None:
-            external_gradients = {}
-        elif not isinstance(external_gradients, dict):
-            raise TypeError("external_gradients should be a dictionary.")
-        else:
-            for inp, g in external_gradients.iteritems():
-                # Since the C++ gradient registry does not have notion of
-                # NameScopes, we will convert all references to strings.
-                all_input_to_grad[str(inp)] = (
-                    GradientSlice(str(g[0]), str(g[1]))
-                    if isinstance(g, GradientSlice) else str(g))
-        # (1) "Play" the forward pass of the network, so we know the version of
-        #    any tensors that are being written multiple times.
-        # After running this, we will have:
-        # a) fwd_metadata: a list of [op, input_versions, output_versions]
-        #    recording the input and the output version of the operator.
-        # b) versioned_input_count: a dictionary specifying for each blob and
-        #    each of its version, how many times it is used as input for another
-        #    op.
-        # c) current_versions: maintaining the current versions of the tensors
-        #    we are having in the workspace. This is useful because if a
-        #    gradient is trying to access an earlier version of a blob, we know
-        #    that it is no longer there, and thus it should not be referred to
-        #    at all.
-        current_versions = defaultdict(int)
-        versioned_input_count = defaultdict(lambda: defaultdict(int))
-        fwd_metadata = []
-        OpFwdMetadata = namedtuple(
-            'OpFwdMetadata', ['op', 'input_versions', 'output_versions']
-        )
-        for op in operators:
-            # For input, they are the current version in the dict.
-            input_versions = {}
-            for s in op.input:
-                input_versions[s] = current_versions[s]
-                versioned_input_count[s][current_versions[s]] += 1
-            # For output, they are the current version plus one. If this is a
-            # newly created blob, its version starts with zero.
-            output_versions = {}
-            for s in op.output:
-                if s in current_versions:
-                    current_versions[s] += 1
-                output_versions[s] = current_versions[s]
-            fwd_metadata.append(
-                OpFwdMetadata(op, input_versions, output_versions)
-            )
+        Args:
+            operators: a list of operators constituting the forward pass.
+            ys: a list or a dictionary specifying what blobs we want to compute
+                derivatives of. If the input is a list, we will automatically
+                generate their gradients with all-one values; if the input is a
+                dictionary, for any dictionary entries that are not None, we'll
+                take the corresponding blobs as their gradients; for all those
+                that are None, we will auto-fill them with 1.
+        Returns:
+            gradient_ops: a list of gradient operators to run.
+            all_input_to_grads: a map from input to their corresponding
+                gradients.
+        """
+        ir = IR(operators)
+        return ir.GetBackwardPass(ys)
 
-        # (2) Now, after having the virtual play above, we now play the ops
-        # backwards, creating the gradients along the path. Note that although
-        # we are playing it backwards, any value being overwritten can not be
-        # recovered, and any reference to a blob already being overwritten would
-        # trigger an error.
 
-        all_gradient_ops = []
-        # current_gradient_versions maps the name of the original blob to its
-        # version that the gradient corresponds to.
-        current_gradient_versions = {}
-        for s, g in external_gradients.iteritems():
-            current_gradient_versions[s] = current_versions[s]
-        versioned_gradient_count = defaultdict(lambda: defaultdict(int))
-        for forward_op, cur_fwd in zip(operators[::-1], fwd_metadata[::-1]):
-            g_output = list(
-                all_input_to_grad.get(name, None) for name in forward_op.output)
-            gradient_ops, g_input = cls.GetGradientForOp(forward_op, g_output)
-            # Now, the constraints for the inputs of the gradient operators are:
-            #
-            # (1) for inputs:
-            # (1a) If it is a dense or sparse gradient name, it should match the
-            #      version of the corresponding output.
-            # (1b) If it is an output name, the current version should match the
-            #      version when the operator was run.
-            # (1c) If it is an input name, the current version should match the
-            #      version when the operator was run.
-            # (1d) If it is none of the above, it should be a blob that is
-            #      generated locally by one of the previous gradient operators.
-            #
-            # (2) for outputs:
-            # (2a) If it is a gradient name, it must be the gradient name of an
-            #      input blob, and we will mark the gradient as being
-            #      corresponding to the version of the input.
-            # (2b) If it is anything else it is OK - we will simply "play" the
-            #      op to update the current versions of blobs.
-            locally_generated_blobs = []
-            multiuse_input_ready_to_sum = []
-            for grad_op in gradient_ops:
-                # (1)
-                for s in grad_op.input:
-                    # TODO(jiayq): yuck. clean this statement.
-                    original_indices = [
-                        i for i, g in enumerate(g_output)
-                        if ((type(g) is GradientSlice and
-                             (g.indices == s or g.values == s))
-                            or g == s)]
-                    # (1a)
-                    if len(original_indices):
-                        original_name = forward_op.output[original_indices[0]]
-                        if (
-                            cur_fwd.output_versions[original_name] !=
-                            current_gradient_versions[original_name]
-                        ):
-                            raise RuntimeError(
-                                'Gradient name "%s" is expected to correspond '
-                                'to version %d of "%s", but currently we have '
-                                'version %d.' % (
-                                    s, cur_fwd.output_versions[original_name],
-                                    original_name,
-                                    current_gradient_versions[original_name])
-                            )
-                    # (1b)
-                    elif s in cur_fwd.output_versions:
-                        if current_versions[s] != cur_fwd.output_versions[s]:
-                            raise RuntimeError(
-                                'Gradient operator needs output "%s" at version'
-                                ' %d, but currently we have version %d.' % (
-                                    s, cur_fwd.output_versions[s],
-                                    current_versions[s]
-                                )
-                            )
-                    # (1c)
-                    elif s in cur_fwd.input_versions:
-                        if (current_versions[s] != cur_fwd.input_versions[s]):
-                            raise RuntimeError(
-                                'Gradient operator needs input "%s" at version '
-                                '%d, but currently we have version %d.' % (
-                                    s, cur_fwd.input_versions[s],
-                                    current_versions[s]
-                                )
-                            )
-                    # (1d)
-                    else:
-                        if s not in locally_generated_blobs:
-                            raise RuntimeError(
-                                'Blob name "%s" not in the scope of operator: '
-                                '%s\nand is not generated by any of the local '
-                                'gradient operators.' % (s, str(cur_fwd.op))
-                            )
-                # (2)
-                for idx, s in enumerate(grad_op.output):
-                    original_indices = [
-                        i for i, g in enumerate(g_input)
-                        if ((type(g) is GradientSlice and
-                             (g.indices == s or g.values == s))
-                            or g == s)]
-                    # (2a)
-                    if len(original_indices):
-                        original_idx = original_indices[0]
-                        original_name = forward_op.input[original_idx]
-                        # Set the current gradient version.
-                        version = cur_fwd.input_versions[original_name]
-                        current_gradient_versions[original_name] = version
-                        # Now we should also check if the gradient we product is
-                        # a multi-use input, in which case we will automatically
-                        # add split nodes.
-                        # TODO: Instead of adding split nodes, we can also
-                        # choose to sequentially compute and accumulate
-                        # gradients. Maybe implement that in the future.
-                        if versioned_input_count[original_name][version] > 1:
-                            assert type(g_input[original_idx]) \
-                                is not GradientSlice, \
-                                'Automatic splitting does not work with ' \
-                                'sparse gradients yet.'
-                            # rename the gradient.
-                            grad_op.output[idx] = '_%s_autosplit_%d' % (
-                                s, versioned_gradient_count[s][version]
-                            )
-                            versioned_gradient_count[s][version] += 1
-                            assert (
-                                versioned_gradient_count[s][version] <=
-                                versioned_input_count[original_name][version]
-                            )
-                            if (
-                                versioned_gradient_count[s][version] ==
-                                versioned_input_count[original_name][version]
-                            ):
-                                # We have calculated all the autosplit gradients
-                                # and will now need to add a sum after this
-                                # gradient computation.
-                                multiuse_input_ready_to_sum.append(
-                                    (
-                                        s, versioned_gradient_count[s][
-                                            version
-                                        ], grad_op
-                                    )
-                                )
-                    else:
-                        # (2b)
-                        locally_generated_blobs.append(s)
-            # If some of the multi use inputs are ready to be summed, we will do
-            # so.
-            for s, count, source_op in multiuse_input_ready_to_sum:
-                additional_sum_op = CreateOperator(
-                    'Sum',
-                    ['_%s_autosplit_%d' % (s, i) for i in range(count)], [s]
-                )
-                if source_op.HasField('device_option'):
-                    additional_sum_op.device_option.CopyFrom(
-                        source_op.device_option
-                    )
-                gradient_ops.append(additional_sum_op)
-            for name, grad in zip(forward_op.input, g_input):
-                all_input_to_grad[name] = grad
+def get_ssa(net, blob_versions=None):
+    """
+    Given a net, return a structure containing the version of each input and
+    output blob used by each operator.
 
-            # Now, for bookkeeping purposes, we will need to "play" the gradient
-            # operators. The reason is that the gradient operators may (although
-            # in most cases they shouldn't) change some of the existing blobs,
-            # in which case this explicit bookkeeping is going to catch them.
-            for op in gradient_ops:
-                for s in op.output:
-                    if s in current_versions:
-                        current_versions[s] += 1
-                    output_versions[s] = current_versions[s]
-            all_gradient_ops += gradient_ops
-        # After we have done computation for each op, we now have the gradient
-        # operators ready.
-        # For the output map, we will convert everything to BlobReferences.
-        all_input_to_grad_out = {}
-        for key, val in all_input_to_grad.items():
-            if val is not None:
-                all_input_to_grad_out[BlobReference(key)] = (
-                    BlobReference(val) if isinstance(val, basestring) else
-                    GradientSlice(BlobReference(val[0]), BlobReference(val[1])))
-        return all_gradient_ops, all_input_to_grad_out
+    Args:
+        net:            either a Net or a NetDef
+        blob_versions:  (optional) map with current version number for given
+                        blob names. If not provided or blob not found, start
+                        from version 0.
+    Returns:
+        Tuple (ssa, blob_versions)
+        ssa:            list of tuples (versioned_inputs, versioned_outputs)
+                        for each op in the net. A versioned input is a tuple
+                        (blob_name, version).
+        blob_versions:  updated map with latest version of each blob found in
+                        the net.
+    """
+    proto = net.Proto() if isinstance(net, Net) else net
+    assert isinstance(proto, caffe2_pb2.NetDef)
+    if blob_versions is None:
+        blob_versions = {}
+    if isinstance(net, list):
+        return [get_ssa(n, blob_versions) for n in net], blob_versions
+    for i in proto.external_input:
+        if i not in blob_versions:
+            blob_versions[str(i)] = 0
+    ssa = []
+    for op in proto.op:
+        if not proto.external_input:
+            for i in op.input:
+                if i not in blob_versions:
+                    blob_versions[i] = 0
+        inputs = [(str(i), blob_versions.get(str(i), 0)) for i in op.input]
+        for o in op.output:
+            blob_versions[str(o)] = blob_versions.get(str(o), 0) + 1
+        outputs = [(str(o), blob_versions[str(o)]) for o in op.output]
+        ssa.append((inputs, outputs))
+    return ssa, blob_versions
+
+
+def get_undefined_blobs(ssa):
+    """
+    Given a ssa in the format produced by get_ssa(), return a set of blobs that
+    are used before they are defined, which corresponds to inputs at version 0.
+    """
+    undef_blobs = set()
+    for inputs, outputs in ssa:
+        undef_blobs |= set(name for (name, ver) in inputs if ver == 0)
+    return undef_blobs
+
+
+def get_output_producers(ssa):
+    """
+    Given a ssa in the format produced by get_ssa(), returns a map from
+    versioned blob into the operator index that produces that version of
+    the blob. A versioned blob is a tuple (blob_name, version).
+    """
+    producers = {}
+    for i, (inputs, outputs) in enumerate(ssa):
+        for o in outputs:
+            producers[o] = i
+    return producers
+
+
+def get_op_ids_in_path(ssa, blob_versions, inputs, outputs):
+    """
+    Given a ssa and blob_versions as produced by get_ssa(), returns the list
+    of op indices that are necessary in order to generate the blobs in
+    `outputs`, given blobs in `inputs`.
+    Consider that the `inputs` are given in their latest version.
+    """
+    inputs_set = set((str(i), blob_versions[str(i)]) for i in inputs)
+    producers = get_output_producers(ssa)
+    queue = [(str(o), blob_versions[str(o)]) for o in outputs]
+    used_op_ids = set()
+    while len(queue) > 0:
+        o = queue.pop()
+        if (o not in inputs_set) and (o in producers):
+            op_id = producers[o]
+            used_op_ids |= {op_id}
+            inputs, _ = ssa[op_id]
+            queue.extend(inputs)
+    return sorted(used_op_ids)
 
 
 class Net(object):
     operator_registry_ = {}
 
-    def __init__(self, name):
-        if type(name) is caffe2_pb2.NetDef:
+    def __init__(self, name_or_proto):
+        """
+        Create a Net.
+        Args:
+            name_or_proto:  If a NetDef is provided, clone it. Otherwise,
+                            create an empty net with the given name.
+        """
+        if type(name_or_proto) is caffe2_pb2.NetDef:
+            proto = name_or_proto
             # We rae initializing a network by a NetDef. In this case, we will
             # initialize our network with the given netdef.
             self._net = caffe2_pb2.NetDef()
-            self._net.CopyFrom(name)
+            self._net.CopyFrom(proto)
             # Set the next name index properly.
             existing_names = set(
                 sum(
@@ -527,22 +694,167 @@ class Net(object):
                 )
             )
             prefix_len = len(self._net.name + '_blob_')
-            autogen_indices = [
-                int(name[prefix_len:])
-                for name in existing_names
-                if name.startswith(self._net.name + '_blob_')
-            ]
+            autogen_indices = []
+            for s in existing_names:
+                if s.startswith(self._net.name + '_blob_'):
+                    try:
+                        autogen_indices.append(int(s[prefix_len]))
+                    except ValueError:
+                        pass
             if len(autogen_indices):
                 self._next_name_index = max(autogen_indices) + 1
             else:
                 self._next_name_index = 0
         else:
+            name = name_or_proto
             self._net = caffe2_pb2.NetDef()
             self._net.name = name
             self._next_name_index = 0
 
     def __str__(self):
         return self._net.name
+
+    def DefinesBlob(self, blob):
+        """
+        Returns true if the given BlobReference is produced as output of
+        an operator in this net, or if it is provided as an external input.
+        """
+        if isinstance(blob, BlobReference):
+            assert blob.Net() == self, 'Reference belongs to different net'
+        blob_name = str(blob)
+        for op in self._net.op:
+            for output in op.output:
+                if output == blob_name:
+                    return True
+        for input in self._net.external_input:
+            if input == blob_name:
+                return True
+        return False
+
+    def UsesBlob(self, blob):
+        """
+        Returns true iff the given BlobReference is used by any operator
+        or this net, or if it is one of the external inputs of the net.
+        """
+        blob_name = str(blob)
+        for op in self._net.op:
+            for input in op.input:
+                if input == blob_name:
+                    return True
+        for input in self._net.external_input:
+            if input == blob_name:
+                return True
+        return False
+
+    def GetBlobRef(self, blob_name):
+        """
+        Given the name of a blob produced by this net, return a BlobReference
+        to it. If the blob is not produced by any op in this net,
+        raises KeyError.
+        """
+        blob_name = str(blob_name)
+        if not self.DefinesBlob(blob_name):
+            raise KeyError('Net does not define blob %s' % blob_name)
+        return BlobReference(blob_name, self)
+
+    def Clone(self, name, blob_remap=None, op_id_mask=None):
+        """
+        Clone this net.
+        Args:
+            name:        name of the cloned net
+            blob_remap:  optional map with list of blob names to replace
+            op_id_mask:  optional list of operator indices to include in
+                         the cloned net. If not provided, all ops are included.
+        """
+        proto = self._net
+        new_proto = caffe2_pb2.NetDef()
+        new_proto.CopyFrom(proto)
+        new_proto.name = name
+        if blob_remap is None and op_id_mask is None:
+            return Net(new_proto)
+
+        if blob_remap is None:
+            blob_remap = {}
+        if op_id_mask is None:
+            op_id_mask = range(0, len(proto.op))
+
+        def remap_list(proto_list):
+            new_list = [blob_remap.get(b, b) for b in proto_list]
+            del proto_list[:]
+            proto_list.extend(new_list)
+
+        def remap_op(op):
+            new_op = caffe2_pb2.OperatorDef()
+            new_op.CopyFrom(op)
+            remap_list(new_op.input)
+            remap_list(new_op.output)
+            return new_op
+
+        del new_proto.op[:]
+        new_proto.op.extend(remap_op(proto.op[op_id]) for op_id in op_id_mask)
+        remap_list(new_proto.external_input)
+        remap_list(new_proto.external_output)
+        return Net(new_proto)
+
+    def ClonePartial(self, name, inputs, outputs):
+        """
+        Clone this net, including only ops that are necessary in order to
+        compute `outputs` given `inputs`. Return references to the cloned
+        outputs. Internal blobs (blobs that are produced and consumed inside
+        the net but not used as outputs) will be remapped to avoid name
+        conflict.
+
+        Args:
+            name:    the name of the cloned net
+            inputs:  map where the keys correspond to BlobReferences in the
+                     original net, and the values correspond to external inputs
+                     in the partially cloned net. If `inputs` is a list, don't
+                     remap input names.
+            outputs: outputs to be produced by the cloned net.
+
+        Returns:
+            Tuple (new_net, new_outputs)
+                new_net:       a new Net object.
+                new_outputs:   list of BlobReferences corresponding to the
+                               outputs produced by new_net.
+        """
+        inputs = inputs if isinstance(inputs, dict) else {i: i for i in inputs}
+        input_names = {str(k): str(v) for k, v in inputs.items()}
+        output_names = [str(o) for o in outputs]
+        for input in inputs.keys():
+            assert self.UsesBlob(input)
+        for output in outputs:
+            assert self.DefinesBlob(output)
+        proto = self._net
+        ssa, blob_versions = get_ssa(proto)
+        used_op_ids = get_op_ids_in_path(ssa, blob_versions, inputs, outputs)
+        disallowed_op_ids = get_op_ids_in_path(ssa, blob_versions, [], inputs)
+        assert len(set(used_op_ids) & set(disallowed_op_ids)) == 0, (
+            'Cannot partially clone net: some of the ops required would ' +
+            'generate the given input.')
+
+        sub_ssa = [op for i, op in enumerate(ssa) if i in used_op_ids]
+        undef_blobs = get_undefined_blobs(sub_ssa) - set(input_names.keys())
+        prefix = (name + '/') if name else ''
+
+        def remap(blob_name):
+            if blob_name in input_names:
+                return input_names[blob_name]
+            elif blob_name in undef_blobs:
+                return blob_name
+            else:
+                return prefix + blob_name
+
+        blob_mapping = {b: remap(b) for b in blob_versions.keys()}
+        new_net = self.Clone(name, blob_mapping, used_op_ids)
+        new_in = [
+            blob_mapping[i] for i in input_names.keys()] + list(undef_blobs)
+        new_out = [blob_mapping[o] for o in output_names]
+        del new_net.Proto().external_input[:]
+        new_net.Proto().external_input.extend(new_in)
+        del new_net.Proto().external_output[:]
+        new_net.Proto().external_output.extend(new_out)
+        return new_net, [new_net.GetBlobRef(o) for o in new_out]
 
     def Proto(self):
         return self._net
@@ -554,10 +866,16 @@ class Net(object):
         self._next_name_index += 1
         return str(output_name)
 
-    def AddGradientOperators(self, skip=0, external_gradients=None):
+    def AddGradientOperators(self, ys, skip=0):
         """Add the gradient for operators in the net.
 
         Inputs:
+          ys: a list or a dictionary specifying what blobs we want to compute
+              derivatives of. If the input is a list, we will automatically
+              generate their gradients with all-one values; if the input is a
+              dictionary, for any dictionary entries that are not None, we will
+              take the corresponding blobs as their gradients; for all those
+              that are None, we will auto-fill them with 1.
           skip: skips the first n operators. This is provided mainly because a
               lot of nets may use the first few operators for data generation
               like stuff which really do not need to have gradients.
@@ -568,15 +886,37 @@ class Net(object):
 
         Currently, this is hard-coded for float operators if there are branches
         (i.e. a blob is used as input to multiple operators). This is because
-        the inserted SplitOp is hard-coded for float (its gradient, SumOp, is
-        float only). Supporting other formats is a todo item.
+        the gradient accumulation (Sum) is float only right now.
         """
 
         grad_ops, input_to_grad = GradientRegistry.GetBackwardPass(
-            self._net.op[skip:], external_gradients
-        )
+            self._net.op[skip:], ys)
+        # Check if in immediate mode: the grad_ops are actually being produced
+        # by C++ and bypasses the CreateOperator() call, so in immediate mode
+        # we will have to explicitly run them.
+        if workspace.IsImmediate():
+            for op in grad_ops:
+                workspace.RunOperatorImmediate(op)
         self._net.op.extend(grad_ops)
         return input_to_grad
+
+    def AddExternalInput(self, input_name):
+        input_name = str(input_name)
+        assert input_name not in self._net.external_input, (
+            'Net already contains an input named %s' % input_name)
+        self._net.external_input.extend([input_name])
+        return BlobReference(input_name, self)
+
+    def AddExternalOutput(self, output):
+        assert isinstance(output, BlobReference)
+        assert self.DefinesBlob(output)
+        self.Proto().external_output.extend([str(output)])
+
+    def DeduplicateGradientSlices(self, g):
+        assert isinstance(g, GradientSlice)
+        unique, remapping = self.Unique([g.indices], 2)
+        sum_g = self.UnsortedSegmentSum([g.values, remapping], 1)
+        return GradientSlice(indices=unique, values=sum_g)
 
     def RunAllOnGPU(self, gpu_id=0, use_cudnn=False):
         """A convenient function to run everything on the GPU."""
@@ -608,50 +948,138 @@ class Net(object):
         else:
             return tuple(BlobReference(str(o), self) for o in op.output)
 
-
     def __getattr__(self, op_type):
         if not IsOperator(op_type):
             raise RuntimeError(
                 'Method ' + op_type + ' is not a registered operator.'
             )
         return lambda *args, **kwargs: self._CreateAndAddToSelf(
-                op_type, *args, **kwargs)
+            op_type, *args, **kwargs)
+
+    def Python(self, f, grad_f=None):
+        with extension_loader.DlopenGuard():
+            import caffe2.python.op.python_ops_python as ops_python
+        RefreshRegisteredOperators()
+        assert(IsOperator('Python'))
+        token = ops_python.register(f)
+        if grad_f:
+            ops_python.register_gradient(token, grad_f)
+        return lambda *args, **kwargs: self._CreateAndAddToSelf(
+            'Python', token=token, *args, **kwargs)
+
+
+def get_net_name(netlike):
+    if isinstance(netlike, Net):
+        return netlike.Proto().name
+    elif isinstance(netlike, caffe2_pb2.NetDef):
+        return netlike.name
+    else:
+        return netlike
+
+
+def _add_net_to_dict(net_dict, net):
+    name = get_net_name(net)
+    if net in net_dict:
+        assert net_dict[name] is None or net == net_dict[name], (
+            'Different nets with same name: ' + name)
+        return False
+    else:
+        net_dict[name] = net if isinstance(net, Net) else None
+        return True
 
 
 class ExecutionStep(object):
-    def __init__(self, name):
+    def __init__(self, name, nets=None, num_iter=None):
         self._step = caffe2_pb2.ExecutionStep()
         self._step.name = name
-
-    def __init__(self, name, nets, num_iter=None):
-        self._step = caffe2_pb2.ExecutionStep()
-        self._step.name = name
-        if type(nets) is Net:
-            nets = [nets]
-        self._step.network.extend([str(n) for n in nets])
+        self._net_dict = OrderedDict()
+        self._is_used = False
+        self._substeps = []
+        if nets is not None:
+            if type(nets) is Net:
+                nets = [nets]
+            for net in nets:
+                if _add_net_to_dict(self._net_dict, net):
+                    self._step.network.extend([get_net_name(net)])
         if num_iter is not None:
             self._step.num_iter = num_iter
 
     def __str__(self):
         return self._step.name
 
+    def _assert_can_mutate(self):
+        assert not self._is_used, (
+            'Cannot mutate a step that has already been added to a plan/step.')
+
+    def _notify_is_used(self):
+        self._assert_can_mutate()
+        self._is_used = True
+
     def Proto(self):
         return self._step
 
+    def HasNets(self):
+        return self._step.network is not None and (
+            len(self._step.network) > 0)
+
+    def HasSubsteps(self):
+        return self._step.substep is not None and (
+            len(self._step.substep) > 0)
+
+    def Nets(self):
+        return self._net_dict.values()
+
+    def Substeps(self):
+        return self._substeps
+
     def SetIter(self, num_iter):
+        self._assert_can_mutate()
         self._step.num_iter = num_iter
 
+    def SetCriteriaNet(self, criteria_net):
+        self._assert_can_mutate()
+        _add_net_to_dict(self._net_dict, criteria_net)
+        self._step.criteria_network = get_net_name(criteria_net)
+
+    def SetReportNet(self, report_net, report_interval):
+        self._assert_can_mutate()
+        _add_net_to_dict(self._net_dict, report_net)
+        self._step.report_net = get_net_name(report_net)
+        self._step.report_interval = report_interval
+
     def AddSubstep(self, substep):
-        self._step.substep.add().CopyFrom(substep)
+        self._assert_can_mutate()
+        assert not self.HasNets(), 'Cannot have both network and substeps.'
+        if isinstance(substep, ExecutionStep):
+            substep._notify_is_used()
+            if not substep.HasNets() and not substep.HasSubsteps():
+                return
+            for net in substep.Nets():
+                _add_net_to_dict(self._net_dict, net)
+            self._substeps.append(substep)
+            proto = substep.Proto()
+        else:
+            proto = substep
+        self._step.substep.add().CopyFrom(proto)
+
+    def SetConcurrentSubsteps(self, concurrent_substeps):
+        self._assert_can_mutate()
+        assert not self.HasNets(), 'Cannot have both network and substeps.'
+        self._step.concurrent_substeps = concurrent_substeps
 
     def AddNet(self, net):
-        self._step.network.add(str(net))
+        self._assert_can_mutate()
+        assert not self.HasSubsteps(), 'Cannot have both network and substeps.'
+        assert isinstance(net, Net)
+        _add_net_to_dict(self._net_dict, net)
+        self._step.network.extend([get_net_name(net)])
 
 
 class Plan(object):
     def __init__(self, name):
         self._plan = caffe2_pb2.PlanDef()
         self._plan.name = name
+        self._net_dict = OrderedDict()
 
     def __str__(self):
         return self._plan.name
@@ -661,7 +1089,75 @@ class Plan(object):
 
     def AddNets(self, nets):
         for net in nets:
-            self._plan.network.add().CopyFrom(net.Proto())
+            if _add_net_to_dict(self._net_dict, net):
+                assert isinstance(net, Net)
+                self._plan.network.add().CopyFrom(net.Proto())
+
+    def Nets(self):
+        return self._net_dict.values()
 
     def AddStep(self, step):
+        assert isinstance(step, ExecutionStep)
+        step._notify_is_used()
+        if not step.HasNets() and not step.HasSubsteps():
+            return
         self._plan.execution_step.add().CopyFrom(step.Proto())
+        self.AddNets(step.Nets())
+
+
+def execution_step(default_name,
+                   steps_or_nets,
+                   criteria=None,
+                   num_iter=None,
+                   report_net=None,
+                   report_interval=None,
+                   concurrent_substeps=None):
+    """
+    Helper for creating an ExecutionStep.
+    - steps_or_nets can be:
+      - None
+      - Net
+      - ExecutionStep
+      - list<Net>
+      - list<ExecutionStep>
+    - criteria is either None or a Net
+    - if no criteria or num_iter is provided, defaults to num_iter=1
+    """
+    assert criteria is None or isinstance(criteria, Net)
+    assert criteria is None or num_iter is None, (
+        'Cannot set both criteria and num_iter.')
+    if criteria is None and num_iter is None:
+        num_iter = 1
+
+    def set_criteria(step):
+        if criteria is not None:
+            step.SetCriteriaNet(criteria)
+        else:
+            step.SetIter(num_iter)
+        if concurrent_substeps is not None:
+            step.SetConcurrentSubsteps(concurrent_substeps)
+        if report_net is not None:
+            assert report_interval is not None
+            step.SetReportNet(report_net, report_interval)
+        return step
+
+    if not steps_or_nets:
+        return ExecutionStep(default_name)
+    if isinstance(steps_or_nets, ExecutionStep):
+        return set_criteria(steps_or_nets)
+    elif isinstance(steps_or_nets, Net):
+        step = set_criteria(ExecutionStep(default_name))
+        step.AddNet(steps_or_nets)
+        return step
+    elif isinstance(steps_or_nets, list):
+        if isinstance(steps_or_nets[0], Net):
+            step = set_criteria(ExecutionStep(default_name))
+            map(step.AddNet, steps_or_nets)
+            return step
+        elif isinstance(steps_or_nets[0], ExecutionStep):
+            step = set_criteria(ExecutionStep(default_name))
+            map(step.AddSubstep, steps_or_nets)
+            return step
+    else:
+        raise ValueError(
+            'steps_or_nets must be a step, a net, or a list of nets or steps.')

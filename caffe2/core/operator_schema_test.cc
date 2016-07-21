@@ -7,11 +7,15 @@
 namespace caffe2 {
 
 OPERATOR_SCHEMA(OpSchemaTestOp)
-  .NumInputs(1).NumOutputs(1);
+  .NumInputs(1).NumOutputs(1)
+  .SetDoc(R"DOC(Test Documentation)DOC")
+  .Input(0, "in0", "dummy input.")
+  .Output(0, "out0", "dummy output.");
 
 TEST(OperatorSchemaTest, BasicSchema) {
   const OpSchema* schema = OpSchemaRegistry::Schema("OpSchemaTestOp");
   EXPECT_TRUE(schema != nullptr);
+  EXPECT_TRUE(schema->doc() != nullptr);
   OperatorDef def1 = CreateOperatorDef(
       "OpSchemaTestOp", "",
       vector<string>{"in"}, vector<string>{"out"});
@@ -44,6 +48,29 @@ TEST(OperatorSchemaTest, SpecifiedInputOutput) {
   OperatorDef def3 = CreateOperatorDef(
       "OpSchemaSpecifiedInputOutputOp", "",
       vector<string>{"in1", "in2"}, vector<string>{"out1", "out2"});
+  EXPECT_FALSE(schema->Verify(def3));
+}
+
+OPERATOR_SCHEMA(OpSchemaInputOutputRelationOp)
+    .NumInputsOutputs([](int in, int out) {
+      return out == in || out == in * 2;
+    });
+
+TEST(OperatorSchemaTest, InputOutputRelation) {
+  const OpSchema* schema
+      = OpSchemaRegistry::Schema("OpSchemaInputOutputRelationOp");
+  EXPECT_TRUE(schema != nullptr);
+  OperatorDef def1 = CreateOperatorDef(
+      "OpSchemaInputOutputRelationOp", "",
+      vector<string>{"in"}, vector<string>{"out"});
+  EXPECT_TRUE(schema->Verify(def1));
+  OperatorDef def2 = CreateOperatorDef(
+      "OpSchemaInputOutputRelationOp", "",
+      vector<string>{"in"}, vector<string>{"out1", "out2"});
+  EXPECT_TRUE(schema->Verify(def2));
+  OperatorDef def3 = CreateOperatorDef(
+      "OpSchemaInputOutputRelationOp", "",
+      vector<string>{"in1", "in2", "in3"}, vector<string>{"out1", "out2"});
   EXPECT_FALSE(schema->Verify(def3));
 }
 

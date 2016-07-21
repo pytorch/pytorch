@@ -14,7 +14,7 @@ static void AddConstInput(const vector<TIndex>& shape, const float value,
   CPUContext context(option);
   Blob* blob = ws->CreateBlob(name);
   auto* tensor = blob->GetMutable<TensorCPU>();
-  tensor->Reshape(shape);
+  tensor->Resize(shape);
   math::Set<float, CPUContext>(tensor->size(), value,
                                tensor->mutable_data<float>(),
                                &context);
@@ -41,8 +41,8 @@ TEST(FullyConnectedTest, Test) {
   auto& Y = Yblob->Get<TensorCPU>();
   EXPECT_EQ(Y.size(), 5 * 6);
   for (int i = 0; i < Y.size(); ++i) {
-    CAFFE_CHECK_LT(Y.data<float>()[i], 10.11);
-    CAFFE_CHECK_GT(Y.data<float>()[i], 10.09);
+    CHECK_LT(Y.data<float>()[i], 10.11);
+    CHECK_GT(Y.data<float>()[i], 10.09);
   }
 }
 

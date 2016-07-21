@@ -33,7 +33,6 @@ class ClipOp final : public Operator<Context> {
  protected:
   T min_;
   T max_;
-  DISABLE_COPY_AND_ASSIGN(ClipOp);
 };
 
 template <typename T, class Context>
@@ -60,8 +59,6 @@ class ClipGradientOp final : public Operator<Context> {
   T min_;
   T max_;
   // Input: Y, dY; Output: dX
-  INPUT_OUTPUT_STATS(2, 2, 1, 1);
-  DISABLE_COPY_AND_ASSIGN(ClipGradientOp);
 };
 
 }  // namespace caffe2

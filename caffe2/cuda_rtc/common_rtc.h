@@ -8,7 +8,7 @@
   do {                                                                         \
     nvrtcResult result = condition;                                            \
     if (result != NVRTC_SUCCESS) {                                             \
-      CAFFE_LOG_FATAL << "Error at: " << __FILE__ << ":" << __LINE__ << ": "   \
+      LOG(FATAL) << "Error at: " << __FILE__ << ":" << __LINE__ << ": "   \
                       << nvrtcGetErrorString(result);                          \
     }                                                                          \
   } while(0)
@@ -32,8 +32,8 @@ class CudaRTCFunction {
   void Compile(Args... args) {
     string src = static_cast<Derived*>(this)->GetSource(args...);
     string name = static_cast<Derived*>(this)->KernelName(args...);
-    CAFFE_VLOG(1) << "function name: " << name;
-    CAFFE_VLOG(1) << "function src:\n" << src;
+    VLOG(1) << "function name: " << name;
+    VLOG(1) << "function src:\n" << src;
     // Actually do the compiling.
     nvrtcProgram prog;
     NVRTC_CHECK(nvrtcCreateProgram(
@@ -50,7 +50,7 @@ class CudaRTCFunction {
       NVRTC_CHECK(nvrtcGetProgramLogSize(prog, &log_size));
       char nvrtc_log[log_size];
       NVRTC_CHECK(nvrtcGetProgramLog(prog, nvrtc_log));
-      CAFFE_LOG_FATAL << "Compilation failure for nvrtc("
+      LOG(FATAL) << "Compilation failure for nvrtc("
                       << nvrtcGetErrorString(compile_result)
                       << "): \n" << nvrtc_log;
     }
@@ -73,7 +73,7 @@ class CudaRTCFunction {
               unsigned int bx, unsigned int by, unsigned int bz,
               unsigned int shared_mem, cudaStream_t stream,
               Args... args) {
-    CAFFE_CHECK(module_loaded_)
+    CHECK(module_loaded_)
         << "Cannot call Launch before a module is loaded.";
     void * args_voidp[] = {&args...};
     CUDA_DRIVERAPI_CHECK(cuLaunchKernel(
@@ -85,7 +85,7 @@ class CudaRTCFunction {
                 unsigned int bx, unsigned int by, unsigned int bz,
                 unsigned int shared_mem, cudaStream_t stream,
                 void** extra) {
-    CAFFE_CHECK(module_loaded_)
+    CHECK(module_loaded_)
         << "Cannot call Launch before a module is loaded.";
     CUDA_DRIVERAPI_CHECK(cuLaunchKernel(
         kernel_, gx, gy, gz, bx, by, bz, shared_mem, stream,

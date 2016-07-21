@@ -22,7 +22,7 @@ namespace caffe2 {
 bool ReadStringFromFile(const char* filename, string* str) {
   std::ifstream ifs(filename, std::ios::in);
   if (!ifs) {
-    CAFFE_LOG_ERROR << "File cannot be opened: " << filename
+    LOG(ERROR) << "File cannot be opened: " << filename
                     << " error: " << ifs.rdstate();
     return false;
   }
@@ -37,7 +37,7 @@ bool ReadStringFromFile(const char* filename, string* str) {
 bool WriteStringToFile(const string& str, const char* filename) {
   std::ofstream ofs(filename, std::ios::out | std::ios::trunc);
   if (!ofs.is_open()) {
-    CAFFE_LOG_ERROR << "File cannot be created: " << filename
+    LOG(ERROR) << "File cannot be created: " << filename
                     << " error: " << ofs.rdstate();
     return false;
   }
@@ -84,7 +84,7 @@ bool ReadProtoFromBinaryFile(const char* filename, MessageLite* proto) {
 }
 
 void WriteProtoToBinaryFile(const MessageLite& proto, const char* filename) {
-  CAFFE_LOG_FATAL << "Not implemented yet.";
+  LOG(FATAL) << "Not implemented yet.";
 }
 
 #else  // CAFFE2_USE_LITE_PROTO
@@ -100,7 +100,7 @@ using ::google::protobuf::io::CodedOutputStream;
 
 bool ReadProtoFromTextFile(const char* filename, Message* proto) {
   int fd = open(filename, O_RDONLY);
-  CAFFE_CHECK_NE(fd, -1) << "File not found: " << filename;
+  CHECK_NE(fd, -1) << "File not found: " << filename;
   FileInputStream* input = new FileInputStream(fd);
   bool success = google::protobuf::TextFormat::Parse(input, proto);
   delete input;
@@ -111,14 +111,14 @@ bool ReadProtoFromTextFile(const char* filename, Message* proto) {
 void WriteProtoToTextFile(const Message& proto, const char* filename) {
   int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
   FileOutputStream* output = new FileOutputStream(fd);
-  CAFFE_CHECK(google::protobuf::TextFormat::Print(proto, output));
+  CHECK(google::protobuf::TextFormat::Print(proto, output));
   delete output;
   close(fd);
 }
 
 bool ReadProtoFromBinaryFile(const char* filename, MessageLite* proto) {
   int fd = open(filename, O_RDONLY);
-  CAFFE_CHECK_NE(fd, -1) << "File not found: " << filename;
+  CHECK_NE(fd, -1) << "File not found: " << filename;
   std::unique_ptr<ZeroCopyInputStream> raw_input(new FileInputStream(fd));
   std::unique_ptr<CodedInputStream> coded_input(
       new CodedInputStream(raw_input.get()));
@@ -133,12 +133,12 @@ bool ReadProtoFromBinaryFile(const char* filename, MessageLite* proto) {
 
 void WriteProtoToBinaryFile(const MessageLite& proto, const char* filename) {
   int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-  CAFFE_CHECK_NE(fd, -1) << "File cannot be created: " << filename
+  CHECK_NE(fd, -1) << "File cannot be created: " << filename
                    << " error number: " << errno;
   std::unique_ptr<ZeroCopyOutputStream> raw_output(new FileOutputStream(fd));
   std::unique_ptr<CodedOutputStream> coded_output(
       new CodedOutputStream(raw_output.get()));
-  CAFFE_CHECK(proto.SerializeToCodedStream(coded_output.get()));
+  CHECK(proto.SerializeToCodedStream(coded_output.get()));
   coded_output.reset();
   raw_output.reset();
   close(fd);
@@ -156,8 +156,10 @@ Argument MakeArgument(const string& name, const T& value) {                    \
   return arg;                                                                  \
 }
 
+CAFFE2_MAKE_SINGULAR_ARGUMENT(bool, i)
 CAFFE2_MAKE_SINGULAR_ARGUMENT(float, f)
 CAFFE2_MAKE_SINGULAR_ARGUMENT(int, i)
+CAFFE2_MAKE_SINGULAR_ARGUMENT(int64_t, i)
 CAFFE2_MAKE_SINGULAR_ARGUMENT(string, s)
 #undef CAFFE2_MAKE_SINGULAR_ARGUMENT
 
@@ -183,6 +185,7 @@ Argument MakeArgument(const string& name, const vector<T>& value) {            \
 
 CAFFE2_MAKE_REPEATED_ARGUMENT(float, floats)
 CAFFE2_MAKE_REPEATED_ARGUMENT(int, ints)
+CAFFE2_MAKE_REPEATED_ARGUMENT(int64_t, ints)
 CAFFE2_MAKE_REPEATED_ARGUMENT(string, strings)
 #undef CAFFE2_MAKE_REPEATED_ARGUMENT
 
@@ -192,7 +195,7 @@ const Argument& GetArgument(const OperatorDef& def, const string& name) {
       return arg;
     }
   }
-  CAFFE_LOG_FATAL << "Argument named " << name << " does not exist.";
+  LOG(FATAL) << "Argument named " << name << " does not exist.";
   // To suppress compiler warning of return values. This will never execute.
   static Argument _dummy_arg_to_suppress_compiler_warning;
   return _dummy_arg_to_suppress_compiler_warning;

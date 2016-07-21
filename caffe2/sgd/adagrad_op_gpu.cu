@@ -11,11 +11,11 @@ __global__ void AdagradUpdate(
     float* ng,
     float* nh,
     float epsilon,
-    float lr) {
+    const float* lr) {
   CUDA_1D_KERNEL_LOOP(i, N) {
     float gi = g[i];
     float hi = nh[i] = h[i] + gi * gi;
-    ng[i] = lr * gi / (sqrt(hi) + epsilon);
+    ng[i] = lr[0] * gi / (sqrt(hi) + epsilon);
   }
 }
 
@@ -27,7 +27,7 @@ void adagrad_update<CUDAContext>(
     float* ng,
     float* nh,
     float epsilon,
-    float lr,
+    const float* lr,
     CUDAContext* context) {
   AdagradUpdate<<<
       CAFFE_GET_BLOCKS(N),

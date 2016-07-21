@@ -7,6 +7,7 @@
 
 #include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/core/logging.h"
+#include "caffe2/utils/math.h"
 
 namespace caffe2 {
 
@@ -25,8 +26,9 @@ struct DefaultCPUAllocator final : CPUAllocator {
   DefaultCPUAllocator() {}
   ~DefaultCPUAllocator() {}
   void* New(size_t nbytes) override {
-    void* data;
-    CAFFE_CHECK_EQ(posix_memalign(&data, gCaffe2Alignment, nbytes), 0);
+    void* data = nullptr;
+    CHECK_EQ(posix_memalign(&data, gCaffe2Alignment, nbytes), 0);
+    memset(data, 0, nbytes);
     return data;
   }
   void Delete(void* data) override { free(data); }
@@ -42,7 +44,7 @@ void SetCPUAllocator(CPUAllocator* alloc);
  * The CPU Context, representing the bare minimum of what a Context class in
  * Caffe2 should implement.
  *
- * See opeartor.h, especially Operator<Context>, for how Context are used in
+ * See operator.h, especially Operator<Context>, for how Context are used in
  * actual operator implementations that are associated with specific devices.
  * In general, the Context class is passed in as a template argument, and
  * the operator can use the functions defined in the context to execute whatever
@@ -61,25 +63,28 @@ void SetCPUAllocator(CPUAllocator* alloc);
  *     the cuda kernel calls.
  * - static void* New(size_t nbytes): allocates memory.
  * - static void Delete(void* data): deletes memory.
- * - template <class SrcContext, class DstContext> void Memcpy(...): does cross
- *     context memory copy.
+ * - template <class SrcContext, class DstContext> void CopyBytes(...): does
+ *     cross context memory copy.
  * - template <typename T, class SrcContext, class DstContext> void Copy(...):
- *     usually a simple wrapper around the above Memcpy function.
+ *     usually a simple wrapper around the above CopyBytes function.
  *
  * We intentionally did not create a base class for the various possible Context
  * classes there might be, since they are intended to be specified during
- * compile time rather than via polymorphism.
+ * compile time using templates rather than via polymorphism. You should also
+ * not have classes derived from existing context classes.
  */
-class CPUContext {
+class CPUContext final {
  public:
-  CPUContext() {}
+  CPUContext() : random_seed_(math::randomNumberSeed()) {}
   explicit CPUContext(const DeviceOption& option)
       : random_seed_(
-          option.has_random_seed() ? option.random_seed() : time(nullptr)) {
-    CAFFE_CHECK_EQ(option.device_type(), CPU);
+            option.has_random_seed() ? option.random_seed()
+                                     : math::randomNumberSeed()) {
+    CHECK_EQ(option.device_type(), CPU);
   }
 
-  virtual ~CPUContext() {}
+  ~CPUContext() {}
+
   inline void SwitchToDevice() {}
   inline bool FinishDeviceComputation() { return true; }
 
@@ -97,11 +102,11 @@ class CPUContext {
 
   // Two copy functions that deals with cross-device copies.
   template <class SrcContext, class DstContext>
-  inline void Memcpy(size_t nbytes, const void* src, void* dst);
+  inline void CopyBytes(size_t nbytes, const void* src, void* dst);
   template <typename T, class SrcContext, class DstContext>
-  inline void Copy(int n, const T* src, T* dst) {
+  inline void Copy(size_t n, const T* src, T* dst) {
     if (std::is_fundamental<T>::value) {
-      Memcpy<SrcContext, DstContext>(n * sizeof(T),
+      CopyBytes<SrcContext, DstContext>(n * sizeof(T),
                                      static_cast<const void*>(src),
                                      static_cast<void*>(dst));
     } else {
@@ -113,12 +118,12 @@ class CPUContext {
 
  protected:
   // TODO(jiayq): instead of hard-coding a generator, make it more flexible.
-  unsigned int random_seed_;
+  int random_seed_{1701};
   std::unique_ptr<std::mt19937> random_generator_;
 };
 
 template<>
-inline void CPUContext::Memcpy<CPUContext, CPUContext>(
+inline void CPUContext::CopyBytes<CPUContext, CPUContext>(
     size_t nbytes, const void* src, void* dst) {
   memcpy(dst, src, nbytes);
 }

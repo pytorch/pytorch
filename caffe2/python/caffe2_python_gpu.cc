@@ -20,15 +20,8 @@ extern "C" {
 
 // Here are functions that are purely GPU-based functions to be filled.
 
-PyObject* NumberOfGPUs(PyObject* self, PyObject* args) {
-  int num_devices = 0;
-  auto err = cudaGetDeviceCount(&num_devices);
-  if (err == cudaErrorNoDevice || err == cudaErrorInsufficientDriver) {
-    return Py_BuildValue("i", 0);
-  } else if (err != cudaSuccess) {
-    PyErr_SetString(PyExc_RuntimeError, "Runtime CUDA error.");
-    return nullptr;
-  }
+PyObject* NumCudaDevices(PyObject* self, PyObject* args) {
+  int num_devices = caffe2::NumCudaDevices();
   return Py_BuildValue("i", num_devices);
 }
 
@@ -77,7 +70,7 @@ static PyMethodDef* GetCaffe2PythonGPUMethods() {
     // TODO(Yangqing): write the methods string.
     // Note(Yangqing): For any function that we are going to override in the
     // python file, we prepend "cc_" here.
-    _PYNAME(NumberOfGPUs),
+    _PYNAME(NumCudaDevices),
     _PYNAME(SetDefaultGPUID),
     _PYNAME(GetDefaultGPUID),
     _PYNAME(GetCudaPeerAccessPattern),

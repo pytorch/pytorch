@@ -75,7 +75,7 @@ class ElementwiseRTCOp final : public Operator<CUDAContext> {
       : Operator<CUDAContext>(operator_def, ws) {
     const string src = OperatorBase::GetSingleArgument<string>(
         "rtc_src", "");
-    CAFFE_CHECK(src.size()) << "Op should have a non-zero source code size.";
+    CHECK(src.size()) << "Op should have a non-zero source code size.";
     func_.Compile(InputSize(), OutputSize(), src);
   }
   ~ElementwiseRTCOp() {}
@@ -85,7 +85,7 @@ class ElementwiseRTCOp final : public Operator<CUDAContext> {
                   "The argbuffer relies on the assumption that void* and "
                   "size_t have the same size.");
     size_t argBuffer[InputSize() + OutputSize() + 1];
-    CAFFE_CHECK(Input(0).size() < std::numeric_limits<int>::max())
+    CHECK(Input(0).size() < std::numeric_limits<int>::max())
         << "The kernel function currently only supports int index.";
     argBuffer[0] = Input(0).size();
     void** ptr_buffer = reinterpret_cast<void**>(argBuffer + 1);
@@ -93,7 +93,7 @@ class ElementwiseRTCOp final : public Operator<CUDAContext> {
       ptr_buffer[i] = const_cast<float*>(Input(i).data<float>());
     }
     for (int i = 0; i < OutputSize(); ++i) {
-      Output(i)->ReshapeLike(Input(0));
+      Output(i)->ResizeLike(Input(0));
       ptr_buffer[i + InputSize()] = Output(i)->mutable_data<float>();
     }
     size_t argBufferSize = sizeof(argBuffer);
@@ -110,7 +110,6 @@ class ElementwiseRTCOp final : public Operator<CUDAContext> {
 
  private:
   ElementwiseRTCFunction func_;
-  DISABLE_COPY_AND_ASSIGN(ElementwiseRTCOp);
 };
 
 namespace {

@@ -12,9 +12,11 @@ namespace db {
 
 class RocksDBCursor : public Cursor {
  public:
-  explicit RocksDBCursor(rocksdb::Iterator* iter)
-    : iter_(iter) { SeekToFirst(); }
-  ~RocksDBCursor() { delete iter_; }
+  explicit RocksDBCursor(rocksdb::DB* db)
+      : iter_(db->NewIterator(rocksdb::ReadOptions())) {
+    SeekToFirst();
+  }
+  ~RocksDBCursor() {}
   void Seek(const string& key) override { iter_->Seek(key); }
   bool SupportsSeek() override { return true; }
   void SeekToFirst() override { iter_->SeekToFirst(); }
@@ -24,13 +26,13 @@ class RocksDBCursor : public Cursor {
   bool Valid() override { return iter_->Valid(); }
 
  private:
-  rocksdb::Iterator* iter_;
+  std::unique_ptr<rocksdb::Iterator> iter_;
 };
 
 class RocksDBTransaction : public Transaction {
  public:
   explicit RocksDBTransaction(rocksdb::DB* db) : db_(db) {
-    CAFFE_CHECK_NOTNULL(db_);
+    CHECK_NOTNULL(db_);
     batch_.reset(new rocksdb::WriteBatch());
   }
   ~RocksDBTransaction() { Commit(); }
@@ -40,7 +42,7 @@ class RocksDBTransaction : public Transaction {
   void Commit() override {
     rocksdb::Status status = db_->Write(rocksdb::WriteOptions(), batch_.get());
     batch_.reset(new rocksdb::WriteBatch());
-    CAFFE_CHECK(status.ok()) << "Failed to write batch to rocksdb "
+    CHECK(status.ok()) << "Failed to write batch to rocksdb "
                        << std::endl << status.ToString();
   }
 
@@ -65,18 +67,22 @@ class RocksDB : public DB {
     rocksdb::DB* db_temp;
     rocksdb::Status status = rocksdb::DB::Open(
       rocksdb_options, source, &db_temp);
-    CAFFE_CHECK(status.ok()) << "Failed to open rocksdb " << source
-                       << std::endl << status.ToString();
+    CAFFE_ENFORCE(
+        status.ok(),
+        "Failed to open rocksdb ",
+        source,
+        "\n",
+        status.ToString());
     db_.reset(db_temp);
-    CAFFE_LOG_INFO << "Opened rocksdb " << source;
+    VLOG(1) << "Opened rocksdb " << source;
   }
 
   void Close() override { db_.reset(); }
-  Cursor* NewCursor() override {
-    return new RocksDBCursor(db_->NewIterator(rocksdb::ReadOptions()));
+  unique_ptr<Cursor> NewCursor() override {
+    return std::make_unique<RocksDBCursor>(db_.get());
   }
-  Transaction* NewTransaction() override {
-    return new RocksDBTransaction(db_.get());
+  unique_ptr<Transaction> NewTransaction() override {
+    return std::make_unique<RocksDBTransaction>(db_.get());
   }
 
  private:

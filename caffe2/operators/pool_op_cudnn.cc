@@ -19,7 +19,7 @@ class CuDNNPoolOp : public ConvPoolOpBase<CUDAContext> {
     } else if (def().type().substr(0, 11) == "AveragePool") {
       mode_ = CUDNN_POOLING_AVERAGE_COUNT_EXCLUDE_PADDING;
     } else {
-      CAFFE_LOG_FATAL << "Unsupported pooling method: " << def().type();
+      LOG(FATAL) << "Unsupported pooling method: " << def().type();
     }
   }
 
@@ -41,13 +41,13 @@ class CuDNNPoolOp : public ConvPoolOpBase<CUDAContext> {
       N = X.dim32(0); C = X.dim32(1); H = X.dim32(2); W = X.dim32(3);
       break;
     default:
-      CAFFE_LOG_FATAL << "Unknown storage order: " << order_;
+      LOG(FATAL) << "Unknown storage order: " << order_;
     }
     ConvPoolOpBase::SetOutputSize(X, Y, C);
 
     if (cudnn_input_dims_ != X.dims()) {
       // Dimensions changed; we will need to re-initialize things.
-      CAFFE_VLOG(1) << "Changing the cudnn descriptor configurations.";
+      VLOG(1) << "Changing the cudnn descriptor configurations.";
       cudnn_input_dims_ = X.dims();
       CUDNN_CHECK(cudnnSetTensor4dDescriptor(
           bottom_desc_, GetCudnnTensorFormat(order_),
@@ -58,7 +58,7 @@ class CuDNNPoolOp : public ConvPoolOpBase<CUDAContext> {
           order_ == StorageOrder::NCHW ? Y->dim32(2) : Y->dim32(1),
           order_ == StorageOrder::NCHW ? Y->dim32(3) : Y->dim32(2)));
       if (pad_t_ != pad_l_ || pad_l_ != pad_r_) {
-        CAFFE_LOG_FATAL << "Cudnn pooling only supports even padding on both sides.";
+        LOG(FATAL) << "Cudnn pooling only supports even padding on both sides.";
       }
       CUDNN_CHECK(cudnnSetPooling2dDescriptor(
           pooling_desc_,
@@ -73,7 +73,7 @@ class CuDNNPoolOp : public ConvPoolOpBase<CUDAContext> {
     }
     // Carry out the pooling computation.
     CUDNN_CHECK(cudnnPoolingForward(
-        cudnn_wrapper_.cudnn_handle(), pooling_desc_,
+        cudnn_wrapper_.inline_cudnn_handle(), pooling_desc_,
         cudnnTypeWrapper<T>::kOne(), bottom_desc_, X.template data<T>(),
         cudnnTypeWrapper<T>::kZero(), top_desc_,
         Y->template mutable_data<T>()));
@@ -88,12 +88,6 @@ class CuDNNPoolOp : public ConvPoolOpBase<CUDAContext> {
   cudnnTensorDescriptor_t top_desc_;
   cudnnPoolingDescriptor_t pooling_desc_;
   cudnnPoolingMode_t mode_;
-
-  // Input: X
-  // Output: Y
-  INPUT_OUTPUT_STATS(1, 1, 1, 1);
-
-  DISABLE_COPY_AND_ASSIGN(CuDNNPoolOp);
 };
 
 template <typename T>
@@ -111,7 +105,7 @@ class CuDNNPoolGradientOp : public ConvPoolOpBase<CUDAContext> {
     } else if (def().type() == "AveragePoolGradient") {
       mode_ = CUDNN_POOLING_AVERAGE_COUNT_EXCLUDE_PADDING;
     } else {
-      CAFFE_LOG_FATAL << "Unsupported pooling method: " << def().type();
+      LOG(FATAL) << "Unsupported pooling method: " << def().type();
     }
   }
 
@@ -126,7 +120,7 @@ class CuDNNPoolGradientOp : public ConvPoolOpBase<CUDAContext> {
     auto& Y = Input(1);
     auto& dY = Input(2);
     auto* dX = Output(0);
-    dX->ReshapeLike(X);
+    dX->ResizeLike(X);
     int N = 0, C = 0, H = 0, W = 0;
     switch (order_) {
     case StorageOrder::NHWC:
@@ -136,13 +130,13 @@ class CuDNNPoolGradientOp : public ConvPoolOpBase<CUDAContext> {
       N = X.dim32(0); C = X.dim32(1); H = X.dim32(2); W = X.dim32(3);
       break;
     default:
-      CAFFE_LOG_FATAL << "Unknown storage order: " << order_;
+      LOG(FATAL) << "Unknown storage order: " << order_;
     }
     ConvPoolOpBase<CUDAContext>::ComputePads(H, W);
 
     if (cudnn_input_dims_ != X.dims()) {
       // Dimensions changed; we will need to re-initialize things.
-      CAFFE_VLOG(1) << "Changing the cudnn descriptor configurations.";
+      VLOG(1) << "Changing the cudnn descriptor configurations.";
       cudnn_input_dims_ = X.dims();
       CUDNN_CHECK(cudnnSetTensor4dDescriptor(
           bottom_desc_, GetCudnnTensorFormat(order_),
@@ -153,7 +147,7 @@ class CuDNNPoolGradientOp : public ConvPoolOpBase<CUDAContext> {
           order_ == StorageOrder::NCHW ? Y.dim32(2) : Y.dim32(1),
           order_ == StorageOrder::NCHW ? Y.dim32(3) : Y.dim32(2)));
       if (pad_t_ != pad_l_ || pad_l_ != pad_r_) {
-        CAFFE_LOG_FATAL << "Cudnn pooling only supports even padding on both sides.";
+        LOG(FATAL) << "Cudnn pooling only supports even padding on both sides.";
       }
       CUDNN_CHECK(cudnnSetPooling2dDescriptor(
           pooling_desc_,
@@ -168,7 +162,7 @@ class CuDNNPoolGradientOp : public ConvPoolOpBase<CUDAContext> {
     }
     // Carry out the pooling computation.
     CUDNN_CHECK(cudnnPoolingBackward(
-        cudnn_wrapper_.cudnn_handle(), pooling_desc_,
+        cudnn_wrapper_.inline_cudnn_handle(), pooling_desc_,
         cudnnTypeWrapper<T>::kOne(), top_desc_,
         Y.template data<T>(), top_desc_, dY.template data<T>(),
         bottom_desc_, X.template data<T>(), cudnnTypeWrapper<T>::kZero(),
@@ -187,8 +181,7 @@ class CuDNNPoolGradientOp : public ConvPoolOpBase<CUDAContext> {
 
   // Input: X, Y, dY
   // Output: dX
-  INPUT_OUTPUT_STATS(3, 3, 1, 1);
-  DISABLE_COPY_AND_ASSIGN(CuDNNPoolGradientOp);
+  INPUT_TAGS(IN, OUT, OUT_GRAD);
 };
 
 namespace {
@@ -197,12 +190,10 @@ REGISTER_CUDNN_OPERATOR(AveragePoolGradient, CuDNNPoolGradientOp<float>);
 REGISTER_CUDNN_OPERATOR(MaxPool, CuDNNPoolOp<float>);
 REGISTER_CUDNN_OPERATOR(MaxPoolGradient, CuDNNPoolGradientOp<float>);
 
-#if CUDNN_VERSION >= 3000
 REGISTER_CUDNN_OPERATOR(AveragePoolFp16, CuDNNPoolOp<float16>);
 REGISTER_CUDNN_OPERATOR(AveragePoolFp16Gradient, CuDNNPoolGradientOp<float16>);
 REGISTER_CUDNN_OPERATOR(MaxPoolFp16, CuDNNPoolOp<float16>);
 REGISTER_CUDNN_OPERATOR(MaxPoolFp16Gradient, CuDNNPoolGradientOp<float16>);
-
 
 class GetPoolGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
@@ -215,8 +206,6 @@ class GetPoolGradient : public GradientMakerBase {
 };
 REGISTER_GRADIENT(AveragePoolFp16, GetPoolGradient);
 REGISTER_GRADIENT(MaxPoolFp16, GetPoolGradient);
-#endif  // CUDNN_VERSION >= 3000
-
 
 }  // namespace
 }  // namespace caffe2

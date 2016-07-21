@@ -4,6 +4,7 @@
 #include <sstream>
 
 #include "caffe2/core/init.h"
+#include "caffe2/core/logging.h"
 
 namespace caffe2 {
 
@@ -11,16 +12,26 @@ int NumCudaDevices() {
   static int count = -1;
   if (count < 0) {
     auto err = cudaGetDeviceCount(&count);
-    if (err == cudaErrorNoDevice || err == cudaErrorInsufficientDriver) {
-      count = 0;
-    } else {
-      // cudaGetDeviceCount() should only return the above two errors. If
-      // there are other kinds of errors, maybe you have called some other
-      // cuda functions before HasCudaGPU().
-      CAFFE_CHECK(err == cudaSuccess)
-          << "Unexpected error from cudaGetDeviceCount(). Did you run some "
-             "cuda functions before calling NumCudaDevices() that might "
-             "have already set an error?";
+    switch (err) {
+      case cudaSuccess:
+        // Everything is good.
+        break;
+      case cudaErrorNoDevice:
+        count = 0;
+        break;
+      case cudaErrorInsufficientDriver:
+        LOG(WARNING) << "Insufficient cuda driver. Cannot use cuda.";
+        count = 0;
+        break;
+      case cudaErrorInitializationError:
+        LOG(WARNING) << "Cuda driver initialization failed, you might not "
+                        "have a cuda gpu.";
+        count = 0;
+        break;
+      default:
+        LOG(FATAL) << "Unexpected error from cudaGetDeviceCount(). Did you run "
+                      "some cuda functions before calling NumCudaDevices() "
+                      "that might have already set an error?";
     }
   }
   return count;
@@ -31,7 +42,7 @@ int gDefaultGPUID = 0;
 }  // namespace
 
 void SetDefaultGPUID(const int deviceid) {
-  CAFFE_CHECK_LT(deviceid, NumCudaDevices())
+  CHECK_LT(deviceid, NumCudaDevices())
       << "The default gpu id should be smaller than the number of gpus "
          "on this machine: " << deviceid << " vs " << NumCudaDevices();
   gDefaultGPUID = deviceid;
@@ -52,7 +63,7 @@ int GetGPUIDForPointer(const void* ptr) {
 
 const cudaDeviceProp& GetDeviceProperty(const int deviceid) {
   static vector<cudaDeviceProp> props;
-  CAFFE_CHECK_LT(deviceid, NumCudaDevices())
+  CHECK_LT(deviceid, NumCudaDevices())
       << "The gpu id should be smaller than the number of gpus "
          "on this machine: " << deviceid << " vs " << NumCudaDevices();
   if (props.size() == 0) {
@@ -95,7 +106,7 @@ void DeviceQuery(const int device) {
      << std::endl;
   ss << "Kernel execution timeout:      "
      << (prop.kernelExecTimeoutEnabled ? "Yes" : "No") << std::endl;
-  CAFFE_LOG_INFO << ss.str();
+  LOG(INFO) << ss.str();
   return;
 }
 
@@ -186,18 +197,18 @@ const char* curandGetErrorString(curandStatus_t error) {
 bool Caffe2InitializeCuda(int*, char***) {
   static bool g_initialization_function_called = false;
   if (g_initialization_function_called == true) {
-    CAFFE_VLOG(1) << "Initialization already called. Ignoring duplicated calls.";
+    VLOG(1) << "Initialization already called. Ignoring duplicated calls.";
     return true;
   }
   g_initialization_function_called = true;
   // If the current run does not have any cuda devices, do nothing.
   if (!HasCudaGPU()) {
-    CAFFE_VLOG(1) << "No cuda gpu present. Skipping.";
+    VLOG(1) << "No cuda gpu present. Skipping.";
     return true;
   }
   // Check if the number of GPUs matches the expected compile-time max number
   // of GPUs.
-  CAFFE_CHECK_LE(NumCudaDevices(), CAFFE2_COMPILE_TIME_MAX_GPUS)
+  CHECK_LE(NumCudaDevices(), CAFFE2_COMPILE_TIME_MAX_GPUS)
       << "Number of CUDA devices on the machine is larger than the compiled "
          "max number of gpus expected ("
       << CAFFE2_COMPILE_TIME_MAX_GPUS
@@ -210,7 +221,7 @@ bool Caffe2InitializeCuda(int*, char***) {
   for (int i = 0; i < NumCudaDevices(); ++i) {
     auto err = cudaSetDevice(i);
     if (err != cudaSuccess) {
-      CAFFE_LOG_WARNING
+      LOG(WARNING)
           << "Cannot use device " << i
           << "due to the following error: " << cudaGetErrorString(err);
       continue;
@@ -221,7 +232,7 @@ bool Caffe2InitializeCuda(int*, char***) {
       int can_access;
       CUDA_CHECK(cudaDeviceCanAccessPeer(&can_access, i, j));
       if (can_access) {
-        CAFFE_VLOG(1) << "Enabling peer access from " << i << " to " << j;
+        VLOG(1) << "Enabling peer access from " << i << " to " << j;
         // Note: just for future reference, the 0 here is not a gpu id, it is
         // a reserved flag for cudaDeviceEnablePeerAccess that should always be
         // zero currently.

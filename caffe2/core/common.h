@@ -28,40 +28,21 @@ using std::string;
 using std::unique_ptr;
 using std::vector;
 
-// Half float definition. Currently half float operators are mainly on CUDA
-// gpus.
-// The reason we do not directly use the cuda __half data type is because that
-// requires compilation with nvcc. The float16 data type should be compatible
-// with the cuda __half data type, but will allow us to refer to the data type
-// without the need of cuda.
-static_assert(sizeof(unsigned short) == 2,
-              "Short on this platform is not 16 bit.");
-typedef struct __f16 {
-  unsigned short x;
-} __attribute__((aligned(2))) float16;
-static_assert(sizeof(float16) == 2,
-              "This should always be satisfied - float16 safeguard.");
-
 // Just in order to mark things as not implemented. Do not use in final code.
-#define CAFFE_NOT_IMPLEMENTED CAFFE_LOG_FATAL << "Not Implemented."
+#define CAFFE_NOT_IMPLEMENTED LOG(FATAL) << "Not Implemented."
 
 // suppress an unused variable.
 #define UNUSED_VARIABLE __attribute__((unused))
 
 // Disable the copy and assignment operator for a class. Note that this will
 // disable the usage of the class in std containers.
-#define DISABLE_COPY_AND_ASSIGN(classname)                                     \
+#ifndef DISABLE_COPY_AND_ASSIGN
+#define DISABLE_COPY_AND_ASSIGN(classname)                              \
 private:                                                                       \
   classname(const classname&) = delete;                                        \
   classname& operator=(const classname&) = delete
+#endif
 
 }  // namespace caffe2
-
-
-namespace std {
-template<>
-struct is_fundamental<caffe2::__f16> : std::integral_constant<bool, true> {
-};
-}  // namespace std
 
 #endif  // CAFFE2_CORE_COMMON_H_

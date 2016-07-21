@@ -17,18 +17,16 @@ int main(int argc, char** argv) {
   caffe2::SetUsageMessage(
       "Inspects the GPUs on the current machine and prints out their details "
       "provided by cuda.");
-  // Set log level to CAFFE_INFO since things will be printed there.
-  caffe2::FLAGS_caffe2_log_level = CAFFE_INFO;
 
   int gpu_count;
   CUDA_CHECK(cudaGetDeviceCount(&gpu_count));
   for (int i = 0; i < gpu_count; ++i) {
-    CAFFE_LOG_INFO << "Querying device ID = " << i;
+    LOG(INFO) << "Querying device ID = " << i;
     caffe2::DeviceQuery(i);
   }
 
   vector<vector<bool> > access_pattern;
-  CAFFE_CHECK(caffe2::GetCudaPeerAccessPattern(&access_pattern));
+  CHECK(caffe2::GetCudaPeerAccessPattern(&access_pattern));
 
   std::stringstream sstream;
   // Find topology
@@ -38,7 +36,7 @@ int main(int argc, char** argv) {
     }
     sstream << std::endl;
   }
-  CAFFE_LOG_INFO << "Access pattern: " << std::endl << sstream.str();
+  LOG(INFO) << "Access pattern: " << std::endl << sstream.str();
 
   return 0;
 }

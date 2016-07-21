@@ -1,15 +1,19 @@
 from caffe2.proto import caffe2_pb2
-from caffe.proto import caffe_pb2
 from google.protobuf.message import DecodeError, Message
 from google.protobuf import text_format
 import numpy as np
+import sys
+
+
+if sys.version_info > (3,):
+    # This is python 3. We will define a few stuff that we used.
+    basestring = str
+    long = int
 
 
 def CaffeBlobToNumpyArray(blob):
-    return np.asarray(blob.data,
-                      dtype=np.float32).reshape(
-                          blob.num, blob.channels, blob.height, blob.width
-                      )
+    return (np.asarray(blob.data, dtype=np.float32)
+            .reshape(blob.num, blob.channels, blob.height, blob.width))
 
 
 def Caffe2TensorToNumpyArray(tensor):
@@ -31,19 +35,19 @@ def MakeArgument(key, value):
     argument.name = key
     if type(value) is float:
         argument.f = value
-    elif type(value) is int or type(value) is bool:
+    elif type(value) is int or type(value) is bool or type(value) is long:
         # We make a relaxation that a boolean variable will also be stored as
         # int.
         argument.i = value
-    elif type(value) is str:
+    elif isinstance(value, basestring):
         argument.s = value
     elif isinstance(value, Message):
         argument.s = value.SerializeToString()
     elif all(type(v) is float for v in value):
         argument.floats.extend(value)
-    elif all(type(v) is int for v in value):
+    elif all(any(type(v) is t for t in [int, bool, long]) for v in value):
         argument.ints.extend(value)
-    elif all(type(v) is str for v in value):
+    elif all(isinstance(v, basestring) for v in value):
         argument.strings.extend(value)
     elif all(isinstance(v, Message) for v in value):
         argument.strings.extend([v.SerializeToString() for v in value])
@@ -72,7 +76,7 @@ def TryReadProtoWithClass(cls, s):
     try:
         text_format.Parse(s, obj)
         return obj
-    except text_format.ParseError as e:
+    except text_format.ParseError:
         obj.ParseFromString(s)
         return obj
 
@@ -80,13 +84,13 @@ def TryReadProtoWithClass(cls, s):
 def GetContentFromProto(obj, function_map):
     """Gets a specific field from a protocol buffer that matches the given class
     """
-    for cls, func in function_map.iteritems():
+    for cls, func in function_map.items():
         if type(obj) is cls:
             return func(obj)
 
 
 def GetContentFromProtoString(s, function_map):
-    for cls, func in function_map.iteritems():
+    for cls, func in function_map.items():
         try:
             obj = TryReadProtoWithClass(cls, s)
             return func(obj)

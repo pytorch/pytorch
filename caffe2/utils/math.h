@@ -30,6 +30,8 @@ using EigenArrayMap =
 template <typename T>
 using EigenVectorMap = Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, 1> >;
 template <typename T>
+using EigenVectorArrayMap = Eigen::Map<Eigen::Array<T, Eigen::Dynamic, 1> >;
+template <typename T>
 using ConstEigenMatrixMap =
     Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> >;
 template <typename T>
@@ -38,6 +40,9 @@ using ConstEigenArrayMap =
 template <typename T>
 using ConstEigenVectorMap =
     Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, 1> >;
+template <typename T>
+using ConstEigenVectorArrayMap =
+    Eigen::Map<const Eigen::Array<T, Eigen::Dynamic, 1> >;
 
 namespace math {
 
@@ -61,7 +66,24 @@ void Mul(const int N, const T* a, const T* b, T* y, Context* context);
 template <typename T, class Context>
 void Div(const int N, const T* a, const T* b, T* y, Context* context);
 
+#define CAFFE2_DECLARE_BINARY_OP(name)                                       \
+  template <typename T, class Context>                                       \
+  void name(const int N, const T* a, const T* b, bool* y, Context* context); \
+  template <typename T, class Context>                                       \
+  void name##ToRow(                                                          \
+      const int M,                                                           \
+      const int N,                                                           \
+      const T* a,                                                            \
+      const T* b,                                                            \
+      bool* y,                                                               \
+      Context* context);
 
+CAFFE2_DECLARE_BINARY_OP(LT)
+CAFFE2_DECLARE_BINARY_OP(LE)
+CAFFE2_DECLARE_BINARY_OP(GT)
+CAFFE2_DECLARE_BINARY_OP(GE)
+
+#undef CAFFE2_DECLARE_BINARY_OP
 // Compute the row-wise max of a N*D matrix X, and write it to a N
 // dimensional vector y.
 template <typename T, class Context>
@@ -74,14 +96,58 @@ template <typename T, class Context>
 void ColwiseMax(const int N, const int D, const T* x, T* y,
                 Context* context);
 
-// AddToRow and AddToCol adds the corresponding row/col vector x to the matrix y
+// AddToRow and AddToCol adds the corresponding row/col vector b to the matrix a
 // of shape MxN.
 template <typename T, class Context>
-void AddToRow(const int M, const int N, const T* x, T* y,
-              Context* context);
+void AddToRow(
+    const int M,
+    const int N,
+    const T* a,
+    const T* b,
+    T* y,
+    Context* context);
 template <typename T, class Context>
-void AddToCol(const int M, const int N, const T* x, T* y,
-              Context* context);
+void SubToRow(
+    const int M,
+    const int N,
+    const T* a,
+    const T* b,
+    T* y,
+    Context* context);
+template <typename T, class Context>
+void MulToRow(
+    const int M,
+    const int N,
+    const T* a,
+    const T* b,
+    T* y,
+    Context* context);
+template <typename T, class Context>
+void DivToRow(
+    const int M,
+    const int N,
+    const T* a,
+    const T* b,
+    T* y,
+    Context* context);
+
+// In-place version of XXXToRow
+template <typename T, class Context>
+void AddToRow(const int M, const int N, const T* x, T* y, Context* context);
+template <typename T, class Context>
+void SubToRow(const int M, const int N, const T* x, T* y, Context* context);
+template <typename T, class Context>
+void MulToRow(const int M, const int N, const T* x, T* y, Context* context);
+template <typename T, class Context>
+void DivToRow(const int M, const int N, const T* x, T* y, Context* context);
+template <typename T, class Context>
+void AddToCol(const int M, const int N, const T* x, T* y, Context* context);
+template <typename T, class Context>
+void SubToCol(const int M, const int N, const T* x, T* y, Context* context);
+template <typename T, class Context>
+void MulToCol(const int M, const int N, const T* x, T* y, Context* context);
+template <typename T, class Context>
+void DivToCol(const int M, const int N, const T* x, T* y, Context* context);
 
 // Decaf gemm provides a simpler interface to the gemm functions, with the
 // limitation that the data has to be contiguous in memory.
@@ -89,6 +155,14 @@ template <typename T, class Context, class Engine=DefaultEngine>
 void Gemm(const CBLAS_TRANSPOSE TransA, const CBLAS_TRANSPOSE TransB,
     const int M, const int N, const int K, const T alpha, const T* A,
     const T* B, const T beta, T* C, Context* context);
+
+// We also provide a gemm that has explicit lda, ldb and ldc specified.
+// In most cases you probably want to use the function above, though.
+template <typename T, class Context, class Engine=DefaultEngine>
+void Gemm(const CBLAS_TRANSPOSE TransA, const CBLAS_TRANSPOSE TransB,
+    const int M, const int N, const int K, const T alpha, const T* A,
+    const int lda, const T* B, const T beta, const int ldb, T* C,
+    const int ldc, Context* context);
 
 // Gemv always takes in a M*N matrix A, and depending on whether we set TransA
 // to Trans, the output is:
@@ -124,7 +198,9 @@ template <typename T, class Context>
 void Select(const int N, const int D, const T* x, const int* idx, T* y,
             Context* context);
 
-template <typename T, class Context>
+// For small FixedSizes (like FixedSize=1) the function might provide more
+// efficent implementation hard-coded statically for this size.
+template <typename T, class Context, int FixedSize = -1>
 void Scale(const int N, const T alpha, const T* x, T* y,
            Context* context);
 
@@ -135,9 +211,10 @@ template <typename T, class Context>
 void Scale(const int N, const T* alpha, const T* x, T* y,
            Context* context);
 
-template <typename T, class Context>
-void Axpy(const int N, const T alpha, const T* x, T* y,
-          Context* context);
+// For small FixedSizes (like FixedSize=1) the function might provide more
+// efficent implementation hard-coded statically for this size.
+template <typename T, class Context, int FixedSize = -1>
+void Axpy(const int N, const T alpha, const T* x, T* y, Context* context);
 
 // Different from the Axpy function above, if alpha is passed in
 // as a pointer, we will assume that it lives on the Context device,
@@ -168,6 +245,11 @@ template <class Context>
 void CopyMatrix(const size_t item_size, const int M, const int N, const void* A,
                 const int lda, void* B, const int ldb, Context* context);
 
+
+uint32_t randomNumberSeed();
+
 }  // namespace math
 }  // namespace caffe2
+
+#include "caffe2/utils/math-detail.h"
 #endif  // CAFFE2_UTILS_MATH_H_

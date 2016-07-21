@@ -13,7 +13,8 @@ class FullyConnectedOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   FullyConnectedOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+      : Operator<Context>(operator_def, ws),
+        axis_(OperatorBase::GetSingleArgument<int32_t>("axis", 1)) {}
   ~FullyConnectedOp() {}
 
   bool RunOnDevice() override {
@@ -21,22 +22,50 @@ class FullyConnectedOp final : public Operator<Context> {
     const auto& W = Input(1);
     const auto& b = Input(2);
     auto* Y = Output(0);
-    CAFFE_CHECK_GE(X.ndim(), 2);
-    CAFFE_CHECK_GE(W.ndim(), 2);
-    if (X.ndim() > 2 || W.ndim() > 2) {
-      CAFFE_VLOG(1) << "Using legacy support for arbitrary input and weight "
-                       "dimensions.";
-    }
-    CAFFE_CHECK_EQ(b.ndim(), 1);
+    CAFFE_ENFORCE(W.ndim() == 2, W.ndim());
+    CAFFE_ENFORCE(b.ndim() == 1, b.ndim());
     // batch size
-    int M = X.dim32(0);
-    // Feature dimension
-    int K = X.size() / X.dim32(0);
-    // number of outputs.
-    int N = W.dim32(0);
-    CAFFE_CHECK_EQ(K, W.size() / W.dim32(0));
-    CAFFE_CHECK_EQ(N, b.dim32(0));
-    Y->Reshape(vector<TIndex>{M, N});
+    const auto canonical_axis = X.canonical_axis_index(axis_);
+    const int M = X.size_to_dim(canonical_axis);
+    const int K = X.size_from_dim(canonical_axis);
+    const int N = W.dim32(0);
+
+    auto dimErrorString = [&]() {
+      return MakeString(
+          "Dimension mismatch: ",
+          "X: ",
+          X.dims(),
+          ", W: ",
+          W.dims(),
+          ", b: ",
+          b.dims(),
+          ", axis: ",
+          axis_,
+          ", M: ",
+          M,
+          ", N: ",
+          N,
+          ", K: ",
+          K);
+    };
+
+    // Error checking
+    CAFFE_ENFORCE(M * K == X.size(), dimErrorString());
+    CAFFE_ENFORCE(K * N == W.size(), dimErrorString());
+    CAFFE_ENFORCE(K == W.size() / W.dim32(0), dimErrorString());
+    CAFFE_ENFORCE(N == b.dim32(0), dimErrorString());
+    CAFFE_ENFORCE(N == b.size(), dimErrorString());
+
+    // Create the Y shape (without allocation)
+    static thread_local vector<TIndex> Y_shape;
+    Y_shape = X.dims();
+    // This is an invariant of canonical_axis, so we can DCHECK.
+    DCHECK_LE(canonical_axis + 1, Y_shape.size());
+    Y_shape.resize(canonical_axis + 1);
+    Y_shape[canonical_axis] = N;
+    Y->Resize(Y_shape);
+    CAFFE_ENFORCE(M * N == Y->size(), dimErrorString());
+
     // W * x
     math::Gemm<T, Context, Engine>(
         CblasNoTrans, CblasTrans, M, N, K, 1, X.template data<T>(),
@@ -45,7 +74,7 @@ class FullyConnectedOp final : public Operator<Context> {
     // Add bias term
     if (bias_multiplier_.size() != M) {
       // If the helper bias multiplier is not M, reshape and fill it with one.
-      bias_multiplier_.Reshape(vector<TIndex>{M});
+      bias_multiplier_.Resize(M);
       math::Set<T, Context>(
           M, static_cast<T>(1), bias_multiplier_.template mutable_data<T>(),
           &context_);
@@ -57,9 +86,9 @@ class FullyConnectedOp final : public Operator<Context> {
     return true;
   }
 
- protected:
+protected:
+  size_t axis_{1};
   Tensor<Context> bias_multiplier_;
-  DISABLE_COPY_AND_ASSIGN(FullyConnectedOp);
 };
 
 template <typename T, class Context, class Engine=DefaultEngine>
@@ -67,29 +96,27 @@ class FullyConnectedGradientOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   FullyConnectedGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+      : Operator<Context>(operator_def, ws),
+        axis_(OperatorBase::GetSingleArgument<int32_t>("axis", 1)) {}
   ~FullyConnectedGradientOp() {}
 
   bool RunOnDevice() override {
     const auto& X = Input(0);
     const auto& W = Input(1);
     const auto& dY = Input(2);
-    CAFFE_DCHECK_GE(X.ndim(), 2);
-    CAFFE_DCHECK_GE(W.ndim(), 2);
-    CAFFE_DCHECK_EQ(dY.ndim(), 2);
+    CAFFE_ENFORCE(W.ndim() == 2, W.ndim());
     // batch size
-    int M = X.dim32(0);
-    // Feature dimension
-    int K = X.size() / X.dim32(0);
-    // number of outputs.
-    int N = W.dim32(0);
-    CAFFE_DCHECK_EQ(K, W.size() / W.dim32(0));
-    CAFFE_DCHECK_EQ(M, dY.dim32(0));
-    CAFFE_DCHECK_EQ(N, dY.dim32(1));
+    const auto canonical_axis = X.canonical_axis_index(axis_);
+    const int M = X.size_to_dim(canonical_axis);
+    const int K = X.size_from_dim(canonical_axis);
+    const int N = W.dim32(0);
+    CAFFE_ENFORCE(M * K == X.size());
+    CAFFE_ENFORCE(K * N == W.size());
+
     auto* dW = Output(0);
     auto* db = Output(1);
-    dW->ReshapeLike(W);
-    db->Reshape(vector<TIndex>{N});
+    dW->ResizeLike(W);
+    db->Resize(N);
 
     // Compute dW
     math::Gemm<T, Context, Engine>(
@@ -98,8 +125,9 @@ class FullyConnectedGradientOp : public Operator<Context> {
         0, dW->template mutable_data<T>(),
         &context_);
     if (bias_multiplier_.size() != M) {
-      // If the helper bias multiplier is not M, reshape and fill it with one.
-      bias_multiplier_.Reshape(vector<TIndex>{M});
+      // If the helper bias multiplier is not M, reshape and fill it
+      // with one.
+      bias_multiplier_.Resize(M);
       math::Set<T, Context>(
           M, static_cast<T>(1),
           bias_multiplier_.template mutable_data<T>(),
@@ -111,24 +139,24 @@ class FullyConnectedGradientOp : public Operator<Context> {
         bias_multiplier_.template data<T>(), 0,
         db->template mutable_data<T>(),
         &context_);
-    // Compute dX if necessary.
+
+    // Compute dX
     if (OutputSize() == 3) {
       auto* dX = Output(2);
-      dX->ReshapeLike(X);
+      dX->ResizeLike(X);
       math::Gemm<T, Context, Engine>(
           CblasNoTrans, CblasNoTrans, M, K, N, 1,
           dY.template data<T>(), W.template data<T>(),
           0, dX->template mutable_data<T>(),
           &context_);
     }
-
     return true;
   }
 
  protected:
+  size_t axis_{1};
   Tensor<Context> bias_multiplier_;
 
-  DISABLE_COPY_AND_ASSIGN(FullyConnectedGradientOp);
 };
 
 }  // namespace caffe2

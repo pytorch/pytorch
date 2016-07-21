@@ -16,15 +16,14 @@ void rmsprop_update(
     float decay,
     float momentum,
     float epsilon,
-    float learning_rate,
+    const float* lr,
     Context* context) {
 #pragma omp parallel for
   for (auto i = 0; i < N; ++i) {
     // Update new mean square estimate
     nms[i] = ms[i] + (1.0f - decay) * (g[i] * g[i] - ms[i]);
     // Update momentum estimate
-    nmom[i] =
-        mom[i] * momentum + learning_rate * g[i] / std::sqrt(epsilon + nms[i]);
+    nmom[i] = mom[i] * momentum + lr[0] * g[i] / std::sqrt(epsilon + nms[i]);
     // New gradient is the momentum
     ng[i] = nmom[i];
   }
@@ -40,14 +39,13 @@ class RmsPropOp final : public Operator<Context> {
         momentum_(OperatorBase::GetSingleArgument<float>("momentum", 0.0)),
         epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5)) {}
   bool RunOnDevice() override {
-    // LR lives on the CPU
-    const auto lr = OperatorBase::Input<TensorCPU>(LR).template data<T>()[0];
-    CAFFE_CHECK_EQ(Input(GRAD).size(), Input(MEAN_SQUARES).size());
-    CAFFE_CHECK_EQ(Input(GRAD).size(), Input(OUTPUT_MOMENTUM).size());
-    Output(OUTPUT_GRAD)->ReshapeLike(Input(GRAD));
-    Output(OUTPUT_GRAD)->ReshapeLike(Input(GRAD));
-    Output(OUTPUT_MEAN_SQUARES)->ReshapeLike(Input(MEAN_SQUARES));
-    Output(OUTPUT_MOMENTUM)->ReshapeLike(Input(MOMENTUM));
+    CAFFE_ENFORCE(Input(LR).size() == 1);
+    CAFFE_ENFORCE(Input(GRAD).size() == Input(MEAN_SQUARES).size());
+    CAFFE_ENFORCE(Input(GRAD).size() == Input(OUTPUT_MOMENTUM).size());
+    Output(OUTPUT_GRAD)->ResizeLike(Input(GRAD));
+    Output(OUTPUT_GRAD)->ResizeLike(Input(GRAD));
+    Output(OUTPUT_MEAN_SQUARES)->ResizeLike(Input(MEAN_SQUARES));
+    Output(OUTPUT_MOMENTUM)->ResizeLike(Input(MOMENTUM));
     rmsprop_update<Context>(
         Input(GRAD).size(),
         Input(GRAD).template data<T>(),
@@ -59,7 +57,7 @@ class RmsPropOp final : public Operator<Context> {
         decay_,
         momentum_,
         epsilon_,
-        lr,
+        Input(LR).template data<T>(),
         &context_);
     return true;
   }
@@ -70,6 +68,5 @@ class RmsPropOp final : public Operator<Context> {
   T epsilon_{1e-8};
   INPUT_TAGS(GRAD, MEAN_SQUARES, MOMENTUM, LR);
   OUTPUT_TAGS(OUTPUT_GRAD, OUTPUT_MEAN_SQUARES, OUTPUT_MOMENTUM);
-  DISABLE_COPY_AND_ASSIGN(RmsPropOp);
 };
 }

@@ -18,13 +18,13 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   auto& bias = Input(BIAS);
   auto* Y = Output(0);
   const int N = X.dim32(0), C = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
-  CAFFE_DCHECK_EQ(filter.ndim(), 4);
+  DCHECK_EQ(filter.ndim(), 4);
   const int M = filter.dim32(0);
-  CAFFE_DCHECK_EQ(filter.dim32(1), C);
-  CAFFE_DCHECK_EQ(filter.dim32(2), kernel_h_);
-  CAFFE_DCHECK_EQ(filter.dim32(3), kernel_w_);
-  CAFFE_DCHECK_EQ(bias.ndim(), 1);
-  CAFFE_DCHECK_EQ(bias.dim32(0), M);
+  DCHECK_EQ(filter.dim32(1), C);
+  DCHECK_EQ(filter.dim32(2), kernel_h_);
+  DCHECK_EQ(filter.dim32(3), kernel_w_);
+  DCHECK_EQ(bias.ndim(), 1);
+  DCHECK_EQ(bias.dim32(0), M);
   ConvPoolOpBase<Context>::SetOutputSize(X, Y, filter.dim32(0));
   // The dimension of each kernel
   const int kernel_dim = C * kernel_h_ * kernel_w_;
@@ -36,11 +36,11 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const int output_image_size = Y->dim32(2) * Y->dim32(3);
   // The col buffer is stored in CHW order as well - kernel_dim, and the height
   // and width.
-  col_buffer_.Reshape(vector<TIndex>{
+  col_buffer_.Resize(vector<TIndex>{
       C, kernel_h_, kernel_w_, Y->dim32(2), Y->dim32(3)});
   if (bias_multiplier_.size() != output_image_size) {
     // If the helper bias multiplier is not M, reshape and fill it with one.
-    bias_multiplier_.Reshape(vector<TIndex>(1, output_image_size));
+    bias_multiplier_.Resize(vector<TIndex>(1, output_image_size));
     math::Set<T, Context>(
         output_image_size, static_cast<T>(1),
         bias_multiplier_.template mutable_data<T>(), &context_);
@@ -80,13 +80,13 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   auto& bias = Input(BIAS);
   auto* Y = Output(0);
   const int N = X.dim32(0), H = X.dim32(1), W = X.dim32(2), C = X.dim32(3);
-  CAFFE_DCHECK_EQ(filter.ndim(), 4);
+  DCHECK_EQ(filter.ndim(), 4);
   const int M = filter.dim32(0);
-  CAFFE_DCHECK_EQ(filter.dim32(1), kernel_h_);
-  CAFFE_DCHECK_EQ(filter.dim32(2), kernel_w_);
-  CAFFE_DCHECK_EQ(filter.dim32(3), C);
-  CAFFE_DCHECK_EQ(bias.ndim(), 1);
-  CAFFE_DCHECK_EQ(bias.dim32(0), M);
+  DCHECK_EQ(filter.dim32(1), kernel_h_);
+  DCHECK_EQ(filter.dim32(2), kernel_w_);
+  DCHECK_EQ(filter.dim32(3), C);
+  DCHECK_EQ(bias.ndim(), 1);
+  DCHECK_EQ(bias.dim32(0), M);
   ConvPoolOpBase<Context>::SetOutputSize(X, Y, filter.dim32(0));
   // The dimension of each kernel
   const int kernel_dim = kernel_h_ * kernel_w_ * C;
@@ -102,7 +102,7 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   T* Ydata = Y->template mutable_data<T>();
   if (bias_multiplier_.size() != output_image_size) {
     // If the helper bias multiplier is not M, reshape and fill it with one.
-    bias_multiplier_.Reshape(vector<TIndex>(1, output_image_size));
+    bias_multiplier_.Resize(vector<TIndex>(1, output_image_size));
     math::Set<T, Context>(
         output_image_size, static_cast<T>(1),
         bias_multiplier_.template mutable_data<T>(), &context_);
@@ -112,7 +112,7 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
       && Y->dim32(2) == X.dim32(2)) {
     if (bias_multiplier_.size() != N * H * W) {
       // If the helper bias multiplier is not M, reshape and fill it with one.
-      bias_multiplier_.Reshape(vector<TIndex>(1, N * H * W));
+      bias_multiplier_.Resize(vector<TIndex>(1, N * H * W));
       math::Set<T, Context>(
           N * H * W, static_cast<T>(1),
           bias_multiplier_.template mutable_data<T>(), &context_);
@@ -127,12 +127,12 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   } else {
     if (bias_multiplier_.size() != output_image_size) {
       // If the helper bias multiplier is not M, reshape and fill it with one.
-      bias_multiplier_.Reshape(vector<TIndex>(1, output_image_size));
+      bias_multiplier_.Resize(vector<TIndex>(1, output_image_size));
       math::Set<T, Context>(
           output_image_size, static_cast<T>(1),
           bias_multiplier_.template mutable_data<T>(), &context_);
     }
-    col_buffer_.Reshape(vector<TIndex>{
+    col_buffer_.Resize(vector<TIndex>{
         Y->dim32(1), Y->dim32(2), kernel_h_, kernel_w_, C});
     T* col_buffer_data = col_buffer_.template mutable_data<T>();
     // Im2col, followed by gemm.
@@ -150,8 +150,8 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
       // Bias term
       math::Gemm<T, Context>(
           CblasNoTrans, CblasNoTrans, output_image_size, M, 1, 1,
-          bias_multiplier_.template data<T>(), bias.template data<T>(), 1, Ydata,
-          &context_);
+          bias_multiplier_.template data<T>(), bias.template data<T>(), 1,
+          Ydata, &context_);
       Xdata += input_offset;
       Ydata += output_offset;
     }
@@ -168,13 +168,13 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   auto* dbias = Output(BIAS_GRAD);
   const int N = X.dim32(0), C = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
   ConvPoolOpBase<Context>::ComputePads(H, W);
-  CAFFE_DCHECK_EQ(filter.ndim(), 4);
+  DCHECK_EQ(filter.ndim(), 4);
   const int M = filter.dim32(0);
-  CAFFE_DCHECK_EQ(filter.dim32(1), C);
-  CAFFE_DCHECK_EQ(filter.dim32(2), kernel_h_);
-  CAFFE_DCHECK_EQ(filter.dim32(3), kernel_w_);
-  dfilter->ReshapeLike(filter);
-  dbias->Reshape(vector<TIndex>{M});
+  DCHECK_EQ(filter.dim32(1), C);
+  DCHECK_EQ(filter.dim32(2), kernel_h_);
+  DCHECK_EQ(filter.dim32(3), kernel_w_);
+  dfilter->ResizeLike(filter);
+  dbias->Resize(vector<TIndex>{M});
   // The dimension of each kernel
   const int kernel_dim = C * kernel_h_ * kernel_w_;
   // The offset corresponding to a single input image, and a single output
@@ -185,10 +185,10 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const int output_image_size = dY.dim32(2) * dY.dim32(3);
   // The col buffer is stored in CHW order as well - kernel_dim, and the height
   // and width.
-  col_buffer_.Reshape(vector<TIndex>{kernel_dim, output_image_size});
+  col_buffer_.Resize(vector<TIndex>{kernel_dim, output_image_size});
   if (bias_multiplier_.size() != output_image_size) {
     // If the helper bias multiplier is not M, reshape and fill it with one.
-    bias_multiplier_.Reshape(vector<TIndex>(1, output_image_size));
+    bias_multiplier_.Resize(vector<TIndex>(1, output_image_size));
     math::Set<T, Context>(
         output_image_size, static_cast<T>(1),
         bias_multiplier_.template mutable_data<T>(), &context_);
@@ -226,7 +226,7 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   if (OutputSize() == 3) {
     // Compute the gradient w.r.t. the input.
     auto *dX = Output(INPUT_GRAD);
-    dX->ReshapeLike(X);
+    dX->ResizeLike(X);
     T* dXdata = dX->template mutable_data<T>();
     for (int image_id = 0; image_id < N; ++image_id) {
       // Compute gradient into col_buffer.
@@ -253,13 +253,13 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   auto* dbias = Output(BIAS_GRAD);
   const int N = X.dim32(0), H = X.dim32(1), W = X.dim32(2), C = X.dim32(3);
   ConvPoolOpBase<Context>::ComputePads(H, W);
-  CAFFE_DCHECK_EQ(filter.ndim(), 4);
+  DCHECK_EQ(filter.ndim(), 4);
   const int M = filter.dim32(0);
-  CAFFE_DCHECK_EQ(filter.dim32(1), kernel_h_);
-  CAFFE_DCHECK_EQ(filter.dim32(2), kernel_w_);
-  CAFFE_DCHECK_EQ(filter.dim32(3), C);
-  dfilter->ReshapeLike(filter);
-  dbias->Reshape(vector<TIndex>{M});
+  DCHECK_EQ(filter.dim32(1), kernel_h_);
+  DCHECK_EQ(filter.dim32(2), kernel_w_);
+  DCHECK_EQ(filter.dim32(3), C);
+  dfilter->ResizeLike(filter);
+  dbias->Resize(vector<TIndex>{M});
   // The dimension of each kernel
   const int kernel_dim = kernel_h_ * kernel_w_ * C;
   // The offset corresponding to a single input image, and a single output
@@ -270,10 +270,10 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   const int output_image_size = dY.dim32(1) * dY.dim32(2);
   // The col buffer is stored in CHW order as well - kernel_dim, and the height
   // and width.
-  col_buffer_.Reshape(vector<TIndex>{output_image_size, kernel_dim});
+  col_buffer_.Resize(vector<TIndex>{output_image_size, kernel_dim});
   if (bias_multiplier_.size() != output_image_size) {
     // If the helper bias multiplier is not M, reshape and fill it with one.
-    bias_multiplier_.Reshape(vector<TIndex>(1, output_image_size));
+    bias_multiplier_.Resize(vector<TIndex>(1, output_image_size));
     math::Set<T, Context>(
         output_image_size, static_cast<T>(1),
         bias_multiplier_.template mutable_data<T>(), &context_);
@@ -311,7 +311,7 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   if (OutputSize() == 3) {
     // Compute the gradient w.r.t. the input.
     auto *dX = Output(INPUT_GRAD);
-    dX->ReshapeLike(X);
+    dX->ResizeLike(X);
     T* dXdata = dX->template mutable_data<T>();
     for (int image_id = 0; image_id < N; ++image_id) {
       // Compute gradient into col_buffer.

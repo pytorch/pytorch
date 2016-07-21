@@ -19,9 +19,9 @@ int main(int argc, char** argv) {
     return 1;
   }
   caffe2::GlobalInit(&argc, &argv);
-  CAFFE_LOG_INFO << "Loading plan: " << caffe2::FLAGS_plan;
+  LOG(INFO) << "Loading plan: " << caffe2::FLAGS_plan;
   caffe2::PlanDef plan_def;
-  CAFFE_CHECK(ReadProtoFromFile(caffe2::FLAGS_plan, &plan_def));
+  CHECK(ReadProtoFromFile(caffe2::FLAGS_plan, &plan_def));
   std::unique_ptr<caffe2::Workspace> workspace(new caffe2::Workspace());
   workspace->RunPlan(plan_def);
 

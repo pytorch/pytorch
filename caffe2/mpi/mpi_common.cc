@@ -7,21 +7,28 @@ static std::mutex gCaffe2MPIMutex;
 std::mutex& MPIMutex() {
   return gCaffe2MPIMutex;
 }
-
-
 static MPI_Comm gCaffe2MPIComm = MPI_COMM_WORLD;
-MPI_Comm MPIComm() {
+
+MPI_Comm GlobalMPIComm() {
   return gCaffe2MPIComm;
 }
 
-void SetMPIComm(MPI_Comm new_mpi_comm) {
-  gCaffe2MPIComm = new_mpi_comm;
+void SetGlobalMPIComm(MPI_Comm new_comm) {
+  if (gCaffe2MPIComm != MPI_COMM_WORLD) {
+    MPI_Comm_free(&gCaffe2MPIComm);
+  }
+  gCaffe2MPIComm = new_comm;
 }
 
-size_t MPISize() {
+int MPICommSize(MPI_Comm comm) {
   int comm_size;
-  MPI_CHECK(MPI_Comm_size(caffe2::MPIComm(), &comm_size));
+  MPI_CHECK(MPI_Comm_size(comm, &comm_size));
   return comm_size;
 }
 
+int MPICommRank(MPI_Comm comm) {
+  int comm_rank;
+  MPI_CHECK(MPI_Comm_rank(comm, &comm_rank));
+  return comm_rank;
+}
 }  // namespace caffe2

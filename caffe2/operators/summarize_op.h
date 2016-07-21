@@ -11,11 +11,6 @@ namespace caffe2 {
 
 constexpr char kSummaryzeOpExtension[] = ".summary";
 
-// Accumulate operator accumulates the input tensor to the output tensor. If the
-// output tensor already has the right size, we add to it; otherwise, we first
-// initialize the output tensor to all zeros, and then do accumulation. Any
-// further calls to the operator, given that no one else fiddles with the output
-// in the interim, will do simple accumulations.
 template <typename T, class Context>
 class SummarizeOp final : public Operator<Context> {
  public:
@@ -29,7 +24,7 @@ class SummarizeOp final : public Operator<Context> {
       log_file_.reset(new std::ofstream(
           target_folder + "/" + def.input(0) + kSummaryzeOpExtension,
           std::ofstream::out | std::ofstream::trunc));
-      CAFFE_CHECK(log_file_->good())
+      CHECK(log_file_->good())
           << "Failed to open summarize file for tensor " << def.input(0)
           << ". rdstate() = " << log_file_->rdstate();
     }
@@ -48,7 +43,6 @@ class SummarizeOp final : public Operator<Context> {
  protected:
   bool to_file_;
   std::unique_ptr<std::ofstream> log_file_;
-  DISABLE_COPY_AND_ASSIGN(SummarizeOp);
 };
 
 }  // namespace caffe2

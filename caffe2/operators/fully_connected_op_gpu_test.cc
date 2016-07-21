@@ -16,7 +16,7 @@ static void AddConstInput(const vector<TIndex>& shape, const float value,
   CUDAContext context(option);
   Blob* blob = ws->CreateBlob(name);
   auto* tensor = blob->GetMutable<Tensor<CUDAContext>>();
-  tensor->Reshape(shape);
+  tensor->Resize(shape);
   math::Set<float, CUDAContext>(tensor->size(), value,
                                 tensor->mutable_data<float>(),
                                 &context);
@@ -24,6 +24,7 @@ static void AddConstInput(const vector<TIndex>& shape, const float value,
 }
 
 TEST(FullyConnectedGPUTest, Test) {
+  if (!HasCudaGPU()) return;
   Workspace ws;
   OperatorDef def;
   def.set_name("test");

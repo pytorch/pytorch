@@ -10,12 +10,13 @@
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/context_gpu.h"
+#include "caffe2/core/logging.h"
 #include "caffe2/core/types.h"
 #include "caffe2/proto/caffe2.pb.h"
-#include "caffe2/core/logging.h"
 
-static_assert(CUDNN_VERSION >= 5000,
-              "Caffe2 requires cudnn version 5.0 or above.");
+static_assert(
+    CUDNN_VERSION >= 5000,
+    "Caffe2 requires cudnn version 5.0 or above.");
 
 namespace caffe2 {
 
@@ -51,27 +52,29 @@ inline const char* cudnnGetErrorString(cudnnStatus_t status) {
       return "Unknown cudnn error number";
   }
 }
-}  // namespace internal
+} // namespace internal
 
 // A macro that wraps around a cudnn statement so we can check if the cudnn
 // execution finishes or not.
-#define CUDNN_CHECK(condition)                                                 \
-  do {                                                                         \
-    cudnnStatus_t status = condition;                                          \
-    CAFFE_CHECK_EQ(status, CUDNN_STATUS_SUCCESS) << " "                        \
-        << "Error at: " << __FILE__ << ":" << __LINE__ << ": "                 \
-        << ::caffe2::internal::cudnnGetErrorString(status);                    \
+#define CUDNN_CHECK(condition)                                 \
+  do {                                                         \
+    cudnnStatus_t status = condition;                          \
+    CHECK_EQ(status, CUDNN_STATUS_SUCCESS)                     \
+        << " "                                                 \
+        << "Error at: " << __FILE__ << ":" << __LINE__ << ": " \
+        << ::caffe2::internal::cudnnGetErrorString(status);    \
   } while (0)
-
 
 /**
  * cudnnTypeWrapper is a wrapper class that allows us to refer to the cudnn type
  * in a template function. The class is specialized explicitly for different
  * data types below.
  */
-template <typename T> class cudnnTypeWrapper;
+template <typename T>
+class cudnnTypeWrapper;
 
-template<> class cudnnTypeWrapper<float> {
+template <>
+class cudnnTypeWrapper<float> {
  public:
   static const cudnnDataType_t type = CUDNN_DATA_FLOAT;
   typedef const float ScalingParamType;
@@ -85,7 +88,8 @@ template<> class cudnnTypeWrapper<float> {
   }
 };
 
-template<> class cudnnTypeWrapper<double> {
+template <>
+class cudnnTypeWrapper<double> {
  public:
   static const cudnnDataType_t type = CUDNN_DATA_DOUBLE;
   typedef const double ScalingParamType;
@@ -99,7 +103,8 @@ template<> class cudnnTypeWrapper<double> {
   }
 };
 
-template<> class cudnnTypeWrapper<float16> {
+template <>
+class cudnnTypeWrapper<float16> {
  public:
   static const cudnnDataType_t type = CUDNN_DATA_HALF;
   typedef const float ScalingParamType;
@@ -119,12 +124,12 @@ template<> class cudnnTypeWrapper<float16> {
  */
 inline cudnnTensorFormat_t GetCudnnTensorFormat(const StorageOrder& order) {
   switch (order) {
-  case StorageOrder::NHWC:
-    return CUDNN_TENSOR_NHWC;
-  case StorageOrder::NCHW:
-    return CUDNN_TENSOR_NCHW;
-  default:
-    CAFFE_LOG_FATAL << "Unknown cudnn equivalent for order: " << order;
+    case StorageOrder::NHWC:
+      return CUDNN_TENSOR_NHWC;
+    case StorageOrder::NCHW:
+      return CUDNN_TENSOR_NCHW;
+    default:
+      LOG(FATAL) << "Unknown cudnn equivalent for order: " << order;
   }
   // Just to suppress compiler warnings
   return CUDNN_TENSOR_NCHW;
@@ -145,28 +150,38 @@ class cudnnTensorDescWrapper {
   }
 
   inline cudnnTensorDescriptor_t Descriptor(
-      const cudnnTensorFormat_t format, const cudnnDataType_t type,
-      const vector<int>& dims, bool* changed) {
+      const cudnnTensorFormat_t format,
+      const cudnnDataType_t type,
+      const vector<int>& dims,
+      bool* changed) {
     if (type_ == type && format_ == format && dims_ == dims) {
       // if not changed, simply return the current descriptor.
-      if (changed) *changed = false;
+      if (changed)
+        *changed = false;
       return desc_;
     }
-    CAFFE_CHECK_EQ(dims.size(), 4)
+    CHECK_EQ(dims.size(), 4)
         << "Currently only 4-dimensional descriptor supported.";
-    format_ = format; type_ = type; dims_ = dims;
+    format_ = format;
+    type_ = type;
+    dims_ = dims;
     CUDNN_CHECK(cudnnSetTensor4dDescriptor(
-        desc_, format, type, dims_[0],
-        (format == CUDNN_TENSOR_NCHW? dims_[1] : dims_[3]),
-        (format == CUDNN_TENSOR_NCHW? dims_[2] : dims_[1]),
-        (format == CUDNN_TENSOR_NCHW? dims_[3] : dims_[2])));
-    if (changed) *changed = true;
+        desc_,
+        format,
+        type,
+        dims_[0],
+        (format == CUDNN_TENSOR_NCHW ? dims_[1] : dims_[3]),
+        (format == CUDNN_TENSOR_NCHW ? dims_[2] : dims_[1]),
+        (format == CUDNN_TENSOR_NCHW ? dims_[3] : dims_[2])));
+    if (changed)
+      *changed = true;
     return desc_;
   }
 
   template <typename T>
   inline cudnnTensorDescriptor_t Descriptor(
-      const StorageOrder& order, const vector<int>& dims) {
+      const StorageOrder& order,
+      const vector<int>& dims) {
     return Descriptor(
         GetCudnnTensorFormat(order), cudnnTypeWrapper<T>::type, dims, nullptr);
   }
@@ -179,7 +194,6 @@ class cudnnTensorDescWrapper {
   DISABLE_COPY_AND_ASSIGN(cudnnTensorDescWrapper);
 };
 
-
 class cudnnFilterDescWrapper {
  public:
   cudnnFilterDescWrapper() {
@@ -190,16 +204,21 @@ class cudnnFilterDescWrapper {
   }
 
   inline cudnnFilterDescriptor_t Descriptor(
-      const StorageOrder& order, const cudnnDataType_t type,
-      const vector<int>& dims, bool* changed) {
+      const StorageOrder& order,
+      const cudnnDataType_t type,
+      const vector<int>& dims,
+      bool* changed) {
     if (type_ == type && order_ == order && dims_ == dims) {
       // if not changed, simply return the current descriptor.
-      if (changed) *changed = false;
+      if (changed)
+        *changed = false;
       return desc_;
     }
-    CAFFE_CHECK_EQ(dims.size(), 4)
+    CHECK_EQ(dims.size(), 4)
         << "Currently only 4-dimensional descriptor supported.";
-    order_ = order; type_ = type; dims_ = dims;
+    order_ = order;
+    type_ = type;
+    dims_ = dims;
     CUDNN_CHECK(cudnnSetFilter4dDescriptor(
         desc_,
         type,
@@ -209,13 +228,15 @@ class cudnnFilterDescWrapper {
         (order == StorageOrder::NCHW ? dims_[1] : dims_[3]),
         (order == StorageOrder::NCHW ? dims_[2] : dims_[1]),
         (order == StorageOrder::NCHW ? dims_[3] : dims_[2])));
-    if (changed) *changed = true;
+    if (changed)
+      *changed = true;
     return desc_;
   }
 
   template <typename T>
   inline cudnnFilterDescriptor_t Descriptor(
-      const StorageOrder& order, const vector<int>& dims) {
+      const StorageOrder& order,
+      const vector<int>& dims) {
     return Descriptor(order, cudnnTypeWrapper<T>::type, dims, nullptr);
   }
 
@@ -227,22 +248,22 @@ class cudnnFilterDescWrapper {
   DISABLE_COPY_AND_ASSIGN(cudnnFilterDescWrapper);
 };
 
-
 class CuDNNWrapper;
 /**
- * ThreadLocalCuDNNObjects wraps around cudnnHandle_t so they can be
+ * CuDNNHandles wraps around cudnnHandle_t so they can be
  * properly destructed when threads exit.
  */
-class ThreadLocalCuDNNObjects {
+class CuDNNHandles {
   friend class CuDNNWrapper;
+
  private:
-  ThreadLocalCuDNNObjects() {
+  CuDNNHandles() {
     for (int i = 0; i < CAFFE2_COMPILE_TIME_MAX_GPUS; ++i) {
       cudnn_handle_[i] = nullptr;
     }
   }
 
-  ~ThreadLocalCuDNNObjects() {
+  ~CuDNNHandles() {
     for (int i = 0; i < CAFFE2_COMPILE_TIME_MAX_GPUS; ++i) {
       if (cudnn_handle_[i]) {
         CUDNN_CHECK(cudnnDestroy(cudnn_handle_[i]));
@@ -262,15 +283,82 @@ class ThreadLocalCuDNNObjects {
  * not need more than one cudnn workspace per device.
  */
 struct CuDNNWorkspace {
-  CuDNNWorkspace() : data_(nullptr) {};
   ~CuDNNWorkspace() {
-    if (data_) CUDAContext::Delete(data_);
+    if (data_) {
+      CUDAContext::Delete(data_);
+    }
   }
-  void Reset(void* new_data=nullptr) {
-    if (data_) CUDAContext::Delete(data_);
-    data_ = new_data;
+
+  void* get(size_t nbytes) {
+    if (nbytes_ < nbytes) {
+      reset();
+      data_ = CUDAContext::New(nbytes);
+      nbytes_ = nbytes;
+    }
+    CHECK_GE(nbytes_, nbytes);
+    return data_;
   }
-  void* data_;
+
+  void reset() {
+    if (data_) {
+      CUDAContext::Delete(data_);
+    }
+    data_ = nullptr;
+    nbytes_ = 0;
+  }
+
+  void* data_{nullptr};
+  size_t nbytes_{0};
+};
+
+// CuDNNState is the owner of the CuDNNWorkspace, and serializes all
+// executions of operations that use the state onto it's own stream
+// (so multiple Net workers can reuse the same workspace from
+// different threads and CUDA streams).
+class CuDNNState {
+ public:
+  explicit CuDNNState(size_t gpu_id) : gpu_id_(gpu_id) {
+    DeviceGuard g(gpu_id_);
+    CUDNN_CHECK(cudnnCreate(&cudnn_handle_));
+    CUDA_CHECK(cudaEventCreate(&before_));
+    CUDA_CHECK(cudaEventCreate(&after_));
+    CUDA_CHECK(cudaStreamCreate(&stream_));
+    CUDNN_CHECK(cudnnSetStream(cudnn_handle_, stream_));
+  }
+
+  ~CuDNNState() {
+    DeviceGuard g(gpu_id_);
+    CUDNN_CHECK(cudnnDestroy(cudnn_handle_));
+    CUDA_CHECK(cudaStreamDestroy(stream_));
+    CUDA_CHECK(cudaEventDestroy(after_));
+    CUDA_CHECK(cudaEventDestroy(before_));
+  }
+
+  cudnnHandle_t& cudnn_handle() {
+    return cudnn_handle_;
+  }
+
+  CuDNNWorkspace& workspace() {
+    return workspace_;
+  }
+
+  template <typename F>
+  void execute(cudaStream_t stream, F&& f) {
+    CUDA_CHECK(cudaEventRecord(before_, stream));
+    CUDA_CHECK(cudaStreamWaitEvent(stream_, before_, 0));
+    f(this);
+    CUDA_CHECK(cudaEventRecord(after_, stream_));
+    CUDA_CHECK(cudaStreamWaitEvent(stream, after_, 0));
+  }
+
+ private:
+  cudnnHandle_t cudnn_handle_{nullptr};
+  cudaEvent_t before_{nullptr};
+  cudaEvent_t after_{nullptr};
+  cudaStream_t stream_{nullptr};
+  CuDNNWorkspace workspace_;
+  size_t gpu_id_{0};
+  DISABLE_COPY_AND_ASSIGN(CuDNNState);
 };
 
 /**
@@ -281,14 +369,6 @@ struct CuDNNWorkspace {
  * per-device cuda stream. The wrapper also hosts the device-specific cudnn
  * workspace (scratch space for some cudnn functions).
  *
- * Sample usage: if you are implementing a cuda operator that uses cudnn, you
- * can have a private member like
- *     CudnnWrapper wrapper_;
- * and in your constructor, initialize it with wrapper_(context_). If
- * you will need to use cudnn workspace, you should access it via a lock like:
- *     std::lock_guard<std::mutex> lock(wrapper_.mutex());
- *     void* workspace = wrapper_.GetWorkspace(nbytes_needed);
- *     // release the mutex once computation is finished.
  */
 class CuDNNWrapper {
  public:
@@ -296,63 +376,65 @@ class CuDNNWrapper {
    * Creates a cudnn wrapper associated with a CUDAContext object. Note that
    * the CUDAContext object should outlive the CuDNNWrapper.
    */
-  explicit CuDNNWrapper(CUDAContext* context)
-      : context_(context) {}
-
-  virtual ~CuDNNWrapper() {}
+  explicit CuDNNWrapper(CUDAContext* context) : context_(context) {}
 
   /**
-   * Returns the cudnn handle.
+   * Returns the inline cudnn handle that executes on the current
+   * thread's cuda_stream.
    */
-  cudnnHandle_t& cudnn_handle() {
+  cudnnHandle_t& inline_cudnn_handle() {
     int gpu_id = context_->cuda_gpu_id();
-    auto& cudnn_handle_ = tls_cudnn_objects_.cudnn_handle_[gpu_id];
+    auto& cudnn_handle_ = tls_cudnn_handles_.cudnn_handle_[gpu_id];
     if (cudnn_handle_) {
       return cudnn_handle_;
     } else {
       context_->SwitchToDevice();
       CUDNN_CHECK(cudnnCreate(&cudnn_handle_));
-      CUDNN_CHECK(cudnnSetStream(
-          cudnn_handle_, context_->cuda_stream()));
+      CUDNN_CHECK(cudnnSetStream(cudnn_handle_, context_->cuda_stream()));
     }
     return cudnn_handle_;
   }
 
-  std::mutex& mutex() {
-    return mutex_[context_->cuda_gpu_id()];
-  }
+  // Executes the closure F on the CuDNNState associated with state_idx
+  template <typename F>
+  void with_cudnn_state(size_t state_idx, F&& f) {
+    CAFFE_ENFORCE(
+        state_idx < CAFFE2_COMPILE_TIME_MAX_CUDNN_STATES, "Invalid state_idx");
+    auto& sync_state = cudnn_states()[context_->cuda_gpu_id()][state_idx];
 
-  void ResetWorkspace() {
-    int gpu_id = context_->cuda_gpu_id();
-    scratch_[gpu_id].Reset();
-    nbytes_[gpu_id] = 0;
-  }
+    DeviceGuard dg(context_->cuda_gpu_id());
 
-  void* GetWorkspace(const size_t nbytes) {
-    int gpu_id = context_->cuda_gpu_id();
-    if (nbytes > nbytes_[gpu_id]) {
-      CAFFE_VLOG(1) << "Resizing CuDNN workspace from " << nbytes_[gpu_id]
-                    << " to " << nbytes << " bytes.";
-      DeviceGuard guard(gpu_id);
-      scratch_[gpu_id].Reset(CUDAContext::New(nbytes));
-      nbytes_[gpu_id] = nbytes;
+    // We need to serialize execution on the CuDNNState as we can't
+    // allow multiple threads to race through the cudaEventRecord
+    // calls (so a worker thread might wait on another worker thread's
+    // execution)
+    std::lock_guard<std::mutex> g(sync_state.mutex);
+    if (!sync_state.state.get()) {
+      sync_state.state.reset(new CuDNNState(context_->cuda_gpu_id()));
     }
-    return scratch_[gpu_id].data_;
+    CHECK_NOTNULL(sync_state.state.get())->execute(context_->cuda_stream(), f);
   }
 
  protected:
   // Pointer to an external cuda context that the cudnn wrapper will use.
   CUDAContext* context_;
-  static thread_local ThreadLocalCuDNNObjects tls_cudnn_objects_;
+  static thread_local CuDNNHandles tls_cudnn_handles_;
 
-  // Objects to hold workspaces for CuDNN.
-  static std::array<CuDNNWorkspace, CAFFE2_COMPILE_TIME_MAX_GPUS> scratch_;
-  static std::array<size_t, CAFFE2_COMPILE_TIME_MAX_GPUS> nbytes_;
-  static std::array<std::mutex, CAFFE2_COMPILE_TIME_MAX_GPUS> mutex_;
+  static constexpr size_t CAFFE2_COMPILE_TIME_MAX_CUDNN_STATES = 4;
+
+  struct SyncedCuDNNState {
+    std::mutex mutex;
+    std::unique_ptr<CuDNNState> state;
+  };
+
+  using PerGPUCuDNNStates = std::array<
+      std::array<SyncedCuDNNState, CAFFE2_COMPILE_TIME_MAX_CUDNN_STATES>,
+      CAFFE2_COMPILE_TIME_MAX_GPUS>;
+  static PerGPUCuDNNStates& cudnn_states();
 
   DISABLE_COPY_AND_ASSIGN(CuDNNWrapper);
 };
 
-}  // namespace caffe2
+} // namespace caffe2
 
-#endif  // CAFFE2_CORE_COMMON_CUDNN_H_
+#endif // CAFFE2_CORE_COMMON_CUDNN_H_

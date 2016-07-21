@@ -65,14 +65,19 @@ void Funcname<T, CUDAContext>(                                             \
 #define CAFFE_MATH_CUDA_SUB(x, y) (x - y)
 #define CAFFE_MATH_CUDA_MUL(x, y) (x * y)
 #define CAFFE_MATH_CUDA_DIV(x, y) (x / y)
-DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(float,  Add, CAFFE_MATH_CUDA_ADD)
-DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(double, Add, CAFFE_MATH_CUDA_ADD)
-DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(float,  Sub, CAFFE_MATH_CUDA_SUB)
-DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(double, Sub, CAFFE_MATH_CUDA_SUB)
-DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(float,  Mul, CAFFE_MATH_CUDA_MUL)
-DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(double, Mul, CAFFE_MATH_CUDA_MUL)
-DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(float,  Div, CAFFE_MATH_CUDA_DIV)
-DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(double, Div, CAFFE_MATH_CUDA_DIV)
+
+#define DEFINE_SIMPLE_CUDA_BINARY_FUNCTION(Name, Expr)                        \
+  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(float, Name, Expr)                     \
+  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(double, Name, Expr)                    \
+  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(int, Name, Expr)                       \
+  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(long, Name, Expr)
+
+DEFINE_SIMPLE_CUDA_BINARY_FUNCTION(Add, CAFFE_MATH_CUDA_ADD)
+DEFINE_SIMPLE_CUDA_BINARY_FUNCTION(Sub, CAFFE_MATH_CUDA_SUB)
+DEFINE_SIMPLE_CUDA_BINARY_FUNCTION(Mul, CAFFE_MATH_CUDA_MUL)
+DEFINE_SIMPLE_CUDA_BINARY_FUNCTION(Div, CAFFE_MATH_CUDA_DIV)
+
+#undef DEFINE_SIMPLE_CUDA_BINARY_FUNCTION
 
 
 /*
@@ -103,35 +108,77 @@ void ColwiseMax<T, CPUContext>(                                                \
 CAFFE2_SPECIALIZED_COLWISEMAX(float)
 */
 
-namespace {
-template<typename T>
-__global__ void AddToRowKernel(const int M, const int N, const T* x,
-                               T* y) {
-  CUDA_1D_KERNEL_LOOP(i, M * N) {
-    y[i] += x[i % N];
+#define DELEGATE_BROADCAST_CUDA_OPERATOR(Funcname, T, expr)                   \
+  namespace {                                                                 \
+  __global__ void Funcname##ToRowKernel_##T(                                  \
+      const int M,                                                            \
+      const int N,                                                            \
+      const T* a,                                                             \
+      const T* b,                                                             \
+      T* y) {                                                                 \
+    CUDA_1D_KERNEL_LOOP(i, M* N) {                                            \
+      y[i] = a[i] expr b[i % N];                                              \
+    }                                                                         \
+  }                                                                           \
+  __global__ void                                                             \
+      Funcname##ToRowKernel_##T(const int M, const int N, const T* x, T* y) { \
+    CUDA_1D_KERNEL_LOOP(i, M* N) {                                            \
+      y[i] expr## = x[i % N];                                                 \
+    }                                                                         \
+  }                                                                           \
+  __global__ void                                                             \
+      Funcname##ToColKernel_##T(const int M, const int N, const T* x, T* y) { \
+    CUDA_1D_KERNEL_LOOP(i, M* N) {                                            \
+      y[i] expr## = x[i / M];                                                 \
+    }                                                                         \
+  }                                                                           \
+  }                                                                           \
+  template <>                                                                 \
+  void Funcname##ToRow<T, CUDAContext>(                                       \
+      const int M,                                                            \
+      const int N,                                                            \
+      const T* a,                                                             \
+      const T* b,                                                             \
+      T* y,                                                                   \
+      CUDAContext* context) {                                                 \
+    Funcname##ToRowKernel_##T<<<                                              \
+        CAFFE_GET_BLOCKS(M* N),                                               \
+        CAFFE_CUDA_NUM_THREADS,                                               \
+        0,                                                                    \
+        context->cuda_stream()>>>(M, N, a, b, y);                             \
+  }                                                                           \
+  template <>                                                                 \
+  void Funcname##ToRow<T, CUDAContext>(                                       \
+      const int M, const int N, const T* x, T* y, CUDAContext* context) {     \
+    Funcname##ToRowKernel_##T<<<                                              \
+        CAFFE_GET_BLOCKS(M* N),                                               \
+        CAFFE_CUDA_NUM_THREADS,                                               \
+        0,                                                                    \
+        context->cuda_stream()>>>(M, N, x, y);                                \
+  }                                                                           \
+  template <>                                                                 \
+  void Funcname##ToCol<T, CUDAContext>(                                       \
+      const int M, const int N, const T* x, T* y, CUDAContext* context) {     \
+    Funcname##ToColKernel_##T<<<                                              \
+        CAFFE_GET_BLOCKS(M* N),                                               \
+        CAFFE_CUDA_NUM_THREADS,                                               \
+        0,                                                                    \
+        context->cuda_stream()>>>(M, N, x, y);                                \
   }
-}
-template<typename T>
-__global__ void AddToColKernel(const int M, const int N, const T* x,
-                               T* y) {
-  CUDA_1D_KERNEL_LOOP(i, M * N) {
-    y[i] += x[i % M];
-  }
-}
-}  // namespace
 
-template <>
-void AddToRow<float, CUDAContext>(
-    const int M, const int N, const float* x, float* y, CUDAContext* context) {
-  AddToRowKernel<float><<<CAFFE_GET_BLOCKS(M * N), CAFFE_CUDA_NUM_THREADS,
-                          0, context->cuda_stream()>>>(M, N, x, y);
-}
-template <>
-void AddToCol<float, CUDAContext>(
-    const int M, const int N, const float* x, float* y, CUDAContext* context) {
-  AddToColKernel<float><<<CAFFE_GET_BLOCKS(M * N), CAFFE_CUDA_NUM_THREADS,
-                          0, context->cuda_stream()>>>(M, N, x, y);
-}
+#define DEFINE_BROADCAST_CUDA_OPERATOR(Name, Expr)                            \
+DELEGATE_BROADCAST_CUDA_OPERATOR(Name, float, Expr)                           \
+DELEGATE_BROADCAST_CUDA_OPERATOR(Name, double, Expr)                          \
+DELEGATE_BROADCAST_CUDA_OPERATOR(Name, int, Expr)                             \
+DELEGATE_BROADCAST_CUDA_OPERATOR(Name, long, Expr)
+
+DEFINE_BROADCAST_CUDA_OPERATOR(Add, +)
+DEFINE_BROADCAST_CUDA_OPERATOR(Sub, -)
+DEFINE_BROADCAST_CUDA_OPERATOR(Mul, *)
+DEFINE_BROADCAST_CUDA_OPERATOR(Div, /)
+
+#undef DEFINE_BROADCAST_CUDA_OPERATOR
+#undef DELEGATE_BROADCAST_CUDA_OPERATOR
 
 // Caffe2 gemm provides a simpler interface to the gemm functions, with the
 // limitation that the data has to be contiguous in memory.
@@ -152,6 +199,21 @@ void Gemm<float, CUDAContext>(
       N, M, K, &alpha, B, ldb, A, lda, &beta, C, N));
 }
 
+template <>
+void Gemm<float, CUDAContext>(
+    const CBLAS_TRANSPOSE TransA, const CBLAS_TRANSPOSE TransB,
+    const int M, const int N, const int K, const float alpha, const float* A,
+    const int lda, const float* B, const float beta, const int ldb, float* C,
+    const int ldc, CUDAContext* context) {
+  // Note that cublas follows fortran order, so the order is different from
+  // the cblas convention.
+  cublasOperation_t cuTransA =
+      (TransA == CblasNoTrans) ? CUBLAS_OP_N : CUBLAS_OP_T;
+  cublasOperation_t cuTransB =
+      (TransB == CblasNoTrans) ? CUBLAS_OP_N : CUBLAS_OP_T;
+  CUBLAS_CHECK(cublasSgemm(context->cublas_handle(), cuTransB, cuTransA,
+      N, M, K, &alpha, B, ldb, A, lda, &beta, C, ldc));
+}
 
 template <>
 void Gemv<float, CUDAContext>(
@@ -385,6 +447,28 @@ void Scale<double, CUDAContext>(
     CUDAContext* context) {
   ScaleKernelDeviceAlpha<double><<<CAFFE_GET_BLOCKS(n), CAFFE_CUDA_NUM_THREADS,
                        0, context->cuda_stream()>>>(n, alpha, x, y);
+}
+
+namespace detail {
+template <>
+void ScaleDynamic<float, CUDAContext>(
+    const int n,
+    const float alpha,
+    const float* x,
+    float* y,
+    CUDAContext* context) {
+  return math::Scale<float, CUDAContext>(n, alpha, x, y, context);
+}
+
+template <>
+void ScaleDynamic<double, CUDAContext>(
+    const int n,
+    const double alpha,
+    const double* x,
+    double* y,
+    CUDAContext* context) {
+  return math::Scale<double, CUDAContext>(n, alpha, x, y, context);
+}
 }
 
 template <>

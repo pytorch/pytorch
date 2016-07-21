@@ -40,13 +40,13 @@ class ConvPoolOpBase : public Operator<Context> {
             "stride_w", OperatorBase::GetSingleArgument<int>("stride", 1))),
         order_(StringToStorageOrder(
             OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
-    CAFFE_CHECK_GT(kernel_h_, 0);
-    CAFFE_CHECK_GT(kernel_w_, 0);
+    CHECK_GT(kernel_h_, 0);
+    CHECK_GT(kernel_w_, 0);
     // For the padding, they should either be the legacy padding strategy
     // (VALID or SAME), or an explicit, non-negative value.
     if (legacy_pad_ == LegacyPadding::VALID ||
         legacy_pad_ == LegacyPadding::SAME) {
-      CAFFE_CHECK(!OperatorBase::HasArgument("pad") &&
+      CHECK(!OperatorBase::HasArgument("pad") &&
             !OperatorBase::HasArgument("pad_t") &&
             !OperatorBase::HasArgument("pad_l") &&
             !OperatorBase::HasArgument("pad_b") &&
@@ -55,15 +55,15 @@ class ConvPoolOpBase : public Operator<Context> {
              "any specific padding values.";
     }
 
-    CAFFE_CHECK_LE(stride_h_, kernel_h_);
-    CAFFE_CHECK_LE(stride_w_, kernel_h_);
-    CAFFE_CHECK_GE(pad_, 0);
-    CAFFE_CHECK_GE(pad_t_, 0);
-    CAFFE_CHECK_GE(pad_l_, 0);
-    CAFFE_CHECK_GE(pad_b_, 0);
-    CAFFE_CHECK_GE(pad_r_, 0);
-    CAFFE_CHECK_GT(stride_h_, 0);
-    CAFFE_CHECK_GT(stride_w_, 0);
+    CHECK_LE(stride_h_, kernel_h_);
+    CHECK_LE(stride_w_, kernel_h_);
+    CHECK_GE(pad_, 0);
+    CHECK_GE(pad_t_, 0);
+    CHECK_GE(pad_l_, 0);
+    CHECK_GE(pad_b_, 0);
+    CHECK_GE(pad_r_, 0);
+    CHECK_GT(stride_h_, 0);
+    CHECK_GT(stride_w_, 0);
   }
 
   // Sets the output size. The output channel is manually provided since
@@ -73,8 +73,8 @@ class ConvPoolOpBase : public Operator<Context> {
   void SetOutputSize(const Tensor<Context>& input,
                      Tensor<Context>* output,
                      int output_channel) {
-    CAFFE_DCHECK_EQ(input.ndim(), 4);
-    CAFFE_DCHECK_GT(input.size(), 0);
+    DCHECK_EQ(input.ndim(), 4);
+    DCHECK_GT(input.size(), 0);
     int N = input.dim32(0);
     bool channel_first = false;  // initialized to suppress compiler warning.
     int H = 0, W = 0;  // initialized to suppress compiler warning.
@@ -91,22 +91,22 @@ class ConvPoolOpBase : public Operator<Context> {
       W = input.dim32(3);
       break;
     default:
-      CAFFE_LOG_FATAL << "Unknown Storage order: " << order_;
+      LOG(FATAL) << "Unknown Storage order: " << order_;
     }
-    CAFFE_CHECK_GE(H, kernel_h_);
-    CAFFE_CHECK_GE(W, kernel_w_);
+    CHECK_GE(H, kernel_h_);
+    CHECK_GE(W, kernel_w_);
     int output_height = 0, output_width = 0;
     ComputeSizeAndPad(H, stride_h_, kernel_h_,
                       &pad_t_, &pad_b_, &output_height);
     ComputeSizeAndPad(W, stride_w_, kernel_w_,
                       &pad_l_, &pad_r_, &output_width);
     if (channel_first) {
-      output->Reshape(N, output_channel, output_height, output_width);
+      output->Resize(N, output_channel, output_height, output_width);
     } else {
-      output->Reshape(N, output_height, output_width, output_channel);
+      output->Resize(N, output_height, output_width, output_channel);
     }
-    //CAFFE_VLOG(2) << "In: N " << N << " C " << C << " H " << H << " W " << W;
-    //CAFFE_VLOG(2) << "Out: C " << output_channel << " H " << output_height
+    //VLOG(2) << "In: N " << N << " C " << C << " H " << H << " W " << W;
+    //VLOG(2) << "Out: C " << output_channel << " H " << output_height
     //        << " W " << output_width;
   }
 
@@ -125,13 +125,13 @@ class ConvPoolOpBase : public Operator<Context> {
   bool RunOnDevice() override {
     switch (order_) {
     case StorageOrder::NHWC:
-      //CAFFE_VLOG(2) << "Running NHWC";
+      //VLOG(2) << "Running NHWC";
       return RunOnDeviceWithOrderNHWC();
     case StorageOrder::NCHW:
-      //CAFFE_VLOG(2) << "Running NCHW";
+      //VLOG(2) << "Running NCHW";
       return RunOnDeviceWithOrderNCHW();
     default:
-      CAFFE_LOG_FATAL << "Unknown storage order: " << order_;
+      LOG(FATAL) << "Unknown storage order: " << order_;
     }
     // To suppress old compiler warnings
     return true;
@@ -178,8 +178,8 @@ class ConvPoolOpBase : public Operator<Context> {
       case LegacyPadding::NOTSET:
         // We will just use the direct padding head and tail values, but we
         // will verify that they are non-negative.
-        CAFFE_CHECK_GE(*pad_head, 0);
-        CAFFE_CHECK_GE(*pad_tail, 0);
+        CHECK_GE(*pad_head, 0);
+        CHECK_GE(*pad_tail, 0);
         *out_size = static_cast<int>(
             static_cast<float>(in_size + *pad_head + *pad_tail - kernel) / stride
             + 1);
@@ -203,13 +203,12 @@ class ConvPoolOpBase : public Operator<Context> {
         break;
       }
       case LegacyPadding::CAFFE_LEGACY_POOLING:
-        CAFFE_LOG_FATAL << "CAFFE_LEGACY_POOLING is no longer supported.";
+        LOG(FATAL) << "CAFFE_LEGACY_POOLING is no longer supported.";
         break;
     }
   }
 
  private:
-  DISABLE_COPY_AND_ASSIGN(ConvPoolOpBase);
 };
 
 #define USE_CONV_POOL_BASE_FUNCTIONS                                           \

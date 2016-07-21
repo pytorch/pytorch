@@ -4,6 +4,7 @@
 #include <climits>
 #include <functional>
 #include <initializer_list>
+#include <ostream>
 #include <set>
 #include <vector>
 
@@ -34,9 +35,9 @@ constexpr int kCannotComputeNumOutputs = -1;
  */
 class OpSchema {
  public:
-  OpSchema() : file_("unknown"), line_(0) { Init(); }
+  OpSchema() : file_("unknown"), line_(0) {}
   OpSchema(const string& file, const int line)
-      : file_(file), line_(line) { Init(); }
+      : file_(file), line_(line) {}
 
   /**
    * @brief Returns the file that the op schema is registered from.
@@ -47,6 +48,13 @@ class OpSchema {
    * @brief Returns the line in file that the op schema is registered from.
    */
   inline int line() const { return line_; }
+
+  /**
+   * @brief Returns the docstring of the op schema.
+   */
+  inline const char* doc() const {
+    return doc_.empty() ? nullptr : doc_.c_str();
+  }
 
   /**
    * @brief Verifies if an operator definition protobuf matches the pattern
@@ -94,6 +102,12 @@ class OpSchema {
    */
   OpSchema& NumOutputs(std::function<bool(int)> func);
 
+  /**
+   * @brief Relationship between inputs and outputs is checked with a specified
+   * function.
+   */
+  OpSchema& NumInputsOutputs(std::function<bool(int, int)> func);
+
   // Set the function that can calculate the number of output based on the
   // number of input. Use only one function in the set below.
   /**
@@ -114,37 +128,46 @@ class OpSchema {
   OpSchema& EnforceInplace(set<std::pair<int, int>> inplace);
   OpSchema& EnforceOneToOneInplace();
 
+  // Functions to do documentation for the operator schema.
+  OpSchema& SetDoc(const string& doc);
+  OpSchema& Arg(const char* name, const char* description);
+  OpSchema& Input(const int n, const char* name, const char* description);
+  OpSchema& Output(const int n, const char* name, const char* description);
+  // Calls the passed function with `this` as an argument. Useful for
+  // adding docs for temlated/macro ops.
+  OpSchema& FillUsing(std::function<void(OpSchema&)> populator);
+
   /**
    * @brief A function to allow one to get the number of outputs based on the
    * number of inputs, if this schema supports it.
    */
   int CalculateOutput(int num_input) const;
 
+  friend std::ostream& operator<<(std::ostream& out, const OpSchema& schema);
+
  private:
-  void Init() {
-    min_input_ = 0;
-    max_input_ = std::numeric_limits<int>::max();
-    min_output_ = 0;
-    max_output_ = std::numeric_limits<int>::max();
-    // In default, any in-place operation is neither allowed nor enforced.
-    inplace_allowed_ = [](int, int) { return false; };
-    inplace_enforced_ = [](int, int) { return false; };
-    num_inputs_allowed_ = [](int) { return true; };
-    num_outputs_allowed_ = [](int) { return true; };
-  }
-
   string file_;
-  int line_;
-  int min_input_;
-  int max_input_;
-  std::function<bool(int)> num_inputs_allowed_;
-  int min_output_;
-  int max_output_;
-  std::function<bool(int)> num_outputs_allowed_;
-
+  string doc_;
+  std::vector<std::pair<const char*, const char*>> arg_desc_{};
+  std::vector<std::pair<const char*, const char*>> input_desc_{};
+  std::vector<std::pair<const char*, const char*>> output_desc_{};
+  int line_ = 0;
+  int min_input_ = 0;
+  int max_input_ = std::numeric_limits<int>::max();
+  int min_output_ = 0;
+  int max_output_ = std::numeric_limits<int>::max();
+  std::function<bool(int)> num_inputs_allowed_
+      = [](int) { return true; };
+  std::function<bool(int)> num_outputs_allowed_
+      = [](int) { return true; };
+  std::function<bool(int, int)> num_inputs_outputs_allowed_
+      = [](int, int) { return true; };
   std::function<int(int)> calculate_output_;
-  std::function<bool(int, int)> inplace_allowed_;
-  std::function<bool(int, int)> inplace_enforced_;
+  // In default, any in-place operation is neither allowed nor enforced.
+  std::function<bool(int, int)> inplace_allowed_
+      = [](int, int) { return false; };
+  std::function<bool(int, int)> inplace_enforced_
+      = [](int, int) { return false; };
 };
 
 /**
@@ -179,8 +202,17 @@ class OpSchemaRegistry {
  private:
   // OpSchemaRegistry should not need to be instantiated.
   OpSchemaRegistry() = delete;
-  // Returns the underlying string to OpSchema map. We wrap it inside
-  // a function to avoid the statia initialization order fiasco.
+
+  /**
+   * @brief Returns the underlying string to OpSchema map.
+   *
+   * You should not manually manipulate the map object returned. Instead, use
+   * the macros defined such as OPERATOR_SCHEMA to register your operator
+   * schema.
+   *
+   * We wrap it inside a function to avoid the statia initialization order
+   * fiasco.
+   */
   static CaffeMap<string, OpSchema>& map();
 };
 

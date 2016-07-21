@@ -18,13 +18,19 @@ class SpatialBNOpBase : public Operator<Context> {
         momentum_(OperatorBase::GetSingleArgument<float>("momentum", 0.9)),
         order_(StringToStorageOrder(
             OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
-    CAFFE_CHECK((is_test_ && InputSize() == 5) ||
+    if (InputSize() == 3) {
+      LOG(ERROR) << "You are using an old interface convention of spatial BN. "
+                    "This is going to be deprecated, consider updating your "
+                    "protobuf.";
+    }
+    // TODO(jiayq): update the input and output size checks.
+    CHECK((is_test_ && InputSize() == 5) ||
           (!is_test_ && InputSize() == 3));
-    CAFFE_CHECK((is_test_ && OutputSize() == 1) ||
+    CHECK((is_test_ && OutputSize() == 1) ||
           (!is_test_ && (OutputSize() == 3 || OutputSize() == 5)));
-    CAFFE_CHECK_GT(epsilon_, 0);
-    CAFFE_CHECK_GE(momentum_, 0);
-    CAFFE_CHECK_LE(momentum_, 1);
+    CHECK_GT(epsilon_, 0);
+    CHECK_GE(momentum_, 0);
+    CHECK_LE(momentum_, 1);
   }
   ~SpatialBNOpBase() {}
 
@@ -35,7 +41,6 @@ class SpatialBNOpBase : public Operator<Context> {
   StorageOrder order_;
   INPUT_TAGS(INPUT, SCALE, BIAS, EST_MEAN, EST_INV_VAR);
   OUTPUT_TAGS(OUTPUT, RUNNING_MEAN, RUNNING_INV_VAR, SAVED_MEAN, SAVED_INV_VAR);
-  DISABLE_COPY_AND_ASSIGN(SpatialBNOpBase);
 };
 
 template <class Context>
@@ -48,8 +53,8 @@ class SpatialBNGradientOpBase : public Operator<Context> {
         epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5)),
         order_(StringToStorageOrder(
             OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
-    CAFFE_CHECK((InputSize() == 5) || (!is_test_ && InputSize() == 3));
-    CAFFE_CHECK_EQ(OutputSize(), 3);
+    CHECK((InputSize() == 5) || (!is_test_ && InputSize() == 3));
+    CHECK_EQ(OutputSize(), 3);
   }
   ~SpatialBNGradientOpBase() {}
 
@@ -60,7 +65,6 @@ class SpatialBNGradientOpBase : public Operator<Context> {
 
   INPUT_TAGS(INPUT, SCALE, OUTPUT_GRAD, SAVED_MEAN, SAVED_INV_VAR);
   OUTPUT_TAGS(INPUT_GRAD, SCALE_GRAD, BIAS_GRAD);
-  DISABLE_COPY_AND_ASSIGN(SpatialBNGradientOpBase);
 };
 
 }  // namespace caffe2

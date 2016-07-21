@@ -33,7 +33,7 @@ int main(int argc, char** argv) {
       caffe2::FLAGS_db_type, caffe2::FLAGS_input_db, caffe2::db::READ));
   std::unique_ptr<Cursor> cursor(in_db->NewCursor());
 
-  CAFFE_CHECK_GT(caffe2::FLAGS_splits, 0) << "Must specify the number of splits.";
+  CHECK_GT(caffe2::FLAGS_splits, 0) << "Must specify the number of splits.";
   std::vector<std::unique_ptr<DB> > out_dbs;
   std::vector<std::unique_ptr<Transaction> > transactions;
   for (int i = 0; i < caffe2::FLAGS_splits; ++i) {
@@ -52,9 +52,9 @@ int main(int argc, char** argv) {
       for (int i = 0; i < caffe2::FLAGS_splits; ++i) {
         transactions[i]->Commit();
       }
-      CAFFE_LOG_INFO << "Splitted " << count << " items so far.";
+      LOG(INFO) << "Split " << count << " items so far.";
     }
   }
-  CAFFE_LOG_INFO << "A total of " << count << " items processed.";
+  LOG(INFO) << "A total of " << count << " items processed.";
   return 0;
 }

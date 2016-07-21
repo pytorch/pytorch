@@ -7,12 +7,15 @@ namespace caffe2 {
 
 namespace {
 
-// A net test dummy op that does nothing but scaffolding.
+// A net test dummy op that does nothing but scaffolding. Here, we
+// inherit from OperatorBase because we instantiate on both CPU and
+// GPU. In general, you want to only inherit from Operator<Context>.
 class NetTestDummyOp final : public OperatorBase {
  public:
-  NetTestDummyOp(const OperatorDef& operator_def, Workspace* ws)
-      : OperatorBase(operator_def, ws) {}
-  bool Run() override { return true; }
+  using OperatorBase::OperatorBase;
+  bool Run() override {
+    return true;
+  }
 };
 
 REGISTER_CPU_OPERATOR(NetTestDummy, NetTestDummyOp);
@@ -33,12 +36,12 @@ const char kExampleNetDefString[] =
 "    type: \"NetTestDummy\""
 "  }";
 
-NetBase* CreateNetTestHelper(
+unique_ptr<NetBase> CreateNetTestHelper(
     Workspace* ws,
     const vector<string>& input,
     const vector<string>& output) {
   NetDef net_def;
-  CAFFE_CHECK(google::protobuf::TextFormat::ParseFromString(
+  CHECK(google::protobuf::TextFormat::ParseFromString(
     kExampleNetDefString, &net_def));
   for (const auto& name : input) {
     net_def.add_external_input(name);
@@ -75,21 +78,177 @@ TEST(NetTest, ConstructionDeclaredOutput) {
   EXPECT_TRUE(net.get() != nullptr);
 }
 
-TEST(NetDeathTest, DeclaredInputInsufficient) {
+TEST(NetTest, DeclaredInputInsufficient) {
   Workspace ws;
   ws.CreateBlob("in");
-  EXPECT_DEATH(
-      CreateNetTestHelper(&ws, vector<string>{"unuseful_in"}, vector<string>()),
-      "");
+  ASSERT_THROW(
+      CreateNetTestHelper(&ws, vector<string>{"unuseful_in"},
+                          vector<string>()),
+      EnforceNotMet);
 }
 
 TEST(NetDeathTest, DeclaredOutputNotMet) {
   Workspace ws;
   ws.CreateBlob("in");
-  EXPECT_DEATH(
+  ASSERT_THROW(
       CreateNetTestHelper(&ws, vector<string>(),
                           vector<string>{"unproduced_out"}),
-      "");
+      EnforceNotMet);
 }
 
-}  // namespace caffe2
+void checkChaining(
+    const char* spec,
+    const DAGNetBase::ExecutionChains& expected) {
+  Workspace ws;
+  ws.CreateBlob("in");
+  NetDef net_def;
+  CHECK(google::protobuf::TextFormat::ParseFromString(spec, &net_def));
+  std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
+  auto* dag = dynamic_cast<DAGNetBase*>(net.get());
+  CHECK_NOTNULL(dag);
+  const auto& chains = dag->TEST_execution_chains();
+  EXPECT_TRUE(chains == expected);
+}
+
+TEST(NetTest, ChainingForLinearModel) {
+  const auto spec = R"DOC(
+        name: "example"
+        type: "dag"
+        external_input: "in"
+        op {
+          input: "in"
+          output: "hidden"
+          type: "NetTestDummy"
+        }
+        op {
+          input: "hidden"
+          output: "out"
+          type: "NetTestDummy"
+        }
+)DOC";
+  checkChaining(spec, {{0, {0, 1}}});
+}
+
+TEST(NetTest, ChainingForDifferentDevices) {
+  const auto spec = R"DOC(
+        name: "example"
+        type: "dag"
+        external_input: "in"
+        op {
+          input: "in"
+          output: "hidden"
+          type: "NetTestDummy"
+        }
+        op {
+          input: "hidden"
+          output: "out"
+          type: "NetTestDummy"
+          device_option {
+            device_type: CUDA
+          }
+        }
+        op {
+          input: "out"
+          output: "out2"
+          type: "NetTestDummy"
+          device_option {
+            device_type: CUDA
+          }
+        }
+        op {
+          input: "out2"
+          output: "out3"
+          type: "NetTestDummy"
+          device_option {
+            device_type: CUDA
+            cuda_gpu_id: 1
+          }
+        }
+)DOC";
+  checkChaining(spec, {{0, {0}}, {1, {1, 2}}, {3, {3}}});
+}
+
+TEST(NetTest, ChainingForFork) {
+  const auto spec = R"DOC(
+        name: "example"
+        type: "dag"
+        external_input: "in"
+        op {
+          input: "in"
+          output: "hidden"
+          type: "NetTestDummy"
+        }
+        op {
+          input: "hidden"
+          output: "out1"
+          type: "NetTestDummy"
+        }
+        op {
+          input: "hidden"
+          output: "out2"
+          type: "NetTestDummy"
+        }
+)DOC";
+  checkChaining(spec, {{0, {0}}, {1, {1}}, {2, {2}}});
+}
+
+TEST(NetTest, ChainingForJoinWithAncestor) {
+  const auto spec = R"DOC(
+        name: "example"
+        type: "dag"
+        external_input: "in"
+        op {
+          input: "in"
+          output: "hidden"
+          type: "NetTestDummy"
+        }
+        op {
+          input: "hidden"
+          output: "out1"
+          type: "NetTestDummy"
+        }
+        op {
+          input: "hidden"
+          output: "out2"
+          type: "NetTestDummy"
+        }
+        op {
+          input: "hidden"
+          input: "out2"
+          type: "NetTestDummy"
+        }
+)DOC";
+  checkChaining(spec, {{0, {0}}, {1, {1}}, {2, {2, 3}}});
+}
+
+TEST(NetTest, ChainingForForkJoin) {
+  const auto spec = R"DOC(
+        name: "example"
+        type: "dag"
+        external_input: "in"
+        op {
+          input: "in"
+          output: "hidden1"
+          type: "NetTestDummy"
+        }
+        op {
+          input: "in"
+          output: "hidden2"
+          type: "NetTestDummy"
+        }
+        op {
+          input: "hidden1"
+          input: "hidden2"
+          output: "out"
+          type: "NetTestDummy"
+        }
+        op {
+          input: "out"
+          output: "out2"
+          type: "NetTestDummy"
+        }
+)DOC";
+  checkChaining(spec, {{0, {0}}, {1, {1}}, {2, {2, 3}}});
+}
+
+} // namespace caffe2

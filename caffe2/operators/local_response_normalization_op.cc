@@ -8,15 +8,15 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   auto& X = Input(0);
   auto* Y = Output(0);
   auto* scale = Output(1);
-  CAFFE_DCHECK_EQ(X.ndim(), 4);
+  DCHECK_EQ(X.ndim(), 4);
   const int N = X.dim32(0);
   const int C = X.dim32(1);
   const int H = X.dim32(2);
   const int W = X.dim32(3);
   const int image_size = C * H * W;
   const float* Xdata = X.data<float>();
-  Y->ReshapeLike(X);
-  scale->ReshapeLike(X);
+  Y->ResizeLike(X);
+  scale->ResizeLike(X);
   float* Ydata = Y->mutable_data<float>();
   float* scale_data = scale->mutable_data<float>();
   math::Set<float, CPUContext>(X.size(), bias_, scale_data, &context_);
@@ -67,15 +67,15 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   auto& X = Input(0);
   auto* Y = Output(0);
   auto* scale = Output(1);
-  CAFFE_DCHECK_EQ(X.ndim(), 4);
+  DCHECK_EQ(X.ndim(), 4);
   const int N = X.dim32(0);
   const int H = X.dim32(1);
   const int W = X.dim32(2);
   const int C = X.dim32(3);
   const int num_rows = N * H * W;
   const float* Xdata = X.data<float>();
-  Y->ReshapeLike(X);
-  scale->ReshapeLike(X);
+  Y->ResizeLike(X);
+  scale->ResizeLike(X);
   float* Ydata = Y->mutable_data<float>();
   float* scale_data = scale->mutable_data<float>();
 
@@ -113,7 +113,7 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   auto& scale = Input(2);
   auto& dY = Input(3);
   auto* dX = Output(0);
-  CAFFE_DCHECK_EQ(X.ndim(), 4);
+  DCHECK_EQ(X.ndim(), 4);
   const int N = X.dim32(0);
   const int C = X.dim32(1);
   const int H = X.dim32(2);
@@ -121,10 +121,10 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   const int image_size = C * H * W;
   // Loosely checking the size, assuming that the shapes will be the same as
   // long as the sizes check out.
-  CAFFE_DCHECK_EQ(X.size(), Y.size());
-  CAFFE_DCHECK_EQ(X.size(), scale.size());
-  CAFFE_DCHECK_EQ(X.size(), dY.size());
-  dX->ReshapeLike(X);
+  DCHECK_EQ(X.size(), Y.size());
+  DCHECK_EQ(X.size(), scale.size());
+  DCHECK_EQ(X.size(), dY.size());
+  dX->ResizeLike(X);
 
   const float* Xdata = X.data<float>();
   const float* Ydata = Y.data<float>();
@@ -183,17 +183,17 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   auto& scale = Input(2);
   auto& dY = Input(3);
   auto* dX = Output(0);
-  CAFFE_DCHECK_EQ(X.ndim(), 4);
+  DCHECK_EQ(X.ndim(), 4);
   const int N = X.dim32(0);
   const int H = X.dim32(1);
   const int W = X.dim32(2);
   const int C = X.dim32(3);
   // Loosely checking the size, assuming that the shapes will be the same as
   // long as the sizes check out.
-  CAFFE_DCHECK_EQ(X.size(), Y.size());
-  CAFFE_DCHECK_EQ(X.size(), scale.size());
-  CAFFE_DCHECK_EQ(X.size(), dY.size());
-  dX->ReshapeLike(X);
+  DCHECK_EQ(X.size(), Y.size());
+  DCHECK_EQ(X.size(), scale.size());
+  DCHECK_EQ(X.size(), dY.size());
+  dX->ResizeLike(X);
   TensorCPU padded_ratio(vector<TIndex>(1, C + size_ - 1));
   float* padded_ratio_data = padded_ratio.mutable_data<float>();
   math::Set<float, CPUContext>(padded_ratio.size(), 0., padded_ratio_data,

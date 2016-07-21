@@ -17,30 +17,30 @@ class LearningRateOp final : public Operator<Context> {
         base_lr_(
             OperatorBase::template GetSingleArgument<float>(
                 "base_lr", FLT_MAX)) {
-    CAFFE_CHECK_NE(base_lr_, FLT_MAX) << "Base learning rate must be set.";
+    CHECK_NE(base_lr_, FLT_MAX) << "Base learning rate must be set.";
     const string policy = OperatorBase::GetSingleArgument<string>("policy", "");
-    CAFFE_CHECK(policy.size()) << "Must specify a learning rate policy.";
+    CHECK(policy.size()) << "Must specify a learning rate policy.";
     if (policy == "fixed") {
       functor_.reset(new FixedLearningRate<T>());
     } else if (policy == "step") {
       int stepsize =
           OperatorBase::template GetSingleArgument<int>("stepsize", 0);
       T gamma = OperatorBase::template GetSingleArgument<float>("gamma", 0);
-      CAFFE_DCHECK_GT(stepsize, 0);
-      CAFFE_DCHECK_GT(gamma, 0);
+      DCHECK_GT(stepsize, 0);
+      DCHECK_GT(gamma, 0);
       functor_.reset(new StepLearningRate<T>(stepsize, gamma));
     } else if (policy == "exp") {
       T gamma = OperatorBase::template GetSingleArgument<float>("gamma", 0);
-      CAFFE_DCHECK_GT(gamma, 0);
+      DCHECK_GT(gamma, 0);
       functor_.reset(new ExpLearningRate<T>(gamma));
     } else if (policy == "inv") {
       T gamma = OperatorBase::template GetSingleArgument<float>("gamma", 0);
       T power = OperatorBase::template GetSingleArgument<float>("power", 0);
-      CAFFE_DCHECK_GT(gamma, 0);
-      CAFFE_DCHECK_GT(power, 0);
+      DCHECK_GT(gamma, 0);
+      DCHECK_GT(power, 0);
       functor_.reset(new InvLearningRate<T>(gamma, power));
     } else {
-      CAFFE_LOG_FATAL << "Unknown learning rate policy: " << policy;
+      LOG(FATAL) << "Unknown learning rate policy: " << policy;
     }
   }
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -50,7 +50,7 @@ class LearningRateOp final : public Operator<Context> {
     T learning_rate = base_lr_ * (*functor_)(iter);
     // Write to output.
     auto* output = Output(0);
-    output->Reshape(vector<TIndex>());
+    output->Resize(vector<TIndex>());
     context_.template Copy<T, CPUContext, Context>(
         1, &learning_rate, Output(0)->template mutable_data<T>());
     return true;
@@ -60,7 +60,6 @@ class LearningRateOp final : public Operator<Context> {
   unique_ptr<LearningRateFunctor<T> > functor_;
   T base_lr_;
 
-  DISABLE_COPY_AND_ASSIGN(LearningRateOp);
 };
 
 }  // namespace caffe2

@@ -7,7 +7,11 @@ thread_local ThreadLocalCUDAObjects CUDAContext::cuda_objects_;
 
 namespace {
 bool Caffe2UsePinnedCPUAllocator(int*, char***) {
-  CAFFE_VLOG(1) << "Caffe2 gpu: setting CPUAllocator to PinnedCPUAllocator.";
+  if (!HasCudaGPU()) {
+    VLOG(1) << "No GPU present. I won't use pinned allocator then.";
+    return true;
+  }
+  VLOG(1) << "Caffe2 gpu: setting CPUAllocator to PinnedCPUAllocator.";
   SetCPUAllocator(new PinnedCPUAllocator());
   return true;
 }

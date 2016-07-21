@@ -11,14 +11,15 @@
 #endif
 
 #include "caffe2/core/common.h"
+#include "caffe2/core/logging.h"
 
 namespace caffe2 {
 
 typedef intptr_t CaffeTypeId;
-std::map<CaffeTypeId, const char*>& gTypeNames();
+std::map<CaffeTypeId, string>& gTypeNames();
 
 // A utility function to demangle a function name.
-const char* Demangle(const char* name);
+string Demangle(const char* name);
 
 template <typename T>
 struct TypeNameRegisterer {
@@ -104,9 +105,13 @@ class TypeMeta {
   /**
    * Returns a printable name for the type.
    */
-  inline const char* const& name() const { return gTypeNames()[id_]; }
-  bool operator==(const TypeMeta& other) const { return (id_ == other.id_); }
-  bool operator!=(const TypeMeta& other) const { return (id_ != other.id_); }
+  inline const char* name() const {
+    auto it = gTypeNames().find(id_);
+    DCHECK(it != gTypeNames().end());
+    return it->second.c_str();
+  }
+  inline bool operator==(const TypeMeta& m) const { return (id_ == m.id_); }
+  inline bool operator!=(const TypeMeta& m) const { return (id_ != m.id_); }
 
   template <typename T>
   inline bool Match() const { return (id_ == Id<T>()); }
@@ -130,11 +135,14 @@ class TypeMeta {
    */
   template <typename T>
   static size_t ItemSize() { return sizeof(T); }
+
   /**
    * Returns the printable name of the type.
    */
   template <typename T>
-  static const char* Name() { return gTypeNames()[Id<T>()]; }
+  static const char* Name() {
+    return gTypeNames()[Id<T>()].c_str();
+  }
 
   /**
    * Placement new function for the type.

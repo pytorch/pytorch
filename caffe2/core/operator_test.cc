@@ -6,39 +6,73 @@
 
 namespace caffe2 {
 
+// Since we instantiate this on CPU and GPU (but don't want a
+// CUDAContext dependency, we use OperatorBase. In general, you only
+// want to inherit from Operator<Context> in your code.
 class JustTest : public OperatorBase {
  public:
-  explicit JustTest(const OperatorDef& op_def, Workspace* ws)
-      : OperatorBase(op_def, ws) {}
+  using OperatorBase::OperatorBase;
   bool Run() override { return true; }
 };
 
-OPERATOR_SCHEMA(JustTest)
-    .NumInputs(0, 1).NumOutputs(0, 1);
+class ThrowException : public Operator<CPUContext> {
+ public:
+  explicit ThrowException(const OperatorDef& op_def, Workspace* ws)
+      : Operator<CPUContext>(op_def, ws) {}
+  bool RunOnDevice() override {
+    CAFFE_THROW("Throwing an exception.");
+  }
+};
+
+OPERATOR_SCHEMA(JustTest).NumInputs(0, 1).NumOutputs(0, 1);
+OPERATOR_SCHEMA(ThrowException).NumInputs(0).NumOutputs(0);
 
 REGISTER_CPU_OPERATOR(JustTest, JustTest);
 REGISTER_CUDA_OPERATOR(JustTest, JustTest);
-
+REGISTER_CPU_OPERATOR(ThrowException, ThrowException);
 
 TEST(OperatorTest, RegistryWorks) {
   OperatorDef op_def;
   Workspace ws;
   op_def.set_type("JustTest");
-  unique_ptr<OperatorBase> op(CreateOperator(op_def, &ws));
+  unique_ptr<OperatorBase> op = CreateOperator(op_def, &ws);
   EXPECT_NE(nullptr, op.get());
   op_def.mutable_device_option()->set_device_type(CUDA);
-  op.reset(CreateOperator(op_def, &ws));
+  op = CreateOperator(op_def, &ws);
   EXPECT_NE(nullptr, op.get());
 }
 
-TEST(OperatorDeathTest, CannotUseUninitializedBlob) {
+TEST(OperatorTest, ExceptionWorks) {
+  OperatorDef op_def;
+  Workspace ws;
+  op_def.set_type("ThrowException");
+  unique_ptr<OperatorBase> op = CreateOperator(op_def, &ws);
+  // Note: we do not do ASSERT_THROW in order to print out
+  // the error message for inspection.
+  try {
+    op->Run();
+    // This should not happen - exception should throw above.
+    LOG(FATAL) << "This should not happen.";
+  } catch (const EnforceNotMet& err) {
+    LOG(INFO) << err.msg();
+  }
+  try {
+    op->RunAsync();
+    // This should not happen - exception should throw above.
+    LOG(FATAL) << "This should not happen.";
+  } catch (const EnforceNotMet& err) {
+    LOG(INFO) << err.msg();
+  }
+}
+
+TEST(OperatorTest, CannotUseUninitializedBlob) {
   Workspace ws;
   OperatorDef op_def;
   op_def.set_name("JustTest0");
   op_def.set_type("JustTest");
   op_def.add_input("input");
   op_def.add_output("output");
-  EXPECT_DEATH(CreateOperator(op_def, &ws), "Check failed");
+  ASSERT_THROW(CreateOperator(op_def, &ws), EnforceNotMet);
 }
 
 TEST(OperatorTest, TestParameterAccess) {
@@ -74,8 +108,7 @@ TEST(OperatorTest, TestParameterAccess) {
   EXPECT_EQ(op.GetSingleArgument<string>("arg2", "default"), "argstring");
 }
 
-
-TEST(OperatorDeathTest, CannotAccessParameterWithWrongType) {
+TEST(OperatorTest, CannotAccessParameterWithWrongType) {
   OperatorDef op_def;
   Workspace ws;
   op_def.set_name("JustTest0");
@@ -90,8 +123,7 @@ TEST(OperatorDeathTest, CannotAccessParameterWithWrongType) {
   EXPECT_NE(ws.CreateBlob("input"), nullptr);
   OperatorBase op(op_def, &ws);
   EXPECT_FLOAT_EQ(op.GetSingleArgument<float>("arg0", 0.0), 0.1);
-  EXPECT_DEATH(op.GetSingleArgument<int>("arg0", 0),
-               "Argument arg0 does not have the right field: expected field i");
+  ASSERT_THROW(op.GetSingleArgument<int>("arg0", 0), EnforceNotMet);
 }
 
 TEST(OperatorDeathTest, DISABLED_CannotAccessRepeatedParameterWithWrongType) {
@@ -146,14 +178,14 @@ TEST(OperatorTest, TestSetUpInputOutputCount) {
   op_def.add_output("output");
   EXPECT_NE(nullptr, ws.CreateBlob("input"));
   EXPECT_NE(nullptr, ws.CreateBlob("input2"));
-  unique_ptr<OperatorBase> op(CreateOperator(op_def, &ws));
+  unique_ptr<OperatorBase> op = CreateOperator(op_def, &ws);
   // JustTest will only accept one single input.
   EXPECT_EQ(nullptr, op.get());
 
   op_def.clear_input();
   op_def.add_input("input");
   op_def.add_output("output2");
-  op.reset(CreateOperator(op_def, &ws));
+  op = CreateOperator(op_def, &ws);
   // JustTest will only produce one single output.
   EXPECT_EQ(nullptr, op.get());
 }
@@ -176,7 +208,7 @@ NetDef GetNetDefForTest() {
 
 TEST(NetTest, TestScaffoldingSimpleNet) {
   NetDef net_def = GetNetDefForTest();
-  net_def.set_net_type("simple");
+  net_def.set_type("simple");
   Workspace ws;
   EXPECT_NE(nullptr, ws.CreateBlob("input"));
   unique_ptr<NetBase> net(CreateNet(net_def, &ws));
@@ -190,7 +222,7 @@ TEST(NetTest, TestScaffoldingSimpleNet) {
 
 TEST(NetTest, TestScaffoldingDAGNet) {
   NetDef net_def = GetNetDefForTest();
-  net_def.set_net_type("dag");
+  net_def.set_type("dag");
   net_def.set_num_workers(1);
   Workspace ws;
   EXPECT_NE(nullptr, ws.CreateBlob("input"));
@@ -247,8 +279,4 @@ TEST(OperatorGradientRegistryTest, GradientSimple) {
   EXPECT_EQ(meta.g_input_[0].dense_, "in_grad");
 }
 
-
-
 }  // namespace caffe2
-
-

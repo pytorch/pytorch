@@ -6,9 +6,9 @@ template <>
 bool NHWC2NCHWOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto* Y = Output(0);
-  CAFFE_DCHECK_EQ(X.ndim(), 4);
+  DCHECK_EQ(X.ndim(), 4);
   const int N = X.dim32(0), H = X.dim32(1), W = X.dim32(2), C = X.dim32(3);
-  Y->Reshape(vector<TIndex>{N, C, H, W});
+  Y->Resize(vector<TIndex>{N, C, H, W});
   const float* Xdata = X.data<float>();
   float* Ydata = Y->mutable_data<float>();
   for (int n = 0; n < N; ++n) {
@@ -27,9 +27,9 @@ template <>
 bool NCHW2NHWCOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto* Y = Output(0);
-  CAFFE_DCHECK_EQ(X.ndim(), 4);
+  DCHECK_EQ(X.ndim(), 4);
   const int N = X.dim32(0), C = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
-  Y->Reshape(vector<TIndex>{N, H, W, C});
+  Y->Resize(vector<TIndex>{N, H, W, C});
   const float* Xdata = X.data<float>();
   float* Ydata = Y->mutable_data<float>();
   for (int n = 0; n < N; ++n) {
@@ -49,8 +49,23 @@ namespace {
 REGISTER_CPU_OPERATOR(NHWC2NCHW, NHWC2NCHWOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(NCHW2NHWC, NCHW2NHWCOp<float, CPUContext>);
 
-OPERATOR_SCHEMA(NHWC2NCHW).NumInputs(1).NumOutputs(1);
-OPERATOR_SCHEMA(NCHW2NHWC).NumInputs(1).NumOutputs(1);
+OPERATOR_SCHEMA(NHWC2NCHW)
+  .NumInputs(1)
+  .NumOutputs(1)
+  .SetDoc(R"DOC(
+The operator switches the order of data in a tensor from NHWC- sample index N,
+height H, width H and channels C, to the NCHW order.
+)DOC")
+  .Input(0, "data", "The input data (Tensor<float>) in the NHWC order.")
+  .Output(0, "output", "The output tensor (Tensor<float>) in the NCHW order.");
+
+OPERATOR_SCHEMA(NCHW2NHWC).NumInputs(1).NumOutputs(1)
+  .SetDoc(R"DOC(
+The operator switches the order of data in a tensor from NCHW- sample index N,
+channels C, height H and width W, to the NHWC order.
+)DOC")
+  .Input(0, "data", "The input data (Tensor<float>) in the NCHW order.")
+  .Output(0, "output", "The output tensor (Tensor<float>) in the NHWC order.");
 
 
 class GetNHWC2NCHWGradient : public GradientMakerBase {

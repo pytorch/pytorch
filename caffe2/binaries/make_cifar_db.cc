@@ -73,10 +73,10 @@ void WriteToDB(const string& filename, const int num_items,
   label->add_dims(1);
   label->add_int32_data(0);
 
-  CAFFE_LOG_INFO << "Converting file " << filename;
+  LOG(INFO) << "Converting file " << filename;
   std::ifstream data_file(filename.c_str(),
       std::ios::in | std::ios::binary);
-  CAFFE_CHECK(data_file) << "Unable to open file " << filename;
+  CHECK(data_file) << "Unable to open file " << filename;
   char str_buffer[kCIFARImageNBytes];
   int label_value;
   string serialized_protos;

@@ -38,11 +38,12 @@ class SimpleQueue {
 
   // Push pushes a value to the queue.
   void Push(const T& value) {
-    std::unique_lock<std::mutex> mutex_lock(mutex_);
-    CAFFE_CHECK(!no_more_jobs_)
-        << "Cannot push to a closed queue.";
-    queue_.push(value);
-    mutex_lock.unlock();
+    {
+      std::lock_guard<std::mutex> mutex_lock(mutex_);
+      CHECK(!no_more_jobs_)
+          << "Cannot push to a closed queue.";
+      queue_.push(value);
+    }
     cv_.notify_one();
   }
 
@@ -53,9 +54,10 @@ class SimpleQueue {
   // by the Pop() functions, any more Pop() function will immediately return
   // false with nothing set to the value.
   void NoMoreJobs() {
-    std::unique_lock<std::mutex> mutex_lock(mutex_);
-    no_more_jobs_ = true;
-    mutex_lock.unlock();
+    {
+      std::lock_guard<std::mutex> mutex_lock(mutex_);
+      no_more_jobs_ = true;
+    }
     cv_.notify_all();
   }
 

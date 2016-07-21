@@ -16,14 +16,15 @@ void adam_update(
     float beta1,
     float beta2,
     float eps_hat,
-    float corrected_local_rate,
+    float correction,
+    const float* lr,
     Context* context) {
 #pragma omp parallel for
   for (auto i = 0; i < N; ++i) {
     float gi = g[i];
     float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
     float vi = nv[i] = v[i] * beta2 + gi * gi * (1 - beta2);
-    ng[i] = corrected_local_rate * mi / (sqrt(vi) + eps_hat);
+    ng[i] = lr[0] * correction * mi / (sqrt(vi) + eps_hat);
   }
 }
 
@@ -37,19 +38,18 @@ class AdamOp final : public Operator<Context> {
         beta2_(OperatorBase::GetSingleArgument<float>("beta2", 0.999)),
         epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5)) {}
   bool RunOnDevice() override {
-    // LR and iter live on the CPU
-    CAFFE_CHECK(OperatorBase::InputIsType<TensorCPU>(LR)) << "LR wrong type";
-    CAFFE_CHECK(OperatorBase::InputIsType<TensorCPU>(ITER)) << "Iter wrong type";
-    const auto lr = OperatorBase::Input<TensorCPU>(LR).template data<T>()[0];
+    // Iter live on the CPU
+    CAFFE_ENFORCE(OperatorBase::InputIsType<TensorCPU>(ITER));
+    CAFFE_ENFORCE(Input(LR).size() == 1);
+    CAFFE_ENFORCE(Input(GRAD).size() == Input(MOMENT_1).size());
+    CAFFE_ENFORCE(Input(GRAD).size() == Input(MOMENT_2).size());
+    Output(OUTPUT_GRAD)->ResizeLike(Input(GRAD));
+    Output(OUTPUT_MOMENT_1)->ResizeLike(Input(MOMENT_1));
+    Output(OUTPUT_MOMENT_2)->ResizeLike(Input(MOMENT_2));
+
     const auto iter =
         OperatorBase::Input<TensorCPU>(ITER).template data<int>()[0];
-    CAFFE_CHECK(OperatorBase::InputIsType<Tensor<Context>>(GRAD))
-        << "Grad wrong type";
-    CAFFE_CHECK_EQ(Input(GRAD).size(), Input(MOMENT_1).size());
-    CAFFE_CHECK_EQ(Input(GRAD).size(), Input(MOMENT_2).size());
-    Output(OUTPUT_GRAD)->ReshapeLike(Input(GRAD));
-    Output(OUTPUT_MOMENT_1)->ReshapeLike(Input(MOMENT_1));
-    Output(OUTPUT_MOMENT_2)->ReshapeLike(Input(MOMENT_2));
+
     const auto t = iter + 1;
     const auto correction =
         std::sqrt(T(1.) - std::pow(beta2_, t)) / (T(1.) - std::pow(beta1_, t));
@@ -64,7 +64,8 @@ class AdamOp final : public Operator<Context> {
         beta1_,
         beta2_,
         epsilon_,
-        correction * lr,
+        correction,
+        Input(LR).template data<T>(),
         &context_);
     return true;
   }
@@ -75,6 +76,5 @@ class AdamOp final : public Operator<Context> {
   T epsilon_{1e-8};
   INPUT_TAGS(GRAD, MOMENT_1, MOMENT_2, LR, ITER);
   OUTPUT_TAGS(OUTPUT_GRAD, OUTPUT_MOMENT_1, OUTPUT_MOMENT_2);
-  DISABLE_COPY_AND_ASSIGN(AdamOp);
 };
 }

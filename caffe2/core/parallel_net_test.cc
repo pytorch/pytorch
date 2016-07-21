@@ -16,16 +16,19 @@ using std::clock;
 const int kTimeThreshold = 20;
 
 // SleepOp basically sleeps for a given number of seconds.
-class SleepOp final : public OperatorBase {
+// We allow arbitrary inputs and at most one output so that we can
+// test scaffolding of networks. If the output is 1, it will be filled with
+// vector<clock_t> with two elements: start time and end time.
+class SleepOp final : public Operator<CPUContext> {
  public:
   SleepOp(const OperatorDef& operator_def, Workspace* ws)
-      : OperatorBase(operator_def, ws),
+      : Operator<CPUContext>(operator_def, ws),
         ms_(OperatorBase::GetSingleArgument<int>("ms", 1000)) {
-    CAFFE_DCHECK_GT(ms_, 0);
-    CAFFE_DCHECK_LT(ms_, 3600 * 1000) << "Really? This long?";
+    DCHECK_GT(ms_, 0);
+    DCHECK_LT(ms_, 3600 * 1000) << "Really? This long?";
   }
 
-  bool Run() override {
+  bool RunOnDevice() override {
     clock_t start = clock();
     std::this_thread::sleep_for(std::chrono::milliseconds(ms_));
     clock_t end = clock();
@@ -40,12 +43,9 @@ class SleepOp final : public OperatorBase {
 
  private:
   int ms_;
-  // We allow arbitrary inputs and at most one output so that we can
-  // test scaffolding of networks. If the output is 1, it will be filled with
-  // vector<clock_t> with two elements: start time and end time.
-  INPUT_OUTPUT_STATS(0, INT_MAX, 0, 1);
-  DISABLE_COPY_AND_ASSIGN(SleepOp);
 };
+
+OPERATOR_SCHEMA(Sleep).NumInputs(0, INT_MAX).NumOutputs(0, 1);
 
 namespace {
 REGISTER_CPU_OPERATOR(Sleep, SleepOp);
@@ -54,7 +54,7 @@ REGISTER_CUDA_OPERATOR(Sleep, SleepOp);
 
 const char kSleepNetDefString[] =
 "  name: \"sleepnet\""
-"  net_type: \"dag\""
+"  type: \"dag\""
 "  num_workers: 2"
 "  op {"
 "    output: \"sleep1\""
@@ -87,17 +87,17 @@ const char kSleepNetDefString[] =
 
 namespace {
 // Run a network and get its duration in milliseconds.
-int RunNetAndGetDuration(const string& net_def_str, const string& net_type) {
+int RunNetAndGetDuration(const string& net_def_str, const string& type) {
   NetDef net_def;
-  CAFFE_CHECK(google::protobuf::TextFormat::ParseFromString(
+  CHECK(google::protobuf::TextFormat::ParseFromString(
     net_def_str, &net_def));
-  net_def.set_net_type(net_type);
+  net_def.set_type(type);
   Workspace ws;
   unique_ptr<NetBase> net(CreateNet(net_def, &ws));
-  CAFFE_CHECK(net.get() != nullptr);
-  CAFFE_CHECK(net->Verify());
+  CHECK(net.get() != nullptr);
+  CHECK(net->Verify());
   auto start_time = std::chrono::system_clock::now();
-  CAFFE_CHECK(net->Run());
+  CHECK(net->Run());
   // Inspect the time - it should be around 200 milliseconds, since sleep3 can
   // run in parallel with sleep1 and sleep2.
   auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -124,7 +124,7 @@ TEST(SimpleNetTest, TestSimpleNetTiming) {
 // run in parallel.
 const char kSleepNetDefStringReadAfterRead[] =
 "  name: \"sleepnet\""
-"  net_type: \"dag\""
+"  type: \"dag\""
 "  num_workers: 2"
 "  op {"
 "    output: \"sleep1\""
@@ -173,7 +173,7 @@ TEST(SimpleNetTest, TestSimpleNetTimingReadAfterRead) {
 // process should be sequential.
 const char kSleepNetDefStringWriteAfterWrite[] =
 "  name: \"sleepnet\""
-"  net_type: \"dag\""
+"  type: \"dag\""
 "  num_workers: 2"
 "  op {"
 "    output: \"sleep1\""
@@ -221,7 +221,7 @@ TEST(SimpleNetTest, TestSimpleNetTimingWriteAfterWrite) {
 // read dependency and the whole process should be sequential.
 const char kSleepNetDefStringWriteAfterRead[] =
 "  name: \"sleepnet\""
-"  net_type: \"dag\""
+"  type: \"dag\""
 "  num_workers: 2"
 "  op {"
 "    output: \"sleep1\""
@@ -261,6 +261,56 @@ TEST(DAGNetTest, TestDAGNetTimingWriteAfterRead) {
 TEST(SimpleNetTest, TestSimpleNetTimingWriteAfterRead) {
   int ms = RunNetAndGetDuration(
       string(kSleepNetDefStringWriteAfterRead), "simple");
+  EXPECT_NEAR(ms, 350, kTimeThreshold);
+}
+
+// This network has an operator writing to sleep1 while another
+// operator has a control dependency on it. As a result, the operator
+// sleep1-again creates a write after read dependency and the whole
+// process should be sequential.
+const char kSleepNetDefStringControlDependency[] = R"DOC(
+  name: "sleepnet"
+  type: "dag"
+  num_workers: 2
+  op {
+    output: "sleep1"
+    name: "sleep1"
+    type: "Sleep"
+    arg {
+      name: "ms"
+      i: 100
+    }
+  }
+  op {
+    control_input: "sleep1"
+    output: "sleep2"
+    name: "sleep2"
+    type: "Sleep"
+    arg {
+      name: "ms"
+      i: 100
+    }
+  }
+  op {
+    output: "sleep1"
+    name: "sleep1-again"
+    type: "Sleep"
+    arg {
+      name: "ms"
+      i: 150
+    }
+  }
+)DOC";
+
+TEST(DAGNetTest, TestDAGNetTimingControlDependency) {
+  int ms = RunNetAndGetDuration(
+      string(kSleepNetDefStringControlDependency), "dag");
+  EXPECT_NEAR(ms, 350, kTimeThreshold);
+}
+
+TEST(SimpleNetTest, TestSimpleNetTimingControlDependency) {
+  int ms = RunNetAndGetDuration(
+      string(kSleepNetDefStringControlDependency), "simple");
   EXPECT_NEAR(ms, 350, kTimeThreshold);
 }
 

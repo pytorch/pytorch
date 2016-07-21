@@ -1,6 +1,7 @@
 #ifndef CAFFE2_IMAGE_IMAGE_INPUT_OP_H_
 #define CAFFE2_IMAGE_IMAGE_INPUT_OP_H_
 
+#include <omp.h>
 #include <opencv2/opencv.hpp>
 
 #include <iostream>
@@ -47,7 +48,6 @@ class ImageInputOp final
   int crop_;
   bool mirror_;
   bool use_caffe_datum_;
-  DISABLE_COPY_AND_ASSIGN(ImageInputOp);
 };
 
 
@@ -68,38 +68,38 @@ ImageInputOp<Context>::ImageInputOp(
         use_caffe_datum_(OperatorBase::template GetSingleArgument<int>(
               "use_caffe_datum", 0)) {
   if (operator_def.input_size() == 0) {
-    CAFFE_LOG_ERROR << "You are using an old ImageInputOp format that creates "
+    LOG(ERROR) << "You are using an old ImageInputOp format that creates "
                        "a local db reader. Consider moving to the new style "
                        "that takes in a DBReader blob instead.";
     string db_name =
         OperatorBase::template GetSingleArgument<string>("db", "");
-    CAFFE_CHECK_GT(db_name.size(), 0) << "Must specify a db name.";
+    CHECK_GT(db_name.size(), 0) << "Must specify a db name.";
     owned_reader_.reset(new db::DBReader(
         OperatorBase::template GetSingleArgument<string>(
             "db_type", "leveldb"),
         db_name));
     reader_ = owned_reader_.get();
   }
-  CAFFE_CHECK_GT(batch_size_, 0) << "Batch size should be nonnegative.";
-  CAFFE_CHECK_GT(scale_, 0) << "Must provide the scaling factor.";
-  CAFFE_CHECK_GT(crop_, 0) << "Must provide the cropping value.";
-  CAFFE_CHECK_GE(scale_, crop_)
+  CHECK_GT(batch_size_, 0) << "Batch size should be nonnegative.";
+  CHECK_GT(scale_, 0) << "Must provide the scaling factor.";
+  CHECK_GT(crop_, 0) << "Must provide the cropping value.";
+  CHECK_GE(scale_, crop_)
       << "The scale value must be no smaller than the crop value.";
 
-  CAFFE_LOG_INFO << "Creating an image input op with the following setting: ";
-  CAFFE_LOG_INFO << "    Outputting in batches of " << batch_size_ << " images;";
-  CAFFE_LOG_INFO << "    Treating input image as "
+  LOG(INFO) << "Creating an image input op with the following setting: ";
+  LOG(INFO) << "    Outputting in batches of " << batch_size_ << " images;";
+  LOG(INFO) << "    Treating input image as "
             << (color_ ? "color " : "grayscale ") << "image;";
-  CAFFE_LOG_INFO << "    Scaling image to " << scale_
+  LOG(INFO) << "    Scaling image to " << scale_
             << (warp_ ? " with " : " without ") << "warping;";
-  CAFFE_LOG_INFO << "    Cropping image to " << crop_
+  LOG(INFO) << "    Cropping image to " << crop_
             << (mirror_ ? " with " : " without ") << "random mirroring;";
-  CAFFE_LOG_INFO << "    Subtract mean " << mean_ << " and divide by std " << std_
+  LOG(INFO) << "    Subtract mean " << mean_ << " and divide by std " << std_
             << ".";
-  prefetched_image_.Reshape(
+  prefetched_image_.Resize(
       vector<TIndex>{TIndex(batch_size_), TIndex(crop_), TIndex(crop_),
                      TIndex(color_ ? 3 : 1)});
-  prefetched_label_.Reshape(vector<TIndex>(1, batch_size_));
+  prefetched_label_.Resize(vector<TIndex>(1, batch_size_));
 }
 
 template <class Context>
@@ -108,7 +108,7 @@ bool ImageInputOp<Context>::GetImageAndLabelFromDBValue(
   if (use_caffe_datum_) {
     // The input is a caffe datum format.
     caffe::Datum datum;
-    CAFFE_CHECK(datum.ParseFromString(value));
+    CHECK(datum.ParseFromString(value));
     *label = datum.label();
     if (datum.encoded()) {
       // encoded image in datum.
@@ -121,8 +121,8 @@ bool ImageInputOp<Context>::GetImageAndLabelFromDBValue(
       *img = cv::Mat(datum.height(), datum.width(),
                      color_ ? CV_8UC3 : CV_8UC1);
       // Note(Yangqing): I believe that the mat should be created continuous.
-      CAFFE_CHECK(img->isContinuous());
-      CAFFE_CHECK((color_ && datum.channels() == 3) || datum.channels() == 1);
+      CHECK(img->isContinuous());
+      CHECK((color_ && datum.channels() == 3) || datum.channels() == 1);
       if (datum.channels() == 1) {
         memcpy(img->ptr<uchar>(0), datum.data().data(), datum.data().size());
       } else {
@@ -144,12 +144,12 @@ bool ImageInputOp<Context>::GetImageAndLabelFromDBValue(
   } else {
     // The input is a caffe2 format.
     TensorProtos protos;
-    CAFFE_CHECK(protos.ParseFromString(value));
+    CHECK(protos.ParseFromString(value));
     const TensorProto& image_proto = protos.protos(0);
     const TensorProto& label_proto = protos.protos(1);
     if (image_proto.data_type() == TensorProto::STRING) {
       // encoded image string.
-      CAFFE_DCHECK_EQ(image_proto.string_data_size(), 1);
+      DCHECK_EQ(image_proto.string_data_size(), 1);
       const string& encoded_image_str = image_proto.string_data(0);
       int encoded_size = encoded_image_str.size();
       // We use a cv::Mat to wrap the encoded str so we do not need a copy.
@@ -159,21 +159,21 @@ bool ImageInputOp<Context>::GetImageAndLabelFromDBValue(
           color_ ? CV_LOAD_IMAGE_COLOR : CV_LOAD_IMAGE_GRAYSCALE);
     } else if (image_proto.data_type() == TensorProto::BYTE) {
       // raw image content.
-      CAFFE_CHECK_EQ(image_proto.dims_size(), (color_ ? 3 : 2));
-      CAFFE_CHECK_GE(image_proto.dims(0), crop_)
+      CHECK_EQ(image_proto.dims_size(), (color_ ? 3 : 2));
+      CHECK_GE(image_proto.dims(0), crop_)
           << "Image height must be bigger than crop.";
-      CAFFE_CHECK_GE(image_proto.dims(1), crop_)
+      CHECK_GE(image_proto.dims(1), crop_)
           << "Image width must be bigger than crop.";
-      CAFFE_CHECK(!color_ || image_proto.dims(2) == 3);
+      CHECK(!color_ || image_proto.dims(2) == 3);
       *img = cv::Mat(
           image_proto.dims(0), image_proto.dims(1), color_ ? CV_8UC3 : CV_8UC1);
       memcpy(img->ptr<uchar>(0), image_proto.byte_data().data(),
              image_proto.byte_data().size());
     } else {
-      CAFFE_LOG_FATAL << "Unknown image data type.";
+      LOG(FATAL) << "Unknown image data type.";
     }
-    CAFFE_DCHECK_EQ(label_proto.data_type(), TensorProto::INT32);
-    CAFFE_DCHECK_EQ(label_proto.int32_data_size(), 1);
+    DCHECK_EQ(label_proto.data_type(), TensorProto::INT32);
+    DCHECK_EQ(label_proto.int32_data_size(), 1);
     *label = label_proto.int32_data(0);
   }
   // TODO(Yangqing): return false if any error happens.
@@ -212,7 +212,7 @@ bool ImageInputOp<Context>::Prefetch() {
     cv::Mat scaled_img;
     // process data
     reader_->Read(&key, &value);
-    CAFFE_CHECK(GetImageAndLabelFromDBValue(value, &img, &label));
+    CHECK(GetImageAndLabelFromDBValue(value, &img, &label));
     // deal with scaling.
     int scaled_width, scaled_height;
     if (warp_) {

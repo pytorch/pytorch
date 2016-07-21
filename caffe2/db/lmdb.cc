@@ -13,7 +13,7 @@ namespace db {
 constexpr size_t LMDB_MAP_SIZE = 1099511627776;  // 1 TB
 
 inline void MDB_CHECK(int mdb_status) {
-  CAFFE_CHECK_EQ(mdb_status, MDB_SUCCESS) << mdb_strerror(mdb_status);
+  CHECK_EQ(mdb_status, MDB_SUCCESS) << mdb_strerror(mdb_status);
 }
 
 class LMDBCursor : public Cursor {
@@ -123,9 +123,11 @@ class LMDB : public DB {
       mdb_env_ = NULL;
     }
   }
-  Cursor* NewCursor() override { return new LMDBCursor(mdb_env_); }
-  Transaction* NewTransaction() override {
-    return new LMDBTransaction(mdb_env_);
+  unique_ptr<Cursor> NewCursor() override {
+    return std::make_unique<LMDBCursor>(mdb_env_);
+  }
+  unique_ptr<Transaction> NewTransaction() override {
+    return std::make_unique<LMDBTransaction>(mdb_env_);
   }
 
  private:
@@ -136,7 +138,7 @@ LMDB::LMDB(const string& source, Mode mode) : DB(source, mode) {
   MDB_CHECK(mdb_env_create(&mdb_env_));
   MDB_CHECK(mdb_env_set_mapsize(mdb_env_, LMDB_MAP_SIZE));
   if (mode == NEW) {
-    CAFFE_CHECK_EQ(mkdir(source.c_str(), 0744), 0)
+    CHECK_EQ(mkdir(source.c_str(), 0744), 0)
         << "mkdir " << source << "failed";
   }
   int flags = 0;
@@ -144,7 +146,7 @@ LMDB::LMDB(const string& source, Mode mode) : DB(source, mode) {
     flags = MDB_RDONLY | MDB_NOTLS;
   }
   MDB_CHECK(mdb_env_open(mdb_env_, source.c_str(), flags, 0664));
-  CAFFE_VLOG(1) << "Opened lmdb " << source;
+  VLOG(1) << "Opened lmdb " << source;
 }
 
 void LMDBTransaction::Put(const string& key, const string& value) {

@@ -5,8 +5,6 @@ from __future__ import unicode_literals
 import argparse
 from collections import defaultdict
 from caffe2.python import utils
-import sys
-import subprocess
 
 try:
     import pydot
@@ -24,7 +22,6 @@ except ImportError:
     pydot = None
 
 from caffe2.proto import caffe2_pb2
-from google.protobuf import text_format
 
 OP_STYLE = {
     'shape': 'box',
@@ -35,11 +32,32 @@ OP_STYLE = {
 BLOB_STYLE = {'shape': 'octagon'}
 
 
-def GetPydotGraph(operators, name, rankdir='LR'):
+def _rectify_operator_and_name(operators_or_net, name):
+    """Gets the operators and name for the pydot graph."""
+    if isinstance(operators_or_net, caffe2_pb2.NetDef):
+        operators = operators_or_net.op
+        if name is None:
+            name = operators_or_net.name
+    elif hasattr(operators_or_net, 'Proto'):
+        net = operators_or_net.Proto()
+        if not isinstance(net, caffe2_pb2.NetDef):
+            raise RuntimeError(
+                "Expecting NetDef, but got {}".format(type(net)))
+        operators = net.op
+        if name is None:
+            name = net.name
+    else:
+        operators = operators_or_net
+        if name is None:
+            name = "unnamed"
+    return operators, name
+
+
+def GetPydotGraph(operators_or_net, name=None, rankdir='LR'):
+    operators, name = _rectify_operator_and_name(operators_or_net, name)
     graph = pydot.Dot(name, rankdir=rankdir)
     pydot_nodes = {}
     pydot_node_counts = defaultdict(int)
-    node_id = 0
     for op_id, op in enumerate(operators):
         if op.name:
             op_node = pydot.Node(
@@ -79,7 +97,7 @@ def GetPydotGraph(operators, name, rankdir='LR'):
 
 
 def GetPydotGraphMinimal(
-    operators,
+    operators_or_net,
     name,
     rankdir='LR',
     minimal_dependency=False
@@ -91,12 +109,12 @@ def GetPydotGraphMinimal(
     op a and b, and op b depends on a, then only the edge b->c will be drawn
     because a->c will be implied.
     """
+    operators, name = _rectify_operator_and_name(operators_or_net, name)
     graph = pydot.Dot(name, rankdir=rankdir)
     # blob_parents maps each blob name to its generating op.
     blob_parents = {}
     # op_ancestry records the ancestors of each op.
     op_ancestry = defaultdict(set)
-    node_id = 0
     for op_id, op in enumerate(operators):
         if op.name:
             op_node = pydot.Node(
@@ -118,7 +136,7 @@ def GetPydotGraphMinimal(
             for node in parents:
                 if all(
                     [node not in op_ancestry[other_node]
-                    for other_node in parents]
+                     for other_node in parents]
                 ):
                     graph.add_edge(pydot.Edge(node, op_node))
         else:
@@ -174,7 +192,7 @@ def main():
                 caffe2_pb2.NetDef: lambda x: {x.name: x.op},
             }
         )
-    for key, operators in graphs.iteritems():
+    for key, operators in graphs.items():
         if args.minimal:
             graph = GetPydotGraphMinimal(
                 operators, key,

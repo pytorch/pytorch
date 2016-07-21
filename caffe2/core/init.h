@@ -42,9 +42,9 @@ class Caffe2InitializeRegistry {
       vector<std::pair<InitFunction, const char*>>& functions,
       int* pargc, char*** pargv) {
     for (const auto& init_pair : functions) {
-      CAFFE_VLOG(1) << "Running init function: " << init_pair.second;
+      VLOG(1) << "Running init function: " << init_pair.second;
       if (!(*init_pair.first)(pargc, pargv)) {
-        CAFFE_LOG_ERROR << "Initialization function failed.";
+        LOG(ERROR) << "Initialization function failed.";
         return false;
       }
     }

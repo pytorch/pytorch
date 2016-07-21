@@ -20,18 +20,18 @@ __global__ void SigmoidGradientKernel(const int N, const T* y, const T* dy,
   }
 }
 
-template <typename T>
 struct SigmoidCUDAFunctor {
-  inline void operator()(const int n, const float* x,
-                         float* y, CUDAContext* device_context) {
+  template <typename T>
+  inline void operator()(const int n, const T* x,
+                         T* y, CUDAContext* device_context) {
     SigmoidKernel<T><<<CAFFE_GET_BLOCKS(n), CAFFE_CUDA_NUM_THREADS,
                     0, device_context->cuda_stream()>>>(n, x, y);
     return;
   }
 };
 
-template <typename T>
 struct SigmoidGradientCUDAFunctor {
+  template <typename T>
   inline void operator()(const int n, const T* y, const T* dy,
                          T* dx, CUDAContext* device_context) {
     SigmoidGradientKernel<T><<<CAFFE_GET_BLOCKS(n), CAFFE_CUDA_NUM_THREADS,
@@ -43,9 +43,9 @@ struct SigmoidGradientCUDAFunctor {
 namespace {
 REGISTER_CUDA_OPERATOR(
     Sigmoid,
-    UnaryElementwiseOp<float, CUDAContext, SigmoidCUDAFunctor<float> >);
+    UnaryElementwiseOp<TensorTypes<float>, CUDAContext, SigmoidCUDAFunctor>);
 REGISTER_CUDA_OPERATOR(
-    SigmoidGradient, BinaryElementwiseOp<float, CUDAContext,
-                                     SigmoidGradientCUDAFunctor<float> >);
+    SigmoidGradient, BinaryElementwiseOp<TensorTypes<float>, CUDAContext,
+                                     SigmoidGradientCUDAFunctor>);
 }  // namespace
 }  // namespace caffe2

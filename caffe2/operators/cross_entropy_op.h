@@ -19,7 +19,6 @@ class LabelCrossEntropyOp final : public Operator<Context> {
   static constexpr T kLOG_THRESHOLD() { return 1e-20; }
   // Input: X, label
   // Output: Y
-  DISABLE_COPY_AND_ASSIGN(LabelCrossEntropyOp);
 };
 
 template <typename T, class Context>
@@ -34,7 +33,6 @@ class LabelCrossEntropyGradientOp final
   // Input: X, label, dY
   // Ouptut: dX. There is no gradient with respect to the label.
   static constexpr T kLOG_THRESHOLD() { return 1e-20; }
-  DISABLE_COPY_AND_ASSIGN(LabelCrossEntropyGradientOp);
 };
 
 // Hacky: turns a vector of probabilities into a 2-column matrix with
@@ -49,7 +47,6 @@ class MakeTwoClassOp final : public Operator<Context> {
  protected:
   // Input: X
   // Output: Y = vstack(1-X, X)
-  DISABLE_COPY_AND_ASSIGN(MakeTwoClassOp);
 };
 
 template <typename T, class Context>
@@ -63,7 +60,6 @@ class MakeTwoClassGradientOp final
  protected:
   // Input: dY
   // Ouptut: dX
-  DISABLE_COPY_AND_ASSIGN(MakeTwoClassGradientOp);
 };
 
 }  // namespace caffe2

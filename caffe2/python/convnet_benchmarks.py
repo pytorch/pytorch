@@ -60,7 +60,31 @@ import argparse
 import numpy as np
 import time
 
-from caffe2.python import cnn, utils, workspace
+from caffe2.python import cnn, workspace, core
+
+
+def MLP(order):
+    model = cnn.CNNModelHelper()
+    d = 256
+    depth = 20
+    width = 3
+    for i in range(depth):
+        for j in range(width):
+            current = "fc_{}_{}".format(i, j) if i > 0 else "data"
+            next_ = "fc_{}_{}".format(i + 1, j)
+            model.FC(
+                current, next_,
+                dim_in=d, dim_out=d,
+                weight_init=model.XavierInit,
+                bias_init=model.XavierInit)
+    model.Sum(["fc_{}_{}".format(depth, j) for j in range(width)], ["sum"])
+    model.FC("sum", "last",
+             dim_in=d, dim_out=1000,
+             weight_init=model.XavierInit,
+             bias_init=model.XavierInit)
+    xent = model.LabelCrossEntropy(["last", "label"], "xent")
+    model.AveragedLoss(xent, "loss")
+    return model, d
 
 
 def AlexNet(order):
@@ -387,7 +411,7 @@ def _InceptionModule(
         ('XavierFill', {}), ('ConstantFill', {})
     )
     pool_proj = model.Relu(pool_proj, pool_proj)
-    output = model.DepthConcat([conv1, conv3, conv5, pool_proj], output_name)
+    output = model.Concat([conv1, conv3, conv5, pool_proj], output_name)
     return output
 
 
@@ -468,6 +492,8 @@ def Inception(order):
 
 def Benchmark(model_gen, arg):
     model, input_size = model_gen(arg.order)
+    model.Proto().type = arg.net_type
+    model.Proto().num_workers = arg.num_workers
 
     # In order to be able to run everything without feeding more stuff, let's
     # add the data and label blobs to the parameter initialization net as well.
@@ -475,6 +501,9 @@ def Benchmark(model_gen, arg):
         input_shape = [arg.batch_size, 3, input_size, input_size]
     else:
         input_shape = [arg.batch_size, input_size, input_size, 3]
+    if arg.model == "MLP":
+        input_shape = [arg.batch_size, input_size]
+
     model.param_init_net.GaussianFill(
         [],
         "data",
@@ -494,7 +523,7 @@ def Benchmark(model_gen, arg):
         print('{}: running forward only.'.format(arg.model))
     else:
         print('{}: running forward-backward.'.format(arg.model))
-        model.AddGradientOperators()
+        model.AddGradientOperators(["loss"])
         if arg.order == 'NHWC':
             print(
                 '==WARNING==\n'
@@ -520,9 +549,10 @@ def Benchmark(model_gen, arg):
     for i in range(arg.warmup_iterations):
         workspace.RunNet(model.net.Proto().name)
 
+    plan = core.Plan("plan")
+    plan.AddStep(core.ExecutionStep("run", model.net, arg.iterations))
     start = time.time()
-    for i in range(arg.iterations):
-        workspace.RunNet(model.net.Proto().name)
+    workspace.RunPlan(plan)
     print('Spent: {}'.format((time.time() - start) / arg.iterations))
     if arg.layer_wise_benchmark:
         print('Layer-wise benchmark.')
@@ -581,6 +611,8 @@ def GetArgumentParser():
         action='store_true',
         help="If True, dump the model prototxts to disk."
     )
+    parser.add_argument("--net_type", type=str, default="dag")
+    parser.add_argument("--num_workers", type=int, default=2)
     return parser
 
 
@@ -597,6 +629,7 @@ if __name__ == '__main__':
         'AlexNet': AlexNet,
         'OverFeat': OverFeat,
         'VGGA': VGGA,
-        'Inception': Inception
+        'Inception': Inception,
+        'MLP': MLP,
     }
     Benchmark(model_map[args.model], args)

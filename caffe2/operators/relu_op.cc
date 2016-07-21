@@ -8,8 +8,8 @@ template <>
 bool ReluOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto* Y = Output(0);
-  CAFFE_DCHECK_GT(X.size(), 0);
-  Y->ReshapeLike(X);
+  DCHECK_GT(X.size(), 0);
+  Y->ResizeLike(X);
   EigenVectorMap<float>(Y->mutable_data<float>(), X.size()) =
       ConstEigenVectorMap<float>(X.data<float>(), X.size()).cwiseMax(0.f);
 
@@ -28,9 +28,9 @@ bool ReluGradientOp<float, CPUContext>::RunOnDevice() {
   auto& Y = Input(0);
   auto& dY = Input(1);
   auto* dX = Output(0);
-  CAFFE_DCHECK_GT(Y.size(), 0);
-  CAFFE_DCHECK_EQ(dY.size(), Y.size());
-  dX->ReshapeLike(Y);
+  DCHECK_GT(Y.size(), 0);
+  DCHECK_EQ(dY.size(), Y.size());
+  dX->ResizeLike(Y);
 
   const float* Ydata = Y.data<float>();
   const float* dYdata = dY.data<float>();
@@ -46,8 +46,28 @@ namespace {
 REGISTER_CPU_OPERATOR(Relu, ReluOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(ReluGradient, ReluGradientOp<float, CPUContext>);
 
-OPERATOR_SCHEMA(Relu).NumInputs(1).NumOutputs(1).AllowInplace({{0, 0}});
-OPERATOR_SCHEMA(ReluGradient).NumInputs(2).NumOutputs(1).AllowInplace({{1, 0}});
+// Input: X, output: Y
+OPERATOR_SCHEMA(Relu)
+  .NumInputs(1)
+  .NumOutputs(1)
+  .AllowInplace({{0, 0}})
+  .SetDoc(R"DOC(
+Relu takes one input data (Tensor<T>) and produces one output data
+(Tensor<T>) where the rectified linear function, y = max(0, x), is applied to
+the tensor elementwise.
+)DOC")
+  .Input(0, "X", "1D input tensor")
+  .Output(0, "Y", "1D input tensor");
+
+// Input: Y, dY, output: dX
+OPERATOR_SCHEMA(ReluGradient)
+  .NumInputs(2)
+  .NumOutputs(1)
+  .AllowInplace({{1, 0}})
+  .SetDoc(R"DOC(
+ReluGradient takes both Y and dY and uses this to update dX according to the
+chain rule and derivatives of the rectified linear function.
+)DOC");
 
 class GetReluGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;

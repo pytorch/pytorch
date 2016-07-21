@@ -7,11 +7,6 @@
 
 namespace caffe2 {
 
-// Accumulate operator accumulates the input tensor to the output tensor. If the
-// output tensor already has the right size, we add to it; otherwise, we first
-// initialize the output tensor to all zeros, and then do accumulation. Any
-// further calls to the operator, given that no one else fiddles with the output
-// in the interim, will do simple accumulations.
 template <typename T, class Context>
 class AccumulateOp final : public Operator<Context> {
  public:
@@ -25,8 +20,8 @@ class AccumulateOp final : public Operator<Context> {
     auto& input = Input(0);
     auto* output = Output(0);
     if (output->dims() != input.dims()) {
-      CAFFE_LOG_INFO << "Reshaping and initializing output.";
-      output->ReshapeLike(input);
+      LOG(INFO) << "Reshaping and initializing output.";
+      output->ResizeLike(input);
       math::Set<T, Context>(
           output->size(), 0, output->template mutable_data<T>(), &context_);
     }
@@ -40,7 +35,6 @@ class AccumulateOp final : public Operator<Context> {
 
  protected:
   T gamma_;
-  DISABLE_COPY_AND_ASSIGN(AccumulateOp);
 };
 
 }  // namespace caffe2

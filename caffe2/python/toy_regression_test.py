@@ -3,6 +3,7 @@ import unittest
 
 from caffe2.python import core, workspace, test_util
 
+
 class TestToyRegression(test_util.TestCase):
     def testToyRegression(self):
         """Tests a toy regression end to end.
@@ -35,18 +36,18 @@ class TestToyRegression(test_util.TestCase):
         # leave it there. In many cases, I am expecting one to load X and Y
         # from the disk, so there is really no operator that will calculate the
         # Y_gt input.
-        input_to_grad = train_net.AddGradientOperators(skip=2)
+        input_to_grad = train_net.AddGradientOperators([loss], skip=2)
         # updates
         train_net.Iter(ITER, ITER)
         train_net.LearningRate(ITER, "LR", base_lr=-0.1,
                                policy="step", stepsize=20, gamma=0.9)
         train_net.WeightedSum([W, ONE, input_to_grad[str(W)], LR], W)
         train_net.WeightedSum([B, ONE, input_to_grad[str(B)], LR], B)
-        train_net.Print([loss, W, B], [])
+        for blob in [loss, W, B]:
+            train_net.Print(blob, [])
 
         # the CPU part.
         plan = core.Plan("toy_regression")
-        plan.AddNets([init_net, train_net])
         plan.AddStep(core.ExecutionStep("init", init_net))
         plan.AddStep(core.ExecutionStep("train", train_net, 200))
 

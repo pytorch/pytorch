@@ -19,10 +19,10 @@ TEST(MathTest, GemmNoTransNoTrans) {
   math::Set<float, CPUContext>(W.size(), 1, W.mutable_data<float>(), &cpu_context);
   EXPECT_EQ(Y.size(), 30);
   for (int i = 0; i < X.size(); ++i) {
-    CAFFE_CHECK_EQ(X.data<float>()[i], 1);
+    CHECK_EQ(X.data<float>()[i], 1);
   }
   for (int i = 0; i < W.size(); ++i) {
-    CAFFE_CHECK_EQ(W.data<float>()[i], 1);
+    CHECK_EQ(W.data<float>()[i], 1);
   }
 
   const float kOne = 1.0;
@@ -33,7 +33,7 @@ TEST(MathTest, GemmNoTransNoTrans) {
                                 &cpu_context);
   EXPECT_EQ(Y.size(), 30);
   for (int i = 0; i < Y.size(); ++i) {
-    CAFFE_CHECK_EQ(Y.data<float>()[i], 10) << i;
+    CHECK_EQ(Y.data<float>()[i], 10) << i;
   }
   // Test Accumulate
   math::Gemm<float, CPUContext>(CblasNoTrans, CblasNoTrans, 5, 6, 10, kOne,
@@ -41,7 +41,7 @@ TEST(MathTest, GemmNoTransNoTrans) {
                                 Y.mutable_data<float>(), &cpu_context);
   EXPECT_EQ(Y.size(), 30);
   for (int i = 0; i < Y.size(); ++i) {
-    CAFFE_CHECK_EQ(Y.data<float>()[i], 15) << i;
+    CHECK_EQ(Y.data<float>()[i], 15) << i;
   }
   // Test Accumulate
   math::Gemm<float, CPUContext>(CblasNoTrans, CblasNoTrans, 5, 6, 10,
@@ -50,7 +50,7 @@ TEST(MathTest, GemmNoTransNoTrans) {
                                 &cpu_context);
   EXPECT_EQ(Y.size(), 30);
   for (int i = 0; i < Y.size(); ++i) {
-    CAFFE_CHECK_EQ(Y.data<float>()[i], 20) << i;
+    CHECK_EQ(Y.data<float>()[i], 20) << i;
   }
 }
 
@@ -66,10 +66,10 @@ TEST(MathTest, GemmNoTransTrans) {
   math::Set<float, CPUContext>(W.size(), 1, W.mutable_data<float>(), &cpu_context);
   EXPECT_EQ(Y.size(), 30);
   for (int i = 0; i < X.size(); ++i) {
-    CAFFE_CHECK_EQ(X.data<float>()[i], 1);
+    CHECK_EQ(X.data<float>()[i], 1);
   }
   for (int i = 0; i < W.size(); ++i) {
-    CAFFE_CHECK_EQ(W.data<float>()[i], 1);
+    CHECK_EQ(W.data<float>()[i], 1);
   }
 
   const float kOne = 1.0;
@@ -80,7 +80,7 @@ TEST(MathTest, GemmNoTransTrans) {
                                 &cpu_context);
   EXPECT_EQ(Y.size(), 30);
   for (int i = 0; i < Y.size(); ++i) {
-    CAFFE_CHECK_EQ(Y.data<float>()[i], 10) << i;
+    CHECK_EQ(Y.data<float>()[i], 10) << i;
   }
   // Test Accumulate
   math::Gemm<float, CPUContext>(CblasNoTrans, CblasTrans, 5, 6, 10, kOne,
@@ -88,14 +88,14 @@ TEST(MathTest, GemmNoTransTrans) {
                                 Y.mutable_data<float>(), &cpu_context);
   EXPECT_EQ(Y.size(), 30);
   for (int i = 0; i < Y.size(); ++i) {
-    CAFFE_CHECK_EQ(Y.data<float>()[i], 15) << i;
+    CHECK_EQ(Y.data<float>()[i], 15) << i;
   }
   math::Gemm<float, CPUContext>(CblasNoTrans, CblasTrans, 5, 6, 10, kPointFive,
                                 X.data<float>(), W.data<float>(), kOne, Y.mutable_data<float>(),
                                 &cpu_context);
   EXPECT_EQ(Y.size(), 30);
   for (int i = 0; i < Y.size(); ++i) {
-    CAFFE_CHECK_EQ(Y.data<float>()[i], 20) << i;
+    CHECK_EQ(Y.data<float>()[i], 20) << i;
   }
 }
 
@@ -111,10 +111,10 @@ TEST(MathTest, GemvNoTrans) {
   math::Set<float, CPUContext>(X.size(), 1, X.mutable_data<float>(), &cpu_context);
   EXPECT_EQ(Y.size(), 5);
   for (int i = 0; i < A.size(); ++i) {
-    CAFFE_CHECK_EQ(A.data<float>()[i], 1);
+    CHECK_EQ(A.data<float>()[i], 1);
   }
   for (int i = 0; i < X.size(); ++i) {
-    CAFFE_CHECK_EQ(X.data<float>()[i], 1);
+    CHECK_EQ(X.data<float>()[i], 1);
   }
 
   const float kOne = 1.0;
@@ -123,20 +123,20 @@ TEST(MathTest, GemvNoTrans) {
   math::Gemv<float, CPUContext>(CblasNoTrans, 5, 10, kOne, A.data<float>(), X.data<float>(),
                                 kZero, Y.mutable_data<float>(), &cpu_context);
   for (int i = 0; i < Y.size(); ++i) {
-    CAFFE_CHECK_EQ(Y.data<float>()[i], 10) << i;
+    CHECK_EQ(Y.data<float>()[i], 10) << i;
   }
   // Test Accumulate
   math::Gemv<float, CPUContext>(CblasNoTrans, 5, 10, kOne, A.data<float>(), X.data<float>(),
                                 kPointFive, Y.mutable_data<float>(), &cpu_context);
   for (int i = 0; i < Y.size(); ++i) {
-    CAFFE_CHECK_EQ(Y.data<float>()[i], 15) << i;
+    CHECK_EQ(Y.data<float>()[i], 15) << i;
   }
   // Test Accumulate
   math::Gemv<float, CPUContext>(CblasNoTrans, 5, 10, kPointFive, A.data<float>(),
                                 X.data<float>(), kOne, Y.mutable_data<float>(),
                                 &cpu_context);
   for (int i = 0; i < Y.size(); ++i) {
-    CAFFE_CHECK_EQ(Y.data<float>()[i], 20) << i;
+    CHECK_EQ(Y.data<float>()[i], 20) << i;
   }
 }
 
@@ -152,10 +152,10 @@ TEST(MathTest, GemvTrans) {
   math::Set<float, CPUContext>(X.size(), 1, X.mutable_data<float>(), &cpu_context);
   EXPECT_EQ(Y.size(), 10);
   for (int i = 0; i < A.size(); ++i) {
-    CAFFE_CHECK_EQ(A.data<float>()[i], 1);
+    CHECK_EQ(A.data<float>()[i], 1);
   }
   for (int i = 0; i < X.size(); ++i) {
-    CAFFE_CHECK_EQ(X.data<float>()[i], 1);
+    CHECK_EQ(X.data<float>()[i], 1);
   }
 
   const float kOne = 1.0;
@@ -164,20 +164,20 @@ TEST(MathTest, GemvTrans) {
   math::Gemv<float, CPUContext>(CblasTrans, 6, 10, kOne, A.data<float>(), X.data<float>(),
                                 kZero, Y.mutable_data<float>(), &cpu_context);
   for (int i = 0; i < Y.size(); ++i) {
-    CAFFE_CHECK_EQ(Y.data<float>()[i], 6) << i;
+    CHECK_EQ(Y.data<float>()[i], 6) << i;
   }
   // Test Accumulate
   math::Gemv<float, CPUContext>(CblasTrans, 6, 10, kOne, A.data<float>(), X.data<float>(),
                                 kPointFive, Y.mutable_data<float>(), &cpu_context);
   for (int i = 0; i < Y.size(); ++i) {
-    CAFFE_CHECK_EQ(Y.data<float>()[i], 9) << i;
+    CHECK_EQ(Y.data<float>()[i], 9) << i;
   }
   // Test Accumulate
   math::Gemv<float, CPUContext>(CblasTrans, 6, 10, kPointFive, A.data<float>(),
                                 X.data<float>(), kOne, Y.mutable_data<float>(),
                                 &cpu_context);
   for (int i = 0; i < Y.size(); ++i) {
-    CAFFE_CHECK_EQ(Y.data<float>()[i], 12) << i;
+    CHECK_EQ(Y.data<float>()[i], 12) << i;
   }
 }
 

@@ -17,6 +17,11 @@ namespace caffe2 {
 // For any operator that is derived from PrefetchOperator, it should
 // explicitly call the Finalize() function in its destructor, so that the
 // prefetching thread is properly destructed.
+
+// Note: We inherit from OperatorBase since we control the
+// synchronization properties of this operator ourselves (we inform
+// the waiting producer after we synchronize). This is a special-case
+// - you should generally inherit from Operator<Context> directly.
 template <class Context>
 class PrefetchOperator : public OperatorBase {
  public:
@@ -28,7 +33,7 @@ class PrefetchOperator : public OperatorBase {
         finalize_(false) {}
 
   virtual ~PrefetchOperator() {
-    CAFFE_CHECK(finalize_)
+    CHECK(finalize_)
         << "Your derived class should call Finalize() in its destructor "
            "so the prefetching thread is joined. ";
   }
@@ -63,11 +68,11 @@ class PrefetchOperator : public OperatorBase {
     std::unique_lock<std::mutex> lock(prefetch_access_mutex_);
     while (!prefetched_) consumer_.wait(lock);
     if (!prefetch_success_) {
-      CAFFE_LOG_ERROR << "Prefetching failed.";
+      LOG(ERROR) << "Prefetching failed.";
       return false;
     }
     if (!CopyPrefetched()) {
-      CAFFE_LOG_ERROR << "Error when copying prefetched data.";
+      LOG(ERROR) << "Error when copying prefetched data.";
       return false;
     }
     prefetched_ = false;
@@ -106,9 +111,6 @@ class PrefetchOperator : public OperatorBase {
   // finalize_ is used to tell the prefetcher to quit.
   std::atomic<bool> finalize_;
   unique_ptr<std::thread> prefetch_thread_;
-
-  INPUT_OUTPUT_STATS(0, 0, 1, INT_MAX);
-  DISABLE_COPY_AND_ASSIGN(PrefetchOperator);
 };
 
 }  // namespace caffe2

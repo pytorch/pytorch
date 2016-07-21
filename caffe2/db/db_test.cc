@@ -15,10 +15,10 @@ namespace db {
 constexpr int kMaxItems = 10;
 
 static bool CreateAndFill(const string& db_type, const string& name) {
-  CAFFE_VLOG(1) << "Creating db: " << name;
+  VLOG(1) << "Creating db: " << name;
   std::unique_ptr<DB> db(CreateDB(db_type, name, NEW));
   if (!db.get()) {
-    CAFFE_LOG_ERROR << "Cannot create db of type " << db_type;
+    LOG(ERROR) << "Cannot create db of type " << db_type;
     return false;
   }
   std::unique_ptr<Transaction> trans(db->NewTransaction());
@@ -114,14 +114,19 @@ TEST(DBReaderTest, Reader) {
   std::string str = reader_blob.Serialize("saved_reader");
   // Release to close the old reader.
   reader_blob.Reset();
-  DBProto proto;
-  CAFFE_CHECK(proto.ParseFromString(str));
-  EXPECT_EQ(proto.name(), "saved_reader");
+  BlobProto blob_proto;
+  CHECK(blob_proto.ParseFromString(str));
+  EXPECT_EQ(blob_proto.name(), "saved_reader");
+  EXPECT_EQ(blob_proto.type(), "DBReader");
+  DBReaderProto proto;
+  CHECK(proto.ParseFromString(blob_proto.content()));
   EXPECT_EQ(proto.source(), name);
   EXPECT_EQ(proto.db_type(), "leveldb");
   EXPECT_EQ(proto.key(), "05");
   // Test restoring the reader from the serialized proto.
-  DBReader new_reader(proto);
+  EXPECT_TRUE(reader_blob.Deserialize(str));
+  EXPECT_TRUE(reader_blob.IsType<DBReader>());
+  const DBReader& new_reader = reader_blob.Get<DBReader>();
   EXPECT_TRUE(new_reader.cursor() != nullptr);
   EXPECT_EQ(new_reader.cursor()->key(), "05");
 

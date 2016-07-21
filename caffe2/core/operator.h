@@ -21,9 +21,6 @@ namespace caffe2 {
 
 class OperatorBase {
  public:
-  // The constructor of the operator. Note that you should not do any
-  // custom initializations in the constructor; instead, do those in the
-  // SetUp() function.
   explicit OperatorBase(const OperatorDef& operator_def, Workspace* ws);
   virtual ~OperatorBase() {}
 
@@ -35,26 +32,30 @@ class OperatorBase {
   template <typename T>
   T GetSingleArgument(const string& name, const T& default_value);
   template <typename T>
+  bool HasSingleArgumentOfType(const string& name);
+  template <typename T>
   vector<T> GetRepeatedArgument(const string& name);
 
   template <typename MessageType>
   MessageType GetMessageArgument(const string& name) {
-    CAFFE_CHECK(arg_map_.count(name)) << "Cannot find parameter named " << name;
+    CAFFE_ENFORCE(arg_map_.count(name),
+        "Cannot find parameter named ", name);
     MessageType message;
     if (arg_map_[name]->has_s()) {
-      CAFFE_CHECK(message.ParseFromString(arg_map_[name]->s()))
+      CHECK(message.ParseFromString(arg_map_[name]->s()))
           << "Faild to parse content from the string";
     } else {
-      CAFFE_VLOG(1) << "Return empty message for parameter " << name;
+      VLOG(1) << "Return empty message for parameter " << name;
     }
     return message;
   }
   template <typename MessageType>
   vector<MessageType> GetRepeatedMessageArgument(const string& name) {
-    CAFFE_CHECK(arg_map_.count(name)) << "Cannot find parameter named " << name;
+    CAFFE_ENFORCE(arg_map_.count(name),
+        "Cannot find parameter named ", name);
     vector<MessageType> messages(arg_map_[name]->strings_size());
     for (int i = 0; i < messages.size(); ++i) {
-      CAFFE_CHECK(messages[i].ParseFromString(arg_map_[name]->strings(i)))
+      CHECK(messages[i].ParseFromString(arg_map_[name]->strings(i)))
           << "Faild to parse content from the string";
     }
     return messages;
@@ -63,13 +64,13 @@ class OperatorBase {
   // Get the inputs and outputs as specific types.
   template <typename T>
   inline const T& Input(int idx) {
-    CAFFE_DCHECK_LT(idx, inputs_.size());
+    DCHECK_LT(idx, inputs_.size());
     return inputs_.at(idx)->template Get<T>();
   }
 
   template <typename T>
   inline T* Output(int idx) {
-    CAFFE_DCHECK_LT(idx, outputs_.size());
+    DCHECK_LT(idx, outputs_.size());
     return outputs_.at(idx)->template GetMutable<T>();
   }
 
@@ -89,27 +90,9 @@ class OperatorBase {
   inline const vector<Blob*>& Outputs() { return outputs_; }
 
   virtual bool Run() { CAFFE_NOT_IMPLEMENTED; return false; }
+  virtual bool RunAsync() { return Run(); }
 
   inline const OperatorDef& def() { return operator_def_; }
-
- protected:
-  // Specify the minimum and maximum number of inputs and outputs.
-  // Do not manually override these functions. Instead, use INPUT_OUTPUT_STATS
-  // macro below.
-  virtual int MinInput() const { return 0; }
-  virtual int MaxInput() const { return INT_MAX; }
-  virtual int MinOutput() const { return 0; }
-  virtual int MaxOutput() const { return INT_MAX; }
-  // Specify whether in-place computation is allowed for a given pair of input
-  // index and output index. In-place computations are opt-in, meaning that an
-  // operator has to explicitly specify that it allows in-place computation.
-  // Otherwise, input and output MUST be different.
-  // Do not manually override this function if your operator does very simple
-  // in-place opt-ins, such as allowing input 0 and output 0 to be inplace.
-  // Use OP_IN_PLACE_ALLOWED({0, 0}) macro below.
-  virtual bool InplaceAllowed(const int input_id, const int output_id) const {
-    return false;
-  }
 
  private:
   CaffeMap<string, const Argument*> arg_map_;
@@ -131,30 +114,6 @@ class OperatorBase {
 // member variables for the class constructors.
 #define OP_SINGLE_ARG(type, name, variable, default)                           \
   variable(OperatorBase::GetSingleArgument<type>(name, (default)))
-
-// INPUT_OUTPUT_STATS gives the statistics of the input and output that are
-// legal. If the max input/output is not limited, you can specify INT_MAX.
-// TODO(Yangqing): If necessary, add ability to specify that n_input = n_output.
-#define INPUT_OUTPUT_STATS(min_input, max_input, min_output, max_output)       \
- protected:                                                                    \
-  int MinInput() const override { return min_input; }                          \
-  int MaxInput() const override { return max_input; }                          \
-  int MinOutput() const override { return min_output; }                        \
-  int MaxOutput() const override { return max_output; }
-
-// Note that this implementation uses vector so it likely won't work well for
-// very large operators, but we should be fine since the InplaceAllowed function
-// should be very sparse.
-#define IN_PLACE_ALLOWED(...)                                                  \
- protected:                                                                    \
-  bool InplaceAllowed(                                                         \
-      const int input_id, const int output_id) const override {                \
-    const int kVec[][2] = {__VA_ARGS__, {-1, -1}};                             \
-    for (int i = 0; kVec[i][0] != -1; ++i) {                                   \
-      if (kVec[i][0] == input_id && kVec[i][1] == output_id) return true;      \
-    }                                                                          \
-    return false;                                                              \
-  }
 
 // INPUT_TAGS and OUTPUT_TAGS are optional features to name the indices of the
 // operator's inputs and outputs, in order to avoid confusion. For example, for
@@ -200,40 +159,55 @@ class Operator : public OperatorBase {
   // the actual computation with RunOnDevice(). You should implement RunOnDevice
   // instead of Run().
   bool Run() final {
-    context_.SwitchToDevice();
-    bool started = RunOnDevice();
-    bool finished = context_.FinishDeviceComputation();
-    if (!finished) {
-      // FinishDeviceComputation() returning error basically means that there is
-      // something wrong with the device (like CUDA) that usually cannot be
-      // recovered, so we should log FATAL.
-      CAFFE_LOG_FATAL << "Computation on device returned error in operator\n"
-                      << ProtoDebugString(this->def());
+    try {
+      context_.SwitchToDevice();
+      bool started = RunOnDevice();
+      bool finished = context_.FinishDeviceComputation();
+      if (!finished) {
+        // FinishDeviceComputation() returning error basically means that there
+        // is something wrong with the device (like CUDA) that usually cannot be
+        // recovered, so we should log FATAL.
+        LOG(FATAL) << "Computation on device returned error in operator\n"
+                   << ProtoDebugString(this->def());
+      }
+      return (started && finished);
+    } catch (EnforceNotMet& err) {
+      err.AppendMessage("Error from operator " + ProtoDebugString(def()));
+      throw;
     }
-    return (started && finished);
+  }
+
+  bool RunAsync() final {
+    try {
+      context_.SwitchToDevice();
+      return RunOnDevice();
+    } catch (EnforceNotMet& err) {
+      err.AppendMessage("Error from operator " + ProtoDebugString(def()));
+      throw;
+    }
   }
 
   virtual bool RunOnDevice() = 0;
 
  protected:
   Context context_;
-  DISABLE_COPY_AND_ASSIGN(Operator);
 };
 
-#define USE_OPERATOR_BASE_FUNCTIONS                                            \
-  using OperatorBase::HasArgument;                                             \
-  using OperatorBase::GetSingleArgument;                                       \
-  using OperatorBase::GetRepeatedArgument;                                     \
-  using OperatorBase::def;                                                     \
-  using OperatorBase::InputIsType;                                             \
-  using OperatorBase::InputSize;                                               \
-  using OperatorBase::OutputSize
+#define USE_OPERATOR_BASE_FUNCTIONS                                 \
+  /* using override */ using OperatorBase::HasArgument;             \
+  /* using override */ using OperatorBase::GetSingleArgument;       \
+  /* using override */ using OperatorBase::HasSingleArgumentOfType; \
+  /* using override */ using OperatorBase::GetRepeatedArgument;     \
+  /* using override */ using OperatorBase::def;                     \
+  /* using override */ using OperatorBase::InputIsType;             \
+  /* using override */ using OperatorBase::InputSize;               \
+  /* using override */ using OperatorBase::OutputSize
 
-#define USE_OPERATOR_FUNCTIONS(context)                                        \
-  USE_OPERATOR_BASE_FUNCTIONS;                                                 \
-  using Operator<context>::context_;                                    \
-  using Operator<context>::Input;                                              \
-  using Operator<context>::Output
+#define USE_OPERATOR_FUNCTIONS(context)                   \
+  USE_OPERATOR_BASE_FUNCTIONS;                            \
+  /* using override */ using Operator<context>::context_; \
+  /* using override */ using Operator<context>::Input;    \
+  /* using override */ using Operator<context>::Output
 
 #define USE_OPERATOR_CONTEXT_FUNCTIONS USE_OPERATOR_FUNCTIONS(Context)
 
@@ -241,6 +215,97 @@ class Operator : public OperatorBase {
   name(const OperatorDef& operator_def, Workspace* ws)                         \
       : Operator<Context>(operator_def, ws) {}                                 \
   virtual ~name() {}
+
+// Helpers to implement runtime op polymorphism. Often it's convenient to make
+// an op work on different input types (e.g. i32 vs i64 indices) or special-case
+// it for particular input size (e.g. ScatterWeightedSum for block size of 1
+// doesn't need to call Eigen).
+//
+// DispatchHelper provides compile-time generation of nested "if" statements,
+// e.g. `DispatchHelper<FixedSizes<1, 4>>::call(this, block_size);`
+// unrolls into:
+//   if (block_size == 1) {
+//     return DoRunWithSize<1>();
+//   } else if (block_size = 4) {
+//     return DoRunWithSize<4>();
+//   } else {
+//     return DoRunWithSize<-1>();
+//   }`
+//
+// DoRunWithSize implementation can use template arguments to do "if" statements
+// or proxy to functions in math.h which often provide fixed size
+// implementation.
+//
+// Similarly `TensorTypes<int32_t, int64_t>(this, Input(0))` provides branching
+// based on type of the first input and calls DoRunWithType.
+//
+// Note, that the same instance of Op class is used as the method, not class is
+// templated. We might consider adding static class-level polymorphism later.
+//
+// Convenient macro USE_DISPATCH_HELPER is provided for declaring friendship in
+// case DoRunWithSize or DoRunWithType are declared non-public.
+
+#define USE_DISPATCH_HELPER                        \
+  template <typename Sizes, typename... ExtraArgs> \
+  friend struct DispatchHelper
+
+template <int... Sizes>
+struct FixedSizes {};
+
+template <typename... Types>
+struct TensorTypes {};
+
+template <typename Sizes, typename... ExtraArgs>
+struct DispatchHelper;
+
+template <int FirstSize, int... Sizes, typename... ExtraArgs>
+struct DispatchHelper<FixedSizes<FirstSize, Sizes...>, ExtraArgs...> {
+  template <typename Op>
+  static bool call(Op* op, TIndex size) {
+    if (FirstSize == size) {
+      return op->template DoRunWithSize<ExtraArgs..., FirstSize>();
+    }
+    return DispatchHelper<FixedSizes<Sizes...>, ExtraArgs...>::
+        template call<Op>(op, size);
+  }
+};
+
+template <typename... ExtraArgs>
+struct DispatchHelper<FixedSizes<>, ExtraArgs...> {
+  template <typename Op>
+  static bool call(Op* op, TIndex size) {
+    return op->template DoRunWithSize<ExtraArgs..., -1>();
+  }
+};
+
+template <typename FirstType, typename... Types, typename... ExtraArgs>
+struct DispatchHelper<TensorTypes<FirstType, Types...>, ExtraArgs...> {
+  template <typename Op>
+  static bool call(Op* op, const TypeMeta& meta) {
+    if (meta.Match<FirstType>()) {
+      return op->template DoRunWithType<ExtraArgs..., FirstType>();
+    }
+    return DispatchHelper<TensorTypes<Types...>, ExtraArgs...>::
+        template call<Op>(op, meta);
+  }
+  template <typename Op, typename Context>
+  static bool call(Op* op, const Tensor<Context>& tensor) {
+    return call<Op>(op, tensor.meta());
+  }
+};
+
+template <typename... ExtraArgs>
+struct DispatchHelper<TensorTypes<>, ExtraArgs...> {
+  template <typename Op>
+  static bool call(Op* op, const TypeMeta& meta) {
+    LOG(FATAL) << "Unsupported type of tensor: " << meta.name();
+    return false;
+  }
+  template <typename Op, typename Context>
+  static bool call(Op* op, const Tensor<Context>& tensor) {
+    return call<Op>(op, tensor.meta());
+  }
+};
 
 // The operator registry. Since we are not expecting a great number of devices,
 // we will simply have an if-then type command and allocate the actual
@@ -274,7 +339,7 @@ CAFFE_DECLARE_REGISTRY(
 #define REGISTER_CUDA_OPERATOR(name, ...) \
   CAFFE_REGISTER_CLASS(CUDAOperatorRegistry, name, __VA_ARGS__)
 #define REGISTER_CUDA_OPERATOR_STR(str_name, ...) \
-  CAFFE_REGISTER_CLASS_STR(CUDAOperatorRegistry, str_name, __VA_ARGS__)
+  CAFFE_REGISTER_TYPED_CLASS(CUDAOperatorRegistry, str_name, __VA_ARGS__)
 
 #define REGISTER_CUDA_OPERATOR_WITH_ENGINE(name, engine, ...) \
   CAFFE_REGISTER_CLASS(                                       \
@@ -285,7 +350,8 @@ CAFFE_DECLARE_REGISTRY(
   REGISTER_CUDA_OPERATOR_WITH_ENGINE(name, CUDNN, __VA_ARGS__)
 
 // Creates an operator with the given operator definition.
-OperatorBase* CreateOperator(const OperatorDef& operator_def, Workspace* ws);
+unique_ptr<OperatorBase> CreateOperator(
+    const OperatorDef& operator_def, Workspace* ws);
 
 }  // namespace caffe2
 

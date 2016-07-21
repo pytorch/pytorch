@@ -1,3 +1,5 @@
+#include <assert.h>
+
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/cross_entropy_op.h"
 
@@ -8,6 +10,7 @@ __global__ void LabelCrossEntropyKernel(
     const int N, const int D, const float* Xdata, const int* labeldata,
     const float log_threshold, float* Ydata) {
   CUDA_1D_KERNEL_LOOP(i, N) {
+    CUDA_KERNEL_ASSERT(labeldata[i] < D);
     Ydata[i] = -logf(max(Xdata[i * D + labeldata[i]], log_threshold));
   }
 }
@@ -26,12 +29,12 @@ bool LabelCrossEntropyOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& label = Input(1);
   auto* Y = Output(0);
-  CAFFE_DCHECK_EQ(X.ndim(), 2);
+  DCHECK_EQ(X.ndim(), 2);
   int N = X.dim32(0);
   int D = X.dim32(1);
-  CAFFE_DCHECK_EQ(label.ndim(), 1);
-  CAFFE_DCHECK_EQ(label.dim32(0), N);
-  Y->Reshape(vector<TIndex>(1, N));
+  DCHECK((label.ndim() == 1) || (label.ndim() == 2 && label.dim32(1) == 1));
+  DCHECK_EQ(label.dim32(0), N);
+  Y->Resize(vector<TIndex>(1, N));
   LabelCrossEntropyKernel<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS,
                             0, context_.cuda_stream()>>>(
       N, D, X.data<float>(), label.data<int>(), kLOG_THRESHOLD(), Y->mutable_data<float>());
@@ -44,14 +47,14 @@ bool LabelCrossEntropyGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& label = Input(1);
   auto& dY = Input(2);
   auto* dX = Output(0);
-  CAFFE_DCHECK_EQ(X.ndim(), 2);
+  DCHECK_EQ(X.ndim(), 2);
   int N = X.dim32(0);
   int D = X.dim32(1);
-  CAFFE_DCHECK_EQ(label.ndim(), 1);
-  CAFFE_DCHECK_EQ(label.dim32(0), N);
-  CAFFE_DCHECK_EQ(dY.ndim(), 1);
-  CAFFE_DCHECK_EQ(dY.dim32(0), N);
-  dX->ReshapeLike(X);
+  DCHECK((label.ndim() == 1) || (label.ndim() == 2 && label.dim32(1) == 1));
+  DCHECK_EQ(label.dim32(0), N);
+  DCHECK_EQ(dY.ndim(), 1);
+  DCHECK_EQ(dY.dim32(0), N);
+  dX->ResizeLike(X);
   math::Set<float, CUDAContext>(
       dX->size(), 0.f, dX->mutable_data<float>(), &context_);
   LabelCrossEntropyGradientKernel<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS,
@@ -83,8 +86,8 @@ bool MakeTwoClassOp<float, CUDAContext>::RunOnDevice() {
   auto* Y = Output(0);
   auto shape = X.dims();
   shape.push_back(2);
-  CAFFE_CHECK_LT(X.size(), std::numeric_limits<int>::max() / 2);
-  Y->Reshape(shape);
+  CHECK_LT(X.size(), std::numeric_limits<int>::max() / 2);
+  Y->Resize(shape);
   int N = X.size();
   MakeTwoClassKernel<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS,
                        0, context_.cuda_stream()>>>(
@@ -97,11 +100,11 @@ bool MakeTwoClassGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& dY = Input(0);
   auto* dX = Output(0);
   auto shape = dY.dims();
-  CAFFE_CHECK_GE(shape.size(), 1);
-  CAFFE_CHECK_EQ(shape.back(), 2);
+  CHECK_GE(shape.size(), 1);
+  CHECK_EQ(shape.back(), 2);
   shape.pop_back();
-  CAFFE_CHECK_LT(dY.size(), std::numeric_limits<int>::max());
-  dX->Reshape(shape);
+  CHECK_LT(dY.size(), std::numeric_limits<int>::max());
+  dX->Resize(shape);
   int N = dX->size();
   MakeTwoClassGradientKernel<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS,
                                0, context_.cuda_stream()>>>(

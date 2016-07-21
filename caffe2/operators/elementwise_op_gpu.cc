@@ -4,10 +4,10 @@
 namespace caffe2 {
 namespace {
 
-REGISTER_CUDA_OPERATOR(Add, AddOp<float, CUDAContext>);
-REGISTER_CUDA_OPERATOR(Sub, SubOp<float, CUDAContext>);
-REGISTER_CUDA_OPERATOR(Mul, MulOp<float, CUDAContext>);
-REGISTER_CUDA_OPERATOR(Div, DivOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(Add, AddOp<CUDAContext>);
+REGISTER_CUDA_OPERATOR(Sub, SubOp<CUDAContext>);
+REGISTER_CUDA_OPERATOR(Mul, MulOp<CUDAContext>);
+REGISTER_CUDA_OPERATOR(Div, DivOp<CUDAContext>);
 
 }  // namespace
 }  // namespace caffe2

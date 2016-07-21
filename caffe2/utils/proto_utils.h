@@ -41,7 +41,7 @@ inline string ProtoDebugString(const MessageLite& proto) {
 // allowing things to compile. It will produce a runtime error if you are using
 // MessageLite but still want text support.
 inline bool ReadProtoFromTextFile(const char* filename, MessageLite* proto) {
-  CAFFE_LOG_FATAL << "If you are running lite version, you should not be "
+  LOG(FATAL) << "If you are running lite version, you should not be "
                   << "calling any text-format protobuffers.";
   return false;  // Just to suppress compiler warning.
 }
@@ -51,7 +51,7 @@ inline bool ReadProtoFromTextFile(const string filename, MessageLite* proto) {
 
 inline void WriteProtoToTextFile(const MessageLite& proto,
                                  const char* filename) {
-  CAFFE_LOG_FATAL << "If you are running lite version, you should not be "
+  LOG(FATAL) << "If you are running lite version, you should not be "
                   << "calling any text-format protobuffers.";
 }
 inline void WriteProtoToTextFile(const MessageLite& proto,

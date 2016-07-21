@@ -16,7 +16,6 @@ class ReluOp final : public Operator<Context> {
   bool RunOnDevice() override;
 
  protected:
-  DISABLE_COPY_AND_ASSIGN(ReluOp);
 };
 
 template <typename T, class Context>
@@ -29,7 +28,6 @@ class ReluGradientOp final : public Operator<Context> {
 
  protected:
   // Input: Y, dY; Output: dX
-  DISABLE_COPY_AND_ASSIGN(ReluGradientOp);
 };
 
 }  // namespace caffe2

@@ -15,13 +15,13 @@ __global__ void RmsPropUpdate(
     float decay,
     float momentum,
     float epsilon,
-    float learning_rate) {
+    const float* lr) {
   CUDA_1D_KERNEL_LOOP(i, N) {
     // Update new mean square estimate
     nms[i] = ms[i] + (1.0f - decay) * (g[i] * g[i] - ms[i]);
     // Update momentum estimate
     nmom[i] =
-        mom[i] * momentum + learning_rate * g[i] / std::sqrt(epsilon + nms[i]);
+        mom[i] * momentum + lr[0] * g[i] / std::sqrt(epsilon + nms[i]);
     // New gradient is the momentum
     ng[i] = nmom[i];
   }
@@ -39,10 +39,10 @@ void rmsprop_update<CUDAContext>(
     float decay,
     float momentum,
     float epsilon,
-    float learning_rate,
+    const float* lr,
     CUDAContext* context) {
   RmsPropUpdate<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
-      N, g, ms, mom, ng, nms, nmom, decay, momentum, epsilon, learning_rate);
+      N, g, ms, mom, ng, nms, nmom, decay, momentum, epsilon, lr);
 }
 
 

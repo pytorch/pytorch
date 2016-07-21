@@ -50,11 +50,12 @@ bool CommandLineFlagsHasBeenParsed();
     using ::FLAGS_##name;                                                      \
   }
 
-#define CAFFE2_DEFINE_int(...)    CAFFE2_GFLAGS_DEF_WRAPPER(int32, __VA_ARGS__)
+#define CAFFE2_DEFINE_int(...) CAFFE2_GFLAGS_DEF_WRAPPER(int32, __VA_ARGS__)
+#define CAFFE2_DEFINE_int64(...) CAFFE2_GFLAGS_DEF_WRAPPER(int64, __VA_ARGS__)
 #define CAFFE2_DEFINE_double(...) CAFFE2_GFLAGS_DEF_WRAPPER(double, __VA_ARGS__)
-#define CAFFE2_DEFINE_bool(...)   CAFFE2_GFLAGS_DEF_WRAPPER(bool, __VA_ARGS__)
+#define CAFFE2_DEFINE_bool(...) CAFFE2_GFLAGS_DEF_WRAPPER(bool, __VA_ARGS__)
 #define CAFFE2_DEFINE_string(name, default_value, help_str) \
-    CAFFE2_GFLAGS_DEF_WRAPPER(string, name, default_value, help_str)
+  CAFFE2_GFLAGS_DEF_WRAPPER(string, name, default_value, help_str)
 
 // DECLARE_typed_var should be used in header files and in the global namespace.
 #define CAFFE2_GFLAGS_DECLARE_WRAPPER(type, name)                             \
@@ -64,6 +65,7 @@ bool CommandLineFlagsHasBeenParsed();
   }  // namespace caffe2
 
 #define CAFFE2_DECLARE_int(name) CAFFE2_GFLAGS_DECLARE_WRAPPER(int32, name)
+#define CAFFE2_DECLARE_int64(name) CAFFE2_GFLAGS_DECLARE_WRAPPER(int64, name)
 #define CAFFE2_DECLARE_double(name) CAFFE2_GFLAGS_DECLARE_WRAPPER(double, name)
 #define CAFFE2_DECLARE_bool(name) CAFFE2_GFLAGS_DECLARE_WRAPPER(bool, name)
 #define CAFFE2_DECLARE_string(name) CAFFE2_GFLAGS_DECLARE_WRAPPER(string, name)
@@ -110,7 +112,9 @@ CAFFE_DECLARE_REGISTRY(Caffe2FlagsRegistry, Caffe2FlagParser, const string&);
 
 #define CAFFE2_DEFINE_int(name, default_value, help_str)                       \
   CAFFE2_DEFINE_typed_var(int, name, default_value, help_str)
-#define CAFFE2_DEFINE_double(name, default_value, help_str)                    \
+#define CAFFE2_DEFINE_int64(name, default_value, help_str) \
+  CAFFE2_DEFINE_typed_var(int64_t, name, default_value, help_str)
+#define CAFFE2_DEFINE_double(name, default_value, help_str) \
   CAFFE2_DEFINE_typed_var(double, name, default_value, help_str)
 #define CAFFE2_DEFINE_bool(name, default_value, help_str)                      \
   CAFFE2_DEFINE_typed_var(bool, name, default_value, help_str)
@@ -124,6 +128,7 @@ CAFFE_DECLARE_REGISTRY(Caffe2FlagsRegistry, Caffe2FlagParser, const string&);
   }  // namespace caffe2
 
 #define CAFFE2_DECLARE_int(name) CAFFE2_DECLARE_typed_var(int, name)
+#define CAFFE2_DECLARE_int64(name) CAFFE2_DECLARE_typed_var(int64_t, name)
 #define CAFFE2_DECLARE_double(name) CAFFE2_DECLARE_typed_var(double, name)
 #define CAFFE2_DECLARE_bool(name) CAFFE2_DECLARE_typed_var(bool, name)
 #define CAFFE2_DECLARE_string(name) CAFFE2_DECLARE_typed_var(string, name)
