@@ -1,0 +1,37 @@
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+from __future__ import unicode_literals
+
+from caffe2.python.caffe2_pybind11 import create_db, Mode
+
+import os
+import tempfile
+import unittest
+
+
+class TestDB(unittest.TestCase):
+    def setUp(self):
+        handle, self.file_name = tempfile.mkstemp()
+        os.close(handle)
+        self.data = [("key{}".format(i), "value{}".format(i))
+                     for i in range(1, 10)]
+
+    def testSimple(self):
+        db = create_db("minidb", self.file_name, Mode.write)
+
+        for key, value in self.data:
+            transaction = db.new_transaction()
+            transaction.put(key, value)
+            del transaction
+
+        del db  # should close DB
+
+        db = create_db("minidb", self.file_name, Mode.read)
+        cursor = db.new_cursor()
+        data = []
+        while cursor.valid():
+            data.append((cursor.key(), cursor.value()))
+            cursor.next()
+        db.close()  # test explicit db closer
+        self.assertEqual(data, self.data)

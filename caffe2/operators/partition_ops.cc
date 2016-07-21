@@ -1,0 +1,43 @@
+#include "caffe2/operators/partition_ops.h"
+
+namespace caffe2 {
+namespace {
+
+REGISTER_CPU_OPERATOR(Sharding, ShardingOp<CPUContext>);
+
+OPERATOR_SCHEMA(Sharding)
+  .NumInputsOutputs([](int in, int out) {
+    return in > 0 && out > 0 && out % in == 0;
+  })
+  .SetDoc(R"DOC(
+Sharding splits the input int tensor into multiple ones according to the first
+tensor.
+
+Takes the first input and partitions it to shards according to the remainder of
+values modulo the number of partitions. It requires that the first tensor is of
+integral type. The number of partitions is derived as (num_output / num_input).
+
+If additional inputs are present they must have the same shape as the first
+input, optionally with extra trailing dimensions. They will be partitioned
+accordingly to the first input.
+
+Optional arg 'pack_first_input' transforms the first tensor values as
+X_ij / num_partitions.
+
+Outputs are ordered as
+X_0_part_0, X_0_part_1, ..., X_0_part_K-1, X_1_part_0, ..., X_N-1_part_K-1
+)DOC")
+  .Arg("pack_first_input", "(int, default 0) If set, the operator transforms "
+       "the first tensor values as floor(X_ij / num_partitions)")
+  .Input(0, "input", "Input tensor containing data to be sharded. The "
+         "number of input tensors might be greater than 1 but must have the "
+         "same shape as the previous tensors.")
+  .Output(0, "shards", "Output Shards. The number of output shards has to be a "
+          "multiple of the number of input shards.");
+
+// This should actually have gradient, but for now nothing uses it.
+// Because gradient computation right now is not input/output aware it can't be
+// GRADIENT_NOT_IMPLEMENTEDYET
+NO_GRADIENT(Sharding);
+} // namespace
+} // namespace caffe2
