@@ -149,8 +149,8 @@ string MaxPoolRTCFunction::GetSource(
       buffer, 65536, kMaxPoolForwardNCHWSource, name_.c_str(), output_size,
       channels, height, width, pooled_height, pooled_width, kernel_h, kernel_w,
       stride_h, stride_w, pad_t, pad_l);
-  CAFFE_DCHECK_GE(nbytes, 0);
-  CAFFE_DCHECK_LT(nbytes, 65536);
+  DCHECK_GE(nbytes, 0);
+  DCHECK_LT(nbytes, 65536);
   return string(buffer);
 }
 
@@ -174,8 +174,8 @@ string MaxPoolGradientRTCFunction::GetSource(
       buffer, 65536, kMaxPoolBackwardNCHWSource, name_.c_str(), output_size,
       num, channels, height, width, pooled_height, pooled_width, kernel_h,
       kernel_w, stride_h, stride_w, pad_t, pad_l);
-  CAFFE_DCHECK_GE(nbytes, 0);
-  CAFFE_DCHECK_LT(nbytes, 65536);
+  DCHECK_GE(nbytes, 0);
+  DCHECK_LT(nbytes, 65536);
   return string(buffer);
 }
 
@@ -186,7 +186,7 @@ class MaxPoolRTCOp final : public ConvPoolOpBase<CUDAContext> {
  public:
   MaxPoolRTCOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<CUDAContext>(operator_def, ws) {
-    CAFFE_CHECK_EQ(order_, StorageOrder::NCHW)
+    CHECK_EQ(order_, StorageOrder::NCHW)
         << "Currently only NCHW is supported.";
   }
   ~MaxPoolRTCOp() {}
@@ -198,8 +198,8 @@ class MaxPoolRTCOp final : public ConvPoolOpBase<CUDAContext> {
 
     if (input_dims_ != X.dims()) {
       // recompile
-      CAFFE_VLOG(1) << "MaxPool RTC recompiling";
-      CAFFE_CHECK_LT(Y->size(), std::numeric_limits<int>::max());
+      VLOG(1) << "MaxPool RTC recompiling";
+      CHECK_LT(Y->size(), std::numeric_limits<int>::max());
       func_.Compile(static_cast<int>(Y->size()), X.dim32(1), X.dim32(2),
                     X.dim32(3), Y->dim32(2), Y->dim32(3), kernel_h_, kernel_w_,
                     stride_h_, stride_w_, pad_t_, pad_l_);
@@ -213,21 +213,20 @@ class MaxPoolRTCOp final : public ConvPoolOpBase<CUDAContext> {
   }
 
   bool RunOnDeviceWithOrderNHWC() override {
-    CAFFE_LOG_FATAL << "Not implemented.";
+    LOG(FATAL) << "Not implemented.";
     return false;
   }
 
  private:
   MaxPoolRTCFunction func_;
   vector<TIndex> input_dims_;
-  DISABLE_COPY_AND_ASSIGN(MaxPoolRTCOp);
 };
 
 class MaxPoolGradientRTCOp final : public ConvPoolOpBase<CUDAContext> {
  public:
   MaxPoolGradientRTCOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<CUDAContext>(operator_def, ws) {
-    CAFFE_CHECK_EQ(order_, StorageOrder::NCHW)
+    CHECK_EQ(order_, StorageOrder::NCHW)
         << "Currently only NCHW is supported.";
   }
   ~MaxPoolGradientRTCOp() {}
@@ -236,13 +235,13 @@ class MaxPoolGradientRTCOp final : public ConvPoolOpBase<CUDAContext> {
     auto& X = Input(0);
     auto& Y = Input(1);
     auto& dY = Input(2);
-    CAFFE_CHECK_EQ(dY.ndim(), 4);
+    CHECK_EQ(dY.ndim(), 4);
     auto* dX = Output(0);
-    dX->ReshapeLike(X);
+    dX->ResizeLike(X);
     ConvPoolOpBase<CUDAContext>::ComputePads(X.dim32(2), X.dim32(3));
     if (input_dims_ != X.dims()) {
-      CAFFE_VLOG(1) << "MaxPoolGradient RTC recompiling";
-      CAFFE_CHECK_LT(X.size(), std::numeric_limits<int>::max());
+      VLOG(1) << "MaxPoolGradient RTC recompiling";
+      CHECK_LT(X.size(), std::numeric_limits<int>::max());
       func_.Compile(static_cast<int>(X.size()), X.dim32(0), X.dim32(1),
                     X.dim32(2), X.dim32(3), dY.dim32(2), dY.dim32(3),
                     kernel_h_, kernel_w_, stride_h_, stride_w_, pad_t_, pad_l_);
@@ -256,14 +255,13 @@ class MaxPoolGradientRTCOp final : public ConvPoolOpBase<CUDAContext> {
   }
 
   bool RunOnDeviceWithOrderNHWC() override {
-    CAFFE_LOG_FATAL << "Not implemented.";
+    LOG(FATAL) << "Not implemented.";
     return false;
   }
 
  private:
   MaxPoolGradientRTCFunction func_;
   vector<TIndex> input_dims_;
-  DISABLE_COPY_AND_ASSIGN(MaxPoolGradientRTCOp);
 };
 
 namespace {

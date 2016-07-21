@@ -22,7 +22,6 @@ class PoolOp final : public ConvPoolOpBase<Context> {
 
   // Input: X
   // Output: Y
-  DISABLE_COPY_AND_ASSIGN(PoolOp);
 };
 
 template <typename T, class Context, class PoolType>
@@ -39,7 +38,6 @@ class PoolGradientOp final : public ConvPoolOpBase<Context> {
 
   // Input: X, Y, dY
   // Output: dX
-  DISABLE_COPY_AND_ASSIGN(PoolGradientOp);
 };
 
 }  // namespace caffe2

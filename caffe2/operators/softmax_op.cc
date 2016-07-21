@@ -7,17 +7,17 @@ template <>
 bool SoftmaxOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto* Y = Output(0);
-  CAFFE_DCHECK_EQ(X.ndim(), 2);
+  DCHECK_EQ(X.ndim(), 2);
   int N = X.dim32(0);
   int D = X.dim32(1);
-  Y->ReshapeLike(X);
+  Y->ResizeLike(X);
   float* Ydata = Y->mutable_data<float>();
   // First, get scales
   if (scale_.size() != N) {
-    scale_.Reshape(vector<TIndex>{N});
+    scale_.Resize(vector<TIndex>{N});
   }
   if (sum_multiplier_.size() != D) {
-    sum_multiplier_.Reshape(vector<TIndex>{D});
+    sum_multiplier_.Resize(vector<TIndex>{D});
     math::Set<float, CPUContext>(D, 1.f, sum_multiplier_.mutable_data<float>(),
                                  &context_);
   }
@@ -53,21 +53,21 @@ bool SoftmaxGradientOp<float, CPUContext>::RunOnDevice() {
   auto& Y = Input(0);
   auto& dY = Input(1);
   auto* dX = Output(0);
-  CAFFE_DCHECK_EQ(Y.ndim(), 2);
+  DCHECK_EQ(Y.ndim(), 2);
   int N = Y.dim32(0);
   int D = Y.dim32(1);
-  CAFFE_DCHECK_EQ(dY.dim32(0), N);
-  CAFFE_DCHECK_EQ(dY.dim32(1), D);
+  DCHECK_EQ(dY.dim32(0), N);
+  DCHECK_EQ(dY.dim32(1), D);
   // First, get scales
   if (scale_.size() != N) {
-    scale_.Reshape(vector<TIndex>{N});
+    scale_.Resize(vector<TIndex>{N});
   }
   if (sum_multiplier_.size() != D) {
-    sum_multiplier_.Reshape(vector<TIndex>{D});
+    sum_multiplier_.Resize(vector<TIndex>{D});
     math::Set<float, CPUContext>(D, 1.f, sum_multiplier_.mutable_data<float>(),
                                  &context_);
   }
-  dX->Reshape(vector<TIndex>{N, D});
+  dX->Resize(vector<TIndex>{N, D});
   const float* Ydata = Y.data<float>();
   const float* dYdata = dY.data<float>();
   float* dXdata = dX->mutable_data<float>();
@@ -89,7 +89,19 @@ namespace {
 REGISTER_CPU_OPERATOR(Softmax, SoftmaxOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(SoftmaxGradient, SoftmaxGradientOp<float, CPUContext>);
 
-OPERATOR_SCHEMA(Softmax).NumInputs(1).NumOutputs(1);
+OPERATOR_SCHEMA(Softmax)
+  .NumInputs(1)
+  .NumOutputs(1)
+  .SetDoc(R"DOC(
+The operator computes the softmax normalized values for each layer in the batch
+ of the given input. The input is a 2-D tensor (Tensor<float>) of size
+(batch_size x input_feature_dimensions). The output tensor has the same shape
+and contains the softmax normalized values of the corresponding input.
+)DOC")
+  .Input(0, "input", "The input data as 2-D Tensor<float>.")
+  .Output(0, "output", "The softmax normalized output values with the same "
+          "shape as input tensor.");
+
 // Input: Y, dY. Output: dX
 OPERATOR_SCHEMA(SoftmaxGradient).NumInputs(2).NumOutputs(1);
 

@@ -7,9 +7,11 @@
 #include <thread>  // NOLINT
 #include <typeinfo>
 #include <vector>
+#include <unordered_map>
 
 #include "caffe2/core/blob.h"
 #include "caffe2/core/common.h"
+#include "caffe2/core/logging.h"
 #include "caffe2/core/registry.h"
 #include "caffe2/core/workspace.h"
 #include "caffe2/proto/caffe2.pb.h"
@@ -18,6 +20,7 @@
 namespace caffe2 {
 
 class OperatorBase;
+class Workspace;
 
 // Net is a thin struct that owns all the operators together with the operator
 // contexts.
@@ -27,9 +30,23 @@ class NetBase {
   virtual ~NetBase() {}
   virtual bool Verify() = 0;
   virtual bool Run() = 0;
+
+  // RunAsync runs the net on the current stream, but potentially does
+  // not synchronize with respect to the host, and thus may require
+  // external synchronization (with respect to the current stream)
+  // after execution.
+  virtual bool RunAsync() { return Run(); }
   virtual void TEST_Benchmark(const int warmup_runs, const int main_runs,
                               const bool run_individual) {
-    CAFFE_LOG_ERROR << "Benchmark not implemented for this net type.";
+    LOG(ERROR) << "Benchmark not implemented for this net type.";
+  }
+
+  inline const vector<string>& external_output() const {
+    return external_output_;
+  }
+
+  inline const vector<string>& external_input() const {
+    return external_input_;
   }
 
  protected:
@@ -44,7 +61,7 @@ CAFFE_DECLARE_REGISTRY(NetRegistry, NetBase, const NetDef&, Workspace*);
   CAFFE_REGISTER_CREATOR(NetRegistry, key, __VA_ARGS__)
 #define REGISTER_NET(name, ...) \
   CAFFE_REGISTER_CLASS(NetRegistry, name, __VA_ARGS__)
-NetBase* CreateNet(const NetDef& net_def, Workspace* ws);
+unique_ptr<NetBase> CreateNet(const NetDef& net_def, Workspace* ws);
 
 // This is the very basic structure you need to run a network - all it
 // does is simply to run everything in sequence. If you want more fancy control
@@ -54,6 +71,7 @@ class SimpleNet final : public NetBase {
   SimpleNet(const NetDef& net_def, Workspace* ws);
   bool Verify() override;
   bool Run() override;
+  bool RunAsync() override;
   void TEST_Benchmark(const int warmup_runs, const int main_runs,
                       const bool run_individual) override;
 
@@ -72,22 +90,29 @@ struct OperatorNode {
 };
 }
 
-class DAGNet final : public NetBase {
+class DAGNetBase : public NetBase {
  public:
-  DAGNet(const NetDef& net_def, Workspace* ws);
-  ~DAGNet();
+  using ExecutionChains = std::unordered_map<int, std::vector<int>>;
+  DAGNetBase(const NetDef& net_def, Workspace* ws);
+  ~DAGNetBase();
   bool Verify() override;
   bool Run() override;
   // WorkerFunction() is a function wrapper to allow us to run worker threads.
   // It checks out one ready-to-run operator from the job queue, runs it,
   // notifies all its children, and for any children that is ready, enqueues
   // it to the job queue.
-  void WorkerFunction();
+  virtual void WorkerFunction();
   void TEST_Benchmark(const int warmup_runs, const int main_runs,
                       const bool run_individual) override;
 
+  const ExecutionChains& TEST_execution_chains() const {
+    return execution_chains_;
+  }
+
  protected:
+  virtual bool RunAt(const std::vector<int>& chain) = 0;
   vector<internal::OperatorNode> operator_nodes_;
+  ExecutionChains execution_chains_;
   vector<int> initial_frontier_;
   SimpleQueue<int> job_queue_;
   std::vector<std::thread> workers_;
@@ -97,7 +122,7 @@ class DAGNet final : public NetBase {
   std::condition_variable cv_;
   std::mutex run_in_progress_;
 
-  DISABLE_COPY_AND_ASSIGN(DAGNet);
+  DISABLE_COPY_AND_ASSIGN(DAGNetBase);
 };
 
 }  // namespace caffe2

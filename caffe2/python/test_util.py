@@ -15,6 +15,14 @@ def rand_array(*dims):
 
 
 class TestCase(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        workspace.GlobalInit([
+            'caffe2',
+            '--caffe2_log_level=0',
+            '--caffe2_omp_num_threads=1',
+        ])
+
     def setUp(self):
         workspace.ResetWorkspace()
 

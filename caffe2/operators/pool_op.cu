@@ -186,9 +186,9 @@ template <>
 bool PoolGradientOp<float, CUDAContext, AveragePool>::RunOnDeviceWithOrderNCHW() {
   auto& X = Input(0);
   auto& dY = Input(2);
-  CAFFE_CHECK_EQ(dY.ndim(), 4);
+  CHECK_EQ(dY.ndim(), 4);
   auto* dX = Output(0);
-  dX->ReshapeLike(X);
+  dX->ResizeLike(X);
   ConvPoolOpBase<CUDAContext>::ComputePads(X.dim32(2), X.dim32(3));
   AvePoolBackwardNCHW<float><<<CAFFE_GET_BLOCKS(X.size()),
                                CAFFE_CUDA_NUM_THREADS,
@@ -203,9 +203,9 @@ template <>
 bool PoolGradientOp<float, CUDAContext, AveragePool>::RunOnDeviceWithOrderNHWC() {
   auto& X = Input(0);
   auto& dY = Input(2);
-  CAFFE_CHECK_EQ(dY.ndim(), 4);
+  CHECK_EQ(dY.ndim(), 4);
   auto* dX = Output(0);
-  dX->ReshapeLike(X);
+  dX->ResizeLike(X);
   ConvPoolOpBase<CUDAContext>::ComputePads(X.dim32(1), X.dim32(2));
   AvePoolBackwardNHWC<float><<<CAFFE_GET_BLOCKS(X.size()),
                                CAFFE_CUDA_NUM_THREADS,
@@ -383,9 +383,9 @@ bool PoolGradientOp<float, CUDAContext, MaxPool>::RunOnDeviceWithOrderNCHW() {
   auto& X = Input(0);
   auto& Y = Input(1);
   auto& dY = Input(2);
-  CAFFE_CHECK_EQ(dY.ndim(), 4);
+  CHECK_EQ(dY.ndim(), 4);
   auto* dX = Output(0);
-  dX->ReshapeLike(X);
+  dX->ResizeLike(X);
   ConvPoolOpBase<CUDAContext>::ComputePads(X.dim32(2), X.dim32(3));
   MaxPoolBackwardNCHW<float><<<CAFFE_GET_BLOCKS(X.size()),
                                CAFFE_CUDA_NUM_THREADS,
@@ -402,9 +402,9 @@ bool PoolGradientOp<float, CUDAContext, MaxPool>::RunOnDeviceWithOrderNHWC() {
   auto& X = Input(0);
   auto& Y = Input(1);
   auto& dY = Input(2);
-  CAFFE_CHECK_EQ(dY.ndim(), 4);
+  CHECK_EQ(dY.ndim(), 4);
   auto* dX = Output(0);
-  dX->ReshapeLike(X);
+  dX->ResizeLike(X);
   ConvPoolOpBase<CUDAContext>::ComputePads(X.dim32(1), X.dim32(2));
   MaxPoolBackwardNHWC<float><<<CAFFE_GET_BLOCKS(X.size()),
                                CAFFE_CUDA_NUM_THREADS,

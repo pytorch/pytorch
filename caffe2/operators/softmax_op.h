@@ -18,7 +18,6 @@ class SoftmaxOp final : public Operator<Context> {
  protected:
   Tensor<Context> scale_;
   Tensor<Context> sum_multiplier_;
-  DISABLE_COPY_AND_ASSIGN(SoftmaxOp);
 };
 
 template <typename T, class Context>
@@ -31,7 +30,6 @@ class SoftmaxGradientOp final : public Operator<Context> {
  protected:
   Tensor<Context> scale_;
   Tensor<Context> sum_multiplier_;
-  DISABLE_COPY_AND_ASSIGN(SoftmaxGradientOp);
 };
 
 }  // namespace caffe2

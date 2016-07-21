@@ -20,6 +20,7 @@ struct PinnedCPUAllocator final : CPUAllocator {
   void* New(size_t nbytes) override {
     void* data;
     CUDA_CHECK(cudaMallocHost(&data, nbytes));
+    memset(data, 0, nbytes);
     return data;
   }
   void Delete(void* data) override {
@@ -45,7 +46,6 @@ class ThreadLocalCUDAObjects {
     for (int i = 0; i < CAFFE2_COMPILE_TIME_MAX_GPUS; ++i) {
       cuda_stream_[i] = nullptr;
       cublas_handle_[i] = nullptr;
-      curand_generator_[i] = nullptr;
     }
     for (int i = 0; i < NumCudaDevices(); ++i) {
       DeviceGuard guard(i);
@@ -56,9 +56,6 @@ class ThreadLocalCUDAObjects {
 
   ~ThreadLocalCUDAObjects() {
     for (int i = 0; i < CAFFE2_COMPILE_TIME_MAX_GPUS; ++i) {
-      if (curand_generator_[i]) {
-        curandDestroyGenerator(curand_generator_[i]);
-      }
       if (cublas_handle_[i]) {
         cublasDestroy(cublas_handle_[i]);
       }
@@ -67,27 +64,29 @@ class ThreadLocalCUDAObjects {
   }
   cudaStream_t cuda_stream_[CAFFE2_COMPILE_TIME_MAX_GPUS];
   cublasHandle_t cublas_handle_[CAFFE2_COMPILE_TIME_MAX_GPUS];
-  curandGenerator_t curand_generator_[CAFFE2_COMPILE_TIME_MAX_GPUS];
 };
 
-
-class CUDAContext {
+class CUDAContext final {
  public:
   // The default cuda context constructor.
   explicit CUDAContext(const int gpu_id = -1)
-      : gpu_id_(gpu_id == -1 ? GetDefaultGPUID() : gpu_id), random_seed_(1701) {
+      : gpu_id_(gpu_id == -1 ? GetDefaultGPUID() : gpu_id)
+      , random_seed_(math::randomNumberSeed()) {
   }
 
   explicit CUDAContext(const DeviceOption& option)
       : gpu_id_(option.has_cuda_gpu_id() ?
                 option.cuda_gpu_id() : GetDefaultGPUID()),
         random_seed_(option.has_random_seed() ?
-                     option.random_seed() : time(nullptr)) {
-    CAFFE_DCHECK_EQ(option.device_type(), CUDA);
+                     option.random_seed() : math::randomNumberSeed()) {
+    DCHECK_EQ(option.device_type(), CUDA);
   }
 
-  virtual ~CUDAContext() {
-    CAFFE_CHECK(FinishDeviceComputation());
+  ~CUDAContext() {
+    if (curand_generator_) {
+      CURAND_CHECK(curandDestroyGenerator(curand_generator_));
+    }
+    CHECK(FinishDeviceComputation());
   }
 
   inline void SwitchToDevice() {
@@ -100,20 +99,24 @@ class CUDAContext {
     if (error == cudaSuccess) {
       return true;
     } else {
-      CAFFE_LOG_ERROR << "Encountered CUDA error: "
+      LOG(ERROR) << "Encountered CUDA error: "
                       << cudaGetErrorString(error);
       return false;
     }
   }
 
-  inline int cuda_gpu_id() { return gpu_id_; }
+  inline int cuda_gpu_id() const { return gpu_id_; }
 
   inline cudaStream_t& cuda_stream() {
-    return cuda_objects_.cuda_stream_[gpu_id_];
+    return cuda_stream(gpu_id_);
   }
 
   inline const cudaStream_t& cuda_stream() const {
-    return cuda_objects_.cuda_stream_[gpu_id_];
+    return cuda_stream(gpu_id_);
+  }
+
+  static cudaStream_t& cuda_stream(int gpu_id) {
+    return cuda_objects_.cuda_stream_[gpu_id];
   }
 
   cublasHandle_t& cublas_handle() {
@@ -135,19 +138,16 @@ class CUDAContext {
   }
 
   curandGenerator_t& curand_generator() {
-    auto& curand_generator_ = cuda_objects_.curand_generator_[gpu_id_];
-    if (curand_generator_) {
-      return curand_generator_;
-    } else {
+    if (!curand_generator_) {
       DeviceGuard guard(gpu_id_);
-      auto& cuda_stream_ = cuda_objects_.cuda_stream_[gpu_id_];
-      CURAND_CHECK(curandCreateGenerator(
-          &curand_generator_, CURAND_RNG_PSEUDO_DEFAULT));
+      CURAND_CHECK(
+          curandCreateGenerator(&curand_generator_, CURAND_RNG_PSEUDO_DEFAULT));
       CURAND_CHECK(curandSetPseudoRandomGeneratorSeed(
-          curand_generator_, random_seed_ + gpu_id_));
-      CURAND_CHECK(curandSetStream(curand_generator_, cuda_stream_));
-      return curand_generator_;
+          curand_generator_, random_seed_));
+      CHECK_NOTNULL(curand_generator_);
     }
+    CURAND_CHECK(curandSetStream(curand_generator_, cuda_stream()));
+    return curand_generator_;
   }
 
   static inline void* New(size_t nbytes) {
@@ -159,7 +159,7 @@ class CUDAContext {
   }
 
   template <class SrcContext, class DstContext>
-  inline void Memcpy(size_t nbytes, const void* src, void* dst) {
+  inline void CopyBytes(size_t nbytes, const void* src, void* dst) {
     CUDA_CHECK(cudaMemcpyAsync(
         dst, src, nbytes, cudaMemcpyDefault,
         cuda_objects_.cuda_stream_[gpu_id_]));
@@ -167,7 +167,7 @@ class CUDAContext {
 
   template <typename T, class SrcContext, class DstContext>
   inline void Copy(int n, const T* src, T* dst) {
-    Memcpy<SrcContext, DstContext>(n * sizeof(T),
+    CopyBytes<SrcContext, DstContext>(n * sizeof(T),
                                  static_cast<const void*>(src),
                                  static_cast<void*>(dst));
   }
@@ -175,6 +175,7 @@ class CUDAContext {
  protected:
   int gpu_id_;
   int random_seed_;
+  curandGenerator_t curand_generator_{nullptr};
   static thread_local ThreadLocalCUDAObjects cuda_objects_;
 };
 
@@ -182,18 +183,18 @@ class CUDAContext {
 // to copy the data from a cuda context. Inside the function, we create
 // a temporary CUDAContext object to carry out the copy. From the caller's
 // side, these functions are synchronous with respect to the host, similar
-// to a normal CPUContext::Memcpy<CPUContext, CPUContext> call.
+// to a normal CPUContext::CopyBytes<CPUContext, CPUContext> call.
 template<>
-inline void CPUContext::Memcpy<CUDAContext, CPUContext>(
+inline void CPUContext::CopyBytes<CUDAContext, CPUContext>(
     size_t nbytes, const void* src, void* dst) {
   CUDAContext context(GetGPUIDForPointer(src));
-  context.Memcpy<CUDAContext, CPUContext>(nbytes, src, dst);
+  context.CopyBytes<CUDAContext, CPUContext>(nbytes, src, dst);
 }
 template<>
-inline void CPUContext::Memcpy<CPUContext, CUDAContext>(
+inline void CPUContext::CopyBytes<CPUContext, CUDAContext>(
     size_t nbytes, const void* src, void* dst) {
   CUDAContext context(GetGPUIDForPointer(dst));
-  context.Memcpy<CPUContext, CUDAContext>(nbytes, src, dst);
+  context.CopyBytes<CPUContext, CUDAContext>(nbytes, src, dst);
 }
 
 // For simplicity, we will typedef Tensor<CPUContext> to TensorCPU.

@@ -16,8 +16,8 @@ class DropoutOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws),
         ratio_(OperatorBase::GetSingleArgument<float>("ratio", 0.5)),
         is_test_(OperatorBase::GetSingleArgument<int>("is_test", 0)) {
-    CAFFE_DCHECK_GE(ratio_, 0);
-    CAFFE_DCHECK_LT(ratio_, 1);
+    DCHECK_GE(ratio_, 0);
+    DCHECK_LT(ratio_, 1);
   }
 
   bool RunOnDevice() override;
@@ -26,7 +26,6 @@ class DropoutOp final : public Operator<Context> {
   float ratio_;
   bool is_test_;
   // Input: X; Output: Y, mask.
-  DISABLE_COPY_AND_ASSIGN(DropoutOp);
 };
 
 template <typename T, class Context>
@@ -37,8 +36,8 @@ class DropoutGradientOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws),
         ratio_(OperatorBase::GetSingleArgument<float>("ratio", 0.5)),
         is_test_(OperatorBase::GetSingleArgument<int>("is_test", 0)) {
-    CAFFE_DCHECK_GE(ratio_, 0);
-    CAFFE_DCHECK_LT(ratio_, 1);
+    DCHECK_GE(ratio_, 0);
+    DCHECK_LT(ratio_, 1);
   }
 
   bool RunOnDevice() override;
@@ -47,7 +46,6 @@ class DropoutGradientOp final : public Operator<Context> {
   float ratio_;
   bool is_test_;
   // Input: dY, mask; Output: dX
-  DISABLE_COPY_AND_ASSIGN(DropoutGradientOp);
 };
 
 }  // namespace caffe2

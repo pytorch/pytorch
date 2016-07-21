@@ -93,7 +93,7 @@ class TestMiniAlexNet(test_util.TestCase):
         pred = model.Softmax(fc8, "pred")
         xent = model.LabelCrossEntropy([pred, "label"], "xent")
         loss = model.AveragedLoss([xent], ["loss"])
-        model.AddGradientOperators()
+        model.AddGradientOperators([loss])
         return model
 
     def _testMiniAlexNet(self, order):
@@ -134,7 +134,7 @@ class TestMiniAlexNet(test_util.TestCase):
 if __name__ == '__main__':
     if not workspace.has_gpu_support:
         print('No GPU support. Skipping gpu test.')
-    elif workspace.NumberOfGPUs() == 0:
+    elif workspace.NumCudaDevices() == 0:
         print('No GPU device. Skipping gpu test.')
     else:
         unittest.main()

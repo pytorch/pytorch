@@ -88,21 +88,19 @@ class ZmqDB : public DB {
  public:
   ZmqDB(const string& source, Mode mode)
       : DB(source, mode), source_(source) {
-    CAFFE_CHECK_EQ(mode, READ) << "ZeroMQ DB only supports read mode.";
+    CAFFE_ENFORCE(mode == READ, "ZeroMQ DB only supports read mode.");
   }
 
   ~ZmqDB() {}
 
   void Close() override {}
 
-  Cursor* NewCursor() override {
-    return new ZmqDBCursor(source_);
+  unique_ptr<Cursor> NewCursor() override {
+    return std::make_unique<ZmqDBCursor>(source_);
   }
 
-  Transaction* NewTransaction() override {
-    // TODO(Yangqing): Do I really need to do log fatal? Any elegant way to
-    // warn the user?
-    CAFFE_LOG_FATAL << "ZeroMQ DB does not support writing with a transaction.";
+  unique_ptr<Transaction> NewTransaction() override {
+    CAFFE_THROW("ZeroMQ DB does not support writing with a transaction.");
     return nullptr;  // dummy placeholder to suppress old compiler warnings.
   }
 

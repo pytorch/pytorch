@@ -1,15 +1,13 @@
 import numpy as np
 from caffe2.python import \
     core, device_checker, gradient_checker, test_util, workspace
-from caffe2.proto import caffe2_pb2, caffe2_legacy_pb2
+from caffe2.proto import caffe2_pb2
 
 import collections
-import sys
 import unittest
 
-core.GlobalInit(["python"])
 
-if workspace.has_gpu_support and workspace.NumberOfGPUs() > 0:
+if workspace.has_gpu_support and workspace.NumCudaDevices() > 0:
     gpu_device_option = caffe2_pb2.DeviceOption()
     gpu_device_option.device_type = caffe2_pb2.CUDA
     cpu_device_option = caffe2_pb2.DeviceOption()
@@ -312,7 +310,7 @@ class TestFlatten(test_util.TestCase):
             self.assertTrue(res)
 
 
-class TestDepthConcat(test_util.TestCase):
+class TestConcat(test_util.TestCase):
     def setUp(self):
         self.test_configs = [
             # input_size, depth1, depth2, depth3, depth4
@@ -320,9 +318,9 @@ class TestDepthConcat(test_util.TestCase):
             (4, 5, 4, 3, 2),
         ]
 
-    def testDepthConcatNHWC(self):
+    def testConcatNHWC(self):
         for input_size, d1, d2, d3, d4 in self.test_configs:
-            op = core.CreateOperator("DepthConcat",
+            op = core.CreateOperator("Concat",
                 ["X1", "X2", "X3", "X4"],
                 ["Y", "Y_dims"],
                 order="NHWC"
@@ -344,9 +342,9 @@ class TestDepthConcat(test_util.TestCase):
                                                                     [0])
                     self.assertTrue(res)
 
-    def testDepthConcatNCHW(self):
+    def testConcatNCHW(self):
         for input_size, d1, d2, d3, d4 in self.test_configs:
-            op = core.CreateOperator("DepthConcat",
+            op = core.CreateOperator("Concat",
                 ["X1", "X2", "X3", "X4"],
                 ["Y", "Y_dims"],
                 order="NCHW"
@@ -402,6 +400,21 @@ class TestTanh(test_util.TestCase):
     def testTanh(self):
         for input_size in self.test_configs:
             op = core.CreateOperator("Tanh", ["X"], ["Y"])
+            X = np.random.rand(*input_size).astype(np.float32) - 0.5
+            res = device_checker.CheckSimple(op, [X], [0])
+            self.assertTrue(res)
+            for checker in gradient_checkers:
+                res, grad, grad_estimated = checker.CheckSimple(op, [X], 0, [0])
+                self.assertTrue(res)
+
+
+class TestExp(test_util.TestCase):
+    def setUp(self):
+        self.test_configs = [(1, 1), (2, 1), (1, 2, 3, 4), ]
+
+    def testExp(self):
+        for input_size in self.test_configs:
+            op = core.CreateOperator("Exp", ["X"], ["Y"])
             X = np.random.rand(*input_size).astype(np.float32) - 0.5
             res = device_checker.CheckSimple(op, [X], [0])
             self.assertTrue(res)
@@ -467,118 +480,6 @@ class TestMakeTwoClass(test_util.TestCase):
                 self.assertTrue(res)
 
 
-@unittest.skipIf(not workspace.has_gpu_support,
-                 "Recurrent only implemented on GPU")
-class TestRecurrent(test_util.TestCase):
-    R = collections.namedtuple('R', [
-        'hidden_size',
-        'bidirectional',
-        'rnn_mode',
-        'input_mode',
-        'num_layers',
-        'T',
-        'N',
-        'D',
-        'dropout',
-    ])
-
-    def test_recurrent(self):
-        CONFIGS = [
-            self.R(
-                hidden_size=3,
-                bidirectional=False,
-                rnn_mode="gru",
-                input_mode="linear",
-                num_layers=2,
-                dropout=0.0,
-                T=3,
-                N=4,
-                D=2
-            ),
-            self.R(
-                hidden_size=5,
-                bidirectional=True,
-                rnn_mode="gru",
-                input_mode="linear",
-                num_layers=2,
-                dropout=0.0,
-                T=3,
-                N=4,
-                D=2
-            ),
-            self.R(
-                hidden_size=1,
-                bidirectional=False,
-                rnn_mode="lstm",
-                input_mode="linear",
-                num_layers=1,
-                T=3,
-                N=4,
-                D=2,
-                dropout=0.0,
-            ),
-            self.R(
-                hidden_size=2,
-                bidirectional=True,
-                rnn_mode="lstm",
-                input_mode="linear",
-                num_layers=2,
-                dropout=0.0,
-                T=2,
-                N=2,
-                D=2
-            ),
-        ]
-
-        for r in CONFIGS:
-            print(r)
-            init_op = core.CreateOperator("RecurrentInit",
-                ["INPUT"],
-                ["WEIGHT", "DROPOUT_STATES"],
-                hidden_size=r.hidden_size,
-                bidirectional=r.bidirectional,
-                rnn_mode=r.rnn_mode,
-                dropout=r.dropout,
-                input_mode=r.input_mode,
-                num_layers=r.num_layers,
-                device_option=gpu_device_option
-            )
-
-            op = core.CreateOperator("Recurrent",
-                ["INPUT", "HIDDEN_INPUT", "CELL_INPUT", "WEIGHT"],
-                ["OUTPUT", "HIDDEN_OUTPUT", "CELL_OUTPUT",
-                 "RNN_SCRATCH", "DROPOUT_STATES"],
-                hidden_size=r.hidden_size,
-                bidirectional=r.bidirectional,
-                rnn_mode=r.rnn_mode,
-                dropout=r.dropout,
-                input_mode=r.input_mode,
-                num_layers=r.num_layers,
-            )
-            num_directions = 2 if r.bidirectional else 1
-
-            X = np.random.randn(r.T, r.N, r.D).astype(np.float32)
-            workspace.FeedBlob("INPUT", X, device_option=gpu_device_option)
-            workspace.RunOperatorOnce(init_op)
-            W = workspace.FetchBlob("WEIGHT")
-            H = np.random.randn(
-                r.hidden_size, r.N, r.num_layers * num_directions).astype(
-                    np.float32)
-            C = np.random.randn(
-                r.hidden_size, r.N, r.num_layers * num_directions).astype(
-                    np.float32) if r.rnn_mode == "lstm" else \
-                np.empty((1,)).astype(np.float32)  # unused in GRU
-            inputs = [X, H, C, W]
-            self.assertTrue(gpu_device_checker.CheckSimple(op, inputs, [0]))
-            for checker in gpu_gradient_checkers:
-                input_idxs = [i for (i, _) in enumerate(inputs)] \
-                    if r.rnn_mode == "lstm" else [0, 1, 3]  # ignore C
-                for input_idx in input_idxs:
-                    res, grad, grad_estimated = checker.CheckSimple(
-                        op, inputs, input_idx, [0, 1, 2])
-                    if not res:
-                        print(input_idx, grad, grad_estimated)
-                    self.assertTrue(res)
-
 if __name__ == '__main__':
+    workspace.GlobalInit(["python"])
     unittest.main()

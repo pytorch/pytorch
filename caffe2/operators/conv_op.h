@@ -24,7 +24,6 @@ class ConvOp final : public ConvPoolOpBase<Context> {
   // Input: X, W, b
   // Output: Y
   INPUT_TAGS(INPUT, FILTER, BIAS);
-  DISABLE_COPY_AND_ASSIGN(ConvOp);
 };
 
 template <typename T, class Context>
@@ -45,7 +44,6 @@ class ConvGradientOp final : public ConvPoolOpBase<Context> {
   // output: dW, db, and optionally dX
   INPUT_TAGS(INPUT, FILTER, OUTPUT_GRAD);
   OUTPUT_TAGS(FILTER_GRAD, BIAS_GRAD, INPUT_GRAD);
-  DISABLE_COPY_AND_ASSIGN(ConvGradientOp);
 };
 
 }  // namespace caffe2

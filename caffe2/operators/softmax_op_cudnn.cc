@@ -29,15 +29,15 @@ class CuDNNSoftmaxOp final : public Operator<CUDAContext> {
   bool RunOnDevice() override {
     auto& X = Input(0);
     auto* Y = Output(0);
-    CAFFE_DCHECK_EQ(X.ndim(), 2);
-    Y->ReshapeLike(X);
+    DCHECK_EQ(X.ndim(), 2);
+    Y->ResizeLike(X);
     if (dims_ != X.dims()) {
       CUDNN_CHECK(cudnnSetTensor4dDescriptor(
           desc_, GetCudnnTensorFormat(StorageOrder::NCHW),
           cudnnTypeWrapper<T>::type, X.dim32(0), X.dim32(1), 1, 1));
       dims_ = X.dims();
     }
-    CUDNN_CHECK(cudnnSoftmaxForward(cudnn_wrapper_.cudnn_handle(),
+    CUDNN_CHECK(cudnnSoftmaxForward(cudnn_wrapper_.inline_cudnn_handle(),
         CUDNN_SOFTMAX_ACCURATE, CUDNN_SOFTMAX_MODE_INSTANCE,
         cudnnTypeWrapper<T>::kOne(), desc_, X.template data<T>(),
         cudnnTypeWrapper<T>::kZero(), desc_, Y->template mutable_data<T>()));
@@ -48,7 +48,6 @@ class CuDNNSoftmaxOp final : public Operator<CUDAContext> {
   CuDNNWrapper cudnn_wrapper_;
   cudnnTensorDescriptor_t desc_;
   vector<TIndex> dims_;
-  DISABLE_COPY_AND_ASSIGN(CuDNNSoftmaxOp);
 };
 
 
@@ -69,20 +68,20 @@ class CuDNNSoftmaxGradientOp final : public Operator<CUDAContext> {
     auto& Y = Input(0);
     auto& dY = Input(1);
     auto* dX = Output(0);
-    CAFFE_DCHECK_EQ(Y.ndim(), 2);
-    CAFFE_DCHECK(Y.dims() == dY.dims());
+    DCHECK_EQ(Y.ndim(), 2);
+    DCHECK(Y.dims() == dY.dims());
     int N = Y.dim32(0);
     int D = Y.dim32(1);
-    CAFFE_DCHECK_EQ(dY.dim32(0), N);
-    CAFFE_DCHECK_EQ(dY.dim32(1), D);
-    dX->ReshapeLike(Y);
+    DCHECK_EQ(dY.dim32(0), N);
+    DCHECK_EQ(dY.dim32(1), D);
+    dX->ResizeLike(Y);
     if (dims_ != Y.dims()) {
       CUDNN_CHECK(cudnnSetTensor4dDescriptor(
           desc_, GetCudnnTensorFormat(StorageOrder::NCHW),
           cudnnTypeWrapper<T>::type, Y.dim32(0), Y.dim32(1), 1, 1));
       dims_ = Y.dims();
     }
-    CUDNN_CHECK(cudnnSoftmaxBackward(cudnn_wrapper_.cudnn_handle(),
+    CUDNN_CHECK(cudnnSoftmaxBackward(cudnn_wrapper_.inline_cudnn_handle(),
         CUDNN_SOFTMAX_ACCURATE, CUDNN_SOFTMAX_MODE_INSTANCE,
         cudnnTypeWrapper<T>::kOne(), desc_, Y.template data<T>(),
         desc_, dY.template data<T>(), cudnnTypeWrapper<T>::kZero(), desc_,
@@ -94,7 +93,6 @@ class CuDNNSoftmaxGradientOp final : public Operator<CUDAContext> {
   CuDNNWrapper cudnn_wrapper_;
   cudnnTensorDescriptor_t desc_;
   vector<TIndex> dims_;
-  DISABLE_COPY_AND_ASSIGN(CuDNNSoftmaxGradientOp);
 };
 
 namespace {

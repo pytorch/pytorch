@@ -17,28 +17,26 @@ using caffe2::db::DB;
 using caffe2::db::Cursor;
 using caffe2::string;
 
-std::unique_ptr<DB> in_db;
-std::unique_ptr<Cursor> cursor;
-
 int main(int argc, char** argv) {
   caffe2::GlobalInit(&argc, &argv);
 
-  CAFFE_LOG_INFO << "Opening DB...";
-  in_db.reset(caffe2::db::CreateDB(
-      caffe2::FLAGS_input_db_type, caffe2::FLAGS_input_db, caffe2::db::READ));
-  CAFFE_CHECK(in_db.get() != nullptr) << "Cannot load input db.";
-  cursor.reset(in_db->NewCursor());
-  CAFFE_LOG_INFO << "DB opened.";
+  LOG(INFO) << "Opening DB...";
+  auto in_db = caffe2::db::CreateDB(
+      caffe2::FLAGS_input_db_type, caffe2::FLAGS_input_db, caffe2::db::READ);
+  CHECK(in_db) << "Cannot load input db " << caffe2::FLAGS_input_db
+               << " of expected type " << caffe2::FLAGS_input_db_type;
+  auto cursor = in_db->NewCursor();
+  LOG(INFO) << "DB opened.";
 
-  CAFFE_LOG_INFO << "Starting ZeroMQ server...";
+  LOG(INFO) << "Starting ZeroMQ server...";
 
   //  Socket to talk to clients
   caffe2::ZmqSocket sender(ZMQ_PUSH);
   sender.Bind(caffe2::FLAGS_server);
-  CAFFE_LOG_INFO << "Server created at " << caffe2::FLAGS_server;
+  LOG(INFO) << "Server created at " << caffe2::FLAGS_server;
 
   while (1) {
-    CAFFE_VLOG(1) << "Sending " << cursor->key();
+    VLOG(1) << "Sending " << cursor->key();
     sender.SendTillSuccess(cursor->key(), ZMQ_SNDMORE);
     sender.SendTillSuccess(cursor->value(), 0);
     cursor->Next();

@@ -10,7 +10,7 @@
 #define CTC_CHECK(condition)                                   \
   do {                                                         \
     ctcStatus_t status = condition;                            \
-    CAFFE_CHECK_EQ(status, CTC_STATUS_SUCCESS)                 \
+    CHECK_EQ(status, CTC_STATUS_SUCCESS)                 \
         << " "                                                 \
         << "Error at: " << __FILE__ << ":" << __LINE__ << ": " \
         << ::ctcGetStatusString(status);                       \
@@ -45,9 +45,9 @@ class CTCOp final : public Operator<Context> {
 
     // outputs
     auto* costs = OperatorBase::template Output<TensorCPU>(COSTS);
-    costs->ReshapeLike(labelLengths);
+    costs->ResizeLike(labelLengths);
     auto* gradients = Output(GRADIENTS);
-    gradients->ReshapeLike(inputs);
+    gradients->ResizeLike(inputs);
     auto* workspace = Output(WORKSPACE);
 
     size_t workspaceSizeBytes;
@@ -58,7 +58,7 @@ class CTCOp final : public Operator<Context> {
         minibatchSize,
         detail::workspaceInfo(context_),
         &workspaceSizeBytes));
-    workspace->Reshape({static_cast<int>(workspaceSizeBytes)});
+    workspace->Resize(workspaceSizeBytes);
     CTC_CHECK(compute_ctc_loss(
         inputs.template data<T>(),
         gradients->template mutable_data<T>(),
@@ -76,7 +76,6 @@ class CTCOp final : public Operator<Context> {
 private:
   INPUT_TAGS(INPUTS, LABELS, LABEL_LENGTHS, INPUT_LENGTHS);
   OUTPUT_TAGS(GRADIENTS, COSTS, WORKSPACE);
-  DISABLE_COPY_AND_ASSIGN(CTCOp);
 };
 }
 

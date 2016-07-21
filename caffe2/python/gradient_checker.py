@@ -51,7 +51,8 @@ class GradientChecker:
         inputs,
         input_to_check,
         outputs_with_grads,
-        grad_ops=None
+        grad_ops=None,
+        input_device_options=None
     ):
         """Checks the operator in a very simple fashion by stacking a sum of
         squares on the top.
@@ -66,9 +67,13 @@ class GradientChecker:
               squared sum and also feed in their gradients.
           grad_operator: the gradient operator. If not given, we will get the
               gradient operator from the gradient registry.
+          input_device_options: an optional mapping from input names to
+              DeviceOptions (to override the default DeviceOption)
         Outputs:
           boolean: True if it passes, False if it does not pass.
         """
+        if input_device_options is None:
+            input_device_options = {}
         # Entering the checker workspace
         old_ws_name = workspace.CurrentWorkspace()
         if self._workspace_name != old_ws_name:
@@ -88,7 +93,10 @@ class GradientChecker:
         dims_to_check = inputs[input_to_check].size
         # First, feed in the input.
         for i, arr in enumerate(inputs):
-            workspace.FeedBlob(op.input[i], arr, self._device_option)
+            workspace.FeedBlob(
+                op.input[i], arr,
+                input_device_options.get(
+                    op.input[i], self._device_option))
 
         # Get the loss and gradient for the original.
         input_name = op.input[input_to_check]
@@ -121,16 +129,16 @@ class GradientChecker:
             grad, grad_estimate, atol=self._threshold, rtol=self._threshold)
         if np.any(fail_mat):
             idx = np.flatnonzero(fail_mat)
-            #print 'Failed. [idx, grad, grad_estimate] are:'
-            #print np.vstack([idx, grad.flat[idx], grad_estimate.flat[idx]]).T
+            print('Failed. [idx, grad, grad_estimate] are:')
+            print(np.vstack([idx, grad.flat[idx], grad_estimate.flat[idx]]).T)
             ret = False
         else:
             ret = True
         # After finishing, cleaning up things.
         if self._workspace_name != old_ws_name:
-            # We reset the workspace to make sure everything intermediate is cleaned
-            # up. Note that there is no need to delete a workspace - when empty it
-            # takes a very limited amount of memory.
+            # We reset the workspace to make sure everything intermediate is
+            # cleaned up. Note that there is no need to delete a workspace -
+            # when empty it takes a very limited amount of memory.
             workspace.ResetWorkspace()
             workspace.SwitchWorkspace(old_ws_name)
         return ret, grad, grad_estimate

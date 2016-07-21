@@ -1,3 +1,5 @@
+syntax = "proto2";
+
 package caffe2;
 
 enum LegacyPadding {

@@ -21,10 +21,10 @@ class LRNOpBase : public Operator<Context> {
         order_(StringToStorageOrder(
             OperatorBase::GetSingleArgument<string>("order", "NHWC"))),
         pre_pad_((size_ - 1) / 2) {
-    CAFFE_DCHECK_GT(size_, 0);
-    CAFFE_DCHECK_EQ(size_ % 2, 1);
-    CAFFE_DCHECK_GT(alpha_, 0);
-    CAFFE_DCHECK_GT(beta_, 0);
+    DCHECK_GT(size_, 0);
+    DCHECK_EQ(size_ % 2, 1);
+    DCHECK_GT(alpha_, 0);
+    DCHECK_GT(beta_, 0);
   }
 
   bool RunOnDevice() override {
@@ -34,7 +34,7 @@ class LRNOpBase : public Operator<Context> {
     case StorageOrder::NCHW:
       return RunOnDeviceWithOrderNCHW();
     default:
-      CAFFE_LOG_FATAL << "Unknown storage order: " << order_;
+      LOG(FATAL) << "Unknown storage order: " << order_;
     }
     // To suppress old compiler warnings
     return true;
@@ -51,7 +51,6 @@ class LRNOpBase : public Operator<Context> {
   const StorageOrder order_;
   const int pre_pad_;
   // Input: X; Output: Y, scale.
-  DISABLE_COPY_AND_ASSIGN(LRNOpBase);
 };
 
 template <typename T, class Context>
@@ -67,8 +66,6 @@ class LRNOp final : public LRNOpBase<T, Context> {
  protected:
   // Input: X; Output: Y, scale.
   OUTPUT_TAGS(OUTPUT, SCALE);
-  INPUT_OUTPUT_STATS(1, 1, 2, 2);
-  DISABLE_COPY_AND_ASSIGN(LRNOp);
 };
 
 template <typename T, class Context>
@@ -84,7 +81,6 @@ class LRNGradientOp final : public LRNOpBase<T, Context> {
  protected:
   // Input: X, Y, scale, dY; Output: dX
   INPUT_TAGS(INPUT, OUTPUT, SCALE, OUTPUT_GRAD);
-  DISABLE_COPY_AND_ASSIGN(LRNGradientOp);
 };
 
 }  // namespace caffe2

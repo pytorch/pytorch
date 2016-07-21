@@ -12,9 +12,11 @@ namespace db {
 
 class LevelDBCursor : public Cursor {
  public:
-  explicit LevelDBCursor(leveldb::Iterator* iter)
-    : iter_(iter) { SeekToFirst(); }
-  ~LevelDBCursor() { delete iter_; }
+  explicit LevelDBCursor(leveldb::DB* db)
+      : iter_(db->NewIterator(leveldb::ReadOptions())) {
+    SeekToFirst();
+  }
+  ~LevelDBCursor() {}
   void Seek(const string& key) override { iter_->Seek(key); }
   bool SupportsSeek() override { return true; }
   void SeekToFirst() override { iter_->SeekToFirst(); }
@@ -24,13 +26,13 @@ class LevelDBCursor : public Cursor {
   bool Valid() override { return iter_->Valid(); }
 
  private:
-  leveldb::Iterator* iter_;
+  std::unique_ptr<leveldb::Iterator> iter_;
 };
 
 class LevelDBTransaction : public Transaction {
  public:
   explicit LevelDBTransaction(leveldb::DB* db) : db_(db) {
-    CAFFE_CHECK_NOTNULL(db_);
+    CHECK_NOTNULL(db_);
     batch_.reset(new leveldb::WriteBatch());
   }
   ~LevelDBTransaction() { Commit(); }
@@ -40,8 +42,9 @@ class LevelDBTransaction : public Transaction {
   void Commit() override {
     leveldb::Status status = db_->Write(leveldb::WriteOptions(), batch_.get());
     batch_.reset(new leveldb::WriteBatch());
-    CAFFE_CHECK(status.ok()) << "Failed to write batch to leveldb "
-                       << std::endl << status.ToString();
+    CAFFE_ENFORCE(
+        status.ok(),
+        "Failed to write batch to leveldb. ", status.ToString());
   }
 
  private:
@@ -62,18 +65,19 @@ class LevelDB : public DB {
     options.create_if_missing = mode != READ;
     leveldb::DB* db_temp;
     leveldb::Status status = leveldb::DB::Open(options, source, &db_temp);
-    CAFFE_CHECK(status.ok()) << "Failed to open leveldb " << source
-                       << std::endl << status.ToString();
+    CAFFE_ENFORCE(
+        status.ok(),
+        "Failed to open leveldb ", source, ". ", status.ToString());
     db_.reset(db_temp);
-    CAFFE_LOG_INFO << "Opened leveldb " << source;
+    VLOG(1) << "Opened leveldb " << source;
   }
 
   void Close() override { db_.reset(); }
-  Cursor* NewCursor() override {
-    return new LevelDBCursor(db_->NewIterator(leveldb::ReadOptions()));
+  unique_ptr<Cursor> NewCursor() override {
+    return std::make_unique<LevelDBCursor>(db_.get());
   }
-  Transaction* NewTransaction() override {
-    return new LevelDBTransaction(db_.get());
+  unique_ptr<Transaction> NewTransaction() override {
+    return std::make_unique<LevelDBTransaction>(db_.get());
   }
 
  private:

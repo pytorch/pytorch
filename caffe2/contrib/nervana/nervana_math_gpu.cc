@@ -21,7 +21,7 @@ void Gemm<float, CUDAContext, NervanaEngine>(
   int ldb = (TransB == CblasNoTrans) ? N : K;
   bool a_t = (TransA == CblasTrans);
   bool b_t = (TransB == CblasTrans);
-  CAFFE_CHECK(nervana_sgemm(
+  CHECK(nervana_sgemm(
       const_cast<float*>(A), const_cast<float*>(B), C, a_t, b_t, M, N, K,
       lda, ldb, N, alpha, beta, nullptr, false, false, context->cuda_stream()));
 }

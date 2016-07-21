@@ -12,4 +12,3 @@ filegroup(
         "//caffe2:caffe2_python",
     ]
 )
-

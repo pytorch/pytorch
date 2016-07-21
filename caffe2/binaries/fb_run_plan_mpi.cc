@@ -14,6 +14,8 @@
 #include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/utils/proto_utils.h"
 
+using caffe2::MPICommSize;
+using caffe2::GlobalMPIComm;
 
 CAFFE2_DEFINE_string(plan, "", "The given path to the plan protobuffer.");
 CAFFE2_DEFINE_string(role, "", "server | client");
@@ -87,7 +89,7 @@ MPI_Comm assimilateComm(MPI_Comm intra, MPI_Comm inter) {
 
   // Delete the original intra-comm
   if (MPI_COMM_NULL != intra && MPI_COMM_WORLD != intra) {
-    MPI_Comm_free(&intra);
+    MPI_CHECK(MPI_Comm_free(&intra));
   }
 
   // Return the new intra-comm
@@ -99,7 +101,7 @@ MPI_Comm connect() {
   std::string port_name;
   while (!caffe2::ReadStringFromFile(caffe2::FLAGS_job_path.c_str(),
                                      &port_name)) {
-    CAFFE_LOG_INFO << "Failed reading job path";
+    LOG(INFO) << "Failed reading job path";
     // Busy wait
     std::this_thread::sleep_for(std::chrono::seconds(1));
     continue;
@@ -108,41 +110,38 @@ MPI_Comm connect() {
   // server transitioning to MPI_Comm_accept.
   std::this_thread::sleep_for(std::chrono::seconds(1));
   MPI_Comm icomm;
-  CAFFE_LOG_INFO << "Connecting to port name: " << port_name;
+  LOG(INFO) << "Connecting to port name: " << port_name;
   MPI_CHECK(MPI_Comm_connect(
-      const_cast<char*>(port_name.c_str()), MPI_INFO_NULL, 0,
-      caffe2::MPIComm(), &icomm));
-  CAFFE_LOG_INFO << "Connected";
+      const_cast<char*>(port_name.c_str()),
+      MPI_INFO_NULL,
+      0,
+      GlobalMPIComm(),
+      &icomm));
+  LOG(INFO) << "Connected";
   return icomm;
 }
 
 MPI_Comm accept() {
   std::string port_name;
-  CAFFE_CHECK(caffe2::ReadStringFromFile(
+  CHECK(caffe2::ReadStringFromFile(
       caffe2::FLAGS_job_path.c_str(), &port_name));
   MPI_Comm icomm;
-  CAFFE_LOG_INFO << "Accepting a client on port name: " << port_name;
+  LOG(INFO) << "Accepting a client on port name: " << port_name;
   MPI_CHECK(MPI_Comm_accept(
       const_cast<char*>(port_name.c_str()), MPI_INFO_NULL, 0,
       MPI_COMM_SELF, &icomm));
-  CAFFE_LOG_INFO << "Finished accepting";
+  LOG(INFO) << "Finished accepting";
   return icomm;
 }
 
 void registerServer() {
   char port_name[MPI_MAX_PORT_NAME];
   MPI_CHECK(MPI_Open_port(MPI_INFO_NULL, port_name));
-  CAFFE_LOG_INFO << "Port name: " << port_name;
+  LOG(INFO) << "Port name: " << port_name;
   // TODO: atomic
-  CAFFE_CHECK(caffe2::WriteStringToFile(
+  CHECK(caffe2::WriteStringToFile(
       std::string(port_name), caffe2::FLAGS_job_path.c_str()));
-  CAFFE_LOG_INFO << "Wrote to file: " << caffe2::FLAGS_job_path;
-}
-
-size_t MPICommSize(MPI_Comm comm) {
-  int comm_size;
-  MPI_CHECK(MPI_Comm_size(comm, &comm_size));
-  return comm_size;
+  LOG(INFO) << "Wrote to file: " << caffe2::FLAGS_job_path;
 }
 
 int main(int argc, char** argv) {
@@ -158,54 +157,54 @@ int main(int argc, char** argv) {
   caffe2::GlobalInit(&argc, &argv);
 
   // Initialize client/server
-  CAFFE_CHECK(caffe2::FLAGS_role == "server" || caffe2::FLAGS_role == "client");
+  CHECK(caffe2::FLAGS_role == "server" || caffe2::FLAGS_role == "client");
   if (caffe2::FLAGS_role == "server") {
-    CAFFE_LOG_INFO << "Registering server";
+    LOG(INFO) << "Registering server";
     registerServer();
-    CAFFE_LOG_INFO << "Registered server";
+    LOG(INFO) << "Registered server";
   }
 
   if (caffe2::FLAGS_role == "client") {
-    CAFFE_LOG_INFO << "Client connecting";
-    CAFFE_LOG_INFO << "Initial comm size: " << MPICommSize(caffe2::MPIComm());
+    LOG(INFO) << "Client connecting";
+    LOG(INFO) << "Initial comm size: " << MPICommSize(GlobalMPIComm());
     MPI_Comm icomm = connect();
-    CAFFE_LOG_INFO << "Connected";
-    CAFFE_LOG_INFO << "After connect size: " << MPICommSize(caffe2::MPIComm());
-    CAFFE_LOG_INFO << "New comm size: " << MPICommSize(icomm);
+    LOG(INFO) << "Connected";
+    LOG(INFO) << "After connect size: " << MPICommSize(GlobalMPIComm());
+    LOG(INFO) << "New comm size: " << MPICommSize(icomm);
     MPI_Comm newIntraComm = assimilateComm(MPI_COMM_NULL, icomm);
-    caffe2::SetMPIComm(newIntraComm);
+    caffe2::SetGlobalMPIComm(newIntraComm);
   }
 
-  while (caffe2::MPISize() < caffe2::FLAGS_replicas) {
-    CAFFE_LOG_INFO << "Still setting up, current known instances: "
-              << caffe2::MPISize();
+  while (MPICommSize(GlobalMPIComm()) < caffe2::FLAGS_replicas) {
+    LOG(INFO) << "Still setting up, current known instances: "
+              << MPICommSize(GlobalMPIComm());
 
     if (caffe2::FLAGS_role == "server") {
-      CAFFE_LOG_INFO << "Server Accepting";
+      LOG(INFO) << "Server Accepting";
       MPI_Comm icomm = accept();
-      CAFFE_LOG_INFO << "Accepted";
-      CAFFE_LOG_INFO << "After accept size: " << MPICommSize(caffe2::MPIComm());
-      CAFFE_LOG_INFO << "New comm size: " << MPICommSize(icomm);
-      MPI_Comm newIntraComm = assimilateComm(caffe2::MPIComm(), icomm);
-      CAFFE_LOG_INFO << "Server assimilated, size: "
+      LOG(INFO) << "Accepted";
+      LOG(INFO) << "After accept size: " << MPICommSize(GlobalMPIComm());
+      LOG(INFO) << "New comm size: " << MPICommSize(icomm);
+      MPI_Comm newIntraComm = assimilateComm(GlobalMPIComm(), icomm);
+      LOG(INFO) << "Server assimilated, size: "
                      << MPICommSize(newIntraComm);
-      caffe2::SetMPIComm(newIntraComm);
+      caffe2::SetGlobalMPIComm(newIntraComm);
     } else {
-      CAFFE_LOG_INFO << "Client assimilating";
-      MPI_Comm newIntraComm = assimilateComm(caffe2::MPIComm(), MPI_COMM_NULL);
-      CAFFE_LOG_INFO << "Client assimilated, size: "
+      LOG(INFO) << "Client assimilating";
+      MPI_Comm newIntraComm = assimilateComm(GlobalMPIComm(), MPI_COMM_NULL);
+      LOG(INFO) << "Client assimilated, size: "
                      << MPICommSize(newIntraComm);
-      caffe2::SetMPIComm(newIntraComm);
+      caffe2::SetGlobalMPIComm(newIntraComm);
     }
   }
 
-  MPI_Barrier(caffe2::MPIComm());
+  MPI_Barrier(GlobalMPIComm());
 
-  CAFFE_LOG_INFO << "Running with a communicator of size: "
-                 << caffe2::MPISize();
-  CAFFE_LOG_INFO << "Loading plan: " << caffe2::FLAGS_plan;
+  LOG(INFO) << "Running with a communicator of size: "
+            << MPICommSize(GlobalMPIComm());
+  LOG(INFO) << "Loading plan: " << caffe2::FLAGS_plan;
   caffe2::PlanDef plan_def;
-  CAFFE_CHECK(ReadProtoFromFile(caffe2::FLAGS_plan, &plan_def));
+  CHECK(ReadProtoFromFile(caffe2::FLAGS_plan, &plan_def));
   std::unique_ptr<caffe2::Workspace> workspace(new caffe2::Workspace());
   workspace->RunPlan(plan_def);
 

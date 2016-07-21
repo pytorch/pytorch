@@ -1,6 +1,7 @@
 #include "caffe2/core/common_cudnn.h"
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/spatial_batch_norm_op.h"
+#include "caffe2/utils/math.h"
 
 // Note: Instead of directly failing, we will choose to not build this operator
 // if cudnn version is not high enough.
@@ -21,7 +22,7 @@ class CudnnSpatialBNOp final : public SpatialBNOpBase<CUDAContext> {
     CUDNN_CHECK(cudnnCreateTensorDescriptor(&data_desc_));
     CUDNN_CHECK(cudnnCreateTensorDescriptor(&bn_param_desc_));
     if (epsilon_ < CUDNN_BN_MIN_EPSILON) {
-      CAFFE_LOG_ERROR << "Provided epsilon is smaller than "
+      LOG(ERROR) << "Provided epsilon is smaller than "
                       << "CUDNN_BN_MIN_EPSILON. Setting it to "
                       << "CUDNN_BN_MIN_EPSILON instead.";
       epsilon_ = CUDNN_BN_MIN_EPSILON;
@@ -40,7 +41,6 @@ class CudnnSpatialBNOp final : public SpatialBNOpBase<CUDAContext> {
   cudnnTensorDescriptor_t data_desc_;
   cudnnTensorDescriptor_t bn_param_desc_;
   vector<TIndex> cudnn_input_dims_;
-  DISABLE_COPY_AND_ASSIGN(CudnnSpatialBNOp);
 };
 
 
@@ -55,7 +55,7 @@ class CudnnSpatialBNGradientOp final
     CUDNN_CHECK(cudnnCreateTensorDescriptor(&data_desc_));
     CUDNN_CHECK(cudnnCreateTensorDescriptor(&bn_param_desc_));
     if (epsilon_ < CUDNN_BN_MIN_EPSILON) {
-      CAFFE_LOG_ERROR << "Provided epsilon is smaller than "
+      LOG(ERROR) << "Provided epsilon is smaller than "
                       << "CUDNN_BN_MIN_EPSILON. Setting it to "
                       << "CUDNN_BN_MIN_EPSILON instead.";
       epsilon_ = CUDNN_BN_MIN_EPSILON;
@@ -74,7 +74,6 @@ class CudnnSpatialBNGradientOp final
   cudnnTensorDescriptor_t data_desc_;
   cudnnTensorDescriptor_t bn_param_desc_;
   vector<TIndex> cudnn_input_dims_;
-  DISABLE_COPY_AND_ASSIGN(CudnnSpatialBNGradientOp);
 };
 
 
@@ -88,18 +87,18 @@ bool CudnnSpatialBNOp<T>::RunOnDevice() {
   const auto& scale = Input(SCALE);
   const auto& bias = Input(BIAS);
 
-  CAFFE_DCHECK_EQ(X.ndim(), 4);
+  DCHECK_EQ(X.ndim(), 4);
   const int N = X.dim32(0);
   const int C = (order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(3));
   const int H = (order_ == StorageOrder::NCHW ? X.dim32(2) : X.dim32(1));
   const int W = (order_ == StorageOrder::NCHW ? X.dim32(3) : X.dim32(2));
-  CAFFE_DCHECK_EQ(scale.ndim(), 1);
-  CAFFE_DCHECK_EQ(bias.ndim(), 1);
-  CAFFE_DCHECK_EQ(scale.dim32(0), C);
-  CAFFE_DCHECK_EQ(bias.dim32(0), C);
+  DCHECK_EQ(scale.ndim(), 1);
+  DCHECK_EQ(bias.ndim(), 1);
+  DCHECK_EQ(scale.dim32(0), C);
+  DCHECK_EQ(bias.dim32(0), C);
   // See if we need to reshape.
   if (X.dims() != cudnn_input_dims_) {
-    CAFFE_VLOG(1) << "Setting descriptors.";
+    VLOG(1) << "Setting descriptors.";
     cudnn_input_dims_ = X.dims();
     CUDNN_CHECK(cudnnSetTensor4dDescriptor(
         data_desc_, GetCudnnTensorFormat(order_),
@@ -113,15 +112,15 @@ bool CudnnSpatialBNOp<T>::RunOnDevice() {
     // Run inference mode.
     const auto& est_mean = Input(EST_MEAN);
     const auto& est_inv_var = Input(EST_INV_VAR);
-    CAFFE_DCHECK_EQ(est_mean.ndim(), 1);
-    CAFFE_DCHECK_EQ(est_inv_var.ndim(), 1);
-    CAFFE_DCHECK_EQ(est_mean.dim32(0), C);
-    CAFFE_DCHECK_EQ(est_inv_var.dim32(0), C);
+    DCHECK_EQ(est_mean.ndim(), 1);
+    DCHECK_EQ(est_inv_var.ndim(), 1);
+    DCHECK_EQ(est_mean.dim32(0), C);
+    DCHECK_EQ(est_inv_var.dim32(0), C);
 
     auto* Y = Output(OUTPUT);
-    Y->ReshapeLike(X);
+    Y->ResizeLike(X);
     CUDNN_CHECK(cudnnBatchNormalizationForwardInference(
-        cudnn_wrapper_.cudnn_handle(), kSpatialBNMode,
+        cudnn_wrapper_.inline_cudnn_handle(), kSpatialBNMode,
         cudnnTypeWrapper<T>::kOne(), cudnnTypeWrapper<T>::kZero(),
         data_desc_, X.template data<T>(),
         data_desc_, Y->template mutable_data<T>(),
@@ -131,24 +130,39 @@ bool CudnnSpatialBNOp<T>::RunOnDevice() {
   } else {
     // Run training mode.
     auto* Y = Output(OUTPUT);
-    Y->ReshapeLike(X);
+    Y->ResizeLike(X);
     // obtain running mean and running inv var, and see if we need to
     // initialize them.
     auto* running_mean = Output(RUNNING_MEAN);
     auto* running_inv_var = Output(RUNNING_INV_VAR);
     double this_momentum;
-    if (running_mean->size() == 0) {
-      CAFFE_VLOG(1) << "Initializing running mean and var.";
+    T* running_mean_data = nullptr;
+    T* running_inv_var_data = nullptr;
+    if (running_mean->size() <= 0) {
+      // If the input mean and var are not initialized yet, this is the first
+      // run and we will initialize the storage.
+      VLOG(1) << "Initializing running mean and var.";
       // Need to do initialization
-      running_mean->Reshape(C);
-      running_inv_var->Reshape(C);
+      running_mean->Resize(C);
+      running_inv_var->Resize(C);
+      running_mean_data = running_mean->template mutable_data<T>();
+      running_inv_var_data = running_inv_var->template mutable_data<T>();
+      // In principle, setting this_momentum to 1 will wipe existing data.
+      // This has a caveat that if cudnn does not deal with 0*NaN cases we
+      // will be having an issue. Thus we choose a safe path by explicitly
+      // setting zero.
+      math::Set<T, CUDAContext>(C, 0, running_mean_data, &context_);
+      math::Set<T, CUDAContext>(C, 0, running_inv_var_data, &context_);
+      // set this_momentum to 1 because this is initialization.
       this_momentum = 1;
     } else {
       // Does not need to do initialization.
-      CAFFE_DCHECK_EQ(running_mean->ndim(), 1);
-      CAFFE_DCHECK_EQ(running_inv_var->ndim(), 1);
-      CAFFE_DCHECK_EQ(running_mean->dim32(0), C);
-      CAFFE_DCHECK_EQ(running_inv_var->dim32(0), C);
+      DCHECK_EQ(running_mean->ndim(), 1);
+      DCHECK_EQ(running_inv_var->ndim(), 1);
+      DCHECK_EQ(running_mean->dim32(0), C);
+      DCHECK_EQ(running_inv_var->dim32(0), C);
+      running_mean_data = running_mean->template mutable_data<T>();
+      running_inv_var_data = running_inv_var->template mutable_data<T>();
       this_momentum = momentum_;
     }
     // If specified, save the mean and inv var results.
@@ -157,21 +171,30 @@ bool CudnnSpatialBNOp<T>::RunOnDevice() {
     if (OutputSize() == 5) {
       auto* save_mean = Output(SAVED_MEAN);
       auto* save_inv_var = Output(SAVED_INV_VAR);
-      save_mean->Reshape(C);
-      save_inv_var->Reshape(C);
+      save_mean->Resize(C);
+      save_inv_var->Resize(C);
       save_mean_data = save_mean->template mutable_data<T>();
       save_inv_var_data = save_inv_var->template mutable_data<T>();
     }
 
     CUDNN_CHECK(cudnnBatchNormalizationForwardTraining(
-        cudnn_wrapper_.cudnn_handle(), kSpatialBNMode,
-        cudnnTypeWrapper<T>::kOne(), cudnnTypeWrapper<T>::kZero(),
-        data_desc_, X.template data<T>(),
-        data_desc_, Y->template mutable_data<T>(),
-        bn_param_desc_, scale.template data<T>(), bias.template data<T>(),
-        this_momentum, running_mean->template mutable_data<T>(),
-        running_inv_var->template mutable_data<T>(), epsilon_,
-        save_mean_data, save_inv_var_data));
+        cudnn_wrapper_.inline_cudnn_handle(),
+        kSpatialBNMode,
+        cudnnTypeWrapper<T>::kOne(),
+        cudnnTypeWrapper<T>::kZero(),
+        data_desc_,
+        X.template data<T>(),
+        data_desc_,
+        Y->template mutable_data<T>(),
+        bn_param_desc_,
+        scale.template data<T>(),
+        bias.template data<T>(),
+        this_momentum,
+        running_mean_data,
+        running_inv_var_data,
+        epsilon_,
+        save_mean_data,
+        save_inv_var_data));
   }
   return true;
 }
@@ -183,13 +206,13 @@ bool CudnnSpatialBNGradientOp<T>::RunOnDevice() {
   const auto& scale = Input(SCALE);
   const auto& dY = Input(OUTPUT_GRAD);
 
-  CAFFE_DCHECK_EQ(X.ndim(), 4);
+  DCHECK_EQ(X.ndim(), 4);
   const int N = X.dim32(0);
   const int C = (order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(3));
   const int H = (order_ == StorageOrder::NCHW ? X.dim32(2) : X.dim32(1));
   const int W = (order_ == StorageOrder::NCHW ? X.dim32(3) : X.dim32(2));
-  CAFFE_DCHECK_EQ(scale.ndim(), 1);
-  CAFFE_DCHECK_EQ(scale.dim32(0), C);
+  DCHECK_EQ(scale.ndim(), 1);
+  DCHECK_EQ(scale.dim32(0), C);
   // See if we need to reshape.
   if (X.dims() != cudnn_input_dims_) {
     cudnn_input_dims_ = X.dims();
@@ -203,9 +226,9 @@ bool CudnnSpatialBNGradientOp<T>::RunOnDevice() {
   auto* dX = Output(INPUT_GRAD);
   auto* dScale = Output(SCALE_GRAD);
   auto* dBias = Output(BIAS_GRAD);
-  dX->ReshapeLike(X);
-  dScale->ReshapeLike(scale);
-  dBias->ReshapeLike(scale);
+  dX->ResizeLike(X);
+  dScale->ResizeLike(scale);
+  dBias->ResizeLike(scale);
 
   const void* saved_mean_data = nullptr;
   const void* saved_inv_var_data = nullptr;
@@ -217,7 +240,7 @@ bool CudnnSpatialBNGradientOp<T>::RunOnDevice() {
   }
 
   CUDNN_CHECK(cudnnBatchNormalizationBackward(
-      cudnn_wrapper_.cudnn_handle(), kSpatialBNMode,
+      cudnn_wrapper_.inline_cudnn_handle(), kSpatialBNMode,
       cudnnTypeWrapper<T>::kOne(), cudnnTypeWrapper<T>::kZero(),
       cudnnTypeWrapper<T>::kOne(), cudnnTypeWrapper<T>::kZero(),
       data_desc_, X.template data<T>(), data_desc_, dY.template data<T>(),

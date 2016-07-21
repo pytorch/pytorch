@@ -9,9 +9,15 @@
 namespace caffe2 {
 
 
-// FillerOp takes in either zero or one input. If the number of input is
-// 1, the shape will be identical to that of the input at run time, and
-// in that case the "shape" parameter should not be set.
+// FillerOp takes in either zero or one input.
+//
+// If the number of input is 1, the shape will be identical to that of the input
+// at run time with optional additional dimensions appended at the end as
+// specified by "extra_shape" argument. In that case the "shape" parameter
+// should not be set.
+//
+// If the number of inputs is 0, the full shape must be provided via "shape"
+// argument
 template <class Context>
 class FillerOp : public Operator<Context> {
  public:
@@ -19,6 +25,8 @@ class FillerOp : public Operator<Context> {
       : Operator<Context>(operator_def, ws),
         shape_(ToVectorTIndex(
             OperatorBase::GetRepeatedArgument<int>("shape"))),
+        extra_shape_(ToVectorTIndex(
+            OperatorBase::GetRepeatedArgument<int>("extra_shape"))),
         run_once_(OperatorBase::GetSingleArgument<int>("run_once", true)),
         already_run_(false) {}
   virtual ~FillerOp() {}
@@ -32,13 +40,19 @@ class FillerOp : public Operator<Context> {
       auto* output = Operator<Context>::Output(0);
       if (InputSize()) {
         if (shape_.size() != 0) {
-          CAFFE_LOG_ERROR << "Cannot set the shape argument and pass in an input at "
+          LOG(ERROR) << "Cannot set the shape argument and pass in an input at "
                         "the same time.";
           return false;
         }
-        output->ReshapeLike(Input(0));
+        auto shape = Input(0).dims();
+        shape.insert(shape.end(), extra_shape_.begin(), extra_shape_.end());
+        output->Resize(shape);
       } else {
-        output->Reshape(shape_);
+        if (!extra_shape_.empty()) {
+          LOG(ERROR) << "Cannot set both shape and extra_shape";
+          return false;
+        }
+        output->Resize(shape_);
       }
       return Fill(output);
     }
@@ -48,9 +62,9 @@ class FillerOp : public Operator<Context> {
 
  protected:
   vector<TIndex> shape_;
+  vector<TIndex> extra_shape_;
   bool run_once_;
   bool already_run_;
-  DISABLE_COPY_AND_ASSIGN(FillerOp);
 };
 
 template <typename T, class Context>
@@ -61,7 +75,7 @@ class UniformFillOp final : public FillerOp<Context> {
       : FillerOp<Context>(operator_def, ws),
         min_(OperatorBase::template GetSingleArgument<T>("min", 0)),
         max_(OperatorBase::template GetSingleArgument<T>("max", 1)) {
-    CAFFE_DCHECK_LT(min_, max_) << "Max value should be bigger than min value.";
+    DCHECK_LT(min_, max_) << "Max value should be bigger than min value.";
   }
 
   bool Fill(Tensor<Context>* output) override {
@@ -74,7 +88,6 @@ class UniformFillOp final : public FillerOp<Context> {
  private:
   T min_;
   T max_;
-  DISABLE_COPY_AND_ASSIGN(UniformFillOp);
 };
 
 template <typename T, class Context>
@@ -94,7 +107,6 @@ class ConstantFillOp final : public FillerOp<Context> {
 
  private:
   T value_;
-  DISABLE_COPY_AND_ASSIGN(ConstantFillOp);
 };
 
 template <typename T, class Context>
@@ -103,15 +115,15 @@ class GivenTensorFillOp final : public FillerOp<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   GivenTensorFillOp(const OperatorDef& operator_def, Workspace* ws)
       : FillerOp<Context>(operator_def, ws) {
-    auto source_values = OperatorBase::template GetRepeatedArgument<float>(
+    auto source_values = OperatorBase::template GetRepeatedArgument<T>(
         "values");
-    for (float& f : source_values) {
+    for (T f : source_values) {
       values_.push_back(static_cast<T>(f));
     }
   }
 
   bool Fill(Tensor<Context>* output) override {
-    CAFFE_DCHECK_EQ(output->size(), values_.size())
+    DCHECK_EQ(output->size(), values_.size())
         << "output size: " << output->size() << " given size: "
         << values_.size();
     context_.template Copy<T, CPUContext, Context>(
@@ -121,7 +133,6 @@ class GivenTensorFillOp final : public FillerOp<Context> {
 
  private:
   vector<T> values_;
-  DISABLE_COPY_AND_ASSIGN(GivenTensorFillOp);
 };
 
 template <typename T, class Context>
@@ -132,7 +143,7 @@ class GaussianFillOp final : public FillerOp<Context> {
       : FillerOp<Context>(operator_def, ws),
         mean_(OperatorBase::template GetSingleArgument<float>("mean", 0)),
         std_(OperatorBase::template GetSingleArgument<float>("std", 1)) {
-    CAFFE_DCHECK_GT(std_, 0)
+    DCHECK_GT(std_, 0)
         << "Standard deviation should be nonnegative.";
   }
 
@@ -146,7 +157,6 @@ class GaussianFillOp final : public FillerOp<Context> {
  private:
   T mean_;
   T std_;
-  DISABLE_COPY_AND_ASSIGN(GaussianFillOp);
 };
 
 template <typename T, class Context>
@@ -165,7 +175,6 @@ class XavierFillOp final : public FillerOp<Context> {
     return true;
   }
 
-  DISABLE_COPY_AND_ASSIGN(XavierFillOp);
 };
 
 template <typename T, class Context>
@@ -184,7 +193,6 @@ class MSRAFillOp final : public FillerOp<Context> {
     return true;
   }
 
-  DISABLE_COPY_AND_ASSIGN(MSRAFillOp);
 };
 
 // This is mostly used just as a debugging purpose stuff: it fills a tensor
@@ -198,7 +206,6 @@ class RangeFillOp final : public FillerOp<Context> {
       : FillerOp<Context>(operator_def, ws) {}
 
   bool Fill(Tensor<Context>* output) override;
-  DISABLE_COPY_AND_ASSIGN(RangeFillOp);
 };
 
 }  // namespace caffe2

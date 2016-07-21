@@ -1,6 +1,7 @@
 #ifndef CAFFE2_CORE_COMMON_GPU_H_
 #define CAFFE2_CORE_COMMON_GPU_H_
 
+#include <assert.h>
 #include <cublas_v2.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
@@ -84,7 +85,7 @@ int GetGPUIDForPointer(const void* ptr);
 const cudaDeviceProp& GetDeviceProperty(const int device);
 
 /**
- * Runs a device query function and prints out the results to CAFFE_LOG_INFO.
+ * Runs a device query function and prints out the results to LOG(INFO).
  */
 void DeviceQuery(const int deviceid);
 
@@ -122,7 +123,7 @@ bool Caffe2InitializeCuda();
 #define CUDA_CHECK(condition)                                                  \
   do {                                                                         \
     cudaError_t error = condition;                                             \
-    CAFFE_CHECK_EQ(error, cudaSuccess)                                         \
+    CHECK_EQ(error, cudaSuccess)                                         \
         << "Error at: " << __FILE__ << ":" << __LINE__ << ": "                 \
         << cudaGetErrorString(error);                                          \
   } while (0)
@@ -133,7 +134,7 @@ bool Caffe2InitializeCuda();
     if (result != CUDA_SUCCESS) {                                              \
       const char *msg;                                                         \
       cuGetErrorName(result, &msg);                                            \
-      CAFFE_LOG_FATAL << "Error at: " << __FILE__ << ":" << __LINE__ << ": "   \
+      LOG(FATAL) << "Error at: " << __FILE__ << ":" << __LINE__ << ": "   \
                       << msg;                                                  \
     }                                                                          \
   } while (0)
@@ -141,7 +142,7 @@ bool Caffe2InitializeCuda();
 #define CUBLAS_CHECK(condition)                                                \
   do {                                                                         \
     cublasStatus_t status = condition;                                         \
-    CAFFE_CHECK_EQ(status, CUBLAS_STATUS_SUCCESS)                              \
+    CHECK_EQ(status, CUBLAS_STATUS_SUCCESS)                              \
         << "Error at: " << __FILE__ << ":" << __LINE__ << ": "                 \
         << ::caffe2::cublasGetErrorString(status);                             \
   } while (0)
@@ -149,7 +150,7 @@ bool Caffe2InitializeCuda();
 #define CURAND_CHECK(condition)                                                \
   do {                                                                         \
     curandStatus_t status = condition;                                         \
-    CAFFE_CHECK_EQ(status, CURAND_STATUS_SUCCESS)                              \
+    CHECK_EQ(status, CURAND_STATUS_SUCCESS)                              \
         << "Error at: " << __FILE__ << ":" << __LINE__ << ": "                 \
         << ::caffe2::curandGetErrorString(status);                             \
   } while (0)
@@ -159,14 +160,23 @@ bool Caffe2InitializeCuda();
        i < (n);                                                                \
        i += blockDim.x * gridDim.x)
 
+// CUDA_KERNEL_ASSERT is a macro that wraps an assert() call inside cuda
+// kernels. This is not supported by Apple platforms so we special case it.
+// See http://docs.nvidia.com/cuda/cuda-c-programming-guide/#assertion
+#ifdef __APPLE__
+#define CUDA_KERNEL_ASSERT(...)
+#else  // __APPLE__
+#define CUDA_KERNEL_ASSERT(...) assert(__VA_ARGS__)
+#endif  // __APPLE__
+
 // The following helper functions are here so that you can write a kernel call
 // when you are not particularly interested in maxing out the kernels'
 // performance. Usually, this will give you a reasonable speed, but if you
 // really want to find the best performance, it is advised that you tune the
 // size of the blocks and grids more reasonably.
 // A legacy note: this is derived from the old good Caffe days, when I simply
-// hard-coded the number of threads and wanted to keep backward compability for
-// different computation capabilities.
+// hard-coded the number of threads and wanted to keep backward compatibility
+// for different computation capabilities.
 // For more info on CUDA compute capabilities, visit the NVidia website at:
 //    http://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#compute-capabilities
 

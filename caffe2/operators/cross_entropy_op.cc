@@ -7,17 +7,20 @@ bool LabelCrossEntropyOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& label = Input(1);
   auto* Y = Output(0);
-  CAFFE_DCHECK_EQ(X.ndim(), 2);
+  DCHECK_EQ(X.ndim(), 2);
   int N = X.dim32(0);
   int D = X.dim32(1);
-  CAFFE_DCHECK_EQ(label.ndim(), 1);
-  CAFFE_DCHECK_EQ(label.dim32(0), N);
-  Y->Reshape(vector<TIndex>{N});
+  DCHECK((label.ndim() == 1) || (label.ndim() == 2 && label.dim32(1) == 1));
+  DCHECK_EQ(label.dim32(0), N);
+  Y->Resize(vector<TIndex>{N});
   const auto* Xdata = X.data<float>();
   const auto* labeldata = label.data<int>();
   auto* Ydata = Y->mutable_data<float>();
   for (int i = 0; i < N; ++i) {
-    CAFFE_DCHECK_LT(labeldata[i], D);
+    CAFFE_ENFORCE(
+        labeldata[i] < D,
+        "Label seems incorrect: label value larger than number of classes: ",
+        labeldata[i], " vs ", D);
     Ydata[i] = -log(std::max(Xdata[i * D + labeldata[i]], kLOG_THRESHOLD()));
   }
   return true;
@@ -29,14 +32,14 @@ bool LabelCrossEntropyGradientOp<float, CPUContext>::RunOnDevice() {
   auto& label = Input(1);
   auto& dY = Input(2);
   auto* dX = Output(0);
-  CAFFE_DCHECK_EQ(X.ndim(), 2);
+  DCHECK_EQ(X.ndim(), 2);
   int N = X.dim32(0);
   int D = X.dim32(1);
-  CAFFE_DCHECK_EQ(label.ndim(), 1);
-  CAFFE_DCHECK_EQ(label.dim32(0), N);
-  CAFFE_DCHECK_EQ(dY.ndim(), 1);
-  CAFFE_DCHECK_EQ(dY.dim32(0), N);
-  dX->ReshapeLike(X);
+  DCHECK((label.ndim() == 1) || (label.ndim() == 2 && label.dim32(1) == 1));
+  DCHECK_EQ(label.dim32(0), N);
+  DCHECK_EQ(dY.ndim(), 1);
+  DCHECK_EQ(dY.dim32(0), N);
+  dX->ResizeLike(X);
   math::Set<float, CPUContext>(dX->size(), 0.f, dX->mutable_data<float>(),
                                &context_);
   const float* Xdata = X.data<float>();
@@ -44,7 +47,6 @@ bool LabelCrossEntropyGradientOp<float, CPUContext>::RunOnDevice() {
   const int* labeldata = label.data<int>();
   float* dXdata = dX->mutable_data<float>();
   for (int i = 0; i < N; ++i) {
-    CAFFE_DCHECK_LT(labeldata[i], D);
     dXdata[i * D + labeldata[i]] =
         - dYdata[i] / std::max(Xdata[i * D + labeldata[i]], kLOG_THRESHOLD());
   }
@@ -58,12 +60,12 @@ bool MakeTwoClassOp<float, CPUContext>::RunOnDevice() {
   auto shape = X.dims();
   shape.push_back(2);
   TIndex N = X.size();
-  Y->Reshape(shape);
+  Y->Resize(shape);
   const auto* Xdata = X.data<float>();
   auto* Ydata = Y->mutable_data<float>();
   for (TIndex i = 0; i < N; ++i) {
-    CAFFE_DCHECK_GE(Xdata[i], 0.0);
-    CAFFE_DCHECK_LE(Xdata[i], 1.0);
+    DCHECK_GE(Xdata[i], 0.0);
+    DCHECK_LE(Xdata[i], 1.0);
     Ydata[i * 2] = 1.0 - Xdata[i];
     Ydata[i * 2 + 1] = Xdata[i];
   }
@@ -75,10 +77,10 @@ bool MakeTwoClassGradientOp<float, CPUContext>::RunOnDevice() {
   auto& dY = Input(0);
   auto* dX = Output(0);
   auto shape = dY.dims();
-  CAFFE_CHECK_GE(shape.size(), 1);
-  CAFFE_CHECK_EQ(shape.back(), 2);
+  CHECK_GE(shape.size(), 1);
+  CHECK_EQ(shape.back(), 2);
   shape.pop_back();
-  dX->Reshape(shape);
+  dX->Resize(shape);
   const float* dYdata = dY.data<float>();
   float* dXdata = dX->mutable_data<float>();
   TIndex N = dX->size();
@@ -95,8 +97,21 @@ REGISTER_CPU_OPERATOR(LabelCrossEntropy,
 REGISTER_CPU_OPERATOR(LabelCrossEntropyGradient,
                       LabelCrossEntropyGradientOp<float, CPUContext>);
 
-OPERATOR_SCHEMA(LabelCrossEntropy).NumInputs(2).NumOutputs(1);
-OPERATOR_SCHEMA(LabelCrossEntropyGradient).NumInputs(3).NumOutputs(1);
+OPERATOR_SCHEMA(LabelCrossEntropy)
+  .NumInputs(2)
+  .NumOutputs(1)
+  .SetDoc(R"DOC(
+Operator computes the cross entropy between the input and the label set. In
+practice, it is most commonly used at the end of models, after the SoftMax
+operator and before the AveragedLoss operator.
+  )DOC")
+  .Input(0, "X", "Input blob from the previous layer, which is almost always "
+  "the result of a softmax operation.")
+  .Input(1, "label", "Blob containing the labels used to compare the input")
+  .Output(0, "Y", "Output blob after the cross entropy computation");
+OPERATOR_SCHEMA(LabelCrossEntropyGradient)
+  .NumInputs(3)
+  .NumOutputs(1);
 
 class GetLabelCrossEntropyGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
@@ -114,8 +129,21 @@ REGISTER_CPU_OPERATOR(MakeTwoClass,
 REGISTER_CPU_OPERATOR(MakeTwoClassGradient,
                       MakeTwoClassGradientOp<float, CPUContext>);
 
-OPERATOR_SCHEMA(MakeTwoClass).NumInputs(1).NumOutputs(1);
-OPERATOR_SCHEMA(MakeTwoClassGradient).NumInputs(1).NumOutputs(1);
+OPERATOR_SCHEMA(MakeTwoClass)
+  .NumInputs(1)
+  .NumOutputs(1)
+  .SetDoc(R"DOC(
+Given a vector of probabilities, this operator transforms this into a 2-column
+matrix with complimentary probabilities for binary classification. In explicit
+terms, given the vector X, the output Y is vstack(1 - X, X).
+  )DOC")
+  .Input(0, "X", "Input vector of probabilities")
+  .Output(0, "Y", "2-column matrix with complimentary probabilities of X for "
+  "binary classification");
+
+OPERATOR_SCHEMA(MakeTwoClassGradient)
+  .NumInputs(1)
+  .NumOutputs(1);
 
 struct GetMakeTwoClassGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;

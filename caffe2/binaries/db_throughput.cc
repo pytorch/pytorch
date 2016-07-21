@@ -31,7 +31,7 @@ void TestThroughputWithDB() {
     for (int i = 0; i < caffe2::FLAGS_report_interval; ++i) {
       string key = cursor->key();
       string value = cursor->value();
-      //CAFFE_VLOG(1) << "Key " << key;
+      //VLOG(1) << "Key " << key;
       cursor->Next();
       if (!cursor->Valid()) {
         cursor->SeekToFirst();

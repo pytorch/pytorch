@@ -180,14 +180,14 @@ bool LRNOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   auto& X = Input(0);
   auto* Y = Output(0);
   auto* scale = Output(1);
-  CAFFE_DCHECK_EQ(X.ndim(), 4);
+  DCHECK_EQ(X.ndim(), 4);
   const int N = X.dim32(0);
   const int C = X.dim32(1);
   const int H = X.dim32(2);
   const int W = X.dim32(3);
   const float* Xdata = X.data<float>();
-  Y->ReshapeLike(X);
-  scale->ReshapeLike(X);
+  Y->ResizeLike(X);
+  scale->ResizeLike(X);
   float* Ydata = Y->mutable_data<float>();
   float* scale_data = scale->mutable_data<float>();
 
@@ -207,14 +207,14 @@ bool LRNOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   auto& X = Input(0);
   auto* Y = Output(0);
   auto* scale = Output(1);
-  CAFFE_DCHECK_EQ(X.ndim(), 4);
+  DCHECK_EQ(X.ndim(), 4);
   const int N = X.dim32(0);
   const int H = X.dim32(1);
   const int W = X.dim32(2);
   const int C = X.dim32(3);
   const float* Xdata = X.data<float>();
-  Y->ReshapeLike(X);
-  scale->ReshapeLike(X);
+  Y->ResizeLike(X);
+  scale->ResizeLike(X);
   float* Ydata = Y->mutable_data<float>();
   float* scale_data = scale->mutable_data<float>();
 
@@ -235,17 +235,17 @@ bool LRNGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   auto& scale = Input(2);
   auto& dY = Input(3);
   auto* dX = Output(0);
-  CAFFE_DCHECK_EQ(X.ndim(), 4);
+  DCHECK_EQ(X.ndim(), 4);
   const int N = X.dim32(0);
   const int C = X.dim32(1);
   const int H = X.dim32(2);
   const int W = X.dim32(3);
   // Loosely checking the size, assuming that the shapes will be the same as
   // long as the sizes check out.
-  CAFFE_DCHECK_EQ(X.size(), Y.size());
-  CAFFE_DCHECK_EQ(X.size(), scale.size());
-  CAFFE_DCHECK_EQ(X.size(), dY.size());
-  dX->ReshapeLike(X);
+  DCHECK_EQ(X.size(), Y.size());
+  DCHECK_EQ(X.size(), scale.size());
+  DCHECK_EQ(X.size(), dY.size());
+  dX->ResizeLike(X);
 
   const float* Xdata = X.data<float>();
   const float* Ydata = Y.data<float>();
@@ -269,13 +269,13 @@ bool LRNGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   auto& scale = Input(2);
   auto& dY = Input(3);
   auto* dX = Output(0);
-  CAFFE_DCHECK_EQ(X.ndim(), 4);
+  DCHECK_EQ(X.ndim(), 4);
   // Loosely checking the size, assuming that the shapes will be the same as
   // long as the sizes check out.
-  CAFFE_DCHECK_EQ(X.size(), Y.size());
-  CAFFE_DCHECK_EQ(X.size(), scale.size());
-  CAFFE_DCHECK_EQ(X.size(), dY.size());
-  dX->ReshapeLike(X);
+  DCHECK_EQ(X.size(), Y.size());
+  DCHECK_EQ(X.size(), scale.size());
+  DCHECK_EQ(X.size(), dY.size());
+  dX->ResizeLike(X);
 
   LRNComputeDiffNHWC<float><<<CAFFE_GET_BLOCKS(X.size()),
                               CAFFE_CUDA_NUM_THREADS, 0,

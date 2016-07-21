@@ -4,13 +4,10 @@
 namespace caffe2 {
 namespace {
 
-REGISTER_CUDA_OPERATOR(Free, FreeOp);
-REGISTER_CUDA_OPERATOR(Print, PrintOp<float, CUDAContext>);
-REGISTER_CUDA_OPERATOR(PrintInt, PrintOp<int, CUDAContext>);
+REGISTER_CUDA_OPERATOR(Print, PrintOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(Flatten, FlattenOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(Alias, AliasOp<CUDAContext>);
-REGISTER_CUDA_OPERATOR(ReshapeLike, ReshapeLikeOp<CUDAContext>);
-REGISTER_CUDA_OPERATOR(Split, SplitOp<CUDAContext>);
+REGISTER_CUDA_OPERATOR(ResizeLike, ResizeLikeOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(Sum, SumOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(WeightedSum, WeightedSumOp<float, CUDAContext>);
 // CopyGPUToCPU and CopyCPUToGPU should both be carried out in a cuda context,

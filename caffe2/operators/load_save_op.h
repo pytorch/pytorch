@@ -18,105 +18,157 @@ using db::DB;
 using db::Transaction;
 
 template <class Context>
-class LoadTensorOp final : public Operator<Context> {
+class LoadOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  LoadTensorOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  LoadOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws), ws_(ws),
+        absolute_path_(OperatorBase::GetSingleArgument<int>(
+            "absolute_path", false)),
         db_name_(OperatorBase::GetSingleArgument<string>("db", "")),
-        db_type_(OperatorBase::GetSingleArgument<string>("db_type", "")) {
-    CAFFE_CHECK_GT(db_name_.size(), 0) << "Must specify a db name.";
-    CAFFE_CHECK_GT(db_type_.size(), 0) << "Must specify a db type.";
+        db_type_(OperatorBase::GetSingleArgument<string>("db_type", "")),
+        keep_device_(OperatorBase::GetSingleArgument<int>("keep_device", 0)) {
+    if (InputSize() == 0) {
+      CHECK_GT(db_name_.size(), 0) << "Must specify a db name.";
+      CHECK_GT(db_type_.size(), 0) << "Must specify a db type.";
+    }
     int idx = 0;
     for (const string& output_name : this->def().output()) {
-      output_indices_[output_name] = idx;
+      output_indices_[output_name] = idx++;
     }
   }
 
-  // TODO(Yangqing): put the load functionality into a registration pattern
-  // as well?
+  void SetCurrentDevice(BlobProto* proto);
+
   bool RunOnDevice() override {
-    std::unique_ptr<DB> in_db(caffe2::db::CreateDB(
-        db_type_, db_name_, caffe2::db::READ));
-    std::unique_ptr<Cursor> cursor(in_db->NewCursor());
+    const vector<Blob*>& outputs = OperatorBase::Outputs();
+    if (InputSize() == 1) {
+      const db::DBReader& reader = OperatorBase::Input<db::DBReader>(0);
+      extractFrom(reader.cursor(), outputs);
+    } else {
+      string full_db_name =
+          absolute_path_ ? db_name_ : (ws_->RootFolder() + "/" + db_name_);
+      std::unique_ptr<DB> in_db(caffe2::db::CreateDB(
+          db_type_, full_db_name, caffe2::db::READ));
+      CAFFE_ENFORCE(in_db.get(), "Cannot open db: ", db_name_);
+      std::unique_ptr<Cursor> cursor(in_db->NewCursor());
+      extractFrom(cursor.get(), outputs);
+    }
+    return true;
+  }
+
+ private:
+  void extractFrom(Cursor* cursor, const vector<Blob*>& outputs) {
+    CHECK(cursor);
+
+    // We are tracking sizes of already read tensor parts while reading data
+    // chunks. This way we can make sure that all chunks were loaded in the end.
+    // This is a map from output index to current size of the blob
+    std::map<int, size_t> blobSizes;
+
     for (; cursor->Valid(); cursor->Next()) {
       const string& key = cursor->key();
       if (!output_indices_.count(key)) {
-        CAFFE_VLOG(1) << "Key " << key << " not used. Skipping.";
-        continue;
+        VLOG(1) << "Key " << key << " not used. Skipping.";
       } else {
-        TensorProto proto;
-        CAFFE_CHECK(proto.ParseFromString(cursor->value()));
-        CAFFE_CHECK_GT(proto.dims_size(), 0);
-        int idx = output_indices_[key];
-        auto* output = Output(idx);
-        output->Reshape(
-            vector<TIndex>(proto.dims().begin(), proto.dims().end()));
-        switch (proto.data_type()) {
-        case TensorProto::FLOAT:
-        {
-          CAFFE_CHECK_EQ(output->size(), proto.float_data_size());
-          this->context_.template Copy<float, CPUContext, Context>(
-              output->size(), proto.float_data().data(),
-              output->template mutable_data<float>());
-          CAFFE_VLOG(1) << "Loaded float tensor " << key << ".";
-          break;
+        VLOG(2) << "Deserializing blob " << key;
+        BlobProto proto;
+        CHECK(proto.ParseFromString(cursor->value()));
+        if (!keep_device_) {
+          // If we are not keeping the device as the one specified in the
+          // proto, we will set the current device.
+          SetCurrentDevice(&proto);
         }
-        case TensorProto::INT32:
-        {
-          static_assert(sizeof(int) == 4,
-                        "int in this compiler does not equal to 4 bytes.");
-          CAFFE_CHECK_EQ(output->size(), proto.int32_data_size());
-          this->context_.template Copy<int, CPUContext, Context>(
-              output->size(), proto.int32_data().data(),
-              output->template mutable_data<int>());
-          CAFFE_VLOG(1) << "Loaded int32 tensor " << key << ".";
-          break;
+        auto blobIndex = output_indices_[key];
+        Blob* blob = outputs.at(blobIndex);
+        auto blobSize = blobSizes.insert({blobIndex, 0});
+        if (blobSize.second) {
+          // We reset the blob so that any existing content is destroyed. This
+          // is to guaranee correct device placement: if we are deserializing
+          // into a TensorCUDA, without explicit Reset we might be loading data
+          // into an existing TensorCUDA that has pre-allocated memory on a
+          // different GPU.
+          blob->Reset();
         }
-        default:
-          CAFFE_LOG_FATAL << "Tensor proto data type " << proto.data_type()
-                     << " not currently supported.";
+        CHECK(blob->Deserialize(proto));
+
+        if (proto.has_tensor()) {
+          if (proto.tensor().has_segment()) {
+            blobSize.first->second += proto.tensor().segment().end() -
+                proto.tensor().segment().begin();
+          } else {
+            CHECK(blobSize.first->second == 0);
+            blobSize.first->second = blob->Get<Tensor<Context>>().size();
+          }
         }
       }
     }
-    return true;
+
+    for (const auto& blobSize : blobSizes) {
+      Blob* blob = outputs.at(blobSize.first);
+      if (blob->IsType<Tensor<Context>>()) {
+        size_t tensorSize = blob->Get<Tensor<Context>>().size();
+        CAFFE_ENFORCE(
+            tensorSize == blobSize.second,
+            "Expected: ",
+            tensorSize,
+            " Read: ",
+            blobSize.second);
+      }
+    }
   }
 
  private:
+  Workspace* ws_;
+  bool absolute_path_;
   string db_name_;
   string db_type_;
+  bool keep_device_;
   std::map<string, int> output_indices_;
-  DISABLE_COPY_AND_ASSIGN(LoadTensorOp);
 };
 
-
 template <class Context>
-class SaveOp final : public OperatorBase {
+class SaveOp final : public Operator<Context> {
  public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
   SaveOp(const OperatorDef& operator_def, Workspace* ws)
-      : OperatorBase(operator_def, ws),
+      : Operator<Context>(operator_def, ws),
+        ws_(ws),
+        absolute_path_(
+            OperatorBase::GetSingleArgument<int>("absolute_path", false)),
         db_name_(OperatorBase::GetSingleArgument<string>("db", "")),
         db_type_(OperatorBase::GetSingleArgument<string>("db_type", "")) {
-    CAFFE_CHECK_GT(db_name_.size(), 0) << "Must specify a db name.";
-    CAFFE_CHECK_GT(db_type_.size(), 0) << "Must specify a db type.";
+    CHECK_GT(db_name_.size(), 0) << "Must specify a db name.";
+    CHECK_GT(db_type_.size(), 0) << "Must specify a db type.";
   }
 
-  bool Run() override {
+  bool RunOnDevice() override {
+    string full_db_name =
+        absolute_path_ ? db_name_ : (ws_->RootFolder() + "/" + db_name_);
     std::unique_ptr<DB> out_db(caffe2::db::CreateDB(
-        db_type_, db_name_, caffe2::db::NEW));
-    std::unique_ptr<Transaction> transaction(out_db->NewTransaction());
-    const vector<const Blob*>& inputs = Inputs();
+        db_type_, full_db_name, caffe2::db::NEW));
+    CAFFE_ENFORCE(out_db.get(),
+        "Cannot open db for writing: ", full_db_name);
+
+    const vector<const Blob*>& inputs = OperatorBase::Inputs();
+    BlobSerializerBase::SerializationAcceptor acceptor = [&](
+        const std::string& blobName, const std::string& data) {
+      // transaction should take care of locking
+      std::unique_ptr<Transaction> transaction(out_db->NewTransaction());
+      transaction->Put(blobName, data);
+      transaction->Commit();
+    };
     for (int i = 0; i < inputs.size(); ++i) {
-      transaction->Put(def().input(i), inputs[i]->Serialize(def().input(i)));
+      inputs[i]->Serialize(def().input(i), acceptor);
     }
-    transaction->Commit();
     return true;
   }
 
  private:
+  Workspace* ws_;
+  bool absolute_path_;
   string db_name_;
   string db_type_;
-  DISABLE_COPY_AND_ASSIGN(SaveOp);
 };
 
 template <typename ... Ts>
@@ -129,7 +181,7 @@ string FormatString(const string& pattern, Ts... values) {
   char buffer[1024];
   int written = sprintf(buffer, pattern.c_str(), values...);
   if (written < 0 || written + 1 > 1024) {
-    CAFFE_LOG_FATAL << "FormatString fails: total bytes written " << written;
+    LOG(FATAL) << "FormatString fails: total bytes written " << written;
   }
   return string(buffer);
   /*
@@ -154,28 +206,22 @@ class SnapshotOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws),
         db_pattern_(OperatorBase::GetSingleArgument<string>("db", "")),
         every_(OperatorBase::GetSingleArgument<int>("every", 1)),
-        ws_(ws), save_op_def_(operator_def), db_arg_index_(-1) {
-    CAFFE_CHECK_GT(db_pattern_.size(), 0)
+        ws_(ws), save_op_def_(operator_def) {
+    CHECK_GT(db_pattern_.size(), 0)
         << "Must specify a snapshot file pattern.";
-    CAFFE_CHECK_GT(every_, 0) << "Snapshot interval should be positive.";
+    CHECK_GT(every_, 0) << "Snapshot interval should be positive.";
     if (every_ == 1) {
       // Just issue a warning, but it's totally legal so we don't do anything.
-      CAFFE_LOG_WARNING << "It seems that we are snapshotting every iteration. "
+      LOG(WARNING) << "It seems that we are snapshotting every iteration. "
                    << "Is that intended?";
     }
     save_op_def_.set_type("Save");
-    for (int i = 0; i < save_op_def_.arg_size(); ++i) {
-      if (save_op_def_.arg(i).name() == "db") {
-        db_arg_index_ = i;
-        break;
-      }
-    }
   }
 
   bool RunOnDevice() override {
     int iter = OperatorBase::Input<TensorCPU>(0).template data<int>()[0];
     if (iter % every_ == 0) {
-      save_op_def_.mutable_arg(db_arg_index_)->set_s(
+      GetMutableArgument("db", true, &save_op_def_)->set_s(
           FormatString(db_pattern_, iter));
       SaveOp<Context> sub_op(save_op_def_, ws_);
       return sub_op.Run();
@@ -189,9 +235,7 @@ class SnapshotOp final : public Operator<Context> {
   int every_;
   Workspace* ws_;
   OperatorDef save_op_def_;
-  int db_arg_index_;
 };
-
 
 }  // namespace caffe2
 

@@ -63,7 +63,7 @@ class CudaMemoryPool {
       // anyway, we will not need to worry about memory leak, so we basically
       // ignore it. This is definitely not ideal but works for now.
       if (error != cudaSuccess && error != cudaErrorCudartUnloading) {
-        CAFFE_LOG_FATAL << "Error at: " << __FILE__ << ":" << __LINE__ << ": "
+        LOG(FATAL) << "Error at: " << __FILE__ << ":" << __LINE__ << ": "
                    << cudaGetErrorString(error);
       }
     }

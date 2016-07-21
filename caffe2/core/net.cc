@@ -1,6 +1,7 @@
 #include "caffe2/core/net.h"
 
 #include <set>
+#include <unordered_set>
 
 #include "caffe2/core/operator.h"
 #include "caffe2/core/timer.h"
@@ -8,9 +9,107 @@
 
 namespace caffe2 {
 
+namespace {
+
+bool sameDevice(const OperatorDef& lhs, const OperatorDef& rhs) {
+  return lhs.device_option().device_type() ==
+      rhs.device_option().device_type() &&
+      lhs.device_option().cuda_gpu_id() == rhs.device_option().cuda_gpu_id();
+}
+
+using OpIndex = int;
+using Ancestry = std::vector<std::unordered_set<OpIndex>>;
+Ancestry computeAncestors(
+    const std::vector<internal::OperatorNode>& ops) {
+  Ancestry ancestors;
+  ancestors.resize(ops.size());
+  for (auto i = 0; i < ops.size(); ++i) {
+    const auto& parents = ops[i].parents_;
+    for (const auto parent : parents) {
+      ancestors[i].insert(parent);
+      for (const auto parent_ancestor : ancestors[parent]) {
+        ancestors[i].insert(parent_ancestor);
+      }
+    }
+    VLOG(2) << "Ancestors of op: " << i << ", "
+            << std::vector<OpIndex>(ancestors[i].begin(), ancestors[i].end());
+  }
+  return ancestors;
+}
+
+DAGNetBase::ExecutionChains computeChains(
+    const std::vector<internal::OperatorNode>& nodes) {
+  const auto& ancestry = computeAncestors(nodes);
+
+  // Now, we compute the set of execution chains An execution chain is
+  // a linear set of nodes that can be executed on a single stream
+  // (e.g. a chain of single input, single output operators)
+  DAGNetBase::ExecutionChains chains;
+  std::unordered_set<OpIndex> seen_nodes;
+  for (auto i = 0; i < nodes.size(); ++i) {
+    if (seen_nodes.find(i) != seen_nodes.end()) {
+      // We've already executed this operator.
+      continue;
+    }
+    // Compute the execution chain rooted at this node.
+    std::vector<OpIndex> chain;
+    chain.push_back(i);
+
+    while (true) {
+      const auto current = chain.back();
+      const auto& children = nodes[current].children_;
+
+      // Find children for which this current node is the *single*
+      // direct ancestor. If there are more than one, then we can't
+      // chain.
+      std::vector<OpIndex> candidates;
+      for (const auto child : children) {
+        std::vector<OpIndex> direct_parents;
+        const auto& parents = nodes[child].parents_;
+        for (const auto parent : parents) {
+          if (std::all_of(
+                  parents.begin(), parents.end(), [&](OpIndex other_parent) {
+                    // If `other_parent` contains `parent` in it's
+                    // ancestors, we can ignore `parent`.
+                    return !ancestry.at(other_parent).count(parent);
+                  })) {
+            direct_parents.push_back(parent);
+          }
+        }
+        if (direct_parents.size() == 1 && direct_parents.front() == current) {
+          candidates.push_back(child);
+        }
+      }
+
+      if (candidates.size() != 1) {
+        break;
+      }
+
+      const auto candidate = candidates.front();
+      const auto parent = chain.back();
+
+      if (!sameDevice(
+              nodes[candidate].operator_->def(),
+              nodes[parent].operator_->def())) {
+        break;
+      }
+
+      chain.push_back(candidate);
+    };
+
+    for (const auto node : chain) {
+      CHECK(seen_nodes.insert(node).second);
+    }
+    CHECK(chains.insert({i, chain}).second);
+    VLOG(2) << "Added chain: " << chain;
+  }
+  CHECK_EQ(seen_nodes.size(), nodes.size());
+  return chains;
+}
+
+}
+
 CAFFE_DEFINE_REGISTRY(NetRegistry, NetBase, const NetDef&, Workspace*);
-REGISTER_NET(simple, SimpleNet);
-REGISTER_NET(dag, DAGNet);
 
 NetBase::NetBase(const NetDef& def, Workspace* /* unused */)
     : external_input_(def.external_input().begin(),
@@ -26,11 +125,12 @@ NetBase::NetBase(const NetDef& def, Workspace* /* unused */)
     for (const string& in : op.input()) {
       if (!known_blobs.count(in)) {
         if (external_input_.size()) {
-          CAFFE_LOG_FATAL << "Source for input " << in << " is unknown.";
+          CAFFE_ENFORCE(false,
+                        "Source for input ", in, " is unknown.");
         } else {
           // If we are not declaring input and output, we will simply VLOG it
           // for debugging purposes.
-          CAFFE_VLOG(1) << "Source for input " << in << " is unknown.";
+          VLOG(1) << "Source for input " << in << " is unknown.";
         }
       }
     }
@@ -40,23 +140,19 @@ NetBase::NetBase(const NetDef& def, Workspace* /* unused */)
     }
   }
   // Finally, check if all declared outputs are being created.
-  if (remaining_output.size()) {
-    CAFFE_LOG_ERROR
-        << "The following blobs:";
-    for (const string& name : remaining_output) {
-      CAFFE_LOG_ERROR << "\t" << name;
-    }
-    CAFFE_LOG_FATAL << "are declared as output but not produced:";
-  }
+  CAFFE_ENFORCE(
+      remaining_output.size() == 0,
+      "Some of the blobs are declared as output but never produced by the "
+      "net.");
 }
 
-NetBase* CreateNet(const NetDef& net_def, Workspace* ws) {
+unique_ptr<NetBase> CreateNet(const NetDef& net_def, Workspace* ws) {
   // In default, we will return a simple network that just runs all operators
   // sequentially.
-  if (!net_def.has_net_type()) {
-    return new SimpleNet(net_def, ws);
+  if (!net_def.has_type()) {
+    return std::make_unique<SimpleNet>(net_def, ws);
   }
-  return NetRegistry()->Create(net_def.net_type(), net_def, ws);
+  return NetRegistry()->Create(net_def.type(), net_def, ws);
 }
 
 SimpleNet::SimpleNet(const NetDef& net_def, Workspace* ws)
@@ -64,7 +160,7 @@ SimpleNet::SimpleNet(const NetDef& net_def, Workspace* ws)
   bool net_def_has_device_option = net_def.has_device_option();
   // Initialize the operators
   for (const OperatorDef& operator_def : net_def.op()) {
-    CAFFE_VLOG(1) << "Creating operator " << operator_def.name()
+    VLOG(1) << "Creating operator " << operator_def.name()
             << ":" << operator_def.type();
     if (!operator_def.has_device_option() && net_def_has_device_option) {
       // In the case that the operator def does not specify a device option but
@@ -83,7 +179,7 @@ bool SimpleNet::Verify() {
   for (int i = 0; i < operators_.size(); ++i) {
     auto& op = operators_[i];
     if (op.get() == nullptr) {
-      CAFFE_LOG_ERROR << "Found empty operator #" << i << ".";
+      LOG(ERROR) << "Found empty operator #" << i << ".";
       return false;
     }
   }
@@ -91,12 +187,12 @@ bool SimpleNet::Verify() {
 }
 
 bool SimpleNet::Run() {
-  CAFFE_VLOG(1) << "Running net.";
+  VLOG(1) << "Running net.";
   for (auto& op : operators_) {
-    CAFFE_VLOG(1) << "Running operator " << op->def().name()
+    VLOG(1) << "Running operator " << op->def().name()
             << "(" << op->def().type() << ").";
     if (!op->Run()) {
-      CAFFE_LOG_ERROR << "Operator failed: "
+      LOG(ERROR) << "Operator failed: "
                       << ProtoDebugString(op->def());
       return false;
     }
@@ -104,23 +200,38 @@ bool SimpleNet::Run() {
   return true;
 }
 
+bool SimpleNet::RunAsync() {
+  VLOG(1) << "Running net.";
+  for (auto& op : operators_) {
+    VLOG(1) << "Running operator " << op->def().name()
+            << "(" << op->def().type() << ").";
+    if (!op->RunAsync()) {
+      LOG(ERROR) << "Operator failed: "
+                 << ProtoDebugString(op->def());
+      return false;
+    }
+  }
+  return true;
+}
+
+
 void SimpleNet::TEST_Benchmark(const int warmup_runs, const int main_runs,
                                const bool run_individual) {
-  CAFFE_LOG_INFO << "Starting benchmark.";
-  CAFFE_LOG_INFO << "Running warmup runs.";
-  CAFFE_CHECK_GE(warmup_runs, 0);
+  LOG(INFO) << "Starting benchmark.";
+  LOG(INFO) << "Running warmup runs.";
+  CHECK_GE(warmup_runs, 0);
   for (int i = 0; i < warmup_runs; ++i) {
-    CAFFE_CHECK(Run());
+    CHECK(Run());
   }
 
-  CAFFE_LOG_INFO << "Main runs.";
-  CAFFE_CHECK_GE(main_runs, 0);
+  LOG(INFO) << "Main runs.";
+  CHECK_GE(main_runs, 0);
   Timer timer;
   for (int i = 0; i < main_runs; ++i) {
-    CAFFE_CHECK(Run());
+    CHECK(Run());
   }
   auto millis = timer.MilliSeconds();
-  CAFFE_LOG_INFO << "Main run finished. Milliseconds per iter: "
+  LOG(INFO) << "Main run finished. Milliseconds per iter: "
                  << millis / main_runs
                  << ". Iters per second: " << 1000.0 * main_runs / millis;
 
@@ -132,7 +243,7 @@ void SimpleNet::TEST_Benchmark(const int warmup_runs, const int main_runs,
       for (auto& op : operators_) {
         const string& op_type = op->def().type();
         timer.Start();
-        CAFFE_CHECK(op->Run());
+        CHECK(op->Run());
         float spent = timer.MilliSeconds();
         time_per_op[idx] += spent;
         time_per_op_type[op_type] += spent;
@@ -143,62 +254,67 @@ void SimpleNet::TEST_Benchmark(const int warmup_runs, const int main_runs,
     int idx = 0;
     for (auto& op : operators_) {
       const string& op_type = op->def().type();
-      CAFFE_LOG_INFO << "Operator #" << idx << " ("
+      LOG(INFO) << "Operator #" << idx << " ("
                      << op->def().name() << ", " << op_type << ") "
                      << time_per_op[idx] / main_runs << " ms/iter";
       ++idx;
     }
-    CAFFE_LOG_INFO << "Time per operator type:";
+    LOG(INFO) << "Time per operator type:";
     for (const auto& item : time_per_op_type) {
-      CAFFE_LOG_INFO << std::setw(15) << std::setfill(' ')
+      LOG(INFO) << std::setw(15) << std::setfill(' ')
                      << item.second / main_runs
                      << " " << item.first;
     }
   }
 }
 
-DAGNet::DAGNet(const NetDef& net_def, Workspace* ws)
+DAGNetBase::DAGNetBase(const NetDef& net_def, Workspace* ws)
     : NetBase(net_def, ws), operator_nodes_(net_def.op_size()) {
   // Blob creator allows us to track which operator created which blob.
   std::map<string, int> blob_creator;
   std::map<string, std::set<int> > blob_readers;
-  std::map<string, int> execution_chains;
   bool net_def_has_device_option = net_def.has_device_option();
   // Initialize the operators
   for (int idx = 0; idx < net_def.op_size(); ++idx) {
     const OperatorDef& op_def = net_def.op(idx);
-    CAFFE_VLOG(1) << "Creating operator #" << idx << ": "
+    VLOG(1) << "Creating operator #" << idx << ": "
             << op_def.name() << ":" << op_def.type();
     if (!op_def.has_device_option() && net_def_has_device_option) {
       OperatorDef temp_def(op_def);
       temp_def.mutable_device_option()->CopyFrom(net_def.device_option());
-      operator_nodes_[idx].operator_.reset(CreateOperator(temp_def, ws));
+      operator_nodes_[idx].operator_ = CreateOperator(temp_def, ws);
     } else {
-      operator_nodes_[idx].operator_.reset(CreateOperator(op_def, ws));
+      operator_nodes_[idx].operator_ = CreateOperator(op_def, ws);
     }
     // Check the inputs, and set up parents if necessary. This addressese the
     // read after write case.
-    for (const string& input : op_def.input()) {
-      if (blob_creator.count(input) == 0) {
-        CAFFE_VLOG(1) << "Input " << input << " not produced by this net. "
-                << "Assuming it is pre-existing.";
-      } else {
-        int parent = blob_creator[input];
-        CAFFE_VLOG(1) << "op dependency (RaW " << input << "): "
-                      << parent << "->" << idx;
-        operator_nodes_[idx].parents_.push_back(parent);
-        operator_nodes_[parent].children_.push_back(idx);
+    auto checkInputs = [&](
+        const google::protobuf::RepeatedPtrField<std::string>& inputs) {
+      for (const string& input : inputs) {
+        if (blob_creator.count(input) == 0) {
+          VLOG(1) << "Input " << input << " not produced by this net. "
+                  << "Assuming it is pre-existing.";
+        } else {
+          int parent = blob_creator[input];
+          VLOG(1) << "op dependency (RaW " << input << "): " << parent << "->"
+                  << idx;
+          operator_nodes_[idx].parents_.push_back(parent);
+          operator_nodes_[parent].children_.push_back(idx);
+        }
+        // Add the current idx to the readers of this input.
+        blob_readers[input].insert(idx);
       }
-      // Add the current idx to the readers of this input.
-      blob_readers[input].insert(idx);
-    }
+    };
+    checkInputs(op_def.input());
+    checkInputs(op_def.control_input());
+
     // Check the outputs.
     for (const string& output : op_def.output()) {
       if (blob_creator.count(output) != 0) {
         // This addresses the write after write case - we will assume that all
         // writes are inherently sequential.
         int waw_parent = blob_creator[output];
-        CAFFE_VLOG(1) << "op dependency (WaW " << output << "): "
+        VLOG(1) << "op dependency (WaW " << output << "): "
                       << waw_parent << "->" << idx;
         operator_nodes_[idx].parents_.push_back(waw_parent);
         operator_nodes_[waw_parent].children_.push_back(idx);
@@ -206,7 +322,7 @@ DAGNet::DAGNet(const NetDef& net_def, Workspace* ws)
       // This addresses the write after read case - we will assume that writes
       // should only occur after all previous reads are finished.
       for (const int war_parent : blob_readers[output]) {
-        CAFFE_VLOG(1) << "op dependency (WaR " << output << "): "
+        VLOG(1) << "op dependency (WaR " << output << "): "
                       << war_parent << "->" << idx;
         operator_nodes_[idx].parents_.push_back(war_parent);
         operator_nodes_[war_parent].children_.push_back(idx);
@@ -218,25 +334,6 @@ DAGNet::DAGNet(const NetDef& net_def, Workspace* ws)
       // not need to depend on these earlier readers. Thus, we can clear up the
       // blob readers.
       blob_readers[output].clear();
-    }
-
-    // Explicitly specified dependency with execution_chain.
-    if (HasArgument(op_def, "execution_chain")) {
-      const auto& arg = GetArgument(op_def, "execution_chain");
-      for (const string& name : arg.strings()) {
-        if (execution_chains.count(name) == 0) {
-          // New execution chain. Do nothing but add it.
-          execution_chains[name] = idx;
-        } else {
-          int parent = execution_chains[name];
-          CAFFE_VLOG(1) << "op dependency due to execution chain " << name
-                  << ": " << parent << "->" << idx;
-          operator_nodes_[idx].parents_.push_back(parent);
-          operator_nodes_[parent].children_.push_back(idx);
-          // update the tail of the current execution chain.
-          execution_chains[name] = idx;
-        }
-      }
     }
   }
 
@@ -256,8 +353,10 @@ DAGNet::DAGNet(const NetDef& net_def, Workspace* ws)
     c.erase(std::remove(c.begin(), c.end(), i), c.end());
   }
 
-  // TODO: do we want to make sure that there are no loops in the dependency
-  // graph?
+  execution_chains_ = computeChains(operator_nodes_);
+
+  // TODO: do we want to make sure that there are no loops in the
+  // dependency graph?
 
   // Figure out the initial frontier - this is the one we will feed into the job
   // queue to start a run.
@@ -268,42 +367,42 @@ DAGNet::DAGNet(const NetDef& net_def, Workspace* ws)
   }
   // Finally, start the workers.
   int num_workers = net_def.has_num_workers() ? net_def.num_workers() : 1;
-  CAFFE_CHECK_GT(num_workers, 0) << "Must have a nonnegative number of workers";
+  CHECK_GT(num_workers, 0) << "Must have a nonnegative number of workers";
   if (num_workers == 1) {
-    CAFFE_LOG_WARNING << "Number of workers is 1: this means that all operators "
+    LOG(WARNING) << "Number of workers is 1: this means that all operators "
                  << "will be executed sequentially. Did you forget to set "
                  << "num_workers in the NetDef?";
   }
   for (int i = 0; i < num_workers; ++i) {
-    CAFFE_VLOG(1) << "Start worker #" << i;
-    workers_.push_back(std::thread(&DAGNet::WorkerFunction, this));
+    VLOG(1) << "Start worker #" << i;
+    workers_.push_back(std::thread(&DAGNetBase::WorkerFunction, this));
   }
 }
 
-DAGNet::~DAGNet() {
+DAGNetBase::~DAGNetBase() {
   // Safely join all the workers before exiting.
   job_queue_.NoMoreJobs();
-  CAFFE_VLOG(1) << "Joining workers.";
+  VLOG(1) << "Joining workers.";
   for (auto& worker : workers_) {
     worker.join();
   }
 }
 
-bool DAGNet::Verify() {
+bool DAGNetBase::Verify() {
   for (int i = 0; i < operator_nodes_.size(); ++i) {
     if (operator_nodes_[i].operator_.get() == nullptr) {
-      CAFFE_LOG_ERROR << "Found empty operator #" << i << ".";
+      LOG(ERROR) << "Found empty operator #" << i << ".";
       return false;
     }
   }
   return true;
 }
 
-bool DAGNet::Run() {
+bool DAGNetBase::Run() {
   // Lock the run_in_progress_ lock so that we do not accidentally call Run()
   // in parallel.
   std::unique_lock<std::mutex> run_lock(run_in_progress_);
-  CAFFE_VLOG(1) << "Running parallel net.";
+  VLOG(1) << "Running parallel net.";
   // First, set up job queue.
   remaining_ops_ = operator_nodes_.size();
   success_ = true;
@@ -318,80 +417,117 @@ bool DAGNet::Run() {
   }
   std::unique_lock<std::mutex> mutex_lock(remaining_ops_mutex_);
   while (remaining_ops_ > 0) {
-    CAFFE_VLOG(2) << "Remaining ops to run: " << remaining_ops_;
+    VLOG(2) << "Remaining ops to run: " << remaining_ops_;
     cv_.wait(mutex_lock);
   }
-  CAFFE_VLOG(2) << "All ops finished running.";
+  VLOG(2) << "All ops finished running.";
+  for (const auto& op: operator_nodes_) {
+    CHECK_EQ(op.runtime_parent_count_, 0);
+  }
   // If the above while loop finished, we know that the current run finished.
   return success_;
 }
 
-void DAGNet::WorkerFunction() {
+void DAGNetBase::WorkerFunction() {
   // WorkerFunctions() is an infinite loop until there are no more jobs to run.
   while (true) {
     int idx = 0;
-    // If there is no more jobs - meaning that the DAGNet is destructing -
+    // If there is no more jobs - meaning that the DAGNetBase is destructing -
     // we will exit safely.
     if (!job_queue_.Pop(&idx)) {
       return;
     }
-    CAFFE_VLOG(1) << "Running operator #" << idx << " "
+    VLOG(1) << "Running operator #" << idx << " "
             << operator_nodes_[idx].operator_->def().name()
             << "(" << operator_nodes_[idx].operator_->def().type() << ").";
-    bool this_success = operator_nodes_[idx].operator_->Run();
+    CHECK(execution_chains_.find(idx) != execution_chains_.end()) << idx;
+    const auto& chain = execution_chains_[idx];
+    bool this_success = RunAt(execution_chains_[idx]);
     if (!this_success) {
-      CAFFE_LOG_ERROR << "Operator failed: "
-                      << ProtoDebugString(operator_nodes_[idx].operator_->def());
+      LOG(ERROR) << "Operator chain failed: "
+                 << ProtoDebugString(operator_nodes_[idx].operator_->def());
     }
-    for (int child : operator_nodes_[idx].children_) {
-      int count = --operator_nodes_[child].runtime_parent_count_;
-      // The count should never be smaller than zero.
-      CAFFE_DCHECK_GE(count, 0)
-          << "Found runtime parent count smaller than zero for "
-          << "operator node "
-          << operator_nodes_[child].operator_->def().name()
-          << "(" << operator_nodes_[child].operator_->def().type() << ").";
-      if (count == 0) {
-        CAFFE_VLOG(2) << "Pushing operator #" << child << " to queue.";
+
+    // Do book-keeping
+    for (const auto idx: chain) {
+      for (const auto child: operator_nodes_[idx].children_) {
+        const int count = --operator_nodes_[child].runtime_parent_count_;
+        CHECK_GE(count, 0)
+            << "Found runtime parent count smaller than zero for "
+            << "operator node "
+            << operator_nodes_[child].operator_->def().name() << "("
+            << operator_nodes_[child].operator_->def().type() << ").";
+
+        if (count != 0) {
+          continue;
+        }
+
+        if (std::find(chain.begin(), chain.end(), child) != chain.end()) {
+          // already executed
+          continue;
+        }
+        VLOG(2) << "Pushing operator #" << child << " to queue.";
         job_queue_.Push(child);
       }
     }
+
     // Notify that the processed op is incremented by one.
     {
       std::unique_lock<std::mutex> mutex_lock(remaining_ops_mutex_);
-      --remaining_ops_;
+      remaining_ops_ -= chain.size();
       success_ &= this_success;
-      CAFFE_DCHECK_GE(remaining_ops_, 0);
+      CHECK_GE(remaining_ops_, 0);
     }
     cv_.notify_one();
-    CAFFE_VLOG(2) << "Finished executing operator #" << idx;
+    VLOG(2) << "Finished executing operator #" << idx;
   }
 }
 
-void DAGNet::TEST_Benchmark(const int warmup_runs, const int main_runs,
+void DAGNetBase::TEST_Benchmark(const int warmup_runs, const int main_runs,
                             const bool run_individual) {
-  CAFFE_LOG_INFO << "Starting benchmark.";
-  CAFFE_LOG_INFO << "Running warmup runs.";
-  CAFFE_CHECK_GE(warmup_runs, 0);
+  LOG(INFO) << "Starting benchmark.";
+  LOG(INFO) << "Running warmup runs.";
+  CHECK_GE(warmup_runs, 0);
   for (int i = 0; i < warmup_runs; ++i) {
-    CAFFE_CHECK(Run());
+    CHECK(Run());
   }
 
-  CAFFE_LOG_INFO << "Main runs.";
-  CAFFE_CHECK_GE(main_runs, 0);
+  LOG(INFO) << "Main runs.";
+  CHECK_GE(main_runs, 0);
   Timer timer;
   for (int i = 0; i < main_runs; ++i) {
-    CAFFE_CHECK(Run());
+    CHECK(Run());
   }
   auto millis = timer.MilliSeconds();
-  CAFFE_LOG_INFO << "Main run finished. Milliseconds per iter: "
+  LOG(INFO) << "Main run finished. Milliseconds per iter: "
                  << millis / main_runs
                  << ". Iters per second: " << 1000.0 * main_runs / millis;
 
   if (run_individual) {
-    CAFFE_LOG_INFO << "DAGNet does not do per-op benchmark. To do so, "
+    LOG(INFO) << "DAGNet does not do per-op benchmark. To do so, "
                       "switch to a simple net type.";
   }
+}
+
+class DAGNet : public DAGNetBase {
+ public:
+  using DAGNetBase::DAGNetBase;
+
+ protected:
+  bool RunAt(const std::vector<int>& chain) override {
+    bool success = true;
+    for (const auto idx : chain) {
+      success &= operator_nodes_[idx].operator_->Run();
+    }
+    return success;
+  }
+};
+
+namespace {
+
+REGISTER_NET(simple, SimpleNet);
+REGISTER_NET(dag, DAGNet);
+
 }
 
 }  // namespace caffe2

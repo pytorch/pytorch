@@ -1,3 +1,5 @@
+#include <cstdio>
+
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
@@ -29,25 +31,25 @@ class AbstractSortedSegmentRangeOp : public Operator<Context> {
     auto& segment_ids = Input(SEGMENT_IDS);
     auto* output = Output(0);
 
-    CAFFE_CHECK_EQ(1, segment_ids.ndim()) << "SEGMENT_IDS must be a vector";
+    CHECK_EQ(1, segment_ids.ndim()) << "SEGMENT_IDS must be a vector";
     auto N = segment_ids.dim(0);
-    CAFFE_CHECK_EQ(N, data.dim(0))
+    CHECK_EQ(N, data.dim(0))
         << "SEGMENT_IDS must have the same length as outer dimension of DATA";
 
     const SIndex* s_ids = segment_ids.template data<SIndex>();
     const T* d = data.template data<T>();
 
-    CAFFE_CHECK_GT(N, 0);
+    CHECK_GT(N, 0);
     const SIndex K = s_ids[N - 1] + 1;
     auto shape = data.dims();
     shape[0] = K;
-    output->Reshape(shape);
+    output->Resize(shape);
 
     TIndex block_size = data.size() / N;
     T* out = output->template mutable_data<T>();
 
     // Assume the segments are sorted and there are no gaps
-    CAFFE_CHECK_EQ(0, s_ids[0]) << "Indices must be sorted and not have gaps";
+    CHECK_EQ(0, s_ids[0]) << "Indices must be sorted and not have gaps";
     for (TIndex i = 0; i < N;) {
       TIndex start = i;
       for (++i; i < N && s_ids[start] == s_ids[i]; ++i)
@@ -62,7 +64,7 @@ class AbstractSortedSegmentRangeOp : public Operator<Context> {
 
       // check correctness of the next segment
       if (i < N) {
-        CAFFE_CHECK_EQ(s_ids[start] + 1, s_ids[i])
+        CHECK_EQ(s_ids[start] + 1, s_ids[i])
             << "Indices must be sorted and not have gaps";
       }
     }
@@ -71,7 +73,6 @@ class AbstractSortedSegmentRangeOp : public Operator<Context> {
 
   static constexpr int kNumInputs = 2;
   INPUT_TAGS(DATA, SEGMENT_IDS);
-  DISABLE_COPY_AND_ASSIGN(AbstractSortedSegmentRangeOp);
 };
 
 template <
@@ -85,59 +86,95 @@ class AbstractSortedSegmentRangeGradientOp : public Operator<Context> {
   USE_SIMPLE_CTOR_DTOR(AbstractSortedSegmentRangeGradientOp);
 
   bool RunOnDevice() override {
+    // TODO(azzolini): avoid using input/output if not used by a particular op
+    auto& data_in = Input(DATA_IN);
+    auto& data_out = Input(DATA_OUT);
     auto& segment_grads = Input(SEGMENT_GRADS);
     auto& segment_ids = Input(SEGMENT_IDS);
     auto* data_grads = Output(0);
 
-    CAFFE_CHECK_EQ(1, segment_ids.ndim()) << "SEGMENT_IDS must be a vector";
+    CHECK_EQ(1, segment_ids.ndim()) << "SEGMENT_IDS must be a vector";
     TIndex N = segment_ids.dim(0);
 
     const SIndex* s_ids = segment_ids.template data<SIndex>();
     const T* s_grads = segment_grads.template data<T>();
+    const T* d_in = data_in.template data<T>();
+    const T* d_out = data_out.template data<T>();
 
     auto shape = segment_grads.dims();
     shape[0] = N;
-    data_grads->Reshape(shape);
+    data_grads->Resize(shape);
 
     const SIndex K = segment_grads.dim(0);
     TIndex block_size = segment_grads.size() / K;
     T* out = data_grads->template mutable_data<T>();
 
     // Assume the segments are sorted and there are no gaps
-    CAFFE_CHECK_EQ(0, s_ids[0]) << "Indices must be sorted and not have gaps";
+    CHECK_EQ(0, s_ids[0]) << "Indices must be sorted and not have gaps";
     // repeat the check from forward op
-    CAFFE_CHECK_EQ(K - 1, s_ids[N - 1])
+    CHECK_EQ(K - 1, s_ids[N - 1])
         << "Indices must be sorted and not have gaps";
     for (TIndex i = 0; i < N;) {
       TIndex start = i;
       for (++i; i < N && s_ids[start] == s_ids[i]; ++i)
         ;
 
+      auto expanded_idx = block_size * start;
+      auto reduced_idx = block_size * s_ids[start];
       RangeReducerGradient()(
           block_size,
           i - start,
-          s_grads + block_size * s_ids[start],
-          out + block_size * start,
+          s_grads + reduced_idx,
+          out + expanded_idx,
+          d_in + expanded_idx,
+          d_out + reduced_idx,
           &context_);
 
       // check correctness of the next segment
       if (i < N) {
-        CAFFE_CHECK_EQ(s_ids[start] + 1, s_ids[i])
+        CHECK_EQ(s_ids[start] + 1, s_ids[i])
             << "Indices must be sorted and not have gaps";
       }
     }
     return true;
   }
 
-  static constexpr int kNumInputs = 2;
-  INPUT_TAGS(SEGMENT_GRADS, SEGMENT_IDS);
-  DISABLE_COPY_AND_ASSIGN(AbstractSortedSegmentRangeGradientOp);
+  static constexpr int kNumInputs = 4;
+  INPUT_TAGS(DATA_IN, DATA_OUT, SEGMENT_GRADS, SEGMENT_IDS);
 };
 
 template <typename T, typename SIndex, typename Context, typename ReducerDef>
 struct AbstractSortedSegmentRangeDef {
   using OpDef = ReducerDef;
   static constexpr const char* basename = "SortedSegmentRange";
+  static constexpr const char* doc = R"DOC(
+Applies '{op}' to each segment of input tensor. In order to allow for more
+efficient implementation of '{op}', the input segments have to be contiguous
+and non-empty.
+
+SEGMENT_IDS is a vector that maps each of the first dimension slices of the
+DATA to a particular group (segment). Values belonging to the same segment are
+aggregated together.
+
+The first dimension of the output is equal to the number of input segments,
+i.e. `SEGMENT_IDS[-1]+1`. Other dimensions are inherited from the input tensor.
+
+{op_doc}
+  )DOC";
+  static void PopulateSchema(OpSchema& schema) {
+    schema.Input(0, "DATA", "Input tensor to be aggregated");
+    schema.Input(
+        1,
+        "SEGMENT_IDS",
+        "Vector with the same length as the first dimension of DATA "
+        "and values in the range 0..K-1 and in increasing order that "
+        "maps each slice of DATA to one of the segments");
+    schema.Output(
+        0,
+        "OUTPUT",
+        "Aggregated tensor with the first dimension of K and the "
+        "other dimentsions inherited from DATA");
+  }
   using ForwardOp = AbstractSortedSegmentRangeOp<
       T,
       SIndex,
@@ -154,7 +191,7 @@ struct AbstractSortedSegmentRangeDef {
       return SingleGradientDef(
           string(basename) + ReducerDef::name + "Gradient",
           "",
-          vector<string>{GO(0), I(1)},
+          vector<string>{I(0), O(0), GO(0), I(1)},
           // no gradient on segment_ids!
           vector<string>{GI(0)});
     }
@@ -202,7 +239,7 @@ class AbstractReduceFrontOp : public Operator<Context> {
     auto& data = Input(0);
     auto* output = Output(0);
 
-    CAFFE_CHECK_LE(num_reduce_dims_, data.ndim());
+    CHECK_LE(num_reduce_dims_, data.ndim());
 
     typename Reducer::Meta ctx;
     ctx.observeInput(0, data, num_reduce_dims_);
@@ -215,7 +252,7 @@ class AbstractReduceFrontOp : public Operator<Context> {
 
     vector<TIndex> shape;
     ctx.appendOutputShape(&shape);
-    output->Reshape(shape);
+    output->Resize(shape);
 
     TIndex in_block_size = data.size_from_dim(num_reduce_dims_);
     TIndex block_num = data.size() / in_block_size;
@@ -229,7 +266,6 @@ class AbstractReduceFrontOp : public Operator<Context> {
   }
 
   static constexpr int kNumInputs = Reducer::kInputCount;
-  DISABLE_COPY_AND_ASSIGN(AbstractReduceFrontOp);
 
  private:
   int num_reduce_dims_;
@@ -246,7 +282,8 @@ class AbstractReduceFrontGradientOp : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& reduction_grad = Input(REDUCTION_GRAD);
-    auto& source_shape = OperatorBase::Input<vector<TIndex>>(SOURCE_SHAPE);
+    auto& source_shape = OperatorBase::Input<TensorCPU>(SOURCE_SHAPE);
+
     auto* data_grads = Output(0);
 
     typename ReducerGradient::Meta ctx(reduction_grad, 0);
@@ -258,10 +295,12 @@ class AbstractReduceFrontGradientOp : public Operator<Context> {
 
     const T* r_grad = reduction_grad.template data<T>();
 
+    CHECK_LE(num_reduce_dims_, source_shape.size());
     vector<TIndex> shape(
-        source_shape.begin(), source_shape.begin() + num_reduce_dims_);
+        source_shape.template data<TIndex>(),
+        source_shape.template data<TIndex>() + num_reduce_dims_);
     ctx.appendGradShape(&shape);
-    data_grads->Reshape(shape);
+    data_grads->Resize(shape);
 
     TIndex block_size = data_grads->size_from_dim(num_reduce_dims_);
     TIndex block_num = data_grads->size() / block_size;
@@ -280,7 +319,6 @@ class AbstractReduceFrontGradientOp : public Operator<Context> {
     REDUCTION_GRAD = ReducerGradient::originalInputs().size(),
     SOURCE_SHAPE
   };
-  DISABLE_COPY_AND_ASSIGN(AbstractReduceFrontGradientOp);
 
  private:
   int num_reduce_dims_;
@@ -290,6 +328,18 @@ template <typename T, typename Context, typename ReducerDef>
 struct AbstractReduceFrontDef {
   using OpDef = ReducerDef;
   static constexpr const char* basename = "ReduceFront";
+  static constexpr const char* doc = R"DOC(
+Reduces the input tensor along the first dimension of the input tensor by
+applying '{op}'. This op acts in a similar way to SortedSegment{op} and
+UnsortedSegment{op} but as if all input slices belong to a single segment.
+
+{op_doc}
+  )DOC";
+  static void PopulateSchema(OpSchema& schema) {
+    schema.Input(
+        0, "DATA", "Input tensor to be reduced on the first dimension");
+    ReducerDef::PopulateSchema(schema);
+  }
   using ReducerGradient =
       typename ReducerDef::template ReducerGradient<T, Context>;
   using ForwardOp = AbstractReduceFrontOp<
@@ -317,7 +367,7 @@ struct AbstractReduceFrontDef {
       // FIXME: pass in num_reduce_dims?!
       return vector<OperatorDef>{
           CreateOperatorDef(
-              "RecordShape",
+              "Shape",
               "",
               vector<string>{I(0)},
               vector<string>{tmp_dims}),
@@ -370,19 +420,19 @@ class AbstractSortedSegmentOp : public Operator<Context> {
     auto& segment_ids = Input(SEGMENT_IDS);
     auto* output = Output(0);
 
-    CAFFE_CHECK_EQ(1, segment_ids.ndim()) << "SEGMENT_IDS must be a vector";
+    CHECK_EQ(1, segment_ids.ndim()) << "SEGMENT_IDS must be a vector";
     TIndex N = segment_ids.dim(0);
     const TIndex M = data.dim(0);
 
     const TIndex* idxs;
     if (SparseFused) { // static if
       auto& indices = Input(INDICES);
-      CAFFE_CHECK_EQ(1, indices.ndim()) << "INDICES must be a vector";
-      CAFFE_CHECK_EQ(N, indices.dim(0))
+      CHECK_EQ(1, indices.ndim()) << "INDICES must be a vector";
+      CHECK_EQ(N, indices.dim(0))
           << "SEGMENT_IDS must have the same length as INDICES";
       idxs = indices.template data<TIndex>();
     } else {
-      CAFFE_CHECK_EQ(N, M)
+      CHECK_EQ(N, M)
           << "DATA must have the same first dimension as SEGMENT_IDS";
     }
 
@@ -392,7 +442,7 @@ class AbstractSortedSegmentOp : public Operator<Context> {
     ctx.observeInput(0, data, 1);
     for (int i = 1; i < Reducer::kInputCount; ++i) {
       auto& aux_in = Input(i);
-      CAFFE_CHECK_EQ(N, aux_in.dim(0))
+      CHECK_EQ(N, aux_in.dim(0))
           << "Input " << i
           << " must have have the same first dim as SEGMENT_IDS";
       ctx.observeInput(i, aux_in, 1);
@@ -401,19 +451,19 @@ class AbstractSortedSegmentOp : public Operator<Context> {
     const SIndex* s_ids = segment_ids.template data<SIndex>();
     const T* d = data.template data<T>();
 
-    CAFFE_CHECK_GT(N, 0);
+    CHECK_GT(N, 0);
     const SIndex K = s_ids[N - 1] + 1;
     vector<TIndex> shape;
     shape.push_back(K);
     ctx.appendOutputShape(&shape);
-    output->Reshape(shape);
+    output->Resize(shape);
 
     TIndex in_block_size = data.size() / M;
     TIndex out_block_size = output->size() / K;
     T* out = output->template mutable_data<T>();
 
     // Assume the segments are sorted and there are no gaps
-    CAFFE_CHECK_EQ(0, s_ids[0]) << "Indices must be sorted and not have gaps";
+    CHECK_EQ(0, s_ids[0]) << "Indices must be sorted and not have gaps";
     for (TIndex i = 0; i < N;) {
       TIndex start = i;
 
@@ -421,7 +471,7 @@ class AbstractSortedSegmentOp : public Operator<Context> {
       for (; i < N && s_ids[start] == s_ids[i]; ++i) {
         TIndex idx;
         if (SparseFused) { // static if
-          CAFFE_CHECK(0 <= idxs[i] && idxs[i] < M)
+          CHECK(0 <= idxs[i] && idxs[i] < M)
               << "Index out of bounds: " << idxs[i] << ", range 0 to " << M;
           idx = idxs[i];
         } else {
@@ -432,7 +482,7 @@ class AbstractSortedSegmentOp : public Operator<Context> {
 
       // check correctness of the next segment
       if (i < N) {
-        CAFFE_CHECK_EQ(s_ids[start] + 1, s_ids[i])
+        CHECK_EQ(s_ids[start] + 1, s_ids[i])
             << "Indices must be sorted and not have gaps";
       }
     }
@@ -445,7 +495,6 @@ class AbstractSortedSegmentOp : public Operator<Context> {
   };
   static constexpr int kSelfInputs = SparseFused ? 2 : 1;
   static constexpr int kNumInputs = Reducer::kInputCount + kSelfInputs;
-  DISABLE_COPY_AND_ASSIGN(AbstractSortedSegmentOp);
 };
 
 // Gradient actually doesn't depend on whether sparse lookup is fused or not
@@ -460,13 +509,13 @@ class AbstractSortedSegmentGradientOp : public Operator<Context> {
     auto& segment_ids = Input(SEGMENT_IDS);
     auto* data_grads = Output(0);
 
-    CAFFE_CHECK_EQ(1, segment_ids.ndim()) << "SEGMENT_IDS must be a vector";
+    CHECK_EQ(1, segment_ids.ndim()) << "SEGMENT_IDS must be a vector";
     TIndex N = segment_ids.dim(0);
 
     typename ReducerGradient::Meta ctx(segment_grads, 1);
     for (int i = 0; i < ReducerGradient::originalInputs().size(); ++i) {
       auto& aux_in = Input(i);
-      CAFFE_CHECK_EQ(N, aux_in.dim(0))
+      CHECK_EQ(N, aux_in.dim(0))
           << "Input " << i
           << " must have have the same first dim as SEGMENT_IDS";
       ctx.observeOriginalInput(ReducerGradient::originalInputs()[i], aux_in, 1);
@@ -478,7 +527,7 @@ class AbstractSortedSegmentGradientOp : public Operator<Context> {
     vector<TIndex> shape;
     shape.push_back(N);
     ctx.appendGradShape(&shape);
-    data_grads->Reshape(shape);
+    data_grads->Resize(shape);
 
     TIndex d_block_size = data_grads->size() / data_grads->dim(0);
     const SIndex K = segment_grads.dim(0);
@@ -486,9 +535,9 @@ class AbstractSortedSegmentGradientOp : public Operator<Context> {
     T* out = data_grads->template mutable_data<T>();
 
     // Assume the segments are sorted and there are no gaps
-    CAFFE_CHECK_EQ(0, s_ids[0]) << "Indices must be sorted and not have gaps";
+    CHECK_EQ(0, s_ids[0]) << "Indices must be sorted and not have gaps";
     // repeat the check from forward op
-    CAFFE_CHECK_EQ(K - 1, s_ids[N - 1])
+    CHECK_EQ(K - 1, s_ids[N - 1])
         << "Indices must be sorted and not have gaps";
     for (TIndex i = 0; i < N;) {
       TIndex start = i;
@@ -501,7 +550,7 @@ class AbstractSortedSegmentGradientOp : public Operator<Context> {
 
       // check correctness of the next segment
       if (i < N) {
-        CAFFE_CHECK_EQ(s_ids[start] + 1, s_ids[i])
+        CHECK_EQ(s_ids[start] + 1, s_ids[i])
             << "Indices must be sorted and not have gaps";
       }
     }
@@ -518,7 +567,6 @@ class AbstractSortedSegmentGradientOp : public Operator<Context> {
     SEGMENT_GRADS = ReducerGradient::originalInputs().size(),
     SEGMENT_IDS
   };
-  DISABLE_COPY_AND_ASSIGN(AbstractSortedSegmentGradientOp);
 };
 
 // base implementation of sorted/unsorted sparse/non-sparse gradient computation
@@ -555,14 +603,38 @@ template <typename T, typename SIndex, typename Context, typename ReducerDef>
 struct AbstractSortedSegmentDef {
   using OpDef = ReducerDef;
   static constexpr const char* basename = "SortedSegment";
+  static constexpr const char* doc = R"DOC(
+Applies '{op}' to each segment of input tensor. Segments need to be sorted and
+contiguous. See also UnsortedSegment{op} that doesn't have this requirement.
+
+SEGMENT_IDS is a vector that maps each of the first dimension slices of the
+DATA to a particular group (segment). Values belonging to the same segment are
+aggregated together.
+
+The first dimension of the output is equal to the number of input segments,
+i.e. `SEGMENT_IDS[-1]+1`. Other dimensions are inherited from the input tensor.
+
+{op_doc}
+  )DOC";
+  static void PopulateSchema(OpSchema& schema) {
+    schema.Input(0, "DATA", "Input tensor, slices of which are aggregated.");
+    schema.Input(
+        Reducer::kInputCount,
+        "SEGMENT_IDS",
+        "Vector with the same length as the first dimension of DATA "
+        "and values in the range 0..K-1 and in increasing order that "
+        "maps each slice of DATA to one of the segments");
+    schema.Output(
+        0,
+        "OUTPUT",
+        "Aggregated output tensor. Has the first dimension of K "
+        "(the number of segments).");
+    ReducerDef::PopulateSchema(schema);
+  }
+  using Reducer = typename ReducerDef::template Reducer<T, Context>;
   using ReducerGradient =
       typename ReducerDef::template ReducerGradient<T, Context>;
-  using ForwardOp = AbstractSortedSegmentOp<
-      T,
-      SIndex,
-      Context,
-      typename ReducerDef::template Reducer<T, Context>,
-      false>;
+  using ForwardOp = AbstractSortedSegmentOp<T, SIndex, Context, Reducer, false>;
   using BackwardOp =
       AbstractSortedSegmentGradientOp<T, SIndex, Context, ReducerGradient>;
   using GetGradient = SegmentOpGetGradient<
@@ -577,13 +649,49 @@ template <typename T, typename SIndex, typename Context, typename ReducerDef>
 struct AbstractSparseSortedSegmentDef {
   using OpDef = ReducerDef;
   static constexpr const char* basename = "SparseSortedSegment";
+  static constexpr const char* doc = R"DOC(
+Pulls in slices of the input tensor, groups them into segments and applies
+'{op}' to each segment. Segments need to be sorted and contiguous. See also
+SparseUnsortedSegment{op} that doesn't have this requirement.
+
+This op is basically Gather and SortedSegment{op} fused together.
+
+INDICES should contain integers in range 0..N-1 where N is the first dimension
+of DATA. INDICES represent which slices of DATA need to be pulled in.
+
+SEGMENT_IDS is a vector that maps each referenced slice of the DATA to a
+particular group (segment). Values belonging to the same segment are aggregated
+together. SEGMENT_IDS should have the same dimension as INDICES.
+
+The first dimension of the output is equal to the number of input segments,
+i.e. `SEGMENT_IDS[-1]+1`. Other dimensions are inherited from the input tensor.
+
+{op_doc}
+  )DOC";
+  static void PopulateSchema(OpSchema& schema) {
+    schema.Input(0, "DATA", "Input tensor, slices of which are aggregated.");
+    schema.Input(
+        Reducer::kInputCount,
+        "INDICES",
+        "Integer vector containing indices of the first dimension of DATA for "
+        "the slices that are being aggregated");
+    schema.Input(
+        Reducer::kInputCount + 1,
+        "SEGMENT_IDS",
+        "Vector with the same length as INDICES and values in the range "
+        "0..K-1 and in increasing order that maps each slice of DATA referenced"
+        " by INDICES to one of the segments");
+    schema.Output(
+        0,
+        "OUTPUT",
+        "Aggregated output tensor. Has the first dimension of K "
+        "(the number of segments).");
+    ReducerDef::PopulateSchema(schema);
+  }
+  using Reducer = typename ReducerDef::template Reducer<T, Context>;
   using ReducerGradient =
       typename ReducerDef::template ReducerGradient<T, Context>;
-  using ForwardOp = AbstractSortedSegmentOp<
-      T,
-      SIndex,
-      Context,
-      typename ReducerDef::template Reducer<T, Context>>;
+  using ForwardOp = AbstractSortedSegmentOp<T, SIndex, Context, Reducer>;
   // TODO(dzhulgakov): we're registering the same class twice here,
   // consider avoiding op duplication here
   using BackwardOp =
@@ -644,19 +752,19 @@ class AbstractUnsortedSegmentOp : public Operator<Context> {
     auto& segment_ids = Input(SEGMENT_IDS);
     auto* output = Output(0);
 
-    CAFFE_CHECK_EQ(1, segment_ids.ndim()) << "SEGMENT_IDS must be a vector";
+    CHECK_EQ(1, segment_ids.ndim()) << "SEGMENT_IDS must be a vector";
     TIndex N = segment_ids.dim(0);
     const TIndex M = data.dim(0);
 
     const TIndex* idxs;
     if (SparseFused) { // static if
       auto& indices = Input(INDICES);
-      CAFFE_CHECK_EQ(1, indices.ndim()) << "INDICES must be a vector";
-      CAFFE_CHECK_EQ(N, indices.dim(0))
+      CHECK_EQ(1, indices.ndim()) << "INDICES must be a vector";
+      CHECK_EQ(N, indices.dim(0))
           << "SEGMENT_IDS must have the same length as INDICES";
       idxs = indices.template data<TIndex>();
     } else {
-      CAFFE_CHECK_EQ(N, M)
+      CHECK_EQ(N, M)
           << "DATA must have the same first dimension as SEGMENT_IDS";
     }
 
@@ -666,7 +774,7 @@ class AbstractUnsortedSegmentOp : public Operator<Context> {
     ctx.observeInput(0, data, 1);
     for (int i = 1; i < Reducer::kInputCount; ++i) {
       auto& aux_in = Input(i);
-      CAFFE_CHECK_EQ(N, aux_in.dim(0))
+      CHECK_EQ(N, aux_in.dim(0))
           << "Input " << i
           << " must have have the same first dim as SEGMENT_IDS";
       ctx.observeInput(i, aux_in, 1);
@@ -689,7 +797,7 @@ class AbstractUnsortedSegmentOp : public Operator<Context> {
     vector<TIndex> shape;
     shape.push_back(K);
     ctx.appendOutputShape(&shape);
-    output->Reshape(shape);
+    output->Resize(shape);
 
     TIndex in_block_size = data.size() / M;
     TIndex out_block_size = output->size() / K;
@@ -703,11 +811,11 @@ class AbstractUnsortedSegmentOp : public Operator<Context> {
 
     for (TIndex i = 0; i < N; ++i) {
       auto s_id = s_ids[i];
-      CAFFE_CHECK(0 <= s_id && s_id < K) << "Segment id out of range: " << s_id
+      CHECK(0 <= s_id && s_id < K) << "Segment id out of range: " << s_id
                                          << ", range 0 to " << K;
       TIndex idx;
       if (SparseFused) { // static if
-        CAFFE_CHECK(0 <= idxs[i] && idxs[i] < M)
+        CHECK(0 <= idxs[i] && idxs[i] < M)
             << "Index out of bounds: " << idxs[i] << ", range 0 to " << M;
         idx = idxs[i];
       } else {
@@ -727,7 +835,6 @@ class AbstractUnsortedSegmentOp : public Operator<Context> {
   };
   static constexpr int kSelfInputs = SparseFused ? 2 : 1;
   static constexpr int kNumInputs = Reducer::kInputCount + kSelfInputs;
-  DISABLE_COPY_AND_ASSIGN(AbstractUnsortedSegmentOp);
 
  private:
   TIndex num_segments_;
@@ -747,13 +854,13 @@ class AbstractUnsortedSegmentGradientOp : public Operator<Context> {
     auto& segment_ids = Input(SEGMENT_IDS);
     auto* data_grads = Output(0);
 
-    CAFFE_CHECK_EQ(1, segment_ids.ndim()) << "SEGMENT_IDS must be a vector";
+    CHECK_EQ(1, segment_ids.ndim()) << "SEGMENT_IDS must be a vector";
     TIndex N = segment_ids.dim(0);
 
     typename ReducerGradient::Meta ctx(segment_grads, 1);
     for (int i = 0; i < ReducerGradient::originalInputs().size(); ++i) {
       auto& aux_in = Input(i);
-      CAFFE_CHECK_EQ(N, aux_in.dim(0))
+      CHECK_EQ(N, aux_in.dim(0))
           << "Input " << i
           << " must have have the same first dim as SEGMENT_IDS";
       ctx.observeOriginalInput(ReducerGradient::originalInputs()[i], aux_in, 1);
@@ -765,7 +872,7 @@ class AbstractUnsortedSegmentGradientOp : public Operator<Context> {
     vector<TIndex> shape;
     shape.push_back(N);
     ctx.appendGradShape(&shape);
-    data_grads->Reshape(shape);
+    data_grads->Resize(shape);
 
     TIndex d_block_size = data_grads->size() / data_grads->dim(0);
     const SIndex K = segment_grads.dim(0);
@@ -780,7 +887,7 @@ class AbstractUnsortedSegmentGradientOp : public Operator<Context> {
 
     for (TIndex i = 0; i < N; ++i) {
       auto s_id = s_ids[i];
-      CAFFE_CHECK(0 <= s_id && s_id < K) << "Segment id out of range: " << s_id
+      CHECK(0 <= s_id && s_id < K) << "Segment id out of range: " << s_id
                                          << ", range 0 to " << K;
       reducers_[s_id].fillGrad(
           ctx, out + d_block_size * i, i, &context_);
@@ -800,7 +907,6 @@ class AbstractUnsortedSegmentGradientOp : public Operator<Context> {
     SEGMENT_GRADS = ReducerGradient::originalInputs().size(),
     SEGMENT_IDS
   };
-  DISABLE_COPY_AND_ASSIGN(AbstractUnsortedSegmentGradientOp);
 
  private:
   // member field to reuse memory
@@ -811,6 +917,40 @@ template <typename T, typename SIndex, typename Context, typename ReducerDef>
 struct AbstractUnsortedSegmentDef {
   using OpDef = ReducerDef;
   static constexpr const char* basename = "UnsortedSegment";
+  static constexpr const char* doc = R"DOC(
+Applies '{op}' to each segment of input tensor. Segments ids can appear in
+arbitrary order (unlike in SortedSegment{op}).
+
+SEGMENT_IDS is a vector that maps each of the first dimension slices of the
+DATA to a particular group (segment). Values belonging to the same segment are
+aggregated together.
+
+If `num_segments` argument is passed it would be used as a first dimension for
+the output. Otherwise, it'd be dynamically calculated from as the max value of
+SEGMENT_IDS plus one. Other output dimensions are inherited from the input
+tensor.
+
+{op_doc}
+  )DOC";
+  static void PopulateSchema(OpSchema& schema) {
+    schema.Arg(
+        "num_segments",
+        "Optional int argument specifying the number of output segments and "
+        "thus the first dimension of the output");
+    schema.Input(0, "DATA", "Input tensor, slices of which are aggregated.");
+    schema.Input(
+        Reducer::kInputCount,
+        "SEGMENT_IDS",
+        "Integer vector with the same length as the first dimension of DATA "
+        "that maps each slice of DATA to one of the segments");
+    schema.Output(
+        0,
+        "OUTPUT",
+        "Aggregated output tensor. Has the first dimension of equal to the "
+        "number of segments.");
+    ReducerDef::PopulateSchema(schema);
+  }
+  using Reducer = typename ReducerDef::template Reducer<T, Context>;
   using ReducerGradient =
       typename ReducerDef::template ReducerGradient<T, Context>;
   using ForwardOp = AbstractUnsortedSegmentOp<
@@ -833,13 +973,50 @@ template <typename T, typename SIndex, typename Context, typename ReducerDef>
 struct AbstractSparseUnsortedSegmentDef {
   using OpDef = ReducerDef;
   static constexpr const char* basename = "SparseUnsortedSegment";
+  static constexpr const char* doc = R"DOC(
+Pulls in slices of the input tensor, groups them into segments and applies
+'{op}' to each segment. Segments ids can appear in arbitrary order (unlike in
+SparseSortedSegment{op}).
+
+This op is basically Gather and UnsortedSegment{op} fused together.
+
+INDICES should contain integers in range 0..N-1 where N is the first dimension
+of DATA. INDICES represent which slices of DATA need to be pulled in.
+
+SEGMENT_IDS is a vector that maps each referenced slice of the DATA to a
+particular group (segment). Values belonging to the same segment are aggregated
+together. SEGMENT_IDS should have the same dimension as INDICES.
+
+If `num_segments` argument is passed it would be used as a first dimension for
+the output. Otherwise, it'd be dynamically calculated from as the max value of
+SEGMENT_IDS plus one. Other output dimensions are inherited from the input
+tensor.
+
+{op_doc}
+  )DOC";
+  static void PopulateSchema(OpSchema& schema) {
+    schema.Input(0, "DATA", "Input tensor, slices of which are aggregated.");
+    schema.Input(
+        Reducer::kInputCount,
+        "INDICES",
+        "Integer vector containing indices of the first dimension of DATA for "
+        "the slices that are being aggregated");
+    schema.Input(
+        Reducer::kInputCount + 1,
+        "SEGMENT_IDS",
+        "Integer vector with the same length as INDICES that maps each slice "
+        "of DATA referenced by INDICES to one of the segments");
+    schema.Output(
+        0,
+        "OUTPUT",
+        "Aggregated output tensor. Has the first dimension of equal to the "
+        "number of segments.");
+    ReducerDef::PopulateSchema(schema);
+  }
+  using Reducer = typename ReducerDef::template Reducer<T, Context>;
   using ReducerGradient =
       typename ReducerDef::template ReducerGradient<T, Context>;
-  using ForwardOp = AbstractUnsortedSegmentOp<
-      T,
-      SIndex,
-      Context,
-      typename ReducerDef::template Reducer<T, Context>>;
+  using ForwardOp = AbstractUnsortedSegmentOp<T, SIndex, Context, Reducer>;
   // TODO(dzhulgakov): we're registering the same class twice here,
   // consider avoiding op duplication here
   using BackwardOp =
@@ -854,6 +1031,14 @@ struct AbstractSparseUnsortedSegmentDef {
 
 namespace {
 
+template <typename Def>
+string FormatDoc() {
+  string doc = Def::doc;
+  ReplaceAll(doc, "{op}", Def::OpDef::name);
+  ReplaceAll(doc, "{op_doc}", Def::OpDef::doc);
+  return doc;
+}
+
 #define REGISTER_SEGMENT_DEF(...)                                              \
   REGISTER_CPU_OPERATOR_STR(                                                   \
       string(__VA_ARGS__::basename) + (__VA_ARGS__::OpDef::name),              \
@@ -861,7 +1046,10 @@ namespace {
   OPERATOR_SCHEMA_STR(                                                         \
       string(__VA_ARGS__::basename) + (__VA_ARGS__::OpDef::name))              \
       .NumInputs(__VA_ARGS__::ForwardOp::kNumInputs)                           \
-      .NumOutputs(1);                                                          \
+      .NumOutputs(1)                                                           \
+      .SetDoc(FormatDoc<__VA_ARGS__>())                                        \
+      .Output(0, "OUTPUT", "Aggregated tensor")                                \
+      .FillUsing(__VA_ARGS__::PopulateSchema);                                 \
   REGISTER_CPU_OPERATOR_STR(                                                   \
       string(__VA_ARGS__::basename) + (__VA_ARGS__::OpDef::name) + "Gradient", \
       __VA_ARGS__::BackwardOp);                                                \
@@ -875,6 +1063,12 @@ namespace {
 
 REGISTER_SEGMENT_DEF(
     AbstractSortedSegmentRangeDef<float, int, CPUContext, SumRangeReducerDef>);
+REGISTER_SEGMENT_DEF(
+    AbstractSortedSegmentRangeDef<float, int, CPUContext,
+                                  LogSumExpRangeReducerDef>);
+REGISTER_SEGMENT_DEF(
+    AbstractSortedSegmentRangeDef<float, int, CPUContext,
+                                  MeanRangeReducerDef>);
 
 #define REGISTER_REDUCER_WITH_ALL_OPS(reducer_def)                          \
   REGISTER_SEGMENT_DEF(                                                     \

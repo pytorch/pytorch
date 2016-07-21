@@ -54,11 +54,18 @@ static_assert(sizeof(int) == sizeof(int32_t),
               "type mapping.");
 int CaffeToNumpyType(const TypeMeta& meta) {
   static std::map<CaffeTypeId, int> numpy_type_map {
+    {TypeMeta::Id<bool>(), NPY_BOOL},
+    {TypeMeta::Id<double>(), NPY_DOUBLE},
     {TypeMeta::Id<float>(), NPY_FLOAT},
     {TypeMeta::Id<float16>(), NPY_FLOAT16},
     {TypeMeta::Id<int>(), NPY_INT},
+    {TypeMeta::Id<int8_t>(), NPY_INT8},
+    {TypeMeta::Id<int16_t>(), NPY_INT16},
     {TypeMeta::Id<int64_t>(), NPY_LONGLONG},
-    // TODO(jiayq): Add more types here.
+    {TypeMeta::Id<uint8_t>(), NPY_UINT8},
+    {TypeMeta::Id<uint16_t>(), NPY_UINT16},
+    {TypeMeta::Id<std::string>(), NPY_OBJECT},
+    // Note: Add more types here.
   };
   const auto it = numpy_type_map.find(meta.id());
   return it == numpy_type_map.end() ? -1 : it->second;
@@ -66,14 +73,22 @@ int CaffeToNumpyType(const TypeMeta& meta) {
 
 const TypeMeta& NumpyTypeToCaffe(int numpy_type) {
   static std::map<int, TypeMeta> caffe_type_map {
+    {NPY_BOOL, TypeMeta::Make<bool>()},
+    {NPY_DOUBLE, TypeMeta::Make<double>()},
     {NPY_FLOAT, TypeMeta::Make<float>()},
     {NPY_FLOAT16, TypeMeta::Make<float16>()},
     {NPY_INT, TypeMeta::Make<int>()},
+    {NPY_INT8, TypeMeta::Make<int8_t>()},
+    {NPY_INT16, TypeMeta::Make<int16_t>()},
     {NPY_INT64, TypeMeta::Make<int64_t>()},
     {NPY_LONG, sizeof(long) == sizeof(int) ?
                TypeMeta::Make<int>() : TypeMeta::Make<int64_t>()},
     {NPY_LONGLONG, TypeMeta::Make<int64_t>()},
-    // TODO(jiayq): Add more types here.
+    {NPY_UINT8, TypeMeta::Make<uint8_t>()},
+    {NPY_UINT16, TypeMeta::Make<uint16_t>()},
+    {NPY_OBJECT, TypeMeta::Make<std::string>()},
+    {NPY_STRING, TypeMeta::Make<std::string>()},
+    // Note: Add more types here.
   };
   static TypeMeta unknown_type;
   const auto it = caffe_type_map.find(numpy_type);
@@ -142,7 +157,7 @@ PyObject* RegisteredOperators(PyObject* self, PyObject* args) {
   PyObject* list = PyList_New(all_keys.size());
   int idx = 0;
   for (const string& name : all_keys) {
-    CAFFE_CHECK_EQ(PyList_SetItem(list, idx, StdStringToPyBytes(name)), 0);
+    CHECK_EQ(PyList_SetItem(list, idx, StdStringToPyBytes(name)), 0);
     ++idx;
   }
   return list;
@@ -192,13 +207,13 @@ static PyObject* PyListFromGradientWrappers(
       obj = Py_BuildValue("");
     } else if (grad[i].IsDense()) {
       // Return dense string
-      obj = StdStringToPyBytes(grad[i].dense_);
+      obj = StdStringToPyUnicode(grad[i].dense_);
     } else {
       // Return sparse tuple
-      obj = PyTuple_Pack(2, StdStringToPyBytes(grad[i].indices_),
-                         StdStringToPyBytes(grad[i].values_));
+      obj = PyTuple_Pack(2, StdStringToPyUnicode(grad[i].indices_),
+                         StdStringToPyUnicode(grad[i].values_));
     }
-    CAFFE_CHECK_EQ(PyList_SetItem(g_output_py, i, obj), 0);
+    CHECK_EQ(PyList_SetItem(g_output_py, i, obj), 0);
   }
   //TODO(jiayq): implement
   return g_output_py;
@@ -231,7 +246,7 @@ PyObject* GetGradientDefs(PyObject* self, PyObject* args) {
   GradientOpsMeta meta = GetGradientForOp(def, g_output);
   PyObject* grad_ops = PyList_New(meta.ops_.size());
   for (int i = 0; i < meta.ops_.size(); ++i) {
-    CAFFE_CHECK_EQ(PyList_SetItem(
+    CHECK_EQ(PyList_SetItem(
         grad_ops, i, StdStringToPyBytes(meta.ops_[i].SerializeAsString())), 0);
   }
   PyObject* g_input_py = PyListFromGradientWrappers(meta.g_input_);
@@ -269,7 +284,7 @@ PyObject* Workspaces(PyObject* self, PyObject* args) {
   PyObject* list = PyList_New(gWorkspaces.size());
   int i = 0;
   for (auto const & it : gWorkspaces) {
-    CAFFE_CHECK_EQ(PyList_SetItem(list, i, StdStringToPyBytes(it.first)), 0);
+    CHECK_EQ(PyList_SetItem(list, i, StdStringToPyBytes(it.first)), 0);
     i += 1;
   }
   return list;
@@ -283,7 +298,7 @@ PyObject* ResetWorkspace(PyObject* self, PyObject* args) {
                     "specifying the root folder of the workspace.");
     return nullptr;
   }
-  CAFFE_VLOG(1) << "Resetting workspace.";
+  VLOG(1) << "Resetting workspace.";
   if (root_folder == nullptr) {
     gWorkspaces[gCurrentWorkspaceName].reset(
         new Workspace());
@@ -310,7 +325,7 @@ PyObject* Blobs(PyObject* self, PyObject* args) {
   std::vector<caffe2::string> blob_strings = gWorkspace->Blobs();
   PyObject* list = PyList_New(blob_strings.size());
   for (int i = 0; i < blob_strings.size(); ++i) {
-    CAFFE_CHECK_EQ(
+    CHECK_EQ(
         PyList_SetItem(list, i, StdStringToPyBytes(blob_strings[i])), 0);
   }
   return list;
@@ -357,9 +372,9 @@ PyObject* RunNet(PyObject* self, PyObject* args) {
   caffe2::string name(cname);
 
   bool result;
-  Py_BEGIN_ALLOW_THREADS;
+  BEGIN_CAFFE2_PY_EXCEPTION_HANDLING_WITH_GUARD;
   result = gWorkspace->RunNet(name);
-  Py_END_ALLOW_THREADS;
+  END_CAFFE2_PY_EXCEPTION_HANDLING;
 
   if (!result) {
     PyErr_SetString(
@@ -389,9 +404,9 @@ PyObject* BenchmarkNet(PyObject* self, PyObject* args) {
   }
   bool run_individual = PyObject_IsTrue(run_individual_obj);
 
-  Py_BEGIN_ALLOW_THREADS;
-  net->TEST_Benchmark(warmup_runs, main_runs, run_individual_obj);
-  Py_END_ALLOW_THREADS;
+  BEGIN_CAFFE2_PY_EXCEPTION_HANDLING_WITH_GUARD;
+  net->TEST_Benchmark(warmup_runs, main_runs, run_individual);
+  END_CAFFE2_PY_EXCEPTION_HANDLING;
 
   Py_RETURN_TRUE;
 }
@@ -411,7 +426,7 @@ PyObject* Nets(PyObject* self, PyObject* args) {
   std::vector<caffe2::string> net_strings = gWorkspace->Nets();
   PyObject* list = PyList_New(net_strings.size());
   for (int i = 0; i < net_strings.size(); ++i) {
-    CAFFE_CHECK_EQ(PyList_SetItem(list, i, StdStringToPyBytes(net_strings[i])), 0);
+    CHECK_EQ(PyList_SetItem(list, i, StdStringToPyBytes(net_strings[i])), 0);
   }
   return list;
 }
@@ -430,9 +445,9 @@ PyObject* RunOperatorOnce(PyObject* self, PyObject* args) {
   }
 
   bool result;
-  Py_BEGIN_ALLOW_THREADS;
+  BEGIN_CAFFE2_PY_EXCEPTION_HANDLING_WITH_GUARD;
   result = gWorkspace->RunOperatorOnce(proto);
-  Py_END_ALLOW_THREADS;
+  END_CAFFE2_PY_EXCEPTION_HANDLING;
 
   if (!result) {
     PyErr_SetString(
@@ -457,9 +472,9 @@ PyObject* RunNetOnce(PyObject* self, PyObject* args) {
   }
 
   bool result;
-  Py_BEGIN_ALLOW_THREADS;
+  BEGIN_CAFFE2_PY_EXCEPTION_HANDLING_WITH_GUARD;
   result = gWorkspace->RunNetOnce(proto);
-  Py_END_ALLOW_THREADS;
+  END_CAFFE2_PY_EXCEPTION_HANDLING;
 
   if (!result) {
     PyErr_SetString(
@@ -484,9 +499,9 @@ PyObject* RunPlan(PyObject* self, PyObject* args) {
   }
 
   bool result;
-  Py_BEGIN_ALLOW_THREADS;
+  BEGIN_CAFFE2_PY_EXCEPTION_HANDLING_WITH_GUARD;
   result = gWorkspace->RunPlan(proto);
-  Py_END_ALLOW_THREADS;
+  END_CAFFE2_PY_EXCEPTION_HANDLING;
 
   if (!result) {
     PyErr_SetString(
@@ -508,6 +523,20 @@ PyObject* CreateBlob(PyObject* self, PyObject* args) {
   Py_RETURN_TRUE;
 }
 
+PyObject* SerializeBlob(PyObject* self, PyObject* args) {
+  char* name;
+  if (!PyArg_ParseTuple(args, "s", &name)) {
+    PyErr_SetString(PyExc_ValueError, "Incorrect arguments.");
+    return nullptr;
+  }
+  if (!gWorkspace->HasBlob(caffe2::string(name))) {
+    PyErr_SetString(PyExc_KeyError, "Requested blob does not exist.");
+    return nullptr;
+  }
+  const caffe2::Blob& blob = *(gWorkspace->GetBlob(caffe2::string(name)));
+  return StdStringToPyBytes(blob.Serialize(caffe2::string(name)));
+}
+
 PyObject* FetchBlob(PyObject* self, PyObject* args) {
   char* name;
   if (!PyArg_ParseTuple(args, "s", &name)) {
@@ -515,13 +544,14 @@ PyObject* FetchBlob(PyObject* self, PyObject* args) {
     return nullptr;
   }
   if (!gWorkspace->HasBlob(caffe2::string(name))) {
-    PyErr_SetString(PyExc_ValueError, "Requested blob does not exist.");
+    PyErr_SetString(
+        PyExc_KeyError,
+        MakeString("Requested blob does not exist: ", name));
     return nullptr;
   }
   const caffe2::Blob& blob = *(gWorkspace->GetBlob(caffe2::string(name)));
-  std::unique_ptr<BlobFetcherBase> fetcher(
-      CreateFetcher(blob.meta().id()));
-  if (fetcher.get()) {
+  auto fetcher = CreateFetcher(blob.meta().id());
+  if (fetcher) {
     return fetcher->Fetch(blob);
   } else {
     // If there is no fetcher registered, return a metainfo string.
@@ -554,9 +584,8 @@ PyObject* FeedBlob(PyObject* self, PyObject* args) {
   }
   Blob* blob = gWorkspace->CreateBlob(name);
 
-  std::unique_ptr<BlobFeederBase> feeder(
-      CreateFeeder(option.device_type()));
-  if (!feeder.get()) {
+  auto feeder = CreateFeeder(option.device_type());
+  if (!feeder) {
     PyErr_SetString(PyExc_TypeError,
                     "Unknown device type encountered in FeedBlob.");
     return nullptr;
@@ -590,6 +619,7 @@ PyMethodDef* GetCaffe2PythonMethods() {
     {"cc_RunNetOnce", RunNetOnce, METH_VARARGS, ""},
     {"cc_RunPlan", RunPlan, METH_VARARGS, ""},
     _PYNAME(CreateBlob),
+    _PYNAME(SerializeBlob),
     _PYNAME(FetchBlob),
     {"cc_FeedBlob", FeedBlob, METH_VARARGS, ""},
     {nullptr, nullptr, 0, nullptr},  // end of python methods.

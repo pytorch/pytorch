@@ -27,10 +27,10 @@ class CuDNNReluOp final : public Operator<CUDAContext> {
   bool RunOnDevice() override {
     const auto& X = Input(0);
     auto* Y = Output(0);
-    Y->ReshapeLike(X);
+    Y->ResizeLike(X);
     // See if we need to reshape.
     if (X.dims() != cudnn_input_dims_) {
-      CAFFE_VLOG(1) << "Setting descriptors.";
+      VLOG(1) << "Setting descriptors.";
       cudnn_input_dims_ = X.dims();
       int C = (order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(3));
       int H = 1;
@@ -43,7 +43,7 @@ class CuDNNReluOp final : public Operator<CUDAContext> {
           data_desc_, GetCudnnTensorFormat(order_),
           cudnnTypeWrapper<T>::type, X.dim32(0), C, H, W));
     }
-    CUDNN_CHECK(cudnnActivationForward(cudnn_wrapper_.cudnn_handle(),
+    CUDNN_CHECK(cudnnActivationForward(cudnn_wrapper_.inline_cudnn_handle(),
         activ_desc_, cudnnTypeWrapper<T>::kOne(), data_desc_,
         X.template data<T>(), cudnnTypeWrapper<T>::kZero(),
         data_desc_, Y->template mutable_data<T>()));
@@ -56,9 +56,6 @@ class CuDNNReluOp final : public Operator<CUDAContext> {
   cudnnActivationDescriptor_t activ_desc_;
   vector<TIndex> cudnn_input_dims_;
   StorageOrder order_;
-  INPUT_OUTPUT_STATS(1, 1, 1, 1);
-  IN_PLACE_ALLOWED({0, 0});
-  DISABLE_COPY_AND_ASSIGN(CuDNNReluOp);
 };
 
 
@@ -91,10 +88,10 @@ class CuDNNReluGradientOp final : public Operator<CUDAContext> {
     const auto& Y = Input(0);
     const auto& dY = Input(1);
     auto* dX = Output(0);
-    dX->ReshapeLike(Y);
+    dX->ResizeLike(Y);
     // See if we need to reshape.
     if (Y.dims() != cudnn_input_dims_) {
-      CAFFE_VLOG(1) << "Setting descriptors.";
+      VLOG(1) << "Setting descriptors.";
       cudnn_input_dims_ = Y.dims();
       int C = (order_ == StorageOrder::NCHW ? Y.dim32(1) : Y.dim32(3));
       int H = 1;
@@ -109,7 +106,7 @@ class CuDNNReluGradientOp final : public Operator<CUDAContext> {
     }
     const typename cudnnTypeWrapper<T>::ScalingParamType kOne = 1;
     const typename cudnnTypeWrapper<T>::ScalingParamType kZero = 0;
-    CUDNN_CHECK(cudnnActivationBackward(cudnn_wrapper_.cudnn_handle(),
+    CUDNN_CHECK(cudnnActivationBackward(cudnn_wrapper_.inline_cudnn_handle(),
         activ_desc_, &kOne, data_desc_, Y.template data<T>(),
         data_desc_, dY.template data<T>(), data_desc_, Y.template data<T>(),
         &kZero, data_desc_, dX->template mutable_data<T>()));
@@ -123,9 +120,6 @@ class CuDNNReluGradientOp final : public Operator<CUDAContext> {
   vector<TIndex> cudnn_input_dims_;
   StorageOrder order_;
   // Input: Y, dY; Output: dX
-  INPUT_OUTPUT_STATS(2, 2, 1, 1);
-  IN_PLACE_ALLOWED({1, 0});
-  DISABLE_COPY_AND_ASSIGN(CuDNNReluGradientOp);
 };
 
 namespace {

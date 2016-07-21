@@ -10,37 +10,45 @@ CAFFE2_DEFINE_string(
 
 namespace caffe2 {
 
-const char kBcastNet[] =
-"  name: \"bcast\""
-"  op {"
-"    output: \"X\""
-"    type: \"ConstantFill\""
-"    arg {"
-"      name: \"shape\""
-"      ints: 10"
-"    }"
-"    arg {"
-"      name: \"value\""
-"      f: 0.0"
-"    }"
-"  }"
-"  op {"
-"    input: \"X\""
-"    output: \"X\""
-"    type: \"MPIBroadcast\""
-"    arg {"
-"      name: \"root\""
-"      i: 0"
-"    }"
-"  }";
+const char kBcastNet[] = R"NET(
+  name: "bcast"
+  op {
+    output: "comm"
+    type: "CreateCommonWorld"
+    engine: "MPI"
+  }
+  op {
+    output: "X"
+    type: "ConstantFill"
+    arg {
+      name: "shape"
+      ints: 10
+    }
+    arg {
+      name: "value"
+      f: 0.0
+    }
+  }
+  op {
+    input: "comm"
+    input: "X"
+    output: "X"
+    type: "Broadcast"
+    engine: "MPI"
+    arg {
+      name: "root"
+      i: 0
+    }
+  }
+)NET";
 
 TEST(MPITest, TestMPIBroadcast) {
   NetDef net_def;
-  CAFFE_CHECK(google::protobuf::TextFormat::ParseFromString(
+  CHECK(google::protobuf::TextFormat::ParseFromString(
       string(kBcastNet), &net_def));
   // Let's set the network's constant fill value to be the mpi rank.
-  auto* arg = net_def.mutable_op(0)->mutable_arg(1);
-  CAFFE_CHECK_EQ(arg->name(), "value");
+  auto* arg = net_def.mutable_op(1)->mutable_arg(1);
+  CHECK_EQ(arg->name(), "value");
   int rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   arg->set_f(rank);
@@ -48,7 +56,7 @@ TEST(MPITest, TestMPIBroadcast) {
   MPI_Comm_size(MPI_COMM_WORLD, &size);
 
   for (int root = 0; root < size; ++root) {
-    net_def.mutable_op(1)->mutable_arg(0)->set_i(root);
+    net_def.mutable_op(2)->mutable_arg(0)->set_i(root);
     Workspace ws;
     unique_ptr<NetBase> net(CreateNet(net_def, &ws));
     EXPECT_NE(nullptr, net.get());
@@ -63,37 +71,45 @@ TEST(MPITest, TestMPIBroadcast) {
   }
 }
 
-const char kReduceNet[] =
-"  name: \"reduce\""
-"  op {"
-"    output: \"X\""
-"    type: \"ConstantFill\""
-"    arg {"
-"      name: \"shape\""
-"      ints: 10"
-"    }"
-"    arg {"
-"      name: \"value\""
-"      f: 0.0"
-"    }"
-"  }"
-"  op {"
-"    input: \"X\""
-"    output: \"X_reduced\""
-"    type: \"MPIReduce\""
-"    arg {"
-"      name: \"root\""
-"      i: 0"
-"    }"
-"  }";
+const char kReduceNet[] = R"NET(
+  name: "reduce"
+  op {
+    output: "comm"
+    type: "CreateCommonWorld"
+    engine: "MPI"
+  }
+  op {
+    output: "X"
+    type: "ConstantFill"
+    arg {
+      name: "shape"
+      ints: 10
+    }
+    arg {
+      name: "value"
+      f: 0.0
+    }
+  }
+  op {
+    input: "comm"
+    input: "X"
+    output: "X_reduced"
+    type: "Reduce"
+    engine: "MPI"
+    arg {
+      name: "root"
+      i: 0
+    }
+  }
+)NET";
 
 TEST(MPITest, TestMPIReduce) {
   NetDef net_def;
-  CAFFE_CHECK(google::protobuf::TextFormat::ParseFromString(
+  CHECK(google::protobuf::TextFormat::ParseFromString(
       string(kReduceNet), &net_def));
   // Let's set the network's constant fill value to be the mpi rank.
-  auto* arg = net_def.mutable_op(0)->mutable_arg(1);
-  CAFFE_CHECK_EQ(arg->name(), "value");
+  auto* arg = net_def.mutable_op(1)->mutable_arg(1);
+  CHECK_EQ(arg->name(), "value");
   int rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   arg->set_f(rank);
@@ -101,7 +117,7 @@ TEST(MPITest, TestMPIReduce) {
   MPI_Comm_size(MPI_COMM_WORLD, &size);
 
   for (int root = 0; root < size; ++root) {
-    net_def.mutable_op(1)->mutable_arg(0)->set_i(root);
+    net_def.mutable_op(2)->mutable_arg(0)->set_i(root);
     Workspace ws;
     unique_ptr<NetBase> net(CreateNet(net_def, &ws));
     EXPECT_NE(nullptr, net.get());
@@ -123,34 +139,42 @@ TEST(MPITest, TestMPIReduce) {
   }
 }
 
-const char kMPIAllgatherNet[] =
-"  name: \"allgather\""
-"  op {"
-"    output: \"X\""
-"    type: \"ConstantFill\""
-"    arg {"
-"      name: \"shape\""
-"      ints: 2"
-"      ints: 10"
-"    }"
-"    arg {"
-"      name: \"value\""
-"      f: 0.0"
-"    }"
-"  }"
-"  op {"
-"    input: \"X\""
-"    output: \"X_gathered\""
-"    type: \"MPIAllgather\""
-"  }";
+const char kMPIAllgatherNet[] = R"NET(
+  name: "allgather"
+  op {
+    output: "comm"
+    type: "CreateCommonWorld"
+    engine: "MPI"
+  }
+  op {
+    output: "X"
+    type: "ConstantFill"
+    arg {
+      name: "shape"
+      ints: 2
+      ints: 10
+    }
+    arg {
+      name: "value"
+      f: 0.0
+    }
+  }
+  op {
+    input: "comm"
+    input: "X"
+    output: "X_gathered"
+    engine: "MPI"
+    type: "Allgather"
+  }
+)NET";
 
 TEST(MPITest, TestMPIAllgather) {
   NetDef net_def;
-  CAFFE_CHECK(google::protobuf::TextFormat::ParseFromString(
+  CHECK(google::protobuf::TextFormat::ParseFromString(
       string(kMPIAllgatherNet), &net_def));
   // Let's set the network's constant fill value to be the mpi rank.
-  auto* arg = net_def.mutable_op(0)->mutable_arg(1);
-  CAFFE_CHECK_EQ(arg->name(), "value");
+  auto* arg = net_def.mutable_op(1)->mutable_arg(1);
+  CHECK_EQ(arg->name(), "value");
   int rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   arg->set_f(rank);
@@ -177,33 +201,41 @@ TEST(MPITest, TestMPIAllgather) {
   }
 }
 
-const char kMPIAllreduceNet[] =
-"  name: \"allreduce\""
-"  op {"
-"    output: \"X\""
-"    type: \"ConstantFill\""
-"    arg {"
-"      name: \"shape\""
-"      ints: 10"
-"    }"
-"    arg {"
-"      name: \"value\""
-"      f: 0.0"
-"    }"
-"  }"
-"  op {"
-"    input: \"X\""
-"    output: \"X_reduced\""
-"    type: \"MPIAllreduce\""
-"  }";
+const char kMPIAllreduceNet[] = R"NET(
+  name: "allreduce"
+  op {
+    output: "comm"
+    type: "CreateCommonWorld"
+    engine: "MPI"
+  }
+  op {
+    output: "X"
+    type: "ConstantFill"
+    arg {
+      name: "shape"
+      ints: 10
+    }
+    arg {
+      name: "value"
+      f: 0.0
+    }
+  }
+  op {
+    input: "comm"
+    input: "X"
+    output: "X_reduced"
+    type: "Allreduce"
+    engine: "MPI"
+  }
+)NET";
 
 TEST(MPITest, TestMPIAllreduce) {
   NetDef net_def;
-  CAFFE_CHECK(google::protobuf::TextFormat::ParseFromString(
+  CHECK(google::protobuf::TextFormat::ParseFromString(
       string(kMPIAllreduceNet), &net_def));
   // Let's set the network's constant fill value to be the mpi rank.
-  auto* arg = net_def.mutable_op(0)->mutable_arg(1);
-  CAFFE_CHECK_EQ(arg->name(), "value");
+  auto* arg = net_def.mutable_op(1)->mutable_arg(1);
+  CHECK_EQ(arg->name(), "value");
   int rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   arg->set_f(rank);
@@ -229,33 +261,41 @@ TEST(MPITest, TestMPIAllreduce) {
   }
 }
 
-const char kInPlaceMPIAllreduceNet[] =
-"  name: \"allreduce\""
-"  op {"
-"    output: \"X\""
-"    type: \"ConstantFill\""
-"    arg {"
-"      name: \"shape\""
-"      ints: 10"
-"    }"
-"    arg {"
-"      name: \"value\""
-"      f: 0.0"
-"    }"
-"  }"
-"  op {"
-"    input: \"X\""
-"    output: \"X\""
-"    type: \"MPIAllreduce\""
-"  }";
+const char kInPlaceMPIAllreduceNet[] = R"NET(
+  name: "allreduce"
+  op {
+    output: "comm"
+    type: "CreateCommonWorld"
+    engine: "MPI"
+  }
+  op {
+    output: "X"
+    type: "ConstantFill"
+    arg {
+      name: "shape"
+      ints: 10
+    }
+    arg {
+      name: "value"
+      f: 0.0
+    }
+  }
+  op {
+    input: "comm"
+    input: "X"
+    output: "X"
+    type: "Allreduce"
+    engine: "MPI"
+  }
+)NET";
 
 TEST(MPITest, TestInPlaceMPIAllreduce) {
   NetDef net_def;
-  CAFFE_CHECK(google::protobuf::TextFormat::ParseFromString(
+  CHECK(google::protobuf::TextFormat::ParseFromString(
       string(kInPlaceMPIAllreduceNet), &net_def));
   // Let's set the network's constant fill value to be the mpi rank.
-  auto* arg = net_def.mutable_op(0)->mutable_arg(1);
-  CAFFE_CHECK_EQ(arg->name(), "value");
+  auto* arg = net_def.mutable_op(1)->mutable_arg(1);
+  CHECK_EQ(arg->name(), "value");
   int rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   arg->set_f(rank);

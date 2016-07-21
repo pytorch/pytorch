@@ -8,7 +8,22 @@
 
 namespace caffe2 {
 
-// MPIBroadcastOp does MPIBroadcast using MPI.
+// TODO(jiayq): if needed, write up the use of color and key with MPI split.
+// Currently, the operator simply creates a communicator that has the
+// same topology as the Caffe2 global communicator.
+template <class Context>
+class MPICreateCommonWorldOp final : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  MPICreateCommonWorldOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws) {}
+
+  bool RunOnDevice() override {
+    OperatorBase::Outputs()[0]->Reset(new MPICommonWorldWrapper());
+    return true;
+  }
+};
+
 template <class Context>
 class MPIBroadcastOp final : public Operator<Context> {
  public:
@@ -19,19 +34,21 @@ class MPIBroadcastOp final : public Operator<Context> {
   ~MPIBroadcastOp() {}
 
   bool RunOnDevice() override {
+    MPI_Comm comm = OperatorBase::Input<MPICommonWorldWrapper>(0).comm();
     auto* output = Output(0);
     // Make sure that output is already allocated.
-    CAFFE_CHECK_GT(output->size(), 0);
+    CHECK_GT(output->size(), 0);
     MPI_CHECK(MPI_Bcast(
         output->raw_mutable_data(),
-        output->nbytes(), MPIDataTypeWrapper<char>::type(),
-        root_, MPIComm()));
+        output->nbytes(),
+        MPIDataTypeWrapper<char>::type(),
+        root_,
+        comm));
     return true;
   }
 
  protected:
   int root_;
-  DISABLE_COPY_AND_ASSIGN(MPIBroadcastOp);
 };
 
 // MPIReduceOp does Reduce using MPI. Currently, only SUM is supported.
@@ -45,20 +62,23 @@ class MPIReduceOp final : public Operator<Context> {
   ~MPIReduceOp() {}
 
   bool RunOnDevice() override {
-    auto& input = Input(0);
+    MPI_Comm comm = OperatorBase::Input<MPICommonWorldWrapper>(0).comm();
+    auto& input = Input(1);
     auto* output = Output(0);
-    output->ReshapeLike(input);
+    output->ResizeLike(input);
     MPI_CHECK(MPI_Reduce(
         const_cast<T*>(input.template data<T>()),
         output->template mutable_data<T>(),
-        input.size(), MPIDataTypeWrapper<T>::type(),
-        MPI_SUM, root_, MPIComm()));
+        input.size(),
+        MPIDataTypeWrapper<T>::type(),
+        MPI_SUM,
+        root_,
+        comm));
     return true;
   }
 
  protected:
   int root_;
-  DISABLE_COPY_AND_ASSIGN(MPIReduceOp);
 };
 
 // MPIAllgatherOp does MPIAllgather using MPI.
@@ -69,25 +89,23 @@ class MPIAllgatherOp final : public Operator<Context> {
   USE_SIMPLE_CTOR_DTOR(MPIAllgatherOp);
 
   bool RunOnDevice() override {
-    auto& input = Input(0);
+    MPI_Comm comm = OperatorBase::Input<MPICommonWorldWrapper>(0).comm();
+    auto& input = Input(1);
     auto* output = Output(0);
     vector<TIndex> output_dims = input.dims();
-    output_dims[0] *= MPISize();
-    output->Reshape(output_dims);
+    output_dims[0] *= OperatorBase::Input<MPICommonWorldWrapper>(0).size();
+    output->Resize(output_dims);
     MPI_CHECK(MPI_Allgather(
-        const_cast<T*>(input.template data<T>()), input.size(),
+        const_cast<T*>(input.template data<T>()),
+        input.size(),
         MPIDataTypeWrapper<T>::type(),
-        output->template mutable_data<T>(), input.size(),
-        MPIDataTypeWrapper<T>::type(), MPIComm()));
+        output->template mutable_data<T>(),
+        input.size(),
+        MPIDataTypeWrapper<T>::type(),
+        comm));
     return true;
   }
-
- protected:
-  DISABLE_COPY_AND_ASSIGN(MPIAllgatherOp);
 };
-
-
-
 
 // MPIAllreduceOp does MPIAllreduce using MPI. Currently, only SUM is supported.
 template <typename T, class Context>
@@ -97,27 +115,29 @@ class MPIAllreduceOp final : public Operator<Context> {
   USE_SIMPLE_CTOR_DTOR(MPIAllreduceOp);
 
   bool RunOnDevice() override {
-    auto& input = Input(0);
+    MPI_Comm comm = OperatorBase::Input<MPICommonWorldWrapper>(0).comm();
+    auto& input = Input(1);
     auto* output = Output(0);
-    output->ReshapeLike(input);
+    output->ResizeLike(input);
+    void* source;
     if (output->template mutable_data<T>() == input.template data<T>()) {
       // We are doing in-place call. Special case handling.
-      MPI_CHECK(MPI_Allreduce(
-          MPI_IN_PLACE, output->template mutable_data<T>(), input.size(),
-          MPIDataTypeWrapper<T>::type(), MPI_SUM, MPIComm()));
+      source = MPI_IN_PLACE;
     } else {
-      // normal allreduce.
-      MPI_CHECK(MPI_Allreduce(
-          const_cast<T*>(input.template data<T>()),
-          output->template mutable_data<T>(),
-          input.size(), MPIDataTypeWrapper<T>::type(), MPI_SUM,
-          MPIComm()));
+      // Normal allreduce takes the source from the input.
+      source = const_cast<T*>(input.template data<T>());
     }
+    MPI_CHECK(MPI_Allreduce(
+        source,
+        output->template mutable_data<T>(),
+        input.size(),
+        MPIDataTypeWrapper<T>::type(),
+        MPI_SUM,
+        comm));
     return true;
   }
 
  protected:
-  DISABLE_COPY_AND_ASSIGN(MPIAllreduceOp);
 };
 
 }  // namespace caffe2

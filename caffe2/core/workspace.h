@@ -9,11 +9,22 @@
 #include "caffe2/core/blob.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/registry.h"
+#include "caffe2/core/net.h"
 #include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/utils/signal_handler.h"
 
 namespace caffe2 {
 
 class NetBase;
+
+struct StopOnSignal {
+  StopOnSignal(): handler_(SignalHandler::Action::STOP,
+                           SignalHandler::Action::STOP) {}
+  bool operator()(int iter) {
+    return handler_.CheckForSignals() != SignalHandler::Action::STOP;
+  }
+  SignalHandler handler_;
+};
 
 /**
  * Workspace is a class that holds all the related objects created during
@@ -22,17 +33,38 @@ class NetBase;
  */
 class Workspace {
  public:
+  typedef std::function<bool(int)> ShouldContinue;
   typedef CaffeMap<string, unique_ptr<Blob> > BlobMap;
   typedef CaffeMap<string, unique_ptr<NetBase> > NetMap;
   /**
    * Initializes an empty workspace.
    */
-  Workspace() : blob_map_(new BlobMap()), root_folder_(".") {}
+  Workspace() {}
   /**
    * Initializes an empty workspace with the given root folder.
+   *
+   * For any operators that are going to interface with the file system, such
+   * as load operators, they will write things under this root folder given
+   * by the workspace.
    */
   explicit Workspace(const string& root_folder)
-      : blob_map_(new BlobMap()), net_map_(), root_folder_(root_folder) {}
+      : root_folder_(root_folder) {}
+  /**
+   * Initializes a workspace with a shared workspace.
+   *
+   * When we access a Blob, we will first try to access the blob that exists
+   * in the local workspace, and if not, access the blob that exists in the
+   * shared workspace. The caller keeps the ownership of the shared workspace
+   * and is responsible for making sure that its lifetime is longer than the
+   * created workspace.
+   */
+  explicit Workspace(Workspace* const shared)
+      : shared_(shared) {}
+  /**
+   * Initializes a workspace with a root folder and a shared workspace.
+   */
+  Workspace(const string& root_folder, Workspace* shared)
+      : root_folder_(root_folder), shared_(shared) {}
   ~Workspace() {}
 
   /**
@@ -40,13 +72,7 @@ class Workspace {
    * creation of multiple temp variables. For best performance, simply use
    * HasBlob() and GetBlob().
    */
-  vector<string> Blobs() {
-    vector<string> names;
-    for (auto& entry : *blob_map_) {
-      names.push_back(entry.first);
-    }
-    return names;
-  }
+  vector<string> Blobs();
 
   /**
    * Return the root folder of the workspace.
@@ -56,7 +82,7 @@ class Workspace {
    * Checks if a blob with the given name is present in the current workspace.
    */
   inline bool HasBlob(const string& name) const {
-    return blob_map_->count(name);
+    return (blob_map_.count(name) || (shared_ && shared_->HasBlob(name)));
   }
   /**
    * Creates a blob of the given name. The pointer to the blob is returned, but
@@ -114,7 +140,8 @@ class Workspace {
   /**
    * Runs a plan that has multiple nets and execution steps.
    */
-  bool RunPlan(const PlanDef& plan_def);
+  bool RunPlan(const PlanDef& plan_def,
+               ShouldContinue should_continue = StopOnSignal{});
 
   // RunOperatorOnce and RunNetOnce runs an operator or net once. The difference
   // between RunNet and RunNetOnce lies in the fact that RunNet allows you to
@@ -124,18 +151,17 @@ class Workspace {
   bool RunOperatorOnce(const OperatorDef& op_def);
   bool RunNetOnce(const NetDef& net_def);
 
-
  protected:
-  bool ExecuteStepRecursive(const ExecutionStep& execution);
+  bool ExecuteStepRecursive(
+      const ExecutionStep& execution,
+      ShouldContinue externalShouldContinue);
 
  private:
-  // If a workspace is shared with another one, the blob_map_ is going to be
-  // shared, but net_map_ will not be.
-  // TODO(Yangqing): Are we really going to share workspaces? If not, let's
-  // remove this unnecessity.
-  unique_ptr<BlobMap> blob_map_;
+  BlobMap blob_map_;
   NetMap net_map_;
-  string root_folder_;
+  string root_folder_ = ".";
+  Workspace* shared_ = nullptr;
+
   DISABLE_COPY_AND_ASSIGN(Workspace);
 };
 

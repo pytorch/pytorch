@@ -17,6 +17,7 @@ namespace {
 REGISTER_BLOB_SERIALIZER(
     (TypeMeta::Id<TensorCUDA>()),
     TensorSerializer<CUDAContext>);
+REGISTER_BLOB_DESERIALIZER(TensorCUDA, TensorDeserializer<CUDAContext>);
 }
 }  // namespace caffe2
 

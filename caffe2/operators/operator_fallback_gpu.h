@@ -35,7 +35,7 @@ class GPUFallbackOp final : public Operator<CUDAContext> {
   USE_OPERATOR_FUNCTIONS(CUDAContext);
   GPUFallbackOp(const OperatorDef& def, Workspace* ws)
       : Operator<CUDAContext>(def, ws) {
-    CAFFE_CHECK_EQ(def.device_option().device_type(), CUDA);
+    CHECK_EQ(def.device_option().device_type(), CUDA);
     OperatorDef base_def_(def);
     // base_def_ runs on CPU, so we will set its device option to CPU.
     base_def_.clear_device_option();
@@ -43,30 +43,30 @@ class GPUFallbackOp final : public Operator<CUDAContext> {
     // Set up the symbols for the local workspace.
     for (const string& name : def.input()) {
       local_input_blobs_.push_back(local_ws_.CreateBlob(name));
-      CAFFE_CHECK_NOTNULL(local_input_blobs_.back());
+      CHECK_NOTNULL(local_input_blobs_.back());
     }
     base_op_.reset(new CPUOp(base_def_, &local_ws_));
     for (const string& name : def.output()) {
       local_output_blobs_.push_back(local_ws_.GetBlob(name));
-      CAFFE_CHECK_NOTNULL(local_output_blobs_.back());
+      CHECK_NOTNULL(local_output_blobs_.back());
     }
   }
 
   bool RunOnDevice() override {
     for (int i = 0; i < InputSize(); ++i) {
-      local_input_blobs_[i]->GetMutable<TensorCPU>()->CopyFrom(
+      local_input_blobs_[i]->template GetMutable<TensorCPU>()->CopyFrom(
           Input(i), &context_);
     }
     // Sync to make sure copies are done.
     context_.FinishDeviceComputation();
     if (!base_op_->Run()) {
-      CAFFE_LOG_ERROR << "Base op run failed in GPUFallbackOp. Def: "
+      LOG(ERROR) << "Base op run failed in GPUFallbackOp. Def: "
                       << ProtoDebugString(def());
       return false;
     }
     for (int i = 0; i < OutputSize(); ++i) {
       Output(i)->CopyFrom(
-          local_output_blobs_[i]->Get<TensorCPU>(), &context_);
+          local_output_blobs_[i]->template Get<TensorCPU>(), &context_);
     }
     return true;
   }
@@ -76,7 +76,6 @@ class GPUFallbackOp final : public Operator<CUDAContext> {
   vector<Blob*> local_input_blobs_;
   vector<Blob*> local_output_blobs_;
   std::unique_ptr<CPUOp> base_op_;
-  DISABLE_COPY_AND_ASSIGN(GPUFallbackOp);
 };
 
 }  // namespace caffe2

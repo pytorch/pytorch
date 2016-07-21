@@ -57,8 +57,8 @@ class Tensor {
    * Note that the actual data allocation is not going to be carried out until
    * the first time mutable_data() is called.
    */
-  explicit Tensor(const vector<TIndex>& dims) { Reshape(dims); }
-  explicit Tensor(const vector<int>& dims) { Reshape(dims); }
+  explicit Tensor(const vector<TIndex>& dims) { Resize(dims); }
+  explicit Tensor(const vector<int>& dims) { Resize(dims); }
 
   /**
    * @brief Creates a tensor from a source tensor, copying over the content.
@@ -93,8 +93,8 @@ class Tensor {
   template <typename T>
   Tensor(const vector<TIndex>& dims, const vector<T>& values, Context* context)
       : meta_(TypeMeta::Make<T>()) {
-    Reshape(dims);
-    CAFFE_CHECK_EQ(values.size(), size_);
+    Resize(dims);
+    CHECK_EQ(values.size(), size_);
     T* data = mutable_data<T>();
     for (TIndex i = 0; i < size_; ++i) {
       data[i] = values[i];
@@ -107,7 +107,7 @@ class Tensor {
   template <typename T,
             typename = typename std::enable_if<std::is_scalar<T>::value>::type>
   Tensor(const T& value, Context* context) {
-    Reshape(vector<TIndex>{});
+    Resize(vector<TIndex>{});
     T* data = mutable_data<T>();
     for (TIndex i = 0; i < size_; ++i) {
       data[i] = value;
@@ -120,13 +120,18 @@ class Tensor {
    */
   template <class SrcContext, class ContextForCopy>
   void CopyFrom(const Tensor<SrcContext>& src, ContextForCopy* context) {
+    if ((void*)&src == (void*)this) {
+      return;
+    }
     meta_ = src.meta();
-    Reshape(src.dims());
-    if (meta_.copy()) {
-      meta_.copy()(src.raw_data(), raw_mutable_data(), size());
-    } else {
-      context->template Memcpy<SrcContext, Context>(
-          nbytes(), src.raw_data(), raw_mutable_data());
+    Resize(src.dims());
+    if (size() > 0) {
+      if (meta_.copy()) {
+        meta_.copy()(src.raw_data(), raw_mutable_data(), size());
+      } else {
+        context->template CopyBytes<SrcContext, Context>(
+            nbytes(), src.raw_data(), raw_mutable_data());
+      }
     }
   }
 
@@ -146,78 +151,66 @@ class Tensor {
   virtual ~Tensor() {}
 
   /**
-   * @brief Reshapes a tensor.
+   * @brief Resizes a tensor.
    *
-   * Reshape takes in a vector of ints specifying the dimensions of the tensor.
+   * Resize takes in a vector of ints specifying the dimensions of the tensor.
    * You can pass in an empty vector to specify that it is a scalar (i.e.
    * containing one single item).
    *
-   * The underlying storage may be deleted after calling Reshape: if the new
+   * The underlying storage may be deleted after calling Resize: if the new
    * shape leads to a different number of items in the tensor, the old memory
    * is deleted and new memory will be allocated next time you call
    * mutable_data(). However, if the shape is different but the total number of
    * items is the same, the underlying storage is kept.
    */
-  void Reshape(const vector<TIndex>& dims) {
-    dims_ = dims;
-    // Calculate the size.
-    TIndex new_size = 1;
-    for (auto d : dims_) {
-      CAFFE_CHECK_GT(d, 0);
-      new_size *= d;
-    }
+  template <typename... Ts>
+  void Resize(Ts... dim_source) {
+    bool size_changed = SetDims(dim_source...);
     // If needed, we will free the data. the next mutable_data() call
     // will create the data storage.
-    if (size_ != new_size &&
-        (capacity_ < new_size * meta_.itemsize() ||
-         !FLAGS_caffe2_keep_on_shrink)) {
+    if (size_changed && (capacity_ < size_ * meta_.itemsize() ||
+                         !FLAGS_caffe2_keep_on_shrink)) {
       data_.reset();
       capacity_ = 0;
     }
-    size_ = new_size;
+  }
+
+  /**
+   * Resize the tensor like the source tensor. Note that this is just a
+   * sugar wrapper that essentially calls Resize(src_tensor.dims()).
+   */
+  template <class OtherContext>
+  inline void ResizeLike(const Tensor<OtherContext>& src_tensor) {
+    // Note: need casting for different context types.
+    if (static_cast<void*>(this) != static_cast<const void*>(&src_tensor)) {
+      Resize(src_tensor.dims());
+    }
+  }
+
+  /**
+   * Resizes the tensor without touching underlying storage.
+   * This requires the total size of the tensor to remains constant.
+   */
+  inline void Reshape(const vector<TIndex>& dims) {
+    TIndex new_size = 1;
+    for (auto d : dims) {
+      CHECK_GE(d, 0);
+      new_size *= d;
+    }
+    CAFFE_ENFORCE(
+        new_size == size_,
+        "New size and old size are not equal. You cannot use Reshape, "
+        "but should use Resize."
+        // TODO(jiayq): remove the following warning after pending diffs
+        // stabilize.
+        " The old caffe2 mixes Reshape and Resize but this behavior has "
+        "been changed. If you find this error, most likely you will need "
+        "to change corresponding code from Reshape to Resize.");
+    dims_ = dims;
   }
 
   inline void Reshape(const vector<int>& dims) {
     Reshape(ToVectorTIndex(dims));
-  }
-
-  /**
-   * @brief Reshapes a tensor to 1-dimensional.
-   *
-   * This is a simple wrapper over the vector version by not needing to require
-   * the user to create a vector.
-   */
-  inline void Reshape(const int n) { Reshape(vector<TIndex>(1, n)); }
-
-  // TODO: the following functions are provided so one can avoid using
-  // initializer list, a C++11 feature that does not work well with some NVCC
-  // versions (currently cuda 7.0 on tegra). Revisit if necessary.
-  inline void Reshape(const int d0, const int d1) {
-    vector<TIndex> v(2);
-    v[0] = d0; v[1] = d1;
-    Reshape(v);
-  }
-  inline void Reshape(const int d0, const int d1, const int d2) {
-    vector<TIndex> v(3);
-    v[0] = d0; v[1] = d1; v[2] = d2;
-    Reshape(v);
-  }
-  inline void Reshape(const int d0, const int d1, const int d2, const int d3) {
-    vector<TIndex> v(4);
-    v[0] = d0; v[1] = d1; v[2] = d2; v[3] = d3;
-    Reshape(v);
-  }
-
-  /**
-   * Reshape the tensor like the source tensor. Note that this is just a
-   * sugar wrapper that essentially calls Reshape(src_tensor.dims()).
-   */
-  template <class OtherContext>
-  inline void ReshapeLike(const Tensor<OtherContext>& src_tensor) {
-    // Note: need casting for different context types.
-    if (static_cast<void*>(this) != static_cast<const void*>(&src_tensor)) {
-      Reshape(src_tensor.dims());
-    }
   }
 
   /**
@@ -240,7 +233,7 @@ class Tensor {
    * @brief Shares the data with another tensor.
    *
    * To share data between two tensors, the sizes of the two tensors must be
-   * equal already. The reason we do not implicitly do a Reshape to make the two
+   * equal already. The reason we do not implicitly do a Resize to make the two
    * tensors have the same shape is that, we want to allow tensors of different
    * shapes but the same number of items to still be able to share data. This
    * allows one to e.g. have a n-dimensional Tensor and a flattened version
@@ -250,12 +243,12 @@ class Tensor {
    */
   void ShareData(const Tensor& src) {
     meta_ = src.meta();
-    CAFFE_CHECK_EQ(src.size_, size_)
+    CHECK_EQ(src.size_, size_)
         << "Size mismatch - did you call reshape before sharing the data?";
     // It is possible that the source tensor hasn't called mutable_data() yet,
     // in which case ShareData() doesn't make much sense since we don't really
     // know what to share yet.
-    CAFFE_CHECK(src.data_.get()) << "Source tensor has no content yet.";
+    CHECK(src.data_.get()) << "Source tensor has no content yet.";
     // Finally, do sharing.
     data_ = src.data_;
     capacity_ = src.capacity_;
@@ -272,7 +265,7 @@ class Tensor {
   template <typename T>
   void ShareExternalPointer(T* src, size_t capacity = 0) {
     meta_ = TypeMeta::Make<T>();
-    CAFFE_CHECK(size_ > 0)
+    CHECK(size_ > 0)
         << "To share data with a raw pointer, you need to set shape first.";
     data_.reset(src, [](void*)->void {});
     // Sets capacity. If not specified, we will implicitly assume that
@@ -289,7 +282,7 @@ class Tensor {
    * or raw_mutable_data() must have been called prior to this function call.
    */
   inline const void* raw_data() const {
-    CAFFE_CHECK_NOTNULL(data_.get());
+    CHECK(data_.get() || size_ == 0);
     return data_.get();
   }
 
@@ -301,9 +294,12 @@ class Tensor {
    */
   template <typename T>
   inline const T* data() const {
-    CAFFE_CHECK_NOTNULL(data_.get());
-    CAFFE_CHECK(IsType<T>()) << "Expected " << TypeMeta::Name<T>() << " have "
-                             << meta_.name();
+    CHECK(data_.get() || size_ == 0)
+        << "The tensor is uninitialized. You probably need to call "
+        << "Resize() and mutable_data() first.";
+    CHECK(IsType<T>())
+        << "Tensor type mistmatch, caller expects elements to be "
+        << TypeMeta::Name<T>() << " while tensor contains " << meta_.name();
     return static_cast<T*>(data_.get());
   }
 
@@ -319,11 +315,17 @@ class Tensor {
    * and a new storage will be created.
    */
   inline void* raw_mutable_data(const TypeMeta& meta) {
-    if (meta_ == meta && data_.get()) {
+    // For 0-size tensors it's fine to return any pointer (including nullptr)
+    if (meta_ == meta && (data_.get() || size_ == 0)) {
       return data_.get();
     } else {
       meta_ = meta;
-      CAFFE_CHECK_GT(size_, 0);
+      CHECK_GE(size_, 0)
+          << "Tensor is not initialized. You probably need to call Resize() "
+          << "before calling mutable_data()";
+      if (size_ == 0) {
+        return data_.get();
+      }
       if (meta.ctor()) {
         // For types that need placement new, we will call it, as well as
         // making sure that when the data is freed, it calls the right
@@ -357,7 +359,7 @@ class Tensor {
    * and a new storage will be created.
    */
   inline void* raw_mutable_data() {
-    CAFFE_CHECK_NE(meta_.id(), 0)
+    CHECK_NE(meta_.id(), 0)
         << "Calling raw_mutable_data() without meta, but the current meta is "
            "of unknown type.";
     return raw_mutable_data(meta_);
@@ -371,7 +373,7 @@ class Tensor {
    */
   template <typename T>
   inline T* mutable_data() {
-    if (data_.get() && IsType<T>()) {
+    if ((size_ == 0 || data_.get()) && IsType<T>()) {
       return static_cast<T*>(data_.get());
     }
     return static_cast<T*>(raw_mutable_data(TypeMeta::Make<T>()));
@@ -410,6 +412,36 @@ class Tensor {
     }
     return r;
   }
+
+  // Product of all dims up to
+  inline TIndex size_to_dim(int k) const {
+    CHECK(k < dims_.size());
+    TIndex r = 1;
+    for (int i = 0; i < k; ++i) {
+      r *= dims_[i];
+    }
+    return r;
+  }
+
+  /**
+  * Returns the 'canonical' version of a (usually)  user-specified axis,
+  * allowing for negative indexing (e.g., -1 for the last axis).
+  *
+  * @param axis_index the axis index.
+  *        If 0 <= index < ndim(), return index.
+  *        If -ndim <= index <= -1, return (ndim() - (-index)),
+  *        e.g., the last axis index (ndim() - 1) if index == -1,
+  *        the second to last if index == -2, etc.
+  *        Dies on out of range index.
+  */
+  inline int canonical_axis_index(int axis_index) const {
+    CHECK_GE(axis_index, -ndim());
+    CHECK_LT(axis_index, ndim());
+    if (axis_index < 0) {
+      return axis_index + ndim();
+    }
+    return axis_index;
+  }
   /**
    * Checks if the tensor content is of the given data type.
    */
@@ -428,9 +460,9 @@ class Tensor {
    * call dim() instead.
    */
   inline int dim32(const int i) const {
-    CAFFE_DCHECK_LT(i, dims_.size()) << "Exceeding ndim limit " << dims_.size();
-    CAFFE_DCHECK_GE(i, 0) << "Cannot have negative index";
-    CAFFE_CHECK_LT(dims_[i], std::numeric_limits<int>::max());
+    DCHECK_LT(i, dims_.size()) << "Exceeding ndim limit " << dims_.size();
+    DCHECK_GE(i, 0) << "Cannot have negative index";
+    CHECK_LT(dims_[i], std::numeric_limits<int>::max());
     return static_cast<int>(dims_[i]);
   }
 
@@ -440,17 +472,83 @@ class Tensor {
    * this function will produce a fatal message.
    */
   inline TIndex dim(const int i) const {
-    CAFFE_DCHECK_LT(i, dims_.size()) << "Exceeding ndim limit " << dims_.size();
-    CAFFE_DCHECK_GE(i, 0) << "Cannot have negative index";
+    DCHECK_LT(i, dims_.size()) << "Exceeding ndim limit " << dims_.size();
+    DCHECK_GE(i, 0) << "Cannot have negative index";
     return dims_[i];
   }
 
  protected:
   vector<TIndex> dims_;
-  TIndex size_ = 0;
+  TIndex size_ = -1;
   TypeMeta meta_;
   std::shared_ptr<void> data_;
   size_t capacity_ = 0;
+  // In case of chunk load we store how much data was already loaded
+
+ private:
+  bool SetDims(const vector<TIndex>& src) {
+    auto old_size = size_;
+    dims_.resize(src.size());
+    size_ = 1;
+    for (int i = 0; i < src.size(); ++i) {
+      size_ *= src[i];
+      dims_[i] = src[i];
+    }
+    return size_ != old_size;
+  }
+
+  bool SetDims(const vector<int>& src) {
+    auto old_size = size_;
+    dims_.resize(src.size());
+    size_ = 1;
+    for (int i = 0; i < src.size(); ++i) {
+      size_ *= src[i];
+      dims_[i] = src[i];
+    }
+    return size_ != old_size;
+  }
+
+  // TODO(jiayq): maybe rewrite the following functions with initializer list.
+  // NVCC does not play well with initializer lists last time, but worth
+  // another shot.
+  bool SetDims(const TIndex d0) {
+    auto old_size = size_;
+    dims_.resize(1);
+    dims_[0] = d0;
+    size_ = d0;
+    return size_ != old_size;
+  }
+
+  bool SetDims(const TIndex d0, const TIndex d1) {
+    auto old_size = size_;
+    dims_.resize(2);
+    dims_[0] = d0;
+    dims_[1] = d1;
+    size_ = d0 * d1;
+    return size_ != old_size;
+  }
+
+  bool SetDims(const TIndex d0, const TIndex d1, const TIndex d2) {
+    auto old_size = size_;
+    dims_.resize(3);
+    dims_[0] = d0;
+    dims_[1] = d1;
+    dims_[2] = d2;
+    size_ = d0 * d1 * d2;
+    return size_ != old_size;
+  }
+
+  bool
+  SetDims(const TIndex d0, const TIndex d1, const TIndex d2, const TIndex d3) {
+    auto old_size = size_;
+    dims_.resize(4);
+    dims_[0] = d0;
+    dims_[1] = d1;
+    dims_[2] = d2;
+    dims_[3] = d3;
+    size_ = d0 * d1 * d2 * d3;
+    return size_ != old_size;
+  }
 
   // Note(jiayq): possibly a rule-of-three violation, but we explicitly
   // discourage the use of = for Tensors.

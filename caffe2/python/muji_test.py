@@ -1,16 +1,11 @@
 import numpy as np
 import unittest
 
-from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace, muji, test_util
 
 
+@unittest.skipIf(not workspace.has_gpu_support, "no gpu")
 class TestMuji(test_util.TestCase):
-    """Test class for Muji."""
-    def setUp(self):
-        # MPI will need a GlobalInit so that peer access gets enabled.
-        workspace.GlobalInit(["caffe2"])
-
     def RunningAllreduceWithGPUs(self, gpu_ids, allreduce_function):
         """A base function to test different scenarios."""
         net = core.Net("mujitest")
@@ -43,11 +38,11 @@ class TestMuji(test_util.TestCase):
 
     def testAllreduceFallback(self):
         self.RunningAllreduceWithGPUs(
-            range(workspace.NumberOfGPUs()), muji.AllreduceFallback
+            range(workspace.NumCudaDevices()), muji.AllreduceFallback
         )
 
     def testAllreduceSingleGPU(self):
-        for i in range(workspace.NumberOfGPUs()):
+        for i in range(workspace.NumCudaDevices()):
             self.RunningAllreduceWithGPUs([i], muji.Allreduce)
 
     def testAllreduceWithTwoGPUs(self):

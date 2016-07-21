@@ -109,13 +109,13 @@ bool PoolGradientOp<float, CPUContext, AveragePool>::RunOnDeviceWithOrderNCHW() 
   auto& dY = Input(2);
   auto* dX = Output(0);
   // TODO(Yangqing): Add shape checks.
-  dX->ReshapeLike(X);
+  dX->ResizeLike(X);
   math::Set<float, CPUContext>(
       X.size(), 0, dX->mutable_data<float>(), &context_);
   const float* dYdata = dY.data<float>();
   float* dXdata = dX->mutable_data<float>();
   int channels = X.dim32(1);
-  CAFFE_CHECK_EQ(channels, dY.dim32(1));
+  CHECK_EQ(channels, dY.dim32(1));
   int height = X.dim32(2);
   int width = X.dim32(3);
   ConvPoolOpBase<CPUContext>::ComputePads(height, width);
@@ -154,10 +154,10 @@ bool PoolGradientOp<float, CPUContext, AveragePool>::RunOnDeviceWithOrderNHWC() 
   auto& X = Input(0);
   // Note that Input(1) is not needed in average pooling.
   auto& dY = Input(2);
-  CAFFE_CHECK_EQ(dY.ndim(), 4);
+  CHECK_EQ(dY.ndim(), 4);
   auto* dX = Output(0);
   // TODO(Yangqing): Add shape checks.
-  dX->ReshapeLike(X);
+  dX->ResizeLike(X);
   math::Set<float, CPUContext>(
       X.size(), 0, dX->mutable_data<float>(), &context_);
   const float* dYdata = dY.data<float>();
@@ -169,7 +169,7 @@ bool PoolGradientOp<float, CPUContext, AveragePool>::RunOnDeviceWithOrderNHWC() 
   int pooled_height = dY.dim32(1);
   int pooled_width = dY.dim32(2);
   int channels = X.dim32(3);
-  CAFFE_CHECK_EQ(channels, dY.dim32(3));
+  CHECK_EQ(channels, dY.dim32(3));
   for (int n = 0; n < X.dim32(0); ++n) {
     for (int ph = 0; ph < pooled_height; ++ph) {
       for (int pw = 0; pw < pooled_width; ++pw) {
@@ -291,7 +291,7 @@ bool PoolGradientOp<float, CPUContext, MaxPool>::RunOnDeviceWithOrderNCHW() {
   auto& dY = Input(2);
   auto* dX = Output(0);
   // TODO(Yangqing): Add shape checks.
-  dX->ReshapeLike(X);
+  dX->ResizeLike(X);
   math::Set<float, CPUContext>(
       X.size(), 0, dX->mutable_data<float>(), &context_);
   const float* Xdata = X.data<float>();
@@ -299,7 +299,7 @@ bool PoolGradientOp<float, CPUContext, MaxPool>::RunOnDeviceWithOrderNCHW() {
   const float* dYdata = dY.data<float>();
   float* dXdata = dX->mutable_data<float>();
   int channels = X.dim32(1);
-  CAFFE_CHECK_EQ(channels, dY.dim32(1));
+  CHECK_EQ(channels, dY.dim32(1));
   int height = X.dim32(2);
   int width = X.dim32(3);
   ConvPoolOpBase<CPUContext>::ComputePads(height, width);
@@ -343,12 +343,12 @@ bool PoolGradientOp<float, CPUContext, MaxPool>::RunOnDeviceWithOrderNHWC() {
   auto& X = Input(0);
   auto& Y = Input(1);
   auto& dY = Input(2);
-  CAFFE_DCHECK_EQ(dY.ndim(), 4);
+  DCHECK_EQ(dY.ndim(), 4);
   auto* dX = Output(0);
-  dX->ReshapeLike(X);
+  dX->ResizeLike(X);
 
   int channels = X.dim32(3);
-  CAFFE_CHECK_EQ(channels, dY.dim32(3));
+  CHECK_EQ(channels, dY.dim32(3));
   ConstEigenArrayMap<float> Ymat(
       Y.data<float>(), channels, Y.size() / channels);
   ConstEigenArrayMap<float> dYmat(
@@ -398,14 +398,52 @@ REGISTER_CPU_OPERATOR(AveragePool, PoolOp<float, CPUContext, AveragePool>);
 REGISTER_CPU_OPERATOR(AveragePoolGradient,
                       PoolGradientOp<float, CPUContext, AveragePool>);
 
-OPERATOR_SCHEMA(AveragePool).NumInputs(1).NumOutputs(1);
+OPERATOR_SCHEMA(AveragePool)
+  .NumInputs(1)
+  .NumOutputs(1)
+  .SetDoc(R"DOC(
+AveragePool consumes an input blob X and applies average pooling across the
+the blob according to kernel sizes, stride sizes, and pad lengths defined by the
+ConvPoolOpBase operator. Average pooling consisting of averaging all values of a
+subset of the input tensor according to the kernel size and downsampling the
+data into the output blob Y for further processing.
+  )DOC")
+  .Input(0, "X", "Input data tensor from the previous operator; dimensions "
+  "depend on whether the NCHW or NHWC operators are being used. For example, "
+  "in the former, the input has size (N x C x H x W), where N is the batch "
+  "size, C is the number of channels, and H and W are the height and the width "
+  "of the data. The corresponding permutation of dimensions is used in the "
+  "latter case. ")
+  .Output(0, "Y", "Output data tensor from average pooling across the input "
+  "tensor. Dimensions will vary based on various kernel, stride, and pad "
+  "sizes.");
+
 OPERATOR_SCHEMA(AveragePoolGradient).NumInputs(3).NumOutputs(1);
 
 REGISTER_CPU_OPERATOR(MaxPool, PoolOp<float, CPUContext, MaxPool>);
 REGISTER_CPU_OPERATOR(MaxPoolGradient,
                       PoolGradientOp<float, CPUContext, MaxPool>);
 
-OPERATOR_SCHEMA(MaxPool).NumInputs(1).NumOutputs(1);
+OPERATOR_SCHEMA(MaxPool)
+  .NumInputs(1)
+  .NumOutputs(1)
+  .SetDoc(R"DOC(
+MaxPool consumes an input blob X and applies max pooling across the
+the blob according to kernel sizes, stride sizes, and pad lengths defined by the
+ConvPoolOpBase operator. Max pooling consisting of taking the maximumvalue of a
+subset of the input tensor according to the kernel size and downsampling the
+data into the output blob Y for further processing.
+  )DOC")
+  .Input(0, "X", "Input data tensor from the previous operator; dimensions "
+  "depend on whether the NCHW or NHWC operators are being used. For example, "
+  "in the former, the input has size (N x C x H x W), where N is the batch "
+  "size, C is the number of channels, and H and W are the height and the width "
+  "of the data. The corresponding permutation of dimensions is used in the "
+  "latter case. ")
+  .Output(0, "Y", "Output data tensor from max pooling across the input "
+  "tensor. Dimensions will vary based on various kernel, stride, and pad "
+  "sizes.");
+
 OPERATOR_SCHEMA(MaxPoolGradient).NumInputs(3).NumOutputs(1);
 
 class GetPoolGradient : public GradientMakerBase {
@@ -422,4 +460,3 @@ REGISTER_GRADIENT(MaxPool, GetPoolGradient);
 
 }  // namespace
 }  // namespace caffe2
-

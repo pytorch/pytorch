@@ -159,6 +159,19 @@ bool Caffe2FlagParser::Parse<int>(const string& content, int* value) {
 }
 
 template <>
+bool Caffe2FlagParser::Parse<int64_t>(const string& content, int64_t* value) {
+  try {
+    static_assert(sizeof(long long) == sizeof(int64_t), "");
+    *value = std::atoll(content.c_str());
+    return true;
+  } catch (...) {
+    GlobalInitStream() << "Caffe2 flag error: Cannot convert argument to int: "
+                       << content << std::endl;
+    return false;
+  }
+}
+
+template <>
 bool Caffe2FlagParser::Parse<double>(const string& content, double* value) {
   try {
     *value = std::atof(content.c_str());

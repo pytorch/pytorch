@@ -96,10 +96,10 @@ template <>
 bool SoftmaxOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
   auto* Y = Output(0);
-  CAFFE_DCHECK_EQ(X.ndim(), 2);
+  DCHECK_EQ(X.ndim(), 2);
   int N = X.dim32(0);
   int D = X.dim32(1);
-  Y->ReshapeLike(X);
+  Y->ResizeLike(X);
   softmax_kernel<<<N, SOFTMAX_NUM_THREADS, 0, context_.cuda_stream()>>>(
       D, X.data<float>(), Y->mutable_data<float>());
   return true;
@@ -111,12 +111,12 @@ bool SoftmaxGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& Y = Input(0);
   auto& dY = Input(1);
   auto* dX = Output(0);
-  CAFFE_DCHECK_EQ(Y.ndim(), 2);
+  DCHECK_EQ(Y.ndim(), 2);
   int N = Y.dim32(0);
   int D = Y.dim32(1);
-  CAFFE_DCHECK_EQ(dY.dim32(0), N);
-  CAFFE_DCHECK_EQ(dY.dim32(1), D);
-  dX->ReshapeLike(Y);
+  DCHECK_EQ(dY.dim32(0), N);
+  DCHECK_EQ(dY.dim32(1), D);
+  dX->ResizeLike(Y);
   softmax_gradient_kernel<<<N, SOFTMAX_NUM_THREADS, 0,
                             context_.cuda_stream()>>>(
       D, Y.data<float>(), dY.data<float>(), dX->mutable_data<float>());

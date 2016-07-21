@@ -5,21 +5,29 @@
 
 namespace caffe2 {
 
-std::vector<nccl::NCCLElement> getNCCLElements(OperatorBase* op) {
+nccl::NCCLExecution getNCCLElements(
+    OperatorBase* op,
+    const CUDAContext& context) {
   // We either do an N-N op, or an N-1 op.
   CHECK(
       op->def().input_size() == op->def().output_size() ||
       op->def().output_size() == 1);
-  std::vector<nccl::NCCLElement> ctxs(op->def().input_size());
+  nccl::NCCLExecution ex;
+  ex.stream_gpu_id = context.cuda_gpu_id();
+  ex.stream = context.cuda_stream();
+  ex.root = op->template GetSingleArgument<int>("root", 0);
+  ex.elements.resize(op->def().input_size());
   for (auto i = 0; i < op->def().input_size(); ++i) {
-    auto& ctx = ctxs[i];
-    ctx.src = &(op->Input<TensorCUDA>(i));
+    auto& el = ex.elements[i];
+    el.src = &(op->Input<TensorCUDA>(i));
     if (i < op->def().output_size()) {
-      ctx.dst = op->Output<TensorCUDA>(i);
+      el.dst = op->Output<TensorCUDA>(i);
     }
-    ctx.device = GetGPUIDForPointer(op->Input<TensorCUDA>(i).raw_data());
+    // TODO - expensive (>1ms) - cache these.
+    el.device = GetGPUIDForPointer(op->Input<TensorCUDA>(i).raw_data());
   }
-  return ctxs;
+
+  return ex;
 }
 
 template <typename T>
@@ -29,12 +37,11 @@ class NCCLAllreduceOp final : public Operator<CUDAContext> {
   NCCLAllreduceOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<CUDAContext>(operator_def, ws) {}
   bool RunOnDevice() override {
-    nccl::NCCL<T>::AllReduce(getNCCLElements(this));
+    nccl::NCCL<T>::AllReduce(getNCCLElements(this, context_));
     return true;
   }
 
  protected:
-  DISABLE_COPY_AND_ASSIGN(NCCLAllreduceOp);
 };
 
 template <typename T>
@@ -43,13 +50,11 @@ class NCCLBroadcastOp final : public Operator<CUDAContext> {
   USE_OPERATOR_FUNCTIONS(CUDAContext);
   using Operator::Operator;
   bool RunOnDevice() override {
-    const auto root = OperatorBase::template GetSingleArgument<int>("root", 0);
-    nccl::NCCL<T>::Broadcast(getNCCLElements(this), root);
+    nccl::NCCL<T>::Broadcast(getNCCLElements(this, context_));
     return true;
   }
 
  protected:
-  DISABLE_COPY_AND_ASSIGN(NCCLBroadcastOp);
 };
 
 template <typename T>
@@ -58,14 +63,14 @@ class NCCLReduceOp final : public Operator<CUDAContext> {
   USE_OPERATOR_FUNCTIONS(CUDAContext);
   using Operator::Operator;
   bool RunOnDevice() override {
-    // We enforce root is zero so ctx.src and ctx.dst are always on
-    // the same device.
-    nccl::NCCL<T>::Reduce(getNCCLElements(this), 0);
+    const auto& ex = getNCCLElements(this, context_);
+    CHECK_EQ(ex.root, 0)
+        << "NCCLReduce has spurious deadlocks for non-zero root";
+    nccl::NCCL<T>::Reduce(ex);
     return true;
   }
 
  protected:
-  DISABLE_COPY_AND_ASSIGN(NCCLReduceOp);
 };
 
 template <typename T>
@@ -74,14 +79,11 @@ class NCCLAllGatherOp final : public Operator<CUDAContext> {
   USE_OPERATOR_FUNCTIONS(CUDAContext);
   using Operator::Operator;
   bool RunOnDevice() override {
-    // We enforce root is zero so ctx.src and ctx.dst are always on
-    // the same device.
-    nccl::NCCL<T>::AllGather(getNCCLElements(this));
+    nccl::NCCL<T>::AllGather(getNCCLElements(this, context_));
     return true;
   }
 
  protected:
-  DISABLE_COPY_AND_ASSIGN(NCCLAllGatherOp);
 };
 
 namespace {

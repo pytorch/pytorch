@@ -20,12 +20,14 @@ bool DropoutOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
   auto* Y = Output(0);
   auto* mask = Output(1);
-  Y->Reshape(X.dims());
-  mask->Reshape(X.dims());
-  CAFFE_DCHECK_GT(X.size(), 0);
+  Y->Resize(X.dims());
+  mask->Resize(X.dims());
+  DCHECK_GT(X.size(), 0);
   if (is_test_) {
-    context_.Copy<float, CUDAContext, CUDAContext>(
-      X.size(), X.data<float>(), Y->mutable_data<float>());
+    if (Y != &X) {
+      context_.Copy<float, CUDAContext, CUDAContext>(
+          X.size(), X.data<float>(), Y->mutable_data<float>());
+    }
     return true;
   } else {
     // We do a simple trick here: since curand cannot generate random
@@ -56,12 +58,14 @@ bool DropoutGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& dY = Input(0);
   auto& mask = Input(1);
   auto* dX = Output(0);
-  CAFFE_DCHECK_GT(dY.size(), 0);
-  CAFFE_DCHECK_EQ(dY.size(), mask.size());
-  dX->Reshape(dY.dims());
+  DCHECK_GT(dY.size(), 0);
+  DCHECK_EQ(dY.size(), mask.size());
+  dX->Resize(dY.dims());
   if (is_test_) {
-    context_.Copy<float, CUDAContext, CUDAContext>(
-      dY.size(), dY.data<float>(), dX->mutable_data<float>());
+    if (dX != &dY) {
+      context_.Copy<float, CUDAContext, CUDAContext>(
+          dY.size(), dY.data<float>(), dX->mutable_data<float>());
+    }
     return true;
   } else {
     const float scale = 1. / (1. - ratio_);

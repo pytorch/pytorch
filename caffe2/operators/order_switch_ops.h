@@ -17,7 +17,6 @@ class NHWC2NCHWOp final : public Operator<Context> {
   bool RunOnDevice() override;
 
  protected:
-  DISABLE_COPY_AND_ASSIGN(NHWC2NCHWOp);
 };
 
 template <typename T, class Context>
@@ -28,7 +27,6 @@ class NCHW2NHWCOp final : public Operator<Context> {
   bool RunOnDevice() override;
 
  protected:
-  DISABLE_COPY_AND_ASSIGN(NCHW2NHWCOp);
 };
 
 }  // namespace caffe2

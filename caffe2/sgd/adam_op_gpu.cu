@@ -15,12 +15,13 @@ __global__ void AdamUpdate(
     float beta1,
     float beta2,
     float eps_hat,
-    float corrected_local_rate) {
+    float correction,
+    const float* lr) {
   CUDA_1D_KERNEL_LOOP(i, N) {
     float gi = g[i];
     float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
     float vi = nv[i] = v[i] * beta2 + gi * gi * (1 - beta2);
-    ng[i] = corrected_local_rate * mi / (sqrt(vi) + eps_hat);
+    ng[i] = lr[0] * correction * mi / (sqrt(vi) + eps_hat);
   }
 }
 
@@ -36,10 +37,11 @@ void adam_update<CUDAContext>(
     float beta1,
     float beta2,
     float eps_hat,
-    float corrected_local_rate,
+    float correction,
+    const float* lr,
     CUDAContext* context) {
   AdamUpdate<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
-      N, g, m, v, ng, nm, nv, beta1, beta2, eps_hat, corrected_local_rate);
+      N, g, m, v, ng, nm, nv, beta1, beta2, eps_hat, correction, lr);
 }
 
 namespace {

@@ -9,7 +9,7 @@ namespace caffe2 {
 
 class Foo {
  public:
-  explicit Foo(int x) { CAFFE_LOG_INFO << "Foo " << x; }
+  explicit Foo(int x) { LOG(INFO) << "Foo " << x; }
 };
 
 CAFFE_DECLARE_REGISTRY(FooRegistry, Foo, int);
@@ -19,14 +19,14 @@ CAFFE_DEFINE_REGISTRY(FooRegistry, Foo, int);
 
 class Bar : public Foo {
  public:
-  explicit Bar(int x) : Foo(x) { CAFFE_LOG_INFO << "Bar " << x; }
+  explicit Bar(int x) : Foo(x) { LOG(INFO) << "Bar " << x; }
 };
 REGISTER_FOO(Bar);
 
 class AnotherBar : public Foo {
  public:
   explicit AnotherBar(int x) : Foo(x) {
-    CAFFE_LOG_INFO << "AnotherBar " << x;
+    LOG(INFO) << "AnotherBar " << x;
   }
 };
 REGISTER_FOO(AnotherBar);

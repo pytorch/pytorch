@@ -1,3 +1,7 @@
+/**
+ * Simple registry implementation in Caffe2 that uses static variables to
+ * register object creators during program initialization time.
+ */
 #ifndef CAFFE2_CORE_REGISTRY_H_
 #define CAFFE2_CORE_REGISTRY_H_
 
@@ -5,29 +9,35 @@
 #include <cstdlib>
 #include <functional>
 #include <iostream>
+#include <memory>
 #include <mutex>
 
 #include "caffe2/core/common.h"
-#include "caffe2/core/typeid.h"
 
 namespace caffe2 {
 
-// Registry is a class that allows one to register classes by a specific
-// key, usually a string specifying the name. For each key type and object type,
-// there should be only one single registry responsible for it.
-
+/**
+ * @brief A template class that allows one to register classes by keys.
+ *
+ * The keys are usually a string specifying the name, but can be anything that
+ * can be used in a std::map.
+ *
+ * You should most likely not use the Registry class explicitly, but use the
+ * helper macros below to declare specific registries as well as registering
+ * objects.
+ */
 template <class SrcType, class ObjectType, class... Args>
 class Registry {
  public:
-  typedef std::function<ObjectType*(Args ...)> Creator;
+  typedef std::function<std::unique_ptr<ObjectType> (Args ...)> Creator;
 
   Registry() : registry_() {}
 
   void Register(const SrcType& key, Creator creator) {
     // The if statement below is essentially the same as the following line:
-    // CAFFE_CHECK_EQ(registry_.count(key), 0) << "Key " << key
+    // CHECK_EQ(registry_.count(key), 0) << "Key " << key
     //                                   << " registered twice.";
-    // However, CAFFE_CHECK_EQ depends on google logging, and since registration is
+    // However, CHECK_EQ depends on google logging, and since registration is
     // carried out at static initialization time, we do not want to have an
     // explicit dependency on glog's initialization function.
     std::lock_guard<std::mutex> lock(register_mutex_);
@@ -35,8 +45,6 @@ class Registry {
       std::cerr << "Key " << key << " already registered." << std::endl;
       std::exit(1);
     }
-    //std::cout << "Registering " << key << " for "
-    //          << typeid(ObjectType).name() << " creator.";
     registry_[key] = creator;
   }
 
@@ -47,14 +55,9 @@ class Registry {
 
   inline bool Has(const SrcType& key) { return (registry_.count(key) != 0); }
 
-  ObjectType* Create(const SrcType& key, Args ... args) {
+  unique_ptr<ObjectType> Create(const SrcType& key, Args ... args) {
     if (registry_.count(key) == 0) {
-      // std::cerr << "Key " << key << " not found." << std::endl;
-      // std::cerr << "Available keys:" << std::endl;
-      // TODO: do we always want to print out the registered names? Sounds a bit
-      // too verbose.
-      //TEST_PrintRegisteredNames();
-      // std::cerr << "Returning null pointer.";
+      // Returns nullptr if the key is not registered.
       return nullptr;
     }
     return registry_[key](args...);
@@ -71,7 +74,9 @@ class Registry {
     return keys;
   }
 
-  const CaffeMap<SrcType, string>& HelpMessage() { return help_message_; }
+  const CaffeMap<SrcType, string>& HelpMessage() const {
+    return help_message_;
+  }
 
  private:
   CaffeMap<SrcType, Creator> registry_;
@@ -92,8 +97,12 @@ class Registerer {
   }
 
   template <class DerivedType>
-  static ObjectType* DefaultCreator(Args ... args) {
-    return new DerivedType(args...);
+  static unique_ptr<ObjectType> DefaultCreator(Args ... args) {
+    // TODO(jiayq): old versions of NVCC does not handle std::make_unique well
+    // so we are forced to use a unique_ptr constructor here. Check if it is
+    // fine to use make_unique in the future.
+    // return std::make_unique<DerivedType>(args...);
+    return std::unique_ptr<ObjectType>(new DerivedType(args...));
   }
 };
 
@@ -110,6 +119,11 @@ class Registerer {
 #define CAFFE_ANONYMOUS_VARIABLE(str) CAFFE_CONCATENATE(str, __LINE__)
 #endif
 
+/**
+ * CAFFE_DECLARE_TYPED_REGISTRY is a macro that expands to a function
+ * declaration, as well as creating a convenient typename for its corresponding
+ * registerer.
+ */
 #define CAFFE_DECLARE_TYPED_REGISTRY(RegistryName, SrcType, ObjectType, ...) \
   Registry<SrcType, ObjectType, ##__VA_ARGS__>* RegistryName();              \
   typedef Registerer<SrcType, ObjectType, ##__VA_ARGS__>                     \

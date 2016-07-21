@@ -25,12 +25,12 @@ class MiniDBCursor : public Cursor {
   ~MiniDBCursor() {}
 
   void Seek(const string& key) override {
-    CAFFE_LOG_FATAL << "MiniDB does not support seeking to a specifi key.";
+    LOG(FATAL) << "MiniDB does not support seeking to a specifi key.";
   }
 
   void SeekToFirst() override {
     fseek(file_, 0, SEEK_SET);
-    CAFFE_CHECK(!feof(file_)) << "Hmm, empty file?";
+    CHECK(!feof(file_)) << "Hmm, empty file?";
     // Read the first item.
     valid_ = true;
     Next();
@@ -40,13 +40,13 @@ class MiniDBCursor : public Cursor {
     // First, read in the key and value length.
     if (fread(&key_len_, sizeof(int), 1, file_) == 0) {
       // Reaching EOF.
-      CAFFE_VLOG(1) << "EOF reached, setting valid to false";
+      VLOG(1) << "EOF reached, setting valid to false";
       valid_ = false;
       return;
     }
-    CAFFE_CHECK_EQ(fread(&value_len_, sizeof(int), 1, file_), 1);
-    CAFFE_CHECK_GT(key_len_, 0);
-    CAFFE_CHECK_GT(value_len_, 0);
+    CHECK_EQ(fread(&value_len_, sizeof(int), 1, file_), 1);
+    CHECK_GT(key_len_, 0);
+    CHECK_GT(value_len_, 0);
     // Resize if the key and value len is larger than the current one.
     if (key_len_ > key_.size()) {
       key_.resize(key_len_);
@@ -55,21 +55,21 @@ class MiniDBCursor : public Cursor {
       value_.resize(value_len_);
     }
     // Actually read in the contents.
-    CAFFE_CHECK_EQ(
+    CHECK_EQ(
         fread(key_.data(), sizeof(char), key_len_, file_), key_len_);
-    CAFFE_CHECK_EQ(
+    CHECK_EQ(
         fread(value_.data(), sizeof(char), value_len_, file_), value_len_);
     // Note(Yangqing): as we read the file, the cursor naturally moves to the
     // beginning of the next entry.
   }
 
   string key() override {
-    CAFFE_CHECK(valid_) << "Cursor is at invalid location!";
+    CHECK(valid_) << "Cursor is at invalid location!";
     return string(key_.data(), key_len_);
   }
 
   string value() override {
-    CAFFE_CHECK(valid_) << "Cursor is at invalid location!";
+    CHECK(valid_) << "Cursor is at invalid location!";
     return string(value_.data(), value_len_);
   }
 
@@ -89,21 +89,26 @@ class MiniDBTransaction : public Transaction {
  public:
   explicit MiniDBTransaction(FILE* f, std::mutex* mutex)
     : file_(f), lock_(*mutex) {}
-  ~MiniDBTransaction() { Commit(); }
+  ~MiniDBTransaction() {
+    Commit();
+  }
 
   void Put(const string& key, const string& value) override {
     int key_len = key.size();
     int value_len = value.size();
-    CAFFE_CHECK_EQ(fwrite(&key_len, sizeof(int), 1, file_), 1);
-    CAFFE_CHECK_EQ(fwrite(&value_len, sizeof(int), 1, file_), 1);
-    CAFFE_CHECK_EQ(
+    CHECK_EQ(fwrite(&key_len, sizeof(int), 1, file_), 1);
+    CHECK_EQ(fwrite(&value_len, sizeof(int), 1, file_), 1);
+    CHECK_EQ(
         fwrite(key.c_str(), sizeof(char), key_len, file_), key_len);
-    CAFFE_CHECK_EQ(
+    CHECK_EQ(
         fwrite(value.c_str(), sizeof(char), value_len, file_), value_len);
   }
 
   void Commit() override {
-    CAFFE_CHECK_EQ(fflush(file_), 0);
+    if (file_ != nullptr) {
+      CHECK_EQ(fflush(file_), 0);
+      file_ = nullptr;
+    }
   }
 
  private:
@@ -128,21 +133,26 @@ class MiniDB : public DB {
         file_ = fopen(source.c_str(), "rb");
         break;
     }
-    CAFFE_CHECK(file_) << "Cannot open file: " << source;
-    CAFFE_LOG_INFO << "Opened MiniDB " << source;
+    CHECK(file_) << "Cannot open file: " << source;
+    VLOG(1) << "Opened MiniDB " << source;
   }
   ~MiniDB() { Close(); }
 
-  void Close() override { fclose(file_); }
-
-  Cursor* NewCursor() override {
-    CAFFE_CHECK_EQ(this->mode_, READ);
-    return new MiniDBCursor(file_, &file_access_mutex_);
+  void Close() override {
+    if (file_) {
+      fclose(file_);
+    }
+    file_ = nullptr;
   }
 
-  Transaction* NewTransaction() override {
-    CAFFE_CHECK(this->mode_ == NEW || this->mode_ == WRITE);
-    return new MiniDBTransaction(file_, &file_access_mutex_);
+  unique_ptr<Cursor> NewCursor() override {
+    CHECK_EQ(this->mode_, READ);
+    return std::make_unique<MiniDBCursor>(file_, &file_access_mutex_);
+  }
+
+  unique_ptr<Transaction> NewTransaction() override {
+    CHECK(this->mode_ == NEW || this->mode_ == WRITE);
+    return std::make_unique<MiniDBTransaction>(file_, &file_access_mutex_);
   }
 
  private:
@@ -155,24 +165,42 @@ class MiniDB : public DB {
 REGISTER_CAFFE2_DB(MiniDB, MiniDB);
 REGISTER_CAFFE2_DB(minidb, MiniDB);
 
-string DBReaderSerializer::Serialize(const Blob& blob, const string& name) {
-  CAFFE_CHECK(blob.IsType<DBReader>());
+void DBReaderSerializer::Serialize(
+    const Blob& blob,
+    const string& name,
+    BlobSerializerBase::SerializationAcceptor acceptor) {
+  CHECK(blob.IsType<DBReader>());
   auto& reader = blob.Get<DBReader>();
-  DBProto proto;
+  DBReaderProto proto;
   proto.set_name(name);
   proto.set_source(reader.source_);
   proto.set_db_type(reader.db_type_);
   if (reader.cursor() && reader.cursor()->SupportsSeek()) {
     proto.set_key(reader.cursor()->key());
   }
-  return proto.SerializeAsString();
+  BlobProto blob_proto;
+  blob_proto.set_name(name);
+  blob_proto.set_type("DBReader");
+  blob_proto.set_content(proto.SerializeAsString());
+  acceptor(name, blob_proto.SerializeAsString());
+}
+
+bool DBReaderDeserializer::Deserialize(const BlobProto& proto, Blob* blob) {
+  DBReaderProto reader_proto;
+  if (!reader_proto.ParseFromString(proto.content())) {
+    LOG(ERROR) << "Cannot parse content into a DBReaderProto.";
+    return false;
+  }
+  blob->Reset(new DBReader(reader_proto));
+  return true;
 }
 
 namespace {
 // Serialize TensorCPU.
 REGISTER_BLOB_SERIALIZER((TypeMeta::Id<DBReader>()),
                          DBReaderSerializer);
+REGISTER_BLOB_DESERIALIZER(DBReader, DBReaderDeserializer);
 }  // namespace
 
-}  // namespacd db
+}  // namespace db
 }  // namespace caffe2

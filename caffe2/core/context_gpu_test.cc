@@ -9,6 +9,7 @@
 namespace caffe2 {
 
 TEST(CUDAContextTest, TestAllocDealloc) {
+  if (!HasCudaGPU()) return;
   CUDAContext context(0);
   context.SwitchToDevice();
   float* data = static_cast<float*>(CUDAContext::New(10 * sizeof(float)));
@@ -19,18 +20,20 @@ TEST(CUDAContextTest, TestAllocDealloc) {
 cudaStream_t getStreamForHandle(cublasHandle_t handle) {
   cudaStream_t stream = nullptr;
   CUBLAS_CHECK(cublasGetStream(handle, &stream));
-  CAFFE_CHECK_NOTNULL(stream);
+  CHECK_NOTNULL(stream);
   return stream;
 }
 
 TEST(CUDAContextTest, TestSameThreadSameObject) {
+  if (!HasCudaGPU()) return;
   CUDAContext context_a(0);
   CUDAContext context_b(0);
   EXPECT_EQ(context_a.cuda_stream(), context_b.cuda_stream());
   EXPECT_EQ(context_a.cublas_handle(), context_b.cublas_handle());
   EXPECT_EQ(
       context_a.cuda_stream(), getStreamForHandle(context_b.cublas_handle()));
-  EXPECT_EQ(context_a.curand_generator(), context_b.curand_generator());
+  // CuRAND generators are context-local.
+  EXPECT_NE(context_a.curand_generator(), context_b.curand_generator());
 }
 
 TEST(CUDAContextTest, TestSameThreadDifferntObjectIfDifferentDevices) {
@@ -56,6 +59,7 @@ void TEST_GetStreamAddress(cudaStream_t* ptr) {
 }  // namespace
 
 TEST(CUDAContextTest, TestDifferntThreadDifferentobject) {
+  if (!HasCudaGPU()) return;
   std::array<cudaStream_t, 2> temp = {0};
   // Same thread
   TEST_GetStreamAddress(&temp[0]);

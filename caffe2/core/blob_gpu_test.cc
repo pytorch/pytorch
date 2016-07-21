@@ -23,7 +23,7 @@ TYPED_TEST(TensorGPUTest, TensorInitializedEmpty) {
   dims[0] = 2;
   dims[1] = 3;
   dims[2] = 5;
-  tensor.Reshape(dims);
+  tensor.Resize(dims);
   EXPECT_EQ(tensor.ndim(), 3);
   EXPECT_EQ(tensor.dim32(0), 2);
   EXPECT_EQ(tensor.dim32(1), 3);
@@ -49,7 +49,7 @@ TYPED_TEST(TensorGPUTest, TensorInitializedNonEmpty) {
   dims[1] = 11;
   dims[2] = 13;
   dims.push_back(17);
-  tensor.Reshape(dims);
+  tensor.Resize(dims);
   EXPECT_EQ(tensor.ndim(), 4);
   EXPECT_EQ(tensor.dim32(0), 7);
   EXPECT_EQ(tensor.dim32(1), 11);
@@ -93,7 +93,7 @@ TYPED_TEST(TensorGPUTest, TensorShareDataCanUseDifferentShapes) {
   EXPECT_EQ(tensor.data<TypeParam>(), other_tensor.data<TypeParam>());
 }
 
-TYPED_TEST(TensorGPUTest, NoLongerSharesAfterReshape) {
+TYPED_TEST(TensorGPUTest, NoLongerSharesAfterResize) {
   if (!HasCudaGPU()) return;
   vector<int> dims(3);
   dims[0] = 2;
@@ -107,7 +107,7 @@ TYPED_TEST(TensorGPUTest, NoLongerSharesAfterReshape) {
   auto* old_pointer = other_tensor.data<TypeParam>();
 
   dims[0] = 7;
-  tensor.Reshape(dims);
+  tensor.Resize(dims);
   EXPECT_EQ(old_pointer, other_tensor.data<TypeParam>());
   EXPECT_NE(old_pointer, tensor.mutable_data<TypeParam>());
 }
@@ -120,10 +120,60 @@ TYPED_TEST(TensorGPUDeathTest, CannotAccessDataWhenEmpty) {
   ASSERT_DEATH(tensor.data<TypeParam>(), "");
 }
 
-TEST(TensorTest, TensorSerialization) {
+#define TEST_SERIALIZATION_GPU_WITH_TYPE(TypeParam, field_name)            \
+  TEST(TensorGPUTest, TensorSerialization_##TypeParam) {                   \
+    if (!HasCudaGPU()) {                                                   \
+      return;                                                              \
+    }                                                                      \
+    Blob blob;                                                             \
+    TensorCPU cpu_tensor;                                                  \
+    cpu_tensor.Resize(2, 3);                                               \
+    for (int i = 0; i < 6; ++i) {                                          \
+      cpu_tensor.mutable_data<TypeParam>()[i] = static_cast<TypeParam>(i); \
+    }                                                                      \
+    blob.GetMutable<TensorCUDA>()->CopyFrom(cpu_tensor);                   \
+    string serialized = blob.Serialize("test");                            \
+    BlobProto proto;                                                       \
+    CHECK(proto.ParseFromString(serialized));                              \
+    EXPECT_EQ(proto.name(), "test");                                       \
+    EXPECT_EQ(proto.type(), "Tensor");                                     \
+    EXPECT_TRUE(proto.has_tensor());                                       \
+    const TensorProto& tensor_proto = proto.tensor();                      \
+    EXPECT_EQ(                                                             \
+        tensor_proto.data_type(),                                          \
+        TypeMetaToDataType(TypeMeta::Make<TypeParam>()));                  \
+    EXPECT_EQ(tensor_proto.field_name##_size(), 6);                        \
+    for (int i = 0; i < 6; ++i) {                                          \
+      EXPECT_EQ(tensor_proto.field_name(i), static_cast<TypeParam>(i));    \
+    }                                                                      \
+    Blob new_blob;                                                         \
+    EXPECT_TRUE(new_blob.Deserialize(serialized));                         \
+    EXPECT_TRUE(new_blob.IsType<TensorCUDA>());                            \
+    TensorCPU new_cpu_tensor(blob.Get<TensorCUDA>());                      \
+    EXPECT_EQ(new_cpu_tensor.ndim(), 2);                                   \
+    EXPECT_EQ(new_cpu_tensor.dim(0), 2);                                   \
+    EXPECT_EQ(new_cpu_tensor.dim(1), 3);                                   \
+    for (int i = 0; i < 6; ++i) {                                          \
+      EXPECT_EQ(                                                           \
+          cpu_tensor.data<TypeParam>()[i],                                 \
+          new_cpu_tensor.data<TypeParam>()[i]);                            \
+    }                                                                      \
+  }
+
+TEST_SERIALIZATION_GPU_WITH_TYPE(bool, int32_data)
+TEST_SERIALIZATION_GPU_WITH_TYPE(double, double_data)
+TEST_SERIALIZATION_GPU_WITH_TYPE(float, float_data)
+TEST_SERIALIZATION_GPU_WITH_TYPE(int, int32_data)
+TEST_SERIALIZATION_GPU_WITH_TYPE(int8_t, int32_data)
+TEST_SERIALIZATION_GPU_WITH_TYPE(int16_t, int32_data)
+TEST_SERIALIZATION_GPU_WITH_TYPE(uint8_t, int32_data)
+TEST_SERIALIZATION_GPU_WITH_TYPE(uint16_t, int32_data)
+TEST_SERIALIZATION_GPU_WITH_TYPE(int64_t, int64_data)
+
+TEST(TensorTest, TensorSerializationMultiDevices) {
   Blob blob;
   TensorCPU tensor;
-  tensor.Reshape(2, 3);
+  tensor.Resize(2, 3);
   for (int i = 0; i < 6; ++i) {
     tensor.mutable_data<float>()[i] = i;
   }
@@ -132,17 +182,32 @@ TEST(TensorTest, TensorSerialization) {
     CUDAContext context(gpu_id);
     blob.Reset(new TensorCUDA(tensor, &context));
     string serialized = blob.Serialize("test");
-    TensorProto proto;
-    CAFFE_CHECK(proto.ParseFromString(serialized));
+    BlobProto proto;
+    CHECK(proto.ParseFromString(serialized));
     EXPECT_EQ(proto.name(), "test");
-    EXPECT_EQ(proto.data_type(), TensorProto::FLOAT);
-    EXPECT_EQ(proto.float_data_size(), 6);
+    EXPECT_TRUE(proto.has_tensor());
+    const TensorProto& tensor_proto = proto.tensor();
+    EXPECT_EQ(tensor_proto.data_type(), TensorProto::FLOAT);
+    EXPECT_EQ(tensor_proto.float_data_size(), 6);
     for (int i = 0; i < 6; ++i) {
-      EXPECT_EQ(proto.float_data(i), i);
+      EXPECT_EQ(tensor_proto.float_data(i), i);
     }
-    EXPECT_TRUE(proto.has_device_detail());
-    EXPECT_EQ(proto.device_detail().device_type(), CUDA);
-    EXPECT_EQ(proto.device_detail().cuda_gpu_id(), gpu_id);
+    EXPECT_TRUE(tensor_proto.has_device_detail());
+    EXPECT_EQ(tensor_proto.device_detail().device_type(), CUDA);
+    EXPECT_EQ(tensor_proto.device_detail().cuda_gpu_id(), gpu_id);
+    // Test if the restored blob is still of the same device.
+    blob.Reset();
+    EXPECT_TRUE(blob.Deserialize(serialized));
+    EXPECT_TRUE(blob.IsType<TensorCUDA>());
+    EXPECT_EQ(GetGPUIDForPointer(blob.Get<TensorCUDA>().data<float>()),
+              gpu_id);
+    // Test if we force the restored blob on a different device, we
+    // can still get so.
+    blob.Reset();
+    proto.mutable_tensor()->mutable_device_detail()->set_cuda_gpu_id(0);
+    EXPECT_TRUE(blob.Deserialize(proto.SerializeAsString()));
+    EXPECT_TRUE(blob.IsType<TensorCUDA>());
+    EXPECT_EQ(GetGPUIDForPointer(blob.Get<TensorCUDA>().data<float>()), 0);
   }
 }
 

@@ -48,14 +48,14 @@ void ConvertImageDataset(
   }
   if (caffe2::FLAGS_shuffle) {
     // randomly shuffle data
-    CAFFE_LOG_INFO << "Shuffling data";
+    LOG(INFO) << "Shuffling data";
     std::shuffle(lines.begin(), lines.end(),
                  std::default_random_engine(1701));
   }
-  CAFFE_LOG_INFO << "A total of " << lines.size() << " images.";
+  LOG(INFO) << "A total of " << lines.size() << " images.";
 
 
-  CAFFE_LOG_INFO << "Opening db " << output_db_name;
+  LOG(INFO) << "Opening db " << output_db_name;
   std::unique_ptr<db::DB> db(db::CreateDB(caffe2::FLAGS_db, output_db_name, db::NEW));
   std::unique_ptr<db::Transaction> transaction(db->NewTransaction());
 
@@ -89,7 +89,7 @@ void ConvertImageDataset(
       // Second, read images.
       std::ifstream image_file_stream(input_folder + lines[item_id].first);
       if (!image_file_stream) {
-        CAFFE_LOG_ERROR << "Cannot open " << input_folder << lines[item_id].first
+        LOG(ERROR) << "Cannot open " << input_folder << lines[item_id].first
                    << ". Skipping.";
       } else {
         data->mutable_string_data(0)->assign(
@@ -118,7 +118,7 @@ void ConvertImageDataset(
                    cv::INTER_LINEAR);
       data->set_dims(0, scaled_height);
       data->set_dims(1, scaled_width);
-      CAFFE_DCHECK(resized_img.isContinuous());
+      DCHECK(resized_img.isContinuous());
       data->set_byte_data(
           resized_img.ptr(),
           scaled_height * scaled_width * (caffe2::FLAGS_color ? 3 : 1));
@@ -131,10 +131,10 @@ void ConvertImageDataset(
     if (++count % 1000 == 0) {
       // Commit the current writes.
       transaction->Commit();
-      CAFFE_LOG_INFO << "Processed " << count << " files.";
+      LOG(INFO) << "Processed " << count << " files.";
     }
   }
-  CAFFE_LOG_INFO << "Processed a total of " << count << " files.";
+  LOG(INFO) << "Processed a total of " << count << " files.";
 }
 
 }  // namespace caffe2

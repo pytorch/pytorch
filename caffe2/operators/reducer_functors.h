@@ -39,6 +39,8 @@ class SumRangeReducerGradient {
       const TIndex blocks,
       const T* segment_grad,
       T* data_grad,
+      const T* data_in, // unused
+      const T* data_out, // unused
       Context* context) {
     // do we have some op that does it smartly with minimum number of memcpy?
     for (TIndex i = 0; i < blocks; ++i) {
@@ -54,6 +56,132 @@ struct SumRangeReducerDef {
   template <typename T, class Context>
   using ReducerGradient = SumRangeReducerGradient<T, Context>;
   static constexpr const char* name = "Sum";
+  static constexpr const char* doc =
+      "Summation is done element-wise across slices of the input tensor and "
+      "doesn't change the shape of the individual blocks.";
+};
+
+// Put forward and backward in the same template?
+template <typename T, class Context>
+class LogSumExpRangeReducer;
+template <typename T, class Context>
+class LogSumExpRangeReducerGradient;
+
+template <typename T>
+class LogSumExpRangeReducer<T, CPUContext> {
+ public:
+  void operator()(
+      const TIndex block_size,
+      const TIndex blocks,
+      const T* in,
+      T* out,
+      CPUContext* context) {
+    for (int j = 0; j < block_size; ++j) {
+      T max_value = std::numeric_limits<T>::lowest();
+      for (int i = 0; i < blocks; ++i) {
+        max_value = std::max(max_value, in[i * block_size + j]);
+      }
+      T scaled_exp_sum = 0;
+      for (int i = 0; i < blocks; ++i) {
+        scaled_exp_sum += std::exp(in[i * block_size + j] - max_value);
+      }
+      *(out++) = std::log(scaled_exp_sum) + max_value;
+    }
+  }
+  T r{1};
+};
+
+template <typename T, class Context>
+class LogSumExpRangeReducerGradient {
+ public:
+  void operator()(
+      const TIndex block_size,
+      const TIndex blocks,
+      const T* segment_grad, // GO
+      T* data_grad, // GI
+      const T* data_in, // I
+      const T* data_out, // O
+      Context* context) {
+    for (int j = 0; j < block_size; ++j) {
+      const T out_grad = *(segment_grad++);
+      const T offset = *(data_out++);
+      for (int i = 0; i < blocks; ++i) {
+        auto idx = i * block_size + j;
+        data_grad[idx] = out_grad * std::exp(data_in[idx] - offset);
+      }
+    }
+  }
+};
+
+struct LogSumExpRangeReducerDef {
+  template <typename T, class Context>
+  using Reducer = LogSumExpRangeReducer<T, Context>;
+  template <typename T, class Context>
+  using ReducerGradient = LogSumExpRangeReducerGradient<T, Context>;
+  static constexpr const char* name = "LogSumExp";
+  static constexpr const char* doc =
+      "LogSumExp computes the element-wise log of the sum of exponentials of "
+      "input slices. Operation doesn't change the shape of individual blocks.";
+};
+
+
+template <typename T, class Context>
+class MeanRangeReducer;
+template <typename T, class Context>
+class MeanRangeReducerGradient;
+
+template <typename T>
+class MeanRangeReducer<T, CPUContext> {
+ public:
+  void operator()(
+      const TIndex block_size,
+      const TIndex blocks,
+      const T* in,
+      T* out,
+      CPUContext* context) {
+    for (int j = 0; j < block_size; ++j) {
+      T avg_value = 0;
+      for (int i = 0; i < blocks; ++i) {
+        avg_value += in[i * block_size + j] / blocks;
+      }
+      *(out++) = avg_value;
+    }
+  }
+};
+
+template <typename T, class Context>
+class MeanRangeReducerGradient {
+ public:
+  void operator()(
+      const TIndex block_size,
+      const TIndex blocks,
+      const T* segment_grad, // GO
+      T* data_grad, // GI
+      const T* data_in, // I
+      const T* data_out, // O
+      Context* context) {
+    const auto in_grad = 1.0 / blocks;
+    for (int j = 0; j < block_size; ++j) {
+      const T out_grad = *(segment_grad++);
+      for (int i = 0; i < blocks; ++i) {
+        auto idx = i * block_size + j;
+        data_grad[idx] = out_grad * in_grad;
+      }
+    }
+  }
+};
+
+struct MeanRangeReducerDef {
+  template <typename T, class Context>
+  using Reducer = MeanRangeReducer<T, Context>;
+  template <typename T, class Context>
+  using ReducerGradient = MeanRangeReducerGradient<T, Context>;
+  static constexpr const char* name = "Mean";
+  static constexpr const char* doc =
+      "Mean computation is done element-wise, so that each element of the "
+      "output slice corresponds to the average value of the respective "
+      "elements in the input slives. Operation doesn't change the shape of "
+      "individual blocks.";
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -77,7 +205,7 @@ class SumReducer<T, CPUContext> {
 
     void
     observeInput(int input, const Tensor<CPUContext>& value, int skip_dims) {
-      CAFFE_DCHECK_EQ(0, input);
+      DCHECK_EQ(0, input);
       auto& dims = value.dims();
       block_shape.assign(dims.begin() + skip_dims, dims.end());
       block_size = value.size_from_dim(skip_dims);
@@ -150,6 +278,10 @@ struct SumReducerDef {
   template <typename T, class Context>
   using ReducerGradient = SumReducerGradient<T, Context>;
   static constexpr const char* name = "Sum";
+  static constexpr const char* doc =
+      "Summation is done element-wise across slices of the input tensor and "
+      "doesn't change the shape of the individual blocks.";
+  static void PopulateSchema(OpSchema& schema) {}
 };
 
 // Put forward and backward in the same template?
@@ -171,12 +303,12 @@ class WeightedSumReducer<T, CPUContext> {
     void
     observeInput(int input, const Tensor<CPUContext>& value, int skip_dims) {
       if (input == 1) {
-        CAFFE_CHECK_EQ(skip_dims, value.ndim())
+        CHECK_EQ(skip_dims, value.ndim())
             << "SCALARS mustn't have extra dimensions";
         scalars = value.data<T>();
         return;
       }
-      CAFFE_DCHECK_EQ(0, input);
+      DCHECK_EQ(0, input);
       auto& dims = value.dims();
       block_shape.assign(dims.begin() + skip_dims, dims.end());
       block_size = value.size_from_dim(skip_dims);
@@ -225,7 +357,7 @@ class WeightedSumReducerGradient {
         int original_input,
         const Tensor<CPUContext>& value,
         int skip_dims) {
-      CAFFE_CHECK_EQ(1, original_input);
+      CHECK_EQ(1, original_input);
       scalars = value.data<T>();
     }
 
@@ -257,6 +389,17 @@ struct WeightedSumReducerDef {
   template <typename T, class Context>
   using ReducerGradient = WeightedSumReducerGradient<T, Context>;
   static constexpr const char* name = "WeightedSum";
+  static constexpr const char* doc =
+      "Input slices are first scaled by SCALARS and then summed element-wise. "
+      "It doesn't change the shape of the individual blocks.";
+  static void PopulateSchema(OpSchema& schema) {
+    schema.Input(0, "DATA", "Input tensor for the summation");
+    schema.Input(
+        1,
+        "SCALARS",
+        "Scalar multipliers for the input slices. Must be a vector with the "
+        "length matching the first dimension of DATA");
+  }
 };
 
 }

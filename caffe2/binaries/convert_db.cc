@@ -27,9 +27,9 @@ int main(int argc, char** argv) {
     transaction->Put(cursor->key(), cursor->value());
     if (++count % caffe2::FLAGS_batch_size == 0) {
       transaction->Commit();
-      CAFFE_LOG_INFO << "Converted " << count << " items so far.";
+      LOG(INFO) << "Converted " << count << " items so far.";
     }
   }
-  CAFFE_LOG_INFO << "A total of " << count << " items processed.";
+  LOG(INFO) << "A total of " << count << " items processed.";
   return 0;
 }

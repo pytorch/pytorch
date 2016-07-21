@@ -1,4 +1,5 @@
 #include "caffe2/core/typeid.h"
+#include "caffe2/core/types.h"
 #include "gtest/gtest.h"
 
 namespace caffe2 {
@@ -21,7 +22,7 @@ TEST(TypeMetaTest, TypeMetaStatic) {
 
 TEST(TypeMetaTest, Names) {
   TypeMeta null_meta;
-  EXPECT_TRUE(string(null_meta.name()) == "Unknown Type");
+  EXPECT_TRUE(string(null_meta.name()) == "nullptr (uninitialized)");
 #ifdef __GXX_RTTI
   TypeMeta int_meta = TypeMeta::Make<int>();
   TypeMeta string_meta = TypeMeta::Make<string>();
@@ -113,6 +114,10 @@ TEST(TypeMetaTest, CtorDtorAndCopy) {
   EXPECT_EQ(meta_b.copy(),
             &(TypeMeta::_CopyNotAllowed<ClassNoAssignment>));
 #endif
+}
+
+TEST(TypeMetaTest, Float16IsNotUint16) {
+  EXPECT_NE(TypeMeta::Id<uint16_t>(), TypeMeta::Id<float16>());
 }
 
 }  // namespace

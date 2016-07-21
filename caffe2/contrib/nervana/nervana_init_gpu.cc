@@ -20,16 +20,16 @@ bool NervanaKernelLoaded() { return g_nervana_kernel_loaded; }
 bool Caffe2InitializeNervanaKernels(int*, char***) {
   // If we do not specify the nervana cubin path, we will simply return.
   if (FLAGS_nervana_cubin_path.size() == 0) {
-    CAFFE_VLOG(1) << "Nervana cubin loading skipped.";
+    VLOG(1) << "Nervana cubin loading skipped.";
     return true;
   }
   g_nervana_kernel_loaded =
       nervana_loadKernels(FLAGS_nervana_cubin_path.c_str());
   if (g_nervana_kernel_loaded) {
-    CAFFE_VLOG(1) << "Loaded nervana kernels from path "
+    VLOG(1) << "Loaded nervana kernels from path "
                   << FLAGS_nervana_cubin_path;
   } else {
-    CAFFE_LOG_ERROR << "Cannot load nervana kernels from path "
+    LOG(ERROR) << "Cannot load nervana kernels from path "
                     << FLAGS_nervana_cubin_path;
   }
   // We will always return true for this initialization, because the loading

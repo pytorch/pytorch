@@ -7,26 +7,31 @@ namespace caffe2 {
 bool OpSchema::Verify(const OperatorDef& def) const {
   // Check the number of inputs.
   if (def.input_size() < min_input_ || def.input_size() > max_input_) {
-    CAFFE_LOG_ERROR << "Input size " << def.input_size()
+    LOG(ERROR) << "Input size " << def.input_size()
                     << " not in range [min=" << min_input_ << ", max="
                     << max_input_ << "].";
     return false;
   }
   if (!num_inputs_allowed_(def.input_size())) {
-    CAFFE_LOG_ERROR << "Input size " << def.input_size()
+    LOG(ERROR) << "Input size " << def.input_size()
                     << " not in allowed input sizes.";
     return false;
   }
   // Check the number of outputs.
   if (def.output_size() < min_output_ || def.output_size() > max_output_) {
-    CAFFE_LOG_ERROR << "Output size " << def.output_size()
+    LOG(ERROR) << "Output size " << def.output_size()
                     << " not in range [min=" << min_output_ << ", max="
                     << max_output_ << "].";
     return false;
   }
   if (!num_outputs_allowed_(def.output_size())) {
-    CAFFE_LOG_ERROR << "Output size " << def.output_size()
+    LOG(ERROR) << "Output size " << def.output_size()
                     << " not in allowed output sizes.";
+    return false;
+  }
+  if (!num_inputs_outputs_allowed_(def.input_size(), def.output_size())) {
+    LOG(ERROR) << "Combination of input size " << def.input_size()
+               << "and output size " << def.output_size() << " not in allowed.";
     return false;
   }
   // If the number of outputs can be calculated, check if the number matches.
@@ -34,7 +39,7 @@ bool OpSchema::Verify(const OperatorDef& def) const {
     int expected_nout = calculate_output_(def.input_size());
     if (expected_nout != kCannotComputeNumOutputs &&
         def.output_size() != expected_nout) {
-      CAFFE_LOG_ERROR << "Output size " << def.output_size()
+      LOG(ERROR) << "Output size " << def.output_size()
                       << " not matching expected output size, which is "
                       << expected_nout;
       return false;
@@ -49,7 +54,7 @@ bool OpSchema::Verify(const OperatorDef& def) const {
       if (def.input(in_idx) == def.output(out_idx) &&
           (!inplace_allowed_(in_idx, out_idx)
           && !inplace_enforced_(in_idx, out_idx))) {
-        CAFFE_LOG_ERROR
+        LOG(ERROR)
             << "Input index " << in_idx << " and output idx "
             << out_idx << " are set to be in-place but this is actually not "
             << "supported by op " << def.type();
@@ -57,7 +62,7 @@ bool OpSchema::Verify(const OperatorDef& def) const {
       }
       if (def.input(in_idx) != def.output(out_idx) &&
           inplace_enforced_(in_idx, out_idx)) {
-        CAFFE_LOG_ERROR
+        LOG(ERROR)
             << "Input index " << in_idx << " and output idx " << out_idx
             << " are not in-place but should be as required by op "
             << def.type();
@@ -114,6 +119,11 @@ OpSchema& OpSchema::NumOutputs(set<int> allowed_output_nums) {
       });
 }
 
+OpSchema& OpSchema::NumInputsOutputs(std::function<bool(int, int)> func) {
+  num_inputs_outputs_allowed_ = func;
+  return *this;
+}
+
 OpSchema& OpSchema::OutputCalculator(std::function<int(int)> calc) {
   calculate_output_ = calc;
   return *this;
@@ -155,6 +165,39 @@ OpSchema& OpSchema::EnforceOneToOneInplace() {
   return EnforceInplace([](int in, int out) { return in == out; });
 }
 
+OpSchema& OpSchema::SetDoc(const string& doc) {
+  doc_ = doc;
+  return *this;
+}
+
+OpSchema& OpSchema::Arg(const char* name, const char* description) {
+  arg_desc_.emplace_back(name, description);
+  return *this;
+}
+
+OpSchema& OpSchema::Input(const int n, const char* name, const char* description) {
+  if (input_desc_.size() <= n) {
+    input_desc_.resize(n + 1);
+  }
+  input_desc_[n] = std::make_pair(name, description);
+  return *this;
+}
+
+OpSchema& OpSchema::Output(const int n, const char* name, const char* description) {
+  if (output_desc_.size() <= n) {
+    output_desc_.resize(n + 1);
+  }
+  output_desc_[n] = std::make_pair(name, description);
+  return *this;
+}
+
+OpSchema& OpSchema::FillUsing(std::function<void(OpSchema&)> populator) {
+  if (populator) {
+    populator(*this);
+  }
+  return *this;
+}
+
 int OpSchema::CalculateOutput(int num_input) const {
   if (min_output_ == max_output_) {
     return min_output_;
@@ -165,6 +208,49 @@ int OpSchema::CalculateOutput(int num_input) const {
   }
 }
 
+std::ostream& operator<<(std::ostream& out, const OpSchema& schema) {
+  if (!schema.arg_desc_.empty()) {
+    out << "Arguments:" << std::endl;
+    for (const auto& it : schema.arg_desc_) {
+      out << "  " << it.first << " : " << it.second << std::endl;
+    }
+  }
+  if (schema.max_input_ > 0) {
+    out << "Inputs:" << std::endl;
+    if (!schema.input_desc_.empty()) {
+      for (int i = 0; i < schema.input_desc_.size(); ++i) {
+        const auto& p = schema.input_desc_[i];
+        out << "  " << i << ", " << (p.first ? p.first : "(unnamed)") << " : "
+            << (p.second ? p.second : "(no doc)") << std::endl;
+      }
+    } else {
+      out << "  (no explicit description available)" << std::endl;
+    }
+  }
+  if (schema.max_output_ > 0) {
+    out << "Outputs:" << std::endl;
+    if (!schema.output_desc_.empty()) {
+      for (int i = 0; i < schema.output_desc_.size(); ++i) {
+        const auto& p = schema.output_desc_[i];
+        out << "  " << i << ", " << (p.first ? p.first : "(unnamed)") << " : "
+            << (p.second ? p.second : "(no doc)") << std::endl;
+      }
+    } else {
+      out << "  (no explicit description available)" << std::endl;
+    }
+  }
+  out << std::endl;
+  if (schema.doc()) {
+    out << schema.doc();
+  } else {
+    out << "(no documentation yet)" << std::endl;
+  }
+  out << std::endl;
+  if (schema.line_) {
+    out << "Defined at " << schema.file_ << ":" << schema.line_ << std::endl;
+  }
+  return out;
+}
 
 CaffeMap<string, OpSchema>& OpSchemaRegistry::map() {
   static CaffeMap<string, OpSchema> map;

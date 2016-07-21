@@ -1,8 +1,74 @@
 #include "caffe2/core/logging.h"
 
+#include <cstring>
+
 #ifdef ANDROID
 #include <android/log.h>
 #endif  // ANDROID
+
+// Common code that we use regardless of whether we use glog or not.
+
+CAFFE2_DEFINE_bool(caffe2_use_fatal_for_enforce, false,
+                   "If set true, when CAFFE_ENFORCE is not met, abort instead "
+                   "of throwing an exception.");
+
+namespace caffe2 {
+std::string StripBasename(const std::string &full_path) {
+  const char kSeparator = '/';
+  size_t pos = full_path.rfind(kSeparator);
+  if (pos != std::string::npos) {
+    return full_path.substr(pos + 1, std::string::npos);
+  } else {
+    return full_path;
+  }
+}
+
+size_t ReplaceAll(string& s, const char* from, const char* to) {
+  CHECK(from && *from);
+  CHECK(to);
+
+  size_t numReplaced = 0;
+  string::size_type lenFrom = std::strlen(from);
+  string::size_type lenTo = std::strlen(to);
+  for (string::size_type pos = s.find(from); pos != string::npos;
+       pos = s.find(from, pos + lenTo)) {
+    s.replace(pos, lenFrom, to);
+    numReplaced++;
+  }
+  return numReplaced;
+}
+
+EnforceNotMet::EnforceNotMet(
+    const char* file,
+    const int line,
+    const char* condition,
+    const string& msg)
+    : msg_stack_{MakeString(
+          "[enforce fail at ",
+          StripBasename(std::string(file)),
+          ":",
+          line,
+          "] ",
+          condition,
+          ". ",
+          msg)} {
+  if (FLAGS_caffe2_use_fatal_for_enforce) {
+    LOG(FATAL) << msg_stack_[0];
+  } else {
+    LOG(ERROR) << msg_stack_[0];
+  }
+}
+
+void EnforceNotMet::AppendMessage(const string& msg) {
+  LOG(ERROR) << msg;
+  msg_stack_.push_back(msg);
+}
+
+string EnforceNotMet::msg() const {
+  return std::accumulate(msg_stack_.begin(), msg_stack_.end(), string(""));
+}
+}  // namespace caffe2
+
 
 #ifdef CAFFE2_USE_GOOGLE_GLOG
 
@@ -44,7 +110,7 @@ bool InitCaffeLogging(int* argc, char** argv) {
 
 #else  // !CAFFE2_USE_GOOGLE_GLOG
 
-CAFFE2_DEFINE_int(caffe2_log_level, CAFFE_ERROR,
+CAFFE2_DEFINE_int(caffe2_log_level, ERROR,
                   "The minimum log level that caffe2 will output.");
 
 namespace caffe2 {
@@ -58,10 +124,10 @@ bool InitCaffeLogging(int* argc, char** argv) {
                  "of this." << std::endl;
     return false;
   }
-  if (FLAGS_caffe2_log_level > CAFFE_FATAL) {
-    std::cerr << "The log level of Caffe2 has to be no larger than CAFFE_FATAL("
-              << CAFFE_FATAL << "). Capping it to CAFFE_FATAL." << std::endl;
-    FLAGS_caffe2_log_level = CAFFE_FATAL;
+  if (FLAGS_caffe2_log_level > FATAL) {
+    std::cerr << "The log level of Caffe2 has to be no larger than FATAL("
+              << FATAL << "). Capping it to FATAL." << std::endl;
+    FLAGS_caffe2_log_level = FATAL;
   }
   return true;
 }
@@ -77,8 +143,6 @@ MessageLogger::MessageLogger(const char *file, int line, int severity)
 #else  // !ANDROID
   tag_ = "";
 #endif  // ANDROID
-  // Pre-pend the stream with the file and line number.
-  StripBasename(std::string(file), &filename_only_);
   /*
   time_t rawtime;
   struct tm * timeinfo;
@@ -88,15 +152,14 @@ MessageLogger::MessageLogger(const char *file, int line, int severity)
       std::chrono::duration_cast<std::chrono::nanoseconds>(
           std::chrono::high_resolution_clock::now().time_since_epoch());
   */
-  stream_ << "["
-          << CAFFE_SEVERITY_PREFIX[std::min(4, CAFFE_FATAL - severity_)]
+  stream_ << "[" << CAFFE2_SEVERITY_PREFIX[std::min(4, FATAL - severity_)]
           //<< (timeinfo->tm_mon + 1) * 100 + timeinfo->tm_mday
           //<< std::setfill('0')
           //<< " " << std::setw(2) << timeinfo->tm_hour
           //<< ":" << std::setw(2) << timeinfo->tm_min
           //<< ":" << std::setw(2) << timeinfo->tm_sec
           //<< "." << std::setw(9) << ns.count() % 1000000000
-          << " " << filename_only_ << ":" << line << "] ";
+          << " " << StripBasename(std::string(file)) << ":" << line << "] ";
 }
 
 // Output the contents of the stream to the proper channel on destruction.
@@ -108,19 +171,19 @@ MessageLogger::~MessageLogger() {
   stream_ << "\n";
 #ifdef ANDROID
   static const int android_log_levels[] = {
-      ANDROID_LOG_FATAL,    // CAFFE_LOG_FATAL
-      ANDROID_LOG_ERROR,    // CAFFE_LOG_ERROR
-      ANDROID_LOG_WARN,     // CAFFE_LOG_WARNING
-      ANDROID_LOG_INFO,     // CAFFE_LOG_INFO
-      ANDROID_LOG_DEBUG,    // CAFFE_VLOG(1)
-      ANDROID_LOG_VERBOSE,  // CAFFE_VLOG(2) .. CAFFE_VLOG(N)
+      ANDROID_LOG_FATAL,    // LOG_FATAL
+      ANDROID_LOG_ERROR,    // LOG_ERROR
+      ANDROID_LOG_WARN,     // LOG_WARNING
+      ANDROID_LOG_INFO,     // LOG_INFO
+      ANDROID_LOG_DEBUG,    // VLOG(1)
+      ANDROID_LOG_VERBOSE,  // VLOG(2) .. VLOG(N)
   };
-  int android_level_index = CAFFE_FATAL - std::min(CAFFE_FATAL, severity_);
+  int android_level_index = FATAL - std::min(FATAL, severity_);
   int level = android_log_levels[std::min(android_level_index, 5)];
   // Output the log string the Android log at the appropriate level.
   __android_log_print(level, tag_, stream_.str().c_str());
   // Indicate termination if needed.
-  if (severity_ == CAFFE_FATAL) {
+  if (severity_ == FATAL) {
     __android_log_print(ANDROID_LOG_FATAL, tag_, "terminating.\n");
   }
 #else  // !ANDROID
@@ -129,19 +192,8 @@ MessageLogger::~MessageLogger() {
     std::cerr << stream_.str();
   }
 #endif  // ANDROID
-  if (severity_ == CAFFE_FATAL) {
+  if (severity_ == FATAL) {
     DealWithFatal();
-  }
-}
-
-void MessageLogger::StripBasename(
-    const std::string &full_path, std::string *filename) {
-  const char kSeparator = '/';
-  size_t pos = full_path.rfind(kSeparator);
-  if (pos != std::string::npos) {
-    *filename = full_path.substr(pos + 1, std::string::npos);
-  } else {
-    *filename = full_path;
   }
 }
 

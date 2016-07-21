@@ -20,10 +20,10 @@ __global__ void TanhGradientKernel(const int N, const T* Y, const T* dY,
   }
 }
 
-template <typename T>
 struct TanhCUDAFunctor {
-  inline void operator()(const int n, const float* x,
-                         float* y, CUDAContext* device_context) {
+  template <typename T>
+  inline void operator()(const int n, const T* x,
+                         T* y, CUDAContext* device_context) {
     TanhKernel<T><<<CAFFE_GET_BLOCKS(n), CAFFE_CUDA_NUM_THREADS,
                     0, device_context->cuda_stream()>>>(n, x, y);
     return;
@@ -33,8 +33,8 @@ struct TanhCUDAFunctor {
   }
 };
 
-template <typename T>
 struct TanhGradientCUDAFunctor {
+  template <typename T>
   inline void operator()(const int n, const T* y, const T* dy,
                          T* dx, CUDAContext* device_context) {
     TanhGradientKernel<T><<<CAFFE_GET_BLOCKS(n), CAFFE_CUDA_NUM_THREADS,
@@ -52,9 +52,9 @@ struct TanhGradientCUDAFunctor {
 
 namespace {
 REGISTER_CUDA_OPERATOR(
-    Tanh, UnaryElementwiseOp<float, CUDAContext, TanhCUDAFunctor<float> >);
+    Tanh, UnaryElementwiseOp<TensorTypes<float>, CUDAContext, TanhCUDAFunctor>);
 REGISTER_CUDA_OPERATOR(
-    TanhGradient, BinaryElementwiseOp<float, CUDAContext,
-                                     TanhGradientCUDAFunctor<float> >);
+    TanhGradient, BinaryElementwiseOp<TensorTypes<float>, CUDAContext,
+                                     TanhGradientCUDAFunctor>);
 }  // namespace
 }  // namespace caffe2

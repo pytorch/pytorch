@@ -89,12 +89,12 @@ class DB {
    * Returns a cursor to read the database. The caller takes the ownership of
    * the pointer.
    */
-  virtual Cursor* NewCursor() = 0;
+  virtual std::unique_ptr<Cursor> NewCursor() = 0;
   /**
    * Returns a transaction to write data to the database. The caller takes the
    * ownership of the pointer.
    */
-  virtual Transaction* NewTransaction() = 0;
+  virtual std::unique_ptr<Transaction> NewTransaction() = 0;
 
  protected:
   Mode mode_;
@@ -114,19 +114,10 @@ CAFFE_DECLARE_REGISTRY(Caffe2DBRegistry, DB, const string&, Mode);
  * supported, a nullptr is returned. The caller is responsible for examining the
  * validity of the pointer.
  */
-inline DB* CreateDB(const string& db_type, const string& source, Mode mode) {
+inline unique_ptr<DB> CreateDB(
+    const string& db_type, const string& source, Mode mode) {
   return Caffe2DBRegistry()->Create(db_type, source, mode);
 }
-
-
-class DBReaderSerializer : public BlobSerializerBase {
- public:
-  /**
-   * Serializes a DBReader. Note that this blob has to contain DBReader,
-   * otherwise this function produces a fatal error.
-   */
-  string Serialize(const Blob& blob, const string& name);
-};
 
 /**
  * A reader wrapper for DB that also allows us to serialize it.
@@ -141,26 +132,34 @@ class DBReader {
     Open(db_type, source);
   }
 
-  explicit DBReader(const DBProto& proto) {
+  explicit DBReader(const DBReaderProto& proto) {
     Open(proto.db_type(), proto.source());
     if (proto.has_key()) {
-      CAFFE_DCHECK(cursor_->SupportsSeek())
-          << "Encountering a proto that needs seeking but the db type "
-             "does not support it.";
+      CAFFE_ENFORCE(cursor_->SupportsSeek(),
+          "Encountering a proto that needs seeking but the db type "
+          "does not support it.");
       cursor_->Seek(proto.key());
     }
   }
 
+  explicit DBReader(std::unique_ptr<DB> db)
+      : db_type_("<memory-type>"),
+        source_("<memory-source>"),
+        db_(std::move(db)) {
+    CAFFE_ENFORCE(db_.get(), "Passed null db");
+    cursor_ = db_->NewCursor();
+  }
+
   void Open(const string& db_type, const string& source) {
-    if (cursor_.get()) {
+    if (cursor_) {
       cursor_.reset();
     }
     db_type_ = db_type;
     source_ = source;
-    db_.reset(CreateDB(db_type_, source_, READ));
-    CAFFE_CHECK(db_.get() != nullptr)
-        << "Cannot open db: " << source_ << " of type " << db_type_;
-    cursor_.reset(db_->NewCursor());
+    db_ = CreateDB(db_type_, source_, READ);
+    CAFFE_ENFORCE(db_,
+        "Cannot open db: ", source_, " of type ", db_type_);
+    cursor_ = db_->NewCursor();
   }
 
   /**
@@ -180,7 +179,7 @@ class DBReader {
    * output blob.
    */
   void Read(string* key, string* value) const {
-    CAFFE_DCHECK(cursor_ != nullptr) << "Reader not initialized.";
+    CHECK(cursor_ != nullptr) << "Reader not initialized.";
     std::unique_lock<std::mutex> mutex_lock(reader_mutex_);
     *key = cursor_->key();
     *value = cursor_->value();
@@ -194,7 +193,7 @@ class DBReader {
    * @brief Seeks to the first key. Thread safe.
    */
   void SeekToFirst() const {
-    CAFFE_DCHECK(cursor_ != nullptr) << "Reader not initialized.";
+    CHECK(cursor_ != nullptr) << "Reader not initialized.";
     std::unique_lock<std::mutex> mutex_lock(reader_mutex_);
     cursor_->SeekToFirst();
   }
@@ -207,8 +206,8 @@ class DBReader {
    * accessing the same cursor. You should consider using Read() explicitly.
    */
   inline Cursor* cursor() const {
-    CAFFE_LOG_ERROR << "Usually for a DBReader you should use Read() to be "
-                       "thread safe. Consider refactoring your code.";
+    LOG(ERROR) << "Usually for a DBReader you should use Read() to be "
+                  "thread safe. Consider refactoring your code.";
     return cursor_.get();
   }
 
@@ -220,6 +219,23 @@ class DBReader {
   mutable std::mutex reader_mutex_;
 
   DISABLE_COPY_AND_ASSIGN(DBReader);
+};
+
+class DBReaderSerializer : public BlobSerializerBase {
+ public:
+  /**
+   * Serializes a DBReader. Note that this blob has to contain DBReader,
+   * otherwise this function produces a fatal error.
+   */
+  void Serialize(
+      const Blob& blob,
+      const string& name,
+      BlobSerializerBase::SerializationAcceptor acceptor) override;
+};
+
+class DBReaderDeserializer : public BlobDeserializerBase {
+ public:
+  bool Deserialize(const BlobProto& proto, Blob* blob) override;
 };
 
 }  // namespace db

@@ -15,7 +15,6 @@ class AccuracyOp final : public Operator<Context> {
 
  protected:
   INPUT_TAGS(PREDICTION, LABEL);
-  DISABLE_COPY_AND_ASSIGN(AccuracyOp);
 };
 
 }  // namespace caffe2

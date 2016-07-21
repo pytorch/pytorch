@@ -30,7 +30,7 @@ class FloatToHalfCUDA : public Operator<CUDAContext> {
   bool RunOnDevice() override {
     auto& X = Input(0);
     auto* Y = Output(0);
-    Y->ReshapeLike(X);
+    Y->ResizeLike(X);
     FloatToHalfKernel<<<CAFFE_GET_BLOCKS(X.size()), CAFFE_CUDA_NUM_THREADS,
                         0, context_.cuda_stream()>>>(
       X.size(), X.data<float>(),
@@ -38,7 +38,6 @@ class FloatToHalfCUDA : public Operator<CUDAContext> {
     return true;
   }
 
-  DISABLE_COPY_AND_ASSIGN(FloatToHalfCUDA);
 };
 
 class HalfToFloatCUDA : public Operator<CUDAContext> {
@@ -50,7 +49,7 @@ class HalfToFloatCUDA : public Operator<CUDAContext> {
   bool RunOnDevice() override {
     auto& X = Input(0);
     auto* Y = Output(0);
-    Y->ReshapeLike(X);
+    Y->ResizeLike(X);
     HalfToFloatKernel<<<CAFFE_GET_BLOCKS(X.size()), CAFFE_CUDA_NUM_THREADS,
                         0, context_.cuda_stream()>>>(
       X.size(), reinterpret_cast<const half*>(X.data<float16>()),
@@ -58,7 +57,6 @@ class HalfToFloatCUDA : public Operator<CUDAContext> {
     return true;
   }
 
-  DISABLE_COPY_AND_ASSIGN(HalfToFloatCUDA);
 };
 
 namespace {

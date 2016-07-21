@@ -1,8 +1,9 @@
 import unittest
 from caffe2.python import convnet_benchmarks as cb
-from caffe2.python import test_util
+from caffe2.python import test_util, workspace
 
 
+@unittest.skipIf(not workspace.has_gpu_support, "no gpu")
 class TestConvnetBenchmarks(test_util.TestCase):
     def testConvnetBenchmarks(self):
         all_args = [
