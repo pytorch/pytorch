@@ -3,7 +3,7 @@ cc_library(
   srcs = Glob(["*.cc"], excludes=["*gpu*"]),
   hdrs = Glob(["*.h"]),
   deps = [
-    "//caffe2/core:core",
+    "//caffe2:core",
   ],
   whole_archive = True,
 )
@@ -13,7 +13,7 @@ cuda_library(
   srcs = Glob(["*.cu"]),
   deps = [
       ":sgd_ops",
-      "//caffe2/core:core_gpu",
+      "//caffe2:core_gpu",
   ],
   whole_archive = True,
 )
@@ -24,7 +24,7 @@ cc_library(
   deps = [
       ":sgd_ops",
       ":sgd_ops_gpu_cu",
-      "//caffe2/core:core_gpu",
+      "//caffe2:core_gpu",
   ],
   whole_archive = True,
 )

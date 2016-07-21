@@ -98,10 +98,10 @@ class Registerer {
 
   template <class DerivedType>
   static unique_ptr<ObjectType> DefaultCreator(Args ... args) {
-    // TODO(jiayq): old versions of NVCC does not handle std::make_unique well
+    // TODO(jiayq): old versions of NVCC does not handle make_unique well
     // so we are forced to use a unique_ptr constructor here. Check if it is
     // fine to use make_unique in the future.
-    // return std::make_unique<DerivedType>(args...);
+    // return make_unique<DerivedType>(args...);
     return std::unique_ptr<ObjectType>(new DerivedType(args...));
   }
 };

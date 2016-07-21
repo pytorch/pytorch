@@ -1,6 +1,6 @@
 #pragma once
 
-#include "caffe2/caffe2/core/operator.h"
+#include "caffe2/core/operator.h"
 
 namespace caffe2 {
 

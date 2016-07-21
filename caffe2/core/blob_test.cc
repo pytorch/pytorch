@@ -1,4 +1,5 @@
 #include <iostream>
+#include <memory>
 #include <mutex>
 
 #include "caffe2/core/blob.h"
@@ -461,7 +462,7 @@ class VectorDB : public db::DB {
   }
   void Close() override {}
   std::unique_ptr<db::Cursor> NewCursor() override {
-    return std::make_unique<VectorCursor>(getData());
+    return make_unique<VectorCursor>(getData());
   }
   std::unique_ptr<db::Transaction> NewTransaction() override {
     CAFFE_THROW("Not implemented");

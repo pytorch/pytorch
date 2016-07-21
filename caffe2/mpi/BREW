@@ -7,7 +7,7 @@ cc_library(
       "mpi_common.h",
   ],
   deps = [
-    "//caffe2/core:core",
+    "//caffe2:core",
   ]
 )
 
@@ -21,7 +21,7 @@ cc_library(
   ],
   deps = [
       ":mpi_common",
-      "//caffe2/core:core",
+      "//caffe2:core",
       "//third_party:openmpi",
   ],
   whole_archive = True,
@@ -37,7 +37,7 @@ cc_library(
   ],
   deps = [
       ":mpi_common",
-      "//caffe2/core:core_gpu",
+      "//caffe2:core_gpu",
       "//caffe2/operators:operators_headers",
       "//third_party:openmpi",
   ],

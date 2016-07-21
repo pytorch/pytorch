@@ -147,12 +147,12 @@ class MiniDB : public DB {
 
   unique_ptr<Cursor> NewCursor() override {
     CHECK_EQ(this->mode_, READ);
-    return std::make_unique<MiniDBCursor>(file_, &file_access_mutex_);
+    return make_unique<MiniDBCursor>(file_, &file_access_mutex_);
   }
 
   unique_ptr<Transaction> NewTransaction() override {
     CHECK(this->mode_ == NEW || this->mode_ == WRITE);
-    return std::make_unique<MiniDBTransaction>(file_, &file_access_mutex_);
+    return make_unique<MiniDBTransaction>(file_, &file_access_mutex_);
   }
 
  private:

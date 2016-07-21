@@ -8,10 +8,8 @@ cc_library(
   ],
   deps = [
     "//caffe/proto:caffe_proto",
-    "//caffe2/core:core",
+    "//caffe2:core",
     "//caffe2/operators:core_ops",
-    "//caffe2/utils:math",
-    "//caffe2/utils:proto_utils",
     "//third_party:opencv",
   ],
   whole_archive = True,
@@ -24,8 +22,7 @@ cc_library(
   ],
   deps = [
       ":image_ops",
-      "//caffe2/core:core_gpu",
-      "//caffe2/utils:math_gpu",
+      "//caffe2:core_gpu",
   ],
   whole_archive = True,
 )

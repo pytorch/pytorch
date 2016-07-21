@@ -124,10 +124,10 @@ class LMDB : public DB {
     }
   }
   unique_ptr<Cursor> NewCursor() override {
-    return std::make_unique<LMDBCursor>(mdb_env_);
+    return make_unique<LMDBCursor>(mdb_env_);
   }
   unique_ptr<Transaction> NewTransaction() override {
-    return std::make_unique<LMDBTransaction>(mdb_env_);
+    return make_unique<LMDBTransaction>(mdb_env_);
   }
 
  private:

@@ -150,7 +150,7 @@ unique_ptr<NetBase> CreateNet(const NetDef& net_def, Workspace* ws) {
   // In default, we will return a simple network that just runs all operators
   // sequentially.
   if (!net_def.has_type()) {
-    return std::make_unique<SimpleNet>(net_def, ws);
+    return make_unique<SimpleNet>(net_def, ws);
   }
   return NetRegistry()->Create(net_def.type(), net_def, ws);
 }

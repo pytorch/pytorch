@@ -244,6 +244,10 @@ class Env(object):
             # If we are building with GLOG, enable the glog macro.
             self.DEFINES.append("-DCAFFE2_USE_GOOGLE_GLOG")
 
+        if Config.USE_GFLAGS:
+            # If we are building with gflags, enable the gflags.
+            self.DEFINES.append("-DCAFFE2_USE_GFLAGS")
+
         # Proto-lite or Proto.
         if Config.USE_LITE_PROTO:
             self.DEFINES.append("-DCAFFE2_USE_LITE_PROTO")
@@ -331,7 +335,11 @@ class Env(object):
                 cuda_dirs = Config.MANUAL_CUDA_LIB_DIRS
             else:
                 cuda_dirs = [os.path.join(Config.CUDA_DIR, "lib"),
-                             os.path.join(Config.CUDA_DIR, "lib64")]
+                             os.path.join(Config.CUDA_DIR, "lib64"),
+                             # stubs allow us to link on a machine with no cuda
+                             # driver.
+                             os.path.join(Config.CUDA_DIR, "lib64", "stubs"),
+                            ]
             self.LIBDIRS += cuda_dirs
             if Config.CUDA_ADD_TO_RPATH:
                 rpath_template = GetRpathTemplate(Config.CC, self.ENV)

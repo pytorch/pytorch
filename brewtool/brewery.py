@@ -12,6 +12,7 @@ import hashlib
 import multiprocessing
 import os
 from os.path import join
+import re
 import shlex
 import shutil
 import signal
@@ -287,10 +288,11 @@ class Brewery(object):
         all_files = set()
         for root, _, files in os.walk("caffe2"):
             all_files.update([os.path.join(root, f) for f in files])
-        not_declared = all_files.difference(cls._registered_files)
+        not_declared = list(all_files.difference(cls._registered_files))
         if len(not_declared):
             BuildWarning("You have the following files not being registered "
                          "by any BREW files:")
+            not_declared.sort()
             for name in not_declared:
                 print(name)
 
@@ -404,8 +406,9 @@ def Glob(patterns, excludes=None):
         full_pattern = os.path.join(Brewery.CWD, pattern)
         files.update(glob.glob(full_pattern))
     for pattern in excludes:
+        pattern = pattern.replace("*", ".*")
         full_pattern = os.path.join(Brewery.CWD, pattern)
-        files.difference_update(glob.glob(full_pattern))
+        files = [f for f in files if not re.match(full_pattern, f)]
     # If CWD is empty, we don't need to cut prefix; else, we will cut
     # CWD as well as the first separator symbol.
     prefix_len = len(Brewery.CWD) + 1 if len(Brewery.CWD) else 0
@@ -465,11 +468,16 @@ class proto_library(BuildTarget):
 
     def AddOptimizationOption(self, name):
         with open(name, 'r') as fid:
-            content = fid.read()
+            lines = fid.read().split('\n')
+        optimization_line = (
+            'option optimize_for = {0};'.format(self.optimize_option))
+        if lines[0].startswith('syntax'):
+            lines.insert(1, optimization_line)
+        else:
+            lines.insert(0, optimization_line)
         with open(name, 'w') as fid:
-            fid.write(
-                'option optimize_for = {0};\n'.format(self.optimize_option))
-            fid.write(content)
+            for line in lines:
+                fid.write(line + '\n')
 
     def SetUp(self):
         Brewery.CopyToGenDir(self.srcs)

@@ -8,9 +8,7 @@ cc_library(
   srcs = Glob(["*.cc"], excludes=["*gpu*", "*test*", "*cudnn*"]),
   deps = [
     ":operators_headers",
-    "//caffe2/core:core",
-    "//caffe2/utils:math",
-    "//caffe2/utils:proto_utils",
+    "//caffe2:core",
   ],
   whole_archive = True,
 )
@@ -20,9 +18,7 @@ cuda_library(
   srcs = Glob(["*.cu"]),
   deps = [
       ":operators_headers",
-      "//caffe2/core:core_gpu",
-      "//caffe2/utils:math_gpu",
-      "//caffe2/utils:proto_utils",
+      "//caffe2:core_gpu",
   ],
   whole_archive = True,
 )
@@ -33,9 +29,7 @@ cc_library(
   deps = [
       ":core_ops_gpu_cu",
       ":operators_headers",
-      "//caffe2/core:core_gpu",
-      "//caffe2/utils:math_gpu",
-      "//caffe2/utils:proto_utils",
+      "//caffe2:core_gpu",
   ],
   whole_archive = True,
 )
@@ -45,9 +39,8 @@ cc_library(
   srcs = Glob(["*_cudnn.cc"]),
   deps = [
       ":operators_headers",
-      "//caffe2/core:core_cudnn",
-      "//caffe2/core:core_gpu",
-      "//caffe2/utils:math_gpu",
+      "//caffe2:core_cudnn",
+      "//caffe2:core_gpu",
       "//third_party:cudnn",
   ],
   whole_archive = True,

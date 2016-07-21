@@ -3,8 +3,7 @@ cc_library(
   srcs = Glob(["*.cc"]),
   hdrs = Glob(["*.h"]),
   deps = [
-    "//caffe2/core:core_gpu",
-    "//caffe2/utils:math",
+    "//caffe2:core_gpu",
     "//third_party:cuda",
     "//third_party:nvrtc",
   ],

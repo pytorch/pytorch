@@ -4,7 +4,7 @@ python_cc_extension(
   hdrs=["caffe2_python.h"],
   deps = [
       "//caffe2:all_available_ops",
-      "//caffe2/core:core",
+      "//caffe2:core",
       "//caffe2/db:db",
   ],
 )
@@ -18,9 +18,20 @@ python_cc_extension(
   hdrs=["caffe2_python.h"],
   deps = [
       "//caffe2:all_available_ops",
-      "//caffe2/core:core",
+      "//caffe2:core",
       "//caffe2/db:db",
   ],
+)
+
+python_cc_extension(
+  name="caffe2_pybind11",
+  srcs=[
+    "db.cc",
+  ],
+  deps=[
+      "//caffe2:core",
+      "//third_party:pybind11",
+  ]
 )
 
 py_library(

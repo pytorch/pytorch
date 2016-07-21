@@ -1,0 +1,4 @@
+filegroup(
+  name="tutorial",
+  srcs=Glob(["*.ipynb"])
+)
