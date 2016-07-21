@@ -6,6 +6,7 @@ _pyrange = torch._pyrange
 
 def _printformat(storage):
     int_mode = True
+    # TODO: this doesn't include CUDA
     if isinstance(storage, torch.FloatStorage) or isinstance(storage, torch.DoubleStorage):
         for value in storage:
             if value != math.ceil(value):

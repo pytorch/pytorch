@@ -10,7 +10,6 @@ PyObject * THPStorage_(newObject)(THStorage *ptr)
   // TODO: error checking
   PyObject *args = PyTuple_New(0);
   PyObject *kwargs = Py_BuildValue("{s:N}", "cdata", PyLong_FromVoidPtr(ptr));
-
   PyObject *instance = PyObject_Call(THPStorageClass, args, kwargs);
   Py_DECREF(args);
   Py_DECREF(kwargs);
@@ -33,6 +32,8 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
   HANDLE_TH_ERRORS
   PyObject *cdata_ptr = NULL;     // keyword-only arg - cdata pointer value
   THPStorage *storage_arg = NULL; // storage to be viewed on
+  long storage_arg_offset = 0;    // offset for storage view
+  long storage_arg_size = -1;     // size for storage view
   THPObjectPtr iterator;          // not null iff got a single iterable
   long size = -1;                 // non-negative iff got a number - new storage size
   bool args_ok = true;
@@ -44,8 +45,6 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
     PyObject *arg = PyTuple_GET_ITEM(args, 0);
     if (THPUtils_checkLong(arg)) {
       args_ok = THPUtils_getLong(PyTuple_GET_ITEM(args, 0), &size);
-    } else if (THPStorage_(IsSubclass)(arg)) {
-      storage_arg = (THPStorage*)arg;
     } else {
       iterator = PyObject_GetIter(arg);
       args_ok = iterator != nullptr;
@@ -54,6 +53,25 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
         args_ok = size != -1;
       }
     }
+  // Storage view
+  } else if (args != NULL && PyTuple_Size(args) >= 1 && THPStorage_(IsSubclass)(PyTuple_GET_ITEM(args, 0))) {
+    storage_arg = (THPStorage *)PyTuple_GET_ITEM(args, 0);
+    if (PyTuple_Size(args) >= 2 && !THPUtils_getLong(PyTuple_GET_ITEM(args, 1), &storage_arg_offset))
+        return NULL;
+    storage_arg_size = storage_arg->cdata->size - storage_arg_offset;
+    if (PyTuple_Size(args) >= 3 && !THPUtils_getLong(PyTuple_GET_ITEM(args, 2), &storage_arg_size))
+        return NULL;
+    if (storage_arg_offset < 0 || storage_arg_offset >= storage_arg->cdata->size) {
+      THPUtils_setError("Invalid storage offset (%ld)!\n", storage_arg_offset);
+      return NULL;
+    }
+    if (storage_arg_size < 1 || storage_arg_size > storage_arg->cdata->size - storage_arg_offset) {
+      THPUtils_setError("Invalid storage size (got %ld, but should be between 0 and %ld)!\n",
+          storage_arg_size);
+      return NULL;
+    }
+    if (PyTuple_Size(args) >= 4)
+      args_ok = false;
   } else if (args && PyTuple_Size(args) != 0) {
     args_ok = false;
   }
@@ -67,11 +85,14 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
   if (self != nullptr) {
     if (cdata_ptr) {
       THStorage *ptr = (THStorage*)PyLong_AsVoidPtr(cdata_ptr);
-      THStorage_(retain)(LIBRARY_STATE ptr);
       self->cdata = ptr;
     } else if (storage_arg) {
+      real *data_ptr = storage_arg->cdata->data + storage_arg_offset;
+      THStoragePtr storage = THStorage_(newWithData)(data_ptr, storage_arg_size);
+      storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_VIEW;
+      storage->view = storage_arg->cdata;
       THStorage_(retain)(LIBRARY_STATE storage_arg->cdata);
-      self->cdata = storage_arg->cdata;
+      self->cdata = storage.release();
     } else if (iterator == nullptr && size >= 0) {
       self->cdata = THStorage_(newWithSize)(LIBRARY_STATE size);
     } else if (iterator != nullptr) {
@@ -164,8 +185,8 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
   }
   char err_string[512];
   snprintf (err_string, 512,
-	    "%s %s", "Only indexing with integers and slices supported, but got type: ",
-	    index->ob_type->tp_name);
+      "%s %s", "Only indexing with integers and slices supported, but got type: ",
+      index->ob_type->tp_name);
   PyErr_SetString(PyExc_RuntimeError, err_string);
   return NULL;
   END_HANDLE_TH_ERRORS
@@ -195,8 +216,8 @@ static int THPStorage_(set)(THPStorage *self, PyObject *index, PyObject *value)
   }
   char err_string[512];
   snprintf (err_string, 512, "%s %s",
-	    "Only indexing with integers and slices supported, but got type: ",
-	    index->ob_type->tp_name);
+      "Only indexing with integers and slices supported, but got type: ",
+      index->ob_type->tp_name);
   PyErr_SetString(PyExc_RuntimeError, err_string);
   return -1;
   END_HANDLE_TH_ERRORS_RET(-1)

@@ -67,9 +67,13 @@ TYPE_CHECK = {
 
 # Code used to convert return values to Python objects
 RETURN_WRAPPER = {
-    'THTensor':             Template('return THPTensor_(newObject)($expr)'),
-    'THStorage':            Template('return THPStorage_(newObject)($expr)'),
-    'THLongStorage':        Template('return THPLongStorage_newObject($expr)'),
+    'THTensor':             Template("""return THPTensor_(newObject)($expr)"""),
+    'THStorageINCREF':      Template("""
+      THStorage *result = $expr;
+      THStorage_(retain)(result);
+      return THPStorage_(newObject)(result)"""),
+    'THStorage':             Template("""return THPStorage_(newObject)($expr)"""),
+    'THLongStorage':             Template("""return THPLongStorage_newObject($expr)"""),
     'bool':                 Template('return PyBool_FromLong($expr)'),
     'long':                 Template('return PyInt_FromLong($expr)'),
     'double':               Template('return PyFloat_FromDouble($expr)'),
@@ -105,9 +109,9 @@ RETURN_WRAPPER = {
     'new ValueValuePair':   Template("""
         THTensorPtr _value = THTensor_(new)(LIBRARY_STATE_NOARGS);
         THPTensorPtr _v = (THPTensor*)THPTensor_(newObject)(_value);
+        _value.release();
         THTensorPtr _indices = THTensor_(new)(LIBRARY_STATE_NOARGS);
         THPTensorPtr _i = (THPTensor*)THPTensor_(newObject)(_indices);
-        _value.release();
         _indices.release();
         $expr;
         PyObject *ret = Py_BuildValue("NN", (PyObject*)_v.get(), (PyObject*)_i.get());

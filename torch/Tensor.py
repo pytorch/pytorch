@@ -3,6 +3,7 @@ from . import TensorPrinting
 from functools import reduce
 from itertools import chain
 import sys
+import math
 
 
 def _infer_sizes(sizes, total):
@@ -16,7 +17,7 @@ def _infer_sizes(sizes, total):
             to_infer = i
     if to_infer >= 0:
         assert total % total_sizes == 0, "Can't make sizes have exactly %d elements" % total
-        sizes[to_infer] = total / total_sizes
+        sizes[to_infer] = -total / total_sizes
     return sizes
 
 
@@ -74,16 +75,16 @@ class _TensorBase(object):
     def split(self, split_size, dim=0):
         result = []
         dim_size = self.size(dim)
-        num_splits = math.ceil(dim_size / split_size)
-        last_split_size = split_size * num_splits - dim_size or split_size
+        num_splits = math.ceil(float(dim_size) / split_size)
+        last_split_size = split_size - (split_size * num_splits - dim_size)
         def get_split_size(i):
             return split_size if i < num_splits-1 else last_split_size
         return [self.narrow(dim, i*split_size, get_split_size(i)) for i
                 in torch._pyrange(0, num_splits)]
 
     def chunk(self, n_chunks, dim=0):
-        split_size = math.ceil(tensor.size(dim)/n_chunks)
-        return torch.split(tensor, split_size, dim)
+        split_size = math.ceil(float(self.size(dim)) / n_chunks)
+        return self.split(split_size, dim)
 
     def tolist(self):
         dim = self.dim()
@@ -94,14 +95,16 @@ class _TensorBase(object):
         return []
 
     def view(self, src, *args):
-        assert torch.isTensor(src)
+        if not torch.isTensor(src):
+            args = (src,) + args
+            src = self
         if len(args) == 1 and torch.isStorage(args[0]):
             sizes = args[0]
         else:
             sizes = torch.LongStorage(args)
         sizes = _infer_sizes(sizes, src.nElement())
 
-        if reduce(lambda a,b: a *b, sizes) != src.nElement():
+        if reduce(lambda a,b: a * b, sizes) != src.nElement():
             raise RuntimeError('Invalid size for view. Input size: ' +
                     'x'.join(map(lambda v: str(v), src.size())) +
                     ', output size: ' +
@@ -111,9 +114,10 @@ class _TensorBase(object):
         self.set(src.storage(), src.storageOffset(), sizes)
         return self
 
-    def viewAs(self, src, template):
-        if not torch.isTensor(src) and torch.isLongStorage(template):
-            raise ValueError('viewAs is expecting a Tensor and LongStorage')
+    def viewAs(self, src, template=None):
+        if template is None:
+            template = src
+            src = self
         return self.view(src, template.size())
 
     def permute(self, *args):
@@ -147,7 +151,7 @@ class _TensorBase(object):
             src = self
             result = self.new()
         else:
-            sizes = torch.LongStorage(args)
+            sizes = args[0] if len(args) == 1 and torch.isLongStorage(args[0]) else torch.LongStorage(args)
             result = self
 
         src_dim = src.dim()
@@ -186,14 +190,16 @@ class _TensorBase(object):
 
     def repeatTensor(self, src, *args):
         if not torch.isTensor(src):
-            if torch.isStorage(src) and len(args) == 0:
+            if torch.isStorage(src):
+                assert len(args) == 0
                 repeats = src.tolist()
             else:
                 repeats = [src] + list(args)
             src = self
             result = self.new()
         else:
-            repeats = list(args)
+            # If args == (torch.LongStorage,), then we need to unpack the tuple
+            repeats = list(args[0] if len(args) == 1 else args)
             result = self
 
         if not src.isContiguous():

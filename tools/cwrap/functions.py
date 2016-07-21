@@ -43,7 +43,11 @@ static PyObject * THPTensor_(${name})(THPTensor *self, PyObject *args)
         is_already_provided = argfilter()
         for variable in variables:
             if not is_already_provided(Argument(*variable)):
-                definition += '  {} {};\n'.format(*variable)
+                t, name = variable
+                # PyArg_ParseTuple requires this to be an int <sigh>
+                if t == 'bool':
+                  t = 'int'
+                definition += '  {} {};\n'.format(t, name)
 
         # Generate function body
         definition += self._generate_body()

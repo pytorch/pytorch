@@ -31,6 +31,7 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
   PyObject *cdata_arg = NULL;                 // keyword-only arg - cdata pointer value
   THLongStorage *sizes_arg = NULL;            // a storage with sizes for a new tensor
   THTensor *tensor_arg = NULL;                // a tensor to be viewed on
+  // TODO: constructor from storage
   PyObject *iterable_arg = NULL;              // an iterable, with new tensor contents
   std::vector<size_t> iterator_lengths;       // a queue storing lengths of iterables at each depth
   bool args_ok = true;
@@ -60,10 +61,23 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
           // TODO: error
           return NULL;
         }
-        item = PyIter_Next(iter);
-        if (item == nullptr) {
-          // TODO: set error
-          return NULL;
+        if (length > 0) {
+          item = PyIter_Next(iter);
+          if (item == nullptr) {
+            // TODO: set error
+            return NULL;
+          }
+        } else {
+          break;
+        }
+      }
+      if (iterator_lengths.size() > 1) {
+        for (auto length: iterator_lengths) {
+          if (length <= 0) {
+            // TODO: error message
+            THPUtils_setError("invalid size");
+            return NULL;
+          }
         }
       }
       args_ok = iterator_lengths.size() > 0;
@@ -86,13 +100,13 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
   THPTensorPtr self = (THPTensor *)type->tp_alloc(type, 0);
   if (self != nullptr) {
     if (cdata_arg) {
-      THTensor *ptr = (THTensor*)PyLong_AsVoidPtr(cdata_arg);
-      THTensor_(retain)(LIBRARY_STATE ptr);
-      self->cdata = ptr;
+      self->cdata = (THTensor*)PyLong_AsVoidPtr(cdata_arg);
     } else if (sizes_arg) {
       self->cdata = THTensor_(newWithSize)(LIBRARY_STATE sizes_arg, nullptr);
     } else if (tensor_arg) {
       self->cdata = THTensor_(newWithTensor)(LIBRARY_STATE tensor_arg);
+    } else if (iterable_arg && iterator_lengths.size() == 1 && iterator_lengths[0] == 0) {
+      self->cdata = THTensor_(new)(LIBRARY_STATE_NOARGS);
     } else if (iterable_arg) {
       size_t iter_depth = iterator_lengths.size();
       std::stack<THPObjectPtr> iterator_stack;
@@ -254,14 +268,25 @@ static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
               THTensor_(select)(LIBRARY_STATE tresult, NULL, t_dim, idx)
             )
         } else if (PyTuple_Check(dimidx)) {
-          if (PyTuple_Size(dimidx) != 1 || !THPUtils_checkLong(PyTuple_GET_ITEM(dimidx, 0))) {
-            PyErr_SetString(PyExc_RuntimeError, "Expected a single integer");
+          long length = 1;
+          if (PyTuple_Size(dimidx) == 0 || PyTuple_Size(dimidx) > 2 || !THPUtils_checkLong(PyTuple_GET_ITEM(dimidx, 0))) {
+            PyErr_SetString(PyExc_RuntimeError, "Expected one or two integers");
             return false;
           }
           PyObject *index_obj = PyTuple_GET_ITEM(dimidx, 0);
+          if (PyTuple_Size(dimidx) == 2) {
+            long idx;
+            if (!THPUtils_checkLong(PyTuple_GET_ITEM(dimidx, 1))) {
+              THPUtils_setError("Expected one or two intetegers");
+              return false;
+            }
+            THPUtils_getLong(index_obj, &idx);
+            THPUtils_getLong(PyTuple_GET_ITEM(dimidx, 1), &length);
+            length -= idx;
+          }
           INDEX_LONG(t_dim, index_obj, tresult,
-              THTensor_(narrow)(LIBRARY_STATE tresult, NULL, t_dim++, idx, 1),
-              THTensor_(narrow)(LIBRARY_STATE tresult, NULL, t_dim++, idx, 1)
+              THTensor_(narrow)(LIBRARY_STATE tresult, NULL, t_dim++, idx, length),
+              THTensor_(narrow)(LIBRARY_STATE tresult, NULL, t_dim++, idx, length)
             )
         } else if (PySlice_Check(dimidx)) {
           Py_ssize_t start, end, length;
@@ -311,7 +336,7 @@ static PyObject * THPTensor_(getValue)(THPTensor *self, PyObject *index)
       return THPUtils_(newReal)(THStorage_(get)(LIBRARY_STATE sresult, storage_offset));
     char err_string[512];
     snprintf (err_string, 512,
-          "%s %s", "Unknown exception in THPTensor_(get). Index type is: ",
+          "%s %s", "Unknown exception in THPTensor_(getValue). Index type is: ",
           index->ob_type->tp_name);
     PyErr_SetString(PyExc_RuntimeError, err_string);
     return NULL;
@@ -338,8 +363,9 @@ int THPTensor_(setValue)(THPTensor *self, PyObject *index, PyObject *value)
       THTensor_(maskedFill)(LIBRARY_STATE self->cdata, mask->cdata, v);
     } else if (THPTensor_(IsSubclass)(index)) {
       THTensor_(maskedCopy)(LIBRARY_STATE self->cdata, mask->cdata, ((THPTensor*)value)->cdata);
+    } else {
+      THError("number or Tensor expected");
     }
-    THError("number or Tensor expected");
 #else
   if (false) {
 #endif
@@ -356,7 +382,7 @@ int THPTensor_(setValue)(THPTensor *self, PyObject *index, PyObject *value)
       if (!THPUtils_(parseReal)(value, &v))
         return -1;
       THStorage_(set)(LIBRARY_STATE sresult, storage_offset, v);
-    } else {
+    } else if (tresult) {
       if (THPUtils_(checkReal)(value)) {
         if (!THPUtils_(parseReal)(value, &v))
           return -1;
@@ -368,6 +394,10 @@ int THPTensor_(setValue)(THPTensor *self, PyObject *index, PyObject *value)
         if (!THPModule_tensorCopy((PyObject*)tmp.get(), value))
           return -1;
       }
+    } else {
+      // TODO: error message
+      THPUtils_setError("error");
+      return -1;
     }
   }
   return 0;

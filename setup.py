@@ -5,6 +5,7 @@ import platform
 
 # TODO: detect CUDA
 WITH_CUDA = False
+DEBUG = False
 
 ################################################################################
 # Monkey-patch setuptools to compile in parallel
@@ -70,13 +71,14 @@ if WITH_CUDA:
         "torch/csrc/cuda/Tensor.cpp",
         "torch/csrc/cuda/utils.cpp",
     ]
+
 C = Extension("torch._C",
              libraries=libraries,
              sources=sources,
              language='c++',
-             extra_compile_args=extra_compile_args,
+             extra_compile_args=extra_compile_args + (['-O0', '-g'] if DEBUG else []),
              include_dirs=([".", "torch/csrc", "cutorch/csrc", torch_headers, th_header_path, "/Developer/NVIDIA/CUDA-7.5/include"]),
-             extra_link_args = extra_link_args,
+             extra_link_args = extra_link_args + (['-O0', '-g'] if DEBUG else []),
 )
 
 setup(name="torch", version="0.1",

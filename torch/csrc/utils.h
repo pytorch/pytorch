@@ -36,7 +36,7 @@ public:
 
 private:
   void free();
-  T *ptr;
+  T *ptr = nullptr;
 };
 
 #include "generic/utils.h"

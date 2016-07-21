@@ -25,7 +25,7 @@
 
 [[
   storage STATEFUL_ONLY
-  storage -> THStorage
+  storage -> THStorageINCREF
     - self
 ]]
 
@@ -54,14 +54,20 @@
 ]]
 
 [[
-  reshape
-  reshape -> self LONG_ARGS
-    - self
+  reshape STATEFUL_ONLY
+  reshape -> new THTensor LONG_ARGS
     - self
     - CONSTANT _long_args
-  reshape -> self LONG_ARGS OPTIONAL_SELF
+]]
+
+[[
+  reshape STATELESS_ONLY
+  reshape -> self LONG_ARGS
     - self
-    - THTensor src
+    - THTensor source
+    - CONSTANT _long_args
+  reshape -> new THTensor LONG_ARGS
+    - THTensor source
     - CONSTANT _long_args
 ]]
 
@@ -529,8 +535,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
   normall -> accreal
     - self
     - real p
-  norm -> self
-    - self
+  norm -> new THTensor
     - self
     - real p
     - long dim
@@ -848,8 +853,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
   sum
   sumall -> accreal
     - self
-  sum -> self
-    - self
+  sum -> new THTensor
     - self
     - long dim
   sum -> self OPTIONAL_SELF
@@ -862,8 +866,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
   prod
   prodall -> accreal
     - self
-  prod -> self
-    - self
+  prod -> new THTensor
     - self
     - long dim
   prod -> self OPTIONAL_SELF
@@ -878,8 +881,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
     - self
     - THTensor source
     - long dim
-  cumsum -> self
-    - self
+  cumsum -> new THTensor
     - self
     - long dim
 ]]
@@ -890,8 +892,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
     - self
     - THTensor source
     - long dim
-  cumprod -> self
-    - self
+  cumprod -> new THTensor
     - self
     - long dim
 ]]
@@ -1119,11 +1120,11 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
   tril -> self
     - self
     - self
-    - long k
+    - long k OPTIONAL 0
   tril -> self OPTIONAL_SELF
     - self
     - THTensor source
-    - long k
+    - long k OPTIONAL 0
 ]]
 
 [[
@@ -1131,11 +1132,11 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
   triu -> self
     - self
     - self
-    - long k
+    - long k OPTIONAL 0
   triu -> self OPTIONAL_SELF
     - self
     - THTensor source
-    - long k
+    - long k OPTIONAL 0
 ]]
 
 [[
@@ -1144,7 +1145,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
     - self
     - self
     - THTensor a
-    - CONSTANT 0
+    - CONSTANT -1
   cross -> self
     - self
     - self
@@ -1154,7 +1155,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
     - self
     - THTensor a
     - THTensor b
-    - CONSTANT 0
+    - CONSTANT -1
   cross -> self OPTIONAL_SELF
     - self
     - THTensor a
@@ -1453,7 +1454,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
   kthvalue -> new ValueIndexPair
     - self
     - long k
-    - EXPRESSION THTensor_(size)(LIBRARY_STATE {2}->cdata,THTensor_(nDimension)(LIBRARY_STATE {2}->cdata)-1)
+    - EXPRESSION THTensor_(nDimension)(LIBRARY_STATE {2}->cdata)-1
   kthvalue -> new ValueIndexPair
     - self
     - long k
@@ -1461,7 +1462,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
   kthvalue -> new SelfIndexPair
     - THTensor other
     - long k
-    - EXPRESSION THTensor_(size)(LIBRARY_STATE {2}->cdata,THTensor_(nDimension)(LIBRARY_STATE {2}->cdata)-1)
+    - EXPRESSION THTensor_(nDimension)(LIBRARY_STATE {2}->cdata)-1
   kthvalue -> new SelfIndexPair
     - THTensor other
     - long k
@@ -1472,13 +1473,13 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
   mode
   mode -> new ValueIndexPair
     - self
-    - EXPRESSION THTensor_(size)(LIBRARY_STATE {2}->cdata,THTensor_(nDimension)(LIBRARY_STATE {2}->cdata)-1)
+    - EXPRESSION THTensor_(nDimension)(LIBRARY_STATE {2}->cdata)-1
   mode -> new ValueIndexPair
     - self
     - long dim
   mode -> new SelfIndexPair
     - THTensor other
-    - EXPRESSION THTensor_(size)(LIBRARY_STATE {2}->cdata,THTensor_(nDimension)(LIBRARY_STATE {2}->cdata)-1)
+    - EXPRESSION THTensor_(nDimension)(LIBRARY_STATE {2}->cdata)-1
   mode -> new SelfIndexPair
     - THTensor other
     - long dim
@@ -1488,13 +1489,13 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
   median
   median -> new ValueIndexPair
     - self
-    - EXPRESSION THTensor_(size)(LIBRARY_STATE {2}->cdata,THTensor_(nDimension)(LIBRARY_STATE {2}->cdata)-1)
+    - EXPRESSION THTensor_(nDimension)(LIBRARY_STATE {2}->cdata)-1
   median -> new ValueIndexPair
     - self
     - long dim
   median -> new SelfIndexPair
     - THTensor other
-    - EXPRESSION THTensor_(size)(LIBRARY_STATE {2}->cdata,THTensor_(nDimension)(LIBRARY_STATE {2}->cdata)-1)
+    - EXPRESSION THTensor_(nDimension)(LIBRARY_STATE {2}->cdata)-1
   median -> new SelfIndexPair
     - THTensor other
     - long dim
@@ -1504,7 +1505,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
   sort
   sort -> new ValueIndexPair
     - self
-    - EXPRESSION THTensor_(size)(LIBRARY_STATE {2}->cdata,THTensor_(nDimension)(LIBRARY_STATE {2}->cdata)-1)
+    - EXPRESSION THTensor_(nDimension)(LIBRARY_STATE {2}->cdata)-1
     - CONSTANT false
   sort -> new ValueIndexPair
     - self
@@ -1516,7 +1517,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
     - bool descending
   sort -> new SelfIndexPair
     - THTensor source
-    - EXPRESSION THTensor_(size)(LIBRARY_STATE {2}->cdata,THTensor_(nDimension)(LIBRARY_STATE {2}->cdata)-1)
+    - EXPRESSION THTensor_(nDimension)(LIBRARY_STATE {2}->cdata)-1
     - CONSTANT false
   sort -> new SelfIndexPair
     - THTensor source
@@ -1533,13 +1534,13 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
   topk -> new ValueIndexPair
     - self
     - CONSTANT 1
-    - EXPRESSION THTensor_(size)(LIBRARY_STATE {2}->cdata,THTensor_(nDimension)(LIBRARY_STATE {2}->cdata)-1)
+    - EXPRESSION THTensor_(nDimension)(LIBRARY_STATE {2}->cdata)-1
     - CONSTANT false
     - CONSTANT false
   topk -> new ValueIndexPair
     - self
     - long k
-    - EXPRESSION THTensor_(size)(LIBRARY_STATE {2}->cdata,THTensor_(nDimension)(LIBRARY_STATE {2}->cdata)-1)
+    - EXPRESSION THTensor_(nDimension)(LIBRARY_STATE {2}->cdata)-1
     - CONSTANT false
     - CONSTANT false
   topk -> new ValueIndexPair
@@ -1563,13 +1564,13 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
   topk -> new SelfIndexPair
     - THTensor source
     - CONSTANT 1
-    - EXPRESSION THTensor_(size)(LIBRARY_STATE {2}->cdata,THTensor_(nDimension)(LIBRARY_STATE {2}->cdata)-1)
+    - EXPRESSION THTensor_(nDimension)(LIBRARY_STATE {2}->cdata)-1
     - CONSTANT false
     - CONSTANT false
   topk -> new SelfIndexPair
     - THTensor source
     - long k
-    - EXPRESSION THTensor_(size)(LIBRARY_STATE {2}->cdata,THTensor_(nDimension)(LIBRARY_STATE {2}->cdata)-1)
+    - EXPRESSION THTensor_(nDimension)(LIBRARY_STATE {2}->cdata)-1
     - CONSTANT false
     - CONSTANT false
   topk -> new SelfIndexPair
@@ -1620,7 +1621,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
   sort
   sort -> new ValueValuePair
     - self
-    - EXPRESSION THTensor_(size)(LIBRARY_STATE {2}->cdata,THTensor_(nDimension)(LIBRARY_STATE {2}->cdata)-1)
+    - EXPRESSION THTensor_(nDimension)(LIBRARY_STATE {2}->cdata)-1
     - CONSTANT false
   sort -> new ValueValuePair
     - self
@@ -1632,7 +1633,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
     - bool descending
   sort -> new SelfValuePair
     - THTensor source
-    - EXPRESSION THTensor_(size)(LIBRARY_STATE {2}->cdata,THTensor_(nDimension)(LIBRARY_STATE {2}->cdata)-1)
+    - EXPRESSION THTensor_(nDimension)(LIBRARY_STATE {2}->cdata)-1
     - CONSTANT false
   sort -> new SelfValuePair
     - THTensor source
@@ -1649,13 +1650,13 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
   topk -> new ValueValuePair
     - self
     - CONSTANT 1
-    - EXPRESSION THTensor_(size)(LIBRARY_STATE {2}->cdata,THTensor_(nDimension)(LIBRARY_STATE {2}->cdata)-1)
+    - EXPRESSION THTensor_(nDimension)(LIBRARY_STATE {2}->cdata)-1
     - CONSTANT false
     - CONSTANT false
   topk -> new ValueValuePair
     - self
     - long k
-    - EXPRESSION THTensor_(size)(LIBRARY_STATE {2}->cdata,THTensor_(nDimension)(LIBRARY_STATE {2}->cdata)-1)
+    - EXPRESSION THTensor_(nDimension)(LIBRARY_STATE {2}->cdata)-1
     - CONSTANT false
     - CONSTANT false
   topk -> new ValueValuePair
@@ -1679,13 +1680,13 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
   topk -> new SelfValuePair
     - THTensor source
     - CONSTANT 1
-    - EXPRESSION THTensor_(size)(LIBRARY_STATE {2}->cdata,THTensor_(nDimension)(LIBRARY_STATE {2}->cdata)-1)
+    - EXPRESSION THTensor_(nDimension)(LIBRARY_STATE {2}->cdata)-1
     - CONSTANT false
     - CONSTANT false
   topk -> new SelfValuePair
     - THTensor source
     - long k
-    - EXPRESSION THTensor_(size)(LIBRARY_STATE {2}->cdata,THTensor_(nDimension)(LIBRARY_STATE {2}->cdata)-1)
+    - EXPRESSION THTensor_(nDimension)(LIBRARY_STATE {2}->cdata)-1
     - CONSTANT false
     - CONSTANT false
   topk -> new SelfValuePair
@@ -1763,6 +1764,20 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
     - self
     - THTensor source
     - THTensor mask
+]]
+#endif
+
+#ifdef TH_REAL_IS_BYTE
+[[
+  all
+  logicalall -> bool
+    - self
+]]
+
+[[
+  any
+  logicalany -> bool
+    - self
 ]]
 #endif
 
@@ -1943,7 +1958,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
     - self
     - accreal xmin
     - accreal xmax
-    - accreal step
+    - accreal step OPTIONAL 1
 ]]
 #endif /* !IS_CUDA */
 
@@ -1963,12 +1978,27 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 ]]
 
 [[
-  gather
-  gather -> new THTensor
+  gather STATEFUL_ONLY
+  gather -> CUSTOM THTensorPtr _value = THTensor_(new)(LIBRARY_STATE_NOARGS); THLongStoragePtr _size = THLongTensor_newSizeOf(LIBRARY_STATE index->cdata); THTensor_(resize)(LIBRARY_STATE _value, _size, NULL); THPTensorPtr _ret = (THPTensor*)THPTensor_(newObject)(_value); _value.release(); {expr}; return (PyObject*)_ret.release();
+    - CONSTANT _ret->cdata
     - self
     - long dim
     - THLongTensor index
-  gather -> self OPTIONAL_SELF
+  gather -> self
+    - self
+    - THTensor src
+    - long dim
+    - THLongTensor index
+]]
+
+[[
+  gather STATELESS_ONLY
+  gather -> CUSTOM THTensorPtr _value = THTensor_(new)(LIBRARY_STATE_NOARGS); THLongStoragePtr _size = THLongTensor_newSizeOf(LIBRARY_STATE index->cdata); THTensor_(resize)(LIBRARY_STATE _value, _size, NULL); THPTensorPtr _ret = (THPTensor*)THPTensor_(newObject)(_value); _value.release(); {expr}; return (PyObject*)_ret.release();
+    - CONSTANT _ret->cdata
+    - self
+    - long dim
+    - THLongTensor index
+  gather -> self
     - self
     - THTensor src
     - long dim
@@ -1990,12 +2020,27 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 ]]
 
 [[
-  gather
-  gather -> new THTensor
+  gather STATEFUL_ONLY
+  gather -> CUSTOM THTensorPtr _value = THTensor_(new)(LIBRARY_STATE_NOARGS); THStoragePtr _size = THTensor_newSizeOf(LIBRARY_STATE index->cdata); THTensor_(resize)(LIBRARY_STATE _value, _size, NULL); THPTensorPtr _ret = (THPTensor*)THPTensor_(newObject)(_value); _value.release(); {expr}; return (PyObject*)_ret.release();
+    - CONSTANT _ret->cdata
     - self
     - long dim
     - THTensor index
-  gather -> self OPTIONAL_SELF
+  gather -> self
+    - self
+    - THTensor src
+    - long dim
+    - THTensor index
+]]
+
+[[
+  gather STATELESS_ONLY
+  gather -> CUSTOM THTensorPtr _value = THTensor_(new)(LIBRARY_STATE_NOARGS); THStoragePtr _size = THTensor_newSizeOf(LIBRARY_STATE index->cdata); THTensor_(resize)(LIBRARY_STATE _value, _size, NULL); THPTensorPtr _ret = (THPTensor*)THPTensor_(newObject)(_value); _value.release(); {expr}; return (PyObject*)_ret.release();
+    - CONSTANT _ret->cdata
+    - self
+    - long dim
+    - THTensor index
+  gather -> self
     - self
     - THTensor src
     - long dim
@@ -2007,6 +2052,13 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 // TODO: torch docs provide 7 args
 [[
   addmm
+  addmm -> self
+    - self
+    - real beta OPTIONAL 1
+    - self
+    - real alpha OPTIONAL 1
+    - THTensor mat1
+    - THTensor mat2
   addmm -> self OPTIONAL_SELF
     - self
     - real beta OPTIONAL 1
@@ -2018,6 +2070,13 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   addmv
+  addmv -> self
+    - self
+    - real beta OPTIONAL 1
+    - self
+    - real alpha OPTIONAL 1
+    - THTensor mat
+    - THTensor vec
   addmv -> self OPTIONAL_SELF
     - self
     - real beta OPTIONAL 1
@@ -2029,6 +2088,13 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   addr
+  addr -> self
+    - self
+    - real beta OPTIONAL 1
+    - self
+    - real alpha OPTIONAL 1
+    - THTensor vec1
+    - THTensor vec2
   addr -> self OPTIONAL_SELF
     - self
     - real beta OPTIONAL 1
@@ -2116,7 +2182,7 @@ IMPLEMENT_TWO_MAT_OP(mm, addmm,
   long s2 = THTensor_(size)(LIBRARY_STATE t2->cdata, 1);
   THTensor_(resize2d)(LIBRARY_STATE self->cdata, s1, s2)
   );
-IMPLEMENT_TWO_MAT_OP(bmm, addmm,
+IMPLEMENT_TWO_MAT_OP(bmm, baddbmm,
   long s1 = THTensor_(size)(LIBRARY_STATE t1->cdata, 0);
   long s2 = THTensor_(size)(LIBRARY_STATE t1->cdata, 1);
   long s3 = THTensor_(size)(LIBRARY_STATE t2->cdata, 2);
@@ -2137,7 +2203,7 @@ IMPLEMENT_TWO_MAT_OP_STATELESS(mm, addmm,
   long s2 = THTensor_(size)(LIBRARY_STATE t2->cdata, 1);
   THTensor_(resize2d)(LIBRARY_STATE self_ptr->cdata, s1, s2)
   );
-IMPLEMENT_TWO_MAT_OP_STATELESS(bmm, addmm,
+IMPLEMENT_TWO_MAT_OP_STATELESS(bmm, baddbmm,
   long s1 = THTensor_(size)(LIBRARY_STATE t1->cdata, 0);
   long s2 = THTensor_(size)(LIBRARY_STATE t1->cdata, 1);
   long s3 = THTensor_(size)(LIBRARY_STATE t2->cdata, 2);
@@ -2147,6 +2213,13 @@ IMPLEMENT_TWO_MAT_OP_STATELESS(bmm, addmm,
 
 [[
   addbmm
+  addbmm -> self
+    - self
+    - real beta OPTIONAL 1
+    - self
+    - real alpha OPTIONAL 1
+    - THTensor batch1
+    - THTensor batch2
   addbmm -> self OPTIONAL_SELF
     - self
     - real beta OPTIONAL 1
@@ -2158,6 +2231,13 @@ IMPLEMENT_TWO_MAT_OP_STATELESS(bmm, addmm,
 
 [[
   baddbmm
+  baddbmm -> self
+    - self
+    - real beta OPTIONAL 1
+    - self
+    - real alpha OPTIONAL 1
+    - THTensor batch1
+    - THTensor batch2
   baddbmm -> self OPTIONAL_SELF
     - self
     - real beta OPTIONAL 1
@@ -2244,7 +2324,7 @@ static void THTensor_(random1__)(THTensor *self, THGenerator *gen, long b)
   multinomial -> new THLongTensor
     - THGenerator generator OPTIONAL THPDefaultGenerator->cdata
     - self
-    - long n
+    - long num_samples
     - bool replacement OPTIONAL false
 ]]
 
@@ -2308,30 +2388,6 @@ static void THTensor_(random1__)(THTensor *self, THGenerator *gen, long b)
     - CONSTANT _long_args
 ]]
 
-// TODO: can't handle sampling from [a, b]
-[[
-  geometric
-  geometric -> self
-    - self
-    - THGenerator generator OPTIONAL THPDefaultGenerator->cdata
-    - double p
-]]
-
-[[
-  bernoulli
-  bernoulli -> self
-    - self
-    - THGenerator generator OPTIONAL THPDefaultGenerator->cdata
-    - double p OPTIONAL 0.5
-  bernoulli_FloatTensor -> self
-    - self
-    - THGenerator generator OPTIONAL THPDefaultGenerator->cdata
-    - THFloatTensor float_probabilities
-  bernoulli_DoubleTensor -> self
-    - self
-    - THGenerator generator OPTIONAL THPDefaultGenerator->cdata
-    - THDoubleTensor double_probabilities
-]]
 #elif CUDA_FLOAT
 [[
   multinomial
@@ -2393,8 +2449,34 @@ static void THTensor_(random1__)(THTensor *self, THGenerator *gen, long b)
     - self
     - CONSTANT _long_args
 ]]
+#endif
 
+#if !IS_CUDA
 // TODO: can't handle sampling from [a, b]
+[[
+  geometric
+  geometric -> self
+    - self
+    - THGenerator generator OPTIONAL THPDefaultGenerator->cdata
+    - double p
+]]
+
+[[
+  bernoulli
+  bernoulli -> self
+    - self
+    - THGenerator generator OPTIONAL THPDefaultGenerator->cdata
+    - double p OPTIONAL 0.5
+  bernoulli_FloatTensor -> self
+    - self
+    - THGenerator generator OPTIONAL THPDefaultGenerator->cdata
+    - THFloatTensor float_probabilities
+  bernoulli_DoubleTensor -> self
+    - self
+    - THGenerator generator OPTIONAL THPDefaultGenerator->cdata
+    - THDoubleTensor double_probabilities
+]]
+#elif CUDA_FLOAT
 [[
   geometric
   geometric -> self
@@ -2409,6 +2491,140 @@ static void THTensor_(random1__)(THTensor *self, THGenerator *gen, long b)
     - double p OPTIONAL 0.5
 ]]
 #endif
+
+static std::pair<std::vector<THPObjectPtr>, std::vector<THTensor *>>
+THPTensor_(_iterableTensors)(PyObject *iterable)
+{
+  THPObjectPtr iterator;
+  THPObjectPtr item;
+  std::vector<THPObjectPtr> items;
+  std::vector<THTensor *> item_tensors;
+  if ((iterator = PyObject_GetIter(iterable))) {
+    while((item = PyIter_Next(iterator))) {
+      if (!THPTensor_(IsSubclass)(item)) {
+        THPUtils_setError("expected an iterable of " THPTensorStr ", but found %s in it", Py_TYPE(item)->tp_name);
+        throw std::exception();
+      }
+      item_tensors.push_back(((THPTensor*)item.get())->cdata);
+      items.emplace_back(std::move(item));
+    }
+  } else {
+    throw std::invalid_argument("");
+  }
+  return std::make_pair(std::move(items), std::move(item_tensors));
+}
+
+static PyObject * THPTensor_(cat)(THPTensor *self, PyObject *args)
+{
+  HANDLE_TH_ERRORS
+  THPTensor *tensor1;
+  THPTensor *tensor2;
+  long dimension;
+  Py_ssize_t _argcount = PyTuple_Size(args);
+  if (_argcount == 2) {
+      PyObject *iterable = PyTuple_GET_ITEM(args, 0);
+      PyObject *dim = PyTuple_GET_ITEM(args, 1);
+      std::vector<THPObjectPtr> items;
+      std::vector<THTensor *> item_tensors;
+      if (THPUtils_getLong(dim, &dimension)) {
+        try {
+          std::tie(items, item_tensors) = THPTensor_(_iterableTensors)(iterable);
+          THTensor_(catArray)(self->cdata, item_tensors.data(), items.size(), dimension);
+          Py_INCREF(self);
+          return (PyObject*)self;
+
+        } catch (std::invalid_argument &e) {
+        } catch (std::exception &e) {
+          return NULL;
+        }
+      }
+  } else if (_argcount == 3) {
+    if (PyArg_ParseTuple(args, "O!O!l", &THPTensorType, &tensor1, &THPTensorType, &tensor2, &dimension)) {
+      THTensor_(cat)(self->cdata, tensor1->cdata, tensor2->cdata, dimension);
+      Py_INCREF(self);
+      return (PyObject*)self;
+    }
+  }
+
+  // TODO: describe args
+  THPUtils_invalidArguments(args, "(TODO)");
+  return NULL;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPTensor_stateless_(cat)(THPTensor *_unused, PyObject *args)
+{
+  HANDLE_TH_ERRORS
+  THPTensor *tensor1;
+  THPTensor *tensor2;
+  long dimension;
+  Py_ssize_t _argcount = PyTuple_Size(args);
+  if (_argcount == 2) {
+    THTensorPtr _self = THTensor_(new)(LIBRARY_STATE_NOARGS);
+    THPTensorPtr self = (THPTensor*)THPTensor_(newObject)(_self);
+    _self.release();
+
+    PyObject *iterable = PyTuple_GET_ITEM(args, 0);
+    PyObject *dim = PyTuple_GET_ITEM(args, 1);
+    std::vector<THPObjectPtr> items;
+    std::vector<THTensor *> item_tensors;
+    if (THPUtils_getLong(dim, &dimension)) {
+      try {
+        std::tie(items, item_tensors) = THPTensor_(_iterableTensors)(iterable);
+        THTensor_(catArray)(self->cdata, item_tensors.data(), items.size(), dimension);
+        Py_INCREF(self.get());
+        return (PyObject*)self.release();
+
+      } catch (std::invalid_argument &e) {
+      } catch (std::exception &e) {
+        return NULL;
+      }
+    }
+  } else if (_argcount == 3) {
+    if (PyArg_ParseTuple(args, "O!O!l", &THPTensorType, &tensor1, &THPTensorType, &tensor2, &dimension)) {
+      THTensorPtr _self = THTensor_(new)(LIBRARY_STATE_NOARGS);
+      THPTensorPtr self = (THPTensor*)THPTensor_(newObject)(_self.get());
+      _self.release();
+
+      THTensor_(cat)(self->cdata, tensor1->cdata, tensor2->cdata, dimension);
+      Py_INCREF(self.get());
+      return (PyObject*)self.release();
+    } else {
+      PyErr_Clear();
+      THPTensor *self = (THPTensor*)PyTuple_GET_ITEM(args, 0);
+      PyObject *iterable = PyTuple_GET_ITEM(args, 1);
+      PyObject *dim = PyTuple_GET_ITEM(args, 2);
+
+      std::vector<THPObjectPtr> items;
+      std::vector<THTensor *> item_tensors;
+      if (THPUtils_getLong(dim, &dimension)) {
+        try {
+          std::tie(items, item_tensors) = THPTensor_(_iterableTensors)(iterable);
+          THTensor_(catArray)(self->cdata, item_tensors.data(), items.size(), dimension);
+          Py_INCREF(self);
+          return (PyObject*)self;
+
+        } catch (std::invalid_argument &e) {
+        } catch (std::exception &e) {
+          fprintf(stderr, "e: %s\n", e.what());
+          return NULL;
+        }
+      }
+    }
+  } else if (_argcount == 4) {
+    THPTensor *self;
+    if (PyArg_ParseTuple(args, "O!O!O!l", &THPTensorType, &self, &THPTensorType, &tensor1, &THPTensorType, &tensor2, &dimension)) {
+      THTensor_(cat)(self->cdata, tensor1->cdata, tensor2->cdata, dimension);
+      Py_INCREF(self);
+      return (PyObject*)self;
+    }
+  }
+
+  // TODO: describe args
+  THPUtils_invalidArguments(args, "(TODO)");
+  return NULL;
+  END_HANDLE_TH_ERRORS
+}
 
 // Declared in TensorCopy.cpp
 //PyObject * THPTensor_(copy)(THPTensor *self, PyObject *other);
@@ -2497,8 +2713,14 @@ static PyMethodDef THPTensor_(methods)[] = {
   {"exponential",     (PyCFunction)THPTensor_(exponential),     METH_VARARGS, NULL},
   {"rand",            (PyCFunction)THPTensor_(rand),            METH_VARARGS, NULL},
   {"randn",           (PyCFunction)THPTensor_(randn),           METH_VARARGS, NULL},
+#endif
+#if !IS_CUDA || CUDA_FLOAT
   {"geometric",       (PyCFunction)THPTensor_(geometric),       METH_VARARGS, NULL},
   {"bernoulli",       (PyCFunction)THPTensor_(bernoulli),       METH_VARARGS, NULL},
+#endif
+#ifdef TH_REAL_IS_BYTE
+  {"all",             (PyCFunction)THPTensor_(all),             METH_VARARGS, NULL},
+  {"any",             (PyCFunction)THPTensor_(any),             METH_VARARGS, NULL},
 #endif
 #if !IS_CUDA
   {"randperm",        (PyCFunction)THPTensor_(randperm),        METH_VARARGS, NULL},
@@ -2566,6 +2788,7 @@ static PyMethodDef THPTensor_(methods)[] = {
   {"indexAdd",        (PyCFunction)THPTensor_(indexAdd),        METH_VARARGS, NULL},
   {"indexFill",       (PyCFunction)THPTensor_(indexFill),       METH_VARARGS, NULL},
 #endif
+  {"cat",             (PyCFunction)THPTensor_(cat),             METH_VARARGS, NULL},
   {"narrow",          (PyCFunction)THPTensor_(narrow),          METH_VARARGS, NULL},
   {"unfold",          (PyCFunction)THPTensor_(unfold),          METH_VARARGS, NULL},
 #if !IS_CUDA || CUDA_FLOAT
@@ -2641,8 +2864,14 @@ static PyMethodDef THPTensorStatelessMethods[] = {
   {"exponential",     (PyCFunction)THPTensor_stateless_(exponential),     METH_VARARGS, NULL},
   {"rand",            (PyCFunction)THPTensor_stateless_(rand),            METH_VARARGS, NULL},
   {"randn",           (PyCFunction)THPTensor_stateless_(randn),           METH_VARARGS, NULL},
+#endif
+#if !IS_CUDA || CUDA_FLOAT
   {"geometric",       (PyCFunction)THPTensor_stateless_(geometric),       METH_VARARGS, NULL},
   {"bernoulli",       (PyCFunction)THPTensor_stateless_(bernoulli),       METH_VARARGS, NULL},
+#endif
+#ifdef TH_REAL_IS_BYTE
+  {"all",             (PyCFunction)THPTensor_stateless_(all),             METH_VARARGS, NULL},
+  {"any",             (PyCFunction)THPTensor_stateless_(any),             METH_VARARGS, NULL},
 #endif
 #if !IS_CUDA
   {"randperm",        (PyCFunction)THPTensor_stateless_(randperm),        METH_VARARGS, NULL},
@@ -2710,6 +2939,7 @@ static PyMethodDef THPTensorStatelessMethods[] = {
   {"indexAdd",        (PyCFunction)THPTensor_stateless_(indexAdd),        METH_VARARGS, NULL},
   {"indexFill",       (PyCFunction)THPTensor_stateless_(indexFill),       METH_VARARGS, NULL},
 #endif
+  {"cat",             (PyCFunction)THPTensor_stateless_(cat),             METH_VARARGS, NULL},
   {"narrow",          (PyCFunction)THPTensor_stateless_(narrow),          METH_VARARGS, NULL},
   {"unfold",          (PyCFunction)THPTensor_stateless_(unfold),          METH_VARARGS, NULL},
 #if !IS_CUDA || CUDA_FLOAT
