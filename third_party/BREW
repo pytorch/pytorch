@@ -104,6 +104,11 @@ cc_thirdparty_target(
 ##############################################################################
 
 cc_thirdparty_target(
+  name="gflags",
+  cc_obj_files = ["-lgflags"] if Brewery.Env.Config.USE_GFLAGS else [],
+)
+
+cc_thirdparty_target(
   name="glog",
   cc_obj_files = ["-lglog"] if Brewery.Env.Config.USE_GLOG else [],
 )
@@ -170,4 +175,14 @@ cc_thirdparty_target(
 cc_thirdparty_target(
   name = "snappy",
   cc_obj_files = ["-lsnappy"],
+)
+  
+shell_script(
+  name = "pybind11",
+  srcs = ["BREW"],
+  commands=[
+    "DST=$CAFFE2_GENDIR/third_party/include/",
+    "mkdir -p $DST",
+    "cp -r $CAFFE2_SRCDIR/$CAFFE2_CWD/pybind11/include/pybind11 $DST/",
+  ],
 )

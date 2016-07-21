@@ -79,10 +79,10 @@ class RocksDB : public DB {
 
   void Close() override { db_.reset(); }
   unique_ptr<Cursor> NewCursor() override {
-    return std::make_unique<RocksDBCursor>(db_.get());
+    return make_unique<RocksDBCursor>(db_.get());
   }
   unique_ptr<Transaction> NewTransaction() override {
-    return std::make_unique<RocksDBTransaction>(db_.get());
+    return make_unique<RocksDBTransaction>(db_.get());
   }
 
  private:

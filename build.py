@@ -56,6 +56,10 @@ class Config(object):
     # True.
     USE_GLOG = True
 
+    # gflags: Caffe can choose to use google glog, which will allow a more
+    # True.
+    USE_GFLAGS = False
+
     # Whether to use RTTI or not. Note that this might not always work; to
     # disable RTTI means that all your dependencies, most notably protobuf, have
     # to be built without RTTI. If you don't know, leave USE_RTTI True.

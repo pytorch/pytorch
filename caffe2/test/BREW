@@ -3,7 +3,7 @@ cc_library(
   srcs = ["caffe2_gtest_main.cc"],
   deps = [
       "//third_party:gtest",
-      "//caffe2/core:core",
+      "//caffe2:core",
   ],
 )
 
@@ -14,6 +14,6 @@ cc_test(
   srcs = ["caffe2_gtest_main.cc"],
   deps = [
       "//third_party:gtest",
-      "//caffe2/core:core",
+      "//caffe2:core",
   ],
 )

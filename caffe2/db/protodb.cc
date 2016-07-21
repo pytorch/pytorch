@@ -83,10 +83,10 @@ class ProtoDB : public DB {
   }
 
   unique_ptr<Cursor> NewCursor() override {
-    return std::make_unique<ProtoDBCursor>(&proto_);
+    return make_unique<ProtoDBCursor>(&proto_);
   }
   unique_ptr<Transaction> NewTransaction() override {
-    return std::make_unique<ProtoDBTransaction>(&proto_);
+    return make_unique<ProtoDBTransaction>(&proto_);
   }
 
  private:

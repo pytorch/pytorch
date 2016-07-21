@@ -96,7 +96,7 @@ class ZmqDB : public DB {
   void Close() override {}
 
   unique_ptr<Cursor> NewCursor() override {
-    return std::make_unique<ZmqDBCursor>(source_);
+    return make_unique<ZmqDBCursor>(source_);
   }
 
   unique_ptr<Transaction> NewTransaction() override {

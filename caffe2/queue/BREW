@@ -1,0 +1,24 @@
+cc_library(
+  name = "queue_ops",
+  srcs = [
+      "queue_ops.cc",
+  ],
+  hdrs = Glob(["*.h"]),
+  deps = [
+    "//caffe/proto:caffe_proto",
+    "//caffe2:core",
+  ],
+  whole_archive = True,
+)
+
+cc_library(
+  name = "queue_ops_gpu",
+  srcs = [
+      "queue_ops_gpu.cc",
+  ],
+  deps = [
+      ":queue_ops",
+      "//caffe2:core_gpu",
+  ],
+  whole_archive = True,
+)

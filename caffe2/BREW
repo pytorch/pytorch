@@ -1,3 +1,67 @@
+cc_library(
+  name = "core",
+  srcs = Glob(["core/*.cc", "utils/*.cc"],
+              excludes=["*gpu*", "*cudnn*", "*test*"]),
+  hdrs=Glob(["core/*.h", "utils/*.h"]),
+  deps = [
+    "//caffe2/proto:caffe2_proto",
+    "//third_party:glog",
+  ],
+  whole_archive = True,
+)
+
+cuda_library(
+  name="core_gpu_cu",
+  srcs=Glob(["core/*.cu", "utils/*.cu"]),
+  deps=[
+    ":core",
+    "//third_party:cuda",
+  ],
+)
+
+cc_library(
+  name = "core_gpu",
+  srcs = Glob(["core/*_gpu.cc", "utils/*_gpu.cc"]),
+  deps = [
+    ":core",
+    ":core_gpu_cu",
+    "//third_party/cnmem:cnmem",
+    "//third_party:cuda",
+  ],
+  whole_archive = True,
+)
+
+cc_library(
+  name = "core_cudnn",
+  srcs = Glob(["core/*_cudnn.cc"]),
+  deps = [
+    ":core_gpu",
+    "//third_party:cudnn",
+  ],
+  whole_archive = True,
+)
+
+cc_test(
+  name = "core_test",
+  srcs = Glob(["core/*_test.cc", "utils/*_test.cc"],
+              excludes=["*gpu_test*"]),
+  deps = [
+      ":core",
+      "//third_party:gtest",
+      "//caffe2/test:caffe2_gtest_main",
+  ],
+)
+
+cc_test(
+  name = "core_gpu_test",
+  srcs = Glob(["core/*_gpu_test.cc", "utils/*_gpu_test.cc"]),
+  deps = [
+      ":core_gpu",
+      "//third_party:gtest",
+      "//caffe2/test:caffe2_gtest_main",
+  ],
+)
+
 filegroup(
     name = "caffe2_python",
     srcs = ["__init__.py"],
@@ -14,11 +78,14 @@ cc_library(
     optional_deps = [
       "//caffe2/operators:core_ops_gpu",
       "//caffe2/operators:core_ops_cudnn",
+      "//caffe2/cuda_rtc:rtc_ops",
+      "//caffe2/db:db_gpu",
       "//caffe2/image:image_ops",
       "//caffe2/image:image_ops_gpu",
       "//caffe2/mpi:mpi_ops",
       "//caffe2/mpi:mpi_ops_gpu",
-      "//caffe2/cuda_rtc:rtc_ops",
+      "//caffe2/queue:queue_ops",
+      "//caffe2/queue:queue_ops_gpu",
       "//caffe2/sgd:sgd_ops",
       "//caffe2/sgd:sgd_ops_gpu",
     ],

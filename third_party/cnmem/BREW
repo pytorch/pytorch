@@ -1,3 +1,14 @@
+# We need to copy over the header to the right folder.
+shell_script(
+  name = "cnmem_header",
+  srcs = ["cnmem.h"],
+  commands=[
+    "DST=$CAFFE2_GENDIR/third_party/include/",
+    "mkdir -p $DST",
+    "cp $CAFFE2_SRCDIR/$CAFFE2_CWD/cnmem.h $DST/",
+  ],
+)
+
 cuda_library(
   name = "cnmem",
   srcs = [
@@ -7,6 +18,7 @@ cuda_library(
     "cnmem.h",
   ],
   deps = [
+      "cnmem_header",
       "//third_party:cuda",
   ]
 )

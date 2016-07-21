@@ -7,7 +7,7 @@ cc_library(
       "rocksdb.cc",
   ],
   deps = [
-      "//caffe2/core:core",
+      "//caffe2:core",
       "//third_party:rocksdb",
   ],
   whole_archive = True,
@@ -19,7 +19,7 @@ cc_library(
       "leveldb.cc",
   ],
   deps = [
-    "//caffe2/core:core",
+    "//caffe2:core",
     "//third_party:leveldb",
   ],
   whole_archive = True,
@@ -31,7 +31,7 @@ cc_library(
       "lmdb.cc",
   ],
   deps = [
-    "//caffe2/core:core",
+    "//caffe2:core",
     "//third_party:lmdb",
   ],
   whole_archive = True,
@@ -43,8 +43,8 @@ cc_library(
       "zmqdb.cc",
   ],
   deps = [
-    "//caffe2/core:core",
-    "//caffe2/utils:zmq_helper",
+    "//caffe2:core",
+    "//third_party:libzmq",
   ],
   whole_archive = True,
 )
@@ -55,14 +55,29 @@ cc_library(
     "create_db_op.cc",
     "protodb.cc",
   ],
+  hdrs = [
+    "create_db_op.h",
+  ],
   deps = [
-    "//caffe2/core:core",
+    "//caffe2:core",
   ],
   optional_deps = [
     ":leveldb",
     ":lmdb",
     ":rocksdb",
     ":zmqdb",
+  ],
+  whole_archive = True,
+)
+
+cc_library(
+  name = "db_gpu",
+  srcs = [
+    "create_db_op_gpu.cc",
+  ],
+  deps = [
+    ":db",
+    "//caffe2:core",
   ],
   whole_archive = True,
 )

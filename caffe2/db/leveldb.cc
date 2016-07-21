@@ -74,10 +74,10 @@ class LevelDB : public DB {
 
   void Close() override { db_.reset(); }
   unique_ptr<Cursor> NewCursor() override {
-    return std::make_unique<LevelDBCursor>(db_.get());
+    return make_unique<LevelDBCursor>(db_.get());
   }
   unique_ptr<Transaction> NewTransaction() override {
-    return std::make_unique<LevelDBTransaction>(db_.get());
+    return make_unique<LevelDBTransaction>(db_.get());
   }
 
  private:
