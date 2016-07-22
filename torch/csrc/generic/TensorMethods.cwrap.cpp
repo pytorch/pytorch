@@ -106,6 +106,12 @@
     - THTensor source
   setStorage -> self
     - self
+    - CONSTANT NULL
+    - CONSTANT 0
+    - CONSTANT NULL
+    - CONSTANT NULL
+  setStorage -> self
+    - self
     - THStorage sourceStorage
     - CONSTANT 0
     - EXPRESSION THLongStorage_newWithSize1(THStorage_(size)(LIBRARY_STATE sourceStorage->cdata))

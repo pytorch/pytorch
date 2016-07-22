@@ -83,5 +83,5 @@ C = Extension("torch._C",
 
 setup(name="torch", version="0.1",
       ext_modules=[C],
-      packages=['torch', 'torch.cuda', 'torch.optim'],
+      packages=['torch', 'torch.cuda', 'torch.optim', 'torch.legacy', 'torch.legacy.nn'],
 )
