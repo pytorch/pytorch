@@ -92,10 +92,49 @@ cc_thirdparty_target(
   ],
 )
 
-cc_thirdparty_target(
-  name="cnmen",
-  deps=["//third_party/cnmem:cnmem"],
-  cc_obj_files = [],
+shell_script(
+  name = "cnmem_header",
+  srcs = ["cnmem/include/cnmem.h"],
+  commands=[
+    "DST=$CAFFE2_GENDIR/third_party/include/",
+    "mkdir -p $DST",
+    "cp $CAFFE2_SRCDIR/$CAFFE2_CWD/cnmem/include/cnmem.h $DST/",
+  ],
+)
+
+cc_library(
+  name = "cnmem",
+  srcs = [
+    "cnmem/src/cnmem.cpp",
+  ],
+  deps = [
+      ":cnmem_header",
+      ":cuda",
+  ]
+)
+
+shell_script(
+  name = "nccl_header",
+  srcs = ["nccl/src/nccl.h"],
+  commands=[
+    "DST=$CAFFE2_GENDIR/third_party/include/",
+    "mkdir -p $DST",
+    "cp $CAFFE2_SRCDIR/$CAFFE2_CWD/nccl/src/nccl.h $DST/",
+  ],
+)
+
+cuda_library(
+  name = "nccl",
+  srcs = Glob(["nccl/src/*.cu"]),
+  deps = [
+      ":nccl_header",
+      ":cuda",
+  ],
+  compiler_flags=[
+      "-Wno-switch",  # NCCL does not follow strict switch enum check.
+      "-DNCCL_MAJOR=1 -DNCCL_MINOR=2 -DNCCL_PATCH=3",
+      "-DCUDA_MAJOR=__CUDACC_VER_MAJOR__ -DCUDA_MINOR=__CUDACC_VER_MINOR__",
+  ],
 )
 
 ###############################################################################

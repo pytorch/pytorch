@@ -14,7 +14,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import core, workspace
-from caffe2.python.io import Reader, Writer
+from caffe2.python.dataio import Reader, Writer
 from caffe2.python.schema import Struct
 import numpy as np
 

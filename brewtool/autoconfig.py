@@ -214,6 +214,11 @@ class Env(object):
             '-ffunction-sections',
             '-fdata-sections',
         ] + Config.OPTIMIZATION_FLAGS
+        # flags that do not get included in nvcc's -Xcompiler
+        self.HOST_ONLY_CFLAGS = [
+            '-MMD',
+            '-MP',
+        ]
         self.INCLUDES = Config.INCLUDES + [
             self.GENDIR,
             os.path.join(self.GENDIR, 'third_party'),
@@ -395,9 +400,10 @@ class Env(object):
             [Config.PROTOC_BINARY, '-I' + self.GENDIR, '--cpp_out', self.GENDIR,
              '--python_out', self.GENDIR, '{src}'])
         self.TEMPLATE_CC = ' '.join(
-            [Config.CC] + self.DEFINES + self.CFLAGS + [self.CPP11_FLAG] +
+            [Config.CC] + self.DEFINES + self.CFLAGS + self.HOST_ONLY_CFLAGS +
+            [self.CPP11_FLAG] +
             ['-I' + s for s in self.INCLUDES] +
-            ['-c', '{src}', '-o', '{dst}'])
+            ['{flags}', '-c', '{src}', '-o', '{dst}'])
         self.TEMPLATE_LINK_STATIC = ' '.join(
             [Config.AR, 'cr', '{dst}', '{src}'])
         self.TEMPLATE_LINK_SHARED = ' '.join(
@@ -413,7 +419,7 @@ class Env(object):
              '--gtest_filter=-*.LARGE_*'])
         self.TEMPLATE_NVCC = ' '.join(
             [NVCC, '-ccbin', Config.CC] + self.NVCC_CFLAGS +
-            ['-Xcompiler', '"' + ' '.join(self.CFLAGS) + '"'] +
+            ['-Xcompiler', '"', ' '.join(self.CFLAGS), '{flags}', '"'] +
             ['-I' + s for s in self.INCLUDES] +
             self.DEFINES + ['-c', '{src}', '-o', '{dst}'])
         self.TEMPLATE_WHOLE_ARCHIVE = GetWholeArchiveTemplate(
@@ -431,18 +437,19 @@ class Env(object):
         # After all are done, we print out the Env setting.
         BuildDebug("Finished autoconfiguring the build environment.")
 
-    def _format(self, template, src, dst=''):
+    def _format(self, template, src, dst='', **kwargs):
         if type(src) is list:
             src = ' '.join(src)
         if type(dst) is list:
             dst = ' '.join(dst)
-        return template.format(src=src, dst=dst)
+        return template.format(src=src, dst=dst, **kwargs)
 
     def protoc(self, src):
         return self._format(self.TEMPLATE_PROTOC, src)
 
-    def cc(self, src, dst):
-        return self._format(self.TEMPLATE_CC, src, dst)
+    def cc(self, src, dst, compiler_flags=None):
+        flags = ' '.join(compiler_flags) if compiler_flags else ''
+        return self._format(self.TEMPLATE_CC, src, dst, flags=flags)
 
     def link_static(self, src, dst):
         return self._format(self.TEMPLATE_LINK_STATIC, src, dst)
@@ -456,8 +463,9 @@ class Env(object):
     def cc_test(self, src):
         return self._format(self.TEMPLATE_CC_TEST, src)
 
-    def nvcc(self, src, dst):
-        return self._format(self.TEMPLATE_NVCC, src, dst)
+    def nvcc(self, src, dst, compiler_flags=None):
+        flags = ' '.join(compiler_flags) if compiler_flags else ''
+        return self._format(self.TEMPLATE_NVCC, src, dst, flags=flags)
 
     def whole_archive(self, src):
         return self._format(self.TEMPLATE_WHOLE_ARCHIVE, src)

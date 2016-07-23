@@ -1,4 +1,8 @@
 filegroup(
-  name="tutorial",
-  srcs=Glob(["*.ipynb"])
+  name="tutorial_files",
+  srcs=Glob([
+      "*.ipynb",
+      "start_ipython_notebook.sh",
+      "images/cat.jpg",
+  ]),
 )

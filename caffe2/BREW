@@ -26,7 +26,7 @@ cc_library(
   deps = [
     ":core",
     ":core_gpu_cu",
-    "//third_party/cnmem:cnmem",
+    "//third_party:cnmem",
     "//third_party:cuda",
   ],
   whole_archive = True,
@@ -48,6 +48,7 @@ cc_test(
               excludes=["*gpu_test*"]),
   deps = [
       ":core",
+      "//caffe2/operators:core_ops",
       "//third_party:gtest",
       "//caffe2/test:caffe2_gtest_main",
   ],
@@ -63,11 +64,6 @@ cc_test(
   ],
 )
 
-filegroup(
-    name = "caffe2_python",
-    srcs = ["__init__.py"],
-)
-
 cc_library(
     name = "all_available_ops",
     srcs = [],
@@ -79,6 +75,7 @@ cc_library(
     optional_deps = [
       "//caffe2/operators:core_ops_gpu",
       "//caffe2/operators:core_ops_cudnn",
+      "//caffe2/contrib/nccl:nccl_ops",
       "//caffe2/cuda_rtc:rtc_ops",
       "//caffe2/db:db_gpu",
       "//caffe2/image:image_ops",

@@ -69,6 +69,32 @@ TEST(BlobTest, BlobWrongType) {
   ASSERT_THROW(blob.Get<int>(), EnforceNotMet);
 }
 
+TEST(BlobTest, BlobReset) {
+  Blob blob;
+  std::unique_ptr<Foo> foo(new Foo());
+  EXPECT_TRUE(blob.Reset(foo.release()) != nullptr);
+  // Also test that Reset works.
+  blob.Reset();
+}
+
+TEST(BlobTest, BlobShareExternalPointer) {
+  Blob blob;
+  std::unique_ptr<Foo> foo(new Foo());
+  EXPECT_EQ(blob.ShareExternal<Foo>(foo.get()), foo.get());
+  EXPECT_TRUE(blob.IsType<Foo>());
+  // Also test that Reset works.
+  blob.Reset();
+}
+
+TEST(BlobTest, BlobShareExternalObject) {
+  Blob blob;
+  Foo foo;
+  EXPECT_EQ(blob.ShareExternal<Foo>(&foo), &foo);
+  EXPECT_TRUE(blob.IsType<Foo>());
+  // Also test that Reset works.
+  blob.Reset();
+}
+
 TEST(BlobTest, StringSerialization) {
   const std::string kTestString = "Hello world?";
   Blob blob;
@@ -558,6 +584,7 @@ TYPED_TEST(TypedTensorTest, BigTensorSerialization) {
         "DUMMY_ENGINE");
     Workspace ws;
     auto load_op = CreateOperator(op_def, &ws);
+    EXPECT_TRUE(load_op != nullptr);
     LOG(INFO) << "Running operator";
 
     load_op->Run();

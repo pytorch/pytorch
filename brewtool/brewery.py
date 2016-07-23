@@ -163,6 +163,22 @@ class Brewery(object):
         return os.path.join(cls.Env.GENDIR, new_name)
 
     @classmethod
+    def GetNestedGenDirs(cls, dirname):
+        """Returns the nested list of directories from a directory name.
+        
+        For example, if the dirname is GENDIR/a/b, this returns
+        ['GENDIR/a/b', 'GENDIR/a']
+        """
+        if not dirname.startswith(cls.Env.GENDIR):
+            raise RuntimeError('Folder {} does not start with gendir, which '
+                               'is {}'.format(dirname, cls.Env.GENDIR))
+        dirs = []
+        while dirname != cls.Env.GENDIR:
+            dirs.append(dirname)
+            dirname = os.path.split(dirname)[0]
+        return dirs
+
+    @classmethod
     def MakeGenDirs(cls, rectified_srcs):
         for src in rectified_srcs:
             dst = join(cls.Env.GENDIR, src)
@@ -265,6 +281,20 @@ class Brewery(object):
                 BuildWarning(key)
 
     @classmethod
+    def ShowFileCoverage(cls):
+        # check if all files in the folder has been properly registered.
+        all_files = set()
+        for root, _, files in os.walk("caffe2"):
+            all_files.update([os.path.join(root, f) for f in files])
+        not_declared = list(all_files.difference(cls._registered_files))
+        if len(not_declared):
+            BuildWarning("You have the following files not being registered "
+                         "by any BREW files:")
+            not_declared.sort()
+            for name in not_declared:
+                print(name)
+
+    @classmethod
     def Run(cls, Config, argv):
         BuildLog("Brewing Caffe2. Running command:\n{0}", argv)
         cls.InitBrewery(Config)
@@ -280,22 +310,12 @@ class Brewery(object):
             cls.is_test = True
             cls.Build(argv[2:])
             cls.Finalize()
+        elif command == 'files':
+            cls.ShowFileCoverage()
         else:
             BuildFatal('Unknown command: {0}', command)
         BuildLog("Brewing done.")
         BuildLog("Performing post-brewing checks.")
-        # check if all files in the folder has been properly registered.
-        all_files = set()
-        for root, _, files in os.walk("caffe2"):
-            all_files.update([os.path.join(root, f) for f in files])
-        not_declared = list(all_files.difference(cls._registered_files))
-        if len(not_declared):
-            BuildWarning("You have the following files not being registered "
-                         "by any BREW files:")
-            not_declared.sort()
-            for name in not_declared:
-                print(name)
-
 
 class BuildTarget(object):
     """A build target that can be executed with the Build() function."""
@@ -490,11 +510,19 @@ class proto_library(BuildTarget):
         pbo_files = [Brewery.GenFilename(f, 'pb.o') for f in gen_srcs]
         self.cc_obj_files = pbo_files + MergeOrderedObjs(
             [Brewery.Get(dep).cc_obj_files for dep in self.deps])
+        # For all folders that will contain python files, touch the __init__.py
+        # under that folder.
+        gen_folders = sum(
+            [Brewery.GetNestedGenDirs(os.path.dirname(s)) for s in gen_srcs],
+            [])
         self.command_groups = [
             # protocol buffer commands
             [Brewery.Env.protoc(s) for s in gen_srcs],
             # cc commands
             [Brewery.Env.cc(s, d) for s, d in zip(pbcc_files, pbo_files)],
+            # touch __init__.py
+            ['touch {}'.format(os.path.join(folder, '__init__.py'))
+             for folder in set(gen_folders)],
         ]
 
 ################################################################################
@@ -505,14 +533,17 @@ class proto_library(BuildTarget):
 class cc_target(BuildTarget):
     def __init__(self, name, srcs, hdrs=None, deps=None, build_shared=False,
                  build_binary=False, is_test=False, whole_archive=False,
-                 **kwargs):
+                 compiler_flags=None, **kwargs):
         if hdrs is None:
             hdrs = []
         if deps is None:
             deps = []
+        if compiler_flags is None:
+            compiler_flags = []
         BuildTarget.__init__(self, name, srcs, other_files=hdrs,
                              deps=deps, **kwargs)
         self.hdrs = [Brewery.RectifyFileName(s) for s in hdrs]
+        self.compiler_flags = compiler_flags
         self.build_shared = build_shared
         self.build_binary = build_binary
         self.is_test = is_test
@@ -559,7 +590,8 @@ class cc_target(BuildTarget):
         if len(self.srcs):
             # Build the source files, and remove the existing archive file.
             self.command_groups.append(
-                [Brewery.Env.cc(s, o) for s, o in zip(self.srcs, obj_files)])
+                [Brewery.Env.cc(s, o, self.compiler_flags)
+                 for s, o in zip(self.srcs, obj_files)])
             # Remove the current archive
             self.command_groups.append(['rm -f ' + archive_file])
             # link the static library
@@ -651,12 +683,15 @@ class mpi_test(cc_target):
 
 class cuda_library(BuildTarget):
     def __init__(self, name, srcs, hdrs=None, deps=None,
-                 whole_archive=False, **kwargs):
+                 whole_archive=False, compiler_flags=None, **kwargs):
         if hdrs is None:
             hdrs = []
+        if compiler_flags is None:
+            compiler_flags = []
         BuildTarget.__init__(self, name, srcs, other_files=hdrs,
                              deps=deps, **kwargs)
         self.hdrs = [Brewery.RectifyFileName(s) for s in hdrs]
+        self.compiler_flags = compiler_flags
         self.whole_archive = whole_archive
         if CUDA_TARGET not in self.deps:
             self.deps.append(CUDA_TARGET)
@@ -678,7 +713,8 @@ class cuda_library(BuildTarget):
         # Build the source files, and remove the existing archive file.
         obj_files = [Brewery.GenFilename(src, 'cuo') for src in self.srcs]
         self.command_groups.append(
-            [Brewery.Env.nvcc(s, o) for s, o in zip(self.srcs, obj_files)])
+            [Brewery.Env.nvcc(s, o, self.compiler_flags)
+             for s, o in zip(self.srcs, obj_files)])
         # Remove the current archive
         self.command_groups.append(['rm -f ' + archive_file])
         # link the static library
@@ -695,8 +731,23 @@ class filegroup(BuildTarget):
         Brewery.CopyToGenDir(self.srcs)
 
 
-def py_library(*args, **kwargs):
-    return filegroup(*args, **kwargs)
+class py_library(BuildTarget):
+    def __init__(self, name, srcs, deps=None, **kwargs):
+        BuildTarget.__init__(self, name, srcs, deps=deps, **kwargs)
+
+    def SetUp(self):
+        Brewery.CopyToGenDir(self.srcs)
+        self.command_groups = []
+        # For all folders that will contain python files, touch the __init__.py
+        # under that folder.
+        gen_folders = sum(
+            [Brewery.GetNestedGenDirs(
+                os.path.dirname(Brewery.GenFilename(src, 'py')))
+             for src in self.srcs],
+            [])
+        self.command_groups.append(
+            ['touch {}'.format(os.path.join(folder, '__init__.py'))
+             for folder in set(gen_folders)])
 
 
 class py_test(BuildTarget):
