@@ -422,40 +422,46 @@ static ncclResult_t commBuildMaps(ncclComm_t comm, ncclUniqueId* commId, int ran
       canpeer = 0;
     }
 
-    if (canpeer) {
-      cudaError_t err;
-      err = cudaDeviceEnablePeerAccess(iDev, 0);
-      if (err == cudaErrorPeerAccessAlreadyEnabled) {
-        cudaGetLastError();
-      } else if (err != cudaSuccess) {
-        INFO("peer access failed between rank %d (dev %d) and rank %d (dev %d)\n",
-          rank, myDev, iRank, iDev);
-
-        canpeer = 0;
-      }
-    }
-
     if (iPid == myPid) {
-      if (canpeer || myDev == iDev) {
-        INFO("rank access %d -> %d via P2P device mem", rank, iRank);
+      if (myDev == iDev) {
+        INFO("rank access %d -> %d via common device", rank, iRank);
         comm->ptrs[i].local  = ranks[myId].devptr;
         comm->ptrs[i].remote = ranks[i].devptr;
         comm->ptrs[i].remoteCleanup = CLEANUP_NONE;
-      } else { // go through hostmem
-        INFO("rank access %d -> %d via zero-copy host mem", rank, iRank);
-        if (j <= 2)
-          *ringDirectFailed = 1;
-        if (cudaHostGetDevicePointer(&comm->ptrs[i].local, ranks[myId].hostptr, 0) != cudaSuccess) {
-          WARN("rank %d failed to map zero copy buffer to device", rank);
-          commClearMaps(comm);
-          return ncclUnhandledCudaError;
+      } else {
+        int peer_enabled = canpeer;
+        if (canpeer) {
+          cudaError_t p2pErr = cudaDeviceEnablePeerAccess(iDev, 0);
+          if (p2pErr == cudaErrorPeerAccessAlreadyEnabled) {
+            cudaGetLastError();
+          } else if (p2pErr != cudaSuccess) {
+            INFO("peer access failed between rank %d (dev %d) and rank %d (dev %d)\n",
+              rank, myDev, iRank, iDev);
+            peer_enabled = 0;
+          }
         }
-        if (cudaHostGetDevicePointer(&comm->ptrs[i].remote, ranks[i].hostptr, 0) != cudaSuccess) {
-          WARN("rank %d failed to map %d's zero copy buffer to device", rank, iRank);
-          commClearMaps(comm);
-          return ncclUnhandledCudaError;
+
+        if (peer_enabled) {
+          INFO("rank access %d -> %d via P2P device mem", rank, iRank);
+          comm->ptrs[i].local  = ranks[myId].devptr;
+          comm->ptrs[i].remote = ranks[i].devptr;
+          comm->ptrs[i].remoteCleanup = CLEANUP_NONE;
+        } else { // go through hostmem
+          INFO("rank access %d -> %d via zero-copy host mem", rank, iRank);
+          if (j <= 2)
+            *ringDirectFailed = 1;
+          if (cudaHostGetDevicePointer(&comm->ptrs[i].local, ranks[myId].hostptr, 0) != cudaSuccess) {
+            WARN("rank %d failed to map zero copy buffer to device", rank);
+            commClearMaps(comm);
+            return ncclUnhandledCudaError;
+          }
+          if (cudaHostGetDevicePointer(&comm->ptrs[i].remote, ranks[i].hostptr, 0) != cudaSuccess) {
+            WARN("rank %d failed to map %d's zero copy buffer to device", rank, iRank);
+            commClearMaps(comm);
+            return ncclUnhandledCudaError;
+          }
+          comm->ptrs[i].remoteCleanup = CLEANUP_NONE;
         }
-        comm->ptrs[i].remoteCleanup = CLEANUP_NONE;
       }
     } else { // multi-process!
       *ringDirectFailed = 1;
