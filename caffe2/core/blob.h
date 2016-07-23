@@ -58,6 +58,9 @@ class Blob {
     return *static_cast<const T*>(pointer_);
   }
 
+  const void* GetRaw() const { return pointer_; }
+  void* GetRaw() { return pointer_; }
+
   /**
    * @brief Gets a mutable pointer to the stored object.
    *
@@ -73,6 +76,7 @@ class Blob {
       return static_cast<T*>(pointer_);
     } else {
       if (is_new_object) *is_new_object = true;
+      VLOG(1) << "Create new mutable object " << TypeMeta::Name<T>();
       return Reset<T>(new T());
     }
   }
@@ -87,10 +91,9 @@ class Blob {
    */
   template <class T>
   T* Reset(T* allocated) {
-    if (pointer_) {
-      CHECK_NOTNULL(destroy_)(pointer_);
+    if (pointer_ && destroy_) {
+      destroy_(pointer_);
     }
-    VLOG(1) << "Create new mutable object " << TypeMeta::Name<T>();
     meta_ = TypeMeta::Make<T>();
     pointer_ = static_cast<void*>(allocated);
     destroy_ = &Destroy<T>;
@@ -98,17 +101,43 @@ class Blob {
   }
 
   /**
+   * Sets the underlying object to the allocated one, but does not take over
+   * the ownership of the passed in pointer. If there is already an object in
+   * the Blob, the old object is freed.
+   *
+   * Unlike Reset, this does not take over the ownership of the pointer and the
+   * caller is responsible for making sure that the lifetime of the allocated
+   * blob outlasts the lifetime of any access to this blob, until another Reset
+   * call is made or the blob is destructed.
+   */
+  template <class T>
+  typename std::remove_const<T>::type* ShareExternal(
+      typename std::remove_const<T>::type* allocated) {
+    return static_cast<T*>(
+        ShareExternal(static_cast<void*>(allocated),
+        TypeMeta::Make<typename std::remove_const<T>::type>()));
+  }
+
+  void* ShareExternal(void* allocated, const TypeMeta& meta) {
+    if (pointer_ && destroy_) {
+      destroy_(pointer_);
+    }
+    meta_ = meta;
+    pointer_ = static_cast<void*>(allocated);
+    destroy_ = nullptr;
+    return allocated;
+  }
+
+  /**
    * Resets the Blob to an empty one.
    */
   inline void Reset() {
-    if (pointer_) {
-      CHECK_NOTNULL(destroy_)(pointer_);
-      pointer_ = nullptr;
-      meta_ = TypeMeta();
-      destroy_ = nullptr;
+    if (pointer_ && destroy_) {
+      destroy_(pointer_);
     }
     pointer_ = nullptr;
     meta_ = TypeMeta();
+    destroy_ = nullptr;
   }
 
   /**

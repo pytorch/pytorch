@@ -4,11 +4,3 @@ proto_library(
     name = 'caffe_proto',
     srcs = ['caffe.proto'],
 )
-
-filegroup(
-    name = "caffe_proto_py",
-    srcs = ["__init__.py"],
-    deps = [
-        "//caffe:caffe_python",
-    ]
-)

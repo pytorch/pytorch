@@ -108,6 +108,7 @@ class Config(object):
         'arch=compute_30,code=sm_30',
         'arch=compute_35,code=sm_35',
         'arch=compute_50,code=sm_50',
+        'arch=compute_61,code=sm_61',
     ]
     # additional CUDA cflags to pass to nvcc.
     CUDA_CFLAGS = []
