@@ -20,6 +20,9 @@ void THNN_(ClassNLLCriterion_updateOutput)(
   if (THTensor_(nDimension)(input) > 2) {
     THError("input tensor should be 1D or 2D");
   }
+  if (weights && THTensor_(nElement)(weights) != n_classes) {
+    THError("weight tensor should be defined either for all or no classes");
+  }
 
   input = THTensor_(newContiguous)(input);
   target = THIndexTensor_(newContiguous)(target);
@@ -94,6 +97,10 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
 
   if (THTensor_(nDimension)(input) > 2) {
     THError("input tensor should be 1D or 2D");
+  }
+  
+  if (weights && THTensor_(nElement)(weights) != n_classes) {
+    THError("weight tensor should be defined either for all or no classes");
   }
 
   target = THIndexTensor_(newContiguous)(target);

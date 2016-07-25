@@ -7,6 +7,9 @@
               "only batches of spatial targets supported (3D tensors)");         \
   THArgCheck(THTensor_(nDimension)(input) == 4, 2,                               \
               "only batches of spatial inputs supported (4D tensors)");          \
+  if (weights && THTensor_(nElement)(weights) != THTensor_(size)(input, 1)) {    \
+    THError("weight tensor should be defined either for all or no classes");     \
+  }                                                                              \
                                                                                  \
   {                                                                              \
     long input0 = THTensor_(size)(input, 0);                                     \
