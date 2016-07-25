@@ -128,6 +128,9 @@ void THNN_CudaClassNLLCriterion_updateOutput(THCState *state, THCudaTensor *inpu
   if (THCudaTensor_nDimension(state, input) > 2) {
     THArgCheck(0, 2, "vector or matrix expected");
   }
+  if (weights && THCudaTensor_nElement(state, weights) != n_classes) {
+    THError("weight tensor should be defined either for all or no classes");
+  }
 
   input = THCudaTensor_newContiguous(state, input);
   weights = weights ? THCudaTensor_newContiguous(state, weights) : NULL;
@@ -197,6 +200,9 @@ void THNN_CudaClassNLLCriterion_updateGradInput(THCState *state, THCudaTensor *i
 
   if (THCudaTensor_nDimension(state, input) > 2) {
     THArgCheck(0, 2, "vector or matrix expected");
+  }
+  if (weights && THCudaTensor_nElement(state, weights) != n_classes) {
+    THError("weight tensor should be defined either for all or no classes");
   }
 
   weights = weights ? THCudaTensor_newContiguous(state, weights) : NULL;
