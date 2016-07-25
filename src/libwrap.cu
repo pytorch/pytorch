@@ -41,12 +41,6 @@ static RetCode (*nvmlInternalDeviceSetCpuAffinity)(nvmlDevice_t device);
 static RetCode (*nvmlInternalDeviceClearCpuAffinity)(nvmlDevice_t device);
 static const char* (*nvmlInternalErrorString)(RetCode r);
 
-static CUresult (*cuInternalGetErrorString)(CUresult error, const char** pStr);
-static CUresult (*cuInternalIpcGetMemHandle)(CUipcMemHandle* pHandle, CUdeviceptr dptr);
-static CUresult (*cuInternalIpcOpenMemHandle)(CUdeviceptr* pdptr, CUipcMemHandle handle, unsigned int  Flags);
-static CUresult (*cuInternalIpcCloseMemHandle)(CUdeviceptr dptr);
-
-
 ncclResult_t wrapSymbols(void) {
 
   if (symbolsLoaded)
@@ -93,11 +87,6 @@ ncclResult_t wrapSymbols(void) {
   LOAD_SYM(nvmlhandle, "nvmlDeviceClearCpuAffinity", nvmlInternalDeviceClearCpuAffinity);
   LOAD_SYM(nvmlhandle, "nvmlErrorString", nvmlInternalErrorString);
 
-  LOAD_SYM(cuhandle, "cuGetErrorString", cuInternalGetErrorString);
-  LOAD_SYM(cuhandle, "cuIpcGetMemHandle", cuInternalIpcGetMemHandle);
-  LOAD_SYM(cuhandle, "cuIpcOpenMemHandle", cuInternalIpcOpenMemHandle);
-  LOAD_SYM(cuhandle, "cuIpcCloseMemHandle", cuInternalIpcCloseMemHandle);
-
   symbolsLoaded = 1;
   return ncclSuccess;
 
@@ -108,11 +97,6 @@ ncclResult_t wrapSymbols(void) {
   nvmlInternalDeviceGetIndex = NULL;
   nvmlInternalDeviceSetCpuAffinity = NULL;
   nvmlInternalDeviceClearCpuAffinity = NULL;
-
-  cuInternalGetErrorString = NULL;
-  cuInternalIpcGetMemHandle = NULL;
-  cuInternalIpcOpenMemHandle = NULL;
-  cuInternalIpcCloseMemHandle = NULL;
 
   if (cuhandle   != NULL) dlclose(cuhandle);
   if (nvmlhandle != NULL) dlclose(nvmlhandle);
@@ -203,58 +187,3 @@ ncclResult_t wrapNvmlDeviceClearCpuAffinity(nvmlDevice_t device) {
   }
   return ncclSuccess;
 }
-
-ncclResult_t wrapCuIpcGetMemHandle(CUipcMemHandle* pHandle, CUdeviceptr dptr) {
-  if (cuInternalIpcGetMemHandle == NULL) {
-    WARN("lib wrapper not initilaized.");
-    return ncclLibWrapperNotSet;
-  }
-  CUresult ret = cuInternalIpcGetMemHandle(pHandle, dptr);
-  if (ret != CUDA_SUCCESS) {
-    const char* reason = NULL;
-    cuInternalGetErrorString(ret, &reason);
-    if (reason != NULL)
-      WARN("cuInternalIpcGetMemHandle() failed: %s ", reason);
-    else
-      WARN("cuInternalIpcGetMemHandle() failed: %d ", ret);
-    return ncclSystemError;
-  }
-  return ncclSuccess;
-}
-
-ncclResult_t wrapCuIpcOpenMemHandle(CUdeviceptr* pdptr, CUipcMemHandle handle, unsigned int  Flags) {
-  if (cuInternalIpcOpenMemHandle == NULL) {
-    WARN("lib wrapper not initilaized.");
-    return ncclLibWrapperNotSet;
-  }
-  CUresult ret = cuInternalIpcOpenMemHandle(pdptr, handle, Flags);
-  if (ret != CUDA_SUCCESS) {
-    const char* reason = NULL;
-    cuInternalGetErrorString(ret, &reason);
-    if (reason != NULL)
-      WARN("cuInternalIpcOpenMemHandle() failed: %s ", reason);
-    else
-      WARN("cuInternalIpcOpenMemHandle() failed: %d ", ret);
-    return ncclSystemError;
-  }
-  return ncclSuccess;
-}
-
-ncclResult_t wrapCuIpcCloseMemHandle(CUdeviceptr dptr) {
-  if (cuInternalIpcCloseMemHandle == NULL) {
-    WARN("lib wrapper not initilaized.");
-    return ncclLibWrapperNotSet;
-  }
-  CUresult ret = cuInternalIpcCloseMemHandle(dptr);
-  if (ret != CUDA_SUCCESS) {
-    const char* reason = NULL;
-    cuInternalGetErrorString(ret, &reason);
-    if (reason != NULL)
-      WARN("cuInternalIpcCloseMemHandle() failed: %s ", reason);
-    else
-      WARN("cuInternalIpcCloseMemHandle() failed: %d ", ret);
-    return ncclSystemError;
-  }
-  return ncclSuccess;
-}
-

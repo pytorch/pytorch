@@ -33,7 +33,6 @@
 #define SRC_LIBWRAP_H_
 
 #include "core.h"
-#include "cuda.h"
 
 typedef struct nvmlDevice_st* nvmlDevice_t;
 
@@ -45,10 +44,6 @@ ncclResult_t wrapNvmlDeviceGetHandleByPciBusId(const char* pciBusId, nvmlDevice_
 ncclResult_t wrapNvmlDeviceGetIndex(nvmlDevice_t device, unsigned* index);
 ncclResult_t wrapNvmlDeviceSetCpuAffinity(nvmlDevice_t device);
 ncclResult_t wrapNvmlDeviceClearCpuAffinity(nvmlDevice_t device);
-
-ncclResult_t wrapCuIpcGetMemHandle(CUipcMemHandle* pHandle, CUdeviceptr dptr);
-ncclResult_t wrapCuIpcOpenMemHandle(CUdeviceptr* pdptr, CUipcMemHandle handle, unsigned int  Flags);
-ncclResult_t wrapCuIpcCloseMemHandle(CUdeviceptr dptr);
 
 #endif // End include guard
 

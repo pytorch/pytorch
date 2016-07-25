@@ -5,6 +5,7 @@ Optimized primitives for collective multi-GPU communication.
 ## Introduction
 
 NCCL (pronounced "Nickel") is a stand-alone library of standard collective communication routines, such as all-gather, reduce, broadcast, etc., that have been optimized to achieve high bandwidth over PCIe. NCCL supports an arbitrary number of GPUs installed in a single node and can be used in either single- or multi-process (e.g., MPI) applications.
+[This blog post](https://devblogs.nvidia.com/parallelforall/fast-multi-gpu-collectives-nccl/) provides details on NCCL functionality, goals, and performance.
 
 ## What's inside
 
