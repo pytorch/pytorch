@@ -197,3 +197,67 @@ void THCudaTensor_triu(THCState *state, THCudaTensor *self_, THCudaTensor *src_,
 
 #include "generic/THCTensorMathPairwise.cu"
 #include "THCGenerateAllTypes.h"
+
+// Copy the kth diagonal of a matrix B to a vector A.
+__global__ void THCudaTensor_copyFromDiagonal(float* a, float* b, long start, long size, long strideSum, long strideA) {
+  for (long linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+       linearIndex < size;
+       linearIndex += gridDim.x * blockDim.x) {
+    const long bOffset = start + strideSum * linearIndex;
+    a[strideA * linearIndex] = b[bOffset];
+  }
+}
+
+// Copy vector B to the kth diagonal of a matrix A
+__global__ void THCudaTensor_copyToDiagonal(float* a, float* b, long start, long size, long strideSum, long strideB) {
+  for (long linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+       linearIndex < size;
+       linearIndex += gridDim.x * blockDim.x) {
+    const long aOffset = start + strideSum * linearIndex;
+    a[aOffset] = b[strideB * linearIndex];
+  }
+}
+
+void THCudaTensor_diag(THCState *state, THCudaTensor *self_, THCudaTensor *src_, long k){
+  THAssert(THCudaTensor_checkGPU(state, 2, self_, src_));
+  int nDimension = THCudaTensor_nDimension(state, src_);
+  THArgCheck((nDimension == 2) || (nDimension == 1), 1, "expected a matrix or a vector");
+  if (nDimension == 2) {
+    long stride0 = THCudaTensor_stride(state, src_, 0);
+    long stride1 = THCudaTensor_stride(state, src_, 1);
+    long size0 = THCudaTensor_size(state, src_, 0);
+    long size1 = THCudaTensor_size(state, src_, 1);
+    long size = (k > 0) ? min((long long)size0, (long long)size1 - k) : min((long long)size0 + k, (long long)size1);
+    THCudaTensor_resize1d(state, self_, size);
+    long strideSelf = THCudaTensor_stride(state, self_, 0);
+    const dim3 threads(min((long long)THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock, (long long)size));
+    dim3 grid(min((long long)1024, (long long)THCCeilDiv(size, (long)threads.x)));
+    long start = (k >= 0 ? k * stride1 : -k * stride0);
+    THCudaTensor_copyFromDiagonal<<<grid, threads, 0, THCState_getCurrentStream(state)>>>
+    (THCudaTensor_data(state, self_), THCudaTensor_data(state, src_), start, size, stride0 + stride1, strideSelf);
+  } else {
+    long totalElements = THCudaTensor_nElement(state, src_);
+    long size = (k > 0) ? totalElements + k : totalElements - k;
+    long strideSrc = THCudaTensor_stride(state, src_, 0);
+    THCudaTensor_resize2d(state, self_, size, size);
+    THCudaTensor_zero(state, self_);
+    long stride0 = THCudaTensor_stride(state, self_, 0);
+    long stride1 = THCudaTensor_stride(state, self_, 1);
+    const dim3 threads(min((long long)THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock, (long long)size));
+    dim3 grid(min((long long)1024, (long long)THCCeilDiv(size, (long)threads.x)));
+    long start = (k >= 0 ? k * stride1 : -k * stride0);
+    THCudaTensor_copyToDiagonal<<<grid, threads, 0, THCState_getCurrentStream(state)>>>
+    (THCudaTensor_data(state, self_), THCudaTensor_data(state, src_), start, totalElements, stride0 + stride1, strideSrc);
+  }
+  THCudaCheck(cudaGetLastError());
+}
+
+float THCudaTensor_trace(THCState *state, THCudaTensor *src_) {
+  THAssert(THCudaTensor_checkGPU(state, 1, src_));
+  THArgCheck((src_->nDimension == 2), 1, "expected a matrix");
+  THCudaTensor *diag = THCudaTensor_new(state);
+  THCudaTensor_diag(state, diag, src_, 0);
+  float trace = THCudaTensor_sumall(state, diag);
+  THCudaTensor_free(state, diag);
+  return trace;
+}
