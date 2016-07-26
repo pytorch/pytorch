@@ -1,16 +1,17 @@
 import torch
 from torch.legacy import nn
 
-class AbsCriterion(nn.Criterion):
+class DistKLDivCriterion(nn.Criterion):
 
     def __init__(self, sizeAverage=True):
-        super(AbsCriterion, self).__init__()
+        super(DistKLDivCriterion, self).__init__()
         self.sizeAverage = sizeAverage
         self.output_tensor = torch.Tensor(1)
 
     def updateOutput(self, input, target):
+        assert input.isSameSizeAs(target)
         self.output_tensor = self.output_tensor or input.new(1)
-        self._backend.AbsCriterion_updateOutput(
+        self._backend.DistKLDivCriterion_updateOutput(
             self._backend.library_state,
             input,
             target,
@@ -20,9 +21,9 @@ class AbsCriterion(nn.Criterion):
         self.output = self.output_tensor[0]
         return self.output
 
-
     def updateGradInput(self, input, target):
-        self._backend.AbsCriterion_updateGradInput(
+        assert input.isSameSizeAs(target)
+        self._backend.DistKLDivCriterion_updateGradInput(
             self._backend.library_state,
             input,
             target,

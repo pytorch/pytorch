@@ -1,0 +1,40 @@
+import torch
+from torch.legacy import nn
+
+class ELU(nn.Module):
+    """
+            Djork-Arné Clevert, Thomas Unterthiner, Sepp Hochreiter
+            Fast and Accurate Deep Network Learning by Exponential Linear Units (ELUs)
+            http.//arxiv.org/pdf/1511.07289.pdf
+    """
+
+    def __init__(self, alpha=1, inplace=False):
+        super(ELU, self).__init__()
+        self.alpha = alpha
+        self.inplace = inplace
+
+    def updateOutput(self, input):
+        self._backend.ELU_updateOutput(
+            self._backend.library_state,
+            input,
+            self.output,
+            self.alpha,
+            self.inplace
+        )
+        return self.output
+
+    def updateGradInput(self, input, gradOutput):
+        self._backend.ELU_updateGradInput(
+            self._backend.library_state,
+            input,
+            gradOutput,
+            self.gradInput,
+            self.output,
+            self.alpha,
+            self.inplace
+        )
+        return self.gradInput
+
+    def __repr__(self):
+        return '{}(alpha={:.3f})'.format(str(type(self)), self.alpha)
+

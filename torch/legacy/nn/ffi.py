@@ -74,8 +74,10 @@ class TorchArgument(object):
     def from_param(obj):
         if hasattr(obj, '_cdata'):
             return ctypes.c_void_p(obj._cdata)
+        elif obj is None:
+            return ctypes.c_void_p(0)
         else:
-            raise ValueError()
+            raise ValueError('Invalid argument type: {}'.format(type(obj).__name__))
 
 TYPE_CONVERTERS = {
     # TODO: this won't work for CUDA

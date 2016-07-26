@@ -10,11 +10,13 @@ class Module(object):
         self._backend = nn._backends.THNNDoubleBackend
 
     def parameters(self):
-        if self.weight and self.bias:
+        has_weight = hasattr(self, 'weight') and self.weight is not None
+        has_bias = hasattr(self, 'bias') and self.bias is not None
+        if has_weight and has_bias:
             return [self.weight, self.bias], [self.gradWeight, self.gradBias]
-        elif self.weight:
+        elif has_weight:
             return [self.weight], [self.gradWeight]
-        elif self.bias:
+        elif has_bias:
             return [self.bias], [self.gradBias]
         else:
             return
@@ -79,32 +81,21 @@ class Module(object):
 
     # TODO
     def share(self, mlp, *arg):
-        for i, v in ipairs(arg):
-           if self[v] != nil:
-              self[v].set(mlp[v])
-              self.accUpdateGradParameters = self.sharedAccUpdateGradParameters
-              mlp.accUpdateGradParameters = mlp.sharedAccUpdateGradParameters
-        return self
+        raise NotImplementedError
 
     def clone(self, *arg):
-        f = torch.MemoryFile("rw").binary()
-        f.writeObject(self)
-        f.seek(1)
-        clone = f.readObject()
-        f.close()
-        if len(arg) > 0:
-           clone.share(self, *arg)
-        return clone
+        raise NotImplementedError
 
     def type(self, type, tensorCache):
+        # TODO: change backend in here
         if not type:
            return self._type
 
         tensorCache = tensorCache or {}
 
         # find all tensors and convert them
-        for key, param in pairs(self):
-           self[key] = nn.utils.recursiveType(param, type, tensorCache)
+        for key, param in self.__dict__:
+            setattr(self, key, nn.utils.recursiveType(param, type, tensorCache))
 
         self._type = type
         return self
@@ -158,11 +149,11 @@ class Module(object):
             # TODO: wut, does it really need to create this tensor?
             # isn't it enough to check if strides == size.cumprod(0)?
             sortedStride, perm = torch.sort(torch.LongTensor(tensor.nDimension()).set(tensor.stride()), 0, True)
-            sortedSize = torch.LongTensor(tensor.nDimension()).set(tensor.size()).index(1, perm)
-            nRealDim = torch.clamp(sortedStride, 0, 1).sum()
-            sortedStride = sortedStride.narrow(1, 1, nRealDim).clone()
-            sortedSize   = sortedSize.narrow(1, 1, nRealDim).clone()
-            t = tensor.new().set(tensor.storage(), 1,
+            sortedSize = torch.LongTensor(tensor.nDimension()).set(tensor.size()).index(0, perm)
+            nRealDim = int(torch.clamp(sortedStride, 0, 1).sum())
+            sortedStride = sortedStride.narrow(0, 0, nRealDim).clone()
+            sortedSize   = sortedSize.narrow(0, 0, nRealDim).clone()
+            t = tensor.new().set(tensor.storage(), 0,
                                  sortedSize.storage(),
                                  sortedStride.storage())
             return t.isContiguous()
@@ -171,7 +162,7 @@ class Module(object):
            return torch.Tensor()
 
         Tensor = parameters[0].new
-        BufferTensor = Module._flattenTensorBuffer[torch.type(parameters[1])] or Tensor
+        BufferTensor = Module._flattenTensorBuffer.get(type(parameters[0]), Tensor)
 
         # 1. construct the set of all unique storages referenced by parameter tensors
         storages = {}
@@ -181,16 +172,16 @@ class Module(object):
             storage = param.storage()
             key = storage._cdata
 
-            if not storages[key]:
+            if key not in storages:
                 storages[key] = (storage, num_parameters)
                 num_parameters = num_parameters + storage.size()
 
 
-            parameterMeta[i] = {
+            parameterMeta.append({
                     'storageOffset':  param.storageOffset() + storages[key][1],
                     'size'         :  param.size(),
                     'stride'       :  param.stride()
-            }
+            })
 
 
         # 2. construct a single tensor that will hold all the parameters
@@ -201,12 +192,12 @@ class Module(object):
         tensorsCompact = True
         for meta in parameterMeta:
             # TODO: reuse one Tensor
-            tmp = BufferTensor().set(flatParameters.storage(), meta.storageOffset, meta.size, meta.stride)
+            tmp = BufferTensor().set(flatParameters.storage(), meta['storageOffset'], meta['size'], meta['stride'])
             tmp.fill(1)
             tensorsCompact = tensorsCompact and isCompact(tmp)
 
         maskParameters  = flatParameters.byte().clone()
-        compactOffsets  = flatParameters.long().cumsum(1)
+        compactOffsets  = flatParameters.long().cumsum(0)
         used_parameters = compactOffsets[-1]
 
         # 4. copy storages into the flattened parameter tensor

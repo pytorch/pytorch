@@ -1,16 +1,16 @@
 import torch
 from torch.legacy import nn
 
-class AbsCriterion(nn.Criterion):
+class MSECriterion(nn.Criterion):
 
     def __init__(self, sizeAverage=True):
-        super(AbsCriterion, self).__init__()
+        super(MSECriterion, self).__init__()
         self.sizeAverage = sizeAverage
-        self.output_tensor = torch.Tensor(1)
+        self.output_tensor = None
 
     def updateOutput(self, input, target):
         self.output_tensor = self.output_tensor or input.new(1)
-        self._backend.AbsCriterion_updateOutput(
+        self._backend.MSECriterion_updateOutput(
             self._backend.library_state,
             input,
             target,
@@ -20,9 +20,8 @@ class AbsCriterion(nn.Criterion):
         self.output = self.output_tensor[0]
         return self.output
 
-
     def updateGradInput(self, input, target):
-        self._backend.AbsCriterion_updateGradInput(
+        self._backend.MSECriterion_updateGradInput(
             self._backend.library_state,
             input,
             target,

@@ -1,33 +1,35 @@
 import torch
 from torch.legacy import nn
 
-class AbsCriterion(nn.Criterion):
+class MarginCriterion(nn.Criterion):
 
-    def __init__(self, sizeAverage=True):
-        super(AbsCriterion, self).__init__()
-        self.sizeAverage = sizeAverage
-        self.output_tensor = torch.Tensor(1)
+    def __init__(self, margin=1, sizeAverage=True):
+        super(MarginCriterion, self).__init__()
+        self.sizeAverage = True
+        self.margin = margin
+        self.output_tensor = None
 
     def updateOutput(self, input, target):
         self.output_tensor = self.output_tensor or input.new(1)
-        self._backend.AbsCriterion_updateOutput(
+        self._backend.MarginCriterion_updateOutput(
             self._backend.library_state,
             input,
             target,
             self.output_tensor,
-            self.sizeAverage
+            self.sizeAverage,
+            self.margin
         )
         self.output = self.output_tensor[0]
         return self.output
 
-
     def updateGradInput(self, input, target):
-        self._backend.AbsCriterion_updateGradInput(
+        self._backend.MarginCriterion_updateGradInput(
             self._backend.library_state,
             input,
             target,
             self.gradInput,
-            self.sizeAverage
+            self.sizeAverage,
+            self.margin
         )
         return self.gradInput
 
