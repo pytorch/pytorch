@@ -260,9 +260,9 @@ static PyObject * THPTensor_stateless_(${name})(PyObject *_unused, PyObject *arg
                 provided.return_type = 'STATELESS PROV2 new SelfIndexPair'
             if provided.return_type == 'new THByteTensor':
                 # Case 1.
+                stateless_options.append(provided.copy())
                 provided.insert_argument(0, Argument('THPByteTensor*', '_ret'))
                 provided.return_type = 'STATELESS PROV new THPByteTensor'
-                stateless_options.append(provided.copy())
             stateless_options.append(provided)
 
         return stateless_options

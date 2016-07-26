@@ -361,7 +361,7 @@ int THPTensor_(setValue)(THPTensor *self, PyObject *index, PyObject *value)
       if (!THPUtils_(parseReal)(value, &v))
         return -1;
       THTensor_(maskedFill)(LIBRARY_STATE self->cdata, mask->cdata, v);
-    } else if (THPTensor_(IsSubclass)(index)) {
+    } else if (THPTensor_(IsSubclass)(value)) {
       THTensor_(maskedCopy)(LIBRARY_STATE self->cdata, mask->cdata, ((THPTensor*)value)->cdata);
     } else {
       THError("number or Tensor expected");

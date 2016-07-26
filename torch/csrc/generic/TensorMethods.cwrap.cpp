@@ -540,7 +540,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
   norm
   normall -> accreal
     - self
-    - real p
+    - real p OPTIONAL 2
   norm -> new THTensor
     - self
     - real p

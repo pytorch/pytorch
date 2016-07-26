@@ -95,9 +95,11 @@ class _TensorBase(object):
         return []
 
     def view(self, src, *args):
+        dst = self
         if not torch.isTensor(src):
             args = (src,) + args
             src = self
+            dst = src.new()
         if len(args) == 1 and torch.isStorage(args[0]):
             sizes = args[0]
         else:
@@ -111,8 +113,8 @@ class _TensorBase(object):
                     'x'.join(map(lambda v: str(v), sizes)) + '.')
 
         assert src.isContiguous(), "expecting a contiguous tensor"
-        self.set(src.storage(), src.storageOffset(), sizes)
-        return self
+        dst.set(src.storage(), src.storageOffset(), sizes)
+        return dst
 
     def viewAs(self, src, template=None):
         if template is None:
