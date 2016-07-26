@@ -175,7 +175,10 @@ void TensorSerializer<Context>::Serialize(
     BlobSerializerBase::SerializationAcceptor acceptor) {
   CHECK(blob.IsType<Tensor<Context>>());
   const auto& tensor = blob.template Get<Tensor<Context>>();
+
+#ifndef __ANDROID__
   std::vector<std::future<void>> futures;
+#endif
 
   for (size_t chunkBegin = 0; chunkBegin < tensor.size();
        chunkBegin += FLAGS_caffe2_tensor_chunk_size) {
@@ -193,16 +196,25 @@ void TensorSerializer<Context>::Serialize(
           FLAGS_caffe2_tensor_chunk_size);
       acceptor(name, blob_proto.SerializeAsString());
     };
+#ifndef __ANDROID__
     if (tensor.size() > FLAGS_caffe2_tensor_chunk_size) {
       futures.emplace_back(std::async(std::launch::async, task, chunkBegin));
     } else {
       // Sync mode for small tensors
       task(chunkBegin);
     }
+#else
+    // Since Android does not have std::future, we will always do sync mode
+    //
+    task(chunkBegin);
+#endif
   }
+
+#ifndef __ANDROID__
   for (auto& fut : futures) {
     fut.get();
   }
+#endif
 }
 
 template <class Context>

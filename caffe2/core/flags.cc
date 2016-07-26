@@ -162,7 +162,12 @@ template <>
 bool Caffe2FlagParser::Parse<int64_t>(const string& content, int64_t* value) {
   try {
     static_assert(sizeof(long long) == sizeof(int64_t), "");
+#ifdef __ANDROID__
+    // Android does not have std::atoll.
+    *value = atoll(content.c_str());
+#else
     *value = std::atoll(content.c_str());
+#endif
     return true;
   } catch (...) {
     GlobalInitStream() << "Caffe2 flag error: Cannot convert argument to int: "

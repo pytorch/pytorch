@@ -6,6 +6,7 @@ cc_library(
   deps = [
     "//caffe2/proto:caffe2_proto",
     "//third_party:glog",
+    "//third_party:eigen",
   ],
   whole_archive = True,
 )

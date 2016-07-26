@@ -96,6 +96,18 @@ def GetCpp11Flag(cc, env):
             BuildFatal("Cannot figure out the C++11 flag for compiler {0}."
                        "Does it support C++11?", cc)
 
+def HasOpenMPSupport(cc, env):
+    """Checks if the current compiler supports openmp."""
+    BuildDebug("Trying to figure out openmp.")
+    command = [cc, "-fopenmp", _TestFilename("test.cc"),
+               "-o", _TempFilename(".out")]
+    ret, _ = GetSubprocessOutput(command, env)
+    if ret == 0:
+        return True
+    else:
+        BuildWarning("You tried to enable openmp but this compiler does not "
+                     "support it. Disabling openmp now.")
+        return False
 
 def NeedLibrtOrNot(cc, env):
     command = [cc, _TestFilename("test.cc"), "-o", _TempFilename(".out"),
@@ -186,7 +198,10 @@ class Env(object):
             '-pthread',
             '-Wall',
             '-Wextra',
-            '-Werror',
+            # Note(jiayq): a lot of dependent libraries such as protobuf
+            # do not properly address all warnings, so turning on -Werror is
+            # a pain. Let's consider incrementally adding error flags.
+            # '-Werror',
             '-Wno-deprecated',  # needed by glog
             '-Wno-unknown-warning-option',
             '-Wno-unused-but-set-variable',  # needed by cnmem
@@ -259,7 +274,7 @@ class Env(object):
             self.CFLAGS.append("-fno-rtti")
 
         # OpenMP
-        if Config.USE_OPENMP:
+        if Config.USE_OPENMP and HasOpenMPSupport(Config.CC, self.ENV):
             self.CFLAGS.append("-fopenmp")
             self.LIBS.append("gomp")
         else:
@@ -390,7 +405,7 @@ class Env(object):
             ['-L' + s for s in self.LIBDIRS] + ['{src}'] +
             ['-l' + s for s in self.LIBS])
         self.TEMPLATE_LINK_BINARY = ' '.join(
-            [Config.CC, '-o', '{dst}'] + self.LINKFLAGS +
+            [Config.CC, '-o', '{dst}', '-pie'] + self.LINKFLAGS +
             ['-L' + s for s in self.LIBDIRS] + ['{src}'] +
             ['-l' + s for s in self.LIBS])
         self.TEMPLATE_CC_TEST = ' '.join(

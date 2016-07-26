@@ -32,7 +32,7 @@ class BlobsQueue : public std::enable_shared_from_this<BlobsQueue> {
       blobs.reserve(numBlobs);
       for (auto j = 0; j < numBlobs; ++j) {
         const auto blobName =
-            queueName + "_" + std::to_string(i) + "_" + std::to_string(j);
+            queueName + "_" + to_string(i) + "_" + to_string(j);
         if (enforceUniqueName) {
           CHECK(!ws->GetBlob(blobName))
               << "Queue internal blob already exists: " << blobName;
