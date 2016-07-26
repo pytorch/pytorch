@@ -14,11 +14,12 @@ STANDALONE_TCHAIN_ROOT variable below.
 from build import Config
 
 STANDALONE_TCHAIN_ROOT = (
-    '/Users/jiayq/android-ndk-r10e/'
+    '/Users/jiayq/Research/android-ndk-r12b/'
     'standalone-toolchains/arm-linux-androideabi-4.9-android-21/')
 
 # We change necessary components in the Config class.
 
+Config.VERBOSE_BUILD = True
 Config.CC = STANDALONE_TCHAIN_ROOT + 'bin/arm-linux-androideabi-g++'
 Config.AR = STANDALONE_TCHAIN_ROOT + 'bin/arm-linux-androideabi-ar'
 Config.GENDIR = "gen-android"

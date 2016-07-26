@@ -1,6 +1,7 @@
 #include "caffe2/core/logging.h"
 
 #include <cstring>
+#include <numeric>
 
 #ifdef ANDROID
 #include <android/log.h>

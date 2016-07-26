@@ -9,9 +9,9 @@
 namespace caffe2 {
 
 namespace {
-
 using IndexKeyTypes = TensorTypes<int32_t, int64_t, std::string>;
 using TIndexValue = int64_t;
+}  // namespace
 
 struct IndexBase {
  public:
@@ -129,7 +129,7 @@ class IndexGetOp: public Operator<CPUContext> {
   template <typename T>
   bool DoRunWithType() {
     auto& base = OperatorBase::Input<std::unique_ptr<IndexBase>>(0);
-    auto* dict = dynamic_cast<Index<T>*>(base.get());
+    auto* dict = dynamic_cast_if_rtti<Index<T>*>(base.get());
     CAFFE_ENFORCE(dict, "Wrong dictionary type given input keys.");
     const auto& keys = Input(1);
     auto* values = Output(0);
@@ -150,7 +150,7 @@ class IndexLoadOp: public Operator<CPUContext> {
   template <typename T>
   bool DoRunWithType() {
     auto& base = OperatorBase::Input<std::unique_ptr<IndexBase>>(0);
-    auto* dict = dynamic_cast<Index<T>*>(base.get());
+    auto* dict = dynamic_cast_if_rtti<Index<T>*>(base.get());
     CAFFE_ENFORCE(dict, "Wrong dictionary type given input keys.");
     const auto& keys = Input(1);
     return dict->Load(keys.data<T>(), keys.size());
@@ -170,7 +170,7 @@ class IndexStoreOp: public Operator<CPUContext> {
   template <typename T>
   bool DoRunWithType() {
     auto& base = OperatorBase::Input<std::unique_ptr<IndexBase>>(0);
-    auto* dict = dynamic_cast<Index<T>*>(base.get());
+    auto* dict = dynamic_cast_if_rtti<Index<T>*>(base.get());
     CHECK(dict);
     return dict->Store(Output(0));
   }
@@ -188,7 +188,6 @@ class IndexFreezeOp: public Operator<CPUContext> {
   }
 };
 
-} // namespace
 
 REGISTER_CPU_OPERATOR(IntIndexCreate, IndexCreateOp<int32_t>);
 REGISTER_CPU_OPERATOR(LongIndexCreate, IndexCreateOp<int64_t>);
@@ -280,4 +279,4 @@ SHOULD_NOT_DO_GRADIENT(IndexFreeze);
 SHOULD_NOT_DO_GRADIENT(IndexLoad);
 SHOULD_NOT_DO_GRADIENT(IndexStore);
 
-}
+}  // namespace caffe2

@@ -5,6 +5,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <sstream>
 #include <type_traits>
 #include <vector>
 
@@ -71,6 +72,29 @@ typename std::enable_if<
 make_unique(Args&&...) = delete;
 
 #endif
+
+// to_string implementation for Android related stuff.
+#ifndef __ANDROID__
+using std::to_string;
+#else 
+template <typename T>
+std::string to_string(T value)
+{
+  std::ostringstream os;
+  os << value;
+  return os.str();
+}
+#endif
+
+// dynamic cast reroute: if RTTI is disabled, go to reinterpret_cast
+template <typename Dst, typename Src>
+inline Dst dynamic_cast_if_rtti(Src ptr) {
+#ifdef __GXX_RTTI
+  return dynamic_cast<Dst>(ptr);
+#else
+  return reinterpret_cast<Dst>(ptr);
+#endif
+}
 
 }  // namespace caffe2
 

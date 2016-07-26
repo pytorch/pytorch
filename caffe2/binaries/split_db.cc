@@ -15,17 +15,6 @@ using caffe2::db::Cursor;
 using caffe2::db::DB;
 using caffe2::db::Transaction;
 
-namespace {
-// A short function to support converting int to string, because some platforms
-// do not have to_string in c++ yet.
-template <typename T>
-std::string to_string(T v) {
-  std::stringstream ss;
-  ss << v;
-  return ss.str();
-}
-}
-
 int main(int argc, char** argv) {
   caffe2::GlobalInit(&argc, &argv);
 
@@ -39,7 +28,8 @@ int main(int argc, char** argv) {
   for (int i = 0; i < caffe2::FLAGS_splits; ++i) {
     out_dbs.push_back(
         std::unique_ptr<DB>(caffe2::db::CreateDB(
-            caffe2::FLAGS_db_type, caffe2::FLAGS_input_db + "_split_" + to_string(i),
+            caffe2::FLAGS_db_type,
+            caffe2::FLAGS_input_db + "_split_" + caffe2::to_string(i),
             caffe2::db::NEW)));
     transactions.push_back(
         std::unique_ptr<Transaction>(out_dbs[i]->NewTransaction()));
