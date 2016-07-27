@@ -25,6 +25,7 @@ def _printformat(storage):
         exp_max = 1
 
     scale = 1
+    exp_max = int(exp_max)
     if int_mode:
         if exp_max > 9:
             format = '{:11.4e}'

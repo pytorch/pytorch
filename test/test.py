@@ -75,7 +75,7 @@ class TestTorch(unittest.TestCase):
         self._testMathByName('sinh')
 
     def test_asin(self):
-        self._testMath(torch.asin, lambda x: math.asin(x) if abs(x) <= 1 else math.nan)
+        self._testMath(torch.asin, lambda x: math.asin(x) if abs(x) <= 1 else float('nan'))
 
     def test_cos(self):
         self._testMathByName('cos')
@@ -84,7 +84,7 @@ class TestTorch(unittest.TestCase):
         self._testMathByName('cosh')
 
     def test_acos(self):
-        self._testMath(torch.acos, lambda x: math.acos(x) if abs(x) <= 1 else math.nan)
+        self._testMath(torch.acos, lambda x: math.acos(x) if abs(x) <= 1 else float('nan'))
 
     def test_tan(self):
         self._testMathByName('tan')
@@ -96,10 +96,10 @@ class TestTorch(unittest.TestCase):
         self._testMathByName('atan')
 
     def test_log(self):
-        self._testMath(torch.log, lambda x: math.log(x) if x > 0 else math.nan)
+        self._testMath(torch.log, lambda x: math.log(x) if x > 0 else float('nan'))
 
     def test_sqrt(self):
-        self._testMath(torch.sqrt, lambda x: math.sqrt(x) if x > 0 else math.nan)
+        self._testMath(torch.sqrt, lambda x: math.sqrt(x) if x > 0 else float('nan'))
 
     def test_exp(self):
         self._testMathByName('exp')
@@ -111,7 +111,7 @@ class TestTorch(unittest.TestCase):
         self._testMathByName('ceil')
 
     def test_rsqrt(self):
-        self._testMath(torch.rsqrt, lambda x: 1 / math.sqrt(x) if x > 0 else math.nan)
+        self._testMath(torch.rsqrt, lambda x: 1 / math.sqrt(x) if x > 0 else float('nan'))
 
     def test_sigmoid(self):
         # TODO: why not simulate math.sigmoid like with rsqrt?
@@ -171,7 +171,7 @@ class TestTorch(unittest.TestCase):
         # NaNs
         for index in (0, 4, 99):
             m1 = torch.randn(100)
-            m1[index] = math.nan
+            m1[index] = float('nan')
             res1val, res1ind = torch.max(m1, 0)
             self.assertNotEqual(res1val[0], res1val[0])
             self.assertEqual(res1ind[0], index)
@@ -593,7 +593,7 @@ class TestTorch(unittest.TestCase):
         self._test_cop(torch.cmul, lambda x, y: x * y)
 
     def test_cpow(self):
-        self._test_cop(torch.cpow, lambda x, y: math.nan if x < 0 else math.pow(x, y))
+        self._test_cop(torch.cpow, lambda x, y: float('nan') if x < 0 else math.pow(x, y))
 
     # TODO: these tests only check if it's possible to pass a return value
     # it'd be good to expand them
@@ -671,7 +671,7 @@ class TestTorch(unittest.TestCase):
         def renorm(matrix, value, dim, max_norm):
             m1 = matrix.transpose(dim, 0).contiguous()
             # collapse non-dim dimensions.
-            m2 = m1.reshape(m1.size(0), math.floor(m1.nElement() / m1.size(0)))
+            m2 = m1.reshape(m1.size(0), int(math.floor(m1.nElement() / m1.size(0))))
             norms = m2.norm(value, 1)
             # clip
             new_norms = norms.clone()
@@ -965,7 +965,7 @@ class TestTorch(unittest.TestCase):
 
             res1val, res1ind = torch.median(x)
             res2val, res2ind = torch.sort(x)
-            ind = math.floor((size+1)/2) - 1
+            ind = int(math.floor((size+1)/2) - 1)
 
             self.assertEqual(res2val.select(1, ind), res1val.select(1, 0), 0)
             self.assertEqual(res2val.select(1, ind), res1val.select(1, 0), 0)
@@ -1414,7 +1414,7 @@ class TestTorch(unittest.TestCase):
         self.assertFalse(MII.isContiguous(), 'MII is contiguous')
         self.assertEqual(MII, MI, 0, 'inverse value in-place')
 
-    @unittest.skip
+    @unittest.skip("Not implemented yet")
     def test_conv2(self):
         x = torch.rand(math.floor(torch.uniform(50, 100)), math.floor(torch.uniform(50, 100)))
         k = torch.rand(math.floor(torch.uniform(10, 20)), math.floor(torch.uniform(10, 20)))

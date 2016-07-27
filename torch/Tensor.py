@@ -75,11 +75,11 @@ class _TensorBase(object):
     def split(self, split_size, dim=0):
         result = []
         dim_size = self.size(dim)
-        num_splits = math.ceil(float(dim_size) / split_size)
+        num_splits = int(math.ceil(float(dim_size) / split_size))
         last_split_size = split_size - (split_size * num_splits - dim_size)
         def get_split_size(i):
             return split_size if i < num_splits-1 else last_split_size
-        return [self.narrow(dim, i*split_size, get_split_size(i)) for i
+        return [self.narrow(int(dim), int(i*split_size), int(get_split_size(i))) for i
                 in torch._pyrange(0, num_splits)]
 
     def chunk(self, n_chunks, dim=0):

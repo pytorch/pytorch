@@ -22,9 +22,15 @@ a.fill(0)
 
 print(a[1])
 
-if not PY3:
-    print(a.ge(long(0)))
+print(a.ge(0).size()[0], a.ge(0).size()[1])
+s = a.ge(0)
+d = s.select(0, 1)
+print(d.double())
 print(a.ge(0))
+
+if not PY3:
+    s = a.ge(int(0))
+    print(s)
 
 a = torch.ones(2, 2)
 b = torch.DoubleTensor()
