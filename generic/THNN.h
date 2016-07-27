@@ -904,6 +904,15 @@ TH_API void THNN_(SpatialUpSamplingNearest_updateGradInput)(
           THTensor *gradInput,
           int scale_factor);
 
+TH_API void THNN_(SpatialUpSamplingBilinear_updateOutput)(
+         THNNState *state,
+         THTensor *input,
+         THTensor *output);
+TH_API void THNN_(SpatialUpSamplingBilinear_updateGradInput)(
+         THNNState *state,
+         THTensor *gradOutput,
+         THTensor *gradInput);
+
 TH_API void THNN_(unfolded_acc)(
           THTensor *finput,
           THTensor *input,

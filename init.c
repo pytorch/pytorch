@@ -148,6 +148,9 @@
 #include "generic/SpatialUpSamplingNearest.c"
 #include "THGenerateFloatTypes.h"
 
+#include "generic/SpatialUpSamplingBilinear.c"
+#include "THGenerateFloatTypes.h"
+
 #include "generic/VolumetricAveragePooling.c"
 #include "THGenerateFloatTypes.h"
 
