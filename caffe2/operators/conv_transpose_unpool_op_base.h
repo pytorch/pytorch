@@ -118,9 +118,13 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
     return true;
   }
 
-  virtual bool RunOnDeviceWithOrderNCHW() = 0;
+  virtual bool RunOnDeviceWithOrderNCHW() {
+    CAFFE_THROW("Not implemented");
+  }
 
-  virtual bool RunOnDeviceWithOrderNHWC() = 0;
+  virtual bool RunOnDeviceWithOrderNHWC() {
+    CAFFE_THROW("Not implemented");
+  }
 
   virtual ~ConvTransposeUnpoolBase() {}
 

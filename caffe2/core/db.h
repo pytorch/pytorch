@@ -116,7 +116,9 @@ CAFFE_DECLARE_REGISTRY(Caffe2DBRegistry, DB, const string&, Mode);
  */
 inline unique_ptr<DB> CreateDB(
     const string& db_type, const string& source, Mode mode) {
-  return Caffe2DBRegistry()->Create(db_type, source, mode);
+  auto result = Caffe2DBRegistry()->Create(db_type, source, mode);
+  VLOG(1) << ((!result) ? "not found db " : "found db ") << db_type;
+  return result;
 }
 
 /**

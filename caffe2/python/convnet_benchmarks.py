@@ -613,6 +613,7 @@ def GetArgumentParser():
     )
     parser.add_argument("--net_type", type=str, default="dag")
     parser.add_argument("--num_workers", type=int, default=2)
+    parser.add_argument("--use-nvtx", default=False, action='store_true')
     return parser
 
 
@@ -624,7 +625,9 @@ if __name__ == '__main__':
     ):
         GetArgumentParser().print_help()
 
-    workspace.GlobalInit(['caffe2', '--caffe2_log_level=0'])
+    workspace.GlobalInit(
+        ['caffe2', '--caffe2_log_level=0'] +
+        ['--caffe2_use_nvtx'] if args.use_nvtx else [])
     model_map = {
         'AlexNet': AlexNet,
         'OverFeat': OverFeat,

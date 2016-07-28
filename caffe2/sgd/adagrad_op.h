@@ -14,7 +14,8 @@ void adagrad_update(
     float epsilon,
     const float* lr,
     Context* context) {
-#pragma omp parallel for
+  // TODO(cxj): use OMP when it is reliable
+  // #pragma omp parallel for
   for (auto i = 0; i < N; ++i) {
     float gi = g[i];
     float hi = nh[i] = h[i] + gi * gi;
@@ -78,8 +79,8 @@ class SparseAdagradOp final : public Operator<Context> {
     const auto* momentIn = Input(MOMENT_1).template data<T>();
     auto* gradOut = Output(OUTPUT_GRAD)->template mutable_data<T>();
     auto* momentOut = Output(OUTPUT_MOMENT_1)->template mutable_data<T>();
-
-#pragma omp parallel for
+    // TODO(cxj): use OMP when it is reliable
+    // #pragma omp parallel for
     for (auto i = 0; i < n; ++i) {
       auto idx = indices[i];
       if (block_size == 1) {

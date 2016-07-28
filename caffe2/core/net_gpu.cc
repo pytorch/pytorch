@@ -1,13 +1,69 @@
 #include "caffe2/core/net.h"
+
 #include "caffe2/core/context_gpu.h"
+#include "caffe2/core/flags.h"
 
 #include "caffe2/core/operator.h"
 #include "caffe2/core/timer.h"
 #include "caffe2/proto/caffe2.pb.h"
 
+#ifdef CAFFE2_USE_NVTX
+#include <nvToolsExt.h>
+#endif
+
+CAFFE2_DEFINE_bool(caffe2_use_nvtx, false, "Use NVTX ranges for profiling");
+
 namespace caffe2 {
 
 namespace {
+
+using Color = int32_t;
+constexpr Color kRunColor = 0x0000CCFF; // blue
+constexpr Color kRecordColor = 0x00FF3300; // red
+constexpr Color kWaitColor = 0x0066FF33; // green
+
+#ifdef CAFFE2_USE_NVTX
+
+class ProfiledRange {
+ public:
+  ProfiledRange(const OperatorDef& def, Color color) {
+    if (!FLAGS_caffe2_use_nvtx) {
+      return;
+    }
+    nvtxEventAttributes_t eventAttrib = {0};
+    eventAttrib.version = NVTX_VERSION;
+    eventAttrib.size = NVTX_EVENT_ATTRIB_STRUCT_SIZE;
+    eventAttrib.colorType = NVTX_COLOR_ARGB;
+    eventAttrib.color = color;
+    eventAttrib.messageType = NVTX_MESSAGE_TYPE_ASCII;
+    eventAttrib.message.ascii = def.type().c_str();
+    range_ = nvtxRangeStartEx(&eventAttrib);
+    CHECK(range_);
+  }
+
+  ~ProfiledRange() {
+    if (!FLAGS_caffe2_use_nvtx) {
+      return;
+    }
+    nvtxRangeEnd(range_);
+  }
+
+ private:
+  nvtxRangeId_t range_ = 0;
+  DISABLE_COPY_AND_ASSIGN(ProfiledRange);
+};
+
+#else
+
+class ProfiledRange {
+ public:
+  ProfiledRange(const OperatorDef& def, Color color) {}
+
+ private:
+  DISABLE_COPY_AND_ASSIGN(ProfiledRange);
+};
+
+#endif // ifdef CAFFE2_USE_NVTX
 
 struct Stream;
 
@@ -69,6 +125,7 @@ struct Stream {
 
   int gpu_id_{-1};
   cudaStream_t stream_{nullptr};
+
  private:
   DISABLE_COPY_AND_ASSIGN(Stream);
 };
@@ -128,18 +185,24 @@ class AsyncDAGNet : public DAGNetBase {
         }));
 
     for (auto source_parent_idx : operator_nodes_[source_idx].parents_) {
+      ProfiledRange r(
+          operator_nodes_[source_parent_idx].operator_->def(), kWaitColor);
       stream.wait(events_[source_parent_idx].get());
     }
 
     // We've waited on all our parent indices.
     bool success = true;
-    for (auto idx: chain) {
+    for (auto idx : chain) {
+      ProfiledRange r(operator_nodes_[idx].operator_->def(), kRunColor);
       success &= operator_nodes_[idx].operator_->RunAsync();
     }
 
     // Record an event for the sink of the chain.
     const auto& sink_idx = chain.back();
-    events_[sink_idx]->record(stream);
+    {
+      ProfiledRange r(operator_nodes_[sink_idx].operator_->def(), kRecordColor);
+      events_[sink_idx]->record(stream);
+    }
     CHECK(!eventRecorded_[sink_idx]);
     eventRecorded_[sink_idx] = 1;
     return success;
@@ -157,9 +220,11 @@ class AsyncDAGNet : public DAGNetBase {
     Stream stream{device_option};
 
     // Potential optimization: we can pre-compute outstanding events.
-    for (auto& event : events_) {
+    for (auto i = 0; i < events_.size(); ++i) {
+      auto& event = events_[i];
       if (event->outstanding_) {
         VLOG(2) << "Synchronizing host on outstanding event";
+        ProfiledRange r(operator_nodes_[i].operator_->def(), kWaitColor);
         stream.wait(event.get());
       }
     }

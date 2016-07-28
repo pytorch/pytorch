@@ -146,7 +146,7 @@ def ScopedBlobReference(name, *args, **kwargs):
     return BlobReference(scope.NAMESCOPE + name, *args, **kwargs)
 
 
-def _RectifyInputOutput(blobs):
+def _RectifyInputOutput(blobs, net=None):
     """A helper function to rectify the input or output of the CreateOperator
     interface.
     """
@@ -154,18 +154,18 @@ def _RectifyInputOutput(blobs):
         # If blobs is a single string, prepend scope.NAMESCOPE and put it as a
         # list.
         # TODO(jiayq): enforce using BlobReference instead of raw strings.
-        return [ScopedBlobReference(blobs)]
+        return [ScopedBlobReference(blobs, net=net)]
     elif type(blobs) is BlobReference:
         # If blob is a BlobReference, simply put it as a list.
-        return [BlobReference(str(blobs))]
-    elif type(blobs) is list:
+        return [blobs]
+    elif type(blobs) in (list, tuple):
         # If blob is a list, we go through it and type check.
         rectified = []
         for blob in blobs:
             if isinstance(blob, basestring):
-                rectified.append(ScopedBlobReference(blob))
+                rectified.append(ScopedBlobReference(blob, net=net))
             elif type(blob) is BlobReference:
-                rectified.append(BlobReference(str(blob)))
+                rectified.append(blob)
             else:
                 raise TypeError(
                     "I/O blob #{} of unsupported type: {} of type {}"
@@ -670,7 +670,18 @@ def get_op_ids_in_path(ssa, blob_versions, inputs, outputs):
 
 
 class Net(object):
+    _net_names_used = set()
     operator_registry_ = {}
+
+    @staticmethod
+    def _get_next_net_name(basename):
+        name = basename
+        next_idx = 1
+        while name in Net._net_names_used:
+            name = basename + '_' + str(next_idx)
+            next_idx += 1
+        Net._net_names_used |= set([name])
+        return name
 
     def __init__(self, name_or_proto):
         """
@@ -706,29 +717,29 @@ class Net(object):
             else:
                 self._next_name_index = 0
         else:
-            name = name_or_proto
             self._net = caffe2_pb2.NetDef()
-            self._net.name = name
+            self._net.name = name_or_proto
             self._next_name_index = 0
+
+        # make sure that this net name hasn't been used before
+        self._net.name = Net._get_next_net_name(self._net.name)
 
     def __str__(self):
         return self._net.name
 
-    def DefinesBlob(self, blob):
+    def BlobIsDefined(self, blob):
         """
         Returns true if the given BlobReference is produced as output of
         an operator in this net, or if it is provided as an external input.
         """
-        if isinstance(blob, BlobReference):
-            assert blob.Net() == self, 'Reference belongs to different net'
         blob_name = str(blob)
+        for input in self._net.external_input:
+            if input == blob_name:
+                return True
         for op in self._net.op:
             for output in op.output:
                 if output == blob_name:
                     return True
-        for input in self._net.external_input:
-            if input == blob_name:
-                return True
         return False
 
     def UsesBlob(self, blob):
@@ -753,7 +764,7 @@ class Net(object):
         raises KeyError.
         """
         blob_name = str(blob_name)
-        if not self.DefinesBlob(blob_name):
+        if not self.BlobIsDefined(blob_name):
             raise KeyError('Net does not define blob %s' % blob_name)
         return BlobReference(blob_name, self)
 
@@ -818,13 +829,16 @@ class Net(object):
                 new_outputs:   list of BlobReferences corresponding to the
                                outputs produced by new_net.
         """
-        inputs = inputs if isinstance(inputs, dict) else {i: i for i in inputs}
+        input_is_pair_list = isinstance(inputs, list) and all(
+            isinstance(i, tuple) and len(i) == 2 for i in inputs)
+        inputs = (
+            inputs if isinstance(inputs, (dict, OrderedDict)) else
+            OrderedDict(inputs) if input_is_pair_list else
+            OrderedDict(zip(inputs, inputs)))
+        for output in outputs:
+            assert self.BlobIsDefined(output)
         input_names = {str(k): str(v) for k, v in inputs.items()}
         output_names = [str(o) for o in outputs]
-        for input in inputs.keys():
-            assert self.UsesBlob(input)
-        for output in outputs:
-            assert self.DefinesBlob(output)
         proto = self._net
         ssa, blob_versions = get_ssa(proto)
         used_op_ids = get_op_ids_in_path(ssa, blob_versions, inputs, outputs)
@@ -859,11 +873,23 @@ class Net(object):
     def Proto(self):
         return self._net
 
-    def NextName(self):
+    def NextName(self, prefix=None, output_id=None):
         """Returns the next name to be used, if you do not want to explicitly
         name your blob."""
-        output_name = self._net.name + '_blob_' + str(self._next_name_index)
-        self._next_name_index += 1
+        if prefix:
+            output_name_base = self._net.name + '/' + prefix
+            output_name = output_name_base
+            if output_id is not None:
+                output_name += ':' + str(output_id)
+            index = 2
+            while self.BlobIsDefined(output_name):
+                output_name = output_name_base + '_' + str(index)
+                if output_id is not None:
+                    output_name += ':' + str(output_id)
+                index += 1
+        else:
+            output_name = self._net.name + '_blob_' + str(self._next_name_index)
+            self._next_name_index += 1
         return str(output_name)
 
     def AddGradientOperators(self, ys, skip=0):
@@ -900,16 +926,18 @@ class Net(object):
         self._net.op.extend(grad_ops)
         return input_to_grad
 
-    def AddExternalInput(self, input_name):
-        input_name = str(input_name)
+    def AddExternalInput(self, input):
+        input_name = str(input)
         assert input_name not in self._net.external_input, (
             'Net already contains an input named %s' % input_name)
         self._net.external_input.extend([input_name])
-        return BlobReference(input_name, self)
+        return (
+            input if isinstance(input, BlobReference)
+            else BlobReference(input_name))
 
     def AddExternalOutput(self, output):
         assert isinstance(output, BlobReference)
-        assert self.DefinesBlob(output)
+        assert self.BlobIsDefined(output)
         self.Proto().external_output.extend([str(output)])
 
     def DeduplicateGradientSlices(self, g):
@@ -931,14 +959,22 @@ class Net(object):
     def _CreateAndAddToSelf(self, op_type, inputs, outputs=None, **kwargs):
         """A helper function to create an operator and add it to self.
         """
+        inputs = _RectifyInputOutput(inputs)
+        for input in inputs:
+            if not self.BlobIsDefined(input):
+                assert input.Net() != self
+                self.AddExternalInput(input)
         if outputs is None:
             # If we do not specify an output, we will assume that this op
             # produces one output in this case.
-            outputs = self.NextName()
+            outputs = self.NextName(prefix=op_type)
         elif type(outputs) is int:
             # In this case, we will auto-fill the given number of outputs
             # with auto-generated names.
-            outputs = [self.NextName() for i in range(outputs)]
+            outputs = [
+                self.NextName(prefix=op_type, output_id=i)
+                for i in range(outputs)]
+        outputs = _RectifyInputOutput(outputs, net=self)
         op = CreateOperator(op_type, inputs, outputs, **kwargs)
         self._net.op.extend([op])
         if len(op.output) == 0:
@@ -1036,10 +1072,11 @@ class ExecutionStep(object):
         self._assert_can_mutate()
         self._step.num_iter = num_iter
 
-    def SetCriteriaNet(self, criteria_net):
+    def SetShouldStopBlob(self, should_stop_blob):
+        assert isinstance(should_stop_blob, BlobReference), (
+            "expects BlobReference here, got {}".format(type(should_stop_blob)))
         self._assert_can_mutate()
-        _add_net_to_dict(self._net_dict, criteria_net)
-        self._step.criteria_network = get_net_name(criteria_net)
+        self._step.should_stop_blob = str(should_stop_blob)
 
     def SetReportNet(self, report_net, report_interval):
         self._assert_can_mutate()
@@ -1053,7 +1090,7 @@ class ExecutionStep(object):
         if isinstance(substep, ExecutionStep):
             substep._notify_is_used()
             if not substep.HasNets() and not substep.HasSubsteps():
-                return
+                return self
             for net in substep.Nets():
                 _add_net_to_dict(self._net_dict, net)
             self._substeps.append(substep)
@@ -1061,6 +1098,7 @@ class ExecutionStep(object):
         else:
             proto = substep
         self._step.substep.add().CopyFrom(proto)
+        return self
 
     def SetConcurrentSubsteps(self, concurrent_substeps):
         self._assert_can_mutate()
@@ -1073,6 +1111,7 @@ class ExecutionStep(object):
         assert isinstance(net, Net)
         _add_net_to_dict(self._net_dict, net)
         self._step.network.extend([get_net_name(net)])
+        return self
 
 
 class Plan(object):
@@ -1107,11 +1146,11 @@ class Plan(object):
 
 def execution_step(default_name,
                    steps_or_nets,
-                   criteria=None,
                    num_iter=None,
                    report_net=None,
                    report_interval=None,
-                   concurrent_substeps=None):
+                   concurrent_substeps=None,
+                   should_stop_blob=None):
     """
     Helper for creating an ExecutionStep.
     - steps_or_nets can be:
@@ -1120,18 +1159,20 @@ def execution_step(default_name,
       - ExecutionStep
       - list<Net>
       - list<ExecutionStep>
-    - criteria is either None or a Net
-    - if no criteria or num_iter is provided, defaults to num_iter=1
+    - should_stop_blob is either None or a scalar boolean blob.
+      - This blob is checked AFTER every substeps/subnets.
+      - If specified and true, then this step will return immediately.
+      - Be sure to handle race conditions if setting from concurrent threads.
+    - if no should_stop_blob or num_iter is provided, defaults to num_iter=1
     """
-    assert criteria is None or isinstance(criteria, Net)
-    assert criteria is None or num_iter is None, (
-        'Cannot set both criteria and num_iter.')
-    if criteria is None and num_iter is None:
+    assert should_stop_blob is None or num_iter is None, (
+        'Cannot set both should_stop_blob and num_iter.')
+    if should_stop_blob is None and num_iter is None:
         num_iter = 1
 
-    def set_criteria(step):
-        if criteria is not None:
-            step.SetCriteriaNet(criteria)
+    def set_step_attr(step):
+        if should_stop_blob is not None:
+            step.SetShouldStopBlob(should_stop_blob)
         else:
             step.SetIter(num_iter)
         if concurrent_substeps is not None:
@@ -1144,18 +1185,20 @@ def execution_step(default_name,
     if not steps_or_nets:
         return ExecutionStep(default_name)
     if isinstance(steps_or_nets, ExecutionStep):
-        return set_criteria(steps_or_nets)
+        step = set_step_attr(ExecutionStep(default_name))
+        step.AddSubstep(steps_or_nets)
+        return step
     elif isinstance(steps_or_nets, Net):
-        step = set_criteria(ExecutionStep(default_name))
+        step = set_step_attr(ExecutionStep(default_name))
         step.AddNet(steps_or_nets)
         return step
     elif isinstance(steps_or_nets, list):
         if isinstance(steps_or_nets[0], Net):
-            step = set_criteria(ExecutionStep(default_name))
+            step = set_step_attr(ExecutionStep(default_name))
             map(step.AddNet, steps_or_nets)
             return step
         elif isinstance(steps_or_nets[0], ExecutionStep):
-            step = set_criteria(ExecutionStep(default_name))
+            step = set_step_attr(ExecutionStep(default_name))
             map(step.AddSubstep, steps_or_nets)
             return step
     else:

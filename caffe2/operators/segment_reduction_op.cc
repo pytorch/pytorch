@@ -1066,9 +1066,15 @@ REGISTER_SEGMENT_DEF(
 REGISTER_SEGMENT_DEF(
     AbstractSortedSegmentRangeDef<float, int, CPUContext,
                                   LogSumExpRangeReducerDef>);
+REGISTER_SEGMENT_DEF(AbstractSortedSegmentRangeDef<
+                     float,
+                     int,
+                     CPUContext,
+                     LogMeanExpRangeReducerDef>);
 REGISTER_SEGMENT_DEF(
-    AbstractSortedSegmentRangeDef<float, int, CPUContext,
-                                  MeanRangeReducerDef>);
+    AbstractSortedSegmentRangeDef<float, int, CPUContext, MeanRangeReducerDef>);
+REGISTER_SEGMENT_DEF(
+    AbstractSortedSegmentRangeDef<float, int, CPUContext, MaxRangeReducerDef>);
 
 #define REGISTER_REDUCER_WITH_ALL_OPS(reducer_def)                          \
   REGISTER_SEGMENT_DEF(                                                     \

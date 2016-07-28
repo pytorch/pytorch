@@ -62,6 +62,22 @@ class MakeTwoClassGradientOp final
   // Ouptut: dX
 };
 
+template <typename T, class Context>
+class SigmoidCrossEntropyWithLogitsOp final : public Operator<Context> {
+ public:
+  USE_SIMPLE_CTOR_DTOR(SigmoidCrossEntropyWithLogitsOp);
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  bool RunOnDevice() override;
+};
+
+template <typename T, class Context>
+class SigmoidCrossEntropyWithLogitsGradientOp final : public Operator<Context> {
+ public:
+  USE_SIMPLE_CTOR_DTOR(SigmoidCrossEntropyWithLogitsGradientOp);
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  bool RunOnDevice() override;
+};
+
 }  // namespace caffe2
 
 #endif  // CAFFE2_OPERATORS_CROSS_ENTROPY_OP_H_

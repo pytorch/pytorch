@@ -41,7 +41,8 @@ void ftrl_update(
     T* new_nz,
     const FtrlParams<T>& params,
     Context* context) {
-#pragma omp parallel for
+  // TODO(cxj): use OMP when it is reliable
+  // #pragma omp parallel for
   for (auto i = 0; i < N; ++i) {
     ftrl_compute(
         w[i],
@@ -93,11 +94,13 @@ void SparseFtrlOp<T>::DoRun() {
   T* nz = n_z->template mutable_data<T>();
   const SIndex* idxs = indices.template data<SIndex>();
   const T* g = grad.template data<T>();
-#pragma omp parallel for
+
+  // TODO(cxj): use OMP when it is reliable
+  // #pragma omp parallel for
   for (TIndex i = 0; i < K; ++i) {
     SIndex idx = idxs[i];
     DCHECK(0 <= idx && idx < N) << "Index out of bounds: " << idx
-                                      << ", range 0 to " << N;
+                                << ", range 0 to " << N;
     if (block_size == 1) {
       ftrl_compute(
           w[idx],

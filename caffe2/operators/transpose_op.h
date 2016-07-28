@@ -45,7 +45,8 @@ class TransposeOp final : public Operator<Context> {
     }
     Y->Resize(new_dims_);
     // Do the actual transpose, which is implemented in DoRunWithType().
-    return DispatchHelper<TensorTypes<float>>::call(this, Input(0));
+    return DispatchHelper<TensorTypes<float, double, int, long>>::call(
+        this, Input(0));
   }
 
  protected:

@@ -3,6 +3,7 @@
 
 #include <cstdio>
 #include <map>
+#include <unordered_set>
 
 #include "caffe2/core/context.h"
 #include "caffe2/core/db.h"
@@ -65,12 +66,18 @@ class LoadOp final : public Operator<Context> {
     // chunks. This way we can make sure that all chunks were loaded in the end.
     // This is a map from output index to current size of the blob
     std::map<int, size_t> blobSizes;
-
+    std::unordered_set<string> loaded;
     for (; cursor->Valid(); cursor->Next()) {
       const string& key = cursor->key();
       if (!output_indices_.count(key)) {
         VLOG(1) << "Key " << key << " not used. Skipping.";
       } else {
+        CAFFE_ENFORCE(
+            loaded.count(key) == 0,
+            "Multiple copies of blob ",
+            key,
+            " found in the db.");
+
         VLOG(2) << "Deserializing blob " << key;
         BlobProto proto;
         CHECK(proto.ParseFromString(cursor->value()));
@@ -101,6 +108,15 @@ class LoadOp final : public Operator<Context> {
             blobSize.first->second = blob->Get<Tensor<Context>>().size();
           }
         }
+
+        if (!proto.has_tensor() ||
+            blobSize.first->second >= blob->Get<Tensor<Context>>().size()) {
+          loaded.insert(key);
+        }
+
+        if (loaded.size() >= OutputSize()) {
+          break;
+        }
       }
     }
 
@@ -116,6 +132,8 @@ class LoadOp final : public Operator<Context> {
             blobSize.second);
       }
     }
+
+    CHECK_EQ(loaded.size(), OutputSize());
   }
 
  private:

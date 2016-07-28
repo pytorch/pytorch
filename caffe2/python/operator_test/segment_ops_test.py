@@ -83,6 +83,10 @@ def logsumexp_grad(grad_out, outputs, inputs):
         axis=0) * np.exp(inputs[0])
 
 
+def logmeanexp(x):
+    return np.log(np.mean(np.exp(x), axis=0))
+
+
 def mean(x):
     return np.mean(x, axis=0)
 
@@ -94,6 +98,30 @@ def mean_grad(grad_out, outputs, inputs):
         axis=0)
 
 
+def max(x):
+    return np.amax(x, axis=0)
+
+
+def max_grad(grad_out, outputs, inputs):
+    flat_inputs = inputs[0].flatten()
+    flat_outputs = np.array(outputs[0]).flatten()
+    flat_grad_in = np.zeros(flat_inputs.shape)
+    flat_grad_out = np.array(grad_out).flatten()
+    blocks = inputs[0].shape[0]
+    block_size = flat_inputs.shape[0] // blocks
+
+    for i in range(block_size):
+        out_grad = flat_grad_out[i]
+        out = flat_outputs[i]
+        for j in range(blocks):
+            idx = j * block_size + i
+            if out == flat_inputs[idx]:
+                flat_grad_in[idx] = out_grad
+                break
+
+    return np.resize(flat_grad_in, inputs[0].shape)
+
+
 REFERENCES_ALL = [
     ('Sum', partial(np.sum, axis=0), sum_grad),
 ]
@@ -101,7 +129,10 @@ REFERENCES_ALL = [
 REFERENCES_SORTED = [
     ('RangeSum', partial(np.sum, axis=0), sum_grad),
     ('RangeLogSumExp', logsumexp, logsumexp_grad),
+    # gradient is the same as sum
+    ('RangeLogMeanExp', logmeanexp, logsumexp_grad),
     ('RangeMean', mean, mean_grad),
+    ('RangeMax', max, max_grad),
 ]
 
 

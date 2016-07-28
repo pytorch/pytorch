@@ -2,6 +2,17 @@
 
 namespace caffe2 {
 
+namespace {
+
+inline float sigmoid_xent_forward(float lgt, float tgt) {
+  return lgt * (tgt - (lgt >= 0)) - log(1 + exp(lgt - 2 * lgt * (lgt >= 0)));
+}
+
+inline float sigmoid_xent_backward(float lgt, float tgt) {
+  return tgt - 1. / (1. + exp(-lgt));
+}
+}
+
 template <>
 bool LabelCrossEntropyOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
@@ -22,6 +33,68 @@ bool LabelCrossEntropyOp<float, CPUContext>::RunOnDevice() {
         "Label seems incorrect: label value larger than number of classes: ",
         labeldata[i], " vs ", D);
     Ydata[i] = -log(std::max(Xdata[i * D + labeldata[i]], kLOG_THRESHOLD()));
+  }
+  return true;
+}
+
+template <>
+bool SigmoidCrossEntropyWithLogitsOp<float, CPUContext>::RunOnDevice() {
+  auto& logits = Input(0);
+  auto& targets = Input(1);
+  CAFFE_ENFORCE(logits.dims() == targets.dims());
+  const auto inner_size = logits.ndim() > 0 ? logits.dims().back() : 1;
+  const auto outer_size = logits.size() / inner_size;
+
+  auto* out = Output(0);
+  if (logits.ndim() == 0) {
+    out->Resize(std::vector<TIndex>{});
+  } else {
+    std::vector<TIndex> dims(logits.dims().begin(), logits.dims().end() - 1);
+    out->Resize(dims);
+  }
+  auto* out_ptr = out->mutable_data<float>();
+
+  auto* logits_ptr = logits.data<float>();
+  auto* targets_ptr = targets.data<float>();
+
+  auto in_idx = 0;
+  for (int i = 0; i < outer_size; ++i) {
+    float value = 0;
+    for (int j = 0; j < inner_size; ++j) {
+      value += sigmoid_xent_forward(logits_ptr[in_idx], targets_ptr[in_idx]);
+      ++in_idx;
+    }
+    out_ptr[i] = -value / inner_size;
+  }
+  return true;
+}
+
+template <>
+bool SigmoidCrossEntropyWithLogitsGradientOp<float, CPUContext>::RunOnDevice() {
+  auto& g = Input(0);
+  auto& logits = Input(1);
+  auto& targets = Input(2);
+  CAFFE_ENFORCE(logits.dims() == targets.dims());
+  const auto inner_size = logits.ndim() > 0 ? logits.dims().back() : 1;
+  const auto outer_size = logits.size() / inner_size;
+  CAFFE_ENFORCE(g.size() == outer_size);
+
+  auto* out = Output(0);
+  out->ResizeLike(logits);
+  auto* out_ptr = out->mutable_data<float>();
+
+  auto* logits_ptr = logits.data<float>();
+  auto* targets_ptr = targets.data<float>();
+  auto* g_ptr = g.data<float>();
+
+  auto in_idx = 0;
+  for (int i = 0; i < outer_size; ++i) {
+    auto g_factor = -g_ptr[i] / inner_size;
+    for (int i = 0; i < inner_size; ++i) {
+      out_ptr[in_idx] = g_factor *
+          sigmoid_xent_backward(logits_ptr[in_idx], targets_ptr[in_idx]);
+      ++in_idx;
+    }
   }
   return true;
 }
@@ -129,6 +202,13 @@ REGISTER_CPU_OPERATOR(MakeTwoClass,
 REGISTER_CPU_OPERATOR(MakeTwoClassGradient,
                       MakeTwoClassGradientOp<float, CPUContext>);
 
+REGISTER_CPU_OPERATOR(
+    SigmoidCrossEntropyWithLogits,
+    SigmoidCrossEntropyWithLogitsOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(
+    SigmoidCrossEntropyWithLogitsGradient,
+    SigmoidCrossEntropyWithLogitsGradientOp<float, CPUContext>);
+
 OPERATOR_SCHEMA(MakeTwoClass)
   .NumInputs(1)
   .NumOutputs(1)
@@ -145,6 +225,22 @@ OPERATOR_SCHEMA(MakeTwoClassGradient)
   .NumInputs(1)
   .NumOutputs(1);
 
+OPERATOR_SCHEMA(SigmoidCrossEntropyWithLogits)
+    .NumInputs(2)
+    .NumOutputs(1)
+    .SetDoc(R"DOC(
+Given two matrices logits and targets, of same shape,
+(batch_size, num_classes), computes the sigmoid cross entropy between the two.
+Returns a tensor of shape (batch_size,) of losses for each example.
+)DOC")
+    .Input(0, "logits", "matrix of logits for each example and class.")
+    .Input(1, "targets", "matrix of targets, same shape as logits.")
+    .Output(0, "xentropy", "Vector with the total xentropy for each example.");
+
+OPERATOR_SCHEMA(SigmoidCrossEntropyWithLogitsGradient)
+    .NumInputs(3)
+    .NumOutputs(1);
+
 struct GetMakeTwoClassGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
@@ -156,5 +252,20 @@ struct GetMakeTwoClassGradient : public GradientMakerBase {
   }
 };
 REGISTER_GRADIENT(MakeTwoClass, GetMakeTwoClassGradient);
+
+struct GetSigmoidCrossEntropyWithLogitsGradient : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  vector<OperatorDef> GetGradientDefs() override {
+    return SingleGradientDef(
+        "SigmoidCrossEntropyWithLogitsGradient",
+        "",
+        vector<string>{GO(0), I(0), I(1)},
+        vector<string>{GI(0)});
+  }
+};
+REGISTER_GRADIENT(
+    SigmoidCrossEntropyWithLogits,
+    GetSigmoidCrossEntropyWithLogitsGradient);
+
 }  // namespace
 }  // namespace caffe2

@@ -69,6 +69,20 @@ TEST(BlobTest, BlobWrongType) {
   ASSERT_THROW(blob.Get<int>(), EnforceNotMet);
 }
 
+TEST(BlobTest, StringSerialization) {
+  const std::string kTestString = "Hello world?";
+  Blob blob;
+  *blob.GetMutable<std::string>() = kTestString;
+
+  string serialized = blob.Serialize("test");
+  BlobProto proto;
+  CHECK(proto.ParseFromString(serialized));
+  EXPECT_EQ(proto.name(), "test");
+  EXPECT_EQ(proto.type(), "std::string");
+  EXPECT_FALSE(proto.has_tensor());
+  EXPECT_EQ(proto.content(), kTestString);
+}
+
 TEST(TensorNonTypedTest, TensorChangeType) {
   vector<int> dims(3);
   dims[0] = 2;
