@@ -103,7 +103,7 @@ class TreeIterator {
       std::vector<TOffset>& sizes,
       std::vector<TOffset>& limits,
       TOffset num) {
-    thread_local std::vector<TOffset> newOffsets;
+    std::vector<TOffset> newOffsets;
     CHECK_EQ(lengths.size(), numLengthFields());
     CHECK_EQ(offsets.size(), numOffsetFields());
     sizes.resize(offsets.size());
@@ -221,10 +221,10 @@ class CheckDatasetConsistencyOp : public Operator<CPUContext> {
         iterator_(OperatorBase::GetRepeatedArgument<std::string>("fields")) {}
 
   bool RunOnDevice() override {
-    thread_local std::vector<const TLength*> lengths;
-    thread_local std::vector<TOffset> limits;
-    thread_local std::vector<TOffset> sizes;
-    thread_local std::vector<TOffset> offsets;
+    std::vector<const TLength*> lengths;
+    std::vector<TOffset> limits;
+    std::vector<TOffset> sizes;
+    std::vector<TOffset> offsets;
     CAFFE_ENFORCE(
         InputSize() == iterator_.fields().size(),
         "Invalid number of fields. Expected ",
@@ -282,10 +282,10 @@ class ReadNextBatchOp : public Operator<CPUContext> {
   bool RunOnDevice() override {
     auto& cursor = OperatorBase::Input<std::unique_ptr<TreeCursor>>(0);
     CAFFE_ENFORCE(InputSize() == cursor->it.fields().size() + 1);
-    thread_local std::vector<const TLength*> lengths;
-    thread_local std::vector<TOffset> limits;
-    thread_local std::vector<TOffset> sizes;
-    thread_local std::vector<TOffset> offsets;
+    std::vector<const TLength*> lengths;
+    std::vector<TOffset> limits;
+    std::vector<TOffset> sizes;
+    std::vector<TOffset> offsets;
     sizes.resize(cursor->it.numOffsetFields());
     // gather length data
     lengths.resize(cursor->it.numLengthFields());
@@ -309,7 +309,7 @@ class ReadNextBatchOp : public Operator<CPUContext> {
       cursor->it.advance(lengths, cursor->offsets, sizes, limits, batchSize_);
     }
     // gather data
-    thread_local std::vector<TIndex> outDim;
+    std::vector<TIndex> outDim;
     for (int i = 0; i < cursor->it.fields().size(); ++i) {
       auto lengthIdx = cursor->it.fields()[i].lengthFieldId + 1;
       auto size = sizes[lengthIdx];
@@ -390,7 +390,7 @@ class ReadRandomBatchOp : public Operator<CPUContext> {
     auto idxvec = idxblob.template data<int64_t>();
     auto& offsetdim = offsetsmat.dims();
     // gather data
-    thread_local std::vector<TIndex> outDim;
+    std::vector<TIndex> outDim;
     int64_t idx;
     {
       std::lock_guard<std::mutex> lock(cursor->mutex_);

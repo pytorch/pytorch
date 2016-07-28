@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+
 #include "caffe2/utils/math.h"
 #include "caffe2/core/context.h"
 
