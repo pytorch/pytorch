@@ -1,4 +1,4 @@
-#include "caffe2/caffe2/operators/string_ops.h"
+#include "caffe2/operators/string_ops.h"
 #include "caffe2/core/operator.h"
 
 namespace caffe2 {
