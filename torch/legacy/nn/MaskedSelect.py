@@ -21,17 +21,16 @@ class MaskedSelect(nn.Module):
     def updateGradInput(self, input, gradOutput):
         input, mask = input
         if input.type() == 'torch.CudaTensor':
-            self._maskIndexBufferCPU.range(1, mask.nElement()).resize(mask.size())
+            self._maskIndexBufferCPU.range(0, mask.nElement()-1).resize(mask.size())
             self._maskIndexBuffer.resize(self._maskIndexBufferCPU.size()).copy(self._maskIndexBufferCPU)
         else:
-            self._maskIndexBuffer.range(1, mask.nElement()).resize(mask.size())
+            self._maskIndexBuffer.range(0, mask.nElement()-1).resize(mask.size())
 
         self._maskIndices.maskedSelect(self._maskIndexBuffer, mask)
         self._gradBuffer.resize(input.nElement()).zero()
         self._gradBuffer.scatter(0, self._maskIndices, gradOutput)
         self._gradBuffer.resize(input.size())
-        self.gradInput = [self._gradBuffer,
-                                self._gradMask.resize(mask.size()).fill(0)]
+        self.gradInput = [self._gradBuffer, self._gradMask.resize(mask.size()).fill(0)]
         return self.gradInput
 
     def type(self, type=None, tensorCache=None):

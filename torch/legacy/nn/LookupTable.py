@@ -3,8 +3,6 @@ from torch.legacy import nn
 
 class LookupTable(nn.Module):
 
-    __version = 4
-
     def __init__(self, nIndex, nOutput, paddingValue=0, maxNorm=None, normType=None):
         super(LookupTable, self).__init__()
         self.weight = torch.Tensor(nIndex, nOutput)
@@ -26,15 +24,6 @@ class LookupTable(nn.Module):
         self._input = torch.LongTensor()
 
         self.reset()
-
-
-    # TODO
-    # def backCompatibility(self, ):
-        # self._count = self._count or torch.IntTensor()
-        # self._input = self._input or torch.LongTensor()
-
-        # if not self.shouldScaleGradByFreq:
-           # self.shouldScaleGradByFreq = False
 
     def accUpdateOnly(self):
         self.gradWeight = None
@@ -70,14 +59,12 @@ class LookupTable(nn.Module):
             return input
 
     def updateOutput(self, input):
-        # TODO
-        # self.backCompatibility()
         self.renorm(input)
         input = self._makeInputContiguous(input)
         if input.dim() == 1:
-           self.output.index(self.weight, 1, input)
+           self.output.index(self.weight, 0, input)
         elif input.dim() == 2:
-           self.output.index(self.weight, 1, input.view(-1))
+           self.output.index(self.weight, 0, input.view(-1))
            self.output = self.output.view(input.size(0), input.size(1), self.weight.size(1))
         else:
            raise RuntimeError("input must be a vector or matrix")
@@ -99,8 +86,6 @@ class LookupTable(nn.Module):
 
 
     def accGradParameters(self, input, gradOutput, scale=1):
-        # TODO
-        #self.backCompatibility()
         input = self._input if self.copiedInput else input
         if input.dim() == 2:
             input = input.view(-1)
@@ -108,9 +93,9 @@ class LookupTable(nn.Module):
             raise RuntimeError("input must be a vector or matrix")
 
         if not gradOutput.isContiguous():
-           self._gradOutput = self._gradOutput or gradOutput.new()
-           self._gradOutput.resizeAs(gradOutput).copy(gradOutput)
-           gradOutput = self._gradOutput
+            self._gradOutput = self._gradOutput or gradOutput.new()
+            self._gradOutput.resizeAs(gradOutput).copy(gradOutput)
+            gradOutput = self._gradOutput
 
         self._backend.LookupTable_accGradParameters(
             self._backend.library_state,
@@ -148,19 +133,20 @@ class LookupTable(nn.Module):
         )
 
     def type(self, type=None, tensorCache=None):
-        # TODO: return type if called without any args
+        if not type:
+            return self._type
         super(LookupTable, self).type(type, tensorCache)
 
         if type == 'torch.CudaTensor':
-           # CUDA uses _sorted and _indices temporary tensors
-           self._sorted = self.weight.new()
-           self._indices = self.weight.new()
-           self._count = self.weight.new()
-           self._input = self.weight.new()
+            # CUDA uses _sorted and _indices temporary tensors
+            self._sorted = self.weight.new()
+            self._indices = self.weight.new()
+            self._count = self.weight.new()
+            self._input = self.weight.new()
         else:
-           # self._count and self._input should only be converted if using Cuda
-           self._count = torch.IntTensor()
-           self._input = torch.LongTensor()
+            # self._count and self._input should only be converted if using Cuda
+            self._count = torch.IntTensor()
+            self._input = torch.LongTensor()
 
 
         return self
@@ -168,8 +154,5 @@ class LookupTable(nn.Module):
 
     def clearState(self):
         nn.utils.clear(self, '_count', '_input', '_sorted', '_indices', '_gradOutput')
-        return super(LookupTable, self).clearState(self)
+        return super(LookupTable, self).clearState()
 
-# TODO
-# we: not need to accumulate parameters when sharing
-#LookupTable.sharedAccUpdateGradParameters = LookupTable.accUpdateGradParameters

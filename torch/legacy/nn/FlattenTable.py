@@ -75,7 +75,8 @@ class FlattenTable(nn.Module):
 
 
     def type(self, type=None, tensorCache=None):
-        # TODO: this should return it's current type anyway
+        if not type:
+            return self._type
         # This function just stores references so we don't need to do any type
         # conversions. Just force the tables to be empty.
         self.clearState()
@@ -83,5 +84,5 @@ class FlattenTable(nn.Module):
 
     def clearState(self):
         self.input_map = []
-        return super(FlattenTable, self).clearState(self)
+        return super(FlattenTable, self).clearState()
 

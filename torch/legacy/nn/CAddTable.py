@@ -2,9 +2,9 @@ import torch
 from torch.legacy import nn
 
 class CAddTable(nn.Module):
-    def __init__(self, ip=False):
+    def __init__(self, inplace=False):
         super(CAddTable, self).__init__()
-        self.inplace = ip
+        self.inplace = inplace
         self.gradInput = []
 
 
@@ -22,11 +22,14 @@ class CAddTable(nn.Module):
 
     def updateGradInput(self, input, gradOutput):
         for i in range(len(input)):
-           self.gradInput[i] = self.gradInput[i] or input[0].new()
-           if self.inplace:
-              self.gradInput[i].set(gradOutput)
-           else:
-              self.gradInput[i].resizeAs(input[i]).copy(gradOutput)
+            if i >= len(self.gradInput):
+                assert i == len(self.gradInput)
+                self.gradInput.append(input[0].new())
+
+            if self.inplace:
+                self.gradInput[i].set(gradOutput)
+            else:
+                self.gradInput[i].resizeAs(input[i]).copy(gradOutput)
 
         for i in range(len(input), len(self.gradInput)):
             self.gradInput[i] = nil

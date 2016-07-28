@@ -25,7 +25,6 @@ class Linear(nn.Module):
         else:
             stdv = 1./math.sqrt(self.weight.size(1))
 
-        # TODO: is removing oldSeed ok?
         self.weight.uniform(-stdv, stdv)
         if self.bias is not None:
             self.bias.uniform(-stdv, stdv)
@@ -67,8 +66,6 @@ class Linear(nn.Module):
 
         return self.gradInput
 
-
-
     def accGradParameters(self, input, gradOutput, scale=1):
         assert input.dim() == 2
         self.gradWeight.addmm(scale, gradOutput.t(), input)
@@ -77,19 +74,13 @@ class Linear(nn.Module):
             self._updateAddBuffer(input)
             self.gradBias.addmv(scale, gradOutput.t(), self.addBuffer)
 
-    # we: not need to accumulate parameters when sharing
-    # TODO
-    #Linear.sharedAccUpdateGradParameters = Linear.accUpdateGradParameters
-
     def clearState(self):
-        # TODO: this shouldn't call set
-        if self.addBuffer:
-            self.addBuffer.set()
+        nn.utils.clear(self, 'addBuffer')
         return super(Linear, self).clearState()
 
 
     def __repr__(self):
-        return torch.typename(self) + \
+        return super(Linear, self).__repr__() + \
                 '({} -> {})'.format(self.weight.size(1), self.weight.size(0)) + \
                 (' without bias' if not self.bias else '')
 

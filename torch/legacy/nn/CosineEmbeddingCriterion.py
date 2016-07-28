@@ -22,19 +22,19 @@ class CosineEmbeddingCriterion(nn.Criterion):
 
         # keep backward compatibility
         if not self.buffer:
-           self.buffer = input1.new()
-           self.w1  = input1.new()
-           self.w22 = input1.new()
-           self.w  = input1.new()
-           self.w32 = input1.new()
-           self._outputs = input1.new()
+            self.buffer = input1.new()
+            self.w1  = input1.new()
+            self.w22 = input1.new()
+            self.w  = input1.new()
+            self.w32 = input1.new()
+            self._outputs = input1.new()
 
-           # comparison operators behave differently from cuda/c implementations
-           # TODO: verify type
-           if input1.type() == 'torch.CudaTensor':
-              self._idx = input1.new()
-           else:
-              self._idx = torch.ByteTensor()
+            # comparison operators behave differently from cuda/c implementations
+            # TODO: verify name
+            if input1.type() == 'torch.CudaTensor':
+                self._idx = input1.new()
+            else:
+                self._idx = torch.ByteTensor()
 
         self.buffer.cmul(input1, input2)
         self.w1.sum(self.buffer, 1)
@@ -104,10 +104,13 @@ class CosineEmbeddingCriterion(nn.Criterion):
         return self.gradInput
 
     def type(self, type=None, tensorCache=None):
-        # TODO: shouldn't this return the type as well?
+        if not type:
+           return self._type
+
         self._idx = nil
         super(CosineEmbeddingCriterion, self).type(self, type, tensorCache)
         # comparison operators behave differently from cuda/c implementations
+        # TODO: verify name
         if type == 'torch.CudaTensor':
            self._idx = torch.CudaTensor()
         else:

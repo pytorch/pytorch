@@ -3,7 +3,7 @@ from torch.legacy import nn
 
 class MixtureTable(nn.Module):
 
-    def __init__(self, dim=0):
+    def __init__(self, dim=1):
         super(MixtureTable, self).__init__()
         self.dim = dim
         self.size = torch.LongStorage()
@@ -28,7 +28,7 @@ class MixtureTable(nn.Module):
         self._expert = self._expert or input[0].new()
         self._expertView = self._expertView or input[0].new()
 
-        self.dimG = 2
+        self.dimG = 1
         batchSize = gaterInput.size(0)
 
         if self.table or isinstance(expertInputs, list):
@@ -39,7 +39,7 @@ class MixtureTable(nn.Module):
             expertInput = expertInputs[0]
             if self.batchSize != batchSize:
                 self.size.resize(expertInput.dim()+1).fill(1)
-                if self.dimG > 1:
+                if self.dimG > 0:
                     self.size[0] = gaterInput.size(0)
 
                 self.size[self.dim] = gaterInput.size(self.dimG)
@@ -54,20 +54,20 @@ class MixtureTable(nn.Module):
                 gate = self._gaterView.select(self.dim, i).expandAs(expertInput)
                 self.output.addcmul(expertInput, gate)
         else:
-           if self.batchSize != batchSize:
-              self.size.resize(expertInputs.dim()).fill(1)
-              if self.dimG > 1:
-                 self.size[0] = gaterInput.size(0)
+            if self.batchSize != batchSize:
+                self.size.resize(expertInputs.dim()).fill(1)
+                if self.dimG > 0:
+                    self.size[0] = gaterInput.size(0)
 
-              self.size[self.dim] = gaterInput.size(self.dimG)
-              self.output.resizeAs(expertInputs.select(self.dim, 0))
-              self.batchSize = batchSize
-              self.backwardSetup = False
+                self.size[self.dim] = gaterInput.size(self.dimG)
+                self.output.resizeAs(expertInputs.select(self.dim, 0))
+                self.batchSize = batchSize
+                self.backwardSetup = False
 
-           self._gaterView.view(gaterInput, self.size)
-           self._expert.cmul(self._gaterView.expandAs(expertInputs), expertInputs)
-           self.output.sum(self._expert, self.dim)
-           self.output.resizeAs(expertInputs.select(self.dim, 0))
+            self._gaterView.view(gaterInput, self.size)
+            self._expert.cmul(self._gaterView.expandAs(expertInputs), expertInputs)
+            self.output.sum(self._expert, self.dim)
+            self.output.resizeAs(expertInputs.select(self.dim, 0))
 
         return self.output
 
@@ -125,13 +125,13 @@ class MixtureTable(nn.Module):
             self._expert.cmul(gradOutput, expertInputs)
             expert = self._expert.transpose(self.dim, self.dimG)
             if not expert.isContiguous():
-                    self._expert2.resizeAs(expert)
-                    self._expert2.copy(expert)
-                    expert = self._expert2
+                self._expert2.resizeAs(expert)
+                self._expert2.copy(expert)
+                expert = self._expert2
             if self.dimG == 0:
-                    self._expertView2.view(expert, gaterInput.size(0), -1)
+                self._expertView2.view(expert, gaterInput.size(0), -1)
             else:
-                    self._expertView2.view(expert, gaterInput.size(0), gaterInput.size(1), -1)
+                self._expertView2.view(expert, gaterInput.size(0), gaterInput.size(1), -1)
 
             gaterGradInput.sum(self._expertView2, self.dimG+1)
             gaterGradInput.resizeAs(gaterInput)

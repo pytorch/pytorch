@@ -1,4 +1,5 @@
 import torch
+from torch.legacy import nn
 
 # tensorCache maintains a list of all tensors and storages that have been
 # converted (recursively) by calls to recursiveType() and type().
@@ -13,14 +14,10 @@ import torch
 # > net1:type('torch.CudaTensor', tensorCache)
 # > net2:type('torch.CudaTensor', tensorCache)
 # > nn.utils.recursiveType(anotherTensor, 'torch.CudaTensor', tensorCache)
-#
-# Implementation note: to make Lua table lookup behave correctly,
-# tensor keys are stored as actual tensor objects, while storage
-# keys are stored as the pointers themselves (as numbers).
 def recursiveType(param, type, tensorCache={}):
     if isinstance(param, list):
         for i, p in enumerate(param):
-            param[i] = nn.utils.recursiveType(p, type, tensorCache)
+            param[i] = recursiveType(p, type, tensorCache)
     elif isinstance(param, nn.Module) or isinstance(param, nn.Criterion):
         param.type(type, tensorCache)
     elif torch.isTensor(param):
@@ -31,25 +28,28 @@ def recursiveType(param, type, tensorCache={}):
             else:
                 newparam = torch.Tensor().type(type)
                 storageType = type.replace('Tensor','Storage')
-                storage_key = param.storage()._cdata
-                if storage_key not in tensorCache:
-                    tensorCache[storage_key] = torch._import_dotted_name(storageType)().copy(param.storage())
-                newparam.set(
-                    tensorCache[storage_key],
-                    param.storageOffset(),
-                    param.size(),
-                    param.stride()
-                )
-                tensorCache[param] = newparam
+                param_storage = param.storage()
+                if param_storage:
+                    storage_key = param_storage._cdata
+                    if storage_key not in tensorCache:
+                        tensorCache[storage_key] = torch._import_dotted_name(storageType)(param_storage.size()).copy(param_storage)
+                    newparam.set(
+                        tensorCache[storage_key],
+                        param.storageOffset(),
+                        param.size(),
+                        param.stride()
+                    )
+                tensorCache[key] = newparam
             param = newparam
     return param
 
 def recursiveResizeAs(t1, t2):
     if isinstance(t2, list):
         t1 = t1 if isinstance(t1, list) else [t1]
-        assert len(t1) == len(t2)
+        if len(t1) < len(t2):
+            t1 += [None] * (len(t2) - len(t1))
         for i, _ in enumerate(t2):
-            t1[i], t2[i] = nn.utils.recursiveResizeAs(t1[i], t2[i])
+            t1[i], t2[i] = recursiveResizeAs(t1[i], t2[i])
         t1 = t1[:len(t2)]
     elif torch.isTensor(t2):
         t1 = t1 if torch.isTensor(t1) else t2.new()
@@ -61,7 +61,7 @@ def recursiveResizeAs(t1, t2):
 
 def recursiveFill(t2, val):
     if isinstance(t2, list):
-        t2 = [nn.utils.recursiveFill(x, val) for x in t2]
+        t2 = [recursiveFill(x, val) for x in t2]
     elif torch.isTensor(t2):
         t2.fill(val)
     else:
@@ -76,7 +76,7 @@ def recursiveAdd(t1, val=1, t2=None):
     if isinstance(t2, list):
         t1 = t1 if isinstance(t1, list) else [t1]
         for i, _ in enumerate(t2):
-            t1[i], t2[i] = nn.utils.recursiveAdd(t1[i], val, t2[i])
+            t1[i], t2[i] = recursiveAdd(t1[i], val, t2[i])
     elif torch.isTensor(t1) and torch.isTensor(t2):
         t1.add(val, t2)
     else:
@@ -88,7 +88,7 @@ def recursiveCopy(t1, t2):
     if isinstance(t2, list):
         t1 = t1 if isinstance(t1, list) else [t1]
         for i, _ in enumerate(t2):
-            t1[i], t2[i] = nn.utils.recursiveCopy(t1[i], t2[i])
+            t1[i], t2[i] = recursiveCopy(t1[i], t2[i])
     elif torch.isTensor(t2):
         t1 = t1 if torch.isTensor(t1) else t2.new()
         t1.resizeAs(t2).copy(t2)
@@ -153,3 +153,4 @@ def clear(self, *args):
     for key in arg:
         _clear(key)
     return self
+

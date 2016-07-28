@@ -58,5 +58,5 @@ class Min(nn.Module):
 
     def clearState(self):
         nn.utils.clear(self, '_indices', '_output')
-        return super(Min, self).clearState(self)
+        return super(Min, self).clearState()
 

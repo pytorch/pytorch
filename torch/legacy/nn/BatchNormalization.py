@@ -181,5 +181,5 @@ class BatchNormalization(nn.Module):
            'save_mean',
            'save_std',
         })
-        return super(BatchNormalization, self).clearState(self)
+        return super(BatchNormalization, self).clearState()
 

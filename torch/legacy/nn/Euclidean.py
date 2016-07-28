@@ -159,5 +159,5 @@ class Euclidean(nn.Module):
            '_repeat',
            '_repeat2',
         ])
-        return super(Euclidean, self).clearState(self)
+        return super(Euclidean, self).clearState()
 

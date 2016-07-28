@@ -7,7 +7,6 @@ from torch.legacy import nn
 
 class L1Penalty(nn.Module):
 
-    # TODO: why sizeAverage=False by default?
     def __init__(self, l1weight, sizeAverage=False, provideOutput=True):
         super(L1Penalty, self).__init__()
         self.l1weight = l1weight

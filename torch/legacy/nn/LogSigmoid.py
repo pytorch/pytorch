@@ -28,9 +28,7 @@ class LogSigmoid(nn.Module):
         return self.gradInput
 
     def clearState(self):
-        # TODO: this shouldn't call set
-        if self.buffer:
-            self.buffer.set()
-        return super(LogSigmoid, self).clearState(self)
+        nn.utils.clear(self, 'buffer')
+        return super(LogSigmoid, self).clearState()
 
 

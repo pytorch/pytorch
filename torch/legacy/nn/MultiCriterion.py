@@ -1,7 +1,7 @@
 import torch
 from torch.legacy import nn
 
-class MultiCriterion(nn.Module):
+class MultiCriterion(nn.Criterion):
 
     def __init__(self, ):
         super(MultiCriterion, self).__init__()
@@ -10,8 +10,11 @@ class MultiCriterion(nn.Module):
 
     def add(self, criterion, weight=1):
         self.criterions.append(criterion)
-        self.weights.resize(len(self.criterions), True)
-        self.weights[len(self.criterions)-1] = weight
+        new_weights = torch.DoubleStorage(len(self.criterions))
+        for i, v in enumerate(self.weights):
+            new_weights[i] = v
+        new_weights[len(self.criterions)-1] = weight
+        self.weights = new_weights
         return self
 
     def updateOutput(self, input, target):
@@ -22,7 +25,7 @@ class MultiCriterion(nn.Module):
         return self.output
 
     def updateGradInput(self, input, target):
-        self.gradInput = nn.utils.recursiveResizeAs(self.gradInput, input)
+        self.gradInput = nn.utils.recursiveResizeAs(self.gradInput, input)[0]
         nn.utils.recursiveFill(self.gradInput, 0)
         for i in range(len(self.criterions)):
            nn.utils.recursiveAdd(self.gradInput, self.weights[i], self.criterions[i].updateGradInput(input, target))
@@ -30,7 +33,7 @@ class MultiCriterion(nn.Module):
         return self.gradInput
 
     def type(self, type):
-        for i, criterion in ipairs(self.criterions):
+        for criterion in self.criterions:
            criterion.type(type)
 
         return super(MultiCriterion, self).type(type)

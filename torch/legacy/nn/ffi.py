@@ -82,7 +82,8 @@ class TorchArgument(object):
 TYPE_CONVERTERS = {
     # TODO: this won't work for CUDA
     'THNNState*': ctypes.c_void_p,
-    'THTensor*': TorchArgument,
+    'THFloatTensor*': TorchArgument,
+    'THDoubleTensor*': TorchArgument,
     'THIndexTensor*': TorchArgument,
     'THIntegerTensor*': TorchArgument,
     'THGenerator*': TorchArgument,
@@ -98,6 +99,11 @@ class Backends(object):
     pass
 _backends = Backends()
 
+_type2tensor = {
+    'Float': 'THFloatTensor*',
+    'Double': 'THDoubleTensor*',
+}
+
 for t in types:
     backend_name = 'THNN{}Backend'.format(t)
     backend = THNNBackendBase()
@@ -106,5 +112,11 @@ for t in types:
         full_fn_name = 'THNN_{}{}'.format(t, function.name)
         ctypes_fn = getattr(lib_handle, full_fn_name)
         ctypes_fn.restype = None  # All functions return void
-        ctypes_fn.argtypes = [TYPE_CONVERTERS[t] for t in function.arguments]
+        arguments = map(lambda a: a if a != 'THTensor*' else _type2tensor[t], function.arguments)
+        ctypes_fn.argtypes = [TYPE_CONVERTERS[t] for t in arguments]
         backend.register_method(function.name, ctypes_fn)
+
+type2backend = {
+  'torch.DoubleTensor': _backends.THNNDoubleBackend,
+  'torch.FloatTensor': _backends.THNNFloatBackend,
+}

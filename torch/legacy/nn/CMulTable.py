@@ -18,8 +18,9 @@ class CMulTable(nn.Module):
         self.tout = self.tout or input[0].new()
         self.tout.resizeAs(self.output)
         for i in range(len(input)):
-            if i not in self.gradInput:
-                self.gradInput[i] = input[0].new()
+            if len(self.gradInput) <= i:
+                assert i == len(self.gradInput)
+                self.gradInput.append(input[0].new())
             self.gradInput[i].resizeAs(input[i]).copy(gradOutput)
             self.tout.copy(self.output).cdiv(input[i])
             self.gradInput[i].cmul(self.tout)
@@ -29,8 +30,9 @@ class CMulTable(nn.Module):
 
     def updateGradInput(self, input, gradOutput):
         for i in range(len(input)):
-            if i not in self.gradInput:
-                self.gradInput[i] = input[0].new()
+            if len(self.gradInput) <= i:
+                assert i == len(self.gradInput)
+                self.gradInput.append(input[0].new())
             self.gradInput[i].resizeAs(input[i]).copy(gradOutput)
             for j in range(len(input)):
                 if i != j:
@@ -40,5 +42,5 @@ class CMulTable(nn.Module):
         return self.gradInput
 
     def clearState(self):
-        if self.tout: self.tout.set()
-        return super(CMulTable, self).clearState(self)
+        nn.utils.clear(self, 'tout')
+        return super(CMulTable, self).clearState()

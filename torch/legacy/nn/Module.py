@@ -1,5 +1,6 @@
 import torch
 from torch.legacy import nn
+from torch.legacy.nn import ffi
 
 class Module(object):
 
@@ -8,6 +9,9 @@ class Module(object):
         self.output = torch.Tensor()
         self._type = self.output.type()
         self._backend = nn._backends.THNNDoubleBackend
+
+    def __repr__(self):
+        return 'nn.' + self.__class__.__name__
 
     def parameters(self):
         has_weight = hasattr(self, 'weight') and self.weight is not None
@@ -62,9 +66,9 @@ class Module(object):
             self.updateParameters(lr)
 
     def zeroGradParameters(self):
-        _, gradParams = self.parameters()
-        if gradParams:
-            for grad in gradParams:
+        params = self.parameters()
+        if params is not None:
+            for grad in params[1]:
                 grad.zero()
 
     def updateParameters(self, learningRate):
@@ -86,17 +90,17 @@ class Module(object):
     def clone(self, *arg):
         raise NotImplementedError
 
-    def type(self, type, tensorCache):
-        # TODO: change backend in here
+    def type(self, type=None, tensorCache=None):
         if not type:
            return self._type
 
         tensorCache = tensorCache or {}
 
         # find all tensors and convert them
-        for key, param in self.__dict__:
+        for key, param in self.__dict__.items():
             setattr(self, key, nn.utils.recursiveType(param, type, tensorCache))
 
+        self._backend = ffi.type2backend[type]
         self._type = type
         return self
 
@@ -146,7 +150,6 @@ class Module(object):
 
         # returns True if tensor occupies a contiguous region of memory (no holes)
         def isCompact(tensor):
-            # TODO: wut, does it really need to create this tensor?
             # isn't it enough to check if strides == size.cumprod(0)?
             sortedStride, perm = torch.sort(torch.LongTensor(tensor.nDimension()).set(tensor.stride()), 0, True)
             sortedSize = torch.LongTensor(tensor.nDimension()).set(tensor.size()).index(0, perm)
@@ -191,7 +194,6 @@ class Module(object):
         #    parameter tensors reference ('holes')
         tensorsCompact = True
         for meta in parameterMeta:
-            # TODO: reuse one Tensor
             tmp = BufferTensor().set(flatParameters.storage(), meta['storageOffset'], meta['size'], meta['stride'])
             tmp.fill(1)
             tensorsCompact = tensorsCompact and isCompact(tmp)
@@ -203,7 +205,6 @@ class Module(object):
         # 4. copy storages into the flattened parameter tensor
         for storageAndOffset in storages.values():
             storage, offset = storageAndOffset
-            # TODO: reuse Tensor
             flatParameters[slice(offset, offset+storage.size())].copy(Tensor().set(storage))
 
         # 5. allow garbage collection

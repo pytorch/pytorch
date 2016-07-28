@@ -54,7 +54,7 @@ class CMul(nn.Module):
         self._weight.view(self.weight, 1, -1)
         self._expand.expandAs(self._weight, self._output)
 
-        # TODO: verify
+        # TODO: verify name
         if torch.typename(input) == 'torch.CudaTensor':
             self._repeat.resizeAs(self._expand).copy(self._expand)
             self._output.cmul(self._repeat)
@@ -118,5 +118,5 @@ class CMul(nn.Module):
            '_repeat',
            '_sum',
         ])
-        return super(CMult, self).clearState(self)
+        return super(CMult, self).clearState()
 

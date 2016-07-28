@@ -42,8 +42,6 @@ class DotProduct(nn.Module):
 
 
     def clearState(self):
-        # TODO: this shouldn't call set I guess
-        if self.buffer:
-            self.buffer.set()
-        return super(DotProduct, self).clearState(self)
+        nn.utils.clear(self, 'buffer')
+        return super(DotProduct, self).clearState()
 

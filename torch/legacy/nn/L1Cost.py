@@ -29,8 +29,6 @@ class L1Cost(nn.Criterion):
         return self.gradInput
 
     def clearState(self):
-        # TODO: this shouldn't call set
-        if self.output_tensor:
-            self.output_tensor.set()
+        nn.utils.clear(self, 'output_tensor')
         return super(L1Cost, self).clearState()
 

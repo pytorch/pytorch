@@ -103,5 +103,5 @@ class CosineDistance(nn.Module):
            'w32',
            'ones',
         ])
-        return super(CosineDistance, self).clearState(self)
+        return super(CosineDistance, self).clearState()
 

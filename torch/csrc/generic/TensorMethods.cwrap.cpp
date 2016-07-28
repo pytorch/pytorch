@@ -23,14 +23,18 @@
   elementSize -> long STORAGE_CALL
 ]]
 
-[[
-  storage STATEFUL_ONLY
-  storage -> THStorageINCREF
-    - self
-]]
+static PyObject * THPTensor_(storage)(THPTensor *self)
+{
+  // TODO: memory leak on error
+  THStorage *result = THTensor_(storage)(self->cdata);
+  if (result == NULL)
+    Py_RETURN_NONE;
+  THStorage_(retain)(result);
+  return THPStorage_(newObject)(result);
+}
 
 [[
-  storageOffset STATEFUL_ONLY
+  storageOffset
   storageOffset -> long
     - self
 ]]

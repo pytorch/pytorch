@@ -58,5 +58,5 @@ class Max(nn.Module):
 
     def clearState(self):
         nn.utils.clear(self, '_indices', '_output')
-        return super(Max, self).clearState(self)
+        return super(Max, self).clearState()
 

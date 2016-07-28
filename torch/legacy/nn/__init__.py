@@ -4,6 +4,7 @@ from . import utils
 
 from .Module import Module
 from .Criterion import Criterion
+from .Container import Container
 
 from .Abs import Abs
 from .AbsCriterion import AbsCriterion
@@ -38,7 +39,6 @@ from .HardTanh import HardTanh
 from .HingeEmbeddingCriterion import HingeEmbeddingCriterion
 from .Identity import Identity
 from .Index import Index
-from .JoinTable import JoinTable
 from .L1Cost import L1Cost
 from .L1HingeEmbeddingCriterion import L1HingeEmbeddingCriterion
 from .L1Penalty import L1Penalty
@@ -59,6 +59,14 @@ from .MixtureTable import MixtureTable
 from .Mul import Mul
 from .MulConstant import MulConstant
 from .MultiCriterion import MultiCriterion
+
+from .Sequential import Sequential
+from .Parallel import Parallel
+from .Concat import Concat
+from .DepthConcat import DepthConcat
+from .ConcatTable import ConcatTable
+from .JoinTable import JoinTable
+from .ParallelTable import ParallelTable
 
 from .Clamp import Clamp
 from .ClassSimplexCriterion import ClassSimplexCriterion

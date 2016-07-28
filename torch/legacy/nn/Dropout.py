@@ -1,7 +1,6 @@
 import torch
 from torch.legacy import nn
 
-# TODO: is it 100% to remove v2?
 class Dropout(nn.Module):
 
     def __init__(self, p=0.5, inplace=False):
@@ -40,11 +39,9 @@ class Dropout(nn.Module):
         self.p = p
 
     def __repr__(self):
-        return '%s({:.4f})'.format(str(type(self)), self.p)
+        return super(Dropout, self).__repr__() + '({:.4f})'.format(self.p)
 
     def clearState(self):
-        # TODO: this probably shouldn't call set
-        if self.noise:
-           self.noise.set()
-        return Parent.clearState(self)
+        nn.utils.clear(self, 'noise')
+        return super(Dropout, self).clearState()
 
