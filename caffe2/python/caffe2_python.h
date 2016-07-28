@@ -160,7 +160,10 @@ class TensorFetcher : public BlobFetcherBase {
             Py_DECREF(outObj[j]);
           }
           Py_DECREF(array);
-          LOG(FATAL) << "Failed to allocate string for ndarray of strings.";
+          PyErr_SetString(
+              PyExc_TypeError,
+              "Failed to allocate string for ndarray of strings.");
+          return nullptr;
         }
       }
       return array;
@@ -217,19 +220,12 @@ class TensorFeeder : public BlobFeederBase {
         char* str;
         Py_ssize_t strSize;
         if (PyBytes_AsStringAndSize(input[i], &str, &strSize) == -1) {
-          LOG(FATAL) << "Unsupported pyhton object type passed into ndarray.";
+          PyErr_SetString(
+              PyExc_TypeError,
+              "Unsupported python object type passed into ndarray.");
+          return nullptr;
         }
         outPtr[i] = std::string(str, strSize);
-      }
-    } break;
-    case NPY_STRING: {
-      char* inputData = PyArray_BYTES(array);
-      auto* outPtr = tensor->template mutable_data<std::string>();
-      auto itemSize = PyArray_ITEMSIZE(array);
-      for (int i = 0; i < tensor->size(); ++i) {
-        auto start = inputData + i * itemSize;
-        auto end = std::find(start, start + itemSize, '\0');
-        outPtr[i] = std::string(start, end - start);
       }
     } break;
     default:

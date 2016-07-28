@@ -87,7 +87,6 @@ const TypeMeta& NumpyTypeToCaffe(int numpy_type) {
     {NPY_UINT8, TypeMeta::Make<uint8_t>()},
     {NPY_UINT16, TypeMeta::Make<uint16_t>()},
     {NPY_OBJECT, TypeMeta::Make<std::string>()},
-    {NPY_STRING, TypeMeta::Make<std::string>()},
     // Note: Add more types here.
   };
   static TypeMeta unknown_type;
@@ -565,11 +564,10 @@ PyObject* FetchBlob(PyObject* self, PyObject* args) {
 
 PyObject* FeedBlob(PyObject* self, PyObject* args) {
   char* name_char;
-  PyArrayObject* array = nullptr;
+  PyObject* arg = nullptr;
   PyObject* device_option_string = nullptr;
-  // TODO(dzhulgakov): implement accepting other types (at least string)
-  if (!PyArg_ParseTuple(args, "sO!|O", &name_char, &PyArray_Type, &array,
-                        &device_option_string)) {
+  if (!PyArg_ParseTuple(
+          args, "sO|O", &name_char, &arg, &device_option_string)) {
     PyErr_SetString(PyExc_ValueError, "Incorrect arguments.");
     return nullptr;
   }
@@ -584,45 +582,57 @@ PyObject* FeedBlob(PyObject* self, PyObject* args) {
   }
   Blob* blob = gWorkspace->CreateBlob(name);
 
-  auto feeder = CreateFeeder(option.device_type());
-  if (!feeder) {
-    PyErr_SetString(PyExc_TypeError,
-                    "Unknown device type encountered in FeedBlob.");
+  if (PyArray_Check(arg)) { // numpy array
+    PyArrayObject* array = reinterpret_cast<PyArrayObject*>(arg);
+    auto feeder = CreateFeeder(option.device_type());
+    if (!feeder) {
+      PyErr_SetString(
+          PyExc_TypeError, "Unknown device type encountered in FeedBlob.");
+      return nullptr;
+    }
+    return feeder->Feed(option, array, blob);
+  } else if (PyString_Check(arg)) { // string
+    *blob->GetMutable<std::string>() = PyBytesToStdString(arg);
+    Py_RETURN_TRUE;
+  } else {
+    PyErr_SetString(
+        PyExc_ValueError,
+        "Unexpected type of argument - only numpy array or string are "
+        "supported for feeding");
     return nullptr;
   }
-  return feeder->Feed(option, array, blob);
 }
 
 // A simple macro to avoid writing repeated symbols.
 #define _PYNAME(name) {#name, name, METH_VARARGS, ""}
 PyMethodDef* GetCaffe2PythonMethods() {
   static PyMethodDef gCaffe2PythonMethods[] = {
-    // Note(Yangqing): For any function that we are going to override in the
-    // python file, we prepend "cc_" here.
-    _PYNAME(GlobalInit),
-    _PYNAME(RegisteredOperators),
-    {"cc_GetGradientDefs", GetGradientDefs, METH_VARARGS, ""},
-    _PYNAME(SwitchWorkspace),
-    _PYNAME(CurrentWorkspace),
-    _PYNAME(Workspaces),
-    {"cc_ResetWorkspace", ResetWorkspace, METH_VARARGS, ""},
-    _PYNAME(RootFolder),
-    _PYNAME(OnModuleExit),
-    _PYNAME(Blobs),
-    _PYNAME(HasBlob),
-    {"cc_CreateNet", CreateNet, METH_VARARGS, ""},
-    _PYNAME(RunNet),
-    _PYNAME(BenchmarkNet),
-    _PYNAME(DeleteNet),
-    _PYNAME(Nets),
-    {"cc_RunOperatorOnce", RunOperatorOnce, METH_VARARGS, ""},
-    {"cc_RunNetOnce", RunNetOnce, METH_VARARGS, ""},
-    {"cc_RunPlan", RunPlan, METH_VARARGS, ""},
-    _PYNAME(CreateBlob),
-    _PYNAME(SerializeBlob),
-    _PYNAME(FetchBlob),
-    {"cc_FeedBlob", FeedBlob, METH_VARARGS, ""},
-    {nullptr, nullptr, 0, nullptr},  // end of python methods.
+      // Note(Yangqing): For any function that we are going to override in the
+      // python file, we prepend "cc_" here.
+      _PYNAME(GlobalInit),
+      _PYNAME(RegisteredOperators),
+      {"cc_GetGradientDefs", GetGradientDefs, METH_VARARGS, ""},
+      _PYNAME(SwitchWorkspace),
+      _PYNAME(CurrentWorkspace),
+      _PYNAME(Workspaces),
+      {"cc_ResetWorkspace", ResetWorkspace, METH_VARARGS, ""},
+      _PYNAME(RootFolder),
+      _PYNAME(OnModuleExit),
+      _PYNAME(Blobs),
+      _PYNAME(HasBlob),
+      {"cc_CreateNet", CreateNet, METH_VARARGS, ""},
+      _PYNAME(RunNet),
+      _PYNAME(BenchmarkNet),
+      _PYNAME(DeleteNet),
+      _PYNAME(Nets),
+      {"cc_RunOperatorOnce", RunOperatorOnce, METH_VARARGS, ""},
+      {"cc_RunNetOnce", RunNetOnce, METH_VARARGS, ""},
+      {"cc_RunPlan", RunPlan, METH_VARARGS, ""},
+      _PYNAME(CreateBlob),
+      _PYNAME(SerializeBlob),
+      {"cc_FetchBlob", FetchBlob, METH_VARARGS, ""},
+      {"cc_FeedBlob", FeedBlob, METH_VARARGS, ""},
+      {nullptr, nullptr, 0, nullptr}, // end of python methods.
   };
   return gCaffe2PythonMethods;
 }

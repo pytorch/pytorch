@@ -7,7 +7,6 @@
 #include <limits>
 
 namespace caffe2 {
-
 namespace {
 using IndexKeyTypes = TensorTypes<int32_t, int64_t, std::string>;
 using TIndexValue = int64_t;
@@ -22,12 +21,17 @@ struct IndexBase {
   void Freeze() { frozen_ = true; }
   virtual ~IndexBase() {}
   const TypeMeta& Type() const { return meta_; }
+  TIndexValue Size() {
+    std::lock_guard<std::mutex> guard(dictMutex_);
+    return nextId_;
+  }
 
  protected:
   int64_t maxElements_;
   TypeMeta meta_;
   TIndexValue nextId_{1}; // guarded by dictMutex_
   std::atomic<bool> frozen_{false};
+  std::mutex dictMutex_;
 };
 
 template<typename T>
@@ -96,7 +100,6 @@ struct Index: IndexBase {
   }
 
   std::unordered_map<T, TIndexValue> dict_;
-  std::mutex dictMutex_;
 };
 
 template<class T>
@@ -142,7 +145,9 @@ class IndexGetOp: public Operator<CPUContext> {
 class IndexLoadOp: public Operator<CPUContext> {
  public:
   IndexLoadOp(const OperatorDef& operator_def, Workspace* ws)
-   : Operator(operator_def, ws) {}
+      : Operator(operator_def, ws),
+        skipFirstEntry_(
+            OperatorBase::GetSingleArgument<int>("skip_first_entry", 0)) {}
 
   bool RunOnDevice() override {
     return DispatchHelper<IndexKeyTypes>::call(this, Input(1));
@@ -153,8 +158,18 @@ class IndexLoadOp: public Operator<CPUContext> {
     auto* dict = dynamic_cast_if_rtti<Index<T>*>(base.get());
     CAFFE_ENFORCE(dict, "Wrong dictionary type given input keys.");
     const auto& keys = Input(1);
-    return dict->Load(keys.data<T>(), keys.size());
+    const auto* keys_data = keys.data<T>();
+    auto keys_size = keys.size();
+    if (skipFirstEntry_) {
+      CAFFE_ENFORCE(keys.size() > 0);
+      ++keys_data;
+      --keys_size;
+    }
+    return dict->Load(keys_data, keys_size);
   }
+
+ private:
+  bool skipFirstEntry_;
 };
 
 class IndexStoreOp: public Operator<CPUContext> {
@@ -188,6 +203,19 @@ class IndexFreezeOp: public Operator<CPUContext> {
   }
 };
 
+class IndexSizeOp : public Operator<CPUContext> {
+ public:
+  IndexSizeOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator(operator_def, ws) {}
+
+  bool RunOnDevice() override {
+    auto& base = OperatorBase::Input<std::unique_ptr<IndexBase>>(0);
+    auto* out = Output(0);
+    out->Resize(std::vector<TIndex>{});
+    *out->mutable_data<TIndexValue>() = base->Size();
+    return true;
+  }
+};
 
 REGISTER_CPU_OPERATOR(IntIndexCreate, IndexCreateOp<int32_t>);
 REGISTER_CPU_OPERATOR(LongIndexCreate, IndexCreateOp<int64_t>);
@@ -197,6 +225,7 @@ REGISTER_CPU_OPERATOR(IndexGet, IndexGetOp);
 REGISTER_CPU_OPERATOR(IndexLoad, IndexLoadOp);
 REGISTER_CPU_OPERATOR(IndexStore, IndexStoreOp);
 REGISTER_CPU_OPERATOR(IndexFreeze, IndexFreezeOp);
+REGISTER_CPU_OPERATOR(IndexSize, IndexSizeOp);
 
 OPERATOR_SCHEMA(IntIndexCreate)
   .NumInputs(0)
@@ -250,16 +279,20 @@ Should not be called concurrently with IndexGet.
 )DOC")
   .Input(0, "handle", "Pointer to an Index instance.");
 
-
 OPERATOR_SCHEMA(IndexLoad)
-  .NumInputs(2)
-  .NumOutputs(0)
-  .SetDoc(R"DOC(
+    .NumInputs(2)
+    .NumOutputs(0)
+    .SetDoc(R"DOC(
 Loads the index from the given 1-D tensor. Elements in the tensor will be given
 consecutive indexes starting at 1. Fails if tensor contains repeated elements.
 )DOC")
-  .Input(0, "handle", "Pointer to an Index instance.")
-  .Input(1, "items", "1-D tensor with elements starting with index 1.");
+    .Input(0, "handle", "Pointer to an Index instance.")
+    .Input(1, "items", "1-D tensor with elements starting with index 1.")
+    .Arg(
+        "skip_first_entry",
+        "If set, skips the first entry of the tensor. This allows "
+        "to load tensors that are aligned with an embedding, where the first "
+        "entry corresponds to the default 0 index entry.");
 
 OPERATOR_SCHEMA(IndexStore)
   .NumInputs(1)
@@ -271,6 +304,15 @@ for unknowns, the first element of the output tensor will be element of index 1.
   .Input(0, "handle", "Pointer to an Index instance.")
   .Output(0, "items", "1-D tensor with elements starting with index 1.");
 
+OPERATOR_SCHEMA(IndexSize)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .SetDoc(R"DOC(
+Returns the number of entries currently present in the index.
+)DOC")
+    .Input(0, "handle", "Pointer to an Index instance.")
+    .Output(0, "items", "Scalar int64 tensor with number of entries.");
+
 NO_GRADIENT(IndexGetOp);
 NO_GRADIENT(IntIndexCreate);
 NO_GRADIENT(LongIndexCreate);
@@ -278,5 +320,5 @@ NO_GRADIENT(StringIndexCreate);
 SHOULD_NOT_DO_GRADIENT(IndexFreeze);
 SHOULD_NOT_DO_GRADIENT(IndexLoad);
 SHOULD_NOT_DO_GRADIENT(IndexStore);
-
+SHOULD_NOT_DO_GRADIENT(IndexSize);
 }  // namespace caffe2

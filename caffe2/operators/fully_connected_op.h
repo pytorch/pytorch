@@ -56,14 +56,12 @@ class FullyConnectedOp final : public Operator<Context> {
     CAFFE_ENFORCE(N == b.dim32(0), dimErrorString());
     CAFFE_ENFORCE(N == b.size(), dimErrorString());
 
-    // Create the Y shape (without allocation)
-    static thread_local vector<TIndex> Y_shape;
-    Y_shape = X.dims();
+    Y_shape_cache_ = X.dims();
     // This is an invariant of canonical_axis, so we can DCHECK.
-    DCHECK_LE(canonical_axis + 1, Y_shape.size());
-    Y_shape.resize(canonical_axis + 1);
-    Y_shape[canonical_axis] = N;
-    Y->Resize(Y_shape);
+    DCHECK_LE(canonical_axis + 1, Y_shape_cache_.size());
+    Y_shape_cache_.resize(canonical_axis + 1);
+    Y_shape_cache_[canonical_axis] = N;
+    Y->Resize(Y_shape_cache_);
     CAFFE_ENFORCE(M * N == Y->size(), dimErrorString());
 
     // W * x
@@ -88,6 +86,9 @@ class FullyConnectedOp final : public Operator<Context> {
 
 protected:
   size_t axis_{1};
+  // A local vector to cache the output shape so we don't need to recreate
+  // a vector object every time we run Run().
+  vector<TIndex> Y_shape_cache_;
   Tensor<Context> bias_multiplier_;
 };
 

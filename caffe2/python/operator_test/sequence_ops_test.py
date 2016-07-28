@@ -185,3 +185,37 @@ class TestSequenceOps(hu.HypothesisTestCase):
             op,
             [padded_data, padded_lengths],
             partial(_gather_padding_ref, start_pad_width, end_pad_width))
+
+    @given(data=hu.tensor(min_dim=3, max_dim=3, dtype=np.float32,
+                          elements=st.floats(min_value=-np.inf,
+                                             max_value=np.inf),
+                          min_value=1, max_value=10),
+                          **hu.gcs_cpu_only)
+    def test_reverse_packed_segs(self, data, gc, dc):
+        max_length = data.shape[0]
+        batch_size = data.shape[1]
+        lengths = np.random.randint(max_length + 1, size=batch_size)
+
+        op = core.CreateOperator(
+            "ReversePackedSegs",
+            ["data", "lengths"],
+            ["reversed_data"])
+
+        def op_ref(data, lengths):
+            rev_data = np.array(data, copy=True)
+            for i in range(batch_size):
+                seg_length = lengths[i]
+                for j in range(seg_length):
+                    rev_data[j][i] = data[seg_length - 1 - j][i]
+            return (rev_data,)
+
+        def op_grad_ref(grad_out, outputs, inputs):
+            return op_ref(grad_out, inputs[1]) + (None,)
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[data, lengths],
+            reference=op_ref,
+            output_to_grad='reversed_data',
+            grad_reference=op_grad_ref)

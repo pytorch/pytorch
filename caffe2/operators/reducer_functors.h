@@ -124,6 +124,67 @@ struct LogSumExpRangeReducerDef {
       "input slices. Operation doesn't change the shape of individual blocks.";
 };
 
+template <typename T, class Context>
+class LogMeanExpRangeReducer;
+template <typename T, class Context>
+class LogMeanExpRangeReducerGradient;
+
+template <typename T>
+class LogMeanExpRangeReducer<T, CPUContext> {
+ public:
+  void operator()(
+      const TIndex block_size,
+      const TIndex blocks,
+      const T* in,
+      T* out,
+      CPUContext* context) {
+    for (int j = 0; j < block_size; ++j) {
+      T max_value = std::numeric_limits<T>::lowest();
+      for (int i = 0; i < blocks; ++i) {
+        max_value = std::max(max_value, in[i * block_size + j]);
+      }
+      T scaled_exp_sum = 0;
+      for (int i = 0; i < blocks; ++i) {
+        scaled_exp_sum += std::exp(in[i * block_size + j] - max_value);
+      }
+      scaled_exp_sum /= blocks;
+      *(out++) = std::log(scaled_exp_sum) + max_value;
+    }
+  }
+};
+
+template <typename T, class Context>
+class LogMeanExpRangeReducerGradient {
+ public:
+  void operator()(
+      const TIndex block_size,
+      const TIndex blocks,
+      const T* segment_grad, // GO
+      T* data_grad, // GI
+      const T* data_in, // I
+      const T* data_out, // O
+      Context* context) {
+    for (int j = 0; j < block_size; ++j) {
+      const T out_grad = *(segment_grad++);
+      const T offset = *(data_out++);
+      for (int i = 0; i < blocks; ++i) {
+        auto idx = i * block_size + j;
+        data_grad[idx] = out_grad * std::exp(data_in[idx] - offset) / blocks;
+      }
+    }
+  }
+};
+
+struct LogMeanExpRangeReducerDef {
+  template <typename T, class Context>
+  using Reducer = LogMeanExpRangeReducer<T, Context>;
+  template <typename T, class Context>
+  using ReducerGradient = LogMeanExpRangeReducerGradient<T, Context>;
+  static constexpr const char* name = "LogMeanExp";
+  static constexpr const char* doc =
+      "LogMeanExp computes the element-wise log of the mean of exponentials of "
+      "input slices. Operation doesn't change the shape of individual blocks.";
+};
 
 template <typename T, class Context>
 class MeanRangeReducer;
@@ -180,8 +241,76 @@ struct MeanRangeReducerDef {
   static constexpr const char* doc =
       "Mean computation is done element-wise, so that each element of the "
       "output slice corresponds to the average value of the respective "
-      "elements in the input slives. Operation doesn't change the shape of "
+      "elements in the input slices. Operation doesn't change the shape of "
       "individual blocks.";
+};
+
+template <typename T, class Context>
+class MaxRangeReducer;
+template <typename T, class Context>
+class MaxRangeReducerGradient;
+
+template <typename T>
+class MaxRangeReducer<T, CPUContext> {
+ public:
+  void operator()(
+      const TIndex block_size,
+      const TIndex blocks,
+      const T* in,
+      T* out,
+      CPUContext* context) {
+    for (int j = 0; j < block_size; ++j) {
+      T max_value = std::numeric_limits<T>::lowest();
+      for (int i = 0; i < blocks; ++i) {
+        max_value = std::max(max_value, in[i * block_size + j]);
+      }
+      *(out++) = max_value;
+    }
+  }
+};
+
+template <typename T, class Context>
+class MaxRangeReducerGradient {
+ public:
+  void operator()(
+      const TIndex block_size,
+      const TIndex blocks,
+      const T* segment_grad, // GO
+      T* data_grad, // GI
+      const T* data_in, // I
+      const T* data_out, // O
+      Context* context) {
+    std::memset(
+        static_cast<void*>(data_grad), 0, blocks * block_size * sizeof(T));
+    for (int j = 0; j < block_size; ++j) {
+      const T out_grad = *(segment_grad++);
+      const T out = data_out[j];
+      for (int i = 0; i < blocks; ++i) {
+        auto idx = i * block_size + j;
+        if (out == data_in[idx]) {
+          data_grad[idx] = out_grad;
+          break;
+        }
+      }
+    }
+  }
+};
+
+struct MaxRangeReducerDef {
+  template <typename T, class Context>
+  using Reducer = MaxRangeReducer<T, Context>;
+  template <typename T, class Context>
+  using ReducerGradient = MaxRangeReducerGradient<T, Context>;
+  static constexpr const char* name = "Max";
+  static constexpr const char* doc =
+      "Max computation is done element-wise, so that each element of the "
+      "output slice corresponds to the max value of the respective "
+      "elements in the input slices. Operation doesn't change the shape of "
+      "individual blocks. This implementation imitates torch nn.Max operator. "
+      "If the maximum value occurs more than once, the operator will return "
+      "the first occurence of value. When computing the gradient using the "
+      "backward propagation, the gradient input corresponding to the first "
+      "occurence of the maximum value will be used.";
 };
 
 ////////////////////////////////////////////////////////////////////////////////

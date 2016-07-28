@@ -68,13 +68,13 @@ class InitRegisterer {
 
 #define REGISTER_CAFFE2_INIT_FUNCTION(name, function, description)             \
   namespace {                                                                  \
-  ::caffe2::InitRegisterer g_caffe2_initregisterer_name(                       \
+  ::caffe2::InitRegisterer g_caffe2_initregisterer_##name(                     \
       function, false, description);                                           \
   }  // namespace
 
 #define REGISTER_CAFFE2_EARLY_INIT_FUNCTION(name, function, description)       \
   namespace {                                                                  \
-  ::caffe2::InitRegisterer g_caffe2_initregisterer_name(                       \
+  ::caffe2::InitRegisterer g_caffe2_initregisterer_##name(                     \
       function, true, description);                                            \
   }  // namespace
 

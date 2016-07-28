@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 import argparse
+import json
 from collections import defaultdict
 from caffe2.python import utils
 
@@ -53,6 +54,11 @@ def _rectify_operator_and_name(operators_or_net, name):
     return operators, name
 
 
+def _escape_label(name):
+    # json.dumps is poor man's escaping
+    return json.dumps(name)
+
+
 def GetPydotGraph(operators_or_net, name=None, rankdir='LR'):
     operators, name = _rectify_operator_and_name(operators_or_net, name)
     graph = pydot.Dot(name, rankdir=rankdir)
@@ -73,7 +79,7 @@ def GetPydotGraph(operators_or_net, name=None, rankdir='LR'):
             if input_name not in pydot_nodes:
                 input_node = pydot.Node(
                     input_name + str(pydot_node_counts[input_name]),
-                    label=input_name,
+                    label=_escape_label(input_name),
                     **BLOB_STYLE
                 )
                 pydot_nodes[input_name] = input_node
@@ -87,7 +93,7 @@ def GetPydotGraph(operators_or_net, name=None, rankdir='LR'):
                 pydot_node_counts[output_name] += 1
             output_node = pydot.Node(
                 output_name + str(pydot_node_counts[output_name]),
-                label=output_name,
+                label=_escape_label(output_name),
                 **BLOB_STYLE
             )
             pydot_nodes[output_name] = output_node

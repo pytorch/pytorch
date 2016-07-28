@@ -32,12 +32,16 @@ class CuDNNReluOp final : public Operator<CUDAContext> {
     if (X.dims() != cudnn_input_dims_) {
       VLOG(1) << "Setting descriptors.";
       cudnn_input_dims_ = X.dims();
-      int C = (order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(3));
-      int H = 1;
-      int W = 1;
+      int C = 1, H = 1, W = 1;
       if (X.ndim() == 4) {
+        // Normal 4-dimensional tensors for images.
+        C = (order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(3));
         H = (order_ == StorageOrder::NCHW ? X.dim32(2) : X.dim32(1));
         W = (order_ == StorageOrder::NCHW ? X.dim32(3) : X.dim32(2));
+      } else {
+        // If X is not 4-dimensional, we will simply use H = 1 and W = 1
+        // and wrap everything into C.
+        C = X.size() / X.dim32(0);
       }
       CUDNN_CHECK(cudnnSetTensor4dDescriptor(
           data_desc_, GetCudnnTensorFormat(order_),
@@ -93,12 +97,16 @@ class CuDNNReluGradientOp final : public Operator<CUDAContext> {
     if (Y.dims() != cudnn_input_dims_) {
       VLOG(1) << "Setting descriptors.";
       cudnn_input_dims_ = Y.dims();
-      int C = (order_ == StorageOrder::NCHW ? Y.dim32(1) : Y.dim32(3));
-      int H = 1;
-      int W = 1;
+      int C = 1, H = 1, W = 1;
       if (Y.ndim() == 4) {
+        // Normal 4-dimensional tensors for images.
+        C = (order_ == StorageOrder::NCHW ? Y.dim32(1) : Y.dim32(3));
         H = (order_ == StorageOrder::NCHW ? Y.dim32(2) : Y.dim32(1));
         W = (order_ == StorageOrder::NCHW ? Y.dim32(3) : Y.dim32(2));
+      } else {
+        // If Y is not 4-dimensional, we will simply use H = 1 and W = 1
+        // and wrap everything into C.
+        C = Y.size() / Y.dim32(0);
       }
       CUDNN_CHECK(cudnnSetTensor4dDescriptor(
           data_desc_, GetCudnnTensorFormat(order_),
