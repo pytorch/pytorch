@@ -20,7 +20,8 @@ enum LegacyPadding {
   VALID = 1;
   SAME = 2;
 
-  // CAFFE is a flag that notifies the code to use the Caffe padding strategy.
+  // CAFFE_LEGACY_POOLING is a flag that notifies the code to use the old Caffe
+  // padding strategy.
   // Basically, in caffe2, after padding the convolution and pooling use the
   // same computation strategy: half-windows at the right and bottom are
   // discarded. In Caffe, convolution follows this strategy but if there are

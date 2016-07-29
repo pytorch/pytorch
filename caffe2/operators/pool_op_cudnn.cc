@@ -58,7 +58,11 @@ class CuDNNPoolOp : public ConvPoolOpBase<CUDAContext> {
           order_ == StorageOrder::NCHW ? Y->dim32(2) : Y->dim32(1),
           order_ == StorageOrder::NCHW ? Y->dim32(3) : Y->dim32(2)));
       if (pad_t_ != pad_l_ || pad_l_ != pad_r_) {
-        LOG(FATAL) << "Cudnn pooling only supports even padding on both sides.";
+        CAFFE_ENFORCE(
+            legacy_pad_ == LegacyPadding::CAFFE_LEGACY_POOLING,
+            "Cudnn pooling only supports even padding on both sides, with "
+            "the only exception of the caffe legacy pooling case where we "
+            "try to preserve backward compatibility with Caffe.");
       }
       CUDNN_CHECK(cudnnSetPooling2dDescriptor(
           pooling_desc_,
@@ -147,7 +151,11 @@ class CuDNNPoolGradientOp : public ConvPoolOpBase<CUDAContext> {
           order_ == StorageOrder::NCHW ? Y.dim32(2) : Y.dim32(1),
           order_ == StorageOrder::NCHW ? Y.dim32(3) : Y.dim32(2)));
       if (pad_t_ != pad_l_ || pad_l_ != pad_r_) {
-        LOG(FATAL) << "Cudnn pooling only supports even padding on both sides.";
+        CAFFE_ENFORCE(
+            legacy_pad_ == LegacyPadding::CAFFE_LEGACY_POOLING,
+            "Cudnn pooling only supports even padding on both sides, with "
+            "the only exception of the caffe legacy pooling case where we "
+            "try to preserve backward compatibility with Caffe.");
       }
       CUDNN_CHECK(cudnnSetPooling2dDescriptor(
           pooling_desc_,

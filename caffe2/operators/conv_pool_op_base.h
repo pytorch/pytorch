@@ -10,8 +10,14 @@
 // This macro is here just to allow us to experiment with padding values that
 // determines, when we have an odd number of pads, which side gets the one
 // additional pad value, the head side, or the tail side. Setting it to false
-// will enable the distbelief behavior, and setting it to true will enable
+// will enable the TensorFlow behavior, and setting it to true will enable
 // a behavior more consistent with Caffe and CuDNN.
+// This only affects the case when you set legacy pad to VALID or SAME. The
+// behavior inherits from the early designs of Google's CNN implementation,
+// where padding values are implicitly calculated instead of explicitly
+// specified. This is still the case with TensorFlow. Many frameworks have
+// followed a slightly different approach of explicitly giving padding values,
+// in which case the value of this constant value does not matter.
 const bool CAFFE2_PAD_HEAD_MORE = false;
 
 namespace caffe2 {
@@ -203,7 +209,41 @@ class ConvPoolOpBase : public Operator<Context> {
         break;
       }
       case LegacyPadding::CAFFE_LEGACY_POOLING:
-        LOG(FATAL) << "CAFFE_LEGACY_POOLING is no longer supported.";
+        // This is in order to adapt Caffe's pooling padding case. In this case,
+        // we will only use pad_head and will compute pad_tail to match the
+        // old caffe pooling strategy. Also see caffe2_legacy.proto for more
+        // details.
+        CHECK_GE(*pad_head, 0);
+        // Here, notice that caffe casts UP while caffe2 casts DOWN for the
+        // output size computation.
+        *out_size = std::ceil(
+            static_cast<float>(in_size + *pad_head * 2 - kernel) / stride
+            + 1);
+        // If we have padding, caffe also ensures that the last pooling starts
+        // strictly inside the image (instead of at the padding); otherwise clip
+        // the last.
+        if (*pad_head > 0 && (*out_size - 1) * stride >= in_size + *pad_head) {
+          --*out_size;
+        }
+        // Now, compare the output size with the standard Caffe2 output size. The
+        // caffe2 standard output size should always be no larger than the output
+        // size of caffe.
+        int standard_out_size = static_cast<int>(
+            static_cast<float>(in_size + *pad_head * 2 - kernel) / stride
+            + 1);
+        CHECK_GE(*out_size, standard_out_size)
+            << "This should never happen. If this happens, double check the logic "
+            << "above.";
+        if (*out_size > standard_out_size) {
+          LOG(WARNING) <<
+              "You are hitting a case where Caffe's legacy padding calculation "
+              "is hit. This leads to inefficient and sometimes incorrect "
+              "results. We are keeping this behavior for backward compatibility"
+              ", but you are strongly recommended to move away from it. The "
+              "operator that generates this warning is: "
+              << ProtoDebugString(def());
+        }
+        *pad_tail = *pad_head + stride * (*out_size - standard_out_size);
         break;
     }
   }

@@ -3,7 +3,7 @@
 # to access it.
 
 # Use the following command for very verbose prints.
-# GLOG_logtostderr=1 GLOG_v=1 PYTHONPATH=../gen:$PYTHONPATH ipython notebook --ip='*'
+# GLOG_logtostderr=1 GLOG_v=1 PYTHONPATH=../../../gen:$PYTHONPATH ipython notebook --ip='*'
 
 # Use the following command for a normal run.
-PYTHONPATH=../gen:$PYTHONPATH ipython notebook --ip='*'
+PYTHONPATH=../../../gen:$PYTHONPATH ipython notebook --ip='*'
