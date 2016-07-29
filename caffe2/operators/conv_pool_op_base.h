@@ -163,7 +163,6 @@ class ConvPoolOpBase : public Operator<Context> {
   // exact padding values. This isolates out the padding scheme that are growing
   // unfortunately complex due to implementational differences from different
   // frameworks.
-  LegacyPadding legacy_pad_;
   int pad_;
 
  protected:
@@ -176,6 +175,7 @@ class ConvPoolOpBase : public Operator<Context> {
   int stride_h_;
   int stride_w_;
   StorageOrder order_;
+  LegacyPadding legacy_pad_;
 
   inline void ComputeSizeAndPad(
       const int in_size, const int stride, const int kernel,
