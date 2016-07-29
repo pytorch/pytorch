@@ -67,7 +67,7 @@ def _printMatrix(self, indent=''):
             strt += SCALE_FORMAT.format(scale)
         for l in _pyrange(self.size(0)):
             strt += indent + (' ' if scale != 1 else '')
-            strt += ' '.join(fmt.format(val/scale) for val in self.select(0, l)) + '\n'
+            strt += ' '.join(fmt.format(val/scale) for val in self.select(0, l).narrow(0, firstColumn, lastColumn-firstColumn+1)) + '\n'
         firstColumn = lastColumn + 1
     return strt
 
