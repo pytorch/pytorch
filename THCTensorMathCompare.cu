@@ -1,15 +1,78 @@
 #include "THCTensorMath.h"
 #include "THCGeneral.h"
-#include "THCBlas.h"
 #include "THCTensorCopy.h"
-#include "THCTensorRandom.h"
 #include "THCApply.cuh"
-#include "THCReduce.cuh"
+#include "THCNumerics.cuh"
 
-template<class Op>
-void THCudaTensor_logicalValue(THCState *state, THCudaTensor *self_, THCudaTensor *src, Op op)
-{
-  THCudaTensor_resizeAs(state, self_, src);
+template <typename T, typename TOut>
+struct TensorLTValueOp {
+  TensorLTValueOp(T v) : value(v) {}
+  __device__ __forceinline__ void operator()(TOut* out, T* in) {
+    *out = ScalarConvert<bool, TOut>::to(THCNumerics<T>::lt(*in, value));
+  }
+
+  const T value;
+};
+
+template <typename T, typename TOut>
+struct TensorGTValueOp {
+  TensorGTValueOp(T v) : value(v) {}
+  __device__ __forceinline__ void operator()(TOut* out, T* in) {
+    *out = ScalarConvert<bool, TOut>::to(THCNumerics<T>::gt(*in, value));
+  }
+
+  const T value;
+};
+
+
+template <typename T, typename TOut>
+struct TensorLEValueOp {
+  TensorLEValueOp(T v) : value(v) {}
+  __device__ __forceinline__ void operator()(TOut* out, T* in) {
+    *out = ScalarConvert<bool, TOut>::to(THCNumerics<T>::le(*in, value));
+  }
+
+  const T value;
+};
+
+template <typename T, typename TOut>
+struct TensorGEValueOp {
+  TensorGEValueOp(T v) : value(v) {}
+  __device__ __forceinline__ void operator()(TOut* out, T* in) {
+    *out = ScalarConvert<bool, TOut>::to(THCNumerics<T>::ge(*in, value));
+  }
+
+  const T value;
+};
+
+template <typename T, typename TOut>
+struct TensorEQValueOp {
+  TensorEQValueOp(T v) : value(v) {}
+  __device__ __forceinline__ void operator()(TOut* out, T* in) {
+    *out = ScalarConvert<bool, TOut>::to(THCNumerics<T>::eq(*in, value));
+  }
+
+  const T value;
+};
+
+template <typename T, typename TOut>
+struct TensorNEValueOp {
+  TensorNEValueOp(T v) : value(v) {}
+  __device__ __forceinline__ void operator()(TOut* out, T* in) {
+    *out = ScalarConvert<bool, TOut>::to(THCNumerics<T>::ne(*in, value));
+  }
+
+  const T value;
+};
+
+template<typename TensorType, typename TensorTypeOut, class Op>
+void THC_logicalValue(THCState *state,
+                      TensorTypeOut *self_,
+                      TensorType *src,
+                      Op op) {
+  THLongStorage* st = TensorUtils<TensorType>::newSizeOf(state, src);
+  TensorUtils<TensorTypeOut>::resize(state, self_, st, NULL);
+  THLongStorage_free(st);
 
   if (!THC_pointwiseApply2(state, self_, src, op)) {
     THArgCheck(false, 2, CUTORCH_DIM_WARNING);
@@ -18,92 +81,5 @@ void THCudaTensor_logicalValue(THCState *state, THCudaTensor *self_, THCudaTenso
   THCudaCheck(cudaGetLastError());
 }
 
-struct TensorLTValueOp {
-  TensorLTValueOp(float v) : value(v) {}
-  __device__ __forceinline__ void operator()(float* out, float* in) {
-    *out = (*in < value);
-  }
-
-  const float value;
-};
-
-void THCudaTensor_ltValue(THCState *state, THCudaTensor *self_, THCudaTensor *src, float value)
-{
-  THAssert(THCudaTensor_checkGPU(state, 2, self_, src));
-  THCudaTensor_logicalValue(state, self_, src, TensorLTValueOp(value));
-}
-
-struct TensorGTValueOp {
-  TensorGTValueOp(float v) : value(v) {}
-  __device__ __forceinline__ void operator()(float* out, float* in) {
-    *out = (*in > value);
-  }
-
-  const float value;
-};
-
-void THCudaTensor_gtValue(THCState *state, THCudaTensor *self_, THCudaTensor *src, float value)
-{
-  THAssert(THCudaTensor_checkGPU(state, 2, self_, src));
-  THCudaTensor_logicalValue(state, self_, src, TensorGTValueOp(value));
-}
-
-struct TensorLEValueOp {
-  TensorLEValueOp(float v) : value(v) {}
-  __device__ __forceinline__ void operator()(float* out, float* in) {
-    *out = (*in <= value);
-  }
-
-  const float value;
-};
-
-void THCudaTensor_leValue(THCState *state, THCudaTensor *self_, THCudaTensor *src, float value)
-{
-  THAssert(THCudaTensor_checkGPU(state, 2, self_, src));
-  THCudaTensor_logicalValue(state, self_, src, TensorLEValueOp(value));
-}
-
-struct TensorGEValueOp {
-  TensorGEValueOp(float v) : value(v) {}
-  __device__ __forceinline__ void operator()(float* out, float* in) {
-    *out = (*in >= value);
-  }
-
-  const float value;
-};
-
-void THCudaTensor_geValue(THCState *state, THCudaTensor *self_, THCudaTensor *src, float value)
-{
-  THAssert(THCudaTensor_checkGPU(state, 2, self_, src));
-  THCudaTensor_logicalValue(state, self_, src, TensorGEValueOp(value));
-}
-
-struct TensorEQValueOp {
-  TensorEQValueOp(float v) : value(v) {}
-  __device__ __forceinline__ void operator()(float* out, float* in) {
-    *out = (*in == value);
-  }
-
-  const float value;
-};
-
-void THCudaTensor_eqValue(THCState *state, THCudaTensor *self_, THCudaTensor *src, float value)
-{
-  THAssert(THCudaTensor_checkGPU(state, 2, self_, src));
-  THCudaTensor_logicalValue(state, self_, src, TensorEQValueOp(value));
-}
-
-struct TensorNEValueOp {
-  TensorNEValueOp(float v) : value(v) {}
-  __device__ __forceinline__ void operator()(float* out, float* in) {
-    *out = (*in != value);
-  }
-
-  const float value;
-};
-
-void THCudaTensor_neValue(THCState *state, THCudaTensor *self_, THCudaTensor *src, float value)
-{
-  THAssert(THCudaTensor_checkGPU(state, 2, self_, src));
-  THCudaTensor_logicalValue(state, self_, src, TensorNEValueOp(value));
-}
+#include "generic/THCTensorMathCompare.cu"
+#include "THCGenerateAllTypes.h"

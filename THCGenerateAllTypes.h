@@ -81,7 +81,9 @@
 #undef THC_REAL_IS_LONG
 
 #define real float
-#define accreal double
+/* FIXME: fp64 has bad performance on some platforms; avoid using it unless
+   we opt into it? */
+#define accreal float
 #define Real Float
 #define CReal Cuda
 #define THC_REAL_IS_FLOAT
@@ -109,7 +111,9 @@
 #ifdef CUDA_HALF_TENSOR
 
 #define real half
-#define accreal half
+/* FIXME: fp64 has bad performance on some platforms; avoid using it unless
+   we opt into it? */
+#define accreal float
 #define Real Half
 #define CReal CudaHalf
 #define THC_REAL_IS_HALF

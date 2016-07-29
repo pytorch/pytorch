@@ -1,9 +1,9 @@
 #include "THCTensorMath.h"
 #include "THCGeneral.h"
-#include "THCBlas.h"
 #include "THCHalf.h"
 #include "THCTensorCopy.h"
 #include "THCApply.cuh"
+#include "THCNumerics.cuh"
 #include "THCReduce.cuh"
 
 #define IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(NAME, CFUNC)                   \
