@@ -56,9 +56,8 @@ if __name__ == '__main__':
         .read()
     )
     net, pretrained_params = caffe_translator.TranslateModel(
-        caffenet, caffenet_pretrained
+        caffenet, caffenet_pretrained, is_test=True
     )
-    caffe_translator.DeleteDropout(net)
     with open('data/testdata/caffe_translator/'
               'bvlc_reference_caffenet.translatedmodel',
               'w') as fid:
