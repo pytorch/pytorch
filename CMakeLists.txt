@@ -117,8 +117,8 @@ SET(src-cuda
   THCTensorMathMagma.cu
   THCTensorMathPairwise.cu
   THCTensorMathPointwise.cu
+  THCTensorMathReduce.cu
   THCTensorMathScan.cu
-  THCTensorMathTransformReduce.cu
   THCTensorMasked.cu
   THCTensorIndex.cu
   THCTensorConv.cu
@@ -181,6 +181,7 @@ INSTALL(FILES
           THCDeviceTensorUtils-inl.cuh
           THCGenerateAllTypes.h
           THCHalf.h
+          THCNumerics.cuh
           THCTensorInfo.cuh
           THCTensorTypeUtils.cuh
           DESTINATION "${THC_INSTALL_INCLUDE_SUBDIR}/THC")
@@ -198,10 +199,20 @@ INSTALL(FILES
           generic/THCTensorCopy.c
           generic/THCTensorCopy.cu
           generic/THCTensorCopy.h
+          generic/THCTensorMasked.h
+          generic/THCTensorMasked.cu
           generic/THCTensorMath.h
           generic/THCTensorMath.cu
+	  generic/THCTensorMathBlas.cu
+	  generic/THCTensorMathBlas.h
+          generic/THCTensorMathCompare.h
+          generic/THCTensorMathCompare.cu
+          generic/THCTensorMathCompareT.h
+          generic/THCTensorMathCompareT.cu
           generic/THCTensorMathPairwise.h
           generic/THCTensorMathPairwise.cu
           generic/THCTensorMathPointwise.h
           generic/THCTensorMathPointwise.cu
+          generic/THCTensorMathReduce.h
+          generic/THCTensorMathReduce.cu
           DESTINATION "${THC_INSTALL_INCLUDE_SUBDIR}/THC/generic")

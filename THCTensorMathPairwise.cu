@@ -1,10 +1,9 @@
 #include "THCTensorMath.h"
 #include "THCGeneral.h"
-#include "THCBlas.h"
 #include "THCHalf.h"
 #include "THCTensorCopy.h"
 #include "THCApply.cuh"
-#include "THCReduce.cuh"
+#include "THCNumerics.cuh"
 
 template <typename T>
 struct TensorAddConstantOp {

@@ -119,3 +119,12 @@ half THC_float2half(float a)
   memcpy(&ret, &ir, sizeof(half));
   return ret;
 }
+
+THC_EXTERNC int THC_nativeHalfInstructions(THCState *state) {
+  cudaDeviceProp* prop =
+    THCState_getCurrentDeviceProperties(state);
+
+  // CC 5.3+
+  return (prop->major > 5 ||
+          (prop->major == 5 && prop->minor == 3));
+}
