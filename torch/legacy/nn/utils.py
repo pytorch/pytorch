@@ -147,7 +147,7 @@ def clear(self, *args):
         if torch.isTensor(attr):
             attr.set()
         elif isinstance(attr, list):
-            setattr(self, f, [])
+            del attr[:]
         else:
             delattr(self, f)
     for key in arg:

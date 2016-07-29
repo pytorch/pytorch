@@ -5,7 +5,6 @@ class Parallel(nn.Container):
 
     def __init__(self, inputDimension, outputDimension):
         super(Parallel, self).__init__()
-        self.modules = {}
         self.inputDimension = inputDimension
         self.outputDimension = outputDimension
         self.totalOutputSize = None
@@ -50,7 +49,7 @@ class Parallel(nn.Container):
             outputSize = currentOutput.size(self.outputDimension)
             currentGradOutput = gradOutput.narrow(self.outputDimension, offset, outputSize)
 
-            currentGradOutput = module.updateGradInput(currentInput, currentGradOutput)
+            currentGradInput = module.updateGradInput(currentInput, currentGradOutput)
 
             self.gradInput.select(self.inputDimension, i).copy(currentGradInput)
             offset = offset + outputSize
@@ -67,7 +66,7 @@ class Parallel(nn.Container):
            outputSize = currentOutput.size(self.outputDimension)
 
            module.accGradParameters(input.select(self.inputDimension, i),
-                   gradOutput.narrow(self.outputDimension, offset, outputSize, scale))
+                   gradOutput.narrow(self.outputDimension, offset, outputSize), scale)
            offset = offset + outputSize
 
     def accUpdateGradParameters(self, input, gradOutput, lr):

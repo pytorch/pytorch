@@ -13,25 +13,29 @@ class ParallelTable(nn.Container):
     def updateOutput(self, input):
         for i in range(len(self.modules)):
             tmp = self.modules[i].updateOutput(input[i])
-            if i in self.output:
-                self.output[i] = tmp
-            else:
+            if len(self.output) <= i:
                 self.output.append(tmp)
+            else:
+                self.output[i] = tmp
 
         return self.output
 
     def updateGradInput(self, input, gradOutput):
         for i, module in enumerate(self.modules):
-           self.gradInput[i] = module.updateGradInput(input[i], gradOutput[i])
+            tmp = module.updateGradInput(input[i], gradOutput[i])
+            if len(self.gradInput) <= i:
+                self.gradInput.append(tmp)
+            else:
+                self.gradInput[i] = tmp
 
         return self.gradInput
 
     def accGradParameters(self, input, gradOutput, scale=1):
-        for i, module in ipairs(self.modules):
+        for i, module in enumerate(self.modules):
             module.accGradParameters(input[i], gradOutput[i], scale)
 
     def accUpdateGradParameters(self, input, gradOutput, lr=1):
-        for i, module in ipairs(self.modules):
+        for i, module in enumerate(self.modules):
             module.accUpdateGradParameters(input[i], gradOutput[i], lr)
 
     def __repr__(self):

@@ -1,0 +1,23 @@
+import torch
+from torch.legacy import nn
+
+class Select(nn.Module):
+
+    def __init__(self, dimension, index):
+        super(Select, self).__init__()
+        self.dimension = dimension
+        self.index = index
+
+    def updateOutput(self, input):
+        index = self.index if self.index >= 0 else input.size(self.dimension) + self.index
+        output = input.select(self.dimension, index)
+        self.output.resizeAs(output)
+        return self.output.copy(output)
+
+    def updateGradInput(self, input, gradOutput):
+        index = self.index if self.index >= 0 else input.size(self.dimension) + self.index
+        self.gradInput.resizeAs(input)
+        self.gradInput.zero()
+        self.gradInput.select(self.dimension, index).copy(gradOutput)
+        return self.gradInput
+

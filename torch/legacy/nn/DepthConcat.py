@@ -10,6 +10,7 @@
 # around the smaller dimensions.
 ####################################
 
+import math
 import torch
 from torch.legacy import nn
 
@@ -17,13 +18,13 @@ class DepthConcat(nn.Concat):
 
     def windowNarrow(self, output, currentOutput, offset):
         outputWindow = output.narrow(self.dimension, offset, currentOutput.size(self.dimension))
-        for dim in range(self.size.size(0)):
+        for dim in range(self.size.size()):
            currentSize = currentOutput.size(dim)
            if dim != self.dimension and self.size[dim] != currentSize:
               # 5x5 vs 3x3 -> start = [(5-3)/2] + 1 = 2 (1 pad each side)
               # 9x9 vs 5x5 -> start = [(9-5)/2] + 1 = 3 (2 pad each side)
               # 9x9 vs 4x4 -> start = [(9-4)/2] + 1 = 3.5 (2 pad, 3 pad)
-              start = int(math.floor(((self.size[dim] - currentSize) / 2) + 1))
+              start = int(math.floor(((self.size[dim] - currentSize) / 2)))
               outputWindow = outputWindow.narrow(dim, start, currentSize)
         return outputWindow
 
@@ -36,7 +37,7 @@ class DepthConcat(nn.Concat):
                 self.size.resize(currentOutput.dim()).copy(currentOutput.size())
             else:
                 self.size[self.dimension] = self.size[self.dimension] + currentOutput.size(self.dimension)
-                for dim in range(self.size.size(0)):
+                for dim in range(self.size.size()):
                     if dim != self.dimension:
                         # take the maximum size (shouldn't change anything for batch dim)
                         self.size[dim] = max(self.size[dim], currentOutput.size(dim))
@@ -82,7 +83,7 @@ class DepthConcat(nn.Concat):
         self.gradInput.resizeAs(input)
 
         offset = 0
-        for i, module in ipairs(self.modules):
+        for i, module in enumerate(self.modules):
             currentOutput = module.output
             gradOutputWindow = self.windowNarrow(gradOutput, currentOutput, offset)
             currentGradInput = module.backward(input, gradOutputWindow)

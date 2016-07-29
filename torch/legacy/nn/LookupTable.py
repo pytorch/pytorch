@@ -5,6 +5,7 @@ class LookupTable(nn.Module):
 
     def __init__(self, nIndex, nOutput, paddingValue=0, maxNorm=None, normType=None):
         super(LookupTable, self).__init__()
+        raise NotImplementedError
         self.weight = torch.Tensor(nIndex, nOutput)
         self.gradWeight = torch.Tensor(nIndex, nOutput).zero()
         self.paddingValue = paddingValue

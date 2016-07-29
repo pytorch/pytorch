@@ -33,6 +33,7 @@ from torch.legacy import nn
 
 class BatchNormalization(nn.Module):
     # expected dimension of input
+    nDim = 2
 
     def __init__(self, nOutput, eps=1e-5, momentum=0.1, affine=True):
         super(BatchNormalization, self).__init__()
@@ -71,8 +72,8 @@ class BatchNormalization(nn.Module):
         self.running_var.fill(1)
 
     def _checkInputDim(self, input):
-        if input.dim() != 2:
-            raise RuntimeError('only mini-batch supported (2D tensor), got {}D tensor instead'.format(input.dim()))
+        if input.dim() != self.nDim:
+            raise RuntimeError('only mini-batch supported ({}D tensor), got {}D tensor instead'.format(self.nDim, input.dim()))
         if input.size(1) != self.running_mean.nElement():
             raise RuntimeError('got %d-feature tensor, expected %d'.format(input.size(1), self.running_mean.nElement()))
 
