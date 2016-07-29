@@ -102,7 +102,7 @@ function(CUDA_SELECT_NVCC_ARCH_FLAGS out_variable)
     set(CUDA_ARCH_LIST ${CUDA_COMMON_GPU_ARCHITECTURES})
   elseif("${CUDA_ARCH_LIST}" STREQUAL "Auto")
     CUDA_DETECT_INSTALLED_GPUS(CUDA_ARCH_LIST)
-    message(STATUS "Autodetected CUDA architecture(s): ${cuda_arch_bin}")
+    message(STATUS "Autodetected CUDA architecture(s): ${CUDA_ARCH_LIST}")
   endif()
 
   # Now process the list and look for names
