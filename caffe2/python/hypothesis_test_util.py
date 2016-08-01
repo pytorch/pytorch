@@ -263,7 +263,11 @@ class HypothesisTestCase(test_util.TestCase):
             outs = []
             for (n, ref) in zip(op.output, reference_outputs):
                 output = workspace.FetchBlob(n)
-                np.testing.assert_allclose(output, ref, atol=1e-4, rtol=1e-4)
+                if output.dtype.kind in ('S', 'O'):
+                    np.testing.assert_array_equal(output, ref)
+                else:
+                    np.testing.assert_allclose(
+                        output, ref, atol=1e-4, rtol=1e-4)
                 outs.append(output)
             if grad_reference and output_to_grad:
                 self._assertGradReferenceChecks(

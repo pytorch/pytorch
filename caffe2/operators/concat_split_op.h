@@ -31,7 +31,7 @@ class SplitOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws),
         split_(OperatorBase::GetRepeatedArgument<int>("split")) {
     CHECK(OperatorBase::HasArgument("axis") ^
-                OperatorBase::HasArgument("order"))
+          OperatorBase::HasArgument("order"))
         << "You should either specify the dim to split, or the order "
            "in the case of 4-D images.";
     if (OperatorBase::HasArgument("axis")) {
@@ -85,7 +85,9 @@ class ConcatOp final : public Operator<Context> {
 template <class Context>
 bool SplitOp<Context>::RunOnDevice() {
   auto& input = Input(0);
+  const int input_channels = input.dim32(axis_);
   const int* axis_data;
+  vector<int> equal_split;
   if (InputSize() == 2) {
     // We obtain split from the input tensor.
     CHECK_EQ(split_.size(), 0)
@@ -94,13 +96,21 @@ bool SplitOp<Context>::RunOnDevice() {
     auto& split_tensor = OperatorBase::Input<TensorCPU>(1);
     CHECK_EQ(split_tensor.size(), OutputSize());
     axis_data = split_tensor.template data<int>();
+  } else if (split_.size() == 0) {
+    CAFFE_ENFORCE(input_channels % OutputSize() == 0,
+                  "If you did not specify split explicitly, the number of "
+                  "input channels should be divisible by the output size.");
+    equal_split.resize(OutputSize(), input_channels / OutputSize());
+    axis_data = equal_split.data();
   } else {
     // We obtain split from the parameters.
-    CHECK_EQ(split_.size(), OutputSize());
+    CAFFE_ENFORCE(split_.size() == OutputSize(),
+                  "The number of splits specified should be equal to the "
+                  "number of outputs.");
     axis_data = split_.data();
   }
   CHECK_LT(axis_, input.ndim());
-  const int input_channels = input.dim32(axis_);
+
   CHECK_EQ(std::accumulate(axis_data, axis_data + OutputSize(), 0),
            input_channels)
       << "Sum of split dimensions do not match: should be " << input_channels;

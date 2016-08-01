@@ -1,5 +1,5 @@
 python_cc_extension(
-  name="caffe2_python",
+  name="caffe2_python_cpu",
   srcs=["caffe2_python.cc"],
   hdrs=["caffe2_python.h"],
   deps = [
@@ -38,11 +38,13 @@ py_library(
   name="pycaffe2",
   srcs=Glob(["*.py"], excludes=["*_test.py"]),
   deps=[
-      ":caffe2_python",
-      ":caffe2_python_gpu",
+      ":caffe2_python_cpu",
       "//caffe/proto:caffe_proto_py",
       "//caffe2/proto:caffe2_proto_py",
       "//caffe2/python/mint:mint",
+  ],
+  optional_deps=[
+      ":caffe2_python_gpu",
   ],
 )
 

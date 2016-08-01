@@ -17,6 +17,7 @@ REGISTER_CPU_OPERATOR(ScatterAssign, ScatterAssignOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(Copy, CopyOp<CPUContext, CPUContext, CPUContext>);
 REGISTER_CPU_OPERATOR(Shape, ShapeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(HasElements, HasElementsOp<CPUContext>);
+REGISTER_CPU_OPERATOR(IsEmpty, IsEmptyOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Gather, GatherOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(Unique, UniqueOp<CPUContext>);
 REGISTER_CPU_OPERATOR(LengthsToSegmentIds, LengthsToSegmentIdsOp<CPUContext>);
@@ -24,6 +25,7 @@ REGISTER_CPU_OPERATOR(SegmentIdsToLengths, SegmentIdsToLengthsOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Slice, SliceOp<int, CPUContext>);
 REGISTER_CPU_OPERATOR(Squeeze, SqueezeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(ExpandDims, ExpandDimsOp<CPUContext>);
+REGISTER_CPU_OPERATOR(And, AndOp<CPUContext>);
 
 OPERATOR_SCHEMA(Print)
     .NumInputs(1)
@@ -209,6 +211,13 @@ OPERATOR_SCHEMA(HasElements)
         "has_elements",
         "Scalar bool tensor. True if input is not empty.");
 
+OPERATOR_SCHEMA(IsEmpty)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .SetDoc("Returns true iff the input tensor has size == 0")
+    .Input(0, "tensor", "Tensor of any type.")
+    .Output(0, "is_empty", "Scalar bool tensor. True if input is empty.");
+
 OPERATOR_SCHEMA(Gather)
     .NumInputs(2)
     .NumOutputs(1)
@@ -340,9 +349,21 @@ If the same blob is provided in input and output, the operation is copy-free.
     .Input(0, "data", "Original tensor")
     .Output(0, "expanded", "Reshaped tensor with same data as input.");
 
+OPERATOR_SCHEMA(And)
+    .NumInputs(2)
+    .NumOutputs(1)
+    .AllowInplace({{0, 0}})
+    .SetDoc(R"DOC(
+Outputs true iff both input blob values are true.
+)DOC")
+    .Input(0, "input_0", "first boolean input.")
+    .Input(1, "input_1", "second boolean input.")
+    .Output(0, "output", "input_0 && input_1.");
+
 SHOULD_NOT_DO_GRADIENT(Print);
 SHOULD_NOT_DO_GRADIENT(Shape);
 SHOULD_NOT_DO_GRADIENT(HasElements);
+SHOULD_NOT_DO_GRADIENT(IsEmpty);
 
 class GetSqueezeGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
@@ -433,6 +454,7 @@ SHOULD_NOT_DO_GRADIENT(LengthsToSegmentIds);
 SHOULD_NOT_DO_GRADIENT(SegmentIdsToLengths);
 // TODO(azzolini): Add support for slice gradient
 SHOULD_NOT_DO_GRADIENT(Slice);
+SHOULD_NOT_DO_GRADIENT(And);
 
 } // namespace
 

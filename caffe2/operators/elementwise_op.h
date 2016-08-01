@@ -2,16 +2,16 @@
 #define CAFFE2_OPERATORS_ELEMENTWISE_OP_H_
 
 #include "caffe2/core/context.h"
+#include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
-#include "caffe2/core/logging.h"
 
 namespace caffe2 {
 
 using NumericTypes = TensorTypes<int32_t, int64_t, float, double>;
 class SameTypeAsInput {};
 
-template<typename OutputTemplate, typename InputType>
+template <typename OutputTemplate, typename InputType>
 struct TypeForOutput {
   using value = OutputTemplate;
 };
@@ -21,12 +21,26 @@ struct TypeForOutput<SameTypeAsInput, InputType> {
   using value = InputType;
 };
 
-template <typename InputTypes, class Context, class Functor,
-          class OutputType = SameTypeAsInput>
-class UnaryElementwiseOp : public Operator<Context> {
+/**
+ * Generic meta-operator that is able to processes element-wise operations on
+ * a single-element tensor, returning a tensor with same shape, and either of
+ * the same type as the input or of a specified result type.
+ *
+ * The functor provided must implement operator() as a template on input and
+ * output types, and on a Context. Moreover, it needs to provide a constructor
+ * that takes OperatorBase& as argument. This is in order to consume arguments
+ * passed to the operator instance.
+ */
+template <
+    typename InputTypes,
+    class Context,
+    class Functor,
+    class OutputType = SameTypeAsInput>
+class UnaryElementwiseWithArgsOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  USE_SIMPLE_CTOR_DTOR(UnaryElementwiseOp);
+  UnaryElementwiseWithArgsOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws), functor(*this) {}
 
   bool RunOnDevice() override {
     return DispatchHelper<InputTypes>::call(this, Input(0));
@@ -38,11 +52,67 @@ class UnaryElementwiseOp : public Operator<Context> {
     auto* output = Output(0);
     output->ResizeLike(input);
     using R = typename TypeForOutput<OutputType, T>::value;
-    Functor()(input.size(), input.template data<T>(),
-              output->template mutable_data<R>(), &context_);
+    functor(
+        input.size(),
+        input.template data<T>(),
+        output->template mutable_data<R>(),
+        &context_);
     return true;
   }
 
+  Functor functor;
+};
+
+/**
+ * WithDefaultConstructor is a functor that can be used as the functor of an
+ * UnaryElementwiseWithArgsOp. It simply forwards the operator() call into
+ * another functor that doesn't accept arguments in its constructor.
+ */
+template <typename Functor>
+struct WithDefaultConstructor {
+  explicit WithDefaultConstructor(OperatorBase& op) {}
+
+  template <typename In, typename Out, typename Context>
+  void operator()(int n, const In* in, Out* out, Context* c) {
+    Functor()(n, in, out, c);
+  }
+};
+
+/**
+ * UnaryElementwiseOp is a wrapper around UnaryElementwiseWithArgsOp, with the
+ * difference that it takes a functor with default constructor, e.g. that does
+ * not need to take into consideration any arguments during operator creation.
+ */
+template <
+    typename InputTypes,
+    class Context,
+    class Functor,
+    class OutputType = SameTypeAsInput>
+using UnaryElementwiseOp = UnaryElementwiseWithArgsOp<
+    InputTypes,
+    Context,
+    WithDefaultConstructor<Functor>,
+    OutputType>;
+
+/**
+ * ForEach is a unary functor that forwards each element of the input array
+ * into the elementwise Functor provided, and gathers the results of each
+ * call into the resulting array. Use it as an adaptor if you want to create
+ * a UnaryElementwiseOp that acts on each element of the tensor per function
+ * call -- this is resonable for complex types where vectorization wouldn't
+ * be much of a gain, performance-wise.
+ */
+template <typename Functor>
+struct ForEach {
+  explicit ForEach(OperatorBase& op) : functor(op) {}
+
+  template <typename In, typename Out, typename Context>
+  void operator()(int n, const In* in, Out* out, Context* c) {
+    for (int i = 0; i < n; ++i) {
+      out[i] = functor(in[i]);
+    }
+  }
+  Functor functor;
 };
 
 /**
@@ -113,7 +183,7 @@ class BinaryElementwiseOp : public Operator<Context> {
       return false;
     }
     for (int i = 0; i < b.size(); ++i) {
-      if (a[a.size()-1-i] != b[b.size()-1-i]) {
+      if (a[a.size() - 1 - i] != b[b.size() - 1 - i]) {
         return false;
       }
     }
@@ -169,31 +239,35 @@ class DivGradientOp final : public Operator<Context> {
   bool RunOnDevice() override;
 };
 
-#define CAFFE2_BINARY_FUNCTOR_WRAPPER(name)                               \
-  struct name##Functor {                                                  \
-    template <typename T, class Context>                                  \
-    inline void operator()(                                               \
-        const int n,                                                      \
-        const T* x,                                                       \
-        const T* y,                                                       \
-        T* output,                                                        \
-        Context* device_context) {                                        \
-      math::name<T, Context>(n, x, y, output, device_context);            \
-    }                                                                     \
-    template <typename T, class Context>                                  \
-    inline void WithBroadcast(                                            \
-        const int m,                                                      \
-        const int n,                                                      \
-        const T* a,                                                       \
-        const T* b,                                                       \
-        T* y,                                                             \
-        Context* device_context) {                                        \
-      math::name##ToRow<T, Context>(m, n, a, b, y, device_context);       \
-    }                                                                     \
-  };                                                                      \
-  template <class DC>                                                     \
-  using name##Op = BinaryElementwiseOp<NumericTypes, DC,                  \
-    name##Functor, SameTypeAsInput, true>
+#define CAFFE2_BINARY_FUNCTOR_WRAPPER(name)                         \
+  struct name##Functor {                                            \
+    template <typename T, class Context>                            \
+    inline void operator()(                                         \
+        const int n,                                                \
+        const T* x,                                                 \
+        const T* y,                                                 \
+        T* output,                                                  \
+        Context* device_context) {                                  \
+      math::name<T, Context>(n, x, y, output, device_context);      \
+    }                                                               \
+    template <typename T, class Context>                            \
+    inline void WithBroadcast(                                      \
+        const int m,                                                \
+        const int n,                                                \
+        const T* a,                                                 \
+        const T* b,                                                 \
+        T* y,                                                       \
+        Context* device_context) {                                  \
+      math::name##ToRow<T, Context>(m, n, a, b, y, device_context); \
+    }                                                               \
+  };                                                                \
+  template <class DC>                                               \
+  using name##Op = BinaryElementwiseOp<                             \
+      NumericTypes,                                                 \
+      DC,                                                           \
+      name##Functor,                                                \
+      SameTypeAsInput,                                              \
+      true>
 
 CAFFE2_BINARY_FUNCTOR_WRAPPER(Add);
 CAFFE2_BINARY_FUNCTOR_WRAPPER(Sub);
@@ -202,31 +276,31 @@ CAFFE2_BINARY_FUNCTOR_WRAPPER(Div);
 
 #undef CAFFE2_BINARY_FUNCTOR_WRAPPER
 
-#define CAFFE2_BINARY_FUNCTOR_BINARY_RESULT_WRAPPER(name)                     \
-  struct name##Functor {                                                      \
-    template <typename T, class Context>                                      \
-    inline void operator()(                                                   \
-        const int n,                                                          \
-        const T* x,                                                           \
-        const T* y,                                                           \
-        bool* output,                                                         \
-        Context* device_context) {                                            \
-      math::name<T, Context>(n, x, y, output, device_context);                \
-    }                                                                         \
-    template <typename T, typename Context>                                   \
-    inline void WithBroadcast(                                                \
-        const int m,                                                          \
-        const int n,                                                          \
-        const T* a,                                                           \
-        const T* b,                                                           \
-        bool* y,                                                              \
-        Context* device_context) {                                            \
-      math::name##ToRow<T, Context>(m, n, a, b, y, device_context);           \
-    }                                                                         \
-  };                                                                          \
-  template <class DC>                                                         \
-  using name##Op = BinaryElementwiseOp<                                       \
-      NumericTypes, DC, name##Functor, bool, true>
+#define CAFFE2_BINARY_FUNCTOR_BINARY_RESULT_WRAPPER(name)           \
+  struct name##Functor {                                            \
+    template <typename T, class Context>                            \
+    inline void operator()(                                         \
+        const int n,                                                \
+        const T* x,                                                 \
+        const T* y,                                                 \
+        bool* output,                                               \
+        Context* device_context) {                                  \
+      math::name<T, Context>(n, x, y, output, device_context);      \
+    }                                                               \
+    template <typename T, typename Context>                         \
+    inline void WithBroadcast(                                      \
+        const int m,                                                \
+        const int n,                                                \
+        const T* a,                                                 \
+        const T* b,                                                 \
+        bool* y,                                                    \
+        Context* device_context) {                                  \
+      math::name##ToRow<T, Context>(m, n, a, b, y, device_context); \
+    }                                                               \
+  };                                                                \
+  template <class DC>                                               \
+  using name##Op =                                                  \
+      BinaryElementwiseOp<NumericTypes, DC, name##Functor, bool, true>
 
 CAFFE2_BINARY_FUNCTOR_BINARY_RESULT_WRAPPER(LT);
 CAFFE2_BINARY_FUNCTOR_BINARY_RESULT_WRAPPER(LE);
@@ -234,6 +308,6 @@ CAFFE2_BINARY_FUNCTOR_BINARY_RESULT_WRAPPER(GT);
 CAFFE2_BINARY_FUNCTOR_BINARY_RESULT_WRAPPER(GE);
 
 #undef CAFFE2_BINARY_FUNCTOR_BINARY_RESULT_WRAPPER
-}  // namespace caffe2
+} // namespace caffe2
 
-#endif  // CAFFE2_OPERATORS_ELEMENTWISE_OP_H_
+#endif // CAFFE2_OPERATORS_ELEMENTWISE_OP_H_

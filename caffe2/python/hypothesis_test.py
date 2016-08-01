@@ -178,7 +178,12 @@ class TestOperators(hu.HypothesisTestCase):
             return st.sampled_from([np.float32, np.float64])
 
         _test_binary(
-            "Div", ref, filter_=non_zero, test_gradient=True, dtypes=div_dtypes
+            "Div", ref, filter_=non_zero, test_gradient=True,
+            dtypes=div_dtypes, gcs=hu.gcs_cpu_only
+        )(self)
+        _test_binary(
+            "Div", ref, filter_=non_zero, test_gradient=False,
+            dtypes=div_dtypes
         )(self)
         _test_binary_broadcast(
             "Div", ref, filter_=non_zero, dtypes=div_dtypes)(self)
@@ -269,8 +274,8 @@ class TestOperators(hu.HypothesisTestCase):
         for param, _ in enumerate(inputs):
             self.assertGradientChecks(gc, op, inputs, param, [0])
 
-    @unittest.skipIf(True,
-                     "Recurrent only works on CUDA 7.5 and above")
+    @unittest.skipIf(not workspace.has_gpu_support,
+                     "Skipping test due to no gpu present.")
     @given(hidden_size=st.integers(min_value=1, max_value=3),
            num_layers=st.integers(min_value=1, max_value=3),
            bidirectional=st.booleans(),
@@ -366,27 +371,27 @@ class TestOperators(hu.HypothesisTestCase):
 
     # CUDNN does NOT support different padding values and we skip it
     @given(stride_h=st.integers(1, 3),
-            stride_w=st.integers(1, 3),
-            pad_t=st.integers(0, 3),
-            pad_l=st.integers(0, 3),
-            pad_b=st.integers(0, 3),
-            pad_r=st.integers(0, 3),
-            kernel=st.integers(1, 5),
-            size=st.integers(7, 10),
-            input_channels=st.integers(1, 8),
-            output_channels=st.integers(1, 8),
-            batch_size=st.integers(1, 3),
-            order=st.sampled_from(["NCHW", "NHWC"]),
-            engine=st.sampled_from([""]),
-            **hu.gcs)
+           stride_w=st.integers(1, 3),
+           pad_t=st.integers(0, 3),
+           pad_l=st.integers(0, 3),
+           pad_b=st.integers(0, 3),
+           pad_r=st.integers(0, 3),
+           kernel=st.integers(3, 5),
+           size=st.integers(8, 8),
+           input_channels=st.integers(1, 3),
+           output_channels=st.integers(1, 3),
+           batch_size=st.integers(1, 3),
+           order=st.sampled_from(["NCHW", "NHWC"]),
+           engine=st.sampled_from([""]),
+           **hu.gcs)
     @settings(max_examples=2, timeout=100)
     def test_convolution_separate_stride_pad_gradients(self, stride_h, stride_w,
-                                                        pad_t, pad_l, pad_b,
-                                                        pad_r, kernel, size,
-                                                        input_channels,
-                                                        output_channels,
-                                                        batch_size, order,
-                                                        engine, gc, dc):
+                                                       pad_t, pad_l, pad_b,
+                                                       pad_r, kernel, size,
+                                                       input_channels,
+                                                       output_channels,
+                                                       batch_size, order,
+                                                       engine, gc, dc):
         assume(stride_h <= kernel)
         assume(stride_w <= kernel)
         op = core.CreateOperator(
@@ -654,18 +659,19 @@ class TestOperators(hu.HypothesisTestCase):
                 rtol=1e-5)
 
     @given(stride=st.integers(1, 3),
-            pad=st.integers(0, 3),
-            kernel=st.integers(1, 5),
-            size=st.integers(7, 10),
-            input_channels=st.integers(1, 8),
-            output_channels=st.integers(1, 8),
-            batch_size=st.integers(1, 3),
-            order=st.sampled_from(["NCHW", "NHWC"]),
-            engine=st.sampled_from([""]), **hu.gcs)
+           pad=st.integers(0, 3),
+           kernel=st.integers(1, 5),
+           size=st.integers(7, 10),
+           input_channels=st.integers(1, 8),
+           output_channels=st.integers(1, 8),
+           batch_size=st.integers(1, 3),
+           order=st.sampled_from(["NCHW", "NHWC"]),
+           engine=st.sampled_from(["", "CUDNN"]), **hu.gcs)
+    @settings(max_examples=2, timeout=100)
     def test_convolution_transpose_gradients(self, stride, pad, kernel,
-                                                size, input_channels,
-                                                output_channels, batch_size,
-                                                order, engine, gc, dc):
+                                             size, input_channels,
+                                             output_channels, batch_size,
+                                             order, engine, gc, dc):
         assume(stride <= kernel)
         X = np.random.rand(
             batch_size, size, size, input_channels).astype(np.float32) - 0.5
@@ -692,17 +698,17 @@ class TestOperators(hu.HypothesisTestCase):
             self.assertGradientChecks(gc, op, [X, w, b], i, [0])
 
     @given(stride=st.integers(1, 3),
-            pad=st.integers(0, 3),
-            kernel=st.integers(1, 5),
-            size=st.integers(7, 10),
-            input_channels=st.integers(1, 8),
-            output_channels=st.integers(1, 8),
-            batch_size=st.integers(1, 3),
-            engine=st.sampled_from([""]), **hu.gcs)
+           pad=st.integers(0, 3),
+           kernel=st.integers(1, 5),
+           size=st.integers(7, 10),
+           input_channels=st.integers(1, 8),
+           output_channels=st.integers(1, 8),
+           batch_size=st.integers(1, 3),
+           engine=st.sampled_from(["", "CUDNN"]), **hu.gcs)
     def test_convolution_transpose_layout(self, stride, pad, kernel,
-                                            size, input_channels,
-                                            output_channels, batch_size,
-                                            engine, gc, dc):
+                                          size, input_channels,
+                                          output_channels, batch_size,
+                                          engine, gc, dc):
         assume(stride <= kernel)
         X = np.random.rand(
             batch_size, size, size, input_channels).astype(np.float32) - 0.5
@@ -1049,7 +1055,7 @@ class TestOperators(hu.HypothesisTestCase):
     @given(target_probabilities=hu.arrays(
         dims=[10], elements=st.floats(allow_nan=False,
                                       allow_infinity=False,
-                                      min_value=0,
+                                      min_value=0.01,
                                       max_value=1)),
            **hu.gcs)
     def test_perplexity(self, target_probabilities, gc, dc):
@@ -1477,9 +1483,13 @@ class TestOperators(hu.HypothesisTestCase):
         op = core.CreateOperator("HasElements", ["data"], ["has_elements"])
         self.assertReferenceChecks(gc, op, [data], lambda x: (len(x) > 0, ))
 
+        op = core.CreateOperator("IsEmpty", ["data"], ["is_empty"])
+        self.assertReferenceChecks(gc, op, [data], lambda x: (len(x) == 0, ))
+
     @given(initial_iters=st.integers(0, 100),
            max_iters=st.integers(0, 100))
-    def test_criteria_net_with_execution_step(self, initial_iters, max_iters):
+    def test_should_stop_as_criteria_net_execution_step(
+            self, initial_iters, max_iters):
         net = core.Net("net")
         net.Iter(["iter"], ["iter"])
         workspace.FeedBlob(
@@ -1487,15 +1497,86 @@ class TestOperators(hu.HypothesisTestCase):
         workspace.FeedBlob(
             "num_iters", np.asarray([max_iters]).astype(np.int32))
         criteria_net = core.Net("criteria")
-        criteria_net.LT(["iter", "num_iters"], ["continue"])
-        criteria_net.Proto().external_output.extend(["continue"])
+        criteria_net.GE(["iter", "num_iters"], ["stop"])
+        criteria_net.Proto().external_output.extend(["stop"])
 
         plan = core.Plan('plan')
-        plan.AddStep(core.execution_step('step', net, criteria=criteria_net))
+        plan.AddStep(core.execution_step(
+            'step', [criteria_net, net],
+            should_stop_blob=core.BlobReference("stop")))
         workspace.RunPlan(plan)
         iters = workspace.FetchBlob("iter")
         self.assertEqual(iters.dtype, np.int32)
         self.assertEqual(iters[0], max(initial_iters, max_iters))
+
+    def test_disabled_execution_step(self):
+        def createNets(i, disabled):
+            should_stop = 'should_stop_{}'.format(i)
+            output = 'output_{}'.format(i)
+
+            # init content and stop signal
+            init = core.Net("init_{}".format(i))
+            init.ConstantFill(
+                [],
+                [output],
+                shape=[1],
+                value=0.0
+            )
+            init.Cast([output], [should_stop], to='bool')
+
+            # decide if disabled or not
+            criterion = core.Net("criterion_{}".format(i))
+            tmp = criterion.ConstantFill(
+                [],
+                shape=[1],
+                value=1.0 if disabled else 0.0
+            )
+            criterion.Cast([tmp], [should_stop], to='bool')
+            criterion.Proto().external_output.extend([should_stop])
+
+            # the body net is just to turn a 0 blob to 1
+            net = core.Net("net_{}".format(i))
+            net.ConstantFill(
+                [],
+                [output],
+                shape=[1],
+                value=1.0
+            )
+
+            # always end the loop
+            ender = core.Net("ender_{}".format(i))
+            tmp = ender.ConstantFill(
+                [],
+                shape=[1],
+                value=1.0
+            )
+            ender.Cast([tmp], [should_stop], to='bool')
+            ender.Proto().external_output.extend([should_stop])
+
+            return [init, criterion, net, ender]
+
+        nets = [createNets(1, False),
+                createNets(2, True),
+                createNets(3, False)]
+        steps = [
+            core.execution_step(
+                'step_1', nets[0],
+                should_stop_blob=core.BlobReference('should_stop_1')),
+            core.execution_step(
+                'step_2', nets[1],
+                should_stop_blob=core.BlobReference('should_stop_2')),
+            core.execution_step('step_3', nets[2])
+        ]
+        expected = [1.0, 0.0, 1.0]
+
+        plan = core.Plan('plan')
+        plan.AddStep(core.execution_step('all_steps', steps, num_iter=3))
+        workspace.RunPlan(plan)
+
+        for i, net in enumerate(nets):
+            self.assertEqual(
+                workspace.FetchBlob('output_{}'.format(i + 1))[0],
+                expected[i])
 
     @given(initial_iters=st.integers(0, 100),
            num_iters=st.integers(0, 100))
@@ -1522,6 +1603,13 @@ class TestOperators(hu.HypothesisTestCase):
            **hu.gcs)
     def test_cast(self, a, src, dst, use_name, gc, dc):
         a = a.astype(src)
+
+        # Casting from a float type outside the range of the integral
+        # type is UB.
+        ftypes = [np.float32, np.float64]
+        if src in ftypes and dst not in ftypes and dst is not np.bool:
+            info = np.iinfo(dst)
+            a = np.clip(a, info.min, info.max)
 
         def ref(data):
             return [data.astype(dst)]
@@ -1571,7 +1659,8 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [X], [0])
         self.assertGradientChecks(gc, op, [X], 0, [0])
 
-    @given(X=hu.tensor(), seed=st.integers(min_value=0, max_value=65536),
+    @given(X=_dtypes().flatmap(lambda dtype: hu.tensor(dtype=dtype)),
+           seed=st.integers(min_value=0, max_value=65536),
            null_axes=st.booleans(),
            **hu.gcs)
     def test_transpose(self, X, seed, null_axes, gc, dc):
@@ -1589,7 +1678,8 @@ class TestOperators(hu.HypothesisTestCase):
 
         self.assertReferenceChecks(gc, op, [X, axes],
                                    transpose_ref)
-        self.assertGradientChecks(gc, op, [X], 0, [0])
+        if X.dtype != np.int32 and X.dtype != np.int64:
+            self.assertGradientChecks(gc, op, [X], 0, [0])
 
     @given(n=st.integers(1, 3),
            dim=st.integers(4, 16),
