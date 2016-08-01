@@ -47,14 +47,14 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
   {
     for (ddt = 0; ddt < dim; ddt++)
     {
-      long target_idx = (long)target_data[ddt]-1;
+      long target_idx = (long)target_data[ddt] - TH_INDEX_BASE;
       if (target_idx < 0)
         break;
       isTarget_data[target_idx] = 1;
     }
     for (dt = 0; dt < dim; dt++)
     {
-      long target_idx = (long)target_data[dt]-1;
+      long target_idx = (long)target_data[dt] - TH_INDEX_BASE;
       real input_target;
       if (target_idx < 0)
         break;
@@ -141,7 +141,7 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
   {
     for (dt = 0; dt < dim; dt++)
     {
-      long target_idx = (long)target_data[dt]-1;
+      long target_idx = (long)target_data[dt] - TH_INDEX_BASE;
       real input_target;
       if (target_idx < 0)
         break;

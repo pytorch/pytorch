@@ -10,7 +10,7 @@ void THNN_(SpatialConvolutionMap_updateOutput)(
   THArgCheck(
     weight != NULL && weight->nDimension == 3
     && connTable != NULL && connTable->size[0] == weight->size[0], 4,
-    "3D weight tensor expected (connTable:size(1) x kH x kW)"
+    "3D weight tensor expected (connTable:size(%d) x kH x kW)", TH_INDEX_BASE
   );
 
   real *weight_data = THTensor_(data)(weight);
@@ -75,8 +75,8 @@ void THNN_(SpatialConvolutionMap_updateOutput)(
       for (k = 0; k < nweight; k++)
       {
         /* get offsets for input/output */
-        int o = (int)connTable_data[k*2+1]-1;
-        int i = (int)connTable_data[k*2+0]-1;
+        int o = (int)connTable_data[k*2+1] - TH_INDEX_BASE;
+        int i = (int)connTable_data[k*2+0] - TH_INDEX_BASE;
 
         if (o == p)
         {
@@ -106,7 +106,7 @@ void THNN_(SpatialConvolutionMap_updateGradInput)(
   THArgCheck(
     weight != NULL && weight->nDimension == 3
     && connTable != NULL && connTable->size[0] == weight->size[0], 5,
-    "3D weight tensor expected (connTable:size(1) x kH x kW)"
+    "3D weight tensor expected (connTable:size(%d) x kH x kW)", TH_INDEX_BASE
   );
 
   real *weight_data = THTensor_(data)(weight);
@@ -154,8 +154,8 @@ void THNN_(SpatialConvolutionMap_updateGradInput)(
       int nkernel = connTable->size[0];
       for (k = 0; k < nkernel; k++)
       {
-        int o = (int)connTable_data[k*2+1]-1;
-        int i = (int)connTable_data[k*2+0]-1;
+        int o = (int)connTable_data[k*2+1] - TH_INDEX_BASE;
+        int i = (int)connTable_data[k*2+0] - TH_INDEX_BASE;
         if (i == p)
         {
           /* gradient to input */
@@ -182,7 +182,7 @@ void THNN_(SpatialConvolutionMap_accGradParameters)(
   THArgCheck(
     gradWeight != NULL && gradWeight->nDimension == 3
     && connTable != NULL && connTable->size[0] == gradWeight->size[0], 5,
-    "3D gradWeight tensor expected (connTable:size(1) x kH x kW)"
+    "3D gradWeight tensor expected (connTable:size(%d) x kH x kW)", TH_INDEX_BASE
   );
 
   real *gradWeight_data = THTensor_(data)(gradWeight);
@@ -237,8 +237,8 @@ void THNN_(SpatialConvolutionMap_accGradParameters)(
     long m;
     for (m = 0; m < nbatch; m++)
     {
-      int o = (int)THTensor_(get2d)(connTable,k,1)-1;
-      int i = (int)THTensor_(get2d)(connTable,k,0)-1;
+      int o = (int)THTensor_(get2d)(connTable,k,1) - TH_INDEX_BASE;
+      int i = (int)THTensor_(get2d)(connTable,k,0) - TH_INDEX_BASE;
 
       /* gradient to kernel */
       THTensor_(validXCorr2DRevptr)(

@@ -63,7 +63,7 @@ static void THNN_(SpatialMaxPooling_updateOutput_frame)(
         *op = maxval;
 
         /* store location of max */
-        *indp = maxindex + 1;
+        *indp = maxindex + TH_INDEX_BASE;
       }
     }
   }
@@ -97,7 +97,7 @@ void THNN_(SpatialMaxPooling_updateOutput)(
 
   THArgCheck(input->nDimension == 3 || input->nDimension == 4 , 2, "3D or 4D (batch mode) tensor expected");
 
-  if (input->nDimension == 4) 
+  if (input->nDimension == 4)
   {
     nbatch = input->size[0];
     dimw++;
@@ -209,7 +209,7 @@ static void THNN_(SpatialMaxPooling_updateGradInput_frame)(
       for(j = 0; j < owidth; j++)
       {
         /* retrieve position of max */
-        long maxp = ind_p_k[i*owidth + j] - 1;
+        long maxp = ind_p_k[i*owidth + j] - TH_INDEX_BASE;
         /* update gradient */
         gradInput_p_k[maxp] += gradOutput_p_k[i*owidth + j];
       }

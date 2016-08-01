@@ -11,7 +11,7 @@ static void THNN_(SpatialMaxUnpooling_updateOutput_frame)(real *input_p, real *o
   long k;
 #pragma omp parallel for private(k)
   for (k = 0; k < nslices; k++)
-  {    
+  {
     real *output_p_k = output_p + k*owidth*oheight;
     real *input_p_k = input_p + k*iwidth*iheight;
     real *ind_p_k = ind_p + k*iwidth*iheight;
@@ -21,7 +21,7 @@ static void THNN_(SpatialMaxUnpooling_updateOutput_frame)(real *input_p, real *o
     {
       for(j = 0; j < iwidth; j++)
       {
-        maxp = ind_p_k[i*iwidth + j] - 1;  /* retrieve position of max */
+        maxp = ind_p_k[i*iwidth + j] - TH_INDEX_BASE;  /* retrieve position of max */
         if(maxp<0 || maxp>=owidth*oheight){
             THError("invalid max index %d, owidth= %d, oheight= %d",maxp,owidth,oheight);
         }
@@ -52,9 +52,9 @@ void THNN_(SpatialMaxUnpooling_updateOutput)(
   THArgCheck(input->nDimension == 3 || input->nDimension == 4 , 2, "3D or 4D (batch mode) tensor expected");
   if (!THTensor_(isSameSizeAs)(input, indices)){
     THError("Invalid input size w.r.t current indices size");
-  }  
+  }
 
-  if (input->nDimension == 4) 
+  if (input->nDimension == 4)
   {
     nbatch = input->size[0];
     dimw++;
@@ -131,11 +131,11 @@ static void THNN_(SpatialMaxUnpooling_updateGradInput_frame)(real *gradInput_p, 
     for(i = 0; i < iheight; i++)
     {
       for(j = 0; j < iwidth; j++)
-      {        
-        maxp = ind_p_k[i*iwidth + j] - 1; /* retrieve position of max */         
+      {
+        maxp = ind_p_k[i*iwidth + j] - TH_INDEX_BASE; /* retrieve position of max */
         if(maxp<0 || maxp>=owidth*oheight){
             THError("invalid max index %d, owidth= %d, oheight= %d",maxp,owidth,oheight);
-        }  
+        }
         gradInput_p_k[i*iwidth + j] = gradOutput_p_k[maxp]; /* update gradient */
       }
     }
@@ -162,7 +162,7 @@ void THNN_(SpatialMaxUnpooling_updateGradInput)(
 
   if (!THTensor_(isSameSizeAs)(input, indices)){
     THError("Invalid input size w.r.t current indices size");
-  } 
+  }
 
   /* get contiguous gradOutput and indices */
   gradOutput = THTensor_(newContiguous)(gradOutput);

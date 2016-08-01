@@ -34,7 +34,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
   for (t = 0; t < nframe; t++)
   {
     real idx = THTensor_(get1d)(target, t);
-    THArgCheck((idx >= 1) && (idx <= dim), 3, "target out of range");
+    THArgCheck((idx >= TH_INDEX_BASE) && (idx < dim + TH_INDEX_BASE), 3, "target out of range");
   }
 
   input = THTensor_(newContiguous)(input);
@@ -47,7 +47,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
   sum = 0;
   for (t = 0; t < nframe; t++)
   {
-    long target_idx = (long)(target_data[t]-1);
+    long target_idx = (long)(target_data[t] - TH_INDEX_BASE);
     real input_target = input_data[target_idx];
     for (d = 0; d < dim; d++)
     {
@@ -124,7 +124,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
 
   for (t = 0; t < nframe; t++)
   {
-    long target_idx = (long)(target_data[t])-1;
+    long target_idx = (long)(target_data[t]) - TH_INDEX_BASE;
     real input_target = input_data[target_idx];
     real gradInput_target = 0;
     for (d = 0; d < dim; d++)
