@@ -9,7 +9,7 @@
 # normally.
 ##############################################################################
 
-# A catch-all target: all the targets should link to this instead of the
+# A catch-all target: all the targets should link to this instead of ther
 # specific libraries below.
 cc_library(
   name = "blas",
@@ -126,7 +126,13 @@ cc_thirdparty_target(
 )
 
 cc_thirdparty_target(
+  name = "libz",
+  cc_obj_files = [ "-lz" ],
+)
+
+cc_thirdparty_target(
   name = "rocksdb",
+  deps = [":libz"],
   cc_obj_files = [ "-lrocksdb" ],
 )
 
