@@ -1,3 +1,5 @@
+import random
+import math
 import torch
 from torch.legacy import nn
 
@@ -11,8 +13,8 @@ class SpatialFullConvolutionMap(nn.Module):
         self.dW = dW
         self.dH = dH
         self.connTable = conMatrix
-        self.nInputPlane = self.connTable.select(1, 0).max()
-        self.nOutputPlane = self.connTable.select(1, 1).max()
+        self.nInputPlane = int(self.connTable.select(1, 0).max()) + 1
+        self.nOutputPlane = int(self.connTable.select(1, 1).max()) + 1
 
         self.weight = torch.Tensor(self.connTable.size(0), kH, kW)
         self.gradWeight = torch.Tensor(self.connTable.size(0), kH, kW)
@@ -38,7 +40,8 @@ class SpatialFullConvolutionMap(nn.Module):
                 self.weight[k].uniform(-stdv, stdv)
             for k in range(self.bias.size(0)):
                 stdv = 1. / math.sqrt(self.kW*self.kH*ninp[k])
-                self.bias[k].uniform(-stdv, stdv)
+                # TODO: torch.uniform
+                self.bias[k] = random.uniform(-stdv, stdv)
 
     def updateOutput(self, input):
         self._backend.SpatialFullConvolutionMap_updateOutput(

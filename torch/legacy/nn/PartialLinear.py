@@ -16,7 +16,6 @@ class PartialLinear(nn.Module):
 
     def __init__(self, inputsize, outputsize, bias=True):
         super(PartialLinear, self).__init__()
-        raise NotImplementedError
 
         # define the layer as a small network:
         pt = nn.ParallelTable()
@@ -38,9 +37,11 @@ class PartialLinear(nn.Module):
 
     def setPartition(self, indices):
         self.partition = indices.type(self.allcolumns.type())
+        return self
 
     def resetPartition(self):
         self.partition = self.allcolumns
+        return self
 
     def parameters(self):
         return [self.network.get(0).get(1).weight,     self.bias], \
@@ -50,7 +51,7 @@ class PartialLinear(nn.Module):
     def updateOutput(self, input):
         self.output.set(self.network.forward([input, self.partition]))
         if self.bias:
-            self.output.add(self.bias.index(1, self.partition.long()).expandAs(self.output))
+            self.output.add(torch.index(self.bias, 1, self.partition.long()).expandAs(self.output))
             self.addBuffer = self.addBuffer or input.new()
             if self.addBuffer.nElement() != input.size(0):
                 self.addBuffer.resize(input.size(0)).fill(1)

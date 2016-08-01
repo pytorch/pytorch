@@ -166,20 +166,20 @@ class VolumetricFullConvolution(nn.Module):
             adjW = self._calculateAdj(tW, self.kW, self.padW, self.dW)
             adjH = self._calculateAdj(tH, self.kH, self.padH, self.dH)
 
-            inputTensor, gradOutput = self._makeContiguous(self, inputTensor, gradOutput)
-            self._backend.VolumetricFullConvolution_accGradParameters(
-                self._backend.library_state,
-                inputTensor,
-                gradOutput,
-                self.gradWeight,
-                self.gradBias,
-                self.finput,
-                self.fgradInput,
-                self.dT, self.dW, self.dH,
-                self.padT, self.padW, self.padH,
-                adjT, adjW, adjH,
-                scale
-            )
+        inputTensor, gradOutput = self._makeContiguous(inputTensor, gradOutput)
+        self._backend.VolumetricFullConvolution_accGradParameters(
+            self._backend.library_state,
+            inputTensor,
+            gradOutput,
+            self.gradWeight,
+            self.gradBias,
+            self.finput,
+            self.fgradInput,
+            self.dT, self.dW, self.dH,
+            self.padT, self.padW, self.padH,
+            adjT, adjW, adjH,
+            scale
+        )
 
     def type(self, type, tensorCache):
         self.finput = torch.Tensor()

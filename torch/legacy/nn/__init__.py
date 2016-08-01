@@ -55,7 +55,7 @@ from .Linear import Linear
 from .Log import Log
 from .LogSigmoid import LogSigmoid
 from .LogSoftMax import LogSoftMax
-from .LookupTable import LookupTable # TODO THNN expects [1,n] indices
+from .LookupTable import LookupTable
 from .MM import MM
 from .MSECriterion import MSECriterion
 from .MarginCriterion import MarginCriterion
@@ -78,7 +78,7 @@ from .PReLU import PReLU
 from .Padding import Padding
 from .PairwiseDistance import PairwiseDistance
 from .ParallelCriterion import ParallelCriterion
-from .PartialLinear import PartialLinear # TODO require LookupTable
+from .PartialLinear import PartialLinear
 from .Power import Power
 from .RReLU import RReLU # TODO implement
 from .ReLU6 import ReLU6
@@ -101,14 +101,14 @@ from .SpatialClassNLLCriterion import SpatialClassNLLCriterion
 from .SpatialContrastiveNormalization import SpatialContrastiveNormalization
 from .SpatialConvolution import SpatialConvolution
 from .SpatialConvolutionLocal import SpatialConvolutionLocal
-from .SpatialConvolutionMap import SpatialConvolutionMap  # TODO Fix -1 in THNN
+from .SpatialConvolutionMap import SpatialConvolutionMap
 from .SpatialCrossMapLRN import SpatialCrossMapLRN # TODO fails tests
 from .SpatialDilatedConvolution import SpatialDilatedConvolution
 from .SpatialDivisiveNormalization import SpatialDivisiveNormalization
 from .SpatialDropout import SpatialDropout
 from .SpatialFractionalMaxPooling import SpatialFractionalMaxPooling
 from .SpatialFullConvolution import SpatialFullConvolution
-from .SpatialFullConvolutionMap import SpatialFullConvolutionMap # TODO Fix, just like SpatialConvolutionMap
+from .SpatialFullConvolutionMap import SpatialFullConvolutionMap
 from .SpatialLPPooling import SpatialLPPooling
 from .SpatialMaxPooling import SpatialMaxPooling
 from .SpatialMaxUnpooling import SpatialMaxUnpooling
@@ -141,7 +141,7 @@ from .VolumetricAveragePooling import VolumetricAveragePooling
 from .VolumetricBatchNormalization import VolumetricBatchNormalization
 from .VolumetricConvolution import VolumetricConvolution
 from .VolumetricDropout import VolumetricDropout
-from .VolumetricFullConvolution import VolumetricFullConvolution # TODO fails tests
+from .VolumetricFullConvolution import VolumetricFullConvolution
 from .VolumetricMaxPooling import VolumetricMaxPooling
 from .VolumetricMaxUnpooling import VolumetricMaxUnpooling
 from .VolumetricReplicationPadding import VolumetricReplicationPadding
