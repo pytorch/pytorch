@@ -79,7 +79,7 @@ static void THNN_(SpatialFractionalMaxPooling_updateOutput_frame)(
 
         outputForPlane[h * outputW + w] = maxVal;
         /* +1 to lua index */
-        indicesForPlane[h * outputW + w] = (real) maxIndex + 1;
+        indicesForPlane[h * outputW + w] = (real) maxIndex + TH_INDEX_BASE;
       }
     }
 
@@ -96,7 +96,7 @@ void THNN_(SpatialFractionalMaxPooling_updateOutput)(
     int poolSizeW, int poolSizeH,
     THTensor *indices,
     THTensor *randomSamples) {
-  
+
   long numBatch = 1;
   int planeDim = 0;
   int heightDim = 1;
@@ -177,7 +177,7 @@ static void THNN_(SpatialFractionalMaxPooling_updateGradInput_frame)(
     for (h = 0; h < outputH; ++h) {
       for (w = 0; w < outputW; ++w) {
         long outputIndex = h * outputW + w;
-        long index = indicesForPlane[outputIndex] - 1;
+        long index = indicesForPlane[outputIndex] - TH_INDEX_BASE;
         THAssert(index >= 0 && index < inputW * inputH);
 
         gradInputForPlane[index] += gradOutputForPlane[outputIndex];

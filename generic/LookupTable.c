@@ -12,12 +12,12 @@ static void THNN_(LookupTable_resetCount)(
 
   for (i = 0; i<numel; i++)
   {
-    long k = input_data[i] - 1;
+    long k = input_data[i] - TH_INDEX_BASE;
     count_data[k] = 0;
   }
   for (i = 0; i<numel; i++)
   {
-    long k = input_data[i] - 1;
+    long k = input_data[i] - TH_INDEX_BASE;
     count_data[k]++;
   }
 }
@@ -56,7 +56,7 @@ void THNN_(LookupTable_accGradParameters)(
 
   // check that inputs are all within range
   for (i=0; i<numel; i++)
-    if (input_data[i] < 1 || input_data[i] > numw)
+    if (input_data[i] < TH_INDEX_BASE || input_data[i] >= numw + TH_INDEX_BASE)
       THError("input out of range");
 
   gradOutput = THTensor_(newContiguous)(gradOutput);
@@ -86,7 +86,7 @@ void THNN_(LookupTable_accGradParameters)(
       {
         if (input_data[i] != paddingValue)
         {
-            long k = input_data[i] - 1;
+            long k = input_data[i] - TH_INDEX_BASE;
             if (k >= start && k < end)
             {
                 real scale_ = scale;
@@ -106,7 +106,7 @@ void THNN_(LookupTable_accGradParameters)(
   {
     if (input_data[i] != paddingValue)
     {
-        long k = input_data[i] - 1;
+        long k = input_data[i] - TH_INDEX_BASE;
         real scale_ = scale;
         if (count_data) scale_ /= count_data[k];
         THBlas_(axpy)(stride, scale_, go + i*stride, 1, gw + k*stride, 1);
@@ -178,7 +178,7 @@ void THNN_(LookupTable_renorm)(
   long stride = THTensor_(stride)(weight, 0);
   real *gw = THTensor_(data)(weight);
   for (i=0; i<numel; i++)
-    if (row_idx[i] < 1 || row_idx[i] > numw)
+    if (row_idx[i] < TH_INDEX_BASE || row_idx[i] >= numw + TH_INDEX_BASE)
       THError("input out of range");
   // get unique indices
   qsort(row_idx, numel, sizeof(THIndex_t), THNN_(compare_THIndex));
@@ -197,7 +197,7 @@ void THNN_(LookupTable_renorm)(
     #pragma omp parallel for private(i)
     for (i=0; i<numel; i++)
     {
-      long k = row_idx[i] - 1;
+      long k = row_idx[i] - TH_INDEX_BASE;
       THNN_(LookupTable_renormRow)(gw + k*stride, stride, maxNorm, normType);
     }
     return;
@@ -205,7 +205,7 @@ void THNN_(LookupTable_renorm)(
 #endif
   for (i=0; i<numel; i++)
   {
-    long k = row_idx[i] - 1;
+    long k = row_idx[i] - TH_INDEX_BASE;
     THNN_(LookupTable_renormRow)(gw + k*stride, stride, maxNorm, normType);
   }
 }

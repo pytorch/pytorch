@@ -30,7 +30,7 @@ static void THNN_(SpatialAdaptiveMaxPooling_updateOutput_frame)(
 
       for(j = 0; j < owidth; j++)
       {
-        
+
         int x_start = (int)floor((float)j / owidth * iwidth);
         int x_end   = (int)ceil((float)(j + 1) / owidth * iwidth);
         int kW = x_end-x_start;
@@ -64,8 +64,8 @@ static void THNN_(SpatialAdaptiveMaxPooling_updateOutput_frame)(
         *op = maxval;
 
         /* store location of max (x,y) */
-        *indyp = (int)(maxindex / kW)+1;
-        *indxp = (maxindex % kW) +1;
+        *indyp = (int)(maxindex / kW) + TH_INDEX_BASE;
+        *indxp = (maxindex % kW) + TH_INDEX_BASE;
       }
     }
   }
@@ -85,7 +85,7 @@ void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
   long nslices;
   long iheight;
   long iwidth;
-  
+
   long istride_d;
   long istride_h;
   long istride_w;
@@ -98,7 +98,7 @@ void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
 
   THArgCheck(input->nDimension == 3 || input->nDimension == 4 , 2, "3D or 4D (batch mode) tensor expected");
 
-  if (input->nDimension == 4) 
+  if (input->nDimension == 4)
   {
     istride_b = input->stride[0];
     nbatch = input->size[0];
@@ -179,7 +179,7 @@ static void THNN_(SpatialAdaptiveMaxPooling_updateGradInput_frame)(
     real *gradOutput_p_k = gradOutput_p + k*owidth*oheight;
     real *indx_p_k = indx_p + k*owidth*oheight;
     real *indy_p_k = indy_p + k*owidth*oheight;
-    
+
     /* calculate max points */
     long i, j;
     for(i = 0; i < oheight; i++)
@@ -189,9 +189,9 @@ static void THNN_(SpatialAdaptiveMaxPooling_updateGradInput_frame)(
       {
         int x_start = (int)floor((float) j / owidth * iwidth);
         /* retrieve position of max */
-        long maxi = indy_p_k[i*owidth + j] - 1 + y_start;
-        long maxj = indx_p_k[i*owidth + j] - 1 + x_start;
-        
+        long maxi = indy_p_k[i*owidth + j] - TH_INDEX_BASE + y_start;
+        long maxj = indx_p_k[i*owidth + j] - TH_INDEX_BASE + x_start;
+
         /* update gradient */
         gradInput_p_k[maxi*iwidth + maxj] += gradOutput_p_k[i*owidth + j];
       }

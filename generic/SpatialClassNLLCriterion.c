@@ -51,7 +51,7 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
   real output_acc = 0;
   for (int b = 0; b < batch_size; b++) {
     for (int elem = 0; elem < map_size; elem++) {
-      int cur_target = target_data[b * map_size + elem] - 1;
+      int cur_target = target_data[b * map_size + elem] - TH_INDEX_BASE;
       THAssert(cur_target >= 0 && cur_target < n_classes);
 
       real cur_weight = weights ? weights_data[cur_target] : 1.0f;
@@ -107,7 +107,7 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
   for (b = 0; b < batch_size; b++) {
     int elem;
     for (elem = 0; elem < map_size; elem++) {
-      int cur_target = target_data[b * map_size + elem] - 1;
+      int cur_target = target_data[b * map_size + elem] - TH_INDEX_BASE;
       THAssert(cur_target >= 0 && cur_target < n_classes);
 
       gradInput_data[b * sample_size + cur_target * map_size + elem] =
