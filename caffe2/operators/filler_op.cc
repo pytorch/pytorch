@@ -18,6 +18,7 @@ REGISTER_CPU_OPERATOR(UniformFill, UniformFillOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(UniformIntFill, UniformFillOp<int, CPUContext>);
 REGISTER_CPU_OPERATOR(ConstantFill, ConstantFillOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(ConstantIntFill, ConstantFillOp<int, CPUContext>);
+REGISTER_CPU_OPERATOR(ConstantBoolFill, ConstantFillOp<bool, CPUContext>);
 REGISTER_CPU_OPERATOR(GivenTensorFill, GivenTensorFillOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(GivenTensorIntFill, GivenTensorFillOp<int, CPUContext>);
 REGISTER_CPU_OPERATOR(GaussianFill, GaussianFillOp<float, CPUContext>);
@@ -30,6 +31,10 @@ OPERATOR_SCHEMA(UniformFill).NumInputs(0, 1).NumOutputs(1).AllowInplace({{0, 0}}
 OPERATOR_SCHEMA(UniformIntFill).NumInputs(0, 1).NumOutputs(1).AllowInplace({{0, 0}});
 OPERATOR_SCHEMA(ConstantFill).NumInputs(0, 1).NumOutputs(1).AllowInplace({{0, 0}});
 OPERATOR_SCHEMA(ConstantIntFill).NumInputs(0, 1).NumOutputs(1).AllowInplace({{0, 0}});
+OPERATOR_SCHEMA(ConstantBoolFill)
+    .NumInputs(0, 1)
+    .NumOutputs(1)
+    .AllowInplace({{0, 0}});
 OPERATOR_SCHEMA(GivenTensorFill).NumInputs(0, 1).NumOutputs(1).AllowInplace({{0, 0}});
 OPERATOR_SCHEMA(GivenTensorIntFill).NumInputs(0, 1).NumOutputs(1).AllowInplace({{0, 0}});
 OPERATOR_SCHEMA(GaussianFill).NumInputs(0, 1).NumOutputs(1).AllowInplace({{0, 0}});

@@ -468,7 +468,7 @@ class proto_library(BuildTarget):
 
     def AddOptimizationOption(self, name):
         with open(name, 'r') as fid:
-            lines = fid.read().split('\n')
+            lines = fid.read().decode('utf-8').split('\n')
         optimization_line = (
             'option optimize_for = {0};'.format(self.optimize_option))
         if lines[0].startswith('syntax'):
@@ -477,7 +477,7 @@ class proto_library(BuildTarget):
             lines.insert(0, optimization_line)
         with open(name, 'w') as fid:
             for line in lines:
-                fid.write(line + '\n')
+                fid.write((line + '\n').encode('utf-8'))
 
     def SetUp(self):
         Brewery.CopyToGenDir(self.srcs)

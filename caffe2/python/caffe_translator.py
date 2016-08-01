@@ -1,6 +1,6 @@
 #!/usr/bin/env python2
 
-from caffe2.proto import caffe2_pb2
+from caffe2.proto import caffe2_pb2, caffe2_legacy_pb2
 from caffe.proto import caffe_pb2
 from caffe2.python import core, utils
 
@@ -57,7 +57,7 @@ class CacaRegistry(object):
             raise KeyError('No translator registered for layer: %s yet.' %
                            str(layer))
         if caffe_ops is None:
-            return []
+            caffe_ops = []
         if type(caffe_ops) is not list:
             caffe_ops = [caffe_ops]
         return caffe_ops, params
@@ -132,6 +132,12 @@ def AddArgument(op, key, value):
 ################################################################################
 # Common translators for layers.
 ################################################################################
+
+
+@CacaRegistry.Register("Input")
+def TranslateInput(layer, pretrained_blobs, is_test):
+    return [], []
+    
 
 
 @CacaRegistry.Register("Convolution")
@@ -246,15 +252,8 @@ def TranslatePool(layer, pretrained_blobs, is_test):
     AddArgument(caffe_op, "kernel", int(param.kernel_size))
     AddArgument(caffe_op, "pad", int(param.pad))
     AddArgument(caffe_op, "order", "NCHW")
-    # TODO: Figure out how we deal with the legacy padding behavior. For now,
-    # we will silently ignore the legacy padding behavior and hope for the best.
-    # Basically, we will need to explicitly run a Caffe script to figure out if
-    # the legacy padding is triggered, and deal with that explicitly.
-    # NOTE: This is now disabled as supporting legacy padding conflicts with
-    # cudnn and it is better for us to manually remove the legacy padding
-    # behavior.
-    # AddArgument(caffe_op, "legacy_pad",
-    #             caffe2_legacy_pb2.CAFFE_LEGACY_POOLING)
+    AddArgument(caffe_op, "legacy_pad",
+                caffe2_legacy_pb2.CAFFE_LEGACY_POOLING)
     return caffe_op, []
 
 

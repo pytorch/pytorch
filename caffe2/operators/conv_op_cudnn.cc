@@ -22,11 +22,11 @@ template <typename ArrayOfcudnnConvolutionAlgoPerf_t>
 inline void LogCuDNNPerfStats(
     const ArrayOfcudnnConvolutionAlgoPerf_t& perf_stat,
     int returned_algo_count) {
-  LOG(INFO) << "Perf result: (algo: stat, time, memory)";
+  VLOG(1) << "Perf result: (algo: stat, time, memory)";
   for (int i = 0; i < returned_algo_count; ++i) {
     const auto& stat = perf_stat[i];
-    LOG(INFO) << stat.algo << ": " << stat.status
-                   << " " << stat.time << " " << stat.memory;
+    VLOG(1) << stat.algo << ": " << stat.status << " " << stat.time << " "
+            << stat.memory;
   }
 }
 }  // namespace
@@ -193,7 +193,7 @@ bool CudnnConvOp<T>::RunOnDevice() {
     if (deterministic_) {
       algo_ = CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM;
     } else if (exhaustive_search_) {
-      LOG(INFO) << "CUDNN Convolution: doing exhaustive search.";
+      VLOG(1) << "CUDNN Convolution: doing exhaustive search.";
       // When we do an exhaustive search, we will ignore the workspace size
       // limit and simply go for the fastest algorithm. If you happen to run
       // out of memory later, you will be on your own...
@@ -229,8 +229,8 @@ bool CudnnConvOp<T>::RunOnDevice() {
         cudnn_wrapper_.inline_cudnn_handle(),
         bottom_desc_, filter_desc_, conv_desc_, top_desc_,
         algo_, &cudnn_ws_nbytes_));
-    LOG(INFO) << "CuDNN algorithm: " << algo_;
-    LOG(INFO) << "CuDNN workspace size: " << cudnn_ws_nbytes_;
+    VLOG(1) << "CuDNN algorithm: " << algo_;
+    VLOG(1) << "CuDNN workspace size: " << cudnn_ws_nbytes_;
   }
 
   // Now, actually run the computation.
@@ -346,7 +346,7 @@ bool CudnnConvGradientOp<T>::RunOnDevice() {
       bwd_data_algo_ = CUDNN_CONVOLUTION_BWD_DATA_ALGO_1;
       bwd_filter_algo_ = CUDNN_CONVOLUTION_BWD_FILTER_ALGO_1;
     } else if (exhaustive_search_) {
-      LOG(INFO) << "CUDNN Convolution bwd: doing exhaustive search.";
+      VLOG(1) << "CUDNN Convolution bwd: doing exhaustive search.";
       // When we do an exhaustive search, we will ignore the workspace size
       // limit and simply go for the fastest algorithm. If you happen to run
       // out of memory later, you will be on your own...
@@ -416,9 +416,9 @@ bool CudnnConvGradientOp<T>::RunOnDevice() {
         bwd_data_algo_, &bwd_data_ws_size));
     cudnn_ws_nbytes_ = std::max(bwd_filter_ws_size, bwd_data_ws_size);
 
-    LOG(INFO) << "CuDNN bwd algorithm: " << bwd_filter_algo_ << ", "
-                   << bwd_data_algo_;
-    LOG(INFO) << "CuDNN workspace size: " << cudnn_ws_nbytes_;
+    VLOG(1) << "CuDNN bwd algorithm: " << bwd_filter_algo_ << ", "
+            << bwd_data_algo_;
+    VLOG(1) << "CuDNN workspace size: " << cudnn_ws_nbytes_;
   }
 
   // Now, actually run the computation.

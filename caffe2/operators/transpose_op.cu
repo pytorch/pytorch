@@ -10,24 +10,25 @@ namespace caffe2 {
 #define COMPILE_TIME_CUDA_MAX_TRANSPOSE_DIMS 5
 
 namespace {
-// TODO(jiayq): one possible optimization is to copy the buffer into a shared memory
-// location to speed up access.
+// TODO(jiayq): one possible optimization is to copy the buffer into a shared
+// memory location to speed up access.
 template <typename Dtype>
 __global__ void transpose_gpu(const int nthreads, const Dtype* from_data,
   Dtype* to_data, const int* buffer, const int num_axes) {
   int from_inds[COMPILE_TIME_CUDA_MAX_TRANSPOSE_DIMS];
   const int* from_counts = buffer;
   const int* to_counts = buffer + num_axes;
-  const int* map = buffer + num_axes * 2;
+  const int* axes = buffer + num_axes * 2;
   CUDA_1D_KERNEL_LOOP(index, nthreads) {
     int from_index = index, to_index = 0;
-    for (int i = 0; i < num_axes; i++) {
-      from_inds[i] = from_index / from_counts[i];
-      from_index = from_index % from_counts[i];
+    for (int i = num_axes - 1; i >= 0; --i) {
+      from_inds[i] = from_index % from_counts[i];
+      from_index = from_index / from_counts[i];
     }
-    for (int i = 0; i < num_axes; i++) {
-      to_index += from_inds[map[i]] * to_counts[i];
+    for (int i = 0; i < num_axes - 1; i++) {
+      to_index = (to_index + from_inds[axes[i]]) * to_counts[i + 1];
     }
+    to_index += from_inds[axes[num_axes - 1]];
     to_data[to_index] = from_data[index];
   }
 }
@@ -42,7 +43,7 @@ bool TransposeOp<CUDAContext>::DoRunWithType() {
   int ndim = input.ndim();
   CAFFE_ENFORCE(count < std::numeric_limits<int>::max(),
                 "Transpose op on GPU only supports int32"); 
-  CAFFE_ENFORCE(count < COMPILE_TIME_CUDA_MAX_TRANSPOSE_DIMS,
+  CAFFE_ENFORCE(ndim < COMPILE_TIME_CUDA_MAX_TRANSPOSE_DIMS,
                 "Input ndim exceeds compile time max."); 
   // Buffer contains the following data:
   // (1) the dimenions of the inputs

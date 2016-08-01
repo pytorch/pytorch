@@ -12,34 +12,39 @@
 namespace caffe2 {
 
 namespace {
-// Returns a function that returns `true` if we should continue
-// iterating, given the current iteration count.
-std::function<bool(int)> getContinuationTest(
-    Workspace* ws,
-    const ExecutionStep& step) {
-  if (step.has_criteria_network()) {
-    CHECK(!step.has_num_iter())
-        << "Must not specify num_iter if critera_network is set";
+// try to get the should_stop signal, a scalar bool blob value.
+// if the blob doesn't exist or is not initiaized, return false
+const bool getShouldStop(const Blob* b) {
+  if (!b || !b->meta().id()) { // not exist or uninitialized
+    return false;
   }
 
-  if (!step.has_criteria_network()) {
-    int iterations = step.has_num_iter() ? step.num_iter() : 1;
-    VLOG(1) << "Executing step for " << iterations << " iterations.";
-    return [=](int i) { return i < iterations; };
+  const auto& t = b->Get<TensorCPU>();
+  CAFFE_ENFORCE(t.IsType<bool>() && t.size() == 1, "expects a scalar boolean");
+  return *(t.template data<bool>());
+}
+
+// Returns a function that returns `true` if we should continue
+// iterating, given the current iteration count.
+std::function<bool(int64_t)> getContinuationTest(
+    Workspace* ws,
+    const ExecutionStep& step) {
+  if (step.has_should_stop_blob()) {
+    CAFFE_ENFORCE(
+        !step.has_num_iter(),
+        "Must not specify num_iter if should_stop_blob is set");
   }
-  auto* criteria_network = ws->GetNet(step.criteria_network());
-  CHECK_NOTNULL(criteria_network);
-  CHECK_EQ(criteria_network->external_output().size(), 1);
-  const auto& criteria_output = criteria_network->external_output().front();
-  VLOG(1) << "Executing step controlled by criteria output: "
-                << criteria_output;
-  return [=](int) {
-    criteria_network->Run();
-    const auto& blob = ws->GetBlob(criteria_output)->Get<TensorCPU>();
-    CHECK_EQ(blob.size(), 1);
-    CHECK(blob.IsType<bool>());
-    return blob.template data<bool>()[0] > 0;
-  };
+
+  if (!step.has_should_stop_blob()) {
+    int64_t iterations = step.has_num_iter() ? step.num_iter() : 1;
+    VLOG(1) << "Will execute step " << step.name() << " for " << iterations
+            << " iterations.";
+    return [=](int64_t i) { return i < iterations; };
+  } else {
+    VLOG(1) << "Will execute step " << step.name() << " until stopped by blob "
+            << step.should_stop_blob();
+    return [](int64_t i) { return true; };
+  }
 };
 }  // namespace
 
@@ -229,10 +234,17 @@ struct Reporter {
 
 }
 
+#define CHECK_SHOULD_STOP(shouldStop)                   \
+  if (getShouldStop(shouldStop)) {                      \
+    VLOG(1) << "Execution stopped by should_stop_blob"; \
+    return true;                                        \
+  }
+
 bool Workspace::ExecuteStepRecursive(
       const ExecutionStep& step,
       ShouldContinue externalShouldContinue) {
-  LOG(INFO) << "Running execution step " << step.name();
+  VLOG(1) << "Running execution step " << step.name();
+
   if (!(step.substep_size() == 0 || step.network_size() == 0)) {
     LOG(ERROR) << "An ExecutionStep should either have substep or networks "
                << "but not both.";
@@ -247,49 +259,67 @@ bool Workspace::ExecuteStepRecursive(
     if (net_map_.count(step.report_net()) == 0) {
       LOG(ERROR) << "Report net " << step.report_net() << " not found.";
     }
+    VLOG(1) << "Starting reporter net";
     reporter.start(net_map_[step.report_net()].get(), step.report_interval());
   }
 
+  const Blob* shouldStop = nullptr;
+  if (step.has_should_stop_blob()) {
+    shouldStop = GetBlob(step.should_stop_blob());
+    CAFFE_ENFORCE(
+        shouldStop, "blob ", step.should_stop_blob(), " does not exist");
+  }
+
   const auto netShouldContinue = getContinuationTest(this, step);
-  const auto shouldContinue = [&](int iter) {
+  const auto shouldContinue = [&](int64_t iter) {
     return externalShouldContinue(iter) && netShouldContinue(iter);
   };
   if (step.substep_size()) {
-    for (int iter = 0; shouldContinue(iter); ++iter) {
-      // we assume that, if we have substeps, each substep is going to take a
-      // reasonable amount of time, so logging here is fine
-      LOG(INFO) << "Execution step " << step.name()
-                << ": Starting iteration " << iter;
-      std::atomic<int> next_substep{0};
-      std::atomic<bool> got_failure{false};
-      auto substepShouldContinue = [&, externalShouldContinue](int iter) {
-        return !got_failure && externalShouldContinue(iter);
-      };
-      auto worker = [&]() {
-        while (true) {
-          int substep_id = next_substep++;
-          if (got_failure || (substep_id >= step.substep().size())) {
-            break;
-          }
-          if (!ExecuteStepRecursive(step.substep().Get(substep_id),
-                                    substepShouldContinue)) {
-            got_failure = true;
-          }
-        }
-      };
+    for (int64_t iter = 0; shouldContinue(iter); ++iter) {
+      VLOG(1) << "Execution step " << step.name() << ": iteration " << iter;
+
       if (!step.concurrent_substeps() || step.substep().size() <= 1) {
-        worker();
+        auto substepShouldContinue = [&, externalShouldContinue](int64_t iter) {
+          return externalShouldContinue(iter);
+        };
+
+        for (auto& ss : step.substep()) {
+          if (!ExecuteStepRecursive(ss, substepShouldContinue)) {
+            return false;
+          }
+          CHECK_SHOULD_STOP(shouldStop);
+        }
       } else {
+        std::atomic<int> next_substep{0};
+        std::atomic<bool> got_failure{false};
+        auto substepShouldContinue = [&, externalShouldContinue](int64_t iter) {
+          return !got_failure && externalShouldContinue(iter);
+        };
+        auto worker = [&]() {
+          while (true) {
+            int substep_id = next_substep++;
+            if (got_failure || (substep_id >= step.substep().size())) {
+              break;
+            }
+            if (!ExecuteStepRecursive(
+                    step.substep().Get(substep_id), substepShouldContinue)) {
+              got_failure = true;
+            }
+          }
+        };
+
         std::vector<std::thread> threads;
-        for (int i = 0; i < step.substep().size(); ++i) {
+        for (int64_t i = 0; i < step.substep().size(); ++i) {
           threads.emplace_back(worker);
         }
         for (auto& thread: threads) {
           thread.join();
         }
-      }
-      if (got_failure) {
-        return false;
+        if (got_failure) {
+          return false;
+        }
+        // concurrent substeps should be careful about setting should_stop_blob
+        CHECK_SHOULD_STOP(shouldStop);
       }
     }
     return true;
@@ -305,16 +335,19 @@ bool Workspace::ExecuteStepRecursive(
       VLOG(1) << "Going to execute network " << network_name;
       networks.push_back(net_map_[network_name].get());
     }
-    for (int iter = 0; shouldContinue(iter); ++iter) {
+    for (int64_t iter = 0; shouldContinue(iter); ++iter) {
       VLOG(1) << "Executing network iteration " << iter;
       for (NetBase* network : networks) {
         if (!network->Run()) {
           return false;
         }
+        CHECK_SHOULD_STOP(shouldStop);
       }
     }
   }
   return true;
 }
+
+#undef CHECK_SHOULD_STOP
 
 }  // namespace caffe2

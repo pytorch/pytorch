@@ -151,6 +151,40 @@ class Tensor {
   virtual ~Tensor() {}
 
   /**
+   * @brief Extends the outer-most dimension of this tensor by num elements,
+   * preserving the existing data.
+   *
+   * The underlying data may be reallocated in order to accommodate the new
+   * elements, in which case this tensors' capacity is grown at a factor of
+   * growthPct. This ensures that Extend runs on an amortized O(1) time
+   * complexity.
+   */
+  template <class ContextForCopy>
+  void Extend(TIndex num, int growthPct, ContextForCopy* context) {
+    CHECK_GE(dims_.size(), 1);
+    auto oldSize = size_;
+    auto newDims = dims_;
+    newDims[0] += num;
+    if (!data_) {
+      Resize(newDims);
+      return;
+    }
+    auto newSize = std::accumulate(
+        newDims.begin(), newDims.end(), 1, std::multiplies<TIndex>());
+    if (newSize * meta_.itemsize() > capacity_) {
+      auto newCapacity = dims_;
+      newCapacity[0] = std::max(newDims[0], dims_[0] * (growthPct + 100) / 100);
+      auto oldData = std::move(data_);
+      Resize(newCapacity);
+      auto* newData = raw_mutable_data(meta_);
+      context->template CopyItems<ContextForCopy, ContextForCopy>(
+          meta_, oldSize, oldData.get(), newData);
+    }
+    dims_ = newDims;
+    size_ = newSize;
+  }
+
+  /**
    * @brief Resizes a tensor.
    *
    * Resize takes in a vector of ints specifying the dimensions of the tensor.
@@ -297,9 +331,12 @@ class Tensor {
     CHECK(data_.get() || size_ == 0)
         << "The tensor is uninitialized. You probably need to call "
         << "Resize() and mutable_data() first.";
-    CHECK(IsType<T>())
-        << "Tensor type mistmatch, caller expects elements to be "
-        << TypeMeta::Name<T>() << " while tensor contains " << meta_.name();
+    CAFFE_ENFORCE(
+        IsType<T>(),
+        "Tensor type mistmatch, caller expects elements to be ",
+        TypeMeta::Name<T>(),
+        " while tensor contains ",
+        meta_.name());
     return static_cast<T*>(data_.get());
   }
 

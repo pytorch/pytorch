@@ -6,9 +6,17 @@ import shutil
 import socket
 import tempfile
 
+import numpy as np
 from caffe2.proto import caffe2_pb2
 from caffe2.python import scope, utils
 from ._import_c_extension import *  # noqa
+
+# Python 2 and 3 compatibility: test if basestring exists
+try:
+    basestring  # NOQA
+except NameError:
+    # This is python3 so we define basestring.
+    basestring = str
 
 
 def _GetFreeFlaskPort():
@@ -86,7 +94,9 @@ def ResetWorkspace(root_folder=None):
         return cc_ResetWorkspace(root_folder)
 
 
-def CreateNet(net, input_blobs=[]):
+def CreateNet(net, input_blobs=None):
+    if input_blobs is None:
+        input_blobs = []
     for input_blob in input_blobs:
         CreateBlob(input_blob)
     return cc_CreateNet(StringfyProto(net))
@@ -112,6 +122,14 @@ def RunPlan(plan):
     return cc_RunPlan(StringfyProto(plan))
 
 
+def _StringifyBlobName(name):
+    if isinstance(name, basestring):
+        return name
+    assert type(name).__name__ == 'BlobReference', \
+        "Expected a string or BlobReference"
+    return str(name)
+
+
 def FeedBlob(name, arr, device_option=None):
     """Feeds a blob into the workspace.
 
@@ -125,12 +143,50 @@ def FeedBlob(name, arr, device_option=None):
     """
     if type(arr) is caffe2_pb2.TensorProto:
         arr = utils.Caffe2TensorToNumpyArray(arr)
+    if type(arr) is np.ndarray and arr.dtype.kind == 'S':
+        # Plain NumPy strings are weird, let's use objects instead
+        arr = arr.astype(np.object)
+    name = _StringifyBlobName(name)
     if device_option is not None:
         return cc_FeedBlob(name, arr, StringfyProto(device_option))
     elif scope.DEVICESCOPE is not None:
         return cc_FeedBlob(name, arr, StringfyProto(scope.DEVICESCOPE))
     else:
         return cc_FeedBlob(name, arr)
+
+
+def FetchBlob(name):
+    """Fetches a blob from the workspace.
+
+    Inputs:
+      name: the name of the blob - a string or a BlobReference
+    Returns:
+      Fetched blob (numpy array or string) if successful
+    """
+    name = _StringifyBlobName(name)
+    return cc_FetchBlob(name)
+
+
+class _BlobDict(object):
+    """Provides python dict compatible way to do fetching and feeding"""
+
+    def __getitem__(self, key):
+        return FetchBlob(key)
+
+    def __setitem__(self, key, value):
+        return FeedBlob(key, value)
+
+    def __len__(self):
+        return len(Blobs())
+
+    def __iter__(self):
+        return Blobs().__iter__()
+
+    def __contains__(self, item):
+        return HasBlob(item)
+
+
+blobs = _BlobDict()
 
 
 class Model(object):

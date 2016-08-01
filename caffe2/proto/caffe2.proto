@@ -199,7 +199,7 @@ message ExecutionStep {
   // Criteria network specifies a single output (TensorCPU<bool>) of
   // size (1), is run on every iteration by the executor, and
   // execution terminates when the output[0] is `false`.
-  optional string criteria_network = 5;
+  optional string criteria_network = 5 [deprecated=true];
 
   // If specified, run report_net asynchronously every `report_interval`
   // seconds. Report_net is guaranteed to run at least once after all
@@ -210,6 +210,20 @@ message ExecutionStep {
   // If false or not set, execute sub-steps serially.
   // If true, execute all substeps concurrently, each one in a separte thread.
   optional bool concurrent_substeps = 6;
+
+  // Name of a scalar boolean tensor.
+  // ES checks this blob AFTER every substeps/subnets.
+  // If specified, and the value is true, then ES will skip the rest and return
+  // immediately.
+  // This means that the report_net and the first step will always be called.
+  // Use cases:
+  // 1) the first substep stops the rest if data condition not met
+  // 2) the first substep decide which of the rest of the steps should be run.
+  // 3) external control
+  //
+  // ** It is the user's responsibility to not to put this blob in race conditions.
+  // ** For example when setting this blob in concurrent substeps
+  optional string should_stop_blob = 9;
 }
 
 message PlanDef {

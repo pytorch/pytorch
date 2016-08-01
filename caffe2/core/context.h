@@ -5,8 +5,9 @@
 #include <cstdlib>
 #include <random>
 
-#include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/core/logging.h"
+#include "caffe2/core/typeid.h"
+#include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {
@@ -103,6 +104,7 @@ class CPUContext final {
   // Two copy functions that deals with cross-device copies.
   template <class SrcContext, class DstContext>
   inline void CopyBytes(size_t nbytes, const void* src, void* dst);
+
   template <typename T, class SrcContext, class DstContext>
   inline void Copy(size_t n, const T* src, T* dst) {
     if (std::is_fundamental<T>::value) {
@@ -113,6 +115,16 @@ class CPUContext final {
       for (int i = 0; i < n; ++i) {
         dst[i] = src[i];
       }
+    }
+  }
+
+  template <class SrcContext, class DstContext>
+  inline void
+  CopyItems(const TypeMeta& meta, size_t n, const void* src, void* dst) {
+    if (meta.copy()) {
+      meta.copy()(src, dst, n);
+    } else {
+      CopyBytes<SrcContext, DstContext>(n * meta.itemsize(), src, dst);
     }
   }
 

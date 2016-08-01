@@ -11,9 +11,11 @@
 //     platforms, it allows one to quickly port Caffe2 to different platforms
 //     where BLAS may not be present.
 
-#include <random>
 #include <sys/time.h>
+#include <sys/types.h>
+#include <unistd.h>
 #include <atomic>
+#include <random>
 
 #ifdef CAFFE2_USE_MKL
 #include <mkl.h>
@@ -486,6 +488,7 @@ void Set<T, CPUContext>(const int N, const T alpha, T *Y,                      \
 CAFFE2_SPECIALIZED_SET(float);
 CAFFE2_SPECIALIZED_SET(double);
 CAFFE2_SPECIALIZED_SET(int);
+CAFFE2_SPECIALIZED_SET(bool);
 #undef CAFFE2_SPECIALIZED_SET
 
 #define CAFFE2_INSTANTIATE_BINARY_OP(name, op, T)                          \

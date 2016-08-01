@@ -675,6 +675,21 @@ class HasElementsOp : public Operator<Context> {
   }
 };
 
+template <class Context>
+class IsEmptyOp : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  USE_SIMPLE_CTOR_DTOR(IsEmptyOp);
+
+  bool RunOnDevice() override {
+    auto& input = Input(0);
+    auto* output = OperatorBase::Output<TensorCPU>(0);
+    output->Resize(std::vector<TIndex>{});
+    *output->template mutable_data<bool>() = (input.size() == 0);
+    return true;
+  }
+};
+
 // RecordShapeOp records the shape of the input tensor to a vector of int. You
 // mostly don't need this operator explicitly, and it is mostly used in the
 // autodiff process.
@@ -910,6 +925,23 @@ class UniqueOp : public Operator<Context> {
 
  public:
   OUTPUT_TAGS(UNIQUE, REMAPPING);
+};
+
+template <class Context>
+class AndOp final : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  AndOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws) {}
+
+  bool RunOnDevice() override {
+    const auto* i1 = Input(0).template data<bool>();
+    const auto* i2 = Input(1).template data<bool>();
+    auto* output = Output(0);
+    output->Resize(std::vector<int>{});
+    *output->template mutable_data<bool>() = (*i1 && *i2);
+    return true;
+  }
 };
 } // namespace caffe2
 
