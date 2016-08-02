@@ -1,7 +1,6 @@
 #include "THCUNN.h"
 #include "common.h"
 
-#define MINUS_LOG_THRESHOLD -18.42
 #define SOFTMAX_THREADS 128
 
 __global__ void cunn_SoftMax_updateOutput_kernel(
@@ -23,6 +22,7 @@ __global__ void cunn_SoftMax_updateOutput_kernel(
     if (buffer[threadIdx.x] < z)
       buffer[threadIdx.x] = z;
   }
+
 
   __syncthreads();
 
@@ -152,6 +152,10 @@ void THNN_CudaSoftMax_updateOutput(THCState *state, THCudaTensor *input, THCudaT
   {
     blocksY *= blocksZ;
     blocksZ = 1;
+    if (input->nDimension == 3 || input->nDimension == 4) {
+      stride0 = blocksY * blocksZ;
+      stride1 = blocksZ;
+    }
   }
 
   dim3 blocks(batchSize, blocksY, blocksZ);
@@ -217,6 +221,10 @@ void THNN_CudaSoftMax_updateGradInput(THCState *state, THCudaTensor *input, THCu
   {
     blocksY *= blocksZ;
     blocksZ = 1;
+    if (input->nDimension == 3 || input->nDimension == 4) {
+      stride0 = blocksY * blocksZ;
+      stride1 = blocksZ;
+    }
   }
 
   dim3 blocks(batchSize, blocksY, blocksZ);
@@ -232,3 +240,5 @@ void THNN_CudaSoftMax_updateGradInput(THCState *state, THCudaTensor *input, THCu
   THCudaTensor_free(state, gradOutput);
   THCudaTensor_free(state, output);
 }
+
+#undef SOFTMAX_THREADS
