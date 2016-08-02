@@ -18,6 +18,8 @@ TYPE_TRANSFORMS = {
     'THDoubleTensor': 'THPDoubleTensor*',
     'THLongStorage': 'THPLongStorage*',
     'THGenerator': 'THPGenerator*',
+    'THBoolTensor': 'THPBoolTensor*',
+    'THIndexTensor': 'THPIndexTensor*',
     # TODO
     'accreal': 'double',
 }
@@ -33,6 +35,8 @@ FORMAT_STR_MAP = {
     'THPLongStorage*': 'O!',
     'THPStorage*': 'O!',
     'THPGenerator*': 'O!',
+    'THPBoolTensor*': 'O!',
+    'THPIndexTensor*': 'O!',
     'real': 'O&',
     'long': 'l',
     'double': 'd',
@@ -51,6 +55,8 @@ ARGPARSE_TYPE_CHECK = {
     'THPLongStorage*': 'THPLongStorageType',
     'THPStorage*': 'THPStorageType',
     'THPGenerator*': 'THPGeneratorType',
+    'THPBoolTensor*': 'THPBoolTensorClass',
+    'THPIndexTensor*': 'THPIndexTensorClass',
     'real': 'THPUtils_(parseReal)',
 }
 
@@ -87,11 +93,29 @@ RETURN_WRAPPER = {
         _t.release();
         $expr;
         return (PyObject*)_ret.release()"""),
+    'new THBoolTensor':     Template("""
+#if IS_CUDA
+        THCByteTensorPtr _t = THCudaByteTensor_new(LIBRARY_STATE_NOARGS);
+        THCPByteTensorPtr _ret = (THCPByteTensor*)THCPByteTensor_newObject(_t);
+#else
+        THByteTensorPtr _t = THByteTensor_new();
+        THPByteTensorPtr _ret = (THPByteTensor*)THPByteTensor_newObject(_t);
+#endif
+        _t.release();
+        $expr;
+        return (PyObject*)_ret.release()"""),
     'new ValueIndexPair':   Template("""
+#if IS_CUDA
+        THCTensorPtr _value = THTensor_(new)(LIBRARY_STATE_NOARGS);
+        THCPTensorPtr _v = (THCPTensor*)THCPTensor_(newObject)(_value);
+        THCLongTensorPtr _indices = THCudaLongTensor_new(LIBRARY_STATE_NOARGS);
+        THCPLongTensorPtr _i = (THCPLongTensor*)THCPLongTensor_newObject(_indices);
+#else
         THTensorPtr _value = THTensor_(new)(LIBRARY_STATE_NOARGS);
         THPTensorPtr _v = (THPTensor*)THPTensor_(newObject)(_value);
-        THLongTensorPtr _indices = THLongTensor_new();
+        THLongTensorPtr _indices = THLongTensor_new(LIBRARY_STATE_NOARGS);
         THPLongTensorPtr _i = (THPLongTensor*)THPLongTensor_newObject(_indices);
+#endif
         _value.release();
         _indices.release();
         $expr;
@@ -99,27 +123,13 @@ RETURN_WRAPPER = {
         _v.release(); _i.release();
         return ret;"""),
     'new SelfIndexPair':    Template("""
-        THLongTensorPtr _indices = THLongTensor_new();
+#if IS_CUDA
+        THCLongTensorPtr _indices = THCudaLongTensor_new(LIBRARY_STATE_NOARGS);
+        THCPLongTensorPtr _i = (THCPLongTensor*)THCPLongTensor_newObject(_indices);
+#else
+        THLongTensorPtr _indices = THLongTensor_new(LIBRARY_STATE_NOARGS);
         THPLongTensorPtr _i = (THPLongTensor*)THPLongTensor_newObject(_indices);
-        _indices.release();
-        $expr;
-        PyObject *ret = Py_BuildValue("ON", (PyObject*)self, (PyObject*)_i.get());
-        _i.release();
-        return ret"""),
-    'new ValueValuePair':   Template("""
-        THTensorPtr _value = THTensor_(new)(LIBRARY_STATE_NOARGS);
-        THPTensorPtr _v = (THPTensor*)THPTensor_(newObject)(_value);
-        _value.release();
-        THTensorPtr _indices = THTensor_(new)(LIBRARY_STATE_NOARGS);
-        THPTensorPtr _i = (THPTensor*)THPTensor_(newObject)(_indices);
-        _indices.release();
-        $expr;
-        PyObject *ret = Py_BuildValue("NN", (PyObject*)_v.get(), (PyObject*)_i.get());
-        _v.release(); _i.release();
-        return ret;"""),
-    'new SelfValuePair':    Template("""
-        THTensorPtr _indices = THTensor_(new)(LIBRARY_STATE_NOARGS);
-        THPTensorPtr _i = (THPTensor*)THPTensor_(newObject)(_indices);
+#endif
         _indices.release();
         $expr;
         PyObject *ret = Py_BuildValue("ON", (PyObject*)self, (PyObject*)_i.get());
@@ -140,16 +150,13 @@ RETURN_WRAPPER = {
 
     # Stateless mode
     'STATELESS PROV new SelfIndexPair': Template("""
+#if IS_CUDA
+        THCLongTensorPtr _indices = THCudaLongTensor_new(LIBRARY_STATE_NOARGS);
+        THCPLongTensorPtr _i = (THCPLongTensor*)THCPLongTensor_newObject(_indices);
+#else
         THLongTensorPtr _indices = THLongTensor_new();
         THPLongTensorPtr _i = (THPLongTensor*)THPLongTensor_newObject(_indices);
-        _indices.release();
-        $expr;
-        PyObject *ret = Py_BuildValue("ON", (PyObject*)_res, (PyObject*)_i.get());
-        _i.release();
-        return ret;"""),
-    'STATELESS PROV new SelfValuePair': Template("""
-        THTensorPtr _indices = THTensor_(new)(LIBRARY_STATE_NOARGS);
-        THPTensorPtr _i = (THPTensor*)THPTensor_(newObject)(_indices);
+#endif
         _indices.release();
         $expr;
         PyObject *ret = Py_BuildValue("ON", (PyObject*)_res, (PyObject*)_i.get());
@@ -166,7 +173,7 @@ RETURN_WRAPPER = {
         _t.release();
         $expr;
         return (PyObject*)_res_new.release()"""),
-    'STATELESS PROV new THPByteTensor':   Template('$expr; Py_INCREF(_ret); return (PyObject*)_ret'),
+    'STATELESS PROV new THPBoolTensor':   Template('$expr; Py_INCREF(_ret); return (PyObject*)_ret'),
 }
 
 # Additional args that are added to TH call
@@ -176,12 +183,10 @@ ADDITIONAL_ARGS = {
     'new THByteTensor': (Argument('THPByteTensor*', '_ret'),),
     'new THLongTensor': (Argument('THPLongTensor*', '_ret'),),
     'new THTensor':     (Argument('THPTensor*', '_ret'),),
-    'new ValueIndexPair': (Argument('THPTensor*', '_v'), Argument('THPLongTensor*', '_i')),
-    'new SelfIndexPair': (Argument('THPTensor*', 'self'), Argument('THPLongTensor*', '_i')),
-    'new ValueValuePair': (Argument('THPTensor*', '_v'), Argument('THPTensor*', '_i')),
-    'new SelfValuePair': (Argument('THPTensor*', 'self'), Argument('THPTensor*', '_i')),
-    'STATELESS PROV new SelfIndexPair': {1: Argument('THPTensor*', '_i')},
-    'STATELESS PROV new SelfValuePair': {1: Argument('THPTensor*', '_i')},
+    'new THBoolTensor': (Argument('THPBoolTensor*', '_ret'),),
+    'new ValueIndexPair': (Argument('THPTensor*', '_v'), Argument('THPIndexTensor*', '_i')),
+    'new SelfIndexPair': (Argument('THPTensor*', 'self'), Argument('THPIndexTensor*', '_i')),
+    'STATELESS PROV new SelfIndexPair': {1: Argument('THPIndexTensor*', '_i')},
 }
 
 # Types for which it's necessary to extract cdata
@@ -194,6 +199,8 @@ CDATA_TYPES = set((
     'THPStorage*',
     'THPLongStorage*',
     'THPGenerator*',
+    'THPBoolTensor*',
+    'THPIndexTensor*',
 ))
 
 TYPE_DESCRIPTIONS = {
@@ -205,6 +212,9 @@ TYPE_DESCRIPTIONS = {
     'THPStorage*': '" THPStorageStr "',
     'THPLongStorage*': 'LongStorage',
     'THPGenerator*': 'Generator',
+    # TODO
+    'THBoolTensor*': 'TODO',
+    'THIndexTensor*': 'TODO',
     'real': '" RealStr "',
     'accreal': '" RealStr "',
 }

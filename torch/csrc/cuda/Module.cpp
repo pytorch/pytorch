@@ -6,7 +6,6 @@
 
 #include "THCP.h"
 
-extern PyObject* module; // From torch/csrc/Module.cpp
 THCState _state;
 THCState *state = &_state;
 
@@ -33,16 +32,9 @@ PyObject *THCPCharTensorClass    = NULL;
 PyObject *THCPByteTensorClass    = NULL;
 
 
-static bool THCPModule_loadClasses()
+static bool THCPModule_loadClasses(PyObject *module_dict)
 {
 #define ASSERT_NOT_NULL(ptr) if (!(ptr)) { THPUtils_setError("couldn't load classes"); return false; }
-  PyObject *torch_module = PyImport_ImportModule("torch.cuda");
-  if (!torch_module) {
-    THPUtils_setError("class loader couldn't access torch module");
-    return false;
-  }
-  PyObject* module_dict = PyModule_GetDict(torch_module);
-
   ASSERT_NOT_NULL(THCPDoubleStorageClass = PyMapping_GetItemString(module_dict, (char*)"DoubleStorage"));
   ASSERT_NOT_NULL(THCPFloatStorageClass  = PyMapping_GetItemString(module_dict, (char*)"FloatStorage"));
   ASSERT_NOT_NULL(THCPHalfStorageClass   = PyMapping_GetItemString(module_dict, (char*)"HalfStorage"));
@@ -106,26 +98,28 @@ static bool THCPModule_assignStateless()
 // Cuda module initialization
 ////////////////////////////////////////////////////////////////////////////////
 
-bool THCPModule_initCuda() {
+bool THCPModule_initCuda(PyObject *module_dict) {
 #define ASSERT_TRUE(cond) if (!(cond)) { return false; }
   THCudaInit(state);
 
 #ifdef USE_MAGMA
   THCMagma_init(state);
-  ASSERT_TRUE(PyObject_SetAttrString(module, "hasMagma", PyBool_FromLong(true)) != -1);
+  ASSERT_TRUE(PyDict_SetItemString(module_dict, "hasMagma", PyBool_FromLong(true)) != -1);
 #else
-  ASSERT_TRUE(PyObject_SetAttrString(module, "hasMagma", PyBool_FromLong(false)) != -1);
+  ASSERT_TRUE(PyDict_SetItemString(module_dict, "hasMagma", PyBool_FromLong(false)) != -1);
 #endif
 
 #ifdef CUDA_HALF_TENSOR
-  ASSERT_TRUE(PyObject_SetAttrString(module, "hasHalf", PyBool_FromLong(true)) != -1);
+  ASSERT_TRUE(PyDict_SetItemString(module_dict, "hasHalf", PyBool_FromLong(true)) != -1);
 #else
-  ASSERT_TRUE(PyObject_SetAttrString(module, "hasHalf", PyBool_FromLong(false)) != -1);
+  ASSERT_TRUE(PyDict_SetItemString(module_dict, "hasHalf", PyBool_FromLong(false)) != -1);
 #endif
 
-  ASSERT_TRUE(THCPModule_loadClasses());
+  ASSERT_TRUE(THCPModule_loadClasses(module_dict));
   ASSERT_TRUE(THCPModule_assignStateless());
   ASSERT_TRUE(THCPModule_initCopy());
+
+  ASSERT_TRUE(PyDict_SetItemString(module_dict, "_state_cdata", PyLong_FromVoidPtr(state)) != -1);
 
   // TODO: register THCudaShutdown handler at exit
   return true;
@@ -135,6 +129,12 @@ bool THCPModule_initCuda() {
 // Callback for python part. Used for additional initialization of python classes
 PyObject * THCPModule_initExtension(PyObject *self)
 {
-  return PyBool_FromLong(THCPModule_initCuda());
+  PyObject *torch_module = PyImport_ImportModule("torch.cuda");
+  if (!torch_module) {
+    THPUtils_setError("class loader couldn't access torch module");
+    return false;
+  }
+  PyObject* module_dict = PyModule_GetDict(torch_module);
+  return PyBool_FromLong(THCPModule_initCuda(module_dict));
 }
 

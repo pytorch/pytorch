@@ -18,6 +18,22 @@
 #define CUDA_FLOAT defined(THC_REAL_IS_FLOAT)
 #endif
 
+#if IS_CUDA
+#define THPIndexTensor THCPLongTensor
+#define THPIndexTensorClass THCPLongTensorClass
+#else
+#define THPIndexTensor THPLongTensor
+#define THPIndexTensorClass THPLongTensorClass
+#endif
+
+#if IS_CUDA
+#define THPBoolTensor THCPByteTensor
+#define THPBoolTensorClass THCPByteTensorClass
+#else
+#define THPBoolTensor THPByteTensor
+#define THPBoolTensorClass THPByteTensorClass
+#endif
+
 [[
   elementSize STATEFUL_ONLY
   elementSize -> long STORAGE_CALL
@@ -26,15 +42,15 @@
 static PyObject * THPTensor_(storage)(THPTensor *self)
 {
   // TODO: memory leak on error
-  THStorage *result = THTensor_(storage)(self->cdata);
+  THStorage *result = THTensor_(storage)(LIBRARY_STATE self->cdata);
   if (result == NULL)
     Py_RETURN_NONE;
-  THStorage_(retain)(result);
+  THStorage_(retain)(LIBRARY_STATE result);
   return THPStorage_(newObject)(result);
 }
 
 [[
-  storageOffset
+  storageOffset STATEFUL_ONLY
   storageOffset -> long
     - self
 ]]
@@ -1216,17 +1232,16 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 ]]
 #endif /* !IS_CUDA */
 
-#if !IS_CUDA
 [[
   lt
-  ltValue -> new THByteTensor
+  ltValue -> new THBoolTensor
     - self
     - real value
   ltValueT -> self
     - self
     - THTensor other
     - real value
-  ltTensor -> new THByteTensor
+  ltTensor -> new THBoolTensor
     - self
     - THTensor other
   ltTensorT -> self
@@ -1237,14 +1252,14 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   gt
-  gtValue -> new THByteTensor
+  gtValue -> new THBoolTensor
     - self
     - real value
   gtValueT -> self
     - self
     - THTensor other
     - real value
-  gtTensor -> new THByteTensor
+  gtTensor -> new THBoolTensor
     - self
     - THTensor other
   gtTensorT -> self
@@ -1255,14 +1270,14 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   le
-  leValue -> new THByteTensor
+  leValue -> new THBoolTensor
     - self
     - real value
   leValueT -> self
     - self
     - THTensor other
     - real value
-  leTensor -> new THByteTensor
+  leTensor -> new THBoolTensor
     - self
     - THTensor other
   leTensorT -> self
@@ -1273,14 +1288,14 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   ge
-  geValue -> new THByteTensor
+  geValue -> new THBoolTensor
     - self
     - real value
   geValueT -> self
     - self
     - THTensor other
     - real value
-  geTensor -> new THByteTensor
+  geTensor -> new THBoolTensor
     - self
     - THTensor other
   geTensorT -> self
@@ -1291,14 +1306,14 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   eq
-  eqValue -> new THByteTensor
+  eqValue -> new THBoolTensor
     - self
     - real value
   eqValueT -> self
     - self
     - THTensor other
     - real value
-  eqTensor -> new THByteTensor
+  eqTensor -> new THBoolTensor
     - self
     - THTensor other
   eqTensorT -> self
@@ -1309,14 +1324,14 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   ne
-  neValue -> new THByteTensor
+  neValue -> new THBoolTensor
     - self
     - real value
   neValueT -> self
     - self
     - THTensor other
     - real value
-  neTensor -> new THByteTensor
+  neTensor -> new THBoolTensor
     - self
     - THTensor other
   neTensorT -> self
@@ -1324,117 +1339,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
     - THTensor other
     - THTensor other2
 ]]
-#elif CUDA_FLOAT
-[[
-  lt
-  ltValue -> new THTensor
-    - self
-    - real value
-  ltValue -> self
-    - self
-    - THTensor other
-    - real value
-  ltTensor -> new THTensor
-    - self
-    - THTensor other
-  ltTensor -> self
-    - self
-    - THTensor other
-    - THTensor other2
-]]
 
-[[
-  gt
-  gtValue -> new THTensor
-    - self
-    - real value
-  gtValue -> self
-    - self
-    - THTensor other
-    - real value
-  gtTensor -> new THTensor
-    - self
-    - THTensor other
-  gtTensor -> self
-    - self
-    - THTensor other
-    - THTensor other2
-]]
-
-[[
-  le
-  leValue -> new THTensor
-    - self
-    - real value
-  leValue -> self
-    - self
-    - THTensor other
-    - real value
-  leTensor -> new THTensor
-    - self
-    - THTensor other
-  leTensor -> self
-    - self
-    - THTensor other
-    - THTensor other2
-]]
-
-[[
-  ge
-  geValue -> new THTensor
-    - self
-    - real value
-  geValue -> self
-    - self
-    - THTensor other
-    - real value
-  geTensor -> new THTensor
-    - self
-    - THTensor other
-  geTensor -> self
-    - self
-    - THTensor other
-    - THTensor other2
-]]
-
-[[
-  eq
-  eqValue -> new THTensor
-    - self
-    - real value
-  eqValue -> self
-    - self
-    - THTensor other
-    - real value
-  eqTensor -> new THTensor
-    - self
-    - THTensor other
-  eqTensor -> self
-    - self
-    - THTensor other
-    - THTensor other2
-]]
-
-[[
-  ne
-  neValue -> new THTensor
-    - self
-    - real value
-  neValue -> self
-    - self
-    - THTensor other
-    - real value
-  neTensor -> new THTensor
-    - self
-    - THTensor other
-  neTensor -> self
-    - self
-    - THTensor other
-    - THTensor other2
-]]
-#endif
-
-#if !IS_CUDA
 [[
   min
   minall -> real
@@ -1459,6 +1364,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
     - long index
 ]]
 
+#if !IS_CUDA
 [[
   kthvalue
   kthvalue -> new ValueIndexPair
@@ -1510,7 +1416,10 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
     - THTensor other
     - long dim
 ]]
+#endif
 
+// TODO: enable when cutorch will be updated to return THCudaLongTensor
+#if !IS_CUDA
 [[
   sort
   sort -> new ValueIndexPair
@@ -1596,122 +1505,6 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
     - bool smallest
     - CONSTANT false
   topk -> new SelfIndexPair
-    - THTensor source
-    - long k
-    - long dim
-    - bool smallest
-    - bool sorted
-]]
-#elif CUDA_FLOAT
-[[
-  min
-  minall -> real
-    - self
-  min -> new ValueValuePair
-    - self
-    - long index
-  min -> new SelfValuePair
-    - THTensor other
-    - long index
-]]
-
-[[
-  max
-  maxall -> real
-    - self
-  max -> new ValueValuePair
-    - self
-    - long index
-  max -> new SelfValuePair
-    - THTensor other
-    - long index
-]]
-
-[[
-  sort
-  sort -> new ValueValuePair
-    - self
-    - EXPRESSION THTensor_(nDimension)(LIBRARY_STATE {2}->cdata)-1
-    - CONSTANT false
-  sort -> new ValueValuePair
-    - self
-    - long dim
-    - CONSTANT false
-  sort -> new ValueValuePair
-    - self
-    - long dim
-    - bool descending
-  sort -> new SelfValuePair
-    - THTensor source
-    - EXPRESSION THTensor_(nDimension)(LIBRARY_STATE {2}->cdata)-1
-    - CONSTANT false
-  sort -> new SelfValuePair
-    - THTensor source
-    - long dim
-    - CONSTANT false
-  sort -> new SelfValuePair
-    - THTensor source
-    - long dim
-    - bool descending
-]]
-
-[[
-  topk
-  topk -> new ValueValuePair
-    - self
-    - CONSTANT 1
-    - EXPRESSION THTensor_(nDimension)(LIBRARY_STATE {2}->cdata)-1
-    - CONSTANT false
-    - CONSTANT false
-  topk -> new ValueValuePair
-    - self
-    - long k
-    - EXPRESSION THTensor_(nDimension)(LIBRARY_STATE {2}->cdata)-1
-    - CONSTANT false
-    - CONSTANT false
-  topk -> new ValueValuePair
-    - self
-    - long k
-    - long dim
-    - CONSTANT false
-    - CONSTANT false
-  topk -> new ValueValuePair
-    - self
-    - long k
-    - long dim
-    - bool smallest
-    - CONSTANT false
-  topk -> new ValueValuePair
-    - self
-    - long k
-    - long dim
-    - bool smallest
-    - bool sorted
-  topk -> new SelfValuePair
-    - THTensor source
-    - CONSTANT 1
-    - EXPRESSION THTensor_(nDimension)(LIBRARY_STATE {2}->cdata)-1
-    - CONSTANT false
-    - CONSTANT false
-  topk -> new SelfValuePair
-    - THTensor source
-    - long k
-    - EXPRESSION THTensor_(nDimension)(LIBRARY_STATE {2}->cdata)-1
-    - CONSTANT false
-    - CONSTANT false
-  topk -> new SelfValuePair
-    - THTensor source
-    - long k
-    - long dim
-    - CONSTANT false
-    - CONSTANT false
-  topk -> new SelfValuePair
-    - THTensor source
-    - long k
-    - long dim
-    - bool smallest
-    - CONSTANT false
-  topk -> new SelfValuePair
     - THTensor source
     - long k
     - long dim
@@ -1721,12 +1514,11 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 #endif
 
 // TODO: why are these stateful only?
-#if !IS_CUDA
 [[
   maskedFill STATEFUL_ONLY
   maskedFill -> self
     - self
-    - THByteTensor mask
+    - THBoolTensor mask
     - real value
 ]]
 
@@ -1734,7 +1526,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
   maskedCopy STATEFUL_ONLY
   maskedCopy -> self
     - self
-    - THByteTensor mask
+    - THBoolTensor mask
     - THTensor source
 ]]
 
@@ -1742,40 +1534,12 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
   maskedSelect STATEFUL_ONLY
   maskedSelect -> new THTensor
     - self
-    - THByteTensor mask
+    - THBoolTensor mask
   maskedSelect -> self
     - self
     - THTensor source
-    - THByteTensor mask
+    - THBoolTensor mask
 ]]
-#elif CUDA_FLOAT
-[[
-  maskedFill STATEFUL_ONLY
-  maskedFill -> self
-    - self
-    - THTensor mask
-    - real value
-]]
-
-[[
-  maskedCopy STATEFUL_ONLY
-  maskedCopy -> self
-    - self
-    - THTensor mask
-    - THTensor source
-]]
-
-[[
-  maskedSelect STATEFUL_ONLY
-  maskedSelect -> new THTensor
-    - self
-    - THTensor mask
-  maskedSelect -> self
-    - self
-    - THTensor source
-    - THTensor mask
-]]
-#endif
 
 #ifdef TH_REAL_IS_BYTE
 [[
@@ -2031,7 +1795,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   gather STATEFUL_ONLY
-  gather -> CUSTOM THTensorPtr _value = THTensor_(new)(LIBRARY_STATE_NOARGS); THStoragePtr _size = THTensor_newSizeOf(LIBRARY_STATE index->cdata); THTensor_(resize)(LIBRARY_STATE _value, _size, NULL); THPTensorPtr _ret = (THPTensor*)THPTensor_(newObject)(_value); _value.release(); {expr}; return (PyObject*)_ret.release();
+  gather -> CUSTOM THTensorPtr _value = THTensor_(new)(LIBRARY_STATE_NOARGS); THLongStoragePtr _size = THTensor_(newSizeOf)(LIBRARY_STATE index->cdata); THTensor_(resize)(LIBRARY_STATE _value, _size, NULL); THPTensorPtr _ret = (THPTensor*)THPTensor_(newObject)(_value); _value.release(); {expr}; return (PyObject*)_ret.release();
     - CONSTANT _ret->cdata
     - self
     - long dim
@@ -2045,7 +1809,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   gather STATELESS_ONLY
-  gather -> CUSTOM THTensorPtr _value = THTensor_(new)(LIBRARY_STATE_NOARGS); THStoragePtr _size = THTensor_newSizeOf(LIBRARY_STATE index->cdata); THTensor_(resize)(LIBRARY_STATE _value, _size, NULL); THPTensorPtr _ret = (THPTensor*)THPTensor_(newObject)(_value); _value.release(); {expr}; return (PyObject*)_ret.release();
+  gather -> CUSTOM THTensorPtr _value = THTensor_(new)(LIBRARY_STATE_NOARGS); THLongStoragePtr _size = THTensor_(newSizeOf)(LIBRARY_STATE index->cdata); THTensor_(resize)(LIBRARY_STATE _value, _size, NULL); THPTensorPtr _ret = (THPTensor*)THPTensor_(newObject)(_value); _value.release(); {expr}; return (PyObject*)_ret.release();
     - CONSTANT _ret->cdata
     - self
     - long dim
@@ -2502,6 +2266,7 @@ static void THTensor_(random1__)(THTensor *self, THGenerator *gen, long b)
 ]]
 #endif
 
+#if !IS_CUDA || CUDA_FLOAT
 static std::pair<std::vector<THPObjectPtr>, std::vector<THTensor *>>
 THPTensor_(_iterableTensors)(PyObject *iterable)
 {
@@ -2539,7 +2304,7 @@ static PyObject * THPTensor_(cat)(THPTensor *self, PyObject *args)
       if (THPUtils_getLong(dim, &dimension)) {
         try {
           std::tie(items, item_tensors) = THPTensor_(_iterableTensors)(iterable);
-          THTensor_(catArray)(self->cdata, item_tensors.data(), items.size(), dimension);
+          THTensor_(catArray)(LIBRARY_STATE self->cdata, item_tensors.data(), items.size(), dimension);
           Py_INCREF(self);
           return (PyObject*)self;
 
@@ -2550,7 +2315,7 @@ static PyObject * THPTensor_(cat)(THPTensor *self, PyObject *args)
       }
   } else if (_argcount == 3) {
     if (PyArg_ParseTuple(args, "O!O!l", &THPTensorType, &tensor1, &THPTensorType, &tensor2, &dimension)) {
-      THTensor_(cat)(self->cdata, tensor1->cdata, tensor2->cdata, dimension);
+      THTensor_(cat)(LIBRARY_STATE self->cdata, tensor1->cdata, tensor2->cdata, dimension);
       Py_INCREF(self);
       return (PyObject*)self;
     }
@@ -2581,7 +2346,7 @@ static PyObject * THPTensor_stateless_(cat)(THPTensor *_unused, PyObject *args)
     if (THPUtils_getLong(dim, &dimension)) {
       try {
         std::tie(items, item_tensors) = THPTensor_(_iterableTensors)(iterable);
-        THTensor_(catArray)(self->cdata, item_tensors.data(), items.size(), dimension);
+        THTensor_(catArray)(LIBRARY_STATE self->cdata, item_tensors.data(), items.size(), dimension);
         Py_INCREF(self.get());
         return (PyObject*)self.release();
 
@@ -2596,7 +2361,7 @@ static PyObject * THPTensor_stateless_(cat)(THPTensor *_unused, PyObject *args)
       THPTensorPtr self = (THPTensor*)THPTensor_(newObject)(_self.get());
       _self.release();
 
-      THTensor_(cat)(self->cdata, tensor1->cdata, tensor2->cdata, dimension);
+      THTensor_(cat)(LIBRARY_STATE self->cdata, tensor1->cdata, tensor2->cdata, dimension);
       Py_INCREF(self.get());
       return (PyObject*)self.release();
     } else {
@@ -2610,7 +2375,7 @@ static PyObject * THPTensor_stateless_(cat)(THPTensor *_unused, PyObject *args)
       if (THPUtils_getLong(dim, &dimension)) {
         try {
           std::tie(items, item_tensors) = THPTensor_(_iterableTensors)(iterable);
-          THTensor_(catArray)(self->cdata, item_tensors.data(), items.size(), dimension);
+          THTensor_(catArray)(LIBRARY_STATE self->cdata, item_tensors.data(), items.size(), dimension);
           Py_INCREF(self);
           return (PyObject*)self;
 
@@ -2624,7 +2389,7 @@ static PyObject * THPTensor_stateless_(cat)(THPTensor *_unused, PyObject *args)
   } else if (_argcount == 4) {
     THPTensor *self;
     if (PyArg_ParseTuple(args, "O!O!O!l", &THPTensorType, &self, &THPTensorType, &tensor1, &THPTensorType, &tensor2, &dimension)) {
-      THTensor_(cat)(self->cdata, tensor1->cdata, tensor2->cdata, dimension);
+      THTensor_(cat)(LIBRARY_STATE self->cdata, tensor1->cdata, tensor2->cdata, dimension);
       Py_INCREF(self);
       return (PyObject*)self;
     }
@@ -2635,6 +2400,7 @@ static PyObject * THPTensor_stateless_(cat)(THPTensor *_unused, PyObject *args)
   return NULL;
   END_HANDLE_TH_ERRORS
 }
+#endif
 
 // Declared in TensorCopy.cpp
 //PyObject * THPTensor_(copy)(THPTensor *self, PyObject *other);
@@ -2658,11 +2424,9 @@ static PyMethodDef THPTensor_(methods)[] = {
   {"retain",          (PyCFunction)THPTensor_(retain),          METH_NOARGS,  NULL},
   {"size",            (PyCFunction)THPTensor_(size),            METH_VARARGS, NULL},
   {"select",          (PyCFunction)THPTensor_(select),          METH_VARARGS, NULL},
-#if !IS_CUDA || CUDA_FLOAT
   {"maskedFill",      (PyCFunction)THPTensor_(maskedFill),      METH_VARARGS, NULL},
   {"maskedCopy",      (PyCFunction)THPTensor_(maskedCopy),      METH_VARARGS, NULL},
   {"maskedSelect",    (PyCFunction)THPTensor_(maskedSelect),    METH_VARARGS, NULL},
-#endif
 #if !IS_CUDA
   {"apply",           (PyCFunction)THPTensor_(apply),           METH_O,       NULL},
   {"map",             (PyCFunction)THPTensor_(map),             METH_VARARGS, NULL},
@@ -2750,9 +2514,9 @@ static PyMethodDef THPTensor_(methods)[] = {
   {"median",          (PyCFunction)THPTensor_(median),          METH_VARARGS, NULL},
   {"nonzero",         (PyCFunction)THPTensor_(nonzero),         METH_VARARGS, NULL},
 #endif
-#if !IS_CUDA || CUDA_FLOAT
   {"min",             (PyCFunction)THPTensor_(min),             METH_VARARGS, NULL},
   {"max",             (PyCFunction)THPTensor_(max),             METH_VARARGS, NULL},
+#if !IS_CUDA || CUDA_FLOAT
   {"cmax",            (PyCFunction)THPTensor_(cmax),            METH_VARARGS, NULL},
   {"cmin",            (PyCFunction)THPTensor_(cmin),            METH_VARARGS, NULL},
   {"dot",             (PyCFunction)THPTensor_(dot),             METH_VARARGS, NULL},
@@ -2764,13 +2528,15 @@ static PyMethodDef THPTensor_(methods)[] = {
   {"sign",            (PyCFunction)THPTensor_(sign),            METH_VARARGS, NULL},
   {"tril",            (PyCFunction)THPTensor_(tril),            METH_VARARGS, NULL},
   {"triu",            (PyCFunction)THPTensor_(triu),            METH_VARARGS, NULL},
+  {"cross",           (PyCFunction)THPTensor_(cross),           METH_VARARGS, NULL},
+#endif
   {"gt",              (PyCFunction)THPTensor_(gt),              METH_VARARGS, NULL},
   {"lt",              (PyCFunction)THPTensor_(lt),              METH_VARARGS, NULL},
   {"ge",              (PyCFunction)THPTensor_(ge),              METH_VARARGS, NULL},
   {"le",              (PyCFunction)THPTensor_(le),              METH_VARARGS, NULL},
   {"eq",              (PyCFunction)THPTensor_(eq),              METH_VARARGS, NULL},
   {"ne",              (PyCFunction)THPTensor_(ne),              METH_VARARGS, NULL},
-  {"cross",           (PyCFunction)THPTensor_(cross),           METH_VARARGS, NULL},
+#if !IS_CUDA
   {"sort",            (PyCFunction)THPTensor_(sort),            METH_VARARGS, NULL},
   {"topk",            (PyCFunction)THPTensor_(topk),            METH_VARARGS, NULL},
 #endif
@@ -2797,8 +2563,8 @@ static PyMethodDef THPTensor_(methods)[] = {
   {"indexCopy",       (PyCFunction)THPTensor_(indexCopy),       METH_VARARGS, NULL},
   {"indexAdd",        (PyCFunction)THPTensor_(indexAdd),        METH_VARARGS, NULL},
   {"indexFill",       (PyCFunction)THPTensor_(indexFill),       METH_VARARGS, NULL},
-#endif
   {"cat",             (PyCFunction)THPTensor_(cat),             METH_VARARGS, NULL},
+#endif
   {"narrow",          (PyCFunction)THPTensor_(narrow),          METH_VARARGS, NULL},
   {"unfold",          (PyCFunction)THPTensor_(unfold),          METH_VARARGS, NULL},
 #if !IS_CUDA || CUDA_FLOAT
@@ -2901,9 +2667,9 @@ static PyMethodDef THPTensorStatelessMethods[] = {
   {"median",          (PyCFunction)THPTensor_stateless_(median),          METH_VARARGS, NULL},
   {"nonzero",         (PyCFunction)THPTensor_stateless_(nonzero),         METH_VARARGS, NULL},
 #endif
-#if !IS_CUDA || CUDA_FLOAT
   {"min",             (PyCFunction)THPTensor_stateless_(min),             METH_VARARGS, NULL},
   {"max",             (PyCFunction)THPTensor_stateless_(max),             METH_VARARGS, NULL},
+#if !IS_CUDA || CUDA_FLOAT
   {"cmax",            (PyCFunction)THPTensor_stateless_(cmax),            METH_VARARGS, NULL},
   {"cmin",            (PyCFunction)THPTensor_stateless_(cmin),            METH_VARARGS, NULL},
   {"dot",             (PyCFunction)THPTensor_stateless_(dot),             METH_VARARGS, NULL},
@@ -2915,13 +2681,15 @@ static PyMethodDef THPTensorStatelessMethods[] = {
   {"sign",            (PyCFunction)THPTensor_stateless_(sign),            METH_VARARGS, NULL},
   {"tril",            (PyCFunction)THPTensor_stateless_(tril),            METH_VARARGS, NULL},
   {"triu",            (PyCFunction)THPTensor_stateless_(triu),            METH_VARARGS, NULL},
+  {"cross",           (PyCFunction)THPTensor_stateless_(cross),           METH_VARARGS, NULL},
+#endif
   {"gt",              (PyCFunction)THPTensor_stateless_(gt),              METH_VARARGS, NULL},
   {"lt",              (PyCFunction)THPTensor_stateless_(lt),              METH_VARARGS, NULL},
   {"ge",              (PyCFunction)THPTensor_stateless_(ge),              METH_VARARGS, NULL},
   {"le",              (PyCFunction)THPTensor_stateless_(le),              METH_VARARGS, NULL},
   {"eq",              (PyCFunction)THPTensor_stateless_(eq),              METH_VARARGS, NULL},
   {"ne",              (PyCFunction)THPTensor_stateless_(ne),              METH_VARARGS, NULL},
-  {"cross",           (PyCFunction)THPTensor_stateless_(cross),           METH_VARARGS, NULL},
+#if !IS_CUDA
   {"sort",            (PyCFunction)THPTensor_stateless_(sort),            METH_VARARGS, NULL},
   {"topk",            (PyCFunction)THPTensor_stateless_(topk),            METH_VARARGS, NULL},
 #endif
@@ -2948,8 +2716,8 @@ static PyMethodDef THPTensorStatelessMethods[] = {
   {"indexCopy",       (PyCFunction)THPTensor_stateless_(indexCopy),       METH_VARARGS, NULL},
   {"indexAdd",        (PyCFunction)THPTensor_stateless_(indexAdd),        METH_VARARGS, NULL},
   {"indexFill",       (PyCFunction)THPTensor_stateless_(indexFill),       METH_VARARGS, NULL},
-#endif
   {"cat",             (PyCFunction)THPTensor_stateless_(cat),             METH_VARARGS, NULL},
+#endif
   {"narrow",          (PyCFunction)THPTensor_stateless_(narrow),          METH_VARARGS, NULL},
   {"unfold",          (PyCFunction)THPTensor_stateless_(unfold),          METH_VARARGS, NULL},
 #if !IS_CUDA || CUDA_FLOAT

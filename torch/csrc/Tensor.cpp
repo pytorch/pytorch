@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <vector>
 #include <stack>
+#include <tuple>
 #include <TH/THMath.h>
 
 #include "THP.h"

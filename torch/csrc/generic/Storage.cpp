@@ -88,7 +88,7 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
       self->cdata = ptr;
     } else if (storage_arg) {
       real *data_ptr = storage_arg->cdata->data + storage_arg_offset;
-      THStoragePtr storage = THStorage_(newWithData)(data_ptr, storage_arg_size);
+      THStoragePtr storage = THStorage_(newWithData)(LIBRARY_STATE data_ptr, storage_arg_size);
       storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_VIEW;
       storage->view = storage_arg->cdata;
       THStorage_(retain)(LIBRARY_STATE storage_arg->cdata);

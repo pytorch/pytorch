@@ -247,21 +247,13 @@ static PyObject * THPTensor_stateless_(${name})(PyObject *_unused, PyObject *arg
                 provided.return_type = 'STATELESS PROV new SelfIndexPair'
                 stateless_options.append(provided.copy())
                 # Reuse option from case 1. to make 2.
-                provided.insert_argument(1, Argument('THPLongTensor*', '_res_ind'))
+                provided.insert_argument(1, Argument('THPIndexTensor*', '_res_ind'))
                 provided.return_type = 'STATELESS PROV2 new SelfIndexPair'
-            if provided.return_type == 'new SelfValuePair':
-                # Case 1.
-                provided.insert_argument(0, Argument('THPTensor*', '_res'))
-                provided.return_type = 'STATELESS PROV new SelfValuePair'
-                stateless_options.append(provided.copy())
-                # Reuse option from case 1. to make 2.
-                provided.insert_argument(1, Argument('THPTensor*', '_res_ind'))
-                provided.return_type = 'STATELESS PROV2 new SelfIndexPair'
-            if provided.return_type == 'new THByteTensor':
+            if provided.return_type == 'new THBoolTensor':
                 # Case 1.
                 stateless_options.append(provided.copy())
-                provided.insert_argument(0, Argument('THPByteTensor*', '_ret'))
-                provided.return_type = 'STATELESS PROV new THPByteTensor'
+                provided.insert_argument(0, Argument('THPBoolTensor*', '_ret'))
+                provided.return_type = 'STATELESS PROV new THPBoolTensor'
             stateless_options.append(provided)
 
         return stateless_options

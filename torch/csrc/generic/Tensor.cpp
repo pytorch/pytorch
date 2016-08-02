@@ -317,9 +317,9 @@ static PyObject * THPTensor_(getValue)(THPTensor *self, PyObject *index)
     THTensor_(maskedSelect)(LIBRARY_STATE t, self->cdata, ((THPByteTensor*)index)->cdata);
     return THPTensor_(newObject)(t);
 #elif defined(THC_REAL_IS_FLOAT)
-  if(THPTensor_(IsSubclass)(index)) {
+  if(THCPByteTensor_IsSubclass(index)) {
     THTensor *t = THTensor_(new)(LIBRARY_STATE_NOARGS);
-    THTensor_(maskedSelect)(LIBRARY_STATE t, self->cdata, ((THPTensor*)index)->cdata);
+    THTensor_(maskedSelect)(LIBRARY_STATE t, self->cdata, ((THCPByteTensor*)index)->cdata);
     return THPTensor_(newObject)(t);
 #else
   if (false) {
@@ -350,8 +350,8 @@ int THPTensor_(setValue)(THPTensor *self, PyObject *index, PyObject *value)
   HANDLE_TH_ERRORS
 #if !defined(THC_GENERIC_FILE) || defined(THC_REAL_IS_FLOAT)
 #ifdef THC_REAL_IS_FLOAT
-  if (THPTensor_(IsSubclass)(index)) {
-    THPTensor *mask = (THPTensor*)index;
+  if (THCPByteTensor_IsSubclass(index)) {
+    THCPByteTensor *mask = (THCPByteTensor*)index;
 #else
   if (THPByteTensor_IsSubclass(index)) {
     THPByteTensor *mask = (THPByteTensor*)index;

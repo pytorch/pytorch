@@ -1,4 +1,5 @@
 #include <exception>
+#include <stdexcept>
 #include <string>
 
 #define HANDLE_TH_ERRORS                                                       \
