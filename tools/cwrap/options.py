@@ -109,7 +109,7 @@ class Option(object):
                 continue
             parsed_type = ARGPARSE_TYPE_CHECK.get(arg.type)
             if parsed_type:
-                s += '&' + parsed_type + ', '
+                s += parsed_type + ', '
             s += '&' + arg.name + ', '
         return s.rstrip()[:-1] # Remove whitespace and trailing comma
 

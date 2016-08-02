@@ -1,0 +1,22 @@
+#ifndef THCP_CUDA_MODULE_INC
+#define THCP_CUDA_MODULE_INC
+
+extern PyObject *THCPDoubleStorageClass;
+extern PyObject *THCPFloatStorageClass;
+extern PyObject *THCPLongStorageClass;
+extern PyObject *THCPIntStorageClass;
+extern PyObject *THCPHalfStorageClass;
+extern PyObject *THCPShortStorageClass;
+extern PyObject *THCPCharStorageClass;
+extern PyObject *THCPByteStorageClass;
+
+extern PyObject *THCPDoubleTensorClass;
+extern PyObject *THCPFloatTensorClass;
+extern PyObject *THCPLongTensorClass;
+extern PyObject *THCPIntTensorClass;
+extern PyObject *THCPHalfTensorClass;
+extern PyObject *THCPShortTensorClass;
+extern PyObject *THCPCharTensorClass;
+extern PyObject *THCPByteTensorClass;
+
+#endif

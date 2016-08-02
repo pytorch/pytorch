@@ -47,14 +47,14 @@ FORMAT_STR_MAP = {
 # type here
 # TODO: change to THP*Class or use a parser function
 ARGPARSE_TYPE_CHECK = {
-    'THPTensor*': 'THPTensorType',
-    'THPLongTensor*': 'THPLongTensorType',
-    'THPByteTensor*': 'THPByteTensorType',
-    'THPFloatTensor*': 'THPFloatTensorType',
-    'THPDoubleTensor*': 'THPDoubleTensorType',
-    'THPLongStorage*': 'THPLongStorageType',
-    'THPStorage*': 'THPStorageType',
-    'THPGenerator*': 'THPGeneratorType',
+    'THPTensor*': 'THPTensorClass',
+    'THPLongTensor*': 'THPLongTensorClass',
+    'THPByteTensor*': 'THPByteTensorClass',
+    'THPFloatTensor*': 'THPFloatTensorClass',
+    'THPDoubleTensor*': 'THPDoubleTensorClass',
+    'THPLongStorage*': 'THPLongStorageClass',
+    'THPStorage*': 'THPStorageClass',
+    'THPGenerator*': '&THPGeneratorType',
     'THPBoolTensor*': 'THPBoolTensorClass',
     'THPIndexTensor*': 'THPIndexTensorClass',
     'real': 'THPUtils_(parseReal)',
