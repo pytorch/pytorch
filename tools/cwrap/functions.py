@@ -202,8 +202,7 @@ static PyObject * THPTensor_stateless_(${name})(PyObject *_unused, PyObject *arg
                 return False
             signatures.add(h)
             return True
-        return self.options
-        return list(filter(uniq_signatures, self.options))
+        self.options = list(filter(uniq_signatures, self.options))
 
 
     def _make_stateless(self):
