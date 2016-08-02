@@ -32,8 +32,7 @@ class _TensorBase(object):
         if t == current:
             return self
         _, _, typename = t.partition('.')
-        assert hasattr(sys.modules['torch'], typename)
-        return getattr(sys.modules['torch'], typename)(self.size()).copy(self)
+        return torch._import_dotted_name(t)(self.size()).copy(self)
 
     def typeAs(self, t):
         return self.type(t.type())

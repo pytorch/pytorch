@@ -39,5 +39,5 @@ class Criterion(object):
         return self.type('torch.DoubleTensor')
 
     def cuda(self):
-        return self.type('torch.CudaTensor')
+        return self.type('torch.cuda.FloatTensor')
 

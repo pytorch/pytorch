@@ -15,7 +15,6 @@ class ClassNLLCriterion(nn.Criterion):
         self.target = torch.zeros(1).long()
 
     def updateOutput(self, input, target):
-        # TODO: verify name
         if target.type() == 'torch.cuda.CudaTensor':
             self.target = target
         else:
@@ -36,8 +35,7 @@ class ClassNLLCriterion(nn.Criterion):
 
 
     def updateGradInput(self, input, target):
-        # TODO: verify name
-        if target.type() == 'torch.CudaTensor':
+        if target.type() == 'torch.cuda.FloatTensor':
             self.target = target
         else:
             self.target = target.long()

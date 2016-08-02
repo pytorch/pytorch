@@ -11,9 +11,9 @@ from torch.legacy import nn
 # passing tensorCache between the calls to type, e.g.
 #
 # > tensorCache = {}
-# > net1:type('torch.CudaTensor', tensorCache)
-# > net2:type('torch.CudaTensor', tensorCache)
-# > nn.utils.recursiveType(anotherTensor, 'torch.CudaTensor', tensorCache)
+# > net1:type('torch.cuda.FloatTensor', tensorCache)
+# > net2:type('torch.cuda.FloatTensor', tensorCache)
+# > nn.utils.recursiveType(anotherTensor, 'torch.cuda.FloatTensor', tensorCache)
 def recursiveType(param, type, tensorCache={}):
     if isinstance(param, list):
         for i, p in enumerate(param):

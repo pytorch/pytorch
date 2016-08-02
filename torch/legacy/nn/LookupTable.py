@@ -137,7 +137,7 @@ class LookupTable(nn.Module):
             return self._type
         super(LookupTable, self).type(type, tensorCache)
 
-        if type == 'torch.CudaTensor':
+        if type == 'torch.cuda.FloatTensor':
             # CUDA uses _sorted and _indices temporary tensors
             self._sorted = self.weight.new()
             self._indices = self.weight.new()

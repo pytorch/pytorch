@@ -20,7 +20,7 @@ class MaskedSelect(nn.Module):
 
     def updateGradInput(self, input, gradOutput):
         input, mask = input
-        if input.type() == 'torch.CudaTensor':
+        if input.type() == 'torch.cuda.FloatTensor':
             self._maskIndexBufferCPU.range(0, mask.nElement()-1).resize(mask.size())
             self._maskIndexBuffer.resize(self._maskIndexBufferCPU.size()).copy(self._maskIndexBufferCPU)
         else:
@@ -42,7 +42,7 @@ class MaskedSelect(nn.Module):
         self.output = self.output.type(type)
 
         # These casts apply when switching between cuda/non-cuda types
-        if type != 'torch.CudaTensor':
+        if type != 'torch.cuda.FloatTensor':
                 self._maskIndexBuffer = self._maskIndexBuffer.long()
                 self._maskIndices = self._maskIndices.long()
                 self._gradMask = self._gradMask.byte()

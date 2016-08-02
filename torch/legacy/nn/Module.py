@@ -111,7 +111,7 @@ class Module(object):
         return self.type('torch.DoubleTensor', *args)
 
     def cuda(self, *args):
-        return self.type('torch.CudaTensor', *args)
+        return self.type('torch.cuda.FloatTensor', *args)
 
     def reset(self):
         pass

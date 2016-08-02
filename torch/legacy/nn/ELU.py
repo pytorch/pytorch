@@ -14,6 +14,7 @@ class ELU(nn.Module):
         self.inplace = inplace
 
     def updateOutput(self, input):
+        print(self._backend)
         self._backend.ELU_updateOutput(
             self._backend.library_state,
             input,

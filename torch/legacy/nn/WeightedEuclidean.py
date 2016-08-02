@@ -86,7 +86,7 @@ class WeightedEuclidean(nn.Module):
 
             self._diagCov.view(self.diagCov, 1, inputSize, outputSize)
             self._expand3.expandAs(self._diagCov, self._repeat)
-            if input.type() == 'torch.CudaTensor':
+            if input.type() == 'torch.cuda.FloatTensor':
                 # TODO: this can be fixed with a custom allocator
                 # requires lots of memory, but minimizes cudaMallocs and loops
                 self._repeat2.resizeAs(self._expand2).copy(self._expand2)
@@ -133,7 +133,7 @@ class WeightedEuclidean(nn.Module):
            self._div.resize(1, outputSize)
            self._expand4.expandAs(self._div, self.weight)
 
-           if torch.type(input) == 'torch.CudaTensor':
+           if torch.type(input) == 'torch.cuda.FloatTensor':
               self._repeat2.resizeAs(self._expand4).copy(self._expand4)
               self._repeat2.cmul(self._repeat)
            else:
@@ -148,7 +148,7 @@ class WeightedEuclidean(nn.Module):
            self._div.resize(batchSize, 1, outputSize)
            self._expand4.expand(self._div, batchSize, inputSize, outputSize)
 
-           if input.type() == 'torch.CudaTensor':
+           if input.type() == 'torch.cuda.FloatTensor':
               self._repeat2.resizeAs(self._expand4).copy(self._expand4)
               self._repeat2.cmul(self._repeat)
               self._repeat2.cmul(self._repeat3)
@@ -184,7 +184,7 @@ class WeightedEuclidean(nn.Module):
            self._repeat.cmul(self._repeat)
            self._repeat.cmul(self.diagCov)
 
-           if torch.type(input) == 'torch.CudaTensor':
+           if torch.type(input) == 'torch.cuda.FloatTensor':
               self._repeat2.resizeAs(self._expand4).copy(self._expand4)
               self._repeat2.cmul(self._repeat)
            else:
@@ -198,7 +198,7 @@ class WeightedEuclidean(nn.Module):
            self._sum.resize(inputSize, outputSize)
            self.gradWeight.add(-scale, self._sum)
 
-           if input.type() == 'torch.CudaTensor':
+           if input.type() == 'torch.cuda.FloatTensor':
               # requires lots of memory, but minimizes cudaMallocs and loops
               self._repeat.cdiv(self._repeat3)
               self._repeat.cmul(self._repeat)

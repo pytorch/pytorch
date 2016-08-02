@@ -66,7 +66,7 @@ class VolumetricConvolution(nn.Module):
     def updateOutput(self, input):
         self.finput = self.finput or input.new()
         self.fgradInput = self.fgradInput or input.new()
-        if input.type() == 'torch.CudaTensor':
+        if input.type() == 'torch.cuda.FloatTensor':
             self._backend.VolumetricConvolution_updateOutput(
                 self._backend.library_state,
                 input,
@@ -99,7 +99,7 @@ class VolumetricConvolution(nn.Module):
     def updateGradInput(self, input, gradOutput):
         if not self.gradInput:
             return
-        if input.type() == 'torch.CudaTensor':
+        if input.type() == 'torch.cuda.FloatTensor':
             self._backend.VolumetricConvolution_updateGradInput(
                 self._backend.library_state,
                 input,
@@ -130,7 +130,7 @@ class VolumetricConvolution(nn.Module):
         return self.gradInput
 
     def accGradParameters(self, input, gradOutput, scale=1):
-        if input.type() == 'torch.CudaTensor':
+        if input.type() == 'torch.cuda.FloatTensor':
             self._backend.VolumetricConvolution_accGradParameters(
                 self._backend.library_state,
                 input,

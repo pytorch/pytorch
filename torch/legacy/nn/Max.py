@@ -19,7 +19,7 @@ class Max(nn.Module):
     def _lazyInit(self):
         self._output = self._output or self.output.new()
         self._indices = self._indices or \
-           (torch.CudaTensor() if str(type(self.output)) == 'torch.CudaTensor' else torch.LongTensor())
+           (torch.cuda.FloatTensor() if str(type(self.output)) == 'torch.cuda.FloatTensor' else torch.LongTensor())
 
     def updateOutput(self, input):
         self._lazyInit()
@@ -45,7 +45,7 @@ class Max(nn.Module):
 
     def type(self, type, tensorCache):
         # torch.max expects a LongTensor as indices, whereas cutorch.max expects a CudaTensor.
-        if type == 'torch.CudaTensor':
+        if type == 'torch.cuda.FloatTensor':
             super(Max, self).type(type, tensorCache)
         else:
             # self._indices must be a LongTensor. Setting it to nil temporarily avoids

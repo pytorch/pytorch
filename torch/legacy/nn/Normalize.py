@@ -32,7 +32,7 @@ class Normalize(nn.Module):
         # specialization for the infinity norm
         if self.p == float('inf'):
             if not self._indices:
-                self._indices = torch.CudaTensor() if torch.typename(self.output) == 'torch.CudaTensor' \
+                self._indices = torch.cuda.FloatTensor() if torch.typename(self.output) == 'torch.cuda.FloatTensor' \
                     else torch.LongTensor()
 
             self.buffer.abs(input)
@@ -125,7 +125,7 @@ class Normalize(nn.Module):
         if not type:
             return self._type
         # torch.max expects a LongTensor as indices, whereas cutorch.max expects a CudaTensor.
-        if type == 'torch.CudaTensor':
+        if type == 'torch.cuda.FloatTensor':
             super(Normalize, self).type(type, tensorCache)
         else:
             # self._indices must be a LongTensor. Setting it to nil temporarily avoids

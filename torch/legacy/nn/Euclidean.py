@@ -66,7 +66,7 @@ class Euclidean(nn.Module):
         self._weight.view(self.weight, 1, inputSize, outputSize)
         self._expand2.expandAs(self._weight, self._repeat)
 
-        if torch.typename(input) == 'torch.CudaTensor':
+        if torch.typename(input) == 'torch.cuda.FloatTensor':
             # TODO: after adding new allocators this can be changed
             # requires lots of memory, but minimizes cudaMallocs and loops
             self._repeat2.resizeAs(self._expand2).copy(self._expand2)
@@ -95,9 +95,9 @@ class Euclidean(nn.Module):
 
         """
         dy_j   -2 * (w_j - x)     x - w_j
-        ## = #######-  = ###-
+        ---- = ---------------- = -------
          dx    2 || w_j - x ||      y_j
-        #"""
+        """
 
         # to prevent div by zero (NaN) bugs
         self._output.resizeAs(self.output).copy(self.output).add(0.0000001)
@@ -109,7 +109,7 @@ class Euclidean(nn.Module):
         self._div.resize(batchSize, 1, outputSize)
         self._expand3.expand(self._div, batchSize, inputSize, outputSize)
 
-        if torch.typename(input) == 'torch.CudaTensor':
+        if torch.typename(input) == 'torch.cuda.FloatTensor':
             self._repeat2.resizeAs(self._expand3).copy(self._expand3)
             self._repeat2.cmul(self._repeat)
         else:
@@ -126,10 +126,10 @@ class Euclidean(nn.Module):
         inputSize, outputSize = self.weight.size(0), self.weight.size(1)
 
         """
-        dy_j    2 * (w_j - x)     w_j - x
-        ## = #######-  = ###-
-        dw_j   2 || w_j - x ||      y_j
-        #"""
+        dy_j    2 * (w_j - x)    w_j - x
+        ---- = --------------- = -------
+        dw_j   2 || w_j - x ||     y_j
+        """
         # assumes a preceding call to updateGradInput
         assert input.dim() == 2
         self._sum = self._sum or input.new()

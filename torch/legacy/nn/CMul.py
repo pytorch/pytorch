@@ -54,8 +54,7 @@ class CMul(nn.Module):
         self._weight.view(self.weight, 1, -1)
         self._expand.expandAs(self._weight, self._output)
 
-        # TODO: verify name
-        if torch.typename(input) == 'torch.CudaTensor':
+        if torch.typename(input) == 'torch.cuda.FloatTensor':
             self._repeat.resizeAs(self._expand).copy(self._expand)
             self._output.cmul(self._repeat)
         else:
@@ -79,7 +78,7 @@ class CMul(nn.Module):
         self._weight.view(self.weight, 1, -1)
         self._expand.expandAs(self._weight, self._gradOutput)
 
-        if torch.typename(input) == 'torch.CudaTensor':
+        if torch.typename(input) == 'torch.cuda.FloatTensor':
             self._repeat.resizeAs(self._expand).copy(self._expand)
             self._gradInput.addcmul(1, self._repeat, self._gradOutput)
         else:

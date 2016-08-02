@@ -49,8 +49,7 @@ torch_headers = th_path + "include"
 th_header_path = th_path + "include/TH"
 th_lib_path = th_path + "lib"
 extra_link_args.append('-L' + th_lib_path)
-if platform.system() == 'Darwin':
-    extra_link_args.append('-Wl,-rpath,' + th_lib_path)
+extra_link_args.append('-Wl,-rpath,' + th_lib_path)
 
 libraries = ['TH']
 extra_compile_args = ['-std=c++11']
@@ -73,15 +72,15 @@ if WITH_CUDA:
     ]
 
 C = Extension("torch._C",
-             libraries=libraries,
-             sources=sources,
-             language='c++',
-             extra_compile_args=extra_compile_args + (['-O0', '-g'] if DEBUG else []),
-             include_dirs=([".", "torch/csrc", "cutorch/csrc", torch_headers, th_header_path, "/Developer/NVIDIA/CUDA-7.5/include"]),
-             extra_link_args = extra_link_args + (['-O0', '-g'] if DEBUG else []),
+    libraries=libraries,
+    sources=sources,
+    language='c++',
+    extra_compile_args=extra_compile_args + (['-O0', '-g'] if DEBUG else []),
+    include_dirs=([".", "torch/csrc", "cutorch/csrc", torch_headers, th_header_path, "/Developer/NVIDIA/CUDA-7.5/include", "/usr/local/cuda/include"]),
+    extra_link_args = extra_link_args + (['-O0', '-g'] if DEBUG else []),
 )
 
 setup(name="torch", version="0.1",
-      ext_modules=[C],
-      packages=['torch', 'torch.cuda', 'torch.legacy', 'torch.legacy.nn', 'torch.legacy.optim'],
+    ext_modules=[C],
+    packages=['torch', 'torch.legacy', 'torch.legacy.nn', 'torch.legacy.optim'] + (['torch.cuda', 'torch.legacy.cunn'] if WITH_CUDA else []),
 )

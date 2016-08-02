@@ -18,7 +18,7 @@ class SpatialCrossMapLRN(nn.Module):
         assert input.dim() == 4
 
         self.scale = self.scale or input.new()
-        if input.type() == 'torch.CudaTensor':
+        if input.type() == 'torch.cuda.FloatTensor':
             self._backend.SpatialCrossMapLRN_updateOutput(
                 self._backend.library_state,
                 input,
@@ -75,7 +75,7 @@ class SpatialCrossMapLRN(nn.Module):
     def updateGradInput(self, input, gradOutput):
         assert input.dim() == 4
 
-        if input.type() == 'torch.CudaTensor':
+        if input.type() == 'torch.cuda.FloatTensor':
             self._backend.SpatialCrossMapLRN_updateGradInput(
                 self._backend.library_state,
                 input,
