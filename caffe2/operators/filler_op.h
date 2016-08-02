@@ -23,39 +23,31 @@ class FillerOp : public Operator<Context> {
  public:
   FillerOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        shape_(ToVectorTIndex(
-            OperatorBase::GetRepeatedArgument<int>("shape"))),
+        shape_(ToVectorTIndex(OperatorBase::GetRepeatedArgument<int>("shape"))),
         extra_shape_(ToVectorTIndex(
-            OperatorBase::GetRepeatedArgument<int>("extra_shape"))),
-        run_once_(OperatorBase::GetSingleArgument<int>("run_once", true)),
-        already_run_(false) {}
+            OperatorBase::GetRepeatedArgument<int>("extra_shape"))) {}
   virtual ~FillerOp() {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override {
-    if (run_once_ && already_run_) {
-      return true;
-    } else {
-      already_run_ = true;
-      auto* output = Operator<Context>::Output(0);
-      if (InputSize()) {
-        if (shape_.size() != 0) {
-          LOG(ERROR) << "Cannot set the shape argument and pass in an input at "
-                        "the same time.";
-          return false;
-        }
-        auto shape = Input(0).dims();
-        shape.insert(shape.end(), extra_shape_.begin(), extra_shape_.end());
-        output->Resize(shape);
-      } else {
-        if (!extra_shape_.empty()) {
-          LOG(ERROR) << "Cannot set both shape and extra_shape";
-          return false;
-        }
-        output->Resize(shape_);
+    auto* output = Operator<Context>::Output(0);
+    if (InputSize()) {
+      if (shape_.size() != 0) {
+        LOG(ERROR) << "Cannot set the shape argument and pass in an input at "
+                      "the same time.";
+        return false;
       }
-      return Fill(output);
+      auto shape = Input(0).dims();
+      shape.insert(shape.end(), extra_shape_.begin(), extra_shape_.end());
+      output->Resize(shape);
+    } else {
+      if (!extra_shape_.empty()) {
+        LOG(ERROR) << "Cannot set both shape and extra_shape";
+        return false;
+      }
+      output->Resize(shape_);
     }
+    return Fill(output);
   }
 
   virtual bool Fill(Tensor<Context>* output) = 0;
@@ -63,8 +55,6 @@ class FillerOp : public Operator<Context> {
  protected:
   vector<TIndex> shape_;
   vector<TIndex> extra_shape_;
-  bool run_once_;
-  bool already_run_;
 };
 
 template <typename T, class Context>

@@ -28,22 +28,27 @@ class ConvPoolOpBase : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   ConvPoolOpBase(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        legacy_pad_(static_cast<LegacyPadding>(
-            OperatorBase::GetSingleArgument<int>(
-                "legacy_pad", LegacyPadding::NOTSET))),
         pad_(OperatorBase::GetSingleArgument<int>("pad", 0)),
         pad_t_(OperatorBase::GetSingleArgument<int>("pad_t", pad_)),
         pad_l_(OperatorBase::GetSingleArgument<int>("pad_l", pad_)),
         pad_b_(OperatorBase::GetSingleArgument<int>("pad_b", pad_)),
         pad_r_(OperatorBase::GetSingleArgument<int>("pad_r", pad_)),
+        legacy_pad_(
+            static_cast<LegacyPadding>(OperatorBase::GetSingleArgument<int>(
+                "legacy_pad",
+                LegacyPadding::NOTSET))),
         kernel_h_(OperatorBase::GetSingleArgument<int>(
-            "kernel_h", OperatorBase::GetSingleArgument<int>("kernel", 0))),
+            "kernel_h",
+            OperatorBase::GetSingleArgument<int>("kernel", 0))),
         kernel_w_(OperatorBase::GetSingleArgument<int>(
-            "kernel_w", OperatorBase::GetSingleArgument<int>("kernel", 0))),
+            "kernel_w",
+            OperatorBase::GetSingleArgument<int>("kernel", 0))),
         stride_h_(OperatorBase::GetSingleArgument<int>(
-            "stride_h", OperatorBase::GetSingleArgument<int>("stride", 1))),
+            "stride_h",
+            OperatorBase::GetSingleArgument<int>("stride", 1))),
         stride_w_(OperatorBase::GetSingleArgument<int>(
-            "stride_w", OperatorBase::GetSingleArgument<int>("stride", 1))),
+            "stride_w",
+            OperatorBase::GetSingleArgument<int>("stride", 1))),
         order_(StringToStorageOrder(
             OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
     CHECK_GT(kernel_h_, 0);
@@ -170,12 +175,12 @@ class ConvPoolOpBase : public Operator<Context> {
   int pad_l_;
   int pad_b_;
   int pad_r_;
+  LegacyPadding legacy_pad_;
   int kernel_h_;
   int kernel_w_;
   int stride_h_;
   int stride_w_;
   StorageOrder order_;
-  LegacyPadding legacy_pad_;
 
   inline void ComputeSizeAndPad(
       const int in_size, const int stride, const int kernel,
@@ -217,30 +222,30 @@ class ConvPoolOpBase : public Operator<Context> {
         // Here, notice that caffe casts UP while caffe2 casts DOWN for the
         // output size computation.
         *out_size = std::ceil(
-            static_cast<float>(in_size + *pad_head * 2 - kernel) / stride
-            + 1);
+            static_cast<float>(in_size + *pad_head * 2 - kernel) / stride + 1);
         // If we have padding, caffe also ensures that the last pooling starts
         // strictly inside the image (instead of at the padding); otherwise clip
         // the last.
         if (*pad_head > 0 && (*out_size - 1) * stride >= in_size + *pad_head) {
           --*out_size;
         }
-        // Now, compare the output size with the standard Caffe2 output size. The
-        // caffe2 standard output size should always be no larger than the output
+        // Now, compare the output size with the standard Caffe2 output size.
+        // The
+        // caffe2 standard output size should always be no larger than the
+        // output
         // size of caffe.
         int standard_out_size = static_cast<int>(
-            static_cast<float>(in_size + *pad_head * 2 - kernel) / stride
-            + 1);
+            static_cast<float>(in_size + *pad_head * 2 - kernel) / stride + 1);
         CHECK_GE(*out_size, standard_out_size)
             << "This should never happen. If this happens, double check the logic "
             << "above.";
         if (*out_size > standard_out_size) {
-          LOG(WARNING) <<
-              "You are hitting a case where Caffe's legacy padding calculation "
-              "is hit. This leads to inefficient and sometimes incorrect "
-              "results. We are keeping this behavior for backward compatibility"
-              ", but you are strongly recommended to move away from it. The "
-              "operator that generates this warning is: "
+          LOG(WARNING)
+              << "You are hitting a case where Caffe's legacy padding calculation "
+                 "is hit. This leads to inefficient and sometimes incorrect "
+                 "results. We are keeping this behavior for backward compatibility"
+                 ", but you are strongly recommended to move away from it. The "
+                 "operator that generates this warning is: "
               << ProtoDebugString(def());
         }
         *pad_tail = *pad_head + stride * (*out_size - standard_out_size);

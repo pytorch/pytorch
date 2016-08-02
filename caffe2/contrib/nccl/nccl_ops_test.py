@@ -10,10 +10,12 @@ import numpy as np
 import time
 import os
 from caffe2.proto import caffe2_pb2
-from caffe2.python import core, workspace, muji
+from caffe2.python import core, workspace, muji, dyndep
 import caffe2.python.hypothesis_test_util as hu
 
 np.random.seed(1)
+
+dyndep.InitOpsLibrary('@/caffe2/caffe2/contrib/nccl:nccl_ops')
 
 
 def gpu_device(i):
@@ -54,9 +56,12 @@ class NCCLOpsTest(hu.HypothesisTestCase):
             output = np.sum(args, axis=0)
             return [output for _ in range(n)]
 
-        self.assertReferenceChecks(
+        outputs = self.assertReferenceChecks(
             hu.gpu_do, op, [xs[i] for i, _ in enumerate(inputs)],
             allreduce, input_device_options)
+        for output in outputs:
+            np.testing.assert_array_equal(outputs[0], output)
+            self.assertEqual(outputs[0].tobytes(), output.tobytes())
 
     @given(n=st.integers(min_value=2, max_value=workspace.NumCudaDevices()),
            m=st.integers(min_value=1, max_value=1000),
@@ -112,9 +117,12 @@ class NCCLOpsTest(hu.HypothesisTestCase):
             assert len(args) == n
             return [np.stack(args, axis=0) for _ in range(n)]
 
-        self.assertReferenceChecks(
+        outputs = self.assertReferenceChecks(
             hu.gpu_do, op, [xs[i] for i, _ in enumerate(inputs)],
             allgather, input_device_options)
+        for output in outputs:
+            np.testing.assert_array_equal(outputs[0], output)
+            self.assertEqual(outputs[0].tobytes(), output.tobytes())
 
     @given(n=st.integers(min_value=2, max_value=workspace.NumCudaDevices()),
            m=st.integers(min_value=100000, max_value=100000),

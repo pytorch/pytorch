@@ -1,10 +1,12 @@
-#include <mutex>
 #include <atomic>
+#include <limits>
+#include <mutex>
+#include <sstream>
 #include <unordered_map>
 #include <vector>
+#include "caffe2/core/blob_serialization.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/tensor.h"
-#include <limits>
 
 namespace caffe2 {
 namespace {
@@ -18,9 +20,21 @@ struct IndexBase {
     : maxElements_{maxElements}
     , meta_(type)
     , frozen_{false} {}
+
   void Freeze() { frozen_ = true; }
+
+  bool isFrozen() const {
+    return frozen_;
+  }
+
+  int64_t maxElements() const {
+    return maxElements_;
+  }
+
   virtual ~IndexBase() {}
+
   const TypeMeta& Type() const { return meta_; }
+
   TIndexValue Size() {
     std::lock_guard<std::mutex> guard(dictMutex_);
     return nextId_;
@@ -102,14 +116,15 @@ struct Index: IndexBase {
   std::unordered_map<T, TIndexValue> dict_;
 };
 
+// TODO(azzolini): support sizes larger than int32
 template<class T>
 class IndexCreateOp: public Operator<CPUContext> {
  public:
   IndexCreateOp(const OperatorDef& operator_def, Workspace* ws)
-   : Operator(operator_def, ws)
-   // TODO(azzolini): figure out how to get to sizes larger than int32
-   , maxElements_(OperatorBase::GetSingleArgument<int>(
-      "max_elements", std::numeric_limits<int>::max())) {}
+      : Operator(operator_def, ws),
+        maxElements_(OperatorBase::GetSingleArgument<int>(
+            "max_elements",
+            std::numeric_limits<int>::max())) {}
 
   bool RunOnDevice() override {
     *OperatorBase::Output<std::unique_ptr<IndexBase>>(0) =
@@ -321,4 +336,106 @@ SHOULD_NOT_DO_GRADIENT(IndexFreeze);
 SHOULD_NOT_DO_GRADIENT(IndexLoad);
 SHOULD_NOT_DO_GRADIENT(IndexStore);
 SHOULD_NOT_DO_GRADIENT(IndexSize);
+
+class IndexSerializer : public BlobSerializerBase {
+ public:
+  IndexSerializer() {}
+  ~IndexSerializer() {}
+
+  void Serialize(
+      const Blob& blob,
+      const string& name,
+      SerializationAcceptor acceptor) override {
+    auto& base = blob.template Get<std::unique_ptr<IndexBase>>();
+    Blob tensor_blob;
+    auto* tensor_out = tensor_blob.template GetMutable<Tensor<CPUContext>>();
+
+    if (base->Type().Match<std::string>()) {
+      doStore<std::string>(base, tensor_out);
+    } else if (base->Type().Match<int32_t>()) {
+      doStore<int32_t>(base, tensor_out);
+    } else if (base->Type().Match<int64_t>()) {
+      doStore<int64_t>(base, tensor_out);
+    } else {
+      CAFFE_THROW("Index of this type can't be serialized.");
+    }
+
+    CAFFE_ENFORCE(
+        tensor_out->size() <= std::numeric_limits<int32_t>::max(),
+        "Index too large to be serialized.");
+    BlobProto blob_proto;
+    TensorSerializer<CPUContext> ser;
+    ser.Serialize(
+        *tensor_out, name, blob_proto.mutable_tensor(), 0, tensor_out->size());
+    blob_proto.set_name(name);
+    blob_proto.set_type("std::unique_ptr<caffe2::IndexBase>");
+
+    std::ostringstream os;
+    os << base->maxElements() << " " << base->isFrozen();
+    blob_proto.set_content(os.str());
+
+    acceptor(name, blob_proto.SerializeAsString());
+  }
+
+ private:
+  template <typename T>
+  void doStore(
+      const std::unique_ptr<IndexBase>& base,
+      Tensor<CPUContext>* tensor_out) {
+    auto* dict = dynamic_cast_if_rtti<Index<T>*>(base.get());
+    CAFFE_ENFORCE(dict, "Wrong dictionary type.");
+    dict->Store(tensor_out);
+  }
+};
+
+class IndexDeserializer : public BlobDeserializerBase {
+ public:
+  bool Deserialize(const BlobProto& proto, Blob* blob) override {
+    TensorDeserializer<CPUContext> deser;
+    Blob tensor_blob;
+    deser.Deserialize(proto, &tensor_blob);
+
+    std::istringstream is(proto.content());
+    int64_t maxElements{std::numeric_limits<int64_t>::max()};
+    bool isFrozen{false};
+    is >> maxElements >> isFrozen;
+
+    auto& tensor_in = tensor_blob.template Get<Tensor<CPUContext>>();
+    auto* base = blob->template GetMutable<std::unique_ptr<IndexBase>>();
+
+    if (tensor_in.IsType<std::string>()) {
+      doLoad<std::string>(base, maxElements, tensor_in);
+    } else if (tensor_in.IsType<int32_t>()) {
+      doLoad<int32_t>(base, maxElements, tensor_in);
+    } else if (tensor_in.IsType<int64_t>()) {
+      doLoad<int64_t>(base, maxElements, tensor_in);
+    } else {
+      CAFFE_THROW("Index of this type cannot be deserialized.");
+    }
+
+    if (isFrozen) {
+      (*base)->Freeze();
+    }
+    return true;
+  }
+
+ private:
+  template <typename T>
+  void doLoad(
+      std::unique_ptr<IndexBase>* base,
+      int64_t maxElements,
+      const Tensor<CPUContext>& tensor_in) {
+    base->reset(new Index<T>(maxElements));
+    auto* dict = dynamic_cast_if_rtti<Index<T>*>(base->get());
+    dict->Load(tensor_in.data<T>(), tensor_in.size());
+  }
+};
+
+REGISTER_BLOB_SERIALIZER(
+    (TypeMeta::Id<std::unique_ptr<caffe2::IndexBase>>()),
+    IndexSerializer);
+REGISTER_BLOB_DESERIALIZER(
+    std::unique_ptr<caffe2::IndexBase>,
+    IndexDeserializer);
+
 }  // namespace caffe2

@@ -99,10 +99,10 @@ class TestDatasetOps(TestCase):
             [11, 21, 22, 31, 32, 33],  # key
             [1.1, 2.1, 2.2, 3.1, 3.2, 3.3],  # value
             # int lists
-            [2, 0, 2],  # len
-            [11, 12, 31, 32],  # key
-            [2, 4, 3, 1],  # value:len
-            [111, 112, 121, 122, 123, 124, 311, 312, 313, 321],  # value:value
+            [2, 0, 1],  # len
+            [11, 12, 31],  # key
+            [2, 4, 3],  # value:len
+            [111, 112, 121, 122, 123, 124, 311, 312, 313],  # value:value
             # id score pairs
             [1, 2, 2],  # len
             [11, 21, 22, 31, 32],  # key
@@ -155,7 +155,7 @@ class TestDatasetOps(TestCase):
             (
                 [[3.1, 3.2, 3.3]],  # dense
                 [3], [31, 32, 33], [3.1, 3.2, 3.3],  # floats
-                [2], [31, 32], [3, 1], [311, 312, 313, 321],  # int lst
+                [1], [31], [3], [311, 312, 313],  # int lst
                 [2], [31, 32], [2, 3], [311, 312, 321, 322, 323],
                 [31.1, 31.2, 32.1, 32.2, 32.3],  # id score list
                 [456], [[0.7, 0.3]], ['posts about ca'],  # metadata
@@ -275,6 +275,40 @@ class TestDatasetOps(TestCase):
 
         for i in range(len(entries)):
             k = idx[i] if i in idx else i
+            entry = entries[k]
+            workspace.RunNet(read_next_net_name)
+            for name, blob, base in zip(ds.field_names(), batch_blobs, entry):
+                data = workspace.FetchBlob(str(blob))
+                _assert_arrays_equal(
+                    data, base,
+                    err_msg='Mismatch in entry %d, field %s' % (i, name))
+
+        """
+        8. Sort and shuffle a dataset
+
+        This sort the dataset using the score of a certain column,
+        and then shuffle within each chunk of size batch_size * shuffle_size
+        before shuffling the chunks.
+
+        """
+        read_init_net = core.Net('read_init')
+        read_next_net = core.Net('read_next')
+
+        reader = ds.random_reader(read_init_net)
+        reader.sortAndShuffle(read_init_net, 'int_lists:lengths', 1, 2)
+        reader.computeoffset(read_init_net)
+
+        should_continue, batch_blobs = reader.read(read_next_net)
+
+        workspace.CreateNet(read_init_net)
+        workspace.RunNetOnce(read_init_net)
+
+        workspace.CreateNet(read_next_net)
+        read_next_net_name = str(read_next_net)
+
+        expected_idx = np.array([2, 1, 0])
+        for i in range(len(entries)):
+            k = expected_idx[i] if i in expected_idx else i
             entry = entries[k]
             workspace.RunNet(read_next_net_name)
             for name, blob, base in zip(ds.field_names(), batch_blobs, entry):

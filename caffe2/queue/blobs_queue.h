@@ -25,7 +25,8 @@ class BlobsQueue : public std::enable_shared_from_this<BlobsQueue> {
       const std::string& queueName,
       size_t capacity,
       size_t numBlobs,
-      bool enforceUniqueName) {
+      bool enforceUniqueName)
+      : numBlobs_(numBlobs) {
     queue_.reserve(capacity);
     for (auto i = 0; i < capacity; ++i) {
       std::vector<Blob*> blobs;
@@ -34,8 +35,10 @@ class BlobsQueue : public std::enable_shared_from_this<BlobsQueue> {
         const auto blobName =
             queueName + "_" + to_string(i) + "_" + to_string(j);
         if (enforceUniqueName) {
-          CHECK(!ws->GetBlob(blobName))
-              << "Queue internal blob already exists: " << blobName;
+          CAFFE_ENFORCE(
+              !ws->GetBlob(blobName),
+              "Queue internal blob already exists: ",
+              blobName);
         }
         blobs.push_back(ws->CreateBlob(blobName));
       }
@@ -61,8 +64,8 @@ class BlobsQueue : public std::enable_shared_from_this<BlobsQueue> {
     }
     DCHECK(canRead());
     auto& result = queue_[reader_ % queue_.size()];
-    CHECK_EQ(inputs.size(), result.size());
-    for (auto i = 0; i < inputs.size(); ++i) {
+    CAFFE_ENFORCE(inputs.size() >= result.size());
+    for (auto i = 0; i < result.size(); ++i) {
       using std::swap;
       swap(*(inputs[i]), *(result[i]));
     }
@@ -87,8 +90,8 @@ class BlobsQueue : public std::enable_shared_from_this<BlobsQueue> {
     }
     DCHECK(canWrite());
     auto& result = queue_[writer_ % queue_.size()];
-    CHECK_EQ(inputs.size(), result.size());
-    for (auto i = 0; i < inputs.size(); ++i) {
+    CAFFE_ENFORCE(inputs.size() >= result.size());
+    for (auto i = 0; i < result.size(); ++i) {
       using std::swap;
       swap(*(inputs[i]), *(result[i]));
     }
@@ -104,14 +107,18 @@ class BlobsQueue : public std::enable_shared_from_this<BlobsQueue> {
     cv_.notify_all();
   }
 
+  size_t getNumBlobs() const {
+    return numBlobs_;
+  }
+
  private:
   std::atomic<bool> closing_{false};
 
+  size_t numBlobs_;
   std::mutex mutex_; // protects all variables in the class.
   std::condition_variable cv_;
   int64_t reader_{0};
   int64_t writer_{0};
   std::vector<std::vector<Blob*>> queue_;
-
 };
 }
