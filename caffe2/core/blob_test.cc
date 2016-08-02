@@ -331,13 +331,13 @@ TYPED_TEST(TensorCPUTest, KeepOnShrink) {
 TYPED_TEST(TensorCPUDeathTest, CannotAccessRawDataWhenEmpty) {
   TensorCPU tensor;
   EXPECT_EQ(tensor.ndim(), 0);
-  ASSERT_DEATH(tensor.raw_data(), "");
+  ASSERT_ANY_THROW(tensor.raw_data());
 }
 
 TYPED_TEST(TensorCPUDeathTest, CannotAccessDataWhenEmpty) {
   TensorCPU tensor;
   EXPECT_EQ(tensor.ndim(), 0);
-  ASSERT_DEATH(tensor.data<TypeParam>(), "");
+  ASSERT_ANY_THROW(tensor.data<TypeParam>());
 }
 
 TEST(TensorTest, TensorNonFundamentalType) {

@@ -99,19 +99,23 @@ class LoadOp final : public Operator<Context> {
         }
         CHECK(blob->Deserialize(proto));
 
-        if (proto.has_tensor()) {
+        if (!blob->IsType<Tensor<Context>>()) {
+          // Deal with non-tensors: we don't support chunking so we're done.
+          loaded.insert(key);
+        } else {
+          // Deal with tensors: done whtn read total tensor size
+          CAFFE_ENFORCE(proto.has_tensor());
+          auto tensorSize = blob->Get<Tensor<Context>>().size();
           if (proto.tensor().has_segment()) {
             blobSize.first->second += proto.tensor().segment().end() -
                 proto.tensor().segment().begin();
           } else {
             CHECK(blobSize.first->second == 0);
-            blobSize.first->second = blob->Get<Tensor<Context>>().size();
+            blobSize.first->second = tensorSize;
           }
-        }
-
-        if (!proto.has_tensor() ||
-            blobSize.first->second >= blob->Get<Tensor<Context>>().size()) {
-          loaded.insert(key);
+          if (blobSize.first->second >= tensorSize) {
+            loaded.insert(key);
+          }
         }
 
         if (loaded.size() >= OutputSize()) {

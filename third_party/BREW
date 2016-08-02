@@ -131,8 +131,13 @@ cc_thirdparty_target(
 )
 
 cc_thirdparty_target(
+  name = "libbz2",
+  cc_obj_files = [ "-lbz2" ],
+)
+
+cc_thirdparty_target(
   name = "rocksdb",
-  deps = [":libz"],
+  deps = [":libz", ":libbz2", ":snappy"],
   cc_obj_files = [ "-lrocksdb" ],
 )
 

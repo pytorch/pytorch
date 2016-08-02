@@ -117,7 +117,7 @@ TYPED_TEST(TensorGPUDeathTest, CannotAccessDataWhenEmpty) {
   ::testing::FLAGS_gtest_death_test_style = "threadsafe";
   TensorCUDA tensor;
   EXPECT_EQ(tensor.ndim(), 0);
-  ASSERT_DEATH(tensor.data<TypeParam>(), "");
+  EXPECT_THROW(tensor.data<TypeParam>(), EnforceNotMet);
 }
 
 #define TEST_SERIALIZATION_GPU_WITH_TYPE(TypeParam, field_name)            \

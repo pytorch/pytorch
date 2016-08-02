@@ -18,7 +18,7 @@ REGISTER_CPU_OPERATOR(Copy, CopyOp<CPUContext, CPUContext, CPUContext>);
 REGISTER_CPU_OPERATOR(Shape, ShapeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(HasElements, HasElementsOp<CPUContext>);
 REGISTER_CPU_OPERATOR(IsEmpty, IsEmptyOp<CPUContext>);
-REGISTER_CPU_OPERATOR(Gather, GatherOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(Gather, GatherOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Unique, UniqueOp<CPUContext>);
 REGISTER_CPU_OPERATOR(LengthsToSegmentIds, LengthsToSegmentIdsOp<CPUContext>);
 REGISTER_CPU_OPERATOR(SegmentIdsToLengths, SegmentIdsToLengthsOp<CPUContext>);
@@ -443,7 +443,7 @@ class GetGatherGradient : public GradientMakerBase {
     // need to revisit it in the future for correctness purposes. The right
     // shape for the output woild be to flatten INDICES and collapse first X
     // dims of GRAD
-    using Op = GatherOp<float, CPUContext>;
+    using Op = GatherOp<CPUContext>;
     SetSparse(Op::DATA, I(Op::INDICES), GO(0));
     return vector<OperatorDef>();
   }

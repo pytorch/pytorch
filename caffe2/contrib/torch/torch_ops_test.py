@@ -3,7 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import core, workspace, fbdep
+from caffe2.python import core, workspace, dyndep
 import caffe2.python.hypothesis_test_util as hu
 
 from hypothesis import given
@@ -13,7 +13,7 @@ import os
 from libfb import parutil
 core.GlobalInit(["python", "--caffe2_log_level=0"])
 
-fbdep.InitOpsLibrary('@/caffe2/caffe2/contrib/torch:torch_ops')
+dyndep.InitOpsLibrary('@/caffe2/caffe2/contrib/torch:torch_ops')
 
 RUNTIME = parutil.get_runtime_path()
 if 'LUA_PATH' not in os.environ:

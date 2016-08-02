@@ -16,6 +16,8 @@ CAFFE2_DECLARE_int(caffe2_tensor_chunk_size);
 
 namespace caffe2 {
 
+constexpr auto kTensorBlobType = "Tensor";
+
 // The Blob serialization registry and serializer creator functions.
 CAFFE_DECLARE_TYPED_REGISTRY(
     BlobSerializerRegistry,
@@ -185,7 +187,7 @@ void TensorSerializer<Context>::Serialize(
     auto task = [&](size_t chunkBegin) {
       BlobProto blob_proto;
       blob_proto.set_name(name);
-      blob_proto.set_type("Tensor");
+      blob_proto.set_type(kTensorBlobType);
       TensorProto& proto = *blob_proto.mutable_tensor();
       proto.set_name(name);
       this->Serialize(

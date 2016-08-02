@@ -114,7 +114,7 @@ bool Blob::Deserialize(const string& content) {
 }
 
 bool Blob::Deserialize(const BlobProto& blob_proto) {
-  if (blob_proto.has_tensor()) {
+  if (blob_proto.type() == kTensorBlobType) {
     // This is a tensor object. Depending on the device type, we will
     // use the corresponding TensorDeserializer.
     auto deserializer = CreateDeserializer(tensorDeviceTypeName(
