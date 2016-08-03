@@ -137,7 +137,8 @@ void THNN_(VolumetricFullConvolution_updateOutput)(
 
   // Resize temporary columns
   THTensor_(resize2d)(columns, nOutputPlane*kW*kH*kT, inputDepth*inputHeight*inputWidth);
-
+  THTensor_(zero)(columns);
+  
   // Define a buffer of ones, for bias accumulation
   // Note: this buffer can be shared with other modules, it only ever gets increased,
   // and always contains ones.
@@ -268,7 +269,8 @@ void THNN_(VolumetricFullConvolution_updateGradInput)(
 
   // Resize output
   THTensor_(resize5d)(gradInput, batchSize, nInputPlane, inputDepth, inputHeight, inputWidth);
-
+  THTensor_(zero)(gradInput);
+  
   // Resize temporary columns
   THTensor_(resize2d)(gradColumns, nOutputPlane*kW*kH*kT, inputDepth*inputHeight*inputWidth);
 
