@@ -98,6 +98,7 @@ void THNN_(SpatialFullConvolution_updateOutput)(
 
   // Resize temporary columns
   THTensor_(resize2d)(columns, nOutputPlane*kW*kH, inputHeight*inputWidth);
+  THTensor_(zero)(columns);
 
   // Define a buffer of ones, for bias accumulation
   // Note: this buffer can be shared with other modules, it only ever gets increased,
@@ -211,6 +212,7 @@ void THNN_(SpatialFullConvolution_updateGradInput)(
 
   // Resize output
   THTensor_(resize4d)(gradInput, batchSize, nInputPlane, inputHeight, inputWidth);
+  THTensor_(zero)(gradInput);
 
   // Resize temporary columns
   THTensor_(resize2d)(gradColumns, nOutputPlane*kW*kH, inputHeight*inputWidth);

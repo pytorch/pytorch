@@ -395,6 +395,10 @@ void THNN_(VolumetricConvolutionMM_updateGradInput)(
 
   THTensor_(resizeAs)(gradInput, input);
   THTensor_(resizeAs)(fgradInput, finput);
+  // depending on the BLAS library, fgradInput (result tensor) might
+  // be left uninitialized on zero alpha, which might lead to weird behavior
+  // hence, to be safe, zero it
+  THTensor_(zero)(fgradInput);  
   THTensor_(transpose)(weight, weight, 0, 1);
 
   if (input->nDimension == 4)

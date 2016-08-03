@@ -49,6 +49,7 @@ void THNN_(SpatialDilatedConvolution_updateOutput)(
 
   // Resize output
   THTensor_(resize4d)(output, batchSize, nOutputPlane, outputHeight, outputWidth);
+  THTensor_(zero)(output);
 
   // Resize temporary columns
   THTensor_(resize2d)(columns, nInputPlane*kW*kH, outputHeight*outputWidth);
@@ -171,6 +172,7 @@ void THNN_(SpatialDilatedConvolution_updateGradInput)(
 
   // Resize temporary columns
   THTensor_(resize2d)(gradColumns, nInputPlane*kW*kH, outputHeight*outputWidth);
+  THTensor_(zero)(gradColumns);
 
   // Helpers
   THTensor *gradInput_n = THTensor_(new)();
