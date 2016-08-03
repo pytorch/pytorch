@@ -163,6 +163,9 @@
 #include "generic/VolumetricFullConvolution.c"
 #include "THGenerateFloatTypes.h"
 
+#include "generic/VolumetricDilatedConvolution.c"
+#include "THGenerateFloatTypes.h"
+
 #include "generic/VolumetricMaxPooling.c"
 #include "THGenerateFloatTypes.h"
 
@@ -177,4 +180,3 @@
 
 #include "generic/VolumetricReplicationPadding.c"
 #include "THGenerateFloatTypes.h"
-

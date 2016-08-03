@@ -1042,6 +1042,45 @@ TH_API void THNN_(VolumetricFullConvolution_accGradParameters)(
           int aT, int aW, int aH,   // extra output adjustment
           real scale);              // scaling factor
 
+TH_API void THNN_(VolumetricDilatedConvolution_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          THTensor *weight,
+          THTensor *bias,
+          THTensor *columns,
+          THTensor *ones,
+          int kT, int kW, int kH,
+          int dT, int dW, int dH,
+          int padT, int padW, int padH,
+          int dilationT, int dilationW, int dilationH);
+
+TH_API void THNN_(VolumetricDilatedConvolution_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          THTensor *weight,
+          THTensor *gradColumns,
+          int kT, int kW, int kH,
+          int dT, int dW, int dH,
+          int padT, int padW, int padH,
+          int dilationT, int dilationW, int dilationH);
+
+TH_API void THNN_(VolumetricDilatedConvolution_accGradParameters)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradWeight,
+          THTensor *gradBias,
+          THTensor *columns,
+          THTensor *ones,
+          int kT, int kW, int kH,
+          int dT, int dW, int dH,
+          int padT, int padW, int padH,
+          int dilationT, int dilationW, int dilationH,
+          real scale);
+
 TH_API void THNN_(VolumetricMaxPooling_updateOutput)(
           THNNState *state,
           THTensor *input,

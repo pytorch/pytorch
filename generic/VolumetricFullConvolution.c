@@ -8,12 +8,13 @@ static void THNN_(vol2col)(
   const int kT, const int kH, const int kW,
   const int pT, const int pH, const int pW,
   const int dT, const int dH, const int dW,
+  const int dilationT, const int dilationH, const int dilationW,
   real *data_col)
 {
   int c, t, h, w;
-  int depth_col  = (depth  + 2 * pT - kT) / dT + 1;
-  int height_col = (height + 2 * pH - kH) / dH + 1;
-  int width_col  = (width  + 2 * pW - kW) / dW + 1;
+  int depth_col  = (depth  + 2 * pT - (dilationT * (kT - 1) + 1)) / dT + 1;
+  int height_col = (height + 2 * pH - (dilationH * (kH - 1) + 1)) / dH + 1;
+  int width_col  = (width  + 2 * pW - (dilationW * (kW - 1) + 1)) / dW + 1;
   int channels_col = channels * kT * kH * kW;
   for (c = 0; c < channels_col; ++c)
   {
@@ -27,10 +28,12 @@ static void THNN_(vol2col)(
       {
         for (w = 0; w < width_col; ++w)
         {
-          int t_pad = t * dT - pT + t_offset;
-          int h_pad = h * dH - pH + h_offset;
-          int w_pad = w * dW - pW + w_offset;
-          if (t_pad >= 0 && t_pad < depth && h_pad >= 0 && h_pad < height && w_pad >= 0 && w_pad < width)
+          int t_pad = t * dT - pT + t_offset * dilationT;
+          int h_pad = h * dH - pH + h_offset * dilationH;
+          int w_pad = w * dW - pW + w_offset * dilationW;
+          if (t_pad >= 0 && t_pad < depth &&
+              h_pad >= 0 && h_pad < height &&
+              w_pad >= 0 && w_pad < width)
             data_col[((c * depth_col + t) * height_col + h) * width_col + w] =
               data_vol[((c_vol * depth + t_pad) * height + h_pad) * width + w_pad];
           else
@@ -47,13 +50,14 @@ static void THNN_(col2vol)(
   const int kT, const int kH, const int kW,
   const int pT, const int pH, const int pW,
   const int dT, const int dH, const int dW,
+  const int dilationT, const int dilationH, const int dilationW,
   real* data_vol)
 {
   int c, t, h, w;
   memset(data_vol, 0, sizeof(real) * depth * height * width * channels);
-  int depth_col = (depth + 2 * pT - kT) / dT + 1;
-  int height_col = (height + 2 * pH - kH) / dH + 1;
-  int width_col = (width + 2 * pW - kW) / dW + 1;
+  int depth_col  = (depth  + 2 * pT - (dilationT * (kT - 1) + 1)) / dT + 1;
+  int height_col = (height + 2 * pH - (dilationH * (kH - 1) + 1)) / dH + 1;
+  int width_col  = (width  + 2 * pW - (dilationW * (kW - 1) + 1)) / dW + 1;
   int channels_col = channels * kT * kH * kW;
   for (c = 0; c < channels_col; ++c)
   {
@@ -67,10 +71,12 @@ static void THNN_(col2vol)(
       {
         for (w = 0; w < width_col; ++w)
         {
-          int t_pad = t * dT - pT + t_offset;
-          int h_pad = h * dH - pH + h_offset;
-          int w_pad = w * dW - pW + w_offset;
-          if (t_pad >= 0 && t_pad < depth && h_pad >= 0 && h_pad < height && w_pad >= 0 && w_pad < width)
+          int t_pad = t * dT - pT + t_offset * dilationT;
+          int h_pad = h * dH - pH + h_offset * dilationH;
+          int w_pad = w * dW - pW + w_offset * dilationW;
+          if (t_pad >= 0 && t_pad < depth &&
+              h_pad >= 0 && h_pad < height &&
+              w_pad >= 0 && w_pad < width)
             data_vol[((c_vol * depth + t_pad) * height + h_pad) * width + w_pad] +=
               data_col[((c * depth_col + t) * height_col + h) * width_col + w];
         }
@@ -138,7 +144,7 @@ void THNN_(VolumetricFullConvolution_updateOutput)(
   // Resize temporary columns
   THTensor_(resize2d)(columns, nOutputPlane*kW*kH*kT, inputDepth*inputHeight*inputWidth);
   THTensor_(zero)(columns);
-  
+
   // Define a buffer of ones, for bias accumulation
   // Note: this buffer can be shared with other modules, it only ever gets increased,
   // and always contains ones.
@@ -185,6 +191,7 @@ void THNN_(VolumetricFullConvolution_updateOutput)(
       kT, kH, kW,
       pT, pH, pW,
       dT, dH, dW,
+       1,  1,  1,
       THTensor_(data)(output_n)
     );
 
@@ -270,7 +277,7 @@ void THNN_(VolumetricFullConvolution_updateGradInput)(
   // Resize output
   THTensor_(resize5d)(gradInput, batchSize, nInputPlane, inputDepth, inputHeight, inputWidth);
   THTensor_(zero)(gradInput);
-  
+
   // Resize temporary columns
   THTensor_(resize2d)(gradColumns, nOutputPlane*kW*kH*kT, inputDepth*inputHeight*inputWidth);
 
@@ -293,6 +300,7 @@ void THNN_(VolumetricFullConvolution_updateGradInput)(
       kT, kH, kW,
       pT, pH, pW,
       dT, dH, dW,
+       1,  1,  1,
       THTensor_(data)(gradColumns)
     );
 
@@ -407,6 +415,7 @@ void THNN_(VolumetricFullConvolution_accGradParameters)(
       kT, kH, kW,
       pT, pH, pW,
       dT, dH, dW,
+       1,  1,  1,
       THTensor_(data)(columns)
     );
 
