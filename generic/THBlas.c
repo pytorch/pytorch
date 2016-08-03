@@ -214,7 +214,10 @@ void THBlas_(gemv)(char trans, long m, long n, real alpha, real *a, long lda, re
         real *row_ = a+lda*i;
         for(j = 0; j < m; j++)
           sum += x[j*incx]*row_[j];
-        y[i*incy] = beta*y[i*incy] + alpha*sum;
+	if (beta == 0)
+	  y[i*incy] = alpha*sum;
+	else
+	  y[i*incy] = beta*y[i*incy] + alpha*sum;
       }
     }
     else
@@ -329,7 +332,10 @@ void THBlas_(gemm)(char transa, char transb, long m, long n, long k, real alpha,
           for(l = 0; l < k; l++)
             sum += a_[l*lda]*b_[l];
           b_ += ldb;
-          c[j*ldc+i] = beta*c[j*ldc+i]+alpha*sum;
+	  if (beta == 0)
+	    c[j*ldc+i] = alpha*sum;
+	  else
+	    c[j*ldc+i] = beta*c[j*ldc+i]+alpha*sum;
         }
         a_++;
       }
@@ -346,7 +352,10 @@ void THBlas_(gemm)(char transa, char transb, long m, long n, long k, real alpha,
           for(l = 0; l < k; l++)
             sum += a_[l]*b_[l];
           b_ += ldb;
-          c[j*ldc+i] = beta*c[j*ldc+i]+alpha*sum;
+	  if (beta == 0)
+	    c[j*ldc+i] = alpha*sum;
+	  else
+	    c[j*ldc+i] = beta*c[j*ldc+i]+alpha*sum;
         }
         a_ += lda;
       }
@@ -363,7 +372,10 @@ void THBlas_(gemm)(char transa, char transb, long m, long n, long k, real alpha,
           for(l = 0; l < k; l++)
             sum += a_[l*lda]*b_[l*ldb];
           b_++;
-          c[j*ldc+i] = beta*c[j*ldc+i]+alpha*sum;
+	  if (beta == 0)
+	    c[j*ldc+i] = alpha*sum;
+	  else
+	    c[j*ldc+i] = beta*c[j*ldc+i]+alpha*sum;
         }
         a_++;
       }
@@ -380,7 +392,10 @@ void THBlas_(gemm)(char transa, char transb, long m, long n, long k, real alpha,
           for(l = 0; l < k; l++)
             sum += a_[l]*b_[l*ldb];
           b_++;
-          c[j*ldc+i] = beta*c[j*ldc+i]+alpha*sum;
+	  if (beta == 0)
+	    c[j*ldc+i] = alpha*sum;
+	  else
+	    c[j*ldc+i] = beta*c[j*ldc+i]+alpha*sum;
         }
         a_ += lda;
       }
