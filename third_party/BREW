@@ -137,6 +137,16 @@ cuda_library(
   ],
 )
 
+shell_script(
+  name = "cub",
+  srcs = Glob(["cub/cub/*.h", "cub/cub/*/*.h", "cub/cub/*/*/*.h"]),
+  commands = [
+    "DST=$CAFFE2_GENDIR/third_party/include/",
+    "mkdir -p $DST",
+    "cp -r $CAFFE2_SRCDIR/$CAFFE2_CWD/cub/cub $DST/",
+  ],
+)
+
 ###############################################################################
 # Other libraries
 # This section includes all other libraries in alphabet order.
