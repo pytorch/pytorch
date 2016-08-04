@@ -460,7 +460,7 @@ accreal THTensor_(prodall)(THTensor *tensor)
   return prod;
 }
 
-void THTensor_(add)(THTensor *r_, THTensor *t, real value)
+void THTensor_(add_Default)(THTensor *r_, THTensor *t, real value)
 {
   THTensor_(resizeAs)(r_, t);
   if (THTensor_(isContiguous)(r_) && THTensor_(isContiguous)(t) && THTensor_(nElement)(r_) == THTensor_(nElement)(t)) {
