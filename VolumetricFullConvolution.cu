@@ -97,6 +97,7 @@ void THNN_CudaVolumetricFullConvolution_updateOutput(
       THCState_getCurrentStream(state),
       THCudaTensor_data(state, columns),
       nOutputPlane, outputDepth, outputHeight, outputWidth, kT, kH, kW, padT, padH, padW, dT, dH, dW,
+      1,1,1,
       THCudaTensor_data(state, output_n)
     );
 
@@ -195,6 +196,7 @@ void THNN_CudaVolumetricFullConvolution_updateGradInput(
       THCState_getCurrentStream(state),
       THCudaTensor_data(state, gradOutput_n),
       nOutputPlane, outputDepth, outputHeight, outputWidth, kT, kH, kW, padT, padH, padW, dT, dH, dW,
+      1,1,1,
       THCudaTensor_data(state, gradColumns)
     );
 
@@ -301,6 +303,7 @@ void THNN_CudaVolumetricFullConvolution_accGradParameters(
       THCState_getCurrentStream(state),
       THCudaTensor_data(state, gradOutput_n),
       nOutputPlane, outputDepth, outputHeight, outputWidth, kT, kH, kW, padT, padH, padW, dT, dH, dW,
+      1,1,1,
       THCudaTensor_data(state, columns)
     );
 
