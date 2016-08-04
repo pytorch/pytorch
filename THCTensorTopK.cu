@@ -1,4 +1,5 @@
 #include "THCReduceApplyUtils.cuh"
+#include "THCTensorCopy.h"
 #include "THCTensorMath.h"
 #include "THCTensorSort.h"
 #include "THCAsmUtils.cuh"
@@ -531,8 +532,15 @@ THC_API void THCudaTensor_topk(THCState* state,
 
       THCudaTensor* sortedTopKIndices = THCudaTensor_new(state);
 
+      THCudaLongTensor *sortedIndicesLong = THCudaLongTensor_new(state);
+      THLongStorage *indicesSize = THCudaTensor_newSizeOf(state, sortedIndices);
+      THCudaLongTensor_resize(state, sortedIndicesLong, indicesSize, NULL);
+      THLongStorage_free(indicesSize);
+      THCudaLongTensor_copyCudaFloat(state, sortedIndicesLong, sortedIndices);
+
       THCudaTensor_resizeAs(state, sortedTopKIndices, indices);
-      THCudaTensor_gather(state, sortedTopKIndices, indices, dim, sortedIndices);
+      THCudaTensor_gather(state, sortedTopKIndices, indices, dim, sortedIndicesLong);
+      THCudaLongTensor_free(state, sortedIndicesLong);
 
       THCudaTensor_freeCopyTo(state, sortedTopK, topK);
       THCudaTensor_freeCopyTo(state, sortedTopKIndices, indices);
