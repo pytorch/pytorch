@@ -2,7 +2,7 @@
 # after generic files change
 .PHONY: all clean torch
 
-all: torch install
+all: install
 
 torch:
 	python3 setup.py build
@@ -16,3 +16,7 @@ clean:
 	@rm -rf torch.egg-info
 	@rm -rf tools/__pycache__
 	@rm -rf torch/csrc/generic/TensorMethods.cpp
+	@rm -rf torch/lib/tmp_install
+	@rm -rf torch/lib/build
+	@rm -rf torch/lib/*.so
+	@rm -rf torch/lib/*.h

@@ -2,6 +2,9 @@ from setuptools import setup, Extension, distutils
 from os.path import expanduser
 from tools.cwrap import cwrap
 import platform
+import subprocess
+
+subprocess.call(['bash', 'torch/lib/build_all.sh', '--with-cuda'])
 
 # TODO: detect CUDA
 WITH_CUDA = False
@@ -83,4 +86,5 @@ C = Extension("torch._C",
 setup(name="torch", version="0.1",
     ext_modules=[C],
     packages=['torch', 'torch.legacy', 'torch.legacy.nn', 'torch.legacy.optim'] + (['torch.cuda', 'torch.legacy.cunn'] if WITH_CUDA else []),
+    package_data={'torch': ['lib/*.so', 'lib/*.h']}
 )
