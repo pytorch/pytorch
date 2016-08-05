@@ -18,6 +18,36 @@ TEST(CUDAContextTest, TestAllocDealloc) {
   CUDAContext::Delete(data);
 }
 
+TEST(CUDAContextTest, MemoryPoolAllocateDealloc) {
+  if (!HasCudaGPU()) return;
+  if (GetCudaMemoryPoolType() == CudaMemoryPoolType::NONE) {
+    LOG(ERROR)
+      << "Choose a memory type that is not none to test memory pool.";
+    return;
+  }
+  const int nbytes = 1048576;
+  for (int i = 0; i < NumCudaDevices(); ++i) {
+    LOG(INFO) << "Device " << i << " of " << NumCudaDevices();
+    DeviceGuard guard(i);
+    void* allocated = CUDAContext::New(nbytes);
+    EXPECT_NE(allocated, nullptr);
+    cudaPointerAttributes attr;
+    CUDA_CHECK(cudaPointerGetAttributes(&attr, allocated));
+    EXPECT_EQ(attr.memoryType, cudaMemoryTypeDevice);
+    EXPECT_EQ(attr.device, i);
+    CUDAContext::Delete(allocated);
+    void* new_allocated = CUDAContext::New(nbytes);
+    // With a pool, the above allocation should yield the same address.
+    EXPECT_EQ(new_allocated, allocated);
+    // But, if we are allocating something larger, we will have a different
+    // chunk of memory.
+    void* larger_allocated = CUDAContext::New(nbytes * 2);
+    EXPECT_NE(larger_allocated, new_allocated);
+    CUDAContext::Delete(new_allocated);
+    CUDAContext::Delete(larger_allocated);
+  }
+}
+
 cudaStream_t getStreamForHandle(cublasHandle_t handle) {
   cudaStream_t stream = nullptr;
   CUBLAS_CHECK(cublasGetStream(handle, &stream));
