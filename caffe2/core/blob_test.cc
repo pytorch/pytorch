@@ -308,27 +308,6 @@ TYPED_TEST(TensorCPUTest, NoLongerSharesAfterResize) {
   EXPECT_NE(old_pointer, tensor.mutable_data<TypeParam>());
 }
 
-
-TYPED_TEST(TensorCPUTest, NoKeepOnShrinkAsDefaultCase) {
-  FLAGS_caffe2_keep_on_shrink = false;
-  vector<int> dims{2, 3, 5};
-  TensorCPU tensor(dims);
-  TypeParam* ptr = tensor.mutable_data<TypeParam>();
-  EXPECT_TRUE(ptr != nullptr);
-  tensor.Resize(vector<int>{3, 4, 6});
-  TypeParam* larger_ptr = tensor.mutable_data<TypeParam>();
-  EXPECT_TRUE(larger_ptr != nullptr);
-  EXPECT_NE(ptr, larger_ptr);
-
-  // resize to 0 in the meantime;
-  tensor.Resize(vector<int>{3, 0, 6});
-
-  tensor.Resize(vector<int>{1, 2, 4});
-  TypeParam* smaller_ptr = tensor.mutable_data<TypeParam>();
-  EXPECT_TRUE(smaller_ptr != nullptr);
-  EXPECT_NE(larger_ptr, smaller_ptr);
-}
-
 TYPED_TEST(TensorCPUTest, KeepOnShrink) {
   FLAGS_caffe2_keep_on_shrink = true;
   vector<int> dims{2, 3, 5};

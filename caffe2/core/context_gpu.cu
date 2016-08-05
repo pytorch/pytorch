@@ -38,7 +38,7 @@ DEFINE_int32(caffe2_cub_min_bin, 6,
              "If using cub as the memory allocator, sets the min number of "
              "bins.");
 DEFINE_int32(caffe2_cub_max_bin, 16,
-             "If using cub as the memory allocator, sets the min number of "
+             "If using cub as the memory allocator, sets the max number of "
              "bins.");
 
 namespace caffe2 {
