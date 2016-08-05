@@ -57,8 +57,9 @@ class Config(object):
     USE_GLOG = True
 
     # gflags: Caffe can choose to use google glog, which will allow a more
-    # True.
-    USE_GFLAGS = False
+    # feature complete flags registration mechanism. If you wish to use gflags,
+    # set USE_GFLAGS to True.
+    USE_GFLAGS = True
 
     # Whether to use RTTI or not. Note that this might not always work; to
     # disable RTTI means that all your dependencies, most notably protobuf, have

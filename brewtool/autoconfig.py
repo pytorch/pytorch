@@ -416,7 +416,7 @@ class Env(object):
             ['-l' + s for s in self.LIBS])
         self.TEMPLATE_CC_TEST = ' '.join(
             ['{src}', '--caffe_test_root=' + os.path.abspath(self.GENDIR),
-             '--gtest_filter=-*.LARGE_*'])
+             '{test_flags}'])
         self.TEMPLATE_NVCC = ' '.join(
             [NVCC, '-ccbin', Config.CC] + self.NVCC_CFLAGS +
             ['-Xcompiler', '"', ' '.join(self.CFLAGS), '{flags}', '"'] +
@@ -460,8 +460,8 @@ class Env(object):
     def link_binary(self, src, dst):
         return self._format(self.TEMPLATE_LINK_BINARY, src, dst)
 
-    def cc_test(self, src):
-        return self._format(self.TEMPLATE_CC_TEST, src)
+    def cc_test(self, src, test_flags):
+        return self._format(self.TEMPLATE_CC_TEST, src, test_flags=test_flags)
 
     def nvcc(self, src, dst, compiler_flags=None):
         flags = ' '.join(compiler_flags) if compiler_flags else ''

@@ -533,7 +533,7 @@ class proto_library(BuildTarget):
 class cc_target(BuildTarget):
     def __init__(self, name, srcs, hdrs=None, deps=None, build_shared=False,
                  build_binary=False, is_test=False, whole_archive=False,
-                 compiler_flags=None, **kwargs):
+                 compiler_flags=None, test_flags=None, **kwargs):
         if hdrs is None:
             hdrs = []
         if deps is None:
@@ -547,6 +547,7 @@ class cc_target(BuildTarget):
         self.build_shared = build_shared
         self.build_binary = build_binary
         self.is_test = is_test
+        self.test_flags = [] if test_flags is None else test_flags
         self.whole_archive = whole_archive
 
     def _OutputName(self, is_library=False, is_shared=False):
@@ -612,7 +613,9 @@ class cc_target(BuildTarget):
         if self.is_test and Brewery.is_test:
             # Runs the test.
             self.command_groups.append(
-                [Brewery.Env.cc_test(self._OutputName())])
+                [Brewery.Env.cc_test(self._OutputName(), "")] +
+                [Brewery.Env.cc_test(self._OutputName(), f)
+                 for f in self.test_flags])
 
 
 def cc_library(*args, **kwargs):

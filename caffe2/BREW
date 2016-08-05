@@ -6,6 +6,7 @@ cc_library(
   deps = [
     "//caffe2/proto:caffe2_proto",
     "//third_party:glog",
+    "//third_party:gflags",
     "//third_party:eigen",
   ],
   whole_archive = True,
@@ -27,6 +28,7 @@ cc_library(
     ":core",
     ":core_gpu_cu",
     "//third_party:cnmem",
+    "//third_party:cub",
     "//third_party:cuda",
   ],
   whole_archive = True,
@@ -61,6 +63,10 @@ cc_test(
       ":core_gpu",
       "//third_party:gtest",
       "//caffe2/test:caffe2_gtest_main",
+  ],
+  test_flags = [
+      "--caffe2_cuda_memory_pool cnmem",
+      "--caffe2_cuda_memory_pool cub",
   ],
 )
 
