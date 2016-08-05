@@ -681,7 +681,7 @@ class mpi_test(cc_target):
         if Brewery.is_test:
             self.command_groups.append(
                 [Brewery.Env.MPIRUN + ' -n ' + str(self.mpi_size) + ' ' +
-                 Brewery.Env.cc_test(self._OutputName())])
+                 Brewery.Env.cc_test(self._OutputName(), "")])
 
 
 class cuda_library(BuildTarget):
