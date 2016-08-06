@@ -476,6 +476,12 @@ void THTensor_(add_Default)(THTensor *r_, THTensor *t, real value)
   }
 }
 
+void THTensor_(add_AVX)(THTensor *r_, THTensor *t, real value)
+{
+  // TODO
+  return;
+}
+
 void THTensor_(sub)(THTensor *r_, THTensor *t, real value)
 {
   THTensor_(add)(r_, t, -value);
