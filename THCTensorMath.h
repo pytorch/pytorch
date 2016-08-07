@@ -28,6 +28,9 @@
 #include "generic/THCTensorMasked.h"
 #include "THCGenerateAllTypes.h"
 
+#include "generic/THCTensorScatterGather.h"
+#include "THCGenerateAllTypes.h"
+
 THC_API void THCudaTensor_tril(THCState *state, THCudaTensor *self, THCudaTensor *src, long k);
 THC_API void THCudaTensor_triu(THCState *state, THCudaTensor *self, THCudaTensor *src, long k);
 THC_API void THCudaTensor_diag(THCState *state, THCudaTensor *self, THCudaTensor *src, long k);
@@ -114,10 +117,6 @@ THC_API void THCudaTensor_indexCopy_long(THCState *state, THCudaTensor *res_, in
 THC_API void THCudaTensor_indexAdd_long(THCState *state, THCudaTensor *res_, int dim, THLongTensor *indices, THCudaTensor *src);
 THC_API void THCudaTensor_indexFill_long(THCState *state, THCudaTensor *tensor, int dim, THLongTensor *index, float val);
 THC_API void THCudaTensor_indexSelect_long(THCState *state, THCudaTensor *tensor, THCudaTensor *src, int dim, THLongTensor *index);
-
-THC_API void THCudaTensor_gather(THCState* state, THCudaTensor *tensor, THCudaTensor *src, int dim, THCudaTensor *index);
-THC_API void THCudaTensor_scatter(THCState* state, THCudaTensor *tensor, int dim, THCudaTensor *index, THCudaTensor *src);
-THC_API void THCudaTensor_scatterFill(THCState* state, THCudaTensor *tensor, int dim, THCudaTensor *index, float value);
 
 THC_API int THCudaByteTensor_logicalall(THCState *state, THCudaByteTensor *self);
 THC_API int THCudaByteTensor_logicalany(THCState *state, THCudaByteTensor *self);
