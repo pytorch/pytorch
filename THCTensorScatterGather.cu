@@ -6,13 +6,13 @@
 // tensor, dimension 'dim' is skipped. The tensors are assumed to have the same
 // size (with the exception of 't2' in dimension 'dim').
 // This version uses a static number of dimensions.
-template <typename IndexType, typename real, int Dims>
+template <typename IndexType, typename Real, int Dims>
 struct IndexToScatterGatherOffsets {
   static __device__ void compute(
       IndexType linearId, const int dim,
       const TensorInfo<long, IndexType>& index, IndexType* indexOffset,
-      const TensorInfo<real, IndexType>& t1, IndexType* t1Offset,
-      const TensorInfo<real, IndexType>& t2, IndexType* t2Offset) {
+      const TensorInfo<Real, IndexType>& t1, IndexType* t1Offset,
+      const TensorInfo<Real, IndexType>& t2, IndexType* t2Offset) {
     for (int d = Dims - 1; d >= 0; d--) {
       IndexType curDimIndex = linearId % index.sizes[d];
       *indexOffset += curDimIndex * index.strides[d];
@@ -27,7 +27,7 @@ struct IndexToScatterGatherOffsets {
   static __device__ void compute(
       IndexType linearId, const int dim,
       const TensorInfo<long, IndexType>& index, IndexType* indexOffset,
-      const TensorInfo<real, IndexType>& t2, IndexType* t2Offset) {
+      const TensorInfo<Real, IndexType>& t2, IndexType* t2Offset) {
     for (int d = Dims - 1; d >= 0; d--) {
       IndexType curDimIndex = linearId % index.sizes[d];
       *indexOffset += curDimIndex * index.strides[d];
@@ -40,13 +40,13 @@ struct IndexToScatterGatherOffsets {
 };
 
 // Same as above but using a dynamic number of dimensions.
-template <typename IndexType, typename real>
-struct IndexToScatterGatherOffsets<IndexType, real, -1> {
+template <typename IndexType, typename Real>
+struct IndexToScatterGatherOffsets<IndexType, Real, -1> {
   static __device__ void compute(
       IndexType linearId, const int dim,
       const TensorInfo<long, IndexType>& index, IndexType* indexOffset,
-      const TensorInfo<real, IndexType>& t1, IndexType* t1Offset,
-      const TensorInfo<real, IndexType>& t2, IndexType* t2Offset) {
+      const TensorInfo<Real, IndexType>& t1, IndexType* t1Offset,
+      const TensorInfo<Real, IndexType>& t2, IndexType* t2Offset) {
     for (int d = index.dims - 1; d >= 0; d--) {
       IndexType curDimIndex = linearId % index.sizes[d];
       *indexOffset += curDimIndex * index.strides[d];
@@ -61,7 +61,7 @@ struct IndexToScatterGatherOffsets<IndexType, real, -1> {
   static __device__ void compute(
       IndexType linearId, const int dim,
       const TensorInfo<long, IndexType>& index, IndexType* indexOffset,
-      const TensorInfo<real, IndexType>& t2, IndexType* t2Offset) {
+      const TensorInfo<Real, IndexType>& t2, IndexType* t2Offset) {
     for (int d = index.dims - 1; d >= 0; d--) {
       IndexType curDimIndex = linearId % index.sizes[d];
       *indexOffset += curDimIndex * index.strides[d];
@@ -73,10 +73,10 @@ struct IndexToScatterGatherOffsets<IndexType, real, -1> {
   }
 };
 
-template <typename IndexType, typename real, int Dims>
+template <typename IndexType, typename Real, int Dims>
 __global__ void THCudaTensor_gatherKernel(
-    TensorInfo<real, IndexType> tensor,
-    TensorInfo<real, IndexType> src,
+    TensorInfo<Real, IndexType> tensor,
+    TensorInfo<Real, IndexType> src,
     TensorInfo<long, IndexType> index,
     const int dim,
     const IndexType totalElements) {
@@ -87,7 +87,7 @@ __global__ void THCudaTensor_gatherKernel(
     IndexType srcOffset = 0;
     IndexType indexOffset = 0;
 
-    IndexToScatterGatherOffsets<IndexType, real, Dims>::compute(linearId, dim,
+    IndexToScatterGatherOffsets<IndexType, Real, Dims>::compute(linearId, dim,
                                                           index, &indexOffset,
                                                           tensor, &tensorOffset,
                                                           src, &srcOffset);
@@ -99,10 +99,10 @@ __global__ void THCudaTensor_gatherKernel(
   }
 }
 
-template <typename IndexType, typename real, int Dims>
+template <typename IndexType, typename Real, int Dims>
 __global__ void THCudaTensor_scatterKernel(
-    TensorInfo<real, IndexType> tensor,
-    TensorInfo<real, IndexType> src,
+    TensorInfo<Real, IndexType> tensor,
+    TensorInfo<Real, IndexType> src,
     TensorInfo<long, IndexType> index,
     const int dim,
     const IndexType totalElements) {
@@ -113,7 +113,7 @@ __global__ void THCudaTensor_scatterKernel(
     IndexType srcOffset = 0;
     IndexType indexOffset = 0;
 
-    IndexToScatterGatherOffsets<IndexType, real, Dims>::compute(linearId, dim,
+    IndexToScatterGatherOffsets<IndexType, Real, Dims>::compute(linearId, dim,
                                                           index, &indexOffset,
                                                           src, &srcOffset,
                                                           tensor, &tensorOffset);
@@ -125,11 +125,11 @@ __global__ void THCudaTensor_scatterKernel(
   }
 }
 
-template <typename IndexType, typename real, int Dims>
+template <typename IndexType, typename Real, int Dims>
 __global__ void THCudaTensor_scatterFillKernel(
-    TensorInfo<real, IndexType> tensor,
+    TensorInfo<Real, IndexType> tensor,
     TensorInfo<long, IndexType> index,
-    real value,
+    Real value,
     const int dim,
     const IndexType totalElements) {
   for (IndexType linearId = blockIdx.x * blockDim.x + threadIdx.x;
@@ -138,7 +138,7 @@ __global__ void THCudaTensor_scatterFillKernel(
     IndexType tensorOffset = 0;
     IndexType indexOffset = 0;
 
-    IndexToScatterGatherOffsets<IndexType, real, Dims>::compute(linearId, dim,
+    IndexToScatterGatherOffsets<IndexType, Real, Dims>::compute(linearId, dim,
                                                           index, &indexOffset,
                                                           tensor, &tensorOffset);
 
