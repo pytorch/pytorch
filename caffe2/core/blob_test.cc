@@ -69,6 +69,32 @@ TEST(BlobTest, BlobWrongType) {
   ASSERT_THROW(blob.Get<int>(), EnforceNotMet);
 }
 
+TEST(BlobTest, BlobReset) {
+  Blob blob;
+  std::unique_ptr<Foo> foo(new Foo());
+  EXPECT_TRUE(blob.Reset(foo.release()) != nullptr);
+  // Also test that Reset works.
+  blob.Reset();
+}
+
+TEST(BlobTest, BlobShareExternalPointer) {
+  Blob blob;
+  std::unique_ptr<Foo> foo(new Foo());
+  EXPECT_EQ(blob.ShareExternal<Foo>(foo.get()), foo.get());
+  EXPECT_TRUE(blob.IsType<Foo>());
+  // Also test that Reset works.
+  blob.Reset();
+}
+
+TEST(BlobTest, BlobShareExternalObject) {
+  Blob blob;
+  Foo foo;
+  EXPECT_EQ(blob.ShareExternal<Foo>(&foo), &foo);
+  EXPECT_TRUE(blob.IsType<Foo>());
+  // Also test that Reset works.
+  blob.Reset();
+}
+
 TEST(BlobTest, StringSerialization) {
   const std::string kTestString = "Hello world?";
   Blob blob;
@@ -282,27 +308,6 @@ TYPED_TEST(TensorCPUTest, NoLongerSharesAfterResize) {
   EXPECT_NE(old_pointer, tensor.mutable_data<TypeParam>());
 }
 
-
-TYPED_TEST(TensorCPUTest, NoKeepOnShrinkAsDefaultCase) {
-  FLAGS_caffe2_keep_on_shrink = false;
-  vector<int> dims{2, 3, 5};
-  TensorCPU tensor(dims);
-  TypeParam* ptr = tensor.mutable_data<TypeParam>();
-  EXPECT_TRUE(ptr != nullptr);
-  tensor.Resize(vector<int>{3, 4, 6});
-  TypeParam* larger_ptr = tensor.mutable_data<TypeParam>();
-  EXPECT_TRUE(larger_ptr != nullptr);
-  EXPECT_NE(ptr, larger_ptr);
-
-  // resize to 0 in the meantime;
-  tensor.Resize(vector<int>{3, 0, 6});
-
-  tensor.Resize(vector<int>{1, 2, 4});
-  TypeParam* smaller_ptr = tensor.mutable_data<TypeParam>();
-  EXPECT_TRUE(smaller_ptr != nullptr);
-  EXPECT_NE(larger_ptr, smaller_ptr);
-}
-
 TYPED_TEST(TensorCPUTest, KeepOnShrink) {
   FLAGS_caffe2_keep_on_shrink = true;
   vector<int> dims{2, 3, 5};
@@ -331,13 +336,13 @@ TYPED_TEST(TensorCPUTest, KeepOnShrink) {
 TYPED_TEST(TensorCPUDeathTest, CannotAccessRawDataWhenEmpty) {
   TensorCPU tensor;
   EXPECT_EQ(tensor.ndim(), 0);
-  ASSERT_DEATH(tensor.raw_data(), "");
+  ASSERT_ANY_THROW(tensor.raw_data());
 }
 
 TYPED_TEST(TensorCPUDeathTest, CannotAccessDataWhenEmpty) {
   TensorCPU tensor;
   EXPECT_EQ(tensor.ndim(), 0);
-  ASSERT_DEATH(tensor.data<TypeParam>(), "");
+  ASSERT_ANY_THROW(tensor.data<TypeParam>());
 }
 
 TEST(TensorTest, TensorNonFundamentalType) {
@@ -558,6 +563,7 @@ TYPED_TEST(TypedTensorTest, BigTensorSerialization) {
         "DUMMY_ENGINE");
     Workspace ws;
     auto load_op = CreateOperator(op_def, &ws);
+    EXPECT_TRUE(load_op != nullptr);
     LOG(INFO) << "Running operator";
 
     load_op->Run();

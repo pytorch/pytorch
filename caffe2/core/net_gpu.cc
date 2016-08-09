@@ -38,7 +38,7 @@ class ProfiledRange {
     eventAttrib.messageType = NVTX_MESSAGE_TYPE_ASCII;
     eventAttrib.message.ascii = def.type().c_str();
     range_ = nvtxRangeStartEx(&eventAttrib);
-    CHECK(range_);
+    CAFFE_ENFORCE(range_, "Start range is invalid.");
   }
 
   ~ProfiledRange() {
@@ -104,19 +104,19 @@ struct Stream {
   }
 
   void wait(Event* event) const {
-    CHECK(event);
+    CAFFE_ENFORCE(event, "Event is invalid.");
     event->outstanding_ = false;
     if (!event->event_) {
       return;
     }
 
     if (!stream_) {
-      CHECK_EQ(gpu_id_, -1);
+      CAFFE_ENFORCE(gpu_id_ == -1, "Gpu ID should be -1.");
       CUDA_CHECK(cudaEventSynchronize(event->event_));
       return;
     }
 
-    CHECK_NE(gpu_id_, -1);
+    CAFFE_ENFORCE(gpu_id_ != -1, "Gpu ID should not be -1.");
     VLOG_IF(2, gpu_id_ != event->gpu_id_) << "Cross-device waiting: " << gpu_id_
                                           << " waiting on " << event->gpu_id_;
     DeviceGuard g(gpu_id_);
@@ -135,16 +135,22 @@ void Event::record(const Stream& stream) {
     // TODO - should we do this?
     stream.wait(this);
   }
-  CHECK(!outstanding_) << "Failed to wait on event before recording";
-  CHECK_EQ(stream.gpu_id_, gpu_id_);
+  CAFFE_ENFORCE(!outstanding_, "Failed to wait on event before recording.");
+  CAFFE_ENFORCE(
+      stream.gpu_id_ == gpu_id_,
+      "Stream gpu id ",
+      stream.gpu_id_,
+      " doesn't match to ",
+      gpu_id_,
+      ".");
   // We *never* use the default stream in Caffe2, so stream should
   // never be NULL for a compute stream in Caffe2.
   if (!stream.stream_) {
-    CHECK(!event_);
+    CAFFE_ENFORCE(!event_, "Stream is NULL, so should be the event.");
     return;
   }
 
-  CHECK(event_);
+  CAFFE_ENFORCE(event_, "Event should not be NULL.");
   DeviceGuard g(gpu_id_);
   CUDA_CHECK(cudaEventRecord(event_, stream.stream_));
   outstanding_ = true;
@@ -172,17 +178,18 @@ class AsyncDAGNet : public DAGNetBase {
   }
 
   bool RunAt(const std::vector<int>& chain) override {
-    CHECK(!chain.empty());
+    CAFFE_ENFORCE(!chain.empty(), "Chain should not be empty.");
     const auto source_idx = chain.front();
     Stream stream{operator_nodes_[source_idx].operator_->def().device_option()};
     const auto& parents = operator_nodes_[source_idx].parents_;
     // Help ensure that our chaining is correct by verifying at least
     // one parent recorded an event.
-    CHECK(
-        parents.empty() ||
-        std::any_of(parents.begin(), parents.end(), [this](int p) {
-          return eventRecorded_[p];
-        }));
+    CAFFE_ENFORCE(
+        parents.empty() || std::any_of(
+                               parents.begin(),
+                               parents.end(),
+                               [this](int p) { return eventRecorded_[p]; }),
+        "None of the parent is recorded for an event.");
 
     for (auto source_parent_idx : operator_nodes_[source_idx].parents_) {
       ProfiledRange r(
@@ -203,7 +210,11 @@ class AsyncDAGNet : public DAGNetBase {
       ProfiledRange r(operator_nodes_[sink_idx].operator_->def(), kRecordColor);
       events_[sink_idx]->record(stream);
     }
-    CHECK(!eventRecorded_[sink_idx]);
+    CAFFE_ENFORCE(
+        !eventRecorded_[sink_idx],
+        "An event for ",
+        sink_idx,
+        " should not be recorded.");
     eventRecorded_[sink_idx] = 1;
     return success;
   }

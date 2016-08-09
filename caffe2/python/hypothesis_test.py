@@ -11,9 +11,11 @@ import hypothesis.strategies as st
 from functools import partial
 import unittest
 
-from caffe2.python import core, workspace, tt_core
+from caffe2.python import core, workspace, tt_core, dyndep
 import caffe2.python.hypothesis_test_util as hu
 from caffe2.proto.caffe2_pb2 import TensorProto
+
+dyndep.InitOpsLibrary('@/caffe2/caffe2/fb/optimizers:sgd_simd_ops')
 
 
 def sigmoid(x):
@@ -661,6 +663,7 @@ class TestOperators(hu.HypothesisTestCase):
     @given(stride=st.integers(1, 3),
            pad=st.integers(0, 3),
            kernel=st.integers(1, 5),
+           adj=st.integers(0, 2),
            size=st.integers(7, 10),
            input_channels=st.integers(1, 8),
            output_channels=st.integers(1, 8),
@@ -668,11 +671,12 @@ class TestOperators(hu.HypothesisTestCase):
            order=st.sampled_from(["NCHW", "NHWC"]),
            engine=st.sampled_from(["", "CUDNN"]), **hu.gcs)
     @settings(max_examples=2, timeout=100)
-    def test_convolution_transpose_gradients(self, stride, pad, kernel,
+    def test_convolution_transpose_gradients(self, stride, pad, kernel, adj,
                                              size, input_channels,
                                              output_channels, batch_size,
                                              order, engine, gc, dc):
         assume(stride <= kernel)
+        assume(adj < stride)
         X = np.random.rand(
             batch_size, size, size, input_channels).astype(np.float32) - 0.5
         w = np.random.rand(
@@ -686,6 +690,7 @@ class TestOperators(hu.HypothesisTestCase):
             stride=stride,
             kernel=kernel,
             pad=pad,
+            adj=adj,
             order=order,
             engine=engine,
         )
@@ -700,16 +705,18 @@ class TestOperators(hu.HypothesisTestCase):
     @given(stride=st.integers(1, 3),
            pad=st.integers(0, 3),
            kernel=st.integers(1, 5),
+           adj=st.integers(0, 2),
            size=st.integers(7, 10),
            input_channels=st.integers(1, 8),
            output_channels=st.integers(1, 8),
            batch_size=st.integers(1, 3),
            engine=st.sampled_from(["", "CUDNN"]), **hu.gcs)
-    def test_convolution_transpose_layout(self, stride, pad, kernel,
+    def test_convolution_transpose_layout(self, stride, pad, kernel, adj,
                                           size, input_channels,
                                           output_channels, batch_size,
                                           engine, gc, dc):
         assume(stride <= kernel)
+        assume(adj < stride)
         X = np.random.rand(
             batch_size, size, size, input_channels).astype(np.float32) - 0.5
         w = np.random.rand(
@@ -725,6 +732,7 @@ class TestOperators(hu.HypothesisTestCase):
                 stride=stride,
                 kernel=kernel,
                 pad=pad,
+                adj=adj,
                 order=order,
                 engine=engine,
                 device_option=gc,
@@ -740,6 +748,10 @@ class TestOperators(hu.HypothesisTestCase):
             workspace.FeedBlob("b", b, device_option=gc)
             workspace.RunOperatorOnce(op)
             outputs[order] = workspace.FetchBlob("Y")
+        output_size = (size - 1) * stride + kernel + adj - 2 * pad
+        self.assertEqual(
+            outputs["NCHW"].shape,
+            (batch_size, output_channels, output_size, output_size))
         np.testing.assert_allclose(
             outputs["NCHW"],
             outputs["NHWC"].transpose((0, 3, 1, 2)),
@@ -1293,6 +1305,69 @@ class TestOperators(hu.HypothesisTestCase):
                     any(np.array_equal(xs[i][j], ys[i][k])
                         for k in range(num_elements)))
 
+    @given(num_producers=st.integers(1, 10),
+           num_consumers=st.integers(1, 10),
+           capacity=st.integers(1, 5),
+           num_blobs=st.integers(1, 3),
+           do=st.sampled_from(hu.device_options))
+    def test_safe_blobs_queue(self, num_producers, num_consumers,
+                              capacity, num_blobs, do):
+        init_net = core.Net('init_net')
+        queue = init_net.CreateBlobsQueue(
+            [], 1, capacity=capacity, num_blobs=num_blobs)
+        producer_steps = []
+        truth = 0
+        for i in range(num_producers):
+            name = 'producer_%d' % i
+            net = core.Net(name)
+            blobs = [net.ConstantFill([], 1, value=1.0, run_once=False)
+                     for times in range(num_blobs)]
+            status = net.NextName()
+            net.SafeEnqueueBlobs([queue] + blobs, blobs + [status])
+            count = (i + 1) * 10
+            step = core.execution_step(name, net, num_iter=count)
+            truth += count
+            producer_steps.append(step)
+        producer_exit_net = core.Net('producer_exit_net')
+        producer_exit_net.CloseBlobsQueue([queue], 0)
+        producer_step = core.execution_step('producer', [
+            core.execution_step(
+                'producers', producer_steps, concurrent_substeps=True),
+            core.execution_step('producer_exit', producer_exit_net)]
+        )
+
+        consumer_steps = []
+        counters = []
+        const_1 = init_net.ConstantFill([], 1, value=1.0)
+        for i in range(num_consumers):
+            name = 'consumer_%d' % i
+            net1 = core.Net(name)
+            blobs = net1.SafeDequeueBlobs([queue], num_blobs + 1)
+            status = blobs[-1]
+
+            net2 = core.Net(name + '_counter')
+            counter = init_net.ConstantFill([], 1, value=0.0)
+            counters.append(counter)
+            net2.Add([counter, const_1], counter)
+            consumer_steps.append(core.execution_step(
+                name, [net1, net2], should_stop_blob=status))
+        consumer_step = core.execution_step(
+            'consumer', consumer_steps, concurrent_substeps=True)
+
+        init_step = core.execution_step('init', init_net)
+        worker_step = core.execution_step(
+            'worker', [consumer_step, producer_step], concurrent_substeps=True)
+
+        plan = core.Plan('test')
+        plan.AddStep(init_step)
+        plan.AddStep(worker_step)
+
+        core.workspace.RunPlan(plan)
+        v = 0
+        for counter in counters:
+            v += core.workspace.FetchBlob(str(counter)).tolist()
+        self.assertEqual(v, truth)
+
     @given(
         data=hu.tensor(),
         **hu.gcs_cpu_only)
@@ -1648,6 +1723,43 @@ class TestOperators(hu.HypothesisTestCase):
                 gc, op, inputs, i, [0, 1],
                 input_device_options=input_device_options)
 
+    @given(n=st.integers(1, 5),
+           c=st.integers(1, 5),
+           h=st.integers(1, 5),
+           w=st.integers(1, 5),
+           pad=st.integers(0, 2),
+           block_size=st.integers(2, 3),
+           **hu.gcs)
+    def test_space_to_batch(self, n, c, h, w, pad, block_size, gc, dc):
+        assume((h + 2 * pad) % block_size == 0)
+        assume((w + 2 * pad) % block_size == 0)
+        X = np.random.randn(n, c, h, w).astype(np.float32)
+        op = core.CreateOperator("SpaceToBatch", ["X"], ["Y"],
+                                 pad=pad, block_size=block_size)
+        self.assertDeviceChecks(dc, op, [X], [0])
+        self.assertGradientChecks(gc, op, [X], 0, [0])
+
+    @given(n=st.integers(1, 5),
+           c=st.integers(1, 5),
+           h=st.integers(1, 5),
+           w=st.integers(1, 5),
+           pad=st.integers(0, 2),
+           block_size=st.integers(2, 3),
+           **hu.gcs)
+    def test_batch_to_space(self, n, c, h, w, pad, block_size, gc, dc):
+        assume((h + 2 * pad) % block_size == 0)
+        assume((w + 2 * pad) % block_size == 0)
+        X = np.random.randn(
+            n * block_size * block_size,
+            c,
+            (h + 2 * pad) / block_size,
+            (w + 2 * pad) / block_size).astype(np.float32)
+        op = core.CreateOperator("BatchToSpace", ["X"], ["Y"],
+                                 pad=pad, block_size=block_size)
+        self.assertDeviceChecks(dc, op, [X], [0])
+        self.assertGradientChecks(gc, op, [X], 0, [0])
+
+
     @given(X=hu.tensor(),
            in_place=st.booleans(),
            scale=st.floats(min_value=-2.0, max_value=2.0),
@@ -1680,6 +1792,15 @@ class TestOperators(hu.HypothesisTestCase):
                                    transpose_ref)
         if X.dtype != np.int32 and X.dtype != np.int64:
             self.assertGradientChecks(gc, op, [X], 0, [0])
+
+    @given(s=st.text())
+    def test_string_serde(self, s):
+        s = s.encode('ascii', 'ignore')
+        workspace.FeedBlob("a", s)
+        serialized = workspace.SerializeBlob("a")
+        workspace.DeserializeBlob("b", serialized)
+        self.assertEqual(s, workspace.FetchBlob("a"))
+        self.assertEqual(s, workspace.FetchBlob("b"))
 
     @given(n=st.integers(1, 3),
            dim=st.integers(4, 16),

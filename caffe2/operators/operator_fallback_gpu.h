@@ -54,8 +54,18 @@ class GPUFallbackOp final : public Operator<CUDAContext> {
 
   bool RunOnDevice() override {
     for (int i = 0; i < InputSize(); ++i) {
-      local_input_blobs_[i]->template GetMutable<TensorCPU>()->CopyFrom(
-          Input(i), &context_);
+      if (OperatorBase::InputIsType<TensorCUDA>(i)) {
+        local_input_blobs_[i]->template GetMutable<TensorCPU>()->CopyFrom(
+            Input(i), &context_);
+      } else {
+        VLOG(1) << "Input " << i << " is not TensorCUDA. Skipping copy.";
+        // Note(jiayq): This removes a const but conceptually
+        // local_input_blobs will only be used as const blob input for the
+        // base op so we are still fine.
+        local_input_blobs_[i]->ShareExternal(
+            const_cast<void*>(OperatorBase::Inputs()[i]->GetRaw()),
+            OperatorBase::Inputs()[i]->meta());
+      }
     }
     // Sync to make sure copies are done.
     context_.FinishDeviceComputation();
@@ -65,6 +75,9 @@ class GPUFallbackOp final : public Operator<CUDAContext> {
       return false;
     }
     for (int i = 0; i < OutputSize(); ++i) {
+      CAFFE_ENFORCE(local_output_blobs_[i]->IsType<TensorCPU>(),
+                    "GPU fallback op currently does not support non-TensorCPU "
+                    "output type.");
       Output(i)->CopyFrom(
           local_output_blobs_[i]->template Get<TensorCPU>(), &context_);
     }

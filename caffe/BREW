@@ -1,4 +1,0 @@
-filegroup(
-    name = "caffe_python",
-    srcs = ["__init__.py"],
-)

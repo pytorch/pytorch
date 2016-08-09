@@ -801,30 +801,19 @@ class ExpandDimsOp : public Operator<Context> {
   vector<int> dims_;
 };
 
-// Since we just do copying, consider untemplating it on T and using raw_data()
-template <typename T, class Context>
+template <class Context>
 class GatherOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(GatherOp);
 
   bool RunOnDevice() override {
-    // Use run-time polymorphism
-    auto& indices = Input(INDICES);
-    if (indices.template IsType<int32_t>()) {
-      DoRun<int32_t>();
-    } else if (indices.template IsType<int64_t>()) {
-      DoRun<int64_t>();
-    } else {
-      LOG(FATAL) << "Unsupported type of INDICES in Gather: "
-                 << indices.meta().name();
-    }
-    return true;
+    return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
+        this, OperatorBase::Input<TensorCPU>(INDICES));
   }
 
- private:
   template <typename Index>
-  void DoRun() {
+  bool DoRunWithType() {
     // If we endup using it on GPU doint O(N) memcpy is probably not best :)
     // TODO: implement prefetching if it starts mattering (TF does it)
     auto& data = Input(DATA);
@@ -837,19 +826,24 @@ class GatherOp : public Operator<Context> {
     output->Resize(shape);
 
     int block_size = data.size() / data.dim(0);
+    auto block_bytesize = data.size_from_dim(1) * data.meta().itemsize();
+    CAFFE_ENFORCE(
+        block_bytesize == data.nbytes() / data.dim(0),
+        "block_bytesize should be consistent with data dim");
     int N = indices.size();
 
-    const T* d = data.template data<T>();
+    auto src_base = static_cast<const char*>(data.raw_data());
     const Index* idxs = indices.template data<Index>();
-    T* out = output->template mutable_data<T>();
+    auto out = static_cast<char*>(output->raw_mutable_data(data.meta()));
 
     for (int i = 0; i < N; ++i) {
-      context_.template Copy<T, Context, Context>(
-          block_size, d + block_size * idxs[i], out + block_size * i);
+      auto src = src_base + idxs[i] * block_bytesize;
+      context_.template CopyItems<Context, Context>(
+          data.meta(), block_size, src, out + block_bytesize * i);
     }
+    return true;
   }
 
- public:
   INPUT_TAGS(DATA, INDICES);
 };
 

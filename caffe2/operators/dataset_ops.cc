@@ -377,6 +377,89 @@ class ComputeOffsetOp : public Operator<CPUContext> {
   }
 };
 
+class SortAndShuffleOp : public Operator<CPUContext> {
+ public:
+  SortAndShuffleOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator(operator_def, ws),
+        sort_by_field_idx_(
+            OperatorBase::GetSingleArgument<int>("sort_by_field_idx", 1)),
+        batch_size_(OperatorBase::GetSingleArgument<int>("batch_size", 1)),
+        shuffle_size_(OperatorBase::GetSingleArgument<int>("shuffle_size", 1)) {
+  }
+
+  bool RunOnDevice() override {
+    auto& cursor = OperatorBase::Input<std::unique_ptr<TreeCursor>>(0);
+    CAFFE_ENFORCE(InputSize() == cursor->it.fields().size() + 1);
+    CAFFE_ENFORCE(
+        -1 <= sort_by_field_idx_ &&
+        sort_by_field_idx_ < cursor->it.fields().size());
+
+    int size;
+    if (sort_by_field_idx_ != -1) {
+      size = Input(sort_by_field_idx_ + 1).dims()[0];
+    } else {
+      size = Input(1).dims()[0];
+    }
+
+    CAFFE_ENFORCE(
+        batch_size_ > 0 && shuffle_size_ > 0 &&
+        0 < batch_size_ * shuffle_size_ && batch_size_ * shuffle_size_ <= size);
+    int num_batch = size / batch_size_;
+
+    auto* out = Output(0);
+    out->Resize(size);
+    auto* out_data = out->mutable_data<int64_t>();
+
+    vector<int> shuffle_idx(size);
+    iota(shuffle_idx.begin(), shuffle_idx.end(), 0);
+
+    if (sort_by_field_idx_ != -1) {
+      auto& sortblob = Input(sort_by_field_idx_ + 1);
+      auto* sortdata = sortblob.data<int>();
+      // must sort by a field at the root level
+      CAFFE_ENFORCE(
+          cursor->it.fields()[sort_by_field_idx_].lengthFieldId == -1);
+      sort(shuffle_idx.begin(), shuffle_idx.end(), [&sortdata](int i1, int i2) {
+        return sortdata[i1] < sortdata[i2];
+      });
+    }
+
+    if (batch_size_ * shuffle_size_ > 1) {
+      int offset = 0;
+      while (offset + batch_size_ * shuffle_size_ < size) {
+        std::shuffle(
+            shuffle_idx.begin() + offset,
+            shuffle_idx.begin() + offset + batch_size_ * shuffle_size_,
+            std::default_random_engine());
+        offset += batch_size_ * shuffle_size_;
+      }
+    }
+
+    vector<int> batch_idx(num_batch);
+    iota(batch_idx.begin(), batch_idx.end(), 0);
+    std::shuffle(
+        batch_idx.begin(), batch_idx.end(), std::default_random_engine());
+
+    for (int i = 0; i < num_batch; i++) {
+      std::copy(
+          shuffle_idx.begin() + batch_idx[i] * batch_size_,
+          shuffle_idx.begin() + (batch_idx[i] + 1) * batch_size_,
+          out_data);
+      out_data += batch_size_;
+    }
+    std::copy(
+        shuffle_idx.begin() + num_batch * batch_size_,
+        shuffle_idx.end(),
+        out_data);
+
+    return true;
+  }
+
+  int sort_by_field_idx_;
+  int batch_size_;
+  int shuffle_size_;
+};
+
 class ReadRandomBatchOp : public Operator<CPUContext> {
  public:
   ReadRandomBatchOp(const OperatorDef& operator_def, Workspace* ws)
@@ -425,10 +508,13 @@ class ReadRandomBatchOp : public Operator<CPUContext> {
       if (out->size() == 0) {
         continue;
       }
-      auto innerSize = in.size_from_dim(1);
       auto dst = static_cast<char*>(out->raw_mutable_data(in.meta()));
       int block_size = in.size() / in.dim(0);
-      int block_bytesize = in.nbytes() / in.dim(0);
+      auto block_bytesize = in.size_from_dim(1) * in.meta().itemsize();
+      CAFFE_ENFORCE(
+          block_bytesize == in.nbytes() / in.dim(0),
+          "block_bytesize should be consistent with data dim");
+      auto src_base = static_cast<const char*>(in.raw_data());
       int start = 0;
       for (int j = 0; j < batchSize_; ++j) {
         if (idx >= idxblob.size()) {
@@ -439,8 +525,7 @@ class ReadRandomBatchOp : public Operator<CPUContext> {
         auto offset = *offsetptr;
         auto size = *(offsetptr + offsetdim[1]) - offset;
         // copy data
-        void* src =
-            (char*)in.raw_data() + offset * innerSize * in.meta().itemsize();
+        auto src = src_base + offset * block_bytesize;
         context_.template CopyItems<CPUContext, CPUContext>(
             in.meta(), size * block_size, src, dst + start * block_bytesize);
         start += size;
@@ -541,6 +626,7 @@ REGISTER_CPU_OPERATOR(CreateTreeCursor, CreateTreeCursorOp);
 REGISTER_CPU_OPERATOR(ResetCursor, ResetCursorOp);
 REGISTER_CPU_OPERATOR(ReadNextBatch, ReadNextBatchOp);
 REGISTER_CPU_OPERATOR(ComputeOffset, ComputeOffsetOp);
+REGISTER_CPU_OPERATOR(SortAndShuffle, SortAndShuffleOp);
 REGISTER_CPU_OPERATOR(ReadRandomBatch, ReadRandomBatchOp);
 REGISTER_CPU_OPERATOR(CheckDatasetConsistency, CheckDatasetConsistencyOp);
 REGISTER_CPU_OPERATOR(Append, AppendOp<CPUContext>);
@@ -663,6 +749,36 @@ ComputeOffset is thread safe.
     .Input(0, "cursor", "A blob containing a pointer to the cursor.")
     .Input(1, "dataset_field_0", "First dataset field")
     .Output(0, "field_0", "Tensor containing offset info for this chunk.");
+
+OPERATOR_SCHEMA(SortAndShuffle)
+    .NumInputs(1, INT_MAX)
+    .NumOutputs(1)
+    .SetDoc(R"DOC(
+Compute the sorted indices given a field index to sort by and break the sorted
+indices into chunks of shuffle_size * batch_size and shuffle each chunk,
+finally we shuffle between batches. If sort_by_field_idx is -1 we skip sort.
+
+For example, we have data sorted as
+1,2,3,4,5,6,7,8,9,10,11,12
+
+and batchSize = 2 and shuffleSize = 3, when we shuffle we get:
+[3,1,4,6,5,2] [12,10,11,8,9,7]
+
+After this we will shuffle among different batches with size 2
+[3,1],[4,6],[5,2],[12,10],[11,8],[9,7]
+
+We may end up with something like
+[9,7],[5,2],[12,10],[4,6],[3,1],[11,8]
+
+Input(0) is a blob pointing to a TreeCursor, and
+[Input(1),... Input(num_fields)] a list of tensors containing the data for
+each field of the dataset.
+
+SortAndShuffle is thread safe.
+)DOC")
+    .Input(0, "cursor", "A blob containing a pointer to the cursor.")
+    .Input(1, "dataset_field_0", "First dataset field")
+    .Output(0, "indices", "Tensor containing sorted indices.");
 
 OPERATOR_SCHEMA(ReadRandomBatch)
     .NumInputs(1, INT_MAX)

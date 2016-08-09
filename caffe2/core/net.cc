@@ -98,12 +98,23 @@ DAGNetBase::ExecutionChains computeChains(
     };
 
     for (const auto node : chain) {
-      CHECK(seen_nodes.insert(node).second);
+      CAFFE_ENFORCE(
+          seen_nodes.insert(node).second,
+          "Node ",
+          node,
+          " is already in the net.");
     }
-    CHECK(chains.insert({i, chain}).second);
+    CAFFE_ENFORCE(
+        chains.insert({i, chain}).second, "Chain ", i, " was already added.");
     VLOG(2) << "Added chain: " << chain;
   }
-  CHECK_EQ(seen_nodes.size(), nodes.size());
+  CAFFE_ENFORCE(
+      seen_nodes.size() == nodes.size(),
+      "Haven't seen all the nodes, expected number of nodes ",
+      nodes.size(),
+      ", but seen only ",
+      seen_nodes.size(),
+      ".");
   return chains;
 }
 
@@ -219,16 +230,24 @@ void SimpleNet::TEST_Benchmark(const int warmup_runs, const int main_runs,
                                const bool run_individual) {
   LOG(INFO) << "Starting benchmark.";
   LOG(INFO) << "Running warmup runs.";
-  CHECK_GE(warmup_runs, 0);
+  CAFFE_ENFORCE(
+      warmup_runs >= 0,
+      "Number of warm up runs should be non negative, provided ",
+      warmup_runs,
+      ".");
   for (int i = 0; i < warmup_runs; ++i) {
-    CHECK(Run());
+    CAFFE_ENFORCE(Run(), "Warmup run ", i, " has failed.");
   }
 
   LOG(INFO) << "Main runs.";
-  CHECK_GE(main_runs, 0);
+  CAFFE_ENFORCE(
+      main_runs >= 0,
+      "Number of main runs should be non negative, provided ",
+      main_runs,
+      ".");
   Timer timer;
   for (int i = 0; i < main_runs; ++i) {
-    CHECK(Run());
+    CAFFE_ENFORCE(Run(), "Main run ", i, " has failed.");
   }
   auto millis = timer.MilliSeconds();
   LOG(INFO) << "Main run finished. Milliseconds per iter: "
@@ -243,7 +262,13 @@ void SimpleNet::TEST_Benchmark(const int warmup_runs, const int main_runs,
       for (auto& op : operators_) {
         const string& op_type = op->def().type();
         timer.Start();
-        CHECK(op->Run());
+        CAFFE_ENFORCE(
+            op->Run(),
+            "operator ",
+            op->def().name(),
+            "(",
+            op_type,
+            ") has failed.");
         float spent = timer.MilliSeconds();
         time_per_op[idx] += spent;
         time_per_op_type[op_type] += spent;
@@ -367,7 +392,7 @@ DAGNetBase::DAGNetBase(const NetDef& net_def, Workspace* ws)
   }
   // Finally, start the workers.
   int num_workers = net_def.has_num_workers() ? net_def.num_workers() : 1;
-  CHECK_GT(num_workers, 0) << "Must have a nonnegative number of workers";
+  CAFFE_ENFORCE(num_workers > 0, "Must have a positive number of workers.");
   if (num_workers == 1) {
     LOG(WARNING) << "Number of workers is 1: this means that all operators "
                  << "will be executed sequentially. Did you forget to set "
@@ -421,8 +446,14 @@ bool DAGNetBase::Run() {
     cv_.wait(mutex_lock);
   }
   VLOG(2) << "All ops finished running.";
-  for (const auto& op: operator_nodes_) {
-    CHECK_EQ(op.runtime_parent_count_, 0);
+  for (const auto& op : operator_nodes_) {
+    CAFFE_ENFORCE(
+        op.runtime_parent_count_ == 0,
+        "Operator ",
+        op.operator_->def().name(),
+        "(",
+        op.operator_->def().type(),
+        ") has some runtime parents left.");
   }
   // If the above while loop finished, we know that the current run finished.
   return success_;
@@ -440,7 +471,11 @@ void DAGNetBase::WorkerFunction() {
     VLOG(1) << "Running operator #" << idx << " "
             << operator_nodes_[idx].operator_->def().name()
             << "(" << operator_nodes_[idx].operator_->def().type() << ").";
-    CHECK(execution_chains_.find(idx) != execution_chains_.end()) << idx;
+    CAFFE_ENFORCE(
+        execution_chains_.find(idx) != execution_chains_.end(),
+        "Can't find chain ",
+        idx,
+        ".");
     const auto& chain = execution_chains_[idx];
     bool this_success = RunAt(execution_chains_[idx]);
     if (!this_success) {
@@ -452,11 +487,14 @@ void DAGNetBase::WorkerFunction() {
     for (const auto idx: chain) {
       for (const auto child: operator_nodes_[idx].children_) {
         const int count = --operator_nodes_[child].runtime_parent_count_;
-        CHECK_GE(count, 0)
-            << "Found runtime parent count smaller than zero for "
-            << "operator node "
-            << operator_nodes_[child].operator_->def().name() << "("
-            << operator_nodes_[child].operator_->def().type() << ").";
+        CAFFE_ENFORCE(
+            count >= 0,
+            "Found runtime parent count smaller than zero for ",
+            "operator node ",
+            operator_nodes_[child].operator_->def().name(),
+            "(",
+            operator_nodes_[child].operator_->def().type(),
+            ").");
 
         if (count != 0) {
           continue;
@@ -476,7 +514,11 @@ void DAGNetBase::WorkerFunction() {
       std::unique_lock<std::mutex> mutex_lock(remaining_ops_mutex_);
       remaining_ops_ -= chain.size();
       success_ &= this_success;
-      CHECK_GE(remaining_ops_, 0);
+      CAFFE_ENFORCE(
+          remaining_ops_ >= 0,
+          "All the operations should be finished by now, still have ",
+          remaining_ops_,
+          " remaining.");
     }
     cv_.notify_one();
     VLOG(2) << "Finished executing operator #" << idx;
@@ -487,16 +529,24 @@ void DAGNetBase::TEST_Benchmark(const int warmup_runs, const int main_runs,
                             const bool run_individual) {
   LOG(INFO) << "Starting benchmark.";
   LOG(INFO) << "Running warmup runs.";
-  CHECK_GE(warmup_runs, 0);
+  CAFFE_ENFORCE(
+      warmup_runs >= 0,
+      "Number of warm up runs should be non negative, provided ",
+      warmup_runs,
+      ".");
   for (int i = 0; i < warmup_runs; ++i) {
-    CHECK(Run());
+    CAFFE_ENFORCE(Run(), "Warmup run ", i, " has failed.");
   }
 
   LOG(INFO) << "Main runs.";
-  CHECK_GE(main_runs, 0);
+  CAFFE_ENFORCE(
+      main_runs >= 0,
+      "Number of main runs should be non negative, provided ",
+      main_runs,
+      ".");
   Timer timer;
   for (int i = 0; i < main_runs; ++i) {
-    CHECK(Run());
+    CAFFE_ENFORCE(Run(), "Main run ", i, " has failed.");
   }
   auto millis = timer.MilliSeconds();
   LOG(INFO) << "Main run finished. Milliseconds per iter: "

@@ -298,7 +298,7 @@ template <typename... ExtraArgs>
 struct DispatchHelper<TensorTypes<>, ExtraArgs...> {
   template <typename Op>
   static bool call(Op* op, const TypeMeta& meta) {
-    LOG(FATAL) << "Unsupported type of tensor: " << meta.name();
+    CAFFE_THROW("Unsupported type of tensor: ", meta.name());
     return false;
   }
   template <typename Op, typename Context>

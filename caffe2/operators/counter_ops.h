@@ -14,8 +14,7 @@ class Counter {
  public:
   explicit Counter(T count) : count_(count) {}
   bool CountDown() {
-    if (count_ > 0) {
-      --count_;
+    if (count_-- > 0) {
       return false;
     }
     return true;

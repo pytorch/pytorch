@@ -1193,14 +1193,15 @@ def execution_step(default_name,
         step.AddNet(steps_or_nets)
         return step
     elif isinstance(steps_or_nets, list):
-        if isinstance(steps_or_nets[0], Net):
-            step = set_step_attr(ExecutionStep(default_name))
-            map(step.AddNet, steps_or_nets)
-            return step
-        elif isinstance(steps_or_nets[0], ExecutionStep):
-            step = set_step_attr(ExecutionStep(default_name))
-            map(step.AddSubstep, steps_or_nets)
-            return step
+        step = set_step_attr(ExecutionStep(default_name))
+        for step_or_net in steps_or_nets:
+            if isinstance(step_or_net, Net):
+                step.AddNet(step_or_net)
+            elif isinstance(step_or_net, ExecutionStep):
+                step.AddSubstep(step_or_net)
+            else:
+                raise ValueError('unsupported type {}'.format(step_or_net))
+        return step
     else:
         raise ValueError(
             'steps_or_nets must be a step, a net, or a list of nets or steps.')

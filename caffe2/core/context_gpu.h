@@ -5,7 +5,6 @@
 
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context.h"
-#include "caffe2/core/cuda_memorypool_gpu.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/core/types.h"
 #include "caffe2/proto/caffe2.pb.h"
@@ -13,7 +12,28 @@
 
 namespace caffe2 {
 
-// A virtual allocator class to do memory allocation and deallocation.
+enum class CudaMemoryPoolType {
+  NONE = 0,
+  CNMEM = 1,
+  CUB = 2,
+};
+
+/**
+ * Gets the current memory pool type used by Caffe2.
+ *
+ * The memory pool is set up during caffe2's global initialization time.
+ */
+CudaMemoryPoolType GetCudaMemoryPoolType();
+
+/**
+ * An allocator that does the CPU memory allocation with pinned memory.
+ *
+ * This is needed because if we want to do any asynchronous cuda memcpy,
+ * the underlying CPU memory also needs to be allocated into pinned memory
+ * space. As a result, whenever Caffe2 is built with GPU and there is
+ * GPU present during runtime, at global initialization time we will set
+ * the CPU memory allocator to allocate pinned memory.
+ */ 
 struct PinnedCPUAllocator final : CPUAllocator {
   PinnedCPUAllocator() {}
   ~PinnedCPUAllocator() {}
@@ -150,13 +170,9 @@ class CUDAContext final {
     return curand_generator_;
   }
 
-  static inline void* New(size_t nbytes) {
-    return CudaMemoryPool::New(nbytes);
-  }
+  static void* New(size_t nbytes);
 
-  static inline void Delete(void* data) {
-    CudaMemoryPool::Delete(data);
-  }
+  static void Delete(void* data);
 
   template <class SrcContext, class DstContext>
   inline void CopyBytes(size_t nbytes, const void* src, void* dst) {
