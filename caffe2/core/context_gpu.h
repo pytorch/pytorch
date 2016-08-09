@@ -5,7 +5,6 @@
 
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context.h"
-#include "caffe2/core/cuda_memorypool_gpu.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/core/types.h"
 #include "caffe2/proto/caffe2.pb.h"
