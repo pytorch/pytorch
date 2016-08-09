@@ -213,4 +213,6 @@ INSTALL(FILES
           generic/THCTensorMathReduce.cu
 	  generic/THCTensorScatterGather.h
 	  generic/THCTensorScatterGather.cu
+	  generic/THCTensorIndex.h
+	  generic/THCTensorIndex.cu
           DESTINATION "${THC_INSTALL_INCLUDE_SUBDIR}/THC/generic")
