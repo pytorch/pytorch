@@ -42,10 +42,10 @@ class EnqueueBlobsOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   using Operator<Context>::Operator;
   bool RunOnDevice() override {
-    CHECK_GT(InputSize(), 1);
+    CAFFE_ENFORCE(InputSize() > 1);
     auto queue = Operator<Context>::Inputs()[0]
                      ->template Get<std::shared_ptr<BlobsQueue>>();
-    CHECK(queue);
+    CAFFE_ENFORCE(queue && OutputSize() == queue->getNumBlobs());
     return queue->blockingWrite(this->Outputs());
   }
 
@@ -58,10 +58,10 @@ class DequeueBlobsOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   using Operator<Context>::Operator;
   bool RunOnDevice() override {
-    CHECK_EQ(InputSize(), 1);
+    CAFFE_ENFORCE(InputSize() == 1);
     auto queue =
         OperatorBase::Inputs()[0]->template Get<std::shared_ptr<BlobsQueue>>();
-    CHECK(queue);
+    CAFFE_ENFORCE(queue && OutputSize() == queue->getNumBlobs());
     return queue->blockingRead(this->Outputs());
   }
 
@@ -80,6 +80,45 @@ class CloseBlobsQueueOp final : public Operator<Context> {
     CHECK(queue);
     queue->close();
     queue.reset();
+    return true;
+  }
+
+ private:
+};
+
+template <typename Context>
+class SafeEnqueueBlobsOp final : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  using Operator<Context>::Operator;
+  bool RunOnDevice() override {
+    auto queue = Operator<Context>::Inputs()[0]
+                     ->template Get<std::shared_ptr<BlobsQueue>>();
+    CAFFE_ENFORCE(queue);
+    auto size = queue->getNumBlobs();
+    CAFFE_ENFORCE(OutputSize() == size + 1);
+    bool status = queue->blockingWrite(this->Outputs());
+    Output(size)->Resize(1);
+    *Output(size)->template mutable_data<bool>() = !status;
+    return true;
+  }
+};
+
+template <typename Context>
+class SafeDequeueBlobsOp final : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  using Operator<Context>::Operator;
+  bool RunOnDevice() override {
+    CAFFE_ENFORCE(InputSize() == 1);
+    auto queue = Operator<Context>::Inputs()[0]
+                     ->template Get<std::shared_ptr<BlobsQueue>>();
+    CAFFE_ENFORCE(queue);
+    auto size = queue->getNumBlobs();
+    CAFFE_ENFORCE(OutputSize() == size + 1);
+    bool status = queue->blockingRead(this->Outputs());
+    Output(size)->Resize(1);
+    *Output(size)->template mutable_data<bool>() = !status;
     return true;
   }
 

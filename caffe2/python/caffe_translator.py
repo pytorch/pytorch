@@ -137,7 +137,7 @@ def AddArgument(op, key, value):
 @CacaRegistry.Register("Input")
 def TranslateInput(layer, pretrained_blobs, is_test):
     return [], []
-    
+
 
 
 @CacaRegistry.Register("Convolution")

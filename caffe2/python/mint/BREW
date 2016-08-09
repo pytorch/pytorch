@@ -1,7 +1,6 @@
 py_library(
   name = "mint",
   srcs = [
-      "__init__.py",
       "app.py",
       "static/css/simple-sidebar.css",
       "templates/index.html",

@@ -627,7 +627,7 @@ if __name__ == '__main__':
 
     workspace.GlobalInit(
         ['caffe2', '--caffe2_log_level=0'] +
-        ['--caffe2_use_nvtx'] if args.use_nvtx else [])
+        (['--caffe2_use_nvtx'] if args.use_nvtx else []))
     model_map = {
         'AlexNet': AlexNet,
         'OverFeat': OverFeat,

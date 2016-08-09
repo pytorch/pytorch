@@ -35,9 +35,13 @@ class MPIBroadcastOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     MPI_Comm comm = OperatorBase::Input<MPICommonWorldWrapper>(0).comm();
+    CAFFE_ENFORCE(OperatorBase::OutputIsType<Tensor<Context>>(0),
+                  "Output is of wrong type.");
     auto* output = Output(0);
     // Make sure that output is already allocated.
-    CHECK_GT(output->size(), 0);
+    CAFFE_ENFORCE(output->size() > 0,
+                  "Broadcast op uses in-place operation so the output "
+                  "should be already allocated.");
     MPI_CHECK(MPI_Bcast(
         output->raw_mutable_data(),
         output->nbytes(),

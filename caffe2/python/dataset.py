@@ -14,7 +14,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import core, workspace
-from caffe2.python.io import Reader, Writer
+from caffe2.python.dataio import Reader, Writer
 from caffe2.python.schema import Struct
 import numpy as np
 
@@ -57,6 +57,23 @@ class _DatasetRandomReader(Reader):
             [self.cursor] + self.field_blobs,
             'offsets')
         self.offsets = offsets
+
+    def sortAndShuffle(self, net, sort_by_field=None,
+                       shuffle_size=1, batch_size=1):
+        # no sorting by default
+        sort_by_field_idx = -1
+        if sort_by_field:
+            assert sort_by_field in self.field_names, 'must be valid field'
+            sort_by_field_idx = self.field_names.index(sort_by_field)
+        self.reset(net)
+
+        indices = net.SortAndShuffle(
+            [self.cursor] + self.field_blobs,
+            'indices',
+            sort_by_field_idx=sort_by_field_idx,
+            shuffle_size=shuffle_size,
+            batch_size=batch_size)
+        self.indices = indices
 
     def read(self, read_net, batch_size=1):
         fields = read_net.ReadRandomBatch(
@@ -238,7 +255,7 @@ class Dataset(object):
         return _DatasetReader(
             self.fields, self.field_blobs, cursor, cursor_name)
 
-    def random_reader(self, init_net, indices, cursor_name=None):
+    def random_reader(self, init_net, indices=None, cursor_name=None):
         """Create a Reader object that is used to iterate through the dataset.
 
         NOTE: The reader order depends on the order in indices.

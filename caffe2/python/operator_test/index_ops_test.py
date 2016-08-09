@@ -5,24 +5,27 @@ from __future__ import unicode_literals
 from caffe2.python import core, workspace
 from caffe2.python.test_util import TestCase
 import numpy as np
+import tempfile
 
 
 class TestIndexOps(TestCase):
-    def test_index_ops(self):
+    def _test_index_ops(self, entries, dtype, index_create_op):
         workspace.RunOperatorOnce(core.CreateOperator(
-            'StringIndexCreate',
+            index_create_op,
             [],
             ['index'],
             max_elements=10))
-        entries = np.array(['entry1', 'entry2', 'entry3'], dtype=str)
+        my_entries = np.array(
+            [entries[0], entries[1], entries[2]], dtype=dtype)
 
-        workspace.FeedBlob('entries', entries)
+        workspace.FeedBlob('entries', my_entries)
         workspace.RunOperatorOnce(core.CreateOperator(
             'IndexLoad',
             ['index', 'entries'],
             []))
-        query1 = np.array(['entry1', 'new_entry1', 'entry1', 'new_entry2'],
-                          dtype=str)
+        query1 = np.array(
+            [entries[0], entries[3], entries[0], entries[4]],
+            dtype=dtype)
 
         workspace.FeedBlob('query1', query1)
         workspace.RunOperatorOnce(core.CreateOperator(
@@ -37,8 +40,9 @@ class TestIndexOps(TestCase):
             ['index'],
             []))
 
-        query2 = np.array(['miss1', 'new_entry2', 'entry1', 'miss2', 'miss3'],
-                          dtype=str)
+        query2 = np.array(
+            [entries[5], entries[4], entries[0], entries[6], entries[7]],
+            dtype=dtype)
         workspace.FeedBlob('query2', query2)
         workspace.RunOperatorOnce(core.CreateOperator(
             'IndexGet',
@@ -59,12 +63,12 @@ class TestIndexOps(TestCase):
             ['index'],
             ['stored_entries']))
         stored_actual = workspace.FetchBlob('stored_entries')
-        new_entries = np.array(['new_entry1', 'new_entry2'], dtype=str)
+        new_entries = np.array([entries[3], entries[4]], dtype=dtype)
         np.testing.assert_array_equal(
-            np.concatenate((entries, new_entries)), stored_actual)
+            np.concatenate((my_entries, new_entries)), stored_actual)
 
         workspace.RunOperatorOnce(core.CreateOperator(
-            'StringIndexCreate',
+            index_create_op,
             [],
             ['index2']))
 
@@ -80,3 +84,44 @@ class TestIndexOps(TestCase):
             ['index2_size']))
         index2_size = workspace.FetchBlob('index2_size')
         self.assertEquals(index2_size, 5)
+
+        # test serde
+        with tempfile.NamedTemporaryFile() as tmp:
+            workspace.RunOperatorOnce(core.CreateOperator(
+                'Save',
+                ['index'],
+                [],
+                absolute_path=1,
+                db_type='minidb',
+                db=tmp.name))
+            # frees up the blob
+            workspace.FeedBlob('index', np.array([]))
+            # reloads the index
+            workspace.RunOperatorOnce(core.CreateOperator(
+                'Load',
+                [],
+                ['index'],
+                absolute_path=1,
+                db_type='minidb',
+                db=tmp.name))
+            query3 = np.array(
+                [entries[0], entries[3], entries[0], entries[4], entries[4]],
+                dtype=dtype)
+
+            workspace.FeedBlob('query3', query3)
+            workspace.RunOperatorOnce(core.CreateOperator(
+                'IndexGet', ['index', 'query3'], ['result3']))
+            result3 = workspace.FetchBlob('result3')
+            np.testing.assert_array_equal([1, 4, 1, 5, 5], result3)
+
+    def test_string_index_ops(self):
+        self._test_index_ops([
+            'entry1', 'entry2', 'entry3', 'new_entry1',
+            'new_entry2', 'miss1', 'miss2', 'miss3',
+        ], str, 'StringIndexCreate')
+
+    def test_int_index_ops(self):
+        self._test_index_ops(range(8), np.int32, 'IntIndexCreate')
+
+    def test_long_index_ops(self):
+        self._test_index_ops(range(8), np.int64, 'LongIndexCreate')

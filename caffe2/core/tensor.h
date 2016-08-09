@@ -316,7 +316,7 @@ class Tensor {
    * or raw_mutable_data() must have been called prior to this function call.
    */
   inline const void* raw_data() const {
-    CHECK(data_.get() || size_ == 0);
+    CAFFE_ENFORCE(data_.get() || size_ == 0);
     return data_.get();
   }
 
@@ -328,9 +328,10 @@ class Tensor {
    */
   template <typename T>
   inline const T* data() const {
-    CHECK(data_.get() || size_ == 0)
-        << "The tensor is uninitialized. You probably need to call "
-        << "Resize() and mutable_data() first.";
+    CAFFE_ENFORCE(
+        data_.get() || size_ == 0,
+        "The tensor is uninitialized. You probably need to call ",
+        "Resize() and mutable_data() first.");
     CAFFE_ENFORCE(
         IsType<T>(),
         "Tensor type mistmatch, caller expects elements to be ",

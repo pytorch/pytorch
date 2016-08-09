@@ -40,7 +40,8 @@ def MakeArgument(key, value):
         # int.
         argument.i = value
     elif isinstance(value, basestring):
-        argument.s = value
+        argument.s = (value if type(value) is bytes
+                      else value.encode('utf-8'))
     elif isinstance(value, Message):
         argument.s = value.SerializeToString()
     elif all(type(v) is float for v in value):
@@ -48,7 +49,8 @@ def MakeArgument(key, value):
     elif all(any(type(v) is t for t in [int, bool, long]) for v in value):
         argument.ints.extend(value)
     elif all(isinstance(v, basestring) for v in value):
-        argument.strings.extend(value)
+        argument.strings.extend([
+            (v if type(v) is bytes else v.encode('utf-8')) for v in value])
     elif all(isinstance(v, Message) for v in value):
         argument.strings.extend([v.SerializeToString() for v in value])
     else:

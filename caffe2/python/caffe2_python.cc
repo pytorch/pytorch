@@ -536,6 +536,22 @@ PyObject* SerializeBlob(PyObject* self, PyObject* args) {
   return StdStringToPyBytes(blob.Serialize(caffe2::string(name)));
 }
 
+PyObject* DeserializeBlob(PyObject* self, PyObject* args) {
+  char* name;
+  char* serialized;
+  int serialized_len;
+  if (!PyArg_ParseTuple(args, "ss#", &name, &serialized, &serialized_len)) {
+    PyErr_SetString(PyExc_ValueError, "Incorrect arguments.");
+    return nullptr;
+  }
+  caffe2::Blob* blob = gWorkspace->CreateBlob(caffe2::string(name));
+  if (!blob->Deserialize(std::string(serialized, serialized_len))) {
+    PyErr_SetString(PyExc_ValueError, "Deserialization failure.");
+    return nullptr;
+  }
+  Py_RETURN_TRUE;
+}
+
 PyObject* FetchBlob(PyObject* self, PyObject* args) {
   char* name;
   if (!PyArg_ParseTuple(args, "s", &name)) {
@@ -630,6 +646,7 @@ PyMethodDef* GetCaffe2PythonMethods() {
       {"cc_RunPlan", RunPlan, METH_VARARGS, ""},
       _PYNAME(CreateBlob),
       _PYNAME(SerializeBlob),
+      _PYNAME(DeserializeBlob),
       {"cc_FetchBlob", FetchBlob, METH_VARARGS, ""},
       {"cc_FeedBlob", FeedBlob, METH_VARARGS, ""},
       {nullptr, nullptr, 0, nullptr}, // end of python methods.

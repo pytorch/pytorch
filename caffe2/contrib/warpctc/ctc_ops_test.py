@@ -6,9 +6,9 @@ import unittest
 import numpy as np
 from caffe2.proto import caffe2_pb2
 
-from caffe2.python import core, workspace, fbdep
+from caffe2.python import core, workspace, dyndep
 
-fbdep.InitOpsLibrary('@/caffe2/caffe2/contrib/warpctc:ctc_ops')
+dyndep.InitOpsLibrary('@/caffe2/caffe2/contrib/warpctc:ctc_ops')
 
 workspace.GlobalInit(["python"])
 

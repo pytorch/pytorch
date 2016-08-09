@@ -37,6 +37,12 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
         stride_w_(OperatorBase::GetSingleArgument<int>(
             "stride_w",
             OperatorBase::GetSingleArgument<int>("stride", 1))),
+        adj_h_(OperatorBase::GetSingleArgument<int>(
+            "adj_h",
+            OperatorBase::GetSingleArgument<int>("adj", 0))),
+        adj_w_(OperatorBase::GetSingleArgument<int>(
+            "adj_w",
+            OperatorBase::GetSingleArgument<int>("adj", 0))),
         order_(StringToStorageOrder(
             OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
     CHECK_GT(kernel_h_, 0);
@@ -63,6 +69,8 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
     CHECK_GE(pad_r_, 0);
     CHECK_GT(stride_h_, 0);
     CHECK_GT(stride_w_, 0);
+    CHECK_LT(adj_w_, stride_w_);
+    CHECK_LT(adj_h_, stride_h_);
   }
   // Sets the output size. The output channel is manually specified.
   void SetOutputSize(
@@ -93,8 +101,9 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
     }
     int output_height = 0, output_width = 0;
     ComputeSizeAndPad(
-        H, stride_h_, kernel_h_, &pad_t_, &pad_b_, &output_height);
-    ComputeSizeAndPad(W, stride_w_, kernel_w_, &pad_l_, &pad_r_, &output_width);
+        H, stride_h_, kernel_h_, adj_h_, &pad_t_, &pad_b_, &output_height);
+    ComputeSizeAndPad(
+        W, stride_w_, kernel_w_, adj_w_, &pad_l_, &pad_r_, &output_width);
     if (channel_first) {
       output->Resize(N, output_channel, output_height, output_width);
     } else {
@@ -141,12 +150,15 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
   int kernel_w_;
   int stride_h_;
   int stride_w_;
+  int adj_h_;
+  int adj_w_;
   StorageOrder order_;
 
   inline void ComputeSizeAndPad(
       const int in_size,
       const int stride,
       const int kernel,
+      const int adj,
       int* pad_head,
       int* pad_tail,
       int* out_size) {
@@ -154,7 +166,8 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
       case LegacyPadding::NOTSET:
         CHECK_GE(*pad_head, 0);
         CHECK_GE(*pad_tail, 0);
-        *out_size = (in_size - 1) * stride + kernel - *pad_head - *pad_tail;
+        *out_size =
+            (in_size - 1) * stride + kernel + adj - *pad_head - *pad_tail;
         break;
       // We handle cases of LegacyPadding::VALID and LegacyPadding::SAME
       // the same way
@@ -162,7 +175,7 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
       case LegacyPadding::SAME:
         *pad_head = 0;
         *pad_tail = 0;
-        *out_size = (in_size - 1) * stride + kernel;
+        *out_size = (in_size - 1) * stride + kernel + adj;
         break;
       case LegacyPadding::CAFFE_LEGACY_POOLING:
         LOG(FATAL) << "CAFFE_LEGACY_POOLING is no longer supported.";
