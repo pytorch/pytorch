@@ -524,29 +524,9 @@ class Tensor {
   // In case of chunk load we store how much data was already loaded
 
  private:
-  bool SetDims(const vector<TIndex>& src) {
-    auto old_size = size_;
-    dims_.resize(src.size());
-    size_ = 1;
-    for (int i = 0; i < src.size(); ++i) {
-      size_ *= src[i];
-      dims_[i] = src[i];
-    }
-    return size_ != old_size;
-  }
-
-  bool SetDims(const vector<long int>& src) {
-    auto old_size = size_;
-    dims_.resize(src.size());
-    size_ = 1;
-    for (int i = 0; i < src.size(); ++i) {
-      size_ *= src[i];
-      dims_[i] = src[i];
-    }
-    return size_ != old_size;
-  }
-
-  bool SetDims(const vector<int>& src) {
+  template <typename T,
+            typename=typename std::enable_if<std::is_integral<T>::value>::type>
+  bool SetDims(const vector<T>& src) {
     auto old_size = size_;
     dims_.resize(src.size());
     size_ = 1;
