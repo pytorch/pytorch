@@ -31,7 +31,7 @@ _InitDataType()
 
 # Python 2 and 3 compatibility: test if basestring exists
 try:
-    basestring  # NOQA
+    basestring = basestring  # NOQA
 except NameError:
     # This is python3 so we define basestring.
     basestring = str
@@ -105,6 +105,11 @@ class BlobReference(object):
         if not isinstance(other, basestring):
             raise RuntimeError('Cannot add BlobReference to a non-string.')
         return BlobReference(self._name + other, self._from_net)
+
+    def __radd__(self, other):
+        if not isinstance(other, basestring):
+            raise RuntimeError('Cannot add a non-string to BlobReference.')
+        return BlobReference(other + self._name, self._from_net)
 
     def Net(self):
         return self._from_net
@@ -882,7 +887,7 @@ class Net(object):
             if output_id is not None:
                 output_name += ':' + str(output_id)
             index = 2
-            while self.BlobIsDefined(output_name):
+            while self.BlobIsDefined(str(ScopedBlobReference(output_name))):
                 output_name = output_name_base + '_' + str(index)
                 if output_id is not None:
                     output_name += ':' + str(output_id)

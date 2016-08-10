@@ -8,9 +8,8 @@ struct TanhCPUFunctor {
   template <typename T>
   inline void operator()(const int n, const T* x,
                          T* y, CPUContext* device_context) {
-    for (int i = 0; i < n; ++i) {
-      y[i] = tanh(x[i]);
-    }
+    ConstEigenVectorArrayMap<T> x_arr(x, n);
+    EigenVectorMap<T>(y, n) = 1 - 2 * ((x_arr * 2).exp() + 1).inverse();
   }
 };
 
@@ -18,9 +17,9 @@ struct TanhGradientCPUFunctor {
   template <typename T>
   inline void operator()(const int n, const T* y, const T* dy,
                          T* dx, CPUContext* device_context) {
-    for (int i = 0; i < n; ++i) {
-      dx[i] = dy[i] * (1 - y[i] * y[i]);
-    }
+    ConstEigenVectorArrayMap<T> dy_arr(dy, n);
+    ConstEigenVectorArrayMap<T> y_arr(y, n);
+    EigenVectorMap<T>(dx, n) = dy_arr * (1 - y_arr * y_arr);
   }
 };
 

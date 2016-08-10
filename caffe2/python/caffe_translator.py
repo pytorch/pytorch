@@ -35,7 +35,7 @@ def _ShouldInclude(net_state, layer):
     return ret
 
 
-class CacaRegistry(object):
+class TranslatorRegistry(object):
     registry_ = {}
 
     @classmethod
@@ -114,7 +114,7 @@ class CacaRegistry(object):
 
 
 def TranslateModel(*args, **kwargs):
-    return CacaRegistry.TranslateModel(*args, **kwargs)
+    return TranslatorRegistry.TranslateModel(*args, **kwargs)
 
 
 def BaseTranslate(layer, caffe2_type):
@@ -134,13 +134,17 @@ def AddArgument(op, key, value):
 ################################################################################
 
 
-@CacaRegistry.Register("Input")
+@TranslatorRegistry.Register("Input")
 def TranslateInput(layer, pretrained_blobs, is_test):
     return [], []
 
 
+@TranslatorRegistry.Register("Data")
+def TranslateData(layer, pretrained_blobs, is_test):
+    return [], []
 
-@CacaRegistry.Register("Convolution")
+
+@TranslatorRegistry.Register("Convolution")
 def TranslateConv(layer, pretrained_blobs, is_test):
     param = layer.convolution_param
     if param.group > 1:
@@ -236,12 +240,12 @@ def TranslateConvWithGroups(layer, pretrained_blobs, is_test):
     return caffe_ops, caffe_params
 
 
-@CacaRegistry.Register("ReLU")
+@TranslatorRegistry.Register("ReLU")
 def TranslateRelu(layer, pretrained_blobs, is_test):
     return BaseTranslate(layer, "Relu"), []
 
 
-@CacaRegistry.Register("Pooling")
+@TranslatorRegistry.Register("Pooling")
 def TranslatePool(layer, pretrained_blobs, is_test):
     param = layer.pooling_param
     if param.pool == caffe_pb2.PoolingParameter.MAX:
@@ -257,7 +261,7 @@ def TranslatePool(layer, pretrained_blobs, is_test):
     return caffe_op, []
 
 
-@CacaRegistry.Register("LRN")
+@TranslatorRegistry.Register("LRN")
 def TranslateLRN(layer, pretrained_blobs, is_test):
     caffe_op = BaseTranslate(layer, "LRN")
     caffe_op.output.extend(['_' + caffe_op.output[0] + '_scale'])
@@ -273,7 +277,7 @@ def TranslateLRN(layer, pretrained_blobs, is_test):
     return caffe_op, []
 
 
-@CacaRegistry.Register("InnerProduct")
+@TranslatorRegistry.Register("InnerProduct")
 def TranslateInnerProduct(layer, pretrained_blobs, is_test):
     caffe_op = BaseTranslate(layer, "FC")
     output = caffe_op.output[0]
@@ -287,7 +291,7 @@ def TranslateInnerProduct(layer, pretrained_blobs, is_test):
     return caffe_op, [weight, bias]
 
 
-@CacaRegistry.Register("Dropout")
+@TranslatorRegistry.Register("Dropout")
 def TranslateDropout(layer, pretrained_blobs, is_test):
     caffe_op = BaseTranslate(layer, "Dropout")
     caffe_op.output.extend(['_' + caffe_op.output[0] + '_mask'])
@@ -298,13 +302,37 @@ def TranslateDropout(layer, pretrained_blobs, is_test):
     return caffe_op, []
 
 
-@CacaRegistry.Register("Softmax")
+@TranslatorRegistry.Register("Softmax")
 def TranslateSoftmax(layer, pretrained_blobs, is_test):
     caffe_op = BaseTranslate(layer, "Softmax")
     return caffe_op, []
 
 
-@CacaRegistry.Register("Concat")
+@TranslatorRegistry.Register("SoftmaxWithLoss")
+def TranslateSoftmaxWithLoss(layer, pretrained_blobs, is_test):
+    softmax_op = core.CreateOperator(
+        "Softmax", [layer.bottom[0]],
+        layer.bottom[0] + "_translator_autogen_softmax")
+    xent_op = core.CreateOperator(
+        "LabelCrossEntropy",
+        [softmax_op.output[0], layer.bottom[1]],
+        layer.bottom[0] + "_translator_autogen_xent")
+    loss_op = core.CreateOperator(
+        "AveragedLoss",
+        xent_op.output[0],
+        layer.top[0])
+    return [softmax_op, xent_op, loss_op], []
+
+
+@TranslatorRegistry.Register("Accuracy")
+def TranslateAccuracy(layer, pretrained_blobs, is_test):
+    caffe_op = BaseTranslate(layer, "Accuracy")
+    if layer.accuracy_param.top_k != 1:
+        print("Warning: Translation does not support Accuracy layers top_k >1.")
+    return caffe_op, []
+
+
+@TranslatorRegistry.Register("Concat")
 def TranslateConcat(layer, pretrained_blobs, is_test):
     caffe_op = BaseTranslate(layer, "Concat")
     caffe_op.output.extend(['_' + caffe_op.output[0] + '_dims'])

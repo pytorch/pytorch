@@ -117,6 +117,53 @@ class CNNModelHelper(object):
             **kwargs
         )
 
+    def ConvTranspose(
+        self, blob_in, blob_out, dim_in, dim_out, kernel, weight_init=None,
+        bias_init=None, **kwargs
+    ):
+        """ConvTranspose.
+        """
+        weight_init = weight_init if weight_init else ('XavierFill', {})
+        bias_init = bias_init if bias_init else ('ConstantFill', {})
+        blob_out = blob_out or self.net.NextName()
+        weight_shape = (
+            [dim_in, dim_out, kernel, kernel]
+            if self.order == "NCHW" else [dim_in, kernel, kernel, dim_out]
+        )
+        if self.init_params:
+            weight = self.param_init_net.__getattr__(weight_init[0])(
+                [],
+                blob_out + '_w',
+                shape=weight_shape,
+                **weight_init[1]
+            )
+            bias = self.param_init_net.__getattr__(bias_init[0])(
+                [],
+                blob_out + '_b',
+                shape=[dim_out, ],
+                **bias_init[1]
+            )
+        else:
+            weight = core.ScopedBlobReference(
+                blob_out + '_w', self.param_init_net)
+            bias = core.ScopedBlobReference(
+                blob_out + '_b', self.param_init_net)
+        self.params.extend([weight, bias])
+        self.weights.append(weight)
+        self.biases.append(bias)
+        if self.use_cudnn:
+            kwargs['engine'] = 'CUDNN'
+            kwargs['exhaustive_search'] = self.cudnn_exhaustive_search
+            if self.ws_nbytes_limit:
+                kwargs['ws_nbytes_limit'] = self.ws_nbytes_limit
+        return self.net.ConvTranspose(
+            [blob_in, weight, bias],
+            blob_out,
+            kernel=kernel,
+            order=self.order,
+            **kwargs
+        )
+
     def GroupConv(
         self,
         blob_in,
@@ -431,8 +478,8 @@ class CNNModelHelper(object):
     def Iter(self, blob_out, **kwargs):
         if 'device_option' in kwargs:
             del kwargs['device_option']
-        self.param_init_net.ConstantIntFill(
-            [], blob_out, shape=[1], value=0.,
+        self.param_init_net.ConstantFill(
+            [], blob_out, shape=[1], value=0, dtype=core.DataType.INT32,
             device_option=core.DeviceOption(caffe2_pb2.CPU, 0),
             **kwargs)
         return self.net.Iter(blob_out, blob_out, **kwargs)

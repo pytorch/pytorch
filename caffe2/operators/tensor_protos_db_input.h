@@ -84,12 +84,12 @@ bool TensorProtosDBInput<Context>::Prefetch() {
         }
         CHECK(deserializer.Deserialize(protos.protos(i), &src));
         DCHECK_EQ(src.size() * batch_size_, dst->size());
-        CHECK(src.meta().copy() == nullptr)
-            << "Only supporting fundamental types for now.";
-        this->context_.template CopyBytes<CPUContext, CPUContext>(
-            src.nbytes(), src.raw_data(),
-            static_cast<char*>(dst->raw_mutable_data(src.meta()))
-                + src.nbytes() * item_id);
+        this->context_.template CopyItems<CPUContext, CPUContext>(
+            src.meta(),
+            src.size(),
+            src.raw_data(),
+            static_cast<char*>(dst->raw_mutable_data(src.meta())) +
+                src.nbytes() * item_id);
       }
     }
   }

@@ -234,10 +234,11 @@ struct Reporter {
 
 }
 
-#define CHECK_SHOULD_STOP(shouldStop)                   \
-  if (getShouldStop(shouldStop)) {                      \
-    VLOG(1) << "Execution stopped by should_stop_blob"; \
-    return true;                                        \
+#define CHECK_SHOULD_STOP(step, shouldStop)                       \
+  if (getShouldStop(shouldStop)) {                                \
+    VLOG(1) << "Execution step " << step.name() << " stopped by " \
+            << step.should_stop_blob();                           \
+    return true;                                                  \
   }
 
 bool Workspace::ExecuteStepRecursive(
@@ -276,9 +277,9 @@ bool Workspace::ExecuteStepRecursive(
   };
   if (step.substep_size()) {
     for (int64_t iter = 0; shouldContinue(iter); ++iter) {
-      VLOG(1) << "Execution step " << step.name() << ": iteration " << iter;
-
       if (!step.concurrent_substeps() || step.substep().size() <= 1) {
+        VLOG(1) << "Executing step " << step.name() << " iteration " << iter;
+
         auto substepShouldContinue = [&, externalShouldContinue](int64_t iter) {
           return externalShouldContinue(iter);
         };
@@ -287,9 +288,12 @@ bool Workspace::ExecuteStepRecursive(
           if (!ExecuteStepRecursive(ss, substepShouldContinue)) {
             return false;
           }
-          CHECK_SHOULD_STOP(shouldStop);
+          CHECK_SHOULD_STOP(step, shouldStop);
         }
       } else {
+        VLOG(1) << "Executing step " << step.name() << " iteration " << iter
+                << " with " << step.substep().size() << " concurrent substeps";
+
         std::atomic<int> next_substep{0};
         std::atomic<bool> got_failure{false};
         auto substepShouldContinue = [&, externalShouldContinue](int64_t iter) {
@@ -319,14 +323,13 @@ bool Workspace::ExecuteStepRecursive(
           return false;
         }
         // concurrent substeps should be careful about setting should_stop_blob
-        CHECK_SHOULD_STOP(shouldStop);
+        CHECK_SHOULD_STOP(step, shouldStop);
       }
     }
     return true;
   } else {
     // If this ExecutionStep just contains nets, we can directly run it.
     vector<NetBase*> networks;
-    // Collect the networks to run.
     for (const string& network_name : step.network()) {
       if (!net_map_.count(network_name)) {
         LOG(ERROR) << "Network " << network_name << " not found.";
@@ -336,12 +339,12 @@ bool Workspace::ExecuteStepRecursive(
       networks.push_back(net_map_[network_name].get());
     }
     for (int64_t iter = 0; shouldContinue(iter); ++iter) {
-      VLOG(1) << "Executing network iteration " << iter;
+      VLOG(1) << "Executing networks " << step.name() << " iteration " << iter;
       for (NetBase* network : networks) {
         if (!network->Run()) {
           return false;
         }
-        CHECK_SHOULD_STOP(shouldStop);
+        CHECK_SHOULD_STOP(step, shouldStop);
       }
     }
   }

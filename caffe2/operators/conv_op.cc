@@ -40,7 +40,7 @@ OPERATOR_SCHEMA(ConvGradient).NumInputs(3).NumOutputs(2, 3);
 class GetConvGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
-    CHECK_EQ(def_.input_size(), 3);
+    CAFFE_ENFORCE(3 == def_.input_size());
     return SingleGradientDef(
         "ConvGradient", "",
         vector<string>{I(0), I(1), GO(0)},

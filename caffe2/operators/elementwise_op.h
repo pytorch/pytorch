@@ -9,6 +9,7 @@
 namespace caffe2 {
 
 using NumericTypes = TensorTypes<int32_t, int64_t, float, double>;
+using BoolTypes = TensorTypes<bool>;
 class SameTypeAsInput {};
 
 template <typename OutputTemplate, typename InputType>
@@ -276,7 +277,7 @@ CAFFE2_BINARY_FUNCTOR_WRAPPER(Div);
 
 #undef CAFFE2_BINARY_FUNCTOR_WRAPPER
 
-#define CAFFE2_BINARY_FUNCTOR_BINARY_RESULT_WRAPPER(name)           \
+#define CAFFE2_BINARY_FUNCTOR_BINARY_RESULT_WRAPPER(name, Types)    \
   struct name##Functor {                                            \
     template <typename T, class Context>                            \
     inline void operator()(                                         \
@@ -299,13 +300,27 @@ CAFFE2_BINARY_FUNCTOR_WRAPPER(Div);
     }                                                               \
   };                                                                \
   template <class DC>                                               \
-  using name##Op =                                                  \
-      BinaryElementwiseOp<NumericTypes, DC, name##Functor, bool, true>
+  using name##Op = BinaryElementwiseOp<Types, DC, name##Functor, bool, true>
 
-CAFFE2_BINARY_FUNCTOR_BINARY_RESULT_WRAPPER(LT);
-CAFFE2_BINARY_FUNCTOR_BINARY_RESULT_WRAPPER(LE);
-CAFFE2_BINARY_FUNCTOR_BINARY_RESULT_WRAPPER(GT);
-CAFFE2_BINARY_FUNCTOR_BINARY_RESULT_WRAPPER(GE);
+CAFFE2_BINARY_FUNCTOR_BINARY_RESULT_WRAPPER(LT, NumericTypes);
+CAFFE2_BINARY_FUNCTOR_BINARY_RESULT_WRAPPER(LE, NumericTypes);
+CAFFE2_BINARY_FUNCTOR_BINARY_RESULT_WRAPPER(GT, NumericTypes);
+CAFFE2_BINARY_FUNCTOR_BINARY_RESULT_WRAPPER(GE, NumericTypes);
+
+CAFFE2_BINARY_FUNCTOR_BINARY_RESULT_WRAPPER(And, BoolTypes);
+CAFFE2_BINARY_FUNCTOR_BINARY_RESULT_WRAPPER(Or, BoolTypes);
+CAFFE2_BINARY_FUNCTOR_BINARY_RESULT_WRAPPER(Xor, BoolTypes);
+
+struct NotFunctor {
+  template <class Context>
+  inline void
+  operator()(const int n, const bool* x, bool* y, Context* device_context) {
+    math::Not<bool, Context>(n, x, y, device_context);
+  }
+};
+
+template <class DC>
+using NotOp = UnaryElementwiseOp<BoolTypes, DC, NotFunctor>;
 
 #undef CAFFE2_BINARY_FUNCTOR_BINARY_RESULT_WRAPPER
 } // namespace caffe2

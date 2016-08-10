@@ -195,7 +195,49 @@ CAFFE2_REGISTER_BINARY_COMPARISON_OP(LE, "<=");
 CAFFE2_REGISTER_BINARY_COMPARISON_OP(GT, ">");
 CAFFE2_REGISTER_BINARY_COMPARISON_OP(GE, ">=");
 
-#undef REGISTER_BINIARY_COMPARISON_OP
+#undef REGISTER_BINARY_COMPARISON_OP
+
+std::function<void(OpSchema&)> LogicalDocGenerator(const char* name) {
+  return [=](OpSchema& schema) {
+    string doc = R"DOC(
+Performs element-wise logical operation `{name}` (with limited broadcast support).
+Both input operands should be of type `bool`.
+{broadcast_doc})DOC";
+    ReplaceAll(doc, "{name}", name);
+    ReplaceAll(doc, "{broadcast_doc}", kBroadcastDoc);
+    schema.SetDoc(doc);
+    schema.Arg("broadcast", "Pass 1 to enable broadcasting");
+    schema.Input(0, "A", "First operand.");
+    schema.Input(
+        1,
+        "B",
+        "Second operand. With broadcasting can be of smaller size than A, "
+        "without a few first dimensions more specifically. If broadcasting is "
+        "disabled should be of exactly the same size as A");
+    schema.Output(0, "C", "Result, has same dimensions and A and type `bool`");
+  };
+}
+
+#define CAFFE2_REGISTER_BINARY_LOGICAL_OP(name, symbol)       \
+  REGISTER_CPU_OPERATOR(name, name##Op<CPUContext>);          \
+  OPERATOR_SCHEMA(name).NumInputs(2).NumOutputs(1).FillUsing( \
+      LogicalDocGenerator(symbol));                           \
+  SHOULD_NOT_DO_GRADIENT(name)
+
+CAFFE2_REGISTER_BINARY_LOGICAL_OP(Or, "or");
+CAFFE2_REGISTER_BINARY_LOGICAL_OP(And, "and");
+CAFFE2_REGISTER_BINARY_LOGICAL_OP(Xor, "xor");
+
+#undef REGISTER_BINARY_LOGICAL_OP
+
+REGISTER_CPU_OPERATOR(Not, NotOp<CPUContext>);
+OPERATOR_SCHEMA(Not)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .SetDoc(R"DOC(Performs element-wise negation.)DOC")
+    .Input(0, "X", "Input tensor of type `bool`.")
+    .Output(0, "Y", "Output tensor of type `bool`.");
+SHOULD_NOT_DO_GRADIENT(Not);
 
 }  // namespace
 }  // namespace caffe2

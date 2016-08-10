@@ -89,12 +89,8 @@ class BooleanMaskOp final : public Operator<Context> {
         const auto* src = inPtr + lastStart * innerSizeBytes;
         auto* dst = outPtr + outStart * innerSizeBytes;
         int numItems = i - lastStart;
-        if (data.meta().copy()) {
-          data.meta().copy()(src, dst, numItems);
-        } else {
-          context_.template CopyBytes<CPUContext, CPUContext>(
-              numItems * data.meta().itemsize(), src, dst);
-        }
+        context_.template CopyItems<CPUContext, CPUContext>(
+            data.meta(), numItems, src, dst);
         outStart += numItems;
         lastStart = -1;
       }

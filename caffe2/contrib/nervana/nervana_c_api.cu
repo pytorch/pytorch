@@ -88,7 +88,7 @@ extern "C" bool nervana_loadKernels(const char* const base_path_cstr) {
         CUresult res = cuModuleLoad(&module, path.c_str());
 
         if (res != CUDA_SUCCESS) {
-            std::cerr << "Failed to load: " << kernel << " " << res << std::endl;
+            // std::cerr << "Failed to load: " << kernel << " " << res << std::endl;
             return false;
         }
 
@@ -97,7 +97,7 @@ extern "C" bool nervana_loadKernels(const char* const base_path_cstr) {
         CUfunction function;
         res = cuModuleGetFunction(&function, module, kernel.c_str());
         if (res != CUDA_SUCCESS) {
-            std::cerr << "Failed to extract: " << kernel << " " << res << std::endl;
+            // std::cerr << "Failed to extract: " << kernel << " " << res << std::endl;
             return false;
         }
 

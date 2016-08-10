@@ -55,7 +55,7 @@ OPERATOR_SCHEMA(ConvTransposeGradient).NumInputs(3).NumOutputs(2, 3);
 class GetConvTransposeGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
-    CHECK_EQ(def_.input_size(), 3);
+    CAFFE_ENFORCE(3 == def_.input_size());
     return SingleGradientDef(
         "ConvTransposeGradient",
         "",

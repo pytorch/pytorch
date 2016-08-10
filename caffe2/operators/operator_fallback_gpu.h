@@ -75,9 +75,10 @@ class GPUFallbackOp final : public Operator<CUDAContext> {
       return false;
     }
     for (int i = 0; i < OutputSize(); ++i) {
-      CAFFE_ENFORCE(local_output_blobs_[i]->IsType<TensorCPU>(),
-                    "GPU fallback op currently does not support non-TensorCPU "
-                    "output type.");
+      CAFFE_ENFORCE(
+          local_output_blobs_[i]->template IsType<TensorCPU>(),
+          "GPU fallback op currently does not support non-TensorCPU "
+          "output type.");
       Output(i)->CopyFrom(
           local_output_blobs_[i]->template Get<TensorCPU>(), &context_);
     }

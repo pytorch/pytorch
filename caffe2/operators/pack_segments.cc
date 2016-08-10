@@ -47,17 +47,11 @@ class PackSegmentsOp final : public Operator<Context> {
     auto* out = static_cast<char*>(output->raw_mutable_data(data.meta()));
     int start = 0;
     for (int i = 0; i < lengths.dim(0); ++i) {
-      if (data.meta().copy() == nullptr) {
-        context_.template CopyBytes<Context, Context>(
-            l[i] * block_bytesize,
-            d + block_bytesize * start,
-            out + block_bytesize * max_l * i);
-      } else {
-        data.meta().copy()(
-            d + block_bytesize * start,
-            out + block_bytesize * max_l * i,
-            l[i] * block_size);
-      }
+      context_.template CopyItems<Context, Context>(
+          data.meta(),
+          l[i] * block_size,
+          d + block_bytesize * start,
+          out + block_bytesize * max_l * i);
       start += l[i];
     }
     return true;
@@ -106,17 +100,11 @@ class UnpackSegmentsOp final : public Operator<Context> {
     auto* out = static_cast<char*>(output->raw_mutable_data(data.meta()));
     int start = 0;
     for (int i = 0; i < lengths.dim(0); ++i) {
-      if (data.meta().copy() == nullptr) {
-        context_.template CopyBytes<Context, Context>(
-            l[i] * block_bytesize,
-            d + block_bytesize * data.dim(1) * i,
-            out + block_bytesize * start);
-      } else {
-        data.meta().copy()(
-            d + block_bytesize * data.dim(1) * i,
-            out + block_bytesize * start,
-            l[i] * block_size);
-      }
+      context_.template CopyItems<Context, Context>(
+          data.meta(),
+          l[i] * block_size,
+          d + block_bytesize * data.dim(1) * i,
+          out + block_bytesize * start);
       start += l[i];
     }
     return true;
@@ -141,11 +129,12 @@ OPERATOR_SCHEMA(PackSegments)
         0,
         "packed_tensor",
         "N + 1 dim Tesor"
-        "where dim(0) is the max length");
+        "where dim(1) is the max length"
+        ", dim(0) is the batch size.");
 OPERATOR_SCHEMA(UnpackSegments)
     .NumInputs(2)
     .NumOutputs(1)
-    .SetDoc("Map N dim tensor to N+1 dim based on length blob")
+    .SetDoc("Map N+1 dim tensor to N dim based on length blob")
     .Input(
         0,
         "lengths",

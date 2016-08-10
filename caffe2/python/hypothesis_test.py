@@ -7,7 +7,7 @@ import copy
 from functools import reduce
 from hypothesis import assume, given, settings
 import hypothesis.strategies as st
-
+import collections
 from functools import partial
 import unittest
 
@@ -81,8 +81,8 @@ _NUMPY_TYPE_TO_ENUM = {
 }
 
 
-def _dtypes():
-    return st.sampled_from([np.int32, np.int64, np.float32, np.float64])
+def _dtypes(dtypes=[np.int32, np.int64, np.float32, np.float64]):
+    return st.sampled_from(dtypes)
 
 
 def _test_binary(name, ref, filter_=None, gcs=hu.gcs,
@@ -194,6 +194,12 @@ class TestOperators(hu.HypothesisTestCase):
     def test_negative(self, X, in_place, gc, dc):
         op = core.CreateOperator("Negative", ["X"],
                                  ["Y" if not in_place else "X"])
+        self.assertDeviceChecks(dc, op, [X], [0])
+        self.assertGradientChecks(gc, op, [X], 0, [0])
+
+    @given(X=hu.tensor(), **hu.gcs)
+    def test_tanh(self, X, gc, dc):
+        op = core.CreateOperator("Tanh", "X", "Y")
         self.assertDeviceChecks(dc, op, [X], [0])
         self.assertGradientChecks(gc, op, [X], 0, [0])
 
@@ -394,8 +400,6 @@ class TestOperators(hu.HypothesisTestCase):
                                                        output_channels,
                                                        batch_size, order,
                                                        engine, gc, dc):
-        assume(stride_h <= kernel)
-        assume(stride_w <= kernel)
         op = core.CreateOperator(
             "Conv",
             ["X", "w", "b"],
@@ -443,8 +447,6 @@ class TestOperators(hu.HypothesisTestCase):
                                                     input_channels,
                                                     output_channels, batch_size,
                                                     engine, gc, dc):
-        assume(stride_h <= kernel)
-        assume(stride_w <= kernel)
         X = np.random.rand(
             batch_size, size, size, input_channels).astype(np.float32) - 0.5
         w = np.random.rand(
@@ -488,6 +490,7 @@ class TestOperators(hu.HypothesisTestCase):
     @given(stride=st.integers(1, 3),
            pad=st.integers(0, 3),
            kernel=st.integers(1, 5),
+           dilation=st.integers(1, 3),
            size=st.integers(7, 10),
            input_channels=st.integers(1, 8),
            output_channels=st.integers(1, 8),
@@ -496,16 +499,19 @@ class TestOperators(hu.HypothesisTestCase):
            engine=st.sampled_from(["", "CUDNN"]),
            **hu.gcs)
     @settings(max_examples=2, timeout=100)
-    def test_convolution_gradients(self, stride, pad, kernel, size,
+    def test_convolution_gradients(self, stride, pad, kernel, dilation, size,
                                    input_channels, output_channels, batch_size,
                                    order, engine, gc, dc):
-        assume(stride <= kernel)
+        assume(size >= dilation * (kernel - 1) + 1)
+        assume("" == engine or 1 == dilation)
+
         op = core.CreateOperator(
             "Conv",
             ["X", "w", "b"],
             ["Y"],
             stride=stride,
             kernel=kernel,
+            dilation=dilation,
             pad=pad,
             order=order,
             engine=engine,
@@ -527,48 +533,162 @@ class TestOperators(hu.HypothesisTestCase):
     @given(stride=st.integers(1, 3),
            pad=st.integers(0, 3),
            kernel=st.integers(1, 5),
+           dilation=st.integers(1, 3),
            size=st.integers(7, 10),
            input_channels=st.integers(1, 8),
            output_channels=st.integers(1, 8),
            batch_size=st.integers(1, 3),
-           engine=st.sampled_from(["", "CUDNN"]), **hu.gcs)
-    def test_convolution_layout(self, stride, pad, kernel, size,
+           **hu.gcs)
+    def test_convolution_layout(self, stride, pad, kernel, dilation, size,
                                 input_channels, output_channels, batch_size,
-                                engine, gc, dc):
-        assume(stride <= kernel)
+                                gc, dc):
+        assume(size >= dilation * (kernel - 1) + 1)
+
         X = np.random.rand(
             batch_size, size, size, input_channels).astype(np.float32) - 0.5
         w = np.random.rand(
             output_channels, kernel, kernel, input_channels).astype(np.float32)\
             - 0.5
         b = np.random.rand(output_channels).astype(np.float32) - 0.5
-        outputs = {}
+        Output = collections.namedtuple("Output", ["Y", "engine", "order"])
+        outputs = []
         for order in ["NCHW", "NHWC"]:
-            op = core.CreateOperator(
-                "Conv",
-                ["X", "w", "b"],
-                ["Y"],
-                stride=stride,
-                kernel=kernel,
-                pad=pad,
-                order=order,
-                engine=engine,
-                device_option=gc,
-            )
-            if order == "NCHW":
-                X_f = X.transpose((0, 3, 1, 2))
-                w_f = w.transpose((0, 3, 1, 2))
+            for engine in (["", "CUDNN"] if dilation == 1 else [""]):
+                op = core.CreateOperator(
+                    "Conv",
+                    ["X", "w", "b"],
+                    ["Y"],
+                    stride=stride,
+                    kernel=kernel,
+                    dilation=dilation,
+                    pad=pad,
+                    order=order,
+                    engine=engine,
+                    device_option=gc,
+                )
+                if order == "NCHW":
+                    X_f = X.transpose((0, 3, 1, 2))
+                    w_f = w.transpose((0, 3, 1, 2))
+                else:
+                    X_f = X
+                    w_f = w
+                self.assertDeviceChecks(dc, op, [X_f, w_f, b], [0])
+                workspace.FeedBlob("X", X_f, device_option=gc)
+                workspace.FeedBlob("w", w_f, device_option=gc)
+                workspace.FeedBlob("b", b, device_option=gc)
+                workspace.RunOperatorOnce(op)
+                outputs.append(Output(
+                    Y=workspace.FetchBlob("Y"), engine=engine, order=order))
+
+        def canonical(o):
+            if o.order == "NHWC":
+                return o.Y.transpose((0, 3, 1, 2))
             else:
-                X_f = X
-                w_f = w
-            workspace.FeedBlob("X", X_f, device_option=gc)
-            workspace.FeedBlob("w", w_f, device_option=gc)
-            workspace.FeedBlob("b", b, device_option=gc)
-            workspace.RunOperatorOnce(op)
-            outputs[order] = workspace.FetchBlob("Y")
+                return o.Y
+
+        for o in outputs:
+            np.testing.assert_allclose(
+                canonical(outputs[0]),
+                canonical(o),
+                atol=1e-4,
+                rtol=1e-4)
+
+    @given(batch_size=st.integers(1, 3),
+           stride=st.integers(1, 3),
+           pad=st.integers(0, 3),
+           kernel=st.integers(1, 5),
+           dilation=st.integers(1, 3),
+           size=st.integers(7, 10),
+           channels=st.integers(1, 8),
+           **hu.gcs)
+    def test_im2col_layout(self, batch_size, stride, pad, kernel, dilation,
+                           size, channels, gc, dc):
+
+        dkernel = (dilation * (kernel - 1) + 1)
+        assume(size >= dkernel)
+
+        NCHW_TO_NHWC = (0, 2, 3, 1)
+        NHWC_TO_NCHW = (0, 3, 1, 2)
+        COL_NHWC_TO_NCHW = (4, 2, 3, 0, 1)
+
+        N = batch_size
+        C = channels
+        H = size
+        W = size
+
+        out_h = int((H + (2 * pad) - dkernel) / stride + 1)
+        out_w = int((W + (2 * pad) - dkernel) / stride + 1)
+
+        im_nchw = np.random.rand(N, C, H, W).astype(np.float32) - 0.5
+        im_nhwc = im_nchw.transpose(NCHW_TO_NHWC)
+
+        op_im2col_nchw = core.CreateOperator(
+            "Im2Col",
+            ["im_nchw"], ["col_nchw"],
+            stride=stride,
+            kernel=kernel,
+            dilation=dilation,
+            pad=pad,
+            order="NCHW",
+            device_option=gc)
+
+        op_im2col_nhwc = core.CreateOperator(
+            "Im2Col",
+            ["im_nhwc"], ["col_nhwc"],
+            stride=stride,
+            kernel=kernel,
+            dilation=dilation,
+            pad=pad,
+            order="NHWC",
+            device_option=gc)
+
+        workspace.FeedBlob("im_nchw", im_nchw, device_option=gc)
+        workspace.FeedBlob("im_nhwc", im_nhwc, device_option=gc)
+        workspace.RunOperatorOnce(op_im2col_nchw)
+        workspace.RunOperatorOnce(op_im2col_nhwc)
+
+        # there is probably a clever way to spell this in np
+        col_nchw = workspace.FetchBlob("col_nchw")
+        col_nhwc = workspace.FetchBlob("col_nhwc")
+        col_nchw_ = col_nchw.reshape(N, C, kernel, kernel, out_h, out_w)
+        col_nhwc_ = col_nhwc.reshape(N, out_h, out_w, kernel, kernel, C)
+        for i in range(0, N):
+            np.testing.assert_allclose(
+                col_nchw_[i],
+                col_nhwc_[i].transpose(COL_NHWC_TO_NCHW),
+                atol=1e-4,
+                rtol=1e-4)
+
+        op_col2im_nchw = core.CreateOperator(
+            "Col2Im",
+            ["col_nchw", "im_nchw"],
+            ["out_nchw"],
+            stride=stride,
+            kernel=kernel,
+            dilation=dilation,
+            pad=pad,
+            order="NCHW",
+            device_option=gc)
+
+        op_col2im_nhwc = core.CreateOperator(
+            "Col2Im",
+            ["col_nhwc", "im_nhwc"],
+            ["out_nhwc"],
+            stride=stride,
+            kernel=kernel,
+            dilation=dilation,
+            pad=pad,
+            order="NHWC",
+            device_option=gc)
+
+        workspace.RunOperatorOnce(op_col2im_nchw)
+        workspace.RunOperatorOnce(op_col2im_nhwc)
+
+        out_nchw = workspace.FetchBlob("out_nchw")
+        out_nhwc = workspace.FetchBlob("out_nhwc")
         np.testing.assert_allclose(
-            outputs["NCHW"],
-            outputs["NHWC"].transpose((0, 3, 1, 2)),
+            out_nchw,
+            out_nhwc.transpose(NHWC_TO_NCHW),
             atol=1e-4,
             rtol=1e-4)
 
@@ -675,7 +795,6 @@ class TestOperators(hu.HypothesisTestCase):
                                              size, input_channels,
                                              output_channels, batch_size,
                                              order, engine, gc, dc):
-        assume(stride <= kernel)
         assume(adj < stride)
         X = np.random.rand(
             batch_size, size, size, input_channels).astype(np.float32) - 0.5
@@ -715,7 +834,6 @@ class TestOperators(hu.HypothesisTestCase):
                                           size, input_channels,
                                           output_channels, batch_size,
                                           engine, gc, dc):
-        assume(stride <= kernel)
         assume(adj < stride)
         X = np.random.rand(
             batch_size, size, size, input_channels).astype(np.float32) - 0.5
@@ -1104,6 +1222,28 @@ class TestOperators(hu.HypothesisTestCase):
             for i, l in enumerate(lengths):
                 sids.extend(l * [i])
             return (np.array(sids, dtype=int), )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[np.array(lengths, dtype=int)],
+            reference=op_ref)
+
+    @given(lengths=st.lists(st.integers(min_value=0, max_value=10),
+                            min_size=0,
+                            max_size=10),
+           **hu.gcs_cpu_only)
+    def test_lengths_to_ranges(self, lengths, gc, dc):
+        op = core.CreateOperator(
+            "LengthsToRanges",
+            ["lengths"],
+            ["ranges"])
+
+        def op_ref(x):
+            if not x.size:
+                return (x.reshape((0, 2)), )
+            return (np.column_stack((np.concatenate(([0], np.cumsum(x)[:-1])),
+                                     x)), )
 
         self.assertReferenceChecks(
             device_option=gc,
@@ -1697,6 +1837,52 @@ class TestOperators(hu.HypothesisTestCase):
         out, = self.assertReferenceChecks(gc, op, [a], ref)
         self.assertEqual(dst, out.dtype)
 
+    @given(data=_dtypes(dtypes=[np.int32, np.int64, np.float32, np.bool]).
+           flatmap(lambda dtype: hu.tensor(
+               min_dim=1, dtype=dtype, elements=hu.elements_of_type(dtype))),
+           has_input=st.booleans(),
+           has_extra_shape=st.booleans(),
+           extra_shape=st.lists(
+           min_size=1, max_size=5, elements=st.integers(1, 5)),
+           **hu.gcs)
+    def test_constant_fill(self, data, has_input, has_extra_shape, extra_shape,
+                           gc, dc):
+        dtype = data.dtype.type
+        # in opt mode, np.bool is converted into np.bool_
+        if data.dtype == np.dtype(np.bool):
+            dtype = np.bool
+
+        value = data.item(0)
+        gt_shape = data.shape
+        inputs = [data]
+        enum_type = _NUMPY_TYPE_TO_ENUM[dtype]
+
+        if has_input:
+            if has_extra_shape:
+                op = core.CreateOperator('ConstantFill', ["X"], ["Y"],
+                                         dtype=enum_type,
+                                         extra_shape=extra_shape,
+                                         value=value)
+                gt_shape += tuple(extra_shape)
+            else:
+                op = core.CreateOperator('ConstantFill', ["X"], ["Y"],
+                                         dtype=enum_type,
+                                         value=value)
+        else:
+                op = core.CreateOperator('ConstantFill', [], ["Y"],
+                                         dtype=enum_type,
+                                         value=value,
+                                         shape=list(gt_shape))
+                inputs = []
+
+        def ref(inputs=None):
+            outputs = np.full(shape=gt_shape, fill_value=value, dtype=dtype)
+            return [outputs]
+
+        self.assertDeviceChecks(dc, op, inputs, [0])
+        out, = self.assertReferenceChecks(gc, op, inputs, ref)
+        self.assertEqual(dtype, out.dtype)
+
     @given(n=st.integers(1, 10),
            d=st.integers(1, 10),
            t=st.integers(1, 10),
@@ -1759,7 +1945,6 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [X], [0])
         self.assertGradientChecks(gc, op, [X], 0, [0])
 
-
     @given(X=hu.tensor(),
            in_place=st.booleans(),
            scale=st.floats(min_value=-2.0, max_value=2.0),
@@ -1775,6 +1960,7 @@ class TestOperators(hu.HypothesisTestCase):
            seed=st.integers(min_value=0, max_value=65536),
            null_axes=st.booleans(),
            **hu.gcs)
+    @settings(max_examples=2, timeout=100)
     def test_transpose(self, X, seed, null_axes, gc, dc):
         if null_axes:
             axes = None
@@ -1841,3 +2027,91 @@ class TestOperators(hu.HypothesisTestCase):
         np.testing.assert_allclose(workspace.FetchBlob("cos"), cos,
                                    rtol=1e-4, atol=1e-4)
         check_grad(cos_op)
+
+    @given(pad_t=st.integers(1, 3),
+           pad_l=st.integers(1, 3),
+           pad_b=st.integers(1, 3),
+           pad_r=st.integers(1, 3),
+           size=st.integers(7, 10),
+           input_channels=st.integers(1, 3),
+           batch_size=st.integers(1, 3),
+           order=st.sampled_from(["NCHW", "NHWC"]),
+           mode=st.sampled_from(["constant", "reflect", "edge"]),
+           **hu.gcs_cpu_only)
+    def test_pad_image(self, pad_t, pad_l, pad_b, pad_r, size, input_channels,
+                       batch_size, order, mode, gc, dc):
+        op = core.CreateOperator(
+            "PadImage",
+            ["X"],
+            ["Y"],
+            pad_t=pad_t,
+            pad_l=pad_l,
+            pad_b=pad_b,
+            pad_r=pad_r,
+            mode=mode,
+            order=order,
+        )
+        if order == "NHWC":
+            X = np.random.rand(
+                batch_size, size, size, input_channels).astype(np.float32) - 0.5
+
+            def numpy_pad_ref(x):
+                return (np.pad(
+                    x, ((0, 0), (pad_t, pad_b), (pad_l, pad_r), (0, 0)),
+                    mode),)
+
+        else:
+            X = np.random.rand(
+                batch_size, input_channels, size, size).astype(np.float32) - 0.5
+
+            def numpy_pad_ref(x):
+                return (np.pad(
+                    x, ((0, 0), (0, 0), (pad_t, pad_b), (pad_l, pad_r)),
+                    mode),)
+
+        self.assertReferenceChecks(gc, op, [X], numpy_pad_ref)
+        self.assertDeviceChecks(dc, op, [X], [0])
+        self.assertGradientChecks(gc, op, [X], 0, [0])
+
+    @given(size=st.integers(7, 10),
+           input_channels=st.integers(1, 10),
+           batch_size=st.integers(1, 3),
+           order=st.sampled_from(["NCHW", "NHWC"]),
+           **hu.gcs_cpu_only)
+    def test_instance_norm(self, size, input_channels, batch_size, order,
+                           gc, dc):
+        op = core.CreateOperator(
+            "InstanceNorm",
+            ["X", "scale", "bias"],
+            ["Y"],
+            order=order,
+            epsilon=1e-2,
+        )
+        np.random.seed(1701)
+        scale = np.random.rand(input_channels).astype(np.float32) + 0.5
+        bias = np.random.rand(input_channels).astype(np.float32) - 0.5
+        X = np.random.rand(
+            batch_size, input_channels, size, size).astype(np.float32) - 0.5
+        if order == "NHWC":
+            X = X.swapaxes(1, 2).swapaxes(2, 3)
+
+        def ref_nchw(x, scale, bias):
+            x = x.reshape(batch_size * input_channels, size * size)
+            y = (x - x.mean(1)[:, np.newaxis])
+            y /= np.sqrt(x.var(1) + 1e-2)[:, np.newaxis]
+            y = y.reshape(batch_size, input_channels, size, size)
+            y = y * scale.reshape(1, input_channels, 1, 1)
+            y = y + bias.reshape(1, input_channels, 1, 1)
+            return (y, )
+
+        def ref_nhwc(x, scale, bias):
+            x = x.swapaxes(2, 3).swapaxes(1, 2)
+            y = ref_nchw(x, scale, bias)[0]
+            return (y.swapaxes(1, 2).swapaxes(2, 3), )
+
+        self.assertReferenceChecks(
+            gc, op, [X, scale, bias],
+            ref_nchw if order == "NCHW" else ref_nhwc,
+            threshold=0.05)
+        # self.assertDeviceChecks(dc, op, [X, scale, bias], [0])
+        # self.assertGradientChecks(gc, op, [X, scale, bias], 0, [0])

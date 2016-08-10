@@ -5,7 +5,9 @@ from __future__ import unicode_literals
 import numpy as np
 from caffe2.python import core, workspace, dataset
 from caffe2.python.dataset import Const
-from caffe2.python.schema import List, Struct, Scalar, Map
+from caffe2.python.schema import (
+    List, Field, Struct, Scalar, Map,
+    from_blob_list, FetchRecord, NewRecord, FeedRecord)
 from caffe2.python.test_util import TestCase
 
 
@@ -15,6 +17,17 @@ def _assert_arrays_equal(actual, ref, err_msg):
     else:
         np.testing.assert_allclose(
             actual, ref, atol=1e-4, rtol=1e-4, err_msg=err_msg)
+
+
+def _assert_records_equal(actual, ref):
+    assert isinstance(actual, Field)
+    assert isinstance(ref, Field)
+    b1 = actual.field_blobs()
+    b2 = ref.field_blobs()
+    assert(len(b1) == len(b2)), 'Records have different lengths: %d vs. %d' % (
+        len(b1), len(b2))
+    for name, d1, d2 in zip(ref.field_names(), b1, b2):
+        _assert_arrays_equal(d1, d2, err_msg='Mismatch in field %s.' % name)
 
 
 class TestDatasetOps(TestCase):
@@ -115,7 +128,7 @@ class TestDatasetOps(TestCase):
             ['dog posts', 'friends who like to', 'posts about ca'],  # query
         ]
         # convert the above content to ndarrays, checking against the schema
-        contents = dataset.to_ndarray_list(contents_raw, schema)
+        contents = from_blob_list(schema, contents_raw)
 
         """
         3. Creating and appending to the dataset.
@@ -126,9 +139,10 @@ class TestDatasetOps(TestCase):
         net = core.Net('init')
         ds.init_empty(net)
 
-        blobs_to_append = [Const(net, c) for c in contents]
+        content_blobs = NewRecord(net, contents)
+        FeedRecord(content_blobs, contents)
         writer = ds.writer(init_net=net)
-        writer.write(net, blobs_to_append)
+        writer.write_record(net, content_blobs)
         workspace.RunNetOnce(net)
 
         """
@@ -164,7 +178,7 @@ class TestDatasetOps(TestCase):
             ([],) * 16,
             ([],) * 16,
         ]
-        entries = [dataset.to_ndarray_list(e, schema) for e in entries_raw]
+        entries = [from_blob_list(schema, e) for e in entries_raw]
 
         """
         Let's go ahead and create the reading nets.
@@ -174,20 +188,15 @@ class TestDatasetOps(TestCase):
         read_init_net = core.Net('read_init')
         read_next_net = core.Net('read_next')
         reader = ds.reader(read_init_net)
-        should_continue, batch_blobs = reader.read(read_next_net)
+        should_continue, batch = reader.read_record(read_next_net)
 
         workspace.RunNetOnce(read_init_net)
-
         workspace.CreateNet(read_next_net)
-        read_next_net_name = str(read_next_net)
 
         for i, entry in enumerate(entries):
-            workspace.RunNet(read_next_net_name)
-            for name, blob, base in zip(ds.field_names(), batch_blobs, entry):
-                data = workspace.FetchBlob(str(blob))
-                _assert_arrays_equal(
-                    data, base,
-                    err_msg='Mismatch in entry %d, field %s' % (i, name))
+            workspace.RunNet(str(read_next_net))
+            actual = FetchRecord(batch)
+            _assert_records_equal(actual, entry)
 
         """
         5. Reading/writing in a single plan
@@ -201,22 +210,22 @@ class TestDatasetOps(TestCase):
         """
         reset_net = core.Net('reset_net')
         reader.reset(reset_net)
-        read_step, fields = reader.execution_step()
+        read_step, batch = reader.execution_step()
 
         """ We will add the line number * 1000 to the feature ids. """
         process_net = core.Net('process')
         line_no = Const(process_net, 0, dtype=np.int32)
         const_one = Const(process_net, 1000, dtype=np.int32)
         process_net.Add([line_no, const_one], [line_no])
-        fid = schema.floats.values.keys.id()
-        process_net.Print(fields[fid], [])
-        process_net.Add([fields[fid], line_no], fields[fid], broadcast=1)
+        field = batch.floats.keys.get()
+        process_net.Print(field, [])
+        process_net.Add([field, line_no], field, broadcast=1)
 
         """ Lets create a second dataset and append to it. """
         ds2 = dataset.Dataset(schema, name='dataset2')
         ds2.init_empty(reset_net)
         writer = ds2.writer(reset_net)
-        writer.write(process_net, fields)
+        writer.write_record(process_net, batch)
         # commit is not necessary for DatasetWriter but will add it for
         # generality of the example
         commit_net = core.Net('commit')
@@ -232,15 +241,11 @@ class TestDatasetOps(TestCase):
         """
         Now we should have dataset2 populated.
         """
-        ds2blobs = ds2.get_blobs()
-        for i, (name, blob) in enumerate(zip(schema.field_names(), ds2blobs)):
-            data = workspace.FetchBlob(str(blob))
-            content = contents[i]
-            if i == fid:
-                # one of our fields has been added with line numbers * 1000
-                content += [1000, 2000, 2000, 3000, 3000, 3000]
-            _assert_arrays_equal(
-                data, contents[i], err_msg='Mismatch in field %s.' % name)
+        ds2_data = FetchRecord(ds2.content())
+        field = ds2_data.floats.keys
+        field.set(blob=field.get() - [1000, 2000, 2000, 3000, 3000, 3000])
+        _assert_records_equal(contents, ds2_data)
+
 
         """
         6. Slicing a dataset
@@ -249,7 +254,7 @@ class TestDatasetOps(TestCase):
         the same data.
         """
         subschema = Struct(('top_level', schema.int_lists.values))
-        int_list_contents = contents[schema.int_lists.values.slice()]
+        int_list_contents = contents.int_lists.values.field_names()
         self.assertEquals(len(subschema.field_names()), len(int_list_contents))
 
         """
@@ -260,12 +265,11 @@ class TestDatasetOps(TestCase):
         read_next_net = core.Net('read_next')
 
         idx = np.array([2, 1, 0])
-        workspace.FeedBlob('idx', idx)
-
-        reader = ds.random_reader(read_init_net, 'idx')
+        indices_blob = Const(read_init_net, idx, name='indices')
+        reader = ds.random_reader(read_init_net, indices_blob)
         reader.computeoffset(read_init_net)
 
-        should_continue, batch_blobs = reader.read(read_next_net)
+        should_continue, batch = reader.read_record(read_next_net)
 
         workspace.CreateNet(read_init_net)
         workspace.RunNetOnce(read_init_net)
@@ -276,12 +280,10 @@ class TestDatasetOps(TestCase):
         for i in range(len(entries)):
             k = idx[i] if i in idx else i
             entry = entries[k]
-            workspace.RunNet(read_next_net_name)
-            for name, blob, base in zip(ds.field_names(), batch_blobs, entry):
-                data = workspace.FetchBlob(str(blob))
-                _assert_arrays_equal(
-                    data, base,
-                    err_msg='Mismatch in entry %d, field %s' % (i, name))
+            workspace.RunNet(str(read_next_net))
+            actual = FetchRecord(batch)
+            _assert_records_equal(actual, entry)
+
 
         """
         8. Sort and shuffle a dataset
@@ -298,21 +300,17 @@ class TestDatasetOps(TestCase):
         reader.sortAndShuffle(read_init_net, 'int_lists:lengths', 1, 2)
         reader.computeoffset(read_init_net)
 
-        should_continue, batch_blobs = reader.read(read_next_net)
+        should_continue, batch = reader.read_record(read_next_net)
 
         workspace.CreateNet(read_init_net)
         workspace.RunNetOnce(read_init_net)
 
         workspace.CreateNet(read_next_net)
-        read_next_net_name = str(read_next_net)
 
         expected_idx = np.array([2, 1, 0])
         for i in range(len(entries)):
             k = expected_idx[i] if i in expected_idx else i
             entry = entries[k]
-            workspace.RunNet(read_next_net_name)
-            for name, blob, base in zip(ds.field_names(), batch_blobs, entry):
-                data = workspace.FetchBlob(str(blob))
-                _assert_arrays_equal(
-                    data, base,
-                    err_msg='Mismatch in entry %d, field %s' % (i, name))
+            workspace.RunNet(str(read_next_net))
+            actual = FetchRecord(batch)
+            _assert_records_equal(actual, entry)

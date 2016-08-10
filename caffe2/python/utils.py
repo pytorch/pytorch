@@ -12,8 +12,14 @@ if sys.version_info > (3,):
 
 
 def CaffeBlobToNumpyArray(blob):
-    return (np.asarray(blob.data, dtype=np.float32)
-            .reshape(blob.num, blob.channels, blob.height, blob.width))
+    if (blob.num != 0):
+        # old style caffe blob.
+        return (np.asarray(blob.data, dtype=np.float32)
+                .reshape(blob.num, blob.channels, blob.height, blob.width))
+    else:
+        # new style caffe blob.
+        return (np.asarray(blob.data, dtype=np.float32)
+                .reshape(blob.shape.dim))
 
 
 def Caffe2TensorToNumpyArray(tensor):

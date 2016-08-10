@@ -3,18 +3,18 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import core, fbdep
+from caffe2.python import core, dyndep
 import caffe2.python.hypothesis_test_util as hu
 
 from hypothesis import given
 import hypothesis.strategies as st
 import numpy as np
 
-fbdep.InitOpsLibrary('@/caffe2/caffe2/contrib/torch:th_ops')
+dyndep.InitOpsLibrary('@/caffe2/caffe2/contrib/torch:th_ops')
 
 
 try:
-    fbdep.InitOpsLibrary('@/caffe2/caffe2/contrib/torch:th_ops_gpu')
+    dyndep.InitOpsLibrary('@/caffe2/caffe2/contrib/torch:th_ops_gpu')
     HAS_GPU = True
 except Exception as e:
     print("Exception loading Torch GPU library: ", e)

@@ -23,7 +23,7 @@ bool LabelCrossEntropyOp<float, CPUContext>::RunOnDevice() {
   int D = X.dim32(1);
   DCHECK((label.ndim() == 1) || (label.ndim() == 2 && label.dim32(1) == 1));
   DCHECK_EQ(label.dim32(0), N);
-  Y->Resize(vector<TIndex>{N});
+  Y->Resize(N);
   const auto* Xdata = X.data<float>();
   const auto* labeldata = label.data<int>();
   auto* Ydata = Y->mutable_data<float>();
