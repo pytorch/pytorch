@@ -7,14 +7,14 @@
    <= 2048 at the moment (slice size == size of keys/values dim `dim`) */
 THC_API void THCudaTensor_sortKeyValueInplace(THCState* state,
                                               THCudaTensor* keys,
-                                              THCudaTensor* values,
+                                              THCudaLongTensor* values,
                                               int dim, int order);
 
 /* Performs an out-of-place sort of `input`, returning the per-slice indices
    in `indices` and the sorted values in `sorted` */
 THC_API void THCudaTensor_sort(THCState* state,
                                THCudaTensor* sorted,
-                               THCudaTensor* indices,
+                               THCudaLongTensor* indices,
                                THCudaTensor* input,
                                int dim, int order);
 

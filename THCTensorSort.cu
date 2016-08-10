@@ -29,7 +29,7 @@ unsigned long nextHighestPowerOf2(unsigned long n) {
 // `sliceSize - 1`.
 template <typename IndexType, int Dim>
 __global__ void
-fillSliceWithIndex(TensorInfo<float, IndexType> out,
+fillSliceWithIndex(TensorInfo<long, IndexType> out,
                    IndexType totalSlices,
                    IndexType sliceSize,
                    IndexType sliceStride) {
@@ -40,22 +40,23 @@ fillSliceWithIndex(TensorInfo<float, IndexType> out,
   }
 
   const unsigned long offset =
-    IndexToOffset<float, IndexType, Dim>::get(slice, out);
-  float* base = &out.data[offset];
+    IndexToOffset<long, IndexType, Dim>::get(slice, out);
+  long* base = &out.data[offset];
 
   for (long i = threadIdx.x; i < sliceSize; i += blockDim.x) {
     // Torch indices are 1-based (hence the +1)
-    base[i * sliceStride] = (float) i + 1.0f;
+    base[i * sliceStride] = (long) i + 1;
   }
 }
 
-void THCudaTensor_fillSliceWithIndex(THCState* state,
-                                     THCudaTensor* t,
-                                     int dim) {
-  THCCheckTensorDims(state, t, 2);
+void THCudaLongTensor_fillSliceWithIndex(THCState* state,
+                                         THCudaLongTensor* t,
+                                         int dim) {
+  long dims = THCudaLongTensor_nDimension(state, t);
+  THArgCheck(dims <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
 
-  long inElements = THCudaTensor_nElement(state, t);
-  long sliceSize = THCudaTensor_size(state, t, dim);
+  long inElements = THCudaLongTensor_nElement(state, t);
+  long sliceSize = THCudaLongTensor_size(state, t, dim);
   long numSlices = inElements / sliceSize;
 
   dim3 grid;
@@ -77,9 +78,9 @@ void THCudaTensor_fillSliceWithIndex(THCState* state,
     <<<grid, block, 0, THCState_getCurrentStream(state)>>>(      \
       info, numSlices, sliceSize, info.strides[collapseDim])
 
-  if (TensorUtils<THCudaTensor>::canUse32BitIndexMath(state, t)) {
-    TensorInfo<float, unsigned int> info =
-      getTensorInfo<THCudaTensor, unsigned int>(state, t);
+  if (TensorUtils<THCudaLongTensor>::canUse32BitIndexMath(state, t)) {
+    TensorInfo<long, unsigned int> info =
+      getTensorInfo<THCudaLongTensor, unsigned int>(state, t);
     info.reduceDim(dim);
     int collapseDim = info.collapseDims(dim);
 
@@ -95,8 +96,8 @@ void THCudaTensor_fillSliceWithIndex(THCState* state,
       }
     }
   } else {
-    TensorInfo<float, unsigned long> info =
-      getTensorInfo<THCudaTensor, unsigned long>(state, t);
+    TensorInfo<long, unsigned long> info =
+      getTensorInfo<THCudaLongTensor, unsigned long>(state, t);
     info.reduceDim(dim);
     int collapseDim = info.collapseDims(dim);
 
@@ -114,12 +115,15 @@ void THCudaTensor_fillSliceWithIndex(THCState* state,
 // in such a way that the 'key' tensor is ordered numerically
 THC_API void THCudaTensor_sortKeyValueInplace(THCState* state,
                                               THCudaTensor* key,
-                                              THCudaTensor* value,
+                                              THCudaLongTensor* value,
                                               int dim, bool dir) {
-  THArgCheck(THCudaTensor_isSameSizeAs(state, key, value), 2,
+  THLongStorage *valueSize = THCudaLongTensor_newSizeOf(state, value);
+  THArgCheck(THCudaTensor_isSize(state, key, valueSize), 2,
              "Key tensor must have same size as value tensor");
+  THLongStorage_free(valueSize);
+  long dims = THCudaLongTensor_nDimension(state, value);
+  THArgCheck(dims <= MAX_CUTORCH_DIMS, 3, CUTORCH_DIM_WARNING);
   THCCheckTensorDims(state, key, 2);
-  THCCheckTensorDims(state, value, 3);
 
   long inElements = THCudaTensor_nElement(state, key);
   long keySliceSize = THCudaTensor_size(state, key, dim);
@@ -157,7 +161,7 @@ THC_API void THCudaTensor_sortKeyValueInplace(THCState* state,
 
 #define HANDLE_CASE(TYPE, A, SIZE)                                      \
   if (dir) {                                                            \
-    bitonicSortKVInPlace<float, float, A, -1, GTComp<float>, TYPE, SIZE> \
+    bitonicSortKVInPlace<float, long, A, -1, GTComp<float>, TYPE, SIZE> \
       <<<grid, block, 0, THCState_getCurrentStream(state)>>>(           \
         keyInfo,                                                        \
         keySlices,                                                      \
@@ -167,7 +171,7 @@ THC_API void THCudaTensor_sortKeyValueInplace(THCState* state,
         (TYPE) valueInfo.strides[collapseValueDim],                     \
         GTComp<float>());                                               \
   } else {                                                              \
-    bitonicSortKVInPlace<float, float, A, -1, LTComp<float>, TYPE, SIZE> \
+    bitonicSortKVInPlace<float, long, A, -1, LTComp<float>, TYPE, SIZE> \
       <<<grid, block, 0, THCState_getCurrentStream(state)>>>(           \
         keyInfo,                                                        \
         keySlices,                                                      \
@@ -230,8 +234,8 @@ THC_API void THCudaTensor_sortKeyValueInplace(THCState* state,
     keyInfo.reduceDim(dim);
     int collapseKeyDim = keyInfo.collapseDims(dim);
 
-    TensorInfo<float, unsigned int> valueInfo =
-      getTensorInfo<THCudaTensor, unsigned int>(state, value);
+    TensorInfo<long, unsigned int> valueInfo =
+      getTensorInfo<THCudaLongTensor, unsigned int>(state, value);
     valueInfo.reduceDim(dim);
     int collapseValueDim = valueInfo.collapseDims(dim);
 
@@ -256,8 +260,8 @@ THC_API void THCudaTensor_sortKeyValueInplace(THCState* state,
     keyInfo.reduceDim(dim);
     int collapseKeyDim = keyInfo.collapseDims(dim);
 
-    TensorInfo<float, unsigned long> valueInfo =
-      getTensorInfo<THCudaTensor, unsigned long>(state, value);
+    TensorInfo<long, unsigned long> valueInfo =
+      getTensorInfo<THCudaLongTensor, unsigned long>(state, value);
     valueInfo.reduceDim(dim);
     int collapseValueDim = valueInfo.collapseDims(dim);
 
@@ -306,7 +310,7 @@ struct GlobalIndexToPerSliceIndex {
 
 void sortViaThrust(THCState* state,
                    THCudaTensor* sorted,
-                   THCudaTensor* indices,
+                   THCudaLongTensor* indices,
                    THCudaTensor* input,
                    int dim, bool dir) {
   long nDims = THCudaTensor_nDimension(state, input);
@@ -345,20 +349,20 @@ void sortViaThrust(THCState* state,
   // efficiency, but instead correctness.
   THCudaTensor_copy(state, sorted, input);
   THCudaTensor* trKeys = THCudaTensor_newWithTensor(state, sorted);
-  THCudaTensor* trIndices = THCudaTensor_newWithTensor(state, indices);
+  THCudaLongTensor* trIndices = THCudaLongTensor_newWithTensor(state, indices);
 
   // Transpose dim to innermost
   if (dim != nDims - 1) {
     THCudaTensor_transpose(state, trKeys, NULL, dim, nDims - 1);
-    THCudaTensor_transpose(state, trIndices, NULL, dim, nDims - 1);
+    THCudaLongTensor_transpose(state, trIndices, NULL, dim, nDims - 1);
   }
 
   // Thrust must operate on a contiguous layout
   THCudaTensor* trContigKey = THCudaTensor_newContiguous(state, trKeys);
-  THCudaTensor* trContigIndices = THCudaTensor_newContiguous(state, trIndices);
+  THCudaLongTensor* trContigIndices = THCudaLongTensor_newContiguous(state, trIndices);
 
   THCudaTensor_free(state, trKeys);
-  THCudaTensor_free(state, trIndices);
+  THCudaLongTensor_free(state, trIndices);
 
   thrust::device_ptr<float> keyIter(THCudaTensor_data(state, trContigKey));
 
@@ -367,7 +371,7 @@ void sortViaThrust(THCState* state,
   // have problems sorting slices < 2^24 but where the entire tensor
   // has more than 2^24 elements
   thrust::device_ptr<int>
-    indexIter((int*) THCudaTensor_data(state, trContigIndices));
+    indexIter((int*) THCudaLongTensor_data(state, trContigIndices));
 
   // Fill the indices with a global index across all slices
   thrust::counting_iterator<int> countIter(0);
@@ -417,27 +421,31 @@ void sortViaThrust(THCState* state,
   // Reverse the transposition as needed
   if (dim != nDims - 1) {
     THCudaTensor_transpose(state, trContigKey, NULL, dim, nDims - 1);
-    THCudaTensor_transpose(state, trContigIndices, NULL, dim, nDims - 1);
+    THCudaLongTensor_transpose(state, trContigIndices, NULL, dim, nDims - 1);
   }
 
   // Then copy back to the expected output
   THCudaTensor_freeCopyTo(state, trContigKey, sorted);
-  THCudaTensor_freeCopyTo(state, trContigIndices, indices);
+  THCudaLongTensor_freeCopyTo(state, trContigIndices, indices);
 }
 
 THC_API void THCudaTensor_sort(THCState* state,
                                THCudaTensor *sorted,
-                               THCudaTensor *indices,
+                               THCudaLongTensor *indices,
                                THCudaTensor *input,
                                int dim, int order) {
-  THAssert(THCudaTensor_checkGPU(state, 3, sorted, indices, input));
+  THAssert(THCudaTensor_checkGPU(state, 2, sorted, input));
+  THAssert(THCudaLongTensor_checkGPU(state, 1, indices));
   THCCheckTensorDims(state, sorted, 2);
-  THCCheckTensorDims(state, indices, 3);
   THCCheckTensorDims(state, input, 4);
+  long dims = THCudaLongTensor_nDimension(state, indices);
+  THArgCheck(dims <= MAX_CUTORCH_DIMS, 3, CUTORCH_DIM_WARNING);
 
   // Make sure sufficient output space is allocated
   THCudaTensor_resizeAs(state, sorted, input);
-  THCudaTensor_resizeAs(state, indices, input);
+  THLongStorage *inputSize = THCudaTensor_newSizeOf(state, input);
+  THCudaLongTensor_resize(state, indices, inputSize, NULL);
+  THLongStorage_free(inputSize);
 
   // How large are the slices that we are sorting?
   long sliceSize = THCudaTensor_size(state, input, dim);
@@ -456,7 +464,7 @@ THC_API void THCudaTensor_sort(THCState* state,
   if (sliceSize <= 2048) {
     // Fill `indices` (the values) with the
     // slice-relative index.
-    THCudaTensor_fillSliceWithIndex(state, indices, dim);
+    THCudaLongTensor_fillSliceWithIndex(state, indices, dim);
 
     // We sort k/v pairs in-place; copy unsorted input to output
     THCudaTensor_copy(state, sorted, input);
