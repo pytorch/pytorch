@@ -28,6 +28,7 @@ Config.PROTOC_BINARY = 'gen/third_party/google/protoc'
 Config.USE_LITE_PROTO = False
 Config.USE_SYSTEM_EIGEN = False
 Config.USE_GLOG = False
+Config.USE_GFLAGS = False
 Config.USE_RTTI = False
 Config.USE_OPENMP = False
 Config.CUDA_DIR = "non-existing"

@@ -8,13 +8,11 @@
 #include <map>
 #include <type_traits>
 #ifdef __GXX_RTTI
+#include <set>
 #include <typeinfo>
-#include <unordered_set>
 #endif
 
-#ifdef __EXCEPTIONS
 #include <exception>
-#endif // __EXCEPTIONS
 
 #include "caffe2/core/common.h"
 
@@ -23,7 +21,7 @@ namespace caffe2 {
 typedef intptr_t CaffeTypeId;
 std::map<CaffeTypeId, string>& gTypeNames();
 #ifdef __GXX_RTTI
-std::unordered_set<string>& gRegisteredTypeNames();
+std::set<string>& gRegisteredTypeNames();
 #endif // __GXX_RTTI
 
 // A utility function to demangle a function name.
@@ -46,11 +44,7 @@ struct TypeNameRegisterer {
                 << " registered twice. This should "
                    "not happen. Are you using RTLD_GLOBAL correctly?"
                 << std::endl;
-#ifdef __EXCEPTIONS
       throw std::runtime_error("TypeNameRegisterer error with type " + name);
-#else
-      exit(EXIT_FAILURE);
-#endif // __EXCEPTIONS
     }
     gRegisteredTypeNames().insert(name);
 #else  // __GXX_RTTI
