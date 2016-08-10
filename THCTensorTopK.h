@@ -7,7 +7,7 @@
 /* on `dir` */
 THC_API void THCudaTensor_topk(THCState* state,
                                THCudaTensor* topK,
-                               THCudaTensor* indices,
+                               THCudaLongTensor* indices,
                                THCudaTensor* input,
                                long k, int dim, int dir, int sorted);
 
