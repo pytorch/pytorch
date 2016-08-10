@@ -33,7 +33,7 @@ def recursiveType(param, type, tensorCache={}):
                     storage_key = param_storage._cdata
                     if storage_key not in tensorCache:
                         tensorCache[storage_key] = torch._import_dotted_name(storageType)(param_storage.size()).copy(param_storage)
-                    newparam.set(
+                    newparam.set_(
                         tensorCache[storage_key],
                         param.storageOffset(),
                         param.size(),
@@ -53,7 +53,7 @@ def recursiveResizeAs(t1, t2):
         t1 = t1[:len(t2)]
     elif torch.isTensor(t2):
         t1 = t1 if torch.isTensor(t1) else t2.new()
-        t1.resizeAs(t2)
+        t1.resizeAs_(t2)
     else:
         raise RuntimeError("Expecting nested tensors or tables. Got " + \
                 type(t1).__name__  + " and " + type(t2).__name__  + "instead")
@@ -63,7 +63,7 @@ def recursiveFill(t2, val):
     if isinstance(t2, list):
         t2 = [recursiveFill(x, val) for x in t2]
     elif torch.isTensor(t2):
-        t2.fill(val)
+        t2.fill_(val)
     else:
         raise RuntimeError("expecting tensor or table thereof. Got " + \
             type(t2).__name__ + " instead")
@@ -78,7 +78,7 @@ def recursiveAdd(t1, val=1, t2=None):
         for i, _ in enumerate(t2):
             t1[i], t2[i] = recursiveAdd(t1[i], val, t2[i])
     elif torch.isTensor(t1) and torch.isTensor(t2):
-        t1.add(val, t2)
+        t1.add_(val, t2)
     else:
         raise RuntimeError("expecting nested tensors or tables. Got " + \
                 type(t1).__name__ + " and " + type(t2).__name__ + " instead")
@@ -91,7 +91,7 @@ def recursiveCopy(t1, t2):
             t1[i], t2[i] = recursiveCopy(t1[i], t2[i])
     elif torch.isTensor(t2):
         t1 = t1 if torch.isTensor(t1) else t2.new()
-        t1.resizeAs(t2).copy(t2)
+        t1.resizeAs_(t2).copy(t2)
     else:
         raise RuntimeError("expecting nested tensors or tables. Got " + \
                 type(t1).__name__ + " and " + type(t2).__name__ + " instead")
@@ -121,17 +121,17 @@ def addSingletonDimension(*args):
         size[d] = t.size(d - 1)
         stride[d] = t.stride(d - 1)
 
-    view.set(t.storage(), t.storageOffset(), size, stride)
+    view.set_(t.storage(), t.storageOffset(), size, stride)
     return view
 
 def contiguousView(output, input, *args):
     output = output or input.new()
     if input.isContiguous():
-        output.view(input, *args)
+        output.set_(input.view(*args))
     else:
-        output.resizeAs(input)
+        output.resizeAs_(input)
         output.copy(input)
-        output.view(output, *args)
+        output.set_(output.view(*args))
     return output
 
 # go over specified fields and clear them. accepts
@@ -145,7 +145,7 @@ def clear(self, *args):
             return
         attr = getattr(self, f)
         if torch.isTensor(attr):
-            attr.set()
+            attr.set_()
         elif isinstance(attr, list):
             del attr[:]
         else:

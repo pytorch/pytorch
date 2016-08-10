@@ -9,13 +9,12 @@ class Squeeze(nn.Module):
 
     def updateOutput(self, input):
         dim = self.dim
-        # TODO: this operates inplace
-        self.output.set(input.squeeze(dim) if dim is not None else input.squeeze())
+        self.output.set_(input.squeeze(dim) if dim is not None else input.squeeze())
         return self.output
 
 
     def updateGradInput(self, input, gradOutput):
         assert input.nElement() == gradOutput.nElement()
-        self.gradInput.set(gradOutput.viewAs(input))
+        self.gradInput.set_(gradOutput.viewAs(input))
         return self.gradInput
 

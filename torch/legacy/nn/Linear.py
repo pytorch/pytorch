@@ -25,9 +25,9 @@ class Linear(nn.Module):
         else:
             stdv = 1./math.sqrt(self.weight.size(1))
 
-        self.weight.uniform(-stdv, stdv)
+        self.weight.uniform_(-stdv, stdv)
         if self.bias is not None:
-            self.bias.uniform(-stdv, stdv)
+            self.bias.uniform_(-stdv, stdv)
 
         return self
 
@@ -35,20 +35,20 @@ class Linear(nn.Module):
         nframe = input.size(0)
         self.addBuffer = self.addBuffer or input.new()
         if self.addBuffer.nElement() != nframe:
-            self.addBuffer.resize(nframe).fill(1)
+            self.addBuffer.resize_(nframe).fill_(1)
 
     def updateOutput(self, input):
         assert input.dim() == 2
         nframe = input.size(0)
         nElement = self.output.nElement()
-        self.output.resize(nframe, self.weight.size(0))
+        self.output.resize_(nframe, self.weight.size(0))
         if self.output.nElement() != nElement:
-            self.output.zero()
+            self.output.zero_()
 
         self._updateAddBuffer(input)
-        self.output.addmm(0, self.output, 1, input, self.weight.t())
+        self.output.addmm_(0, 1, input, self.weight.t())
         if self.bias is not None:
-            self.output.addr(1, self.addBuffer, self.bias)
+            self.output.addr_(self.addBuffer, self.bias)
 
         return self.output
 
@@ -57,22 +57,22 @@ class Linear(nn.Module):
             return
 
         nElement = self.gradInput.nElement()
-        self.gradInput.resizeAs(input)
+        self.gradInput.resizeAs_(input)
         if self.gradInput.nElement() != nElement:
-            self.gradInput.zero()
+            self.gradInput.zero_()
 
         assert input.dim() == 2
-        self.gradInput.addmm(0, 1, gradOutput, self.weight)
+        self.gradInput.addmm_(0, 1, gradOutput, self.weight)
 
         return self.gradInput
 
     def accGradParameters(self, input, gradOutput, scale=1):
         assert input.dim() == 2
-        self.gradWeight.addmm(scale, gradOutput.t(), input)
+        self.gradWeight.addmm_(scale, gradOutput.t(), input)
         if self.bias is not None:
             # update the size of addBuffer if the input is not the same size as the one we had in last updateGradInput
             self._updateAddBuffer(input)
-            self.gradBias.addmv(scale, gradOutput.t(), self.addBuffer)
+            self.gradBias.addmv_(scale, gradOutput.t(), self.addBuffer)
 
     def clearState(self):
         nn.utils.clear(self, 'addBuffer')

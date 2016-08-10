@@ -346,7 +346,7 @@ IMPLEMENT_STATELESS(lerp)
 IMPLEMENT_STATELESS(reshape)
 IMPLEMENT_STATELESS(zeros)
 IMPLEMENT_STATELESS(ones)
-IMPLEMENT_STATELESS(index)
+IMPLEMENT_STATELESS(indexSelect)
 IMPLEMENT_STATELESS(indexCopy)
 IMPLEMENT_STATELESS(indexAdd)
 IMPLEMENT_STATELESS(indexFill)
@@ -381,6 +381,7 @@ IMPLEMENT_STATELESS(rand)
 IMPLEMENT_STATELESS(randn)
 IMPLEMENT_STATELESS(all)
 IMPLEMENT_STATELESS(any)
+IMPLEMENT_STATELESS(maskedSelect)
 
 #undef IMPLEMENT_STATELESS
 
@@ -567,7 +568,7 @@ static PyMethodDef TorchMethods[] = {
   {"reshape",         (PyCFunction)THPModule_reshape,           METH_VARARGS, NULL},
   {"zeros",           (PyCFunction)THPModule_zeros,             METH_VARARGS, NULL},
   {"ones",            (PyCFunction)THPModule_ones,              METH_VARARGS, NULL},
-  {"index",           (PyCFunction)THPModule_index,             METH_VARARGS, NULL},
+  {"indexSelect",     (PyCFunction)THPModule_indexSelect,       METH_VARARGS, NULL},
   {"indexCopy",       (PyCFunction)THPModule_indexCopy,         METH_VARARGS, NULL},
   {"indexAdd",        (PyCFunction)THPModule_indexAdd,          METH_VARARGS, NULL},
   {"indexFill",       (PyCFunction)THPModule_indexFill,         METH_VARARGS, NULL},
@@ -602,6 +603,7 @@ static PyMethodDef TorchMethods[] = {
   {"all",             (PyCFunction)THPModule_all,               METH_VARARGS, NULL},
   {"any",             (PyCFunction)THPModule_any,               METH_VARARGS, NULL},
   {"cat",             (PyCFunction)THPModule_cat,               METH_VARARGS, NULL},
+  {"maskedSelect",    (PyCFunction)THPModule_maskedSelect,      METH_VARARGS, NULL},
   {NULL, NULL, 0, NULL}
 };
 

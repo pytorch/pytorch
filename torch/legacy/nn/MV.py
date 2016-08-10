@@ -20,21 +20,21 @@ class MV(nn.Module):
             assert v.nDimension() == 1
             if self.trans:
                 M = M.transpose(0, 1)
-            self.output.resize(M.size(0))
-            self.output.mv(M, v)
+            self.output.resize_(M.size(0))
+            torch.mv(self.output, M, v)
         else:
             assert v.nDimension() == 2
             if self.trans:
                 M = M.transpose(1, 2)
-            self.output.resize(M.size(0), M.size(1), 1)
-            self.output.bmm(M, v.view(v.size(0), v.size(1), 1)).resize(M.size(0), M.size(1))
+            self.output.resize_(M.size(0), M.size(1), 1)
+            torch.bmm(self.output, M, v.view(v.size(0), v.size(1), 1)).resize_(M.size(0), M.size(1))
 
         return self.output
 
     def updateGradInput(self, input, gradOutput):
         M, v = input
-        self.gradInput[0].resizeAs(M)
-        self.gradInput[1].resizeAs(v)
+        self.gradInput[0].resizeAs_(M)
+        self.gradInput[1].resizeAs_(v)
 
         assert gradOutput.nDimension() == 1 or gradOutput.nDimension() == 2
 
@@ -46,20 +46,20 @@ class MV(nn.Module):
             idim = M.size(2)
 
             if self.trans:
-                self.gradInput[0].bmm(v.view(bdim, odim, 1), gradOutput.view(bdim, 1, idim))
-                self.gradInput[1].view(bdim, odim, 1).bmm(M, gradOutput.view(bdim, idim, 1))
+                torch.bmm(self.gradInput[0], v.view(bdim, odim, 1), gradOutput.view(bdim, 1, idim))
+                torch.bmm(self.gradInput[1].view(bdim, odim, 1), M, gradOutput.view(bdim, idim, 1))
             else:
-                self.gradInput[0].bmm(gradOutput.view(bdim, odim, 1), v.view(bdim, 1, idim))
-                self.gradInput[1].view(bdim, idim, 1).bmm(M.transpose(1, 2), gradOutput.view(bdim, odim, 1))
+                torch.bmm(self.gradInput[0], gradOutput.view(bdim, odim, 1), v.view(bdim, 1, idim))
+                torch.bmm(self.gradInput[1].view(bdim, idim, 1), M.transpose(1, 2), gradOutput.view(bdim, odim, 1))
         else:
             assert M.nDimension() == 2
             assert v.nDimension() == 1
 
             if self.trans:
-                self.gradInput[0].ger(v, gradOutput)
+                torch.ger(self.gradInput[0], v, gradOutput)
                 self.gradInput[1] = M * gradOutput
             else:
-                self.gradInput[0].ger(gradOutput, v)
+                torch.ger(self.gradInput[0], gradOutput, v)
                 self.gradInput[1] = M.t() * gradOutput
 
         return self.gradInput

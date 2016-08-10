@@ -1,6 +1,6 @@
 import torch
 from torch.legacy import nn
-from torch.legacy.nn import ffi
+import torch._thnn
 
 class Criterion(object):
 
@@ -29,7 +29,7 @@ class Criterion(object):
         for key, param in self.__dict__.items():
             setattr(self, key, nn.utils.recursiveType(param, type, tensorCache or {}))
 
-        self._backend = ffi.type2backend[type]
+        self._backend = torch._thnn.type2backend[type]
         return self
 
     def float(self):

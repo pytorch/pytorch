@@ -38,36 +38,36 @@ class MixtureTable(nn.Module):
 
             expertInput = expertInputs[0]
             if self.batchSize != batchSize:
-                self.size.resize(expertInput.dim()+1).fill(1)
+                self.size.resize_(expertInput.dim()+1).fill_(1)
                 if self.dimG > 0:
                     self.size[0] = gaterInput.size(0)
 
                 self.size[self.dim] = gaterInput.size(self.dimG)
-                self.output.resizeAs(expertInput)
+                self.output.resizeAs_(expertInput)
                 self.backwardSetup = False
                 self.batchSize = batchSize
 
-            self._gaterView.view(gaterInput, self.size)
-            self.output.zero()
+            self._gaterView = gaterInput.view(self.size)
+            self.output.zero_()
             # multiply accumulate gater outputs by their commensurate expert
             for i, expertInput in enumerate(expertInputs):
                 gate = self._gaterView.select(self.dim, i).expandAs(expertInput)
-                self.output.addcmul(expertInput, gate)
+                self.output.addcmul_(expertInput, gate)
         else:
             if self.batchSize != batchSize:
-                self.size.resize(expertInputs.dim()).fill(1)
+                self.size.resize_(expertInputs.dim()).fill_(1)
                 if self.dimG > 0:
                     self.size[0] = gaterInput.size(0)
 
                 self.size[self.dim] = gaterInput.size(self.dimG)
-                self.output.resizeAs(expertInputs.select(self.dim, 0))
+                self.output.resizeAs_(expertInputs.select(self.dim, 0))
                 self.batchSize = batchSize
                 self.backwardSetup = False
 
-            self._gaterView.view(gaterInput, self.size)
-            self._expert.cmul(self._gaterView.expandAs(expertInputs), expertInputs)
-            self.output.sum(self._expert, self.dim)
-            self.output.resizeAs(expertInputs.select(self.dim, 0))
+            self._gaterView = gaterInput.view(self.size)
+            torch.mul(self._expert, self._gaterView.expandAs(expertInputs), expertInputs)
+            torch.sum(self.output, self._expert, self.dim)
+            self.output.resizeAs_(expertInputs.select(self.dim, 0))
 
         return self.output
 
@@ -86,23 +86,23 @@ class MixtureTable(nn.Module):
             if not self.backwardSetup:
                 for i, expertInput in enumerate(expertInputs):
                     expertGradInput = expertGradInputs[i] or expertInput.clone()
-                    expertGradInput.resizeAs(expertInput)
+                    expertGradInput.resizeAs_(expertInput)
                     expertGradInputs[i] = expertGradInput
 
-                gaterGradInput.resizeAs(gaterInput)
+                gaterGradInput.resizeAs_(gaterInput)
                 self.backwardSetup = True
 
 
             # like CMulTable, but with broadcasting
             for i, expertGradInput in enumerate(expertGradInputs):
                 # gater updateGradInput
-                self._expert.cmul(gradOutput, expertInputs[i])
+                torch.mul(self._expert, gradOutput, expertInputs[i])
                 if self.dimG == 0:
-                    self._expertView.view(self._expert, -1)
+                    self._expertView = self._expert.view(-1)
                 else:
-                    self._expertView.view(self._expert, gradOutput.size(0), -1)
+                    self._expertView = self._expert.view(gradOutput.size(0), -1)
 
-                self._sum.sum(self._expertView, self.dimG)
+                torch.sum(self._sum, self._expertView, self.dimG)
                 if self.dimG == 0:
                     gaterGradInput[i] = self._sum.select(self.dimG, 0)
                 else:
@@ -110,34 +110,35 @@ class MixtureTable(nn.Module):
 
                 # expert updateGradInput
                 gate = self._gaterView.select(self.dim, i).expandAs(expertGradInput)
-                expertGradInput.cmul(gate, gradOutput)
+                expertGradInput.mul_(gate, gradOutput)
         else:
             if not self.backwardSetup:
-                self.size2.resize(expertInputs.dim())
+                self.size2.resize_(expertInputs.dim())
                 self.size2.copy(expertInputs.size())
                 self.size2[self.dim] = 1
-                gaterGradInput.resizeAs(gaterInput)
+                gaterGradInput.resizeAs_(gaterInput)
                 self.backwardSetup = True
 
             # gater updateGradInput
-            self._expertView.view(gradOutput, self.size2)
+            self._expertView = gradOutput.view(self.size2)
             gradOutput = self._expertView.expandAs(expertInputs)
-            self._expert.cmul(gradOutput, expertInputs)
+            torch.mul(self._expert, gradOutput, expertInputs)
             expert = self._expert.transpose(self.dim, self.dimG)
             if not expert.isContiguous():
-                self._expert2.resizeAs(expert)
+                self._expert2.resizeAs_(expert)
                 self._expert2.copy(expert)
                 expert = self._expert2
             if self.dimG == 0:
-                self._expertView2.view(expert, gaterInput.size(0), -1)
+                self._expertView2 = expert.view(gaterInput.size(0), -1)
             else:
-                self._expertView2.view(expert, gaterInput.size(0), gaterInput.size(1), -1)
+                self._expertView2 = expert.view(gaterInput.size(0), gaterInput.size(1), -1)
 
-            gaterGradInput.sum(self._expertView2, self.dimG+1)
-            gaterGradInput.resizeAs(gaterInput)
+
+            torch.sum(gaterGradInput, self._expertView2, self.dimG+1)
+            gaterGradInput.resizeAs_(gaterInput)
 
             # expert updateGradInput
-            expertGradInputs.cmul(self._gaterView.expandAs(expertInputs), gradOutput)
+            torch.mul(expertGradInputs, self._gaterView.expandAs(expertInputs), gradOutput)
 
         return self.gradInput
 

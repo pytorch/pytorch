@@ -11,8 +11,8 @@ class Euclidean(nn.Module):
         self.gradWeight = torch.Tensor(inputSize, outputSize)
 
         # state
-        self.gradInput.resize(inputSize)
-        self.output.resize(outputSize)
+        self.gradInput.resize_(inputSize)
+        self.output.resize_(outputSize)
 
         self.fastBackward = True
         self.reset()
@@ -35,13 +35,13 @@ class Euclidean(nn.Module):
         else:
            stdv = 1./math.sqrt(self.weight.size(0))
 
-        self.weight.uniform(-stdv, stdv)
+        self.weight.uniform_(-stdv, stdv)
 
     def _view(self, res, src, *args):
         if src.isContiguous():
-           res.view(src, *args)
+           res.set_(src.view(*args))
         else:
-           res.reshape(src, *args)
+           res.set_(src.contiguous().view(*args))
 
     def updateOutput(self, input):
         # lazy initialize buffers
@@ -59,23 +59,23 @@ class Euclidean(nn.Module):
 
         batchSize = input.size(0)
         self._view(self._input, input, batchSize, inputSize, 1)
-        self._expand.expand(self._input, batchSize, inputSize, outputSize)
+        self._expand = self._input.expand(batchSize, inputSize, outputSize)
         # make the expanded tensor contiguous (requires lots of memory)
-        self._repeat.resizeAs(self._expand).copy(self._expand)
+        self._repeat.resizeAs_(self._expand).copy(self._expand)
 
-        self._weight.view(self.weight, 1, inputSize, outputSize)
-        self._expand2.expandAs(self._weight, self._repeat)
+        self._weight = self.weight.view(1, inputSize, outputSize)
+        self._expand2 = self._weight.expandAs(self._repeat)
 
         if torch.typename(input) == 'torch.cuda.FloatTensor':
             # TODO: after adding new allocators this can be changed
             # requires lots of memory, but minimizes cudaMallocs and loops
-            self._repeat2.resizeAs(self._expand2).copy(self._expand2)
-            self._repeat.add(-1, self._repeat2)
+            self._repeat2.resizeAs_(self._expand2).copy(self._expand2)
+            self._repeat.add_(-1, self._repeat2)
         else:
-            self._repeat.add(-1, self._expand2)
+            self._repeat.add_(-1, self._expand2)
 
-        self.output.norm(self._repeat, 2, 1)
-        self.output.resize(batchSize, outputSize)
+        torch.norm(self.output, self._repeat, 2, 1)
+        self.output.resize_(batchSize, outputSize)
 
         return self.output
 
@@ -100,24 +100,24 @@ class Euclidean(nn.Module):
         """
 
         # to prevent div by zero (NaN) bugs
-        self._output.resizeAs(self.output).copy(self.output).add(0.0000001)
+        self._output.resizeAs_(self.output).copy(self.output).add_(0.0000001)
         self._view(self._gradOutput, gradOutput, gradOutput.size())
-        self._div.cdiv(gradOutput, self._output)
+        torch.div(self._div, gradOutput, self._output)
         assert input.dim() == 2
         batchSize = input.size(0)
 
-        self._div.resize(batchSize, 1, outputSize)
-        self._expand3.expand(self._div, batchSize, inputSize, outputSize)
+        self._div.resize_(batchSize, 1, outputSize)
+        self._expand3 = self._div.expand(batchSize, inputSize, outputSize)
 
         if torch.typename(input) == 'torch.cuda.FloatTensor':
-            self._repeat2.resizeAs(self._expand3).copy(self._expand3)
-            self._repeat2.cmul(self._repeat)
+            self._repeat2.resizeAs_(self._expand3).copy(self._expand3)
+            self._repeat2.mul_(self._repeat)
         else:
-            self._repeat2.cmul(self._repeat, self._expand3)
+            torch.mul(self._repeat2, self._repeat, self._expand3)
 
 
-        self.gradInput.sum(self._repeat2, 2)
-        self.gradInput.resizeAs(input)
+        torch.sum(self.gradInput, self._repeat2, 2)
+        self.gradInput.resizeAs_(input)
 
         return self.gradInput
 
@@ -133,9 +133,9 @@ class Euclidean(nn.Module):
         # assumes a preceding call to updateGradInput
         assert input.dim() == 2
         self._sum = self._sum or input.new()
-        self._sum.sum(self._repeat2, 0)
-        self._sum.resize(inputSize, outputSize)
-        self.gradWeight.add(-scale, self._sum)
+        torch.sum(self._sum, self._repeat2, 0)
+        self._sum.resize_(inputSize, outputSize)
+        self.gradWeight.add_(-scale, self._sum)
 
     def type(self, type=None, tensorCache=None):
         if type:

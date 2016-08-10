@@ -40,14 +40,14 @@ class WeightedEuclidean(nn.Module):
         else:
            stdv = 1. / math.sqrt(self.weight.size(1))
 
-        self.weight.uniform(-stdv, stdv)
-        self.diagCov.fill(1)
+        self.weight.uniform_(-stdv, stdv)
+        self.diagCov.fill_(1)
 
     def _view(self, res, src, *args):
         if src.isContiguous():
-           res.view(src, *args)
+           res.set_(src.view(*args))
         else:
-           res.reshape(src, *args)
+           res.set_(src.contiguous().view(*args))
 
     def updateOutput(self, input):
         # lazy-initialize
@@ -68,38 +68,38 @@ class WeightedEuclidean(nn.Module):
         if input.dim() == 1:
             self._view(self._input, input, inputSize, 1)
             self._expand.expandAs(self._input, self.weight)
-            self._repeat.resizeAs(self._expand).copy(self._expand)
-            self._repeat.add(-1, self.weight)
-            self._repeat.cmul(self.diagCov)
-            self.output.norm(self._repeat, 2, 0)
-            self.output.resize(outputSize)
+            self._repeat.resizeAs_(self._expand).copy(self._expand)
+            self._repeat.add_(-1, self.weight)
+            self._repeat.mul_(self.diagCov)
+            torch.norm(self.output, self._repeat, 2, 0)
+            self.output.resize_(outputSize)
         elif input.dim() == 2:
             batchSize = input.size(0)
 
             self._view(self._input, input, batchSize, inputSize, 1)
-            self._expand.expand(self._input, batchSize, inputSize, outputSize)
+            self._expand = self._input.expand(batchSize, inputSize, outputSize)
             # make the expanded tensor contiguous (requires lots of memory)
-            self._repeat.resizeAs(self._expand).copy(self._expand)
+            self._repeat.resizeAs_(self._expand).copy(self._expand)
 
-            self._weight.view(self.weight, 1, inputSize, outputSize)
-            self._expand2.expandAs(self._weight, self._repeat)
+            self._weight = self.weight.view(1, inputSize, outputSize)
+            self._expand2 = self._weight.expandAs(self._repeat)
 
-            self._diagCov.view(self.diagCov, 1, inputSize, outputSize)
-            self._expand3.expandAs(self._diagCov, self._repeat)
+            self._diagCov = self.diagCov.view(1, inputSize, outputSize)
+            self._expand3 = self._diagCov.expandAs(self._repeat)
             if input.type() == 'torch.cuda.FloatTensor':
                 # TODO: this can be fixed with a custom allocator
                 # requires lots of memory, but minimizes cudaMallocs and loops
-                self._repeat2.resizeAs(self._expand2).copy(self._expand2)
-                self._repeat.add(-1, self._repeat2)
-                self._repeat3.resizeAs(self._expand3).copy(self._expand3)
-                self._repeat.cmul(self._repeat3)
+                self._repeat2.resizeAs_(self._expand2).copy(self._expand2)
+                self._repeat.add_(-1, self._repeat2)
+                self._repeat3.resizeAs_(self._expand3).copy(self._expand3)
+                self._repeat.mul_(self._repeat3)
             else:
-                self._repeat.add(-1, self._expand2)
-                self._repeat.cmul(self._expand3)
+                self._repeat.add_(-1, self._expand2)
+                self._repeat.mul_(self._expand3)
 
 
-            self.output.norm(self._repeat, 2, 1)
-            self.output.resize(batchSize, outputSize)
+            torch.norm(self.output, self._repeat, 2, 1)
+            self.output.resize_(batchSize, outputSize)
         else:
            raise RuntimeError("1D or 2D input expected")
 
@@ -123,44 +123,44 @@ class WeightedEuclidean(nn.Module):
         dy_j   -2 * c_j * c_j * (w_j - x)   c_j * c_j * (x - w_j)
         ---- = -------------------------- = ---------------------
          dx     2 || c_j * (w_j - x) ||              y_j
-        #"""
+        """
 
         # to prevent div by zero (NaN) bugs
-        self._output.resizeAs(self.output).copy(self.output).add(1e-7)
+        self._output.resizeAs_(self.output).copy(self.output).add_(1e-7)
         self._view(self._gradOutput, gradOutput, gradOutput.size())
-        self._div.cdiv(gradOutput, self._output)
+        torch.div(self._div, gradOutput, self._output)
         if input.dim() == 1:
-           self._div.resize(1, outputSize)
-           self._expand4.expandAs(self._div, self.weight)
+            self._div.resize_(1, outputSize)
+            self._expand4 = self._div.expandAs(self.weight)
 
-           if torch.type(input) == 'torch.cuda.FloatTensor':
-              self._repeat2.resizeAs(self._expand4).copy(self._expand4)
-              self._repeat2.cmul(self._repeat)
-           else:
-              self._repeat2.cmul(self._repeat, self._expand4)
+            if torch.type(input) == 'torch.cuda.FloatTensor':
+                self._repeat2.resizeAs_(self._expand4).copy(self._expand4)
+                self._repeat2.mul_(self._repeat)
+            else:
+                self._repeat2.mul_(self._repeat, self._expand4)
 
-           self._repeat2.cmul(self.diagCov)
-           self.gradInput.sum(self._repeat2, 1)
-           self.gradInput.resizeAs(input)
+            self._repeat2.mul_(self.diagCov)
+            torch.sum(self.gradInput, self._repeat2, 1)
+            self.gradInput.resizeAs_(input)
         elif input.dim() == 2:
-           batchSize = input.size(0)
+            batchSize = input.size(0)
 
-           self._div.resize(batchSize, 1, outputSize)
-           self._expand4.expand(self._div, batchSize, inputSize, outputSize)
+            self._div.resize_(batchSize, 1, outputSize)
+            self._expand4 = self._div.expand(batchSize, inputSize, outputSize)
 
-           if input.type() == 'torch.cuda.FloatTensor':
-              self._repeat2.resizeAs(self._expand4).copy(self._expand4)
-              self._repeat2.cmul(self._repeat)
-              self._repeat2.cmul(self._repeat3)
-           else:
-              self._repeat2.cmul(self._repeat, self._expand4)
-              self._repeat2.cmul(self._expand3)
+            if input.type() == 'torch.cuda.FloatTensor':
+                self._repeat2.resizeAs_(self._expand4).copy(self._expand4)
+                self._repeat2.mul_(self._repeat)
+                self._repeat2.mul_(self._repeat3)
+            else:
+                torch.mul(self._repeat2, self._repeat, self._expand4)
+                self._repeat2.mul_(self._expand3)
 
 
-           self.gradInput.sum(self._repeat2, 2)
-           self.gradInput.resizeAs(input)
+            torch.sum(self.gradInput, self._repeat2, 2)
+            self.gradInput.resizeAs_(input)
         else:
-           raise RuntimeError("1D or 2D input expected")
+            raise RuntimeError("1D or 2D input expected")
 
         return self.gradInput
 
@@ -178,45 +178,45 @@ class WeightedEuclidean(nn.Module):
         #"""
         # assumes a preceding call to updateGradInput
         if input.dim() == 1:
-           self.gradWeight.add(-scale, self._repeat2)
+            self.gradWeight.add_(-scale, self._repeat2)
 
-           self._repeat.cdiv(self.diagCov)
-           self._repeat.cmul(self._repeat)
-           self._repeat.cmul(self.diagCov)
+            self._repeat.div_(self.diagCov)
+            self._repeat.mul_(self._repeat)
+            self._repeat.mul_(self.diagCov)
 
-           if torch.type(input) == 'torch.cuda.FloatTensor':
-              self._repeat2.resizeAs(self._expand4).copy(self._expand4)
-              self._repeat2.cmul(self._repeat)
-           else:
-              self._repeat2.cmul(self._repeat, self._expand4)
+            if torch.type(input) == 'torch.cuda.FloatTensor':
+                self._repeat2.resizeAs_(self._expand4).copy(self._expand4)
+                self._repeat2.mul_(self._repeat)
+            else:
+                torch.mul(self._repeat2, self._repeat, self._expand4)
 
 
-           self.gradDiagCov.add(self._repeat2)
+            self.gradDiagCov.add_(self._repeat2)
         elif input.dim() == 2:
-           self._sum = self._sum or input.new()
-           self._sum.sum(self._repeat2, 0)
-           self._sum.resize(inputSize, outputSize)
-           self.gradWeight.add(-scale, self._sum)
+            self._sum = self._sum or input.new()
+            torch.sum(self._sum, self._repeat2, 0)
+            self._sum.resize_(inputSize, outputSize)
+            self.gradWeight.add_(-scale, self._sum)
 
-           if input.type() == 'torch.cuda.FloatTensor':
-              # requires lots of memory, but minimizes cudaMallocs and loops
-              self._repeat.cdiv(self._repeat3)
-              self._repeat.cmul(self._repeat)
-              self._repeat.cmul(self._repeat3)
-              self._repeat2.resizeAs(self._expand4).copy(self._expand4)
-              self._repeat.cmul(self._repeat2)
-           else:
-              self._repeat.cdiv(self._expand3)
-              self._repeat.cmul(self._repeat)
-              self._repeat.cmul(self._expand3)
-              self._repeat.cmul(self._expand4)
+            if input.type() == 'torch.cuda.FloatTensor':
+                # requires lots of memory, but minimizes cudaMallocs and loops
+                self._repeat.div_(self._repeat3)
+                self._repeat.mul_(self._repeat)
+                self._repeat.mul_(self._repeat3)
+                self._repeat2.resizeAs_(self._expand4).copy(self._expand4)
+                self._repeat.mul_(self._repeat2)
+            else:
+                self._repeat.div_(self._expand3)
+                self._repeat.mul_(self._repeat)
+                self._repeat.mul_(self._expand3)
+                self._repeat.mul_(self._expand4)
 
 
-           self._sum.sum(self._repeat, 0)
-           self._sum.resize(inputSize, outputSize)
-           self.gradDiagCov.add(scale, self._sum)
+            torch.sum(self._sum, self._repeat, 0)
+            self._sum.resize_(inputSize, outputSize)
+            self.gradDiagCov.add_(scale, self._sum)
         else:
-           raise RuntimeError("1D or 2D input expected")
+            raise RuntimeError("1D or 2D input expected")
 
     def type(self, type=None, tensorCache=None):
         if type:

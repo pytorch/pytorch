@@ -52,19 +52,19 @@ class VolumetricFullConvolution(nn.Module):
             kW = self.kW
             stdv = 1. / math.sqrt(kW*kH*kT*nInputPlane)
 
-        self.weight.uniform(-stdv, stdv)
-        self.bias.uniform(-stdv, stdv)
+        self.weight.uniform_(-stdv, stdv)
+        self.bias.uniform_(-stdv, stdv)
 
     def _makeContiguous(self, input, gradOutput=None):
         if not input.isContiguous():
            self._input = self._input or input.new()
-           self._input.resizeAs(input).copy(input)
+           self._input.resizeAs_(input).copy(input)
            input = self._input
 
         if gradOutput is not None:
             if not gradOutput.isContiguous():
                 self._gradOutput = self._gradOutput or gradOutput.new()
-                self._gradOutput.resizeAs(gradOutput).copy(gradOutput)
+                self._gradOutput.resizeAs_(gradOutput).copy(gradOutput)
                 gradOutput = self._gradOutput
             return input, gradOutput
 
@@ -142,8 +142,8 @@ class VolumetricFullConvolution(nn.Module):
 
         if isinstance(input, list):
             # Create a zero tensor to be expanded and used as gradInput[1].
-            self.zeroScalar = self.zeroScalar or input[1].new(1).zero()
-            self.ones.resize(input[1].dim()).fill(1)
+            self.zeroScalar = self.zeroScalar or input[1].new(1).zero_()
+            self.ones.resize_(input[1].dim()).fill_(1)
             zeroTensor =  self.zeroScalar.view(self.ones.tolist()).expandAs(input[1])
             self.gradInput = [self.gradInput, zeroTensor]
 

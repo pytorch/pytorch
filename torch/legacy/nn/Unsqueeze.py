@@ -13,7 +13,7 @@ class Unsqueeze(nn.Module):
 
     def updateGradInput(self, input, gradOutput):
         assert input.nElement() == gradOutput.nElement()
-        self.gradInput.view(gradOutput, input.size())
+        self.gradInput = gradOutput.view(input.size())
         return self.gradInput
 
     def __repr__(self):

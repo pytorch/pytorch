@@ -8,13 +8,13 @@ class Power(nn.Module):
         self.pow = p
 
     def updateOutput(self, input):
-        self.output.resizeAs(input).copy(input)
-        self.output.pow(self.pow)
+        self.output.resizeAs_(input).copy(input)
+        self.output.pow_(self.pow)
         return self.output
 
     def updateGradInput(self, input, gradOutput):
-        self.gradInput.resizeAs(input).copy(input)
-        self.gradInput.pow(self.pow - 1)
-        self.gradInput.cmul(gradOutput).mul(self.pow)
+        self.gradInput.resizeAs_(input).copy(input)
+        self.gradInput.pow_(self.pow - 1)
+        self.gradInput.mul_(gradOutput).mul_(self.pow)
         return self.gradInput
 

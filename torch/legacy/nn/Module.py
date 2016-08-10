@@ -1,6 +1,6 @@
 import torch
 from torch.legacy import nn
-from torch.legacy.nn import ffi
+import torch._thnn
 
 class Module(object):
 
@@ -69,13 +69,13 @@ class Module(object):
         params = self.parameters()
         if params is not None:
             for grad in params[1]:
-                grad.zero()
+                grad.zero_()
 
     def updateParameters(self, learningRate):
         params, gradParams = self.parameters()
         if params:
             for p, gp in zip(params, gradParams):
-                p.add(-learningRate, gp)
+                p.add_(-learningRate, gp)
 
     def training(self):
         self.train = True
@@ -100,7 +100,7 @@ class Module(object):
         for key, param in self.__dict__.items():
             setattr(self, key, nn.utils.recursiveType(param, type, tensorCache))
 
-        self._backend = ffi.type2backend[type]
+        self._backend = torch._thnn.type2backend[type]
         self._type = type
         return self
 
@@ -151,12 +151,12 @@ class Module(object):
         # returns True if tensor occupies a contiguous region of memory (no holes)
         def isCompact(tensor):
             # isn't it enough to check if strides == size.cumprod(0)?
-            sortedStride, perm = torch.sort(torch.LongTensor(tensor.nDimension()).set(tensor.stride()), 0, True)
-            sortedSize = torch.LongTensor(tensor.nDimension()).set(tensor.size()).index(0, perm)
+            sortedStride, perm = torch.sort(torch.LongTensor(tensor.nDimension()).set_(tensor.stride()), 0, True)
+            sortedSize = torch.LongTensor(tensor.nDimension()).set_(tensor.size()).indexSelect(0, perm)
             nRealDim = int(torch.clamp(sortedStride, 0, 1).sum())
             sortedStride = sortedStride.narrow(0, 0, nRealDim).clone()
             sortedSize   = sortedSize.narrow(0, 0, nRealDim).clone()
-            t = tensor.new().set(tensor.storage(), 0,
+            t = tensor.new().set_(tensor.storage(), 0,
                                  sortedSize.storage(),
                                  sortedStride.storage())
             return t.isContiguous()
@@ -188,14 +188,14 @@ class Module(object):
 
 
         # 2. construct a single tensor that will hold all the parameters
-        flatParameters = BufferTensor(num_parameters).zero()
+        flatParameters = BufferTensor(num_parameters).zero_()
 
         # 3. determine if there are elements in the storage that none of the
         #    parameter tensors reference ('holes')
         tensorsCompact = True
         for meta in parameterMeta:
-            tmp = BufferTensor().set(flatParameters.storage(), meta['storageOffset'], meta['size'], meta['stride'])
-            tmp.fill(1)
+            tmp = BufferTensor().set_(flatParameters.storage(), meta['storageOffset'], meta['size'], meta['stride'])
+            tmp.fill_(1)
             tensorsCompact = tensorsCompact and isCompact(tmp)
 
         maskParameters  = flatParameters.byte().clone()
@@ -205,12 +205,12 @@ class Module(object):
         # 4. copy storages into the flattened parameter tensor
         for storageAndOffset in storages.values():
             storage, offset = storageAndOffset
-            flatParameters[slice(offset, offset+storage.size())].copy(Tensor().set(storage))
+            flatParameters[slice(offset, offset+storage.size())].copy(Tensor().set_(storage))
 
         # 5. allow garbage collection
         storages = None
         for param in parameters:
-            param.set()
+            param.set_()
 
         # 6. compact the flattened parameters if there were holes
         if used_parameters != num_parameters:
@@ -226,7 +226,7 @@ class Module(object):
 
         # 7. fix up the parameter tensors to point at the flattened parameters
         for param, meta in zip(parameters, parameterMeta):
-           param.set(flatParameters.storage(),
+           param.set_(flatParameters.storage(),
                      meta['storageOffset'],
                      meta['size'],
                      meta['stride'])

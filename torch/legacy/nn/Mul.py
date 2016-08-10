@@ -15,16 +15,16 @@ class Mul(nn.Module):
            stdv = stdv * math.sqrt(3)
         else:
            stdv = 1./math.sqrt(self.weight.size(0))
-        self.weight.uniform(-stdv, stdv)
+        self.weight.uniform_(-stdv, stdv)
 
     def updateOutput(self, input):
-        self.output.resizeAs(input).copy(input);
-        self.output.mul(self.weight[0]);
+        self.output.resizeAs_(input).copy(input)
+        self.output.mul_(self.weight[0])
         return self.output
 
     def updateGradInput(self, input, gradOutput):
-        self.gradInput.resizeAs(input).zero()
-        self.gradInput.add(self.weight[0], gradOutput)
+        self.gradInput.resizeAs_(input).zero_()
+        self.gradInput.add_(self.weight[0], gradOutput)
         return self.gradInput
 
     def accGradParameters(self, input, gradOutput, scale=1):

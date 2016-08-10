@@ -16,7 +16,7 @@ class Narrow(nn.Module):
 
         output = input.narrow(self.dimension, self.index, length)
         self.output = self.output.typeAs(output)
-        self.output.resizeAs(output).copy(output)
+        self.output.resizeAs_(output).copy(output)
         return self.output
 
 
@@ -26,7 +26,7 @@ class Narrow(nn.Module):
            length = input.size(self.dimension) - self.index + self.length + 1
 
         self.gradInput = self.gradInput.typeAs(input)
-        self.gradInput.resizeAs(input).zero()
+        self.gradInput.resizeAs_(input).zero_()
         self.gradInput.narrow(self.dimension, self.index, length).copy(gradOutput)
         return self.gradInput
 

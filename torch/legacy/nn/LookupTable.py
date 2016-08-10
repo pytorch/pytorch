@@ -6,7 +6,7 @@ class LookupTable(nn.Module):
     def __init__(self, nIndex, nOutput, paddingValue=-1, maxNorm=None, normType=None):
         super(LookupTable, self).__init__()
         self.weight = torch.Tensor(nIndex, nOutput)
-        self.gradWeight = torch.Tensor(nIndex, nOutput).zero()
+        self.gradWeight = torch.Tensor(nIndex, nOutput).zero_()
         self.paddingValue = paddingValue
         self.maxNorm = maxNorm
         self.normType = normType
@@ -46,13 +46,13 @@ class LookupTable(nn.Module):
         return self
 
     def reset(self, stdv=1):
-        self.weight.normal(0, stdv)
+        self.weight.normal_(0, stdv)
 
     def _makeInputContiguous(self, input):
         # make sure input is a contiguous torch.LongTensor
         if not input.isContiguous() or type(input) != type(self._input):
             self.copiedInput = True
-            self._input.resize(input.size()).copy(input)
+            self._input.resize_(input.size()).copy(input)
             return self._input
         else:
             self.copiedInput = False
@@ -62,9 +62,9 @@ class LookupTable(nn.Module):
         self.renorm(input)
         input = self._makeInputContiguous(input)
         if input.dim() == 1:
-           self.output.index(self.weight, 0, input)
+           torch.indexSelect(self.output, self.weight, 0, input)
         elif input.dim() == 2:
-           self.output.index(self.weight, 0, input.view(-1))
+           torch.indexSelect(self.output, self.weight, 0, input.view(-1))
            self.output = self.output.view(input.size(0), input.size(1), self.weight.size(1))
         else:
            raise RuntimeError("input must be a vector or matrix")
@@ -80,7 +80,7 @@ class LookupTable(nn.Module):
             self.gradInput = input.new()
 
         if not self.gradInput.isSameSizeAs(input):
-            self.gradInput.resizeAs(input).zero()
+            self.gradInput.resizeAs_(input).zero_()
 
         return self.gradInput
 
@@ -94,7 +94,7 @@ class LookupTable(nn.Module):
 
         if not gradOutput.isContiguous():
             self._gradOutput = self._gradOutput or gradOutput.new()
-            self._gradOutput.resizeAs(gradOutput).copy(gradOutput)
+            self._gradOutput.resizeAs_(gradOutput).copy(gradOutput)
             gradOutput = self._gradOutput
 
         self._backend.LookupTable_accGradParameters(
@@ -116,7 +116,7 @@ class LookupTable(nn.Module):
 
         # copy input into _input, so _input is continous.
         # The copied _input will be modified in the C code.
-        self._input.resize(input.size()).copy(input)
+        self._input.resize_(input.size()).copy(input)
         row_idx = self._input
         if row_idx.dim() == 2:
            row_idx = row_idx.view(-1)
@@ -148,9 +148,7 @@ class LookupTable(nn.Module):
             self._count = torch.IntTensor()
             self._input = torch.LongTensor()
 
-
         return self
-
 
     def clearState(self):
         nn.utils.clear(self, '_count', '_input', '_sorted', '_indices', '_gradOutput')

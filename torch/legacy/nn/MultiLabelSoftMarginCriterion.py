@@ -20,7 +20,6 @@ class MultiLabelSoftMarginCriterion(nn.Criterion):
          self.lsm = nn.Sigmoid()
          self.nll = nn.BCECriterion(weights)
 
-
     def updateOutput(self, input, target):
          input = input if input.nElement() == 1 else input.squeeze()
          target = target if target.nElement() == 1 else target.squeeze()
@@ -29,13 +28,12 @@ class MultiLabelSoftMarginCriterion(nn.Criterion):
          self.output = self.nll.output
          return self.output
 
-
     def updateGradInput(self, input, target):
          size = input.size()
          input = input if input.nElement() == 1 else input.squeeze()
          target = target if target.nElement() == 1 else target.squeeze()
          self.nll.updateGradInput(self.lsm.output, target)
          self.lsm.updateGradInput(input, self.nll.gradInput)
-         self.gradInput.view(self.lsm.gradInput, size)
+         self.gradInput = self.lsm.gradInput.view(size)
          return self.gradInput
 

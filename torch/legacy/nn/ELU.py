@@ -8,13 +8,13 @@ class ELU(nn.Module):
             http.//arxiv.org/pdf/1511.07289.pdf
     """
 
-    def __init__(self, alpha=1, inplace=False):
+    def __init__(self, alpha=1., inplace=False):
+        assert type(alpha) == float
         super(ELU, self).__init__()
         self.alpha = alpha
         self.inplace = inplace
 
     def updateOutput(self, input):
-        print(self._backend)
         self._backend.ELU_updateOutput(
             self._backend.library_state,
             input,

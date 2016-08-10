@@ -7,7 +7,7 @@ class PReLU(nn.Module):
         super(PReLU, self).__init__()
         # if no argument provided, use shared model (weight is scalar)
         self.nOutputPlane = nOutputPlane
-        self.weight = torch.Tensor(nOutputPlane or 1).fill(0.25)
+        self.weight = torch.Tensor(nOutputPlane or 1).fill_(0.25)
         self.gradWeight = torch.Tensor(nOutputPlane or 1)
         self.gradWeightBuf = None
         self.gradWeightBuf2 = None

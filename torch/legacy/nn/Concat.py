@@ -14,11 +14,11 @@ class Concat(nn.Container):
             currentOutput = self.modules[i].updateOutput(input)
             outs.append(currentOutput)
             if i == 0:
-                self.size.resize(currentOutput.dim()).copy(currentOutput.size())
+                self.size.resize_(currentOutput.dim()).copy(currentOutput.size())
             else:
                 self.size[self.dimension] = self.size[self.dimension] + currentOutput.size(self.dimension)
 
-        self.output.resize(self.size)
+        self.output.resize_(self.size)
 
         offset = 0
         for i, module in enumerate(self.modules):
@@ -29,7 +29,7 @@ class Concat(nn.Container):
         return self.output
 
     def updateGradInput(self, input, gradOutput):
-        self.gradInput.resizeAs(input)
+        self.gradInput.resizeAs_(input)
 
         offset = 0
         for i, module in enumerate(self.modules):
@@ -40,7 +40,7 @@ class Concat(nn.Container):
                 if i == 0:
                     self.gradInput.copy(currentGradInput)
                 else:
-                    self.gradInput.add(currentGradInput)
+                    self.gradInput.add_(currentGradInput)
 
             offset = offset + currentOutput.size(self.dimension)
 
@@ -58,7 +58,7 @@ class Concat(nn.Container):
            offset = offset + currentOutput.size(self.dimension)
 
     def backward(self, input, gradOutput, scale=1):
-        self.gradInput.resizeAs(input)
+        self.gradInput.resizeAs_(input)
         offset = 0
         for i, module in enumerate(self.modules):
             currentOutput = module.output
@@ -67,7 +67,7 @@ class Concat(nn.Container):
                 if i == 0:
                     self.gradInput.copy(currentGradInput)
                 else:
-                    self.gradInput.add(currentGradInput)
+                    self.gradInput.add_(currentGradInput)
             offset = offset + currentOutput.size(self.dimension)
 
         return self.gradInput

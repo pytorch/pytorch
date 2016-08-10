@@ -65,12 +65,12 @@ class SpatialFractionalMaxPooling(nn.Module):
         sampleBufferSize = self._getBufferSize(input)
 
         if self.randomSamples is None:
-            self.randomSamples = input.new().resize(sampleBufferSize).uniform()
+            self.randomSamples = input.new().resize_(sampleBufferSize).uniform_()
         elif self.randomSamples.size(0) != sampleBufferSize[0] or self.randomSamples.size(1) != sampleBufferSize[1]:
-            self.randomSamples.resize(sampleBufferSize).uniform()
+            self.randomSamples.resize_(sampleBufferSize).uniform_()
         elif not self.newRandomPool:
             # Create new pooling windows, since this is a subsequent call
-            self.randomSamples.uniform()
+            self.randomSamples.uniform_()
 
     def _getOutputSizes(self, input):
         outW = self.outW
@@ -124,12 +124,10 @@ class SpatialFractionalMaxPooling(nn.Module):
     def empty(self):
         self.clearState()
 
-
     def clearState(self):
         self.indices = None
         self.randomSamples = None
         return super(SpatialFractionalMaxPooling, self).clearState()
-
 
     def __repr__(self):
         return super(SpatialFractionalMaxPooling, self).__repr__() + \

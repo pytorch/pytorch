@@ -8,7 +8,7 @@ class SpatialContrastiveNormalization(nn.Module):
 
         # get args
         self.nInputPlane = nInputPlane
-        self.kernel = kernel or torch.Tensor(9, 9).fill(1)
+        self.kernel = kernel or torch.Tensor(9, 9).fill_(1)
         self.threshold = threshold
         self.thresval = thresval or threshold
         kdim = self.kernel.nDimension()

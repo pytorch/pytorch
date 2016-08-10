@@ -12,26 +12,26 @@ class Dropout(nn.Module):
 
     def updateOutput(self, input):
         if self.inplace:
-            self.output.set(input)
+            self.output.set_(input)
         else:
-            self.output.resizeAs(input).copy(input)
+            self.output.resizeAs_(input).copy(input)
 
         if self.p > 0 and self.train:
-            self.noise.resizeAs(input)
-            self.noise.bernoulli(1-self.p)
-            self.noise.div(1-self.p)
-            self.output.cmul(self.noise)
+            self.noise.resizeAs_(input)
+            self.noise.bernoulli_(1-self.p)
+            self.noise.div_(1-self.p)
+            self.output.mul_(self.noise)
 
         return self.output
 
     def updateGradInput(self, input, gradOutput):
         if self.inplace:
-            self.gradInput.set(gradOutput)
+            self.gradInput.set_(gradOutput)
         else:
-            self.gradInput.resizeAs(gradOutput).copy(gradOutput)
+            self.gradInput.resizeAs_(gradOutput).copy(gradOutput)
 
         if self.p > 0 and self.train:
-            self.gradInput.cmul(self.noise) # simply mask the gradients with the noise vector
+            self.gradInput.mul_(self.noise) # simply mask the gradients with the noise vector
 
         return self.gradInput
 

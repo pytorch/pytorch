@@ -24,8 +24,8 @@ class SpatialConvolutionLocal(nn.Module):
 
         self.weight = torch.Tensor(self.oH, self.oW, nOutputPlane, nInputPlane, kH, kW)
         self.bias = torch.Tensor(nOutputPlane, self.oH, self.oW)
-        self.gradWeight = torch.Tensor().resizeAs(self.weight)
-        self.gradBias = torch.Tensor().resizeAs(self.bias)
+        self.gradWeight = torch.Tensor().resizeAs_(self.weight)
+        self.gradBias = torch.Tensor().resizeAs_(self.bias)
 
         self.reset()
         self.finput = None
@@ -37,19 +37,19 @@ class SpatialConvolutionLocal(nn.Module):
         else:
            stdv = 1. / math.sqrt(self.kW*self.kH*self.nInputPlane)
 
-        self.weight.uniform(-stdv, stdv)
-        self.bias.uniform(-stdv, stdv)
+        self.weight.uniform_(-stdv, stdv)
+        self.bias.uniform_(-stdv, stdv)
 
     def _makeContiguous(self, input, gradOutput=None):
         if not input.isContiguous():
            self._input = self._input or input.new()
-           self._input.resizeAs(input).copy(input)
+           self._input.resizeAs_(input).copy(input)
            input = self._input
 
         if gradOutput is not None:
             if not gradOutput.isContiguous():
                 self._gradOutput = self._gradOutput or gradOutput.new()
-                self._gradOutput.resizeAs(gradOutput).copy(gradOutput)
+                self._gradOutput.resizeAs_(gradOutput).copy(gradOutput)
                 gradOutput = self._gradOutput
             return input, gradOutput
 

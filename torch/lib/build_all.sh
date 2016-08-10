@@ -1,9 +1,10 @@
 # WARGNING: this script assumes it's ran from repo's root
+set -e
 
 BASE_DIR=$(pwd)
 cd torch/lib
 INSTALL_DIR=$(pwd)/tmp_install
-BASIC_FLAGS=" -DTH_INDEX_BASE=1 -I$INSTALL_DIR/include -I$INSTALL_DIR/include/TH -I$INSTALL_DIR/include/THC -L$INSTALL_DIR/lib "
+BASIC_FLAGS=" -DTH_INDEX_BASE=0 -I$INSTALL_DIR/include -I$INSTALL_DIR/include/TH -I$INSTALL_DIR/include/THC -L$INSTALL_DIR/lib "
 FLAGS="$BASIC_FLAGS -Wl,-rpath,\$ORIGIN"
 function build() {
   mkdir -p build/$1
@@ -30,3 +31,4 @@ fi
 
 cp $INSTALL_DIR/lib/* .
 cp THNN/generic/THNN.h .
+cp THCUNN/THCUNN.h .

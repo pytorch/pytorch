@@ -20,16 +20,16 @@ class MM(nn.Module):
                 a = a.t()
             if self.transB:
                 b = b.t()
-            self.output.resize(a.size(0), b.size(1))
-            self.output.mm(a, b)
+            self.output.resize_(a.size(0), b.size(1))
+            torch.mm(self.output, a, b)
         else:
             if self.transA:
                 a = a.transpose(2, 3)
             if self.transB:
                 b = b.transpose(2, 3)
 
-            self.output.resize(a.size(0), a.size(1), b.size(2))
-            self.output.bmm(a, b)
+            self.output.resize_(a.size(0), a.size(1), b.size(2))
+            torch.bmm(self.output, a, b)
 
         return self.output
 
@@ -39,8 +39,8 @@ class MM(nn.Module):
 
         assert len(input) == 2
         a, b = input
-        self.gradInput[0].resizeAs(a)
-        self.gradInput[1].resizeAs(b)
+        self.gradInput[0].resizeAs_(a)
+        self.gradInput[1].resizeAs_(b)
 
         assert gradOutput.nDimension() == 2 or gradOutput.nDimension() == 3
         assert a.dim() == b.dim() == gradOutput.dim()
@@ -57,14 +57,14 @@ class MM(nn.Module):
             b = b.transpose(h_dim, w_dim)
 
         if self.transA:
-            getattr(self.gradInput[0], f)(b, gradOutput.transpose(h_dim, w_dim))
+            getattr(torch, f)(self.gradInput[0], b, gradOutput.transpose(h_dim, w_dim))
         else:
-            getattr(self.gradInput[0], f)(gradOutput, b)
+            getattr(torch, f)(self.gradInput[0], gradOutput, b)
 
         if self.transB:
-            getattr(self.gradInput[1], f)(gradOutput.transpose(h_dim, w_dim), a)
+            getattr(torch, f)(self.gradInput[1], gradOutput.transpose(h_dim, w_dim), a)
         else:
-            getattr(self.gradInput[1], f)(a, gradOutput)
+            getattr(torch, f)(self.gradInput[1], a, gradOutput)
 
         return self.gradInput
 

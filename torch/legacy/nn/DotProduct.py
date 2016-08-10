@@ -14,9 +14,9 @@ class DotProduct(nn.Module):
         if not self.buffer:
            self.buffer = input1.new()
 
-        self.buffer.cmul(input1, input2)
-        self.output.sum(self.buffer, 1)
-        self.output.resize(input1.size(0))
+        torch.mul(self.buffer, input1, input2)
+        torch.sum(self.output, self.buffer, 1)
+        self.output.resize_(input1.size(0))
         return self.output
 
     def updateGradInput(self, input, gradOutput):
@@ -31,15 +31,14 @@ class DotProduct(nn.Module):
 
         gw1 = self.gradInput[0]
         gw2 = self.gradInput[1]
-        gw1.resizeAs(v1).copy(v2)
-        gw2.resizeAs(v2).copy(v1)
+        gw1.resizeAs_(v1).copy(v2)
+        gw2.resizeAs_(v2).copy(v1)
 
         go = gradOutput.view(-1, 1).expandAs(v1)
-        gw1.cmul(go)
-        gw2.cmul(go)
+        gw1.mul_(go)
+        gw2.mul_(go)
 
         return self.gradInput
-
 
     def clearState(self):
         nn.utils.clear(self, 'buffer')

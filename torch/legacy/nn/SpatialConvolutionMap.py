@@ -42,7 +42,7 @@ class SpatialConvolutionMap(nn.Module):
             utotbl = totbl.unfold(0, nto, nto)
             ufitbl = fitbl.unfold(0, nto, nto)
 
-            # start filling frtbl
+            # start fill_ing frtbl
             for i in range(nout): # fro each unit in target map
                 ufrtbl.select(0, i).copy(ufitbl.select(0, frcntr))
                 frcntr += 1
@@ -51,7 +51,7 @@ class SpatialConvolutionMap(nn.Module):
                     frcntr = 1
 
             for tocntr in range(utotbl.size(0)):
-                utotbl.select(0, tocntr).fill(tocntr)
+                utotbl.select(0, tocntr).fill_(tocntr)
 
             return tbl
 
@@ -75,17 +75,17 @@ class SpatialConvolutionMap(nn.Module):
     def reset(self, stdv=None):
         if stdv is not None:
             stdv = stdv * math.sqrt(3)
-            self.weight.uniform(-stdv, stdv)
-            self.bias.uniform(-stdv, stdv)
+            self.weight.uniform_(-stdv, stdv)
+            self.bias.uniform_(-stdv, stdv)
         else:
-            ninp = torch.Tensor(self.nOutputPlane).zero()
+            ninp = torch.Tensor(self.nOutputPlane).zero_()
             for i in range(self.connTable.size(0)):
                 idx = int(self.connTable[i,1])
                 ninp[idx] += 1
             for k in range(self.connTable.size(0)):
                 idx = int(self.connTable[k,1])
                 stdv = 1. / math.sqrt(self.kW*self.kH*ninp[idx])
-                self.weight.select(0, k).uniform(-stdv, stdv)
+                self.weight.select(0, k).uniform_(-stdv, stdv)
             for k in range(self.bias.size(0)):
                 stdv = 1. / math.sqrt(self.kW * self.kH * ninp[k])
                 # TODO: torch.uniform

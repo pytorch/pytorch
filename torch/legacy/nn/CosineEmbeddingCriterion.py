@@ -36,30 +36,30 @@ class CosineEmbeddingCriterion(nn.Criterion):
             else:
                 self._idx = torch.ByteTensor()
 
-        self.buffer.cmul(input1, input2)
-        self.w1.sum(self.buffer, 1)
+        torch.mul(self.buffer, input1, input2)
+        torch.sum(self.w1, self.buffer, 1)
 
         epsilon = 1e-12
-        self.buffer.cmul(input1, input1)
-        self.w22.sum(self.buffer, 1).add(epsilon)
+        torch.mul(self.buffer, input1, input1)
+        torch.sum(self.w22, self.buffer, 1).add_(epsilon)
         # self._outputs is also used as a temporary buffer
-        self._outputs.resizeAs(self.w22).fill(1)
-        self.w22.cdiv(self._outputs, self.w22)
-        self.w.resizeAs(self.w22).copy(self.w22)
+        self._outputs.resizeAs_(self.w22).fill_(1)
+        torch.div(self.w22, self._outputs, self.w22)
+        self.w.resizeAs_(self.w22).copy(self.w22)
 
-        self.buffer.cmul(input2, input2)
-        self.w32.sum(self.buffer, 1).add(epsilon)
-        self.w32.cdiv(self._outputs, self.w32)
-        self.w.cmul(self.w32)
-        self.w.sqrt()
+        torch.mul(self.buffer, input2, input2)
+        torch.sum(self.w32, self.buffer, 1).add_(epsilon)
+        torch.div(self.w32, self._outputs, self.w32)
+        self.w.mul_(self.w32)
+        self.w.sqrt_()
 
-        self._outputs.cmul(self.w1, self.w)
+        torch.mul(self._outputs, self.w1, self.w)
         self._outputs = self._outputs.select(1, 0)
 
         torch.eq(self._idx, y, -1)
-        self._outputs[self._idx] = self._outputs[self._idx].add(-self.margin).cmax(0)
+        self._outputs[self._idx] = self._outputs[self._idx].add_(-self.margin).cmax_(0)
         torch.eq(self._idx, y, 1)
-        self._outputs[self._idx] = self._outputs[self._idx].mul(-1).add(1)
+        self._outputs[self._idx] = self._outputs[self._idx].mul_(-1).add_(1)
 
         self.output = self._outputs.sum()
 
@@ -75,16 +75,16 @@ class CosineEmbeddingCriterion(nn.Criterion):
 
         gw1 = self.gradInput[0]
         gw2 = self.gradInput[1]
-        gw1.resizeAs(v1).copy(v2)
-        gw2.resizeAs(v1).copy(v1)
+        gw1.resizeAs_(v1).copy(v2)
+        gw2.resizeAs_(v1).copy(v1)
 
-        self.buffer.cmul(self.w1, self.w22)
-        gw1.addcmul(-1, self.buffer.expandAs(v1), v1)
-        gw1.cmul(self.w.expandAs(v1))
+        torch.mul(self.buffer, self.w1, self.w22)
+        gw1.addcmul_(-1, self.buffer.expandAs(v1), v1)
+        gw1.mul_(self.w.expandAs(v1))
 
-        self.buffer.cmul(self.w1, self.w32)
-        gw2.addcmul(-1, self.buffer.expandAs(v1), v2)
-        gw2.cmul(self.w.expandAs(v1))
+        torch.mul(self.buffer, self.w1, self.w32)
+        gw2.addcmul_(-1, self.buffer.expandAs(v1), v2)
+        gw2.mul_(self.w.expandAs(v1))
 
         # self._idx = self._outputs <= 0
         torch.le(self._idx, self._outputs, 0)
@@ -92,14 +92,14 @@ class CosineEmbeddingCriterion(nn.Criterion):
         gw1[self._idx] = 0
         gw2[self._idx] = 0
 
-        torch.eq(self._idx, y,1)
+        torch.eq(self._idx, y, 1)
         self._idx = self._idx.view(-1, 1).expand(gw2.size())
-        gw1[self._idx] = gw1[self._idx].mul(-1)
-        gw2[self._idx] = gw2[self._idx].mul(-1)
+        gw1[self._idx] = gw1[self._idx].mul_(-1)
+        gw2[self._idx] = gw2[self._idx].mul_(-1)
 
         if self.sizeAverage:
-           gw1.div(y.size(0))
-           gw2.div(y.size(0))
+           gw1.div_(y.size(0))
+           gw2.div_(y.size(0))
 
         return self.gradInput
 
@@ -107,10 +107,9 @@ class CosineEmbeddingCriterion(nn.Criterion):
         if not type:
            return self._type
 
-        self._idx = nil
+        self._idx = None
         super(CosineEmbeddingCriterion, self).type(self, type, tensorCache)
         # comparison operators behave differently from cuda/c implementations
-        # TODO: verify name
         if type == 'torch.cuda.FloatTensor':
            self._idx = torch.cuda.FloatTensor()
         else:

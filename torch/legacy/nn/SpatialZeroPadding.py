@@ -18,8 +18,8 @@ class SpatialZeroPadding(nn.Module):
         w = input.size(3) + self.pad_l + self.pad_r
         if w < 1 or h < 1:
             raise RuntimeError('input is too small (feature map size: {}x{})'.format(h, w))
-        self.output.resize(input.size(0), input.size(1), h, w)
-        self.output.zero()
+        self.output.resize_(input.size(0), input.size(1), h, w)
+        self.output.zero_()
         # crop input if necessary
         c_input = input
         if self.pad_t < 0:
@@ -48,7 +48,7 @@ class SpatialZeroPadding(nn.Module):
     def updateGradInput(self, input, gradOutput):
         assert input.dim() == 4
 
-        self.gradInput.resizeAs(input).zero()
+        self.gradInput.resizeAs_(input).zero_()
         # crop gradInput if necessary
         cg_input = self.gradInput
         if self.pad_t < 0:

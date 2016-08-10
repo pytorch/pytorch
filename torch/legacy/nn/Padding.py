@@ -15,13 +15,13 @@ class Padding(nn.Module):
 
 
     def updateOutput(self, input):
-        self.outputSize.resize(input.dim())
+        self.outputSize.resize_(input.dim())
         self.outputSize.copy(input.size())
         dim = self.dim
 
         self.outputSize[dim] = self.outputSize[dim] + abs(self.pad)
-        self.output.resize(self.outputSize)
-        self.output.fill(self.value)
+        self.output.resize_(self.outputSize)
+        self.output.fill_(self.value)
         index = self.index
         pad = self.pad
         if pad > 0:
@@ -41,7 +41,7 @@ class Padding(nn.Module):
 
 
     def updateGradInput(self, input, gradOutput):
-        self.gradInput.resizeAs(input)
+        self.gradInput.resizeAs_(input)
         dim = self.dim
 
         index = self.index

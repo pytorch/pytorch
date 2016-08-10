@@ -38,7 +38,7 @@ class SpatialUpSamplingNearest(nn.Module):
 
         self.outputSize[ydim] = self.outputSize[ydim] * self.scale_factor
         self.outputSize[xdim] = self.outputSize[xdim] * self.scale_factor
-        self.output.resize(self.outputSize)
+        self.output.resize_(self.outputSize)
         self._backend.SpatialUpSamplingNearest_updateOutput(
             self._backend.library_state,
             input,
@@ -49,7 +49,7 @@ class SpatialUpSamplingNearest(nn.Module):
 
 
     def updateGradInput(self, input, gradOutput):
-        self.gradInput.resizeAs(input)
+        self.gradInput.resizeAs_(input)
         self._backend.SpatialUpSamplingNearest_updateGradInput(
             self._backend.library_state,
             input,

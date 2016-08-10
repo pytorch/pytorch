@@ -4,15 +4,15 @@ from torch.legacy import nn
 class Log(nn.Module):
 
     def updateOutput(self, input):
-        self.output.resizeAs(input)
+        self.output.resizeAs_(input)
         self.output.copy(input)
-        self.output.log()
+        self.output.log_()
         return self.output
 
     def updateGradInput(self, input, gradOutput) :
-        self.gradInput.resizeAs(input)
-        self.gradInput.fill(1)
-        self.gradInput.cdiv(input)
-        self.gradInput.cmul(gradOutput)
+        self.gradInput.resizeAs_(input)
+        self.gradInput.fill_(1)
+        self.gradInput.div_(input)
+        self.gradInput.mul_(gradOutput)
         return self.gradInput
 

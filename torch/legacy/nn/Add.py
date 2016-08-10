@@ -23,26 +23,26 @@ class Add(nn.Module):
         else:
            stdv = 1./math.sqrt(self.bias.size(0))
 
-        self.bias.uniform(-stdv, stdv)
+        self.bias.uniform_(-stdv, stdv)
 
     def updateOutput(self, input):
-        self.output.resizeAs(input).copy(input)
+        self.output.resizeAs_(input).copy(input)
         if self.scalar:
-            self.output.add(self.bias[0]);
+            self.output.add_(self.bias[0]);
         else:
             batchSize = input.size(0)
             if self._ones.size(0) != batchSize:
-                self._ones.resize(batchSize).fill(1)
+                self._ones.resize_(batchSize).fill_(1)
 
             bias = self.bias.view(-1)
             output = self.output.view(batchSize, -1)
-            output.addr(1, self._ones, bias)
+            output.addr_(self._ones, bias)
 
         return self.output
 
     def updateGradInput(self, input, gradOutput):
         if self.gradInput:
-           self.gradInput.resizeAs(gradOutput).copy(gradOutput)
+           self.gradInput.resizeAs_(gradOutput).copy(gradOutput)
            return self.gradInput
 
     def accGradParameters(self, input, gradOutput, scale=1):
@@ -50,8 +50,8 @@ class Add(nn.Module):
            self.gradBias[0] = self.gradBias[0] + scale*gradOutput.sum();
         else:
            if input.isSameSizeAs(self.bias):
-              self.gradBias.add(scale, gradOutput)
+              self.gradBias.add_(scale, gradOutput)
            else:
               gradOutput = gradOutput.view(input.size(0), -1)
-              self.gradBias.view(-1).addmv(scale, gradOutput.t(), self._ones)
+              self.gradBias.view(-1).addmv_(scale, gradOutput.t(), self._ones)
 

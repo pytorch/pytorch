@@ -38,7 +38,7 @@ static PyObject * THPStorage_(new)(THPStorage *self)
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPStorage_(resize)(THPStorage *self, PyObject *number_arg)
+static PyObject * THPStorage_(resize_)(THPStorage *self, PyObject *number_arg)
 {
   HANDLE_TH_ERRORS
   long newsize;
@@ -50,7 +50,7 @@ static PyObject * THPStorage_(resize)(THPStorage *self, PyObject *number_arg)
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPStorage_(fill)(THPStorage *self, PyObject *number_arg)
+static PyObject * THPStorage_(fill_)(THPStorage *self, PyObject *number_arg)
 {
   HANDLE_TH_ERRORS
   real rvalue;
@@ -64,10 +64,10 @@ static PyObject * THPStorage_(fill)(THPStorage *self, PyObject *number_arg)
 
 static PyMethodDef THPStorage_(methods)[] = {
   {"elementSize", (PyCFunction)THPStorage_(elementSize), METH_NOARGS, NULL},
-  {"fill", (PyCFunction)THPStorage_(fill), METH_O, NULL},
+  {"fill_", (PyCFunction)THPStorage_(fill_), METH_O, NULL},
   {"free", (PyCFunction)THPStorage_(free), METH_NOARGS, NULL},
   {"new", (PyCFunction)THPStorage_(new), METH_NOARGS, NULL},
-  {"resize", (PyCFunction)THPStorage_(resize), METH_O, NULL},
+  {"resize_", (PyCFunction)THPStorage_(resize_), METH_O, NULL},
   {"retain", (PyCFunction)THPStorage_(retain), METH_NOARGS, NULL},
   {"size", (PyCFunction)THPStorage_(size), METH_NOARGS, NULL},
   {NULL}

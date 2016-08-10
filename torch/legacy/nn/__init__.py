@@ -1,4 +1,5 @@
-from .ffi import _backends
+import torch._thnn.thnn
+from torch._thnn import _backends
 
 from . import utils
 

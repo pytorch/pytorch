@@ -10,7 +10,6 @@
 #define THPTensorClass              TH_CONCAT_3(THP,Real,TensorClass)
 
 #define THPTensorStatelessType      TH_CONCAT_2(Real,TensorStatelessType)
-#define THPTensorStatelessMethods   TH_CONCAT_2(Real,TensorStatelessMethods)
 #define THPTensorStateless          TH_CONCAT_2(Real,TensorStateless)
 
 #include "generic/Tensor.h"

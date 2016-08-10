@@ -37,7 +37,7 @@ class SpatialClassNLLCriterion(nn.Criterion):
         else:
            self.target = target.long()
 
-        self.gradInput.resizeAs(input).zero()
+        self.gradInput.resizeAs_(input).zero_()
         self._backend.SpatialClassNLLCriterion_updateGradInput(
             self._backend.library_state,
             input,

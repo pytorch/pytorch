@@ -23,22 +23,22 @@ class BCECriterion(nn.Criterion):
         buffer = self.buffer
         weights = self.weights
 
-        buffer.resizeAs(input)
+        buffer.resizeAs_(input)
 
         if weights is not None and target.dim() != 1:
             weights = self.weights.view(1, target.size(1)).expandAs(target)
 
         # log(input) * target
-        buffer.add(input, self.eps).log()
+        torch.add(buffer, input, self.eps).log_()
         if weights is not None:
-            buffer.cmul(weights)
+            buffer.mul_(weights)
 
         output = torch.dot(target, buffer)
 
         # log(1 - input) * (1 - target)
-        buffer.mul(input, -1).add(1).add(self.eps).log()
+        torch.mul(buffer, input, -1).add_(1+self.eps).log_()
         if weights is not None:
-            buffer.cmul(weights)
+            buffer.mul_(weights)
 
         output = output + torch.sum(buffer)
         output = output - torch.dot(target, buffer)
@@ -70,21 +70,21 @@ class BCECriterion(nn.Criterion):
              weights = self.weights.view(1, target.size(1)).expandAs(target)
 
 
-         buffer.resizeAs(input)
+         buffer.resizeAs_(input)
          # - x ( 1 + self.eps -x ) + self.eps
-         buffer.add(input, -1).add(-self.eps).cmul(input).add(-self.eps)
+         torch.add(buffer, input, -1).add_(-self.eps).mul_(input).add_(-self.eps)
 
-         gradInput.resizeAs(input)
+         gradInput.resizeAs_(input)
          # y - x
-         gradInput.add(target, -1, input)
+         torch.add(gradInput, target, -1, input)
          # - (y - x) / ( x ( 1 + self.eps -x ) + self.eps )
-         gradInput.cdiv(buffer)
+         gradInput.div_(buffer)
 
          if weights is not None:
-             gradInput.cmul(weights)
+             gradInput.mul_(weights)
 
          if self.sizeAverage:
-             gradInput.div(target.nElement())
+             gradInput.div_(target.nElement())
 
          return gradInput
 

@@ -5,7 +5,7 @@ class SoftShrink(nn.Module):
 
     def __init__(self, lambd=0.5):
         super(SoftShrink, self).__init__()
-        self.lambd = lambd or 0.5
+        self.lambd = lambd
 
     def updateOutput(self, input):
         self._backend.SoftShrink_updateOutput(

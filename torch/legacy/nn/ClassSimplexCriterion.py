@@ -53,9 +53,9 @@ class ClassSimplexCriterion(nn.MSECriterion):
             else:
                 a[k][k] = math.sqrt(1 - a[(k,), (0, k)].norm()**2)
 
-            # fill the k-th coordinates for the vectors of the remaining vertices
+            # fill_ the k-th coordinates for the vectors of the remaining vertices
             c = (a[k][k]**2 - 1 - 1/n) / a[k][k]
-            a[(k+1, n+1), (k,)].fill(c)
+            a[(k+1, n+1), (k,)].fill_(c)
 
         return a
 
@@ -64,7 +64,7 @@ class ClassSimplexCriterion(nn.MSECriterion):
     def _transformTarget(self, target):
         assert target.dim() == 1
         nSamples = target.size(0)
-        self._target.resize(nSamples, self.nClasses)
+        self._target.resize_(nSamples, self.nClasses)
         for i in range(nSamples):
             self._target[i].copy(self.simplex[target[i]])
 

@@ -35,8 +35,8 @@ class SpatialCrossMapLRN(nn.Module):
             inputHeight = input.size(2)
             inputWidth  = input.size(3)
 
-            self.output.resizeAs(input)
-            self.scale.resizeAs(input)
+            self.output.resizeAs_(input)
+            self.scale.resizeAs_(input)
 
             # use output storage as temporary buffer
             inputSquare = self.output
@@ -46,10 +46,10 @@ class SpatialCrossMapLRN(nn.Module):
             prePadCrop = channels if prePad > channels else prePad
 
             scaleFirst = self.scale.select(1, 0)
-            scaleFirst.zero()
+            scaleFirst.zero_()
             # compute first feature map normalization
             for c in range(prePadCrop):
-                scaleFirst.add(inputSquare.select(1, c))
+                scaleFirst.add_(inputSquare.select(1, c))
 
             # reuse computations for next feature maps normalization
             # by adding the next feature map and removing the previous
@@ -59,16 +59,16 @@ class SpatialCrossMapLRN(nn.Module):
                 scaleCurrent.copy(scalePrevious)
                 if c < channels - prePad + 1:
                     squareNext   = inputSquare.select(1, c + prePad - 1)
-                    scaleCurrent.add(1, squareNext)
+                    scaleCurrent.add_(1, squareNext)
 
                 if c > prePad:
                     squarePrevious = inputSquare.select(1, c - prePad)
-                    scaleCurrent.add(-1, squarePrevious)
+                    scaleCurrent.add_(-1, squarePrevious)
 
-            self.scale.mul(self.alpha / self.size).add(self.k)
+            self.scale.mul_(self.alpha / self.size).add_(self.k)
 
-            self.output.pow(self.scale, -self.beta)
-            self.output.cmul(input)
+            torch.pow(self.output, self.scale, -self.beta)
+            self.output.mul_(input)
 
         return self.output
 
@@ -96,25 +96,25 @@ class SpatialCrossMapLRN(nn.Module):
 
             self.paddedRatio = self.paddedRatio or input.new()
             self.accumRatio = self.accumRatio or input.new()
-            self.paddedRatio.resize(channels + self.size - 1, inputHeight, inputWidth)
-            self.accumRatio.resize(inputHeight, inputWidth)
+            self.paddedRatio.resize_(channels + self.size - 1, inputHeight, inputWidth)
+            self.accumRatio.resize_(inputHeight, inputWidth)
 
             cacheRatioValue = 2 * self.alpha * self.beta / self.size
             inversePrePad = int(self.size - (self.size - 1) / 2)
 
-            self.gradInput.resizeAs(input)
-            self.gradInput.pow(self.scale, -self.beta).cmul(gradOutput)
+            self.gradInput.resizeAs_(input)
+            torch.pow(self.gradInput, self.scale, -self.beta).mul_(gradOutput)
 
-            self.paddedRatio.zero()
+            self.paddedRatio.zero_()
             paddedRatioCenter = self.paddedRatio.narrow(0, inversePrePad, channels)
             for n in range(batchSize):
-                paddedRatioCenter.cmul(gradOutput[n], self.output[n])
-                paddedRatioCenter.cdiv(self.scale[n])
+                paddedRatioCenter.mul_(gradOutput[n], self.output[n])
+                paddedRatioCenter.div_(self.scale[n])
                 self.accumRatio.sum(self.paddedRatio.narrow(0, 0,self.size-1), 0)
                 for c in range(channels):
-                    self.accumRatio.add(self.paddedRatio[c+self.size-1])
-                    self.gradInput[n][c].addcmul(-cacheRatioValue, input[n][c], self.accumRatio)
-                    self.accumRatio.add(-1, self.paddedRatio[c])
+                    self.accumRatio.add_(self.paddedRatio[c+self.size-1])
+                    self.gradInput[n][c].addcmul_(-cacheRatioValue, input[n][c], self.accumRatio)
+                    self.accumRatio.add_(-1, self.paddedRatio[c])
 
         return self.gradInput
 

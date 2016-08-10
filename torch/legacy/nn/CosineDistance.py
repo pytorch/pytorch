@@ -19,12 +19,12 @@ class CosineDistance(nn.Module):
     def _makeContiguous(self, input1, input2):
         if not input1.isContiguous():
            self._input1 = self._input1 or input1.new()
-           self._input1.resizeAs(input1).copy(input1)
+           self._input1.resizeAs_(input1).copy(input1)
            input1 = self._input1
 
         if not input2.isContiguous():
            self._input2 = self._input2 or input2.new()
-           self._input2.resizeAs(input2).copy(input2)
+           self._input2.resizeAs_(input2).copy(input2)
            input2 = self._input2
 
         return input1, input2
@@ -42,24 +42,23 @@ class CosineDistance(nn.Module):
            self.w32 = input1.new()
            self.ones = input1.new()
 
-        self.buffer.cmul(input1, input2)
-        self.w1.sum(self.buffer, 1)
+        torch.mul(self.buffer, input1, input2)
+        torch.sum(self.w1, self.buffer, 1)
 
         epsilon = 1e-12
-        self.buffer.cmul(input1, input1)
-        self.w22.sum(self.buffer, 1).add(epsilon)
-        self.ones.resizeAs(self.w22).fill(1)
-        self.w22.cdiv(self.ones, self.w22)
-        self.w.resizeAs(self.w22).copy(self.w22)
+        torch.mul(self.buffer, input1, input1)
+        torch.sum(self.w22, self.buffer, 1).add_(epsilon)
+        self.w22.cinv_()
+        self.w.resizeAs_(self.w22).copy(self.w22)
 
-        self.buffer.cmul(input2, input2)
-        self.w32.sum(self.buffer, 1).add(epsilon)
-        self.w32.cdiv(self.ones, self.w32)
-        self.w.cmul(self.w32)
-        self.w.sqrt()
+        torch.mul(self.buffer, input2, input2)
+        torch.sum(self.w32, self.buffer, 1).add_(epsilon)
+        self.w32.cinv_()
+        self.w.mul_(self.w32)
+        self.w.sqrt_()
 
-        self.output.cmul(self.w1, self.w)
-        self.output.resize(input1.size(0))
+        torch.mul(self.output, self.w1, self.w)
+        self.output.resize_(input1.size(0))
 
         return self.output
 
@@ -76,20 +75,20 @@ class CosineDistance(nn.Module):
 
         gw1 = self.gradInput[0]
         gw2 = self.gradInput[1]
-        gw1.resizeAs(v1).copy(v2)
-        gw2.resizeAs(v1).copy(v1)
+        gw1.resizeAs_(v1).copy(v2)
+        gw2.resizeAs_(v1).copy(v1)
 
-        self.buffer.cmul(self.w1, self.w22)
-        gw1.addcmul(-1, self.buffer.expandAs(v1), v1)
-        gw1.cmul(self.w.expandAs(v1))
+        torch.mul(self.buffer, self.w1, self.w22)
+        gw1.addcmul_(-1, self.buffer.expandAs(v1), v1)
+        gw1.mul_(self.w.expandAs(v1))
 
-        self.buffer.cmul(self.w1, self.w32)
-        gw2.addcmul(-1, self.buffer.expandAs(v1), v2)
-        gw2.cmul(self.w.expandAs(v1))
+        torch.mul(self.buffer, self.w1, self.w32)
+        gw2.addcmul_(-1, self.buffer.expandAs(v1), v2)
+        gw2.mul_(self.w.expandAs(v1))
 
         go = gradOutput.view(-1, 1).expandAs(v1)
-        gw1.cmul(go)
-        gw2.cmul(go)
+        gw1.mul_(go)
+        gw2.mul_(go)
 
         return self.gradInput
 

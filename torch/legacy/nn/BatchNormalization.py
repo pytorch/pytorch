@@ -63,13 +63,13 @@ class BatchNormalization(nn.Module):
 
     def reset(self):
         if self.weight:
-           self.weight.uniform()
+           self.weight.uniform_()
 
         if self.bias:
-           self.bias.zero()
+           self.bias.zero_()
 
-        self.running_mean.zero()
-        self.running_var.fill(1)
+        self.running_mean.zero_()
+        self.running_var.fill_(1)
 
     def _checkInputDim(self, input):
         if input.dim() != self.nDim:
@@ -80,13 +80,13 @@ class BatchNormalization(nn.Module):
     def _makeContiguous(self, input, gradOutput=None):
         if not input.isContiguous():
             self._input = self._input or input.new()
-            self._input.resizeAs(input).copy(input)
+            self._input.resizeAs_(input).copy(input)
             input = self._input
 
         if gradOutput:
             if not gradOutput.isContiguous():
                 self._gradOutput = self._gradOutput or gradOutput.new()
-                self._gradOutput.resizeAs(gradOutput).copy(gradOutput)
+                self._gradOutput.resizeAs_(gradOutput).copy(gradOutput)
                 gradOutput = self._gradOutput
 
         return input, gradOutput
@@ -96,11 +96,11 @@ class BatchNormalization(nn.Module):
 
         input = self._makeContiguous(input)[0]
 
-        self.output.resizeAs(input)
+        self.output.resizeAs_(input)
         self.save_mean = self.save_mean or input.new()
-        self.save_mean.resizeAs(self.running_mean)
+        self.save_mean.resizeAs_(self.running_mean)
         self.save_std = self.save_std or input.new()
-        self.save_std.resizeAs(self.running_var)
+        self.save_std.resizeAs_(self.running_var)
 
         self._backend.BatchNormalization_updateOutput(
             self._backend.library_state,
@@ -128,9 +128,9 @@ class BatchNormalization(nn.Module):
 
         input, gradOutput = self._makeContiguous(input, gradOutput)
 
-        scale = scale or 1
+        scale = scale or 1.
         if gradInput is not None:
-           gradInput.resizeAs(gradOutput)
+           gradInput.resizeAs_(gradOutput)
 
 
         self._backend.BatchNormalization_backward(
@@ -152,21 +152,21 @@ class BatchNormalization(nn.Module):
 
         return self.gradInput
 
-    def backward(self, input, gradOutput, scale=1):
+    def backward(self, input, gradOutput, scale=1.):
         return self._backward(input, gradOutput, scale, self.gradInput, self.gradWeight, self.gradBias)
 
     def updateGradInput(self, input, gradOutput):
-        return self._backward(input, gradOutput, 1, self.gradInput)
+        return self._backward(input, gradOutput, 1., self.gradInput)
 
-    def accGradParameters(self, input, gradOutput, scale=1):
+    def accGradParameters(self, input, gradOutput, scale=1.):
         return self._backward(input, gradOutput, scale, None, self.gradWeight, self.gradBias)
 
     def read(self, file, version):
         super(BatchNormalization, self).read(self, file)
         if version < 2:
             if self.running_std:
-                self.running_var = self.running_std.pow(-2).add(-self.eps)
-                self.running_std = nil
+                self.running_var = self.running_std.pow_(-2).add_(-self.eps)
+                self.running_std = None
 
     def clearState(self):
         # first 5 buffers are not present in the current implementation,

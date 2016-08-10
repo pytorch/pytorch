@@ -25,8 +25,8 @@ class TemporalConvolution(nn.Module):
         else:
            stdv = 1. / math.sqrt(self.kW*self.inputFrameSize)
 
-        self.weight.uniform(-stdv, stdv)
-        self.bias.uniform(-stdv, stdv)
+        self.weight.uniform_(-stdv, stdv)
+        self.bias.uniform_(-stdv, stdv)
 
     def updateOutput(self, input):
         self._backend.TemporalConvolution_updateOutput(

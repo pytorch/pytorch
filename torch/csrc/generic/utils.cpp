@@ -28,13 +28,13 @@ bool THPUtils_(parseSlice)(PyObject *slice, Py_ssize_t len, Py_ssize_t *ostart, 
   return true;
 }
 
-bool THPUtils_(parseReal)(PyObject *value, real *result)
-{
 #ifdef THC_REAL_IS_HALF
 #define CONVERT(expr) THC_float2half((expr))
 #else
 #define CONVERT(expr) (expr)
 #endif
+bool THPUtils_(parseReal)(PyObject *value, real *result)
+{
   if (PyLong_Check(value)) {
     *result = (real)CONVERT(PyLong_AsLongLong(value));
   }  else if (PyInt_Check(value)) {
@@ -50,8 +50,34 @@ bool THPUtils_(parseReal)(PyObject *value, real *result)
     return false;
   }
   return true;
-#undef CONVERT
 }
+
+real THPUtils_(unpackReal)(PyObject *value)
+{
+  if (PyLong_Check(value)) {
+    return (real)CONVERT(PyLong_AsLongLong(value));
+  }  else if (PyInt_Check(value)) {
+    return (real)CONVERT(PyInt_AsLong(value));
+  } else if (PyFloat_Check(value)) {
+    return (real)CONVERT(PyFloat_AsDouble(value));
+  } else {
+    throw std::exception();
+  }
+}
+
+accreal THPUtils_(unpackAccreal)(PyObject *value)
+{
+  if (PyLong_Check(value)) {
+    return (accreal)PyLong_AsLongLong(value);
+  }  else if (PyInt_Check(value)) {
+    return (accreal)PyInt_AsLong(value);
+  } else if (PyFloat_Check(value)) {
+    return (accreal)PyFloat_AsDouble(value);
+  } else {
+    throw std::exception();
+  }
+}
+#undef CONVERT
 
 bool THPUtils_(checkReal)(PyObject *value)
 {

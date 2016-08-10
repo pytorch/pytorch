@@ -9,7 +9,7 @@ class SpatialSubtractiveNormalization(nn.Module):
 
         # get args
         self.nInputPlane = nInputPlane
-        self.kernel = kernel or torch.Tensor(9, 9).fill(1)
+        self.kernel = kernel or torch.Tensor(9, 9).fill_(1)
         kdim = self.kernel.nDimension()
 
         # check args
@@ -20,7 +20,7 @@ class SpatialSubtractiveNormalization(nn.Module):
            error('<SpatialSubtractiveNormalization> averaging kernel must have ODD dimensions')
 
         # normalize kernel
-        self.kernel.div(self.kernel.sum() * self.nInputPlane)
+        self.kernel.div_(self.kernel.sum() * self.nInputPlane)
 
         # padding values
         padH = math.floor(self.kernel.size(0)/2)
@@ -44,14 +44,14 @@ class SpatialSubtractiveNormalization(nn.Module):
         if kdim == 2:
             for i in range(self.nInputPlane):
                 self.meanestimator.modules[1].weight[0][i] = self.kernel
-            self.meanestimator.modules[1].bias.zero()
+            self.meanestimator.modules[1].bias.zero_()
         else:
             for i in range(self.nInputPlane):
                 self.meanestimator.modules[1].weight[i].copy(self.kernel)
                 self.meanestimator.modules[2].weight[0][i].copy(self.kernel)
 
-            self.meanestimator.modules[1].bias.zero()
-            self.meanestimator.modules[2].bias.zero()
+            self.meanestimator.modules[1].bias.zero_()
+            self.meanestimator.modules[2].bias.zero_()
 
         # other operation
         self.subtractor = nn.CSubTable()
@@ -70,9 +70,9 @@ class SpatialSubtractiveNormalization(nn.Module):
             self.ones = self.ones or input.new()
             self._coef = self._coef or self.coef.new()
 
-            self.ones.resizeAs(input[0:1]).fill(1)
+            self.ones.resizeAs_(input[0:1]).fill_(1)
             coef = self.meanestimator.updateOutput(self.ones).squeeze(0)
-            self._coef.resizeAs(coef).copy(coef) # make contiguous for view
+            self._coef.resizeAs_(coef).copy(coef) # make contiguous for view
             size = coef.size().tolist()
             size = [input.size(0)] + size
             self.coef = self._coef.view(1, *(self._coef.size().tolist())).expand(*size)
@@ -86,14 +86,14 @@ class SpatialSubtractiveNormalization(nn.Module):
 
     def updateGradInput(self, input, gradOutput):
         # resize grad
-        self.gradInput.resizeAs(input).zero()
+        self.gradInput.resizeAs_(input).zero_()
 
         # backprop through all modules
         gradsub = self.subtractor.updateGradInput([input, self.adjustedsums], gradOutput)
         graddiv = self.divider.updateGradInput([self.localsums, self.coef], gradsub[1])
         size = self.meanestimator.updateGradInput(input, graddiv[0]).size()
-        self.gradInput.add(self.meanestimator.updateGradInput(input, graddiv[0]))
-        self.gradInput.add(gradsub[0])
+        self.gradInput.add_(self.meanestimator.updateGradInput(input, graddiv[0]))
+        self.gradInput.add_(gradsub[0])
 
         return self.gradInput
 

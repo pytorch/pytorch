@@ -93,33 +93,26 @@ class _TensorBase(object):
             return [subt.tolist() for subt in self]
         return []
 
-    def view(self, src, *args):
-        dst = self
-        if not torch.isTensor(src):
-            args = (src,) + args
-            src = self
-            dst = src.new()
+    def view(self, *args):
+        dst = self.new()
         if len(args) == 1 and torch.isStorage(args[0]):
             sizes = args[0]
         else:
             sizes = torch.LongStorage(args)
-        sizes = _infer_sizes(sizes, src.nElement())
+        sizes = _infer_sizes(sizes, self.nElement())
 
-        if reduce(lambda a,b: a * b, sizes) != src.nElement():
+        if reduce(lambda a,b: a * b, sizes) != self.nElement():
             raise RuntimeError('Invalid size for view. Input size: ' +
-                    'x'.join(map(lambda v: str(v), src.size())) +
+                    'x'.join(map(lambda v: str(v), self.size())) +
                     ', output size: ' +
                     'x'.join(map(lambda v: str(v), sizes)) + '.')
 
-        assert src.isContiguous(), "expecting a contiguous tensor"
-        dst.set(src.storage(), src.storageOffset(), sizes)
+        assert self.isContiguous(), "expecting a contiguous tensor"
+        dst.set_(self.storage(), self.storageOffset(), sizes)
         return dst
 
-    def viewAs(self, src, template=None):
-        if template is None:
-            template = src
-            src = self
-        return self.view(src, template.size())
+    def viewAs(self, tensor):
+        return self.view(tensor.size())
 
     def permute(self, *args):
         perm = list(args)
@@ -138,22 +131,13 @@ class _TensorBase(object):
                 perm[j] = -1
         return tensor
 
-    def expandAs(self, src, template=None):
-        if template is not None:
-            return self.expand(src, template.size())
-        return self.expand(src.size())
+    def expandAs(self, tensor):
+        return self.expand(tensor.size())
 
-    def expand(self, src, *args):
-        if not torch.isTensor(src):
-            if torch.isStorage(src) and len(args) == 0:
-                sizes = src
-            else:
-                sizes = torch.LongStorage((src,) + args)
-            src = self
-            result = self.new()
-        else:
-            sizes = args[0] if len(args) == 1 and torch.isLongStorage(args[0]) else torch.LongStorage(args)
-            result = self
+    def expand(self, *args):
+        result = self.new()
+        sizes = args[0] if len(args) == 1 and torch.isLongStorage(args[0]) else torch.LongStorage(args)
+        src = self
 
         src_dim = src.dim()
         src_stride = src.stride()
@@ -170,59 +154,33 @@ class _TensorBase(object):
             elif size != sizes[i]:
                 raise ValueError('incorrect size: only supporting singleton expansion (size=1)')
 
-        result.set(src.storage(), src.storageOffset(),
+        result.set_(src.storage(), src.storageOffset(),
                                 src_size, src_stride)
         return result
 
-    # TODO: maybe drop this in favour of csub? :(
-    def sub(self, *sizes):
-        if len(sizes) == 0:
-            raise ValueError('sub requires at least two arguments')
-        if len(sizes) % 2 != 0:
-            raise ValueError('sub requires an even number of arguments')
-        result = self
-        pairs = int(len(sizes)/2)
-        for dim, start, end in zip(torch._pyrange(pairs), sizes[::2], sizes[1::2]):
-            dim_size = result.size(dim)
-            start = start + dim_size if start < 0 else start
-            end = end + dim_size if end < 0 else end
-            result = result.narrow(dim, start, end-start+1)
-        return result
-
-    def repeatTensor(self, src, *args):
-        if not torch.isTensor(src):
-            if torch.isStorage(src):
-                assert len(args) == 0
-                repeats = src.tolist()
-            else:
-                repeats = [src] + list(args)
-            src = self
-            result = self.new()
-        else:
-            # If args == (torch.LongStorage,), then we need to unpack the tuple
-            repeats = list(args[0] if len(args) == 1 else args)
-            result = self
-
-        if not src.isContiguous():
-            src = src.clone()
+    def repeatTensor(self, *args):
+        # If args == (torch.LongStorage,), then we need to unpack the tuple
+        repeats = list(args[0] if len(args) == 1 else args)
+        result = self.new()
+        src = self.contiguous()
 
         if len(repeats) < src.dim():
             raise ValueError('Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor')
 
-        xtensor = src.new().set(src)
+        xtensor = src.new().set_(src)
         xsize = xtensor.size().tolist()
         for i in torch._pyrange(len(repeats)-src.dim()):
             xsize = [1] + xsize
 
         size = torch.LongStorage([a * b for a, b in zip(xsize, repeats)])
-        xtensor.resize(torch.LongStorage(xsize))
-        result.resize(size)
+        xtensor.resize_(torch.LongStorage(xsize))
+        result.resize_(size)
         urtensor = result.new(result)
         for i in torch._pyrange(xtensor.dim()):
             urtensor = urtensor.unfold(i,xtensor.size(i),xtensor.size(i))
         for i in torch._pyrange(urtensor.dim()-xtensor.dim()):
             xsize = [1] + xsize
-        xtensor.resize(torch.LongStorage(xsize))
+        xtensor.resize_(torch.LongStorage(xsize))
         xxtensor = xtensor.expandAs(urtensor)
         urtensor.copy(xxtensor)
         return result
@@ -232,7 +190,7 @@ class _TensorBase(object):
     __radd__ = __add__
 
     def __sub__(self, other):
-        return self.clone().csub(other)
+        return self.clone().sub(other)
     __rsub__ = __sub__
 
     def __mul__(self, other):
@@ -242,9 +200,9 @@ class _TensorBase(object):
             if dim_self == 1 and dim_other == 1:
                 return self.dot(other)
             elif dim_self == 2 and dim_other == 1:
-                return self.new().mv(self, other)
+                return torch.mv(self, other)
             elif dim_self == 2 and dim_other == 2:
-                return self.new().mm(self, other)
+                return torch.mm(self, other)
         else:
             return self.clone().mul(other)
 

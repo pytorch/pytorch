@@ -9,13 +9,13 @@ class TanhShrink(nn.Module):
 
     def updateOutput(self, input):
         th = self.tanh.updateOutput(input)
-        self.output.resizeAs(input).copy(input)
-        self.output.add(-1, th)
+        self.output.resizeAs_(input).copy(input)
+        self.output.add_(-1, th)
         return self.output
 
     def updateGradInput(self, input, gradOutput):
         dth = self.tanh.updateGradInput(input, gradOutput)
-        self.gradInput.resizeAs(input).copy(gradOutput)
-        self.gradInput.add(-1, dth)
+        self.gradInput.resizeAs_(input).copy(gradOutput)
+        self.gradInput.add_(-1, dth)
         return self.gradInput
 

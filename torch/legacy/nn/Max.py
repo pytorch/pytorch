@@ -12,7 +12,7 @@ class Max(nn.Module):
     def _getPositiveDimension(self, input):
         dimension = self.dimension
         if dimension < 0:
-           dimension = input.dim() + dimension + 1
+           dimension = input.dim() + dimension
 
         return dimension
 
@@ -26,9 +26,9 @@ class Max(nn.Module):
         dimension = self._getPositiveDimension(input)
         torch.max(self._output, self._indices, input, dimension)
         if input.dim() > 1:
-          self.output.set(self._output.select(dimension, 0))
+          self.output.set_(self._output.select(dimension, 0))
         else:
-          self.output.set(self._output)
+          self.output.set_(self._output)
 
         return self.output
 
@@ -40,7 +40,7 @@ class Max(nn.Module):
         else:
           gradOutputView = gradOutput
 
-        self.gradInput.resizeAs(input).zero().scatter(dimension, self._indices, gradOutputView)
+        self.gradInput.resizeAs_(input).zero_().scatter_(dimension, self._indices, gradOutputView)
         return self.gradInput
 
     def type(self, type, tensorCache):

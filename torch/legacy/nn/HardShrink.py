@@ -4,6 +4,7 @@ from torch.legacy import nn
 class HardShrink(nn.Module):
 
     def __init__(self, lambd=0.5):
+        assert type(lambd) == float
         super(HardShrink, self).__init__()
         self.lambd = lambd
 

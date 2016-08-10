@@ -10,12 +10,12 @@ class Copy(nn.Module):
         self.output = outtype()
 
     def updateOutput(self, input):
-        self.output.resize(input.size()).copy(input)
+        self.output.resize_(input.size()).copy(input)
         return self.output
 
 
     def updateGradInput(self, input, gradOutput):
-        self.gradInput.resize(gradOutput.size()).copy(gradOutput)
+        self.gradInput.resize_(gradOutput.size()).copy(gradOutput)
         return self.gradInput
 
 

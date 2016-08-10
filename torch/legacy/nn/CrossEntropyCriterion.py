@@ -22,6 +22,6 @@ class CrossEntropyCriterion(nn.Criterion):
         target = target.squeeze()
         self.nll.updateGradInput(self.lsm.output, target)
         self.lsm.updateGradInput(input, self.nll.gradInput)
-        self.gradInput.view(self.lsm.gradInput, size)
+        self.gradInput = self.lsm.gradInput.view(size)
         return self.gradInput
 

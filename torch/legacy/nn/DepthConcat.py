@@ -34,7 +34,7 @@ class DepthConcat(nn.Concat):
             currentOutput = self.modules[i].updateOutput(input)
             outs.append(currentOutput)
             if i == 0:
-                self.size.resize(currentOutput.dim()).copy(currentOutput.size())
+                self.size.resize_(currentOutput.dim()).copy(currentOutput.size())
             else:
                 self.size[self.dimension] = self.size[self.dimension] + currentOutput.size(self.dimension)
                 for dim in range(self.size.size()):
@@ -42,7 +42,7 @@ class DepthConcat(nn.Concat):
                         # take the maximum size (shouldn't change anything for batch dim)
                         self.size[dim] = max(self.size[dim], currentOutput.size(dim))
 
-        self.output.resize(self.size).zero()  # zero for padding
+        self.output.resize_(self.size).zero_()  # zero for padding
 
         offset = 0
         for i, module in enumerate(self.modules):
@@ -54,7 +54,7 @@ class DepthConcat(nn.Concat):
         return self.output
 
     def updateGradInput(self, input, gradOutput):
-        self.gradInput.resizeAs(input)
+        self.gradInput.resizeAs_(input)
 
         offset = 0
         for i, module in enumerate(self.modules):
@@ -64,7 +64,7 @@ class DepthConcat(nn.Concat):
            if i == 0:
               self.gradInput.copy(currentGradInput)
            else:
-              self.gradInput.add(currentGradInput)
+              self.gradInput.add_(currentGradInput)
 
            offset = offset + currentOutput.size(self.dimension)
 
@@ -80,7 +80,7 @@ class DepthConcat(nn.Concat):
            offset = offset + currentOutput.size(self.dimension)
 
     def backward(self, input, gradOutput, scale=1):
-        self.gradInput.resizeAs(input)
+        self.gradInput.resizeAs_(input)
 
         offset = 0
         for i, module in enumerate(self.modules):
@@ -90,7 +90,7 @@ class DepthConcat(nn.Concat):
             if i == 0:
                 self.gradInput.copy(currentGradInput)
             else:
-                self.gradInput.add(currentGradInput)
+                self.gradInput.add_(currentGradInput)
 
             offset = offset + currentOutput.size(self.dimension)
 

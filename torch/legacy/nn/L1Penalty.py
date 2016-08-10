@@ -28,10 +28,10 @@ class L1Penalty(nn.Module):
         if self.sizeAverage:
             m = m / input.nElement()
 
-        self.gradInput.resizeAs(input).copy(input).sign().mul(m)
+        self.gradInput.resizeAs_(input).copy(input).sign_().mul_(m)
 
         if self.provideOutput:
-            self.gradInput.add(gradOutput)
+            self.gradInput.add_(gradOutput)
 
         return self.gradInput
 

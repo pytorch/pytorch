@@ -24,11 +24,11 @@ class Replicate(nn.Module):
             offset = 1 if i >= self.dim else 0
             st[i+offset] = input.stride(i)
 
-        self.output.set(input.storage(), input.storageOffset(), sz, st)
+        self.output.set_(input.storage(), input.storageOffset(), sz, st)
         return self.output
 
     def updateGradInput(self, input, gradOutput):
-        self.gradInput.resizeAs(input).zero()
+        self.gradInput.resizeAs_(input).zero_()
         sz = torch.LongStorage(input.dim()+1)
         sz[self.dim] = 1
         for i in range(input.dim()):
@@ -36,6 +36,6 @@ class Replicate(nn.Module):
            sz[i+offset] = input.size(i)
 
         gradInput = self.gradInput.view(sz)
-        gradInput.sum(gradOutput, self.dim)
+        torch.sum(gradInput, gradOutput, self.dim)
         return self.gradInput
 

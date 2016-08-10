@@ -54,7 +54,7 @@ THLongStorage * THPUtils_getLongStorage(PyObject *args, int ignore_first) {
   for (Py_ssize_t i = ignore_first; i < length; ++i) {
     PyObject *arg = PyTuple_GET_ITEM(args, i);
     if (!THPUtils_getLong(arg, &value))
-        throw std::invalid_argument("Expected a numeric argument");
+        throw std::invalid_argument("Expected a numeric argument, but got " + std::string(Py_TYPE(arg)->tp_name));
     result->data[i-ignore_first] = value;
   }
   return result.release();

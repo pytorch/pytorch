@@ -7,4 +7,8 @@ torch/lib/*.so
 torch/lib/*.h
 torch/lib/build
 torch/lib/tmp_install
+torch/csrc/nn/THNN.cwrap
+torch/csrc/nn/THNN.cpp
+torch/csrc/nn/THCUNN.cwrap
+torch/csrc/nn/THCUNN.cpp
 */**/*.pyc

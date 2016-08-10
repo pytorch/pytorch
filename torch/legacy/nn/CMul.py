@@ -10,15 +10,15 @@ class CMul(nn.Module):
 
         self.size = torch.LongStorage()
         if len(args) == 1 and torch.type(args[0]) == 'torch.LongStorage':
-            self.size.resize(arg[0].size()).copy(arg[0])
+            self.size.resize_(arg[0].size()).copy(arg[0])
         else:
-            self.size.resize(len(args))
+            self.size.resize_(len(args))
             for i, arg in enumerate(args):
                     self.size[i] = arg
 
         self.weight = torch.Tensor(self.size)
         self.gradWeight = torch.Tensor(self.size)
-        self.output.resize(self.size)
+        self.output.resize_(self.size)
         self.reset()
 
         self._output = None
@@ -37,7 +37,7 @@ class CMul(nn.Module):
         else:
             stdv = 1./math.sqrt(self.weight.nElement())
 
-        self.weight.uniform(-stdv, stdv)
+        self.weight.uniform_(-stdv, stdv)
 
 
     def updateOutput(self, input):
@@ -48,17 +48,18 @@ class CMul(nn.Module):
             self._expand = input.new()
             self._repeat = input.new()
 
-        self.output.resizeAs(input).copy(input)
+        self.output.resizeAs_(input).copy(input)
         batchSize = input.size(0)
-        self._output.view(self.output, batchSize, -1)
-        self._weight.view(self.weight, 1, -1)
-        self._expand.expandAs(self._weight, self._output)
+        # TODO: expandAs_, view_
+        self._output = self.output.view(batchSize, -1)
+        self._weight = self.weight.view(1, -1)
+        self._expand = self._weight.expandAs(self._output)
 
         if torch.typename(input) == 'torch.cuda.FloatTensor':
-            self._repeat.resizeAs(self._expand).copy(self._expand)
-            self._output.cmul(self._repeat)
+            self._repeat.resizeAs_(self._expand).copy(self._expand)
+            self._output.mul_(self._repeat)
         else:
-            self._output.cmul(self._expand)
+            self._output.mul_(self._expand)
 
         return self.output
 
@@ -71,18 +72,18 @@ class CMul(nn.Module):
             self._gradOutput = input.new()
             self._gradInput = input.new()
 
-        self.gradInput.resizeAs(input).zero()
+        self.gradInput.resizeAs_(input).zero_()
         batchSize = input.size(0)
         nn.utils.contiguousView(self._gradOutput, gradOutput, batchSize, -1)
         nn.utils.contiguousView(self._gradInput, self.gradInput, batchSize, -1)
-        self._weight.view(self.weight, 1, -1)
-        self._expand.expandAs(self._weight, self._gradOutput)
+        self._weight = self.weight.view(1, -1)
+        self._expand = self._weight.expandAs(self._gradOutput)
 
         if torch.typename(input) == 'torch.cuda.FloatTensor':
-            self._repeat.resizeAs(self._expand).copy(self._expand)
-            self._gradInput.addcmul(1, self._repeat, self._gradOutput)
+            self._repeat.resizeAs_(self._expand).copy(self._expand)
+            self._gradInput.addcmul_(1, self._repeat, self._gradOutput)
         else:
-            self._gradInput.addcmul(1, self._expand, self._gradOutput)
+            self._gradInput.addcmul_(1, self._expand, self._gradOutput)
 
         return self.gradInput
 
@@ -96,11 +97,11 @@ class CMul(nn.Module):
         batchSize = input.size(0)
         nn.utils.contiguousView(self._input, input, batchSize, -1)
         nn.utils.contiguousView(self._gradOutput, gradOutput, batchSize, -1)
-        self._gradWeight.view(self.gradWeight, 1, -1)
+        self._gradWeight = self.gradWeight.view(1, -1)
 
-        self._repeat.cmul(self._input, self._gradOutput)
-        self._sum.sum(self._repeat, 0)
-        self._gradWeight.add(scale, self._sum)
+        torch.mul(self._repeat, self._input, self._gradOutput)
+        torch.sum(self._sum, self._repeat, 0)
+        self._gradWeight.add_(scale, self._sum)
 
     def type(self, type=None, tensorCache=None):
         if type:

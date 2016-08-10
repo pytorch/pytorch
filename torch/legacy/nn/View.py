@@ -28,13 +28,13 @@ class View(nn.Module):
 
     def updateOutput(self, input):
         self.output = self.output or input.new()
-        self.output.view(input, self.size)
+        self.output = input.view(self.size)
         return self.output
 
 
     def updateGradInput(self, input, gradOutput):
         self.gradInput = self.gradInput or gradOutput.new()
-        self.gradInput.view(gradOutput, input.size())
+        self.gradInput = gradOutput.view(input.size())
         return self.gradInput
 
     def __repr__(self):

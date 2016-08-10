@@ -49,19 +49,19 @@ class PartialLinear(nn.Module):
         # should return only the relevant partition?
 
     def updateOutput(self, input):
-        self.output.set(self.network.forward([input, self.partition]))
+        self.output.set_(self.network.forward([input, self.partition]))
         if self.bias:
-            self.output.add(torch.index(self.bias, 1, self.partition.long()).expandAs(self.output))
+            self.output.add_(torch.indexSelect(self.bias, 1, self.partition.long()).expandAs(self.output))
             self.addBuffer = self.addBuffer or input.new()
             if self.addBuffer.nElement() != input.size(0):
-                self.addBuffer.resize(input.size(0)).fill(1)
+                self.addBuffer.resize_(input.size(0)).fill_(1)
 
         return self.output
 
     def updateGradInput(self, input, gradOutput):
         if self.gradInput:
            self.network.updateGradInput([input, self.partition], gradOutput)
-           self.gradInput.set(self.network.gradInput[0])
+           self.gradInput.set_(self.network.gradInput[0])
 
         return self.gradInput
 
@@ -69,9 +69,9 @@ class PartialLinear(nn.Module):
         self.network.accGradParameters([input, self.partition], gradOutput, scale)
         if self.bias:
             self.buffer = self.buffer or input.new()
-            self.buffer.resize(gradOutput.size(1))
-            self.buffer.mv(gradOutput.t(), self.addBuffer).mul(scale)
-            self.gradBias.indexAdd(
+            self.buffer.resize_(gradOutput.size(1))
+            torch.mv(self.buffer, gradOutput.t(), self.addBuffer).mul_(scale)
+            self.gradBias.indexAdd_(
                 1, self.partition.long(), self.buffer.view(1, self.buffer.nElement())
             )
 
@@ -86,11 +86,11 @@ class PartialLinear(nn.Module):
 
     def zeroGradParameters(self):
         self.network.zeroGradParameters()
-        self.gradBias.zero()
+        self.gradBias.zero_()
 
     def updateParameters(self, learningRate):
         self.network.updateParameters(learningRate)
-        self.bias.add(-learningRate, self.gradBias)
+        self.bias._add(-learningRate, self.gradBias)
 
     def __repr__(self):
         return super(ParallelTable, self).__repr__() + \

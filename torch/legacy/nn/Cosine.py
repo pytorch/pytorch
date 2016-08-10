@@ -22,7 +22,7 @@ class Cosine(nn.Module):
             stdv = stdv * math.sqrt(3)
         else:
             stdv = 1./math.sqrt(self.weight.size(0))
-        self.weight.uniform(-stdv, stdv)
+        self.weight.uniform_(-stdv, stdv)
 
     def updateOutput(self, input):
         assert input.dim() == 2
@@ -35,19 +35,19 @@ class Cosine(nn.Module):
 
         # y_j = (w_j * x) / ( || w_j || * || x || )
 
-        self._weightNorm.norm(self.weight, 2, 1).add(1e-12)
+        torch.norm(self._weightNorm, self.weight, 2, 1).add_(1e-12)
 
         batchSize = input.size(0)
         nElement = self.output.nElement()
-        self.output.resize(batchSize, outputSize)
+        self.output.resize_(batchSize, outputSize)
         if self.output.nElement() != nElement:
-            self.output.zero()
+            self.output.zero_()
 
-        self.output.addmm(0, self.output, 1, input, self.weight.t())
+        self.output.addmm_(0., 1., input, self.weight.t())
 
-        self._inputNorm.norm(input, 2,1).add(1e-12)
-        self.output.cdiv(self._weightNorm.view(1, outputSize).expandAs(self.output))
-        self.output.cdiv(self._inputNorm.expandAs(self.output))
+        torch.norm(self._inputNorm, input, 2, 1).add_(1e-12)
+        self.output.div_(self._weightNorm.view(1, outputSize).expandAs(self.output))
+        self.output.div_(self._inputNorm.expandAs(self.output))
         return self.output
 
 
@@ -67,9 +67,9 @@ class Cosine(nn.Module):
         """
 
         nElement = self.gradInput.nElement()
-        self.gradInput.resizeAs(input)
+        self.gradInput.resizeAs_(input)
         if self.gradInput.nElement() != nElement:
-           self.gradInput.zero()
+           self.gradInput.zero_()
 
         inputNorm = self._inputNorm.expandAs(input)
         weightNorm = self._weightNorm.view(1, outputSize).expandAs(gradOutput)
@@ -77,16 +77,16 @@ class Cosine(nn.Module):
         self._gradOutput = self._gradOutput or gradOutput.new()
         self._sum = self._sum or input.new()
 
-        self.gradInput.copy(input).cdiv(inputNorm)
-        self._gradOutput.resizeAs(gradOutput).copy(gradOutput)
-        self._gradOutput.cmul(self.output)
-        self._sum.sum(self._gradOutput, 1)
-        self.gradInput.cmul(self._sum.expandAs(input))
+        self.gradInput.copy(input).div_(inputNorm)
+        self._gradOutput.resizeAs_(gradOutput).copy(gradOutput)
+        self._gradOutput.mul_(self.output)
+        torch.sum(self._sum, self._gradOutput, 1)
+        self.gradInput.mul_(self._sum.expandAs(input))
 
-        self._gradOutput.resizeAs(gradOutput).copy(gradOutput)
-        self._gradOutput.cdiv(weightNorm)
-        self.gradInput.addmm(-1, self.gradInput, 1, self._gradOutput, self.weight)
-        self.gradInput.cdiv(inputNorm)
+        self._gradOutput.resizeAs_(gradOutput).copy(gradOutput)
+        self._gradOutput.div_(weightNorm)
+        self.gradInput.addmm_(-1, 1, self._gradOutput, self.weight)
+        self.gradInput.div_(inputNorm)
 
         return self.gradInput
 
@@ -104,22 +104,22 @@ class Cosine(nn.Module):
         self._weight = self._weight or self.weight.new()
         self._sum = self._sum or input.new()
 
-        self._weight.resizeAs(self.weight).copy(self.weight)
+        self._weight.resizeAs_(self.weight).copy(self.weight)
         self._gradOutput = self._gradOutput or gradOutput.new()
-        self._gradOutput.resizeAs(gradOutput).copy(gradOutput)
-        self._gradOutput.cmul(self.output)
-        self._sum.sum(self._gradOutput, 0)
+        self._gradOutput.resizeAs_(gradOutput).copy(gradOutput)
+        self._gradOutput.mul_(self.output)
+        torch.sum(self._sum, self._gradOutput, 0)
         grad = self._sum[0]
-        grad.cdiv(self._weightNorm.select(1, 0))
-        self._weight.cmul(grad.view(outputSize, 1).expandAs(self._weight))
+        grad.div_(self._weightNorm.select(1, 0))
+        self._weight.mul_(grad.view(outputSize, 1).expandAs(self._weight))
 
         input_ = self._gradOutput
-        input_.resizeAs(input).copy(input)
-        input_.cdiv(self._inputNorm.expandAs(input))
-        self._weight.addmm(-1, self._weight, 1, gradOutput.t(), input_)
+        input_.resizeAs_(input).copy(input)
+        input_.div_(self._inputNorm.expandAs(input))
+        self._weight.addmm_(-1, 1, gradOutput.t(), input_)
 
-        self._weight.cdiv(self._weightNorm.expandAs(self._weight))
-        self.gradWeight.add(self._weight)
+        self._weight.div_(self._weightNorm.expandAs(self._weight))
+        self.gradWeight.add_(self._weight)
 
     def type(self, type=None, tensorCache=None):
         if type is not None:

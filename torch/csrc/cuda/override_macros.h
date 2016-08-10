@@ -7,7 +7,6 @@
 #undef THPTensorClass
 
 #undef THPTensorStatelessType
-#undef THPTensorStatelessMethods
 #undef THPTensorStateless
 
 #undef THPStorage_
@@ -63,7 +62,6 @@
 #define THPTensorClass TH_CONCAT_3(THCP,Real,TensorClass)
 
 #define THPTensorStatelessType THCPTensorStatelessType
-#define THPTensorStatelessMethods THCPTensorStatelessMethods
 #define THPTensorStateless THCPTensorStateless
 
 #undef THPUtils_

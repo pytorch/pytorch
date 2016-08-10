@@ -10,12 +10,12 @@ class CAddTable(nn.Module):
 
     def updateOutput(self, input):
         if self.inplace:
-           self.output.set(input[0])
+           self.output.set_(input[0])
         else:
-           self.output.resizeAs(input[0]).copy(input[0])
+           self.output.resizeAs_(input[0]).copy(input[0])
 
         for i in range(1, len(input)):
-           self.output.add(input[i])
+           self.output.add_(input[i])
 
         return self.output
 
@@ -27,12 +27,11 @@ class CAddTable(nn.Module):
                 self.gradInput.append(input[0].new())
 
             if self.inplace:
-                self.gradInput[i].set(gradOutput)
+                self.gradInput[i].set_(gradOutput)
             else:
-                self.gradInput[i].resizeAs(input[i]).copy(gradOutput)
+                self.gradInput[i].resizeAs_(input[i]).copy(gradOutput)
 
-        for i in range(len(input), len(self.gradInput)):
-            self.gradInput[i] = nil
+        del self.gradInput[len(input):]
 
         return self.gradInput
 

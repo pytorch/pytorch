@@ -134,13 +134,13 @@ simple_tests = [
                     reference_fn=lambda _,i: i.sigmoid().log()),
     SimpleTestCase(nn.LogSoftMax,
                     input_size=(10, 20),
-                    reference_fn=lambda _,i: torch.exp(i).cdiv(torch.exp(i).sum(1).expand(10, 20)).log()),
+                    reference_fn=lambda _,i: torch.exp(i).div_(torch.exp(i).sum(1).expand(10, 20)).log_()),
     SimpleTestCase(nn.SoftMax,
                     input_size=(10, 20),
-                    reference_fn=lambda _,i: torch.exp(i).cdiv(torch.exp(i).sum(1).expand(10, 20))),
+                    reference_fn=lambda _,i: torch.exp(i).div(torch.exp(i).sum(1).expand(10, 20))),
     SimpleTestCase(nn.SpatialSoftMax,
                     input_size=(1, 3, 10, 20),
-                    reference_fn=lambda _,i: torch.exp(i).cdiv(torch.exp(i).sum(1).expandAs(i))),
+                    reference_fn=lambda _,i: torch.exp(i).div(torch.exp(i).sum(1).expandAs(i))),
     SimpleTestCase(nn.SoftMin,
                     input_size=(10, 20)),
     SimpleTestCase(nn.SoftPlus,
@@ -155,14 +155,14 @@ simple_tests = [
                     input_size=(3, 2, 5),
                     reference_fn=lambda _,i: i.clamp(-1, 1)),
     SimpleTestCase(nn.Clamp,
-                    (-2, 5),
+                    (-2., 5.),
                     input=torch.randn(3, 2, 50) * 6,
                     reference_fn=lambda _,i: i.clamp(-2, 5)),
     SimpleTestCase(nn.Abs,
                     input_size=(3, 20, 5),
                     reference_fn=lambda _,i: i.abs()),
     SimpleTestCase(nn.ELU,
-                    (2,),
+                    (2.,),
                     input_size=(3, 2, 5),
                     check_inplace=True),
     # TODO implement
@@ -182,7 +182,7 @@ simple_tests = [
                     desc='lambda'),
     SimpleTestCase(nn.SoftSign,
                     input_size=(3, 2, 5),
-                    reference_fn=lambda _,i: i.cdiv(1 + torch.abs(i))),
+                    reference_fn=lambda _,i: i.div(1 + torch.abs(i))),
     SimpleTestCase(nn.LeakyReLU,
                     input_size=(3, 2, 5),
                     check_inplace=True),
@@ -217,7 +217,7 @@ simple_tests = [
                     input_size=[(5, 7), (5, 7)]),
     SimpleTestCase(nn.Square,
                     input_size=(10, 2, 4),
-                    reference_fn=lambda _,i: i.cmul(i)),
+                    reference_fn=lambda _,i: i.mul(i)),
     SimpleTestCase(nn.Sqrt,
                     input=torch.rand(10, 2, 4)+0.01,
                     reference_fn=lambda _,i: i.sqrt()),
@@ -282,7 +282,7 @@ simple_tests = [
                     desc='not_affine'),
     # TODO: reference function
     SimpleTestCase(nn.HardShrink,
-                    (2,),
+                    (2.,),
                     input_size=(4, 3, 2, 4)),
     SimpleTestCase(lambda: nn.Sequential().add(nn.GradientReversal()).add(nn.GradientReversal()),
                     input_size=(4, 3, 2, 2),
@@ -669,19 +669,19 @@ simple_tests = [
                         desc='weights'),
     CriterionTestCase(nn.ClassNLLCriterion,
                         input=torch.rand(15, 10).log(),
-                        target=torch.Tensor(15).uniform().mul(10).floor()),
+                        target=torch.Tensor(15).uniform_().mul(10).floor()),
     CriterionTestCase(nn.ClassNLLCriterion,
                         (torch.rand(10),),
                         input=torch.rand(15, 10).log(),
-                        target=torch.Tensor(15).uniform().mul(10).floor(),
+                        target=torch.Tensor(15).uniform_().mul(10).floor(),
                         desc='weights'),
     CriterionTestCase(nn.CrossEntropyCriterion,
                         input=torch.randn(15, 10),
-                        target=torch.Tensor(15).uniform().mul(10).floor()),
+                        target=torch.Tensor(15).uniform_().mul(10).floor()),
     CriterionTestCase(nn.CrossEntropyCriterion,
                         (torch.rand(10),),
                         input=torch.randn(15, 10),
-                        target=torch.Tensor(15).uniform().mul(10).floor(),
+                        target=torch.Tensor(15).uniform_().mul(10).floor(),
                         desc='weights'),
     CriterionTestCase(nn.CosineEmbeddingCriterion,
                         input=[torch.rand(15, 10), torch.rand(15, 10)],
@@ -773,10 +773,10 @@ for p in (1, 2, 1.5):
                         (p,),
                         input_size=(4, 5),
                         # Eh, we need to use p as a default, so it's passed by value
-                        reference_fn=lambda _,i,p=p: i.cdiv(i.norm(p, 1).expandAs(i)),
+                        reference_fn=lambda _,i,p=p: i.div(i.norm(p, 1).expandAs(i)),
                         desc=str(p)),
     )
-for p in (1, 2):
+for p in range(1, 4+1):
     simple_tests.append(
         SimpleTestCase(nn.PairwiseDistance,
                         (p,),
@@ -856,7 +856,7 @@ class TestNN(unittest.TestCase):
 
     def _analytical_jacobian(self, module, input, jacobian_input=True, jacobian_parameters=True):
         module.forward(input)
-        d_out = module.output.new().resizeAs(module.output)
+        d_out = module.output.new().resizeAs_(module.output)
         flat_d_out = d_out.view(-1)
 
         if jacobian_input:
@@ -869,7 +869,7 @@ class TestNN(unittest.TestCase):
             jacobian_param = torch.zeros(param.nElement(), d_out.nElement())
 
         for i in range(flat_d_out.nElement()):
-            d_out.zero()
+            d_out.zero_()
             flat_d_out[i] = 1
 
             if jacobian_parameters:
@@ -923,7 +923,7 @@ class TestNN(unittest.TestCase):
                     outb.copy(module.forward(input))
                     flat_tensor[i] = orig
 
-                    outb.add(-1,outa).div(2*perturbation)
+                    outb.add_(-1,outa).div_(2*perturbation)
                     d_tensor[i] = outb
 
             return jacobian
@@ -986,7 +986,7 @@ class TestNN(unittest.TestCase):
 
     def test_Dropout(self):
         p = 0.2
-        input = torch.Tensor(1000).fill(1-p)
+        input = torch.Tensor(1000).fill_(1-p)
 
         module = nn.Dropout(p)
         output = module.forward(input)
@@ -1006,7 +1006,7 @@ class TestNN(unittest.TestCase):
         w = random.randint(1, 5)
         h = random.randint(1, 5)
         nfeats = 1000
-        input = torch.Tensor(b, nfeats, w, h).fill(1)
+        input = torch.Tensor(b, nfeats, w, h).fill_(1)
         module = nn.SpatialDropout(p)
         module.training()
         output = module.forward(input)
@@ -1021,7 +1021,7 @@ class TestNN(unittest.TestCase):
         w = random.randint(1,5)
         h = random.randint(1,5)
         nfeats = 1000
-        input = torch.Tensor(bsz, nfeats, t, w, h).fill(1)
+        input = torch.Tensor(bsz, nfeats, t, w, h).fill_(1)
         module = nn.VolumetricDropout(p)
         module.training()
         output = module.forward(input)
@@ -1050,7 +1050,7 @@ class TestNN(unittest.TestCase):
         output = c.forward(input)
         self.assertEqual(torch.typename(output), 'torch.FloatTensor')
         self.assertEqual(output, input.float(), 1e-6)
-        gradInput = c.backward(input, output.fill(1))
+        gradInput = c.backward(input, output.fill_(1))
         self.assertEqual(torch.typename(gradInput), 'torch.DoubleTensor')
         self.assertEqual(gradInput, output.double(), 1e-6)
         c.dontCast = True
@@ -1124,15 +1124,15 @@ class TestNN(unittest.TestCase):
         for l in linears:
             m.add(l)
             l.zeroGradParameters()
-            l.weight.fill(1)
-            l.bias.fill(0)
+            l.weight.fill_(1)
+            l.bias.fill_(0)
 
         output = m.forward(input)
         output2 = input.sum(1).expand(4, 5).repeatTensor(num_modules, 1)
         self.assertEqual(output2, output)
 
         gradInput = m.backward(input, torch.ones(output2.size()))
-        gradInput2 = torch.ones(4, 2).fill(num_modules * 5)
+        gradInput2 = torch.ones(4, 2).fill_(num_modules * 5)
         self.assertEqual(gradInput, gradInput2)
 
         gradWeight = input.sum(0).expand(5, 2)
@@ -1234,15 +1234,15 @@ class TestNN(unittest.TestCase):
         outputConcat = concat.forward(input)
         gradInputConcat = concat.backward(input, gradOutput)
         # the spatial dims are the largest, the nFilters is the sum
-        output = torch.Tensor(2, int(outputSize.sum()), 12, 12).zero() # zero for padding
+        output = torch.Tensor(2, int(outputSize.sum()), 12, 12).zero_() # zero for padding
         narrows = ( (slice(None), (0, 5), slice(None), slice(None)), (slice(None), (5, 11), (1, 11), (1, 11)), (slice(None), (11, 18), (1, 10), (1, 10)), (slice(None), (18, 26), (2, 10), (2, 10)) )
-        gradInput = input.clone().zero()
+        gradInput = input.clone().zero_()
         for i in range(4):
            conv = concat.get(i)
            gradWeight = conv.gradWeight.clone()
            conv.zeroGradParameters()
            output[narrows[i]].copy(conv.forward(input))
-           gradInput.add(conv.backward(input, gradOutput[narrows[i]]))
+           gradInput.add_(conv.backward(input, gradOutput[narrows[i]]))
            self.assertEqual(gradWeight, conv.gradWeight)
 
         self.assertEqual(output, outputConcat)
@@ -1282,21 +1282,21 @@ class TestNN(unittest.TestCase):
         weight = 1
         m = nn.L1Penalty(weight, False, False)
 
-        input = torch.rand(2,10).add(-0.5)
+        input = torch.rand(2,10).add_(-0.5)
         input[0][0] = 0
 
         m.forward(input)
         grad = m.backward(input, torch.ones(input.size()))
 
-        self.assertEqual(input.clone().abs().sum() * weight, m.loss)
+        self.assertEqual(input.abs().sum() * weight, m.loss)
 
         true_grad = (input.gt(0).typeAs(grad) +
-            input.lt(0).typeAs(grad).mul(-1)).mul(weight)
+            input.lt(0).typeAs(grad).mul_(-1)).mul_(weight)
         self.assertEqual(true_grad, grad)
 
     def test_MaskedSelect(self):
         input = torch.randn(4, 5)
-        mask = torch.ByteTensor(4, 5).bernoulli()
+        mask = torch.ByteTensor(4, 5).bernoulli_()
         module = nn.MaskedSelect()
         out = module.forward([input, mask])
         self.assertEqual(input.maskedSelect(mask), out)

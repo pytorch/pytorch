@@ -10,22 +10,22 @@ class AddConstant(nn.Module):
 
     def updateOutput(self, input):
         if self.inplace:
-            input.add(self.constant_scalar)
-            self.output.set(input)
+            input.add_(self.constant_scalar)
+            self.output.set_(input)
         else:
-            self.output.resizeAs(input)
+            self.output.resizeAs_(input)
             self.output.copy(input)
-            self.output.add(self.constant_scalar)
+            self.output.add_(self.constant_scalar)
 
         return self.output
 
     def updateGradInput(self, input, gradOutput):
         if self.inplace:
-            self.gradInput.set(gradOutput)
+            self.gradInput.set_(gradOutput)
             # restore previous input value
-            input.add(-self.constant_scalar)
+            input.add_(-self.constant_scalar)
         else:
-            self.gradInput.resizeAs(gradOutput)
+            self.gradInput.resizeAs_(gradOutput)
             self.gradInput.copy(gradOutput)
 
         return self.gradInput

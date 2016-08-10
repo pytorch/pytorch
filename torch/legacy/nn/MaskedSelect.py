@@ -11,26 +11,24 @@ class MaskedSelect(nn.Module):
         self._gradBuffer = torch.Tensor()
         self._gradMask = torch.ByteTensor()
 
-
     def updateOutput(self, input):
         input, mask = input
-        self.output.maskedSelect(input, mask)
+        torch.maskedSelect(self.output, input, mask)
         return self.output
-
 
     def updateGradInput(self, input, gradOutput):
         input, mask = input
         if input.type() == 'torch.cuda.FloatTensor':
-            self._maskIndexBufferCPU.range(0, mask.nElement()-1).resize(mask.size())
-            self._maskIndexBuffer.resize(self._maskIndexBufferCPU.size()).copy(self._maskIndexBufferCPU)
+            torch.range(self._maskIndexBufferCPU, 0, mask.nElement()-1).resize_(mask.size())
+            self._maskIndexBuffer.resize_(self._maskIndexBufferCPU.size()).copy(self._maskIndexBufferCPU)
         else:
-            self._maskIndexBuffer.range(0, mask.nElement()-1).resize(mask.size())
+            torch.range(self._maskIndexBuffer, 0, mask.nElement()-1).resize_(mask.size())
 
-        self._maskIndices.maskedSelect(self._maskIndexBuffer, mask)
-        self._gradBuffer.resize(input.nElement()).zero()
-        self._gradBuffer.scatter(0, self._maskIndices, gradOutput)
-        self._gradBuffer.resize(input.size())
-        self.gradInput = [self._gradBuffer, self._gradMask.resize(mask.size()).fill(0)]
+        torch.maskedSelect(self._maskIndices, self._maskIndexBuffer, mask)
+        self._gradBuffer.resize_(input.nElement()).zero_()
+        self._gradBuffer.scatter_(0, self._maskIndices, gradOutput)
+        self._gradBuffer.resize_(input.size())
+        self.gradInput = [self._gradBuffer, self._gradMask.resize_(mask.size()).fill_(0)]
         return self.gradInput
 
     def type(self, type=None, tensorCache=None):

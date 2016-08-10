@@ -9,7 +9,7 @@ class SpatialDivisiveNormalization(nn.Module):
 
         # get args
         self.nInputPlane = nInputPlane
-        self.kernel = kernel or torch.Tensor(9, 9).fill(1)
+        self.kernel = kernel or torch.Tensor(9, 9).fill_(1)
         self.threshold = threshold
         self.thresval = thresval or threshold or 1e-4
         kdim = self.kernel.nDimension()
@@ -53,25 +53,25 @@ class SpatialDivisiveNormalization(nn.Module):
 
         # set kernel and bias
         if kdim == 2:
-            self.kernel.div(self.kernel.sum() * self.nInputPlane)
+            self.kernel.div_(self.kernel.sum() * self.nInputPlane)
             for i in range(self.nInputPlane):
                 self.meanestimator.modules[1].weight[0][i] = self.kernel
                 self.stdestimator.modules[2].weight[0][i] = self.kernel
 
-            self.meanestimator.modules[1].bias.zero()
-            self.stdestimator.modules[2].bias.zero()
+            self.meanestimator.modules[1].bias.zero_()
+            self.stdestimator.modules[2].bias.zero_()
         else:
-            self.kernel.div(self.kernel.sum() * math.sqrt(self.nInputPlane))
+            self.kernel.div_(self.kernel.sum() * math.sqrt(self.nInputPlane))
             for i in range(self.nInputPlane):
                 self.meanestimator.modules[1].weight[i].copy(self.kernel)
                 self.meanestimator.modules[2].weight[0][i].copy(self.kernel)
                 self.stdestimator.modules[2].weight[i].copy(self.kernel)
                 self.stdestimator.modules[3].weight[0][i].copy(self.kernel)
 
-            self.meanestimator.modules[1].bias.zero()
-            self.meanestimator.modules[2].bias.zero()
-            self.stdestimator.modules[2].bias.zero()
-            self.stdestimator.modules[3].bias.zero()
+            self.meanestimator.modules[1].bias.zero_()
+            self.meanestimator.modules[2].bias.zero_()
+            self.stdestimator.modules[2].bias.zero_()
+            self.stdestimator.modules[3].bias.zero_()
 
         # other operation
         self.normalizer = nn.CDivTable()
@@ -91,10 +91,10 @@ class SpatialDivisiveNormalization(nn.Module):
         dim = input.dim()
         if self.localstds.dim() != self.coef.dim() or (input.size(dim-1) != self.coef.size(dim-1)) or (input.size(dim-2) != self.coef.size(dim-2)):
             self.ones = self.ones or input.new()
-            self.ones.resizeAs(input[0:1]).fill(1)
+            self.ones.resizeAs_(input[0:1]).fill_(1)
             coef = self.meanestimator.updateOutput(self.ones).squeeze(0)
             self._coef = self._coef or input.new()
-            self._coef.resizeAs(coef).copy(coef) # make contiguous for view
+            self._coef.resizeAs_(coef).copy(coef) # make contiguous for view
             self.coef = self._coef.view(1, *(self._coef.size().tolist())).expandAs(self.localstds)
 
         # normalize std dev
@@ -106,14 +106,14 @@ class SpatialDivisiveNormalization(nn.Module):
 
     def updateGradInput(self, input, gradOutput):
         # resize grad
-        self.gradInput.resizeAs(input).zero()
+        self.gradInput.resizeAs_(input).zero_()
 
         # backprop through all modules
         gradnorm = self.normalizer.updateGradInput([input, self.thresholdedstds], gradOutput)
         gradadj = self.thresholder.updateGradInput(self.adjustedstds, gradnorm[1])
         graddiv = self.divider.updateGradInput([self.localstds, self.coef], gradadj)
-        self.gradInput.add(self.stdestimator.updateGradInput(input, graddiv[0]))
-        self.gradInput.add(gradnorm[0])
+        self.gradInput.add_(self.stdestimator.updateGradInput(input, graddiv[0]))
+        self.gradInput.add_(gradnorm[0])
 
         return self.gradInput
 
