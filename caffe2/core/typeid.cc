@@ -9,8 +9,8 @@ std::map<CaffeTypeId, string>& gTypeNames() {
   return g_type_names;
 }
 
-std::unordered_set<string>& gRegisteredTypeNames() {
-  static std::unordered_set<string> g_registered_type_names;
+std::set<string>& gRegisteredTypeNames() {
+  static std::set<string> g_registered_type_names;
   return g_registered_type_names;
 }
 

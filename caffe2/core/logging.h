@@ -92,11 +92,6 @@ class EnforceNotMet : public std::exception {
   vector<string> msg_stack_;
 };
 
-// Exception handling: if we are enabling exceptions, we will turn on the caffe
-// enforce capabilities. If one does not allow exceptions during compilation
-// time, we will simply do LOG(FATAL).
-#ifdef __EXCEPTIONS
-
 #define CAFFE_ENFORCE(condition, ...)                                         \
   do {                                                                        \
     if (!(condition)) {                                                       \
@@ -108,21 +103,6 @@ class EnforceNotMet : public std::exception {
 #define CAFFE_THROW(...)         \
   throw ::caffe2::EnforceNotMet( \
       __FILE__, __LINE__, "", ::caffe2::MakeString(__VA_ARGS__))
-
-#else // __EXCEPTIONS
-
-#define CAFFE_ENFORCE(condition, ...)         \
-  CHECK(condition) << "[exception as fatal] " \
-                   << ::caffe2::MakeString(__VA_ARGS__)
-
-#define CAFFE_THROW(...) \
-  LOG(FATAL) << "[exception as fatal] " << ::caffe2::MakeString(__VA_ARGS__);
-
-#endif // __EXCEPTIONS
-
-#define CAFFE_FAIL(...) \
-  static_assert(        \
-      false, "CAFFE_FAIL is renamed CAFFE_THROW. Kindly change your code.")
 
 } // namespace caffe2
 

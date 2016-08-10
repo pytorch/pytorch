@@ -535,6 +535,17 @@ class Tensor {
     return size_ != old_size;
   }
 
+  bool SetDims(const vector<long int>& src) {
+    auto old_size = size_;
+    dims_.resize(src.size());
+    size_ = 1;
+    for (int i = 0; i < src.size(); ++i) {
+      size_ *= src[i];
+      dims_[i] = src[i];
+    }
+    return size_ != old_size;
+  }
+
   bool SetDims(const vector<int>& src) {
     auto old_size = size_;
     dims_.resize(src.size());

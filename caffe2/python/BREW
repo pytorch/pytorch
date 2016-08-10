@@ -26,7 +26,7 @@ python_cc_extension(
 python_cc_extension(
   name="caffe2_pybind11",
   srcs=[
-    "db.cc",
+    "pybind.cc",
   ],
   deps=[
       "//caffe2:core",
