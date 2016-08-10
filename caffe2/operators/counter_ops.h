@@ -13,11 +13,19 @@ template <typename T>
 class Counter {
  public:
   explicit Counter(T count) : count_(count) {}
-  bool CountDown() {
+  bool countDown() {
     if (count_-- > 0) {
       return false;
     }
     return true;
+  }
+
+  T countUp() {
+    return count_++;
+  }
+
+  T retrieve() const {
+    return count_.load();
   }
 
   void reset(T init_count) {
@@ -80,9 +88,42 @@ class CountDownOp final : public Operator<Context> {
     auto& counterPtr = OperatorBase::Input<std::unique_ptr<Counter<T>>>(0);
     auto* output = Output(0);
     output->Resize(std::vector<int>{});
-    *output->template mutable_data<bool>() = counterPtr->CountDown();
+    *output->template mutable_data<bool>() = counterPtr->countDown();
     return true;
   }
 };
+
+template <typename T, class Context = CPUContext>
+class CountUpOp final : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  CountUpOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws) {}
+
+  bool RunOnDevice() override {
+    auto& counterPtr = OperatorBase::Input<std::unique_ptr<Counter<T>>>(0);
+    auto* output = Output(0);
+    output->Resize(std::vector<int>{});
+    *output->template mutable_data<T>() = counterPtr->countUp();
+    return true;
+  }
+};
+
+template <typename T, class Context = CPUContext>
+class RetrieveCountOp final : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  RetrieveCountOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws) {}
+
+  bool RunOnDevice() override {
+    auto& counterPtr = OperatorBase::Input<std::unique_ptr<Counter<T>>>(0);
+    auto* output = Output(0);
+    output->Resize(std::vector<int>{});
+    *output->template mutable_data<T>() = counterPtr->retrieve();
+    return true;
+  }
+};
+
 } // namespace caffe2
 #endif // CAFFE2_OPERATORS_COUNTER_OPS_H_

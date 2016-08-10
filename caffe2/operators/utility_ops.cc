@@ -16,16 +16,18 @@ REGISTER_CPU_OPERATOR(
 REGISTER_CPU_OPERATOR(ScatterAssign, ScatterAssignOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(Copy, CopyOp<CPUContext, CPUContext, CPUContext>);
 REGISTER_CPU_OPERATOR(Shape, ShapeOp<CPUContext>);
+REGISTER_CPU_OPERATOR(Reshape, ReshapeOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(LengthsToShape, LengthsToShapeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(HasElements, HasElementsOp<CPUContext>);
 REGISTER_CPU_OPERATOR(IsEmpty, IsEmptyOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Gather, GatherOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Unique, UniqueOp<CPUContext>);
 REGISTER_CPU_OPERATOR(LengthsToSegmentIds, LengthsToSegmentIdsOp<CPUContext>);
+REGISTER_CPU_OPERATOR(LengthsToRanges, LengthsToRangesOp<CPUContext>);
 REGISTER_CPU_OPERATOR(SegmentIdsToLengths, SegmentIdsToLengthsOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Slice, SliceOp<int, CPUContext>);
 REGISTER_CPU_OPERATOR(Squeeze, SqueezeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(ExpandDims, ExpandDimsOp<CPUContext>);
-REGISTER_CPU_OPERATOR(And, AndOp<CPUContext>);
 
 OPERATOR_SCHEMA(Print)
     .NumInputs(1)
@@ -37,6 +39,10 @@ OPERATOR_SCHEMA(Print)
         "workspace, appending the tensor contents to a file named after "
         "the blob name. Otherwise, logs to stderr.")
     .Input(0, "tensor", "The tensor to print.");
+
+OPERATOR_SCHEMA(LengthsToShape).NumInputs(1).NumOutputs(1);
+
+OPERATOR_SCHEMA(Reshape).NumInputs(2).NumOutputs(1);
 
 OPERATOR_SCHEMA(Flatten)
     .NumInputs(1)
@@ -271,7 +277,25 @@ In general, the inverse operation is SegmentIdsToLengths. Notice though that
 trailing empty sequence lengths can't be properly recovered from segment ids.
 )DOC")
     .Input(0, "lengths", "1D tensor of int32 or int64 segment lengths.")
-    .Output(0, "has_elements", "Scalar bool. True iff input is not empty.");
+    .Output(0, "segment_ids", "1D tensor of length `sum(lengths)`");
+
+OPERATOR_SCHEMA(LengthsToRanges)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .SetDoc(R"DOC(
+Given a vector of segment lengths, calculates offsets of each segment and packs
+them next to the lengths. For the input vector of length N the output is a Nx2
+matrix with (offset, lengths) packaged for each segment. Output is going to have
+the same type as input. For long tensors explicit casting from int32 to int64
+might be necessary prior to this op.
+
+For example, `[1, 3, 0, 2]` transforms into `[[0, 1], [1, 3], [4, 0], [4, 2]]`.
+)DOC")
+    .Input(0, "lengths", "1D tensor of int32 or int64 segment lengths.")
+    .Output(
+        0,
+        "ranges",
+        "2D tensor of shape len(lengths) X 2 and the same type as `lengths`");
 
 OPERATOR_SCHEMA(SegmentIdsToLengths)
     .NumInputs(1)
@@ -286,7 +310,7 @@ operation of LengthsToSegmentIds, except that a vector of segment IDs
 cannot represent empty segments at the end.
 )DOC")
     .Input(0, "segment_ids", "1-D int32_t or int64_t tensor of segment ids")
-    .Output(0, "segment_lengths", "1-D int64_t tensor of segment lengths");
+    .Output(0, "lengths", "1-D int64_t tensor of segment lengths");
 
 OPERATOR_SCHEMA(Slice)
     .NumInputs(3)
@@ -349,21 +373,12 @@ If the same blob is provided in input and output, the operation is copy-free.
     .Input(0, "data", "Original tensor")
     .Output(0, "expanded", "Reshaped tensor with same data as input.");
 
-OPERATOR_SCHEMA(And)
-    .NumInputs(2)
-    .NumOutputs(1)
-    .AllowInplace({{0, 0}})
-    .SetDoc(R"DOC(
-Outputs true iff both input blob values are true.
-)DOC")
-    .Input(0, "input_0", "first boolean input.")
-    .Input(1, "input_1", "second boolean input.")
-    .Output(0, "output", "input_0 && input_1.");
-
 SHOULD_NOT_DO_GRADIENT(Print);
 SHOULD_NOT_DO_GRADIENT(Shape);
 SHOULD_NOT_DO_GRADIENT(HasElements);
 SHOULD_NOT_DO_GRADIENT(IsEmpty);
+SHOULD_NOT_DO_GRADIENT(Reshape);
+SHOULD_NOT_DO_GRADIENT(LengthsToShape);
 
 class GetSqueezeGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
@@ -454,7 +469,6 @@ SHOULD_NOT_DO_GRADIENT(LengthsToSegmentIds);
 SHOULD_NOT_DO_GRADIENT(SegmentIdsToLengths);
 // TODO(azzolini): Add support for slice gradient
 SHOULD_NOT_DO_GRADIENT(Slice);
-SHOULD_NOT_DO_GRADIENT(And);
 
 } // namespace
 

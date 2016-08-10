@@ -145,6 +145,16 @@ class OpSchema {
 
   friend std::ostream& operator<<(std::ostream& out, const OpSchema& schema);
 
+  const std::vector<std::pair<const char*, const char*>>& arg_desc() {
+    return arg_desc_;
+  }
+  const std::vector<std::pair<const char*, const char*>>& input_desc() {
+    return input_desc_;
+  }
+  const std::vector<std::pair<const char*, const char*>>& output_desc() {
+    return output_desc_;
+  }
+
  private:
   string file_;
   string doc_;

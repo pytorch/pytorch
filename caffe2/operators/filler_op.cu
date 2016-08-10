@@ -25,7 +25,7 @@ namespace {
 
 REGISTER_CUDA_OPERATOR(UniformFill, UniformFillOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(UniformIntFill, UniformFillOp<int, CUDAContext>);
-REGISTER_CUDA_OPERATOR(ConstantFill, ConstantFillOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(ConstantFill, ConstantFillOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(GivenTensorFill, GivenTensorFillOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(GaussianFill, GaussianFillOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(XavierFill, XavierFillOp<float, CUDAContext>);

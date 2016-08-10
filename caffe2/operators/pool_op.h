@@ -14,7 +14,11 @@ class PoolOp final : public ConvPoolOpBase<Context> {
  public:
   USE_CONV_POOL_BASE_FUNCTIONS;
   PoolOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<Context>(operator_def, ws) {}
+      : ConvPoolOpBase<Context>(operator_def, ws) {
+    CAFFE_ENFORCE(
+        dilation_h_ == 1 && dilation_w_ == 1,
+        "Pooling op does not support dilation right now.");
+  }
   ~PoolOp() {}
 
   bool RunOnDeviceWithOrderNCHW() override;

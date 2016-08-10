@@ -56,6 +56,8 @@ def elements_of_type(dtype=np.float32, filter_=None):
         elems = st.integers(min_value=0, max_value=2 ** 31 - 1)
     elif dtype is np.int64:
         elems = st.integers(min_value=0, max_value=2 ** 63 - 1)
+    elif dtype is np.bool:
+        elems = st.booleans()
     else:
         raise ValueError("Unexpected dtype without elements provided")
     return elems if filter_ is None else elems.filter(filter_)
@@ -201,7 +203,8 @@ class HypothesisTestCase(test_util.TestCase):
         inputs,
         ref_outputs,
         output_to_grad,
-        grad_reference
+        grad_reference,
+        threshold=1e-4,
     ):
         grad_blob_name = output_to_grad + '_grad'
         grad_ops, grad_map = core.GradientRegistry.GetBackwardPass(
@@ -229,7 +232,7 @@ class HypothesisTestCase(test_util.TestCase):
                     val_name = grad_names.values
                 vals = workspace.FetchBlob(str(val_name))
                 np.testing.assert_allclose(vals, ref_vals,
-                                           atol=1e-4, rtol=1e-4)
+                                           atol=threshold, rtol=threshold)
                 if ref_indices is not None:
                     indices = workspace.FetchBlob(str(grad_names.indices))
                     np.testing.assert_allclose(indices, ref_indices,
@@ -243,7 +246,6 @@ class HypothesisTestCase(test_util.TestCase):
         reference,
         input_device_options={},
         threshold=1e-4,
-
         output_to_grad=None,
         grad_reference=None,
     ):
@@ -259,6 +261,11 @@ class HypothesisTestCase(test_util.TestCase):
                 )
             workspace.RunOperatorOnce(op)
             reference_outputs = reference(*inputs)
+            if not (isinstance(reference_outputs, tuple) or
+                    isinstance(reference_outputs, list)):
+                raise RuntimeError(
+                    "You are providing a wrong reference implementation. A "
+                    "proper one should return a tuple/list of numpy arrays.")
             self.assertEqual(len(reference_outputs), len(op.output))
             outs = []
             for (n, ref) in zip(op.output, reference_outputs):
@@ -267,7 +274,7 @@ class HypothesisTestCase(test_util.TestCase):
                     np.testing.assert_array_equal(output, ref)
                 else:
                     np.testing.assert_allclose(
-                        output, ref, atol=1e-4, rtol=1e-4)
+                        output, ref, atol=threshold, rtol=threshold)
                 outs.append(output)
             if grad_reference and output_to_grad:
                 self._assertGradReferenceChecks(

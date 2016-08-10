@@ -33,7 +33,7 @@ CudaMemoryPoolType GetCudaMemoryPoolType();
  * space. As a result, whenever Caffe2 is built with GPU and there is
  * GPU present during runtime, at global initialization time we will set
  * the CPU memory allocator to allocate pinned memory.
- */ 
+ */
 struct PinnedCPUAllocator final : CPUAllocator {
   PinnedCPUAllocator() {}
   ~PinnedCPUAllocator() {}
@@ -186,6 +186,13 @@ class CUDAContext final {
     CopyBytes<SrcContext, DstContext>(n * sizeof(T),
                                  static_cast<const void*>(src),
                                  static_cast<void*>(dst));
+  }
+
+  template <class SrcContext, class DstContext>
+  inline void
+  CopyItems(const TypeMeta& meta, size_t n, const void* src, void* dst) {
+    CAFFE_ENFORCE(!meta.copy(), "CUDAContext requires fundamental types.");
+    CopyBytes<SrcContext, DstContext>(n * meta.itemsize(), src, dst);
   }
 
  protected:

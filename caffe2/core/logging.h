@@ -19,9 +19,9 @@
 // Below are different implementations for glog and non-glog cases.
 #ifdef CAFFE2_USE_GOOGLE_GLOG
 #include "caffe2/core/logging_is_google_glog.h"
-#else   // !CAFFE2_USE_GOOGLE_GLOG
+#else // !CAFFE2_USE_GOOGLE_GLOG
 #include "caffe2/core/logging_is_not_google_glog.h"
-#endif  // CAFFE2_USE_GOOGLE_GLOG
+#endif // CAFFE2_USE_GOOGLE_GLOG
 
 CAFFE2_DECLARE_int(caffe2_log_level);
 CAFFE2_DECLARE_bool(caffe2_use_fatal_for_enforce);
@@ -45,9 +45,9 @@ inline void MakeStringInternal(std::stringstream& ss, const T& t) {
   ss << t;
 }
 
-template <typename T, typename ... Args>
-inline void MakeStringInternal(
-    std::stringstream& ss, const T& t, const Args&... args) {
+template <typename T, typename... Args>
+inline void
+MakeStringInternal(std::stringstream& ss, const T& t, const Args&... args) {
   MakeStringInternal(ss, t);
   MakeStringInternal(ss, args...);
 }
@@ -61,11 +61,15 @@ string MakeString(const Args&... args) {
 
 // Specializations for already-a-string types.
 template <>
-inline string MakeString(const string& str) { return str; }
-inline string MakeString(const char* c_str) { return string(c_str); }
+inline string MakeString(const string& str) {
+  return str;
+}
+inline string MakeString(const char* c_str) {
+  return string(c_str);
+}
 
 // Obtains the base name from a full path.
-string StripBasename(const std::string &full_path);
+string StripBasename(const std::string& full_path);
 
 // Replace all occurrences of "from" substring to "to" string.
 // Returns number of replacements
@@ -73,8 +77,11 @@ size_t ReplaceAll(string& s, const char* from, const char* to);
 
 class EnforceNotMet : public std::exception {
  public:
-  EnforceNotMet(const char* file, const int line, const char* condition,
-                const string& msg);
+  EnforceNotMet(
+      const char* file,
+      const int line,
+      const char* condition,
+      const string& msg);
   void AppendMessage(const string& msg);
   string msg() const;
   inline const vector<string>& msg_stack() const {
@@ -90,35 +97,33 @@ class EnforceNotMet : public std::exception {
 // time, we will simply do LOG(FATAL).
 #ifdef __EXCEPTIONS
 
-#define CAFFE_ENFORCE(condition, ...)                                          \
-  do {                                                                         \
-    if (!(condition)) {                                                        \
-      throw ::caffe2::EnforceNotMet(                                           \
-          __FILE__,                                                            \
-          __LINE__,                                                            \
-          #condition,                                                          \
-          MakeString(__VA_ARGS__));                                            \
-    }                                                                          \
+#define CAFFE_ENFORCE(condition, ...)                                         \
+  do {                                                                        \
+    if (!(condition)) {                                                       \
+      throw ::caffe2::EnforceNotMet(                                          \
+          __FILE__, __LINE__, #condition, ::caffe2::MakeString(__VA_ARGS__)); \
+    }                                                                         \
   } while (false)
 
-#define CAFFE_THROW(...) \
-  throw ::caffe2::EnforceNotMet(__FILE__, __LINE__, "", MakeString(__VA_ARGS__))
+#define CAFFE_THROW(...)         \
+  throw ::caffe2::EnforceNotMet( \
+      __FILE__, __LINE__, "", ::caffe2::MakeString(__VA_ARGS__))
 
 #else // __EXCEPTIONS
 
-#define CAFFE_ENFORCE(condition, ...) \
-  CHECK(condition) << "[exception as fatal] " << MakeString(__VA_ARGS__)
+#define CAFFE_ENFORCE(condition, ...)         \
+  CHECK(condition) << "[exception as fatal] " \
+                   << ::caffe2::MakeString(__VA_ARGS__)
 
 #define CAFFE_THROW(...) \
-  LOG(FATAL) << "[exception as fatal] " << MakeString(__VA_ARGS__);
+  LOG(FATAL) << "[exception as fatal] " << ::caffe2::MakeString(__VA_ARGS__);
 
 #endif // __EXCEPTIONS
 
-#define CAFFE_FAIL(...)                                                        \
-  static_assert(                                                               \
-      false,                                                                   \
-      "CAFFE_FAIL is renamed CAFFE_THROW. Kindly change your code.")
+#define CAFFE_FAIL(...) \
+  static_assert(        \
+      false, "CAFFE_FAIL is renamed CAFFE_THROW. Kindly change your code.")
 
-}  // namespace caffe2
+} // namespace caffe2
 
-#endif  // CAFFE2_CORE_LOGGING_H_
+#endif // CAFFE2_CORE_LOGGING_H_

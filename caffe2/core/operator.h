@@ -89,7 +89,9 @@ class OperatorBase {
   inline const vector<const Blob*>& Inputs() const { return inputs_; }
   inline const vector<Blob*>& Outputs() { return outputs_; }
 
-  virtual bool Run() { CAFFE_NOT_IMPLEMENTED; return false; }
+  virtual bool Run() {
+    CAFFE_NOT_IMPLEMENTED;
+  }
   virtual bool RunAsync() { return Run(); }
 
   inline const OperatorDef& def() { return operator_def_; }
@@ -299,7 +301,6 @@ struct DispatchHelper<TensorTypes<>, ExtraArgs...> {
   template <typename Op>
   static bool call(Op* op, const TypeMeta& meta) {
     CAFFE_THROW("Unsupported type of tensor: ", meta.name());
-    return false;
   }
   template <typename Op, typename Context>
   static bool call(Op* op, const Tensor<Context>& tensor) {

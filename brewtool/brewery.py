@@ -165,7 +165,7 @@ class Brewery(object):
     @classmethod
     def GetNestedGenDirs(cls, dirname):
         """Returns the nested list of directories from a directory name.
-        
+
         For example, if the dirname is GENDIR/a/b, this returns
         ['GENDIR/a/b', 'GENDIR/a']
         """

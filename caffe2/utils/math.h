@@ -54,19 +54,12 @@ template <typename T, class Context>
 void Sqr(const int N, const T* x, T* y, Context* context);
 
 template <typename T, class Context>
+void Not(const int N, const T* x, T* y, Context* context);
+
+template <typename T, class Context>
 void Powx(const int N, const T* a, const T b, T* y, Context* context);
 
-
-template <typename T, class Context>
-void Add(const int N, const T* a, const T* b, T* y, Context* context);
-template <typename T, class Context>
-void Sub(const int N, const T* a, const T* b, T* y, Context* context);
-template <typename T, class Context>
-void Mul(const int N, const T* a, const T* b, T* y, Context* context);
-template <typename T, class Context>
-void Div(const int N, const T* a, const T* b, T* y, Context* context);
-
-#define CAFFE2_DECLARE_BINARY_OP(name)                                       \
+#define CAFFE2_DECLARE_BINARY_OP_BINARY_RESULT(name)                         \
   template <typename T, class Context>                                       \
   void name(const int N, const T* a, const T* b, bool* y, Context* context); \
   template <typename T, class Context>                                       \
@@ -78,12 +71,42 @@ void Div(const int N, const T* a, const T* b, T* y, Context* context);
       bool* y,                                                               \
       Context* context);
 
-CAFFE2_DECLARE_BINARY_OP(LT)
-CAFFE2_DECLARE_BINARY_OP(LE)
-CAFFE2_DECLARE_BINARY_OP(GT)
-CAFFE2_DECLARE_BINARY_OP(GE)
+CAFFE2_DECLARE_BINARY_OP_BINARY_RESULT(LT);
+CAFFE2_DECLARE_BINARY_OP_BINARY_RESULT(LE);
+CAFFE2_DECLARE_BINARY_OP_BINARY_RESULT(GT);
+CAFFE2_DECLARE_BINARY_OP_BINARY_RESULT(GE);
+
+CAFFE2_DECLARE_BINARY_OP_BINARY_RESULT(And);
+CAFFE2_DECLARE_BINARY_OP_BINARY_RESULT(Or);
+CAFFE2_DECLARE_BINARY_OP_BINARY_RESULT(Xor);
+
+#undef CAFFE2_DECLARE_BINARY_OP_BINARY_RESULT
+
+#define CAFFE2_DECLARE_BINARY_OP(name)                                    \
+  template <typename T, class Context>                                    \
+  void name(const int N, const T* a, const T* b, T* y, Context* context); \
+  template <typename T, class Context>                                    \
+  void name##ToRow(                                                       \
+      const int M,                                                        \
+      const int N,                                                        \
+      const T* a,                                                         \
+      const T* b,                                                         \
+      T* y,                                                               \
+      Context* context);                                                  \
+  template <typename T, class Context>                                    \
+  void name##ToRow(                                                       \
+      const int M, const int N, const T* x, T* y, Context* context);      \
+  template <typename T, class Context>                                    \
+  void name##ToCol(                                                       \
+      const int M, const int N, const T* x, T* y, Context* context);
+
+CAFFE2_DECLARE_BINARY_OP(Add);
+CAFFE2_DECLARE_BINARY_OP(Sub);
+CAFFE2_DECLARE_BINARY_OP(Mul);
+CAFFE2_DECLARE_BINARY_OP(Div);
 
 #undef CAFFE2_DECLARE_BINARY_OP
+
 // Compute the row-wise max of a N*D matrix X, and write it to a N
 // dimensional vector y.
 template <typename T, class Context>
@@ -95,59 +118,6 @@ void RowwiseMax(const int N, const int D, const T* x, T* y,
 template <typename T, class Context>
 void ColwiseMax(const int N, const int D, const T* x, T* y,
                 Context* context);
-
-// AddToRow and AddToCol adds the corresponding row/col vector b to the matrix a
-// of shape MxN.
-template <typename T, class Context>
-void AddToRow(
-    const int M,
-    const int N,
-    const T* a,
-    const T* b,
-    T* y,
-    Context* context);
-template <typename T, class Context>
-void SubToRow(
-    const int M,
-    const int N,
-    const T* a,
-    const T* b,
-    T* y,
-    Context* context);
-template <typename T, class Context>
-void MulToRow(
-    const int M,
-    const int N,
-    const T* a,
-    const T* b,
-    T* y,
-    Context* context);
-template <typename T, class Context>
-void DivToRow(
-    const int M,
-    const int N,
-    const T* a,
-    const T* b,
-    T* y,
-    Context* context);
-
-// In-place version of XXXToRow
-template <typename T, class Context>
-void AddToRow(const int M, const int N, const T* x, T* y, Context* context);
-template <typename T, class Context>
-void SubToRow(const int M, const int N, const T* x, T* y, Context* context);
-template <typename T, class Context>
-void MulToRow(const int M, const int N, const T* x, T* y, Context* context);
-template <typename T, class Context>
-void DivToRow(const int M, const int N, const T* x, T* y, Context* context);
-template <typename T, class Context>
-void AddToCol(const int M, const int N, const T* x, T* y, Context* context);
-template <typename T, class Context>
-void SubToCol(const int M, const int N, const T* x, T* y, Context* context);
-template <typename T, class Context>
-void MulToCol(const int M, const int N, const T* x, T* y, Context* context);
-template <typename T, class Context>
-void DivToCol(const int M, const int N, const T* x, T* y, Context* context);
 
 // Decaf gemm provides a simpler interface to the gemm functions, with the
 // limitation that the data has to be contiguous in memory.
@@ -228,17 +198,41 @@ void Axpby(const int N, const T alpha, const T* x, const T b, T* y,
            Context* context);
 
 template <typename T, class Context, int order>
-void Im2col(const T* data_im, const int channels,
-    const int height, const int width, const int kernel_h, const int kernel_w,
-    const int pad_t, const int pad_l, const int pad_b, const int pad_r,
-    const int stride_h, const int stride_w, T* data_col,
+void Im2col(
+    const T* data_im,
+    const int channels,
+    const int height,
+    const int width,
+    const int kernel_h,
+    const int kernel_w,
+    const int dilation_h,
+    const int dilation_w,
+    const int pad_t,
+    const int pad_l,
+    const int pad_b,
+    const int pad_r,
+    const int stride_h,
+    const int stride_w,
+    T* data_col,
     Context* context);
 
 template <typename T, class Context, int order>
-void Col2im(const T* data_col, const int channels,
-    const int height, const int width, const int patch_h, const int patch_w,
-    const int pad_t, const int pad_l, const int pad_b, const int pad_r,
-    const int stride_h, const int stride_w, T* data_im,
+void Col2im(
+    const T* data_col,
+    const int channels,
+    const int height,
+    const int width,
+    const int patch_h,
+    const int patch_w,
+    const int dilation_h,
+    const int dilation_w,
+    const int pad_t,
+    const int pad_l,
+    const int pad_b,
+    const int pad_r,
+    const int stride_h,
+    const int stride_w,
+    T* data_im,
     Context* context);
 
 template <class Context>

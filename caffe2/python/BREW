@@ -39,8 +39,8 @@ py_library(
   srcs=Glob(["*.py"], excludes=["*_test.py"]),
   deps=[
       ":caffe2_python_cpu",
-      "//caffe/proto:caffe_proto",
-      "//caffe2/proto:caffe2_proto",
+      "//caffe/proto:caffe_proto_py",
+      "//caffe2/proto:caffe2_proto_py",
       "//caffe2/python/mint:mint",
   ],
   optional_deps=[

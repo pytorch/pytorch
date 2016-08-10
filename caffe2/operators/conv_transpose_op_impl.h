@@ -74,6 +74,8 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNCHW() {
         Y->dim32(3),
         kernel_h_,
         kernel_w_,
+        1,
+        1,
         pad_t_,
         pad_l_,
         pad_b_,
@@ -163,6 +165,8 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNHWC() {
         Y->dim32(2),
         kernel_h_,
         kernel_w_,
+        1,
+        1,
         pad_t_,
         pad_l_,
         pad_b_,
@@ -211,14 +215,14 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
       filter.dim32(3) == kernel_w_,
       "filter width must be equal to kernel width");
   dfilter->ResizeLike(filter);
-  dbias->Resize(vector<TIndex>{C});
+  dbias->Resize(C);
 
   const int kernel_dim = C * kernel_h_ * kernel_w_;
   const int output_image_size = dY.dim32(2) * dY.dim32(3);
   // The col buffer is stored in CHW order as well
   col_buffer_.Resize(vector<TIndex>{C, kernel_h_, kernel_w_, H, W});
   if (bias_multiplier_.size() != output_image_size) {
-    bias_multiplier_.Resize(vector<TIndex>{1, output_image_size});
+    bias_multiplier_.Resize(1, output_image_size);
     math::Set<T, Context>(
         output_image_size,
         static_cast<T>(1),
@@ -243,6 +247,8 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
         dY.dim32(3),
         kernel_h_,
         kernel_w_,
+        1,
+        1,
         pad_t_,
         pad_l_,
         pad_b_,
@@ -298,6 +304,8 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
           dY.dim32(3),
           kernel_h_,
           kernel_w_,
+          1,
+          1,
           pad_t_,
           pad_l_,
           pad_b_,
@@ -347,14 +355,14 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
       "filter width must be equal to kernel width");
   const int C = filter.dim32(3);
   dfilter->ResizeLike(filter);
-  dbias->Resize(vector<TIndex>{C});
+  dbias->Resize(C);
 
   const int kernel_dim = C * kernel_h_ * kernel_w_;
   const int output_image_size = dY.dim32(1) * dY.dim32(2);
   // The col buffer is stored in HWC order as well
   col_buffer_.Resize(vector<TIndex>{H, W, kernel_h_, kernel_w_, C});
   if (bias_multiplier_.size() != output_image_size) {
-    bias_multiplier_.Resize(vector<TIndex>{1, output_image_size});
+    bias_multiplier_.Resize(1, output_image_size);
     math::Set<T, Context>(
         output_image_size,
         static_cast<T>(1),
@@ -379,6 +387,8 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
         dY.dim32(2),
         kernel_h_,
         kernel_w_,
+        1,
+        1,
         pad_t_,
         pad_l_,
         pad_b_,
@@ -434,6 +444,8 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
           dY.dim32(2),
           kernel_h_,
           kernel_w_,
+          1,
+          1,
           pad_t_,
           pad_l_,
           pad_b_,

@@ -20,9 +20,15 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 from caffe2.python import core
+from caffe2.python.schema import Field, from_blob_list
 
 
 class Reader(object):
+    def __init__(self, schema=None):
+        if schema is not None:
+            assert isinstance(schema, Field)
+        self._schema = schema
+
     """
     Reader is a abstract class to be implemented in order to provide
     operations capable of iterating through a dataset or stream of data.
@@ -66,7 +72,13 @@ class Reader(object):
         """
         raise NotImplementedError('This reader cannot be resetted.')
 
-    def execution_step(self, reader_net_name=None, batch_size=1):
+    def read_record(self, read_net, batch_size=1, **kwargs):
+        should_stop, fields = self.read(read_net, **kwargs)
+        if self._schema:
+            fields = from_blob_list(self._schema, fields)
+        return should_stop, fields
+
+    def execution_step(self, reader_net_name=None, **kwargs):
         """Create an execution step with a net containing read operators.
 
         The execution step will contain a `stop_blob` that knows how to stop
@@ -98,7 +110,7 @@ class Reader(object):
                         of data that was read.
         """
         reader_net = core.Net(reader_net_name or 'reader')
-        should_stop, fields = self.read(reader_net, batch_size=batch_size)
+        should_stop, fields = self.read_record(reader_net, **kwargs)
         read_step = core.execution_step(
             '{}_step'.format(reader_net_name),
             reader_net,
@@ -128,6 +140,11 @@ class Writer(object):
                     write.
         """
         raise NotImplementedError('Writers must implement write.')
+
+    def write_record(self, writer_net, fields):
+        if isinstance(fields, Field):
+            fields = fields.field_blobs()
+        self.write(writer_net, fields)
 
     def commit(self, finish_net):
         """Add operations to `finish_net` that signal end of data.

@@ -14,10 +14,10 @@ bool SoftmaxOp<float, CPUContext>::RunOnDevice() {
   float* Ydata = Y->mutable_data<float>();
   // First, get scales
   if (scale_.size() != N) {
-    scale_.Resize(vector<TIndex>{N});
+    scale_.Resize(N);
   }
   if (sum_multiplier_.size() != D) {
-    sum_multiplier_.Resize(vector<TIndex>{D});
+    sum_multiplier_.Resize(D);
     math::Set<float, CPUContext>(D, 1.f, sum_multiplier_.mutable_data<float>(),
                                  &context_);
   }
@@ -60,14 +60,14 @@ bool SoftmaxGradientOp<float, CPUContext>::RunOnDevice() {
   DCHECK_EQ(dY.dim32(1), D);
   // First, get scales
   if (scale_.size() != N) {
-    scale_.Resize(vector<TIndex>{N});
+    scale_.Resize(N);
   }
   if (sum_multiplier_.size() != D) {
-    sum_multiplier_.Resize(vector<TIndex>{D});
+    sum_multiplier_.Resize(D);
     math::Set<float, CPUContext>(D, 1.f, sum_multiplier_.mutable_data<float>(),
                                  &context_);
   }
-  dX->Resize(vector<TIndex>{N, D});
+  dX->Resize(N, D);
   const float* Ydata = Y.data<float>();
   const float* dYdata = dY.data<float>();
   float* dXdata = dX->mutable_data<float>();

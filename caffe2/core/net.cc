@@ -279,9 +279,12 @@ void SimpleNet::TEST_Benchmark(const int warmup_runs, const int main_runs,
     int idx = 0;
     for (auto& op : operators_) {
       const string& op_type = op->def().type();
-      LOG(INFO) << "Operator #" << idx << " ("
-                     << op->def().name() << ", " << op_type << ") "
-                     << time_per_op[idx] / main_runs << " ms/iter";
+      const string& print_name =
+          (op->def().name().size()
+               ? op->def().name()
+               : (op->def().output_size() ? op->def().output(0) : "NO_OUTPUT"));
+      LOG(INFO) << "Operator #" << idx << " (" << print_name << ", " << op_type
+                << ") " << time_per_op[idx] / main_runs << " ms/iter";
       ++idx;
     }
     LOG(INFO) << "Time per operator type:";

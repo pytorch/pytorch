@@ -27,7 +27,7 @@ class IterOp final : public Operator<Context> {
         // This is the first run; set the iter to start with 0.
         auto* output = OperatorBase::Output<TensorCPU>(0);
         VLOG(1) << "Initializing iter counter.";
-        output->Resize(vector<TIndex>{1});
+        output->Resize(1);
         output->template mutable_data<int>()[0] = 0;
       }
     }

@@ -475,8 +475,8 @@ DEFINE_BROADCAST_BINARY_FUNCTION(Sub, -)
 DEFINE_BROADCAST_BINARY_FUNCTION(Mul, *)
 DEFINE_BROADCAST_BINARY_FUNCTION(Div, /)
 
-#undef DELEGATE_BROADCAST_BINARY_FUNCTION
 #undef DEFINE_BROADCAST_BINARY_FUNCTION
+#undef DELEGATE_BROADCAST_BINARY_FUNCTION
 
 #define CAFFE2_SPECIALIZED_SET(T)                                              \
 template <>                                                                    \
@@ -488,7 +488,9 @@ void Set<T, CPUContext>(const int N, const T alpha, T *Y,                      \
 CAFFE2_SPECIALIZED_SET(float);
 CAFFE2_SPECIALIZED_SET(double);
 CAFFE2_SPECIALIZED_SET(int);
+CAFFE2_SPECIALIZED_SET(int64_t);
 CAFFE2_SPECIALIZED_SET(bool);
+CAFFE2_SPECIALIZED_SET(char);
 #undef CAFFE2_SPECIALIZED_SET
 
 #define CAFFE2_INSTANTIATE_BINARY_OP(name, op, T)                          \
@@ -518,11 +520,25 @@ CAFFE2_SPECIALIZED_SET(bool);
   CAFFE2_INSTANTIATE_BINARY_OP(name, op, int32_t) \
   CAFFE2_INSTANTIATE_BINARY_OP(name, op, int64_t)
 
-
 CAFFE2_DEFINE_BINARY_OP(LT, <);
 CAFFE2_DEFINE_BINARY_OP(LE, <=);
 CAFFE2_DEFINE_BINARY_OP(GT, >);
 CAFFE2_DEFINE_BINARY_OP(GE, >=);
+
+CAFFE2_INSTANTIATE_BINARY_OP(Or, |, bool);
+CAFFE2_INSTANTIATE_BINARY_OP(And, &, bool);
+CAFFE2_INSTANTIATE_BINARY_OP(Xor, ^, bool);
+
+template <>
+void Not<bool, CPUContext>(
+    const int n,
+    const bool* x,
+    bool* y,
+    CPUContext* context) {
+  for (int i = 0; i < n; ++i) {
+    y[i] = !x[i];
+  }
+}
 
 #undef CAFFE2_DEFINE_BINARY_OP
 #undef CAFFE2_INSTANTIATE_BINARY_OP
@@ -584,13 +600,28 @@ void Select<float, CPUContext>(
 
 template <>
 void Im2col<float, CPUContext, StorageOrder::NCHW>(
-    const float* data_im, const int channels,
-    const int height, const int width, const int kernel_h, const int kernel_w,
-    const int pad_t, const int pad_l, const int pad_b, const int pad_r,
+    const float* data_im,
+    const int channels,
+    const int height,
+    const int width,
+    const int kernel_h,
+    const int kernel_w,
+    const int dilation_h,
+    const int dilation_w,
+    const int pad_t,
+    const int pad_l,
+    const int pad_b,
+    const int pad_r,
     const int stride_h,
-    const int stride_w, float* data_col, CPUContext* context) {
-  int height_col = (height + pad_t + pad_b - kernel_h) / stride_h + 1;
-  int width_col = (width + pad_l + pad_r - kernel_w) / stride_w + 1;
+    const int stride_w,
+    float* data_col,
+    CPUContext* context) {
+  const int dkernel_h = dilation_h * (kernel_h - 1) + 1;
+  const int dkernel_w = dilation_w * (kernel_w - 1) + 1;
+
+  int height_col = (height + pad_t + pad_b - dkernel_h) / stride_h + 1;
+  int width_col = (width + pad_l + pad_r - dkernel_w) / stride_w + 1;
+
   int channels_col = channels * kernel_h * kernel_w;
   for (int c = 0; c < channels_col; ++c) {
     int w_offset = c % kernel_w;
@@ -598,8 +629,8 @@ void Im2col<float, CPUContext, StorageOrder::NCHW>(
     int c_im = c / kernel_h / kernel_w;
     for (int h = 0; h < height_col; ++h) {
       for (int w = 0; w < width_col; ++w) {
-        int h_pad = h * stride_h - pad_t + h_offset;
-        int w_pad = w * stride_w - pad_l + w_offset;
+        int h_pad = h * stride_h - pad_t + h_offset * dilation_h;
+        int w_pad = w * stride_w - pad_l + w_offset * dilation_w;
         if (h_pad >= 0 && h_pad < height && w_pad >= 0 && w_pad < width)
           data_col[(c * height_col + h) * width_col + w] =
             data_im[(c_im * height + h_pad) * width + w_pad];
@@ -612,20 +643,34 @@ void Im2col<float, CPUContext, StorageOrder::NCHW>(
 
 template <>
 void Im2col<float, CPUContext, StorageOrder::NHWC>(
-    const float* data_im, const int channels,
-    const int height, const int width, const int kernel_h, const int kernel_w,
-    const int pad_t, const int pad_l, const int pad_b, const int pad_r,
-    const int stride_h, const int stride_w, float* data_col,
+    const float* data_im,
+    const int channels,
+    const int height,
+    const int width,
+    const int kernel_h,
+    const int kernel_w,
+    const int dilation_h,
+    const int dilation_w,
+    const int pad_t,
+    const int pad_l,
+    const int pad_b,
+    const int pad_r,
+    const int stride_h,
+    const int stride_w,
+    float* data_col,
     CPUContext* context) {
-  int height_col = (height + pad_t + pad_b - kernel_h) / stride_h + 1;
-  int width_col = (width + pad_l + pad_r - kernel_w) / stride_w + 1;
+  const int dkernel_h = dilation_h * (kernel_h - 1) + 1;
+  const int dkernel_w = dilation_w * (kernel_w - 1) + 1;
+
+  int height_col = (height + pad_t + pad_b - dkernel_h) / stride_h + 1;
+  int width_col = (width + pad_l + pad_r - dkernel_w) / stride_w + 1;
 
   int h_pad = -pad_t;
   for (int h = 0; h < height_col; ++h) {
     int w_pad = -pad_l;
     for (int w = 0; w < width_col; ++w) {
-      for (int ih = h_pad; ih < h_pad + kernel_h; ++ih) {
-        for (int iw = w_pad; iw < w_pad + kernel_w; ++iw) {
+      for (int ih = h_pad; ih < h_pad + dkernel_h; ih += dilation_h) {
+        for (int iw = w_pad; iw < w_pad + dkernel_w; iw += dilation_w) {
           if (ih >= 0 && ih < height && iw >= 0 && iw < width) {
             memcpy(data_col, data_im + (ih * width + iw) * channels,
                    sizeof(float) * channels);
@@ -644,14 +689,28 @@ void Im2col<float, CPUContext, StorageOrder::NHWC>(
 
 template <>
 void Col2im<float, CPUContext, StorageOrder::NCHW>(
-    const float* data_col, const int channels,
-    const int height, const int width, const int kernel_h, const int kernel_w,
-    const int pad_t, const int pad_l, const int pad_b, const int pad_r,
+    const float* data_col,
+    const int channels,
+    const int height,
+    const int width,
+    const int kernel_h,
+    const int kernel_w,
+    const int dilation_h,
+    const int dilation_w,
+    const int pad_t,
+    const int pad_l,
+    const int pad_b,
+    const int pad_r,
     const int stride_h,
-    const int stride_w, float* data_im, CPUContext* context) {
+    const int stride_w,
+    float* data_im,
+    CPUContext* context) {
+  const int dkernel_h = dilation_h * (kernel_h - 1) + 1;
+  const int dkernel_w = dilation_w * (kernel_w - 1) + 1;
+
   Set<float, CPUContext>(height * width * channels, 0, data_im, context);
-  int height_col = (height + pad_t + pad_b - kernel_h) / stride_h + 1;
-  int width_col = (width + pad_l + pad_r - kernel_w) / stride_w + 1;
+  int height_col = (height + pad_t + pad_b - dkernel_h) / stride_h + 1;
+  int width_col = (width + pad_l + pad_r - dkernel_w) / stride_w + 1;
   int channels_col = channels * kernel_h * kernel_w;
   for (int c = 0; c < channels_col; ++c) {
     int w_offset = c % kernel_w;
@@ -659,11 +718,12 @@ void Col2im<float, CPUContext, StorageOrder::NCHW>(
     int c_im = c / kernel_h / kernel_w;
     for (int h = 0; h < height_col; ++h) {
       for (int w = 0; w < width_col; ++w) {
-        int h_pad = h * stride_h - pad_t + h_offset;
-        int w_pad = w * stride_w - pad_l + w_offset;
-        if (h_pad >= 0 && h_pad < height && w_pad >= 0 && w_pad < width)
+        int h_pad = h * stride_h - pad_t + h_offset * dilation_h;
+        int w_pad = w * stride_w - pad_l + w_offset * dilation_w;
+        if (h_pad >= 0 && h_pad < height && w_pad >= 0 && w_pad < width) {
           data_im[(c_im * height + h_pad) * width + w_pad] +=
               data_col[(c * height_col + h) * width_col + w];
+        }
       }
     }
   }
@@ -671,30 +731,41 @@ void Col2im<float, CPUContext, StorageOrder::NCHW>(
 
 template <>
 void Col2im<float, CPUContext, StorageOrder::NHWC>(
-    const float* data_col, const int channels,
-    const int height, const int width, const int kernel_h, const int kernel_w,
-    const int pad_t, const int pad_l, const int pad_b, const int pad_r,
+    const float* data_col,
+    const int channels,
+    const int height,
+    const int width,
+    const int kernel_h,
+    const int kernel_w,
+    const int dilation_h,
+    const int dilation_w,
+    const int pad_t,
+    const int pad_l,
+    const int pad_b,
+    const int pad_r,
     const int stride_h,
-    const int stride_w, float* data_im, CPUContext* context) {
+    const int stride_w,
+    float* data_im,
+    CPUContext* context) {
+  const int dkernel_h = dilation_h * (kernel_h - 1) + 1;
+  const int dkernel_w = dilation_w * (kernel_w - 1) + 1;
+
   Set<float, CPUContext>(height * width * channels, 0, data_im, context);
-  int height_col = (height + pad_t + pad_b - kernel_h) / stride_h + 1;
-  int width_col = (width + pad_l + pad_r - kernel_w) / stride_w + 1;
+  int height_col = (height + pad_t + pad_b - dkernel_h) / stride_h + 1;
+  int width_col = (width + pad_l + pad_r - dkernel_w) / stride_w + 1;
   int h_pad = -pad_t;
   for (int h = 0; h < height_col; ++h) {
     int w_pad = -pad_l;
     for (int w = 0; w < width_col; ++w) {
-      float* data_im_patch = data_im + (h_pad * width + w_pad) * channels;
-      for (int ih = h_pad; ih < h_pad + kernel_h; ++ih) {
-        for (int iw = w_pad; iw < w_pad + kernel_w; ++iw) {
+      for (int ih = h_pad; ih < h_pad + dkernel_h; ih += dilation_h) {
+        for (int iw = w_pad; iw < w_pad + dkernel_w; iw += dilation_w) {
           if (ih >= 0 && ih < height && iw >= 0 && iw < width) {
+            auto* data_im_patch = data_im + (ih * width + iw) * channels;
             Add<float, CPUContext>(
                   channels, data_im_patch, data_col, data_im_patch, context);
           }
-          data_im_patch += channels;
           data_col += channels;
         }
-        // Jump over remaining number of channels
-        data_im_patch += channels * (width - kernel_w);
       }
       w_pad += stride_w;
     }

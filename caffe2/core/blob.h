@@ -58,8 +58,12 @@ class Blob {
     return *static_cast<const T*>(pointer_);
   }
 
-  const void* GetRaw() const { return pointer_; }
-  void* GetRaw() { return pointer_; }
+  const void* GetRaw() const {
+    return pointer_;
+  }
+  void* GetRaw() {
+    return pointer_;
+  }
 
   /**
    * @brief Gets a mutable pointer to the stored object.
@@ -113,8 +117,8 @@ class Blob {
   template <class T>
   typename std::remove_const<T>::type* ShareExternal(
       typename std::remove_const<T>::type* allocated) {
-    return static_cast<T*>(
-        ShareExternal(static_cast<void*>(allocated),
+    return static_cast<T*>(ShareExternal(
+        static_cast<void*>(allocated),
         TypeMeta::Make<typename std::remove_const<T>::type>()));
   }
 

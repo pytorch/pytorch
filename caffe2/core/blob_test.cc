@@ -315,19 +315,19 @@ TYPED_TEST(TensorCPUTest, KeepOnShrink) {
   TypeParam* ptr = tensor.mutable_data<TypeParam>();
   EXPECT_TRUE(ptr != nullptr);
   // Expanding - will reallocate
-  tensor.Resize(vector<int>{3, 4, 6});
+  tensor.Resize(3, 4, 6);
   TypeParam* larger_ptr = tensor.mutable_data<TypeParam>();
   EXPECT_TRUE(larger_ptr != nullptr);
   EXPECT_NE(ptr, larger_ptr);
   // Shrinking - will not reallocate
-  tensor.Resize(vector<int>{1, 2, 4});
+  tensor.Resize(1, 2, 4);
   TypeParam* smaller_ptr = tensor.mutable_data<TypeParam>();
   EXPECT_TRUE(smaller_ptr != nullptr);
   EXPECT_EQ(larger_ptr, smaller_ptr);
   // resize to 0 in the meantime;
-  tensor.Resize(vector<int>{3, 0, 6});
+  tensor.Resize(3, 0, 6);
   // Expanding but still under capacity - will not reallocate
-  tensor.Resize(vector<int>{2, 3, 5});
+  tensor.Resize(2, 3, 5);
   TypeParam* new_ptr = tensor.mutable_data<TypeParam>();
   EXPECT_TRUE(new_ptr != nullptr);
   EXPECT_EQ(larger_ptr, new_ptr);
@@ -382,7 +382,7 @@ TEST(TensorTest, Tensor64BitDimension) {
   EXPECT_EQ(tensor.itemsize(), sizeof(char));
   // Try to go even larger, but this time we will not do mutable_data because we
   // do not have a large enough memory.
-  tensor.Resize(vector<TIndex>{large_number, 100});
+  tensor.Resize(large_number, 100);
   EXPECT_EQ(tensor.ndim(), 2);
   EXPECT_EQ(tensor.dim(0), large_number);
   EXPECT_EQ(tensor.dim(1), 100);

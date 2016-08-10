@@ -118,16 +118,35 @@ def RunNetOnce(net):
     return cc_RunNetOnce(StringfyProto(net))
 
 
+def RunNet(name):
+    """Runs a given net.
+
+    Inputs:
+      name: the name of the net, or a reference to the net.
+    Returns:
+      True or an exception.
+    """
+    return cc_RunNet(StringifyNetName(name))
+
+
 def RunPlan(plan):
     return cc_RunPlan(StringfyProto(plan))
 
 
-def _StringifyBlobName(name):
+def _StringifyName(name, expected_type):
     if isinstance(name, basestring):
         return name
-    assert type(name).__name__ == 'BlobReference', \
-        "Expected a string or BlobReference"
+    assert type(name).__name__ == expected_type, \
+        "Expected a string or %s" % expected_type
     return str(name)
+
+
+def StringifyBlobName(name):
+    return _StringifyName(name, "BlobReference")
+
+
+def StringifyNetName(name):
+    return _StringifyName(name, "Net")
 
 
 def FeedBlob(name, arr, device_option=None):
@@ -146,7 +165,7 @@ def FeedBlob(name, arr, device_option=None):
     if type(arr) is np.ndarray and arr.dtype.kind == 'S':
         # Plain NumPy strings are weird, let's use objects instead
         arr = arr.astype(np.object)
-    name = _StringifyBlobName(name)
+    name = StringifyBlobName(name)
     if device_option is not None:
         return cc_FeedBlob(name, arr, StringfyProto(device_option))
     elif scope.DEVICESCOPE is not None:
@@ -163,8 +182,12 @@ def FetchBlob(name):
     Returns:
       Fetched blob (numpy array or string) if successful
     """
-    name = _StringifyBlobName(name)
-    return cc_FetchBlob(name)
+    return cc_FetchBlob(StringifyBlobName(name))
+
+
+def GetNameScope():
+    """Return the current namescope string. To be used to fetch blobs"""
+    return scope.NAMESCOPE
 
 
 class _BlobDict(object):

@@ -23,7 +23,8 @@ class TestToyRegression(test_util.TestCase):
         B_gt = init_net.GivenTensorFill([], "B_gt", shape=[1], values=[0.5])
         LR = init_net.ConstantFill([], "LR", shape=[1], value=-0.1)
         ONE = init_net.ConstantFill([], "ONE", shape=[1], value=1.)
-        ITER = init_net.ConstantIntFill([], "ITER", shape=[1], value=0.)
+        ITER = init_net.ConstantFill([], "ITER", shape=[1], value=0,
+                                     dtype=core.DataType.INT32)
 
         train_net = core.Net("train")
         X = train_net.GaussianFill([], "X", shape=[64, 2], mean=0.0, std=1.0)

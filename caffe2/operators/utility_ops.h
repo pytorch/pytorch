@@ -57,8 +57,8 @@ class PrintOp final : public Operator<Context> {
 
     if (OperatorBase::InputIsType<TensorCPU>(0)) {
       return DispatchHelper<
-          TensorTypes<float, double, int, long, bool, std::string>>::call(
-              this, OperatorBase::Input<TensorCPU>(0));
+          TensorTypes<float, double, int, long, bool, std::string>>::
+          call(this, OperatorBase::Input<TensorCPU>(0));
     } else {
       return DispatchHelper<TensorTypes<float, double, int, long, bool>>::call(
           this, Input(0));
@@ -155,9 +155,10 @@ class FlattenOp : public Operator<Context> {
     auto& input = Input(0);
     auto* output = Output(0);
     DCHECK_GT(input.size(), 0);
-    output->Resize(vector<TIndex>{input.dim(0), input.size() / input.dim(0)});
-    context_.template CopyBytes<Context, Context>(
-        input.nbytes(),
+    output->Resize(input.dim(0), input.size() / input.dim(0));
+    context_.template CopyItems<Context, Context>(
+        input.meta(),
+        input.size(),
         input.raw_data(),
         output->raw_mutable_data(input.meta()));
     return true;
@@ -177,8 +178,9 @@ class ResizeLikeOp : public Operator<Context> {
     auto* output = Output(0);
     DCHECK_EQ(input0.size(), input1.size());
     output->ResizeLike(Input(1));
-    context_.template CopyBytes<Context, Context>(
-        input0.nbytes(),
+    context_.template CopyItems<Context, Context>(
+        input0.meta(),
+        input0.size(),
         input0.raw_data(),
         output->raw_mutable_data(input0.meta()));
     return true;
@@ -478,8 +480,9 @@ class CopyOp : public Operator<Context> {
     auto& input = OperatorBase::Input<Tensor<SrcContext>>(0);
     auto* output = OperatorBase::Output<Tensor<DstContext>>(0);
     output->ResizeLike(input);
-    this->context_.template CopyBytes<SrcContext, DstContext>(
-        input.nbytes(),
+    this->context_.template CopyItems<SrcContext, DstContext>(
+        input.meta(),
+        input.size(),
         input.raw_data(),
         output->raw_mutable_data(input.meta()));
     return true;
@@ -502,18 +505,50 @@ class LengthsToSegmentIdsOp : public Operator<Context> {
     auto* output = Output(0);
     auto* input_data = input.template data<Index>();
 
-    CHECK_EQ(input.dims().size(), 1) << "Input must be a vector.";
+    CAFFE_ENFORCE(input.dims().size() == 1, "Input must be a vector.");
     auto total_length =
         std::accumulate(input_data, input_data + input.size(), 0);
 
     output->Resize(total_length);
     auto* output_data = output->template mutable_data<int32_t>();
 
-    int pos = 0;
     for (int i = 0; i < input.size(); ++i) {
       auto len = input_data[i];
       std::fill(output_data, output_data + len, i);
       output_data += len;
+    }
+    return true;
+  }
+};
+
+template <class Context>
+class LengthsToRangesOp : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  USE_SIMPLE_CTOR_DTOR(LengthsToRangesOp);
+
+  bool RunOnDevice() override {
+    return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(this, Input(0));
+  }
+
+  template <typename Index>
+  bool DoRunWithType() {
+    auto& input = Input(0);
+    auto* output = Output(0);
+    auto* input_data = input.template data<Index>();
+
+    CAFFE_ENFORCE(input.dims().size() == 1, "Input must be a vector.");
+    auto size = input.size();
+
+    output->Resize(size, 2);
+    auto* output_data = output->template mutable_data<Index>();
+
+    Index offset = 0;
+    for (int i = 0; i < size; ++i) {
+      auto len = input_data[i];
+      output_data[i * 2] = offset;
+      output_data[i * 2 + 1] = len;
+      offset += len;
     }
     return true;
   }
@@ -532,16 +567,28 @@ class SegmentIdsToLengthsOp : public Operator<Context> {
   template <typename Index>
   bool DoRunWithType() {
     auto& input = Input(0);
-    CHECK_EQ(input.dims().size(), 1) << "Input must be a vector.";
+    CAFFE_ENFORCE(input.dims().size() == 1, "Input must be a vector.");
     auto* input_data = input.template data<Index>();
     auto input_size = input.size();
     auto* output = Output(0);
     // segment id starts from 0
     auto num_segments = input_size ? input_data[input_size - 1] + 1 : 0;
+    CAFFE_ENFORCE(0 <= num_segments, "Indices must be in 0..K-1 range");
     output->Resize(num_segments);
     auto* output_data = output->template mutable_data<int64_t>();
+    if (num_segments == 0) {
+      return true;
+    }
     std::fill(output_data, output_data + num_segments, 0);
+    Index prev = input_data[0];
     for (int64_t i = 0; i < input_size; i++) {
+      CAFFE_ENFORCE(
+          prev <= input_data[i],
+          "Segment ids must be sorted: ",
+          prev,
+          " vs ",
+          input_data[i]);
+      prev = input_data[i];
       output_data[input_data[i]] += 1;
     }
 
@@ -633,26 +680,23 @@ class SliceOp : public Operator<Context> {
       return true;
     }
 
-    if (data.meta().copy()) {
-      CHECK(false) << "Complex types not supported yet.";
-    } else {
-      auto itemsize = data.meta().itemsize();
-      auto src_block_size_bytes = itemsize * src_block_size;
-      auto dst_block_size_bytes = itemsize * dst_block_size;
-      auto src_offset_bytes = src_bytes + itemsize * src_offset;
-      auto dst_offset_bytes = dst_bytes;
-      for (int i = 0; i < num_blocks; ++i) {
-        DCHECK_LE(
-            src_offset_bytes + dst_block_size_bytes, src_bytes + src_nbytes);
-        DCHECK_LE(
-            dst_offset_bytes + dst_block_size_bytes, dst_bytes + dst_nbytes);
-        this->context_.template CopyBytes<Context, Context>(
-            dst_block_size_bytes,
-            (void*)src_offset_bytes,
-            (void*)dst_offset_bytes);
-        src_offset_bytes += src_block_size_bytes;
-        dst_offset_bytes += dst_block_size_bytes;
-      }
+    auto itemsize = data.meta().itemsize();
+    auto src_block_size_bytes = itemsize * src_block_size;
+    auto dst_block_size_bytes = itemsize * dst_block_size;
+    auto src_offset_bytes = src_bytes + itemsize * src_offset;
+    auto dst_offset_bytes = dst_bytes;
+    for (int i = 0; i < num_blocks; ++i) {
+      DCHECK_LE(
+          src_offset_bytes + dst_block_size_bytes, src_bytes + src_nbytes);
+      DCHECK_LE(
+          dst_offset_bytes + dst_block_size_bytes, dst_bytes + dst_nbytes);
+      this->context_.template CopyItems<Context, Context>(
+          data.meta(),
+          dst_block_size,
+          (void*)src_offset_bytes,
+          (void*)dst_offset_bytes);
+      src_offset_bytes += src_block_size_bytes;
+      dst_offset_bytes += dst_block_size_bytes;
     }
     return true;
   }
@@ -707,6 +751,85 @@ class ShapeOp : public Operator<Context> {
     for (int i = 0; i < input.ndim(); ++i) {
       output_data[i] = input.dim(i);
     }
+    return true;
+  }
+};
+
+// Takes a shape and data tensor and reshapes it
+template <typename F, class Context>
+class ReshapeOp : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  USE_SIMPLE_CTOR_DTOR(ReshapeOp);
+
+  bool RunOnDevice() override {
+    return DispatchHelper<TensorTypes<int, long>>::call(this, Input(1));
+  }
+
+  template <typename T>
+  bool DoRunWithType() {
+    auto& input = Input(0);
+    auto& shape = Input(1);
+    auto* input_data = input.template data<F>();
+    auto input_size = input.size();
+    auto* output = Output(0);
+
+    CAFFE_ENFORCE(input.ndim() >= 1, "DATA should be at least 1-D");
+    CAFFE_ENFORCE(shape.ndim() == 1, "Shape should be 1-D");
+
+    const T* shape_data = shape.template data<T>();
+    T newSize = 1;
+    std::vector<T> shapeVec;
+    for (T i = 0; i < shape.size(); ++i) {
+      newSize = newSize * shape_data[i];
+      shapeVec.push_back(shape_data[i]);
+    }
+
+    auto oldSize = input.size_from_dim(0);
+    DCHECK_EQ(oldSize, newSize);
+    output->Resize(shapeVec);
+    context_.template CopyBytes<Context, Context>(
+        input.nbytes(),
+        input.raw_data(),
+        output->raw_mutable_data(input.meta()));
+
+    return true;
+  }
+};
+
+// Takes a length vector, check that all lengths are equal and
+// returns a shape to be passed to Reshape
+template <class Context>
+class LengthsToShapeOp : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  USE_SIMPLE_CTOR_DTOR(LengthsToShapeOp);
+
+  bool RunOnDevice() override {
+    return DispatchHelper<TensorTypes<int, long>>::call(this, Input(0));
+  }
+
+  template <typename T>
+  bool DoRunWithType() {
+    auto& input = Input(0);
+
+    CAFFE_ENFORCE(input.dims().size() == 1, "Input must be a vector.");
+    auto* output = Output(0);
+    auto* input_data = input.template data<T>();
+
+    auto size = input.size();
+    auto first = input_data[0];
+
+    for (int i = 1; i < size; i++) {
+      CAFFE_ENFORCE(
+          input_data[i] == first, "All elements of input must be same ");
+    }
+
+    output->Resize(2);
+    auto* output_data = output->template mutable_data<T>();
+    output_data[0] = size;
+    output_data[1] = first;
+
     return true;
   }
 };
@@ -921,22 +1044,6 @@ class UniqueOp : public Operator<Context> {
   OUTPUT_TAGS(UNIQUE, REMAPPING);
 };
 
-template <class Context>
-class AndOp final : public Operator<Context> {
- public:
-  USE_OPERATOR_CONTEXT_FUNCTIONS;
-  AndOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
-
-  bool RunOnDevice() override {
-    const auto* i1 = Input(0).template data<bool>();
-    const auto* i2 = Input(1).template data<bool>();
-    auto* output = Output(0);
-    output->Resize(std::vector<int>{});
-    *output->template mutable_data<bool>() = (*i1 && *i2);
-    return true;
-  }
-};
 } // namespace caffe2
 
 #endif // CAFFE2_OPERATORS_UTILITY_OPS_H_

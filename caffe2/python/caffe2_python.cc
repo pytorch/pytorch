@@ -637,7 +637,7 @@ PyMethodDef* GetCaffe2PythonMethods() {
       _PYNAME(Blobs),
       _PYNAME(HasBlob),
       {"cc_CreateNet", CreateNet, METH_VARARGS, ""},
-      _PYNAME(RunNet),
+      {"cc_RunNet", RunNet, METH_VARARGS, ""},
       _PYNAME(BenchmarkNet),
       _PYNAME(DeleteNet),
       _PYNAME(Nets),

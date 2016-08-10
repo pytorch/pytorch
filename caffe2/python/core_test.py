@@ -218,5 +218,49 @@ class TestCreateOperator(test_util.TestCase):
         self.assertEqual(list(op.arg[2].ints), [1, 2, 3])
 
 
+class TestAutoNaming(test_util.TestCase):
+    """
+    Test that operators are named with different names, and that automatically
+    named blob names don't clash intra or inter networks.
+    """
+
+    def test_auto_naming(self):
+        a = core.Net('net')
+        b = core.Net('net')
+        self.assertNotEqual(a.Proto().name, b.Proto().name)
+        a_in1 = a.AddExternalInput('a')
+        b_in1 = b.AddExternalInput('b')
+        all_outputs_single = []
+        all_outputs_list = []
+
+        def add_ops():
+            all_outputs_single.append(a.Sum([a_in1, a_in1]))
+            all_outputs_single.append(a.Sum([a_in1, a_in1]))
+            all_outputs_single.append(b.Sum([b_in1, b_in1]))
+            all_outputs_single.append(b.Sum([b_in1, b_in1]))
+            all_outputs_list.append(a.Sum([a_in1, a_in1], outputs=2))
+            all_outputs_list.append(a.Sum([a_in1, a_in1], outputs=2))
+            all_outputs_list.append(b.Sum([b_in1, b_in1], outputs=2))
+            all_outputs_list.append(b.Sum([b_in1, b_in1], outputs=2))
+
+        add_ops()
+        with core.NameScope('n1'):
+            add_ops()
+        with core.NameScope('n2'):
+            add_ops()
+
+        all_outputs = []
+        for s in all_outputs_single:
+            all_outputs.append(str(s))
+        for l in all_outputs_list:
+            for o in l:
+                all_outputs.append(str(o))
+
+        for i, o1 in enumerate(all_outputs):
+            for j, o2 in enumerate(all_outputs):
+                if i != j:
+                    self.assertNotEqual(str(o1), str(o2))
+
+
 if __name__ == '__main__':
     unittest.main()
