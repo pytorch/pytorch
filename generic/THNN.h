@@ -840,6 +840,7 @@ TH_API void THNN_(SpatialMaxPooling_updateOutput)(
           int kW, int kH,
           int dW, int dH,
           int padW, int padH,
+          int dilationW, int dilationH,
           bool ceil_mode);
 TH_API void THNN_(SpatialMaxPooling_updateGradInput)(
           THNNState *state,
@@ -850,6 +851,7 @@ TH_API void THNN_(SpatialMaxPooling_updateGradInput)(
           int kW, int kH,
           int dW, int dH,
           int padW, int padH,
+          int dilationW, int dilationH,
           bool ceil_mode);
 
 TH_API void THNN_(SpatialMaxUnpooling_updateOutput)(
