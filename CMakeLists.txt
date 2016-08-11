@@ -137,6 +137,10 @@ if(BUILD_STATIC)
   ADD_LIBRARY(TH_static STATIC ${src})
 endif()
 
+SET_TARGET_PROPERTIES(TH PROPERTIES
+  VERSION   0
+  SOVERSION 0)
+
 CHECK_C_SOURCE_RUNS("
 #include <stdatomic.h>
 int main()
