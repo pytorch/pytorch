@@ -106,7 +106,7 @@ class CMul(nn.Module):
     def type(self, type=None, tensorCache=None):
         if type:
            self.clearState()
-        return super(CMul, self).type(self, type, tensorCache)
+        return super(CMul, self).type(type, tensorCache)
 
     def clearState(self):
         nn.utils.clear(self, [
@@ -118,5 +118,5 @@ class CMul(nn.Module):
            '_repeat',
            '_sum',
         ])
-        return super(CMult, self).clearState()
+        return super(CMul, self).clearState()
 

@@ -157,7 +157,7 @@ class VolumetricConvolution(nn.Module):
             )
             self._unviewWeight()
 
-    def type(self, type, tensorCache):
+    def type(self, type, tensorCache=None):
         nn.utils.clear(self, 'finput', 'fgradInput')
         return super(VolumetricConvolution, self).type(type, tensorCache)
 

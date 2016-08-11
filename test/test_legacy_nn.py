@@ -3,7 +3,9 @@ import random
 import unittest
 import torch
 import torch.legacy.nn as nn
-from common import TestCase
+import torch.cuda
+import torch.legacy.cunn
+from common import TestCase, to_gpu
 
 PRECISION = 1e-5
 EXP_PRECISION = 1e-4
@@ -49,10 +51,11 @@ class TestCaseBase(object):
 
 
 class SimpleTestCase(TestCaseBase):
-    def __init__(self, *args, check_inplace=False, jacobian_input=True, **kwargs):
+    def __init__(self, *args, check_inplace=False, jacobian_input=True, test_cuda=True, **kwargs):
         super(SimpleTestCase, self).__init__(*args, **kwargs)
         self.check_inplace = check_inplace
         self.jacobian_input = jacobian_input
+        self.should_test_cuda = test_cuda
 
     def __call__(self, test_case):
         module = self.constructor(*self.constructor_args)
@@ -70,6 +73,12 @@ class SimpleTestCase(TestCaseBase):
         module.evaluate()
         test_case.check_jacobian(module, input, self.jacobian_input)
 
+        # Test .type()
+        module.float().double().forward(input)
+
+        # Test .clearState()
+        module.clearState()
+
         if self.check_inplace:
             input2 = test_case._clone_input(input)
             module_ip = self.constructor(*self.constructor_args, inplace=True)
@@ -79,11 +88,56 @@ class SimpleTestCase(TestCaseBase):
             test_case.assertNotEqual(input, input2)
             test_case.assertEqual(output, input2)
 
+    def test_cuda(self, test_case):
+        if not self.should_test_cuda:
+            raise unittest.SkipTest('Excluded from CUDA tests')
+        try:
+            cpu_input = self._get_input()
+            gpu_input = to_gpu(cpu_input, tensor_type=torch.cuda.FloatTensor)
+
+            cpu_module = self.constructor(*self.constructor_args)
+            gpu_module = self.constructor(*self.constructor_args).cuda()
+            cpu_module.zeroGradParameters()
+            gpu_module.zeroGradParameters()
+            if cpu_module.parameters():
+                gpu_param = gpu_module.flattenParameters()
+                cpu_param = cpu_module.flattenParameters()
+                gpu_param[0].copy(cpu_param[0])
+
+            cpu_output = cpu_module.forward(cpu_input).clone()
+            gpu_output = gpu_module.forward(gpu_input).clone()
+            test_case.assertEqual(cpu_output, gpu_output, 1e-4)
+
+            for i in range(5):
+                cpu_gradOutput = cpu_output.clone().bernoulli_()
+                gpu_gradOutput = cpu_gradOutput.type('torch.cuda.FloatTensor')
+                cpu_gradInput = cpu_module.backward(cpu_input, cpu_gradOutput)
+                gpu_gradInput = gpu_module.backward(gpu_input, gpu_gradOutput)
+                test_case.assertEqual(cpu_gradInput, gpu_gradInput, 1e-4)
+                if cpu_module.parameters():
+                    test_case.assertEqual(cpu_param[1], gpu_param[1], 1e-4)
+        except NotImplementedError:
+            pass
+        # TODO: remove this after index* CUDA operations are upadted
+        except RuntimeError as e:
+            if len(e.args) == 1 and "doesn't implement stateless method indexSelect" in e.args[0]:
+                pass
+            else:
+                raise
+        # TODO: remove this after CUDA scatter_ is implemented
+        except AttributeError as e:
+            if len(e.args) == 1 and "'FloatTensor' object has no attribute 'scatter_'" in e.args[0]:
+                pass
+            else:
+                raise
+
 
 class CriterionTestCase(TestCaseBase):
     def __init__(self, *args, target=None, **kwargs):
         super(CriterionTestCase, self).__init__(*args, **kwargs)
         self.target = target
+        # TODO: Enable this after adding TH_INDEX_BASE to THC
+        self.should_test_cuda = False
 
     def __call__(self, test_case):
         module = self.constructor(*self.constructor_args)
@@ -96,6 +150,29 @@ class CriterionTestCase(TestCaseBase):
             expected_out = self.reference_fn(module, test_case._clone_input(input),
                     test_case._clone_input(self.target))
             test_case.assertEqual(out, expected_out)
+
+    def test_cuda(self, test_case):
+        if not self.should_test_cuda:
+            raise unittest.SkipTest('Excluded from CUDA tests')
+        try:
+            cpu_input = self._get_input()
+            gpu_input = to_gpu(cpu_input, tensor_type=torch.cuda.FloatTensor)
+
+            cpu_target = self.target
+            gpu_target = to_gpu(self.target, tensor_type=torch.cuda.FloatTensor)
+
+            cpu_module = self.constructor(*self.constructor_args)
+            gpu_module = self.constructor(*self.constructor_args).cuda()
+
+            cpu_output = cpu_module.forward(cpu_input, cpu_target)
+            gpu_output = gpu_module.forward(gpu_input, gpu_target)
+            test_case.assertEqual(cpu_output, gpu_output, 1e-4)
+
+            cpu_gradInput = cpu_module.backward(cpu_input, cpu_target)
+            gpu_gradInput = gpu_module.backward(gpu_input, gpu_target)
+            test_case.assertEqual(cpu_gradInput, gpu_gradInput, 1e-4)
+        except NotImplementedError:
+            pass
 
 
 simple_tests = [
@@ -554,12 +631,15 @@ simple_tests = [
                     (nn.SpatialConvolutionMap.maps.full(3, 4), 3, 3),
                     input_size=(3, 5, 5),
                     desc='full'),
+    # TODO: test CUDA
     SimpleTestCase(lambda: nn.SpatialFractionalMaxPooling(2, 2, 0.5, 0.5).fixPoolingRegions(),
                     input_size=(1, 3, 5, 5),
-                    fullname='SpatialFractionalMaxPooling_ratio'),
+                    fullname='SpatialFractionalMaxPooling_ratio',
+                    test_cuda=False),
     SimpleTestCase(lambda: nn.SpatialFractionalMaxPooling(2, 2, 4, 4).fixPoolingRegions(),
                     input_size=(1, 3, 7, 7),
-                    fullname='SpatialFractionalMaxPooling_size'),
+                    fullname='SpatialFractionalMaxPooling_size',
+                    test_cuda=False),
     SimpleTestCase(nn.SpatialFullConvolution,
                     (3, 4, 3, 3, 2, 2, 1, 1, 1, 1),
                     input_size=(1, 3, 7, 7)),
@@ -660,12 +740,12 @@ simple_tests = [
                             sum((a-b).abs().sum() for a,b in zip(i, t))
                     ),
     CriterionTestCase(nn.BCECriterion,
-                        input_size=(15, 10),
+                        input=torch.rand(15, 10).clamp_(0, 1),
                         target=torch.randn(15, 10).gt(0).double()
                     ),
     CriterionTestCase(nn.BCECriterion,
                         (torch.rand(10),),
-                        input_size=(15, 10),
+                        input=torch.rand(15, 10).clamp_(0, 1),
                         target=torch.randn(15, 10).gt(0).double(),
                         desc='weights'),
     CriterionTestCase(nn.ClassNLLCriterion,
@@ -810,9 +890,13 @@ simple_tests.append(
 def prepare_simple_tests():
     for test in simple_tests:
         test_name = test.get_name()
+        cuda_test_name = test_name + '_cuda'
         if hasattr(TestNN, test_name):
             raise RuntimeError('Found two tests with the same name: ' + test_name)
+        if hasattr(TestNN, cuda_test_name):
+            raise RuntimeError('Found two tests with the same name: ' + cuda_test_name)
         setattr(TestNN, test_name, lambda self,test=test: test(self))
+        setattr(TestNN, cuda_test_name, lambda self,test=test: test.test_cuda(self))
 
 class TestNN(TestCase):
 

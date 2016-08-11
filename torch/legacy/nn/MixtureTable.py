@@ -143,7 +143,7 @@ class MixtureTable(nn.Module):
         return self.gradInput
 
 
-    def type(self, type, tensorCache):
+    def type(self, type, tensorCache=None):
         self._gaterView = None
         self._expert = None
         self._expertView = None

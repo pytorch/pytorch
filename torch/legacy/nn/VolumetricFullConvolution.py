@@ -181,7 +181,7 @@ class VolumetricFullConvolution(nn.Module):
             scale
         )
 
-    def type(self, type, tensorCache):
+    def type(self, type, tensorCache=None):
         self.finput = torch.Tensor()
         self.fgradInput = torch.Tensor()
         return super(VolumetricFullConvolution, self).type(type, tensorCache)

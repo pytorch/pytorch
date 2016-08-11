@@ -41,9 +41,10 @@ class SelectTable(nn.Module):
         nn.utils.recursiveCopy(self.gradInput[index], gradOutput)
         return self.gradInput
 
-    def type(self, type, tensorCache):
+    def type(self, type, tensorCache=None):
         del self.gradInput[:]
-        del self.output[:]
+        if isinstance(self.output, list):
+            del self.output[:]
         return super(SelectTable, self).type(type, tensorCache)
 
 

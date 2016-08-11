@@ -47,5 +47,5 @@ class Sum(nn.Module):
 
     def clearState(self):
          nn.utils.clear(self, '_gradOutput')
-         return super(Sum, self).clearState(self)
+         return super(Sum, self).clearState()
 

@@ -171,7 +171,7 @@ class BatchNormalization(nn.Module):
     def clearState(self):
         # first 5 buffers are not present in the current implementation,
         # but we keep them for cleaning old saved models
-        nn.utils.clear(self, {
+        nn.utils.clear(self, [
            'buffer',
            'buffer2',
            'centered',
@@ -181,6 +181,6 @@ class BatchNormalization(nn.Module):
            '_gradOutput',
            'save_mean',
            'save_std',
-        })
+        ])
         return super(BatchNormalization, self).clearState()
 

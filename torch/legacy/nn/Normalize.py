@@ -118,7 +118,7 @@ class Normalize(nn.Module):
     def __repr__(self):
         return super(Normalize, self).__repr__() + '({})'.format(self.p)
 
-    def type(self, type, tensorCache):
+    def type(self, type, tensorCache=None):
         if not type:
             return self._type
         # torch.max expects a LongTensor as indices, whereas cutorch.max expects a CudaTensor.

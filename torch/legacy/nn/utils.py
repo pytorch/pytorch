@@ -139,7 +139,7 @@ def contiguousView(output, input, *args):
 # nn.utils.clearState(self, '_buffer', '_buffer2')
 def clear(self, *args):
     if len(args) == 1 and isinstance(args[0], list):
-        args = args[1]
+        args = args[0]
     def _clear(f):
         if not hasattr(self, f):
             return
@@ -149,8 +149,8 @@ def clear(self, *args):
         elif isinstance(attr, list):
             del attr[:]
         else:
-            delattr(self, f)
-    for key in arg:
+            setattr(self, f, None)
+    for key in args:
         _clear(key)
     return self
 

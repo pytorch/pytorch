@@ -54,5 +54,5 @@ class Reshape(nn.Module):
 
     def clearState(self):
         nn.utils.clear(self, '_input', '_gradOutput')
-        return super(Reshape, self).clearState(self)
+        return super(Reshape, self).clearState()
 

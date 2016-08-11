@@ -234,7 +234,7 @@ class WeightedEuclidean(nn.Module):
             self._repeat = None
             self._repeat2 = None
             self._repeat3 = None
-        return super(WeightedEuclidean, self).type(self, type, tensorCache)
+        return super(WeightedEuclidean, self).type(type, tensorCache)
 
     def parameters(self):
         return [self.weight, self.diagCov], [self.gradWeight, self.gradDiagCov]

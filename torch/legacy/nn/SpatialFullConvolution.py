@@ -183,7 +183,7 @@ class SpatialFullConvolution(nn.Module):
     def type(self, type=None, tensorCache=None):
         self.finput = self.finput and torch.Tensor()
         self.fgradInput = self.fgradInput and torch.Tensor()
-        return super(SpatialFullConvolution, self).type(self, type, tensorCache)
+        return super(SpatialFullConvolution, self).type(type, tensorCache)
 
     def __repr__(self):
         s = super(SpatialFullConvolution, self).__repr__()

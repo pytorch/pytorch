@@ -108,7 +108,7 @@ class CosineEmbeddingCriterion(nn.Criterion):
            return self._type
 
         self._idx = None
-        super(CosineEmbeddingCriterion, self).type(self, type, tensorCache)
+        super(CosineEmbeddingCriterion, self).type(type, tensorCache)
         # comparison operators behave differently from cuda/c implementations
         if type == 'torch.cuda.FloatTensor':
            self._idx = torch.cuda.FloatTensor()

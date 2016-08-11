@@ -19,7 +19,7 @@ class Max(nn.Module):
     def _lazyInit(self):
         self._output = self._output or self.output.new()
         self._indices = self._indices or \
-           (torch.cuda.FloatTensor() if str(type(self.output)) == 'torch.cuda.FloatTensor' else torch.LongTensor())
+           (torch.cuda.LongTensor() if torch.typename(self.output) == 'torch.cuda.FloatTensor' else torch.LongTensor())
 
     def updateOutput(self, input):
         self._lazyInit()
@@ -43,15 +43,17 @@ class Max(nn.Module):
         self.gradInput.resizeAs_(input).zero_().scatter_(dimension, self._indices, gradOutputView)
         return self.gradInput
 
-    def type(self, type, tensorCache):
+    def type(self, type, tensorCache=None):
         # torch.max expects a LongTensor as indices, whereas cutorch.max expects a CudaTensor.
         if type == 'torch.cuda.FloatTensor':
+            indices, self._indices = self._indices, None
             super(Max, self).type(type, tensorCache)
+            self._indices = indices.type('torch.cuda.LongTensor') if indices else None
         else:
             # self._indices must be a LongTensor. Setting it to nil temporarily avoids
             # unnecessary memory allocations.
             indices, self._indices = self._indices, None
-            super(Max, self).type(self, type, tensorCache)
+            super(Max, self).type(type, tensorCache)
             self._indices = indices.long() if indices else None
 
         return self

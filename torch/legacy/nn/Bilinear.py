@@ -135,5 +135,5 @@ class Bilinear(nn.Module):
 
     def clearState(self):
         nn.utils.clear(self, 'buff1', 'buff2')
-        return super(Biliniear, self).clearState()
+        return super(Bilinear, self).clearState()
 

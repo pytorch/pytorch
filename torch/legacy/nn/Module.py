@@ -234,7 +234,10 @@ class Module(object):
         return flatParameters
 
     def flattenParameters(self):
-        parameters, gradParameters = self.parameters()
+        _params = self.parameters()
+        if _params is None:
+            return
+        parameters, gradParameters = _params
         p, g = self._flatten(parameters), self._flatten(gradParameters)
 
         assert p.nElement() == g.nElement()

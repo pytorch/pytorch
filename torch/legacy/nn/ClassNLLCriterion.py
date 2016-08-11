@@ -15,7 +15,7 @@ class ClassNLLCriterion(nn.Criterion):
         self.target = torch.zeros(1).long()
 
     def updateOutput(self, input, target):
-        if target.type() == 'torch.cuda.CudaTensor':
+        if target.type() == 'torch.cuda.FloatTensor':
             self.target = target
         else:
             self.target = target.long()

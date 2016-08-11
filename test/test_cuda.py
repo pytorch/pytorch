@@ -1,26 +1,9 @@
 import unittest
-from copy import deepcopy
 
 import torch
 import torch.cuda
 
-from common import TestCase
-
-def get_cpu_type(t):
-    assert t.__module__ == 'torch.cuda'
-    return getattr(torch, t.__class__.__name__)
-
-def get_gpu_type(t):
-    assert t.__module__ == 'torch'
-    return getattr(torch.cuda, t.__name__)
-
-def to_gpu(obj):
-    if torch.isTensor(obj):
-        return get_gpu_type(type(obj))(obj.size()).copy(obj)
-    elif torch.isStorage(obj):
-        return obj.new().resize_(obj.size()).copy(obj)
-    else:
-        return deepcopy(obj)
+from common import TestCase, get_gpu_type, to_gpu
 
 def is_floating(t):
     return type(t) in [torch.FloatTensor, torch.DoubleTensor,

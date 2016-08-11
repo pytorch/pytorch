@@ -142,7 +142,7 @@ class Euclidean(nn.Module):
            # prevent premature memory allocations
            self.clearState()
 
-        return super(Euclidean, self).type(self, type, tensorCache)
+        return super(Euclidean, self).type(type, tensorCache)
 
 
     def clearState(self):

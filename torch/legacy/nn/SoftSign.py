@@ -22,5 +22,5 @@ class SoftSign(nn.Module):
 
     def clearState(self):
         nn.utils.clear(self, 'temp', 'tempgrad')
-        return super(SoftSign, self).clearState(self)
+        return super(SoftSign, self).clearState()
 
