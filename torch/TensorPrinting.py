@@ -72,7 +72,7 @@ def _printMatrix(self, indent=''):
 
 def _printTensor(self):
     counter_dim = self.nDimension()-2
-    counter = torch.LongStorage(counter_dim).fill(0)
+    counter = torch.LongStorage(counter_dim).fill_(0)
     counter[0] = -1
     finished = False
     strt = ''
