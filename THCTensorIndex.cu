@@ -31,7 +31,7 @@ __global__ void indexCopySmallIndex(TensorInfo<T, IndexType> dst,
   for (IndexType srcIndex = 0; srcIndex < indices.sizes[0]; ++srcIndex) {
     // Lua indices begin at 1
     IndexType dstIndex =
-      indices.data[IndexToOffset<long, IndexType, IdxDim>::get(srcIndex, indices)] - 1;
+      indices.data[IndexToOffset<long, IndexType, IdxDim>::get(srcIndex, indices)] - TH_INDEX_BASE;
 
     if (dstIndex < dstCopyDimSize) {
       // We stride over the output ignoring the indexed dimension
@@ -78,7 +78,7 @@ __global__ void indexCopyLargeIndex(TensorInfo<T, IndexType> dst,
 
     // Lua indices begin at 1
     IndexType dstIndex =
-      indices.data[IndexToOffset<long, IndexType, IdxDim>::get(srcIndex, indices)] - 1;
+      indices.data[IndexToOffset<long, IndexType, IdxDim>::get(srcIndex, indices)] - TH_INDEX_BASE;
 
     if (dstIndex < dstCopyDimSize) {
       IndexType dstOffset =
@@ -116,7 +116,7 @@ __global__ void indexAddSmallIndex(TensorInfo<T, IndexType> dst,
   for (IndexType srcIndex = 0; srcIndex < indices.sizes[0]; ++srcIndex) {
     // Lua indices begin at 1
     IndexType dstIndex =
-      indices.data[IndexToOffset<long, IndexType, IdxDim>::get(srcIndex, indices)] - 1;
+      indices.data[IndexToOffset<long, IndexType, IdxDim>::get(srcIndex, indices)] - TH_INDEX_BASE;
 
     if (dstIndex < dstAddDimSize) {
       // We stride over the output ignoring the indexed dimension
@@ -162,7 +162,7 @@ __global__ void indexAddLargeIndex(TensorInfo<T, IndexType> dst,
 
     // Lua indices begin at 1
     IndexType dstIndex =
-      indices.data[IndexToOffset<long, IndexType, IdxDim>::get(srcIndex, indices)] - 1;
+      indices.data[IndexToOffset<long, IndexType, IdxDim>::get(srcIndex, indices)] - TH_INDEX_BASE;
 
     if (dstIndex < dstAddDimSize) {
       IndexType dstOffset =
@@ -199,7 +199,7 @@ __global__ void indexFillSmallIndex(TensorInfo<T, IndexType> dst,
   for (IndexType dstIndex = 0; dstIndex < indices.sizes[0]; ++dstIndex) {
     // Lua indices begin at 1
     IndexType dstIndex_ =
-      indices.data[IndexToOffset<long, IndexType, IdxDim>::get(dstIndex, indices)] - 1;
+      indices.data[IndexToOffset<long, IndexType, IdxDim>::get(dstIndex, indices)] - TH_INDEX_BASE;
 
     if (dstIndex < dstFillDimSize) {
       // We stride over the output ignoring the indexed dimension
@@ -240,7 +240,7 @@ __global__ void indexFillLargeIndex(TensorInfo<T, IndexType> dst,
 
     // Lua indices begin at 1
     IndexType dstIndex_ =
-      indices.data[IndexToOffset<long, IndexType, IdxDim>::get(dstIndex, indices)] - 1;
+      indices.data[IndexToOffset<long, IndexType, IdxDim>::get(dstIndex, indices)] - TH_INDEX_BASE;
 
     if (dstIndex_ < dstFillDimSize) {
       IndexType dstOffset =
@@ -274,7 +274,7 @@ __global__ void indexSelectSmallIndex(TensorInfo<T, IndexType> dst,
   for (IndexType dstIndex = 0; dstIndex < indices.sizes[0]; ++dstIndex) {
     // Lua indices begin at 1
     IndexType srcIndex =
-      indices.data[IndexToOffset<long, IndexType, IdxDim>::get(dstIndex, indices)] - 1;
+      indices.data[IndexToOffset<long, IndexType, IdxDim>::get(dstIndex, indices)] - TH_INDEX_BASE;
 
     if (srcIndex < srcSelectDimSize) {
       // We stride over the output ignoring the indexed dimension
@@ -321,7 +321,7 @@ __global__ void indexSelectLargeIndex(TensorInfo<T, IndexType> dst,
 
     // Lua indices begin at 1
     IndexType srcIndex =
-      indices.data[IndexToOffset<long, IndexType, IdxDim>::get(dstIndex, indices)] - 1;
+      indices.data[IndexToOffset<long, IndexType, IdxDim>::get(dstIndex, indices)] - TH_INDEX_BASE;
 
     if (srcIndex < srcSelectDimSize) {
       IndexType dstOffset =

@@ -92,7 +92,7 @@ __global__ void THCudaTensor_gatherKernel(
                                                           tensor, &tensorOffset,
                                                           src, &srcOffset);
 
-    IndexType indexValue = (IndexType)index.data[indexOffset] - 1;
+    IndexType indexValue = (IndexType)index.data[indexOffset] - TH_INDEX_BASE;
     srcOffset += indexValue * src.strides[dim];
 
     tensor.data[tensorOffset] = src.data[srcOffset];
@@ -118,7 +118,7 @@ __global__ void THCudaTensor_scatterKernel(
                                                           src, &srcOffset,
                                                           tensor, &tensorOffset);
 
-    IndexType indexValue = (IndexType)index.data[indexOffset] - 1;
+    IndexType indexValue = (IndexType)index.data[indexOffset] - TH_INDEX_BASE;
     tensorOffset += indexValue * tensor.strides[dim];
 
     tensor.data[tensorOffset] = src.data[srcOffset];
@@ -142,7 +142,7 @@ __global__ void THCudaTensor_scatterFillKernel(
                                                           index, &indexOffset,
                                                           tensor, &tensorOffset);
 
-    IndexType indexValue = (IndexType)index.data[indexOffset] - 1;
+    IndexType indexValue = (IndexType)index.data[indexOffset] - TH_INDEX_BASE;
     tensorOffset += indexValue * tensor.strides[dim];
 
     tensor.data[tensorOffset] = value;

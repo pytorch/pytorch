@@ -511,7 +511,7 @@ sampleMultinomialOnce(float* dest,
         // We're done; we have the sample
         // Torch indices are 1-based
         // FIXME: broadcast exit flag?
-        dest[curDist] = cat + 1;
+        dest[curDist] = cat + TH_INDEX_BASE;
       }
 
       // Store the previous scan's high value for future use
@@ -555,7 +555,7 @@ sampleMultinomialWithReplacement(curandStateMtgp32* state,
           r);
 
         // Torch indices are 1-based
-        dest[curDist * totalSamples + sample] = (float) choice + 1.0f;
+        dest[curDist * totalSamples + sample] = (float) choice + (float)TH_INDEX_BASE;
       }
     }
   }
@@ -595,7 +595,7 @@ sampleMultinomialWithoutReplacement(curandStateMtgp32* state,
         r);
 
       // Torch indices are 1-based
-      dest[curDist * totalSamples + sample] = (float) choice + 1.0f;
+      dest[curDist * totalSamples + sample] = (float) choice + (float)TH_INDEX_BASE;
 
       // Without replacement, so update the original probability so it
       // is not considered a second time
