@@ -71,8 +71,8 @@ __global__ void adaptivemaxpool(float *input, float *output, float *indices_x, f
       }
       // Update output and argmax
       *ptr_output = max;
-      *ptr_ind_x = argmax_x + 1;
-      *ptr_ind_y = argmax_y + 1;
+      *ptr_ind_x = argmax_x + TH_INDEX_BASE;
+      *ptr_ind_y = argmax_y + TH_INDEX_BASE;
     }
   }
 }
@@ -122,8 +122,8 @@ __global__ void adaptivemaxgradinput(float *gradInput, float *gradOutput, float 
       float *ptr_ind_y = indices_y + yy*output_w + xx;
       float z = *ptr_gradOutput;
 
-      int argmax_x = (*ptr_ind_x)-1;
-      int argmax_y = (*ptr_ind_y)-1;
+      int argmax_x = (*ptr_ind_x) - TH_INDEX_BASE;
+      int argmax_y = (*ptr_ind_y) - TH_INDEX_BASE;
 
       ptr_gradInput[argmax_x + argmax_y*input_w] += z;
     }
@@ -176,8 +176,8 @@ __global__ void atomicadaptivemaxgradinput(
       float *ptr_ind_y = indices_y + yy*output_w + xx;
       float z = *ptr_gradOutput;
 
-      int argmax_x = (*ptr_ind_x)-1;
-      int argmax_y = (*ptr_ind_y)-1;
+      int argmax_x = (*ptr_ind_x) - TH_INDEX_BASE;
+      int argmax_y = (*ptr_ind_y) - TH_INDEX_BASE;
 
       // atomic add since different threads could update same variable
       atomicAdd(&(ptr_gradInput[argmax_x + argmax_y*input_w]), z);

@@ -10,7 +10,7 @@ __global__ void cunn_MultiMarginCriterion_updateOutput_kernel(float *output, flo
   int k = blockIdx.x;
   float *input_k = input + k*dim;
   float *output_k = output + k;
-  int target_k = ((int)target[k])-1;
+  int target_k = ((int)target[k]) - TH_INDEX_BASE;
   float input_target_k = input_k[target_k];
 
   int i_start = threadIdx.x;
@@ -53,7 +53,7 @@ __global__ void cunn_MultiMarginCriterion_updateGradInput_kernel(float *gradInpu
   int k = blockIdx.x;
   float *input_k = input + k*dim;
   float *gradInput_k = gradInput + k*dim;
-  int target_k = ((int)target[k])-1;
+  int target_k = ((int)target[k]) - TH_INDEX_BASE;
   float input_target_k = input_k[target_k];
   float g = (sizeAverage ? 1./((float)(nframe*dim)) : 1./((float)dim));
 

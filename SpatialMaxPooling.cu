@@ -32,7 +32,7 @@ __global__ void MaxPoolForward(const int nthreads, const Dtype* bottom_data,
       }
     }
     top_data[index] = maxval;
-    top_mask[index] = maxidx + 1;
+    top_mask[index] = maxidx + TH_INDEX_BASE;
   }
 }
 
@@ -63,7 +63,7 @@ __global__ void MaxPoolBackward(const int nthreads, const Dtype* top_diff,
     top_mask += offset;
     for (int ph = phstart; ph < phend; ++ph) {
       for (int pw = pwstart; pw < pwend; ++pw) {
-	if (top_mask[ph * pooled_width + pw] - 1 == h * width + w) {
+	if (top_mask[ph * pooled_width + pw] - TH_INDEX_BASE == h * width + w) {
 	  gradient += top_diff[ph * pooled_width + pw];
 	}
       }

@@ -73,8 +73,8 @@ __global__ void cunn_LookupTable_accGradParametersKernelByFeature(
   // warp-wide collision detector `warpHasCollision`.
   const int laneId = threadIdx.x % 32;
   for (int i = laneId; i < numel; i += WARP_SIZE) {
-    const int weightIndex = (int) (input[i] - 1);
-    if (weightIndex == paddingValue - 1) {
+    const int weightIndex = (int) (input[i] - TH_INDEX_BASE);
+    if (weightIndex == paddingValue - TH_INDEX_BASE) {
       continue;
     }
 
@@ -120,8 +120,8 @@ __global__ void cunn_LookupTable_accGradParametersKernel(
       && input[idx] != paddingValue) {
     do {
       const int startFeature = threadIdx.x + blockIdx.y * blockDim.x * SZ;
-      const int weightRow = ((int) input[idx] - 1) * stride;
-      const int gradOutputRow = ((int) indices[idx] - 1) * stride;
+      const int weightRow = ((int) input[idx] - TH_INDEX_BASE) * stride;
+      const int gradOutputRow = ((int) indices[idx] - TH_INDEX_BASE) * stride;
       const float scale = count ? defaultScale / count[idx] : defaultScale;
 
       float gradient[SZ];
@@ -326,7 +326,7 @@ void THNN_CudaLookupTable_renorm(
   // numel << stride, since idx usually contains sparse row indices
   for (long i = 0; i < numel; i++)
   {
-    long k = idx_ptr[i] - 1;
+    long k = idx_ptr[i] - TH_INDEX_BASE;
     thrust::device_ptr<float> row_ptr = weight_ptr + k * stride;
     float norm = thrust::transform_reduce(row_ptr, row_ptr + stride,
       unary_pow, 0, binary_plus);

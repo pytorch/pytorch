@@ -33,9 +33,9 @@ __global__ void cunn_MultiLabelMarginCriterion_updateOutput_kernel(float *output
   // mark targets in istarget
   if (threadIdx.x == 0) {
     for (int dt = 0; dt < dim; dt++) {
-      int target_idx = (int)target_k[dt];
-      if (target_idx == 0) break;
-      istarget_k[target_idx - 1] = 1;
+      int target_idx = (int)target_k[dt] - TH_INDEX_BASE;
+      if (target_idx < 0) break;
+      istarget_k[target_idx] = 1;
     }
   }
   __syncthreads();
@@ -44,11 +44,11 @@ __global__ void cunn_MultiLabelMarginCriterion_updateOutput_kernel(float *output
   float sum = 0;
   for (int dt = 0; dt < dim; dt++) {
     // next target:
-    int target_idx = (int)target_k[dt];
-    if (target_idx == 0) break;
+    int target_idx = (int)target_k[dt] - TH_INDEX_BASE;
+    if (target_idx < 0) break;
 
     // current value for target
-    float input_target_k = input_k[target_idx-1];
+    float input_target_k = input_k[target_idx];
 
     // compare to all inputs (multithreaded):
     for (int d = threadIdx.x; d < dim; d += blockDim.x) {
@@ -102,11 +102,11 @@ __global__ void cunn_MultiLabelMarginCriterion_updateGradInput_kernel(float *gra
   // iterate over targets
   for (int dt = 0; dt < dim; dt++) {
     // next target:
-    int target_idx = (int)target_k[dt];
-    if (target_idx == 0) break;
+    int target_idx = (int)target_k[dt] - TH_INDEX_BASE;
+    if (target_idx < 0) break;
 
     // current value for target
-    float input_target_k = input_k[target_idx-1];
+    float input_target_k = input_k[target_idx];
 
     // compare to all inputs (multithreaded):
     float sum = 0;
@@ -125,7 +125,7 @@ __global__ void cunn_MultiLabelMarginCriterion_updateGradInput_kernel(float *gra
     // reduce sum
     float totalSum = reduceBlock(sums, blockDim.x, sum, thrust::plus<float>(), 0.0f);
     if (threadIdx.x == 0) {
-      gradInput_k[target_idx-1] += totalSum;
+      gradInput_k[target_idx] += totalSum;
     }
     __syncthreads();
   }

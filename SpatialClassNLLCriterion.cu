@@ -32,7 +32,7 @@ __global__ void cunn_SpatialClassNLLCriterion_updateOutput_kernel(
   for (i = (blockIdx.x % blocks_per_sample) * blockDim.x + threadIdx.x;
        i < map_nelem;
        i += step) {
-    t = target[toffset + i] - 1;
+    t = target[toffset + i] - TH_INDEX_BASE;
     assert(t >= 0 && t < n_classes);
     cur_weight = weights ? weights[t] : 1.0f;
     input_sum -= input[ioffset + i + map_nelem * t] * cur_weight;
@@ -77,7 +77,7 @@ __global__ void cunn_SpatialClassNLLCriterion_updateGradInput_kernel(
   for (i = (blockIdx.x % blocks_per_sample) * blockDim.x + threadIdx.x;
        i < map_nelem;
        i += step) {
-    t = (int)target[toffset + i] - 1;
+    t = (int)target[toffset + i] - TH_INDEX_BASE;
     assert(t >= 0 && t < n_classes);
     gradInput[ioffset + i + map_nelem * t] = -(weights ? weights[t] : 1.0f) * norm;
   }

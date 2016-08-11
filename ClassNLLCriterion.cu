@@ -18,7 +18,7 @@ __global__ void cunn_ClassNLLCriterion_updateOutput_kernel1(float *output,
   // TODO: T4951791 Reuse code between updateOutput_kernel1 and
   // updateOutput_kernel.
 
-  int t = (int)*target - 1;
+  int t = (int)*target - TH_INDEX_BASE;
   assert(t >= 0 && t < n_classes);
   float cur_weight = weights ? weights[t] : 1.0f;
   *output = -cur_weight * input[t];
@@ -44,7 +44,7 @@ __global__ void cunn_ClassNLLCriterion_updateOutput_kernel(float *output,
   shInputs[threadIdx.x] = 0.0f;
   acc_weight[threadIdx.x] = 0.0f;
   for (i = threadIdx.x; i < nframe; i += NTHREADS) {
-      t = target[i] - 1;
+      t = target[i] - TH_INDEX_BASE;
       assert(t >= 0 && t < n_classes);
       cur_weight = weights ? weights[t] : 1.0f;
       shInputs[threadIdx.x] -= input[i * ndim + t] * cur_weight;
@@ -79,7 +79,7 @@ __global__ void cunn_ClassNLLCriterion_updateGradInput_kernel1(
     return;
   }
   float norm = size_average ? (1.0f / *total_weight) : 1.0f;
-  int t = (int)*target - 1;
+  int t = (int)*target - TH_INDEX_BASE;
   assert(t >= 0 && t < n_classes);
   gradInput[t] = -(weights ? weights[t] : 1.0f) * norm;
 }
@@ -101,7 +101,7 @@ __global__ void cunn_ClassNLLCriterion_updateGradInput_kernel(
   float norm = size_average ? (1.0f / *total_weight) : 1.0f;
 
   for (i = threadIdx.x; i < nframe; i += NTHREADS) {
-    t = (int)target[i] - 1;
+    t = (int)target[i] - TH_INDEX_BASE;
     assert(t >= 0 && t < n_classes);
     gradInput[i * ndim + t] = -(weights ? weights[t] : 1.0f) * norm;
   }
