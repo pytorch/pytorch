@@ -3,19 +3,20 @@
 
 #include "THCReduceApplyUtils.cuh"
 #include "THCTensorTypeUtils.cuh"
+#include "THCNumerics.cuh"
 
 // Collection of kernel sort routines
 template <typename T>
 struct LTComp {
   __device__ inline bool operator()(const T& a, const T& b) const {
-    return (a < b);
+    return THCNumerics<T>::lt(a, b);
   }
 };
 
 template <typename T>
 struct GTComp {
   __device__ inline bool operator()(const T& a, const T& b) const {
-    return (a > b);
+    return THCNumerics<T>::gt(a, b);
   }
 };
 
@@ -127,9 +128,9 @@ bitonicSortKVInPlace(TensorInfo<K, IndexType> keys,
 
     bool valid1 = (elem1 < keySliceSize);
     K k1 = valid1 ?
-      keys.data[keyStartOffset + elem1 * keySliceStride] : (K) 0;
+      keys.data[keyStartOffset + elem1 * keySliceStride] : ScalarConvert<int, K>::to(0);
     V v1 = valid1 ?
-      values.data[valueStartOffset + elem1 * valueSliceStride] : (V) 0;
+      values.data[valueStartOffset + elem1 * valueSliceStride] : ScalarConvert<int, V>::to(0);
 
     sharedKeys[elem1] = k1;
     sharedValues[elem1] = v1;
@@ -137,9 +138,9 @@ bitonicSortKVInPlace(TensorInfo<K, IndexType> keys,
 
     bool valid2 = (elem2 < keySliceSize);
     K k2 = valid2 ?
-      keys.data[keyStartOffset + elem2 * keySliceStride] : (K) 0;
+      keys.data[keyStartOffset + elem2 * keySliceStride] : ScalarConvert<int, K>::to(0);
     V v2 = valid2 ?
-      values.data[valueStartOffset + elem2 * valueSliceStride] : (V) 0;
+      values.data[valueStartOffset + elem2 * valueSliceStride] : ScalarConvert<int, V>::to(0);
 
     sharedKeys[elem2] = k2;
     sharedValues[elem2] = v2;

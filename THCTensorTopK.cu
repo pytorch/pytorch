@@ -1,7 +1,7 @@
+#include "THC.h"
 #include "THCReduceApplyUtils.cuh"
 #include "THCTensorCopy.h"
 #include "THCTensorMath.h"
-#include "THCTensorSort.h"
 #include "THCAsmUtils.cuh"
 #include "THCScanUtils.cuh"
 #include "THCTensorTypeUtils.cuh"
