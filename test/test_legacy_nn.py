@@ -3,6 +3,7 @@ import random
 import unittest
 import torch
 import torch.legacy.nn as nn
+from common import TestCase
 
 PRECISION = 1e-5
 EXP_PRECISION = 1e-4
@@ -813,27 +814,7 @@ def prepare_simple_tests():
             raise RuntimeError('Found two tests with the same name: ' + test_name)
         setattr(TestNN, test_name, lambda self,test=test: test(self))
 
-class TestNN(unittest.TestCase):
-
-    # TODO: subclass Torch tests
-    def assertEqual(self, x, y, prec=None, message=''):
-        if prec is None:
-            prec = PRECISION
-
-        if torch.isTensor(x) and torch.isTensor(y):
-            max_err = 0
-            super(TestNN, self).assertEqual(x.size().tolist(), y.size().tolist())
-            max_err = (x - y).abs().max()
-            self.assertLessEqual(max_err, prec)
-        elif isinstance(x, list) and isinstance(y, list):
-            self.assertEqual(len(x), len(y))
-            for _x, _y in zip(x, y):
-                self.assertEqual(_x, _y)
-        else:
-            try:
-                self.assertLessEqual(abs(x - y), prec)
-            except:
-                super(TestNN, self).assertEqual(x, y)
+class TestNN(TestCase):
 
     def _jacobian(self, input, num_out):
         if isinstance(input, list):

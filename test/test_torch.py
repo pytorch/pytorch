@@ -3,33 +3,11 @@ import random
 import torch
 import unittest
 from itertools import product
+from common import TestCase, iter_indices
 
 SIZE = 100
 
-def iter_indices(tensor):
-    if tensor.dim() == 1:
-        return range(tensor.size(0))
-    return product(*(range(s) for s in tensor.size()))
-
-class TestTorch(unittest.TestCase):
-    def maxdiff(self, x, y):
-        return torch.DoubleTensor(x - y).abs().max()
-
-    def assertEqual(self, x, y, prec=None, message=''):
-        if prec is None:
-            prec = precision
-
-        if torch.isTensor(x) and torch.isTensor(y):
-            max_err = 0
-            super(TestTorch, self).assertEqual(x.size().tolist(), y.size().tolist())
-            for index in iter_indices(x):
-                max_err = max(max_err, abs(x[index] - y[index]))
-            self.assertLessEqual(max_err, prec)
-        else:
-            try:
-                self.assertLessEqual(abs(x - y), prec)
-            except:
-                super(TestTorch, self).assertEqual(x, y)
+class TestTorch(TestCase):
 
     def test_dot(self):
         types = {
@@ -166,7 +144,7 @@ class TestTorch(unittest.TestCase):
         for i in range(res1val.size(0)):
             maxerr = max(maxerr, abs(res1val[i][0] - res2val[i][0]))
             self.assertEqual(res1ind[i][0], res2ind[i][0])
-        self.assertLessEqual(abs(maxerr), precision)
+        self.assertLessEqual(abs(maxerr), 1e-5)
 
         # NaNs
         for index in (0, 4, 99):
@@ -2226,13 +2204,4 @@ class TestTorch(unittest.TestCase):
         self.assertTrue(isBinary(t))
 
 if __name__ == '__main__':
-    # TODO
-    # torch.setheaptracking(True)
-    # math.randomseed(os.time())
-    # if torch.getdefaulttensortype() == 'torch.FloatTensor' then
-        # precision = 1e-4
-    # elseif  torch.getdefaulttensortype() == 'torch.DoubleTensor' then
-        # precision = 1e-8
-    # end
-    precision = 1e-4
     unittest.main()
