@@ -45,6 +45,9 @@ def small_3d_positive(t):
     min_val = 1e-3 if is_floating(t) else 2
     return make_tensor(t, S, S, S).clamp_(min_val, 120)
 
+def small_3d_unique(t):
+    return t(S, S, S).copy(torch.range(1, S*S*S))
+
 def new_t(*sizes):
     def tmp(t):
         return t(*sizes).copy(torch.randn(*sizes))
@@ -54,13 +57,12 @@ tests = [
     ('add',           small_3d,           lambda t: [3.14]                                                  ),
     ('add',           small_3d,           lambda t: [small_3d_positive(t)],                 'tensor'        ),
     ('add',           small_3d,           lambda t: [0.2, small_3d_positive(t)],            'scalar_tensor' ),
-    # sub and div are broken in THC
-    # ('sub',           small_3d,           lambda t: [3.14],                                                 ),
-    # ('sub',           small_3d,           lambda t: [small_3d_positive(t)],                 'tensor'        ),
+    ('sub',           small_3d,           lambda t: [3.14],                                                 ),
+    ('sub',           small_3d,           lambda t: [small_3d_positive(t)],                 'tensor'        ),
     ('mul',           small_3d,           lambda t: [3.14],                                                 ),
     ('mul',           small_3d,           lambda t: [small_3d_positive(t)],                 'tensor'        ),
-    # ('div',           small_3d,           lambda t: [3.14],                                                 ),
-    # ('div',           small_3d,           lambda t: [small_3d_positive(t)],               'tensor'          ),
+    ('div',           small_3d,           lambda t: [3.14],                                                 ),
+    ('div',           small_3d,           lambda t: [small_3d_positive(t)],               'tensor'          ),
     ('pow',           small_3d,           lambda t: [3.14],                                                 ),
     ('pow',           small_3d,           lambda t: [small_3d(t).abs_()],                   'tensor' ),
     ('addbmm',        small_2d,           lambda t: [small_3d(t), small_3d(t)],                             ),
@@ -123,13 +125,13 @@ tests = [
     ('isSetTo',       medium_2d,          lambda t: [medium_2d(t)],                                         ),
     # TODO: positive case
     ('isSize',        medium_2d,          lambda t: [torch.LongStorage((M, M))],                            ),
-    ('kthvalue',      medium_2d,          lambda t: [3],                                                    ),
-    ('kthvalue',      medium_2d,          lambda t: [3, 1],                                 'dim'           ),
+    ('kthvalue',      small_3d_unique,    lambda t: [3],                                                    ),
+    ('kthvalue',      small_3d_unique,    lambda t: [3, 1],                                 'dim'           ),
     ('lerp',          small_3d,           lambda t: [small_3d(t), 0.3],                                     ),
-    # ('max',           small_3d,           lambda t: [],                                                     ),
-    # ('max',           small_3d,           lambda t: [1],                                    'dim'           ),
-    # ('min',           small_3d,           lambda t: [],                                                     ),
-    # ('min',           small_3d,           lambda t: [1],                                    'dim'           ),
+    ('max',           small_3d_unique,    lambda t: [],                                                     ),
+    ('max',           small_3d_unique,    lambda t: [1],                                    'dim'           ),
+    ('min',           small_3d_unique,    lambda t: [],                                                     ),
+    ('min',           small_3d_unique,    lambda t: [1],                                    'dim'           ),
     ('mean',          small_3d,           lambda t: [],                                                     ),
     ('mean',          small_3d,           lambda t: [1],                                    'dim'           ),
     ('mode',          small_3d,           lambda t: [],                                                     ),

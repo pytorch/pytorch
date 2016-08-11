@@ -137,7 +137,7 @@ class CriterionTestCase(TestCaseBase):
         super(CriterionTestCase, self).__init__(*args, **kwargs)
         self.target = target
         # TODO: Enable this after adding TH_INDEX_BASE to THC
-        self.should_test_cuda = False
+        self.should_test_cuda = True
 
     def __call__(self, test_case):
         module = self.constructor(*self.constructor_args)
