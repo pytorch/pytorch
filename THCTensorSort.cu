@@ -282,30 +282,28 @@ THC_API void THCudaTensor_sortKeyValueInplace(THCState* state,
 // For slice sorting in Thrust; extracts a slice index from a linear
 // index and uses that for comparison
 struct SliceComp {
-  SliceComp(int size) : sliceSize(size) {}
+  SliceComp(long size) : sliceSize(size) {}
 
-  __device__ bool operator()(const int& a, const int& b) const {
+  __device__ bool operator()(const long& a, const long& b) const {
     // Since the slices are guaranteed to be innermost, the segment is
-    // just via integer division
-    int segA = a / sliceSize;
-    int segB = b / sliceSize;
+    // just via long division
+    long segA = a / sliceSize;
+    long segB = b / sliceSize;
     return segA < segB;
   }
 
-  const int sliceSize;
+  const long sliceSize;
 };
 
 // For sorting in Thurst; extracts a within-slice index from a linear index
 struct GlobalIndexToPerSliceIndex {
-  GlobalIndexToPerSliceIndex(int size) : sliceSize(size) {}
+  GlobalIndexToPerSliceIndex(long size) : sliceSize(size) {}
 
-  __device__ inline void operator()(int& v) const {
-    // Thrust is operating on this index array as an array of type
-    // int, but to Torch it should be a float array.
-    v = __float_as_int((float) (v % sliceSize + 1));
+  __device__ inline void operator()(long& v) const {
+    v = v % sliceSize + 1;
   }
 
-  const int sliceSize;
+  const long sliceSize;
 };
 
 void sortViaThrust(THCState* state,
@@ -370,11 +368,11 @@ void sortViaThrust(THCState* state,
   // than a per-segment index, we treat the memory as int so we don't
   // have problems sorting slices < 2^24 but where the entire tensor
   // has more than 2^24 elements
-  thrust::device_ptr<int>
-    indexIter((int*) THCudaLongTensor_data(state, trContigIndices));
+  thrust::device_ptr<long>
+    indexIter((long*) THCudaLongTensor_data(state, trContigIndices));
 
   // Fill the indices with a global index across all slices
-  thrust::counting_iterator<int> countIter(0);
+  thrust::counting_iterator<long> countIter(0);
 
   thrust::copy(
 #if CUDA_VERSION >= 7000
