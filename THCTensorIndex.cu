@@ -1,3 +1,4 @@
+#include "THC.h"
 #include "THCTensorMath.h"
 #include "THCGeneral.h"
 #include "THCBlas.h"
