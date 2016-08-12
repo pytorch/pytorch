@@ -75,7 +75,7 @@ struct TensorSubConstantOp {
 #ifdef CUDA_HALF_TENSOR
 template <>
 struct TensorSubConstantOp<half> {
-#ifdef CUDA_HALF_INSTRUCTONS
+#ifdef CUDA_HALF_INSTRUCTIONS
   TensorSubConstantOp(half v): val(THC_float2half(-(THC_half2float(v)))) {}
 #else
   TensorSubConstantOp(half v): fval(-(THC_half2float(v))) {}
