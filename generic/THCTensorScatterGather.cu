@@ -59,15 +59,19 @@ void THCTensor_(gather)(THCState* state, THCTensor *tensor,
     switch (indexInfo.dims) {
       case 1:
         RUN(unsigned int, 1, real);
+        THCudaCheck(cudaGetLastError());
         break;
       case 2:
         RUN(unsigned int, 2, real);
+        THCudaCheck(cudaGetLastError());
         break;
       case 3:
         RUN(unsigned int, 3, real);
+        THCudaCheck(cudaGetLastError());
         break;
       default:
         RUN(unsigned int, -1, real);
+        THCudaCheck(cudaGetLastError());
         break;
     }
   } else {
@@ -77,8 +81,8 @@ void THCTensor_(gather)(THCState* state, THCTensor *tensor,
       getTensorInfo<THCTensor, unsigned long>(state, src);
     TensorInfo<long, unsigned long> indexInfo =
       getTensorInfo<THCudaLongTensor, unsigned long>(state, index);
-
-    RUN(unsigned long, -1, real)
+    RUN(unsigned long, -1, real);
+    THCudaCheck(cudaGetLastError());
   }
 
   if (oldTensor) {
@@ -86,6 +90,7 @@ void THCTensor_(gather)(THCState* state, THCTensor *tensor,
     THCTensor_(free)(state, tensor);
     tensor = oldTensor;
   }
+  THCudaCheck(cudaGetLastError());
 }
 
 #undef RUN
@@ -173,6 +178,7 @@ void THCTensor_(scatter)(THCState* state, THCTensor *tensor, int dim, THCudaLong
     THCTensor_(free)(state, tensor);
     tensor = oldTensor;
   }
+  THCudaCheck(cudaGetLastError());
 }
 
 #undef RUN
@@ -252,6 +258,7 @@ THCTensor_(scatterFill)(THCState* state, THCTensor *tensor,
     THCTensor_(free)(state, tensor);
     tensor = oldTensor;
   }
+  THCudaCheck(cudaGetLastError());
 }
 
 #undef RUN
