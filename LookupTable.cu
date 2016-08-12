@@ -50,7 +50,7 @@ __device__ __forceinline__ bool warpHasCollision(int val)
 }
 
 __global__ void cunn_LookupTable_accGradParametersKernelByFeature(
-  float *input, float *gradOutput, float *gradWeight, float scale, long numel,
+  long *input, float *gradOutput, float *gradWeight, float scale, long numel,
   long stride, int paddingValue) {
 
   const int featureDim = blockIdx.x * 4 + threadIdx.x / 32;
@@ -96,8 +96,8 @@ __global__ void cunn_LookupTable_accGradParametersKernelByFeature(
 }
 
 __global__ void cunn_LookupTable_accGradParametersKernel(
-  float *input, float *indices, float *gradOutput, float *gradWeight,
-  float *count, float defaultScale, long numel, long stride, int paddingValue) {
+  long *input, long *indices, float *gradOutput, float *gradWeight,
+  long *count, float defaultScale, long numel, long stride, int paddingValue) {
 
   int idx = blockIdx.x * 4 + threadIdx.y;
 
@@ -164,33 +164,33 @@ void THNN_CudaLookupTable_accGradParameters(
   THIndexTensor *input,
   THCudaTensor *gradOutput,
   THCudaTensor *gradWeight,
-  THIntegerTensor *count,
-  THCudaTensor *sorted,
-  THCudaTensor *indices,
+  THIndexTensor *count,
+  THIndexTensor *sorted,
+  THIndexTensor *indices,
   bool scaleGradByFreq,
   int paddingValue,
   float scale)
 {
   THCUNN_assertSameGPU(state, 5, input, gradOutput, gradWeight, sorted, indices);
-  if (!(THCudaTensor_isContiguous(state, input) &&
+  if (!(THIndexTensor_(isContiguous)(state, input) &&
         THCudaTensor_isContiguous(state, gradOutput) &&
         THCudaTensor_isContiguous(state, gradWeight)))
   {
     THError("Tensors must be contiguous");
   }
 
-  int nDim = THCudaTensor_nDimension(state, input);
+  int nDim = THIndexTensor_(nDimension)(state, input);
   if (nDim != 1 && nDim != 2)
     THError("input must be a vector or matrix");
 
-  long numel = THCudaTensor_nElement(state, input);
+  long numel = THIndexTensor_(nElement)(state, input);
   long stride = gradWeight->stride[0];
 
   cudaStream_t stream = THCState_getCurrentStream(state);
 
   if (numel <= 768 && !scaleGradByFreq) {
     cunn_LookupTable_accGradParametersKernelByFeature<<<DIVUP(stride,4), 128, 0, stream>>>(
-      THCudaTensor_data(state, input),
+      THIndexTensor_(data)(state, input),
       THCudaTensor_data(state, gradOutput),
       THCudaTensor_data(state, gradWeight),
       scale,
@@ -201,23 +201,25 @@ void THNN_CudaLookupTable_accGradParameters(
     return;
   }
 
-  THCudaTensor_resizeAs(state, sorted, input);
-  THCudaTensor_resizeAs(state, indices, input);
+  THLongStorage *inputSize = THIndexTensor_(newSizeOf)(state, input);
+  THIndexTensor_(resize)(state, sorted, inputSize, NULL);
+  THIndexTensor_(resize)(state, indices, inputSize, NULL);
+  THLongStorage_free(inputSize);
 
   // Sort the inputs into sorted with the corresponding indices
-  THCudaTensor_sort(state, sorted, indices, input, 0, 0);
+  THIndexTensor_(sort)(state, sorted, indices, input, 0, 0);
 
-  float *sorted_data = THCudaTensor_data(state, sorted);
-  float *indices_data = THCudaTensor_data(state, indices);
-  float *count_data = NULL;
+  long *sorted_data = THIndexTensor_(data)(state, sorted);
+  long  *indices_data = THIndexTensor_(data)(state, indices);
+  long *count_data = NULL;
 
   if (scaleGradByFreq)
   {
-    THIntegerTensor_(resizeAs)(state, count, input);
-    count_data = THIntegerTensor_(data)(state, count);
+    THIndexTensor_(resizeAs)(state, count, input);
+    count_data = THIndexTensor_(data)(state, count);
 
-    thrust::device_ptr<float> sorted_ptr(sorted_data);
-    thrust::device_ptr<float> count_ptr(count_data);
+    thrust::device_ptr<long> sorted_ptr(sorted_data);
+    thrust::device_ptr<long> count_ptr(count_data);
 
     // Compute an increasing sequence per unique item in sorted:
     // sorted: 2 5 5 5 7 7 8 9 9
@@ -243,8 +245,8 @@ void THNN_CudaLookupTable_accGradParameters(
       thrust::make_reverse_iterator(sorted_ptr),
       thrust::make_reverse_iterator(count_ptr + numel),
       thrust::make_reverse_iterator(count_ptr + numel),
-      thrust::equal_to<float>(),
-      thrust::maximum<float>()
+      thrust::equal_to<long>(),
+      thrust::maximum<long>()
     );
   }
 
@@ -302,23 +304,23 @@ void THNN_CudaLookupTable_renorm(
   float normType)
 {
   THCUNN_assertSameGPU(state, 2, idx, weight);
-  if (!(THCudaTensor_isContiguous(state, idx) &&
+  if (!(THIndexTensor_(isContiguous)(state, idx) &&
         THCudaTensor_isContiguous(state, weight)))
   {
     THError("Tensors must be contiguous");
   }
-  if (THCudaTensor_nDimension(state, idx) != 1)
+  if (THIndexTensor_(nDimension)(state, idx) != 1)
     THError("idx must be a vector");
   if (normType <= 0)
     THError("non-positive-norm not supported");
 
-  long numel = THCudaTensor_nElement(state, idx);
+  long numel = THIndexTensor_(nElement)(state, idx);
   long stride = weight->stride[0];
 
   // get the unique indices
   thrust::device_ptr<float> weight_ptr(THCudaTensor_data(state, weight));
-  thrust::device_ptr<float> idx_ptr(THCudaTensor_data(state, idx));
-  thrust::device_ptr<float> end_ptr = thrust::unique(idx_ptr, idx_ptr+numel);
+  thrust::device_ptr<long> idx_ptr(THIndexTensor_(data)(state, idx));
+  thrust::device_ptr<long> end_ptr = thrust::unique(idx_ptr, idx_ptr+numel);
   numel = end_ptr - idx_ptr;
 
   pow_v<float> unary_pow(normType);

@@ -72,7 +72,7 @@ void THNN_CudaSparseLinear_updateOutput(THCState *state,
 
   init_cusparse();
   cusparseXcoo2csr(cusparse_handle,
-      THCudaIntTensor_data(state, rowbuf), nnz, batchnum, 
+      THCudaIntTensor_data(state, rowbuf), nnz, batchnum,
       THCudaIntTensor_data(state, csrPtrs), CUSPARSE_INDEX_BASE_ONE);
 
   // output = bias
@@ -82,13 +82,13 @@ void THNN_CudaSparseLinear_updateOutput(THCState *state,
     THCudaTensor_select(state, sel, buffer, 1, h);
     THCudaTensor_copy(state, sel, bias);
   }
-  
+
   // output = W * x
   float one = 1;
   cusparseMatDescr_t descr = 0;
   cusparseCreateMatDescr(&descr);
   cusparseSetMatType(descr,CUSPARSE_MATRIX_TYPE_GENERAL);
-  cusparseSetMatIndexBase(descr,CUSPARSE_INDEX_BASE_ONE);  
+  cusparseSetMatIndexBase(descr,CUSPARSE_INDEX_BASE_ONE);
   cusparseScsrmm(cusparse_handle,
       CUSPARSE_OPERATION_NON_TRANSPOSE,
       batchnum, outDim, inDim, nnz,
@@ -105,7 +105,7 @@ void THNN_CudaSparseLinear_updateOutput(THCState *state,
   // We do work in the buffer to keep the output contiguous
   THCudaTensor_copy(state, output, buffer);
 
-  cusparseDestroyMatDescr(descr); 
+  cusparseDestroyMatDescr(descr);
   descr = 0;
   THCudaTensor_free(state, buffer);
   THCudaTensor_free(state, sel);
@@ -141,7 +141,7 @@ void THNN_CudaSparseLinear_accGradParameters(
   THCudaTensor *buf = THCudaTensor_new(state);
   THCudaTensor *cols = THCudaTensor_new(state);
   THCudaTensor *sel = THCudaTensor_new(state);
-  THCudaTensor *inds = THCudaTensor_new(state);
+  THCudaLongTensor *inds = THCudaLongTensor_new(state);
   THCudaTensor *values = THCudaTensor_new(state);
   THCudaIntTensor *colbuf = THCudaIntTensor_new(state);
   THCudaIntTensor *colPtrs = THCudaIntTensor_new(state);
@@ -169,7 +169,7 @@ void THNN_CudaSparseLinear_accGradParameters(
   init_cusparse();
   // Secretly coo2csc
   cusparseXcoo2csr(cusparse_handle,
-      THCudaIntTensor_data(state, colbuf), nnz, inDim, 
+      THCudaIntTensor_data(state, colbuf), nnz, inDim,
       THCudaIntTensor_data(state, colPtrs), CUSPARSE_INDEX_BASE_ONE);
 
   // FORTRAN expects contiguous col-major matricies
@@ -182,7 +182,7 @@ void THNN_CudaSparseLinear_accGradParameters(
   cusparseMatDescr_t descr = 0;
   cusparseCreateMatDescr(&descr);
   cusparseSetMatType(descr,CUSPARSE_MATRIX_TYPE_GENERAL);
-  cusparseSetMatIndexBase(descr,CUSPARSE_INDEX_BASE_ONE);  
+  cusparseSetMatIndexBase(descr,CUSPARSE_INDEX_BASE_ONE);
   cusparseScsrmm(cusparse_handle,
       CUSPARSE_OPERATION_NON_TRANSPOSE,
       inDim, outDim, batchnum, nnz,
@@ -208,7 +208,7 @@ void THNN_CudaSparseLinear_accGradParameters(
   THCudaTensor_free(state, buf);
   THCudaTensor_free(state, sel);
   THCudaTensor_free(state, cols);
-  THCudaTensor_free(state, inds);
+  THCudaLongTensor_free(state, inds);
   THCudaTensor_free(state, values);
   THCudaIntTensor_free(state, colbuf);
   THCudaIntTensor_free(state, rowInds);
@@ -260,4 +260,3 @@ TH_API void THNN_CudaSparseLinear_updateParameters(
 
 void THNN_CudaSparseLinear_cudaClearState(THCState *state) {
 }
-
