@@ -5,7 +5,7 @@ class Log(nn.Module):
 
     def updateOutput(self, input):
         self.output.resizeAs_(input)
-        self.output.copy(input)
+        self.output.copy_(input)
         self.output.log_()
         return self.output
 

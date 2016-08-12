@@ -14,7 +14,7 @@ class AddConstant(nn.Module):
             self.output.set_(input)
         else:
             self.output.resizeAs_(input)
-            self.output.copy(input)
+            self.output.copy_(input)
             self.output.add_(self.constant_scalar)
 
         return self.output
@@ -26,7 +26,7 @@ class AddConstant(nn.Module):
             input.add_(-self.constant_scalar)
         else:
             self.gradInput.resizeAs_(gradOutput)
-            self.gradInput.copy(gradOutput)
+            self.gradInput.copy_(gradOutput)
 
         return self.gradInput
 

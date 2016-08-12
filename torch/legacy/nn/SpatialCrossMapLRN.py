@@ -56,7 +56,7 @@ class SpatialCrossMapLRN(nn.Module):
             for c in range(1, channels):
                 scalePrevious = self.scale.select(1, c - 1)
                 scaleCurrent  = self.scale.select(1, c)
-                scaleCurrent.copy(scalePrevious)
+                scaleCurrent.copy_(scalePrevious)
                 if c < channels - prePad + 1:
                     squareNext   = inputSquare.select(1, c + prePad - 1)
                     scaleCurrent.add_(1, squareNext)

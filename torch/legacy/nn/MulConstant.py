@@ -14,7 +14,7 @@ class MulConstant(nn.Module):
             self.output.set_(input)
         else:
             self.output.resizeAs_(input)
-            self.output.copy(input)
+            self.output.copy_(input)
             self.output.mul_(self.constant_scalar)
 
         return self.output
@@ -31,7 +31,7 @@ class MulConstant(nn.Module):
             input.div_(self.constant_scalar)
         else:
             self.gradInput.resizeAs_(gradOutput)
-            self.gradInput.copy(gradOutput)
+            self.gradInput.copy_(gradOutput)
             self.gradInput.mul_(self.constant_scalar)
 
         return self.gradInput

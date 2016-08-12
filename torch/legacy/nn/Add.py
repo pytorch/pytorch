@@ -26,7 +26,7 @@ class Add(nn.Module):
         self.bias.uniform_(-stdv, stdv)
 
     def updateOutput(self, input):
-        self.output.resizeAs_(input).copy(input)
+        self.output.resizeAs_(input).copy_(input)
         if self.scalar:
             self.output.add_(self.bias[0]);
         else:
@@ -42,7 +42,7 @@ class Add(nn.Module):
 
     def updateGradInput(self, input, gradOutput):
         if self.gradInput:
-           self.gradInput.resizeAs_(gradOutput).copy(gradOutput)
+           self.gradInput.resizeAs_(gradOutput).copy_(gradOutput)
            return self.gradInput
 
     def accGradParameters(self, input, gradOutput, scale=1):

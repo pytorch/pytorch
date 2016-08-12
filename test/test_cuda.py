@@ -24,7 +24,7 @@ S = 10
 M = 50
 
 def make_tensor(t, *sizes):
-    return t(*sizes).copy(torch.randn(*sizes))
+    return t(*sizes).copy_(torch.randn(*sizes))
 
 def small_2d(t):
     return make_tensor(t, S, S)
@@ -39,18 +39,18 @@ def medium_2d(t):
     return make_tensor(t, M, M)
 
 def small_3d_ones(t):
-    return t(S, S, S).copy(torch.ones(S, S, S))
+    return t(S, S, S).copy_(torch.ones(S, S, S))
 
 def small_3d_positive(t):
     min_val = 1e-3 if is_floating(t) else 2
     return make_tensor(t, S, S, S).clamp_(min_val, 120)
 
 def small_3d_unique(t):
-    return t(S, S, S).copy(torch.range(1, S*S*S))
+    return t(S, S, S).copy_(torch.range(1, S*S*S))
 
 def new_t(*sizes):
     def tmp(t):
-        return t(*sizes).copy(torch.randn(*sizes))
+        return t(*sizes).copy_(torch.randn(*sizes))
     return tmp
 
 tests = [

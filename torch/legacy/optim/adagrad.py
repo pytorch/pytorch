@@ -42,7 +42,7 @@ def adagrad(opfunc, x, config, state=None):
         state['paramStd'] = x.new().resizeAs(dfdx)
 
     state['paramVariance'].addcmul(1, dfdx, dfdx)
-    state['paramStd'].resizeAs(state['paramVariance']).copy(state['paramVariance']).sqrt()
+    state['paramStd'].resizeAs(state['paramVariance']).copy_(state['paramVariance']).sqrt()
     x.addcdiv(-clr, dfdx, state['paramStd'].add(1e-10))
 
     # (5) update evaluation counter

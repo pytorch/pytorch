@@ -14,7 +14,7 @@ class Concat(nn.Container):
             currentOutput = self.modules[i].updateOutput(input)
             outs.append(currentOutput)
             if i == 0:
-                self.size.resize_(currentOutput.dim()).copy(currentOutput.size())
+                self.size.resize_(currentOutput.dim()).copy_(currentOutput.size())
             else:
                 self.size[self.dimension] = self.size[self.dimension] + currentOutput.size(self.dimension)
 
@@ -23,7 +23,7 @@ class Concat(nn.Container):
         offset = 0
         for i, module in enumerate(self.modules):
            currentOutput = outs[i]
-           self.output.narrow(self.dimension, offset, currentOutput.size(self.dimension)).copy(currentOutput)
+           self.output.narrow(self.dimension, offset, currentOutput.size(self.dimension)).copy_(currentOutput)
            offset = offset + currentOutput.size(self.dimension)
 
         return self.output
@@ -38,7 +38,7 @@ class Concat(nn.Container):
 
             if currentGradInput: # if the module does not produce a gradInput (for example first layer),: ignore it and move on.
                 if i == 0:
-                    self.gradInput.copy(currentGradInput)
+                    self.gradInput.copy_(currentGradInput)
                 else:
                     self.gradInput.add_(currentGradInput)
 
@@ -65,7 +65,7 @@ class Concat(nn.Container):
             currentGradInput = module.backward(input, gradOutput.narrow(self.dimension, offset, currentOutput.size(self.dimension)), scale)
             if currentGradInput: # if the module.es not produce a gradInput (for example first layer),: ignore it and move on.
                 if i == 0:
-                    self.gradInput.copy(currentGradInput)
+                    self.gradInput.copy_(currentGradInput)
                 else:
                     self.gradInput.add_(currentGradInput)
             offset = offset + currentOutput.size(self.dimension)

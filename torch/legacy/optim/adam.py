@@ -55,7 +55,7 @@ def adam(opfunc, x, config, state=None):
     state['m'].mul(beta1).add(1 - beta1, dfdx)
     state['v'].mul(beta2).addcmul(1 - beta2, dfdx, dfdx)
 
-    state['denom'].copy(state['v']).sqrt().add(epsilon)
+    state['denom'].copy_(state['v']).sqrt().add(epsilon)
 
     biasCorrection1 = 1 - beta1 ** state['t']
     biasCorrection2 = 1 - beta2 ** state['t']

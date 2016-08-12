@@ -22,7 +22,7 @@ class JoinTable(nn.Module):
         for i in range(len(input)):
            currentOutput = input[i]
            if i == 0:
-              self.size.resize_(currentOutput.dim()).copy(currentOutput.size())
+              self.size.resize_(currentOutput.dim()).copy_(currentOutput.size())
            else:
               self.size[dimension] = self.size[dimension] + currentOutput.size(dimension)
 
@@ -33,7 +33,7 @@ class JoinTable(nn.Module):
         for i in range(len(input)):
            currentOutput = input[i]
            self.output.narrow(dimension, offset,
-              currentOutput.size(dimension)).copy(currentOutput)
+              currentOutput.size(dimension)).copy_(currentOutput)
            offset = offset + currentOutput.size(dimension)
 
         return self.output
@@ -52,7 +52,7 @@ class JoinTable(nn.Module):
            currentOutput = input[i]
            currentGradInput = gradOutput.narrow(dimension, offset,
                            currentOutput.size(dimension))
-           self.gradInput[i].copy(currentGradInput)
+           self.gradInput[i].copy_(currentGradInput)
            offset = offset + currentOutput.size(dimension)
 
         return self.gradInput

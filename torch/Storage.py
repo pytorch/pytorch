@@ -12,7 +12,7 @@ class _StorageBase():
     def __iter__(self):
         return iter(map(lambda i: self[i], torch._pyrange(self.size())))
 
-    def copy(self, other):
+    def copy_(self, other):
         torch._C._storageCopy(self, other)
         return self
 

@@ -54,13 +54,13 @@ def sgd(opfunc, x, config, state=None):
         if not state['decayParameters']:
             state['decayParameters'] = torch.Tensor().typeAs(x).resizeAs(dfdx)
 
-        state['decayParameters'].copy(wds).cmul(x)
+        state['decayParameters'].copy_(wds).cmul(x)
         dfdx.add(state['decayParameters'])
 
     # (3) apply momentum
     if mom != 0:
         if 'dfdx' not in state:
-            state['dfdx'] = torch.Tensor().typeAs(dfdx).resizeAs(dfdx).copy(dfdx)
+            state['dfdx'] = torch.Tensor().typeAs(dfdx).resizeAs(dfdx).copy_(dfdx)
         else:
             state['dfdx'].mul(mom).add(1-damp, dfdx)
 
@@ -77,7 +77,7 @@ def sgd(opfunc, x, config, state=None):
         if not 'deltaParameters' in state:
             state['deltaParameters'] = torch.Tensor().typeAs(x).resizeAs(dfdx)
 
-        state['deltaParameters'].copy(lrs).cmul(dfdx)
+        state['deltaParameters'].copy_(lrs).cmul(dfdx)
         x.add(-clr, state['deltaParameters'])
     else:
         x.add(-clr, dfdx)

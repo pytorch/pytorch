@@ -18,7 +18,7 @@ class Mul(nn.Module):
         self.weight.uniform_(-stdv, stdv)
 
     def updateOutput(self, input):
-        self.output.resizeAs_(input).copy(input)
+        self.output.resizeAs_(input).copy_(input)
         self.output.mul_(self.weight[0])
         return self.output
 

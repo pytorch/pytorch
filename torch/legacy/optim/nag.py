@@ -71,7 +71,7 @@ def nag(opfunc, x, config, state=None):
         if 'deltaParameters' in state:
             state['deltaParameters'] = x.new().resizeAs(dfdx)
 
-        state['deltaParameters'].copy(lrs).cmul(dfdx)
+        state['deltaParameters'].copy_(lrs).cmul(dfdx)
         x.add(-clr, state['deltaParameters'])
         state['dfdx'].add(-clr, state['deltaParameters'])
     else:

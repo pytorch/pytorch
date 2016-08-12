@@ -33,12 +33,12 @@ class Sum(nn.Module):
         size[dimension] = 1
         if not gradOutput.isContiguous():
             self._gradOutput = self._gradOutput or gradOutput.new()
-            self._gradOutput.resizeAs_(gradOutput).copy(gradOutput)
+            self._gradOutput.resizeAs_(gradOutput).copy_(gradOutput)
             gradOutput = self._gradOutput
 
         gradOutput = gradOutput.view(size)
         self.gradInput.resizeAs_(input)
-        self.gradInput.copy(gradOutput.expandAs(input))
+        self.gradInput.copy_(gradOutput.expandAs(input))
         if self.sizeAverage:
             self.gradInput.div_(input.size(dimension))
 

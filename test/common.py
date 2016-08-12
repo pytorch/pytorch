@@ -17,10 +17,10 @@ def get_gpu_type(t):
 def to_gpu(obj, tensor_type=None):
     if torch.isTensor(obj):
         if tensor_type:
-            return tensor_type(obj.size()).copy(obj)
-        return get_gpu_type(type(obj))(obj.size()).copy(obj)
+            return tensor_type(obj.size()).copy_(obj)
+        return get_gpu_type(type(obj))(obj.size()).copy_(obj)
     elif torch.isStorage(obj):
-        return obj.new().resize_(obj.size()).copy(obj)
+        return obj.new().resize_(obj.size()).copy_(obj)
     elif isinstance(obj, list):
         return [to_gpu(o, tensor_type) for o in obj]
     else:

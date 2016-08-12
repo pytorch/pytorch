@@ -102,7 +102,7 @@ class SimpleTestCase(TestCaseBase):
             if cpu_module.parameters():
                 gpu_param = gpu_module.flattenParameters()
                 cpu_param = cpu_module.flattenParameters()
-                gpu_param[0].copy(cpu_param[0])
+                gpu_param[0].copy_(cpu_param[0])
 
             cpu_output = cpu_module.forward(cpu_input).clone()
             gpu_output = gpu_module.forward(gpu_input).clone()
@@ -983,9 +983,9 @@ class TestNN(TestCase):
                 for i in range(flat_tensor.nElement()):
                     orig = flat_tensor[i]
                     flat_tensor[i] = orig - perturbation
-                    outa.copy(module.forward(input))
+                    outa.copy_(module.forward(input))
                     flat_tensor[i] = orig + perturbation
-                    outb.copy(module.forward(input))
+                    outb.copy_(module.forward(input))
                     flat_tensor[i] = orig
 
                     outb.add_(-1,outa).div_(2*perturbation)
@@ -1306,7 +1306,7 @@ class TestNN(TestCase):
            conv = concat.get(i)
            gradWeight = conv.gradWeight.clone()
            conv.zeroGradParameters()
-           output[narrows[i]].copy(conv.forward(input))
+           output[narrows[i]].copy_(conv.forward(input))
            gradInput.add_(conv.backward(input, gradOutput[narrows[i]]))
            self.assertEqual(gradWeight, conv.gradWeight)
 

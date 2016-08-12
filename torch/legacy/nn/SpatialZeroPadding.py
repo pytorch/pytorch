@@ -41,7 +41,7 @@ class SpatialZeroPadding(nn.Module):
         if self.pad_r > 0:
             c_output = c_output.narrow(3, 0, c_output.size(3) - self.pad_r)
         # copy input to output
-        c_output.copy(c_input)
+        c_output.copy_(c_input)
 
         return self.output
 
@@ -70,7 +70,7 @@ class SpatialZeroPadding(nn.Module):
         if self.pad_r > 0:
             cg_output = cg_output.narrow(3, 0, cg_output.size(3) - self.pad_r)
         # copy gradOuput to gradInput
-        cg_input.copy(cg_output)
+        cg_input.copy_(cg_output)
 
         return self.gradInput
 

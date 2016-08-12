@@ -5,7 +5,7 @@ class Contiguous(nn.Module):
 
     def updateOutput(self, input):
         if not input.isContiguous():
-            self.output.resizeAs_(input).copy(input)
+            self.output.resizeAs_(input).copy_(input)
         else:
             self.output.set_(input)
 
@@ -14,7 +14,7 @@ class Contiguous(nn.Module):
 
     def updateGradInput(self, input, gradOutput):
         if not gradOutput.isContiguous():
-            self.gradInput.resizeAs_(gradOutput).copy(gradOutput)
+            self.gradInput.resizeAs_(gradOutput).copy_(gradOutput)
         else:
             self.gradInput.set_(gradOutput)
 

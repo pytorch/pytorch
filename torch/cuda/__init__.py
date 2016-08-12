@@ -76,7 +76,7 @@ def _tensor_cuda(self, idx=None):
         target_device = idx if idx else torch._C._cuda_getDevice()
         if self.getDevice() != target_device:
             with device(target_device):
-                return type(self)(self.size()).copy(self)
+                return type(self)(self.size()).copy_(self)
     else:
         ctx = device(idx) if idx else _dummy_ctx()
         with ctx:

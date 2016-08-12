@@ -1400,11 +1400,11 @@ class TestTorch(TestCase):
         self.assertLessEqual(math.abs(x.dot(x) - torch.xcorr2(x, x)[0][0]), 1e-10, 'torch.conv2')
 
         xx = torch.Tensor(2, x.size(1), x.size(2))
-        xx[1].copy(x)
-        xx[2].copy(x)
+        xx[1].copy_(x)
+        xx[2].copy_(x)
         kk = torch.Tensor(2, k.size(1), k.size(2))
-        kk[1].copy(k)
-        kk[2].copy(k)
+        kk[1].copy_(k)
+        kk[2].copy_(k)
 
         immvc = torch.conv2(xx, kk)
         immvc2 = torch.conv2(xx, kk, 'V')
@@ -1444,11 +1444,11 @@ class TestTorch(TestCase):
         self.assertLessEqual(math.abs(x.dot(x) - torch.xcorr3(x, x)[0][0][0]), 4e-10, 'torch.conv3')
 
         xx = torch.Tensor(2, x.size(1), x.size(2), x.size(3))
-        xx[1].copy(x)
-        xx[2].copy(x)
+        xx[1].copy_(x)
+        xx[2].copy_(x)
         kk = torch.Tensor(2, k.size(1), k.size(2), k.size(3))
-        kk[1].copy(k)
-        kk[2].copy(k)
+        kk[1].copy_(k)
+        kk[2].copy_(k)
 
         immvc = torch.conv3(xx, kk)
         immvc2 = torch.conv3(xx, kk, 'V')
@@ -1751,7 +1751,7 @@ class TestTorch(TestCase):
         dest2 = dest.clone()
         dest.indexCopy_(0, idx, src)
         for i in range(idx.size(0)):
-            dest2[idx[i]].copy(src[i])
+            dest2[idx[i]].copy_(src[i])
         self.assertEqual(dest, dest2, 0)
 
         dest = torch.randn(num_dest)

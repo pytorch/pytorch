@@ -42,8 +42,8 @@ def adadelta(opfunc, x, config, state=None):
         state['accDelta'] = x.new().resizeAs(dfdx).zero()
 
     state['paramVariance'].mul(rho).addcmul(1 - rho, dfdx, dfdx)
-    state['paramStd'].resizeAs(state['paramVariance']).copy(state['paramVariance']).add(eps).sqrt()
-    state['delta'].resizeAs(state['paramVariance']).copy(state['accDelta']).add(eps).sqrt().cdiv(state['paramStd']).cmul(dfdx)
+    state['paramStd'].resizeAs(state['paramVariance']).copy_(state['paramVariance']).add(eps).sqrt()
+    state['delta'].resizeAs(state['paramVariance']).copy_(state['accDelta']).add(eps).sqrt().cdiv(state['paramStd']).cmul(dfdx)
     x.add(-1, state['delta'])
     state['accDelta'].mul(rho).addcmul(1 - rho, state['delta'], state['delta'])
 

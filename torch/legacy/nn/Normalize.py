@@ -86,7 +86,7 @@ class Normalize(nn.Module):
                         torch.abs(self.buffer, input).pow_(self.p-2).mul_(input)
                 # special case for p == 2, pow(x, 0) = 1
                 elif self.p == 2:
-                    self.buffer.copy(input)
+                    self.buffer.copy_(input)
                 else:
                     # p is even and > 2, pow(x, p) is always positive
                     torch.pow(self.buffer, input, self.p-2).mul_(input)

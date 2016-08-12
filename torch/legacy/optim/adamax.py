@@ -53,8 +53,8 @@ def adamax(opfunc, x, config, state=None):
     # Update biased first moment estimate.
     state['m'].mul(beta1).add(1 - beta1, dfdx)
     # Update the exponentially weighted infinity norm.
-    state['max'][0].copy(state['u']).mul(beta2)
-    state['max'][1].copy(dfdx).abs().add(epsilon)
+    state['max'][0].copy_(state['u']).mul(beta2)
+    state['max'][1].copy_(dfdx).abs().add(epsilon)
     state['u'].max(state['max'], 0)
 
     biasCorrection1 = 1 - beta1 ** state['t']

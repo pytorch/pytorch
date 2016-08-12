@@ -93,7 +93,7 @@ def rprop(opfunc, x, config, state=None):
         x.addcmul(-1, state['sign'], state['stepsize'])
 
         # update state['dfdx'] with current dfdx
-        state['delta'].copy(dfdx)
+        state['delta'].copy_(dfdx)
 
         hfx.append(fx)
 

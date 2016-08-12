@@ -52,7 +52,7 @@ class LookupTable(nn.Module):
         # make sure input is a contiguous torch.LongTensor
         if not input.isContiguous() or type(input) != type(self._input):
             self.copiedInput = True
-            self._input.resize_(input.size()).copy(input)
+            self._input.resize_(input.size()).copy_(input)
             return self._input
         else:
             self.copiedInput = False
@@ -94,7 +94,7 @@ class LookupTable(nn.Module):
 
         if not gradOutput.isContiguous():
             self._gradOutput = self._gradOutput or gradOutput.new()
-            self._gradOutput.resizeAs_(gradOutput).copy(gradOutput)
+            self._gradOutput.resizeAs_(gradOutput).copy_(gradOutput)
             gradOutput = self._gradOutput
 
         self._backend.LookupTable_accGradParameters(
@@ -116,7 +116,7 @@ class LookupTable(nn.Module):
 
         # copy input into _input, so _input is continous.
         # The copied _input will be modified in the C code.
-        self._input.resize_(input.size()).copy(input)
+        self._input.resize_(input.size()).copy_(input)
         row_idx = self._input
         if row_idx.dim() == 2:
            row_idx = row_idx.view(-1)

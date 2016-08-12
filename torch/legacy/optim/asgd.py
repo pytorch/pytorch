@@ -59,11 +59,11 @@ def asgd(opfunc, x, config, state=None):
     state['ax'] = state.get('ax', x.new().resizeAs(x).zero())
     state['tmp'] = state.get('tmp', state['ax'].new().resizeAs(state['ax']))
     if state['mu_t'] != 1:
-        state['tmp'].copy(x)
+        state['tmp'].copy_(x)
         state['tmp'].add(-1,state['ax']).mul(state['mu_t'])
         state['ax'].add(state['tmp'])
     else:
-        state['ax'].copy(x)
+        state['ax'].copy_(x)
 
 
     # (5) update eta_t and mu_t

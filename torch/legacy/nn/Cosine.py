@@ -77,13 +77,13 @@ class Cosine(nn.Module):
         self._gradOutput = self._gradOutput or gradOutput.new()
         self._sum = self._sum or input.new()
 
-        self.gradInput.copy(input).div_(inputNorm)
-        self._gradOutput.resizeAs_(gradOutput).copy(gradOutput)
+        self.gradInput.copy_(input).div_(inputNorm)
+        self._gradOutput.resizeAs_(gradOutput).copy_(gradOutput)
         self._gradOutput.mul_(self.output)
         torch.sum(self._sum, self._gradOutput, 1)
         self.gradInput.mul_(self._sum.expandAs(input))
 
-        self._gradOutput.resizeAs_(gradOutput).copy(gradOutput)
+        self._gradOutput.resizeAs_(gradOutput).copy_(gradOutput)
         self._gradOutput.div_(weightNorm)
         self.gradInput.addmm_(-1, 1, self._gradOutput, self.weight)
         self.gradInput.div_(inputNorm)
@@ -104,9 +104,9 @@ class Cosine(nn.Module):
         self._weight = self._weight or self.weight.new()
         self._sum = self._sum or input.new()
 
-        self._weight.resizeAs_(self.weight).copy(self.weight)
+        self._weight.resizeAs_(self.weight).copy_(self.weight)
         self._gradOutput = self._gradOutput or gradOutput.new()
-        self._gradOutput.resizeAs_(gradOutput).copy(gradOutput)
+        self._gradOutput.resizeAs_(gradOutput).copy_(gradOutput)
         self._gradOutput.mul_(self.output)
         torch.sum(self._sum, self._gradOutput, 0)
         grad = self._sum[0]
@@ -114,7 +114,7 @@ class Cosine(nn.Module):
         self._weight.mul_(grad.view(outputSize, 1).expandAs(self._weight))
 
         input_ = self._gradOutput
-        input_.resizeAs_(input).copy(input)
+        input_.resizeAs_(input).copy_(input)
         input_.div_(self._inputNorm.expandAs(input))
         self._weight.addmm_(-1, 1, gradOutput.t(), input_)
 

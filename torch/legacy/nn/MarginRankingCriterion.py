@@ -19,7 +19,7 @@ class MarginRankingCriterion(nn.Criterion):
         else:
            self._output = self._output or input[0].clone()
            self._output.resizeAs_(input[0])
-           self._output.copy(input[0])
+           self._output.copy_(input[0])
 
            self._output.add_(-1, input[1])
            self._output.mul_(-1).mul_(y)
@@ -45,7 +45,7 @@ class MarginRankingCriterion(nn.Criterion):
                 self.gradInput[1][0] = y
         else:
             self.dist = self.dist or input[0].new()
-            self.dist = self.dist.resizeAs_(input[0]).copy(input[0])
+            self.dist = self.dist.resizeAs_(input[0]).copy_(input[0])
             dist = self.dist
 
             dist.add_(-1, input[1])
@@ -53,7 +53,7 @@ class MarginRankingCriterion(nn.Criterion):
             dist.add_(self.margin)
 
             self.mask = self.mask or input[0].new()
-            self.mask = self.mask.resizeAs_(input[0]).copy(dist)
+            self.mask = self.mask.resizeAs_(input[0]).copy_(dist)
             mask = self.mask
 
             torch.ge(mask, dist, 0)
@@ -61,9 +61,9 @@ class MarginRankingCriterion(nn.Criterion):
             self.gradInput[0].resize_(dist.size())
             self.gradInput[1].resize_(dist.size())
 
-            self.gradInput[0].copy(mask)
+            self.gradInput[0].copy_(mask)
             self.gradInput[0].mul_(-1).mul_(y)
-            self.gradInput[1].copy(mask)
+            self.gradInput[1].copy_(mask)
             self.gradInput[1].mul_(y)
 
             if self.sizeAverage:

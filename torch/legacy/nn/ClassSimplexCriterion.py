@@ -66,7 +66,7 @@ class ClassSimplexCriterion(nn.MSECriterion):
         nSamples = target.size(0)
         self._target.resize_(nSamples, self.nClasses)
         for i in range(nSamples):
-            self._target[i].copy(self.simplex[int(target[i])])
+            self._target[i].copy_(self.simplex[int(target[i])])
 
     def updateOutput(self, input, target):
          self._transformTarget(target)

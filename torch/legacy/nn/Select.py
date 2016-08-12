@@ -12,12 +12,12 @@ class Select(nn.Module):
         index = self.index if self.index >= 0 else input.size(self.dimension) + self.index
         output = input.select(self.dimension, index)
         self.output.resizeAs_(output)
-        return self.output.copy(output)
+        return self.output.copy_(output)
 
     def updateGradInput(self, input, gradOutput):
         index = self.index if self.index >= 0 else input.size(self.dimension) + self.index
         self.gradInput.resizeAs_(input)
         self.gradInput.zero_()
-        self.gradInput.select(self.dimension, index).copy(gradOutput)
+        self.gradInput.select(self.dimension, index).copy_(gradOutput)
         return self.gradInput
 

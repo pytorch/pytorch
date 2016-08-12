@@ -31,8 +31,8 @@ class DotProduct(nn.Module):
 
         gw1 = self.gradInput[0]
         gw2 = self.gradInput[1]
-        gw1.resizeAs_(v1).copy(v2)
-        gw2.resizeAs_(v2).copy(v1)
+        gw1.resizeAs_(v1).copy_(v2)
+        gw2.resizeAs_(v2).copy_(v1)
 
         go = gradOutput.view(-1, 1).expandAs(v1)
         gw1.mul_(go)

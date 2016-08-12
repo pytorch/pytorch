@@ -22,7 +22,7 @@ class Parallel(nn.Container):
             outputSize = currentOutput.size(self.outputDimension)
 
             if i == 0:
-                totalOutputSize.resize_(currentOutput.dim()).copy(currentOutput.size())
+                totalOutputSize.resize_(currentOutput.dim()).copy_(currentOutput.size())
             else:
                 totalOutputSize[self.outputDimension] = totalOutputSize[self.outputDimension] + outputSize
 
@@ -32,7 +32,7 @@ class Parallel(nn.Container):
         for i in range(nModule):
             currentOutput = outputs[i]
             outputSize = currentOutput.size(self.outputDimension)
-            self.output.narrow(self.outputDimension, offset, outputSize).copy(currentOutput)
+            self.output.narrow(self.outputDimension, offset, outputSize).copy_(currentOutput)
             offset = offset + currentOutput.size(self.outputDimension)
 
         return self.output
@@ -51,7 +51,7 @@ class Parallel(nn.Container):
 
             currentGradInput = module.updateGradInput(currentInput, currentGradOutput)
 
-            self.gradInput.select(self.inputDimension, i).copy(currentGradInput)
+            self.gradInput.select(self.inputDimension, i).copy_(currentGradInput)
             offset = offset + outputSize
 
         return self.gradInput

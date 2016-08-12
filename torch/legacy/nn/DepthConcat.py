@@ -34,7 +34,7 @@ class DepthConcat(nn.Concat):
             currentOutput = self.modules[i].updateOutput(input)
             outs.append(currentOutput)
             if i == 0:
-                self.size.resize_(currentOutput.dim()).copy(currentOutput.size())
+                self.size.resize_(currentOutput.dim()).copy_(currentOutput.size())
             else:
                 self.size[self.dimension] = self.size[self.dimension] + currentOutput.size(self.dimension)
                 for dim in range(self.size.size()):
@@ -48,7 +48,7 @@ class DepthConcat(nn.Concat):
         for i, module in enumerate(self.modules):
            currentOutput = outs[i]
            outputWindow = self.windowNarrow(self.output, currentOutput, offset)
-           outputWindow.copy(currentOutput)
+           outputWindow.copy_(currentOutput)
            offset = offset + currentOutput.size(self.dimension)
 
         return self.output
@@ -62,7 +62,7 @@ class DepthConcat(nn.Concat):
            gradOutputWindow = self.windowNarrow(gradOutput, currentOutput, offset)
            currentGradInput = module.updateGradInput(input, gradOutputWindow)
            if i == 0:
-              self.gradInput.copy(currentGradInput)
+              self.gradInput.copy_(currentGradInput)
            else:
               self.gradInput.add_(currentGradInput)
 
@@ -88,7 +88,7 @@ class DepthConcat(nn.Concat):
             gradOutputWindow = self.windowNarrow(gradOutput, currentOutput, offset)
             currentGradInput = module.backward(input, gradOutputWindow)
             if i == 0:
-                self.gradInput.copy(currentGradInput)
+                self.gradInput.copy_(currentGradInput)
             else:
                 self.gradInput.add_(currentGradInput)
 

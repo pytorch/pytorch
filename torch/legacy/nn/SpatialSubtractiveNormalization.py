@@ -47,8 +47,8 @@ class SpatialSubtractiveNormalization(nn.Module):
             self.meanestimator.modules[1].bias.zero_()
         else:
             for i in range(self.nInputPlane):
-                self.meanestimator.modules[1].weight[i].copy(self.kernel)
-                self.meanestimator.modules[2].weight[0][i].copy(self.kernel)
+                self.meanestimator.modules[1].weight[i].copy_(self.kernel)
+                self.meanestimator.modules[2].weight[0][i].copy_(self.kernel)
 
             self.meanestimator.modules[1].bias.zero_()
             self.meanestimator.modules[2].bias.zero_()
@@ -72,7 +72,7 @@ class SpatialSubtractiveNormalization(nn.Module):
 
             self.ones.resizeAs_(input[0:1]).fill_(1)
             coef = self.meanestimator.updateOutput(self.ones).squeeze(0)
-            self._coef.resizeAs_(coef).copy(coef) # make contiguous for view
+            self._coef.resizeAs_(coef).copy_(coef) # make contiguous for view
             size = coef.size().tolist()
             size = [input.size(0)] + size
             self.coef = self._coef.view(1, *(self._coef.size().tolist())).expand(*size)

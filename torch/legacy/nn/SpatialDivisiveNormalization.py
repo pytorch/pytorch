@@ -63,10 +63,10 @@ class SpatialDivisiveNormalization(nn.Module):
         else:
             self.kernel.div_(self.kernel.sum() * math.sqrt(self.nInputPlane))
             for i in range(self.nInputPlane):
-                self.meanestimator.modules[1].weight[i].copy(self.kernel)
-                self.meanestimator.modules[2].weight[0][i].copy(self.kernel)
-                self.stdestimator.modules[2].weight[i].copy(self.kernel)
-                self.stdestimator.modules[3].weight[0][i].copy(self.kernel)
+                self.meanestimator.modules[1].weight[i].copy_(self.kernel)
+                self.meanestimator.modules[2].weight[0][i].copy_(self.kernel)
+                self.stdestimator.modules[2].weight[i].copy_(self.kernel)
+                self.stdestimator.modules[3].weight[0][i].copy_(self.kernel)
 
             self.meanestimator.modules[1].bias.zero_()
             self.meanestimator.modules[2].bias.zero_()
@@ -94,7 +94,7 @@ class SpatialDivisiveNormalization(nn.Module):
             self.ones.resizeAs_(input[0:1]).fill_(1)
             coef = self.meanestimator.updateOutput(self.ones).squeeze(0)
             self._coef = self._coef or input.new()
-            self._coef.resizeAs_(coef).copy(coef) # make contiguous for view
+            self._coef.resizeAs_(coef).copy_(coef) # make contiguous for view
             self.coef = self._coef.view(1, *(self._coef.size().tolist())).expandAs(self.localstds)
 
         # normalize std dev

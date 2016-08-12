@@ -106,7 +106,7 @@ class MixtureTable(nn.Module):
                 if self.dimG == 0:
                     gaterGradInput[i] = self._sum.select(self.dimG, 0)
                 else:
-                    gaterGradInput.select(self.dimG, i).copy(self._sum.select(self.dimG, 0))
+                    gaterGradInput.select(self.dimG, i).copy_(self._sum.select(self.dimG, 0))
 
                 # expert updateGradInput
                 gate = self._gaterView.select(self.dim, i).expandAs(expertGradInput)
@@ -114,7 +114,7 @@ class MixtureTable(nn.Module):
         else:
             if not self.backwardSetup:
                 self.size2.resize_(expertInputs.dim())
-                self.size2.copy(expertInputs.size())
+                self.size2.copy_(expertInputs.size())
                 self.size2[self.dim] = 1
                 gaterGradInput.resizeAs_(gaterInput)
                 self.backwardSetup = True
@@ -126,7 +126,7 @@ class MixtureTable(nn.Module):
             expert = self._expert.transpose(self.dim, self.dimG)
             if not expert.isContiguous():
                 self._expert2.resizeAs_(expert)
-                self._expert2.copy(expert)
+                self._expert2.copy_(expert)
                 expert = self._expert2
             if self.dimG == 0:
                 self._expertView2 = expert.view(gaterInput.size(0), -1)

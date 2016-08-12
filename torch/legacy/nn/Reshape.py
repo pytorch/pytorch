@@ -11,7 +11,7 @@ class Reshape(nn.Module):
 
         n = len(args)
         if n == 0 and isinstance(args[0], torch.LongStorage):
-            self.size.resize_(args[0].size()).copy(args[0])
+            self.size.resize_(args[0].size()).copy_(args[0])
         else:
             self.size.resize_(n)
             for i in range(n):
@@ -30,7 +30,7 @@ class Reshape(nn.Module):
         if not input.isContiguous():
            self._input = self._input or input.new()
            self._input.resizeAs_(input)
-           self._input.copy(input)
+           self._input.copy_(input)
            input = self._input
 
         self.batchsize[0] = input.size(0)
@@ -42,7 +42,7 @@ class Reshape(nn.Module):
         if not gradOutput.isContiguous():
            self._gradOutput = self._gradOutput or gradOutput.new()
            self._gradOutput.resizeAs_(gradOutput)
-           self._gradOutput.copy(gradOutput)
+           self._gradOutput.copy_(gradOutput)
            gradOutput = self._gradOutput
 
         self.gradInput = gradOutput.viewAs(input)

@@ -85,23 +85,23 @@ def cg(opfunc, x, config, state=None):
     # evaluate at initial point
     f1, tdf = opfunc(x)
     fx.append(f1)
-    df1.copy(tdf)
+    df1.copy_(tdf)
     i = i+1
 
     # initial search direction
-    s.copy(df1).mul(-1)
+    s.copy_(df1).mul(-1)
 
     d1 = -s.dot(s )         # slope
     z1 = red/(1-d1)         # initial step
 
     while i < abs(maxEval):
-        x0.copy(x)
+        x0.copy_(x)
         f0 = f1
-        df0.copy(df1)
+        df0.copy_(df1)
 
         x.add(z1, s)
         f2, tdf = opfunc(x)
-        df2.copy(tdf)
+        df2.copy_(tdf)
         i = i + 1
         d2 = df2.dot(s)
         f3, d3, z3 = f1, d1, -z1   # init point 3 equal to point 1
@@ -126,7 +126,7 @@ def cg(opfunc, x, config, state=None):
                 z1 = z1 + z2
                 x.add(z2, s)
                 f2, tdf = opfunc(x)
-                df2.copy(tdf)
+                df2.copy_(tdf)
                 i = i + 1
                 m = m - 1
                 d2 = df2.dot(s)
@@ -166,7 +166,7 @@ def cg(opfunc, x, config, state=None):
             x.add(z2, s)
 
             f2, tdf = opfunc(x)
-            df2.copy(tdf)
+            df2.copy_(tdf)
             i = i+1
             m = m - 1
             d2 = df2.dot(s)
@@ -178,11 +178,11 @@ def cg(opfunc, x, config, state=None):
             s.mul(ss)
             s.add(-1, df2)
             tmp = df1.clone()
-            df1.copy(df2)
-            df2.copy(tmp)
+            df1.copy_(df2)
+            df2.copy_(tmp)
             d2 = df1.dot(s)
             if d2 > 0:
-                s.copy(df1)
+                s.copy_(df1)
                 s.mul(-1)
                 d2 = -s.dot(s)
 
@@ -190,16 +190,16 @@ def cg(opfunc, x, config, state=None):
             d1 = d2
             ls_failed = 0
         else:
-            x.copy(x0)
+            x.copy_(x0)
             f1 = f0
-            df1.copy(df0)
+            df1.copy_(df0)
             if ls_failed or i > maxEval:
                 break
 
             tmp = df1.clone()
-            df1.copy(df2)
-            df2.copy(tmp)
-            s.copy(df1)
+            df1.copy_(df2)
+            df2.copy_(tmp)
+            s.copy_(df1)
             s.mul(-1)
             d1 = -s.dot(s)
             z1 = 1 / (1 - d1)

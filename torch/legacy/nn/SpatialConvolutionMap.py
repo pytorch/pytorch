@@ -44,10 +44,10 @@ class SpatialConvolutionMap(nn.Module):
 
             # start fill_ing frtbl
             for i in range(nout): # fro each unit in target map
-                ufrtbl.select(0, i).copy(ufitbl.select(0, frcntr))
+                ufrtbl.select(0, i).copy_(ufitbl.select(0, frcntr))
                 frcntr += 1
                 if frcntr-1 == nfi: # reset fi
-                    fi.copy(torch.randperm(nin))
+                    fi.copy_(torch.randperm(nin))
                     frcntr = 1
 
             for tocntr in range(utotbl.size(0)):

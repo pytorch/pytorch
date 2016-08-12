@@ -43,13 +43,13 @@ class SpatialConvolutionLocal(nn.Module):
     def _makeContiguous(self, input, gradOutput=None):
         if not input.isContiguous():
            self._input = self._input or input.new()
-           self._input.resizeAs_(input).copy(input)
+           self._input.resizeAs_(input).copy_(input)
            input = self._input
 
         if gradOutput is not None:
             if not gradOutput.isContiguous():
                 self._gradOutput = self._gradOutput or gradOutput.new()
-                self._gradOutput.resizeAs_(gradOutput).copy(gradOutput)
+                self._gradOutput.resizeAs_(gradOutput).copy_(gradOutput)
                 gradOutput = self._gradOutput
             return input, gradOutput
 

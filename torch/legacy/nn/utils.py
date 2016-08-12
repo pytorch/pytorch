@@ -32,7 +32,7 @@ def recursiveType(param, type, tensorCache={}):
                 if param_storage:
                     storage_key = param_storage._cdata
                     if storage_key not in tensorCache:
-                        tensorCache[storage_key] = torch._import_dotted_name(storageType)(param_storage.size()).copy(param_storage)
+                        tensorCache[storage_key] = torch._import_dotted_name(storageType)(param_storage.size()).copy_(param_storage)
                     newparam.set_(
                         tensorCache[storage_key],
                         param.storageOffset(),
@@ -91,7 +91,7 @@ def recursiveCopy(t1, t2):
             t1[i], t2[i] = recursiveCopy(t1[i], t2[i])
     elif torch.isTensor(t2):
         t1 = t1 if torch.isTensor(t1) else t2.new()
-        t1.resizeAs_(t2).copy(t2)
+        t1.resizeAs_(t2).copy_(t2)
     else:
         raise RuntimeError("expecting nested tensors or tables. Got " + \
                 type(t1).__name__ + " and " + type(t2).__name__ + " instead")
@@ -130,7 +130,7 @@ def contiguousView(output, input, *args):
         output.set_(input.view(*args))
     else:
         output.resizeAs_(input)
-        output.copy(input)
+        output.copy_(input)
         output.set_(output.view(*args))
     return output
 

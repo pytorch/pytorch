@@ -11,7 +11,7 @@ def _printformat(storage):
         if value != math.ceil(value):
             int_mode = False
             break
-    tensor = torch.DoubleTensor(torch.DoubleStorage(storage.size()).copy(storage)).abs()
+    tensor = torch.DoubleTensor(torch.DoubleStorage(storage.size()).copy_(storage)).abs()
     exp_min = tensor.min()
     if exp_min != 0:
         exp_min = math.floor(math.log10(exp_min)) + 1

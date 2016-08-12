@@ -10,7 +10,7 @@ class CMul(nn.Module):
 
         self.size = torch.LongStorage()
         if len(args) == 1 and torch.type(args[0]) == 'torch.LongStorage':
-            self.size.resize_(arg[0].size()).copy(arg[0])
+            self.size.resize_(arg[0].size()).copy_(arg[0])
         else:
             self.size.resize_(len(args))
             for i, arg in enumerate(args):
@@ -48,7 +48,7 @@ class CMul(nn.Module):
             self._expand = input.new()
             self._repeat = input.new()
 
-        self.output.resizeAs_(input).copy(input)
+        self.output.resizeAs_(input).copy_(input)
         batchSize = input.size(0)
         # TODO: expandAs_, view_
         self._output = self.output.view(batchSize, -1)
@@ -56,7 +56,7 @@ class CMul(nn.Module):
         self._expand = self._weight.expandAs(self._output)
 
         if torch.typename(input) == 'torch.cuda.FloatTensor':
-            self._repeat.resizeAs_(self._expand).copy(self._expand)
+            self._repeat.resizeAs_(self._expand).copy_(self._expand)
             self._output.mul_(self._repeat)
         else:
             self._output.mul_(self._expand)
@@ -80,7 +80,7 @@ class CMul(nn.Module):
         self._expand = self._weight.expandAs(self._gradOutput)
 
         if torch.typename(input) == 'torch.cuda.FloatTensor':
-            self._repeat.resizeAs_(self._expand).copy(self._expand)
+            self._repeat.resizeAs_(self._expand).copy_(self._expand)
             self._gradInput.addcmul_(1, self._repeat, self._gradOutput)
         else:
             self._gradInput.addcmul_(1, self._expand, self._gradOutput)

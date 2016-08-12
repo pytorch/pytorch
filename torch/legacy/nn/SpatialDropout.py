@@ -10,7 +10,7 @@ class SpatialDropout(nn.Module):
         self.noise = torch.Tensor()
 
     def updateOutput(self, input):
-        self.output.resizeAs_(input).copy(input)
+        self.output.resizeAs_(input).copy_(input)
         if self.train:
             if input.dim() == 4:
                 self.noise.resize_(input.size(0), input.size(1), 1, 1)
@@ -29,7 +29,7 @@ class SpatialDropout(nn.Module):
 
     def updateGradInput(self, input, gradOutput):
         if self.train:
-            self.gradInput.resizeAs_(gradOutput).copy(gradOutput)
+            self.gradInput.resizeAs_(gradOutput).copy_(gradOutput)
             self.gradInput.mul_(self.noise.expandAs(input)) # simply mask the gradients with the noise vector
         else:
             raise RuntimeError('backprop only defined while training')

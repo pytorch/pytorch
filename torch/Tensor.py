@@ -33,11 +33,11 @@ class _TensorBase(object):
             if t == current:
                 return self
             _, _, typename = t.partition('.')
-            return torch._import_dotted_name(t)(self.size()).copy(self)
+            return torch._import_dotted_name(t)(self.size()).copy_(self)
         else:
             if t == type(self):
                 return self
-            return t(self.size()).copy(self)
+            return t(self.size()).copy_(self)
 
     def typeAs(self, t):
         return self.type(t.type())
@@ -63,7 +63,7 @@ class _TensorBase(object):
     def byte(self):
         return self.type(torch.ByteTensor)
 
-    def copy(self, other):
+    def copy_(self, other):
         torch._C._tensorCopy(self, other)
         return self
 
@@ -187,7 +187,7 @@ class _TensorBase(object):
             xsize = [1] + xsize
         xtensor.resize_(torch.LongStorage(xsize))
         xxtensor = xtensor.expandAs(urtensor)
-        urtensor.copy(xxtensor)
+        urtensor.copy_(xxtensor)
         return result
 
     def __add__(self, other):

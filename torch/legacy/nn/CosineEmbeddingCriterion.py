@@ -45,7 +45,7 @@ class CosineEmbeddingCriterion(nn.Criterion):
         # self._outputs is also used as a temporary buffer
         self._outputs.resizeAs_(self.w22).fill_(1)
         torch.div(self.w22, self._outputs, self.w22)
-        self.w.resizeAs_(self.w22).copy(self.w22)
+        self.w.resizeAs_(self.w22).copy_(self.w22)
 
         torch.mul(self.buffer, input2, input2)
         torch.sum(self.w32, self.buffer, 1).add_(epsilon)
@@ -75,8 +75,8 @@ class CosineEmbeddingCriterion(nn.Criterion):
 
         gw1 = self.gradInput[0]
         gw2 = self.gradInput[1]
-        gw1.resizeAs_(v1).copy(v2)
-        gw2.resizeAs_(v1).copy(v1)
+        gw1.resizeAs_(v1).copy_(v2)
+        gw2.resizeAs_(v1).copy_(v1)
 
         torch.mul(self.buffer, self.w1, self.w22)
         gw1.addcmul_(-1, self.buffer.expandAs(v1), v1)

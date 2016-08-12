@@ -61,7 +61,7 @@ class Euclidean(nn.Module):
         self._view(self._input, input, batchSize, inputSize, 1)
         self._expand = self._input.expand(batchSize, inputSize, outputSize)
         # make the expanded tensor contiguous (requires lots of memory)
-        self._repeat.resizeAs_(self._expand).copy(self._expand)
+        self._repeat.resizeAs_(self._expand).copy_(self._expand)
 
         self._weight = self.weight.view(1, inputSize, outputSize)
         self._expand2 = self._weight.expandAs(self._repeat)
@@ -69,7 +69,7 @@ class Euclidean(nn.Module):
         if torch.typename(input) == 'torch.cuda.FloatTensor':
             # TODO: after adding new allocators this can be changed
             # requires lots of memory, but minimizes cudaMallocs and loops
-            self._repeat2.resizeAs_(self._expand2).copy(self._expand2)
+            self._repeat2.resizeAs_(self._expand2).copy_(self._expand2)
             self._repeat.add_(-1, self._repeat2)
         else:
             self._repeat.add_(-1, self._expand2)
@@ -100,7 +100,7 @@ class Euclidean(nn.Module):
         """
 
         # to prevent div by zero (NaN) bugs
-        self._output.resizeAs_(self.output).copy(self.output).add_(0.0000001)
+        self._output.resizeAs_(self.output).copy_(self.output).add_(0.0000001)
         self._view(self._gradOutput, gradOutput, gradOutput.size())
         torch.div(self._div, gradOutput, self._output)
         assert input.dim() == 2
@@ -110,7 +110,7 @@ class Euclidean(nn.Module):
         self._expand3 = self._div.expand(batchSize, inputSize, outputSize)
 
         if torch.typename(input) == 'torch.cuda.FloatTensor':
-            self._repeat2.resizeAs_(self._expand3).copy(self._expand3)
+            self._repeat2.resizeAs_(self._expand3).copy_(self._expand3)
             self._repeat2.mul_(self._repeat)
         else:
             torch.mul(self._repeat2, self._repeat, self._expand3)

@@ -20,7 +20,7 @@ class MaskedSelect(nn.Module):
         input, mask = input
         if input.type() == 'torch.cuda.FloatTensor':
             torch.range(self._maskIndexBufferCPU, 0, mask.nElement()-1).resize_(mask.size())
-            self._maskIndexBuffer.resize_(self._maskIndexBufferCPU.size()).copy(self._maskIndexBufferCPU)
+            self._maskIndexBuffer.resize_(self._maskIndexBufferCPU.size()).copy_(self._maskIndexBufferCPU)
         else:
             torch.range(self._maskIndexBuffer, 0, mask.nElement()-1).resize_(mask.size())
 

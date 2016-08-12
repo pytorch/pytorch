@@ -37,7 +37,7 @@ class PairwiseDistance(nn.Module):
 
         self.gradInput[0] = (self.gradInput[0] or input[0].new()).resize_(input[0].size())
         self.gradInput[1] = (self.gradInput[1] or input[1].new()).resize_(input[1].size())
-        self.gradInput[0].copy(input[0])
+        self.gradInput[0].copy_(input[0])
         self.gradInput[0].add_(-1, input[1])
 
         if self.norm == 1:
@@ -50,7 +50,7 @@ class PairwiseDistance(nn.Module):
 
             self.outExpand = self.outExpand or self.output.new()
             self.outExpand.resize_(self.output.size(0), 1)
-            self.outExpand.copy(self.output)
+            self.outExpand.copy_(self.output)
             self.outExpand.add_(1e-6)  # Prevent divide by zero errors
             self.outExpand.pow_(-(self.norm-1))
             self.gradInput[0].mul_(self.outExpand.expand(self.gradInput[0].size(0),

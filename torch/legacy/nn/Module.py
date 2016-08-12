@@ -205,7 +205,7 @@ class Module(object):
         # 4. copy storages into the flattened parameter tensor
         for storageAndOffset in storages.values():
             storage, offset = storageAndOffset
-            flatParameters[slice(offset, offset+storage.size())].copy(Tensor().set_(storage))
+            flatParameters[slice(offset, offset+storage.size())].copy_(Tensor().set_(storage))
 
         # 5. allow garbage collection
         storages = None
@@ -216,13 +216,13 @@ class Module(object):
         if used_parameters != num_parameters:
            assert tensorsCompact
 
-           flatParameters = BufferTensor(used_parameters).copy(
+           flatParameters = BufferTensor(used_parameters).copy_(
                  flatParameters.maskedSelect(maskParameters))
            for meta in parameterMeta:
                meta['storageOffset'] = compactOffsets[meta['storageOffset']]
 
         if BufferTensor != Tensor:
-           flatParameters = Tensor(flatParameters.nElement()).copy(flatParameters)
+           flatParameters = Tensor(flatParameters.nElement()).copy_(flatParameters)
 
         # 7. fix up the parameter tensors to point at the flattened parameters
         for param, meta in zip(parameters, parameterMeta):
