@@ -240,7 +240,22 @@ def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t):
     return tmp
 
 class TestCuda(TestCase):
-    pass
+
+    def test_autogpu(self):
+        if torch.cuda.deviceCount() > 1:
+            x = torch.randn(5, 5).cuda()
+            y = torch.randn(5, 5).cuda()
+            self.assertEqual(x.getDevice(), 0)
+            self.assertEqual(x.getDevice(), 0)
+            with torch.cuda.device(1):
+                z = torch.randn(5, 5).cuda()
+                self.assertEqual(z.getDevice(), 1)
+                q = x.add(y)
+                self.assertEqual(q.getDevice(), 0)
+                w = torch.randn(5, 5).cuda()
+                self.assertEqual(w.getDevice(), 1)
+            z = z.cuda()
+            self.assertEqual(z.getDevice(), 0)
 
 for decl in tests:
     for t in types:

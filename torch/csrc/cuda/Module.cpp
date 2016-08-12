@@ -95,6 +95,51 @@ static bool THCPModule_assignStateless()
 #include "ModuleCopy.cpp"
 
 ////////////////////////////////////////////////////////////////////////////////
+// CUDA management methods
+////////////////////////////////////////////////////////////////////////////////
+
+void THCPModule_setDevice(int device)
+{
+  THCudaCheck(cudaSetDevice(device));
+  THCRandom_setGenerator(state, device);
+
+  // The stream is per device, so update the stream as well
+  THCState_setStream(state, device, THCState_getCurrentStreamIndex(state));
+  THCState_setBlasHandle(state, device, THCState_getCurrentBlasHandleIndex(state));
+}
+
+PyObject * THCPModule_setDevice_wrap(PyObject *self, PyObject *arg)
+{
+  HANDLE_TH_ERRORS
+  long device;
+  if (!THPUtils_getLong(arg, &device))
+    return NULL;
+
+  THCPModule_setDevice(device);
+
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject * THCPModule_getDevice_wrap(PyObject *self)
+{
+  HANDLE_TH_ERRORS
+  int device;
+  THCudaCheck(cudaGetDevice(&device));
+  return PyLong_FromLong(device);
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject * THCPModule_getDeviceCount_wrap(PyObject *self)
+{
+  HANDLE_TH_ERRORS
+  int ndevice;
+  THCudaCheck(cudaGetDeviceCount(&ndevice));
+  return PyLong_FromLong(ndevice);
+  END_HANDLE_TH_ERRORS
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // Cuda module initialization
 ////////////////////////////////////////////////////////////////////////////////
 

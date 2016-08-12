@@ -34,6 +34,15 @@
 #define THPBoolTensorClass THPByteTensorClass
 #endif
 
+[[
+  name: getDevice
+  defined_if: IS_CUDA
+  return: long
+  arguments:
+    - THTensor* self
+]]
+
+
 // TODO: check that there are no args
 [[
   name: THPTensor_(elementSize)
@@ -3239,6 +3248,9 @@ THPTensor_(_iterableTensors)(PyObject *iterable)
 
 static PyObject * THPTensor_(cat)(THPTensor *self, PyObject *args)
 {
+#if IS_CUDA && THCP_AUTO_GPU
+  THCPAutoGPU __autogpu_guard = THCPAutoGPU(args);
+#endif
   HANDLE_TH_ERRORS
   THPTensor *tensor1;
   THPTensor *tensor2;
@@ -3277,6 +3289,9 @@ static PyObject * THPTensor_(cat)(THPTensor *self, PyObject *args)
 
 static PyObject * THPTensor_stateless_(cat)(THPTensor *_unused, PyObject *args)
 {
+#if IS_CUDA && THCP_AUTO_GPU
+  THCPAutoGPU __autogpu_guard = THCPAutoGPU(args);
+#endif
   HANDLE_TH_ERRORS
   THPTensor *tensor1;
   THPTensor *tensor2;

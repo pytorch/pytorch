@@ -1,4 +1,5 @@
 import torch
+import contextlib
 
 from torch.Storage import _StorageBase
 from torch.Tensor import _TensorBase
@@ -57,4 +58,32 @@ torch._tensor_classes.add(ShortTensor)
 torch._tensor_classes.add(CharTensor)
 torch._tensor_classes.add(ByteTensor)
 
-assert torch._C._initCuda()
+@contextlib.contextmanager
+def device(idx):
+    prev_idx = torch._C._cuda_getDevice()
+    torch._C._cuda_setDevice(idx)
+    yield
+    torch._C._cuda_setDevice(prev_idx)
+
+@contextlib.contextmanager
+def _dummy_ctx():
+    yield
+
+def _tensor_cuda(self, idx=None):
+    # This already is a CUDA tensor.
+    # Let's check if it needs to be transfered to another GPU.
+    if hasattr(self, 'getDevice'):
+        target_device = idx if idx else torch._C._cuda_getDevice()
+        if self.getDevice() != target_device:
+            with device(target_device):
+                return type(self)(self.size()).copy(self)
+    else:
+        ctx = device(idx) if idx else _dummy_ctx()
+        with ctx:
+            return self.type(getattr(torch.cuda, self.__class__.__name__))
+_TensorBase.cuda = _tensor_cuda
+
+def deviceCount():
+    return torch._C._cuda_getDeviceCount()
+
+assert torch._C._cuda_init()

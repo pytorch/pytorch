@@ -19,4 +19,8 @@ extern PyObject *THCPShortTensorClass;
 extern PyObject *THCPCharTensorClass;
 extern PyObject *THCPByteTensorClass;
 
+extern PyObject * THCPModule_getDevice_wrap(PyObject *self);
+extern PyObject * THCPModule_setDevice_wrap(PyObject *self, PyObject *arg);
+void THCPModule_setDevice(int idx);
+
 #endif
