@@ -49,23 +49,23 @@ def sgd(opfunc, x, config, state=None):
 
     # (2) weight decay with single or individual parameters
     if wd != 0:
-        dfdx.add(wd, x)
+        dfdx.add_(wd, x)
     elif wds is not None:
         if not state['decayParameters']:
-            state['decayParameters'] = torch.Tensor().typeAs(x).resizeAs(dfdx)
+            state['decayParameters'] = torch.Tensor().typeAs(x).resizeAs_(dfdx)
 
-        state['decayParameters'].copy_(wds).cmul(x)
-        dfdx.add(state['decayParameters'])
+        state['decayParameters'].copy_(wds).mul_(x)
+        dfdx.add_(state['decayParameters'])
 
     # (3) apply momentum
     if mom != 0:
         if 'dfdx' not in state:
-            state['dfdx'] = torch.Tensor().typeAs(dfdx).resizeAs(dfdx).copy_(dfdx)
+            state['dfdx'] = torch.Tensor().typeAs(dfdx).resizeAs_(dfdx).copy_(dfdx)
         else:
-            state['dfdx'].mul(mom).add(1-damp, dfdx)
+            state['dfdx'].mul_(mom).add_(1-damp, dfdx)
 
         if nesterov:
-            dfdx.add(mom, state['dfdx'])
+            dfdx.add_(mom, state['dfdx'])
         else:
             dfdx = state['dfdx']
 
@@ -75,12 +75,12 @@ def sgd(opfunc, x, config, state=None):
     # (5) parameter update with single or individual learning rates
     if lrs is not None:
         if not 'deltaParameters' in state:
-            state['deltaParameters'] = torch.Tensor().typeAs(x).resizeAs(dfdx)
+            state['deltaParameters'] = torch.Tensor().typeAs(x).resizeAs_(dfdx)
 
-        state['deltaParameters'].copy_(lrs).cmul(dfdx)
-        x.add(-clr, state['deltaParameters'])
+        state['deltaParameters'].copy_(lrs).mul_(dfdx)
+        x.add_(-clr, state['deltaParameters'])
     else:
-        x.add(-clr, dfdx)
+        x.add_(-clr, dfdx)
 
 
     # (6) update evaluation counter

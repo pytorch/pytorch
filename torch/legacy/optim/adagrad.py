@@ -30,7 +30,7 @@ def adagrad(opfunc, x, config, state=None):
 
     # (2) weight decay with a single parameter
     if wd != 0:
-        dfdx.add(wd, x)
+        dfdx.add_(wd, x)
 
 
     # (3) learning rate decay (annealing)
@@ -38,12 +38,12 @@ def adagrad(opfunc, x, config, state=None):
 
     # (4) parameter update with single or individual learning rates
     if not 'paramVariance' in state:
-        state['paramVariance'] = x.new().resizeAs(dfdx).zero()
-        state['paramStd'] = x.new().resizeAs(dfdx)
+        state['paramVariance'] = x.new().resizeAs_(dfdx).zero_()
+        state['paramStd'] = x.new().resizeAs_(dfdx)
 
-    state['paramVariance'].addcmul(1, dfdx, dfdx)
-    state['paramStd'].resizeAs(state['paramVariance']).copy_(state['paramVariance']).sqrt()
-    x.addcdiv(-clr, dfdx, state['paramStd'].add(1e-10))
+    state['paramVariance'].addcmul_(1, dfdx, dfdx)
+    state['paramStd'].resizeAs_(state['paramVariance']).copy_(state['paramVariance']).sqrt_()
+    x.addcdiv_(-clr, dfdx, state['paramStd'].add_(1e-10))
 
     # (5) update evaluation counter
     state['evalCounter'] += 1

@@ -37,31 +37,31 @@ def adam(opfunc, x, config, state=None):
 
     # (2) weight decay
     if wd != 0:
-        dfdx.add(wd, x)
+        dfdx.add_(wd, x)
 
     # Initialization
     if not 't' in state:
         state['t'] = 0
         # Exponential moving average of gradient values
-        state['m'] = x.new().resizeAs(dfdx).zero()
+        state['m'] = x.new().resizeAs_(dfdx).zero_()
         # Exponential moving average of squared gradient values
-        state['v'] = x.new().resizeAs(dfdx).zero()
+        state['v'] = x.new().resizeAs_(dfdx).zero_()
         # A tmp tensor to hold the sqrt(v) + epsilon
-        state['denom'] = x.new().resizeAs(dfdx).zero()
+        state['denom'] = x.new().resizeAs_(dfdx).zero_()
 
     state['t'] += 1
 
     # Decay the first and second moment running average coefficient
-    state['m'].mul(beta1).add(1 - beta1, dfdx)
-    state['v'].mul(beta2).addcmul(1 - beta2, dfdx, dfdx)
+    state['m'].mul_(beta1).add_(1 - beta1, dfdx)
+    state['v'].mul_(beta2).addcmul_(1 - beta2, dfdx, dfdx)
 
-    state['denom'].copy_(state['v']).sqrt().add(epsilon)
+    state['denom'].copy_(state['v']).sqrt_().add_(epsilon)
 
     biasCorrection1 = 1 - beta1 ** state['t']
     biasCorrection2 = 1 - beta2 ** state['t']
     stepSize = lr * math.sqrt(biasCorrection2)/biasCorrection1
     # (3) update x
-    x.addcdiv(-stepSize, state['m'], state['denom'])
+    x.addcdiv_(-stepSize, state['m'], state['denom'])
 
     # return x*, f(x) before optimization
     return x, fx

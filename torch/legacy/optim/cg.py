@@ -67,20 +67,20 @@ def cg(opfunc, x, config, state=None):
     df2 = state.get('df2', x.new())
     df3 = state.get('df3', x.new())
 
-    df1.resizeAs(x)
-    df2.resizeAs(x)
-    df3.resizeAs(x)
+    df1.resizeAs_(x)
+    df2.resizeAs_(x)
+    df3.resizeAs_(x)
 
     # search direction
     s = state.get('s', x.new())
-    s.resizeAs(x)
+    s.resizeAs_(x)
 
     # we need a temp storage for X
     x0 = state.get('x0', x.new())
     f0 = 0
     df0 = state.get('df0', x.new())
-    x0.resizeAs(x)
-    df0.resizeAs(x)
+    x0.resizeAs_(x)
+    df0.resizeAs_(x)
 
     # evaluate at initial point
     f1, tdf = opfunc(x)
@@ -89,7 +89,7 @@ def cg(opfunc, x, config, state=None):
     i = i+1
 
     # initial search direction
-    s.copy_(df1).mul(-1)
+    s.copy_(df1).mul_(-1)
 
     d1 = -s.dot(s )         # slope
     z1 = red/(1-d1)         # initial step
@@ -99,7 +99,7 @@ def cg(opfunc, x, config, state=None):
         f0 = f1
         df0.copy_(df1)
 
-        x.add(z1, s)
+        x.add_(z1, s)
         f2, tdf = opfunc(x)
         df2.copy_(tdf)
         i = i + 1
@@ -124,7 +124,7 @@ def cg(opfunc, x, config, state=None):
 
                 z2 = max(min(z2, _int*z3), (1-_int)*z3)
                 z1 = z1 + z2
-                x.add(z2, s)
+                x.add_(z2, s)
                 f2, tdf = opfunc(x)
                 df2.copy_(tdf)
                 i = i + 1
@@ -163,7 +163,7 @@ def cg(opfunc, x, config, state=None):
             d3 = d2
             z3 = -z2
             z1 = z1+z2
-            x.add(z2, s)
+            x.add_(z2, s)
 
             f2, tdf = opfunc(x)
             df2.copy_(tdf)
@@ -175,15 +175,15 @@ def cg(opfunc, x, config, state=None):
             f1 = f2
             fx.append(f1)
             ss = (df2.dot(df2) - df2.dot(df1)) / df1.dot(df1)
-            s.mul(ss)
-            s.add(-1, df2)
+            s.mul_(ss)
+            s.add_(-1, df2)
             tmp = df1.clone()
             df1.copy_(df2)
             df2.copy_(tmp)
             d2 = df1.dot(s)
             if d2 > 0:
                 s.copy_(df1)
-                s.mul(-1)
+                s.mul_(-1)
                 d2 = -s.dot(s)
 
             z1 = z1 * min(ratio, d1 / (d2 - 1e-320))
@@ -200,7 +200,7 @@ def cg(opfunc, x, config, state=None):
             df1.copy_(df2)
             df2.copy_(tmp)
             s.copy_(df1)
-            s.mul(-1)
+            s.mul_(-1)
             d1 = -s.dot(s)
             z1 = 1 / (1 - d1)
             ls_failed = 1

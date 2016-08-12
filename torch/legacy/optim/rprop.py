@@ -42,8 +42,8 @@ def rprop(opfunc, x, config, state=None):
 
         # init temp storage
         if not 'delta' in state:
-            state['delta']    = dfdx.new(dfdx.size()).zero()
-            state['stepsize'] = dfdx.new(dfdx.size()).fill(stepsize)
+            state['delta']    = dfdx.new(dfdx.size()).zero_()
+            state['stepsize'] = dfdx.new(dfdx.size()).fill_(stepsize)
             state['sign']     = dfdx.new(dfdx.size())
             state['bytesign'] = torch.ByteTensor(dfdx.size())
             state['psign']    = torch.ByteTensor(dfdx.size())
@@ -60,7 +60,7 @@ def rprop(opfunc, x, config, state=None):
 
 
         # sign of derivative from last step to this one
-        torch.cmul(state['sign'], dfdx, state['delta'])
+        torch.mul(state['sign'], dfdx, state['delta'])
         torch.sign(state['sign'], state['sign'])
 
         # get indices of >0, <0 and ==0 entries
@@ -74,7 +74,7 @@ def rprop(opfunc, x, config, state=None):
         state['sign'][state['zsign']] = 1
 
         # update stepsizes with step size updates
-        state['stepsize'].cmul(state['sign'])
+        state['stepsize'].mul_(state['sign'])
 
         # threshold step sizes
         # >50 => 50
@@ -90,7 +90,7 @@ def rprop(opfunc, x, config, state=None):
         torch.sign(state['sign'], dfdx)
 
         # update weights
-        x.addcmul(-1, state['sign'], state['stepsize'])
+        x.addcmul_(-1, state['sign'], state['stepsize'])
 
         # update state['dfdx'] with current dfdx
         state['delta'].copy_(dfdx)

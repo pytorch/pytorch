@@ -32,20 +32,20 @@ def adadelta(opfunc, x, config, state=None):
 
     # (2) weight decay
     if wd != 0:
-      dfdx.add(wd, x)
+      dfdx.add_(wd, x)
 
     # (3) parameter update
     if not 'paramVariance' in state:
-        state['paramVariance'] = x.new().resizeAs(dfdx).zero()
-        state['paramStd'] = x.new().resizeAs(dfdx).zero()
-        state['delta'] = x.new().resizeAs(dfdx).zero()
-        state['accDelta'] = x.new().resizeAs(dfdx).zero()
+        state['paramVariance'] = x.new().resizeAs_(dfdx).zero_()
+        state['paramStd'] = x.new().resizeAs_(dfdx).zero_()
+        state['delta'] = x.new().resizeAs_(dfdx).zero_()
+        state['accDelta'] = x.new().resizeAs_(dfdx).zero_()
 
-    state['paramVariance'].mul(rho).addcmul(1 - rho, dfdx, dfdx)
-    state['paramStd'].resizeAs(state['paramVariance']).copy_(state['paramVariance']).add(eps).sqrt()
-    state['delta'].resizeAs(state['paramVariance']).copy_(state['accDelta']).add(eps).sqrt().cdiv(state['paramStd']).cmul(dfdx)
-    x.add(-1, state['delta'])
-    state['accDelta'].mul(rho).addcmul(1 - rho, state['delta'], state['delta'])
+    state['paramVariance'].mul_(rho).addcmul_(1 - rho, dfdx, dfdx)
+    state['paramStd'].resizeAs_(state['paramVariance']).copy_(state['paramVariance']).add_(eps).sqrt_()
+    state['delta'].resizeAs_(state['paramVariance']).copy_(state['accDelta']).add_(eps).sqrt_().div_(state['paramStd']).mul_(dfdx)
+    x.add_(-1, state['delta'])
+    state['accDelta'].mul_(rho).addcmul_(1 - rho, state['delta'], state['delta'])
 
     # (4) update evaluation counter
     state['evalCounter'] += 1

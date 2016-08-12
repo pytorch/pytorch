@@ -1,3 +1,4 @@
+import torch
 
 def rmsprop(opfunc, x, config, state=None):
     """ An implementation of RMSprop
@@ -36,21 +37,21 @@ def rmsprop(opfunc, x, config, state=None):
 
     # (2) weight decay
     if wd != 0:
-        dfdx.add(wd, x)
+        dfdx.add_(wd, x)
 
     # (3) initialize mean square values and square gradient storage
     if not 'm' in state:
-        state['m'] = x.new().resizeAs(dfdx).fill(1)
-        state['tmp'] = x.new().resizeAs(dfdx)
+        state['m'] = x.new().resizeAs_(dfdx).fill_(1)
+        state['tmp'] = x.new().resizeAs_(dfdx)
 
 
     # (4) calculate new (leaky) mean squared values
-    state['m'].mul(alpha)
-    state['m'].addcmul(1.0-alpha, dfdx, dfdx)
+    state['m'].mul_(alpha)
+    state['m'].addcmul_(1.0-alpha, dfdx, dfdx)
 
     # (5) perform update
-    state['tmp'].sqrt(state['m']).add(epsilon)
-    x.addcdiv(-lr, dfdx, state['tmp'])
+    torch.sqrt(state['tmp'], state['m']).add_(epsilon)
+    x.addcdiv_(-lr, dfdx, state['tmp'])
 
     # return x*, f(x) before optimization
     return x, fx

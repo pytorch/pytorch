@@ -50,18 +50,18 @@ def asgd(opfunc, x, config, state=None):
     fx, dfdx = opfunc(x)
 
     # (2) decay term
-    x.mul(1 - config['lambda'] * state['eta_t'])
+    x.mul_(1 - config['lambda'] * state['eta_t'])
 
     # (3) update x
-    x.add(-state['eta_t'], dfdx)
+    x.add_(-state['eta_t'], dfdx)
 
     # (4) averaging
-    state['ax'] = state.get('ax', x.new().resizeAs(x).zero())
-    state['tmp'] = state.get('tmp', state['ax'].new().resizeAs(state['ax']))
+    state['ax'] = state.get('ax', x.new().resizeAs_(x).zero_())
+    state['tmp'] = state.get('tmp', state['ax'].new().resizeAs_(state['ax']))
     if state['mu_t'] != 1:
         state['tmp'].copy_(x)
-        state['tmp'].add(-1,state['ax']).mul(state['mu_t'])
-        state['ax'].add(state['tmp'])
+        state['tmp'].add_(-1,state['ax']).mul_(state['mu_t'])
+        state['ax'].add_(state['tmp'])
     else:
         state['ax'].copy_(x)
 

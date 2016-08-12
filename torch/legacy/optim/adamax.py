@@ -1,3 +1,4 @@
+import torch
 
 def adamax(opfunc, x, config, state=None):
     """ An implementation of AdaMax http://arxiv.org/pdf/1412.6980.pdf
@@ -36,31 +37,31 @@ def adamax(opfunc, x, config, state=None):
 
     # (2) weight decay
     if wd != 0:
-        dfdx.add(wd, x)
+        dfdx.add_(wd, x)
 
     # Initialization
     if 't' not in state:
         state['t'] = 0
         # Exponential moving average of gradient values
-        state['m'] = x.new().resizeAs(dfdx).zero()
+        state['m'] = x.new().resizeAs_(dfdx).zero_()
         # Exponential moving average of the infinity norm
-        state['u'] = x.new().resizeAs(dfdx).zero()
+        state['u'] = x.new().resizeAs_(dfdx).zero_()
         # A tmp tensor to hold the input to max()
-        state['max'] = x.new(*([2] + dfdx.size().tolist())).zero()
+        state['max'] = x.new(*([2] + dfdx.size().tolist())).zero_()
 
     state['t'] += 1
 
     # Update biased first moment estimate.
-    state['m'].mul(beta1).add(1 - beta1, dfdx)
+    state['m'].mul_(beta1).add_(1 - beta1, dfdx)
     # Update the exponentially weighted infinity norm.
-    state['max'][0].copy_(state['u']).mul(beta2)
-    state['max'][1].copy_(dfdx).abs().add(epsilon)
-    state['u'].max(state['max'], 0)
+    state['max'][0].copy_(state['u']).mul_(beta2)
+    state['max'][1].copy_(dfdx).abs_().add_(epsilon)
+    torch.max(state['u'], state['max'], 0)
 
     biasCorrection1 = 1 - beta1 ** state['t']
     stepSize = lr / biasCorrection1
     # (2) update x
-    x.addcdiv(-stepSize, state['m'], state['u'])
+    x.addcdiv_(-stepSize, state['m'], state['u'])
 
     # return x*, f(x) before optimization
     return x, fx

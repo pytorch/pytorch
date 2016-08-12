@@ -45,7 +45,7 @@ def nag(opfunc, x, config, state=None):
     # first step in the direction of the momentum vector
 
     if 'dfdx' in state:
-        x.add(mom, state['dfdx'])
+        x.add_(mom, state['dfdx'])
 
     #: compute gradient at that point
     # comment out the above line to get the original SGD
@@ -53,7 +53,7 @@ def nag(opfunc, x, config, state=None):
 
     # (2) weight decay
     if wd != 0:
-        dfdx.add(wd, x)
+        dfdx.add_(wd, x)
 
 
     # (3) learning rate decay (annealing)
@@ -61,22 +61,22 @@ def nag(opfunc, x, config, state=None):
 
     # (4) apply momentum
     if not 'dfdx' in state:
-        state['dfdx'] = dfdx.new().resizeAs(dfdx).zero()
+        state['dfdx'] = dfdx.new().resizeAs_(dfdx).zero_()
     else:
-        state['dfdx'].mul(mom)
+        state['dfdx'].mul_(mom)
 
 
     # (5) parameter update with single or individual learning rates
     if lrs is not None:
         if 'deltaParameters' in state:
-            state['deltaParameters'] = x.new().resizeAs(dfdx)
+            state['deltaParameters'] = x.new().resizeAs_(dfdx)
 
-        state['deltaParameters'].copy_(lrs).cmul(dfdx)
-        x.add(-clr, state['deltaParameters'])
-        state['dfdx'].add(-clr, state['deltaParameters'])
+        state['deltaParameters'].copy_(lrs).mul_(dfdx)
+        x.add_(-clr, state['deltaParameters'])
+        state['dfdx'].add_(-clr, state['deltaParameters'])
     else:
-        x.add(-clr, dfdx)
-        state['dfdx'].add(-clr, dfdx)
+        x.add_(-clr, dfdx)
+        state['dfdx'].add_(-clr, dfdx)
 
 
     # (6) update evaluation counter
