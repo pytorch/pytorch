@@ -1,4 +1,4 @@
-SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../../cmake ${CMAKE_MODULE_PATH})
+SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
 
 IF(NOT Torch_FOUND)
   FIND_PACKAGE(Torch)
@@ -67,7 +67,7 @@ ENDIF(APPLE)
 
 # Detect CUDA architecture and get best NVCC flags
 IF(NOT COMMAND CUDA_SELECT_NVCC_ARCH_FLAGS)
-  INCLUDE(${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/select_compute_arch.cmake)
+  INCLUDE(${CMAKE_CURRENT_SOURCE_DIR}/cmake/select_compute_arch.cmake)
 ENDIF()
 CUDA_SELECT_NVCC_ARCH_FLAGS(NVCC_FLAGS_EXTRA $ENV{TORCH_CUDA_ARCH_LIST})
 LIST(APPEND CUDA_NVCC_FLAGS ${NVCC_FLAGS_EXTRA})
@@ -94,7 +94,7 @@ ENDIF()
 INCLUDE_DIRECTORIES("${CMAKE_CURRENT_BINARY_DIR}")
 CONFIGURE_FILE(THCGeneral.h.in "${CMAKE_CURRENT_BINARY_DIR}/THCGeneral.h")
 
-SET(CMAKE_C_FLAGS "-std=c99")
+SET(CMAKE_C_FLAGS "-std=c99 ${CMAKE_C_FLAGS}")
 SET(src
     THCGeneral.c THCAllocator.c THCStorage.c THCStorageCopy.c THCTensor.c THCTensorCopy.c)
 
@@ -160,7 +160,6 @@ INSTALL(FILES
           THCTensorRandom.h
           THCTensorMath.h
           THCTensorConv.h
-          THCTensorSort.h
           THCTensorTopK.h
           THCApply.cuh
           THCReduce.cuh
@@ -211,4 +210,10 @@ INSTALL(FILES
           generic/THCTensorMathPointwise.cu
           generic/THCTensorMathReduce.h
           generic/THCTensorMathReduce.cu
+	  generic/THCTensorScatterGather.h
+	  generic/THCTensorScatterGather.cu
+	  generic/THCTensorIndex.h
+	  generic/THCTensorIndex.cu
+	  generic/THCTensorSort.h
+	  generic/THCTensorSort.cu
           DESTINATION "${THC_INSTALL_INCLUDE_SUBDIR}/THC/generic")

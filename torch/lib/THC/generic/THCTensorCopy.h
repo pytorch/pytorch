@@ -12,15 +12,15 @@ THC_API void THCTensor_(copyLong)(THCState *state, THCTensor *self, THLongTensor
 THC_API void THCTensor_(copyFloat)(THCState *state, THCTensor *self, THFloatTensor *src);
 THC_API void THCTensor_(copyDouble)(THCState *state, THCTensor *self, THDoubleTensor *src);
 
-THC_API void THCTensor_(copyCudaByte)(THCState *state, THCTensor *storage, struct THCudaByteTensor *src);
-THC_API void THCTensor_(copyCudaChar)(THCState *state, THCTensor *storage, struct THCudaCharTensor *src);
-THC_API void THCTensor_(copyCudaShort)(THCState *state, THCTensor *storage, struct THCudaShortTensor *src);
-THC_API void THCTensor_(copyCudaInt)(THCState *state, THCTensor *storage, struct THCudaIntTensor *src);
-THC_API void THCTensor_(copyCudaLong)(THCState *state, THCTensor *storage, struct THCudaLongTensor *src);
-THC_API void THCTensor_(copyCudaFloat)(THCState *state, THCTensor *storage, struct THCudaTensor *src);
-THC_API void THCTensor_(copyCudaDouble)(THCState *state, THCTensor *storage, struct THCudaDoubleTensor *src);
+THC_API void THCTensor_(copyCudaByte)(THCState *state, THCTensor *dst, struct THCudaByteTensor *src);
+THC_API void THCTensor_(copyCudaChar)(THCState *state, THCTensor *dst, struct THCudaCharTensor *src);
+THC_API void THCTensor_(copyCudaShort)(THCState *state, THCTensor *dst, struct THCudaShortTensor *src);
+THC_API void THCTensor_(copyCudaInt)(THCState *state, THCTensor *dst, struct THCudaIntTensor *src);
+THC_API void THCTensor_(copyCudaLong)(THCState *state, THCTensor *dst, struct THCudaLongTensor *src);
+THC_API void THCTensor_(copyCudaFloat)(THCState *state, THCTensor *dst, struct THCudaTensor *src);
+THC_API void THCTensor_(copyCudaDouble)(THCState *state, THCTensor *dst, struct THCudaDoubleTensor *src);
 #ifdef CUDA_HALF_TENSOR
-THC_API void THCTensor_(copyCudaHalf)(THCState *state, THCTensor *storage, struct THCudaHalfTensor *src);
+THC_API void THCTensor_(copyCudaHalf)(THCState *state, THCTensor *dst, struct THCudaHalfTensor *src);
 #endif
 
 THC_API void TH_CONCAT_2(THByteTensor_copyCuda  , Real)  (THCState *state, THByteTensor *self, THCTensor *src);

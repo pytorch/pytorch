@@ -150,7 +150,7 @@ kernelTransformReduceOuterDimIndex(K *tgt1,
 
       for (unsigned col = 0; col < row_size; ++col) {
         // +1 for Lua index
-        acc = binary_op(thrust::make_pair<K, Index>(*src, col+1),
+        acc = binary_op(thrust::make_pair<K, Index>(*src, col + TH_INDEX_BASE),
                         acc);
         src += num_irows;
       }
@@ -231,7 +231,7 @@ kernelTransformReduceInnermostDimIndex(K *tgt1,
       K *src = src_ + row * row_size;
       // Sequential reduction within a thread.
       for (unsigned col = threadIdx.x; col < row_size; col += blockDim.x) {
-        acc = binary_op(thrust::make_pair<K, Index>(src[col], col + 1), acc);
+        acc = binary_op(thrust::make_pair<K, Index>(src[col], col + TH_INDEX_BASE), acc);
       }
     }
 
