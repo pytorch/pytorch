@@ -422,7 +422,6 @@ simple_tests = [
     SimpleTestCase(nn.MixtureTable,
                     tuple(),
                     input_size=[(5, 3), (5, 3, 6)]),
-    # TODO: Fix index checks in THNN
     SimpleTestCase(nn.LookupTable,
                     (4, 3),
                     input=torch.randperm(2).repeatTensor(1, 2),

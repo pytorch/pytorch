@@ -2245,7 +2245,6 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: sort
-  defined_if: "!IS_CUDA"
   with_stateless: True
   return: argument 0,1
   options:
@@ -2278,7 +2277,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: topk
-  defined_if: "!IS_CUDA"
+  defined_if: CUDA_FLOAT || !IS_CUDA
   with_stateless: True
   return: argument 0,1
   options:
@@ -2470,7 +2469,6 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: indexSelect
-  defined_if: "!IS_CUDA"
   with_stateless: True
   return: argument 0
   arguments:
@@ -2483,7 +2481,6 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: indexCopy_
-  defined_if: "!IS_CUDA"
   with_stateless: True
   cname: indexCopy
   return: argument 0
@@ -2496,7 +2493,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: indexAdd_
-  defined_if: "!IS_CUDA"
+  defined_if: CUDA_FLOAT || !IS_CUDA
   with_stateless: True
   cname: indexAdd
   return: argument 0
@@ -2509,7 +2506,6 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: indexFill_
-  defined_if: "!IS_CUDA"
   with_stateless: True
   cname: indexFill
   return: argument 0

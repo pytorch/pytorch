@@ -16,10 +16,6 @@ class LookupTable(Module):
         self._gradOutput = None
         self._sorted = None
         self._indices = None
-        self._count = None
-        self._input = None
-        self._count = None
-        self._input = None
 
         self._count = torch.IntTensor()
         self._input = torch.LongTensor()
@@ -140,10 +136,10 @@ class LookupTable(Module):
 
         if type == 'torch.cuda.FloatTensor':
             # CUDA uses _sorted and _indices temporary tensors
-            self._sorted = self.weight.new()
-            self._indices = self.weight.new()
-            self._count = self.weight.new()
-            self._input = self.weight.new()
+            self._sorted = torch.cuda.LongTensor()
+            self._indices = torch.cuda.LongTensor()
+            self._count = torch.cuda.LongTensor()
+            self._input = torch.cuda.LongTensor()
         else:
             # self._count and self._input should only be converted if using Cuda
             self._count = torch.IntTensor()

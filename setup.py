@@ -39,14 +39,14 @@ distutils.ccompiler.CCompiler.compile = parallelCCompile
 # Build libraries
 ################################################################################
 
-# if subprocess.call(['bash', 'torch/lib/build_all.sh'] + (['--with-cuda'] if WITH_CUDA else [])) != 0:
-   # sys.exit(1)
+if subprocess.call(['bash', 'torch/lib/build_all.sh'] + (['--with-cuda'] if WITH_CUDA else [])) != 0:
+   sys.exit(1)
 
 ################################################################################
 # Generate cpp code
 ################################################################################
 
-# cwrap('torch/csrc/generic/TensorMethods.cwrap', plugins=[THPLongArgsPlugin(), THPPlugin(), ArgcountSortPlugin(), AutoGPU()])
+cwrap('torch/csrc/generic/TensorMethods.cwrap', plugins=[THPLongArgsPlugin(), THPPlugin(), ArgcountSortPlugin(), AutoGPU()])
 generate_nn_wrappers()
 
 ################################################################################
@@ -137,5 +137,6 @@ if WITH_CUDA:
 setup(name="torch", version="0.1",
     ext_modules=extensions,
     packages=['torch', 'torch._thnn', 'torch.legacy', 'torch.legacy.nn', 'torch.legacy.optim'] + (['torch.cuda', 'torch.legacy.cunn'] if WITH_CUDA else []),
-    package_data={'torch': ['lib/*.so', 'lib/*.h']}
+    package_data={'torch': ['lib/*.so*', 'lib/*.h']},
+    install_requires=['pyyaml'],
 )

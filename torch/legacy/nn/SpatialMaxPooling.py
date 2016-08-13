@@ -44,6 +44,7 @@ class SpatialMaxPooling(Module):
             self.kW, self.kH,
             self.dW, self.dH,
             self.padW, self.padH,
+            1, 1,
             self.ceil_mode
         )
         return self.output
@@ -58,6 +59,7 @@ class SpatialMaxPooling(Module):
             self.kW, self.kH,
             self.dW, self.dH,
             self.padW, self.padH,
+            1, 1,
             self.ceil_mode
         )
         return self.gradInput

@@ -18,5 +18,5 @@ clean:
 	@rm -rf torch/csrc/generic/TensorMethods.cpp
 	@rm -rf torch/lib/tmp_install
 	@rm -rf torch/lib/build
-	@rm -rf torch/lib/*.so
+	@rm -rf torch/lib/*.so*
 	@rm -rf torch/lib/*.h

@@ -35,7 +35,7 @@ class PartialLinear(Module):
         # set partition:
         self.inputsize  = inputsize
         self.outputsize = outputsize
-        self.allcolumns = torch.range(0, self.outputsize-1)
+        self.allcolumns = torch.range(0, self.outputsize-1).long()
         self.resetPartition()
         self.addBuffer = None
         self.buffer = None
@@ -56,7 +56,7 @@ class PartialLinear(Module):
     def updateOutput(self, input):
         self.output.set_(self.network.forward([input, self.partition]))
         if self.bias:
-            self.output.add_(torch.indexSelect(self.bias, 1, self.partition.long()).expandAs(self.output))
+            self.output.add_(torch.indexSelect(self.bias, 1, self.partition).expandAs(self.output))
             self.addBuffer = self.addBuffer or input.new()
             if self.addBuffer.nElement() != input.size(0):
                 self.addBuffer.resize_(input.size(0)).fill_(1)
@@ -77,7 +77,7 @@ class PartialLinear(Module):
             self.buffer.resize_(gradOutput.size(1))
             torch.mv(self.buffer, gradOutput.t(), self.addBuffer).mul_(scale)
             self.gradBias.indexAdd_(
-                1, self.partition.long(), self.buffer.view(1, self.buffer.nElement())
+                1, self.partition, self.buffer.view(1, self.buffer.nElement())
             )
 
     def accUpdateGradParameters(self, input, gradOutput, lr):
@@ -96,6 +96,15 @@ class PartialLinear(Module):
     def updateParameters(self, learningRate):
         self.network.updateParameters(learningRate)
         self.bias._add(-learningRate, self.gradBias)
+
+    def type(self, type=None, tensorCache=None):
+        result = super(PartialLinear, self).type(type, tensorCache)
+        self.partition = self.partition.long()
+        self.allcolumns = self.allcolumns.long()
+        if type == 'torch.cuda.FloatTensor':
+            self.allcolumns = self.allcolumns.cuda()
+            self.partition = self.partition.cuda()
+        return result
 
     def __repr__(self):
         return super(ParallelTable, self).__repr__() + \

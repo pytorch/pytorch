@@ -51,8 +51,7 @@ TYPE_TRANSFORMS = {
     },
     'Cuda': {
         'THCState*': 'void*',
-        'THIndexTensor*': 'THCudaTensor*',
-        'THIntegerTensor*': 'THCudaTensor*',
+        'THIndexTensor*': 'THCudaLongTensor*',
     }
 }
 for t, transforms in TYPE_TRANSFORMS.items():
