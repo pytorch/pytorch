@@ -1,11 +1,8 @@
 #include <THC/THC.h>
 #include <THC/THCApply.cuh>
 
-#define THIndexTensor THCudaTensor
-#define THIndexTensor_(NAME) THCudaTensor_ ## NAME
-
-#define THIntegerTensor THCudaTensor
-#define THIntegerTensor_(NAME) THCudaTensor_ ## NAME
+#define THIndexTensor THCudaLongTensor
+#define THIndexTensor_(NAME) THCudaLongTensor_ ## NAME
 
 TH_API void THNN_CudaAbs_updateOutput(
           THCState *state,
@@ -36,7 +33,7 @@ TH_API void THNN_CudaClassNLLCriterion_updateOutput(
           THCudaTensor *target,
           THCudaTensor *output,
           bool sizeAverage,
-          THCudaTensor *weights,
+          THCudaTensor *weights,       // [OPTIONAL]
           THCudaTensor *total_weight);
 TH_API void THNN_CudaClassNLLCriterion_updateGradInput(
           THCState *state,
@@ -44,7 +41,7 @@ TH_API void THNN_CudaClassNLLCriterion_updateGradInput(
           THCudaTensor *target,
           THCudaTensor *gradInput,
           bool sizeAverage,
-          THCudaTensor *weights,
+          THCudaTensor *weights,       // [OPTIONAL]
           THCudaTensor *total_weight);
 
 TH_API void THNN_CudaSpatialClassNLLCriterion_updateOutput(
@@ -53,7 +50,7 @@ TH_API void THNN_CudaSpatialClassNLLCriterion_updateOutput(
           THCudaTensor *target,
           THCudaTensor *output,
           bool sizeAverage,
-          THCudaTensor *weights,
+          THCudaTensor *weights,       // [OPTIONAL]
           THCudaTensor *total_weight);
 TH_API void THNN_CudaSpatialClassNLLCriterion_updateGradInput(
           THCState *state,
@@ -61,7 +58,7 @@ TH_API void THNN_CudaSpatialClassNLLCriterion_updateGradInput(
           THCudaTensor *target,
           THCudaTensor *gradInput,
           bool sizeAverage,
-          THCudaTensor *weights,
+          THCudaTensor *weights,       // [OPTIONAL]
           THCudaTensor *total_weight);
 
 TH_API void THNN_CudaDistKLDivCriterion_updateOutput(
@@ -115,7 +112,7 @@ TH_API void THNN_CudaL1Cost_updateOutput(
 TH_API void THNN_CudaL1Cost_updateGradInput(
           THCState *state,
           THCudaTensor *input,
-          THCudaTensor *gradOutput,
+          THCudaTensor *gradOutput,    // [OPTIONAL]
           THCudaTensor *gradInput);
 
 TH_API void THNN_CudaLeakyReLU_updateOutput(
@@ -159,9 +156,9 @@ TH_API void THNN_CudaLookupTable_accGradParameters(
           THIndexTensor *input,
           THCudaTensor *gradOutput,
           THCudaTensor *gradWeight,
-          THIntegerTensor *count,
-          THCudaTensor *sorted,
-          THCudaTensor *indices,
+          THIndexTensor *count,
+          THIndexTensor *sorted,        // [OPTIONAL]
+          THIndexTensor *indices,       // [OPTIONAL]
           bool scaleGradByFreq,
           int paddingValue,
           float scale);
@@ -222,7 +219,7 @@ TH_API void THNN_CudaMultiMarginCriterion_updateOutput(
           THCudaTensor *output,
           bool sizeAverage,
           int p,
-          THCudaTensor *weights,
+          THCudaTensor *weights,       // [OPTIONAL]
           float margin);
 TH_API void THNN_CudaMultiMarginCriterion_updateGradInput(
           THCState *state,
@@ -231,7 +228,7 @@ TH_API void THNN_CudaMultiMarginCriterion_updateGradInput(
           THCudaTensor *gradInput,
           bool sizeAverage,
           int p,
-          THCudaTensor *weights,
+          THCudaTensor *weights,       // [OPTIONAL]
           float margin);
 
 TH_API void THNN_CudaMultiLabelMarginCriterion_updateOutput(
@@ -497,8 +494,8 @@ TH_API void THNN_CudaBatchNormalization_updateOutput(
           THCState *state,
           THCudaTensor *input,
           THCudaTensor *output,
-          THCudaTensor *weight,
-          THCudaTensor *bias,
+          THCudaTensor *weight,        // [OPTIONAL]
+          THCudaTensor *bias,          // [OPTIONAL]
           THCudaTensor *runningMean,
           THCudaTensor *runningVar,
           THCudaTensor *saveMean,
@@ -510,10 +507,10 @@ TH_API void THNN_CudaBatchNormalization_backward(
           THCState *state,
           THCudaTensor *input,
           THCudaTensor *gradOutput,
-          THCudaTensor *gradInput,
-          THCudaTensor *gradWeight,
-          THCudaTensor *gradBias,
-          THCudaTensor *weight,
+          THCudaTensor *gradInput,     // [OPTIONAL]
+          THCudaTensor *gradWeight,    // [OPTIONAL]
+          THCudaTensor *gradBias,      // [OPTIONAL]
+          THCudaTensor *weight,        // [OPTIONAL]
           THCudaTensor *running_mean,
           THCudaTensor *running_var,
           THCudaTensor *save_mean,
@@ -527,7 +524,7 @@ TH_API void THNN_CudaSpatialConvolutionMM_updateOutput(
           THCudaTensor *input,
           THCudaTensor *output,
           THCudaTensor *weight,
-          THCudaTensor *bias,
+          THCudaTensor *bias,          // [OPTIONAL]
           THCudaTensor *columns,
           THCudaTensor *ones,
           int kW, int kH,
@@ -549,7 +546,7 @@ TH_API void THNN_CudaSpatialConvolutionMM_accGradParameters(
           THCudaTensor *input,
           THCudaTensor *gradOutput,
           THCudaTensor *gradWeight,
-          THCudaTensor *gradBias,
+          THCudaTensor *gradBias,      // [OPTIONAL]
           THCudaTensor *columns,
           THCudaTensor *ones,
           int kW, int kH,
@@ -603,7 +600,7 @@ TH_API void THNN_CudaSpatialFullConvolution_updateOutput(
           THCudaTensor *input,
           THCudaTensor *output,
           THCudaTensor *weight,
-          THCudaTensor *bias,
+          THCudaTensor *bias,          // [OPTIONAL]
           THCudaTensor *columns,
           THCudaTensor *ones,
           int kW, int kH,
@@ -626,7 +623,7 @@ TH_API void THNN_CudaSpatialFullConvolution_accGradParameters(
           THCudaTensor *input,
           THCudaTensor *gradOutput,
           THCudaTensor *gradWeight,
-          THCudaTensor *gradBias,
+          THCudaTensor *gradBias,      // [OPTIONAL]
           THCudaTensor *columns,
           THCudaTensor *ones,
           int kW, int kH,
@@ -636,43 +633,43 @@ TH_API void THNN_CudaSpatialFullConvolution_accGradParameters(
           float scale);
 
 TH_API void THNN_CudaSpatialDilatedConvolution_updateOutput(
-  THCState *state,
-  THCudaTensor *input,
-  THCudaTensor *output,
-  THCudaTensor *weight,
-  THCudaTensor *bias,
-  THCudaTensor *columns,
-  THCudaTensor *ones,
-  int kW, int kH,
-  int dW, int dH,
-  int padW, int padH,
-  int dilationW, int dilationH);
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *output,
+          THCudaTensor *weight,
+          THCudaTensor *bias,          // [OPTIONAL]
+          THCudaTensor *columns,
+          THCudaTensor *ones,
+          int kW, int kH,
+          int dW, int dH,
+          int padW, int padH,
+          int dilationW, int dilationH);
 
 TH_API void THNN_CudaSpatialDilatedConvolution_updateGradInput(
-  THCState *state,
-  THCudaTensor *input,
-  THCudaTensor *gradOutput,
-  THCudaTensor *gradInput,
-  THCudaTensor *weight,
-  THCudaTensor *gradColumns,
-  int kW, int kH,
-  int dW, int dH,
-  int padW, int padH,
-  int dilationW, int dilationH );
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *gradOutput,
+          THCudaTensor *gradInput,
+          THCudaTensor *weight,
+          THCudaTensor *gradColumns,
+          int kW, int kH,
+          int dW, int dH,
+          int padW, int padH,
+          int dilationW, int dilationH );
 
 TH_API void THNN_CudaSpatialDilatedConvolution_accGradParameters(
-  THCState *state,
-  THCudaTensor *input,
-  THCudaTensor *gradOutput,
-  THCudaTensor *gradWeight,
-  THCudaTensor *gradBias,
-  THCudaTensor *columns,
-  THCudaTensor *ones,
-  int kW, int kH,
-  int dW, int dH,
-  int padW, int padH,
-  int dilationW, int dilationH,
-  float scale);
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *gradOutput,
+          THCudaTensor *gradWeight,
+          THCudaTensor *gradBias,      // [OPTIONAL]
+          THCudaTensor *columns,
+          THCudaTensor *ones,
+          int kW, int kH,
+          int dW, int dH,
+          int padW, int padH,
+          int dilationW, int dilationH,
+          float scale);
 
 TH_API void THNN_CudaSpatialCrossMapLRN_updateOutput(
           THCState *state,
@@ -737,6 +734,7 @@ TH_API void THNN_CudaSpatialMaxPooling_updateOutput(
           int kW, int kH,
           int dW, int dH,
           int padW, int padH,
+          int dilationW, int dilationH,
           bool ceil_mode);
 TH_API void THNN_CudaSpatialMaxPooling_updateGradInput(
           THCState *state,
@@ -747,6 +745,7 @@ TH_API void THNN_CudaSpatialMaxPooling_updateGradInput(
           int kW, int kH,
           int dW, int dH,
           int padW, int padH,
+          int dilationW, int dilationH,
           bool ceil_mode);
 
 TH_API void THNN_CudaSpatialMaxUnpooling_updateOutput(
@@ -908,43 +907,43 @@ TH_API void THNN_CudaVolumetricFullConvolution_accGradParameters(
           float scale);
 
 TH_API void THNN_CudaVolumetricDilatedConvolution_updateOutput(
-  THCState *state,
-  THCudaTensor *input,
-  THCudaTensor *output,
-  THCudaTensor *weight,
-  THCudaTensor *bias,
-  THCudaTensor *columns,
-  THCudaTensor *ones,
-  int kT, int kW, int kH,
-  int dT, int dW, int dH,
-  int padT, int padW, int padH,
-  int dilationT, int dilationW, int dilationH);
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *output,
+          THCudaTensor *weight,
+          THCudaTensor *bias,
+          THCudaTensor *columns,
+          THCudaTensor *ones,
+          int kT, int kW, int kH,
+          int dT, int dW, int dH,
+          int padT, int padW, int padH,
+          int dilationT, int dilationW, int dilationH);
 
 TH_API void THNN_CudaVolumetricDilatedConvolution_updateGradInput(
-  THCState *state,
-  THCudaTensor *input,
-  THCudaTensor *gradOutput,
-  THCudaTensor *gradInput,
-  THCudaTensor *weight,
-  THCudaTensor *gradColumns,
-  int kT, int kW, int kH,
-  int dT, int dW, int dH,
-  int padT, int padW, int padH,
-  int dilationT, int dilationW, int dilationH);
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *gradOutput,
+          THCudaTensor *gradInput,
+          THCudaTensor *weight,
+          THCudaTensor *gradColumns,
+          int kT, int kW, int kH,
+          int dT, int dW, int dH,
+          int padT, int padW, int padH,
+          int dilationT, int dilationW, int dilationH);
 
 TH_API void THNN_CudaVolumetricDilatedConvolution_accGradParameters(
-  THCState *state,
-  THCudaTensor *input,
-  THCudaTensor *gradOutput,
-  THCudaTensor *gradWeight,
-  THCudaTensor *gradBias,
-  THCudaTensor *columns,
-  THCudaTensor *ones,
-  int kT, int kW, int kH,
-  int dT, int dW, int dH,
-  int padT, int padW, int padH,
-  int dilationT, int dilationW, int dilationH,
-  float scale);
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *gradOutput,
+          THCudaTensor *gradWeight,
+          THCudaTensor *gradBias,
+          THCudaTensor *columns,
+          THCudaTensor *ones,
+          int kT, int kW, int kH,
+          int dT, int dW, int dH,
+          int padT, int padW, int padH,
+          int dilationT, int dilationW, int dilationH,
+          float scale);
 
 TH_API void THNN_CudaVolumetricMaxPooling_updateOutput(
           THCState *state,
@@ -982,31 +981,33 @@ TH_API void THNN_CudaVolumetricMaxUnpooling_updateGradInput(
           int dT, int dW, int dH,
           int padT, int padW, int padH);
 
-TH_API void THNN_CudaSpatialReflectionPadding_updateOutput(THCState *state,
-                                                    THCudaTensor *input,
-                                                    THCudaTensor *output,
-                                                    int padL, int padR,
-                                                    int padT, int padB
-                                                   );
-TH_API void THNN_CudaSpatialReflectionPadding_updateGradInput(THCState *state,
-                                                       THCudaTensor *input,
-                                                       THCudaTensor *gradOutput,
-                                                       THCudaTensor *gradInput,
-                                                       int padL, int padR,
-                                                       int padT, int padB);
+TH_API void THNN_CudaSpatialReflectionPadding_updateOutput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *output,
+          int padL, int padR,
+          int padT, int padB);
+TH_API void THNN_CudaSpatialReflectionPadding_updateGradInput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *gradOutput,
+          THCudaTensor *gradInput,
+          int padL, int padR,
+          int padT, int padB);
 
-TH_API void THNN_CudaSpatialReplicationPadding_updateOutput(THCState *state,
-                                                    THCudaTensor *input,
-                                                    THCudaTensor *output,
-                                                    int padL, int padR,
-                                                    int padT, int padB
-                                                   );
-TH_API void THNN_CudaSpatialReplicationPadding_updateGradInput(THCState *state,
-                                                       THCudaTensor *input,
-                                                       THCudaTensor *gradOutput,
-                                                       THCudaTensor *gradInput,
-                                                       int padL, int padR,
-                                                       int padT, int padB);
+TH_API void THNN_CudaSpatialReplicationPadding_updateOutput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *output,
+          int padL, int padR,
+          int padT, int padB);
+TH_API void THNN_CudaSpatialReplicationPadding_updateGradInput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *gradOutput,
+          THCudaTensor *gradInput,
+          int padL, int padR,
+          int padT, int padB);
 
 TH_API void THNN_CudaVolumetricReplicationPadding_updateOutput(
           THCState *state,

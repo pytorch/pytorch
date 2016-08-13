@@ -165,7 +165,6 @@ __global__ void BatchNormalizationUpdateOutputInference_kernel(
     float epsilon) {
 
   int plane = blockIdx.x;
-  int batch = blockIdx.y;
 
   float invstd = 1.0f / sqrt(runningVar[plane].ldg() + epsilon);
   float mean = runningMean[plane].ldg();
@@ -173,9 +172,11 @@ __global__ void BatchNormalizationUpdateOutputInference_kernel(
   float beta = bias.numElements() > 0 ? bias[plane].ldg() : 0.0f;
 
   // Write normalized and update the output
-  for (int x = threadIdx.x; x < input.getSize(2); x += blockDim.x) {
-    float inp = input[batch][plane][x].ldg();
-    output[batch][plane][x] = gamma * (inp - mean) * invstd + beta;
+  for (int batch = 0; batch < input.getSize(0); batch++) {
+    for (int x = threadIdx.x; x < input.getSize(2); x += blockDim.x) {
+      float inp = input[batch][plane][x].ldg();
+      output[batch][plane][x] = gamma * (inp - mean) * invstd + beta;
+    }
   }
 }
 
@@ -245,7 +246,7 @@ void THNN_CudaBatchNormalization_updateOutput(
   cudaDeviceProp *prop = THCState_getCurrentDeviceProperties(state);
 
   if (!train) {
-    dim3 blocks(input.getSize(1), input.getSize(0));
+    dim3 blocks(input.getSize(1));
     dim3 threads(getNumThreads(input.getSize(2)));
     BatchNormalizationUpdateOutputInference_kernel<<<blocks, threads, 0, s>>>(
       input, output, runningMean, runningVar, weight, bias, eps);
