@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .BatchNormalization import BatchNormalization
 
-class SpatialBatchNormalization(nn.BatchNormalization):
+class SpatialBatchNormalization(BatchNormalization):
     """
        This class implements Batch Normalization as described in the paper:
        "Batch Normalization: Accelerating Deep Network Training

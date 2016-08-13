@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Criterion import Criterion
 
-class MSECriterion(nn.Criterion):
+class MSECriterion(Criterion):
 
     def __init__(self, sizeAverage=True):
         super(MSECriterion, self).__init__()

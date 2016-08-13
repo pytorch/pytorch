@@ -1,11 +1,12 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .Tanh import Tanh
 
-class TanhShrink(nn.Module):
+class TanhShrink(Module):
 
     def __init__(self):
         super(TanhShrink, self).__init__()
-        self.tanh = nn.Tanh()
+        self.tanh = Tanh()
 
     def updateOutput(self, input):
         th = self.tanh.updateOutput(input)

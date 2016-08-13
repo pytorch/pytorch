@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class HardTanh(nn.Module):
+class HardTanh(Module):
 
     def __init__(self, min_value=-1, max_value=1, inplace=False):
         super(HardTanh, self).__init__()

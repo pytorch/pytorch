@@ -1,7 +1,8 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .utils import clear
 
-class CosineDistance(nn.Module):
+class CosineDistance(Module):
 
     def __init__(self, ):
         super(CosineDistance, self).__init__()
@@ -94,7 +95,7 @@ class CosineDistance(nn.Module):
 
 
     def clearState(self):
-        nn.utils.clear(self, [
+        clear(self, [
            'buffer',
            'w1',
            'w22',

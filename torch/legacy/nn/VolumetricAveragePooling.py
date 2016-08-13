@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class VolumetricAveragePooling(nn.Module):
+class VolumetricAveragePooling(Module):
 
     def __init__(self, kT, kW, kH, dT=None, dW=None, dH=None):
         super(VolumetricAveragePooling, self).__init__()

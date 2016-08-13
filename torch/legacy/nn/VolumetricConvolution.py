@@ -1,8 +1,9 @@
 import math
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .utils import clear
 
-class VolumetricConvolution(nn.Module):
+class VolumetricConvolution(Module):
 
     def __init__(self, nInputPlane, nOutputPlane, kT, kW, kH, dT=1, dW=1, dH=1, padT=0, padW=None, padH=None):
         super(VolumetricConvolution, self).__init__()
@@ -158,11 +159,11 @@ class VolumetricConvolution(nn.Module):
             self._unviewWeight()
 
     def type(self, type, tensorCache=None):
-        nn.utils.clear(self, 'finput', 'fgradInput')
+        clear(self, 'finput', 'fgradInput')
         return super(VolumetricConvolution, self).type(type, tensorCache)
 
     def clearState(self, ):
-        nn.utils.clear(self, 'finput', 'fgradInput', '_input', '_gradOutput')
+        clear(self, 'finput', 'fgradInput', '_input', '_gradOutput')
         return super(VolumetricConvolution, self).clearState()
 
     def __repr__(self):

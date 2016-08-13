@@ -1,7 +1,8 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .utils import clear, recursiveResizeAs, recursiveFill
 
-class NarrowTable(nn.Module):
+class NarrowTable(Module):
 
     def __init__(self, offset, length=1):
         super(NarrowTable, self).__init__()
@@ -25,8 +26,8 @@ class NarrowTable(nn.Module):
 
         for i in range(len(input)):
             if i < self.offset or i >= self.offset + self.length:
-                self.gradInput[i] = nn.utils.recursiveResizeAs(self.gradInput[i] or torch.Tensor(), input[i])
-                nn.utils.recursiveFill(self.gradInput[i], 0)
+                self.gradInput[i] = recursiveResizeAs(self.gradInput[i] or torch.Tensor(), input[i])
+                recursiveFill(self.gradInput[i], 0)
 
         return self.gradInput
 
@@ -34,6 +35,6 @@ class NarrowTable(nn.Module):
     def type(self, type=None, tensorCache=None):
         if not type:
             return self._type
-        nn.utils.clear(self, 'output', 'gradInput')
+        clear(self, 'output', 'gradInput')
         return super(NarrowTable, self).type(self, type, tensorCache)
 

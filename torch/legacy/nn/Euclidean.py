@@ -1,8 +1,9 @@
 import math
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .utils import clear
 
-class Euclidean(nn.Module):
+class Euclidean(Module):
 
     def __init__(self, inputSize, outputSize):
         super(Euclidean, self).__init__()
@@ -146,7 +147,7 @@ class Euclidean(nn.Module):
 
 
     def clearState(self):
-        nn.utils.clear(self, [
+        clear(self, [
            '_input',
            '_output',
            '_gradOutput',

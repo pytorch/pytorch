@@ -130,13 +130,42 @@ void __invalidArgs(PyObject *given_args, const char *expected_args_desc) {
 }
 
 bool __checkFloat(PyObject *arg) {
+#if PY_MAJOR_VERSION != 2
   return PyFloat_Check(arg) || PyLong_Check(arg);
+#else
+  return PyFloat_Check(arg) || PyLong_Check(arg) || PyInt_Check(arg);
+#endif
 }
 
 double __getFloat(PyObject *arg) {
   if (PyFloat_Check(arg)) {
     return PyFloat_AsDouble(arg);
+#if PY_MAJOR_VERSION == 2
+  } else if (PyInt_Check(arg)) {
+    return (double)PyInt_AsLong(arg);
+#endif
   } else {
     return PyLong_AsDouble(arg);
   }
 }
+
+bool __checkLong(PyObject *arg) {
+#if PY_MAJOR_VERSION != 2
+  return PyLong_Check(arg);
+#else
+  return PyInt_Check(arg) || PyLong_Check(arg);
+#endif
+}
+
+long __getLong(PyObject *arg) {
+#if PY_MAJOR_VERSION != 2
+  return PyLong_AsLong(arg);
+#else
+  if (PyInt_Check(arg)) {
+    return PyInt_AsLong(arg);
+  } else {
+    return PyLong_AsLong(arg);
+  }
+#endif
+}
+

@@ -39,14 +39,14 @@ distutils.ccompiler.CCompiler.compile = parallelCCompile
 # Build libraries
 ################################################################################
 
-if subprocess.call(['bash', 'torch/lib/build_all.sh'] + (['--with-cuda'] if WITH_CUDA else [])) != 0:
-   sys.exit(1)
+# if subprocess.call(['bash', 'torch/lib/build_all.sh'] + (['--with-cuda'] if WITH_CUDA else [])) != 0:
+   # sys.exit(1)
 
 ################################################################################
 # Generate cpp code
 ################################################################################
 
-cwrap('torch/csrc/generic/TensorMethods.cwrap', plugins=[THPLongArgsPlugin(), THPPlugin(), ArgcountSortPlugin(), AutoGPU()])
+# cwrap('torch/csrc/generic/TensorMethods.cwrap', plugins=[THPLongArgsPlugin(), THPPlugin(), ArgcountSortPlugin(), AutoGPU()])
 generate_nn_wrappers()
 
 ################################################################################

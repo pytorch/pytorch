@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Container import Container
 
-class ParallelTable(nn.Container):
+class ParallelTable(Container):
 
     def __init__(self, ):
         super(ParallelTable, self).__init__()

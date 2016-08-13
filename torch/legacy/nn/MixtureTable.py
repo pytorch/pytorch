@@ -1,7 +1,8 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .utils import clear, recursiveResizeAs
 
-class MixtureTable(nn.Module):
+class MixtureTable(Module):
 
     def __init__(self, dim=1):
         super(MixtureTable, self).__init__()
@@ -74,7 +75,7 @@ class MixtureTable(nn.Module):
 
     def updateGradInput(self, input, gradOutput):
         gaterInput, expertInputs = input
-        nn.utils.recursiveResizeAs(self.gradInput, input)
+        recursiveResizeAs(self.gradInput, input)
         gaterGradInput, expertGradInputs = self.gradInput
 
         # buffers
@@ -154,7 +155,7 @@ class MixtureTable(nn.Module):
 
 
     def clearState(self, ):
-        nn.utils.clear(self, [
+        clear(self, [
           '_gaterView',
           '_expert',
           '_expertView',

@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class VolumetricReplicationPadding(nn.Module):
+class VolumetricReplicationPadding(Module):
 
     def __init__(self, pleft, pright=None, ptop=None, pbottom=None, pfront=None, pback=None):
         super(VolumetricReplicationPadding, self).__init__()

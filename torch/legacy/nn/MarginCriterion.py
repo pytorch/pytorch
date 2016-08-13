@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Criterion import Criterion
 
-class MarginCriterion(nn.Criterion):
+class MarginCriterion(Criterion):
 
     def __init__(self, margin=1, sizeAverage=True):
         super(MarginCriterion, self).__init__()

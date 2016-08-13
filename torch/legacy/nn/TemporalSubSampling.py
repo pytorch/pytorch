@@ -1,8 +1,8 @@
 import math
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class TemporalSubSampling(nn.Module):
+class TemporalSubSampling(Module):
 
     def __init__(self, inputFrameSize, kW, dW=1):
         super(TemporalSubSampling, self).__init__()

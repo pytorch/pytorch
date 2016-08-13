@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Criterion import Criterion
 
-class ClassNLLCriterion(nn.Criterion):
+class ClassNLLCriterion(Criterion):
     def __init__(self, weights=None, sizeAverage=True):
         super(ClassNLLCriterion, self).__init__()
         self.sizeAverage = sizeAverage

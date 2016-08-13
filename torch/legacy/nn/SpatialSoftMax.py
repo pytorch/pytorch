@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class SpatialSoftMax(nn.Module):
+class SpatialSoftMax(Module):
 
     def updateOutput(self, input):
         self._backend.SoftMax_updateOutput(

@@ -1,6 +1,7 @@
 import torch
-from torch.legacy import nn
 import torch._thnn
+from .utils import clear, recursiveType
+from . import _backends
 
 class Module(object):
 
@@ -8,7 +9,7 @@ class Module(object):
         self.gradInput = torch.Tensor()
         self.output = torch.Tensor()
         self._type = self.output.type()
-        self._backend = nn._backends.THNNDoubleBackend
+        self._backend = _backends.THNNDoubleBackend
 
     def __repr__(self):
         return 'nn.' + self.__class__.__name__
@@ -98,7 +99,7 @@ class Module(object):
 
         # find all tensors and convert them
         for key, param in self.__dict__.items():
-            setattr(self, key, nn.utils.recursiveType(param, type, tensorCache))
+            setattr(self, key, recursiveType(param, type, tensorCache))
 
         self._backend = torch._thnn.type2backend[type]
         self._type = type
@@ -281,7 +282,7 @@ class Module(object):
         return modules
 
     def clearState(self):
-        return nn.utils.clear(self, 'output', 'gradInput')
+        return clear(self, 'output', 'gradInput')
 
     def replace(self, callback):
         out = callback(self)

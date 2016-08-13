@@ -1,7 +1,8 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .utils import clear
 
-class SoftMin(nn.Module):
+class SoftMin(Module):
 
     def __init__(self):
         super(SoftMin, self).__init__()
@@ -32,6 +33,6 @@ class SoftMin(nn.Module):
         return self.gradInput
 
     def clearState(self):
-        nn.utils.clear(self, 'mininput')
+        clear(self, 'mininput')
         return super(SoftMin, self).clearState()
 

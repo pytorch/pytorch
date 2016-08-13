@@ -1,11 +1,12 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .SpatialMaxPooling import SpatialMaxPooling
 
-class SpatialMaxUnpooling(nn.Module):
+class SpatialMaxUnpooling(Module):
 
     def __init__(self, poolingModule):
         super(SpatialMaxUnpooling, self).__init__()
-        assert isinstance(poolingModule, nn.SpatialMaxPooling)
+        assert isinstance(poolingModule, SpatialMaxPooling)
         assert poolingModule.kH == poolingModule.dH
         assert poolingModule.kW == poolingModule.dW
         self.pooling = poolingModule

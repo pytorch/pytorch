@@ -1,7 +1,8 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .utils import clear
 
-class Sum(nn.Module):
+class Sum(Module):
 
     def __init__(self, dimension=0, sizeAverage=False):
         super(Sum, self).__init__()
@@ -46,6 +47,6 @@ class Sum(nn.Module):
 
 
     def clearState(self):
-         nn.utils.clear(self, '_gradOutput')
+         clear(self, '_gradOutput')
          return super(Sum, self).clearState()
 

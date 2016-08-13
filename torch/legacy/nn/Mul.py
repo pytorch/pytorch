@@ -1,8 +1,8 @@
 import math
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class Mul(nn.Module):
+class Mul(Module):
 
     def __init__(self):
         super(Mul, self).__init__()

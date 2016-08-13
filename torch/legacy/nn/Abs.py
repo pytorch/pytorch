@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class Abs(nn.Module):
+class Abs(Module):
     def __init__(self):
         super(Abs, self).__init__()
 

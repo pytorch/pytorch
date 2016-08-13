@@ -13,7 +13,7 @@ EXP_PRECISION = 1e-4
 
 class TestCaseBase(object):
     def __init__(self, constructor, constructor_args=tuple(), input_size=None,
-            input=None, desc='', reference_fn=None, fullname=None):
+            input=None, desc='', reference_fn=None, fullname=None, **kwargs):
         if input_size is None and input is None:
             raise RuntimeError("Specify either an input tensor, or it's size!")
         self.constructor = constructor
@@ -51,11 +51,11 @@ class TestCaseBase(object):
 
 
 class SimpleTestCase(TestCaseBase):
-    def __init__(self, *args, check_inplace=False, jacobian_input=True, test_cuda=True, **kwargs):
+    def __init__(self, *args, **kwargs):
         super(SimpleTestCase, self).__init__(*args, **kwargs)
-        self.check_inplace = check_inplace
-        self.jacobian_input = jacobian_input
-        self.should_test_cuda = test_cuda
+        self.check_inplace = kwargs.get('check_inplace', False)
+        self.jacobian_input = kwargs.get('jacobian_input', True)
+        self.should_test_cuda = kwargs.get('test_cuda', True)
 
     def __call__(self, test_case):
         module = self.constructor(*self.constructor_args)
@@ -133,9 +133,9 @@ class SimpleTestCase(TestCaseBase):
 
 
 class CriterionTestCase(TestCaseBase):
-    def __init__(self, *args, target=None, **kwargs):
+    def __init__(self, *args, **kwargs):
         super(CriterionTestCase, self).__init__(*args, **kwargs)
-        self.target = target
+        self.target = kwargs.get('target', None)
         # TODO: Enable this after adding TH_INDEX_BASE to THC
         self.should_test_cuda = True
 
@@ -736,7 +736,7 @@ simple_tests = [
     CriterionTestCase(nn.AbsCriterion,
                         input_size=(2, 3, 4),
                         target=torch.randn(2, 3, 4),
-                        reference_fn=lambda _,i,t: 1/i.numel() * \
+                        reference_fn=lambda _,i,t: 1./i.numel() * \
                             sum((a-b).abs().sum() for a,b in zip(i, t))
                     ),
     CriterionTestCase(nn.BCECriterion,
@@ -911,7 +911,8 @@ class TestNN(TestCase):
             yield x
         else:
             for e in x:
-                yield from self._tensors_in(e)
+                for tmp in self._tensors_in(e):
+                    yield tmp
 
     def _clone_input(self, input):
         if isinstance(input, list):

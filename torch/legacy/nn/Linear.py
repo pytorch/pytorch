@@ -1,8 +1,9 @@
 import math
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .utils import clear
 
-class Linear(nn.Module):
+class Linear(Module):
 
     def __init__(self, inputSize, outputSize, bias=True):
         super(Linear, self).__init__()
@@ -75,7 +76,7 @@ class Linear(nn.Module):
             self.gradBias.addmv_(scale, gradOutput.t(), self.addBuffer)
 
     def clearState(self):
-        nn.utils.clear(self, 'addBuffer')
+        clear(self, 'addBuffer')
         return super(Linear, self).clearState()
 
 

@@ -1,5 +1,4 @@
 import torch
-from torch.legacy import nn
 
 # tensorCache maintains a list of all tensors and storages that have been
 # converted (recursively) by calls to recursiveType() and type().
@@ -15,10 +14,12 @@ from torch.legacy import nn
 # > net2:type('torch.cuda.FloatTensor', tensorCache)
 # > nn.utils.recursiveType(anotherTensor, 'torch.cuda.FloatTensor', tensorCache)
 def recursiveType(param, type, tensorCache={}):
+    from .Criterion import Criterion
+    from .Module import Module
     if isinstance(param, list):
         for i, p in enumerate(param):
             param[i] = recursiveType(p, type, tensorCache)
-    elif isinstance(param, nn.Module) or isinstance(param, nn.Criterion):
+    elif isinstance(param, Module) or isinstance(param, Criterion):
         param.type(type, tensorCache)
     elif torch.isTensor(param):
         if torch.typename(param) != type:
@@ -135,8 +136,8 @@ def contiguousView(output, input, *args):
     return output
 
 # go over specified fields and clear them. accepts
-# nn.utils.clearState(self, ['_buffer', '_buffer2']) and
-# nn.utils.clearState(self, '_buffer', '_buffer2')
+# nn.clearState(self, ['_buffer', '_buffer2']) and
+# nn.clearState(self, '_buffer', '_buffer2')
 def clear(self, *args):
     if len(args) == 1 and isinstance(args[0], list):
         args = args[0]

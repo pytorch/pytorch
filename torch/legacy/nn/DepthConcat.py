@@ -12,9 +12,9 @@
 
 import math
 import torch
-from torch.legacy import nn
+from .Concat import Concat
 
-class DepthConcat(nn.Concat):
+class DepthConcat(Concat):
 
     def windowNarrow(self, output, currentOutput, offset):
         outputWindow = output.narrow(self.dimension, offset, currentOutput.size(self.dimension))

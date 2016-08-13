@@ -1,7 +1,8 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .utils import clear
 
-class Normalize(nn.Module):
+class Normalize(Module):
 
     def __init__(self, p, eps=1e-10):
         super(Normalize, self).__init__()
@@ -46,7 +47,7 @@ class Normalize(nn.Module):
                 torch.pow(self.buffer, input, self.p)
 
             torch.sum(self.normp, self.buffer, 1).add_(self.eps)
-            torch.pow(self.norm, self.normp, 1/self.p)
+            torch.pow(self.norm, self.normp, 1./self.p)
 
         torch.div(self._output, input, self.norm.view(-1, 1).expandAs(input))
 
@@ -134,7 +135,7 @@ class Normalize(nn.Module):
         return self
 
     def clearState(self):
-        nn.utils.clear(self, [
+        clear(self, [
            '_output',
            '_indices',
            '_gradInput',

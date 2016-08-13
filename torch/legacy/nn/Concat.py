@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Container import Container
 
-class Concat(nn.Container):
+class Concat(Container):
 
     def __init__(self, dimension):
         super(Concat, self).__init__()

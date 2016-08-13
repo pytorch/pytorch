@@ -1,8 +1,8 @@
 import math
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class VolumetricFullConvolution(nn.Module):
+class VolumetricFullConvolution(Module):
 
     def __init__(self, nInputPlane, nOutputPlane,
             kT, kW, kH,                 # kernel size

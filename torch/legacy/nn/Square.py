@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class Square(nn.Module):
+class Square(Module):
 
     def updateOutput(self, input):
         self._backend.Square_updateOutput(

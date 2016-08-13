@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class Sqrt(nn.Module):
+class Sqrt(Module):
 
     def __init__(self, b=0, eps=0):
         super(Sqrt, self).__init__()

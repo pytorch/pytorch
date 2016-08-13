@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Criterion import Criterion
 
-class SoftMarginCriterion(nn.Criterion):
+class SoftMarginCriterion(Criterion):
 
     def __init__(self, ):
         super(SoftMarginCriterion, self).__init__()

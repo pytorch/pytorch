@@ -1,7 +1,8 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .utils import clear
 
-class SpatialAdaptiveMaxPooling(nn.Module):
+class SpatialAdaptiveMaxPooling(Module):
 
     def __init__(self, w, h):
         super(SpatialAdaptiveMaxPooling, self).__init__()
@@ -32,6 +33,6 @@ class SpatialAdaptiveMaxPooling(nn.Module):
         return self.gradInput
 
     def clearState(self):
-        nn.utils.clear(self, 'indices')
+        clear(self, 'indices')
         return super(SpatialAdaptiveMaxPooling, self).clearState()
 

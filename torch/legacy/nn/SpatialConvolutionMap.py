@@ -1,11 +1,11 @@
 import random
 import math
 import torch
-from torch.legacy import nn
+from .Module import Module
 
 # TODO fix THNN...
 
-class SpatialConvolutionMap(nn.Module):
+class SpatialConvolutionMap(Module):
 
     class maps(object):
 

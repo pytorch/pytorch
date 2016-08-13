@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Criterion import Criterion
 
-class SmoothL1Criterion(nn.Criterion):
+class SmoothL1Criterion(Criterion):
 
     def __init__(self, sizeAverage=True):
         super(SmoothL1Criterion, self).__init__()

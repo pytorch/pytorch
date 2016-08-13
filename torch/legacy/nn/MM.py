@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class MM(nn.Module):
+class MM(Module):
 
     def __init__(self, transA=False, transB=False):
         super(MM, self).__init__()

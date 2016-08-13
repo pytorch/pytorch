@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class SpatialZeroPadding(nn.Module):
+class SpatialZeroPadding(Module):
 
     def __init__(self, pad_l, pad_r=None, pad_t=None, pad_b=None):
         super(SpatialZeroPadding, self).__init__()

@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Criterion import Criterion
 
-class DistKLDivCriterion(nn.Criterion):
+class DistKLDivCriterion(Criterion):
 
     def __init__(self, sizeAverage=True):
         super(DistKLDivCriterion, self).__init__()

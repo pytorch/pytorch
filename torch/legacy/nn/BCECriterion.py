@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Criterion import Criterion
 
-class BCECriterion(nn.Criterion):
+class BCECriterion(Criterion):
     eps = 1e-12
 
     def __init__(self, weights=None, sizeAverage=True):

@@ -1,7 +1,8 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .utils import clear
 
-class LookupTable(nn.Module):
+class LookupTable(Module):
 
     def __init__(self, nIndex, nOutput, paddingValue=-1, maxNorm=None, normType=None):
         super(LookupTable, self).__init__()
@@ -151,6 +152,6 @@ class LookupTable(nn.Module):
         return self
 
     def clearState(self):
-        nn.utils.clear(self, '_count', '_input', '_sorted', '_indices', '_gradOutput')
+        clear(self, '_count', '_input', '_sorted', '_indices', '_gradOutput')
         return super(LookupTable, self).clearState()
 

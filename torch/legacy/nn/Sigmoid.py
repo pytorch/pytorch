@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class Sigmoid(nn.Module):
+class Sigmoid(Module):
 
     def updateOutput(self, input):
         self._backend.Sigmoid_updateOutput(

@@ -1,5 +1,5 @@
-import importlib.util
 import os
+import sys
 from string import Template, ascii_lowercase
 from ..cwrap import cwrap
 from ..cwrap.plugins import StandaloneExtension, NullableArguments
@@ -9,10 +9,16 @@ WRAPPER_PATH = os.path.join(BASE_PATH, 'torch', 'csrc', 'nn')
 THNN_UTILS_PATH = os.path.join(BASE_PATH, 'torch', '_thnn', 'utils.py')
 
 def import_module(name, path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    if sys.version_info > (3, 0):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(name, path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    else:
+        import imp
+        module = imp.load_source(name, path)
+        return module
 
 thnn_utils = import_module('torch._thnn.utils', THNN_UTILS_PATH)
 

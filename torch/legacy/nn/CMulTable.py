@@ -1,7 +1,8 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .utils import clear
 
-class CMulTable(nn.Module):
+class CMulTable(Module):
 
     def __init__(self, ):
         super(CMulTable, self).__init__()
@@ -42,5 +43,5 @@ class CMulTable(nn.Module):
         return self.gradInput
 
     def clearState(self):
-        nn.utils.clear(self, 'tout')
+        clear(self, 'tout')
         return super(CMulTable, self).clearState()

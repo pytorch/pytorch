@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class SpatialAveragePooling(nn.Module):
+class SpatialAveragePooling(Module):
 
     def __init__(self, kW, kH, dW=1, dH=1, padW=0, padH=0):
         super(SpatialAveragePooling, self).__init__()

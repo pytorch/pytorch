@@ -1,8 +1,9 @@
 import math
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .utils import clear
 
-class Bilinear(nn.Module):
+class Bilinear(Module):
 
     def _assertInput(self, input):
         if len(input) != 2 or not torch.isTensor(input[0]) or not torch.isTensor(input[1]):
@@ -134,6 +135,6 @@ class Bilinear(nn.Module):
                 )
 
     def clearState(self):
-        nn.utils.clear(self, 'buff1', 'buff2')
+        clear(self, 'buff1', 'buff2')
         return super(Bilinear, self).clearState()
 

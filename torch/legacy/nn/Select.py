@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class Select(nn.Module):
+class Select(Module):
 
     def __init__(self, dimension, index):
         super(Select, self).__init__()

@@ -1,7 +1,8 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .utils import clear
 
-class LogSigmoid(nn.Module):
+class LogSigmoid(Module):
 
     def __init__(self):
         super(LogSigmoid, self).__init__()
@@ -28,7 +29,7 @@ class LogSigmoid(nn.Module):
         return self.gradInput
 
     def clearState(self):
-        nn.utils.clear(self, 'buffer')
+        clear(self, 'buffer')
         return super(LogSigmoid, self).clearState()
 
 

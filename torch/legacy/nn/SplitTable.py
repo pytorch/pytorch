@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class SplitTable(nn.Module):
+class SplitTable(Module):
 
     def __init__(self, dimension):
         super(SplitTable, self).__init__()

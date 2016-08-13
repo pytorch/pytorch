@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .SpatialConvolution import SpatialConvolution
 
-class SpatialDilatedConvolution(nn.SpatialConvolution):
+class SpatialDilatedConvolution(SpatialConvolution):
 
     def __init__(self, nInputPlane, nOutputPlane, kW, kH, dW=1, dH=1, padW=0, padH=None, dilationH=1, dilationW=None):
         super(SpatialDilatedConvolution, self).__init__(nInputPlane, nOutputPlane, kW, kH, dW, dH, padW, padH)

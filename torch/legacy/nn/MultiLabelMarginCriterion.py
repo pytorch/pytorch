@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Criterion import Criterion
 
-class MultiLabelMarginCriterion(nn.Criterion):
+class MultiLabelMarginCriterion(Criterion):
 
     def __init__(self, sizeAverage=True):
         super(MultiLabelMarginCriterion, self).__init__()

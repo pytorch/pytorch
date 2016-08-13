@@ -1,8 +1,9 @@
 import math
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .utils import clear
 
-class SpatialConvolution(nn.Module):
+class SpatialConvolution(Module):
 
     def __init__(self, nInputPlane, nOutputPlane, kW, kH, dW=1, dH=1, padW=0, padH=None):
         super(SpatialConvolution, self).__init__()
@@ -158,6 +159,6 @@ class SpatialConvolution(nn.Module):
         return s
 
     def clearState(self):
-        nn.utils.clear(self, 'finput', 'fgradInput', '_input', '_gradOutput')
+        clear(self, 'finput', 'fgradInput', '_input', '_gradOutput')
         return super(SpatialConvolution, self).clearState()
 

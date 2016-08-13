@@ -1,9 +1,9 @@
 import random
 import math
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class SpatialFullConvolutionMap(nn.Module):
+class SpatialFullConvolutionMap(Module):
 
     def __init__(self, conMatrix, kW, kH, dW=1, dH=1):
         super(SpatialFullConvolutionMap, self).__init__()

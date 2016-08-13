@@ -1,7 +1,8 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .utils import clear
 
-class PReLU(nn.Module):
+class PReLU(Module):
 
     def __init__(self, nOutputPlane=0):
         super(PReLU, self).__init__()
@@ -51,6 +52,6 @@ class PReLU(nn.Module):
         return self.gradWeight
 
     def clearState(self):
-        nn.utils.clear(self, 'gradWeightBuf', 'gradWeightBuf2')
+        clear(self, 'gradWeightBuf', 'gradWeightBuf2')
         return super(PReLU, self).clearState()
 

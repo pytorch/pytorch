@@ -1,7 +1,8 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .utils import clear
 
-class VolumetricMaxPooling(nn.Module):
+class VolumetricMaxPooling(Module):
 
     def __init__(self, kT, kW, kH, dT=None, dW=None, dH=None, padT=0, padW=0, padH=0):
         super(VolumetricMaxPooling, self).__init__()
@@ -60,7 +61,7 @@ class VolumetricMaxPooling(nn.Module):
         return self.gradInput
 
     def clearState(self):
-        nn.utils.clear(self, 'indices')
+        clear(self, 'indices')
         return super(VolumetricMaxPooling, self).clearState()
 
     def __repr__(self):

@@ -1,8 +1,8 @@
 import math
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class SpatialSubSampling(nn.Module):
+class SpatialSubSampling(Module):
 
     def __init__(self, nInputPlane, kW, kH, dW=1, dH=1):
         super(SpatialSubSampling, self).__init__()

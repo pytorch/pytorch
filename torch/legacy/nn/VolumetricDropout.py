@@ -1,7 +1,8 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .utils import clear
 
-class VolumetricDropout(nn.Module):
+class VolumetricDropout(Module):
 
     def __init__(self, p=0.5):
         super(VolumetricDropout, self).__init__()
@@ -41,6 +42,6 @@ class VolumetricDropout(nn.Module):
         return super(VolumetricDropout, self).__repr__() + '({:.4f})'.format(self.p)
 
     def clearState(self):
-        nn.utils.clear(self, 'noise')
+        clear(self, 'noise')
         return super(VolumetricDropout, self).clearState()
 

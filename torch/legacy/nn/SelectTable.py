@@ -1,7 +1,8 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .utils import recursiveCopy
 
-class SelectTable(nn.Module):
+class SelectTable(Module):
 
     def __init__(self, index):
         super(SelectTable, self).__init__()
@@ -38,7 +39,7 @@ class SelectTable(nn.Module):
         index = self.index if self.index >= 0 else input.size(self.dimension) + self.index
         # copy into gradInput[index] (necessary for variable sized inputs)
         assert self.gradInput[index]
-        nn.utils.recursiveCopy(self.gradInput[index], gradOutput)
+        recursiveCopy(self.gradInput[index], gradOutput)
         return self.gradInput
 
     def type(self, type, tensorCache=None):

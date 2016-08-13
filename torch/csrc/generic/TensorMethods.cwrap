@@ -260,7 +260,7 @@ static PyObject * THPTensor_(apply)(THPTensor *self, PyObject *arg)
   THTensor *tensor = self->cdata;
   TH_TENSOR_APPLY(real, tensor,
                   PyObject *ret =
-                      PyObject_CallFunction(arg, BUILD_REAL_FMT, *tensor_data);
+                      PyObject_CallFunction(arg, (char*)BUILD_REAL_FMT, *tensor_data);
                   if (!ret)
                     return NULL;
                   bool success = THPUtils_(parseReal)(ret, &v);
@@ -294,7 +294,7 @@ static PyObject * THPTensor_(map)(THPTensor *self, PyObject *args)
   THTensor *src = src_object->cdata;
   TH_TENSOR_APPLY2(real, tensor, real, src,
                   PyObject *ret =
-                      PyObject_CallFunction(fn, BUILD_REAL_FMT BUILD_REAL_FMT,
+                      PyObject_CallFunction(fn, (char*)(BUILD_REAL_FMT BUILD_REAL_FMT),
                                             *tensor_data, *src_data);
                   if (!ret)
                     return NULL;
@@ -331,7 +331,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
   THTensor *src2 = src2_object->cdata;
   TH_TENSOR_APPLY3(real, tensor, real, src1, real, src2,
                   PyObject *ret =
-                      PyObject_CallFunction(fn, BUILD_REAL_FMT BUILD_REAL_FMT BUILD_REAL_FMT,
+                      PyObject_CallFunction(fn, (char*)(BUILD_REAL_FMT BUILD_REAL_FMT BUILD_REAL_FMT),
                                             *tensor_data, *src1_data, *src2_data);
                   if (!ret)
                     return NULL;

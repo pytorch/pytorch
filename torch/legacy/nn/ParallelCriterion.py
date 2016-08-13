@@ -1,7 +1,8 @@
 import torch
-from torch.legacy import nn
+from .Criterion import Criterion
+from .utils import recursiveResizeAs, recursiveFill, recursiveAdd
 
-class ParallelCriterion(nn.Criterion):
+class ParallelCriterion(Criterion):
 
     def __init__(self, repeatTarget=False):
         super(ParallelCriterion, self).__init__()
@@ -24,11 +25,11 @@ class ParallelCriterion(nn.Criterion):
         return self.output
 
     def updateGradInput(self, input, target):
-        self.gradInput = nn.utils.recursiveResizeAs(self.gradInput, input)[0]
-        nn.utils.recursiveFill(self.gradInput, 0)
+        self.gradInput = recursiveResizeAs(self.gradInput, input)[0]
+        recursiveFill(self.gradInput, 0)
         for i, criterion in enumerate(self.criterions):
             current_target = target if self.repeatTarget else target[i]
-            nn.utils.recursiveAdd(self.gradInput[i], self.weights[i], criterion.updateGradInput(input[i], current_target))
+            recursiveAdd(self.gradInput[i], self.weights[i], criterion.updateGradInput(input[i], current_target))
 
         return self.gradInput
 

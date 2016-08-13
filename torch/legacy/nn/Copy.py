@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class Copy(nn.Module):
+class Copy(Module):
 
     def __init__(self, intype, outtype, dontCast=False):
         self.dontCast = dontCast

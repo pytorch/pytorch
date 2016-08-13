@@ -1,8 +1,16 @@
 import math
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .Sequential import Sequential
+from .SpatialZeroPadding import SpatialZeroPadding
+from .SpatialConvolution import SpatialConvolution
+from .SpatialConvolutionMap import SpatialConvolutionMap
+from .Replicate import Replicate
+from .CSubTable import CSubTable
+from .CDivTable import CDivTable
+from .utils import clear
 
-class SpatialSubtractiveNormalization(nn.Module):
+class SpatialSubtractiveNormalization(Module):
 
     def __init__(self, nInputPlane=1, kernel=None):
         super(SpatialSubtractiveNormalization, self).__init__()
@@ -23,22 +31,22 @@ class SpatialSubtractiveNormalization(nn.Module):
         self.kernel.div_(self.kernel.sum() * self.nInputPlane)
 
         # padding values
-        padH = math.floor(self.kernel.size(0)/2)
+        padH = int(math.floor(self.kernel.size(0)/2))
         padW = padH
         if kdim == 2:
-           padW = math.floor(self.kernel.size(1)/2)
+           padW = int(math.floor(self.kernel.size(1)/2))
 
         # create convolutional mean extractor
-        self.meanestimator = nn.Sequential()
-        self.meanestimator.add(nn.SpatialZeroPadding(padW, padW, padH, padH))
+        self.meanestimator = Sequential()
+        self.meanestimator.add(SpatialZeroPadding(padW, padW, padH, padH))
         if kdim == 2:
-            self.meanestimator.add(nn.SpatialConvolution(self.nInputPlane, 1, self.kernel.size(1), self.kernel.size(0)))
+            self.meanestimator.add(SpatialConvolution(self.nInputPlane, 1, self.kernel.size(1), self.kernel.size(0)))
         else:
             # TODO: map
-            self.meanestimator.add(nn.SpatialConvolutionMap(nn.SpatialConvolutionMap.maps.oneToOne(self.nInputPlane), self.kernel.size(0), 1))
-            self.meanestimator.add(nn.SpatialConvolution(self.nInputPlane, 1, 1, self.kernel.size(0)))
+            self.meanestimator.add(SpatialConvolutionMap(SpatialConvolutionMap.maps.oneToOne(self.nInputPlane), self.kernel.size(0), 1))
+            self.meanestimator.add(SpatialConvolution(self.nInputPlane, 1, 1, self.kernel.size(0)))
 
-        self.meanestimator.add(nn.Replicate(self.nInputPlane, 0))
+        self.meanestimator.add(Replicate(self.nInputPlane, 0))
 
         # set kernel and bias
         if kdim == 2:
@@ -54,8 +62,8 @@ class SpatialSubtractiveNormalization(nn.Module):
             self.meanestimator.modules[2].bias.zero_()
 
         # other operation
-        self.subtractor = nn.CSubTable()
-        self.divider = nn.CDivTable()
+        self.subtractor = CSubTable()
+        self.divider = CDivTable()
 
         # coefficient array, to adjust side effects
         self.coef = torch.Tensor(1, 1, 1)
@@ -98,7 +106,7 @@ class SpatialSubtractiveNormalization(nn.Module):
         return self.gradInput
 
     def clearState(self):
-        nn.utils.clear(self, 'ones', '_coef')
+        clear(self, 'ones', '_coef')
         self.meanestimator.clearState()
         return super(SpatialSubtractiveNormalization, self).clearState()
 

@@ -1,7 +1,8 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .utils import clear
 
-class RReLU(nn.Module):
+class RReLU(Module):
 
     def __init__(self, lower=1/8, upper=1/3, inplace=False):
         super(RReLU, self).__init__()
@@ -47,6 +48,6 @@ class RReLU(nn.Module):
         return super(RReLU, self).__repr__() + '({:.4f}, {:.4f})'.format(self.lower, self.upper)
 
     def clearState(self):
-        nn.utils.clear(self, 'noise')
+        clear(self, 'noise')
         return super(RReLU, self).clearState(self)
 

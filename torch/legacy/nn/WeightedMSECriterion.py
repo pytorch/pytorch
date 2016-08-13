@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Criterion import Criterion
 
-class WeightedMSECriterion(nn.Criterion):
+class WeightedMSECriterion(Criterion):
 
     def __init__(self, weight, sizeAverage=True):
         super(WeightedMSECriterion, self).__init__()

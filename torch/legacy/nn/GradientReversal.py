@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class GradientReversal(nn.Module):
+class GradientReversal(Module):
 
     def __init__(self, lambd=1):
         super(GradientReversal, self).__init__()

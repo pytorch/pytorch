@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class CDivTable(nn.Module):
+class CDivTable(Module):
     def __init__(self, ):
         super(CDivTable, self).__init__()
         self.gradInput = []

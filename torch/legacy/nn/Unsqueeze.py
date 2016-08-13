@@ -1,14 +1,15 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .utils import addSingletonDimension
 
-class Unsqueeze(nn.Module):
+class Unsqueeze(Module):
 
     def __init__(self, dim):
         super(Unsqueeze, self).__init__()
         self.dim = dim
 
     def updateOutput(self, input):
-        nn.utils.addSingletonDimension(self.output, input, self.dim)
+        addSingletonDimension(self.output, input, self.dim)
         return self.output
 
     def updateGradInput(self, input, gradOutput):

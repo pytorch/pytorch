@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class SoftPlus(nn.Module):
+class SoftPlus(Module):
 
     def __init__(self, beta=1):
         super(SoftPlus, self).__init__()

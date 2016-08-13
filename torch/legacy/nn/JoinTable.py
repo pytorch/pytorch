@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class JoinTable(nn.Module):
+class JoinTable(Module):
 
     def __init__(self, dimension):
         super(JoinTable, self).__init__()

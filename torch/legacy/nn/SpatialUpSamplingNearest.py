@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class SpatialUpSamplingNearest(nn.Module):
+class SpatialUpSamplingNearest(Module):
     """
     Applies a 2D up-sampling over an input image composed of several input planes.
 

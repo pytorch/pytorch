@@ -1,7 +1,8 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .utils import clear
 
-class PairwiseDistance(nn.Module):
+class PairwiseDistance(Module):
 
     def __init__(self, p):
         super(PairwiseDistance, self).__init__()
@@ -69,6 +70,6 @@ class PairwiseDistance(nn.Module):
         return self.gradInput
 
     def clearState(self):
-        nn.utils.clear(self, 'diff', 'outExpand', 'grad', 'ones')
+        clear(self, 'diff', 'outExpand', 'grad', 'ones')
         return super(PairwiseDistance, self).clearState()
 

@@ -1,7 +1,8 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .utils import clear
 
-class SpatialCrossMapLRN(nn.Module):
+class SpatialCrossMapLRN(Module):
 
     def __init__(self, size, alpha=1e-4, beta=0.75, k=1):
         super(SpatialCrossMapLRN, self).__init__()
@@ -119,6 +120,6 @@ class SpatialCrossMapLRN(nn.Module):
         return self.gradInput
 
     def clearState(self):
-        nn.utils.clear(self, 'scale', 'paddedRatio', 'accumRatio')
+        clear(self, 'scale', 'paddedRatio', 'accumRatio')
         return super(SpatialCrossMapLRN, self).clearState(self)
 

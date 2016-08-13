@@ -28,6 +28,10 @@ class StandaloneExtension(CWrapPlugin):
         'THCudaTensor*':    Template('(THCudaTensor*)(((Tensor*)$arg)->cdata)'),
         'float':            Template('__getFloat($arg)'),
         'double':           Template('__getFloat($arg)'),
+        'bool':             Template('__getLong($arg)'),
+        'int':              Template('__getLong($arg)'),
+        'long':             Template('__getLong($arg)'),
+        'void*':            Template('(void*)__getLong($arg)'),
         # TODO: implement this
         'THGenerator*':     Template('NULL'),
     }
@@ -40,6 +44,10 @@ class StandaloneExtension(CWrapPlugin):
         'THCudaTensor*':    Template('(PyObject*)Py_TYPE($arg) == THCPFloatTensorClass'),
         'float':            Template('__checkFloat($arg)'),
         'double':           Template('__checkFloat($arg)'),
+        'bool':             Template('__checkLong($arg)'),
+        'int':              Template('__checkLong($arg)'),
+        'long':             Template('__checkLong($arg)'),
+        'void*':            Template('__checkLong($arg)'),
         # TODO: implement this
         'THGenerator*':     Template('false'),
     }

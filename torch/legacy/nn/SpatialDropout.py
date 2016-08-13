@@ -1,7 +1,8 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .utils import clear
 
-class SpatialDropout(nn.Module):
+class SpatialDropout(Module):
 
     def __init__(self, p=0.5):
         super(SpatialDropout, self).__init__()
@@ -43,6 +44,6 @@ class SpatialDropout(nn.Module):
         return super(SpatialDropout, self).__repr__()
 
     def clearState(self):
-        nn.utils.clear(self, 'noise')
+        clear(self, 'noise')
         return super(SpatialDropout, self).clearState()
 

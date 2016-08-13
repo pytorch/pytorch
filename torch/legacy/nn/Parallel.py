@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Container import Container
 
-class Parallel(nn.Container):
+class Parallel(Container):
 
     def __init__(self, inputDimension, outputDimension):
         super(Parallel, self).__init__()

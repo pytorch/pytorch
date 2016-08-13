@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class Replicate(nn.Module):
+class Replicate(Module):
 
     def __init__(self, nf, dim=0):
         super(Replicate, self).__init__()

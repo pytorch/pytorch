@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class Squeeze(nn.Module):
+class Squeeze(Module):
 
     def __init__(self, dim=None):
         super(Squeeze, self).__init__()

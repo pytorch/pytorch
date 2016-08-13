@@ -1,7 +1,8 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .utils import clear
 
-class TemporalMaxPooling(nn.Module):
+class TemporalMaxPooling(Module):
 
     def __init__(self, kW, dW=None):
         super(TemporalMaxPooling, self).__init__()
@@ -37,6 +38,6 @@ class TemporalMaxPooling(nn.Module):
         return self.gradInput
 
     def clearState(self):
-        nn.utils.clear(self, 'indices')
+        clear(self, 'indices')
         return super(TemporalMaxPooling, self).clearState()
 

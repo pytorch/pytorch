@@ -1,6 +1,6 @@
 import math
 import torch
-from torch.legacy import nn
+from .MSECriterion import MSECriterion
 
 """
          This file implements a criterion for multi-class classification.
@@ -12,7 +12,7 @@ from torch.legacy import nn
          Reference: http.//arxiv.org/abs/1506.08230
 """
 
-class ClassSimplexCriterion(nn.MSECriterion):
+class ClassSimplexCriterion(MSECriterion):
 
     def __init__(self, nClasses):
          super(ClassSimplexCriterion, self).__init__()

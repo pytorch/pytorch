@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class View(nn.Module):
+class View(Module):
 
     def resetSize(self, *args):
         if len(args) == 1 and isinstance(args[0], torch.LongStorage):

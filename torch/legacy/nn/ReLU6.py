@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class ReLU6(nn.Module):
+class ReLU6(Module):
 
     def __init__(self, inplace=False):
         super(ReLU6, self).__init__()

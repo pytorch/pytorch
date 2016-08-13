@@ -1,8 +1,9 @@
 import math
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .utils import clear
 
-class SpatialFullConvolution(nn.Module):
+class SpatialFullConvolution(Module):
 
     def __init__(self, nInputPlane, nOutputPlane, kW, kH, dW=1, dH=1, padW=0, padH=None, adjW=0, adjH=0):
         super(SpatialFullConvolution, self).__init__()
@@ -203,7 +204,7 @@ class SpatialFullConvolution(nn.Module):
         return s
 
     def clearState(self):
-        nn.utils.clear(self, 'finput', 'fgradInput', '_input', '_gradOutput')
+        clear(self, 'finput', 'fgradInput', '_input', '_gradOutput')
         return super(SpatialFullConvolution, self).clearState()
 
 

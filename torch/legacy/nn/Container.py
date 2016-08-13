@@ -1,9 +1,10 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .utils import clear
 from functools import wraps
 import sys
 
-class Container(nn.Module):
+class Container(Module):
 
     def __init__(self, *args):
          super(Container, self).__init__(*args)
@@ -57,8 +58,8 @@ class Container(nn.Module):
          return w, gw
 
     def clearState(self):
-        nn.utils.clear('output')
-        nn.utils.clear('gradInput')
+        clear('output')
+        clear('gradInput')
         for module in self.modules:
             module.clearState()
         return self

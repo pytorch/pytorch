@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Criterion import Criterion
 
-class MultiMarginCriterion(nn.Criterion):
+class MultiMarginCriterion(Criterion):
 
     def __init__(self, p=1, weights=None, margin=1, sizeAverage=True):
         super(MultiMarginCriterion, self).__init__()

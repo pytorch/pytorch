@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class MulConstant(nn.Module):
+class MulConstant(Module):
 
     def __init__(self, constant_scalar, inplace=False):
         super(MulConstant, self).__init__()

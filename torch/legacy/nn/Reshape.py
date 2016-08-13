@@ -1,7 +1,8 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .utils import clear
 
-class Reshape(nn.Module):
+class Reshape(Module):
 
     def __init__(self, *args):
         super(Reshape, self).__init__()
@@ -53,6 +54,6 @@ class Reshape(nn.Module):
                 '({})'.format('x'.join(map(lambda x: str(x), self.size)))
 
     def clearState(self):
-        nn.utils.clear(self, '_input', '_gradOutput')
+        clear(self, '_input', '_gradOutput')
         return super(Reshape, self).clearState()
 

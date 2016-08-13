@@ -1,7 +1,8 @@
 import torch
-from torch.legacy import nn
+from .Criterion import Criterion
+from .utils import clear
 
-class L1Cost(nn.Criterion):
+class L1Cost(Criterion):
 
     def __init__(self):
         super(L1Cost, self).__init__()
@@ -29,6 +30,6 @@ class L1Cost(nn.Criterion):
         return self.gradInput
 
     def clearState(self):
-        nn.utils.clear(self, 'output_tensor')
+        clear(self, 'output_tensor')
         return super(L1Cost, self).clearState()
 

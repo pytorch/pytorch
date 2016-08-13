@@ -1,7 +1,8 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .utils import clear
 
-class Identity(nn.Module):
+class Identity(Module):
 
     def updateOutput(self, input):
         self.output = input
@@ -12,7 +13,7 @@ class Identity(nn.Module):
         return self.gradInput
 
     def clearState(self):
-        nn.utils.clear(self, [
+        clear(self, [
            'output',
            'gradInput',
         ])

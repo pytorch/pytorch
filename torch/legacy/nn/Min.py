@@ -1,7 +1,8 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .utils import clear, addSingletonDimension
 
-class Min(nn.Module):
+class Min(Module):
 
     def __init__(self, dimension=0):
         super(Min, self).__init__()
@@ -36,7 +37,7 @@ class Min(nn.Module):
         self._lazyInit()
         dimension = self._getPositiveDimension(input)
         if input.dim() > 1:
-          gradOutputView = nn.utils.addSingletonDimension(gradOutput, dimension)
+          gradOutputView = addSingletonDimension(gradOutput, dimension)
         else:
           gradOutputView = gradOutput
 
@@ -59,6 +60,6 @@ class Min(nn.Module):
         return self
 
     def clearState(self):
-        nn.utils.clear(self, '_indices', '_output')
+        clear(self, '_indices', '_output')
         return super(Min, self).clearState()
 

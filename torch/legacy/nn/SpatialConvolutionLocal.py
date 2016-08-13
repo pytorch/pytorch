@@ -1,8 +1,9 @@
 import math
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .utils import clear
 
-class SpatialConvolutionLocal(nn.Module):
+class SpatialConvolutionLocal(Module):
 
     def __init__(self, nInputPlane, nOutputPlane, iW, iH ,kW, kH, dW=1, dH=1, padW=0, padH=None):
         super(SpatialConvolutionLocal, self).__init__()
@@ -18,8 +19,8 @@ class SpatialConvolutionLocal(nn.Module):
         self.dH = dH
         self.padW = padW
         self.padH = padH or self.padW
-        self.oW = math.floor((self.padW * 2 + iW - self.kW) / self.dW) + 1
-        self.oH = math.floor((self.padH * 2 + iH - self.kH) / self.dH) + 1
+        self.oW = int(math.floor((self.padW * 2 + iW - self.kW) / self.dW)) + 1
+        self.oH = int(math.floor((self.padH * 2 + iH - self.kH) / self.dH)) + 1
         assert 1 <= self.oW and 1 <= self.oH
 
         self.weight = torch.Tensor(self.oH, self.oW, nOutputPlane, nInputPlane, kH, kW)
@@ -183,6 +184,6 @@ class SpatialConvolutionLocal(nn.Module):
         return s
 
     def clearState(self):
-        nn.utils.clear(self, 'finput', 'fgradInput', '_input', '_gradOutput')
+        clear(self, 'finput', 'fgradInput', '_input', '_gradOutput')
         return super(SpatialConvolutionLocal, self).clearState()
 

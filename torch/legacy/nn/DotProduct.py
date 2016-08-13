@@ -1,7 +1,8 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .utils import clear
 
-class DotProduct(nn.Module):
+class DotProduct(Module):
 
     def __init__(self):
         super(DotProduct, self).__init__()
@@ -41,6 +42,6 @@ class DotProduct(nn.Module):
         return self.gradInput
 
     def clearState(self):
-        nn.utils.clear(self, 'buffer')
+        clear(self, 'buffer')
         return super(DotProduct, self).clearState()
 

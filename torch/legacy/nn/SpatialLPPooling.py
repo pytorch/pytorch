@@ -1,7 +1,13 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .Sequential import Sequential
+from .Square import Square
+from .Power import Power
+from .SpatialAveragePooling import SpatialAveragePooling
+from .MulConstant import MulConstant
+from .Sqrt import Sqrt
 
-class SpatialLPPooling(nn.Sequential):
+class SpatialLPPooling(Sequential):
 
     def __init__(self, nInputPlane, pnorm, kW, kH, dW=None, dH=None):
         super(SpatialLPPooling, self).__init__()
@@ -15,16 +21,16 @@ class SpatialLPPooling(nn.Sequential):
         self.dH = dH
 
         if pnorm == 2:
-           self.add(nn.Square())
+           self.add(Square())
         else:
-           self.add(nn.Power(pnorm))
+           self.add(Power(pnorm))
 
-        self.add(nn.SpatialAveragePooling(kW, kH, dW, dH))
-        self.add(nn.MulConstant(kW*kH))
+        self.add(SpatialAveragePooling(kW, kH, dW, dH))
+        self.add(MulConstant(kW*kH))
         if pnorm == 2:
-           self.add(nn.Sqrt())
+           self.add(Sqrt())
         else:
-           self.add(nn.Power(1/pnorm))
+           self.add(Power(1/pnorm))
 
     # the module is a Sequential: by default, it'll try to learn the parameters
     # of the sub sampler: we avoid that by redefining its methods.

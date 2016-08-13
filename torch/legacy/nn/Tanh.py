@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class Tanh(nn.Module):
+class Tanh(Module):
 
     def updateOutput(self, input):
         self._backend.Tanh_updateOutput(

@@ -1,12 +1,14 @@
 import torch
-from torch.legacy import nn
+from .Criterion import Criterion
+from .LogSoftMax import LogSoftMax
+from .ClassNLLCriterion import ClassNLLCriterion
 
-class CrossEntropyCriterion(nn.Criterion):
+class CrossEntropyCriterion(Criterion):
 
     def __init__(self, weights=None):
         super(CrossEntropyCriterion, self).__init__()
-        self.lsm = nn.LogSoftMax()
-        self.nll = nn.ClassNLLCriterion(weights)
+        self.lsm = LogSoftMax()
+        self.nll = ClassNLLCriterion(weights)
 
     def updateOutput(self, input, target):
         input = input.squeeze()

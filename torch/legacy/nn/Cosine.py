@@ -1,8 +1,9 @@
 import math
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .utils import clear
 
-class Cosine(nn.Module):
+class Cosine(Module):
 
     def __init__(self, inputSize, outputSize):
         super(Cosine, self).__init__()
@@ -135,7 +136,7 @@ class Cosine(nn.Module):
 
 
     def clearState(self):
-        nn.utils.clear(self, [
+        clear(self, [
            '_input',
            '_weight',
            '_gradOutput',

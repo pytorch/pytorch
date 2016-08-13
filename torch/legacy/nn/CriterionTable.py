@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class CriterionTable(nn.Module):
+class CriterionTable(Module):
 
     def __init__(self, criterion):
         super(CriterionTable, self).__init__()

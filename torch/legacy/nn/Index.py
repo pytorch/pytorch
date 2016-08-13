@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class Index(nn.Module):
+class Index(Module):
 
     def __init__(self, dimension):
          super(Index, self).__init__()

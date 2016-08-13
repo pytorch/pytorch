@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class CAddTable(nn.Module):
+class CAddTable(Module):
     def __init__(self, inplace=False):
         super(CAddTable, self).__init__()
         self.inplace = inplace

@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Criterion import Criterion
 
-class HingeEmbeddingCriterion(nn.Criterion):
+class HingeEmbeddingCriterion(Criterion):
 
     def __init__(self, margin=1, sizeAverage=True):
         super(HingeEmbeddingCriterion, self).__init__()

@@ -29,9 +29,10 @@
 """
 
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .utils import clear
 
-class BatchNormalization(nn.Module):
+class BatchNormalization(Module):
     # expected dimension of input
     nDim = 2
 
@@ -171,7 +172,7 @@ class BatchNormalization(nn.Module):
     def clearState(self):
         # first 5 buffers are not present in the current implementation,
         # but we keep them for cleaning old saved models
-        nn.utils.clear(self, [
+        clear(self, [
            'buffer',
            'buffer2',
            'centered',

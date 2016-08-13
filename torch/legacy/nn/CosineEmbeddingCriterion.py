@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Criterion import Criterion
 
-class CosineEmbeddingCriterion(nn.Criterion):
+class CosineEmbeddingCriterion(Criterion):
 
     def __init__(self, margin=0, sizeAverage=True):
         super(CosineEmbeddingCriterion, self).__init__()

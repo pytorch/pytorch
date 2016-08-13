@@ -1,7 +1,8 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .utils import clear
 
-class SpatialMaxPooling(nn.Module):
+class SpatialMaxPooling(Module):
 
     def __init__(self, kW, kH, dW=None, dH=None, padW=0, padH=0):
         super(SpatialMaxPooling, self).__init__()
@@ -71,6 +72,6 @@ class SpatialMaxPooling(nn.Module):
         return s
 
     def clearState(self):
-        nn.utils.clear(self, 'indices')
+        clear(self, 'indices')
         return super(SpatialMaxPooling, self).clearState()
 

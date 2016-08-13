@@ -1,7 +1,8 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .utils import clear
 
-class Dropout(nn.Module):
+class Dropout(Module):
 
     def __init__(self, p=0.5, inplace=False):
         super(Dropout, self).__init__()
@@ -42,6 +43,6 @@ class Dropout(nn.Module):
         return super(Dropout, self).__repr__() + '({:.4f})'.format(self.p)
 
     def clearState(self):
-        nn.utils.clear(self, 'noise')
+        clear(self, 'noise')
         return super(Dropout, self).clearState()
 

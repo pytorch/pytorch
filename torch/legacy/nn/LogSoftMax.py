@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class LogSoftMax(nn.Module):
+class LogSoftMax(Module):
 
     def updateOutput(self, input):
         self._backend.LogSoftMax_updateOutput(

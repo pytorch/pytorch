@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class Exp(nn.Module):
+class Exp(Module):
 
     def updateOutput(self, input):
         return torch.exp(self.output, input)

@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class Log(nn.Module):
+class Log(Module):
 
     def updateOutput(self, input):
         self.output.resizeAs_(input)

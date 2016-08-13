@@ -1,7 +1,10 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .Sequential import Sequential
+from .SpatialSubtractiveNormalization import SpatialSubtractiveNormalization
+from .SpatialDivisiveNormalization import SpatialDivisiveNormalization
 
-class SpatialContrastiveNormalization(nn.Module):
+class SpatialContrastiveNormalization(Module):
 
     def __init__(self, nInputPlane=1, kernel=None, threshold=1e-4, thresval=1e-4):
         super(SpatialContrastiveNormalization, self).__init__()
@@ -21,9 +24,9 @@ class SpatialContrastiveNormalization(nn.Module):
            raise ValueError('SpatialContrastiveNormalization averaging kernel must have ODD dimensions')
 
         # instantiate sub+div normalization
-        self.normalizer = nn.Sequential()
-        self.normalizer.add(nn.SpatialSubtractiveNormalization(self.nInputPlane, self.kernel))
-        self.normalizer.add(nn.SpatialDivisiveNormalization(self.nInputPlane, self.kernel,
+        self.normalizer = Sequential()
+        self.normalizer.add(SpatialSubtractiveNormalization(self.nInputPlane, self.kernel))
+        self.normalizer.add(SpatialDivisiveNormalization(self.nInputPlane, self.kernel,
                                                             self.threshold, self.thresval))
 
     def updateOutput(self, input):

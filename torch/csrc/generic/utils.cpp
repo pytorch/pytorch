@@ -33,24 +33,6 @@ bool THPUtils_(parseSlice)(PyObject *slice, Py_ssize_t len, Py_ssize_t *ostart, 
 #else
 #define CONVERT(expr) (expr)
 #endif
-bool THPUtils_(parseReal)(PyObject *value, real *result)
-{
-  if (PyLong_Check(value)) {
-    *result = (real)CONVERT(PyLong_AsLongLong(value));
-  }  else if (PyInt_Check(value)) {
-    *result = (real)CONVERT(PyInt_AsLong(value));
-  } else if (PyFloat_Check(value)) {
-    *result = (real)CONVERT(PyFloat_AsDouble(value));
-  } else {
-   char err_string[512];
-   snprintf (err_string, 512, "%s %s",
-       "parseReal expected long or float, but got type: ",
-       value->ob_type->tp_name);
-    PyErr_SetString(PyExc_RuntimeError, err_string);
-    return false;
-  }
-  return true;
-}
 
 real THPUtils_(unpackReal)(PyObject *value)
 {
@@ -65,6 +47,21 @@ real THPUtils_(unpackReal)(PyObject *value)
   }
 }
 
+bool THPUtils_(parseReal)(PyObject *value, real *result)
+{
+  try {
+    *result = THPUtils_(unpackReal)(value);
+  } catch (...) {
+   char err_string[512];
+   snprintf (err_string, 512, "%s %s",
+       "parseReal expected long or float, but got type: ",
+       value->ob_type->tp_name);
+    PyErr_SetString(PyExc_RuntimeError, err_string);
+    return false;
+  }
+  return true;
+}
+
 accreal THPUtils_(unpackAccreal)(PyObject *value)
 {
   if (PyLong_Check(value)) {
@@ -77,6 +74,7 @@ accreal THPUtils_(unpackAccreal)(PyObject *value)
     throw std::exception();
   }
 }
+
 #undef CONVERT
 
 bool THPUtils_(checkReal)(PyObject *value)
@@ -92,7 +90,8 @@ PyObject * THPUtils_(newReal)(real value)
 #elif defined(THC_REAL_IS_HALF)
   return PyFloat_FromDouble(THC_half2float(value));
 #else
-  return PyLong_FromLong(value);
+  // TODO: return long if result doesn't fit
+  return PyInt_FromLong(value);
 #endif
 }
 

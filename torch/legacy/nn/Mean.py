@@ -1,5 +1,5 @@
 import torch
-from torch.legacy import nn
+from .Sum import Sum
 
 """
 
@@ -9,7 +9,7 @@ Please use instead "nn.Sum(dimension, nInputDims, sizeAverage)"
 
 """
 
-class Mean(nn.Sum):
+class Mean(Sum):
 
     def __init__(self, dimension):
         super(Mean, self).__init__(dimension, True)

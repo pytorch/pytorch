@@ -1,11 +1,11 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
 
 # This module acts as an L1 latent state regularizer, adding the
 # [gradOutput] to the gradient of the L1 loss. The [input] is copied to
 # the [output].
 
-class L1Penalty(nn.Module):
+class L1Penalty(Module):
 
     def __init__(self, l1weight, sizeAverage=False, provideOutput=True):
         super(L1Penalty, self).__init__()

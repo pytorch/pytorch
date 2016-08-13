@@ -1,7 +1,8 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .utils import clear
 
-class MaskedSelect(nn.Module):
+class MaskedSelect(Module):
 
     def __init__(self):
         super(MaskedSelect, self).__init__()
@@ -53,11 +54,11 @@ class MaskedSelect(nn.Module):
         return self
 
     def clearState(self):
-        return nn.utils.clear(self, ['output',
-                                    'gradInput',
-                                    '_maskIndexBuffer',
-                                    '_maskIndexBufferCPU',
-                                    '_maskIndices',
-                                    '_gradBuffer',
-                                    '_gradMask'])
+        return clear(self, ['output',
+                            'gradInput',
+                            '_maskIndexBuffer',
+                            '_maskIndexBufferCPU',
+                            '_maskIndices',
+                            '_gradBuffer',
+                            '_gradMask'])
 

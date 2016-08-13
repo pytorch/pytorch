@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class Contiguous(nn.Module):
+class Contiguous(Module):
 
     def updateOutput(self, input):
         if not input.isContiguous():

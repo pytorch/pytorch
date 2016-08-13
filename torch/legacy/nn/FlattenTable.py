@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class FlattenTable(nn.Module):
+class FlattenTable(Module):
 
     def __init__(self):
         super(FlattenTable, self).__init__()

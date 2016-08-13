@@ -1,7 +1,8 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .utils import clear
 
-class SoftSign(nn.Module):
+class SoftSign(Module):
 
     def __init__(self):
         super(SoftSign, self).__init__()
@@ -21,6 +22,6 @@ class SoftSign(nn.Module):
         return self.gradInput
 
     def clearState(self):
-        nn.utils.clear(self, 'temp', 'tempgrad')
+        clear(self, 'temp', 'tempgrad')
         return super(SoftSign, self).clearState()
 

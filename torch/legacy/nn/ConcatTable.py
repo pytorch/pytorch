@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Container import Container
 
-class ConcatTable(nn.Container):
+class ConcatTable(Container):
 
     def __init__(self, ):
         super(ConcatTable, self).__init__()

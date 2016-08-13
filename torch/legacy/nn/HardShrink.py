@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class HardShrink(nn.Module):
+class HardShrink(Module):
 
     def __init__(self, lambd=0.5):
         assert type(lambd) == float

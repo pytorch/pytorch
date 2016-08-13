@@ -1,8 +1,18 @@
 import math
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .Sequential import Sequential
+from .SpatialZeroPadding import SpatialZeroPadding
+from .SpatialConvolution import SpatialConvolution
+from .SpatialConvolutionMap import SpatialConvolutionMap
+from .Replicate import Replicate
+from .Square import Square
+from .Sqrt import Sqrt
+from .CDivTable import CDivTable
+from .Threshold import Threshold
+from .utils import clear
 
-class SpatialDivisiveNormalization(nn.Module):
+class SpatialDivisiveNormalization(Module):
 
     def __init__(self, nInputPlane=1, kernel=None, threshold=1e-4, thresval=None):
         super(SpatialDivisiveNormalization, self).__init__()
@@ -22,34 +32,34 @@ class SpatialDivisiveNormalization(nn.Module):
             raise ValueError('SpatialDivisiveNormalization averaging kernel must have ODD dimensions')
 
         # padding values
-        padH = math.floor(self.kernel.size(0)/2)
+        padH = int(math.floor(self.kernel.size(0)/2))
         padW = padH
         if kdim == 2:
-            padW = math.floor(self.kernel.size(1)/2)
+            padW = int(math.floor(self.kernel.size(1)/2))
 
         # create convolutional mean estimator
-        self.meanestimator = nn.Sequential()
-        self.meanestimator.add(nn.SpatialZeroPadding(padW, padW, padH, padH))
+        self.meanestimator = Sequential()
+        self.meanestimator.add(SpatialZeroPadding(padW, padW, padH, padH))
         if kdim == 2:
-            self.meanestimator.add(nn.SpatialConvolution(self.nInputPlane, 1, self.kernel.size(1), self.kernel.size(0)))
+            self.meanestimator.add(SpatialConvolution(self.nInputPlane, 1, self.kernel.size(1), self.kernel.size(0)))
         else:
-            self.meanestimator.add(nn.SpatialConvolutionMap(nn.SpatialConvolutionMap.maps.oneToOne(self.nInputPlane), self.kernel.size(0), 1))
-            self.meanestimator.add(nn.SpatialConvolution(self.nInputPlane, 1, 1, self.kernel.size(0)))
+            self.meanestimator.add(SpatialConvolutionMap(SpatialConvolutionMap.maps.oneToOne(self.nInputPlane), self.kernel.size(0), 1))
+            self.meanestimator.add(SpatialConvolution(self.nInputPlane, 1, 1, self.kernel.size(0)))
 
-        self.meanestimator.add(nn.Replicate(self.nInputPlane, 1))
+        self.meanestimator.add(Replicate(self.nInputPlane, 1))
 
         # create convolutional std estimator
-        self.stdestimator = nn.Sequential()
-        self.stdestimator.add(nn.Square())
-        self.stdestimator.add(nn.SpatialZeroPadding(padW, padW, padH, padH))
+        self.stdestimator = Sequential()
+        self.stdestimator.add(Square())
+        self.stdestimator.add(SpatialZeroPadding(padW, padW, padH, padH))
         if kdim == 2:
-            self.stdestimator.add(nn.SpatialConvolution(self.nInputPlane, 1, self.kernel.size(1), self.kernel.size(0)))
+            self.stdestimator.add(SpatialConvolution(self.nInputPlane, 1, self.kernel.size(1), self.kernel.size(0)))
         else:
-            self.stdestimator.add(nn.SpatialConvolutionMap(nn.SpatialContolutionMap.maps.oneToOne(self.nInputPlane), self.kernel.size(0), 1))
-            self.stdestimator.add(nn.SpatialConvolution(self.nInputPlane, 1, 1, self.kernel.size(0)))
+            self.stdestimator.add(SpatialConvolutionMap(SpatialContolutionMap.maps.oneToOne(self.nInputPlane), self.kernel.size(0), 1))
+            self.stdestimator.add(SpatialConvolution(self.nInputPlane, 1, 1, self.kernel.size(0)))
 
-        self.stdestimator.add(nn.Replicate(self.nInputPlane, 1))
-        self.stdestimator.add(nn.Sqrt())
+        self.stdestimator.add(Replicate(self.nInputPlane, 1))
+        self.stdestimator.add(Sqrt())
 
         # set kernel and bias
         if kdim == 2:
@@ -74,9 +84,9 @@ class SpatialDivisiveNormalization(nn.Module):
             self.stdestimator.modules[3].bias.zero_()
 
         # other operation
-        self.normalizer = nn.CDivTable()
-        self.divider = nn.CDivTable()
-        self.thresholder = nn.Threshold(self.threshold, self.thresval)
+        self.normalizer = CDivTable()
+        self.divider = CDivTable()
+        self.thresholder = Threshold(self.threshold, self.thresval)
 
         # coefficient array, to adjust side effects
         self.coef = torch.Tensor(1, 1, 1)
@@ -118,7 +128,7 @@ class SpatialDivisiveNormalization(nn.Module):
         return self.gradInput
 
     def clearState(self):
-        nn.utils.clear(self, 'ones', '_coef')
+        clear(self, 'ones', '_coef')
         self.meanestimator.clearState()
         self.stdestimator.clearState()
         return super(SpatialDivisiveNormalization, self).clearState()

@@ -1,7 +1,12 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .Identity import Identity
+from .LookupTable import LookupTable
+from .Sequential import Sequential
+from .ParallelTable import ParallelTable
+from .MM import MM
 
-class PartialLinear(nn.Module):
+class PartialLinear(Module):
     """
     PartialLinear is a Linear layer that allows the user to a set a collection of
     column indices. When the column indices are set, the layer will behave like a
@@ -18,9 +23,9 @@ class PartialLinear(nn.Module):
         super(PartialLinear, self).__init__()
 
         # define the layer as a small network:
-        pt = nn.ParallelTable()
-        pt.add(nn.Identity()).add(nn.LookupTable(outputsize, inputsize))
-        self.network = nn.Sequential().add(pt).add(nn.MM(False, True))
+        pt = ParallelTable()
+        pt.add(Identity()).add(LookupTable(outputsize, inputsize))
+        self.network = Sequential().add(pt).add(MM(False, True))
         if bias:
             self.bias     = torch.zeros(1, outputsize)
             self.gradBias = torch.zeros(1, outputsize)

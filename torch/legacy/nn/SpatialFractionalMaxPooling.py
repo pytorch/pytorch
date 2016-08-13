@@ -1,8 +1,8 @@
 import math
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class SpatialFractionalMaxPooling(nn.Module):
+class SpatialFractionalMaxPooling(Module):
     # Usage:
     # nn.SpatialFractionalMaxPooling(poolSizeW, poolSizeH, outW, outH)
     #   the output should be the exact size (outH x outW)
@@ -77,8 +77,8 @@ class SpatialFractionalMaxPooling(nn.Module):
         outH = self.outH
         if self.ratioW != None and self.ratioH != None:
             assert input.nDimension() == 4
-            outW = math.floor(input.size(3) * self.ratioW)
-            outH = math.floor(input.size(2) * self.ratioH)
+            outW = int(math.floor(input.size(3) * self.ratioW))
+            outH = int(math.floor(input.size(2) * self.ratioH))
 
             # Neither can be smaller than 1
             assert outW > 0

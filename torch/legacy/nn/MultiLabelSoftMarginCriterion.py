@@ -1,7 +1,9 @@
 import torch
-from torch.legacy import nn
+from .Criterion import Criterion
+from .Sigmoid import Sigmoid
+from .BCECriterion import BCECriterion
 
-class MultiLabelSoftMarginCriterion(nn.Criterion):
+class MultiLabelSoftMarginCriterion(Criterion):
     """
     A MultiLabel multiclass criterion based on sigmoid:
 
@@ -17,8 +19,8 @@ class MultiLabelSoftMarginCriterion(nn.Criterion):
 
     def __init__(self, weights=None):
          super(MultiLabelSoftMarginCriterion, self).__init__()
-         self.lsm = nn.Sigmoid()
-         self.nll = nn.BCECriterion(weights)
+         self.lsm = Sigmoid()
+         self.nll = BCECriterion(weights)
 
     def updateOutput(self, input, target):
          input = input if input.nElement() == 1 else input.squeeze()

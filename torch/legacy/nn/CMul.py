@@ -1,9 +1,10 @@
 import math
 
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .utils import clear, contiguousView
 
-class CMul(nn.Module):
+class CMul(Module):
 
     def __init__(self, *args):
         super(CMul, self).__init__()
@@ -74,8 +75,8 @@ class CMul(nn.Module):
 
         self.gradInput.resizeAs_(input).zero_()
         batchSize = input.size(0)
-        nn.utils.contiguousView(self._gradOutput, gradOutput, batchSize, -1)
-        nn.utils.contiguousView(self._gradInput, self.gradInput, batchSize, -1)
+        contiguousView(self._gradOutput, gradOutput, batchSize, -1)
+        contiguousView(self._gradInput, self.gradInput, batchSize, -1)
         self._weight = self.weight.view(1, -1)
         self._expand = self._weight.expandAs(self._gradOutput)
 
@@ -95,8 +96,8 @@ class CMul(nn.Module):
             self._sum = input.new()
 
         batchSize = input.size(0)
-        nn.utils.contiguousView(self._input, input, batchSize, -1)
-        nn.utils.contiguousView(self._gradOutput, gradOutput, batchSize, -1)
+        contiguousView(self._input, input, batchSize, -1)
+        contiguousView(self._gradOutput, gradOutput, batchSize, -1)
         self._gradWeight = self.gradWeight.view(1, -1)
 
         torch.mul(self._repeat, self._input, self._gradOutput)
@@ -109,7 +110,7 @@ class CMul(nn.Module):
         return super(CMul, self).type(type, tensorCache)
 
     def clearState(self):
-        nn.utils.clear(self, [
+        clear(self, [
            '_input',
            '_output',
            '_weight',

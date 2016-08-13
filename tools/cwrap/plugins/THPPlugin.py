@@ -16,6 +16,12 @@ class THPPlugin(CWrapPlugin):
         'THLongStorage*':   Template('((THPLongStorage*)$arg)->cdata'),
         'THStorage*':       Template('((THPStorage*)$arg)->cdata'),
         'THGenerator*':     Template('((THPGenerator*)$arg)->cdata'),
+        'void*':            Template('THPUtils_unpackLong($arg)'),
+        'long':             Template('THPUtils_unpackLong($arg)'),
+        'int':              Template('THPUtils_unpackLong($arg)'),
+        'bool':             Template('THPUtils_unpackLong($arg)'),
+        'float':            Template('THPFloatUtils_unpackReal($arg)'),
+        'double':           Template('THPDoubleUtils_unpackReal($arg)'),
         'real':             Template('THPUtils_(unpackReal)($arg)'),
         'accreal':          Template('THPUtils_(unpackAccreal)($arg)'),
     }
@@ -32,6 +38,12 @@ class THPPlugin(CWrapPlugin):
         'THLongStorage*':   Template('(PyObject*)Py_TYPE($arg) == THPLongStorageClass'),
         'THStorage*':       Template('(PyObject*)Py_TYPE($arg) == THPStorageClass'),
         'THGenerator*':     Template('Py_TYPE($arg) == &THPGeneratorType'),
+        'void*':            Template('THPUtils_checkLong($arg)'),
+        'long':             Template('THPUtils_checkLong($arg)'),
+        'int':              Template('THPUtils_checkLong($arg)'),
+        'bool':             Template('THPUtils_checkLong($arg)'),
+        'float':            Template('THPFloatUtils_checkReal($arg)'),
+        'double':           Template('THPDoubleUtils_checkReal($arg)'),
         'real':             Template('THPUtils_(checkReal)($arg)'),
         # TODO
         'accreal':          Template('THPUtils_(checkReal)($arg)'),
@@ -40,6 +52,8 @@ class THPPlugin(CWrapPlugin):
     RETURN_WRAPPER = {
         'THTensor*':        Template('return THPTensor_(newObject)($call);'),
         'THLongStorage*':   Template('return THPLongStorage_newObject($call);'),
+        # TODO: make it smarter - it should return python long if result doesn't fit into an int
+        'long':             Template('return PyInt_FromLong($call);'),
         # TODO
         'accreal':          Template('return PyFloat_FromDouble($call);'),
         'self':             Template('$call;\nPy_INCREF(self);\nreturn (PyObject*)self;'),

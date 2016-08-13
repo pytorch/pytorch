@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class CSubTable(nn.Module):
+class CSubTable(Module):
 
     def __init__(self, ):
         super(CSubTable, self).__init__()

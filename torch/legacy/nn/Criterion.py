@@ -1,5 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
+from . import _backends
+from .utils import recursiveType
 import torch._thnn
 
 class Criterion(object):
@@ -7,7 +9,7 @@ class Criterion(object):
     def __init__(self):
         self.gradInput = torch.Tensor()
         self.output = 0
-        self._backend = nn._backends.THNNDoubleBackend
+        self._backend = _backends.THNNDoubleBackend
 
     def updateOutput(self, input, target):
         raise NotImplementedError
@@ -27,7 +29,7 @@ class Criterion(object):
     def type(self, type, tensorCache=None):
         # find all tensors and convert them
         for key, param in self.__dict__.items():
-            setattr(self, key, nn.utils.recursiveType(param, type, tensorCache or {}))
+            setattr(self, key, recursiveType(param, type, tensorCache or {}))
 
         self._backend = torch._thnn.type2backend[type]
         return self

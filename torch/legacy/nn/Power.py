@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class Power(nn.Module):
+class Power(Module):
 
     def __init__(self, p):
         super(Power, self).__init__()

@@ -1,7 +1,8 @@
 import torch
-from torch.legacy import nn
+from .Criterion import Criterion
+from .utils import recursiveResizeAs, recursiveFill, recursiveAdd
 
-class MultiCriterion(nn.Criterion):
+class MultiCriterion(Criterion):
 
     def __init__(self, ):
         super(MultiCriterion, self).__init__()
@@ -25,10 +26,10 @@ class MultiCriterion(nn.Criterion):
         return self.output
 
     def updateGradInput(self, input, target):
-        self.gradInput = nn.utils.recursiveResizeAs(self.gradInput, input)[0]
-        nn.utils.recursiveFill(self.gradInput, 0)
+        self.gradInput = recursiveResizeAs(self.gradInput, input)[0]
+        recursiveFill(self.gradInput, 0)
         for i in range(len(self.criterions)):
-           nn.utils.recursiveAdd(self.gradInput, self.weights[i], self.criterions[i].updateGradInput(input, target))
+           recursiveAdd(self.gradInput, self.weights[i], self.criterions[i].updateGradInput(input, target))
 
         return self.gradInput
 

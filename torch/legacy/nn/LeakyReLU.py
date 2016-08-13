@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class LeakyReLU(nn.Module):
+class LeakyReLU(Module):
 
     def __init__(self, negval=1/100, inplace=False):
         super(LeakyReLU, self).__init__()

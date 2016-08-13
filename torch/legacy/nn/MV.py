@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class MV(nn.Module):
+class MV(Module):
     """Module to perform matrix vector multiplication on two minibatch inputs,
        producing a minibatch.
     """

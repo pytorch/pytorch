@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class AddConstant(nn.Module):
+class AddConstant(Module):
 
     def __init__(self, constant_scalar, inplace=False):
         super(AddConstant, self).__init__()

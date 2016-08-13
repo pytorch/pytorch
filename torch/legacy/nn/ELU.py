@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class ELU(nn.Module):
+class ELU(Module):
     """
             Djork-Arné Clevert, Thomas Unterthiner, Sepp Hochreiter
             Fast and Accurate Deep Network Learning by Exponential Linear Units (ELUs)

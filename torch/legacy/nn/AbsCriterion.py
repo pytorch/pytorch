@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Criterion import Criterion
 
-class AbsCriterion(nn.Criterion):
+class AbsCriterion(Criterion):
 
     def __init__(self, sizeAverage=True):
         super(AbsCriterion, self).__init__()

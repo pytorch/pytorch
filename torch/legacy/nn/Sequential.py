@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Container import Container
 
-class Sequential(nn.Container):
+class Sequential(Container):
 
     def __len__(self):
         return len(self.modules)

@@ -1,11 +1,12 @@
 import torch
-from torch.legacy import nn
+from .Module import Module
+from .VolumetricMaxPooling import VolumetricMaxPooling
 
-class VolumetricMaxUnpooling(nn.Module):
+class VolumetricMaxUnpooling(Module):
 
     def __init__(self, poolingModule):
         super(VolumetricMaxUnpooling, self).__init__()
-        assert isinstance(poolingModule, nn.VolumetricMaxPooling)
+        assert isinstance(poolingModule, VolumetricMaxPooling)
         assert poolingModule.kT == poolingModule.dT
         assert poolingModule.kH == poolingModule.dH
         assert poolingModule.kW == poolingModule.dW

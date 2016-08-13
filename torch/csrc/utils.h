@@ -8,6 +8,7 @@ if (!(cond)) { THPUtils_setError(__VA_ARGS__); return NULL; }
 
 bool THPUtils_checkLong(PyObject *index);
 int THPUtils_getLong(PyObject *index, long *result);
+long THPUtils_unpackLong(PyObject *index);
 int THPUtils_getCallable(PyObject *arg, PyObject **result);
 THLongStorage * THPUtils_getLongStorage(PyObject *args, int ignore_first=0);
 void THPUtils_setError(const char *format, ...);

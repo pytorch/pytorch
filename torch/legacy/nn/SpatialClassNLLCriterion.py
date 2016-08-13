@@ -1,7 +1,7 @@
 import torch
-from torch.legacy import nn
+from .Criterion import Criterion
 
-class SpatialClassNLLCriterion(nn.Criterion):
+class SpatialClassNLLCriterion(Criterion):
 
     def __init__(self, weights=None, sizeAverage=True):
         assert weights is None or weights.dim() == 1

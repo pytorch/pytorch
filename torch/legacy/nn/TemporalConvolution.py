@@ -1,8 +1,8 @@
 import math
 import torch
-from torch.legacy import nn
+from .Module import Module
 
-class TemporalConvolution(nn.Module):
+class TemporalConvolution(Module):
 
     def __init__(self, inputFrameSize, outputFrameSize, kW, dW=1):
         super(TemporalConvolution, self).__init__()
