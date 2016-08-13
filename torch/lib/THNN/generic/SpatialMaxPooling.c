@@ -16,7 +16,10 @@ static void THNN_(SpatialMaxPooling_updateOutput_frame)(
           int dW,
           int dH,
           int padW,
-          int padH)
+          int padH,
+          int dilationW,
+          int dilationH
+          )
 {
   long k;
 #pragma omp parallel for private(k)
@@ -31,10 +34,12 @@ static void THNN_(SpatialMaxPooling_updateOutput_frame)(
       {
         long hstart = i * dH - padH;
         long wstart = j * dW - padW;
-        long hend = fminf(hstart + kH, iheight);
-        long wend = fminf(wstart + kW, iwidth);
-        hstart = fmaxf(hstart, 0);
-        wstart = fmaxf(wstart, 0);
+        long hend = fminf(hstart + (kH - 1) * dilationH + 1, iheight);
+        long wend = fminf(wstart + (kW - 1) * dilationW + 1, iwidth);
+        while(hstart < 0)
+          hstart += dilationH;
+        while(wstart < 0)
+          wstart += dilationW;
 
         /* local pointers */
         real *op = output_p  + k*owidth*oheight + i*owidth + j;
@@ -45,9 +50,9 @@ static void THNN_(SpatialMaxPooling_updateOutput_frame)(
         real maxval = -THInf;
         long tcntr = 0;
         long x,y;
-        for(y = hstart; y < hend; y++)
+        for(y = hstart; y < hend; y += dilationH)
         {
-          for(x = wstart; x < wend; x++)
+          for(x = wstart; x < wend; x += dilationW)
           {
             tcntr = y*iwidth + x;
             real val = *(ip + tcntr);
@@ -80,6 +85,8 @@ void THNN_(SpatialMaxPooling_updateOutput)(
           int dH,
           int padW,
           int padH,
+          int dilationW,
+          int dilationH,
           bool ceil_mode)
 {
   int dimw = 2;
@@ -104,23 +111,26 @@ void THNN_(SpatialMaxPooling_updateOutput)(
     dimh++;
   }
   THArgCheck(input->size[dimw] >= kW - padW && input->size[dimh] >= kH - padH, 2, "input image smaller than kernel size");
-
   THArgCheck(kW/2 >= padW && kH/2 >= padH, 2, "pad should be smaller than half of kernel size");
-
+  
   /* sizes */
   nslices = input->size[dimh-1];
   iheight = input->size[dimh];
   iwidth = input->size[dimw];
   if (ceil_mode)
   {
-    oheight = (long)(ceil((float)(iheight - kH + 2*padH) / dH)) + 1;
-    owidth  = (long)(ceil((float)(iwidth  - kW + 2*padW) / dW)) + 1;
+    oheight = (long)(ceil((float)(iheight - (dilationH * (kH - 1) + 1) + 2*padH) / dH)) + 1;
+    owidth  = (long)(ceil((float)(iwidth  - (dilationW * (kW - 1) + 1) + 2*padW) / dW)) + 1;
   }
   else
   {
-    oheight = (long)(floor((float)(iheight - kH + 2*padH) / dH)) + 1;
-    owidth  = (long)(floor((float)(iwidth  - kW + 2*padW) / dW)) + 1;
+    oheight = (long)(floor((float)(iheight - (dilationH * (kH - 1) + 1) + 2*padH) / dH)) + 1;
+    owidth  = (long)(floor((float)(iwidth  - (dilationW * (kW - 1) + 1) + 2*padW) / dW)) + 1;
   }
+
+  if (owidth < 1 || oheight < 1)
+    THError("Given input size: (%dx%dx%d). Calculated output size: (%dx%dx%d). Output size is too small",
+            nslices,iheight,iwidth,nslices,oheight,owidth);
 
   if (padW || padH)
   {
@@ -151,7 +161,9 @@ void THNN_(SpatialMaxPooling_updateOutput)(
                                               iwidth, iheight,
                                               owidth, oheight,
                                               kW, kH, dW, dH,
-                                              padW, padH);
+                                              padW, padH,
+                                              dilationW, dilationH
+                                              );
   }
   else
   {
@@ -174,7 +186,9 @@ void THNN_(SpatialMaxPooling_updateOutput)(
                                                 iwidth, iheight,
                                                 owidth, oheight,
                                                 kW, kH, dW, dH,
-                                                padW, padH);
+                                                padW, padH,
+                                                dilationW, dilationH
+                                                );
     }
   }
 
@@ -229,6 +243,8 @@ void THNN_(SpatialMaxPooling_updateGradInput)(
           int dH,
           int padW,
           int padH,
+          int dilationW,
+          int dilationH,
           bool ceil_mode)
 {
   int dimw = 2;
