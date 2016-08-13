@@ -207,7 +207,7 @@ static size_t THDiskFile_position(THFile *self)
   if (offset > -1)
       return (size_t)offset;
   else if(!dfself->file.isQuiet)
-      THError("unable to obtain disk file offset (maybe a long overflow occured)");
+      THError("unable to obtain disk file offset (maybe a long overflow occurred)");
 
   return 0;
 }

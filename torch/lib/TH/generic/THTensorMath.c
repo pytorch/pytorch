@@ -1937,7 +1937,7 @@ void THTensor_(tril)(THTensor *r_, THTensor *t, long k)
   for(r = 0; r < t_size_0; r++)
   {
     long sz = THMin(r+k+1, t_size_1);
-    for(c = THMax(0, r+k); c < t_size_1; c++)
+    for(c = THMax(0, r+k+1); c < t_size_1; c++)
       r__data[r*r__stride_0+c*r__stride_1] = 0;
     for(c = 0; c < sz; c++)
       r__data[r*r__stride_0+c*r__stride_1] = t_data[r*t_stride_0+c*t_stride_1];
@@ -2066,30 +2066,26 @@ int THTensor_(equal)(THTensor *ta, THTensor* tb)
   void THTensor_(NAME##Value)(THByteTensor *r_, THTensor* t, real value)	\
   {									\
     THByteTensor_rawResize(r_, t->nDimension, t->size, NULL);		\
-    THByteTensor_zero(r_);						\
     TH_TENSOR_APPLY2(unsigned char, r_, real, t,			\
-		     if (*t_data OP value) *r__data = 1;);		\
+		     *r__data = (*t_data OP value) ? 1 : 0;); \
   }									\
   void THTensor_(NAME##ValueT)(THTensor* r_, THTensor* t, real value)	\
   {									\
     THTensor_(rawResize)(r_, t->nDimension, t->size, NULL);		\
-    THTensor_(zero)(r_);						\
     TH_TENSOR_APPLY2(real, r_, real, t,					\
-		     if (*t_data OP value) *r__data = 1;);		\
+		     *r__data = (*t_data OP value) ? 1 : 0;); \
   }									\
   void THTensor_(NAME##Tensor)(THByteTensor *r_, THTensor *ta, THTensor *tb) \
   {									\
     THByteTensor_rawResize(r_, ta->nDimension, ta->size, NULL);		\
-    THByteTensor_zero(r_);						\
     TH_TENSOR_APPLY3(unsigned char, r_, real, ta, real, tb,		\
-		     if(*ta_data OP *tb_data) *r__data = 1;);		\
+		     *r__data = (*ta_data OP *tb_data) ? 1 : 0;); \
   }									\
   void THTensor_(NAME##TensorT)(THTensor *r_, THTensor *ta, THTensor *tb) \
   {									\
     THTensor_(rawResize)(r_, ta->nDimension, ta->size, NULL);		\
-    THTensor_(zero)(r_);						\
     TH_TENSOR_APPLY3(real, r_, real, ta, real, tb,			\
-		     if(*ta_data OP *tb_data) *r__data = 1;);		\
+		     *r__data = (*ta_data OP *tb_data) ? 1 : 0;); \
   }									\
 
 
