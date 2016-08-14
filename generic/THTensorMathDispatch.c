@@ -23,10 +23,17 @@ TH_API void THTensor_(add)(THTensor *r_, THTensor *t, real value)
 // Dispatch tables: each optimized implementation of a function
 // is described in a table, and the tables are used to initialize
 // the function pointers for dynamic dispatch
+
+#if defined(TH_REAL_IS_DOUBLE)
 FunctionDescription THTensor_(dispatchTblAdd)[] = {
   FUNCTION_IMPL(THTensor_(add_AVX), SIMDExtension_AVX),
   FUNCTION_IMPL(THTensor_(add_Default), SIMDExtension_DEFAULT)
 };
+#else
+FunctionDescription THTensor_(dispatchTblAdd)[] = {
+  FUNCTION_IMPL(THTensor_(add_Default), SIMDExtension_DEFAULT)
+};
+#endif
 
 int THTensor_(cpuDispatchInit)()
 {
