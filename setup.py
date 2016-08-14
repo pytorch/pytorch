@@ -79,6 +79,14 @@ main_sources = [
     "torch/csrc/utils.cpp",
 ]
 
+try:
+    import numpy as np
+    include_dirs += [np.get_include()]
+    main_sources += ["torch/csrc/numpy.cpp"]
+    extra_compile_args += ['-DWITH_NUMPY']
+except ImportError:
+    pass
+
 if WITH_CUDA:
     if platform.system() == 'Darwin':
         include_dirs += ['/Developer/NVIDIA/CUDA-7.5/include']

@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <TH/TH.h>
 
+#define WITH_NUMPY_IMPORT_ARRAY
 #include "THP.h"
 
 PyObject* module;
@@ -724,6 +725,10 @@ PyMODINIT_FUNC PyInit__C()
   ASSERT_TRUE(THPDefaultGenerator != nullptr);
 
   updateErrorHandlers();
+
+#ifdef WITH_NUMPY
+  import_array();
+#endif
 
 #if PY_MAJOR_VERSION == 2
 #else

@@ -2,6 +2,28 @@
 #define TH_GENERIC_FILE "generic/Tensor.cpp"
 #else
 
+#ifdef WITH_NUMPY
+
+#ifdef TH_REAL_IS_DOUBLE
+#define NUMPY_TYPE_ENUM NPY_DOUBLE
+#endif
+#ifdef TH_REAL_IS_FLOAT
+#define NUMPY_TYPE_ENUM NPY_FLOAT
+#endif
+#ifdef TH_REAL_IS_LONG
+#define NUMPY_TYPE_ENUM NPY_INT64
+#endif
+#ifdef TH_REAL_IS_INT
+#define NUMPY_TYPE_ENUM NPY_INT32
+#endif
+#ifdef TH_REAL_IS_BYTE
+#define NUMPY_TYPE_ENUM NPY_UINT8
+#endif
+
+#endif
+
+#include "TensorMethods.cpp"
+
 extern PyObject *THPTensorClass;
 PyObject * THPTensor_(newObject)(THTensor *ptr)
 {
@@ -35,6 +57,9 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
   PyObject *iterable_arg = NULL;              // an iterable, with new tensor contents
   std::vector<size_t> iterator_lengths;       // a queue storing lengths of iterables at each depth
   bool args_ok = true;
+#ifdef NUMPY_TYPE_ENUM
+  THPObjectPtr numpy_array = NULL;
+#endif
 
   if (kwargs && PyDict_Size(kwargs) == 1) {
     cdata_arg = PyDict_GetItemString(kwargs, "cdata");
@@ -48,6 +73,11 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
     } else if (THPUtils_checkLong(arg)) {
       sizes_arg = THPUtils_getLongStorage(args);
       args_ok = sizes_arg != nullptr;
+#ifdef NUMPY_TYPE_ENUM
+    } else if (PyArray_Check(arg) && PyArray_TYPE((PyArrayObject*)arg) == NUMPY_TYPE_ENUM) {
+      numpy_array = PyArray_FromArray((PyArrayObject*)arg, nullptr, NPY_ARRAY_BEHAVED);
+      args_ok = numpy_array != nullptr;
+#endif
     } else {
       iterable_arg = arg;
       Py_INCREF(arg);
@@ -105,6 +135,10 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
       self->cdata = THTensor_(newWithSize)(LIBRARY_STATE sizes_arg, nullptr);
     } else if (tensor_arg) {
       self->cdata = THTensor_(newWithTensor)(LIBRARY_STATE tensor_arg);
+#ifdef NUMPY_TYPE_ENUM
+    } else if (numpy_array) {
+      self->cdata = THPTensor_(fromNumpy)(numpy_array.get());
+#endif
     } else if (iterable_arg && iterator_lengths.size() == 1 && iterator_lengths[0] == 0) {
       self->cdata = THTensor_(new)(LIBRARY_STATE_NOARGS);
     } else if (iterable_arg) {
@@ -457,8 +491,6 @@ static struct PyMemberDef THPTensor_(members)[] = {
   {NULL}
 };
 
-#include "TensorMethods.cpp"
-
 typedef struct {
   PyObject_HEAD
 } THPTensorStateless;
@@ -524,5 +556,7 @@ bool THPTensor_(init)(PyObject *module)
   PyModule_AddObject(module, THPTensorBaseStr, (PyObject *)&THPTensorType);
   return true;
 }
+
+#undef NUMPY_TYPE_ENUM
 
 #endif

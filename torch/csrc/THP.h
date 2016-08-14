@@ -23,5 +23,8 @@
 #include "Tensor.h"
 #include "Module.h"
 #include "utils.h" // This requires defined Storage and Tensor types
+#ifdef WITH_NUMPY
+#include "numpy.h"
+#endif
 
 #endif
