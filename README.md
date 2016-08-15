@@ -15,12 +15,8 @@ python3 setup.py install
 
 ## Communication
 * github issues: bug reports, feature requests, install issues, RFCs, thoughts, etc.
-* slack: general chat, online discussions, collaboration etc.
-
-###Slack:
-You should all be invited to the slack chat (check your email)  
-- Team Name: PyTorch
-- Team Domain: https://pytorch.slack.com/
+* slack: general chat, online discussions, collaboration etc. https://pytorch.slack.com/ . If you need a slack invite, ping me at soumith@pytorch.org 
+* newsletter: no-noise, one-way email newsletter with important announcements about pytorch. You can sign-up here: http://eepurl.com/cbG0rv
 
 ## Timeline
 
@@ -164,6 +160,7 @@ for i in range(ITERS):
 
 ```
 
+* Here, nn.Variable will have a complete tape-based automatic differentiation implemented 
 * To access states, have hooks for forward / backward (this also makes multi-GPU easier to implement)
     * This has the advantage of not having to worry about in-place / out-of-place operators for accessing .output or .gradInput
 * When writing the module, make sure debuggability is straight forward. Dropping into pdb and inspecting things should be natural, especially when going over the backward graph.
