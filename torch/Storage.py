@@ -16,5 +16,22 @@ class _StorageBase():
         torch._C._storageCopy(self, other)
         return self
 
+    def __copy__(self):
+        return self.clone()
+
+    def __deepcopy__(self, memo):
+        memo = memo.setdefault('torch', {})
+        if self._cdata in memo:
+            return memo[self._cdata]
+        new_storage = self.clone()
+        memo[self._cdata] = new_storage
+        return new_storage
+
+    def __reduce__(self):
+        return type(self), (self.tolist(),)
+
+    def clone(self):
+        return type(self)(self.size()).copy_(self)
+
     def tolist(self):
         return [v for v in self]

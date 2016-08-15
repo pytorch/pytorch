@@ -67,6 +67,19 @@ class _TensorBase(object):
         torch._C._tensorCopy(self, other)
         return self
 
+    def __deepcopy__(self, _memo):
+        memo = _memo.setdefault('torch', {})
+        if self._cdata in memo:
+            return memo[self._cdata]
+        new_storage = self.storage().__deepcopy__(_memo)
+        new_tensor = self.new()
+        new_tensor.set_(new_storage, self.storageOffset(), self.size(), self.stride())
+        memo[self._cdata] = new_tensor
+        return new_tensor
+
+    def __reduce__(self):
+        return type(self), (self.tolist(),)
+
     def __repr__(self):
         return str(self)
 
