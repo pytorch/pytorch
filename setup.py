@@ -1,17 +1,15 @@
-from setuptools import setup, Extension, distutils
-from tools.nnwrap import generate_wrappers as generate_nn_wrappers
-from tools.cwrap import cwrap
-from tools.cwrap.plugins.THPPlugin import THPPlugin
-from tools.cwrap.plugins.THPLongArgsPlugin import THPLongArgsPlugin
-from tools.cwrap.plugins.ArgcountSortPlugin import ArgcountSortPlugin
-from tools.cwrap.plugins.AutoGPU import AutoGPU
+from setuptools import setup, Extension, distutils, Command
+import setuptools.command.build_ext
+import distutils.command.build
+import distutils.command.clean
 import platform
 import subprocess
+import shutil
 import sys
 import os
 
 # TODO: detect CUDA
-WITH_CUDA = True
+WITH_CUDA = False
 DEBUG = False
 
 ################################################################################
@@ -36,18 +34,70 @@ def parallelCCompile(self, sources, output_dir=None, macros=None, include_dirs=N
 distutils.ccompiler.CCompiler.compile = parallelCCompile
 
 ################################################################################
-# Build libraries
+# Custom build commands
 ################################################################################
 
-if subprocess.call(['bash', 'torch/lib/build_all.sh'] + (['--with-cuda'] if WITH_CUDA else [])) != 0:
-   sys.exit(1)
+class build_deps(Command):
+    user_options = []
 
-################################################################################
-# Generate cpp code
-################################################################################
+    def initialize_options(self):
+        pass
 
-cwrap('torch/csrc/generic/TensorMethods.cwrap', plugins=[THPLongArgsPlugin(), THPPlugin(), ArgcountSortPlugin(), AutoGPU()])
-generate_nn_wrappers()
+    def finalize_options(self):
+        pass
+
+    def run(self):
+        from tools.nnwrap import generate_wrappers as generate_nn_wrappers
+        build_all_cmd = ['bash', 'torch/lib/build_all.sh']
+        if WITH_CUDA:
+            build_all_cmd += ['--with-cuda']
+        if subprocess.call(build_all_cmd) != 0:
+            sys.exit(1)
+        generate_nn_wrappers()
+
+
+class build_module(Command):
+    user_options = []
+
+    def initialize_options(self):
+        pass
+
+    def finalize_options(self):
+        pass
+
+    def run(self):
+        self.run_command('build_py')
+        self.run_command('build_ext')
+
+
+class build_ext(setuptools.command.build_ext.build_ext):
+    def run(self):
+        # cwrap depends on pyyaml, so we can't import it earlier
+        from tools.cwrap import cwrap
+        from tools.cwrap.plugins.THPPlugin import THPPlugin
+        from tools.cwrap.plugins.THPLongArgsPlugin import THPLongArgsPlugin
+        from tools.cwrap.plugins.ArgcountSortPlugin import ArgcountSortPlugin
+        from tools.cwrap.plugins.AutoGPU import AutoGPU
+        cwrap('torch/csrc/generic/TensorMethods.cwrap', plugins=[
+            THPLongArgsPlugin(), THPPlugin(), ArgcountSortPlugin(), AutoGPU()
+        ])
+        super(build_ext, self).run()
+
+
+class build(distutils.command.build.build):
+    sub_commands = [
+        ('build_deps', lambda self: True),
+    ] + distutils.command.build.build.sub_commands
+
+
+class clean(distutils.command.clean.clean):
+    def run(self):
+        with open('.gitignore', 'r') as f:
+            ignores = f.read()
+            for glob in filter(bool, ignores.split('\n')):
+                shutil.rmtree(glob, ignore_errors=True)
+        super(clean, self).run()
+
 
 ################################################################################
 # Configure compile flags
@@ -106,7 +156,7 @@ if DEBUG:
     extra_link_args += ['-O0', '-g']
 
 ################################################################################
-# Declare extensions and the package
+# Declare extensions and package
 ################################################################################
 
 extensions = []
@@ -144,6 +194,13 @@ if WITH_CUDA:
 
 setup(name="torch", version="0.1",
     ext_modules=extensions,
+    cmdclass = {
+        'build': build,
+        'build_ext': build_ext,
+        'build_deps': build_deps,
+        'build_module': build_module,
+        'clean': clean,
+    },
     packages=['torch', 'torch._thnn', 'torch.legacy', 'torch.legacy.nn', 'torch.legacy.optim'] + (['torch.cuda', 'torch.legacy.cunn'] if WITH_CUDA else []),
     package_data={'torch': ['lib/*.so*', 'lib/*.h']},
     install_requires=['pyyaml'],
