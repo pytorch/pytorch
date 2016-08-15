@@ -3,9 +3,13 @@ import random
 import unittest
 import torch
 import torch.legacy.nn as nn
-import torch.cuda
-import torch.legacy.cunn
 from common import TestCase, to_gpu
+try:
+    import torch.cuda
+    import torch.legacy.cunn
+    TEST_CUDA = True
+except ImportError:
+    TEST_CUDA = False
 
 PRECISION = 1e-5
 EXP_PRECISION = 1e-4
@@ -89,7 +93,7 @@ class SimpleTestCase(TestCaseBase):
             test_case.assertEqual(output, input2)
 
     def test_cuda(self, test_case):
-        if not self.should_test_cuda:
+        if not TEST_CUDA or not self.should_test_cuda:
             raise unittest.SkipTest('Excluded from CUDA tests')
         try:
             cpu_input = self._get_input()
@@ -152,7 +156,7 @@ class CriterionTestCase(TestCaseBase):
             test_case.assertEqual(out, expected_out)
 
     def test_cuda(self, test_case):
-        if not self.should_test_cuda:
+        if not TEST_CUDA or not self.should_test_cuda:
             raise unittest.SkipTest('Excluded from CUDA tests')
         try:
             cpu_input = self._get_input()

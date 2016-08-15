@@ -1,3 +1,4 @@
+import sys
 import math
 import random
 import torch
@@ -1547,25 +1548,6 @@ class TestTorch(TestCase):
         forked_value = torch.rand(gen, 1000)
         self.assertEqual(target_value, forked_value, 0, "RNG has not forked correctly.")
 
-    @unittest.skip("Not implemented yet")
-    def test_serializeGenerator(self):
-        generator = torch.Generator()
-        torch.manualSeed(generator, 123)
-
-        differentGenerator = torch.Generator()
-        torch.manualSeed(differentGenerator, 124)
-
-        deserialized = torch.deserialize(torch.serialize(generator))
-
-        generated = torch.random(generator)
-        deserializedGenerated = torch.random(deserialized)
-        differentGenerated = torch.random(differentGenerator)
-
-        self.assertEqual(generated, deserializedGenerated, 0,
-                'torch.Generator changed internal state after being serialized')
-        self.assertNotEqual(generated, differentGenerated, 0,
-                'Generators with different random seed should not produce the same output')
-
     def test_boxMullerState(self):
         torch.manualSeed(123)
         odd_number = 101
@@ -2122,13 +2104,6 @@ class TestTorch(TestCase):
         self.assertEqual(perm, new)
         self.assertEqual(x.size().tolist(), orig)
 
-    @unittest.skip("Not implemented yet")
-    def test_serialize(self):
-        serString = torch.serialize(tensObj)
-        serStorage = torch.serializeToStorage(tensObj)
-        self.assertEqual(tensObj, torch.deserialize(serString), 0)
-        self.assertEqual(tensObj, torch.deserializeFromStorage(serStorage), 0)
-
     def test_storageview(self):
         s1 = torch.LongStorage((3, 4, 5))
         s2 = torch.LongStorage(s1, 1)
@@ -2188,6 +2163,46 @@ class TestTorch(TestCase):
                 # that the elements flagged positive are indeed non-zero.
                     for i in range(dst1.size(0)):
                         self.assertNotEqual(tensor[dst1[i,0], dst1[i,1], dst1[i,2]], 0)
+
+    def test_deepcopy(self):
+        from copy import deepcopy
+        a = torch.randn(5, 5)
+        b = torch.randn(5, 5)
+        c = a.view(25)
+        q = [a, [a.storage(), b.storage()], b, c]
+        w = deepcopy(q)
+        self.assertEqual(w[0], q[0], 0)
+        self.assertEqual(w[1][0], q[1][0], 0)
+        self.assertEqual(w[1][1], q[1][1], 0)
+        self.assertEqual(w[1], q[1], 0)
+        self.assertEqual(w[2], q[2], 0)
+
+        # Check that deepcopy preserves sharing
+        w[0].add_(1)
+        for i in range(a.numel()):
+            self.assertEqual(w[1][0][i], q[1][0][i] + 1)
+        self.assertEqual(w[3], c + 1)
+        w[2].sub_(1)
+        for i in range(a.numel()):
+            self.assertEqual(w[1][1][i], q[1][1][i] - 1)
+
+    def test_copy(self):
+        from copy import copy
+        a = torch.randn(5, 5)
+        a_clone = a.clone()
+        b = copy(a)
+        b.fill_(1)
+        self.assertEqual(a, a_clone)
+
+    def test_pickle(self):
+        if sys.version_info[0] == 2:
+            import cPickle as pickle
+        else:
+            import pickle
+        a = torch.randn(5, 5)
+        serialized = pickle.dumps(a)
+        b = pickle.loads(serialized)
+        self.assertEqual(a, b)
 
     def test_bernoulli(self):
         t = torch.ByteTensor(10, 10)
