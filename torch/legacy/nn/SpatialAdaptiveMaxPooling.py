@@ -2,6 +2,7 @@ import torch
 from .Module import Module
 from .utils import clear
 
+
 class SpatialAdaptiveMaxPooling(Module):
 
     def __init__(self, w, h):
@@ -35,4 +36,3 @@ class SpatialAdaptiveMaxPooling(Module):
     def clearState(self):
         clear(self, 'indices')
         return super(SpatialAdaptiveMaxPooling, self).clearState()
-

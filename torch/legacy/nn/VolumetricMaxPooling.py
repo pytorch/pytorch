@@ -2,6 +2,7 @@ import torch
 from .Module import Module
 from .utils import clear
 
+
 class VolumetricMaxPooling(Module):
 
     def __init__(self, kT, kW, kH, dT=None, dW=None, dH=None, padT=0, padW=0, padH=0):
@@ -22,18 +23,18 @@ class VolumetricMaxPooling(Module):
         self.indices = torch.Tensor()
 
     def ceil(self):
-         self.ceil_mode = True
-         return self
+        self.ceil_mode = True
+        return self
 
     def floor(self):
-         self.ceil_mode = False
-         return self
+        self.ceil_mode = False
+        return self
 
     def updateOutput(self, input):
         dims = input.dim()
-        self.itime = input.size(dims-3)
-        self.iheight = input.size(dims-2)
-        self.iwidth = input.size(dims-1)
+        self.itime = input.size(dims - 3)
+        self.iheight = input.size(dims - 2)
+        self.iwidth = input.size(dims - 1)
 
         self.indices = self.indices or input.new()
         self._backend.VolumetricMaxPooling_updateOutput(
@@ -71,4 +72,3 @@ class VolumetricMaxPooling(Module):
             s += ', {}, {}, {}'.format(self.padT, self.padW, self.padH)
         s += ')'
         return s
-

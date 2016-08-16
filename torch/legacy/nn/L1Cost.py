@@ -2,6 +2,7 @@ import torch
 from .Criterion import Criterion
 from .utils import clear
 
+
 class L1Cost(Criterion):
 
     def __init__(self):
@@ -32,4 +33,3 @@ class L1Cost(Criterion):
     def clearState(self):
         clear(self, 'output_tensor')
         return super(L1Cost, self).clearState()
-

@@ -2,6 +2,7 @@ import torch
 from .Module import Module
 from .utils import clear, recursiveResizeAs
 
+
 class MixtureTable(Module):
 
     def __init__(self, dim=1):
@@ -39,7 +40,7 @@ class MixtureTable(Module):
 
             expertInput = expertInputs[0]
             if self.batchSize != batchSize:
-                self.size.resize_(expertInput.dim()+1).fill_(1)
+                self.size.resize_(expertInput.dim() + 1).fill_(1)
                 if self.dimG > 0:
                     self.size[0] = gaterInput.size(0)
 
@@ -72,7 +73,6 @@ class MixtureTable(Module):
 
         return self.output
 
-
     def updateGradInput(self, input, gradOutput):
         gaterInput, expertInputs = input
         recursiveResizeAs(self.gradInput, input)
@@ -92,7 +92,6 @@ class MixtureTable(Module):
 
                 gaterGradInput.resizeAs_(gaterInput)
                 self.backwardSetup = True
-
 
             # like CMulTable, but with broadcasting
             for i, expertGradInput in enumerate(expertGradInputs):
@@ -134,15 +133,13 @@ class MixtureTable(Module):
             else:
                 self._expertView2 = expert.view(gaterInput.size(0), gaterInput.size(1), -1)
 
-
-            torch.sum(gaterGradInput, self._expertView2, self.dimG+1)
+            torch.sum(gaterGradInput, self._expertView2, self.dimG + 1)
             gaterGradInput.resizeAs_(gaterInput)
 
             # expert updateGradInput
             torch.mul(expertGradInputs, self._gaterView.expandAs(expertInputs), gradOutput)
 
         return self.gradInput
-
 
     def type(self, type, tensorCache=None):
         self._gaterView = None
@@ -153,15 +150,13 @@ class MixtureTable(Module):
         self._expertView2 = None
         return super(MixtureTable, self).type(type, tensorCache)
 
-
     def clearState(self, ):
         clear(self, [
-          '_gaterView',
-          '_expert',
-          '_expertView',
-          '_sum',
-          '_expert2',
-          '_expertView2',
+            '_gaterView',
+            '_expert',
+            '_expertView',
+            '_sum',
+            '_expert2',
+            '_expertView2',
         ])
         return super(MixtureTable, self).clearState()
-

@@ -32,7 +32,7 @@ def adadelta(opfunc, x, config, state=None):
 
     # (2) weight decay
     if wd != 0:
-      dfdx.add_(wd, x)
+        dfdx.add_(wd, x)
 
     # (3) parameter update
     if not 'paramVariance' in state:

@@ -4,6 +4,7 @@ from copy import deepcopy
 
 import torch
 
+
 def get_cpu_type(t):
     assert t.__module__ == 'torch.cuda'
     return getattr(torch, t.__class__.__name__)

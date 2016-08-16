@@ -3,6 +3,7 @@ import torch
 from .Module import Module
 from .utils import clear
 
+
 class SpatialFullConvolution(Module):
 
     def __init__(self, nInputPlane, nOutputPlane, kW, kH, dW=1, dH=1, padW=0, padH=None, adjW=0, adjH=0):
@@ -46,7 +47,7 @@ class SpatialFullConvolution(Module):
             nInputPlane = self.nInputPlane
             kH = self.kH
             kW = self.kW
-            stdv = 1/math.sqrt(kW*kH*nInputPlane)
+            stdv = 1 / math.sqrt(kW * kH * nInputPlane)
 
         self.weight.uniform_(-stdv, stdv)
         if self.bias:
@@ -54,9 +55,9 @@ class SpatialFullConvolution(Module):
 
     def _makeContiguous(self, input, gradOutput=None):
         if not input.isContiguous():
-           self._input = self._input or input.new()
-           self._input.resizeAs_(input).copy_(input)
-           input = self._input
+            self._input = self._input or input.new()
+            self._input.resizeAs_(input).copy_(input)
+            input = self._input
 
         if gradOutput is not None:
             if not gradOutput.isContiguous():
@@ -80,8 +81,8 @@ class SpatialFullConvolution(Module):
             inputTensor = input[0]
             targetTensor = input[1]
             tDims = targetTensor.dim()
-            tH = targetTensor.size(tDims-2)
-            tW = targetTensor.size(tDims-1)
+            tH = targetTensor.size(tDims - 2)
+            tW = targetTensor.size(tDims - 1)
             adjW = self._calculateAdj(tW, self.kW, self.padW, self.dW)
             adjH = self._calculateAdj(tH, self.kH, self.padH, self.dH)
             self.finput = self.finput or input[0].new()
@@ -89,7 +90,6 @@ class SpatialFullConvolution(Module):
         else:
             self.finput = self.finput or input.new()
             self.fgradInput = self.fgradInput or input.new()
-
 
         inputTensor = self._makeContiguous(inputTensor)
         self._backend.SpatialFullConvolution_updateOutput(
@@ -119,8 +119,8 @@ class SpatialFullConvolution(Module):
             inputTensor = input[0]
             targetTensor = input[1]
             tDims = targetTensor.dim()
-            tH = targetTensor.size(tDims-2)
-            tW = targetTensor.size(tDims-1)
+            tH = targetTensor.size(tDims - 2)
+            tW = targetTensor.size(tDims - 1)
             adjW = self._calculateAdj(tW, self.kW, self.padW, self.dW)
             adjH = self._calculateAdj(tH, self.kH, self.padH, self.dH)
         # Momentarily extract the gradInput tensor
@@ -145,7 +145,7 @@ class SpatialFullConvolution(Module):
             # Create a zero tensor to be expanded and used as gradInput[1].
             self.zeroScalar = self.zeroScalar or input[1].new(1).zero_()
             self.ones.resize_(input[1].dim()).fill_(1)
-            zeroTensor =  self.zeroScalar.viewAs(self.ones).expandAs(input[1])
+            zeroTensor = self.zeroScalar.viewAs(self.ones).expandAs(input[1])
             self.gradInput = [self.gradInput, zeroTensor]
 
         return self.gradInput
@@ -160,8 +160,8 @@ class SpatialFullConvolution(Module):
             inputTensor = input[0]
             targetTensor = input[1]
             tDims = targetTensor.dim()
-            tH = targetTensor.size(tDims-2)
-            tW = targetTensor.size(tDims-1)
+            tH = targetTensor.size(tDims - 2)
+            tW = targetTensor.size(tDims - 1)
             adjW = calculateAdj(tW, self.kW, self.padW, self.dW)
             adjH = calculateAdj(tH, self.kH, self.padH, self.dH)
 
@@ -206,5 +206,3 @@ class SpatialFullConvolution(Module):
     def clearState(self):
         clear(self, 'finput', 'fgradInput', '_input', '_gradOutput')
         return super(SpatialFullConvolution, self).clearState()
-
-

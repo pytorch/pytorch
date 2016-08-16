@@ -2,6 +2,7 @@ import math
 import torch
 from .Module import Module
 
+
 class TemporalConvolution(Module):
 
     def __init__(self, inputFrameSize, outputFrameSize, kW, dW=1):
@@ -12,18 +13,18 @@ class TemporalConvolution(Module):
         self.kW = kW
         self.dW = dW
 
-        self.weight = torch.Tensor(outputFrameSize, inputFrameSize*kW)
+        self.weight = torch.Tensor(outputFrameSize, inputFrameSize * kW)
         self.bias = torch.Tensor(outputFrameSize)
-        self.gradWeight = torch.Tensor(outputFrameSize, inputFrameSize*kW)
+        self.gradWeight = torch.Tensor(outputFrameSize, inputFrameSize * kW)
         self.gradBias = torch.Tensor(outputFrameSize)
 
         self.reset()
 
     def reset(self, stdv=None):
         if stdv is not None:
-           stdv = stdv * math.sqrt(3)
+            stdv = stdv * math.sqrt(3)
         else:
-           stdv = 1. / math.sqrt(self.kW*self.inputFrameSize)
+            stdv = 1. / math.sqrt(self.kW * self.inputFrameSize)
 
         self.weight.uniform_(-stdv, stdv)
         self.bias.uniform_(-stdv, stdv)
@@ -67,4 +68,3 @@ class TemporalConvolution(Module):
             self.dW,
             scale
         )
-

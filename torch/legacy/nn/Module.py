@@ -3,6 +3,7 @@ import torch._thnn
 from .utils import clear, recursiveType
 from . import _backends
 
+
 class Module(object):
 
     def __init__(self):
@@ -37,12 +38,10 @@ class Module(object):
         self.accGradParameters(input, gradOutput, scale)
         return self.gradInput
 
-
     def backwardUpdate(self, input, gradOutput, lr):
         self.updateGradInput(input, gradOutput)
         self.accUpdateGradParameters(input, gradOutput, lr)
         return self.gradInput
-
 
     def updateGradInput(self, input, gradOutput):
         return self.gradInput
@@ -58,7 +57,6 @@ class Module(object):
         self.accGradParameters(input, gradOutput, -lr)
         self.gradWeight = gradWeight
         self.gradBias = gradBias
-
 
     def sharedAccUpdateGradParameters(self, input, gradOutput, lr):
         if self.parameters():
@@ -93,7 +91,7 @@ class Module(object):
 
     def type(self, type=None, tensorCache=None):
         if not type:
-           return self._type
+            return self._type
 
         tensorCache = tensorCache or {}
 
@@ -147,6 +145,7 @@ class Module(object):
     #
     # TODO: This logically belongs to torch.Tensor, not nn.
     _flattenTensorBuffer = {}
+
     def _flatten(self, parameters=[]):
 
         # returns True if tensor occupies a contiguous region of memory (no holes)
@@ -156,14 +155,14 @@ class Module(object):
             sortedSize = torch.LongTensor(tensor.nDimension()).set_(tensor.size()).indexSelect(0, perm)
             nRealDim = int(torch.clamp(sortedStride, 0, 1).sum())
             sortedStride = sortedStride.narrow(0, 0, nRealDim).clone()
-            sortedSize   = sortedSize.narrow(0, 0, nRealDim).clone()
+            sortedSize = sortedSize.narrow(0, 0, nRealDim).clone()
             t = tensor.new().set_(tensor.storage(), 0,
-                                 sortedSize.storage(),
-                                 sortedStride.storage())
+                                  sortedSize.storage(),
+                                  sortedStride.storage())
             return t.isContiguous()
 
         if not parameters:
-           return torch.Tensor()
+            return torch.Tensor()
 
         Tensor = parameters[0].new
         BufferTensor = Module._flattenTensorBuffer.get(type(parameters[0]), Tensor)
@@ -180,13 +179,11 @@ class Module(object):
                 storages[key] = (storage, num_parameters)
                 num_parameters = num_parameters + storage.size()
 
-
             parameterMeta.append({
-                    'storageOffset':  param.storageOffset() + storages[key][1],
-                    'size'         :  param.size(),
-                    'stride'       :  param.stride()
+                'storageOffset': param.storageOffset() + storages[key][1],
+                'size': param.size(),
+                'stride': param.stride()
             })
-
 
         # 2. construct a single tensor that will hold all the parameters
         flatParameters = BufferTensor(num_parameters).zero_()
@@ -199,14 +196,14 @@ class Module(object):
             tmp.fill_(1)
             tensorsCompact = tensorsCompact and isCompact(tmp)
 
-        maskParameters  = flatParameters.byte().clone()
-        compactOffsets  = flatParameters.long().cumsum(0)
+        maskParameters = flatParameters.byte().clone()
+        compactOffsets = flatParameters.long().cumsum(0)
         used_parameters = compactOffsets[-1]
 
         # 4. copy storages into the flattened parameter tensor
         for storageAndOffset in storages.values():
             storage, offset = storageAndOffset
-            flatParameters[slice(offset, offset+storage.size())].copy_(Tensor().set_(storage))
+            flatParameters[slice(offset, offset + storage.size())].copy_(Tensor().set_(storage))
 
         # 5. allow garbage collection
         storages = None
@@ -215,22 +212,22 @@ class Module(object):
 
         # 6. compact the flattened parameters if there were holes
         if used_parameters != num_parameters:
-           assert tensorsCompact
+            assert tensorsCompact
 
-           flatParameters = BufferTensor(used_parameters).copy_(
-                 flatParameters.maskedSelect(maskParameters))
-           for meta in parameterMeta:
-               meta['storageOffset'] = compactOffsets[meta['storageOffset']]
+            flatParameters = BufferTensor(used_parameters).copy_(
+                flatParameters.maskedSelect(maskParameters))
+            for meta in parameterMeta:
+                meta['storageOffset'] = compactOffsets[meta['storageOffset']]
 
         if BufferTensor != Tensor:
-           flatParameters = Tensor(flatParameters.nElement()).copy_(flatParameters)
+            flatParameters = Tensor(flatParameters.nElement()).copy_(flatParameters)
 
         # 7. fix up the parameter tensors to point at the flattened parameters
         for param, meta in zip(parameters, parameterMeta):
-           param.set_(flatParameters.storage(),
-                     meta['storageOffset'],
-                     meta['size'],
-                     meta['stride'])
+            param.set_(flatParameters.storage(),
+                       meta['storageOffset'],
+                       meta['size'],
+                       meta['stride'])
 
         return flatParameters
 
@@ -291,4 +288,3 @@ class Module(object):
             for i, module in self.modules:
                 self.modules[i] = module.replace(callback)
         return out
-

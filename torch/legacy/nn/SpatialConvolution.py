@@ -3,6 +3,7 @@ import torch
 from .Module import Module
 from .utils import clear
 
+
 class SpatialConvolution(Module):
 
     def __init__(self, nInputPlane, nOutputPlane, kW, kH, dW=1, dH=1, padW=0, padH=None):
@@ -36,9 +37,9 @@ class SpatialConvolution(Module):
 
     def reset(self, stdv=None):
         if stdv is not None:
-           stdv = stdv * math.sqrt(3)
+            stdv = stdv * math.sqrt(3)
         else:
-           stdv = 1. / math.sqrt(self.kW*self.kH*self.nInputPlane)
+            stdv = 1. / math.sqrt(self.kW * self.kH * self.nInputPlane)
 
         self.weight.uniform_(-stdv, stdv)
         if self.bias:
@@ -46,9 +47,9 @@ class SpatialConvolution(Module):
 
     def _makeContiguous(self, input, gradOutput=None):
         if not input.isContiguous():
-           self._input = self._input or input.new()
-           self._input.resizeAs_(input).copy_(input)
-           input = self._input
+            self._input = self._input or input.new()
+            self._input.resizeAs_(input).copy_(input)
+            input = self._input
 
         if gradOutput is not None:
             if not gradOutput.isContiguous():
@@ -94,7 +95,6 @@ class SpatialConvolution(Module):
         )
         self._unviewWeight()
         return self.output
-
 
     def updateGradInput(self, input, gradOutput):
         if not self.gradInput:
@@ -155,10 +155,9 @@ class SpatialConvolution(Module):
 
         s += ')'
         if not self.bias:
-           s += ' without bias'
+            s += ' without bias'
         return s
 
     def clearState(self):
         clear(self, 'finput', 'fgradInput', '_input', '_gradOutput')
         return super(SpatialConvolution, self).clearState()
-

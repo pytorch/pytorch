@@ -13,6 +13,8 @@ import torch
 # > net1:type('torch.cuda.FloatTensor', tensorCache)
 # > net2:type('torch.cuda.FloatTensor', tensorCache)
 # > nn.utils.recursiveType(anotherTensor, 'torch.cuda.FloatTensor', tensorCache)
+
+
 def recursiveType(param, type, tensorCache={}):
     from .Criterion import Criterion
     from .Module import Module
@@ -28,7 +30,7 @@ def recursiveType(param, type, tensorCache={}):
                 newparam = tensorCache[key]
             else:
                 newparam = torch.Tensor().type(type)
-                storageType = type.replace('Tensor','Storage')
+                storageType = type.replace('Tensor', 'Storage')
                 param_storage = param.storage()
                 if param_storage:
                     storage_key = param_storage._cdata
@@ -44,6 +46,7 @@ def recursiveType(param, type, tensorCache={}):
             param = newparam
     return param
 
+
 def recursiveResizeAs(t1, t2):
     if isinstance(t2, list):
         t1 = t1 if isinstance(t1, list) else [t1]
@@ -56,9 +59,10 @@ def recursiveResizeAs(t1, t2):
         t1 = t1 if torch.isTensor(t1) else t2.new()
         t1.resizeAs_(t2)
     else:
-        raise RuntimeError("Expecting nested tensors or tables. Got " + \
-                type(t1).__name__  + " and " + type(t2).__name__  + "instead")
+        raise RuntimeError("Expecting nested tensors or tables. Got " +
+                           type(t1).__name__ + " and " + type(t2).__name__ + "instead")
     return t1, t2
+
 
 def recursiveFill(t2, val):
     if isinstance(t2, list):
@@ -66,9 +70,10 @@ def recursiveFill(t2, val):
     elif torch.isTensor(t2):
         t2.fill_(val)
     else:
-        raise RuntimeError("expecting tensor or table thereof. Got " + \
-            type(t2).__name__ + " instead")
+        raise RuntimeError("expecting tensor or table thereof. Got " +
+                           type(t2).__name__ + " instead")
     return t2
+
 
 def recursiveAdd(t1, val=1, t2=None):
     if t2 is None:
@@ -81,9 +86,10 @@ def recursiveAdd(t1, val=1, t2=None):
     elif torch.isTensor(t1) and torch.isTensor(t2):
         t1.add_(val, t2)
     else:
-        raise RuntimeError("expecting nested tensors or tables. Got " + \
-                type(t1).__name__ + " and " + type(t2).__name__ + " instead")
+        raise RuntimeError("expecting nested tensors or tables. Got " +
+                           type(t1).__name__ + " and " + type(t2).__name__ + " instead")
     return t1, t2
+
 
 def recursiveCopy(t1, t2):
     if isinstance(t2, list):
@@ -94,9 +100,10 @@ def recursiveCopy(t1, t2):
         t1 = t1 if torch.isTensor(t1) else t2.new()
         t1.resizeAs_(t2).copy_(t2)
     else:
-        raise RuntimeError("expecting nested tensors or tables. Got " + \
-                type(t1).__name__ + " and " + type(t2).__name__ + " instead")
+        raise RuntimeError("expecting nested tensors or tables. Got " +
+                           type(t1).__name__ + " and " + type(t2).__name__ + " instead")
     return t1, t2
+
 
 def addSingletonDimension(*args):
     view = None
@@ -118,12 +125,13 @@ def addSingletonDimension(*args):
         stride[d] = t.stride(d)
     size[dim] = 1
     stride[dim] = 1
-    for d in range(dim+1, t.dim()+1):
+    for d in range(dim + 1, t.dim() + 1):
         size[d] = t.size(d - 1)
         stride[d] = t.stride(d - 1)
 
     view.set_(t.storage(), t.storageOffset(), size, stride)
     return view
+
 
 def contiguousView(output, input, *args):
     output = output or input.new()
@@ -138,9 +146,12 @@ def contiguousView(output, input, *args):
 # go over specified fields and clear them. accepts
 # nn.clearState(self, ['_buffer', '_buffer2']) and
 # nn.clearState(self, '_buffer', '_buffer2')
+
+
 def clear(self, *args):
     if len(args) == 1 and isinstance(args[0], list):
         args = args[0]
+
     def _clear(f):
         if not hasattr(self, f):
             return
@@ -154,4 +165,3 @@ def clear(self, *args):
     for key in args:
         _clear(key)
     return self
-

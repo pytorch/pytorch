@@ -2,9 +2,10 @@ import torch
 from .Module import Module
 from .utils import clear
 
+
 class RReLU(Module):
 
-    def __init__(self, lower=1/8, upper=1/3, inplace=False):
+    def __init__(self, lower=1 / 8, upper=1 / 3, inplace=False):
         super(RReLU, self).__init__()
         raise NotImplementedError
         self.lower = lower
@@ -50,4 +51,3 @@ class RReLU(Module):
     def clearState(self):
         clear(self, 'noise')
         return super(RReLU, self).clearState(self)
-

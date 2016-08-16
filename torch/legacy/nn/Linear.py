@@ -3,6 +3,7 @@ import torch
 from .Module import Module
 from .utils import clear
 
+
 class Linear(Module):
 
     def __init__(self, inputSize, outputSize, bias=True):
@@ -24,7 +25,7 @@ class Linear(Module):
         if stdv is not None:
             stdv = stdv * math.sqrt(3)
         else:
-            stdv = 1./math.sqrt(self.weight.size(1))
+            stdv = 1. / math.sqrt(self.weight.size(1))
 
         self.weight.uniform_(-stdv, stdv)
         if self.bias is not None:
@@ -79,9 +80,7 @@ class Linear(Module):
         clear(self, 'addBuffer')
         return super(Linear, self).clearState()
 
-
     def __repr__(self):
         return super(Linear, self).__repr__() + \
-                '({} -> {})'.format(self.weight.size(1), self.weight.size(0)) + \
-                (' without bias' if not self.bias else '')
-
+            '({} -> {})'.format(self.weight.size(1), self.weight.size(0)) + \
+            (' without bias' if not self.bias else '')

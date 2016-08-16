@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class MM(Module):
 
     def __init__(self, transA=False, transB=False):
@@ -67,4 +68,3 @@ class MM(Module):
             getattr(torch, f)(self.gradInput[1], a, gradOutput)
 
         return self.gradInput
-

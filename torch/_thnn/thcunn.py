@@ -2,6 +2,7 @@ import torch._thnn._THCUNN
 from .utils import THCUNN_H_PATH, parse_header, load_backend
 from . import type2backend
 
+
 class THNNCudaBackendStateMixin(object):
     @property
     def library_state(self):

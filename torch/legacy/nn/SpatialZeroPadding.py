@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class SpatialZeroPadding(Module):
 
     def __init__(self, pad_l, pad_r=None, pad_t=None, pad_b=None):
@@ -78,4 +79,3 @@ class SpatialZeroPadding(Module):
         s = super(SpatialZeroPadding, self).__repr__()
         s += '({}, {}, {}, {})'.foramat(self.pad_l, self.pad_r, self.pad_t, self.pad_b)
         return s
-

@@ -16,6 +16,7 @@ DEBUG = False
 # Monkey-patch setuptools to compile in parallel
 ################################################################################
 
+
 def parallelCCompile(self, sources, output_dir=None, macros=None, include_dirs=None, debug=0, extra_preargs=None, extra_postargs=None, depends=None):
     # those lines are copied from distutils.ccompiler.CCompiler directly
     macros, objects, extra_postargs, pp_opts, build = self._setup_compile(output_dir, macros, include_dirs, sources, depends, extra_postargs)
@@ -23,6 +24,7 @@ def parallelCCompile(self, sources, output_dir=None, macros=None, include_dirs=N
 
     # compile using a thread pool
     import multiprocessing.pool
+
     def _single_compile(obj):
         src, ext = build[obj]
         self._compile(obj, src, ext, cc_args, extra_postargs, pp_opts)
@@ -36,6 +38,7 @@ distutils.ccompiler.CCompiler.compile = parallelCCompile
 ################################################################################
 # Custom build commands
 ################################################################################
+
 
 class build_deps(Command):
     user_options = []
@@ -162,46 +165,46 @@ if DEBUG:
 extensions = []
 
 C = Extension("torch._C",
-    libraries=main_libraries,
-    sources=main_sources,
-    language='c++',
-    extra_compile_args=extra_compile_args,
-    include_dirs=include_dirs,
-    extra_link_args=extra_link_args + ['-Wl,-rpath,$ORIGIN/lib'],
-)
+              libraries=main_libraries,
+              sources=main_sources,
+              language='c++',
+              extra_compile_args=extra_compile_args,
+              include_dirs=include_dirs,
+              extra_link_args=extra_link_args + ['-Wl,-rpath,$ORIGIN/lib'],
+              )
 extensions.append(C)
 
 THNN = Extension("torch._thnn._THNN",
-    libraries=['TH', 'THNN'],
-    sources=['torch/csrc/nn/THNN.cpp'],
-    language='c++',
-    extra_compile_args=extra_compile_args,
-    include_dirs=include_dirs,
-    extra_link_args=extra_link_args + ['-Wl,-rpath,$ORIGIN/../lib'],
-)
+                 libraries=['TH', 'THNN'],
+                 sources=['torch/csrc/nn/THNN.cpp'],
+                 language='c++',
+                 extra_compile_args=extra_compile_args,
+                 include_dirs=include_dirs,
+                 extra_link_args=extra_link_args + ['-Wl,-rpath,$ORIGIN/../lib'],
+                 )
 extensions.append(THNN)
 
 if WITH_CUDA:
     THCUNN = Extension("torch._thnn._THCUNN",
-        libraries=['TH', 'THC', 'THCUNN'],
-        sources=['torch/csrc/nn/THCUNN.cpp'],
-        language='c++',
-        extra_compile_args=extra_compile_args,
-        include_dirs=include_dirs,
-        extra_link_args=extra_link_args + ['-Wl,-rpath,$ORIGIN/../lib'],
-    )
+                       libraries=['TH', 'THC', 'THCUNN'],
+                       sources=['torch/csrc/nn/THCUNN.cpp'],
+                       language='c++',
+                       extra_compile_args=extra_compile_args,
+                       include_dirs=include_dirs,
+                       extra_link_args=extra_link_args + ['-Wl,-rpath,$ORIGIN/../lib'],
+                       )
     extensions.append(THCUNN)
 
 setup(name="torch", version="0.1",
-    ext_modules=extensions,
-    cmdclass = {
-        'build': build,
-        'build_ext': build_ext,
-        'build_deps': build_deps,
-        'build_module': build_module,
-        'clean': clean,
-    },
-    packages=['torch', 'torch._thnn', 'torch.legacy', 'torch.legacy.nn', 'torch.legacy.optim'] + (['torch.cuda', 'torch.legacy.cunn'] if WITH_CUDA else []),
-    package_data={'torch': ['lib/*.so*', 'lib/*.h']},
-    install_requires=['pyyaml'],
-)
+      ext_modules=extensions,
+      cmdclass={
+          'build': build,
+          'build_ext': build_ext,
+          'build_deps': build_deps,
+          'build_module': build_module,
+          'clean': clean,
+      },
+      packages=['torch', 'torch._thnn', 'torch.legacy', 'torch.legacy.nn', 'torch.legacy.optim'] + (['torch.cuda', 'torch.legacy.cunn'] if WITH_CUDA else []),
+      package_data={'torch': ['lib/*.so*', 'lib/*.h']},
+      install_requires=['pyyaml'],
+      )

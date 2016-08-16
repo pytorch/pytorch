@@ -1,6 +1,7 @@
 from . import CWrapPlugin
 from string import Template
 
+
 class BeforeCall(CWrapPlugin):
 
     def initialize(self, cwrap):
@@ -11,7 +12,7 @@ class BeforeCall(CWrapPlugin):
             if '$' in option['before_call']:
                 template = Template(option['before_call'])
                 args = {'arg' + str(i): self.cwrap.get_arg_accessor(arg, option) for i, arg
-                            in enumerate(option['arguments'])}
+                        in enumerate(option['arguments'])}
                 return template.substitute(args) + code
             else:
                 return option['before_call'] + code

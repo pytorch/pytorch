@@ -6,6 +6,7 @@ from .Sequential import Sequential
 from .ParallelTable import ParallelTable
 from .MM import MM
 
+
 class PartialLinear(Module):
     """
     PartialLinear is a Linear layer that allows the user to a set a collection of
@@ -27,15 +28,15 @@ class PartialLinear(Module):
         pt.add(Identity()).add(LookupTable(outputsize, inputsize))
         self.network = Sequential().add(pt).add(MM(False, True))
         if bias:
-            self.bias     = torch.zeros(1, outputsize)
+            self.bias = torch.zeros(1, outputsize)
             self.gradBias = torch.zeros(1, outputsize)
         else:
             self.bias = self.gradBias = None
 
         # set partition:
-        self.inputsize  = inputsize
+        self.inputsize = inputsize
         self.outputsize = outputsize
-        self.allcolumns = torch.range(0, self.outputsize-1).long()
+        self.allcolumns = torch.range(0, self.outputsize - 1).long()
         self.resetPartition()
         self.addBuffer = None
         self.buffer = None
@@ -49,7 +50,7 @@ class PartialLinear(Module):
         return self
 
     def parameters(self):
-        return [self.network.get(0).get(1).weight,     self.bias], \
+        return [self.network.get(0).get(1).weight, self.bias], \
                [self.network.get(0).get(1).gradWeight, self.gradBias]
         # should return only the relevant partition?
 
@@ -65,8 +66,8 @@ class PartialLinear(Module):
 
     def updateGradInput(self, input, gradOutput):
         if self.gradInput:
-           self.network.updateGradInput([input, self.partition], gradOutput)
-           self.gradInput.set_(self.network.gradInput[0])
+            self.network.updateGradInput([input, self.partition], gradOutput)
+            self.gradInput.set_(self.network.gradInput[0])
 
         return self.gradInput
 
@@ -108,6 +109,5 @@ class PartialLinear(Module):
 
     def __repr__(self):
         return super(ParallelTable, self).__repr__() + \
-           '({} -> {})'.format(self.inputsize, self.outputsize) + \
-           ' without bias' if self.bias is None else ''
-
+            '({} -> {})'.format(self.inputsize, self.outputsize) + \
+            ' without bias' if self.bias is None else ''

@@ -12,6 +12,7 @@ from .CDivTable import CDivTable
 from .Threshold import Threshold
 from .utils import clear
 
+
 class SpatialDivisiveNormalization(Module):
 
     def __init__(self, nInputPlane=1, kernel=None, threshold=1e-4, thresval=None):
@@ -32,10 +33,10 @@ class SpatialDivisiveNormalization(Module):
             raise ValueError('SpatialDivisiveNormalization averaging kernel must have ODD dimensions')
 
         # padding values
-        padH = int(math.floor(self.kernel.size(0)/2))
+        padH = int(math.floor(self.kernel.size(0) / 2))
         padW = padH
         if kdim == 2:
-            padW = int(math.floor(self.kernel.size(1)/2))
+            padW = int(math.floor(self.kernel.size(1) / 2))
 
         # create convolutional mean estimator
         self.meanestimator = Sequential()
@@ -99,12 +100,12 @@ class SpatialDivisiveNormalization(Module):
 
         # compute side coefficients
         dim = input.dim()
-        if self.localstds.dim() != self.coef.dim() or (input.size(dim-1) != self.coef.size(dim-1)) or (input.size(dim-2) != self.coef.size(dim-2)):
+        if self.localstds.dim() != self.coef.dim() or (input.size(dim - 1) != self.coef.size(dim - 1)) or (input.size(dim - 2) != self.coef.size(dim - 2)):
             self.ones = self.ones or input.new()
             self.ones.resizeAs_(input[0:1]).fill_(1)
             coef = self.meanestimator.updateOutput(self.ones).squeeze(0)
             self._coef = self._coef or input.new()
-            self._coef.resizeAs_(coef).copy_(coef) # make contiguous for view
+            self._coef.resizeAs_(coef).copy_(coef)  # make contiguous for view
             self.coef = self._coef.view(1, *(self._coef.size().tolist())).expandAs(self.localstds)
 
         # normalize std dev
@@ -132,4 +133,3 @@ class SpatialDivisiveNormalization(Module):
         self.meanestimator.clearState()
         self.stdestimator.clearState()
         return super(SpatialDivisiveNormalization, self).clearState()
-

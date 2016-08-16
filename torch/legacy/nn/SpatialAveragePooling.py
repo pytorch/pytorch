@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class SpatialAveragePooling(Module):
 
     def __init__(self, kW, kH, dW=1, dH=1, padW=0, padH=0):
@@ -46,7 +47,7 @@ class SpatialAveragePooling(Module):
         # for backward compatibility with saved models
         # which are not supposed to have "divide" field
         if not self.divide:
-            self.output.mul_(self.kW*self.kH)
+            self.output.mul_(self.kW * self.kH)
 
         return self.output
 
@@ -65,7 +66,7 @@ class SpatialAveragePooling(Module):
             )
             # for backward compatibility
             if not self.divide:
-                self.gradInput.mul_(self.kW*self.kH)
+                self.gradInput.mul_(self.kW * self.kH)
 
             return self.gradInput
 
@@ -76,4 +77,3 @@ class SpatialAveragePooling(Module):
             s += ', {}, {}'.format(self.padW, self.padH)
         s += ')'
         return s
-

@@ -1,6 +1,7 @@
 import torch
 from .Criterion import Criterion
 
+
 class SpatialClassNLLCriterion(Criterion):
 
     def __init__(self, weights=None, sizeAverage=True):
@@ -15,9 +16,9 @@ class SpatialClassNLLCriterion(Criterion):
 
     def updateOutput(self, input, target):
         if target.type() == 'torch.cuda.FloatTensor':
-           self.target = target
+            self.target = target
         else:
-           self.target = target.long()
+            self.target = target.long()
 
         self._backend.SpatialClassNLLCriterion_updateOutput(
             self._backend.library_state,
@@ -33,9 +34,9 @@ class SpatialClassNLLCriterion(Criterion):
 
     def updateGradInput(self, input, target):
         if target.type() == 'torch.cuda.FloatTensor':
-           self.target = target
+            self.target = target
         else:
-           self.target = target.long()
+            self.target = target.long()
 
         self.gradInput.resizeAs_(input).zero_()
         self._backend.SpatialClassNLLCriterion_updateGradInput(
@@ -48,4 +49,3 @@ class SpatialClassNLLCriterion(Criterion):
             self.total_weight_tensor
         )
         return self.gradInput
-

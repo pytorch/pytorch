@@ -21,37 +21,37 @@ $METHODS
 class StandaloneExtension(CWrapPlugin):
 
     TYPE_UNPACK = {
-        'THFloatTensor*':   Template('(THFloatTensor*)(((Tensor*)$arg)->cdata)'),
-        'THDoubleTensor*':  Template('(THDoubleTensor*)(((Tensor*)$arg)->cdata)'),
-        'THLongTensor*':    Template('(THLongTensor*)(((Tensor*)$arg)->cdata)'),
-        'THIntTensor*':     Template('(THIntTensor*)(((Tensor*)$arg)->cdata)'),
-        'THCudaTensor*':    Template('(THCudaTensor*)(((Tensor*)$arg)->cdata)'),
+        'THFloatTensor*': Template('(THFloatTensor*)(((Tensor*)$arg)->cdata)'),
+        'THDoubleTensor*': Template('(THDoubleTensor*)(((Tensor*)$arg)->cdata)'),
+        'THLongTensor*': Template('(THLongTensor*)(((Tensor*)$arg)->cdata)'),
+        'THIntTensor*': Template('(THIntTensor*)(((Tensor*)$arg)->cdata)'),
+        'THCudaTensor*': Template('(THCudaTensor*)(((Tensor*)$arg)->cdata)'),
         'THCudaLongTensor*': Template('(THCudaLongTensor*)(((Tensor*)$arg)->cdata)'),
-        'float':            Template('__getFloat($arg)'),
-        'double':           Template('__getFloat($arg)'),
-        'bool':             Template('__getLong($arg)'),
-        'int':              Template('__getLong($arg)'),
-        'long':             Template('__getLong($arg)'),
-        'void*':            Template('(void*)__getLong($arg)'),
+        'float': Template('__getFloat($arg)'),
+        'double': Template('__getFloat($arg)'),
+        'bool': Template('__getLong($arg)'),
+        'int': Template('__getLong($arg)'),
+        'long': Template('__getLong($arg)'),
+        'void*': Template('(void*)__getLong($arg)'),
         # TODO: implement this
-        'THGenerator*':     Template('NULL'),
+        'THGenerator*': Template('NULL'),
     }
 
     TYPE_CHECK = {
-        'THDoubleTensor*':  Template('(PyObject*)Py_TYPE($arg) == THPDoubleTensorClass'),
-        'THFloatTensor*':   Template('(PyObject*)Py_TYPE($arg) == THPFloatTensorClass'),
-        'THLongTensor*':    Template('(PyObject*)Py_TYPE($arg) == THPLongTensorClass'),
-        'THIntTensor*':     Template('(PyObject*)Py_TYPE($arg) == THPIntTensorClass'),
-        'THCudaTensor*':    Template('(PyObject*)Py_TYPE($arg) == THCPFloatTensorClass'),
+        'THDoubleTensor*': Template('(PyObject*)Py_TYPE($arg) == THPDoubleTensorClass'),
+        'THFloatTensor*': Template('(PyObject*)Py_TYPE($arg) == THPFloatTensorClass'),
+        'THLongTensor*': Template('(PyObject*)Py_TYPE($arg) == THPLongTensorClass'),
+        'THIntTensor*': Template('(PyObject*)Py_TYPE($arg) == THPIntTensorClass'),
+        'THCudaTensor*': Template('(PyObject*)Py_TYPE($arg) == THCPFloatTensorClass'),
         'THCudaLongTensor*': Template('(PyObject*)Py_TYPE($arg) == THCPLongTensorClass'),
-        'float':            Template('__checkFloat($arg)'),
-        'double':           Template('__checkFloat($arg)'),
-        'bool':             Template('__checkLong($arg)'),
-        'int':              Template('__checkLong($arg)'),
-        'long':             Template('__checkLong($arg)'),
-        'void*':            Template('__checkLong($arg)'),
+        'float': Template('__checkFloat($arg)'),
+        'double': Template('__checkFloat($arg)'),
+        'bool': Template('__checkLong($arg)'),
+        'int': Template('__checkLong($arg)'),
+        'long': Template('__checkLong($arg)'),
+        'void*': Template('__checkLong($arg)'),
         # TODO: implement this
-        'THGenerator*':     Template('false'),
+        'THGenerator*': Template('false'),
     }
 
     WRAPPER_TEMPLATE = Template("""

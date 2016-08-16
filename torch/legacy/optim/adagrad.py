@@ -32,7 +32,6 @@ def adagrad(opfunc, x, config, state=None):
     if wd != 0:
         dfdx.add_(wd, x)
 
-
     # (3) learning rate decay (annealing)
     clr = lr / (1 + state['evalCounter'] * lrd)
 
@@ -50,4 +49,3 @@ def adagrad(opfunc, x, config, state=None):
 
     # return x*, f(x) before optimization
     return x, fx
-

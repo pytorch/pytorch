@@ -4,6 +4,7 @@ import torch
 from .Module import Module
 from .utils import clear, contiguousView
 
+
 class CMul(Module):
 
     def __init__(self, *args):
@@ -15,7 +16,7 @@ class CMul(Module):
         else:
             self.size.resize_(len(args))
             for i, arg in enumerate(args):
-                    self.size[i] = arg
+                self.size[i] = arg
 
         self.weight = torch.Tensor(self.size)
         self.gradWeight = torch.Tensor(self.size)
@@ -36,10 +37,9 @@ class CMul(Module):
         if stdv is not None:
             stdv = stdv * math.sqrt(3)
         else:
-            stdv = 1./math.sqrt(self.weight.nElement())
+            stdv = 1. / math.sqrt(self.weight.nElement())
 
         self.weight.uniform_(-stdv, stdv)
-
 
     def updateOutput(self, input):
         # lazy-initialize
@@ -64,10 +64,9 @@ class CMul(Module):
 
         return self.output
 
-
     def updateGradInput(self, input, gradOutput):
         if not self.gradInput:
-           return
+            return
 
         if self._gradOutput is None:
             self._gradOutput = input.new()
@@ -88,7 +87,6 @@ class CMul(Module):
 
         return self.gradInput
 
-
     def accGradParameters(self, input, gradOutput, scale=1):
         if self._input is None:
             self._input = input.new()
@@ -106,18 +104,17 @@ class CMul(Module):
 
     def type(self, type=None, tensorCache=None):
         if type:
-           self.clearState()
+            self.clearState()
         return super(CMul, self).type(type, tensorCache)
 
     def clearState(self):
         clear(self, [
-           '_input',
-           '_output',
-           '_weight',
-           '_gradWeight',
-           '_expand',
-           '_repeat',
-           '_sum',
+            '_input',
+            '_output',
+            '_weight',
+            '_gradWeight',
+            '_expand',
+            '_repeat',
+            '_sum',
         ])
         return super(CMul, self).clearState()
-

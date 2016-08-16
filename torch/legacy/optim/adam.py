@@ -1,5 +1,6 @@
 import math
 
+
 def adam(opfunc, x, config, state=None):
     """ An implementation of Adam http://arxiv.org/pdf/1412.6980.pdf
 
@@ -59,7 +60,7 @@ def adam(opfunc, x, config, state=None):
 
     biasCorrection1 = 1 - beta1 ** state['t']
     biasCorrection2 = 1 - beta2 ** state['t']
-    stepSize = lr * math.sqrt(biasCorrection2)/biasCorrection1
+    stepSize = lr * math.sqrt(biasCorrection2) / biasCorrection1
     # (3) update x
     x.addcdiv_(-stepSize, state['m'], state['denom'])
 

@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class VolumetricAveragePooling(Module):
 
     def __init__(self, kT, kW, kH, dT=None, dW=None, dH=None):
@@ -40,4 +41,3 @@ class VolumetricAveragePooling(Module):
             s += ', {}, {}, {}'.format(self.padT, self.padW, self.padH)
         s += ')'
         return s
-

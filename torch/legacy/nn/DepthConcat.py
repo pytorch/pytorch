@@ -14,18 +14,19 @@ import math
 import torch
 from .Concat import Concat
 
+
 class DepthConcat(Concat):
 
     def windowNarrow(self, output, currentOutput, offset):
         outputWindow = output.narrow(self.dimension, offset, currentOutput.size(self.dimension))
         for dim in range(self.size.size()):
-           currentSize = currentOutput.size(dim)
-           if dim != self.dimension and self.size[dim] != currentSize:
-              # 5x5 vs 3x3 -> start = [(5-3)/2] + 1 = 2 (1 pad each side)
-              # 9x9 vs 5x5 -> start = [(9-5)/2] + 1 = 3 (2 pad each side)
-              # 9x9 vs 4x4 -> start = [(9-4)/2] + 1 = 3.5 (2 pad, 3 pad)
-              start = int(math.floor(((self.size[dim] - currentSize) / 2)))
-              outputWindow = outputWindow.narrow(dim, start, currentSize)
+            currentSize = currentOutput.size(dim)
+            if dim != self.dimension and self.size[dim] != currentSize:
+                # 5x5 vs 3x3 -> start = [(5-3)/2] + 1 = 2 (1 pad each side)
+                # 9x9 vs 5x5 -> start = [(9-5)/2] + 1 = 3 (2 pad each side)
+                # 9x9 vs 4x4 -> start = [(9-4)/2] + 1 = 3.5 (2 pad, 3 pad)
+                start = int(math.floor(((self.size[dim] - currentSize) / 2)))
+                outputWindow = outputWindow.narrow(dim, start, currentSize)
         return outputWindow
 
     def updateOutput(self, input):
@@ -46,10 +47,10 @@ class DepthConcat(Concat):
 
         offset = 0
         for i, module in enumerate(self.modules):
-           currentOutput = outs[i]
-           outputWindow = self.windowNarrow(self.output, currentOutput, offset)
-           outputWindow.copy_(currentOutput)
-           offset = offset + currentOutput.size(self.dimension)
+            currentOutput = outs[i]
+            outputWindow = self.windowNarrow(self.output, currentOutput, offset)
+            outputWindow.copy_(currentOutput)
+            offset = offset + currentOutput.size(self.dimension)
 
         return self.output
 
@@ -58,26 +59,25 @@ class DepthConcat(Concat):
 
         offset = 0
         for i, module in enumerate(self.modules):
-           currentOutput = module.output
-           gradOutputWindow = self.windowNarrow(gradOutput, currentOutput, offset)
-           currentGradInput = module.updateGradInput(input, gradOutputWindow)
-           if i == 0:
-              self.gradInput.copy_(currentGradInput)
-           else:
-              self.gradInput.add_(currentGradInput)
+            currentOutput = module.output
+            gradOutputWindow = self.windowNarrow(gradOutput, currentOutput, offset)
+            currentGradInput = module.updateGradInput(input, gradOutputWindow)
+            if i == 0:
+                self.gradInput.copy_(currentGradInput)
+            else:
+                self.gradInput.add_(currentGradInput)
 
-           offset = offset + currentOutput.size(self.dimension)
+            offset = offset + currentOutput.size(self.dimension)
 
         return self.gradInput
-
 
     def accGradParameters(self, input, gradOutput, scale=1):
         offset = 0
         for i, module in enumerate(self.modules):
-           currentOutput = module.output
-           gradOutputWindow = self.windowNarrow(gradOutput, currentOutput, offset)
-           module.accGradParameters(input, gradOutputWindow, scale)
-           offset = offset + currentOutput.size(self.dimension)
+            currentOutput = module.output
+            gradOutputWindow = self.windowNarrow(gradOutput, currentOutput, offset)
+            module.accGradParameters(input, gradOutputWindow, scale)
+            offset = offset + currentOutput.size(self.dimension)
 
     def backward(self, input, gradOutput, scale=1):
         self.gradInput.resizeAs_(input)
@@ -99,8 +99,7 @@ class DepthConcat(Concat):
     def accUpdateGradParameters(self, input, gradOutput, lr):
         offset = 0
         for i, module in enumerate(self.modules):
-           currentOutput = module.output
-           gradOutputWindow = self.windowNarrow(gradOutput, currentOutput, offset)
-           module.accUpdateGradParameters(input, gradOutputWindow, lr)
-           offset = offset + currentOutput.size(self.dimension)
-
+            currentOutput = module.output
+            gradOutputWindow = self.windowNarrow(gradOutput, currentOutput, offset)
+            module.accUpdateGradParameters(input, gradOutputWindow, lr)
+            offset = offset + currentOutput.size(self.dimension)

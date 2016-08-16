@@ -3,61 +3,62 @@ from copy import deepcopy
 from . import CWrapPlugin
 from itertools import product
 
+
 class THPPlugin(CWrapPlugin):
 
     TYPE_UNPACK = {
-        'THFloatTensor*':   Template('((THPFloatTensor*)$arg)->cdata'),
-        'THDoubleTensor*':  Template('((THPDoubleTensor*)$arg)->cdata'),
-        'THLongTensor*':    Template('((THPLongTensor*)$arg)->cdata'),
-        'THIntTensor*':     Template('((THPIntTensor*)$arg)->cdata'),
-        'THTensor*':        Template('((THPTensor*)$arg)->cdata'),
-        'THBoolTensor*':    Template('((THPBoolTensor*)$arg)->cdata'),
-        'THIndexTensor*':   Template('((THPIndexTensor*)$arg)->cdata'),
-        'THLongStorage*':   Template('((THPLongStorage*)$arg)->cdata'),
-        'THStorage*':       Template('((THPStorage*)$arg)->cdata'),
-        'THGenerator*':     Template('((THPGenerator*)$arg)->cdata'),
-        'void*':            Template('THPUtils_unpackLong($arg)'),
-        'long':             Template('THPUtils_unpackLong($arg)'),
-        'int':              Template('THPUtils_unpackLong($arg)'),
-        'bool':             Template('THPUtils_unpackLong($arg)'),
-        'float':            Template('THPFloatUtils_unpackReal($arg)'),
-        'double':           Template('THPDoubleUtils_unpackReal($arg)'),
-        'real':             Template('THPUtils_(unpackReal)($arg)'),
-        'accreal':          Template('THPUtils_(unpackAccreal)($arg)'),
+        'THFloatTensor*': Template('((THPFloatTensor*)$arg)->cdata'),
+        'THDoubleTensor*': Template('((THPDoubleTensor*)$arg)->cdata'),
+        'THLongTensor*': Template('((THPLongTensor*)$arg)->cdata'),
+        'THIntTensor*': Template('((THPIntTensor*)$arg)->cdata'),
+        'THTensor*': Template('((THPTensor*)$arg)->cdata'),
+        'THBoolTensor*': Template('((THPBoolTensor*)$arg)->cdata'),
+        'THIndexTensor*': Template('((THPIndexTensor*)$arg)->cdata'),
+        'THLongStorage*': Template('((THPLongStorage*)$arg)->cdata'),
+        'THStorage*': Template('((THPStorage*)$arg)->cdata'),
+        'THGenerator*': Template('((THPGenerator*)$arg)->cdata'),
+        'void*': Template('THPUtils_unpackLong($arg)'),
+        'long': Template('THPUtils_unpackLong($arg)'),
+        'int': Template('THPUtils_unpackLong($arg)'),
+        'bool': Template('THPUtils_unpackLong($arg)'),
+        'float': Template('THPFloatUtils_unpackReal($arg)'),
+        'double': Template('THPDoubleUtils_unpackReal($arg)'),
+        'real': Template('THPUtils_(unpackReal)($arg)'),
+        'accreal': Template('THPUtils_(unpackAccreal)($arg)'),
     }
 
     TYPE_CHECK = {
-        'THDoubleTensor*':  Template('(PyObject*)Py_TYPE($arg) == THPDoubleTensorClass'),
-        'THFloatTensor*':   Template('(PyObject*)Py_TYPE($arg) == THPFloatTensorClass'),
-        'THLongTensor*':    Template('(PyObject*)Py_TYPE($arg) == THPLongTensorClass'),
-        'THIntTensor*':     Template('(PyObject*)Py_TYPE($arg) == THPIntTensorClass'),
-        'THCudaTensor*':    Template('(PyObject*)Py_TYPE($arg) == THCPFloatTensorClass'),
-        'THTensor*':        Template('(PyObject*)Py_TYPE($arg) == THPTensorClass'),
-        'THBoolTensor*':    Template('(PyObject*)Py_TYPE($arg) == THPBoolTensorClass'),
-        'THIndexTensor*':   Template('(PyObject*)Py_TYPE($arg) == THPIndexTensorClass'),
-        'THLongStorage*':   Template('(PyObject*)Py_TYPE($arg) == THPLongStorageClass'),
-        'THStorage*':       Template('(PyObject*)Py_TYPE($arg) == THPStorageClass'),
-        'THGenerator*':     Template('Py_TYPE($arg) == &THPGeneratorType'),
-        'void*':            Template('THPUtils_checkLong($arg)'),
-        'long':             Template('THPUtils_checkLong($arg)'),
-        'int':              Template('THPUtils_checkLong($arg)'),
-        'bool':             Template('THPUtils_checkLong($arg)'),
-        'float':            Template('THPFloatUtils_checkReal($arg)'),
-        'double':           Template('THPDoubleUtils_checkReal($arg)'),
-        'real':             Template('THPUtils_(checkReal)($arg)'),
+        'THDoubleTensor*': Template('(PyObject*)Py_TYPE($arg) == THPDoubleTensorClass'),
+        'THFloatTensor*': Template('(PyObject*)Py_TYPE($arg) == THPFloatTensorClass'),
+        'THLongTensor*': Template('(PyObject*)Py_TYPE($arg) == THPLongTensorClass'),
+        'THIntTensor*': Template('(PyObject*)Py_TYPE($arg) == THPIntTensorClass'),
+        'THCudaTensor*': Template('(PyObject*)Py_TYPE($arg) == THCPFloatTensorClass'),
+        'THTensor*': Template('(PyObject*)Py_TYPE($arg) == THPTensorClass'),
+        'THBoolTensor*': Template('(PyObject*)Py_TYPE($arg) == THPBoolTensorClass'),
+        'THIndexTensor*': Template('(PyObject*)Py_TYPE($arg) == THPIndexTensorClass'),
+        'THLongStorage*': Template('(PyObject*)Py_TYPE($arg) == THPLongStorageClass'),
+        'THStorage*': Template('(PyObject*)Py_TYPE($arg) == THPStorageClass'),
+        'THGenerator*': Template('Py_TYPE($arg) == &THPGeneratorType'),
+        'void*': Template('THPUtils_checkLong($arg)'),
+        'long': Template('THPUtils_checkLong($arg)'),
+        'int': Template('THPUtils_checkLong($arg)'),
+        'bool': Template('THPUtils_checkLong($arg)'),
+        'float': Template('THPFloatUtils_checkReal($arg)'),
+        'double': Template('THPDoubleUtils_checkReal($arg)'),
+        'real': Template('THPUtils_(checkReal)($arg)'),
         # TODO
-        'accreal':          Template('THPUtils_(checkReal)($arg)'),
+        'accreal': Template('THPUtils_(checkReal)($arg)'),
     }
 
     RETURN_WRAPPER = {
-        'THTensor*':        Template('return THPTensor_(newObject)($call);'),
-        'THLongStorage*':   Template('return THPLongStorage_newObject($call);'),
+        'THTensor*': Template('return THPTensor_(newObject)($call);'),
+        'THLongStorage*': Template('return THPLongStorage_newObject($call);'),
         # TODO: make it smarter - it should return python long if result doesn't fit into an int
-        'long':             Template('return PyInt_FromLong($call);'),
+        'long': Template('return PyInt_FromLong($call);'),
         # TODO
-        'accreal':          Template('return PyFloat_FromDouble($call);'),
-        'self':             Template('$call;\nPy_INCREF(self);\nreturn (PyObject*)self;'),
-        'real':             Template('return THPUtils_(newReal)($call);'),
+        'accreal': Template('return PyFloat_FromDouble($call);'),
+        'self': Template('$call;\nPy_INCREF(self);\nreturn (PyObject*)self;'),
+        'real': Template('return THPUtils_(newReal)($call);'),
     }
 
     TENSOR_METHODS_DECLARATION = Template("""
@@ -82,19 +83,19 @@ PyObject * $name(PyObject *self, PyObject *args)
 """)
 
     ALLOCATE_TYPE = {
-        'THTensor*':        Template("""\
+        'THTensor*': Template("""\
       THTensorPtr _th_$name = THTensor_(new)(LIBRARY_STATE_NOARGS);
       THPTensorPtr _${name}_guard = (THPTensor*)THPTensor_(newObject)(_th_$name.get());
       THPTensor* $name = _${name}_guard.get();
       _th_$name.release();
 """),
-        'THLongTensor*':        Template("""\
+        'THLongTensor*': Template("""\
       THLongTensorPtr _th_$name = THLongTensor_new(LIBRARY_STATE_NOARGS);
       THPLongTensorPtr _${name}_guard = (THPLongTensor*)THPLongTensor_newObject(_th_$name.get());
       THPLongTensor* $name = _${name}_guard.get();
       _th_$name.release();
 """),
-        'THBoolTensor*':    Template("""
+        'THBoolTensor*': Template("""
 #if IS_CUDA
       THCByteTensorPtr _t_$name = THCudaByteTensor_new(LIBRARY_STATE_NOARGS);
       THCPByteTensorPtr _${name}_guard = (THCPByteTensor*)THCPByteTensor_newObject(_t_$name);
@@ -106,7 +107,7 @@ PyObject * $name(PyObject *self, PyObject *args)
 #endif
       _t_$name.release();
 """),
-        'THIndexTensor*':    Template("""
+        'THIndexTensor*': Template("""
 #if IS_CUDA
       THCLongTensorPtr _t_$name = THCudaLongTensor_new(LIBRARY_STATE_NOARGS);
       THCPLongTensorPtr _${name}_guard = (THCPLongTensor*)THCPLongTensor_newObject(_t_$name);
@@ -222,8 +223,8 @@ PyObject * $name(PyObject *self, PyObject *args)
         tensor_methods = ''
         for declaration in (self.declarations if not stateless else self.stateless_declarations):
             entry = Template('  {"$python_name", (PyCFunction)$name, METH_VARARGS, NULL},\n').substitute(
-                    python_name=declaration['python_name'], name=declaration['name']
-                )
+                python_name=declaration['python_name'], name=declaration['name']
+            )
             if 'defined_if' in declaration:
                 entry = self.preprocessor_guard(entry, declaration['defined_if'])
             tensor_methods += entry
@@ -235,7 +236,7 @@ PyObject * $name(PyObject *self, PyObject *args)
         return code[:idx] + self.declare_methods(False) + self.declare_methods(True) + code[idx:]
 
     def preprocessor_guard(self, code, condition):
-            return '#if ' + condition + '\n' + code + '#endif\n'
+        return '#if ' + condition + '\n' + code + '#endif\n'
 
     def process_wrapper(self, code, declaration):
         if 'defined_if' in declaration:

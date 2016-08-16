@@ -1,6 +1,7 @@
 import torch
 from .Criterion import Criterion
 
+
 class DistKLDivCriterion(Criterion):
 
     def __init__(self, sizeAverage=True):
@@ -31,4 +32,3 @@ class DistKLDivCriterion(Criterion):
             self.sizeAverage
         )
         return self.gradInput
-

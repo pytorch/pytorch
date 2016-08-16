@@ -1,6 +1,7 @@
 import torch
 from .Container import Container
 
+
 class Parallel(Container):
 
     def __init__(self, inputDimension, outputDimension):
@@ -38,12 +39,12 @@ class Parallel(Container):
         return self.output
 
     def updateGradInput(self, input, gradOutput):
-        nModule=input.size(self.inputDimension)
+        nModule = input.size(self.inputDimension)
         self.gradInput.resizeAs_(input)
 
         offset = 0
         for i in range(nModule):
-            module=self.modules[i]
+            module = self.modules[i]
             currentInput = input.select(self.inputDimension, i)
             currentOutput = module.output
             outputSize = currentOutput.size(self.outputDimension)
@@ -61,25 +62,25 @@ class Parallel(Container):
 
         offset = 0
         for i in range(nModule):
-           module = self.modules[i]
-           currentOutput = module.output
-           outputSize = currentOutput.size(self.outputDimension)
+            module = self.modules[i]
+            currentOutput = module.output
+            outputSize = currentOutput.size(self.outputDimension)
 
-           module.accGradParameters(input.select(self.inputDimension, i),
-                   gradOutput.narrow(self.outputDimension, offset, outputSize), scale)
-           offset = offset + outputSize
+            module.accGradParameters(input.select(self.inputDimension, i),
+                                     gradOutput.narrow(self.outputDimension, offset, outputSize), scale)
+            offset = offset + outputSize
 
     def accUpdateGradParameters(self, input, gradOutput, lr):
         nModule = input.size(self.inputDimension)
 
         offset = 0
         for i in range(nModule):
-           module = self.modules[i];
-           currentOutput = module.output
-           module.accupdateGradParameters(input.select(self.inputDimension, i),
-               gradOutput.narrow(self.outputDimension, offset, currentOutput.size(self.outputDimension)),
-               lr)
-           offset = offset + currentOutput.size(self.outputDimension)
+            module = self.modules[i]
+            currentOutput = module.output
+            module.accupdateGradParameters(input.select(self.inputDimension, i),
+                                           gradOutput.narrow(self.outputDimension, offset, currentOutput.size(self.outputDimension)),
+                                           lr)
+            offset = offset + currentOutput.size(self.outputDimension)
 
     def __repr__(self):
         tab = '  '
@@ -91,7 +92,7 @@ class Parallel(Container):
         res = torch.type(self)
         res += ' {' + line + tab + 'input'
         for i in range(len(self.modules)):
-            if i == len(self.modules)-1:
+            if i == len(self.modules) - 1:
                 res += line + tab + next + '(' + i + '): ' + str(self.modules[i]).replace(line, line + tab + extlast)
             else:
                 res += line + tab + next + '(' + i + '): ' + str(self.modules[i]).replace(line, line + tab + ext)
@@ -99,4 +100,3 @@ class Parallel(Container):
         res += line + tab + last + 'output'
         res += line + '}'
         return res
-

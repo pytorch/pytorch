@@ -1,6 +1,7 @@
 import torch
 from .Criterion import Criterion
 
+
 class MSECriterion(Criterion):
 
     def __init__(self, sizeAverage=True):
@@ -29,4 +30,3 @@ class MSECriterion(Criterion):
             self.sizeAverage
         )
         return self.gradInput
-

@@ -3,6 +3,7 @@ import torch
 from .Module import Module
 from .utils import clear
 
+
 class Euclidean(Module):
 
     def __init__(self, inputSize, outputSize):
@@ -18,11 +19,11 @@ class Euclidean(Module):
         self.fastBackward = True
         self.reset()
 
-        self._input   = None
-        self._weight  = None
-        self._expand  = None
+        self._input = None
+        self._weight = None
+        self._expand = None
         self._expand2 = None
-        self._repeat  = None
+        self._repeat = None
         self._repeat2 = None
         self._div = None
         self._output = None
@@ -32,17 +33,17 @@ class Euclidean(Module):
 
     def reset(self, stdv=None):
         if stdv is not None:
-           stdv = stdv * math.sqrt(3)
+            stdv = stdv * math.sqrt(3)
         else:
-           stdv = 1./math.sqrt(self.weight.size(0))
+            stdv = 1. / math.sqrt(self.weight.size(0))
 
         self.weight.uniform_(-stdv, stdv)
 
     def _view(self, res, src, *args):
         if src.isContiguous():
-           res.set_(src.view(*args))
+            res.set_(src.view(*args))
         else:
-           res.set_(src.contiguous().view(*args))
+            res.set_(src.contiguous().view(*args))
 
     def updateOutput(self, input):
         # lazy initialize buffers
@@ -82,7 +83,7 @@ class Euclidean(Module):
 
     def updateGradInput(self, input, gradOutput):
         if not self.gradInput:
-           return
+            return
 
         self._div = self._div or input.new()
         self._output = self._output or self.output.new()
@@ -90,7 +91,7 @@ class Euclidean(Module):
         self._expand3 = self._expand3 or input.new()
 
         if not self.fastBackward:
-           self.updateOutput(input)
+            self.updateOutput(input)
 
         inputSize, outputSize = self.weight.size(0), self.weight.size(1)
 
@@ -116,12 +117,10 @@ class Euclidean(Module):
         else:
             torch.mul(self._repeat2, self._repeat, self._expand3)
 
-
         torch.sum(self.gradInput, self._repeat2, 2)
         self.gradInput.resizeAs_(input)
 
         return self.gradInput
-
 
     def accGradParameters(self, input, gradOutput, scale=1):
         inputSize, outputSize = self.weight.size(0), self.weight.size(1)
@@ -140,25 +139,23 @@ class Euclidean(Module):
 
     def type(self, type=None, tensorCache=None):
         if type:
-           # prevent premature memory allocations
-           self.clearState()
+            # prevent premature memory allocations
+            self.clearState()
 
         return super(Euclidean, self).type(type, tensorCache)
 
-
     def clearState(self):
         clear(self, [
-           '_input',
-           '_output',
-           '_gradOutput',
-           '_weight',
-           '_div',
-           '_sum',
-           '_expand',
-           '_expand2',
-           '_expand3',
-           '_repeat',
-           '_repeat2',
+            '_input',
+            '_output',
+            '_gradOutput',
+            '_weight',
+            '_div',
+            '_sum',
+            '_expand',
+            '_expand2',
+            '_expand3',
+            '_repeat',
+            '_repeat2',
         ])
         return super(Euclidean, self).clearState()
-

@@ -13,23 +13,23 @@ class cwrap(object):
     }
 
     TYPE_CHECK = {
-        'void*':            Template('PyLong_Check($arg)'),
-        'bool':             Template('PyLong_Check($arg)'),
-        'float':            Template('PyFloat_Check($arg)'),
-        'double':           Template('PyFloat_Check($arg)'),
+        'void*': Template('PyLong_Check($arg)'),
+        'bool': Template('PyLong_Check($arg)'),
+        'float': Template('PyFloat_Check($arg)'),
+        'double': Template('PyFloat_Check($arg)'),
         # TODO: this will only work for python3
-        'int':              Template('PyLong_Check($arg)'),
-        'long':             Template('PyLong_Check($arg)'),
+        'int': Template('PyLong_Check($arg)'),
+        'long': Template('PyLong_Check($arg)'),
     }
 
     TYPE_UNPACK = {
-        'void*':            Template('PyLong_AsVoidPtr($arg)'),
-        'bool':             Template('PyLong_AsLong($arg)'),
-        'float':            Template('(float)PyFloat_AsDouble($arg)'),
-        'double':           Template('PyFloat_AsDouble($arg)'),
+        'void*': Template('PyLong_AsVoidPtr($arg)'),
+        'bool': Template('PyLong_AsLong($arg)'),
+        'float': Template('(float)PyFloat_AsDouble($arg)'),
+        'double': Template('PyFloat_AsDouble($arg)'),
         # TODO: this will only work for python3
-        'int':              Template('PyLong_AsLong($arg)'),
-        'long':             Template('PyLong_AsLong($arg)'),
+        'int': Template('PyLong_AsLong($arg)'),
+        'long': Template('PyLong_AsLong($arg)'),
     }
 
     OPTION_TEMPLATE = Template("""
@@ -140,10 +140,10 @@ class cwrap(object):
         return fallback(*args)
 
     def get_type_check(self, arg, option):
-        return self.search_plugins('get_type_check', (arg, option), lambda arg,_: self.TYPE_CHECK[arg['type']])
+        return self.search_plugins('get_type_check', (arg, option), lambda arg, _: self.TYPE_CHECK[arg['type']])
 
     def get_type_unpack(self, arg, option):
-        return self.search_plugins('get_type_unpack', (arg, option), lambda arg,_: self.TYPE_UNPACK[arg['type']])
+        return self.search_plugins('get_type_unpack', (arg, option), lambda arg, _: self.TYPE_UNPACK[arg['type']])
 
     def get_return_wrapper(self, option):
         return self.search_plugins('get_return_wrapper', (option,), lambda t: self.RETURN_WRAPPERS[option['return']])
@@ -152,7 +152,7 @@ class cwrap(object):
         return self.search_plugins('get_wrapper_template', (declaration,), lambda _: None)
 
     def get_arg_accessor(self, arg, option):
-        return self.search_plugins('get_arg_accessor', (arg, option), lambda arg,_: 'PyTuple_GET_ITEM(args, {})'.format(arg['idx']))
+        return self.search_plugins('get_arg_accessor', (arg, option), lambda arg, _: 'PyTuple_GET_ITEM(args, {})'.format(arg['idx']))
 
     def generate_wrapper(self, declaration):
         wrapper = ''
@@ -183,14 +183,14 @@ class cwrap(object):
 
         # Generate checks
         arg_checks = self.map_selected_arguments('get_type_check',
-                'process_single_check', option, checked_args)
+                                                 'process_single_check', option, checked_args)
         arg_checks = ' &&\n          '.join(arg_checks)
         for plugin in self.plugins:
             arg_checks = plugin.process_all_checks(arg_checks, option)
 
         # Generate unpacks
         arg_unpack = self.map_selected_arguments('get_type_unpack',
-                'process_single_unpack', option, option['arguments'])
+                                                 'process_single_unpack', option, option['arguments'])
         arg_unpack = ', '.join(arg_unpack)
         for plugin in self.plugins:
             arg_unpack = plugin.process_all_unpacks(arg_unpack, option)
@@ -208,4 +208,3 @@ class cwrap(object):
             arg_check=arg_checks,
             call=call
         )
-

@@ -2,6 +2,7 @@ import torch
 from .Module import Module
 from .utils import clear
 
+
 class SoftMin(Module):
 
     def __init__(self):
@@ -35,4 +36,3 @@ class SoftMin(Module):
     def clearState(self):
         clear(self, 'mininput')
         return super(SoftMin, self).clearState()
-

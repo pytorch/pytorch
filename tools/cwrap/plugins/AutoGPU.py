@@ -1,5 +1,6 @@
 from . import CWrapPlugin
 
+
 class AutoGPU(CWrapPlugin):
 
     DEFINES = """
@@ -21,5 +22,3 @@ class AutoGPU(CWrapPlugin):
 
     def process_full_file(self, code):
         return self.DEFINES + code
-
-

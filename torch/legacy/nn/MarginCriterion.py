@@ -1,6 +1,7 @@
 import torch
 from .Criterion import Criterion
 
+
 class MarginCriterion(Criterion):
 
     def __init__(self, margin=1, sizeAverage=True):
@@ -32,4 +33,3 @@ class MarginCriterion(Criterion):
             self.margin
         )
         return self.gradInput
-

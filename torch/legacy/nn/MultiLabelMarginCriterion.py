@@ -1,6 +1,7 @@
 import torch
 from .Criterion import Criterion
 
+
 class MultiLabelMarginCriterion(Criterion):
 
     def __init__(self, sizeAverage=True):
@@ -32,4 +33,3 @@ class MultiLabelMarginCriterion(Criterion):
             self.sizeAverage
         )
         return self.gradInput
-

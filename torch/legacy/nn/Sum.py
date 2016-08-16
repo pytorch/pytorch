@@ -2,11 +2,12 @@ import torch
 from .Module import Module
 from .utils import clear
 
+
 class Sum(Module):
 
     def __init__(self, dimension=0, sizeAverage=False):
         super(Sum, self).__init__()
-        self.dimension   = dimension
+        self.dimension = dimension
         self.sizeAverage = sizeAverage
         self._gradOutput = None
 
@@ -45,8 +46,6 @@ class Sum(Module):
 
         return self.gradInput
 
-
     def clearState(self):
-         clear(self, '_gradOutput')
-         return super(Sum, self).clearState()
-
+        clear(self, '_gradOutput')
+        return super(Sum, self).clearState()

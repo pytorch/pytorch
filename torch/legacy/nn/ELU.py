@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class ELU(Module):
     """
             Djork-Arné Clevert, Thomas Unterthiner, Sepp Hochreiter
@@ -38,4 +39,3 @@ class ELU(Module):
 
     def __repr__(self):
         return '{}(alpha={:.3f})'.format(str(type(self)), self.alpha)
-

@@ -3,6 +3,7 @@ import torch
 from .Module import Module
 from .utils import clear
 
+
 class Cosine(Module):
 
     def __init__(self, inputSize, outputSize):
@@ -22,7 +23,7 @@ class Cosine(Module):
         if stdv is not None:
             stdv = stdv * math.sqrt(3)
         else:
-            stdv = 1./math.sqrt(self.weight.size(0))
+            stdv = 1. / math.sqrt(self.weight.size(0))
         self.weight.uniform_(-stdv, stdv)
 
     def updateOutput(self, input):
@@ -51,12 +52,11 @@ class Cosine(Module):
         self.output.div_(self._inputNorm.expandAs(self.output))
         return self.output
 
-
     def updateGradInput(self, input, gradOutput):
         assert input.dim() == 2
 
         if not self.gradInput:
-           return
+            return
 
         inputSize = self.weight.size(1)
         outputSize = self.weight.size(0)
@@ -70,7 +70,7 @@ class Cosine(Module):
         nElement = self.gradInput.nElement()
         self.gradInput.resizeAs_(input)
         if self.gradInput.nElement() != nElement:
-           self.gradInput.zero_()
+            self.gradInput.zero_()
 
         inputNorm = self._inputNorm.expandAs(input)
         weightNorm = self._weightNorm.view(1, outputSize).expandAs(gradOutput)
@@ -124,25 +124,23 @@ class Cosine(Module):
 
     def type(self, type=None, tensorCache=None):
         if type is not None:
-           # prevent premature memory allocations
-           self._input = None
-           self._weight = None
-           self._inputNorm = None
-           self._weightNorm = None
-           self._gradOutput = None
-           self._sum = None
+            # prevent premature memory allocations
+            self._input = None
+            self._weight = None
+            self._inputNorm = None
+            self._weightNorm = None
+            self._gradOutput = None
+            self._sum = None
 
         return super(Cosine, self).type(type, tensorCache)
 
-
     def clearState(self):
         clear(self, [
-           '_input',
-           '_weight',
-           '_gradOutput',
-           '_sum',
-           '_inputNorm',
-           '_weightNorm',
+            '_input',
+            '_weight',
+            '_gradOutput',
+            '_sum',
+            '_inputNorm',
+            '_weightNorm',
         ])
         return super(Cosine, self).clearState()
-

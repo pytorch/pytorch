@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class CSubTable(Module):
 
     def __init__(self, ):
@@ -20,4 +21,3 @@ class CSubTable(Module):
 
         self.gradInput = self.gradInput[:2]
         return self.gradInput
-

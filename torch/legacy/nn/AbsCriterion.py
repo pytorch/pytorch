@@ -1,6 +1,7 @@
 import torch
 from .Criterion import Criterion
 
+
 class AbsCriterion(Criterion):
 
     def __init__(self, sizeAverage=True):
@@ -20,7 +21,6 @@ class AbsCriterion(Criterion):
         self.output = self.output_tensor[0]
         return self.output
 
-
     def updateGradInput(self, input, target):
         self._backend.AbsCriterion_updateGradInput(
             self._backend.library_state,
@@ -30,4 +30,3 @@ class AbsCriterion(Criterion):
             self.sizeAverage
         )
         return self.gradInput
-

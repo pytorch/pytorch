@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class FlattenTable(Module):
 
     def __init__(self):
@@ -59,7 +60,6 @@ class FlattenTable(Module):
 
         return self.output
 
-
     def updateGradInput(self, input, gradOutput):
         assert isinstance(input, list)
         assert isinstance(gradOutput, list)
@@ -69,10 +69,9 @@ class FlattenTable(Module):
 
         # However, we should check that the gradInput is valid:
         if not self._checkMapping(gradOutput, self.gradInput, self.input_map):
-                self.gradInput = self._inverseFlatten(gradOutput, self.input_map)
+            self.gradInput = self._inverseFlatten(gradOutput, self.input_map)
 
         return self.gradInput
-
 
     def type(self, type=None, tensorCache=None):
         if not type:
@@ -81,8 +80,6 @@ class FlattenTable(Module):
         # conversions. Just force the tables to be empty.
         self.clearState()
 
-
     def clearState(self):
         self.input_map = []
         return super(FlattenTable, self).clearState()
-

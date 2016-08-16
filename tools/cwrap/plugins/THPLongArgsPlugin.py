@@ -1,6 +1,7 @@
 from string import Template
 from . import CWrapPlugin
 
+
 class THPLongArgsPlugin(CWrapPlugin):
     PARSE_LONG_ARGS = Template("""\
       THLongStoragePtr __long_args_guard = THPUtils_getLongStorage(args, $num_checked);
@@ -38,7 +39,6 @@ class THPLongArgsPlugin(CWrapPlugin):
                 if ') {' in line:
                     end_checks = i
                     break
-            lines = lines[:end_checks+1] + [self.PARSE_LONG_ARGS.substitute(num_checked=option['num_checked_args'])] + lines[end_checks+1:]
+            lines = lines[:end_checks + 1] + [self.PARSE_LONG_ARGS.substitute(num_checked=option['num_checked_args'])] + lines[end_checks + 1:]
             code = '\n'.join(lines)
         return code
-

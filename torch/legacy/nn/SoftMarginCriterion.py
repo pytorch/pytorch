@@ -1,6 +1,7 @@
 import torch
 from .Criterion import Criterion
 
+
 class SoftMarginCriterion(Criterion):
 
     def __init__(self, ):
@@ -29,4 +30,3 @@ class SoftMarginCriterion(Criterion):
             self.sizeAverage
         )
         return self.gradInput
-

@@ -4,6 +4,7 @@ from . import _backends
 from .utils import recursiveType
 import torch._thnn
 
+
 class Criterion(object):
 
     def __init__(self):
@@ -42,4 +43,3 @@ class Criterion(object):
 
     def cuda(self):
         return self.type('torch.cuda.FloatTensor')
-

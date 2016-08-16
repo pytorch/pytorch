@@ -1,6 +1,7 @@
 import torch
 from .Criterion import Criterion
 
+
 class HingeEmbeddingCriterion(Criterion):
 
     def __init__(self, margin=1, sizeAverage=True):
@@ -33,4 +34,3 @@ class HingeEmbeddingCriterion(Criterion):
             self.gradInput.mul_(1 / input.nElement())
 
         return self.gradInput
-

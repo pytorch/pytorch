@@ -12,19 +12,20 @@ from .MSECriterion import MSECriterion
          Reference: http.//arxiv.org/abs/1506.08230
 """
 
+
 class ClassSimplexCriterion(MSECriterion):
 
     def __init__(self, nClasses):
-         super(ClassSimplexCriterion, self).__init__()
-         self.nClasses = nClasses
+        super(ClassSimplexCriterion, self).__init__()
+        self.nClasses = nClasses
 
-         # embedding the simplex in a space of dimension strictly greater than
-         # the minimum possible (nClasses-1) is critical for effective training.
-         simp = self._regsplex(nClasses - 1)
-         self.simplex = torch.cat(simp, torch.zeros(simp.size(0), nClasses - simp.size(1)), 1)
-         self._target = torch.Tensor(nClasses)
+        # embedding the simplex in a space of dimension strictly greater than
+        # the minimum possible (nClasses-1) is critical for effective training.
+        simp = self._regsplex(nClasses - 1)
+        self.simplex = torch.cat(simp, torch.zeros(simp.size(0), nClasses - simp.size(1)), 1)
+        self._target = torch.Tensor(nClasses)
 
-         self.output_tensor = None
+        self.output_tensor = None
 
     def _regsplex(self, n):
         """
@@ -54,8 +55,8 @@ class ClassSimplexCriterion(MSECriterion):
                 a[k][k] = math.sqrt(1 - a[(k,), (0, k)].norm()**2)
 
             # fill_ the k-th coordinates for the vectors of the remaining vertices
-            c = (a[k][k]**2 - 1 - 1/n) / a[k][k]
-            a[(k+1, n+1), (k,)].fill_(c)
+            c = (a[k][k]**2 - 1 - 1 / n) / a[k][k]
+            a[(k + 1, n + 1), (k,)].fill_(c)
 
         return a
 
@@ -69,19 +70,19 @@ class ClassSimplexCriterion(MSECriterion):
             self._target[i].copy_(self.simplex[int(target[i])])
 
     def updateOutput(self, input, target):
-         self._transformTarget(target)
+        self._transformTarget(target)
 
-         assert input.nElement() == self._target.nElement()
-         self.output_tensor = self.output_tensor or input.new(1)
-         self._backend.MSECriterion_updateOutput(
+        assert input.nElement() == self._target.nElement()
+        self.output_tensor = self.output_tensor or input.new(1)
+        self._backend.MSECriterion_updateOutput(
             self._backend.library_state,
             input,
             self._target,
             self.output_tensor,
             self.sizeAverage
-         )
-         self.output = self.output_tensor[0]
-         return self.output
+        )
+        self.output = self.output_tensor[0]
+        return self.output
 
     def updateGradInput(self, input, target):
         assert input.nElement() == self._target.nElement()
@@ -99,6 +100,5 @@ class ClassSimplexCriterion(MSECriterion):
 
     def getTopPrediction(self, input):
         prod = self.getPredictions(input)
-        _, maxs = prod.max(prod.nDimension()-1)
+        _, maxs = prod.max(prod.nDimension() - 1)
         return maxs.view(-1)
-
