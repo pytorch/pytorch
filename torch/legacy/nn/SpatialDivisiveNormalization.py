@@ -33,10 +33,10 @@ class SpatialDivisiveNormalization(Module):
             raise ValueError('SpatialDivisiveNormalization averaging kernel must have ODD dimensions')
 
         # padding values
-        padH = int(math.floor(self.kernel.size(0)/2))
+        padH = int(math.floor(self.kernel.size(0) /2))
         padW = padH
         if kdim == 2:
-            padW = int(math.floor(self.kernel.size(1)/2))
+            padW = int(math.floor(self.kernel.size(1) /2))
 
         # create convolutional mean estimator
         self.meanestimator = Sequential()
@@ -100,7 +100,7 @@ class SpatialDivisiveNormalization(Module):
 
         # compute side coefficients
         dim = input.dim()
-        if self.localstds.dim() != self.coef.dim() or (input.size(dim-1) != self.coef.size(dim-1)) or (input.size(dim-2) != self.coef.size(dim-2)):
+        if self.localstds.dim() != self.coef.dim() or (input.size(dim -1) != self.coef.size(dim -1)) or (input.size(dim -2) != self.coef.size(dim -2)):
             self.ones = self.ones or input.new()
             self.ones.resizeAs_(input[0:1]).fill_(1)
             coef = self.meanestimator.updateOutput(self.ones).squeeze(0)

@@ -19,13 +19,13 @@ class SpatialDropout(Module):
             else:
                 raise RuntimeError('Input must be 4D (nbatch, nfeat, h, w)')
 
-            self.noise.bernoulli_(1-self.p)
+            self.noise.bernoulli_(1 -self.p)
             # We expand the random dropouts to the entire feature map because the
             # features are likely correlated accross the map and so the dropout
             # should also be correlated.
             self.output.mul_(self.noise.expandAs(input))
         else:
-            self.output.mul_(1-self.p)
+            self.output.mul_(1 -self.p)
 
         return self.output
 

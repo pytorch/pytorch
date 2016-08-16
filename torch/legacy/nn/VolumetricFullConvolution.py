@@ -50,7 +50,7 @@ class VolumetricFullConvolution(Module):
             kT = self.kT
             kH = self.kH
             kW = self.kW
-            stdv = 1. / math.sqrt(kW*kH*kT*nInputPlane)
+            stdv = 1. / math.sqrt(kW *kH *kT *nInputPlane)
 
         self.weight.uniform_(-stdv, stdv)
         self.bias.uniform_(-stdv, stdv)
@@ -83,9 +83,9 @@ class VolumetricFullConvolution(Module):
             inputTensor = input[0]
             targetTensor = input[1]
             tDims = targetTensor.dim()
-            tT = targetTensor.size(tDims-3)
-            tH = targetTensor.size(tDims-2)
-            tW = targetTensor.size(tDims-1)
+            tT = targetTensor.size(tDims -3)
+            tH = targetTensor.size(tDims -2)
+            tW = targetTensor.size(tDims -1)
             adjT = self._calculateAdj(tT, self.kT, self.padT, self.dT)
             adjW = self._calculateAdj(tW, self.kW, self.padW, self.dW)
             adjH = self._calculateAdj(tH, self.kH, self.padH, self.dH)
@@ -116,9 +116,9 @@ class VolumetricFullConvolution(Module):
             inputTensor = input[0]
             targetTensor = input[1]
             tDims = targetTensor.dim()
-            tT = targetTensor.size(tDims-3)
-            tH = targetTensor.size(tDims-2)
-            tW = targetTensor.size(tDims-1)
+            tT = targetTensor.size(tDims -3)
+            tH = targetTensor.size(tDims -2)
+            tW = targetTensor.size(tDims -1)
             adjT = self._calculateAdj(tT, self.kT, self.padT, self.dT)
             adjW = self._calculateAdj(tW, self.kW, self.padW, self.dW)
             adjH = self._calculateAdj(tH, self.kH, self.padH, self.dH)
@@ -159,9 +159,9 @@ class VolumetricFullConvolution(Module):
             inputTensor = input[0]
             targetTensor = input[1]
             tDims = targetTensor.dim()
-            tT = targetTensor.size(tDims-3)
-            tH = targetTensor.size(tDims-2)
-            tW = targetTensor.size(tDims-1)
+            tT = targetTensor.size(tDims -3)
+            tH = targetTensor.size(tDims -2)
+            tW = targetTensor.size(tDims -1)
             adjT = self._calculateAdj(tT, self.kT, self.padT, self.dT)
             adjW = self._calculateAdj(tW, self.kW, self.padW, self.dW)
             adjH = self._calculateAdj(tH, self.kH, self.padH, self.dH)

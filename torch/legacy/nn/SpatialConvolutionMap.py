@@ -12,7 +12,7 @@ class SpatialConvolutionMap(Module):
 
         @staticmethod
         def full(nin, nout):
-            ft = torch.Tensor(nin*nout, 2)
+            ft = torch.Tensor(nin *nout, 2)
             p = 0
             for j in range(nout):
                 for i in range(nin):
@@ -47,7 +47,7 @@ class SpatialConvolutionMap(Module):
             for i in range(nout):  # fro each unit in target map
                 ufrtbl.select(0, i).copy_(ufitbl.select(0, frcntr))
                 frcntr += 1
-                if frcntr-1 == nfi:  # reset fi
+                if frcntr -1 == nfi:  # reset fi
                     fi.copy_(torch.randperm(nin))
                     frcntr = 1
 
@@ -85,7 +85,7 @@ class SpatialConvolutionMap(Module):
                 ninp[idx] += 1
             for k in range(self.connTable.size(0)):
                 idx = int(self.connTable[k, 1])
-                stdv = 1. / math.sqrt(self.kW*self.kH*ninp[idx])
+                stdv = 1. / math.sqrt(self.kW *self.kH *ninp[idx])
                 self.weight.select(0, k).uniform_(-stdv, stdv)
             for k in range(self.bias.size(0)):
                 stdv = 1. / math.sqrt(self.kW * self.kH * ninp[k])

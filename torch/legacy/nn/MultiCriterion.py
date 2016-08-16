@@ -15,7 +15,7 @@ class MultiCriterion(Criterion):
         new_weights = torch.DoubleStorage(len(self.criterions))
         for i, v in enumerate(self.weights):
             new_weights[i] = v
-        new_weights[len(self.criterions)-1] = weight
+        new_weights[len(self.criterions) -1] = weight
         self.weights = new_weights
         return self
 

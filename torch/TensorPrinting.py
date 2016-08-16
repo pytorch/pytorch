@@ -42,7 +42,7 @@ def _printformat(storage):
         else:
             if exp_max > 5 or exp_max < 0:
                 sz = 7
-                scale = math.pow(10, exp_max-1)
+                scale = math.pow(10, exp_max -1)
             else:
                 if exp_max == 0:
                     sz = 7
@@ -56,11 +56,11 @@ SCALE_FORMAT = '{:.5f} *\n'
 
 def _printMatrix(self, indent=''):
     fmt, scale, sz = _printformat(self.storage())
-    nColumnPerLine = math.floor((80-len(indent))/(sz+1))
+    nColumnPerLine = math.floor((80 -len(indent)) /(sz +1))
     strt = ''
     firstColumn = 0
     while firstColumn < self.size(1):
-        lastColumn = min(firstColumn + nColumnPerLine - 1, self.size(1)-1)
+        lastColumn = min(firstColumn + nColumnPerLine - 1, self.size(1) -1)
         if nColumnPerLine < self.size(1):
             strt += '\n' if firstColumn != 1 else ''
             strt += 'Columns {} to {} \n{}'.format(firstColumn, lastColumn, indent)
@@ -68,13 +68,13 @@ def _printMatrix(self, indent=''):
             strt += SCALE_FORMAT.format(scale)
         for l in _pyrange(self.size(0)):
             strt += indent + (' ' if scale != 1 else '')
-            strt += ' '.join(fmt.format(val/scale) for val in self.select(0, l).narrow(0, firstColumn, lastColumn-firstColumn+1)) + '\n'
+            strt += ' '.join(fmt.format(val /scale) for val in self.select(0, l).narrow(0, firstColumn, lastColumn -firstColumn +1)) + '\n'
         firstColumn = lastColumn + 1
     return strt
 
 
 def _printTensor(self):
-    counter_dim = self.nDimension()-2
+    counter_dim = self.nDimension() -2
     counter = torch.LongStorage(counter_dim).fill_(0)
     counter[0] = -1
     finished = False
@@ -83,7 +83,7 @@ def _printTensor(self):
         for i in _pyrange(counter_dim):
             counter[i] += 1
             if counter[i] == self.size(i):
-                if i == counter_dim-1:
+                if i == counter_dim -1:
                     finished = True
                 counter[i] = 0
             else:
@@ -103,7 +103,7 @@ def _printVector(tensor):
     strt = ''
     if scale != 1:
         strt += SCALE_FORMAT.format(scale)
-    return '\n'.join(fmt.format(val/scale) for val in tensor) + '\n'
+    return '\n'.join(fmt.format(val /scale) for val in tensor) + '\n'
 
 
 def printTensor(self):

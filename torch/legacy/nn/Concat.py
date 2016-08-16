@@ -92,7 +92,7 @@ class Concat(Container):
         res = torch.type(self)
         res += ' {' + line + tab + 'input'
         for i in range(len(self.modules)):
-            if i == len(self.modules)-1:
+            if i == len(self.modules) -1:
                 res += line + tab + next + '(' + i + '): ' + str(self.modules[i]).replace(line, line + tab + extlast)
             else:
                 res += line + tab + next + '(' + i + '): ' + str(self.modules[i]).replace(line, line + tab + ext)

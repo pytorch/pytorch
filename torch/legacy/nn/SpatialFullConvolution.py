@@ -47,7 +47,7 @@ class SpatialFullConvolution(Module):
             nInputPlane = self.nInputPlane
             kH = self.kH
             kW = self.kW
-            stdv = 1/math.sqrt(kW*kH*nInputPlane)
+            stdv = 1 /math.sqrt(kW *kH *nInputPlane)
 
         self.weight.uniform_(-stdv, stdv)
         if self.bias:
@@ -81,8 +81,8 @@ class SpatialFullConvolution(Module):
             inputTensor = input[0]
             targetTensor = input[1]
             tDims = targetTensor.dim()
-            tH = targetTensor.size(tDims-2)
-            tW = targetTensor.size(tDims-1)
+            tH = targetTensor.size(tDims -2)
+            tW = targetTensor.size(tDims -1)
             adjW = self._calculateAdj(tW, self.kW, self.padW, self.dW)
             adjH = self._calculateAdj(tH, self.kH, self.padH, self.dH)
             self.finput = self.finput or input[0].new()
@@ -119,8 +119,8 @@ class SpatialFullConvolution(Module):
             inputTensor = input[0]
             targetTensor = input[1]
             tDims = targetTensor.dim()
-            tH = targetTensor.size(tDims-2)
-            tW = targetTensor.size(tDims-1)
+            tH = targetTensor.size(tDims -2)
+            tW = targetTensor.size(tDims -1)
             adjW = self._calculateAdj(tW, self.kW, self.padW, self.dW)
             adjH = self._calculateAdj(tH, self.kH, self.padH, self.dH)
         # Momentarily extract the gradInput tensor
@@ -160,8 +160,8 @@ class SpatialFullConvolution(Module):
             inputTensor = input[0]
             targetTensor = input[1]
             tDims = targetTensor.dim()
-            tH = targetTensor.size(tDims-2)
-            tW = targetTensor.size(tDims-1)
+            tH = targetTensor.size(tDims -2)
+            tW = targetTensor.size(tDims -1)
             adjW = calculateAdj(tW, self.kW, self.padW, self.dW)
             adjH = calculateAdj(tH, self.kH, self.padH, self.dH)
 

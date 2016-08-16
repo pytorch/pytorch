@@ -35,7 +35,7 @@ class Euclidean(Module):
         if stdv is not None:
             stdv = stdv * math.sqrt(3)
         else:
-            stdv = 1./math.sqrt(self.weight.size(0))
+            stdv = 1. /math.sqrt(self.weight.size(0))
 
         self.weight.uniform_(-stdv, stdv)
 

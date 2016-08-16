@@ -203,7 +203,7 @@ class Module(object):
         # 4. copy storages into the flattened parameter tensor
         for storageAndOffset in storages.values():
             storage, offset = storageAndOffset
-            flatParameters[slice(offset, offset+storage.size())].copy_(Tensor().set_(storage))
+            flatParameters[slice(offset, offset +storage.size())].copy_(Tensor().set_(storage))
 
         # 5. allow garbage collection
         storages = None

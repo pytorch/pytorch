@@ -37,10 +37,10 @@ class SpatialFullConvolutionMap(Module):
                 ninp[idx] += 1
             for k in range(self.connTable.size(0)):
                 idx = int(self.connTable[k][1])
-                stdv = 1. / math.sqrt(self.kW*self.kH*ninp[idx])
+                stdv = 1. / math.sqrt(self.kW *self.kH *ninp[idx])
                 self.weight[k].uniform_(-stdv, stdv)
             for k in range(self.bias.size(0)):
-                stdv = 1. / math.sqrt(self.kW*self.kH*ninp[k])
+                stdv = 1. / math.sqrt(self.kW *self.kH *ninp[k])
                 # TODO: torch.uniform
                 self.bias[k] = random.uniform(-stdv, stdv)
 

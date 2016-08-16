@@ -32,9 +32,9 @@ class VolumetricMaxPooling(Module):
 
     def updateOutput(self, input):
         dims = input.dim()
-        self.itime = input.size(dims-3)
-        self.iheight = input.size(dims-2)
-        self.iwidth = input.size(dims-1)
+        self.itime = input.size(dims -3)
+        self.iheight = input.size(dims -2)
+        self.iwidth = input.size(dims -1)
 
         self.indices = self.indices or input.new()
         self._backend.VolumetricMaxPooling_updateOutput(

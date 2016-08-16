@@ -22,7 +22,7 @@ class Add(Module):
         if stdv is not None:
             stdv = stdv * math.sqrt(3)
         else:
-            stdv = 1./math.sqrt(self.bias.size(0))
+            stdv = 1. /math.sqrt(self.bias.size(0))
 
         self.bias.uniform_(-stdv, stdv)
 
@@ -48,7 +48,7 @@ class Add(Module):
 
     def accGradParameters(self, input, gradOutput, scale=1):
         if self.gradBias.size(0) == 1:
-            self.gradBias[0] = self.gradBias[0] + scale*gradOutput.sum();
+            self.gradBias[0] = self.gradBias[0] + scale *gradOutput.sum();
         else:
             if input.isSameSizeAs(self.bias):
                 self.gradBias.add_(scale, gradOutput)

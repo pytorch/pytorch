@@ -55,8 +55,8 @@ class ClassSimplexCriterion(MSECriterion):
                 a[k][k] = math.sqrt(1 - a[(k,), (0, k)].norm()**2)
 
             # fill_ the k-th coordinates for the vectors of the remaining vertices
-            c = (a[k][k]**2 - 1 - 1/n) / a[k][k]
-            a[(k+1, n+1), (k,)].fill_(c)
+            c = (a[k][k]**2 - 1 - 1 /n) / a[k][k]
+            a[(k +1, n +1), (k,)].fill_(c)
 
         return a
 
@@ -100,5 +100,5 @@ class ClassSimplexCriterion(MSECriterion):
 
     def getTopPrediction(self, input):
         prod = self.getPredictions(input)
-        _, maxs = prod.max(prod.nDimension()-1)
+        _, maxs = prod.max(prod.nDimension() -1)
         return maxs.view(-1)

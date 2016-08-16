@@ -302,7 +302,7 @@ simple_tests = [
                     input_size=(10, 2, 4),
                     reference_fn=lambda _, i: i.mul(i)),
     SimpleTestCase(nn.Sqrt,
-                    input=torch.rand(10, 2, 4)+0.01,
+                    input=torch.rand(10, 2, 4) +0.01,
                     reference_fn=lambda _, i: i.sqrt()),
     SimpleTestCase(nn.Squeeze,
                     input_size=(2, 1, 1, 4, 5),
@@ -518,10 +518,10 @@ simple_tests = [
                     desc='fractional'),
     SimpleTestCase(nn.Reshape,
                     (4, 5),
-                    input_size=(3, 4*5),
+                    input_size=(3, 4 *5),
                     desc='add_dim'),
     SimpleTestCase(nn.Reshape,
-                    (4*5,),
+                    (4 *5,),
                     input_size=(3, 4, 5),
                     desc='squash_dim'),
     SimpleTestCase(nn.Select,
@@ -740,8 +740,8 @@ simple_tests = [
     CriterionTestCase(nn.AbsCriterion,
                         input_size=(2, 3, 4),
                         target=torch.randn(2, 3, 4),
-                        reference_fn=lambda _, i, t: 1./i.numel() * \
-                            sum((a-b).abs().sum() for a, b in zip(i, t))
+                        reference_fn=lambda _, i, t: 1. /i.numel() * \
+                            sum((a -b).abs().sum() for a, b in zip(i, t))
                     ),
     CriterionTestCase(nn.BCECriterion,
                         input=torch.rand(15, 10).clamp_(0, 1),
@@ -801,7 +801,7 @@ simple_tests = [
     CriterionTestCase(nn.MSECriterion,
                         input=torch.randn(2, 3, 4, 5),
                         target=torch.randn(2, 3, 4, 5),
-                        reference_fn=lambda _, i, t: (i-t).abs().pow(2).sum() / i.numel()),
+                        reference_fn=lambda _, i, t: (i -t).abs().pow(2).sum() / i.numel()),
     CriterionTestCase(nn.WeightedMSECriterion,
                         (torch.rand(3, 4, 5),),
                         input=torch.randn(2, 3, 4, 5),
@@ -861,7 +861,7 @@ for p in (1, 2, 1.5):
                         reference_fn=lambda _, i, p=p: i.div(i.norm(p, 1).expandAs(i)),
                         desc=str(p)),
     )
-for p in range(1, 4+1):
+for p in range(1, 4 +1):
     simple_tests.append(
         SimpleTestCase(nn.PairwiseDistance,
                         (p,),
@@ -997,7 +997,7 @@ class TestNN(TestCase):
                     outb.copy_(module.forward(input))
                     flat_tensor[i] = orig
 
-                    outb.add_(-1, outa).div_(2*perturbation)
+                    outb.add_(-1, outa).div_(2 *perturbation)
                     d_tensor[i] = outb
 
             return jacobian
@@ -1046,7 +1046,7 @@ class TestNN(TestCase):
                 fx1 = criterion.forward(input, target)
                 x[i] = original - eps
                 fx2 = criterion.forward(input, target)
-                deriv = (fx1 - fx2) / (2*eps)
+                deriv = (fx1 - fx2) / (2 *eps)
                 d_x[i] = deriv
                 x[i] = original
 
@@ -1060,19 +1060,19 @@ class TestNN(TestCase):
 
     def test_Dropout(self):
         p = 0.2
-        input = torch.Tensor(1000).fill_(1-p)
+        input = torch.Tensor(1000).fill_(1 -p)
 
         module = nn.Dropout(p)
         output = module.forward(input)
-        self.assertLess(abs(output.mean() - (1-p)), 0.05)
+        self.assertLess(abs(output.mean() - (1 -p)), 0.05)
         gradInput = module.backward(input, input)
-        self.assertLess(abs(gradInput.mean() - (1-p)), 0.05)
+        self.assertLess(abs(gradInput.mean() - (1 -p)), 0.05)
 
         module = nn.Dropout(p, True)
         output = module.forward(input.clone())
-        self.assertLess(abs(output.mean() - (1-p)), 0.05)
+        self.assertLess(abs(output.mean() - (1 -p)), 0.05)
         gradInput = module.backward(input.clone(), input.clone())
-        self.assertLess(abs(gradInput.mean() - (1-p)), 0.05)
+        self.assertLess(abs(gradInput.mean() - (1 -p)), 0.05)
 
     def test_SpatialDropout(self):
         p = 0.2
@@ -1084,9 +1084,9 @@ class TestNN(TestCase):
         module = nn.SpatialDropout(p)
         module.training()
         output = module.forward(input)
-        self.assertLess(abs(output.mean() - (1-p)), 0.05)
+        self.assertLess(abs(output.mean() - (1 -p)), 0.05)
         gradInput = module.backward(input, input)
-        self.assertLess(abs(gradInput.mean() - (1-p)), 0.05)
+        self.assertLess(abs(gradInput.mean() - (1 -p)), 0.05)
 
     def test_VolumetricDropout(self):
         p = 0.2
@@ -1099,9 +1099,9 @@ class TestNN(TestCase):
         module = nn.VolumetricDropout(p)
         module.training()
         output = module.forward(input)
-        self.assertLess(abs(output.mean() - (1-p)), 0.05)
+        self.assertLess(abs(output.mean() - (1 -p)), 0.05)
         gradInput = module.backward(input, input)
-        self.assertLess(abs(gradInput.mean() - (1-p)), 0.05)
+        self.assertLess(abs(gradInput.mean() - (1 -p)), 0.05)
 
     def test_ReLU_reference(self):
         input = torch.randn(10, 20)
@@ -1392,7 +1392,7 @@ class TestNN(TestCase):
         mc = nn.MultiCriterion().add(nll, 0.5).add(nll2)
 
         output = mc.forward(input, target)
-        output2 = nll.forward(input, target)/2 + nll2.forward(input, target)
+        output2 = nll.forward(input, target) /2 + nll2.forward(input, target)
 
         self.assertEqual(output, output2)
         gradInput = mc.backward(input, target)
@@ -1437,7 +1437,7 @@ class TestNN(TestCase):
         mse = nn.MSECriterion()
         pc = nn.ParallelCriterion().add(nll, 0.5).add(mse)
         output = pc.forward(input, target)
-        output2 = nll.forward(input[0], target[0])/2 + mse.forward(input[1], target[1])
+        output2 = nll.forward(input[0], target[0]) /2 + mse.forward(input[1], target[1])
         self.assertEqual(output, output2)
         gradInput2 = [nll.backward(input[0], target[0]).clone().div(2), mse.backward(input[1], target[1])]
         gradInput = pc.backward(input, target)
@@ -1461,7 +1461,7 @@ class TestNN(TestCase):
         mse = nn.MSECriterion()
         pc = nn.ParallelCriterion(True).add(mse, 0.5).add(nn.MSECriterion())
         output = pc.forward(input, target)
-        output2 = mse.forward(input[0], target)/2 + mse.forward(input[1], target)
+        output2 = mse.forward(input[0], target) /2 + mse.forward(input[1], target)
         self.assertEqual(output, output2)
         gradInput = pc.backward(input, target)
         gradInput2 = [mse.backward(input[0], target).clone().div(2), mse.backward(input[1], target)]
@@ -1477,7 +1477,7 @@ class TestNN(TestCase):
         pc = nn.ParallelCriterion().add(nll, 0.5).add(mse)
         pc2 = nn.ParallelCriterion().add(nll2, 0.4).add(pc)
         output = pc2.forward(input, target)
-        output2 = nll2.forward(input[0], target[0])*0.4 + nll.forward(input[1][0], target[1][0])/2 + mse.forward(input[1][1], target[1][1])
+        output2 = nll2.forward(input[0], target[0]) *0.4 + nll.forward(input[1][0], target[1][0]) /2 + mse.forward(input[1][1], target[1][1])
         self.assertEqual(output, output2)
         gradInput2 = [
                 nll2.backward(input[0], target[0]).clone().mul(0.4),

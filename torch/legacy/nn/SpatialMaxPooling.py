@@ -34,8 +34,8 @@ class SpatialMaxPooling(Module):
         self.indices = self.indices or input.new()
 
         dims = input.dim()
-        self.iheight = input.size(dims-2)
-        self.iwidth = input.size(dims-1)
+        self.iheight = input.size(dims -2)
+        self.iwidth = input.size(dims -1)
 
         self._backend.SpatialMaxPooling_updateOutput(
             self._backend.library_state,

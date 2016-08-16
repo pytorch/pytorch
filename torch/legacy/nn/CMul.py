@@ -37,7 +37,7 @@ class CMul(Module):
         if stdv is not None:
             stdv = stdv * math.sqrt(3)
         else:
-            stdv = 1./math.sqrt(self.weight.nElement())
+            stdv = 1. /math.sqrt(self.weight.nElement())
 
         self.weight.uniform_(-stdv, stdv)
 

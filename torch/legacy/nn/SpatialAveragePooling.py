@@ -47,7 +47,7 @@ class SpatialAveragePooling(Module):
         # for backward compatibility with saved models
         # which are not supposed to have "divide" field
         if not self.divide:
-            self.output.mul_(self.kW*self.kH)
+            self.output.mul_(self.kW *self.kH)
 
         return self.output
 
@@ -66,7 +66,7 @@ class SpatialAveragePooling(Module):
             )
             # for backward compatibility
             if not self.divide:
-                self.gradInput.mul_(self.kW*self.kH)
+                self.gradInput.mul_(self.kW *self.kH)
 
             return self.gradInput
 

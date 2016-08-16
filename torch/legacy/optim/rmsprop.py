@@ -47,7 +47,7 @@ def rmsprop(opfunc, x, config, state=None):
 
     # (4) calculate new (leaky) mean squared values
     state['m'].mul_(alpha)
-    state['m'].addcmul_(1.0-alpha, dfdx, dfdx)
+    state['m'].addcmul_(1.0 -alpha, dfdx, dfdx)
 
     # (5) perform update
     torch.sqrt(state['tmp'], state['m']).add_(epsilon)

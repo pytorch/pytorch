@@ -125,7 +125,7 @@ def addSingletonDimension(*args):
         stride[d] = t.stride(d)
     size[dim] = 1
     stride[dim] = 1
-    for d in range(dim+1, t.dim()+1):
+    for d in range(dim +1, t.dim() +1):
         size[d] = t.size(d - 1)
         stride[d] = t.stride(d - 1)
 

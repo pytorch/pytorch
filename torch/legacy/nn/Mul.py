@@ -15,7 +15,7 @@ class Mul(Module):
         if stdv is not None:
             stdv = stdv * math.sqrt(3)
         else:
-            stdv = 1./math.sqrt(self.weight.size(0))
+            stdv = 1. /math.sqrt(self.weight.size(0))
         self.weight.uniform_(-stdv, stdv)
 
     def updateOutput(self, input):
@@ -29,4 +29,4 @@ class Mul(Module):
         return self.gradInput
 
     def accGradParameters(self, input, gradOutput, scale=1):
-        self.gradWeight[0] = self.gradWeight[0] + scale*input.dot(gradOutput);
+        self.gradWeight[0] = self.gradWeight[0] + scale *input.dot(gradOutput);

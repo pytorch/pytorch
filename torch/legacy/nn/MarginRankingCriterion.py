@@ -16,7 +16,7 @@ class MarginRankingCriterion(Criterion):
 
     def updateOutput(self, input, y):
         if input[0].size(0) == 1:
-            self.output = max(0, -y*(input[0][0]-input[1][0]) + self.margin)
+            self.output = max(0, -y *(input[0][0] -input[1][0]) + self.margin)
         else:
             self._output = self._output or input[0].clone()
             self._output.resizeAs_(input[0])
@@ -37,7 +37,7 @@ class MarginRankingCriterion(Criterion):
 
     def updateGradInput(self, input, y):
         if input[0].size(0) == 1:
-            dist = -y * (input[0][0]-input[1][0]) + self.margin
+            dist = -y * (input[0][0] -input[1][0]) + self.margin
             if dist < 0:
                 self.gradInput[0][0] = 0
                 self.gradInput[1][0] = 0

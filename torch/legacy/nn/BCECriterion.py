@@ -37,7 +37,7 @@ class BCECriterion(Criterion):
         output = torch.dot(target, buffer)
 
         # log(1 - input) * (1 - target)
-        torch.mul(buffer, input, -1).add_(1+self.eps).log_()
+        torch.mul(buffer, input, -1).add_(1 +self.eps).log_()
         if weights is not None:
             buffer.mul_(weights)
 

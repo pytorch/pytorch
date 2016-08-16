@@ -47,7 +47,7 @@ class Normalize(Module):
                 torch.pow(self.buffer, input, self.p)
 
             torch.sum(self.normp, self.buffer, 1).add_(self.eps)
-            torch.pow(self.norm, self.normp, 1./self.p)
+            torch.pow(self.norm, self.normp, 1. /self.p)
 
         torch.div(self._output, input, self.norm.view(-1, 1).expandAs(input))
 
@@ -82,15 +82,15 @@ class Normalize(Module):
             if self.p % 2 != 0:
                 if self.p < 2:
                     # add eps to avoid possible division by 0
-                    torch.abs(self.buffer, input).add_(self.eps).pow_(self.p-2).mul_(input)
+                    torch.abs(self.buffer, input).add_(self.eps).pow_(self.p -2).mul_(input)
                 else:
-                    torch.abs(self.buffer, input).pow_(self.p-2).mul_(input)
+                    torch.abs(self.buffer, input).pow_(self.p -2).mul_(input)
             # special case for p == 2, pow(x, 0) = 1
             elif self.p == 2:
                 self.buffer.copy_(input)
             else:
                 # p is even and > 2, pow(x, p) is always positive
-                torch.pow(self.buffer, input, self.p-2).mul_(input)
+                torch.pow(self.buffer, input, self.p -2).mul_(input)
 
         # compute cross term in two steps
         self.cross.resize_(n, 1)

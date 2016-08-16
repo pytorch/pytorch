@@ -188,7 +188,7 @@ class TestTorch(TestCase):
 
     def test_lerp(self):
         def TH_lerp(a, b, weight):
-            return a + weight * (b-a);
+            return a + weight * (b -a);
 
         size = (100, 100)
         a = torch.rand(*size)
@@ -430,16 +430,16 @@ class TestTorch(TestCase):
         self.assertEqual(res2, res.sum(0)[0])
 
         res2.addbmm_(1, b1, b2)
-        self.assertEqual(res2, res.sum(0)[0]*2)
+        self.assertEqual(res2, res.sum(0)[0] *2)
 
         res2.addbmm_(1., .5, b1, b2)
-        self.assertEqual(res2, res.sum(0)[0]*2.5)
+        self.assertEqual(res2, res.sum(0)[0] *2.5)
 
         res3 = torch.addbmm(1, res2, 0, b1, b2)
         self.assertEqual(res3, res2)
 
         res4 = torch.addbmm(1, res2, .5, b1, b2)
-        self.assertEqual(res4, res.sum(0)[0]*3)
+        self.assertEqual(res4, res.sum(0)[0] *3)
 
         res5 = torch.addbmm(0, res2, 1, b1, b2)
         self.assertEqual(res5, res.sum(0)[0])
@@ -459,16 +459,16 @@ class TestTorch(TestCase):
         self.assertEqual(res2, res)
 
         res2.baddbmm_(1, b1, b2)
-        self.assertEqual(res2, res*2)
+        self.assertEqual(res2, res *2)
 
         res2.baddbmm_(1, .5, b1, b2)
-        self.assertEqual(res2, res*2.5)
+        self.assertEqual(res2, res *2.5)
 
         res3 = torch.baddbmm(1, res2, 0, b1, b2)
         self.assertEqual(res3, res2)
 
         res4 = torch.baddbmm(1, res2, .5, b1, b2)
-        self.assertEqual(res4, res*3)
+        self.assertEqual(res4, res *3)
 
         res5 = torch.baddbmm(0, res2, 1, b1, b2)
         self.assertEqual(res5, res)
@@ -673,9 +673,9 @@ class TestTorch(TestCase):
     def test_multinomial(self):
         # with replacement
         n_row = 3
-        for n_col in range(4, 5+1):
+        for n_col in range(4, 5 +1):
             prob_dist = torch.rand(n_row, n_col)
-            prob_dist.select(1, n_col-1).fill_(0)  # index n_col shouldn't be sampled
+            prob_dist.select(1, n_col -1).fill_(0)  # index n_col shouldn't be sampled
             n_sample = n_col
             sample_indices = torch.multinomial(prob_dist, n_sample, True)
             self.assertEqual(prob_dist.dim(), 2)
@@ -685,9 +685,9 @@ class TestTorch(TestCase):
 
         # without replacement
         n_row = 3
-        for n_col in range(4, 5+1):
+        for n_col in range(4, 5 +1):
             prob_dist = torch.rand(n_row, n_col)
-            prob_dist.select(1, n_col-1).fill_(0)  # index n_col shouldn't be sampled
+            prob_dist.select(1, n_col -1).fill_(0)  # index n_col shouldn't be sampled
             n_sample = 3
             sample_indices = torch.multinomial(prob_dist, n_sample, False)
             self.assertEqual(prob_dist.dim(), 2)
@@ -696,7 +696,7 @@ class TestTorch(TestCase):
                 row_samples = {}
                 for j in range(n_sample):
                     sample_idx = sample_indices[i, j]
-                    self.assertNotEqual(sample_idx, n_col-1,
+                    self.assertNotEqual(sample_idx, n_col -1,
                             "sampled an index with zero probability")
                     self.assertNotIn(sample_idx, row_samples, "sampled an index twice")
                     row_samples[sample_idx] = True
@@ -768,12 +768,12 @@ class TestTorch(TestCase):
 
         are_ordered = True
         for j, k in product(range(SIZE), range(1, SIZE)):
-            self.assertTrue(check_order(mxx[j][k-1], mxx[j][k]),
+            self.assertTrue(check_order(mxx[j][k -1], mxx[j][k]),
                     'torch.sort ({}) values unordered for {}'.format(order, task))
 
         seen = set()
         indicesCorrect = True
-        size = x.size(x.dim()-1)
+        size = x.size(x.dim() -1)
         for k in range(size):
             seen.clear()
             for j in range(size):
@@ -805,18 +805,18 @@ class TestTorch(TestCase):
         )
 
         # Test that we still have proper sorting with duplicate keys
-        x = torch.floor(torch.rand(SIZE, SIZE)*10)
+        x = torch.floor(torch.rand(SIZE, SIZE) *10)
         torch.sort(res2val, res2ind, x)
         self.assertIsOrdered('ascending', x, res2val, res2ind, 'random with duplicate keys')
 
         # DESCENDING SORT
         x = torch.rand(SIZE, SIZE)
-        res1val, res1ind = torch.sort(x, x.dim()-1, True)
+        res1val, res1ind = torch.sort(x, x.dim() -1, True)
 
         # Test use of result tensor
         res2val = torch.Tensor()
         res2ind = torch.LongTensor()
-        torch.sort(res2val, res2ind, x, x.dim()-1, True)
+        torch.sort(res2val, res2ind, x, x.dim() -1, True)
         self.assertEqual(res1val, res2val, 0)
         self.assertEqual(res1ind, res2ind, 0)
 
@@ -886,23 +886,23 @@ class TestTorch(TestCase):
         res1val, res1ind = torch.kthvalue(x, k)
         res2val, res2ind = torch.sort(x)
 
-        self.assertEqual(res1val[:, :, 0], res2val[:, :, k-1], 0)
-        self.assertEqual(res1ind[:, :, 0], res2ind[:, :, k-1], 0)
+        self.assertEqual(res1val[:, :, 0], res2val[:, :, k -1], 0)
+        self.assertEqual(res1ind[:, :, 0], res2ind[:, :, k -1], 0)
         # test use of result tensors
         k = random.randint(1, SIZE)
         res1val = torch.Tensor()
         res1ind = torch.LongTensor()
         torch.kthvalue(res1val, res1ind, x, k)
         res2val, res2ind = torch.sort(x)
-        self.assertEqual(res1val[:, :, 0], res2val[:, :, k-1], 0)
-        self.assertEqual(res1ind[:, :, 0], res2ind[:, :, k-1], 0)
+        self.assertEqual(res1val[:, :, 0], res2val[:, :, k -1], 0)
+        self.assertEqual(res1ind[:, :, 0], res2ind[:, :, k -1], 0)
 
         # test non-default dim
         k = random.randint(1, SIZE)
         res1val, res1ind = torch.kthvalue(x, k, 0)
         res2val, res2ind = torch.sort(x, 0)
-        self.assertEqual(res1val[0], res2val[k-1], 0)
-        self.assertEqual(res1ind[0], res2ind[k-1], 0)
+        self.assertEqual(res1val[0], res2val[k -1], 0)
+        self.assertEqual(res1ind[0], res2ind[k -1], 0)
 
         # non-contiguous
         y = x.narrow(1, 0, 1)
@@ -928,7 +928,7 @@ class TestTorch(TestCase):
 
             res1val, res1ind = torch.median(x)
             res2val, res2ind = torch.sort(x)
-            ind = int(math.floor((size+1)/2) - 1)
+            ind = int(math.floor((size +1) /2) - 1)
 
             self.assertEqual(res2val.select(1, ind), res1val.select(1, 0), 0)
             self.assertEqual(res2val.select(1, ind), res1val.select(1, 0), 0)
@@ -959,8 +959,8 @@ class TestTorch(TestCase):
         res1val = torch.Tensor(SIZE, 1).fill_(1)
         # The indices are the position of the last appearance of the mode element.
         res1ind = torch.LongTensor(SIZE, 1).fill_(1)
-        res1ind[0] = SIZE-1
-        res1ind[1] = SIZE-1
+        res1ind[0] = SIZE -1
+        res1ind[1] = SIZE -1
 
         res2val, res2ind = torch.mode(x)
 
@@ -1388,8 +1388,8 @@ class TestTorch(TestCase):
         ki = k.clone()
         ks = k.storage()
         kis = ki.storage()
-        for i in range(ks.size()-1, 0, -1):
-            kis[ks.size()-i+1] = ks[i]
+        for i in range(ks.size() -1, 0, -1):
+            kis[ks.size() -i +1] = ks[i]
         #for i=ks.size(), 1, -1 do kis[ks.size()-i+1]=ks[i] end
         imvx = torch.xcorr2(x, ki)
         imvx2 = torch.xcorr2(x, ki, 'V')
@@ -1433,8 +1433,8 @@ class TestTorch(TestCase):
         ki = k.clone();
         ks = k.storage()
         kis = ki.storage()
-        for i in range(ks.size()-1, 0, -1):
-            kis[ks.size()-i+1] = ks[i]
+        for i in range(ks.size() -1, 0, -1):
+            kis[ks.size() -i +1] = ks[i]
         imvx = torch.xcorr3(x, ki)
         imvx2 = torch.xcorr3(x, ki, 'V')
         imfx = torch.xcorr3(x, ki, 'F')
@@ -1484,7 +1484,7 @@ class TestTorch(TestCase):
         def reference(x, k, o3, o32):
             for i in range(o3.size(1)):
                 for j in range(k.size(1)):
-                    o32[i].add(torch.xcorr2(x[i+j-1], k[j]))
+                    o32[i].add(torch.xcorr2(x[i +j -1], k[j]))
         self._test_conv_corr_eq(lambda x, k: torch.xcorr3(x, k), reference)
 
     @unittest.skip("Not implemented yet")
@@ -1500,7 +1500,7 @@ class TestTorch(TestCase):
         def reference(x, k, o3, o32):
             for i in range(o3.size(1)):
                 for j in range(k.size(1)):
-                    o32[i].add(torch.conv2(x[i+j-1], k[k.size(1)-j+1]))
+                    o32[i].add(torch.conv2(x[i +j -1], k[k.size(1) -j +1]))
         self._test_conv_corr_eq(lambda x, k: torch.conv3(x, k), reference)
 
     @unittest.skip("Not implemented yet")
@@ -1508,7 +1508,7 @@ class TestTorch(TestCase):
         def reference(x, k, o3, o32):
             for i in range(o3.size(1)):
                 for j in range(k.size(1)):
-                    o32[i+j-1].add(torch.conv2(x[i], k[j], 'F'))
+                    o32[i +j -1].add(torch.conv2(x[i], k[j], 'F'))
         self._test_conv_corr_eq(lambda x, k: torch.conv3(x, k, 'F'), reference)
 
     def test_logical(self):
@@ -1658,7 +1658,7 @@ class TestTorch(TestCase):
                 a_reconstructed = u.t() * u
 
             piv = piv.long()
-            a_permuted = a.index(0, piv-1).index(1, piv-1)
+            a_permuted = a.index(0, piv -1).index(1, piv -1)
             self.assertTensorEq(a_permuted, a_reconstructed, 1e-14)
 
         dimensions = ((5, 1), (5, 3), (5, 5), (10, 10))
@@ -1677,8 +1677,8 @@ class TestTorch(TestCase):
 
     def test_numel(self):
         b = torch.ByteTensor(3, 100, 100)
-        self.assertEqual(b.nElement(), 3*100*100)
-        self.assertEqual(b.numel(), 3*100*100)
+        self.assertEqual(b.nElement(), 3 *100 *100)
+        self.assertEqual(b.numel(), 3 *100 *100)
 
     def _consecutive(self, size, start=1):
         sequence = torch.ones(int(torch.Tensor(size).prod(0)[0])).cumsum(0)
@@ -1774,7 +1774,7 @@ class TestTorch(TestCase):
                 for k in range(1 if dim == 2 else o):
                     ii = [i, j, k]
                     ii[dim] = (0, idx.size(dim))
-                    idx[tuple(ii)] = torch.randperm(dim_size)[1:elems_per_row+1]
+                    idx[tuple(ii)] = torch.randperm(dim_size)[1:elems_per_row +1]
 
     def test_gather(self):
         m, n, o = random.randint(10, 20), random.randint(10, 20), random.randint(10, 20)
@@ -1929,7 +1929,7 @@ class TestTorch(TestCase):
         self.assertEqual(tensor.view(3, -1).size().tolist(), target)
         tensor_view = tensor.view(5, 3)
         tensor_view.fill_(random.uniform(0, 1))
-        self.assertEqual((tensor_view-tensor).abs().max(), 0)
+        self.assertEqual((tensor_view -tensor).abs().max(), 0)
 
     def test_expand(self):
         result = torch.Tensor()
@@ -1952,7 +1952,7 @@ class TestTorch(TestCase):
         self.assertEqual(result.size().tolist(), target, 'Error in repeatTensor using result')
         result = tensor.repeatTensor(sizeStorage)
         self.assertEqual(result.size().tolist(), target, 'Error in repeatTensor using result and LongStorage')
-        self.assertEqual((result.mean(0).view(8, 4)-tensor).abs().max(), 0, 'Error in repeatTensor (not equal)')
+        self.assertEqual((result.mean(0).view(8, 4) -tensor).abs().max(), 0, 'Error in repeatTensor (not equal)')
 
     def test_isSameSizeAs(self):
         t1 = torch.Tensor(3, 4, 9, 10)
