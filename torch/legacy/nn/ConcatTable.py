@@ -105,7 +105,6 @@ class ConcatTable(Container):
            else:
               res = res + line + tab + next + '(' + i + '): ' + str(self.modules[i]).replace(line, line + tab + ext)
 
-
         res = res + line + tab + last + 'output'
         res = res + line + '}'
         return res

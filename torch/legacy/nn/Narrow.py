@@ -19,7 +19,6 @@ class Narrow(Module):
         self.output.resizeAs_(output).copy_(output)
         return self.output
 
-
     def updateGradInput(self, input, gradOutput):
         length = self.length
         if length < 0:

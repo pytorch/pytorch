@@ -47,7 +47,6 @@ class SpatialUpSamplingNearest(Module):
         )
         return self.output
 
-
     def updateGradInput(self, input, gradOutput):
         self.gradInput.resizeAs_(input)
         self._backend.SpatialUpSamplingNearest_updateGradInput(

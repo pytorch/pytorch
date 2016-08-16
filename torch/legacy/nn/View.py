@@ -31,7 +31,6 @@ class View(Module):
         self.output = input.view(self.size)
         return self.output
 
-
     def updateGradInput(self, input, gradOutput):
         self.gradInput = self.gradInput or gradOutput.new()
         self.gradInput = gradOutput.view(input.size())

@@ -41,7 +41,6 @@ class VolumetricFullConvolution(Module):
 
         self.reset()
 
-
     def reset(self, stdv=None):
         if stdv is not None:
             stdv = stdv * math.sqrt(3)

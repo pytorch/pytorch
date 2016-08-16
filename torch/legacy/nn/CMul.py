@@ -40,7 +40,6 @@ class CMul(Module):
 
         self.weight.uniform_(-stdv, stdv)
 
-
     def updateOutput(self, input):
         # lazy-initialize
         if self._output is None:
@@ -64,7 +63,6 @@ class CMul(Module):
 
         return self.output
 
-
     def updateGradInput(self, input, gradOutput):
         if not self.gradInput:
            return
@@ -87,7 +85,6 @@ class CMul(Module):
             self._gradInput.addcmul_(1, self._expand, self._gradOutput)
 
         return self.gradInput
-
 
     def accGradParameters(self, input, gradOutput, scale=1):
         if self._input is None:

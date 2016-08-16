@@ -20,7 +20,6 @@ class SpatialSubSampling(Module):
 
         self.reset()
 
-
     def reset(self, stdv=None):
         if stdv is not None:
             stdv = stdv * math.sqrt(3)
@@ -42,7 +41,6 @@ class SpatialSubSampling(Module):
         )
         return self.output
 
-
     def updateGradInput(self, input, gradOutput):
         if not self.gradInput:
             return
@@ -57,8 +55,6 @@ class SpatialSubSampling(Module):
             self.dW, self.dH
         )
         return self.gradInput
-
-
 
     def accGradParameters(self, input, gradOutput, scale=1):
         self._backend.SpatialSubSampling_accGradParameters(

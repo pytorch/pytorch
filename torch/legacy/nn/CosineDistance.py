@@ -30,7 +30,6 @@ class CosineDistance(Module):
 
         return input1, input2
 
-
     def updateOutput(self, input):
         input1, input2 = input[0], input[1]
         input1, input2 = self._makeContiguous(input1, input2)
@@ -63,7 +62,6 @@ class CosineDistance(Module):
 
         return self.output
 
-
     def updateGradInput(self, input, gradOutput):
         v1  = input[0]
         v2  = input[1]
@@ -92,7 +90,6 @@ class CosineDistance(Module):
         gw2.mul_(go)
 
         return self.gradInput
-
 
     def clearState(self):
         clear(self, [

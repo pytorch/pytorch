@@ -19,7 +19,6 @@ class Normalize(Module):
         self.cross = None
         self.buffer2 = None
 
-
     def updateOutput(self, input):
         assert input.dim() == 2
         input_size = input.size()

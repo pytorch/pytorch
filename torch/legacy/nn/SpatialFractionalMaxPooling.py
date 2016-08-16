@@ -60,7 +60,6 @@ class SpatialFractionalMaxPooling(Module):
 
         return torch.LongStorage((batchSize, planeSize, 2))
 
-
     def _initSampleBuffer(self, input):
         sampleBufferSize = self._getBufferSize(input)
 

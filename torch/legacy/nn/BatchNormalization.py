@@ -120,7 +120,6 @@ class BatchNormalization(Module):
 
         return self.output
 
-
     def _backward(self, input, gradOutput, scale, gradInput=None, gradWeight=None, gradBias=None):
         self._checkInputDim(input)
         self._checkInputDim(gradOutput)
@@ -132,7 +131,6 @@ class BatchNormalization(Module):
         scale = scale or 1.
         if gradInput is not None:
            gradInput.resizeAs_(gradOutput)
-
 
         self._backend.BatchNormalization_backward(
             self._backend.library_state,

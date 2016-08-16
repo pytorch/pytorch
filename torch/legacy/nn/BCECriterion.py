@@ -50,7 +50,6 @@ class BCECriterion(Criterion):
 
         return self.output
 
-
     def updateGradInput(self, input, target):
          # - (target - input) / ( input (1 - input) )
          # The gradient is slightly incorrect:
@@ -68,7 +67,6 @@ class BCECriterion(Criterion):
 
          if weights is not None and target.dim() != 1:
              weights = self.weights.view(1, target.size(1)).expandAs(target)
-
 
          buffer.resizeAs_(input)
          # - x ( 1 + self.eps -x ) + self.eps

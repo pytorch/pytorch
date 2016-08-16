@@ -65,7 +65,6 @@ def asgd(opfunc, x, config, state=None):
     else:
         state['ax'].copy_(x)
 
-
     # (5) update eta_t and mu_t
     state['t'] += 1
     state['eta_t'] = config['eta0'] / math.pow((1 + config['lambda'] * config['eta0'] * state['t']), config['alpha'])

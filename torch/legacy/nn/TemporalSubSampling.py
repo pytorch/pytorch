@@ -40,7 +40,6 @@ class TemporalSubSampling(Module):
         )
         return self.output
 
-
     def updateGradInput(self, input, gradOutput):
         if not self.gradInput:
             return

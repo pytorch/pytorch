@@ -37,12 +37,10 @@ class Module(object):
         self.accGradParameters(input, gradOutput, scale)
         return self.gradInput
 
-
     def backwardUpdate(self, input, gradOutput, lr):
         self.updateGradInput(input, gradOutput)
         self.accUpdateGradParameters(input, gradOutput, lr)
         return self.gradInput
-
 
     def updateGradInput(self, input, gradOutput):
         return self.gradInput
@@ -58,7 +56,6 @@ class Module(object):
         self.accGradParameters(input, gradOutput, -lr)
         self.gradWeight = gradWeight
         self.gradBias = gradBias
-
 
     def sharedAccUpdateGradParameters(self, input, gradOutput, lr):
         if self.parameters():
@@ -180,13 +177,11 @@ class Module(object):
                 storages[key] = (storage, num_parameters)
                 num_parameters = num_parameters + storage.size()
 
-
             parameterMeta.append({
                     'storageOffset':  param.storageOffset() + storages[key][1],
                     'size'         :  param.size(),
                     'stride'       :  param.stride()
             })
-
 
         # 2. construct a single tensor that will hold all the parameters
         flatParameters = BufferTensor(num_parameters).zero_()

@@ -79,7 +79,6 @@ class Linear(Module):
         clear(self, 'addBuffer')
         return super(Linear, self).clearState()
 
-
     def __repr__(self):
         return super(Linear, self).__repr__() + \
                 '({} -> {})'.format(self.weight.size(1), self.weight.size(0)) + \

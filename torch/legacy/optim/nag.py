@@ -40,7 +40,6 @@ def nag(opfunc, x, config, state=None):
     if mom <= 0:
         raise ValueError('Momentum must be positive for Nesterov Accelerated Gradient')
 
-
     # (1) evaluate f(x) and df/dx
     # first step in the direction of the momentum vector
 
@@ -55,7 +54,6 @@ def nag(opfunc, x, config, state=None):
     if wd != 0:
         dfdx.add_(wd, x)
 
-
     # (3) learning rate decay (annealing)
     clr = lr / (1 + state['evalCounter'] * lrd)
 
@@ -64,7 +62,6 @@ def nag(opfunc, x, config, state=None):
         state['dfdx'] = dfdx.new().resizeAs_(dfdx).zero_()
     else:
         state['dfdx'].mul_(mom)
-
 
     # (5) parameter update with single or individual learning rates
     if lrs is not None:
@@ -77,7 +74,6 @@ def nag(opfunc, x, config, state=None):
     else:
         x.add_(-clr, dfdx)
         state['dfdx'].add_(-clr, dfdx)
-
 
     # (6) update evaluation counter
     state['evalCounter'] += 1

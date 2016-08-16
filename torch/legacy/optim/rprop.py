@@ -57,8 +57,6 @@ def rprop(opfunc, x, config, state=None):
                 state['zsign']    = state['zsign'].cuda()
                 state['dminmax']  = state['dminmax'].cuda()
 
-
-
         # sign of derivative from last step to this one
         torch.mul(state['sign'], dfdx, state['delta'])
         torch.sign(state['sign'], state['sign'])

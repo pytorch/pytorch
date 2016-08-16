@@ -90,7 +90,6 @@ class SpatialFullConvolution(Module):
             self.finput = self.finput or input.new()
             self.fgradInput = self.fgradInput or input.new()
 
-
         inputTensor = self._makeContiguous(inputTensor)
         self._backend.SpatialFullConvolution_updateOutput(
             self._backend.library_state,

@@ -72,7 +72,6 @@ class MixtureTable(Module):
 
         return self.output
 
-
     def updateGradInput(self, input, gradOutput):
         gaterInput, expertInputs = input
         recursiveResizeAs(self.gradInput, input)
@@ -92,7 +91,6 @@ class MixtureTable(Module):
 
                 gaterGradInput.resizeAs_(gaterInput)
                 self.backwardSetup = True
-
 
             # like CMulTable, but with broadcasting
             for i, expertGradInput in enumerate(expertGradInputs):
@@ -134,7 +132,6 @@ class MixtureTable(Module):
             else:
                 self._expertView2 = expert.view(gaterInput.size(0), gaterInput.size(1), -1)
 
-
             torch.sum(gaterGradInput, self._expertView2, self.dimG+1)
             gaterGradInput.resizeAs_(gaterInput)
 
@@ -142,7 +139,6 @@ class MixtureTable(Module):
             torch.mul(expertGradInputs, self._gaterView.expandAs(expertInputs), gradOutput)
 
         return self.gradInput
-
 
     def type(self, type, tensorCache=None):
         self._gaterView = None
@@ -152,7 +148,6 @@ class MixtureTable(Module):
         self._expert2 = None
         self._expertView2 = None
         return super(MixtureTable, self).type(type, tensorCache)
-
 
     def clearState(self, ):
         clear(self, [

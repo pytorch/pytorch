@@ -13,7 +13,6 @@ class Padding(Module):
         self.outputSize = torch.LongStorage()
         super(Padding, self).__init__()
 
-
     def updateOutput(self, input):
         self.outputSize.resize_(input.dim())
         self.outputSize.copy_(input.size())
@@ -38,7 +37,6 @@ class Padding(Module):
            self.output.narrow(dim, index + pad, input.size(dim) - index).copy_(input.narrow(dim, index, input.size(dim) - index))
 
         return self.output
-
 
     def updateGradInput(self, input, gradOutput):
         self.gradInput.resizeAs_(input)

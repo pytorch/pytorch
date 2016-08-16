@@ -70,7 +70,6 @@ class DepthConcat(Concat):
 
         return self.gradInput
 
-
     def accGradParameters(self, input, gradOutput, scale=1):
         offset = 0
         for i, module in enumerate(self.modules):

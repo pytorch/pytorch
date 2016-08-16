@@ -11,7 +11,6 @@ class SpatialSoftMax(Module):
         )
         return self.output
 
-
     def updateGradInput(self, input, gradOutput):
         self._backend.SoftMax_updateGradInput(
             self._backend.library_state,

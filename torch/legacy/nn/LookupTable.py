@@ -68,7 +68,6 @@ class LookupTable(Module):
 
         return self.output
 
-
     def updateGradInput(self, input, gradOutput):
         # the input can be of any type (as in the forward it's
         # converted anyway to LongTensor) thus, need to allocate
@@ -80,7 +79,6 @@ class LookupTable(Module):
             self.gradInput.resizeAs_(input).zero_()
 
         return self.gradInput
-
 
     def accGradParameters(self, input, gradOutput, scale=1):
         input = self._input if self.copiedInput else input

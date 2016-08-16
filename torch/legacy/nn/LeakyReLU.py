@@ -27,7 +27,6 @@ class LeakyReLU(Module):
         )
         return self.output
 
-
     def updateGradInput(self, input, gradOutput):
         self._backend.LeakyReLU_updateGradInput(
             self._backend.library_state,
@@ -38,7 +37,6 @@ class LeakyReLU(Module):
             self.inplace
         )
         return self.gradInput
-
 
     def __repr__(self):
         return str(type(self)) + '({:.4f})'.format(self.negval)

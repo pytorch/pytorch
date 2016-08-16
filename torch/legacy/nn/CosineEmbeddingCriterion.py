@@ -16,7 +16,6 @@ class CosineEmbeddingCriterion(Criterion):
         self._outputs = None
         self._idx = None
 
-
     def updateOutput(self, input, y):
         input1, input2 = input[0], input[1]
 
@@ -67,7 +66,6 @@ class CosineEmbeddingCriterion(Criterion):
            self.output = self.output / y.size(0)
 
         return self.output
-
 
     def updateGradInput(self, input, y):
         v1  = input[0]

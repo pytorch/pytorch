@@ -12,7 +12,6 @@ class Squeeze(Module):
         self.output.set_(input.squeeze(dim) if dim is not None else input.squeeze())
         return self.output
 
-
     def updateGradInput(self, input, gradOutput):
         assert input.nElement() == gradOutput.nElement()
         self.gradInput.set_(gradOutput.viewAs(input))

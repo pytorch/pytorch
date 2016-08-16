@@ -116,12 +116,10 @@ class Euclidean(Module):
         else:
             torch.mul(self._repeat2, self._repeat, self._expand3)
 
-
         torch.sum(self.gradInput, self._repeat2, 2)
         self.gradInput.resizeAs_(input)
 
         return self.gradInput
-
 
     def accGradParameters(self, input, gradOutput, scale=1):
         inputSize, outputSize = self.weight.size(0), self.weight.size(1)
@@ -144,7 +142,6 @@ class Euclidean(Module):
            self.clearState()
 
         return super(Euclidean, self).type(type, tensorCache)
-
 
     def clearState(self):
         clear(self, [

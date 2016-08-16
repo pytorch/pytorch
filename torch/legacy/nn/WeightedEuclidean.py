@@ -97,7 +97,6 @@ class WeightedEuclidean(Module):
                 self._repeat.add_(-1, self._expand2)
                 self._repeat.mul_(self._expand3)
 
-
             torch.norm(self.output, self._repeat, 2, 1)
             self.output.resize_(batchSize, outputSize)
         else:
@@ -156,7 +155,6 @@ class WeightedEuclidean(Module):
                 torch.mul(self._repeat2, self._repeat, self._expand4)
                 self._repeat2.mul_(self._expand3)
 
-
             torch.sum(self.gradInput, self._repeat2, 2)
             self.gradInput.resizeAs_(input)
         else:
@@ -190,7 +188,6 @@ class WeightedEuclidean(Module):
             else:
                 torch.mul(self._repeat2, self._repeat, self._expand4)
 
-
             self.gradDiagCov.add_(self._repeat2)
         elif input.dim() == 2:
             self._sum = self._sum or input.new()
@@ -210,7 +207,6 @@ class WeightedEuclidean(Module):
                 self._repeat.mul_(self._repeat)
                 self._repeat.mul_(self._expand3)
                 self._repeat.mul_(self._expand4)
-
 
             torch.sum(self._sum, self._repeat, 0)
             self._sum.resize_(inputSize, outputSize)

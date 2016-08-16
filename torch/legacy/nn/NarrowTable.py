@@ -11,7 +11,6 @@ class NarrowTable(Module):
         self.output = []
         self.gradInput = []
 
-
     def updateOutput(self, input):
         self.output[:] = [input[self.offset + i] for i in range(self.length)]
         return self.output
@@ -30,7 +29,6 @@ class NarrowTable(Module):
                 recursiveFill(self.gradInput[i], 0)
 
         return self.gradInput
-
 
     def type(self, type=None, tensorCache=None):
         if not type:

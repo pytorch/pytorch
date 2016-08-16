@@ -11,7 +11,6 @@ class LogSoftMax(Module):
         )
         return self.output
 
-
     def updateGradInput(self, input, gradOutput):
         self._backend.LogSoftMax_updateGradInput(
             self._backend.library_state,

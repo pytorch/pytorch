@@ -13,11 +13,9 @@ class Copy(Module):
         self.output.resize_(input.size()).copy_(input)
         return self.output
 
-
     def updateGradInput(self, input, gradOutput):
         self.gradInput.resize_(gradOutput.size()).copy_(gradOutput)
         return self.gradInput
-
 
     def type(self, type=None, tensorCache=None):
         if type and self.dontCast:

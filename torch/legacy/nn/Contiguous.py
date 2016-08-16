@@ -11,7 +11,6 @@ class Contiguous(Module):
 
         return self.output
 
-
     def updateGradInput(self, input, gradOutput):
         if not gradOutput.isContiguous():
             self.gradInput.resizeAs_(gradOutput).copy_(gradOutput)

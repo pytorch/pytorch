@@ -30,7 +30,6 @@ class MultiMarginCriterion(Criterion):
         self.output = self.output_tensor[0]
         return self.output
 
-
     def updateGradInput(self, input, target):
         self._backend.MultiMarginCriterion_updateGradInput(
             self._backend.library_state,

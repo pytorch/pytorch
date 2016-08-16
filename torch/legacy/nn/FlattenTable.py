@@ -59,7 +59,6 @@ class FlattenTable(Module):
 
         return self.output
 
-
     def updateGradInput(self, input, gradOutput):
         assert isinstance(input, list)
         assert isinstance(gradOutput, list)
@@ -73,14 +72,12 @@ class FlattenTable(Module):
 
         return self.gradInput
 
-
     def type(self, type=None, tensorCache=None):
         if not type:
             return self._type
         # This function just stores references so we don't need to do any type
         # conversions. Just force the tables to be empty.
         self.clearState()
-
 
     def clearState(self):
         self.input_map = []

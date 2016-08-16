@@ -7,7 +7,6 @@ class CAddTable(Module):
         self.inplace = inplace
         self.gradInput = []
 
-
     def updateOutput(self, input):
         if self.inplace:
            self.output.set_(input[0])
@@ -18,7 +17,6 @@ class CAddTable(Module):
            self.output.add_(input[i])
 
         return self.output
-
 
     def updateGradInput(self, input, gradOutput):
         for i in range(len(input)):

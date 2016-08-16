@@ -51,7 +51,6 @@ class Cosine(Module):
         self.output.div_(self._inputNorm.expandAs(self.output))
         return self.output
 
-
     def updateGradInput(self, input, gradOutput):
         assert input.dim() == 2
 
@@ -133,7 +132,6 @@ class Cosine(Module):
            self._sum = None
 
         return super(Cosine, self).type(type, tensorCache)
-
 
     def clearState(self):
         clear(self, [

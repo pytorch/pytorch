@@ -23,7 +23,6 @@ class Bilinear(Module):
         if gradOutput.size(1) != self.weight.size(0):
             raise RuntimeError('number of columns in gradOutput does not match layer\'s output size')
 
-
     def __init__(self, inputSize1, inputSize2, outputSize, bias=True):
         # set up model:
         super(Bilinear, self).__init__()
@@ -53,7 +52,6 @@ class Bilinear(Module):
             self.bias.uniform_(-stdv, stdv)
         return self
 
-
     def updateOutput(self, input):
         self._assertInput(input)
 
@@ -72,7 +70,6 @@ class Bilinear(Module):
             self.output.add_(self.bias.view(1, self.bias.nElement()).expandAs(self.output))
 
         return self.output
-
 
     def updateGradInput(self, input, gradOutput):
         if not self.gradInput:
@@ -109,8 +106,6 @@ class Bilinear(Module):
 
         return self.gradInput
 
-
-
     def accGradParameters(self, input, gradOutput, scale=1):
         self._assertInputGradOutput(input, gradOutput)
 
@@ -125,7 +120,6 @@ class Bilinear(Module):
 
         if self.bias:
             self.gradBias.add_(scale, gradOutput.sum(0))
-
 
     def __repr__(self):
         return str(type(self)) + \

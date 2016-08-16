@@ -9,7 +9,6 @@ class ParallelTable(Container):
         self.output = []
         self.gradInput = []
 
-
     def updateOutput(self, input):
         for i in range(len(self.modules)):
             tmp = self.modules[i].updateOutput(input[i])
@@ -52,7 +51,6 @@ class ParallelTable(Container):
               res = res + line + tab + next + '(' + i + '): ' + toresing(self.modules[i]).gsub(line, line + tab + extlast)
            else:
               res = res + line + tab + next + '(' + i + '): ' + toresing(self.modules[i]).gsub(line, line + tab + ext)
-
 
         res = res + line + tab + last + 'output'
         res = res + line + '}'

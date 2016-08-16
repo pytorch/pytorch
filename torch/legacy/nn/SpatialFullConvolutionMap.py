@@ -57,7 +57,6 @@ class SpatialFullConvolutionMap(Module):
         )
         return self.output
 
-
     def updateGradInput(self, input, gradOutput):
         self._backend.SpatialFullConvolutionMap_updateGradInput(
             self._backend.library_state,
@@ -72,7 +71,6 @@ class SpatialFullConvolutionMap(Module):
             self.dW, self.dH
         )
         return self.gradInput
-
 
     def accGradParameters(self, input, gradOutput, scale=1):
         self._backend.SpatialFullConvolutionMap_accGradParameters(

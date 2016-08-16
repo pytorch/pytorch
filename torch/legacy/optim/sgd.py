@@ -82,7 +82,6 @@ def sgd(opfunc, x, config, state=None):
     else:
         x.add_(-clr, dfdx)
 
-
     # (6) update evaluation counter
     state['evalCounter'] += 1
 

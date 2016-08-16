@@ -32,7 +32,6 @@ class ClassNLLCriterion(Criterion):
         self.output = self.output_tensor[0]
         return self.output
 
-
     def updateGradInput(self, input, target):
         if target.type() == 'torch.cuda.FloatTensor':
             self.target = target

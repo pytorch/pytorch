@@ -16,7 +16,6 @@ class ReLU6(Module):
         )
         return self.output
 
-
     def updateGradInput(self, input, gradOutput):
         self._backend.HardTanh_updateGradInput(
             self._backend.library_state,
