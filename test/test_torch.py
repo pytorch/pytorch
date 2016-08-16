@@ -760,9 +760,11 @@ class TestTorch(TestCase):
     def assertIsOrdered(self, order, x, mxx, ixx, task):
         SIZE = 4
         if order == 'descending':
-            check_order = lambda a, b: a >= b
+            def check_order(a, b):
+                return a >= b
         elif order == 'ascending':
-            check_order = lambda a, b: a <= b
+            def check_order(a, b):
+                return a <= b
         else:
             error('unknown order "{}", must be "ascending" or "descending"'.format(order))
 
@@ -1914,7 +1916,7 @@ class TestTorch(TestCase):
             self.assertEqual(res.abs(), data, 1e-16)
 
         # Checking that the right abs function is called for LongTensor
-        bignumber = 2 ^31 + 1
+        bignumber = 2 ** 31 + 1
         res = torch.LongTensor((-bignumber,))
         self.assertGreater(res.abs()[0], 0)
 

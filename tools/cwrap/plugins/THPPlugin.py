@@ -83,19 +83,19 @@ PyObject * $name(PyObject *self, PyObject *args)
 """)
 
     ALLOCATE_TYPE = {
-        'THTensor*':        Template("""\
+        'THTensor*': Template("""\
       THTensorPtr _th_$name = THTensor_(new)(LIBRARY_STATE_NOARGS);
       THPTensorPtr _${name}_guard = (THPTensor*)THPTensor_(newObject)(_th_$name.get());
       THPTensor* $name = _${name}_guard.get();
       _th_$name.release();
 """),
-        'THLongTensor*':        Template("""\
+        'THLongTensor*': Template("""\
       THLongTensorPtr _th_$name = THLongTensor_new(LIBRARY_STATE_NOARGS);
       THPLongTensorPtr _${name}_guard = (THPLongTensor*)THPLongTensor_newObject(_th_$name.get());
       THPLongTensor* $name = _${name}_guard.get();
       _th_$name.release();
 """),
-        'THBoolTensor*':    Template("""
+        'THBoolTensor*': Template("""
 #if IS_CUDA
       THCByteTensorPtr _t_$name = THCudaByteTensor_new(LIBRARY_STATE_NOARGS);
       THCPByteTensorPtr _${name}_guard = (THCPByteTensor*)THCPByteTensor_newObject(_t_$name);
@@ -107,7 +107,7 @@ PyObject * $name(PyObject *self, PyObject *args)
 #endif
       _t_$name.release();
 """),
-        'THIndexTensor*':    Template("""
+        'THIndexTensor*': Template("""
 #if IS_CUDA
       THCLongTensorPtr _t_$name = THCudaLongTensor_new(LIBRARY_STATE_NOARGS);
       THCPLongTensorPtr _${name}_guard = (THCPLongTensor*)THCPLongTensor_newObject(_t_$name);
