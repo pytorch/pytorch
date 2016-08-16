@@ -47,11 +47,11 @@ def cg(opfunc, x, config, state=None):
     if config is None and state is None:
         raise ValueError("cg requires a dictionary to retain state between iterations")
     state = state or config
-    rho  = config.get('rho', 0.01)
-    sig  = config.get('sig', 0.5)
-    _int  = config.get('int', 0.1)
-    ext  = config.get('ext', 3.0)
-    maxIter  = config.get('maxIter', 20)
+    rho = config.get('rho', 0.01)
+    sig = config.get('sig', 0.5)
+    _int = config.get('int', 0.1)
+    ext = config.get('ext', 3.0)
+    maxIter = config.get('maxIter', 20)
     ratio = config.get('ratio', 100)
     maxEval = config.get('maxEval', maxIter * 1.25)
     red = 1

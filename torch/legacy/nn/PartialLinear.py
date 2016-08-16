@@ -28,13 +28,13 @@ class PartialLinear(Module):
         pt.add(Identity()).add(LookupTable(outputsize, inputsize))
         self.network = Sequential().add(pt).add(MM(False, True))
         if bias:
-            self.bias     = torch.zeros(1, outputsize)
+            self.bias = torch.zeros(1, outputsize)
             self.gradBias = torch.zeros(1, outputsize)
         else:
             self.bias = self.gradBias = None
 
         # set partition:
-        self.inputsize  = inputsize
+        self.inputsize = inputsize
         self.outputsize = outputsize
         self.allcolumns = torch.range(0, self.outputsize-1).long()
         self.resetPartition()

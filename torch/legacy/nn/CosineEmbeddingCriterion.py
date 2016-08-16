@@ -10,9 +10,9 @@ class CosineEmbeddingCriterion(Criterion):
         self.sizeAverage = sizeAverage
         self.gradInput = [torch.Tensor(), torch.Tensor()]
         self.buffer = None
-        self.w1  = None
+        self.w1 = None
         self.w22 = None
-        self.w  = None
+        self.w = None
         self.w32 = None
         self._outputs = None
         self._idx = None
@@ -23,9 +23,9 @@ class CosineEmbeddingCriterion(Criterion):
         # keep backward compatibility
         if not self.buffer:
             self.buffer = input1.new()
-            self.w1  = input1.new()
+            self.w1 = input1.new()
             self.w22 = input1.new()
-            self.w  = input1.new()
+            self.w = input1.new()
             self.w32 = input1.new()
             self._outputs = input1.new()
 
@@ -69,8 +69,8 @@ class CosineEmbeddingCriterion(Criterion):
         return self.output
 
     def updateGradInput(self, input, y):
-        v1  = input[0]
-        v2  = input[1]
+        v1 = input[0]
+        v2 = input[1]
 
         gw1 = self.gradInput[0]
         gw2 = self.gradInput[1]

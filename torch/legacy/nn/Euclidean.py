@@ -19,11 +19,11 @@ class Euclidean(Module):
         self.fastBackward = True
         self.reset()
 
-        self._input   = None
-        self._weight  = None
-        self._expand  = None
+        self._input = None
+        self._weight = None
+        self._expand = None
         self._expand2 = None
-        self._repeat  = None
+        self._repeat = None
         self._repeat2 = None
         self._div = None
         self._output = None

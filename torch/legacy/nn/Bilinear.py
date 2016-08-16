@@ -27,10 +27,10 @@ class Bilinear(Module):
     def __init__(self, inputSize1, inputSize2, outputSize, bias=True):
         # set up model:
         super(Bilinear, self).__init__()
-        self.weight     = torch.Tensor(outputSize, inputSize1, inputSize2)
+        self.weight = torch.Tensor(outputSize, inputSize1, inputSize2)
         self.gradWeight = torch.Tensor(outputSize, inputSize1, inputSize2)
         if bias:
-            self.bias     = torch.Tensor(outputSize)
+            self.bias = torch.Tensor(outputSize)
             self.gradBias = torch.Tensor(outputSize)
         else:
             self.bias = None

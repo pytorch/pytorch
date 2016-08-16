@@ -60,7 +60,7 @@ def recursiveResizeAs(t1, t2):
         t1.resizeAs_(t2)
     else:
         raise RuntimeError("Expecting nested tensors or tables. Got " + \
-                type(t1).__name__  + " and " + type(t2).__name__  + "instead")
+                type(t1).__name__ + " and " + type(t2).__name__ + "instead")
     return t1, t2
 
 

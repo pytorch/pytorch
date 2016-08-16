@@ -154,7 +154,7 @@ class Module(object):
             sortedSize = torch.LongTensor(tensor.nDimension()).set_(tensor.size()).indexSelect(0, perm)
             nRealDim = int(torch.clamp(sortedStride, 0, 1).sum())
             sortedStride = sortedStride.narrow(0, 0, nRealDim).clone()
-            sortedSize   = sortedSize.narrow(0, 0, nRealDim).clone()
+            sortedSize = sortedSize.narrow(0, 0, nRealDim).clone()
             t = tensor.new().set_(tensor.storage(), 0,
                                  sortedSize.storage(),
                                  sortedStride.storage())
@@ -195,8 +195,8 @@ class Module(object):
             tmp.fill_(1)
             tensorsCompact = tensorsCompact and isCompact(tmp)
 
-        maskParameters  = flatParameters.byte().clone()
-        compactOffsets  = flatParameters.long().cumsum(0)
+        maskParameters = flatParameters.byte().clone()
+        compactOffsets = flatParameters.long().cumsum(0)
         used_parameters = compactOffsets[-1]
 
         # 4. copy storages into the flattened parameter tensor

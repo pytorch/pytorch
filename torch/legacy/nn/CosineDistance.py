@@ -12,9 +12,9 @@ class CosineDistance(Module):
         self._input1 = None
         self._input2 = None
         self.buffer = None
-        self.w1  = None
+        self.w1 = None
         self.w22 = None
-        self.w  = None
+        self.w = None
         self.w32 = None
         self.ones = None
 
@@ -37,9 +37,9 @@ class CosineDistance(Module):
 
         if not self.buffer:
            self.buffer = input1.new()
-           self.w1  = input1.new()
+           self.w1 = input1.new()
            self.w22 = input1.new()
-           self.w  = input1.new()
+           self.w = input1.new()
            self.w32 = input1.new()
            self.ones = input1.new()
 
@@ -64,8 +64,8 @@ class CosineDistance(Module):
         return self.output
 
     def updateGradInput(self, input, gradOutput):
-        v1  = input[0]
-        v2  = input[1]
+        v1 = input[0]
+        v2 = input[1]
         v1, v2 = self._makeContiguous(v1, v2)
 
         if len(self.gradInput) != 2:

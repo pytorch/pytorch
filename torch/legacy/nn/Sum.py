@@ -7,7 +7,7 @@ class Sum(Module):
 
     def __init__(self, dimension=0, sizeAverage=False):
         super(Sum, self).__init__()
-        self.dimension   = dimension
+        self.dimension = dimension
         self.sizeAverage = sizeAverage
         self._gradOutput = None
 

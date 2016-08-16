@@ -32,10 +32,10 @@ class SpatialCrossMapLRN(Module):
                 self.k
             )
         else:
-            batchSize   = input.size(0)
-            channels    = input.size(1)
+            batchSize = input.size(0)
+            channels = input.size(1)
             inputHeight = input.size(2)
-            inputWidth  = input.size(3)
+            inputWidth = input.size(3)
 
             self.output.resizeAs_(input)
             self.scale.resizeAs_(input)
@@ -57,10 +57,10 @@ class SpatialCrossMapLRN(Module):
             # by adding the next feature map and removing the previous
             for c in range(1, channels):
                 scalePrevious = self.scale.select(1, c - 1)
-                scaleCurrent  = self.scale.select(1, c)
+                scaleCurrent = self.scale.select(1, c)
                 scaleCurrent.copy_(scalePrevious)
                 if c < channels - prePad + 1:
-                    squareNext   = inputSquare.select(1, c + prePad - 1)
+                    squareNext = inputSquare.select(1, c + prePad - 1)
                     scaleCurrent.add_(1, squareNext)
 
                 if c > prePad:
@@ -91,10 +91,10 @@ class SpatialCrossMapLRN(Module):
                 self.k
             )
         else:
-            batchSize   = input.size(0)
-            channels    = input.size(1)
+            batchSize = input.size(0)
+            channels = input.size(1)
             inputHeight = input.size(2)
-            inputWidth  = input.size(3)
+            inputWidth = input.size(3)
 
             self.paddedRatio = self.paddedRatio or input.new()
             self.accumRatio = self.accumRatio or input.new()
