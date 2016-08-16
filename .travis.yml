@@ -1,0 +1,26 @@
+# https://travis-ci.org/pytorch/pytorch
+language: python
+python:
+    - 2.7.8
+    - 2.7
+    - pypy
+    - 3.3
+    - 3.4
+    - 3.5
+    - nightly
+    - pypy3
+
+install:
+    - travis_retry pip install pyyaml
+    - travis_retry python setup.py install
+
+script:
+    - python test/test_torch.py
+
+# This reportedly works around an issue downloading packages from pypi on
+# travis.  Consider removing this after the underlying issue is fixed.
+# https://github.com/travis-ci/travis-ci/issues/2389
+sudo: false
+
+matrix:
+    fast_finish: true
