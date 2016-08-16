@@ -10,7 +10,7 @@ class Log(Module):
         self.output.log_()
         return self.output
 
-    def updateGradInput(self, input, gradOutput) :
+    def updateGradInput(self, input, gradOutput):
         self.gradInput.resizeAs_(input)
         self.gradInput.fill_(1)
         self.gradInput.div_(input)
