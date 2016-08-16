@@ -180,9 +180,9 @@ class Module(object):
                 num_parameters = num_parameters + storage.size()
 
             parameterMeta.append({
-                    'storageOffset':  param.storageOffset() + storages[key][1],
-                    'size':  param.size(),
-                    'stride':  param.stride()
+                    'storageOffset': param.storageOffset() + storages[key][1],
+                    'size': param.size(),
+                    'stride': param.stride()
             })
 
         # 2. construct a single tensor that will hold all the parameters

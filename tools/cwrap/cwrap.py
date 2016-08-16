@@ -13,23 +13,23 @@ class cwrap(object):
     }
 
     TYPE_CHECK = {
-        'void*':            Template('PyLong_Check($arg)'),
-        'bool':             Template('PyLong_Check($arg)'),
-        'float':            Template('PyFloat_Check($arg)'),
-        'double':           Template('PyFloat_Check($arg)'),
+        'void*': Template('PyLong_Check($arg)'),
+        'bool': Template('PyLong_Check($arg)'),
+        'float': Template('PyFloat_Check($arg)'),
+        'double': Template('PyFloat_Check($arg)'),
         # TODO: this will only work for python3
-        'int':              Template('PyLong_Check($arg)'),
-        'long':             Template('PyLong_Check($arg)'),
+        'int': Template('PyLong_Check($arg)'),
+        'long': Template('PyLong_Check($arg)'),
     }
 
     TYPE_UNPACK = {
-        'void*':            Template('PyLong_AsVoidPtr($arg)'),
-        'bool':             Template('PyLong_AsLong($arg)'),
-        'float':            Template('(float)PyFloat_AsDouble($arg)'),
-        'double':           Template('PyFloat_AsDouble($arg)'),
+        'void*': Template('PyLong_AsVoidPtr($arg)'),
+        'bool': Template('PyLong_AsLong($arg)'),
+        'float': Template('(float)PyFloat_AsDouble($arg)'),
+        'double': Template('PyFloat_AsDouble($arg)'),
         # TODO: this will only work for python3
-        'int':              Template('PyLong_AsLong($arg)'),
-        'long':             Template('PyLong_AsLong($arg)'),
+        'int': Template('PyLong_AsLong($arg)'),
+        'long': Template('PyLong_AsLong($arg)'),
     }
 
     OPTION_TEMPLATE = Template("""
