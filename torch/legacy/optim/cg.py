@@ -93,7 +93,7 @@ def cg(opfunc, x, config, state=None):
     # initial search direction
     s.copy_(df1).mul_(-1)
 
-    d1 = -s.dot(s )         # slope
+    d1 = -s.dot(s)         # slope
     z1 = red /(1 -d1)         # initial step
 
     while i < abs(maxEval):

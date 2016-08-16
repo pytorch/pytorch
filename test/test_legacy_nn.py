@@ -1309,7 +1309,7 @@ class TestNN(TestCase):
         gradInputConcat = concat.backward(input, gradOutput)
         # the spatial dims are the largest, the nFilters is the sum
         output = torch.Tensor(2, int(outputSize.sum()), 12, 12).zero_()  # zero for padding
-        narrows = ( (slice(None), (0, 5), slice(None), slice(None)), (slice(None), (5, 11), (1, 11), (1, 11)), (slice(None), (11, 18), (1, 10), (1, 10)), (slice(None), (18, 26), (2, 10), (2, 10)) )
+        narrows = ( (slice(None), (0, 5), slice(None), slice(None)), (slice(None), (5, 11), (1, 11), (1, 11)), (slice(None), (11, 18), (1, 10), (1, 10)), (slice(None), (18, 26), (2, 10), (2, 10)))
         gradInput = input.clone().zero_()
         for i in range(4):
             conv = concat.get(i)
