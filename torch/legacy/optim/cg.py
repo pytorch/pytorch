@@ -149,7 +149,7 @@ def cg(opfunc, x, config, state=None):
 
             if z2 != z2 or z2 == INFINITY or z2 == -INFINITY or z2 < 0:
                 if limit < -0.5:
-                    z2 = z1 * (ext -1)
+                    z2 = z1 * (ext - 1)
                 else:
                     z2 = (limit-z1)/2
             elif (limit > -0.5) and (z2+z1) > limit:

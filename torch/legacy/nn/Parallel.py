@@ -39,12 +39,12 @@ class Parallel(Container):
         return self.output
 
     def updateGradInput(self, input, gradOutput):
-        nModule=input.size(self.inputDimension)
+        nModule = input.size(self.inputDimension)
         self.gradInput.resizeAs_(input)
 
         offset = 0
         for i in range(nModule):
-            module=self.modules[i]
+            module = self.modules[i]
             currentInput = input.select(self.inputDimension, i)
             currentOutput = module.output
             outputSize = currentOutput.size(self.outputDimension)
