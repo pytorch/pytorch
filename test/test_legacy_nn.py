@@ -879,7 +879,7 @@ simple_tests.append(
     SimpleTestCase(build_spatial_unpooling_net,
                        input_size=(1, 3, 10, 10),
                        desc='SpatialMaxUnpooling')
-    )
+)
 
 
 def build_volumetric_unpooling_net():
@@ -891,7 +891,7 @@ simple_tests.append(
     SimpleTestCase(build_volumetric_unpooling_net,
                        input_size=(1, 3, 10, 10),
                        desc='VolumetricMaxUnpooling')
-    )
+)
 
 
 def prepare_simple_tests():
