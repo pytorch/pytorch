@@ -19,4 +19,3 @@ class Contiguous(Module):
             self.gradInput.set_(gradOutput)
 
         return self.gradInput
-

@@ -77,4 +77,3 @@ class SpatialAveragePooling(Module):
             s += ', {}, {}'.format(self.padW, self.padH)
         s += ')'
         return s
-

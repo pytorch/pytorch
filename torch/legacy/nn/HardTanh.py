@@ -33,4 +33,3 @@ class HardTanh(Module):
             self.inplace
         )
         return self.gradInput
-

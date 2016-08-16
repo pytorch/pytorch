@@ -42,4 +42,3 @@ class THPLongArgsPlugin(CWrapPlugin):
             lines = lines[:end_checks+1] + [self.PARSE_LONG_ARGS.substitute(num_checked=option['num_checked_args'])] + lines[end_checks+1:]
             code = '\n'.join(lines)
         return code
-

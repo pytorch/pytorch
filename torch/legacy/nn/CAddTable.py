@@ -33,4 +33,3 @@ class CAddTable(Module):
         del self.gradInput[len(input):]
 
         return self.gradInput
-

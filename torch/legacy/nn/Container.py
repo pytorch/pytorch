@@ -64,4 +64,3 @@ class Container(Module):
         for module in self.modules:
             module.clearState()
         return self
-

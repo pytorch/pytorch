@@ -161,4 +161,3 @@ class SpatialConvolution(Module):
     def clearState(self):
         clear(self, 'finput', 'fgradInput', '_input', '_gradOutput')
         return super(SpatialConvolution, self).clearState()
-

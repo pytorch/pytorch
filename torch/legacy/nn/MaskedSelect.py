@@ -62,4 +62,3 @@ class MaskedSelect(Module):
                             '_maskIndices',
                             '_gradBuffer',
                             '_gradMask'])
-

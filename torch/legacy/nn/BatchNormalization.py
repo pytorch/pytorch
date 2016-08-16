@@ -183,4 +183,3 @@ class BatchNormalization(Module):
            'save_std',
         ])
         return super(BatchNormalization, self).clearState()
-

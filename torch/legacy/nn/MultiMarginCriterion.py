@@ -43,4 +43,3 @@ class MultiMarginCriterion(Criterion):
             self.margin
         )
         return self.gradInput
-

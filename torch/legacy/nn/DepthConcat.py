@@ -103,4 +103,3 @@ class DepthConcat(Concat):
            gradOutputWindow = self.windowNarrow(gradOutput, currentOutput, offset)
            module.accUpdateGradParameters(input, gradOutputWindow, lr)
            offset = offset + currentOutput.size(self.dimension)
-

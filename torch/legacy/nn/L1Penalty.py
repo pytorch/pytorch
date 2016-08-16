@@ -35,4 +35,3 @@ class L1Penalty(Module):
             self.gradInput.add_(gradOutput)
 
         return self.gradInput
-

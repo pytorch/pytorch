@@ -21,4 +21,3 @@ class CDivTable(Module):
         del self.gradInput[len(input):]
 
         return self.gradInput
-

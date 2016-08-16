@@ -66,4 +66,3 @@ class TemporalSubSampling(Module):
             self.dW,
             scale
         )
-

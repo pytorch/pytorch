@@ -115,4 +115,3 @@ class CosineEmbeddingCriterion(Criterion):
            self._idx = torch.ByteTensor()
 
         return self
-

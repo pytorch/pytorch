@@ -22,5 +22,3 @@ class AutoGPU(CWrapPlugin):
 
     def process_full_file(self, code):
         return self.DEFINES + code
-
-

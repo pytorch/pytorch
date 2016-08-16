@@ -133,4 +133,3 @@ class SpatialDivisiveNormalization(Module):
         self.meanestimator.clearState()
         self.stdestimator.clearState()
         return super(SpatialDivisiveNormalization, self).clearState()
-

@@ -29,4 +29,3 @@ class Narrow(Module):
         self.gradInput.resizeAs_(input).zero_()
         self.gradInput.narrow(self.dimension, self.index, length).copy_(gradOutput)
         return self.gradInput
-

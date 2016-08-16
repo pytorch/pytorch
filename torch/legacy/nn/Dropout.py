@@ -46,4 +46,3 @@ class Dropout(Module):
     def clearState(self):
         clear(self, 'noise')
         return super(Dropout, self).clearState()
-

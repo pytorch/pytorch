@@ -244,4 +244,3 @@ class WeightedEuclidean(Module):
         self.accGradParameters(input, gradOutput, -lr)
         self.gradWeight = gradWeight
         self.gradDiagCov = gradDiagCov
-

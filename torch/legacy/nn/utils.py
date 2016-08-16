@@ -164,4 +164,3 @@ def clear(self, *args):
     for key in args:
         _clear(key)
     return self
-

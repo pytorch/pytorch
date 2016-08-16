@@ -40,4 +40,3 @@ class TemporalMaxPooling(Module):
     def clearState(self):
         clear(self, 'indices')
         return super(TemporalMaxPooling, self).clearState()
-

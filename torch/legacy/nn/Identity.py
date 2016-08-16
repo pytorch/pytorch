@@ -19,4 +19,3 @@ class Identity(Module):
            'gradInput',
         ])
         return super(Identity, self).clearState()
-

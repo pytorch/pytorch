@@ -22,5 +22,3 @@ class Transpose(Module):
            gradOutput = gradOutput.transpose(*perm)
         self.gradInput.resizeAs_(gradOutput).copy_(gradOutput)
         return self.gradInput
-
-

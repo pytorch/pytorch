@@ -21,4 +21,3 @@ class CSubTable(Module):
 
         self.gradInput = self.gradInput[:2]
         return self.gradInput
-

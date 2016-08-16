@@ -83,4 +83,3 @@ class FlattenTable(Module):
     def clearState(self):
         self.input_map = []
         return super(FlattenTable, self).clearState()
-

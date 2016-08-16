@@ -21,4 +21,3 @@ class SoftMax(Module):
             self.output
         )
         return self.gradInput
-

@@ -84,4 +84,3 @@ class Sequential(Container):
 
         res = res + line + '}'
         return res
-

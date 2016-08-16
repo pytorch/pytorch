@@ -16,4 +16,3 @@ class Log(Module):
         self.gradInput.div_(input)
         self.gradInput.mul_(gradOutput)
         return self.gradInput
-

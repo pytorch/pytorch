@@ -33,4 +33,3 @@ class MultiLabelMarginCriterion(Criterion):
             self.sizeAverage
         )
         return self.gradInput
-

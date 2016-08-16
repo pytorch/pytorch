@@ -68,4 +68,3 @@ class SpatialSubSampling(Module):
             self.dW, self.dH,
             scale
         )
-

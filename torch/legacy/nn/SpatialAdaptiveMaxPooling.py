@@ -36,4 +36,3 @@ class SpatialAdaptiveMaxPooling(Module):
     def clearState(self):
         clear(self, 'indices')
         return super(SpatialAdaptiveMaxPooling, self).clearState()
-

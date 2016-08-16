@@ -100,4 +100,3 @@ class Parallel(Container):
         res += line + tab + last + 'output'
         res += line + '}'
         return res
-

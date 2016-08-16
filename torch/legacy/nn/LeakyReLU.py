@@ -41,4 +41,3 @@ class LeakyReLU(Module):
 
     def __repr__(self):
         return str(type(self)) + '({:.4f})'.format(self.negval)
-

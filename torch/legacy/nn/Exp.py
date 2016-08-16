@@ -9,4 +9,3 @@ class Exp(Module):
 
     def updateGradInput(self, input, gradOutput):
         return torch.mul(self.gradInput, self.output, gradOutput)
-

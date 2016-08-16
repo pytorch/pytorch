@@ -21,4 +21,3 @@ class Tanh(Module):
             self.output
         )
         return self.gradInput
-

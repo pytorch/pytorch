@@ -45,4 +45,3 @@ class DotProduct(Module):
     def clearState(self):
         clear(self, 'buffer')
         return super(DotProduct, self).clearState()
-

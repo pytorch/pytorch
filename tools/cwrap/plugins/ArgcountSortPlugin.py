@@ -12,4 +12,3 @@ class ArgcountSortPlugin(CWrapPlugin):
         for declaration in declarations:
             declaration['options'].sort(key=num_checked_args, reverse=self.descending)
         return declarations
-

@@ -30,4 +30,3 @@ class AddConstant(Module):
             self.gradInput.copy_(gradOutput)
 
         return self.gradInput
-

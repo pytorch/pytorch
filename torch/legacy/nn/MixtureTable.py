@@ -160,4 +160,3 @@ class MixtureTable(Module):
           '_expertView2',
         ])
         return super(MixtureTable, self).clearState()
-

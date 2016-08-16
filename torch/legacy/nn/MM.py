@@ -68,4 +68,3 @@ class MM(Module):
             getattr(torch, f)(self.gradInput[1], a, gradOutput)
 
         return self.gradInput
-

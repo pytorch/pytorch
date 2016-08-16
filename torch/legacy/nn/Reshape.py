@@ -57,4 +57,3 @@ class Reshape(Module):
     def clearState(self):
         clear(self, '_input', '_gradOutput')
         return super(Reshape, self).clearState()
-

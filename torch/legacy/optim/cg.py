@@ -214,4 +214,3 @@ def cg(opfunc, x, config, state=None):
     state['x0'] = x0
     state['s'] = s
     return x, fx, i
-

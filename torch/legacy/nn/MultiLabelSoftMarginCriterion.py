@@ -39,4 +39,3 @@ class MultiLabelSoftMarginCriterion(Criterion):
          self.lsm.updateGradInput(input, self.nll.gradInput)
          self.gradInput = self.lsm.gradInput.view(size)
          return self.gradInput
-

@@ -20,4 +20,3 @@ class Unsqueeze(Module):
 
     def __repr__(self):
         return super(Unsqueeze, self).__repr__() + '({})'.format(self.dim)
-

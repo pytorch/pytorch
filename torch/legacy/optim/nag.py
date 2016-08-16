@@ -80,4 +80,3 @@ def nag(opfunc, x, config, state=None):
 
     # return x, f(x) before optimization
     return x, fx
-

@@ -45,4 +45,3 @@ class VolumetricDropout(Module):
     def clearState(self):
         clear(self, 'noise')
         return super(VolumetricDropout, self).clearState()
-

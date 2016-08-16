@@ -27,4 +27,3 @@ class Sqrt(Module):
             self.output
         )
         return self.gradInput
-

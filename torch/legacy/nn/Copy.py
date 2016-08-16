@@ -23,4 +23,3 @@ class Copy(Module):
            return self
 
         return super(Copy, self).type(self, type, tensorCache)
-

@@ -72,4 +72,3 @@ class MarginRankingCriterion(Criterion):
                 self.gradInput[1].div_(y.size(0))
 
         return self.gradInput
-

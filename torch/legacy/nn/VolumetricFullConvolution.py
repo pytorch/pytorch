@@ -203,4 +203,3 @@ class VolumetricFullConvolution(Module):
 
         s += ')'
         return s
-

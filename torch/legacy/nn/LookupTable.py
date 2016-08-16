@@ -149,4 +149,3 @@ class LookupTable(Module):
     def clearState(self):
         clear(self, '_count', '_input', '_sorted', '_indices', '_gradOutput')
         return super(LookupTable, self).clearState()
-

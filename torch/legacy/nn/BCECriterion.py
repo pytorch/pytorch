@@ -86,4 +86,3 @@ class BCECriterion(Criterion):
              gradInput.div_(target.nElement())
 
          return gradInput
-

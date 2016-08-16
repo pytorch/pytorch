@@ -77,4 +77,3 @@ class SpatialMaxPooling(Module):
     def clearState(self):
         clear(self, 'indices')
         return super(SpatialMaxPooling, self).clearState()
-

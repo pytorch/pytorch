@@ -49,4 +49,3 @@ class SpatialClassNLLCriterion(Criterion):
             self.total_weight_tensor
         )
         return self.gradInput
-

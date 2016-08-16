@@ -58,4 +58,3 @@ class SpatialUpSamplingNearest(Module):
             self.scale_factor
         )
         return self.gradInput
-

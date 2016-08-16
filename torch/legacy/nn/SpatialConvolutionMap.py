@@ -134,4 +134,3 @@ class SpatialConvolutionMap(Module):
             self.dW, self.dH,
             scale
         )
-

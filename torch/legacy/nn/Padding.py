@@ -59,4 +59,3 @@ class Padding(Module):
            self.gradInput.narrow(dim, index, input.size(dim) - index).copy_(gradOutput.narrow(dim, index + pad, input.size(dim) - index))
 
         return self.gradInput
-

@@ -39,4 +39,3 @@ class MultiCriterion(Criterion):
            criterion.type(type)
 
         return super(MultiCriterion, self).type(type)
-

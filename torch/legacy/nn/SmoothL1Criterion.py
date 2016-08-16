@@ -30,4 +30,3 @@ class SmoothL1Criterion(Criterion):
             self.sizeAverage
         )
         return self.gradInput
-

@@ -51,4 +51,3 @@ class RReLU(Module):
     def clearState(self):
         clear(self, 'noise')
         return super(RReLU, self).clearState(self)
-

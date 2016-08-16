@@ -21,4 +21,3 @@ class SpatialSoftMax(Module):
             self.output
         )
         return self.gradInput
-

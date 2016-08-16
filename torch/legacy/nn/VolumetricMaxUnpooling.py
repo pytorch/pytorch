@@ -54,4 +54,3 @@ class VolumetricMaxUnpooling(Module):
 
     def __repr__(self):
         return 'nn.VolumetricMaxUnpooling associated to ' + self.pooling.__repr__()
-

@@ -118,4 +118,3 @@ class CMul(Module):
            '_sum',
         ])
         return super(CMul, self).clearState()
-

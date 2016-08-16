@@ -86,4 +86,3 @@ class SpatialFullConvolutionMap(Module):
             self.dW, self.dH,
             scale
         )
-

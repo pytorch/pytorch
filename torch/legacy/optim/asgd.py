@@ -73,4 +73,3 @@ def asgd(opfunc, x, config, state=None):
 
     # return x*, f(x) before optimization, and average(x_t0,x_t1,x_t2,...)
     return x, fx, state['ax']
-

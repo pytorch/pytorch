@@ -21,4 +21,3 @@ class LogSoftMax(Module):
             self.output
         )
         return self.gradInput
-

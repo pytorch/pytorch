@@ -51,4 +51,3 @@ class SelectTable(Module):
 
     def __repr__(self):
         return super(SelectTable, self).__repr__() + '({})'.format(self.index)
-

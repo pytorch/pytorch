@@ -33,4 +33,3 @@ class L1Cost(Criterion):
     def clearState(self):
         clear(self, 'output_tensor')
         return super(L1Cost, self).clearState()
-

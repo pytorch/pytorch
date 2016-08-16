@@ -30,4 +30,3 @@ class SoftMarginCriterion(Criterion):
             self.sizeAverage
         )
         return self.gradInput
-

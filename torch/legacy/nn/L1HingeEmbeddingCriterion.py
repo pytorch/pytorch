@@ -34,4 +34,3 @@ class L1HingeEmbeddingCriterion(Criterion):
 
         self.gradInput[1].zero_().add_(-1, self.gradInput[0])
         return self.gradInput
-

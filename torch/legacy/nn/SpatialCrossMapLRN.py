@@ -123,4 +123,3 @@ class SpatialCrossMapLRN(Module):
     def clearState(self):
         clear(self, 'scale', 'paddedRatio', 'accumRatio')
         return super(SpatialCrossMapLRN, self).clearState(self)
-

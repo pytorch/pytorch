@@ -82,4 +82,3 @@ class SpatialDilatedConvolution(SpatialConvolution):
         if not self.bias:
            s += ' without bias'
         return s
-

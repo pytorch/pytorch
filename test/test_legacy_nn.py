@@ -1503,4 +1503,3 @@ class TestNN(TestCase):
 if __name__ == '__main__':
     prepare_simple_tests()
     unittest.main()
-

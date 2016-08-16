@@ -35,4 +35,3 @@ class MulConstant(Module):
             self.gradInput.mul_(self.constant_scalar)
 
         return self.gradInput
-

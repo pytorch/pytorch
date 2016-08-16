@@ -39,4 +39,3 @@ class ELU(Module):
 
     def __repr__(self):
         return '{}(alpha={:.3f})'.format(str(type(self)), self.alpha)
-

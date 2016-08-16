@@ -134,4 +134,3 @@ class SpatialFractionalMaxPooling(Module):
                 '({}x{}, {}, {})'.format(self.outW or self.ratioW,
                                         self.outH or self.ratioH,
                                         self.poolSizeW, self.poolSizeH)
-

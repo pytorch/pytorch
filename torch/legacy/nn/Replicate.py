@@ -39,4 +39,3 @@ class Replicate(Module):
         gradInput = self.gradInput.view(sz)
         torch.sum(gradInput, gradOutput, self.dim)
         return self.gradInput
-

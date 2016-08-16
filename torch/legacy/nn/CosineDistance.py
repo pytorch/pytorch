@@ -102,4 +102,3 @@ class CosineDistance(Module):
            'ones',
         ])
         return super(CosineDistance, self).clearState()
-

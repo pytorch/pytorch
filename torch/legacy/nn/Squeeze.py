@@ -17,4 +17,3 @@ class Squeeze(Module):
         assert input.nElement() == gradOutput.nElement()
         self.gradInput.set_(gradOutput.viewAs(input))
         return self.gradInput
-

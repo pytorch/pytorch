@@ -36,4 +36,3 @@ class NarrowTable(Module):
             return self._type
         clear(self, 'output', 'gradInput')
         return super(NarrowTable, self).type(self, type, tensorCache)
-

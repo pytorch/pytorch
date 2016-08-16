@@ -111,4 +111,3 @@ class PartialLinear(Module):
         return super(ParallelTable, self).__repr__() + \
            '({} -> {})'.format(self.inputsize, self.outputsize) + \
            ' without bias' if self.bias is None else ''
-

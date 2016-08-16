@@ -36,4 +36,3 @@ class SoftMin(Module):
     def clearState(self):
         clear(self, 'mininput')
         return super(SoftMin, self).clearState()
-

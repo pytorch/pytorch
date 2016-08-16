@@ -61,4 +61,3 @@ class JoinTable(Module):
     def type(self, type=None, tensorCache=None):
         self.gradInput = []
         return super(JoinTable, self).type(type, tensorCache)
-

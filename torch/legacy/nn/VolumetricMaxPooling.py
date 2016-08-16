@@ -72,4 +72,3 @@ class VolumetricMaxPooling(Module):
             s += ', {}, {}, {}'.format(self.padT, self.padW, self.padH)
         s += ')'
         return s
-

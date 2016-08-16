@@ -63,4 +63,3 @@ class Max(Module):
     def clearState(self):
         clear(self, '_indices', '_output')
         return super(Max, self).clearState()
-

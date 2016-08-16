@@ -64,4 +64,3 @@ class MV(Module):
                 self.gradInput[1] = M.t() * gradOutput
 
         return self.gradInput
-

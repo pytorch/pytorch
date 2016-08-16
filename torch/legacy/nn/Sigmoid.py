@@ -21,4 +21,3 @@ class Sigmoid(Module):
             self.output
         )
         return self.gradInput
-

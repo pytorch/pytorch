@@ -37,4 +37,3 @@ class SplitTable(Module):
             self.gradInput.select(dimension, i).copy_(gradOutput[i])
 
         return self.gradInput
-

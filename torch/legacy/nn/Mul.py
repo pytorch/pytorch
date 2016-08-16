@@ -30,4 +30,3 @@ class Mul(Module):
 
     def accGradParameters(self, input, gradOutput, scale=1):
         self.gradWeight[0] = self.gradWeight[0] + scale*input.dot(gradOutput);
-

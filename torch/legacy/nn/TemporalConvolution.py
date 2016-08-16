@@ -68,4 +68,3 @@ class TemporalConvolution(Module):
             self.dW,
             scale
         )
-

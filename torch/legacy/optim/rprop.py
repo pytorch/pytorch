@@ -98,4 +98,3 @@ def rprop(opfunc, x, config, state=None):
 
     # return x*, table of f(x) values from each step
     return x, hfx
-

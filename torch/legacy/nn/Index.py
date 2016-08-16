@@ -23,4 +23,3 @@ class Index(Module):
          gradInput.resizeAs_(t).zero_()
          gradInput.indexAdd_(self.dimension, index, gradOutput)
          return self.gradInput
-

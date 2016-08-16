@@ -26,4 +26,3 @@ class ReLU6(Module):
             0, 6, self.inplace
         )
         return self.gradInput
-

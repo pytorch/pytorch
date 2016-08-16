@@ -79,4 +79,3 @@ class SpatialZeroPadding(Module):
         s = super(SpatialZeroPadding, self).__repr__()
         s += '({}, {}, {}, {})'.foramat(self.pad_l, self.pad_r, self.pad_t, self.pad_b)
         return s
-

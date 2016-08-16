@@ -30,4 +30,3 @@ class MSECriterion(Criterion):
             self.sizeAverage
         )
         return self.gradInput
-

@@ -52,4 +52,3 @@ class ClassNLLCriterion(Criterion):
         )
 
         return self.gradInput
-

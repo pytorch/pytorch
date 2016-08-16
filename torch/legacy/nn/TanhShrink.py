@@ -20,4 +20,3 @@ class TanhShrink(Module):
         self.gradInput.resizeAs_(input).copy_(gradOutput)
         self.gradInput.add_(-1, dth)
         return self.gradInput
-

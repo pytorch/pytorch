@@ -27,4 +27,3 @@ class HardShrink(Module):
             self.lambd
         )
         return self.gradInput
-

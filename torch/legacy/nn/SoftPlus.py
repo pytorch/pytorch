@@ -36,4 +36,3 @@ class SoftPlus(Module):
             self.threshold
         )
         return self.gradInput
-

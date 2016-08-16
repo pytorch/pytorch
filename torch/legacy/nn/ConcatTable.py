@@ -109,5 +109,3 @@ class ConcatTable(Container):
         res = res + line + tab + last + 'output'
         res = res + line + '}'
         return res
-
-

@@ -73,4 +73,3 @@ class PairwiseDistance(Module):
     def clearState(self):
         clear(self, 'diff', 'outExpand', 'grad', 'ones')
         return super(PairwiseDistance, self).clearState()
-

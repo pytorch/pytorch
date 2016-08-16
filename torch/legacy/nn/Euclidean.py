@@ -159,4 +159,3 @@ class Euclidean(Module):
            '_repeat2',
         ])
         return super(Euclidean, self).clearState()
-

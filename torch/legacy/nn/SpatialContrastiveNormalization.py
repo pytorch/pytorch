@@ -37,4 +37,3 @@ class SpatialContrastiveNormalization(Module):
     def updateGradInput(self, input, gradOutput):
         self.gradInput = self.normalizer.backward(input, gradOutput)
         return self.gradInput
-

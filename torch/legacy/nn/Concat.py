@@ -100,5 +100,3 @@ class Concat(Container):
         res += line + tab + last + 'output'
         res += line + '}'
         return res
-
-

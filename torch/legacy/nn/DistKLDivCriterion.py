@@ -32,4 +32,3 @@ class DistKLDivCriterion(Criterion):
             self.sizeAverage
         )
         return self.gradInput
-

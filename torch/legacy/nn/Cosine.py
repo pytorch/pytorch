@@ -144,4 +144,3 @@ class Cosine(Module):
            '_weightNorm',
         ])
         return super(Cosine, self).clearState()
-

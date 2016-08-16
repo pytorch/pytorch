@@ -20,4 +20,3 @@ class Square(Module):
             self.gradInput
         )
         return self.gradInput
-

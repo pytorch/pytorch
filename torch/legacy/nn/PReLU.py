@@ -55,4 +55,3 @@ class PReLU(Module):
     def clearState(self):
         clear(self, 'gradWeightBuf', 'gradWeightBuf2')
         return super(PReLU, self).clearState()
-

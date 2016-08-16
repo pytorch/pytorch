@@ -25,4 +25,3 @@ class SoftSign(Module):
     def clearState(self):
         clear(self, 'temp', 'tempgrad')
         return super(SoftSign, self).clearState()
-

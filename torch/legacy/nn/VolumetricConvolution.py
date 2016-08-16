@@ -179,4 +179,3 @@ class VolumetricConvolution(Module):
 
         s += ')'
         return s
-

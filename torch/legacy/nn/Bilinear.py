@@ -132,4 +132,3 @@ class Bilinear(Module):
     def clearState(self):
         clear(self, 'buff1', 'buff2')
         return super(Bilinear, self).clearState()
-

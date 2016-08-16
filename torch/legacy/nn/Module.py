@@ -287,4 +287,3 @@ class Module(object):
             for i, module in self.modules:
                 self.modules[i] = module.replace(callback)
         return out
-

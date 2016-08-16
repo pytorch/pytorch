@@ -37,4 +37,3 @@ class OptionalArguments(CWrapPlugin):
                 unique.append(option)
                 seen_signatures.add(sig)
         return unique
-

@@ -53,4 +53,3 @@ class VolumetricReplicationPadding(Module):
             self.pfront, self.pback
         )
         return s
-

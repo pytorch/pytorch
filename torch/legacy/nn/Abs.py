@@ -22,4 +22,3 @@ class Abs(Module):
            self.gradInput
         )
         return self.gradInput
-

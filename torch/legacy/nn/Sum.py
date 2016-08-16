@@ -49,4 +49,3 @@ class Sum(Module):
     def clearState(self):
          clear(self, '_gradOutput')
          return super(Sum, self).clearState()
-

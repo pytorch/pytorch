@@ -11,5 +11,3 @@ class NullableArguments(CWrapPlugin):
         if 'nullable' in arg and arg['nullable']:
             return '({} == Py_None ? NULL : {})'.format(arg_accessor, code)
         return code
-
-

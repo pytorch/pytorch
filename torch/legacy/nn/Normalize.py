@@ -145,4 +145,3 @@ class Normalize(Module):
            'cross',
         ])
         return super(Normalize, self).clearState()
-

@@ -63,4 +63,3 @@ class Min(Module):
     def clearState(self):
         clear(self, '_indices', '_output')
         return super(Min, self).clearState()
-

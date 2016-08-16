@@ -37,4 +37,3 @@ class ParallelCriterion(Criterion):
     def type(self, type=None, tensorCache=None):
         self.gradInput = []
         return super(ParallelCriterion, self).type(type, tensorCache)
-

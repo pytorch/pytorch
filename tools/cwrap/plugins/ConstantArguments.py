@@ -19,5 +19,3 @@ class ConstantArguments(CWrapPlugin):
     def get_arg_accessor(self, arg, option):
         if arg['type'] == 'CONSTANT':
             return arg['name']
-
-

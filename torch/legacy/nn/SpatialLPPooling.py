@@ -49,4 +49,3 @@ class SpatialLPPooling(Sequential):
 
     def updateParameters(self, learningRate):
         pass
-

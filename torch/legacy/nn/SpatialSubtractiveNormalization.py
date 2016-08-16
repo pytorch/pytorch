@@ -110,4 +110,3 @@ class SpatialSubtractiveNormalization(Module):
         clear(self, 'ones', '_coef')
         self.meanestimator.clearState()
         return super(SpatialSubtractiveNormalization, self).clearState()
-

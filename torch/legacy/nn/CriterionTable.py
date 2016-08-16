@@ -16,4 +16,3 @@ class CriterionTable(Module):
     def updateGradInput(self, input):
         self.criterion.updateGradInput(*input)
         return self.gradInput
-

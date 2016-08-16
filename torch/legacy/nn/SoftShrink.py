@@ -26,4 +26,3 @@ class SoftShrink(Module):
             self.lambd
         )
         return self.gradInput
-

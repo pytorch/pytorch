@@ -43,4 +43,3 @@ class Criterion(object):
 
     def cuda(self):
         return self.type('torch.cuda.FloatTensor')
-

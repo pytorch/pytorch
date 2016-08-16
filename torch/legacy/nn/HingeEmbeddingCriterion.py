@@ -34,4 +34,3 @@ class HingeEmbeddingCriterion(Criterion):
             self.gradInput.mul_(1 / input.nElement())
 
         return self.gradInput
-

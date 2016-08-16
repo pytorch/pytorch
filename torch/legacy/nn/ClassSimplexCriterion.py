@@ -102,4 +102,3 @@ class ClassSimplexCriterion(MSECriterion):
         prod = self.getPredictions(input)
         _, maxs = prod.max(prod.nDimension()-1)
         return maxs.view(-1)
-

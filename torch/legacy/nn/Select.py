@@ -21,4 +21,3 @@ class Select(Module):
         self.gradInput.zero_()
         self.gradInput.select(self.dimension, index).copy_(gradOutput)
         return self.gradInput
-

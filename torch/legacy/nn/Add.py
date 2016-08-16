@@ -55,4 +55,3 @@ class Add(Module):
            else:
               gradOutput = gradOutput.view(input.size(0), -1)
               self.gradBias.view(-1).addmv_(scale, gradOutput.t(), self._ones)
-
