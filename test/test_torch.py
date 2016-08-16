@@ -2018,12 +2018,12 @@ class TestTorch(TestCase):
         self.assertTrue(t1.isSize(t1.size()))
 
     def test_elementSize(self):
-        byte =   torch.ByteStorage().elementSize()
-        char =   torch.CharStorage().elementSize()
-        short =  torch.ShortStorage().elementSize()
-        int =    torch.IntStorage().elementSize()
-        long =   torch.LongStorage().elementSize()
-        float =  torch.FloatStorage().elementSize()
+        byte = torch.ByteStorage().elementSize()
+        char = torch.CharStorage().elementSize()
+        short = torch.ShortStorage().elementSize()
+        int = torch.IntStorage().elementSize()
+        long = torch.LongStorage().elementSize()
+        float = torch.FloatStorage().elementSize()
         double = torch.DoubleStorage().elementSize()
 
         self.assertEqual(byte, torch.ByteTensor().elementSize())

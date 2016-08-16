@@ -145,7 +145,7 @@ class SpatialFullConvolution(Module):
             # Create a zero tensor to be expanded and used as gradInput[1].
             self.zeroScalar = self.zeroScalar or input[1].new(1).zero_()
             self.ones.resize_(input[1].dim()).fill_(1)
-            zeroTensor =  self.zeroScalar.viewAs(self.ones).expandAs(input[1])
+            zeroTensor = self.zeroScalar.viewAs(self.ones).expandAs(input[1])
             self.gradInput = [self.gradInput, zeroTensor]
 
         return self.gradInput
