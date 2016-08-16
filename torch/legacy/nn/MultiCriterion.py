@@ -30,12 +30,12 @@ class MultiCriterion(Criterion):
         self.gradInput = recursiveResizeAs(self.gradInput, input)[0]
         recursiveFill(self.gradInput, 0)
         for i in range(len(self.criterions)):
-           recursiveAdd(self.gradInput, self.weights[i], self.criterions[i].updateGradInput(input, target))
+            recursiveAdd(self.gradInput, self.weights[i], self.criterions[i].updateGradInput(input, target))
 
         return self.gradInput
 
     def type(self, type):
         for criterion in self.criterions:
-           criterion.type(type)
+            criterion.type(type)
 
         return super(MultiCriterion, self).type(type)

@@ -23,9 +23,9 @@ class Concat(Container):
 
         offset = 0
         for i, module in enumerate(self.modules):
-           currentOutput = outs[i]
-           self.output.narrow(self.dimension, offset, currentOutput.size(self.dimension)).copy_(currentOutput)
-           offset = offset + currentOutput.size(self.dimension)
+            currentOutput = outs[i]
+            self.output.narrow(self.dimension, offset, currentOutput.size(self.dimension)).copy_(currentOutput)
+            offset = offset + currentOutput.size(self.dimension)
 
         return self.output
 
@@ -50,12 +50,12 @@ class Concat(Container):
     def accGradParameters(self, input, gradOutput, scale=1):
         offset = 0
         for i, module in enumerate(self.modules):
-           currentOutput = module.output
-           module.accGradParameters(
-               input,
-               gradOutput.narrow(self.dimension, offset, currentOutput.size(self.dimension)),
-               scale)
-           offset = offset + currentOutput.size(self.dimension)
+            currentOutput = module.output
+            module.accGradParameters(
+                input,
+                gradOutput.narrow(self.dimension, offset, currentOutput.size(self.dimension)),
+                scale)
+            offset = offset + currentOutput.size(self.dimension)
 
     def backward(self, input, gradOutput, scale=1):
         self.gradInput.resizeAs_(input)
@@ -75,12 +75,12 @@ class Concat(Container):
     def accUpdateGradParameters(self, input, gradOutput, lr):
         offset = 0
         for i, module in enumerate(self.modules):
-           currentOutput = module.output
-           module.accUpdateGradParameters(
-               input,
-               gradOutput.narrow(self.dimension, offset, currentOutput.size(self.dimension)),
-               lr)
-           offset = offset + currentOutput.size(self.dimension)
+            currentOutput = module.output
+            module.accUpdateGradParameters(
+                input,
+                gradOutput.narrow(self.dimension, offset, currentOutput.size(self.dimension)),
+                lr)
+            offset = offset + currentOutput.size(self.dimension)
 
     def __tostring__(self):
         tab = '  '

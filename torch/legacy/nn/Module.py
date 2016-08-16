@@ -91,7 +91,7 @@ class Module(object):
 
     def type(self, type=None, tensorCache=None):
         if not type:
-           return self._type
+            return self._type
 
         tensorCache = tensorCache or {}
 
@@ -161,7 +161,7 @@ class Module(object):
             return t.isContiguous()
 
         if not parameters:
-           return torch.Tensor()
+            return torch.Tensor()
 
         Tensor = parameters[0].new
         BufferTensor = Module._flattenTensorBuffer.get(type(parameters[0]), Tensor)
@@ -211,22 +211,22 @@ class Module(object):
 
         # 6. compact the flattened parameters if there were holes
         if used_parameters != num_parameters:
-           assert tensorsCompact
+            assert tensorsCompact
 
-           flatParameters = BufferTensor(used_parameters).copy_(
-                 flatParameters.maskedSelect(maskParameters))
-           for meta in parameterMeta:
-               meta['storageOffset'] = compactOffsets[meta['storageOffset']]
+            flatParameters = BufferTensor(used_parameters).copy_(
+                  flatParameters.maskedSelect(maskParameters))
+            for meta in parameterMeta:
+                meta['storageOffset'] = compactOffsets[meta['storageOffset']]
 
         if BufferTensor != Tensor:
-           flatParameters = Tensor(flatParameters.nElement()).copy_(flatParameters)
+            flatParameters = Tensor(flatParameters.nElement()).copy_(flatParameters)
 
         # 7. fix up the parameter tensors to point at the flattened parameters
         for param, meta in zip(parameters, parameterMeta):
-           param.set_(flatParameters.storage(),
-                     meta['storageOffset'],
-                     meta['size'],
-                     meta['stride'])
+            param.set_(flatParameters.storage(),
+                      meta['storageOffset'],
+                      meta['size'],
+                      meta['stride'])
 
         return flatParameters
 

@@ -7,10 +7,10 @@ class LeakyReLU(Module):
     def __init__(self, negval=1/100, inplace=False):
         super(LeakyReLU, self).__init__()
         if isinstance(negval, bool):
-           inplace = negval
-           self.negval = 1/100
+            inplace = negval
+            self.negval = 1/100
         else:
-           self.negval = negval
+            self.negval = negval
 
         # default for inplace is False
         self.inplace = inplace

@@ -11,7 +11,7 @@ class SplitTable(Module):
     def _getPositiveDimension(self, input):
         dimension = self.dimension
         if dimension < 0:
-           dimension = input.dim() + dimension
+            dimension = input.dim() + dimension
 
         return dimension
 

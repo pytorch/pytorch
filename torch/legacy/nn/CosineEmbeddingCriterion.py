@@ -64,7 +64,7 @@ class CosineEmbeddingCriterion(Criterion):
         self.output = self._outputs.sum()
 
         if self.sizeAverage:
-           self.output = self.output / y.size(0)
+            self.output = self.output / y.size(0)
 
         return self.output
 
@@ -97,21 +97,21 @@ class CosineEmbeddingCriterion(Criterion):
         gw2[self._idx] = gw2[self._idx].mul_(-1)
 
         if self.sizeAverage:
-           gw1.div_(y.size(0))
-           gw2.div_(y.size(0))
+            gw1.div_(y.size(0))
+            gw2.div_(y.size(0))
 
         return self.gradInput
 
     def type(self, type=None, tensorCache=None):
         if not type:
-           return self._type
+            return self._type
 
         self._idx = None
         super(CosineEmbeddingCriterion, self).type(type, tensorCache)
         # comparison operators behave differently from cuda/c implementations
         if type == 'torch.cuda.FloatTensor':
-           self._idx = torch.cuda.ByteTensor()
+            self._idx = torch.cuda.ByteTensor()
         else:
-           self._idx = torch.ByteTensor()
+            self._idx = torch.ByteTensor()
 
         return self

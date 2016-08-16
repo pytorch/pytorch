@@ -60,12 +60,12 @@ class LookupTable(Module):
         self.renorm(input)
         input = self._makeInputContiguous(input)
         if input.dim() == 1:
-           torch.indexSelect(self.output, self.weight, 0, input)
+            torch.indexSelect(self.output, self.weight, 0, input)
         elif input.dim() == 2:
-           torch.indexSelect(self.output, self.weight, 0, input.view(-1))
-           self.output = self.output.view(input.size(0), input.size(1), self.weight.size(1))
+            torch.indexSelect(self.output, self.weight, 0, input.view(-1))
+            self.output = self.output.view(input.size(0), input.size(1), self.weight.size(1))
         else:
-           raise RuntimeError("input must be a vector or matrix")
+            raise RuntimeError("input must be a vector or matrix")
 
         return self.output
 
@@ -108,16 +108,16 @@ class LookupTable(Module):
 
     def renorm(self, input):
         if not self.maxNorm:
-           return
+            return
 
         # copy input into _input, so _input is continous.
         # The copied _input will be modified in the C code.
         self._input.resize_(input.size()).copy_(input)
         row_idx = self._input
         if row_idx.dim() == 2:
-           row_idx = row_idx.view(-1)
+            row_idx = row_idx.view(-1)
         elif row_idx.dim() != 1:
-           raise RuntimeError("input must be a vector or matrix")
+            raise RuntimeError("input must be a vector or matrix")
 
         # "row_idx" and "weight" will be modified in the C code
         self._backend.LookupTable_renorm(

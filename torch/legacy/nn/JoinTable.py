@@ -21,21 +21,21 @@ class JoinTable(Module):
         dimension = self._getPositiveDimension(input)
 
         for i in range(len(input)):
-           currentOutput = input[i]
-           if i == 0:
-              self.size.resize_(currentOutput.dim()).copy_(currentOutput.size())
-           else:
-              self.size[dimension] = self.size[dimension] + currentOutput.size(dimension)
+            currentOutput = input[i]
+            if i == 0:
+                self.size.resize_(currentOutput.dim()).copy_(currentOutput.size())
+            else:
+                self.size[dimension] = self.size[dimension] + currentOutput.size(dimension)
 
         self.output.resize_(self.size)
 
         # TODO: use cat?
         offset = 0
         for i in range(len(input)):
-           currentOutput = input[i]
-           self.output.narrow(dimension, offset,
-              currentOutput.size(dimension)).copy_(currentOutput)
-           offset = offset + currentOutput.size(dimension)
+            currentOutput = input[i]
+            self.output.narrow(dimension, offset,
+               currentOutput.size(dimension)).copy_(currentOutput)
+            offset = offset + currentOutput.size(dimension)
 
         return self.output
 
@@ -43,18 +43,18 @@ class JoinTable(Module):
         dimension = self._getPositiveDimension(input)
 
         for i in range(len(input)):
-           if i not in self.gradInput:
-              self.gradInput.append(input[i].new())
-           self.gradInput[i].resizeAs_(input[i])
+            if i not in self.gradInput:
+                self.gradInput.append(input[i].new())
+            self.gradInput[i].resizeAs_(input[i])
         self.gradInput = self.gradInput[:len(input)]
 
         offset = 0
         for i in range(len(input)):
-           currentOutput = input[i]
-           currentGradInput = gradOutput.narrow(dimension, offset,
-                           currentOutput.size(dimension))
-           self.gradInput[i].copy_(currentGradInput)
-           offset = offset + currentOutput.size(dimension)
+            currentOutput = input[i]
+            currentGradInput = gradOutput.narrow(dimension, offset,
+                            currentOutput.size(dimension))
+            self.gradInput[i].copy_(currentGradInput)
+            offset = offset + currentOutput.size(dimension)
 
         return self.gradInput
 

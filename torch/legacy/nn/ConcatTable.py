@@ -85,11 +85,11 @@ class ConcatTable(Container):
 
     def accGradParameters(self, input, gradOutput, scale=1):
         for i, module in ipairs(self.modules):
-           self.rethrowErrors(module, i, 'accGradParameters', input, gradOutput[i], scale)
+            self.rethrowErrors(module, i, 'accGradParameters', input, gradOutput[i], scale)
 
     def accUpdateGradParameters(self, input, gradOutput, lr):
         for i, module in ipairs(self.modules):
-           self.rethrowErrors(module, i, 'accUpdateGradParameters', input, gradOutput[i], lr)
+            self.rethrowErrors(module, i, 'accUpdateGradParameters', input, gradOutput[i], lr)
 
     def __repr__(self):
         tab = '  '
@@ -101,10 +101,10 @@ class ConcatTable(Container):
         res = torch.type(self)
         res = res + ' {' + line + tab + 'input'
         for i in range(len(self.modules)):
-           if i == self.modules-1:
-              res = res + line + tab + next + '(' + i + '): ' + str(self.modules[i]).replace(line, line + tab + extlast)
-           else:
-              res = res + line + tab + next + '(' + i + '): ' + str(self.modules[i]).replace(line, line + tab + ext)
+            if i == self.modules-1:
+                res = res + line + tab + next + '(' + i + '): ' + str(self.modules[i]).replace(line, line + tab + extlast)
+            else:
+                res = res + line + tab + next + '(' + i + '): ' + str(self.modules[i]).replace(line, line + tab + ext)
 
         res = res + line + tab + last + 'output'
         res = res + line + '}'

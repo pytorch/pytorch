@@ -69,7 +69,7 @@ class FlattenTable(Module):
 
         # However, we should check that the gradInput is valid:
         if not self._checkMapping(gradOutput, self.gradInput, self.input_map):
-                self.gradInput = self._inverseFlatten(gradOutput, self.input_map)
+            self.gradInput = self._inverseFlatten(gradOutput, self.input_map)
 
         return self.gradInput
 

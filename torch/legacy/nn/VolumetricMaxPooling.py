@@ -23,12 +23,12 @@ class VolumetricMaxPooling(Module):
         self.indices = torch.Tensor()
 
     def ceil(self):
-         self.ceil_mode = True
-         return self
+        self.ceil_mode = True
+        return self
 
     def floor(self):
-         self.ceil_mode = False
-         return self
+        self.ceil_mode = False
+        return self
 
     def updateOutput(self, input):
         dims = input.dim()

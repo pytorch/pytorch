@@ -14,7 +14,7 @@ class DotProduct(Module):
         input1, input2 = input[0], input[1]
 
         if not self.buffer:
-           self.buffer = input1.new()
+            self.buffer = input1.new()
 
         torch.mul(self.buffer, input1, input2)
         torch.sum(self.output, self.buffer, 1)
@@ -27,9 +27,9 @@ class DotProduct(Module):
         not_batch = False
 
         if len(self.gradInput) != 2:
-          self.gradInput[0] = self.gradInput[0] or input[0].new()
-          self.gradInput[1] = self.gradInput[1] or input[1].new()
-          self.gradInput = self.gradInput[:2]
+            self.gradInput[0] = self.gradInput[0] or input[0].new()
+            self.gradInput[1] = self.gradInput[1] or input[1].new()
+            self.gradInput = self.gradInput[:2]
 
         gw1 = self.gradInput[0]
         gw2 = self.gradInput[1]

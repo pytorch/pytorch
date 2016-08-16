@@ -52,23 +52,23 @@ class BatchNormalization(Module):
         self.save_std = None
 
         if self.affine:
-           self.weight = torch.Tensor(nOutput)
-           self.bias = torch.Tensor(nOutput)
-           self.gradWeight = torch.Tensor(nOutput)
-           self.gradBias = torch.Tensor(nOutput)
-           self.reset()
+            self.weight = torch.Tensor(nOutput)
+            self.bias = torch.Tensor(nOutput)
+            self.gradWeight = torch.Tensor(nOutput)
+            self.gradBias = torch.Tensor(nOutput)
+            self.reset()
         else:
-           self.weight = None
-           self.bias = None
-           self.gradWeight = None
-           self.gradBias = None
+            self.weight = None
+            self.bias = None
+            self.gradWeight = None
+            self.gradBias = None
 
     def reset(self):
         if self.weight:
-           self.weight.uniform_()
+            self.weight.uniform_()
 
         if self.bias:
-           self.bias.zero_()
+            self.bias.zero_()
 
         self.running_mean.zero_()
         self.running_var.fill_(1)
@@ -131,7 +131,7 @@ class BatchNormalization(Module):
 
         scale = scale or 1.
         if gradInput is not None:
-           gradInput.resizeAs_(gradOutput)
+            gradInput.resizeAs_(gradOutput)
 
         self._backend.BatchNormalization_backward(
             self._backend.library_state,

@@ -35,18 +35,18 @@ class SpatialConvolutionLocal(Module):
 
     def reset(self, stdv=None):
         if stdv is not None:
-           stdv = stdv * math.sqrt(3)
+            stdv = stdv * math.sqrt(3)
         else:
-           stdv = 1. / math.sqrt(self.kW*self.kH*self.nInputPlane)
+            stdv = 1. / math.sqrt(self.kW*self.kH*self.nInputPlane)
 
         self.weight.uniform_(-stdv, stdv)
         self.bias.uniform_(-stdv, stdv)
 
     def _makeContiguous(self, input, gradOutput=None):
         if not input.isContiguous():
-           self._input = self._input or input.new()
-           self._input.resizeAs_(input).copy_(input)
-           input = self._input
+            self._input = self._input or input.new()
+            self._input.resizeAs_(input).copy_(input)
+            input = self._input
 
         if gradOutput is not None:
             if not gradOutput.isContiguous():
@@ -60,12 +60,12 @@ class SpatialConvolutionLocal(Module):
     def _viewWeight(self):
         self.weight = self.weight.view(self.oH * self.oW, self.nOutputPlane, self.nInputPlane * self.kH * self.kW)
         if self.gradWeight and self.gradWeight.dim() > 0:
-           self.gradWeight = self.gradWeight.view(self.oH * self.oW, self.nOutputPlane, self.nInputPlane * self.kH * self.kW)
+            self.gradWeight = self.gradWeight.view(self.oH * self.oW, self.nOutputPlane, self.nInputPlane * self.kH * self.kW)
 
     def _unviewWeight(self):
         self.weight = self.weight.view(self.oH, self.oW, self.nOutputPlane, self.nInputPlane, self.kH, self.kW)
         if self.gradWeight and self.gradWeight.dim() > 0:
-           self.gradWeight = self.gradWeight.view(self.oH, self.oW, self.nOutputPlane, self.nInputPlane, self.kH, self.kW)
+            self.gradWeight = self.gradWeight.view(self.oH, self.oW, self.nOutputPlane, self.nInputPlane, self.kH, self.kW)
 
     def _checkInputSize(self, input):
         if input.nDimension() == 3:

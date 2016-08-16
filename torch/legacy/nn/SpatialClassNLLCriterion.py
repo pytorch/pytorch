@@ -16,9 +16,9 @@ class SpatialClassNLLCriterion(Criterion):
 
     def updateOutput(self, input, target):
         if target.type() == 'torch.cuda.FloatTensor':
-           self.target = target
+            self.target = target
         else:
-           self.target = target.long()
+            self.target = target.long()
 
         self._backend.SpatialClassNLLCriterion_updateOutput(
             self._backend.library_state,
@@ -34,9 +34,9 @@ class SpatialClassNLLCriterion(Criterion):
 
     def updateGradInput(self, input, target):
         if target.type() == 'torch.cuda.FloatTensor':
-           self.target = target
+            self.target = target
         else:
-           self.target = target.long()
+            self.target = target.long()
 
         self.gradInput.resizeAs_(input).zero_()
         self._backend.SpatialClassNLLCriterion_updateGradInput(

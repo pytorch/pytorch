@@ -16,7 +16,7 @@ class CMul(Module):
         else:
             self.size.resize_(len(args))
             for i, arg in enumerate(args):
-                    self.size[i] = arg
+                self.size[i] = arg
 
         self.weight = torch.Tensor(self.size)
         self.gradWeight = torch.Tensor(self.size)
@@ -66,7 +66,7 @@ class CMul(Module):
 
     def updateGradInput(self, input, gradOutput):
         if not self.gradInput:
-           return
+            return
 
         if self._gradOutput is None:
             self._gradOutput = input.new()
@@ -104,7 +104,7 @@ class CMul(Module):
 
     def type(self, type=None, tensorCache=None):
         if type:
-           self.clearState()
+            self.clearState()
         return super(CMul, self).type(type, tensorCache)
 
     def clearState(self):

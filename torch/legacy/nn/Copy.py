@@ -20,6 +20,6 @@ class Copy(Module):
 
     def type(self, type=None, tensorCache=None):
         if type and self.dontCast:
-           return self
+            return self
 
         return super(Copy, self).type(self, type, tensorCache)

@@ -16,22 +16,22 @@ class MarginRankingCriterion(Criterion):
 
     def updateOutput(self, input, y):
         if input[0].size(0) == 1:
-           self.output = max(0, -y*(input[0][0]-input[1][0]) + self.margin)
+            self.output = max(0, -y*(input[0][0]-input[1][0]) + self.margin)
         else:
-           self._output = self._output or input[0].clone()
-           self._output.resizeAs_(input[0])
-           self._output.copy_(input[0])
+            self._output = self._output or input[0].clone()
+            self._output.resizeAs_(input[0])
+            self._output.copy_(input[0])
 
-           self._output.add_(-1, input[1])
-           self._output.mul_(-1).mul_(y)
-           self._output.add_(self.margin)
+            self._output.add_(-1, input[1])
+            self._output.mul_(-1).mul_(y)
+            self._output.add_(self.margin)
 
-           self._output.cmax_(0)
+            self._output.cmax_(0)
 
-           self.output = self._output.sum()
+            self.output = self._output.sum()
 
-           if self.sizeAverage:
-              self.output = self.output / y.size(0)
+            if self.sizeAverage:
+                self.output = self.output / y.size(0)
 
         return self.output
 

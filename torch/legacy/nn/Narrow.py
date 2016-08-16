@@ -13,7 +13,7 @@ class Narrow(Module):
     def updateOutput(self, input):
         length = self.length
         if length < 0:
-           length = input.size(self.dimension) - self.index + self.length + 1
+            length = input.size(self.dimension) - self.index + self.length + 1
 
         output = input.narrow(self.dimension, self.index, length)
         self.output = self.output.typeAs(output)
@@ -23,7 +23,7 @@ class Narrow(Module):
     def updateGradInput(self, input, gradOutput):
         length = self.length
         if length < 0:
-           length = input.size(self.dimension) - self.index + self.length + 1
+            length = input.size(self.dimension) - self.index + self.length + 1
 
         self.gradInput = self.gradInput.typeAs(input)
         self.gradInput.resizeAs_(input).zero_()

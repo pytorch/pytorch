@@ -236,7 +236,7 @@ PyObject * $name(PyObject *self, PyObject *args)
         return code[:idx] + self.declare_methods(False) + self.declare_methods(True) + code[idx:]
 
     def preprocessor_guard(self, code, condition):
-            return '#if ' + condition + '\n' + code + '#endif\n'
+        return '#if ' + condition + '\n' + code + '#endif\n'
 
     def process_wrapper(self, code, declaration):
         if 'defined_if' in declaration:

@@ -23,10 +23,10 @@ class SpatialSubtractiveNormalization(Module):
 
         # check args
         if kdim != 2 and kdim != 1:
-           error('SpatialSubtractiveNormalization averaging kernel must be 2D or 1D')
+            error('SpatialSubtractiveNormalization averaging kernel must be 2D or 1D')
 
         if (self.kernel.size(0) % 2) == 0 or (kdim == 2 and (self.kernel.size(1) % 2) == 0):
-           error('<SpatialSubtractiveNormalization> averaging kernel must have ODD dimensions')
+            error('<SpatialSubtractiveNormalization> averaging kernel must have ODD dimensions')
 
         # normalize kernel
         self.kernel.div_(self.kernel.sum() * self.nInputPlane)
@@ -35,7 +35,7 @@ class SpatialSubtractiveNormalization(Module):
         padH = int(math.floor(self.kernel.size(0)/2))
         padW = padH
         if kdim == 2:
-           padW = int(math.floor(self.kernel.size(1)/2))
+            padW = int(math.floor(self.kernel.size(1)/2))
 
         # create convolutional mean extractor
         self.meanestimator = Sequential()

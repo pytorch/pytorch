@@ -48,10 +48,10 @@ class ParallelTable(Container):
         res = torch.type(self)
         res = res + ' {' + line + tab + 'input'
         for i in range(len(self.modules)):
-           if i == self.modules-1:
-              res = res + line + tab + next + '(' + i + '): ' + toresing(self.modules[i]).gsub(line, line + tab + extlast)
-           else:
-              res = res + line + tab + next + '(' + i + '): ' + toresing(self.modules[i]).gsub(line, line + tab + ext)
+            if i == self.modules-1:
+                res = res + line + tab + next + '(' + i + '): ' + toresing(self.modules[i]).gsub(line, line + tab + extlast)
+            else:
+                res = res + line + tab + next + '(' + i + '): ' + toresing(self.modules[i]).gsub(line, line + tab + ext)
 
         res = res + line + tab + last + 'output'
         res = res + line + '}'

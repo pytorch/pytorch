@@ -62,25 +62,25 @@ class Parallel(Container):
 
         offset = 0
         for i in range(nModule):
-           module = self.modules[i]
-           currentOutput = module.output
-           outputSize = currentOutput.size(self.outputDimension)
+            module = self.modules[i]
+            currentOutput = module.output
+            outputSize = currentOutput.size(self.outputDimension)
 
-           module.accGradParameters(input.select(self.inputDimension, i),
-                   gradOutput.narrow(self.outputDimension, offset, outputSize), scale)
-           offset = offset + outputSize
+            module.accGradParameters(input.select(self.inputDimension, i),
+                    gradOutput.narrow(self.outputDimension, offset, outputSize), scale)
+            offset = offset + outputSize
 
     def accUpdateGradParameters(self, input, gradOutput, lr):
         nModule = input.size(self.inputDimension)
 
         offset = 0
         for i in range(nModule):
-           module = self.modules[i];
-           currentOutput = module.output
-           module.accupdateGradParameters(input.select(self.inputDimension, i),
-               gradOutput.narrow(self.outputDimension, offset, currentOutput.size(self.outputDimension)),
-               lr)
-           offset = offset + currentOutput.size(self.outputDimension)
+            module = self.modules[i];
+            currentOutput = module.output
+            module.accupdateGradParameters(input.select(self.inputDimension, i),
+                gradOutput.narrow(self.outputDimension, offset, currentOutput.size(self.outputDimension)),
+                lr)
+            offset = offset + currentOutput.size(self.outputDimension)
 
     def __repr__(self):
         tab = '  '

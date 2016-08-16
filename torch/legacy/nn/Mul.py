@@ -13,9 +13,9 @@ class Mul(Module):
 
     def reset(self, stdv=None):
         if stdv is not None:
-           stdv = stdv * math.sqrt(3)
+            stdv = stdv * math.sqrt(3)
         else:
-           stdv = 1./math.sqrt(self.weight.size(0))
+            stdv = 1./math.sqrt(self.weight.size(0))
         self.weight.uniform_(-stdv, stdv)
 
     def updateOutput(self, input):

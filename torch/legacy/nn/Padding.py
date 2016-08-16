@@ -25,17 +25,17 @@ class Padding(Module):
         index = self.index
         pad = self.pad
         if pad > 0:
-           index = input.size(dim) - index
+            index = input.size(dim) - index
         else:
-           pad = -pad
+            pad = -pad
 
         if index == 0:
-           self.output.narrow(dim, pad, input.size(dim)).copy_(input)
+            self.output.narrow(dim, pad, input.size(dim)).copy_(input)
         elif index == input.size(dim):
-           self.output.narrow(dim, 0, input.size(dim)).copy_(input)
+            self.output.narrow(dim, 0, input.size(dim)).copy_(input)
         else:
-           self.output.narrow(dim, 0, index).copy_(input.narrow(dim, 0, index))
-           self.output.narrow(dim, index + pad, input.size(dim) - index).copy_(input.narrow(dim, index, input.size(dim) - index))
+            self.output.narrow(dim, 0, index).copy_(input.narrow(dim, 0, index))
+            self.output.narrow(dim, index + pad, input.size(dim) - index).copy_(input.narrow(dim, index, input.size(dim) - index))
 
         return self.output
 
@@ -46,16 +46,16 @@ class Padding(Module):
         index = self.index
         pad = self.pad
         if pad > 0:
-           index = input.size(dim) - index
+            index = input.size(dim) - index
         else:
-           pad = -pad
+            pad = -pad
 
         if index == 0:
-           self.gradInput.copy_(gradOutput.narrow(dim, pad, input.size(dim)))
+            self.gradInput.copy_(gradOutput.narrow(dim, pad, input.size(dim)))
         elif index == input.size(dim):
-           self.gradInput.copy_(gradOutput.narrow(dim, 0, input.size(dim)))
+            self.gradInput.copy_(gradOutput.narrow(dim, 0, input.size(dim)))
         else:
-           self.gradInput.narrow(dim, 0, index).copy_(gradOutput.narrow(dim, 0, index))
-           self.gradInput.narrow(dim, index, input.size(dim) - index).copy_(gradOutput.narrow(dim, index + pad, input.size(dim) - index))
+            self.gradInput.narrow(dim, 0, index).copy_(gradOutput.narrow(dim, 0, index))
+            self.gradInput.narrow(dim, index, input.size(dim) - index).copy_(gradOutput.narrow(dim, index + pad, input.size(dim) - index))
 
         return self.gradInput

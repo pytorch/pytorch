@@ -1312,12 +1312,12 @@ class TestNN(TestCase):
         narrows = ( (slice(None), (0, 5), slice(None), slice(None)), (slice(None), (5, 11), (1, 11), (1, 11)), (slice(None), (11, 18), (1, 10), (1, 10)), (slice(None), (18, 26), (2, 10), (2, 10)) )
         gradInput = input.clone().zero_()
         for i in range(4):
-           conv = concat.get(i)
-           gradWeight = conv.gradWeight.clone()
-           conv.zeroGradParameters()
-           output[narrows[i]].copy_(conv.forward(input))
-           gradInput.add_(conv.backward(input, gradOutput[narrows[i]]))
-           self.assertEqual(gradWeight, conv.gradWeight)
+            conv = concat.get(i)
+            gradWeight = conv.gradWeight.clone()
+            conv.zeroGradParameters()
+            output[narrows[i]].copy_(conv.forward(input))
+            gradInput.add_(conv.backward(input, gradOutput[narrows[i]]))
+            self.assertEqual(gradWeight, conv.gradWeight)
 
         self.assertEqual(output, outputConcat)
         self.assertEqual(gradInput, gradInputConcat)

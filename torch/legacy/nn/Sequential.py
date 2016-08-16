@@ -9,7 +9,7 @@ class Sequential(Container):
 
     def add(self, module):
         if len(self.modules) == 0:
-           self.gradInput = module.gradInput
+            self.gradInput = module.gradInput
 
         self.modules.append(module)
         self.output = module.output
@@ -76,11 +76,11 @@ class Sequential(Container):
         res = 'nn.Sequential'
         res = res + ' {' + line + tab + '[input'
         for i in range(len(self.modules)):
-           res = res + next + '(' + str(i) + ')'
+            res = res + next + '(' + str(i) + ')'
 
         res = res + next + 'output]'
         for i in range(len(self.modules)):
-           res = res + line + tab + '(' + str(i) + '): ' + str(self.modules[i]).replace(line, line + tab)
+            res = res + line + tab + '(' + str(i) + '): ' + str(self.modules[i]).replace(line, line + tab)
 
         res = res + line + '}'
         return res

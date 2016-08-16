@@ -43,13 +43,13 @@ class MaskedSelect(Module):
 
         # These casts apply when switching between cuda/non-cuda types
         if type != 'torch.cuda.FloatTensor':
-                self._maskIndexBuffer = self._maskIndexBuffer.long()
-                self._maskIndices = self._maskIndices.long()
-                self._gradMask = self._gradMask.byte()
+            self._maskIndexBuffer = self._maskIndexBuffer.long()
+            self._maskIndices = self._maskIndices.long()
+            self._gradMask = self._gradMask.byte()
         else:
-                self._maskIndexBuffer = self._maskIndexBuffer.cuda()
-                self._maskIndices = self._maskIndices.cuda()
-                self._gradMask = self._gradMask.cuda()
+            self._maskIndexBuffer = self._maskIndexBuffer.cuda()
+            self._maskIndices = self._maskIndices.cuda()
+            self._gradMask = self._gradMask.cuda()
 
         self._type = type
         return self

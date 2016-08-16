@@ -32,18 +32,18 @@ class VolumetricConvolution(Module):
 
     def reset(self, stdv=None):
         if stdv is not None:
-           stdv = stdv * math.sqrt(3)
+            stdv = stdv * math.sqrt(3)
         else:
-           stdv = 1. / math.sqrt(self.kT*self.kW*self.kH*self.nInputPlane)
+            stdv = 1. / math.sqrt(self.kT*self.kW*self.kH*self.nInputPlane)
 
         self.weight.uniform_(-stdv, stdv)
         self.bias.uniform_(-stdv, stdv)
 
     def _makeContiguous(self, input, gradOutput=None):
         if not input.isContiguous():
-           self._input = self._input or input.new()
-           self._input.resizeAs_(input).copy_(input)
-           input = self._input
+            self._input = self._input or input.new()
+            self._input.resizeAs_(input).copy_(input)
+            input = self._input
 
         if gradOutput is not None:
             if not gradOutput.isContiguous():
@@ -172,10 +172,10 @@ class VolumetricConvolution(Module):
         s += '({} -> {}, {}x{}x{}'.format(self.nInputPlane, self.nOutputPlane, self.kT, self.kW, self.kH)
         if self.dT != 1 or self.dW != 1 or self.dH != 1 or \
            self.padT != 0 or self.padW != 0 or self.padH != 0:
-               s += ', {}, {}, {}'.format(self.dT, self.dW, self.dH)
+            s += ', {}, {}, {}'.format(self.dT, self.dW, self.dH)
 
         if self.padT != 0 or self.padW != 0 or self.padH != 0:
-               s += ', {}, {}, {}'.format(self.padT, self.padW, self.padH)
+            s += ', {}, {}, {}'.format(self.padT, self.padW, self.padH)
 
         s += ')'
         return s

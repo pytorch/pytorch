@@ -57,9 +57,9 @@ class VolumetricFullConvolution(Module):
 
     def _makeContiguous(self, input, gradOutput=None):
         if not input.isContiguous():
-           self._input = self._input or input.new()
-           self._input.resizeAs_(input).copy_(input)
-           input = self._input
+            self._input = self._input or input.new()
+            self._input.resizeAs_(input).copy_(input)
+            input = self._input
 
         if gradOutput is not None:
             if not gradOutput.isContiguous():

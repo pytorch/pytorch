@@ -33,17 +33,17 @@ class Euclidean(Module):
 
     def reset(self, stdv=None):
         if stdv is not None:
-           stdv = stdv * math.sqrt(3)
+            stdv = stdv * math.sqrt(3)
         else:
-           stdv = 1./math.sqrt(self.weight.size(0))
+            stdv = 1./math.sqrt(self.weight.size(0))
 
         self.weight.uniform_(-stdv, stdv)
 
     def _view(self, res, src, *args):
         if src.isContiguous():
-           res.set_(src.view(*args))
+            res.set_(src.view(*args))
         else:
-           res.set_(src.contiguous().view(*args))
+            res.set_(src.contiguous().view(*args))
 
     def updateOutput(self, input):
         # lazy initialize buffers
@@ -83,7 +83,7 @@ class Euclidean(Module):
 
     def updateGradInput(self, input, gradOutput):
         if not self.gradInput:
-           return
+            return
 
         self._div = self._div or input.new()
         self._output = self._output or self.output.new()
@@ -91,7 +91,7 @@ class Euclidean(Module):
         self._expand3 = self._expand3 or input.new()
 
         if not self.fastBackward:
-           self.updateOutput(input)
+            self.updateOutput(input)
 
         inputSize, outputSize = self.weight.size(0), self.weight.size(1)
 
@@ -139,8 +139,8 @@ class Euclidean(Module):
 
     def type(self, type=None, tensorCache=None):
         if type:
-           # prevent premature memory allocations
-           self.clearState()
+            # prevent premature memory allocations
+            self.clearState()
 
         return super(Euclidean, self).type(type, tensorCache)
 

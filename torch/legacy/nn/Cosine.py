@@ -56,7 +56,7 @@ class Cosine(Module):
         assert input.dim() == 2
 
         if not self.gradInput:
-           return
+            return
 
         inputSize = self.weight.size(1)
         outputSize = self.weight.size(0)
@@ -70,7 +70,7 @@ class Cosine(Module):
         nElement = self.gradInput.nElement()
         self.gradInput.resizeAs_(input)
         if self.gradInput.nElement() != nElement:
-           self.gradInput.zero_()
+            self.gradInput.zero_()
 
         inputNorm = self._inputNorm.expandAs(input)
         weightNorm = self._weightNorm.view(1, outputSize).expandAs(gradOutput)
@@ -124,13 +124,13 @@ class Cosine(Module):
 
     def type(self, type=None, tensorCache=None):
         if type is not None:
-           # prevent premature memory allocations
-           self._input = None
-           self._weight = None
-           self._inputNorm = None
-           self._weightNorm = None
-           self._gradOutput = None
-           self._sum = None
+            # prevent premature memory allocations
+            self._input = None
+            self._weight = None
+            self._inputNorm = None
+            self._weightNorm = None
+            self._gradOutput = None
+            self._sum = None
 
         return super(Cosine, self).type(type, tensorCache)
 

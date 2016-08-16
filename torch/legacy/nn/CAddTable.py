@@ -10,12 +10,12 @@ class CAddTable(Module):
 
     def updateOutput(self, input):
         if self.inplace:
-           self.output.set_(input[0])
+            self.output.set_(input[0])
         else:
-           self.output.resizeAs_(input[0]).copy_(input[0])
+            self.output.resizeAs_(input[0]).copy_(input[0])
 
         for i in range(1, len(input)):
-           self.output.add_(input[i])
+            self.output.add_(input[i])
 
         return self.output
 

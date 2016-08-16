@@ -35,21 +35,21 @@ class SpatialFractionalMaxPooling(Module):
         self.indices = None
 
         if arg1 >= 1 and arg2 >= 1:
-           # Desired output size: the input tensor will determine the reduction
-           # ratio
-           self.outW = arg1
-           self.outH = arg2
-           self.ratioW = self.ratioH = None
+            # Desired output size: the input tensor will determine the reduction
+            # ratio
+            self.outW = arg1
+            self.outH = arg2
+            self.ratioW = self.ratioH = None
         else:
-           # Reduction ratio specified per each input
-           # This is the reduction ratio that we use
-           self.ratioW = arg1
-           self.ratioH = arg2
-           self.outW = self.outH = None
+            # Reduction ratio specified per each input
+            # This is the reduction ratio that we use
+            self.ratioW = arg1
+            self.ratioH = arg2
+            self.outW = self.outH = None
 
-           # The reduction ratio must be between 0 and 1
-           assert self.ratioW > 0 and self.ratioW < 1
-           assert self.ratioH > 0 and self.ratioH < 1
+            # The reduction ratio must be between 0 and 1
+            assert self.ratioW > 0 and self.ratioW < 1
+            assert self.ratioH > 0 and self.ratioH < 1
 
     def _getBufferSize(self, input):
         batchSize = 0

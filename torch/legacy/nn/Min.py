@@ -14,7 +14,7 @@ class Min(Module):
     def _getPositiveDimension(self, input):
         dimension = self.dimension
         if dimension < 0:
-           dimension = input.dim() + dimension
+            dimension = input.dim() + dimension
 
         return dimension
 
@@ -28,9 +28,9 @@ class Min(Module):
         dimension = self._getPositiveDimension(input)
         torch.min(self._output, self._indices, input, dimension)
         if input.dim() > 1:
-          self.output.set_(self._output.select(dimension, 0))
+            self.output.set_(self._output.select(dimension, 0))
         else:
-          self.output.set_(self._output)
+            self.output.set_(self._output)
 
         return self.output
 
@@ -38,9 +38,9 @@ class Min(Module):
         self._lazyInit()
         dimension = self._getPositiveDimension(input)
         if input.dim() > 1:
-          gradOutputView = addSingletonDimension(gradOutput, dimension)
+            gradOutputView = addSingletonDimension(gradOutput, dimension)
         else:
-          gradOutputView = gradOutput
+            gradOutputView = gradOutput
 
         self.gradInput.resizeAs_(input).zero_().scatter_(dimension, self._indices, gradOutputView)
         return self.gradInput

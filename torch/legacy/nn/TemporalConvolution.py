@@ -22,9 +22,9 @@ class TemporalConvolution(Module):
 
     def reset(self, stdv=None):
         if stdv is not None:
-           stdv = stdv * math.sqrt(3)
+            stdv = stdv * math.sqrt(3)
         else:
-           stdv = 1. / math.sqrt(self.kW*self.inputFrameSize)
+            stdv = 1. / math.sqrt(self.kW*self.inputFrameSize)
 
         self.weight.uniform_(-stdv, stdv)
         self.bias.uniform_(-stdv, stdv)

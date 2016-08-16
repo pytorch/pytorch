@@ -20,9 +20,9 @@ class Add(Module):
 
     def reset(self, stdv=None):
         if stdv is not None:
-           stdv = stdv * math.sqrt(3)
+            stdv = stdv * math.sqrt(3)
         else:
-           stdv = 1./math.sqrt(self.bias.size(0))
+            stdv = 1./math.sqrt(self.bias.size(0))
 
         self.bias.uniform_(-stdv, stdv)
 
@@ -43,15 +43,15 @@ class Add(Module):
 
     def updateGradInput(self, input, gradOutput):
         if self.gradInput:
-           self.gradInput.resizeAs_(gradOutput).copy_(gradOutput)
-           return self.gradInput
+            self.gradInput.resizeAs_(gradOutput).copy_(gradOutput)
+            return self.gradInput
 
     def accGradParameters(self, input, gradOutput, scale=1):
         if self.gradBias.size(0) == 1:
-           self.gradBias[0] = self.gradBias[0] + scale*gradOutput.sum();
+            self.gradBias[0] = self.gradBias[0] + scale*gradOutput.sum();
         else:
-           if input.isSameSizeAs(self.bias):
-              self.gradBias.add_(scale, gradOutput)
-           else:
-              gradOutput = gradOutput.view(input.size(0), -1)
-              self.gradBias.view(-1).addmv_(scale, gradOutput.t(), self._ones)
+            if input.isSameSizeAs(self.bias):
+                self.gradBias.add_(scale, gradOutput)
+            else:
+                gradOutput = gradOutput.view(input.size(0), -1)
+                self.gradBias.view(-1).addmv_(scale, gradOutput.t(), self._ones)

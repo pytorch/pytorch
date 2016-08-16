@@ -57,32 +57,32 @@ class BCECriterion(Criterion):
          # It should have be divided by (input + self.eps) (1 - input + self.eps)
          # but it is divided by input (1 - input + self.eps) + self.eps
          # This modification requires less memory to be computed.
-         if input.nElement() != target.nElement():
+        if input.nElement() != target.nElement():
             raise RuntimeError("input and target size mismatch")
 
-         self.buffer = self.buffer or input.new()
+        self.buffer = self.buffer or input.new()
 
-         buffer = self.buffer
-         weights = self.weights
-         gradInput = self.gradInput
+        buffer = self.buffer
+        weights = self.weights
+        gradInput = self.gradInput
 
-         if weights is not None and target.dim() != 1:
-             weights = self.weights.view(1, target.size(1)).expandAs(target)
+        if weights is not None and target.dim() != 1:
+            weights = self.weights.view(1, target.size(1)).expandAs(target)
 
-         buffer.resizeAs_(input)
-         # - x ( 1 + self.eps -x ) + self.eps
-         torch.add(buffer, input, -1).add_(-self.eps).mul_(input).add_(-self.eps)
+        buffer.resizeAs_(input)
+        # - x ( 1 + self.eps -x ) + self.eps
+        torch.add(buffer, input, -1).add_(-self.eps).mul_(input).add_(-self.eps)
 
-         gradInput.resizeAs_(input)
-         # y - x
-         torch.add(gradInput, target, -1, input)
-         # - (y - x) / ( x ( 1 + self.eps -x ) + self.eps )
-         gradInput.div_(buffer)
+        gradInput.resizeAs_(input)
+        # y - x
+        torch.add(gradInput, target, -1, input)
+        # - (y - x) / ( x ( 1 + self.eps -x ) + self.eps )
+        gradInput.div_(buffer)
 
-         if weights is not None:
-             gradInput.mul_(weights)
+        if weights is not None:
+            gradInput.mul_(weights)
 
-         if self.sizeAverage:
-             gradInput.div_(target.nElement())
+        if self.sizeAverage:
+            gradInput.div_(target.nElement())
 
-         return gradInput
+        return gradInput

@@ -25,7 +25,7 @@ class TemporalMaxPooling(Module):
 
     def updateGradInput(self, input, gradOutput):
         if not self.gradInput:
-             return
+            return
         self._backend.TemporalMaxPooling_updateGradInput(
             self._backend.library_state,
             input,

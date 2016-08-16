@@ -33,8 +33,8 @@ class Replicate(Module):
         sz = torch.LongStorage(input.dim()+1)
         sz[self.dim] = 1
         for i in range(input.dim()):
-           offset = 1 if i >= self.dim else 0
-           sz[i+offset] = input.size(i)
+            offset = 1 if i >= self.dim else 0
+            sz[i+offset] = input.size(i)
 
         gradInput = self.gradInput.view(sz)
         torch.sum(gradInput, gradOutput, self.dim)

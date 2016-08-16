@@ -19,10 +19,10 @@ class SpatialContrastiveNormalization(Module):
 
         # check args
         if kdim != 2 and kdim != 1:
-           raise ValueError('SpatialContrastiveNormalization averaging kernel must be 2D or 1D')
+            raise ValueError('SpatialContrastiveNormalization averaging kernel must be 2D or 1D')
 
         if self.kernel.size(0) % 2 == 0 or (kdim == 2 and (self.kernel.size(1) % 2) == 0):
-           raise ValueError('SpatialContrastiveNormalization averaging kernel must have ODD dimensions')
+            raise ValueError('SpatialContrastiveNormalization averaging kernel must have ODD dimensions')
 
         # instantiate sub+div normalization
         self.normalizer = Sequential()

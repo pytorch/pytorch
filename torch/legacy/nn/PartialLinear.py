@@ -66,8 +66,8 @@ class PartialLinear(Module):
 
     def updateGradInput(self, input, gradOutput):
         if self.gradInput:
-           self.network.updateGradInput([input, self.partition], gradOutput)
-           self.gradInput.set_(self.network.gradInput[0])
+            self.network.updateGradInput([input, self.partition], gradOutput)
+            self.gradInput.set_(self.network.gradInput[0])
 
         return self.gradInput
 
