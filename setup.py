@@ -197,7 +197,7 @@ if WITH_CUDA:
 
 setup(name="torch", version="0.1",
       ext_modules=extensions,
-      cmdclass = {
+      cmdclass={
           'build': build,
           'build_ext': build_ext,
           'build_deps': build_deps,
