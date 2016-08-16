@@ -13,9 +13,9 @@ class TemporalConvolution(Module):
         self.kW = kW
         self.dW = dW
 
-        self.weight = torch.Tensor(outputFrameSize, inputFrameSize *kW)
+        self.weight = torch.Tensor(outputFrameSize, inputFrameSize * kW)
         self.bias = torch.Tensor(outputFrameSize)
-        self.gradWeight = torch.Tensor(outputFrameSize, inputFrameSize *kW)
+        self.gradWeight = torch.Tensor(outputFrameSize, inputFrameSize * kW)
         self.gradBias = torch.Tensor(outputFrameSize)
 
         self.reset()
@@ -24,7 +24,7 @@ class TemporalConvolution(Module):
         if stdv is not None:
             stdv = stdv * math.sqrt(3)
         else:
-            stdv = 1. / math.sqrt(self.kW *self.inputFrameSize)
+            stdv = 1. / math.sqrt(self.kW * self.inputFrameSize)
 
         self.weight.uniform_(-stdv, stdv)
         self.bias.uniform_(-stdv, stdv)

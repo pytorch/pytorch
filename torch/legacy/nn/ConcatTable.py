@@ -16,7 +16,7 @@ class ConcatTable(Container):
                 self.output[i] = out
             else:
                 self.output.append(out)
-        for i in range(len(self.output) -1, len(self.modules) -1, -1):
+        for i in range(len(self.output) - 1, len(self.modules) - 1, -1):
             del self.output[i]
 
         return self.output
@@ -32,7 +32,7 @@ class ConcatTable(Container):
                     l1[i] = res
             else:
                 f(l1, i, v)
-        for i in range(len(l1) -1, len(l2) -1, -1):
+        for i in range(len(l1) - 1, len(l2) - 1, -1):
             del l1[i]
         return l1
 
@@ -102,7 +102,7 @@ class ConcatTable(Container):
         res = torch.type(self)
         res = res + ' {' + line + tab + 'input'
         for i in range(len(self.modules)):
-            if i == self.modules -1:
+            if i == self.modules - 1:
                 res = res + line + tab + next + '(' + i + '): ' + str(self.modules[i]).replace(line, line + tab + extlast)
             else:
                 res = res + line + tab + next + '(' + i + '): ' + str(self.modules[i]).replace(line, line + tab + ext)

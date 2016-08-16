@@ -39,7 +39,7 @@ class SpatialConvolution(Module):
         if stdv is not None:
             stdv = stdv * math.sqrt(3)
         else:
-            stdv = 1. / math.sqrt(self.kW *self.kH *self.nInputPlane)
+            stdv = 1. / math.sqrt(self.kW * self.kH * self.nInputPlane)
 
         self.weight.uniform_(-stdv, stdv)
         if self.bias:

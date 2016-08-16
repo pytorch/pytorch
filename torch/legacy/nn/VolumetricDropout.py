@@ -17,13 +17,13 @@ class VolumetricDropout(Module):
             assert input.dim() == 5
             self.noise.resize_(input.size(0), input.size(1), 1, 1, 1)
 
-            self.noise.bernoulli_(1 -self.p)
+            self.noise.bernoulli_(1 - self.p)
             # We expand the random dropouts to the entire feature map because the
             # features are likely correlated accross the map and so the dropout
             # should also be correlated.
             self.output.mul_(self.noise.expandAs(input))
         else:
-            self.output.mul_(1 -self.p)
+            self.output.mul_(1 - self.p)
 
         return self.output
 

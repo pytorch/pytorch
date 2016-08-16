@@ -55,7 +55,7 @@ def small_3d_positive(t):
 
 
 def small_3d_unique(t):
-    return t(S, S, S).copy_(torch.range(1, S *S *S))
+    return t(S, S, S).copy_(torch.range(1, S * S * S))
 
 
 def new_t(*sizes):

@@ -20,8 +20,8 @@ class Dropout(Module):
 
         if self.p > 0 and self.train:
             self.noise.resizeAs_(input)
-            self.noise.bernoulli_(1 -self.p)
-            self.noise.div_(1 -self.p)
+            self.noise.bernoulli_(1 - self.p)
+            self.noise.div_(1 - self.p)
             self.output.mul_(self.noise)
 
         return self.output

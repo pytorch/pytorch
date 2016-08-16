@@ -23,7 +23,7 @@ class Reshape(Module):
         self.batchsize.resize_(self.size.size() + 1)
         for i, s in enumerate(self.size):
             self.nelement *= s
-            self.batchsize[i +1] = self.size[i]
+            self.batchsize[i + 1] = self.size[i]
 
         self._input = None
         self._gradOutput = None

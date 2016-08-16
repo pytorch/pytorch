@@ -32,10 +32,10 @@ class SpatialSubtractiveNormalization(Module):
         self.kernel.div_(self.kernel.sum() * self.nInputPlane)
 
         # padding values
-        padH = int(math.floor(self.kernel.size(0) /2))
+        padH = int(math.floor(self.kernel.size(0) / 2))
         padW = padH
         if kdim == 2:
-            padW = int(math.floor(self.kernel.size(1) /2))
+            padW = int(math.floor(self.kernel.size(1) / 2))
 
         # create convolutional mean extractor
         self.meanestimator = Sequential()
@@ -75,7 +75,7 @@ class SpatialSubtractiveNormalization(Module):
     def updateOutput(self, input):
         # compute side coefficients
         dim = input.dim()
-        if input.dim() + 1 != self.coef.dim() or (input.size(dim -1) != self.coef.size(dim -1)) or (input.size(dim -2) != self.coef.size(dim -2)):
+        if input.dim() + 1 != self.coef.dim() or (input.size(dim - 1) != self.coef.size(dim - 1)) or (input.size(dim - 2) != self.coef.size(dim - 2)):
             self.ones = self.ones or input.new()
             self._coef = self._coef or self.coef.new()
 

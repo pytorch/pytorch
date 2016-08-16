@@ -44,7 +44,7 @@ class SpatialCrossMapLRN(Module):
             inputSquare = self.output
             inputSquare.pow(input, 2)
 
-            prePad = int((self.size - 1) /2 + 1)
+            prePad = int((self.size - 1) / 2 + 1)
             prePadCrop = channels if prePad > channels else prePad
 
             scaleFirst = self.scale.select(1, 0)
@@ -112,9 +112,9 @@ class SpatialCrossMapLRN(Module):
             for n in range(batchSize):
                 paddedRatioCenter.mul_(gradOutput[n], self.output[n])
                 paddedRatioCenter.div_(self.scale[n])
-                self.accumRatio.sum(self.paddedRatio.narrow(0, 0, self.size -1), 0)
+                self.accumRatio.sum(self.paddedRatio.narrow(0, 0, self.size - 1), 0)
                 for c in range(channels):
-                    self.accumRatio.add_(self.paddedRatio[c +self.size -1])
+                    self.accumRatio.add_(self.paddedRatio[c + self.size - 1])
                     self.gradInput[n][c].addcmul_(-cacheRatioValue, input[n][c], self.accumRatio)
                     self.accumRatio.add_(-1, self.paddedRatio[c])
 

@@ -25,7 +25,7 @@ class Linear(Module):
         if stdv is not None:
             stdv = stdv * math.sqrt(3)
         else:
-            stdv = 1. /math.sqrt(self.weight.size(1))
+            stdv = 1. / math.sqrt(self.weight.size(1))
 
         self.weight.uniform_(-stdv, stdv)
         if self.bias is not None:

@@ -96,8 +96,8 @@ class _TensorBase(object):
         last_split_size = split_size - (split_size * num_splits - dim_size)
 
         def get_split_size(i):
-            return split_size if i < num_splits -1 else last_split_size
-        return [self.narrow(int(dim), int(i *split_size), int(get_split_size(i))) for i
+            return split_size if i < num_splits - 1 else last_split_size
+        return [self.narrow(int(dim), int(i * split_size), int(get_split_size(i))) for i
                 in torch._pyrange(0, num_splits)]
 
     def chunk(self, n_chunks, dim=0):
@@ -188,7 +188,7 @@ class _TensorBase(object):
 
         xtensor = src.new().set_(src)
         xsize = xtensor.size().tolist()
-        for i in torch._pyrange(len(repeats) -src.dim()):
+        for i in torch._pyrange(len(repeats) - src.dim()):
             xsize = [1] + xsize
 
         size = torch.LongStorage([a * b for a, b in zip(xsize, repeats)])
@@ -197,7 +197,7 @@ class _TensorBase(object):
         urtensor = result.new(result)
         for i in torch._pyrange(xtensor.dim()):
             urtensor = urtensor.unfold(i, xtensor.size(i), xtensor.size(i))
-        for i in torch._pyrange(urtensor.dim() -xtensor.dim()):
+        for i in torch._pyrange(urtensor.dim() - xtensor.dim()):
             xsize = [1] + xsize
         xtensor.resize_(torch.LongStorage(xsize))
         xxtensor = xtensor.expandAs(urtensor)

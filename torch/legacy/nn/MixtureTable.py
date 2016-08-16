@@ -40,7 +40,7 @@ class MixtureTable(Module):
 
             expertInput = expertInputs[0]
             if self.batchSize != batchSize:
-                self.size.resize_(expertInput.dim() +1).fill_(1)
+                self.size.resize_(expertInput.dim() + 1).fill_(1)
                 if self.dimG > 0:
                     self.size[0] = gaterInput.size(0)
 
@@ -133,7 +133,7 @@ class MixtureTable(Module):
             else:
                 self._expertView2 = expert.view(gaterInput.size(0), gaterInput.size(1), -1)
 
-            torch.sum(gaterGradInput, self._expertView2, self.dimG +1)
+            torch.sum(gaterGradInput, self._expertView2, self.dimG + 1)
             gaterGradInput.resizeAs_(gaterInput)
 
             # expert updateGradInput

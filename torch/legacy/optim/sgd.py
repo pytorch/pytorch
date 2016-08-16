@@ -63,7 +63,7 @@ def sgd(opfunc, x, config, state=None):
         if 'dfdx' not in state:
             state['dfdx'] = torch.Tensor().typeAs(dfdx).resizeAs_(dfdx).copy_(dfdx)
         else:
-            state['dfdx'].mul_(mom).add_(1 -damp, dfdx)
+            state['dfdx'].mul_(mom).add_(1 - damp, dfdx)
 
         if nesterov:
             dfdx.add_(mom, state['dfdx'])
