@@ -190,12 +190,12 @@ class VolumetricFullConvolution(Module):
         s = super(VolumetricFullConvolution, self).__repr__()
         s += '({} -> {}, {}x{}x{}'.format(self.nInputPlane, self.nOutputPlane, self.kT, self.kW, self.kH)
         if self.dT != 1 or self.dW != 1 or self.dH != 1 or \
-            self.padT != 0 or self.padW != 0 or self.padH != 0 or \
-            self.adjT != 0 or self.adjW != 0 or self.adjH != 0:
+                self.padT != 0 or self.padW != 0 or self.padH != 0 or \
+                self.adjT != 0 or self.adjW != 0 or self.adjH != 0:
             s += ', {}, {}, {}'.format(self.dT, self.dW, self.dH)
 
         if self.padT != 0 or self.padW != 0 or self.padH != 0 or \
-            self.adjT != 0 or self.adjW != 0 or self.adjH != 0:
+                self.adjT != 0 or self.adjW != 0 or self.adjH != 0:
             s += ', {}, {}, {}'.format(self.padT, self.padW, self.padH)
 
         if self.adjT != 0 or self.adjW != 0 or self.adjH != 0:
