@@ -18,7 +18,7 @@ EXP_PRECISION = 1e-4
 
 class TestCaseBase(object):
     def __init__(self, constructor, constructor_args=tuple(), input_size=None,
-            input=None, desc='', reference_fn=None, fullname=None, **kwargs):
+                 input=None, desc='', reference_fn=None, fullname=None, **kwargs):
         if input_size is None and input is None:
             raise RuntimeError("Specify either an input tensor, or it's size!")
         self.constructor = constructor
@@ -153,7 +153,7 @@ class CriterionTestCase(TestCaseBase):
         if self.reference_fn is not None:
             out = module.forward(input, self.target)
             expected_out = self.reference_fn(module, test_case._clone_input(input),
-                    test_case._clone_input(self.target))
+                                             test_case._clone_input(self.target))
             test_case.assertEqual(out, expected_out)
 
     def test_cuda(self, test_case):
@@ -877,8 +877,8 @@ def build_spatial_unpooling_net():
 
 simple_tests.append(
         SimpleTestCase(build_spatial_unpooling_net,
-            input_size=(1, 3, 10, 10),
-            desc='SpatialMaxUnpooling')
+                       input_size=(1, 3, 10, 10),
+                       desc='SpatialMaxUnpooling')
         )
 
 
@@ -889,8 +889,8 @@ def build_volumetric_unpooling_net():
 
 simple_tests.append(
         SimpleTestCase(build_volumetric_unpooling_net,
-            input_size=(1, 3, 10, 10),
-            desc='VolumetricMaxUnpooling')
+                       input_size=(1, 3, 10, 10),
+                       desc='VolumetricMaxUnpooling')
         )
 
 
@@ -1365,7 +1365,7 @@ class TestNN(TestCase):
         self.assertEqual(input.abs().sum() * weight, m.loss)
 
         true_grad = (input.gt(0).typeAs(grad) +
-            input.lt(0).typeAs(grad).mul_(-1)).mul_(weight)
+                     input.lt(0).typeAs(grad).mul_(-1)).mul_(weight)
         self.assertEqual(true_grad, grad)
 
     def test_MaskedSelect(self):

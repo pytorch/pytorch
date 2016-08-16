@@ -697,7 +697,7 @@ class TestTorch(TestCase):
                 for j in range(n_sample):
                     sample_idx = sample_indices[i, j]
                     self.assertNotEqual(sample_idx, n_col - 1,
-                            "sampled an index with zero probability")
+                                        "sampled an index with zero probability")
                     self.assertNotIn(sample_idx, row_samples, "sampled an index twice")
                     row_samples[sample_idx] = True
 
@@ -769,7 +769,7 @@ class TestTorch(TestCase):
         are_ordered = True
         for j, k in product(range(SIZE), range(1, SIZE)):
             self.assertTrue(check_order(mxx[j][k - 1], mxx[j][k]),
-                    'torch.sort ({}) values unordered for {}'.format(order, task))
+                            'torch.sort ({}) values unordered for {}'.format(order, task))
 
         seen = set()
         indicesCorrect = True
@@ -778,7 +778,7 @@ class TestTorch(TestCase):
             seen.clear()
             for j in range(size):
                 self.assertEqual(x[k][ixx[k][j]], mxx[k][j],
-                        'torch.sort ({}) indices wrong for {}'.format(order, task))
+                                 'torch.sort ({}) indices wrong for {}'.format(order, task))
                 seen.add(ixx[k][j])
             self.assertEqual(len(seen), size)
 
@@ -1088,13 +1088,13 @@ class TestTorch(TestCase):
     @unittest.skipIf(not hasattr(torch, 'gesv'), 'Compiled without gesv')
     def test_gesv(self):
         a = torch.Tensor(((6.80, -2.11, 5.66, 5.97, 8.23),
-                        (-6.05, -3.30, 5.36, -4.44, 1.08),
-                        (-0.45, 2.58, -2.70, 0.27, 9.04),
-                        (8.32, 2.71, 4.35, -7.17, 2.14),
-                        (-9.67, -5.14, -7.26, 6.08, -6.87))).t()
+                          (-6.05, -3.30, 5.36, -4.44, 1.08),
+                          (-0.45, 2.58, -2.70, 0.27, 9.04),
+                          (8.32, 2.71, 4.35, -7.17, 2.14),
+                          (-9.67, -5.14, -7.26, 6.08, -6.87))).t()
         b = torch.Tensor(((4.02, 6.19, -8.22, -7.57, -3.03),
-                        (-1.56, 4.00, -8.67, 1.75, 2.86),
-                        (9.81, -4.09, -4.57, -8.61, 8.99))).t()
+                          (-1.56, 4.00, -8.67, 1.75, 2.86),
+                          (9.81, -4.09, -4.57, -8.61, 8.99))).t()
 
         res1 = torch.gesv(b, a)
         self.assertLessEqual(b.dist(a * res1), 1e-12)
@@ -1119,13 +1119,13 @@ class TestTorch(TestCase):
     @unittest.skipIf(not hasattr(torch, 'trtrs'), 'Compiled without trtrs')
     def test_trtrs(self):
         a = torch.Tensor(((6.80, -2.11, 5.66, 5.97, 8.23),
-                        (-6.05, -3.30, 5.36, -4.44, 1.08),
-                        (-0.45, 2.58, -2.70, 0.27, 9.04),
-                        (8.32, 2.71, 4.35, -7.17, 2.14),
-                        (-9.67, -5.14, -7.26, 6.08, -6.87))).t()
+                          (-6.05, -3.30, 5.36, -4.44, 1.08),
+                          (-0.45, 2.58, -2.70, 0.27, 9.04),
+                          (8.32, 2.71, 4.35, -7.17, 2.14),
+                          (-9.67, -5.14, -7.26, 6.08, -6.87))).t()
         b = torch.Tensor(((4.02, 6.19, -8.22, -7.57, -3.03),
-                        (-1.56, 4.00, -8.67, 1.75, 2.86),
-                        (9.81, -4.09, -4.57, -8.61, 8.99))).t()
+                          (-1.56, 4.00, -8.67, 1.75, 2.86),
+                          (9.81, -4.09, -4.57, -8.61, 8.99))).t()
 
         U = torch.triu(a)
         L = torch.tril(a)
@@ -1199,41 +1199,41 @@ class TestTorch(TestCase):
         # basic test
         expectedNorm = 0
         a = torch.Tensor(((1.44, -9.96, -7.55, 8.34),
-                        (-7.84, -0.28, 3.24, 8.09),
-                        (-4.39, -3.24, 6.27, 5.28),
-                        (4.53, 3.83, -6.64, 2.06))).t()
+                          (-7.84, -0.28, 3.24, 8.09),
+                          (-4.39, -3.24, 6.27, 5.28),
+                          (4.53, 3.83, -6.64, 2.06))).t()
         b = torch.Tensor(((8.58, 8.26, 8.48, -5.28),
-                        (9.35, -4.43, -0.70, -0.26))).t()
+                          (9.35, -4.43, -0.70, -0.26))).t()
         _test(a, b, expectedNorm)
 
         # test overderemined
         expectedNorm = 17.390200628863
         a = torch.Tensor(((1.44, -9.96, -7.55, 8.34, 7.08, -5.45),
-                        (-7.84, -0.28, 3.24, 8.09, 2.52, -5.70),
-                        (-4.39, -3.24, 6.27, 5.28, 0.74, -1.19),
-                        (4.53, 3.83, -6.64, 2.06, -2.47, 4.70))).t()
+                          (-7.84, -0.28, 3.24, 8.09, 2.52, -5.70),
+                          (-4.39, -3.24, 6.27, 5.28, 0.74, -1.19),
+                          (4.53, 3.83, -6.64, 2.06, -2.47, 4.70))).t()
         b = torch.Tensor(((8.58, 8.26, 8.48, -5.28, 5.72, 8.93),
-                        (9.35, -4.43, -0.70, -0.26, -7.36, -2.52))).t()
+                          (9.35, -4.43, -0.70, -0.26, -7.36, -2.52))).t()
         _test(a, b, expectedNorm)
 
         # test underdetermined
         expectedNorm = 0
         a = torch.Tensor(((1.44, -9.96, -7.55),
-                        (-7.84, -0.28, 3.24),
-                        (-4.39, -3.24, 6.27),
-                        (4.53, 3.83, -6.64))).t()
+                          (-7.84, -0.28, 3.24),
+                          (-4.39, -3.24, 6.27),
+                          (4.53, 3.83, -6.64))).t()
         b = torch.Tensor(((8.58, 8.26, 8.48),
-                        (9.35, -4.43, -0.70))).t()
+                          (9.35, -4.43, -0.70))).t()
         _test(a, b, expectedNorm)
 
         # test reuse
         expectedNorm = 0
         a = torch.Tensor(((1.44, -9.96, -7.55, 8.34),
-                        (-7.84, -0.28, 3.24, 8.09),
-                        (-4.39, -3.24, 6.27, 5.28),
-                        (4.53, 3.83, -6.64, 2.06))).t()
+                          (-7.84, -0.28, 3.24, 8.09),
+                          (-4.39, -3.24, 6.27, 5.28),
+                          (4.53, 3.83, -6.64, 2.06))).t()
         b = torch.Tensor(((8.58, 8.26, 8.48, -5.28),
-                        (9.35, -4.43, -0.70, -0.26))).t()
+                          (9.35, -4.43, -0.70, -0.26))).t()
         ta = torch.Tensor()
         tb = torch.Tensor()
         torch.gels(tb, ta, b, a)
@@ -1246,10 +1246,10 @@ class TestTorch(TestCase):
     @unittest.skipIf(not hasattr(torch, 'eig'), 'Compiled without eig')
     def test_eig(self):
         a = torch.Tensor(((1.96, 0.00, 0.00, 0.00, 0.00),
-                        (-6.49, 3.80, 0.00, 0.00, 0.00),
-                        (-0.47, -6.39, 4.17, 0.00, 0.00),
-                        (-7.20, 1.50, -1.51, 5.70, 0.00),
-                        (-0.65, -6.34, 2.67, 1.80, -7.10))).t().contiguous()
+                          (-6.49, 3.80, 0.00, 0.00, 0.00),
+                          (-0.47, -6.39, 4.17, 0.00, 0.00),
+                          (-7.20, 1.50, -1.51, 5.70, 0.00),
+                          (-0.65, -6.34, 2.67, 1.80, -7.10))).t().contiguous()
         e = torch.eig(a)
         ee, vv = torch.eig(a, 'V')
         te = torch.Tensor()
@@ -1319,10 +1319,10 @@ class TestTorch(TestCase):
     @unittest.skipIf(not hasattr(torch, 'svd'), 'Compiled without svd')
     def test_svd(self):
         a = torch.Tensor(((8.79, 6.11, -9.15, 9.57, -3.49, 9.84),
-                        (9.93, 6.91, -7.93, 1.64, 4.02, 0.15),
-                        (9.83, 5.04, 4.86, 8.83, 9.80, -8.99),
-                        (5.45, -0.27, 4.85, 0.74, 10.00, -6.02),
-                        (3.16, 7.98, 3.01, 5.80, 4.27, -5.31))).t().clone()
+                          (9.93, 6.91, -7.93, 1.64, 4.02, 0.15),
+                          (9.83, 5.04, 4.86, 8.83, 9.80, -8.99),
+                          (5.45, -0.27, 4.85, 0.74, 10.00, -6.02),
+                          (3.16, 7.98, 3.01, 5.80, 4.27, -5.31))).t().clone()
         u, s, v = torch.svd(a)
         uu = torch.Tensor()
         ss = torch.Tensor()
@@ -1421,11 +1421,11 @@ class TestTorch(TestCase):
     @unittest.skip("Not implemented yet")
     def test_conv3(self):
         x = torch.rand(math.floor(torch.uniform(20, 40)),
-                math.floor(torch.uniform(20, 40)),
-                math.floor(torch.uniform(20, 40)))
+                       math.floor(torch.uniform(20, 40)),
+                       math.floor(torch.uniform(20, 40)))
         k = torch.rand(math.floor(torch.uniform(5, 10)),
-                math.floor(torch.uniform(5, 10)),
-                math.floor(torch.uniform(5, 10)))
+                       math.floor(torch.uniform(5, 10)),
+                       math.floor(torch.uniform(5, 10)))
         imvc = torch.conv3(x, k)
         imvc2 = torch.conv3(x, k, 'V')
         imfc = torch.conv3(x, k, 'F')
@@ -1560,9 +1560,9 @@ class TestTorch(TestCase):
         torch.manualSeed(123)
         reseeded = torch.randn(odd_number)
         self.assertEqual(midstream, repeat_midstream, 0,
-                'getRNGState/setRNGState not generating same sequence of normally distributed numbers')
+                         'getRNGState/setRNGState not generating same sequence of normally distributed numbers')
         self.assertEqual(seeded, reseeded, 0,
-                'repeated calls to manualSeed not generating same sequence of normally distributed numbers')
+                         'repeated calls to manualSeed not generating same sequence of normally distributed numbers')
 
     @unittest.skip("Not implemented yet")
     def test_cholesky(self):
@@ -1587,13 +1587,13 @@ class TestTorch(TestCase):
     @unittest.skipIf(not hasattr(torch, 'potrs'), 'Compiled without potrs')
     def test_potrs(self):
         a = torch.Tensor(((6.80, -2.11, 5.66, 5.97, 8.23),
-                        (-6.05, -3.30, 5.36, -4.44, 1.08),
-                        (-0.45, 2.58, -2.70, 0.27, 9.04),
-                        (8.32, 2.71, 4.35, -7.17, 2.14),
-                        (-9.67, -5.14, -7.26, 6.08, -6.87))).t()
+                          (-6.05, -3.30, 5.36, -4.44, 1.08),
+                          (-0.45, 2.58, -2.70, 0.27, 9.04),
+                          (8.32, 2.71, 4.35, -7.17, 2.14),
+                          (-9.67, -5.14, -7.26, 6.08, -6.87))).t()
         b = torch.Tensor(((4.02, 6.19, -8.22, -7.57, -3.03),
-                        (-1.56, 4.00, -8.67, 1.75, 2.86),
-                        (9.81, -4.09, -4.57, -8.61, 8.99))).t()
+                          (-1.56, 4.00, -8.67, 1.75, 2.86),
+                          (9.81, -4.09, -4.57, -8.61, 8.99))).t()
 
         # make sure 'a' is symmetric PSD
         a = a * a.t()
@@ -1611,10 +1611,10 @@ class TestTorch(TestCase):
     @unittest.skipIf(not hasattr(torch, 'potri'), 'Compiled without potri')
     def tset_potri(self):
         a = torch.Tensor(((6.80, -2.11, 5.66, 5.97, 8.23),
-                        (-6.05, -3.30, 5.36, -4.44, 1.08),
-                        (-0.45, 2.58, -2.70, 0.27, 9.04),
-                        (8.32, 2.71, 4.35, -7.17, 2.14),
-                        (-9.67, -5.14, -7.26, 6.08, -6.87))).t()
+                          (-6.05, -3.30, 5.36, -4.44, 1.08),
+                          (-0.45, 2.58, -2.70, 0.27, 9.04),
+                          (8.32, 2.71, 4.35, -7.17, 2.14),
+                          (-9.67, -5.14, -7.26, 6.08, -6.87))).t()
 
         # make sure 'a' is symmetric PSD
         a = a * a.t()
@@ -1974,8 +1974,8 @@ class TestTorch(TestCase):
         self.assertTrue(t3.isSetTo(t1), "isSetTo should be symmetric")
         self.assertFalse(t1.isSetTo(t4))
         self.assertFalse(torch.Tensor().isSetTo(torch.Tensor()),
-                "Tensors with no storages should not appear to be set "
-                "to each other")
+                         "Tensors with no storages should not appear to be set "
+                         "to each other")
 
     def test_equal(self):
         # Contiguous, 1D

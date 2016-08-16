@@ -122,9 +122,9 @@ class _TensorBase(object):
 
         if reduce(lambda a, b: a * b, sizes) != self.nElement():
             raise RuntimeError('Invalid size for view. Input size: ' +
-                    'x'.join(map(lambda v: str(v), self.size())) +
-                    ', output size: ' +
-                    'x'.join(map(lambda v: str(v), sizes)) + '.')
+                               'x'.join(map(lambda v: str(v), self.size())) +
+                               ', output size: ' +
+                               'x'.join(map(lambda v: str(v), sizes)) + '.')
 
         assert self.isContiguous(), "expecting a contiguous tensor"
         dst.set_(self.storage(), self.storageOffset(), sizes)

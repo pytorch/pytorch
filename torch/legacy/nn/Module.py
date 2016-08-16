@@ -157,8 +157,8 @@ class Module(object):
             sortedStride = sortedStride.narrow(0, 0, nRealDim).clone()
             sortedSize = sortedSize.narrow(0, 0, nRealDim).clone()
             t = tensor.new().set_(tensor.storage(), 0,
-                                 sortedSize.storage(),
-                                 sortedStride.storage())
+                                  sortedSize.storage(),
+                                  sortedStride.storage())
             return t.isContiguous()
 
         if not parameters:
@@ -225,9 +225,9 @@ class Module(object):
         # 7. fix up the parameter tensors to point at the flattened parameters
         for param, meta in zip(parameters, parameterMeta):
             param.set_(flatParameters.storage(),
-                      meta['storageOffset'],
-                      meta['size'],
-                      meta['stride'])
+                       meta['storageOffset'],
+                       meta['size'],
+                       meta['stride'])
 
         return flatParameters
 

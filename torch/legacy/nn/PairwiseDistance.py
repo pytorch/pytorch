@@ -56,7 +56,7 @@ class PairwiseDistance(Module):
             self.outExpand.add_(1e-6)  # Prevent divide by zero errors
             self.outExpand.pow_(-(self.norm - 1))
             self.gradInput[0].mul_(self.outExpand.expand(self.gradInput[0].size(0),
-                self.gradInput[0].size(1)))
+                                                         self.gradInput[0].size(1)))
 
         self.grad = self.grad or gradOutput.new()
         self.ones = self.ones or gradOutput.new()

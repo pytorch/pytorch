@@ -84,10 +84,10 @@ class Bilinear(Module):
         #: first slice of weight tensor (k = 1)
         self.gradInput[0].addmm_(input[1], self.weight[0].t())
         self.gradInput[0].mul_(gradOutput.narrow(1, 0, 1).expand(self.gradInput[0].size(0),
-            self.gradInput[0].size(1)))
+                                                                 self.gradInput[0].size(1)))
         self.gradInput[1].addmm_(input[0], self.weight[0])
         self.gradInput[1].mul_(gradOutput.narrow(1, 0, 1).expand(self.gradInput[1].size(0),
-            self.gradInput[1].size(1)))
+                                                                 self.gradInput[1].size(1)))
 
         #: remaining slices of weight tensor
         if self.weight.size(0) > 1:
@@ -97,12 +97,12 @@ class Bilinear(Module):
             for k in range(1, self.weight.size(0)):
                 torch.mm(self.buff1, input[1], self.weight[k].t())
                 self.buff1.mul_(gradOutput.narrow(1, k, 1).expand(self.gradInput[0].size(0),
-                    self.gradInput[0].size(1)))
+                                                                  self.gradInput[0].size(1)))
                 self.gradInput[0].add_(self.buff1)
 
                 torch.mm(self.buff2, input[0], self.weight[k])
                 self.buff2.mul_(gradOutput.narrow(1, k, 1).expand(self.gradInput[1].size(0),
-                    self.gradInput[1].size(1)))
+                                                                  self.gradInput[1].size(1)))
                 self.gradInput[1].add_(self.buff2)
 
         return self.gradInput

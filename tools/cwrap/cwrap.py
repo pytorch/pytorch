@@ -183,14 +183,14 @@ class cwrap(object):
 
         # Generate checks
         arg_checks = self.map_selected_arguments('get_type_check',
-                'process_single_check', option, checked_args)
+                                                 'process_single_check', option, checked_args)
         arg_checks = ' &&\n          '.join(arg_checks)
         for plugin in self.plugins:
             arg_checks = plugin.process_all_checks(arg_checks, option)
 
         # Generate unpacks
         arg_unpack = self.map_selected_arguments('get_type_unpack',
-                'process_single_unpack', option, option['arguments'])
+                                                 'process_single_unpack', option, option['arguments'])
         arg_unpack = ', '.join(arg_unpack)
         for plugin in self.plugins:
             arg_unpack = plugin.process_all_unpacks(arg_unpack, option)

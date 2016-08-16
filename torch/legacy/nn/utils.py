@@ -60,7 +60,7 @@ def recursiveResizeAs(t1, t2):
         t1.resizeAs_(t2)
     else:
         raise RuntimeError("Expecting nested tensors or tables. Got " +
-                type(t1).__name__ + " and " + type(t2).__name__ + "instead")
+                           type(t1).__name__ + " and " + type(t2).__name__ + "instead")
     return t1, t2
 
 
@@ -71,7 +71,7 @@ def recursiveFill(t2, val):
         t2.fill_(val)
     else:
         raise RuntimeError("expecting tensor or table thereof. Got " +
-            type(t2).__name__ + " instead")
+                           type(t2).__name__ + " instead")
     return t2
 
 
@@ -87,7 +87,7 @@ def recursiveAdd(t1, val=1, t2=None):
         t1.add_(val, t2)
     else:
         raise RuntimeError("expecting nested tensors or tables. Got " +
-                type(t1).__name__ + " and " + type(t2).__name__ + " instead")
+                           type(t1).__name__ + " and " + type(t2).__name__ + " instead")
     return t1, t2
 
 
@@ -101,7 +101,7 @@ def recursiveCopy(t1, t2):
         t1.resizeAs_(t2).copy_(t2)
     else:
         raise RuntimeError("expecting nested tensors or tables. Got " +
-                type(t1).__name__ + " and " + type(t2).__name__ + " instead")
+                           type(t1).__name__ + " and " + type(t2).__name__ + " instead")
     return t1, t2
 
 

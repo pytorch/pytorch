@@ -6,10 +6,10 @@ from .Module import Module
 class VolumetricFullConvolution(Module):
 
     def __init__(self, nInputPlane, nOutputPlane,
-            kT, kW, kH,                 # kernel size
-            dT=1, dW=1, dH=1,           # stride
-            padT=0, padW=0, padH=0,     # padding
-            adjT=0, adjW=0, adjH=0):    # extra output adjustment
+                 kT, kW, kH,                 # kernel size
+                 dT=1, dW=1, dH=1,           # stride
+                 padT=0, padW=0, padH=0,     # padding
+                 adjT=0, adjW=0, adjH=0):    # extra output adjustment
         super(VolumetricFullConvolution, self).__init__()
 
         self.nInputPlane = nInputPlane
@@ -29,7 +29,7 @@ class VolumetricFullConvolution(Module):
 
         if self.adjW > self.dW - 1 or self.adjH > self.dH - 1 or self.adjT > self.dT - 1:
             raise RuntimeError('adjW, adjH and adjT must be smaller than self.dW - 1, '
-                    ' self.dH - 1 and self.dT - 1 respectively')
+                               ' self.dH - 1 and self.dT - 1 respectively')
 
         self.weight = torch.Tensor(nInputPlane, nOutputPlane, kT, kH, kW)
         self.gradWeight = torch.Tensor(nInputPlane, nOutputPlane, kT, kH, kW)

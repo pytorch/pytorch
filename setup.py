@@ -165,39 +165,39 @@ if DEBUG:
 extensions = []
 
 C = Extension("torch._C",
-    libraries=main_libraries,
-    sources=main_sources,
-    language='c++',
-    extra_compile_args=extra_compile_args,
-    include_dirs=include_dirs,
-    extra_link_args=extra_link_args + ['-Wl,-rpath,$ORIGIN/lib'],
+              libraries=main_libraries,
+              sources=main_sources,
+              language='c++',
+              extra_compile_args=extra_compile_args,
+              include_dirs=include_dirs,
+              extra_link_args=extra_link_args + ['-Wl,-rpath,$ORIGIN/lib'],
 )
 extensions.append(C)
 
 THNN = Extension("torch._thnn._THNN",
-    libraries=['TH', 'THNN'],
-    sources=['torch/csrc/nn/THNN.cpp'],
-    language='c++',
-    extra_compile_args=extra_compile_args,
-    include_dirs=include_dirs,
-    extra_link_args=extra_link_args + ['-Wl,-rpath,$ORIGIN/../lib'],
+                 libraries=['TH', 'THNN'],
+                 sources=['torch/csrc/nn/THNN.cpp'],
+                 language='c++',
+                 extra_compile_args=extra_compile_args,
+                 include_dirs=include_dirs,
+                 extra_link_args=extra_link_args + ['-Wl,-rpath,$ORIGIN/../lib'],
 )
 extensions.append(THNN)
 
 if WITH_CUDA:
     THCUNN = Extension("torch._thnn._THCUNN",
-        libraries=['TH', 'THC', 'THCUNN'],
-        sources=['torch/csrc/nn/THCUNN.cpp'],
-        language='c++',
-        extra_compile_args=extra_compile_args,
-        include_dirs=include_dirs,
-        extra_link_args=extra_link_args + ['-Wl,-rpath,$ORIGIN/../lib'],
+                       libraries=['TH', 'THC', 'THCUNN'],
+                       sources=['torch/csrc/nn/THCUNN.cpp'],
+                       language='c++',
+                       extra_compile_args=extra_compile_args,
+                       include_dirs=include_dirs,
+                       extra_link_args=extra_link_args + ['-Wl,-rpath,$ORIGIN/../lib'],
     )
     extensions.append(THCUNN)
 
 setup(name="torch", version="0.1",
-    ext_modules=extensions,
-    cmdclass = {
+      ext_modules=extensions,
+      cmdclass = {
         'build': build,
         'build_ext': build_ext,
         'build_deps': build_deps,
