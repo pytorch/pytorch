@@ -51,5 +51,5 @@ class VolumetricReplicationPadding(Module):
         s += '({}, {}, {}, {}, {}, {})'.format(self.pleft, self.pright,
                                                self.ptop, self.pbottom,
                                                self.pfront, self.pback
-        )
+                                               )
         return s

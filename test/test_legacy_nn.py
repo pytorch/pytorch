@@ -377,12 +377,12 @@ simple_tests = [
                     input_size=[(10, 4), (10, 4)],
                     reference_fn=lambda _, i: torch.Tensor(list(
                         a.dot(b) for a, b in zip(i[0], i[1])))
-                    ),
+                   ),
     SimpleTestCase(nn.CosineDistance,
                     input_size=[(10, 4), (10, 4)],
                     reference_fn=lambda _, i: torch.Tensor(list(
                         a.dot(b) / (a.norm(2) * b.norm(2)) for a, b in zip(i[0], i[1])))
-                    ),
+                   ),
     SimpleTestCase(nn.JoinTable,
                     (0,),
                     input_size=[(10, 4), (10, 4)],
@@ -742,11 +742,11 @@ simple_tests = [
                         target=torch.randn(2, 3, 4),
                         reference_fn=lambda _, i, t: 1. / i.numel() * \
                             sum((a - b).abs().sum() for a, b in zip(i, t))
-                    ),
+                      ),
     CriterionTestCase(nn.BCECriterion,
                         input=torch.rand(15, 10).clamp_(0, 1),
                         target=torch.randn(15, 10).gt(0).double()
-                    ),
+                      ),
     CriterionTestCase(nn.BCECriterion,
                         (torch.rand(10),),
                         input=torch.rand(15, 10).clamp_(0, 1),

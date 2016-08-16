@@ -171,7 +171,7 @@ C = Extension("torch._C",
               extra_compile_args=extra_compile_args,
               include_dirs=include_dirs,
               extra_link_args=extra_link_args + ['-Wl,-rpath,$ORIGIN/lib'],
-)
+              )
 extensions.append(C)
 
 THNN = Extension("torch._thnn._THNN",
@@ -181,7 +181,7 @@ THNN = Extension("torch._thnn._THNN",
                  extra_compile_args=extra_compile_args,
                  include_dirs=include_dirs,
                  extra_link_args=extra_link_args + ['-Wl,-rpath,$ORIGIN/../lib'],
-)
+                 )
 extensions.append(THNN)
 
 if WITH_CUDA:
@@ -192,7 +192,7 @@ if WITH_CUDA:
                        extra_compile_args=extra_compile_args,
                        include_dirs=include_dirs,
                        extra_link_args=extra_link_args + ['-Wl,-rpath,$ORIGIN/../lib'],
-    )
+                       )
     extensions.append(THCUNN)
 
 setup(name="torch", version="0.1",
