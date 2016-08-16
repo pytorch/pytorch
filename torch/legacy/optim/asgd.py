@@ -61,7 +61,7 @@ def asgd(opfunc, x, config, state=None):
     state['tmp'] = state.get('tmp', state['ax'].new().resizeAs_(state['ax']))
     if state['mu_t'] != 1:
         state['tmp'].copy_(x)
-        state['tmp'].add_(-1,state['ax']).mul_(state['mu_t'])
+        state['tmp'].add_(-1, state['ax']).mul_(state['mu_t'])
         state['ax'].add_(state['tmp'])
     else:
         state['ax'].copy_(x)

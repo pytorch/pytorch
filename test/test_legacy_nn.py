@@ -192,7 +192,7 @@ simple_tests = [
     SimpleTestCase(nn.AddConstant,
                     (3.5,),
                     input_size=(3, 5, 4),
-                    reference_fn=lambda _,i: i + 3.5,
+                    reference_fn=lambda _, i: i + 3.5,
                     check_inplace=True),
     SimpleTestCase(nn.CMul,
                     (5, 6),
@@ -204,46 +204,46 @@ simple_tests = [
                     desc='3D_single_example'),
     SimpleTestCase(nn.CMul,
                     (1, 5),
-                    input=torch.randn(10, 3, 5)[:,1],
+                    input=torch.randn(10, 3, 5)[:, 1],
                     desc='3D_noncontiguous'),
     SimpleTestCase(nn.Exp,
                     input_size=(2, 3, 4),
-                    reference_fn=lambda _,i: i.exp()),
+                    reference_fn=lambda _, i: i.exp()),
     SimpleTestCase(nn.Log,
                     input=torch.rand(2, 3, 2) + 0.1,
-                    reference_fn=lambda _,i: i.log()),
+                    reference_fn=lambda _, i: i.log()),
     SimpleTestCase(nn.LogSigmoid,
                     input_size=(2, 3, 4),
-                    reference_fn=lambda _,i: i.sigmoid().log()),
+                    reference_fn=lambda _, i: i.sigmoid().log()),
     SimpleTestCase(nn.LogSoftMax,
                     input_size=(10, 20),
-                    reference_fn=lambda _,i: torch.exp(i).div_(torch.exp(i).sum(1).expand(10, 20)).log_()),
+                    reference_fn=lambda _, i: torch.exp(i).div_(torch.exp(i).sum(1).expand(10, 20)).log_()),
     SimpleTestCase(nn.SoftMax,
                     input_size=(10, 20),
-                    reference_fn=lambda _,i: torch.exp(i).div(torch.exp(i).sum(1).expand(10, 20))),
+                    reference_fn=lambda _, i: torch.exp(i).div(torch.exp(i).sum(1).expand(10, 20))),
     SimpleTestCase(nn.SpatialSoftMax,
                     input_size=(1, 3, 10, 20),
-                    reference_fn=lambda _,i: torch.exp(i).div(torch.exp(i).sum(1).expandAs(i))),
+                    reference_fn=lambda _, i: torch.exp(i).div(torch.exp(i).sum(1).expandAs(i))),
     SimpleTestCase(nn.SoftMin,
                     input_size=(10, 20)),
     SimpleTestCase(nn.SoftPlus,
                     input_size=(10, 20),
-                    reference_fn=lambda _,i: torch.log(1 + torch.exp(i))),
+                    reference_fn=lambda _, i: torch.log(1 + torch.exp(i))),
     SimpleTestCase(nn.SoftPlus,
                     (2,),
                     input_size=(10, 20),
-                    reference_fn=lambda _,i: 1. / 2. * torch.log(1 + torch.exp(2 * i)),
+                    reference_fn=lambda _, i: 1. / 2. * torch.log(1 + torch.exp(2 * i)),
                     desc='beta'),
     SimpleTestCase(nn.HardTanh,
                     input_size=(3, 2, 5),
-                    reference_fn=lambda _,i: i.clamp(-1, 1)),
+                    reference_fn=lambda _, i: i.clamp(-1, 1)),
     SimpleTestCase(nn.Clamp,
                     (-2., 5.),
                     input=torch.randn(3, 2, 50) * 6,
-                    reference_fn=lambda _,i: i.clamp(-2, 5)),
+                    reference_fn=lambda _, i: i.clamp(-2, 5)),
     SimpleTestCase(nn.Abs,
                     input_size=(3, 20, 5),
-                    reference_fn=lambda _,i: i.abs()),
+                    reference_fn=lambda _, i: i.abs()),
     SimpleTestCase(nn.ELU,
                     (2.,),
                     input_size=(3, 2, 5),
@@ -265,7 +265,7 @@ simple_tests = [
                     desc='lambda'),
     SimpleTestCase(nn.SoftSign,
                     input_size=(3, 2, 5),
-                    reference_fn=lambda _,i: i.div(1 + torch.abs(i))),
+                    reference_fn=lambda _, i: i.div(1 + torch.abs(i))),
     SimpleTestCase(nn.LeakyReLU,
                     input_size=(3, 2, 5),
                     check_inplace=True),
@@ -300,13 +300,13 @@ simple_tests = [
                     input_size=[(5, 7), (5, 7)]),
     SimpleTestCase(nn.Square,
                     input_size=(10, 2, 4),
-                    reference_fn=lambda _,i: i.mul(i)),
+                    reference_fn=lambda _, i: i.mul(i)),
     SimpleTestCase(nn.Sqrt,
                     input=torch.rand(10, 2, 4)+0.01,
-                    reference_fn=lambda _,i: i.sqrt()),
+                    reference_fn=lambda _, i: i.sqrt()),
     SimpleTestCase(nn.Squeeze,
                     input_size=(2, 1, 1, 4, 5),
-                    reference_fn=lambda _,i: i.squeeze()),
+                    reference_fn=lambda _, i: i.squeeze()),
     # TODO: should squeeze work inplace?
     # SimpleTestCase(nn.Squeeze,
                     # (1,),
@@ -316,45 +316,45 @@ simple_tests = [
     SimpleTestCase(nn.Unsqueeze,
                     (1,),
                     input_size=(2, 4, 5),
-                    reference_fn=lambda _,i: i.view(2, 1, 4, 5)),
+                    reference_fn=lambda _, i: i.view(2, 1, 4, 5)),
     SimpleTestCase(nn.Unsqueeze,
                     (0,),
                     input_size=(2, 4, 5),
-                    reference_fn=lambda _,i: i.view(1, 2, 4, 5),
+                    reference_fn=lambda _, i: i.view(1, 2, 4, 5),
                     desc='fist_dim'),
     SimpleTestCase(nn.Unsqueeze,
                     (3,),
                     input_size=(2, 4, 5),
-                    reference_fn=lambda _,i: i.view(2, 4, 5, 1),
+                    reference_fn=lambda _, i: i.view(2, 4, 5, 1),
                     desc='last_dim'),
     SimpleTestCase(nn.View,
                     (-1, 2, 20),
                     input_size=(2, 2, 4, 5),
-                    reference_fn=lambda _,i: i.view(-1, 2, 20),
+                    reference_fn=lambda _, i: i.view(-1, 2, 20),
                     desc='infer_batch'),
     SimpleTestCase(nn.View,
                     (2, 2, 2, 5),
                     input_size=(2, 4, 5),
-                    reference_fn=lambda _,i: i.view(2, 2, 2, 5),
+                    reference_fn=lambda _, i: i.view(2, 2, 2, 5),
                     desc='split_dim'),
     SimpleTestCase(nn.View,
                     (2, -1, 2, 5),
                     input_size=(2, 4, 5),
-                    reference_fn=lambda _,i: i.view(2, -1, 2, 5),
+                    reference_fn=lambda _, i: i.view(2, -1, 2, 5),
                     desc='infer_middle'),
     SimpleTestCase(nn.Sum,
                     (1,),
                     input_size=(2, 4, 5),
-                    reference_fn=lambda _,i: i.sum(1)),
+                    reference_fn=lambda _, i: i.sum(1)),
     SimpleTestCase(nn.Sum,
                     (1, True),
                     input_size=(2, 4, 5),
-                    reference_fn=lambda _,i: i.sum(1).div(i.size(1)),
+                    reference_fn=lambda _, i: i.sum(1).div(i.size(1)),
                     desc='sizeAverage'),
     SimpleTestCase(nn.Mean,
                     (1,),
                     input_size=(2, 4, 5),
-                    reference_fn=lambda _,i: torch.mean(i, 1)),
+                    reference_fn=lambda _, i: torch.mean(i, 1)),
     SimpleTestCase(nn.BatchNormalization,
                     (10,),
                     input_size=(4, 10),
@@ -372,57 +372,57 @@ simple_tests = [
                     fullname='GradientReversal'),
     SimpleTestCase(nn.Identity,
                     input_size=(4, 3, 2, 4),
-                    reference_fn=lambda _,i: i),
+                    reference_fn=lambda _, i: i),
     SimpleTestCase(nn.DotProduct,
                     input_size=[(10, 4), (10, 4)],
-                    reference_fn=lambda _,i: torch.Tensor(list(
+                    reference_fn=lambda _, i: torch.Tensor(list(
                         a.dot(b) for a, b in zip(i[0], i[1])))
                     ),
     SimpleTestCase(nn.CosineDistance,
                     input_size=[(10, 4), (10, 4)],
-                    reference_fn=lambda _,i: torch.Tensor(list(
+                    reference_fn=lambda _, i: torch.Tensor(list(
                         a.dot(b) / (a.norm(2) * b.norm(2)) for a, b in zip(i[0], i[1])))
                     ),
     SimpleTestCase(nn.JoinTable,
                     (0,),
                     input_size=[(10, 4), (10, 4)],
-                    reference_fn=lambda _,i: torch.cat(i, 0),
+                    reference_fn=lambda _, i: torch.cat(i, 0),
                     desc='first_dim'),
     SimpleTestCase(nn.JoinTable,
                     (2,),
                     input_size=[(2, 4, 2), (2, 4, 2)],
-                    reference_fn=lambda _,i: torch.cat(i, 2),
+                    reference_fn=lambda _, i: torch.cat(i, 2),
                     desc='positive_dim_index'),
     SimpleTestCase(nn.JoinTable,
                     (-1,),
                     input_size=[(2, 4, 2, 4), (2, 4, 2, 4)],
-                    reference_fn=lambda _,i: torch.cat(i, 3),
+                    reference_fn=lambda _, i: torch.cat(i, 3),
                     desc='negative_dim_index'),
     SimpleTestCase(nn.Linear,
-                    (10,8),
+                    (10, 8),
                     input_size=(4, 10),
-                    reference_fn=lambda m,i: i * m.weight.t() + m.bias.view(1, -1).expand(4, 8)),
+                    reference_fn=lambda m, i: i * m.weight.t() + m.bias.view(1, -1).expand(4, 8)),
     SimpleTestCase(nn.MM,
                     input_size=[(4, 5, 3), (4, 3, 2)],
-                    reference_fn=lambda _,i: torch.bmm(*i)),
+                    reference_fn=lambda _, i: torch.bmm(*i)),
     SimpleTestCase(nn.MV,
                     input_size=[(4, 5, 3), (4, 3)],
-                    reference_fn=lambda _,i: torch.bmm(i[0], i[1].view(i[1].size(0), i[1].size(1), 1)).squeeze()),
+                    reference_fn=lambda _, i: torch.bmm(i[0], i[1].view(i[1].size(0), i[1].size(1), 1)).squeeze()),
     SimpleTestCase(nn.Max,
                     input_size=(4, 5, 3),
-                    reference_fn=lambda _,i: torch.max(i, 0)[0].squeeze()),
+                    reference_fn=lambda _, i: torch.max(i, 0)[0].squeeze()),
     SimpleTestCase(nn.Max,
                     (1,),
                     input_size=(4, 5, 3),
-                    reference_fn=lambda _,i: torch.max(i, 1)[0].squeeze(),
+                    reference_fn=lambda _, i: torch.max(i, 1)[0].squeeze(),
                     desc='with_dimension'),
     SimpleTestCase(nn.Min,
                     input_size=(4, 5, 3),
-                    reference_fn=lambda _,i: torch.min(i, 0)[0].squeeze()),
+                    reference_fn=lambda _, i: torch.min(i, 0)[0].squeeze()),
     SimpleTestCase(nn.Min,
                     (1,),
                     input_size=(4, 5, 3),
-                    reference_fn=lambda _,i: torch.min(i, 1)[0].squeeze(),
+                    reference_fn=lambda _, i: torch.min(i, 1)[0].squeeze(),
                     desc='with_dimension'),
     SimpleTestCase(nn.MixtureTable,
                     tuple(),
@@ -433,20 +433,20 @@ simple_tests = [
                     jacobian_input=False),
     SimpleTestCase(nn.Mul,
                     input_size=(2, 3, 4, 2),
-                    reference_fn=lambda m,i: i * m.weight[0]),
+                    reference_fn=lambda m, i: i * m.weight[0]),
     SimpleTestCase(nn.MulConstant,
                     (4,),
                     input_size=(2, 3, 4, 2),
-                    reference_fn=lambda m,i: i * 4,
+                    reference_fn=lambda m, i: i * 4,
                     check_inplace=True),
     SimpleTestCase(nn.Narrow,
                     (0, 0),
                     input_size=(2, 3, 4, 2),
-                    reference_fn=lambda _,i: i.narrow(0, 0, 1)),
+                    reference_fn=lambda _, i: i.narrow(0, 0, 1)),
     SimpleTestCase(nn.Narrow,
                     (1, 1, 2),
                     input_size=(2, 3, 4, 2),
-                    reference_fn=lambda _,i: i.narrow(1, 1, 2),
+                    reference_fn=lambda _, i: i.narrow(1, 1, 2),
                     desc='length'),
     SimpleTestCase(nn.PReLU,
                     input_size=(2, 3, 4, 5)),
@@ -481,17 +481,17 @@ simple_tests = [
     SimpleTestCase(nn.Transpose,
                     ((1, 2), (1, 3)),
                     input_size=(2, 3, 4, 5),
-                    reference_fn=lambda _,i: i.transpose(1, 2).transpose(1, 3)),
+                    reference_fn=lambda _, i: i.transpose(1, 2).transpose(1, 3)),
     SimpleTestCase(nn.Transpose,
                     ((1, 2),),
                     input_size=(2, 3, 4, 5),
-                    reference_fn=lambda _,i: i.transpose(1, 2),
+                    reference_fn=lambda _, i: i.transpose(1, 2),
                     desc='single_arg'),
     # TODO: this seems to be very slow
     SimpleTestCase(nn.Replicate,
                     (2, 1),
                     input_size=(10, 3, 4, 5),
-                    reference_fn=lambda _,i: i.view(10, 1, 3, 4, 5).expand(10, 2, 3, 4, 5)),
+                    reference_fn=lambda _, i: i.view(10, 1, 3, 4, 5).expand(10, 2, 3, 4, 5)),
     SimpleTestCase(nn.Padding,
                     (0, 2, -10),
                     input_size=(2, 3, 4, 5)),
@@ -527,11 +527,11 @@ simple_tests = [
     SimpleTestCase(nn.Select,
                     (1, 2),
                     input_size=(3, 4, 5),
-                    reference_fn=lambda _,i: i.select(1, 2)),
+                    reference_fn=lambda _, i: i.select(1, 2)),
     SimpleTestCase(nn.SelectTable,
                     (1,),
                     input_size=[(1,), (2,), (3,), (4,)],
-                    reference_fn=lambda _,i: i[1]),
+                    reference_fn=lambda _, i: i[1]),
     SimpleTestCase(nn.SpatialAdaptiveMaxPooling,
                     (4, 4),
                     input_size=(2, 3, 8, 8)),
@@ -740,8 +740,8 @@ simple_tests = [
     CriterionTestCase(nn.AbsCriterion,
                         input_size=(2, 3, 4),
                         target=torch.randn(2, 3, 4),
-                        reference_fn=lambda _,i,t: 1./i.numel() * \
-                            sum((a-b).abs().sum() for a,b in zip(i, t))
+                        reference_fn=lambda _, i, t: 1./i.numel() * \
+                            sum((a-b).abs().sum() for a, b in zip(i, t))
                     ),
     CriterionTestCase(nn.BCECriterion,
                         input=torch.rand(15, 10).clamp_(0, 1),
@@ -801,7 +801,7 @@ simple_tests = [
     CriterionTestCase(nn.MSECriterion,
                         input=torch.randn(2, 3, 4, 5),
                         target=torch.randn(2, 3, 4, 5),
-                        reference_fn=lambda _,i,t: (i-t).abs().pow(2).sum() / i.numel()),
+                        reference_fn=lambda _, i, t: (i-t).abs().pow(2).sum() / i.numel()),
     CriterionTestCase(nn.WeightedMSECriterion,
                         (torch.rand(3, 4, 5),),
                         input=torch.randn(2, 3, 4, 5),
@@ -858,7 +858,7 @@ for p in (1, 2, 1.5):
                         (p,),
                         input_size=(4, 5),
                         # Eh, we need to use p as a default, so it's passed by value
-                        reference_fn=lambda _,i,p=p: i.div(i.norm(p, 1).expandAs(i)),
+                        reference_fn=lambda _, i, p=p: i.div(i.norm(p, 1).expandAs(i)),
                         desc=str(p)),
     )
 for p in range(1, 4+1):
@@ -902,8 +902,8 @@ def prepare_simple_tests():
             raise RuntimeError('Found two tests with the same name: ' + test_name)
         if hasattr(TestNN, cuda_test_name):
             raise RuntimeError('Found two tests with the same name: ' + cuda_test_name)
-        setattr(TestNN, test_name, lambda self,test=test: test(self))
-        setattr(TestNN, cuda_test_name, lambda self,test=test: test.test_cuda(self))
+        setattr(TestNN, test_name, lambda self, test=test: test(self))
+        setattr(TestNN, cuda_test_name, lambda self, test=test: test.test_cuda(self))
 
 
 class TestNN(TestCase):
@@ -954,9 +954,9 @@ class TestNN(TestCase):
 
             if jacobian_input:
                 for jacobian_x, d_x in zip(flat_jacobian_input, self._tensors_in(d_input)):
-                    jacobian_x[:,i] = d_x
+                    jacobian_x[:, i] = d_x
             if jacobian_parameters:
-                jacobian_param[:,i] = d_param
+                jacobian_param[:, i] = d_param
 
         res = tuple()
         if jacobian_input:
@@ -997,7 +997,7 @@ class TestNN(TestCase):
                     outb.copy_(module.forward(input))
                     flat_tensor[i] = orig
 
-                    outb.add_(-1,outa).div_(2*perturbation)
+                    outb.add_(-1, outa).div_(2*perturbation)
                     d_tensor[i] = outb
 
             return jacobian
@@ -1090,10 +1090,10 @@ class TestNN(TestCase):
 
     def test_VolumetricDropout(self):
         p = 0.2
-        bsz = random.randint(1,5)
-        t = random.randint(1,5)
-        w = random.randint(1,5)
-        h = random.randint(1,5)
+        bsz = random.randint(1, 5)
+        t = random.randint(1, 5)
+        w = random.randint(1, 5)
+        h = random.randint(1, 5)
         nfeats = 1000
         input = torch.Tensor(bsz, nfeats, t, w, h).fill_(1)
         module = nn.VolumetricDropout(p)
@@ -1119,7 +1119,7 @@ class TestNN(TestCase):
         self.assertTrue(output[input.lt(0)].eq(0).all())
 
     def test_Copy(self):
-        input = torch.randn(3,4).double()
+        input = torch.randn(3, 4).double()
         c = nn.Copy(torch.DoubleTensor, torch.FloatTensor)
         output = c.forward(input)
         self.assertEqual(torch.typename(output), 'torch.FloatTensor')
@@ -1230,16 +1230,16 @@ class TestNN(TestCase):
     def test_ParallelTable(self):
         input = torch.randn(3, 4, 5)
         p = nn.ParallelTable()
-        p.add(nn.View(4,5,1))
-        p.add(nn.View(4,5,1))
-        p.add(nn.View(4,5,1))
+        p.add(nn.View(4, 5, 1))
+        p.add(nn.View(4, 5, 1))
+        p.add(nn.View(4, 5, 1))
         m = nn.Sequential()
         m.add(nn.SplitTable(0))
         m.add(p)
         m.add(nn.JoinTable(2))
 
         output = m.forward(input)
-        output2 = input.transpose(0,2).transpose(0,1)
+        output2 = input.transpose(0, 2).transpose(0, 1)
         self.assertEqual(output2, output)
 
         gradInput = m.backward(input, output2)
@@ -1250,7 +1250,7 @@ class TestNN(TestCase):
                 torch.randn(3, 4).float(), torch.randn(3, 4).float(), [torch.randn(3, 4).float()]
         ]
         _gradOutput = [
-                torch.randn(3, 3,4).float(), torch.randn(3, 3,4).float(), torch.randn(3, 3,4).float()
+                torch.randn(3, 3, 4).float(), torch.randn(3, 3, 4).float(), torch.randn(3, 3, 4).float()
         ]
         gradOutput = [
                 [_gradOutput[0][0], _gradOutput[1][0], [_gradOutput[2][0]]],
@@ -1356,7 +1356,7 @@ class TestNN(TestCase):
         weight = 1
         m = nn.L1Penalty(weight, False, False)
 
-        input = torch.rand(2,10).add_(-0.5)
+        input = torch.rand(2, 10).add_(-0.5)
         input[0][0] = 0
 
         m.forward(input)

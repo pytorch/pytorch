@@ -19,7 +19,7 @@ class TestTorch(TestCase):
         for tname, prec in types.items():
             v1 = torch.randn(100).type(tname)
             v2 = torch.randn(100).type(tname)
-            res1 = torch.dot(v1,v2)
+            res1 = torch.dot(v1, v2)
             res2 = 0
             for i, j in zip(v1, v2):
                 res2 += i * j
@@ -37,9 +37,9 @@ class TestTorch(TestCase):
 
         # non-contiguous
         m1 = torch.randn(*size)
-        res1 = torchfn(m1[:,4])
+        res1 = torchfn(m1[:, 4])
         res2 = res1.clone().zero_()
-        for i, v in enumerate(m1[:,4]):
+        for i, v in enumerate(m1[:, 4]):
             res2[i] = mathfn(v)
         self.assertEqual(res1, res2)
 
@@ -95,7 +95,7 @@ class TestTorch(TestCase):
 
     def test_sigmoid(self):
         # TODO: why not simulate math.sigmoid like with rsqrt?
-        inputValues = [-1000,-1,0,0.5,1,2,1000]
+        inputValues = [-1000, -1, 0, 0.5, 1, 2, 1000]
         expectedOutput = [0.0000, 0.2689, 0.5, 0.6225, 0.7311, 0.8808, 1.000]
         precision_4dps = 0.0002
 
@@ -116,31 +116,31 @@ class TestTorch(TestCase):
 
     def _testSelection(self, torchfn, mathfn):
         # contiguous
-        m1 = torch.randn(100,100)
+        m1 = torch.randn(100, 100)
         res1 = torchfn(m1)
-        res2 = m1[0,0]
+        res2 = m1[0, 0]
         for i, j in iter_indices(m1):
-            res2 = mathfn(res2, m1[i,j])
+            res2 = mathfn(res2, m1[i, j])
         self.assertEqual(res1, res2)
 
         # non-contiguous
-        m1 = torch.randn(10,10,10)
-        m2 = m1[:,4]
+        m1 = torch.randn(10, 10, 10)
+        m2 = m1[:, 4]
         res1 = torchfn(m2)
-        res2 = m2[0,0]
+        res2 = m2[0, 0]
         for i, j in iter_indices(m2):
             res2 = mathfn(res2, m2[i][j])
         self.assertEqual(res1, res2)
 
         # with indices
-        m1 = torch.randn(100,100)
+        m1 = torch.randn(100, 100)
         res1val, res1ind = torchfn(m1, 1)
-        res2val = m1[:,(0,)].clone()
+        res2val = m1[:, (0,)].clone()
         res2ind = res1ind.clone().fill_(0)
         for i, j in iter_indices(m1):
-            if mathfn(res2val[i,0], m1[i,j]) != res2val[i,0]:
-                res2val[i,0] = m1[i,j]
-                res2ind[i,0] = j
+            if mathfn(res2val[i, 0], m1[i, j]) != res2val[i, 0]:
+                res2val[i, 0] = m1[i, j]
+                res2ind[i, 0] = j
 
         maxerr = 0
         for i in range(res1val.size(0)):
@@ -221,10 +221,10 @@ class TestTorch(TestCase):
         test((5, 5))
 
     def test_mv(self):
-        m1 = torch.randn(100,100)
+        m1 = torch.randn(100, 100)
         v1 = torch.randn(100)
 
-        res1 = torch.mv(m1,v1)
+        res1 = torch.mv(m1, v1)
         res2 = res1.clone().zero_()
         for i, j in iter_indices(m1):
             res2[i] += m1[i][j] * v1[j]
@@ -233,51 +233,51 @@ class TestTorch(TestCase):
 
     def test_add(self):
         # [res] torch.add([res,] tensor1, tensor2)
-        m1 = torch.randn(100,100)
+        m1 = torch.randn(100, 100)
         v1 = torch.randn(100)
 
         # contiguous
         res1 = torch.add(m1[4], v1)
         res2 = res1.clone().zero_()
         for i in range(m1.size(1)):
-            res2[i] = m1[4,i] + v1[i]
+            res2[i] = m1[4, i] + v1[i]
         self.assertEqual(res1, res2)
 
-        m1 = torch.randn(100,100)
+        m1 = torch.randn(100, 100)
         v1 = torch.randn(100)
 
         # non-contiguous
-        res1 = torch.add(m1[:,4],v1)
+        res1 = torch.add(m1[:, 4], v1)
         res2 = res1.clone().zero_()
         for i in range(m1.size(0)):
-            res2[i] = m1[i,4] + v1[i]
+            res2[i] = m1[i, 4] + v1[i]
         self.assertEqual(res1, res2)
 
         # [res] torch.add([res,] tensor, value)
-        m1 = torch.randn(10,10)
+        m1 = torch.randn(10, 10)
 
         # contiguous
         res1 = m1.clone()
         res1[3].add_(2)
         res2 = m1.clone()
         for i in range(m1.size(1)):
-            res2[3,i] = res2[3,i] + 2
+            res2[3, i] = res2[3, i] + 2
         self.assertEqual(res1, res2)
 
         # non-contiguous
-        m1 = torch.randn(10,10)
+        m1 = torch.randn(10, 10)
         res1 = m1.clone()
-        res1[:,3].add_(2)
+        res1[:, 3].add_(2)
         res2 = m1.clone()
         for i in range(m1.size(0)):
-            res2[i,3] = res2[i,3] + 2
+            res2[i, 3] = res2[i, 3] + 2
         self.assertEqual(res1, res2)
 
         # [res] torch.add([res,] tensor1, value, tensor2)
 
     def test_csub(self):
         # with a tensor
-        a = torch.randn(100,90)
+        a = torch.randn(100, 90)
         b = a.clone().normal_()
 
         res_add = torch.add(a, -1, b)
@@ -286,7 +286,7 @@ class TestTorch(TestCase):
         self.assertEqual(res_add, res_csub)
 
         # with a scalar
-        a = torch.randn(100,100)
+        a = torch.randn(100, 100)
 
         scalar = 123.5
         res_add = torch.add(a, -scalar)
@@ -295,7 +295,7 @@ class TestTorch(TestCase):
         self.assertEqual(res_add, res_csub)
 
     def test_neg(self):
-        a = torch.randn(100,90)
+        a = torch.randn(100, 90)
         zeros = torch.Tensor().resizeAs_(a).zero_()
 
         res_add = torch.add(zeros, -1, a)
@@ -304,7 +304,7 @@ class TestTorch(TestCase):
         self.assertEqual(res_neg, res_add)
 
     def test_cinv(self):
-        a = torch.randn(100,89)
+        a = torch.randn(100, 89)
         zeros = torch.Tensor().resizeAs_(a).zero_()
 
         res_pow = torch.pow(a, -1)
@@ -313,97 +313,97 @@ class TestTorch(TestCase):
         self.assertEqual(res_inv, res_pow)
 
     def test_mul(self):
-        m1 = torch.randn(10,10)
+        m1 = torch.randn(10, 10)
         res1 = m1.clone()
-        res1[:,3].mul_(2)
+        res1[:, 3].mul_(2)
         res2 = m1.clone()
         for i in range(res1.size(0)):
-            res2[i,3] = res2[i,3] * 2
+            res2[i, 3] = res2[i, 3] * 2
         self.assertEqual(res1, res2)
 
     def test_div(self):
-        m1 = torch.randn(10,10)
+        m1 = torch.randn(10, 10)
         res1 = m1.clone()
-        res1[:,3].div_(2)
+        res1[:, 3].div_(2)
         res2 = m1.clone()
         for i in range(m1.size(0)):
-            res2[i,3] = res2[i,3] / 2
+            res2[i, 3] = res2[i, 3] / 2
         self.assertEqual(res1, res2)
 
     def test_fmod(self):
-        m1 = torch.Tensor(10,10).uniform_(-10., 10.)
+        m1 = torch.Tensor(10, 10).uniform_(-10., 10.)
         res1 = m1.clone()
         q = 2.1
-        res1[:,3].fmod_(q)
+        res1[:, 3].fmod_(q)
         res2 = m1.clone()
         for i in range(m1.size(1)):
-            res2[i,3] = math.fmod(res2[i,3], q)
+            res2[i, 3] = math.fmod(res2[i, 3], q)
         self.assertEqual(res1, res2)
 
     def test_remainder(self):
         m1 = torch.Tensor(10, 10).uniform_(-10., 10.)
         res1 = m1.clone()
         q = 2.1
-        res1[:,3].remainder_(q)
+        res1[:, 3].remainder_(q)
         res2 = m1.clone()
         for i in range(m1.size(0)):
-            res2[i,3] = res2[i,3] % q
+            res2[i, 3] = res2[i, 3] % q
         self.assertEqual(res1, res2)
 
     def test_mm(self):
         # helper function
-        def matrixmultiply(mat1,mat2):
+        def matrixmultiply(mat1, mat2):
             n = mat1.size(0)
             m = mat1.size(1)
             p = mat2.size(1)
-            res = torch.zeros(n,p)
+            res = torch.zeros(n, p)
             for i, j in iter_indices(res):
-                res[i,j] = sum(mat1[i,k] * mat2[k,j] for k in range(m))
+                res[i, j] = sum(mat1[i, k] * mat2[k, j] for k in range(m))
             return res
 
         # contiguous case
         n, m, p = 10, 10, 5
-        mat1 = torch.randn(n,m)
-        mat2 = torch.randn(m,p)
-        res = torch.mm(mat1,mat2)
+        mat1 = torch.randn(n, m)
+        mat2 = torch.randn(m, p)
+        res = torch.mm(mat1, mat2)
 
-        res2 = matrixmultiply(mat1,mat2)
+        res2 = matrixmultiply(mat1, mat2)
         self.assertEqual(res, res2)
 
         # non contiguous case 1
         n, m, p = 10, 10, 5
-        mat1 = torch.randn(n,m)
-        mat2 = torch.randn(p,m).t()
-        res = torch.mm(mat1,mat2)
+        mat1 = torch.randn(n, m)
+        mat2 = torch.randn(p, m).t()
+        res = torch.mm(mat1, mat2)
 
-        res2 = matrixmultiply(mat1,mat2)
+        res2 = matrixmultiply(mat1, mat2)
         self.assertEqual(res, res2)
 
         # non contiguous case 2
         n, m, p = 10, 10, 5
-        mat1 = torch.randn(m,n).t()
-        mat2 = torch.randn(m,p)
-        res = torch.mm(mat1,mat2)
+        mat1 = torch.randn(m, n).t()
+        mat2 = torch.randn(m, p)
+        res = torch.mm(mat1, mat2)
 
-        res2 = matrixmultiply(mat1,mat2)
+        res2 = matrixmultiply(mat1, mat2)
         self.assertEqual(res, res2)
 
         # non contiguous case 3
         n, m, p = 10, 10, 5
-        mat1 = torch.randn(m,n).t()
-        mat2 = torch.randn(p,m).t()
-        res = torch.mm(mat1,mat2)
+        mat1 = torch.randn(m, n).t()
+        mat2 = torch.randn(p, m).t()
+        res = torch.mm(mat1, mat2)
 
-        res2 = matrixmultiply(mat1,mat2)
+        res2 = matrixmultiply(mat1, mat2)
         self.assertEqual(res, res2)
 
         # test with zero stride
         n, m, p = 10, 10, 5
-        mat1 = torch.randn(n,m)
-        mat2 = torch.randn(m,1).expand(m,p)
-        res = torch.mm(mat1,mat2)
+        mat1 = torch.randn(n, m)
+        mat2 = torch.randn(m, 1).expand(m, p)
+        res = torch.mm(mat1, mat2)
 
-        res2 = matrixmultiply(mat1,mat2)
+        res2 = matrixmultiply(mat1, mat2)
         self.assertEqual(res, res2)
 
     def test_bmm(self):
@@ -426,25 +426,25 @@ class TestTorch(TestCase):
         res = torch.bmm(b1, b2)
         res2 = torch.Tensor().resizeAs_(res[0]).zero_()
 
-        res2.addbmm_(b1,b2)
+        res2.addbmm_(b1, b2)
         self.assertEqual(res2, res.sum(0)[0])
 
-        res2.addbmm_(1,b1,b2)
+        res2.addbmm_(1, b1, b2)
         self.assertEqual(res2, res.sum(0)[0]*2)
 
-        res2.addbmm_(1.,.5,b1,b2)
+        res2.addbmm_(1., .5, b1, b2)
         self.assertEqual(res2, res.sum(0)[0]*2.5)
 
-        res3 = torch.addbmm(1,res2,0,b1,b2)
+        res3 = torch.addbmm(1, res2, 0, b1, b2)
         self.assertEqual(res3, res2)
 
-        res4 = torch.addbmm(1,res2,.5,b1,b2)
+        res4 = torch.addbmm(1, res2, .5, b1, b2)
         self.assertEqual(res4, res.sum(0)[0]*3)
 
-        res5 = torch.addbmm(0,res2,1,b1,b2)
+        res5 = torch.addbmm(0, res2, 1, b1, b2)
         self.assertEqual(res5, res.sum(0)[0])
 
-        res6 = torch.addbmm(.1,res2,.5,b1,b2)
+        res6 = torch.addbmm(.1, res2, .5, b1, b2)
         self.assertEqual(res6, res2 * .1 + res.sum(0) * .5)
 
     def test_baddbmm(self):
@@ -455,25 +455,25 @@ class TestTorch(TestCase):
         res = torch.bmm(b1, b2)
         res2 = torch.Tensor().resizeAs_(res).zero_()
 
-        res2.baddbmm_(b1,b2)
+        res2.baddbmm_(b1, b2)
         self.assertEqual(res2, res)
 
-        res2.baddbmm_(1,b1,b2)
+        res2.baddbmm_(1, b1, b2)
         self.assertEqual(res2, res*2)
 
-        res2.baddbmm_(1,.5,b1,b2)
+        res2.baddbmm_(1, .5, b1, b2)
         self.assertEqual(res2, res*2.5)
 
-        res3 = torch.baddbmm(1,res2,0,b1,b2)
+        res3 = torch.baddbmm(1, res2, 0, b1, b2)
         self.assertEqual(res3, res2)
 
-        res4 = torch.baddbmm(1,res2,.5,b1,b2)
+        res4 = torch.baddbmm(1, res2, .5, b1, b2)
         self.assertEqual(res4, res*3)
 
-        res5 = torch.baddbmm(0,res2,1,b1,b2)
+        res5 = torch.baddbmm(0, res2, 1, b1, b2)
         self.assertEqual(res5, res)
 
-        res6 = torch.baddbmm(.1,res2,.5,b1,b2)
+        res6 = torch.baddbmm(.1, res2, .5, b1, b2)
         self.assertEqual(res6, res2 * .1 + res * .5)
 
     def test_clamp(self):
@@ -496,7 +496,7 @@ class TestTorch(TestCase):
 
         # base - tensor, exponent - number
         # contiguous
-        m1 = torch.randn(100,100)
+        m1 = torch.randn(100, 100)
         res1 = torch.pow(m1[4], 3)
         res2 = res1.clone().zero_()
         for i in range(res2.size(0)):
@@ -504,25 +504,25 @@ class TestTorch(TestCase):
         self.assertEqual(res1, res2)
 
         # non-contiguous
-        m1 = torch.randn(100,100)
-        res1 = torch.pow(m1[:,4], 3)
+        m1 = torch.randn(100, 100)
+        res1 = torch.pow(m1[:, 4], 3)
         res2 = res1.clone().zero_()
         for i in range(res2.size(0)):
-            res2[i] = math.pow(m1[i,4], 3)
+            res2[i] = math.pow(m1[i, 4], 3)
         self.assertEqual(res1, res2)
 
         # base - number, exponent - tensor
         # contiguous
-        m1 = torch.randn(100,100)
+        m1 = torch.randn(100, 100)
         res1 = torch.pow(3, m1[4])
         res2 = res1.clone().zero_()
         for i in range(res2.size(0)):
-            res2[i] = math.pow(3, m1[4,i])
+            res2[i] = math.pow(3, m1[4, i])
         self.assertEqual(res1, res2)
 
         # non-contiguous
-        m1 = torch.randn(100,100)
-        res1 = torch.pow(3, m1[:,4])
+        m1 = torch.randn(100, 100)
+        res1 = torch.pow(3, m1[:, 4])
         res2 = res1.clone().zero_()
         for i in range(res2.size(0)):
             res2[i] = math.pow(3, m1[i][4])
@@ -532,7 +532,7 @@ class TestTorch(TestCase):
         def reference_implementation(res2):
             for i, j in iter_indices(sm1):
                 idx1d = i * sm1.size(0) + j
-                res2[i,j] = mathfn(sm1[i,j], sm2[idx1d])
+                res2[i, j] = mathfn(sm1[i, j], sm2[idx1d])
             return res2
 
         # contiguous
@@ -547,8 +547,8 @@ class TestTorch(TestCase):
         # non-contiguous
         m1 = torch.randn(10, 10, 10)
         m2 = torch.randn(10 * 10, 10 * 10)
-        sm1 = m1[:,4]
-        sm2 = m2[:,4]
+        sm1 = m1[:, 4]
+        sm2 = m2[:, 4]
         res1 = torchfn(sm1, sm2)
         res2 = reference_implementation(res1.clone())
         self.assertEqual(res1, res2)
@@ -638,7 +638,7 @@ class TestTorch(TestCase):
         self.assertEqual(res1, res2)
 
     def test_renorm(self):
-        m1 = torch.randn(10,5)
+        m1 = torch.randn(10, 5)
         res1 = torch.Tensor()
 
         def renorm(matrix, value, dim, max_norm):
@@ -695,7 +695,7 @@ class TestTorch(TestCase):
             for i in range(n_row):
                 row_samples = {}
                 for j in range(n_sample):
-                    sample_idx = sample_indices[i,j]
+                    sample_idx = sample_indices[i, j]
                     self.assertNotEqual(sample_idx, n_col-1,
                             "sampled an index with zero probability")
                     self.assertNotIn(sample_idx, row_samples, "sampled an index twice")
@@ -886,16 +886,16 @@ class TestTorch(TestCase):
         res1val, res1ind = torch.kthvalue(x, k)
         res2val, res2ind = torch.sort(x)
 
-        self.assertEqual(res1val[:,:,0], res2val[:,:,k-1], 0)
-        self.assertEqual(res1ind[:,:,0], res2ind[:,:,k-1], 0)
+        self.assertEqual(res1val[:, :, 0], res2val[:, :, k-1], 0)
+        self.assertEqual(res1ind[:, :, 0], res2ind[:, :, k-1], 0)
         # test use of result tensors
         k = random.randint(1, SIZE)
         res1val = torch.Tensor()
         res1ind = torch.LongTensor()
         torch.kthvalue(res1val, res1ind, x, k)
         res2val, res2ind = torch.sort(x)
-        self.assertEqual(res1val[:,:,0], res2val[:,:,k-1], 0)
-        self.assertEqual(res1ind[:,:,0], res2ind[:,:,k-1], 0)
+        self.assertEqual(res1val[:, :, 0], res2val[:, :, k-1], 0)
+        self.assertEqual(res1ind[:, :, 0], res2ind[:, :, k-1], 0)
 
         # test non-default dim
         k = random.randint(1, SIZE)
@@ -952,7 +952,7 @@ class TestTorch(TestCase):
     def test_mode(self):
         x = torch.range(1, SIZE * SIZE).clone().resize_(SIZE, SIZE)
         x[:2] = 1
-        x[:,:2] = 1
+        x[:, :2] = 1
         x0 = x.clone()
 
         # Pre-calculated results.
@@ -1096,7 +1096,7 @@ class TestTorch(TestCase):
                         (-1.56,  4.00, -8.67,  1.75,  2.86),
                         (9.81, -4.09, -4.57, -8.61,  8.99))).t()
 
-        res1 = torch.gesv(b,a)
+        res1 = torch.gesv(b, a)
         self.assertLessEqual(b.dist(a * res1), 1e-12)
         ta = torch.Tensor()
         tb = torch.Tensor()
@@ -1163,13 +1163,13 @@ class TestTorch(TestCase):
         self.assertLessEqual(x.dist(y), 1e-12)
 
         # test reuse
-        res1 = torch.trtrs(b,a)
+        res1 = torch.trtrs(b, a)
         ta = torch.Tensor()
         tb = torch.Tensor()
-        torch.trtrs(tb,ta,b,a)
+        torch.trtrs(tb, ta, b, a)
         self.assertEqual(res1, tb, 0)
         tb.zero_()
-        torch.trtrs(tb,ta,b,a)
+        torch.trtrs(tb, ta, b, a)
         self.assertEqual(res1, tb, 0)
 
     @unittest.skipIf(not hasattr(torch, 'gels'), 'Compiled without gels')
@@ -1262,9 +1262,9 @@ class TestTorch(TestCase):
         self.assertEqual(vv, tv, 1e-12)
 
         # test reuse
-        X = torch.randn(4,4)
+        X = torch.randn(4, 4)
         X = X.t() * X
-        e, v = torch.zeros(4,2), torch.zeros(4,4)
+        e, v = torch.zeros(4, 2), torch.zeros(4, 4)
         torch.eig(e, v, X, 'V')
         Xhat = v * torch.diag(e.select(1, 0)) * v.t()
         self.assertEqual(X, Xhat, 1e-8, 'VeV\' wrong')
@@ -1278,8 +1278,8 @@ class TestTorch(TestCase):
         # test non-contiguous
         X = torch.randn(4, 4)
         X = X.t() * X
-        e = torch.zeros(4, 2, 2)[:,2]
-        v = torch.zeros(4, 2, 4)[:,2]
+        e = torch.zeros(4, 2, 2)[:, 2]
+        v = torch.zeros(4, 2, 4)[:, 2]
         self.assertFalse(v.isContiguous(), 'V is contiguous')
         self.assertFalse(e.isContiguous(), 'E is contiguous')
         torch.eig(e, v, X, 'V')
@@ -1288,10 +1288,10 @@ class TestTorch(TestCase):
 
     @unittest.skipIf(not hasattr(torch, 'symeig'), 'Compiled without symeig')
     def test_symeig(self):
-        xval = torch.rand(100,3)
+        xval = torch.rand(100, 3)
         cov = torch.mm(xval.t(), xval)
         rese = torch.zeros(3)
-        resv = torch.zeros(3,3)
+        resv = torch.zeros(3, 3)
 
         # First call to symeig
         self.assertTrue(resv.isContiguous(), 'resv is not contiguous')
@@ -1309,7 +1309,7 @@ class TestTorch(TestCase):
         X = torch.rand(5, 5)
         X = X.t() * X
         e = torch.zeros(4, 2).select(1, 1)
-        v = torch.zeros(4, 2, 4)[:,1]
+        v = torch.zeros(4, 2, 4)[:, 1]
         self.assertFalse(v.isContiguous(), 'V is contiguous')
         self.assertFalse(e.isContiguous(), 'E is contiguous')
         torch.symeig(e, v, X, 'V')
@@ -1348,9 +1348,9 @@ class TestTorch(TestCase):
 
         # test non-contiguous
         X = torch.randn(5, 5)
-        U = torch.zeros(5, 2, 5)[:,1]
-        S = torch.zeros(5, 2)[:,2]
-        V = torch.zeros(5, 2, 5)[:,2]
+        U = torch.zeros(5, 2, 5)[:, 1]
+        S = torch.zeros(5, 2)[:, 2]
+        V = torch.zeros(5, 2, 5)[:, 2]
 
         self.assertFalse(U.isContiguous(), 'U is contiguous')
         self.assertFalse(S.isContiguous(), 'S is contiguous')
@@ -1361,7 +1361,7 @@ class TestTorch(TestCase):
 
     @unittest.skipIf(not hasattr(torch, 'inverse'), 'Compiled without inverse')
     def test_inverse(self):
-        M = torch.randn(5,5)
+        M = torch.randn(5, 5)
         MI = torch.inverse(M)
         E = torch.eye(5)
         self.assertFalse(MI.isContiguous(), 'MI is contiguous')
@@ -1792,8 +1792,8 @@ class TestTorch(TestCase):
             for j in range(idx_size[1]):
                 for k in range(idx_size[2]):
                     ii = [i, j, k]
-                    ii[dim] = idx[i,j,k]
-                    expected[i,j,k] = src[tuple(ii)]
+                    ii[dim] = idx[i, j, k]
+                    expected[i, j, k] = src[tuple(ii)]
         self.assertEqual(actual, expected, 0)
 
         idx[0][0][0] = 23
@@ -1821,8 +1821,8 @@ class TestTorch(TestCase):
             for j in range(idx_size[1]):
                 for k in range(idx_size[2]):
                     ii = [i, j, k]
-                    ii[dim] = idx[i,j,k]
-                    expected[tuple(ii)] = src[i,j,k]
+                    ii[dim] = idx[i, j, k]
+                    expected[tuple(ii)] = src[i, j, k]
         self.assertEqual(actual, expected, 0)
 
         idx[0][0][0] = 34
@@ -1845,7 +1845,7 @@ class TestTorch(TestCase):
             for j in range(idx_size[1]):
                 for k in range(idx_size[2]):
                     ii = [i, j, k]
-                    ii[dim] = idx[i,j,k]
+                    ii[dim] = idx[i, j, k]
                     expected[tuple(ii)] = val
         self.assertEqual(actual, expected, 0)
 
@@ -1994,7 +1994,7 @@ class TestTorch(TestCase):
 
         # Non contiguous, 2D
         s = torch.Tensor(((1, 2, 3, 4), (5, 6, 7, 8)))
-        s1 = s[:,1:3]
+        s1 = s[:, 1:3]
         s2 = s1.clone()
         s3 = torch.Tensor(((2, 3), (6, 7)))
         s4 = torch.Tensor(((0, 0), (0, 0)))
@@ -2158,12 +2158,12 @@ class TestTorch(TestCase):
                     # This test will allow through some False positives. It only checks
                     # that the elements flagged positive are indeed non-zero.
                     for i in range(dst1.size(0)):
-                        self.assertNotEqual(tensor[dst1[i,0], dst1[i,1]], 0)
+                        self.assertNotEqual(tensor[dst1[i, 0], dst1[i, 1]], 0)
                 elif shape.size() == 3:
                 # This test will allow through some False positives. It only checks
                 # that the elements flagged positive are indeed non-zero.
                     for i in range(dst1.size(0)):
-                        self.assertNotEqual(tensor[dst1[i,0], dst1[i,1], dst1[i,2]], 0)
+                        self.assertNotEqual(tensor[dst1[i, 0], dst1[i, 1], dst1[i, 2]], 0)
 
     def test_deepcopy(self):
         from copy import deepcopy

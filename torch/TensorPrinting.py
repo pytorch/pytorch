@@ -93,7 +93,7 @@ def _printTensor(self):
         if strt != '':
            strt += '\n'
         strt += '({},.,.) = \n'.format(','.join(str(i) for i in counter))
-        submatrix = reduce(lambda t,i: t.select(0, i), counter, self)
+        submatrix = reduce(lambda t, i: t.select(0, i), counter, self)
         strt += _printMatrix(submatrix, ' ')
     return strt
 

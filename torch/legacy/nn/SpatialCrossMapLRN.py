@@ -112,7 +112,7 @@ class SpatialCrossMapLRN(Module):
             for n in range(batchSize):
                 paddedRatioCenter.mul_(gradOutput[n], self.output[n])
                 paddedRatioCenter.div_(self.scale[n])
-                self.accumRatio.sum(self.paddedRatio.narrow(0, 0,self.size-1), 0)
+                self.accumRatio.sum(self.paddedRatio.narrow(0, 0, self.size-1), 0)
                 for c in range(channels):
                     self.accumRatio.add_(self.paddedRatio[c+self.size-1])
                     self.gradInput[n][c].addcmul_(-cacheRatioValue, input[n][c], self.accumRatio)

@@ -140,10 +140,10 @@ class cwrap(object):
         return fallback(*args)
 
     def get_type_check(self, arg, option):
-        return self.search_plugins('get_type_check', (arg, option), lambda arg,_: self.TYPE_CHECK[arg['type']])
+        return self.search_plugins('get_type_check', (arg, option), lambda arg, _: self.TYPE_CHECK[arg['type']])
 
     def get_type_unpack(self, arg, option):
-        return self.search_plugins('get_type_unpack', (arg, option), lambda arg,_: self.TYPE_UNPACK[arg['type']])
+        return self.search_plugins('get_type_unpack', (arg, option), lambda arg, _: self.TYPE_UNPACK[arg['type']])
 
     def get_return_wrapper(self, option):
         return self.search_plugins('get_return_wrapper', (option,), lambda t: self.RETURN_WRAPPERS[option['return']])
@@ -152,7 +152,7 @@ class cwrap(object):
         return self.search_plugins('get_wrapper_template', (declaration,), lambda _: None)
 
     def get_arg_accessor(self, arg, option):
-        return self.search_plugins('get_arg_accessor', (arg, option), lambda arg,_: 'PyTuple_GET_ITEM(args, {})'.format(arg['idx']))
+        return self.search_plugins('get_arg_accessor', (arg, option), lambda arg, _: 'PyTuple_GET_ITEM(args, {})'.format(arg['idx']))
 
     def generate_wrapper(self, declaration):
         wrapper = ''

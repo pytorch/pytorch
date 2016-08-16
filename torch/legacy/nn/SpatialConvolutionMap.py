@@ -81,10 +81,10 @@ class SpatialConvolutionMap(Module):
         else:
             ninp = torch.Tensor(self.nOutputPlane).zero_()
             for i in range(self.connTable.size(0)):
-                idx = int(self.connTable[i,1])
+                idx = int(self.connTable[i, 1])
                 ninp[idx] += 1
             for k in range(self.connTable.size(0)):
-                idx = int(self.connTable[k,1])
+                idx = int(self.connTable[k, 1])
                 stdv = 1. / math.sqrt(self.kW*self.kH*ninp[idx])
                 self.weight.select(0, k).uniform_(-stdv, stdv)
             for k in range(self.bias.size(0)):

@@ -6,7 +6,7 @@ from .utils import clear
 
 class SpatialConvolutionLocal(Module):
 
-    def __init__(self, nInputPlane, nOutputPlane, iW, iH ,kW, kH, dW=1, dH=1, padW=0, padH=None):
+    def __init__(self, nInputPlane, nOutputPlane, iW, iH , kW, kH, dW=1, dH=1, padW=0, padH=None):
         super(SpatialConvolutionLocal, self).__init__()
 
         self.nInputPlane = nInputPlane

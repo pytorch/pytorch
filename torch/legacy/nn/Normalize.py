@@ -68,7 +68,7 @@ class Normalize(Module):
         self._gradInput.resize_(n, d)
         if self.p == float('inf'):
                 # specialization for the inf case
-                torch.mul(self._gradInput, self.norm.view(n, 1,1).expand(n, d,1), gradOutput)
+                torch.mul(self._gradInput, self.norm.view(n, 1, 1).expand(n, d, 1), gradOutput)
                 self.buffer.resizeAs_(input).zero_()
                 self.cross.resize_(n, 1)
                 torch.gather(self.cross, input, 1, self._indices)

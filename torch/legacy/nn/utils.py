@@ -30,7 +30,7 @@ def recursiveType(param, type, tensorCache={}):
                 newparam = tensorCache[key]
             else:
                 newparam = torch.Tensor().type(type)
-                storageType = type.replace('Tensor','Storage')
+                storageType = type.replace('Tensor', 'Storage')
                 param_storage = param.storage()
                 if param_storage:
                     storage_key = param_storage._cdata

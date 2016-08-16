@@ -119,7 +119,7 @@ class _TensorBase(object):
             sizes = torch.LongStorage(args)
         sizes = _infer_sizes(sizes, self.nElement())
 
-        if reduce(lambda a,b: a * b, sizes) != self.nElement():
+        if reduce(lambda a, b: a * b, sizes) != self.nElement():
             raise RuntimeError('Invalid size for view. Input size: ' +
                     'x'.join(map(lambda v: str(v), self.size())) +
                     ', output size: ' +
@@ -195,7 +195,7 @@ class _TensorBase(object):
         result.resize_(size)
         urtensor = result.new(result)
         for i in torch._pyrange(xtensor.dim()):
-            urtensor = urtensor.unfold(i,xtensor.size(i),xtensor.size(i))
+            urtensor = urtensor.unfold(i, xtensor.size(i), xtensor.size(i))
         for i in torch._pyrange(urtensor.dim()-xtensor.dim()):
             xsize = [1] + xsize
         xtensor.resize_(torch.LongStorage(xsize))
