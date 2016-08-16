@@ -1390,7 +1390,7 @@ class TestTorch(TestCase):
         kis = ki.storage()
         for i in range(ks.size() - 1, 0, -1):
             kis[ks.size() - i + 1] = ks[i]
-        #for i=ks.size(), 1, -1 do kis[ks.size()-i+1]=ks[i] end
+        # for i=ks.size(), 1, -1 do kis[ks.size()-i+1]=ks[i] end
         imvx = torch.xcorr2(x, ki)
         imvx2 = torch.xcorr2(x, ki, 'V')
         imfx = torch.xcorr2(x, ki, 'F')
