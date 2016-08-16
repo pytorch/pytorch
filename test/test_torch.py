@@ -2161,8 +2161,8 @@ class TestTorch(TestCase):
                     for i in range(dst1.size(0)):
                         self.assertNotEqual(tensor[dst1[i, 0], dst1[i, 1]], 0)
                 elif shape.size() == 3:
-                # This test will allow through some False positives. It only checks
-                # that the elements flagged positive are indeed non-zero.
+                    # This test will allow through some False positives. It only checks
+                    # that the elements flagged positive are indeed non-zero.
                     for i in range(dst1.size(0)):
                         self.assertNotEqual(tensor[dst1[i, 0], dst1[i, 1], dst1[i, 2]], 0)
 
