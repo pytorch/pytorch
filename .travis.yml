@@ -11,10 +11,11 @@ python:
     - pypy3
 
 install:
-    - travis_retry pip install pyyaml
+    - travis_retry pip install -r requirements.txt
     - travis_retry python setup.py install
 
 script:
+    - nosetests
     - python test/test_torch.py
 
 # This reportedly works around an issue downloading packages from pypi on
