@@ -1299,16 +1299,16 @@ class TestNN(TestCase):
         input = torch.randn(2, 3, 12, 12)
         gradOutput = torch.randn(2, int(outputSize.sum()), 12, 12)
         concat = nn.DepthConcat(1)
-        concat.add(nn.SpatialConvolution(3, outputSize[0], 1, 1, 1, 1)) #> 2, 5, 12, 12
-        concat.add(nn.SpatialConvolution(3, outputSize[1], 3, 3, 1, 1)) #> 2, 6, 10, 10
-        concat.add(nn.SpatialConvolution(3, outputSize[2], 4, 4, 1, 1)) #> 2, 7, 9, 9
-        concat.add(nn.SpatialConvolution(3, outputSize[3], 5, 5, 1, 1)) #> 2, 8, 8, 8
+        concat.add(nn.SpatialConvolution(3, outputSize[0], 1, 1, 1, 1))  # > 2, 5, 12, 12
+        concat.add(nn.SpatialConvolution(3, outputSize[1], 3, 3, 1, 1))  # > 2, 6, 10, 10
+        concat.add(nn.SpatialConvolution(3, outputSize[2], 4, 4, 1, 1))  # > 2, 7, 9, 9
+        concat.add(nn.SpatialConvolution(3, outputSize[3], 5, 5, 1, 1))  # > 2, 8, 8, 8
         concat.zeroGradParameters()
         # forward/backward
         outputConcat = concat.forward(input)
         gradInputConcat = concat.backward(input, gradOutput)
         # the spatial dims are the largest, the nFilters is the sum
-        output = torch.Tensor(2, int(outputSize.sum()), 12, 12).zero_() # zero for padding
+        output = torch.Tensor(2, int(outputSize.sum()), 12, 12).zero_()  # zero for padding
         narrows = ( (slice(None), (0, 5), slice(None), slice(None)), (slice(None), (5, 11), (1, 11), (1, 11)), (slice(None), (11, 18), (1, 10), (1, 10)), (slice(None), (18, 26), (2, 10), (2, 10)) )
         gradInput = input.clone().zero_()
         for i in range(4):

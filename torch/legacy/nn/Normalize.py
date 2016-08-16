@@ -59,8 +59,8 @@ class Normalize(Module):
         assert gradOutput.dim() == 2
 
         input_size = input.size()
-        n = input.size(0) # batch size
-        d = input.size(1) # dimensionality of vectors
+        n = input.size(0)  # batch size
+        d = input.size(1)  # dimensionality of vectors
 
         self._gradInput = self._gradInput or input.new()
         self.cross = self.cross or input.new()
@@ -98,7 +98,7 @@ class Normalize(Module):
         # instead of having a huge temporary matrix (b1*b2),
         #: the computations as b1*(b2*gradOutput). This avoids redundant
         # computation and also a huge buffer of size n*d^2
-        self.buffer2 = self.buffer2 or input.new() # nxd
+        self.buffer2 = self.buffer2 or input.new()  # nxd
         torch.mul(self.buffer2, input, gradOutput)
         torch.sum(self.cross, self.buffer2, 1)
 

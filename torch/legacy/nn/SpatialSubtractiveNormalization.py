@@ -81,7 +81,7 @@ class SpatialSubtractiveNormalization(Module):
 
             self.ones.resizeAs_(input[0:1]).fill_(1)
             coef = self.meanestimator.updateOutput(self.ones).squeeze(0)
-            self._coef.resizeAs_(coef).copy_(coef) # make contiguous for view
+            self._coef.resizeAs_(coef).copy_(coef)  # make contiguous for view
             size = coef.size().tolist()
             size = [input.size(0)] + size
             self.coef = self._coef.view(1, *(self._coef.size().tolist())).expand(*size)

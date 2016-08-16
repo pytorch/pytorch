@@ -614,7 +614,7 @@ class TestTorch(TestCase):
 
     def test_histc(self):
         x = torch.Tensor((2, 4, 2, 2, 5, 4))
-        y = torch.histc(x, 5, 1, 5) # nbins,  min,  max
+        y = torch.histc(x, 5, 1, 5)  # nbins,  min,  max
         z = torch.Tensor((0, 3, 0, 2, 1))
         self.assertEqual(y, z)
 
@@ -675,7 +675,7 @@ class TestTorch(TestCase):
         n_row = 3
         for n_col in range(4, 5+1):
             prob_dist = torch.rand(n_row, n_col)
-            prob_dist.select(1, n_col-1).fill_(0) #index n_col shouldn't be sampled
+            prob_dist.select(1, n_col-1).fill_(0)  # index n_col shouldn't be sampled
             n_sample = n_col
             sample_indices = torch.multinomial(prob_dist, n_sample, True)
             self.assertEqual(prob_dist.dim(), 2)
@@ -687,7 +687,7 @@ class TestTorch(TestCase):
         n_row = 3
         for n_col in range(4, 5+1):
             prob_dist = torch.rand(n_row, n_col)
-            prob_dist.select(1, n_col-1).fill_(0) #index n_col shouldn't be sampled
+            prob_dist.select(1, n_col-1).fill_(0)  # index n_col shouldn't be sampled
             n_sample = 3
             sample_indices = torch.multinomial(prob_dist, n_sample, False)
             self.assertEqual(prob_dist.dim(), 2)

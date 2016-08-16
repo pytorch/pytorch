@@ -37,7 +37,7 @@ class Concat(Container):
             currentOutput = module.output
             currentGradInput = module.updateGradInput(input, gradOutput.narrow(self.dimension, offset, currentOutput.size(self.dimension)))
 
-            if currentGradInput: # if the module does not produce a gradInput (for example first layer),: ignore it and move on.
+            if currentGradInput:  # if the module does not produce a gradInput (for example first layer),: ignore it and move on.
                 if i == 0:
                     self.gradInput.copy_(currentGradInput)
                 else:
@@ -63,7 +63,7 @@ class Concat(Container):
         for i, module in enumerate(self.modules):
             currentOutput = module.output
             currentGradInput = module.backward(input, gradOutput.narrow(self.dimension, offset, currentOutput.size(self.dimension)), scale)
-            if currentGradInput: # if the module.es not produce a gradInput (for example first layer),: ignore it and move on.
+            if currentGradInput:  # if the module.es not produce a gradInput (for example first layer),: ignore it and move on.
                 if i == 0:
                     self.gradInput.copy_(currentGradInput)
                 else:

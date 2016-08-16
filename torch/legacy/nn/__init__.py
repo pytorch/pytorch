@@ -81,7 +81,7 @@ from .PairwiseDistance import PairwiseDistance
 from .ParallelCriterion import ParallelCriterion
 from .PartialLinear import PartialLinear
 from .Power import Power
-from .RReLU import RReLU # TODO implement
+from .RReLU import RReLU  # TODO implement
 from .ReLU6 import ReLU6
 from .Replicate import Replicate
 from .Reshape import Reshape
@@ -103,7 +103,7 @@ from .SpatialContrastiveNormalization import SpatialContrastiveNormalization
 from .SpatialConvolution import SpatialConvolution
 from .SpatialConvolutionLocal import SpatialConvolutionLocal
 from .SpatialConvolutionMap import SpatialConvolutionMap
-from .SpatialCrossMapLRN import SpatialCrossMapLRN # TODO fails tests
+from .SpatialCrossMapLRN import SpatialCrossMapLRN  # TODO fails tests
 from .SpatialDilatedConvolution import SpatialDilatedConvolution
 from .SpatialDivisiveNormalization import SpatialDivisiveNormalization
 from .SpatialDropout import SpatialDropout

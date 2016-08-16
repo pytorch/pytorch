@@ -35,19 +35,19 @@ class SpatialConvolutionMap(Module):
             tbl = torch.Tensor(nker, 2)
             fi = torch.randperm(nin)
             frcntr = 0
-            nfi = math.floor(nin / nto) # number of distinct nto chunks
+            nfi = math.floor(nin / nto)  # number of distinct nto chunks
             totbl = tbl.select(1, 1)
             frtbl = tbl.select(1, 0)
-            fitbl = fi.narrow(0, 0, (nfi * nto)) # part of fi that covers distinct chunks
+            fitbl = fi.narrow(0, 0, (nfi * nto))  # part of fi that covers distinct chunks
             ufrtbl = frtbl.unfold(0, nto, nto)
             utotbl = totbl.unfold(0, nto, nto)
             ufitbl = fitbl.unfold(0, nto, nto)
 
             # start fill_ing frtbl
-            for i in range(nout): # fro each unit in target map
+            for i in range(nout):  # fro each unit in target map
                 ufrtbl.select(0, i).copy_(ufitbl.select(0, frcntr))
                 frcntr += 1
-                if frcntr-1 == nfi: # reset fi
+                if frcntr-1 == nfi:  # reset fi
                     fi.copy_(torch.randperm(nin))
                     frcntr = 1
 

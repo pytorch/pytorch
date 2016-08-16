@@ -33,7 +33,7 @@ class Dropout(Module):
             self.gradInput.resizeAs_(gradOutput).copy_(gradOutput)
 
         if self.p > 0 and self.train:
-            self.gradInput.mul_(self.noise) # simply mask the gradients with the noise vector
+            self.gradInput.mul_(self.noise)  # simply mask the gradients with the noise vector
 
         return self.gradInput
 

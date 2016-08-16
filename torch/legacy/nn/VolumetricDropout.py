@@ -30,7 +30,7 @@ class VolumetricDropout(Module):
     def updateGradInput(self, input, gradOutput):
         if self.train:
             self.gradInput.resizeAs_(gradOutput).copy_(gradOutput)
-            self.gradInput.mul_(self.noise.expandAs(input)) # simply mask the gradients with the noise vector
+            self.gradInput.mul_(self.noise.expandAs(input))  # simply mask the gradients with the noise vector
         else:
             raise RuntimeError('backprop only defined while training')
 

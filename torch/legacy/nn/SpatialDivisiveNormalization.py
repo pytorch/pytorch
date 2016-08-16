@@ -105,7 +105,7 @@ class SpatialDivisiveNormalization(Module):
             self.ones.resizeAs_(input[0:1]).fill_(1)
             coef = self.meanestimator.updateOutput(self.ones).squeeze(0)
             self._coef = self._coef or input.new()
-            self._coef.resizeAs_(coef).copy_(coef) # make contiguous for view
+            self._coef.resizeAs_(coef).copy_(coef)  # make contiguous for view
             self.coef = self._coef.view(1, *(self._coef.size().tolist())).expandAs(self.localstds)
 
         # normalize std dev
