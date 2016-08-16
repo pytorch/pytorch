@@ -124,10 +124,10 @@ class Bilinear(Module):
 
     def __repr__(self):
         return str(type(self)) + \
-                '({}x{} -> {}) {}'.format(
-                    self.weight.size(1), self.weight.size(2), self.weight.size(0),
-                    (' without bias' if self.bias is None else '')
-                )
+            '({}x{} -> {}) {}'.format(
+            self.weight.size(1), self.weight.size(2), self.weight.size(0),
+            (' without bias' if self.bias is None else '')
+            )
 
     def clearState(self):
         clear(self, 'buff1', 'buff2')

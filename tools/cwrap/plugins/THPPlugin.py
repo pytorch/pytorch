@@ -223,7 +223,7 @@ PyObject * $name(PyObject *self, PyObject *args)
         tensor_methods = ''
         for declaration in (self.declarations if not stateless else self.stateless_declarations):
             entry = Template('  {"$python_name", (PyCFunction)$name, METH_VARARGS, NULL},\n').substitute(
-                    python_name=declaration['python_name'], name=declaration['name']
+                python_name=declaration['python_name'], name=declaration['name']
                 )
             if 'defined_if' in declaration:
                 entry = self.preprocessor_guard(entry, declaration['defined_if'])

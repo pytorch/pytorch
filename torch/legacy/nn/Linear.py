@@ -82,5 +82,5 @@ class Linear(Module):
 
     def __repr__(self):
         return super(Linear, self).__repr__() + \
-                '({} -> {})'.format(self.weight.size(1), self.weight.size(0)) + \
-                (' without bias' if not self.bias else '')
+            '({} -> {})'.format(self.weight.size(1), self.weight.size(0)) + \
+            (' without bias' if not self.bias else '')

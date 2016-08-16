@@ -250,13 +250,13 @@ simple_tests = [
                    check_inplace=True),
     # TODO implement
     # SimpleTestCase(nn.RReLU,
-                    # input_size=(4, 2, 5),
-                    # check_inplace=True),
+    # input_size=(4, 2, 5),
+    # check_inplace=True),
     # SimpleTestCase(nn.RReLU,
-                    # (0.1, 0.9),
-                    # input_size=(4, 4, 5),
-                    # check_inplace=True,
-                    # desc='with_up_down'),
+    # (0.1, 0.9),
+    # input_size=(4, 4, 5),
+    # check_inplace=True,
+    # desc='with_up_down'),
     SimpleTestCase(nn.SoftShrink,
                     input_size=(3, 2, 5)),
     SimpleTestCase(nn.SoftShrink,
@@ -309,10 +309,10 @@ simple_tests = [
                    reference_fn=lambda _, i: i.squeeze()),
     # TODO: should squeeze work inplace?
     # SimpleTestCase(nn.Squeeze,
-                    # (1,),
-                    # input_size=(2, 1, 1, 4, 5),
-                    # reference_fn=lambda _,i: i.squeeze(1),
-                    # desc='dim'),
+    # (1,),
+    # input_size=(2, 1, 1, 4, 5),
+    # reference_fn=lambda _,i: i.squeeze(1),
+    # desc='dim'),
     SimpleTestCase(nn.Unsqueeze,
                     (1,),
                     input_size=(2, 4, 5),
@@ -376,12 +376,12 @@ simple_tests = [
     SimpleTestCase(nn.DotProduct,
                    input_size=[(10, 4), (10, 4)],
                    reference_fn=lambda _, i: torch.Tensor(list(
-                        a.dot(b) for a, b in zip(i[0], i[1])))
+                       a.dot(b) for a, b in zip(i[0], i[1])))
                    ),
     SimpleTestCase(nn.CosineDistance,
                    input_size=[(10, 4), (10, 4)],
                    reference_fn=lambda _, i: torch.Tensor(list(
-                        a.dot(b) / (a.norm(2) * b.norm(2)) for a, b in zip(i[0], i[1])))
+                       a.dot(b) / (a.norm(2) * b.norm(2)) for a, b in zip(i[0], i[1])))
                    ),
     SimpleTestCase(nn.JoinTable,
                    (0,),
@@ -539,8 +539,8 @@ simple_tests = [
                    (4, 4),
                    input_size=(2, 3, 7, 11),
                    desc='irregular'),
-                    # TODO: enable after implementing MaxPooling
-                    # reference_fn=lambda _,i: nn.SpatialMaxPooling(2, 2).forward(i)),
+    # TODO: enable after implementing MaxPooling
+    # reference_fn=lambda _,i: nn.SpatialMaxPooling(2, 2).forward(i)),
     SimpleTestCase(nn.SpatialAveragePooling,
                     (2, 2),
                     input_size=(2, 3, 6, 6)),
@@ -587,8 +587,8 @@ simple_tests = [
                    desc='stride_pad'),
     # TODO FIX THIS
     # SimpleTestCase(nn.SpatialCrossMapLRN,
-                    # (3,),
-                    # input_size=(2, 3, 6, 6)),
+    # (3,),
+    # input_size=(2, 3, 6, 6)),
     SimpleTestCase(nn.SpatialDivisiveNormalization,
                     (3,),
                     input_size=(2, 3, 8, 8)),
@@ -876,10 +876,10 @@ def build_spatial_unpooling_net():
     return nn.Sequential().add(pool).add(unpool)
 
 simple_tests.append(
-        SimpleTestCase(build_spatial_unpooling_net,
+    SimpleTestCase(build_spatial_unpooling_net,
                        input_size=(1, 3, 10, 10),
                        desc='SpatialMaxUnpooling')
-        )
+    )
 
 
 def build_volumetric_unpooling_net():
@@ -888,10 +888,10 @@ def build_volumetric_unpooling_net():
     return nn.Sequential().add(pool).add(unpool)
 
 simple_tests.append(
-        SimpleTestCase(build_volumetric_unpooling_net,
+    SimpleTestCase(build_volumetric_unpooling_net,
                        input_size=(1, 3, 10, 10),
                        desc='VolumetricMaxUnpooling')
-        )
+    )
 
 
 def prepare_simple_tests():
@@ -1247,15 +1247,15 @@ class TestNN(TestCase):
 
     def test_ConcatTable(self):
         input = [
-                torch.randn(3, 4).float(), torch.randn(3, 4).float(), [torch.randn(3, 4).float()]
+            torch.randn(3, 4).float(), torch.randn(3, 4).float(), [torch.randn(3, 4).float()]
         ]
         _gradOutput = [
-                torch.randn(3, 3, 4).float(), torch.randn(3, 3, 4).float(), torch.randn(3, 3, 4).float()
+            torch.randn(3, 3, 4).float(), torch.randn(3, 3, 4).float(), torch.randn(3, 3, 4).float()
         ]
         gradOutput = [
-                [_gradOutput[0][0], _gradOutput[1][0], [_gradOutput[2][0]]],
-                [_gradOutput[0][1], _gradOutput[1][1], [_gradOutput[2][1]]],
-                [_gradOutput[0][2], _gradOutput[1][2], [_gradOutput[2][2]]]
+            [_gradOutput[0][0], _gradOutput[1][0], [_gradOutput[2][0]]],
+            [_gradOutput[0][1], _gradOutput[1][1], [_gradOutput[2][1]]],
+            [_gradOutput[0][2], _gradOutput[1][2], [_gradOutput[2][2]]]
         ]
         module = nn.ConcatTable()
         module.add(nn.Identity())
@@ -1480,8 +1480,8 @@ class TestNN(TestCase):
         output2 = nll2.forward(input[0], target[0]) * 0.4 + nll.forward(input[1][0], target[1][0]) / 2 + mse.forward(input[1][1], target[1][1])
         self.assertEqual(output, output2)
         gradInput2 = [
-                nll2.backward(input[0], target[0]).clone().mul(0.4),
-                [nll.backward(input[1][1], target[1][0]).clone().div(2), mse.backward(input[1][1], target[1][1])]
+            nll2.backward(input[0], target[0]).clone().mul(0.4),
+            [nll.backward(input[1][1], target[1][0]).clone().div(2), mse.backward(input[1][1], target[1][1])]
         ]
         gradInput = pc2.backward(input, target)
         self.assertEqual(gradInput[0], gradInput2[0])

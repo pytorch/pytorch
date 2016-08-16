@@ -71,11 +71,11 @@ class SpatialConvolutionLocal(Module):
         if input.nDimension() == 3:
             if input.size(0) != self.nInputPlane or input.size(1) != self.iH or input.size(1) != self.iW:
                 raise RuntimeError('Given input size: ({}x{}x{}) inconsistent with expected input size: ({}x{}x{}).'.format(
-                                  input.size(0), input.size(1), input.size(2), self.nInputPlane, self.iH, self.iW))
+                    input.size(0), input.size(1), input.size(2), self.nInputPlane, self.iH, self.iW))
         elif input.nDimension() == 4:
             if input.size(1) != self.nInputPlane or input.size(2) != self.iH or input.size(3) != self.iW:
                 raise RuntimeError('Given input size: ({}x{}x{}x{}) inconsistent with expected input size: (*x{}x{}x{}).'.format(
-                                    input.size(0), input.size(1), input.size(2), input.size(3), self.nInputPlane, self.iH, self.iW))
+                    input.size(0), input.size(1), input.size(2), input.size(3), self.nInputPlane, self.iH, self.iW))
         else:
             raise RuntimeError('3D or 4D (batch mode) tensor expected')
 
@@ -86,11 +86,11 @@ class SpatialConvolutionLocal(Module):
         if output.nDimension() == 3:
             if output.size(0) != self.nOutputPlane or output.size(1) != self.oH or output.size(2) != self.oW:
                 raise RuntimeError('Given output size: ({}x{}x{}) inconsistent with expected output size: ({}x{}x{}).'.format(
-                                    output.size(0), output.size(1), output.size(2), self.nOutputPlane, self.oH, self.oW))
+                    output.size(0), output.size(1), output.size(2), self.nOutputPlane, self.oH, self.oW))
         elif output.nDimension() == 4:
             if output.size(1) != self.nOutputPlane or output.size(2) != self.oH or output.size(3) != self.oW:
                 raise RuntimeError('Given output size: ({}x{}x{}x{}) inconsistent with expected output size: (batchsize x{}x{}x{}).'.format(
-                                    output.size(0), output.size(1), output.size(2), output.size(3), self.nOutputPlane, self.oH, self.oW))
+                    output.size(0), output.size(1), output.size(2), output.size(3), self.nOutputPlane, self.oH, self.oW))
         else:
             raise RuntimeError('3D or 4D(batch mode) tensor expected')
 

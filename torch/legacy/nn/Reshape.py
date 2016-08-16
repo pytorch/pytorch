@@ -52,7 +52,7 @@ class Reshape(Module):
 
     def __repr__(self):
         return super(Reshape, self).__repr__() + \
-                '({})'.format('x'.join(map(lambda x: str(x), self.size)))
+            '({})'.format('x'.join(map(lambda x: str(x), self.size)))
 
     def clearState(self):
         clear(self, '_input', '_gradOutput')
