@@ -146,16 +146,16 @@ class Euclidean(Module):
 
     def clearState(self):
         clear(self, [
-           '_input',
-           '_output',
-           '_gradOutput',
-           '_weight',
-           '_div',
-           '_sum',
-           '_expand',
-           '_expand2',
-           '_expand3',
-           '_repeat',
-           '_repeat2',
+            '_input',
+            '_output',
+            '_gradOutput',
+            '_weight',
+            '_div',
+            '_sum',
+            '_expand',
+            '_expand2',
+            '_expand3',
+            '_repeat',
+            '_repeat2',
         ])
         return super(Euclidean, self).clearState()

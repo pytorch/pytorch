@@ -136,12 +136,12 @@ class Normalize(Module):
 
     def clearState(self):
         clear(self, [
-           '_output',
-           '_indices',
-           '_gradInput',
-           'buffer',
-           'norm',
-           'normp',
-           'cross',
+            '_output',
+            '_indices',
+            '_gradInput',
+            'buffer',
+            'norm',
+            'normp',
+            'cross',
         ])
         return super(Normalize, self).clearState()

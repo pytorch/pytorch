@@ -15,7 +15,7 @@ class Identity(Module):
 
     def clearState(self):
         clear(self, [
-           'output',
-           'gradInput',
+            'output',
+            'gradInput',
         ])
         return super(Identity, self).clearState()

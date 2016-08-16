@@ -172,14 +172,14 @@ class BatchNormalization(Module):
         # first 5 buffers are not present in the current implementation,
         # but we keep them for cleaning old saved models
         clear(self, [
-           'buffer',
-           'buffer2',
-           'centered',
-           'std',
-           'normalized',
-           '_input',
-           '_gradOutput',
-           'save_mean',
-           'save_std',
+            'buffer',
+            'buffer2',
+            'centered',
+            'std',
+            'normalized',
+            '_input',
+            '_gradOutput',
+            'save_mean',
+            'save_std',
         ])
         return super(BatchNormalization, self).clearState()

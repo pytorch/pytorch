@@ -94,11 +94,11 @@ class CosineDistance(Module):
 
     def clearState(self):
         clear(self, [
-           'buffer',
-           'w1',
-           'w22',
-           'w',
-           'w32',
-           'ones',
+            'buffer',
+            'w1',
+            'w22',
+            'w',
+            'w32',
+            'ones',
         ])
         return super(CosineDistance, self).clearState()

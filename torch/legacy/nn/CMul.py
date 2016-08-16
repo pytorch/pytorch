@@ -109,12 +109,12 @@ class CMul(Module):
 
     def clearState(self):
         clear(self, [
-           '_input',
-           '_output',
-           '_weight',
-           '_gradWeight',
-           '_expand',
-           '_repeat',
-           '_sum',
+            '_input',
+            '_output',
+            '_weight',
+            '_gradWeight',
+            '_expand',
+            '_repeat',
+            '_sum',
         ])
         return super(CMul, self).clearState()

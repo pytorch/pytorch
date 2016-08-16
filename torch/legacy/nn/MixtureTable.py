@@ -152,11 +152,11 @@ class MixtureTable(Module):
 
     def clearState(self, ):
         clear(self, [
-          '_gaterView',
-          '_expert',
-          '_expertView',
-          '_sum',
-          '_expert2',
-          '_expertView2',
+            '_gaterView',
+            '_expert',
+            '_expertView',
+            '_sum',
+            '_expert2',
+            '_expertView2',
         ])
         return super(MixtureTable, self).clearState()

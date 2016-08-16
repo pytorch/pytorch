@@ -75,11 +75,11 @@ class ClassSimplexCriterion(MSECriterion):
         assert input.nElement() == self._target.nElement()
         self.output_tensor = self.output_tensor or input.new(1)
         self._backend.MSECriterion_updateOutput(
-           self._backend.library_state,
-           input,
-           self._target,
-           self.output_tensor,
-           self.sizeAverage
+            self._backend.library_state,
+            input,
+            self._target,
+            self.output_tensor,
+            self.sizeAverage
         )
         self.output = self.output_tensor[0]
         return self.output

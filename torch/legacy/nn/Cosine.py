@@ -136,11 +136,11 @@ class Cosine(Module):
 
     def clearState(self):
         clear(self, [
-           '_input',
-           '_weight',
-           '_gradOutput',
-           '_sum',
-           '_inputNorm',
-           '_weightNorm',
+            '_input',
+            '_weight',
+            '_gradOutput',
+            '_sum',
+            '_inputNorm',
+            '_weightNorm',
         ])
         return super(Cosine, self).clearState()
