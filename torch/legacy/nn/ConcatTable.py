@@ -50,6 +50,7 @@ class ConcatTable(Container):
 
                 if i == 0:
                     self.gradInput = self.gradInput if wasTable else []
+
                     def fn(l, i, v):
                         if i >= len(l):
                             assert len(l) == i

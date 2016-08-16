@@ -1705,6 +1705,7 @@ class TestTorch(TestCase):
     def test_newindex(self):
         reference = self._consecutive((3, 3, 3))
         # This relies on __index__() being correct - but we have separate tests for that
+
         def checkPartialAssign(index):
             reference = torch.zeros(3, 3, 3)
             reference[index] = self._consecutive((3, 3, 3))[index]

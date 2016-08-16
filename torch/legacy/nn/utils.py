@@ -151,6 +151,7 @@ def contiguousView(output, input, *args):
 def clear(self, *args):
     if len(args) == 1 and isinstance(args[0], list):
         args = args[0]
+
     def _clear(f):
         if not hasattr(self, f):
             return

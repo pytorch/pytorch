@@ -145,6 +145,7 @@ class Module(object):
     #
     # TODO: This logically belongs to torch.Tensor, not nn.
     _flattenTensorBuffer = {}
+
     def _flatten(self, parameters=[]):
 
         # returns True if tensor occupies a contiguous region of memory (no holes)

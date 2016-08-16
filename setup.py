@@ -24,6 +24,7 @@ def parallelCCompile(self, sources, output_dir=None, macros=None, include_dirs=N
 
     # compile using a thread pool
     import multiprocessing.pool
+
     def _single_compile(obj):
         src, ext = build[obj]
         self._compile(obj, src, ext, cc_args, extra_postargs, pp_opts)

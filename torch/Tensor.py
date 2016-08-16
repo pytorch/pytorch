@@ -94,6 +94,7 @@ class _TensorBase(object):
         dim_size = self.size(dim)
         num_splits = int(math.ceil(float(dim_size) / split_size))
         last_split_size = split_size - (split_size * num_splits - dim_size)
+
         def get_split_size(i):
             return split_size if i < num_splits-1 else last_split_size
         return [self.narrow(int(dim), int(i*split_size), int(get_split_size(i))) for i
