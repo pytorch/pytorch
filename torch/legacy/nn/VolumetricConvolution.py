@@ -3,6 +3,7 @@ import torch
 from .Module import Module
 from .utils import clear
 
+
 class VolumetricConvolution(Module):
 
     def __init__(self, nInputPlane, nOutputPlane, kT, kW, kH, dT=1, dW=1, dH=1, padT=0, padW=None, padH=None):

@@ -3,6 +3,7 @@ import torch._thnn
 from .utils import clear, recursiveType
 from . import _backends
 
+
 class Module(object):
 
     def __init__(self):

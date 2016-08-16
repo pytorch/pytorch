@@ -1,6 +1,7 @@
 import torch
 from .Criterion import Criterion
 
+
 class MultiMarginCriterion(Criterion):
 
     def __init__(self, p=1, weights=None, margin=1, sizeAverage=True):

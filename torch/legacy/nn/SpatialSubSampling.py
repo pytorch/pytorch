@@ -2,6 +2,7 @@ import math
 import torch
 from .Module import Module
 
+
 class SpatialSubSampling(Module):
 
     def __init__(self, nInputPlane, kW, kH, dW=1, dH=1):

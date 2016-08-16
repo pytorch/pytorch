@@ -1,5 +1,6 @@
 import torch
 
+
 def sgd(opfunc, x, config, state=None):
     """A plain implementation of SGD
 

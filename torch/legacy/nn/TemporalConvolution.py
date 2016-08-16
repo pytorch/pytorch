@@ -2,6 +2,7 @@ import math
 import torch
 from .Module import Module
 
+
 class TemporalConvolution(Module):
 
     def __init__(self, inputFrameSize, outputFrameSize, kW, dW=1):

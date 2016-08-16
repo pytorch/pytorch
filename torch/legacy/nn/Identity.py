@@ -2,6 +2,7 @@ import torch
 from .Module import Module
 from .utils import clear
 
+
 class Identity(Module):
 
     def updateOutput(self, input):

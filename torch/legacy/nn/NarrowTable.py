@@ -2,6 +2,7 @@ import torch
 from .Module import Module
 from .utils import clear, recursiveResizeAs, recursiveFill
 
+
 class NarrowTable(Module):
 
     def __init__(self, offset, length=1):

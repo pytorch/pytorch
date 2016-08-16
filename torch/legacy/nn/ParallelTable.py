@@ -1,6 +1,7 @@
 import torch
 from .Container import Container
 
+
 class ParallelTable(Container):
 
     def __init__(self, ):

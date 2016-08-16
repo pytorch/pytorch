@@ -2,6 +2,7 @@ import torch
 from .Module import Module
 from .utils import clear
 
+
 class Dropout(Module):
 
     def __init__(self, p=0.5, inplace=False):

@@ -5,6 +5,7 @@ import torch.cuda
 
 from common import TestCase, get_gpu_type, to_gpu
 
+
 def is_floating(t):
     return type(t) in [torch.FloatTensor, torch.DoubleTensor,
                        torch.cuda.FloatTensor, torch.cuda.DoubleTensor]
@@ -23,30 +24,39 @@ types = [
 S = 10
 M = 50
 
+
 def make_tensor(t, *sizes):
     return t(*sizes).copy_(torch.randn(*sizes))
+
 
 def small_2d(t):
     return make_tensor(t, S, S)
 
+
 def small_3d(t):
     return make_tensor(t, S, S, S)
+
 
 def medium_1d(t):
     return make_tensor(t, M)
 
+
 def medium_2d(t):
     return make_tensor(t, M, M)
 
+
 def small_3d_ones(t):
     return t(S, S, S).copy_(torch.ones(S, S, S))
+
 
 def small_3d_positive(t):
     min_val = 1e-3 if is_floating(t) else 2
     return make_tensor(t, S, S, S).clamp_(min_val, 120)
 
+
 def small_3d_unique(t):
     return t(S, S, S).copy_(torch.range(1, S*S*S))
+
 
 def new_t(*sizes):
     def tmp(t):
@@ -216,6 +226,7 @@ simple_pointwise = [
 for fn in simple_pointwise:
     tests.append((fn, small_3d, lambda t: []))
 
+
 def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t):
     def tmp(self):
         cpu_tensor = tensor_constructor(t)
@@ -236,6 +247,7 @@ def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t):
         # Compare results
         self.assertEqual(cpu_result, gpu_result)
     return tmp
+
 
 class TestCuda(TestCase):
 

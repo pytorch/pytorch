@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class View(Module):
 
     def resetSize(self, *args):

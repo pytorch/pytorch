@@ -1,5 +1,6 @@
 import torch
 
+
 def rmsprop(opfunc, x, config, state=None):
     """ An implementation of RMSprop
 

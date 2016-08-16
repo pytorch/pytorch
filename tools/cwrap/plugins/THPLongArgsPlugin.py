@@ -1,6 +1,7 @@
 from string import Template
 from . import CWrapPlugin
 
+
 class THPLongArgsPlugin(CWrapPlugin):
     PARSE_LONG_ARGS = Template("""\
       THLongStoragePtr __long_args_guard = THPUtils_getLongStorage(args, $num_checked);

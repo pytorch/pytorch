@@ -3,6 +3,7 @@ import torch
 from .Module import Module
 from .utils import clear
 
+
 class SpatialConvolutionLocal(Module):
 
     def __init__(self, nInputPlane, nOutputPlane, iW, iH ,kW, kH, dW=1, dH=1, padW=0, padH=None):

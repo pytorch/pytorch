@@ -1,6 +1,7 @@
 import torch
 from .Criterion import Criterion
 
+
 class CosineEmbeddingCriterion(Criterion):
 
     def __init__(self, margin=0, sizeAverage=True):

@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class MV(Module):
     """Module to perform matrix vector multiplication on two minibatch inputs,
        producing a minibatch.

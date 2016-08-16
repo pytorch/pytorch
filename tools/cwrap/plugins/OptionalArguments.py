@@ -2,6 +2,7 @@ from copy import deepcopy
 from . import CWrapPlugin
 from itertools import product
 
+
 class OptionalArguments(CWrapPlugin):
 
     def process_declarations(self, declarations):

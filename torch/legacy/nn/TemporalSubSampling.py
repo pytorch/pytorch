@@ -2,6 +2,7 @@ import math
 import torch
 from .Module import Module
 
+
 class TemporalSubSampling(Module):
 
     def __init__(self, inputFrameSize, kW, dW=1):

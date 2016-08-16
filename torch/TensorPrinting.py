@@ -4,6 +4,7 @@ from functools import reduce
 
 _pyrange = torch._pyrange
 
+
 def _printformat(storage):
     int_mode = True
     # TODO: use fmod?
@@ -52,6 +53,7 @@ def _printformat(storage):
 
 SCALE_FORMAT = '{:.5f} *\n'
 
+
 def _printMatrix(self, indent=''):
     fmt, scale, sz = _printformat(self.storage())
     nColumnPerLine = math.floor((80-len(indent))/(sz+1))
@@ -69,6 +71,7 @@ def _printMatrix(self, indent=''):
             strt += ' '.join(fmt.format(val/scale) for val in self.select(0, l).narrow(0, firstColumn, lastColumn-firstColumn+1)) + '\n'
         firstColumn = lastColumn + 1
     return strt
+
 
 def _printTensor(self):
     counter_dim = self.nDimension()-2
@@ -94,12 +97,14 @@ def _printTensor(self):
         strt += _printMatrix(submatrix, ' ')
     return strt
 
+
 def _printVector(tensor):
     fmt, scale, _ = _printformat(tensor.storage())
     strt = ''
     if scale != 1:
         strt += SCALE_FORMAT.format(scale)
     return '\n'.join(fmt.format(val/scale) for val in tensor) + '\n'
+
 
 def printTensor(self):
     if self.nDimension() == 0:

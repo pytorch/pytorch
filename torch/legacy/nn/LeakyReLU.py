@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class LeakyReLU(Module):
 
     def __init__(self, negval=1/100, inplace=False):

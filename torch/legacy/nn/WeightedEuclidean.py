@@ -2,6 +2,7 @@ import math
 import torch
 from .Module import Module
 
+
 class WeightedEuclidean(Module):
 
     def __init__(self, inputSize, outputSize):

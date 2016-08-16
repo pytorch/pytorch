@@ -2,6 +2,7 @@ import torch
 from .Module import Module
 from .SpatialMaxPooling import SpatialMaxPooling
 
+
 class SpatialMaxUnpooling(Module):
 
     def __init__(self, poolingModule):

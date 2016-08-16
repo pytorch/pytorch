@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class MulConstant(Module):
 
     def __init__(self, constant_scalar, inplace=False):

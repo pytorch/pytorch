@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class FlattenTable(Module):
 
     def __init__(self):

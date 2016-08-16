@@ -5,6 +5,7 @@ from .Module import Module
 
 # TODO fix THNN...
 
+
 class SpatialConvolutionMap(Module):
 
     class maps(object):

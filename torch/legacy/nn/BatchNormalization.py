@@ -32,6 +32,7 @@ import torch
 from .Module import Module
 from .utils import clear
 
+
 class BatchNormalization(Module):
     # expected dimension of input
     nDim = 2

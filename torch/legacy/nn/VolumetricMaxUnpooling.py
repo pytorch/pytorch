@@ -2,6 +2,7 @@ import torch
 from .Module import Module
 from .VolumetricMaxPooling import VolumetricMaxPooling
 
+
 class VolumetricMaxUnpooling(Module):
 
     def __init__(self, poolingModule):

@@ -1,5 +1,6 @@
 import math
 
+
 def adam(opfunc, x, config, state=None):
     """ An implementation of Adam http://arxiv.org/pdf/1412.6980.pdf
 

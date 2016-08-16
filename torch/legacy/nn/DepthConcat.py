@@ -14,6 +14,7 @@ import math
 import torch
 from .Concat import Concat
 
+
 class DepthConcat(Concat):
 
     def windowNarrow(self, output, currentOutput, offset):

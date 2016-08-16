@@ -2,6 +2,7 @@ import torch
 from .Module import Module
 from .utils import clear
 
+
 class LookupTable(Module):
 
     def __init__(self, nIndex, nOutput, paddingValue=-1, maxNorm=None, normType=None):

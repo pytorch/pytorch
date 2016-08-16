@@ -3,6 +3,7 @@ import torch
 from .Module import Module
 from .utils import clear
 
+
 class Linear(Module):
 
     def __init__(self, inputSize, outputSize, bias=True):

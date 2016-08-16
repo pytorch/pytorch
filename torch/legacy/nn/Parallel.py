@@ -1,6 +1,7 @@
 import torch
 from .Container import Container
 
+
 class Parallel(Container):
 
     def __init__(self, inputDimension, outputDimension):

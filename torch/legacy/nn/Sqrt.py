@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class Sqrt(Module):
 
     def __init__(self, b=0, eps=0):

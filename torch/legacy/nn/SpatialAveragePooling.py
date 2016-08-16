@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class SpatialAveragePooling(Module):
 
     def __init__(self, kW, kH, dW=1, dH=1, padW=0, padH=0):

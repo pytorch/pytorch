@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class HardShrink(Module):
 
     def __init__(self, lambd=0.5):

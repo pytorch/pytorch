@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class Abs(Module):
     def __init__(self):
         super(Abs, self).__init__()

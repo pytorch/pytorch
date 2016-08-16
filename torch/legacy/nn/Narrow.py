@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class Narrow(Module):
 
     def __init__(self, dimension, offset, length=1):

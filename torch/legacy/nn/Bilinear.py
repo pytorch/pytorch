@@ -3,6 +3,7 @@ import torch
 from .Module import Module
 from .utils import clear
 
+
 class Bilinear(Module):
 
     def _assertInput(self, input):

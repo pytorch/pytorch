@@ -2,6 +2,7 @@ import torch
 from .Module import Module
 from .Tanh import Tanh
 
+
 class TanhShrink(Module):
 
     def __init__(self):

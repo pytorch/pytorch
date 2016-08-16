@@ -2,6 +2,7 @@ import torch
 from .Module import Module
 from .utils import clear
 
+
 class SpatialCrossMapLRN(Module):
 
     def __init__(self, size, alpha=1e-4, beta=0.75, k=1):

@@ -12,6 +12,7 @@ from .MSECriterion import MSECriterion
          Reference: http.//arxiv.org/abs/1506.08230
 """
 
+
 class ClassSimplexCriterion(MSECriterion):
 
     def __init__(self, nClasses):

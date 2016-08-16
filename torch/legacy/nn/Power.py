@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class Power(Module):
 
     def __init__(self, p):

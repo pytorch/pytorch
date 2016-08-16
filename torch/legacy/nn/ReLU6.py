@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class ReLU6(Module):
 
     def __init__(self, inplace=False):

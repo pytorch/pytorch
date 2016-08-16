@@ -7,6 +7,7 @@ from .SpatialAveragePooling import SpatialAveragePooling
 from .MulConstant import MulConstant
 from .Sqrt import Sqrt
 
+
 class SpatialLPPooling(Sequential):
 
     def __init__(self, nInputPlane, pnorm, kW, kH, dW=None, dH=None):

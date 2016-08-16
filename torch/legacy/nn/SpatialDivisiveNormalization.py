@@ -12,6 +12,7 @@ from .CDivTable import CDivTable
 from .Threshold import Threshold
 from .utils import clear
 
+
 class SpatialDivisiveNormalization(Module):
 
     def __init__(self, nInputPlane=1, kernel=None, threshold=1e-4, thresval=None):

@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class Transpose(Module):
     # transpose dimensions:
     # n = nn.Transpose({1, 4}, {1, 3})

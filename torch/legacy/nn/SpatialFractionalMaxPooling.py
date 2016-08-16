@@ -2,6 +2,7 @@ import math
 import torch
 from .Module import Module
 
+
 class SpatialFractionalMaxPooling(Module):
     # Usage:
     # nn.SpatialFractionalMaxPooling(poolSizeW, poolSizeH, outW, outH)

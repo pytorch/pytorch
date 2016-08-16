@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class Squeeze(Module):
 
     def __init__(self, dim=None):

@@ -1,5 +1,6 @@
 import torch
 
+
 def rprop(opfunc, x, config, state=None):
     """ A plain implementation of RPROP
 

@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class LogSoftMax(Module):
 
     def updateOutput(self, input):

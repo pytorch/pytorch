@@ -4,6 +4,7 @@ import itertools
 THNN_H_PATH = os.path.join(os.path.dirname(__file__), '..', 'lib', 'THNN.h')
 THCUNN_H_PATH = os.path.join(os.path.dirname(__file__), '..', 'lib', 'THCUNN.h')
 
+
 class THNNBackendBase(object):
     def __init__(self):
         self.methods = {}

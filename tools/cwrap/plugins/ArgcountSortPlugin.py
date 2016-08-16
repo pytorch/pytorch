@@ -1,5 +1,6 @@
 from . import CWrapPlugin
 
+
 class ArgcountSortPlugin(CWrapPlugin):
 
     def __init__(self, descending=True):

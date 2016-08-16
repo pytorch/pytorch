@@ -6,6 +6,7 @@ from .Sequential import Sequential
 from .ParallelTable import ParallelTable
 from .MM import MM
 
+
 class PartialLinear(Module):
     """
     PartialLinear is a Linear layer that allows the user to a set a collection of

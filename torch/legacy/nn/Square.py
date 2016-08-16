@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class Square(Module):
 
     def updateOutput(self, input):

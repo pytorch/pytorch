@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class CAddTable(Module):
     def __init__(self, inplace=False):
         super(CAddTable, self).__init__()

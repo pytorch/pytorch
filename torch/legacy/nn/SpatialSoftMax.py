@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class SpatialSoftMax(Module):
 
     def updateOutput(self, input):

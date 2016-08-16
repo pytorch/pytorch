@@ -2,6 +2,7 @@ import torch
 from .Module import Module
 from .utils import clear
 
+
 class TemporalMaxPooling(Module):
 
     def __init__(self, kW, dW=None):

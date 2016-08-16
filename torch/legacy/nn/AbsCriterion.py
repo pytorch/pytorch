@@ -1,6 +1,7 @@
 import torch
 from .Criterion import Criterion
 
+
 class AbsCriterion(Criterion):
 
     def __init__(self, sizeAverage=True):

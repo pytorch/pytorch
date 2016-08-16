@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class Log(Module):
 
     def updateOutput(self, input):

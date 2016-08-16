@@ -1,6 +1,7 @@
 import torch
 from .Container import Container
 
+
 class ConcatTable(Container):
 
     def __init__(self, ):

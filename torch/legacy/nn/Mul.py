@@ -2,6 +2,7 @@ import math
 import torch
 from .Module import Module
 
+
 class Mul(Module):
 
     def __init__(self):

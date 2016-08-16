@@ -1,6 +1,7 @@
 import torch
 from .Criterion import Criterion
 
+
 class HingeEmbeddingCriterion(Criterion):
 
     def __init__(self, margin=1, sizeAverage=True):

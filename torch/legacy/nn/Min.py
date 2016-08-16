@@ -2,6 +2,7 @@ import torch
 from .Module import Module
 from .utils import clear, addSingletonDimension
 
+
 class Min(Module):
 
     def __init__(self, dimension=0):

@@ -9,6 +9,7 @@ Please use instead "nn.Sum(dimension, nInputDims, sizeAverage)"
 
 """
 
+
 class Mean(Sum):
 
     def __init__(self, dimension):

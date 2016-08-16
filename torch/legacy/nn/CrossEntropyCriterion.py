@@ -3,6 +3,7 @@ from .Criterion import Criterion
 from .LogSoftMax import LogSoftMax
 from .ClassNLLCriterion import ClassNLLCriterion
 
+
 class CrossEntropyCriterion(Criterion):
 
     def __init__(self, weights=None):

@@ -2,6 +2,7 @@ import torch
 from .Module import Module
 from .utils import clear
 
+
 class VolumetricMaxPooling(Module):
 
     def __init__(self, kT, kW, kH, dT=None, dW=None, dH=None, padT=0, padW=0, padH=0):

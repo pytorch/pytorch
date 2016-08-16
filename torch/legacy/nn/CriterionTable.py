@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class CriterionTable(Module):
 
     def __init__(self, criterion):

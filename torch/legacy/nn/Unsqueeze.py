@@ -2,6 +2,7 @@ import torch
 from .Module import Module
 from .utils import addSingletonDimension
 
+
 class Unsqueeze(Module):
 
     def __init__(self, dim):

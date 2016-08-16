@@ -2,6 +2,7 @@ import torch
 from .Module import Module
 from .utils import clear
 
+
 class SpatialMaxPooling(Module):
 
     def __init__(self, kW, kH, dW=None, dH=None, padW=0, padH=0):

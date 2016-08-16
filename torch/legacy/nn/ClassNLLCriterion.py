@@ -1,6 +1,7 @@
 import torch
 from .Criterion import Criterion
 
+
 class ClassNLLCriterion(Criterion):
     def __init__(self, weights=None, sizeAverage=True):
         super(ClassNLLCriterion, self).__init__()

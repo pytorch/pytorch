@@ -8,6 +8,7 @@ BASE_PATH = os.path.realpath(os.path.join(__file__, '..', '..', '..'))
 WRAPPER_PATH = os.path.join(BASE_PATH, 'torch', 'csrc', 'nn')
 THNN_UTILS_PATH = os.path.join(BASE_PATH, 'torch', '_thnn', 'utils.py')
 
+
 def import_module(name, path):
     if sys.version_info > (3, 0):
         import importlib.util
@@ -79,9 +80,11 @@ def wrap_function(name, type, arguments):
     declaration += ']]\n\n\n'
     return declaration
 
+
 def generate_wrappers():
     wrap_nn()
     wrap_cunn()
+
 
 def wrap_nn():
     wrapper = '#include <TH/TH.h>\n\n\n'
@@ -95,6 +98,7 @@ def wrap_nn():
         StandaloneExtension('torch._thnn._THNN'),
         NullableArguments(),
     ])
+
 
 def wrap_cunn():
     wrapper = '#include <TH/TH.h>\n'

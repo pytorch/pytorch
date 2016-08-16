@@ -1,5 +1,6 @@
 import math
 
+
 def asgd(opfunc, x, config, state=None):
     """ An implementation of ASGD
 

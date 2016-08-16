@@ -1,6 +1,7 @@
 import torch
 from .Threshold import Threshold
 
+
 class ReLU(Threshold):
 
     def __init__(self, inplace=False):

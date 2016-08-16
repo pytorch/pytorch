@@ -1,6 +1,7 @@
 import torch
 from .Container import Container
 
+
 class Sequential(Container):
 
     def __len__(self):

@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class ELU(Module):
     """
             Djork-Arné Clevert, Thomas Unterthiner, Sepp Hochreiter

@@ -3,6 +3,7 @@ import math
 import torch
 from .Module import Module
 
+
 class SpatialFullConvolutionMap(Module):
 
     def __init__(self, conMatrix, kW, kH, dW=1, dH=1):

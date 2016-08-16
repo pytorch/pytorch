@@ -1,6 +1,7 @@
 from . import CWrapPlugin
 from string import Template
 
+
 class BeforeCall(CWrapPlugin):
 
     def initialize(self, cwrap):

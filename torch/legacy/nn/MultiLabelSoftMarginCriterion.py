@@ -3,6 +3,7 @@ from .Criterion import Criterion
 from .Sigmoid import Sigmoid
 from .BCECriterion import BCECriterion
 
+
 class MultiLabelSoftMarginCriterion(Criterion):
     """
     A MultiLabel multiclass criterion based on sigmoid:

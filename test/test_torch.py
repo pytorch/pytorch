@@ -8,6 +8,7 @@ from common import TestCase, iter_indices
 
 SIZE = 100
 
+
 class TestTorch(TestCase):
 
     def test_dot(self):

@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class Select(Module):
 
     def __init__(self, dimension, index):

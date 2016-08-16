@@ -1,5 +1,6 @@
 from . import CWrapPlugin
 
+
 class AutoGPU(CWrapPlugin):
 
     DEFINES = """

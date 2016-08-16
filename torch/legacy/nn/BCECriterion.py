@@ -1,6 +1,7 @@
 import torch
 from .Criterion import Criterion
 
+
 class BCECriterion(Criterion):
     eps = 1e-12
 

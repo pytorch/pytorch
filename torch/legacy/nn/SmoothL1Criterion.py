@@ -1,6 +1,7 @@
 import torch
 from .Criterion import Criterion
 
+
 class SmoothL1Criterion(Criterion):
 
     def __init__(self, sizeAverage=True):

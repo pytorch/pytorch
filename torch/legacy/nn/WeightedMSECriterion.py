@@ -1,6 +1,7 @@
 import torch
 from .Criterion import Criterion
 
+
 class WeightedMSECriterion(Criterion):
 
     def __init__(self, weight, sizeAverage=True):

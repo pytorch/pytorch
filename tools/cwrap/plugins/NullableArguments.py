@@ -1,5 +1,6 @@
 from . import CWrapPlugin
 
+
 class NullableArguments(CWrapPlugin):
     def process_single_check(self, code, arg, arg_accessor):
         if 'nullable' in arg and arg['nullable']:

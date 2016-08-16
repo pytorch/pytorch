@@ -10,6 +10,7 @@ from .CSubTable import CSubTable
 from .CDivTable import CDivTable
 from .utils import clear
 
+
 class SpatialSubtractiveNormalization(Module):
 
     def __init__(self, nInputPlane=1, kernel=None):

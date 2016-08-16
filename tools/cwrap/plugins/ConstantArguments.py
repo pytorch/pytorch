@@ -1,6 +1,7 @@
 from . import CWrapPlugin
 from string import Template
 
+
 class ConstantArguments(CWrapPlugin):
 
     def process_declarations(self, declarations):

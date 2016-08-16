@@ -2,6 +2,7 @@ import torch
 from .Criterion import Criterion
 from .utils import clear
 
+
 class L1Cost(Criterion):
 
     def __init__(self):

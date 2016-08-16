@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class Sigmoid(Module):
 
     def updateOutput(self, input):

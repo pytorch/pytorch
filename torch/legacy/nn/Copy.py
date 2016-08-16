@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class Copy(Module):
 
     def __init__(self, intype, outtype, dontCast=False):

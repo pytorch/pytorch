@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class SoftMax(Module):
 
     def updateOutput(self, input):

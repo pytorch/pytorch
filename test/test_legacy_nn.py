@@ -15,6 +15,7 @@ PRECISION = 1e-5
 EXP_PRECISION = 1e-4
 # TODO: hessian tests
 
+
 class TestCaseBase(object):
     def __init__(self, constructor, constructor_args=tuple(), input_size=None,
             input=None, desc='', reference_fn=None, fullname=None, **kwargs):
@@ -868,6 +869,7 @@ for p in range(1, 4+1):
                         desc=str(p))
     )
 
+
 def build_spatial_unpooling_net():
     pool = nn.SpatialMaxPooling(2, 2, 2, 2)
     unpool = nn.SpatialMaxUnpooling(pool)
@@ -878,6 +880,7 @@ simple_tests.append(
             input_size=(1, 3, 10, 10),
             desc='SpatialMaxUnpooling')
         )
+
 
 def build_volumetric_unpooling_net():
     pool = nn.VolumetricMaxPooling(2, 2, 2, 2)
@@ -890,6 +893,7 @@ simple_tests.append(
             desc='VolumetricMaxUnpooling')
         )
 
+
 def prepare_simple_tests():
     for test in simple_tests:
         test_name = test.get_name()
@@ -900,6 +904,7 @@ def prepare_simple_tests():
             raise RuntimeError('Found two tests with the same name: ' + cuda_test_name)
         setattr(TestNN, test_name, lambda self,test=test: test(self))
         setattr(TestNN, cuda_test_name, lambda self,test=test: test.test_cuda(self))
+
 
 class TestNN(TestCase):
 

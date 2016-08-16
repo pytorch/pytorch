@@ -4,6 +4,7 @@ from .Sequential import Sequential
 from .SpatialSubtractiveNormalization import SpatialSubtractiveNormalization
 from .SpatialDivisiveNormalization import SpatialDivisiveNormalization
 
+
 class SpatialContrastiveNormalization(Module):
 
     def __init__(self, nInputPlane=1, kernel=None, threshold=1e-4, thresval=1e-4):

@@ -2,6 +2,7 @@ import torch
 from .Criterion import Criterion
 from .utils import recursiveResizeAs, recursiveFill, recursiveAdd
 
+
 class ParallelCriterion(Criterion):
 
     def __init__(self, repeatTarget=False):

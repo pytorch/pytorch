@@ -13,6 +13,8 @@ import torch
 # > net1:type('torch.cuda.FloatTensor', tensorCache)
 # > net2:type('torch.cuda.FloatTensor', tensorCache)
 # > nn.utils.recursiveType(anotherTensor, 'torch.cuda.FloatTensor', tensorCache)
+
+
 def recursiveType(param, type, tensorCache={}):
     from .Criterion import Criterion
     from .Module import Module
@@ -44,6 +46,7 @@ def recursiveType(param, type, tensorCache={}):
             param = newparam
     return param
 
+
 def recursiveResizeAs(t1, t2):
     if isinstance(t2, list):
         t1 = t1 if isinstance(t1, list) else [t1]
@@ -60,6 +63,7 @@ def recursiveResizeAs(t1, t2):
                 type(t1).__name__  + " and " + type(t2).__name__  + "instead")
     return t1, t2
 
+
 def recursiveFill(t2, val):
     if isinstance(t2, list):
         t2 = [recursiveFill(x, val) for x in t2]
@@ -69,6 +73,7 @@ def recursiveFill(t2, val):
         raise RuntimeError("expecting tensor or table thereof. Got " + \
             type(t2).__name__ + " instead")
     return t2
+
 
 def recursiveAdd(t1, val=1, t2=None):
     if t2 is None:
@@ -85,6 +90,7 @@ def recursiveAdd(t1, val=1, t2=None):
                 type(t1).__name__ + " and " + type(t2).__name__ + " instead")
     return t1, t2
 
+
 def recursiveCopy(t1, t2):
     if isinstance(t2, list):
         t1 = t1 if isinstance(t1, list) else [t1]
@@ -97,6 +103,7 @@ def recursiveCopy(t1, t2):
         raise RuntimeError("expecting nested tensors or tables. Got " + \
                 type(t1).__name__ + " and " + type(t2).__name__ + " instead")
     return t1, t2
+
 
 def addSingletonDimension(*args):
     view = None
@@ -125,6 +132,7 @@ def addSingletonDimension(*args):
     view.set_(t.storage(), t.storageOffset(), size, stride)
     return view
 
+
 def contiguousView(output, input, *args):
     output = output or input.new()
     if input.isContiguous():
@@ -138,6 +146,8 @@ def contiguousView(output, input, *args):
 # go over specified fields and clear them. accepts
 # nn.clearState(self, ['_buffer', '_buffer2']) and
 # nn.clearState(self, '_buffer', '_buffer2')
+
+
 def clear(self, *args):
     if len(args) == 1 and isinstance(args[0], list):
         args = args[0]

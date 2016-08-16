@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class SpatialZeroPadding(Module):
 
     def __init__(self, pad_l, pad_r=None, pad_t=None, pad_b=None):

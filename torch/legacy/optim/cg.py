@@ -2,8 +2,10 @@ import math
 
 INFINITY = float('inf')
 
+
 def sqrt_nothrow(x):
     return math.sqrt(x) if x >= 0 else float('nan')
+
 
 def cg(opfunc, x, config, state=None):
     """

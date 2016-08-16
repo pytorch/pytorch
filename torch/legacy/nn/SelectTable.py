@@ -2,6 +2,7 @@ import torch
 from .Module import Module
 from .utils import recursiveCopy
 
+
 class SelectTable(Module):
 
     def __init__(self, index):
