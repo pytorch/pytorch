@@ -75,7 +75,7 @@ class Parallel(Container):
 
         offset = 0
         for i in range(nModule):
-            module = self.modules[i];
+            module = self.modules[i]
             currentOutput = module.output
             module.accupdateGradParameters(input.select(self.inputDimension, i),
                                            gradOutput.narrow(self.outputDimension, offset, currentOutput.size(self.outputDimension)),

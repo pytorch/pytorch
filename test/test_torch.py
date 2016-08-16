@@ -188,7 +188,7 @@ class TestTorch(TestCase):
 
     def test_lerp(self):
         def TH_lerp(a, b, weight):
-            return a + weight * (b - a);
+            return a + weight * (b - a)
 
         size = (100, 100)
         a = torch.rand(*size)
@@ -1430,7 +1430,7 @@ class TestTorch(TestCase):
         imvc2 = torch.conv3(x, k, 'V')
         imfc = torch.conv3(x, k, 'F')
 
-        ki = k.clone();
+        ki = k.clone()
         ks = k.storage()
         kis = ki.storage()
         for i in range(ks.size() - 1, 0, -1):
@@ -1512,7 +1512,7 @@ class TestTorch(TestCase):
         self._test_conv_corr_eq(lambda x, k: torch.conv3(x, k, 'F'), reference)
 
     def test_logical(self):
-        x = torch.rand(100, 100) * 2 - 1;
+        x = torch.rand(100, 100) * 2 - 1
         xx = x.clone()
 
         xgt = torch.gt(x, 1)
