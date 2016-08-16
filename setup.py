@@ -207,4 +207,4 @@ setup(name="torch", version="0.1",
     packages=['torch', 'torch._thnn', 'torch.legacy', 'torch.legacy.nn', 'torch.legacy.optim'] + (['torch.cuda', 'torch.legacy.cunn'] if WITH_CUDA else []),
     package_data={'torch': ['lib/*.so*', 'lib/*.h']},
     install_requires=['pyyaml'],
-)
+      )
