@@ -25,9 +25,9 @@ class SpatialReflectionPadding(Module):
     def updateGradInput(self, input, gradOutput):
         assert input.dim() == 4 and gradOutput.dim() == 4
         assert input.size(0) == gradOutput.size(0) and \
-                input.size(1) == gradOutput.size(1) and \
-                input.size(2) + self.pad_t + self.pad_b == gradOutput.size(2) and \
-                input.size(3) + self.pad_l + self.pad_r == gradOutput.size(3)
+        input.size(1) == gradOutput.size(1) and \
+        input.size(2) + self.pad_t + self.pad_b == gradOutput.size(2) and \
+        input.size(3) + self.pad_l + self.pad_r == gradOutput.size(3)
 
         self._backend.SpatialReflectionPadding_updateGradInput(
             self._backend.library_state,

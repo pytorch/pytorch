@@ -857,8 +857,8 @@ class TestTorch(TestCase):
             compareTensors(t, sortKVal, sortKInd, topKVal, topKInd, dim)
 
         t = torch.rand(random.randrange(SIZE),
-                        random.randrange(SIZE),
-                        random.randrange(SIZE))
+                       random.randrange(SIZE),
+                       random.randrange(SIZE))
 
         for kTries in range(3):
             for dimTries in range(3):

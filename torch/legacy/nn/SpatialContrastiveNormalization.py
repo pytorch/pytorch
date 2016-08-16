@@ -28,7 +28,7 @@ class SpatialContrastiveNormalization(Module):
         self.normalizer = Sequential()
         self.normalizer.add(SpatialSubtractiveNormalization(self.nInputPlane, self.kernel))
         self.normalizer.add(SpatialDivisiveNormalization(self.nInputPlane, self.kernel,
-                                                            self.threshold, self.thresval))
+                                                         self.threshold, self.thresval))
 
     def updateOutput(self, input):
         self.output = self.normalizer.forward(input)

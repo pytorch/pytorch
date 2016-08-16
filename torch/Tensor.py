@@ -174,7 +174,7 @@ class _TensorBase(object):
                 raise ValueError('incorrect size: only supporting singleton expansion (size=1)')
 
         result.set_(src.storage(), src.storageOffset(),
-                                src_size, src_stride)
+                    src_size, src_stride)
         return result
 
     def repeatTensor(self, *args):
