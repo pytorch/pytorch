@@ -203,37 +203,54 @@ class _TensorBase(object):
         urtensor.copy_(xxtensor)
         return result
 
+    #TODO: add tests for operators
     def __add__(self, other):
-        return self.clone().add(other)
+        return self.add(other)
     __radd__ = __add__
 
+    def __iadd__(self, other):
+        return self.add_(other)
+
     def __sub__(self, other):
-        return self.clone().sub(other)
-    __rsub__ = __sub__
+        return self.sub(other)
+
+    def __rsub__(self, other):
+        return self.new().resizeAs_(self).fill_(other).add_(-1, self)
+
+    def __isub__(self, other):
+        return self.sub_(other)
 
     def __mul__(self, other):
-        if torch.isTensor(other):
-            dim_self = self.dim()
-            dim_other = other.dim()
-            if dim_self == 1 and dim_other == 1:
-                return self.dot(other)
-            elif dim_self == 2 and dim_other == 1:
-                return torch.mv(self, other)
-            elif dim_self == 2 and dim_other == 2:
-                return torch.mm(self, other)
-        else:
-            return self.clone().mul(other)
+        return self.mul(other)
+    __rmul__ = __mul__
 
-    def __rmul__(self, other):
-        # No need to check for tensor on lhs - it would execute it's __mul__
-        return self.clone().mul(other)
+    def __imul__(self, other):
+        return self.mul_(other)
+
+    def __matmul__(self, other):
+        dim_self = self.dim()
+        dim_other = other.dim()
+        # TODO: should this really be dot product?
+        # if dim_self == 1 and dim_other == 1:
+            # return self.dot(other)
+        if dim_self == 2 and dim_other == 1:
+            return torch.mv(self, other)
+        elif dim_self == 2 and dim_other == 2:
+            return torch.mm(self, other)
 
     def __div__(self, other):
-        return self.clone().div(other)
-    __rdiv__ = __div__
+        return self.div(other)
+    __truediv__ = __div__
+
+    def __rdiv__(self, other):
+        return self.new().resizeAs_(self).fill_(other).div_(self)
+    __rtruediv__ = __rdiv__
+
+    def __idiv__(self, other):
+        return self.div_(other)
 
     def __mod__(self, other):
-        return self.clone().remainder(other)
+        return self.remainder(other)
 
     def __neg__(self):
-        return self.clone().mul(-1)
+        return self.neg()
