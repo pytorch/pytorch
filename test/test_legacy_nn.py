@@ -400,7 +400,7 @@ simple_tests = [
     SimpleTestCase(nn.Linear,
                     (10,8),
                     input_size=(4, 10),
-                    reference_fn=lambda m,i: i * m.weight.t() + m.bias.view(1, -1).expand(4, 8)),
+                    reference_fn=lambda m,i: torch.mm(i, m.weight.t()) + m.bias.view(1, -1).expand(4, 8)),
     SimpleTestCase(nn.MM,
                     input_size=[(4, 5, 3), (4, 3, 2)],
                     reference_fn=lambda _,i: torch.bmm(*i)),
