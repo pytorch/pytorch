@@ -1,21 +1,20 @@
 # pytorch [alpha-0]
 
-The project is still under active development and is likely to drastically change in short periods of time.  
-We will be announcing API changes and important developments via a newsletter, github issues and post a link to the issues on slack.  
-Please remember that at this stage, this is an invite-only closed alpha, and please don't distribute code further.  
+The project is still under active development and is likely to drastically change in short periods of time.
+We will be announcing API changes and important developments via a newsletter, github issues and post a link to the issues on slack.
+Please remember that at this stage, this is an invite-only closed alpha, and please don't distribute code further.
 This is done so that we can control development tightly and rapidly during the initial phases with feedback from you.
 
 
 ## Installation
 ```bash
-pip3 install .
-python3 setup.py build
-python3 setup.py install
+pip install -r requirements.txt
+pip install .
 ```
 
 ## Communication
 * github issues: bug reports, feature requests, install issues, RFCs, thoughts, etc.
-* slack: general chat, online discussions, collaboration etc. https://pytorch.slack.com/ . If you need a slack invite, ping me at soumith@pytorch.org 
+* slack: general chat, online discussions, collaboration etc. https://pytorch.slack.com/ . If you need a slack invite, ping me at soumith@pytorch.org
 * newsletter: no-noise, one-way email newsletter with important announcements about pytorch. You can sign-up here: http://eepurl.com/cbG0rv
 
 ## Timeline
@@ -26,7 +25,7 @@ After that, we will reevaluate progress, and if we are ready, we will hit beta-0
 * alpha-0: Working versions of torch, cutorch, nn, cunn, optim fully unit tested with seamless numpy conversions
 * alpha-1: Serialization to/from disk with sharing intact. initial release of the new neuralnets package based on a Chainer-like design
 * alpha-2: sharing tensors across processes for hogwild training or data-loading processes. a rewritten optim package for this new nn.
-* alpha-3: binary installs (prob will take @alexbw 's help here), contbuilds, etc. 
+* alpha-3: binary installs (prob will take @alexbw 's help here), contbuilds, etc.
 * alpha-4: a ton of examples across vision, nlp, speech, RL -- this phase might make us rethink parts of the APIs, and hence want to do this in alpha than beta
 * alpha-5: Putting a simple and efficient story around multi-machine training. Probably simplistic like torch-distlearn. Building the website, release scripts, more documentation, etc.
 * alpha-6: [no plan yet]
@@ -35,15 +34,15 @@ The beta phases will be leaning more towards working with all of you, convering 
 
 ## pytorch vs torch: important changes
 
-We've decided that it's time to rewrite/update parts of the old torch API, even if it means losing some of backward compatibility (we can hack up a model converter that converts correctly).  
+We've decided that it's time to rewrite/update parts of the old torch API, even if it means losing some of backward compatibility (we can hack up a model converter that converts correctly).
 This section lists the biggest changes, and suggests how to shift from torch to pytorch.
 
-For now there's no pytorch documentation.  
+For now there's no pytorch documentation.
 Since all currently implemented modules are very similar to the old ones, it's best to use torch7 docs for now (having in mind several differences described below).
 
 ### Library structure
 
-All core modules are merged into a single repository.  
+All core modules are merged into a single repository.
 Most of them will be rewritten and will be completely new (more on this below), but we're providing a Python version of old packages under torch.legacy namespace.
 * torch           (torch)
 * cutorch         (torch.cuda)
@@ -54,7 +53,7 @@ Most of them will be rewritten and will be completely new (more on this below), 
 
 ### 0-based indexing
 
-pytorch uses 0-based indexing everywhere.  
+pytorch uses 0-based indexing everywhere.
 This includes arguments to `index*` functions and nn criterion weights.
 
 Under the hood, on the C side, we've changed logic on TH / THC / THNN / THCUNN to introduce a TH_INDEX_BASE compile-time definition to switch between 0 and 1 indexing logic.
@@ -63,8 +62,8 @@ Under the hood, on the C side, we've changed logic on TH / THC / THNN / THCUNN t
 
 **All methods operating on tensors are now out-of-place by default.**
 
-This means that although `a.add(b)` used to have a side-effect of mutating the elements in a, it will now return a new Tensor, holding the result.  
-All methods that mutate the Tensor/Storage are now marked with a trailing underscore (including `copy` -> `copy_`, `fill` -> `fill_`, `set` -> `set_`, etc.).  
+This means that although `a.add(b)` used to have a side-effect of mutating the elements in a, it will now return a new Tensor, holding the result.
+All methods that mutate the Tensor/Storage are now marked with a trailing underscore (including `copy` -> `copy_`, `fill` -> `fill_`, `set` -> `set_`, etc.).
 Most of math methods have their in-place counterparts, so  an equivalent to `a.add(b)` in Lua is now `a.add_(b)` (or `torch.add(a, a, b)`, which is not recommended in this case)
 
 ### CUDA module
@@ -78,10 +77,10 @@ with torch.cuda.device(1):
     a = torch.cuda.FloatTensor(10) # a is allocated on GPU1
 ```
 
-Calling `.cuda()` on tensors no longer converts it to a GPU float tensor, but to a CUDA tensor of the same type located on a currently selected device.  
+Calling `.cuda()` on tensors no longer converts it to a GPU float tensor, but to a CUDA tensor of the same type located on a currently selected device.
 So, for example: ``` a = torch.LongTensor(10).cuda() # a is a CudaLongTensor ```
 
-Calling `.cuda(3)` will send it to the third device.  
+Calling `.cuda(3)` will send it to the third device.
 `.cuda()` can be also used to transfer CUDA tensors between devices (calling it on a GPU tensor, with a different device selected will copy it into the current device).
 
 ```python
@@ -103,8 +102,8 @@ with torch.cuda.device(1):
     d = torch.randn(2, 2).cuda() # d is on GPU1
 ```
 
-In the near future, we also plan to use a CUDA allocator, which allows to alleviate problems with cudaMalloc/cudaFree being a sync point.  
-This will help us to not worry about using buffers for every intermediate computation in a module if one wants to do multi-GPU training, for example.  
+In the near future, we also plan to use a CUDA allocator, which allows to alleviate problems with cudaMalloc/cudaFree being a sync point.
+This will help us to not worry about using buffers for every intermediate computation in a module if one wants to do multi-GPU training, for example.
 See: https://github.com/torch/cutorch/pull/443
 
 
@@ -160,7 +159,7 @@ for i in range(ITERS):
 
 ```
 
-* Here, nn.Variable will have a complete tape-based automatic differentiation implemented 
+* Here, nn.Variable will have a complete tape-based automatic differentiation implemented
 * To access states, have hooks for forward / backward (this also makes multi-GPU easier to implement)
     * This has the advantage of not having to worry about in-place / out-of-place operators for accessing .output or .gradInput
 * When writing the module, make sure debuggability is straight forward. Dropping into pdb and inspecting things should be natural, especially when going over the backward graph.
@@ -226,6 +225,6 @@ For parameter reductions ASAP:
 
 #### Multiprocessing
 
-We plan to make it as straightforward as possible, to use pytorch in a multiprocessing environment.  
-For this, we plan to implement a .share() method for tensors that will enable them to be shared across processes seamlessly.  
+We plan to make it as straightforward as possible, to use pytorch in a multiprocessing environment.
+For this, we plan to implement a .share() method for tensors that will enable them to be shared across processes seamlessly.
 One can use [python multiprocessing](https://docs.python.org/2/library/multiprocessing.html) seamlessly.

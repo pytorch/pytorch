@@ -3,20 +3,28 @@ language: python
 python:
     - 2.7.8
     - 2.7
-    - pypy
     - 3.3
     - 3.4
     - 3.5
     - nightly
-    - pypy3
 
 install:
+    - export CC="gcc-4.8"
+    - export CXX="g++-4.8"
     - travis_retry pip install -r requirements.txt
-    - travis_retry python setup.py install
+    - travis_retry pip install .
 
 script:
-    - nosetests
     - python test/test_torch.py
+    - python test/test_legacy_nn.py
+
+addons:
+    apt:
+        sources:
+            - ubuntu-toolchain-r-test
+        packages:
+            - gcc-4.8
+            - g++-4.8
 
 # This reportedly works around an issue downloading packages from pypi on
 # travis.  Consider removing this after the underlying issue is fixed.

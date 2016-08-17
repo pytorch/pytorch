@@ -1,5 +1,6 @@
-from setuptools import setup, Extension, distutils, Command
+from setuptools import setup, Extension, distutils, Command, find_packages
 import setuptools.command.build_ext
+import setuptools.command.install
 import distutils.command.build
 import distutils.command.clean
 import platform
@@ -81,7 +82,9 @@ class build_ext(setuptools.command.build_ext.build_ext):
         cwrap('torch/csrc/generic/TensorMethods.cwrap', plugins=[
             THPLongArgsPlugin(), THPPlugin(), ArgcountSortPlugin(), AutoGPU()
         ])
-        super(build_ext, self).run()
+        # It's an old-style class in Python 2.7...
+        setuptools.command.build_ext.build_ext.run(self)
+
 
 
 class build(distutils.command.build.build):
@@ -90,13 +93,22 @@ class build(distutils.command.build.build):
     ] + distutils.command.build.build.sub_commands
 
 
+class install(setuptools.command.install.install):
+    def run(self):
+        if not self.skip_build:
+            self.run_command('build_deps')
+        setuptools.command.install.install.run(self)
+
+
 class clean(distutils.command.clean.clean):
     def run(self):
         with open('.gitignore', 'r') as f:
             ignores = f.read()
             for glob in filter(bool, ignores.split('\n')):
                 shutil.rmtree(glob, ignore_errors=True)
-        super(clean, self).run()
+        # It's an old-style class in Python 2.7...
+        distutils.command.clean.clean.run(self)
+
 
 
 ################################################################################
@@ -160,6 +172,7 @@ if DEBUG:
 ################################################################################
 
 extensions = []
+packages = find_packages(exclude=('tools.*', 'torch.cuda', 'torch.legacy.cunn'))
 
 C = Extension("torch._C",
     libraries=main_libraries,
@@ -191,6 +204,7 @@ if WITH_CUDA:
         extra_link_args=extra_link_args + ['-Wl,-rpath,$ORIGIN/../lib'],
     )
     extensions.append(THCUNN)
+    packages += ['torch.cuda', 'torch.legacy.cunn']
 
 setup(name="torch", version="0.1",
     ext_modules=extensions,
@@ -199,9 +213,10 @@ setup(name="torch", version="0.1",
         'build_ext': build_ext,
         'build_deps': build_deps,
         'build_module': build_module,
+        'install': install,
         'clean': clean,
     },
-    packages=['torch', 'torch._thnn', 'torch.legacy', 'torch.legacy.nn', 'torch.legacy.optim'] + (['torch.cuda', 'torch.legacy.cunn'] if WITH_CUDA else []),
+    packages=packages,
     package_data={'torch': ['lib/*.so*', 'lib/*.h']},
     install_requires=['pyyaml'],
 )

@@ -9,16 +9,18 @@ WRAPPER_PATH = os.path.join(BASE_PATH, 'torch', 'csrc', 'nn')
 THNN_UTILS_PATH = os.path.join(BASE_PATH, 'torch', '_thnn', 'utils.py')
 
 def import_module(name, path):
-    if sys.version_info > (3, 0):
+    if sys.version_info >= (3, 5):
         import importlib.util
         spec = importlib.util.spec_from_file_location(name, path)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         return module
+    elif sys.version_info >= (3, 0):
+        from importlib.machinery import SourceFileLoader
+        return SourceFileLoader(name, path).load_module()
     else:
         import imp
-        module = imp.load_source(name, path)
-        return module
+        return imp.load_source(name, path)
 
 thnn_utils = import_module('torch._thnn.utils', THNN_UTILS_PATH)
 
