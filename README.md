@@ -1,4 +1,4 @@
-# pytorch [alpha-0]
+# pytorch [alpha-0] ![Build Status](https://travis-ci.com/apaszke/pytorch.svg?token=x5muYzmNgtGJxk6DvWMN&branch=master)
 
 The project is still under active development and is likely to drastically change in short periods of time.
 We will be announcing API changes and important developments via a newsletter, github issues and post a link to the issues on slack.
@@ -11,6 +11,8 @@ This is done so that we can control development tightly and rapidly during the i
 pip install -r requirements.txt
 pip install .
 ```
+
+To install with CUDA support change `WITH_CUDA = False` to `WITH_CUDA = True` in `setup.py`.
 
 ## Communication
 * github issues: bug reports, feature requests, install issues, RFCs, thoughts, etc.
@@ -168,6 +170,32 @@ for i in range(ITERS):
 * Drop overly verbose names. Example:
     * SpatialConvolution → conv2d
     * VolumetricConvolution → conv3d
+
+#### Some notes on new nn implementation
+
+As shown above, structure of the networks is fully defined by control-flow embedded in the code. There are no rigid containers known from Lua. You can put an `if` in the middle of your model and freely branch depending on any condition you can come up with. All operations are registered in the computational graph history.
+
+There are two main objects that make this possible - variables and functions. They will be denoted as squares and circles respectively.
+
+![Variable and function symbols](http://students.mimuw.edu.pl/~ap360585/__torch_img/variable_function.png)
+
+Variables are the objects that hold a reference to a tensor (and optionally to gradient w.r.t. that tensor), and to the function in the computational graph that created it. Variables created explicitly by the user (`Variable(tensor)`) have a Leaf function node associated with them.
+
+![Variable and leaf function](http://students.mimuw.edu.pl/~ap360585/__torch_img/variable_leaf.png)
+
+Functions are simple classes that define a function from a tuple of inputs to a tuple of outputs, and a formula for computing gradient w.r.t. it's inputs. Function objects are instantiated to hold references to other functions, and these references allow to reconstruct the history of a computation. An example graph for a linear layer (`Wx + b`) is shown below.
+
+![Linear layer](http://students.mimuw.edu.pl/~ap360585/__torch_img/linear.png)
+
+Please note that function objects never hold references to Variable objects, except for when they're necessary in the backward pass. This allows to free all the unnecessary intermediate values. A good example for this is addition when computing e.g. (`y = Wx + My`):
+
+![Freeing intermediate values](http://students.mimuw.edu.pl/~ap360585/__torch_img/intermediate_free.png)
+
+Matrix multiplication operation keeps references to it's inputs because it will need them, but addition doesn't need `Wx` and `My` after it computes the result, so as soon as they go out of scope they are freed. To access intermediate values in the forward pass you can either copy them when you still have a reference, or you can use a system of hooks that can be attached to any function. Hooks also allow to access and inspect gradients inside the graph.
+
+Another nice thing about this is that a single layer doesn't hold any state other than it's parameters (all intermediate values are alive as long as the graph references them), so it can be used multiple times before calling backward. This is especially convenient when training RNNs. You can use the same network for all timesteps and the gradients will sum up automatically.
+
+To compute backward pass you can call `.backward()` on a variable if it's a scalar (a 1-element Variable), or you can provide a gradient tensor of matching shape if it's not. This creates an execution engine object that manages the whole backward pass. It's been introduced, so that the code for analyzing the graph and scheduling node processing order is decoupled from other parts, and can be easily replaced. Right now it's simply processing the nodes in topological order, without any prioritization, but in the future we can implement algorithms and heuristics for scheduling independent nodes on different GPU streams, deciding which branches to compute first, etc.
 
 ### Multi-GPU
 
