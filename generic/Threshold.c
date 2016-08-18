@@ -33,6 +33,7 @@ void THNN_(Threshold_updateGradInput)(
           THTensor *gradOutput,
           THTensor *gradInput,
           real threshold,
+          real val,
           bool inplace)
 {
   if (inplace)
