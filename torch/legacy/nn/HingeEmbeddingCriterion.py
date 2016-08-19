@@ -30,7 +30,7 @@ class HingeEmbeddingCriterion(Criterion):
         self.gradInput[torch.mul(torch.eq(y, -1), torch.gt(input, self.margin))] = 0
 
         if self.sizeAverage:
-            self.gradInput.mul_(1 / input.nElement())
+            self.gradInput.mul_(1. / input.nElement())
 
         return self.gradInput
 

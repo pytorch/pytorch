@@ -32,6 +32,7 @@ class Threshold(Module):
             gradOutput,
             self.gradInput,
             self.threshold,
+            self.value,
             self.inplace
         )
         return self.gradInput

@@ -1,3 +1,4 @@
+# -*- coding: utf8 -*-
 import torch
 from .Module import Module
 
