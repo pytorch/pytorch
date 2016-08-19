@@ -9,8 +9,8 @@ import shutil
 import sys
 import os
 
-# TODO: detect CUDA
-WITH_CUDA = False
+# TODO: make this more robust
+WITH_CUDA = os.path.exists('/Developer/NVIDIA/CUDA-7.5/include') or os.path.exists('/usr/local/cuda/include')
 DEBUG = False
 
 ################################################################################
