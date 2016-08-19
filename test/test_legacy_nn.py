@@ -1,75 +1,19 @@
 import math
 import random
 import unittest
+from copy import deepcopy
+
 import torch
 import torch.legacy.nn as nn
-from common import TestCase, to_gpu
-try:
-    import torch.cuda
-    import torch.legacy.cunn
-    TEST_CUDA = True
-except ImportError:
-    TEST_CUDA = False
+from common_nn import NNTestCase, ModuleTest, CriterionTest, iter_tensors, module_tests, criterion_tests, TEST_CUDA, PRECISION
+from common import to_gpu
 
-PRECISION = 1e-5
-EXP_PRECISION = 1e-4
-# TODO: hessian tests
-
-class TestCaseBase(object):
-    def __init__(self, constructor, constructor_args=tuple(), input_size=None,
-            input=None, desc='', reference_fn=None, fullname=None, **kwargs):
-        if input_size is None and input is None:
-            raise RuntimeError("Specify either an input tensor, or it's size!")
-        self.constructor = constructor
-        self.constructor_args = constructor_args
-        self.input = input
-        self.input_size = input_size
-        self.desc = desc
-        self.fullname = fullname
-        self.reference_fn = reference_fn
-
-    def get_name(self):
-        if self.fullname is not None:
-            return 'test_' + self.fullname
-
-        test_name = 'test_' + self.constructor.__name__
-        if self.desc:
-            test_name += '_' + self.desc
-        return test_name
-
-    def _get_input(self):
-        if self.input is not None:
-            return self.input
-
-        def map_input_sizes(sizes):
-            if isinstance(sizes, list):
-                return [map_input_sizes(s) for s in sizes]
-            else:
-                return torch.randn(*sizes)
-
-        assert self.input_size is not None
-        return map_input_sizes(self.input_size)
-
-    def __call__(self, test_case):
-        raise NotImplementedError
-
-
-class SimpleTestCase(TestCaseBase):
+class OldModuleTest(ModuleTest):
     def __init__(self, *args, **kwargs):
-        super(SimpleTestCase, self).__init__(*args, **kwargs)
+        super(OldModuleTest, self).__init__(*args, **kwargs)
         self.check_inplace = kwargs.get('check_inplace', False)
-        self.jacobian_input = kwargs.get('jacobian_input', True)
-        self.should_test_cuda = kwargs.get('test_cuda', True)
 
-    def __call__(self, test_case):
-        module = self.constructor(*self.constructor_args)
-        input = self._get_input()
-
-        if self.reference_fn is not None:
-            out = module.forward(input)
-            expected_out = self.reference_fn(module, test_case._clone_input(input))
-            test_case.assertEqual(out, expected_out)
-
+    def _do_test(self, test_case, module, input):
         # TODO: check update parameters
         # TODO: test IO
         module.training()
@@ -84,7 +28,7 @@ class SimpleTestCase(TestCaseBase):
         module.clearState()
 
         if self.check_inplace:
-            input2 = test_case._clone_input(input)
+            input2 = deepcopy(input)
             module_ip = self.constructor(*self.constructor_args, inplace=True)
             output = module.forward(input)
             test_case.assertEqual(input, input2)
@@ -92,756 +36,616 @@ class SimpleTestCase(TestCaseBase):
             test_case.assertNotEqual(input, input2)
             test_case.assertEqual(output, input2)
 
-    def test_cuda(self, test_case):
-        if not TEST_CUDA or not self.should_test_cuda:
-            raise unittest.SkipTest('Excluded from CUDA tests')
-        try:
-            cpu_input = self._get_input()
-            gpu_input = to_gpu(cpu_input, tensor_type=torch.cuda.FloatTensor)
-
-            cpu_module = self.constructor(*self.constructor_args)
-            gpu_module = self.constructor(*self.constructor_args).cuda()
-            cpu_module.zeroGradParameters()
-            gpu_module.zeroGradParameters()
-            if cpu_module.parameters():
-                gpu_param = gpu_module.flattenParameters()
-                cpu_param = cpu_module.flattenParameters()
-                gpu_param[0].copy_(cpu_param[0])
-
-            cpu_output = cpu_module.forward(cpu_input).clone()
-            gpu_output = gpu_module.forward(gpu_input).clone()
-            test_case.assertEqual(cpu_output, gpu_output, 1e-4)
-
-            for i in range(5):
-                cpu_gradOutput = cpu_output.clone().bernoulli_()
-                gpu_gradOutput = cpu_gradOutput.type('torch.cuda.FloatTensor')
-                cpu_gradInput = cpu_module.backward(cpu_input, cpu_gradOutput)
-                gpu_gradInput = gpu_module.backward(gpu_input, gpu_gradOutput)
-                test_case.assertEqual(cpu_gradInput, gpu_gradInput, 1e-4)
-                if cpu_module.parameters():
-                    test_case.assertEqual(cpu_param[1], gpu_param[1], 1e-4)
-        except NotImplementedError:
-            pass
-        # TODO: remove this after index* CUDA operations are upadted
-        except RuntimeError as e:
-            if len(e.args) == 1 and "doesn't implement stateless method indexSelect" in e.args[0]:
-                pass
-            else:
-                raise
-        # TODO: remove this after CUDA scatter_ is implemented
-        except AttributeError as e:
-            if len(e.args) == 1 and "'FloatTensor' object has no attribute 'scatter_'" in e.args[0]:
-                pass
-            else:
-                raise
-
-
-class CriterionTestCase(TestCaseBase):
-    def __init__(self, *args, **kwargs):
-        super(CriterionTestCase, self).__init__(*args, **kwargs)
-        self.target = kwargs.get('target', None)
-        # TODO: Enable this after adding TH_INDEX_BASE to THC
-        self.should_test_cuda = True
-
-    def __call__(self, test_case):
-        module = self.constructor(*self.constructor_args)
-        input = self._get_input()
-
-        test_case.check_criterion_jacobian(module, input, self.target)
-
-        if self.reference_fn is not None:
-            out = module.forward(input, self.target)
-            expected_out = self.reference_fn(module, test_case._clone_input(input),
-                    test_case._clone_input(self.target))
-            test_case.assertEqual(out, expected_out)
-
-    def test_cuda(self, test_case):
-        if not TEST_CUDA or not self.should_test_cuda:
-            raise unittest.SkipTest('Excluded from CUDA tests')
-        try:
-            cpu_input = self._get_input()
-            gpu_input = to_gpu(cpu_input, tensor_type=torch.cuda.FloatTensor)
-
-            cpu_target = self.target
-            gpu_target = to_gpu(self.target, tensor_type=torch.cuda.FloatTensor)
-
-            cpu_module = self.constructor(*self.constructor_args)
-            gpu_module = self.constructor(*self.constructor_args).cuda()
-
-            cpu_output = cpu_module.forward(cpu_input, cpu_target)
-            gpu_output = gpu_module.forward(gpu_input, gpu_target)
-            test_case.assertEqual(cpu_output, gpu_output, 1e-4)
-
-            cpu_gradInput = cpu_module.backward(cpu_input, cpu_target)
-            gpu_gradInput = gpu_module.backward(gpu_input, gpu_target)
-            test_case.assertEqual(cpu_gradInput, gpu_gradInput, 1e-4)
-        except NotImplementedError:
-            pass
-
-
-simple_tests = [
-    SimpleTestCase(nn.Add,
+# TODO: hessian tests
+tests = [
+    OldModuleTest(nn.Add,
                     (torch.LongStorage([5, 4]),),
                     input_size=(3, 5, 4),
                     desc='3D'),
-    SimpleTestCase(nn.Add,
+    OldModuleTest(nn.Add,
                     (1, True),
                     input_size=(3, 1, 4),
                     desc='scalar'),
-    SimpleTestCase(nn.AddConstant,
+    OldModuleTest(nn.AddConstant,
                     (3.5,),
                     input_size=(3, 5, 4),
-                    reference_fn=lambda _,i: i + 3.5,
+                    reference_fn=lambda i,_: i + 3.5,
                     check_inplace=True),
-    SimpleTestCase(nn.CMul,
+    OldModuleTest(nn.CMul,
                     (5, 6),
                     input_size=(10, 5, 6),
                     desc='3D'),
-    SimpleTestCase(nn.CMul,
+    OldModuleTest(nn.CMul,
                     (50, 4),
                     input_size=(1, 50, 4),
                     desc='3D_single_example'),
-    SimpleTestCase(nn.CMul,
+    OldModuleTest(nn.CMul,
                     (1, 5),
                     input=torch.randn(10, 3, 5)[:,1],
                     desc='3D_noncontiguous'),
-    SimpleTestCase(nn.Exp,
+    OldModuleTest(nn.Exp,
                     input_size=(2, 3, 4),
-                    reference_fn=lambda _,i: i.exp()),
-    SimpleTestCase(nn.Log,
+                    reference_fn=lambda i,_: i.exp()),
+    OldModuleTest(nn.Log,
                     input=torch.rand(2, 3, 2) + 0.1,
-                    reference_fn=lambda _,i: i.log()),
-    SimpleTestCase(nn.LogSigmoid,
+                    reference_fn=lambda i,_: i.log()),
+    OldModuleTest(nn.LogSigmoid,
                     input_size=(2, 3, 4),
-                    reference_fn=lambda _,i: i.sigmoid().log()),
-    SimpleTestCase(nn.LogSoftMax,
+                    reference_fn=lambda i,_: i.sigmoid().log()),
+    OldModuleTest(nn.LogSoftMax,
                     input_size=(10, 20),
-                    reference_fn=lambda _,i: torch.exp(i).div_(torch.exp(i).sum(1).expand(10, 20)).log_()),
-    SimpleTestCase(nn.SoftMax,
+                    reference_fn=lambda i,_: torch.exp(i).div_(torch.exp(i).sum(1).expand(10, 20)).log_()),
+    OldModuleTest(nn.SoftMax,
                     input_size=(10, 20),
-                    reference_fn=lambda _,i: torch.exp(i).div(torch.exp(i).sum(1).expand(10, 20))),
-    SimpleTestCase(nn.SpatialSoftMax,
+                    reference_fn=lambda i,_: torch.exp(i).div(torch.exp(i).sum(1).expand(10, 20))),
+    OldModuleTest(nn.SpatialSoftMax,
                     input_size=(1, 3, 10, 20),
-                    reference_fn=lambda _,i: torch.exp(i).div(torch.exp(i).sum(1).expandAs(i))),
-    SimpleTestCase(nn.SoftMin,
+                    reference_fn=lambda i,_: torch.exp(i).div(torch.exp(i).sum(1).expandAs(i))),
+    OldModuleTest(nn.SoftMin,
                     input_size=(10, 20)),
-    SimpleTestCase(nn.SoftPlus,
+    OldModuleTest(nn.SoftPlus,
                     input_size=(10, 20),
-                    reference_fn=lambda _,i: torch.log(1 + torch.exp(i))),
-    SimpleTestCase(nn.SoftPlus,
+                    reference_fn=lambda i,_: torch.log(1 + torch.exp(i))),
+    OldModuleTest(nn.SoftPlus,
                     (2,),
                     input_size=(10, 20),
-                    reference_fn=lambda _,i: 1. / 2. * torch.log(1 + torch.exp(2 * i)),
+                    reference_fn=lambda i,_: 1. / 2. * torch.log(1 + torch.exp(2 * i)),
                     desc='beta'),
-    SimpleTestCase(nn.HardTanh,
-                    input_size=(3, 2, 5),
-                    reference_fn=lambda _,i: i.clamp(-1, 1)),
-    SimpleTestCase(nn.Clamp,
+    OldModuleTest(nn.Clamp,
                     (-2., 5.),
                     input=torch.randn(3, 2, 50) * 6,
-                    reference_fn=lambda _,i: i.clamp(-2, 5)),
-    SimpleTestCase(nn.Abs,
+                    reference_fn=lambda i,_: i.clamp(-2, 5)),
+    OldModuleTest(nn.Abs,
                     input_size=(3, 20, 5),
-                    reference_fn=lambda _,i: i.abs()),
-    SimpleTestCase(nn.ELU,
+                    reference_fn=lambda i,_: i.abs()),
+    OldModuleTest(nn.ELU,
                     (2.,),
                     input_size=(3, 2, 5),
                     check_inplace=True),
     # TODO implement
-    # SimpleTestCase(nn.RReLU,
+    # OldModuleTest(nn.RReLU,
                     # input_size=(4, 2, 5),
                     # check_inplace=True),
-    # SimpleTestCase(nn.RReLU,
+    # OldModuleTest(nn.RReLU,
                     # (0.1, 0.9),
                     # input_size=(4, 4, 5),
                     # check_inplace=True,
                     # desc='with_up_down'),
-    SimpleTestCase(nn.SoftShrink,
+    OldModuleTest(nn.SoftShrink,
                     input_size=(3, 2, 5)),
-    SimpleTestCase(nn.SoftShrink,
+    OldModuleTest(nn.SoftShrink,
                     (1,),
                     input_size=(3, 2, 5),
                     desc='lambda'),
-    SimpleTestCase(nn.SoftSign,
+    OldModuleTest(nn.SoftSign,
                     input_size=(3, 2, 5),
-                    reference_fn=lambda _,i: i.div(1 + torch.abs(i))),
-    SimpleTestCase(nn.LeakyReLU,
+                    reference_fn=lambda i,_: i.div(1 + torch.abs(i))),
+    OldModuleTest(nn.LeakyReLU,
                     input_size=(3, 2, 5),
                     check_inplace=True),
-    SimpleTestCase(nn.LeakyReLU,
+    OldModuleTest(nn.LeakyReLU,
                     (0.5,),
                     input_size=(3, 2, 5),
                     check_inplace=True,
                     desc='with_negval'),
-    SimpleTestCase(nn.Bilinear,
+    OldModuleTest(nn.Bilinear,
                     (2, 3, 10),
                     input_size=[(4, 2), (4, 3)]),
-    SimpleTestCase(nn.Bilinear,
+    OldModuleTest(nn.Bilinear,
                     (5, 4, 2),
                     input_size=[(2, 5), (2, 4)],
                     desc='small_output'),
-    SimpleTestCase(nn.Euclidean,
+    OldModuleTest(nn.Euclidean,
                     (5, 7),
                     input_size=(10, 5)),
-    SimpleTestCase(nn.WeightedEuclidean,
+    OldModuleTest(nn.WeightedEuclidean,
                     (5, 7),
                     input_size=(10, 5)),
-    SimpleTestCase(nn.Cosine,
+    OldModuleTest(nn.Cosine,
                     (5, 7),
                     input_size=(10, 5)),
-    SimpleTestCase(nn.CAddTable,
+    OldModuleTest(nn.CAddTable,
                     input_size=[(5, 7), (5, 7)]),
-    SimpleTestCase(nn.CSubTable,
+    OldModuleTest(nn.CSubTable,
                     input_size=[(5, 7), (5, 7)]),
-    SimpleTestCase(nn.CDivTable,
+    OldModuleTest(nn.CDivTable,
                     input=[torch.randn(1, 7), torch.rand(1, 7) + 0.1]),
-    SimpleTestCase(nn.CMulTable,
+    OldModuleTest(nn.CMulTable,
                     input_size=[(5, 7), (5, 7)]),
-    SimpleTestCase(nn.Square,
+    OldModuleTest(nn.Square,
                     input_size=(10, 2, 4),
-                    reference_fn=lambda _,i: i.mul(i)),
-    SimpleTestCase(nn.Sqrt,
+                    reference_fn=lambda i,_: i.mul(i)),
+    OldModuleTest(nn.Sqrt,
                     input=torch.rand(10, 2, 4)+0.01,
-                    reference_fn=lambda _,i: i.sqrt()),
-    SimpleTestCase(nn.Squeeze,
+                    reference_fn=lambda i,_: i.sqrt()),
+    OldModuleTest(nn.Squeeze,
                     input_size=(2, 1, 1, 4, 5),
-                    reference_fn=lambda _,i: i.squeeze()),
+                    reference_fn=lambda i,_: i.squeeze()),
     # TODO: should squeeze work inplace?
-    # SimpleTestCase(nn.Squeeze,
+    # OldModuleTest(nn.Squeeze,
                     # (1,),
                     # input_size=(2, 1, 1, 4, 5),
-                    # reference_fn=lambda _,i: i.squeeze(1),
+                    # reference_fn=lambda i,_: i.squeeze(1),
                     # desc='dim'),
-    SimpleTestCase(nn.Unsqueeze,
+    OldModuleTest(nn.Unsqueeze,
                     (1,),
                     input_size=(2, 4, 5),
-                    reference_fn=lambda _,i: i.view(2, 1, 4, 5)),
-    SimpleTestCase(nn.Unsqueeze,
+                    reference_fn=lambda i,_: i.view(2, 1, 4, 5)),
+    OldModuleTest(nn.Unsqueeze,
                     (0,),
                     input_size=(2, 4, 5),
-                    reference_fn=lambda _,i: i.view(1, 2, 4, 5),
+                    reference_fn=lambda i,_: i.view(1, 2, 4, 5),
                     desc='fist_dim'),
-    SimpleTestCase(nn.Unsqueeze,
+    OldModuleTest(nn.Unsqueeze,
                     (3,),
                     input_size=(2, 4, 5),
-                    reference_fn=lambda _,i: i.view(2, 4, 5, 1),
+                    reference_fn=lambda i,_: i.view(2, 4, 5, 1),
                     desc='last_dim'),
-    SimpleTestCase(nn.View,
+    OldModuleTest(nn.View,
                     (-1, 2, 20),
                     input_size=(2, 2, 4, 5),
-                    reference_fn=lambda _,i: i.view(-1, 2, 20),
+                    reference_fn=lambda i,_: i.view(-1, 2, 20),
                     desc='infer_batch'),
-    SimpleTestCase(nn.View,
+    OldModuleTest(nn.View,
                     (2, 2, 2, 5),
                     input_size=(2, 4, 5),
-                    reference_fn=lambda _,i: i.view(2, 2, 2, 5),
+                    reference_fn=lambda i,_: i.view(2, 2, 2, 5),
                     desc='split_dim'),
-    SimpleTestCase(nn.View,
+    OldModuleTest(nn.View,
                     (2, -1, 2, 5),
                     input_size=(2, 4, 5),
-                    reference_fn=lambda _,i: i.view(2, -1, 2, 5),
+                    reference_fn=lambda i,_: i.view(2, -1, 2, 5),
                     desc='infer_middle'),
-    SimpleTestCase(nn.Sum,
+    OldModuleTest(nn.Sum,
                     (1,),
                     input_size=(2, 4, 5),
-                    reference_fn=lambda _,i: i.sum(1)),
-    SimpleTestCase(nn.Sum,
+                    reference_fn=lambda i,_: i.sum(1)),
+    OldModuleTest(nn.Sum,
                     (1, True),
                     input_size=(2, 4, 5),
-                    reference_fn=lambda _,i: i.sum(1).div(i.size(1)),
+                    reference_fn=lambda i,_: i.sum(1).div(i.size(1)),
                     desc='sizeAverage'),
-    SimpleTestCase(nn.Mean,
+    OldModuleTest(nn.Mean,
                     (1,),
                     input_size=(2, 4, 5),
-                    reference_fn=lambda _,i: torch.mean(i, 1)),
-    SimpleTestCase(nn.BatchNormalization,
+                    reference_fn=lambda i,_: torch.mean(i, 1)),
+    OldModuleTest(nn.BatchNormalization,
                     (10,),
                     input_size=(4, 10),
                     desc='affine'),
-    SimpleTestCase(nn.BatchNormalization,
+    OldModuleTest(nn.BatchNormalization,
                     (10, 1e-3, 0.3, False),
                     input_size=(4, 10),
                     desc='not_affine'),
     # TODO: reference function
-    SimpleTestCase(nn.HardShrink,
+    OldModuleTest(nn.HardShrink,
                     (2.,),
                     input_size=(4, 3, 2, 4)),
-    SimpleTestCase(lambda: nn.Sequential().add(nn.GradientReversal()).add(nn.GradientReversal()),
+    OldModuleTest(lambda: nn.Sequential().add(nn.GradientReversal()).add(nn.GradientReversal()),
                     input_size=(4, 3, 2, 2),
                     fullname='GradientReversal'),
-    SimpleTestCase(nn.Identity,
+    OldModuleTest(nn.Identity,
                     input_size=(4, 3, 2, 4),
-                    reference_fn=lambda _,i: i),
-    SimpleTestCase(nn.DotProduct,
+                    reference_fn=lambda i,_: i),
+    OldModuleTest(nn.DotProduct,
                     input_size=[(10, 4), (10, 4)],
-                    reference_fn=lambda _,i: torch.Tensor(list(
+                    reference_fn=lambda i,_: torch.Tensor(list(
                         a.dot(b) for a, b in zip(i[0], i[1])))
                     ),
-    SimpleTestCase(nn.CosineDistance,
+    OldModuleTest(nn.CosineDistance,
                     input_size=[(10, 4), (10, 4)],
-                    reference_fn=lambda _,i: torch.Tensor(list(
+                    reference_fn=lambda i,_: torch.Tensor(list(
                         a.dot(b) / (a.norm(2) * b.norm(2)) for a, b in zip(i[0], i[1])))
                     ),
-    SimpleTestCase(nn.JoinTable,
+    OldModuleTest(nn.JoinTable,
                     (0,),
                     input_size=[(10, 4), (10, 4)],
-                    reference_fn=lambda _,i: torch.cat(i, 0),
+                    reference_fn=lambda i,_: torch.cat(i, 0),
                     desc='first_dim'),
-    SimpleTestCase(nn.JoinTable,
+    OldModuleTest(nn.JoinTable,
                     (2,),
                     input_size=[(2, 4, 2), (2, 4, 2)],
-                    reference_fn=lambda _,i: torch.cat(i, 2),
+                    reference_fn=lambda i,_: torch.cat(i, 2),
                     desc='positive_dim_index'),
-    SimpleTestCase(nn.JoinTable,
+    OldModuleTest(nn.JoinTable,
                     (-1,),
                     input_size=[(2, 4, 2, 4), (2, 4, 2, 4)],
-                    reference_fn=lambda _,i: torch.cat(i, 3),
+                    reference_fn=lambda i,_: torch.cat(i, 3),
                     desc='negative_dim_index'),
-    SimpleTestCase(nn.Linear,
-                    (10,8),
-                    input_size=(4, 10),
-                    reference_fn=lambda m,i: torch.mm(i, m.weight.t()) + m.bias.view(1, -1).expand(4, 8)),
-    SimpleTestCase(nn.MM,
+    OldModuleTest(nn.MM,
                     input_size=[(4, 5, 3), (4, 3, 2)],
-                    reference_fn=lambda _,i: torch.bmm(*i)),
-    SimpleTestCase(nn.MV,
+                    reference_fn=lambda i,_: torch.bmm(*i)),
+    OldModuleTest(nn.MV,
                     input_size=[(4, 5, 3), (4, 3)],
-                    reference_fn=lambda _,i: torch.bmm(i[0], i[1].view(i[1].size(0), i[1].size(1), 1)).squeeze()),
-    SimpleTestCase(nn.Max,
+                    reference_fn=lambda i,_: torch.bmm(i[0], i[1].view(i[1].size(0), i[1].size(1), 1)).squeeze()),
+    OldModuleTest(nn.Max,
                     input_size=(4, 5, 3),
-                    reference_fn=lambda _,i: torch.max(i, 0)[0].squeeze()),
-    SimpleTestCase(nn.Max,
+                    reference_fn=lambda i,_: torch.max(i, 0)[0].squeeze()),
+    OldModuleTest(nn.Max,
                     (1,),
                     input_size=(4, 5, 3),
-                    reference_fn=lambda _,i: torch.max(i, 1)[0].squeeze(),
+                    reference_fn=lambda i,_: torch.max(i, 1)[0].squeeze(),
                     desc='with_dimension'),
-    SimpleTestCase(nn.Min,
+    OldModuleTest(nn.Min,
                     input_size=(4, 5, 3),
-                    reference_fn=lambda _,i: torch.min(i, 0)[0].squeeze()),
-    SimpleTestCase(nn.Min,
+                    reference_fn=lambda i,_: torch.min(i, 0)[0].squeeze()),
+    OldModuleTest(nn.Min,
                     (1,),
                     input_size=(4, 5, 3),
-                    reference_fn=lambda _,i: torch.min(i, 1)[0].squeeze(),
+                    reference_fn=lambda i,_: torch.min(i, 1)[0].squeeze(),
                     desc='with_dimension'),
-    SimpleTestCase(nn.MixtureTable,
+    OldModuleTest(nn.MixtureTable,
                     tuple(),
                     input_size=[(5, 3), (5, 3, 6)]),
-    SimpleTestCase(nn.LookupTable,
+    OldModuleTest(nn.LookupTable,
                     (4, 3),
                     input=torch.randperm(2).repeatTensor(1, 2),
                     jacobian_input=False),
-    SimpleTestCase(nn.Mul,
+    OldModuleTest(nn.Mul,
                     input_size=(2, 3, 4, 2),
-                    reference_fn=lambda m,i: i * m.weight[0]),
-    SimpleTestCase(nn.MulConstant,
+                    reference_fn=lambda i,p: i * p[0][0]),
+    OldModuleTest(nn.MulConstant,
                     (4,),
                     input_size=(2, 3, 4, 2),
-                    reference_fn=lambda m,i: i * 4,
+                    reference_fn=lambda i,_: i * 4,
                     check_inplace=True),
-    SimpleTestCase(nn.Narrow,
+    OldModuleTest(nn.Narrow,
                     (0, 0),
                     input_size=(2, 3, 4, 2),
-                    reference_fn=lambda _,i: i.narrow(0, 0, 1)),
-    SimpleTestCase(nn.Narrow,
+                    reference_fn=lambda i,_: i.narrow(0, 0, 1)),
+    OldModuleTest(nn.Narrow,
                     (1, 1, 2),
                     input_size=(2, 3, 4, 2),
-                    reference_fn=lambda _,i: i.narrow(1, 1, 2),
+                    reference_fn=lambda i,_: i.narrow(1, 1, 2),
                     desc='length'),
-    SimpleTestCase(nn.PReLU,
+    OldModuleTest(nn.PReLU,
                     input_size=(2, 3, 4, 5)),
-    SimpleTestCase(nn.PReLU,
+    OldModuleTest(nn.PReLU,
                     (3,),
                     input_size=(2, 3, 4, 5),
                     desc='multiparam'),
-    SimpleTestCase(nn.ReLU,
-                    input_size=(2, 3, 4, 5),
-                    check_inplace=True),
-    SimpleTestCase(nn.ReLU6,
-                    input_size=(2, 3, 4, 5),
-                    check_inplace=True),
-    SimpleTestCase(nn.Sigmoid,
+    OldModuleTest(nn.TanhShrink,
                     input_size=(2, 3, 4, 5)),
-    SimpleTestCase(nn.Tanh,
-                    input_size=(2, 3, 4, 5)),
-    SimpleTestCase(nn.TanhShrink,
-                    input_size=(2, 3, 4, 5)),
-    SimpleTestCase(nn.Threshold,
-                    input_size=(2, 3, 4, 5),
-                    check_inplace=True),
-    SimpleTestCase(nn.Threshold,
-                    (2, 1),
-                    input_size=(2, 3, 4, 5),
-                    check_inplace=True,
-                    desc='threshold_value'),
-    SimpleTestCase(nn.Threshold,
-                    (2, 10),
-                    input_size=(2, 3, 4, 5),
-                    desc='large_value'),
-    SimpleTestCase(nn.Transpose,
+    OldModuleTest(nn.Transpose,
                     ((1, 2), (1, 3)),
                     input_size=(2, 3, 4, 5),
-                    reference_fn=lambda _,i: i.transpose(1, 2).transpose(1, 3)),
-    SimpleTestCase(nn.Transpose,
+                    reference_fn=lambda i,_: i.transpose(1, 2).transpose(1, 3)),
+    OldModuleTest(nn.Transpose,
                     ((1, 2),),
                     input_size=(2, 3, 4, 5),
-                    reference_fn=lambda _,i: i.transpose(1, 2),
+                    reference_fn=lambda i,_: i.transpose(1, 2),
                     desc='single_arg'),
     # TODO: this seems to be very slow
-    SimpleTestCase(nn.Replicate,
+    OldModuleTest(nn.Replicate,
                     (2, 1),
                     input_size=(10, 3, 4, 5),
-                    reference_fn=lambda _,i: i.view(10, 1, 3, 4, 5).expand(10, 2, 3, 4, 5)),
-    SimpleTestCase(nn.Padding,
+                    reference_fn=lambda i,_: i.view(10, 1, 3, 4, 5).expand(10, 2, 3, 4, 5)),
+    OldModuleTest(nn.Padding,
                     (0, 2, -10),
                     input_size=(2, 3, 4, 5)),
-    SimpleTestCase(nn.Padding,
+    OldModuleTest(nn.Padding,
                     (0, 2, -10, 1),
                     input_size=(2, 3, 4, 5),
                     desc='index'),
-    SimpleTestCase(nn.Padding,
+    OldModuleTest(nn.Padding,
                     (0, -2, -10, 1),
                     input_size=(2, 3, 4, 5),
                     desc='negative_pad'),
-    SimpleTestCase(nn.PartialLinear,
+    OldModuleTest(nn.PartialLinear,
                     (5, 6),
                     input_size=(4, 5)),
-    SimpleTestCase(lambda: nn.PartialLinear(5, 6).setPartition(torch.Tensor((2, 4))),
+    OldModuleTest(lambda: nn.PartialLinear(5, 6).setPartition(torch.Tensor((2, 4))),
                     input_size=(4, 5),
                     fullname='PartialLinear_setPartition'),
-    SimpleTestCase(nn.Power,
+    OldModuleTest(nn.Power,
                     (2,),
                     input_size=(2, 3, 4, 5)),
-    SimpleTestCase(nn.Power,
+    OldModuleTest(nn.Power,
                     (1.5,),
                     input=torch.rand(3, 4, 5),
                     desc='fractional'),
-    SimpleTestCase(nn.Reshape,
+    OldModuleTest(nn.Reshape,
                     (4, 5),
                     input_size=(3, 4*5),
                     desc='add_dim'),
-    SimpleTestCase(nn.Reshape,
+    OldModuleTest(nn.Reshape,
                     (4*5,),
                     input_size=(3, 4, 5),
                     desc='squash_dim'),
-    SimpleTestCase(nn.Select,
+    OldModuleTest(nn.Select,
                     (1, 2),
                     input_size=(3, 4, 5),
-                    reference_fn=lambda _,i: i.select(1, 2)),
-    SimpleTestCase(nn.SelectTable,
+                    reference_fn=lambda i,_: i.select(1, 2)),
+    OldModuleTest(nn.SelectTable,
                     (1,),
                     input_size=[(1,), (2,), (3,), (4,)],
-                    reference_fn=lambda _,i: i[1]),
-    SimpleTestCase(nn.SpatialAdaptiveMaxPooling,
+                    reference_fn=lambda i,_: i[1]),
+    OldModuleTest(nn.SpatialAdaptiveMaxPooling,
                     (4, 4),
                     input_size=(2, 3, 8, 8)),
-    SimpleTestCase(nn.SpatialAdaptiveMaxPooling,
+    OldModuleTest(nn.SpatialAdaptiveMaxPooling,
                     (4, 4),
                     input_size=(2, 3, 7, 11),
                     desc='irregular'),
                     # TODO: enable after implementing MaxPooling
-                    # reference_fn=lambda _,i: nn.SpatialMaxPooling(2, 2).forward(i)),
-    SimpleTestCase(nn.SpatialAveragePooling,
+                    # reference_fn=lambda i,_: nn.SpatialMaxPooling(2, 2).forward(i)),
+    OldModuleTest(nn.SpatialAveragePooling,
                     (2, 2),
                     input_size=(2, 3, 6, 6)),
-    SimpleTestCase(nn.SpatialAveragePooling,
+    OldModuleTest(nn.SpatialAveragePooling,
                     (2, 2, 2, 2),
                     input_size=(2, 3, 6, 6),
                     desc='stride'),
-    SimpleTestCase(nn.SpatialAveragePooling,
+    OldModuleTest(nn.SpatialAveragePooling,
                     (2, 2, 2, 2, 1, 1),
                     input_size=(2, 3, 6, 6),
                     desc='stride_pad'),
-    SimpleTestCase(nn.SpatialBatchNormalization,
+    OldModuleTest(nn.SpatialBatchNormalization,
                     (3,),
                     input_size=(2, 3, 6, 6)),
-    SimpleTestCase(nn.SpatialBatchNormalization,
+    OldModuleTest(nn.SpatialBatchNormalization,
                     (3, 1e-3, 0.8),
                     input_size=(2, 3, 6, 6),
                     desc='momentum'),
-    SimpleTestCase(nn.SpatialBatchNormalization,
+    OldModuleTest(nn.SpatialBatchNormalization,
                     (3, 1e-3, 0.8, False),
                     input_size=(2, 3, 6, 6),
                     desc='no_affine'),
-    SimpleTestCase(nn.SpatialConvolution,
-                    (3, 4, 3, 3),
-                    input_size=(2, 3, 6, 6)),
-    SimpleTestCase(nn.SpatialConvolution,
-                    (3, 4, 3, 3, 2, 2),
-                    input_size=(2, 3, 6, 6),
-                    desc='strided'),
-    SimpleTestCase(nn.SpatialConvolution,
-                    (3, 4, 3, 3, 2, 2, 1, 1),
-                    input_size=(2, 3, 6, 6),
-                    desc='padding'),
-    SimpleTestCase(nn.SpatialConvolutionLocal,
+    OldModuleTest(nn.SpatialConvolutionLocal,
                     (3, 2, 4, 4, 2, 2),
                     input_size=(1, 3, 4, 4)),
-    SimpleTestCase(nn.SpatialConvolutionLocal,
+    OldModuleTest(nn.SpatialConvolutionLocal,
                     (3, 2, 6, 6, 2, 2, 2, 2),
                     input_size=(2, 3, 6, 6),
                     desc='stride'),
-    SimpleTestCase(nn.SpatialConvolutionLocal,
+    OldModuleTest(nn.SpatialConvolutionLocal,
                     (3, 2, 6, 6, 2, 2, 2, 2, 1, 1),
                     input_size=(2, 3, 6, 6),
                     desc='stride_pad'),
     # TODO FIX THIS
-    # SimpleTestCase(nn.SpatialCrossMapLRN,
+    # OldModuleTest(nn.SpatialCrossMapLRN,
                     # (3,),
                     # input_size=(2, 3, 6, 6)),
-    SimpleTestCase(nn.SpatialDivisiveNormalization,
+    OldModuleTest(nn.SpatialDivisiveNormalization,
                     (3,),
                     input_size=(2, 3, 8, 8)),
-    SimpleTestCase(nn.SpatialContrastiveNormalization,
+    OldModuleTest(nn.SpatialContrastiveNormalization,
                     (3,),
                     input_size=(2, 3, 8, 8)),
-    SimpleTestCase(nn.SpatialDilatedConvolution,
+    OldModuleTest(nn.SpatialDilatedConvolution,
                     (3, 2, 3, 3, 2, 2, 1, 1, 2, 2),
                     input_size=(2, 3, 8, 8)),
-    SimpleTestCase(nn.SpatialDilatedConvolution,
+    OldModuleTest(nn.SpatialDilatedConvolution,
                     (3, 2, 3, 3, 2, 2, 1, 1, 2, 2),
                     input_size=(2, 3, 8, 8),
                     desc='stride_pad'),
-    SimpleTestCase(nn.SpatialReflectionPadding,
+    OldModuleTest(nn.SpatialReflectionPadding,
                     (1, 2, 3, 4),
                     input_size=(2, 3, 8, 8)),
-    SimpleTestCase(nn.SpatialReplicationPadding,
+    OldModuleTest(nn.SpatialReplicationPadding,
                     (1, 2, 3, 4),
                     input_size=(2, 3, 4, 4)),
-    SimpleTestCase(nn.SpatialZeroPadding,
+    OldModuleTest(nn.SpatialZeroPadding,
                     (1, 2, 3, 4),
                     input_size=(2, 3, 4, 4)),
-    SimpleTestCase(nn.SpatialConvolutionMap,
+    OldModuleTest(nn.SpatialConvolutionMap,
                     (nn.SpatialConvolutionMap.maps.oneToOne(3), 3, 3),
                     input_size=(3, 5, 5),
                     desc='oneToOne'),
-    SimpleTestCase(nn.SpatialConvolutionMap,
+    OldModuleTest(nn.SpatialConvolutionMap,
                     (nn.SpatialConvolutionMap.maps.oneToOne(3), 3, 3, 2, 2),
                     input_size=(3, 5, 5),
                     desc='oneToOne_stride'),
-    SimpleTestCase(nn.SpatialConvolutionMap,
+    OldModuleTest(nn.SpatialConvolutionMap,
                     (nn.SpatialConvolutionMap.maps.full(3, 4), 3, 3),
                     input_size=(3, 5, 5),
                     desc='full'),
-    SimpleTestCase(nn.SpatialFullConvolutionMap,
+    OldModuleTest(nn.SpatialFullConvolutionMap,
                     (nn.SpatialConvolutionMap.maps.oneToOne(3), 3, 3),
                     input_size=(3, 5, 5),
                     desc='oneToOne'),
-    SimpleTestCase(nn.SpatialFullConvolutionMap,
+    OldModuleTest(nn.SpatialFullConvolutionMap,
                     (nn.SpatialConvolutionMap.maps.oneToOne(3), 3, 3, 2, 2),
                     input_size=(3, 5, 5),
                     desc='oneToOne_stride'),
-    SimpleTestCase(nn.SpatialFullConvolutionMap,
+    OldModuleTest(nn.SpatialFullConvolutionMap,
                     (nn.SpatialConvolutionMap.maps.full(3, 4), 3, 3),
                     input_size=(3, 5, 5),
                     desc='full'),
     # TODO: test CUDA
-    SimpleTestCase(lambda: nn.SpatialFractionalMaxPooling(2, 2, 0.5, 0.5).fixPoolingRegions(),
+    OldModuleTest(lambda: nn.SpatialFractionalMaxPooling(2, 2, 0.5, 0.5).fixPoolingRegions(),
                     input_size=(1, 3, 5, 5),
                     fullname='SpatialFractionalMaxPooling_ratio',
                     test_cuda=False),
-    SimpleTestCase(lambda: nn.SpatialFractionalMaxPooling(2, 2, 4, 4).fixPoolingRegions(),
+    OldModuleTest(lambda: nn.SpatialFractionalMaxPooling(2, 2, 4, 4).fixPoolingRegions(),
                     input_size=(1, 3, 7, 7),
                     fullname='SpatialFractionalMaxPooling_size',
                     test_cuda=False),
-    SimpleTestCase(nn.SpatialFullConvolution,
+    OldModuleTest(nn.SpatialFullConvolution,
                     (3, 4, 3, 3, 2, 2, 1, 1, 1, 1),
                     input_size=(1, 3, 7, 7)),
-    SimpleTestCase(nn.SpatialLPPooling,
+    OldModuleTest(nn.SpatialLPPooling,
                     (3, 2, 2, 2, 2, 2),
                     input_size=(1, 3, 7, 7)),
-    SimpleTestCase(nn.SpatialMaxPooling,
+    OldModuleTest(nn.SpatialMaxPooling,
                     (3, 3, 2, 2, 1, 1),
                     input_size=(1, 3, 7, 7)),
-    SimpleTestCase(nn.SpatialSubSampling,
+    OldModuleTest(nn.SpatialSubSampling,
                     (3, 3, 3, 2, 2),
                     input_size=(1, 3, 7, 7)),
-    SimpleTestCase(nn.SpatialSubtractiveNormalization,
+    OldModuleTest(nn.SpatialSubtractiveNormalization,
                     (3,),
                     input_size=(1, 3, 7, 7)),
-    SimpleTestCase(nn.SpatialSubtractiveNormalization,
+    OldModuleTest(nn.SpatialSubtractiveNormalization,
                     (3, torch.rand(3)),
                     input_size=(1, 3, 7, 7),
                     desc='kernel'),
-    SimpleTestCase(nn.SpatialUpSamplingNearest,
+    OldModuleTest(nn.SpatialUpSamplingNearest,
                     (2,),
                     input_size=(1, 3, 4, 4)),
 
-    SimpleTestCase(nn.TemporalConvolution,
+    OldModuleTest(nn.TemporalConvolution,
                     (4, 5, 3),
                     input_size=(2, 10, 4)),
-    SimpleTestCase(nn.TemporalConvolution,
+    OldModuleTest(nn.TemporalConvolution,
                     (4, 5, 3, 2),
                     input_size=(2, 10, 4),
                     desc='stride'),
     # TODO: this runs in non-batch mode only
-    SimpleTestCase(nn.TemporalSubSampling,
+    OldModuleTest(nn.TemporalSubSampling,
                     (4, 3),
                     input_size=(10, 4)),
-    SimpleTestCase(nn.TemporalSubSampling,
+    OldModuleTest(nn.TemporalSubSampling,
                     (4, 3, 2),
                     input_size=(10, 4),
                     desc='stride'),
-    SimpleTestCase(nn.TemporalMaxPooling,
+    OldModuleTest(nn.TemporalMaxPooling,
                     (4,),
                     input_size=(2, 10, 4)),
-    SimpleTestCase(nn.TemporalMaxPooling,
+    OldModuleTest(nn.TemporalMaxPooling,
                     (4, 4),
                     input_size=(2, 10, 4),
                     desc='stride'),
 
-    SimpleTestCase(nn.VolumetricAveragePooling,
+    OldModuleTest(nn.VolumetricAveragePooling,
                     (2, 2, 2),
                     input_size=(2, 3, 4, 4, 4)),
-    SimpleTestCase(nn.VolumetricAveragePooling,
+    OldModuleTest(nn.VolumetricAveragePooling,
                     (2, 2, 2, 2, 2, 2),
                     input_size=(2, 3, 5, 5, 5),
                     desc='stride'),
-    SimpleTestCase(nn.VolumetricBatchNormalization,
+    OldModuleTest(nn.VolumetricBatchNormalization,
                     (3,),
                     input_size=(2, 3, 4, 4, 4)),
-    SimpleTestCase(nn.VolumetricBatchNormalization,
+    OldModuleTest(nn.VolumetricBatchNormalization,
                     (3, 1e-3, 0.7),
                     input_size=(2, 3, 4, 4, 4),
                     desc='momentum'),
-    SimpleTestCase(nn.VolumetricBatchNormalization,
+    OldModuleTest(nn.VolumetricBatchNormalization,
                     (3, 1e-3, 0.7, False),
                     input_size=(2, 3, 4, 4, 4),
                     desc='no_affine'),
-    SimpleTestCase(nn.VolumetricConvolution,
+    OldModuleTest(nn.VolumetricConvolution,
                     (3, 4, 2, 2, 2),
                     input_size=(2, 3, 3, 3, 3)),
-    SimpleTestCase(nn.VolumetricConvolution,
+    OldModuleTest(nn.VolumetricConvolution,
                     (3, 4, 2, 2, 2, 2, 2, 2),
                     input_size=(2, 3, 5, 5, 5),
                     desc='stride'),
-    SimpleTestCase(nn.VolumetricConvolution,
+    OldModuleTest(nn.VolumetricConvolution,
                     (3, 4, 2, 2, 2, 2, 2, 2, 1, 1, 1),
                     input_size=(2, 3, 5, 5, 5),
                     desc='stride_padding'),
-    SimpleTestCase(nn.VolumetricFullConvolution,
+    OldModuleTest(nn.VolumetricFullConvolution,
                     (2, 3, 2, 2, 2),
                     input_size=(1, 2, 4, 4, 4)),
-    SimpleTestCase(nn.VolumetricMaxPooling,
+    OldModuleTest(nn.VolumetricMaxPooling,
                     (2, 2, 2),
                     input_size=(2, 3, 5, 5, 5)),
-    SimpleTestCase(nn.VolumetricMaxPooling,
+    OldModuleTest(nn.VolumetricMaxPooling,
                     (2, 2, 2, 2, 2, 2),
                     input_size=(2, 3, 5, 5, 5),
                     desc='stride'),
-    SimpleTestCase(nn.VolumetricMaxPooling,
+    OldModuleTest(nn.VolumetricMaxPooling,
                     (2, 2, 2, 2, 2, 2, 1, 1, 1),
                     input_size=(2, 3, 5, 5, 5),
                     desc='stride_padding'),
-    SimpleTestCase(nn.VolumetricReplicationPadding,
+    OldModuleTest(nn.VolumetricReplicationPadding,
                     (1, 2, 3, 4, 5, 6),
                     input_size=(2, 3, 5, 5, 5)),
 
-    CriterionTestCase(nn.AbsCriterion,
-                        input_size=(2, 3, 4),
-                        target=torch.randn(2, 3, 4),
-                        reference_fn=lambda _,i,t: 1./i.numel() * \
-                            sum((a-b).abs().sum() for a,b in zip(i, t))
-                    ),
-    CriterionTestCase(nn.BCECriterion,
-                        input=torch.rand(15, 10).clamp_(0, 1),
+    CriterionTest(nn.BCECriterion,
+                        input=torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
                         target=torch.randn(15, 10).gt(0).double()
                     ),
-    CriterionTestCase(nn.BCECriterion,
+    CriterionTest(nn.BCECriterion,
                         (torch.rand(10),),
-                        input=torch.rand(15, 10).clamp_(0, 1),
+                        input=torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
                         target=torch.randn(15, 10).gt(0).double(),
                         desc='weights'),
-    CriterionTestCase(nn.ClassNLLCriterion,
-                        input=torch.rand(15, 10).log(),
-                        target=torch.Tensor(15).uniform_().mul(10).floor()),
-    CriterionTestCase(nn.ClassNLLCriterion,
-                        (torch.rand(10),),
-                        input=torch.rand(15, 10).log(),
-                        target=torch.Tensor(15).uniform_().mul(10).floor(),
-                        desc='weights'),
-    CriterionTestCase(nn.CrossEntropyCriterion,
+    CriterionTest(nn.CrossEntropyCriterion,
                         input=torch.randn(15, 10),
                         target=torch.Tensor(15).uniform_().mul(10).floor()),
-    CriterionTestCase(nn.CrossEntropyCriterion,
+    CriterionTest(nn.CrossEntropyCriterion,
                         (torch.rand(10),),
                         input=torch.randn(15, 10),
                         target=torch.Tensor(15).uniform_().mul(10).floor(),
                         desc='weights'),
-    CriterionTestCase(nn.CosineEmbeddingCriterion,
+    CriterionTest(nn.CosineEmbeddingCriterion,
                         input=[torch.rand(15, 10), torch.rand(15, 10)],
                         target=torch.randn(15).sign()),
-    CriterionTestCase(nn.CosineEmbeddingCriterion,
+    CriterionTest(nn.CosineEmbeddingCriterion,
                         (0.5,),
                         input=[torch.rand(15, 10), torch.rand(15, 10)],
                         target=torch.randn(15).sign(),
                         desc='margin'),
-    CriterionTestCase(nn.DistKLDivCriterion,
+    CriterionTest(nn.DistKLDivCriterion,
                         input=torch.rand(10, 10).log(),
                         target=torch.rand(10, 10)),
-    CriterionTestCase(nn.HingeEmbeddingCriterion,
+    CriterionTest(nn.HingeEmbeddingCriterion,
                         input=torch.rand(10),
-                        target=torch.randn(10).gt(0).double()),
-    CriterionTestCase(nn.HingeEmbeddingCriterion,
+                        target=torch.randn(10).gt(0).double().mul_(2).sub(1)),
+    CriterionTest(nn.HingeEmbeddingCriterion,
                         (0.5,),
                         input=torch.rand(10),
-                        target=torch.randn(10).gt(0).double(),
+                        target=torch.randn(10).gt(0).double().mul_(2).sub(1),
                         desc='margin'),
-    CriterionTestCase(nn.L1Cost,
+    CriterionTest(nn.L1Cost,
                         input=torch.randn(2, 3, 4, 5),
                         target=None),
-    CriterionTestCase(nn.L1HingeEmbeddingCriterion,
+    CriterionTest(nn.L1HingeEmbeddingCriterion,
                         input=[torch.randn(2, 3, 4, 5), torch.randn(2, 3, 4, 5)],
                         target=1),
-    CriterionTestCase(nn.L1HingeEmbeddingCriterion,
+    CriterionTest(nn.L1HingeEmbeddingCriterion,
                         (2,),
                         input=[torch.randn(2, 3, 4, 5), torch.randn(2, 3, 4, 5)],
                         target=1,
                         desc='margin'),
-    CriterionTestCase(nn.MSECriterion,
+    CriterionTest(nn.MSECriterion,
                         input=torch.randn(2, 3, 4, 5),
                         target=torch.randn(2, 3, 4, 5),
-                        reference_fn=lambda _,i,t: (i-t).abs().pow(2).sum() / i.numel()),
-    CriterionTestCase(nn.WeightedMSECriterion,
+                        reference_fn=lambda i,t,_: (i-t).abs().pow(2).sum() / i.numel()),
+    CriterionTest(nn.WeightedMSECriterion,
                         (torch.rand(3, 4, 5),),
                         input=torch.randn(2, 3, 4, 5),
                         target=torch.randn(2, 3, 4, 5)),
-    CriterionTestCase(nn.MarginCriterion,
+    CriterionTest(nn.MarginCriterion,
                         input_size=(5, 10),
                         target=torch.randn(5, 10).sign()),
-    CriterionTestCase(nn.MarginRankingCriterion,
+    CriterionTest(nn.MarginRankingCriterion,
                         input=[torch.randn(50).mul(10), torch.randn(50).mul(10)],
                         target=torch.randn(50).sign()),
-    CriterionTestCase(nn.MarginRankingCriterion,
+    CriterionTest(nn.MarginRankingCriterion,
                         (2,),
                         input=[torch.randn(50).mul(10), torch.randn(50).mul(10)],
                         target=torch.randn(50).sign(),
                         desc='margin'),
-    CriterionTestCase(nn.ClassSimplexCriterion,
+    CriterionTest(nn.ClassSimplexCriterion,
                         (30,),
                         input=torch.randn(5, 30).mul(10).renorm(2, 0, 1),
                         target=torch.rand(5).mul(30).floor().long(),
                         desc='margin'),
-    CriterionTestCase(nn.MultiLabelMarginCriterion,
+    CriterionTest(nn.MultiLabelMarginCriterion,
                         input_size=(5, 10),
                         target=torch.rand(5, 10).mul(10).floor()),
-    CriterionTestCase(nn.MultiLabelSoftMarginCriterion,
+    CriterionTest(nn.MultiLabelSoftMarginCriterion,
                         input_size=(5, 10),
                         target=torch.rand(5, 10).mul(2).floor()),
-    CriterionTestCase(nn.MultiLabelSoftMarginCriterion,
+    CriterionTest(nn.MultiLabelSoftMarginCriterion,
                         (torch.rand(10),),
                         input_size=(5, 10),
                         target=torch.rand(5, 10).mul(2).floor(),
                         desc='weights'),
-    CriterionTestCase(nn.MultiMarginCriterion,
+    CriterionTest(nn.MultiMarginCriterion,
                         input_size=(5, 10),
                         target=torch.rand(5).mul(8).floor()),
-    CriterionTestCase(nn.SmoothL1Criterion,
+    CriterionTest(nn.SmoothL1Criterion,
                         input_size=(5, 10),
                         target=torch.randn(5, 10)),
-    CriterionTestCase(nn.SoftMarginCriterion,
+    CriterionTest(nn.SoftMarginCriterion,
                         input_size=(5, 5),
                         target=torch.randn(5, 5).sign()),
-    CriterionTestCase(nn.SpatialClassNLLCriterion,
+    CriterionTest(nn.SpatialClassNLLCriterion,
                         input_size=(2, 3, 5, 5),
                         target=torch.rand(2, 5, 5).mul(3).floor()),
 ]
@@ -852,17 +656,17 @@ simple_tests = [
 # TODO: SplitTable
 
 for p in (1, 2, 1.5):
-    simple_tests.append(
-        SimpleTestCase(nn.Normalize,
+    tests.append(
+        OldModuleTest(nn.Normalize,
                         (p,),
                         input_size=(4, 5),
                         # Eh, we need to use p as a default, so it's passed by value
-                        reference_fn=lambda _,i,p=p: i.div(i.norm(p, 1).expandAs(i)),
+                        reference_fn=lambda i,_,p=p: i.div(i.norm(p, 1).expandAs(i)),
                         desc=str(p)),
     )
 for p in range(1, 4+1):
-    simple_tests.append(
-        SimpleTestCase(nn.PairwiseDistance,
+    tests.append(
+        OldModuleTest(nn.PairwiseDistance,
                         (p,),
                         input_size=[(4, 10), (4, 10)],
                         desc=str(p))
@@ -873,8 +677,8 @@ def build_spatial_unpooling_net():
     unpool = nn.SpatialMaxUnpooling(pool)
     return nn.Sequential().add(pool).add(unpool)
 
-simple_tests.append(
-        SimpleTestCase(build_spatial_unpooling_net,
+tests.append(
+        OldModuleTest(build_spatial_unpooling_net,
             input_size=(1, 3, 10, 10),
             desc='SpatialMaxUnpooling')
         )
@@ -884,14 +688,14 @@ def build_volumetric_unpooling_net():
     unpool = nn.VolumetricMaxUnpooling(pool)
     return nn.Sequential().add(pool).add(unpool)
 
-simple_tests.append(
-        SimpleTestCase(build_volumetric_unpooling_net,
+tests.append(
+        OldModuleTest(build_volumetric_unpooling_net,
             input_size=(1, 3, 10, 10),
             desc='VolumetricMaxUnpooling')
         )
 
-def prepare_simple_tests():
-    for test in simple_tests:
+def prepare_tests():
+    def add_test(test):
         test_name = test.get_name()
         cuda_test_name = test_name + '_cuda'
         if hasattr(TestNN, test_name):
@@ -900,158 +704,45 @@ def prepare_simple_tests():
             raise RuntimeError('Found two tests with the same name: ' + cuda_test_name)
         setattr(TestNN, test_name, lambda self,test=test: test(self))
         setattr(TestNN, cuda_test_name, lambda self,test=test: test.test_cuda(self))
+    name_remap = {
+        'Conv2d': 'SpatialConvolution',
+    }
+    for test in tests:
+        add_test(test)
+    for test_params in module_tests:
+        test_params = deepcopy(test_params)
+        name = test_params.pop('module_name')
+        name = name_remap.get(name, name)
+        test_params['constructor'] = getattr(nn, name)
+        test = OldModuleTest(**test_params)
+        add_test(test)
+    for test_params in criterion_tests:
+        test_params = deepcopy(test_params)
+        name = test_params.pop('module_name')
+        name = name_remap.get(name, name)
+        test_params['constructor'] = getattr(nn, name)
+        test = CriterionTest(**test_params)
+        add_test(test)
 
-class TestNN(TestCase):
+class TestNN(NNTestCase):
 
-    def _jacobian(self, input, num_out):
-        if isinstance(input, list):
-            return [self._jacobian(elem, num_out) for elem in input]
-        else:
-            return torch.zeros(input.nElement(), num_out)
+    def _forward(self, module, input):
+        return module.forward(input)
 
-    def _tensors_in(self, x):
-        if torch.isTensor(x):
-            yield x
-        else:
-            for e in x:
-                for tmp in self._tensors_in(e):
-                    yield tmp
+    def _backward(self, module, input, output, grad_output):
+        return module.backward(input, grad_output)
 
-    def _clone_input(self, input):
-        if isinstance(input, list):
-            return [self._clone_input(i) for i in input]
-        else:
-            return input.clone()
+    def _forward_criterion(self, criterion, input, target):
+        return criterion.forward(input, target)
 
-    def _analytical_jacobian(self, module, input, jacobian_input=True, jacobian_parameters=True):
-        module.forward(input)
-        d_out = module.output.new().resizeAs_(module.output)
-        flat_d_out = d_out.view(-1)
+    def _backward_criterion(self, criterion, input, target):
+        return criterion.backward(input, target)
 
-        if jacobian_input:
-            jacobian_input = self._jacobian(input, d_out.nElement())
-            flat_jacobian_input = list(self._tensors_in(jacobian_input))
-            flat_input = list(self._tensors_in(input))
+    def _zero_grad_parameters(self, module):
+        return module.zeroGradParameters()
 
-        if jacobian_parameters:
-            param, d_param = module.flattenParameters()
-            jacobian_param = torch.zeros(param.nElement(), d_out.nElement())
-
-        for i in range(flat_d_out.nElement()):
-            d_out.zero_()
-            flat_d_out[i] = 1
-
-            if jacobian_parameters:
-                module.zeroGradParameters()
-
-            d_input = module.updateGradInput(input, d_out)
-            module.accGradParameters(input, d_out)
-
-            if jacobian_input:
-                for jacobian_x, d_x in zip(flat_jacobian_input, self._tensors_in(d_input)):
-                    jacobian_x[:,i] = d_x
-            if jacobian_parameters:
-                jacobian_param[:,i] = d_param
-
-        res = tuple()
-        if jacobian_input:
-            res += jacobian_input,
-        if jacobian_parameters:
-            res += jacobian_param,
-
-        return res
-
-    def _numerical_jacobian(self, module, input, jacobian_input=True, jacobian_parameters=True):
-        perturbation = 1e-6
-        module.forward(input)
-        output_size = module.output.nElement()
-
-        if jacobian_parameters:
-            param, d_param = module.flattenParameters()
-
-        def get_jacobian_wrt(input, x):
-            jacobian = self._jacobian(x, output_size)
-
-            # It's much easier to iterate over flattened lists of tensors.
-            # These are reference to the same objects in jacobian, so any changes
-            # will be reflected in it as well.
-            x_tensors = [t for t in self._tensors_in(x)]
-            j_tensors = [t for t in self._tensors_in(jacobian)]
-
-            outa = torch.Tensor(output_size)
-            outb = torch.Tensor(output_size)
-
-            # TODO: compare structure
-            for x_tensor, d_tensor in zip(x_tensors, j_tensors):
-                flat_tensor = x_tensor.view(-1)
-                for i in range(flat_tensor.nElement()):
-                    orig = flat_tensor[i]
-                    flat_tensor[i] = orig - perturbation
-                    outa.copy_(module.forward(input))
-                    flat_tensor[i] = orig + perturbation
-                    outb.copy_(module.forward(input))
-                    flat_tensor[i] = orig
-
-                    outb.add_(-1,outa).div_(2*perturbation)
-                    d_tensor[i] = outb
-
-            return jacobian
-
-        # To be able to use .view(-1) the Tensors must be contiguous
-        def contiguous(input):
-            if isinstance(input, list):
-                return [contiguous(e) for e in input]
-            else:
-                return input.contiguous()
-        input = contiguous(input)
-
-        res = tuple()
-        if jacobian_input:
-            res += get_jacobian_wrt(input, input),
-        if jacobian_parameters:
-            res += get_jacobian_wrt(input, param),
-        return res
-
-    def check_jacobian(self, module, input, jacobian_input=True):
-        jacobian_parameters = bool(module.parameters())
-        analytical = self._analytical_jacobian(module, input, jacobian_input, jacobian_parameters)
-        numerical = self._numerical_jacobian(module, input, jacobian_input, jacobian_parameters)
-        analytical_t = self._tensors_in(analytical)
-        numerical_t = self._tensors_in(numerical)
-        # TODO: compare structure
-        self.assertLessEqual(
-            max(a.add(-1, n).abs().max() for a, n in zip(analytical_t, numerical_t)),
-            PRECISION
-        )
-
-    def check_criterion_jacobian(self, criterion, input, target):
-        eps = 1e-6
-        criterion.forward(input, target)
-        d_x = criterion.backward(input, target)
-        numerical_d_x = self._clone_input(input)
-
-        input_t = self._tensors_in(input)
-        numerical_t = self._tensors_in(input)
-        for x, d_x in zip(input_t, numerical_t):
-            x = x.view(-1)
-            d_x = d_x.view(-1)
-            for i in range(x.nElement()):
-                original = x[i]
-                x[i] = original + eps
-                fx1 = criterion.forward(input, target)
-                x[i] = original - eps
-                fx2 = criterion.forward(input, target)
-                deriv = (fx1 - fx2) / (2*eps)
-                d_x[i] = deriv
-                x[i] = original
-
-        # TODO: check structure
-        input_t = self._tensors_in(input)
-        numerical_t = self._tensors_in(input)
-        self.assertLessEqual(
-            max(a.add(-1, n).abs().max() for a, n in zip(input_t, numerical_t)),
-            PRECISION
-        )
+    def _get_parameters(self, module):
+        return module.parameters() or ([], [])
 
     def test_Dropout(self):
         p = 0.2
@@ -1269,7 +960,7 @@ class TestNN(TestCase):
         self.assertTrue(isinstance(gradInput[2], list))
         self.assertEqual(len(gradInput), 3)
         self.assertEqual(len(gradInput[2]), 1)
-        for t1, t2 in zip(self._tensors_in(gradInput), self._tensors_in(gradInput2)):
+        for t1, t2 in zip(iter_tensors(gradInput), iter_tensors(gradInput2)):
             self.assertEqual(t1, t2)
 
         # test outputs for variable length inputs
@@ -1496,6 +1187,6 @@ class TestNN(TestCase):
 
 
 if __name__ == '__main__':
-    prepare_simple_tests()
+    prepare_tests()
     unittest.main()
 

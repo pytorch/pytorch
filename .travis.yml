@@ -17,6 +17,8 @@ install:
 script:
     - python test/test_torch.py
     - python test/test_legacy_nn.py
+    - python test/test_nn.py
+    - python test/test_autograd.py
 
 addons:
     apt:
