@@ -14,3 +14,4 @@ for function in generic_functions:
 
 backend = load_backend('Cuda', torch._thnn._THCUNN, generic_functions, (THNNCudaBackendStateMixin,))
 type2backend['torch.cuda.FloatTensor'] = backend
+type2backend[torch.cuda.FloatTensor] = backend
