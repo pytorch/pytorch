@@ -89,7 +89,7 @@ struct ThresholdUpdateGradInputIP
 };
 
 void THNN_CudaThreshold_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput,
-  THCudaTensor *gradInput, double threshold, bool inplace)
+  THCudaTensor *gradInput, double threshold, double val, bool inplace)
 {
   THCUNN_assertSameGPU(state, 3, input, gradInput, gradOutput);
 
