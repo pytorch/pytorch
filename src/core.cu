@@ -750,7 +750,7 @@ ncclResult_t ncclCommInitRank(ncclComm_t* newcomm, int ndev, ncclUniqueId commId
 }
 
 extern "C" DSOGLOBAL
-ncclResult_t ncclCommInitAll(ncclComm_t* comms, int ndev, int* devlist) {
+ncclResult_t ncclCommInitAll(ncclComm_t* comms, int ndev, const int* devlist) {
   initDebug();
 
   showVersion();
