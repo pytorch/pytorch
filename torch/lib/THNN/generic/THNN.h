@@ -472,6 +472,7 @@ TH_API void THNN_(Threshold_updateGradInput)(
           THTensor *gradOutput,
           THTensor *gradInput,
           real threshold,
+          real val,
           bool inplace);
 
 TH_API void THNN_(TemporalConvolution_updateOutput)(

@@ -14,7 +14,7 @@ void THNN_(SpatialUpSamplingNearest_updateOutput)(
   int yDim = input->nDimension-1;
 
   // dims
-  int idim = input->nDimension;  // Gauranteed to be between 3 and 5
+  int idim = input->nDimension;  // Guaranteed to be between 3 and 5
   int osz0 = output->size[0];
   int osz1 = output->size[1];
   int osz2 = output->size[2];
@@ -80,7 +80,7 @@ void THNN_(SpatialUpSamplingNearest_updateGradInput)(
   int yDim = gradInput->nDimension-1;
 
   // dims
-  int idim = gradInput->nDimension;  // Gauranteed to be between 3 and 5
+  int idim = gradInput->nDimension;  // Guaranteed to be between 3 and 5
   int isz0 = gradInput->size[0];
   int isz1 = gradInput->size[1];
   int isz2 = gradInput->size[2];

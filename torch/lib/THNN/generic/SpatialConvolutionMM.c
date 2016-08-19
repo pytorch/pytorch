@@ -67,9 +67,12 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
   long outputWidth;
   long outputHeight;
 
+  int freeWeight = 0;
+
   THArgCheck( input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch mode) tensor expected");
   THArgCheck(kW > 0 && kH > 0, 8, "kernel size should be greater than zero");
   THArgCheck(dW > 0 && dH > 0, 10, "stride should be greater than zero");
+  THArgCheck(weight->nDimension == 2 || weight->nDimension == 4, 4, "weight tensor should be 2D or 4D");
 
   if (input->nDimension == 4) {
     dimf++;
@@ -88,8 +91,19 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
     THError("Given input size: (%dx%dx%d). Calculated output size: (%dx%dx%d). Output size is too small",
         nInputPlane,inputHeight,inputWidth,nOutputPlane,outputHeight,outputWidth);
 
-  if (nInputPlane*kW*kH != weight->size[1])
-    THError("Wrong number of input channels! Input has %d channels, expected %d",nInputPlane,weight->size[1]/(kW*kH));
+
+  int expectedWeightSize = weight->nDimension == 2 ? nInputPlane*kW*kH : nInputPlane;
+  int weightInputPlanes = weight->nDimension == 2 ? weight->size[1]/(kW*kH) : weight->size[1];
+  if (expectedWeightSize != weight->size[1])
+    THError("Wrong number of input channels! Input has %d channels, expected %d",
+        nInputPlane, weightInputPlanes);
+
+  if (weight->nDimension == 4) {
+    long s1 = weight->size[0];
+    long s2 = weight->size[1] * weight->size[2] * weight->size[3];
+    weight = THTensor_(newWithStorage2d)(weight->storage, 0, s1, -1, s2, -1);
+    freeWeight = 1;
+  }
 
   if(input->nDimension == 3)
   {
@@ -126,6 +140,9 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
       THTensor_(free)(finput_t);
     }
   }
+
+  if (freeWeight)
+    THTensor_(free)(weight);
 }
 
 static void THNN_(SpatialConvolutionMM_updateGradInput_frame)(
@@ -167,17 +184,27 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
           int padH)
 {
   long nOutputPlane = weight->size[0];
+  int freeWeight = 0;
 
   THArgCheck( nOutputPlane == gradOutput->size[input->nDimension == 4 ? 1 : 0], 3, "Number of output features is not equal to nOutputPlane" );
   THArgCheck(kW > 0 && kH > 0, 9, "kernel size should be greater than zero");
   THArgCheck(dW > 0 && dH > 0, 11, "stride should be greater than zero");
+  THArgCheck(weight->nDimension == 2 || weight->nDimension == 4, 4, "weight tensor should be 2D or 4D");
 
   THTensor_(resizeAs)(gradInput, input);
   THTensor_(resizeAs)(fgradInput, finput);
   // depending on the BLAS library, fgradInput (result tensor) might
   // be left uninitialized on zero alpha, which might lead to weird behavior
   // hence, to be safe, zero it
-  THTensor_(zero)(fgradInput); 
+  THTensor_(zero)(fgradInput);
+
+  if (weight->nDimension == 4) {
+    long s1 = weight->size[0];
+    long s2 = weight->size[1] * weight->size[2] * weight->size[3];
+    weight = THTensor_(newWithStorage2d)(weight->storage, 0, s1, -1, s2, -1);
+    freeWeight = 1;
+  }
+
   THTensor_(transpose)(weight, weight, 0, 1);
 
   if(input->nDimension == 3)
@@ -205,6 +232,9 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
   }
 
   THTensor_(transpose)(weight, weight, 0, 1);
+
+  if (freeWeight)
+    THTensor_(free)(weight);
 }
 
 static void THNN_(SpatialConvolutionMM_accGradParameters_frame)(
@@ -254,10 +284,19 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
           int padH,
           real scale)
 {
+  int freeWeight = 0;
   long nOutputPlane = gradWeight->size[0];
   THArgCheck( nOutputPlane == gradOutput->size[input->nDimension == 4 ? 1 : 0], 3, "Number of output features is not equal to nOutputPlane" );
   THArgCheck(kW > 0 && kH > 0, 8, "kernel size should be greater than zero");
   THArgCheck(dW > 0 && dH > 0, 10, "stride should be greater than zero");
+  THArgCheck(gradWeight->nDimension == 2 || gradWeight->nDimension == 4, 4, "gradWeight tensor should be 2D or 4D");
+
+  if (gradWeight->nDimension == 4) {
+    long s1 = gradWeight->size[0];
+    long s2 = gradWeight->size[1] * gradWeight->size[2] * gradWeight->size[3];
+    gradWeight = THTensor_(newWithStorage2d)(gradWeight->storage, 0, s1, -1, s2, -1);
+    freeWeight = 1;
+  }
 
   if(input->nDimension == 3)
   {
@@ -279,6 +318,8 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
       THTensor_(free)(finput_t);
     }
   }
+  if (freeWeight)
+    THTensor_(free)(gradWeight);
 }
 
 #endif
