@@ -151,9 +151,16 @@ except ImportError:
 
 if WITH_CUDA:
     if platform.system() == 'Darwin':
-        include_dirs += ['/Developer/NVIDIA/CUDA-7.5/include']
+        cuda_path = '/Developer/NVIDIA/CUDA-7.5'
+        cuda_include_path = cuda_path + '/include'
+        cuda_lib_path = cuda_path + '/lib'
     else:
-        include_dirs += ['/usr/local/cuda/include']
+        cuda_path = '/usr/local/cuda'
+        cuda_include_path = cuda_path + '/include'
+        cuda_lib_path = cuda_path + '/lib64'
+    include_dirs.append(cuda_include_path)
+    extra_link_args.append('-L' + cuda_lib_path)
+    extra_link_args.append('-Wl,-rpath,' + cuda_lib_path)
     extra_compile_args += ['-DWITH_CUDA']
     main_libraries += ['THC']
     main_sources += [
@@ -166,6 +173,13 @@ if WITH_CUDA:
 if DEBUG:
     extra_compile_args += ['-O0', '-g']
     extra_link_args += ['-O0', '-g']
+
+
+def make_relative_rpath(path):
+    if platform.system() == 'Darwin':
+        return '-Wl,-rpath,@loader_path/' + path
+    else:
+        return '-Wl,-rpath,$ORIGIN/' + path
 
 ################################################################################
 # Declare extensions and package
@@ -180,7 +194,7 @@ C = Extension("torch._C",
     language='c++',
     extra_compile_args=extra_compile_args,
     include_dirs=include_dirs,
-    extra_link_args=extra_link_args + ['-Wl,-rpath,$ORIGIN/lib'],
+    extra_link_args=extra_link_args + [make_relative_rpath('lib')]
 )
 extensions.append(C)
 
@@ -190,7 +204,7 @@ THNN = Extension("torch._thnn._THNN",
     language='c++',
     extra_compile_args=extra_compile_args,
     include_dirs=include_dirs,
-    extra_link_args=extra_link_args + ['-Wl,-rpath,$ORIGIN/../lib'],
+    extra_link_args=extra_link_args + [make_relative_rpath('../lib')]
 )
 extensions.append(THNN)
 
@@ -201,7 +215,7 @@ if WITH_CUDA:
         language='c++',
         extra_compile_args=extra_compile_args,
         include_dirs=include_dirs,
-        extra_link_args=extra_link_args + ['-Wl,-rpath,$ORIGIN/../lib'],
+        extra_link_args=extra_link_args + [make_relative_rpath('../lib')]
     )
     extensions.append(THCUNN)
     packages += ['torch.cuda', 'torch.legacy.cunn']

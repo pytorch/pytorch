@@ -177,7 +177,7 @@ PyObject * THCPModule_initExtension(PyObject *self)
   PyObject *torch_module = PyImport_ImportModule("torch.cuda");
   if (!torch_module) {
     THPUtils_setError("class loader couldn't access torch module");
-    return false;
+    return NULL;
   }
   PyObject* module_dict = PyModule_GetDict(torch_module);
   return PyBool_FromLong(THCPModule_initCuda(module_dict));
