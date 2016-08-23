@@ -130,36 +130,6 @@ void THCudaTensor_clamp(THCState *state, THCudaTensor *self_, THCudaTensor *src,
   THCudaCheck(cudaGetLastError());
 }
 
-struct TensorSignOp {
-  __device__ __forceinline__ void operator()(float* out, float* in) {
-    float orig = *in;
-    *out = (orig > 0) - (orig < 0);
-  }
-
-  __device__ __forceinline__ void operator()(float* v) {
-    float orig = *v;
-    *v = (orig > 0) - (orig < 0);
-  }
-};
-
-void THCudaTensor_sign(THCState *state, THCudaTensor *self_, THCudaTensor *src)
-{
-  THAssert(THCudaTensor_checkGPU(state, 2, self_, src));
-  if (self_ == src) {
-    if (!THC_pointwiseApply1(state, self_, TensorSignOp())) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  } else {
-    THCudaTensor_resizeAs(state, self_, src);
-
-    if (!THC_pointwiseApply2(state, self_, src, TensorSignOp())) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  }
-
-  THCudaCheck(cudaGetLastError());
-}
-
 float THCudaTensor_meanall(THCState *state, THCudaTensor *self)
 {
   THAssert(THCudaTensor_checkGPU(state, 1, self));
