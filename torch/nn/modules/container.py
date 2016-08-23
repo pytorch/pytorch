@@ -6,6 +6,7 @@ from collections import OrderedDict
 class Container(Module):
 
     def __init__(self, **kwargs):
+        self.module_set = set()
         for key, value in kwargs.items():
             self._assign_module(key, value)
 
@@ -13,6 +14,13 @@ class Container(Module):
         # TODO: error message
         assert not hasattr(self, name)
         setattr(self, name, module)
+        self.module_set.add(module)
+
+    def parameters(self):
+        params = []
+        for module in self.module_set:
+            params.extend(module.parameters())
+        return params
 
 
 class Sequential(Container):

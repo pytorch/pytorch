@@ -35,6 +35,12 @@ class Module(object):
         else:
             return self.type(torch.cuda.FloatTensor)
 
+    def float(self):
+        return self.type(torch.FloatTensor)
+
+    def double(self):
+        return self.type(torch.DoubleTensor)
+
     def register_backward_hook(self, name, hook):
         assert name not in self.backward_hooks, \
             "Trying to register a second backward hook with name {}".format(name)
@@ -66,8 +72,10 @@ class Module(object):
             return result[0]
         return result
 
-    def float(self):
-        return self.type(torch.FloatTensor)
+    def parameters(self):
+        params = []
+        if hasattr(self, 'weight') and self.weight is not None:
+            params.append(self.weight)
+        if hasattr(self, 'bias') and self.bias is not None:
+            params.append(self.bias)
 
-    def double(self):
-        return self.type(torch.DoubleTensor)
