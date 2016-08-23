@@ -46,18 +46,18 @@ class TestNN(NNTestCase):
         return input.grad
 
     def _zero_grad_parameters(self, module):
-        if hasattr(module, 'weight'):
+        if hasattr(module, 'weight') and module.weight is not None:
             module.weight.grad.zero_()
-        if hasattr(module, 'bias'):
+        if hasattr(module, 'bias') and module.bias is not None:
             module.bias.grad.zero_()
 
     def _get_parameters(self, module):
         params = []
         d_params = []
-        if hasattr(module, 'weight'):
+        if hasattr(module, 'weight') and module.weight is not None:
             params += [module.weight.data]
             d_params += [module.weight.grad]
-        if hasattr(module, 'bias'):
+        if hasattr(module, 'bias') and module.bias is not None:
             params += [module.bias.data]
             d_params += [module.bias.grad]
         return params, d_params

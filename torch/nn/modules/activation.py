@@ -41,12 +41,33 @@ class ReLU6(HardTanh):
     def __init__(self, inplace=False):
         super(ReLU6, self).__init__(0, 6, inplace)
 
+
 class Sigmoid(Module):
 
     def _forward(self, input):
         return self._backend.Sigmoid()(input)
 
+
 class Tanh(Module):
 
     def _forward(self, input):
         return self._backend.Tanh()(input)
+
+
+class Softmax(Module):
+
+    def _forward(self, input):
+        assert input.dim() == 2, 'Softmax requires a 2D tensor as input'
+        return self._backend.Softmax()(input)
+
+
+class Softmax2d(Module):
+
+    def _forward(self, input):
+        assert input.dim() == 4, 'Softmax2d requires a 4D tensor as input'
+        return self._backend.Softmax()(input)
+
+class LogSoftmax(Module):
+
+    def _forward(self, input):
+        return self._backend.LogSoftmax()(input)

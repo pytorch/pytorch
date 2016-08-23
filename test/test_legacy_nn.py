@@ -72,15 +72,6 @@ tests = [
     OldModuleTest(nn.LogSigmoid,
                     input_size=(2, 3, 4),
                     reference_fn=lambda i,_: i.sigmoid().log()),
-    OldModuleTest(nn.LogSoftMax,
-                    input_size=(10, 20),
-                    reference_fn=lambda i,_: torch.exp(i).div_(torch.exp(i).sum(1).expand(10, 20)).log_()),
-    OldModuleTest(nn.SoftMax,
-                    input_size=(10, 20),
-                    reference_fn=lambda i,_: torch.exp(i).div(torch.exp(i).sum(1).expand(10, 20))),
-    OldModuleTest(nn.SpatialSoftMax,
-                    input_size=(1, 3, 10, 20),
-                    reference_fn=lambda i,_: torch.exp(i).div(torch.exp(i).sum(1).expandAs(i))),
     OldModuleTest(nn.SoftMin,
                     input_size=(10, 20)),
     OldModuleTest(nn.SoftPlus,
@@ -209,14 +200,6 @@ tests = [
                     (1,),
                     input_size=(2, 4, 5),
                     reference_fn=lambda i,_: torch.mean(i, 1)),
-    OldModuleTest(nn.BatchNormalization,
-                    (10,),
-                    input_size=(4, 10),
-                    desc='affine'),
-    OldModuleTest(nn.BatchNormalization,
-                    (10, 1e-3, 0.3, False),
-                    input_size=(4, 10),
-                    desc='not_affine'),
     # TODO: reference function
     OldModuleTest(nn.HardShrink,
                     (2.,),
@@ -467,9 +450,6 @@ tests = [
     OldModuleTest(nn.SpatialLPPooling,
                     (3, 2, 2, 2, 2, 2),
                     input_size=(1, 3, 7, 7)),
-    OldModuleTest(nn.SpatialMaxPooling,
-                    (3, 3, 2, 2, 1, 1),
-                    input_size=(1, 3, 7, 7)),
     OldModuleTest(nn.SpatialSubSampling,
                     (3, 3, 3, 2, 2),
                     input_size=(1, 3, 7, 7)),
@@ -706,6 +686,11 @@ def prepare_tests():
         setattr(TestNN, cuda_test_name, lambda self,test=test: test.test_cuda(self))
     name_remap = {
         'Conv2d': 'SpatialConvolution',
+        'MaxPooling2d': 'SpatialMaxPooling',
+        'Softmax': 'SoftMax',
+        'Softmax2d': 'SpatialSoftMax',
+        'LogSoftmax': 'LogSoftMax',
+        'BatchNorm': 'BatchNormalization',
     }
     for test in tests:
         add_test(test)

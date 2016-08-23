@@ -74,6 +74,38 @@ module_tests = [
         module_name='Tanh',
         input_size=(2, 3, 4, 5)
     ),
+    dict(
+        module_name='MaxPooling2d',
+        constructor_args=(3, 3, 2, 2, 1, 1),
+        input_size=(1, 3, 7, 7)
+    ),
+    dict(
+        module_name='Softmax',
+        input_size=(10, 20),
+        reference_fn=lambda i,_: torch.exp(i).div(torch.exp(i).sum(1).expand(10, 20))
+    ),
+    dict(
+        module_name='Softmax2d',
+        input_size=(1, 3, 10, 20),
+        reference_fn=lambda i,_: torch.exp(i).div(torch.exp(i).sum(1).expandAs(i))
+    ),
+    dict(
+        module_name='BatchNorm',
+        constructor_args=(10,),
+        input_size=(4, 10),
+        desc='affine'
+    ),
+    dict(
+        module_name='BatchNorm',
+        constructor_args=(10, 1e-3, 0.3, False),
+        input_size=(4, 10),
+        desc='not_affine'
+    ),
+    dict(
+        module_name='LogSoftmax',
+        input_size=(10, 20),
+        reference_fn=lambda i,_: torch.exp(i).div_(torch.exp(i).sum(1).expand(10, 20)).log_()
+    ),
 ]
 
 

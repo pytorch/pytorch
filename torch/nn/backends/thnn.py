@@ -11,6 +11,10 @@ def _initialize_backend():
     backend.register_function('Linear', LinearFunction)
     name_remap = {
         'SpatialConvolutionMMFunction': 'Conv2dFunction',
+        'SpatialMaxPoolingFunction': 'MaxPooling2dFunction',
+        'SoftMaxFunction': 'SoftmaxFunction',
+        'LogSoftMaxFunction': 'LogSoftmaxFunction',
+        'BatchNormalizationFunction': 'BatchNormFunction',
     }
     for cls in _generated_functions:
         name = cls.__name__

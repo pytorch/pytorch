@@ -9,6 +9,7 @@ class Variable(object):
         'stride',
         'nElement',
         'numel',
+        'dim',
         # TODO: add more
     ]
 

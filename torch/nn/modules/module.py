@@ -11,6 +11,7 @@ class Module(object):
         self._backend = thnn_backend
         self.backward_hooks = OrderedDict()
         self.forward_hooks = OrderedDict()
+        self.train = True
 
     def _forward(self, *input):
         raise NotImplementedError
@@ -73,9 +74,12 @@ class Module(object):
         return result
 
     def parameters(self):
-        params = []
         if hasattr(self, 'weight') and self.weight is not None:
-            params.append(self.weight)
+            yield self.weight
         if hasattr(self, 'bias') and self.bias is not None:
-            params.append(self.bias)
+            yield self.bias
+
+    def zero_grad_parameters(self):
+        for p in self.parameters():
+            p.grad.zero_()
 

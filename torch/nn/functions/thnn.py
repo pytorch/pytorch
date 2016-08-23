@@ -1,7 +1,9 @@
-def _make_function_class_criterion(class_name, update_output, update_grad_input, acc_grad_parameters):
-    from torch.autograd import Function
-    from torch._thnn import type2backend
+import torch._thnn.thnn
+from torch._thnn.utils import parse_header, THNN_H_PATH
+from torch.autograd import Function
+from torch._thnn import type2backend
 
+def _make_function_class_criterion(class_name, update_output, update_grad_input, acc_grad_parameters):
     weight_arg_idx = -1
     for i, arg in enumerate(update_output.arguments):
         if arg.name.startswith('weight'):
@@ -45,9 +47,6 @@ def _make_function_class_criterion(class_name, update_output, update_grad_input,
 
 
 def _make_function_class(class_name, update_output, update_grad_input, acc_grad_parameters):
-    from torch.autograd import Function
-    from torch._thnn import type2backend
-
     def has_argument(fn, name):
         for arg in fn.arguments:
             if arg.name == name:
@@ -107,12 +106,10 @@ def _make_function_class(class_name, update_output, update_grad_input, acc_grad_
     return type(class_name, (Function,), dict(__init__=__init__, forward=forward, backward=backward))
 
 
+_function_list = parse_header(THNN_H_PATH)
+_function_by_name = {fn.name: fn for fn in _function_list}
 def _generate_function_classes(scope_dict):
-    import torch._thnn.thnn
-    from torch._thnn.utils import parse_header, THNN_H_PATH
-    function_list = parse_header(THNN_H_PATH)
-    classes_to_generate = {fn.name.partition('_')[0] for fn in function_list}
-    function_by_name = {fn.name: fn for fn in function_list}
+    classes_to_generate = {fn.name.partition('_')[0] for fn in _function_list}
     exceptions = {
         'SparseLinear',
         'BatchNormalization',
@@ -121,9 +118,9 @@ def _generate_function_classes(scope_dict):
     }
     classes_to_generate -= exceptions
     for fn in classes_to_generate:
-        update_output = function_by_name[fn + '_updateOutput']
-        update_grad_input = function_by_name[fn + '_updateGradInput']
-        acc_grad_parameters = function_by_name.get(fn + '_accGradParameters')
+        update_output = _function_by_name[fn + '_updateOutput']
+        update_grad_input = _function_by_name[fn + '_updateGradInput']
+        acc_grad_parameters = _function_by_name.get(fn + '_accGradParameters')
         class_name = fn + 'Function'
         # This has to call a function to retain correct references to functions
         if 'Criterion' in fn:
@@ -136,5 +133,48 @@ def _generate_function_classes(scope_dict):
         _generated_functions.append(cls)
 
 
-_generated_functions = []
+class BatchNormalizationFunction(Function):
+    def __init__(self, *args):
+        super(BatchNormalizationFunction, self).__init__()
+        self.additional_args = args
+
+    def forward(self, input, *params):
+        self.backend = type2backend[type(input)]
+        self.params = params
+        self.input = input
+        self.num_features = input.size(1)
+        # Add save_input and save_std
+        self.additional_args = self.additional_args[:2] + \
+            (input.new(self.num_features), input.new(self.num_features)) + \
+            self.additional_args[2:]
+        num_params = len(self.params)
+        if num_params < 2:
+            params = params + tuple(None for i in range(2 - num_params))
+        additional_args = params + self.additional_args
+        output = input.new().resizeAs_(input)
+        self.backend.BatchNormalization_updateOutput(self.backend.library_state,
+                input, output, *additional_args)
+        return output
+
+    def backward(self, grad_output):
+        grad_input = (self.input.new().resizeAs_(self.input).zero_()
+                if self.needs_input_grad[0] else None,)
+        grad_param = tuple(p.new().resizeAs_(p).zero_() if self.needs_input_grad[i+1]
+                else None for i, p in enumerate(self.params))
+        result_grad = grad_input + grad_param
+
+        num_params = len(self.params)
+        if num_params < 2:
+            grad_param = grad_param + tuple(None for i in range(2 - num_params))
+
+        weight_tuple = (self.params[0],) if len(self.params) > 0 else (None,)
+        # backward takes scale instead of momentum
+        additional_args = self.additional_args[:-2] + (1,) + self.additional_args[-1:]
+        args = grad_input + grad_param + weight_tuple + additional_args
+        self.backend.BatchNormalization_backward(self.backend.library_state,
+                self.input, grad_output, *args)
+        return result_grad
+
+
+_generated_functions = [BatchNormalizationFunction]
 _generate_function_classes(locals())
