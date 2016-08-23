@@ -173,6 +173,17 @@ struct TensorSignOp {
   }
 };
 
+template <>
+struct TensorSignOp<unsigned char> {
+  __device__ __forceinline__ void operator()(unsigned char* out, unsigned char* in) {
+    *out = 1;
+  }
+
+  __device__ __forceinline__ void operator()(unsigned char* v) {
+    *v = 1;
+  }
+};
+
 #ifdef CUDA_HALF_TENSOR
 template <>
 struct TensorSignOp<half> {
