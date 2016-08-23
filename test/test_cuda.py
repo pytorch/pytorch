@@ -260,7 +260,7 @@ class TestCuda(TestCase):
         x = torch.randn(5, 5).cuda()
         y = torch.IntTensor(2, 5).fill_(0).cuda()
         q = [x, y, x, y.storage()]
-        with tempfile.TemporaryFile() as f:
+        with tempfile.NamedTemporaryFile() as f:
             torch.save(q, f)
             f.seek(0)
             q_copy = torch.load(f)

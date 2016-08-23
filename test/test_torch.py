@@ -2222,7 +2222,7 @@ class TestTorch(TestCase):
     def test_serialization(self):
         a = [torch.randn(5, 5).float() for i in range(2)]
         b = [a[i % 2] for i in range(4)] + [a[0].storage()]
-        with tempfile.TemporaryFile() as f:
+        with tempfile.NamedTemporaryFile() as f:
             torch.save(b, f)
             f.seek(0)
             c = torch.load(f)

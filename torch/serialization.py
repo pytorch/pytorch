@@ -13,6 +13,8 @@ else:
 
 import torch
 
+DEFAULT_PROTOCOL = 2
+
 LONG_SIZE = struct.Struct('=l').size
 INT_SIZE = struct.Struct('=i').size
 SHORT_SIZE = struct.Struct('=h').size
@@ -35,7 +37,7 @@ def mkdtemp():
 
 
 # TODO: choose pickle protocol
-def save(obj, f, pickle_module=pickle, pickle_protocol=pickle.DEFAULT_PROTOCOL):
+def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
     serialized_tensors = {}
     serialized_storages = {}
 

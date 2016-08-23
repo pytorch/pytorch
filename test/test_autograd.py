@@ -56,7 +56,7 @@ tests = [
     (Index, (slice(0, 3),), (torch.rand(S, S, S),), 'slice'),
     (View, (S*S, S), (torch.rand(S, S, S),)),
     (Exp,  (), (torch.rand(S, S, S),)),
-    (Log,  (), (torch.rand(S, S, S),)),
+    (Log,  (), (torch.rand(S, S, S) + 1e-2,)),
     (Log1p,  (), (torch.rand(S, S, S),)),
 ]
 
