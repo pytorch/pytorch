@@ -2,6 +2,7 @@ import sys
 import math
 import random
 import torch
+import tempfile
 import unittest
 from itertools import product
 from common import TestCase, iter_indices
@@ -2217,6 +2218,25 @@ class TestTorch(TestCase):
         p = torch.rand(SIZE)
         t.bernoulli_(p)
         self.assertTrue(isBinary(t))
+
+    def test_serialization(self):
+        a = [torch.randn(5, 5).float() for i in range(2)]
+        b = [a[i % 2] for i in range(4)] + [a[0].storage()]
+        with tempfile.TemporaryFile() as f:
+            torch.save(b, f)
+            f.seek(0)
+            c = torch.load(f)
+        self.assertEqual(b, c, 0)
+        self.assertTrue(isinstance(c[0], torch.FloatTensor))
+        self.assertTrue(isinstance(c[1], torch.FloatTensor))
+        self.assertTrue(isinstance(c[2], torch.FloatTensor))
+        self.assertTrue(isinstance(c[3], torch.FloatTensor))
+        self.assertTrue(isinstance(c[4], torch.FloatStorage))
+        c[0].fill_(10)
+        self.assertEqual(c[0], c[2], 0)
+        self.assertEqual(c[4], torch.FloatStorage(25).fill_(10), 0)
+        c[1].fill_(20)
+        self.assertEqual(c[1], c[3], 0)
 
 if __name__ == '__main__':
     unittest.main()

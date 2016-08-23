@@ -1,3 +1,4 @@
+import tempfile
 import unittest
 
 import torch
@@ -254,6 +255,24 @@ class TestCuda(TestCase):
                 self.assertEqual(w.getDevice(), 1)
             z = z.cuda()
             self.assertEqual(z.getDevice(), 0)
+
+    def test_serialization(self):
+        x = torch.randn(5, 5).cuda()
+        y = torch.IntTensor(2, 5).fill_(0).cuda()
+        q = [x, y, x, y.storage()]
+        with tempfile.TemporaryFile() as f:
+            torch.save(q, f)
+            f.seek(0)
+            q_copy = torch.load(f)
+        self.assertEqual(q_copy, q, 0)
+        q_copy[0].fill_(5)
+        self.assertEqual(q_copy[0], q_copy[2], 0)
+        self.assertTrue(isinstance(q_copy[0], torch.cuda.DoubleTensor))
+        self.assertTrue(isinstance(q_copy[1], torch.cuda.IntTensor))
+        self.assertTrue(isinstance(q_copy[2], torch.cuda.DoubleTensor))
+        self.assertTrue(isinstance(q_copy[3], torch.cuda.IntStorage))
+        q_copy[1].fill_(10)
+        self.assertTrue(q_copy[3], torch.cuda.IntStorage(10).fill_(10))
 
 for decl in tests:
     for t in types:

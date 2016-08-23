@@ -221,8 +221,9 @@ PyObject * $name(PyObject *self, PyObject *args)
     def declare_methods(self, stateless):
         tensor_methods = ''
         for declaration in (self.declarations if not stateless else self.stateless_declarations):
-            entry = Template('  {"$python_name", (PyCFunction)$name, METH_VARARGS, NULL},\n').substitute(
-                    python_name=declaration['python_name'], name=declaration['name']
+            extra_flags = ' | ' + declaration.get('method_flags') if 'method_flags' in declaration else ''
+            entry = Template('  {"$python_name", (PyCFunction)$name, METH_VARARGS$extra_flags, NULL},\n').substitute(
+                    python_name=declaration['python_name'], name=declaration['name'], extra_flags=extra_flags
                 )
             if 'defined_if' in declaration:
                 entry = self.preprocessor_guard(entry, declaration['defined_if'])

@@ -80,7 +80,7 @@ with torch.cuda.device(1):
 ```
 
 Calling `.cuda()` on tensors no longer converts it to a GPU float tensor, but to a CUDA tensor of the same type located on a currently selected device.
-So, for example: ``` a = torch.LongTensor(10).cuda() # a is a CudaLongTensor ```
+So, for example: `a = torch.LongTensor(10).cuda() # a is a CudaLongTensor`
 
 Calling `.cuda(3)` will send it to the third device.
 `.cuda()` can be also used to transfer CUDA tensors between devices (calling it on a GPU tensor, with a different device selected will copy it into the current device).
@@ -196,6 +196,19 @@ Matrix multiplication operation keeps references to it's inputs because it will 
 Another nice thing about this is that a single layer doesn't hold any state other than it's parameters (all intermediate values are alive as long as the graph references them), so it can be used multiple times before calling backward. This is especially convenient when training RNNs. You can use the same network for all timesteps and the gradients will sum up automatically.
 
 To compute backward pass you can call `.backward()` on a variable if it's a scalar (a 1-element Variable), or you can provide a gradient tensor of matching shape if it's not. This creates an execution engine object that manages the whole backward pass. It's been introduced, so that the code for analyzing the graph and scheduling node processing order is decoupled from other parts, and can be easily replaced. Right now it's simply processing the nodes in topological order, without any prioritization, but in the future we can implement algorithms and heuristics for scheduling independent nodes on different GPU streams, deciding which branches to compute first, etc.
+
+### Serialization
+
+Pickling tensors is supported, but requires making a temporary copy of all data and breaks sharing.
+For this reason we're providing `torch.load` and `torch.save`, that are free of these problems.
+They have the same interfaces as `pickle.load` (file object) and `pickle.dump` (serialized object, file object) respectively.
+For now the only requirement is that the file should have a `fileno` method, which returns a file descriptor number (this is already implemented by objects returned by `open`).
+
+Objects are serialized in a tar archive consisting of four files:
+`sys_info` - protocol version, byte order, long size, etc.
+`pickle` - pickled object
+`tensors` - tensor metadata
+`storages` - serialized data
 
 ### Multi-GPU
 

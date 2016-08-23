@@ -6,6 +6,7 @@
 
 #include "torch/csrc/THP.h"
 #include "utils.h"
+#include "serialization.h"
 #include "Module.h"
 #include "Storage.h"
 #include "Tensor.h"

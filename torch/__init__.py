@@ -43,6 +43,8 @@ def setDefaultTensorType(t):
 def getDefaultTensorType():
     return _defaultTensorTypeName
 
+from .serialization import save, load
+
 from .Storage import _StorageBase
 from .Tensor import _TensorBase
 

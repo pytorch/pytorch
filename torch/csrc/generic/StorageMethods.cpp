@@ -62,6 +62,34 @@ static PyObject * THPStorage_(fill_)(THPStorage *self, PyObject *number_arg)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject * THPStorage_(writeFile)(THPStorage *self, PyObject *file)
+{
+  HANDLE_TH_ERRORS
+  int fd = PyObject_AsFileDescriptor(file);
+  if (fd == -1) {
+    THPUtils_setError("_write_file couln't retrieve file descriptor from given object");
+    return NULL;
+  }
+  THPStorage_(writeFileRaw)(self->cdata, fd);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject * THPStorage_(newWithFile)(PyObject *_unused, PyObject *file)
+{
+  HANDLE_TH_ERRORS
+  int fd = PyObject_AsFileDescriptor(file);
+  if (fd == -1) {
+    THPUtils_setError("_new_with_file couln't retrieve file descriptor from given object");
+    return NULL;
+  }
+  THStoragePtr storage = THPStorage_(readFileRaw)(fd);
+  PyObject *result = THPStorage_(newObject)(storage);
+  storage.release();
+  return result;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyMethodDef THPStorage_(methods)[] = {
   {"elementSize", (PyCFunction)THPStorage_(elementSize), METH_NOARGS, NULL},
   {"fill_", (PyCFunction)THPStorage_(fill_), METH_O, NULL},
@@ -70,5 +98,7 @@ static PyMethodDef THPStorage_(methods)[] = {
   {"resize_", (PyCFunction)THPStorage_(resize_), METH_O, NULL},
   {"retain", (PyCFunction)THPStorage_(retain), METH_NOARGS, NULL},
   {"size", (PyCFunction)THPStorage_(size), METH_NOARGS, NULL},
+  {"_write_file", (PyCFunction)THPStorage_(writeFile), METH_O, NULL},
+  {"_new_with_file", (PyCFunction)THPStorage_(newWithFile), METH_O | METH_STATIC, NULL},
   {NULL}
 };

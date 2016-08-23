@@ -139,6 +139,7 @@ main_sources = [
     "torch/csrc/Tensor.cpp",
     "torch/csrc/Storage.cpp",
     "torch/csrc/utils.cpp",
+    "torch/csrc/serialization.cpp",
 ]
 
 try:
@@ -168,6 +169,7 @@ if WITH_CUDA:
         "torch/csrc/cuda/Storage.cpp",
         "torch/csrc/cuda/Tensor.cpp",
         "torch/csrc/cuda/utils.cpp",
+        "torch/csrc/cuda/serialization.cpp",
     ]
 
 if DEBUG:

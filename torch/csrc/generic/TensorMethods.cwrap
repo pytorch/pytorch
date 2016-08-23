@@ -35,6 +35,51 @@
 #endif
 
 [[
+  name: THPTensor_(writeMetadata)
+  python_name: _write_metadata
+  only_register: True
+]]
+PyObject * THPTensor_(writeMetadata)(THPTensor *self, PyObject *args)
+{
+  if (!args || PyTuple_Size(args) != 1) {
+    THPUtils_invalidArguments(args, "a single file object");
+    return NULL;
+  }
+  int fd = PyObject_AsFileDescriptor(PyTuple_GET_ITEM(args, 0));
+  if (fd == -1) {
+    THPUtils_setError("write_file couln't retrieve file descriptor from given object");
+    return NULL;
+  }
+  THPTensor_(writeMetadataRaw)(self->cdata, fd);
+  Py_RETURN_NONE;
+}
+
+[[
+  name: THPTensor_(newWithMetadataFile)
+  python_name: _new_with_metadata_file
+  only_register: True
+  method_flags: METH_STATIC
+]]
+PyObject * THPTensor_(newWithMetadataFile)(PyObject *_null, PyObject *args)
+{
+  if (!args || PyTuple_Size(args) != 2 || !THPStorage_(IsSubclass)(PyTuple_GET_ITEM(args, 1))) {
+    THPUtils_invalidArguments(args, "a single file object and a storage object");
+    return NULL;
+  }
+  int fd = PyObject_AsFileDescriptor(PyTuple_GET_ITEM(args, 0));
+  if (fd == -1) {
+    THPUtils_setError("write_file couln't retrieve file descriptor from given object");
+    return NULL;
+  }
+  THPStorage *storage = (THPStorage*)PyTuple_GET_ITEM(args, 1);
+  THTensorPtr tensor = THPTensor_(newWithMetadataFileRaw)(fd, storage->cdata);
+  PyObject *result = THPTensor_(newObject)(tensor);
+  tensor.release();
+  return result;
+}
+
+
+[[
   name: THPTensor_(toNumpy)
   defined_if: defined(NUMPY_TYPE_ENUM)
   python_name: numpy
