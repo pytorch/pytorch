@@ -54,6 +54,7 @@ class Pow(Function):
 class AddConstant(Function):
 
     def __init__(self, constant):
+        super(AddConstant, self).__init__()
         self.constant = constant
 
     def forward(self, a):
@@ -66,6 +67,7 @@ class AddConstant(Function):
 class SubConstant(Function):
 
     def __init__(self, constant, sub_tensor=False):
+        super(SubConstant, self).__init__()
         self.constant = constant
         self.sub_tensor = sub_tensor
 
@@ -85,6 +87,7 @@ class SubConstant(Function):
 class MulConstant(Function):
 
     def __init__(self, constant):
+        super(MulConstant, self).__init__()
         self.constant = constant
 
     def forward(self, a):
@@ -97,6 +100,7 @@ class MulConstant(Function):
 class DivConstant(Function):
 
     def __init__(self, constant, div_by_tensor=False):
+        super(DivConstant, self).__init__()
         self.constant = constant
         self.div_by_tensor = div_by_tensor
 
@@ -118,6 +122,7 @@ class DivConstant(Function):
 class PowConstant(Function):
 
     def __init__(self, constant, tensor_power=False):
+        super(PowConstant, self).__init__()
         self.constant = constant
         self.tensor_power = tensor_power
 

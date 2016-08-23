@@ -46,7 +46,7 @@ class Sequential(Container):
         except IndexError:
             raise IndexError("Sequential doesn't have any module with index " + str(idx))
 
-    def __call__(self, input):
+    def _forward(self, input):
         for module in self.modules:
             input = module(input)
         return input

@@ -17,6 +17,7 @@ def _make_function_class_criterion(class_name, update_output, update_grad_input,
         additional_arg_idx += 1
 
     def __init__(self, target, *args, **kwargs):
+        super(type(self), self).__init__()
         self.target = target
         self.weight = kwargs.get('weight')
         self.additional_args = list(args)
@@ -65,6 +66,7 @@ def _make_function_class(class_name, update_output, update_grad_input, acc_grad_
         additional_arg_idx += 1
 
     def __init__(self, *args):
+        super(type(self), self).__init__()
         self.additional_args = list(args)
 
     def forward(self, input, *params):

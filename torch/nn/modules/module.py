@@ -1,3 +1,5 @@
+from collections import OrderedDict
+
 import torch
 from ..backends.thnn import backend as thnn_backend
 from torch.autograd import Variable
@@ -7,8 +9,10 @@ class Module(object):
 
     def __init__(self):
         self._backend = thnn_backend
+        self.backward_hooks = OrderedDict()
+        self.forward_hooks = OrderedDict()
 
-    def __call__(self, *input):
+    def _forward(self, *input):
         raise NotImplementedError
 
     def type(self, type, *forwarded_args):
@@ -30,6 +34,37 @@ class Module(object):
             return self.type(torch.cuda.FloatTensor, device_id)
         else:
             return self.type(torch.cuda.FloatTensor)
+
+    def register_backward_hook(self, name, hook):
+        assert name not in self.backward_hooks, \
+            "Trying to register a second backward hook with name {}".format(name)
+        self.backward_hooks[name] = hook
+
+    def remove_backward_hook(self, name):
+        assert name in self.backward_hooks, \
+            "Trying to remove an inexistent backward hook with name {}".format(name)
+        del self.backward_hooks[name]
+
+    def register_forward_hook(self, name, hook):
+        assert name not in self.forward_hooks, \
+            "Trying to register a second forward hook with name {}".format(name)
+        self.forward_hooks[name] = hook
+
+    def remove_forward_hook(self, name):
+        assert name in self.forward_hooks, \
+            "Trying to remove an inexistent forward hook with name {}".format(name)
+        del self.forward_hooks[name]
+
+    def __call__(self, *input):
+        result = self._forward(*input)
+        for hook in self.forward_hooks.values():
+            hook(self, input, result)
+        fn = result[0].creator
+        for key, hook in self.backward_hooks.items():
+            fn.register_hook(key, lambda gi,go,hook=hook: hook(self, gi, go))
+        if len(result) == 1:
+            return result[0]
+        return result
 
     def float(self):
         return self.type(torch.FloatTensor)

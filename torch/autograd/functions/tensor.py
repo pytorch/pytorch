@@ -4,6 +4,7 @@ from ..variable import Variable
 class Index(Function):
 
     def __init__(self, *index):
+        super(Index, self).__init__()
         self.index = index
 
     def forward(self, i):
@@ -19,6 +20,7 @@ class Index(Function):
 class Transpose(Function):
 
     def __init__(self, *dims):
+        super(Transpose, self).__init__()
         assert len(dims) == 2
         self.dims = dims
 
@@ -31,6 +33,7 @@ class Transpose(Function):
 class View(Function):
 
     def __init__(self, *sizes):
+        super(View, self).__init__()
         self.sizes = sizes
 
     def forward(self, i):
@@ -44,6 +47,7 @@ class View(Function):
 class Copy(Function):
 
     def __init__(self, dest_type):
+        super(Copy, self).__init__()
         self.dest_type = dest_type
 
     def forward(self, i):

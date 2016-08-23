@@ -1,3 +1,4 @@
+import math
 import torch
 import unittest
 from copy import deepcopy
@@ -60,6 +61,71 @@ class TestNN(NNTestCase):
             params += [module.bias.data]
             d_params += [module.bias.grad]
         return params, d_params
+
+    def test_hooks(self):
+        module = nn.Sigmoid()
+        input = Variable(torch.ones(5, 5))
+
+        counter = {
+            'forwards': 0,
+            'backwards': 0
+        }
+
+        def fw_hook(inc, h_module, input, output):
+            self.assertTrue(h_module is module)
+            self.assertEqual(input[0].data, torch.ones(5, 5))
+            self.assertEqual(output[0].data, torch.Tensor(5, 5).fill_(1 / (1 + 1 / math.e)))
+            counter['forwards'] += inc
+
+        def bw_hook(inc, h_module, grad_input, grad_output):
+            self.assertTrue(h_module is module)
+            self.assertEqual(grad_output, torch.ones(5, 5) * 2)
+            counter['backwards'] += inc
+
+        module.register_forward_hook('test', lambda *args: fw_hook(1, *args))
+
+        module(input)
+        module(input)
+        self.assertEqual(counter['forwards'], 2)
+        self.assertEqual(counter['backwards'], 0)
+
+        module.register_backward_hook('test', lambda *args: bw_hook(1, *args))
+
+        output = module(input)
+        self.assertEqual(counter['forwards'], 3)
+        self.assertEqual(counter['backwards'], 0)
+
+        output.backward(torch.ones(5, 5) * 2)
+        self.assertEqual(counter['forwards'], 3)
+        self.assertEqual(counter['backwards'], 1)
+
+        output.backward(torch.ones(5, 5) * 2)
+        self.assertEqual(counter['forwards'], 3)
+        self.assertEqual(counter['backwards'], 2)
+
+        module.register_forward_hook('test2', lambda *args: fw_hook(2, *args))
+
+        output = module(input)
+        self.assertEqual(counter['forwards'], 6)
+        self.assertEqual(counter['backwards'], 2)
+
+        module.register_backward_hook('test2', lambda *args: bw_hook(2, *args))
+
+        module(input).backward(torch.ones(5, 5) * 2)
+        self.assertEqual(counter['forwards'], 9)
+        self.assertEqual(counter['backwards'], 5)
+
+        module.remove_backward_hook('test2')
+
+        module(input).backward(torch.ones(5, 5) * 2)
+        self.assertEqual(counter['forwards'], 12)
+        self.assertEqual(counter['backwards'], 6)
+
+        module.remove_forward_hook('test2')
+
+        module(input).backward(torch.ones(5, 5) * 2)
+        self.assertEqual(counter['forwards'], 13)
+        self.assertEqual(counter['backwards'], 7)
 
 
 def add_test(test):

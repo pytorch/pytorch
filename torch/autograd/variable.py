@@ -44,6 +44,12 @@ class Variable(object):
     def __repr__(self):
         return 'Variable containing:' + self.data.__repr__()
 
+    def register_hook(self, name, hook):
+        self.creator.register_hook(name, hook, self)
+
+    def remove_hook(self, name):
+        self.creator.remove_hook(name)
+
     def contiguous_(self):
         self.data = self.data.contiguous()
         return self

@@ -1,4 +1,4 @@
-from collections import Counter
+from collections import OrderedDict
 from .function import Function
 
 class Leaf(Function):
@@ -8,11 +8,14 @@ class Leaf(Function):
         self.output_ids = {id(variable): 0}
         self.previous_functions = []
         self.requires_grad = requires_grad
+        self.backward_hooks = OrderedDict()
 
     def _do_forward(self, *input):
         raise NotImplementedError
 
     def _do_backward(self, *grad_output):
         assert len(grad_output) == 1
+        for hook in self.backward_hooks.values():
+            hook(grad_output, grad_output)
         self.variable.grad.add_(grad_output[0])
         return tuple()

@@ -33,7 +33,28 @@ def get_analytical_jacobian(input, output):
     return jacobian
 
 class TestAutograd(TestCase):
-    pass
+
+    def test_hooks(self):
+        x = Variable(torch.ones(5, 5))
+        y = Variable(torch.ones(5, 5) * 4)
+
+        counter = [0]
+        def bw_hook(inc, grad_input, grad_output):
+            counter[0] += inc
+
+        z = x ** 2 + x * 2 + x * y + y
+        z.register_hook('test', lambda *args: bw_hook(1, *args))
+        z.backward(torch.ones(5, 5))
+        self.assertEqual(counter[0], 1)
+
+        z.register_hook('test2', lambda *args: bw_hook(2, *args))
+        z.backward(torch.ones(5, 5))
+        self.assertEqual(counter[0], 4)
+
+        z.remove_hook('test2')
+        z.backward(torch.ones(5, 5))
+        self.assertEqual(counter[0], 5)
+
 
 L = 20
 M = 10

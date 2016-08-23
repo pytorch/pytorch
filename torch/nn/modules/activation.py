@@ -13,8 +13,8 @@ class Threshold(Module):
         self.inplace = inplace
         # TODO: check in THNN (if inplace == True, then assert value <= threshold)
 
-    def __call__(self, input):
-        return self._backend.Threshold(self.threshold, self.value, self.inplace)(input)[0]
+    def _forward(self, input):
+        return self._backend.Threshold(self.threshold, self.value, self.inplace)(input)
 
 
 class ReLU(Threshold):
@@ -32,8 +32,8 @@ class HardTanh(Module):
         self.inplace = inplace
         assert self.max_val > self.min_val
 
-    def __call__(self, input):
-        return self._backend.HardTanh(self.min_val, self.max_val, self.inplace)(input)[0]
+    def _forward(self, input):
+        return self._backend.HardTanh(self.min_val, self.max_val, self.inplace)(input)
 
 
 class ReLU6(HardTanh):
@@ -43,10 +43,10 @@ class ReLU6(HardTanh):
 
 class Sigmoid(Module):
 
-    def __call__(self, input):
-        return self._backend.Sigmoid()(input)[0]
+    def _forward(self, input):
+        return self._backend.Sigmoid()(input)
 
 class Tanh(Module):
 
-    def __call__(self, input):
-        return self._backend.Tanh()(input)[0]
+    def _forward(self, input):
+        return self._backend.Tanh()(input)
