@@ -10,8 +10,9 @@ class SGD(Optimizer):
         self.dampening = dampening or momentum
         self.state = defaultdict(dict)
 
-    def step(self, *input):
-        loss = self._forward_backward(input)
+    def step(self, forward_closure):
+        loss = self._forward_backward(forward_closure)
+
         for p in self.parameters:
             if self.momentum != 0:
                 param_state = self.state[id(p)]
@@ -23,4 +24,5 @@ class SGD(Optimizer):
             else:
                 d_p = p.grad
             p.data.add_(-self.lr, d_p)
+
         return loss

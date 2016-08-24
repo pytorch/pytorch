@@ -83,6 +83,10 @@ def _tensor_cuda(self, idx=None):
             return self.type(getattr(torch.cuda, self.__class__.__name__))
 _TensorBase.cuda = _tensor_cuda
 
+def _tensor_cpu(self):
+    return self.type(getattr(torch, self.__class__.__name__))
+_TensorBase.cpu = _tensor_cpu
+
 def deviceCount():
     return torch._C._cuda_getDeviceCount()
 

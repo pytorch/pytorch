@@ -79,7 +79,7 @@ class Module(object):
         if hasattr(self, 'bias') and self.bias is not None:
             yield self.bias
 
-    def zero_grad_parameters(self):
+    def zero_grad(self):
         for p in self.parameters():
             p.grad.zero_()
 
