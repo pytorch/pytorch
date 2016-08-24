@@ -1,4 +1,4 @@
-# pytorch [alpha-0] ![Build Status](https://travis-ci.com/apaszke/pytorch.svg?token=x5muYzmNgtGJxk6DvWMN&branch=master)
+# pytorch [alpha-1] ![Build Status](https://travis-ci.com/apaszke/pytorch.svg?token=x5muYzmNgtGJxk6DvWMN&branch=master)
 
 The project is still under active development and is likely to drastically change in short periods of time.
 We will be announcing API changes and important developments via a newsletter, github issues and post a link to the issues on slack.
