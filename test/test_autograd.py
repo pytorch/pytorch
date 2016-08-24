@@ -40,6 +40,8 @@ class TestAutograd(TestCase):
 
         counter = [0]
         def bw_hook(inc, grad_input, grad_output):
+            self.assertIsInstance(grad_input, tuple)
+            self.assertIsInstance(grad_output, tuple)
             counter[0] += inc
 
         z = x ** 2 + x * 2 + x * y + y
@@ -54,6 +56,23 @@ class TestAutograd(TestCase):
         z.remove_hook('test2')
         z.backward(torch.ones(5, 5))
         self.assertEqual(counter[0], 5)
+
+    def test_volatile(self):
+        x = Variable(torch.ones(5, 5))
+        y = Variable(torch.ones(5, 5) * 4, volatile=True)
+
+        z = x ** 2
+        self.assertFalse(z.volatile)
+        self.assertTrue(z.requires_grad)
+        self.assertIsNotNone(z.creator)
+        z.backward(torch.ones(5, 5))
+        self.assertEqual(x.grad, torch.ones(5, 5) * 2)
+
+        w = z + y
+        self.assertTrue(w.volatile)
+        self.assertFalse(w.requires_grad)
+        self.assertRaises(RuntimeError, lambda: w.backward(torch.ones(5, 5)))
+        self.assertIsNone(w.creator)
 
 
 L = 20

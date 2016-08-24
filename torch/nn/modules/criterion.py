@@ -2,9 +2,9 @@ from torch.autograd import Variable
 from .module import Module
 
 def _assert_no_grad(variable):
-    assert not variable.creator.requires_grad, "nn criterions don't compute " \
-        "the gradient w.r.t. targets - please mark these variables as not" \
-        "requiring gradients"
+    assert variable.volatile or not variable.creator.requires_grad, \
+        "nn criterions don't compute the gradient w.r.t. targets - please " \
+        "mark these variables as volatile or not requiring gradients"
 
 class AbsCriterion(Module):
 

@@ -14,19 +14,24 @@ class Function(object):
 
     def _do_forward(self, *input):
         unpacked_input = tuple(arg.data for arg in input)
+        is_volatile = any(arg.volatile for arg in input)
         raw_output = self.forward(*unpacked_input)
         if not isinstance(raw_output, tuple):
             raw_output = (raw_output,)
-        self.needs_input_grad = tuple(arg.creator.requires_grad for arg in input)
-        self.requires_grad = any(self.needs_input_grad)
-        output = tuple(Variable(tensor, self) for tensor in raw_output)
 
-        self.previous_functions = [(arg.creator, id(arg)) for arg in input]
-        self.output_ids = {id(var): i for i, var in enumerate(output)}
+        if is_volatile:
+            output = tuple(Variable(tensor, volatile=True) for tensor in raw_output)
+        else:
+            self.needs_input_grad = tuple(arg.creator.requires_grad for arg in input)
+            self.requires_grad = any(self.needs_input_grad)
+            self.previous_functions = [(arg.creator, id(arg)) for arg in input]
+            output = tuple(Variable(tensor, self) for tensor in raw_output)
+            self.output_ids = {id(var): i for i, var in enumerate(output)}
+
         return output
 
-    def _do_backward(self, grad_output):
-        grad_input = self.backward(grad_output)
+    def _do_backward(self, *grad_output):
+        grad_input = self.backward(*grad_output)
         if not isinstance(grad_input, tuple):
             grad_input = (grad_input,)
         assert len(grad_input) == len(self.previous_functions), \

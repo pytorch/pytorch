@@ -1,5 +1,6 @@
 from .engine import ExecutionEngine
 
+
 class Variable(object):
 
     _execution_engine = ExecutionEngine()
@@ -13,19 +14,28 @@ class Variable(object):
         # TODO: add more
     ]
 
-    def __init__(self, tensor, creator=None, requires_grad=True):
-        if creator is None:
+    def __init__(self, tensor, creator=None, volatile=False, requires_grad=True):
+        if volatile:
+            requires_grad = False
+        if not volatile and creator is None:
             creator = Leaf(self, requires_grad)
         self.data = tensor
         self.creator = creator
+        self.volatile = volatile
         self._grad = None
 
     @property
     def grad(self):
-        if self.creator.requires_grad:
+        if not self.volatile and self.requires_grad:
             # TODO: this won't have to be zeroed in the future
             self._grad = self._grad or self.data.new(self.data.size()).zero_()
         return self._grad
+
+    @property
+    def requires_grad(self):
+        if self.volatile:
+            return False
+        return self.creator.requires_grad
 
     def __getattr__(self, name):
         if name in self._fallthrough_methods:
@@ -36,6 +46,10 @@ class Variable(object):
         return Index(key)(self)[0]
 
     def backward(self, gradient=None):
+        if self.volatile:
+            raise RuntimeError('calling backward on a volatile variable')
+        if not self.requires_grad:
+            raise RuntimeError("calling backward on a variable that doesn't require gradient")
         if gradient is None:
             if self.data.numel() != 1:
                 raise RuntimeError('backward should be called only on a scalar (i.e. 1-element tensor) or with gradient w.r.t. the variable')
@@ -46,9 +60,15 @@ class Variable(object):
         return 'Variable containing:' + self.data.__repr__()
 
     def register_hook(self, name, hook):
+        if self.volatile:
+            raise RuntimeError('registering hook on a volatile variable')
+        if not self.requires_grad:
+            raise RuntimeError("registering hook on a variable that doesn't require gradient")
         self.creator.register_hook(name, hook, self)
 
     def remove_hook(self, name):
+        if self.volatile:
+            raise RuntimeError("volatile variables don't support hooks")
         self.creator.remove_hook(name)
 
     def contiguous_(self):

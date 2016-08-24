@@ -72,14 +72,18 @@ class TestNN(NNTestCase):
         }
 
         def fw_hook(inc, h_module, input, output):
+            self.assertIsInstance(input, tuple)
+            self.assertIsInstance(output, tuple)
             self.assertTrue(h_module is module)
             self.assertEqual(input[0].data, torch.ones(5, 5))
             self.assertEqual(output[0].data, torch.Tensor(5, 5).fill_(1 / (1 + 1 / math.e)))
             counter['forwards'] += inc
 
         def bw_hook(inc, h_module, grad_input, grad_output):
+            self.assertIsInstance(grad_input, tuple)
+            self.assertIsInstance(grad_output, tuple)
             self.assertTrue(h_module is module)
-            self.assertEqual(grad_output, torch.ones(5, 5) * 2)
+            self.assertEqual(grad_output[0], torch.ones(5, 5) * 2)
             counter['backwards'] += inc
 
         module.register_forward_hook('test', lambda *args: fw_hook(1, *args))
@@ -126,6 +130,23 @@ class TestNN(NNTestCase):
         module(input).backward(torch.ones(5, 5) * 2)
         self.assertEqual(counter['forwards'], 13)
         self.assertEqual(counter['backwards'], 7)
+
+    def test_volatile(self):
+        module = nn.Conv2d(2, 5, 3, 3, padh=1, padw=1)
+        input = torch.randn(1, 2, 10, 10)
+        x = Variable(input)
+        y = Variable(input.clone(), volatile=True)
+
+        output = module(x)
+        self.assertFalse(output.volatile)
+        self.assertTrue(output.requires_grad)
+        output.backward(torch.ones(1, 5, 10, 10))
+
+        vol_output = module(y)
+        self.assertTrue(vol_output.volatile)
+        self.assertFalse(vol_output.requires_grad)
+        self.assertRaises(RuntimeError, lambda: vol_output.backward(torch.ones(1, 5, 10, 10)))
+
 
 
 def add_test(test):
