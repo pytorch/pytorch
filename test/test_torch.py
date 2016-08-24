@@ -856,9 +856,9 @@ class TestTorch(TestCase):
             sortKVal, sortKInd = topKViaSort(t, k, dim, dir)
             compareTensors(t, sortKVal, sortKInd, topKVal, topKInd, dim)
 
-        t = torch.rand(random.randrange(SIZE),
-                        random.randrange(SIZE),
-                        random.randrange(SIZE))
+        t = torch.rand(random.randint(1, SIZE),
+                        random.randint(1, SIZE),
+                        random.randint(1, SIZE))
 
         for kTries in range(3):
             for dimTries in range(3):
@@ -1773,7 +1773,7 @@ class TestTorch(TestCase):
                 for k in range(1 if dim == 2 else o):
                     ii = [i, j, k]
                     ii[dim] = (0, idx.size(dim))
-                    idx[tuple(ii)] = torch.randperm(dim_size)[1:elems_per_row+1]
+                    idx[tuple(ii)] = torch.randperm(dim_size)[0:elems_per_row]
 
     def test_gather(self):
         m, n, o = random.randint(10, 20), random.randint(10, 20), random.randint(10, 20)
