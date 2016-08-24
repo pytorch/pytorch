@@ -3,10 +3,10 @@ from torch.autograd import Variable
 
 from .module import Module
 
-class MaxPooling2d(Module):
+class MaxPool2d(Module):
 
     def __init__(self, kh, kw, dh=None, dw=None, padh=0, padw=0, dilh=1, dilw=1, ceil_mode=False):
-        super(MaxPooling2d, self).__init__()
+        super(MaxPool2d, self).__init__()
         self.kw = kw
         self.kh = kh
         self.dw = dw or kw
@@ -18,4 +18,4 @@ class MaxPooling2d(Module):
         self.ceil_mode = ceil_mode
 
     def __call__(self, input):
-        return self._backend.MaxPooling2d(self.kw, self.kh, self.dw, self.dh, self.padw, self.padh, self.dilh, self.dilw, self.ceil_mode)(input)[0]
+        return self._backend.MaxPool2d(self.kw, self.kh, self.dw, self.dh, self.padw, self.padh, self.dilh, self.dilw, self.ceil_mode)(input)[0]

@@ -686,7 +686,7 @@ def prepare_tests():
         setattr(TestNN, cuda_test_name, lambda self,test=test: test.test_cuda(self))
     name_remap = {
         'Conv2d': 'SpatialConvolution',
-        'MaxPooling2d': 'SpatialMaxPooling',
+        'MaxPool2d': 'SpatialMaxPooling',
         'Softmax': 'SoftMax',
         'Softmax2d': 'SpatialSoftMax',
         'LogSoftmax': 'LogSoftMax',

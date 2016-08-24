@@ -75,7 +75,7 @@ module_tests = [
         input_size=(2, 3, 4, 5)
     ),
     dict(
-        module_name='MaxPooling2d',
+        module_name='MaxPool2d',
         constructor_args=(3, 3, 2, 2, 1, 1),
         input_size=(1, 3, 7, 7)
     ),
