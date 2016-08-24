@@ -86,6 +86,12 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
       while ((iter = PyObject_GetIter(item)) != nullptr) {
         Py_ssize_t length = PyObject_Length(item);
         iterator_lengths.push_back(length);
+        if (iterator_lengths.size() > 1000000) {
+            THPUtils_setError("Counted more than 1,000,000 dimensions in a given iterable. "
+                    "Most likely your items are also iterable, and there's no "
+                    "way to infer how many dimensions should the tensor have.");
+            return NULL;
+        }
         // TODO length == 0 is an error too
         if (length == -1) {
           // TODO: error
