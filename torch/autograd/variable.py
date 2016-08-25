@@ -19,9 +19,10 @@ class Variable(object):
             requires_grad = False
         if not volatile and creator is None:
             creator = Leaf(self, requires_grad)
-        self.data = tensor
         self.creator = creator
         self.volatile = volatile
+        self.dirty = False
+        self._data = tensor
         self._grad = None
 
     @property
@@ -32,10 +33,20 @@ class Variable(object):
         return self._grad
 
     @property
+    def data(self):
+        if self.dirty:
+            raise RuntimeError('Accessing data of a dirty variable!')
+        return self._data
+
+    @property
     def requires_grad(self):
         if self.volatile:
             return False
         return self.creator.requires_grad
+
+    def mark_dirty(self):
+        self.dirty = True
+        self._data = None
 
     def __getattr__(self, name):
         if name in self._fallthrough_methods:
@@ -57,6 +68,8 @@ class Variable(object):
         self._execution_engine.run_backward(self, gradient)
 
     def __repr__(self):
+        if self.dirty:
+            return 'Variable used in an in-place operation'
         return 'Variable containing:' + self.data.__repr__()
 
     def register_hook(self, name, hook):
@@ -72,7 +85,7 @@ class Variable(object):
         self.creator.remove_hook(name)
 
     def contiguous_(self):
-        self.data = self.data.contiguous()
+        self._data = self.data.contiguous()
         return self
 
     def type(self, t):
@@ -80,35 +93,72 @@ class Variable(object):
             return Copy(t)(self)[0]
         return self
 
-    def add(self, other):
+    def add(self, other, inplace=False):
         if isinstance(other, Variable):
-            return Add()(self, other)[0]
+            return Add(inplace)(self, other)[0]
         else:
-            return AddConstant(other)(self)[0]
+            assert not torch.isTensor(other)
+            return AddConstant(other, inplace)(self)[0]
+
+    def add_(self, other):
+        return self.add(other, inplace=True)
 
     def sub(self, other):
         if isinstance(other, Variable):
             return Sub()(self, other)[0]
         else:
+            assert not torch.isTensor(other)
             return SubConstant(other)(self)[0]
+
+    def sub_(self, other):
+        return self.add(other, inplace=True)
 
     def mul(self, other):
         if isinstance(other, Variable):
             return Mul()(self, other)[0]
         else:
+            assert not torch.isTensor(other)
             return MulConstant(other)(self)[0]
+
+    def mul_(self, other):
+        if not isinstance(other, Variable) and not torch.isTensor(other):
+            return MulConstant(other, inplace=True)(self)[0]
 
     def div(self, other):
         if isinstance(other, Variable):
             return Div()(self, other)[0]
         else:
+            assert not torch.isTensor(other)
             return DivConstant(other)(self)[0]
+
+    def div_(self, other):
+        if not isinstance(other, Variable) and not torch.isTensor(other):
+            return DivConstant(other, inplace=True)(self)[0]
 
     def pow(self, other):
         if isinstance(other, Variable):
             return Pow()(self, other)[0]
         else:
+            assert not torch.isTensor(other)
             return PowConstant(other)(self)[0]
+
+    def exp(self):
+        return Exp()(self)[0]
+
+    def exp_(self):
+        return Exp(inplace=True)(self)[0]
+
+    def log(self):
+        return Log()(self)[0]
+
+    def log1p(self):
+        return Log1p()(self)[0]
+
+    def neg(self):
+        return Negate()(self)[0]
+
+    def neg_(self):
+        return Negate(inplace=True)(self)[0]
 
     def view(self, *sizes):
         return View(*sizes)(self)[0]

@@ -15,6 +15,7 @@ class Leaf(Function):
 
     def _do_backward(self, *grad_output):
         assert len(grad_output) == 1
+        assert not self.variable.dirty
         self._call_hooks(grad_output, grad_output)
         self.variable.grad.add_(grad_output[0])
         return tuple()

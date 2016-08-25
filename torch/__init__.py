@@ -68,19 +68,27 @@ class ByteStorage(_C.ByteStorageBase, _StorageBase):
     pass
 
 class DoubleTensor(_C.DoubleTensorBase, _TensorBase):
-    pass
+    def is_signed(self):
+        return True
 class FloatTensor(_C.FloatTensorBase, _TensorBase):
-    pass
+    def is_signed(self):
+        return True
 class LongTensor(_C.LongTensorBase, _TensorBase):
-    pass
+    def is_signed(self):
+        return True
 class IntTensor(_C.IntTensorBase, _TensorBase):
-    pass
+    def is_signed(self):
+        return True
 class ShortTensor(_C.ShortTensorBase, _TensorBase):
-    pass
+    def is_signed(self):
+        return True
 class CharTensor(_C.CharTensorBase, _TensorBase):
-    pass
+    def is_signed(self):
+        # TODO
+        return False
 class ByteTensor(_C.ByteTensorBase, _TensorBase):
-    pass
+    def is_signed(self):
+        return False
 
 _storage_classes.add(DoubleStorage)
 _storage_classes.add(FloatStorage)

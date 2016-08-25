@@ -1,3 +1,4 @@
+import math
 import unittest
 
 from common import make_jacobian, TestCase, iter_tensors, get_numerical_jacobian
@@ -90,6 +91,43 @@ class TestAutograd(TestCase):
         self.assertFalse(w.requires_grad)
         self.assertRaises(RuntimeError, lambda: w.backward(torch.ones(5, 5)))
         self.assertIsNone(w.creator)
+
+    def test_inplace(self):
+        x = Variable(torch.ones(5, 5))
+        y = Variable(torch.ones(5, 5) * 4)
+
+        z = x * y
+        q = z + y
+        w = z * y
+        z.dirty = True
+        # Add doesn't need it's inputs to do backward, so it shouldn't raise
+        q.backward(torch.ones(5, 5))
+        # Mul saves both inputs in forward, so it should raise
+        self.assertRaises(RuntimeError, lambda: w.backward(torch.ones(5, 5)))
+
+        z = x * y
+        q = z * y
+        r = z + y
+        w = z.add_(y)
+        # w is a the last expression, so this should succeed
+        w.backward(torch.ones(5, 5))
+        # r doesn't use the modified value in backward, so it should succeed
+        r.backward(torch.ones(5, 5))
+        # q uses dirty z, so it should raise
+        self.assertRaises(RuntimeError, lambda: q.backward(torch.ones(5, 5)))
+
+        x.grad.zero_()
+        m = x / 2
+        z = m + y / 8
+        q = z * y
+        r = z + y
+        w = z.exp_()
+        self.assertTrue(z.dirty)
+        r.backward(torch.ones(5, 5))
+        self.assertEqual(x.grad, torch.ones(5, 5) / 2)
+        w.backward(torch.ones(5, 5))
+        self.assertEqual(x.grad, torch.Tensor(5, 5).fill_((1 + math.e) / 2))
+        self.assertRaises(RuntimeError, lambda: q.backward(torch.ones(5, 5)))
 
 
 L = 20

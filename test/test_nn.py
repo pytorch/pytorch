@@ -20,8 +20,23 @@ class InputVariableMixin(object):
 
 
 class NewModuleTest(InputVariableMixin, ModuleTest):
+    def __init__(self, *args, **kwargs):
+        super(NewModuleTest, self).__init__(*args, **kwargs)
+        self.check_inplace = kwargs.get('check_inplace', False)
+
     def _do_test(self, test_case, module, input):
         test_case.check_jacobian(module, input, self.jacobian_input)
+
+        if self.check_inplace:
+            module_ip = self.constructor(*self.constructor_args, inplace=True)
+
+            output = module(input)
+            test_case.assertFalse(input.dirty)
+
+            output2 = module_ip(input)
+            test_case.assertTrue(input.dirty)
+
+            test_case.assertEqual(output, output2)
 
 
 class NewCriterionTest(InputVariableMixin, CriterionTest):

@@ -26,21 +26,30 @@ class HalfStorage(torch._C.CudaHalfStorageBase, _StorageBase):
     pass
 
 class DoubleTensor(torch._C.CudaDoubleTensorBase, _TensorBase):
-    pass
+    def is_signed(self):
+        return True
 class FloatTensor(torch._C.CudaFloatTensorBase, _TensorBase):
-    pass
+    def is_signed(self):
+        return True
 class LongTensor(torch._C.CudaLongTensorBase, _TensorBase):
-    pass
+    def is_signed(self):
+        return True
 class IntTensor(torch._C.CudaIntTensorBase, _TensorBase):
-    pass
+    def is_signed(self):
+        return True
 class ShortTensor(torch._C.CudaShortTensorBase, _TensorBase):
-    pass
+    def is_signed(self):
+        return True
 class CharTensor(torch._C.CudaCharTensorBase, _TensorBase):
-    pass
+    def is_signed(self):
+        # TODO
+        return False
 class ByteTensor(torch._C.CudaByteTensorBase, _TensorBase):
-    pass
+    def is_signed(self):
+        return False
 class HalfTensor(torch._C.CudaHalfTensorBase, _TensorBase):
-    pass
+    def is_signed(self):
+        return True
 
 torch._storage_classes.add(DoubleStorage)
 torch._storage_classes.add(FloatStorage)
