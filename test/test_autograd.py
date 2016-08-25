@@ -39,9 +39,8 @@ class TestAutograd(TestCase):
         y = Variable(torch.ones(5, 5) * 4)
 
         counter = [0]
-        def bw_hook(inc, grad_input, grad_output):
-            self.assertIsInstance(grad_input, tuple)
-            self.assertIsInstance(grad_output, tuple)
+        def bw_hook(inc, grad):
+            self.assertTrue(torch.isTensor(grad))
             counter[0] += inc
 
         z = x ** 2 + x * 2 + x * y + y

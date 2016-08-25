@@ -37,11 +37,15 @@ class Function(object):
         assert len(grad_input) == len(self.previous_functions), \
             self.__class__.__name__ + ' returned an invalid number of gradient tensors'
 
-        for hook, idx in self.backward_hooks.values():
-            gi = grad_input if idx is None else grad_input[idx]
-            hook(grad_input, grad_output)
-
+        self._call_hooks(grad_input, grad_output)
         return grad_input
+
+    def _call_hooks(self, grad_input, grad_output):
+        for hook, idx in self.backward_hooks.values():
+            if idx is None:
+                hook(grad_input, grad_output)
+            else:
+                hook(grad_output[idx])
 
     def register_hook(self, name, hook, variable=None):
         assert name not in self.backward_hooks, \
