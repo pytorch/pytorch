@@ -139,6 +139,9 @@
 #include "generic/SpatialMaxPooling.c"
 #include "THGenerateFloatTypes.h"
 
+#include "generic/SpatialDilatedMaxPooling.c"
+#include "THGenerateFloatTypes.h"
+
 #include "generic/SpatialMaxUnpooling.c"
 #include "THGenerateFloatTypes.h"
 
