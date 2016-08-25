@@ -36,9 +36,22 @@ class ExecutionEngine(object):
                 return False
         return True
 
+    def _add_grad(self, need_copy, prev_grad, output_nr, d_prev_fn):
+        if not prev_grad[output_nr]:
+            prev_grad[output_nr] = d_prev_fn
+            need_copy.add(d_prev_fn)
+        else:
+            grad_tensor = prev_grad[output_nr]
+            if grad_tensor in need_copy:
+                need_copy.remove(grad_tensor)
+                grad_tensor = grad_tensor.clone()
+                prev_grad[output_nr] = grad_tensor
+            grad_tensor.add_(d_prev_fn)
+
     def run_backward(self, variable, grad):
         ready = [(variable.creator, (grad,))]
         not_ready = {}
+        need_copy = set()
 
         dependencies = self._compute_dependencies(variable.creator)
 
@@ -55,11 +68,7 @@ class ExecutionEngine(object):
                 if is_ready:
                     if prev_fn in not_ready:
                         prev_grad = not_ready[prev_fn]
-                        if not prev_grad[output_nr]:
-                            prev_grad[output_nr] = d_prev_fn
-                        else:
-                            prev_grad[output_nr].add_(d_prev_fn)
-                        del not_ready[prev_fn]
+                        self._add_grad(need_copy, prev_grad, output_nr, d_prev_fn)
                     else:
                         assert output_nr == 0
                         prev_grad = (d_prev_fn,)
@@ -70,11 +79,7 @@ class ExecutionEngine(object):
                     else:
                         prev_grad = [None for _ in prev_fn.output_ids]
 
-                    if not prev_grad[output_nr]:
-                        prev_grad[output_nr] = d_prev_fn
-                    else:
-                        prev_grad[output_nr].add_(d_prev_fn)
-
+                    self._add_grad(need_copy, prev_grad, output_nr, d_prev_fn)
                     not_ready[prev_fn] = prev_grad
 
 

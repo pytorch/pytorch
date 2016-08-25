@@ -57,6 +57,24 @@ class TestAutograd(TestCase):
         z.backward(torch.ones(5, 5))
         self.assertEqual(counter[0], 5)
 
+    def test_backward(self):
+        x_t = torch.randn(5, 5)
+        y_t = torch.rand(5, 5) + 0.1
+        z_t = torch.randn(5, 5)
+        grad_output = torch.randn(5, 5)
+        x = Variable(x_t)
+        y = Variable(y_t)
+        z = Variable(z_t)
+
+        a = x + (y * z) + 4 * z**2 * x / y
+        a.backward(grad_output)
+        x_grad = 4 * z_t.pow(2) / y_t + 1
+        y_grad = z_t - 4 * x_t * z_t.pow(2) / y_t.pow(2)
+        z_grad = 8 * x_t * z_t / y_t + y_t
+        self.assertEqual(x.grad, x_grad * grad_output)
+        self.assertEqual(y.grad, y_grad * grad_output)
+        self.assertEqual(z.grad, z_grad * grad_output)
+
     def test_volatile(self):
         x = Variable(torch.ones(5, 5))
         y = Variable(torch.ones(5, 5) * 4, volatile=True)
@@ -83,7 +101,7 @@ tests = [
     (Sub, (), ((M, M), (M, M))),
     (Mul, (), ((M, M), (M, M))),
     (Div, (), ((M, M), torch.rand(M, M) + 1e-2)),
-    (Pow, (), (torch.rand(M, M), torch.rand(M, M) + 0.1)),
+    (Pow, (), (torch.rand(M, M) + 1e-3, torch.rand(M, M) + 0.1)),
     (AddConstant, (3.14,), ((L, L),)),
     (SubConstant, (3.14,), ((L, L),)),
     (SubConstant, (3.14, True), ((L, L),), 'from_tensor'),
