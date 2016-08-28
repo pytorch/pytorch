@@ -172,6 +172,9 @@
 #include "generic/VolumetricMaxPooling.c"
 #include "THGenerateFloatTypes.h"
 
+#include "generic/VolumetricDilatedMaxPooling.c"
+#include "THGenerateFloatTypes.h"
+
 #include "generic/VolumetricMaxUnpooling.c"
 #include "THGenerateFloatTypes.h"
 
