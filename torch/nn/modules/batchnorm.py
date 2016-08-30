@@ -48,5 +48,5 @@ class BatchNorm(Module):
                 self.running_var, self.train, self.momentum, self.eps)(*args)[0]
 
 
-class BatchNorm2d(Module):
+class BatchNorm2d(BatchNorm):
     expected_dim = 4

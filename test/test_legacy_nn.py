@@ -352,17 +352,6 @@ tests = [
                     desc='irregular'),
                     # TODO: enable after implementing MaxPooling
                     # reference_fn=lambda i,_: nn.SpatialMaxPooling(2, 2).forward(i)),
-    OldModuleTest(nn.SpatialBatchNormalization,
-                    (3,),
-                    input_size=(2, 3, 6, 6)),
-    OldModuleTest(nn.SpatialBatchNormalization,
-                    (3, 1e-3, 0.8),
-                    input_size=(2, 3, 6, 6),
-                    desc='momentum'),
-    OldModuleTest(nn.SpatialBatchNormalization,
-                    (3, 1e-3, 0.8, False),
-                    input_size=(2, 3, 6, 6),
-                    desc='no_affine'),
     OldModuleTest(nn.SpatialConvolutionLocal,
                     (3, 2, 4, 4, 2, 2),
                     input_size=(1, 3, 4, 4)),
@@ -681,6 +670,7 @@ def prepare_tests():
         'Softmax2d': 'SpatialSoftMax',
         'LogSoftmax': 'LogSoftMax',
         'BatchNorm': 'BatchNormalization',
+        'BatchNorm2d': 'SpatialBatchNormalization',
     }
     for test in tests:
         add_test(test)
