@@ -80,6 +80,23 @@ module_tests = [
         input_size=(1, 3, 7, 7)
     ),
     dict(
+        module_name='AvgPool2d',
+        constructor_args=(2, 2),
+        input_size=(2, 3, 6, 6),
+    ),
+    dict(
+        module_name='AvgPool2d',
+        constructor_args=(2, 2, 2, 2),
+        input_size=(2, 3, 6, 6),
+        desc='stride',
+    ),
+    dict(
+        module_name='AvgPool2d',
+        constructor_args=(2, 2, 2, 2, 1, 1),
+        input_size=(2, 3, 6, 6),
+        desc='stride_pad',
+    ),
+    dict(
         module_name='Softmax',
         input_size=(10, 20),
         reference_fn=lambda i,_: torch.exp(i).div(torch.exp(i).sum(1).expand(10, 20))
@@ -414,4 +431,3 @@ class CriterionTest(TestBase):
             test_case.assertEqual(cpu_gradInput, gpu_gradInput, 2e-4)
         except NotImplementedError:
             pass
-
