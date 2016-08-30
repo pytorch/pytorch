@@ -352,17 +352,6 @@ tests = [
                     desc='irregular'),
                     # TODO: enable after implementing MaxPooling
                     # reference_fn=lambda i,_: nn.SpatialMaxPooling(2, 2).forward(i)),
-    OldModuleTest(nn.SpatialAveragePooling,
-                    (2, 2),
-                    input_size=(2, 3, 6, 6)),
-    OldModuleTest(nn.SpatialAveragePooling,
-                    (2, 2, 2, 2),
-                    input_size=(2, 3, 6, 6),
-                    desc='stride'),
-    OldModuleTest(nn.SpatialAveragePooling,
-                    (2, 2, 2, 2, 1, 1),
-                    input_size=(2, 3, 6, 6),
-                    desc='stride_pad'),
     OldModuleTest(nn.SpatialBatchNormalization,
                     (3,),
                     input_size=(2, 3, 6, 6)),
@@ -687,6 +676,7 @@ def prepare_tests():
     name_remap = {
         'Conv2d': 'SpatialConvolution',
         'MaxPool2d': 'SpatialMaxPooling',
+        'AvgPool2d': 'SpatialAveragePooling',
         'Softmax': 'SoftMax',
         'Softmax2d': 'SpatialSoftMax',
         'LogSoftmax': 'LogSoftMax',
@@ -1174,4 +1164,3 @@ class TestNN(NNTestCase):
 if __name__ == '__main__':
     prepare_tests()
     unittest.main()
-

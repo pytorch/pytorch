@@ -10,6 +10,7 @@ def _initialize_backend():
 
     backend.register_function('Linear', LinearFunction)
     name_remap = {
+        'SpatialAveragePoolingFunction': 'AvgPool2dFunction',
         'SpatialConvolutionMMFunction': 'Conv2dFunction',
         'SpatialMaxPoolingFunction': 'MaxPool2dFunction',
         'SoftMaxFunction': 'SoftmaxFunction',
