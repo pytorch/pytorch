@@ -119,6 +119,23 @@ module_tests = [
         desc='not_affine'
     ),
     dict(
+        module_name='BatchNorm2d',
+        constructor_args=(3,),
+        input_size=(2, 3, 6, 6),
+    ),
+    dict(
+        module_name='BatchNorm2d',
+        constructor_args=(3, 1e-3, 0.8),
+        input_size=(2, 3, 6, 6),
+        desc='momentum',
+    ),
+    dict(
+        module_name='BatchNorm2d',
+        constructor_args=(3, 1e-3, 0.8, False),
+        input_size=(2, 3, 6, 6),
+        desc='no_affine',
+    ),
+    dict(
         module_name='LogSoftmax',
         input_size=(10, 20),
         reference_fn=lambda i,_: torch.exp(i).div_(torch.exp(i).sum(1).expand(10, 20)).log_()
