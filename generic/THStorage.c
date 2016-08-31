@@ -41,9 +41,9 @@ THStorage* THStorage_(newWithAllocator)(long size,
   return storage;
 }
 
-THStorage* THStorage_(newWithMapping)(const char *filename, long size, int shared)
+THStorage* THStorage_(newWithMapping)(const char *filename, long size, int flags)
 {
-  THMapAllocatorContext *ctx = THMapAllocatorContext_new(filename, shared);
+  THMapAllocatorContext *ctx = THMapAllocatorContext_new(filename, flags);
 
   THStorage *storage = THStorage_(newWithAllocator)(size,
                                                     &THMapAllocator,
@@ -201,6 +201,26 @@ real THStorage_(get)(const THStorage *self, long idx)
 {
   THArgCheck((idx >= 0) && (idx < self->size), 2, "out of bounds");
   return self->data[idx];
+}
+
+void THStorage_(swap)(THStorage *storage1, THStorage *storage2)
+{
+#define SWAP(val) { val = storage1->val; storage1->val = storage2->val; storage2->val = val; }
+    real *data;
+    long size;
+    char flag;
+    THAllocator *allocator;
+    void *allocatorContext;
+    struct THStorage *view;
+
+    SWAP(data);
+    SWAP(size);
+    SWAP(flag);
+    // don't swap refcount!
+    SWAP(allocator);
+    SWAP(allocatorContext);
+    SWAP(view);
+#undef SWAP
 }
 
 #endif

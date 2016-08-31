@@ -5,6 +5,8 @@
 
 #define TH_ALLOCATOR_MAPPED_SHARED 1
 #define TH_ALLOCATOR_MAPPED_SHAREDMEM 2
+#define TH_ALLOCATOR_MAPPED_EXCLUSIVE 4
+#define TH_ALLOCATOR_MAPPED_NOCREATE 8
 
 /* Custom allocator
  */
@@ -22,10 +24,12 @@ extern THAllocator THDefaultAllocator;
 /* file map allocator
  */
 typedef struct THMapAllocatorContext_  THMapAllocatorContext;
-THMapAllocatorContext *THMapAllocatorContext_new(const char *filename, int shared);
-long THMapAllocatorContext_size(THMapAllocatorContext *ctx);
-void THMapAllocatorContext_free(THMapAllocatorContext *ctx);
+TH_API THMapAllocatorContext *THMapAllocatorContext_new(const char *filename, int flags);
+TH_API char * THMapAllocatorContext_filename(THMapAllocatorContext *ctx);
+TH_API long THMapAllocatorContext_size(THMapAllocatorContext *ctx);
+TH_API void THMapAllocatorContext_free(THMapAllocatorContext *ctx);
 
 extern THAllocator THMapAllocator;
+extern THAllocator THRefcountedMapAllocator;
 
 #endif
