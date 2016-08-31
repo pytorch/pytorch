@@ -38,6 +38,7 @@ function build() {
 mkdir -p tmp_install
 build TH
 build THNN
+build libshm
 
 if [[ "$1" == "--with-cuda" ]]; then
     build THC
@@ -47,3 +48,4 @@ fi
 cp $INSTALL_DIR/lib/* .
 cp THNN/generic/THNN.h .
 cp THCUNN/THCUNN.h .
+cp $INSTALL_DIR/bin/* .

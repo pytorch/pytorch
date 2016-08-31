@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <TH/TH.h>
+#include <libshm.h>
 #include "THP.h"
 
 #include "generic/Storage.cpp"

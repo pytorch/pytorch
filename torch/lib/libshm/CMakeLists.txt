@@ -1,0 +1,49 @@
+CMAKE_MINIMUM_REQUIRED(VERSION 2.6 FATAL_ERROR)
+CMAKE_POLICY(VERSION 2.6)
+
+IF(NOT Torch_FOUND)
+  FIND_PACKAGE(Torch REQUIRED)
+ENDIF()
+
+IF(NOT LIBSHM_INSTALL_LIB_SUBDIR)
+  SET(LIBSHM_INSTALL_LIB_SUBDIR "lib" CACHE PATH "libshm install library directory")
+ENDIF()
+
+# Flags
+# When using MSVC
+IF(MSVC)
+  # we want to respect the standard, and we are bored of those **** .
+  ADD_DEFINITIONS(-D_CRT_SECURE_NO_DEPRECATE=1)
+ENDIF(MSVC)
+
+IF (CMAKE_VERSION VERSION_LESS "3.1")
+  SET(CMAKE_CXX_FLAGS "-std=c++11 ${CMAKE_C_FLAGS}")
+ELSE ()
+  SET(CMAKE_CXX_STANDARD 11)
+ENDIF ()
+
+LINK_DIRECTORIES("${Torch_INSTALL_LIB}")
+
+ADD_LIBRARY(shm SHARED core.cpp)
+ADD_EXECUTABLE(torch_shm_manager manager.cpp)
+INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR})
+### Torch packages supposes libraries prefix is "lib"
+SET_TARGET_PROPERTIES(shm PROPERTIES
+  PREFIX "lib"
+  IMPORT_PREFIX "lib")
+TARGET_LINK_LIBRARIES(shm TH)
+
+IF (UNIX AND NOT APPLE)
+   INCLUDE(CheckLibraryExists)
+   # https://github.com/libgit2/libgit2/issues/2128#issuecomment-35649830
+   CHECK_LIBRARY_EXISTS(rt clock_gettime "time.h" NEED_LIBRT)
+   IF(NEED_LIBRT)
+     TARGET_LINK_LIBRARIES(shm rt)
+     TARGET_LINK_LIBRARIES(torch_shm_manager rt)
+   ENDIF(NEED_LIBRT)
+ENDIF(UNIX AND NOT APPLE)
+
+
+INSTALL(TARGETS shm LIBRARY DESTINATION ${LIBSHM_INSTALL_LIB_SUBDIR})
+INSTALL(FILES libshm.h DESTINATION "include")
+INSTALL(TARGETS torch_shm_manager DESTINATION "bin")

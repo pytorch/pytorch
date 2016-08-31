@@ -106,6 +106,33 @@ void THPUtils_invalidArguments(PyObject *given_args, const char *expected_args_d
   PyErr_SetString(PyExc_ValueError, error_msg.c_str());
 }
 
+PyObject * THPUtils_bytesFromString(const char *b)
+{
+#if PY_MAJOR_VERSION == 2
+    return PyString_FromString(b);
+#else
+    return PyBytes_FromString(b);
+#endif
+}
+
+bool THPUtils_checkBytes(PyObject *obj)
+{
+#if PY_MAJOR_VERSION == 2
+    return PyString_Check(obj);
+#else
+    return PyBytes_Check(obj);
+#endif
+}
+
+const char * THPUtils_bytesAsString(PyObject *bytes)
+{
+#if PY_MAJOR_VERSION == 2
+    return PyString_AS_STRING(bytes);
+#else
+    return PyBytes_AS_STRING(bytes);
+#endif
+}
+
 template<>
 void THPPointer<THPGenerator>::free() {
   if (ptr)

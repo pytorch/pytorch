@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <unordered_map>
+#include <libshm.h>
 #include <TH/TH.h>
 
 #define WITH_NUMPY_IMPORT_ARRAY
@@ -139,8 +140,13 @@ static bool THPModule_assignStateless(PyObject *self)
 }
 
 // Callback for python part. Used for additional initialization of python classes
-static PyObject * THPModule_initExtension(PyObject *self)
+static PyObject * THPModule_initExtension(PyObject *self, PyObject *shm_manager_path)
 {
+  if (!THPUtils_checkBytes(shm_manager_path)) {
+    THPUtils_setError("initialization error - expected bytes/string object as shm_manager_path!");
+    return NULL;
+  }
+  libshm_init(THPUtils_bytesAsString(shm_manager_path));
   if (!THPModule_loadClasses(self))         return NULL;
   if (!THPModule_assignStateless(self))     return NULL;
   if (!THPModule_initCopy(self))            return NULL;
@@ -475,7 +481,7 @@ extern PyObject * THCPModule_getDeviceCount_wrap(PyObject *self);
 #endif
 
 static PyMethodDef TorchMethods[] = {
-  {"_initExtension",  (PyCFunction)THPModule_initExtension,     METH_NOARGS,  NULL},
+  {"_initExtension",  (PyCFunction)THPModule_initExtension,     METH_O,  NULL},
 #ifdef WITH_CUDA
   {"_cuda_init",      (PyCFunction)THCPModule_initExtension,    METH_NOARGS,  NULL},
   {"_cuda_setDevice", (PyCFunction)THCPModule_setDevice_wrap,   METH_O,       NULL},

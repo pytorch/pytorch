@@ -113,7 +113,16 @@ setDefaultTensorType('torch.DoubleTensor')
 # Initialize extension
 ################################################################################
 
-_C._initExtension()
+# Shared memory manager needs to know the exact location of manager executable
+import os
+manager_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'lib', 'torch_shm_manager')
+if sys.version_info[0] >= 3:
+    manager_path = bytes(manager_path, 'ascii')
+
+_C._initExtension(manager_path)
+
+del os
+del manager_path
 
 ################################################################################
 # Remove unnecessary members

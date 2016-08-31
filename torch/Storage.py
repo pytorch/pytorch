@@ -1,5 +1,7 @@
+import weakref
 import torch
 
+_shared_cache = weakref.WeakValueDictionary()
 
 class _StorageBase():
     def __str__(self):
@@ -15,6 +17,29 @@ class _StorageBase():
     def copy_(self, other):
         torch._C._storageCopy(self, other)
         return self
+
+    def share(self):
+        handle, weak_storage = self._share()
+        manager_handle, object_handle, size = handle
+        _shared_cache[object_handle] = weak_storage
+        return handle
+
+    @classmethod
+    def new_shared(cls, args):
+        manager_handle, object_handle, size = args
+        try:
+            weak_storage = _shared_cache[object_handle]
+            # Try to momentarily convert a weak reference into a strong one
+            weak_storage.retain()
+            if weak_storage._cdata != 0:
+                # Success, we managed to retain the storage before it was freed
+                new_storage = type(weak_storage)(cdata=weak_storage._cdata)
+                return new_storage
+        except KeyError:
+            pass
+        new_storage, weak_storage = cls._new_shared(manager_handle, object_handle, size)
+        _shared_cache[object_handle] = weak_storage
+        return new_storage
 
     def __copy__(self):
         return self.clone()

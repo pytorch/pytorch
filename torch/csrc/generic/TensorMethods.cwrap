@@ -3483,6 +3483,7 @@ static PyObject * THPTensor_stateless_(cat)(THPTensor *_unused, PyObject *args)
 
         } catch (std::invalid_argument &e) {
         } catch (std::exception &e) {
+          // FIXME TODO: that's not a good way of handling errors
           fprintf(stderr, "e: %s\n", e.what());
           return NULL;
         }

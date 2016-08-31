@@ -132,20 +132,20 @@ include_dirs += [
 
 extra_link_args.append('-L' + lib_path)
 
-main_libraries = ['TH']
+main_libraries = ['TH', 'shm']
 main_sources = [
     "torch/csrc/Module.cpp",
     "torch/csrc/Generator.cpp",
     "torch/csrc/Tensor.cpp",
     "torch/csrc/Storage.cpp",
     "torch/csrc/utils.cpp",
+    "torch/csrc/allocators.cpp",
     "torch/csrc/serialization.cpp",
 ]
 
 try:
     import numpy as np
     include_dirs += [np.get_include()]
-    main_sources += ["torch/csrc/numpy.cpp"]
     extra_compile_args += ['-DWITH_NUMPY']
 except ImportError:
     pass
@@ -233,6 +233,6 @@ setup(name="torch", version="0.1",
         'clean': clean,
     },
     packages=packages,
-    package_data={'torch': ['lib/*.so*', 'lib/*.h']},
+    package_data={'torch': ['lib/*.so*', 'lib/*.h', 'lib/torch_shm_manager']},
     install_requires=['pyyaml'],
 )

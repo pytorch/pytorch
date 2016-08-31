@@ -2,8 +2,25 @@
 #define TH_GENERIC_FILE "generic/Storage.cpp"
 #else
 
+
 /* A pointer to RealStorage class defined later in Python */
 extern PyObject *THPStorageClass;
+
+PyObject * THPStorage_(newWeakObject)(THStorage *storage) {
+  if (storage->allocator == &THStorageWeakRefAllocator) {
+    auto allocator_obj = ((StorageWeakRefAllocator*)storage->allocatorContext);
+    Py_INCREF(allocator_obj->object.get());
+    return allocator_obj->object.get();
+  }
+  std::unique_ptr<StorageWeakRefAllocator> new_ctx(new StorageWeakRefAllocator(
+        nullptr, storage->allocator, storage->allocatorContext));
+  PyObject *weak_result = THPStorage_(newObject)(storage);
+  Py_INCREF(weak_result); // THPObjectPtr steals the reference
+  new_ctx->object = weak_result;
+  storage->allocatorContext = (void*)new_ctx.release();
+  storage->allocator = &THStorageWeakRefAllocator;
+  return weak_result;
+}
 
 PyObject * THPStorage_(newObject)(THStorage *ptr)
 {
@@ -23,7 +40,8 @@ bool THPStorage_(IsSubclass)(PyObject *storage)
 
 static void THPStorage_(dealloc)(THPStorage* self)
 {
-  THStorage_(free)(LIBRARY_STATE self->cdata);
+  if (self->cdata)
+    THStorage_(free)(LIBRARY_STATE self->cdata);
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 

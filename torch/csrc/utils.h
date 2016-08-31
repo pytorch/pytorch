@@ -13,6 +13,9 @@ int THPUtils_getCallable(PyObject *arg, PyObject **result);
 THLongStorage * THPUtils_getLongStorage(PyObject *args, int ignore_first=0);
 void THPUtils_setError(const char *format, ...);
 void THPUtils_invalidArguments(PyObject *given_args, const char *expected_args_desc);
+PyObject * THPUtils_bytesFromString(const char *b);
+bool THPUtils_checkBytes(PyObject *obj);
+const char * THPUtils_bytesAsString(PyObject *bytes);
 
 #define THStoragePtr TH_CONCAT_3(TH,Real,StoragePtr)
 #define THTensorPtr  TH_CONCAT_3(TH,Real,TensorPtr)
