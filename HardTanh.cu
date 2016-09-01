@@ -90,14 +90,14 @@ void THNN_CudaHardTanh_updateGradInput(
 
   if (inplace)
   {
-    THCudaTensor_resizeAs(state, gradInput, input);
-    THC_pointwiseApply3(state, gradInput, input, gradOutput,
+    THCudaTensor_set(state, gradInput, gradOutput);
+    THC_pointwiseApply2(state, gradInput, input,
                                  hardtanhupdateGradInput_functor(min_val, max_val));
   }
   else
   {
-    THCudaTensor_set(state, gradInput, gradOutput);
-    THC_pointwiseApply2(state, gradInput, input,
+    THCudaTensor_resizeAs(state, gradInput, input);
+    THC_pointwiseApply3(state, gradInput, input, gradOutput,
                                  hardtanhupdateGradInput_functor(min_val, max_val));
   }
 }
