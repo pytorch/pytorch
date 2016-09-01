@@ -264,8 +264,68 @@ For parameter reductions ASAP:
         * Well, last usage in backward graph = first usage in forward graph, so this should be straightforward
 
 
-#### Multiprocessing
+### Multiprocessing with Tensor sharing
 
-We plan to make it as straightforward as possible, to use pytorch in a multiprocessing environment.
-For this, we plan to implement a .share() method for tensors that will enable them to be shared across processes seamlessly.
-One can use [python multiprocessing](https://docs.python.org/2/library/multiprocessing.html) seamlessly.
+In Torch, or in general, one uses "threads" to build parallel data loaders, as well as to do Hogwild training.
+Threads are powerful, as one can share Tensors between threads.
+This allows you to:
+* transfer data between threads with efficiently with zero memory copy and serialization overhead.
+* share tensors among threads for parameter sharing models
+
+Sharing Tensors among threads is very useful when you do Hogwild training, i.e. if you want to train several models in parallel, but want to share their underlying parameters.
+This is often used in non ConvNets, like training word embeddings, RL-for-games, etc.
+
+With Python, one cannot use threads because of a few technical issues.
+Python has what is called [Global Interpreter Lock](https://wiki.python.org/moin/GlobalInterpreterLock), which does not allow threads to concurrently execute python code.
+
+Hence, the most pythonic way to use multiple CPU cores is [multiprocessing](http://docs.python.org/2/library/multiprocessing.html)
+
+We made PyTorch to seamlessly integrate with python multiprocessing.
+This involved solving some complex technical problems to make this an air-tight solution, and more can be read [in this in-depth technical discussion](http://github.com/pytorch/pytorch/wiki/Multiprocessing-Technical-Notes).
+
+What this means for you as the end-user is that you can simply use multiprocessing in this way:
+
+```python
+# loaders.py
+# Functions from this file run in the workers
+
+def fill(queue):
+  while True:
+      tensor = queue.get()
+	      tensor.fill_(10)
+		      queue.put(tensor)
+
+def fill_pool(tensor):
+  tensor.fill_(10)
+  ```
+
+```python
+# Example 1: Using multiple persistent processes and a Queue
+# process.py
+
+import torch
+import torch.multiprocessing as multiprocessing
+from loaders import fill
+
+# torch.multiprocessing.Queue automatically moves Tensor data to shared memory
+# So the main process and worker share the data
+queue = multiprocessing.Queue()
+buffers = [torch.Tensor(2, 2) for i in range(4)]
+for b in buffers:
+  queue.put(b)
+  processes = [multiprocessing.Process(target=fill, args=(queue,)).start() for i in range(10)]
+  ```
+
+```python
+# Example 2: Using a process pool
+# pool.py
+
+import torch
+from torch.multiprocessing import Pool
+from loaders import fill_pool
+
+tensors = [torch.Tensor(2, 2) for i in range(100)]
+pool = Pool(10)
+pool.map(fill_pool, tensors)
+```
+
