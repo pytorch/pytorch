@@ -57,8 +57,10 @@ def _make_function_class(class_name, update_output, update_grad_input, acc_grad_
 
     buffers_idx = []
     additional_arg_idx = 0
+    expected_params = []
     for arg in update_output.arguments[3:]:
         if arg.name in {'weight', 'bias'}:
+            expected_params.append(arg)
             continue
         # TODO: index tensors, etc.
         if arg.type == 'THTensor*':
@@ -83,8 +85,17 @@ def _make_function_class(class_name, update_output, update_grad_input, acc_grad_
         for idx in buffers_idx:
             self.additional_args = self.additional_args[:idx] + [input.new()] + self.additional_args[idx:]
         self.additional_args = tuple(self.additional_args)
-        # <sigh> python2.7 can't expand multiple tuples as arguments
-        args = params + self.additional_args
+
+        # Fill in optional params with None
+        args = params
+        for i in range(len(params), len(expected_params)):
+            param = expected_params[i]
+            if param.is_optional:
+                args += (None,)
+            else:
+                raise TypeError("missing required argument '%s'" % param.name)
+
+        args += self.additional_args
 
         output = input.new()
         # If the module is working in-place it's output will be set to the
