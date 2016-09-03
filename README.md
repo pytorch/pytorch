@@ -1,7 +1,7 @@
 # pytorch [alpha-2] 
 
-* CPU Linux & OSX: [![Build Status](https://travis-ci.com/apaszke/pytorch.svg?token=shqHbUq29zKDxuqzGcjC&branch=master)](https://travis-ci.com/apaszke/pytorch)
-* CUDA Linux: [![Build Status](http://build.pytorch.org:8080/buildStatus/icon?job=pytorch-master)](https://build.pytorch.org/job/pytorch-master)
+* CPU [![Build Status](https://travis-ci.com/apaszke/pytorch.svg?token=shqHbUq29zKDxuqzGcjC&branch=master)](https://travis-ci.com/apaszke/pytorch) on Linux with Python versions [2.7.8, 2.7, 3.3, 3.4, 3.5, Nightly]
+* CUDA [![Build Status](http://build.pytorch.org:8080/buildStatus/icon?job=pytorch-master)](https://build.pytorch.org/job/pytorch-master) on Linux with Python versions [3.5]
 
 The project is still under active development and is likely to drastically change in short periods of time.
 We will be announcing API changes and important developments via a newsletter, github issues and post a link to the issues on slack.
