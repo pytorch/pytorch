@@ -3,7 +3,7 @@ import torch
 
 _shared_cache = weakref.WeakValueDictionary()
 
-class _StorageBase():
+class _StorageBase(object):
     def __str__(self):
         content = ' ' + '\n '.join(str(self[i]) for i in torch._pyrange(len(self)))
         return content + '\n[{} of size {}]'.format(torch.typename(self), len(self))
