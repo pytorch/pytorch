@@ -21,8 +21,6 @@ pip install -r requirements.txt
 pip install .
 ```
 
-To install with CUDA support change `WITH_CUDA = False` to `WITH_CUDA = True` in `setup.py`.
-
 ## Communication
 * github issues: bug reports, feature requests, install issues, RFCs, thoughts, etc.
 * slack: general chat, online discussions, collaboration etc. https://pytorch.slack.com/ . If you need a slack invite, ping me at soumith@pytorch.org
@@ -33,9 +31,9 @@ To install with CUDA support change `WITH_CUDA = False` to `WITH_CUDA = True` in
 We will run the alpha releases weekly for 6 weeks.
 After that, we will reevaluate progress, and if we are ready, we will hit beta-0. If not, we will do another two weeks of alpha.
 
-* alpha-0: Working versions of torch, cutorch, nn, cunn, optim fully unit tested with seamless numpy conversions
-* alpha-1: Serialization to/from disk with sharing intact. initial release of the new neuralnets package based on a Chainer-like design
-* alpha-2: sharing tensors across processes for hogwild training or data-loading processes. a rewritten optim package for this new nn.
+* ~~alpha-0: Working versions of torch, cutorch, nn, cunn, optim fully unit tested with seamless numpy conversions~~
+* ~~alpha-1: Serialization to/from disk with sharing intact. initial release of the new neuralnets package based on a Chainer-like design~~
+* ~~alpha-2: sharing tensors across processes for hogwild training or data-loading processes. a rewritten optim package for this new nn.~~
 * alpha-3: binary installs (prob will take @alexbw 's help here), contbuilds, etc.
 * alpha-4: a ton of examples across vision, nlp, speech, RL -- this phase might make us rethink parts of the APIs, and hence want to do this in alpha than beta
 * alpha-5: Putting a simple and efficient story around multi-machine training. Probably simplistic like torch-distlearn. Building the website, release scripts, more documentation, etc.
