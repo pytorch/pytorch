@@ -1,9 +1,18 @@
 import multiprocessing
 import multiprocessing.pool
+import multiprocessing.util as util
 
 import torch
-from .common import CustomizablePicklingQueue, reduce_torch_object
-from .queue import Queue
+from . import Queue
+
+
+def clean_worker(*args, **kwargs):
+    import gc
+    multiprocessing.pool.worker(*args, **kwargs)
+    # Regular multiprocessing workers don't fully clean up after themselves,
+    # so we have to explicitly trigger garbage collection to make sure that all
+    # destructors are called...
+    gc.collect()
 
 
 class Pool(multiprocessing.pool.Pool):
@@ -36,10 +45,26 @@ class Pool(multiprocessing.pool.Pool):
 
     def _setup_queues(self):
         context = getattr(self, '_ctx', multiprocessing)
-        self._inqueue = Queue(context,
-                              self._forward_reducers)
-        self._outqueue = Queue(context,
-                               self._backward_reducers)
+        self._inqueue = Queue(context, self._forward_reducers)
+        self._outqueue = Queue(context, self._backward_reducers)
         self._quick_put = self._inqueue._send
         self._quick_get = self._outqueue._recv
+
+    def _repopulate_pool(self):
+        """Bring the number of pool processes up to the specified number,
+        for use after reaping workers which have exited.
+        """
+        for i in range(self._processes - len(self._pool)):
+            # changed worker -> clean_worker
+            args = (self._inqueue, self._outqueue,
+                    self._initializer,
+                    self._initargs, self._maxtasksperchild)
+            if hasattr(self, '_wrap_exception'):
+                args += (self._wrap_exception,)
+            w = self.Process(target=clean_worker, args=args)
+            self._pool.append(w)
+            w.name = w.name.replace('Process', 'PoolWorker')
+            w.daemon = True
+            w.start()
+            util.debug('added worker')
 

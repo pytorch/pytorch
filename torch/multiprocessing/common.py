@@ -4,6 +4,9 @@ from io import BytesIO
 if sys.version_info[0] >= 3:
     import copyreg
 
+import torch
+from . import _sharing_strategy
+
 # The code below was copied from joblib (https://github.com/joblib/joblib)
 #
 # This software is OSI Certified Open Source Software. OSI Certified is a
@@ -57,8 +60,10 @@ class CustomizablePickler(pickle.Pickler):
 
     def __init__(self, writer, reducers=None, protocol=pickle.HIGHEST_PROTOCOL):
         pickle.Pickler.__init__(self, writer, protocol=protocol)
+        self.extended_init = set()
         if reducers is None:
             reducers = {}
+
         if hasattr(pickle.Pickler, 'dispatch'):
             # Make the dispatch registry an instance level attribute instead of
             # a reference to the class dictionary under Python 2
@@ -67,6 +72,7 @@ class CustomizablePickler(pickle.Pickler):
             # Under Python 3 initialize the dispatch table with a copy of the
             # default registry
             self.dispatch_table = copyreg.dispatch_table.copy()
+
         for type, reduce_func in reducers.items():
             self.register(type, reduce_func)
 
@@ -76,11 +82,33 @@ class CustomizablePickler(pickle.Pickler):
             # Python 2 pickler dispatching is not explicitly customizable.
             # Let us use a closure to workaround this limitation.
             def dispatcher(self, obj):
-                reduced = reduce_func(obj)
+                reduced = reduce_func(self, obj)
                 self.save_reduce(obj=obj, *reduced)
             self.dispatch[type] = dispatcher
         else:
-            self.dispatch_table[type] = reduce_func
+            self.dispatch_table[type] = lambda obj: reduce_func(self, obj)
+
+
+class ExtendedInitPickler(CustomizablePickler):
+
+    def __init__(self, *args, **kwargs):
+        CustomizablePickler.__init__(self, *args, **kwargs)
+        self.extended_init = set()
+
+    def register_extended_init(self, obj):
+        self.extended_init.add(obj)
+
+    def dump(self, obj):
+        CustomizablePickler.dump(self, obj)
+        CustomizablePickler.dump(self, self.extended_init)
+
+
+class ExtendedInitUnpickler(pickle.Unpickler):
+
+    def load(self):
+        result = pickle.Unpickler.load(self)
+        self.extended_init = pickle.Unpickler.load(self)
+        return result
 
 
 class CustomizablePicklingQueue(object):
@@ -108,7 +136,7 @@ class CustomizablePicklingQueue(object):
         self._make_methods()
 
     def __getstate__(self):
-        assert_spawning(self)
+        # TODO: assert spawning
         return (self._reader, self._writer, self._rlock, self._wlock,
                 self._reducers)
 
@@ -120,45 +148,35 @@ class CustomizablePicklingQueue(object):
     def empty(self):
         return not self._reader.poll()
 
+
+    def _load(self):
+        return self._reader.recv()
+
+    def _recv(self):
+        return self._load()
+
+    def get(self):
+        self._rlock.acquire()
+        try:
+            # TODO: unpickle outside of a read lock
+            return self._load()
+        finally:
+            self._rlock.release()
+
+    def _send(self, obj):
+        buffer = BytesIO()
+        CustomizablePickler(buffer, self._reducers).dump(obj)
+        self._writer.send_bytes(buffer.getvalue())
+
+    def put(self, obj):
+        self._wlock.acquire()
+        try:
+            return self._send(obj)
+        finally:
+            self._wlock.release()
+
     def _make_methods(self):
-        self._recv = recv = self._reader.recv
-        racquire, rrelease = self._rlock.acquire, self._rlock.release
-
-        def get():
-            racquire()
-            try:
-                return recv()
-            finally:
-                rrelease()
-
-        self.get = get
-
-        if self._reducers:
-            def send(obj):
-                buffer = BytesIO()
-                CustomizablePickler(buffer, self._reducers).dump(obj)
-                self._writer.send_bytes(buffer.getvalue())
-        else:
-            send = self._writer.send
-        self._send = send
-
         if self._wlock is None:
             # writes to a message oriented win32 pipe are atomic
-            self.put = send
-        else:
-            wlock_acquire, wlock_release = (
-                self._wlock.acquire, self._wlock.release)
-
-            def put(obj):
-                wlock_acquire()
-                try:
-                    return send(obj)
-                finally:
-                    wlock_release()
-
-            self.put = put
-
-
-def reduce_torch_object(obj):
-    return (type(obj).new_shared, (obj.share(),))
+            self.put = self.send
 

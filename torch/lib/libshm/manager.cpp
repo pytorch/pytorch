@@ -2,6 +2,7 @@
 #include <poll.h>
 #include <errno.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <vector>
 #include <set>
 #include <algorithm>
@@ -11,7 +12,7 @@
 #include "err.h"
 #include "socket.h"
 
-const int SHUTDOWN_TIMEOUT = 10000;
+const int SHUTDOWN_TIMEOUT = 2000; // 2s
 
 #ifdef DEBUG_LOG
 #define COLOR "\033[31;1m"
@@ -26,14 +27,14 @@ struct ClientSession {
   ClientSession(ManagerSocket s): socket(std::move(s)), pid(0) {}
 
   pid_t pid;
-  std::set<std::string> used_objects;
   ManagerSocket socket;
 };
 
 
 std::vector<struct pollfd> pollfds;
 std::unordered_map<int, ClientSession> client_sessions;
-std::unordered_map<std::string, int> object_refcounts;
+// TODO: check if objects have been freed from time to time
+std::set<std::string> used_objects;
 
 
 void register_fd(int fd) {
@@ -44,7 +45,7 @@ void register_fd(int fd) {
 }
 
 
-void unregister(int fd) {
+void unregister_fd(int fd) {
   pollfds.erase(
     std::remove_if(pollfds.begin(), pollfds.end(),
         [fd](const struct pollfd &pfd) { return pfd.fd == fd; }),
@@ -58,20 +59,24 @@ void print_init_message(const char *message) {
   write(1, "\n", 1);
 }
 
-bool object_decref(const std::string &obj_name, bool should_unlink=false) {
-  int new_refcount = --object_refcounts[obj_name];
-    DEBUG("decreased %s refcount to %d", obj_name.c_str(), new_refcount);
-  if (new_refcount == 0) {
-    object_refcounts.erase(obj_name);
-    if(should_unlink) {
-      DEBUG("unlinking %s", obj_name.c_str());
-      shm_unlink(obj_name.c_str());
-    }
+bool object_exists(const char *name) {
+  int fd = shm_open(name, O_RDONLY, 0);
+  if (fd >= 0) {
+    close(fd);
     return true;
+  } else {
+    return false;
   }
-  return false;
 }
 
+void free_used_object(const std::string &name) {
+  if (!object_exists(name.c_str())) {
+    DEBUG("object %s appears to have been freed", name.c_str());
+    used_objects.erase(name);
+  } else {
+    DEBUG("object %s still exists", name.c_str());
+  }
+}
 
 int main(int argc, char *argv[]) {
   setsid();  // Daemonize the process
@@ -110,8 +115,6 @@ int main(int argc, char *argv[]) {
         DEBUG("detaching process");
         auto &session = client_sessions.at(pfd.fd);
         DEBUG("%d has died", session.pid);
-        for (auto &obj_name: session.used_objects)
-            object_decref(obj_name, true);
         to_remove.push_back(pfd.fd);
       } else if (pfd.revents & POLLIN) {
         if (pfd.fd == srv_socket->socket_fd) {
@@ -129,25 +132,28 @@ int main(int argc, char *argv[]) {
           session.pid = info.pid;
           DEBUG("got alloc info: %d %d %s", (int)info.free, info.pid, info.filename);
           if (info.free) {
-            session.used_objects.erase(info.filename);
-            object_decref(info.filename);
+            free_used_object(info.filename);
           } else {
-            object_refcounts[info.filename]++;
-            session.used_objects.emplace(info.filename);
-            DEBUG("increased %s refcount to %d", info.filename, object_refcounts[info.filename]);
+            used_objects.insert(info.filename);
+            DEBUG("registered object %s", info.filename);
+            session.socket.confirm();
           }
-          session.socket.confirm();
         }
       }
     }
 
     for (int fd: to_add)
-    register_fd(fd);
+      register_fd(fd);
     to_add.clear();
 
     for (int fd: to_remove)
-    unregister(fd);
+      unregister_fd(fd);
     to_remove.clear();
+  }
+
+  for (auto &obj_name: used_objects) {
+    DEBUG("freeing %s", obj_name.c_str());
+    shm_unlink(obj_name.c_str());
   }
 
   DEBUG("manager done");

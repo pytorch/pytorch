@@ -78,6 +78,7 @@ ClientSocket& get_manager_socket(char *manager_handle) {
 char * copy_handle(const std::string &handle) {
   char *new_handle = new char[handle.length()+1];
   std::strcpy(new_handle, handle.c_str());
+  return new_handle;
 }
 
 AllocInfo get_alloc_info(libshm_context *ctx) {

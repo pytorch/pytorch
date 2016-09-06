@@ -89,23 +89,6 @@ class _TensorBase(object):
     def __iter__(self):
         return iter(map(lambda i: self.select(0, i), torch._pyrange(self.size(0))))
 
-    def share(self):
-        metadata = (self.storageOffset(), self.size().tolist(),
-                self.stride().tolist())
-        storage = self.storage()
-        return (storage.share(), metadata)
-
-    @classmethod
-    def new_shared(cls, args):
-        storage_args, metadata = args
-        storage_offset, size, stride = metadata
-        size = torch.LongStorage(size)
-        stride = torch.LongStorage(stride)
-        new_tensor = cls(1)
-        storage = type(new_tensor.storage()).new_shared(storage_args)
-        new_tensor.set_(storage, storage_offset, size, stride)
-        return new_tensor
-
     def split(self, split_size, dim=0):
         result = []
         dim_size = self.size(dim)
