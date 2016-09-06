@@ -16,10 +16,14 @@ class CastOp : public Operator<Context> {
       : Operator<Context>(operator_def, ws) {
     TensorProto_DataType to;
     if (OperatorBase::HasSingleArgumentOfType<string>("to")) {
+#ifndef CAFFE2_USE_LITE_PROTO
       string s = OperatorBase::GetSingleArgument<string>("to", "");
       std::transform(s.begin(), s.end(), s.begin(), ::toupper);
       CAFFE_ENFORCE(
           TensorProto_DataType_Parse(s, &to), "Unknown 'to' argument: ", s);
+#else
+      CAFFE_THROW("String cast op not supported");
+#endif
     } else {
       to = static_cast<TensorProto_DataType>(
           OperatorBase::GetSingleArgument<int>(

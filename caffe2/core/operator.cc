@@ -107,11 +107,10 @@ unique_ptr<OperatorBase> CreateOperator(
   // first, check with OpSchema if the operator is legal.
   auto* schema = OpSchemaRegistry::Schema(operator_def.type());
   if (schema) {
-    if (!schema->Verify(operator_def)) {
-      LOG(ERROR) << "Operator def did not pass schema checking: "
-                 << ProtoDebugString(operator_def);
-      return nullptr;
-    }
+    CAFFE_ENFORCE(
+        schema->Verify(operator_def),
+        "Operator def did not pass schema checking: ",
+        ProtoDebugString(operator_def));
   } else {
     // We would like to recommend every op to register its schema, so if there
     // is not one, we print a LOG_ERROR. But we will still allow the operator

@@ -37,7 +37,9 @@ class Counter {
 };
 }
 
-template <typename T, class Context = CPUContext>
+// TODO(jiayq): deprecate these ops & consolidate them with IterOp/AtomicIterOp
+
+template <typename T, class Context>
 class CreateCounterOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -57,7 +59,7 @@ class CreateCounterOp final : public Operator<Context> {
   T init_count_ = 0;
 };
 
-template <typename T, class Context = CPUContext>
+template <typename T, class Context>
 class ResetCounterOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -77,7 +79,8 @@ class ResetCounterOp final : public Operator<Context> {
   T init_count_;
 };
 
-template <typename T, class Context = CPUContext>
+// Will always use TensorCPU regardless the Context
+template <typename T, class Context>
 class CountDownOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -86,14 +89,15 @@ class CountDownOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& counterPtr = OperatorBase::Input<std::unique_ptr<Counter<T>>>(0);
-    auto* output = Output(0);
+    auto* output = OperatorBase::Output<TensorCPU>(0);
     output->Resize(std::vector<int>{});
     *output->template mutable_data<bool>() = counterPtr->countDown();
     return true;
   }
 };
 
-template <typename T, class Context = CPUContext>
+// Will always use TensorCPU regardless the Context
+template <typename T, class Context>
 class CountUpOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -102,14 +106,15 @@ class CountUpOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& counterPtr = OperatorBase::Input<std::unique_ptr<Counter<T>>>(0);
-    auto* output = Output(0);
+    auto* output = OperatorBase::Output<TensorCPU>(0);
     output->Resize(std::vector<int>{});
     *output->template mutable_data<T>() = counterPtr->countUp();
     return true;
   }
 };
 
-template <typename T, class Context = CPUContext>
+// Will always use TensorCPU regardless the Context
+template <typename T, class Context>
 class RetrieveCountOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -118,7 +123,7 @@ class RetrieveCountOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& counterPtr = OperatorBase::Input<std::unique_ptr<Counter<T>>>(0);
-    auto* output = Output(0);
+    auto* output = OperatorBase::Output<TensorCPU>(0);
     output->Resize(std::vector<int>{});
     *output->template mutable_data<T>() = counterPtr->retrieve();
     return true;

@@ -9,6 +9,24 @@
 
 namespace caffe2 {
 
+template <int... values>
+class SkipIndices {
+ private:
+  template <int... V>
+  static inline bool ContainsInternal(const int i) {
+    return false;
+  }
+  template <int First, int... Rest>
+  static inline bool ContainsInternal(const int i) {
+    return (i == First) && ContainsInternal<Rest...>(i);
+  }
+
+ public:
+  static inline bool Contains(const int i) {
+    return ContainsInternal<values...>(i);
+  }
+};
+
 /**
  * @brief A templated class to allow one to wrap a CPU operator as a CUDA
  * operator.
@@ -28,8 +46,15 @@ namespace caffe2 {
  * (with performance hits of course) via
  *     REGISTER_CUDA_OPERATOR(MyMagic,
  *                            GPUFallbackOp<MyMagicOp>);
+ *
+ * Advanced usage: if you want to have some specific outputs never copied, you
+ * can use the SkipOutputCopy template argument to do that. For example, if
+ * MyMagic produces two outputs and the first output is always going to live on
+ * the CPU, you can do
+ *     REGISTER_CUDA_OPERATOR(MyMagic,
+ *                            GPUFallbackOp<MyMagicOp, SkipIndices<0>>);
  */
-template <class CPUOp>
+template <class CPUOp, typename SkipOutputCopy = SkipIndices<>>
 class GPUFallbackOp final : public Operator<CUDAContext> {
  public:
   USE_OPERATOR_FUNCTIONS(CUDAContext);
@@ -53,10 +78,12 @@ class GPUFallbackOp final : public Operator<CUDAContext> {
   }
 
   bool RunOnDevice() override {
+    bool need_sync = false;
     for (int i = 0; i < InputSize(); ++i) {
       if (OperatorBase::InputIsType<TensorCUDA>(i)) {
         local_input_blobs_[i]->template GetMutable<TensorCPU>()->CopyFrom(
             Input(i), &context_);
+        need_sync = true;
       } else {
         VLOG(1) << "Input " << i << " is not TensorCUDA. Skipping copy.";
         // Note(jiayq): This removes a const but conceptually
@@ -67,18 +94,26 @@ class GPUFallbackOp final : public Operator<CUDAContext> {
             OperatorBase::Inputs()[i]->meta());
       }
     }
+
     // Sync to make sure copies are done.
-    context_.FinishDeviceComputation();
+    if (need_sync) {
+      context_.FinishDeviceComputation();
+    }
+
     if (!base_op_->Run()) {
       LOG(ERROR) << "Base op run failed in GPUFallbackOp. Def: "
                       << ProtoDebugString(def());
       return false;
     }
     for (int i = 0; i < OutputSize(); ++i) {
+      if (SkipOutputCopy::Contains(i)) {
+        VLOG(1) << "Copy output: index " << i << " skipped.";
+        continue;
+      }
       CAFFE_ENFORCE(
           local_output_blobs_[i]->template IsType<TensorCPU>(),
           "GPU fallback op currently does not support non-TensorCPU "
-          "output type.");
+          "output type who needs copying.");
       Output(i)->CopyFrom(
           local_output_blobs_[i]->template Get<TensorCPU>(), &context_);
     }

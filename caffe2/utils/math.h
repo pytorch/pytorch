@@ -9,6 +9,10 @@ extern "C" {
 #include "caffe2/utils/cblas.h"
 }
 
+#ifdef CAFFE2_USE_ACCELERATE
+#include <Accelerate/Accelerate.h>
+#endif // CAFFE2_USE_ACCELERATE
+
 #include "caffe2/core/common.h"
 #include "caffe2/core/types.h"
 #include "Eigen/Core"
@@ -168,7 +172,7 @@ template <typename T, class Context>
 void Select(const int N, const int D, const T* x, const int* idx, T* y,
             Context* context);
 
-// For small FixedSizes (like FixedSize=1) the function might provide more
+// For small FixedValues (like FixedSize=1) the function might provide more
 // efficent implementation hard-coded statically for this size.
 template <typename T, class Context, int FixedSize = -1>
 void Scale(const int N, const T alpha, const T* x, T* y,
@@ -181,7 +185,7 @@ template <typename T, class Context>
 void Scale(const int N, const T* alpha, const T* x, T* y,
            Context* context);
 
-// For small FixedSizes (like FixedSize=1) the function might provide more
+// For small FixedValues (like FixedSize=1) the function might provide more
 // efficent implementation hard-coded statically for this size.
 template <typename T, class Context, int FixedSize = -1>
 void Axpy(const int N, const T alpha, const T* x, T* y, Context* context);

@@ -44,7 +44,7 @@ OPERATOR_SCHEMA(ConvTranspose)
         "The 1D bias blob that is added through the convolution;"
         "has size (C)")
     .Output(
-        3,
+        0,
         "Y",
         "Output data blob that contains the result of the "
         "transposed convolution. The output dimensions are functions of the kernel"

@@ -6,12 +6,13 @@ from __future__ import unicode_literals
 from collections import namedtuple
 from collections import OrderedDict
 
-from ._import_c_extension import *  # NOQA
-
 from caffe2.proto import caffe2_pb2
 from collections import defaultdict
 from caffe2.python import scope, utils, workspace, extension_loader
 
+import caffe2.python._import_c_extension as C
+
+GlobalInit = C.global_init
 
 # Convenience redirections to functions inside scope.
 DeviceScope = scope.DeviceScope
@@ -50,6 +51,10 @@ def RefreshRegisteredOperators():
 
 def IsOperator(op_type):
     return (op_type in _REGISTERED_OPERATORS)
+
+
+def IsOperatorWithEngine(op_type, engine):
+    return (op_type + "_ENGINE_" + engine in _REGISTERED_OPERATORS)
 
 
 def DeviceOption(device_type, cuda_gpu_id, random_seed=None):
@@ -368,6 +373,20 @@ class IR(object):
                     input_version = in_versions[input_name]
                     self.gradient_generators[input_name][input_version].append(
                         GradGenMeta(grad_op, i, g_input[input_index]))
+
+        # (3) for ops (e.g., Add, Sum, Sub) which have grdient outputs directly
+        # passed from inputs (not computed from gradient ops), we create an
+        # GradGenMeta with None grad_op and idx so that the gradient_generators
+        # knows where the gradients are coming from. This is needed for creating
+        # Sum op to accumulate the gradients from multiple parents.
+        for input_index, g in enumerate(g_input):
+            if not g or str(g) in [str(b) for b in locally_generated_blobs]:
+                continue
+            input_name = forward_op.input[input_index]
+            input_version = in_versions[input_name]
+            self.gradient_generators[input_name][input_version].append(
+                GradGenMeta(None, 0, g))
+
         # Finally, for the gradients specified in g_input, we update the
         # gradient frontier to reflect the input versions that the gradients
         # correspond to.
@@ -377,8 +396,73 @@ class IR(object):
                 input_version = in_versions[input_name]
                 self.gradient_frontier[input_name] = input_version
 
-    def DoGradientAccumulation(
-            self, fwd_op_idx, gradient_ops, g_output, g_input):
+    def _GetSumOpOutputName(self, generator, input_name):
+        sum_op_output = None
+        for grad_op, idx, _ in generator:
+            if grad_op and not sum_op_output:
+                sum_op_output = grad_op.output[idx]
+        return sum_op_output or input_name + '_grad'
+
+    def _MakeSumOp(self, input_name, input_version):
+        generator = self.gradient_generators[input_name][input_version]
+        sum_op_input = []
+        sum_op_output = self._GetSumOpOutputName(generator, input_name)
+        current = 0
+        for grad_op, idx, g in generator:
+            if grad_op:
+                grad_op.output[idx] = ('_' + grad_op.output[idx] +
+                                       '_autosplit_{}'.format(current))
+                sum_op_input.append(grad_op.output[idx])
+                current += 1
+            else:
+                if str(sum_op_output) == str(g):
+                    raise RuntimeError(
+                        'The gradient output of empty gradient op can not '
+                        'be the same as the normal name of the current '
+                        'input gradient.')
+                sum_op_input.append(g)
+
+        sum_op = CreateOperator("Sum", sum_op_input, sum_op_output)
+        for g in generator:
+            if g.grad_op:
+                if g.grad_op.HasField('device_option'):
+                    sum_op.device_option.CopyFrom(g.grad_op.device_option)
+                break
+
+        return sum_op
+
+    def _VerifyGradientGenerators(self, generator):
+        # (1) check if we are dealing with dense gradients. Sparse gradients
+        # do not support automatic aggregation yet.
+        if any(type(g[2]) is GradientSlice for g in generator):
+            raise RuntimeError(
+                'Automatic gradient aggregation does not work with sparse '
+                'gradients yet.')
+
+        # If for all the operators that used the operator, none or only one
+        # produced the gradient, then no additional sum needs to be carried
+        # out.
+        if len(generator) < 2:
+            return False
+
+        all_gradient_names = []
+        all_device_options = []
+        for g in generator:
+            if g.grad_op:
+                all_gradient_names.append(g.grad_op.output[g.idx])
+                all_device_options.append(g.grad_op.device_option)
+        # Check if all grad names are the same.
+        if len(set(all_gradient_names)) > 1:
+            raise RuntimeError('Unexpected behavior: not all grad output '
+                               'names are the same.')
+        # Check if all grad op device options are the same.
+        if len(all_device_options) >= 2 and not all(
+                d == all_device_options[0] for d in all_device_options[1:]):
+            raise RuntimeError('Unexpected behavior: not all grad ops'
+                               'have the same device option.')
+        return True
+
+    def DoGradientAccumulation(self, fwd_op_idx):
         """For each input name in the forward op, check if we will need to
         add gradient accumulation. If so, do gradient accumulation and return
         the list of gradient operators.
@@ -400,49 +484,59 @@ class IR(object):
         forward_op, in_versions, out_versions = self.ssa[fwd_op_idx]
         additional_sum_ops = []
         grad_map = {}
-        for i, input_name in enumerate(forward_op.input):
+        for i, input_name in enumerate(set(forward_op.input)):
             input_version = in_versions[input_name]
             input_usage = self.input_usages[input_name][input_version]
             if (len(input_usage) <= 1 or fwd_op_idx != input_usage[0]):
                 # We do not need to do gradient accumulation yet.
                 continue
+
             generator = self.gradient_generators[input_name][input_version]
-            # (1) check if we are dealing with dense gradients. Sparse gradients
-            # do not support automatic aggregation yet.
-            if any(type(g[2]) is GradientSlice for g in generator):
-                raise RuntimeError(
-                    'Automatic gradient aggregation does not work with sparse '
-                    'gradients yet.')
-            # If for all the operators that used the operator, none or only one
-            # produced the gradient, then no additional sum needs to be carried
-            # out.
-            if len(generator) < 2:
+            if not self._VerifyGradientGenerators(generator):
                 continue
-            # Check if all grad names are the same.
-            if len(set([g.grad_op.output[g.idx] for g in generator])) != 1:
-                raise RuntimeError('Unexpected behavior: not all grad output '
-                                   'names are the same.')
-            # Check if all grad op device options are the same.
-            all_device_options = [g.grad_op.device_option for g in generator]
-            if not all(d == all_device_options[0]
-                       for d in all_device_options[1:]):
-                raise RuntimeError('Unexpected behavior: not all grad ops'
-                                   'have the same device option.')
+
             # Finally, let's create the sum operator.
-            sum_op_input = []
-            sum_op_output = generator[0].grad_op.output[generator[0].idx]
-            current = 0
-            for grad_op, idx, _ in generator:
-                grad_op.output[idx] = ('_' + grad_op.output[idx] +
-                                       '_autosplit_{}'.format(current))
-                sum_op_input.append(grad_op.output[idx])
-                current += 1
-            sum_op = CreateOperator("Sum", sum_op_input, sum_op_output)
-            if generator[0][0].HasField('device_option'):
-                sum_op.device_option.CopyFrom(generator[0][0].device_option)
+            sum_op = self._MakeSumOp(input_name, input_version)
             additional_sum_ops.append(sum_op)
-            grad_map[input_name] = sum_op_output
+            grad_map[input_name] = sum_op.output[0]
         return additional_sum_ops, grad_map
+
+    def _GetInitGradients(self, ys):
+        input_to_grad = {}
+        gradient_ops = []
+        for y, g in ys.items():
+            if g is None:
+                autograd_op = CreateOperator(
+                    "ConstantFill", [y], [str(y) + "_autogen_grad"],
+                    value=1.0)
+                gradient_ops.append(autograd_op)
+                g = autograd_op.output[0]
+            # Since the C++ gradient registry does not have notion of
+            # NameScopes, we will convert all references to strings.
+            input_to_grad[str(y)] = (
+                GradientSlice(str(g[0]), str(g[1]))
+                if isinstance(g, GradientSlice) else str(g))
+
+        return input_to_grad, gradient_ops
+
+    def _GenerateGradientsForForwardOp(
+            self, forward_op_idx, input_to_grad):
+        new_input_to_grad = {}
+        gradient_ops = []
+        forward_op, in_versions, out_versions = self.ssa[forward_op_idx]
+        g_output = list(
+            input_to_grad.get(name, None) for name in forward_op.output)
+        if not all(g is None for g in g_output):
+            gradient_ops, g_input = GradientRegistry.GetGradientForOp(
+                forward_op, g_output)
+            # Checks if the gradient operators are legal
+            self.CheckGradientOperators(
+                forward_op_idx, gradient_ops, g_output, g_input)
+            # Record the gradient map to all_input_to_grad.
+            for name, grad in zip(forward_op.input, g_input):
+                new_input_to_grad[name] = grad
+
+        return new_input_to_grad, gradient_ops
 
     def GetBackwardPass(self, ys):
         """Gets the backward pass that computes the derivatives of given blobs.
@@ -455,27 +549,17 @@ class IR(object):
               take the corresponding blobs as their gradients; for all those
               that are None, we will auto-fill them with 1.
         """
-        all_input_to_grad = {}
-        all_gradient_ops = []
         if isinstance(ys, list):
             ys = dict((y, None) for y in ys)
         elif not isinstance(ys, dict):
             raise TypeError("ys should either be a list or a dict.")
-        for y, g in ys.items():
-            if g is None:
-                autograd_op = CreateOperator(
-                    "ConstantFill", [y], [str(y) + "_autogen_grad"],
-                    value=1.0)
-                all_gradient_ops.append(autograd_op)
-                g = autograd_op.output[0]
-            # Since the C++ gradient registry does not have notion of
-            # NameScopes, we will convert all references to strings.
-            all_input_to_grad[str(y)] = (
-                GradientSlice(str(g[0]), str(g[1]))
-                if isinstance(g, GradientSlice) else str(g))
-            # Set the gradient frontier with the initialized external
-            # gradients.
+
+        # Set the gradient frontier with the initialized external
+        # gradients.
+        for y, _ in ys.items():
             self.gradient_frontier[y] = self.frontier[y]
+
+        all_input_to_grad, all_gradient_ops = self._GetInitGradients(ys)
 
         # (2) Now, after having the virtual play above, we now play the ops
         # backwards, creating the gradients along the path. Note that although
@@ -483,29 +567,20 @@ class IR(object):
         # at a version older than current_versions because it is already been
         # overwritten.
         for forward_op_idx in reversed(range(len(self.ssa))):
-            forward_op, in_versions, out_versions = self.ssa[forward_op_idx]
-            g_output = list(
-                all_input_to_grad.get(name, None) for name in forward_op.output)
-            if all(g is None for g in g_output):
-                # this operator will not produce any gradients. Skipping.
-                continue
-            gradient_ops, g_input = GradientRegistry.GetGradientForOp(
-                forward_op, g_output)
-            # Checks if the gradient operators are legal
-            self.CheckGradientOperators(
-                forward_op_idx, gradient_ops, g_output, g_input)
-            # Record the gradient map to all_input_to_grad.
-            for name, grad in zip(forward_op.input, g_input):
-                all_input_to_grad[name] = grad
+            input_to_grad, gradient_ops = self._GenerateGradientsForForwardOp(
+                forward_op_idx, all_input_to_grad)
+            all_input_to_grad.update(input_to_grad)
+            all_gradient_ops += gradient_ops
+
             # If there are multiple use blobs, do gradient accumulation.
             additional_sum_ops, grad_map = self.DoGradientAccumulation(
-                forward_op_idx, gradient_ops, g_output, g_input)
+                forward_op_idx)
             # This line is so that if in an accumulation some of the operators
             # have not produced gradients, they still do not overwrite the
             # general all_input_to_grad map.
             all_input_to_grad.update(grad_map)
-            all_gradient_ops += gradient_ops
             all_gradient_ops += additional_sum_ops
+
         # (3) Post-processing.
         # After we have done computation for each op, we now have the gradient
         # operators ready. For the output map, we will convert everything to
@@ -535,14 +610,38 @@ class GradientRegistry(object):
 
     @classmethod
     def _GetGradientForOpCC(cls, op_def, g_output):
-        grad_defs_str, g_input = cc_GetGradientDefs(  # NOQA
+        # TODO(tulloch) - Propagate GradientWrapper up through the stack.
+        def from_untyped(grad):
+            if grad is None:
+                w = C.GradientWrapper()
+                assert w.is_empty()
+                return w
+            try:
+                (indices, values) = grad
+                w = C.GradientWrapper()
+                w.indices = indices
+                w.values = values
+                assert w.is_sparse()
+                return w
+            except ValueError:
+                w = C.GradientWrapper()
+                w.dense = grad
+                assert w.is_dense()
+                return w
+
+        g_output = [from_untyped(grad) for grad in g_output]
+        grad_defs_str, g_input = C.get_gradient_defs(
             op_def.SerializeToString(), g_output)
-        # C++ return tuple for sparse gradients, and we will convert it to
-        # namedtuple here.
-        g_input = [
-            (GradientSlice(*g) if type(g) is tuple else g)
-            for g in g_input
-        ]
+
+        def to_untyped(grad_wrapper):
+            if grad_wrapper.is_empty():
+                return None
+            if grad_wrapper.is_sparse():
+                return GradientSlice(grad_wrapper.indices, grad_wrapper.values)
+            assert grad_wrapper.is_dense()
+            return grad_wrapper.dense
+
+        g_input = [to_untyped(grad_wrapper) for grad_wrapper in g_input]
         grad_defs = []
         for grad_def_str in grad_defs_str:
             grad_def = caffe2_pb2.OperatorDef()
@@ -773,7 +872,7 @@ class Net(object):
             raise KeyError('Net does not define blob %s' % blob_name)
         return BlobReference(blob_name, self)
 
-    def Clone(self, name, blob_remap=None, op_id_mask=None):
+    def Clone(self, name, blob_remap=None, op_id_mask=None, remap_funcs=None):
         """
         Clone this net.
         Args:
@@ -782,6 +881,8 @@ class Net(object):
             op_id_mask:  optional list of operator indices to include in
                          the cloned net. If not provided, all ops are included.
         """
+        if remap_funcs is None:
+            remap_funcs = {}
         proto = self._net
         new_proto = caffe2_pb2.NetDef()
         new_proto.CopyFrom(proto)
@@ -804,6 +905,8 @@ class Net(object):
             new_op.CopyFrom(op)
             remap_list(new_op.input)
             remap_list(new_op.output)
+            if new_op.type in remap_funcs:
+                remap_funcs[new_op.type](new_op, (name + '/') if name else '')
             return new_op
 
         del new_proto.op[:]
@@ -812,7 +915,7 @@ class Net(object):
         remap_list(new_proto.external_output)
         return Net(new_proto)
 
-    def ClonePartial(self, name, inputs, outputs):
+    def ClonePartial(self, name, inputs, outputs, remap_funcs=None):
         """
         Clone this net, including only ops that are necessary in order to
         compute `outputs` given `inputs`. Return references to the cloned
@@ -865,7 +968,7 @@ class Net(object):
                 return prefix + blob_name
 
         blob_mapping = {b: remap(b) for b in blob_versions.keys()}
-        new_net = self.Clone(name, blob_mapping, used_op_ids)
+        new_net = self.Clone(name, blob_mapping, used_op_ids, remap_funcs)
         new_in = [
             blob_mapping[i] for i in input_names.keys()] + list(undef_blobs)
         new_out = [blob_mapping[o] for o in output_names]

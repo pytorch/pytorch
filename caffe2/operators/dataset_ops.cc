@@ -286,11 +286,17 @@ class ReadNextBatchOp : public Operator<CPUContext> {
     std::vector<TOffset> limits;
     std::vector<TOffset> sizes;
     std::vector<TOffset> offsets;
+    TLength lenZero = 0;
     sizes.resize(cursor->it.numOffsetFields());
     // gather length data
     lengths.resize(cursor->it.numLengthFields());
     for (int i = 0; i < lengths.size(); ++i) {
-      lengths[i] = Input(cursor->it.lengthField(i).id + 1).data<int>();
+      auto& a = Input(cursor->it.lengthField(i).id + 1);
+      if (a.size() > 0) {
+        lengths[i] = a.data<int>();
+      } else {
+        lengths[i] = &lenZero;
+      }
     }
     // gather size limits
     limits.assign(sizes.size(), std::numeric_limits<TOffset>::max());
@@ -347,11 +353,17 @@ class ComputeOffsetOp : public Operator<CPUContext> {
     std::vector<TOffset> limits;
     std::vector<TOffset> sizes;
     std::vector<TOffset> offsets;
+    TLength lenZero = 0;
     sizes.resize(cursor->it.numOffsetFields());
     // gather length data
     lengths.resize(cursor->it.numLengthFields());
     for (int i = 0; i < lengths.size(); ++i) {
-      lengths[i] = Input(cursor->it.lengthField(i).id + 1).data<int>();
+      auto& a = Input(cursor->it.lengthField(i).id + 1);
+      if (a.size() > 0) {
+        lengths[i] = a.data<int>();
+      } else {
+        lengths[i] = &lenZero;
+      }
     }
     // gather size limits
     limits.assign(sizes.size(), std::numeric_limits<TOffset>::max());

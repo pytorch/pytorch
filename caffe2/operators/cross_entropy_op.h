@@ -78,6 +78,33 @@ class SigmoidCrossEntropyWithLogitsGradientOp final : public Operator<Context> {
   bool RunOnDevice() override;
 };
 
+template <typename T, class Context>
+class CrossEntropyOp final : public Operator<Context> {
+ public:
+  USE_SIMPLE_CTOR_DTOR(CrossEntropyOp);
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  bool RunOnDevice() override;
+
+ protected:
+  // Input: X, label
+  // Output: Y
+  static constexpr T kLOG_THRESHOLD() { return 1e-20; }
+};
+
+template <typename T, class Context>
+class CrossEntropyGradientOp final
+    : public Operator<Context> {
+ public:
+  USE_SIMPLE_CTOR_DTOR(CrossEntropyGradientOp);
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  bool RunOnDevice() override;
+
+ protected:
+  // Input: X, label, dY
+  // Ouptut: dX. There is no gradient with respect to the label.
+  static constexpr T kLOG_THRESHOLD() { return 1e-20; }
+};
+
 }  // namespace caffe2
 
 #endif  // CAFFE2_OPERATORS_CROSS_ENTROPY_OP_H_

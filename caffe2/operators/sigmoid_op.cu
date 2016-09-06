@@ -32,8 +32,8 @@ struct SigmoidCUDAFunctor {
 
 struct SigmoidGradientCUDAFunctor {
   template <typename T>
-  inline void operator()(const int n, const T* y, const T* dy,
-                         T* dx, CUDAContext* device_context) {
+  inline void Run(const int n, const T* y, const T* dy,
+                  T* dx, CUDAContext* device_context) {
     SigmoidGradientKernel<T><<<CAFFE_GET_BLOCKS(n), CAFFE_CUDA_NUM_THREADS,
                             0, device_context->cuda_stream()>>>(n, y, dy, dx);
     return;
@@ -45,7 +45,8 @@ REGISTER_CUDA_OPERATOR(
     Sigmoid,
     UnaryElementwiseOp<TensorTypes<float>, CUDAContext, SigmoidCUDAFunctor>);
 REGISTER_CUDA_OPERATOR(
-    SigmoidGradient, BinaryElementwiseOp<TensorTypes<float>, CUDAContext,
-                                     SigmoidGradientCUDAFunctor>);
+    SigmoidGradient, BinaryElementwiseOp<
+        TensorTypes<float>, CUDAContext,
+        WithoutBroadcast<SigmoidGradientCUDAFunctor>>);
 }  // namespace
 }  // namespace caffe2

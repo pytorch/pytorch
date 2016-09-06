@@ -27,7 +27,7 @@ def NameScope(prefix, reset=False):
     assert isinstance(prefix, basestring), \
         "NameScope takes in a string as its argument."
     old_scope = NAMESCOPE
-    prefix = prefix + _NAMESCOPE_SEPARATOR
+    prefix = prefix + _NAMESCOPE_SEPARATOR if prefix is not '' else ''
     if reset:
         NAMESCOPE = prefix
     else:

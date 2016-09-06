@@ -11,6 +11,28 @@
 
 namespace caffe2 {
 
+template <class Context>
+class WallClockTimeOp final : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+
+  WallClockTimeOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws) {}
+
+  bool RunOnDevice() override {
+    int64_t nanoseconds = static_cast<long int>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::high_resolution_clock::now().time_since_epoch())
+            .count());
+
+    TensorCPU* output = OperatorBase::Output<TensorCPU>(0);
+    output->Resize();
+    *output->template mutable_data<int64_t>() = nanoseconds;
+
+    return true;
+  }
+};
+
 const char kPrintFileExtension[] = ".log";
 
 template <class Context>
@@ -45,6 +67,11 @@ class PrintOp final : public Operator<Context> {
   }
 
   bool RunOnDevice() override {
+    if (!OperatorBase::InputIsType<Tensor<Context>>(0) &&
+        !OperatorBase::InputIsType<TensorCPU>(0)) {
+      LOG(INFO) << "Non-tensor input.";
+      return true;
+    }
     // special-case empty tensors since they may have no meta()
     if (Input(0).size() == 0) {
       if (to_file_) {
@@ -55,20 +82,29 @@ class PrintOp final : public Operator<Context> {
       return true;
     }
 
+    using Types = TensorTypes<
+        float,
+        double,
+        int,
+        long,
+        bool,
+        char,
+        unsigned char,
+        std::string>;
+
     if (OperatorBase::InputIsType<TensorCPU>(0)) {
-      return DispatchHelper<
-          TensorTypes<float, double, int, long, bool, std::string>>::
-          call(this, OperatorBase::Input<TensorCPU>(0));
+      return DispatchHelper<Types>::call(
+          this, OperatorBase::Input<TensorCPU>(0));
     } else {
-      return DispatchHelper<TensorTypes<float, double, int, long, bool>>::call(
-          this, Input(0));
+      return DispatchHelper<Types>::call(this, Input(0));
     }
   }
 
  private:
   std::string MetaStr() {
     std::stringstream meta_stream;
-    meta_stream << "Tensor " << def().input(0) << " (";
+    meta_stream << "Tensor " << def().input(0) << " " << Input(0).meta().name()
+                << " (";
     for (const auto dim : Input(0).dims()) {
       meta_stream << dim << ",";
     }
@@ -333,11 +369,11 @@ class ScatterWeightedSumOp : public Operator<Context> {
   template <typename Index>
   bool DoRunWithType() {
     TIndex block_size = Input(0).size_from_dim(1);
-    return DispatchHelper<FixedSizes<1>, Index>::call(this, block_size);
+    return DispatchHelper<FixedValues<1>, Index>::call(this, block_size);
   }
 
   template <typename Index, int FixedSize>
-  bool DoRunWithSize() {
+  bool DoRunWithValue() {
     DCHECK_EQ(InputSize() % 2, 1);
     auto& X0 = Input(0);
     auto& weight0 = Input(1);
@@ -760,34 +796,76 @@ template <typename F, class Context>
 class ReshapeOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  USE_SIMPLE_CTOR_DTOR(ReshapeOp);
+  ReshapeOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
+        new_shape_(OperatorBase::GetRepeatedArgument<int64_t>("shape")) {}
 
   bool RunOnDevice() override {
-    return DispatchHelper<TensorTypes<int, long>>::call(this, Input(1));
+    if (InputSize() == 2) {
+      return DispatchHelper<TensorTypes<int, int64_t>>::call(this, Input(1));
+    }
+    CAFFE_ENFORCE(
+        OperatorBase::HasArgument("shape"), "Argument `shape` is missing.");
+    return this->template DoRunWithType<int64_t>();
   }
 
   template <typename T>
   bool DoRunWithType() {
     auto& input = Input(0);
-    auto& shape = Input(1);
-    auto* input_data = input.template data<F>();
-    auto input_size = input.size();
-    auto* output = Output(0);
-
     CAFFE_ENFORCE(input.ndim() >= 1, "DATA should be at least 1-D");
-    CAFFE_ENFORCE(shape.ndim() == 1, "Shape should be 1-D");
 
-    const T* shape_data = shape.template data<T>();
-    T newSize = 1;
-    std::vector<T> shapeVec;
-    for (T i = 0; i < shape.size(); ++i) {
-      newSize = newSize * shape_data[i];
-      shapeVec.push_back(shape_data[i]);
+    if (InputSize() == 2) {
+      CAFFE_ENFORCE(
+          !OperatorBase::HasArgument("shape"),
+          "New shape is specified by the input blob, do not pass in "
+          "the argument `shape`.");
+
+      auto& shape = Input(1);
+      CAFFE_ENFORCE(shape.ndim() == 1, "Shape should be 1-D");
+
+      const T* shape_data = shape.template data<T>();
+      new_shape_.assign(shape_data, shape_data + shape.size());
     }
 
-    auto oldSize = input.size_from_dim(0);
-    DCHECK_EQ(oldSize, newSize);
-    output->Resize(shapeVec);
+    // Checks if the new shape is valid and fills in the missing dimension
+    // specified by -1.
+    // NOTE: At most one dimension can be -1.
+    auto total_size = input.size_from_dim(0);
+    T size = 1;
+    int unknown_idx = -1;
+    for (int i = 0; i < new_shape_.size(); ++i) {
+      const auto dim = new_shape_[i];
+      if (dim == -1) {
+        CAFFE_ENFORCE(
+            unknown_idx == -1,
+            "Argument `shape` has more than one missing dimension.");
+        unknown_idx = i;
+      } else {
+        size *= dim;
+      }
+    }
+
+    if (unknown_idx != -1) {
+      CAFFE_ENFORCE(
+          total_size % size == 0,
+          "Argument `shape` does not agree with the input data.");
+      new_shape_[unknown_idx] = total_size / size;
+    } else {
+      CAFFE_ENFORCE(
+          total_size == size,
+          "Argument `shape` does not agree with the input data.");
+    }
+
+    // Write the original shape to the second output.
+    auto* old_shape = Output(1);
+    old_shape->Resize(input.ndim());
+    T* old_shape_data = old_shape->template mutable_data<T>();
+    for (int i = 0; i < input.ndim(); ++i) {
+      old_shape_data[i] = input.dim(i);
+    }
+
+    auto* output = Output(0);
+    output->Resize(new_shape_);
     context_.template CopyBytes<Context, Context>(
         input.nbytes(),
         input.raw_data(),
@@ -795,6 +873,9 @@ class ReshapeOp : public Operator<Context> {
 
     return true;
   }
+
+ private:
+  vector<int64_t> new_shape_;
 };
 
 // Takes a length vector, check that all lengths are equal and
@@ -856,21 +937,23 @@ class SqueezeOp : public Operator<Context> {
     auto* output = Output(0);
     output->CopyFrom(input, &context_);
 
-    if (dims_.empty()) {
-      return true;
-    }
-    CHECK_GE(input.dims().back() + 1, dims_.size())
-        << "Input needs at least " << (dims_.back() + 1) << " dimensions.";
-
+    CAFFE_ENFORCE(
+        input.dims().back() + 1 >= dims_.size(),
+        "Input needs at least ",
+        (dims_.back() + 1),
+        " dimensions.");
     int j = 0;
     std::vector<int> newDims;
     for (int i = 0; i < input.dims().size(); ++i) {
       if (j < dims_.size() && dims_[j] == i) {
-        CHECK_EQ(input.dims()[i], 1) << "Dimension " << i
-                                     << " of input must be 1.";
+        CAFFE_ENFORCE(
+            input.dims()[i] == 1, "Dimension ", i, " of input must be 1.");
         ++j;
         continue;
+      } else if (dims_.empty() && input.dim(i) == 1) {
+        continue;
       }
+
       newDims.push_back(input.dims().at(i));
     }
     output->Reshape(newDims);

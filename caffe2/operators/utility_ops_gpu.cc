@@ -10,6 +10,9 @@ REGISTER_CUDA_OPERATOR(Alias, AliasOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(ResizeLike, ResizeLikeOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(Sum, SumOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(WeightedSum, WeightedSumOp<float, CUDAContext>);
+// From whatever the current context, ensure the output is TensorCPU
+REGISTER_CUDA_OPERATOR(EnsureCPUOutput,
+                       CopyOp<CUDAContext, CPUContext, CUDAContext>);
 // CopyGPUToCPU and CopyCPUToGPU should both be carried out in a cuda context,
 // since gpu code will be involved.
 REGISTER_CUDA_OPERATOR(CopyGPUToCPU,
@@ -23,5 +26,3 @@ REGISTER_CUDA_OPERATOR(Copy,
 
 }  // namespace
 }  // namespace caffe2
-
-

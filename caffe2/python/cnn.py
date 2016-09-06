@@ -34,6 +34,9 @@ class CNNModelHelper(object):
     def Proto(self):
         return self.net.Proto()
 
+    def InitProto(self):
+        return self.param_init_net.Proto()
+
     def RunAllOnGPU(self, *args, **kwargs):
         self.param_init_net.RunAllOnGPU(*args, **kwargs)
         self.net.RunAllOnGPU(*args, **kwargs)
@@ -46,8 +49,6 @@ class CNNModelHelper(object):
     def ImageInput(
             self, blob_in, blob_out, **kwargs
     ):
-        assert len(blob_in) == 1
-        assert len(blob_out) == 2
         """Image Input."""
         if self.order == "NCHW":
             data, label = self.net.ImageInput(
@@ -479,7 +480,7 @@ class CNNModelHelper(object):
         if 'device_option' in kwargs:
             del kwargs['device_option']
         self.param_init_net.ConstantFill(
-            [], blob_out, shape=[1], value=0, dtype=core.DataType.INT32,
+            [], blob_out, shape=[1], value=0, dtype=core.DataType.INT64,
             device_option=core.DeviceOption(caffe2_pb2.CPU, 0),
             **kwargs)
         return self.net.Iter(blob_out, blob_out, **kwargs)
@@ -522,6 +523,119 @@ class CNNModelHelper(object):
         device_option.cuda_gpu_id = gpu_id
         return device_option
 
+    def LSTM(self, input_blob, seq_lengths, initial_states, dim_in, dim_out,
+             scope=None):
+        def s(name):
+            # We have to manually scope due to our internal/external blob
+            # relationships.
+            scope_name = scope or str(input_blob)
+            return "{}/{}".format(str(scope_name), str(name))
+
+        (hidden_input_blob, cell_input_blob) = initial_states
+
+        input_blob = self.FC(input_blob, s("i2h"),
+                             dim_in=dim_in, dim_out=4 * dim_out, axis=2)
+
+        step_net = CNNModelHelper(name="LSTM")
+        step_net.Proto().external_input.extend([
+            str(seq_lengths),
+            "input_t",
+            "timestep",
+            "hidden_t_prev",
+            "cell_t_prev",
+            s("gates_t_w"),
+            s("gates_t_b"),
+        ])
+        step_net.Proto().type = "simple"
+        step_net.Proto().external_output.extend(
+            ["hidden_t", "cell_t", s("gates_t")])
+        step_net.FC("hidden_t_prev", s("gates_t"),
+                    dim_in=dim_out, dim_out=4 * dim_out, axis=2)
+        step_net.net.Sum([s("gates_t"), "input_t"], [s("gates_t")])
+        step_net.net.LSTMUnit(
+            ["cell_t_prev", s("gates_t"), str(seq_lengths), "timestep"],
+            ["hidden_t", "cell_t"])
+
+        links = [
+            ("hidden_t_prev", s("hidden"), 0),
+            ("hidden_t", s("hidden"), 1),
+            ("cell_t_prev", s("cell"), 0),
+            ("cell_t", s("cell"), 1),
+            (s("gates_t"), s("gates"), 0),
+            ("input_t", str(input_blob), 0),
+        ]
+        link_internal, link_external, link_offset = zip(*links)
+
+        # # Initialize params for step net in the parent net
+        # for op in step_net.param_init_net.Proto().op:
+
+        # Set up the backward links
+        backward_ops, backward_mapping = core.GradientRegistry.GetBackwardPass(
+            step_net.Proto().op,
+            {"hidden_t": "hidden_t_grad", "cell_t": "cell_t_grad"})
+        backward_mapping = {str(k): str(v) for k, v
+                            in backward_mapping.items()}
+        backward_step_net = core.Net("LSTMBackward")
+        del backward_step_net.Proto().op[:]
+        backward_step_net.Proto().op.extend(backward_ops)
+
+        backward_links = [
+            ("hidden_t_prev_grad", s("hidden_grad"), 0),
+            ("hidden_t_grad", s("hidden_grad"), 1),
+            ("cell_t_prev_grad", s("cell_grad"), 0),
+            ("cell_t_grad", s("cell_grad"), 1),
+            (s("gates_t_grad"), s("gates_grad"), 0),
+        ]
+
+        backward_link_internal, backward_link_external, \
+            backward_link_offset = zip(*backward_links)
+
+        backward_step_net.Proto().external_input.extend(
+            ["hidden_t_grad", "cell_t_grad"])
+        backward_step_net.Proto().external_input.extend(
+            step_net.Proto().external_input)
+        backward_step_net.Proto().external_input.extend(
+            step_net.Proto().external_output)
+
+        output, _, _, hidden_state, cell_state = self.net.RecurrentNetwork(
+            [input_blob, seq_lengths,
+                s("gates_t_w"), s("gates_t_b"),
+                hidden_input_blob, cell_input_blob],
+            [s("output"), s("hidden"), s("cell"),
+                s("hidden_output"), s("cell_output")],
+            param=[str(p) for p in step_net.params],
+            param_gradient=[backward_mapping[str(p)] for p in step_net.params],
+            alias_src=[s("hidden"), s("hidden"), s("cell")],
+            alias_dst=[s("output"), s("hidden_output"), s("cell_output")],
+            alias_offset=[1, -1, -1],
+            recurrent_states=[s("hidden"), s("cell")],
+            recurrent_inputs=[str(hidden_input_blob), str(cell_input_blob)],
+            recurrent_sizes=[dim_out, dim_out],
+            link_internal=link_internal,
+            link_external=link_external,
+            link_offset=link_offset,
+            backward_link_internal=backward_link_internal,
+            backward_link_external=backward_link_external,
+            backward_link_offset=backward_link_offset,
+            backward_alias_src=[s("gates_grad")],
+            backward_alias_dst=[str(input_blob) + "_grad"],
+            backward_alias_offset=[0],
+            scratch=[s("gates")],
+            backward_scratch=[s("gates_grad")],
+            scratch_sizes=[4 * dim_out],
+            step_net=str(step_net.Proto()),
+            backward_step_net=str(backward_step_net.Proto()),
+            timestep="timestep")
+        self.param_init_net.Proto().op.extend(
+            step_net.param_init_net.Proto().op)
+        self.params += step_net.params
+        for p in step_net.params:
+            if str(p) in backward_mapping:
+                self.param_to_grad[p] = backward_mapping[str(p)]
+        self.weights += step_net.weights
+        self.biases += step_net.biases
+        return output, hidden_state, cell_state
+
     def __getattr__(self, op_type):
         """Catch-all for all other operators, mostly those without params."""
         if not core.IsOperator(op_type):
@@ -531,6 +645,7 @@ class CNNModelHelper(object):
         # known_working_ops are operators that do not need special care.
         known_working_ops = [
             "Accuracy",
+            "Adam",
             "AveragedLoss",
             "Cast",
             "LabelCrossEntropy",
@@ -541,6 +656,7 @@ class CNNModelHelper(object):
             "Softmax",
             "StopGradient",
             "Summarize",
+            "Tanh",
             "WeightedSum",
         ]
         if op_type not in known_working_ops:

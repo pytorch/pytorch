@@ -13,14 +13,17 @@ class SparseToDenseMaskOp : public Operator<CPUContext> {
       : Operator<CPUContext>(operator_def, ws) {
     std::vector<int> mask = GetRepeatedArgument<int>("mask");
     featuresCount_ = mask.size();
+    CAFFE_ENFORCE(!mask.empty(), "mask can't be empty");
     auto biggest = *std::max_element(mask.begin(), mask.end());
     dense_.assign(std::min(kMaxDenseSize, biggest + 1), -1);
     for (int i = 0; i < mask.size(); i++) {
       int id = mask[i];
       CAFFE_ENFORCE(id >= 0, "Only positive IDs are allowed.");
       if (id >= kMaxDenseSize) {
+        CAFFE_ENFORCE(sparse_.count(id) == 0, "Duplicated id: ", id);
         sparse_[id] = i;
       } else {
+        CAFFE_ENFORCE(dense_[id] == -1, "Duplicated id: ", id);
         dense_[id] = i;
       }
     }

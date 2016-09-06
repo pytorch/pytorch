@@ -219,7 +219,7 @@ class TestDatasetOps(TestCase):
         process_net.Add([line_no, const_one], [line_no])
         field = batch.floats.keys.get()
         process_net.Print(field, [])
-        process_net.Add([field, line_no], field, broadcast=1)
+        process_net.Add([field, line_no], field, broadcast=1, axis=0)
 
         """ Lets create a second dataset and append to it. """
         ds2 = dataset.Dataset(schema, name='dataset2')
@@ -297,7 +297,7 @@ class TestDatasetOps(TestCase):
         read_next_net = core.Net('read_next')
 
         reader = ds.random_reader(read_init_net)
-        reader.sortAndShuffle(read_init_net, 'int_lists:lengths', 1, 2)
+        reader.sort_and_shuffle(read_init_net, 'int_lists:lengths', 1, 2)
         reader.computeoffset(read_init_net)
 
         should_continue, batch = reader.read_record(read_next_net)

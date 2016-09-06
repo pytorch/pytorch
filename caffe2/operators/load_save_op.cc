@@ -16,10 +16,10 @@ REGISTER_CPU_OPERATOR(Snapshot, SnapshotOp<CPUContext>);
 
 OPERATOR_SCHEMA(Load)
     .NumInputs(0, 1)
-    .NumOutputs(1, INT_MAX)
+    .NumOutputs(0, INT_MAX)
     .SetDoc(R"DOC(
 The Load operator loads a set of serialized blobs from a db. It takes no
-input and [1, infinity) number of outputs, using the db keys to match the db
+input and [0, infinity) number of outputs, using the db keys to match the db
 entries with the outputs.
 
 If an input is passed, then it is assumed that that input blob is a

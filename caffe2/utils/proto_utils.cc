@@ -22,8 +22,8 @@ namespace caffe2 {
 bool ReadStringFromFile(const char* filename, string* str) {
   std::ifstream ifs(filename, std::ios::in);
   if (!ifs) {
-    LOG(ERROR) << "File cannot be opened: " << filename
-                    << " error: " << ifs.rdstate();
+    VLOG(1) << "File cannot be opened: " << filename
+            << " error: " << ifs.rdstate();
     return false;
   }
   ifs.seekg(0, std::ios::end);
@@ -37,8 +37,8 @@ bool ReadStringFromFile(const char* filename, string* str) {
 bool WriteStringToFile(const string& str, const char* filename) {
   std::ofstream ofs(filename, std::ios::out | std::ios::trunc);
   if (!ofs.is_open()) {
-    LOG(ERROR) << "File cannot be created: " << filename
-                    << " error: " << ofs.rdstate();
+    VLOG(1) << "File cannot be created: " << filename
+            << " error: " << ofs.rdstate();
     return false;
   }
   ofs << str;

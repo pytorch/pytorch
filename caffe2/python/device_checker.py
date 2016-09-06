@@ -36,7 +36,7 @@ class DeviceChecker(object):
         for i, device_option in enumerate(self._device_options):
             for i, arr in enumerate(inputs):
                 workspace.FeedBlob(
-                    op.input[i], arr,
+                    op.input[i], np.array(arr),
                     input_device_options.get(op.input[i], device_option))
             op.device_option.CopyFrom(device_option)
             workspace.RunOperatorOnce(op)
@@ -55,7 +55,7 @@ class DeviceChecker(object):
                                    atol=self._threshold, rtol=self._threshold):
                     print('Failure in checking device option {}'
                           ' and output {}. The outputs are:'
-                          .format(i, op.output[j]))
+                          .format(i, op.output[outputs_to_check[j]]))
                     print(x.flatten())
                     print(y.flatten())
                     print(np.max(np.abs(x - y)))

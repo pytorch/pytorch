@@ -13,12 +13,11 @@ namespace caffe2 {
 constexpr cudnnBatchNormMode_t kSpatialBNMode = CUDNN_BATCHNORM_SPATIAL;
 
 template <typename T>
-class CudnnSpatialBNOp final : public SpatialBNOpBase<CUDAContext> {
+class CudnnSpatialBNOp final : public SpatialBNOp<CUDAContext> {
  public:
   USE_OPERATOR_FUNCTIONS(CUDAContext);
   CudnnSpatialBNOp(const OperatorDef& operator_def, Workspace* ws)
-      : SpatialBNOpBase<CUDAContext>(operator_def, ws),
-        cudnn_wrapper_(&context_) {
+      : SpatialBNOp<CUDAContext>(operator_def, ws), cudnn_wrapper_(&context_) {
     CUDNN_CHECK(cudnnCreateTensorDescriptor(&data_desc_));
     CUDNN_CHECK(cudnnCreateTensorDescriptor(&bn_param_desc_));
     if (epsilon_ < CUDNN_BN_MIN_EPSILON) {
@@ -43,14 +42,12 @@ class CudnnSpatialBNOp final : public SpatialBNOpBase<CUDAContext> {
   vector<TIndex> cudnn_input_dims_;
 };
 
-
 template <typename T>
-class CudnnSpatialBNGradientOp final
-    : public SpatialBNGradientOpBase<CUDAContext> {
+class CudnnSpatialBNGradientOp final : public SpatialBNGradientOp<CUDAContext> {
  public:
   USE_OPERATOR_FUNCTIONS(CUDAContext);
   CudnnSpatialBNGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : SpatialBNGradientOpBase<CUDAContext>(operator_def, ws),
+      : SpatialBNGradientOp<CUDAContext>(operator_def, ws),
         cudnn_wrapper_(&context_) {
     CUDNN_CHECK(cudnnCreateTensorDescriptor(&data_desc_));
     CUDNN_CHECK(cudnnCreateTensorDescriptor(&bn_param_desc_));
@@ -111,21 +108,28 @@ bool CudnnSpatialBNOp<T>::RunOnDevice() {
   if (is_test_) {
     // Run inference mode.
     const auto& est_mean = Input(EST_MEAN);
-    const auto& est_inv_var = Input(EST_INV_VAR);
+    const auto& est_var = Input(EST_VAR);
     DCHECK_EQ(est_mean.ndim(), 1);
-    DCHECK_EQ(est_inv_var.ndim(), 1);
+    DCHECK_EQ(est_var.ndim(), 1);
     DCHECK_EQ(est_mean.dim32(0), C);
-    DCHECK_EQ(est_inv_var.dim32(0), C);
+    DCHECK_EQ(est_var.dim32(0), C);
 
     auto* Y = Output(OUTPUT);
     Y->ResizeLike(X);
     CUDNN_CHECK(cudnnBatchNormalizationForwardInference(
-        cudnn_wrapper_.inline_cudnn_handle(), kSpatialBNMode,
-        cudnnTypeWrapper<T>::kOne(), cudnnTypeWrapper<T>::kZero(),
-        data_desc_, X.template data<T>(),
-        data_desc_, Y->template mutable_data<T>(),
-        bn_param_desc_, scale.template data<T>(), bias.template data<T>(),
-        est_mean.template data<T>(), est_inv_var.template data<T>(),
+        cudnn_wrapper_.inline_cudnn_handle(),
+        kSpatialBNMode,
+        cudnnTypeWrapper<T>::kOne(),
+        cudnnTypeWrapper<T>::kZero(),
+        data_desc_,
+        X.template data<T>(),
+        data_desc_,
+        Y->template mutable_data<T>(),
+        bn_param_desc_,
+        scale.template data<T>(),
+        bias.template data<T>(),
+        est_mean.template data<T>(),
+        est_var.template data<T>(),
         epsilon_));
   } else {
     // Run training mode.
@@ -134,48 +138,41 @@ bool CudnnSpatialBNOp<T>::RunOnDevice() {
     // obtain running mean and running inv var, and see if we need to
     // initialize them.
     auto* running_mean = Output(RUNNING_MEAN);
-    auto* running_inv_var = Output(RUNNING_INV_VAR);
-    double this_momentum;
+    auto* running_var = Output(RUNNING_VAR);
+    double this_factor = 1. - momentum_;
     T* running_mean_data = nullptr;
-    T* running_inv_var_data = nullptr;
-    if (running_mean->size() <= 0) {
+    T* running_var_data = nullptr;
+    if (!running_mean->size()) {
       // If the input mean and var are not initialized yet, this is the first
       // run and we will initialize the storage.
       VLOG(1) << "Initializing running mean and var.";
       // Need to do initialization
       running_mean->Resize(C);
-      running_inv_var->Resize(C);
+      running_var->Resize(C);
       running_mean_data = running_mean->template mutable_data<T>();
-      running_inv_var_data = running_inv_var->template mutable_data<T>();
+      running_var_data = running_var->template mutable_data<T>();
       // In principle, setting this_momentum to 1 will wipe existing data.
       // This has a caveat that if cudnn does not deal with 0*NaN cases we
       // will be having an issue. Thus we choose a safe path by explicitly
       // setting zero.
       math::Set<T, CUDAContext>(C, 0, running_mean_data, &context_);
-      math::Set<T, CUDAContext>(C, 0, running_inv_var_data, &context_);
-      // set this_momentum to 1 because this is initialization.
-      this_momentum = 1;
+      math::Set<T, CUDAContext>(C, 0, running_var_data, &context_);
     } else {
       // Does not need to do initialization.
       DCHECK_EQ(running_mean->ndim(), 1);
-      DCHECK_EQ(running_inv_var->ndim(), 1);
+      DCHECK_EQ(running_var->ndim(), 1);
       DCHECK_EQ(running_mean->dim32(0), C);
-      DCHECK_EQ(running_inv_var->dim32(0), C);
+      DCHECK_EQ(running_var->dim32(0), C);
       running_mean_data = running_mean->template mutable_data<T>();
-      running_inv_var_data = running_inv_var->template mutable_data<T>();
-      this_momentum = momentum_;
+      running_var_data = running_var->template mutable_data<T>();
     }
-    // If specified, save the mean and inv var results.
-    void* save_mean_data = nullptr;
-    void* save_inv_var_data = nullptr;
-    if (OutputSize() == 5) {
-      auto* save_mean = Output(SAVED_MEAN);
-      auto* save_inv_var = Output(SAVED_INV_VAR);
-      save_mean->Resize(C);
-      save_inv_var->Resize(C);
-      save_mean_data = save_mean->template mutable_data<T>();
-      save_inv_var_data = save_inv_var->template mutable_data<T>();
-    }
+    // Save the mean and inv var results.
+    auto* save_mean = Output(SAVED_MEAN);
+    auto* save_var = Output(SAVED_INV_VAR);
+    save_mean->Resize(C);
+    save_var->Resize(C);
+    void* save_mean_data = save_mean->template mutable_data<T>();
+    void* save_var_data = save_var->template mutable_data<T>();
 
     CUDNN_CHECK(cudnnBatchNormalizationForwardTraining(
         cudnn_wrapper_.inline_cudnn_handle(),
@@ -189,12 +186,12 @@ bool CudnnSpatialBNOp<T>::RunOnDevice() {
         bn_param_desc_,
         scale.template data<T>(),
         bias.template data<T>(),
-        this_momentum,
+        this_factor,
         running_mean_data,
-        running_inv_var_data,
+        running_var_data,
         epsilon_,
         save_mean_data,
-        save_inv_var_data));
+        save_var_data));
   }
   return true;
 }
@@ -230,24 +227,31 @@ bool CudnnSpatialBNGradientOp<T>::RunOnDevice() {
   dScale->ResizeLike(scale);
   dBias->ResizeLike(scale);
 
-  const void* saved_mean_data = nullptr;
-  const void* saved_inv_var_data = nullptr;
-  if (InputSize() == 5) {
-    const auto& saved_mean = Input(SAVED_MEAN);
-    const auto& saved_inv_var = Input(SAVED_INV_VAR);
-    saved_mean_data = saved_mean.template data<T>();
-    saved_inv_var_data = saved_inv_var.template data<T>();
-  }
+  const auto& saved_mean = Input(SAVED_MEAN);
+  const auto& saved_var = Input(SAVED_INV_VAR);
+  const void* saved_mean_data = saved_mean.template data<T>();
+  const void* saved_var_data = saved_var.template data<T>();
 
   CUDNN_CHECK(cudnnBatchNormalizationBackward(
-      cudnn_wrapper_.inline_cudnn_handle(), kSpatialBNMode,
-      cudnnTypeWrapper<T>::kOne(), cudnnTypeWrapper<T>::kZero(),
-      cudnnTypeWrapper<T>::kOne(), cudnnTypeWrapper<T>::kZero(),
-      data_desc_, X.template data<T>(), data_desc_, dY.template data<T>(),
-      data_desc_, dX->template mutable_data<T>(),
-      bn_param_desc_, scale.template data<T>(),
-      dScale->template mutable_data<T>(), dBias->template mutable_data<T>(),
-      epsilon_, saved_mean_data, saved_inv_var_data));
+      cudnn_wrapper_.inline_cudnn_handle(),
+      kSpatialBNMode,
+      cudnnTypeWrapper<T>::kOne(),
+      cudnnTypeWrapper<T>::kZero(),
+      cudnnTypeWrapper<T>::kOne(),
+      cudnnTypeWrapper<T>::kZero(),
+      data_desc_,
+      X.template data<T>(),
+      data_desc_,
+      dY.template data<T>(),
+      data_desc_,
+      dX->template mutable_data<T>(),
+      bn_param_desc_,
+      scale.template data<T>(),
+      dScale->template mutable_data<T>(),
+      dBias->template mutable_data<T>(),
+      epsilon_,
+      saved_mean_data,
+      saved_var_data));
   return true;
 }
 

@@ -17,8 +17,6 @@
 // A global boolean variable to control whether we free memory when a Tensor
 // is shrinked to a smaller size. As a result, a Tensor is always going to
 // keep the memory allocated for its maximum capacity reshaped to so far.
-// This is disabled by default unless explicitly enabled by the commandline
-// argument.
 CAFFE2_DECLARE_bool(caffe2_keep_on_shrink);
 
 namespace caffe2 {
@@ -182,6 +180,22 @@ class Tensor {
     }
     dims_ = newDims;
     size_ = newSize;
+  }
+
+  /**
+   * @brief Shrinks the outer-most dimension to given size, keeping the data.
+   *
+   * This method guarantees that no re-allocations are carried out, which means
+   * that the extra capacity after the end of the shurnk tensor is maintained.
+   */
+  void Shrink(TIndex outer_dim) {
+    CAFFE_ENFORCE(dims_.size() >= 1, "Tensor must be at least 1D");
+    CAFFE_ENFORCE(
+        outer_dim <= dims_[0],
+        "New outer dimension must be smaller than current.");
+    dims_[0] = outer_dim;
+    size_ = std::accumulate(
+        dims_.begin(), dims_.end(), 1, std::multiplies<TIndex>());
   }
 
   /**
@@ -524,8 +538,9 @@ class Tensor {
   // In case of chunk load we store how much data was already loaded
 
  private:
-  template <typename T,
-            typename=typename std::enable_if<std::is_integral<T>::value>::type>
+  template <
+      typename T,
+      typename = typename std::enable_if<std::is_integral<T>::value>::type>
   bool SetDims(const vector<T>& src) {
     auto old_size = size_;
     dims_.resize(src.size());
@@ -534,6 +549,13 @@ class Tensor {
       size_ *= src[i];
       dims_[i] = src[i];
     }
+    return size_ != old_size;
+  }
+
+  bool SetDims() {
+    auto old_size = size_;
+    dims_.resize(0);
+    size_ = 1;
     return size_ != old_size;
   }
 

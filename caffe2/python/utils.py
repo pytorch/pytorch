@@ -39,6 +39,10 @@ def MakeArgument(key, value):
     """Makes an argument based on the value type."""
     argument = caffe2_pb2.Argument()
     argument.name = key
+
+    if isinstance(value, np.ndarray):
+        value = value.flatten().tolist()
+
     if type(value) is float:
         argument.f = value
     elif type(value) is int or type(value) is bool or type(value) is long:
@@ -50,9 +54,9 @@ def MakeArgument(key, value):
                       else value.encode('utf-8'))
     elif isinstance(value, Message):
         argument.s = value.SerializeToString()
-    elif all(type(v) is float for v in value):
+    elif all(type(v) in [float, np.float_] for v in value):
         argument.floats.extend(value)
-    elif all(any(type(v) is t for t in [int, bool, long]) for v in value):
+    elif all(type(v) in [int, bool, long, np.int_] for v in value):
         argument.ints.extend(value)
     elif all(isinstance(v, basestring) for v in value):
         argument.strings.extend([
@@ -106,3 +110,10 @@ def GetContentFromProtoString(s, function_map):
             continue
     else:
         raise DecodeError("Cannot find a fit protobuffer class.")
+
+
+def ConvertProtoToBinary(proto_class, filename, out_filename):
+    """Convert a text file of the given protobuf class to binary."""
+    proto = TryReadProtoWithClass(proto_class, open(filename).read())
+    with open(out_filename, 'w') as fid:
+        fid.write(proto.SerializeToString())

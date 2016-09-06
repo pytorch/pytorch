@@ -25,13 +25,13 @@ def gpu_device(i):
     return device_option
 
 
-def benchmark(net, warmups=5, iters=100):
+def benchmark(ws, net, warmups=5, iters=100):
     for _ in range(warmups):
-        workspace.RunNetOnce(net.Proto().SerializeToString())
+        ws.run(net)
     plan = core.Plan("plan")
     plan.AddStep(core.ExecutionStep("test-step", net, iters))
     before = time.time()
-    workspace.RunPlan(plan.Proto().SerializeToString())
+    ws.run(plan)
     after = time.time()
     print("Timing network, time taken per-iteration: {:.6f}ms".format((
         after - before) / float(iters) * 1000.0))
@@ -143,12 +143,10 @@ class NCCLOpsTest(hu.HypothesisTestCase):
                 net.Sum([inputs[i], extra_inputs[i]], [inputs[i]],
                         device_option=gpu_device(i))
         net.NCCLReduce(inputs, [inputs[0]], device_option=gpu_device(0))
-        workspace.RunNetOnce(net)
+        self.ws.run(net)
         np.testing.assert_array_equal(
-            workspace.FetchBlob(inputs[0]),
+            self.ws.blobs[inputs[0]].fetch(),
             np.full(shape=(m,), fill_value=iters * n, dtype=np.float32))
-
-
 
     @unittest.skipIf(not os.environ.get("CAFFE2_BENCHMARK"), "Benchmark")
     def test_timings(self):
@@ -164,12 +162,11 @@ class NCCLOpsTest(hu.HypothesisTestCase):
                 net.NCCLAllreduce(inputs, outputs)
                 net.RunAllOnGPU()
                 for i in range(n):
-                    workspace.FeedBlob(inputs[i], xs[i],
-                                       gpu_device(i).SerializeToString())
-                workspace.RunNetOnce(net.Proto().SerializeToString())
-                net_time = benchmark(net)
+                    self.ws.create_blob(inputs[i]).feed(xs[i], gpu_device(i))
+                self.ws.run(net)
+                net_time = benchmark(self.ws, net)
                 vanilla = core.Net("vanilla")
                 muji.Allreduce(vanilla, inputs)
-                vanilla_time = benchmark(vanilla)
+                vanilla_time = benchmark(self.ws, vanilla)
                 print("Speedup for NCCL: {:.2f}".format(
                     vanilla_time / net_time))

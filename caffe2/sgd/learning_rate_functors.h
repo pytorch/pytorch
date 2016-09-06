@@ -12,14 +12,16 @@ template <typename T>
 class LearningRateFunctor {
  public:
   virtual ~LearningRateFunctor() {}
-  virtual T operator()(const int iter) const = 0;
+  virtual T operator()(const int64_t iter) const = 0;
 };
 
 // Fixed: not changing the learning rate at all.
 template <typename T>
 class FixedLearningRate : public LearningRateFunctor<T> {
  public:
-  T operator()(const int iter) const override { return 1.; }
+  T operator()(const int64_t iter) const override {
+    return 1.;
+  }
 };
 
 // Step: return gamma ^ (floor(iter / step))
@@ -28,7 +30,7 @@ class StepLearningRate : public LearningRateFunctor<T> {
  public:
   StepLearningRate(const int stepsize, const T gamma)
       : stepsize_(stepsize), gamma_(gamma) {}
-  T operator()(const int iter) const override {
+  T operator()(const int64_t iter) const override {
     return std::pow(gamma_, static_cast<T>(iter / stepsize_));
   }
 
@@ -41,7 +43,7 @@ template <typename T>
 class ExpLearningRate : public LearningRateFunctor<T> {
  public:
   explicit ExpLearningRate(const T gamma) : gamma_(gamma) {}
-  T operator()(const int iter) const override {
+  T operator()(const int64_t iter) const override {
     return std::pow(gamma_, static_cast<T>(iter));
   }
 
@@ -54,8 +56,8 @@ class InvLearningRate : public LearningRateFunctor<T> {
  public:
   InvLearningRate(const T gamma, const T power)
       : gamma_(gamma), power_(power) {}
-  T operator()(const int iter) const override {
-      return std::pow(T(1) + gamma_ * iter, -power_);
+  T operator()(const int64_t iter) const override {
+    return std::pow(T(1) + gamma_ * iter, -power_);
   }
   T gamma_;
   T power_;

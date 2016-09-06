@@ -219,3 +219,70 @@ class TestSequenceOps(hu.HypothesisTestCase):
             reference=op_ref,
             output_to_grad='reversed_data',
             grad_reference=op_grad_ref)
+
+    @given(data=hu.tensor(min_dim=1, max_dim=3, dtype=np.float32,
+                          elements=st.floats(min_value=-np.inf,
+                                             max_value=np.inf),
+                          min_value=10, max_value=10),
+           indices=st.lists(st.integers(min_value=0, max_value=9),
+                            min_size=0,
+                            max_size=10),
+           **hu.gcs_cpu_only)
+    def test_remove_data_blocks(self, data, indices, gc, dc):
+        indices = np.array(indices)
+
+        op = core.CreateOperator(
+            "RemoveDataBlocks",
+            ["data", "indices"],
+            ["shrunk_data"])
+
+        def op_ref(data, indices):
+            unique_indices = np.unique(indices)
+            sorted_indices = np.sort(unique_indices)
+            shrunk_data = np.delete(data, sorted_indices, axis=0)
+            return (shrunk_data,)
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[data, indices],
+            reference=op_ref)
+
+    @given(elements=st.lists(st.integers(min_value=0, max_value=9),
+                             min_size=0,
+                             max_size=10),
+           **hu.gcs_cpu_only)
+    def test_find_duplicate_elements(self, elements, gc, dc):
+        mapping = {
+            0: "a",
+            1: "b",
+            2: "c",
+            3: "d",
+            4: "e",
+            5: "f",
+            6: "g",
+            7: "h",
+            8: "i",
+            9: "j"}
+        data = np.array([mapping[e] for e in elements], dtype='|S')
+
+        op = core.CreateOperator(
+            "FindDuplicateElements",
+            ["data"],
+            ["indices"])
+
+        def op_ref(data):
+            unique_data = []
+            indices = []
+            for i, e in enumerate(data):
+                if e in unique_data:
+                    indices.append(i)
+                else:
+                    unique_data.append(e)
+            return (np.array(indices, dtype=np.int64),)
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[data],
+            reference=op_ref)

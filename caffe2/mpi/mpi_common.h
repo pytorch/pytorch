@@ -1,8 +1,8 @@
 #ifndef CAFFE2_MPI_MPI_COMMON_H_
 #define CAFFE2_MPI_MPI_COMMON_H_
 
-#include <mutex>
 #include <mpi.h>
+#include <mutex>
 
 #include "caffe2/core/logging.h"
 
@@ -31,13 +31,18 @@ MPI_DATATYPE_WRAPPER(double, MPI_DOUBLE)
 // For all Caffe MPI calls, we will wrap it inside an MPI mutex lock guard.
 std::mutex& MPIMutex();
 
-#define MPI_CHECK(condition)                                                   \
-  do {                                                                         \
-    std::lock_guard<std::mutex> guard(::caffe2::MPIMutex());                   \
-    int error = (condition);                                                   \
-    CHECK_EQ(error, MPI_SUCCESS)                                         \
-        << "Caffe2 MPI Error at: " << __FILE__ << ":" << __LINE__ << ": "      \
-        << error;                                                              \
+#define MPI_CHECK(condition)                                 \
+  do {                                                       \
+    std::lock_guard<std::mutex> guard(::caffe2::MPIMutex()); \
+    int error = (condition);                                 \
+    CAFFE_ENFORCE(                                           \
+        error == MPI_SUCCESS,                                \
+        "Caffe2 MPI Error at: ",                             \
+        __FILE__,                                            \
+        ":",                                                 \
+        __LINE__,                                            \
+        ": ",                                                \
+        error);                                              \
   } while (0)
 
 /**
@@ -91,6 +96,15 @@ class MPICommonWorldWrapper {
     MPI_CHECK(MPI_Comm_size(comm_, &size_));
     MPI_CHECK(MPI_Comm_rank(comm_, &rank_));
   }
+
+  ~MPICommonWorldWrapper() {
+    int ret;
+    MPI_CHECK(MPI_Finalized(&ret));
+    if (!ret) {
+      MPI_Comm_free(&comm_);
+    }
+  }
+
   /**
    * @brief Returns the common world held by the wrapper.
    */
@@ -109,9 +123,6 @@ class MPICommonWorldWrapper {
   inline int rank() const {
     return rank_;
   }
-  ~MPICommonWorldWrapper() {
-    MPI_Comm_free(&comm_);
-  }
 
  private:
   MPI_Comm comm_;
@@ -119,6 +130,25 @@ class MPICommonWorldWrapper {
   int rank_;
 };
 
+/**
+ * A function used to perform peer setup so one does not need to use
+ * mpirun / mpiexec to run the binary. Note that if you use mpirun or mpiexec
+ * to set up the common world, do not use this function - MPI_Init would have
+ * already set that up.
+ *
+ * This also assumes that you have a common path (like NFS) that multiple
+ * instances can read from.
+ *
+ * Inputs:
+ *   replicas (int): the number of replicas that mpi will run with.
+ *   role (string): the role of this process, "server" or "client".
+ *   job_path (string): a file name that the server will write its port into
+ *       and the clients will read the server's port from.
+ */
+void MPISetupPeers(
+    const int replicas,
+    const string& role,
+    const string& job_path);
 }  // namespace caffe2
 
 #endif  // CAFFE2_MPI_MPI_COMMON_H_

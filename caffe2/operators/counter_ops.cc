@@ -3,11 +3,13 @@
 namespace caffe2 {
 namespace {
 
-REGISTER_CPU_OPERATOR(CreateCounter, CreateCounterOp<int64_t>);
-REGISTER_CPU_OPERATOR(ResetCounter, ResetCounterOp<int64_t>);
-REGISTER_CPU_OPERATOR(CountDown, CountDownOp<int64_t>);
-REGISTER_CPU_OPERATOR(CountUp, CountUpOp<int64_t>);
-REGISTER_CPU_OPERATOR(RetrieveCount, RetrieveCountOp<int64_t>);
+// TODO(jiayq): deprecate these ops & consolidate them with IterOp/AtomicIterOp
+
+REGISTER_CPU_OPERATOR(CreateCounter, CreateCounterOp<int64_t, CPUContext>);
+REGISTER_CPU_OPERATOR(ResetCounter, ResetCounterOp<int64_t, CPUContext>);
+REGISTER_CPU_OPERATOR(CountDown, CountDownOp<int64_t, CPUContext>);
+REGISTER_CPU_OPERATOR(CountUp, CountUpOp<int64_t, CPUContext>);
+REGISTER_CPU_OPERATOR(RetrieveCount, RetrieveCountOp<int64_t, CPUContext>);
 
 OPERATOR_SCHEMA(CreateCounter)
     .NumInputs(0)

@@ -3,6 +3,7 @@
 namespace caffe2 {
 namespace {
 
+REGISTER_CPU_OPERATOR(WallClockTime, WallClockTimeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Print, PrintOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Flatten, FlattenOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Alias, AliasOp<CPUContext>);
@@ -14,6 +15,9 @@ REGISTER_CPU_OPERATOR(
     ScatterWeightedSum,
     ScatterWeightedSumOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(ScatterAssign, ScatterAssignOp<float, CPUContext>);
+// From whatever the current context, ensure the output is TensorCPU
+REGISTER_CPU_OPERATOR(EnsureCPUOutput,
+                      CopyOp<CPUContext, CPUContext, CPUContext>);
 REGISTER_CPU_OPERATOR(Copy, CopyOp<CPUContext, CPUContext, CPUContext>);
 REGISTER_CPU_OPERATOR(Shape, ShapeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Reshape, ReshapeOp<float, CPUContext>);
@@ -29,6 +33,12 @@ REGISTER_CPU_OPERATOR(Slice, SliceOp<int, CPUContext>);
 REGISTER_CPU_OPERATOR(Squeeze, SqueezeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(ExpandDims, ExpandDimsOp<CPUContext>);
 
+OPERATOR_SCHEMA(WallClockTime)
+    .NumInputs(0)
+    .NumOutputs(1)
+    .SetDoc("Time since epoch in nanoseconds.")
+    .Output(0, "time", "The time in nanoseconds.");
+
 OPERATOR_SCHEMA(Print)
     .NumInputs(1)
     .NumOutputs(0)
@@ -42,7 +52,42 @@ OPERATOR_SCHEMA(Print)
 
 OPERATOR_SCHEMA(LengthsToShape).NumInputs(1).NumOutputs(1);
 
-OPERATOR_SCHEMA(Reshape).NumInputs(2).NumOutputs(1);
+OPERATOR_SCHEMA(Reshape)
+    .NumInputs(1, 2)
+    .NumOutputs(2)
+    .AllowInplace({{0, 0}})
+    .SetDoc(R"DOC(
+Reshape the input tensor similar to numpy.reshape.
+
+It takes a tensor as input and an optional tensor specifying the new shape.
+When the second input is absent, an extra argument `shape` must be specified.
+It outputs the reshaped tensor as well as the original shape.
+
+At most one dimension of the new shape can be -1. In this case, the value is
+inferred from the size of the tensor and the remaining dimensions.
+)DOC")
+    .Arg("shape", "New shape")
+    .Input(0, "data", "An input tensor.")
+    .Input(1, "new_shape", "New shape.")
+    .Output(0, "reshaped", "Reshaped data.")
+    .Output(1, "old_shape", "Original shape.");
+
+class GetReshapeGradient : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  vector<OperatorDef> GetGradientDefs() override {
+    return SingleGradientDef(
+        "Reshape", "",
+        vector<string>{GO(0), O(1)},
+        vector<string>{GI(0), "_" + GI(0) + "_dims"});
+  }
+
+  // Argument `shape` is no longer needed in backprop.
+  bool CopyArguments() const override {
+    return false;
+  }
+};
+
+REGISTER_GRADIENT(Reshape, GetReshapeGradient);
 
 OPERATOR_SCHEMA(Flatten)
     .NumInputs(1)
@@ -201,6 +246,16 @@ OPERATOR_SCHEMA(Copy)
     .SetDoc("Copy input tensor into output, potentially across devices.")
     .Input(0, "input", "The input tensor.")
     .Output(0, "output", "Tensor that will contain a copy of the input.");
+
+OPERATOR_SCHEMA(EnsureCPUOutput)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .SetDoc(R"DOC(
+Take an input tensor in the current Context (GPU or CPU) and create an output
+which is always a TensorCPU. This may involves cross-device MemCpy.
+)DOC")
+    .Input(0, "input", "The input CUDA or CPU tensor.")
+    .Output(0, "output", "TensorCPU that is a copy of the input.");
 
 OPERATOR_SCHEMA(Shape)
     .NumInputs(1)
@@ -373,11 +428,11 @@ If the same blob is provided in input and output, the operation is copy-free.
     .Input(0, "data", "Original tensor")
     .Output(0, "expanded", "Reshaped tensor with same data as input.");
 
+SHOULD_NOT_DO_GRADIENT(WallClockTime);
 SHOULD_NOT_DO_GRADIENT(Print);
 SHOULD_NOT_DO_GRADIENT(Shape);
 SHOULD_NOT_DO_GRADIENT(HasElements);
 SHOULD_NOT_DO_GRADIENT(IsEmpty);
-SHOULD_NOT_DO_GRADIENT(Reshape);
 SHOULD_NOT_DO_GRADIENT(LengthsToShape);
 
 class GetSqueezeGradient : public GradientMakerBase {

@@ -7,7 +7,6 @@ import copy
 from functools import reduce
 from hypothesis import assume, given, settings
 import hypothesis.strategies as st
-import collections
 from functools import partial
 import unittest
 
@@ -26,8 +25,8 @@ def tanh(x):
     return 2.0 * sigmoid(2.0 * x) - 1
 
 
-def lstm_unit(cell_t_m_1, gates, seq_lengths, timestep):
-    D = cell_t_m_1.shape[2]
+def lstm_unit(cell_t_prev, gates, seq_lengths, timestep):
+    D = cell_t_prev.shape[2]
     G = gates.shape[2]
     N = gates.shape[1]
     t = (timestep[0].reshape(1, 1) * np.ones(shape=(N, D))).astype(np.int32)
@@ -38,7 +37,7 @@ def lstm_unit(cell_t_m_1, gates, seq_lengths, timestep):
     assert G == 4 * D
     # Resize to avoid broadcasting inconsistencies with NumPy
     gates = gates.reshape(N, 4, D)
-    cell_t_m_1 = cell_t_m_1.reshape(N, D)
+    cell_t_prev = cell_t_prev.reshape(N, D)
     i_t = gates[:, 0, :].reshape(N, D)
     f_t = gates[:, 1, :].reshape(N, D)
     o_t = gates[:, 2, :].reshape(N, D)
@@ -49,8 +48,8 @@ def lstm_unit(cell_t_m_1, gates, seq_lengths, timestep):
     g_t = tanh(g_t)
     valid = (seq_lengths < t).astype(np.int32)
     assert valid.shape == (N, D)
-    cell_t = ((f_t * cell_t_m_1) + (i_t * g_t)) * (valid) + \
-        (1 - valid) * cell_t_m_1
+    cell_t = ((f_t * cell_t_prev) + (i_t * g_t)) * (valid) + \
+        (1 - valid) * cell_t_prev
     assert cell_t.shape == (N, D)
     hidden_t = (o_t * tanh(cell_t)) * valid
     hidden_t = hidden_t.reshape(1, N, D)
@@ -218,6 +217,16 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [X], [0])
         self.assertGradientChecks(gc, op, [X], 0, [0])
 
+    @given(X=hu.tensor(), inplace=st.booleans(), **hu.gcs)
+    def test_softsign(self, X, inplace, gc, dc):
+        op = core.CreateOperator("Softsign", ["X"], ["X" if inplace else "Y"])
+
+        def softsign(X):
+            return (X / (1 + np.abs(X)),)
+
+        self.assertDeviceChecks(dc, op, [X], [0])
+        self.assertReferenceChecks(gc, op, [X], softsign)
+
     @given(
         device_options=st.lists(
             min_size=2,
@@ -238,8 +247,9 @@ class TestOperators(hu.HypothesisTestCase):
                 "XavierFill", [], ["Y"],
                 device_option=do,
                 shape=[2])
-            workspace.RunOperatorOnce(op)
-            return workspace.FetchBlob("Y")
+            self.ws.run(op)
+            return self.ws.blobs["Y"].fetch()
+
         ys = [run(do) for do in device_options]
         for y in ys[1:]:
             if set_seed:
@@ -272,9 +282,9 @@ class TestOperators(hu.HypothesisTestCase):
             ["Y"],
             axis=axis)
         for name, param in [("X", X), ("W", W), ("b", b)]:
-            workspace.FeedBlob(name, param)
-        workspace.RunOperatorOnce(op)
-        Y = workspace.FetchBlob("Y")
+            self.ws.create_blob(name).feed(param)
+        self.ws.run(op)
+        Y = self.ws.blobs["Y"].fetch()
         self.assertEqual(list(Y.shape), list(X.shape)[:axis] + [N])
 
         inputs = [X, W, b]
@@ -322,9 +332,9 @@ class TestOperators(hu.HypothesisTestCase):
             engine="CUDNN")
         num_directions = 2 if bidirectional else 1
         X = np.random.randn(T, N, D).astype(np.float32)
-        workspace.FeedBlob("INPUT", X, device_option=hu.gpu_do)
-        workspace.RunOperatorOnce(init_op)
-        W = workspace.FetchBlob("WEIGHT")
+        self.ws.create_blob("INPUT").feed(X, device_option=hu.gpu_do)
+        self.ws.run(init_op)
+        W = self.ws.blobs["WEIGHT"].fetch()
         H = np.random.randn(
             hidden_size, N, num_layers * num_directions).astype(
                 np.float32)
@@ -377,222 +387,6 @@ class TestOperators(hu.HypothesisTestCase):
         for i in range(num_inputs):
             self.assertGradientChecks(gc, op, inputs, i, [0])
 
-    # CUDNN does NOT support different padding values and we skip it
-    @given(stride_h=st.integers(1, 3),
-           stride_w=st.integers(1, 3),
-           pad_t=st.integers(0, 3),
-           pad_l=st.integers(0, 3),
-           pad_b=st.integers(0, 3),
-           pad_r=st.integers(0, 3),
-           kernel=st.integers(3, 5),
-           size=st.integers(8, 8),
-           input_channels=st.integers(1, 3),
-           output_channels=st.integers(1, 3),
-           batch_size=st.integers(1, 3),
-           order=st.sampled_from(["NCHW", "NHWC"]),
-           engine=st.sampled_from([""]),
-           **hu.gcs)
-    @settings(max_examples=2, timeout=100)
-    def test_convolution_separate_stride_pad_gradients(self, stride_h, stride_w,
-                                                       pad_t, pad_l, pad_b,
-                                                       pad_r, kernel, size,
-                                                       input_channels,
-                                                       output_channels,
-                                                       batch_size, order,
-                                                       engine, gc, dc):
-        op = core.CreateOperator(
-            "Conv",
-            ["X", "w", "b"],
-            ["Y"],
-            stride_h=stride_h,
-            stride_w=stride_w,
-            pad_t=pad_t,
-            pad_l=pad_l,
-            pad_b=pad_b,
-            pad_r=pad_r,
-            kernel=kernel,
-            order=order,
-            engine=engine,
-        )
-        X = np.random.rand(
-            batch_size, size, size, input_channels).astype(np.float32) - 0.5
-        w = np.random.rand(
-            output_channels, kernel, kernel, input_channels).astype(np.float32)\
-            - 0.5
-        b = np.random.rand(output_channels).astype(np.float32) - 0.5
-        if order == "NCHW":
-            X = X.transpose((0, 3, 1, 2))
-            w = w.transpose((0, 3, 1, 2))
-
-        self.assertDeviceChecks(dc, op, [X, w, b], [0])
-        for i in range(3):
-            self.assertGradientChecks(gc, op, [X, w, b], i, [0])
-
-    # CUDNN does NOT support different padding values and we skip it
-    @given(stride_h=st.integers(1, 3),
-            stride_w=st.integers(1, 3),
-            pad_t=st.integers(0, 3),
-            pad_l=st.integers(0, 3),
-            pad_b=st.integers(0, 3),
-            pad_r=st.integers(0, 3),
-            kernel=st.integers(1, 5),
-            size=st.integers(7, 10),
-            input_channels=st.integers(1, 8),
-            output_channels=st.integers(1, 8),
-            batch_size=st.integers(1, 3),
-            engine=st.sampled_from([""]), **hu.gcs)
-    def test_convolution_separate_stride_pad_layout(self, stride_h, stride_w,
-                                                    pad_t, pad_l, pad_b, pad_r,
-                                                    kernel, size,
-                                                    input_channels,
-                                                    output_channels, batch_size,
-                                                    engine, gc, dc):
-        X = np.random.rand(
-            batch_size, size, size, input_channels).astype(np.float32) - 0.5
-        w = np.random.rand(
-            output_channels, kernel, kernel, input_channels).astype(np.float32)\
-            - 0.5
-        b = np.random.rand(output_channels).astype(np.float32) - 0.5
-        outputs = {}
-        for order in ["NCHW", "NHWC"]:
-            op = core.CreateOperator(
-                "Conv",
-                ["X", "w", "b"],
-                ["Y"],
-                stride_h=stride_h,
-                stride_w=stride_w,
-                kernel=kernel,
-                pad_t=pad_t,
-                pad_l=pad_l,
-                pad_b=pad_b,
-                pad_r=pad_r,
-                order=order,
-                engine=engine,
-                device_option=gc,
-            )
-            if order == "NCHW":
-                X_f = X.transpose((0, 3, 1, 2))
-                w_f = w.transpose((0, 3, 1, 2))
-            else:
-                X_f = X
-                w_f = w
-            workspace.FeedBlob("X", X_f, device_option=gc)
-            workspace.FeedBlob("w", w_f, device_option=gc)
-            workspace.FeedBlob("b", b, device_option=gc)
-            workspace.RunOperatorOnce(op)
-            outputs[order] = workspace.FetchBlob("Y")
-        np.testing.assert_allclose(
-            outputs["NCHW"],
-            outputs["NHWC"].transpose((0, 3, 1, 2)),
-            atol=1e-4,
-            rtol=1e-4)
-
-    @given(stride=st.integers(1, 3),
-           pad=st.integers(0, 3),
-           kernel=st.integers(1, 5),
-           dilation=st.integers(1, 3),
-           size=st.integers(7, 10),
-           input_channels=st.integers(1, 8),
-           output_channels=st.integers(1, 8),
-           batch_size=st.integers(1, 3),
-           order=st.sampled_from(["NCHW", "NHWC"]),
-           engine=st.sampled_from(["", "CUDNN"]),
-           **hu.gcs)
-    @settings(max_examples=2, timeout=100)
-    def test_convolution_gradients(self, stride, pad, kernel, dilation, size,
-                                   input_channels, output_channels, batch_size,
-                                   order, engine, gc, dc):
-        assume(size >= dilation * (kernel - 1) + 1)
-        assume("" == engine or 1 == dilation)
-
-        op = core.CreateOperator(
-            "Conv",
-            ["X", "w", "b"],
-            ["Y"],
-            stride=stride,
-            kernel=kernel,
-            dilation=dilation,
-            pad=pad,
-            order=order,
-            engine=engine,
-        )
-        X = np.random.rand(
-            batch_size, size, size, input_channels).astype(np.float32) - 0.5
-        w = np.random.rand(
-            output_channels, kernel, kernel, input_channels).astype(np.float32)\
-            - 0.5
-        b = np.random.rand(output_channels).astype(np.float32) - 0.5
-        if order == "NCHW":
-            X = X.transpose((0, 3, 1, 2))
-            w = w.transpose((0, 3, 1, 2))
-
-        self.assertDeviceChecks(dc, op, [X, w, b], [0])
-        for i in range(3):
-            self.assertGradientChecks(gc, op, [X, w, b], i, [0])
-
-    @given(stride=st.integers(1, 3),
-           pad=st.integers(0, 3),
-           kernel=st.integers(1, 5),
-           dilation=st.integers(1, 3),
-           size=st.integers(7, 10),
-           input_channels=st.integers(1, 8),
-           output_channels=st.integers(1, 8),
-           batch_size=st.integers(1, 3),
-           **hu.gcs)
-    def test_convolution_layout(self, stride, pad, kernel, dilation, size,
-                                input_channels, output_channels, batch_size,
-                                gc, dc):
-        assume(size >= dilation * (kernel - 1) + 1)
-
-        X = np.random.rand(
-            batch_size, size, size, input_channels).astype(np.float32) - 0.5
-        w = np.random.rand(
-            output_channels, kernel, kernel, input_channels).astype(np.float32)\
-            - 0.5
-        b = np.random.rand(output_channels).astype(np.float32) - 0.5
-        Output = collections.namedtuple("Output", ["Y", "engine", "order"])
-        outputs = []
-        for order in ["NCHW", "NHWC"]:
-            for engine in (["", "CUDNN"] if dilation == 1 else [""]):
-                op = core.CreateOperator(
-                    "Conv",
-                    ["X", "w", "b"],
-                    ["Y"],
-                    stride=stride,
-                    kernel=kernel,
-                    dilation=dilation,
-                    pad=pad,
-                    order=order,
-                    engine=engine,
-                    device_option=gc,
-                )
-                if order == "NCHW":
-                    X_f = X.transpose((0, 3, 1, 2))
-                    w_f = w.transpose((0, 3, 1, 2))
-                else:
-                    X_f = X
-                    w_f = w
-                self.assertDeviceChecks(dc, op, [X_f, w_f, b], [0])
-                workspace.FeedBlob("X", X_f, device_option=gc)
-                workspace.FeedBlob("w", w_f, device_option=gc)
-                workspace.FeedBlob("b", b, device_option=gc)
-                workspace.RunOperatorOnce(op)
-                outputs.append(Output(
-                    Y=workspace.FetchBlob("Y"), engine=engine, order=order))
-
-        def canonical(o):
-            if o.order == "NHWC":
-                return o.Y.transpose((0, 3, 1, 2))
-            else:
-                return o.Y
-
-        for o in outputs:
-            np.testing.assert_allclose(
-                canonical(outputs[0]),
-                canonical(o),
-                atol=1e-4,
-                rtol=1e-4)
-
     @given(batch_size=st.integers(1, 3),
            stride=st.integers(1, 3),
            pad=st.integers(0, 3),
@@ -642,14 +436,14 @@ class TestOperators(hu.HypothesisTestCase):
             order="NHWC",
             device_option=gc)
 
-        workspace.FeedBlob("im_nchw", im_nchw, device_option=gc)
-        workspace.FeedBlob("im_nhwc", im_nhwc, device_option=gc)
-        workspace.RunOperatorOnce(op_im2col_nchw)
-        workspace.RunOperatorOnce(op_im2col_nhwc)
+        self.ws.create_blob("im_nchw").feed(im_nchw, device_option=gc)
+        self.ws.create_blob("im_nhwc").feed(im_nhwc, device_option=gc)
+        self.ws.run(op_im2col_nchw)
+        self.ws.run(op_im2col_nhwc)
 
         # there is probably a clever way to spell this in np
-        col_nchw = workspace.FetchBlob("col_nchw")
-        col_nhwc = workspace.FetchBlob("col_nhwc")
+        col_nchw = self.ws.blobs["col_nchw"].fetch()
+        col_nhwc = self.ws.blobs["col_nhwc"].fetch()
         col_nchw_ = col_nchw.reshape(N, C, kernel, kernel, out_h, out_w)
         col_nhwc_ = col_nhwc.reshape(N, out_h, out_w, kernel, kernel, C)
         for i in range(0, N):
@@ -681,251 +475,23 @@ class TestOperators(hu.HypothesisTestCase):
             order="NHWC",
             device_option=gc)
 
-        workspace.RunOperatorOnce(op_col2im_nchw)
-        workspace.RunOperatorOnce(op_col2im_nhwc)
+        self.ws.run(op_col2im_nchw)
+        self.ws.run(op_col2im_nhwc)
 
-        out_nchw = workspace.FetchBlob("out_nchw")
-        out_nhwc = workspace.FetchBlob("out_nhwc")
+        out_nchw = self.ws.blobs["out_nchw"].fetch()
+        out_nhwc = self.ws.blobs["out_nhwc"].fetch()
         np.testing.assert_allclose(
             out_nchw,
             out_nhwc.transpose(NHWC_TO_NCHW),
             atol=1e-4,
             rtol=1e-4)
 
-    @given(num_workers=st.integers(1, 4),
-           net_type=st.sampled_from(
-               ["simple", "dag"] +
-               (["async_dag"] if workspace.has_gpu_support else [])),
-           do=st.sampled_from(hu.device_options),
-           engine=st.sampled_from(["CUDNN", ""]))
-    def test_convolution_sync(self, net_type, num_workers, do, engine):
-        from caffe2.python.cnn import CNNModelHelper
-        m = CNNModelHelper()
-        n = 1
-        d = 2
-        depth = 3
-        iters = 5
-        h = 5
-        w = 5
-        workspace.ResetWorkspace()
-
-        np.random.seed(1701)
-        # Build a binary tree of conv layers, summing at each node.
-        for i in reversed(range(depth)):
-            for j in range(2 ** i):
-                bottom_1 = "{}_{}".format(i + 1, 2 * j)
-                bottom_2 = "{}_{}".format(i + 1, 2 * j + 1)
-                mid_1 = "{}_{}_m".format(i + 1, 2 * j)
-                mid_2 = "{}_{}_m".format(i + 1, 2 * j + 1)
-                top = "{}_{}".format(i, j)
-                w1, b1, w2, b2 = np.random.randn(4).tolist()
-                m.Conv(
-                    bottom_1, mid_1,
-                    dim_in=d, dim_out=d,
-                    kernel=3,
-                    weight_init=m.ConstantInit(w1),
-                    bias_init=m.ConstantInit(b1),
-                    cudnn_state=np.random.randint(0, 3),
-                    stride=1,
-                    pad=1,
-                    deterministic=1,
-                    engine=engine)
-                m.Conv(
-                    bottom_2, mid_2,
-                    dim_in=d, dim_out=d,
-                    kernel=3,
-                    stride=1,
-                    pad=1,
-                    weight_init=m.ConstantInit(w2),
-                    bias_init=m.ConstantInit(b2),
-                    deterministic=1,
-                    cudnn_state=np.random.randint(0, 3),
-                    engine=engine)
-                m.net.Sum([mid_1, mid_2], top)
-
-        m.net.Flatten(["0_0"], ["0_0_flat"])
-        m.net.SquaredL2Distance(["0_0_flat", "label"], "xent")
-        m.net.AveragedLoss("xent", "loss")
-        input_to_grad = m.AddGradientOperators(["loss"])
-        m.Proto().device_option.CopyFrom(do)
-        m.param_init_net.Proto().device_option.CopyFrom(do)
-        m.Proto().type = net_type
-        m.Proto().num_workers = num_workers
-        workspace.RunNetOnce(m.param_init_net)
-
-        def run():
-            import numpy as np
-            np.random.seed(1701)
-            input_blobs = ["{}_{}".format(depth, j) for j in range(2 ** depth)]
-            for input_blob in input_blobs:
-                workspace.FeedBlob(
-                    input_blob,
-                    np.random.randn(n, d, h, w).astype(np.float32),
-                    device_option=do)
-                workspace.FeedBlob(
-                    "label",
-                    np.random.randn(n, d * h * w).astype(np.float32),
-                    device_option=do)
-            workspace.RunNetOnce(m.net)
-            gradients = [
-                workspace.FetchBlob(str(input_to_grad[input_blob]))
-                for input_blob in input_blobs]
-            return gradients
-
-        outputs = [run() for _ in range(iters)]
-        for output in outputs[1:]:
-            np.testing.assert_array_equal(outputs[0], output)
-            np.testing.assert_allclose(
-                np.sum(np.square(output)),
-                1763719461732352.0,
-                rtol=1e-5)
-
-    @given(stride=st.integers(1, 3),
-           pad=st.integers(0, 3),
-           kernel=st.integers(1, 5),
-           adj=st.integers(0, 2),
-           size=st.integers(7, 10),
-           input_channels=st.integers(1, 8),
-           output_channels=st.integers(1, 8),
-           batch_size=st.integers(1, 3),
-           order=st.sampled_from(["NCHW", "NHWC"]),
-           engine=st.sampled_from(["", "CUDNN"]), **hu.gcs)
-    @settings(max_examples=2, timeout=100)
-    def test_convolution_transpose_gradients(self, stride, pad, kernel, adj,
-                                             size, input_channels,
-                                             output_channels, batch_size,
-                                             order, engine, gc, dc):
-        assume(adj < stride)
-        X = np.random.rand(
-            batch_size, size, size, input_channels).astype(np.float32) - 0.5
-        w = np.random.rand(
-            input_channels, kernel, kernel, output_channels)\
-            .astype(np.float32) - 0.5
-        b = np.random.rand(output_channels).astype(np.float32) - 0.5
-        op = core.CreateOperator(
-            "ConvTranspose",
-            ["X", "w", "b"],
-            ["Y"],
-            stride=stride,
-            kernel=kernel,
-            pad=pad,
-            adj=adj,
-            order=order,
-            engine=engine,
-        )
-        if order == "NCHW":
-            X = X.transpose((0, 3, 1, 2))
-            w = w.transpose((0, 3, 1, 2))
-
-        self.assertDeviceChecks(dc, op, [X, w, b], [0])
-        for i in range(3):
-            self.assertGradientChecks(gc, op, [X, w, b], i, [0])
-
-    @given(stride=st.integers(1, 3),
-           pad=st.integers(0, 3),
-           kernel=st.integers(1, 5),
-           adj=st.integers(0, 2),
-           size=st.integers(7, 10),
-           input_channels=st.integers(1, 8),
-           output_channels=st.integers(1, 8),
-           batch_size=st.integers(1, 3),
-           engine=st.sampled_from(["", "CUDNN"]), **hu.gcs)
-    def test_convolution_transpose_layout(self, stride, pad, kernel, adj,
-                                          size, input_channels,
-                                          output_channels, batch_size,
-                                          engine, gc, dc):
-        assume(adj < stride)
-        X = np.random.rand(
-            batch_size, size, size, input_channels).astype(np.float32) - 0.5
-        w = np.random.rand(
-            input_channels, kernel, kernel, output_channels)\
-            .astype(np.float32) - 0.5
-        b = np.random.rand(output_channels).astype(np.float32) - 0.5
-        outputs = {}
-        for order in ["NCHW", "NHWC"]:
-            op = core.CreateOperator(
-                "ConvTranspose",
-                ["X", "w", "b"],
-                ["Y"],
-                stride=stride,
-                kernel=kernel,
-                pad=pad,
-                adj=adj,
-                order=order,
-                engine=engine,
-                device_option=gc,
-            )
-            if order == "NCHW":
-                X_f = X.transpose((0, 3, 1, 2))
-                w_f = w.transpose((0, 3, 1, 2))
-            else:
-                X_f = X
-                w_f = w
-            workspace.FeedBlob("X", X_f, device_option=gc)
-            workspace.FeedBlob("w", w_f, device_option=gc)
-            workspace.FeedBlob("b", b, device_option=gc)
-            workspace.RunOperatorOnce(op)
-            outputs[order] = workspace.FetchBlob("Y")
-        output_size = (size - 1) * stride + kernel + adj - 2 * pad
-        self.assertEqual(
-            outputs["NCHW"].shape,
-            (batch_size, output_channels, output_size, output_size))
-        np.testing.assert_allclose(
-            outputs["NCHW"],
-            outputs["NHWC"].transpose((0, 3, 1, 2)),
-            atol=1e-4,
-            rtol=1e-4)
-
     @given(dtype=st.sampled_from([np.float32, np.float64, np.int32, np.bool]))
     def test_print(self, dtype):
         data = np.random.permutation(6).astype(dtype)
-        workspace.FeedBlob("data", data)
+        self.ws.create_blob("data").feed(data)
         op = core.CreateOperator("Print", "data", [])
-        self.assertTrue(workspace.RunOperatorOnce(op))
-
-    @given(inputs=hu.tensors(n=3),
-           in_place=st.booleans(),
-           beta1=st.floats(min_value=0.1, max_value=0.9),
-           beta2=st.floats(min_value=0.1, max_value=0.9),
-           lr=st.floats(min_value=0.1, max_value=0.9),
-           iters=st.integers(min_value=1, max_value=10000),
-           epsilon=st.floats(min_value=1e-5, max_value=1e-2),
-           **hu.gcs)
-    def test_adam_sgd(self, inputs, in_place, beta1, beta2, lr, iters, epsilon,
-                      gc, dc):
-        grad, m1, m2 = inputs
-        m2 += np.abs(m2) + 0.01
-        lr = np.asarray([lr], dtype=np.float32)
-        iters = np.asarray([iters], dtype=np.int32)
-        op = core.CreateOperator(
-            "Adam",
-            ["grad", "m1", "m2", "lr", "iters"],
-            ["grad" if in_place else "grad_o",
-             "m1" if in_place else "m1_o",
-             "m2" if in_place else "m2_o"],
-            beta1=beta1, beta2=beta2, epsilon=epsilon,
-            device_option=gc)
-        input_device_options = {"iters": hu.cpu_do}
-        self.assertDeviceChecks(
-            dc, op, [grad, m1, m2, lr, iters], [0], input_device_options)
-
-        # Reference
-        def adam(grad, m1, m2, lr, iters):
-            lr = lr[0]
-            iters = iters[0]
-            t = iters + 1
-            corrected_local_rate = lr * np.sqrt(1. - np.power(beta2, t)) / \
-                (1. - np.power(beta1, t))
-
-            m1_o = (beta1 * m1) + (1. - beta1) * grad
-            m2_o = (beta2 * m2) + (1. - beta2) * np.square(grad)
-            grad_o = corrected_local_rate * m1_o / \
-                (np.sqrt(m2_o) + epsilon)
-
-            return (grad_o, m1_o, m2_o)
-
-        self.assertReferenceChecks(gc, op, [grad, m1, m2, lr, iters],
-                                   adam, input_device_options)
+        self.ws.run(op)
 
     @given(inputs=hu.tensors(n=2),
            in_place=st.booleans(),
@@ -989,41 +555,59 @@ class TestOperators(hu.HypothesisTestCase):
             return (grad_o, ms_o, mom_o)
         self.assertReferenceChecks(gc, op, [grad, ms, mom, lr], rmsprop)
 
+    # Reference
     @staticmethod
-    def _dense_adagrad(epsilon, grad, h, lr):
+    def _dense_adagrad(epsilon, w, h, grad, lr):
         lr = lr[0]
         h_o = h + np.square(grad)
         grad_o = lr * grad / (np.sqrt(h_o) + epsilon)
-        return (grad_o, h_o)
+        w_o = w + grad_o
+        return (w_o, h_o)
 
-    @given(inputs=hu.tensors(n=2),
+    # Reference
+    @staticmethod
+    def _dense_adam(epsilon, beta1, beta2, w, m1, m2, grad, lr, iters):
+            lr = lr[0]
+            iters = iters[0]
+            t = iters + 1
+            corrected_local_rate = lr * np.sqrt(1. - np.power(beta2, t)) / \
+                (1. - np.power(beta1, t))
+
+            m1_o = (beta1 * m1) + (1. - beta1) * grad
+            m2_o = (beta2 * m2) + (1. - beta2) * np.square(grad)
+            grad_o = corrected_local_rate * m1_o / \
+                (np.sqrt(m2_o) + epsilon)
+            w_o = w + grad_o
+            return (w_o, m1_o, m2_o)
+
+    @given(inputs=hu.tensors(n=3),
            in_place=st.booleans(),
            lr=st.floats(min_value=0.1, max_value=0.9),
            epsilon=st.floats(min_value=1e-5, max_value=1e-2),
-           **hu.gcs)
+           **hu.gcs_cpu_only)
     def test_adagrad_sgd(self, inputs, in_place, lr, epsilon,
                          gc, dc):
-        grad, h = inputs
+        w, grad, h = inputs
         h = np.abs(h) + 0.01
         lr = np.asarray([lr], dtype=np.float32)
         op = core.CreateOperator(
             "Adagrad",
-            ["grad", "h", "lr"],
-            ["grad" if in_place else "grad_o",
+            ["w", "h", "grad", "lr"],
+            ["w" if in_place else "grad_o",
              "h" if in_place else "h_o"],
             epsilon=epsilon, device_option=gc)
-        self.assertDeviceChecks(dc, op, [grad, h, lr], [0])
+        self.assertDeviceChecks(dc, op, [w, h, grad, lr], [0])
 
-        self.assertReferenceChecks(gc, op, [grad, h, lr],
+        self.assertReferenceChecks(gc, op, [w, h, grad, lr],
                                    partial(self._dense_adagrad, epsilon))
 
-    @given(inputs=hu.tensors(n=2),
+    @given(inputs=hu.tensors(n=3),
            lr=st.floats(min_value=0.1, max_value=0.9),
            epsilon=st.floats(min_value=1e-5, max_value=1e-2),
            **hu.gcs_cpu_only)
     def test_sparse_adagrad_sgd(self, inputs, lr, epsilon,
                                 gc, dc):
-        grad, h = inputs
+        w, grad, h = inputs
         indices = np.arange(h.shape[0])
         indices = indices[indices % 2 == 0]
         grad = grad[indices]
@@ -1031,19 +615,90 @@ class TestOperators(hu.HypothesisTestCase):
         lr = np.asarray([lr], dtype=np.float32)
         op = core.CreateOperator(
             "SparseAdagrad",
-            ["indices", "grad", "h", "lr"],
-            ["grad", "h"],
+            ["param", "h", "indices", "grad", "lr"],
+            ["param", "h"],
             epsilon=epsilon,
             device_option=gc)
         self.assertDeviceChecks(
-            dc, op, [indices, grad, h, lr], [0])
+            dc, op, [w, h, indices, grad, lr], [0])
 
-        def adagrad(i, grad, h, lr):
-            sg, sh = self._dense_adagrad(epsilon, grad, h[i], lr)
+        def adagrad(param, h, i, grad, lr):
+            sw, sh = self._dense_adagrad(epsilon, param[i], h[i], grad, lr)
             h[i] = sh
-            return (sg, h)
+            param[i] = sw
+            return (param, h)
 
-        self.assertReferenceChecks(gc, op, [indices, grad, h, lr], adagrad)
+        self.assertReferenceChecks(gc, op, [w, h, indices, grad, lr], adagrad)
+
+    @given(inputs=hu.tensors(n=4),
+           in_place=st.booleans(),
+           beta1=st.floats(min_value=0.1, max_value=0.9),
+           beta2=st.floats(min_value=0.1, max_value=0.9),
+           lr=st.floats(min_value=0.1, max_value=0.9),
+           iters=st.integers(min_value=1, max_value=10000),
+           epsilon=st.floats(min_value=1e-5, max_value=1e-2),
+           **hu.gcs_cpu_only)
+    def test_adam_sgd(self, inputs, in_place, beta1, beta2, lr, iters, epsilon,
+                      gc, dc):
+        w, grad, m1, m2 = inputs
+        m2 += np.abs(m2) + 0.01
+        lr = np.asarray([lr], dtype=np.float32)
+        iters = np.asarray([iters], dtype=np.int64)
+
+        op = core.CreateOperator(
+            "Adam",
+            ["w", "m1", "m2", "grad", "lr", "iters"],
+            ["w" if in_place else "w_o",
+             "m1" if in_place else "m1_o",
+             "m2" if in_place else "m2_o"],
+            beta1=beta1, beta2=beta2, epsilon=epsilon,
+            device_option=gc)
+        input_device_options = {"iters": hu.cpu_do}
+        inputs = [w, m1, m2, grad, lr, iters]
+        self.assertDeviceChecks(
+            dc, op, inputs, [0], input_device_options=input_device_options)
+
+        self.assertReferenceChecks(gc, op, inputs, partial(self._dense_adam,
+                                   epsilon, beta1, beta2),
+                                   input_device_options=input_device_options)
+
+    @given(inputs=hu.tensors(n=4),
+           beta1=st.floats(min_value=0.1, max_value=0.9),
+           beta2=st.floats(min_value=0.1, max_value=0.9),
+           lr=st.floats(min_value=0.1, max_value=0.9),
+           iters=st.integers(min_value=1, max_value=10000),
+           epsilon=st.floats(min_value=1e-5, max_value=1e-2),
+           **hu.gcs_cpu_only)
+    def test_sparse_adam_sgd(self, inputs, beta1, beta2, lr, iters,
+                             epsilon, gc, dc):
+
+        w, grad, m1, m2 = inputs
+        indices = np.arange(m1.shape[0])
+        indices = indices[indices % 2 == 0]
+        grad = grad[indices]
+        m2 += np.abs(m2) + 0.01
+        lr = np.asarray([lr], dtype=np.float32)
+        iters = np.asarray([iters], dtype=np.int64)
+        op = core.CreateOperator(
+            "SparseAdam",
+            ["w", "m1", "m2", "indices", "grad", "lr", "iters"],
+            ["w", "m1", "m2"],
+            beta1=beta1, beta2=beta2, epsilon=epsilon,
+            device_option=gc)
+        input_device_options = {"iters": hu.cpu_do}
+        inputs = [w, m1, m2, indices, grad, lr, iters]
+        self.assertDeviceChecks(
+            dc, op, inputs, [0], input_device_options=input_device_options)
+
+        def adam(w, m1, m2, i, grad, lr, iters):
+            nw, nm1, nm2 = self._dense_adam(epsilon, beta1, beta2, w[i],
+                                            m1[i], m2[i], grad, lr, iters)
+            w[i] = nw
+            m1[i] = nm1
+            m2[i] = nm2
+            return (w, m1, m2)
+
+        self.assertReferenceChecks(gc, op, inputs, adam)
 
     # Reference
     @staticmethod
@@ -1385,7 +1040,7 @@ class TestOperators(hu.HypothesisTestCase):
             capacity=capacity,
             num_blobs=num_blobs,
             device_option=do)
-        workspace.RunOperatorOnce(op)
+        self.ws.run(op)
 
         xs = [np.random.randn(num_elements, 5).astype(np.float32)
               for _ in range(num_blobs)]
@@ -1404,8 +1059,9 @@ class TestOperators(hu.HypothesisTestCase):
                 try:
                     elems = q.get_nowait()
                     for elem, feed_blob in zip(elems, feed_blobs):
-                        workspace.FeedBlob(feed_blob, elem, device_option=do)
-                    workspace.RunOperatorOnce(op)
+                        self.ws.create_blob(feed_blob).feed(
+                            elem, device_option=do)
+                    self.ws.run(op)
                 except Queue.Empty:
                     return
 
@@ -1413,7 +1069,7 @@ class TestOperators(hu.HypothesisTestCase):
         # (blob creation is not threadsafe)
         for t in range(num_threads):
             for i in range(num_blobs):
-                workspace.CreateBlob("x_{}_{}".format(i, t))
+                self.ws.create_blob("x_{}_{}".format(i, t))
 
         threads = [threading.Thread(target=enqueue, args=(t,))
                    for t in range(num_threads)]
@@ -1427,12 +1083,12 @@ class TestOperators(hu.HypothesisTestCase):
                 ["queue"],
                 dequeue_blobs,
                 device_option=do)
-            workspace.RunOperatorOnce(op)
+            self.ws.run(op)
         for thread in threads:
             thread.join()
         op = core.CreateOperator("CloseBlobsQueue", ["queue"], [])
-        workspace.RunOperatorOnce(op)
-        ys = [np.vstack([workspace.FetchBlob("y_{}_{}".format(i, n))
+        self.ws.run(op)
+        ys = [np.vstack([self.ws.blobs["y_{}_{}".format(i, n)].fetch()
                          for n in range(num_elements)])
               for i in range(num_blobs)]
         for i in range(num_blobs):
@@ -1502,10 +1158,10 @@ class TestOperators(hu.HypothesisTestCase):
         plan.AddStep(init_step)
         plan.AddStep(worker_step)
 
-        core.workspace.RunPlan(plan)
+        self.ws.run(plan)
         v = 0
         for counter in counters:
-            v += core.workspace.FetchBlob(str(counter)).tolist()
+            v += self.ws.blobs[str(counter)].fetch().tolist()
         self.assertEqual(v, truth)
 
     @given(
@@ -1568,12 +1224,12 @@ class TestOperators(hu.HypothesisTestCase):
         b = np.array([0] * 16).astype(np.float32)
         cores = tt_core.init_tt_cores(inp_sizes, out_sizes, tt_ranks)
 
-        workspace.FeedBlob("X", X)
-        workspace.FeedBlob("b", b)
-        workspace.FeedBlob("cores", cores)
-        workspace.RunOperatorOnce(op)
+        self.ws.create_blob("X").feed(X)
+        self.ws.create_blob("b").feed(b)
+        self.ws.create_blob("cores").feed(cores)
+        self.ws.run(op)
 
-        Y = workspace.FetchBlob("Y")
+        Y = self.ws.blobs[("Y")].fetch()
         Y = Y.reshape([16])
 
         golden = np.array([-9.51763490e-07, -1.28442286e-06,
@@ -1630,7 +1286,7 @@ class TestOperators(hu.HypothesisTestCase):
         m.Proto().type = net_type
         m.Proto().num_workers = num_workers
 
-        workspace.RunNetOnce(m.param_init_net)
+        self.ws.run(m.param_init_net)
 
         print(str(m.Proto()))
 
@@ -1639,17 +1295,15 @@ class TestOperators(hu.HypothesisTestCase):
             np.random.seed(1701)
             input_blobs = ["{}_{}".format(depth, j) for j in range(2 ** depth)]
             for input_blob in input_blobs:
-                workspace.FeedBlob(
-                    input_blob,
+                self.ws.create_blob(input_blob).feed(
                     np.random.randn(n, d).astype(np.float32),
                     device_option=do)
-                workspace.FeedBlob(
-                    "label",
+                self.ws.create_blob("label").feed(
                     np.random.randn(n, d).astype(np.float32),
                     device_option=do)
-            workspace.RunNetOnce(m.net)
+            self.ws.run(m.net)
             gradients = [
-                workspace.FetchBlob(str(input_to_grad[input_blob]))
+                self.ws.blobs[str(input_to_grad[input_blob])].fetch()
                 for input_blob in input_blobs]
             return gradients
 
@@ -1707,10 +1361,10 @@ class TestOperators(hu.HypothesisTestCase):
             self, initial_iters, max_iters):
         net = core.Net("net")
         net.Iter(["iter"], ["iter"])
-        workspace.FeedBlob(
-            "iter", np.asarray([initial_iters]).astype(np.int32))
-        workspace.FeedBlob(
-            "num_iters", np.asarray([max_iters]).astype(np.int32))
+        self.ws.create_blob("iter").feed(
+            np.asarray([initial_iters]).astype(np.int64))
+        self.ws.create_blob("num_iters").feed(
+            np.asarray([max_iters]).astype(np.int64))
         criteria_net = core.Net("criteria")
         criteria_net.GE(["iter", "num_iters"], ["stop"])
         criteria_net.Proto().external_output.extend(["stop"])
@@ -1719,9 +1373,9 @@ class TestOperators(hu.HypothesisTestCase):
         plan.AddStep(core.execution_step(
             'step', [criteria_net, net],
             should_stop_blob=core.BlobReference("stop")))
-        workspace.RunPlan(plan)
-        iters = workspace.FetchBlob("iter")
-        self.assertEqual(iters.dtype, np.int32)
+        self.ws.run(plan)
+        iters = self.ws.blobs[("iter")].fetch()
+        self.assertEqual(iters.dtype, np.int64)
         self.assertEqual(iters[0], max(initial_iters, max_iters))
 
     def test_disabled_execution_step(self):
@@ -1786,11 +1440,11 @@ class TestOperators(hu.HypothesisTestCase):
 
         plan = core.Plan('plan')
         plan.AddStep(core.execution_step('all_steps', steps, num_iter=3))
-        workspace.RunPlan(plan)
+        self.ws.run(plan)
 
         for i, net in enumerate(nets):
             self.assertEqual(
-                workspace.FetchBlob('output_{}'.format(i + 1))[0],
+                self.ws.blobs['output_{}'.format(i + 1)].fetch()[0],
                 expected[i])
 
     @given(initial_iters=st.integers(0, 100),
@@ -1798,18 +1452,45 @@ class TestOperators(hu.HypothesisTestCase):
     def test_iter_count_with_execution_step(self, initial_iters, num_iters):
         net = core.Net("net")
         net.Iter(["iter"], ["iter"])
-        workspace.FeedBlob(
-            "iter", np.asarray([initial_iters]).astype(np.int32))
+        self.ws.create_blob("iter").feed(
+            np.asarray([initial_iters]).astype(np.int64))
 
         step = core.ExecutionStep("step", [net])
         step.SetIter(num_iters)
 
         plan = core.Plan("plan")
         plan.AddStep(step)
-        workspace.RunPlan(plan)
-        iters = workspace.FetchBlob("iter")
-        self.assertEqual(iters.dtype, np.int32)
+        self.ws.run(plan)
+        iters = self.ws.blobs[("iter")].fetch()
+        self.assertEqual(iters.dtype, np.int64)
         self.assertEqual(iters[0], initial_iters + num_iters)
+
+    @given(initial_iters=st.integers(0, 100),
+           num_iters=st.integers(0, 100),
+           num_nets=st.integers(0, 5))
+    def test_atomic_iter_with_concurrent_steps(self, initial_iters, num_iters,
+                                               num_nets):
+        init_net = core.Net("init_net")
+        iter_mutex = init_net.CreateMutex([], ["iter_mutex"])
+        self.ws.create_blob("iter").feed(
+            np.asarray([initial_iters]).astype(np.int64))
+        concurrent_steps = core.ExecutionStep("concurrent_steps",
+                                              num_iter=num_iters)
+        for i in range(num_nets):
+            net = core.Net("net_{}".format(i))
+            net.AtomicIter([iter_mutex, "iter"], ["iter"])
+            step = core.ExecutionStep("step", [net])
+            concurrent_steps.AddSubstep(step)
+
+        concurrent_steps.SetConcurrentSubsteps(True)
+        plan = core.Plan("plan")
+        plan.AddStep(concurrent_steps)
+
+        self.ws.run(init_net)
+        self.ws.run(plan)
+        iters = self.ws.blobs[("iter")].fetch()
+        self.assertEqual(iters.dtype, np.int64)
+        self.assertEqual(iters[0], initial_iters + num_iters * num_nets)
 
     @given(a=hu.tensor(),
            src=st.sampled_from(_NUMPY_TYPE_TO_ENUM.keys()),
@@ -1890,13 +1571,13 @@ class TestOperators(hu.HypothesisTestCase):
     def test_lstm_unit_recurrent_network(self, n, d, t, dc, gc):
         op = core.CreateOperator(
             "LSTMUnit",
-            ["cell_t-1", "gates_t", "seq_lengths", "timestep"],
+            ["cell_t_prev", "gates_t", "seq_lengths", "timestep"],
             ["hidden_t", "cell_t"])
-        cell_t_m_1 = np.random.randn(1, n, d).astype(np.float32)
+        cell_t_prev = np.random.randn(1, n, d).astype(np.float32)
         gates = np.random.randn(1, n, 4 * d).astype(np.float32)
         seq_lengths = np.random.randint(0, t, size=(n,)).astype(np.int32)
         timestep = np.random.randint(0, t, size=(1,)).astype(np.int32)
-        inputs = [cell_t_m_1, gates, seq_lengths, timestep]
+        inputs = [cell_t_prev, gates, seq_lengths, timestep]
         input_device_options = {"timestep": hu.cpu_do}
         self.assertDeviceChecks(
             dc, op, inputs, [0],
@@ -1908,6 +1589,267 @@ class TestOperators(hu.HypothesisTestCase):
             self.assertGradientChecks(
                 gc, op, inputs, i, [0, 1],
                 input_device_options=input_device_options)
+
+    @given(t=st.integers(1, 5),
+           n=st.integers(1, 5),
+           d=st.integers(1, 5))
+    def test_lstm_recurrent_network(self, t, n, d):
+        from caffe2.python import cnn
+        np.random.seed(1701)
+        step_net = cnn.CNNModelHelper(name="LSTM")
+        # TODO: name scope external inputs and outputs
+        step_net.Proto().external_input.extend(
+            ["input_t", "seq_lengths", "timestep", "hidden_t_prev",
+             "cell_t_prev", "gates_t_w", "gates_t_b"])
+        step_net.Proto().type = "simple"
+        step_net.Proto().external_output.extend(
+            ["hidden_t", "cell_t", "gates_t"])
+        step_net.FC("hidden_t_prev", "gates_t", dim_in=d, dim_out=4 * d, axis=2)
+        step_net.net.Sum(["gates_t", "input_t"], ["gates_t"])
+        step_net.net.LSTMUnit(
+            ["cell_t_prev", "gates_t", "seq_lengths", "timestep"],
+            ["hidden_t", "cell_t"])
+
+        # Initialize params for step net in the parent net
+        for op in step_net.param_init_net.Proto().op:
+            workspace.RunOperatorOnce(op)
+
+        backward_ops, backward_mapping = core.GradientRegistry.GetBackwardPass(
+            step_net.Proto().op,
+            {"hidden_t": "hidden_t_grad", "cell_t": "cell_t_grad"})
+        backward_mapping = {str(k): str(v) for k, v
+                            in backward_mapping.items()}
+        backward_step_net = core.Net("LSTMBackward")
+        del backward_step_net.Proto().op[:]
+        backward_step_net.Proto().op.extend(backward_ops)
+
+        # Code:
+        links = [
+            ("hidden_t_prev", "hidden", 0),
+            ("hidden_t", "hidden", 1),
+            ("cell_t_prev", "cell", 0),
+            ("cell_t", "cell", 1),
+            ("gates_t", "gates", 0),
+            ("input_t", "input", 0),
+        ]
+        link_internal, link_external, link_offset = zip(*links)
+        backward_links = [
+            ("hidden_t_prev_grad", "hidden_grad", 0),
+            ("hidden_t_grad", "hidden_grad", 1),
+            ("cell_t", "cell", 1),
+            ("cell_t_prev_grad", "cell_grad", 0),
+            ("cell_t_grad", "cell_grad", 1),
+            ("gates_t_grad", "gates_grad", 0),
+        ]
+        backward_link_internal, backward_link_external, backward_link_offset = \
+            zip(*backward_links)
+        backward_step_net.Proto().external_input.extend(
+            ["hidden_t_grad", "cell_t_grad"])
+        backward_step_net.Proto().external_input.extend(
+            step_net.Proto().external_input)
+        backward_step_net.Proto().external_input.extend(
+            step_net.Proto().external_output)
+        op = core.CreateOperator(
+            "RecurrentNetwork",
+            ["input", "seq_lengths", "gates_t_w", "gates_t_b",
+             "hidden_input", "cell_input"],
+            ["output", "hidden", "cell", "hidden_output", "cell_output"],
+            param=[str(p) for p in step_net.params],
+            param_gradient=[backward_mapping[str(p)] for p in step_net.params],
+            alias_src=["hidden", "hidden", "cell"],
+            alias_dst=["output", "hidden_output", "cell_output"],
+            alias_offset=[1, -1, -1],
+            recurrent_states=["hidden", "cell"],
+            recurrent_inputs=["hidden_input", "cell_input"],
+            recurrent_sizes=[d, d],
+            link_internal=link_internal,
+            link_external=link_external,
+            link_offset=link_offset,
+            backward_link_internal=backward_link_internal,
+            backward_link_external=backward_link_external,
+            backward_link_offset=backward_link_offset,
+            backward_alias_src=["gates_grad"],
+            backward_alias_dst=["input_grad"],
+            backward_alias_offset=[0],
+            scratch=["gates"],
+            backward_scratch=["gates_grad"],
+            scratch_sizes=[4 * d],
+            step_net=str(step_net.Proto()),
+            backward_step_net=str(backward_step_net.Proto()),
+            dim_out=d)
+        workspace.FeedBlob(
+            "input", np.random.randn(t, n, d * 4).astype(np.float32))
+        workspace.FeedBlob(
+            "hidden_input", np.random.randn(1, n, d).astype(np.float32))
+        workspace.FeedBlob(
+            "cell_input", np.random.randn(1, n, d).astype(np.float32))
+        workspace.FeedBlob(
+            "seq_lengths", np.random.randint(0, t, size=(n,)).astype(np.int32))
+
+        def reference(input, seq_lengths, gates_w, gates_b,
+                      hidden_input, cell_input):
+            T = input.shape[0]
+            N = input.shape[1]
+            G = input.shape[2]
+            D = hidden_input.shape[2]
+            hidden = np.zeros(shape=(T + 1, N, D))
+            cell = np.zeros(shape=(T + 1, N, D))
+            assert hidden.shape[0] == T + 1
+            assert cell.shape[0] == T + 1
+            assert hidden.shape[1] == N
+            assert cell.shape[1] == N
+            cell[0, :, :] = cell_input
+            hidden[0, :, :] = hidden_input
+            for t in range(T):
+                timestep = np.asarray([t]).astype(np.int32)
+                input_t = input[t].reshape(1, N, G)
+                hidden_t_prev = hidden[t].reshape(1, N, D)
+                cell_t_prev = cell[t].reshape(1, N, D)
+                gates = np.dot(hidden_t_prev, gates_w.T) + gates_b
+                gates = gates + input_t
+                hidden_t, cell_t = lstm_unit(cell_t_prev, gates, seq_lengths,
+                                             timestep)
+                hidden[t + 1] = hidden_t
+                cell[t + 1] = cell_t
+            return hidden[1:], hidden, cell, hidden[-1].reshape(1, N, D), \
+                cell[-1].reshape(1, N, D)
+
+        self.assertReferenceChecks(
+            hu.cpu_do,
+            op,
+            [workspace.FetchBlob(name)
+             for name in ["input", "seq_lengths",
+                          "gates_t_w", "gates_t_b",
+                          "hidden_input", "cell_input"]],
+            reference)
+
+        for param in [0, 2, 3]:
+            self.assertGradientChecks(
+                hu.cpu_do,
+                op,
+                [workspace.FetchBlob(name)
+                 for name in ["input", "seq_lengths", "gates_t_w", "gates_t_b",
+                              "hidden_input", "cell_input"]],
+                param,
+                [0])
+
+    @given(t=st.integers(1, 5),
+           n=st.integers(1, 5),
+           d=st.integers(1, 5))
+    def test_elman_recurrent_network(self, t, n, d):
+        from caffe2.python import cnn
+        np.random.seed(1701)
+        step_net = cnn.CNNModelHelper(name="Elman")
+        # TODO: name scope external inputs and outputs
+        step_net.Proto().external_input.extend(
+            ["input_t", "seq_lengths", "timestep",
+             "hidden_t_prev", "gates_t_w", "gates_t_b"])
+        step_net.Proto().type = "simple"
+        step_net.Proto().external_output.extend(["hidden_t", "gates_t"])
+        step_net.FC("hidden_t_prev", "gates_t", dim_in=d, dim_out=d, axis=2)
+        step_net.net.Sum(["gates_t", "input_t"], ["gates_t"])
+        step_net.net.Sigmoid(["gates_t"], ["hidden_t"])
+
+        # Initialize params for step net in the parent net
+        for op in step_net.param_init_net.Proto().op:
+            workspace.RunOperatorOnce(op)
+
+        backward_ops, backward_mapping = core.GradientRegistry.GetBackwardPass(
+            step_net.Proto().op, {"hidden_t": "hidden_t_grad"})
+        backward_mapping = {str(k): str(v) for k, v
+                            in backward_mapping.items()}
+        backward_step_net = core.Net("ElmanBackward")
+        del backward_step_net.Proto().op[:]
+        backward_step_net.Proto().op.extend(backward_ops)
+        assert backward_mapping["input_t"] == "gates_t_grad"
+        links = [
+            ("hidden_t_prev", "hidden", 0),
+            ("hidden_t", "hidden", 1),
+            ("gates_t", "gates", 0),
+            ("input_t", "input", 0),
+        ]
+        link_internal, link_external, link_offset = zip(*links)
+        backward_links = [
+            ("hidden_t_prev_grad", "hidden_grad", 0),
+            ("hidden_t_grad", "hidden_grad", 1),
+            ("gates_t_grad", "gates_grad", 0),
+        ]
+        backward_link_internal, backward_link_external, backward_link_offset = \
+            zip(*backward_links)
+        backward_step_net.Proto().external_input.extend(["hidden_t_grad"])
+        backward_step_net.Proto().external_input.extend(
+            step_net.Proto().external_input)
+        backward_step_net.Proto().external_input.extend(
+            step_net.Proto().external_output)
+        op = core.CreateOperator(
+            "RecurrentNetwork",
+            ["input", "seq_lengths", "gates_t_w", "gates_t_b", "hidden_input"],
+            ["output", "hidden", "hidden_output"],
+            alias_src=["hidden", "hidden"],
+            alias_dst=["output", "hidden_output"],
+            alias_offset=[1, -1],
+            recurrent_states=["hidden"],
+            recurrent_inputs=["hidden_input"],
+            recurrent_sizes=[d],
+            link_internal=link_internal,
+            link_external=link_external,
+            link_offset=link_offset,
+            backward_link_internal=backward_link_internal,
+            backward_link_external=backward_link_external,
+            backward_link_offset=backward_link_offset,
+            backward_alias_src=["gates_grad"],
+            backward_alias_dst=["input_grad"],
+            backward_alias_offset=[0],
+            param=[str(p) for p in step_net.params],
+            param_gradient=[backward_mapping[str(p)] for p in step_net.params],
+            scratch=["gates"],
+            backward_scratch=["gates_grad"],
+            scratch_sizes=[d],
+            step_net=str(step_net.Proto()),
+            backward_step_net=str(backward_step_net.Proto()),
+            dim_out=d)
+        workspace.FeedBlob(
+            "input", np.random.randn(t, n, d).astype(np.float32))
+        workspace.FeedBlob(
+            "hidden_input", np.random.randn(1, n, d).astype(np.float32))
+        workspace.FeedBlob(
+            "seq_lengths", np.random.randint(0, t, size=(n,)).astype(np.int32))
+
+        def reference(input, seq_lengths, gates_w, gates_b, hidden_input):
+            T = input.shape[0]
+            N = input.shape[1]
+            D = input.shape[2]
+            hidden = np.zeros(shape=(T + 1, N, D))
+            assert hidden.shape[0] == T + 1
+            assert hidden.shape[1] == N
+            assert hidden.shape[2] == D
+
+            hidden[0, :, :] = hidden_input
+            for t in range(T):
+                input_t = input[t].reshape(1, N, D)
+                hidden_t_prev = hidden[t].reshape(1, N, D)
+                gates = np.dot(hidden_t_prev, gates_w.T)
+                gates = gates.reshape(1, N, D) + input_t.reshape(1, N, D)
+                hidden[t + 1] = sigmoid(gates)
+            return hidden[1:], hidden, hidden[-1].reshape(1, N, D)
+
+        self.assertReferenceChecks(
+            hu.cpu_do,
+            op,
+            [workspace.FetchBlob(name)
+             for name in ["input", "seq_lengths", "gates_t_w", "gates_t_b",
+                          "hidden_input"]],
+            reference)
+
+        for param in [0, 2, 3]:
+            self.assertGradientChecks(
+                hu.cpu_do,
+                op,
+                [workspace.FetchBlob(name)
+                 for name in ["input", "seq_lengths", "gates_t_w", "gates_t_b",
+                              "hidden_input"]],
+                param,
+                [0])
 
     @given(n=st.integers(1, 5),
            c=st.integers(1, 5),
@@ -1982,11 +1924,11 @@ class TestOperators(hu.HypothesisTestCase):
     @given(s=st.text())
     def test_string_serde(self, s):
         s = s.encode('ascii', 'ignore')
-        workspace.FeedBlob("a", s)
-        serialized = workspace.SerializeBlob("a")
-        workspace.DeserializeBlob("b", serialized)
-        self.assertEqual(s, workspace.FetchBlob("a"))
-        self.assertEqual(s, workspace.FetchBlob("b"))
+        self.ws.create_blob("a").feed(s)
+        serialized = self.ws.blobs["a"].serialize("a")
+        self.ws.create_blob("b").deserialize(serialized)
+        self.assertEqual(s, self.ws.blobs[("a")].fetch())
+        self.assertEqual(s, self.ws.blobs[("b")].fetch())
 
     @given(n=st.integers(1, 3),
            dim=st.integers(4, 16),
@@ -1994,8 +1936,8 @@ class TestOperators(hu.HypothesisTestCase):
     def test_distances(self, n, dim, gc, dc):
         X = np.random.uniform(-1, 1, (n, dim)).astype(np.float32)
         Y = np.random.uniform(-1, 1, (n, dim)).astype(np.float32)
-        workspace.FeedBlob("X", X)
-        workspace.FeedBlob("Y", Y)
+        self.ws.create_blob("X").feed(X)
+        self.ws.create_blob("Y").feed(Y)
 
         def check_grad(op):
             self.assertGradientChecks(gc, op, [X, Y], 0, [0],
@@ -2005,26 +1947,26 @@ class TestOperators(hu.HypothesisTestCase):
 
         l2_op = core.CreateOperator("SquaredL2Distance",
                                     ["X", "Y"], ["l2_dist"])
-        workspace.RunOperatorOnce(l2_op)
-        np.testing.assert_allclose(workspace.FetchBlob("l2_dist"),
+        self.ws.run(l2_op)
+        np.testing.assert_allclose(self.ws.blobs[("l2_dist")].fetch(),
                                    np.square(X - Y).sum(axis=1) * 0.5,
                                    rtol=1e-4, atol=1e-4)
         check_grad(l2_op)
 
         dot_op = core.CreateOperator("DotProduct", ["X", "Y"], ["dot"])
-        workspace.RunOperatorOnce(dot_op)
-        np.testing.assert_allclose(workspace.FetchBlob("dot"),
+        self.ws.run(dot_op)
+        np.testing.assert_allclose(self.ws.blobs[("dot")].fetch(),
                                    np.multiply(X, Y).sum(axis=1),
                                    rtol=1e-4, atol=1e-4)
         check_grad(dot_op)
 
         kEps = 1e-12
         cos_op = core.CreateOperator("CosineSimilarity", ["X", "Y"], ["cos"])
-        workspace.RunOperatorOnce(cos_op)
+        self.ws.run(cos_op)
         cos = np.divide(np.multiply(X, Y).sum(axis=1),
                         np.multiply(np.linalg.norm(X, axis=1) + kEps,
                                     np.linalg.norm(Y, axis=1) + kEps))
-        np.testing.assert_allclose(workspace.FetchBlob("cos"), cos,
+        np.testing.assert_allclose(self.ws.blobs[("cos")].fetch(), cos,
                                    rtol=1e-4, atol=1e-4)
         check_grad(cos_op)
 
@@ -2037,7 +1979,7 @@ class TestOperators(hu.HypothesisTestCase):
            batch_size=st.integers(1, 3),
            order=st.sampled_from(["NCHW", "NHWC"]),
            mode=st.sampled_from(["constant", "reflect", "edge"]),
-           **hu.gcs_cpu_only)
+           **hu.gcs)
     def test_pad_image(self, pad_t, pad_l, pad_b, pad_r, size, input_channels,
                        batch_size, order, mode, gc, dc):
         op = core.CreateOperator(
@@ -2077,15 +2019,16 @@ class TestOperators(hu.HypothesisTestCase):
            input_channels=st.integers(1, 10),
            batch_size=st.integers(1, 3),
            order=st.sampled_from(["NCHW", "NHWC"]),
+           epsilon=st.floats(min_value=1e-4, max_value=1e-2),
            **hu.gcs_cpu_only)
     def test_instance_norm(self, size, input_channels, batch_size, order,
-                           gc, dc):
+                           epsilon, gc, dc):
         op = core.CreateOperator(
             "InstanceNorm",
             ["X", "scale", "bias"],
             ["Y"],
             order=order,
-            epsilon=1e-2,
+            epsilon=epsilon,
         )
         np.random.seed(1701)
         scale = np.random.rand(input_channels).astype(np.float32) + 0.5
@@ -2098,7 +2041,7 @@ class TestOperators(hu.HypothesisTestCase):
         def ref_nchw(x, scale, bias):
             x = x.reshape(batch_size * input_channels, size * size)
             y = (x - x.mean(1)[:, np.newaxis])
-            y /= np.sqrt(x.var(1) + 1e-2)[:, np.newaxis]
+            y /= np.sqrt(x.var(1) + epsilon)[:, np.newaxis]
             y = y.reshape(batch_size, input_channels, size, size)
             y = y * scale.reshape(1, input_channels, 1, 1)
             y = y + bias.reshape(1, input_channels, 1, 1)
@@ -2111,7 +2054,33 @@ class TestOperators(hu.HypothesisTestCase):
 
         self.assertReferenceChecks(
             gc, op, [X, scale, bias],
-            ref_nchw if order == "NCHW" else ref_nhwc,
-            threshold=0.05)
+            ref_nchw if order == "NCHW" else ref_nhwc)
+        # TODO(jiayq): when there are backward and GPU implementations, enable
+        # these two.
         # self.assertDeviceChecks(dc, op, [X, scale, bias], [0])
         # self.assertGradientChecks(gc, op, [X, scale, bias], 0, [0])
+
+        ws = workspace.C.Workspace()
+        feeds = [("X", X), ("scale", scale), ("bias", bias)]
+        for blob, arr in feeds:
+            ws.create_blob(blob).feed(arr)
+        for i in range(100):
+            ws.run(op)
+        for blob, arr in feeds:
+            np.testing.assert_array_equal(ws.blobs[blob].fetch(), arr)
+
+    @given(X=hu.tensor(min_dim=2,
+                       max_dim=2,
+                       elements=st.floats(min_value=0.5, max_value=1.0)),
+           **hu.gcs_cpu_only)
+    def test_normalize(self, X, gc, dc):
+        op = core.CreateOperator("Normalize", "X", "Y")
+
+        def ref_normalize(X):
+            x_normed = X / (
+                np.sqrt((X**2).sum(-1))[:, np.newaxis] + np.finfo(X.dtype).tiny)
+            return (x_normed,)
+
+        self.assertReferenceChecks(gc, op, [X], ref_normalize)
+        self.assertDeviceChecks(dc, op, [X], [0])
+        self.assertGradientChecks(gc, op, [X], 0, [0])

@@ -224,17 +224,18 @@ class Operator : public OperatorBase {
 // doesn't need to call Eigen).
 //
 // DispatchHelper provides compile-time generation of nested "if" statements,
-// e.g. `DispatchHelper<FixedSizes<1, 4>>::call(this, block_size);`
+// e.g. `DispatchHelper<FixedValues<1, 4>>::call(this, block_size);`
 // unrolls into:
 //   if (block_size == 1) {
-//     return DoRunWithSize<1>();
+//     return DoRunWithValue<1>();
 //   } else if (block_size = 4) {
-//     return DoRunWithSize<4>();
+//     return DoRunWithValue<4>();
 //   } else {
-//     return DoRunWithSize<-1>();
+//     return DoRunWithValue<-1>();
 //   }`
 //
-// DoRunWithSize implementation can use template arguments to do "if" statements
+// DoRunWithValue implementation can use template arguments to do "if"
+// statements
 // or proxy to functions in math.h which often provide fixed size
 // implementation.
 //
@@ -245,14 +246,14 @@ class Operator : public OperatorBase {
 // templated. We might consider adding static class-level polymorphism later.
 //
 // Convenient macro USE_DISPATCH_HELPER is provided for declaring friendship in
-// case DoRunWithSize or DoRunWithType are declared non-public.
+// case DoRunWithValue or DoRunWithType are declared non-public.
 
 #define USE_DISPATCH_HELPER                        \
   template <typename Sizes, typename... ExtraArgs> \
   friend struct DispatchHelper
 
-template <int... Sizes>
-struct FixedSizes {};
+template <int... Values>
+struct FixedValues {};
 
 template <typename... Types>
 struct TensorTypes {};
@@ -260,23 +261,23 @@ struct TensorTypes {};
 template <typename Sizes, typename... ExtraArgs>
 struct DispatchHelper;
 
-template <int FirstSize, int... Sizes, typename... ExtraArgs>
-struct DispatchHelper<FixedSizes<FirstSize, Sizes...>, ExtraArgs...> {
+template <int FirstVal, int... Values, typename... ExtraArgs>
+struct DispatchHelper<FixedValues<FirstVal, Values...>, ExtraArgs...> {
   template <typename Op>
-  static bool call(Op* op, TIndex size) {
-    if (FirstSize == size) {
-      return op->template DoRunWithSize<ExtraArgs..., FirstSize>();
+  static bool call(Op* op, int value) {
+    if (FirstVal == value) {
+      return op->template DoRunWithValue<ExtraArgs..., FirstVal>();
     }
-    return DispatchHelper<FixedSizes<Sizes...>, ExtraArgs...>::
-        template call<Op>(op, size);
+    return DispatchHelper<FixedValues<Values...>, ExtraArgs...>::template call<
+        Op>(op, value);
   }
 };
 
 template <typename... ExtraArgs>
-struct DispatchHelper<FixedSizes<>, ExtraArgs...> {
+struct DispatchHelper<FixedValues<>, ExtraArgs...> {
   template <typename Op>
   static bool call(Op* op, TIndex size) {
-    return op->template DoRunWithSize<ExtraArgs..., -1>();
+    return op->template DoRunWithValue<ExtraArgs..., -1>();
   }
 };
 

@@ -15,7 +15,6 @@
 namespace caffe2 {
 namespace math {
 
-// TODO(Yangqing): Yuck again. Maybe change it to templated functors?
 #define DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(T, Funcname, function)             \
 __global__                                                                     \
 void _Kernel_##T##_##Funcname(const int N, const T* x, T* y) {                 \
@@ -42,7 +41,6 @@ __device__ double cuda_sqr(const double x) { return x * x; }
 
 DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Sqr, cuda_sqrf);
 DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(double, Sqr, cuda_sqr);
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(bool, Not, !);
 
 #undef DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION
 
@@ -63,145 +61,10 @@ DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(bool, Not, !);
         context->cuda_stream()>>>(N, a, b, y);                           \
   }
 
-#define DEFINE_SIMPLE_CUDA_BINARY_FUNCTION(Name, Expr)     \
-  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(float, Name, Expr)  \
-  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(double, Name, Expr) \
-  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(int, Name, Expr)    \
-  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(long, Name, Expr)
-
-DEFINE_SIMPLE_CUDA_BINARY_FUNCTION(Add, +);
-DEFINE_SIMPLE_CUDA_BINARY_FUNCTION(Sub, -);
-DEFINE_SIMPLE_CUDA_BINARY_FUNCTION(Mul, *);
-DEFINE_SIMPLE_CUDA_BINARY_FUNCTION(Div, /);
-
-DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(bool, And, &);
-DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(bool, Or, |);
-DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(bool, Xor, ^);
-
-#undef DEFINE_SIMPLE_CUDA_BINARY_FUNCTION
-#undef DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION
-
-
-/*
-#define CAFFE2_SPECIALIZED_ROWWISEMAX(T)                                       \
-template <>                                                                    \
-void RowwiseMax<T, CPUContext>(                                                \
-    const int N, const int D, const T* x, T* y, CPUContext* context) {         \
-  for (int i = 0; i < N; ++i) {                                                \
-    y[i] = x[i*D];                                                             \
-    for (int j = 1; j < D; ++j) {                                              \
-      y[i] = std::max(y[i], x[i * D + j]);                                     \
-    }                                                                          \
-  }                                                                            \
-}
-CAFFE2_SPECIALIZED_ROWWISEMAX(float)
-
-#define CAFFE2_SPECIALIZED_COLWISEMAX(T)                                       \
-template <>                                                                    \
-void ColwiseMax<T, CPUContext>(                                                \
-    const int N, const int D, const T* x, T* y, CPUContext* context) {         \
-  memcpy(y, x, sizeof(T) * D);                                                 \
-  for (int i = 1; i < N; ++i) {                                                \
-    for (int j = 0; j < D; ++j) {                                              \
-      y[j] = std::max(y[j], x[i * D + j]);                                     \
-    }                                                                          \
-  }                                                                            \
-}
-CAFFE2_SPECIALIZED_COLWISEMAX(float)
-*/
-
-#define DELEGATE_BROADCAST_CUDA_OPERATOR(T, Funcname, expr) \
-  namespace {                                               \
-  __global__ void Funcname##ToRowKernel_##T(                \
-      const int M,                                          \
-      const int N,                                          \
-      const T* a,                                           \
-      const T* b,                                           \
-      T* y) {                                               \
-    CUDA_1D_KERNEL_LOOP(i, M* N) {                          \
-      y[i] = a[i] expr b[i % N];                            \
-    }                                                       \
-  }                                                         \
-  }                                                         \
-  template <>                                               \
-  void Funcname##ToRow<T, CUDAContext>(                     \
-      const int M,                                          \
-      const int N,                                          \
-      const T* a,                                           \
-      const T* b,                                           \
-      T* y,                                                 \
-      CUDAContext* context) {                               \
-    Funcname##ToRowKernel_##T<<<                            \
-        CAFFE_GET_BLOCKS(M* N),                             \
-        CAFFE_CUDA_NUM_THREADS,                             \
-        0,                                                  \
-        context->cuda_stream()>>>(M, N, a, b, y);           \
-  }
-
-#define DEFINE_BROADCAST_CUDA_OPERATOR(Name, Expr)     \
-  DELEGATE_BROADCAST_CUDA_OPERATOR(float, Name, Expr)  \
-  DELEGATE_BROADCAST_CUDA_OPERATOR(double, Name, Expr) \
-  DELEGATE_BROADCAST_CUDA_OPERATOR(int, Name, Expr)    \
-  DELEGATE_BROADCAST_CUDA_OPERATOR(long, Name, Expr)
-
-DEFINE_BROADCAST_CUDA_OPERATOR(Add, +);
-DEFINE_BROADCAST_CUDA_OPERATOR(Sub, -);
-DEFINE_BROADCAST_CUDA_OPERATOR(Mul, *);
-DEFINE_BROADCAST_CUDA_OPERATOR(Div, /);
-
-DELEGATE_BROADCAST_CUDA_OPERATOR(bool, And, &);
-DELEGATE_BROADCAST_CUDA_OPERATOR(bool, Or, |);
-DELEGATE_BROADCAST_CUDA_OPERATOR(bool, Xor, ^);
-
-#undef DEFINE_BROADCAST_CUDA_OPERATOR
-#undef DELEGATE_BROADCAST_CUDA_OPERATOR
-
-#define DELEGATE_INLINE_BROADCAST_CUDA_OPERATOR(T, Funcname, expr)            \
-  namespace {                                                                 \
-  __global__ void                                                             \
-      Funcname##ToRowKernel_##T(const int M, const int N, const T* x, T* y) { \
-    CUDA_1D_KERNEL_LOOP(i, M* N) {                                            \
-      y[i] expr## = x[i % N];                                                 \
-    }                                                                         \
-  }                                                                           \
-  __global__ void                                                             \
-      Funcname##ToColKernel_##T(const int M, const int N, const T* x, T* y) { \
-    CUDA_1D_KERNEL_LOOP(i, M* N) {                                            \
-      y[i] expr## = x[i / M];                                                 \
-    }                                                                         \
-  }                                                                           \
-  }                                                                           \
-  template <>                                                                 \
-  void Funcname##ToRow<T, CUDAContext>(                                       \
-      const int M, const int N, const T* x, T* y, CUDAContext* context) {     \
-    Funcname##ToRowKernel_##T<<<                                              \
-        CAFFE_GET_BLOCKS(M* N),                                               \
-        CAFFE_CUDA_NUM_THREADS,                                               \
-        0,                                                                    \
-        context->cuda_stream()>>>(M, N, x, y);                                \
-  }                                                                           \
-  template <>                                                                 \
-  void Funcname##ToCol<T, CUDAContext>(                                       \
-      const int M, const int N, const T* x, T* y, CUDAContext* context) {     \
-    Funcname##ToColKernel_##T<<<                                              \
-        CAFFE_GET_BLOCKS(M* N),                                               \
-        CAFFE_CUDA_NUM_THREADS,                                               \
-        0,                                                                    \
-        context->cuda_stream()>>>(M, N, x, y);                                \
-  }
-#define DEFINE_INLINE_BROADCAST_CUDA_OPERATOR(Name, Expr)     \
-  DELEGATE_INLINE_BROADCAST_CUDA_OPERATOR(float, Name, Expr)  \
-  DELEGATE_INLINE_BROADCAST_CUDA_OPERATOR(double, Name, Expr) \
-  DELEGATE_INLINE_BROADCAST_CUDA_OPERATOR(int, Name, Expr)    \
-  DELEGATE_INLINE_BROADCAST_CUDA_OPERATOR(long, Name, Expr)
-
-DEFINE_INLINE_BROADCAST_CUDA_OPERATOR(Add, +);
-DEFINE_INLINE_BROADCAST_CUDA_OPERATOR(Sub, -);
-DEFINE_INLINE_BROADCAST_CUDA_OPERATOR(Mul, *);
-DEFINE_INLINE_BROADCAST_CUDA_OPERATOR(Div, /);
-
-#undef DEFINE_INLINE_BROADCAST_CUDA_OPERATOR
-#undef DELEGATE_INLINE_BROADCAST_CUDA_OPERATOR
+DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(float, Add, +);
+DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(float, Sub, -);
+DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(float, Mul, *);
+DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(float, Div, /);
 
 // Caffe2 gemm provides a simpler interface to the gemm functions, with the
 // limitation that the data has to be contiguous in memory.

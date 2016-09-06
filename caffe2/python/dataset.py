@@ -21,20 +21,23 @@ import numpy as np
 
 
 class _DatasetReader(Reader):
-    def __init__(self, content, cursor, name):
+    def __init__(self, content, cursor, name, batch_size=1):
         """Don't call this directly. Instead, use dataset.reader()"""
         assert isinstance(content, Field)
         Reader.__init__(self, content)
         self._content = content
         self.cursor = cursor
         self.name = name
+        self.batch_size = batch_size
 
-    def read(self, read_net, batch_size=1):
+    def read(self, read_net):
         with core.NameScope(read_net.NextName(self.name)):
             fields = read_net.ReadNextBatch(
                 [self.cursor] + self._content.field_blobs(),
                 self._content.field_names(),
-                batch_size=batch_size)
+                batch_size=self.batch_size)
+            if type(fields) is core.BlobReference:
+                fields = [fields]
             return (read_net.IsEmpty([fields[0]]), fields)
 
     def reset(self, net):
@@ -42,13 +45,14 @@ class _DatasetReader(Reader):
 
 
 class _DatasetRandomReader(Reader):
-    def __init__(self, content, cursor, name, indices):
+    def __init__(self, content, cursor, name, indices, batch_size=1):
         """Don't call this directly. Instead, use dataset.random_reader()"""
         Reader.__init__(self, content)
         self._content = content
         self.cursor = cursor
         self.name = name
         self.indices = indices
+        self.batch_size = batch_size
 
     def reset(self, net):
         net.ResetCursor([self.cursor], [])
@@ -60,8 +64,8 @@ class _DatasetRandomReader(Reader):
             'offsets')
         self.offsets = offsets
 
-    def sortAndShuffle(self, net, sort_by_field=None,
-                       shuffle_size=1, batch_size=1):
+    def sort_and_shuffle(self, net, sort_by_field=None,
+                         shuffle_size=1, batch_size=1):
         # no sorting by default
         sort_by_field_idx = -1
         if sort_by_field:
@@ -78,13 +82,13 @@ class _DatasetRandomReader(Reader):
             batch_size=batch_size)
         self.indices = indices
 
-    def read(self, read_net, batch_size=1):
+    def read(self, read_net):
         with core.NameScope(read_net.NextName(self.name)):
             fields = read_net.ReadRandomBatch(
                 [self.cursor, self.indices, self.offsets] + (
                     self._content.field_blobs()),
                 self._content.field_names(),
-                batch_size=batch_size)
+                batch_size=self.batch_size)
             return (read_net.IsEmpty([fields[0]]), fields)
 
 
@@ -223,7 +227,7 @@ class Dataset(object):
         """
         return self.field_types
 
-    def reader(self, init_net, cursor_name=None):
+    def reader(self, init_net, cursor_name=None, batch_size=1):
         """Create a Reader object that is used to iterate through the dataset.
 
         This will append operations to `init_net` that create a TreeCursor,
@@ -235,6 +239,7 @@ class Dataset(object):
             init_net: net that will be run once to create the cursor.
             cursor_name: optional name for the blob containing a pointer
                          to the cursor.
+            batch_size: how many samples to read per iteration.
 
         Returns:
             A _DatasetReader that can be used to create operators that will
@@ -246,16 +251,20 @@ class Dataset(object):
             [],
             [cursor_name],
             fields=self.fields)
-        return _DatasetReader(self.content(), cursor, cursor_name)
+        return _DatasetReader(self.content(), cursor, cursor_name, batch_size)
 
-    def random_reader(self, init_net, indices=None, cursor_name=None):
+    def random_reader(self, init_net, indices=None, cursor_name=None,
+                      batch_size=1):
         """Create a Reader object that is used to iterate through the dataset.
 
         NOTE: The reader order depends on the order in indices.
 
         Args:
-            Similar to reader
+            init_net: net that will be run once to create the cursor.
             indices: blob of reading order
+            cursor_name: optional name for the blob containing a pointer
+                         to the cursor.
+            batch_size: how many samples to read per iteration.
 
         Returns:
             A DatasetReader that can be used to create operators that will
@@ -268,7 +277,7 @@ class Dataset(object):
             [cursor_name],
             fields=self.fields)
         return _DatasetRandomReader(
-            self.content(), cursor, cursor_name, indices)
+            self.content(), cursor, cursor_name, indices, batch_size)
 
     def writer(self, init_net):
         """Create a Writer that can be used to append entries into the dataset.
