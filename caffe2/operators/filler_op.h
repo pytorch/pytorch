@@ -25,26 +25,28 @@ class FillerOp : public Operator<Context> {
       : Operator<Context>(operator_def, ws),
         shape_(ToVectorTIndex(OperatorBase::GetRepeatedArgument<int>("shape"))),
         extra_shape_(ToVectorTIndex(
-            OperatorBase::GetRepeatedArgument<int>("extra_shape"))) {}
+            OperatorBase::GetRepeatedArgument<int>("extra_shape"))) {
+    if (InputSize()) {
+      if (shape_.size() != 0) {
+        CAFFE_THROW(
+            "Cannot set the shape argument and pass in an input at "
+            "the same time");
+      }
+    } else if (!extra_shape_.empty()) {
+      CAFFE_THROW("Cannot set extra_shape when there is no input");
+    }
+  }
+
   virtual ~FillerOp() {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override {
     auto* output = Operator<Context>::Output(0);
     if (InputSize()) {
-      if (shape_.size() != 0) {
-        LOG(ERROR) << "Cannot set the shape argument and pass in an input at "
-                      "the same time.";
-        return false;
-      }
       auto shape = Input(0).dims();
       shape.insert(shape.end(), extra_shape_.begin(), extra_shape_.end());
       output->Resize(shape);
     } else {
-      if (!extra_shape_.empty()) {
-        LOG(ERROR) << "Cannot set extra_shape when there is no input";
-        return false;
-      }
       output->Resize(shape_);
     }
     return Fill(output);

@@ -85,6 +85,7 @@ class ConcatOp final : public Operator<Context> {
 template <class Context>
 bool SplitOp<Context>::RunOnDevice() {
   auto& input = Input(0);
+  CAFFE_ENFORCE(axis_ < input.ndim(), "Axis not in input ndim range.");
   const int input_channels = input.dim32(axis_);
   const int* axis_data;
   vector<int> equal_split;
@@ -109,7 +110,6 @@ bool SplitOp<Context>::RunOnDevice() {
                   "number of outputs.");
     axis_data = split_.data();
   }
-  CHECK_LT(axis_, input.ndim());
 
   CHECK_EQ(std::accumulate(axis_data, axis_data + OutputSize(), 0),
            input_channels)
@@ -143,26 +143,53 @@ bool ConcatOp<Context>::RunOnDevice() {
   TensorCPU* split = OperatorBase::Output<TensorCPU>(1);
   split->Resize(vector<TIndex>(1, InputSize()));
   int* axis_data = split->template mutable_data<int>();
+  auto& input_zero = Input(0);
+  CAFFE_ENFORCE(axis_ < input_zero.ndim(), "Axis not in input ndim range.");
+
+  int before = 1, after = 1;
+  vector<TIndex> output_dims(input_zero.dims());
+  for (int i = 0; i < input_zero.ndim(); ++i) {
+    if (i == axis_) {
+      continue;
+    }
+    int dim = input_zero.dim32(i);
+    if (i < axis_) {
+      before *= dim;
+    } else { // i > axis_
+      after *= dim;
+    }
+    // check the input dims are compatible.
+    for (int j = 1; j < InputSize(); ++j) {
+      int dim_j = Input(j).dim32(i);
+      CAFFE_ENFORCE(
+          dim == dim_j,
+          "Expect dimension = ",
+          dim,
+          " got ",
+          dim_j,
+          " at axis = ",
+          i,
+          " for input: ",
+          j,
+          ". The input tensors can only have different dimensions "
+          "along the axis = ",
+          axis_,
+          Input(0).dims(),
+          " vs ",
+          Input(j).dims());
+    }
+  }
+
   int output_channels = 0;
   for (int i = 0; i < InputSize(); ++i) {
     axis_data[i] = Input(i).dim32(axis_);
     output_channels += axis_data[i];
   }
-  auto& input_zero = Input(0);
-  vector<TIndex> output_dims(input_zero.dims());
   output_dims[axis_] = output_channels;
   output->Resize(output_dims);
   int output_offset = 0;
-  int before = 1, after = 1;
-  for (int i = 0; i < axis_; ++i) {
-    before *= input_zero.dim32(i);
-  }
-  for (int i = axis_ + 1; i < input_zero.ndim(); ++i) {
-    after *= input_zero.dim32(i);
-  }
   for (int i = 0; i < InputSize(); ++i) {
     auto& input = Input(i);
-    // TODO: check if the input dims are compatible.
     math::CopyMatrix<Context>(
         input.itemsize(), before, input.dim32(axis_) * after, input.raw_data(),
         input.dim32(axis_) * after,

@@ -34,6 +34,7 @@ class BlobSerializerBase {
    * @param acceptor
    *     a lambda which accepts key value pairs to save them to storage.
    *     serailizer can use it to save blob in several chunks
+   *     acceptor should be thread-safe
    */
   virtual void Serialize(const Blob& blob, const std::string& name,
                         SerializationAcceptor acceptor) = 0;

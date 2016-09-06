@@ -298,9 +298,88 @@ class AddPaddingOp final : public Operator<CPUContext> {
   int endPaddingWidth_;
 };
 
+using TLength = int32_t;
+
+class PadEmptySamplesOp : public Operator<CPUContext> {
+ public:
+  PadEmptySamplesOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CPUContext>(operator_def, ws) {}
+
+  bool RunOnDevice() override {
+    auto& lengths = Input(0);
+    auto* lengthsPtr = lengths.template data<TLength>();
+    CAFFE_ENFORCE(lengths.ndim() == 1, "LENGTH should be 1-D");
+    CAFFE_ENFORCE(InputSize() >= 1, "Input size must be no less than 1");
+
+    auto* out_lengths = Output(0);
+    int needPadding = 0;
+    int sumLen = 0;
+    for (int i = 0; i < lengths.size(); ++i) {
+      if (lengthsPtr[i] == 0) {
+        needPadding++;
+      }
+      sumLen += lengthsPtr[i];
+    }
+
+    out_lengths->Resize(lengths.size());
+    auto* outLengthsPtr = out_lengths->template mutable_data<TLength>();
+    for (int i = 0; i < lengths.size(); ++i) {
+      if (lengthsPtr[i] == 0) {
+        outLengthsPtr[i] = 1;
+      } else {
+        outLengthsPtr[i] = lengthsPtr[i];
+      }
+    }
+
+    for (int k = 0; k < InputSize() - 1; k++) {
+      auto& features = Input(1 + k);
+      CAFFE_ENFORCE(features.ndim() >= 1, "FEATURE should at least 1-D");
+      CAFFE_ENFORCE(
+          features.dim(0) == sumLen, "FEATURE and LENGTH should be consistent");
+      const auto block_size = features.size_from_dim(1);
+
+      auto* out_features = Output(1 + k);
+      auto outDim = features.dims();
+      outDim.at(0) += needPadding;
+      out_features->Resize(outDim);
+      auto dst =
+          static_cast<char*>(out_features->raw_mutable_data(features.meta()));
+      auto src_base = static_cast<const char*>(features.raw_data());
+      // copy data and add padding index as zero
+      Tensor<CPUContext> zero;
+      zero.Resize(block_size);
+      auto zeroPtr =
+          static_cast<const char*>(zero.raw_mutable_data(features.meta()));
+      int start_dest = 0;
+      int start_src = 0;
+      for (int i = 0; i < lengths.size(); ++i) {
+        if (lengthsPtr[i] == 0) {
+          context_.template CopyItems<CPUContext, CPUContext>(
+              features.meta(),
+              block_size,
+              zeroPtr,
+              dst + start_dest * features.meta().itemsize());
+          start_dest += block_size;
+        } else {
+          auto src = src_base + start_src * features.meta().itemsize();
+          context_.template CopyItems<CPUContext, CPUContext>(
+              features.meta(),
+              lengthsPtr[i] * block_size,
+              src,
+              dst + start_dest * features.meta().itemsize());
+          start_src += lengthsPtr[i] * block_size;
+          start_dest += lengthsPtr[i] * block_size;
+        }
+      }
+    }
+    return true;
+  }
+};
+
 REGISTER_CPU_OPERATOR(AddPadding, AddPaddingOp);
 REGISTER_CPU_OPERATOR(RemovePadding, RemovePaddingOp);
 REGISTER_CPU_OPERATOR(GatherPadding, GatherPaddingOp);
+REGISTER_CPU_OPERATOR(PadEmptySamples, PadEmptySamplesOp);
 
 struct GetAddPadingGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
@@ -424,5 +503,23 @@ order to compute the gradients of AddPadding w.r.t the padding tensors.
         1,
         "end_padding_sum",
         "T<D1..., Dn> Sum of all end paddings, if provided.");
+
+OPERATOR_SCHEMA(PadEmptySamples)
+    .NumInputs(1, INT_MAX)
+    .NumOutputs(1, INT_MAX)
+    .SetDoc(R"DOC(
+Pad empty field given lengths and index features,
+
+Input(0) is a blob pointing to the lengths of samples in one batch,
+[Input(1),... Input(num_fields)] a list of tensors containing the data for
+each field of the features.
+
+PadEmptySamples is thread safe.
+)DOC")
+    .Input(0, "lengths", "A blob containing a pointer to the lengths.")
+    .Output(
+        0,
+        "out_lengths",
+        "Tensor containing lengths with empty sample padded.");
 }
 }

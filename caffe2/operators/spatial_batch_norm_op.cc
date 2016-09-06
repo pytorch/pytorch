@@ -2,25 +2,161 @@
 
 namespace caffe2 {
 
-namespace {
-// TODO(jiayq): remove the 3-input case to keep strong state-less assumption.
+template <>
+bool SpatialBNOp<CPUContext>::RunOnDevice() {
+  const auto& X = Input(INPUT);
+  const auto& scale = Input(SCALE);
+  const auto& bias = Input(BIAS);
+
+  DCHECK_EQ(X.ndim(), 4);
+  const int N = X.dim32(0);
+  const int C = (order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(3));
+  const int H = (order_ == StorageOrder::NCHW ? X.dim32(2) : X.dim32(1));
+  const int W = (order_ == StorageOrder::NCHW ? X.dim32(3) : X.dim32(2));
+  DCHECK_EQ(scale.ndim(), 1);
+  DCHECK_EQ(bias.ndim(), 1);
+  DCHECK_EQ(scale.dim32(0), C);
+  DCHECK_EQ(bias.dim32(0), C);
+
+  ConstEigenVectorArrayMap<float> scale_arr(scale.data<float>(), C);
+  ConstEigenVectorArrayMap<float> bias_arr(bias.data<float>(), C);
+
+  auto* Y = Output(OUTPUT);
+  Y->ResizeLike(X);
+
+  if (!is_test_) {
+    // training mode
+    // Get the mean and variance.
+    // Note that, to be consistent with cudnn, we will output saved inverse
+    // std as output 5, but we will still use the same storage place to
+    // compute var as well. The inverse is going to be carried out at the end
+    // of the op.
+    Output(SAVED_MEAN)->Resize(C);
+    Output(SAVED_INV_VAR)->Resize(C);
+    EigenVectorArrayMap<float> mean(
+        Output(SAVED_MEAN)->mutable_data<float>(), C);
+    EigenVectorArrayMap<float> var(
+        Output(SAVED_INV_VAR)->mutable_data<float>(), C);
+
+    mean.setZero();
+    var.setZero();
+    switch (order_) {
+      case StorageOrder::NCHW: {
+        ConstEigenArrayMap<float> X_arr(X.data<float>(), H * W, N * C);
+        for (int nc = 0; nc < N * C; ++nc) {
+          mean(nc % C) += X_arr.col(nc).sum();
+        }
+        mean /= N * H * W;
+        for (int nc = 0; nc < N * C; ++nc) {
+          var(nc % C) += (X_arr.col(nc) - mean(nc % C)).matrix().squaredNorm();
+        }
+        var /= N * H * W;
+        break;
+      }
+      case StorageOrder::NHWC: {
+        ConstEigenArrayMap<float> X_arr(X.data<float>(), C, N * H * W);
+        for (int i = 0; i < N * H * W; ++i) {
+          mean += X_arr.col(i);
+        }
+        mean /= N * H * W;
+        for (int i = 0; i < N * H * W; ++i) {
+          var += (X_arr.col(i) - mean) * (X_arr.col(i) - mean);
+        }
+        var /= N * H * W;
+        break;
+      }
+      default:
+        CAFFE_THROW("Unknown storage order: ", order_);
+    }
+
+    // Compute the running mean and running inv variance.
+    auto* running_mean = Output(RUNNING_MEAN);
+    auto* running_var = Output(RUNNING_VAR);
+    // Check if they are initialized
+    if (!running_mean->size()) {
+      running_mean->Resize(C);
+      EigenVectorArrayMap<float>(running_mean->mutable_data<float>(), C) = 0;
+    }
+    if (!running_var->size()) {
+      running_var->Resize(C);
+      EigenVectorArrayMap<float>(running_var->mutable_data<float>(), C) = 0;
+    }
+    EigenVectorArrayMap<float> running_mean_arr(
+        running_mean->mutable_data<float>(), C);
+    EigenVectorArrayMap<float> running_var_arr(
+        running_var->mutable_data<float>(), C);
+    running_mean_arr = running_mean_arr * momentum_ + mean * (1. - momentum_);
+    running_var_arr = running_var_arr * momentum_ + var * (1. - momentum_);
+  }
+
+  // Regardless of training or testing, we will apply the estimated mean
+  // and standard deviation to the input. For testing, they are
+  // specified directly by the input, and for training, they are computed
+  // by the op.
+  Eigen::Array<float, Eigen::Dynamic, 1> inv_std(C);
+  if (is_test_) {
+    ConstEigenVectorArrayMap<float> var_arr(Input(EST_VAR).data<float>(), C);
+    inv_std = (var_arr + epsilon_).sqrt().inverse();
+  } else {
+    EigenVectorArrayMap<float> saved_inv_std(
+        Output(SAVED_INV_VAR)->mutable_data<float>(), C);
+    saved_inv_std = (saved_inv_std + epsilon_).inverse().sqrt();
+    inv_std = saved_inv_std;
+  }
+  ConstEigenVectorArrayMap<float> mean_arr(
+      is_test_ ? Input(EST_MEAN).data<float>()
+               : Output(SAVED_MEAN)->data<float>(),
+      C);
+  // We can fuse the output computation as follows:
+  //   ((x - est_mean) * (inv_var) * scale + bias
+  // to
+  //   (x * inv_var * scale) + (bias - est_mean * inv_var * scale)
+  Eigen::Array<float, Eigen::Dynamic, 1> new_scale = inv_std * scale_arr;
+  Eigen::Array<float, Eigen::Dynamic, 1> new_bias =
+      bias_arr - mean_arr * inv_std * scale_arr;
+  switch (order_) {
+    case StorageOrder::NHWC: {
+      EigenArrayMap<float>(Y->mutable_data<float>(), C, N * H * W) =
+          (ConstEigenArrayMap<float>(X.data<float>(), C, N * H * W).colwise() *
+           new_scale)
+              .colwise() +
+          new_bias;
+      break;
+    }
+    case StorageOrder::NCHW: {
+      EigenArrayMap<float> Y_arr(Y->mutable_data<float>(), H * W, N * C);
+      ConstEigenArrayMap<float> X_arr(X.data<float>(), H * W, N * C);
+      for (int nc = 0; nc < N * C; ++nc) {
+        Y_arr.col(nc) = X_arr.col(nc) * new_scale(nc % C) + new_bias(nc % C);
+      }
+      break;
+    }
+    default:
+      CAFFE_THROW("Unknown storage order: ", order_);
+  }
+  return true;
+}
+
+template <>
+bool SpatialBNGradientOp<CPUContext>::RunOnDevice() {
+  CAFFE_THROW("Spatial BN gradient on the CPU is not implemented yet.");
+}
+
+REGISTER_CPU_OPERATOR(SpatialBN, SpatialBNOp<CPUContext>);
+REGISTER_CPU_OPERATOR(SpatialBNGradient, SpatialBNGradientOp<CPUContext>);
+
 OPERATOR_SCHEMA(SpatialBN)
-    .NumInputs(3, 5)
-    .NumOutputs({1, 3, 5})
+    .NumInputs(5)
+    .NumOutputs({1, 5})
     .EnforceInplace({{3, 1}, {4, 2}})
     .SetDoc(R"DOC(
 Carries out spatial batch normalization as described in the paper
 https://arxiv.org/abs/1502.03167. Depending on the mode it is being run,
 there are multiple cases for the number of outputs, which we list below:
 
-Output case #1: Y, mean, inv_var (if training mode, type 1)
-Output case #2: Y, mean, inv_var, saved_mean, saved_inv_var
-                (if training mode, type 2)
-Output case #3: Y (test mode only)
-
-For training mode, type 2 is faster in the sense that for the backward
-pass, it is able to reuse the saved mean and inv_var in the gradient
-computation.
+Output case #1: Y, mean, var, saved_mean, saved_var
+                (training mode)
+Output case #2: Y (test mode)
 )DOC")
     .Arg(
         "is_test",
@@ -35,21 +171,23 @@ computation.
     .Input(
         1,
         "scale",
-        "The scale as a tensor of size 1 to be applied to the output.")
+        "The scale as a 1-dimensional tensor of size C to be applied to the "
+        "output.")
     .Input(
         2,
         "bias",
-        "The bias as a tensor of size 1 to be applied to the output.")
+        "The bias as a 1-dimensional tensor of size C to be applied to the "
+        "output.")
     .Input(
         3,
         "mean",
         "The running mean (training) or the estimated mean (testing) "
-        "as a 1-dimensional vector of size C.")
+        "as a 1-dimensional tensor of size C.")
     .Input(
         4,
-        "inv_var",
-        "The running inverse variance (training) or the estimated inverse "
-        "variance (testing) as a 1-dimensional vector of size C.")
+        "var",
+        "The running variance (training) or the estimated "
+        "variance (testing) as a 1-dimensional tensor of size C.")
     .Output(0, "Y", "The output 4-dimensional tensor of the same shape as X.")
     .Output(
         1,
@@ -58,33 +196,26 @@ computation.
         "with the input mean. Should not be used for testing.")
     .Output(
         2,
-        "inv_var",
-        "The running inverse variance after the spatial BN operator. Must be "
-        "in-place with the input inv_var. Should not be used for testing.")
+        "var",
+        "The running variance after the spatial BN operator. Must be "
+        "in-place with the input var. Should not be used for testing.")
     .Output(
         3,
         "saved_mean",
-        "Optional saved mean used during training to speed up gradient "
+        "Saved mean used during training to speed up gradient "
         "computation. Should not be used for testing.")
     .Output(
         4,
-        "saved_inv_var",
-        "Optional saved inverse variance used during training to speed up "
+        "saved_var",
+        "Saved variance used during training to speed up "
         "gradient computation. Should not be used for testing.");
 
-// Input: X, scale, dY  (type 1)
-// Input: X, scale, dY, mean, inv_variance
-//     (type 2, faster, and also necessary if one wants to compute gradient
-//      in testing mode)
+// Input: X, scale, dY, mean, variance
 // Output: dX, dscale, dbias
-OPERATOR_SCHEMA(SpatialBNGradient).NumInputs({3, 5}).NumOutputs(3);
-}  // namespace
-
-// TODO: implement the CPU version of spatial batch normalization.
+OPERATOR_SCHEMA(SpatialBNGradient).NumInputs(5).NumOutputs(3);
 
 // Spatial batch normalization's gradient, depending on the various input sizes,
 // is a bit more complex than usual gradient operators.
-namespace {
 class GetSpatialBNGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
@@ -99,46 +230,21 @@ class GetSpatialBNGradient : public GradientMakerBase {
     vector<string> grad_inputs;
     if (is_test) {
       // This is in testing mode. The operator should have five input:
-      //     X, scale, bias, estimated_mean, estimated_inv_variance
+      //     X, scale, bias, estimated_mean, estimated_variance
       // The gradient inputs are:
-      //     X, scale, dY, estimated_mean, estimated_inv_variance
+      //     X, scale, dY, estimated_mean, estimated_variance
       CHECK_EQ(def_.input_size(), 5);
       CHECK_EQ(def_.output_size(), 1);
       grad_inputs = vector<string>{
           I(0), I(1), GO(0), I(3), I(4)};
     } else {
-      CHECK_EQ(def_.input_size(), 3);
-      CHECK(def_.output_size() == 3 || def_.output_size() == 5);
-      // This is in training mode. The operator should have either three output:
-      //     Y, running_mean, running_inv_variance
-      // or five:
-      //     Y, running_mean, running_inv_variance, saved_mean,
-      //     saved_inv_variance
-      switch (def_.output_size()) {
-      case 3:
-        // The original operator does not have saved mean and inv variance,
-        // so the gradient operator cannot take advantage of that.
-        // The gradient inputs are:
-        //     X, scale, dY
-        grad_inputs = vector<string>{I(0), I(1), GO(0)};
-        break;
-      case 5:
-        // The original operator does have saved mean and inv variance,
-        // and the gradient operator can take advantage of that.
-        // The gradient inputs are:
-        //     X, scale, dY, saved_mean, saved_inv_variance
-        grad_inputs = vector<string>{
-            I(0), I(1), GO(0), O(3), O(4)};
-        break;
-      default:
-        LOG(FATAL) << "Should not happen.";
-      }
+      CHECK_EQ(def_.input_size(), 5);
+      CHECK_EQ(def_.output_size(), 5);
+      grad_inputs = vector<string>{I(0), I(1), GO(0), O(3), O(4)};
     }
     return SingleGradientDef(
         "SpatialBNGradient", "", grad_inputs, grad_outputs);
   }
 };
 REGISTER_GRADIENT(SpatialBN, GetSpatialBNGradient);
-}  // namespace
-
 }  // namespace caffe2

@@ -50,17 +50,21 @@ struct Suffix {
   int length_;
 };
 
-template <typename ScalarFunctor, typename OutputType = std::string>
+template <typename ScalarFunctor, typename TypeMap = FixedType<std::string>>
 using StringElementwiseOp = UnaryElementwiseWithArgsOp<
     TensorTypes<std::string>,
     CPUContext,
     ForEach<ScalarFunctor>,
-    OutputType>;
+    TypeMap>;
 
 REGISTER_CPU_OPERATOR(StringPrefix, StringElementwiseOp<Prefix>);
 REGISTER_CPU_OPERATOR(StringSuffix, StringElementwiseOp<Suffix>);
-REGISTER_CPU_OPERATOR(StringStartsWith, StringElementwiseOp<StartsWith, bool>);
-REGISTER_CPU_OPERATOR(StringEndsWith, StringElementwiseOp<EndsWith, bool>);
+REGISTER_CPU_OPERATOR(
+    StringStartsWith,
+    StringElementwiseOp<StartsWith, FixedType<bool>>);
+REGISTER_CPU_OPERATOR(
+    StringEndsWith,
+    StringElementwiseOp<EndsWith, FixedType<bool>>);
 
 OPERATOR_SCHEMA(StringPrefix)
     .NumInputs(1)

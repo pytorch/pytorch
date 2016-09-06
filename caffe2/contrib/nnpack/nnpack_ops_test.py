@@ -9,19 +9,19 @@ from hypothesis import given, assume, settings
 import numpy as np
 import time
 import os
-from caffe2.python import core, workspace
+from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
 
 np.random.seed(1)
 
 
-def benchmark(net, warmups=5, iters=100):
+def benchmark(ws, net, warmups=5, iters=100):
     for _ in range(warmups):
-        workspace.RunNetOnce(net.Proto().SerializeToString())
+        ws.run(net)
     plan = core.Plan("plan")
     plan.AddStep(core.ExecutionStep("test-step", net, iters))
     before = time.time()
-    workspace.RunPlan(plan.Proto().SerializeToString())
+    ws.run(plan)
     after = time.time()
     print("Timing network, time taken per-iteration: {:.6f}ms".format((
         after - before) / float(iters) * 1000.0))
@@ -71,11 +71,11 @@ class NNPackOpsTest(hu.HypothesisTestCase):
                 kts="TUPLE",
                 engine=engine,
             )
-            workspace.FeedBlob("X", X)
-            workspace.FeedBlob("w", w)
-            workspace.FeedBlob("b", b)
-            workspace.RunOperatorOnce(op)
-            outputs[engine] = workspace.FetchBlob("Y")
+            self.ws.create_blob("X").feed(X)
+            self.ws.create_blob("w").feed(w)
+            self.ws.create_blob("b").feed(b)
+            self.ws.run(op)
+            outputs[engine] = self.ws.blobs["Y"].fetch()
         np.testing.assert_allclose(
             outputs[""],
             outputs["NNPACK"],
@@ -106,9 +106,9 @@ class NNPackOpsTest(hu.HypothesisTestCase):
                 order=order,
                 engine=engine,
             )
-            workspace.FeedBlob("X", X)
-            workspace.RunOperatorOnce(op)
-            outputs[engine] = workspace.FetchBlob("Y")
+            self.ws.create_blob("X").feed(X)
+            self.ws.run(op)
+            outputs[engine] = self.ws.blobs["Y"].fetch()
         np.testing.assert_allclose(
             outputs[""],
             outputs["NNPACK"],
@@ -145,10 +145,10 @@ class NNPackOpsTest(hu.HypothesisTestCase):
                 kts="TUPLE",
                 engine=engine,
             )
-            workspace.FeedBlob("X", X)
-            workspace.FeedBlob("W", w)
-            workspace.FeedBlob("b", b)
-            workspace.RunNetOnce(net.Proto().SerializeToString())
-            times[engine] = benchmark(net)
+            self.ws.create_blob("X").feed(X)
+            self.ws.create_blob("W").feed(w)
+            self.ws.create_blob("b").feed(b)
+            self.ws.run(net)
+            times[engine] = benchmark(self.ws, net)
         print("Speedup for NNPACK: {:.2f}".format(
             times[""] / times["NNPACK"]))

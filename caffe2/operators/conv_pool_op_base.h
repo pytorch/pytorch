@@ -110,11 +110,6 @@ class ConvPoolOpBase : public Operator<Context> {
       LOG(FATAL) << "Unknown Storage order: " << order_;
     }
 
-    const int dkernel_h = dilation_h_ * (kernel_h_ - 1) + 1;
-    const int dkernel_w = dilation_w_ * (kernel_w_ - 1) + 1;
-    CAFFE_ENFORCE(H >= dkernel_h);
-    CAFFE_ENFORCE(W >= dkernel_w);
-
     int output_height = 0, output_width = 0;
     ComputeSizeAndPad(
         H, stride_h_, kernel_h_, dilation_h_, &pad_t_, &pad_b_, &output_height);
@@ -125,9 +120,6 @@ class ConvPoolOpBase : public Operator<Context> {
     } else {
       output->Resize(N, output_height, output_width, output_channel);
     }
-    //VLOG(2) << "In: N " << N << " C " << C << " H " << H << " W " << W;
-    //VLOG(2) << "Out: C " << output_channel << " H " << output_height
-    //        << " W " << output_width;
   }
 
   // ComputePads could be used in backward functions to figure out the padding
@@ -288,8 +280,8 @@ class ConvPoolOpBase : public Operator<Context> {
  private:
 };
 
-#define USE_CONV_POOL_BASE_FUNCTIONS          \
-  USE_OPERATOR_CONTEXT_FUNCTIONS;             \
+#define USE_CONV_POOL_BASE_FUNCTIONS(Context) \
+  USE_OPERATOR_FUNCTIONS(Context);            \
   using ConvPoolOpBase<Context>::pad_t_;      \
   using ConvPoolOpBase<Context>::pad_l_;      \
   using ConvPoolOpBase<Context>::pad_b_;      \

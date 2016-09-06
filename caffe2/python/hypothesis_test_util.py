@@ -1,3 +1,37 @@
+"""
+The Hypothesis library uses *property-based testing* to check
+invariants about the code under test under a variety of random inputs.
+
+ The key idea here is to express properties of the code under test
+(e.g. that it passes a gradient check, that it implements a reference
+function, etc), and then generate random instances and verify they
+satisfy these properties.
+
+The main functions of interest are exposed on `HypothesisTestCase`.
+You can usually just add a short function in this to generate an
+arbitrary number of test cases for your operator.
+
+The key functions are:
+
+- `assertDeviceChecks(devices, op, inputs, outputs)`. This asserts that the
+  operator computes the same outputs, regardless of which device it is executed
+  on.
+- `assertGradientChecks(device, op, inputs, output_,
+  outputs_with_grads)`. This implements a standard numerical gradient checker
+  for the operator in question.
+- `assertReferenceChecks(device, op, inputs, reference)`. This runs the
+  reference function (effectively calling `reference(*inputs)`, and comparing
+  that to the output of output.
+
+`hypothesis_test_util.py` exposes some useful pre-built samplers.
+
+- `hu.gcs` - a gradient checker device (`gc`) and device checker devices (`dc`)
+
+- `hu.gcs_cpu_only` - a CPU-only gradient checker device (`gc`) and
+  device checker devices (`dc`). Used for when your operator is only
+  implemented on the CPU.
+"""
+
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
@@ -142,6 +176,7 @@ gcs = dict(
 )
 
 gcs_cpu_only = dict(gc=st.sampled_from([cpu_do]), dc=st.just([cpu_do]))
+gcs_gpu_only = dict(gc=st.sampled_from([gpu_do]), dc=st.just([gpu_do]))
 
 
 @contextlib.contextmanager
@@ -153,7 +188,36 @@ def temp_workspace(name=b"temp_ws"):
     workspace.SwitchWorkspace(old_ws_name)
 
 
+def runOpBenchmark(
+    device_option,
+    op,
+    inputs,
+    input_device_options={},
+    iterations=10,
+):
+    op = copy.deepcopy(op)
+    op.device_option.CopyFrom(device_option)
+    net = caffe2_pb2.NetDef()
+    net.op.extend([op])
+    net.name = op.name if op.name else "test"
+
+    with temp_workspace():
+        for (n, b) in zip(op.input, inputs):
+            workspace.FeedBlob(
+                n,
+                b,
+                device_option=input_device_options.get(n, device_option)
+            )
+        workspace.CreateNet(net)
+        ret = workspace.BenchmarkNet(net.name, 1, iterations, True)
+    return ret
+
+
 class HypothesisTestCase(test_util.TestCase):
+    """
+    A unittest.TestCase subclass with some helper functions for
+    utilizing the `hypothesis` (hypothesis.readthedocs.io) library.
+    """
     def assertDeviceChecks(
         self,
         device_options,
@@ -163,6 +227,22 @@ class HypothesisTestCase(test_util.TestCase):
         input_device_options=None,
         threshold=0.01
     ):
+        """
+        Asserts that the operator computes the same outputs, regardless of
+        which device it is executed on.
+
+        Useful for checking the consistency of GPU and CPU
+        implementations of operators.
+
+        Usage example:
+
+            @given(inputs=hu.tensors(n=2), in_place=st.booleans(), **hu.gcs)
+            def test_sum(self, inputs, in_place, gc, dc):
+                op = core.CreateOperator("Sum", ["X1", "X2"],
+                                                ["Y" if not in_place else "X1"])
+                X1, X2 = inputs
+                self.assertDeviceChecks(dc, op, [X1, X2], [0])
+        """
         dc = device_checker.DeviceChecker(
             threshold,
             device_options=device_options
@@ -183,6 +263,22 @@ class HypothesisTestCase(test_util.TestCase):
         stepsize=0.05,
         input_device_options=None,
     ):
+        """
+        Implements a standard numerical gradient checker for the operator
+        in question.
+
+        Useful for checking the consistency of the forward and
+        backward implementations of operators.
+
+        Usage example:
+
+            @given(inputs=hu.tensors(n=2), in_place=st.booleans(), **hu.gcs)
+            def test_sum(self, inputs, in_place, gc, dc):
+                op = core.CreateOperator("Sum", ["X1", "X2"],
+                                                ["Y" if not in_place else "X1"])
+                X1, X2 = inputs
+                self.assertGradientChecks(gc, op, [X1, X2], 0, [0])
+        """
         gc = gradient_checker.GradientChecker(
             stepsize=stepsize,
             threshold=threshold,
@@ -249,6 +345,27 @@ class HypothesisTestCase(test_util.TestCase):
         output_to_grad=None,
         grad_reference=None,
     ):
+        """
+        This runs the reference Python function implementation
+        (effectively calling `reference(*inputs)`, and compares that
+        to the output of output, with an absolute/relative tolerance
+        given by the `threshold` parameter.
+
+        Useful for checking the implementation matches the Python
+        (typically NumPy) implementation of the same functionality.
+
+        Usage example:
+
+            @given(X=hu.tensor(), inplace=st.booleans(), **hu.gcs)
+            def test_softsign(self, X, inplace, gc, dc):
+                op = core.CreateOperator(
+                    "Softsign", ["X"], ["X" if inplace else "Y"])
+
+                def softsign(X):
+                    return (X / (1 + np.abs(X)),)
+
+                self.assertReferenceChecks(gc, op, [X], softsign)
+        """
         op = copy.deepcopy(op)
         op.device_option.CopyFrom(device_option)
 

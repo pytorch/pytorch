@@ -86,10 +86,10 @@ class PrefetchOperator : public OperatorBase {
     std::unique_lock<std::mutex> lock(prefetch_access_mutex_);
     while (prefetched_) producer_.wait(lock);
     while (!finalize_) {
-      // Note(jiayq): we don't do FinishDeviceComputation here, because the
-      // prefetcher should be using the same context. If your prefetcher uses
-      // device asynchrony, make sure you manually do synchronization.
-      prefetch_success_ = Prefetch();
+      // We will need to run a FinishDeviceComputation() call because the
+      // prefetcher thread and the main thread are potentially using different
+      // streams (like on GPU).
+      prefetch_success_ = Prefetch() && context_.FinishDeviceComputation();
       prefetched_ = true;
       consumer_.notify_one();
       while (prefetched_) producer_.wait(lock);

@@ -4,8 +4,18 @@ namespace caffe2 {
 namespace {
 REGISTER_CPU_OPERATOR(Split, SplitOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Concat, ConcatOp<CPUContext>);
-OPERATOR_SCHEMA(Split).NumInputs(1, 2).NumOutputs(1, INT_MAX);
-OPERATOR_SCHEMA(Concat).NumInputs(1, INT_MAX).NumOutputs(2);
+OPERATOR_SCHEMA(Split)
+    .NumInputs(1, 2)
+    .NumOutputs(1, INT_MAX)
+    .Arg("axis", "Which axis to split on")
+    .Arg("order", "Either NHWC or NCWH, will split on C axis")
+    .SetDoc("Split a tensor into a list of tensors.");
+OPERATOR_SCHEMA(Concat)
+    .NumInputs(1, INT_MAX)
+    .NumOutputs(2)
+    .Arg("axis", "Which axis to concat on")
+    .Arg("order", "Either NHWC or HCWH, will concat on C axis")
+    .SetDoc("Concatenate a list of tensors into a single tensor.");
 
 // Backward compatibility names.
 REGISTER_CPU_OPERATOR(DepthSplit, SplitOp<CPUContext>);
@@ -57,4 +67,3 @@ REGISTER_GRADIENT(Concat, GetConcatGradient);
 REGISTER_GRADIENT(DepthConcat, GetConcatGradient);
 }  // namespace
 }  // namespace caffe2
-

@@ -2,6 +2,7 @@
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/cross_entropy_op.h"
+#include "caffe2/operators/operator_fallback_gpu.h"
 
 namespace caffe2 {
 
@@ -10,7 +11,7 @@ __global__ void LabelCrossEntropyKernel(
     const int N, const int D, const float* Xdata, const int* labeldata,
     const float log_threshold, float* Ydata) {
   CUDA_1D_KERNEL_LOOP(i, N) {
-    CUDA_KERNEL_ASSERT(labeldata[i] < D);
+    CUDA_KERNEL_ASSERT(labeldata[i] >= 0 && labeldata[i] < D);
     Ydata[i] = -logf(max(Xdata[i * D + labeldata[i]], log_threshold));
   }
 }
@@ -34,10 +35,11 @@ bool LabelCrossEntropyOp<float, CUDAContext>::RunOnDevice() {
   int D = X.dim32(1);
   DCHECK((label.ndim() == 1) || (label.ndim() == 2 && label.dim32(1) == 1));
   DCHECK_EQ(label.dim32(0), N);
-  Y->Resize(vector<TIndex>(1, N));
+  Y->Resize(vector<TIndex>(size_t(1), N));
   LabelCrossEntropyKernel<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS,
                             0, context_.cuda_stream()>>>(
-      N, D, X.data<float>(), label.data<int>(), kLOG_THRESHOLD(), Y->mutable_data<float>());
+      N, D, X.data<float>(), label.data<int>(), kLOG_THRESHOLD(),
+      Y->mutable_data<float>());
   return true;
 }
 
@@ -59,8 +61,8 @@ bool LabelCrossEntropyGradientOp<float, CUDAContext>::RunOnDevice() {
       dX->size(), 0.f, dX->mutable_data<float>(), &context_);
   LabelCrossEntropyGradientKernel<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS,
                                     0, context_.cuda_stream()>>>(
-      N, D, X.data<float>(), label.data<int>(), dY.data<float>(), kLOG_THRESHOLD(),
-      dX->mutable_data<float>());
+      N, D, X.data<float>(), label.data<int>(), dY.data<float>(),
+      kLOG_THRESHOLD(), dX->mutable_data<float>());
   return true;
 }
 
@@ -122,5 +124,12 @@ REGISTER_CUDA_OPERATOR(MakeTwoClass,
                        MakeTwoClassOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(MakeTwoClassGradient,
                        MakeTwoClassGradientOp<float, CUDAContext>);
+
+//TODO(surya) Add full GPU/CUDA support for the CrossEntropyOp
+REGISTER_CUDA_OPERATOR(CrossEntropy,
+                       GPUFallbackOp<CrossEntropyOp<float, CPUContext>>);
+REGISTER_CUDA_OPERATOR(CrossEntropyGradient,
+                       GPUFallbackOp<CrossEntropyGradientOp<float, CPUContext>>);
+
 }  // namespace
 }  // namespace caffe2

@@ -48,7 +48,7 @@ std::function<bool(int64_t)> getContinuationTest(
 };
 }  // namespace
 
-vector<string> Workspace::Blobs() {
+vector<string> Workspace::Blobs() const {
   vector<string> names;
   for (auto& entry : blob_map_) {
     names.push_back(entry.first);
@@ -92,7 +92,7 @@ Blob* Workspace::GetBlob(const string& name) {
 }
 
 NetBase* Workspace::CreateNet(const NetDef& net_def) {
-  CHECK(net_def.has_name()) << "Net definition should have a name.";
+  CAFFE_ENFORCE(net_def.has_name(), "Net definition should have a name.");
   if (net_map_.count(net_def.name()) > 0) {
     LOG(WARNING) << "Overwriting existing network of the same name.";
     // Note(Yangqing): Why do we explicitly erase it here? Some components of
@@ -107,11 +107,6 @@ NetBase* Workspace::CreateNet(const NetDef& net_def) {
       unique_ptr<NetBase>(caffe2::CreateNet(net_def, this));
   if (net_map_[net_def.name()].get() == nullptr) {
     LOG(ERROR) << "Error when creating the network.";
-    net_map_.erase(net_def.name());
-    return nullptr;
-  }
-  if (!net_map_[net_def.name()]->Verify()) {
-    LOG(ERROR) << "Error when setting up network " << net_def.name();
     net_map_.erase(net_def.name());
     return nullptr;
   }
@@ -154,10 +149,6 @@ bool Workspace::RunOperatorOnce(const OperatorDef& op_def) {
 }
 bool Workspace::RunNetOnce(const NetDef& net_def) {
   std::unique_ptr<NetBase> net(caffe2::CreateNet(net_def, this));
-  if (!net->Verify()) {
-    LOG(ERROR) << "Error when setting up network " << net_def.name();
-    return false;
-  }
   if (!net->Run()) {
     LOG(ERROR) << "Error when running network " << net_def.name();
     return false;

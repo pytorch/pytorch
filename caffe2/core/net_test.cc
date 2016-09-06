@@ -1,7 +1,10 @@
 #include "caffe2/core/net.h"
 #include "caffe2/core/operator.h"
+#include "caffe2/core/scope_guard.h"
 #include "google/protobuf/text_format.h"
 #include "gtest/gtest.h"
+
+CAFFE2_DECLARE_bool(caffe2_disable_chaining);
 
 namespace caffe2 {
 
@@ -103,11 +106,17 @@ void checkChaining(
   ws.CreateBlob("in");
   NetDef net_def;
   CHECK(google::protobuf::TextFormat::ParseFromString(spec, &net_def));
-  std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
-  auto* dag = dynamic_cast<DAGNetBase*>(net.get());
-  CHECK_NOTNULL(dag);
-  const auto& chains = dag->TEST_execution_chains();
-  EXPECT_TRUE(chains == expected);
+  {
+    auto old = FLAGS_caffe2_disable_chaining;
+    auto g = MakeGuard([&]() { FLAGS_caffe2_disable_chaining = old; });
+    FLAGS_caffe2_disable_chaining = false;
+
+    std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
+    auto* dag = dynamic_cast<DAGNetBase*>(net.get());
+    CHECK_NOTNULL(dag);
+    const auto& chains = dag->TEST_execution_chains();
+    EXPECT_TRUE(chains == expected);
+  }
 }
 
 TEST(NetTest, ChainingForLinearModel) {

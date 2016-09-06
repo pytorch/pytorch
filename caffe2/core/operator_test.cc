@@ -178,16 +178,14 @@ TEST(OperatorTest, TestSetUpInputOutputCount) {
   op_def.add_output("output");
   EXPECT_NE(nullptr, ws.CreateBlob("input"));
   EXPECT_NE(nullptr, ws.CreateBlob("input2"));
-  unique_ptr<OperatorBase> op = CreateOperator(op_def, &ws);
   // JustTest will only accept one single input.
-  EXPECT_EQ(nullptr, op.get());
+  ASSERT_ANY_THROW(CreateOperator(op_def, &ws));
 
   op_def.clear_input();
   op_def.add_input("input");
   op_def.add_output("output2");
-  op = CreateOperator(op_def, &ws);
   // JustTest will only produce one single output.
-  EXPECT_EQ(nullptr, op.get());
+  ASSERT_ANY_THROW(CreateOperator(op_def, &ws));
 }
 
 NetDef GetNetDefForTest() {
@@ -213,7 +211,6 @@ TEST(NetTest, TestScaffoldingSimpleNet) {
   EXPECT_NE(nullptr, ws.CreateBlob("input"));
   unique_ptr<NetBase> net(CreateNet(net_def, &ws));
   EXPECT_NE(nullptr, net.get());
-  EXPECT_TRUE(net->Verify());
   EXPECT_TRUE(ws.HasBlob("input"));
   EXPECT_TRUE(ws.HasBlob("hidden"));
   EXPECT_TRUE(ws.HasBlob("output"));
@@ -228,7 +225,6 @@ TEST(NetTest, TestScaffoldingDAGNet) {
   EXPECT_NE(nullptr, ws.CreateBlob("input"));
   unique_ptr<NetBase> net(CreateNet(net_def, &ws));
   EXPECT_NE(nullptr, net.get());
-  EXPECT_TRUE(net->Verify());
   EXPECT_TRUE(ws.HasBlob("input"));
   EXPECT_TRUE(ws.HasBlob("hidden"));
   EXPECT_TRUE(ws.HasBlob("output"));

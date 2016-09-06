@@ -165,6 +165,9 @@ class Struct(Field):
         self.fields = OrderedDict(fields)
         Field.__init__(self, self.fields.values())
 
+    def get_children(self):
+        return self.fields.items()
+
     def field_names(self):
         names = []
         for name, field in self.fields.items():
@@ -516,3 +519,23 @@ def NewRecord(net, schema):
         net.AddExternalInput(net.NextName(prefix=name))
         for name in schema.field_names()]
     return from_blob_list(schema, blob_refs)
+
+_DATA_TYPE_FOR_DTYPE = [
+    (np.str, core.DataType.STRING),
+    (np.float32, core.DataType.FLOAT),
+    (np.float64, core.DataType.DOUBLE),
+    (np.bool, core.DataType.BOOL),
+    (np.int8, core.DataType.INT8),
+    (np.int16, core.DataType.INT16),
+    (np.int32, core.DataType.INT32),
+    (np.int64, core.DataType.INT64),
+    (np.uint8, core.DataType.UINT8),
+    (np.uint16, core.DataType.UINT16),
+]
+
+
+def data_type_for_dtype(dtype):
+    for np_type, dt in _DATA_TYPE_FOR_DTYPE:
+        if dtype.base == np_type:
+            return dt
+    raise TypeError('Unknown dtype: ' + str(dtype.base))

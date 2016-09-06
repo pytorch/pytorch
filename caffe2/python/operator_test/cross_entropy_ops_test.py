@@ -69,3 +69,35 @@ class TestCrossEntropyOps(hu.HypothesisTestCase):
             sigmoid_xentr_logit_ref,
             output_to_grad='xentropy',
             grad_reference=sigmoid_xentr_logit_grad_ref)
+
+    @given(n=st.integers(2, 10),
+           **hu.gcs_cpu_only)
+    def test_soft_label_cross_entropy(self, n, gc, dc):
+        # Initialize X and add 1e-2 for numerical stability
+        X = np.random.rand(n).astype(np.float32)
+        X = X + 1e-2
+        X = np.expand_dims((X / np.sum(X)), axis=0)
+
+        # Initialize label
+        label = np.random.rand(n).astype(np.float32)
+        label = np.expand_dims((label / np.sum(label)), axis=0)
+
+        # Reference implementation of cross entropy with soft labels
+        def soft_label_xentr_ref(X, label):
+            xent = [np.sum((-label[0][i] * np.log(max(X[0][i], 1e-20))
+                    for i in range(len(X[0]))))]
+            return (xent,)
+
+        op = core.CreateOperator("CrossEntropy", ["X", "label"], ["Y"])
+
+        # TODO(surya) Once CrossEntropyOp is ported to GPU, add the respective
+        # tests to this unit test.
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[X, label],
+            reference=soft_label_xentr_ref,
+        )
+
+        self.assertGradientChecks(
+            gc, op, [X, label], 0, [0], stepsize=1e-4, threshold=1e-2)

@@ -117,6 +117,7 @@ class PythonOpTest(hu.HypothesisTestCase):
 
         def f(inputs, outputs):
             for idx in [0, 1]:
+                self.assertEqual(type(inputs[idx].shape), tuple)
                 outputs[idx].reshape(inputs[idx].shape)
                 outputs[idx].data[...] = inputs[idx].data * 2
 

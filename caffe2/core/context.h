@@ -28,7 +28,11 @@ struct DefaultCPUAllocator final : CPUAllocator {
   ~DefaultCPUAllocator() {}
   void* New(size_t nbytes) override {
     void* data = nullptr;
+#ifdef __ANDROID__
+    data = memalign(gCaffe2Alignment, nbytes);
+#else
     CHECK_EQ(posix_memalign(&data, gCaffe2Alignment, nbytes), 0);
+#endif
     memset(data, 0, nbytes);
     return data;
   }

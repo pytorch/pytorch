@@ -28,4 +28,25 @@ TensorProto::DataType TypeMetaToDataType(const TypeMeta& meta) {
           ? TensorProto_DataType_UNDEFINED : it->second);
 }
 
+const TypeMeta& DataTypeToTypeMeta(const TensorProto::DataType& dt) {
+  static std::map<TensorProto::DataType, TypeMeta> type_meta_map{
+      {TensorProto_DataType_FLOAT, TypeMeta::Make<float>()},
+      {TensorProto_DataType_INT32, TypeMeta::Make<int>()},
+      {TensorProto_DataType_STRING, TypeMeta::Make<std::string>()},
+      {TensorProto_DataType_BOOL, TypeMeta::Make<bool>()},
+      {TensorProto_DataType_UINT8, TypeMeta::Make<uint8_t>()},
+      {TensorProto_DataType_INT8, TypeMeta::Make<int8_t>()},
+      {TensorProto_DataType_UINT16, TypeMeta::Make<uint16_t>()},
+      {TensorProto_DataType_INT16, TypeMeta::Make<int16_t>()},
+      {TensorProto_DataType_INT64, TypeMeta::Make<int64_t>()},
+      {TensorProto_DataType_FLOAT16, TypeMeta::Make<float16>()},
+      {TensorProto_DataType_DOUBLE, TypeMeta::Make<double>()},
+  };
+  const auto it = type_meta_map.find(dt);
+  if (it == type_meta_map.end()) {
+    throw std::runtime_error("Unknown data type.");
+  }
+  return it->second;
+}
+
 }  // namespace caffe2

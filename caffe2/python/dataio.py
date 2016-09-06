@@ -29,6 +29,13 @@ class Reader(object):
             assert isinstance(schema, Field)
         self._schema = schema
 
+    def schema(self):
+        """
+        Return the schema associated with the Reader
+        """
+        assert self._schema is not None, 'Schema not provided for this reader.'
+        return self._schema
+
     """
     Reader is a abstract class to be implemented in order to provide
     operations capable of iterating through a dataset or stream of data.
@@ -38,7 +45,7 @@ class Reader(object):
     optionally support the `reset` operation, which is useful when multiple
     passes over the data are required.
     """
-    def read(self, read_net, batch_size=1, *args):
+    def read(self, read_net):
         """
         Add operations to read_net that will read the read batch of data
         and return a list of BlobReference representing the blobs that will
@@ -50,7 +57,6 @@ class Reader(object):
 
         Args:
             read_net: the net that will be appended with read operations
-            batch_size: number of entires to read
 
         Returns:
             A tuple (should_stop, fields), with:
@@ -72,13 +78,13 @@ class Reader(object):
         """
         raise NotImplementedError('This reader cannot be resetted.')
 
-    def read_record(self, read_net, batch_size=1, **kwargs):
-        should_stop, fields = self.read(read_net, **kwargs)
+    def read_record(self, read_net):
+        should_stop, fields = self.read(read_net)
         if self._schema:
             fields = from_blob_list(self._schema, fields)
         return should_stop, fields
 
-    def execution_step(self, reader_net_name=None, **kwargs):
+    def execution_step(self, reader_net_name=None):
         """Create an execution step with a net containing read operators.
 
         The execution step will contain a `stop_blob` that knows how to stop
@@ -98,7 +104,6 @@ class Reader(object):
             reader_net_name: (optional) the name of the reader_net to be
                              created. The execution step will
                              be named accordingly.
-            batch_size: the batch size
 
         Returns:
             A tuple (read_step, fields), with:
@@ -110,7 +115,7 @@ class Reader(object):
                         of data that was read.
         """
         reader_net = core.Net(reader_net_name or 'reader')
-        should_stop, fields = self.read_record(reader_net, **kwargs)
+        should_stop, fields = self.read_record(reader_net)
         read_step = core.execution_step(
             '{}_step'.format(reader_net_name),
             reader_net,

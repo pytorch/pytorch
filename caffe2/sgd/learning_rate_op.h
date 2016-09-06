@@ -46,7 +46,8 @@ class LearningRateOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override {
-    int iter = OperatorBase::Input<TensorCPU>(0).template data<int>()[0];
+    int64_t iter =
+        OperatorBase::Input<TensorCPU>(0).template data<int64_t>()[0];
     T learning_rate = base_lr_ * (*functor_)(iter);
     // Write to output.
     auto* output = Output(0);

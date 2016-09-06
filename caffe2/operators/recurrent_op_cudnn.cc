@@ -1,4 +1,4 @@
-#include "recurrent_op_cudnn.h"
+#include "caffe2/operators/recurrent_op_cudnn.h"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {

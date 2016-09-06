@@ -28,7 +28,7 @@ and output blobs.
 )DOC")
     .Input(0, "input", "Input tensor")
     .Output(
-        1,
+        0,
         "output",
         "The exponential of the input tensor computed "
         "element-wise");

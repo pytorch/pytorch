@@ -19,21 +19,29 @@ bool InstanceNormOp<CPUContext>::RunOnDeviceWithOrderNHWC() {
   ConstEigenVectorArrayMap<float> scale(Input(SCALE).data<float>(), C);
   ConstEigenVectorArrayMap<float> bias(Input(BIAS).data<float>(), C);
   for (int n = 0; n < N; ++n) {
-    ConstEigenMatrixMap<float> Xmat(X.data<float>() + offset * n, C, H * W);
-    EigenMatrixMap<float> Ymat(Y->mutable_data<float>() + offset * n, C, H * W);
+    ConstEigenArrayMap<float> Xmat(X.data<float>() + offset * n, C, H * W);
+    EigenArrayMap<float> Ymat(Y->mutable_data<float>() + offset * n, C, H * W);
     EigenVectorArrayMap<float> mean_arr(mean->mutable_data<float>() + n * C, C);
     EigenVectorArrayMap<float> inv_var_arr(
         inv_var->mutable_data<float>() + n * C, C);
-    mean_arr = Xmat.rowwise().mean();
-    inv_var_arr = Xmat.rowwise().squaredNorm();
-    inv_var_arr = ((inv_var_arr - mean_arr * mean_arr) / (H * W) + epsilon_)
-                      .sqrt()
-                      .inverse();
-    // Vectorizing over C.
-    for (int hw = 0; hw < H * W; ++hw) {
-      Ymat.col(hw) =
-          (Xmat.array().col(hw) - mean_arr) * inv_var_arr * scale + bias;
+
+    // The following effectively does the row wise mean computation:
+    //   mean_arr = Xmat.rowwise().mean();
+    // but manually vectorizes over columns.
+    mean_arr = Xmat.col(0);
+    for (int i = 1; i < H * W; ++i) {
+      mean_arr += Xmat.col(i);
     }
+    mean_arr *= 1. / (H * W);
+    Ymat = Xmat.colwise() - mean_arr;
+    // The following effectively does row wise squared norm computation,
+    // but manually vectorizes over columns similar to the mean case.
+    inv_var_arr = Ymat.col(0) * Ymat.col(0);
+    for (int i = 1; i < H * W; ++i) {
+      inv_var_arr += Ymat.col(i) * Ymat.col(i);
+    }
+    inv_var_arr = (inv_var_arr / (H * W) + epsilon_).sqrt().inverse();
+    Ymat = (Ymat.colwise() * (inv_var_arr * scale)).colwise() + bias;
   }
   return true;
 }
@@ -51,24 +59,22 @@ bool InstanceNormOp<CPUContext>::RunOnDeviceWithOrderNCHW() {
   Y->ResizeLike(X);
   mean->Resize(N, C);
   inv_var->Resize(N, C);
-  ConstEigenMatrixMap<float> Xmat(X.data<float>(), H * W, N * C);
+  ConstEigenArrayMap<float> Xmat(X.data<float>(), H * W, N * C);
   ConstEigenVectorArrayMap<float> scale(Input(SCALE).data<float>(), C);
   ConstEigenVectorArrayMap<float> bias(Input(BIAS).data<float>(), C);
-  EigenMatrixMap<float> Ymat(Y->mutable_data<float>(), H * W, N * C);
+  EigenArrayMap<float> Ymat(Y->mutable_data<float>(), H * W, N * C);
   EigenVectorArrayMap<float> mean_arr(mean->mutable_data<float>(), N * C);
   EigenVectorArrayMap<float> inv_var_arr(inv_var->mutable_data<float>(), N * C);
 
   mean_arr = Xmat.colwise().mean();
+
   // TODO(jiayq): refactor the following 4 lines to be more concise.
-  inv_var_arr = Xmat.colwise().squaredNorm();
-  inv_var_arr = ((inv_var_arr - mean_arr * mean_arr) / (H * W) + epsilon_)
-                    .sqrt()
-                    .inverse();
+  Ymat = Xmat.rowwise() - mean_arr.transpose();
+  inv_var_arr = Ymat.matrix().colwise().squaredNorm();
+  inv_var_arr = (inv_var_arr / (H * W) + epsilon_).sqrt().inverse();
   // Vectorizing over H*W
   for (int i = 0; i < N * C; ++i) {
-    Ymat.col(i) =
-        (Xmat.array().col(i) - mean_arr(i)) * (inv_var_arr(i) * scale(i % C)) +
-        bias(i % C);
+    Ymat.col(i) = Ymat.col(i) * (inv_var_arr(i) * scale(i % C)) + bias(i % C);
   }
   return true;
 }

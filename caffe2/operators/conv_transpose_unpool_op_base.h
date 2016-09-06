@@ -22,9 +22,9 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
                 LegacyPadding::NOTSET))),
         pad_(OperatorBase::GetSingleArgument<int>("pad", 0)),
         pad_t_(OperatorBase::GetSingleArgument<int>("pad_t", pad_)),
-        pad_l_(OperatorBase::GetSingleArgument<int>("pad", pad_)),
-        pad_b_(OperatorBase::GetSingleArgument<int>("pad", pad_)),
-        pad_r_(OperatorBase::GetSingleArgument<int>("pad", pad_)),
+        pad_l_(OperatorBase::GetSingleArgument<int>("pad_l", pad_)),
+        pad_b_(OperatorBase::GetSingleArgument<int>("pad_b", pad_)),
+        pad_r_(OperatorBase::GetSingleArgument<int>("pad_r", pad_)),
         kernel_h_(OperatorBase::GetSingleArgument<int>(
             "kernel_h",
             OperatorBase::GetSingleArgument<int>("kernel", 0))),

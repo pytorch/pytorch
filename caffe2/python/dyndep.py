@@ -2,7 +2,10 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+
 import ctypes
+import os
+
 from caffe2.python import core, extension_loader
 
 
@@ -21,10 +24,11 @@ def InitOpsLibrary(name):
     Returns:
         None
     """
-    if not name.endswith('.so'):
-        # TODO(jiayq): deal with extensions on platforms that do not use .so
-        # as extensions.
-        print('Ignoring {} as it is not an .so file.'.format(name))
+    if not os.path.exists(name):
+        # Note(jiayq): if the name does not exist, instead of immediately
+        # failing we will simply print a warning, deferring failure to the
+        # time when an actual call is made.
+        print('Ignoring {} as it is not a valid file.'.format(name))
         return
     with extension_loader.DlopenGuard():
         ctypes.CDLL(name)

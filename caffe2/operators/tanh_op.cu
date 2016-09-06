@@ -35,18 +35,11 @@ struct TanhCUDAFunctor {
 
 struct TanhGradientCUDAFunctor {
   template <typename T>
-  inline void operator()(const int n, const T* y, const T* dy,
-                         T* dx, CUDAContext* device_context) {
+  inline void Run(const int n, const T* y, const T* dy,
+                  T* dx, CUDAContext* device_context) {
     TanhGradientKernel<T><<<CAFFE_GET_BLOCKS(n), CAFFE_CUDA_NUM_THREADS,
                             0, device_context->cuda_stream()>>>(n, y, dy, dx);
     return;
-  }
-  inline bool InplaceAllowed(const int input_id, const int output_id) {
-    if (input_id == 1 && output_id == 0) {
-      return true;
-    } else {
-      return false;
-    }
   }
 };
 
@@ -54,7 +47,8 @@ namespace {
 REGISTER_CUDA_OPERATOR(
     Tanh, UnaryElementwiseOp<TensorTypes<float>, CUDAContext, TanhCUDAFunctor>);
 REGISTER_CUDA_OPERATOR(
-    TanhGradient, BinaryElementwiseOp<TensorTypes<float>, CUDAContext,
-                                     TanhGradientCUDAFunctor>);
+    TanhGradient, BinaryElementwiseOp<
+        TensorTypes<float>, CUDAContext,
+        WithoutBroadcast<TanhGradientCUDAFunctor>>);
 }  // namespace
 }  // namespace caffe2

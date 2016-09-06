@@ -95,7 +95,6 @@ int RunNetAndGetDuration(const string& net_def_str, const string& type) {
   Workspace ws;
   unique_ptr<NetBase> net(CreateNet(net_def, &ws));
   CHECK(net.get() != nullptr);
-  CHECK(net->Verify());
   auto start_time = std::chrono::system_clock::now();
   CHECK(net->Run());
   // Inspect the time - it should be around 200 milliseconds, since sleep3 can
