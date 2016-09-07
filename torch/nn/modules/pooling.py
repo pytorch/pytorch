@@ -2,19 +2,16 @@ import torch
 from torch.autograd import Variable
 
 from .module import Module
+from .utils import _pair
 
 class MaxPool2d(Module):
 
-    def __init__(self, kh, kw, dh=None, dw=None, padh=0, padw=0, dilh=1, dilw=1, ceil_mode=False):
+    def __init__(self, ksize, stride=None, pad=0, dil=1, ceil_mode=False):
         super(MaxPool2d, self).__init__()
-        self.kw = kw
-        self.kh = kh
-        self.dw = dw or kw
-        self.dh = dh or kh
-        self.padw = padw
-        self.padh = padh
-        self.dilh = dilh
-        self.dilw = dilw
+        self.kh, self.kw = _pair(ksize)
+        self.dh, self.dw = _pair(stride or ksize)
+        self.padh, self.padw = _pair(pad)
+        self.dilh, self.dilw = _pair(dil)
         self.ceil_mode = ceil_mode
 
     def forward(self, input):
@@ -22,14 +19,11 @@ class MaxPool2d(Module):
 
 class AvgPool2d(Module):
 
-    def __init__(self, kh, kw, dh=None, dw=None, padh=0, padw=0, ceil_mode=False, count_include_pad=True):
+    def __init__(self, ksize, stride=None, pad=0, ceil_mode=False, count_include_pad=True):
         super(AvgPool2d, self).__init__()
-        self.kw = kw
-        self.kh = kh
-        self.dw = dw or kw
-        self.dh = dh or kh
-        self.padw = padw
-        self.padh = padh
+        self.kh, self.kw = _pair(ksize)
+        self.dh, self.dw = _pair(stride or ksize)
+        self.padh, self.padw = _pair(pad)
         self.ceil_mode = ceil_mode
         self.count_include_pad = count_include_pad
 

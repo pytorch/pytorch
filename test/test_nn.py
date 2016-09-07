@@ -147,7 +147,7 @@ class TestNN(NNTestCase):
         self.assertEqual(counter['backwards'], 7)
 
     def test_volatile(self):
-        module = nn.Conv2d(2, 5, 3, 3, padh=1, padw=1)
+        module = nn.Conv2d(2, 5, ksize=3, pad=1)
         input = torch.randn(1, 2, 10, 10)
         x = Variable(input)
         y = Variable(input.clone(), volatile=True)
@@ -175,7 +175,49 @@ def add_test(test):
     setattr(TestNN, cuda_test_name, lambda self,test=test: test.test_cuda(self))
 
 
-for test_params in module_tests:
+new_module_tests = [
+    dict(
+        module_name='Conv2d',
+        constructor_args=(3, 4, (3, 3)),
+        input_size=(2, 3, 6, 6)
+    ),
+    dict(
+        module_name='Conv2d',
+        constructor_args=(3, 4, (3, 3), (2, 2)),
+        input_size=(2, 3, 6, 6),
+        desc='strided'
+    ),
+    dict(
+        module_name='Conv2d',
+        constructor_args=(3, 4, (3, 3), (2, 2), (1, 1)),
+        input_size=(2, 3, 6, 6),
+        desc='padding'
+    ),
+    dict(
+        module_name='MaxPool2d',
+        constructor_args=((3, 3), (2, 2), (1, 1)),
+        input_size=(1, 3, 7, 7)
+    ),
+    dict(
+        module_name='AvgPool2d',
+        constructor_args=((2, 2),),
+        input_size=(2, 3, 6, 6),
+    ),
+    dict(
+        module_name='AvgPool2d',
+        constructor_args=((2, 2), (2, 2)),
+        input_size=(2, 3, 6, 6),
+        desc='stride',
+    ),
+    dict(
+        module_name='AvgPool2d',
+        constructor_args=((2, 2), (2, 2), (1, 1)),
+        input_size=(2, 3, 6, 6),
+        desc='stride_pad',
+    ),
+]
+
+for test_params in module_tests + new_module_tests:
     test_params = deepcopy(test_params)
     # TODO: CUDA is not implemented yet
     name = test_params.pop('module_name')
