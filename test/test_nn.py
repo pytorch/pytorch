@@ -88,10 +88,10 @@ class TestNN(NNTestCase):
 
         def fw_hook(inc, h_module, input, output):
             self.assertIsInstance(input, tuple)
-            self.assertIsInstance(output, tuple)
+            self.assertIsInstance(output, Variable)
             self.assertTrue(h_module is module)
             self.assertEqual(input[0].data, torch.ones(5, 5))
-            self.assertEqual(output[0].data, torch.Tensor(5, 5).fill_(1 / (1 + 1 / math.e)))
+            self.assertEqual(output.data, torch.Tensor(5, 5).fill_(1 / (1 + 1 / math.e)))
             counter['forwards'] += inc
 
         def bw_hook(inc, h_module, grad_input, grad_output):

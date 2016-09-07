@@ -9,13 +9,14 @@ class Container(Module):
         super(Container, self).__init__()
         self.modules = []
         for key, value in kwargs.items():
-            self._assign_module(key, value)
+            self.add_module(key, value)
 
-    def _assign_module(self, name, module):
-        # TODO: error message
-        assert not hasattr(self, name)
+    def add_module(self, name, module):
+        if hasattr(self, name):
+            raise KeyError("attribute already exists '{}'".format(name))
         setattr(self, name, module)
-        self.modules.append(module)
+        if module is not None:
+            self.modules.append(module)
 
     def parameters(self):
         for module in self.modules:
@@ -29,17 +30,17 @@ class Sequential(Container):
         super(Sequential, self).__init__()
         if len(args) == 1 and isinstance(args[0], OrderedDict):
             for key, module in args[0].items():
-                self._assign_module(key, module)
+                self.add_module(key, module)
         else:
             idx = 0
             for module in args:
-                self._assign_module(str(idx), module)
+                self.add_module(str(idx), module)
                 idx += 1
 
     def __getitem__(self, idx):
         return self.modules[idx]
 
-    def _forward(self, input):
+    def forward(self, input):
         for module in self.modules:
             input = module(input)
-        return (input,)
+        return input

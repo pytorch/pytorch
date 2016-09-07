@@ -22,5 +22,5 @@ class Linear(Module):
         self.weight.data.uniform_(-stdv, stdv)
         self.bias.data.uniform_(-stdv, stdv)
 
-    def _forward(self, input):
+    def forward(self, input):
         return self._backend.Linear()(input, self.weight, self.bias)

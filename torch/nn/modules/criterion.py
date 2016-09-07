@@ -12,7 +12,7 @@ class AbsCriterion(Module):
         super(AbsCriterion, self).__init__()
         self.size_average = size_average
 
-    def _forward(self, input, target):
+    def forward(self, input, target):
         if isinstance(target, Variable):
             _assert_no_grad(target)
             target = target.data
@@ -25,9 +25,8 @@ class ClassNLLCriterion(Module):
         self.weight = weight
         self.size_average = size_average
 
-    def _forward(self, input, target):
+    def forward(self, input, target):
         if isinstance(target, Variable):
             _assert_no_grad(target)
             target = target.data
         return self._backend.ClassNLLCriterion(target, self.size_average, weight=self.weight)(input)
-

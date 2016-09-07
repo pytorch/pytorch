@@ -59,6 +59,8 @@ class Function(object):
                 del self.to_save
 
         del self.input  # Remove unnecessary references to input
+        if len(output) == 1:
+            output = output[0]
         return output
 
     def _do_backward(self, *grad_output):

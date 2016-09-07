@@ -13,7 +13,7 @@ class Module(object):
         self.forward_hooks = OrderedDict()
         self.train = True
 
-    def _forward(self, *input):
+    def forward(self, *input):
         raise NotImplementedError
 
     def type(self, type, *forwarded_args):
@@ -63,14 +63,12 @@ class Module(object):
         del self.forward_hooks[name]
 
     def __call__(self, *input):
-        result = self._forward(*input)
+        result = self.forward(*input)
         for hook in self.forward_hooks.values():
             hook(self, input, result)
-        fn = result[0].creator
+        fn = result.creator
         for key, hook in self.backward_hooks.items():
             fn.register_hook(key, lambda gi,go,hook=hook: hook(self, gi, go))
-        if len(result) == 1:
-            return result[0]
         return result
 
     def parameters(self):
@@ -82,4 +80,3 @@ class Module(object):
     def zero_grad(self):
         for p in self.parameters():
             p.grad.zero_()
-

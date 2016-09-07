@@ -39,13 +39,13 @@ class BatchNorm(Module):
         if input.size(1) != self.running_mean.nElement():
             raise RuntimeError('got {}-feature tensor, expected {}'.format(input.size(1), self.running_mean.nElement()))
 
-    def __call__(self, input):
+    def forward(self, input):
         self._checkInputDim(input)
         args = (input,)
         if self.weight is not None:
             args = args + (self.weight, self.bias)
         return self._backend.BatchNorm(self.running_mean,
-                self.running_var, self.train, self.momentum, self.eps)(*args)[0]
+                self.running_var, self.train, self.momentum, self.eps)(*args)
 
 
 class BatchNorm2d(BatchNorm):
