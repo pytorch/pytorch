@@ -4,6 +4,9 @@
 #include <unistd.h>
 #include <poll.h>
 #include <cstdio>
+#include <string>
+#include <sstream>
+#include <iostream>
 
 #include "err.h"
 #include "alloc_info.h"
