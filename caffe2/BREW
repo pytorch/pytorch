@@ -47,7 +47,7 @@ cc_library(
 cc_test(
   name = "core_test",
   srcs = Glob(["core/*_test.cc", "utils/*_test.cc"],
-              excludes=["*gpu_test*"]),
+              excludes=["*gpu_test*", "*cudnn_test*"]),
   deps = [
       ":core",
       "//caffe2/operators:core_ops",
@@ -58,9 +58,14 @@ cc_test(
 
 cc_test(
   name = "core_gpu_test",
-  srcs = Glob(["core/*_gpu_test.cc", "utils/*_gpu_test.cc"]),
+  srcs = Glob([
+      "core/*_gpu_test.cc",
+      "core/*_cudnn_test.cc",
+      "utils/*_gpu_test.cc",
+  ]),
   deps = [
       ":core_gpu",
+      ":core_cudnn",
       "//third_party:gtest",
       "//caffe2/test:caffe2_gtest_main",
   ],
