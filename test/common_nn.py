@@ -9,7 +9,8 @@ try:
     import torch.cuda
     import torch.legacy.cunn
     TEST_CUDA = True
-except ImportError:
+except Exception:
+    # TODO: catch ImportError once it works with "setup.py develop"
     TEST_CUDA = False
 
 PRECISION = 1e-5
@@ -20,23 +21,6 @@ module_tests = [
         constructor_args=(10, 8),
         input_size=(4, 10),
         reference_fn=lambda i,p: torch.mm(i, p[0].t()) + p[1].view(1, -1).expand(4, 8)
-    ),
-    dict(
-        module_name='Conv2d',
-        constructor_args=(3, 4, 3, 3),
-        input_size=(2, 3, 6, 6)
-    ),
-    dict(
-        module_name='Conv2d',
-        constructor_args=(3, 4, 3, 3, 2, 2),
-        input_size=(2, 3, 6, 6),
-        desc='strided'
-    ),
-    dict(
-        module_name='Conv2d',
-        constructor_args=(3, 4, 3, 3, 2, 2, 1, 1),
-        input_size=(2, 3, 6, 6),
-        desc='padding'
     ),
     dict(
         module_name='Threshold',
@@ -73,28 +57,6 @@ module_tests = [
     dict(
         module_name='Tanh',
         input_size=(2, 3, 4, 5)
-    ),
-    dict(
-        module_name='MaxPool2d',
-        constructor_args=(3, 3, 2, 2, 1, 1),
-        input_size=(1, 3, 7, 7)
-    ),
-    dict(
-        module_name='AvgPool2d',
-        constructor_args=(2, 2),
-        input_size=(2, 3, 6, 6),
-    ),
-    dict(
-        module_name='AvgPool2d',
-        constructor_args=(2, 2, 2, 2),
-        input_size=(2, 3, 6, 6),
-        desc='stride',
-    ),
-    dict(
-        module_name='AvgPool2d',
-        constructor_args=(2, 2, 2, 2, 1, 1),
-        input_size=(2, 3, 6, 6),
-        desc='stride_pad',
     ),
     dict(
         module_name='Softmax',
