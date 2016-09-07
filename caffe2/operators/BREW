@@ -52,6 +52,7 @@ cc_test(
   deps = [
       ":core_ops",
       ":core_ops_gpu",
+      ":core_ops_cudnn",
       "//caffe2/test:caffe2_gtest_main",
   ]
 )

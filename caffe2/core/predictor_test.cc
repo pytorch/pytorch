@@ -74,7 +74,7 @@ const char* initSpec = R"DOC(
 std::unique_ptr<Blob> randomTensor(
     const std::vector<TIndex>& dims,
     CPUContext* ctx) {
-  auto blob = std::make_unique<Blob>();
+  auto blob = make_unique<Blob>();
   auto* t = blob->GetMutable<TensorCPU>();
   t->Resize(dims);
   math::RandUniform<float, CPUContext>(
