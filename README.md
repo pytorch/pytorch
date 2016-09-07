@@ -16,6 +16,14 @@ This is done so that we can control development tightly and rapidly during the i
 
 
 ## Installation
+
+### Binaries
+- Anaconda
+```bash
+conda install pytorch -c https://conda.anaconda.org/t/6N-MsQ4WZ7jo/soumith
+```
+
+### From source
 ```bash
 pip install -r requirements.txt
 pip install .
