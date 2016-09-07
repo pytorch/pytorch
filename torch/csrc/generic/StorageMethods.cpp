@@ -65,6 +65,90 @@ static PyObject * THPStorage_(fill_)(THPStorage *self, PyObject *number_arg)
   END_HANDLE_TH_ERRORS
 }
 
+#ifndef THC_GENERIC_FILE
+static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyObject *keywds)
+{
+  HANDLE_TH_ERRORS
+  PyObject *obj = NULL;
+  const char* byte_order_str = NULL;
+  Py_ssize_t count = -1, offset = 0;
+  Py_buffer buffer;
+  static char *kwlist[] = {"buffer", "byte_order", "count", "offset", NULL};
+  const char* argtypes;
+#if defined(TH_REAL_IS_BYTE) || defined(TH_REAL_IS_CHAR)
+  argtypes = "O|snn";
+#else
+  argtypes = "Os|nn";
+#endif
+
+  if (!PyArg_ParseTupleAndKeywords(args, keywds, argtypes, kwlist,
+        &obj, &byte_order_str, &count, &offset)) {
+    return NULL;
+  }
+
+#if !(defined(TH_REAL_IS_BYTE) || defined(TH_REAL_IS_CHAR))
+  THPByteOrder byte_order;
+  if (strcmp(byte_order_str, "native") == 0) {
+    byte_order = THP_nativeByteOrder();
+  } else if (strcmp(byte_order_str, "big") == 0) {
+    byte_order = THP_BIG_ENDIAN;
+  } else if (strcmp(byte_order_str, "little") == 0) {
+    byte_order = THP_LITTLE_ENDIAN;
+  } else {
+    PyErr_Format(PyExc_ValueError,
+      "invalid byte_order '%s' (expected 'big', 'little', or 'native')",
+      byte_order_str);
+    return NULL;
+  }
+#endif
+
+  if (PyObject_GetBuffer(obj, &buffer, PyBUF_SIMPLE) < 0)
+    return NULL;
+
+  if (offset < 0 || offset > buffer.len) {
+    PyErr_Format(PyExc_ValueError,
+      "offset must be non-negative and no greater than buffer length (%ld)",
+      (long) buffer.len);
+    return NULL;
+  }
+
+  if (count < 0) {
+    if ((buffer.len - offset) % sizeof(real) != 0) {
+      PyErr_Format(PyExc_ValueError, "buffer size must be a multiple of element size");
+      return NULL;
+    }
+    count = (buffer.len - offset) / sizeof(real);
+  }
+
+  if (offset + (count * (Py_ssize_t)sizeof(real)) > buffer.len) {
+    PyErr_Format(PyExc_ValueError, "buffer is smaller than requested size");
+    return NULL;
+  }
+
+  uint8_t* src = (uint8_t*) buffer.buf;
+  THStorage* storage = THStorage_(newWithSize)(count);
+
+#if defined(TH_REAL_IS_BYTE) || defined(TH_REAL_IS_CHAR)
+  memcpy(storage->data, src + offset, count);
+#elif defined(TH_REAL_IS_SHORT)
+  THP_decodeInt16Buffer(storage->data, src + offset, byte_order, count);
+#elif defined(TH_REAL_IS_INT)
+  THP_decodeInt32Buffer(storage->data, src + offset, byte_order, count);
+#elif defined(TH_REAL_IS_LONG)
+  THP_decodeInt64Buffer(storage->data, src + offset, byte_order, count);
+#elif defined(TH_REAL_IS_FLOAT)
+  THP_decodeFloatBuffer(storage->data, src + offset, byte_order, count);
+#elif defined(TH_REAL_IS_DOUBLE)
+  THP_decodeDoubleBuffer(storage->data, src + offset, byte_order, count);
+#else
+#error "Unknown type"
+#endif
+
+  return (PyObject*)THPStorage_(newObject)(storage);
+  END_HANDLE_TH_ERRORS
+}
+#endif
+
 PyObject * THPStorage_(writeFile)(THPStorage *self, PyObject *file)
 {
   HANDLE_TH_ERRORS
@@ -185,6 +269,7 @@ static PyMethodDef THPStorage_(methods)[] = {
   {"_write_file", (PyCFunction)THPStorage_(writeFile), METH_O, NULL},
   {"_new_with_file", (PyCFunction)THPStorage_(newWithFile), METH_O | METH_STATIC, NULL},
 #ifndef THC_GENERIC_FILE
+  {"from_buffer", (PyCFunction)THPStorage_(fromBuffer), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"_share", (PyCFunction)THPStorage_(_share), METH_NOARGS, NULL},
   {"_new_shared", (PyCFunction)THPStorage_(_newShared), METH_VARARGS | METH_STATIC, NULL},
 #endif

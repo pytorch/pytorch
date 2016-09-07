@@ -117,7 +117,7 @@ class clean(distutils.command.clean.clean):
 
 include_dirs = []
 extra_link_args = []
-extra_compile_args = ['-std=c++11']
+extra_compile_args = ['-std=c++11', '-Wno-write-strings']
 
 cwd = os.path.dirname(os.path.abspath(__file__))
 lib_path = os.path.join(cwd, "torch", "lib")
@@ -138,6 +138,7 @@ main_sources = [
     "torch/csrc/Generator.cpp",
     "torch/csrc/Tensor.cpp",
     "torch/csrc/Storage.cpp",
+    "torch/csrc/byte_order.cpp",
     "torch/csrc/utils.cpp",
     "torch/csrc/allocators.cpp",
     "torch/csrc/serialization.cpp",
