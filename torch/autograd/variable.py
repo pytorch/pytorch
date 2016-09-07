@@ -54,7 +54,7 @@ class Variable(object):
         raise AttributeError(name)
 
     def __getitem__(self, key):
-        return Index(key)(self)[0]
+        return Index(key)(self)
 
     def backward(self, gradient=None):
         if self.volatile:
@@ -90,84 +90,84 @@ class Variable(object):
 
     def type(self, t):
         if t != type(self.data):
-            return Copy(t)(self)[0]
+            return Copy(t)(self)
         return self
 
     def add(self, other, inplace=False):
         if isinstance(other, Variable):
-            return Add(inplace)(self, other)[0]
+            return Add(inplace)(self, other)
         else:
             assert not torch.isTensor(other)
-            return AddConstant(other, inplace)(self)[0]
+            return AddConstant(other, inplace)(self)
 
     def add_(self, other):
         return self.add(other, inplace=True)
 
     def sub(self, other):
         if isinstance(other, Variable):
-            return Sub()(self, other)[0]
+            return Sub()(self, other)
         else:
             assert not torch.isTensor(other)
-            return SubConstant(other)(self)[0]
+            return SubConstant(other)(self)
 
     def sub_(self, other):
         return self.add(other, inplace=True)
 
     def mul(self, other):
         if isinstance(other, Variable):
-            return Mul()(self, other)[0]
+            return Mul()(self, other)
         else:
             assert not torch.isTensor(other)
-            return MulConstant(other)(self)[0]
+            return MulConstant(other)(self)
 
     def mul_(self, other):
         if not isinstance(other, Variable) and not torch.isTensor(other):
-            return MulConstant(other, inplace=True)(self)[0]
+            return MulConstant(other, inplace=True)(self)
 
     def div(self, other):
         if isinstance(other, Variable):
-            return Div()(self, other)[0]
+            return Div()(self, other)
         else:
             assert not torch.isTensor(other)
-            return DivConstant(other)(self)[0]
+            return DivConstant(other)(self)
 
     def div_(self, other):
         if not isinstance(other, Variable) and not torch.isTensor(other):
-            return DivConstant(other, inplace=True)(self)[0]
+            return DivConstant(other, inplace=True)(self)
 
     def pow(self, other):
         if isinstance(other, Variable):
-            return Pow()(self, other)[0]
+            return Pow()(self, other)
         else:
             assert not torch.isTensor(other)
-            return PowConstant(other)(self)[0]
+            return PowConstant(other)(self)
 
     def exp(self):
-        return Exp()(self)[0]
+        return Exp()(self)
 
     def exp_(self):
-        return Exp(inplace=True)(self)[0]
+        return Exp(inplace=True)(self)
 
     def log(self):
-        return Log()(self)[0]
+        return Log()(self)
 
     def log1p(self):
-        return Log1p()(self)[0]
+        return Log1p()(self)
 
     def neg(self):
-        return Negate()(self)[0]
+        return Negate()(self)
 
     def neg_(self):
-        return Negate(inplace=True)(self)[0]
+        return Negate(inplace=True)(self)
 
     def view(self, *sizes):
-        return View(*sizes)(self)[0]
+        return View(*sizes)(self)
 
     def t(self):
-        return Transpose(0, 1)(self)[0]
+        return Transpose(0, 1)(self)
 
     def transpose(self, dim1, dim2):
-        return Transpose(dim1, dim2)(self)[0]
+        return Transpose(dim1, dim2)(self)
 
     def __add__(self, other):
         return self.add(other)
@@ -177,7 +177,7 @@ class Variable(object):
         return self.sub(other)
 
     def __rsub__(self, other):
-        return SubConstant(other, sub_tensor=True)(self)[0]
+        return SubConstant(other, sub_tensor=True)(self)
 
     def __mul__(self, other):
         return self.mul(other)
@@ -188,17 +188,17 @@ class Variable(object):
     __truediv__ = __div__
 
     def __rdiv__(self, other):
-        return DivConstant(other, div_by_tensor=True)(self)[0]
+        return DivConstant(other, div_by_tensor=True)(self)
     __rtruediv__ = __rdiv__
 
     def __pow__(self, other):
         return self.pow(other)
 
     def __rpow__(self, other):
-        return PowConstant(other, tensor_power=True)(self)[0]
+        return PowConstant(other, tensor_power=True)(self)
 
     def __neg__(self):
-        return Negate()(self)[0]
+        return Negate()(self)
 
 
 from .leaf import Leaf

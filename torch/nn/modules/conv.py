@@ -26,7 +26,7 @@ class Conv2d(Module):
         self.weight.data.uniform_(-stdv, stdv)
         self.bias.data.uniform_(-stdv, stdv)
 
-    def _forward(self, input):
+    def forward(self, input):
         conv2d = self._backend.Conv2d(self.kw, self.kh, self.dw, self.dh, self.padw, self.padh)
         if self.bias is None:
             return conv2d(input, self.weight)

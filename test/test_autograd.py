@@ -171,10 +171,15 @@ for test in tests:
     def do_test(self, cls=cls, constructor_args=constructor_args, call_args=call_args):
         input = create_input(call_args)
         output = cls(*constructor_args)(*input)
+        if not isinstance(output, tuple):
+            output = (output,)
         for i, o in enumerate(output):
             analytical = get_analytical_jacobian(input, o)
             def fn(input):
-                return cls(*constructor_args)(*input)[i].data
+                tmp = cls(*constructor_args)(*input)
+                if not isinstance(tmp, tuple):
+                    tmp = (tmp,)
+                return tmp[i].data
             numerical = get_numerical_jacobian(fn, input, input)
             self.assertLessEqual(
                 max(a.add(-1, n).abs().max() for a, n in zip(analytical, numerical)),

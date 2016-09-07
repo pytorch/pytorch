@@ -13,7 +13,7 @@ class Threshold(Module):
         self.inplace = inplace
         # TODO: check in THNN (if inplace == True, then assert value <= threshold)
 
-    def _forward(self, input):
+    def forward(self, input):
         return self._backend.Threshold(self.threshold, self.value, self.inplace)(input)
 
 
@@ -32,7 +32,7 @@ class HardTanh(Module):
         self.inplace = inplace
         assert self.max_val > self.min_val
 
-    def _forward(self, input):
+    def forward(self, input):
         return self._backend.HardTanh(self.min_val, self.max_val, self.inplace)(input)
 
 
@@ -44,30 +44,30 @@ class ReLU6(HardTanh):
 
 class Sigmoid(Module):
 
-    def _forward(self, input):
+    def forward(self, input):
         return self._backend.Sigmoid()(input)
 
 
 class Tanh(Module):
 
-    def _forward(self, input):
+    def forward(self, input):
         return self._backend.Tanh()(input)
 
 
 class Softmax(Module):
 
-    def _forward(self, input):
+    def forward(self, input):
         assert input.dim() == 2, 'Softmax requires a 2D tensor as input'
         return self._backend.Softmax()(input)
 
 
 class Softmax2d(Module):
 
-    def _forward(self, input):
+    def forward(self, input):
         assert input.dim() == 4, 'Softmax2d requires a 4D tensor as input'
         return self._backend.Softmax()(input)
 
 class LogSoftmax(Module):
 
-    def _forward(self, input):
+    def forward(self, input):
         return self._backend.LogSoftmax()(input)
