@@ -242,7 +242,7 @@ static void *_map_alloc(void* ctx_, long size)
         if((fd = shm_open(ctx->filename, flags, (mode_t)0600)) == -1)
           THError("unable to open shared memory object <%s> in read-write mode", ctx->filename);
 #else
-        THError("unable to open file <%s> in sharedmem mode, shm_open unavailable on this platform");
+        THError("unable to open file <%s> in sharedmem mode, shm_open unavailable on this platform", ctx->filename);
 #endif
       }
       else
