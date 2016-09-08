@@ -332,6 +332,7 @@ INSTALL(FILES
   generic/THTensorRandom.c
   generic/THTensorRandom.h
   generic/THVectorDispatch.c
+  generic/THVector.h
   DESTINATION "${TH_INSTALL_INCLUDE_SUBDIR}/TH/generic")
 
 
