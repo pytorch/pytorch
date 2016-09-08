@@ -551,6 +551,10 @@ PyTypeObject THPTensorStatelessType = {
 
 bool THPTensor_(init)(PyObject *module)
 {
+#ifndef THC_GENERIC_FILE
+  THVector_(vectorDispatchInit)();
+#endif
+
   THPTensorType.tp_methods = THPTensor_(methods);
   THPTensorType.tp_members = THPTensor_(members);
   if (PyType_Ready(&THPTensorType) < 0)
