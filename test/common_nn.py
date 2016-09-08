@@ -380,6 +380,10 @@ class CriterionTest(TestBase):
         module = self.constructor(*self.constructor_args)
         input = self._get_input()
 
+        # Check that these methods don't raise errors
+        module.__repr__()
+        str(module)
+
         if self.reference_fn is not None:
             out = test_case._forward_criterion(module, input, self.target)
             expected_out = self.reference_fn(deepcopy(self._unpack_input(input)),

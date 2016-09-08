@@ -41,7 +41,7 @@ class SpatialCrossMapLRN(Module):
 
             # use output storage as temporary buffer
             inputSquare = self.output
-            inputSquare.pow(input, 2)
+            torch.pow(inputSquare, input, 2)
 
             prePad = int((self.size - 1)/2 + 1)
             prePadCrop = channels if prePad > channels else prePad
@@ -109,9 +109,9 @@ class SpatialCrossMapLRN(Module):
             self.paddedRatio.zero_()
             paddedRatioCenter = self.paddedRatio.narrow(0, inversePrePad, channels)
             for n in range(batchSize):
-                paddedRatioCenter.mul_(gradOutput[n], self.output[n])
+                torch.mul(paddedRatioCenter, gradOutput[n], self.output[n])
                 paddedRatioCenter.div_(self.scale[n])
-                self.accumRatio.sum(self.paddedRatio.narrow(0, 0,self.size-1), 0)
+                torch.sum(self.accumRatio, self.paddedRatio.narrow(0, 0,self.size-1), 0)
                 for c in range(channels):
                     self.accumRatio.add_(self.paddedRatio[c+self.size-1])
                     self.gradInput[n][c].addcmul_(-cacheRatioValue, input[n][c], self.accumRatio)
@@ -121,5 +121,5 @@ class SpatialCrossMapLRN(Module):
 
     def clearState(self):
         clear(self, 'scale', 'paddedRatio', 'accumRatio')
-        return super(SpatialCrossMapLRN, self).clearState(self)
+        return super(SpatialCrossMapLRN, self).clearState()
 

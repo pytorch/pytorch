@@ -152,12 +152,11 @@ tests = [
     OldModuleTest(nn.Squeeze,
                     input_size=(2, 1, 1, 4, 5),
                     reference_fn=lambda i,_: i.squeeze()),
-    # TODO: should squeeze work inplace?
-    # OldModuleTest(nn.Squeeze,
-                    # (1,),
-                    # input_size=(2, 1, 1, 4, 5),
-                    # reference_fn=lambda i,_: i.squeeze(1),
-                    # desc='dim'),
+    OldModuleTest(nn.Squeeze,
+                    (1,),
+                    input_size=(2, 1, 1, 4, 5),
+                    reference_fn=lambda i,_: i.squeeze(1),
+                    desc='dim'),
     OldModuleTest(nn.Unsqueeze,
                     (1,),
                     input_size=(2, 4, 5),
@@ -356,13 +355,12 @@ tests = [
                     desc='stride_pad'),
     OldModuleTest(nn.SpatialAdaptiveMaxPooling,
                     (4, 4),
-                    input_size=(2, 3, 8, 8)),
+                    input_size=(2, 3, 8, 8),
+                    reference_fn=lambda i,_: nn.SpatialMaxPooling(2, 2).forward(i)),
     OldModuleTest(nn.SpatialAdaptiveMaxPooling,
                     (4, 4),
                     input_size=(2, 3, 7, 11),
                     desc='irregular'),
-                    # TODO: enable after implementing MaxPooling
-                    # reference_fn=lambda i,_: nn.SpatialMaxPooling(2, 2).forward(i)),
     OldModuleTest(nn.SpatialConvolution,
                     (3, 4, 3, 3),
                     input_size=(2, 3, 6, 6)),
@@ -385,10 +383,9 @@ tests = [
                     (3, 2, 6, 6, 2, 2, 2, 2, 1, 1),
                     input_size=(2, 3, 6, 6),
                     desc='stride_pad'),
-    # TODO FIX THIS
-    # OldModuleTest(nn.SpatialCrossMapLRN,
-                    # (3,),
-                    # input_size=(2, 3, 6, 6)),
+    OldModuleTest(nn.SpatialCrossMapLRN,
+                    (5, 5e-3, 1e-3, 2),
+                    input_size=(2, 3, 6, 6)),
     OldModuleTest(nn.SpatialDivisiveNormalization,
                     (3,),
                     input_size=(2, 3, 8, 8)),
@@ -750,6 +747,10 @@ class TestNN(NNTestCase):
         gradInput = module.backward(input.clone(), input.clone())
         self.assertLess(abs(gradInput.mean() - (1-p)), 0.05)
 
+        # Check that these don't raise errors
+        module.__repr__()
+        str(module)
+
     def test_SpatialDropout(self):
         p = 0.2
         b = random.randint(1, 5)
@@ -763,6 +764,10 @@ class TestNN(NNTestCase):
         self.assertLess(abs(output.mean() - (1-p)), 0.05)
         gradInput = module.backward(input, input)
         self.assertLess(abs(gradInput.mean() - (1-p)), 0.05)
+
+        # Check that these don't raise errors
+        module.__repr__()
+        str(module)
 
     def test_VolumetricDropout(self):
         p = 0.2
@@ -779,6 +784,10 @@ class TestNN(NNTestCase):
         gradInput = module.backward(input, input)
         self.assertLess(abs(gradInput.mean() - (1-p)), 0.05)
 
+        # Check that these don't raise errors
+        module.__repr__()
+        str(module)
+
     def test_ReLU_reference(self):
         input = torch.randn(10, 20)
         module = nn.ReLU()
@@ -790,7 +799,6 @@ class TestNN(NNTestCase):
         input = torch.randn(10, 20).mul(10)
         module = nn.ReLU6()
         output = module.forward(input)
-        # TODO: check elements between 0 and 6
         self.assertTrue(output[input.ge(6)].eq(6).all())
         self.assertTrue(output[input.lt(0)].eq(0).all())
 
@@ -806,6 +814,10 @@ class TestNN(NNTestCase):
         c.dontCast = True
         c.double()
         self.assertEqual(torch.typename(output), 'torch.FloatTensor')
+
+        # Check that these don't raise errors
+        c.__repr__()
+        str(c)
 
     def test_FlattenTable(self):
         input = [
@@ -838,6 +850,10 @@ class TestNN(NNTestCase):
         self.assertEqual(gradOutput[1], gradInput[1][0])
         self.assertEqual(gradOutput[2], gradInput[1][1][0])
         self.assertEqual(gradOutput[3], gradInput[2])
+
+        # Check that these don't raise errors
+        m.__repr__()
+        str(m)
 
         # More uglyness: FlattenTable doesn't rebuild the table every updateOutput
         # call, so we need to make sure that modifications to the input are
@@ -877,6 +893,10 @@ class TestNN(NNTestCase):
             l.weight.fill_(1)
             l.bias.fill_(0)
 
+        # Check that these don't raise errors
+        m.__repr__()
+        str(m)
+
         output = m.forward(input)
         output2 = input.sum(1).expand(4, 5).repeatTensor(num_modules, 1)
         self.assertEqual(output2, output)
@@ -896,6 +916,10 @@ class TestNN(NNTestCase):
         m.add(nn.View(4, 5, 1))
         m.add(nn.View(4, 5, 1))
 
+        # Check that these don't raise errors
+        m.__repr__()
+        str(m)
+
         output = m.forward(input)
         output2 = input.transpose(0, 2).transpose(0, 1)
         self.assertEqual(output2, output)
@@ -913,6 +937,10 @@ class TestNN(NNTestCase):
         m.add(nn.SplitTable(0))
         m.add(p)
         m.add(nn.JoinTable(2))
+
+        # Check that these don't raise errors
+        p.__repr__()
+        str(p)
 
         output = m.forward(input)
         output2 = input.transpose(0,2).transpose(0,1)
@@ -938,6 +966,10 @@ class TestNN(NNTestCase):
         module.add(nn.Identity())
         module.add(nn.Identity())
         module.float()
+
+        # Check that these don't raise errors
+        module.__repr__()
+        str(module)
 
         output = module.forward(input)
         output2 = [input, input, input]
@@ -998,6 +1030,10 @@ class TestNN(NNTestCase):
         self.assertEqual(output, outputConcat)
         self.assertEqual(gradInput, gradInputConcat)
 
+        # Check that these don't raise errors
+        concat.__repr__()
+        str(concat)
+
     def test_Contiguous(self):
         input = torch.randn(10, 10, 10)
         noncontig = input[:, 4]
@@ -1006,6 +1042,10 @@ class TestNN(NNTestCase):
         output = module.forward(noncontig)
         self.assertEqual(output, noncontig)
         self.assertTrue(output.contiguous())
+
+        # Check that these don't raise errors
+        module.__repr__()
+        str(module)
 
     def test_Index(self):
         net = nn.Index(0)
@@ -1028,6 +1068,10 @@ class TestNN(NNTestCase):
         gradInput = net.backward(input, gradOutput)
         self.assertEqual(gradInput[0], torch.Tensor(((2, 4), (0, 0))))
 
+        # Check that these don't raise errors
+        net.__repr__()
+        str(net)
+
     def test_L1Penalty(self):
         weight = 1
         m = nn.L1Penalty(weight, False, False)
@@ -1044,6 +1088,10 @@ class TestNN(NNTestCase):
             input.lt(0).typeAs(grad).mul_(-1)).mul_(weight)
         self.assertEqual(true_grad, grad)
 
+        # Check that these don't raise errors
+        m.__repr__()
+        str(m)
+
     def test_MaskedSelect(self):
         input = torch.randn(4, 5)
         mask = torch.ByteTensor(4, 5).bernoulli_()
@@ -1059,6 +1107,10 @@ class TestNN(NNTestCase):
         module.forward([input, mask])
         gradIn = module.backward([input, mask], gradOut)
         self.assertEqual(inTarget, gradIn[0])
+
+        # Check that these don't raise errors
+        module.__repr__()
+        str(module)
 
     def test_MultiCriterion(self):
         input = torch.rand(2, 10)
@@ -1084,6 +1136,10 @@ class TestNN(NNTestCase):
         gradInput3 = mc.backward(input3, target3)
         self.assertEqual(output, output3)
         self.assertEqual(gradInput.float(), gradInput3)
+
+        # Check that these don't raise errors
+        mc.__repr__()
+        str(mc)
 
         # test table input
         # TODO: enable when Criterion.clone is ready
@@ -1164,6 +1220,10 @@ class TestNN(NNTestCase):
         self.assertEqual(gradInput[1][0], gradInput2[1][0])
         self.assertEqual(gradInput[1][1], gradInput2[1][1])
 
+        # Check that these don't raise errors
+        pc.__repr__()
+        str(pc)
+
     def test_NarrowTable(self):
         input = [torch.Tensor(i) for i in range(1, 6)]
 
@@ -1174,6 +1234,10 @@ class TestNN(NNTestCase):
         module = nn.NarrowTable(2, 3)
         output = module.forward(input)
         self.assertEqual(output, input[2:5])
+
+        # Check that these don't raise errors
+        module.__repr__()
+        str(module)
 
 
 if __name__ == '__main__':

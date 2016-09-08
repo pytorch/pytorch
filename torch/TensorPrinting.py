@@ -54,7 +54,7 @@ SCALE_FORMAT = '{:.5f} *\n'
 
 def _printMatrix(self, indent=''):
     fmt, scale, sz = _printformat(self.storage())
-    nColumnPerLine = math.floor((80-len(indent))/(sz+1))
+    nColumnPerLine = int(math.floor((80-len(indent))/(sz+1)))
     strt = ''
     firstColumn = 0
     while firstColumn < self.size(1):

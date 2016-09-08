@@ -178,7 +178,9 @@ class _TensorBase(object):
 
     def repeatTensor(self, *args):
         # If args == (torch.LongStorage,), then we need to unpack the tuple
-        repeats = list(args[0] if len(args) == 1 else args)
+        if len(args) == 1 and isinstance(args[0], torch.LongStorage):
+            args = args[0]
+        repeats = list(args)
         result = self.new()
         src = self.contiguous()
 

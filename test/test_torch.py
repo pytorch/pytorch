@@ -4,7 +4,7 @@ import random
 import torch
 import tempfile
 import unittest
-from itertools import product
+from itertools import product, chain
 from common import TestCase, iter_indices
 
 SIZE = 100
@@ -2252,5 +2252,17 @@ class TestTorch(TestCase):
         self.assertEqual(floats.size(), 1)
         self.assertEqual(floats[0], 2.25)
 
+    def test_print(self):
+        for t in torch._tensor_classes:
+            obj = t(100, 100).fill_(1)
+            obj.__repr__()
+            str(obj)
+        for t in torch._storage_classes:
+            obj = t(100).fill_(1)
+            obj.__repr__()
+            str(obj)
+
+
 if __name__ == '__main__':
     unittest.main()
+

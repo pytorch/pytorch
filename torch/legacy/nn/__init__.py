@@ -103,7 +103,7 @@ from .SpatialContrastiveNormalization import SpatialContrastiveNormalization
 from .SpatialConvolution import SpatialConvolution
 from .SpatialConvolutionLocal import SpatialConvolutionLocal
 from .SpatialConvolutionMap import SpatialConvolutionMap
-from .SpatialCrossMapLRN import SpatialCrossMapLRN # TODO fails tests
+from .SpatialCrossMapLRN import SpatialCrossMapLRN
 from .SpatialDilatedConvolution import SpatialDilatedConvolution
 from .SpatialDivisiveNormalization import SpatialDivisiveNormalization
 from .SpatialDropout import SpatialDropout
@@ -146,7 +146,6 @@ from .VolumetricFullConvolution import VolumetricFullConvolution
 from .VolumetricMaxPooling import VolumetricMaxPooling
 from .VolumetricMaxUnpooling import VolumetricMaxUnpooling
 from .VolumetricReplicationPadding import VolumetricReplicationPadding
-
 
 from .Clamp import Clamp
 from .ClassSimplexCriterion import ClassSimplexCriterion
