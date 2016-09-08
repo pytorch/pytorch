@@ -278,11 +278,16 @@ static void *_map_alloc(void* ctx_, long size)
             close(fd);
             THError("unable to stretch file <%s> to the right size", ctx->filename);
           }
+/* on OS X write returns with errno 45 (Opperation not supported) when used
+ * with a file descriptor obtained via shm_open
+ */
+#ifndef __APPLE__
           if((write(fd, "", 1)) != 1) /* note that the string "" contains the '\0' byte ... */
           {
             close(fd);
             THError("unable to write to file <%s>", ctx->filename);
           }
+#endif
         }
         else
         {
