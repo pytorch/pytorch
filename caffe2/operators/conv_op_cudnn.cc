@@ -1,6 +1,6 @@
 #include "caffe2/core/common_cudnn.h"
 #include "caffe2/core/context_gpu.h"
-#include "caffe2/operators/conv_op_cudnn_cache_gpu.h"
+#include "caffe2/operators/conv_op_cache_cudnn.h"
 #include "caffe2/operators/conv_pool_op_base.h"
 
 namespace caffe2 {

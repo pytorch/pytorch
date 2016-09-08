@@ -1,4 +1,4 @@
-#include "caffe2/operators/conv_op_cudnn_cache_gpu.h"
+#include "caffe2/operators/conv_op_cache_cudnn.h"
 
 #include <cudnn.h>
 
