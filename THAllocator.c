@@ -462,6 +462,18 @@ static void THRefcountedMapAllocator_free(void* ctx_, void* data) {
   THMapAllocatorContext_free(ctx);
 }
 
+void THRefcountedMapAllocator_incref(THMapAllocatorContext *ctx, void *data)
+{
+  THMapInfo *map_info = (THMapInfo*)(((char*)data) - TH_ALLOC_ALIGNMENT);
+  THAtomicIncrementRef(&map_info->refcount);
+}
+
+int THRefcountedMapAllocator_decref(THMapAllocatorContext *ctx, void *data)
+{
+  THMapInfo *map_info = (THMapInfo*)(((char*)data) - TH_ALLOC_ALIGNMENT);
+  return THAtomicDecrementRef(&map_info->refcount);
+}
+
 #else
 
 static void * THRefcountedMapAllocator_alloc(void *ctx, long size) {
@@ -475,6 +487,16 @@ static void *THRefcountedMapAllocator_realloc(void* ctx, void* ptr, long size) {
 }
 
 static void THRefcountedMapAllocator_free(void* ctx_, void* data) {
+  THError("refcounted file mapping not supported on your system");
+}
+
+void THRefcountedMapAllocator_incref(THMapAllocatorContext *ctx, void *data)
+{
+  THError("refcounted file mapping not supported on your system");
+}
+
+int THRefcountedMapAllocator_decref(THMapAllocatorContext *ctx, void *data)
+{
   THError("refcounted file mapping not supported on your system");
 }
 
