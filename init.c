@@ -10,6 +10,9 @@
 #include "generic/AbsCriterion.c"
 #include "THGenerateFloatTypes.h"
 
+#include "generic/BCECriterion.c"
+#include "THGenerateFloatTypes.h"
+
 #include "generic/ClassNLLCriterion.c"
 #include "THGenerateFloatTypes.h"
 

@@ -25,6 +25,21 @@ TH_API void THNN_(AbsCriterion_updateGradInput)(
           THTensor *gradInput,         // [OUT] gradient w.r.t. input
           bool sizeAverage);           // if true, the gradient will be normalized by batch size
 
+TH_API void THNN_(BCECriterion_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *target,
+          THTensor *output,
+          bool sizeAverage,
+	  THTensor *weights);
+TH_API void THNN_(BCECriterion_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *target,
+          THTensor *gradInput,
+          bool sizeAverage,
+	  THTensor *weights);
+
 TH_API void THNN_(ClassNLLCriterion_updateOutput)(
           THNNState *state,            // library's state
           THTensor *input,             // input tensor (1D/2D)
