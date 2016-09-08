@@ -129,7 +129,7 @@ SET(hdr
 
 SET(src
   THGeneral.c THAllocator.c THStorage.c THTensor.c THBlas.c THLapack.c
-  THLogAdd.c THRandom.c THFile.c THDiskFile.c THMemoryFile.c THAtomic.c)
+  THLogAdd.c THRandom.c THFile.c THDiskFile.c THMemoryFile.c THAtomic.c THVector.c)
 
 SET(src ${src} ${hdr} ${simd})
 ADD_LIBRARY(TH SHARED ${src})
@@ -331,7 +331,7 @@ INSTALL(FILES
   generic/THTensorMath.h
   generic/THTensorRandom.c
   generic/THTensorRandom.h
-  generic/THVector.c
+  generic/THVectorDispatch.c
   DESTINATION "${TH_INSTALL_INCLUDE_SUBDIR}/TH/generic")
 
 
