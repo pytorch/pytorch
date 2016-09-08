@@ -665,7 +665,7 @@ class python_cc_extension(BuildTarget):
                 obj_files + MergeOrderedObjs(
                     [Brewery.Get(dep).cc_obj_files for dep in self.deps]),
                 os.path.join(Brewery.Env.GENDIR, name_split[0][2:],
-                             'lib' + name_split[1] + ".so"))])
+                             name_split[1] + ".so"))])
 
 
 class mpi_test(cc_target):

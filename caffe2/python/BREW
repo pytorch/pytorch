@@ -3,9 +3,8 @@ python_cc_extension(
   srcs=["pybind_state.cc"],
   hdrs=Glob(["*.h"]),
   deps = [
-      "//caffe2:all_available_ops",
+      "//caffe2:all_available_cpu_ops",
       "//caffe2:core",
-      "//caffe2/db:db",
   ],
 )
 
@@ -16,7 +15,6 @@ python_cc_extension(
   deps = [
       "//caffe2:all_available_ops",
       "//caffe2:core",
-      "//caffe2/db:db",
   ],
 )
 
