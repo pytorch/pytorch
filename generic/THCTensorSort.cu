@@ -38,13 +38,6 @@ THC_API void THCTensor_(sortKeyValueInplace)(THCState* state,
     THError("sortKeyValueInplace only works for sizes <= 2048 at present");
   }
 
-  int blockSize = (int) ceilPowerOf2 / 2;
-  if (blockSize < 1) {
-    blockSize = 1;
-  }
-
-  dim3 block(blockSize);
-
   // The grid is based on the number of independent slices that we
   // have to sort; one block per slice
   dim3 grid;
@@ -53,27 +46,36 @@ THC_API void THCTensor_(sortKeyValueInplace)(THCState* state,
   }
 
 #define HANDLE_CASE(TYPE, A, SIZE)                                      \
-  if (dir) {                                                            \
-    bitonicSortKVInPlace<real, long, A, -1, GTComp<real>, TYPE, SIZE> \
-      <<<grid, block, 0, THCState_getCurrentStream(state)>>>(           \
-        keyInfo,                                                        \
-        keySlices,                                                      \
-        (TYPE) keySliceSize,                                            \
-        (TYPE) keyInfo.strides[collapseKeyDim],                         \
-        valueInfo,                                                      \
-        (TYPE) valueInfo.strides[collapseValueDim],                     \
-        GTComp<real>());                                               \
-  } else {                                                              \
-    bitonicSortKVInPlace<real, long, A, -1, LTComp<real>, TYPE, SIZE> \
-      <<<grid, block, 0, THCState_getCurrentStream(state)>>>(           \
-        keyInfo,                                                        \
-        keySlices,                                                      \
-        (TYPE) keySliceSize,                                            \
-        (TYPE) keyInfo.strides[collapseKeyDim],                         \
-        valueInfo,                                                      \
-        (TYPE) valueInfo.strides[collapseValueDim],                     \
-        LTComp<real>());                                               \
-  }
+  do {                                                                  \
+    int blockSize = SIZE / 2;                                           \
+    if (blockSize < 1) {                                                \
+      blockSize = 1;                                                    \
+    }                                                                   \
+                                                                        \
+    dim3 block(blockSize);                                              \
+                                                                        \
+    if (dir) {                                                          \
+      bitonicSortKVInPlace<real, long, A, -1, GTComp<real>, TYPE, SIZE> \
+        <<<grid, block, 0, THCState_getCurrentStream(state)>>>(         \
+          keyInfo,                                                      \
+          keySlices,                                                    \
+          (TYPE) keySliceSize,                                          \
+          (TYPE) keyInfo.strides[collapseKeyDim],                       \
+          valueInfo,                                                    \
+          (TYPE) valueInfo.strides[collapseValueDim],                   \
+          GTComp<real>());                                              \
+    } else {                                                            \
+      bitonicSortKVInPlace<real, long, A, -1, LTComp<real>, TYPE, SIZE> \
+        <<<grid, block, 0, THCState_getCurrentStream(state)>>>(         \
+          keyInfo,                                                      \
+          keySlices,                                                    \
+          (TYPE) keySliceSize,                                          \
+          (TYPE) keyInfo.strides[collapseKeyDim],                       \
+          valueInfo,                                                    \
+          (TYPE) valueInfo.strides[collapseValueDim],                   \
+          LTComp<real>());                                              \
+    }                                                                   \
+  } while (0)
 
 #define HANDLE_SORT_CASE(TYPE, A)                       \
   {                                                     \
@@ -82,34 +84,20 @@ THC_API void THCTensor_(sortKeyValueInplace)(THCState* state,
       HANDLE_CASE(TYPE, A, 2048);                       \
       break;                                            \
       case 1024:                                        \
+      case 512:                                         \
+      case 256:                                         \
       HANDLE_CASE(TYPE, A, 1024);                       \
       break;                                            \
-      case 512:                                         \
-      HANDLE_CASE(TYPE, A, 512);                        \
-      break;                                            \
-      case 256:                                         \
-      HANDLE_CASE(TYPE, A, 256);                        \
-      break;                                            \
       case 128:                                         \
+      case 64:                                          \
       HANDLE_CASE(TYPE, A, 128);                        \
       break;                                            \
-      case 64:                                          \
-      HANDLE_CASE(TYPE, A, 64);                         \
-      break;                                            \
       case 32:                                          \
-      HANDLE_CASE(TYPE, A, 32);                         \
-      break;                                            \
       case 16:                                          \
-      HANDLE_CASE(TYPE, A, 16);                         \
-      break;                                            \
       case 8:                                           \
-      HANDLE_CASE(TYPE, A, 8);                          \
-      break;                                            \
       case 4:                                           \
-      HANDLE_CASE(TYPE, A, 4);                          \
-      break;                                            \
       case 2:                                           \
-      HANDLE_CASE(TYPE, A, 2);                          \
+      HANDLE_CASE(TYPE, A, 32);                         \
       break;                                            \
       case 1:                                           \
       /* Nothing to do, data already sorted */          \
@@ -136,9 +124,6 @@ THC_API void THCTensor_(sortKeyValueInplace)(THCState* state,
       HANDLE_SORT_CASE(unsigned int, -2);
     } else {
       switch (keyInfo.dims) {
-        case 1:
-          HANDLE_SORT_CASE(unsigned int, 1);
-          break;
         case 2:
           HANDLE_SORT_CASE(unsigned int, 2);
           break;
@@ -158,12 +143,8 @@ THC_API void THCTensor_(sortKeyValueInplace)(THCState* state,
     valueInfo.reduceDim(dim);
     int collapseValueDim = valueInfo.collapseDims(dim);
 
-    // long case is rare, just instantiate these versions
-    if (keyInfo.isContiguous()) {
-      HANDLE_SORT_CASE(unsigned long, -2);
-    } else {
-      HANDLE_SORT_CASE(unsigned long, -1);
-    }
+    // long case is rare, just instantiate the generic version
+    HANDLE_SORT_CASE(unsigned long, -1);
   }
 #undef HANDLE_CASE
 #undef HANDLE_SORT_CASE
