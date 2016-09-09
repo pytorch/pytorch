@@ -138,6 +138,8 @@ class BlobReference(object):
         is equivalent to doing
             net.Relu([b], ...)
         """
+        if op_type.startswith('__'):
+            raise AttributeError('Attribute {} not found.'.format(op_type))
         if self._from_net is None:
             raise RuntimeError(
                 'You cannot use a blob reference that does not have a net '
@@ -1093,6 +1095,8 @@ class Net(object):
             return tuple(BlobReference(str(o), self) for o in op.output)
 
     def __getattr__(self, op_type):
+        if op_type.startswith('__'):
+            raise AttributeError('Attribute {} not found.'.format(op_type))
         if not IsOperator(op_type):
             raise RuntimeError(
                 'Method ' + op_type + ' is not a registered operator.'

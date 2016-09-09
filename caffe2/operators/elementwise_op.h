@@ -10,6 +10,7 @@
 namespace caffe2 {
 
 using NumericTypes = TensorTypes<int32_t, int64_t, float, double>;
+using IntTypes = TensorTypes<int32_t, int64_t>;
 using BoolTypes = TensorTypes<bool>;
 
 struct SameTypeAsInput {

@@ -198,6 +198,7 @@ CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(LT, "<");
 CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(LE, "<=");
 CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(GT, ">");
 CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(GE, ">=");
+CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(EQ, "==");
 
 std::function<void(OpSchema&)> LogicalDocGenerator(const char* name) {
   return [=](OpSchema& schema) {

@@ -8,21 +8,21 @@
 #include "caffe2/operators/elementwise_op.h"
 #include "gtest/gtest.h"
 
-template <typename Context>
-void CopyVector(const int N, const bool* x, bool* y);
+template <typename Context, typename T>
+void CopyVector(const int N, const T* x, T* y);
 
-template <typename Context>
+template <typename Context, typename I_Type, typename O_Type>
 void FillTensor(
     caffe2::Workspace* ws,
     const std::string& name,
     const std::vector<caffe2::TIndex>& shape,
-    const std::vector<uint8_t>& values) {
+    const std::vector<I_Type>& values) {
   auto* blob = ws->CreateBlob(name);
   auto* tensor = blob->GetMutable<caffe2::Tensor<Context>>();
   tensor->Resize(shape);
-  auto* mutable_data = tensor->template mutable_data<bool>();
-  const bool* data = reinterpret_cast<const bool*>(values.data());
-  CopyVector<Context>(values.size(), data, mutable_data);
+  auto* mutable_data = tensor->template mutable_data<O_Type>();
+  const O_Type* data = reinterpret_cast<const O_Type*>(values.data());
+  CopyVector<Context, O_Type>(values.size(), data, mutable_data);
 }
 
 template <typename Context>
@@ -49,8 +49,10 @@ void elementwiseAnd() {
   caffe2::Workspace ws;
   auto def = DefineOperator<Context>("And");
   { // equal size
-    FillTensor<Context>(&ws, "X", {N}, {true, false, true, false});
-    FillTensor<Context>(&ws, "Y", {N}, {true, true, false, false});
+    FillTensor<Context, uint8_t, bool>(
+        &ws, "X", {N}, {true, false, true, false});
+    FillTensor<Context, uint8_t, bool>(
+        &ws, "Y", {N}, {true, true, false, false});
     std::unique_ptr<caffe2::OperatorBase> op(caffe2::CreateOperator(def, &ws));
     EXPECT_NE(nullptr, op.get());
     EXPECT_TRUE(op->Run());
@@ -67,9 +69,10 @@ void elementwiseAnd() {
     auto* arg = def.add_arg();
     arg->set_name("broadcast");
     arg->set_i(1);
-    FillTensor<Context>(
+    FillTensor<Context, uint8_t, bool>(
         &ws, "X", {M, N}, {true, false, true, false, true, false, true, false});
-    FillTensor<Context>(&ws, "Y", {N}, {true, true, false, false});
+    FillTensor<Context, uint8_t, bool>(
+        &ws, "Y", {N}, {true, true, false, false});
     std::unique_ptr<caffe2::OperatorBase> op(caffe2::CreateOperator(def, &ws));
     EXPECT_NE(nullptr, op.get());
     EXPECT_TRUE(op->Run());
@@ -92,8 +95,10 @@ void elementwiseOr() {
   caffe2::Workspace ws;
   auto def = DefineOperator<Context>("Or");
   { // equal size
-    FillTensor<Context>(&ws, "X", {N}, {true, false, true, false});
-    FillTensor<Context>(&ws, "Y", {N}, {true, true, false, false});
+    FillTensor<Context, uint8_t, bool>(
+        &ws, "X", {N}, {true, false, true, false});
+    FillTensor<Context, uint8_t, bool>(
+        &ws, "Y", {N}, {true, true, false, false});
     std::unique_ptr<caffe2::OperatorBase> op(caffe2::CreateOperator(def, &ws));
     EXPECT_NE(nullptr, op.get());
     EXPECT_TRUE(op->Run());
@@ -110,9 +115,10 @@ void elementwiseOr() {
     auto* arg = def.add_arg();
     arg->set_name("broadcast");
     arg->set_i(1);
-    FillTensor<Context>(
+    FillTensor<Context, uint8_t, bool>(
         &ws, "X", {M, N}, {true, false, true, false, true, false, true, false});
-    FillTensor<Context>(&ws, "Y", {N}, {true, true, false, false});
+    FillTensor<Context, uint8_t, bool>(
+        &ws, "Y", {N}, {true, true, false, false});
     std::unique_ptr<caffe2::OperatorBase> op(caffe2::CreateOperator(def, &ws));
     EXPECT_NE(nullptr, op.get());
     EXPECT_TRUE(op->Run());
@@ -134,8 +140,10 @@ void elementwiseXor() {
   caffe2::Workspace ws;
   auto def = DefineOperator<Context>("Xor");
   { // equal size
-    FillTensor<Context>(&ws, "X", {N}, {true, false, true, false});
-    FillTensor<Context>(&ws, "Y", {N}, {true, true, false, false});
+    FillTensor<Context, uint8_t, bool>(
+        &ws, "X", {N}, {true, false, true, false});
+    FillTensor<Context, uint8_t, bool>(
+        &ws, "Y", {N}, {true, true, false, false});
     std::unique_ptr<caffe2::OperatorBase> op(caffe2::CreateOperator(def, &ws));
     EXPECT_NE(nullptr, op.get());
     EXPECT_TRUE(op->Run());
@@ -152,9 +160,10 @@ void elementwiseXor() {
     auto* arg = def.add_arg();
     arg->set_name("broadcast");
     arg->set_i(1);
-    FillTensor<Context>(
+    FillTensor<Context, uint8_t, bool>(
         &ws, "X", {M, N}, {true, false, true, false, true, false, true, false});
-    FillTensor<Context>(&ws, "Y", {N}, {true, true, false, false});
+    FillTensor<Context, uint8_t, bool>(
+        &ws, "Y", {N}, {true, true, false, false});
     std::unique_ptr<caffe2::OperatorBase> op(caffe2::CreateOperator(def, &ws));
     EXPECT_NE(nullptr, op.get());
     EXPECT_TRUE(op->Run());
@@ -179,7 +188,7 @@ void elementwiseNot() {
   def.set_type("Not");
   def.add_input("X");
   def.add_output("Y");
-  FillTensor<Context>(&ws, "X", {N}, {true, false});
+  FillTensor<Context, uint8_t, bool>(&ws, "X", {N}, {true, false});
   std::unique_ptr<caffe2::OperatorBase> op(caffe2::CreateOperator(def, &ws));
   EXPECT_NE(nullptr, op.get());
   EXPECT_TRUE(op->Run());
@@ -190,6 +199,49 @@ void elementwiseNot() {
   std::vector<bool> result{false, true};
   for (size_t i = 0; i < Y.size(); ++i) {
     EXPECT_EQ(Y.template data<bool>()[i], result[i]);
+  }
+}
+
+template <typename Context>
+void elementwiseEQ() {
+  const int N = 4;
+  const int M = 2;
+  caffe2::Workspace ws;
+  auto def = DefineOperator<Context>("EQ");
+  { // equal size
+    FillTensor<Context, int32_t, int32_t>(&ws, "X", {N}, {1, 100, 5, -10});
+    FillTensor<Context, int32_t, int32_t>(&ws, "Y", {N}, {0, 100, 4, -10});
+    std::unique_ptr<caffe2::OperatorBase> op(caffe2::CreateOperator(def, &ws));
+    EXPECT_NE(nullptr, op.get());
+    EXPECT_TRUE(op->Run());
+    auto* blob = ws.GetBlob("Z");
+    EXPECT_NE(nullptr, blob);
+    caffe2::TensorCPU Z(blob->Get<caffe2::Tensor<Context>>());
+    EXPECT_EQ(Z.size(), N);
+    std::vector<bool> result{false, true, false, true};
+    for (size_t i = 0; i < Z.size(); ++i) {
+      EXPECT_EQ(Z.template data<bool>()[i], result[i]);
+    }
+  }
+  { // broadcast
+    auto* arg = def.add_arg();
+    arg->set_name("broadcast");
+    arg->set_i(1);
+    FillTensor<Context, int32_t, int32_t>(
+        &ws, "X", {M, N}, {1, 100, 5, -10, 3, 6, -1000, 33});
+    FillTensor<Context, int32_t, int32_t>(&ws, "Y", {N}, {1, 6, -1000, -10});
+    std::unique_ptr<caffe2::OperatorBase> op(caffe2::CreateOperator(def, &ws));
+    EXPECT_NE(nullptr, op.get());
+    EXPECT_TRUE(op->Run());
+    auto* blob = ws.GetBlob("Z");
+    EXPECT_NE(nullptr, blob);
+    caffe2::TensorCPU Z(blob->Get<caffe2::Tensor<Context>>());
+    EXPECT_EQ(Z.size(), M * N);
+    std::vector<bool> result{
+        true, false, false, true, false, true, true, false};
+    for (size_t i = 0; i < Z.size(); ++i) {
+      EXPECT_EQ(Z.template data<bool>()[i], result[i]);
+    }
   }
 }
 

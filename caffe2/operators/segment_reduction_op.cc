@@ -112,8 +112,7 @@ class AbstractSortedSegmentRangeGradientOp : public Operator<Context> {
     // Assume the segments are sorted and there are no gaps
     CHECK_EQ(0, s_ids[0]) << "Indices must be sorted and not have gaps";
     // repeat the check from forward op
-    CHECK_EQ(K - 1, s_ids[N - 1])
-        << "Indices must be sorted and not have gaps";
+    CHECK_EQ(K - 1, s_ids[N - 1]) << "Indices must be sorted and not have gaps";
     for (TIndex i = 0; i < N;) {
       TIndex start = i;
       for (++i; i < N && s_ids[start] == s_ids[i]; ++i)
@@ -237,6 +236,16 @@ class AbstractReduceFrontOp : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& data = Input(0);
+    // If more complicated fixed size logic becomes necessary, it can be moved
+    // to the reducer class
+    TIndex in_block_size = data.size_from_dim(num_reduce_dims_);
+    return DispatchHelper<typename Reducer::FixedDispatch>::call(
+        this, in_block_size);
+  }
+
+  template <int FixedSize>
+  bool DoRunWithValue() {
+    auto& data = Input(0);
     auto* output = Output(0);
 
     CHECK_LE(num_reduce_dims_, data.ndim());
@@ -260,7 +269,7 @@ class AbstractReduceFrontOp : public Operator<Context> {
 
     Reducer r(ctx, out, &context_);
     for (TIndex i = 0; i < block_num; ++i) {
-      r.process(ctx, d + in_block_size * i, i, &context_);
+      r.template process<FixedSize>(ctx, d + in_block_size * i, i, &context_);
     }
     return true;
   }
@@ -281,6 +290,15 @@ class AbstractReduceFrontGradientOp : public Operator<Context> {
         OP_SINGLE_ARG(int, "num_reduce_dim", num_reduce_dims_, 1) {}
 
   bool RunOnDevice() override {
+    // If more complicated fixed size logic becomes necessary, it can be moved
+    // to the reducer class
+    TIndex grad_block_size = Input(REDUCTION_GRAD).size();
+    return DispatchHelper<typename ReducerGradient::FixedDispatch>::call(
+        this, grad_block_size);
+  }
+
+  template <int FixedSize>
+  bool DoRunWithValue() {
     auto& reduction_grad = Input(REDUCTION_GRAD);
     auto& source_shape = OperatorBase::Input<TensorCPU>(SOURCE_SHAPE);
 
@@ -308,7 +326,7 @@ class AbstractReduceFrontGradientOp : public Operator<Context> {
 
     ReducerGradient r(ctx, r_grad, &context_);
     for (TIndex i = 0; i < block_num; ++i) {
-      r.fillGrad(ctx, out + block_size * i, i, &context_);
+      r.template fillGrad<FixedSize>(ctx, out + block_size * i, i, &context_);
     }
     return true;
   }
@@ -367,10 +385,7 @@ UnsortedSegment{op} but as if all input slices belong to a single segment.
       // FIXME: pass in num_reduce_dims?!
       return vector<OperatorDef>{
           CreateOperatorDef(
-              "Shape",
-              "",
-              vector<string>{I(0)},
-              vector<string>{tmp_dims}),
+              "Shape", "", vector<string>{I(0)}, vector<string>{tmp_dims}),
           CreateOperatorDef(
               string(basename) + ReducerDef::name + "Gradient",
               "",
@@ -416,6 +431,17 @@ class AbstractSortedSegmentOp : public Operator<Context> {
   USE_SIMPLE_CTOR_DTOR(AbstractSortedSegmentOp);
 
   bool RunOnDevice() override {
+    auto& data = Input(0);
+    const TIndex M = data.dim(0);
+    // If more complicated fixed size logic becomes necessary, it can be moved
+    // to the reducer class
+    TIndex in_block_size = data.size() / M;
+    return DispatchHelper<typename Reducer::FixedDispatch>::call(
+        this, in_block_size);
+  }
+
+  template <int FixedSize>
+  bool DoRunWithValue() {
     auto& data = Input(0);
     auto& segment_ids = Input(SEGMENT_IDS);
     auto* output = Output(0);
@@ -477,7 +503,8 @@ class AbstractSortedSegmentOp : public Operator<Context> {
         } else {
           idx = i;
         }
-        r.process(ctx, d + in_block_size * idx, i, &context_);
+        r.template process<FixedSize>(
+            ctx, d + in_block_size * idx, i, &context_);
       }
 
       // check correctness of the next segment
@@ -505,6 +532,16 @@ class AbstractSortedSegmentGradientOp : public Operator<Context> {
   USE_SIMPLE_CTOR_DTOR(AbstractSortedSegmentGradientOp);
 
   bool RunOnDevice() override {
+    auto& segment_grads = Input(SEGMENT_GRADS);
+    // If more complicated fixed size logic becomes necessary, it can be moved
+    // to the reducer class
+    TIndex grad_block_size = segment_grads.size() / segment_grads.dim(0);
+    return DispatchHelper<typename ReducerGradient::FixedDispatch>::call(
+        this, grad_block_size);
+  }
+
+  template <int FixedSize>
+  bool DoRunWithValue() {
     auto& segment_grads = Input(SEGMENT_GRADS);
     auto& segment_ids = Input(SEGMENT_IDS);
     auto* data_grads = Output(0);
@@ -537,15 +574,14 @@ class AbstractSortedSegmentGradientOp : public Operator<Context> {
     // Assume the segments are sorted and there are no gaps
     CHECK_EQ(0, s_ids[0]) << "Indices must be sorted and not have gaps";
     // repeat the check from forward op
-    CHECK_EQ(K - 1, s_ids[N - 1])
-        << "Indices must be sorted and not have gaps";
+    CHECK_EQ(K - 1, s_ids[N - 1]) << "Indices must be sorted and not have gaps";
     for (TIndex i = 0; i < N;) {
       TIndex start = i;
 
-      ReducerGradient r(
-          ctx, s_grads + s_block_size * s_ids[start], &context_);
+      ReducerGradient r(ctx, s_grads + s_block_size * s_ids[start], &context_);
       for (; i < N && s_ids[start] == s_ids[i]; ++i) {
-        r.fillGrad(ctx, out + d_block_size * i, i, &context_);
+        r.template fillGrad<FixedSize>(
+            ctx, out + d_block_size * i, i, &context_);
       }
 
       // check correctness of the next segment
@@ -749,6 +785,17 @@ class AbstractUnsortedSegmentOp : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& data = Input(0);
+    const TIndex M = data.dim(0);
+    // If more complicated fixed size logic becomes necessary, it can be moved
+    // to the reducer class
+    TIndex in_block_size = data.size() / M;
+    return DispatchHelper<typename Reducer::FixedDispatch>::call(
+        this, in_block_size);
+  }
+
+  template <int FixedSize>
+  bool DoRunWithValue() {
+    auto& data = Input(0);
     auto& segment_ids = Input(SEGMENT_IDS);
     auto* output = Output(0);
 
@@ -812,16 +859,16 @@ class AbstractUnsortedSegmentOp : public Operator<Context> {
     for (TIndex i = 0; i < N; ++i) {
       auto s_id = s_ids[i];
       CHECK(0 <= s_id && s_id < K) << "Segment id out of range: " << s_id
-                                         << ", range 0 to " << K;
+                                   << ", range 0 to " << K;
       TIndex idx;
       if (SparseFused) { // static if
-        CHECK(0 <= idxs[i] && idxs[i] < M)
-            << "Index out of bounds: " << idxs[i] << ", range 0 to " << M;
+        CHECK(0 <= idxs[i] && idxs[i] < M) << "Index out of bounds: " << idxs[i]
+                                           << ", range 0 to " << M;
         idx = idxs[i];
       } else {
         idx = i;
       }
-      reducers_[s_id].process(
+      reducers_[s_id].template process<FixedSize>(
           ctx, d + in_block_size * idx, i, &context_);
     }
     // call reducers destructors (if there is any)
@@ -850,6 +897,16 @@ class AbstractUnsortedSegmentGradientOp : public Operator<Context> {
   USE_SIMPLE_CTOR_DTOR(AbstractUnsortedSegmentGradientOp);
 
   bool RunOnDevice() override {
+    auto& segment_grads = Input(SEGMENT_GRADS);
+    // If more complicated fixed size logic becomes necessary, it can be moved
+    // to the reducer class
+    TIndex grad_block_size = segment_grads.size() / segment_grads.dim(0);
+    return DispatchHelper<typename ReducerGradient::FixedDispatch>::call(
+        this, grad_block_size);
+  }
+
+  template <int FixedSize>
+  bool DoRunWithValue() {
     auto& segment_grads = Input(SEGMENT_GRADS);
     auto& segment_ids = Input(SEGMENT_IDS);
     auto* data_grads = Output(0);
@@ -888,8 +945,8 @@ class AbstractUnsortedSegmentGradientOp : public Operator<Context> {
     for (TIndex i = 0; i < N; ++i) {
       auto s_id = s_ids[i];
       CHECK(0 <= s_id && s_id < K) << "Segment id out of range: " << s_id
-                                         << ", range 0 to " << K;
-      reducers_[s_id].fillGrad(
+                                   << ", range 0 to " << K;
+      reducers_[s_id].template fillGrad<FixedSize>(
           ctx, out + d_block_size * i, i, &context_);
     }
     // call reducers destructors (if there is any)
@@ -1063,9 +1120,11 @@ string FormatDoc() {
 
 REGISTER_SEGMENT_DEF(
     AbstractSortedSegmentRangeDef<float, int, CPUContext, SumRangeReducerDef>);
-REGISTER_SEGMENT_DEF(
-    AbstractSortedSegmentRangeDef<float, int, CPUContext,
-                                  LogSumExpRangeReducerDef>);
+REGISTER_SEGMENT_DEF(AbstractSortedSegmentRangeDef<
+                     float,
+                     int,
+                     CPUContext,
+                     LogSumExpRangeReducerDef>);
 REGISTER_SEGMENT_DEF(AbstractSortedSegmentRangeDef<
                      float,
                      int,

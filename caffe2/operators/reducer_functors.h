@@ -2,8 +2,8 @@
 
 #include <array>
 
-#include "caffe2/utils/math.h"
 #include "caffe2/core/context.h"
+#include "caffe2/utils/math.h"
 
 namespace caffe2 {
 
@@ -330,6 +330,8 @@ class SumReducer<T, CPUContext> {
  public:
   static constexpr int kInputCount = 1;
 
+  using FixedDispatch = FixedValues<1>;
+
   struct Meta {
     TIndex block_size;
     vector<TIndex> block_shape;
@@ -352,9 +354,10 @@ class SumReducer<T, CPUContext> {
     // add a wrapper in Context for it
     memset(out, 0, sizeof(T) * meta.block_size);
   }
+  template <int FixedSize>
   void
   process(const Meta& meta, const T* in, TIndex offset, CPUContext* context) {
-    math::Axpy<T>(meta.block_size, 1, in, out_, context);
+    math::Axpy<T, CPUContext, FixedSize>(meta.block_size, 1, in, out_, context);
   }
 
  private:
@@ -368,6 +371,8 @@ class SumReducerGradient {
   static constexpr std::array<int, 0> originalInputs() {
     return std::array<int, 0>();
   }
+
+  using FixedDispatch = FixedValues<1>;
 
   struct Meta {
     TIndex block_size;
@@ -393,10 +398,15 @@ class SumReducerGradient {
   SumReducerGradient(const Meta& meta, const T* s_grad, CPUContext* context)
       : s_grad_(s_grad) {}
 
+  template <int FixedSize>
   void
   fillGrad(const Meta& meta, T* data_grad, TIndex offset, Context* context) {
-    context->template Copy<T, Context, Context>(
-        meta.block_size, s_grad_, data_grad);
+    if (FixedSize == 1) { // static if
+      *data_grad = *s_grad_;
+    } else {
+      context->template Copy<T, Context, Context>(
+          meta.block_size, s_grad_, data_grad);
+    }
   }
 
  private:
@@ -425,6 +435,8 @@ template <typename T>
 class WeightedSumReducer<T, CPUContext> {
  public:
   static constexpr int kInputCount = 2;
+
+  using FixedDispatch = FixedValues<1>;
 
   struct Meta {
     TIndex block_size;
@@ -456,9 +468,11 @@ class WeightedSumReducer<T, CPUContext> {
     // do we have a wrapper for it?
     memset(out, 0, sizeof(T) * meta.block_size);
   }
+  template <int FixedSize>
   void
   process(const Meta& meta, const T* in, TIndex offset, CPUContext* context) {
-    math::Axpy<T>(meta.block_size, meta.scalars[offset], in, out_, context);
+    math::Axpy<T, CPUContext, FixedSize>(
+        meta.block_size, meta.scalars[offset], in, out_, context);
   }
 
  private:
@@ -472,6 +486,8 @@ class WeightedSumReducerGradient {
   static constexpr std::array<int, 1> originalInputs() {
     return {1};
   }
+
+  using FixedDispatch = FixedValues<1>;
 
   struct Meta {
     TIndex block_size;
@@ -504,9 +520,10 @@ class WeightedSumReducerGradient {
       CPUContext* context)
       : s_grad_(s_grad) {}
 
+  template <int FixedSize>
   void
   fillGrad(const Meta& meta, T* data_grad, TIndex offset, Context* context) {
-    math::Scale(
+    math::Scale<T, CPUContext, FixedSize>(
         meta.block_size, meta.scalars[offset], s_grad_, data_grad, context);
   }
 
@@ -532,5 +549,4 @@ struct WeightedSumReducerDef {
         "length matching the first dimension of DATA");
   }
 };
-
 }
