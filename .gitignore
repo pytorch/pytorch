@@ -1,0 +1,8 @@
+THCTensorSortByte.cu
+THCTensorSortChar.cu
+THCTensorSortShort.cu
+THCTensorSortInt.cu
+THCTensorSortLong.cu
+THCTensorSortHalf.cu
+THCTensorSortFloat.cu
+THCTensorSortDouble.cu

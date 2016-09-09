@@ -1,3 +1,9 @@
+CMAKE_MINIMUM_REQUIRED(VERSION 2.8 FATAL_ERROR)
+CMAKE_POLICY(VERSION 2.8)
+set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "${CMAKE_COMMAND} -E time")
+set_property(GLOBAL PROPERTY RULE_LAUNCH_CUSTOM "${CMAKE_COMMAND} -E time")
+set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK "${CMAKE_COMMAND} -E time")
+
 SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
 
 IF(NOT Torch_FOUND)
@@ -121,10 +127,18 @@ SET(src-cuda
   THCTensorConv.cu
   THCTensorRandom.cu
   THCTensorScatterGather.cu
-  THCTensorSort.cu
   THCTensorTopK.cu
+  THCTensorSort.cu
   THCTensorTypeUtils.cu
   )
+
+foreach(THC_TYPE Byte Char Short Int Long Half Float Double)
+   if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/THCTensorSort${THC_TYPE}.cu")
+      FILE(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/THCTensorSort${THC_TYPE}.cu"
+          "#include \"THCTensorSort.cuh\"\n#include \"generic/THCTensorSort.cu\"\n#include \"THCGenerate${THC_TYPE}Type.h\"\n")
+   endif()
+   LIST(APPEND src-cuda "${CMAKE_CURRENT_SOURCE_DIR}/THCTensorSort${THC_TYPE}.cu")
+endforeach()
 
 MESSAGE(STATUS "got cuda version " ${CUDA_VERSION})
 
@@ -178,6 +192,7 @@ INSTALL(FILES
           THCGenerateAllTypes.h
           THCHalf.h
           THCNumerics.cuh
+          THCTensorSort.cuh
           THCTensorInfo.cuh
           THCTensorTypeUtils.cuh
           DESTINATION "${THC_INSTALL_INCLUDE_SUBDIR}/THC")
