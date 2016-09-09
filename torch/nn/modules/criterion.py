@@ -29,4 +29,6 @@ class ClassNLLCriterion(Module):
         if isinstance(target, Variable):
             _assert_no_grad(target)
             target = target.data
+        if target.dim() == 2 and target.size(1) == 1:
+            target = target.view(-1)
         return self._backend.ClassNLLCriterion(target, self.size_average, weight=self.weight)(input)
