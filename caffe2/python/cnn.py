@@ -651,6 +651,7 @@ class CNNModelHelper(object):
             "LabelCrossEntropy",
             "LearningRate",
             "Print",
+            "Sigmoid",
             "Scale",
             "Snapshot",
             "Softmax",

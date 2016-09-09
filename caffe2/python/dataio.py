@@ -31,7 +31,7 @@ class Reader(object):
 
     def schema(self):
         """
-        Return the schema associated with the Reader
+        Return the schema associated with the Hive Reader
         """
         assert self._schema is not None, 'Schema not provided for this reader.'
         return self._schema

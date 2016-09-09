@@ -175,21 +175,20 @@ bool CrossEntropyOp<float, CPUContext>::RunOnDevice() {
   const float* Xdata = X.data<float>();
   const float* labelData = label.data<float>();
   auto* Ydata = Y->mutable_data<float>();
-  for (int i = 0; i < N; ++i) {
-    float cross_entropy = 0.0;
-    for (int j = 0; j < D; ++j) {
-      CAFFE_ENFORCE(
-          (labelData[i * D + j] <= 1) && (labelData[i * D + j] >= 0),
-          "Soft label seems incorrect: label value should be a probability ",
-          "between 0.0 and 1.0, inclusive: ", labelData[i * D + j], ". You ",
-          "may be using the wrong cross entropy operator; use ",
-          "LabelCrossEntropy if the labels are integers whose values are at ",
-          "most the number of classes, ", D, ".");
-      cross_entropy += labelData[i * D + j] *
-        -log(std::max(Xdata[i * D + j], kLOG_THRESHOLD()));
-    }
-    Ydata[i] = cross_entropy;
-  }
+  CAFFE_ENFORCE(
+      (ConstEigenArrayMap<float>(labelData, D, N) <= 1.0f).all() &&
+          (ConstEigenArrayMap<float>(labelData, D, N) >= 0.0f).all(),
+      "Soft label seems incorrect: label value should be a probability ",
+      "between 0 and 1.0. You may be using the wrong cross entropy operator; ",
+      "use LabelCrossEntropy if the labels are integers whose values are at ",
+      "most the number of classes, ",
+      D,
+      ".");
+  EigenArrayMap<float>(Ydata, N, 1) =
+      -(ConstEigenArrayMap<float>(labelData, D, N) *
+        ConstEigenArrayMap<float>(Xdata, D, N).cwiseMax(kLOG_THRESHOLD()).log())
+           .colwise()
+           .sum();
   return true;
 }
 
@@ -212,13 +211,11 @@ bool CrossEntropyGradientOp<float, CPUContext>::RunOnDevice() {
   const float* dYdata = dY.data<float>();
   const float* labelData = label.data<float>();
   float* dXdata = dX->mutable_data<float>();
-  for (int i = 0; i < N; ++i) {
-    for (int j = 0; j < D; ++j) {
-      dXdata[i * D + j] = labelData[i * D + j] *
-                          - dYdata[i] /
-                          (std::max(Xdata[i * D + j], kLOG_THRESHOLD()));
-    }
-  }
+  EigenArrayMap<float>(dXdata, D, N) =
+      (ConstEigenArrayMap<float>(labelData, D, N) /
+       ConstEigenArrayMap<float>(Xdata, D, N).cwiseMax(kLOG_THRESHOLD()))
+          .rowwise() *
+      (-ConstEigenVectorArrayMap<float>(dYdata, N).transpose());
   return true;
 }
 

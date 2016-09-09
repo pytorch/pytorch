@@ -5,8 +5,16 @@
 CAFFE2_DECLARE_string(caffe_test_root);
 
 template <>
-void CopyVector<caffe2::CPUContext>(const int N, const bool* x, bool* y) {
+void CopyVector<caffe2::CPUContext, bool>(const int N, const bool* x, bool* y) {
   memcpy(y, x, N * sizeof(bool));
+}
+
+template <>
+void CopyVector<caffe2::CPUContext, int32_t>(
+    const int N,
+    const int32_t* x,
+    int32_t* y) {
+  memcpy(y, x, N * sizeof(int32_t));
 }
 
 TEST(ElementwiseCPUTest, And) {
@@ -23,4 +31,8 @@ TEST(ElementwiseTest, Xor) {
 
 TEST(ElementwiseTest, Not) {
   elementwiseNot<caffe2::CPUContext>();
+}
+
+TEST(ElementwiseTest, EQ) {
+  elementwiseEQ<caffe2::CPUContext>();
 }

@@ -141,12 +141,14 @@ class List(Field):
     def __getattr__(self, item):
         """If the value of this list is a struct,
         allow to instrospect directly into its fields."""
+        if item.startswith('__'):
+            raise AttributeError(item)
         if isinstance(self._items, Struct):
             return getattr(self._items, item)
         elif item == 'value' or item == 'items':
             return self._items
         else:
-            return AttributeError('Field not found in list: %s.' % item)
+            raise AttributeError('Field not found in list: %s.' % item)
 
 
 class Struct(Field):
@@ -190,7 +192,12 @@ class Struct(Field):
         return Struct(*self.fields.items())
 
     def __getattr__(self, item):
-        return self.fields[item]
+        if item.startswith('__'):
+            raise AttributeError(item)
+        try:
+            return self.__dict__['fields'][item]
+        except KeyError:
+            raise AttributeError(item)
 
 
 class Scalar(Field):
@@ -471,6 +478,8 @@ def from_blob_list(schema, values):
     list of values.
     """
     assert isinstance(schema, Field), 'Argument `schema` must be a Field.'
+    if isinstance(values, BlobReference):
+        values = [values]
     names = schema.field_names()
     types = schema.field_types()
     assert len(names) == len(values), (
