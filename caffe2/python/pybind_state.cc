@@ -284,6 +284,9 @@ void addObjectMethods(py::module& m) {
       .def_property_readonly("arg_desc", &OpSchema::arg_desc)
       .def_property_readonly("input_desc", &OpSchema::input_desc)
       .def_property_readonly("output_desc", &OpSchema::output_desc)
+      // Note: this does not work yet, we will need to figure out how to pass
+      // protobuf objects.
+      .def("infer_tensor", &OpSchema::InferTensor)
       .def_static(
           "get", &OpSchemaRegistry::Schema, py::return_value_policy::reference)
       .def_static(

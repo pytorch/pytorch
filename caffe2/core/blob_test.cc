@@ -23,18 +23,18 @@ using namespace ::caffe2::db;
 
 namespace {
 
-class Foo {};
-class Bar {};
+class BlobTestFoo {};
+class BlobTestBar {};
 
 TEST(BlobTest, Blob) {
   Blob blob;
 
   int* int_unused UNUSED_VARIABLE = blob.GetMutable<int>();
   EXPECT_TRUE(blob.IsType<int>());
-  EXPECT_FALSE(blob.IsType<Foo>());
+  EXPECT_FALSE(blob.IsType<BlobTestFoo>());
 
-  Foo* foo_unused UNUSED_VARIABLE = blob.GetMutable<Foo>();
-  EXPECT_TRUE(blob.IsType<Foo>());
+  BlobTestFoo* foo_unused UNUSED_VARIABLE = blob.GetMutable<BlobTestFoo>();
+  EXPECT_TRUE(blob.IsType<BlobTestFoo>());
   EXPECT_FALSE(blob.IsType<int>());
 }
 
@@ -48,9 +48,9 @@ TEST(BlobTest, BlobNewObjectFlag) {
   blob.GetMutable<int>(&is_new_object);
   EXPECT_FALSE(is_new_object);
 
-  blob.GetMutable<Foo>(&is_new_object);
+  blob.GetMutable<BlobTestFoo>(&is_new_object);
   EXPECT_TRUE(is_new_object);
-  blob.GetMutable<Foo>(&is_new_object);
+  blob.GetMutable<BlobTestFoo>(&is_new_object);
   EXPECT_FALSE(is_new_object);
 }
 
@@ -61,17 +61,17 @@ TEST(BlobTest, BlobUninitialized) {
 
 TEST(BlobTest, BlobWrongType) {
   Blob blob;
-  Foo* foo_unused UNUSED_VARIABLE = blob.GetMutable<Foo>();
-  EXPECT_TRUE(blob.IsType<Foo>());
+  BlobTestFoo* foo_unused UNUSED_VARIABLE = blob.GetMutable<BlobTestFoo>();
+  EXPECT_TRUE(blob.IsType<BlobTestFoo>());
   EXPECT_FALSE(blob.IsType<int>());
   // When not null, we should only call with the right type.
-  EXPECT_NE(&blob.Get<Foo>(), nullptr);
+  EXPECT_NE(&blob.Get<BlobTestFoo>(), nullptr);
   ASSERT_THROW(blob.Get<int>(), EnforceNotMet);
 }
 
 TEST(BlobTest, BlobReset) {
   Blob blob;
-  std::unique_ptr<Foo> foo(new Foo());
+  std::unique_ptr<BlobTestFoo> foo(new BlobTestFoo());
   EXPECT_TRUE(blob.Reset(foo.release()) != nullptr);
   // Also test that Reset works.
   blob.Reset();
@@ -79,18 +79,18 @@ TEST(BlobTest, BlobReset) {
 
 TEST(BlobTest, BlobShareExternalPointer) {
   Blob blob;
-  std::unique_ptr<Foo> foo(new Foo());
-  EXPECT_EQ(blob.ShareExternal<Foo>(foo.get()), foo.get());
-  EXPECT_TRUE(blob.IsType<Foo>());
+  std::unique_ptr<BlobTestFoo> foo(new BlobTestFoo());
+  EXPECT_EQ(blob.ShareExternal<BlobTestFoo>(foo.get()), foo.get());
+  EXPECT_TRUE(blob.IsType<BlobTestFoo>());
   // Also test that Reset works.
   blob.Reset();
 }
 
 TEST(BlobTest, BlobShareExternalObject) {
   Blob blob;
-  Foo foo;
-  EXPECT_EQ(blob.ShareExternal<Foo>(&foo), &foo);
-  EXPECT_TRUE(blob.IsType<Foo>());
+  BlobTestFoo foo;
+  EXPECT_EQ(blob.ShareExternal<BlobTestFoo>(&foo), &foo);
+  EXPECT_TRUE(blob.IsType<BlobTestFoo>());
   // Also test that Reset works.
   blob.Reset();
 }
