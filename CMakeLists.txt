@@ -116,7 +116,6 @@ SET(src-cuda
   THCTensorMath2.cu
   THCTensorMathBlas.cu
   THCTensorMathCompare.cu
-  THCTensorMathCompareT.cu
   THCTensorMathMagma.cu
   THCTensorMathPairwise.cu
   THCTensorMathPointwise.cu
@@ -133,11 +132,20 @@ SET(src-cuda
   )
 
 foreach(THC_TYPE Byte Char Short Int Long Half Float Double)
+   # TensorSort
    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/THCTensorSort${THC_TYPE}.cu")
       FILE(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/THCTensorSort${THC_TYPE}.cu"
-          "#include \"THCTensorSort.cuh\"\n#include \"generic/THCTensorSort.cu\"\n#include \"THCGenerate${THC_TYPE}Type.h\"\n")
+           "#include \"THCTensorSort.cuh\"\n#include \"generic/THCTensorSort.cu\"\n#include \"THCGenerate${THC_TYPE}Type.h\"\n")
    endif()
    LIST(APPEND src-cuda "${CMAKE_CURRENT_SOURCE_DIR}/THCTensorSort${THC_TYPE}.cu")
+
+   # TensorMathCompareT
+   if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMathCompareT${THC_TYPE}.cu")
+      FILE(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMathCompareT${THC_TYPE}.cu"
+           "#include \"THCTensorMathCompareT.cuh\"\n#include \"generic/THCTensorMathCompareT.cu\"\n#include \"THCGenerate${THC_TYPE}Type.h\"\n")
+   endif()
+   LIST(APPEND src-cuda "${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMathCompareT${THC_TYPE}.cu")
+
 endforeach()
 
 MESSAGE(STATUS "got cuda version " ${CUDA_VERSION})
