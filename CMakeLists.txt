@@ -1,8 +1,5 @@
 CMAKE_MINIMUM_REQUIRED(VERSION 2.8 FATAL_ERROR)
 CMAKE_POLICY(VERSION 2.8)
-set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "${CMAKE_COMMAND} -E time")
-set_property(GLOBAL PROPERTY RULE_LAUNCH_CUSTOM "${CMAKE_COMMAND} -E time")
-set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK "${CMAKE_COMMAND} -E time")
 
 SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
 
@@ -129,49 +126,16 @@ SET(src-cuda
   THCTensorTypeUtils.cu
   )
 
+# loop over all types
 foreach(THC_TYPE Byte Char Short Int Long Half Float Double)
-   # TensorSort
-   if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/generated/THCTensorSort${THC_TYPE}.cu")
-      FILE(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/generated/THCTensorSort${THC_TYPE}.cu"
-           "#include \"../THCTensorSort.cuh\"\n#include \"../generic/THCTensorSort.cu\"\n#include \"../THCGenerate${THC_TYPE}Type.h\"\n")
-   endif()
-   LIST(APPEND src-cuda "${CMAKE_CURRENT_SOURCE_DIR}/generated/THCTensorSort${THC_TYPE}.cu")
-
-   # TensorMathCompareT
-   if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/generated/THCTensorMathCompareT${THC_TYPE}.cu")
-      FILE(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/generated/THCTensorMathCompareT${THC_TYPE}.cu"
-           "#include \"../THCTensorMathCompareT.cuh\"\n#include \"../generic/THCTensorMathCompareT.cu\"\n#include \"../THCGenerate${THC_TYPE}Type.h\"\n")
-   endif()
-   LIST(APPEND src-cuda "${CMAKE_CURRENT_SOURCE_DIR}/generated/THCTensorMathCompareT${THC_TYPE}.cu")
-
-   # TensorMathPointwise
-   if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/generated/THCTensorMathPointwise${THC_TYPE}.cu")
-      FILE(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/generated/THCTensorMathPointwise${THC_TYPE}.cu"
-           "#include \"../THCTensorMathPointwise.cuh\"\n#include \"../generic/THCTensorMathPointwise.cu\"\n#include \"../THCGenerate${THC_TYPE}Type.h\"\n")
-   endif()
-   LIST(APPEND src-cuda "${CMAKE_CURRENT_SOURCE_DIR}/generated/THCTensorMathPointwise${THC_TYPE}.cu")
-
-   # TensorMathCompare
-   if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/generated/THCTensorMathCompare${THC_TYPE}.cu")
-      FILE(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/generated/THCTensorMathCompare${THC_TYPE}.cu"
-           "#include \"../THCTensorMathCompare.cuh\"\n#include \"../generic/THCTensorMathCompare.cu\"\n#include \"../THCGenerate${THC_TYPE}Type.h\"\n")
-   endif()
-   LIST(APPEND src-cuda "${CMAKE_CURRENT_SOURCE_DIR}/generated/THCTensorMathCompare${THC_TYPE}.cu")
-
-   # TensorMathReduce
-   if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/generated/THCTensorMathReduce${THC_TYPE}.cu")
-      FILE(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/generated/THCTensorMathReduce${THC_TYPE}.cu"
-           "#include \"../THCTensorMathReduce.cuh\"\n#include \"../generic/THCTensorMathReduce.cu\"\n#include \"../THCGenerate${THC_TYPE}Type.h\"\n")
-   endif()
-   LIST(APPEND src-cuda "${CMAKE_CURRENT_SOURCE_DIR}/generated/THCTensorMathReduce${THC_TYPE}.cu")
-
-   # TensorMasked
-   if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/generated/THCTensorMasked${THC_TYPE}.cu")
-      FILE(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/generated/THCTensorMasked${THC_TYPE}.cu"
-           "#include \"../THCTensorMasked.cuh\"\n#include \"../generic/THCTensorMasked.cu\"\n#include \"../THCGenerate${THC_TYPE}Type.h\"\n")
-   endif()
-   LIST(APPEND src-cuda "${CMAKE_CURRENT_SOURCE_DIR}/generated/THCTensorMasked${THC_TYPE}.cu")
-
+   # loop over files which need to be split between types (because of long compile times)
+   foreach(THC_FILE TensorSort TensorMathCompareT TensorMathPointwise TensorMathCompare TensorMathReduce TensorMasked)
+      if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}${THC_TYPE}.cu")
+         FILE(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}${THC_TYPE}.cu"
+              "#include \"../THC${THC_FILE}.cuh\"\n#include \"../generic/THC${THC_FILE}.cu\"\n#include \"../THCGenerate${THC_TYPE}Type.h\"\n")
+      endif()
+      LIST(APPEND src-cuda "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}${THC_TYPE}.cu")
+   endforeach()
 endforeach()
 
 MESSAGE(STATUS "got cuda version " ${CUDA_VERSION})
@@ -224,6 +188,14 @@ INSTALL(FILES
           THCDeviceTensorUtils.cuh
           THCDeviceTensorUtils-inl.cuh
           THCGenerateAllTypes.h
+          THCGenerateByteType.h
+          THCGenerateCharType.h
+          THCGenerateShortType.h
+          THCGenerateIntType.h
+          THCGenerateLongType.h
+          THCGenerateHalfType.h
+          THCGenerateFloatType.h
+          THCGenerateDoubleType.h
           THCHalf.h
           THCNumerics.cuh
           THCTensorSort.cuh
