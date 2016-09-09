@@ -1,3 +1,5 @@
+#ifndef THC_TENSOR_MASKED_CUH
+#define THC_TENSOR_MASKED_CUH
 #include "THCTensorMath.h"
 #include "THCGeneral.h"
 #include "THCTensorCopy.h"
@@ -52,5 +54,4 @@ struct TensorMaskedSelectOp {
   T* out;
 };
 
-#include "generic/THCTensorMasked.cu"
-#include "THCGenerateAllTypes.h"
+#endif // THC_TENSOR_MASKED_CUH
