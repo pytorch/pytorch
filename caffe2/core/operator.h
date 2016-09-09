@@ -25,40 +25,23 @@ class OperatorBase {
   virtual ~OperatorBase() {}
 
   // Parameter getters. You can use these to get the arguments that you want.
-  bool HasArgument(const string& name) { return (arg_map_.count(name) > 0); }
+  inline bool HasArgument(const string& name) {
+    return arg_helper_.HasArgument(name);
+  }
 
   // Functions that deal with arguments. Basically, this allows us to map an
   // argument name to a specific type of argument that we are trying to access.
   template <typename T>
-  T GetSingleArgument(const string& name, const T& default_value);
-  template <typename T>
-  bool HasSingleArgumentOfType(const string& name);
-  template <typename T>
-  vector<T> GetRepeatedArgument(const string& name);
-
-  template <typename MessageType>
-  MessageType GetMessageArgument(const string& name) {
-    CAFFE_ENFORCE(arg_map_.count(name),
-        "Cannot find parameter named ", name);
-    MessageType message;
-    if (arg_map_[name]->has_s()) {
-      CHECK(message.ParseFromString(arg_map_[name]->s()))
-          << "Faild to parse content from the string";
-    } else {
-      VLOG(1) << "Return empty message for parameter " << name;
-    }
-    return message;
+  inline T GetSingleArgument(const string& name, const T& default_value) {
+    return arg_helper_.GetSingleArgument<T>(name, default_value);
   }
-  template <typename MessageType>
-  vector<MessageType> GetRepeatedMessageArgument(const string& name) {
-    CAFFE_ENFORCE(arg_map_.count(name),
-        "Cannot find parameter named ", name);
-    vector<MessageType> messages(arg_map_[name]->strings_size());
-    for (int i = 0; i < messages.size(); ++i) {
-      CHECK(messages[i].ParseFromString(arg_map_[name]->strings(i)))
-          << "Faild to parse content from the string";
-    }
-    return messages;
+  template <typename T>
+  inline bool HasSingleArgumentOfType(const string& name) {
+    return arg_helper_.HasSingleArgumentOfType<T>(name);
+  }
+  template <typename T>
+  inline vector<T> GetRepeatedArgument(const string& name) {
+    return arg_helper_.GetRepeatedArgument<T>(name);
   }
 
   // Get the inputs and outputs as specific types.
@@ -94,11 +77,16 @@ class OperatorBase {
   }
   virtual bool RunAsync() { return Run(); }
 
-  inline const OperatorDef& def() { return operator_def_; }
+  inline const OperatorDef& def() const {
+    return operator_def_;
+  }
+  inline const ArgumentHelper& arg_helper() const {
+    return arg_helper_;
+  }
 
  private:
-  CaffeMap<string, const Argument*> arg_map_;
   OperatorDef operator_def_;
+  ArgumentHelper arg_helper_;
   vector<const Blob*> inputs_;
   vector<Blob*> outputs_;
 

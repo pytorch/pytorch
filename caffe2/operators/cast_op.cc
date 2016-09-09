@@ -20,9 +20,16 @@ bool CastOp<CPUContext>::DoRunWithType() {
 REGISTER_CPU_OPERATOR(Cast, CastOp<CPUContext>);
 
 OPERATOR_SCHEMA(Cast)
-  .NumInputs(1)
-  .NumOutputs(1)
-  .SetDoc(R"DOC(
+    .NumInputs(1)
+    .NumOutputs(1)
+    .TensorInferenceFunction(
+        [](const OperatorDef& def, const vector<TensorProto>& in) {
+          ArgumentHelper helper(def);
+          vector<TensorProto> out(in);
+          out[0].set_data_type(cast::GetCastDataType(helper));
+          return out;
+        })
+    .SetDoc(R"DOC(
 The operator casts the elements of a given input tensor to a data type
 specified by the 'to' argument and returns an output tensor of the same size in
 the converted type. The 'to' argument must be one of the data types specified
@@ -32,11 +39,16 @@ throws an Enforce error.
 
 NOTE: Casting to and from strings is not supported yet.
 )DOC")
-  .Arg("to", "The data type to which the elements of the input tensor are cast."
-       "Strictly must be one of the types from DataType enum in TensorProto")
-  .Input(0, "input", "Input tensor to be cast.")
-  .Output(0, "output", "Output tensor with the same shape as input with type "
-          "specified by the 'to' argument");
+    .Arg(
+        "to",
+        "The data type to which the elements of the input tensor are cast."
+        "Strictly must be one of the types from DataType enum in TensorProto")
+    .Input(0, "input", "Input tensor to be cast.")
+    .Output(
+        0,
+        "output",
+        "Output tensor with the same shape as input with type "
+        "specified by the 'to' argument");
 
 // Some Casts are compatible with gradients, but for now we don't support it
 GRADIENT_NOT_IMPLEMENTED_YET(Cast);

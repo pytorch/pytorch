@@ -141,4 +141,67 @@ TEST(OperatorSchemaTest, Inplace) {
   EXPECT_FALSE(schema->Verify(def4));
 }
 
+OPERATOR_SCHEMA(OpSchemaSameInputOutputTensorInference).IdenticalTypeAndShape();
+
+TEST(OperatorSchemaTest, TensorInferenceIdentical) {
+  const OpSchema* schema =
+      OpSchemaRegistry::Schema("OpSchemaSameInputOutputTensorInference");
+  OperatorDef def = CreateOperatorDef(
+      "OpSchemaSameInputOutputTensorInference",
+      "",
+      vector<string>{"in"},
+      vector<string>{"out"});
+  vector<TensorProto> protos(1);
+  protos[0].set_data_type(TensorProto::FLOAT);
+  protos[0].add_dims(1);
+  protos[0].add_dims(2);
+  protos[0].add_dims(3);
+  vector<TensorProto> out = schema->InferTensor(def, protos);
+  EXPECT_EQ(out.size(), 1);
+  EXPECT_EQ(out[0].SerializeAsString(), protos[0].SerializeAsString());
+}
+
+OPERATOR_SCHEMA(OpSchemaArbitraryTensorInference)
+    .TensorInferenceFunction(
+        [](const OperatorDef&, const vector<TensorProto>&) {
+          vector<TensorProto> protos(1);
+          protos[0].set_data_type(TensorProto::FLOAT);
+          protos[0].add_dims(1701);
+          return protos;
+        });
+
+TEST(OperatorSchemaTest, TensorInferenceArbitrary) {
+  const OpSchema* schema =
+      OpSchemaRegistry::Schema("OpSchemaArbitraryTensorInference");
+  OperatorDef def = CreateOperatorDef(
+      "OpSchemaArbitraryTensorInference",
+      "",
+      vector<string>{"in"},
+      vector<string>{"out"});
+  vector<TensorProto> out = schema->InferTensor(def, vector<TensorProto>());
+  EXPECT_EQ(out.size(), 1);
+  EXPECT_EQ(out[0].data_type(), TensorProto::FLOAT);
+  EXPECT_EQ(out[0].dims_size(), 1);
+  EXPECT_EQ(out[0].dims(0), 1701);
+}
+
+TEST(OperatorSchemaTest, TestCastSchema) {
+  // This tests a use case of the schema: the Cast op takes in the def and
+  // deduces the
+  // schema from the "to" argument.
+  const OpSchema* schema = OpSchemaRegistry::Schema("Cast");
+  OperatorDef def = CreateOperatorDef(
+      "Cast",
+      "",
+      vector<string>{"in"},
+      vector<string>{"out"},
+      vector<Argument>{MakeArgument<int64_t>("to", TensorProto::UINT8)});
+  vector<TensorProto> out = schema->InferTensor(def, vector<TensorProto>(1));
+  EXPECT_EQ(out.size(), 1);
+  // Data type should be inferred.
+  EXPECT_EQ(out[0].data_type(), TensorProto::UINT8);
+  // Dim should not be set (same as input);
+  EXPECT_EQ(out[0].dims_size(), 0);
+}
+
 }  // namespace caffe2

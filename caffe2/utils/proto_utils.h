@@ -154,6 +154,54 @@ inline bool HasArgument(const OperatorDef& def, const string& name) {
   return false;
 }
 
+/**
+ * @brief A helper class to index into arguments.
+ *
+ * This helper helps us to more easily index into a set of arguments
+ * that are present in the operator. To save memory, the argument helper
+ * does not copy the operator def, so one would need to make sure that the
+ * lifetime of the OperatorDef object outlives that of the ArgumentHelper.
+ */
+class ArgumentHelper {
+ public:
+  explicit ArgumentHelper(const OperatorDef& def);
+  bool HasArgument(const string& name) const;
+
+  template <typename T>
+  T GetSingleArgument(const string& name, const T& default_value) const;
+  template <typename T>
+  bool HasSingleArgumentOfType(const string& name) const;
+  template <typename T>
+  vector<T> GetRepeatedArgument(const string& name) const;
+
+  template <typename MessageType>
+  MessageType GetMessageArgument(const string& name) const {
+    CAFFE_ENFORCE(arg_map_.count(name), "Cannot find parameter named ", name);
+    MessageType message;
+    if (arg_map_.at(name)->has_s()) {
+      CHECK(message.ParseFromString(arg_map_.at(name)->s()))
+          << "Faild to parse content from the string";
+    } else {
+      VLOG(1) << "Return empty message for parameter " << name;
+    }
+    return message;
+  }
+
+  template <typename MessageType>
+  vector<MessageType> GetRepeatedMessageArgument(const string& name) const {
+    CAFFE_ENFORCE(arg_map_.count(name), "Cannot find parameter named ", name);
+    vector<MessageType> messages(arg_map_.at(name)->strings_size());
+    for (int i = 0; i < messages.size(); ++i) {
+      CHECK(messages[i].ParseFromString(arg_map_.at(name)->strings(i)))
+          << "Faild to parse content from the string";
+    }
+    return messages;
+  }
+
+ private:
+  CaffeMap<string, const Argument*> arg_map_;
+};
+
 const Argument& GetArgument(const OperatorDef& def, const string& name);
 
 Argument* GetMutableArgument(

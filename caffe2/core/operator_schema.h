@@ -128,6 +128,33 @@ class OpSchema {
   OpSchema& EnforceInplace(set<std::pair<int, int>> inplace);
   OpSchema& EnforceOneToOneInplace();
 
+  // Functions to deal with type and shape inference. Basically, this registers
+  // a function that takes in an OperatorDef and a series of input type and
+  // shape specified by TensorProto objects (whose data fields are empty), and
+  // produces a series of output type and shape.
+  typedef std::function<
+      vector<TensorProto>(const OperatorDef&, const vector<TensorProto>&)>
+      TensorInferenceFunctionType;
+  /**
+   * @brief Sets the tensor inference function, which is a std::function object
+   * defined in operator_schema.h.
+   */
+  OpSchema& TensorInferenceFunction(TensorInferenceFunctionType function);
+  /**
+   * @brief Seets the tensor inference function to produce the same output as
+   * the input.
+   */
+  OpSchema& IdenticalTypeAndShape();
+  /**
+   * @brief A function to allow one to infer the type and shape from the op
+   * schema.
+   */
+  inline vector<TensorProto> InferTensor(
+      const OperatorDef& def,
+      const vector<TensorProto> input_type_shape) const {
+    return tensor_inference_function_(def, input_type_shape);
+  }
+
   // Functions to do documentation for the operator schema.
   OpSchema& SetDoc(const string& doc);
   OpSchema& Arg(const char* name, const char* description);
@@ -178,6 +205,11 @@ class OpSchema {
       = [](int, int) { return false; };
   std::function<bool(int, int)> inplace_enforced_
       = [](int, int) { return false; };
+  TensorInferenceFunctionType tensor_inference_function_ =
+      [](const OperatorDef& def, const vector<TensorProto>&) {
+        // In default, return a vector of TensorProto that has nothing set.
+        return vector<TensorProto>(def.output_size());
+      };
 };
 
 /**

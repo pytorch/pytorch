@@ -165,6 +165,19 @@ OpSchema& OpSchema::EnforceOneToOneInplace() {
   return EnforceInplace([](int in, int out) { return in == out; });
 }
 
+OpSchema& OpSchema::TensorInferenceFunction(
+    TensorInferenceFunctionType function) {
+  tensor_inference_function_ = function;
+  return *this;
+}
+
+OpSchema& OpSchema::IdenticalTypeAndShape() {
+  return TensorInferenceFunction(
+      [](const OperatorDef&, const vector<TensorProto>& input_types) {
+        return vector<TensorProto>(input_types);
+      });
+}
+
 OpSchema& OpSchema::SetDoc(const string& doc) {
   doc_ = doc;
   return *this;

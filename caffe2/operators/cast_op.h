@@ -7,6 +7,27 @@
 
 namespace caffe2 {
 
+namespace cast {
+
+inline TensorProto_DataType GetCastDataType(const ArgumentHelper& helper) {
+  TensorProto_DataType to;
+  if (helper.HasSingleArgumentOfType<string>("to")) {
+#ifndef CAFFE2_USE_LITE_PROTO
+    string s = helper.GetSingleArgument<string>("to", "");
+    std::transform(s.begin(), s.end(), s.begin(), ::toupper);
+    CAFFE_ENFORCE(
+        TensorProto_DataType_Parse(s, &to), "Unknown 'to' argument: ", s);
+#else
+      CAFFE_THROW("String cast op not supported");
+#endif
+    } else {
+      to = static_cast<TensorProto_DataType>(
+          helper.GetSingleArgument<int>("to", TensorProto_DataType_UNDEFINED));
+    }
+    return to;
+}
+} // namespace cast
+
 template <class Context>
 class CastOp : public Operator<Context> {
  public:
@@ -14,21 +35,7 @@ class CastOp : public Operator<Context> {
 
   CastOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws) {
-    TensorProto_DataType to;
-    if (OperatorBase::HasSingleArgumentOfType<string>("to")) {
-#ifndef CAFFE2_USE_LITE_PROTO
-      string s = OperatorBase::GetSingleArgument<string>("to", "");
-      std::transform(s.begin(), s.end(), s.begin(), ::toupper);
-      CAFFE_ENFORCE(
-          TensorProto_DataType_Parse(s, &to), "Unknown 'to' argument: ", s);
-#else
-      CAFFE_THROW("String cast op not supported");
-#endif
-    } else {
-      to = static_cast<TensorProto_DataType>(
-          OperatorBase::GetSingleArgument<int>(
-              "to", TensorProto_DataType_UNDEFINED));
-    }
+    TensorProto_DataType to = cast::GetCastDataType(this->arg_helper());
     switch (to) {
       case TensorProto_DataType_FLOAT:
         body_ = &CastOp::DoRunWithDstType<float>;
