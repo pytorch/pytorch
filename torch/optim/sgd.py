@@ -7,7 +7,7 @@ class SGD(Optimizer):
         super(SGD, self).__init__(model)
         self.lr = lr
         self.momentum = momentum
-        self.dampening = dampening or momentum
+        self.dampening = dampening or 0
         self.state = defaultdict(dict)
 
     def step(self, forward_closure):
