@@ -15,7 +15,11 @@
 #define CUDA_FLOAT false
 #else
 #define IS_CUDA true
+#define CUDA_INT defined(THC_REAL_IS_INT)
+#define CUDA_LONG defined(THC_REAL_IS_LONG)
 #define CUDA_FLOAT defined(THC_REAL_IS_FLOAT)
+#define CUDA_DOUBLE defined(THC_REAL_IS_DOUBLE)
+#define CUDA_HALF defined(THC_REAL_IS_HALF)
 #endif
 
 #if IS_CUDA
@@ -496,7 +500,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 [[
   name: abs
   return: argument 0
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_LONG) || defined(TH_REAL_IS_INT) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_LONG) || defined(TH_REAL_IS_INT) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE || CUDA_INT || CUDA_LONG
   with_stateless: True
   arguments:
     - arg: THTensor* destination
@@ -508,7 +512,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
   name: abs_
   cname: abs
   return: self
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_LONG) || defined(TH_REAL_IS_INT) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_LONG) || defined(TH_REAL_IS_INT) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE || CUDA_INT || CUDA_LONG
   arguments:
     - THTensor* self
     - THTensor* self
@@ -517,7 +521,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: sigmoid_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   cname: sigmoid
   return: self
   arguments:
@@ -527,7 +531,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: sigmoid
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   cname: sigmoid
   with_stateless: True
   return: argument 0
@@ -540,7 +544,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: log_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   cname: log
   return: self
   arguments:
@@ -550,7 +554,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: log
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   with_stateless: True
   return: argument 0
   arguments:
@@ -562,7 +566,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: log1p_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   cname: log1p
   return: self
   arguments:
@@ -572,7 +576,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: log1p
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   with_stateless: True
   return: argument 0
   arguments:
@@ -584,7 +588,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: exp_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   cname: exp
   return: self
   arguments:
@@ -594,7 +598,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: exp
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   with_stateless: True
   return: argument 0
   arguments:
@@ -606,7 +610,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: cos_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   cname: cos
   return: self
   arguments:
@@ -616,7 +620,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: cos
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   with_stateless: True
   return: argument 0
   arguments:
@@ -628,7 +632,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: acos_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   cname: acos
   return: self
   arguments:
@@ -638,7 +642,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: acos
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   with_stateless: True
   return: argument 0
   arguments:
@@ -650,7 +654,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: cosh_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   cname: cosh
   return: self
   arguments:
@@ -660,7 +664,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: cosh
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   with_stateless: True
   return: argument 0
   arguments:
@@ -672,7 +676,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: sin_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   cname: sin
   return: self
   arguments:
@@ -682,7 +686,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: sin
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   with_stateless: True
   return: argument 0
   arguments:
@@ -694,7 +698,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: asin_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   cname: asin
   return: self
   arguments:
@@ -704,7 +708,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: asin
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   with_stateless: True
   return: argument 0
   arguments:
@@ -716,7 +720,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: sinh_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   cname: sinh
   return: self
   arguments:
@@ -726,7 +730,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: sinh
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   with_stateless: True
   return: argument 0
   arguments:
@@ -738,7 +742,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: tan_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   cname: tan
   return: self
   arguments:
@@ -748,7 +752,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: tan
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   with_stateless: True
   return: argument 0
   arguments:
@@ -760,7 +764,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: atan_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   cname: atan
   return: self
   arguments:
@@ -770,7 +774,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: atan
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   with_stateless: True
   return: argument 0
   arguments:
@@ -782,7 +786,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: tanh_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   cname: tanh
   return: self
   arguments:
@@ -792,7 +796,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: tanh
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   with_stateless: True
   return: argument 0
   arguments:
@@ -804,7 +808,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: sqrt_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   cname: sqrt
   return: self
   arguments:
@@ -814,7 +818,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: sqrt
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   with_stateless: True
   return: argument 0
   arguments:
@@ -826,7 +830,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: rsqrt_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   cname: rsqrt
   return: self
   arguments:
@@ -836,7 +840,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: rsqrt
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   with_stateless: True
   return: argument 0
   arguments:
@@ -848,7 +852,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: ceil_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   cname: ceil
   return: self
   arguments:
@@ -858,7 +862,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: ceil
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   with_stateless: True
   return: argument 0
   arguments:
@@ -870,7 +874,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: floor_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   cname: floor
   return: self
   arguments:
@@ -880,7 +884,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: floor
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   with_stateless: True
   return: argument 0
   arguments:
@@ -892,7 +896,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: round_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   cname: round
   return: self
   arguments:
@@ -902,7 +906,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: round
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   with_stateless: True
   return: argument 0
   arguments:
@@ -914,7 +918,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: trunc_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   cname: trunc
   return: self
   arguments:
@@ -924,7 +928,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: trunc
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   with_stateless: True
   return: argument 0
   arguments:
@@ -936,7 +940,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: frac_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   cname: frac
   return: self
   arguments:
@@ -946,7 +950,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: frac
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   with_stateless: True
   return: argument 0
   arguments:
@@ -1078,7 +1082,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: cinv
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   with_stateless: True
   options:
     - cname: cinv
@@ -1091,7 +1095,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: cinv_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   options:
     - cname: cinv
       return: self
@@ -1102,7 +1106,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: neg
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   with_stateless: True
   options:
     - cname: neg
@@ -1115,7 +1119,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: neg_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   options:
     - cname: neg
       return: self
@@ -1496,7 +1500,6 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: sign
-  defined_if: CUDA_FLOAT || !IS_CUDA
   with_stateless: True
   return: argument 0
   arguments:
@@ -1508,7 +1511,6 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 [[
   name: sign_
   cname: sign
-  defined_if: CUDA_FLOAT || !IS_CUDA
   return: self
   arguments:
     - THTensor* self
@@ -3510,7 +3512,11 @@ static PyObject * THPTensor_stateless_(cat)(THPTensor *_unused, PyObject *args)
 // PUT DEFINITIONS IN HERE PLEASE
 
 #undef IS_CUDA
+#undef CUDA_INT
+#undef CUDA_LONG
 #undef CUDA_FLOAT
+#undef CUDA_DOUBLE
+#undef CUDA_HALF
 #undef THPIndexTensor
 #undef THPIndexTensorClass
 #undef THPBoolTensor
