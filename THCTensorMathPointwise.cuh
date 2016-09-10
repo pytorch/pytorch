@@ -63,11 +63,13 @@ struct TensorSignOp {
 template <>
 struct TensorSignOp<unsigned char> {
   __device__ __forceinline__ void operator()(unsigned char* out, unsigned char* in) {
-    *out = 1;
+    unsigned char orig = *in;
+    *out = (orig == 0) ? 0 : 1;
   }
 
   __device__ __forceinline__ void operator()(unsigned char* v) {
-    *v = 1;
+    unsigned char orig = *v;
+    *v = (orig == 0) ? 0 : 1;
   }
 };
 
