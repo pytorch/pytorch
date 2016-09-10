@@ -109,12 +109,14 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
     PyErr_Format(PyExc_ValueError,
       "offset must be non-negative and no greater than buffer length (%ld)",
       (long) buffer.len);
+    PyBuffer_Release(&buffer);
     return NULL;
   }
 
   if (count < 0) {
     if ((buffer.len - offset) % sizeof(real) != 0) {
       PyErr_Format(PyExc_ValueError, "buffer size must be a multiple of element size");
+      PyBuffer_Release(&buffer);
       return NULL;
     }
     count = (buffer.len - offset) / sizeof(real);
@@ -122,6 +124,7 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
 
   if (offset + (count * (Py_ssize_t)sizeof(real)) > buffer.len) {
     PyErr_Format(PyExc_ValueError, "buffer is smaller than requested size");
+    PyBuffer_Release(&buffer);
     return NULL;
   }
 
@@ -144,6 +147,7 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
 #error "Unknown type"
 #endif
 
+  PyBuffer_Release(&buffer);
   return (PyObject*)THPStorage_(newObject)(storage);
   END_HANDLE_TH_ERRORS
 }
