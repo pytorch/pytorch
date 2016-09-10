@@ -74,7 +74,7 @@ struct THCNumerics<int> {
   static inline __host__ __device__ bool ne(int a, int b) { return a != b; }
 
   static inline __host__ __device__  int add(int a, int b) { return a + b; }
-  static inline __host__ __device__  int abs(int a) { return abs(a); }
+  static inline __host__ __device__  int abs(int a) { return ::abs(a); }
 };
 
 template <>
