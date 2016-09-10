@@ -341,9 +341,4 @@ struct TensorDivOp<half> {
 };
 #endif // CUDA_HALF_TENSOR
 
-__device__ __forceinline__ double frac(double x)
-{
-  return x - trunc(x);
-}
-
 #endif // THC_TENSORMATH_POINTWISE_CUH
