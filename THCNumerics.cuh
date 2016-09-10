@@ -406,7 +406,7 @@ struct THCNumerics<half> {
   static inline __host__ __device__ half frac(half a) {
 #ifdef __CUDA_ARCH__
     float fa = __half2float(a);
-    return __float2half(fa - floorf(fa));
+    return __float2half(fa - truncf(fa));
 #else // __CUDA_ARCH__
     float fa = THC_half2float(a);
     return THC_float2half(fa - floorf(fa));
@@ -472,7 +472,7 @@ struct THCNumerics<float> {
   static inline __host__ __device__  float tanh (float a) { return  tanhf(a); }
   static inline __host__ __device__  float abs  (float a) { return   fabs(a); }
   static inline __host__ __device__  float round(float a) { return roundf(a); }
-  static inline __host__ __device__  float frac (float a) { return a - floorf(a); }
+  static inline __host__ __device__  float frac (float a) { return a - truncf(a); }
   static inline __host__ __device__  float cinv (float a) { return 1.0f / a; }
   static inline __host__ __device__  float add  (float a, float b) { return a + b; }
 };
@@ -511,7 +511,7 @@ struct THCNumerics<double> {
   static inline __host__ __device__  double tanh (double a) { return  ::tanh(a); }
   static inline __host__ __device__  double abs  (double a) { return   ::abs(a); }
   static inline __host__ __device__  double round(double a) { return ::round(a); }
-  static inline __host__ __device__  double frac (double a) { return a - ::floor(a); }
+  static inline __host__ __device__  double frac (double a) { return a - ::trunc(a); }
   static inline __host__ __device__  double cinv (double a) { return 1.0 / a; }
   static inline __host__ __device__  double add  (double a, double b) { return a + b; }
 };
