@@ -22,5 +22,7 @@ extern PyObject *THCPByteTensorClass;
 extern PyObject * THCPModule_getDevice_wrap(PyObject *self);
 extern PyObject * THCPModule_setDevice_wrap(PyObject *self, PyObject *arg);
 void THCPModule_setDevice(int idx);
+extern PyObject * THCPModule_getDriverVersion(PyObject *self);
+extern PyObject * THCPModule_isDriverSufficient(PyObject *self);
 
 #endif

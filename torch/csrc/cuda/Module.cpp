@@ -139,6 +139,29 @@ PyObject * THCPModule_getDeviceCount_wrap(PyObject *self)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject * THCPModule_isDriverSufficient(PyObject *self)
+{
+  int count;
+  cudaError_t err = cudaGetDeviceCount(&count);
+  if (err == cudaErrorInsufficientDriver) {
+    return PyBool_FromLong(0);
+  }
+  return PyBool_FromLong(1);
+}
+
+PyObject * THCPModule_getDriverVersion(PyObject *self)
+{
+  int driverVersion = -1;
+  cudaError_t err = cudaDriverGetVersion(&driverVersion);
+  if (err != cudaSuccess) {
+    PyErr_Format(PyExc_RuntimeError,
+                    "Error calling cudaDriverGetVersion: %d %s",
+                    err, cudaGetErrorString(err));
+    return false;
+  }
+  return PyLong_FromLong((long) driverVersion);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Cuda module initialization
 ////////////////////////////////////////////////////////////////////////////////
@@ -182,4 +205,3 @@ PyObject * THCPModule_initExtension(PyObject *self)
   PyObject* module_dict = PyModule_GetDict(torch_module);
   return PyBool_FromLong(THCPModule_initCuda(module_dict));
 }
-

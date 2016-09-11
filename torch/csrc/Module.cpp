@@ -574,6 +574,8 @@ extern PyObject * THCPModule_initExtension(PyObject *self);
 extern PyObject * THCPModule_setDevice_wrap(PyObject *self, PyObject *arg);
 extern PyObject * THCPModule_getDevice_wrap(PyObject *self);
 extern PyObject * THCPModule_getDeviceCount_wrap(PyObject *self);
+extern PyObject * THCPModule_getDriverVersion(PyObject *self);
+extern PyObject * THCPModule_isDriverSufficient(PyObject *self);
 #endif
 
 static PyMethodDef TorchMethods[] = {
@@ -583,6 +585,8 @@ static PyMethodDef TorchMethods[] = {
   {"_cuda_setDevice", (PyCFunction)THCPModule_setDevice_wrap,   METH_O,       NULL},
   {"_cuda_getDevice", (PyCFunction)THCPModule_getDevice_wrap,   METH_NOARGS,  NULL},
   {"_cuda_getDeviceCount", (PyCFunction)THCPModule_getDeviceCount_wrap, METH_NOARGS, NULL},
+  {"_cuda_isDriverSufficient", (PyCFunction)THCPModule_isDriverSufficient, METH_NOARGS, NULL},
+  {"_cuda_getDriverVersion", (PyCFunction)THCPModule_getDriverVersion, METH_NOARGS, NULL},
 #endif
   {"_sendfd",         (PyCFunction)THPModule_sendfd,            METH_VARARGS, NULL},
   {"_recvfd",         (PyCFunction)THPModule_recvfd,            METH_VARARGS, NULL},
@@ -841,4 +845,3 @@ PyMODINIT_FUNC PyInit__C()
 
 #undef ASSERT_TRUE
 }
-

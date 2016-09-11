@@ -1,5 +1,28 @@
+from __future__ import print_function
 import torch
 import contextlib
+
+if torch._C._cuda_isDriverSufficient() == False:
+    if torch._C._cuda_getDriverVersion() == 0:
+        # found no NVIDIA driver on the system
+        raise Assertionerror(
+            "Found no NVIDIA driver on your system. Please check that you "
+            + "have an NVIDIA GPU and installed a driver from "
+            + "\n http://www.nvidia.com/Download/index.aspx \n")
+    else:
+        # TODO: directly link to the alternative bin that needs install
+        raise AssertionError(
+            "The NVIDIA driver on your system is too old. "
+            + "It is of version: "
+            + str(torch._C._cuda_getDriverVersion()) + "\n" +
+            "Please update your GPU driver by downloading " +
+            "and installing a new version from the URL:" +
+            "\n http://www.nvidia.com/Download/index.aspx \n"
+            + "Alternatively, go to: " +
+            " \n https://pytorch.org/binaries \n " +
+            "to install a PyTorch version that is compiled " +
+            "for old NVIDIA drivers")
+
 
 from torch.Storage import _StorageBase
 from torch.Tensor import _TensorBase
