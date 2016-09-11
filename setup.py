@@ -117,7 +117,7 @@ class clean(distutils.command.clean.clean):
 
 include_dirs = []
 extra_link_args = []
-extra_compile_args = ['-std=c++11', '-Wno-write-strings']
+extra_compile_args = ['-std=c++11', '-Wno-write-strings', '-fabi-version=2']
 
 cwd = os.path.dirname(os.path.abspath(__file__))
 lib_path = os.path.join(cwd, "torch", "lib")
