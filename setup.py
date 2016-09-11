@@ -118,6 +118,10 @@ class clean(distutils.command.clean.clean):
 include_dirs = []
 extra_link_args = []
 extra_compile_args = ['-std=c++11', '-Wno-write-strings']
+if os.getenv('PYTORCH_BINARY_BUILD') and platform.system() == 'Linux':
+    print('PYTORCH_BINARY_BUILD found. Static linking libstdc++ on Linux')
+    extra_compile_args += ['-static-libstdc++']
+    extra_link_args += ['-static-libstdc++']
 
 cwd = os.path.dirname(os.path.abspath(__file__))
 lib_path = os.path.join(cwd, "torch", "lib")
