@@ -138,7 +138,8 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
 #elif defined(TH_REAL_IS_INT)
   THP_decodeInt32Buffer(storage->data, src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_LONG)
-  THP_decodeInt64Buffer(storage->data, src + offset, byte_order, count);
+  // TODO: remove the cast
+  THP_decodeInt64Buffer((int64_t*) storage->data, src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_FLOAT)
   THP_decodeFloatBuffer(storage->data, src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_DOUBLE)
