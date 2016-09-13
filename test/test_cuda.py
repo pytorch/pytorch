@@ -189,6 +189,11 @@ tests = [
 
 # TODO: random functions, cat, gather, scatter, index*, masked*, resize, resizeAs, storageOffset, storage, stride, unfold
 
+custom_precision = {
+    'addbmm': 1e-4,
+    'rsqrt': 1e-4,
+}
+
 simple_pointwise = [
     'abs',
     'acos',
@@ -217,7 +222,7 @@ simple_pointwise = [
 for fn in simple_pointwise:
     tests.append((fn, small_3d, lambda t: []))
 
-def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t):
+def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t, precision=1e-5):
     def tmp(self):
         cpu_tensor = tensor_constructor(t)
         gpu_tensor = to_gpu(cpu_tensor)
@@ -232,10 +237,10 @@ def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t):
                 raise unittest.SkipTest('unimplemented data type')
             raise
         # If one changes, another should change as well
-        self.assertEqual(cpu_tensor, gpu_tensor)
-        self.assertEqual(cpu_args, gpu_args)
+        self.assertEqual(cpu_tensor, gpu_tensor, precision)
+        self.assertEqual(cpu_args, gpu_args, precision)
         # Compare results
-        self.assertEqual(cpu_result, gpu_result)
+        self.assertEqual(cpu_result, gpu_result, precision)
     return tmp
 
 class TestCuda(TestCase):
@@ -296,8 +301,10 @@ for decl in tests:
             if desc:
                 test_name += '_' + desc
 
+            precision = custom_precision.get(name, TestCuda.precision)
+
             assert not hasattr(TestCase, test_name)
-            setattr(TestCuda, test_name, compare_cpu_gpu(constr, arg_constr, name, t))
+            setattr(TestCuda, test_name, compare_cpu_gpu(constr, arg_constr, name, t, precision))
 
 if __name__ == '__main__':
     unittest.main()
