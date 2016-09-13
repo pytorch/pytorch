@@ -10,6 +10,9 @@
 #include "generic/AbsCriterion.c"
 #include "THGenerateFloatTypes.h"
 
+#include "generic/BCECriterion.c"
+#include "THGenerateFloatTypes.h"
+
 #include "generic/ClassNLLCriterion.c"
 #include "THGenerateFloatTypes.h"
 
@@ -139,6 +142,9 @@
 #include "generic/SpatialMaxPooling.c"
 #include "THGenerateFloatTypes.h"
 
+#include "generic/SpatialDilatedMaxPooling.c"
+#include "THGenerateFloatTypes.h"
+
 #include "generic/SpatialMaxUnpooling.c"
 #include "THGenerateFloatTypes.h"
 
@@ -167,6 +173,9 @@
 #include "THGenerateFloatTypes.h"
 
 #include "generic/VolumetricMaxPooling.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/VolumetricDilatedMaxPooling.c"
 #include "THGenerateFloatTypes.h"
 
 #include "generic/VolumetricMaxUnpooling.c"

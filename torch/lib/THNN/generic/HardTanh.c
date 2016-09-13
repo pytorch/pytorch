@@ -85,7 +85,7 @@ void THNN_(HardTanh_updateGradInput)(
     if (inplace)
     {
       TH_TENSOR_APPLY2(real, gradOutput, real, input,
-        if (*input_data < min_val || *input_data > max_val)
+        if (*input_data <= min_val || *input_data >= max_val)
           *gradOutput_data = 0;
       );
     }

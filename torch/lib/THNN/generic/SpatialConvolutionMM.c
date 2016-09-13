@@ -101,7 +101,7 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
   if (weight->nDimension == 4) {
     long s1 = weight->size[0];
     long s2 = weight->size[1] * weight->size[2] * weight->size[3];
-    weight = THTensor_(newWithStorage2d)(weight->storage, 0, s1, -1, s2, -1);
+    weight = THTensor_(newWithStorage2d)(weight->storage, weight->storageOffset, s1, -1, s2, -1);
     freeWeight = 1;
   }
 
@@ -201,7 +201,7 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
   if (weight->nDimension == 4) {
     long s1 = weight->size[0];
     long s2 = weight->size[1] * weight->size[2] * weight->size[3];
-    weight = THTensor_(newWithStorage2d)(weight->storage, 0, s1, -1, s2, -1);
+    weight = THTensor_(newWithStorage2d)(weight->storage, weight->storageOffset, s1, -1, s2, -1);
     freeWeight = 1;
   }
 
@@ -294,7 +294,7 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
   if (gradWeight->nDimension == 4) {
     long s1 = gradWeight->size[0];
     long s2 = gradWeight->size[1] * gradWeight->size[2] * gradWeight->size[3];
-    gradWeight = THTensor_(newWithStorage2d)(gradWeight->storage, 0, s1, -1, s2, -1);
+    gradWeight = THTensor_(newWithStorage2d)(gradWeight->storage, gradWeight->storageOffset, s1, -1, s2, -1);
     freeWeight = 1;
   }
 

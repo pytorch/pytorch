@@ -25,6 +25,21 @@ TH_API void THNN_(AbsCriterion_updateGradInput)(
           THTensor *gradInput,         // [OUT] gradient w.r.t. input
           bool sizeAverage);           // if true, the gradient will be normalized by batch size
 
+TH_API void THNN_(BCECriterion_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *target,
+          THTensor *output,
+          bool sizeAverage,
+	  THTensor *weights);
+TH_API void THNN_(BCECriterion_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *target,
+          THTensor *gradInput,
+          bool sizeAverage,
+	  THTensor *weights);
+
 TH_API void THNN_(ClassNLLCriterion_updateOutput)(
           THNNState *state,            // library's state
           THTensor *input,             // input tensor (1D/2D)
@@ -841,9 +856,29 @@ TH_API void THNN_(SpatialMaxPooling_updateOutput)(
           int kW, int kH,
           int dW, int dH,
           int padW, int padH,
-          int dilationW, int dilationH,
           bool ceil_mode);
 TH_API void THNN_(SpatialMaxPooling_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          THTensor *indices,
+          int kW, int kH,
+          int dW, int dH,
+          int padW, int padH,
+          bool ceil_mode);
+
+TH_API void THNN_(SpatialDilatedMaxPooling_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          THTensor *indices,
+          int kW, int kH,
+          int dW, int dH,
+          int padW, int padH,
+          int dilationW, int dilationH,
+          bool ceil_mode);
+TH_API void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
           THNNState *state,
           THTensor *input,
           THTensor *gradOutput,
@@ -1101,6 +1136,26 @@ TH_API void THNN_(VolumetricMaxPooling_updateGradInput)(
           THTensor *indices,
           int dT, int dW, int dH,
           int pT, int pW, int pH);
+
+TH_API void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          THTensor *indices,
+          int kT, int kW, int kH,
+          int dT, int dW, int dH,
+          int pT, int pW, int pH,
+          int dilationT, int dilationW, int dilationH,
+          bool ceilMode);
+TH_API void THNN_(VolumetricDilatedMaxPooling_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          THTensor *indices,
+          int dT, int dW, int dH,
+          int pT, int pW, int pH,
+          int dilationT, int dilationW, int dilationH);
 
 TH_API void THNN_(VolumetricMaxUnpooling_updateOutput)(
           THNNState *state,
