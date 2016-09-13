@@ -9,7 +9,7 @@
 #endif
 
 /* Kernel side: Native fp16 ALU instructions are available if we have this: */
-#if defined(CUDA_HALF_TENSOR) && (__CUDA_ARCH__ >= 530)
+#if defined(CUDA_HALF_TENSOR) && (CUDA_VERSION >= 8000) && (__CUDA_ARCH__ >= 530)
 #define CUDA_HALF_INSTRUCTIONS 1
 #endif
 

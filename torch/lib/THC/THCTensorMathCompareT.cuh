@@ -1,3 +1,6 @@
+#ifndef THC_TENSORMATH_COMPARET_CUH
+#define THC_TENSORMATH_COMPARET_CUH
+
 #include "THCTensorMath.h"
 #include "THCGeneral.h"
 #include "THCTensorCopy.h"
@@ -68,5 +71,4 @@ void THC_logicalTensor(THCState *state,
   THCudaCheck(cudaGetLastError());
 }
 
-#include "generic/THCTensorMathCompareT.cu"
-#include "THCGenerateAllTypes.h"
+#endif // THC_TENSORMATH_COMPARET_CUH

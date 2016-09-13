@@ -1,3 +1,6 @@
+CMAKE_MINIMUM_REQUIRED(VERSION 2.8 FATAL_ERROR)
+CMAKE_POLICY(VERSION 2.8)
+
 SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
 
 IF(NOT Torch_FOUND)
@@ -40,6 +43,11 @@ IF(MAGMA_FOUND)
   MESSAGE(STATUS "MAGMA INCLUDE DIRECTORIES: ${MAGMA_INCLUDE_DIR}")
   MESSAGE(STATUS "MAGMA LIBRARIES: ${MAGMA_LIBRARIES}")
   MESSAGE(STATUS "MAGMA V2 check: ${MAGMA_V2}")
+  # This is required for MAGMA which has C++ symbols
+  IF ($ENV{TH_BINARY_BUILD})
+    MESSAGE(STATUS "TH_BINARY_BUILD detected. Statically linking libstdc++")
+    SET(CMAKE_CXX_FLAGS "-static-libstdc++ ${CMAKE_CXX_FLAGS}")
+  ENDIF()
 ELSE(MAGMA_FOUND)
   MESSAGE(STATUS "MAGMA not found. Compiling without MAGMA support")
 ENDIF(MAGMA_FOUND)
@@ -69,6 +77,7 @@ ENDIF(APPLE)
 IF(NOT COMMAND CUDA_SELECT_NVCC_ARCH_FLAGS)
   INCLUDE(${CMAKE_CURRENT_SOURCE_DIR}/cmake/select_compute_arch.cmake)
 ENDIF()
+LIST(APPEND CUDA_NVCC_FLAGS $ENV{TORCH_NVCC_FLAGS})
 CUDA_SELECT_NVCC_ARCH_FLAGS(NVCC_FLAGS_EXTRA $ENV{TORCH_CUDA_ARCH_LIST})
 LIST(APPEND CUDA_NVCC_FLAGS ${NVCC_FLAGS_EXTRA})
 
@@ -108,22 +117,31 @@ SET(src-cuda
   THCTensorMath.cu
   THCTensorMath2.cu
   THCTensorMathBlas.cu
-  THCTensorMathCompare.cu
-  THCTensorMathCompareT.cu
   THCTensorMathMagma.cu
   THCTensorMathPairwise.cu
   THCTensorMathPointwise.cu
   THCTensorMathReduce.cu
   THCTensorMathScan.cu
-  THCTensorMasked.cu
   THCTensorIndex.cu
   THCTensorConv.cu
   THCTensorRandom.cu
   THCTensorScatterGather.cu
-  THCTensorSort.cu
   THCTensorTopK.cu
+  THCTensorSort.cu
   THCTensorTypeUtils.cu
   )
+
+# loop over all types
+foreach(THC_TYPE Byte Char Short Int Long Half Float Double)
+   # loop over files which need to be split between types (because of long compile times)
+   foreach(THC_FILE TensorSort TensorMathCompareT TensorMathPointwise TensorMathCompare TensorMathReduce TensorMasked)
+      if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}${THC_TYPE}.cu")
+         FILE(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}${THC_TYPE}.cu"
+              "#include \"../THC${THC_FILE}.cuh\"\n#include \"../generic/THC${THC_FILE}.cu\"\n#include \"../THCGenerate${THC_TYPE}Type.h\"\n")
+      endif()
+      LIST(APPEND src-cuda "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}${THC_TYPE}.cu")
+   endforeach()
+endforeach()
 
 MESSAGE(STATUS "got cuda version " ${CUDA_VERSION})
 
@@ -136,12 +154,14 @@ ELSE(CUDA_HAS_FP16 OR NOT ${CUDA_VERSION} LESS 7.5)
   MESSAGE(STATUS "Could not find CUDA with FP16 support, compiling without torch.CudaHalfTensor")
 ENDIF(CUDA_HAS_FP16 OR NOT ${CUDA_VERSION} LESS 7.5)
 
+MESSAGE(STATUS "CUDA_NVCC_FLAGS: ${CUDA_NVCC_FLAGS}")
+
 CUDA_ADD_LIBRARY(THC SHARED ${src} ${src-cuda})
 CUDA_ADD_CUBLAS_TO_TARGET(THC)
 TARGET_LINK_LIBRARIES(THC TH ${CUDA_curand_LIBRARY})
 
 IF(USE_MAGMA)
-  TARGET_LINK_LIBRARIES(THC ${MAGMA_LIBRARIES})
+  TARGET_LINK_LIBRARIES(THC ${MAGMA_LIBRARIES} ${CUDA_cusparse_LIBRARY})
 ENDIF(USE_MAGMA)
 
 INSTALL(TARGETS THC
@@ -175,8 +195,17 @@ INSTALL(FILES
           THCDeviceTensorUtils.cuh
           THCDeviceTensorUtils-inl.cuh
           THCGenerateAllTypes.h
+          THCGenerateByteType.h
+          THCGenerateCharType.h
+          THCGenerateShortType.h
+          THCGenerateIntType.h
+          THCGenerateLongType.h
+          THCGenerateHalfType.h
+          THCGenerateFloatType.h
+          THCGenerateDoubleType.h
           THCHalf.h
           THCNumerics.cuh
+          THCTensorSort.cuh
           THCTensorInfo.cuh
           THCTensorTypeUtils.cuh
           DESTINATION "${THC_INSTALL_INCLUDE_SUBDIR}/THC")

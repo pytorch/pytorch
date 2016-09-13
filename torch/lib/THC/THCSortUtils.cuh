@@ -150,16 +150,16 @@ bitonicSortKVInPlace(TensorInfo<K, IndexType> keys,
     bitonicSort<Comparator, K, V, IndexType, Power2SortSize>(
       sharedKeys, sharedValues, sharedValid, comp);
 
-    // elem1 values are always valid, since otherwise we would have
-    // chosen the next smallest power-of-2 for sorting
-    keys.data[keyStartOffset + elem1 * keySliceStride] =
-      sharedKeys[elem1];
-    values.data[valueStartOffset + elem1 * valueSliceStride] =
-      sharedValues[elem1];
+    // elem1 and elem2 values might be out-of-range, if the data size we are
+    // sorting is smaller than half the power2 size
+    if (valid1) {
+      keys.data[keyStartOffset + elem1 * keySliceStride] =
+        sharedKeys[elem1];
+      values.data[valueStartOffset + elem1 * valueSliceStride] =
+        sharedValues[elem1];
+    }
 
     if (valid2) {
-      // elem2 values might be out-of-range, if the data size we are
-      // sorting is not a power-of-2
       keys.data[keyStartOffset + elem2 * keySliceStride] =
         sharedKeys[elem2];
       values.data[valueStartOffset + elem2 * valueSliceStride] =
