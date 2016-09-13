@@ -26,6 +26,11 @@ IF(MSVC)
   ADD_DEFINITIONS(-D_CRT_SECURE_NO_DEPRECATE=1)
 ENDIF(MSVC)
 
+IF(UNIX)
+  # prevent Unknown CMake command "check_function_exists".
+  INCLUDE(CheckFunctionExists)
+ENDIF(UNIX)
+
 # OpenMP support?
 SET(WITH_OPENMP ON CACHE BOOL "OpenMP support if available?")
 IF (APPLE AND CMAKE_COMPILER_IS_GNUCC)
@@ -207,7 +212,6 @@ IF (UNIX AND NOT APPLE)
 ENDIF(UNIX AND NOT APPLE)
 
 IF(UNIX)
-  INCLUDE(CheckFunctionExists)
   SET(CMAKE_EXTRA_INCLUDE_FILES "sys/mman.h")
   CHECK_FUNCTION_EXISTS(mmap HAVE_MMAP)
   IF(HAVE_MMAP)
