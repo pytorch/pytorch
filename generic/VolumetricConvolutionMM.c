@@ -10,7 +10,7 @@ static int THNN_(view_weight)(THTensor **_weight)
   if (weight->nDimension == 5) {
     long s1 = weight->size[0];
     long s2 = weight->size[1] * weight->size[2] * weight->size[3] * weight->size[4];
-    *_weight = THTensor_(newWithStorage2d)(weight->storage, 0, s1, -1, s2, -1);
+    *_weight = THTensor_(newWithStorage2d)(weight->storage, weight->storageOffset, s1, -1, s2, -1);
     return 1;
   }
   return 0;
