@@ -5,22 +5,24 @@ class THNNFunctionBackend(FunctionBackend):
 
 
 def _initialize_backend():
-    from ..functions.thnn import _generated_functions
-    from ..functions.linear import LinearFunction
+    from ..functions.thnn import _all_functions as _thnn_functions
+    from ..functions.linear import Linear
+    from ..functions.dropout import Dropout, FeatureDropout
+    from ..functions.activation import Softsign
+    from ..functions.loss import CosineEmbeddingLoss, \
+            HingeEmbeddingLoss, MarginRankingLoss
 
-    backend.register_function('Linear', LinearFunction)
-    name_remap = {
-        'SpatialAveragePoolingFunction': 'AvgPool2dFunction',
-        'SpatialConvolutionMMFunction': 'Conv2dFunction',
-        'SpatialMaxPoolingFunction': 'MaxPool2dFunction',
-        'SoftMaxFunction': 'SoftmaxFunction',
-        'LogSoftMaxFunction': 'LogSoftmaxFunction',
-        'BatchNormalizationFunction': 'BatchNormFunction',
-    }
-    for cls in _generated_functions:
+    backend.register_function('Linear', Linear)
+    backend.register_function('Dropout', Dropout)
+    backend.register_function('Dropout2d', FeatureDropout)
+    backend.register_function('Dropout3d', FeatureDropout)
+    backend.register_function('CosineEmbeddingLoss', CosineEmbeddingLoss)
+    backend.register_function('HingeEmbeddingLoss', HingeEmbeddingLoss)
+    backend.register_function('MarginRankingLoss', MarginRankingLoss)
+    backend.register_function('Softsign', Softsign)
+    for cls in _thnn_functions:
         name = cls.__name__
-        new_name = name_remap.get(name, name)
-        backend.register_function(new_name.replace('Function', ''), cls)
+        backend.register_function(name, cls)
 
 
 backend = THNNFunctionBackend()

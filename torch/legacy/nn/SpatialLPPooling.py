@@ -30,7 +30,7 @@ class SpatialLPPooling(Sequential):
         if pnorm == 2:
            self.add(Sqrt())
         else:
-           self.add(Power(1/pnorm))
+           self.add(Power(1./pnorm))
 
     # the module is a Sequential: by default, it'll try to learn the parameters
     # of the sub sampler: we avoid that by redefining its methods.

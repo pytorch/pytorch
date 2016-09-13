@@ -2,6 +2,7 @@ from collections import OrderedDict
 from itertools import chain
 from .variable import Variable
 
+
 class Function(object):
 
     def __init__(self):
@@ -10,6 +11,7 @@ class Function(object):
         self.needs_input_grad = None
         self.saved_variables = None
         self.to_save = None
+        self.non_differentiable = None
         self.backward_hooks = OrderedDict()
 
     def __call__(self, *input):
@@ -23,6 +25,9 @@ class Function(object):
         for var in self.input:
             if var.data in dirty_set:
                 var.mark_dirty()
+
+    def mark_non_differentiable(self, *args):
+        self.non_differentiable = set(args)
 
     @property
     def saved_tensors(self):
@@ -38,9 +43,10 @@ class Function(object):
             raw_output = (raw_output,)
 
         if is_volatile:
-            output = tuple(Variable(tensor, volatile=True) for tensor in raw_output)
+            output = tuple(Variable(tensor, volatile=True)
+                    for tensor in raw_output)
         else:
-            self.needs_input_grad = tuple(arg.creator.requires_grad for arg in input)
+            self.needs_input_grad = tuple(arg.requires_grad for arg in input)
             self.requires_grad = any(self.needs_input_grad)
             self.previous_functions = [(arg.creator, id(arg)) for arg in input]
             output = tuple(Variable(tensor, self) for tensor in raw_output)
@@ -57,8 +63,13 @@ class Function(object):
                 t2var = {var._data: var for var in chain(input, output)}
                 self.saved_variables = tuple(t2var[t] for t in self.to_save)
                 del self.to_save
+            if self.non_differentiable is not None:
+                for var in output:
+                    if var.data in self.non_differentiable:
+                        var._requires_grad = False
 
         del self.input  # Remove unnecessary references to input
+        del self.non_differentiable  # and output
         if len(output) == 1:
             output = output[0]
         return output
@@ -97,8 +108,10 @@ class Function(object):
     def backward(self, *grad_output):
         raise NotImplementedError
 
+
 class InplaceFunction(Function):
 
     def __init__(self, inplace=False):
         super(InplaceFunction, self).__init__()
         self.inplace = inplace
+

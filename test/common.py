@@ -16,18 +16,20 @@ def get_gpu_type(t):
     return getattr(torch.cuda, t.__name__)
 
 
-def to_gpu(obj, tensor_type=None):
+def to_gpu(obj, type_map={}):
     if torch.isTensor(obj):
-        if tensor_type:
-            return tensor_type(obj.size()).copy_(obj)
-        return get_gpu_type(type(obj))(obj.size()).copy_(obj)
+        t = type_map.get(type(obj), get_gpu_type(type(obj)))
+        return obj.clone().type(t)
     elif torch.isStorage(obj):
         return obj.new().resize_(obj.size()).copy_(obj)
     elif isinstance(obj, Variable):
         assert type(obj.creator) == Leaf
-        return Variable(obj.data.clone().type(tensor_type))
+        t = type_map.get(type(obj.data), get_gpu_type(type(obj.data)))
+        return Variable(obj.data.clone().type(t), requires_grad=obj.requires_grad)
     elif isinstance(obj, list):
-        return [to_gpu(o, tensor_type) for o in obj]
+        return [to_gpu(o, type_map) for o in obj]
+    elif isinstance(obj, tuple):
+        return tuple(to_gpu(o, type_map) for o in obj)
     else:
         return deepcopy(obj)
 

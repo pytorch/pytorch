@@ -2,7 +2,7 @@ import torch
 from torch.autograd import Function
 
 
-class LinearFunction(Function):
+class Linear(Function):
 
     def forward(self, input, weight, bias=None):
         if bias:
