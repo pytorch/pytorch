@@ -4,11 +4,11 @@ from torch.autograd import Variable
 from .module import Module
 
 # TODO: check contiguous in THNN
-class BatchNorm(Module):
-    expected_dim = 2
+# TODO: use separate backend functions?
+class _BatchNorm(Module):
 
     def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True):
-        super(BatchNorm, self).__init__()
+        super(_BatchNorm, self).__init__()
 
         self.affine = affine
         self.eps = eps
@@ -48,5 +48,14 @@ class BatchNorm(Module):
                 self.running_var, self.train, self.momentum, self.eps)(*args)
 
 
-class BatchNorm2d(BatchNorm):
+class BatchNorm1d(_BatchNorm):
+    expected_dim = 2
+
+
+class BatchNorm2d(_BatchNorm):
     expected_dim = 4
+
+
+class BatchNorm3d(_BatchNorm):
+    expected_dim = 5
+

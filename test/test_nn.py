@@ -1,18 +1,23 @@
 import math
 import torch
+import random
 import unittest
 from copy import deepcopy
+from itertools import repeat
 
 import torch.nn as nn
 from torch.autograd import Variable
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     module_tests, criterion_tests, TEST_CUDA, PRECISION
 
+
 class InputVariableMixin(object):
     def _get_input(self):
         input = TestBase._get_input(self)
         def map_variables(i):
-            if torch.isTensor(i):
+            if isinstance(i, Variable):
+                return i
+            elif torch.isTensor(i):
                 return Variable(i)
             else:
                 return type(i)(map_variables(elem) for elem in i)
@@ -40,7 +45,10 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
 
 
 class NewCriterionTest(InputVariableMixin, CriterionTest):
-    pass
+    # TODO: check that criterions don't ignore grad_output
+
+    def _get_target(self, target):
+        return Variable(target, requires_grad=False)
 
 
 class TestNN(NNTestCase):
@@ -53,12 +61,23 @@ class TestNN(NNTestCase):
         return input.grad
 
     def _forward_criterion(self, criterion, input, target):
-        return criterion(input, target).data[0]
+        if isinstance(input, tuple):
+            args = input + (target,)
+            output = criterion(*args)
+        else:
+            output = criterion(input, target)
+        return output.data[0]
 
     def _backward_criterion(self, criterion, input, target):
-        input.grad.zero_()
-        criterion(input, target).backward()
-        return input.grad
+        input_tuple = input if isinstance(input, tuple) else (input,)
+        for i in input_tuple:
+            i.grad.zero_()
+        args = input_tuple + (target,)
+        criterion(*args).backward()
+        if isinstance(input, tuple):
+            return tuple(map(lambda i: i.grad, input))
+        else:
+            return input.grad
 
     def _zero_grad_parameters(self, module):
         if hasattr(module, 'weight') and module.weight is not None:
@@ -147,7 +166,7 @@ class TestNN(NNTestCase):
         self.assertEqual(counter['backwards'], 7)
 
     def test_volatile(self):
-        module = nn.Conv2d(2, 5, ksize=3, pad=1)
+        module = nn.Conv2d(2, 5, kernel_size=3, padding=1)
         input = torch.randn(1, 2, 10, 10)
         x = Variable(input)
         y = Variable(input.clone(), volatile=True)
@@ -162,6 +181,100 @@ class TestNN(NNTestCase):
         self.assertFalse(vol_output.requires_grad)
         self.assertRaises(RuntimeError, lambda: vol_output.backward(torch.ones(1, 5, 10, 10)))
 
+    def _test_dropout(self, cls, input):
+        p = 0.2
+        input.fill_(1-p)
+
+        module = cls(p)
+        input_var = Variable(input)
+        output = module(input_var)
+        self.assertLess(abs(output.data.mean() - (1-p)), 0.05)
+        output.backward(input)
+        self.assertLess(abs(input_var.grad.mean() - (1-p)), 0.05)
+
+        module = cls(p, True)
+        input_var = Variable(input.clone())
+        output = module(input_var + 0)
+        self.assertLess(abs(output.data.mean() - (1-p)), 0.05)
+        output.backward(input)
+        self.assertLess(abs(input_var.grad.mean() - (1-p)), 0.05)
+
+        # Check that these don't raise errors
+        module.__repr__()
+        str(module)
+
+
+    def test_Dropout(self):
+        input = torch.Tensor(1000)
+        self._test_dropout(nn.Dropout, input)
+
+    def test_Dropout2d(self):
+        b = random.randint(1, 5)
+        w = random.randint(1, 5)
+        h = random.randint(1, 5)
+        num_features = 1000
+        input = torch.Tensor(num_features, b, w, h)
+        self._test_dropout(nn.Dropout2d, input)
+
+    def test_Dropout3d(self):
+        b = random.randint(1, 5)
+        w = random.randint(1, 5)
+        h = random.randint(1, 5)
+        d = random.randint(1, 2)
+        num_features = 1000
+        input = torch.Tensor(num_features, b, d, w, h)
+        self._test_dropout(nn.Dropout3d, input)
+
+    def _test_maxpool_indices(self, num_dim):
+        def expected_indices(dim):
+            if dim == 1:
+                return torch.DoubleTensor([1, 3])
+            lower_dim = expected_indices(dim-1)
+            lower_dim = lower_dim.view(1, *lower_dim.size())
+            return torch.cat((lower_dim+4, lower_dim+12), 0)
+
+        def expected_grad(dim):
+            if dim == 1:
+                return torch.DoubleTensor([0, 1, 0, 1])
+            lower_dim_grad = expected_grad(dim-1)
+            grad = lower_dim_grad.view(1, *lower_dim_grad.size())
+            zero = torch.zeros(grad.size())
+            return torch.cat((zero, grad, zero, grad), 0)
+
+        module_cls = getattr(nn, 'MaxPool{}d'.format(num_dim))
+        module = module_cls(2, return_indices=True)
+        numel = 4 ** num_dim
+        input = torch.range(1, numel).view(1, 1, *repeat(4, num_dim))
+        input_var = Variable(input)
+
+        # Check forward
+        output, indices = module(input_var)
+        if num_dim != 3:
+            expected_indices = expected_indices(num_dim)
+            expected_output = expected_indices + 1
+            self.assertEqual(indices.data.squeeze(), expected_indices)
+            self.assertEqual(output.data.squeeze(), expected_output)
+        self.assertTrue(output.requires_grad)
+        self.assertFalse(indices.requires_grad)
+
+        # Make sure backward works
+        grad_output = torch.DoubleTensor(output.size()).fill_(1)
+        output.backward(grad_output)
+        expected_grad = expected_grad(num_dim)
+        self.assertEqual(input_var.grad, expected_grad.viewAs(input))
+
+        # Make sure backward after changing indices will result in an error
+        indices.add_(1)
+        self.assertRaises(RuntimeError, lambda: output.backward(grad_output))
+
+    def test_MaxPool1d_indices(self):
+        self._test_maxpool_indices(1)
+
+    def test_MaxPool2d_indices(self):
+        self._test_maxpool_indices(2)
+
+    def test_MaxPool3d_indices(self):
+        self._test_maxpool_indices(3)
 
 
 def add_test(test):
@@ -176,6 +289,28 @@ def add_test(test):
 
 
 new_module_tests = [
+    dict(
+        module_name='Conv1d',
+        constructor_args=(4, 5, 3),
+        input_size=(2, 4, 10)
+    ),
+    dict(
+        module_name='Conv1d',
+        constructor_args=(4, 5, 3),
+        input_size=(2, 4, 10),
+        desc='stride'
+    ),
+    dict(
+        module_name='MaxPool1d',
+        constructor_args=(4,),
+        input_size=(2, 10, 4)
+    ),
+    dict(
+        module_name='MaxPool1d',
+        constructor_args=(4, 4),
+        input_size=(2, 10, 4),
+        desc='stride'
+    ),
     dict(
         module_name='Conv2d',
         constructor_args=(3, 4, (3, 3)),
@@ -192,6 +327,12 @@ new_module_tests = [
         constructor_args=(3, 4, (3, 3), (2, 2), (1, 1)),
         input_size=(2, 3, 6, 6),
         desc='padding'
+    ),
+    dict(
+        module_name='Conv2d',
+        constructor_args=(3, 2, (3, 3), (2, 2), (1, 1), (2, 2)),
+        input_size=(2, 3, 8, 8),
+        desc='dilated'
     ),
     dict(
         module_name='MaxPool2d',
@@ -215,21 +356,143 @@ new_module_tests = [
         input_size=(2, 3, 6, 6),
         desc='stride_pad',
     ),
+    dict(
+        module_name='LPPool2d',
+        constructor_args=(2, (2, 2), 2),
+        input_size=(1, 3, 7, 7)
+    ),
+    dict(
+        module_name='LPPool2d',
+        constructor_args=(1.5, 2),
+        input=torch.rand(1, 3, 7, 7),
+        desc='norm'
+    ),
+    dict(
+        module_name='ReflectionPad2d',
+        constructor_args=((1, 2, 3, 4),),
+        input_size=(2, 3, 8, 8)
+    ),
+    dict(
+        module_name='ReplicationPad2d',
+        constructor_args=((1, 2, 3, 4),),
+        input_size=(2, 3, 4, 4)
+    ),
+    dict(
+        module_name='Conv3d',
+        constructor_args=(3, 4, 2),
+        input_size=(2, 3, 3, 3, 3)
+    ),
+    dict(
+        module_name='Conv3d',
+        constructor_args=(3, 4, 2, 2),
+        input_size=(2, 3, 5, 5, 5),
+        desc='stride'
+    ),
+    dict(
+        module_name='Conv3d',
+        constructor_args=(3, 4, 2, 2, 1),
+        input_size=(2, 3, 5, 5, 5),
+        desc='stride_padding'
+    ),
+    dict(
+        module_name='FullConv3d',
+        constructor_args=(2, 3, (2, 2, 2)),
+        input_size=(1, 2, 4, 4, 4)
+    ),
+    dict(
+        module_name='MaxPool3d',
+        constructor_args=((2, 2, 2),),
+        input_size=(2, 3, 5, 5, 5)
+    ),
+    dict(
+        module_name='MaxPool3d',
+        constructor_args=(2, (2, 2, 2)),
+        input_size=(2, 3, 5, 5, 5),
+        desc='stride'
+    ),
+    dict(
+        module_name='MaxPool3d',
+        constructor_args=(2, 2, (1, 1, 1)),
+        input_size=(2, 3, 5, 5, 5),
+        desc='stride_padding'
+    ),
+    dict(
+        module_name='AvgPool3d',
+        constructor_args=((2, 2, 2),),
+        input_size=(2, 3, 4, 4, 4)
+    ),
+    dict(
+        module_name='AvgPool3d',
+        constructor_args=(2, (2, 2, 2)),
+        input_size=(2, 3, 5, 5, 5),
+        desc='stride'
+    ),
+    dict(
+        module_name='ReplicationPad3d',
+        constructor_args=((1, 2, 3, 4, 5, 6),),
+        input_size=(2, 3, 5, 5, 5)
+    ),
+    dict(
+        module_name='Embedding',
+        constructor_args=(4, 3),
+        input=Variable(
+            torch.randperm(2).repeatTensor(1, 2).long(),
+            requires_grad=False
+        ),
+        jacobian_input=False
+    ),
+    dict(
+        constructor=lambda: nn.FractionalMaxPool2d(2, output_ratio=0.5, _random_samples=torch.DoubleTensor(1, 3, 2).uniform_()),
+        input_size=(1, 3, 5, 5),
+        fullname='FractionalMaxPool2d_ratio',
+        test_cuda=False),
+    dict(
+        constructor=lambda: nn.FractionalMaxPool2d((2, 2), output_size=(4, 4), _random_samples=torch.DoubleTensor(1, 3, 2).uniform_()),
+        input_size=(1, 3, 7, 7),
+        fullname='FractionalMaxPool2d_size',
+        test_cuda=False
+    ),
 ]
 
+
 for test_params in module_tests + new_module_tests:
-    test_params = deepcopy(test_params)
     # TODO: CUDA is not implemented yet
-    name = test_params.pop('module_name')
-    test_params['constructor'] = getattr(nn, name)
+    if 'constructor' not in test_params:
+        name = test_params.pop('module_name')
+        test_params['constructor'] = getattr(nn, name)
     test = NewModuleTest(**test_params)
     add_test(test)
 for test_params in criterion_tests:
-    test_params = deepcopy(test_params)
     name = test_params.pop('module_name')
     test_params['constructor'] = getattr(nn, name)
     test = NewCriterionTest(**test_params)
     add_test(test)
+
+
+def make_unpooling_net(dim):
+    pool_module = getattr(nn, 'MaxPool{}d'.format(dim))
+    unpool_module = getattr(nn, 'MaxUnpool{}d'.format(dim))
+    class Net(nn.Container):
+
+        def __init__(self):
+            super(Net, self).__init__(
+                pool=pool_module(2, return_indices=True),
+                unpool=unpool_module(2)
+            )
+
+        def forward(self, input):
+            return self.unpool(*self.pool(input))
+    return Net
+
+
+add_test(NewModuleTest(
+    constructor=make_unpooling_net(2),
+    input_size=(1, 1, 8, 8),
+    fullname='MaxUnpool2d_net'))
+add_test(NewModuleTest(
+    constructor=make_unpooling_net(3),
+    input_size=(1, 1, 8, 8, 8),
+    fullname='MaxUnpool3d_net'))
 
 
 if __name__ == '__main__':

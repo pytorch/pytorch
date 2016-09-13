@@ -22,6 +22,7 @@ class Variable(object):
         self.creator = creator
         self.volatile = volatile
         self.dirty = False
+        self._requires_grad = None
         self._data = tensor
         self._grad = None
 
@@ -42,6 +43,8 @@ class Variable(object):
     def requires_grad(self):
         if self.volatile:
             return False
+        if self._requires_grad is not None:
+            return self._requires_grad
         return self.creator.requires_grad
 
     def mark_dirty(self):
@@ -55,6 +58,13 @@ class Variable(object):
 
     def __getitem__(self, key):
         return Index(key)(self)
+
+    def __deepcopy__(self, memo):
+        if isinstance(self.creator, Leaf):
+            return Variable(self.data.clone(), requires_grad=self.requires_grad,
+                    volatile=self.volatile)
+        raise RuntimeError("Only Variables created explicitly by the user "
+                "(graph leaves) support the deepcopy protocol at the moment")
 
     def backward(self, gradient=None):
         if self.volatile:
