@@ -24,7 +24,7 @@ void THNN_CudaSpatialConvolutionMM_updateOutput(THCState *state, THCudaTensor *i
   if (weight->nDimension == 4) {
     long s1 = weight->size[0];
     long s2 = weight->size[1] * weight->size[2] * weight->size[3];
-    weight = THCudaTensor_newWithStorage2d(state, weight->storage, 0, s1, -1, s2, -1);
+    weight = THCudaTensor_newWithStorage2d(state, weight->storage, weight->storageOffset, s1, -1, s2, -1);
     freeWeight = 1;
   }
 
@@ -155,7 +155,7 @@ void THNN_CudaSpatialConvolutionMM_updateGradInput(THCState *state, THCudaTensor
   if (weight->nDimension == 4) {
     long s1 = weight->size[0];
     long s2 = weight->size[1] * weight->size[2] * weight->size[3];
-    weight = THCudaTensor_newWithStorage2d(state, weight->storage, 0, s1, -1, s2, -1);
+    weight = THCudaTensor_newWithStorage2d(state, weight->storage, weight->storageOffset, s1, -1, s2, -1);
     freeWeight = 1;
   }
 
@@ -252,7 +252,7 @@ void THNN_CudaSpatialConvolutionMM_accGradParameters(THCState *state, THCudaTens
   if (gradWeight->nDimension == 4) {
     long s1 = gradWeight->size[0];
     long s2 = gradWeight->size[1] * gradWeight->size[2] * gradWeight->size[3];
-    gradWeight = THCudaTensor_newWithStorage2d(state, gradWeight->storage, 0, s1, -1, s2, -1);
+    gradWeight = THCudaTensor_newWithStorage2d(state, gradWeight->storage, gradWeight->storageOffset, s1, -1, s2, -1);
     freeWeight = 1;
   }
 
