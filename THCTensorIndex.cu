@@ -8,6 +8,7 @@
 #include "THCReduce.cuh"
 #include "THCDeviceUtils.cuh"
 #include <algorithm> // for std::min
+#include <cuda_fp16.h>
 
 // We prefer this kernel to avoid reloading index points if the number
 // of indices is a small number.
@@ -92,6 +93,124 @@ __global__ void indexCopyLargeIndex(TensorInfo<T, IndexType> dst,
       dst.data[dstOffset] = src.data[srcOffset];
     }
   }
+}
+
+template <typename T, size_t n>
+struct AtomicAddIntegerImpl;
+
+template<typename T>
+struct AtomicAddIntegerImpl<T, 1> {
+  __device__ void operator()(T *address, T val) {
+    unsigned int * address_as_ui =
+        (unsigned int *) (address - ((size_t)address & 3));
+    unsigned int old = *address_as_ui, sum, newval, assumed;
+    unsigned int selectors[] = {0x3214, 0x3240, 0x3410, 0x4210};
+    unsigned int sel = selectors[(size_t)address & 3];
+
+    do {
+      assumed = old;
+      sum = val +  (T)__byte_perm(old, 0, (size_t)address & 3 | 0x4440);
+      newval = __byte_perm(old, sum, sel);
+      old = atomicCAS(address_as_ui, assumed, newval);
+    } while (assumed != old);
+  }
+};
+
+template<typename T>
+struct AtomicAddIntegerImpl<T, 2> {
+  __device__ void operator()(T *address, T val) {
+    unsigned int * address_as_ui =
+        (unsigned int *) ((char *)address - ((size_t)address & 2));
+    unsigned int old = *address_as_ui, sum, newval, assumed;
+
+    do {
+      assumed = old;
+      sum = val +  (T)__byte_perm(old, 0, ((size_t)address & 2) ? 0x4432 : 0x4410);
+      newval = __byte_perm(old, sum, ((size_t)address & 2) ? 0x5410 : 0x3254);
+      old = atomicCAS(address_as_ui, assumed, newval);
+    } while (assumed != old);
+  }
+};
+
+template<typename T>
+struct AtomicAddIntegerImpl<T, 4> {
+  __device__ void operator()(T *address, T val) {
+    unsigned int * address_as_ui = (unsigned int *) (address);
+    unsigned int old = *address_as_ui, newval, assumed;
+
+    do {
+      assumed = old;
+      newval = val +  (T)old;
+      old = atomicCAS(address_as_ui, assumed, newval);
+    } while (assumed != old);
+  }
+};
+
+template<typename T>
+struct AtomicAddIntegerImpl<T, 8> {
+  __device__ void operator()(T *address, T val) {
+    unsigned long long * address_as_ui = (unsigned long long *) (address);
+    unsigned long long old = *address_as_ui, newval, assumed;
+
+    do {
+      assumed = old;
+      newval = val +  (T)old;
+      old = atomicCAS(address_as_ui, assumed, newval);
+    } while (assumed != old);
+  }
+};
+
+__device__ void atomicAdd(unsigned char *address, unsigned char val) {
+  AtomicAddIntegerImpl<unsigned char, sizeof(unsigned char)>()(address, val);
+}
+
+__device__ void atomicAdd(char *address, char val) {
+  AtomicAddIntegerImpl<char, sizeof(char)>()(address, val);
+}
+
+__device__ void atomicAdd(short *address, short val) {
+  AtomicAddIntegerImpl<short, sizeof(short)>()(address, val);
+}
+
+__device__ void atomicAdd(long *address, long val) {
+  AtomicAddIntegerImpl<long, sizeof(long)>()(address, val);
+}
+
+#ifdef CUDA_HALF_INSTRUCTIONS
+#define HALF_ADD(a, b) __hadd(a, b)
+#else
+#define HALF_ADD(a, b) __float2half(__half2float(a) + __half2float(b))
+#endif
+
+__device__ void atomicAdd(half *address, half val) {
+  unsigned int * address_as_ui =
+      (unsigned int *) ((char *)address - ((size_t)address & 2));
+  unsigned int old = *address_as_ui, assumed;
+  half hsum;
+
+  do {
+    // byte_perm doesn't work with halfs, let's manually memcpy
+    assumed = old;
+    half *hp = (half *)((char *)(&old) + ((size_t)address & 2));
+    hsum = HALF_ADD(val, *hp);
+    memcpy(hp, &hsum, sizeof(half));
+    old = atomicCAS(address_as_ui, assumed, old);
+   } while (assumed != old);
+}
+
+// from CUDA C Programmic Guide
+__device__  void atomicAdd(double *address, double val) {
+  unsigned long long int* address_as_ull = (unsigned long long int*)address;
+  unsigned long long int old = *address_as_ull, assumed;
+
+  do {
+    assumed = old;
+    old = atomicCAS(address_as_ull, assumed,
+                    __double_as_longlong(val +
+                    __longlong_as_double(assumed)));
+
+    // Note: uses integer comparison to avoid hang in case of NaN (since NaN != NaN)
+  } while (assumed != old);
 }
 
 // We prefer this kernel to avoid reloading index points if the number
