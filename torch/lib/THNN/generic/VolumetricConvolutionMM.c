@@ -2,6 +2,20 @@
 #define TH_GENERIC_FILE "generic/VolumetricConvolutionMM.c"
 #else
 
+static int THNN_(view_weight)(THTensor **_weight)
+{
+  THTensor *weight = *_weight;
+  THArgCheck(weight->nDimension == 2 || weight->nDimension == 5, 4,
+          "weight tensor should be 2D or 5D - got %dD", weight->nDimension);
+  if (weight->nDimension == 5) {
+    long s1 = weight->size[0];
+    long s2 = weight->size[1] * weight->size[2] * weight->size[3] * weight->size[4];
+    *_weight = THTensor_(newWithStorage2d)(weight->storage, weight->storageOffset, s1, -1, s2, -1);
+    return 1;
+  }
+  return 0;
+}
+
 /* note: due to write issues, this one cannot be parallelized as well as unfolded_copy */
 static void THNN_(unfolded_acc_vol)(
           THTensor *finput,
@@ -243,6 +257,7 @@ void THNN_(VolumetricConvolutionMM_updateOutput)(
   int dimt = 1;
   int dimh = 2;
   int dimw = 3;
+  int freeWeight = 0;
 
   long nInputPlane;
   long inputDepth;
@@ -282,6 +297,8 @@ void THNN_(VolumetricConvolutionMM_updateOutput)(
       nOutputPlane, outputDepth, outputHeight, outputWidth
     );
   }
+
+  freeWeight = THNN_(view_weight)(&weight);
 
   if (input->nDimension == 4)
   {
@@ -326,6 +343,9 @@ void THNN_(VolumetricConvolutionMM_updateOutput)(
       THTensor_(free)(finput_t);
     }
   }
+
+  if (freeWeight)
+    THTensor_(free)(weight);
 }
 
 static void THNN_(VolumetricConvolutionMM_updateGradInput_frame)(
@@ -382,23 +402,20 @@ void THNN_(VolumetricConvolutionMM_updateGradInput)(
           int pW,
           int pH)
 {
-  // number of input/output planes and kernel size is indirectly defined by the weight tensor
-  THArgCheck(weight->nDimension == 2, 4,
-    "2D weight tensor is expected (nOutputPlane x (nInputPlane * kT * kH * kW))"
-  );
-
   int nOutputPlane = (int)weight->size[0];
 
   THArgCheck(nOutputPlane == gradOutput->size[input->nDimension == 5 ? 1 : 0], 1,
     "Number of output features is not equal to nOutputPlane"
   );
 
+  int freeWeight = THNN_(view_weight)(&weight);
+
   THTensor_(resizeAs)(gradInput, input);
   THTensor_(resizeAs)(fgradInput, finput);
   // depending on the BLAS library, fgradInput (result tensor) might
   // be left uninitialized on zero alpha, which might lead to weird behavior
   // hence, to be safe, zero it
-  THTensor_(zero)(fgradInput);  
+  THTensor_(zero)(fgradInput);
   THTensor_(transpose)(weight, weight, 0, 1);
 
   if (input->nDimension == 4)
@@ -436,6 +453,9 @@ void THNN_(VolumetricConvolutionMM_updateGradInput)(
   }
 
   THTensor_(transpose)(weight, weight, 0, 1);
+
+  if (freeWeight)
+    THTensor_(free)(weight);
 }
 
 static void THNN_(VolumetricConvolutionMM_accGradParameters_frame)(
@@ -479,10 +499,7 @@ void THNN_(VolumetricConvolutionMM_accGradParameters)(
           THTensor *finput,
           real scale)
 {
-  THArgCheck(gradWeight->nDimension == 2, 4,
-    "2D gradWeight tensor is expected (nOutputPlane x (nInputPlane * kT * kH * kW))"
-  );
-
+  int freeWeight;
   int nOutputPlane = (int)gradWeight->size[0];
 
   THArgCheck(gradBias->nDimension == 1 && gradBias->size[0] == nOutputPlane, 5,
@@ -492,6 +509,8 @@ void THNN_(VolumetricConvolutionMM_accGradParameters)(
   THArgCheck(nOutputPlane == gradOutput->size[input->nDimension == 5 ? 1 : 0], 3,
     "Number of output features is not equal to nOutputPlane"
   );
+
+  freeWeight = THNN_(view_weight)(&gradWeight);
 
   if (input->nDimension == 4)   // non-batch mode
   {
@@ -513,6 +532,9 @@ void THNN_(VolumetricConvolutionMM_accGradParameters)(
       THTensor_(free)(finput_t);
     }
   }
+
+  if (freeWeight)
+    THTensor_(free)(gradWeight);
 }
 
 #endif

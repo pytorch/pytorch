@@ -24,3 +24,7 @@ class Linear(Module):
 
     def forward(self, input):
         return self._backend.Linear()(input, self.weight, self.bias)
+
+
+# TODO: Bilinear
+# TODO: PartialLinear - maybe in sparse?

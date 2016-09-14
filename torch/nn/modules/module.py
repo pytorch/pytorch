@@ -66,7 +66,10 @@ class Module(object):
         result = self.forward(*input)
         for hook in self.forward_hooks.values():
             hook(self, input, result)
-        fn = result.creator
+        if isinstance(result, tuple):
+            fn = result[0].creator
+        else:
+            fn = result.creator
         for key, hook in self.backward_hooks.items():
             fn.register_hook(key, lambda gi,go,hook=hook: hook(self, gi, go))
         return result

@@ -8,6 +8,7 @@ from common import TestCase, to_gpu, get_numerical_jacobian, iter_tensors, conti
 try:
     import torch.cuda
     import torch.legacy.cunn
+    import torch.nn.cuda
     TEST_CUDA = True
 except Exception:
     # TODO: catch ImportError once it works with "setup.py develop"
@@ -46,7 +47,7 @@ module_tests = [
         check_inplace=True
     ),
     dict(
-        module_name='HardTanh',
+        module_name='Hardtanh',
         input_size=(3, 2, 5),
         reference_fn=lambda i,_: i.clamp(-1, 1)
     ),
@@ -69,13 +70,13 @@ module_tests = [
         reference_fn=lambda i,_: torch.exp(i).div(torch.exp(i).sum(1).expandAs(i))
     ),
     dict(
-        module_name='BatchNorm',
+        module_name='BatchNorm1d',
         constructor_args=(10,),
         input_size=(4, 10),
         desc='affine'
     ),
     dict(
-        module_name='BatchNorm',
+        module_name='BatchNorm1d',
         constructor_args=(10, 1e-3, 0.3, False),
         input_size=(4, 10),
         desc='not_affine'
@@ -98,31 +99,235 @@ module_tests = [
         desc='no_affine',
     ),
     dict(
+        module_name='BatchNorm3d',
+        constructor_args=(3,),
+        input_size=(2, 3, 4, 4, 4)
+    ),
+    dict(
+        module_name='BatchNorm3d',
+        constructor_args=(3, 1e-3, 0.7),
+        input_size=(2, 3, 4, 4, 4),
+        desc='momentum'
+    ),
+    dict(
+        module_name='BatchNorm3d',
+        constructor_args=(3, 1e-3, 0.7, False),
+        input_size=(2, 3, 4, 4, 4),
+        desc='no_affine'
+    ),
+    dict(
         module_name='LogSoftmax',
         input_size=(10, 20),
         reference_fn=lambda i,_: torch.exp(i).div_(torch.exp(i).sum(1).expand(10, 20)).log_()
+    ),
+    dict(
+        module_name='ELU',
+        constructor_args=(2.,),
+        input_size=(3, 2, 5),
+        check_inplace=True
+    ),
+    # TODO: reference function
+    dict(
+        module_name='Hardshrink',
+        constructor_args=(2.,),
+        input_size=(4, 3, 2, 4)
+    ),
+    dict(
+        module_name='LeakyReLU',
+        input_size=(3, 2, 5),
+        check_inplace=True
+    ),
+    dict(
+        module_name='LeakyReLU',
+        constructor_args=(0.5,),
+        input_size=(3, 2, 5),
+        check_inplace=True,
+        desc='with_negval'
+    ),
+    dict(
+        module_name='LogSigmoid',
+        input_size=(2, 3, 4),
+        reference_fn=lambda i,_: i.sigmoid().log()
+    ),
+    dict(
+        module_name='Softplus',
+        input_size=(10, 20),
+        reference_fn=lambda i,_: torch.log(1 + torch.exp(i))
+    ),
+    dict(
+        module_name='Softplus',
+        constructor_args=(2,),
+        input_size=(10, 20),
+        reference_fn=lambda i,_: 1. / 2. * torch.log(1 + torch.exp(2 * i)),
+        desc='beta'
+    ),
+    dict(
+        module_name='Softshrink',
+        input_size=(3, 2, 5)
+    ),
+    dict(
+        module_name='Softshrink',
+        constructor_args=(1,),
+        input_size=(3, 2, 5),
+        desc='lambda'
+    ),
+    dict(
+        module_name='CrossMapLRN2d',
+        constructor_args=(5, 5e-3, 1e-3, 2),
+        input_size=(2, 3, 6, 6)
+    ),
+    dict(
+        module_name='PReLU',
+        input_size=(2, 3, 4, 5)
+    ),
+    dict(
+        module_name='PReLU',
+        constructor_args=(3,),
+        input_size=(2, 3, 4, 5),
+        desc='multiparam'
+    ),
+    dict(
+        module_name='Softsign',
+        input_size=(3, 2, 5),
+        reference_fn=lambda i,_: i.div(1 + torch.abs(i))
+    ),
+    dict(
+        module_name='Softmin',
+        input_size=(10, 20)
+    ),
+    dict(
+        module_name='Tanhshrink',
+        input_size=(2, 3, 4, 5)
     ),
 ]
 
 
 criterion_tests = [
-    dict(module_name='AbsCriterion',
+    dict(module_name='L1Loss',
         input_size=(2, 3, 4),
         target=torch.randn(2, 3, 4),
         reference_fn=lambda i,t,_: 1./i.numel() * \
             sum((a-b).abs().sum() for a,b in zip(i, t))
     ),
     dict(
-        module_name='ClassNLLCriterion',
+        module_name='NLLLoss',
         input=torch.rand(15, 10).log(),
         target=torch.Tensor(15).uniform_().mul(10).floor().long(),
     ),
     dict(
-        module_name='ClassNLLCriterion',
+        module_name='NLLLoss',
         constructor_args=(torch.rand(10),),
         input=torch.rand(15, 10).add(1e-2).log(),
         target=torch.Tensor(15).uniform_().mul(10).floor().long(),
         desc='weights',
+    ),
+    dict(
+        module_name='KLDivLoss',
+        input=torch.rand(10, 10).log(),
+        target=torch.rand(10, 10)
+    ),
+    dict(
+        module_name='MSELoss',
+        input=torch.randn(2, 3, 4, 5),
+        target=torch.randn(2, 3, 4, 5),
+        reference_fn=lambda i,t,_: (i-t).abs().pow(2).sum() / i.numel()
+    ),
+    dict(
+        module_name='BCELoss',
+        input=torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
+        target=torch.randn(15, 10).gt(0).double()
+    ),
+    dict(
+        module_name='BCELoss',
+        constructor_args=(torch.rand(10),),
+        input=torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
+        target=torch.randn(15, 10).gt(0).double(),
+        desc='weights'
+    ),
+    dict(
+        module_name='CELoss',
+        input=torch.randn(15, 10),
+        target=torch.Tensor(15).uniform_().mul(10).floor().long()
+    ),
+    dict(
+        module_name='CELoss',
+        constructor_args=(torch.rand(10),),
+        input=torch.randn(15, 10),
+        target=torch.Tensor(15).uniform_().mul(10).floor().long(),
+        desc='weights'
+    ),
+    dict(
+        module_name='NLLLoss2d',
+        input_size=(2, 3, 5, 5),
+        target=torch.rand(2, 5, 5).mul(3).floor().long()
+    ),
+    dict(
+        module_name='HingeEmbeddingLoss',
+        input=torch.rand(10),
+        target=torch.randn(10).gt(0).double().mul_(2).sub(1)
+    ),
+    dict(
+        module_name='HingeEmbeddingLoss',
+        constructor_args=(0.5,),
+        input=torch.rand(10),
+        target=torch.randn(10).gt(0).double().mul_(2).sub(1),
+        desc='margin'
+    ),
+    dict(
+        module_name='MultiLabelMarginLoss',
+        input_size=(5, 10),
+        target=torch.rand(5, 10).mul(10).floor()
+    ),
+    dict(
+        module_name='MultiLabelSoftMarginLoss',
+        input_size=(5, 10),
+        target=torch.rand(5, 10).mul(2).floor()
+    ),
+    dict(
+        module_name='MultiLabelSoftMarginLoss',
+        constructor_args=(torch.rand(10),),
+        input_size=(5, 10),
+        target=torch.rand(5, 10).mul(2).floor(),
+        desc='weights'
+    ),
+    dict(
+        module_name='MultiMarginLoss',
+        input_size=(5, 10),
+        target=torch.rand(5).mul(8).floor()
+    ),
+    dict(
+        module_name='SmoothL1Loss',
+        input_size=(5, 10),
+        target=torch.randn(5, 10)
+    ),
+    dict(
+        module_name='SoftMarginLoss',
+        input_size=(5, 5),
+        target=torch.randn(5, 5).sign()
+    ),
+    dict(
+        module_name='CosineEmbeddingLoss',
+        input=(torch.rand(15, 10), torch.rand(15, 10)),
+        target=torch.randn(15).sign()
+    ),
+    dict(
+        module_name='CosineEmbeddingLoss',
+        constructor_args=(0.7,),
+        input=(torch.rand(15, 10), torch.rand(15, 10)),
+        target=torch.randn(15).sign(),
+        desc='margin'
+    ),
+    dict(
+        module_name='MarginRankingLoss',
+        input=(torch.randn(50).mul(10), torch.randn(50).mul(10)),
+        target=torch.randn(50).sign()
+    ),
+    dict(
+        module_name='MarginRankingLoss',
+        constructor_args=(2,),
+        input=(torch.randn(50).mul(10), torch.randn(50).mul(10)),
+        target=torch.randn(50).sign(),
+        desc='margin'
     ),
 ]
 
@@ -176,7 +381,8 @@ class NNTestCase(TestCase):
             if jacobian_parameters:
                 self._zero_grad_parameters(module)
             # Variables will accumulate gradient from multiple steps
-            self._zero_grad_input(input)
+            if jacobian_input:
+                self._zero_grad_input(input)
             d_input = self._backward(module, input, output, d_out)
 
             if jacobian_input:
@@ -232,7 +438,6 @@ class NNTestCase(TestCase):
         self._forward_criterion(criterion, input, target)
         analytical_d_x = self._backward_criterion(criterion, input, target)
         numerical_d_x = deepcopy(analytical_d_x)
-
 
         input_t = iter_tensors(input)
         numerical_t = iter_tensors(numerical_d_x)
@@ -332,7 +537,8 @@ class ModuleTest(TestBase):
             raise unittest.SkipTest('Excluded from CUDA tests')
         try:
             cpu_input = self._get_input()
-            gpu_input = to_gpu(cpu_input, tensor_type=torch.cuda.FloatTensor)
+            type_map = {torch.DoubleTensor: torch.cuda.FloatTensor}
+            gpu_input = to_gpu(cpu_input, type_map=type_map)
 
             cpu_module = self.constructor(*self.constructor_args)
             gpu_module = self.constructor(*self.constructor_args).cuda()
@@ -373,8 +579,11 @@ class ModuleTest(TestBase):
 class CriterionTest(TestBase):
     def __init__(self, *args, **kwargs):
         super(CriterionTest, self).__init__(*args, **kwargs)
-        self.target = kwargs.get('target', None)
+        self.target = self._get_target(kwargs['target'])
         self.should_test_cuda = kwargs.get('test_cuda', True)
+
+    def _get_target(self, target):
+        return target
 
     def __call__(self, test_case):
         module = self.constructor(*self.constructor_args)
@@ -386,8 +595,11 @@ class CriterionTest(TestBase):
 
         if self.reference_fn is not None:
             out = test_case._forward_criterion(module, input, self.target)
+            target = self.target
+            if isinstance(target, Variable):
+                target = target.data
             expected_out = self.reference_fn(deepcopy(self._unpack_input(input)),
-                    deepcopy(self.target), module)
+                    deepcopy(target), module)
             test_case.assertEqual(out, expected_out)
 
         test_case.check_criterion_jacobian(module, input, self.target)
@@ -397,10 +609,14 @@ class CriterionTest(TestBase):
             raise unittest.SkipTest('Excluded from CUDA tests')
         try:
             cpu_input = self._get_input()
-            gpu_input = to_gpu(cpu_input, tensor_type=torch.cuda.FloatTensor)
+            type_map = {
+                torch.DoubleTensor: torch.cuda.FloatTensor,
+                torch.LongTensor: torch.cuda.FloatTensor
+            }
+            gpu_input = to_gpu(cpu_input, type_map=type_map)
 
             cpu_target = self.target
-            gpu_target = to_gpu(self.target, tensor_type=torch.cuda.FloatTensor)
+            gpu_target = to_gpu(self.target, type_map=type_map)
 
             cpu_module = self.constructor(*self.constructor_args)
             gpu_module = self.constructor(*self.constructor_args).cuda()

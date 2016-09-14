@@ -157,7 +157,7 @@ PyObject * THCPModule_getDriverVersion(PyObject *self)
     PyErr_Format(PyExc_RuntimeError,
                     "Error calling cudaDriverGetVersion: %d %s",
                     err, cudaGetErrorString(err));
-    return false;
+    return NULL;
   }
   return PyLong_FromLong((long) driverVersion);
 }
