@@ -12,13 +12,13 @@ The LogSoftmax formulation can be simplified as
 ### Returns
     a Tensor of the same dimension and shape as the input
 
-### Input Shape
-\[ : , :\]  \(2D Tensor, any size\)
+### Expected Shape
+       | Shape | Description 
+------ | ----- | ------------
+ input | [ * , * ]  | 2D Tensor of any size
+output | Same  | Output has the same shape as input
 
-### Output Shape
-Same as input shape
-
-<img src="logsoftmax.png" >
+<img src="image/logsoftmax.png" >
 
 ```python
 m = nn.LogSoftmax()
@@ -40,13 +40,13 @@ inplace |  | can optionally do the operation in-place
 ### Returns
     a Tensor of the same dimension and shape as the input
 
-### Input Shape
-Tensor of any size and dimension
+### Expected Shape
+       | Shape | Description 
+------ | ----- | ------------
+ input | Any  | Tensor of any size and dimension
+output | Same  | Output has the same shape as input
 
-### Output Shape
-Same as input shape
-
-<img src="relu.png" >
+<img src="image/relu.png" >
 
 ```python
 m = nn.ReLU()
@@ -62,13 +62,13 @@ Applies element-wise LogSigmoid(x) = log( 1 / (1 + exp(-x_i)))
 ### Returns
     a Tensor of the same dimension and shape as the input
 
-### Input Shape
-Tensor of any size and dimension
+### Expected Shape
+       | Shape | Description 
+------ | ----- | ------------
+ input | Any  | Tensor of any size and dimension
+output | Same  | Output has the same shape as input
 
-### Output Shape
-Same as input shape
-
-<img src="logsigmoid.png" >
+<img src="image/logsigmoid.png" >
 
 ```python
 m = nn.LogSigmoid()
@@ -97,13 +97,13 @@ init | 0.25 | the initial value of "a".
 ### Returns
     a Tensor of the same dimension and shape as the input
 
-### Input Shape
-Tensor of any size and dimension
+### Expected Shape
+       | Shape | Description 
+------ | ----- | ------------
+ input | Any  | Tensor of any size and dimension
+output | Same  | Output has the same shape as input
 
-### Output Shape
-Same as input shape
-
-<img src="prelu.png" >
+<img src="image/prelu.png" >
 
 ```python
 m = nn.PReLU()
@@ -122,11 +122,11 @@ apply Softmax to each location [Channels, h_i, w_j]
 ### Returns
     a Tensor of the same dimension and shape as the input
 
-### Input Shape
-\[ : , : , : , : \] \(4D Tensor, any size\)
-
-### Output Shape
-Same as input shape
+### Expected Shape
+       | Shape | Description 
+------ | ----- | ------------
+ input | [ * , * , * , * ]  | 4D Tensor of any size
+output | Same  | Output has the same shape as input
 
 ```python
 m = nn.Softmax2d()
@@ -149,13 +149,13 @@ inplace |  | can optionally do the operation in-place
 ### Returns
     a Tensor of the same dimension and shape as the input
 
-### Input Shape
-Tensor of any size and dimension
+### Expected Shape
+       | Shape | Description 
+------ | ----- | ------------
+ input | Any  | Tensor of any size and dimension
+output | Same  | Output has the same shape as input
 
-### Output Shape
-Same as input shape
-
-<img src="relu6.png" >
+<img src="image/relu6.png" >
 
 ```python
 m = nn.ReLU6()
@@ -171,13 +171,13 @@ Applies element-wise, Tanh(x) = (exp(x) - exp(-x)) / (exp(x) + exp(-x))
 ### Returns
     a Tensor of the same dimension and shape as the input
 
-### Input Shape
-Tensor of any size and dimension
+### Expected Shape
+       | Shape | Description 
+------ | ----- | ------------
+ input | Any  | Tensor of any size and dimension
+output | Same  | Output has the same shape as input
 
-### Output Shape
-Same as input shape
-
-<img src="tanh.png" >
+<img src="image/tanh.png" >
 
 ```python
 m = nn.Tanh()
@@ -204,13 +204,13 @@ threshold | 20 | values above this revert to a linear function.
 ### Returns
     a Tensor of the same dimension and shape as the input
 
-### Input Shape
-Tensor of any size and dimension
+### Expected Shape
+       | Shape | Description 
+------ | ----- | ------------
+ input | Any  | Tensor of any size and dimension
+output | Same  | Output has the same shape as input
 
-### Output Shape
-Same as input shape
-
-<img src="softplus.png" >
+<img src="image/softplus.png" >
 
 ```python
 m = nn.Softplus()
@@ -237,12 +237,11 @@ inplace |  | can optionally do the operation in-place
 ### Returns
     Tensor of same dimension and shape as the input
 
-### Input Shape
-Tensor of any size and dimension
-
-### Output Shape
-Same as input shape
-Examples:
+### Expected Shape
+       | Shape | Description 
+------ | ----- | ------------
+ input | Any  | Tensor of any size and dimension
+output | Same  | Output has the same shape as input
 
 ```python
 m = nn.Threshold(0.1, 20)
@@ -262,13 +261,13 @@ Softmin(x) = exp(-x_i - shift) / sum_j exp(-x_j - shift)
 ### Returns
     a Tensor of the same dimension and shape as the input
 
-### Input Shape
-\[ : , :\]  \(2D Tensor, any size\)
+### Expected Shape
+       | Shape | Description 
+------ | ----- | ------------
+ input | [ * , * ]  | 2D Tensor of any size
+output | Same  | Output has the same shape as input
 
-### Output Shape
-Same as input shape
-
-<img src="softmin.png" >
+<img src="image/softmin.png" >
 
 ```python
 m = nn.Softmin()
@@ -293,13 +292,13 @@ lambd | 0.5 | the lambda value for the Softshrink formulation.
 ### Returns
     a Tensor of the same dimension and shape as the input
 
-### Input Shape
-Tensor of any size and dimension
+### Expected Shape
+       | Shape | Description 
+------ | ----- | ------------
+ input | Any  | Tensor of any size and dimension
+output | Same  | Output has the same shape as input
 
-### Output Shape
-Same as input shape
-
-<img src="sshrink.png" >
+<img src="image/sshrink.png" >
 
 ```python
 m = nn.Softshrink()
@@ -322,13 +321,13 @@ inplace |  | can optionally do the operation in-place
 ### Returns
     a Tensor of the same dimension and shape as the input
 
-### Input Shape
-Tensor of any size and dimension
+### Expected Shape
+       | Shape | Description 
+------ | ----- | ------------
+ input | Any  | Tensor of any size and dimension
+output | Same  | Output has the same shape as input
 
-### Output Shape
-Same as input shape
-
-<img src="elu.png" >
+<img src="image/elu.png" >
 
 ```python
 m = nn.ELU()
@@ -353,13 +352,13 @@ lambd | 0.5 | the lambda value for the Hardshrink formulation.
 ### Returns
     a Tensor of the same dimension and shape as the input
 
-### Input Shape
-Tensor of any size and dimension
+### Expected Shape
+       | Shape | Description 
+------ | ----- | ------------
+ input | Any  | Tensor of any size and dimension
+output | Same  | Output has the same shape as input
 
-### Output Shape
-Same as input shape
-
-<img src="hshrink.png" >
+<img src="image/hshrink.png" >
 
 ```python
 m = nn.Hardshrink()
@@ -388,13 +387,13 @@ inplace |  | can optionally do the operation in-place
 ### Returns
     a Tensor of the same dimension and shape as the input
 
-### Input Shape
-Tensor of any size and dimension
+### Expected Shape
+       | Shape | Description 
+------ | ----- | ------------
+ input | Any  | Tensor of any size and dimension
+output | Same  | Output has the same shape as input
 
-### Output Shape
-Same as input shape
-
-<img src="htanh.png" >
+<img src="image/htanh.png" >
 
 ```python
 m = nn.HardTanh(-2, 2)
@@ -410,13 +409,13 @@ Applies element-wise, the function Softsign(x) = x / (1 + |x|)
 ### Returns
     a Tensor of the same dimension and shape as the input
 
-### Input Shape
-Tensor of any size and dimension
+### Expected Shape
+       | Shape | Description 
+------ | ----- | ------------
+ input | Any  | Tensor of any size and dimension
+output | Same  | Output has the same shape as input
 
-### Output Shape
-Same as input shape
-
-<img src="softsign.png" >
+<img src="image/softsign.png" >
 
 ```python
 m = nn.Softsign()
@@ -439,11 +438,11 @@ inplace |  | can optionally do the operation in-place
 ### Returns
     a Tensor of the same dimension and shape as the input
 
-### Input Shape
-Tensor of any size and dimension
-
-### Output Shape
-Same as input shape
+### Expected Shape
+       | Shape | Description 
+------ | ----- | ------------
+ input | Any  | Tensor of any size and dimension
+output | Same  | Output has the same shape as input
 
 ```python
 m = nn.LeakyReLU(0.1)
@@ -459,13 +458,13 @@ Applies the element-wise function sigmoid(x) = 1 / ( 1 + exp(-x))
 ### Returns
     a Tensor of the same dimension and shape as the input
 
-### Input Shape
-Tensor of any size and dimension
+### Expected Shape
+       | Shape | Description 
+------ | ----- | ------------
+ input | Any  | Tensor of any size and dimension
+output | Same  | Output has the same shape as input
 
-### Output Shape
-Same as input shape
-
-<img src="sigmoid.png" >
+<img src="image/sigmoid.png" >
 
 ```python
 m = nn.Sigmoid()
@@ -481,11 +480,11 @@ Applies element-wise, Tanhshrink(x) = x - Tanh(x)
 ### Returns
     a Tensor of the same dimension and shape as the input
 
-### Input Shape
-Tensor of any size and dimension
-
-### Output Shape
-Same as input shape
+### Expected Shape
+       | Shape | Description 
+------ | ----- | ------------
+ input | Any  | Tensor of any size and dimension
+output | Same  | Output has the same shape as input
 
 ```python
 m = nn.Tanhshrink()
@@ -507,13 +506,13 @@ Softmax is defined as f_i(x) = exp(x_i - shift) / sum_j exp(x_j - shift)
 ### Returns
     a Tensor of the same dimension and shape as the input
 
-### Input Shape
-\[: , :\] \(2D Tensor, any size\)
+### Expected Shape
+       | Shape | Description 
+------ | ----- | ------------
+ input | [ * , * ]  | 2D Tensor of any size
+output | Same  | Output has the same shape as input
 
-### Output Shape
-Same as input shape
-
-<img src="softmax.png" >
+<img src="image/softmax.png" >
 Notes:
     Note that this module doesn't work directly with NLLLoss,
     which expects the Log to be computed between the Softmax and itself.

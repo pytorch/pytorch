@@ -3,7 +3,7 @@ import gc
 import time
 import unittest
 import contextlib
-
+from sys import platform
 
 import torch
 import torch.multiprocessing as mp
@@ -146,6 +146,7 @@ class TestMultiprocessing(TestCase):
     def test_fd_pool(self):
         self._test_pool()
 
+    @unittest.skipIf(platform == "darwin", "file_system sharing strategy doesn't work in OSX")
     def test_fs_sharing(self):
         with fs_sharing():
             self._test_sharing()

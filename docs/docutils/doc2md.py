@@ -68,6 +68,21 @@ def unindent(lines):
     else:
         return [line[indent:] for line in lines]
 
+def escape_markdown(line):
+    line = line.replace('[', '\[').replace(']', '\]')
+    line = line.replace('(', '\(').replace(')', '\)')
+    line = line.replace('{', '\{').replace('}', '\}')
+    line = line.replace('\\', '\\\\')
+    line = line.replace('`', '\`')
+    line = line.replace('*', '\*')
+    line = line.replace('_', '\_')
+    line = line.replace('#', '\#')
+    line = line.replace('+', '\+')
+    line = line.replace('-', '\-')
+    line = line.replace('.', '\.')
+    line = line.replace('!', '\!')
+    return line
+
 def code_block(lines, language=''):
     """
     Mark the code segment for syntax highlighting.
@@ -121,7 +136,7 @@ _image_section = re.compile('^\s*Image:\s*')
 def is_image_check(line):
     return _image_section.match(line)
 
-_example_section = re.compile('^\s*Returns:\s*|^\s*Example:\s*')
+_example_section = re.compile('^\s*Returns:\s*|^\s*Examples:\s*')
 def is_example_check(line):
     return _example_section.match(line)
 
@@ -217,21 +232,21 @@ def _doc2md(lines, shiftlevel=0):
             #md += [line]
         elif is_inputshape_check(line):
             reset()
-            md += ['']
-            md += ['#' * (shiftlevel+2) + ' Input Shape']
-            shape = re.findall(r'\s*Input\sShape:\s*(.*?)\s*$', line)
-            md += [shape[0].replace('[', '\[').replace(']', '\]').replace('(', '\(').replace(')', '\)')]
+            inputshape = re.findall(r'\s*Input\sShape:\s*(.*)\s*:\s*(.*)\s*$', line)[0]
         elif is_outputshape_check(line):
             reset()
+            outputshape = re.findall(r'\s*Output\sShape:\s*(.*)\s*:\s*(.*)\s*$', line)[0]
             md += ['']
-            md += ['#' * (shiftlevel+2) + ' Output Shape']
-            shape = re.findall(r'\s*Output\sShape:\s*(.*?)\s*$', line)
-            md += [shape[0].replace('[', '\[').replace(']', '\]').replace('(', '\(').replace(')', '\)')]
+            md += ['#' * (shiftlevel+2) + ' Expected Shape']
+            md += ['       | Shape | Description ']
+            md += ['------ | ----- | ------------']
+            md += [' input | ' + inputshape[0] + ' | ' + inputshape[1]]
+            md += ['output | ' + outputshape[0] + ' | ' + outputshape[1]]
         elif is_image_check(line):
             reset()
             md += ['']
             filename = re.findall(r'\s*Image:\s*(.*?)\s*$', line)
-            md += ['<img src="' + filename[0] + '" >']
+            md += ['<img src="image/' + filename[0] + '" >']
         elif _doc2md.is_code == False and trimmed.startswith('>>> '):
             reset()
             _doc2md.is_code = True
