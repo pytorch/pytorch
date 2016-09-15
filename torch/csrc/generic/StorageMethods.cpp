@@ -405,6 +405,15 @@ PyObject * THPStorage_(_sharedFd)(THPStorage *self)
 }
 #endif
 
+#ifdef THC_GENERIC_FILE
+PyObject * THPStorage_(getDevice)(THPStorage *self)
+{
+  HANDLE_TH_ERRORS
+  return PyLong_FromLong(THCStorage_(getDevice)(LIBRARY_STATE self->cdata));
+  END_HANDLE_TH_ERRORS
+}
+#endif
+
 PyObject * THPStorage_(_setCdata)(THPStorage *self, PyObject *new_cdata)
 {
   HANDLE_TH_ERRORS
@@ -438,6 +447,9 @@ static PyMethodDef THPStorage_(methods)[] = {
   {"_get_shared_fd", (PyCFunction)THPStorage_(_sharedFd), METH_NOARGS, NULL},
   {"_shared_decref", (PyCFunction)THPStorage_(_sharedDecref), METH_NOARGS, NULL},
   {"_shared_incref", (PyCFunction)THPStorage_(_sharedIncref), METH_NOARGS, NULL},
+#endif
+#ifdef THC_GENERIC_FILE
+  {"getDevice", (PyCFunction)THPStorage_(getDevice), METH_NOARGS, NULL},
 #endif
   {"_set_cdata", (PyCFunction)THPStorage_(_setCdata), METH_O, NULL},
   {NULL}

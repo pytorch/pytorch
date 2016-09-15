@@ -1,5 +1,6 @@
 import torch
 from . import TensorPrinting
+from ._utils import _type
 from functools import reduce
 from itertools import chain
 import sys
@@ -25,43 +26,29 @@ class _TensorBase(object):
     def new(self, *args, **kwargs):
         return self.__class__(*args, **kwargs)
 
-    def type(self, t=None):
-        if isinstance(t, str) or t is None:
-            current = self.__module__ + '.' + self.__class__.__name__
-            if t is None:
-                return current
-            if t == current:
-                return self
-            _, _, typename = t.partition('.')
-            return torch._import_dotted_name(t)(self.size()).copy_(self)
-        else:
-            if t == type(self):
-                return self
-            return t(self.size()).copy_(self)
-
     def typeAs(self, t):
         return self.type(t.type())
 
     def double(self):
-        return self.type(torch.DoubleTensor)
+        return self.type(type(self).__module__ + '.DoubleTensor')
 
     def float(self):
-        return self.type(torch.FloatTensor)
+        return self.type(type(self).__module__ + '.FloatTensor')
 
     def long(self):
-        return self.type(torch.LongTensor)
+        return self.type(type(self).__module__ + '.LongTensor')
 
     def int(self):
-        return self.type(torch.IntTensor)
+        return self.type(type(self).__module__ + '.IntTensor')
 
     def short(self):
-        return self.type(torch.ShortTensor)
+        return self.type(type(self).__module__ + '.ShortTensor')
 
     def char(self):
-        return self.type(torch.CharTensor)
+        return self.type(type(self).__module__ + '.CharTensor')
 
     def byte(self):
-        return self.type(torch.ByteTensor)
+        return self.type(type(self).__module__ + '.ByteTensor')
 
     def copy_(self, other):
         torch._C._tensorCopy(self, other)
@@ -267,3 +254,6 @@ class _TensorBase(object):
 
     def __neg__(self):
         return self.neg()
+
+
+_TensorBase.type = _type

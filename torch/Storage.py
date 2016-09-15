@@ -1,4 +1,5 @@
 import torch
+from ._utils import _type
 
 
 class _StorageBase(object):
@@ -35,3 +36,27 @@ class _StorageBase(object):
 
     def tolist(self):
         return [v for v in self]
+
+    def double(self):
+        return self.type(type(self).__module__ + '.DoubleStorage')
+
+    def float(self):
+        return self.type(type(self).__module__ + '.FloatStorage')
+
+    def long(self):
+        return self.type(type(self).__module__ + '.LongStorage')
+
+    def int(self):
+        return self.type(type(self).__module__ + '.IntStorage')
+
+    def short(self):
+        return self.type(type(self).__module__ + '.ShortStorage')
+
+    def char(self):
+        return self.type(type(self).__module__ + '.CharStorage')
+
+    def byte(self):
+        return self.type(type(self).__module__ + '.ByteStorage')
+
+
+_StorageBase.type = _type

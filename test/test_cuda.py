@@ -280,6 +280,27 @@ class TestCuda(TestCase):
         q_copy[1].fill_(10)
         self.assertTrue(q_copy[3], torch.cuda.IntStorage(10).fill_(10))
 
+    def test_type_conversions(self):
+        x = torch.randn(5, 5)
+        self.assertIs(type(x.float()), torch.FloatTensor)
+        self.assertIs(type(x.cuda()), torch.cuda.DoubleTensor)
+        self.assertIs(type(x.cuda().float()), torch.cuda.FloatTensor)
+        self.assertIs(type(x.cuda().float().cpu()), torch.FloatTensor)
+        self.assertIs(type(x.cuda().float().cpu().int()), torch.IntTensor)
+
+        y = x.storage()
+        self.assertIs(type(y.float()), torch.FloatStorage)
+        self.assertIs(type(y.cuda()), torch.cuda.DoubleStorage)
+        self.assertIs(type(y.cuda().float()), torch.cuda.FloatStorage)
+        self.assertIs(type(y.cuda().float().cpu()), torch.FloatStorage)
+        self.assertIs(type(y.cuda().float().cpu().int()), torch.IntStorage)
+
+    @unittest.skipIf(torch.cuda.deviceCount() < 2, "only one GPU detected")
+    def test_type_conversions_same_gpu(self):
+        x = torch.randn(5, 5).cuda(1)
+        self.assertEqual(x.int().getDevice(), 1)
+
+
 for decl in tests:
     for t in types:
         tensor = t()
