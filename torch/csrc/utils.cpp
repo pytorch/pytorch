@@ -1,6 +1,7 @@
 #include <Python.h>
 #include <stdarg.h>
 #include <string>
+#include <vector>
 #include "THP.h"
 
 #include "generic/utils.cpp"
@@ -81,11 +82,17 @@ void THPUtils_setError(const char *format, ...)
 }
 
 
-void THPUtils_invalidArguments(PyObject *given_args, const char *expected_args_desc) {
-  static const std::string PREFIX = "Invalid arguments! Got ";
+void THPUtils_invalidArguments(PyObject *given_args, const char *function_name, size_t num_options, ...) {
+  std::vector<std::string> option_strings;
   std::string error_msg;
   error_msg.reserve(2000);
-  error_msg += PREFIX;
+  error_msg += function_name;
+  error_msg += " recieved an invalid combination of argument types - got ";
+  va_list option_list;
+  va_start(option_list, num_options);
+  for (size_t i = 0; i < num_options; i++)
+    option_strings.push_back(va_arg(option_list, const char*));
+  va_end(option_list);
 
   // TODO: assert that args is a tuple?
   Py_ssize_t num_args = PyTuple_Size(given_args);
@@ -97,12 +104,43 @@ void THPUtils_invalidArguments(PyObject *given_args, const char *expected_args_d
       PyObject *arg = PyTuple_GET_ITEM(given_args, i);
       if (i > 0)
         error_msg += ", ";
-      error_msg += Py_TYPE(arg)->tp_name;
+      std::string type_name = Py_TYPE(arg)->tp_name;
+      if (type_name.find("Storage") != std::string::npos ||
+              type_name.find("Tensor") != std::string::npos) {
+        PyObject *module_name = PyObject_GetAttrString(arg, "__module__");
+#if PY_MAJOR_VERSION == 2
+        if (module_name && PyString_Check(module_name)) {
+          error_msg += PyString_AS_STRING(module_name);
+          error_msg += ".";
+        }
+#else
+        if (module_name && PyUnicode_Check(module_name)) {
+          THPObjectPtr module_name_bytes = PyUnicode_AsASCIIString(module_name);
+          if (module_name_bytes.get()) {
+            error_msg += PyBytes_AS_STRING(module_name_bytes.get());
+            error_msg += ".";
+          }
+        }
+#endif
+      }
+      error_msg += type_name;
     }
     error_msg += ")";
   }
-  error_msg += ", but expected ";
-  error_msg += expected_args_desc;
+  error_msg += ", but expected";
+
+  if (num_options == 1) {
+    error_msg += " ";
+    error_msg += option_strings[0];
+  } else {
+    error_msg += " one of:\n";
+    for (auto &option: option_strings) {
+      error_msg += " * ";
+      error_msg += option;
+      error_msg += "\n";
+    }
+  }
+
   PyErr_SetString(PyExc_ValueError, error_msg.c_str());
 }
 

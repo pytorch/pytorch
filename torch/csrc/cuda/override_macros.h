@@ -56,7 +56,7 @@
 #define THPTensor_(NAME) TH_CONCAT_4(THCP,Real,Tensor_,NAME)
 #define THPTensor_stateless_(NAME) TH_CONCAT_4(THCP,Real,Tensor_stateless_,NAME)
 #define THPTensor TH_CONCAT_3(THCP,Real,Tensor)
-#define THPTensorStr TH_CONCAT_STRING_3(Cuda,Real,Tensor)
+#define THPTensorStr TH_CONCAT_STRING_3(torch.cuda.,Real,Tensor)
 #define THPTensorType TH_CONCAT_3(THCP,Real,TensorType)
 #define THPTensorBaseStr TH_CONCAT_STRING_3(Cuda,Real,TensorBase)
 #define THPTensorClass TH_CONCAT_3(THCP,Real,TensorClass)

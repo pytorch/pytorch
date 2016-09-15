@@ -319,7 +319,7 @@ THStorage * THPStorage_(_newShared_filename)(PyObject *args)
   PyObject *_object_handle = PyTuple_GET_ITEM(args, 1);
   PyObject *_size = PyTuple_GET_ITEM(args, 2);
   if (!THPUtils_checkBytes(_manager_handle) || !THPUtils_checkBytes(_object_handle) || !THPUtils_checkLong(_size)) {
-    THPUtils_invalidArguments(args, "a handle (string/bytes) and storage size (int)");
+    THPUtils_invalidArguments(args, "_new_shared in file system mode", 1, "a handle (string/bytes) and storage size (int)");
     return NULL;
   }
   const char *manager_handle = THPUtils_bytesAsString(_manager_handle);
@@ -338,7 +338,7 @@ THStorage * THPStorage_(_newShared_fd)(PyObject *args)
   PyObject *_tmp_fd = PyTuple_GET_ITEM(args, 0);
   PyObject *_size = PyTuple_GET_ITEM(args, 1);
   if (!THPUtils_checkLong(_tmp_fd) || !THPUtils_checkLong(_size)) {
-    THPUtils_invalidArguments(args, "a handle (string/bytes) and storage size (int)");
+    THPUtils_invalidArguments(args, "_new_shared in file descriptor mode", 1, "a handle (string/bytes) and storage size (int)");
     return NULL;
   }
   int fd;

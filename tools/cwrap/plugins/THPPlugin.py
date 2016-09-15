@@ -74,7 +74,7 @@ PyObject * $name(PyObject *self, PyObject *args)
     int __argcount = args ? PyTuple_Size(args) : 0;
     $options
     } else {
-      THPUtils_invalidArguments(args, $expected_args);
+      THPUtils_invalidArguments(args, "$readable_name", $num_options, $expected_args);
       return NULL;
     }
     END_HANDLE_TH_ERRORS
@@ -122,6 +122,23 @@ PyObject * $name(PyObject *self, PyObject *args)
 
     RELEASE_ARG = Template("_${name}_guard.release();")
 
+    TYPE_NAMES = {
+        'THTensor*': '" THPTensorStr "',
+        'THStorage*': '" THPStorageStr "',
+        'THGenerator*': 'Generator',
+        'THLongStorage*': 'LongStorage',
+        'THLongTensor*': 'LongTensor',
+        'THBoolTensor*': 'ByteTensor',
+        'THIndexTensor*': 'LongTensor',
+        'THFloatTensor*': 'FloatTensor',
+        'THDoubleTensor*': 'DoubleTensor',
+        'long': 'int',
+        'real': 'float',
+        'double': 'float',
+        'accreal': 'float',
+        'bool': 'bool',
+    }
+
     def __init__(self):
         self.declarations = []
         self.stateless_declarations = []
@@ -136,13 +153,23 @@ PyObject * $name(PyObject *self, PyObject *args)
     def get_wrapper_template(self, declaration):
         arg_desc = []
         for option in declaration['options']:
-            option_desc = [arg['type'] + ' ' + arg['name'] for arg in option['arguments'] if not arg.get('ignore_check', False)]
+            option_desc = [self.TYPE_NAMES[arg['type']] + ' ' + arg['name']
+                    for arg in option['arguments']
+                    if not arg.get('ignore_check', False)]
             if option_desc:
                 arg_desc.append('({})'.format(', '.join(option_desc)))
             else:
                 arg_desc.append('no arguments')
-        arg_str = '"' + ' or '.join(arg_desc) + '"'
-        return Template(self.WRAPPER_TEMPLATE.safe_substitute(expected_args=arg_str))
+        arg_desc.sort(key=len)
+        arg_desc = ['"' + desc + '"' for desc in arg_desc]
+        arg_str = ', '.join(arg_desc)
+        if 'stateless' in declaration['name']:
+            readable_name = 'torch.' + declaration['python_name']
+        else:
+            readable_name = declaration['python_name']
+        return Template(self.WRAPPER_TEMPLATE.safe_substitute(
+            readable_name=readable_name, num_options=len(arg_desc),
+            expected_args=arg_str))
 
     def get_return_wrapper(self, option):
         return self.RETURN_WRAPPER.get(option['return'], None)
@@ -177,6 +204,9 @@ PyObject * $name(PyObject *self, PyObject *args)
                         arg['ignore_check'] = True
                     if 'allocate' in arg and arg['allocate']:
                         arg['ignore_check'] = True
+            # TODO: we can probably allow duplicate signatures once we implement
+            # keyword arguments
+            declaration['options'] = self.filter_unique_options(declaration['options'])
         declarations = [d for d in declarations if not d.get('only_stateless', False)]
         self.declarations.extend(filter(lambda x: not x.get('only_stateless', False), register_only))
         self.stateless_declarations.extend(filter(lambda x: x.get('only_stateless', False), register_only))
