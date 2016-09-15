@@ -51,4 +51,6 @@ THC_API void THCStorage_(free)(THCState *state, THCStorage *storage);
 THC_API void THCStorage_(resize)(THCState *state, THCStorage *storage, long size);
 THC_API void THCStorage_(fill)(THCState *state, THCStorage *storage, real value);
 
+THC_API int THCStorage_(getDevice)(THCState* state, const THCStorage* storage);
+
 #endif
