@@ -63,7 +63,7 @@ ncclResult_t ncclCommInitRank(ncclComm_t* comm, int ndev, ncclUniqueId commId, i
  * comm should be pre-allocated with size at least ndev*sizeof(ncclComm_t).
  * If devlist is NULL, the first ndev CUDA devices are used.
  * Order of devlist defines user-order of processors within the communicator. */
-ncclResult_t ncclCommInitAll(ncclComm_t* comm, int ndev, int* devlist);
+ncclResult_t ncclCommInitAll(ncclComm_t* comm, int ndev, const int* devlist);
 
 /* Frees resources associated with communicator object. */
 void ncclCommDestroy(ncclComm_t comm);
