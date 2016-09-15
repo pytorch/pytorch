@@ -239,8 +239,8 @@ PyObject * THPStorage_(_share_filename)(THPStorage *self)
     auto allocator_obj = ((StorageWeakRefAllocator*)storage->allocatorContext);
     ctx = (libshm_context*)allocator_obj->allocatorContext;
   } else {
-    Py_BEGIN_ALLOW_THREADS
     // TODO: retry on collision
+    // TODO: free GIL - but remember to reacquire it when an exception is thrown
     std::string handle = THPStorage_(__newHandle)();
     ctx = libshm_context_new(NULL, handle.c_str(),
             TH_ALLOCATOR_MAPPED_SHAREDMEM | TH_ALLOCATOR_MAPPED_EXCLUSIVE);
@@ -248,7 +248,6 @@ PyObject * THPStorage_(_share_filename)(THPStorage *self)
             &THManagedSharedAllocator, (void*)ctx);
     THStorage_(copy)(new_storage, storage);
     THStorage_(swap)(storage, new_storage);
-    Py_END_ALLOW_THREADS
   }
 
   THPObjectPtr manager_handle =
