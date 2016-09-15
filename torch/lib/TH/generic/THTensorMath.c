@@ -1761,7 +1761,7 @@ void THTensor_(mode)(THTensor *values_, THLongTensor *indices_, THTensor *t, int
 
   TH_TENSOR_DIM_APPLY3(real, t, real, values_, long, indices_, dimension,
                        long i;
-                       long mode = 0;
+                       real mode = 0;
                        long modei = 0;
                        long temp_freq = 0;
                        long max_freq = 0;
