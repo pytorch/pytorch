@@ -13,12 +13,14 @@ def _get_thnn_function_backend():
 def _initialize_backend():
     from ..functions.thnn import _all_functions as _thnn_functions
     from ..functions.linear import Linear
+    from ..functions.conv import Conv2d
     from ..functions.dropout import Dropout, FeatureDropout
     from ..functions.activation import Softsign
     from ..functions.loss import CosineEmbeddingLoss, \
             HingeEmbeddingLoss, MarginRankingLoss
 
     backend.register_function('Linear', Linear)
+    backend.register_function('Conv2d', Conv2d)
     backend.register_function('Dropout', Dropout)
     backend.register_function('Dropout2d', FeatureDropout)
     backend.register_function('Dropout3d', FeatureDropout)

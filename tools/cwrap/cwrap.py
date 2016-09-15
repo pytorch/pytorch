@@ -10,6 +10,7 @@ class cwrap(object):
         'void': Template('$call;\n      Py_RETURN_NONE;'),
         'long': Template('return PyLong_FromLong($call);'),
         'bool': Template('return PyBool_FromLong($call);'),
+        'void*': Template('return PyLong_FromVoidPtr($call);'),
     }
 
     TYPE_CHECK = {
@@ -208,4 +209,3 @@ class cwrap(object):
             arg_check=arg_checks,
             call=call
         )
-

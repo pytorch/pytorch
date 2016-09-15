@@ -69,7 +69,7 @@ class TestCase(unittest.TestCase):
             super(TestCase, self).assertEqual(x.size().tolist(), y.size().tolist())
             for index in iter_indices(x):
                 max_err = max(max_err, abs(x[index] - y[index]))
-            self.assertLessEqual(max_err, prec)
+            self.assertLessEqual(max_err, prec, message)
         elif type(x) == str and type(y) == str:
             super(TestCase, self).assertEqual(x, y)
         elif is_iterable(x) and is_iterable(y):
@@ -77,11 +77,11 @@ class TestCase(unittest.TestCase):
                 self.assertEqual(x_, y_, prec, message)
         else:
             try:
-                self.assertLessEqual(abs(x - y), prec)
+                self.assertLessEqual(abs(x - y), prec, message)
                 return
             except:
                 pass
-            super(TestCase, self).assertEqual(x, y)
+            super(TestCase, self).assertEqual(x, y, message)
 
 
 def make_jacobian(input, num_out):

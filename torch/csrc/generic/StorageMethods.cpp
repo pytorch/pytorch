@@ -5,6 +5,13 @@ static PyObject * THPStorage_(size)(THPStorage *self)
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPStorage_(dataPtr)(THPStorage *self)
+{
+  HANDLE_TH_ERRORS
+  return PyLong_FromVoidPtr(THStorage_(data)(LIBRARY_STATE self->cdata));
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPStorage_(elementSize)(THPStorage *self)
 {
   HANDLE_TH_ERRORS
@@ -452,6 +459,7 @@ static PyMethodDef THPStorage_(methods)[] = {
   {"resize_", (PyCFunction)THPStorage_(resize_), METH_O, NULL},
   {"retain", (PyCFunction)THPStorage_(retain), METH_NOARGS, NULL},
   {"size", (PyCFunction)THPStorage_(size), METH_NOARGS, NULL},
+  {"data_ptr", (PyCFunction)THPStorage_(dataPtr), METH_NOARGS, NULL},
   {"_write_file", (PyCFunction)THPStorage_(writeFile), METH_O, NULL},
   {"_new_with_file", (PyCFunction)THPStorage_(newWithFile), METH_O | METH_STATIC, NULL},
 #ifndef THC_GENERIC_FILE

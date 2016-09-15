@@ -1161,6 +1161,14 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
     - THTensor* other
 ]]
 
+[[
+  name: data_ptr
+  return: void*
+  cname: data
+  arguments:
+    - THTensor* self
+]]
+
 // These options look the same in stateful method - only the first one will
 // be available. Still, they differ in torch.pow.
 [[
@@ -3533,7 +3541,6 @@ static PyObject * THPTensor_stateless_(cat)(THPTensor *_unused, PyObject *args)
   END_HANDLE_TH_ERRORS
 }
 #endif
-
 
 // cwrap should put definitions before undefs, so let's mark this place
 // PUT DEFINITIONS IN HERE PLEASE
