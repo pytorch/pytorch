@@ -53,4 +53,12 @@ void THCStorage_(resize)(THCState *state, THCStorage *self, long size)
     self->size = size;
   }
 }
+
+THC_API int THCStorage_(getDevice)(THCState* state, const THCStorage* storage) {
+  if (!storage->data) return -1;
+  cudaPointerAttributes attr;
+  THCudaCheck(cudaPointerGetAttributes(&attr, storage->data));
+  return attr.device;
+}
+
 #endif
