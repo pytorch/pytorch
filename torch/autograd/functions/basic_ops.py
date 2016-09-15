@@ -1,6 +1,4 @@
-import sys
 import torch
-from ..variable import Variable
 from ..function import Function, InplaceFunction
 
 
@@ -82,8 +80,8 @@ class AddConstant(InplaceFunction):
 
 class SubConstant(InplaceFunction):
 
-    def __init__(self, constant, sub_tensor=False):
-        super(SubConstant, self).__init__()
+    def __init__(self, constant, sub_tensor=False, inplace=False):
+        super(SubConstant, self).__init__(inplace)
         self.constant = constant
         self.sub_tensor = sub_tensor
 
@@ -112,8 +110,8 @@ class SubConstant(InplaceFunction):
 
 class MulConstant(InplaceFunction):
 
-    def __init__(self, constant):
-        super(MulConstant, self).__init__()
+    def __init__(self, constant, inplace=False):
+        super(MulConstant, self).__init__(inplace)
         self.constant = constant
 
     def forward(self, a):
@@ -129,8 +127,8 @@ class MulConstant(InplaceFunction):
 
 class DivConstant(InplaceFunction):
 
-    def __init__(self, constant, div_by_tensor=False):
-        super(DivConstant, self).__init__()
+    def __init__(self, constant, div_by_tensor=False, inplace=False):
+        super(DivConstant, self).__init__(inplace)
         self.constant = constant
         self.div_by_tensor = div_by_tensor
         if self.inplace and self.div_by_tensor:
@@ -188,3 +186,4 @@ class Negate(InplaceFunction):
 
     def backward(self, grad_output):
         return grad_output.neg()
+

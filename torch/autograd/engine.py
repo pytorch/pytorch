@@ -61,7 +61,7 @@ class ExecutionEngine(object):
             grad_input = fn._do_backward(*grad)
             for (prev_fn, arg_id), d_prev_fn in zip(fn.previous_functions, grad_input):
                 if not prev_fn.requires_grad:
-                    assert d_prev_fn is None
+                    # TODO: check that d_prev_fn is None and warn otherwise
                     continue
                 output_nr = self._free_backward_dependency(dependencies, prev_fn, fn, arg_id)
                 is_ready = self._is_ready_for_backward(dependencies, prev_fn)

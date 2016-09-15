@@ -205,6 +205,17 @@ class _TensorBase(object):
         urtensor.copy_(xxtensor)
         return result
 
+    def unsqueeze(self, dim):
+        return self.new(self).unsqueeze_(dim)
+
+    def unsqueeze_(self, dim):
+        sizes = self.size().tolist()
+        sizes.insert(dim, 1)
+        strides = self.stride().tolist()
+        strides.insert(dim, 0)
+        return self.set_(self.storage(), self.storageOffset(),
+                torch.LongStorage(sizes), torch.LongStorage(strides))
+
     #TODO: add tests for operators
     def __add__(self, other):
         return self.add(other)

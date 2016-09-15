@@ -2262,6 +2262,21 @@ class TestTorch(TestCase):
             obj.__repr__()
             str(obj)
 
+    def test_unsqueeze(self):
+        x = torch.randn(2, 3, 4)
+        y = x.unsqueeze(1)
+        self.assertEqual(y, x.view(2, 1, 3, 4))
+        y = x.clone().unsqueeze_(2)
+        self.assertEqual(y, x.view(2, 3, 1, 4))
+
+        x = x[:, 1]
+        self.assertFalse(x.isContiguous())
+        y = x.unsqueeze(1)
+        self.assertEqual(y, x.contiguous().view(2, 1, 4))
+        y = x.clone().unsqueeze_(2)
+        self.assertEqual(y, x.contiguous().view(2, 4, 1))
+
+
 
 if __name__ == '__main__':
     unittest.main()

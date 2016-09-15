@@ -9,6 +9,13 @@ class Variable(object):
         'size',
         'stride',
         'nElement',
+        'nDimension',
+        'elementSize',
+        'isContiguous',
+        'isSameSizeAs',
+        'isSetTo',
+        'isSize',
+        'is_signed',
         'numel',
         'dim',
         # TODO: add more
@@ -100,28 +107,34 @@ class Variable(object):
 
     def type(self, t):
         if t != type(self.data):
-            return Copy(t)(self)
+            return Type(t)(self)
         return self
 
-    def add(self, other, inplace=False):
+    def _add(self, other, inplace):
         if isinstance(other, Variable):
             return Add(inplace)(self, other)
         else:
             assert not torch.isTensor(other)
             return AddConstant(other, inplace)(self)
 
-    def add_(self, other):
-        return self.add(other, inplace=True)
+    def add(self, other):
+        return self._add(other, False)
 
-    def sub(self, other):
+    def add_(self, other):
+        return self._add(other, True)
+
+    def _sub(self, other, inplace):
         if isinstance(other, Variable):
-            return Sub()(self, other)
+            return Sub(inplace=inplace)(self, other)
         else:
             assert not torch.isTensor(other)
-            return SubConstant(other)(self)
+            return SubConstant(other, inplace=inplace)(self)
+
+    def sub(self, other):
+        return self._sub(other, False)
 
     def sub_(self, other):
-        return self.add(other, inplace=True)
+        return self._sub(other, True)
 
     def mul(self, other):
         if isinstance(other, Variable):
@@ -133,6 +146,7 @@ class Variable(object):
     def mul_(self, other):
         if not isinstance(other, Variable) and not torch.isTensor(other):
             return MulConstant(other, inplace=True)(self)
+        raise RuntimeError("mul_ only supports scalar multiplication")
 
     def div(self, other):
         if isinstance(other, Variable):
@@ -144,6 +158,7 @@ class Variable(object):
     def div_(self, other):
         if not isinstance(other, Variable) and not torch.isTensor(other):
             return DivConstant(other, inplace=True)(self)
+        raise RuntimeError("mul_ only supports scalar multiplication")
 
     def pow(self, other):
         if isinstance(other, Variable):
@@ -170,14 +185,214 @@ class Variable(object):
     def neg_(self):
         return Negate(inplace=True)(self)
 
+    def tanh(self):
+        return Tanh()(self)
+
+    def tanh_(self):
+        return Tanh()(self)
+
+    def sigmoid(self):
+        return Sigmoid()(self)
+
+    def sigmoid_(self):
+        return Sigmoid()(self)
+
+    def sin(self):
+        return Sin()(self)
+
+    def sin_(self):
+        return Sin()(self)
+
+    def cos(self):
+        return Cos()(self)
+
+    def cos_(self):
+        return Cos()(self)
+
+    def tan(self):
+        return Tan()(self)
+
+    def tan_(self):
+        return Tan()(self)
+
+    def asin(self):
+        return Asin()(self)
+
+    def asin_(self):
+        return Asin()(self)
+
+    def acos(self):
+        return Acos()(self)
+
+    def acos_(self):
+        return Acos()(self)
+
+    def atan(self):
+        return Atan()(self)
+
+    def atan_(self):
+        return Atan()(self)
+
+    def sinh(self):
+        return Sinh()(self)
+
+    def sinh_(self):
+        return Sinh()(self)
+
+    def cosh(self):
+        return Cosh()(self)
+
+    def cosh_(self):
+        return Cosh()(self)
+
+    def abs(self):
+        return Abs()(self)
+
+    def abs_(self):
+        return Abs()(self)
+
+    def clamp(self, min_val, max_val):
+        return Clamp(min_val, max_val)(self)
+
+    def clamp_(self, min_val, max_val):
+        return Clamp(min_val, max_val)(self)
+
+    def cinv(self):
+        return Cinv()(self)
+
+    def cinv_(self):
+        return Cinv()(self)
+
+    def _cmax(self, other, inplace):
+        if isinstance(other, Variable):
+            return Cmax()(self, other)
+        else:
+            return CmaxConstant(other)(self)
+
+    def cmax(self, other):
+        return self._cmax(other, False)
+
+    def cmax_(self, other):
+        return self._cmax(other, True)
+
+    def _cmin(self, other, inplace):
+        if isinstance(other, Variable):
+            return Cmin()(self, other)
+        else:
+            return CminConstant(other)(self)
+
+    def cmin(self, other):
+        return self._cmin(other, False)
+
+    def cmin_(self, other):
+        return self._cmin(other, True)
+
+    def floor(self):
+        return Floor()(self)
+
+    def floor_(self):
+        return Floor()(self)
+
+    def ceil(self):
+        return Ceil()(self)
+
+    def ceil_(self):
+        return Ceil()(self)
+
+    def frac(self):
+        return Frac()(self)
+
+    def frac_(self):
+        return Frac()(self)
+
+    def sqrt(self):
+        return Sqrt()(self)
+
+    def sqrt_(self):
+        return Sqrt()(self)
+
+    def sum(self, dim=None):
+        return Sum(dim)(self)
+
+    def mean(self, dim=None):
+        return Mean(dim)(self)
+
+    def max(self, dim=None):
+        return Max(dim)(self)
+
+    def min(self, dim=None):
+        return Min(dim)(self)
+
+    def mode(self, dim=None):
+        return Mode(dim)(self)
+
+    def median(self, dim=None):
+        return Median(dim)(self)
+
     def view(self, *sizes):
         return View(*sizes)(self)
+
+    def viewAs(self, tensor):
+        return View(*tensor.size())(self)
+
+    def _blas(self, cls, args, inplace):
+        num_args = len(args)
+        alpha = beta = 1
+        if num_args > 4:
+            raise RuntimeError("too many args")
+        if num_args == 4:
+            alpha, beta = args[:2]
+        if num_args == 3:
+            alpha = args[0]
+        return cls(alpha, beta, inplace)(self, *args[-2:])
+
+    def addmm(self, *args):
+        return self._blas(Addmm, args, False)
+
+    def addmm_(self, *args):
+        return self._blas(Addmm, args, True)
+
+    def addbmm(self, *args):
+        return self._blas(Addbmm, args, False)
+
+    def addbmm_(self, *args):
+        return self._blas(Addbmm, args, True)
+
+    def baddbmm(self, *args):
+        return self._blas(Baddbmm, args, False)
+
+    def baddbmm_(self, *args):
+        return self._blas(Baddbmm, args, True)
+
+    def addmv(self, *args):
+        return self._blas(Addmv, args, False)
+
+    def addmv_(self, *args):
+        return self._blas(Addmv, args, True)
+
+    def addr(self, *args):
+        return self._blas(Addr, args, False)
+
+    def addr(self, *args):
+        return self._blas(Addr, args, True)
+
+    def dot(self, other):
+        return Dot()(self, other)
+
+    def expand(self, *sizes):
+        return Expand(*sizes)(self)
+
+    def expandAs(self, tensor):
+        return Expand(*tensor.size())(self)
 
     def t(self):
         return Transpose(0, 1)(self)
 
     def transpose(self, dim1, dim2):
         return Transpose(dim1, dim2)(self)
+
+    # TODO: permute
+    # TODO: narrow
 
     def __add__(self, other):
         return self.add(other)
@@ -213,3 +428,4 @@ class Variable(object):
 
 from .leaf import Leaf
 from .functions import *
+
