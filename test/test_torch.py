@@ -2262,6 +2262,10 @@ class TestTorch(TestCase):
             obj.__repr__()
             str(obj)
 
+        x = torch.Tensor([4, float('inf'), 1.5, float('-inf'), 0, float('nan'), 1])
+        x.__repr__()
+        str(x)
+
     def test_unsqueeze(self):
         x = torch.randn(2, 3, 4)
         y = x.unsqueeze(1)
@@ -2275,7 +2279,6 @@ class TestTorch(TestCase):
         self.assertEqual(y, x.contiguous().view(2, 1, 4))
         y = x.clone().unsqueeze_(2)
         self.assertEqual(y, x.contiguous().view(2, 4, 1))
-
 
 
 if __name__ == '__main__':
