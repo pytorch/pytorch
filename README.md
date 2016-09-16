@@ -1,4 +1,4 @@
-# pytorch [alpha-2] 
+# pytorch [alpha-3] 
 
 | Python |  **`Linux CPU`**   |  **`Linux GPU`** |
 |--------|--------------------|------------------|
@@ -29,6 +29,12 @@ pip install -r requirements.txt
 pip install .
 ```
 
+## Getting Started
+A more comprehensive Getting Started section will be filled in soon.
+For now, there's two pointers:
+- The MNIST example: [https://github.com/pytorch/examples](https://github.com/pytorch/examples)
+- The API Reference: [http://pytorch.org/api/](http://pytorch.org/api/)
+
 ## Communication
 * github issues: bug reports, feature requests, install issues, RFCs, thoughts, etc.
 * slack: general chat, online discussions, collaboration etc. https://pytorch.slack.com/ . If you need a slack invite, ping me at soumith@pytorch.org
@@ -42,7 +48,7 @@ After that, we will reevaluate progress, and if we are ready, we will hit beta-0
 * ~~alpha-0: Working versions of torch, cutorch, nn, cunn, optim fully unit tested with seamless numpy conversions~~
 * ~~alpha-1: Serialization to/from disk with sharing intact. initial release of the new neuralnets package based on a Chainer-like design~~
 * ~~alpha-2: sharing tensors across processes for hogwild training or data-loading processes. a rewritten optim package for this new nn.~~
-* alpha-3: binary installs (prob will take @alexbw 's help here), contbuilds, etc.
+* ~~alpha-3: binary installs, contbuilds, etc.
 * alpha-4: a ton of examples across vision, nlp, speech, RL -- this phase might make us rethink parts of the APIs, and hence want to do this in alpha than beta
 * alpha-5: Putting a simple and efficient story around multi-machine training. Probably simplistic like torch-distlearn. Building the website, release scripts, more documentation, etc.
 * alpha-6: [no plan yet]

@@ -4,7 +4,38 @@ from collections import OrderedDict
 
 
 class Container(Module):
+    """This is the base container class for all neural networks you would define.
+    You will subclass your container from this class.
+    In the constructor you define the modules that you would want to use, 
+    and in the __call__ function you use the constructed modules in 
+    your operations.
+    
+    To make it easier to understand, given is a small example.
+    ```
+    # Example of using Container
+     class Net(nn.Container):
+        def __init__(self):
+            super(Net, self).__init__(
+                conv1 = nn.Conv2d(1, 20, 5),
+                relu  = nn.ReLU()
+             )
+        def __call__(self, input):
+            output = self.relu(self.conv1(x))
+            return output
+     model = Net()
+     ```     
+    
+    One can also add new modules to a container after construction.
+    You can do this with the add_module function.
 
+    ```
+    # one can add modules to the container after construction
+    model.add_module('pool1', nn.MaxPool2d(2, 2)
+    ```
+    
+    The container has one additional method `parameters()` which
+    returns the list of learnable parameters in the container instance.
+    """
     def __init__(self, **kwargs):
         super(Container, self).__init__()
         self.modules = []

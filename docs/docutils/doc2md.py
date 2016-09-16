@@ -190,17 +190,22 @@ def make_toc(sections):
 
 def _doc2md(lines, shiftlevel=0):
     _doc2md.md = []
-    md = _doc2md.md
     _doc2md.is_code = False
+    _doc2md.is_code_block = False
     _doc2md.is_args = False
     _doc2md.is_returns = False
     _doc2md.is_inputshape = False
     _doc2md.is_outputshape = False
+    _doc2md.code = []
     def reset():
         if _doc2md.is_code:
             _doc2md.is_code = False
-            _doc2md.md += ['']
-            _doc2md.md += doc_code_block(code, 'python')
+            _doc2md.code += doc_code_block(code, 'python')
+            _doc2md.code += ['']
+        if _doc2md.is_code_block:
+            _doc2md.is_code_block = False
+            _doc2md.code += doc_code_block(code_block, 'python')
+            _doc2md.code += ['']
 
         if _doc2md.is_args:
             _doc2md.is_args = False
@@ -218,43 +223,49 @@ def _doc2md(lines, shiftlevel=0):
         if is_args_check(line):
             reset()
             _doc2md.is_args = True
-            md += ['']
-            md += ['#' * (shiftlevel+2) + ' Constructor Arguments']
+            _doc2md.md += ['']
+            _doc2md.md += ['#' * (shiftlevel+2) + ' Constructor Arguments']
             args = []
         elif is_returns_check(line):
             reset()
             _doc2md.is_returns = True
-            md += ['']
-            md += ['#' * (shiftlevel+2) + ' Returns']
+            _doc2md.md += ['']
+            _doc2md.md += ['#' * (shiftlevel+2) + ' Returns']
             returns = []
         elif is_example_check(line):
             reset()
-            #md += [line]
         elif is_inputshape_check(line):
             reset()
             inputshape = re.findall(r'\s*Input\sShape:\s*(.*)\s*:\s*(.*)\s*$', line)[0]
         elif is_outputshape_check(line):
             reset()
             outputshape = re.findall(r'\s*Output\sShape:\s*(.*)\s*:\s*(.*)\s*$', line)[0]
-            md += ['']
-            md += ['#' * (shiftlevel+2) + ' Expected Shape']
-            md += ['       | Shape | Description ']
-            md += ['------ | ----- | ------------']
-            md += [' input | ' + inputshape[0] + ' | ' + inputshape[1]]
-            md += ['output | ' + outputshape[0] + ' | ' + outputshape[1]]
+            _doc2md.md += ['']
+            _doc2md.md += ['#' * (shiftlevel+2) + ' Expected Shape']
+            _doc2md.md += ['       | Shape | Description ']
+            _doc2md.md += ['------ | ----- | ------------']
+            _doc2md.md += [' input | ' + inputshape[0] + ' | ' + inputshape[1]]
+            _doc2md.md += ['output | ' + outputshape[0] + ' | ' + outputshape[1]]
         elif is_image_check(line):
             reset()
-            md += ['']
+            _doc2md.md += ['']
             filename = re.findall(r'\s*Image:\s*(.*?)\s*$', line)
-            md += ['<img src="image/' + filename[0] + '" >']
+            _doc2md.md += ['<img src="image/' + filename[0] + '" >']
         elif _doc2md.is_code == False and trimmed.startswith('>>> '):
             reset()
             _doc2md.is_code = True
             code = [line]
+        elif _doc2md.is_code_block == False and trimmed.startswith('```'):
+            reset()
+            _doc2md.is_code_block = True
+            code_block = []
+        elif _doc2md.is_code_block == True and trimmed.startswith('```'):
+            # end of code block
+            reset()
         elif shiftlevel != 0 and is_heading(line):
             reset()
             level, title = get_heading(line)
-            md += [make_heading(level + shiftlevel, title)]
+            _doc2md.md += [make_heading(level + shiftlevel, title)]
         elif _doc2md.is_args:
             if line:
                 args.append(line)
@@ -270,11 +281,17 @@ def _doc2md(lines, shiftlevel=0):
                 code.append(line)
             else:
                 reset()
+        elif _doc2md.is_code_block:
+            if line:
+                code_block.append(line)
+            else:
+                reset()
         else:
             reset()
-            md += [line]
+            _doc2md.md += [line]
     reset()
-    return md
+    _doc2md.code += _doc2md.md
+    return _doc2md.code
 
 def doc2md(docstr, title, min_level=1, more_info=False, toc=True):
     """
