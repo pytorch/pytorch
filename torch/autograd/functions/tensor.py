@@ -1,3 +1,5 @@
+import torch
+
 from ..function import Function
 from ..variable import Variable
 
@@ -98,16 +100,113 @@ class Permute(Function):
         return grad_output.permute(*self.rev_dim_indices)
 
 
+class IndexAdd(Function):
+
+    def __init__(self, dim):
+        super(IndexAdd, self).__init__()
+        self.dim = dim
+
+    def forward(self, tensor1, index, tensor2):
+        assert not self.needs_input_grad[1]
+        if self.needs_input_grad[2]:
+            self.save_for_backward(index)
+        return tensor1.clone().indexAdd_(self.dim, index, tensor2)
+
+    def backward(self, grad_output):
+        grad_tensor1 = grad_tensor2 = None
+
+        if self.needs_input_grad[0]:
+            grad_tensor1 = grad_output
+
+        if self.needs_input_grad[2]:
+            index, = self.saved_tensors
+            grad_tensor2 = grad_output.indexSelect(self.dim, index)
+
+        return grad_tensor1, None, grad_tensor2
+
+
+class IndexCopy(Function):
+
+    def __init__(self, dim):
+        super(IndexCopy, self).__init__()
+        self.dim = dim
+
+    def forward(self, tensor1, index, tensor2):
+        assert not self.needs_input_grad[1]
+        if any(self.needs_input_grad):
+            self.save_for_backward(index)
+        return tensor1.clone().indexCopy_(self.dim, index, tensor2)
+
+    def backward(self, grad_output):
+        grad_tensor1 = grad_tensor2 = None
+
+        if any(self.needs_input_grad):
+            index, = self.saved_tensors
+
+        if self.needs_input_grad[0]:
+            grad_tensor1 = grad_output.clone().indexFill_(self.dim, index, 0)
+
+        if self.needs_input_grad[2]:
+            grad_tensor2 = grad_output.indexSelect(self.dim, index)
+
+        return grad_tensor1, None, grad_tensor2
+
+
+class IndexFill(Function):
+
+    def __init__(self, dim, value):
+        super(IndexFill, self).__init__()
+        self.dim = dim
+        self.value = value
+
+    def forward(self, tensor, index):
+        assert not self.needs_input_grad[1]
+        if self.needs_input_grad[0]:
+            self.save_for_backward(index)
+        return tensor.clone().indexFill_(self.dim, index, self.value)
+
+    def backward(self, grad_output):
+        grad_tensor = None
+
+        if self.needs_input_grad[0]:
+            index, = self.saved_tensors
+            grad_tensor = grad_output.clone().indexFill_(self.dim, index, 0)
+
+        return grad_tensor, None
+
+
+class IndexSelect(Function):
+
+    def __init__(self, dim):
+        super(IndexSelect, self).__init__()
+        self.dim = dim
+
+    def forward(self, tensor, index):
+        assert not self.needs_input_grad[1]
+
+        if self.needs_input_grad[0]:
+            self.save_for_backward(index)
+            self.input_size = tensor.size()
+
+        return tensor.indexSelect(self.dim, index)
+
+    def backward(self, grad_output):
+        grad_tensor = None
+
+        if self.needs_input_grad[0]:
+            index, = self.saved_tensors
+            grad_tensor = grad_output.new(*self.input_size).zero_()
+            grad_tensor.indexCopy_(self.dim, index, grad_output)
+
+        return grad_tensor, None
+
+
 # TODO: cat
 # TODO: chunk
 # TODO: copy
 # TODO: gather
-# TODO: indexAdd
-# TODO: index?
-# TODO: indexSelect
 # TODO: kthvalue
 # TODO: repeatTensor
-# TODO: resize
 # TODO: sort
 # TODO: split
 # TODO: squeeze
