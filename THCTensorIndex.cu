@@ -4,11 +4,12 @@
 #include "THCBlas.h"
 #include "THCTensorCopy.h"
 #include "THCTensorRandom.h"
+#include "THCHalf.h"
 #include "THCApply.cuh"
 #include "THCReduce.cuh"
 #include "THCDeviceUtils.cuh"
+#include "THCNumerics.cuh"
 #include <algorithm> // for std::min
-#include <cuda_fp16.h>
 
 // We prefer this kernel to avoid reloading index points if the number
 // of indices is a small number.
@@ -103,15 +104,16 @@ struct AtomicAddIntegerImpl<T, 1> {
   __device__ void operator()(T *address, T val) {
     unsigned int * address_as_ui =
         (unsigned int *) (address - ((size_t)address & 3));
-    unsigned int old = *address_as_ui, sum, newval, assumed;
-    unsigned int selectors[] = {0x3214, 0x3240, 0x3410, 0x4210};
-    unsigned int sel = selectors[(size_t)address & 3];
+    unsigned int old = *address_as_ui;
+    unsigned int shift = (((size_t)address & 3) * 8);
+    unsigned int sum;
+    unsigned int assumed;
 
     do {
       assumed = old;
-      sum = val +  (T)__byte_perm(old, 0, (size_t)address & 3 | 0x4440);
-      newval = __byte_perm(old, sum, sel);
-      old = atomicCAS(address_as_ui, assumed, newval);
+      sum = val + T((old >> shift) & 0xff);
+      old = (old & ~(0x000000ff << shift)) | (sum << shift);
+      old = atomicCAS(address_as_ui, assumed, old);
     } while (assumed != old);
   }
 };
@@ -121,12 +123,15 @@ struct AtomicAddIntegerImpl<T, 2> {
   __device__ void operator()(T *address, T val) {
     unsigned int * address_as_ui =
         (unsigned int *) ((char *)address - ((size_t)address & 2));
-    unsigned int old = *address_as_ui, sum, newval, assumed;
+    unsigned int old = *address_as_ui;
+    unsigned int sum;
+    unsigned int newval;
+    unsigned int assumed;
 
     do {
       assumed = old;
-      sum = val +  (T)__byte_perm(old, 0, ((size_t)address & 2) ? 0x4432 : 0x4410);
-      newval = __byte_perm(old, sum, ((size_t)address & 2) ? 0x5410 : 0x3254);
+      sum = val + (size_t)address & 2 ? T(old >> 16) : T(old & 0xffff);
+      newval = (size_t)address & 2 ? (old & 0xffff) | (sum << 16) : (old & 0xffff0000) | sum;
       old = atomicCAS(address_as_ui, assumed, newval);
     } while (assumed != old);
   }
@@ -136,7 +141,9 @@ template<typename T>
 struct AtomicAddIntegerImpl<T, 4> {
   __device__ void operator()(T *address, T val) {
     unsigned int * address_as_ui = (unsigned int *) (address);
-    unsigned int old = *address_as_ui, newval, assumed;
+    unsigned int old = *address_as_ui;
+    unsigned int newval;
+    unsigned int assumed;
 
     do {
       assumed = old;
@@ -150,7 +157,9 @@ template<typename T>
 struct AtomicAddIntegerImpl<T, 8> {
   __device__ void operator()(T *address, T val) {
     unsigned long long * address_as_ui = (unsigned long long *) (address);
-    unsigned long long old = *address_as_ui, newval, assumed;
+    unsigned long long old = *address_as_ui;
+    unsigned long long newval;
+    unsigned long long assumed;
 
     do {
       assumed = old;
@@ -176,32 +185,29 @@ __device__ void atomicAdd(long *address, long val) {
   AtomicAddIntegerImpl<long, sizeof(long)>()(address, val);
 }
 
-#ifdef CUDA_HALF_INSTRUCTIONS
-#define HALF_ADD(a, b) __hadd(a, b)
-#else
-#define HALF_ADD(a, b) __float2half(__half2float(a) + __half2float(b))
-#endif
-
+#ifdef CUDA_HALF_TENSOR
 __device__ void atomicAdd(half *address, half val) {
   unsigned int * address_as_ui =
       (unsigned int *) ((char *)address - ((size_t)address & 2));
-  unsigned int old = *address_as_ui, assumed;
-  half hsum;
+  unsigned int old = *address_as_ui;
+  unsigned int assumed;
 
   do {
-    // byte_perm doesn't work with halfs, let's manually memcpy
     assumed = old;
-    half *hp = (half *)((char *)(&old) + ((size_t)address & 2));
-    hsum = HALF_ADD(val, *hp);
-    memcpy(hp, &hsum, sizeof(half));
+    half hsum;
+    hsum.x = (size_t)address & 2 ? (old >> 16) : (old & 0xffff);
+    hsum = THCNumerics<half>::add(hsum, val);
+    old = (size_t)address & 2 ? (old & 0xffff) | (hsum.x << 16) : (old & 0xffff0000) | hsum.x;
     old = atomicCAS(address_as_ui, assumed, old);
    } while (assumed != old);
 }
+#endif
 
 // from CUDA C Programmic Guide
 __device__  void atomicAdd(double *address, double val) {
   unsigned long long int* address_as_ull = (unsigned long long int*)address;
-  unsigned long long int old = *address_as_ull, assumed;
+  unsigned long long int old = *address_as_ull;
+  unsigned long long int assumed;
 
   do {
     assumed = old;
