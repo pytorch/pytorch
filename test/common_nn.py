@@ -1,3 +1,4 @@
+import tempfile
 import unittest
 from copy import deepcopy
 
@@ -529,6 +530,14 @@ class ModuleTest(TestBase):
             ref_input = self._unpack_input(deepcopy(input))
             expected_out = self.reference_fn(ref_input, test_case._get_parameters(module)[0])
             test_case.assertEqual(out, expected_out)
+
+        # TODO: do this with in-memory files as soon as torch.save will support it
+        with tempfile.TemporaryFile() as f:
+            test_case._forward(module, input)
+            torch.save(module, f)
+            f.seek(0)
+            module_copy = torch.load(f)
+            test_case.assertEqual(test_case._forward(module, input), test_case._forward(module_copy, input))
 
         self._do_test(test_case, module, input)
 

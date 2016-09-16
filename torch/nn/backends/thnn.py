@@ -1,7 +1,13 @@
 from .backend import FunctionBackend
 
 class THNNFunctionBackend(FunctionBackend):
-    pass
+
+    def __reduce__(self):
+        return (_get_thnn_function_backend, ())
+
+
+def _get_thnn_function_backend():
+    return backend
 
 
 def _initialize_backend():

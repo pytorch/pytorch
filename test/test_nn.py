@@ -469,28 +469,36 @@ for test_params in criterion_tests:
     add_test(test)
 
 
-def make_unpooling_net(dim):
-    pool_module = getattr(nn, 'MaxPool{}d'.format(dim))
-    unpool_module = getattr(nn, 'MaxUnpool{}d'.format(dim))
-    class Net(nn.Container):
+class UnpoolingNet2d(nn.Container):
 
-        def __init__(self):
-            super(Net, self).__init__(
-                pool=pool_module(2, return_indices=True),
-                unpool=unpool_module(2)
-            )
+    def __init__(self):
+        super(UnpoolingNet2d, self).__init__(
+            pool=nn.MaxPool2d(2, return_indices=True),
+            unpool=nn.MaxUnpool2d(2)
+        )
 
-        def forward(self, input):
-            return self.unpool(*self.pool(input))
-    return Net
+    def forward(self, input):
+        return self.unpool(*self.pool(input))
+
+
+class UnpoolingNet3d(nn.Container):
+
+    def __init__(self):
+        super(UnpoolingNet3d, self).__init__(
+            pool=nn.MaxPool3d(2, return_indices=True),
+            unpool=nn.MaxUnpool3d(2)
+        )
+
+    def forward(self, input):
+        return self.unpool(*self.pool(input))
 
 
 add_test(NewModuleTest(
-    constructor=make_unpooling_net(2),
+    constructor=UnpoolingNet2d,
     input_size=(1, 1, 8, 8),
     fullname='MaxUnpool2d_net'))
 add_test(NewModuleTest(
-    constructor=make_unpooling_net(3),
+    constructor=UnpoolingNet3d,
     input_size=(1, 1, 8, 8, 8),
     fullname='MaxUnpool3d_net'))
 

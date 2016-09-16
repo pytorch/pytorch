@@ -21,7 +21,8 @@ THTensor * THPTensor_(newWithMetadataFileRaw)(int fd, THStorage *storage)
   SYSCHECK(read(fd, tensor->size, sizeof(long) * tensor->nDimension));
   SYSCHECK(read(fd, tensor->stride, sizeof(long) * tensor->nDimension));
   SYSCHECK(read(fd, &tensor->storageOffset, sizeof(long)));
-  THStorage_(retain)(LIBRARY_STATE storage);
+  if (storage)
+    THStorage_(retain)(LIBRARY_STATE storage);
   tensor->storage = storage;
   return tensor.release();
 }
