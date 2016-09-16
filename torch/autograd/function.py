@@ -38,6 +38,11 @@ class Function(object):
         is_volatile = any(arg.volatile for arg in input)
         # Save the input, so _save_for_backward can access it
         self.input = input
+        if not is_volatile:
+            self.needs_input_grad = tuple(arg.requires_grad for arg in input)
+            self.requires_grad = any(self.needs_input_grad)
+            self.previous_functions = [(arg.creator, id(arg)) for arg in input]
+
         raw_output = self.forward(*unpacked_input)
         if not isinstance(raw_output, tuple):
             raw_output = (raw_output,)
@@ -46,9 +51,6 @@ class Function(object):
             output = tuple(Variable(tensor, volatile=True)
                     for tensor in raw_output)
         else:
-            self.needs_input_grad = tuple(arg.requires_grad for arg in input)
-            self.requires_grad = any(self.needs_input_grad)
-            self.previous_functions = [(arg.creator, id(arg)) for arg in input]
             output = tuple(Variable(tensor, self) for tensor in raw_output)
             self.output_ids = {id(var): i for i, var in enumerate(output)}
             if self.to_save:

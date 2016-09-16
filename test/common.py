@@ -80,20 +80,24 @@ class TestCase(unittest.TestCase):
 
 
 def make_jacobian(input, num_out):
+    if isinstance(input, Variable) and not input.requires_grad:
+        return None
     if torch.isTensor(input) or isinstance(input, Variable):
         return torch.zeros(input.nElement(), num_out)
     else:
-        return type(input)(make_jacobian(elem, num_out) for elem in input)
+        return type(input)(filter(lambda x: x is not None,
+            (make_jacobian(elem, num_out) for elem in input)))
 
 
-def iter_tensors(x):
+def iter_tensors(x, only_requiring_grad=False):
     if torch.isTensor(x):
         yield x
     elif isinstance(x, Variable):
-        yield x.data
+        if x.requires_grad or not only_requiring_grad:
+            yield x.data
     else:
         for elem in x:
-            for result in iter_tensors(elem):
+            for result in iter_tensors(elem, only_requiring_grad):
                 yield result
 
 
@@ -116,7 +120,7 @@ def get_numerical_jacobian(fn, input, target):
     # It's much easier to iterate over flattened lists of tensors.
     # These are reference to the same objects in jacobian, so any changes
     # will be reflected in it as well.
-    x_tensors = [t for t in iter_tensors(target)]
+    x_tensors = [t for t in iter_tensors(target, True)]
     j_tensors = [t for t in iter_tensors(jacobian)]
 
     outa = torch.Tensor(output_size)

@@ -189,127 +189,97 @@ class Variable(object):
         return Tanh()(self)
 
     def tanh_(self):
-        return Tanh()(self)
+        return Tanh(True)(self)
 
     def sigmoid(self):
         return Sigmoid()(self)
 
     def sigmoid_(self):
-        return Sigmoid()(self)
+        return Sigmoid(True)(self)
 
     def sin(self):
-        return Sin()(self)
-
-    def sin_(self):
         return Sin()(self)
 
     def cos(self):
         return Cos()(self)
 
-    def cos_(self):
-        return Cos()(self)
-
     def tan(self):
-        return Tan()(self)
-
-    def tan_(self):
         return Tan()(self)
 
     def asin(self):
         return Asin()(self)
 
-    def asin_(self):
-        return Asin()(self)
-
     def acos(self):
-        return Acos()(self)
-
-    def acos_(self):
         return Acos()(self)
 
     def atan(self):
         return Atan()(self)
 
-    def atan_(self):
-        return Atan()(self)
-
     def sinh(self):
-        return Sinh()(self)
-
-    def sinh_(self):
         return Sinh()(self)
 
     def cosh(self):
         return Cosh()(self)
 
-    def cosh_(self):
-        return Cosh()(self)
-
     def abs(self):
-        return Abs()(self)
-
-    def abs_(self):
         return Abs()(self)
 
     def clamp(self, min_val, max_val):
         return Clamp(min_val, max_val)(self)
 
-    def clamp_(self, min_val, max_val):
-        return Clamp(min_val, max_val)(self)
-
     def cinv(self):
         return Cinv()(self)
 
-    def cinv_(self):
-        return Cinv()(self)
-
-    def _cmax(self, other, inplace):
+    def cmax(self, other):
         if isinstance(other, Variable):
             return Cmax()(self, other)
         else:
             return CmaxConstant(other)(self)
 
-    def cmax(self, other):
-        return self._cmax(other, False)
-
-    def cmax_(self, other):
-        return self._cmax(other, True)
-
-    def _cmin(self, other, inplace):
+    def cmin(self, other):
         if isinstance(other, Variable):
             return Cmin()(self, other)
         else:
             return CminConstant(other)(self)
 
-    def cmin(self, other):
-        return self._cmin(other, False)
-
-    def cmin_(self, other):
-        return self._cmin(other, True)
-
     def floor(self):
-        return Floor()(self)
-
-    def floor_(self):
         return Floor()(self)
 
     def ceil(self):
         return Ceil()(self)
 
-    def ceil_(self):
-        return Ceil()(self)
-
     def frac(self):
-        return Frac()(self)
-
-    def frac_(self):
         return Frac()(self)
 
     def sqrt(self):
         return Sqrt()(self)
 
-    def sqrt_(self):
-        return Sqrt()(self)
+    def round(self):
+        return Round()(self)
+
+    def sign(self):
+        return Sign()(self)
+
+    def trunc(self):
+        return Trunc()(self)
+
+    def floor(self):
+        return Floor()(self)
+
+    def ceil(self):
+        return Ceil()(self)
+
+    def fmod(self, value):
+        return Fmod(value)(self)
+
+    def remainder(self, value):
+        return Remainder(value)(self)
+
+    def lerp(self, tensor, weight):
+        return Lerp(weight)(self, tensor)
+
+    def rsqrt(self):
+        return Rsqrt()(self)
 
     def sum(self, dim=None):
         return Sum(dim)(self)
@@ -378,6 +348,38 @@ class Variable(object):
 
     def dot(self, other):
         return Dot()(self, other)
+
+    def _addcop(self, op, args):
+        if len(args) == 3:
+            # scale, tensor1, tensor2
+            return op(args[0])(self, *args[1:])
+        else:
+            # tensor1, tensor2
+            return op()(self, *args)
+
+    def addcmul(self, *args):
+        return self._addcop(Addcmul, args)
+
+    def addcdiv(self, *args):
+        return self._addcop(Addcdiv, args)
+
+    def norm(self, norm_type=2, dim=None):
+        return Norm(norm_type, dim)(self)
+
+    def dist(self, tensor, norm_type=2):
+        return Norm(norm_type)(self - tensor)
+
+    def indexAdd(self, dim, index, tensor):
+        return IndexAdd(dim)(self, index, tensor)
+
+    def indexCopy(self, dim, index, tensor):
+        return IndexCopy(dim)(self, index, tensor)
+
+    def indexFill(self, dim, index, value):
+        return IndexFill(dim, value)(self, index)
+
+    def indexSelect(self, dim, index):
+        return IndexSelect(dim)(self, index)
 
     def expand(self, *sizes):
         return Expand(*sizes)(self)

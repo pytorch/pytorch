@@ -1,3 +1,5 @@
+from itertools import repeat
+
 from ..variable import Variable
 from ..function import Function, InplaceFunction
 
@@ -262,11 +264,17 @@ class CminConstant(Function):
 class _ConstantGrad(Function):
     grad_value = 0
 
+    def __init__(self, *args):
+        super(_ConstantGrad, self).__init__()
+        self.args = args
+
     def forward(self, i):
-        return getattr(i, type(self).__name__.lower())()
+        return getattr(i, type(self).__name__.lower())(*self.args)
 
     def backward(self, grad_output):
-        return grad_output.new((self.grad_value,)).expandAs(grad_output)
+        grad_input = grad_output.new(*repeat(1, grad_output.dim()))
+        grad_input = grad_input.fill_(self.grad_value).expandAs(grad_output)
+        return grad_input.mul(grad_output)
 
 
 class Floor(_ConstantGrad):
@@ -277,18 +285,119 @@ class Ceil(_ConstantGrad):
     pass
 
 
+class Round(_ConstantGrad):
+    pass
+
+
+class Sign(_ConstantGrad):
+    pass
+
+
+class Trunc(_ConstantGrad):
+    pass
+
+
 class Frac(_ConstantGrad):
     grad_value = 1
 
 
-# TODO: addcdiv + inplace
-# TODO: addcmul + inplace
+class Fmod(_ConstantGrad):
+    grad_value = 1
+
+
+class Remainder(_ConstantGrad):
+    grad_value = 1
+
+
+class Lerp(Function):
+
+    def __init__(self, weight):
+        super(Lerp, self).__init__()
+        self.weight = float(weight)
+
+    def forward(self, a, b):
+        return a.lerp(b, self.weight)
+
+    def backward(self, grad_output):
+        return grad_output.mul(1 - self.weight), grad_output.mul(self.weight)
+
+
+class Rsqrt(InplaceFunction):
+
+    def forward(self, input):
+        if self.inplace:
+            self.mark_dirty(input)
+            result = input.rsqrt_()
+        else:
+            result = input.rsqrt()
+        self.save_for_backward(result)
+        return result
+
+    def backward(self, grad_output):
+        result, = self.saved_tensors
+        return result.pow(3).div_(-2).mul_(grad_output)
+
+
+class Addcmul(InplaceFunction):
+
+    def __init__(self, scale=1, inplace=False):
+        super(Addcmul, self).__init__(inplace)
+        self.scale = scale
+
+    def forward(self, add_tensor, mul_tensor1, mul_tensor2):
+        self.add_tensor_size = add_tensor.size().tolist()
+        self.save_for_backward(mul_tensor1, mul_tensor2)
+        if self.inplace:
+            return add_tensor.addcmul_(self.scale, mul_tensor1, mul_tensor2)
+        else:
+            return add_tensor.addcmul(self.scale, mul_tensor1, mul_tensor2)
+
+    def backward(self, grad_output):
+        grad_add = grad_mul1 = grad_mul2 = None
+        mul_tensor1, mul_tensor2 = self.saved_tensors
+
+        if self.needs_input_grad[0]:
+            grad_add = grad_output
+
+        if self.needs_input_grad[1]:
+            grad_mul1 = grad_output.mul(mul_tensor2).mul(self.scale)
+
+        if self.needs_input_grad[2]:
+            grad_mul2 = grad_output.mul(mul_tensor1).mul(self.scale)
+
+        return grad_add, grad_mul1, grad_mul2
+
+
+class Addcdiv(InplaceFunction):
+
+    def __init__(self, scale=1, inplace=False):
+        super(Addcdiv, self).__init__(inplace)
+        self.scale = scale
+
+    def forward(self, add_tensor, div_tensor1, div_tensor2):
+        self.add_tensor_size = add_tensor.size().tolist()
+        self.save_for_backward(div_tensor1, div_tensor2)
+        if self.inplace:
+            return add_tensor.addcdiv_(self.scale, div_tensor1, div_tensor2)
+        else:
+            return add_tensor.addcdiv(self.scale, div_tensor1, div_tensor2)
+
+    def backward(self, grad_output):
+        grad_add = grad_div1 = grad_div2 = None
+        div_tensor1, div_tensor2 = self.saved_tensors
+
+        if self.needs_input_grad[0]:
+            grad_add = grad_output
+
+        if self.needs_input_grad[1]:
+            grad_div1 = grad_output.div(div_tensor2).mul(self.scale)
+
+        if self.needs_input_grad[2]:
+            div_tensor2_sq = div_tensor2.mul(div_tensor2)
+            grad_div2 = grad_output.mul(div_tensor1).div_(div_tensor2_sq)
+            grad_div2.neg_().mul_(self.scale)
+
+        return grad_add, grad_div1, grad_div2
+
+
 # TODO: atan2 + inplace
-# TODO: ceil + inplace
-# TODO: lerp
-# TODO: remainder
-# TODO: fmod
-# TODO: round
-# TODO: rsqrt
-# TODO: sign
-# TODO: trunc

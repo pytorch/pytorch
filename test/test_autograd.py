@@ -9,7 +9,8 @@ PRECISION = 1e-3
 
 def iter_gradients(x):
     if isinstance(x, Variable):
-        yield x.grad
+        if x.requires_grad:
+            yield x.grad
     else:
         for elem in x:
             for result in iter_gradients(elem):
@@ -131,6 +132,11 @@ class TestAutograd(TestCase):
         self.assertRaises(RuntimeError, lambda: q.backward(torch.ones(5, 5)))
 
 
+def index_variable(num_indices, max_indices):
+    index = torch.randperm(max_indices)[:num_indices].long()
+    return Variable(index, requires_grad=False)
+
+
 L = 20
 M = 10
 S = 5
@@ -143,7 +149,7 @@ function_tests = [
     (AddConstant,   (3.14,),            ((L, L),)                                   ),
     (SubConstant,   (3.14,),            ((L, L),)                                   ),
     (SubConstant,   (3.14, True),       ((L, L),),                  'from_tensor'   ),
-    (MulConstant,   (3.14,),            ((L, L),)),
+    (MulConstant,   (3.14,),            ((L, L),)                                   ),
     (DivConstant,   (3.14, True),       (torch.rand(L, L) + 1e-2,), 'by_tensor'     ),
     (PowConstant,   (3.14,),            (torch.rand(L, L),)                         ),
     (Transpose,     (0, 1),             (torch.rand(L, L),)                         ),
@@ -172,12 +178,24 @@ function_tests = [
     (Cinv,          (),                 (torch.rand(S, S, S) + 0.1,)                ),
     (Cmax,          (),                 ((S, S, S), (S, S, S))                      ),
     (Cmin,          (),                 ((S, S, S), (S, S, S))                      ),
+    (Round,         (),                 ((S, S, S),)                                ),
+    (Sign,          (),                 ((S, S, S),)                                ),
+    (Trunc,         (),                 ((S, S, S),)                                ),
+    (Floor,         (),                 ((S, S, S),)                                ),
+    (Ceil,          (),                 ((S, S, S),)                                ),
+    (Frac,          (),                 ((S, S, S),)                                ),
+    (Fmod,          (1.5,),             ((S, S, S),)                                ),
+    (Lerp,          (0.2,),             ((S, S, S), (S, S, S))                      ),
+    (Rsqrt,         (),                 (torch.rand(S, S, S) + 1e-2,)               ),
+    (Remainder,     (1.5,),             ((S, S, S),)                                ),
     (CmaxConstant,  (0.5,),             ((S, S, S),)                                ),
     (CminConstant,  (0.5,),             ((S, S, S),)                                ),
     (Mean,          (),                 ((S, S, S),)                                ),
     (Mean,          (1,),               ((S, S, S),),               'dim'           ),
     (Sum,           (),                 ((S, S, S),)                                ),
     (Sum,           (1,),               ((S, S, S),),               'dim'           ),
+    (Prod,          (),                 ((S, S, S),)                                ),
+    (Prod,          (1,),               ((S, S, S),),               'dim'           ),
     (Addmm,         (),                 ((S, M), (S, S), (S, M)),                   ),
     (Addmm,         (0.1, 1),           ((S, M), (S, S), (S, M)),   'coef'          ),
     (Addbmm,        (),                 ((S, M), (S, S, S), (S, S, M)),             ),
@@ -189,10 +207,26 @@ function_tests = [
     (Addr,          (),                 ((S, M), (S,), (M,)),                       ),
     (Addr,          (0.1, 0.4),         ((S, M), (S,), (M,)),       'coef'          ),
     (Dot,           (),                 ((L,), (L,)),                               ),
-    (Max,           (0,),               ((S, S, S),),                               ),
-    (Min,           (0,),               ((S, S, S),),                               ),
+    (Max,           (),                 ((S, S, S),),                               ),
+    (Min,           (),                 ((S, S, S),),                               ),
+    (Max,           (0,),               ((S, S, S),),               'dim'           ),
+    (Min,           (0,),               ((S, S, S),),               'dim'           ),
     (Mode,          (0,),               ((S, S, S),),                               ),
     (Median,        (0,),               ((S, S, S),),                               ),
+    (Norm,          (1.5,),             (torch.rand(S, S, S),),     '1.5'           ),
+    (Norm,          (),                 ((S, S, S),),               '2'             ),
+    (Norm,          (3,),               ((S, S, S),),               '3'             ),
+    (Norm,          (1.5, 0),           (torch.rand(S, S, S),),     '1.5_dim'       ),
+    (Norm,          (2, 0),             ((S, S, S),),               '2_dim'         ),
+    (Norm,          (3, 0),             ((S, S, S),),               '3_dim'         ),
+    (Addcmul,       (),                 ((S, S), (S, S), (S, S))                    ),
+    (Addcmul,       (0.6,),             ((S, S), (S, S), (S, S)),   'scale'         ),
+    (Addcdiv,       (),                 ((S, S), (S, S), torch.rand(S, S) + 1e-2)   ),
+    (Addcdiv,       (0.6,),             ((S, S), (S, S), torch.rand(S, S) + 1e-2), 'scale'),
+    (IndexAdd,      (0,),               ((S, S), index_variable(2, S), (2, S))      ),
+    (IndexCopy,     (0,),               ((S, S), index_variable(2, S), (2, S))      ),
+    (IndexFill,     (0, 2),             ((S, S), index_variable(2, S))              ),
+    (IndexSelect,   (0,),               ((S, S), index_variable(2, S))              ),
 ]
 
 
@@ -229,6 +263,15 @@ method_tests = [
     ('acos',        (S, S, S),          ()                                          ),
     ('atan',        (S, S, S),          ()                                          ),
     ('cinv',        (S, S, S),          ()                                          ),
+    ('round',       (S, S, S),          ()                                          ),
+    ('sign',        (S, S, S),          ()                                          ),
+    ('trunc',       (S, S, S),          ()                                          ),
+    ('floor',       (S, S, S),          ()                                          ),
+    ('ceil',        (S, S, S),          ()                                          ),
+    ('rsqrt',       (S, S, S),          ()                                          ),
+    ('fmod',        (S, S, S),          (1.5,)                                      ),
+    ('remainder',   (S, S, S),          (1.5,)                                      ),
+    ('lerp',        (S, S, S),          ((S, S, S), 0.4)                            ),
     ('cmax',        (S, S, S),          ((S, S, S),)                                ),
     ('cmax',        (S, S, S),          (0.5,),                     'constant'      ),
     ('cmin',        (S, S, S),          ((S, S, S),)                                ),
@@ -250,9 +293,19 @@ method_tests = [
     ('dot',         (L,),               ((L,),),                                    ),
     ('max',         (S, S, S),          ()                                          ),
     ('min',         (S, S, S),          ()                                          ),
+    ('addcmul',     (S, S),             ((S, S), (S, S))                            ),
+    ('addcmul',     (S, S),             (0.5, (S, S), (S, S)),      'scale'         ),
+    ('addcdiv',     (S, S),             ((S, S), (S, S))                            ),
+    ('addcdiv',     (S, S),             (0.5, (S, S), (S, S)),      'scale'         ),
+    ('norm',        (S, S, S),          (2,)                                        ),
+    ('norm',        (S, S, S),          (2, 1),                     'dim'           ),
+    ('dist',        (S, S, S),          ((S, S, S),)                                ),
+    ('dist',        (S, S, S),          ((S, S, S), 4),             '4'             ),
+    ('indexSelect', (S, S, S),          (0, index_variable(2, S))                   ),
 ]
 # TODO: max, min with dim
 # TODO: mode, median
+# TODO: indexAdd, indexCopy, indexFill
 
 
 def create_input(call_args):
@@ -305,10 +358,23 @@ for test in function_tests:
             )
 
         if test_name not in ignore_inplace and issubclass(cls, InplaceFunction):
-            inplace_output = cls(*constructor_args, inplace=True)(*input)
+            inplace_input = deepcopy(input)
+            inplace_input_copy = tuple(i + 0 for i in inplace_input)
+            fn = cls(*constructor_args, inplace=True)
+            inplace_output = fn(*inplace_input_copy)
             if not isinstance(inplace_output, tuple):
                 inplace_output = (inplace_output,)
             self.assertEqual(inplace_output, output)
+            # Check that gradient is the same
+            for inp_i, i in zip(inplace_input, input):
+                inp_i.grad.zero_()
+                i.grad.zero_()
+            for io, o in zip(inplace_output, output):
+                grad = torch.randn(*io.size())
+                io.backward(grad)
+                o.backward(grad)
+            for inp_i, i in zip(inplace_input, input):
+                self.assertEqual(inp_i.grad, i.grad)
 
     assert not hasattr(TestAutograd, test_name), 'Two tests have the same name: ' + test_name
     setattr(TestAutograd, test_name, do_test)
