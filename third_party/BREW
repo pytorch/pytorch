@@ -24,11 +24,26 @@ cc_thirdparty_target(
 )
 
 # Eigen
-cc_thirdparty_target(
-  name = "eigen",
-  deps = ["//third_party/eigen3:eigen"],
-  cc_obj_files = [],
-)
+# Current eigen version: 3.3 beta 1
+if Brewery.Env.Config.USE_SYSTEM_EIGEN:
+  # If we are using system eigen, this is just a dummy placeholder that does
+  # nothing. Also, Eigen is a header-only library so there is no cc_obj_files.
+  cc_thirdparty_target(
+    name = "eigen",
+    cc_obj_files = [],
+  )
+else:
+  # We need to copy over the code included in Caffe.
+  shell_script(
+    name = "eigen",
+    srcs = ["BREW"],
+    commands=[
+      "DST=$CAFFE2_GENDIR/third_party/include/",
+      "mkdir -p $DST",
+      "cp -r $CAFFE2_SRCDIR/$CAFFE2_CWD/eigen/Eigen $DST/",
+      "cp -r $CAFFE2_SRCDIR/$CAFFE2_CWD/eigen/unsupported $DST/",
+    ],
+  )
 
 # Intel MKL.
 cc_thirdparty_target(
@@ -150,6 +165,7 @@ shell_script(
 ###############################################################################
 # Protobuf
 # This section includes all protobuf-related dependencies.
+# Current protobuf version: 3.0.0
 ##############################################################################
 
 if Brewery.Env.Config.USE_SYSTEM_PROTOBUF:
