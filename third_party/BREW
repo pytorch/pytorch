@@ -396,6 +396,31 @@ else:
   )
 
 ###############################################################################
+# Google googletest
+# Current version: release-1.8.0
+##############################################################################
+
+shell_script(
+  name = "gtest_hdrs",
+  srcs = ["BREW"],
+  commands=[
+    "DST=$CAFFE2_GENDIR/third_party/include/",
+    "mkdir -p $DST",
+    "cp -r $CAFFE2_SRCDIR/$CAFFE2_CWD/googletest/googletest/include/gtest $DST/",
+    # The following is so that gtest-all.cc can find the related cc files.
+    "cp -r $CAFFE2_SRCDIR/$CAFFE2_CWD/googletest/googletest/src $DST/",
+  ],
+)
+
+cc_library(
+  name="gtest",
+  srcs=[
+      "googletest/googletest/src/gtest-all.cc",
+  ],
+  deps=["gtest_hdrs"],
+)
+
+###############################################################################
 # Other libraries
 # This section includes all other libraries in alphabet order.
 ##############################################################################
@@ -408,12 +433,6 @@ cc_thirdparty_target(
 cc_thirdparty_target(
   name="glog",
   cc_obj_files = ["-lglog"] if Brewery.Env.Config.USE_GLOG else [],
-)
-
-cc_thirdparty_target(
-  name = "gtest",
-  deps = ["//third_party/gtest:gtest"],
-  cc_obj_files = [],
 )
 
 cc_thirdparty_target(
