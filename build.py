@@ -24,7 +24,7 @@ class Config(object):
     # Otherwise, use the following line: we will build protobuf using the
     # included source file.
     #USE_SYSTEM_PROTOBUF = False
-    #PROTOC_BINARY = 'gen/third_party/google/protoc'
+    #PROTOC_BINARY = 'gen/third_party/protoc'
     # Note for the line above: if you are doing things like cross-compilation,
     # the built protoc compiler will not work on the host, in which case you
     # will need to provide a protoc binary that can run on the host environment.
