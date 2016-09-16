@@ -16,3 +16,6 @@
 [submodule "third_party/eigen"]
 	path = third_party/eigen
 	url = https://github.com/RLovelett/eigen.git
+[submodule "third_party/googletest"]
+	path = third_party/googletest
+	url = https://github.com/google/googletest.git

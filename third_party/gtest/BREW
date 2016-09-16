@@ -1,5 +1,0 @@
-cc_library(
-  name = "gtest",
-  srcs = ["gtest-all.cpp"],
-  hdrs = ["gtest.h"],
-)
