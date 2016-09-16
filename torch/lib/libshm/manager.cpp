@@ -85,7 +85,7 @@ int main(int argc, char *argv[]) {
   try {
     char tmpfile[L_tmpnam];
     if (std::tmpnam(tmpfile) == NULL)
-      throw std::exception();
+      throw std::runtime_error("could not generate a random filename for manager socket");
     // TODO: better strategy for generating tmp names
     // TODO: retry on collisions - this can easily fail
     srv_socket.reset(new ManagerServerSocket(std::string(tmpfile)));

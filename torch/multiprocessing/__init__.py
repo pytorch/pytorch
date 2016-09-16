@@ -1,17 +1,26 @@
+from sys import platform as _platform
 from multiprocessing import *
 
 
-_sharing_strategy = 'file_descriptor'
+if _platform == 'darwin':
+    _sharing_strategy = 'file_system'
+    _all_sharing_strategies = {'file_system'}
+else:
+    _sharing_strategy = 'file_descriptor'
+    _all_sharing_strategies = {'file_descriptor', 'file_system'}
 
 
 def set_sharing_strategy(new_stragegy):
     global _sharing_strategy
-    assert new_stragegy in {'file_descriptor', 'file_system'}
+    assert new_stragegy in _all_sharing_strategies
     _sharing_strategy = new_stragegy
 
 
 def get_sharing_strategy():
     return _sharing_strategy
+
+def get_all_sharing_strategies():
+    return _all_sharing_strategies
 
 
 def Queue(*args, **kwargs):

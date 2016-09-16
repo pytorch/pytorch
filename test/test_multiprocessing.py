@@ -137,16 +137,18 @@ class TestMultiprocessing(TestCase):
         with leak_checker(self) as lc:
             do_test()
 
+    @unittest.skipIf(platform == 'darwin', "file descriptor strategy is not supported on OS X")
     def test_fd_sharing(self):
         self._test_sharing()
 
+    @unittest.skipIf(platform == 'darwin', "file descriptor strategy is not supported on OS X")
     def test_fd_preserve_sharing(self):
         self._test_preserve_sharing()
 
+    @unittest.skipIf(platform == 'darwin', "file descriptor strategy is not supported on OS X")
     def test_fd_pool(self):
         self._test_pool()
 
-    @unittest.skipIf(platform == "darwin", "file_system sharing strategy doesn't work in OSX")
     def test_fs_sharing(self):
         with fs_sharing():
             self._test_sharing()
