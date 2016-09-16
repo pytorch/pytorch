@@ -262,6 +262,11 @@ def _doc2md(lines, shiftlevel=0):
         elif _doc2md.is_code_block == True and trimmed.startswith('```'):
             # end of code block
             reset()
+        elif _doc2md.is_code_block:
+            if line:
+                code_block.append(line)
+            else:
+                reset()
         elif shiftlevel != 0 and is_heading(line):
             reset()
             level, title = get_heading(line)
@@ -279,11 +284,6 @@ def _doc2md(lines, shiftlevel=0):
         elif _doc2md.is_code:
             if line:
                 code.append(line)
-            else:
-                reset()
-        elif _doc2md.is_code_block:
-            if line:
-                code_block.append(line)
             else:
                 reset()
         else:
