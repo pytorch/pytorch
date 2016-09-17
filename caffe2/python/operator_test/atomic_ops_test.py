@@ -19,9 +19,12 @@ class TestAtomicOps(TestCase):
         init_net = core.Net('init')
         mutex_countdown = init_net.CreateMutex([])
         mutex_checksum = init_net.CreateMutex([])
-        countdown = init_net.ConstantIntFill([], shape=[], value=20000.)
-        checksum = init_net.ConstantIntFill([], shape=[], value=0.)
-        minus_one = init_net.ConstantIntFill([], shape=[], value=-1.)
+        countdown = init_net.ConstantFill([], shape=[], value=20000,
+                                          dtype=core.DataType.INT32)
+        checksum = init_net.ConstantFill(
+            [], shape=[], value=0, dtype=core.DataType.INT32)
+        minus_one = init_net.ConstantFill(
+            [], shape=[], value=-1, dtype=core.DataType.INT32)
         steps = []
         for i in range(0, 100):
             net = core.Net('net:%d' % i)

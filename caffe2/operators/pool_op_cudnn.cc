@@ -203,17 +203,5 @@ REGISTER_CUDNN_OPERATOR(AveragePoolFp16Gradient, CuDNNPoolGradientOp<float16>);
 REGISTER_CUDNN_OPERATOR(MaxPoolFp16, CuDNNPoolOp<float16>);
 REGISTER_CUDNN_OPERATOR(MaxPoolFp16Gradient, CuDNNPoolGradientOp<float16>);
 
-class GetPoolGradient : public GradientMakerBase {
-  using GradientMakerBase::GradientMakerBase;
-  vector<OperatorDef> GetGradientDefs() override {
-    return SingleGradientDef(
-        def_.type() + "Gradient", "",
-        vector<string>{I(0), O(0), GO(0)},
-        vector<string>{GI(0)});
-  }
-};
-REGISTER_GRADIENT(AveragePoolFp16, GetPoolGradient);
-REGISTER_GRADIENT(MaxPoolFp16, GetPoolGradient);
-
 }  // namespace
 }  // namespace caffe2

@@ -83,7 +83,6 @@ class GradientMakerBase {
  protected:
   virtual vector<OperatorDef> GetGradientDefs() {
     CAFFE_NOT_IMPLEMENTED;
-    return vector<OperatorDef>();
   }
 
   // Helper functions to return names for the gradient computation.

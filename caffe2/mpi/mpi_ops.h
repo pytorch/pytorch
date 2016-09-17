@@ -35,13 +35,15 @@ class MPIBroadcastOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     MPI_Comm comm = OperatorBase::Input<MPICommonWorldWrapper>(0).comm();
-    CAFFE_ENFORCE(OperatorBase::OutputIsType<Tensor<Context>>(0),
-                  "Output is of wrong type.");
+    CAFFE_ENFORCE(
+        OperatorBase::OutputIsType<Tensor<Context>>(0),
+        "Output is of wrong type.");
     auto* output = Output(0);
     // Make sure that output is already allocated.
-    CAFFE_ENFORCE(output->size() > 0,
-                  "Broadcast op uses in-place operation so the output "
-                  "should be already allocated.");
+    CAFFE_ENFORCE(
+        output->size() > 0,
+        "Broadcast op uses in-place operation so the output "
+        "should be already allocated.");
     MPI_CHECK(MPI_Bcast(
         output->raw_mutable_data(),
         output->nbytes(),
@@ -140,8 +142,99 @@ class MPIAllreduceOp final : public Operator<Context> {
         comm));
     return true;
   }
+};
+
+template <class Context>
+class MPISendTensorOp final : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  MPISendTensorOp(const OperatorDef& def, Workspace* ws)
+      : Operator<Context>(def, ws),
+        OP_SINGLE_ARG(int, "dst", dst_, MPI_ANY_SOURCE),
+        OP_SINGLE_ARG(int, "tag", tag_, MPI_ANY_TAG),
+        OP_SINGLE_ARG(bool, "raw_buffer", raw_buffer_, false) {
+    CAFFE_ENFORCE(raw_buffer_, "non-raw-buffer transfer not supported yet.");
+    CAFFE_ENFORCE(
+        dst_ != MPI_ANY_SOURCE || def.input_size() == 4,
+        "You should explicitly specify the to rank either via "
+        "argument or via input blobs.");
+    CAFFE_ENFORCE(
+        tag_ != MPI_ANY_TAG || def.input_size() == 4,
+        "You should explicitly specify the tag either via "
+        "argument or via input blobs.");
+  }
+
+  bool RunOnDevice() override {
+    MPI_Comm comm = OperatorBase::Input<MPICommonWorldWrapper>(COMM).comm();
+    auto& input = Input(INPUT);
+    if (InputSize() == 4) {
+      dst_ = OperatorBase::Input<TensorCPU>(DST).template data<int>()[0];
+      tag_ = OperatorBase::Input<TensorCPU>(TAG).template data<int>()[0];
+    }
+    if (raw_buffer_) {
+      MPI_CHECK(MPI_Send(
+          input.raw_data(), input.nbytes(), MPI_CHAR, dst_, tag_, comm));
+    } else {
+      CAFFE_NOT_IMPLEMENTED;
+    }
+    return true;
+  }
 
  protected:
+  int dst_;
+  int tag_;
+  bool raw_buffer_;
+
+  INPUT_TAGS(COMM, INPUT, DST, TAG);
+};
+
+template <class Context>
+class MPIReceiveTensorOp final : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  MPIReceiveTensorOp(const OperatorDef& def, Workspace* ws)
+      : Operator<Context>(def, ws),
+        OP_SINGLE_ARG(int, "src", src_, MPI_ANY_SOURCE),
+        OP_SINGLE_ARG(int, "tag", tag_, MPI_ANY_TAG),
+        OP_SINGLE_ARG(bool, "raw_buffer", raw_buffer_, false) {
+    CAFFE_ENFORCE(raw_buffer_, "non-raw-buffer transfer not supported yet.");
+  }
+
+  bool RunOnDevice() override {
+    MPI_Comm comm = OperatorBase::Input<MPICommonWorldWrapper>(COMM).comm();
+    if (InputSize() == 4) {
+      src_ = OperatorBase::Input<TensorCPU>(SRC_IN).template data<int>()[0];
+      tag_ = OperatorBase::Input<TensorCPU>(TAG_IN).template data<int>()[0];
+    }
+    MPI_Status status;
+    if (raw_buffer_) {
+      auto* output = Output(OUTPUT);
+      MPI_CHECK(MPI_Recv(
+          output->raw_mutable_data(),
+          output->nbytes(),
+          MPI_CHAR,
+          src_,
+          tag_,
+          comm,
+          &status));
+    } else {
+      CAFFE_NOT_IMPLEMENTED;
+    }
+    auto* src_out = OperatorBase::Output<TensorCPU>(SRC_OUT);
+    src_out->Resize();
+    src_out->template mutable_data<int>()[0] = status.MPI_SOURCE;
+    auto* tag_out = OperatorBase::Output<TensorCPU>(TAG_OUT);
+    tag_out->Resize();
+    tag_out->template mutable_data<int>()[0] = status.MPI_TAG;
+    return true;
+  }
+
+ protected:
+  int src_;
+  int tag_;
+  bool raw_buffer_;
+  INPUT_TAGS(COMM, INPUT, SRC_IN, TAG_IN);
+  OUTPUT_TAGS(OUTPUT, SRC_OUT, TAG_OUT);
 };
 
 }  // namespace caffe2

@@ -29,8 +29,10 @@ bool Caffe2InitializeNervanaKernels(int*, char***) {
     VLOG(1) << "Loaded nervana kernels from path "
                   << FLAGS_nervana_cubin_path;
   } else {
-    LOG(ERROR) << "Cannot load nervana kernels from path "
-                    << FLAGS_nervana_cubin_path;
+    // Since this is not a critical error we will just log it in info.
+    LOG(INFO) << "Cannot load nervana gpu kernels from path "
+              << FLAGS_nervana_cubin_path
+              << ", will disable Caffe2 nervana engines.";
   }
   // We will always return true for this initialization, because the loading
   // result is kept and accessible via NervanaKernelLoaded(). This allows us

@@ -4,6 +4,10 @@ import unittest
 
 from caffe2.python import core, test_util, workspace
 
+import caffe2.python.hypothesis_test_util as htu
+import hypothesis.strategies as st
+from hypothesis import given
+
 
 class TestWorkspace(unittest.TestCase):
     def setUp(self):
@@ -78,7 +82,6 @@ class TestWorkspace(unittest.TestCase):
         self.assertEqual(fetched_again.shape, (1, 2, 3, 4))
         np.testing.assert_array_equal(fetched_again, 2.0)
 
-
     def testFetchFeedBlobTypes(self):
         for dtype in [np.float16, np.float32, np.float64, np.bool,
                       np.int8, np.int16, np.int32, np.int64,
@@ -140,6 +143,15 @@ class TestWorkspace(unittest.TestCase):
         s2 = workspace.FetchBlob('my_plain_string')
         self.assertEqual(s, s2)
 
+    def testFetchBlobs(self):
+        s1 = "test1"
+        s2 = "test2"
+        workspace.FeedBlob('s1', s1)
+        workspace.FeedBlob('s2', s2)
+        fetch1, fetch2 = workspace.FetchBlobs(['s1', 's2'])
+        self.assertEquals(s1, fetch1)
+        self.assertEquals(s2, fetch2)
+
     def testFetchFeedViaBlobDict(self):
         self.assertEqual(
             workspace.RunNetOnce(self.net.Proto().SerializeToString()), True)
@@ -172,9 +184,9 @@ class TestMultiWorkspaces(unittest.TestCase):
             workspace.RunNetOnce(self.net.Proto().SerializeToString()), True
         )
         self.assertEqual(workspace.HasBlob("testblob"), True)
-        self.assertEqual(workspace.SwitchWorkspace("test", True), True)
+        self.assertEqual(workspace.SwitchWorkspace("test", True), None)
         self.assertEqual(workspace.HasBlob("testblob"), False)
-        self.assertEqual(workspace.SwitchWorkspace("default"), True)
+        self.assertEqual(workspace.SwitchWorkspace("default"), None)
         self.assertEqual(workspace.HasBlob("testblob"), True)
 
         try:
@@ -213,7 +225,7 @@ class TestWorkspaceGPU(test_util.TestCase):
         np.testing.assert_array_equal(fetched_again, 2.0)
 
     def testDefaultGPUID(self):
-        self.assertEqual(workspace.SetDefaultGPUID(0), True)
+        self.assertEqual(workspace.SetDefaultGPUID(0), None)
         self.assertEqual(workspace.GetDefaultGPUID(), 0)
 
     def testGetCudaPeerAccessPattern(self):
@@ -240,7 +252,7 @@ class TestImmediate(test_util.TestCase):
         content = workspace.FetchImmediate("testblob")
         # Also, the immediate mode should not invade the original namespace,
         # so we check if this is so.
-        with self.assertRaises(KeyError):
+        with self.assertRaises(RuntimeError):
             workspace.FetchBlob("testblob")
         np.testing.assert_array_equal(content, 1.0)
         content[:] = 2.0
@@ -248,7 +260,7 @@ class TestImmediate(test_util.TestCase):
         np.testing.assert_array_equal(
             workspace.FetchImmediate("testblob"), 2.0)
         workspace.StopImmediate()
-        with self.assertRaises(KeyError):
+        with self.assertRaises(RuntimeError):
             content = workspace.FetchImmediate("testblob")
 
     def testImmediateRootFolder(self):
@@ -270,6 +282,122 @@ class TestCppEnforceAsException(test_util.TestCase):
         op = core.CreateOperator("Relu", ["X"], ["Y"])
         with self.assertRaises(RuntimeError):
             workspace.RunOperatorOnce(op)
+
+
+class TestCWorkspace(htu.HypothesisTestCase):
+    def test_net_execution(self):
+        ws = workspace.C.Workspace()
+        self.assertEqual(ws.nets, {})
+        self.assertEqual(ws.blobs, {})
+        net = core.Net("test-net")
+        net.ConstantFill([], "testblob", shape=[1, 2, 3, 4], value=1.0)
+        ws.create_net(net)
+        self.assertIn("testblob", ws.blobs)
+        self.assertIn("test-net", ws.nets)
+        net = ws.nets["test-net"].run()
+        blob = ws.blobs["testblob"]
+        np.testing.assert_array_equal(
+            np.ones((1, 2, 3, 4), dtype=np.float32),
+            blob.fetch())
+
+    @given(name=st.text(), value=st.floats(min_value=-1, max_value=1.0))
+    def test_operator_run(self, name, value):
+        name = name.encode("ascii", "ignore")
+        ws = workspace.C.Workspace()
+        op = core.CreateOperator(
+            "ConstantFill", [], [name], shape=[1], value=value)
+        ws.run(op)
+        self.assertIn(name, ws.blobs)
+        np.testing.assert_allclose(
+            [value], ws.blobs[name].fetch(), atol=1e-4, rtol=1e-4)
+
+    @given(blob_name=st.text(),
+           net_name=st.text(),
+           value=st.floats(min_value=-1, max_value=1.0))
+    def test_net_run(self, blob_name, net_name, value):
+        blob_name = blob_name.encode("ascii", "ignore")
+        net_name = net_name.encode("ascii", "ignore")
+
+        ws = workspace.C.Workspace()
+        net = core.Net(net_name)
+        net.ConstantFill([], [blob_name], shape=[1], value=value)
+        ws.run(net)
+        self.assertIn(blob_name, ws.blobs)
+        self.assertNotIn(net_name, ws.nets)
+        np.testing.assert_allclose(
+            [value], ws.blobs[blob_name].fetch(), atol=1e-4, rtol=1e-4)
+
+    @given(blob_name=st.text(),
+           net_name=st.text(),
+           plan_name=st.text(),
+           value=st.floats(min_value=-1, max_value=1.0))
+    def test_plan_run(self, blob_name, plan_name, net_name, value):
+        blob_name = blob_name.encode("ascii", "ignore")
+        net_name = net_name.encode("ascii", "ignore")
+        plan_name = plan_name.encode("ascii", "ignore")
+
+        ws = workspace.C.Workspace()
+        plan = core.Plan(plan_name)
+        net = core.Net(net_name)
+        net.ConstantFill([], [blob_name], shape=[1], value=value)
+
+        plan.AddStep(core.ExecutionStep("step", nets=[net], num_iter=1))
+
+        ws.run(plan)
+        self.assertIn(blob_name, ws.blobs)
+        self.assertIn(str(net), ws.nets)
+        np.testing.assert_allclose(
+            [value], ws.blobs[blob_name].fetch(), atol=1e-4, rtol=1e-4)
+
+    @given(blob_name=st.text(),
+           net_name=st.text(),
+           value=st.floats(min_value=-1, max_value=1.0))
+    def test_net_create(self, blob_name, net_name, value):
+        blob_name = blob_name.encode("ascii", "ignore")
+        net_name = net_name.encode("ascii", "ignore")
+
+        ws = workspace.C.Workspace()
+        net = core.Net(net_name)
+        net_name = str(net)
+        net.ConstantFill([], [blob_name], shape=[1], value=value)
+        ws.create_net(net).run()
+        self.assertIn(blob_name, ws.blobs)
+        self.assertIn(net_name, ws.nets)
+        np.testing.assert_allclose(
+            [value], ws.blobs[blob_name].fetch(), atol=1e-4, rtol=1e-4)
+
+    @given(name=st.text(),
+           value=htu.tensor(),
+           device_option=st.sampled_from(htu.device_options))
+    def test_array_serde(self, name, value, device_option):
+        name = name.encode("ascii", "ignore")
+        ws = workspace.C.Workspace()
+        ws.create_blob(name).feed(value, device_option=device_option)
+        self.assertIn(name, ws.blobs)
+        blob = ws.blobs[name]
+        np.testing.assert_equal(value, ws.blobs[name].fetch())
+        serde_blob = ws.create_blob("{}_serde".format(name))
+        serde_blob.deserialize(blob.serialize(name))
+        np.testing.assert_equal(value, serde_blob.fetch())
+
+    @given(name=st.text(), value=st.text())
+    def test_string_serde(self, name, value):
+        name = name.encode("ascii", "ignore")
+        value = value.encode("ascii", "ignore")
+        ws = workspace.C.Workspace()
+        ws.create_blob(name).feed(value)
+        self.assertIn(name, ws.blobs)
+        blob = ws.blobs[name]
+        self.assertEqual(value, ws.blobs[name].fetch())
+        serde_blob = ws.create_blob("{}_serde".format(name))
+        serde_blob.deserialize(blob.serialize(name))
+        self.assertEqual(value, serde_blob.fetch())
+
+    def test_exception(self):
+        ws = workspace.C.Workspace()
+        with self.assertRaises(RuntimeError):
+            ws.create_net("...")
+
 
 if __name__ == '__main__':
     unittest.main()

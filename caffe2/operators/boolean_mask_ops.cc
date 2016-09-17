@@ -70,6 +70,7 @@ class BooleanMaskOp final : public Operator<Context> {
     outShape.push_back(numOutputs);
     outShape.insert(outShape.end(), data.dims().begin() + 1, data.dims().end());
     dataOut->Resize(outShape);
+    auto* outPtr = (char*)dataOut->raw_mutable_data(data.meta());
     if (numOutputs == 0) {
       return true;
     }
@@ -81,7 +82,6 @@ class BooleanMaskOp final : public Operator<Context> {
         data.meta().itemsize();
     TIndex lastStart = -1;
     const auto* inPtr = (char*)data.raw_data();
-    auto* outPtr = (char*)dataOut->raw_mutable_data(data.meta());
     TIndex outStart = 0;
     for (TIndex i = 0;; ++i) {
       // mask was true and either a) became false, or b) sequence finished
@@ -89,12 +89,8 @@ class BooleanMaskOp final : public Operator<Context> {
         const auto* src = inPtr + lastStart * innerSizeBytes;
         auto* dst = outPtr + outStart * innerSizeBytes;
         int numItems = i - lastStart;
-        if (data.meta().copy()) {
-          data.meta().copy()(src, dst, numItems);
-        } else {
-          context_.template CopyBytes<CPUContext, CPUContext>(
-              numItems * data.meta().itemsize(), src, dst);
-        }
+        context_.template CopyItems<CPUContext, CPUContext>(
+            data.meta(), numItems, src, dst);
         outStart += numItems;
         lastStart = -1;
       }

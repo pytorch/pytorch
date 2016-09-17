@@ -22,10 +22,10 @@ float HSoftmaxOp<float, CPUContext>::RunForwardSingle(const float* X,
   float* softmax_output_data = int_output + int_output_offset;
 
   if (scale_.size() != 1) {
-    scale_.Resize(vector<TIndex>{1});
+    scale_.Resize(1);
   }
   if (sum_multiplier_.size() != dim_out) {
-    sum_multiplier_.Resize(vector<TIndex>{dim_out});
+    sum_multiplier_.Resize(dim_out);
     math::Set<float, CPUContext>(dim_out, 1.f,
       sum_multiplier_.mutable_data<float>(), &context_);
   }
@@ -79,7 +79,7 @@ bool HSoftmaxOp<float, CPUContext>::RunOnDevice() {
   // Sum of output dimensions of all hierarchy nodes
   int N = W.dim32(0);
   CHECK_EQ(N, b.dim32(0));
-  Y->Resize(vector<TIndex>{M});
+  Y->Resize(M);
   auto* Ydata = Y->mutable_data<float>();
   math::Set<float, CPUContext>(M, 0.f, Ydata, &context_);
   const auto* labeldata = label.data<int>();
@@ -87,12 +87,12 @@ bool HSoftmaxOp<float, CPUContext>::RunOnDevice() {
   std::unordered_map<int, PathProto> hierarchy = getHierarchyForLabels(M,
     labeldata, hierarchy_);
   int int_output_size = getIntermediateOutputSize(labeldata, M, hierarchy);
-  intermediate_output->Resize(vector<TIndex>{int_output_size});
+  intermediate_output->Resize(int_output_size);
   float * int_output_data = intermediate_output->mutable_data<float>();
   int int_output_offset = 0;
 
   if (bias_multiplier_.size() != M) {
-    bias_multiplier_.Resize(vector<TIndex>{M});
+    bias_multiplier_.Resize(M);
     math::Set<float, CPUContext>(M, static_cast<float>(1),
         bias_multiplier_.mutable_data<float>(), &context_);
   }
@@ -135,12 +135,12 @@ void HSoftmaxGradientOp<float, CPUContext>::RunBackwardSingle(const float* X,
 
   //Softmax
   if (scale_.size() != 1) {
-    scale_.Resize(vector<TIndex>{1});
+    scale_.Resize(1);
   }
   float* scaledata = scale_.mutable_data<float>();
 
   if (sum_multiplier_.size() != dim_out) {
-    sum_multiplier_.Resize(vector<TIndex>{dim_out});
+    sum_multiplier_.Resize(dim_out);
     math::Set<float, CPUContext>(dim_out, 1.f,
       sum_multiplier_.mutable_data<float>(), &context_);
   }
@@ -161,7 +161,7 @@ void HSoftmaxGradientOp<float, CPUContext>::RunBackwardSingle(const float* X,
   if (bias_multiplier_.size() != 1) {
     // If the helper bias multiplier has not been created, reshape and fill
     // it with 1
-    bias_multiplier_.Resize(vector<TIndex>{1});
+    bias_multiplier_.Resize(1);
     math::Set<float, CPUContext>(1, static_cast<float>(1),
         bias_multiplier_.template mutable_data<float>(), &context_);
   }

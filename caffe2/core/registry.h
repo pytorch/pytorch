@@ -13,6 +13,7 @@
 #include <mutex>
 
 #include "caffe2/core/common.h"
+#include "caffe2/core/typeid.h"
 
 namespace caffe2 {
 
@@ -76,6 +77,14 @@ class Registry {
 
   const CaffeMap<SrcType, string>& HelpMessage() const {
     return help_message_;
+  }
+
+  const char* HelpMessage(const SrcType& key) const {
+    auto it = help_message_.find(key);
+    if (it == help_message_.end()) {
+      return nullptr;
+    }
+    return it->second.c_str();
   }
 
  private:
@@ -149,7 +158,8 @@ class Registerer {
   static Registerer##RegistryName CAFFE_ANONYMOUS_VARIABLE(g_##RegistryName)( \
       key,                                                                    \
       RegistryName(),                                                         \
-      Registerer##RegistryName::DefaultCreator<__VA_ARGS__>);                 \
+      Registerer##RegistryName::DefaultCreator<__VA_ARGS__>,                  \
+      TypeMeta::Name<__VA_ARGS__>());                                         \
   }
 
 // CAFFE_DECLARE_REGISTRY and CAFFE_DEFINE_REGISTRY are hard-wired to use string

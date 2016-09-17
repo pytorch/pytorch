@@ -22,9 +22,9 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
                 LegacyPadding::NOTSET))),
         pad_(OperatorBase::GetSingleArgument<int>("pad", 0)),
         pad_t_(OperatorBase::GetSingleArgument<int>("pad_t", pad_)),
-        pad_l_(OperatorBase::GetSingleArgument<int>("pad", pad_)),
-        pad_b_(OperatorBase::GetSingleArgument<int>("pad", pad_)),
-        pad_r_(OperatorBase::GetSingleArgument<int>("pad", pad_)),
+        pad_l_(OperatorBase::GetSingleArgument<int>("pad_l", pad_)),
+        pad_b_(OperatorBase::GetSingleArgument<int>("pad_b", pad_)),
+        pad_r_(OperatorBase::GetSingleArgument<int>("pad_r", pad_)),
         kernel_h_(OperatorBase::GetSingleArgument<int>(
             "kernel_h",
             OperatorBase::GetSingleArgument<int>("kernel", 0))),
@@ -45,40 +45,38 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
             OperatorBase::GetSingleArgument<int>("adj", 0))),
         order_(StringToStorageOrder(
             OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
-    CHECK_GT(kernel_h_, 0);
-    CHECK_GT(kernel_w_, 0);
+    CAFFE_ENFORCE(kernel_h_ > 0);
+    CAFFE_ENFORCE(kernel_w_ > 0);
     // For the padding, they should either be the legacy padding strategy
     // (VALID or SAME), or an explicit, non-negative value.
     if (legacy_pad_ == LegacyPadding::VALID ||
         legacy_pad_ == LegacyPadding::SAME) {
-      CHECK(
+      CAFFE_ENFORCE(
           !OperatorBase::HasArgument("pad") &&
-          !OperatorBase::HasArgument("pad_t") &&
-          !OperatorBase::HasArgument("pad_l") &&
-          !OperatorBase::HasArgument("pad_b") &&
-          !OperatorBase::HasArgument("pad_r"))
-          << "If you use legacy padding VALID or SAME, you should not specify "
-             "any specific padding values.";
+              !OperatorBase::HasArgument("pad_t") &&
+              !OperatorBase::HasArgument("pad_l") &&
+              !OperatorBase::HasArgument("pad_b") &&
+              !OperatorBase::HasArgument("pad_r"),
+          "If you use legacy padding VALID or SAME, you should not specify "
+          "any specific padding values.");
     }
-    CHECK_LE(stride_h_, kernel_h_);
-    CHECK_LE(stride_w_, kernel_w_);
-    CHECK_GE(pad_, 0);
-    CHECK_GE(pad_t_, 0);
-    CHECK_GE(pad_l_, 0);
-    CHECK_GE(pad_b_, 0);
-    CHECK_GE(pad_r_, 0);
-    CHECK_GT(stride_h_, 0);
-    CHECK_GT(stride_w_, 0);
-    CHECK_LT(adj_w_, stride_w_);
-    CHECK_LT(adj_h_, stride_h_);
+    CAFFE_ENFORCE(pad_ >= 0);
+    CAFFE_ENFORCE(pad_t_ >= 0);
+    CAFFE_ENFORCE(pad_l_ >= 0);
+    CAFFE_ENFORCE(pad_b_ >= 0);
+    CAFFE_ENFORCE(pad_r_ >= 0);
+    CAFFE_ENFORCE(stride_h_ > 0);
+    CAFFE_ENFORCE(stride_w_ > 0);
+    CAFFE_ENFORCE(adj_h_ < stride_h_);
+    CAFFE_ENFORCE(adj_w_ < stride_w_);
   }
   // Sets the output size. The output channel is manually specified.
   void SetOutputSize(
       const Tensor<Context>& input,
       Tensor<Context>* output,
       int output_channel) {
-    DCHECK_EQ(input.ndim(), 4);
-    DCHECK_GT(input.size(), 0);
+    CAFFE_ENFORCE(4 == input.ndim());
+    CAFFE_ENFORCE(input.size() > 0);
     int N = input.dim32(0);
     bool channel_first = false; // initialized to suppress compiler warning.
     int H = 0, W = 0; // initialized to suppress compiler warning.
@@ -164,8 +162,8 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
       int* out_size) {
     switch (legacy_pad_) {
       case LegacyPadding::NOTSET:
-        CHECK_GE(*pad_head, 0);
-        CHECK_GE(*pad_tail, 0);
+        CAFFE_ENFORCE(*pad_head >= 0);
+        CAFFE_ENFORCE(*pad_tail >= 0);
         *out_size =
             (in_size - 1) * stride + kernel + adj - *pad_head - *pad_tail;
         break;

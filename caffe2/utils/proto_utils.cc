@@ -22,8 +22,8 @@ namespace caffe2 {
 bool ReadStringFromFile(const char* filename, string* str) {
   std::ifstream ifs(filename, std::ios::in);
   if (!ifs) {
-    LOG(ERROR) << "File cannot be opened: " << filename
-                    << " error: " << ifs.rdstate();
+    VLOG(1) << "File cannot be opened: " << filename
+            << " error: " << ifs.rdstate();
     return false;
   }
   ifs.seekg(0, std::ios::end);
@@ -37,8 +37,8 @@ bool ReadStringFromFile(const char* filename, string* str) {
 bool WriteStringToFile(const string& str, const char* filename) {
   std::ofstream ofs(filename, std::ios::out | std::ios::trunc);
   if (!ofs.is_open()) {
-    LOG(ERROR) << "File cannot be created: " << filename
-                    << " error: " << ofs.rdstate();
+    VLOG(1) << "File cannot be created: " << filename
+            << " error: " << ofs.rdstate();
     return false;
   }
   ofs << str;
@@ -146,6 +146,71 @@ void WriteProtoToBinaryFile(const MessageLite& proto, const char* filename) {
 
 #endif  // CAFFE2_USE_LITE_PROTO
 
+ArgumentHelper::ArgumentHelper(const OperatorDef& def) {
+  for (auto& arg : def.arg()) {
+    CAFFE_ENFORCE(
+        arg_map_.count(arg.name()) == 0,
+        "Duplicated argument name found in operator def: ",
+        ProtoDebugString(def));
+    arg_map_[arg.name()] = &arg;
+  }
+}
+
+bool ArgumentHelper::HasArgument(const string& name) const {
+  return arg_map_.count(name);
+}
+
+#define INSTANTIATE_GET_SINGLE_ARGUMENT(T, fieldname)                         \
+  template <>                                                                 \
+  T ArgumentHelper::GetSingleArgument<T>(                                     \
+      const string& name, const T& default_value) const {                     \
+    if (arg_map_.count(name) == 0) {                                          \
+      VLOG(1) << "Using default parameter value " << default_value            \
+              << " for parameter " << name;                                   \
+      return default_value;                                                   \
+    }                                                                         \
+    CAFFE_ENFORCE(                                                            \
+        arg_map_.at(name)->has_##fieldname(),                                 \
+        "Argument ",                                                          \
+        name,                                                                 \
+        " does not have the right field: expected field " #fieldname);        \
+    return arg_map_.at(name)->fieldname();                                    \
+  }                                                                           \
+  template <>                                                                 \
+  bool ArgumentHelper::HasSingleArgumentOfType<T>(const string& name) const { \
+    if (arg_map_.count(name) == 0) {                                          \
+      return false;                                                           \
+    }                                                                         \
+    return arg_map_.at(name)->has_##fieldname();                              \
+  }
+
+INSTANTIATE_GET_SINGLE_ARGUMENT(float, f)
+INSTANTIATE_GET_SINGLE_ARGUMENT(int, i)
+INSTANTIATE_GET_SINGLE_ARGUMENT(bool, i)
+INSTANTIATE_GET_SINGLE_ARGUMENT(int64_t, i)
+INSTANTIATE_GET_SINGLE_ARGUMENT(size_t, i)
+INSTANTIATE_GET_SINGLE_ARGUMENT(string, s)
+#undef INSTANTIATE_GET_SINGLE_ARGUMENT
+
+#define INSTANTIATE_GET_REPEATED_ARGUMENT(T, fieldname)                        \
+  template <>                                                                  \
+  vector<T> ArgumentHelper::GetRepeatedArgument<T>(const string& name) const { \
+    if (arg_map_.count(name) == 0) {                                           \
+      return vector<T>();                                                      \
+    }                                                                          \
+    vector<T> values;                                                          \
+    for (const auto& v : arg_map_.at(name)->fieldname())                       \
+      values.push_back(v);                                                     \
+    return values;                                                             \
+  }
+
+INSTANTIATE_GET_REPEATED_ARGUMENT(float, floats)
+INSTANTIATE_GET_REPEATED_ARGUMENT(int, ints)
+INSTANTIATE_GET_REPEATED_ARGUMENT(bool, ints)
+INSTANTIATE_GET_REPEATED_ARGUMENT(int64_t, ints)
+INSTANTIATE_GET_REPEATED_ARGUMENT(size_t, ints)
+INSTANTIATE_GET_REPEATED_ARGUMENT(string, strings)
+#undef INSTANTIATE_GET_REPEATED_ARGUMENT
 
 #define CAFFE2_MAKE_SINGULAR_ARGUMENT(T, fieldname)                            \
 template <>                                                                    \
@@ -170,7 +235,6 @@ Argument MakeArgument(const string& name, const MessageLite& value) {
   arg.set_s(value.SerializeAsString());
   return arg;
 }
-
 
 #define CAFFE2_MAKE_REPEATED_ARGUMENT(T, fieldname)                            \
 template <>                                                                    \

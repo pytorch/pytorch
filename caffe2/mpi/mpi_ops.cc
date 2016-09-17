@@ -17,6 +17,11 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Allreduce,
     MPI,
     MPIAllreduceOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR_WITH_ENGINE(SendTensor, MPI, MPISendTensorOp<CPUContext>);
+REGISTER_CPU_OPERATOR_WITH_ENGINE(
+    ReceiveTensor,
+    MPI,
+    MPIReceiveTensorOp<CPUContext>);
 
 }  // namespace
 }  // namespace caffe2

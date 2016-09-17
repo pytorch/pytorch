@@ -1,50 +1,34 @@
 python_cc_extension(
-  name="caffe2_python_cpu",
-  srcs=["caffe2_python.cc"],
-  hdrs=["caffe2_python.h"],
+  name="caffe2_pybind11_state",
+  srcs=["pybind_state.cc"],
+  hdrs=Glob(["*.h"]),
   deps = [
-      "//caffe2:all_available_ops",
+      "//caffe2:all_available_cpu_ops",
       "//caffe2:core",
-      "//caffe2/db:db",
   ],
 )
 
 python_cc_extension(
-  name="caffe2_python_gpu",
-  srcs=[
-    "caffe2_python.cc",
-    "caffe2_python_gpu.cc",
-  ],
-  hdrs=["caffe2_python.h"],
+  name="caffe2_pybind11_state_gpu",
+  srcs=["pybind_state.cc", "pybind_state_gpu.cc"],
+  hdrs=Glob(["*.h"]),
   deps = [
       "//caffe2:all_available_ops",
       "//caffe2:core",
-      "//caffe2/db:db",
   ],
-)
-
-python_cc_extension(
-  name="caffe2_pybind11",
-  srcs=[
-    "db.cc",
-  ],
-  deps=[
-      "//caffe2:core",
-      "//third_party:pybind11",
-  ]
 )
 
 py_library(
   name="pycaffe2",
   srcs=Glob(["*.py"], excludes=["*_test.py"]),
   deps=[
-      ":caffe2_python_cpu",
+      ":caffe2_pybind11_state",
       "//caffe/proto:caffe_proto",
       "//caffe2/proto:caffe2_proto",
       "//caffe2/python/mint:mint",
   ],
   optional_deps=[
-      ":caffe2_python_gpu",
+      ":caffe2_pybind11_state_gpu",
   ],
 )
 

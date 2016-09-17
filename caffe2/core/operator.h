@@ -25,40 +25,23 @@ class OperatorBase {
   virtual ~OperatorBase() {}
 
   // Parameter getters. You can use these to get the arguments that you want.
-  bool HasArgument(const string& name) { return (arg_map_.count(name) > 0); }
+  inline bool HasArgument(const string& name) {
+    return arg_helper_.HasArgument(name);
+  }
 
   // Functions that deal with arguments. Basically, this allows us to map an
   // argument name to a specific type of argument that we are trying to access.
   template <typename T>
-  T GetSingleArgument(const string& name, const T& default_value);
-  template <typename T>
-  bool HasSingleArgumentOfType(const string& name);
-  template <typename T>
-  vector<T> GetRepeatedArgument(const string& name);
-
-  template <typename MessageType>
-  MessageType GetMessageArgument(const string& name) {
-    CAFFE_ENFORCE(arg_map_.count(name),
-        "Cannot find parameter named ", name);
-    MessageType message;
-    if (arg_map_[name]->has_s()) {
-      CHECK(message.ParseFromString(arg_map_[name]->s()))
-          << "Faild to parse content from the string";
-    } else {
-      VLOG(1) << "Return empty message for parameter " << name;
-    }
-    return message;
+  inline T GetSingleArgument(const string& name, const T& default_value) {
+    return arg_helper_.GetSingleArgument<T>(name, default_value);
   }
-  template <typename MessageType>
-  vector<MessageType> GetRepeatedMessageArgument(const string& name) {
-    CAFFE_ENFORCE(arg_map_.count(name),
-        "Cannot find parameter named ", name);
-    vector<MessageType> messages(arg_map_[name]->strings_size());
-    for (int i = 0; i < messages.size(); ++i) {
-      CHECK(messages[i].ParseFromString(arg_map_[name]->strings(i)))
-          << "Faild to parse content from the string";
-    }
-    return messages;
+  template <typename T>
+  inline bool HasSingleArgumentOfType(const string& name) {
+    return arg_helper_.HasSingleArgumentOfType<T>(name);
+  }
+  template <typename T>
+  inline vector<T> GetRepeatedArgument(const string& name) {
+    return arg_helper_.GetRepeatedArgument<T>(name);
   }
 
   // Get the inputs and outputs as specific types.
@@ -89,14 +72,21 @@ class OperatorBase {
   inline const vector<const Blob*>& Inputs() const { return inputs_; }
   inline const vector<Blob*>& Outputs() { return outputs_; }
 
-  virtual bool Run() { CAFFE_NOT_IMPLEMENTED; return false; }
+  virtual bool Run() {
+    CAFFE_NOT_IMPLEMENTED;
+  }
   virtual bool RunAsync() { return Run(); }
 
-  inline const OperatorDef& def() { return operator_def_; }
+  inline const OperatorDef& def() const {
+    return operator_def_;
+  }
+  inline const ArgumentHelper& arg_helper() const {
+    return arg_helper_;
+  }
 
  private:
-  CaffeMap<string, const Argument*> arg_map_;
   OperatorDef operator_def_;
+  ArgumentHelper arg_helper_;
   vector<const Blob*> inputs_;
   vector<Blob*> outputs_;
 
@@ -222,17 +212,18 @@ class Operator : public OperatorBase {
 // doesn't need to call Eigen).
 //
 // DispatchHelper provides compile-time generation of nested "if" statements,
-// e.g. `DispatchHelper<FixedSizes<1, 4>>::call(this, block_size);`
+// e.g. `DispatchHelper<FixedValues<1, 4>>::call(this, block_size);`
 // unrolls into:
 //   if (block_size == 1) {
-//     return DoRunWithSize<1>();
+//     return DoRunWithValue<1>();
 //   } else if (block_size = 4) {
-//     return DoRunWithSize<4>();
+//     return DoRunWithValue<4>();
 //   } else {
-//     return DoRunWithSize<-1>();
+//     return DoRunWithValue<-1>();
 //   }`
 //
-// DoRunWithSize implementation can use template arguments to do "if" statements
+// DoRunWithValue implementation can use template arguments to do "if"
+// statements
 // or proxy to functions in math.h which often provide fixed size
 // implementation.
 //
@@ -243,14 +234,14 @@ class Operator : public OperatorBase {
 // templated. We might consider adding static class-level polymorphism later.
 //
 // Convenient macro USE_DISPATCH_HELPER is provided for declaring friendship in
-// case DoRunWithSize or DoRunWithType are declared non-public.
+// case DoRunWithValue or DoRunWithType are declared non-public.
 
 #define USE_DISPATCH_HELPER                        \
   template <typename Sizes, typename... ExtraArgs> \
   friend struct DispatchHelper
 
-template <int... Sizes>
-struct FixedSizes {};
+template <int... Values>
+struct FixedValues {};
 
 template <typename... Types>
 struct TensorTypes {};
@@ -258,23 +249,23 @@ struct TensorTypes {};
 template <typename Sizes, typename... ExtraArgs>
 struct DispatchHelper;
 
-template <int FirstSize, int... Sizes, typename... ExtraArgs>
-struct DispatchHelper<FixedSizes<FirstSize, Sizes...>, ExtraArgs...> {
+template <int FirstVal, int... Values, typename... ExtraArgs>
+struct DispatchHelper<FixedValues<FirstVal, Values...>, ExtraArgs...> {
   template <typename Op>
-  static bool call(Op* op, TIndex size) {
-    if (FirstSize == size) {
-      return op->template DoRunWithSize<ExtraArgs..., FirstSize>();
+  static bool call(Op* op, int value) {
+    if (FirstVal == value) {
+      return op->template DoRunWithValue<ExtraArgs..., FirstVal>();
     }
-    return DispatchHelper<FixedSizes<Sizes...>, ExtraArgs...>::
-        template call<Op>(op, size);
+    return DispatchHelper<FixedValues<Values...>, ExtraArgs...>::template call<
+        Op>(op, value);
   }
 };
 
 template <typename... ExtraArgs>
-struct DispatchHelper<FixedSizes<>, ExtraArgs...> {
+struct DispatchHelper<FixedValues<>, ExtraArgs...> {
   template <typename Op>
   static bool call(Op* op, TIndex size) {
-    return op->template DoRunWithSize<ExtraArgs..., -1>();
+    return op->template DoRunWithValue<ExtraArgs..., -1>();
   }
 };
 
@@ -299,7 +290,6 @@ struct DispatchHelper<TensorTypes<>, ExtraArgs...> {
   template <typename Op>
   static bool call(Op* op, const TypeMeta& meta) {
     CAFFE_THROW("Unsupported type of tensor: ", meta.name());
-    return false;
   }
   template <typename Op, typename Context>
   static bool call(Op* op, const Tensor<Context>& tensor) {

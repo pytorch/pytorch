@@ -28,7 +28,6 @@ class NetBase {
  public:
   NetBase(const NetDef& net_def, Workspace* ws);
   virtual ~NetBase() {}
-  virtual bool Verify() = 0;
   virtual bool Run() = 0;
 
   // RunAsync runs the net on the current stream, but potentially does
@@ -36,9 +35,21 @@ class NetBase {
   // external synchronization (with respect to the current stream)
   // after execution.
   virtual bool RunAsync() { return Run(); }
-  virtual void TEST_Benchmark(const int warmup_runs, const int main_runs,
-                              const bool run_individual) {
+  /**
+   * Benchmarks a network.
+   *
+   * This function returns a vector of float recording the number of milli-
+   * seconds spent during the benchmark. The 0-th item is the time spent per
+   * each network run, and if a net instantiation supports run_individual,
+   * the remainder of the vector returns the number of milliseconds spent per
+   * opeartor.
+   */
+  virtual vector<float> TEST_Benchmark(
+      const int warmup_runs,
+      const int main_runs,
+      const bool run_individual) {
     LOG(ERROR) << "Benchmark not implemented for this net type.";
+    return vector<float>();
   }
 
   inline const vector<string>& external_output() const {
@@ -69,11 +80,12 @@ unique_ptr<NetBase> CreateNet(const NetDef& net_def, Workspace* ws);
 class SimpleNet final : public NetBase {
  public:
   SimpleNet(const NetDef& net_def, Workspace* ws);
-  bool Verify() override;
   bool Run() override;
   bool RunAsync() override;
-  void TEST_Benchmark(const int warmup_runs, const int main_runs,
-                      const bool run_individual) override;
+  vector<float> TEST_Benchmark(
+      const int warmup_runs,
+      const int main_runs,
+      const bool run_individual) override;
 
  protected:
   vector<unique_ptr<OperatorBase> > operators_;
@@ -95,15 +107,16 @@ class DAGNetBase : public NetBase {
   using ExecutionChains = std::unordered_map<int, std::vector<int>>;
   DAGNetBase(const NetDef& net_def, Workspace* ws);
   ~DAGNetBase();
-  bool Verify() override;
   bool Run() override;
   // WorkerFunction() is a function wrapper to allow us to run worker threads.
   // It checks out one ready-to-run operator from the job queue, runs it,
   // notifies all its children, and for any children that is ready, enqueues
   // it to the job queue.
   virtual void WorkerFunction();
-  void TEST_Benchmark(const int warmup_runs, const int main_runs,
-                      const bool run_individual) override;
+  vector<float> TEST_Benchmark(
+      const int warmup_runs,
+      const int main_runs,
+      const bool run_individual) override;
 
   const ExecutionChains& TEST_execution_chains() const {
     return execution_chains_;

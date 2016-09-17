@@ -16,8 +16,8 @@ struct SigmoidCPUFunctor {
 
 struct SigmoidGradientCPUFunctor {
   template <typename T>
-  inline void operator()(const int n, const T* y, const T* dy,
-                         T* dx, CPUContext* device_context) {
+  inline void
+  Run(const int n, const T* y, const T* dy, T* dx, CPUContext* device_context) {
     for (int i = 0; i < n; ++i) {
       dx[i] = dy[i] * y[i] * (1. - y[i]);
     }
@@ -29,8 +29,11 @@ REGISTER_CPU_OPERATOR(
     Sigmoid, UnaryElementwiseOp<
         TensorTypes<float>, CPUContext, SigmoidCPUFunctor>);
 REGISTER_CPU_OPERATOR(
-    SigmoidGradient, BinaryElementwiseOp<TensorTypes<float>, CPUContext,
-                                     SigmoidGradientCPUFunctor>);
+    SigmoidGradient,
+    BinaryElementwiseOp<
+        TensorTypes<float>,
+        CPUContext,
+        WithoutBroadcast<SigmoidGradientCPUFunctor>>);
 
 // Input: X, output: Y
 OPERATOR_SCHEMA(Sigmoid)

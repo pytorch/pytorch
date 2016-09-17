@@ -1,7 +1,158 @@
 #include "caffe2/operators/elementwise_op.h"
-#include "caffe2/core/operator_gradient.h"
 
 namespace caffe2 {
+
+// For arithmetic operators, Eigen provides a good way to vectorize even
+// when broadcasting.
+#define EIGEN_FUNCTOR(name, eigen_op, input_type, output_type)               \
+  struct Eigen##name##Functor {                                              \
+    template <int b_is_scalar, typename T, typename R>                       \
+    inline void Run(size_t n, const T* a, const T* b, R* out, CPUContext*) { \
+      if (b_is_scalar) {                                                     \
+        EigenVectorArrayMap<R>(out, n) =                                     \
+            eigen_op((ConstEigenVectorArrayMap<T>(a, n)), (b[0]));           \
+      } else {                                                               \
+        EigenVectorArrayMap<R>(out, n) = eigen_op(                           \
+            (ConstEigenVectorArrayMap<T>(a, n)),                             \
+            (ConstEigenVectorArrayMap<T>(b, n)));                            \
+      }                                                                      \
+    }                                                                        \
+    template <typename T, typename R>                                        \
+    void RunWithBroadcast(                                                   \
+        const T* a,                                                          \
+        const T* b,                                                          \
+        R* out,                                                              \
+        size_t pre,                                                          \
+        size_t n,                                                            \
+        CPUContext*) {                                                       \
+      EigenArrayMap<R>(out, n, pre) = eigen_op(                              \
+          (ConstEigenArrayMap<T>(a, n, pre).colwise()),                      \
+          (ConstEigenVectorArrayMap<T>(b, n)));                              \
+    }                                                                        \
+    template <typename T, typename R>                                        \
+    void RunWithBroadcast2(                                                  \
+        const T* a,                                                          \
+        const T* b,                                                          \
+        R* out,                                                              \
+        size_t pre,                                                          \
+        size_t n,                                                            \
+        size_t post,                                                         \
+        CPUContext*) {                                                       \
+      for (int i = 0; i < pre; ++i) {                                        \
+        EigenArrayMap<R>(out + i * n * post, post, n) = eigen_op(            \
+            (ConstEigenArrayMap<T>(a + i * n * post, post, n).rowwise()),    \
+            (Eigen::Map<const Eigen::Array<T, 1, Eigen::Dynamic>>(b, n)));   \
+      }                                                                      \
+    }                                                                        \
+  };                                                                         \
+  REGISTER_CPU_OPERATOR(                                                     \
+      name,                                                                  \
+      BinaryElementwiseOp<                                                   \
+          input_type,                                                        \
+          CPUContext,                                                        \
+          Eigen##name##Functor,                                              \
+          output_type>)
+
+// For some comparison and logical operators, eigen does not have vectorized
+// math so we need to improvise.
+#define NAIVE_FUNCTOR(name, op, input_type, output_type)                       \
+  struct Naive##name##Functor {                                                \
+    template <int b_is_scalar, typename T, typename R>                         \
+    inline void Run(size_t n, const T* a, const T* b, R* out, CPUContext*) {   \
+      for (int i = 0; i < n; ++i) {                                            \
+        out[i] = op(a[i], b[b_is_scalar ? 0 : i]);                             \
+      }                                                                        \
+    }                                                                          \
+    template <typename T, typename R>                                          \
+    void RunWithBroadcast(                                                     \
+        const T* a,                                                            \
+        const T* b,                                                            \
+        R* out,                                                                \
+        size_t pre,                                                            \
+        size_t n,                                                              \
+        CPUContext*) {                                                         \
+      for (int i = 0; i < pre; ++i) {                                          \
+        for (int j = 0; j < n; ++j) {                                          \
+          out[i * n + j] = op(a[i * n + j], b[j]);                             \
+        }                                                                      \
+      }                                                                        \
+    }                                                                          \
+    template <typename T, typename R>                                          \
+    void RunWithBroadcast2(                                                    \
+        const T* a,                                                            \
+        const T* b,                                                            \
+        R* out,                                                                \
+        size_t pre,                                                            \
+        size_t n,                                                              \
+        size_t post,                                                           \
+        CPUContext*) {                                                         \
+      for (int i = 0; i < pre; ++i) {                                          \
+        for (int j = 0; j < n; ++j) {                                          \
+          for (int k = 0; k < post; ++k) {                                     \
+            out[(i * n + j) * post + k] = op(a[(i * n + j) * post + k], b[j]); \
+          }                                                                    \
+        }                                                                      \
+      }                                                                        \
+    }                                                                          \
+  };                                                                           \
+  REGISTER_CPU_OPERATOR(                                                       \
+      name,                                                                    \
+      BinaryElementwiseOp<                                                     \
+          input_type,                                                          \
+          CPUContext,                                                          \
+          Naive##name##Functor,                                                \
+          output_type>)
+
+// See the operations supported here:
+// https://eigen.tuxfamily.org/dox-devel/group__QuickRefPage.html
+#define EIGEN_ADD(x, y) ((x) + (y))
+EIGEN_FUNCTOR(Add, EIGEN_ADD, NumericTypes, SameTypeAsInput);
+#undef EIGEN_ADD
+#define EIGEN_SUB(x, y) ((x) - (y))
+EIGEN_FUNCTOR(Sub, EIGEN_SUB, NumericTypes, SameTypeAsInput);
+#undef EIGEN_SUB
+#define EIGEN_MUL(x, y) ((x) * (y))
+EIGEN_FUNCTOR(Mul, EIGEN_MUL, NumericTypes, SameTypeAsInput);
+#undef EIGEN_MUL
+#define EIGEN_DIV(x, y) ((x) / (y))
+EIGEN_FUNCTOR(Div, EIGEN_DIV, NumericTypes, SameTypeAsInput);
+#undef EIGEN_DIV
+
+#define NAIVE_LT(x, y) ((x) < (y))
+NAIVE_FUNCTOR(LT, NAIVE_LT, NumericTypes, FixedType<bool>);
+#undef NAIVE_LT
+#define NAIVE_LE(x, y) ((x) <= (y))
+NAIVE_FUNCTOR(LE, NAIVE_LE, NumericTypes, FixedType<bool>);
+#undef NAIVE_LE
+#define NAIVE_GT(x, y) ((x) > (y))
+NAIVE_FUNCTOR(GT, NAIVE_GT, NumericTypes, FixedType<bool>);
+#undef NAIVE_GT
+#define NAIVE_GE(x, y) ((x) >= (y))
+NAIVE_FUNCTOR(GE, NAIVE_GE, NumericTypes, FixedType<bool>);
+#undef NAIVE_GE
+#define NAIVE_EQ(x, y) ((x) == (y))
+NAIVE_FUNCTOR(EQ, NAIVE_EQ, IntTypes, FixedType<bool>);
+#undef NAIVE_EQ
+#define NAIVE_AND(x, y) ((x) & (y))
+NAIVE_FUNCTOR(And, NAIVE_AND, BoolTypes, FixedType<bool>);
+#undef NAIVE_AND
+#define NAIVE_OR(x, y) ((x) | (y))
+NAIVE_FUNCTOR(Or, NAIVE_OR, BoolTypes, FixedType<bool>);
+#undef NAIVE_OR
+#define NAIVE_XOR(x, y) ((x) ^ (y))
+NAIVE_FUNCTOR(Xor, NAIVE_XOR, BoolTypes, FixedType<bool>);
+#undef NAIVE_XOR
+
+struct NotFunctor {
+  inline void operator()(const int n, const bool* x, bool* y, CPUContext*) {
+    for (int i = 0; i < n; ++i) {
+      y[i] = !x[i];
+    }
+  }
+};
+REGISTER_CPU_OPERATOR(
+    Not,
+    UnaryElementwiseOp<BoolTypes, CPUContext, NotFunctor>);
 
 template <>
 bool DivGradientOp<float, CPUContext>::RunOnDevice() {
@@ -28,174 +179,6 @@ bool DivGradientOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
-namespace {
-
-REGISTER_CPU_OPERATOR(Add, AddOp<CPUContext>);
-REGISTER_CPU_OPERATOR(Sub, SubOp<CPUContext>);
-REGISTER_CPU_OPERATOR(Mul, MulOp<CPUContext>);
-REGISTER_CPU_OPERATOR(Div, DivOp<CPUContext>);
 REGISTER_CPU_OPERATOR(DivGradient, DivGradientOp<float, CPUContext>);
 
-const char* kBroadcastDoc = R"DOC(
-If necessary the right-hand-side argument will be broadcasted to match the
-shape of left-hand-side argument. Only suffix matching is supported for now,
-1-dim expansion doesn't work yet.
-
-More precisely tensors A and B" can be operated on iff
-`shape(A)[-len(shape(B)):] == shape(B)`
-
-Argument `broadcast=1` needs to be passed to enable broadcasting.
-)DOC";
-
-std::function<void(OpSchema&)> MathDocGenerator(const char* name) {
-  return [=](OpSchema& schema) {
-    string doc = R"DOC(
-Performs element-wise binary {name} (with limited broadcast support).
-{broadcast_doc})DOC";
-    ReplaceAll(doc, "{name}", name);
-    ReplaceAll(doc, "{broadcast_doc}", kBroadcastDoc);
-    schema.SetDoc(doc);
-    schema.Arg("broadcast", "Pass 1 to enable broadcasting");
-    schema.Input(
-        0,
-        "A",
-        "First operand, should share the type with the second operand.");
-    schema.Input(
-        1,
-        "B",
-        "Second operand. With broadcasting can be of smaller size than A, "
-        "without a few first dimensions more specifically. If broadcasting is "
-        "disabled should be of exactly the same size as A");
-    schema.Output(0, "C", "Result, has same dimensions and type as A");
-  };
-}
-
-OPERATOR_SCHEMA(Add)
-    .NumInputs(2)
-    .NumOutputs(1)
-    .AllowInplace({{0, 0}, {1, 0}})
-    .FillUsing(MathDocGenerator("addition"));
-OPERATOR_SCHEMA(Sub)
-    .NumInputs(2)
-    .NumOutputs(1)
-    .AllowInplace({{0, 0}, {1, 0}})
-    .FillUsing(MathDocGenerator("subtraction"));
-OPERATOR_SCHEMA(Mul)
-    .NumInputs(2)
-    .NumOutputs(1)
-    .AllowInplace({{0, 0}, {1, 0}})
-    .FillUsing(MathDocGenerator("multiplication"));
-OPERATOR_SCHEMA(Div)
-    .NumInputs(2)
-    .NumOutputs(1)
-    .AllowInplace({{0, 0}})
-    .FillUsing(MathDocGenerator("division"));
-OPERATOR_SCHEMA(DivGradient)
-    .NumInputs(3)
-    .NumOutputs(2)
-    .AllowInplace({{0, 0}});
-
-class GetAddGradient : public GradientMakerBase {
-  using GradientMakerBase::GradientMakerBase;
-  vector<OperatorDef> GetGradientDefs() override {
-    // TODO(jiayq): write gradient for the broadcast case.
-    CAFFE_ENFORCE(!HasArgument(Def(), "broadcast"),
-                  "Gradient not ready yet for Add with broadcasting.");
-    SetDense(0, GO(0));
-    SetDense(1, GO(0));
-    return vector<OperatorDef>();
-  }
-};
-REGISTER_GRADIENT(Add, GetAddGradient);
-
-// TODO(jiayq): Although we have Sub gradient implemented, we are still missing
-// the Negative unary operator to be implemented.
-class GetSubGradient : public GradientMakerBase {
-  using GradientMakerBase::GradientMakerBase;
-  vector<OperatorDef> GetGradientDefs() override {
-    // TODO(jiayq): write gradient for the broadcast case.
-    CAFFE_ENFORCE(!HasArgument(Def(), "broadcast"),
-                  "Gradient not ready yet for Sub with broadcasting.");
-    SetDense(0, GO(0));
-    return SingleGradientDef(
-        "Negative", "", vector<string>{GO(0)}, vector<string>{GI(1)});
-  }
-};
-REGISTER_GRADIENT(Sub, GetSubGradient);
-
-class GetMulGradient : public GradientMakerBase {
-  using GradientMakerBase::GradientMakerBase;
-  vector<OperatorDef> GetGradientDefs() override {
-    // TODO(jiayq): write gradient for the broadcast case.
-    CAFFE_ENFORCE(!HasArgument(Def(), "broadcast"),
-                  "Gradient not ready yet for Mul with broadcasting.");
-    CAFFE_ENFORCE(
-        Def().input(0) != Def().output(0) && Def().input(1) != Def().output(0),
-        "Gradient computation cannot be carried out if Mul uses in-place "
-        "computation: ", ProtoDebugString(Def()));
-    return vector<OperatorDef>{
-        CreateOperatorDef(
-            "Mul", "",
-            vector<string>{I(1), GO(0)},
-            vector<string>{GI(0)}),
-        CreateOperatorDef(
-            "Mul", "",
-            vector<string>{I(0), GO(0)},
-            vector<string>{GI(1)}),
-    };
-  }
-};
-REGISTER_GRADIENT(Mul, GetMulGradient);
-
-class GetDivGradient : public GradientMakerBase {
-  using GradientMakerBase::GradientMakerBase;
-  vector<OperatorDef> GetGradientDefs() override {
-    // TODO(jiayq): write gradient for the broadcast case.
-    CAFFE_ENFORCE(!HasArgument(Def(), "broadcast"),
-                  "Gradient not ready yet for Div with broadcasting.");
-    return SingleGradientDef(
-            "DivGradient", "",
-            vector<string>{I(1), O(0), GO(0)},
-            vector<string>{GI(0), GI(1)});
-  }
-};
-REGISTER_GRADIENT(Div, GetDivGradient);
-
-std::function<void(OpSchema&)> ComparisonDocGenerator(const char* name) {
-  return [=](OpSchema& schema) {
-    string doc = R"DOC(
-Performs element-wise comparison `{name}` (with limited broadcast support).
-{broadcast_doc})DOC";
-    ReplaceAll(doc, "{name}", name);
-    ReplaceAll(doc, "{broadcast_doc}", kBroadcastDoc);
-    schema.SetDoc(doc);
-    schema.Arg("broadcast", "Pass 1 to enable broadcasting");
-    schema.Input(
-        0,
-        "A",
-        "First operand, should share the type with the second operand.");
-    schema.Input(
-        1,
-        "B",
-        "Second operand. With broadcasting can be of smaller size than A, "
-        "without a few first dimensions more specifically. If broadcasting is "
-        "disabled should be of exactly the same size as A");
-    schema.Output(0, "C", "Result, has same dimensions and A and type `bool`");
-  };
-}
-
-#define CAFFE2_REGISTER_BINARY_COMPARISON_OP(name, symbol)    \
-  REGISTER_CPU_OPERATOR(name, name##Op<CPUContext>);          \
-  OPERATOR_SCHEMA(name).NumInputs(2).NumOutputs(1).FillUsing( \
-      ComparisonDocGenerator(symbol));                        \
-  SHOULD_NOT_DO_GRADIENT(name)
-
-CAFFE2_REGISTER_BINARY_COMPARISON_OP(LT, "<");
-CAFFE2_REGISTER_BINARY_COMPARISON_OP(LE, "<=");
-CAFFE2_REGISTER_BINARY_COMPARISON_OP(GT, ">");
-CAFFE2_REGISTER_BINARY_COMPARISON_OP(GE, ">=");
-
-#undef REGISTER_BINIARY_COMPARISON_OP
-
-}  // namespace
 }  // namespace caffe2

@@ -11,13 +11,21 @@ class TestCounterOps(TestCase):
     def test_counter_ops(self):
         workspace.RunOperatorOnce(core.CreateOperator(
             'CreateCounter', [], ['c'], init_count=1))
+
         workspace.RunOperatorOnce(core.CreateOperator(
             'CountDown', ['c'], ['t1']))  # 1 -> 0
         assert not workspace.FetchBlob('t1')
 
         workspace.RunOperatorOnce(core.CreateOperator(
-            'CountDown', ['c'], ['t2']))  # 0 -> 0
+            'CountDown', ['c'], ['t2']))  # 0 -> -1
         assert workspace.FetchBlob('t2')
+
+        workspace.RunOperatorOnce(core.CreateOperator(
+            'CountUp', ['c'], ['t21']))  # -1 -> 0
+        assert workspace.FetchBlob('t21') == -1
+        workspace.RunOperatorOnce(core.CreateOperator(
+            'RetrieveCount', ['c'], ['t22']))
+        assert workspace.FetchBlob('t22') == 0
 
         workspace.RunOperatorOnce(core.CreateOperator(
             'ResetCounter', ['c'], [], init_count=1))  # -> 1
@@ -26,11 +34,13 @@ class TestCounterOps(TestCase):
         assert not workspace.FetchBlob('t3')
 
         workspace.RunOperatorOnce(core.CreateOperator(
-            'ConstantBoolFill', [], ['t4'], value=0.0, shape=[]))
+            'ConstantFill', [], ['t4'], value=False, shape=[],
+            dtype=core.DataType.BOOL))
         assert workspace.FetchBlob('t4') == workspace.FetchBlob('t1')
 
         workspace.RunOperatorOnce(core.CreateOperator(
-            'ConstantBoolFill', [], ['t5'], value=1.0, shape=[]))
+            'ConstantFill', [], ['t5'], value=True, shape=[],
+            dtype=core.DataType.BOOL))
         assert workspace.FetchBlob('t5') == workspace.FetchBlob('t2')
 
         assert workspace.RunOperatorOnce(core.CreateOperator(

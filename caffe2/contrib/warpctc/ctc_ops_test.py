@@ -6,10 +6,9 @@ import unittest
 import numpy as np
 from caffe2.proto import caffe2_pb2
 
-from caffe2.python import core, workspace, dyndep
+from caffe2.python import core, workspace, dyndep, test_util
 
 dyndep.InitOpsLibrary('@/caffe2/caffe2/contrib/warpctc:ctc_ops')
-
 workspace.GlobalInit(["python"])
 
 
@@ -20,7 +19,7 @@ def softmax(w):
     return dist
 
 
-class CTCOpsTest(unittest.TestCase):
+class CTCOpsTest(test_util.TestCase):
     def verify_cost(self, device_option):
         alphabet_size = 5
         N = 1
@@ -41,17 +40,16 @@ class CTCOpsTest(unittest.TestCase):
         net.CTC(["inputs", "labels", "label_lengths", "input_lengths"],
                 ["inputs_grad", "costs", "workspace"],
                 device_option=device_option)
-        workspace.FeedBlob("inputs", inputs, device_option=device_option)
-        workspace.FeedBlob("labels", labels)
-        workspace.FeedBlob("label_lengths", label_lengths)
-        workspace.FeedBlob("input_lengths", input_lengths)
-        self.assertEqual(
-            workspace.RunNetOnce(net.Proto().SerializeToString()), True)
+        self.ws.create_blob("inputs").feed(inputs, device_option=device_option)
+        self.ws.create_blob("labels").feed(labels)
+        self.ws.create_blob("label_lengths").feed(label_lengths)
+        self.ws.create_blob("input_lengths").feed(input_lengths)
+        self.ws.run(net)
         probs = softmax(inputs)
         expected = probs[0, 0, 1] * probs[1, 0, 2]
-        self.assertEqual(workspace.FetchBlob("costs").shape, (N,))
-        self.assertEqual(workspace.FetchBlob("costs").dtype, np.float32)
-        cost = workspace.FetchBlob("costs")[0]
+        self.assertEqual(self.ws.blobs["costs"].fetch().shape, (N,))
+        self.assertEqual(self.ws.blobs["costs"].fetch().dtype, np.float32)
+        cost = self.ws.blobs["costs"].fetch()[0]
         print(cost)
         self.assertAlmostEqual(np.exp(-cost), expected)
 

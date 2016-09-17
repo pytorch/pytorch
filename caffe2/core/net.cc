@@ -7,6 +7,11 @@
 #include "caffe2/core/timer.h"
 #include "caffe2/proto/caffe2.pb.h"
 
+CAFFE2_DEFINE_bool(
+    caffe2_disable_chaining,
+    true,
+    "Disable chaining logic (some latent multi-device issues).");
+
 namespace caffe2 {
 
 namespace {
@@ -35,6 +40,15 @@ Ancestry computeAncestors(
             << std::vector<OpIndex>(ancestors[i].begin(), ancestors[i].end());
   }
   return ancestors;
+}
+
+DAGNetBase::ExecutionChains singleChains(
+    const std::vector<internal::OperatorNode>& nodes) {
+  DAGNetBase::ExecutionChains chains;
+  for (auto i = 0; i < nodes.size(); ++i) {
+    chains[i] = {i};
+  }
+  return chains;
 }
 
 DAGNetBase::ExecutionChains computeChains(
@@ -180,21 +194,18 @@ SimpleNet::SimpleNet(const NetDef& net_def, Workspace* ws)
       OperatorDef temp_def(operator_def);
       temp_def.mutable_device_option()->CopyFrom(net_def.device_option());
       operators_.emplace_back(CreateOperator(temp_def, ws));
+      CAFFE_ENFORCE(
+          operators_.back() != nullptr,
+          "Cannot create operator for def: ",
+          ProtoDebugString(temp_def));
     } else {
       operators_.emplace_back(CreateOperator(operator_def, ws));
+      CAFFE_ENFORCE(
+          operators_.back() != nullptr,
+          "Cannot create operator for def: ",
+          ProtoDebugString(operator_def));
     }
   }
-}
-
-bool SimpleNet::Verify() {
-  for (int i = 0; i < operators_.size(); ++i) {
-    auto& op = operators_[i];
-    if (op.get() == nullptr) {
-      LOG(ERROR) << "Found empty operator #" << i << ".";
-      return false;
-    }
-  }
-  return true;
 }
 
 bool SimpleNet::Run() {
@@ -225,9 +236,10 @@ bool SimpleNet::RunAsync() {
   return true;
 }
 
-
-void SimpleNet::TEST_Benchmark(const int warmup_runs, const int main_runs,
-                               const bool run_individual) {
+vector<float> SimpleNet::TEST_Benchmark(
+    const int warmup_runs,
+    const int main_runs,
+    const bool run_individual) {
   LOG(INFO) << "Starting benchmark.";
   LOG(INFO) << "Running warmup runs.";
   CAFFE_ENFORCE(
@@ -279,9 +291,12 @@ void SimpleNet::TEST_Benchmark(const int warmup_runs, const int main_runs,
     int idx = 0;
     for (auto& op : operators_) {
       const string& op_type = op->def().type();
-      LOG(INFO) << "Operator #" << idx << " ("
-                     << op->def().name() << ", " << op_type << ") "
-                     << time_per_op[idx] / main_runs << " ms/iter";
+      const string& print_name =
+          (op->def().name().size()
+               ? op->def().name()
+               : (op->def().output_size() ? op->def().output(0) : "NO_OUTPUT"));
+      LOG(INFO) << "Operator #" << idx << " (" << print_name << ", " << op_type
+                << ") " << time_per_op[idx] / main_runs << " ms/iter";
       ++idx;
     }
     LOG(INFO) << "Time per operator type:";
@@ -291,6 +306,12 @@ void SimpleNet::TEST_Benchmark(const int warmup_runs, const int main_runs,
                      << " " << item.first;
     }
   }
+  // We will reuse time_per_op to return the result of BenchmarkNet.
+  for (int i = 0; i < time_per_op.size(); ++i) {
+    time_per_op[i] /= main_runs;
+  }
+  time_per_op.insert(time_per_op.begin(), millis / main_runs);
+  return time_per_op;
 }
 
 DAGNetBase::DAGNetBase(const NetDef& net_def, Workspace* ws)
@@ -308,8 +329,16 @@ DAGNetBase::DAGNetBase(const NetDef& net_def, Workspace* ws)
       OperatorDef temp_def(op_def);
       temp_def.mutable_device_option()->CopyFrom(net_def.device_option());
       operator_nodes_[idx].operator_ = CreateOperator(temp_def, ws);
+      CAFFE_ENFORCE(
+          operator_nodes_[idx].operator_ != nullptr,
+          "Cannot create operator for def: ",
+          ProtoDebugString(temp_def));
     } else {
       operator_nodes_[idx].operator_ = CreateOperator(op_def, ws);
+      CAFFE_ENFORCE(
+          operator_nodes_[idx].operator_ != nullptr,
+          "Cannot create operator for def: ",
+          ProtoDebugString(op_def));
     }
     // Check the inputs, and set up parents if necessary. This addressese the
     // read after write case.
@@ -378,7 +407,9 @@ DAGNetBase::DAGNetBase(const NetDef& net_def, Workspace* ws)
     c.erase(std::remove(c.begin(), c.end(), i), c.end());
   }
 
-  execution_chains_ = computeChains(operator_nodes_);
+  execution_chains_ =
+      (FLAGS_caffe2_disable_chaining ? singleChains(operator_nodes_)
+                                     : computeChains(operator_nodes_));
 
   // TODO: do we want to make sure that there are no loops in the
   // dependency graph?
@@ -411,16 +442,6 @@ DAGNetBase::~DAGNetBase() {
   for (auto& worker : workers_) {
     worker.join();
   }
-}
-
-bool DAGNetBase::Verify() {
-  for (int i = 0; i < operator_nodes_.size(); ++i) {
-    if (operator_nodes_[i].operator_.get() == nullptr) {
-      LOG(ERROR) << "Found empty operator #" << i << ".";
-      return false;
-    }
-  }
-  return true;
 }
 
 bool DAGNetBase::Run() {
@@ -525,8 +546,10 @@ void DAGNetBase::WorkerFunction() {
   }
 }
 
-void DAGNetBase::TEST_Benchmark(const int warmup_runs, const int main_runs,
-                            const bool run_individual) {
+vector<float> DAGNetBase::TEST_Benchmark(
+    const int warmup_runs,
+    const int main_runs,
+    const bool run_individual) {
   LOG(INFO) << "Starting benchmark.";
   LOG(INFO) << "Running warmup runs.";
   CAFFE_ENFORCE(
@@ -557,6 +580,7 @@ void DAGNetBase::TEST_Benchmark(const int warmup_runs, const int main_runs,
     LOG(INFO) << "DAGNet does not do per-op benchmark. To do so, "
                       "switch to a simple net type.";
   }
+  return vector<float>{millis / main_runs};
 }
 
 class DAGNet : public DAGNetBase {

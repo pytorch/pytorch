@@ -1,6 +1,7 @@
 #include <cmath>
 
 #include "caffe2/operators/elementwise_op.h"
+#include "caffe2/utils/math.h"
 
 namespace caffe2 {
 
@@ -8,19 +9,22 @@ struct TanhCPUFunctor {
   template <typename T>
   inline void operator()(const int n, const T* x,
                          T* y, CPUContext* device_context) {
-    for (int i = 0; i < n; ++i) {
-      y[i] = tanh(x[i]);
-    }
+#ifdef CAFFE2_USE_ACCELERATE
+    vvtanhf(y, x, &n);
+#else
+    ConstEigenVectorArrayMap<T> x_arr(x, n);
+    EigenVectorMap<T>(y, n) = 1 - 2 * ((x_arr * 2).exp() + 1).inverse();
+#endif
   }
 };
 
 struct TanhGradientCPUFunctor {
   template <typename T>
-  inline void operator()(const int n, const T* y, const T* dy,
-                         T* dx, CPUContext* device_context) {
-    for (int i = 0; i < n; ++i) {
-      dx[i] = dy[i] * (1 - y[i] * y[i]);
-    }
+  inline void
+  Run(const int n, const T* y, const T* dy, T* dx, CPUContext* device_context) {
+    ConstEigenVectorArrayMap<T> dy_arr(dy, n);
+    ConstEigenVectorArrayMap<T> y_arr(y, n);
+    EigenVectorMap<T>(dx, n) = dy_arr * (1 - y_arr * y_arr);
   }
 };
 
@@ -28,8 +32,11 @@ namespace {
 REGISTER_CPU_OPERATOR(
     Tanh, UnaryElementwiseOp<TensorTypes<float>, CPUContext, TanhCPUFunctor>);
 REGISTER_CPU_OPERATOR(
-    TanhGradient, BinaryElementwiseOp<TensorTypes<float>, CPUContext,
-                                     TanhGradientCPUFunctor>);
+    TanhGradient,
+    BinaryElementwiseOp<
+        TensorTypes<float>,
+        CPUContext,
+        WithoutBroadcast<TanhGradientCPUFunctor>>);
 
 OPERATOR_SCHEMA(Tanh)
   .NumInputs(1)
@@ -41,7 +48,7 @@ operation can be done in an in-place fashion too, by providing the same input
 and output blobs.
 )DOC")
   .Input(0, "input", "1-D input tensor")
-  .Output(1, "output", "The hyperbolic tangent values of the input tensor "
+  .Output(0, "output", "The hyperbolic tangent values of the input tensor "
           "computed element-wise");
 
 OPERATOR_SCHEMA(TanhGradient).NumInputs(2).NumOutputs(1).AllowInplace({{1, 0}});

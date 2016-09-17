@@ -3,7 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python.caffe2_pybind11 import create_db, Mode
+from caffe2.python import workspace
 
 import os
 import tempfile
@@ -18,7 +18,8 @@ class TestDB(unittest.TestCase):
                      for i in range(1, 10)]
 
     def testSimple(self):
-        db = create_db("minidb", self.file_name, Mode.write)
+        db = workspace.C.create_db(
+            "minidb", self.file_name, workspace.C.Mode.write)
 
         for key, value in self.data:
             transaction = db.new_transaction()
@@ -27,7 +28,8 @@ class TestDB(unittest.TestCase):
 
         del db  # should close DB
 
-        db = create_db("minidb", self.file_name, Mode.read)
+        db = workspace.C.create_db(
+            "minidb", self.file_name, workspace.C.Mode.read)
         cursor = db.new_cursor()
         data = []
         while cursor.valid():

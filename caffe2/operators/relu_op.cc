@@ -10,9 +10,14 @@ bool ReluOp<float, CPUContext>::RunOnDevice() {
   auto* Y = Output(0);
   DCHECK_GT(X.size(), 0);
   Y->ResizeLike(X);
+
+#ifdef CAFFE2_USE_ACCELERATE
+  const float zero = 0.0f;
+  vDSP_vthres(X.data<float>(), 1, &zero, Y->mutable_data<float>(), 1, X.size());
+#else
   EigenVectorMap<float>(Y->mutable_data<float>(), X.size()) =
       ConstEigenVectorMap<float>(X.data<float>(), X.size()).cwiseMax(0.f);
-
+#endif
   /* Naive implementation
   const float* Xdata = X.data<float>();
   float* Ydata = Y->mutable_data<float>();

@@ -12,9 +12,13 @@ namespace caffe2 {
 template <typename T, class Context, typename PoolType>
 class PoolOp final : public ConvPoolOpBase<Context> {
  public:
-  USE_CONV_POOL_BASE_FUNCTIONS;
+  USE_CONV_POOL_BASE_FUNCTIONS(Context);
   PoolOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<Context>(operator_def, ws) {}
+      : ConvPoolOpBase<Context>(operator_def, ws) {
+    CAFFE_ENFORCE(
+        dilation_h_ == 1 && dilation_w_ == 1,
+        "Pooling op does not support dilation right now.");
+  }
   ~PoolOp() {}
 
   bool RunOnDeviceWithOrderNCHW() override;
@@ -27,7 +31,7 @@ class PoolOp final : public ConvPoolOpBase<Context> {
 template <typename T, class Context, class PoolType>
 class PoolGradientOp final : public ConvPoolOpBase<Context> {
  public:
-  USE_CONV_POOL_BASE_FUNCTIONS;
+  USE_CONV_POOL_BASE_FUNCTIONS(Context);
   PoolGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<Context>(operator_def, ws) {}
   ~PoolGradientOp() {}

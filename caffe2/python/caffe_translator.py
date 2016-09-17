@@ -35,7 +35,7 @@ def _ShouldInclude(net_state, layer):
     return ret
 
 
-class CacaRegistry(object):
+class TranslatorRegistry(object):
     registry_ = {}
 
     @classmethod
@@ -114,10 +114,34 @@ class CacaRegistry(object):
 
 
 def TranslateModel(*args, **kwargs):
-    return CacaRegistry.TranslateModel(*args, **kwargs)
+    return TranslatorRegistry.TranslateModel(*args, **kwargs)
+
+
+def ConvertTensorProtosToInitNet(net_params):
+    """Takes the net_params returned from TranslateModel, and wrap it as an
+    init net that contain GivenTensorFill.
+
+    This is a very simple feature that only works with float tensors, and is
+    only intended to be used in an environment where you want a single
+    initialization file - for more complex cases, use a db to store the
+    parameters.
+    """
+    init_net = caffe2_pb2.NetDef()
+    for tensor in net_params.protos:
+        if len(tensor.float_data) == 0:
+            raise RuntimeError(
+                "Only float tensors are supported in this util.")
+        op = core.CreateOperator(
+            "GivenTensorFill", [], [tensor.name],
+            arg=[
+                utils.MakeArgument("shape", list(tensor.dims)),
+                utils.MakeArgument("values", tensor.float_data)])
+        init_net.op.extend([op])
+    return init_net
 
 
 def BaseTranslate(layer, caffe2_type):
+    """A simple translate interface that maps the layer input and output."""
     caffe2_op = caffe2_pb2.OperatorDef()
     caffe2_op.type = caffe2_type
     caffe2_op.input.extend(layer.bottom)
@@ -134,13 +158,61 @@ def AddArgument(op, key, value):
 ################################################################################
 
 
-@CacaRegistry.Register("Input")
+@TranslatorRegistry.Register("Input")
 def TranslateInput(layer, pretrained_blobs, is_test):
     return [], []
 
 
+@TranslatorRegistry.Register("Data")
+def TranslateData(layer, pretrained_blobs, is_test):
+    return [], []
 
-@CacaRegistry.Register("Convolution")
+
+# A function used in convolution, pooling and deconvolution to deal with
+# conv pool specific parameters.
+def _TranslateStridePadKernelHelper(param, caffe_op):
+    try:
+        if (len(param.stride) > 1 or len(param.kernel_size) > 1 or
+                len(param.pad) > 1):
+            raise NotImplementedError(
+                "Translator currently does not support non-conventional "
+                "pad/kernel/stride settings."
+            )
+        stride = param.stride[0] if len(param.stride) else 1
+        pad = param.pad[0] if len(param.pad) else 0
+        kernel = param.kernel_size[0] if len(param.kernel_size) else 0
+    except TypeError:
+        # This catches the case of a PoolingParameter, in which case we are
+        # having non-repeating pad, stride and kernel.
+        stride = param.stride
+        pad = param.pad
+        kernel = param.kernel_size
+    # Get stride
+    if param.HasField("stride_h") or param.HasField("stride_w"):
+        AddArgument(caffe_op, "stride_h", param.stride_h)
+        AddArgument(caffe_op, "stride_w", param.stride_w)
+    else:
+        AddArgument(caffe_op, "stride", stride)
+    # Get pad
+    if param.HasField("pad_h") or param.HasField("pad_w"):
+        if param.pad_h == param.pad_w:
+            AddArgument(caffe_op, "pad", param.pad_h)
+        else:
+            AddArgument(caffe_op, "pad_t", param.pad_h)
+            AddArgument(caffe_op, "pad_b", param.pad_h)
+            AddArgument(caffe_op, "pad_l", param.pad_w)
+            AddArgument(caffe_op, "pad_r", param.pad_w)
+    else:
+        AddArgument(caffe_op, "pad", pad)
+    # Get kernel
+    if param.HasField("kernel_h") or param.HasField("kernel_w"):
+        AddArgument(caffe_op, "kernel_h", param.kernel_h)
+        AddArgument(caffe_op, "kernel_w", param.kernel_w)
+    else:
+        AddArgument(caffe_op, "kernel", kernel)
+
+
+@TranslatorRegistry.Register("Convolution")
 def TranslateConv(layer, pretrained_blobs, is_test):
     param = layer.convolution_param
     if param.group > 1:
@@ -150,18 +222,7 @@ def TranslateConv(layer, pretrained_blobs, is_test):
     caffe_op = BaseTranslate(layer, "Conv")
     output = caffe_op.output[0]
     caffe_op.input.extend([output + '_w', output + '_b'])
-    if (len(param.stride) > 1 or len(param.kernel_size) != 1 or
-            len(param.pad) > 1):
-        raise NotImplementedError(
-            "Translator currently does not support non-conventional "
-            "pad/kernel/stride settings."
-        )
-    stride = param.stride[0] if len(param.stride) else 1
-    pad = param.pad[0] if len(param.pad) else 0
-    AddArgument(caffe_op, "stride", stride)
-    AddArgument(caffe_op, "kernel", param.kernel_size[0])
-    AddArgument(caffe_op, "pad", pad)
-    AddArgument(caffe_op, "order", "NCHW")
+    _TranslateStridePadKernelHelper(param, caffe_op)
     weight = utils.NumpyArrayToCaffe2Tensor(pretrained_blobs[0], output + '_w')
     bias = utils.NumpyArrayToCaffe2Tensor(
         pretrained_blobs[1].flatten(), output + '_b'
@@ -198,14 +259,6 @@ def TranslateConvWithGroups(layer, pretrained_blobs, is_test):
     )
     caffe_ops.append(depth_split_op)
     # second, convolutions
-    if (len(param.stride) > 1 or len(param.kernel_size) != 1 or
-            len(param.pad) > 1):
-        raise NotImplementedError(
-            "Translator currently does not support non-conventional "
-            "pad/kernel/stride settings."
-        )
-    stride = param.stride[0] if len(param.stride) else 1
-    pad = param.pad[0] if len(param.pad) else 0
     for i in range(g):
         # convolution layer i
         this_weight = utils.NumpyArrayToCaffe2Tensor(
@@ -218,11 +271,9 @@ def TranslateConvWithGroups(layer, pretrained_blobs, is_test):
             "Conv",
             [depth_split_op.output[i], this_weight.name, this_bias.name],
             ['_' + output + '_gconv_conv_' + str(i)],
-            stride=stride,
-            kernel=param.kernel_size[0],
-            pad=pad,
             order="NCHW"
         )
+        _TranslateStridePadKernelHelper(param, conv_op)
         caffe_ops.append(conv_op)
         caffe_params.extend([this_weight, this_bias])
     # third, depth concat
@@ -236,28 +287,45 @@ def TranslateConvWithGroups(layer, pretrained_blobs, is_test):
     return caffe_ops, caffe_params
 
 
-@CacaRegistry.Register("ReLU")
+@TranslatorRegistry.Register("Deconvolution")
+def TranslateDeconv(layer, pretrained_blobs, is_test):
+    param = layer.convolution_param
+    if param.group > 1:
+        raise NotImplementedError(
+            "Translator currently does not support group deconvolution."
+        )
+    caffe_op = BaseTranslate(layer, "ConvTranspose")
+    output = caffe_op.output[0]
+    _TranslateStridePadKernelHelper(param, caffe_op)
+    caffe_op.input.extend([output + '_w', output + '_b'])
+    AddArgument(caffe_op, "order", "NCHW")
+    weight = utils.NumpyArrayToCaffe2Tensor(pretrained_blobs[0], output + '_w')
+    bias = utils.NumpyArrayToCaffe2Tensor(
+        pretrained_blobs[1].flatten(), output + '_b'
+    )
+    return caffe_op, [weight, bias]
+
+
+@TranslatorRegistry.Register("ReLU")
 def TranslateRelu(layer, pretrained_blobs, is_test):
     return BaseTranslate(layer, "Relu"), []
 
 
-@CacaRegistry.Register("Pooling")
+@TranslatorRegistry.Register("Pooling")
 def TranslatePool(layer, pretrained_blobs, is_test):
     param = layer.pooling_param
     if param.pool == caffe_pb2.PoolingParameter.MAX:
         caffe_op = BaseTranslate(layer, "MaxPool")
     elif param.pool == caffe_pb2.PoolingParameter.AVE:
         caffe_op = BaseTranslate(layer, "AveragePool")
-    AddArgument(caffe_op, "stride", int(param.stride))
-    AddArgument(caffe_op, "kernel", int(param.kernel_size))
-    AddArgument(caffe_op, "pad", int(param.pad))
+    _TranslateStridePadKernelHelper(param, caffe_op)
     AddArgument(caffe_op, "order", "NCHW")
     AddArgument(caffe_op, "legacy_pad",
                 caffe2_legacy_pb2.CAFFE_LEGACY_POOLING)
     return caffe_op, []
 
 
-@CacaRegistry.Register("LRN")
+@TranslatorRegistry.Register("LRN")
 def TranslateLRN(layer, pretrained_blobs, is_test):
     caffe_op = BaseTranslate(layer, "LRN")
     caffe_op.output.extend(['_' + caffe_op.output[0] + '_scale'])
@@ -273,7 +341,7 @@ def TranslateLRN(layer, pretrained_blobs, is_test):
     return caffe_op, []
 
 
-@CacaRegistry.Register("InnerProduct")
+@TranslatorRegistry.Register("InnerProduct")
 def TranslateInnerProduct(layer, pretrained_blobs, is_test):
     caffe_op = BaseTranslate(layer, "FC")
     output = caffe_op.output[0]
@@ -287,7 +355,7 @@ def TranslateInnerProduct(layer, pretrained_blobs, is_test):
     return caffe_op, [weight, bias]
 
 
-@CacaRegistry.Register("Dropout")
+@TranslatorRegistry.Register("Dropout")
 def TranslateDropout(layer, pretrained_blobs, is_test):
     caffe_op = BaseTranslate(layer, "Dropout")
     caffe_op.output.extend(['_' + caffe_op.output[0] + '_mask'])
@@ -298,15 +366,58 @@ def TranslateDropout(layer, pretrained_blobs, is_test):
     return caffe_op, []
 
 
-@CacaRegistry.Register("Softmax")
+@TranslatorRegistry.Register("Softmax")
 def TranslateSoftmax(layer, pretrained_blobs, is_test):
     caffe_op = BaseTranslate(layer, "Softmax")
     return caffe_op, []
 
 
-@CacaRegistry.Register("Concat")
+@TranslatorRegistry.Register("SoftmaxWithLoss")
+def TranslateSoftmaxWithLoss(layer, pretrained_blobs, is_test):
+    softmax_op = core.CreateOperator(
+        "Softmax", [layer.bottom[0]],
+        layer.bottom[0] + "_translator_autogen_softmax")
+    xent_op = core.CreateOperator(
+        "LabelCrossEntropy",
+        [softmax_op.output[0], layer.bottom[1]],
+        layer.bottom[0] + "_translator_autogen_xent")
+    loss_op = core.CreateOperator(
+        "AveragedLoss",
+        xent_op.output[0],
+        layer.top[0])
+    return [softmax_op, xent_op, loss_op], []
+
+
+@TranslatorRegistry.Register("Accuracy")
+def TranslateAccuracy(layer, pretrained_blobs, is_test):
+    caffe_op = BaseTranslate(layer, "Accuracy")
+    if layer.accuracy_param.top_k != 1:
+        print("Warning: Translation does not support Accuracy layers top_k >1.")
+    return caffe_op, []
+
+
+@TranslatorRegistry.Register("Concat")
 def TranslateConcat(layer, pretrained_blobs, is_test):
     caffe_op = BaseTranslate(layer, "Concat")
     caffe_op.output.extend(['_' + caffe_op.output[0] + '_dims'])
     AddArgument(caffe_op, "order", "NCHW")
     return caffe_op, []
+
+
+@TranslatorRegistry.Register("TanH")
+def TranslateTanH(layer, pretrained_blobs, is_test):
+    caffe_op = BaseTranslate(layer, "Tanh")
+    return caffe_op, []
+
+
+@TranslatorRegistry.Register("InstanceNorm")
+def TranslateInstanceNorm(layer, pretrained_blobs, is_test):
+    caffe_op = BaseTranslate(layer, "InstanceNorm")
+    output = caffe_op.output[0]
+    weight = utils.NumpyArrayToCaffe2Tensor(
+        pretrained_blobs[0].flatten(), output + '_w')
+    bias = utils.NumpyArrayToCaffe2Tensor(
+        pretrained_blobs[1].flatten(), output + '_b')
+    caffe_op.input.extend([output + '_w', output + '_b'])
+    AddArgument(caffe_op, "order", "NCHW")
+    return caffe_op, [weight, bias]

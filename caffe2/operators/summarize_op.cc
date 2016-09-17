@@ -32,7 +32,7 @@ bool SummarizeOp<float, CPUContext>::RunOnDevice() {
   }
   if (OutputSize()) {
     auto* Y = Output(0);
-    Y->Resize(vector<TIndex>{NUM_STATS});
+    Y->Resize(NUM_STATS);
     float* Ydata = Y->mutable_data<float>();
     Ydata[MIN_IDX] = min;
     Ydata[MAX_IDX] = max;

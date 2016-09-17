@@ -1,7 +1,7 @@
 #include "caffe2/core/operator.h"
+#include "caffe2/operators/no_default_engine_op.h"
 
 namespace caffe2 {
-namespace {
 
 OPERATOR_SCHEMA(CreateCommonWorld)
     .NumInputs(0)
@@ -16,7 +16,8 @@ OPERATOR_SCHEMA(Broadcast)
     .NumOutputs(1)
     .EnforceInplace({{1, 0}})
     .SetDoc(R"DOC(
-Does a broadcast operation from the root node to every other node.
+Does a broadcast operation from the root node to every other node. The tensor
+on each node should have been pre-created with the same shape and data type.
 )DOC")
     .Input(0, "comm_world", "The common world.")
     .Input(1, "X", "A tensor to be broadcasted.")
@@ -56,9 +57,90 @@ Does an allgather operation among the nodes. Currently only Sum is supported.
     .Input(1, "X", "A tensor to be allgathered.")
     .Output(0, "Y", "The allgathered tensor, same on all nodes.");
 
+OPERATOR_SCHEMA(SendTensor)
+    .NumInputs({2, 4})
+    .NumOutputs(0)
+    .SetDoc(R"DOC(
+Sends the tensor to another node.
+)DOC")
+    .Input(0, "comm_world", "The common world.")
+    .Input(1, "X", "A tensor to be allgathered.")
+    .Input(
+        2,
+        "dst",
+        "An int CPUtensor of size 1 specifying the rank. If "
+        "given, this overrides the 'to' argument of the op.")
+    .Input(
+        3,
+        "tag",
+        "An int CPUtensor of size 1 specifying the tag to "
+        "send the tensor with. This overrides the 'tag' "
+        "argument of the op.")
+    .Arg("dst", "The rank to send the tensor to.")
+    .Arg("tag", "(int) a tag to send the tensor with.")
+    .Arg(
+        "raw_buffer",
+        "(bool) if set, only send the content and assume that the receiver "
+        "has already known the tensor's shape and information.");
+
+OPERATOR_SCHEMA(ReceiveTensor)
+    .NumInputs({2, 4})
+    .NumOutputs(3)
+    .EnforceInplace({{1, 0}})
+    .AllowInplace({{2, 1}, {3, 2}})
+    .SetDoc(R"DOC(
+Receives the tensor from another node.
+)DOC")
+    .Input(0, "comm_world", "The common world.")
+    .Input(
+        1,
+        "Y",
+        "In-place output. If raw_buffer is specified, "
+        "Y should have pre-allocated data and type..")
+    .Input(
+        2,
+        "src",
+        "An int CPUtensor of size 1 specifying the rank. If "
+        "given, this overrides the 'from' argument of the op.")
+    .Input(
+        3,
+        "tag",
+        "An int CPUtensor of size 1 specifying the tag to "
+        "send the tensor with. This overrides the 'tag' "
+        "argument of the op.")
+    .Output(0, "Y", "The received tensor.")
+    .Output(
+        1,
+        "src",
+        "The sender that sent the message as a CPUTensor "
+        "of size 1 and of type int.")
+    .Output(
+        2,
+        "tag",
+        "The tag that the message is sent with as a CPUTensor "
+        "of size 1 and of type int.")
+    .Arg("src", "(int) he rank to receive the tensor from.")
+    .Arg("tag", "(int) a tag to receive the tensor with.")
+    .Arg(
+        "raw_buffer",
+        "(bool) if set, only send the content and assume that the receiver "
+        "has already known the tensor's shape and information.");
+
+SHOULD_NOT_DO_GRADIENT(CreateCommonWorld);
 SHOULD_NOT_DO_GRADIENT(Broadcast);
 SHOULD_NOT_DO_GRADIENT(Reduce);
 SHOULD_NOT_DO_GRADIENT(Allgather);
 SHOULD_NOT_DO_GRADIENT(Allreduce);
-} // namespace
+SHOULD_NOT_DO_GRADIENT(SendTensor);
+SHOULD_NOT_DO_GRADIENT(ReceiveTensor);
+
+// Communication operators do not have default engines.
+REGISTER_CPU_OPERATOR(CreateCommonWorld, NoDefaultEngineOp<CPUContext>);
+REGISTER_CPU_OPERATOR(Broadcast, NoDefaultEngineOp<CPUContext>);
+REGISTER_CPU_OPERATOR(Reduce, NoDefaultEngineOp<CPUContext>);
+REGISTER_CPU_OPERATOR(Allgather, NoDefaultEngineOp<CPUContext>);
+REGISTER_CPU_OPERATOR(Allreduce, NoDefaultEngineOp<CPUContext>);
+REGISTER_CPU_OPERATOR(SendTensor, NoDefaultEngineOp<CPUContext>);
+REGISTER_CPU_OPERATOR(ReceiveTensor, NoDefaultEngineOp<CPUContext>);
+
 } // namespace caffe2

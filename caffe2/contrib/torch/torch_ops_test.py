@@ -3,7 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import core, workspace, dyndep
+from caffe2.python import core, dyndep
 import caffe2.python.hypothesis_test_util as hu
 
 from hypothesis import given
@@ -39,11 +39,11 @@ class TorchOpTest(hu.HypothesisTestCase):
         x = np.random.randn(n, i).astype(np.float32)
         W = np.random.randn(h, i).astype(np.float32)
         b = np.random.randn(h).astype(np.float32)
-        workspace.FeedBlob("x", x)
-        workspace.FeedBlob("W", W)
-        workspace.FeedBlob("b", b)
-        workspace.RunOperatorOnce(op)
-        y = workspace.FetchBlob("y")
+        self.ws.create_blob("x").feed(x)
+        self.ws.create_blob("W").feed(W)
+        self.ws.create_blob("b").feed(b)
+        self.ws.run(op)
+        y = self.ws.blobs["y"].fetch()
         print("y", y)
         y = y.reshape((n, h))
         np.testing.assert_allclose(y, np.dot(x, W.T) + b, atol=1e-4, rtol=1e-4)
@@ -76,9 +76,9 @@ class TorchOpTest(hu.HypothesisTestCase):
         x = np.random.randn(n, i).astype(np.float32)
         W = np.random.randn(h, i).astype(np.float32)
         b = np.random.randn(h).astype(np.float32)
-        workspace.FeedBlob("x", x)
-        workspace.FeedBlob("W", W)
-        workspace.FeedBlob("b", b)
+        self.ws.create_blob("x").feed(x)
+        self.ws.create_blob("W").feed(W)
+        self.ws.create_blob("b").feed(b)
         net = core.Net("op")
         net.Torch(
             ["x", "W", "b"], ["y"],
@@ -88,13 +88,13 @@ class TorchOpTest(hu.HypothesisTestCase):
             num_outputs=1
         )
         print(net.Proto())
-        workspace.CreateNet(net)
+        net_ = self.ws.create_net(net)
         for i in range(iters):
             if i % 1000 == 0:
                 print(i)
-            workspace.RunNet("op")
+            net_.run()
 
-        y = workspace.FetchBlob("y")
+        y = self.ws.blobs["y"].fetch()
         y = y.reshape((n, h))
         np.testing.assert_allclose(y, np.dot(x, W.T) + b, atol=1e-4, rtol=1e-4)
 
@@ -106,9 +106,9 @@ class TorchOpTest(hu.HypothesisTestCase):
         x = np.random.randn(n, i).astype(np.float32)
         W = np.random.randn(h, i).astype(np.float32)
         b = np.random.randn(h).astype(np.float32)
-        workspace.FeedBlob("x", x)
-        workspace.FeedBlob("W", W)
-        workspace.FeedBlob("b", b)
+        self.ws.create_blob("x").feed(x)
+        self.ws.create_blob("W").feed(W)
+        self.ws.create_blob("b").feed(b)
         net = core.Net("op")
         net.Torch(
             ["x", "W", "b"], ["y"],
@@ -117,12 +117,12 @@ class TorchOpTest(hu.HypothesisTestCase):
             num_params=2,
             num_outputs=1
         )
-        workspace.CreateNet(net)
+        net_ = self.ws.create_net(net)
         for i in range(iters):
             if i % 1000 == 0:
                 print(i)
-            workspace.RunNet("op")
+            net_.run()
 
-        y = workspace.FetchBlob("y")
+        y = self.ws.blobs["y"].fetch()
         y = y.reshape((n, h))
         np.testing.assert_allclose(y, np.dot(x, W.T) + b, atol=1e-4, rtol=1e-4)

@@ -97,7 +97,7 @@ bool SummarizeOp<float, CUDAContext>::RunOnDevice() {
   }
   if (OutputSize()) {
     auto* Y = OperatorBase::Output<TensorCUDA>(0);
-    Y->Resize(vector<TIndex>{4});
+    Y->Resize(4);
     float output_buffer[NUM_STATS] = {result.min, result.max, result.mean,
                                standard_deviation};
     context_.Copy<float, CPUContext, CUDAContext>(

@@ -64,7 +64,6 @@ TEST(MPITest, TestMPIBroadcast) {
     Workspace ws;
     unique_ptr<NetBase> net(CreateNet(net_def, &ws));
     EXPECT_NE(nullptr, net.get());
-    EXPECT_TRUE(net->Verify());
     EXPECT_TRUE(net->Run());
     // Let's test the value.
     auto& X = ws.GetBlob("X")->Get<TensorCUDA>();
@@ -129,7 +128,6 @@ TEST(MPITest, TestMPIReduce) {
     Workspace ws;
     unique_ptr<NetBase> net(CreateNet(net_def, &ws));
     EXPECT_NE(nullptr, net.get());
-    EXPECT_TRUE(net->Verify());
     EXPECT_TRUE(net->Run());
     int rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
@@ -196,7 +194,6 @@ TEST(MPITest, TestMPIAllgather) {
   Workspace ws;
   unique_ptr<NetBase> net(CreateNet(net_def, &ws));
   EXPECT_NE(nullptr, net.get());
-  EXPECT_TRUE(net->Verify());
   EXPECT_TRUE(net->Run());
   // Let's test the value.
   auto& X = ws.GetBlob("X")->Get<TensorCUDA>();
@@ -262,7 +259,6 @@ TEST(MPITest, TestMPIAllreduce) {
   Workspace ws;
   unique_ptr<NetBase> net(CreateNet(net_def, &ws));
   EXPECT_NE(nullptr, net.get());
-  EXPECT_TRUE(net->Verify());
   EXPECT_TRUE(net->Run());
   // Let's test the value.
   auto& X = ws.GetBlob("X")->Get<TensorCUDA>();
@@ -327,7 +323,6 @@ TEST(MPITest, TestInPlaceMPIAllreduce) {
   Workspace ws;
   unique_ptr<NetBase> net(CreateNet(net_def, &ws));
   EXPECT_NE(nullptr, net.get());
-  EXPECT_TRUE(net->Verify());
   EXPECT_TRUE(net->Run());
   auto& X_reduced = ws.GetBlob("X")->Get<TensorCUDA>();
   EXPECT_EQ(X_reduced.size(), 10);

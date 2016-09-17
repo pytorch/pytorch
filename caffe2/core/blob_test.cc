@@ -23,18 +23,18 @@ using namespace ::caffe2::db;
 
 namespace {
 
-class Foo {};
-class Bar {};
+class BlobTestFoo {};
+class BlobTestBar {};
 
 TEST(BlobTest, Blob) {
   Blob blob;
 
   int* int_unused UNUSED_VARIABLE = blob.GetMutable<int>();
   EXPECT_TRUE(blob.IsType<int>());
-  EXPECT_FALSE(blob.IsType<Foo>());
+  EXPECT_FALSE(blob.IsType<BlobTestFoo>());
 
-  Foo* foo_unused UNUSED_VARIABLE = blob.GetMutable<Foo>();
-  EXPECT_TRUE(blob.IsType<Foo>());
+  BlobTestFoo* foo_unused UNUSED_VARIABLE = blob.GetMutable<BlobTestFoo>();
+  EXPECT_TRUE(blob.IsType<BlobTestFoo>());
   EXPECT_FALSE(blob.IsType<int>());
 }
 
@@ -48,9 +48,9 @@ TEST(BlobTest, BlobNewObjectFlag) {
   blob.GetMutable<int>(&is_new_object);
   EXPECT_FALSE(is_new_object);
 
-  blob.GetMutable<Foo>(&is_new_object);
+  blob.GetMutable<BlobTestFoo>(&is_new_object);
   EXPECT_TRUE(is_new_object);
-  blob.GetMutable<Foo>(&is_new_object);
+  blob.GetMutable<BlobTestFoo>(&is_new_object);
   EXPECT_FALSE(is_new_object);
 }
 
@@ -61,17 +61,17 @@ TEST(BlobTest, BlobUninitialized) {
 
 TEST(BlobTest, BlobWrongType) {
   Blob blob;
-  Foo* foo_unused UNUSED_VARIABLE = blob.GetMutable<Foo>();
-  EXPECT_TRUE(blob.IsType<Foo>());
+  BlobTestFoo* foo_unused UNUSED_VARIABLE = blob.GetMutable<BlobTestFoo>();
+  EXPECT_TRUE(blob.IsType<BlobTestFoo>());
   EXPECT_FALSE(blob.IsType<int>());
   // When not null, we should only call with the right type.
-  EXPECT_NE(&blob.Get<Foo>(), nullptr);
+  EXPECT_NE(&blob.Get<BlobTestFoo>(), nullptr);
   ASSERT_THROW(blob.Get<int>(), EnforceNotMet);
 }
 
 TEST(BlobTest, BlobReset) {
   Blob blob;
-  std::unique_ptr<Foo> foo(new Foo());
+  std::unique_ptr<BlobTestFoo> foo(new BlobTestFoo());
   EXPECT_TRUE(blob.Reset(foo.release()) != nullptr);
   // Also test that Reset works.
   blob.Reset();
@@ -79,18 +79,18 @@ TEST(BlobTest, BlobReset) {
 
 TEST(BlobTest, BlobShareExternalPointer) {
   Blob blob;
-  std::unique_ptr<Foo> foo(new Foo());
-  EXPECT_EQ(blob.ShareExternal<Foo>(foo.get()), foo.get());
-  EXPECT_TRUE(blob.IsType<Foo>());
+  std::unique_ptr<BlobTestFoo> foo(new BlobTestFoo());
+  EXPECT_EQ(blob.ShareExternal<BlobTestFoo>(foo.get()), foo.get());
+  EXPECT_TRUE(blob.IsType<BlobTestFoo>());
   // Also test that Reset works.
   blob.Reset();
 }
 
 TEST(BlobTest, BlobShareExternalObject) {
   Blob blob;
-  Foo foo;
-  EXPECT_EQ(blob.ShareExternal<Foo>(&foo), &foo);
-  EXPECT_TRUE(blob.IsType<Foo>());
+  BlobTestFoo foo;
+  EXPECT_EQ(blob.ShareExternal<BlobTestFoo>(&foo), &foo);
+  EXPECT_TRUE(blob.IsType<BlobTestFoo>());
   // Also test that Reset works.
   blob.Reset();
 }
@@ -315,19 +315,19 @@ TYPED_TEST(TensorCPUTest, KeepOnShrink) {
   TypeParam* ptr = tensor.mutable_data<TypeParam>();
   EXPECT_TRUE(ptr != nullptr);
   // Expanding - will reallocate
-  tensor.Resize(vector<int>{3, 4, 6});
+  tensor.Resize(3, 4, 6);
   TypeParam* larger_ptr = tensor.mutable_data<TypeParam>();
   EXPECT_TRUE(larger_ptr != nullptr);
   EXPECT_NE(ptr, larger_ptr);
   // Shrinking - will not reallocate
-  tensor.Resize(vector<int>{1, 2, 4});
+  tensor.Resize(1, 2, 4);
   TypeParam* smaller_ptr = tensor.mutable_data<TypeParam>();
   EXPECT_TRUE(smaller_ptr != nullptr);
   EXPECT_EQ(larger_ptr, smaller_ptr);
   // resize to 0 in the meantime;
-  tensor.Resize(vector<int>{3, 0, 6});
+  tensor.Resize(3, 0, 6);
   // Expanding but still under capacity - will not reallocate
-  tensor.Resize(vector<int>{2, 3, 5});
+  tensor.Resize(2, 3, 5);
   TypeParam* new_ptr = tensor.mutable_data<TypeParam>();
   EXPECT_TRUE(new_ptr != nullptr);
   EXPECT_EQ(larger_ptr, new_ptr);
@@ -382,7 +382,7 @@ TEST(TensorTest, Tensor64BitDimension) {
   EXPECT_EQ(tensor.itemsize(), sizeof(char));
   // Try to go even larger, but this time we will not do mutable_data because we
   // do not have a large enough memory.
-  tensor.Resize(vector<TIndex>{large_number, 100});
+  tensor.Resize(large_number, 100);
   EXPECT_EQ(tensor.ndim(), 2);
   EXPECT_EQ(tensor.dim(0), large_number);
   EXPECT_EQ(tensor.dim(1), 100);

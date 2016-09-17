@@ -1,11 +1,9 @@
 #include "caffe2/core/logging.h"
+#include "caffe2/core/flags.h"
 
+#include <algorithm>
 #include <cstring>
 #include <numeric>
-
-#ifdef ANDROID
-#include <android/log.h>
-#endif  // ANDROID
 
 // Common code that we use regardless of whether we use glog or not.
 
@@ -73,10 +71,21 @@ string EnforceNotMet::msg() const {
 
 #ifdef CAFFE2_USE_GOOGLE_GLOG
 
+#ifdef CAFFE2_USE_GFLAGS
 // GLOG's minloglevel
-DECLARE_int32(minloglevel);
+CAFFE2_DECLARE_int(minloglevel);
 // GLOG's verbose log value.
-DECLARE_int32(v);
+CAFFE2_DECLARE_int(v);
+// GLOG's logtostderr value
+CAFFE2_DECLARE_bool(logtostderr);
+
+#else
+
+using fLI::FLAGS_minloglevel;
+using fLI::FLAGS_v;
+using fLB::FLAGS_logtostderr;
+
+#endif // CAFFE2_USE_GFLAGS
 
 CAFFE2_DEFINE_int(caffe2_log_level, google::ERROR,
                   "The minimum log level that caffe2 will output.");
@@ -99,17 +108,26 @@ bool InitCaffeLogging(int* argc, char** argv) {
     ::google::InitGoogleLogging(argv[0]);
     ::google::InstallFailureSignalHandler();
   }
-  // Transfer the caffe2_log_level setting to glog.
-  FLAGS_minloglevel = FLAGS_caffe2_log_level;
-  // Transfer the caffe2_log_level verbose setting to glog.
+  // If caffe2_log_level is set and is lower than the min log level by glog,
+  // we will transfer the caffe2_log_level setting to glog to override that.
+  FLAGS_minloglevel = std::min(FLAGS_caffe2_log_level, FLAGS_minloglevel);
+  // If caffe2_log_level is explicitly set, let's also turn on logtostderr.
+  if (FLAGS_caffe2_log_level < google::ERROR) {
+    FLAGS_logtostderr = 1;
+  }
+  // Also, transfer the caffe2_log_level verbose setting to glog.
   if (FLAGS_caffe2_log_level < 0) {
-    FLAGS_v = -FLAGS_caffe2_log_level;
+    FLAGS_v = std::min(FLAGS_v, -FLAGS_caffe2_log_level);
   }
   return true;
 }
 }  // namespace caffe2
 
 #else  // !CAFFE2_USE_GOOGLE_GLOG
+
+#ifdef ANDROID
+#include <android/log.h>
+#endif // ANDROID
 
 CAFFE2_DEFINE_int(caffe2_log_level, ERROR,
                   "The minimum log level that caffe2 will output.");

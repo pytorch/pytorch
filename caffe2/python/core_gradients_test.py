@@ -508,5 +508,199 @@ class TestGradientCalculation(test_util.TestCase):
                        'in': 'in_grad'})
 
 
+class TestGradientsAccumulationWithNoGradientOps(test_util.TestCase):
+    def testNormalAccumulation(self):
+        #  x1-->Relu--x2----------------->DotProduct-->x4
+        #                |                 |
+        #                 -->Softmax-->x3-->
+        net = core.Net("test_net")
+        net.Relu("x1", "x2")
+        net.Softmax("x2", "x3")
+        net.DotProduct(["x2", "x3"], "x4")
+        net.AddGradientOperators(["x4"])
+        sum_op = net.Proto().op[-2]
+        self.assertEqual(sum_op.input[0], "_x2_grad_autosplit_0")
+        self.assertEqual(sum_op.input[1], "_x2_grad_autosplit_1")
+        self.assertEqual(sum_op.output[0], "x2_grad")
+
+    def testAccumulationWithNoGradientBranch(self):
+        #                 -->PRINT
+        #                |
+        #  x1-->Relu--x2----------------->DotProduct-->x4
+        #                |                 |
+        #                 -->Softmax-->x3-->
+        net = core.Net("test_net")
+        net.Relu("x1", "x2")
+        net.Print("x2", [])
+        net.Softmax("x2", "x3")
+        net.DotProduct(["x2", "x3"], "x4")
+        net.AddGradientOperators(["x4"])
+        sum_op = net.Proto().op[-2]
+        self.assertEqual(sum_op.input[0], "_x2_grad_autosplit_0")
+        self.assertEqual(sum_op.input[1], "_x2_grad_autosplit_1")
+        self.assertEqual(sum_op.output[0], "x2_grad")
+
+
+class TestGradientsAccumulationWithPassThroughGradients(test_util.TestCase):
+    def testAddOpInMiddle(self):
+        #  x1-->Relu--x2----------------->Add-->x4
+        #                |                 |
+        #                 -->Softmax-->x3-->
+        #
+        # Expected gradient graph:
+        #
+        #  x1_g<--ReluG<--x2_g<--Sum<------------<---------x4_g
+        #                          |                       |
+        #                           <--_x2_g_split_0<--SoftmaxG
+        net = core.Net("test_net")
+        net.Relu("x1", "x2")
+        net.Softmax("x2", "x3")
+        net.Add(["x2", "x3"], "x4")
+        input_to_grad = net.AddGradientOperators({"x4": "x4_grad"})
+        sum_op = net.Proto().op[-2]
+        self.assertEqual(sum_op.input[0], "x4_grad")
+        self.assertEqual(sum_op.input[1], "_x2_grad_autosplit_0")
+        self.assertEqual(sum_op.output[0], "x2_grad")
+        self.assertEqual(input_to_grad["x1"], "x1_grad")
+
+    def testSubOpInMiddle(self):
+        #  x1-->Relu--x2----------------->Sub-->x4
+        #                |                 |
+        #                 -->Softmax-->x3-->
+        #
+        # Expected gradient graph:
+        #
+        #  x1_g<--ReluG<--x2_g<--Sum<------------<-----------------------x4_g
+        #                          |                                      |
+        #                           <--_x2_g_split_0<--SoftmaxG<--x3_g<--neg
+        net = core.Net("test_net")
+        net.Relu("x1", "x2")
+        net.Softmax("x2", "x3")
+        net.Sub(["x2", "x3"], "x4")
+        input_to_grad = net.AddGradientOperators({"x4": "x4_grad"})
+        print(str(net.Proto()))
+        sum_op = net.Proto().op[-2]
+        self.assertEqual(sum_op.input[0], "x4_grad")
+        self.assertEqual(sum_op.input[1], "_x2_grad_autosplit_0")
+        self.assertEqual(sum_op.output[0], "x2_grad")
+        self.assertEqual(input_to_grad["x1"], "x1_grad")
+
+    def testAddOpAtLeaf(self):
+        # x1
+        #   \
+        #    -->Add-->x4
+        #   /           \
+        # x2             -->DotProduct-->x6
+        #   \           /
+        #    -->Add-->x5
+        #   /
+        # x3
+        #
+        # Expected gradient graph:
+        #
+        #  x2_g<--Sum<--x4_g<--DotProductG<--x6_g
+        #          |                |                       |
+        #           <---x5_g<-------
+        net = core.Net("test_net")
+        net.Add(["x1", "x2"], "x4")
+        net.Add(["x2", "x3"], "x5")
+        net.DotProduct(["x4", "x5"], "x6")
+        input_to_grad = net.AddGradientOperators({"x6": "x6_grad"})
+        sum_op = net.Proto().op[-1]
+        self.assertEqual(sum_op.input[0], "x5_grad")
+        self.assertEqual(sum_op.input[1], "x4_grad")
+        self.assertEqual(sum_op.output[0], "x2_grad")
+        self.assertEqual(input_to_grad["x1"], "x4_grad")
+        self.assertEqual(input_to_grad["x2"], "x2_grad")
+        self.assertEqual(input_to_grad["x3"], "x5_grad")
+
+    def testSubOpAtLeaf(self):
+        # x1
+        #   \
+        #    -->Sub-->x4
+        #   /           \
+        # x2             -->DotProduct-->x6
+        #   \           /
+        #    -->Sub-->x5
+        #   /
+        # x3
+        #
+        # Expected gradient graph:
+        #
+        #  x2_g<-------Sum<--x2_g_split_0<--neg<--x4_g<--DotProductG<--x6_g
+        #               |                                       |
+        #  x3_g<--neg<--<--x5_g<--------------------------------
+        net = core.Net("test_net")
+        net.Sub(["x1", "x2"], "x4")
+        net.Sub(["x2", "x3"], "x5")
+        net.DotProduct(["x4", "x5"], "x6")
+        input_to_grad = net.AddGradientOperators({"x6": "x6_grad"})
+        sum_op = net.Proto().op[-1]
+        self.assertEqual(sum_op.input[0], "x5_grad")
+        self.assertEqual(sum_op.input[1], "_x2_grad_autosplit_0")
+        self.assertEqual(sum_op.output[0], "x2_grad")
+        self.assertEqual(input_to_grad["x1"], "x4_grad")
+        self.assertEqual(input_to_grad["x2"], "x2_grad")
+        self.assertEqual(input_to_grad["x3"], "x3_grad")
+
+    def testMultiLayerAddOps(self):
+        # x1
+        #   \
+        #    -->Add-->x4
+        #   /           \
+        # x2             -->Add-->x6
+        #   \           /
+        #    -->Add-->x5
+        #   /
+        # x3
+        #
+        # Expected gradient graph:
+        #
+        #  x2_g<--Sum<-----x6_g
+        #          |         |
+        #           <--------
+        net = core.Net("test_net")
+        net.Add(["x1", "x2"], "x4")
+        net.Add(["x2", "x3"], "x5")
+        net.Add(["x4", "x5"], "x6")
+        input_to_grad = net.AddGradientOperators({"x6": "x6_grad"})
+        sum_op = net.Proto().op[-1]
+        self.assertEqual(sum_op.input[0], "x6_grad")
+        self.assertEqual(sum_op.input[1], "x6_grad")
+        self.assertEqual(sum_op.output[0], "x2_grad")
+        self.assertEqual(input_to_grad["x1"], "x6_grad")
+        self.assertEqual(input_to_grad["x2"], "x2_grad")
+        self.assertEqual(input_to_grad["x3"], "x6_grad")
+
+    def testMultiLayerSubOps(self):
+        # x1
+        #   \
+        #    -->Sub-->x4
+        #   /           \
+        # x2             -->Sub-->x6
+        #   \           /
+        #    -->Sub-->x5
+        #   /
+        # x3
+        #
+        # Expected gradient graph:
+        #
+        #  x2_g<--Sum<-----x6_g
+        #          |         |
+        #           <--------
+        net = core.Net("test_net")
+        net.Sub(["x1", "x2"], "x4")
+        net.Sub(["x2", "x3"], "x5")
+        net.Sub(["x4", "x5"], "x6")
+        input_to_grad = net.AddGradientOperators({"x6": "x6_grad"})
+        sum_op = net.Proto().op[-1]
+        self.assertEqual(sum_op.input[0], "x5_grad")
+        self.assertEqual(sum_op.input[1], "_x2_grad_autosplit_0")
+        self.assertEqual(sum_op.output[0], "x2_grad")
+        self.assertEqual(input_to_grad["x1"], "x6_grad")
+        self.assertEqual(input_to_grad["x2"], "x2_grad")
+        self.assertEqual(input_to_grad["x3"], "x3_grad")
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -1,0 +1,93 @@
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+from __future__ import unicode_literals
+import numpy as np
+
+from caffe2.python import core, workspace
+from caffe2.python.test_util import TestCase
+
+
+class TestLengthsToShapeOps(TestCase):
+    def test_lengths_to_shape_ops(self):
+        workspace.FeedBlob('l', np.array([200, 200, 200], dtype=np.int64))
+        workspace.RunOperatorOnce(core.CreateOperator(
+            'LengthsToShape', ['l'], ['s']))
+        workspace.FeedBlob('res', np.array([3, 200]))
+        assert ((workspace.FetchBlob('s') == workspace.FetchBlob('res')).all())
+
+    def test_reshape_ops(self):
+        workspace.FeedBlob('res', np.array([[0, 0, 0, 0]], dtype=np.float32))
+        workspace.FeedBlob('shape', np.array([1, 4], dtype=np.int32))
+        workspace.FeedBlob('input', np.zeros((2, 2), dtype=np.float32))
+        workspace.RunOperatorOnce(core.CreateOperator(
+            'Reshape', ['input', 'shape'], ['output', 'old_shape']))
+        assert ((workspace.FetchBlob('output') ==
+                 workspace.FetchBlob('res')).all())
+
+    def test_basic_reshape(self):
+        test_reshape(old_shape=(4, 2, 1), new_shape=(2, 4))
+        test_reshape(old_shape=(4, 2, 1), new_shape=(2, 4), arg_shape=False)
+
+    def test_missing_dim(self):
+        test_reshape(old_shape=(4, 2, 1), new_shape=(-1, 8))
+        test_reshape(old_shape=(4, 2, 1), new_shape=(-1, 8), arg_shape=False)
+
+    def test_in_place(self):
+        test_reshape(old_shape=(4, 2, 1), new_shape=(-1, 8), in_place=True)
+        test_reshape(old_shape=(4, 2, 1), new_shape=(-1, 8),
+                     in_place=True, arg_shape=False)
+
+    def test_backprop(self):
+        old_shape = (4, 2, 1)
+        new_shape = (1, 8)
+        X = np.random.rand(*old_shape).astype(np.float32)
+        Y = np.random.rand(*new_shape).astype(np.float32)
+
+        net = core.Net('net')
+
+        net.GivenTensorFill([], 'X', shape=old_shape, values=X.flatten())
+        net.GivenTensorFill([], 'Y', shape=new_shape, values=Y.flatten())
+
+        net.Reshape(['X'], ['X_out', 'old_shape'], shape=new_shape)
+        net.DotProduct(['X_out', 'Y'], 'Z')
+        net.AddGradientOperators(['Z'])
+
+        workspace.RunNetOnce(net)
+
+        Z = workspace.FetchBlob('Z')
+        X_grad = workspace.FetchBlob('X_grad')
+
+        # Check forward computation
+        np.testing.assert_allclose(
+            Z.squeeze(), X.reshape(new_shape).dot(Y.T).squeeze(), rtol=1e-5)
+
+        # Check the shape of the gradient
+        np.testing.assert_array_equal(X_grad.shape, X.shape)
+
+        # Check the gradient
+        np.testing.assert_allclose(X_grad, Y.reshape(old_shape), rtol=1e-5)
+
+
+def test_reshape(old_shape, new_shape, arg_shape=True, in_place=False):
+    X = np.random.rand(*old_shape).astype(np.float32)
+
+    blob_in = 'X'
+    blob_out = blob_in if in_place else blob_in + '_out'
+
+    if arg_shape:
+        op = core.CreateOperator('Reshape',
+                                 [blob_in],
+                                 [blob_out, 'old_shape'],
+                                 shape=new_shape)
+    else:
+        op = core.CreateOperator('Reshape',
+                                 [blob_in, 'new_shape'],
+                                 [blob_out, 'old_shape'])
+        workspace.FeedBlob('new_shape', np.asarray(new_shape))
+
+    workspace.FeedBlob(blob_in, X)
+    workspace.RunOperatorOnce(op)
+
+    Y = workspace.FetchBlob(blob_out)
+    np.testing.assert_allclose(Y, X.reshape(new_shape))

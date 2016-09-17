@@ -47,7 +47,7 @@ cc_library(
 cc_test(
   name = "core_test",
   srcs = Glob(["core/*_test.cc", "utils/*_test.cc"],
-              excludes=["*gpu_test*"]),
+              excludes=["*gpu_test*", "*cudnn_test*"]),
   deps = [
       ":core",
       "//caffe2/operators:core_ops",
@@ -58,9 +58,14 @@ cc_test(
 
 cc_test(
   name = "core_gpu_test",
-  srcs = Glob(["core/*_gpu_test.cc", "utils/*_gpu_test.cc"]),
+  srcs = Glob([
+      "core/*_gpu_test.cc",
+      "core/*_cudnn_test.cc",
+      "utils/*_gpu_test.cc",
+  ]),
   deps = [
       ":core_gpu",
+      ":core_cudnn",
       "//third_party:gtest",
       "//caffe2/test:caffe2_gtest_main",
   ],
@@ -71,7 +76,7 @@ cc_test(
 )
 
 cc_library(
-    name = "all_available_ops",
+    name = "all_available_cpu_ops",
     srcs = [],
     # core_ops should always be available. Otherwise, we have a problem.
     deps = [
@@ -79,18 +84,28 @@ cc_library(
       "//caffe2/operators:core_ops",
     ],
     optional_deps = [
+      "//caffe2/image:image_ops",
+      "//caffe2/mpi:mpi_ops",
+      "//caffe2/queue:queue_ops",
+      "//caffe2/sgd:sgd_ops",
+    ],
+)
+
+cc_library(
+    name = "all_available_ops",
+    srcs = [],
+    deps = [
+      ":all_available_cpu_ops",
+    ],
+    optional_deps = [
       "//caffe2/operators:core_ops_gpu",
       "//caffe2/operators:core_ops_cudnn",
       "//caffe2/contrib/nccl:nccl_ops",
       "//caffe2/cuda_rtc:rtc_ops",
       "//caffe2/db:db_gpu",
-      "//caffe2/image:image_ops",
       "//caffe2/image:image_ops_gpu",
-      "//caffe2/mpi:mpi_ops",
       "//caffe2/mpi:mpi_ops_gpu",
-      "//caffe2/queue:queue_ops",
       "//caffe2/queue:queue_ops_gpu",
-      "//caffe2/sgd:sgd_ops",
       "//caffe2/sgd:sgd_ops_gpu",
     ],
 )
