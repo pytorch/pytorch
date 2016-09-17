@@ -30,7 +30,7 @@ using std::unique_ptr;
 using std::vector;
 
 // Just in order to mark things as not implemented. Do not use in final code.
-#define CAFFE_NOT_IMPLEMENTED LOG(FATAL) << "Not Implemented."
+#define CAFFE_NOT_IMPLEMENTED CAFFE_THROW("Not Implemented.")
 
 // suppress an unused variable.
 #define UNUSED_VARIABLE __attribute__((unused))
@@ -76,7 +76,7 @@ make_unique(Args&&...) = delete;
 // to_string implementation for Android related stuff.
 #ifndef __ANDROID__
 using std::to_string;
-#else 
+#else
 template <typename T>
 std::string to_string(T value)
 {

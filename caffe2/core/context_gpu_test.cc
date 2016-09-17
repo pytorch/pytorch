@@ -19,10 +19,10 @@ TEST(CUDAContextTest, TestAllocDealloc) {
 }
 
 TEST(CUDAContextTest, MemoryPoolAllocateDealloc) {
-  if (!HasCudaGPU()) return;
+  if (!HasCudaGPU())
+    return;
   if (GetCudaMemoryPoolType() == CudaMemoryPoolType::NONE) {
-    LOG(ERROR)
-      << "Choose a memory type that is not none to test memory pool.";
+    LOG(ERROR) << "Choose a memory type that is not none to test memory pool.";
     return;
   }
   const int nbytes = 1048576;
@@ -87,7 +87,7 @@ void TEST_GetStreamAddress(cudaStream_t* ptr) {
   CUDAContext context(0);
   *ptr = context.cuda_stream();
   // Sleep for a while so we have concurrent thread executions
-  std::this_thread::sleep_for(std::chrono::seconds(1));  
+  std::this_thread::sleep_for(std::chrono::seconds(1));
 }
 }  // namespace
 

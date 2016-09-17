@@ -1,5 +1,6 @@
 #include "caffe2/core/common_cudnn.h"
 #include "caffe2/core/context_gpu.h"
+#include "caffe2/operators/conv_op_cache_cudnn.h"
 #include "caffe2/operators/conv_pool_op_base.h"
 
 namespace caffe2 {
@@ -89,6 +90,7 @@ class CudnnConvOp final : public CudnnConvOpBase {
 
  private:
   cudnnConvolutionFwdAlgo_t algo_;
+  AlgorithmsCache<cudnnConvolutionFwdAlgo_t> algo_cache_;
   // Input: X, W, b
   // Output: Y
   INPUT_TAGS(INPUT, FILTER, BIAS);
@@ -107,6 +109,8 @@ class CudnnConvGradientOp final : public CudnnConvOpBase {
  private:
   cudnnConvolutionBwdFilterAlgo_t bwd_filter_algo_;
   cudnnConvolutionBwdDataAlgo_t bwd_data_algo_;
+  AlgorithmsCache<cudnnConvolutionBwdFilterAlgo_t> filter_algo_cache_;
+  AlgorithmsCache<cudnnConvolutionBwdDataAlgo_t> data_algo_cache_;
   // input: X, W, dY
   // output: dW, db, and optionally dX
   INPUT_TAGS(INPUT, FILTER, OUTPUT_GRAD);
@@ -193,29 +197,33 @@ bool CudnnConvOp<T>::RunOnDevice() {
     if (deterministic_) {
       algo_ = CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM;
     } else if (exhaustive_search_) {
-      VLOG(1) << "CUDNN Convolution: doing exhaustive search.";
-      // When we do an exhaustive search, we will ignore the workspace size
-      // limit and simply go for the fastest algorithm. If you happen to run
-      // out of memory later, you will be on your own...
-      int returned_algo_count;
-      std::array<cudnnConvolutionFwdAlgoPerf_t, kNUM_CUDNN_FWD_ALGS> perf_stat;
-      // We clean up the current workspace memory so that the forward algorithm
-      // is free to allocate memory.
-      cudnn_wrapper_.with_cudnn_state(cudnn_state_, [&](CuDNNState* state) {
-        state->workspace().reset();
-        // Actually run the search.
-        CUDNN_CHECK(cudnnFindConvolutionForwardAlgorithm(
-            state->cudnn_handle(),
-            bottom_desc_,
-            filter_desc_,
-            conv_desc_,
-            top_desc_,
-            kNUM_CUDNN_FWD_ALGS,
-            &returned_algo_count,
-            perf_stat.data()));
+      algo_ = algo_cache_.getAlgorithm(X.dims(), filter.dims(), [&]() {
+        VLOG(1) << "CUDNN Convolution: doing exhaustive search.";
+        // When we do an exhaustive search, we will ignore the workspace size
+        // limit and simply go for the fastest algorithm. If you happen to run
+        // out of memory later, you will be on your own...
+        int returned_algo_count;
+        std::array<cudnnConvolutionFwdAlgoPerf_t, kNUM_CUDNN_FWD_ALGS>
+            perf_stat;
+        // We clean up the current workspace memory so that the forward
+        // algorithm
+        // is free to allocate memory.
+        cudnn_wrapper_.with_cudnn_state(cudnn_state_, [&](CuDNNState* state) {
+          state->workspace().reset();
+          // Actually run the search.
+          CUDNN_CHECK(cudnnFindConvolutionForwardAlgorithm(
+              state->cudnn_handle(),
+              bottom_desc_,
+              filter_desc_,
+              conv_desc_,
+              top_desc_,
+              kNUM_CUDNN_FWD_ALGS,
+              &returned_algo_count,
+              perf_stat.data()));
+        });
+        LogCuDNNPerfStats(perf_stat, returned_algo_count);
+        return perf_stat[0].algo;
       });
-      algo_ = perf_stat[0].algo;
-      LogCuDNNPerfStats(perf_stat, returned_algo_count);
     } else {
       // Get the convolution algorithm based on the workspace limit.
       CUDNN_CHECK(cudnnGetConvolutionForwardAlgorithm(
@@ -297,7 +305,7 @@ bool CudnnConvGradientOp<T>::RunOnDevice() {
   }
   ConvPoolOpBase<CUDAContext>::ComputePads(H, W);
   dfilter->ResizeLike(filter);
-  dbias->Resize(vector<TIndex>{TIndex(M)});
+  dbias->Resize(TIndex(M));
 
   // Set up the cudnn algorithms & workspace if necessary
   bool input_changed = (X.dims() != cudnn_input_dims_);
@@ -346,50 +354,66 @@ bool CudnnConvGradientOp<T>::RunOnDevice() {
       bwd_data_algo_ = CUDNN_CONVOLUTION_BWD_DATA_ALGO_1;
       bwd_filter_algo_ = CUDNN_CONVOLUTION_BWD_FILTER_ALGO_1;
     } else if (exhaustive_search_) {
-      VLOG(1) << "CUDNN Convolution bwd: doing exhaustive search.";
-      // When we do an exhaustive search, we will ignore the workspace size
-      // limit and simply go for the fastest algorithm. If you happen to run
-      // out of memory later, you will be on your own...
-      int returned_algo_count;
-      // We clean up the current workspace memory so that the forward algorithm
-      // is free to allocate memory.
-      // Actually run the search.
-      std::array<cudnnConvolutionBwdFilterAlgoPerf_t,
-                 kNUM_CUDNN_BWD_FILTER_ALGS> filter_perf_stat;
+      bwd_filter_algo_ =
+          filter_algo_cache_.getAlgorithm(X.dims(), filter.dims(), [&]() {
+            VLOG(1) << "CUDNN Convolution bwd: doing filter exhaustive search.";
+            // When we do an exhaustive search, we will ignore the workspace
+            // size
+            // limit and simply go for the fastest algorithm. If you happen to
+            // run
+            // out of memory later, you will be on your own...
+            int returned_algo_count;
+            // We clean up the current workspace memory so that the forward
+            // algorithm is free to allocate memory.
+            // Actually run the search.
+            std::array<
+                cudnnConvolutionBwdFilterAlgoPerf_t,
+                kNUM_CUDNN_BWD_FILTER_ALGS>
+                filter_perf_stat;
 
-      cudnn_wrapper_.with_cudnn_state(cudnn_state_, [&](CuDNNState* state) {
-        state->workspace().reset();
-        CUDNN_CHECK(cudnnFindConvolutionBackwardFilterAlgorithm(
-            state->cudnn_handle(),
-            bottom_desc_,
-            top_desc_,
-            conv_desc_,
-            filter_desc_,
-            kNUM_CUDNN_BWD_FILTER_ALGS,
-            &returned_algo_count,
-            filter_perf_stat.data()));
-      });
-      LogCuDNNPerfStats(filter_perf_stat, returned_algo_count);
-      bwd_filter_algo_ = filter_perf_stat[0].algo;
+            cudnn_wrapper_.with_cudnn_state(
+                cudnn_state_, [&](CuDNNState* state) {
+                  state->workspace().reset();
+                  CUDNN_CHECK(cudnnFindConvolutionBackwardFilterAlgorithm(
+                      state->cudnn_handle(),
+                      bottom_desc_,
+                      top_desc_,
+                      conv_desc_,
+                      filter_desc_,
+                      kNUM_CUDNN_BWD_FILTER_ALGS,
+                      &returned_algo_count,
+                      filter_perf_stat.data()));
+                });
+            LogCuDNNPerfStats(filter_perf_stat, returned_algo_count);
+            return filter_perf_stat[0].algo;
+          });
 
+      bwd_data_algo_ =
+          data_algo_cache_.getAlgorithm(X.dims(), filter.dims(), [&]() {
+            VLOG(1) << "CUDNN Convolution bwd: doing data exhaustive search.";
+            int returned_algo_count;
 
-      std::array<cudnnConvolutionBwdDataAlgoPerf_t,
-                 kNUM_CUDNN_BWD_DATA_ALGS> data_perf_stat;
-      cudnn_wrapper_.with_cudnn_state(cudnn_state_, [&](CuDNNState* state) {
-        state->workspace().reset();
-        CUDNN_CHECK(cudnnFindConvolutionBackwardDataAlgorithm(
-            state->cudnn_handle(),
-            filter_desc_,
-            top_desc_,
-            conv_desc_,
-            bottom_desc_,
-            kNUM_CUDNN_BWD_DATA_ALGS,
-            &returned_algo_count,
-            data_perf_stat.data()));
-      });
+            std::array<
+                cudnnConvolutionBwdDataAlgoPerf_t,
+                kNUM_CUDNN_BWD_DATA_ALGS>
+                data_perf_stat;
+            cudnn_wrapper_.with_cudnn_state(
+                cudnn_state_, [&](CuDNNState* state) {
+                  state->workspace().reset();
+                  CUDNN_CHECK(cudnnFindConvolutionBackwardDataAlgorithm(
+                      state->cudnn_handle(),
+                      filter_desc_,
+                      top_desc_,
+                      conv_desc_,
+                      bottom_desc_,
+                      kNUM_CUDNN_BWD_DATA_ALGS,
+                      &returned_algo_count,
+                      data_perf_stat.data()));
+                });
 
-      LogCuDNNPerfStats(data_perf_stat, returned_algo_count);
-      bwd_data_algo_ = data_perf_stat[0].algo;
+            LogCuDNNPerfStats(data_perf_stat, returned_algo_count);
+            return data_perf_stat[0].algo;
+          });
     } else {
       // choose backward algorithm for filter
       CUDNN_CHECK(cudnnGetConvolutionBackwardFilterAlgorithm(

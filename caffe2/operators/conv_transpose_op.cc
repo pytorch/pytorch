@@ -44,7 +44,7 @@ OPERATOR_SCHEMA(ConvTranspose)
         "The 1D bias blob that is added through the convolution;"
         "has size (C)")
     .Output(
-        3,
+        0,
         "Y",
         "Output data blob that contains the result of the "
         "transposed convolution. The output dimensions are functions of the kernel"
@@ -55,7 +55,7 @@ OPERATOR_SCHEMA(ConvTransposeGradient).NumInputs(3).NumOutputs(2, 3);
 class GetConvTransposeGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
-    CHECK_EQ(def_.input_size(), 3);
+    CAFFE_ENFORCE(3 == def_.input_size());
     return SingleGradientDef(
         "ConvTransposeGradient",
         "",

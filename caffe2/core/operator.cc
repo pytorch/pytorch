@@ -13,12 +13,7 @@ namespace caffe2 {
 
 // TODO(Yangqing): move all the checks to a less fatal check mechanism.
 OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
-    : operator_def_(operator_def) {
-  for (auto& arg : operator_def_.arg()) {
-    CHECK_GT(arg.name().size(), 0) << "Argument must have a name.";
-    CHECK_EQ(arg_map_.count(arg.name()), 0) << "Duplicated argument name.";
-    arg_map_[arg.name()] = &arg;
-  }
+    : operator_def_(operator_def), arg_helper_(operator_def_) {
   for (const string& input_str : operator_def_.input()) {
     auto* blob = ws->GetBlob(input_str);
     CAFFE_ENFORCE(blob != nullptr,
@@ -29,58 +24,6 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
     outputs_.push_back(CHECK_NOTNULL(ws->CreateBlob(output_str)));
   }
 }
-
-// Parameter getters. You can use these to get the arguments that you want.
-// We need to deal with the fact that we cannot really template into
-// protocol buffers... yuck.
-#define INSTANTIATE_GET_SINGLE_ARGUMENT(T, fieldname)                         \
-  template <>                                                                 \
-  T OperatorBase::GetSingleArgument<T>(                                       \
-      const string& name, const T& default_value) {                           \
-    if (arg_map_.count(name) == 0) {                                          \
-      VLOG(1) << "Using default parameter value " << default_value            \
-              << " for parameter " << name;                                   \
-      return default_value;                                                   \
-    }                                                                         \
-    CAFFE_ENFORCE(arg_map_[name]->has_##fieldname(),                          \
-        "Argument ", name, " does not have the right field: expected field "  \
-        #fieldname);                                                          \
-    return arg_map_[name]->fieldname();                                       \
-  }                                                                           \
-  template <>                                                                 \
-  bool OperatorBase::HasSingleArgumentOfType<T>(const string& name) {         \
-    if (arg_map_.count(name) == 0) {                                          \
-      return false;                                                           \
-    }                                                                         \
-    return arg_map_[name]->has_##fieldname();                                 \
-  }
-
-INSTANTIATE_GET_SINGLE_ARGUMENT(float, f)
-INSTANTIATE_GET_SINGLE_ARGUMENT(int, i)
-INSTANTIATE_GET_SINGLE_ARGUMENT(int64_t, i)
-INSTANTIATE_GET_SINGLE_ARGUMENT(size_t, i)
-INSTANTIATE_GET_SINGLE_ARGUMENT(string, s)
-// Undefine the argument just to be safe.
-#undef INSTANTIATE_GET_SINGLE_ARGUMENT
-
-#define INSTANTIATE_GET_REPEATED_ARGUMENT(T, fieldname)                        \
-template <>                                                                    \
-vector<T> OperatorBase::GetRepeatedArgument<T>(                                \
-    const string& name) {                                                      \
-  if (arg_map_.count(name) == 0) {                                             \
-    return vector<T>();                                                        \
-  }                                                                            \
-  vector<T> values;                                                            \
-  for (const auto& v : arg_map_[name]->fieldname()) values.push_back(v);       \
-  return values;                                                               \
-}
-
-INSTANTIATE_GET_REPEATED_ARGUMENT(float, floats)
-INSTANTIATE_GET_REPEATED_ARGUMENT(int, ints)
-INSTANTIATE_GET_REPEATED_ARGUMENT(int64_t, ints)
-INSTANTIATE_GET_REPEATED_ARGUMENT(size_t, ints)
-INSTANTIATE_GET_REPEATED_ARGUMENT(string, strings)
-#undef INSTANTIATE_GET_REPEATED_ARGUMENT
 
 namespace {
 unique_ptr<OperatorBase> TryCreateOperator(
@@ -105,11 +48,10 @@ unique_ptr<OperatorBase> CreateOperator(
   // first, check with OpSchema if the operator is legal.
   auto* schema = OpSchemaRegistry::Schema(operator_def.type());
   if (schema) {
-    if (!schema->Verify(operator_def)) {
-      LOG(ERROR) << "Operator def did not pass schema checking: "
-                 << ProtoDebugString(operator_def);
-      return nullptr;
-    }
+    CAFFE_ENFORCE(
+        schema->Verify(operator_def),
+        "Operator def did not pass schema checking: ",
+        ProtoDebugString(operator_def));
   } else {
     // We would like to recommend every op to register its schema, so if there
     // is not one, we print a LOG_ERROR. But we will still allow the operator

@@ -4,43 +4,36 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
+#include "caffe2/core/tensor.h"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {
 
 using NumericTypes = TensorTypes<int32_t, int64_t, float, double>;
-class SameTypeAsInput {};
+using IntTypes = TensorTypes<int32_t, int64_t>;
+using BoolTypes = TensorTypes<bool>;
 
-template <typename OutputTemplate, typename InputType>
-struct TypeForOutput {
-  using value = OutputTemplate;
+struct SameTypeAsInput {
+  template <typename T>
+  using type = T;
 };
 
-template <typename InputType>
-struct TypeForOutput<SameTypeAsInput, InputType> {
-  using value = InputType;
+template <typename R>
+struct FixedType {
+  template <typename T>
+  using type = R;
 };
 
-/**
- * Generic meta-operator that is able to processes element-wise operations on
- * a single-element tensor, returning a tensor with same shape, and either of
- * the same type as the input or of a specified result type.
- *
- * The functor provided must implement operator() as a template on input and
- * output types, and on a Context. Moreover, it needs to provide a constructor
- * that takes OperatorBase& as argument. This is in order to consume arguments
- * passed to the operator instance.
- */
 template <
     typename InputTypes,
     class Context,
     class Functor,
-    class OutputType = SameTypeAsInput>
+    class TypeMap = SameTypeAsInput>
 class UnaryElementwiseWithArgsOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   UnaryElementwiseWithArgsOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws), functor(*this) {}
+      : Operator<Context>(operator_def, ws), functor_(*this) {}
 
   bool RunOnDevice() override {
     return DispatchHelper<InputTypes>::call(this, Input(0));
@@ -51,8 +44,8 @@ class UnaryElementwiseWithArgsOp : public Operator<Context> {
     auto& input = Input(0);
     auto* output = Output(0);
     output->ResizeLike(input);
-    using R = typename TypeForOutput<OutputType, T>::value;
-    functor(
+    using R = typename TypeMap::template type<T>;
+    functor_(
         input.size(),
         input.template data<T>(),
         output->template mutable_data<R>(),
@@ -60,7 +53,8 @@ class UnaryElementwiseWithArgsOp : public Operator<Context> {
     return true;
   }
 
-  Functor functor;
+ private:
+  Functor functor_;
 };
 
 /**
@@ -95,27 +89,6 @@ using UnaryElementwiseOp = UnaryElementwiseWithArgsOp<
     OutputType>;
 
 /**
- * ForEach is a unary functor that forwards each element of the input array
- * into the elementwise Functor provided, and gathers the results of each
- * call into the resulting array. Use it as an adaptor if you want to create
- * a UnaryElementwiseOp that acts on each element of the tensor per function
- * call -- this is resonable for complex types where vectorization wouldn't
- * be much of a gain, performance-wise.
- */
-template <typename Functor>
-struct ForEach {
-  explicit ForEach(OperatorBase& op) : functor(op) {}
-
-  template <typename In, typename Out, typename Context>
-  void operator()(int n, const In* in, Out* out, Context* c) {
-    for (int i = 0; i < n; ++i) {
-      out[i] = functor(in[i]);
-    }
-  }
-  Functor functor;
-};
-
-/**
  * Performs a binary operation (e.g. +, - or /) with optional broadcast support.
  *
  * Functor specifies actual operation to be performed.
@@ -132,15 +105,44 @@ template <
     typename InputTypes,
     class Context,
     class Functor,
-    class OutputType = SameTypeAsInput,
-    bool AllowBroadcast = false>
+    class TypeMap = SameTypeAsInput>
 class BinaryElementwiseOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   BinaryElementwiseOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        OP_SINGLE_ARG(int, "broadcast", enable_broadcast_, 0) {}
+        OP_SINGLE_ARG(bool, "broadcast", enable_broadcast_, 0),
+        OP_SINGLE_ARG(int, "axis", axis_, -1),
+        OP_SINGLE_ARG(string, "axis_str", axis_str_, ""),
+        OP_SINGLE_ARG(string, "order", order_, "NCHW"),
+        functor_() {
+    // Figure out the correct axis to use.
+    if (enable_broadcast_) {
+      if (axis_ != -1) {
+        // Get axis from an explicit axis argument.
+        CAFFE_ENFORCE(
+            axis_str_.size() == 0,
+            "Args axis and axis_str cannot be used simultaneously.");
+      } else if (axis_str_.size()) {
+        // Get the axis index semantically.
+        CAFFE_ENFORCE(
+            axis_str_.size() == 1, "Unsupported axis string", axis_str_);
+        size_t semantic_axis_ = order_.find(axis_str_);
+        CAFFE_ENFORCE(
+            semantic_axis_ != string::npos,
+            "Unrecognizable axis string ",
+            axis_str_,
+            " from order string ",
+            order_);
+        axis_ = semantic_axis_;
+      }
+    } else {
+      CAFFE_ENFORCE(
+          axis_ == -1 && axis_str_.size() == 0,
+          "Do not specify axis or axis_str if broadcast is not enabled.");
+    }
+  }
 
   bool RunOnDevice() override {
     return DispatchHelper<InputTypes>::call(this, Input(0));
@@ -148,88 +150,98 @@ class BinaryElementwiseOp : public Operator<Context> {
 
   template <typename T>
   bool DoRunWithType() {
-    auto& input0 = Input(0);
-    auto& input1 = Input(1);
-    // Currently we don't check shapes. Shall we enforce shape matching?
-    auto N0 = input0.size();
-    auto N1 = input1.size();
-    DCHECK_GT(N0, 0);
-    DCHECK_GT(N1, 0);
-    if (N0 != N1 || input0.ndim() != input1.ndim()) {
-      RunBroadcast<T, AllowBroadcast>();
-      return true;
-    }
-    DCHECK(input0.dims() == input1.dims())
-        << "Tensor should have exactly the same shape"
-#ifndef __CUDACC__
-        << ", have " << input0.dims() << " and " << input1.dims()
-#endif
-        ;
-    auto* output = Output(0);
-    output->ResizeLike(input0);
-    using R = typename TypeForOutput<OutputType, T>::value;
-    Functor()(
-        N0,
-        input0.template data<T>(),
-        input1.template data<T>(),
-        output->template mutable_data<R>(),
-        &context_);
-    return true;
-  }
-
- private:
-  static bool isShapeSuffix(const vector<TIndex>& a, const vector<TIndex>& b) {
-    if (a.size() < b.size()) {
-      return false;
-    }
-    for (int i = 0; i < b.size(); ++i) {
-      if (a[a.size() - 1 - i] != b[b.size() - 1 - i]) {
-        return false;
+    const auto& A = Input(0);
+    const auto& B = Input(1);
+    auto* C = Output(0);
+    CAFFE_ENFORCE(
+        &B != C || !enable_broadcast_,
+        "In-place is allowed only with the first tensor when broadcasting");
+    C->ResizeLike(A);
+    const T* Adata = A.template data<T>();
+    const T* Bdata = B.template data<T>();
+    auto* Cdata =
+        C->template mutable_data<typename TypeMap::template type<T>>();
+    if (!enable_broadcast_) {
+      CAFFE_ENFORCE(
+          A.dims() == B.dims(),
+          "Dimension mismatch - did you forget to set broadcast=1?");
+      functor_.template Run<false>(A.size(), Adata, Bdata, Cdata, &context_);
+    } else if (B.size() == 1) {
+      functor_.template Run<true>(A.size(), Adata, Bdata, Cdata, &context_);
+    } else {
+      CAFFE_ENFORCE(
+          A.ndim() > B.ndim(),
+          "If you are doing broadcasting, input1 should have "
+          "a smaller number of dimensions.");
+      const int axis = (axis_ == -1 ? A.ndim() - B.ndim() : axis_);
+      CAFFE_ENFORCE(
+          axis >= 0 && axis < A.ndim(),
+          "Broadcast axis should be in the range of the number "
+          "of dimensions of the first input.");
+      size_t pre = 1, n = 1, post = 1;
+      for (int i = 0; i < axis; ++i) {
+        pre *= A.dim(i);
+      }
+      for (int i = 0; i < B.ndim(); ++i) {
+        CAFFE_ENFORCE(
+            A.dim(i + axis) == B.dim(i), "Broadcast dimension mismatch.");
+        n *= B.dim(i);
+      }
+      for (int i = axis + B.ndim(); i < A.ndim(); ++i) {
+        post *= A.dim(i);
+      }
+      if (post == 1) {
+        functor_.RunWithBroadcast(Adata, Bdata, Cdata, pre, n, &context_);
+      } else {
+        functor_.RunWithBroadcast2(
+            Adata, Bdata, Cdata, pre, n, post, &context_);
       }
     }
     return true;
   }
 
-  template <typename T, bool Broadcast>
-  typename std::enable_if<Broadcast, void>::type RunBroadcast() {
-    CHECK(enable_broadcast_)
-        << "Tensor have different shape, pass `broadcast=1` to enable "
-        << "broadcasting of the second argument";
-    // We enforce that the second argument gets broadcasted. For addition it's
-    // not strictly necessary, but makes code easier
-    auto& input0 = Input(0);
-    auto& input1 = Input(1);
-    auto* output = Output(0);
-    auto N0 = input0.size();
-    auto N1 = input1.size();
-    CHECK_EQ(N0 % N1, 0)
-        << "Sizes of tensors don't match for broadcasting to work: " << N0
-        << " and " << N1;
-    DCHECK(isShapeSuffix(input0.dims(), input1.dims()))
-        << "Bad shapes for broadcasting: " << input0.dims() << " and "
-        << input1.dims();
-    CHECK_NE(&input1, output)
-        << "In-place is allowed only with the first tensor when broadcasting";
-    output->ResizeLike(input0);
-    using R = typename TypeForOutput<OutputType, T>::value;
-    Functor().WithBroadcast(
-        N0 / N1,
-        N1,
-        input0.template data<T>(),
-        input1.template data<T>(),
-        output->template mutable_data<R>(),
-        &context_);
-  }
-
-  template <typename T, bool Broadcast>
-  typename std::enable_if<!Broadcast, void>::type RunBroadcast() {
-    CHECK(false) << "Broadcasting is not supported for this op, "
-                 << "inputs should be of the same size";
-  }
-
+ private:
   bool enable_broadcast_;
+  int axis_;
+  string axis_str_;
+  string order_;
+  Functor functor_;
 };
 
+template <typename Functor>
+struct WithoutBroadcast {
+  template <bool b_is_scalar, typename T, typename R, typename Context>
+  inline void Run(size_t n, const T* a, const T* b, R* out, Context* c) {
+    if (b_is_scalar) {
+      CAFFE_THROW("Broadcast not supported.");
+    } else {
+      Functor().Run(n, a, b, out, c);
+    }
+  }
+  template <typename T, typename R, typename Context>
+  inline void RunWithBroadcast(
+      const T* a,
+      const T* b,
+      R* out,
+      size_t pre,
+      size_t n,
+      Context*) {
+    CAFFE_NOT_IMPLEMENTED;
+  }
+  template <typename T, typename R, typename Context>
+  inline void RunWithBroadcast2(
+      const T* a,
+      const T* b,
+      R* out,
+      size_t pre,
+      size_t n,
+      size_t post,
+      Context*) {
+    CAFFE_NOT_IMPLEMENTED;
+  }
+};
+
+// Gradient operator for elementwise division.
 template <typename T, class Context>
 class DivGradientOp final : public Operator<Context> {
  public:
@@ -239,75 +251,17 @@ class DivGradientOp final : public Operator<Context> {
   bool RunOnDevice() override;
 };
 
-#define CAFFE2_BINARY_FUNCTOR_WRAPPER(name)                         \
-  struct name##Functor {                                            \
-    template <typename T, class Context>                            \
-    inline void operator()(                                         \
-        const int n,                                                \
-        const T* x,                                                 \
-        const T* y,                                                 \
-        T* output,                                                  \
-        Context* device_context) {                                  \
-      math::name<T, Context>(n, x, y, output, device_context);      \
-    }                                                               \
-    template <typename T, class Context>                            \
-    inline void WithBroadcast(                                      \
-        const int m,                                                \
-        const int n,                                                \
-        const T* a,                                                 \
-        const T* b,                                                 \
-        T* y,                                                       \
-        Context* device_context) {                                  \
-      math::name##ToRow<T, Context>(m, n, a, b, y, device_context); \
-    }                                                               \
-  };                                                                \
-  template <class DC>                                               \
-  using name##Op = BinaryElementwiseOp<                             \
-      NumericTypes,                                                 \
-      DC,                                                           \
-      name##Functor,                                                \
-      SameTypeAsInput,                                              \
-      true>
+// Sum reduction operator that is used for computing the gradient in cases
+// where the forward op is in broadcast mode.
+template <class Context>
+class SumReduceLikeOp final : public Operator<Context> {
+ public:
+  USE_SIMPLE_CTOR_DTOR(SumReduceLikeOp);
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-CAFFE2_BINARY_FUNCTOR_WRAPPER(Add);
-CAFFE2_BINARY_FUNCTOR_WRAPPER(Sub);
-CAFFE2_BINARY_FUNCTOR_WRAPPER(Mul);
-CAFFE2_BINARY_FUNCTOR_WRAPPER(Div);
+  bool RunOnDevice() override;
+};
 
-#undef CAFFE2_BINARY_FUNCTOR_WRAPPER
-
-#define CAFFE2_BINARY_FUNCTOR_BINARY_RESULT_WRAPPER(name)           \
-  struct name##Functor {                                            \
-    template <typename T, class Context>                            \
-    inline void operator()(                                         \
-        const int n,                                                \
-        const T* x,                                                 \
-        const T* y,                                                 \
-        bool* output,                                               \
-        Context* device_context) {                                  \
-      math::name<T, Context>(n, x, y, output, device_context);      \
-    }                                                               \
-    template <typename T, typename Context>                         \
-    inline void WithBroadcast(                                      \
-        const int m,                                                \
-        const int n,                                                \
-        const T* a,                                                 \
-        const T* b,                                                 \
-        bool* y,                                                    \
-        Context* device_context) {                                  \
-      math::name##ToRow<T, Context>(m, n, a, b, y, device_context); \
-    }                                                               \
-  };                                                                \
-  template <class DC>                                               \
-  using name##Op =                                                  \
-      BinaryElementwiseOp<NumericTypes, DC, name##Functor, bool, true>
-
-CAFFE2_BINARY_FUNCTOR_BINARY_RESULT_WRAPPER(LT);
-CAFFE2_BINARY_FUNCTOR_BINARY_RESULT_WRAPPER(LE);
-CAFFE2_BINARY_FUNCTOR_BINARY_RESULT_WRAPPER(GT);
-CAFFE2_BINARY_FUNCTOR_BINARY_RESULT_WRAPPER(GE);
-
-#undef CAFFE2_BINARY_FUNCTOR_BINARY_RESULT_WRAPPER
 } // namespace caffe2
 
 #endif // CAFFE2_OPERATORS_ELEMENTWISE_OP_H_

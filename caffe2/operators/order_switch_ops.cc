@@ -6,9 +6,9 @@ template <>
 bool NHWC2NCHWOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto* Y = Output(0);
-  DCHECK_EQ(X.ndim(), 4);
+  CAFFE_ENFORCE(X.ndim() == 4);
   const int N = X.dim32(0), H = X.dim32(1), W = X.dim32(2), C = X.dim32(3);
-  Y->Resize(vector<TIndex>{N, C, H, W});
+  Y->Resize(N, C, H, W);
   const float* Xdata = X.data<float>();
   float* Ydata = Y->mutable_data<float>();
   for (int n = 0; n < N; ++n) {
@@ -27,9 +27,9 @@ template <>
 bool NCHW2NHWCOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto* Y = Output(0);
-  DCHECK_EQ(X.ndim(), 4);
+  CAFFE_ENFORCE(X.ndim() == 4);
   const int N = X.dim32(0), C = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
-  Y->Resize(vector<TIndex>{N, H, W, C});
+  Y->Resize(N, H, W, C);
   const float* Xdata = X.data<float>();
   float* Ydata = Y->mutable_data<float>();
   for (int n = 0; n < N; ++n) {

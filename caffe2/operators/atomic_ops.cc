@@ -42,8 +42,52 @@ class AtomicFetchAddOp final : public Operator<CPUContext> {
   }
 };
 
+class CreateAtomicBoolOp final : public Operator<CPUContext> {
+ public:
+  using Operator::Operator;
+
+  bool RunOnDevice() override {
+    *OperatorBase::Output<std::unique_ptr<std::atomic<bool>>>(0) =
+        std::unique_ptr<std::atomic<bool>>(new std::atomic<bool>(false));
+    return true;
+  }
+};
+
+class ConditionalSetAtomicBoolOp final : public Operator<CPUContext> {
+ public:
+  using Operator::Operator;
+
+  bool RunOnDevice() override {
+    auto& ptr =
+        OperatorBase::Input<std::unique_ptr<std::atomic<bool>>>(ATOMIC_BOOL);
+    if (Input(CONDITION).data<bool>()[0]) {
+      ptr->store(true);
+    }
+    return true;
+  }
+
+ private:
+  INPUT_TAGS(ATOMIC_BOOL, CONDITION);
+};
+
+class CheckAtomicBoolOp final : public Operator<CPUContext> {
+ public:
+  using Operator::Operator;
+
+  bool RunOnDevice() override {
+    auto& ptr = OperatorBase::Input<std::unique_ptr<std::atomic<bool>>>(0);
+    Output(0)->Resize(1);
+    *Output(0)->mutable_data<bool>() = ptr->load();
+    return true;
+  }
+};
+
 REGISTER_CPU_OPERATOR(CreateMutex, CreateMutexOp);
 REGISTER_CPU_OPERATOR(AtomicFetchAdd, AtomicFetchAddOp);
+
+REGISTER_CPU_OPERATOR(CreateAtomicBool, CreateAtomicBoolOp);
+REGISTER_CPU_OPERATOR(ConditionalSetAtomicBool, ConditionalSetAtomicBoolOp);
+REGISTER_CPU_OPERATOR(CheckAtomicBool, CheckAtomicBoolOp);
 
 OPERATOR_SCHEMA(CreateMutex)
     .NumInputs(0)
@@ -66,8 +110,33 @@ argument. Returns the updated integer and the value prior to the update.
     .Output(1, "fetched_value", "Value of the first operand before sum.")
     .AllowInplace({{1, 0}});
 
+OPERATOR_SCHEMA(CreateAtomicBool)
+    .NumInputs(0)
+    .NumOutputs(1)
+    .SetDoc("Create an unique_ptr blob to hold a atomic<bool>")
+    .Output(0, "atomic_bool", "Blob containing a unique_ptr<atomic<bool>>");
+
+OPERATOR_SCHEMA(ConditionalSetAtomicBool)
+    .NumInputs(2)
+    .NumOutputs(0)
+    .SetDoc(R"DOC(
+    Set an atomic<bool> to true if the given condition bool variable is true
+    )DOC")
+    .Input(0, "atomic_bool", "Blob containing a unique_ptr<atomic<bool>>")
+    .Input(1, "condition", "Blob containing a bool");
+
+OPERATOR_SCHEMA(CheckAtomicBool)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .SetDoc("Copy the value of a atomic<bool> to a bool")
+    .Input(0, "atomic_bool", "Blob containing a unique_ptr<atomic<bool>>")
+    .Output(0, "value", "Copy of the value for the atomic<bool>");
+
 SHOULD_NOT_DO_GRADIENT(CreateMutex);
 SHOULD_NOT_DO_GRADIENT(AtomicFetchAdd);
+SHOULD_NOT_DO_GRADIENT(CreateAtomicBool);
+SHOULD_NOT_DO_GRADIENT(ConditionalSetAtomicBool);
+SHOULD_NOT_DO_GRADIENT(CheckAtomicBool);
 }
 }
 }

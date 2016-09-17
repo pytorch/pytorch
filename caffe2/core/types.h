@@ -35,6 +35,9 @@ inline constexpr char NameScopeSeparator() { return '/'; }
 // From TypeMeta to caffe2::DataType protobuffer enum.
 TensorProto::DataType TypeMetaToDataType(const TypeMeta& meta);
 
+// From caffe2::DataType protobuffer enum to TypeMeta
+const TypeMeta& DataTypeToTypeMeta(const TensorProto::DataType& dt);
+
 }  // namespace caffe2
 
 ///////////////////////////////////////////////////////////////////////////////

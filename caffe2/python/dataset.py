@@ -15,24 +15,29 @@ from __future__ import unicode_literals
 
 from caffe2.python import core, workspace
 from caffe2.python.dataio import Reader, Writer
-from caffe2.python.schema import Struct
+from caffe2.python.schema import (
+    Struct, from_blob_list, Field, from_column_list)
 import numpy as np
 
 
 class _DatasetReader(Reader):
-    def __init__(self, field_names, field_blobs, cursor, name):
+    def __init__(self, content, cursor, name, batch_size=1):
         """Don't call this directly. Instead, use dataset.reader()"""
-        self.field_names = field_names
-        self.field_blobs = field_blobs
+        assert isinstance(content, Field)
+        Reader.__init__(self, content)
+        self._content = content
         self.cursor = cursor
         self.name = name
+        self.batch_size = batch_size
 
-    def read(self, read_net, batch_size=1):
+    def read(self, read_net):
         with core.NameScope(read_net.NextName(self.name)):
             fields = read_net.ReadNextBatch(
-                [self.cursor] + self.field_blobs,
-                self.field_names,
-                batch_size=batch_size)
+                [self.cursor] + self._content.field_blobs(),
+                self._content.field_names(),
+                batch_size=self.batch_size)
+            if type(fields) is core.BlobReference:
+                fields = [fields]
             return (read_net.IsEmpty([fields[0]]), fields)
 
     def reset(self, net):
@@ -40,13 +45,14 @@ class _DatasetReader(Reader):
 
 
 class _DatasetRandomReader(Reader):
-    def __init__(self, field_names, field_blobs, cursor, name, indices):
+    def __init__(self, content, cursor, name, indices, batch_size=1):
         """Don't call this directly. Instead, use dataset.random_reader()"""
-        self.field_names = field_names
-        self.field_blobs = field_blobs
+        Reader.__init__(self, content)
+        self._content = content
         self.cursor = cursor
         self.name = name
         self.indices = indices
+        self.batch_size = batch_size
 
     def reset(self, net):
         net.ResetCursor([self.cursor], [])
@@ -54,40 +60,42 @@ class _DatasetRandomReader(Reader):
     def computeoffset(self, net):
         self.reset(net)
         offsets = net.ComputeOffset(
-            [self.cursor] + self.field_blobs,
+            [self.cursor] + self._content.field_blobs(),
             'offsets')
         self.offsets = offsets
 
-    def sortAndShuffle(self, net, sort_by_field=None,
-                       shuffle_size=1, batch_size=1):
+    def sort_and_shuffle(self, net, sort_by_field=None,
+                         shuffle_size=1, batch_size=1):
         # no sorting by default
         sort_by_field_idx = -1
         if sort_by_field:
-            assert sort_by_field in self.field_names, 'must be valid field'
-            sort_by_field_idx = self.field_names.index(sort_by_field)
+            assert sort_by_field in self._content.field_names(), (
+                'Must be valid field.')
+            sort_by_field_idx = self._content.field_names().index(sort_by_field)
         self.reset(net)
 
         indices = net.SortAndShuffle(
-            [self.cursor] + self.field_blobs,
+            [self.cursor] + self._content.field_blobs(),
             'indices',
             sort_by_field_idx=sort_by_field_idx,
             shuffle_size=shuffle_size,
             batch_size=batch_size)
         self.indices = indices
 
-    def read(self, read_net, batch_size=1):
-        fields = read_net.ReadRandomBatch(
-            [self.cursor, self.indices, self.offsets] + self.field_blobs,
-            self.field_names,
-            batch_size=batch_size)
-        return (read_net.IsEmpty([fields[0]]), fields)
+    def read(self, read_net):
+        with core.NameScope(read_net.NextName(self.name)):
+            fields = read_net.ReadRandomBatch(
+                [self.cursor, self.indices, self.offsets] + (
+                    self._content.field_blobs()),
+                self._content.field_names(),
+                batch_size=self.batch_size)
+            return (read_net.IsEmpty([fields[0]]), fields)
 
 
 class _DatasetWriter(Writer):
-    def __init__(self, fields, field_blobs, init_net):
+    def __init__(self, content, init_net):
         """Don't call this directly. Use dataset.writer() instead."""
-        self.fields = fields
-        self.field_blobs = field_blobs
+        self._content = content
         self.mutex = init_net.CreateMutex([])
 
     def write(self, writer_net, fields):
@@ -100,46 +108,18 @@ class _DatasetWriter(Writer):
             writer_net: The net that will contain the Append operators.
             fields: A list of BlobReference to be appeneded to this dataset.
         """
-        assert len(fields) == len(self.fields), (
-            'Expected %s fields, got %s.' % (len(self.fields), len(fields)))
-        writer_net.CheckDatasetConsistency(fields, [], fields=self.fields)
+        field_blobs = self._content.field_blobs()
+        assert len(fields) == len(field_blobs), (
+            'Expected %s fields, got %s.' % (len(field_blobs), len(fields)))
+        writer_net.CheckDatasetConsistency(
+            fields, [], fields=self._content.field_names())
         writer_net.AtomicAppend(
-            [self.mutex] + list(self.field_blobs) + list(fields),
-            self.field_blobs)
+            [self.mutex] + field_blobs + list(fields),
+            field_blobs)
 
     def commit(self, finish_net):
         """Commit is a no-op for an in-memory dataset."""
         pass
-
-
-def to_ndarray_list(values, schema):
-    """
-    Given a list of values and a dataset schema, produce list of ndarray in the
-    right format.
-
-    This function will perform some checks to make sure that the arrays
-    produced have the right dtype and rank.
-    """
-    assert isinstance(schema, Struct), 'schema must be a Struct.'
-    names = schema.field_names()
-    types = schema.field_types()
-    assert len(types) == len(values), (
-        'Values must have %d elements, got %d' % (len(types), len(values)))
-
-    arrays = []
-    for value, dtype, name in zip(values, types, names):
-        array = np.array(value, dtype=dtype.base)
-        # if array is empty we may need to reshape a little
-        if array.size == 0:
-            array = array.reshape((0,) + dtype.shape)
-        # check that the inner dimensions match the schema
-        assert (array.shape[1:] == dtype.shape), (
-            'Invalid array shape for field %s. Expected (%s), got (%s).' % (
-                name,
-                ', '.join(['_'] + map(str, dtype.shape)),
-                ', '.join(map(str, array.shape))))
-        arrays.append(array)
-    return arrays
 
 
 def Const(net, value, dtype=None, name=None):
@@ -155,6 +135,17 @@ def Const(net, value, dtype=None, name=None):
     workspace.FeedBlob(str(blob), value)
     return blob
 
+
+def execution_step_with_progress(name, init_net, substeps, rows_read):
+    # progress reporter
+    report_net = core.Net('report_net')
+    report_net.Print([rows_read], [])
+    return core.execution_step(
+        name,
+        substeps,
+        report_net=report_net,
+        concurrent_substeps=True,
+        report_interval=5)
 
 class Dataset(object):
     """Represents an in-memory dataset with fixed schema.
@@ -180,12 +171,11 @@ class Dataset(object):
         """
         assert isinstance(fields, list) or isinstance(fields, Struct), (
             'fields must be either a Struct or a list of raw field names.')
+        if isinstance(fields, list):
+            fields = from_column_list(fields)
         self.schema = fields
-        self.fields = (
-            fields.field_names() if isinstance(fields, Struct) else fields)
-        self.field_types = (
-            fields.field_types() if isinstance(fields, Struct) else
-            [np.dtype(np.void)] * len(self.fields))
+        self.fields = fields.field_names()
+        self.field_types = fields.field_types()
         self.name = name or 'dataset'
         self.field_blobs = None
 
@@ -195,7 +185,8 @@ class Dataset(object):
         Empty arrays will be immediately fed into the current workspace,
         and `init_net` will take those blobs as external inputs.
         """
-        self.field_blobs = [Const(init_net, [], name=f) for f in self.fields]
+        self.field_blobs = [init_net.ConstantFill(
+            [], shape=[0], run_once=False) for f in self.fields]
 
     def init_from_dataframe(self, net, dataframe):
         """Initialize the blobs for this dataset from a Pandas dataframe.
@@ -216,6 +207,13 @@ class Dataset(object):
         assert self
         return self.field_blobs
 
+    def content(self):
+        """
+        Return a Record of BlobReferences pointing to the full content of
+        this dataset.
+        """
+        return from_blob_list(self.schema, self.field_blobs)
+
     def field_names(self):
         """Return the list of field names for this dataset."""
         return self.fields
@@ -229,7 +227,7 @@ class Dataset(object):
         """
         return self.field_types
 
-    def reader(self, init_net, cursor_name=None):
+    def reader(self, init_net, cursor_name=None, batch_size=1):
         """Create a Reader object that is used to iterate through the dataset.
 
         This will append operations to `init_net` that create a TreeCursor,
@@ -241,6 +239,7 @@ class Dataset(object):
             init_net: net that will be run once to create the cursor.
             cursor_name: optional name for the blob containing a pointer
                          to the cursor.
+            batch_size: how many samples to read per iteration.
 
         Returns:
             A _DatasetReader that can be used to create operators that will
@@ -252,17 +251,20 @@ class Dataset(object):
             [],
             [cursor_name],
             fields=self.fields)
-        return _DatasetReader(
-            self.fields, self.field_blobs, cursor, cursor_name)
+        return _DatasetReader(self.content(), cursor, cursor_name, batch_size)
 
-    def random_reader(self, init_net, indices=None, cursor_name=None):
+    def random_reader(self, init_net, indices=None, cursor_name=None,
+                      batch_size=1):
         """Create a Reader object that is used to iterate through the dataset.
 
         NOTE: The reader order depends on the order in indices.
 
         Args:
-            Similar to reader
+            init_net: net that will be run once to create the cursor.
             indices: blob of reading order
+            cursor_name: optional name for the blob containing a pointer
+                         to the cursor.
+            batch_size: how many samples to read per iteration.
 
         Returns:
             A DatasetReader that can be used to create operators that will
@@ -275,7 +277,7 @@ class Dataset(object):
             [cursor_name],
             fields=self.fields)
         return _DatasetRandomReader(
-            self.fields, self.field_blobs, cursor, cursor_name, indices)
+            self.content(), cursor, cursor_name, indices, batch_size)
 
     def writer(self, init_net):
         """Create a Writer that can be used to append entries into the dataset.
@@ -290,4 +292,4 @@ class Dataset(object):
                       (currently not used)
         """
         assert self.field_blobs, 'Dataset not initialized.'
-        return _DatasetWriter(self.fields, self.field_blobs, init_net)
+        return _DatasetWriter(self.content(), init_net)

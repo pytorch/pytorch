@@ -1,7 +1,0 @@
-file(GLOB Eigen_src_subdirectories "*")
-escape_string_as_regex(ESCAPED_CMAKE_CURRENT_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
-foreach(f ${Eigen_src_subdirectories})
-  if(NOT f MATCHES "\\.txt" AND NOT f MATCHES "${ESCAPED_CMAKE_CURRENT_SOURCE_DIR}/[.].+" )
-    add_subdirectory(${f})
-  endif()
-endforeach()

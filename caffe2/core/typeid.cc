@@ -9,6 +9,11 @@ std::map<CaffeTypeId, string>& gTypeNames() {
   return g_type_names;
 }
 
+std::set<string>& gRegisteredTypeNames() {
+  static std::set<string> g_registered_type_names;
+  return g_registered_type_names;
+}
+
 string Demangle(const char* name) {
   int status = 0;
   auto demangled = ::abi::__cxa_demangle(name, nullptr, nullptr, &status);

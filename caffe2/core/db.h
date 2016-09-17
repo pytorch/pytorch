@@ -153,9 +153,10 @@ class DBReader {
   }
 
   void Open(const string& db_type, const string& source) {
-    if (cursor_) {
-      cursor_.reset();
-    }
+    // Note(jiayq): resetting is needed when we re-open e.g. leveldb where no
+    // concurrent access is allowed.
+    cursor_.reset();
+    db_.reset();
     db_type_ = db_type;
     source_ = source;
     db_ = CreateDB(db_type_, source_, READ);

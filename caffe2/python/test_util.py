@@ -24,6 +24,7 @@ class TestCase(unittest.TestCase):
         ])
 
     def setUp(self):
+        self.ws = workspace.C.Workspace()
         workspace.ResetWorkspace()
 
     def tearDown(self):

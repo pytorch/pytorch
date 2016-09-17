@@ -25,26 +25,28 @@ class FillerOp : public Operator<Context> {
       : Operator<Context>(operator_def, ws),
         shape_(ToVectorTIndex(OperatorBase::GetRepeatedArgument<int>("shape"))),
         extra_shape_(ToVectorTIndex(
-            OperatorBase::GetRepeatedArgument<int>("extra_shape"))) {}
+            OperatorBase::GetRepeatedArgument<int>("extra_shape"))) {
+    if (InputSize()) {
+      if (shape_.size() != 0) {
+        CAFFE_THROW(
+            "Cannot set the shape argument and pass in an input at "
+            "the same time");
+      }
+    } else if (!extra_shape_.empty()) {
+      CAFFE_THROW("Cannot set extra_shape when there is no input");
+    }
+  }
+
   virtual ~FillerOp() {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override {
     auto* output = Operator<Context>::Output(0);
     if (InputSize()) {
-      if (shape_.size() != 0) {
-        LOG(ERROR) << "Cannot set the shape argument and pass in an input at "
-                      "the same time.";
-        return false;
-      }
       auto shape = Input(0).dims();
       shape.insert(shape.end(), extra_shape_.begin(), extra_shape_.end());
       output->Resize(shape);
     } else {
-      if (!extra_shape_.empty()) {
-        LOG(ERROR) << "Cannot set both shape and extra_shape";
-        return false;
-      }
       output->Resize(shape_);
     }
     return Fill(output);
@@ -80,23 +82,66 @@ class UniformFillOp final : public FillerOp<Context> {
   T max_;
 };
 
-template <typename T, class Context>
+template <class Context>
 class ConstantFillOp final : public FillerOp<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   ConstantFillOp(const OperatorDef& operator_def, Workspace* ws)
-      : FillerOp<Context>(operator_def, ws),
-        value_(OperatorBase::template GetSingleArgument<float>("value", 0)) {}
+      : FillerOp<Context>(operator_def, ws) {
+    TensorProto_DataType dtype =
+        static_cast<TensorProto_DataType>(OperatorBase::GetSingleArgument<int>(
+            "dtype", TensorProto_DataType_FLOAT));
+
+    if (!OperatorBase::HasArgument("dtype") &&
+        OperatorBase::HasArgument("value")) {
+      // If 'dtype' is not provided, infer type based on the type of 'value'
+      // Currently, single argument contains either float, int64 or bytes
+      if (OperatorBase::HasSingleArgumentOfType<float>("value")) {
+        dtype = TensorProto_DataType_FLOAT;
+      } else if (OperatorBase::HasSingleArgumentOfType<int64_t>("value")) {
+        dtype = TensorProto_DataType_INT64;
+      } else {
+        CAFFE_THROW("Argument 'value' is of unexpected type");
+      }
+      VLOG(1) << "Argument 'dtype' is not provided. Assume the data type is "
+              << "the same as that of argument 'value': " << dtype;
+    }
+
+    switch (dtype) {
+      case TensorProto_DataType_FLOAT:
+        body_ = &ConstantFillOp::FillWithType<float>;
+        break;
+      case TensorProto_DataType_INT32:
+        body_ = &ConstantFillOp::FillWithType<int>;
+        break;
+      case TensorProto_DataType_BOOL:
+        body_ = &ConstantFillOp::FillWithType<bool>;
+        break;
+      case TensorProto_DataType_INT64:
+        body_ = &ConstantFillOp::FillWithType<int64_t>;
+        break;
+      case TensorProto_DataType_UNDEFINED:
+        CAFFE_THROW("ConstantFill op cannot have undefined 'dtype' argument");
+      // break;
+      default:
+        CAFFE_THROW("Unexpected 'dtype' argument value: ", dtype);
+    }
+  }
 
   bool Fill(Tensor<Context>* output) override {
+    return (this->*body_)(output);
+  }
+
+  template <typename T>
+  bool FillWithType(Tensor<Context>* output) {
+    T value = OperatorBase::GetSingleArgument<T>("value", 0);
     math::Set<T, Context>(
-        output->size(), value_, output->template mutable_data<T>(),
-        &context_);
+        output->size(), value, output->template mutable_data<T>(), &context_);
     return true;
   }
 
  private:
-  T value_;
+  bool (ConstantFillOp::*body_)(Tensor<Context>* output);
 };
 
 template <typename T, class Context>

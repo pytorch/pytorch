@@ -97,8 +97,10 @@ ImageInputOp<Context>::ImageInputOp(
   LOG(INFO) << "    Subtract mean " << mean_ << " and divide by std " << std_
             << ".";
   prefetched_image_.Resize(
-      vector<TIndex>{TIndex(batch_size_), TIndex(crop_), TIndex(crop_),
-                     TIndex(color_ ? 3 : 1)});
+      TIndex(batch_size_),
+      TIndex(crop_),
+      TIndex(crop_),
+      TIndex(color_ ? 3 : 1));
   prefetched_label_.Resize(vector<TIndex>(1, batch_size_));
 }
 

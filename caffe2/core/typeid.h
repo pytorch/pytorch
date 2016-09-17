@@ -1,22 +1,28 @@
 #ifndef CAFFE2_CORE_TYPEID_H_
 #define CAFFE2_CORE_TYPEID_H_
 
+#include <cassert>
 #include <cstdlib>
 
 #include <iostream>
 #include <map>
 #include <type_traits>
 #ifdef __GXX_RTTI
+#include <set>
 #include <typeinfo>
 #endif
 
+#include <exception>
+
 #include "caffe2/core/common.h"
-#include "caffe2/core/logging.h"
 
 namespace caffe2 {
 
 typedef intptr_t CaffeTypeId;
 std::map<CaffeTypeId, string>& gTypeNames();
+#ifdef __GXX_RTTI
+std::set<string>& gRegisteredTypeNames();
+#endif // __GXX_RTTI
 
 // A utility function to demangle a function name.
 string Demangle(const char* name);
@@ -24,10 +30,25 @@ string Demangle(const char* name);
 template <typename T>
 struct TypeNameRegisterer {
   TypeNameRegisterer() {
-    gTypeNames()[reinterpret_cast<CaffeTypeId>(Id())] =
 #ifdef __GXX_RTTI
-        Demangle(typeid(T).name());
+    string name = Demangle(typeid(T).name());
+    gTypeNames()[reinterpret_cast<CaffeTypeId>(Id())] = name;
+    // If we are in RTTI mode, we will also use this opportunity to do sanity
+    // check if there are duplicated ids registered for the same type. This
+    // usually happens when one does not do RTLD_GLOBAL, which is often the
+    // case in Python. The way we do the check is to make sure that there are
+    // no duplicated names registered - this could be done by checking the
+    // uniqueness of names.
+    if (gRegisteredTypeNames().count(name)) {
+      std::cerr << "Type name " << name
+                << " registered twice. This should "
+                   "not happen. Are you using RTLD_GLOBAL correctly?"
+                << std::endl;
+      throw std::runtime_error("TypeNameRegisterer error with type " + name);
+    }
+    gRegisteredTypeNames().insert(name);
 #else  // __GXX_RTTI
+    gTypeNames()[reinterpret_cast<CaffeTypeId>(Id())] =
         "(RTTI disabled, cannot show name)";
 #endif  // __GXX_RTTI
   }
@@ -107,7 +128,7 @@ class TypeMeta {
    */
   inline const char* name() const {
     auto it = gTypeNames().find(id_);
-    DCHECK(it != gTypeNames().end());
+    assert(it != gTypeNames().end());
     return it->second.c_str();
   }
   inline bool operator==(const TypeMeta& m) const { return (id_ == m.id_); }

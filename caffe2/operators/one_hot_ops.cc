@@ -19,7 +19,7 @@ class OneHotOp : public Operator<CPUContext> {
 
     auto* indices_ptr = indices.data<int64_t>();
     auto* one_hots = Output(0);
-    one_hots->Resize(std::vector<TIndex>{batch_size, index_size});
+    one_hots->Resize(batch_size, index_size);
     if (one_hots->size() == 0) {
       return true;
     }
@@ -54,7 +54,7 @@ class SegmentOneHotOp : public Operator<CPUContext> {
     auto* lengths_ptr = lengths.data<int32_t>();
     auto* indices_ptr = indices.data<int64_t>();
     auto* one_hots = Output(0);
-    one_hots->Resize(std::vector<TIndex>{batch_size, index_size});
+    one_hots->Resize(batch_size, index_size);
     auto* one_hots_ptr = one_hots->mutable_data<float>();
     if (one_hots->size() == 0) {
       return true;

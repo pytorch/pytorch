@@ -16,9 +16,12 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from collections import OrderedDict
 import logging
 import numpy as np
+from caffe2.python import core
+from caffe2.python import workspace
+from caffe2.python.core import BlobReference
+from collections import OrderedDict
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +56,13 @@ class Field(object):
 
     def field_types(self):
         """Return the numpy.dtype for each of the children fields."""
+        raise NotImplementedError('Field is an abstract class.')
+
+    def field_blobs(self):
+        """Return the list of blobs with contents for this Field.
+        Values can either be all numpy.ndarray or BlobReference.
+        If any of the fields doens't have a blob, throws.
+        """
         raise NotImplementedError('Field is an abstract class.')
 
     def clone(self):
@@ -105,25 +115,40 @@ class List(Field):
     additional `lengths` field, which will contain the size of each list under
     the parent domain.
     """
-    def __init__(self, values):
+    def __init__(self, values, lengths_blob=None):
         assert isinstance(values, Field)
-        self.lengths = Scalar(np.int32)
-        self.values = values.clone()
+        self.lengths = Scalar(np.int32, lengths_blob)
+        self._items = values.clone()
         self.lengths._set_parent(self, 0)
-        self.values._set_parent(self, 1)
-        Field.__init__(self, [self.lengths, self.values])
+        self._items._set_parent(self, 1)
+        Field.__init__(self, [self.lengths, self._items])
 
     def field_names(self):
-        value_fields = self.values.field_names()
+        value_fields = self._items.field_names()
         return (
             ['lengths'] +
             [_join_field_name('values', v) for v in value_fields])
 
     def field_types(self):
-        return self.lengths.field_types() + self.values.field_types()
+        return self.lengths.field_types() + self._items.field_types()
+
+    def field_blobs(self):
+        return self.lengths.field_blobs() + self._items.field_blobs()
 
     def clone(self):
-        return List(self.values)
+        return List(self._items, self.lengths._blob)
+
+    def __getattr__(self, item):
+        """If the value of this list is a struct,
+        allow to instrospect directly into its fields."""
+        if item.startswith('__'):
+            raise AttributeError(item)
+        if isinstance(self._items, Struct):
+            return getattr(self._items, item)
+        elif item == 'value' or item == 'items':
+            return self._items
+        else:
+            raise AttributeError('Field not found in list: %s.' % item)
 
 
 class Struct(Field):
@@ -142,6 +167,9 @@ class Struct(Field):
         self.fields = OrderedDict(fields)
         Field.__init__(self, self.fields.values())
 
+    def get_children(self):
+        return self.fields.items()
+
     def field_names(self):
         names = []
         for name, field in self.fields.items():
@@ -154,11 +182,22 @@ class Struct(Field):
             types += field.field_types()
         return types
 
+    def field_blobs(self):
+        blobs = []
+        for name, field in self.fields.items():
+            blobs += field.field_blobs()
+        return blobs
+
     def clone(self):
         return Struct(*self.fields.items())
 
     def __getattr__(self, item):
-        return self.fields[item]
+        if item.startswith('__'):
+            raise AttributeError(item)
+        try:
+            return self.__dict__['fields'][item]
+        except KeyError:
+            raise AttributeError(item)
 
 
 class Scalar(Field):
@@ -198,13 +237,15 @@ class Scalar(Field):
     It is an error to pass a structured dtype to Scalar, since it would contain
     more than one field. Instead, use from_dtype, which will construct
     a nested `Struct` field reflecting the given dtype's structure.
+
+    A Scalar can also contain a blob, which represents the value of this
+    Scalar. A blob can be either a numpy.ndarray, in which case it contain the
+    actual contents of the Scalar, or a BlobReference, which represents a
+    blob living in a caffe2 Workspace. If blob of different types are passed,
+    a conversion to numpy.ndarray is attempted.
     """
-    def __init__(self, dtype=None):
-        self._original_dtype = dtype
-        self.dtype = np.dtype(dtype or np.void)
-        assert not self.dtype.fields, (
-            'Cannot create Scalar with a structured dtype. ' +
-            'Use from_dtype instead.')
+    def __init__(self, dtype=None, blob=None):
+        self.set(dtype, blob)
         Field.__init__(self, [])
 
     def field_names(self):
@@ -213,8 +254,72 @@ class Scalar(Field):
     def field_types(self):
         return [self.dtype]
 
+    def field_blobs(self):
+        assert self._blob is not None, 'Value is not set for this field.'
+        return [self._blob]
+
     def clone(self):
-        return Scalar(self._original_dtype)
+        return Scalar(dtype=self._original_dtype, blob=self._blob)
+
+    def get(self):
+        """Gets the current blob of this Scalar field."""
+        assert self._blob is not None, 'Value is not set for this field.'
+        return self._blob
+
+    def __call__(self):
+        """Shortcut for self.get()"""
+        return self.get()
+
+    def set(self, dtype=None, blob=None):
+        """Set the type and/or blob of this scalar. See __init__ for details.
+
+        Args:
+            dtype: can be any numpy type. If not provided and `blob` is
+                   provided, it will be inferred. If no argument is provided,
+                   this Scalar will be of type np.void.
+            blob:  if provided, can be either a BlobReference or a
+                   numpy.ndarray. If a value of different type is passed,
+                   a conversion to numpy.ndarray is attempted. Strings aren't
+                   accepted, since they can be ambiguous. If you want to pass
+                   a string, to either BlobReference(blob) or np.array(blob).
+        """
+        if blob is not None and isinstance(blob, core.basestring):
+            raise ValueError(
+                'Passing str blob to Scalar.set() is ambiguous. '
+                'Do either set(blob=np.array(blob)) or '
+                'set(blob=BlobReference(blob))')
+
+        self._original_dtype = dtype
+        if dtype is not None:
+            dtype = np.dtype(dtype)
+        # If blob is not None and it is not a BlobReference, we assume that
+        # it is actual tensor data, so we will try to cast it to an numpy array.
+        if blob is not None and not isinstance(blob, BlobReference):
+            if dtype is not None:
+                blob = np.array(blob, dtype=dtype.base)
+                # if array is empty we may need to reshape a little
+                if blob.size == 0:
+                    blob = blob.reshape((0,) + dtype.shape)
+            else:
+                assert isinstance(blob, np.ndarray), (
+                    'Invalid blob type: %s' % str(type(blob)))
+            assert len(blob.shape), ('Value must be at least a 1D array.')
+            # infer inner shape from the blob given
+            # TODO(dzhulgakov): tweak this to make it work with PackedStruct
+            if len(blob.shape) > 1:
+                dtype = np.dtype((dtype.base, blob.shape[1:]))
+        # if we were still unable to infer the dtype
+        if dtype is None:
+            dtype = np.dtype(np.void)
+        assert not dtype.fields, (
+            'Cannot create Scalar with a structured dtype. ' +
+            'Use from_dtype instead.')
+        self.dtype = dtype
+        self._blob = blob
+
+    def set_type(self, dtype):
+        self._original_dtype = dtype
+        self.dtype = np.dtype(dtype or np.void)
 
     def id(self):
         """
@@ -225,11 +330,14 @@ class Scalar(Field):
         return self._child_base_id()
 
 
-def Map(keys, values, keys_name='keys', values_name='values'):
+def Map(keys, values, keys_name='keys', values_name='values',
+        lengths_blob=None):
     """A map is a List of Struct containing keys and values fields.
     Optionally, you can provide custom name for the key and value fields.
     """
-    return List(Struct((keys_name, keys), (values_name, values)))
+    return List(
+        Struct((keys_name, keys), (values_name, values)),
+        lengths_blob=lengths_blob)
 
 
 def from_dtype(dtype, _outer_shape=()):
@@ -268,6 +376,7 @@ class _SchemaNode(object):
         self.children = []
         self.type_str = type_str
         self.field = None
+        self.col_blob = None
 
     def add_child(self, name, type_str=''):
         for child in self.children:
@@ -293,17 +402,21 @@ class _SchemaNode(object):
         if (set(child_names) == set(list_names)):
             for child in self.children:
                 if child.name == 'values':
-                    self.field = List(child.get_field())
+                    self.field = List(
+                        child.get_field(),
+                        lengths_blob=self.children[0].col_blob)
                     self.type_str = "List"
                     return self.field
-
         elif (set(child_names) == set(map_names)):
             for child in self.children:
                 if child.name == 'keys':
                     key_field = child.get_field()
                 elif child.name == 'values':
                     values_field = child.get_field()
-            self.field = Map(key_field, values_field)
+            self.field = Map(
+                key_field,
+                values_field,
+                lengths_blob=self.children[0].col_blob)
             self.type_str = "Map"
             return self.field
 
@@ -327,22 +440,111 @@ class _SchemaNode(object):
         logger.info(self.type_str)
 
 
-def from_column_list(column_names, column_types):
-
+def from_column_list(col_names, col_types=None, col_blobs=None):
+    """
+    Given a list of names, types, and optionally values, construct a Schema.
+    """
+    if col_types is None:
+        col_types = [None] * len(col_names)
+    if col_blobs is None:
+        col_blobs = [None] * len(col_names)
+    assert len(col_names) == len(col_types), (
+        'col_names and col_types must have the same length.')
+    assert len(col_names) == len(col_blobs), (
+        'col_names and col_blobs must have the same length.')
     root = _SchemaNode('root', 'Struct')
-    for column_name, column_type in zip(column_names, column_types):
-        columns = column_name.split(':')
+    for col_name, col_type, col_blob in zip(col_names, col_types, col_blobs):
+        columns = col_name.split(':')
         current = root
         for i in range(len(columns)):
             name = columns[i]
             type_str = ''
             field = None
             if i == len(columns) - 1:
-                type_str = column_type
-                field = Scalar(column_type)
+                type_str = col_type
+                field = Scalar(dtype=col_type, blob=col_blob)
             next = current.add_child(name, type_str)
             if field is not None:
                 next.field = field
+                next.col_blob = col_blob
             current = next
 
     return root.get_field()
+
+
+def from_blob_list(schema, values):
+    """
+    Create a schema that clones the given schema, but containing the given
+    list of values.
+    """
+    assert isinstance(schema, Field), 'Argument `schema` must be a Field.'
+    if isinstance(values, BlobReference):
+        values = [values]
+    names = schema.field_names()
+    types = schema.field_types()
+    assert len(names) == len(values), (
+        'Values must have %d elements, got %d.' % (len(names), len(values)))
+    return from_column_list(names, types, values)
+
+
+def FetchRecord(blob_record):
+    """
+    Given a record containing BlobReferences, return a new record with same
+    schema, containing numpy arrays, fetched from the current active workspace.
+    """
+    assert isinstance(blob_record, Field)
+    field_blobs = blob_record.field_blobs()
+    assert all(isinstance(v, BlobReference) for v in field_blobs)
+    field_arrays = [workspace.FetchBlob(value) for value in field_blobs]
+    return from_blob_list(blob_record, field_arrays)
+
+
+def FeedRecord(blob_record, arrays):
+    """
+    Given a Record containing blob_references and arrays, which is either
+    a list of numpy arrays or a Record containing numpy arrays, feeds the
+    record to the current workspace.
+    """
+    assert isinstance(blob_record, Field)
+    field_blobs = blob_record.field_blobs()
+    assert all(isinstance(v, BlobReference) for v in field_blobs)
+    if isinstance(arrays, Field):
+        # TODO: check schema
+        arrays = arrays.field_blobs()
+    assert len(arrays) == len(field_blobs), (
+        'Values must contain exactly %d ndarrays.' % len(field_blobs))
+    for blob, array in zip(field_blobs, arrays):
+        workspace.FeedBlob(blob, array)
+
+
+def NewRecord(net, schema):
+    """
+    Given a record of np.arrays, create a BlobReference for each one of them,
+    returning a record containing BlobReferences. The BlobReferences will be
+    added as ExternalInputs of the given net.
+    """
+    assert isinstance(schema, Field), 'Record must be a schema.Field instance.'
+    blob_refs = [
+        net.AddExternalInput(net.NextName(prefix=name))
+        for name in schema.field_names()]
+    return from_blob_list(schema, blob_refs)
+
+_DATA_TYPE_FOR_DTYPE = [
+    (np.str, core.DataType.STRING),
+    (np.float32, core.DataType.FLOAT),
+    (np.float64, core.DataType.DOUBLE),
+    (np.bool, core.DataType.BOOL),
+    (np.int8, core.DataType.INT8),
+    (np.int16, core.DataType.INT16),
+    (np.int32, core.DataType.INT32),
+    (np.int64, core.DataType.INT64),
+    (np.uint8, core.DataType.UINT8),
+    (np.uint16, core.DataType.UINT16),
+]
+
+
+def data_type_for_dtype(dtype):
+    for np_type, dt in _DATA_TYPE_FOR_DTYPE:
+        if dtype.base == np_type:
+            return dt
+    raise TypeError('Unknown dtype: ' + str(dtype.base))

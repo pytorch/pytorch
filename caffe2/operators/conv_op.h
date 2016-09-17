@@ -10,7 +10,7 @@ namespace caffe2 {
 template <typename T, class Context>
 class ConvOp final : public ConvPoolOpBase<Context> {
  public:
-  USE_CONV_POOL_BASE_FUNCTIONS;
+  USE_CONV_POOL_BASE_FUNCTIONS(Context);
   ConvOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<Context>(operator_def, ws) {}
   ~ConvOp() {}
@@ -29,7 +29,7 @@ class ConvOp final : public ConvPoolOpBase<Context> {
 template <typename T, class Context>
 class ConvGradientOp final : public ConvPoolOpBase<Context> {
  public:
-  USE_CONV_POOL_BASE_FUNCTIONS;
+  USE_CONV_POOL_BASE_FUNCTIONS(Context);
   ConvGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<Context>(operator_def, ws) {}
   ~ConvGradientOp() {}

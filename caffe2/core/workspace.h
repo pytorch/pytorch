@@ -72,7 +72,7 @@ class Workspace {
    * creation of multiple temp variables. For best performance, simply use
    * HasBlob() and GetBlob().
    */
-  vector<string> Blobs();
+  vector<string> Blobs() const;
 
   /**
    * Return the root folder of the workspace.
@@ -129,7 +129,7 @@ class Workspace {
   /**
    * Returns a list of names of the currently instantiated networks.
    */
-  vector<string> Nets() {
+  vector<string> Nets() const {
     vector<string> names;
     for (auto& entry : net_map_) {
       names.push_back(entry.first);

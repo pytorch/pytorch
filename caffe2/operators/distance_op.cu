@@ -29,9 +29,9 @@ bool SquaredL2DistanceOp<float, CUDAContext>::RunOnDevice() {
   for (int i = 0; i < X.ndim(); ++i) {
     DCHECK_EQ(X.dim32(i), Y.dim32(i));
   }
-  int N = X.dim32(0);
-  int D = X.size() / X.dim32(0);
-  distance->Resize(vector<TIndex>(1, N));
+  int N = X.ndim() > 0 ? X.dim32(0) : 1;
+  int D = X.size() / N;
+  distance->Resize(vector<TIndex>(size_t(1), N));
   SquaredL2DistanceKernel<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS,
                             0, context_.cuda_stream()>>>(
       N, D, X.data<float>(), Y.data<float>(), distance->mutable_data<float>());

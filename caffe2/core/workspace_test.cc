@@ -6,7 +6,7 @@
 
 namespace caffe2 {
 
-class Foo {};
+class WorkspaceTestFoo {};
 
 TEST(WorkspaceTest, BlobAccess) {
   Workspace ws;
@@ -27,14 +27,14 @@ TEST(WorkspaceTest, BlobAccess) {
   Blob* blob = ws.GetBlob("newblob");
   int* int_unused UNUSED_VARIABLE = blob->GetMutable<int>();
   EXPECT_TRUE(blob->IsType<int>());
-  EXPECT_FALSE(blob->IsType<Foo>());
+  EXPECT_FALSE(blob->IsType<WorkspaceTestFoo>());
   EXPECT_NE(&blob->Get<int>(), nullptr);
 
   // Re-creating the blob does not change the content as long as it already
   // exists.
   EXPECT_NE(nullptr, ws.CreateBlob("newblob"));
   EXPECT_TRUE(blob->IsType<int>());
-  EXPECT_FALSE(blob->IsType<Foo>());
+  EXPECT_FALSE(blob->IsType<WorkspaceTestFoo>());
   // When not null, we should only call with the right type.
   EXPECT_NE(&blob->Get<int>(), nullptr);
 }

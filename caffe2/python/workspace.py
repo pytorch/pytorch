@@ -9,7 +9,33 @@ import tempfile
 import numpy as np
 from caffe2.proto import caffe2_pb2
 from caffe2.python import scope, utils
-from ._import_c_extension import *  # noqa
+
+import caffe2.python._import_c_extension as C
+
+Blobs = C.blobs
+CreateBlob = C.create_blob
+CurrentWorkspace = C.current_workspace
+DeserializeBlob = C.deserialize_blob
+GlobalInit = C.global_init
+HasBlob = C.has_blob
+RegisteredOperators = C.registered_operators
+SerializeBlob = C.serialize_blob
+SwitchWorkspace = C.switch_workspace
+RootFolder = C.root_folder
+Workspaces = C.workspaces
+BenchmarkNet = C.benchmark_net
+
+has_gpu_support = C.has_gpu_support
+if has_gpu_support:
+    NumCudaDevices = C.num_cuda_devices
+    SetDefaultGPUID = C.set_default_gpu_id
+    GetDefaultGPUID = C.get_default_gpu_id
+
+    def GetCudaPeerAccessPattern():
+        return np.asarray(C.get_cuda_peer_access_pattern())
+else:
+    def NumCudaDevices():
+        return 0
 
 # Python 2 and 3 compatibility: test if basestring exists
 try:
@@ -48,7 +74,7 @@ def StartMint(root_folder=None, port=None):
     from caffe2.python.mint import app
     if root_folder is None:
         # Get the root folder from the current workspace
-        root_folder = RootFolder()
+        root_folder = C.root_folder()
     if port is None:
         port = _GetFreeFlaskPort()
     process = Process(
@@ -87,23 +113,23 @@ def StringfyProto(obj):
 def ResetWorkspace(root_folder=None):
     if root_folder is None:
         # Reset the workspace, but keep the current root folder setting.
-        return cc_ResetWorkspace(RootFolder())
+        return C.reset_workspace(C.root_folder())
     else:
         if not os.path.exists(root_folder):
             os.makedirs(root_folder)
-        return cc_ResetWorkspace(root_folder)
+        return C.reset_workspace(root_folder)
 
 
 def CreateNet(net, input_blobs=None):
     if input_blobs is None:
         input_blobs = []
     for input_blob in input_blobs:
-        CreateBlob(input_blob)
-    return cc_CreateNet(StringfyProto(net))
+        C.create_blob(input_blob)
+    return C.create_net(StringfyProto(net))
 
 
 def RunOperatorOnce(operator):
-    return cc_RunOperatorOnce(StringfyProto(operator))
+    return C.run_operator_once(StringfyProto(operator))
 
 
 def RunOperatorsOnce(operators):
@@ -115,19 +141,38 @@ def RunOperatorsOnce(operators):
 
 
 def RunNetOnce(net):
-    return cc_RunNetOnce(StringfyProto(net))
+    return C.run_net_once(StringfyProto(net))
+
+
+def RunNet(name):
+    """Runs a given net.
+
+    Inputs:
+      name: the name of the net, or a reference to the net.
+    Returns:
+      True or an exception.
+    """
+    return C.run_net(StringifyNetName(name))
 
 
 def RunPlan(plan):
-    return cc_RunPlan(StringfyProto(plan))
+    return C.run_plan(StringfyProto(plan))
 
 
-def _StringifyBlobName(name):
+def _StringifyName(name, expected_type):
     if isinstance(name, basestring):
         return name
-    assert type(name).__name__ == 'BlobReference', \
-        "Expected a string or BlobReference"
+    assert type(name).__name__ == expected_type, \
+        "Expected a string or %s" % expected_type
     return str(name)
+
+
+def StringifyBlobName(name):
+    return _StringifyName(name, "BlobReference")
+
+
+def StringifyNetName(name):
+    return _StringifyName(name, "Net")
 
 
 def FeedBlob(name, arr, device_option=None):
@@ -146,13 +191,24 @@ def FeedBlob(name, arr, device_option=None):
     if type(arr) is np.ndarray and arr.dtype.kind == 'S':
         # Plain NumPy strings are weird, let's use objects instead
         arr = arr.astype(np.object)
-    name = _StringifyBlobName(name)
+    name = StringifyBlobName(name)
     if device_option is not None:
-        return cc_FeedBlob(name, arr, StringfyProto(device_option))
+        return C.feed_blob(name, arr, StringfyProto(device_option))
     elif scope.DEVICESCOPE is not None:
-        return cc_FeedBlob(name, arr, StringfyProto(scope.DEVICESCOPE))
+        return C.feed_blob(name, arr, StringfyProto(scope.DEVICESCOPE))
     else:
-        return cc_FeedBlob(name, arr)
+        return C.feed_blob(name, arr)
+
+
+def FetchBlobs(names):
+    """Fetches a list of blobs from the workspace.
+
+    Inputs:
+        names: list of names of blobs - strings or BlobReferences
+    Returns:
+        list of fetched blobs
+    """
+    return [FetchBlob(name) for name in names]
 
 
 def FetchBlob(name):
@@ -163,8 +219,12 @@ def FetchBlob(name):
     Returns:
       Fetched blob (numpy array or string) if successful
     """
-    name = _StringifyBlobName(name)
-    return cc_FetchBlob(name)
+    return C.fetch_blob(StringifyBlobName(name))
+
+
+def GetNameScope():
+    """Return the current namescope string. To be used to fetch blobs"""
+    return scope.NAMESCOPE
 
 
 class _BlobDict(object):
@@ -177,13 +237,13 @@ class _BlobDict(object):
         return FeedBlob(key, value)
 
     def __len__(self):
-        return len(Blobs())
+        return len(C.blobs())
 
     def __iter__(self):
-        return Blobs().__iter__()
+        return C.blobs().__iter__()
 
     def __contains__(self, item):
-        return HasBlob(item)
+        return C.has_blob(item)
 
 
 blobs = _BlobDict()
@@ -354,3 +414,31 @@ def FetchImmediate(*args, **kwargs):
 def FeedImmediate(*args, **kwargs):
     with WorkspaceGuard(_immediate_workspace_name):
         return FeedBlob(*args, **kwargs)
+
+
+# CWorkspace utilities
+
+def _Workspace_create_net(ws, net):
+    return ws._create_net(StringfyProto(net))
+C.Workspace.create_net = _Workspace_create_net
+
+
+def _Workspace_run(ws, obj):
+    if hasattr(obj, 'Proto'):
+        obj = obj.Proto()
+    if isinstance(obj, caffe2_pb2.PlanDef):
+        return ws._run_plan(obj.SerializeToString())
+    if isinstance(obj, caffe2_pb2.NetDef):
+        return ws._run_net(obj.SerializeToString())
+    if isinstance(obj, caffe2_pb2.OperatorDef):
+        return ws._run_operator(obj.SerializeToString())
+
+C.Workspace.run = _Workspace_run
+
+
+def _Blob_feed(blob, arg, device_option=None):
+    if device_option is not None:
+        device_option = StringfyProto(device_option)
+    return blob._feed(arg, device_option)
+
+C.Blob.feed = _Blob_feed

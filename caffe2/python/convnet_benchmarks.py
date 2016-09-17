@@ -546,17 +546,10 @@ def Benchmark(model_gen, arg):
 
     workspace.RunNetOnce(model.param_init_net)
     workspace.CreateNet(model.net)
-    for i in range(arg.warmup_iterations):
-        workspace.RunNet(model.net.Proto().name)
+    workspace.BenchmarkNet(
+        model.net.Proto().name, arg.warmup_iterations, arg.iterations,
+        arg.layer_wise_benchmark)
 
-    plan = core.Plan("plan")
-    plan.AddStep(core.ExecutionStep("run", model.net, arg.iterations))
-    start = time.time()
-    workspace.RunPlan(plan)
-    print('Spent: {}'.format((time.time() - start) / arg.iterations))
-    if arg.layer_wise_benchmark:
-        print('Layer-wise benchmark.')
-        workspace.BenchmarkNet(model.net.Proto().name, 1, arg.iterations, True)
 
 def GetArgumentParser():
     parser = argparse.ArgumentParser(description="Caffe2 benchmark.")

@@ -46,8 +46,8 @@ bool MultiClassAccuracyOp<float, CUDAContext>::RunOnDevice() {
   int D = X.dim32(1);
   DCHECK_EQ(label.ndim(), 1);
   DCHECK_EQ(label.dim32(0), N);
-  Y0->Resize(vector<TIndex>{D});
-  Y1->Resize(vector<TIndex>{D});
+  Y0->Resize(D);
+  Y1->Resize(D);
 
   const float* Xdata = X.data<float>();
   const int* labeldata = label.data<int>();
