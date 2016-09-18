@@ -61,7 +61,7 @@ PyObject * $name(PyObject *_unused, PyObject *args)
   try {
       $options
     } else {
-      __invalidArgs(args, "");
+      __invalidArgs(args, $expected_args);
       return NULL;
     }
   } catch (std::exception &e) {
@@ -70,6 +70,27 @@ PyObject * $name(PyObject *_unused, PyObject *args)
   }
 }
     """)
+
+    TYPE_NAMES = {
+        'THGenerator*': 'Generator',
+        'THCudaTensor*': 'torch.cuda.FloatTensor',
+        'THCudaLongTensor*': 'torch.cuda.LongTensor',
+        'THDoubleTensor*': 'torch.DoubleTensor',
+        'THFloatTensor*': 'torch.FloatTensor',
+        'THBoolTensor*': 'torch.ByteTensor',
+        'THLongTensor*': 'torch.LongTensor',
+        'THIndexTensor*': 'torch.LongTensor',
+        'THIntTensor*': 'torch.IntTensor',
+        'THLongStorage*': 'torch.LongStorage',
+        'long': 'int',
+        'int': 'int',
+        'real': 'float',
+        'double': 'float',
+        'float': 'float',
+        'accreal': 'float',
+        'bool': 'bool',
+        'void*': 'int',
+    }
 
     def __init__(self, module_name, with_cuda=False):
         self.module_name = module_name
@@ -101,4 +122,21 @@ PyObject * $name(PyObject *_unused, PyObject *args)
         return self.TYPE_CHECK.get(arg['type'], None)
 
     def get_wrapper_template(self, declaration):
-        return self.WRAPPER_TEMPLATE
+        arg_desc = []
+        def describe_arg(arg):
+            desc = self.TYPE_NAMES[arg['type']] + ' ' + arg['name']
+            if arg.get('nullable'):
+                return '[{} or None]'.format(desc)
+            return desc
+        for option in declaration['options']:
+            option_desc = [describe_arg(arg)
+                    for arg in option['arguments']
+                    if not arg.get('ignore_check', False)]
+            if option_desc:
+                arg_desc.append('({})'.format(', '.join(option_desc)))
+            else:
+                arg_desc.append('no arguments')
+        arg_desc.sort(key=len)
+        arg_desc = ['"' + desc + '"' for desc in arg_desc]
+        arg_str = ', '.join(arg_desc)
+        return Template(self.WRAPPER_TEMPLATE.safe_substitute(expected_args=arg_str))
