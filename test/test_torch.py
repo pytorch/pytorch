@@ -1878,7 +1878,7 @@ class TestTorch(TestCase):
     def test_maskedSelect(self):
         num_src = 10
         src = torch.randn(num_src)
-        mask = torch.rand(num_src).mul(2).floor().byte()
+        mask = torch.rand(num_src).clamp(0, 1).mul(2).floor().byte()
         dst = src.maskedSelect(mask)
         dst2 = []
         for i in range(num_src):
