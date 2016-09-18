@@ -7,6 +7,24 @@ from .module import Module
 
 
 class Linear(Module):
+    """Applies a linear transformation to the incoming data, y = Ax + b
+    The input is a 2D mini-batch of samples, each of size in_features
+    The output will be a 2D Tensor of size mini-batch x out_features
+    
+    Args:
+        in_features: size of each input sample
+        out_features: size of each output sample
+    Input Shape: [*, in_features] : Input can be of shape minibatch x in_features
+    Output Shape:[*, out_features]  : Output is of shape minibatch x out_features
+    Members:
+        weight: the learnable weights of the module of shape (out_features x in_features)
+        bias:   the learnable bias of the module of shape (out_features)
+    Examples:
+        >>> m = nn.Linear(20, 30)
+        >>> input = autograd.Variable(torch.randn(128, 20))
+        >>> output = m.forward(input)
+        >>> print(output.size())
+    """
     def __init__(self, in_features, out_features):
         super(Linear, self).__init__()
         self.in_features = in_features
