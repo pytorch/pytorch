@@ -2,6 +2,9 @@
 #define TH_SIMD_INC
 
 #include <stdint.h>
+#ifdef _MSC_VER
+#include <intrin.h>
+#endif
 
 // Can be found on Intel ISA Reference for CPUID
 #define CPUID_AVX2_BIT 0x10       // Bit 5 of EBX for EAX=0x7
@@ -56,13 +59,22 @@ static inline uint32_t detectHostSIMDExtensions()
 
 static inline void cpuid(uint32_t *eax, uint32_t *ebx, uint32_t *ecx, uint32_t *edx)
 {
+#ifndef _MSC_VER
   uint32_t a = *eax, b, c, d;
   asm volatile ( "cpuid\n\t"
-                 : "+a"(a), "=b"(b), "+c"(c), "=d"(d) );
+                 : "+a"(a), "=b"(b), "=c"(c), "=d"(d) );
   *eax = a;
   *ebx = b;
   *ecx = c;
   *edx = d;
+#else
+  uint32_t cpuInfo[4];
+  __cpuid(cpuInfo, *eax);
+  *eax = cpuInfo[0];
+  *ebx = cpuInfo[1];
+  *ecx = cpuInfo[2];
+  *edx = cpuInfo[3];
+#endif
 }
 
 static inline uint32_t detectHostSIMDExtensions()
