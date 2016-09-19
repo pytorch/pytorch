@@ -41,7 +41,7 @@ def _make_function_class_criterion(class_name, update_output, update_grad_input,
 
     def backward(self, grad_output):
         input, target = self.saved_tensors
-        grad_input = grad_output.new().resizeAs_(input).zero_()
+        grad_input = grad_output.new().resize_as_(input).zero_()
         getattr(self._backend, update_grad_input.name)(self._backend.library_state, input, target,
             grad_input, *self.additional_args)
         if grad_output[0] != 1:
@@ -150,7 +150,7 @@ def _make_function_class(class_name, update_output, update_grad_input, acc_grad_
             if save_output:
                 additional_args = (output,) + additional_args
 
-            grad_input = input.new().resizeAs_(input).zero_()
+            grad_input = input.new().resize_as_(input).zero_()
             params_without_bias = params if len(params) < 2 else params[:1]
             update_grad_input_fn = getattr(self._backend, update_grad_input.name)
             gi_args = params_without_bias + additional_args
@@ -159,7 +159,7 @@ def _make_function_class(class_name, update_output, update_grad_input, acc_grad_
 
         if acc_grad_parameters and any(self.needs_input_grad[1:]):
             additional_args = self._initialize_buffers('acc_grad_parameters')
-            grad_params = tuple(p.new().resizeAs_(p).zero_() for p in params)
+            grad_params = tuple(p.new().resize_as_(p).zero_() for p in params)
             acc_grad_parameters_fn = getattr(self._backend, acc_grad_parameters.name)
             param_args = grad_params + additional_args + (1,)
             acc_grad_parameters_fn(self._backend.library_state, input, grad_output, *param_args)

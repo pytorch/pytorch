@@ -12,10 +12,10 @@ class MM(Module):
     def updateOutput(self, input):
         assert len(input) == 2
         a, b = input
-        assert a.nDimension() == 2 or a.nDimension() == 3
+        assert a.ndimension() == 2 or a.ndimension() == 3
         assert a.dim() == b.dim()
 
-        if a.nDimension() == 2:
+        if a.ndimension() == 2:
             if self.transA:
                 a = a.t()
             if self.transB:
@@ -39,13 +39,13 @@ class MM(Module):
 
         assert len(input) == 2
         a, b = input
-        self.gradInput[0].resizeAs_(a)
-        self.gradInput[1].resizeAs_(b)
+        self.gradInput[0].resize_as_(a)
+        self.gradInput[1].resize_as_(b)
 
-        assert gradOutput.nDimension() == 2 or gradOutput.nDimension() == 3
+        assert gradOutput.ndimension() == 2 or gradOutput.ndimension() == 3
         assert a.dim() == b.dim() == gradOutput.dim()
 
-        if gradOutput.nDimension() == 2:
+        if gradOutput.ndimension() == 2:
             h_dim, w_dim = 0, 1
             f = "mm"
         else:

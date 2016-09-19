@@ -42,10 +42,10 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
     serialized_storages = {}
 
     def persistent_id(obj):
-        if torch.isTensor(obj):
+        if torch.is_tensor(obj):
             serialized_tensors[obj._cdata] = obj
             return str(obj._cdata)
-        elif torch.isStorage(obj):
+        elif torch.is_storage(obj):
             serialized_storages[obj._cdata] = obj
             return str(obj._cdata)
         return None

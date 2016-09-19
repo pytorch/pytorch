@@ -10,7 +10,7 @@ class SoftMin(Module):
 
     def updateOutput(self, input):
         self.mininput = self.mininput or input.new()
-        self.mininput.resizeAs_(input).copy_(input).mul_(-1)
+        self.mininput.resize_as_(input).copy_(input).mul_(-1)
         self._backend.SoftMax_updateOutput(
             self._backend.library_state,
             self.mininput,
@@ -20,7 +20,7 @@ class SoftMin(Module):
 
     def updateGradInput(self, input, gradOutput):
         self.mininput = self.mininput or input.new()
-        self.mininput.resizeAs_(input).copy_(input).mul_(-1)
+        self.mininput.resize_as_(input).copy_(input).mul_(-1)
         self._backend.SoftMax_updateGradInput(
             self._backend.library_state,
             self.mininput,

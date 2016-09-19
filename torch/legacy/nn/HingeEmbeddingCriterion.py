@@ -11,7 +11,7 @@ class HingeEmbeddingCriterion(Criterion):
 
     def updateOutput(self, input, y):
         self.buffer = self.buffer or input.new()
-        self.buffer.resizeAs_(input).copy_(input)
+        self.buffer.resize_as_(input).copy_(input)
         self.buffer[torch.eq(y, -1.)] = 0
         self.output = self.buffer.sum()
 
@@ -21,16 +21,16 @@ class HingeEmbeddingCriterion(Criterion):
         self.output = self.output + self.buffer.sum()
 
         if self.sizeAverage:
-            self.output = self.output / input.nElement()
+            self.output = self.output / input.nelement()
 
         return self.output
 
     def updateGradInput(self, input, y):
-        self.gradInput.resizeAs_(input).copy_(y)
+        self.gradInput.resize_as_(input).copy_(y)
         self.gradInput[torch.mul(torch.eq(y, -1), torch.gt(input, self.margin))] = 0
 
         if self.sizeAverage:
-            self.gradInput.mul_(1. / input.nElement())
+            self.gradInput.mul_(1. / input.nelement())
 
         return self.gradInput
 

@@ -41,7 +41,7 @@ class Padding(Module):
 
 
     def updateGradInput(self, input, gradOutput):
-        self.gradInput.resizeAs_(input)
+        self.gradInput.resize_as_(input)
         dim = self.dim
 
         index = self.index

@@ -15,10 +15,10 @@ class Dropout(Module):
         if self.inplace:
             self.output.set_(input)
         else:
-            self.output.resizeAs_(input).copy_(input)
+            self.output.resize_as_(input).copy_(input)
 
         if self.p > 0 and self.train:
-            self.noise.resizeAs_(input)
+            self.noise.resize_as_(input)
             self.noise.bernoulli_(1-self.p)
             self.noise.div_(1-self.p)
             self.output.mul_(self.noise)
@@ -29,7 +29,7 @@ class Dropout(Module):
         if self.inplace:
             self.gradInput.set_(gradOutput)
         else:
-            self.gradInput.resizeAs_(gradOutput).copy_(gradOutput)
+            self.gradInput.resize_as_(gradOutput).copy_(gradOutput)
 
         if self.p > 0 and self.train:
             self.gradInput.mul_(self.noise) # simply mask the gradients with the noise vector

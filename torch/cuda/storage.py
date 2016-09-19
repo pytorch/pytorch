@@ -1,5 +1,5 @@
 from . import device, _dummy_ctx
-from ..Storage import _StorageBase
+from ..storage import _StorageBase
 
 
 class _CudaStorageBase(_StorageBase):

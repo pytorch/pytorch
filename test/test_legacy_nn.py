@@ -223,7 +223,7 @@ tests = [
                     input_size=[(5, 3), (5, 3, 6)]),
     OldModuleTest(nn.LookupTable,
                     (4, 3),
-                    input=torch.randperm(2).repeatTensor(1, 2),
+                    input=torch.randperm(2).repeat(1, 2),
                     jacobian_input=False),
     OldModuleTest(nn.Mul,
                     input_size=(2, 3, 4, 2),
@@ -503,7 +503,7 @@ for p in (1, 2, 1.5):
                         (p,),
                         input_size=(4, 5),
                         # Eh, we need to use p as a default, so it's passed by value
-                        reference_fn=lambda i,_,p=p: i.div(i.norm(p, 1).expandAs(i)),
+                        reference_fn=lambda i,_,p=p: i.div(i.norm(p, 1).expand_as(i)),
                         desc=str(p)),
     )
 for p in range(1, 4+1):
@@ -774,7 +774,7 @@ class TestNN(NNTestCase):
         str(m)
 
         output = m.forward(input)
-        output2 = input.sum(1).expand(4, 5).repeatTensor(num_modules, 1)
+        output2 = input.sum(1).expand(4, 5).repeat(num_modules, 1)
         self.assertEqual(output2, output)
 
         gradInput = m.backward(input, torch.ones(output2.size()))
@@ -914,7 +914,7 @@ class TestNN(NNTestCase):
         input = torch.randn(10, 10, 10)
         noncontig = input[:, 4]
         module = nn.Contiguous()
-        assert not noncontig.isContiguous()
+        assert not noncontig.is_contiguous()
         output = module.forward(noncontig)
         self.assertEqual(output, noncontig)
         self.assertTrue(output.contiguous())
@@ -960,8 +960,8 @@ class TestNN(NNTestCase):
 
         self.assertEqual(input.abs().sum() * weight, m.loss)
 
-        true_grad = (input.gt(0).typeAs(grad) +
-            input.lt(0).typeAs(grad).mul_(-1)).mul_(weight)
+        true_grad = (input.gt(0).type_as(grad) +
+            input.lt(0).type_as(grad).mul_(-1)).mul_(weight)
         self.assertEqual(true_grad, grad)
 
         # Check that these don't raise errors
@@ -973,7 +973,7 @@ class TestNN(NNTestCase):
         mask = torch.ByteTensor(4, 5).bernoulli_()
         module = nn.MaskedSelect()
         out = module.forward([input, mask])
-        self.assertEqual(input.maskedSelect(mask), out)
+        self.assertEqual(input.masked_select(mask), out)
 
         gradOut = torch.Tensor((20, 80))
         input = torch.Tensor(((10, 20), (30, 40)))

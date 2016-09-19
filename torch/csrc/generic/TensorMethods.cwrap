@@ -198,7 +198,7 @@ THTensor* THPTensor_(fromNumpy)(PyObject *numpy_array) {
 // TODO: check that there are no args
 [[
   name: THPTensor_(elementSize)
-  python_name: elementSize
+  python_name: element_size
   only_register: True
 ]]
 static PyObject * THPTensor_(elementSize)(THPTensor *self, PyObject *args)
@@ -227,6 +227,7 @@ static PyObject * THPTensor_(storage)(THPTensor *self, PyObject *args)
 
 [[
   name: storageOffset
+  python_name: storage_offset
   return: long
   arguments:
     - THTensor* self
@@ -234,6 +235,7 @@ static PyObject * THPTensor_(storage)(THPTensor *self, PyObject *args)
 
 [[
   name: nDimension
+  python_name: ndimension
   return: long
   arguments:
     - THTensor* self
@@ -320,7 +322,7 @@ static PyObject * THPTensor_(storage)(THPTensor *self, PyObject *args)
 ]]
 [[
   name: THPTensor_(numel)
-  python_name: nElement
+  python_name: nelement
   only_register: True
 ]]
 
@@ -349,7 +351,7 @@ static PyObject * THPTensor_(storage)(THPTensor *self, PyObject *args)
       arguments:
         - THTensor* self
         - THStorage* sourceStorage
-        - long storageOffset
+        - long storage_offset
         - THLongStorage* sizes
         - THLongStorage* strides
     - cname: setStorage
@@ -357,7 +359,7 @@ static PyObject * THPTensor_(storage)(THPTensor *self, PyObject *args)
       arguments:
         - THTensor* self
         - THStorage* sourceStorage
-        - long storageOffset
+        - long storage_offset
         - THLongStorage* long_args
         - CONSTANT NULL
 ]]
@@ -1340,6 +1342,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: isSameSizeAs
+  python_name: is_same_size
   return: bool
   arguments:
     - THTensor* self
@@ -1348,6 +1351,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: isContiguous
+  python_name: is_contiguous
   return: bool
   arguments:
     - THTensor* self
@@ -1355,6 +1359,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: isSetTo
+  python_name: is_set_to
   return: bool
   arguments:
     - THTensor* self
@@ -1363,6 +1368,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: isSize
+  python_name: is_size
   return: bool
   arguments:
     - THTensor* self
@@ -2459,6 +2465,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 [[
   name: maskedFill_
   cname: maskedFill
+  python_name: masked_fill_
   return: self
   arguments:
     - THTensor* self
@@ -2469,6 +2476,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 [[
   name: maskedCopy_
   cname: maskedCopy
+  python_name: masked_copy_
   return: self
   arguments:
     - THTensor* self
@@ -2478,6 +2486,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: maskedSelect
+  python_name: masked_select
   with_stateless: True
   return: argument 0
   arguments:
@@ -2610,6 +2619,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: resizeAs_
+  python_name: resize_as_
   cname: resizeAs
   return: self
   arguments:
@@ -2619,6 +2629,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: indexSelect
+  python_name: index_select
   with_stateless: True
   return: argument 0
   arguments:
@@ -2631,7 +2642,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: indexCopy_
-  with_stateless: True
+  python_name: index_copy_
   cname: indexCopy
   return: argument 0
   arguments:
@@ -2643,8 +2654,8 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: indexAdd_
+  python_name: index_add_
   defined_if: CUDA_FLOAT || !IS_CUDA
-  with_stateless: True
   cname: indexAdd
   return: argument 0
   arguments:
@@ -2656,7 +2667,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: indexFill_
-  with_stateless: True
+  python_name: index_fill_
   cname: indexFill
   return: argument 0
   arguments:
@@ -3143,8 +3154,9 @@ static void THTensor_(random1__)(THTensor *self, THGenerator *gen, long b)
 
 [[
   name: logNormal_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
   cname: logNormal
+  python_name: log_normal_
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
   return: self
   arguments:
     - THTensor* self
@@ -3251,8 +3263,9 @@ static void THTensor_(random1__)(THTensor *self, THGenerator *gen, long b)
 
 [[
   name: logNormal_
-  defined_if: CUDA_FLOAT
   cname: logNormal
+  python_name: log_normal_
+  defined_if: CUDA_FLOAT
   return: self
   arguments:
     - THTensor* self

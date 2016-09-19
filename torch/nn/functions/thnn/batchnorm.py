@@ -21,7 +21,7 @@ class BatchNorm(Function):
         if num_params < 2:
             params = params + tuple(None for i in range(2 - num_params))
         additional_args = params + self.additional_args
-        output = input.new().resizeAs_(input)
+        output = input.new().resize_as_(input)
         self.backend.BatchNormalization_updateOutput(self.backend.library_state,
                 input, output, *additional_args)
         return output
@@ -29,9 +29,9 @@ class BatchNorm(Function):
     def backward(self, grad_output):
         tensors = self.saved_tensors
         input, params = tensors[0], tensors[1:]
-        grad_input = (input.new().resizeAs_(input).zero_()
+        grad_input = (input.new().resize_as_(input).zero_()
                 if self.needs_input_grad[0] else None,)
-        grad_param = tuple(p.new().resizeAs_(p).zero_() if self.needs_input_grad[i+1]
+        grad_param = tuple(p.new().resize_as_(p).zero_() if self.needs_input_grad[i+1]
                 else None for i, p in enumerate(params))
         result_grad = grad_input + grad_param
 

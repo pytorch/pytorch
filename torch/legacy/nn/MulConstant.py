@@ -13,7 +13,7 @@ class MulConstant(Module):
             input.mul_(self.constant_scalar)
             self.output.set_(input)
         else:
-            self.output.resizeAs_(input)
+            self.output.resize_as_(input)
             self.output.copy_(input)
             self.output.mul_(self.constant_scalar)
 
@@ -30,7 +30,7 @@ class MulConstant(Module):
             # restore previous input value
             input.div_(self.constant_scalar)
         else:
-            self.gradInput.resizeAs_(gradOutput)
+            self.gradInput.resize_as_(gradOutput)
             self.gradInput.copy_(gradOutput)
             self.gradInput.mul_(self.constant_scalar)
 

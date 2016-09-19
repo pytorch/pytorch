@@ -12,7 +12,7 @@ class Dropout(InplaceFunction):
         self.inplace = inplace
 
     def _make_noise(self, input):
-        return input.new().resizeAs_(input)
+        return input.new().resize_as_(input)
 
     def forward(self, input):
         if self.inplace:
@@ -24,7 +24,7 @@ class Dropout(InplaceFunction):
         if self.p > 0 and self.train:
             self.noise = self._make_noise(input)
             self.noise.bernoulli_(1-self.p).div_(1-self.p)
-            self.noise = self.noise.expandAs(input)
+            self.noise = self.noise.expand_as(input)
             output.mul_(self.noise)
 
         return output

@@ -61,7 +61,7 @@ def nag(opfunc, x, config, state=None):
 
     # (4) apply momentum
     if not 'dfdx' in state:
-        state['dfdx'] = dfdx.new().resizeAs_(dfdx).zero_()
+        state['dfdx'] = dfdx.new().resize_as_(dfdx).zero_()
     else:
         state['dfdx'].mul_(mom)
 
@@ -69,7 +69,7 @@ def nag(opfunc, x, config, state=None):
     # (5) parameter update with single or individual learning rates
     if lrs is not None:
         if 'deltaParameters' in state:
-            state['deltaParameters'] = x.new().resizeAs_(dfdx)
+            state['deltaParameters'] = x.new().resize_as_(dfdx)
 
         state['deltaParameters'].copy_(lrs).mul_(dfdx)
         x.add_(-clr, state['deltaParameters'])

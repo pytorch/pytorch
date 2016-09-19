@@ -26,7 +26,7 @@ class Sum(_DimReduceFunction):
         else:
             repeats = [1 for _ in self.input_size]
             repeats[self.dim] = self.input_size[self.dim]
-            return grad_output.repeatTensor(*repeats),
+            return grad_output.repeat(*repeats),
 
 
 class Prod(_DimReduceFunction):
@@ -51,7 +51,7 @@ class Prod(_DimReduceFunction):
             input, output = self.saved_tensors
             repeats = [1 for _ in self.input_size]
             repeats[self.dim] = self.input_size[self.dim]
-            return output.mul(grad_output).repeatTensor(*repeats).div_(input)
+            return output.mul(grad_output).repeat(*repeats).div_(input)
 
 
 class Mean(_DimReduceFunction):
@@ -66,7 +66,7 @@ class Mean(_DimReduceFunction):
             repeats = [1 for _ in self.input_size]
             dim_size = self.input_size[self.dim]
             repeats[self.dim] = dim_size
-            return grad_output.repeatTensor(*repeats).div_(dim_size)
+            return grad_output.repeat(*repeats).div_(dim_size)
 
 
 class _SelectionFunction(Function):
@@ -154,13 +154,13 @@ class Norm(Function):
                 return input.mul(pow).mul(scale)
         else:
             input, output = self.saved_tensors
-            big_grad_output = grad_output.expandAs(input)
+            big_grad_output = grad_output.expand_as(input)
             if self.norm_type == 2:
-                big_output = output.expandAs(input)
+                big_output = output.expand_as(input)
                 return input.mul(big_grad_output).div(big_output)
             else:
                 pow = input.abs().pow(self.norm_type - 2)
-                big_output = output.pow(self.norm_type - 1).expandAs(input)
+                big_output = output.pow(self.norm_type - 1).expand_as(input)
                 return input.mul(pow).mul(big_grad_output).div(big_output)
 
 

@@ -60,7 +60,7 @@ class PairwiseDistance(Module):
         self.grad = self.grad or gradOutput.new()
         self.ones = self.ones or gradOutput.new()
 
-        self.grad.resizeAs_(input[0]).zero_()
+        self.grad.resize_as_(input[0]).zero_()
         self.ones.resize_(input[0].size(1)).fill_(1)
 
         self.grad.addr_(gradOutput, self.ones)

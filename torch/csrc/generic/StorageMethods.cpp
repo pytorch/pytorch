@@ -430,7 +430,7 @@ PyObject * THPStorage_(_setCdata)(THPStorage *self, PyObject *new_cdata)
 }
 
 static PyMethodDef THPStorage_(methods)[] = {
-  {"elementSize", (PyCFunction)THPStorage_(elementSize), METH_NOARGS, NULL},
+  {"element_size", (PyCFunction)THPStorage_(elementSize), METH_NOARGS, NULL},
   {"fill_", (PyCFunction)THPStorage_(fill_), METH_O, NULL},
   {"free", (PyCFunction)THPStorage_(free), METH_NOARGS, NULL},
   {"new", (PyCFunction)THPStorage_(new), METH_NOARGS, NULL},

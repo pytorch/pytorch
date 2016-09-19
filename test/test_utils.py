@@ -187,7 +187,7 @@ class TestDataset(TestCase):
 
     def setUp(self):
         self.data = torch.randn(10, 2, 3, 5)
-        self.labels = torch.randperm(5).repeatTensor(2)
+        self.labels = torch.randperm(5).repeat(2)
         self.datasource = TensorDataSource(self.data, self.labels)
 
     def _test_sequential(self, dataset):

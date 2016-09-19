@@ -44,7 +44,7 @@ class JoinTable(Module):
         for i in range(len(input)):
            if i not in self.gradInput:
               self.gradInput.append(input[i].new())
-           self.gradInput[i].resizeAs_(input[i])
+           self.gradInput[i].resize_as_(input[i])
         self.gradInput = self.gradInput[:len(input)]
 
         offset = 0

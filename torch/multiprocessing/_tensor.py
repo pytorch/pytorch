@@ -2,7 +2,7 @@ import torch
 
 
 def _shared_serialize(self):
-    metadata = (self.storageOffset(), self.size().tolist(),
+    metadata = (self.storage_offset(), self.size().tolist(),
             self.stride().tolist())
     storage = self.storage()
     return (storage, metadata)
@@ -25,6 +25,6 @@ def reduce_tensor(self, obj):
 
 
 def _init_tensor_sharing():
-    from torch.Tensor import _TensorBase
+    from torch.tensor import _TensorBase
     _TensorBase._shared_serialize = _shared_serialize
 

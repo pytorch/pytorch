@@ -1,6 +1,8 @@
-from torch._C import *
 import sys
 import math
+
+from torch._C import *
+from ._utils import _import_dotted_name
 
 _tensor_classes = set()
 _storage_classes = set()
@@ -9,48 +11,34 @@ _storage_classes = set()
 # Define basic utilities
 ################################################################################
 
-def _import_dotted_name(name):
-    components = name.split('.')
-    obj = __import__(components[0])
-    for component in components[1:]:
-        obj = getattr(obj, component)
-    return obj
-
-# range gets shadowed by torch.range
-def _pyrange(*args, **kwargs):
-    return __builtins__['range'](*args, **kwargs)
-
 def typename(o):
     return o.__module__ + "." + o.__class__.__name__
 
-def isTensor(obj):
+
+def is_tensor(obj):
     return obj.__class__ in _tensor_classes
 
-def isStorage(obj):
+
+def is_storage(obj):
     return obj.__class__ in _storage_classes
 
-def isLongStorage(obj):
-    return isinstance(obj, LongStorage)
 
-def setDefaultTensorType(t):
+def set_default_tensor_type(t):
     global Tensor
     global Storage
-    global _defaultTensorTypeName
-    _defaultTensorTypeName = t
     Tensor = _import_dotted_name(t)
     Storage = _import_dotted_name(t.replace('Tensor', 'Storage'))
+    _C._set_default_tensor_type(Tensor)
 
-def getDefaultTensorType():
-    return _defaultTensorTypeName
 
 from .serialization import save, load
-
-from .Storage import _StorageBase
-from .Tensor import _TensorBase
 
 ################################################################################
 # Define Storage and Tensor classes
 ################################################################################
+
+from .storage import _StorageBase
+from .tensor import _TensorBase
 
 class DoubleStorage(_C.DoubleStorageBase, _StorageBase):
     pass
@@ -106,8 +94,8 @@ _tensor_classes.add(ShortTensor)
 _tensor_classes.add(CharTensor)
 _tensor_classes.add(ByteTensor)
 
-# This shadows Torch.py and Storage.py
-setDefaultTensorType('torch.DoubleTensor')
+
+set_default_tensor_type('torch.FloatTensor')
 
 ################################################################################
 # Initialize extension
@@ -142,3 +130,4 @@ del IntTensorBase
 del ShortTensorBase
 del CharTensorBase
 del ByteTensorBase
+

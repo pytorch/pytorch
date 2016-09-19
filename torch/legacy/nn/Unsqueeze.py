@@ -1,6 +1,6 @@
 import torch
 from .Module import Module
-from .utils import addSingletonDimension
+from .utils import addSingletondimension
 
 class Unsqueeze(Module):
 
@@ -9,11 +9,11 @@ class Unsqueeze(Module):
         self.dim = dim
 
     def updateOutput(self, input):
-        addSingletonDimension(self.output, input, self.dim)
+        addSingletondimension(self.output, input, self.dim)
         return self.output
 
     def updateGradInput(self, input, gradOutput):
-        assert input.nElement() == gradOutput.nElement()
+        assert input.nelement() == gradOutput.nelement()
         self.gradInput = gradOutput.view(input.size())
         return self.gradInput
 

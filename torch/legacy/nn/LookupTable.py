@@ -47,7 +47,7 @@ class LookupTable(Module):
 
     def _makeInputContiguous(self, input):
         # make sure input is a contiguous torch.LongTensor
-        if not input.isContiguous() or type(input) != type(self._input):
+        if not input.is_contiguous() or type(input) != type(self._input):
             self.copiedInput = True
             self._input.resize_(input.size()).copy_(input)
             return self._input
@@ -59,9 +59,9 @@ class LookupTable(Module):
         self.renorm(input)
         input = self._makeInputContiguous(input)
         if input.dim() == 1:
-           torch.indexSelect(self.output, self.weight, 0, input)
+           torch.index_select(self.output, self.weight, 0, input)
         elif input.dim() == 2:
-           torch.indexSelect(self.output, self.weight, 0, input.view(-1))
+           torch.index_select(self.output, self.weight, 0, input.view(-1))
            self.output = self.output.view(input.size(0), input.size(1), self.weight.size(1))
         else:
            raise RuntimeError("input must be a vector or matrix")
@@ -76,8 +76,8 @@ class LookupTable(Module):
         if type(self.gradInput) != type(input):
             self.gradInput = input.new()
 
-        if not self.gradInput.isSameSizeAs(input):
-            self.gradInput.resizeAs_(input).zero_()
+        if not self.gradInput.is_same_size(input):
+            self.gradInput.resize_as_(input).zero_()
 
         return self.gradInput
 
@@ -89,9 +89,9 @@ class LookupTable(Module):
         elif input.dim() != 1:
             raise RuntimeError("input must be a vector or matrix")
 
-        if not gradOutput.isContiguous():
+        if not gradOutput.is_contiguous():
             self._gradOutput = self._gradOutput or gradOutput.new()
-            self._gradOutput.resizeAs_(gradOutput).copy_(gradOutput)
+            self._gradOutput.resize_as_(gradOutput).copy_(gradOutput)
             gradOutput = self._gradOutput
 
         self._backend.LookupTable_accGradParameters(

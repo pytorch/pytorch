@@ -74,7 +74,7 @@ class Conv3d(Function):
     def _compute_grad_input(self, grad_output):
         input, weight, bias = self._get_saved_tensors()
         # TODO: no zero needed in the future
-        grad_input = input.new().resizeAs_(input).zero_()
+        grad_input = input.new().resize_as_(input).zero_()
         if torch.typename(input) == 'torch.cuda.FloatTensor':
             self._backend.VolumetricConvolution_updateGradInput(
                 self._backend.library_state, input, grad_output, grad_input,
@@ -88,8 +88,8 @@ class Conv3d(Function):
     def _compute_grad_weight(self, grad_output):
         input, weight, bias = self._get_saved_tensors()
         # TODO: no zero needed in the future
-        grad_weight = weight.new().resizeAs_(weight).zero_()
-        grad_bias = bias.new().resizeAs_(bias).zero_()
+        grad_weight = weight.new().resize_as_(weight).zero_()
+        grad_bias = bias.new().resize_as_(bias).zero_()
         if torch.typename(input) == 'torch.cuda.FloatTensor':
             args = self.additional_args[3:] + (1,)
             self._backend.VolumetricConvolution_accGradParameters(

@@ -39,7 +39,7 @@ class ClassNLLCriterion(Criterion):
         else:
             self.target = target.long()
 
-        self.gradInput.resizeAs_(input).zero_()
+        self.gradInput.resize_as_(input).zero_()
 
         self._backend.ClassNLLCriterion_updateGradInput(
             self._backend.library_state,

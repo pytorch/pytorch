@@ -23,7 +23,7 @@ class Module(object):
                 # Variables stored in modules are graph leaves,
                 # and we don't want to create copy nodes.
                 value._data = value.data.type(type, *forwarded_args)
-            elif torch.isTensor(value):
+            elif torch.is_tensor(value):
                 setattr(self, key, value.type(type, *forwarded_args))
             elif isinstance(value, Module):
                 value.type(type, *forwarded_args)

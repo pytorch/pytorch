@@ -75,19 +75,19 @@ class BatchNormalization(Module):
     def _checkInputDim(self, input):
         if input.dim() != self.nDim:
             raise RuntimeError('only mini-batch supported ({}D tensor), got {}D tensor instead'.format(self.nDim, input.dim()))
-        if input.size(1) != self.running_mean.nElement():
-            raise RuntimeError('got {}-feature tensor, expected {}'.format(input.size(1), self.running_mean.nElement()))
+        if input.size(1) != self.running_mean.nelement():
+            raise RuntimeError('got {}-feature tensor, expected {}'.format(input.size(1), self.running_mean.nelement()))
 
     def _makeContiguous(self, input, gradOutput=None):
-        if not input.isContiguous():
+        if not input.is_contiguous():
             self._input = self._input or input.new()
-            self._input.resizeAs_(input).copy_(input)
+            self._input.resize_as_(input).copy_(input)
             input = self._input
 
         if gradOutput:
-            if not gradOutput.isContiguous():
+            if not gradOutput.is_contiguous():
                 self._gradOutput = self._gradOutput or gradOutput.new()
-                self._gradOutput.resizeAs_(gradOutput).copy_(gradOutput)
+                self._gradOutput.resize_as_(gradOutput).copy_(gradOutput)
                 gradOutput = self._gradOutput
 
         return input, gradOutput
@@ -97,11 +97,11 @@ class BatchNormalization(Module):
 
         input = self._makeContiguous(input)[0]
 
-        self.output.resizeAs_(input)
+        self.output.resize_as_(input)
         self.save_mean = self.save_mean or input.new()
-        self.save_mean.resizeAs_(self.running_mean)
+        self.save_mean.resize_as_(self.running_mean)
         self.save_std = self.save_std or input.new()
-        self.save_std.resizeAs_(self.running_var)
+        self.save_std.resize_as_(self.running_var)
 
         self._backend.BatchNormalization_updateOutput(
             self._backend.library_state,
@@ -131,7 +131,7 @@ class BatchNormalization(Module):
 
         scale = scale or 1.
         if gradInput is not None:
-           gradInput.resizeAs_(gradOutput)
+           gradInput.resize_as_(gradOutput)
 
 
         self._backend.BatchNormalization_backward(

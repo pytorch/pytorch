@@ -19,8 +19,8 @@ class L1HingeEmbeddingCriterion(Criterion):
         return 1 if x > 0 else -1
 
     def updateGradInput(self, input, y):
-        self.gradInput[0].resizeAs_(input[0])
-        self.gradInput[1].resizeAs_(input[1])
+        self.gradInput[0].resize_as_(input[0])
+        self.gradInput[1].resize_as_(input[1])
         self.gradInput[0].copy_(input[0])
         self.gradInput[0].add_(-1, input[1])
         dist = self.gradInput[0].norm(1)

@@ -6,6 +6,10 @@ import torch
 from torch.autograd import Variable
 from torch.autograd.leaf import Leaf
 
+
+torch.set_default_tensor_type('torch.DoubleTensor')
+
+
 def get_cpu_type(t):
     assert t.__module__ == 'torch.cuda'
     return getattr(torch, t.__class__.__name__)
@@ -17,10 +21,10 @@ def get_gpu_type(t):
 
 
 def to_gpu(obj, type_map={}):
-    if torch.isTensor(obj):
+    if torch.is_tensor(obj):
         t = type_map.get(type(obj), get_gpu_type(type(obj)))
         return obj.clone().type(t)
-    elif torch.isStorage(obj):
+    elif torch.is_storage(obj):
         return obj.new().resize_(obj.size()).copy_(obj)
     elif isinstance(obj, Variable):
         assert type(obj.creator) == Leaf
@@ -61,7 +65,7 @@ class TestCase(unittest.TestCase):
             x = x.data
             y = y.data
 
-        if torch.isTensor(x) and torch.isTensor(y):
+        if torch.is_tensor(x) and torch.is_tensor(y):
             max_err = 0
             super(TestCase, self).assertEqual(x.size().tolist(), y.size().tolist())
             for index in iter_indices(x):
@@ -84,15 +88,15 @@ class TestCase(unittest.TestCase):
 def make_jacobian(input, num_out):
     if isinstance(input, Variable) and not input.requires_grad:
         return None
-    if torch.isTensor(input) or isinstance(input, Variable):
-        return torch.zeros(input.nElement(), num_out)
+    if torch.is_tensor(input) or isinstance(input, Variable):
+        return torch.zeros(input.nelement(), num_out)
     else:
         return type(input)(filter(lambda x: x is not None,
             (make_jacobian(elem, num_out) for elem in input)))
 
 
 def iter_tensors(x, only_requiring_grad=False):
-    if torch.isTensor(x):
+    if torch.is_tensor(x):
         yield x
     elif isinstance(x, Variable):
         if x.requires_grad or not only_requiring_grad:
@@ -104,7 +108,7 @@ def iter_tensors(x, only_requiring_grad=False):
 
 
 def contiguous(input):
-    if torch.isTensor(input):
+    if torch.is_tensor(input):
         return input.contiguous()
     elif isinstance(input, Variable):
         return input.contiguous_()
@@ -125,13 +129,13 @@ def get_numerical_jacobian(fn, input, target):
     x_tensors = [t for t in iter_tensors(target, True)]
     j_tensors = [t for t in iter_tensors(jacobian)]
 
-    outa = torch.Tensor(output_size)
-    outb = torch.Tensor(output_size)
+    outa = torch.DoubleTensor(output_size)
+    outb = torch.DoubleTensor(output_size)
 
     # TODO: compare structure
     for x_tensor, d_tensor in zip(x_tensors, j_tensors):
         flat_tensor = x_tensor.view(-1)
-        for i in range(flat_tensor.nElement()):
+        for i in range(flat_tensor.nelement()):
             orig = flat_tensor[i]
             flat_tensor[i] = orig - perturbation
             outa.copy_(fn(input))
@@ -143,3 +147,4 @@ def get_numerical_jacobian(fn, input, target):
             d_tensor[i] = outb
 
     return jacobian
+

@@ -47,8 +47,8 @@ class CrossMapLRN2d(Function):
             input_height = input.size(2)
             input_width  = input.size(3)
 
-            output.resizeAs_(input)
-            self.scale.resizeAs_(input)
+            output.resize_as_(input)
+            self.scale.resize_as_(input)
 
             # use output storage as temporary buffer
             input_square = output
@@ -115,7 +115,7 @@ class CrossMapLRN2d(Function):
             cache_ratio_value = 2 * self.alpha * self.beta / self.size
             inversePrePad = int(self.size - (self.size - 1) / 2)
 
-            grad_input.resizeAs_(input)
+            grad_input.resize_as_(input)
             torch.pow(grad_input, self.scale, -self.beta).mul_(grad_output)
 
             paddded_ratio.zero_()

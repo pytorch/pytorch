@@ -18,14 +18,14 @@ class CosineDistance(Module):
         self.ones = None
 
     def _makeContiguous(self, input1, input2):
-        if not input1.isContiguous():
+        if not input1.is_contiguous():
            self._input1 = self._input1 or input1.new()
-           self._input1.resizeAs_(input1).copy_(input1)
+           self._input1.resize_as_(input1).copy_(input1)
            input1 = self._input1
 
-        if not input2.isContiguous():
+        if not input2.is_contiguous():
            self._input2 = self._input2 or input2.new()
-           self._input2.resizeAs_(input2).copy_(input2)
+           self._input2.resize_as_(input2).copy_(input2)
            input2 = self._input2
 
         return input1, input2
@@ -50,7 +50,7 @@ class CosineDistance(Module):
         torch.mul(self.buffer, input1, input1)
         torch.sum(self.w22, self.buffer, 1).add_(epsilon)
         self.w22.cinv_()
-        self.w.resizeAs_(self.w22).copy_(self.w22)
+        self.w.resize_as_(self.w22).copy_(self.w22)
 
         torch.mul(self.buffer, input2, input2)
         torch.sum(self.w32, self.buffer, 1).add_(epsilon)
@@ -76,18 +76,18 @@ class CosineDistance(Module):
 
         gw1 = self.gradInput[0]
         gw2 = self.gradInput[1]
-        gw1.resizeAs_(v1).copy_(v2)
-        gw2.resizeAs_(v1).copy_(v1)
+        gw1.resize_as_(v1).copy_(v2)
+        gw2.resize_as_(v1).copy_(v1)
 
         torch.mul(self.buffer, self.w1, self.w22)
-        gw1.addcmul_(-1, self.buffer.expandAs(v1), v1)
-        gw1.mul_(self.w.expandAs(v1))
+        gw1.addcmul_(-1, self.buffer.expand_as(v1), v1)
+        gw1.mul_(self.w.expand_as(v1))
 
         torch.mul(self.buffer, self.w1, self.w32)
-        gw2.addcmul_(-1, self.buffer.expandAs(v1), v2)
-        gw2.mul_(self.w.expandAs(v1))
+        gw2.addcmul_(-1, self.buffer.expand_as(v1), v2)
+        gw2.mul_(self.w.expand_as(v1))
 
-        go = gradOutput.view(-1, 1).expandAs(v1)
+        go = gradOutput.view(-1, 1).expand_as(v1)
         gw1.mul_(go)
         gw2.mul_(go)
 

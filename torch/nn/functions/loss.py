@@ -32,9 +32,9 @@ class CosineEmbeddingLoss(Function):
         torch.mul(buffer, input1, input1)
         torch.sum(self.w22, buffer, 1).add_(epsilon)
 
-        self._outputs.resizeAs_(self.w22).fill_(1)
+        self._outputs.resize_as_(self.w22).fill_(1)
         torch.div(self.w22, self._outputs, self.w22)
-        self.w.resizeAs_(self.w22).copy_(self.w22)
+        self.w.resize_as_(self.w22).copy_(self.w22)
 
         torch.mul(buffer, input2, input2)
         torch.sum(self.w32, buffer, 1).add_(epsilon)
@@ -66,16 +66,16 @@ class CosineEmbeddingLoss(Function):
 
         gw1 = grad_output.new()
         gw2 = grad_output.new()
-        gw1.resizeAs_(v1).copy_(v2)
-        gw2.resizeAs_(v1).copy_(v1)
+        gw1.resize_as_(v1).copy_(v2)
+        gw2.resize_as_(v1).copy_(v1)
 
         torch.mul(buffer, self.w1, self.w22)
-        gw1.addcmul_(-1, buffer.expandAs(v1), v1)
-        gw1.mul_(self.w.expandAs(v1))
+        gw1.addcmul_(-1, buffer.expand_as(v1), v1)
+        gw1.mul_(self.w.expand_as(v1))
 
         torch.mul(buffer, self.w1, self.w32)
-        gw2.addcmul_(-1, buffer.expandAs(v1), v2)
-        gw2.mul_(self.w.expandAs(v1))
+        gw2.addcmul_(-1, buffer.expand_as(v1), v2)
+        gw2.mul_(self.w.expand_as(v1))
 
         torch.le(_idx, self._outputs, 0)
         _idx = _idx.view(-1, 1).expand(gw1.size())
@@ -106,7 +106,7 @@ class HingeEmbeddingLoss(Function):
 
     def forward(self, input, target):
         buffer = input.new()
-        buffer.resizeAs_(input).copy_(input)
+        buffer.resize_as_(input).copy_(input)
         buffer[torch.eq(target, -1.)] = 0
         output = buffer.sum()
 
@@ -116,18 +116,18 @@ class HingeEmbeddingLoss(Function):
         output += buffer.sum()
 
         if self.size_average:
-            output = output / input.nElement()
+            output = output / input.nelement()
 
         self.save_for_backward(input, target)
         return input.new((output,))
 
     def backward(self, grad_output):
         input, target = self.saved_tensors
-        grad_input = input.new().resizeAs_(input).copy_(target)
+        grad_input = input.new().resize_as_(input).copy_(target)
         grad_input[torch.mul(torch.eq(target, -1), torch.gt(input, self.margin))] = 0
 
         if self.size_average:
-            grad_input.mul_(1. / input.nElement())
+            grad_input.mul_(1. / input.nelement())
 
         if grad_output[0] != 1:
             grad_input.mul_(grad_output[0])
@@ -158,8 +158,8 @@ class MarginRankingLoss(Function):
 
     def backward(self, grad_output):
         input1, input2, y = self.saved_tensors
-        grad_input1 = input1.new().resizeAs_(input1)
-        grad_input2 = input2.new().resizeAs_(input2)
+        grad_input1 = input1.new().resize_as_(input1)
+        grad_input2 = input2.new().resize_as_(input2)
 
         dist = input1.clone()
         dist.add_(-1, input2)

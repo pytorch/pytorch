@@ -18,12 +18,12 @@ class Mul(Module):
         self.weight.uniform_(-stdv, stdv)
 
     def updateOutput(self, input):
-        self.output.resizeAs_(input).copy_(input)
+        self.output.resize_as_(input).copy_(input)
         self.output.mul_(self.weight[0])
         return self.output
 
     def updateGradInput(self, input, gradOutput):
-        self.gradInput.resizeAs_(input).zero_()
+        self.gradInput.resize_as_(input).zero_()
         self.gradInput.add_(self.weight[0], gradOutput)
         return self.gradInput
 

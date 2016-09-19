@@ -8,13 +8,13 @@ class Variable(object):
     _fallthrough_methods = [
         'size',
         'stride',
-        'nElement',
-        'nDimension',
-        'elementSize',
-        'isContiguous',
-        'isSameSizeAs',
-        'isSetTo',
-        'isSize',
+        'nelement',
+        'ndimension',
+        'element_size',
+        'is_contiguous',
+        'is_same_size',
+        'is_set_to',
+        'is_size',
         'is_signed',
         'numel',
         'dim',
@@ -114,7 +114,7 @@ class Variable(object):
         if isinstance(other, Variable):
             return Add(inplace)(self, other)
         else:
-            assert not torch.isTensor(other)
+            assert not torch.is_tensor(other)
             return AddConstant(other, inplace)(self)
 
     def add(self, other):
@@ -127,7 +127,7 @@ class Variable(object):
         if isinstance(other, Variable):
             return Sub(inplace=inplace)(self, other)
         else:
-            assert not torch.isTensor(other)
+            assert not torch.is_tensor(other)
             return SubConstant(other, inplace=inplace)(self)
 
     def sub(self, other):
@@ -140,11 +140,11 @@ class Variable(object):
         if isinstance(other, Variable):
             return Mul()(self, other)
         else:
-            assert not torch.isTensor(other)
+            assert not torch.is_tensor(other)
             return MulConstant(other)(self)
 
     def mul_(self, other):
-        if not isinstance(other, Variable) and not torch.isTensor(other):
+        if not isinstance(other, Variable) and not torch.is_tensor(other):
             return MulConstant(other, inplace=True)(self)
         raise RuntimeError("mul_ only supports scalar multiplication")
 
@@ -152,11 +152,11 @@ class Variable(object):
         if isinstance(other, Variable):
             return Div()(self, other)
         else:
-            assert not torch.isTensor(other)
+            assert not torch.is_tensor(other)
             return DivConstant(other)(self)
 
     def div_(self, other):
-        if not isinstance(other, Variable) and not torch.isTensor(other):
+        if not isinstance(other, Variable) and not torch.is_tensor(other):
             return DivConstant(other, inplace=True)(self)
         raise RuntimeError("mul_ only supports scalar multiplication")
 
@@ -164,7 +164,7 @@ class Variable(object):
         if isinstance(other, Variable):
             return Pow()(self, other)
         else:
-            assert not torch.isTensor(other)
+            assert not torch.is_tensor(other)
             return PowConstant(other)(self)
 
     def exp(self):
@@ -302,7 +302,7 @@ class Variable(object):
     def view(self, *sizes):
         return View(*sizes)(self)
 
-    def viewAs(self, tensor):
+    def view_as(self, tensor):
         return View(*tensor.size())(self)
 
     def _blas(self, cls, args, inplace):
@@ -369,22 +369,22 @@ class Variable(object):
     def dist(self, tensor, norm_type=2):
         return Norm(norm_type)(self - tensor)
 
-    def indexAdd(self, dim, index, tensor):
+    def index_add(self, dim, index, tensor):
         return IndexAdd(dim)(self, index, tensor)
 
-    def indexCopy(self, dim, index, tensor):
+    def index_copy(self, dim, index, tensor):
         return IndexCopy(dim)(self, index, tensor)
 
-    def indexFill(self, dim, index, value):
+    def index_fill(self, dim, index, value):
         return IndexFill(dim, value)(self, index)
 
-    def indexSelect(self, dim, index):
+    def index_select(self, dim, index):
         return IndexSelect(dim)(self, index)
 
     def expand(self, *sizes):
         return Expand(*sizes)(self)
 
-    def expandAs(self, tensor):
+    def expand_as(self, tensor):
         return Expand(*tensor.size())(self)
 
     def t(self):

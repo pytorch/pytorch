@@ -16,7 +16,7 @@ class L1Penalty(Module):
     def updateOutput(self, input):
         m = self.l1weight
         if self.sizeAverage:
-            m = m / input.nElement()
+            m = m / input.nelement()
 
         loss = m * input.norm(1)
         self.loss = loss
@@ -26,9 +26,9 @@ class L1Penalty(Module):
     def updateGradInput(self, input, gradOutput):
         m = self.l1weight
         if self.sizeAverage:
-            m = m / input.nElement()
+            m = m / input.nelement()
 
-        self.gradInput.resizeAs_(input).copy_(input).sign_().mul_(m)
+        self.gradInput.resize_as_(input).copy_(input).sign_().mul_(m)
 
         if self.provideOutput:
             self.gradInput.add_(gradOutput)

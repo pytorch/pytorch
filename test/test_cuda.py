@@ -105,7 +105,7 @@ tests = [
     ('dist',          small_2d,           lambda t: [small_2d(t), 3],                       '3_norm'        ),
     ('dist',          small_2d,           lambda t: [small_2d(t), 2.5],                     '2.5_norm'      ),
     ('dot',           medium_1d,          lambda t: [medium_1d(t)],                                         ),
-    ('elementSize',   medium_1d,          lambda t: [],                                                     ),
+    ('element_size',   medium_1d,          lambda t: [],                                                     ),
     ('eq',            small_3d_ones,      lambda t: [small_3d(t)],                                          ),
     ('eq',            small_3d_ones,      lambda t: [small_3d_ones(t)],                     'equal'         ),
     ('ne',            small_3d_ones,      lambda t: [small_3d(t)],                                          ),
@@ -113,19 +113,19 @@ tests = [
     ('equal',         small_3d_ones,      lambda t: [small_3d_ones(t)],                                     ),
     ('equal',         small_3d_ones,      lambda t: [small_3d(t)],                                          ),
     ('expand',        new_t(M, 1, M),     lambda t: [M, 4, M],                                              ),
-    ('expandAs',      new_t(M, 1, M),     lambda t: [new_t(M, 4, M)(t)],                                    ),
+    ('expand_as',      new_t(M, 1, M),     lambda t: [new_t(M, 4, M)(t)],                                    ),
     ('fill',          medium_2d,          lambda t: [3.14],                                                 ),
     ('ge',            medium_2d,          lambda t: [medium_2d(t)],                                         ),
     ('le',            medium_2d,          lambda t: [medium_2d(t)],                                         ),
     ('gt',            medium_2d,          lambda t: [medium_2d(t)],                                         ),
     ('lt',            medium_2d,          lambda t: [medium_2d(t)],                                         ),
-    ('isContiguous',  medium_2d,          lambda t: [],                                                     ),
+    ('is_contiguous',  medium_2d,          lambda t: [],                                                     ),
     # TODO: can't check negative case - GPU copy will be contiguous
-    ('isSameSizeAs',  medium_2d,          lambda t: [small_3d(t)],                          'negative'      ),
-    ('isSameSizeAs',  medium_2d,          lambda t: [medium_2d(t)],                         'positive'      ),
-    ('isSetTo',       medium_2d,          lambda t: [medium_2d(t)],                                         ),
+    ('is_same_size',  medium_2d,          lambda t: [small_3d(t)],                          'negative'      ),
+    ('is_same_size',  medium_2d,          lambda t: [medium_2d(t)],                         'positive'      ),
+    ('is_set_to',       medium_2d,          lambda t: [medium_2d(t)],                                         ),
     # TODO: positive case
-    ('isSize',        medium_2d,          lambda t: [torch.LongStorage((M, M))],                            ),
+    ('is_size',        medium_2d,          lambda t: [torch.LongStorage((M, M))],                            ),
     ('kthvalue',      small_3d_unique,    lambda t: [3],                                                    ),
     ('kthvalue',      small_3d_unique,    lambda t: [3, 1],                                 'dim'           ),
     ('lerp',          small_3d,           lambda t: [small_3d(t), 0.3],                                     ),
@@ -141,8 +141,8 @@ tests = [
     ('std',           small_3d,           lambda t: [1],                                    'dim'           ),
     ('var',           small_3d,           lambda t: [],                                                     ),
     ('var',           small_3d,           lambda t: [1],                                    'dim'           ),
-    ('nDimension',    small_3d,           lambda t: [],                                                     ),
-    ('nElement',      small_3d,           lambda t: [],                                                     ),
+    ('ndimension',    small_3d,           lambda t: [],                                                     ),
+    ('nelement',      small_3d,           lambda t: [],                                                     ),
     ('numel',         small_3d,           lambda t: [],                                                     ),
     ('narrow',        small_3d,           lambda t: [1, 3, 2],                                              ),
     ('nonzero',       small_3d,           lambda t: [],                                                     ),
@@ -157,7 +157,7 @@ tests = [
     ('sum',           small_3d,           lambda t: [1],                                    'dim'           ),
     ('renorm',        small_3d,           lambda t: [2, 1, 1],                              '2_norm'        ),
     ('renorm',        small_3d,           lambda t: [1.5, 1, 1],                            '1.5_norm'      ),
-    ('repeatTensor',  small_2d,           lambda t: [2, 2, 2],                                              ),
+    ('repeat',  small_2d,           lambda t: [2, 2, 2],                                              ),
     ('size',          new_t(1, 2, 3, 4),  lambda t: [],                                                     ),
     ('sort',          small_3d_unique,    lambda t: [],                                                     ),
     ('sort',          small_3d_unique,    lambda t: [1],                                    'dim'           ),
@@ -179,7 +179,7 @@ tests = [
     ('triu',          medium_2d,          lambda t: [2],                                    'positive'      ),
     ('triu',          medium_2d,          lambda t: [-2],                                   'negative'      ),
     ('view',          small_3d,           lambda t: [100, 10],                                              ),
-    ('viewAs',        small_3d,           lambda t: [t(100, 10)],                                           ),
+    ('view_as',        small_3d,           lambda t: [t(100, 10)],                                           ),
     ('zero',          small_3d,           lambda t: [],                                                     ),
     ('zeros',         small_3d,           lambda t: [1, 2, 3, 4],                                           ),
     ('rsqrt',         lambda t: small_3d(t) + 1,                lambda t: [],                               ),
@@ -187,7 +187,7 @@ tests = [
     ('tan',           lambda t: small_3d(t).clamp(-1, 1),       lambda t: [],                               ),
 ]
 
-# TODO: random functions, cat, gather, scatter, index*, masked*, resize, resizeAs, storageOffset, storage, stride, unfold
+# TODO: random functions, cat, gather, scatter, index*, masked*, resize, resizeAs, storage_offset, storage, stride, unfold
 
 custom_precision = {
     'addbmm': 1e-4,
@@ -247,7 +247,7 @@ def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t, precision=1e-5):
 class TestCuda(TestCase):
 
     def test_autogpu(self):
-        if torch.cuda.deviceCount() > 1:
+        if torch.cuda.device_count() > 1:
             x = torch.randn(5, 5).cuda()
             y = torch.randn(5, 5).cuda()
             self.assertEqual(x.getDevice(), 0)
@@ -295,7 +295,7 @@ class TestCuda(TestCase):
         self.assertIs(type(y.cuda().float().cpu()), torch.FloatStorage)
         self.assertIs(type(y.cuda().float().cpu().int()), torch.IntStorage)
 
-    @unittest.skipIf(torch.cuda.deviceCount() < 2, "only one GPU detected")
+    @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
     def test_type_conversions_same_gpu(self):
         x = torch.randn(5, 5).cuda(1)
         self.assertEqual(x.int().getDevice(), 1)

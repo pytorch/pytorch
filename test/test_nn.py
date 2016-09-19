@@ -17,7 +17,7 @@ class InputVariableMixin(object):
         def map_variables(i):
             if isinstance(i, Variable):
                 return i
-            elif torch.isTensor(i):
+            elif torch.is_tensor(i):
                 return Variable(i)
             else:
                 return type(i)(map_variables(elem) for elem in i)
@@ -261,7 +261,7 @@ class TestNN(NNTestCase):
         grad_output = torch.DoubleTensor(output.size()).fill_(1)
         output.backward(grad_output)
         expected_grad = expected_grad(num_dim)
-        self.assertEqual(input_var.grad, expected_grad.viewAs(input))
+        self.assertEqual(input_var.grad, expected_grad.view_as(input))
 
         # Make sure backward after changing indices will result in an error
         indices.add_(1)
@@ -436,7 +436,7 @@ new_module_tests = [
         module_name='Embedding',
         constructor_args=(4, 3),
         input=Variable(
-            torch.randperm(2).repeatTensor(1, 2).long(),
+            torch.randperm(2).repeat(1, 2).long(),
             requires_grad=False
         ),
         jacobian_input=False

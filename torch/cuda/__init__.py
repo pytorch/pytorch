@@ -5,23 +5,19 @@ import contextlib
 if torch._C._cuda_isDriverSufficient() == False:
     if torch._C._cuda_getDriverVersion() == 0:
         # found no NVIDIA driver on the system
-        raise Assertionerror(
-            "Found no NVIDIA driver on your system. Please check that you "
-            + "have an NVIDIA GPU and installed a driver from "
-            + "\n http://www.nvidia.com/Download/index.aspx \n")
+        raise AssertionError("""
+Found no NVIDIA driver on your system. Please check that you
+have an NVIDIA GPU and installed a driver from
+http://www.nvidia.com/Download/index.aspx""")
     else:
         # TODO: directly link to the alternative bin that needs install
-        raise AssertionError(
-            "The NVIDIA driver on your system is too old. "
-            + "It is of version: "
-            + str(torch._C._cuda_getDriverVersion()) + "\n" +
-            "Please update your GPU driver by downloading " +
-            "and installing a new version from the URL:" +
-            "\n http://www.nvidia.com/Download/index.aspx \n"
-            + "Alternatively, go to: " +
-            " \n https://pytorch.org/binaries \n " +
-            "to install a PyTorch version that is compiled " +
-            "for old NVIDIA drivers")
+        raise AssertionError("""
+The NVIDIA driver on your system is too old (found version {}).
+Please update your GPU driver by downloading and installing a new
+version from the URL: http://www.nvidia.com/Download/index.aspx
+Alternatively, go to: https://pytorch.org/binaries to install
+a PyTorch version that has been compiled with your version
+of the CUDA driver.""".format(str(torch._C._cuda_getDriverVersion())))
 
 
 @contextlib.contextmanager
@@ -37,7 +33,7 @@ def _dummy_ctx():
     yield
 
 
-def deviceCount():
+def device_count():
     return torch._C._cuda_getDeviceCount()
 
 
@@ -131,8 +127,8 @@ def _cpu(self):
     return self.type(getattr(torch, self.__class__.__name__))
 
 
-from ..Tensor import _TensorBase
-from ..Storage import _StorageBase
+from ..tensor import _TensorBase
+from ..storage import _StorageBase
 _TensorBase.cuda = _cuda
 _TensorBase.cpu = _cpu
 _StorageBase.cuda = _cuda

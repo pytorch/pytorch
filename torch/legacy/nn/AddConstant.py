@@ -13,7 +13,7 @@ class AddConstant(Module):
             input.add_(self.constant_scalar)
             self.output.set_(input)
         else:
-            self.output.resizeAs_(input)
+            self.output.resize_as_(input)
             self.output.copy_(input)
             self.output.add_(self.constant_scalar)
 
@@ -25,7 +25,7 @@ class AddConstant(Module):
             # restore previous input value
             input.add_(-self.constant_scalar)
         else:
-            self.gradInput.resizeAs_(gradOutput)
+            self.gradInput.resize_as_(gradOutput)
             self.gradInput.copy_(gradOutput)
 
         return self.gradInput

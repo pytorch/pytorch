@@ -35,15 +35,15 @@ class Linear(Module):
     def _updateAddBuffer(self, input):
         nframe = input.size(0)
         self.addBuffer = self.addBuffer or input.new()
-        if self.addBuffer.nElement() != nframe:
+        if self.addBuffer.nelement() != nframe:
             self.addBuffer.resize_(nframe).fill_(1)
 
     def updateOutput(self, input):
         assert input.dim() == 2
         nframe = input.size(0)
-        nElement = self.output.nElement()
+        nelement = self.output.nelement()
         self.output.resize_(nframe, self.weight.size(0))
-        if self.output.nElement() != nElement:
+        if self.output.nelement() != nelement:
             self.output.zero_()
 
         self._updateAddBuffer(input)
@@ -57,9 +57,9 @@ class Linear(Module):
         if not self.gradInput:
             return
 
-        nElement = self.gradInput.nElement()
-        self.gradInput.resizeAs_(input)
-        if self.gradInput.nElement() != nElement:
+        nelement = self.gradInput.nelement()
+        self.gradInput.resize_as_(input)
+        if self.gradInput.nelement() != nelement:
             self.gradInput.zero_()
 
         assert input.dim() == 2

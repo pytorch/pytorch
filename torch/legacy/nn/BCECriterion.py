@@ -15,7 +15,7 @@ class BCECriterion(Criterion):
 
     def updateOutput(self, input, target):
          # - log(input) * target - log(1 - input) * (1 - target)
-        if input.nElement() != target.nElement():
+        if input.nelement() != target.nelement():
             raise RuntimeError("input and target size mismatch")
 
         self.buffer = self.buffer or input.new()
@@ -23,10 +23,10 @@ class BCECriterion(Criterion):
         buffer = self.buffer
         weights = self.weights
 
-        buffer.resizeAs_(input)
+        buffer.resize_as_(input)
 
         if weights is not None and target.dim() != 1:
-            weights = self.weights.view(1, target.size(1)).expandAs(target)
+            weights = self.weights.view(1, target.size(1)).expand_as(target)
 
         # log(input) * target
         torch.add(buffer, input, self.eps).log_()
@@ -44,7 +44,7 @@ class BCECriterion(Criterion):
         output = output - torch.dot(target, buffer)
 
         if self.sizeAverage:
-            output = output / input.nElement()
+            output = output / input.nelement()
 
         self.output = - output
 
@@ -57,7 +57,7 @@ class BCECriterion(Criterion):
          # It should have be divided by (input + self.eps) (1 - input + self.eps)
          # but it is divided by input (1 - input + self.eps) + self.eps
          # This modification requires less memory to be computed.
-         if input.nElement() != target.nElement():
+         if input.nelement() != target.nelement():
             raise RuntimeError("input and target size mismatch")
 
          self.buffer = self.buffer or input.new()
@@ -67,14 +67,14 @@ class BCECriterion(Criterion):
          gradInput = self.gradInput
 
          if weights is not None and target.dim() != 1:
-             weights = self.weights.view(1, target.size(1)).expandAs(target)
+             weights = self.weights.view(1, target.size(1)).expand_as(target)
 
 
-         buffer.resizeAs_(input)
+         buffer.resize_as_(input)
          # - x ( 1 + self.eps -x ) + self.eps
          torch.add(buffer, input, -1).add_(-self.eps).mul_(input).add_(-self.eps)
 
-         gradInput.resizeAs_(input)
+         gradInput.resize_as_(input)
          # y - x
          torch.add(gradInput, target, -1, input)
          # - (y - x) / ( x ( 1 + self.eps -x ) + self.eps )
@@ -84,7 +84,7 @@ class BCECriterion(Criterion):
              gradInput.mul_(weights)
 
          if self.sizeAverage:
-             gradInput.div_(target.nElement())
+             gradInput.div_(target.nelement())
 
          return gradInput
 

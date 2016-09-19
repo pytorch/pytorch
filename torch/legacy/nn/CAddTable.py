@@ -12,7 +12,7 @@ class CAddTable(Module):
         if self.inplace:
            self.output.set_(input[0])
         else:
-           self.output.resizeAs_(input[0]).copy_(input[0])
+           self.output.resize_as_(input[0]).copy_(input[0])
 
         for i in range(1, len(input)):
            self.output.add_(input[i])
@@ -29,7 +29,7 @@ class CAddTable(Module):
             if self.inplace:
                 self.gradInput[i].set_(gradOutput)
             else:
-                self.gradInput[i].resizeAs_(input[i]).copy_(gradOutput)
+                self.gradInput[i].resize_as_(input[i]).copy_(gradOutput)
 
         del self.gradInput[len(input):]
 

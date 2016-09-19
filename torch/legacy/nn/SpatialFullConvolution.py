@@ -53,15 +53,15 @@ class SpatialFullConvolution(Module):
             self.bias.uniform_(-stdv, stdv)
 
     def _makeContiguous(self, input, gradOutput=None):
-        if not input.isContiguous():
+        if not input.is_contiguous():
            self._input = self._input or input.new()
-           self._input.resizeAs_(input).copy_(input)
+           self._input.resize_as_(input).copy_(input)
            input = self._input
 
         if gradOutput is not None:
-            if not gradOutput.isContiguous():
+            if not gradOutput.is_contiguous():
                 self._gradOutput = self._gradOutput or gradOutput.new()
-                self._gradOutput.resizeAs_(gradOutput).copy_(gradOutput)
+                self._gradOutput.resize_as_(gradOutput).copy_(gradOutput)
                 gradOutput = self._gradOutput
             return input, gradOutput
 
@@ -145,7 +145,7 @@ class SpatialFullConvolution(Module):
             # Create a zero tensor to be expanded and used as gradInput[1].
             self.zeroScalar = self.zeroScalar or input[1].new(1).zero_()
             self.ones.resize_(input[1].dim()).fill_(1)
-            zeroTensor =  self.zeroScalar.viewAs(self.ones).expandAs(input[1])
+            zeroTensor =  self.zeroScalar.view_as(self.ones).expand_as(input[1])
             self.gradInput = [self.gradInput, zeroTensor]
 
         return self.gradInput

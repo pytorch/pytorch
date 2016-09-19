@@ -30,7 +30,7 @@ class SplitTable(Module):
             return
         dimension = self._getPositiveDimension(input)
         slices = input.size(dimension)
-        self.gradInput.resizeAs_(input)
+        self.gradInput.resize_as_(input)
 
         for i in range(slices):
             self.gradInput.select(dimension, i).copy_(gradOutput[i])

@@ -48,7 +48,7 @@ class SpatialZeroPadding(Module):
     def updateGradInput(self, input, gradOutput):
         assert input.dim() == 4
 
-        self.gradInput.resizeAs_(input).zero_()
+        self.gradInput.resize_as_(input).zero_()
         # crop gradInput if necessary
         cg_input = self.gradInput
         if self.pad_t < 0:

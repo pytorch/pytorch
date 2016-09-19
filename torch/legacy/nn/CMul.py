@@ -36,7 +36,7 @@ class CMul(Module):
         if stdv is not None:
             stdv = stdv * math.sqrt(3)
         else:
-            stdv = 1./math.sqrt(self.weight.nElement())
+            stdv = 1./math.sqrt(self.weight.nelement())
 
         self.weight.uniform_(-stdv, stdv)
 
@@ -49,15 +49,15 @@ class CMul(Module):
             self._expand = input.new()
             self._repeat = input.new()
 
-        self.output.resizeAs_(input).copy_(input)
+        self.output.resize_as_(input).copy_(input)
         batchSize = input.size(0)
-        # TODO: expandAs_, view_
+        # TODO: expand_as_, view_
         self._output = self.output.view(batchSize, -1)
         self._weight = self.weight.view(1, -1)
-        self._expand = self._weight.expandAs(self._output)
+        self._expand = self._weight.expand_as(self._output)
 
         if torch.typename(input) == 'torch.cuda.FloatTensor':
-            self._repeat.resizeAs_(self._expand).copy_(self._expand)
+            self._repeat.resize_as_(self._expand).copy_(self._expand)
             self._output.mul_(self._repeat)
         else:
             self._output.mul_(self._expand)
@@ -73,15 +73,15 @@ class CMul(Module):
             self._gradOutput = input.new()
             self._gradInput = input.new()
 
-        self.gradInput.resizeAs_(input).zero_()
+        self.gradInput.resize_as_(input).zero_()
         batchSize = input.size(0)
         contiguousView(self._gradOutput, gradOutput, batchSize, -1)
         contiguousView(self._gradInput, self.gradInput, batchSize, -1)
         self._weight = self.weight.view(1, -1)
-        self._expand = self._weight.expandAs(self._gradOutput)
+        self._expand = self._weight.expand_as(self._gradOutput)
 
         if torch.typename(input) == 'torch.cuda.FloatTensor':
-            self._repeat.resizeAs_(self._expand).copy_(self._expand)
+            self._repeat.resize_as_(self._expand).copy_(self._expand)
             self._gradInput.addcmul_(1, self._repeat, self._gradOutput)
         else:
             self._gradInput.addcmul_(1, self._expand, self._gradOutput)

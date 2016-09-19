@@ -28,9 +28,9 @@ class Reshape(Module):
         self._gradOutput = None
 
     def updateOutput(self, input):
-        if not input.isContiguous():
+        if not input.is_contiguous():
            self._input = self._input or input.new()
-           self._input.resizeAs_(input)
+           self._input.resize_as_(input)
            self._input.copy_(input)
            input = self._input
 
@@ -40,13 +40,13 @@ class Reshape(Module):
         return self.output
 
     def updateGradInput(self, input, gradOutput):
-        if not gradOutput.isContiguous():
+        if not gradOutput.is_contiguous():
            self._gradOutput = self._gradOutput or gradOutput.new()
-           self._gradOutput.resizeAs_(gradOutput)
+           self._gradOutput.resize_as_(gradOutput)
            self._gradOutput.copy_(gradOutput)
            gradOutput = self._gradOutput
 
-        self.gradInput = gradOutput.viewAs(input)
+        self.gradInput = gradOutput.view_as(input)
         return self.gradInput
 
     def __repr__(self):

@@ -110,7 +110,7 @@ class IndexAdd(Function):
         assert not self.needs_input_grad[1]
         if self.needs_input_grad[2]:
             self.save_for_backward(index)
-        return tensor1.clone().indexAdd_(self.dim, index, tensor2)
+        return tensor1.clone().index_add_(self.dim, index, tensor2)
 
     def backward(self, grad_output):
         grad_tensor1 = grad_tensor2 = None
@@ -120,7 +120,7 @@ class IndexAdd(Function):
 
         if self.needs_input_grad[2]:
             index, = self.saved_tensors
-            grad_tensor2 = grad_output.indexSelect(self.dim, index)
+            grad_tensor2 = grad_output.index_select(self.dim, index)
 
         return grad_tensor1, None, grad_tensor2
 
@@ -135,7 +135,7 @@ class IndexCopy(Function):
         assert not self.needs_input_grad[1]
         if any(self.needs_input_grad):
             self.save_for_backward(index)
-        return tensor1.clone().indexCopy_(self.dim, index, tensor2)
+        return tensor1.clone().index_copy_(self.dim, index, tensor2)
 
     def backward(self, grad_output):
         grad_tensor1 = grad_tensor2 = None
@@ -144,10 +144,10 @@ class IndexCopy(Function):
             index, = self.saved_tensors
 
         if self.needs_input_grad[0]:
-            grad_tensor1 = grad_output.clone().indexFill_(self.dim, index, 0)
+            grad_tensor1 = grad_output.clone().index_fill_(self.dim, index, 0)
 
         if self.needs_input_grad[2]:
-            grad_tensor2 = grad_output.indexSelect(self.dim, index)
+            grad_tensor2 = grad_output.index_select(self.dim, index)
 
         return grad_tensor1, None, grad_tensor2
 
@@ -163,14 +163,14 @@ class IndexFill(Function):
         assert not self.needs_input_grad[1]
         if self.needs_input_grad[0]:
             self.save_for_backward(index)
-        return tensor.clone().indexFill_(self.dim, index, self.value)
+        return tensor.clone().index_fill_(self.dim, index, self.value)
 
     def backward(self, grad_output):
         grad_tensor = None
 
         if self.needs_input_grad[0]:
             index, = self.saved_tensors
-            grad_tensor = grad_output.clone().indexFill_(self.dim, index, 0)
+            grad_tensor = grad_output.clone().index_fill_(self.dim, index, 0)
 
         return grad_tensor, None
 
@@ -188,7 +188,7 @@ class IndexSelect(Function):
             self.save_for_backward(index)
             self.input_size = tensor.size()
 
-        return tensor.indexSelect(self.dim, index)
+        return tensor.index_select(self.dim, index)
 
     def backward(self, grad_output):
         grad_tensor = None
@@ -196,7 +196,7 @@ class IndexSelect(Function):
         if self.needs_input_grad[0]:
             index, = self.saved_tensors
             grad_tensor = grad_output.new(*self.input_size).zero_()
-            grad_tensor.indexCopy_(self.dim, index, grad_output)
+            grad_tensor.index_copy_(self.dim, index, grad_output)
 
         return grad_tensor, None
 
@@ -206,7 +206,7 @@ class IndexSelect(Function):
 # TODO: copy
 # TODO: gather
 # TODO: kthvalue
-# TODO: repeatTensor
+# TODO: repeat
 # TODO: sort
 # TODO: split
 # TODO: squeeze

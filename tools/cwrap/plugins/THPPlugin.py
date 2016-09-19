@@ -187,7 +187,7 @@ PyObject * $name(PyObject *self, PyObject *args)
         for declaration in declarations:
             if declaration.get('only_register', False):
                 continue
-            declaration['python_name'] = declaration['name']
+            declaration.setdefault('python_name', declaration['name'])
             if declaration.get('with_stateless', False) or declaration.get('only_stateless', False):
                 stateless_declaration = self.make_stateless(deepcopy(declaration))
                 new_declarations.append(stateless_declaration)

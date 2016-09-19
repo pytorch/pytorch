@@ -1,5 +1,5 @@
 from . import device, _dummy_ctx
-from ..Tensor import _TensorBase
+from ..tensor import _TensorBase
 
 
 class _CudaTensorBase(_TensorBase):

@@ -75,7 +75,7 @@ module_tests = [
     dict(
         module_name='Softmax2d',
         input_size=(1, 3, 10, 20),
-        reference_fn=lambda i,_: torch.exp(i).div(torch.exp(i).sum(1).expandAs(i))
+        reference_fn=lambda i,_: torch.exp(i).div(torch.exp(i).sum(1).expand_as(i))
     ),
     dict(
         module_name='BatchNorm1d',
@@ -348,10 +348,10 @@ class NNTestCase(TestCase):
         elif isinstance(input, list):
             return [self._jacobian(elem, num_out) for elem in input]
         else:
-            return torch.zeros(input.nElement(), num_out)
+            return torch.zeros(input.nelement(), num_out)
 
     def _flatten_tensors(self, x):
-        if torch.isTensor(x):
+        if torch.is_tensor(x):
             return x.view(-1)
         elif isinstance(x, Variable):
             return x.data.view(-1)
@@ -361,7 +361,7 @@ class NNTestCase(TestCase):
     def _zero_grad_input(self, input):
         if isinstance(input, Variable):
             input.grad.zero_()
-        elif torch.isTensor(input):
+        elif torch.is_tensor(input):
             return
         else:
             for i in input:
@@ -374,15 +374,15 @@ class NNTestCase(TestCase):
         flat_d_out = d_out.view(-1)
 
         if jacobian_input:
-            jacobian_input = self._jacobian(input, d_out.nElement())
+            jacobian_input = self._jacobian(input, d_out.nelement())
             flat_jacobian_input = list(iter_tensors(jacobian_input))
 
         if jacobian_parameters:
             param, d_param = self._get_parameters(module)
             num_param = sum(p.numel() for p in param)
-            jacobian_param = torch.zeros(num_param, d_out.nElement())
+            jacobian_param = torch.zeros(num_param, d_out.nelement())
 
-        for i in range(flat_d_out.nElement()):
+        for i in range(flat_d_out.nelement()):
             d_out.zero_()
             flat_d_out[i] = 1
 
@@ -409,7 +409,7 @@ class NNTestCase(TestCase):
 
     def _numerical_jacobian(self, module, input, jacobian_input=True, jacobian_parameters=True):
         output = self._forward(module, input)
-        output_size = output.nElement()
+        output_size = output.nelement()
 
         if jacobian_parameters:
             param, d_param = self._get_parameters(module)
@@ -452,7 +452,7 @@ class NNTestCase(TestCase):
         for x, d_x in zip(input_t, numerical_t):
             x = x.view(-1)
             d_x = d_x.view(-1)
-            for i in range(x.nElement()):
+            for i in range(x.nelement()):
                 original = x[i]
                 x[i] = original + eps
                 fx1 = self._forward_criterion(criterion, input, target)
@@ -496,7 +496,7 @@ class TestBase(object):
     def _unpack_input(self, input):
         if isinstance(input, Variable):
             return input.data
-        elif torch.isTensor(input):
+        elif torch.is_tensor(input):
             return input
         else:
             return type(input)(self._unpack_input(i) for i in input)
@@ -508,8 +508,8 @@ class TestBase(object):
         def map_input_sizes(sizes):
             if isinstance(sizes, list):
                 return [map_input_sizes(s) for s in sizes]
-            elif torch.isTensor(sizes):
-                return sizes
+            elif torch.is_tensor(sizes):
+                return sizes.double()
             else:
                 return torch.randn(*sizes)
 

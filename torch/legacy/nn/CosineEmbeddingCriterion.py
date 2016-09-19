@@ -43,9 +43,9 @@ class CosineEmbeddingCriterion(Criterion):
         torch.mul(self.buffer, input1, input1)
         torch.sum(self.w22, self.buffer, 1).add_(epsilon)
         # self._outputs is also used as a temporary buffer
-        self._outputs.resizeAs_(self.w22).fill_(1)
+        self._outputs.resize_as_(self.w22).fill_(1)
         torch.div(self.w22, self._outputs, self.w22)
-        self.w.resizeAs_(self.w22).copy_(self.w22)
+        self.w.resize_as_(self.w22).copy_(self.w22)
 
         torch.mul(self.buffer, input2, input2)
         torch.sum(self.w32, self.buffer, 1).add_(epsilon)
@@ -75,16 +75,16 @@ class CosineEmbeddingCriterion(Criterion):
 
         gw1 = self.gradInput[0]
         gw2 = self.gradInput[1]
-        gw1.resizeAs_(v1).copy_(v2)
-        gw2.resizeAs_(v1).copy_(v1)
+        gw1.resize_as_(v1).copy_(v2)
+        gw2.resize_as_(v1).copy_(v1)
 
         torch.mul(self.buffer, self.w1, self.w22)
-        gw1.addcmul_(-1, self.buffer.expandAs(v1), v1)
-        gw1.mul_(self.w.expandAs(v1))
+        gw1.addcmul_(-1, self.buffer.expand_as(v1), v1)
+        gw1.mul_(self.w.expand_as(v1))
 
         torch.mul(self.buffer, self.w1, self.w32)
-        gw2.addcmul_(-1, self.buffer.expandAs(v1), v2)
-        gw2.mul_(self.w.expandAs(v1))
+        gw2.addcmul_(-1, self.buffer.expand_as(v1), v2)
+        gw2.mul_(self.w.expand_as(v1))
 
         # self._idx = self._outputs <= 0
         torch.le(self._idx, self._outputs, 0)

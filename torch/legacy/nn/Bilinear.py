@@ -6,9 +6,9 @@ from .utils import clear
 class Bilinear(Module):
 
     def _assertInput(self, input):
-        if len(input) != 2 or not torch.isTensor(input[0]) or not torch.isTensor(input[1]):
+        if len(input) != 2 or not torch.is_tensor(input[0]) or not torch.is_tensor(input[1]):
             raise RuntimeError('input should be a table containing two data Tensors')
-        if input[0].nDimension() != 2 or input[1].nDimension() != 2:
+        if input[0].ndimension() != 2 or input[1].ndimension() != 2:
             raise RuntimeError('input Tensors should be two-dimensional')
         if input[0].size(0) != input[1].size(0):
             raise RuntimeError('input Tensors should have the same number of rows')
@@ -59,7 +59,7 @@ class Bilinear(Module):
 
         # set up buffer:
         self.buff2 = self.buff2 or input[0].new()
-        self.buff2.resizeAs_(input[1])
+        self.buff2.resize_as_(input[1])
 
         # compute output scores:
         self.output.resize_(input[0].size(0), self.weight.size(0))
@@ -69,7 +69,7 @@ class Bilinear(Module):
             torch.sum(self.output.narrow(1, k, 1), self.buff2, 1)
 
         if self.bias:
-            self.output.add_(self.bias.view(1, self.bias.nElement()).expandAs(self.output))
+            self.output.add_(self.bias.view(1, self.bias.nelement()).expand_as(self.output))
 
         return self.output
 
@@ -80,8 +80,8 @@ class Bilinear(Module):
 
         self._assertInputGradOutput(input, gradOutput)
         # compute d output / d input:
-        self.gradInput[0].resizeAs_(input[0]).fill_(0)
-        self.gradInput[1].resizeAs_(input[1]).fill_(0)
+        self.gradInput[0].resize_as_(input[0]).fill_(0)
+        self.gradInput[1].resize_as_(input[1]).fill_(0)
 
         #: first slice of weight tensor (k = 1)
         self.gradInput[0].addmm_(input[1], self.weight[0].t())
@@ -94,7 +94,7 @@ class Bilinear(Module):
         #: remaining slices of weight tensor
         if self.weight.size(0) > 1:
             self.buff1 = self.buff1 or input[0].new()
-            self.buff1.resizeAs_(input[0])
+            self.buff1.resize_as_(input[0])
 
             for k in range(1, self.weight.size(0)):
                 torch.mm(self.buff1, input[1], self.weight[k].t())
@@ -116,11 +116,11 @@ class Bilinear(Module):
 
         # make sure we have buffer:
         self.buff1 = self.buff1 or input[0].new()
-        self.buff1.resizeAs_(input[0])
+        self.buff1.resize_as_(input[0])
 
         # accumulate parameter gradients:
         for k in range(self.weight.size(0)):
-            torch.mul(self.buff1, input[0], gradOutput.narrow(1, k, 1).expandAs(input[0]))
+            torch.mul(self.buff1, input[0], gradOutput.narrow(1, k, 1).expand_as(input[0]))
             self.gradWeight[k].addmm_(self.buff1.t(), input[1])
 
         if self.bias:

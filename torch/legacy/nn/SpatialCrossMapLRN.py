@@ -36,8 +36,8 @@ class SpatialCrossMapLRN(Module):
             inputHeight = input.size(2)
             inputWidth  = input.size(3)
 
-            self.output.resizeAs_(input)
-            self.scale.resizeAs_(input)
+            self.output.resize_as_(input)
+            self.scale.resize_as_(input)
 
             # use output storage as temporary buffer
             inputSquare = self.output
@@ -103,7 +103,7 @@ class SpatialCrossMapLRN(Module):
             cacheRatioValue = 2 * self.alpha * self.beta / self.size
             inversePrePad = int(self.size - (self.size - 1) / 2)
 
-            self.gradInput.resizeAs_(input)
+            self.gradInput.resize_as_(input)
             torch.pow(self.gradInput, self.scale, -self.beta).mul_(gradOutput)
 
             self.paddedRatio.zero_()

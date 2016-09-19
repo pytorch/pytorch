@@ -14,16 +14,16 @@ class MV(Module):
 
     def updateOutput(self, input):
         M, v = input
-        assert M.nDimension() == 2 or M.nDimension() == 3
+        assert M.ndimension() == 2 or M.ndimension() == 3
 
-        if M.nDimension() == 2:
-            assert v.nDimension() == 1
+        if M.ndimension() == 2:
+            assert v.ndimension() == 1
             if self.trans:
                 M = M.transpose(0, 1)
             self.output.resize_(M.size(0))
             torch.mv(self.output, M, v)
         else:
-            assert v.nDimension() == 2
+            assert v.ndimension() == 2
             if self.trans:
                 M = M.transpose(1, 2)
             self.output.resize_(M.size(0), M.size(1), 1)
@@ -33,14 +33,14 @@ class MV(Module):
 
     def updateGradInput(self, input, gradOutput):
         M, v = input
-        self.gradInput[0].resizeAs_(M)
-        self.gradInput[1].resizeAs_(v)
+        self.gradInput[0].resize_as_(M)
+        self.gradInput[1].resize_as_(v)
 
-        assert gradOutput.nDimension() == 1 or gradOutput.nDimension() == 2
+        assert gradOutput.ndimension() == 1 or gradOutput.ndimension() == 2
 
-        if gradOutput.nDimension() == 2:
-            assert M.nDimension() == 3
-            assert v.nDimension() == 2
+        if gradOutput.ndimension() == 2:
+            assert M.ndimension() == 3
+            assert v.ndimension() == 2
             bdim = M.size(0)
             odim = M.size(1)
             idim = M.size(2)
@@ -52,8 +52,8 @@ class MV(Module):
                 torch.bmm(self.gradInput[0], gradOutput.view(bdim, odim, 1), v.view(bdim, 1, idim))
                 torch.bmm(self.gradInput[1].view(bdim, idim, 1), M.transpose(1, 2), gradOutput.view(bdim, odim, 1))
         else:
-            assert M.nDimension() == 2
-            assert v.nDimension() == 1
+            assert M.ndimension() == 2
+            assert v.ndimension() == 1
 
             if self.trans:
                 torch.ger(self.gradInput[0], v, gradOutput)

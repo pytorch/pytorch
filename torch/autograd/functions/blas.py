@@ -16,7 +16,7 @@ class _BlasBase(InplaceFunction):
             self.mark_dirty(arg)
             return arg
         else:
-            return arg.new().resizeAs_(arg)
+            return arg.new().resize_as_(arg)
 
 
 class Addmm(_BlasBase):

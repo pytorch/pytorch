@@ -1,6 +1,6 @@
 import torch
-from . import TensorPrinting
-from ._utils import _type
+from . import _tensor_str
+from ._utils import _type, _range
 from functools import reduce
 from itertools import chain
 import sys
@@ -26,7 +26,7 @@ class _TensorBase(object):
     def new(self, *args, **kwargs):
         return self.__class__(*args, **kwargs)
 
-    def typeAs(self, t):
+    def type_as(self, t):
         return self.type(t.type())
 
     def double(self):
@@ -60,7 +60,7 @@ class _TensorBase(object):
             return memo[self._cdata]
         new_storage = self.storage().__deepcopy__(_memo)
         new_tensor = self.new()
-        new_tensor.set_(new_storage, self.storageOffset(), self.size(), self.stride())
+        new_tensor.set_(new_storage, self.storage_offset(), self.size(), self.stride())
         memo[self._cdata] = new_tensor
         return new_tensor
 
@@ -71,10 +71,10 @@ class _TensorBase(object):
         return str(self)
 
     def __str__(self):
-        return TensorPrinting.printTensor(self)
+        return _tensor_str._str(self)
 
     def __iter__(self):
-        return iter(map(lambda i: self.select(0, i), torch._pyrange(self.size(0))))
+        return iter(map(lambda i: self.select(0, i), _range(self.size(0))))
 
     def split(self, split_size, dim=0):
         result = []
@@ -84,7 +84,7 @@ class _TensorBase(object):
         def get_split_size(i):
             return split_size if i < num_splits-1 else last_split_size
         return [self.narrow(int(dim), int(i*split_size), int(get_split_size(i))) for i
-                in torch._pyrange(0, num_splits)]
+                in _range(0, num_splits)]
 
     def chunk(self, n_chunks, dim=0):
         split_size = math.ceil(float(self.size(dim)) / n_chunks)
@@ -100,23 +100,23 @@ class _TensorBase(object):
 
     def view(self, *args):
         dst = self.new()
-        if len(args) == 1 and torch.isStorage(args[0]):
+        if len(args) == 1 and torch.is_storage(args[0]):
             sizes = args[0]
         else:
             sizes = torch.LongStorage(args)
-        sizes = _infer_sizes(sizes, self.nElement())
+        sizes = _infer_sizes(sizes, self.nelement())
 
-        if reduce(lambda a,b: a * b, sizes) != self.nElement():
+        if reduce(lambda a,b: a * b, sizes) != self.nelement():
             raise RuntimeError('Invalid size for view. Input size: ' +
                     'x'.join(map(lambda v: str(v), self.size())) +
                     ', output size: ' +
                     'x'.join(map(lambda v: str(v), sizes)) + '.')
 
-        assert self.isContiguous(), "expecting a contiguous tensor"
-        dst.set_(self.storage(), self.storageOffset(), sizes)
+        assert self.is_contiguous(), "expecting a contiguous tensor"
+        dst.set_(self.storage(), self.storage_offset(), sizes)
         return dst
 
-    def viewAs(self, tensor):
+    def view_as(self, tensor):
         return self.view(tensor.size())
 
     def permute(self, *args):
@@ -136,12 +136,12 @@ class _TensorBase(object):
                 perm[j] = -1
         return tensor
 
-    def expandAs(self, tensor):
+    def expand_as(self, tensor):
         return self.expand(tensor.size())
 
     def expand(self, *args):
         result = self.new()
-        sizes = args[0] if len(args) == 1 and torch.isLongStorage(args[0]) else torch.LongStorage(args)
+        sizes = args[0] if len(args) == 1 and isinstance(args[0], torch.LongStorage) else torch.LongStorage(args)
         src = self
 
         src_dim = src.dim()
@@ -159,11 +159,11 @@ class _TensorBase(object):
             elif size != sizes[i]:
                 raise ValueError('incorrect size: only supporting singleton expansion (size=1)')
 
-        result.set_(src.storage(), src.storageOffset(),
+        result.set_(src.storage(), src.storage_offset(),
                                 src_size, src_stride)
         return result
 
-    def repeatTensor(self, *args):
+    def repeat(self, *args):
         # If args == (torch.LongStorage,), then we need to unpack the tuple
         if len(args) == 1 and isinstance(args[0], torch.LongStorage):
             args = args[0]
@@ -176,19 +176,19 @@ class _TensorBase(object):
 
         xtensor = src.new().set_(src)
         xsize = xtensor.size().tolist()
-        for i in torch._pyrange(len(repeats)-src.dim()):
+        for i in _range(len(repeats)-src.dim()):
             xsize = [1] + xsize
 
         size = torch.LongStorage([a * b for a, b in zip(xsize, repeats)])
         xtensor.resize_(torch.LongStorage(xsize))
         result.resize_(size)
         urtensor = result.new(result)
-        for i in torch._pyrange(xtensor.dim()):
+        for i in _range(xtensor.dim()):
             urtensor = urtensor.unfold(i,xtensor.size(i),xtensor.size(i))
-        for i in torch._pyrange(urtensor.dim()-xtensor.dim()):
+        for i in _range(urtensor.dim()-xtensor.dim()):
             xsize = [1] + xsize
         xtensor.resize_(torch.LongStorage(xsize))
-        xxtensor = xtensor.expandAs(urtensor)
+        xxtensor = xtensor.expand_as(urtensor)
         urtensor.copy_(xxtensor)
         return result
 
@@ -200,7 +200,7 @@ class _TensorBase(object):
         sizes.insert(dim, 1)
         strides = self.stride().tolist()
         strides.insert(dim, 0)
-        return self.set_(self.storage(), self.storageOffset(),
+        return self.set_(self.storage(), self.storage_offset(),
                 torch.LongStorage(sizes), torch.LongStorage(strides))
 
     #TODO: add tests for operators
@@ -215,7 +215,7 @@ class _TensorBase(object):
         return self.sub(other)
 
     def __rsub__(self, other):
-        return self.new().resizeAs_(self).fill_(other).add_(-1, self)
+        return self.new().resize_as_(self).fill_(other).add_(-1, self)
 
     def __isub__(self, other):
         return self.sub_(other)
@@ -243,7 +243,7 @@ class _TensorBase(object):
     __truediv__ = __div__
 
     def __rdiv__(self, other):
-        return self.new().resizeAs_(self).fill_(other).div_(self)
+        return self.new().resize_as_(self).fill_(other).div_(self)
     __rtruediv__ = __rdiv__
 
     def __idiv__(self, other):

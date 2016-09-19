@@ -43,11 +43,11 @@ def adam(opfunc, x, config, state=None):
     if not 't' in state:
         state['t'] = 0
         # Exponential moving average of gradient values
-        state['m'] = x.new().resizeAs_(dfdx).zero_()
+        state['m'] = x.new().resize_as_(dfdx).zero_()
         # Exponential moving average of squared gradient values
-        state['v'] = x.new().resizeAs_(dfdx).zero_()
+        state['v'] = x.new().resize_as_(dfdx).zero_()
         # A tmp tensor to hold the sqrt(v) + epsilon
-        state['denom'] = x.new().resizeAs_(dfdx).zero_()
+        state['denom'] = x.new().resize_as_(dfdx).zero_()
 
     state['t'] += 1
 

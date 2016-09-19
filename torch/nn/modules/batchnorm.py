@@ -36,8 +36,8 @@ class _BatchNorm(Module):
     def _checkInputDim(self, input):
         if input.dim() != self.expected_dim:
             raise RuntimeError('only mini-batch supported ({}D tensor), got {}D tensor instead'.format(self.expected_dim, input.dim()))
-        if input.size(1) != self.running_mean.nElement():
-            raise RuntimeError('got {}-feature tensor, expected {}'.format(input.size(1), self.running_mean.nElement()))
+        if input.size(1) != self.running_mean.nelement():
+            raise RuntimeError('got {}-feature tensor, expected {}'.format(input.size(1), self.running_mean.nelement()))
 
     def forward(self, input):
         self._checkInputDim(input)

@@ -25,9 +25,9 @@ class SelectTable(Module):
                     l1.append(self._zeroTableCopy([], l2[i]))
             else:
                 if i >= len(l1):
-                    l1.append(v.new().resizeAs_(v).zero_())
+                    l1.append(v.new().resize_as_(v).zero_())
                 else:
-                    l1[i].resizeAs_(v)
+                    l1[i].resize_as_(v)
                     l1[i].zero_()
         del l1[len(l2):]
         return l1

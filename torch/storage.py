@@ -1,17 +1,17 @@
 import torch
-from ._utils import _type
+from ._utils import _type, _range
 
 
 class _StorageBase(object):
     def __str__(self):
-        content = ' ' + '\n '.join(str(self[i]) for i in torch._pyrange(len(self)))
+        content = ' ' + '\n '.join(str(self[i]) for i in _range(len(self)))
         return content + '\n[{} of size {}]'.format(torch.typename(self), len(self))
 
     def __repr__(self):
         return str(self)
 
     def __iter__(self):
-        return iter(map(lambda i: self[i], torch._pyrange(self.size())))
+        return iter(map(lambda i: self[i], _range(self.size())))
 
     def copy_(self, other):
         torch._C._storageCopy(self, other)

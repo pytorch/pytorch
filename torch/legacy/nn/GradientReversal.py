@@ -15,7 +15,7 @@ class GradientReversal(Module):
         return self.output
 
     def updateGradInput(self, input, gradOutput):
-        self.gradInput.resizeAs_(gradOutput)
+        self.gradInput.resize_as_(gradOutput)
         self.gradInput.copy_(gradOutput)
         self.gradInput.mul_(-self.lambd)
         return self.gradInput

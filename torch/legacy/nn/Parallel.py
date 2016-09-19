@@ -39,7 +39,7 @@ class Parallel(Container):
 
     def updateGradInput(self, input, gradOutput):
         nModule=input.size(self.inputDimension)
-        self.gradInput.resizeAs_(input)
+        self.gradInput.resize_as_(input)
 
         offset = 0
         for i in range(nModule):

@@ -1,6 +1,6 @@
 import torch
 from .Module import Module
-from .utils import clear, addSingletonDimension
+from .utils import clear, addSingletondimension
 
 class Min(Module):
 
@@ -37,11 +37,11 @@ class Min(Module):
         self._lazyInit()
         dimension = self._getPositiveDimension(input)
         if input.dim() > 1:
-          gradOutputView = addSingletonDimension(gradOutput, dimension)
+          gradOutputView = addSingletondimension(gradOutput, dimension)
         else:
           gradOutputView = gradOutput
 
-        self.gradInput.resizeAs_(input).zero_().scatter_(dimension, self._indices, gradOutputView)
+        self.gradInput.resize_as_(input).zero_().scatter_(dimension, self._indices, gradOutputView)
         return self.gradInput
 
     def type(self, type, tensorCache=None):

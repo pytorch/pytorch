@@ -34,7 +34,7 @@ class Embedding(Function):
         self._backend = type2backend[type(weight)]
         self._weight_size = weight.size()
 
-        if not indices.isContiguous():
+        if not indices.is_contiguous():
             self._indices = indices.contiguous()
             indices = self._indices
         else:
@@ -45,9 +45,9 @@ class Embedding(Function):
 
         output = weight.new()
         if indices.dim() == 1:
-            torch.indexSelect(output, weight, 0, indices)
+            torch.index_select(output, weight, 0, indices)
         else:
-            torch.indexSelect(output, weight, 0, indices.view(-1))
+            torch.index_select(output, weight, 0, indices.view(-1))
             output = output.view(indices.size(0), indices.size(1), weight.size(1))
 
         return output

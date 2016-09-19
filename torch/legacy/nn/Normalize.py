@@ -28,7 +28,7 @@ class Normalize(Module):
         self.norm = self.norm or input.new()
         self.buffer = self.buffer or input.new()
 
-        self._output.resizeAs_(input)
+        self._output.resize_as_(input)
 
         # specialization for the infinity norm
         if self.p == float('inf'):
@@ -49,7 +49,7 @@ class Normalize(Module):
             torch.sum(self.normp, self.buffer, 1).add_(self.eps)
             torch.pow(self.norm, self.normp, 1./self.p)
 
-        torch.div(self._output, input, self.norm.view(-1, 1).expandAs(input))
+        torch.div(self._output, input, self.norm.view(-1, 1).expand_as(input))
 
         self.output = self._output.view(input_size)
         return self.output
@@ -69,7 +69,7 @@ class Normalize(Module):
         if self.p == float('inf'):
                 # specialization for the inf case
                 torch.mul(self._gradInput, self.norm.view(n, 1,1).expand(n, d,1), gradOutput)
-                self.buffer.resizeAs_(input).zero_()
+                self.buffer.resize_as_(input).zero_()
                 self.cross.resize_(n, 1)
                 torch.gather(self.cross, input, 1, self._indices)
                 self.cross.div_(self.norm)
@@ -102,7 +102,7 @@ class Normalize(Module):
         torch.mul(self.buffer2, input, gradOutput)
         torch.sum(self.cross, self.buffer2, 1)
 
-        self.buffer.mul_(self.cross.expandAs(self.buffer))
+        self.buffer.mul_(self.cross.expand_as(self.buffer))
         self._gradInput.add_(-1, self.buffer)
 
         # reuse cross buffer for normalization

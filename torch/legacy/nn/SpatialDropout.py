@@ -11,7 +11,7 @@ class SpatialDropout(Module):
         self.noise = torch.Tensor()
 
     def updateOutput(self, input):
-        self.output.resizeAs_(input).copy_(input)
+        self.output.resize_as_(input).copy_(input)
         if self.train:
             if input.dim() == 4:
                 self.noise.resize_(input.size(0), input.size(1), 1, 1)
@@ -22,7 +22,7 @@ class SpatialDropout(Module):
             # We expand the random dropouts to the entire feature map because the
             # features are likely correlated accross the map and so the dropout
             # should also be correlated.
-            self.output.mul_(self.noise.expandAs(input))
+            self.output.mul_(self.noise.expand_as(input))
         else:
             self.output.mul_(1-self.p)
 
@@ -30,8 +30,8 @@ class SpatialDropout(Module):
 
     def updateGradInput(self, input, gradOutput):
         if self.train:
-            self.gradInput.resizeAs_(gradOutput).copy_(gradOutput)
-            self.gradInput.mul_(self.noise.expandAs(input)) # simply mask the gradients with the noise vector
+            self.gradInput.resize_as_(gradOutput).copy_(gradOutput)
+            self.gradInput.mul_(self.noise.expand_as(input)) # simply mask the gradients with the noise vector
         else:
             raise RuntimeError('backprop only defined while training')
 

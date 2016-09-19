@@ -67,20 +67,20 @@ def cg(opfunc, x, config, state=None):
     df2 = state.get('df2', x.new())
     df3 = state.get('df3', x.new())
 
-    df1.resizeAs_(x)
-    df2.resizeAs_(x)
-    df3.resizeAs_(x)
+    df1.resize_as_(x)
+    df2.resize_as_(x)
+    df3.resize_as_(x)
 
     # search direction
     s = state.get('s', x.new())
-    s.resizeAs_(x)
+    s.resize_as_(x)
 
     # we need a temp storage for X
     x0 = state.get('x0', x.new())
     f0 = 0
     df0 = state.get('df0', x.new())
-    x0.resizeAs_(x)
-    df0.resizeAs_(x)
+    x0.resize_as_(x)
+    df0.resize_as_(x)
 
     # evaluate at initial point
     f1, tdf = opfunc(x)

@@ -38,7 +38,7 @@ class PReLU(Function):
         buf = weight.new()
         buf2 = weight.new()
         # TODO: this won't have to be zeroed in the future
-        grad_weight = weight.new().resizeAs_(weight).zero_()
+        grad_weight = weight.new().resize_as_(weight).zero_()
         self._backend.PReLU_accGradParameters(
             self._backend.library_state,
             input,

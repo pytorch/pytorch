@@ -54,7 +54,7 @@ class SpatialFractionalMaxPooling(Module):
         batchSize = 0
         planeSize = 0
 
-        assert input.nDimension() == 4
+        assert input.ndimension() == 4
         batchSize = input.size(0)
         planeSize = input.size(1)
 
@@ -76,7 +76,7 @@ class SpatialFractionalMaxPooling(Module):
         outW = self.outW
         outH = self.outH
         if self.ratioW != None and self.ratioH != None:
-            assert input.nDimension() == 4
+            assert input.ndimension() == 4
             outW = int(math.floor(input.size(3) * self.ratioW))
             outH = int(math.floor(input.size(2) * self.ratioH))
 

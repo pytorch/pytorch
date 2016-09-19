@@ -44,7 +44,7 @@ class WeightedEuclidean(Module):
         self.diagCov.fill_(1)
 
     def _view(self, res, src, *args):
-        if src.isContiguous():
+        if src.is_contiguous():
            res.set_(src.view(*args))
         else:
            res.set_(src.contiguous().view(*args))
@@ -67,8 +67,8 @@ class WeightedEuclidean(Module):
         # y_j = || c_j * (w_j - x) ||
         if input.dim() == 1:
             self._view(self._input, input, inputSize, 1)
-            self._expand.expandAs(self._input, self.weight)
-            self._repeat.resizeAs_(self._expand).copy_(self._expand)
+            self._expand.expand_as(self._input, self.weight)
+            self._repeat.resize_as_(self._expand).copy_(self._expand)
             self._repeat.add_(-1, self.weight)
             self._repeat.mul_(self.diagCov)
             torch.norm(self.output, self._repeat, 2, 0)
@@ -79,19 +79,19 @@ class WeightedEuclidean(Module):
             self._view(self._input, input, batchSize, inputSize, 1)
             self._expand = self._input.expand(batchSize, inputSize, outputSize)
             # make the expanded tensor contiguous (requires lots of memory)
-            self._repeat.resizeAs_(self._expand).copy_(self._expand)
+            self._repeat.resize_as_(self._expand).copy_(self._expand)
 
             self._weight = self.weight.view(1, inputSize, outputSize)
-            self._expand2 = self._weight.expandAs(self._repeat)
+            self._expand2 = self._weight.expand_as(self._repeat)
 
             self._diagCov = self.diagCov.view(1, inputSize, outputSize)
-            self._expand3 = self._diagCov.expandAs(self._repeat)
+            self._expand3 = self._diagCov.expand_as(self._repeat)
             if input.type() == 'torch.cuda.FloatTensor':
                 # TODO: this can be fixed with a custom allocator
                 # requires lots of memory, but minimizes cudaMallocs and loops
-                self._repeat2.resizeAs_(self._expand2).copy_(self._expand2)
+                self._repeat2.resize_as_(self._expand2).copy_(self._expand2)
                 self._repeat.add_(-1, self._repeat2)
-                self._repeat3.resizeAs_(self._expand3).copy_(self._expand3)
+                self._repeat3.resize_as_(self._expand3).copy_(self._expand3)
                 self._repeat.mul_(self._repeat3)
             else:
                 self._repeat.add_(-1, self._expand2)
@@ -126,22 +126,22 @@ class WeightedEuclidean(Module):
         """
 
         # to prevent div by zero (NaN) bugs
-        self._output.resizeAs_(self.output).copy_(self.output).add_(1e-7)
+        self._output.resize_as_(self.output).copy_(self.output).add_(1e-7)
         self._view(self._gradOutput, gradOutput, gradOutput.size())
         torch.div(self._div, gradOutput, self._output)
         if input.dim() == 1:
             self._div.resize_(1, outputSize)
-            self._expand4 = self._div.expandAs(self.weight)
+            self._expand4 = self._div.expand_as(self.weight)
 
             if torch.type(input) == 'torch.cuda.FloatTensor':
-                self._repeat2.resizeAs_(self._expand4).copy_(self._expand4)
+                self._repeat2.resize_as_(self._expand4).copy_(self._expand4)
                 self._repeat2.mul_(self._repeat)
             else:
                 self._repeat2.mul_(self._repeat, self._expand4)
 
             self._repeat2.mul_(self.diagCov)
             torch.sum(self.gradInput, self._repeat2, 1)
-            self.gradInput.resizeAs_(input)
+            self.gradInput.resize_as_(input)
         elif input.dim() == 2:
             batchSize = input.size(0)
 
@@ -149,7 +149,7 @@ class WeightedEuclidean(Module):
             self._expand4 = self._div.expand(batchSize, inputSize, outputSize)
 
             if input.type() == 'torch.cuda.FloatTensor':
-                self._repeat2.resizeAs_(self._expand4).copy_(self._expand4)
+                self._repeat2.resize_as_(self._expand4).copy_(self._expand4)
                 self._repeat2.mul_(self._repeat)
                 self._repeat2.mul_(self._repeat3)
             else:
@@ -158,7 +158,7 @@ class WeightedEuclidean(Module):
 
 
             torch.sum(self.gradInput, self._repeat2, 2)
-            self.gradInput.resizeAs_(input)
+            self.gradInput.resize_as_(input)
         else:
             raise RuntimeError("1D or 2D input expected")
 
@@ -185,7 +185,7 @@ class WeightedEuclidean(Module):
             self._repeat.mul_(self.diagCov)
 
             if torch.type(input) == 'torch.cuda.FloatTensor':
-                self._repeat2.resizeAs_(self._expand4).copy_(self._expand4)
+                self._repeat2.resize_as_(self._expand4).copy_(self._expand4)
                 self._repeat2.mul_(self._repeat)
             else:
                 torch.mul(self._repeat2, self._repeat, self._expand4)
@@ -203,7 +203,7 @@ class WeightedEuclidean(Module):
                 self._repeat.div_(self._repeat3)
                 self._repeat.mul_(self._repeat)
                 self._repeat.mul_(self._repeat3)
-                self._repeat2.resizeAs_(self._expand4).copy_(self._expand4)
+                self._repeat2.resize_as_(self._expand4).copy_(self._expand4)
                 self._repeat.mul_(self._repeat2)
             else:
                 self._repeat.div_(self._expand3)

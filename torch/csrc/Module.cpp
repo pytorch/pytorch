@@ -63,8 +63,6 @@ static bool THPModule_loadClasses(PyObject *self)
   ASSERT_NOT_NULL(THPCharTensorClass    = PyMapping_GetItemString(module_dict,(char*)"CharTensor"));
   ASSERT_NOT_NULL(THPByteTensorClass    = PyMapping_GetItemString(module_dict,(char*)"ByteTensor"));
 
-  THPDefaultTensorClass = THPDoubleTensorClass;
-
   return true;
 #undef ASSERT_NOT_NULL
 }
@@ -349,6 +347,12 @@ static PyObject * THPModule_recvfd(PyObject *self, PyObject *args)
   return Py_BuildValue("i", fd);
 }
 
+PyObject * THPModule_setDefaultTensorType(PyObject *_unused, PyObject *type)
+{
+  THPDefaultTensorClass = type;
+  Py_RETURN_NONE;
+}
+
 
 #define IMPLEMENT_STATELESS(name)                                              \
 static PyObject * TH_CONCAT_2(THPModule_, name)(PyObject *_unused, PyObject *args) \
@@ -449,10 +453,7 @@ IMPLEMENT_STATELESS(lerp)
 IMPLEMENT_STATELESS(reshape)
 IMPLEMENT_STATELESS(zeros)
 IMPLEMENT_STATELESS(ones)
-IMPLEMENT_STATELESS(indexSelect)
-IMPLEMENT_STATELESS(indexCopy)
-IMPLEMENT_STATELESS(indexAdd)
-IMPLEMENT_STATELESS(indexFill)
+IMPLEMENT_STATELESS(index_select)
 IMPLEMENT_STATELESS(narrow)
 IMPLEMENT_STATELESS(addmm)
 IMPLEMENT_STATELESS(addmv)
@@ -470,7 +471,7 @@ IMPLEMENT_STATELESS(multinomial)
 IMPLEMENT_STATELESS(uniform)
 IMPLEMENT_STATELESS(normal)
 IMPLEMENT_STATELESS(cauchy)
-IMPLEMENT_STATELESS(logNormal)
+IMPLEMENT_STATELESS(log_normal)
 IMPLEMENT_STATELESS(exponential)
 IMPLEMENT_STATELESS(random)
 IMPLEMENT_STATELESS(geometric)
@@ -484,7 +485,7 @@ IMPLEMENT_STATELESS(rand)
 IMPLEMENT_STATELESS(randn)
 IMPLEMENT_STATELESS(all)
 IMPLEMENT_STATELESS(any)
-IMPLEMENT_STATELESS(maskedSelect)
+IMPLEMENT_STATELESS(masked_select)
 
 #undef IMPLEMENT_STATELESS
 
@@ -590,13 +591,14 @@ static PyMethodDef TorchMethods[] = {
 #endif
   {"_sendfd",         (PyCFunction)THPModule_sendfd,            METH_VARARGS, NULL},
   {"_recvfd",         (PyCFunction)THPModule_recvfd,            METH_VARARGS, NULL},
+  {"_set_default_tensor_type", (PyCFunction)THPModule_setDefaultTensorType, METH_O, NULL},
   {"_tensorCopy",     (PyCFunction)THPModule_tensorCopyWrapper, METH_VARARGS, NULL},
   {"_storageCopy",    (PyCFunction)THPModule_storageCopyWrapper, METH_VARARGS, NULL},
-  {"getNumThreads",   (PyCFunction)THPModule_getNumThreads,     METH_NOARGS,  NULL},
-  {"setNumThreads",   (PyCFunction)THPModule_setNumThreads,     METH_O,       NULL},
-  {"getRNGState",     (PyCFunction)THPModule_getRNGState,       METH_VARARGS, NULL},
-  {"setRNGState",     (PyCFunction)THPModule_setRNGState,       METH_VARARGS, NULL},
-  {"manualSeed",      (PyCFunction)THPModule_manualSeed,        METH_VARARGS, NULL},
+  {"get_num_threads", (PyCFunction)THPModule_getNumThreads,     METH_NOARGS,  NULL},
+  {"set_num_threads", (PyCFunction)THPModule_setNumThreads,     METH_O,       NULL},
+  {"get_rng_state",   (PyCFunction)THPModule_getRNGState,       METH_VARARGS, NULL},
+  {"set_rng_state",   (PyCFunction)THPModule_setRNGState,       METH_VARARGS, NULL},
+  {"manual_seed",     (PyCFunction)THPModule_manualSeed,        METH_VARARGS, NULL},
 
   {"sigmoid",         (PyCFunction)THPModule_sigmoid,           METH_VARARGS, NULL},
   {"log",             (PyCFunction)THPModule_log,               METH_VARARGS, NULL},
@@ -685,10 +687,7 @@ static PyMethodDef TorchMethods[] = {
   {"reshape",         (PyCFunction)THPModule_reshape,           METH_VARARGS, NULL},
   {"zeros",           (PyCFunction)THPModule_zeros,             METH_VARARGS, NULL},
   {"ones",            (PyCFunction)THPModule_ones,              METH_VARARGS, NULL},
-  {"indexSelect",     (PyCFunction)THPModule_indexSelect,       METH_VARARGS, NULL},
-  {"indexCopy",       (PyCFunction)THPModule_indexCopy,         METH_VARARGS, NULL},
-  {"indexAdd",        (PyCFunction)THPModule_indexAdd,          METH_VARARGS, NULL},
-  {"indexFill",       (PyCFunction)THPModule_indexFill,         METH_VARARGS, NULL},
+  {"index_select",    (PyCFunction)THPModule_index_select,      METH_VARARGS, NULL},
   {"narrow",          (PyCFunction)THPModule_narrow,            METH_VARARGS, NULL},
   {"addmm",           (PyCFunction)THPModule_addmm,             METH_VARARGS, NULL},
   {"addmv",           (PyCFunction)THPModule_addmv,             METH_VARARGS, NULL},
@@ -705,7 +704,7 @@ static PyMethodDef TorchMethods[] = {
   {"uniform",         (PyCFunction)THPModule_uniform,           METH_VARARGS, NULL},
   {"normal",          (PyCFunction)THPModule_normal,            METH_VARARGS, NULL},
   {"cauchy",          (PyCFunction)THPModule_cauchy,            METH_VARARGS, NULL},
-  {"logNormal",       (PyCFunction)THPModule_logNormal,         METH_VARARGS, NULL},
+  {"log_normal",      (PyCFunction)THPModule_log_normal,        METH_VARARGS, NULL},
   {"exponential",     (PyCFunction)THPModule_exponential,       METH_VARARGS, NULL},
   {"random",          (PyCFunction)THPModule_random,            METH_VARARGS, NULL},
   {"geometric",       (PyCFunction)THPModule_geometric,         METH_VARARGS, NULL},
@@ -720,7 +719,7 @@ static PyMethodDef TorchMethods[] = {
   {"all",             (PyCFunction)THPModule_all,               METH_VARARGS, NULL},
   {"any",             (PyCFunction)THPModule_any,               METH_VARARGS, NULL},
   {"cat",             (PyCFunction)THPModule_cat,               METH_VARARGS, NULL},
-  {"maskedSelect",    (PyCFunction)THPModule_maskedSelect,      METH_VARARGS, NULL},
+  {"masked_select",   (PyCFunction)THPModule_masked_select,     METH_VARARGS, NULL},
   {NULL, NULL, 0, NULL}
 };
 

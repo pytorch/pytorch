@@ -18,7 +18,7 @@ class SpatialSubtractiveNormalization(Module):
         # get args
         self.nInputPlane = nInputPlane
         self.kernel = kernel or torch.Tensor(9, 9).fill_(1)
-        kdim = self.kernel.nDimension()
+        kdim = self.kernel.ndimension()
 
         # check args
         if kdim != 2 and kdim != 1:
@@ -78,9 +78,9 @@ class SpatialSubtractiveNormalization(Module):
             self.ones = self.ones or input.new()
             self._coef = self._coef or self.coef.new()
 
-            self.ones.resizeAs_(input[0:1]).fill_(1)
+            self.ones.resize_as_(input[0:1]).fill_(1)
             coef = self.meanestimator.updateOutput(self.ones).squeeze(0)
-            self._coef.resizeAs_(coef).copy_(coef) # make contiguous for view
+            self._coef.resize_as_(coef).copy_(coef) # make contiguous for view
             size = coef.size().tolist()
             size = [input.size(0)] + size
             self.coef = self._coef.view(1, *(self._coef.size().tolist())).expand(*size)
@@ -94,7 +94,7 @@ class SpatialSubtractiveNormalization(Module):
 
     def updateGradInput(self, input, gradOutput):
         # resize grad
-        self.gradInput.resizeAs_(input).zero_()
+        self.gradInput.resize_as_(input).zero_()
 
         # backprop through all modules
         gradsub = self.subtractor.updateGradInput([input, self.adjustedsums], gradOutput)

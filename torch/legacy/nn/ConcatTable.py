@@ -54,7 +54,7 @@ class ConcatTable(Container):
                             assert len(l) == i
                             l.append(v.clone())
                         else:
-                            l[i].resizeAs_(v)
+                            l[i].resize_as_(v)
                             l[i].copy_(v)
                     self._map_list(self.gradInput, currentGradInput, fn)
                 else:
@@ -70,7 +70,7 @@ class ConcatTable(Container):
             for i, module in enumerate(self.modules):
                 currentGradInput = getattr(module, method)(input, gradOutput[i], scale)
                 if i == 0:
-                    self.gradInput.resizeAs_(currentGradInput).copy_(currentGradInput)
+                    self.gradInput.resize_as_(currentGradInput).copy_(currentGradInput)
                 else:
                     self.gradInput.add_(currentGradInput)
 

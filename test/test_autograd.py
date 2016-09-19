@@ -5,7 +5,7 @@ from copy import deepcopy
 from common import make_jacobian, TestCase, iter_tensors, get_numerical_jacobian
 from torch.autograd.functions import *
 
-PRECISION = 1e-3
+PRECISION = 1e-4
 
 def iter_gradients(x):
     if isinstance(x, Variable):
@@ -43,7 +43,7 @@ class TestAutograd(TestCase):
 
         counter = [0]
         def bw_hook(inc, grad):
-            self.assertTrue(torch.isTensor(grad))
+            self.assertTrue(torch.is_tensor(grad))
             counter[0] += inc
 
         z = x ** 2 + x * 2 + x * y + y
@@ -144,13 +144,13 @@ function_tests = [
     (Add,           (),                 ((M, M), (M, M))                            ),
     (Sub,           (),                 ((M, M), (M, M))                            ),
     (Mul,           (),                 ((M, M), (M, M))                            ),
-    (Div,           (),                 ((M, M), torch.rand(M, M) + 1e-2)           ),
+    (Div,           (),                 ((M, M), torch.rand(M, M) + 5e-2)           ),
     (Pow,           (),                 (torch.rand(M, M) + 1e-3, torch.rand(M, M) + 0.1)),
     (AddConstant,   (3.14,),            ((L, L),)                                   ),
     (SubConstant,   (3.14,),            ((L, L),)                                   ),
     (SubConstant,   (3.14, True),       ((L, L),),                  'from_tensor'   ),
     (MulConstant,   (3.14,),            ((L, L),)                                   ),
-    (DivConstant,   (3.14, True),       (torch.rand(L, L) + 1e-2,), 'by_tensor'     ),
+    (DivConstant,   (3.14, True),       (torch.rand(L, L) + 1e-1,), 'by_tensor'     ),
     (PowConstant,   (3.14,),            (torch.rand(L, L),)                         ),
     (Transpose,     (0, 1),             (torch.rand(L, L),)                         ),
     (Transpose,     (2, 0),             (torch.rand(S, S, S),),     '3d'            ),
@@ -244,7 +244,7 @@ method_tests = [
     ('transpose',   (1, 2, 3),          (1, 2)                                      ),
     ('t',           (1, 2),             ()                                          ),
     ('view',        (S, S, S),          (S*S, S),                                   ),
-    ('viewAs',      (S, S, S),          ((S*S, S),)                                 ),
+    ('view_as',      (S, S, S),          ((S*S, S),)                                 ),
     ('expand',      (S, 1, S),          (S, S, S)                                   ),
     ('exp',         (S, S, S),          ()                                          ),
     ('log',         (S, S, S),          ()                                          ),
@@ -301,7 +301,7 @@ method_tests = [
     ('norm',        (S, S, S),          (2, 1),                     'dim'           ),
     ('dist',        (S, S, S),          ((S, S, S),)                                ),
     ('dist',        (S, S, S),          ((S, S, S), 4),             '4'             ),
-    ('indexSelect', (S, S, S),          (0, index_variable(2, S))                   ),
+    ('index_select', (S, S, S),          (0, index_variable(2, S))                   ),
 ]
 # TODO: max, min with dim
 # TODO: mode, median
@@ -313,9 +313,9 @@ def create_input(call_args):
         call_args = (call_args,)
     def map_arg(arg):
         if isinstance(arg, tuple):
-            return Variable(torch.randn(*arg))
-        elif torch.isTensor(arg):
-            return Variable(arg)
+            return Variable(torch.randn(*arg).double())
+        elif torch.is_tensor(arg):
+            return Variable(arg.double())
         else:
             return arg
     return tuple(map_arg(arg) for arg in call_args)
@@ -370,7 +370,7 @@ for test in function_tests:
                 inp_i.grad.zero_()
                 i.grad.zero_()
             for io, o in zip(inplace_output, output):
-                grad = torch.randn(*io.size())
+                grad = torch.randn(*io.size()).double()
                 io.backward(grad)
                 o.backward(grad)
             for inp_i, i in zip(inplace_input, input):
@@ -391,7 +391,7 @@ for test in method_tests:
             args_tensor = deepcopy(unpack_variables(args_variable))
             output_variable = getattr(self_variable, name)(*args_variable)
             output_tensor = getattr(self_tensor, name)(*args_tensor)
-            if not torch.isTensor(output_tensor) and not isinstance(output_tensor, tuple):
+            if not torch.is_tensor(output_tensor) and not isinstance(output_tensor, tuple):
                 output_tensor = torch.DoubleTensor((output_tensor,))
             self.assertEqual(unpack_variables(output_variable), output_tensor)
             # TODO: check that both have changed after adding all inplace ops
@@ -408,7 +408,6 @@ for test in method_tests:
 
     assert not hasattr(TestAutograd, test_name), 'Two tests have the same name: ' + test_name
     setattr(TestAutograd, test_name, do_test)
-
 
 
 if __name__ == '__main__':

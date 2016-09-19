@@ -43,9 +43,9 @@ def adamax(opfunc, x, config, state=None):
     if 't' not in state:
         state['t'] = 0
         # Exponential moving average of gradient values
-        state['m'] = x.new().resizeAs_(dfdx).zero_()
+        state['m'] = x.new().resize_as_(dfdx).zero_()
         # Exponential moving average of the infinity norm
-        state['u'] = x.new().resizeAs_(dfdx).zero_()
+        state['u'] = x.new().resize_as_(dfdx).zero_()
         # A tmp tensor to hold the input to max()
         state['max'] = x.new(*([2] + dfdx.size().tolist())).zero_()
 

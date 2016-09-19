@@ -9,7 +9,7 @@ class DistKLDivCriterion(Criterion):
         self.output_tensor = torch.Tensor(1)
 
     def updateOutput(self, input, target):
-        assert input.isSameSizeAs(target)
+        assert input.is_same_size(target)
         self.output_tensor = self.output_tensor or input.new(1)
         self._backend.DistKLDivCriterion_updateOutput(
             self._backend.library_state,
@@ -22,7 +22,7 @@ class DistKLDivCriterion(Criterion):
         return self.output
 
     def updateGradInput(self, input, target):
-        assert input.isSameSizeAs(target)
+        assert input.is_same_size(target)
         self._backend.DistKLDivCriterion_updateGradInput(
             self._backend.library_state,
             input,

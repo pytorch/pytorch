@@ -118,7 +118,7 @@ class Clamp(Function):
     def backward(self, grad_output):
         i, = self.saved_tensors
         mask = i.ge(self.min_val) * i.le(self.max_val)
-        return grad_output * mask.typeAs(grad_output)
+        return grad_output * mask.type_as(grad_output)
 
 
 class Sqrt(Function):
@@ -210,13 +210,13 @@ class Cinv(Function):
 class Cmax(Function):
 
     def forward(self, a, b):
-        self._max_buffer = a.gt(b).typeAs(a)
+        self._max_buffer = a.gt(b).type_as(a)
         return a.cmax(b)
 
     def backward(self, grad_output):
         return (
             grad_output * self._max_buffer,
-            grad_output * self._max_buffer.eq(0).typeAs(grad_output)
+            grad_output * self._max_buffer.eq(0).type_as(grad_output)
         )
 
 
@@ -227,7 +227,7 @@ class CmaxConstant(Function):
         self.constant = constant
 
     def forward(self, i):
-        self._max_buffer = i.gt(self.constant).typeAs(i)
+        self._max_buffer = i.gt(self.constant).type_as(i)
         return i.cmax(self.constant)
 
     def backward(self, grad_output):
@@ -237,13 +237,13 @@ class CmaxConstant(Function):
 class Cmin(Function):
 
     def forward(self, a, b):
-        self._min_buffer = a.lt(b).typeAs(a)
+        self._min_buffer = a.lt(b).type_as(a)
         return a.cmin(b)
 
     def backward(self, grad_output):
         return (
             grad_output * self._min_buffer,
-            grad_output * self._min_buffer.eq(0).typeAs(grad_output)
+            grad_output * self._min_buffer.eq(0).type_as(grad_output)
         )
 
 
@@ -254,7 +254,7 @@ class CminConstant(Function):
         self.constant = constant
 
     def forward(self, i):
-        self._min_buffer = i.lt(self.constant).typeAs(i)
+        self._min_buffer = i.lt(self.constant).type_as(i)
         return i.cmin(self.constant)
 
     def backward(self, grad_output):
@@ -273,7 +273,7 @@ class _ConstantGrad(Function):
 
     def backward(self, grad_output):
         grad_input = grad_output.new(*repeat(1, grad_output.dim()))
-        grad_input = grad_input.fill_(self.grad_value).expandAs(grad_output)
+        grad_input = grad_input.fill_(self.grad_value).expand_as(grad_output)
         return grad_input.mul(grad_output)
 
 

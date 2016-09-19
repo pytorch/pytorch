@@ -14,7 +14,7 @@ class SpatialContrastiveNormalization(Module):
         self.kernel = kernel or torch.Tensor(9, 9).fill_(1)
         self.threshold = threshold
         self.thresval = thresval or threshold
-        kdim = self.kernel.nDimension()
+        kdim = self.kernel.ndimension()
 
         # check args
         if kdim != 2 and kdim != 1:

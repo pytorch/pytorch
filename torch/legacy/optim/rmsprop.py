@@ -41,8 +41,8 @@ def rmsprop(opfunc, x, config, state=None):
 
     # (3) initialize mean square values and square gradient storage
     if not 'm' in state:
-        state['m'] = x.new().resizeAs_(dfdx).fill_(1)
-        state['tmp'] = x.new().resizeAs_(dfdx)
+        state['m'] = x.new().resize_as_(dfdx).fill_(1)
+        state['tmp'] = x.new().resize_as_(dfdx)
 
 
     # (4) calculate new (leaky) mean squared values

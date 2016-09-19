@@ -25,8 +25,8 @@ class SpatialConvolutionLocal(Module):
 
         self.weight = torch.Tensor(self.oH, self.oW, nOutputPlane, nInputPlane, kH, kW)
         self.bias = torch.Tensor(nOutputPlane, self.oH, self.oW)
-        self.gradWeight = torch.Tensor().resizeAs_(self.weight)
-        self.gradBias = torch.Tensor().resizeAs_(self.bias)
+        self.gradWeight = torch.Tensor().resize_as_(self.weight)
+        self.gradBias = torch.Tensor().resize_as_(self.bias)
 
         self.reset()
         self.finput = None
@@ -42,15 +42,15 @@ class SpatialConvolutionLocal(Module):
         self.bias.uniform_(-stdv, stdv)
 
     def _makeContiguous(self, input, gradOutput=None):
-        if not input.isContiguous():
+        if not input.is_contiguous():
            self._input = self._input or input.new()
-           self._input.resizeAs_(input).copy_(input)
+           self._input.resize_as_(input).copy_(input)
            input = self._input
 
         if gradOutput is not None:
-            if not gradOutput.isContiguous():
+            if not gradOutput.is_contiguous():
                 self._gradOutput = self._gradOutput or gradOutput.new()
-                self._gradOutput.resizeAs_(gradOutput).copy_(gradOutput)
+                self._gradOutput.resize_as_(gradOutput).copy_(gradOutput)
                 gradOutput = self._gradOutput
             return input, gradOutput
 
@@ -67,11 +67,11 @@ class SpatialConvolutionLocal(Module):
            self.gradWeight = self.gradWeight.view(self.oH, self.oW, self.nOutputPlane, self.nInputPlane, self.kH, self.kW)
 
     def _checkInputSize(self, input):
-        if input.nDimension() == 3:
+        if input.ndimension() == 3:
             if input.size(0) != self.nInputPlane or input.size(1) != self.iH or input.size(1) != self.iW:
                 raise RuntimeError('Given input size: ({}x{}x{}) inconsistent with expected input size: ({}x{}x{}).'.format(
                                   input.size(0), input.size(1), input.size(2), self.nInputPlane, self.iH, self.iW))
-        elif input.nDimension() == 4:
+        elif input.ndimension() == 4:
             if input.size(1) != self.nInputPlane or input.size(2) != self.iH or input.size(3) != self.iW:
                 raise RuntimeError('Given input size: ({}x{}x{}x{}) inconsistent with expected input size: (*x{}x{}x{}).'.format(
                                     input.size(0), input.size(1), input.size(2), input.size(3), self.nInputPlane, self.iH, self.iW))
@@ -79,14 +79,14 @@ class SpatialConvolutionLocal(Module):
             raise RuntimeError('3D or 4D (batch mode) tensor expected')
 
     def _checkOutputSize(self, input, output):
-        if output.nDimension() != input.nDimension():
+        if output.ndimension() != input.ndimension():
             raise RuntimeError('inconsistent dimension between output and input.')
 
-        if output.nDimension() == 3:
+        if output.ndimension() == 3:
             if output.size(0) != self.nOutputPlane or output.size(1) != self.oH or output.size(2) != self.oW:
                 raise RuntimeError('Given output size: ({}x{}x{}) inconsistent with expected output size: ({}x{}x{}).'.format(
                                     output.size(0), output.size(1), output.size(2), self.nOutputPlane, self.oH, self.oW))
-        elif output.nDimension() == 4:
+        elif output.ndimension() == 4:
             if output.size(1) != self.nOutputPlane or output.size(2) != self.oH or output.size(3) != self.oW:
                 raise RuntimeError('Given output size: ({}x{}x{}x{}) inconsistent with expected output size: (batchsize x{}x{}x{}).'.format(
                                     output.size(0), output.size(1), output.size(2), output.size(3), self.nOutputPlane, self.oH, self.oW))

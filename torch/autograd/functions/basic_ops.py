@@ -93,7 +93,7 @@ class SubConstant(InplaceFunction):
             else:
                 assert not self.inplace, "can't perform (constant - tensor) " \
                     "subtraction in-place on an unsigned type"
-                return a.new().resizeAs_(a).fill_(self.constant).sub_(a)
+                return a.new().resize_as_(a).fill_(self.constant).sub_(a)
         else:
             if self.inplace:
                 self.mark_dirty(a)
@@ -138,7 +138,7 @@ class DivConstant(InplaceFunction):
     def forward(self, a):
         if self.div_by_tensor:
             self.save_for_backward(a)
-            return a.new().resizeAs_(a).fill_(self.constant).div_(a)
+            return a.new().resize_as_(a).fill_(self.constant).div_(a)
         else:
             if self.inplace:
                 return a.div_(self.constant)

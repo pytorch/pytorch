@@ -12,7 +12,7 @@ class WeightedMSECriterion(Criterion):
 
     def updateOutput(self, input, target):
         self.buffer = self.buffer or input.new()
-        self.buffer.resizeAs_(input).copy_(target)
+        self.buffer.resize_as_(input).copy_(target)
         if input.dim() - 1 == self.weight.dim():
             for i in range(input.size(0)):
                 self.buffer[i].mul_(self.weight)
@@ -31,7 +31,7 @@ class WeightedMSECriterion(Criterion):
         return self.output
 
     def updateGradInput(self, input, target):
-        self.buffer.resizeAs_(input).copy_(target)
+        self.buffer.resize_as_(input).copy_(target)
         if input.dim() - 1 == self.weight.dim():
             for i in range(input.size(0)):
                 self.buffer[i].mul_(self.weight)

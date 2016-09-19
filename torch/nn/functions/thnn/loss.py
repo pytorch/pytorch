@@ -12,14 +12,14 @@ class BCELoss(_BCELoss):
     def _resize_weight(self, target):
         self.old_weight = self.weight
         if self.weight is not None and target.dim() != 1:
-            self.weight = self.weight.view(1, target.size(1)).expandAs(target)
+            self.weight = self.weight.view(1, target.size(1)).expand_as(target)
 
     def _unresize_weight(self):
         self.weight = self.old_weight
         del self.old_weight
 
     def forward(self, input, target):
-        assert input.nElement() == target.nElement()
+        assert input.nelement() == target.nelement()
         self._resize_weight(target)
         result = super(BCELoss, self).forward(input, target)
         self._unresize_weight()

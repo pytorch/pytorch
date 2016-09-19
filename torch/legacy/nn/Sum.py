@@ -32,14 +32,14 @@ class Sum(Module):
         # Instead, do a deepcopy.
         size = input.size()
         size[dimension] = 1
-        if not gradOutput.isContiguous():
+        if not gradOutput.is_contiguous():
             self._gradOutput = self._gradOutput or gradOutput.new()
-            self._gradOutput.resizeAs_(gradOutput).copy_(gradOutput)
+            self._gradOutput.resize_as_(gradOutput).copy_(gradOutput)
             gradOutput = self._gradOutput
 
         gradOutput = gradOutput.view(size)
-        self.gradInput.resizeAs_(input)
-        self.gradInput.copy_(gradOutput.expandAs(input))
+        self.gradInput.resize_as_(input)
+        self.gradInput.copy_(gradOutput.expand_as(input))
         if self.sizeAverage:
             self.gradInput.div_(input.size(dimension))
 

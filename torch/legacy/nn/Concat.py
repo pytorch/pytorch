@@ -29,7 +29,7 @@ class Concat(Container):
         return self.output
 
     def updateGradInput(self, input, gradOutput):
-        self.gradInput.resizeAs_(input)
+        self.gradInput.resize_as_(input)
 
         offset = 0
         for i, module in enumerate(self.modules):
@@ -58,7 +58,7 @@ class Concat(Container):
            offset = offset + currentOutput.size(self.dimension)
 
     def backward(self, input, gradOutput, scale=1):
-        self.gradInput.resizeAs_(input)
+        self.gradInput.resize_as_(input)
         offset = 0
         for i, module in enumerate(self.modules):
             currentOutput = module.output

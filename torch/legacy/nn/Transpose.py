@@ -13,13 +13,13 @@ class Transpose(Module):
     def updateOutput(self, input):
         for perm in self.permutations:
            input = input.transpose(*perm)
-        self.output.resizeAs_(input).copy_(input)
+        self.output.resize_as_(input).copy_(input)
         return self.output
 
     def updateGradInput(self, input, gradOutput):
         for perm in self.permutations[::-1]:
            gradOutput = gradOutput.transpose(*perm)
-        self.gradInput.resizeAs_(gradOutput).copy_(gradOutput)
+        self.gradInput.resize_as_(gradOutput).copy_(gradOutput)
         return self.gradInput
 
 

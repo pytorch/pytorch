@@ -56,8 +56,8 @@ def asgd(opfunc, x, config, state=None):
     x.add_(-state['eta_t'], dfdx)
 
     # (4) averaging
-    state['ax'] = state.get('ax', x.new().resizeAs_(x).zero_())
-    state['tmp'] = state.get('tmp', state['ax'].new().resizeAs_(state['ax']))
+    state['ax'] = state.get('ax', x.new().resize_as_(x).zero_())
+    state['tmp'] = state.get('tmp', state['ax'].new().resize_as_(state['ax']))
     if state['mu_t'] != 1:
         state['tmp'].copy_(x)
         state['tmp'].add_(-1,state['ax']).mul_(state['mu_t'])

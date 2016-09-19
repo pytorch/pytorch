@@ -71,7 +71,7 @@ class ClassSimplexCriterion(MSECriterion):
     def updateOutput(self, input, target):
          self._transformTarget(target)
 
-         assert input.nElement() == self._target.nElement()
+         assert input.nelement() == self._target.nelement()
          self.output_tensor = self.output_tensor or input.new(1)
          self._backend.MSECriterion_updateOutput(
             self._backend.library_state,
@@ -84,7 +84,7 @@ class ClassSimplexCriterion(MSECriterion):
          return self.output
 
     def updateGradInput(self, input, target):
-        assert input.nElement() == self._target.nElement()
+        assert input.nelement() == self._target.nelement()
         self._backend.MSECriterion_updateGradInput(
             self._backend.library_state,
             input,
@@ -99,6 +99,6 @@ class ClassSimplexCriterion(MSECriterion):
 
     def getTopPrediction(self, input):
         prod = self.getPredictions(input)
-        _, maxs = prod.max(prod.nDimension()-1)
+        _, maxs = prod.max(prod.ndimension()-1)
         return maxs.view(-1)
 
