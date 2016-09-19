@@ -8,7 +8,119 @@ from torch.autograd import Variable
 
 
 class Module(object):
+    """This is the base class for all Modules defined in the nn package.
+    Even the Container class derives from this class.
+    
+    An nn.Module has the following interface:
 
+    **Constructor:**
+       nn.Module(**parameters)
+
+    All arguments passed in to the constructor need to be of type 
+    nn.Parameter or a Tensor.
+    
+
+    **forward(...)**
+    
+    This is the function that one defines when subclassing to create
+    their own modules.
+    It takes in inputs and returns outputs.
+
+    **__call__(...)**
+    
+    This calls the forward function, as well as the hooks
+
+    **register_buffer(name, tensor)**
+    
+    This is typically used to register a buffer that is not a Parameter.
+    For example, in BatchNorm, the running_mean is a buffer, so one would
+    register it in the constructor of BatchNorm with:
+
+    `self.register_buffer('running_mean', torch.zeros(num_features))`
+    
+    The registered buffers can simply be accessed as class members
+    when needed.
+
+    **cpu()**
+    
+    Recursively moves all it's parameters and buffers to the CPU
+
+    **cuda(device_id=None)**
+    Recursively moves all it's parameters and buffers to the CUDA memory.
+    If device_id is given, moves it to GPU number device_id
+
+    **float()**
+    Typecasts the parameters and buffers to float
+
+    **double()**
+    Typecasts the parameters and buffers to double
+
+    **register_forward_hook(name, hook)**
+    
+    This will register a user-defined closure on the module.
+    Whenever the module finishes it's forward operation,
+    the user closure is called.
+    The signature of the closure is `def closure(input, output)`
+
+    **register_backward_hook(name, hook)**
+    
+    This will register a user-defined closure on the module.
+    Whenever the module finishes it's backward operation,
+    the user closure is called.
+    The signature of the closure is `def closure(gradOutput, gradInput)`
+
+    **remove_forward_hook(name)**
+
+    Removes a registered forward hook with the given name
+
+    **remove_backward_hook(name)**
+
+    Removes a registered backward hook with the given name
+
+    **`[generator] parameters()`**
+    
+    returns a generator over all learnable parameters in the container instance. 
+    This can typically be passed to the optimizer API
+
+    ```python
+    # .parameters()
+    >>> for param in model.parameters():
+    >>>     print(type(param.data), param.size())
+    <class 'torch.FloatTensor'> (20L,)
+    <class 'torch.FloatTensor'> (20L, 1L, 5L, 5L)
+    ```
+    
+    **`[dict] parameter_dict()`**
+    
+    returns a dictionary of learnable parameters of the Module.
+    For example: ['weight' : Parameter(torch.FloatTensor(20x1x5x5)),
+                  'bias'   : Parameter(torch.FloatTensor(20)),
+                 ]
+
+    ```python
+    # .parameter_dict()
+    >>> pdict = model.parameter_dict()
+    >>> print(pdict.keys())
+    ['bias', 'weight']
+    ```
+
+    **`load_parameter_dict(dict)`**
+
+    Given a parameter dict, sets the parameters of self to be the given dict.
+
+    **`train()`**
+
+    Sets the Container to training mode (for modules such as batchnorm, dropout etc.)
+
+    **`eval()`**
+
+    Sets the Container to evaluate mode (for modules such as batchnorm, dropout etc.)
+
+    **`zero_grad()`**
+
+    Zeroes the gradients of each Parameter of the module
+    
+    """
     def __init__(self, **parameters):
         self._backend = thnn_backend
         self._parameters = OrderedDict(parameters)

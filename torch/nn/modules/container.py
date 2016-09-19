@@ -37,15 +37,75 @@ class Container(Module):
      ```
 
     One can also add new modules to a container after construction.
-    You can do this with the add_module function.
+    You can do this with the add_module function 
+    or by assigning them as Container attributes.
 
-    ```
+    ```python
     # one can add modules to the container after construction
     model.add_module('pool1', nn.MaxPool2d(2, 2))
+
+    # one can also set modules as attributes of the container
+    model.conv1 = nn.Conv2d(12, 24, 3)
     ```
 
-    The container has one additional method `parameters()` which
-    returns the list of learnable parameters in the container instance.
+    The container has some important additional methods: 
+    
+    **`[generator] parameters()`**
+    
+    returns a generator over all learnable parameters in the container instance. 
+    This can typically be passed to the optimizer API
+
+    ```python
+    # .parameters()
+    >>> for param in model.parameters():
+    >>>     print(type(param.data), param.size())
+    <class 'torch.FloatTensor'> (20L,)
+    <class 'torch.FloatTensor'> (20L, 1L, 5L, 5L)
+    ```
+    
+    **`[dict] parameter_dict()`**
+    
+    returns a dictionary of learnable parameters of the Container.
+    For example: ['conv1.weight' : Parameter(torch.FloatTensor(20x1x5x5)),
+                  'conv1.bias'   : Parameter(torch.FloatTensor(20)),
+                 ]
+
+    ```python
+    # .parameter_dict()
+    >>> pdict = model.parameter_dict()
+    >>> print(pdict.keys())
+    ['conv1.bias', 'conv1.weight']
+    ```
+
+
+    **`load_parameter_dict(dict)`**
+
+    Given a parameter dict, sets the parameters of self to be the given dict.
+    It loads loads the parameters recursively.
+    Excessive or non-matching parameter names are ignored.
+    For example, the input dict has an entry 'conv44.weight', but 
+    if the container does not have a module named 'conv44', then this entry is ignored.
+
+    **`children()`**
+
+    Returns a generator over all the children modules of self
+
+    **`train()`**
+
+    Sets the Container (and all it's child modules) to training mode (for modules such as batchnorm, dropout etc.)
+
+    **`eval()`**
+
+    Sets the Container (and all it's child modules) to evaluate mode (for modules such as batchnorm, dropout etc.)
+
+    **`apply(closure)`**
+
+    Applies the given closure to each parameter of the container. 
+
+
+    **__Note: Apart from these, the container will define the base functions that it has derived from nn.Module __**
+    
+
     """
 
     dump_patches = False

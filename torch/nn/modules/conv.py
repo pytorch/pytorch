@@ -184,7 +184,7 @@ class ConvTranspose2d(Conv2d):
         kernel_size: the size of the convolving kernel. Can be a single number k (for a square kernel of k x k) or a tuple (kh x kw)
         stride: the stride of the convolving kernel. Can be a single number or a tuple (sh x sw). Default: 1
         padding: implicit zero padding on the input. Can be a single number or a tuple. Default: 0
-        output_padding: A padding of 0 or 1 pixels that should be added to the output. Can be a single number or a tuple. Default: 0
+        output_padding: A zero-padding of 0 <= padding < stride that should be added to the output. Can be a single number or a tuple. Default: 0
         bias: If set to False, the layer will not learn an additive bias. Default: True
     Input Shape: [ * , in_channels  , * , * ] : Input is minibatch x in_channels x iH x iW
     Output Shape:[ * , out_channels , * , * ]  : Output shape is minibatch x out_channels x (iH - 1) * sH - 2*padH + kH + output_paddingH x (iW - 1) * sW - 2*padW + kW, or as specified in a second argument to the call.
@@ -333,7 +333,7 @@ class ConvTranspose3d(_Conv3dBase):
         kernel_size: the size of the convolving kernel. Can be a single number k (for a square kernel of k x k x k) or a tuple (kt x kh x kw)
         stride: the stride of the convolving kernel. Can be a single number or a tuple (st x sh x sw). Default: 1
         padding: implicit zero padding on the input. Can be a single number or a tuple. Default: 0
-        output_padding: A padding of 0 or 1 pixels that should be added to the output. Can be a single number or a tuple. Default: 0
+        output_padding: A zero-padding of 0 <= padding < stride that should be added to the output. Can be a single number or a tuple. Default: 0
     Input Shape: [ * , in_channels  , * , * , * ] : Input is minibatch x in_channels x iH x iW
     Output Shape:[ * , out_channels , * , * , * ]  : Output shape is precisely minibatch x out_channels x (iT - 1) * sT - 2*padT + kT + output_paddingT x (iH - 1) * sH - 2*padH + kH + output_paddingH x (iW - 1) * sW - 2*padW + kW
     Members:
