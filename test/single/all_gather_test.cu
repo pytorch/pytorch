@@ -13,6 +13,9 @@
 #include "nccl.h"
 #include "test_utilities.h"
 
+int errors = 0;
+double min_bw = 10000.0;
+bool is_reduction = false;
 
 template<typename T>
 void RunTest(T** sendbuff, T** recvbuff, const int N, const ncclDataType_t type,
@@ -84,6 +87,9 @@ void RunTest(T** sendbuff, T** recvbuff, const int N, const ncclDataType_t type,
 
     printf("  %7.3f  %5.2f  %5.2f  %7.0le\n", elapsedSec * 1.0E3, algbw, busbw,
         maxDelta);
+
+    if (maxDelta > deltaMaxValue(type, is_reduction)) errors++;
+    if (busbw < min_bw) min_bw = busbw;
   }
 
   for (int i = 0; i < nDev; ++i) {
@@ -197,7 +203,7 @@ int main(int argc, char* argv[]) {
 
   RunTests<char>(N / sizeof(char), ncclChar, comms, dList);
   RunTests<int>(N / sizeof(int), ncclInt, comms, dList);
-#if CUDART_VERSION >= 7050
+#ifdef CUDA_HAS_HALF
   RunTests<half>(N / sizeof(half), ncclHalf, comms, dList);
 #endif
   RunTests<float>(N / sizeof(float), ncclFloat, comms, dList);
@@ -211,6 +217,15 @@ int main(int argc, char* argv[]) {
     ncclCommDestroy(comms[i]);
   free(comms);
 
-  exit(EXIT_SUCCESS);
+  char* str = getenv("NCCL_TESTS_MIN_BW");
+  double check_min_bw = str ? atof(str) : -1;
+
+  printf(" Out of bounds values : %d %s\n", errors, errors ? "FAILED" : "OK");
+  printf(" Min bus bandwidth    : %g %s\n", min_bw, check_min_bw == -1 ? "" : (min_bw < check_min_bw ? "FAILED" : "OK"));
+  printf("\n");
+  if (errors || min_bw < check_min_bw)
+    exit(EXIT_FAILURE);
+  else 
+    exit(EXIT_SUCCESS);
 }
 
