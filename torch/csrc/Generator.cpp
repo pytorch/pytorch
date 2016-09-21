@@ -5,7 +5,21 @@
 #include <TH/TH.h>
 #include "THP.h"
 
-extern PyObject *THPGeneratorClass;
+PyObject *THPGeneratorClass = NULL;
+
+PyObject * THPGenerator_New()
+{
+  PyObject *args = PyTuple_New(0);
+  if (!args) {
+    PyErr_SetString(PyExc_RuntimeError, "Could not create a new generator object - "
+        "failed to allocate argument tuple");
+    return NULL;
+  }
+  PyObject *result = PyObject_Call((PyObject*)THPGeneratorClass, args, NULL);
+  Py_DECREF(args);
+  return result;
+}
+
 
 static void THPGenerator_dealloc(THPGenerator* self)
 {
@@ -67,18 +81,6 @@ PyTypeObject THPGeneratorType = {
   0,                                     /* tp_alloc */
   THPGenerator_pynew,                    /* tp_new */
 };
-
-bool THPGenerator_Check(PyObject *obj)
-{
-  return Py_TYPE(obj) == &THPGeneratorType;
-}
-
-PyObject * THPGenerator_newObject()
-{
-  // TODO: error checking
-  THPObjectPtr args = PyTuple_New(0);
-  return PyObject_Call((PyObject*)&THPGeneratorType, args, NULL);
-}
 
 //static struct PyMemberDef THPStorage_(members)[] = {
   //{(char*)"_cdata", T_ULONGLONG, offsetof(THPGenerator, cdata), READONLY, NULL},

@@ -7,11 +7,12 @@ struct THPStorage {
   THStorage *cdata;
 };
 
-extern PyTypeObject THPStorageType;
+THP_API PyObject * THPStorage_(New)(THStorage *ptr);
+extern PyObject *THPStorageClass;
 
+#ifdef _THP_CORE
 bool THPStorage_(init)(PyObject *module);
-PyObject * THPStorage_(newObject)(THStorage *storage);
 PyObject * THPStorage_(newWeakObject)(THStorage *storage);
-bool THPStorage_(IsSubclass)(PyObject *storage);
+#endif
 
 #endif

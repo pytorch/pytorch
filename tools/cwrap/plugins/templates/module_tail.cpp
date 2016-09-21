@@ -28,8 +28,6 @@ PyMODINIT_FUNC PyInit_$short_name()
   ASSERT_TRUE(module = PyModule_Create(&module_def));
 #endif
 
-  ASSERT_TRUE(__loadClasses());
-
 #if PY_MAJOR_VERSION != 2
   return module;
 #endif

@@ -2,9 +2,31 @@
 #define TH_GENERIC_FILE "generic/Storage.cpp"
 #else
 
+PyObject *THPStorageClass = NULL;
 
-/* A pointer to RealStorage class defined later in Python */
-extern PyObject *THPStorageClass;
+PyObject * THPStorage_(New)(THStorage *ptr)
+{
+  PyObject *args = PyTuple_New(0);
+  PyObject *kwargs = NULL;
+  if (!args) {
+    PyErr_SetString(PyExc_RuntimeError, "Could not create a new storage object - "
+        "failed to allocate argument tuple");
+    return NULL;
+  }
+  if (ptr) {
+    kwargs = Py_BuildValue("{s:N}", "cdata", PyLong_FromVoidPtr(ptr));
+    if (!kwargs) {
+      PyErr_SetString(PyExc_RuntimeError, "Could not create a new storage object - "
+          "failed to allocate keyword argument dictionary");
+      Py_DECREF(args);
+      return NULL;
+    }
+  }
+  PyObject *result = PyObject_Call(THPStorageClass, args, kwargs);
+  Py_DECREF(args);
+  Py_XDECREF(kwargs);
+  return result;
+}
 
 PyObject * THPStorage_(newWeakObject)(THStorage *storage) {
   if (storage->allocator == &THStorageWeakRefAllocator) {
@@ -14,28 +36,14 @@ PyObject * THPStorage_(newWeakObject)(THStorage *storage) {
   }
   std::unique_ptr<StorageWeakRefAllocator> new_ctx(new StorageWeakRefAllocator(
         nullptr, storage->allocator, storage->allocatorContext));
-  PyObject *weak_result = THPStorage_(newObject)(storage);
+  PyObject *weak_result = THPStorage_(New)(storage);
+  if (!weak_result)
+    return NULL;
   Py_INCREF(weak_result); // THPObjectPtr steals the reference
   new_ctx->object = weak_result;
   storage->allocatorContext = (void*)new_ctx.release();
   storage->allocator = &THStorageWeakRefAllocator;
   return weak_result;
-}
-
-PyObject * THPStorage_(newObject)(THStorage *ptr)
-{
-  // TODO: error checking
-  PyObject *args = PyTuple_New(0);
-  PyObject *kwargs = Py_BuildValue("{s:N}", "cdata", PyLong_FromVoidPtr(ptr));
-  PyObject *instance = PyObject_Call(THPStorageClass, args, kwargs);
-  Py_DECREF(args);
-  Py_DECREF(kwargs);
-  return instance;
-}
-
-bool THPStorage_(IsSubclass)(PyObject *storage)
-{
-  return PyObject_IsSubclass((PyObject*)Py_TYPE(storage), (PyObject*)&THPStorageType);
 }
 
 static void THPStorage_(dealloc)(THPStorage* self)
@@ -62,7 +70,7 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
   } else if (args != NULL && PyTuple_Size(args) == 1) {
     PyObject *arg = PyTuple_GET_ITEM(args, 0);
     if (THPUtils_checkLong(arg)) {
-      args_ok = THPUtils_getLong(PyTuple_GET_ITEM(args, 0), &size);
+      size = THPUtils_unpackLong(arg);
     } else {
       iterator = PyObject_GetIter(arg);
       args_ok = iterator != nullptr;
@@ -72,13 +80,19 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
       }
     }
   // Storage view
-  } else if (args != NULL && PyTuple_Size(args) >= 1 && THPStorage_(IsSubclass)(PyTuple_GET_ITEM(args, 0))) {
+  } else if (args != NULL && PyTuple_Size(args) >= 1 && THPStorage_(Check)(PyTuple_GET_ITEM(args, 0))) {
     storage_arg = (THPStorage *)PyTuple_GET_ITEM(args, 0);
-    if (PyTuple_Size(args) >= 2 && !THPUtils_getLong(PyTuple_GET_ITEM(args, 1), &storage_arg_offset))
-        return NULL;
+    if (PyTuple_Size(args) >= 2) {
+      PyObject *second_arg = PyTuple_GET_ITEM(args, 1);
+      THPUtils_assert(THPUtils_checkLong(second_arg), "Invalid arguments");
+      storage_arg_offset = THPUtils_unpackLong(second_arg);
+    }
     storage_arg_size = storage_arg->cdata->size - storage_arg_offset;
-    if (PyTuple_Size(args) >= 3 && !THPUtils_getLong(PyTuple_GET_ITEM(args, 2), &storage_arg_size))
-        return NULL;
+    if (PyTuple_Size(args) >= 3) {
+      PyObject *third_arg = PyTuple_GET_ITEM(args, 2);
+      THPUtils_assert(THPUtils_checkLong(third_arg), "Invalid arguments");
+      storage_arg_size = THPUtils_unpackLong(third_arg);
+    }
     if (storage_arg_offset < 0 || storage_arg_offset >= storage_arg->cdata->size) {
       THPUtils_setError("Invalid storage offset (%ld)!\n", storage_arg_offset);
       return NULL;
@@ -94,7 +108,7 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
     args_ok = false;
   }
   if (!args_ok) {
-    // TODO: nice error mossage
+    // TODO: better error message
     THPUtils_setError("invalid arguments");
     return NULL;
   }
@@ -119,10 +133,11 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
       THPObjectPtr item;
       real v;
       while ((item = PyIter_Next(iterator))) {
-        if (!THPUtils_(parseReal)(item, &v)) {
+        if (!THPUtils_(checkReal)(item)) {
           THPUtils_setError("expected a numeric type, but got %s", Py_TYPE(item)->tp_name);
           return NULL;
         }
+        v = THPUtils_(unpackReal)(item);
         if (items_processed == size) {
           // TODO: error - iterator has too many items
           return NULL;
@@ -166,8 +181,8 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
   HANDLE_TH_ERRORS
   /* Integer index */
   long nindex;
-  if ((PyLong_Check(index) || PyInt_Check(index))
-      && THPUtils_getLong(index, &nindex) == 1 ) {
+  if (THPUtils_checkLong(index)) {
+    nindex = THPUtils_unpackLong(index);
     if (nindex < 0)
       nindex += THStorage_(size)(LIBRARY_STATE self->cdata);
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || \
@@ -182,7 +197,7 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
   } else if (PySlice_Check(index)) {
     Py_ssize_t start, stop, slicelength, len;
     len = THStorage_(size)(LIBRARY_STATE self->cdata);
-    if (!THPUtils_(parseSlice)(index, len, &start, &stop, &slicelength))
+    if (!THPUtils_parseSlice(index, len, &start, &stop, &slicelength))
       return NULL;
 
     real *data = THStorage_(data)(LIBRARY_STATE self->cdata);
@@ -197,7 +212,7 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
     THStorage_(clearFlag)(LIBRARY_STATE view, TH_STORAGE_FREEMEM);
     THStorage_(copy)(LIBRARY_STATE new_storage, view);
 #endif
-    PyObject *_ret = THPStorage_(newObject)(new_storage);
+    PyObject *_ret = THPStorage_(New)(new_storage);
     new_storage.release();
     return _ret;
   }
@@ -213,19 +228,22 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
 static int THPStorage_(set)(THPStorage *self, PyObject *index, PyObject *value)
 {
   HANDLE_TH_ERRORS
-  real rvalue;
-  if (!THPUtils_(parseReal)(value, &rvalue))
+  if (!THPUtils_(checkReal)(value)) {
+    // TODO: error
+    THPUtils_setError("TODO");
     return -1;
+  }
+  real rvalue = THPUtils_(unpackReal)(value);
 
   long nindex;
-  if ((PyLong_Check(index) || PyInt_Check(index))
-      && THPUtils_getLong(index, &nindex) == 1) {
+  if (THPUtils_checkLong(index)) {
+    nindex = THPUtils_unpackLong(index);
     THStorage_(set)(LIBRARY_STATE self->cdata, nindex, rvalue);
     return 0;
   } else if (PySlice_Check(index)) {
     Py_ssize_t start, stop, len;
     len = THStorage_(size)(LIBRARY_STATE self->cdata);
-    if (!THPUtils_(parseSlice)(index, len, &start, &stop, NULL))
+    if (!THPUtils_parseSlice(index, len, &start, &stop, NULL))
       return -1;
     // TODO: check the bounds only once
     for (;start < stop; start++)

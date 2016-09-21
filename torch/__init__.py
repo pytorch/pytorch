@@ -1,11 +1,21 @@
 import sys
 import math
-
-from torch._C import *
 from ._utils import _import_dotted_name
 
-_tensor_classes = set()
-_storage_classes = set()
+################################################################################
+# Load the extension module
+################################################################################
+
+# Loading the extension with RTLD_GLOBAL option allows to not link extension
+# modules against the _C shared object. Their missing THP symbols will be
+# automatically filled by the dynamic loader.
+import DLFCN
+old_flags = sys.getdlopenflags()
+sys.setdlopenflags(DLFCN.RTLD_GLOBAL | DLFCN.RTLD_NOW)
+from torch._C import *
+sys.setdlopenflags(old_flags)
+del DLFCN
+del old_flags
 
 ################################################################################
 # Define basic utilities
@@ -77,6 +87,11 @@ class CharTensor(_C.CharTensorBase, _TensorBase):
 class ByteTensor(_C.ByteTensorBase, _TensorBase):
     def is_signed(self):
         return False
+
+
+_tensor_classes = set()
+_storage_classes = set()
+
 
 _storage_classes.add(DoubleStorage)
 _storage_classes.add(FloatStorage)

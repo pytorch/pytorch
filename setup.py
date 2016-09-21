@@ -86,7 +86,6 @@ class build_ext(setuptools.command.build_ext.build_ext):
         setuptools.command.build_ext.build_ext.run(self)
 
 
-
 class build(distutils.command.build.build):
     sub_commands = [
         ('build_deps', lambda self: True),
@@ -136,6 +135,7 @@ include_dirs += [
 
 extra_link_args.append('-L' + lib_path)
 
+main_compile_args = ['-D_THP_CORE']
 main_libraries = ['TH', 'shm']
 main_sources = [
     "torch/csrc/Module.cpp",
@@ -199,7 +199,7 @@ C = Extension("torch._C",
     libraries=main_libraries,
     sources=main_sources,
     language='c++',
-    extra_compile_args=extra_compile_args,
+    extra_compile_args=main_compile_args + extra_compile_args,
     include_dirs=include_dirs,
     extra_link_args=extra_link_args + [make_relative_rpath('lib')]
 )

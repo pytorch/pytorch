@@ -37,7 +37,7 @@ class THPPlugin(CWrapPlugin):
         'THIndexTensor*':   Template('(PyObject*)Py_TYPE($arg) == THPIndexTensorClass'),
         'THLongStorage*':   Template('(PyObject*)Py_TYPE($arg) == THPLongStorageClass'),
         'THStorage*':       Template('(PyObject*)Py_TYPE($arg) == THPStorageClass'),
-        'THGenerator*':     Template('Py_TYPE($arg) == &THPGeneratorType'),
+        'THGenerator*':     Template('(PyObject*)Py_TYPE($arg) == THPGeneratorClass'),
         'void*':            Template('THPUtils_checkLong($arg)'),
         'long':             Template('THPUtils_checkLong($arg)'),
         'int':              Template('THPUtils_checkLong($arg)'),
@@ -50,8 +50,8 @@ class THPPlugin(CWrapPlugin):
     }
 
     RETURN_WRAPPER = {
-        'THTensor*':        Template('return THPTensor_(newObject)($call);'),
-        'THLongStorage*':   Template('return THPLongStorage_newObject($call);'),
+        'THTensor*':        Template('return THPTensor_(New)($call);'),
+        'THLongStorage*':   Template('return THPLongStorage_New($call);'),
         # TODO: make it smarter - it should return python long if result doesn't fit into an int
         'long':             Template('return PyInt_FromLong($call);'),
         # TODO
@@ -84,38 +84,46 @@ PyObject * $name(PyObject *self, PyObject *args)
     ALLOCATE_TYPE = {
         'THTensor*':        Template("""\
       THTensorPtr _th_$name = THTensor_(new)(LIBRARY_STATE_NOARGS);
-      THPTensorPtr _${name}_guard = (THPTensor*)THPTensor_(newObject)(_th_$name.get());
+      THPTensorPtr _${name}_guard = (THPTensor*)THPTensor_(New)(_th_$name.get());
       THPTensor* $name = _${name}_guard.get();
+      if (!$name)
+        return NULL;
       _th_$name.release();
 """),
         'THLongTensor*':        Template("""\
       THLongTensorPtr _th_$name = THLongTensor_new(LIBRARY_STATE_NOARGS);
-      THPLongTensorPtr _${name}_guard = (THPLongTensor*)THPLongTensor_newObject(_th_$name.get());
+      THPLongTensorPtr _${name}_guard = (THPLongTensor*)THPLongTensor_New(_th_$name.get());
       THPLongTensor* $name = _${name}_guard.get();
+      if (!$name)
+        return NULL;
       _th_$name.release();
 """),
         'THBoolTensor*':    Template("""
 #if IS_CUDA
       THCByteTensorPtr _t_$name = THCudaByteTensor_new(LIBRARY_STATE_NOARGS);
-      THCPByteTensorPtr _${name}_guard = (THCPByteTensor*)THCPByteTensor_newObject(_t_$name);
+      THCPByteTensorPtr _${name}_guard = (THCPByteTensor*)THCPByteTensor_New(_t_$name);
       THCPByteTensor *$name = _${name}_guard.get();
 #else
       THByteTensorPtr _t_$name = THByteTensor_new();
-      THPByteTensorPtr _${name}_guard = (THPByteTensor*)THPByteTensor_newObject(_t_$name);
+      THPByteTensorPtr _${name}_guard = (THPByteTensor*)THPByteTensor_New(_t_$name);
       THPByteTensor *$name = _${name}_guard.get();
 #endif
+      if (!$name)
+        return NULL;
       _t_$name.release();
 """),
         'THIndexTensor*':    Template("""
 #if IS_CUDA
       THCLongTensorPtr _t_$name = THCudaLongTensor_new(LIBRARY_STATE_NOARGS);
-      THCPLongTensorPtr _${name}_guard = (THCPLongTensor*)THCPLongTensor_newObject(_t_$name);
+      THCPLongTensorPtr _${name}_guard = (THCPLongTensor*)THCPLongTensor_New(_t_$name);
       THCPLongTensor *$name = _${name}_guard.get();
 #else
       THLongTensorPtr _t_$name = THLongTensor_new();
-      THPLongTensorPtr _${name}_guard = (THPLongTensor*)THPLongTensor_newObject(_t_$name);
+      THPLongTensorPtr _${name}_guard = (THPLongTensor*)THPLongTensor_New(_t_$name);
       THPLongTensor *$name = _${name}_guard.get();
 #endif
+      if (!$name)
+        return NULL;
       _t_$name.release();
 """),
     }
@@ -133,9 +141,9 @@ PyObject * $name(PyObject *self, PyObject *args)
         'THFloatTensor*': 'FloatTensor',
         'THDoubleTensor*': 'DoubleTensor',
         'long': 'int',
-        'real': 'float',
+        'real': '" RealStr "',
         'double': 'float',
-        'accreal': 'float',
+        'accreal': '" RealStr "',
         'bool': 'bool',
     }
 

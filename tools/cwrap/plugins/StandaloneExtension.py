@@ -3,8 +3,13 @@ from string import Template
 from . import CWrapPlugin
 
 
-with open(os.path.join(os.path.dirname(__file__), 'templates', 'module_head.cpp'), 'r') as f:
-    MODULE_HEAD = Template(f.read())
+MODULE_HEAD = """
+#include <Python.h>
+#include <exception>
+
+#include "THP_API.h"
+
+"""
 with open(os.path.join(os.path.dirname(__file__), 'templates', 'module_tail.cpp'), 'r') as f:
     MODULE_TAIL = Template(f.read())
 
@@ -21,18 +26,18 @@ $METHODS
 class StandaloneExtension(CWrapPlugin):
 
     TYPE_UNPACK = {
-        'THFloatTensor*':   Template('(THFloatTensor*)(((Tensor*)$arg)->cdata)'),
-        'THDoubleTensor*':  Template('(THDoubleTensor*)(((Tensor*)$arg)->cdata)'),
-        'THLongTensor*':    Template('(THLongTensor*)(((Tensor*)$arg)->cdata)'),
-        'THIntTensor*':     Template('(THIntTensor*)(((Tensor*)$arg)->cdata)'),
-        'THCudaTensor*':    Template('(THCudaTensor*)(((Tensor*)$arg)->cdata)'),
-        'THCudaLongTensor*': Template('(THCudaLongTensor*)(((Tensor*)$arg)->cdata)'),
-        'float':            Template('__getFloat($arg)'),
-        'double':           Template('__getFloat($arg)'),
-        'bool':             Template('__getLong($arg)'),
-        'int':              Template('__getLong($arg)'),
-        'long':             Template('__getLong($arg)'),
-        'void*':            Template('(void*)__getLong($arg)'),
+        'THFloatTensor*':   Template('THPFloatTensor_CData((THPFloatTensor*)$arg)'),
+        'THDoubleTensor*':  Template('THPDoubleTensor_CData((THPDoubleTensor*)$arg)'),
+        'THLongTensor*':    Template('THPLongTensor_CData((THPLongTensor*)$arg)'),
+        'THIntTensor*':     Template('THPIntTensor_CData((THPIntTensor*)$arg)'),
+        'THCudaTensor*':    Template('THCPFloatTensor_CData((THCPFloatTensor*)$arg)'),
+        'THCudaLongTensor*': Template('THCPLongTensor_CData((THCPLongTensor*)$arg)'),
+        'float':            Template('THPFloatUtils_unpackReal($arg)'),
+        'double':           Template('THPDoubleUtils_unpackReal($arg)'),
+        'bool':             Template('THPUtils_unpackLong($arg)'),
+        'int':              Template('THPUtils_unpackLong($arg)'),
+        'long':             Template('THPUtils_unpackLong($arg)'),
+        'void*':            Template('(void*)THPUtils_unpackLong($arg)'),
         # TODO: implement this
         'THGenerator*':     Template('NULL'),
     }
@@ -44,12 +49,12 @@ class StandaloneExtension(CWrapPlugin):
         'THIntTensor*':     Template('(PyObject*)Py_TYPE($arg) == THPIntTensorClass'),
         'THCudaTensor*':    Template('(PyObject*)Py_TYPE($arg) == THCPFloatTensorClass'),
         'THCudaLongTensor*': Template('(PyObject*)Py_TYPE($arg) == THCPLongTensorClass'),
-        'float':            Template('__checkFloat($arg)'),
-        'double':           Template('__checkFloat($arg)'),
-        'bool':             Template('__checkLong($arg)'),
-        'int':              Template('__checkLong($arg)'),
-        'long':             Template('__checkLong($arg)'),
-        'void*':            Template('__checkLong($arg)'),
+        'float':            Template('THPDoubleUtils_checkReal($arg)'),
+        'double':           Template('THPDoubleUtils_checkReal($arg)'),
+        'bool':             Template('THPUtils_checkLong($arg)'),
+        'int':              Template('THPUtils_checkLong($arg)'),
+        'long':             Template('THPUtils_checkLong($arg)'),
+        'void*':            Template('THPUtils_checkLong($arg)'),
         # TODO: implement this
         'THGenerator*':     Template('false'),
     }
@@ -57,17 +62,14 @@ class StandaloneExtension(CWrapPlugin):
     WRAPPER_TEMPLATE = Template("""
 PyObject * $name(PyObject *_unused, PyObject *args)
 {
+  HANDLE_TH_ERRORS
   int __argcount = args ? PyTuple_Size(args) : 0;
-  try {
-      $options
-    } else {
-      __invalidArgs(args, $expected_args);
-      return NULL;
-    }
-  } catch (std::exception &e) {
-      PyErr_SetString(PyExc_RuntimeError, e.what());
-      return NULL;
+    $options
+  } else {
+    THPUtils_invalidArguments(args, "$name", 1, $expected_args);
+    return NULL;
   }
+  END_HANDLE_TH_ERRORS
 }
     """)
 
@@ -92,14 +94,13 @@ PyObject * $name(PyObject *_unused, PyObject *args)
         'void*': 'int',
     }
 
-    def __init__(self, module_name, with_cuda=False):
+    def __init__(self, module_name):
         self.module_name = module_name
-        self.with_cuda = with_cuda
         self.declarations = []
 
     def process_full_file(self, code):
         short_name = self.module_name.split('.')[-1]
-        new_code = MODULE_HEAD.substitute(requres_cuda=('1' if self.with_cuda else '0'))
+        new_code = MODULE_HEAD
         new_code += code
         new_code += self.declare_module_methods()
         new_code += MODULE_TAIL.substitute(full_name=self.module_name, short_name=short_name)

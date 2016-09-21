@@ -7,12 +7,13 @@ struct THPTensor {
   THTensor *cdata;
 };
 
-extern PyTypeObject THPTensorType;
-extern PyTypeObject THPTensorStatelessType;
+THP_API PyObject * THPTensor_(New)(THTensor *ptr);
 extern PyObject *THPTensorClass;
 
+#ifdef _THP_CORE
+// TODO: init stateless in THPTensor_(init) and remove this
+extern PyTypeObject THPTensorStatelessType;
 bool THPTensor_(init)(PyObject *module);
-PyObject * THPTensor_(newObject)(THTensor *tensor);
-bool THPTensor_(IsSubclass)(PyObject *tensor);
+#endif
 
 #endif

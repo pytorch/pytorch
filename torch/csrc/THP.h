@@ -17,13 +17,18 @@
 #define LIBRARY_STATE
 #define LIBRARY_STATE_NOARGS
 
+#define THP_API extern "C"
+
 #include "Exceptions.h"
 #include "Generator.h"
 #include "Storage.h"
 #include "Tensor.h"
 #include "Module.h"
 #include "utils.h" // This requires defined Storage and Tensor types
+
+#ifdef _THP_CORE
 #include "serialization.h"
 #include "allocators.h"
+#endif
 
 #endif

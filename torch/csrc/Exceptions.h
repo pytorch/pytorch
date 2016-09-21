@@ -13,6 +13,7 @@
 
 #define END_HANDLE_TH_ERRORS END_HANDLE_TH_ERRORS_RET(NULL)
 
+#ifdef _THP_CORE
 struct THException: public std::exception {
   THException(const char* msg): msg(msg) {};
 
@@ -28,4 +29,5 @@ struct THArgException: public THException {
 
   const int argNumber;
 };
+#endif
 

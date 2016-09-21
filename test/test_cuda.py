@@ -1,3 +1,4 @@
+import math
 import tempfile
 import unittest
 
@@ -19,6 +20,13 @@ types = [
     torch.CharTensor,
     torch.ByteTensor,
 ]
+
+def number(floating, integer, t):
+    name = type(t).__name__
+    if 'Double' in name or 'Float' in name or 'Half' in name:
+        return floating
+    else:
+        return integer
 # TODO: check HalfTensor
 
 S = 10
@@ -55,40 +63,40 @@ def new_t(*sizes):
     return tmp
 
 tests = [
-    ('add',           small_3d,           lambda t: [3.14]                                                  ),
+    ('add',           small_3d,           lambda t: [number(3.14, 3, t)]                                    ),
     ('add',           small_3d,           lambda t: [small_3d_positive(t)],                 'tensor'        ),
-    ('add',           small_3d,           lambda t: [0.2, small_3d_positive(t)],            'scalar_tensor' ),
-    ('sub',           small_3d,           lambda t: [3.14],                                                 ),
+    ('add',           small_3d,           lambda t: [number(0.2, 2, t), small_3d_positive(t)], 'scalar_tensor' ),
+    ('sub',           small_3d,           lambda t: [number(3.14, 3, t)],                                   ),
     ('sub',           small_3d,           lambda t: [small_3d_positive(t)],                 'tensor'        ),
-    ('mul',           small_3d,           lambda t: [3.14],                                                 ),
+    ('mul',           small_3d,           lambda t: [number(3.14, 3, t)],                                   ),
     ('mul',           small_3d,           lambda t: [small_3d_positive(t)],                 'tensor'        ),
-    ('div',           small_3d,           lambda t: [3.14],                                                 ),
-    ('div',           small_3d,           lambda t: [small_3d_positive(t)],               'tensor'          ),
-    ('pow',           small_3d,           lambda t: [3.14],                                                 ),
-    ('pow',           small_3d,           lambda t: [small_3d(t).abs_()],                   'tensor' ),
+    ('div',           small_3d,           lambda t: [number(3.14, 3, t)],                                   ),
+    ('div',           small_3d,           lambda t: [small_3d_positive(t)],                 'tensor'        ),
+    ('pow',           small_3d,           lambda t: [number(3.14, 3, t)],                                   ),
+    ('pow',           small_3d,           lambda t: [small_3d(t).abs_()],                   'tensor'        ),
     ('addbmm',        small_2d,           lambda t: [small_3d(t), small_3d(t)],                             ),
-    ('addbmm',        small_2d,           lambda t: [0.2, small_3d(t), small_3d(t)],        'scalar'        ),
-    ('addbmm',        small_2d,           lambda t: [0.5, 0.2, small_3d(t), small_3d(t)],   'two_scalars'   ),
+    ('addbmm',        small_2d,           lambda t: [number(0.4, 2, t), small_3d(t), small_3d(t)], 'scalar' ),
+    ('addbmm',        small_2d,           lambda t: [number(0.5, 3, t), number(0.4, 2, t), small_3d(t), small_3d(t)], 'two_scalars' ),
     ('baddbmm',       small_3d,           lambda t: [small_3d(t), small_3d(t)],                             ),
-    ('baddbmm',       small_3d,           lambda t: [0.2, small_3d(t), small_3d(t)],        'scalar'        ),
-    ('baddbmm',       small_3d,           lambda t: [0.5, 0.2, small_3d(t), small_3d(t)],   'two_scalars'   ),
+    ('baddbmm',       small_3d,           lambda t: [number(0.4, 2, t), small_3d(t), small_3d(t)], 'scalar' ),
+    ('baddbmm',       small_3d,           lambda t: [number(0.5, 3, t), number(0.4, 2, t), small_3d(t), small_3d(t)], 'two_scalars' ),
     ('addcdiv',       small_3d,           lambda t: [small_3d(t), small_3d(t)],                             ),
-    ('addcdiv',       small_3d,           lambda t: [0.2, small_3d(t), small_3d(t)],        'scalar'        ),
+    ('addcdiv',       small_3d,           lambda t: [number(0.4, 2, t), small_3d(t), small_3d(t)], 'scalar' ),
     ('addcmul',       small_3d,           lambda t: [small_3d(t), small_3d(t)],                             ),
-    ('addcmul',       small_3d,           lambda t: [0.2, small_3d(t), small_3d(t)],        'scalar'        ),
+    ('addcmul',       small_3d,           lambda t: [number(0.4, 2, t), small_3d(t), small_3d(t)], 'scalar' ),
     ('addmm',         medium_2d,          lambda t: [medium_2d(t), medium_2d(t)],                           ),
-    ('addmm',         medium_2d,          lambda t: [0.2, medium_2d(t), medium_2d(t)],      'scalar'        ),
-    ('addmm',         medium_2d,          lambda t: [0.5, 0.2, medium_2d(t), medium_2d(t)], 'two_scalars'   ),
+    ('addmm',         medium_2d,          lambda t: [number(0.4, 2, t), medium_2d(t), medium_2d(t)], 'scalar' ),
+    ('addmm',         medium_2d,          lambda t: [number(0.5, 3, t), number(0.4, 2, t), medium_2d(t), medium_2d(t)], 'two_scalars'   ),
     ('addmv',         medium_1d,          lambda t: [medium_2d(t), medium_1d(t)],                           ),
-    ('addmv',         medium_1d,          lambda t: [0.2, medium_2d(t), medium_1d(t)],      'scalar'        ),
-    ('addmv',         medium_1d,          lambda t: [0.5, 0.2, medium_2d(t), medium_1d(t)], 'two_scalars'   ),
+    ('addmv',         medium_1d,          lambda t: [number(0.4, 2, t), medium_2d(t), medium_1d(t)], 'scalar' ),
+    ('addmv',         medium_1d,          lambda t: [number(0.5, 3, t), number(0.4, 2, t), medium_2d(t), medium_1d(t)], 'two_scalars'   ),
     ('addmv',         medium_1d,          lambda t: [medium_2d(t), medium_1d(t)],                           ),
-    ('addmv',         medium_1d,          lambda t: [0.2, medium_2d(t), medium_1d(t)],      'scalar'        ),
-    ('addmv',         medium_1d,          lambda t: [0.5, 0.2, medium_2d(t), medium_1d(t)], 'two_scalars'   ),
+    ('addmv',         medium_1d,          lambda t: [number(0.4, 2, t), medium_2d(t), medium_1d(t)], 'scalar' ),
+    ('addmv',         medium_1d,          lambda t: [number(0.5, 3, t), number(0.4, 2, t), medium_2d(t), medium_1d(t)], 'two_scalars'   ),
     ('addr',          medium_2d,          lambda t: [medium_1d(t), medium_1d(t)],                           ),
-    ('addr',          medium_2d,          lambda t: [0.2, medium_1d(t), medium_1d(t)],      'scalar'        ),
-    ('addr',          medium_2d,          lambda t: [0.5, 0.2, medium_1d(t), medium_1d(t)], 'two_scalars'   ),
-    ('addr',          medium_2d,          lambda t: [0.5, 0.2, medium_1d(t), medium_1d(t)], 'two_scalars'   ),
+    ('addr',          medium_2d,          lambda t: [number(0.4, 2, t), medium_1d(t), medium_1d(t)], 'scalar' ),
+    ('addr',          medium_2d,          lambda t: [number(0.5, 3, t), number(0.4, 2, t), medium_1d(t), medium_1d(t)], 'two_scalars'   ),
+    ('addr',          medium_2d,          lambda t: [number(0.5, 3, t), number(0.4, 2, t), medium_1d(t), medium_1d(t)], 'two_scalars'   ),
     ('atan2',         medium_2d,          lambda t: [medium_2d(t)],                                         ),
     ('chunk',         medium_2d,          lambda t: [4],                                                    ),
     ('chunk',         medium_2d,          lambda t: [4, 1],                                 'dim'           ),
@@ -105,7 +113,7 @@ tests = [
     ('dist',          small_2d,           lambda t: [small_2d(t), 3],                       '3_norm'        ),
     ('dist',          small_2d,           lambda t: [small_2d(t), 2.5],                     '2.5_norm'      ),
     ('dot',           medium_1d,          lambda t: [medium_1d(t)],                                         ),
-    ('element_size',   medium_1d,          lambda t: [],                                                     ),
+    ('element_size',  medium_1d,          lambda t: [],                                                     ),
     ('eq',            small_3d_ones,      lambda t: [small_3d(t)],                                          ),
     ('eq',            small_3d_ones,      lambda t: [small_3d_ones(t)],                     'equal'         ),
     ('ne',            small_3d_ones,      lambda t: [small_3d(t)],                                          ),
@@ -113,19 +121,19 @@ tests = [
     ('equal',         small_3d_ones,      lambda t: [small_3d_ones(t)],                                     ),
     ('equal',         small_3d_ones,      lambda t: [small_3d(t)],                                          ),
     ('expand',        new_t(M, 1, M),     lambda t: [M, 4, M],                                              ),
-    ('expand_as',      new_t(M, 1, M),     lambda t: [new_t(M, 4, M)(t)],                                    ),
-    ('fill',          medium_2d,          lambda t: [3.14],                                                 ),
+    ('expand_as',     new_t(M, 1, M),     lambda t: [new_t(M, 4, M)(t)],                                    ),
+    ('fill',          medium_2d,          lambda t: [number(3.14, 3, t)],                                   ),
     ('ge',            medium_2d,          lambda t: [medium_2d(t)],                                         ),
     ('le',            medium_2d,          lambda t: [medium_2d(t)],                                         ),
     ('gt',            medium_2d,          lambda t: [medium_2d(t)],                                         ),
     ('lt',            medium_2d,          lambda t: [medium_2d(t)],                                         ),
-    ('is_contiguous',  medium_2d,          lambda t: [],                                                     ),
+    ('is_contiguous', medium_2d,          lambda t: [],                                                     ),
     # TODO: can't check negative case - GPU copy will be contiguous
     ('is_same_size',  medium_2d,          lambda t: [small_3d(t)],                          'negative'      ),
     ('is_same_size',  medium_2d,          lambda t: [medium_2d(t)],                         'positive'      ),
-    ('is_set_to',       medium_2d,          lambda t: [medium_2d(t)],                                         ),
+    ('is_set_to',     medium_2d,          lambda t: [medium_2d(t)],                                         ),
     # TODO: positive case
-    ('is_size',        medium_2d,          lambda t: [torch.LongStorage((M, M))],                            ),
+    ('is_size',       medium_2d,          lambda t: [torch.LongStorage((M, M))],                            ),
     ('kthvalue',      small_3d_unique,    lambda t: [3],                                                    ),
     ('kthvalue',      small_3d_unique,    lambda t: [3, 1],                                 'dim'           ),
     ('lerp',          small_3d,           lambda t: [small_3d(t), 0.3],                                     ),
@@ -157,7 +165,7 @@ tests = [
     ('sum',           small_3d,           lambda t: [1],                                    'dim'           ),
     ('renorm',        small_3d,           lambda t: [2, 1, 1],                              '2_norm'        ),
     ('renorm',        small_3d,           lambda t: [1.5, 1, 1],                            '1.5_norm'      ),
-    ('repeat',  small_2d,           lambda t: [2, 2, 2],                                              ),
+    ('repeat',        small_2d,           lambda t: [2, 2, 2],                                              ),
     ('size',          new_t(1, 2, 3, 4),  lambda t: [],                                                     ),
     ('sort',          small_3d_unique,    lambda t: [],                                                     ),
     ('sort',          small_3d_unique,    lambda t: [1],                                    'dim'           ),
@@ -179,7 +187,7 @@ tests = [
     ('triu',          medium_2d,          lambda t: [2],                                    'positive'      ),
     ('triu',          medium_2d,          lambda t: [-2],                                   'negative'      ),
     ('view',          small_3d,           lambda t: [100, 10],                                              ),
-    ('view_as',        small_3d,           lambda t: [t(100, 10)],                                           ),
+    ('view_as',       small_3d,           lambda t: [t(100, 10)],                                           ),
     ('zero',          small_3d,           lambda t: [],                                                     ),
     ('zeros',         small_3d,           lambda t: [1, 2, 3, 4],                                           ),
     ('rsqrt',         lambda t: small_3d(t) + 1,                lambda t: [],                               ),

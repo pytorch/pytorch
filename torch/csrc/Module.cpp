@@ -13,26 +13,7 @@
 PyObject* module;
 PyObject* tensor_classes;
 
-PyObject *THPDoubleStorageClass = NULL;
-PyObject *THPFloatStorageClass  = NULL;
-PyObject *THPLongStorageClass   = NULL;
-PyObject *THPIntStorageClass    = NULL;
-PyObject *THPShortStorageClass  = NULL;
-PyObject *THPCharStorageClass   = NULL;
-PyObject *THPByteStorageClass   = NULL;
-
-PyObject *THPDoubleTensorClass  = NULL;
-PyObject *THPFloatTensorClass   = NULL;
-PyObject *THPLongTensorClass    = NULL;
-PyObject *THPIntTensorClass     = NULL;
-PyObject *THPShortTensorClass   = NULL;
-PyObject *THPCharTensorClass    = NULL;
-PyObject *THPByteTensorClass    = NULL;
-
 PyObject *THPDefaultTensorClass = NULL;
-PyObject *THPGeneratorClass     = NULL;
-
-// Used if no other generator is provided
 THPGenerator *THPDefaultGenerator   = NULL;
 
 static bool THPModule_loadClasses(PyObject *self)
@@ -122,7 +103,7 @@ static bool THPModule_assignStateless(PyObject *self)
     THPUtils_setError("stateless method initialization error");                \
     return false;                                                              \
   }                                                                            \
-  if (PyObject_SetAttrString(TH_CONCAT_3(THP,type,TensorClass), STATELESS_ATTRIBUTE_NAME, stateless) == -1) { \
+  if (PyObject_SetAttrString(TH_CONCAT_3(THP,type,TensorClass), THP_STATELESS_ATTRIBUTE_NAME, stateless) == -1) { \
     THPUtils_setError("stateless method initialization error (on assignment)");\
   }
   PyObject *arg = PyTuple_New(0);
@@ -164,11 +145,13 @@ static PyObject * THPModule_getNumThreads(PyObject *module)
 
 static PyObject * THPModule_setNumThreads(PyObject *module, PyObject *arg)
 {
-  if (!THPUtils_checkLong(arg))
+  if (!THPUtils_checkLong(arg)) {
+    THPUtils_setError("set_num_threads expects a single int as argument");
     return NULL;
+  }
   // TODO: maybe throw an error to let people know it's a noop? or a warning?
 #ifdef _OPENMP
-  omp_set_num_threads(THPUtils_getLong(arg));
+  omp_set_num_threads(THPUtils_unpackLong(arg));
 #endif
   return 0;
 }
@@ -185,7 +168,7 @@ static PyObject * THPModule_getRNGState(PyObject *module, PyObject *args)
   }
   THByteTensorPtr _t = THByteTensor_new();
   THByteTensor_getRNGState(generator, _t.get());
-  PyObject *_ret =  THPByteTensor_newObject(_t);
+  PyObject *_ret =  THPByteTensor_New(_t);
   _t.release();
   return _ret;
 }
@@ -200,11 +183,11 @@ static PyObject * THPModule_setRNGState(PyObject *module, PyObject *args)
 
     if (THPGenerator_Check(first_arg)) {
       PyObject *second_arg = PyTuple_GET_ITEM(args, 1);
-      if (THPByteTensor_IsSubclass(second_arg)) {
+      if (THPByteTensor_Check(second_arg)) {
         new_state = ((THPByteTensor*)second_arg)->cdata;
         args_ok = PyTuple_Size(args) == 2;
       }
-    } else if (THPByteTensor_IsSubclass(first_arg)) {
+    } else if (THPByteTensor_Check(first_arg)) {
       new_state = ((THPByteTensor*)first_arg)->cdata;
       args_ok = PyTuple_Size(args) == 1;
     }
@@ -224,15 +207,8 @@ static PyObject * THPModule_manualSeed(PyObject *module, PyObject *args)
   bool args_ok = false;
   if (args && PyTuple_Size(args) > 0) {
     PyObject *first_arg = PyTuple_GET_ITEM(args, 0);
-
-    if (THPGenerator_Check(first_arg)) {
-      PyObject *second_arg = PyTuple_GET_ITEM(args, 1);
-      if (THPUtils_checkLong(second_arg)) {
-        THPUtils_getLong(second_arg, &new_seed);
-        args_ok = PyTuple_Size(args) == 2;
-      }
-    } else if (THPUtils_checkLong(first_arg)) {
-      THPUtils_getLong(first_arg, &new_seed);
+    if (THPUtils_checkLong(first_arg)) {
+      new_seed = THPUtils_unpackLong(first_arg);
       args_ok = PyTuple_Size(args) == 1;
     }
   }
@@ -366,7 +342,7 @@ static PyObject * TH_CONCAT_2(THPModule_, name)(PyObject *_unused, PyObject *arg
     }                                                                          \
   }                                                                            \
                                                                                \
-  PyObject *methods = PyObject_GetAttrString(tensor, STATELESS_ATTRIBUTE_NAME);     \
+  PyObject *methods = PyObject_GetAttrString(tensor, THP_STATELESS_ATTRIBUTE_NAME);     \
   THPUtils_assert(methods, "Type %s doesn't implement statless methods",       \
       Py_TYPE(tensor)->tp_name);                                               \
   PyObject *method = PyObject_GetAttrString(methods, #name);                   \
@@ -503,7 +479,7 @@ static PyObject * TH_CONCAT_2(THPModule_, name)(PyObject *_unused, PyObject *arg
     }                                                                          \
   }                                                                            \
                                                                                \
-  PyObject *methods = PyObject_GetAttrString(tensor, STATELESS_ATTRIBUTE_NAME);     \
+  PyObject *methods = PyObject_GetAttrString(tensor, THP_STATELESS_ATTRIBUTE_NAME);     \
   THPUtils_assert(methods, "Type %s doesn't implement statless methods",       \
       Py_TYPE(tensor)->tp_name);                                               \
   PyObject *method = PyObject_GetAttrString(methods, #name);                   \
@@ -532,7 +508,7 @@ static PyObject * THPModule_nonzero(PyObject *_unused, PyObject *args)
   else if (PyTuple_Size(args) == 2)
     tensor = PyTuple_GET_ITEM(args, 1);
 
-  PyObject *methods = PyObject_GetAttrString(tensor, STATELESS_ATTRIBUTE_NAME);
+  PyObject *methods = PyObject_GetAttrString(tensor, THP_STATELESS_ATTRIBUTE_NAME);
   THPUtils_assert(methods, "Type %s doesn't implement statless methods",
       Py_TYPE(tensor)->tp_name);
   PyObject *method = PyObject_GetAttrString(methods, "nonzero");
@@ -561,7 +537,7 @@ static PyObject * THPModule_cat(PyObject *_unused, PyObject *args)
     PyErr_Clear();
   }
 
-  PyObject *methods = PyObject_GetAttrString(tensor, STATELESS_ATTRIBUTE_NAME);
+  PyObject *methods = PyObject_GetAttrString(tensor, THP_STATELESS_ATTRIBUTE_NAME);
   THPUtils_assert(methods, "Type %s doesn't implement statless methods",
       Py_TYPE(tensor)->tp_name);
   PyObject *method = PyObject_GetAttrString(methods, "cat");
@@ -828,7 +804,7 @@ PyMODINIT_FUNC PyInit__C()
   ASSERT_TRUE(THCPByteTensor_init(module));
 #endif
 
-  THPDefaultGenerator = (THPGenerator*)THPGenerator_newObject();
+  THPDefaultGenerator = (THPGenerator*)THPGenerator_New();
   ASSERT_TRUE(THPDefaultGenerator != nullptr);
 
   updateErrorHandlers();

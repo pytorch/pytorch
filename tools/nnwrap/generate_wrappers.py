@@ -110,6 +110,6 @@ def wrap_cunn():
     with open('torch/csrc/nn/THCUNN.cwrap', 'w') as f:
         f.write(wrapper)
     cwrap('torch/csrc/nn/THCUNN.cwrap', plugins=[
-        StandaloneExtension('torch._thnn._THCUNN', with_cuda=True),
+        StandaloneExtension('torch._thnn._THCUNN'),
         NullableArguments(),
     ])

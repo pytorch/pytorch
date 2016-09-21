@@ -1,4 +1,6 @@
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || \
+    defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || \
+    defined(THC_REAL_IS_HALF)
 #define RealStr "float"
 #else
 #define RealStr "int"
@@ -67,7 +69,7 @@ PyObject * THPTensor_(writeMetadata)(THPTensor *self, PyObject *args)
 PyObject * THPTensor_(newWithMetadataFile)(PyObject *_null, PyObject *args)
 {
   if (!args || PyTuple_Size(args) != 2 ||
-        !(THPStorage_(IsSubclass)(PyTuple_GET_ITEM(args, 1)) ||
+        !(THPStorage_(Check)(PyTuple_GET_ITEM(args, 1)) ||
           PyTuple_GET_ITEM(args, 1) == Py_None)) {
     THPUtils_invalidArguments(args, "_new_with_metadata_file", 1, "single file object and a storage object");
     return NULL;
@@ -82,7 +84,7 @@ PyObject * THPTensor_(newWithMetadataFile)(PyObject *_null, PyObject *args)
     storage = ((THPStorage*)PyTuple_GET_ITEM(args, 1))->cdata;
   }
   THTensorPtr tensor = THPTensor_(newWithMetadataFileRaw)(fd, storage);
-  PyObject *result = THPTensor_(newObject)(tensor);
+  PyObject *result = THPTensor_(New)(tensor);
   tensor.release();
   return result;
 }
@@ -220,7 +222,7 @@ static PyObject * THPTensor_(storage)(THPTensor *self, PyObject *args)
     Py_RETURN_NONE;
   THStorage_(retain)(LIBRARY_STATE result);
   THStoragePtr _tmp = result;
-  PyObject *ret = THPStorage_(newObject)(result);
+  PyObject *ret = THPStorage_(New)(result);
   _tmp.release();
   return ret;
 }
@@ -380,7 +382,7 @@ static PyObject * THPTensor_(select)(THPTensor *self, PyObject *args)
   if(ndim > 1) {
     THTensor *selected = THTensor_(newWithTensor)(LIBRARY_STATE self->cdata);
     THTensor_(select)(LIBRARY_STATE selected, NULL, dim, idx);
-    return THPTensor_(newObject)(selected);
+    return THPTensor_(New)(selected);
   }
   else {
     THArgCheck(ndim == 1, 1, "empty Tensor");
@@ -410,18 +412,18 @@ static PyObject * THPTensor_(apply)(THPTensor *self, PyObject *arg)
     return NULL;
   }
 
-  real v;
   THTensor *tensor = self->cdata;
   TH_TENSOR_APPLY(real, tensor,
                   PyObject *ret =
                       PyObject_CallFunction(arg, (char*)BUILD_REAL_FMT, *tensor_data);
                   if (!ret)
                     return NULL;
-                  bool success = THPUtils_(parseReal)(ret, &v);
-                  Py_DECREF(ret);
-                  if (!success)
+                  if (!THPUtils_(checkReal)(ret)) {
+                    Py_DECREF(ret);
                     THError("given function should return a number");
-                  *tensor_data = v;
+                  }
+                  *tensor_data = THPUtils_(unpackReal)(ret);
+                  Py_DECREF(ret);
                   );
 
   Py_INCREF(self);
@@ -440,10 +442,9 @@ static PyObject * THPTensor_(map)(THPTensor *self, PyObject *args)
   HANDLE_TH_ERRORS
     PyObject *fn;
     THPTensor *src_object;
-    if (!PyArg_ParseTuple(args, "O!O&", &THPTensorType, &src_object, THPUtils_getCallable, &fn))
+    if (!PyArg_ParseTuple(args, "O!O&", THPTensorClass, &src_object, THPUtils_getCallable, &fn))
       return NULL;
 
-  real v;
   THTensor *tensor = self->cdata;
   THTensor *src = src_object->cdata;
   TH_TENSOR_APPLY2(real, tensor, real, src,
@@ -452,11 +453,12 @@ static PyObject * THPTensor_(map)(THPTensor *self, PyObject *args)
                                             *tensor_data, *src_data);
                   if (!ret)
                     return NULL;
-                  bool success = THPUtils_(parseReal)(ret, &v);
-                  Py_DECREF(ret);
-                  if (!success)
+                  if (!THPUtils_(checkReal)(ret)) {
+                    Py_DECREF(ret);
                     THError("given function should return a number");
-                  *tensor_data = v;
+                  }
+                  *tensor_data = THPUtils_(unpackReal)(ret);
+                  Py_DECREF(ret);
                   );
 
   Py_INCREF(self);
@@ -476,10 +478,9 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
     PyObject *fn;
     THPTensor *src1_object;
     THPTensor *src2_object;
-    if (!PyArg_ParseTuple(args, "O!O!O&", &THPTensorType, &src1_object, &THPTensorType, &src2_object, THPUtils_getCallable, &fn))
+    if (!PyArg_ParseTuple(args, "O!O!O&", THPTensorClass, &src1_object, THPTensorClass, &src2_object, THPUtils_getCallable, &fn))
       return NULL;
 
-  real v;
   THTensor *tensor = self->cdata;
   THTensor *src1 = src1_object->cdata;
   THTensor *src2 = src2_object->cdata;
@@ -489,11 +490,12 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
                                             *tensor_data, *src1_data, *src2_data);
                   if (!ret)
                     return NULL;
-                  bool success = THPUtils_(parseReal)(ret, &v);
-                  Py_DECREF(ret);
-                  if (!success)
+                  if (!THPUtils_(checkReal)(ret)) {
+                    Py_DECREF(ret);
                     THError("given function should return a number");
-                  *tensor_data = v;
+                  }
+                  *tensor_data = THPUtils_(unpackReal)(ret);
+                  Py_DECREF(ret);
                   );
 
   Py_INCREF(self);
@@ -3392,7 +3394,7 @@ THPTensor_(_iterableTensors)(PyObject *iterable)
   std::vector<THTensor *> item_tensors;
   if ((iterator = PyObject_GetIter(iterable))) {
     while((item = PyIter_Next(iterator))) {
-      if (!THPTensor_(IsSubclass)(item)) {
+      if (!THPTensor_(Check)(item)) {
         THPUtils_setError("expected an iterable of " THPTensorStr ", but found %s in it", Py_TYPE(item)->tp_name);
         throw std::exception();
       }
@@ -3420,7 +3422,8 @@ static PyObject * THPTensor_(cat)(THPTensor *self, PyObject *args)
       PyObject *dim = PyTuple_GET_ITEM(args, 1);
       std::vector<THPObjectPtr> items;
       std::vector<THTensor *> item_tensors;
-      if (THPUtils_getLong(dim, &dimension)) {
+      if (THPUtils_checkLong(dim)) {
+        dimension = THPUtils_unpackLong(dim);
         try {
           std::tie(items, item_tensors) = THPTensor_(_iterableTensors)(iterable);
           THTensor_(catArray)(LIBRARY_STATE self->cdata, item_tensors.data(), items.size(), dimension);
@@ -3433,7 +3436,7 @@ static PyObject * THPTensor_(cat)(THPTensor *self, PyObject *args)
         }
       }
   } else if (_argcount == 3) {
-    if (PyArg_ParseTuple(args, "O!O!l", &THPTensorType, &tensor1, &THPTensorType, &tensor2, &dimension)) {
+    if (PyArg_ParseTuple(args, "O!O!l", THPTensorClass, &tensor1, THPTensorClass, &tensor2, &dimension)) {
       THTensor_(cat)(LIBRARY_STATE self->cdata, tensor1->cdata, tensor2->cdata, dimension);
       Py_INCREF(self);
       return (PyObject*)self;
@@ -3458,14 +3461,17 @@ static PyObject * THPTensor_stateless_(cat)(THPTensor *_unused, PyObject *args)
   Py_ssize_t _argcount = PyTuple_Size(args);
   if (_argcount == 2) {
     THTensorPtr _self = THTensor_(new)(LIBRARY_STATE_NOARGS);
-    THPTensorPtr self = (THPTensor*)THPTensor_(newObject)(_self);
+    THPTensorPtr self = (THPTensor*)THPTensor_(New)(_self);
+    if (!self)
+      return NULL;
     _self.release();
 
     PyObject *iterable = PyTuple_GET_ITEM(args, 0);
     PyObject *dim = PyTuple_GET_ITEM(args, 1);
     std::vector<THPObjectPtr> items;
     std::vector<THTensor *> item_tensors;
-    if (THPUtils_getLong(dim, &dimension)) {
+    if (THPUtils_checkLong(dim)) {
+      dimension = THPUtils_unpackLong(dim);
       try {
         std::tie(items, item_tensors) = THPTensor_(_iterableTensors)(iterable);
         THTensor_(catArray)(LIBRARY_STATE self->cdata, item_tensors.data(), items.size(), dimension);
@@ -3478,9 +3484,11 @@ static PyObject * THPTensor_stateless_(cat)(THPTensor *_unused, PyObject *args)
       }
     }
   } else if (_argcount == 3) {
-    if (PyArg_ParseTuple(args, "O!O!l", &THPTensorType, &tensor1, &THPTensorType, &tensor2, &dimension)) {
+    if (PyArg_ParseTuple(args, "O!O!l", THPTensorClass, &tensor1, THPTensorClass, &tensor2, &dimension)) {
       THTensorPtr _self = THTensor_(new)(LIBRARY_STATE_NOARGS);
-      THPTensorPtr self = (THPTensor*)THPTensor_(newObject)(_self.get());
+      THPTensorPtr self = (THPTensor*)THPTensor_(New)(_self.get());
+      if (!self)
+        return NULL;
       _self.release();
 
       THTensor_(cat)(LIBRARY_STATE self->cdata, tensor1->cdata, tensor2->cdata, dimension);
@@ -3494,7 +3502,8 @@ static PyObject * THPTensor_stateless_(cat)(THPTensor *_unused, PyObject *args)
 
       std::vector<THPObjectPtr> items;
       std::vector<THTensor *> item_tensors;
-      if (THPUtils_getLong(dim, &dimension)) {
+      if (THPUtils_checkLong(dim)) {
+        dimension = THPUtils_unpackLong(dim);
         try {
           std::tie(items, item_tensors) = THPTensor_(_iterableTensors)(iterable);
           THTensor_(catArray)(LIBRARY_STATE self->cdata, item_tensors.data(), items.size(), dimension);
@@ -3511,7 +3520,7 @@ static PyObject * THPTensor_stateless_(cat)(THPTensor *_unused, PyObject *args)
     }
   } else if (_argcount == 4) {
     THPTensor *self;
-    if (PyArg_ParseTuple(args, "O!O!O!l", &THPTensorType, &self, &THPTensorType, &tensor1, &THPTensorType, &tensor2, &dimension)) {
+    if (PyArg_ParseTuple(args, "O!O!O!l", THPTensorClass, &self, THPTensorClass, &tensor1, THPTensorClass, &tensor2, &dimension)) {
       THTensor_(cat)(LIBRARY_STATE self->cdata, tensor1->cdata, tensor2->cdata, dimension);
       Py_INCREF(self);
       return (PyObject*)self;

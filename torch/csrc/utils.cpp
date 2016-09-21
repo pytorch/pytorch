@@ -7,40 +7,13 @@
 #include "generic/utils.cpp"
 #include <TH/THGenerateAllTypes.h>
 
-bool THPUtils_checkLong(PyObject *index) {
-    return PyLong_Check(index) || PyInt_Check(index);
-}
-
-long THPUtils_unpackLong(PyObject *index) {
-  if (PyLong_Check(index)) {
-    return PyLong_AsLong(index);
-  } else if (PyInt_Check(index)) {
-    return PyInt_AsLong(index);
-  } else {
-    throw std::exception();
-  }
-}
-
-int THPUtils_getLong(PyObject *index, long *result) {
-  try {
-    *result = THPUtils_unpackLong(index);
-  } catch(...) {
-    char err_string[512];
-    snprintf (err_string, 512, "%s %s",
-      "getLong expected int or long, but got type: ",
-      index->ob_type->tp_name);
-    PyErr_SetString(PyExc_RuntimeError, err_string);
-    return 0;
-  }
-  return 1;
-}
-
 int THPUtils_getCallable(PyObject *arg, PyObject **result) {
   if (!PyCallable_Check(arg))
     return 0;
   *result = arg;
   return 1;
 }
+
 
 THLongStorage * THPUtils_getLongStorage(PyObject *args, int ignore_first) {
 // TODO: error messages
@@ -52,7 +25,7 @@ THLongStorage * THPUtils_getLongStorage(PyObject *args, int ignore_first) {
 
   // Maybe there's a LongStorage
   PyObject *first_arg = PyTuple_GET_ITEM(args, ignore_first);
-  if (length == ignore_first+1 && THPLongStorage_IsSubclass(first_arg)) {
+  if (length == ignore_first+1 && THPLongStorage_Check(first_arg)) {
     THPLongStorage *storage = (THPLongStorage*)first_arg;
     THLongStorage_retain(storage->cdata);
     return storage->cdata;
@@ -62,12 +35,14 @@ THLongStorage * THPUtils_getLongStorage(PyObject *args, int ignore_first) {
   THLongStoragePtr result = THLongStorage_newWithSize(length-ignore_first);
   for (Py_ssize_t i = ignore_first; i < length; ++i) {
     PyObject *arg = PyTuple_GET_ITEM(args, i);
-    if (!THPUtils_getLong(arg, &value))
-        throw std::invalid_argument("Expected a numeric argument, but got " + std::string(Py_TYPE(arg)->tp_name));
+    if (!THPUtils_checkLong(arg))
+      throw std::invalid_argument("Expected a numeric argument, but got " + std::string(Py_TYPE(arg)->tp_name));
+    value = THPUtils_unpackLong(arg);
     result->data[i-ignore_first] = value;
   }
   return result.release();
 }
+
 
 void THPUtils_setError(const char *format, ...)
 {
@@ -81,8 +56,8 @@ void THPUtils_setError(const char *format, ...)
   PyErr_SetString(PyExc_RuntimeError, buffer);
 }
 
-
-void THPUtils_invalidArguments(PyObject *given_args, const char *function_name, size_t num_options, ...) {
+void THPUtils_invalidArguments(PyObject *given_args,
+        const char *function_name, size_t num_options, ...) {
   std::vector<std::string> option_strings;
   std::string error_msg;
   error_msg.reserve(2000);
@@ -115,13 +90,15 @@ void THPUtils_invalidArguments(PyObject *given_args, const char *function_name, 
         }
 #else
         if (module_name && PyUnicode_Check(module_name)) {
-          THPObjectPtr module_name_bytes = PyUnicode_AsASCIIString(module_name);
-          if (module_name_bytes.get()) {
-            error_msg += PyBytes_AS_STRING(module_name_bytes.get());
+          PyObject *module_name_bytes = PyUnicode_AsASCIIString(module_name);
+          if (module_name_bytes) {
+            error_msg += PyBytes_AS_STRING(module_name_bytes);
             error_msg += ".";
+            Py_DECREF(module_name_bytes);
           }
         }
 #endif
+        Py_XDECREF(module_name);
       }
       error_msg += type_name;
     }
@@ -144,31 +121,31 @@ void THPUtils_invalidArguments(PyObject *given_args, const char *function_name, 
   PyErr_SetString(PyExc_ValueError, error_msg.c_str());
 }
 
-PyObject * THPUtils_bytesFromString(const char *b)
-{
-#if PY_MAJOR_VERSION == 2
-    return PyString_FromString(b);
-#else
-    return PyBytes_FromString(b);
-#endif
-}
 
-bool THPUtils_checkBytes(PyObject *obj)
-{
-#if PY_MAJOR_VERSION == 2
-    return PyString_Check(obj);
-#else
-    return PyBytes_Check(obj);
-#endif
-}
 
-const char * THPUtils_bytesAsString(PyObject *bytes)
+bool THPUtils_parseSlice(PyObject *slice, Py_ssize_t len, Py_ssize_t *ostart, Py_ssize_t *ostop, Py_ssize_t *oslicelength)
 {
-#if PY_MAJOR_VERSION == 2
-    return PyString_AS_STRING(bytes);
+  Py_ssize_t start, stop, step, slicelength;
+  if (PySlice_GetIndicesEx(
+// https://bugsfiles.kde.org/attachment.cgi?id=61186
+#if PY_VERSION_HEX >= 0x03020000
+         slice,
 #else
-    return PyBytes_AS_STRING(bytes);
+         (PySliceObject *)slice,
 #endif
+         len, &start, &stop, &step, &slicelength) < 0) {
+    PyErr_SetString(PyExc_RuntimeError, "Got an invalid slice");
+    return false;
+  }
+  if (step != 1) {
+    PyErr_SetString(PyExc_RuntimeError, "Only step == 1 supported");
+    return false;
+  }
+  *ostart = start;
+  *ostop = stop;
+  if(oslicelength)
+    *oslicelength = slicelength;
+  return true;
 }
 
 template<>

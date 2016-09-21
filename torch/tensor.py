@@ -18,7 +18,7 @@ def _infer_sizes(sizes, total):
             to_infer = i
     if to_infer >= 0:
         assert total % total_sizes == 0, "Can't make sizes have exactly %d elements" % total
-        sizes[to_infer] = -total / total_sizes
+        sizes[to_infer] = -total // total_sizes
     return sizes
 
 

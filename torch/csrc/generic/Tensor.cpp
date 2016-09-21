@@ -22,24 +22,33 @@
 
 #endif
 
-#include "TensorMethods.cpp"
+PyObject *THPTensorClass = NULL;
 
-extern PyObject *THPTensorClass;
-PyObject * THPTensor_(newObject)(THTensor *ptr)
+PyObject * THPTensor_(New)(THTensor *ptr)
 {
-  // TODO: error checking
   PyObject *args = PyTuple_New(0);
-  PyObject *kwargs = Py_BuildValue("{s:K}", "cdata", (unsigned long long) ptr);
-  PyObject *instance = PyObject_Call(THPTensorClass, args, kwargs);
+  PyObject *kwargs = NULL;
+  if (!args) {
+    PyErr_SetString(PyExc_RuntimeError, "Could not create a new storage object - "
+        "failed to allocate argument tuple");
+    return NULL;
+  }
+  if (ptr) {
+    kwargs = Py_BuildValue("{s:N}", "cdata", PyLong_FromVoidPtr(ptr));
+    if (!kwargs) {
+      PyErr_SetString(PyExc_RuntimeError, "Could not create a new storage object - "
+          "failed to allocate keyword argument dictionary");
+      Py_DECREF(args);
+      return NULL;
+    }
+  }
+  PyObject *result = PyObject_Call(THPTensorClass, args, kwargs);
   Py_DECREF(args);
-  Py_DECREF(kwargs);
-  return instance;
+  Py_XDECREF(kwargs);
+  return result;
 }
 
-bool THPTensor_(IsSubclass)(PyObject *tensor)
-{
-  return PyObject_IsSubclass((PyObject*)Py_TYPE(tensor), (PyObject*)&THPTensorType);
-}
+#include "TensorMethods.cpp"
 
 static void THPTensor_(dealloc)(THPTensor* self)
 {
@@ -66,9 +75,9 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
     args_ok = cdata_arg != NULL;
   } else if (args && PyTuple_Size(args) == 1) {
     PyObject *arg = PyTuple_GET_ITEM(args, 0);
-    if (THPTensor_(IsSubclass)(arg)) {
+    if (THPTensor_(Check)(arg)) {
       tensor_arg = ((THPTensor*)arg)->cdata;
-    } else if (THPLongStorage_IsSubclass(arg)) {
+    } else if (THPLongStorage_Check(arg)) {
       sizes_arg = ((THPLongStorage*)arg)->cdata;
     } else if (THPUtils_checkLong(arg)) {
       sizes_arg = THPUtils_getLongStorage(args);
@@ -174,52 +183,59 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
       }
       THTensorPtr tensor = THTensor_(newWithSize)(LIBRARY_STATE sizes, NULL);
 
-      // TODO CUDA
+// TODO: do cuda in one transfer
 #ifndef THC_GENERIC_FILE
-#define SET_ITEM if (!THPUtils_(parseReal)(item, data++)) return NULL
+#define SET_ITEM *data++ = THPUtils_(unpackReal)(item)
       real *data = tensor->storage->data;
 #else
-#define SET_ITEM if (!THPUtils_(parseReal)(item, &item_value)) return NULL; THStorage_(set)(LIBRARY_STATE storage, item_nr++, item_value)
+#define SET_ITEM item_value = THPUtils_(unpackReal)(item); THStorage_(set)(LIBRARY_STATE storage, item_nr++, item_value)
       real item_value;
       size_t item_nr = 0;
       THStorage *storage = tensor->storage;
 #endif
-      SET_ITEM;
-      items_processed[iter_depth-1]++;
+      try {
+        SET_ITEM;
+        items_processed[iter_depth-1]++;
 
-      while (!iterator_stack.empty()) {
-        PyObject *iter = iterator_stack.top().get();
-        // Parse items
-        if (iterator_stack.size() == iter_depth) {
-          while ((item = PyIter_Next(iter))) {
-            SET_ITEM;
-            items_processed[iter_depth-1]++;
-          }
-          if (items_processed[iter_depth-1] != iterator_lengths[iter_depth-1]) {
-            THPUtils_setError("inconsistent size");
-            return NULL;
-          }
-          iterator_stack.pop(); // this deallocates the iter
-        // Iterate on lower depths
-        } else {
-          item = PyIter_Next(iter);
-          if (item == nullptr) {
-            if (PyErr_Occurred())
-              return NULL;
-            if (items_processed[iterator_stack.size()-1]) {
+        while (!iterator_stack.empty()) {
+          PyObject *iter = iterator_stack.top().get();
+          // Parse items
+          if (iterator_stack.size() == iter_depth) {
+            while ((item = PyIter_Next(iter))) {
+              SET_ITEM;
+              items_processed[iter_depth-1]++;
+            }
+            if (items_processed[iter_depth-1] != iterator_lengths[iter_depth-1]) {
               THPUtils_setError("inconsistent size");
               return NULL;
             }
             iterator_stack.pop(); // this deallocates the iter
+          // Iterate on lower depths
           } else {
-            PyObject *new_iter = PyObject_GetIter(item);
-            if (!new_iter) {
-              THPUtils_setError("non-iterable item");
-              return NULL;
+            item = PyIter_Next(iter);
+            if (item == nullptr) {
+              if (PyErr_Occurred())
+                return NULL;
+              if (items_processed[iterator_stack.size()-1]) {
+                THPUtils_setError("inconsistent size");
+                return NULL;
+              }
+              iterator_stack.pop(); // this deallocates the iter
+            } else {
+              PyObject *new_iter = PyObject_GetIter(item);
+              if (!new_iter) {
+                THPUtils_setError("non-iterable item");
+                return NULL;
+              }
+              items_processed[iterator_stack.size()] = 0;
+              iterator_stack.emplace(new_iter);
             }
-            items_processed[iterator_stack.size()] = 0;
-            iterator_stack.emplace(new_iter);
           }
+        }
+      } catch (std::exception &e) {
+        if (std::string(e.what()).find("Could not parse real") != std::string::npos) {
+          // TODO: error message
+          THPUtils_setError("Expected an iterable of numbers!");
         }
       }
       self->cdata = tensor.release();
@@ -235,8 +251,7 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
 }
 
 #define INDEX_LONG(DIM, IDX_VARIABLE, TENSOR_VARIABLE, CASE_1D, CASE_MD)       \
-  long idx;                                                                    \
-  THPUtils_getLong(IDX_VARIABLE, &idx);                                        \
+  long idx = THPUtils_unpackLong(IDX_VARIABLE);                                \
   long dimsize = THTensor_(size)(LIBRARY_STATE TENSOR_VARIABLE, DIM);          \
   idx = (idx < 0) ? dimsize + idx : idx;                                       \
                                                                                \
@@ -284,7 +299,7 @@ static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
     } else if (PySlice_Check(index)) {
       tresult = THTensor_(newWithTensor)(LIBRARY_STATE self->cdata);
       Py_ssize_t start, end, length;
-      if (!THPUtils_(parseSlice)(index, THTensor_(size)(LIBRARY_STATE tresult, 0), &start, &end, &length))
+      if (!THPUtils_parseSlice(index, THTensor_(size)(LIBRARY_STATE tresult, 0), &start, &end, &length))
         return false;
       THTensor_(narrow)(LIBRARY_STATE tresult, NULL, 0, start, length);
     // Indexing multiple dimensions
@@ -320,8 +335,8 @@ static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
               THPUtils_setError("Expected one or two intetegers");
               return false;
             }
-            THPUtils_getLong(index_obj, &idx);
-            THPUtils_getLong(PyTuple_GET_ITEM(dimidx, 1), &length);
+            idx = THPUtils_unpackLong(index_obj);
+            length = THPUtils_unpackLong(PyTuple_GET_ITEM(dimidx, 1));
             length -= idx;
           }
           INDEX_LONG(t_dim, index_obj, tresult,
@@ -330,7 +345,7 @@ static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
             )
         } else if (PySlice_Check(dimidx)) {
           Py_ssize_t start, end, length;
-          if (!THPUtils_(parseSlice)(dimidx, THTensor_(size)(LIBRARY_STATE tresult, t_dim), &start, &end, &length))
+          if (!THPUtils_parseSlice(dimidx, THTensor_(size)(LIBRARY_STATE tresult, t_dim), &start, &end, &length))
             return false;
           THTensor_(narrow)(LIBRARY_STATE tresult, NULL, t_dim++, start, length);
         } else {
@@ -352,15 +367,15 @@ static PyObject * THPTensor_(getValue)(THPTensor *self, PyObject *index)
 {
   HANDLE_TH_ERRORS
 #ifndef THC_GENERIC_FILE
-  if(THPByteTensor_IsSubclass(index)) {
+  if(THPByteTensor_Check(index)) {
     THTensor *t = THTensor_(new)(LIBRARY_STATE_NOARGS);
     THTensor_(maskedSelect)(LIBRARY_STATE t, self->cdata, ((THPByteTensor*)index)->cdata);
-    return THPTensor_(newObject)(t);
+    return THPTensor_(New)(t);
 #elif defined(THC_REAL_IS_FLOAT)
-  if(THCPByteTensor_IsSubclass(index)) {
+  if(THCPByteTensor_Check(index)) {
     THTensor *t = THTensor_(new)(LIBRARY_STATE_NOARGS);
     THTensor_(maskedSelect)(LIBRARY_STATE t, self->cdata, ((THCPByteTensor*)index)->cdata);
-    return THPTensor_(newObject)(t);
+    return THPTensor_(New)(t);
 #else
   if (false) {
 #endif
@@ -371,7 +386,7 @@ static PyObject * THPTensor_(getValue)(THPTensor *self, PyObject *index)
     if (!THPTensor_(_index)(self, index, tresult, sresult, storage_offset))
       return NULL;
     if (tresult)
-      return THPTensor_(newObject)(tresult);
+      return THPTensor_(New)(tresult);
     if (sresult)
       return THPUtils_(newReal)(THStorage_(get)(LIBRARY_STATE sresult, storage_offset));
     char err_string[512];
@@ -390,18 +405,21 @@ int THPTensor_(setValue)(THPTensor *self, PyObject *index, PyObject *value)
   HANDLE_TH_ERRORS
 #if !defined(THC_GENERIC_FILE) || defined(THC_REAL_IS_FLOAT)
 #ifdef THC_REAL_IS_FLOAT
-  if (THCPByteTensor_IsSubclass(index)) {
+  if (THCPByteTensor_Check(index)) {
     THCPByteTensor *mask = (THCPByteTensor*)index;
 #else
-  if (THPByteTensor_IsSubclass(index)) {
+  if (THPByteTensor_Check(index)) {
     THPByteTensor *mask = (THPByteTensor*)index;
 #endif
     if (THPUtils_(checkReal)(value)) {
-      real v;
-      if (!THPUtils_(parseReal)(value, &v))
+      if (!THPUtils_(checkReal)(value)) {
+        // TODO: better error message
+        THPUtils_setError("TODO");
         return -1;
+      }
+      real v = THPUtils_(unpackReal)(value);
       THTensor_(maskedFill)(LIBRARY_STATE self->cdata, mask->cdata, v);
-    } else if (THPTensor_(IsSubclass)(value)) {
+    } else if (THPTensor_(Check)(value)) {
       THTensor_(maskedCopy)(LIBRARY_STATE self->cdata, mask->cdata, ((THPTensor*)value)->cdata);
     } else {
       THError("number or Tensor expected");
@@ -419,17 +437,22 @@ int THPTensor_(setValue)(THPTensor *self, PyObject *index, PyObject *value)
 
     THTensorPtr tresult_ptr = tresult;
     if (sresult) {
-      if (!THPUtils_(parseReal)(value, &v))
+      if (!THPUtils_(checkReal)(value)) {
+        // TODO: better error message
+        THPUtils_setError("TODO");
         return -1;
+      }
+      v = THPUtils_(unpackReal)(value);
       THStorage_(set)(LIBRARY_STATE sresult, storage_offset, v);
     } else if (tresult) {
       if (THPUtils_(checkReal)(value)) {
-        if (!THPUtils_(parseReal)(value, &v))
-          return -1;
+        v = THPUtils_(unpackReal)(value);
         THTensor_(fill)(LIBRARY_STATE tresult, v);
       } else {
         // TODO: try to do this without creating a temporary object
-        THPTensorPtr tmp = (THPTensor*)THPTensor_(newObject)(tresult_ptr.get());
+        THPTensorPtr tmp = (THPTensor*)THPTensor_(New)(tresult_ptr.get());
+        if (!tmp)
+          return -1;
         tresult_ptr.release();
         if (!THPModule_tensorCopy((PyObject*)tmp.get(), value))
           return -1;

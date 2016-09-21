@@ -35,7 +35,7 @@ static PyObject * THPStorage_(new)(THPStorage *self)
 {
   HANDLE_TH_ERRORS
   THStoragePtr new_storage = THStorage_(new)(LIBRARY_STATE_NOARGS);
-  PyObject *_ret = THPStorage_(newObject)(new_storage);
+  PyObject *_ret = THPStorage_(New)(new_storage);
   new_storage.release();
   return _ret;
   END_HANDLE_TH_ERRORS
@@ -44,9 +44,8 @@ static PyObject * THPStorage_(new)(THPStorage *self)
 static PyObject * THPStorage_(resize_)(THPStorage *self, PyObject *number_arg)
 {
   HANDLE_TH_ERRORS
-  long newsize;
-  if (!THPUtils_getLong(number_arg, &newsize))
-    return NULL;
+  THPUtils_assert(THPUtils_checkLong(number_arg), "invalid arguments");
+  long newsize = THPUtils_unpackLong(number_arg);
   THStorage_(resize)(LIBRARY_STATE self->cdata, newsize);
   Py_INCREF(self);
   return (PyObject*)self;
@@ -56,10 +55,12 @@ static PyObject * THPStorage_(resize_)(THPStorage *self, PyObject *number_arg)
 static PyObject * THPStorage_(fill_)(THPStorage *self, PyObject *number_arg)
 {
   HANDLE_TH_ERRORS
-  real rvalue;
-  if (!THPUtils_(parseReal)(number_arg, &rvalue))
+  if (!THPUtils_(checkReal)(number_arg)) {
+    // TODO: better error message
+    THPUtils_setError("TODO");
     return NULL;
-  THStorage_(fill)(LIBRARY_STATE self->cdata, rvalue);
+  }
+  THStorage_(fill)(LIBRARY_STATE self->cdata, THPUtils_(unpackReal)(number_arg));
   Py_INCREF(self);
   return (PyObject*)self;
   END_HANDLE_TH_ERRORS
@@ -149,7 +150,7 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
 #endif
 
   PyBuffer_Release(&buffer);
-  return (PyObject*)THPStorage_(newObject)(storage);
+  return (PyObject*)THPStorage_(New)(storage);
   END_HANDLE_TH_ERRORS
 }
 #endif
@@ -176,7 +177,7 @@ PyObject * THPStorage_(newWithFile)(PyObject *_unused, PyObject *file)
     return NULL;
   }
   THStoragePtr storage = THPStorage_(readFileRaw)(fd);
-  PyObject *result = THPStorage_(newObject)(storage);
+  PyObject *result = THPStorage_(New)(storage);
   storage.release();
   return result;
   END_HANDLE_TH_ERRORS
@@ -371,7 +372,9 @@ PyObject * THPStorage_(_newShared)(THPStorage *self, PyObject *args)
   } else {
     storage_guard = THPStorage_(_newShared_fd)(args);
   }
-  THPObjectPtr result = THPStorage_(newObject)(storage_guard.get());
+  THPObjectPtr result = THPStorage_(New)(storage_guard.get());
+  if (!result)
+    return NULL;
   THStorage *storage = storage_guard.release();
 
   THPObjectPtr tuple = PyTuple_New(2);

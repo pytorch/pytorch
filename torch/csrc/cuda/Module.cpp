@@ -13,25 +13,6 @@ THCState *state = &_state;
 // Class pointer cache
 ////////////////////////////////////////////////////////////////////////////////
 
-PyObject *THCPDoubleStorageClass = NULL;
-PyObject *THCPFloatStorageClass  = NULL;
-PyObject *THCPLongStorageClass   = NULL;
-PyObject *THCPIntStorageClass    = NULL;
-PyObject *THCPHalfStorageClass   = NULL;
-PyObject *THCPShortStorageClass  = NULL;
-PyObject *THCPCharStorageClass   = NULL;
-PyObject *THCPByteStorageClass   = NULL;
-
-PyObject *THCPDoubleTensorClass  = NULL;
-PyObject *THCPFloatTensorClass   = NULL;
-PyObject *THCPLongTensorClass    = NULL;
-PyObject *THCPIntTensorClass     = NULL;
-PyObject *THCPHalfTensorClass    = NULL;
-PyObject *THCPShortTensorClass   = NULL;
-PyObject *THCPCharTensorClass    = NULL;
-PyObject *THCPByteTensorClass    = NULL;
-
-
 static bool THCPModule_loadClasses(PyObject *module_dict)
 {
 #define ASSERT_NOT_NULL(ptr) if (!(ptr)) { THPUtils_setError("couldn't load classes"); return false; }
@@ -70,7 +51,7 @@ static bool THCPModule_assignStateless()
     THPUtils_setError("stateless method initialization error");                \
     return false;                                                              \
   }                                                                            \
-  if (PyObject_SetAttrString(TH_CONCAT_3(THCP,type,TensorClass), STATELESS_ATTRIBUTE_NAME, stateless) == -1) { \
+  if (PyObject_SetAttrString(TH_CONCAT_3(THCP,type,TensorClass), THP_STATELESS_ATTRIBUTE_NAME, stateless) == -1) { \
     THPUtils_setError("stateless method initialization error (on assignment)");\
   }
   PyObject *arg = PyTuple_New(0);
@@ -111,9 +92,8 @@ void THCPModule_setDevice(int device)
 PyObject * THCPModule_setDevice_wrap(PyObject *self, PyObject *arg)
 {
   HANDLE_TH_ERRORS
-  long device;
-  if (!THPUtils_getLong(arg, &device))
-    return NULL;
+  THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to setDevice");
+  long device = THPUtils_unpackLong(arg);
 
   THCPModule_setDevice(device);
 
