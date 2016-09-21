@@ -203,6 +203,7 @@ __device__ void atomicAdd(half *address, half val) {
 }
 #endif
 
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ < 600
 // from CUDA C Programmic Guide
 __device__  void atomicAdd(double *address, double val) {
   unsigned long long int* address_as_ull = (unsigned long long int*)address;
@@ -218,6 +219,7 @@ __device__  void atomicAdd(double *address, double val) {
     // Note: uses integer comparison to avoid hang in case of NaN (since NaN != NaN)
   } while (assumed != old);
 }
+#endif
 
 // We prefer this kernel to avoid reloading index points if the number
 // of indices is a small number.
