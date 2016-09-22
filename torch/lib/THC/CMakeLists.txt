@@ -104,8 +104,16 @@ INCLUDE_DIRECTORIES("${CMAKE_CURRENT_BINARY_DIR}")
 CONFIGURE_FILE(THCGeneral.h.in "${CMAKE_CURRENT_BINARY_DIR}/THCGeneral.h")
 
 SET(CMAKE_C_FLAGS "-std=c99 ${CMAKE_C_FLAGS}")
+SET(CMAKE_CXX_STANDARD 11)
 SET(src
-    THCGeneral.c THCAllocator.c THCStorage.c THCStorageCopy.c THCTensor.c THCTensorCopy.c)
+    THCAllocator.c
+    THCCachingAllocator.cpp
+    THCGeneral.c
+    THCStorage.c
+    THCStorageCopy.c
+    THCTensor.c
+    THCTensorCopy.c
+    )
 
 SET(src-cuda
   THCReduceApplyUtils.cu
@@ -189,6 +197,7 @@ INSTALL(FILES
           THCScanUtils.cuh
           THCSortUtils.cuh
           THCAllocator.h
+          THCCachingAllocator.h
           THCDeviceUtils.cuh
           THCDeviceTensor.cuh
           THCDeviceTensor-inl.cuh
@@ -227,8 +236,8 @@ INSTALL(FILES
           generic/THCTensorMasked.cu
           generic/THCTensorMath.h
           generic/THCTensorMath.cu
-	  generic/THCTensorMathBlas.cu
-	  generic/THCTensorMathBlas.h
+          generic/THCTensorMathBlas.cu
+          generic/THCTensorMathBlas.h
           generic/THCTensorMathCompare.h
           generic/THCTensorMathCompare.cu
           generic/THCTensorMathCompareT.h
@@ -239,10 +248,10 @@ INSTALL(FILES
           generic/THCTensorMathPointwise.cu
           generic/THCTensorMathReduce.h
           generic/THCTensorMathReduce.cu
-	  generic/THCTensorScatterGather.h
-	  generic/THCTensorScatterGather.cu
-	  generic/THCTensorIndex.h
-	  generic/THCTensorIndex.cu
-	  generic/THCTensorSort.h
-	  generic/THCTensorSort.cu
+          generic/THCTensorScatterGather.h
+          generic/THCTensorScatterGather.cu
+          generic/THCTensorIndex.h
+          generic/THCTensorIndex.cu
+          generic/THCTensorSort.h
+          generic/THCTensorSort.cu
           DESTINATION "${THC_INSTALL_INCLUDE_SUBDIR}/THC/generic")

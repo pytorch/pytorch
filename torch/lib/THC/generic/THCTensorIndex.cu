@@ -130,7 +130,6 @@ void THCTensor_(indexCopy)(THCState *state, THCTensor *dst, int dim, THCudaLongT
 #undef LARGE_INDEX
 }
 
-#ifdef THC_REAL_IS_FLOAT
 void THCTensor_(indexAdd_long)(THCState *state, THCTensor *dst, int dim, THLongTensor *indices, THCTensor *src)
 {
   THAssert(THCTensor_(checkGPU)(state, 2, dst, src));
@@ -258,7 +257,6 @@ void THCTensor_(indexAdd)(THCState *state, THCTensor *dst, int dim, THCudaLongTe
 #undef SMALL_INDEX
 #undef LARGE_INDEX
 }
-#endif // #ifdef THC_REAL_IS_FLOAT
 
 void THCTensor_(indexFill_long)(THCState *state, THCTensor *dst, int dim, THLongTensor *indices, real val)
 {
