@@ -9,12 +9,14 @@ from ._utils import _import_dotted_name
 # Loading the extension with RTLD_GLOBAL option allows to not link extension
 # modules against the _C shared object. Their missing THP symbols will be
 # automatically filled by the dynamic loader.
-import DLFCN
+import os as _dl_flags
+if not hasattr(_dl_flags, 'RTLD_GLOBAL') or not hasattr(_dl_flags, 'RTLD_NOW'):
+    import DLFCN as _dl_flags
 old_flags = sys.getdlopenflags()
-sys.setdlopenflags(DLFCN.RTLD_GLOBAL | DLFCN.RTLD_NOW)
+sys.setdlopenflags(_dl_flags.RTLD_GLOBAL | _dl_flags.RTLD_NOW)
 from torch._C import *
 sys.setdlopenflags(old_flags)
-del DLFCN
+del _dl_flags
 del old_flags
 
 ################################################################################
