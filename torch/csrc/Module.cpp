@@ -74,14 +74,16 @@ bool TH_CONCAT_3(THPModule_,name,Copy)(PyObject *dst, PyObject *src)           \
 static PyObject * TH_CONCAT_3(THPModule_,name,CopyWrapper)(PyObject *unused, PyObject *args)\
 {                                                                              \
   HANDLE_TH_ERRORS                                                             \
-  /* TODO: check args */                                                       \
+  Py_ssize_t num_args = args ? PyTuple_Size(args) : 0;                         \
+  THPUtils_assert(num_args == 2, #name "Copy expected exactly two arguments, " \
+          "but got %ld", (long)num_args);                                      \
   PyObject *dst = PyTuple_GET_ITEM(args, 0);                                   \
   PyObject *src = PyTuple_GET_ITEM(args, 1);                                   \
   if (!TH_CONCAT_3(THPModule_,name,Copy)(dst, src)) {                          \
     return NULL;                                                               \
   }                                                                            \
-  /* TODO: return dst? */                                                      \
-  Py_RETURN_NONE;                                                              \
+  Py_INCREF(dst);                                                              \
+  return dst;                                                                  \
   END_HANDLE_TH_ERRORS                                                         \
 }
 
@@ -145,81 +147,55 @@ static PyObject * THPModule_getNumThreads(PyObject *module)
 
 static PyObject * THPModule_setNumThreads(PyObject *module, PyObject *arg)
 {
-  if (!THPUtils_checkLong(arg)) {
-    THPUtils_setError("set_num_threads expects a single int as argument");
-    return NULL;
-  }
-  // TODO: maybe throw an error to let people know it's a noop? or a warning?
+  THPUtils_assert(THPUtils_checkLong(arg), "set_num_threads expects an int, "
+          "but got %s", THPUtils_typename(arg));
 #ifdef _OPENMP
   omp_set_num_threads(THPUtils_unpackLong(arg));
+#else
+  PyErr_WarnEx(PyExc_RuntimeWarning, "set_num_threads is a no-op - torch was "
+          "compiled without OpenMP support", 1);
 #endif
   return 0;
 }
 
-static PyObject * THPModule_getRNGState(PyObject *module, PyObject *args)
+static PyObject * THPModule_getRNGState(PyObject *module)
 {
-  THGenerator *generator = THPDefaultGenerator->cdata;
-  if (args && PyTuple_Size(args) == 1 && THPGenerator_Check(PyTuple_GET_ITEM(args, 0))) {
-    generator = ((THPGenerator*)PyTuple_GET_ITEM(args, 0))->cdata;
-  } else if (args && PyTuple_Size(args) > 0) {
-    // TODO: better error message
-    THPUtils_setError("invalid arguments");
-    return NULL;
-  }
+  HANDLE_TH_ERRORS
+  THPGenerator *self = THPDefaultGenerator;
+  THGenerator *generator = self->cdata;
   THByteTensorPtr _t = THByteTensor_new();
   THByteTensor_getRNGState(generator, _t.get());
   PyObject *_ret =  THPByteTensor_New(_t);
   _t.release();
   return _ret;
+  END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPModule_setRNGState(PyObject *module, PyObject *args)
+static PyObject * THPModule_setRNGState(PyObject *_unused, PyObject *_new_state)
 {
-  THGenerator *generator = THPDefaultGenerator->cdata;
-  THByteTensor *new_state = NULL;
-  bool args_ok = false;
-  if (args && PyTuple_Size(args) > 0) {
-    PyObject *first_arg = PyTuple_GET_ITEM(args, 0);
-
-    if (THPGenerator_Check(first_arg)) {
-      PyObject *second_arg = PyTuple_GET_ITEM(args, 1);
-      if (THPByteTensor_Check(second_arg)) {
-        new_state = ((THPByteTensor*)second_arg)->cdata;
-        args_ok = PyTuple_Size(args) == 2;
-      }
-    } else if (THPByteTensor_Check(first_arg)) {
-      new_state = ((THPByteTensor*)first_arg)->cdata;
-      args_ok = PyTuple_Size(args) == 1;
-    }
-  }
-  if (!args_ok) {
-    THPUtils_setError("invalid arguments");
-    return NULL;
-  }
+  HANDLE_TH_ERRORS
+  THPGenerator *self = THPDefaultGenerator;
+  THGenerator *generator = self->cdata;
+  THPUtils_assert(THPByteTensor_Check(_new_state), "set_rng_state expects a "
+          "torch.ByteTensor, but got %s", THPUtils_typename(_new_state));
+  THByteTensor *new_state = ((THPByteTensor*)_new_state)->cdata;;
   THByteTensor_setRNGState(generator, new_state);
-  Py_RETURN_NONE;
+  Py_INCREF(self);
+  return (PyObject*)self;
+  END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPModule_manualSeed(PyObject *module, PyObject *args)
+static PyObject * THPModule_manualSeed(PyObject *_unused, PyObject *seed)
 {
-  THGenerator *generator = THPDefaultGenerator->cdata;
-  long new_seed;
-  bool args_ok = false;
-  if (args && PyTuple_Size(args) > 0) {
-    PyObject *first_arg = PyTuple_GET_ITEM(args, 0);
-    if (THPUtils_checkLong(first_arg)) {
-      new_seed = THPUtils_unpackLong(first_arg);
-      args_ok = PyTuple_Size(args) == 1;
-    }
-  }
-
-  if (!args_ok) {
-    // TODO: better error message
-    THPUtils_setError("invalid arguments");
-    return NULL;
-  }
-  THRandom_manualSeed(generator, new_seed);
-  Py_RETURN_NONE;
+  HANDLE_TH_ERRORS
+  THPGenerator *self = THPDefaultGenerator;
+  THGenerator *generator = self->cdata;
+  THPUtils_assert(THPUtils_checkLong(seed), "manual_seed expected a long, "
+          "but got %s", THPUtils_typename(seed));
+  THRandom_manualSeed(generator, THPUtils_unpackLong(seed));
+  Py_INCREF(self);
+  return (PyObject*)self;
+  END_HANDLE_TH_ERRORS
 }
 
 bool THPModule_isTensor(PyObject *obj)
@@ -572,9 +548,9 @@ static PyMethodDef TorchMethods[] = {
   {"_storageCopy",    (PyCFunction)THPModule_storageCopyWrapper, METH_VARARGS, NULL},
   {"get_num_threads", (PyCFunction)THPModule_getNumThreads,     METH_NOARGS,  NULL},
   {"set_num_threads", (PyCFunction)THPModule_setNumThreads,     METH_O,       NULL},
-  {"get_rng_state",   (PyCFunction)THPModule_getRNGState,       METH_VARARGS, NULL},
-  {"set_rng_state",   (PyCFunction)THPModule_setRNGState,       METH_VARARGS, NULL},
-  {"manual_seed",     (PyCFunction)THPModule_manualSeed,        METH_VARARGS, NULL},
+  {"get_rng_state",   (PyCFunction)THPModule_getRNGState,       METH_NOARGS,  NULL},
+  {"set_rng_state",   (PyCFunction)THPModule_setRNGState,       METH_O,       NULL},
+  {"manual_seed",     (PyCFunction)THPModule_manualSeed,        METH_O,       NULL},
 
   {"sigmoid",         (PyCFunction)THPModule_sigmoid,           METH_VARARGS, NULL},
   {"log",             (PyCFunction)THPModule_log,               METH_VARARGS, NULL},

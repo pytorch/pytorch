@@ -106,15 +106,18 @@ class TestMultiprocessing(TestCase):
     def _test_preserve_sharing(self):
         def do_test():
             x = torch.randn(5, 5)
-            data = [x.storage(), x, x[2], x[:,1]]
+            data = [x.storage(), x.storage()[1:4], x, x[2], x[:,1]]
             q = mp.Queue()
             q.put(data)
             new_data = q.get()
             self.assertEqual(new_data, data, 0)
             storage_cdata = data[0]._cdata
             self.assertEqual(new_data[0]._cdata, storage_cdata)
-            for t in new_data[1:]:
+            for t in new_data[2:]:
                 self.assertEqual(t.storage()._cdata, storage_cdata)
+            # TODO: enable after fixing #46
+            # new_data[0].fill_(10)
+            # self.assertEqual(new_data[1], new_data[0][1:4], 0)
 
         with leak_checker(self):
             do_test()

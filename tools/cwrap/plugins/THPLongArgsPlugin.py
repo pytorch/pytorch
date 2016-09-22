@@ -3,7 +3,12 @@ from . import CWrapPlugin
 
 class THPLongArgsPlugin(CWrapPlugin):
     PARSE_LONG_ARGS = Template("""\
-      THLongStoragePtr __long_args_guard = THPUtils_getLongStorage(args, $num_checked);
+      THLongStoragePtr __long_args_guard;
+      try {
+        __long_args_guard = THPUtils_getLongStorage(args, $num_checked);
+      } catch (std::exception &e) {
+        goto invalid_arguments;
+      }
       THLongStorage* __long_args = __long_args_guard.get();
 """)
 
@@ -28,6 +33,13 @@ class THPLongArgsPlugin(CWrapPlugin):
     def process_all_checks(self, code, option):
         if 'long_args' in option and option['long_args']:
             code = code.replace('__argcount ==', '__argcount >')
+        return code
+
+    def process_wrapper(self, code, declaration):
+        if any(map(lambda opt: opt.get('long_args'), declaration['options'])):
+            invalid_arguments_idx = code.find('THPUtils_invalidArguments')
+            newline_idx = code.rfind('\n', 0, invalid_arguments_idx)
+            code = code[:newline_idx] + '\ninvalid_arguments:' + code[newline_idx:]
         return code
 
     def process_option_code(self, code, option):

@@ -73,10 +73,10 @@ PyObject * $name(PyObject *self, PyObject *args)
     HANDLE_TH_ERRORS
     int __argcount = args ? PyTuple_Size(args) : 0;
     $options
-    } else {
-      THPUtils_invalidArguments(args, "$readable_name", $num_options, $expected_args);
-      return NULL;
     }
+
+    THPUtils_invalidArguments(args, "$readable_name", $num_options, $expected_args);
+    return NULL;
     END_HANDLE_TH_ERRORS
 }
 """)
@@ -164,6 +164,9 @@ PyObject * $name(PyObject *self, PyObject *args)
             option_desc = [self.TYPE_NAMES[arg['type']] + ' ' + arg['name']
                     for arg in option['arguments']
                     if not arg.get('ignore_check', False)]
+            # TODO: this should probably go to THPLongArgsPlugin
+            if option.get('long_args'):
+                option_desc.append('int ...')
             if option_desc:
                 arg_desc.append('({})'.format(', '.join(option_desc)))
             else:

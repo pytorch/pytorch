@@ -6,25 +6,16 @@ PyObject *THPStorageClass = NULL;
 
 PyObject * THPStorage_(New)(THStorage *ptr)
 {
-  PyObject *args = PyTuple_New(0);
-  PyObject *kwargs = NULL;
-  if (!args) {
-    PyErr_SetString(PyExc_RuntimeError, "Could not create a new storage object - "
-        "failed to allocate argument tuple");
-    return NULL;
-  }
+  THPObjectPtr args = PyTuple_New(0);
+  THPObjectPtr kwargs;
+  THPUtils_assert(args, "Could not create a new storage object - failed to"
+          "allocate argument tuple");
   if (ptr) {
     kwargs = Py_BuildValue("{s:N}", "cdata", PyLong_FromVoidPtr(ptr));
-    if (!kwargs) {
-      PyErr_SetString(PyExc_RuntimeError, "Could not create a new storage object - "
+    THPUtils_assert(kwargs, "Could not create a new storage object - "
           "failed to allocate keyword argument dictionary");
-      Py_DECREF(args);
-      return NULL;
-    }
   }
   PyObject *result = PyObject_Call(THPStorageClass, args, kwargs);
-  Py_DECREF(args);
-  Py_XDECREF(kwargs);
   return result;
 }
 
@@ -56,116 +47,116 @@ static void THPStorage_(dealloc)(THPStorage* self)
 static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
   HANDLE_TH_ERRORS
-  PyObject *cdata_ptr = NULL;     // keyword-only arg - cdata pointer value
-  THPStorage *storage_arg = NULL; // storage to be viewed on
-  long storage_arg_offset = 0;    // offset for storage view
-  long storage_arg_size = -1;     // size for storage view
-  THPObjectPtr iterator;          // not null iff got a single iterable
-  long size = -1;                 // non-negative iff got a number - new storage size
-  bool args_ok = true;
-
-  if (kwargs != NULL && PyDict_Size(kwargs) == 1) {
-    cdata_ptr = PyDict_GetItemString(kwargs, "cdata");
-    args_ok = cdata_ptr != NULL;
-  } else if (args != NULL && PyTuple_Size(args) == 1) {
-    PyObject *arg = PyTuple_GET_ITEM(args, 0);
-    if (THPUtils_checkLong(arg)) {
-      size = THPUtils_unpackLong(arg);
-    } else {
-      iterator = PyObject_GetIter(arg);
-      args_ok = iterator != nullptr;
-      if (args_ok) {
-        size = PyObject_Length(arg);
-        args_ok = size != -1;
-      }
-    }
-  // Storage view
-  } else if (args != NULL && PyTuple_Size(args) >= 1 && THPStorage_(Check)(PyTuple_GET_ITEM(args, 0))) {
-    storage_arg = (THPStorage *)PyTuple_GET_ITEM(args, 0);
-    if (PyTuple_Size(args) >= 2) {
-      PyObject *second_arg = PyTuple_GET_ITEM(args, 1);
-      THPUtils_assert(THPUtils_checkLong(second_arg), "Invalid arguments");
-      storage_arg_offset = THPUtils_unpackLong(second_arg);
-    }
-    storage_arg_size = storage_arg->cdata->size - storage_arg_offset;
-    if (PyTuple_Size(args) >= 3) {
-      PyObject *third_arg = PyTuple_GET_ITEM(args, 2);
-      THPUtils_assert(THPUtils_checkLong(third_arg), "Invalid arguments");
-      storage_arg_size = THPUtils_unpackLong(third_arg);
-    }
-    if (storage_arg_offset < 0 || storage_arg_offset >= storage_arg->cdata->size) {
-      THPUtils_setError("Invalid storage offset (%ld)!\n", storage_arg_offset);
-      return NULL;
-    }
-    if (storage_arg_size < 1 || storage_arg_size > storage_arg->cdata->size - storage_arg_offset) {
-      THPUtils_setError("Invalid storage size (got %ld, but should be between 0 and %ld)!\n",
-          storage_arg_size);
-      return NULL;
-    }
-    if (PyTuple_Size(args) >= 4)
-      args_ok = false;
-  } else if (args && PyTuple_Size(args) != 0) {
-    args_ok = false;
-  }
-  if (!args_ok) {
-    // TODO: better error message
-    THPUtils_setError("invalid arguments");
-    return NULL;
-  }
+  Py_ssize_t num_args = args ? PyTuple_Size(args) : 0;
 
   THPStoragePtr self = (THPStorage *)type->tp_alloc(type, 0);
-  if (self != nullptr) {
-    if (cdata_ptr) {
-      THStorage *ptr = (THStorage*)PyLong_AsVoidPtr(cdata_ptr);
-      self->cdata = ptr;
-    } else if (storage_arg) {
-      real *data_ptr = storage_arg->cdata->data + storage_arg_offset;
-      THStoragePtr storage = THStorage_(newWithData)(LIBRARY_STATE data_ptr, storage_arg_size);
-      storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_VIEW;
-      storage->view = storage_arg->cdata;
-      THStorage_(retain)(LIBRARY_STATE storage_arg->cdata);
-      self->cdata = storage.release();
-    } else if (iterator == nullptr && size >= 0) {
-      self->cdata = THStorage_(newWithSize)(LIBRARY_STATE size);
-    } else if (iterator != nullptr) {
-      self->cdata = THStorage_(newWithSize)(LIBRARY_STATE size);
-      long items_processed = 0;
-      THPObjectPtr item;
-      real v;
-      while ((item = PyIter_Next(iterator))) {
-        if (!THPUtils_(checkReal)(item)) {
-          THPUtils_setError("expected a numeric type, but got %s", Py_TYPE(item)->tp_name);
-          return NULL;
-        }
-        v = THPUtils_(unpackReal)(item);
-        if (items_processed == size) {
-          // TODO: error - iterator has too many items
-          return NULL;
-        }
-#ifndef THC_GENERIC_FILE
-        self->cdata->data[items_processed++] = v;
-#else
-        // TODO: this might be slow - consider batched updates?
-        THCStorage_(set)(LIBRARY_STATE self->cdata, items_processed++, v);
-#endif
+  THPUtils_assert(self, "failed to allocate a " THPStorageStr " object");
+
+  // Internally we allow constructing with a keywoard only argument cdata
+  if (kwargs != NULL) {
+    Py_ssize_t num_kwargs = PyDict_Size(kwargs);
+    if (num_args == 0) {
+      PyObject *cdata_ptr = PyDict_GetItemString(kwargs, "cdata");
+      if (num_kwargs == 1 && cdata_ptr && THPUtils_checkLong(cdata_ptr)) {
+        THStorage *ptr = (THStorage*)PyLong_AsVoidPtr(cdata_ptr);
+        self->cdata = ptr;
+        return (PyObject*)self.release();
       }
-      // Iterator raised an exception
-      if (PyErr_Occurred()) {
-        return NULL;
-      }
-      // Iterator was too short
-      if (items_processed < size) {
-        // TODO; error message
-        return NULL;
-      }
-    } else {
-      self->cdata = THStorage_(new)(LIBRARY_STATE_NOARGS);
+    }
+    // This is an internal option, so we don't want to advertise it.
+    THPUtils_assert(num_kwargs == 0, THPStorageStr " constructor doesn't "
+        "accept any keyword arguments");
+  }
+
+  // torch.Storage()
+  if (num_args == 0) {
+    self->cdata = THStorage_(new)(LIBRARY_STATE_NOARGS);
+    return (PyObject*)self.release();
+  }
+
+  PyObject *first_arg = PyTuple_GET_ITEM(args, 0);
+
+  // torch.Storage(size)
+  if (num_args == 1 && THPUtils_checkLong(first_arg)) {
+    long size = THPUtils_unpackLong(first_arg);
+    self->cdata = THStorage_(newWithSize)(LIBRARY_STATE size);
+    return (PyObject*)self.release();
+  }
+
+  // torch.Storage(view_source, [offset, [size]])
+  if (num_args < 4 && THPStorage_(Check)(first_arg)) {
+    THPStorage *storage_arg = (THPStorage *)first_arg;
+    long numel = storage_arg->cdata->size;
+    long offset = 0;
+
+    if (num_args >= 2) {
+      PyObject *second_arg = PyTuple_GET_ITEM(args, 1);
+      if (!THPUtils_checkLong(second_arg))
+        goto invalid_arguments;
+      offset = THPUtils_unpackLong(second_arg);
     }
 
-    if (self->cdata == NULL)
-      return NULL;
+    long size = numel - offset;
+    if (num_args >= 3) {
+      PyObject *third_arg = PyTuple_GET_ITEM(args, 2);
+      if (!THPUtils_checkLong(third_arg))
+        goto invalid_arguments;
+      size = THPUtils_unpackLong(third_arg);
+    }
+
+    THPUtils_assert(offset >= 0 && offset <= numel, "specified an offset of "
+        "%ld, but the viewed storage has only %ld element(s)", offset, numel);
+    THPUtils_assert(size >= 1 && size <= numel - offset, "specified a size of "
+        "%d, but the viewed storage has only %ld element(s) after offset %ld",
+        size, numel - offset, offset);
+
+    real *data_ptr = storage_arg->cdata->data + offset;
+    THStoragePtr storage = THStorage_(newWithData)(LIBRARY_STATE data_ptr, size);
+    storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_VIEW;
+    storage->view = storage_arg->cdata;
+    THStorage_(retain)(LIBRARY_STATE storage_arg->cdata);
+    self->cdata = storage.release();
+    return (PyObject*)self.release();
   }
-  return (PyObject *)self.release();
+
+  // torch.Storage(sequence)
+  if (num_args == 1 && PySequence_Check(first_arg)) {
+    Py_ssize_t length = PySequence_Length(first_arg);
+    THPUtils_assert(length >= 0, "couldn't obtain the length of %s",
+        THPUtils_typename(first_arg));
+    self->cdata = THStorage_(newWithSize)(LIBRARY_STATE length);
+    THPObjectPtr item;
+    try {
+      for (Py_ssize_t i = 0; i < length; i++) {
+        item = PySequence_GetItem(first_arg, i);
+        real value = THPUtils_(unpackReal)(item.get());
+#ifndef THC_GENERIC_FILE
+        self->cdata->data[i] = value;
+#else
+        // TODO: this might be slow - consider batched updates?
+        THCStorage_(set)(LIBRARY_STATE self->cdata, i, value);
+#endif
+      }
+    } catch (std::runtime_error &e) {
+      THPUtils_setError("tried to construct a storage from a sequence (%s), "
+          "but one of the items was of type %s instead of %s",
+          THPUtils_typename(first_arg),
+          THPUtils_typename(item.get()),
+          THPUtils_typeTraits<real>::python_type_str);
+      return NULL;
+    }
+    return (PyObject*)self.release();
+  }
+
+invalid_arguments:
+  THPUtils_invalidArguments(args, THPStorageStr " constructor", 6,
+          "no arguments",
+          "(int size)",
+          "(Sequence data)",
+          "(" THPStorageStr " view_source)",
+          "(" THPStorageStr " view_source, int offset)",
+          "(" THPStorageStr " view_source, int offset, int size)");
+  return NULL;
   END_HANDLE_TH_ERRORS
 }
 
@@ -180,47 +171,31 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
 {
   HANDLE_TH_ERRORS
   /* Integer index */
-  long nindex;
   if (THPUtils_checkLong(index)) {
-    nindex = THPUtils_unpackLong(index);
+    long nindex = THPUtils_unpackLong(index);
     if (nindex < 0)
       nindex += THStorage_(size)(LIBRARY_STATE self->cdata);
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || \
-    defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
-    return PyFloat_FromDouble(THStorage_(get)(LIBRARY_STATE self->cdata, nindex));
-#elif defined(THC_REAL_IS_HALF)
-    return PyFloat_FromDouble(THC_half2float(THStorage_(get)(LIBRARY_STATE self->cdata, nindex)));
-#else
-    return PyLong_FromLong(THStorage_(get)(LIBRARY_STATE self->cdata, nindex));
-#endif
+    real value = THStorage_(get)(LIBRARY_STATE self->cdata, nindex);
+    return THPUtils_(newReal)(value);
   /* Slice index */
   } else if (PySlice_Check(index)) {
-    Py_ssize_t start, stop, slicelength, len;
-    len = THStorage_(size)(LIBRARY_STATE self->cdata);
+    Py_ssize_t start, stop, slicelength;
+    long len = THStorage_(size)(LIBRARY_STATE self->cdata);
     if (!THPUtils_parseSlice(index, len, &start, &stop, &slicelength))
       return NULL;
 
     real *data = THStorage_(data)(LIBRARY_STATE self->cdata);
-#ifndef THC_GENERIC_FILE
-    // TODO: this can leak memory if newWithData fails
-    real *new_data = (real*)THAlloc(slicelength * sizeof(real));
-    memcpy(new_data, data + start, slicelength * sizeof(real));
-    THStoragePtr new_storage = THStorage_(newWithData)(LIBRARY_STATE new_data, slicelength);
-#else
-    THStoragePtr new_storage = THStorage_(newWithSize)(LIBRARY_STATE slicelength);
-    THStoragePtr view = THStorage_(newWithData)(LIBRARY_STATE data + start, slicelength);
-    THStorage_(clearFlag)(LIBRARY_STATE view, TH_STORAGE_FREEMEM);
-    THStorage_(copy)(LIBRARY_STATE new_storage, view);
-#endif
+    THStoragePtr new_storage = THStorage_(newWithData)(LIBRARY_STATE data + start, slicelength);
+    new_storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_VIEW;
+    new_storage->view = self->cdata;
+    THStorage_(retain)(LIBRARY_STATE self->cdata);
+
     PyObject *_ret = THPStorage_(New)(new_storage);
     new_storage.release();
     return _ret;
   }
-  char err_string[512];
-  snprintf (err_string, 512,
-      "%s %s", "Only indexing with integers and slices supported, but got type: ",
-      index->ob_type->tp_name);
-  PyErr_SetString(PyExc_RuntimeError, err_string);
+  THPUtils_setError("can't index a " THPStorageStr " with %s",
+      THPUtils_typename(index));
   return NULL;
   END_HANDLE_TH_ERRORS
 }
@@ -229,32 +204,30 @@ static int THPStorage_(set)(THPStorage *self, PyObject *index, PyObject *value)
 {
   HANDLE_TH_ERRORS
   if (!THPUtils_(checkReal)(value)) {
-    // TODO: error
-    THPUtils_setError("TODO");
+    THPUtils_setError("can only set storage content with a %s, but got "
+        "%s instead", THPUtils_typeTraits<real>::python_type_str,
+        THPUtils_typename(value));
     return -1;
   }
-  real rvalue = THPUtils_(unpackReal)(value);
 
-  long nindex;
+  real rvalue = THPUtils_(unpackReal)(value);
   if (THPUtils_checkLong(index)) {
-    nindex = THPUtils_unpackLong(index);
+    long nindex = THPUtils_unpackLong(index);
     THStorage_(set)(LIBRARY_STATE self->cdata, nindex, rvalue);
     return 0;
   } else if (PySlice_Check(index)) {
-    Py_ssize_t start, stop, len;
-    len = THStorage_(size)(LIBRARY_STATE self->cdata);
+    Py_ssize_t start, stop;
+    long len = THStorage_(size)(LIBRARY_STATE self->cdata);
     if (!THPUtils_parseSlice(index, len, &start, &stop, NULL))
       return -1;
     // TODO: check the bounds only once
+    // TODO: fill?
     for (;start < stop; start++)
       THStorage_(set)(LIBRARY_STATE self->cdata, start, rvalue);
     return 0;
   }
-  char err_string[512];
-  snprintf (err_string, 512, "%s %s",
-      "Only indexing with integers and slices supported, but got type: ",
-      index->ob_type->tp_name);
-  PyErr_SetString(PyExc_RuntimeError, err_string);
+  THPUtils_setError("can't index a " THPStorageStr " with %s",
+      THPUtils_typename(index));
   return -1;
   END_HANDLE_TH_ERRORS_RET(-1)
 }

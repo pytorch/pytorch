@@ -6,6 +6,8 @@
 
 #define THPUtils_(NAME) TH_CONCAT_4(THP,Real,Utils_,NAME)
 
+#define THPUtils_typename(obj) (Py_TYPE(obj)->tp_name)
+
 
 #if PY_MAJOR_VERSION == 2
 #define THPUtils_checkLong(obj) (PyLong_Check(obj) || PyInt_Check(obj))
@@ -151,6 +153,7 @@ public:
   T * release() { T *tmp = ptr; ptr = NULL; return tmp; }
   operator T*() { return ptr; }
   THPPointer& operator =(T *new_ptr) { free(); ptr = new_ptr; return *this; }
+  THPPointer& operator =(THPPointer &&p) { free(); ptr = p.ptr; p.ptr = nullptr; return *this; }
   T * operator ->() { return ptr; }
   operator bool() { return ptr != nullptr; }
 
@@ -161,6 +164,9 @@ private:
 
 typedef THPPointer<PyObject> THPObjectPtr;
 typedef THPPointer<THPGenerator> THPGeneratorPtr;
+
+template <typename T>
+struct THPUtils_typeTraits {};
 
 #include "generic/utils.h"
 #include <TH/THGenerateAllTypes.h>

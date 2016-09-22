@@ -16,12 +16,10 @@ int THPUtils_getCallable(PyObject *arg, PyObject **result) {
 
 
 THLongStorage * THPUtils_getLongStorage(PyObject *args, int ignore_first) {
-// TODO: error messages
-  long value;
-
   Py_ssize_t length = PyTuple_Size(args);
   if (length < ignore_first+1)
-    throw std::logic_error("Provided too few arguments");
+    throw std::runtime_error("Provided " + std::to_string(length) +
+        " arguments, but expected at least " + std::to_string(ignore_first+1));
 
   // Maybe there's a LongStorage
   PyObject *first_arg = PyTuple_GET_ITEM(args, ignore_first);
@@ -36,9 +34,10 @@ THLongStorage * THPUtils_getLongStorage(PyObject *args, int ignore_first) {
   for (Py_ssize_t i = ignore_first; i < length; ++i) {
     PyObject *arg = PyTuple_GET_ITEM(args, i);
     if (!THPUtils_checkLong(arg))
-      throw std::invalid_argument("Expected a numeric argument, but got " + std::string(Py_TYPE(arg)->tp_name));
-    value = THPUtils_unpackLong(arg);
-    result->data[i-ignore_first] = value;
+      throw std::invalid_argument("Expected an int argument, but got " +
+          std::string(THPUtils_typename(arg)) + "at position " +
+          std::to_string(i));
+    result->data[i-ignore_first] = THPUtils_unpackLong(arg);
   }
   return result.release();
 }
@@ -134,11 +133,11 @@ bool THPUtils_parseSlice(PyObject *slice, Py_ssize_t len, Py_ssize_t *ostart, Py
          (PySliceObject *)slice,
 #endif
          len, &start, &stop, &step, &slicelength) < 0) {
-    PyErr_SetString(PyExc_RuntimeError, "Got an invalid slice");
     return false;
   }
   if (step != 1) {
-    PyErr_SetString(PyExc_RuntimeError, "Only step == 1 supported");
+    THPUtils_setError("Trying to slice with a step of %ld, but only a step of "
+        "1 is supported", (long)step);
     return false;
   }
   *ostart = start;

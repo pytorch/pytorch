@@ -44,7 +44,8 @@ static PyObject * THPStorage_(new)(THPStorage *self)
 static PyObject * THPStorage_(resize_)(THPStorage *self, PyObject *number_arg)
 {
   HANDLE_TH_ERRORS
-  THPUtils_assert(THPUtils_checkLong(number_arg), "invalid arguments");
+  THPUtils_assert(THPUtils_checkLong(number_arg), "resize_ expects an int, "
+      "but got %s", THPUtils_typename(number_arg));
   long newsize = THPUtils_unpackLong(number_arg);
   THStorage_(resize)(LIBRARY_STATE self->cdata, newsize);
   Py_INCREF(self);
@@ -55,11 +56,9 @@ static PyObject * THPStorage_(resize_)(THPStorage *self, PyObject *number_arg)
 static PyObject * THPStorage_(fill_)(THPStorage *self, PyObject *number_arg)
 {
   HANDLE_TH_ERRORS
-  if (!THPUtils_(checkReal)(number_arg)) {
-    // TODO: better error message
-    THPUtils_setError("TODO");
-    return NULL;
-  }
+  THPUtils_assert(THPUtils_(checkReal)(number_arg), "fill_ expects %s, "
+      "but got %s", THPUtils_typeTraits<real>::python_type_str,
+      THPUtils_typename(number_arg));
   THStorage_(fill)(LIBRARY_STATE self->cdata, THPUtils_(unpackReal)(number_arg));
   Py_INCREF(self);
   return (PyObject*)self;
@@ -108,15 +107,16 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
 
   if (offset < 0 || offset > buffer.len) {
     PyErr_Format(PyExc_ValueError,
-      "offset must be non-negative and no greater than buffer length (%ld)",
-      (long) buffer.len);
+      "offset must be non-negative and no greater than buffer length (%ld), "
+      "but got %ld", (long)offset, (long)buffer.len);
     PyBuffer_Release(&buffer);
     return NULL;
   }
 
   if (count < 0) {
     if ((buffer.len - offset) % sizeof(real) != 0) {
-      PyErr_Format(PyExc_ValueError, "buffer size must be a multiple of element size");
+      PyErr_Format(PyExc_ValueError, "buffer size (%ld) must be a multiple "
+          "of element size (%ld)", (long)buffer.len, (long)sizeof(real));
       PyBuffer_Release(&buffer);
       return NULL;
     }
@@ -124,7 +124,9 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
   }
 
   if (offset + (count * (Py_ssize_t)sizeof(real)) > buffer.len) {
-    PyErr_Format(PyExc_ValueError, "buffer is smaller than requested size");
+    PyErr_Format(PyExc_ValueError, "buffer has only %ld elements after offset "
+        "%ld, but specified a size of %ld", (long)(buffer.len - offset),
+        (long)offset, (long)count);
     PyBuffer_Release(&buffer);
     return NULL;
   }
@@ -159,10 +161,8 @@ PyObject * THPStorage_(writeFile)(THPStorage *self, PyObject *file)
 {
   HANDLE_TH_ERRORS
   int fd = PyObject_AsFileDescriptor(file);
-  if (fd == -1) {
-    THPUtils_setError("_write_file couln't retrieve file descriptor from given object");
-    return NULL;
-  }
+  THPUtils_assert(fd != -1, "_write_file couldn't retrieve a file descriptor "
+      "from given object");
   THPStorage_(writeFileRaw)(self->cdata, fd);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -172,10 +172,8 @@ PyObject * THPStorage_(newWithFile)(PyObject *_unused, PyObject *file)
 {
   HANDLE_TH_ERRORS
   int fd = PyObject_AsFileDescriptor(file);
-  if (fd == -1) {
-    THPUtils_setError("_new_with_file couln't retrieve file descriptor from given object");
-    return NULL;
-  }
+  THPUtils_assert(fd != -1, "_new_with_file couldn't retrieve a file "
+      "descriptor from given object");
   THStoragePtr storage = THPStorage_(readFileRaw)(fd);
   PyObject *result = THPStorage_(New)(storage);
   storage.release();
@@ -398,10 +396,7 @@ PyObject * THPStorage_(_sharedFd)(THPStorage *self)
     }
   }
 
-  if (!ctx) {
-    THPUtils_setError("can't retrieve shared file descriptor");
-    return NULL;
-  }
+  THPUtils_assert(ctx, "couldn't retrieve a shared file descriptor");
   return PyLong_FromLong(THMapAllocatorContext_fd(ctx));
   END_HANDLE_TH_ERRORS
 }
@@ -419,10 +414,9 @@ PyObject * THPStorage_(getDevice)(THPStorage *self)
 PyObject * THPStorage_(_setCdata)(THPStorage *self, PyObject *new_cdata)
 {
   HANDLE_TH_ERRORS
-  if (!THPUtils_checkLong(new_cdata)) {
-    THPUtils_setError("invalid argument to _set_cdata - expected an int or long");
-    return NULL;
-  }
+  THPUtils_assert(THPUtils_checkLong(new_cdata), "given an invalid argument to "
+      "_set_cdata - expected an int or long, but got %s",
+      THPUtils_typename(new_cdata));
   THStorage *ptr = (THStorage*)PyLong_AsVoidPtr(new_cdata);
   THStorage_(retain)(LIBRARY_STATE ptr);
   THStorage_(free)(LIBRARY_STATE self->cdata);

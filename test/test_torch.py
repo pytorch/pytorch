@@ -135,7 +135,7 @@ class TestTorch(TestCase):
         # with indices
         m1 = torch.randn(100,100)
         res1val, res1ind = torchfn(m1, 1)
-        res2val = m1[:,(0,)].clone()
+        res2val = m1[:,0:1].clone()
         res2ind = res1ind.clone().fill_(0)
         for i, j in iter_indices(m1):
             if mathfn(res2val[i,0], m1[i,j]) != res2val[i,0]:
@@ -1690,9 +1690,6 @@ class TestTorch(TestCase):
         self.assertEqual(reference[0], self._consecutive((3, 3)), 0)
         self.assertEqual(reference[1], self._consecutive((3, 3), 10), 0)
         self.assertEqual(reference[2], self._consecutive((3, 3), 19), 0)
-        self.assertEqual(reference[(0,)], self._consecutive((1, 3, 3)), 0)
-        self.assertEqual(reference[(1,)], self._consecutive((1, 3, 3), 10), 0)
-        self.assertEqual(reference[(2,)], self._consecutive((1, 3, 3), 19), 0)
         self.assertEqual(reference[0, 1], self._consecutive((3,), 4), 0)
         self.assertEqual(reference[0:2], self._consecutive((2, 3, 3)), 0)
         self.assertEqual(reference[2, 2, 2], 27, 0)
@@ -1772,7 +1769,7 @@ class TestTorch(TestCase):
             for j in range(1 if dim == 1 else n):
                 for k in range(1 if dim == 2 else o):
                     ii = [i, j, k]
-                    ii[dim] = (0, idx.size(dim))
+                    ii[dim] = slice(0, idx.size(dim)+1)
                     idx[tuple(ii)] = torch.randperm(dim_size)[0:elems_per_row]
 
     def test_gather(self):
@@ -2221,7 +2218,9 @@ class TestTorch(TestCase):
 
     def test_serialization(self):
         a = [torch.randn(5, 5).float() for i in range(2)]
-        b = [a[i % 2] for i in range(4)] + [a[0].storage()]
+        b = [a[i % 2] for i in range(4)]
+        b += [a[0].storage()]
+        b += [a[0].storage()[1:4]]
         with tempfile.NamedTemporaryFile() as f:
             torch.save(b, f)
             f.seek(0)
@@ -2237,6 +2236,8 @@ class TestTorch(TestCase):
         self.assertEqual(c[4], torch.FloatStorage(25).fill_(10), 0)
         c[1].fill_(20)
         self.assertEqual(c[1], c[3], 0)
+        # TODO: enable after fixing #46
+        # self.assertEqual(c[4], c[5][1:4], 0)
 
     def test_from_buffer(self):
         a = bytearray([1, 2, 3, 4])
