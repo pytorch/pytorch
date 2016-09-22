@@ -1,7 +1,7 @@
 /*************************************************************************
  * Copyright (c) 2015-2016, NVIDIA CORPORATION. All rights reserved.
  *
- * See LICENCE.txt for license information
+ * See LICENSE.txt for license information
  ************************************************************************/
 
 #include <stdio.h>
@@ -20,7 +20,7 @@
 
 DebugLevel ncclDebugLevel;
 
-extern "C" DSOGLOBAL
+NCCL_API(ncclResult_t, ncclGetUniqueId, ncclUniqueId* out);
 ncclResult_t ncclGetUniqueId(ncclUniqueId* out) {
   pid_t pid = getpid();
   static int count = 0;
@@ -83,7 +83,7 @@ typedef struct {
   int rank;
   int ndev;
   int cudaDev;
-  int ncclId;
+  int sortId;
   pid_t pid;
   ncclMem* hostptr;
   ncclMem* devptr;
@@ -94,15 +94,13 @@ typedef struct {
 static int compRanks(const void* a, const void* b) {
   const RankEntry* A = (const RankEntry*)a;
   const RankEntry* B = (const RankEntry*)b;
-  if (A->ncclId < B->ncclId) return -1;
-  if (A->ncclId > B->ncclId) return  1;
+  if (A->sortId < B->sortId) return -1;
+  if (A->sortId > B->sortId) return  1;
   return 0;
 }
 
 static void orderRanks(RankEntry* ranks, int count) {
   qsort(ranks, count, sizeof(RankEntry), compRanks);
-  for(int i=0; i<count; ++i)
-    ranks[i].ncclId = i;
 }
 
 
@@ -110,7 +108,7 @@ typedef struct {
   union {
     struct {
       volatile int bar;
-      int ringDirectFail;
+      int globalMemSpaceBroke;
     };
     char pad[16];
    };
@@ -156,7 +154,7 @@ static ncclResult_t initGather(RankGather** gather, ncclUniqueId commId,
   return ncclSuccess;
 }
 
-static void syncRingDirect(RankGather* gather, int* ringDirectOk) {
+static void syncRingDirect(RankGather* gather, int* globalMemSpaceOk) {
   int bar_tmp = gather->bar - 1;
   int ndev = gather->ranks[0].ndev;
   bool swapped;
@@ -169,7 +167,7 @@ static void syncRingDirect(RankGather* gather, int* ringDirectOk) {
     sched_yield();
   __sync_synchronize();
 
-  *ringDirectOk = gather->ringDirectFail ? 0 : 1;
+  *globalMemSpaceOk = gather->globalMemSpaceBroke ? 0 : 1;
 }
 
 static ncclResult_t closeGather(RankGather* gather, int ndev) {
@@ -264,13 +262,13 @@ static ncclResult_t populateRankInfo(RankEntry* info, int rank, ncclComm_t comm)
     return ncclUnhandledCudaError;
   }
   // Order by nvml index
-  if (wrapNvmlDeviceGetIndex(nvmlHandle, (unsigned*)&info->ncclId) != ncclSuccess) {
+  if (wrapNvmlDeviceGetIndex(nvmlHandle, (unsigned*)&info->sortId) != ncclSuccess) {
     WARN("rank %d failed to get nvml device index for device %d", rank, comm->cudaDev);
     return ncclUnhandledCudaError;
   }
 
   info->rank = rank;
-  info->ndev = comm->nDev;
+  info->ndev = comm->nRanks;
   info->cudaDev = comm->cudaDev;
   info->pid = getpid();
   info->buffSize = comm->buffSize;
@@ -285,109 +283,104 @@ static ncclResult_t populateRankInfo(RankEntry* info, int rank, ncclComm_t comm)
 }
 
 
-static const int CLEANUP_NONE  = 0;
-static const int CLEANUP_CUIPC = 1;
-static const int CLEANUP_UNMAP = 2;
-
 static ncclResult_t commClearMaps(ncclComm_t comm) {
   ncclResult_t res, retval = ncclSuccess;
   cudaError_t cures;
 
-  for(int d=0; d<comm->nDev; ++d) {
-    switch(comm->ptrs[d].remoteCleanup) {
-      case CLEANUP_NONE:
-        break;
-      case CLEANUP_CUIPC:
-        cures = cudaIpcCloseMemHandle((void*)comm->ptrs[d].cleanupHandle);
-        if (cures != cudaSuccess) {
-          WARN("rank %d failed to close IPC handle to rank %d",
-            comm->userFromRing[comm->ncclId], comm->userFromRing[d]);
+  for(int d=0; d<comm->nRanks; ++d) {
+    if (comm->ptrs[d].hostCleanup != NULL) {
+      cures = cudaHostUnregister(comm->ptrs[d].hostCleanup);
+      if (cures != cudaSuccess) {
+        WARN("rank %d failed to unregister handle to device %d",
+          comm->rank, d);
           retval = (retval == ncclSuccess) ? ncclUnhandledCudaError : retval;
-        }
-        break;
-      case CLEANUP_UNMAP:
-        cures = cudaHostUnregister(comm->ptrs[d].cleanupHandle);
-        if (cures != cudaSuccess) {
-          WARN("rank %d failed to unregister handle to rank %d",
-            comm->userFromRing[comm->ncclId], comm->userFromRing[d]);
-          retval = (retval == ncclSuccess) ? ncclUnhandledCudaError : retval;
-        }
-        res = shmUnmap(comm->ptrs[d].cleanupHandle, offsetof(ncclMem, buff) + comm->buffSize);
-        if (res != ncclSuccess) {
-          WARN("rank %d failed to unmap handle to rank %d",
-            comm->userFromRing[comm->ncclId], comm->userFromRing[d]);
+      }
+      res = shmUnmap(comm->ptrs[d].hostCleanup, offsetof(ncclMem, buff) + comm->buffSize);
+      if (res != ncclSuccess) {
+        WARN("rank %d failed to unmap handle to device %d",
+          comm->rank, d);
           retval = (retval == ncclSuccess) ? res : retval;
-        }
-        break;
-      default:
-        WARN("Unknown cleanup type %d", comm->ptrs[d].remoteCleanup);
+      }
+      comm->ptrs[d].hostCleanup = NULL;
     }
-    comm->ptrs[d].remoteCleanup = CLEANUP_NONE;
-    comm->ptrs[d].cleanupHandle = NULL;
+
+    if (comm->ptrs[d].devCleanup != NULL) {
+      cures = cudaIpcCloseMemHandle((void*)comm->ptrs[d].devCleanup);
+      if (cures != cudaSuccess) {
+        WARN("rank %d failed to close IPC handle to device %d: %s",
+          comm->rank, d, cudaGetErrorString(cures));
+        retval = (retval == ncclSuccess) ? ncclUnhandledCudaError : retval;
+      }
+    }
   }
 
   if (comm->userFromRing != NULL)
-    memset(comm->userFromRing, 0, sizeof(int)*comm->nDev);
-  if (comm->ringFromUser != NULL)
-    memset(comm->ringFromUser, 0, sizeof(int)*comm->nDev);
+    memset(comm->userFromRing, 0, sizeof(int)*comm->nRanks);
+  if (comm->ncclFromRing != NULL)
+    memset(comm->ncclFromRing, 0, sizeof(int)*comm->nRanks);
 
   if (comm->devUserFromRing != NULL) {
-    cudaError_t err = cudaMemset(comm->devUserFromRing, 0, sizeof(int)*comm->nDev);
-    if (err != cudaSuccess) {
-      WARN("Faild to clear dev map: %s", cudaGetErrorString(err));
+    cures = cudaMemset(comm->devUserFromRing, 0, sizeof(int)*comm->nRanks);
+    if (cures != cudaSuccess) {
+      WARN("Faild to clear dev map: %s", cudaGetErrorString(cures));
+      retval = (retval == ncclSuccess) ? ncclUnhandledCudaError : retval;
+    }
+  }
+
+  if (comm->devRing != NULL) {
+    cures = cudaMemset(comm->devRing, 0, sizeof(DevRing<char>));
+    if (cures != cudaSuccess) {
+      WARN("Failed to clear devRing: %s", cudaGetErrorString(cures));
       retval = (retval == ncclSuccess) ? ncclUnhandledCudaError : retval;
     }
   }
   return retval;
 }
 
-static ncclResult_t commBuildMaps(ncclComm_t comm, ncclUniqueId* commId, int rank, RankEntry* ranks, int* ringDirectFailed) {
-  int ndev = comm->nDev;
+static ncclResult_t commBuildMaps(ncclComm_t comm, ncclUniqueId* commId, int rank, RankEntry* ranks, int* globalMemSpaceBroke) {
+  int ndev = comm->nRanks;
+  comm->rank = rank;
+
+  if (ndev > MAXRANKS) {
+    WARN("%d ranks exceeds MAXRANKS of %d", ndev, MAXRANKS);
+    return ncclUnsupportedDeviceCount;
+  }
+
+  // Check for inconsistencies between ranks
+  // If two ranks use the same rank, then one slot of
+  // ranks[] will be left unset with zero ndev/buffSize.
   for(int i=0; i<ndev; ++i) {
-    // Check for inconsistencies between ranks
-    // If two ranks use the same rank, then one slot of
-    // ranks[] will be left unset with zero ndev/buffSize.
     if (ranks[i].buffSize != comm->buffSize
-        || ranks[i].ndev != comm->nDev) {
+        || ranks[i].ndev != comm->nRanks) {
       commClearMaps(comm);
       return ncclRankMismatch;
     }
-
-    // Create rank<->nccl maps
-    int iRank = ranks[i].rank;
-    comm->userFromRing[i] = iRank;
-    comm->ringFromUser[iRank] = i;
   }
 
-  if (cudaMemcpy(comm->devUserFromRing, comm->userFromRing, ndev*sizeof(int),
-      cudaMemcpyHostToDevice) != cudaSuccess) {
-    WARN("rank %d failed to copy maps to device", rank);
-    commClearMaps(comm);
-    return ncclUnhandledCudaError;
-  }
-
-  int myId = -1;
+  // Find self among ranks of gather
+  int myNcclId = -1;
   for (int i=0; i<ndev; ++i) {
     if(ranks[i].rank == rank) {
-      myId = i;
+      myNcclId = i;
       break;
     }
   }
-
-  if (myId == -1) {
+  if (myNcclId == -1) {
     WARN("rank %d not found in communicator", rank);
     return ncclInvalidRank;
   }
-  comm->ncclId = myId;
 
-  int myDev = ranks[myId].cudaDev;
-  pid_t myPid = ranks[myId].pid;
-  comm->useRemoteRecv = 1; // Assume we directly write to result ptrs.
+  for(int ringPos=0; ringPos<ndev; ++ringPos) {
+    int ncclPos = (ringPos+myNcclId) % ndev; // ring order relative to self
+    int userRank = ranks[ncclPos].rank;
+    comm->userFromRing[ringPos] = userRank;
+    comm->ncclFromRing[ringPos] = ncclPos;
+  }
 
-  // The order that we link with peers must ensure that
-  // P2P slots are used for high-priority links first.
-  for (int j=0; j<ndev; ++j) {
-    int i = (myId - 1 + ndev + j) % ndev;
+  int myDev = ranks[myNcclId].cudaDev;
+  pid_t myPid = ranks[myNcclId].pid;
+
+  for (int i=0; i<ndev; ++i) {
     int iRank = ranks[i].rank;
     int iDev = ranks[i].cudaDev;
     pid_t iPid = ranks[i].pid;
@@ -399,84 +392,127 @@ static ncclResult_t commBuildMaps(ncclComm_t comm, ncclUniqueId* commId, int ran
       canpeer = 0;
     }
 
-    if (iPid == myPid) {
-      if (myDev == iDev) {
-        INFO("rank access %d -> %d via common device", rank, iRank);
-        comm->ptrs[i].local  = ranks[myId].devptr;
-        comm->ptrs[i].remote = ranks[i].devptr;
-        comm->ptrs[i].remoteCleanup = CLEANUP_NONE;
-      } else {
-        int peer_enabled = canpeer;
-        if (canpeer) {
-          cudaError_t p2pErr = cudaDeviceEnablePeerAccess(iDev, 0);
-          if (p2pErr == cudaErrorPeerAccessAlreadyEnabled) {
-            cudaGetLastError();
-          } else if (p2pErr != cudaSuccess) {
-            INFO("peer access failed between rank %d (dev %d) and rank %d (dev %d)\n",
-              rank, myDev, iRank, iDev);
-            peer_enabled = 0;
-          }
-        }
+    cudaError_t err;
+    ncclMem* remoteHostBuff;
 
-        if (peer_enabled) {
-          INFO("rank access %d -> %d via P2P device mem", rank, iRank);
-          comm->ptrs[i].local  = ranks[myId].devptr;
-          comm->ptrs[i].remote = ranks[i].devptr;
-          comm->ptrs[i].remoteCleanup = CLEANUP_NONE;
-        } else { // go through hostmem
-          INFO("rank access %d -> %d via zero-copy host mem", rank, iRank);
-          if (j <= 2)
-            *ringDirectFailed = 1;
-          if (cudaHostGetDevicePointer(&comm->ptrs[i].local, ranks[myId].hostptr, 0) != cudaSuccess) {
-            WARN("rank %d failed to map zero copy buffer to device", rank);
-            commClearMaps(comm);
-            return ncclUnhandledCudaError;
-          }
-          if (cudaHostGetDevicePointer(&comm->ptrs[i].remote, ranks[i].hostptr, 0) != cudaSuccess) {
-            WARN("rank %d failed to map %d's zero copy buffer to device", rank, iRank);
-            commClearMaps(comm);
-            return ncclUnhandledCudaError;
-          }
-          comm->ptrs[i].remoteCleanup = CLEANUP_NONE;
+    comm->ptrs[i].type = NodeRef::HOST; // Assume host buffer
+    comm->ptrs[i].devCleanup = NULL;
+    comm->ptrs[i].hostCleanup = NULL;
+
+    if (iPid == myPid) {
+      remoteHostBuff = ranks[i].hostptr;
+
+      if (myDev == iDev) { // shared device
+        INFO("rank access %d -> %d via common device", rank, iRank);
+        comm->ptrs[i].type = NodeRef::DEVICE;
+        comm->ptrs[i].local = ranks[myNcclId].devptr;
+        comm->ptrs[i].remote = ranks[i].devptr;
+      } else if (canpeer) {
+        INFO("rank access %d -> %d via P2P device mem", rank, iRank);
+        err = cudaDeviceEnablePeerAccess(iDev, 0);
+        if (err == cudaErrorPeerAccessAlreadyEnabled) {
+          cudaGetLastError();
+        } else if (err != cudaSuccess) {
+          WARN("rank %d failed to peer with device %d: %s",
+              rank, iDev, cudaGetErrorString(err));
+          commClearMaps(comm);
+          return ncclUnhandledCudaError;
         }
+        comm->ptrs[i].type = NodeRef::DEVICE;
+        comm->ptrs[i].local = ranks[myNcclId].devptr;
+        comm->ptrs[i].remote = ranks[i].devptr;
       }
-    } else { // multi-process!
-      *ringDirectFailed = 1;
-      if (canpeer || myDev == iDev) {
-        INFO("rank access %d -> %d via Ipc P2P device mem", rank, iRank);
-        comm->ptrs[i].local = ranks[myId].devptr;
-        if (cudaIpcOpenMemHandle((void**)(&comm->ptrs[i].remote),
-            ranks[i].devipc, cudaIpcMemLazyEnablePeerAccess) != cudaSuccess) {
-          WARN("rank %d failed to open Ipc handle to rank %d", rank, iRank);
+    } else { // Separate processes
+      *globalMemSpaceBroke = 1;
+      char rankname[1024];
+      sprintf(rankname, "%s-%d", commId->internal, ranks[i].rank);
+      if (openHostMemShm(rankname, &remoteHostBuff, ranks[i].buffSize)
+          != ncclSuccess) {
+        WARN("rank %d failed to open sysmem buffer of rank %d", rank, iRank);
+        commClearMaps(comm);
+        return ncclUnhandledCudaError;
+      }
+      comm->ptrs[i].hostCleanup = remoteHostBuff;
+
+      // TODO: Extend to same device (MPS) case.
+      // At present that would go through host mem.
+      if (canpeer) {
+        INFO("rank access %d -> %d via IPC device mem", rank, iRank);
+        comm->ptrs[i].type = NodeRef::DEVICE;
+        comm->ptrs[i].local  = ranks[myNcclId].devptr;
+        err = cudaIpcOpenMemHandle((void**)(&comm->ptrs[i].remote),
+            ranks[i].devipc, cudaIpcMemLazyEnablePeerAccess);
+        if (err != cudaSuccess) {
+          WARN("rank %d failed to open Ipc handle to rank %d: %s",
+              rank, iRank, cudaGetErrorString(err));
           commClearMaps(comm);
           return ncclUnhandledCudaError;
         }
-        comm->ptrs[i].remoteCleanup = CLEANUP_CUIPC;
-        comm->ptrs[i].cleanupHandle = comm->ptrs[i].remote;
-      } else { // go through hostmem
-        INFO("rank access %d -> %d via zero copy host shm", rank, iRank);
-        if (cudaHostGetDevicePointer(&comm->ptrs[i].local, ranks[myId].hostptr, 0) != cudaSuccess) {
-          WARN("rank %d failed to obtain dev ptr to sysmem buffer", rank);
-          commClearMaps(comm);
-          return ncclUnhandledCudaError;
-        }
-        char rankname[1024];
-        sprintf(rankname, "%s-%d", commId->internal, ranks[i].rank);
-        if (openHostMemShm(rankname, (ncclMem**)&comm->ptrs[i].cleanupHandle, ranks[i].buffSize)
-            != ncclSuccess) {
-          WARN("rank %d failed to open sysmem buffer of rank %d", rank, iRank);
-          commClearMaps(comm);
-          return ncclUnhandledCudaError;
-        }
-        if (cudaHostGetDevicePointer(&comm->ptrs[i].remote, comm->ptrs[i].cleanupHandle, 0) != cudaSuccess) {
-          WARN("rank %d failed to obtain dev ptr for rank %d", rank, iRank);
-          commClearMaps(comm);
-          return ncclUnhandledCudaError;
-        }
-        comm->ptrs[i].remoteCleanup = CLEANUP_UNMAP;
+        comm->ptrs[i].devCleanup = comm->ptrs[i].remote;
+      }
+    }
+
+    err = cudaHostGetDevicePointer(&comm->ptrs[i].opCounter,
+          &(remoteHostBuff->opCounter), 0);
+    if (err != cudaSuccess) {
+      WARN("rank %d failed to obtain %d's zero copy pointer: %s",
+          rank, iRank, cudaGetErrorString(err));
+      commClearMaps(comm);
+      return ncclUnhandledCudaError;
+    }
+
+    if (comm->ptrs[i].type == NodeRef::HOST) {
+      *globalMemSpaceBroke = 1;
+      INFO("rank access %d -> %d via zero-copy host mem", rank, iRank);
+      if (cudaHostGetDevicePointer(&comm->ptrs[i].local, ranks[myNcclId].hostptr, 0) != cudaSuccess) {
+        WARN("rank %d failed to map zero copy buffer to device", rank);
+        commClearMaps(comm);
+        return ncclUnhandledCudaError;
+      }
+      if (cudaHostGetDevicePointer(&comm->ptrs[i].remote, remoteHostBuff, 0) != cudaSuccess) {
+        WARN("rank %d failed to map %d's zero copy buffer to device", rank, iRank);
+        commClearMaps(comm);
+        return ncclUnhandledCudaError;
       }
     }
   }
+
+  // Setup device-side ring view
+  if (cudaMemcpy(comm->devUserFromRing, comm->userFromRing, ndev*sizeof(int),
+      cudaMemcpyHostToDevice) != cudaSuccess) {
+    WARN("rank %d failed to copy maps to device", rank);
+    commClearMaps(comm);
+    return ncclUnhandledCudaError;
+  }
+
+  DevRing<char> ringTemp;
+  memcpy(ringTemp.userRank, comm->userFromRing, ndev*sizeof(int));
+
+  int prevIdx = comm->ncclFromRing[comm->nRanks-1];
+  int nextIdx = comm->ncclFromRing[1 % comm->nRanks];
+  NodeRef* prevPtrs = comm->ptrs+prevIdx;
+  NodeRef* nextPtrs = comm->ptrs+nextIdx;
+
+  ringTemp.prevOpCounter    = prevPtrs->opCounter;
+  ringTemp.nextOpCounter    = nextPtrs->opCounter;
+  ringTemp.sendFlagToNext   = nextPtrs->remote->flags;
+  ringTemp.recvFlagFromPrev = prevPtrs->local->flags;
+  ringTemp.sendFlagToPrev   = prevPtrs->remote->flags+1;
+  ringTemp.recvFlagFromNext = nextPtrs->local->flags+1;
+
+  ringTemp.recvPtrFromNext = (char**)&nextPtrs->local->recvPtrs;
+  ringTemp.sendPtrToPrev   = (char**)&prevPtrs->remote->recvPtrs;
+
+  ringTemp.recvBuffer = prevPtrs->local->buff;
+  ringTemp.sendBuffer = nextPtrs->remote->buff;
+
+  if (cudaMemcpy(comm->devRing, &ringTemp, sizeof(ringTemp),
+      cudaMemcpyHostToDevice) != cudaSuccess) {
+    WARN("rank %d failed to copy ring maps to device", rank);
+    commClearMaps(comm);
+    return ncclUnhandledCudaError;
+  }
+
   return ncclSuccess;
 }
 
@@ -495,22 +531,23 @@ static void initDebug() {
     ncclDebugLevel = ABORT;
     INFO("NCCL debug level set to ABORT");
   }
-
 }
 
 static void commFree(ncclComm_t comm) {
   if (comm == NULL)
     return;
 
-  for(int i=0; i<MAXQUEUE; ++i) {
-    if (comm->events.isDone[i] != NULL)
-      if (cudaEventDestroy(comm->events.isDone[i]) != cudaSuccess)
-        INFO("failed to destroy cuda event %d", i);
-  }
+  if (comm->doneEvent != NULL)
+    if (cudaEventDestroy(comm->doneEvent) != cudaSuccess)
+      INFO("ncclComm failed to destroy doneEvent");
 
   ncclResult_t res = commClearMaps(comm);
   if (res != ncclSuccess)
     INFO("failed to cleanup comm maps");
+
+  if (comm->devRing != NULL)
+    if (cudaFree(comm->devRing) != cudaSuccess)
+      INFO("commFree failed to free devRing");
 
   if (comm->userFromRing != NULL)
     free(comm->userFromRing);
@@ -519,8 +556,8 @@ static void commFree(ncclComm_t comm) {
     if (cudaFree(comm->devUserFromRing) != cudaSuccess)
       INFO("commFree failed to free dev maps");
 
-  if (comm->ringFromUser != NULL)
-    free(comm->ringFromUser);
+  if (comm->ncclFromRing != NULL)
+    free(comm->ncclFromRing);
 
   if (comm->devMem != NULL && cudaFree(comm->devMem) != cudaSuccess)
     INFO("Failed to free devMap");
@@ -550,7 +587,7 @@ static ncclResult_t commAlloc(ncclComm_t* comret, int ndev, const ncclUniqueId* 
     return ncclInvalidRank;
   }
 
-  size_t commBytes = offsetof(ncclComm, ptrs) + ndev*sizeof(ncclNodeRef);
+  size_t commBytes = offsetof(ncclComm, ptrs) + ndev*sizeof(NodeRef);
   struct ncclComm* comm = (struct ncclComm*)malloc(commBytes);
   if (comm == NULL) {
     WARN("comm allocation failed");
@@ -558,21 +595,23 @@ static ncclResult_t commAlloc(ncclComm_t* comret, int ndev, const ncclUniqueId* 
   }
   memset(comm, 0, commBytes);
 
-  comm->nDev = ndev;
+  comm->nRanks = ndev;
   cudaGetDevice(&comm->cudaDev);
 
   const char* str = getenv("NCCL_BUFFSIZE");
+  int buffsize;
   if (str != NULL) {
     errno = 0;
-    comm->buffSize = strtol(str, NULL, 10);
-    if (errno == ERANGE || comm->buffSize == 0) {
+    buffsize = strtol(str, NULL, 10);
+    if (errno == ERANGE || buffsize == 0) {
       INFO("rank %d invalid NCCL_BUFFSIZE: %s, using default %lu",
           rank, str, DEFAULT_BUFFER_SIZE_BYTES);
-      comm->buffSize = DEFAULT_BUFFER_SIZE_BYTES;
+      buffsize = DEFAULT_BUFFER_SIZE_BYTES;
     }
   } else {
-    comm->buffSize = DEFAULT_BUFFER_SIZE_BYTES;
+    buffsize = DEFAULT_BUFFER_SIZE_BYTES;
   }
+  comm->buffSize = buffsize;
   INFO("rank %d using buffSize = %lu", rank, comm->buffSize);
 
 
@@ -583,7 +622,14 @@ static ncclResult_t commAlloc(ncclComm_t* comret, int ndev, const ncclUniqueId* 
     commFree(comm);
     return res;
   }
-  if (cudaMalloc(&comm->devUserFromRing, ndev*sizeof(int)) != cudaSuccess) {
+
+  if (cudaMalloc(&comm->devRing, sizeof(DevRing<char>)) != cudaSuccess) {
+    WARN("rank %d failed to allocate device-side ring views", rank);
+    commFree(comm);
+    return ncclCudaMallocFailed;
+  }
+
+  if (cudaMalloc(&comm->devUserFromRing, ndev*sizeof(int)) != cudaSuccess ) {
     WARN("rank %d failed to allocated device maps", rank);
     commFree(comm);
     return ncclCudaMallocFailed;
@@ -596,20 +642,17 @@ static ncclResult_t commAlloc(ncclComm_t* comret, int ndev, const ncclUniqueId* 
     return ncclSystemError;
   }
 
-  comm->ringFromUser = (int*)malloc(ndev*sizeof(int));
-  if (comm->ringFromUser == NULL) {
+  comm->ncclFromRing = (int*)malloc(ndev*sizeof(int));
+  if (comm->ncclFromRing == NULL) {
     WARN("rank %d failed to allocate host maps", rank);
     commFree(comm);
     return ncclSystemError;
   }
 
-  EventQueue* eq = &comm->events;
-  for(int i=0; i<MAXQUEUE; ++i) {
-    if (cudaEventCreateWithFlags(eq->isDone+i, cudaEventDisableTiming) != cudaSuccess) {
-      WARN("rank %d failed to create nccl event %d", rank, i);
-      commFree(comm);
-      return ncclUnhandledCudaError;
-    }
+  if (cudaEventCreateWithFlags(&comm->doneEvent, cudaEventDisableTiming) != cudaSuccess) {
+    WARN("ncclComm on rank %d failed to create doneEvent", rank);
+    commFree(comm);
+    return ncclUnhandledCudaError;
   }
 
   if(commId == NULL) {
@@ -627,8 +670,44 @@ static ncclResult_t commAlloc(ncclComm_t* comret, int ndev, const ncclUniqueId* 
     comm->hostMemState = ShmMapped | ShmLinked;
   }
 
+  if (cudaHostGetDevicePointer(&comm->opCounter, &comm->hostMem->opCounter, 0) != cudaSuccess) {
+    WARN("ncclComm on rank %d failed to map opCounter to device", rank);
+    commFree(comm);
+    return ncclUnhandledCudaError;
+  }
+
   *comret = comm;
   return ncclSuccess;
+}
+
+static ncclResult_t devCommUpdate(ncclComm_t comm) {
+  // Copy the comm on the device
+  size_t commBytes = offsetof(ncclComm, ptrs) + comm->nRanks*sizeof(NodeRef);
+  if (cudaMemcpy(comm->devComm, comm, commBytes, cudaMemcpyHostToDevice) != cudaSuccess) {
+    WARN("failed to copy device comm");
+    return ncclUnhandledCudaError;
+  }
+  // Fix the host pointer to be accessible from the device
+  void* dptr;
+  if (cudaHostGetDevicePointer(&dptr, comm->hostMem, 0) != cudaSuccess) {
+    WARN("failed to get device pointer for host mem");
+    return ncclUnhandledCudaError;
+  }
+  if (cudaMemcpy(&comm->devComm->hostMem, &dptr, sizeof(dptr), cudaMemcpyHostToDevice) != cudaSuccess) {
+    WARN("failed to update host pointer");
+    return ncclUnhandledCudaError;
+  }
+  return ncclSuccess;
+}
+
+static ncclResult_t devCommSetup(ncclComm_t comm) {
+  // Fully duplicate the comm on the device
+  size_t commBytes = offsetof(ncclComm, ptrs) + comm->nRanks*sizeof(NodeRef);
+  if (cudaMalloc(&comm->devComm, commBytes) != cudaSuccess) {
+    WARN("failed to allocated device comm");
+    return ncclCudaMallocFailed;
+  }
+  return devCommUpdate(comm);
 }
 
 static ncclResult_t commUnlinkHostMem(ncclComm_t comm, ncclUniqueId commId, int rank) {
@@ -643,12 +722,12 @@ static void showVersion() {
   static int shown = 0;
   if (shown == 0 && ncclDebugLevel >= VERSION) {
     printf("NCCL version %d.%d.%d compiled with CUDA %d.%d\n", NCCL_MAJOR, NCCL_MINOR, NCCL_PATCH, CUDA_MAJOR, CUDA_MINOR);
-    fflush(stdout);                                              \
+    fflush(stdout);
     shown = 1;
   }
 }
 
-extern "C" DSOGLOBAL
+NCCL_API(ncclResult_t, ncclCommInitRank, ncclComm_t* newcomm, int ndev, ncclUniqueId commId, int myrank);
 ncclResult_t ncclCommInitRank(ncclComm_t* newcomm, int ndev, ncclUniqueId commId, int myrank) {
   if (myrank == 0) showVersion();
 
@@ -693,14 +772,14 @@ ncclResult_t ncclCommInitRank(ncclComm_t* newcomm, int ndev, ncclUniqueId commId
     goto cleanup;
   }
 
-  res = commBuildMaps(*newcomm, &commId, myrank, gath->ranks, &gath->ringDirectFail);
+  res = commBuildMaps(*newcomm, &commId, myrank, gath->ranks, &gath->globalMemSpaceBroke);
   if (res != ncclSuccess) {
     WARN("rank %d failed to build comm maps", myrank);
     goto cleanup;
   }
 
-  syncRingDirect(gath, &((*newcomm)->useRemoteRecv));
-  INFO("PushToRecv algos are %s\n", (*newcomm)->useRemoteRecv ? "enabled" : "disabled");
+  syncRingDirect(gath, &((*newcomm)->globalMemSpace));
+  INFO("Global device memory space is %s", (*newcomm)->globalMemSpace ? "enabled" : "disabled");
 
   res = closeGather(gath, ndev); // includes a barrier
   gath = NULL;
@@ -709,6 +788,13 @@ ncclResult_t ncclCommInitRank(ncclComm_t* newcomm, int ndev, ncclUniqueId commId
     goto cleanup;
   }
 
+  res = devCommSetup(*newcomm);
+  if (res != ncclSuccess) {
+    WARN("rank %d failed to copy dcomm", myrank);
+    goto cleanup;
+  }
+
+  res = ncclSuccess;
   goto final;
 
   cleanup:
@@ -727,7 +813,7 @@ ncclResult_t ncclCommInitRank(ncclComm_t* newcomm, int ndev, ncclUniqueId commId
   return res;
 }
 
-extern "C" DSOGLOBAL
+NCCL_API(ncclResult_t, ncclCommInitAll, ncclComm_t* comms, int ndev, const int* devlist);
 ncclResult_t ncclCommInitAll(ncclComm_t* comms, int ndev, const int* devlist) {
   initDebug();
 
@@ -741,7 +827,7 @@ ncclResult_t ncclCommInitAll(ncclComm_t* comms, int ndev, const int* devlist) {
   char busId[13];
   nvmlDevice_t nvmlHandle;
   int affinity_set = 0;
-  int ringDirectFail = 0; // Assume direct access to recv ptr OK
+  int globalMemSpaceBroke = 0; // Assume direct access to recv ptr OK
 
   res = wrapSymbols();
   if (res != ncclSuccess) {
@@ -812,16 +898,24 @@ ncclResult_t ncclCommInitAll(ncclComm_t* comms, int ndev, const int* devlist) {
   for(rank=0; rank<ndev; ++rank) {
     comm = comms[rank];
     cudaSetDevice(comm->cudaDev);
-    res = commBuildMaps(comm, NULL, rank, ranks, &ringDirectFail);
+    res = commBuildMaps(comm, NULL, rank, ranks, &globalMemSpaceBroke);
     if (res != ncclSuccess) {
       WARN("rank %d failed to build comm maps", rank);
       goto cleanup;
     }
   }
 
-  INFO("PushToRecv algos are %s\n", (ringDirectFail) ? "disabled" : "enabled");
+  INFO("Global device memory space is %s", (globalMemSpaceBroke) ? "disabled" : "enabled");
   for(rank=0; rank<ndev; ++rank) {
-    comms[rank]->useRemoteRecv = ringDirectFail ? 0 : 1;
+    comms[rank]->globalMemSpace = globalMemSpaceBroke ? 0 : 1;
+  }
+ 
+  for(rank=0; rank<ndev; ++rank) {
+    res = devCommSetup(comms[rank]);
+    if (res != ncclSuccess) {
+      WARN("rank %d failed to copy dcomm", rank);
+      goto cleanup;
+    }
   }
 
   free(ranks);
@@ -845,8 +939,7 @@ ncclResult_t ncclCommInitAll(ncclComm_t* comms, int ndev, const int* devlist) {
   return res;
 }
 
-
-extern "C" DSOGLOBAL
+NCCL_API(void, ncclCommDestroy, ncclComm_t comm);
 void ncclCommDestroy(ncclComm_t comm) {
   if (comm == NULL)
     return;
@@ -865,7 +958,7 @@ void ncclCommDestroy(ncclComm_t comm) {
     cudaSetDevice(savedDevice);
 }
 
-extern "C" DSOGLOBAL
+NCCL_API(const char*, ncclGetErrorString, ncclResult_t code);
 const char* ncclGetErrorString(ncclResult_t code) {
   switch (code) {
   case ncclSuccess                : return "no error";
@@ -887,21 +980,21 @@ const char* ncclGetErrorString(ncclResult_t code) {
   return "unknown result code";
 }
 
-extern "C" DSOGLOBAL
+NCCL_API(ncclResult_t, ncclCommCount, const ncclComm_t comm, int* count);
 ncclResult_t ncclCommCount(const ncclComm_t comm, int* count) {
-  *count = comm->nDev;
+  *count = comm->nRanks;
   return ncclSuccess;
 }
 
-extern "C" DSOGLOBAL
+NCCL_API(ncclResult_t, ncclCommCuDevice, const ncclComm_t comm, int* devid);
 ncclResult_t ncclCommCuDevice(const ncclComm_t comm, int* devid) {
   *devid = comm->cudaDev;
   return ncclSuccess;
 }
 
-extern "C" DSOGLOBAL
+NCCL_API(ncclResult_t, ncclCommUserRank, const ncclComm_t comm, int* rank);
 ncclResult_t ncclCommUserRank(const ncclComm_t comm, int* rank) {
-  *rank = comm->userFromRing[comm->ncclId];
+  *rank = comm->rank;
   return ncclSuccess;
 }
 

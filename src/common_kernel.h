@@ -1,7 +1,7 @@
 /*************************************************************************
  * Copyright (c) 2015-2016, NVIDIA CORPORATION. All rights reserved.
  *
- * See LICENCE.txt for license information
+ * See LICENSE.txt for license information
  ************************************************************************/
 
 
@@ -245,7 +245,7 @@ __device__ inline void ReduceOrCopy(const int tid,
     volatile T * __restrict__ dest0, volatile T * __restrict__ dest1,
     const volatile T * __restrict__ src0, const volatile T * __restrict__ src1,
     int N) {
-  if (N==0) {
+  if (N<=0) {
     return;
   }
 
@@ -453,6 +453,77 @@ __device__ inline void CalcLastChunk(int * const bigSliceN,
   // done recalculating
   *numSlices = *numBigSlices +
       *numSmallSlices + 1;
+}
+
+// Kernel launch
+template<typename T>
+struct KernelArgs {
+  // general parameters
+  int nRanks;
+  int root;
+  int buffSize;
+  int N;
+  int opIndex;
+  volatile int * __restrict__ opCounter;
+  bool pushrecv;
+
+  // some pre-computed sizes
+  int SliceSize;
+  int SliceOffset;
+  int ChunkSize;
+  int NumChunks;
+
+  // local and remote input, output, and buffer
+  const T * __restrict__ ThisInput;
+  T * __restrict__ ThisOutput;
+
+  DevRing<char>* ring;
+};
+
+template<typename T>
+void ArgsSetup(KernelArgs<T> *args, const void* sendbuff, void* recvbuff,
+		const int root, const int count, ncclComm *comm) {
+  args->nRanks = comm->nRanks;
+  args->root = root;
+  args->buffSize = comm->buffSize;
+  args->N = count;
+  args->opIndex = comm->opSched;
+  args->opCounter = comm->opCounter;
+  args->ThisInput = (const T*)sendbuff;
+  args->ThisOutput = (T*)recvbuff;
+  args->ring = comm->devRing;
+  args->pushrecv = comm->globalMemSpace;
+}
+
+#define LAUNCH_KERNEL(K, THREADS, UNROLL, FUNC, T, \
+		args, stream) do { \
+  dim3 grid(1, 1, 1); \
+  dim3 block(THREADS+1, 1, 1); \
+  void* argptrs[] = {&args}; \
+  CUDACHECK(cudaLaunchKernel( \
+            (void*)K<THREADS, UNROLL, FUNC, T>, \
+            grid, block, argptrs, 0, stream)); \
+} while (0)
+
+template <typename T>
+__device__ inline void incrementOpCounter(const KernelArgs<T> *args) {
+  // increment comm's operation counts
+  __threadfence_system(); // Technically need to ensure that cleared flags
+  // are visible before incrementing op counter.
+  *args->opCounter = args->opIndex+1;
+}
+
+template <int THREADS, typename T> __device__ __forceinline__
+void LoadRing(const DevRing<char>* src, DevRing<T>* dst) {
+  enum { NUM_WORDS = sizeof(DevRing<char>) / sizeof(long long) };
+  static_assert(sizeof(DevRing<char>) % sizeof(long long) == 0, "Bad alignment");
+  static_assert(THREADS >= NUM_WORDS, "Not enough threads to load DevRing");
+  static_assert(sizeof(DevRing<char>) == sizeof(DevRing<T>), "DevRing size mismatch");
+  long long* lldst = reinterpret_cast<long long*>(dst);
+  const long long* llsrc = reinterpret_cast<const long long*>(src);
+  if (threadIdx.x < NUM_WORDS) {
+    lldst[threadIdx.x] = llsrc[threadIdx.x];
+  }
 }
 
 

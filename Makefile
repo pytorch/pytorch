@@ -7,7 +7,9 @@
 CUDA_HOME ?= /usr/local/cuda
 PREFIX ?= /usr/local
 VERBOSE ?= 0
+KEEP ?= 0
 DEBUG ?= 0
+PROFAPI ?= 0
 BUILDDIR ?= build
 
 CUDA_LIB ?= $(CUDA_HOME)/lib64
@@ -19,7 +21,7 @@ NVCC_GENCODE ?= -gencode=arch=compute_35,code=sm_35 \
                 -gencode=arch=compute_52,code=sm_52 \
                 -gencode=arch=compute_52,code=compute_52
 
-CXXFLAGS   := -I$(CUDA_INC) -fPIC -fvisibility=hidden
+CXXFLAGS   := -I$(CUDA_INC) -fPIC -fvisibility=hidden 
 NVCUFLAGS  := -ccbin $(CXX) $(NVCC_GENCODE) -lineinfo -std=c++11 -maxrregcount 96
 # Use addprefix so that we can specify more than one path
 LDFLAGS    := $(addprefix -L,${CUDA_LIB}) -lcudart -lrt
@@ -39,10 +41,17 @@ else
 .SILENT:
 endif
 
+ifneq ($(KEEP), 0)
+NVCUFLAGS += -keep
+endif
+
+ifneq ($(PROFAPI), 0)
+CXXFLAGS += -DPROFAPI
+endif
 
 NCCL_MAJOR   := 1
-NCCL_MINOR   := 2
-NCCL_PATCH   := 3
+NCCL_MINOR   := 3
+NCCL_PATCH   := 0
 CXXFLAGS  += -DNCCL_MAJOR=$(NCCL_MAJOR) -DNCCL_MINOR=$(NCCL_MINOR) -DNCCL_PATCH=$(NCCL_PATCH)
 
 CUDA_VERSION ?= $(shell ls $(CUDA_LIB)/libcudart.so.* | head -1 | rev | cut -d "." -f -2 | rev)
@@ -50,7 +59,7 @@ CUDA_MAJOR = $(shell echo $(CUDA_VERSION) | cut -d "." -f 1)
 CUDA_MINOR = $(shell echo $(CUDA_VERSION) | cut -d "." -f 2)
 CXXFLAGS  += -DCUDA_MAJOR=$(CUDA_MAJOR) -DCUDA_MINOR=$(CUDA_MINOR)
 
-.PHONY : lib clean debclean test mpitest install
+.PHONY : lib clean test mpitest install deb debian debclean
 .DEFAULT : lib
 
 INCEXPORTS  := nccl.h
@@ -103,6 +112,7 @@ install : lib
 	cp -P -v $(BUILDDIR)/lib/* $(PREFIX)/lib/
 	cp -v $(BUILDDIR)/include/* $(PREFIX)/include/
 
+
 #### TESTS ####
 
 TEST_ONLY ?= 0
@@ -132,7 +142,7 @@ MPITESTBINS:= $(patsubst %, $(MPITSTDIR)/%, $(MPITESTS))
 
 test : $(TESTBINS)
 
-$(TSTDIR)/% : test/single/%.cu $(TSTDEP)
+$(TSTDIR)/% : test/single/%.cu test/include/*.h $(TSTDEP) 
 	@printf "Building  %-25s > %-24s\n" $< $@
 	mkdir -p $(TSTDIR)
 	$(NVCC) $(TSTINC) $(NVCUFLAGS) --compiler-options "$(CXXFLAGS)" -o $@ $< $(TSTLIB) -lcuda -lcurand -lnvToolsExt
@@ -144,7 +154,7 @@ $(TSTDIR)/% : test/single/%.cu $(TSTDEP)
 
 mpitest : $(MPITESTBINS)
 
-$(MPITSTDIR)/% : test/mpi/%.cu $(TSTDEP)
+$(MPITSTDIR)/% : test/mpi/%.cu $(TSTDEP) 
 	@printf "Building  %-25s > %-24s\n" $< $@
 	mkdir -p $(MPITSTDIR)
 	$(NVCC) $(MPIFLAGS) $(TSTINC) $(NVCUFLAGS) --compiler-options "$(CXXFLAGS)" -o $@ $< $(TSTLIB) -lcurand

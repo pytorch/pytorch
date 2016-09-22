@@ -1,7 +1,7 @@
 /*************************************************************************
  * Copyright (c) 2015-2016, NVIDIA CORPORATION. All rights reserved.
  *
- * See LICENCE.txt for license information
+ * See LICENSE.txt for license information
  ************************************************************************/
 
 #include "libwrap.h"
@@ -25,7 +25,6 @@ ncclResult_t wrapSymbols(void) {
     return ncclSuccess;
 
   static void* nvmlhandle = NULL;
-  static void* cuhandle = NULL;
   void* tmp;
   void** cast;
 
@@ -38,20 +37,11 @@ ncclResult_t wrapSymbols(void) {
     }
   }
 
-  cuhandle = dlopen("libcuda.so", RTLD_NOW);
-  if (!cuhandle) {
-    cuhandle = dlopen("libcuda.so.1", RTLD_NOW);
-    if (!cuhandle) {
-      WARN("Failed to open libcuda.so[.1]");
-      goto teardown;
-    }
-  }
-
   #define LOAD_SYM(handle, symbol, funcptr) do {         \
     cast = (void**)&funcptr;                             \
     tmp = dlsym(handle, symbol);                         \
     if (tmp == NULL) {                                   \
-      WARN("dlsym failed on %s - %s", symbol, dlerror()); \
+      WARN("dlsym failed on %s - %s", symbol, dlerror());\
       goto teardown;                                     \
     }                                                    \
     *cast = tmp;                                         \
@@ -76,7 +66,6 @@ ncclResult_t wrapSymbols(void) {
   nvmlInternalDeviceSetCpuAffinity = NULL;
   nvmlInternalDeviceClearCpuAffinity = NULL;
 
-  if (cuhandle   != NULL) dlclose(cuhandle);
   if (nvmlhandle != NULL) dlclose(nvmlhandle);
   return ncclSystemError;
 }
@@ -84,7 +73,7 @@ ncclResult_t wrapSymbols(void) {
 
 ncclResult_t wrapNvmlInit(void) {
   if (nvmlInternalInit == NULL) {
-    WARN("lib wrapper not initilaized.");
+    WARN("lib wrapper not initialized.");
     return ncclLibWrapperNotSet;
   }
   RetCode ret = nvmlInternalInit();
@@ -98,7 +87,7 @@ ncclResult_t wrapNvmlInit(void) {
 
 ncclResult_t wrapNvmlShutdown(void) {
   if (nvmlInternalShutdown == NULL) {
-    WARN("lib wrapper not initilaized.");
+    WARN("lib wrapper not initialized.");
     return ncclLibWrapperNotSet;
   }
   RetCode ret = nvmlInternalShutdown();
@@ -112,7 +101,7 @@ ncclResult_t wrapNvmlShutdown(void) {
 
 ncclResult_t wrapNvmlDeviceGetHandleByPciBusId(const char* pciBusId, nvmlDevice_t* device) {
   if (nvmlInternalDeviceGetHandleByPciBusId == NULL) {
-    WARN("lib wrapper not initilaized.");
+    WARN("lib wrapper not initialized.");
     return ncclLibWrapperNotSet;
   }
   RetCode ret = nvmlInternalDeviceGetHandleByPciBusId(pciBusId, device);
@@ -126,7 +115,7 @@ ncclResult_t wrapNvmlDeviceGetHandleByPciBusId(const char* pciBusId, nvmlDevice_
 
 ncclResult_t wrapNvmlDeviceGetIndex(nvmlDevice_t device, unsigned* index) {
   if (nvmlInternalDeviceGetIndex == NULL) {
-    WARN("lib wrapper not initilaized.");
+    WARN("lib wrapper not initialized.");
     return ncclLibWrapperNotSet;
   }
   RetCode ret = nvmlInternalDeviceGetIndex(device, index);
@@ -140,7 +129,7 @@ ncclResult_t wrapNvmlDeviceGetIndex(nvmlDevice_t device, unsigned* index) {
 
 ncclResult_t wrapNvmlDeviceSetCpuAffinity(nvmlDevice_t device) {
   if (nvmlInternalDeviceSetCpuAffinity == NULL) {
-    WARN("lib wrapper not initilaized.");
+    WARN("lib wrapper not initialized.");
     return ncclLibWrapperNotSet;
   }
   RetCode ret = nvmlInternalDeviceSetCpuAffinity(device);
@@ -154,7 +143,7 @@ ncclResult_t wrapNvmlDeviceSetCpuAffinity(nvmlDevice_t device) {
 
 ncclResult_t wrapNvmlDeviceClearCpuAffinity(nvmlDevice_t device) {
   if (nvmlInternalInit == NULL) {
-    WARN("lib wrapper not initilaized.");
+    WARN("lib wrapper not initialized.");
     return ncclLibWrapperNotSet;
   }
   RetCode ret = nvmlInternalDeviceClearCpuAffinity(device);
@@ -165,3 +154,4 @@ ncclResult_t wrapNvmlDeviceClearCpuAffinity(nvmlDevice_t device) {
   }
   return ncclSuccess;
 }
+
