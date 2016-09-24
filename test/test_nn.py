@@ -203,6 +203,21 @@ class TestNN(NNTestCase):
         module.__repr__()
         str(module)
 
+    def test_parameters(self):
+        def num_params(module):
+            return len(list(module.parameters()))
+        class Net(nn.Container):
+            def __init__(self):
+                super(Net, self).__init__(
+                    l1=l,
+                    l2=l
+                )
+        l = nn.Linear(10, 20)
+        n = Net()
+        s = nn.Sequential(l, l, l, l)
+        self.assertEqual(num_params(l), 2)
+        self.assertEqual(num_params(n), 2)
+        self.assertEqual(num_params(s), 2)
 
     def test_Dropout(self):
         input = torch.Tensor(1000)

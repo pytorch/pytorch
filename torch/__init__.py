@@ -24,10 +24,20 @@ del old_flags
 ################################################################################
 
 def typename(o):
-    module = o.__module__ + '.'
-    if module == '__builtin__.':
-        module = ''
-    return module + o.__class__.__name__
+    module = ''
+    class_name = ''
+    if hasattr(o, '__module__') and o.__module__ != 'builtins' \
+            and o.__module__ != '__builtin__' and o.__module__ is not None:
+        module = o.__module__ + '.'
+
+    if hasattr(o, '__qualname__'):
+        class_name = o.__qualname__
+    elif hasattr(o, '__name__'):
+        class_name = o.__name__
+    else:
+        class_name = o.__class__.__name__
+
+    return module + class_name
 
 
 def is_tensor(obj):
