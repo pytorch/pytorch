@@ -35,7 +35,7 @@ class Embedding(Module):
         self.norm_type = norm_type
         self.scale_grad_by_freq = scale_grad_by_freq
 
-        weight_t = torch.DoubleTensor(num_embeddings, embedding_dim)
+        weight_t = torch.Tensor(num_embeddings, embedding_dim)
         self.weight = Variable(weight_t)
 
         self.reset_parameters()

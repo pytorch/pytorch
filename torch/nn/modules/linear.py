@@ -10,7 +10,7 @@ class Linear(Module):
     """Applies a linear transformation to the incoming data, y = Ax + b
     The input is a 2D mini-batch of samples, each of size in_features
     The output will be a 2D Tensor of size mini-batch x out_features
-    
+
     Args:
         in_features: size of each input sample
         out_features: size of each output sample
@@ -30,8 +30,8 @@ class Linear(Module):
         self.in_features = in_features
         self.out_features = out_features
 
-        self.weight = Variable(torch.DoubleTensor(out_features, in_features))
-        self.bias = Variable(torch.DoubleTensor(out_features))
+        self.weight = Variable(torch.Tensor(out_features, in_features))
+        self.bias = Variable(torch.Tensor(out_features))
 
         self.reset_parameters()
 

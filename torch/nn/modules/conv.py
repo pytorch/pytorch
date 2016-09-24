@@ -8,13 +8,13 @@ from .utils import _pair, _triple
 
 class Conv1d(Module):
     """Applies a 1D convolution over an input signal composed of several input
-    planes. 
+    planes.
 
     ```
     The output value of the layer with input (b x iC x W) and output (b x oC x oW)
     can be precisely described as:
-    output[b_i][oc_i][w_i] = bias[oc_i] 
-                + sum_iC sum_{ow = 0, oW-1} sum_{kw = 0 to kW-1} 
+    output[b_i][oc_i][w_i] = bias[oc_i]
+                + sum_iC sum_{ow = 0, oW-1} sum_{kw = 0 to kW-1}
                     weight[oc_i][ic_i][kw] * input[b_i][ic_i][stride_w * ow + kw)]
     ```
 
@@ -25,8 +25,8 @@ class Conv1d(Module):
     Args:
         in_channels: The number of expected input channels in the image given as input
         out_channels: The number of output channels the convolution layer will produce
-        kernel_size: the size of the convolving kernel. 
-        stride: the stride of the convolving kernel. 
+        kernel_size: the size of the convolving kernel.
+        stride: the stride of the convolving kernel.
     Input Shape: [ * , in_channels  , * ] : Input is minibatch x in_channels x iW
     Output Shape:[ * , out_channels , * ]  : Output shape is precisely minibatch x out_channels x floor((iW  + 2*padW - kW) / dW + 1)
     Members:
@@ -46,9 +46,9 @@ class Conv1d(Module):
         self.stride = stride
 
         kernel_elements = self.in_features * self.kernel_size
-        self.weight = Variable(torch.DoubleTensor(out_features,
+        self.weight = Variable(torch.Tensor(out_features,
                 kernel_elements))
-        self.bias = Variable(torch.DoubleTensor(out_features))
+        self.bias = Variable(torch.Tensor(out_features))
 
         self.reset_parameters()
 
@@ -65,13 +65,13 @@ class Conv1d(Module):
 
 class Conv2d(Module):
     """Applies a 2D convolution over an input image composed of several input
-    planes. 
+    planes.
 
     ```
     The output value of the layer with input (b x iC x H x W) and output (b x oC x oH x oW)
     can be precisely described as:
-    output[b_i][oc_i][h_i][w_i] = bias[oc_i] 
-                + sum_iC sum_{oh = 0, oH-1} sum_{ow = 0, oW-1} sum_{kh = 0 to kH-1} sum_{kw = 0 to kW-1} 
+    output[b_i][oc_i][h_i][w_i] = bias[oc_i]
+                + sum_iC sum_{oh = 0, oH-1} sum_{ow = 0, oW-1} sum_{kh = 0 to kH-1} sum_{kw = 0 to kW-1}
                     weight[oc_i][ic_i][kh][kw] * input[b_i][ic_i][stride_h * oh + kh)][stride_w * ow + kw)]
     ```
 
@@ -114,12 +114,12 @@ class Conv2d(Module):
         if self.is_dilated:
             self.dilh, self.dilw = _pair(dilation)
 
-        self.weight = Variable(torch.DoubleTensor(self.out_channels,
+        self.weight = Variable(torch.Tensor(self.out_channels,
                 self.in_channels, self.kh, self.kw))
         if no_bias:
             self.bias = None
         else:
-            self.bias = Variable(torch.DoubleTensor(self.out_channels))
+            self.bias = Variable(torch.Tensor(self.out_channels))
 
         self.reset_parameters()
 
@@ -144,7 +144,7 @@ class Conv2d(Module):
 
 class FullConv2d(Conv2d):
     """Applies a 2D deconvolution operator over an input image composed of several input
-    planes. 
+    planes.
     The deconvolution operator multiplies each input value element-wise by a learnable kernel,
     and sums over the outputs from all input feature planes.
     This module can be seen as the exact reverse of the Conv2d module.
@@ -187,7 +187,7 @@ class FullConv2d(Conv2d):
 
 class Conv3d(Module):
     """Applies a 3D convolution over an input image composed of several input
-    planes. 
+    planes.
 
     Note that depending of the size of your kernel, several (of the last)
     columns or rows of the input image might be lost. It is up to the user
@@ -222,12 +222,12 @@ class Conv3d(Module):
         self.dt, self.dh, self.dw = _triple(stride)
         self.padt, self.padh, self.padw = _triple(padding)
 
-        self.weight = Variable(torch.DoubleTensor(self.out_channels,
+        self.weight = Variable(torch.Tensor(self.out_channels,
                 self.in_channels, self.kt, self.kh, self.kw))
         if no_bias:
             self.bias = None
         else:
-            self.bias = Variable(torch.DoubleTensor(self.out_channels))
+            self.bias = Variable(torch.Tensor(self.out_channels))
 
         self.reset_parameters()
 
@@ -248,7 +248,7 @@ class Conv3d(Module):
 
 class FullConv3d(Conv3d):
     """Applies a 3D deconvolution operator over an input image composed of several input
-    planes. 
+    planes.
     The deconvolution operator multiplies each input value element-wise by a learnable kernel,
     and sums over the outputs from all input feature planes.
     This module can be seen as the exact reverse of the Conv3d module.
@@ -283,12 +283,12 @@ class FullConv3d(Conv3d):
         self.dt, self.dh, self.dw = _triple(stride)
         self.padt, self.padh, self.padw = _triple(padding)
 
-        self.weight = Variable(torch.DoubleTensor(self.in_channels,
+        self.weight = Variable(torch.Tensor(self.in_channels,
                 self.out_channels, self.kt, self.kh, self.kw))
         if no_bias:
             self.bias = None
         else:
-            self.bias = Variable(torch.DoubleTensor(self.out_channels))
+            self.bias = Variable(torch.Tensor(self.out_channels))
 
         self.reset_parameters()
 
