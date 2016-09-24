@@ -31,6 +31,7 @@ class Module(object):
 
     def cuda(self, device_id=None):
         import torch.cuda
+        import torch.nn.cuda
         if device_id is not None:
             return self.type(torch.cuda.FloatTensor, device_id)
         else:
