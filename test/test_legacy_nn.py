@@ -568,7 +568,6 @@ def prepare_tests():
         'NLLLoss': 'ClassNLLCriterion',
         'NLLLoss2d': 'SpatialClassNLLCriterion',
         'KLDivLoss': 'DistKLDivCriterion',
-        'CELoss': 'CrossEntropyCriterion',
     }
     for test in tests:
         add_test(test)

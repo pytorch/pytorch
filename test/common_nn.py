@@ -253,12 +253,12 @@ criterion_tests = [
         desc='weights'
     ),
     dict(
-        module_name='CELoss',
+        module_name='CrossEntropyLoss',
         input=torch.randn(15, 10),
         target=torch.Tensor(15).uniform_().mul(10).floor().long()
     ),
     dict(
-        module_name='CELoss',
+        module_name='CrossEntropyLoss',
         constructor_args=(torch.rand(10),),
         input=torch.randn(15, 10),
         target=torch.Tensor(15).uniform_().mul(10).floor().long(),

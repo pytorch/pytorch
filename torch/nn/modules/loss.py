@@ -73,7 +73,7 @@ class SoftMarginLoss(_Loss):
     pass
 
 
-class CELoss(_WeighedLoss):
+class CrossEntropyLoss(_WeighedLoss):
 
     def forward(self, input, target):
         _assert_no_grad(target)
