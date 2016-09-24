@@ -65,11 +65,26 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
             tensor._write_metadata(f)
 
     def save_storages(f):
+        storage_views = []
+        storage_views_roots = {}
+
+        for key, storage in serialized_storages.items():
+            root, offset = storage._root_storage()
+            if root is not storage:
+                storage_views_roots[root._cdata] = root
+                storage_views.append((storage._cdata, root._cdata, offset,
+                    storage.size()))
+        for view_info in storage_views:
+            del serialized_storages[view_info[0]]
+        serialized_storages.update(storage_views_roots)
+
         pickle_module.dump(len(serialized_storages), f, protocol=pickle_protocol)
         for key, storage in serialized_storages.items():
             pickle_module.dump((key, type(storage)), f, protocol=pickle_protocol)
             f.flush()
             storage._write_file(f)
+
+        pickle_module.dump(storage_views, f, protocol=pickle_protocol)
 
     def pickle_objects(f):
         pickler = pickle_module.Pickler(f, protocol=pickle_protocol)
@@ -104,19 +119,28 @@ def load(f, pickle_module=pickle):
     with closing(tarfile.open(fileobj=f, mode='r:', format=tarfile.PAX_FORMAT)) as tar, \
          mkdtemp() as tmpdir:
 
-        def extract(name, init):
-            tar.extract(name, path=tmpdir)
-            with open(os.path.join(tmpdir, name), 'rb', 0) as f:
-                num_storages = pickle_module.load(f)
-                for i in range(num_storages):
-                    args = pickle_module.load(f)
-                    key, args = args[0], args[1:]
-                    obj = init(f, *args)
-                    deserialized_objects[key] = obj
+        def extract(f, init):
+            num_storages = pickle_module.load(f)
+            for i in range(num_storages):
+                args = pickle_module.load(f)
+                key, args = args[0], args[1:]
+                obj = init(*args)
+                deserialized_objects[key] = obj
 
-        extract('storages', lambda f, storage_type: storage_type._new_with_file(f))
-        extract('tensors', lambda f, tensor_type, storage_id: \
-                tensor_type._new_with_metadata_file(f, deserialized_objects.get(storage_id, None)))
+        tar.extract('storages', path=tmpdir)
+        with open(os.path.join(tmpdir, 'storages'), 'rb', 0) as f:
+            extract(f, lambda storage_type: storage_type._new_with_file(f))
+            storage_views = pickle_module.load(f)
+            for target_cdata, root_cdata, offset, size in storage_views:
+                root = deserialized_objects[root_cdata]
+                deserialized_objects[target_cdata] = root[offset:offset+size]
+
+        tar.extract('tensors', path=tmpdir)
+        with open(os.path.join(tmpdir, 'tensors'), 'rb', 0) as f:
+            def deserialize_tensor(tensor_type, storage_id):
+                storage = deserialized_objects.get(storage_id, None)
+                return tensor_type._new_with_metadata_file(f, storage)
+            extract(f, deserialize_tensor)
 
         pickle_file = tar.extractfile('pickle')
         unpickler = pickle_module.Unpickler(pickle_file)
