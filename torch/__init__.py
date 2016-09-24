@@ -24,7 +24,10 @@ del old_flags
 ################################################################################
 
 def typename(o):
-    return o.__module__ + "." + o.__class__.__name__
+    module = o.__module__ + '.'
+    if module == '__builtin__.':
+        module = ''
+    return module + o.__class__.__name__
 
 
 def is_tensor(obj):

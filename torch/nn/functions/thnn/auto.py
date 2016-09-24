@@ -1,5 +1,6 @@
 from collections import defaultdict
 
+import torch
 from torch._thnn.utils import parse_header, THNN_H_PATH
 from torch.autograd.function import Function, InplaceFunction
 from torch._thnn import type2backend
@@ -107,6 +108,12 @@ def _make_function_class(class_name, update_output, update_grad_input, acc_grad_
     def forward(self, input, *params):
         self._backend = type2backend[type(input)]
 
+        for param in params:
+            if type(param) != type(input):
+                raise RuntimeError("input type ({}) doesn't match the type of "
+                        "a parameter tensor ({})".format(torch.typename(input),
+                            torch.typename(param)))
+
         # Allocate temporary buffers and insert them into additional_args
         self.buffers = defaultdict(type(input))
         additional_args = self._initialize_buffers('update_output')
@@ -118,7 +125,7 @@ def _make_function_class(class_name, update_output, update_grad_input, acc_grad_
             if param.is_optional:
                 args += (None,)
             else:
-                raise TypeError("missing required argument '%s'" % param.name)
+                raise ValueError("missing required argument '%s'" % param.name)
 
         args += tuple(additional_args)
 
