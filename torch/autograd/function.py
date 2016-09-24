@@ -41,7 +41,7 @@ class Function(object):
         if not is_volatile:
             self.needs_input_grad = tuple(arg.requires_grad for arg in input)
             self.requires_grad = any(self.needs_input_grad)
-            self.previous_functions = [(arg.creator, id(arg)) for arg in input]
+            self.previous_functions = [(arg.creator or arg, id(arg)) for arg in input]
 
         raw_output = self.forward(*unpacked_input)
         if not isinstance(raw_output, tuple):
@@ -49,9 +49,10 @@ class Function(object):
 
         if is_volatile:
             output = tuple(Variable(tensor, volatile=True)
-                    for tensor in raw_output)
+                           for tensor in raw_output)
         else:
-            output = tuple(Variable(tensor, self) for tensor in raw_output)
+            output = tuple(Variable(tensor, self, requires_grad=self.requires_grad)
+                           for tensor in raw_output)
             self.output_ids = {id(var): i for i, var in enumerate(output)}
             if self.to_save:
                 # output has to be chained after input, so if the same tensor
@@ -68,7 +69,7 @@ class Function(object):
             if self.non_differentiable is not None:
                 for var in output:
                     if var.data in self.non_differentiable:
-                        var._requires_grad = False
+                        var.requires_grad = False
 
         del self.input  # Remove unnecessary references to input
         del self.non_differentiable  # and output
@@ -76,7 +77,7 @@ class Function(object):
             output = output[0]
         return output
 
-    def _do_backward(self, *grad_output):
+    def _do_backward(self, grad_output, retain_variables):
         grad_input = self.backward(*grad_output)
         if not isinstance(grad_input, tuple):
             grad_input = (grad_input,)
@@ -84,20 +85,18 @@ class Function(object):
             self.__class__.__name__ + ' returned an invalid number of gradient tensors'
 
         self._call_hooks(grad_input, grad_output)
+        if not retain_variables:
+            del self.saved_variables
         return grad_input
 
     def _call_hooks(self, grad_input, grad_output):
-        for hook, idx in self.backward_hooks.values():
-            if idx is None:
-                hook(grad_input, grad_output)
-            else:
-                hook(grad_output[idx])
+        for hook in self.backward_hooks.values():
+            hook(grad_input, grad_output)
 
-    def register_hook(self, name, hook, variable=None):
+    def register_hook(self, name, hook):
         assert name not in self.backward_hooks, \
             "Trying to register a second hook with name {}".format(name)
-        variable_idx = self.output_ids[id(variable)] if variable else None
-        self.backward_hooks[name] = (hook, variable_idx)
+        self.backward_hooks[name] = hook
 
     def remove_hook(self, name):
         assert name in self.backward_hooks, \
@@ -116,4 +115,3 @@ class InplaceFunction(Function):
     def __init__(self, inplace=False):
         super(InplaceFunction, self).__init__()
         self.inplace = inplace
-

@@ -1,9 +1,7 @@
-from .engine import ExecutionEngine
+from collections import OrderedDict
 
 
 class Variable(object):
-
-    _execution_engine = ExecutionEngine()
 
     _fallthrough_methods = [
         'size',
@@ -22,20 +20,17 @@ class Variable(object):
     ]
 
     def __init__(self, tensor, creator=None, volatile=False, requires_grad=True):
-        if volatile:
-            requires_grad = False
-        if not volatile and creator is None:
-            creator = Leaf(self, requires_grad)
         self.creator = creator
         self.volatile = volatile
         self.dirty = False
-        self._requires_grad = None
+        self.requires_grad = (not volatile) and requires_grad
         self._data = tensor
         self._grad = None
+        self.backward_hooks = OrderedDict()
 
     @property
     def grad(self):
-        if not self.volatile and self.requires_grad:
+        if self.requires_grad:
             # TODO: this won't have to be zeroed in the future
             self._grad = self._grad or self.data.new(self.data.size()).zero_()
         return self._grad
@@ -45,14 +40,6 @@ class Variable(object):
         if self.dirty:
             raise RuntimeError('Accessing data of a dirty variable!')
         return self._data
-
-    @property
-    def requires_grad(self):
-        if self.volatile:
-            return False
-        if self._requires_grad is not None:
-            return self._requires_grad
-        return self.creator.requires_grad
 
     def mark_dirty(self):
         self.dirty = True
@@ -67,13 +54,13 @@ class Variable(object):
         return Index(key)(self)
 
     def __deepcopy__(self, memo):
-        if isinstance(self.creator, Leaf):
+        if self.creator is None:
             return Variable(self.data.clone(), requires_grad=self.requires_grad,
                     volatile=self.volatile)
         raise RuntimeError("Only Variables created explicitly by the user "
                 "(graph leaves) support the deepcopy protocol at the moment")
 
-    def backward(self, gradient=None):
+    def backward(self, gradient=None, retain_variables=False):
         if self.volatile:
             raise RuntimeError('calling backward on a volatile variable')
         if not self.requires_grad:
@@ -82,24 +69,46 @@ class Variable(object):
             if self.data.numel() != 1:
                 raise RuntimeError('backward should be called only on a scalar (i.e. 1-element tensor) or with gradient w.r.t. the variable')
             gradient = self.data.new(1).fill_(1)
-        self._execution_engine.run_backward(self, gradient)
+        self._execution_engine.run_backward(self, gradient, retain_variables)
 
     def __repr__(self):
         if self.dirty:
             return 'Variable used in an in-place operation'
         return 'Variable containing:' + self.data.__repr__()
 
+    def _call_hooks(self, grad_output):
+        for hook in self.backward_hooks.values():
+            hook(grad_output)
+
     def register_hook(self, name, hook):
         if self.volatile:
             raise RuntimeError('registering hook on a volatile variable')
         if not self.requires_grad:
             raise RuntimeError("registering hook on a variable that doesn't require gradient")
-        self.creator.register_hook(name, hook, self)
+        if self.creator is not None:
+            idx = self.creator.output_ids[id(self)]
+            self.creator.register_hook(name, lambda gi, go: hook(go[idx]))
+        else:
+            assert name not in self.backward_hooks, \
+                "Trying to register a second hook with name {}".format(name)
+            self.backward_hooks[name] = hook
 
     def remove_hook(self, name):
         if self.volatile:
             raise RuntimeError("volatile variables don't support hooks")
-        self.creator.remove_hook(name)
+        if self.creator is not None:
+            self.creator.remove_hook(name)
+        else:
+            assert name in self.backward_hooks, \
+                "Trying to remove an inexistent hook with name {}".format(name)
+            del self.backward_hooks[name]
+
+    def _do_backward(self, grad_output, retain_variables):
+        assert len(grad_output) == 1
+        assert not self.dirty
+        self._call_hooks(grad_output[0])
+        self.grad.add_(grad_output[0])
+        return tuple()
 
     def contiguous_(self):
         self._data = self.data.contiguous()
@@ -428,6 +437,7 @@ class Variable(object):
         return Negate()(self)
 
 
-from .leaf import Leaf
 from .functions import *
+from .engine import ExecutionEngine
 
+Variable._execution_engine = ExecutionEngine()

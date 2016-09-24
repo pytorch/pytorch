@@ -3,8 +3,7 @@ from itertools import product
 from copy import deepcopy
 
 import torch
-from torch.autograd import Variable
-from torch.autograd.leaf import Leaf
+from torch.autograd import Variable, Function
 
 
 torch.set_default_tensor_type('torch.DoubleTensor')
@@ -27,7 +26,7 @@ def to_gpu(obj, type_map={}):
     elif torch.is_storage(obj):
         return obj.new().resize_(obj.size()).copy_(obj)
     elif isinstance(obj, Variable):
-        assert type(obj.creator) == Leaf
+        assert obj.creator is None
         t = type_map.get(type(obj.data), get_gpu_type(type(obj.data)))
         return Variable(obj.data.clone().type(t), requires_grad=obj.requires_grad)
     elif isinstance(obj, list):
@@ -147,4 +146,3 @@ def get_numerical_jacobian(fn, input, target):
             d_tensor[i] = outb
 
     return jacobian
-
