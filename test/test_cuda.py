@@ -199,6 +199,7 @@ tests = [
 
 custom_precision = {
     'addbmm': 1e-4,
+    'addmm': 1e-4,
     'rsqrt': 1e-4,
     'cumprod': 1e-4,
 }
