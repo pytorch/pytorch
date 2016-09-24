@@ -110,9 +110,9 @@ torch._tensor_classes.add(ByteTensor)
 def _cuda(self, idx=None):
     # This already is a CUDA tensor.
     # Let's check if it needs to be transfered to another GPU.
-    if hasattr(self, 'getDevice'):
+    if hasattr(self, 'get_device'):
         target_device = idx if idx else torch._C._cuda_getDevice()
-        if self.getDevice() != target_device:
+        if self.get_device() != target_device:
             with device(target_device):
                 return type(self)(self.size()).copy_(self)
         else:

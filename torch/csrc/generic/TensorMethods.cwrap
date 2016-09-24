@@ -190,6 +190,7 @@ THTensor* THPTensor_(fromNumpy)(PyObject *numpy_array) {
 
 [[
   name: getDevice
+  python_name: get_device
   defined_if: IS_CUDA
   return: long
   arguments:

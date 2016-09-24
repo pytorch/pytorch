@@ -471,7 +471,7 @@ static PyMethodDef THPStorage_(methods)[] = {
   {"_shared_incref", (PyCFunction)THPStorage_(_sharedIncref), METH_NOARGS, NULL},
 #endif
 #ifdef THC_GENERIC_FILE
-  {"getDevice", (PyCFunction)THPStorage_(getDevice), METH_NOARGS, NULL},
+  {"get_device", (PyCFunction)THPStorage_(getDevice), METH_NOARGS, NULL},
 #endif
   {"_set_cdata", (PyCFunction)THPStorage_(_setCdata), METH_O, NULL},
   {"_root_storage", (PyCFunction)THPStorage_(_rootStorage), METH_NOARGS, NULL},
