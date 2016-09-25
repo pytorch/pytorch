@@ -10,8 +10,16 @@ from ._utils import _import_dotted_name
 # modules against the _C shared object. Their missing THP symbols will be
 # automatically filled by the dynamic loader.
 import os as _dl_flags
+
+# first check if the os package has the required flags
 if not hasattr(_dl_flags, 'RTLD_GLOBAL') or not hasattr(_dl_flags, 'RTLD_NOW'):
-    import DLFCN as _dl_flags
+    try:
+        # next try if DLFCN exists
+        import DLFCN as _dl_flags
+    except ImportError:
+        # as a last attempt, use compile-time constants
+        import torch._dl as _dl_flags
+        
 old_flags = sys.getdlopenflags()
 sys.setdlopenflags(_dl_flags.RTLD_GLOBAL | _dl_flags.RTLD_NOW)
 from torch._C import *
