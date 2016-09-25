@@ -206,6 +206,12 @@ C = Extension("torch._C",
 )
 extensions.append(C)
 
+DL = Extension("torch._dl",
+    sources=["torch/csrc/dl.c"],
+    language='c',
+)
+extensions.append(DL)
+
 THNN = Extension("torch._thnn._THNN",
     libraries=['TH', 'THNN'],
     sources=['torch/csrc/nn/THNN.cpp'],
