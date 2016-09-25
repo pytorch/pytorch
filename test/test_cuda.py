@@ -317,12 +317,14 @@ for decl in tests:
     for t in types:
         tensor = t()
         gpu_tensor = get_gpu_type(t)()
+        if len(decl) == 3:
+            name, constr, arg_constr = decl
+            desc = ''
+        elif len(decl) == 4:
+            name, constr, arg_constr, desc = decl
+
+        precision = custom_precision.get(name, TestCuda.precision)
         for inplace in (True, False):
-            if len(decl) == 3:
-                name, constr, arg_constr = decl
-                desc = ''
-            elif len(decl) == 4:
-                name, constr, arg_constr, desc = decl
             if inplace:
                 name = name + '_'
             if not hasattr(tensor, name):
@@ -334,8 +336,6 @@ for decl in tests:
             test_name = 'test_' + t.__name__ + '_' + name
             if desc:
                 test_name += '_' + desc
-
-            precision = custom_precision.get(name, TestCuda.precision)
 
             assert not hasattr(TestCase, test_name)
             setattr(TestCuda, test_name, compare_cpu_gpu(constr, arg_constr, name, t, precision))
