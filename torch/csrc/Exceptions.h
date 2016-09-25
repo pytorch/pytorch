@@ -1,6 +1,11 @@
+#ifndef THP_EXCEPTIONS_H
+#define THP_EXCEPTIONS_H
+
 #include <exception>
 #include <stdexcept>
 #include <string>
+
+#include "THP.h"
 
 #define HANDLE_TH_ERRORS                                                       \
   try {
@@ -12,6 +17,8 @@
   }
 
 #define END_HANDLE_TH_ERRORS END_HANDLE_TH_ERRORS_RET(NULL)
+
+extern PyObject *THPException_FatalError;
 
 #ifdef _THP_CORE
 struct THException: public std::exception {
@@ -29,5 +36,8 @@ struct THArgException: public THException {
 
   const int argNumber;
 };
+
+bool THPException_init(PyObject *module);
 #endif
 
+#endif
