@@ -140,6 +140,7 @@ main_libraries = ['TH', 'shm']
 main_sources = [
     "torch/csrc/Module.cpp",
     "torch/csrc/Generator.cpp",
+    "torch/csrc/Exceptions.cpp",
     "torch/csrc/Tensor.cpp",
     "torch/csrc/Storage.cpp",
     "torch/csrc/byte_order.cpp",

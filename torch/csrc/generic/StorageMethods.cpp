@@ -426,6 +426,24 @@ PyObject * THPStorage_(_setCdata)(THPStorage *self, PyObject *new_cdata)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject * THPStorage_(_rootStorage)(THPStorage *self)
+{
+  HANDLE_TH_ERRORS
+  if (!(self->cdata->flag & TH_STORAGE_VIEW)) {
+    return Py_BuildValue("(ON)", self, PyLong_FromLong(0));
+  }
+  THStorage *root = self->cdata;
+  while (root->flag & TH_STORAGE_VIEW)
+    root = root->view;
+  size_t offset = self->cdata->data - root->data;
+  THStorage_(retain)(LIBRARY_STATE root);
+  THPObjectPtr storage = THPStorage_(New)(root);
+  PyObject *result = Py_BuildValue("(NN)", storage.get(), PyLong_FromLong(offset));
+  storage.release();
+  return result;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyMethodDef THPStorage_(methods)[] = {
   {"element_size", (PyCFunction)THPStorage_(elementSize), METH_NOARGS, NULL},
   {"fill_", (PyCFunction)THPStorage_(fill_), METH_O, NULL},
@@ -448,5 +466,6 @@ static PyMethodDef THPStorage_(methods)[] = {
   {"getDevice", (PyCFunction)THPStorage_(getDevice), METH_NOARGS, NULL},
 #endif
   {"_set_cdata", (PyCFunction)THPStorage_(_setCdata), METH_O, NULL},
+  {"_root_storage", (PyCFunction)THPStorage_(_rootStorage), METH_NOARGS, NULL},
   {NULL}
 };

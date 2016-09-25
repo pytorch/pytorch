@@ -2236,8 +2236,7 @@ class TestTorch(TestCase):
         self.assertEqual(c[4], torch.FloatStorage(25).fill_(10), 0)
         c[1].fill_(20)
         self.assertEqual(c[1], c[3], 0)
-        # TODO: enable after fixing #46
-        # self.assertEqual(c[4], c[5][1:4], 0)
+        self.assertEqual(c[4], c[5][1:4], 0)
 
     def test_from_buffer(self):
         a = bytearray([1, 2, 3, 4])

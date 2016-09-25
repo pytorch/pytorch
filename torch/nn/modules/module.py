@@ -75,10 +75,16 @@ class Module(object):
             fn.register_hook(key, lambda gi,go,hook=hook: hook(self, gi, go))
         return result
 
-    def parameters(self):
-        if hasattr(self, 'weight') and self.weight is not None:
+    def parameters(self, memo=None):
+        if memo is None:
+            memo = set()
+        if hasattr(self, 'weight') and self.weight is not None \
+                and self.weight not in memo:
+            memo.add(self.weight)
             yield self.weight
-        if hasattr(self, 'bias') and self.bias is not None:
+        if hasattr(self, 'bias') and self.bias is not None \
+                and self.bias not in memo:
+            memo.add(self.bias)
             yield self.bias
 
     def zero_grad(self):

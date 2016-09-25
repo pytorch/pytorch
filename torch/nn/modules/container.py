@@ -1,15 +1,17 @@
+from collections import OrderedDict
+
+import torch
 from torch.autograd import Variable
 from .module import Module
-from collections import OrderedDict
 
 
 class Container(Module):
     """This is the base container class for all neural networks you would define.
     You will subclass your container from this class.
-    In the constructor you define the modules that you would want to use, 
-    and in the __call__ function you use the constructed modules in 
+    In the constructor you define the modules that you would want to use,
+    and in the __call__ function you use the constructed modules in
     your operations.
-    
+
     To make it easier to understand, given is a small example.
     ```
     # Example of using Container
@@ -23,16 +25,16 @@ class Container(Module):
             output = self.relu(self.conv1(x))
             return output
      model = Net()
-     ```     
-    
+     ```
+
     One can also add new modules to a container after construction.
     You can do this with the add_module function.
 
     ```
     # one can add modules to the container after construction
-    model.add_module('pool1', nn.MaxPool2d(2, 2)
+    model.add_module('pool1', nn.MaxPool2d(2, 2))
     ```
-    
+
     The container has one additional method `parameters()` which
     returns the list of learnable parameters in the container instance.
     """
@@ -45,13 +47,18 @@ class Container(Module):
     def add_module(self, name, module):
         if hasattr(self, name):
             raise KeyError("attribute already exists '{}'".format(name))
+        if not isinstance(module, Module):
+            raise ValueError("{} is not a Module subclass".format(
+                torch.typename(module)))
         setattr(self, name, module)
         if module is not None:
             self.modules.append(module)
 
-    def parameters(self):
+    def parameters(self, memo=None):
+        if memo is None:
+            memo = set()
         for module in self.modules:
-            for p in module.parameters():
+            for p in module.parameters(memo):
                 yield p
 
 
