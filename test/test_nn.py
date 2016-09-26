@@ -219,6 +219,21 @@ class TestNN(NNTestCase):
         self.assertEqual(num_params(n), 2)
         self.assertEqual(num_params(s), 2)
 
+    def test_add_module(self):
+        l = nn.Linear(10, 20)
+        net = nn.Container(
+            l=l,
+            l2=l,
+            empty=None,
+        )
+        self.assertEqual(net.l, l)
+        self.assertEqual(net.l2, l)
+        self.assertEqual(net.empty, None)
+        net.add_module('l3', l)
+        self.assertEqual(net.l3, l)
+        self.assertRaises(KeyError, lambda: net.add_module('l', l))
+        self.assertRaises(ValueError, lambda: net.add_module('x', 'non-module'))
+
     def test_Dropout(self):
         input = torch.Tensor(1000)
         self._test_dropout(nn.Dropout, input)

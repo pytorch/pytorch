@@ -47,7 +47,7 @@ class Container(Module):
     def add_module(self, name, module):
         if hasattr(self, name):
             raise KeyError("attribute already exists '{}'".format(name))
-        if not isinstance(module, Module):
+        if not isinstance(module, Module) and module is not None:
             raise ValueError("{} is not a Module subclass".format(
                 torch.typename(module)))
         setattr(self, name, module)
