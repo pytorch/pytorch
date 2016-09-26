@@ -1,5 +1,6 @@
 #include "THMemoryFile.h"
 #include "THFilePrivate.h"
+#include "stdint.h"
 
 typedef struct THMemoryFile__
 {
@@ -373,7 +374,7 @@ static size_t THMemoryFile_readLong(THFile *self, long *data, size_t n)
       size_t i;
       size_t nByte = 4*n;
       size_t nByteRemaining = (mfself->position + nByte <= mfself->size ? nByte : mfself->size-mfself->position);
-      int *storage = (int *)(mfself->storage->data + mfself->position);
+      int32_t *storage = (int32_t *)(mfself->storage->data + mfself->position);
       nread = nByteRemaining/4;
       for(i = 0; i < nread; i++)
         data[i] = storage[i];
@@ -383,12 +384,12 @@ static size_t THMemoryFile_readLong(THFile *self, long *data, size_t n)
     {
       int i, big_endian = !THDiskFile_isLittleEndianCPU();
       size_t nByte = 8*n;
-      long *storage = (long *)(mfself->storage->data + mfself->position);
+      int32_t *storage = (int32_t *)(mfself->storage->data + mfself->position);
       size_t nByteRemaining = (mfself->position + nByte <= mfself->size ? nByte : mfself->size-mfself->position);
       nread = nByteRemaining/8;
       for(i = 0; i < nread; i++)
         data[i] = storage[2*i + big_endian];
-      mfself->position += nread*4;
+      mfself->position += nread*8;
     }
   }
   else
@@ -449,8 +450,8 @@ static size_t THMemoryFile_writeLong(THFile *self, long *data, size_t n)
     {
       int i;
       size_t nByte = 4*n;
-      int *storage = (int *)(mfself->storage->data + mfself->position);
       THMemoryFile_grow(mfself, mfself->position+nByte);
+      int32_t *storage = (int32_t *)(mfself->storage->data + mfself->position);
       for(i = 0; i < n; i++)
         storage[i] = data[i];
       mfself->position += nByte;
@@ -459,8 +460,8 @@ static size_t THMemoryFile_writeLong(THFile *self, long *data, size_t n)
     {
       int i, big_endian = !THDiskFile_isLittleEndianCPU();
       size_t nByte = 8*n;
-      long *storage = (long *)(mfself->storage->data + mfself->position);
       THMemoryFile_grow(mfself, mfself->position+nByte);
+      int32_t *storage = (int32_t *)(mfself->storage->data + mfself->position);
       for(i = 0; i < n; i++)
       {
         storage[2*i + !big_endian] = 0;
