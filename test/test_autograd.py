@@ -29,7 +29,7 @@ def get_analytical_jacobian(input, output):
         flat_grad_output.zero_()
         flat_grad_output[i] = 1
         zero_gradients(input)
-        output.backward(grad_output)
+        output.backward(grad_output, retain_variables=True)
         for jacobian_x, d_x in zip(jacobian, iter_gradients(input)):
             jacobian_x[:,i] = d_x
 
@@ -48,25 +48,30 @@ class TestAutograd(TestCase):
 
         z = x ** 2 + x * 2 + x * y + y
         z.register_hook('test', lambda *args: bw_hook(1, *args))
-        z.backward(torch.ones(5, 5))
+        z.backward(torch.ones(5, 5), retain_variables=True)
         self.assertEqual(counter[0], 1)
 
         z.register_hook('test2', lambda *args: bw_hook(2, *args))
-        z.backward(torch.ones(5, 5))
+        z.backward(torch.ones(5, 5), retain_variables=True)
         self.assertEqual(counter[0], 4)
 
         z.remove_hook('test2')
-        z.backward(torch.ones(5, 5))
+        z.backward(torch.ones(5, 5), retain_variables=True)
         self.assertEqual(counter[0], 5)
 
     def test_backward(self):
+        v_t = torch.randn(5, 5)
         x_t = torch.randn(5, 5)
         y_t = torch.rand(5, 5) + 0.1
         z_t = torch.randn(5, 5)
         grad_output = torch.randn(5, 5)
+        v = Variable(v_t)
         x = Variable(x_t)
         y = Variable(y_t)
         z = Variable(z_t)
+
+        v.backward(grad_output)
+        self.assertEqual(v.grad, grad_output)
 
         a = x + (y * z) + 4 * z**2 * x / y
         a.backward(grad_output)
@@ -112,9 +117,9 @@ class TestAutograd(TestCase):
         r = z + y
         w = z.add_(y)
         # w is a the last expression, so this should succeed
-        w.backward(torch.ones(5, 5))
+        w.backward(torch.ones(5, 5), retain_variables=True)
         # r doesn't use the modified value in backward, so it should succeed
-        r.backward(torch.ones(5, 5))
+        r.backward(torch.ones(5, 5), retain_variables=True)
         # q uses dirty z, so it should raise
         self.assertRaises(RuntimeError, lambda: q.backward(torch.ones(5, 5)))
 
@@ -125,9 +130,9 @@ class TestAutograd(TestCase):
         r = z + y
         w = z.exp_()
         self.assertTrue(z.dirty)
-        r.backward(torch.ones(5, 5))
+        r.backward(torch.ones(5, 5), retain_variables=True)
         self.assertEqual(x.grad, torch.ones(5, 5) / 2)
-        w.backward(torch.ones(5, 5))
+        w.backward(torch.ones(5, 5), retain_variables=True)
         self.assertEqual(x.grad, torch.Tensor(5, 5).fill_((1 + math.e) / 2))
         self.assertRaises(RuntimeError, lambda: q.backward(torch.ones(5, 5)))
 
@@ -412,4 +417,3 @@ for test in method_tests:
 
 if __name__ == '__main__':
     unittest.main()
-

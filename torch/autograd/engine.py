@@ -1,4 +1,5 @@
 from collections import Counter
+from .variable import Variable
 
 class ExecutionEngine(object):
     def __init__(self):
@@ -11,6 +12,8 @@ class ExecutionEngine(object):
         while len(queue) > 0:
             fn = queue.pop()
             for prev_fn, arg_id in fn.previous_functions:
+                if isinstance(prev_fn, Variable):
+                    continue
                 if prev_fn not in dependencies:
                     dependencies[prev_fn] = [Counter() for _ in prev_fn.output_ids]
                 output_idx = prev_fn.output_ids[arg_id]
@@ -48,7 +51,11 @@ class ExecutionEngine(object):
                 prev_grad[output_nr] = grad_tensor
             grad_tensor.add_(d_prev_fn)
 
-    def run_backward(self, variable, grad):
+    def run_backward(self, variable, grad, retain_variables):
+        if variable.creator is None:
+            variable._do_backward((grad,), retain_variables)
+            return
+
         ready = [(variable.creator, (grad,))]
         not_ready = {}
         need_copy = set()
@@ -58,10 +65,13 @@ class ExecutionEngine(object):
         while len(ready) > 0:
             fn, grad = ready.pop()
             # TODO: double-buffering
-            grad_input = fn._do_backward(*grad)
+            grad_input = fn._do_backward(grad, retain_variables)
             for (prev_fn, arg_id), d_prev_fn in zip(fn.previous_functions, grad_input):
                 if not prev_fn.requires_grad:
                     # TODO: check that d_prev_fn is None and warn otherwise
+                    continue
+                if isinstance(prev_fn, Variable):
+                    prev_fn._do_backward((d_prev_fn,), retain_variables)
                     continue
                 output_nr = self._free_backward_dependency(dependencies, prev_fn, fn, arg_id)
                 is_ready = self._is_ready_for_backward(dependencies, prev_fn)
@@ -81,5 +91,3 @@ class ExecutionEngine(object):
 
                     self._add_grad(need_copy, prev_grad, output_nr, d_prev_fn)
                     not_ready[prev_fn] = prev_grad
-
-

@@ -57,7 +57,7 @@ class TestNN(NNTestCase):
         return module(input)
 
     def _backward(self, module, input, output, grad_output):
-        output.backward(grad_output)
+        output.backward(grad_output, retain_variables=True)
         return input.grad
 
     def _forward_criterion(self, criterion, input, target):
@@ -133,11 +133,11 @@ class TestNN(NNTestCase):
         self.assertEqual(counter['forwards'], 3)
         self.assertEqual(counter['backwards'], 0)
 
-        output.backward(torch.ones(5, 5) * 2)
+        output.backward(torch.ones(5, 5) * 2, retain_variables=True)
         self.assertEqual(counter['forwards'], 3)
         self.assertEqual(counter['backwards'], 1)
 
-        output.backward(torch.ones(5, 5) * 2)
+        output.backward(torch.ones(5, 5) * 2, retain_variables=True)
         self.assertEqual(counter['forwards'], 3)
         self.assertEqual(counter['backwards'], 2)
 
@@ -274,7 +274,7 @@ class TestNN(NNTestCase):
 
         # Make sure backward works
         grad_output = torch.DoubleTensor(output.size()).fill_(1)
-        output.backward(grad_output)
+        output.backward(grad_output, retain_variables=True)
         expected_grad = expected_grad(num_dim)
         self.assertEqual(input_var.grad, expected_grad.view_as(input))
 

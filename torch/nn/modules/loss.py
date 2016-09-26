@@ -4,7 +4,7 @@ from .container import Sequential
 from .activation import LogSoftmax
 
 def _assert_no_grad(variable):
-    assert variable.volatile or not variable.creator.requires_grad, \
+    assert not variable.requires_grad, \
         "nn criterions don't compute the gradient w.r.t. targets - please " \
         "mark these variables as volatile or not requiring gradients"
 
@@ -133,4 +133,3 @@ class MultiMarginLoss(Module):
 # TODO: L1HingeEmbeddingCriterion
 # TODO: MSECriterion weight
 # TODO: ClassSimplexCriterion
-
