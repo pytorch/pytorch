@@ -36,6 +36,14 @@ THCTensor_(zero)(THCState *state, THCTensor *self_)
 }
 
 THC_API void
+THCTensor_(mean)(THCState *state, THCudaTensor *self, THCudaTensor *src, long dim)
+{
+  THAssert(THCTensor_(checkGPU)(state, 2, self, src));
+  THCudaTensor_sum(state, self, src, dim);
+  THCudaTensor_div(state, self, self, THCudaTensor_size(state, src, dim));
+}
+
+THC_API void
 THCTensor_(zeros)(THCState *state, THCTensor *r_, THLongStorage *size)
 {
   THAssert(THCTensor_(checkGPU)(state, 1, r_));

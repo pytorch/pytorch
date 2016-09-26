@@ -15,37 +15,6 @@
 #include <thrust/system/cuda/execution_policy.h>
 #endif
 
-struct TensorPowOp {
-  TensorPowOp(float v) : val(v) {}
-  __device__ __forceinline__ void operator()(float* out, float* in) {
-    *out = powf(*in, val);
-  }
-
-  __device__ __forceinline__ void operator()(float* v) {
-    *v = powf(*v, val);
-  }
-
-  const float val;
-};
-
-void THCudaTensor_pow(THCState *state, THCudaTensor *self_, THCudaTensor *src, float value)
-{
-  THAssert(THCudaTensor_checkGPU(state, 2, self_, src));
-  if (self_ == src) {
-    if (!THC_pointwiseApply1(state, self_, TensorPowOp(value))) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  } else {
-    THCudaTensor_resizeAs(state, self_, src);
-
-    if (!THC_pointwiseApply2(state, self_, src, TensorPowOp(value))) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  }
-
-  THCudaCheck(cudaGetLastError());
-}
-
 struct TensorTPowOp {
   TensorTPowOp(float v) : val(v) {}
 

@@ -6,6 +6,7 @@
 
 THC_API void THCTensor_(renorm)(THCState *state, THCTensor* self, THCTensor* src, real value, long dimension, real max_norm);
 THC_API void THCTensor_(std)(THCState *state, THCTensor *self, THCTensor *src, long dim, int flag);
+THC_API void THTensor_(norm)(THCState *state, THCTensor* self, THCTensor* src, real value, long dimension);
 
 #endif
 

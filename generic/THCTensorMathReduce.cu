@@ -201,4 +201,36 @@ THCTensor_(min)(THCState *state,
     MinValuePair<typename TensorUtils<THCTensor>::DataType, long>());
 }
 
+#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
+
+THC_API void THTensor_(norm)(THCState *state, THCTensor* self, THCTensor* src, real value, long dimension)
+{
+  THAssert(THCTensor_(checkGPU)(state, 2, self, src));
+  if (value == 0.0) {
+    THC_reduceDim(state, self, src,
+                  TensorNonZeroOp<real>(), thrust::plus<real>(),
+                  0.0, dimension);
+  } else if (value == 1.0) {
+    THC_reduceDim(state, self, src,
+                  TensorNormOp<real, 1>(), thrust::plus<real>(),
+                  0.0, dimension);
+
+  } else if (value == 2.0) {
+    THC_reduceDim(state, self, src,
+                  TensorNormOp<real, 2>(), thrust::plus<real>(),
+                  0.0, dimension);
+    THCTensor_(pow)(state, self, self, 0.5);
+
+  } else {
+    THC_reduceDim(state, self, src,
+                  TensorNormOp<real, -1>(), thrust::plus<real>(),
+                  0.0, dimension);
+    THCTensor_(pow)(state, self, self, 1.0 / value);
+  }
+
+  THCudaCheck(cudaGetLastError());
+}
+
+#endif
+
 #endif
