@@ -16,8 +16,8 @@ class AutoGPU(CWrapPlugin):
 #endif
 """
 
-    def process_call(self, code, option):
-        return self.BEFORE_CALL + code
+    def process_option_code_template(self, template, option):
+        return [self.BEFORE_CALL] + template
 
     def process_full_file(self, code):
         return self.DEFINES + code

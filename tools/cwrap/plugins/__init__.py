@@ -43,8 +43,8 @@ class CWrapPlugin(object):
     def process_declarations(self, declarations):
         return declarations
 
-    def process_call(self, code, option):
-        return code
+    def process_option_code_template(self, template, option):
+        return template
 
 
 from .StandaloneExtension import StandaloneExtension
@@ -55,3 +55,4 @@ from .ArgumentReferences import ArgumentReferences
 from .BeforeCall import BeforeCall
 from .ConstantArguments import ConstantArguments
 from .ReturnArguments import ReturnArguments
+from .GILRelease import GILRelease

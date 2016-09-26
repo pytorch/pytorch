@@ -2,8 +2,8 @@ from . import CWrapPlugin
 from string import Template
 
 class ReturnArguments(CWrapPlugin):
-    ARGUMENT_RETURN_TEMPLATE =  Template("$call;Py_INCREF($arg);\nreturn (PyObject*)($arg);")
-    TUPLE_RETURN_TEMPLATE =     Template("$call;\nreturn PyTuple_Pack($num_args, $args);")
+    ARGUMENT_RETURN_TEMPLATE =  Template("Py_INCREF($arg);\nreturn (PyObject*)($arg);")
+    TUPLE_RETURN_TEMPLATE =     Template("return PyTuple_Pack($num_args, $args);")
 
     def initialize(self, cwrap):
         self.cwrap = cwrap

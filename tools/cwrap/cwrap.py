@@ -2,46 +2,31 @@ import os
 import yaml
 from string import Template
 from copy import deepcopy
-from .plugins import ArgcountChecker, OptionalArguments, ArgumentReferences, BeforeCall, ConstantArguments, ReturnArguments
+from .plugins import ArgcountChecker, OptionalArguments, ArgumentReferences, \
+    BeforeCall, ConstantArguments, ReturnArguments, GILRelease
 
 
 class cwrap(object):
     RETURN_WRAPPERS = {
-        'void': Template('$call;\n      Py_RETURN_NONE;'),
-        'long': Template('return PyLong_FromLong($call);'),
-        'bool': Template('return PyBool_FromLong($call);'),
-        'void*': Template('return PyLong_FromVoidPtr($call);'),
-    }
-
-    TYPE_CHECK = {
-        'void*':            Template('PyLong_Check($arg)'),
-        'bool':             Template('PyLong_Check($arg)'),
-        'float':            Template('PyFloat_Check($arg)'),
-        'double':           Template('PyFloat_Check($arg)'),
-        # TODO: this will only work for python3
-        'int':              Template('PyLong_Check($arg)'),
-        'long':             Template('PyLong_Check($arg)'),
-    }
-
-    TYPE_UNPACK = {
-        'void*':            Template('PyLong_AsVoidPtr($arg)'),
-        'bool':             Template('PyLong_AsLong($arg)'),
-        'float':            Template('(float)PyFloat_AsDouble($arg)'),
-        'double':           Template('PyFloat_AsDouble($arg)'),
-        # TODO: this will only work for python3
-        'int':              Template('PyLong_AsLong($arg)'),
-        'long':             Template('PyLong_AsLong($arg)'),
+        'void': Template('Py_RETURN_NONE;'),
+        'long': Template('return PyLong_FromLong($result);'),
+        'bool': Template('return PyBool_FromLong($result);'),
+        'void*': Template('return PyLong_FromVoidPtr($result);'),
     }
 
     OPTION_TEMPLATE = Template("""
     ${els}if ($arg_check) {
-
-      $call
+      $code
     """)
 
-    CALL_TEMPLATE = Template("$cname($arg_unpack)")
+    OPTION_CODE_TEMPLATE = [
+      '$call',
+      '$return_result',
+    ]
 
-    DEFAULT_PLUGIN_CLASSES = [ArgcountChecker, ConstantArguments, OptionalArguments, ArgumentReferences, BeforeCall, ReturnArguments]
+    FUNCTION_CALL_TEMPLATE = Template("$capture_result$cname($arg_unpack);")
+
+    DEFAULT_PLUGIN_CLASSES = [ArgcountChecker, ConstantArguments, OptionalArguments, ArgumentReferences, BeforeCall, ReturnArguments, GILRelease]
 
     def __init__(self, source, destination=None, plugins=[], default_plugins=True):
         if destination is None:
@@ -141,13 +126,13 @@ class cwrap(object):
         return fallback(*args)
 
     def get_type_check(self, arg, option):
-        return self.search_plugins('get_type_check', (arg, option), lambda arg,_: self.TYPE_CHECK[arg['type']])
+        return self.search_plugins('get_type_check', (arg, option), lambda arg,_: None)
 
     def get_type_unpack(self, arg, option):
-        return self.search_plugins('get_type_unpack', (arg, option), lambda arg,_: self.TYPE_UNPACK[arg['type']])
+        return self.search_plugins('get_type_unpack', (arg, option), lambda arg,_: None)
 
     def get_return_wrapper(self, option):
-        return self.search_plugins('get_return_wrapper', (option,), lambda t: self.RETURN_WRAPPERS[option['return']])
+        return self.search_plugins('get_return_wrapper', (option,), lambda _: self.RETURN_WRAPPERS[option['return']])
 
     def get_wrapper_template(self, declaration):
         return self.search_plugins('get_wrapper_template', (declaration,), lambda _: None)
@@ -197,15 +182,32 @@ class cwrap(object):
             arg_unpack = plugin.process_all_unpacks(arg_unpack, option)
 
         # Generate call
-        raw_call = self.CALL_TEMPLATE.substitute(cname=option['cname'], arg_unpack=arg_unpack)
-        call = self.get_return_wrapper(option).substitute(call=raw_call)
+        try:
+            return_result = self.get_return_wrapper(option).substitute()
+            call = self.FUNCTION_CALL_TEMPLATE.substitute(capture_result='',
+                    cname=option['cname'], arg_unpack=arg_unpack)
+        except KeyError:
+            return_result = self.get_return_wrapper(option).substitute(result='__result')
+            call = self.FUNCTION_CALL_TEMPLATE.substitute(capture_result=(option['return'] + ' __result = '),
+                    cname=option['cname'], arg_unpack=arg_unpack)
+
+        code_template = deepcopy(self.OPTION_CODE_TEMPLATE)
         for plugin in self.plugins:
-            call = plugin.process_call(call, option)
-        call = '\n      '.join(map(lambda s: s.strip(), call.split('\n')))
+            code_template = plugin.process_option_code_template(code_template,
+                    option)
+        code_template = Template('\n'.join(code_template))
+        code = code_template.substitute(call=call, return_result=return_result)
+        code_lines = map(lambda s: s.strip(), code.split('\n'))
+        code = '\n'
+        depth = 6
+        for line in code_lines:
+            depth -= line.count('}') * 2
+            code += ' ' * depth + line + '\n'
+            depth += line.count('{') * 2
 
         # Put everything together
         return self.OPTION_TEMPLATE.substitute(
             els=('} else ' if not is_first else ''),
             arg_check=arg_checks,
-            call=call
+            code=code,
         )

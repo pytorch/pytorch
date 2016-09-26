@@ -50,14 +50,14 @@ class THPPlugin(CWrapPlugin):
     }
 
     RETURN_WRAPPER = {
-        'THTensor*':        Template('return THPTensor_(New)($call);'),
-        'THLongStorage*':   Template('return THPLongStorage_New($call);'),
+        'THTensor*':        Template('return THPTensor_(New)($result);'),
+        'THLongStorage*':   Template('return THPLongStorage_New($result);'),
         # TODO: make it smarter - it should return python long if result doesn't fit into an int
-        'long':             Template('return PyInt_FromLong($call);'),
+        'long':             Template('return PyInt_FromLong($result);'),
         # TODO
-        'accreal':          Template('return PyFloat_FromDouble($call);'),
-        'self':             Template('$call;\nPy_INCREF(self);\nreturn (PyObject*)self;'),
-        'real':             Template('return THPUtils_(newReal)($call);'),
+        'accreal':          Template('return PyFloat_FromDouble($result);'),
+        'self':             Template('Py_INCREF(self);\nreturn (PyObject*)self;'),
+        'real':             Template('return THPUtils_(newReal)($result);'),
     }
 
     TENSOR_METHODS_DECLARATION = Template("""
@@ -287,9 +287,10 @@ PyObject * $name(PyObject *self, PyObject *args)
     def process_all_unpacks(self, code, option):
         return 'LIBRARY_STATE ' + code
 
-    def process_call(self, code, option):
+    def process_option_code_template(self, template, option):
         new_args = []
         for arg in option['arguments']:
             if 'allocate' in arg and arg['allocate']:
                 new_args.append(self.ALLOCATE_TYPE[arg['type']].substitute(name=arg['name']))
-        return '\n      '.join(new_args) + '\n' + code
+        template = new_args + template
+        return template
