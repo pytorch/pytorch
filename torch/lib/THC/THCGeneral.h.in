@@ -48,6 +48,13 @@ typedef struct _THCCudaResourcesPerDevice {
   void** devScratchSpacePerStream;
 } THCCudaResourcesPerDevice;
 
+typedef struct _THCDeviceAllocator {
+   cudaError_t (*malloc)(void*, void**, size_t, cudaStream_t);
+   cudaError_t (*free)(void*, void*);
+   cudaError_t (*shutdown)(void*);
+   void* state;
+} THCDeviceAllocator;
+
 
 /* Global state to be held in the cutorch table. */
 typedef struct THCState
@@ -74,6 +81,7 @@ typedef struct THCState
   int currentPerDeviceBlasHandle;
   /* Allocator using cudaMallocHost. */
   THAllocator* cudaHostAllocator;
+  THCDeviceAllocator cudaDeviceAllocator;
 
   /* Table of enabled peer-to-peer access between directed pairs of GPUs.
      If i accessing allocs on j is enabled, p2pAccess[i][j] is 1; 0 otherwise. */
