@@ -3,6 +3,7 @@ from ..tensor import _TensorBase
 
 
 class _CudaTensorBase(_TensorBase):
+    is_cuda = True
 
     def type(self, *args, **kwargs):
         source_device = self.get_device()

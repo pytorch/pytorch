@@ -23,35 +23,40 @@ def _infer_sizes(sizes, total):
 
 
 class _TensorBase(object):
+    is_cuda = False
+
     def new(self, *args, **kwargs):
         return self.__class__(*args, **kwargs)
 
-    def type_as(self, t):
+    def type_as(self, t, async=False):
         return self.type(t.type())
 
-    def double(self):
+    def double(self, async=False):
         return self.type(type(self).__module__ + '.DoubleTensor')
 
-    def float(self):
+    def float(self, async=False):
         return self.type(type(self).__module__ + '.FloatTensor')
 
-    def long(self):
+    def long(self, async=False):
         return self.type(type(self).__module__ + '.LongTensor')
 
-    def int(self):
+    def int(self, async=False):
         return self.type(type(self).__module__ + '.IntTensor')
 
-    def short(self):
+    def short(self, async=False):
         return self.type(type(self).__module__ + '.ShortTensor')
 
-    def char(self):
+    def char(self, async=False):
         return self.type(type(self).__module__ + '.CharTensor')
 
-    def byte(self):
+    def byte(self, async=False):
         return self.type(type(self).__module__ + '.ByteTensor')
 
-    def copy_(self, other):
-        torch._C._tensorCopy(self, other)
+    def copy_(self, source, async=False):
+        if async:
+            torch._C._tensorCopyAsync(self, source)
+        else:
+            torch._C._tensorCopy(self, source)
         return self
 
     def __deepcopy__(self, _memo):

@@ -56,12 +56,13 @@ static bool THPModule_loadClasses(PyObject *self)
 
 std::unordered_map<std::pair<PyObject *, PyObject *>, THPCopyFunction, pair_hasher> tensor_copy_handlers;
 std::unordered_map<std::pair<PyObject *, PyObject *>, THPCopyFunction, pair_hasher> storage_copy_handlers;
+std::unordered_map<std::pair<PyObject *, PyObject *>, THPCopyFunction, pair_hasher> tensor_async_copy_handlers;
+std::unordered_map<std::pair<PyObject *, PyObject *>, THPCopyFunction, pair_hasher> storage_async_copy_handlers;
 
 #define COPY_METHODS(name) TH_CONCAT_2(name,_copy_handlers)
 #define IMPLEMENT_COPY_WITH_WRAPPER(name)                                      \
 bool TH_CONCAT_3(THPModule_,name,Copy)(PyObject *dst, PyObject *src)           \
 {                                                                              \
-  /* TODO: this won't work for subclasses, but is that a problem? */           \
   auto it = COPY_METHODS(name).find(std::make_pair((PyObject*)Py_TYPE(dst), (PyObject*)Py_TYPE(src))); \
   if (it == COPY_METHODS(name).end()) {                                        \
     THPUtils_setError("Copy function from %s to %s isn't implemented!", Py_TYPE(src)->tp_name, Py_TYPE(dst)->tp_name); \
@@ -89,6 +90,8 @@ static PyObject * TH_CONCAT_3(THPModule_,name,CopyWrapper)(PyObject *unused, PyO
 
 IMPLEMENT_COPY_WITH_WRAPPER(tensor)
 IMPLEMENT_COPY_WITH_WRAPPER(storage)
+IMPLEMENT_COPY_WITH_WRAPPER(tensor_async)
+IMPLEMENT_COPY_WITH_WRAPPER(storage_async)
 #undef COPY_METHODS
 #undef IMPLEMENT_COPY_WITH_WRAPPER
 
@@ -564,6 +567,8 @@ static PyMethodDef TorchMethods[] = {
   {"_set_default_tensor_type", (PyCFunction)THPModule_setDefaultTensorType, METH_O, NULL},
   {"_tensorCopy",     (PyCFunction)THPModule_tensorCopyWrapper, METH_VARARGS, NULL},
   {"_storageCopy",    (PyCFunction)THPModule_storageCopyWrapper, METH_VARARGS, NULL},
+  {"_tensorCopyAsync", (PyCFunction)THPModule_tensor_asyncCopyWrapper, METH_VARARGS, NULL},
+  {"_storageCopyAsync", (PyCFunction)THPModule_storage_asyncCopyWrapper, METH_VARARGS, NULL},
   {"get_num_threads", (PyCFunction)THPModule_getNumThreads,     METH_NOARGS,  NULL},
   {"set_num_threads", (PyCFunction)THPModule_setNumThreads,     METH_O,       NULL},
   {"get_rng_state",   (PyCFunction)THPModule_getRNGState,       METH_NOARGS,  NULL},

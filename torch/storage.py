@@ -3,6 +3,8 @@ from ._utils import _type, _range
 
 
 class _StorageBase(object):
+    is_cuda = False
+
     def __str__(self):
         content = ' ' + '\n '.join(str(self[i]) for i in _range(len(self)))
         return content + '\n[{} of size {}]'.format(torch.typename(self), len(self))
@@ -13,8 +15,11 @@ class _StorageBase(object):
     def __iter__(self):
         return iter(map(lambda i: self[i], _range(self.size())))
 
-    def copy_(self, other):
-        torch._C._storageCopy(self, other)
+    def copy_(self, source, async=False):
+        if async:
+            torch._C._storageCopyAsync(self, source)
+        else:
+            torch._C._storageCopy(self, source)
         return self
 
     def __copy__(self):
@@ -37,26 +42,26 @@ class _StorageBase(object):
     def tolist(self):
         return [v for v in self]
 
-    def double(self):
-        return self.type(type(self).__module__ + '.DoubleStorage')
+    def double(self, async=False):
+        return self.type(type(self).__module__ + '.DoubleStorage', async)
 
-    def float(self):
-        return self.type(type(self).__module__ + '.FloatStorage')
+    def float(self, async=False):
+        return self.type(type(self).__module__ + '.FloatStorage', async)
 
-    def long(self):
-        return self.type(type(self).__module__ + '.LongStorage')
+    def long(self, async=False):
+        return self.type(type(self).__module__ + '.LongStorage', async)
 
-    def int(self):
-        return self.type(type(self).__module__ + '.IntStorage')
+    def int(self, async=False):
+        return self.type(type(self).__module__ + '.IntStorage', async)
 
-    def short(self):
-        return self.type(type(self).__module__ + '.ShortStorage')
+    def short(self, async=False):
+        return self.type(type(self).__module__ + '.ShortStorage', async)
 
-    def char(self):
-        return self.type(type(self).__module__ + '.CharStorage')
+    def char(self, async=False):
+        return self.type(type(self).__module__ + '.CharStorage', async)
 
-    def byte(self):
-        return self.type(type(self).__module__ + '.ByteStorage')
+    def byte(self, async=False):
+        return self.type(type(self).__module__ + '.ByteStorage', async)
 
 
 _StorageBase.type = _type

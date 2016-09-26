@@ -3,6 +3,7 @@ from ..storage import _StorageBase
 
 
 class _CudaStorageBase(_StorageBase):
+    is_cuda = True
 
     def type(self, *args, **kwargs):
         source_device = self.get_device()

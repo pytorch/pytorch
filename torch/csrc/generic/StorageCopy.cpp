@@ -12,7 +12,6 @@ void TH_CONCAT_2(_THPCopy_,NAME)(PyObject *dst, PyObject *src)                 \
           ((TYPEB *)src)->cdata);                                              \
 }
 
-IMPLEMENT_COPY_WRAPPER(copy,        THPStorage,          THPStorage)
 IMPLEMENT_COPY_WRAPPER(copyByte,    THPStorage,          THPByteStorage)
 IMPLEMENT_COPY_WRAPPER(copyChar,    THPStorage,          THPCharStorage)
 IMPLEMENT_COPY_WRAPPER(copyShort,   THPStorage,          THPShortStorage)
@@ -22,8 +21,6 @@ IMPLEMENT_COPY_WRAPPER(copyFloat,   THPStorage,          THPFloatStorage)
 IMPLEMENT_COPY_WRAPPER(copyDouble,  THPStorage,          THPDoubleStorage)
 
 #ifdef THC_GENERIC_FILE
-// TODO: half
-//IMPLEMENT_COPY_WRAPPER(copyCuda,        THCPStorage,     THCPStorage)
 IMPLEMENT_COPY_WRAPPER(copyCudaByte,    THCPStorage,     THCPByteStorage)
 IMPLEMENT_COPY_WRAPPER(copyCudaChar,    THCPStorage,     THCPCharStorage)
 IMPLEMENT_COPY_WRAPPER(copyCudaShort,   THCPStorage,     THCPShortStorage)
@@ -35,7 +32,6 @@ IMPLEMENT_COPY_WRAPPER(copyCudaDouble,  THCPStorage,     THCPDoubleStorage)
 IMPLEMENT_COPY_WRAPPER(copyCudaHalf,    THCPStorage,     THCPHalfStorage)
 #endif
 
-
 IMPLEMENT_COPY_WRAPPER_FULLNAME(TH_CONCAT_2(THByteStorage_copyCuda  , Real), THPByteStorage,   THCPStorage);
 IMPLEMENT_COPY_WRAPPER_FULLNAME(TH_CONCAT_2(THCharStorage_copyCuda  , Real), THPCharStorage,   THCPStorage);
 IMPLEMENT_COPY_WRAPPER_FULLNAME(TH_CONCAT_2(THShortStorage_copyCuda , Real), THPShortStorage,  THCPStorage);
@@ -44,15 +40,6 @@ IMPLEMENT_COPY_WRAPPER_FULLNAME(TH_CONCAT_2(THLongStorage_copyCuda  , Real), THP
 IMPLEMENT_COPY_WRAPPER_FULLNAME(TH_CONCAT_2(THFloatStorage_copyCuda , Real), THPFloatStorage,  THCPStorage);
 IMPLEMENT_COPY_WRAPPER_FULLNAME(TH_CONCAT_2(THDoubleStorage_copyCuda, Real), THPDoubleStorage, THCPStorage);
 
-// There is no THHalfStorage
-#ifndef THC_REAL_IS_HALF
-//IMPLEMENT_COPY_WRAPPER_FULLNAME(THStorage_(copyCuda), THPStorage,  THCPStorage);
-//IMPLEMENT_COPY_WRAPPER_FULLNAME(THCStorage_(copyCPU), THCPStorage, THPStorage);
-
-// TODO
-//THC_API void THCStorage_(copyAsyncCPU)(THCState *state, THCStorage *self, THStorage *src);
-//THC_API void THStorage_(copyAsyncCuda)(THCState *state, THStorage *self, THCStorage *src);
-#endif
 #endif
 
 #endif

@@ -12,7 +12,6 @@ void TH_CONCAT_2(_THPCopy_,NAME)(PyObject *dst, PyObject *src)                 \
           ((TYPEB *)src)->cdata);                                              \
 }
 
-IMPLEMENT_COPY_WRAPPER(copy,        THPTensor,          THPTensor)
 IMPLEMENT_COPY_WRAPPER(copyByte,    THPTensor,          THPByteTensor)
 IMPLEMENT_COPY_WRAPPER(copyChar,    THPTensor,          THPCharTensor)
 IMPLEMENT_COPY_WRAPPER(copyShort,   THPTensor,          THPShortTensor)
@@ -22,7 +21,6 @@ IMPLEMENT_COPY_WRAPPER(copyFloat,   THPTensor,          THPFloatTensor)
 IMPLEMENT_COPY_WRAPPER(copyDouble,  THPTensor,          THPDoubleTensor)
 
 #ifdef THC_GENERIC_FILE
-IMPLEMENT_COPY_WRAPPER(copyCuda,        THCPTensor,     THCPTensor)
 IMPLEMENT_COPY_WRAPPER(copyCudaByte,    THCPTensor,     THCPByteTensor)
 IMPLEMENT_COPY_WRAPPER(copyCudaChar,    THCPTensor,     THCPCharTensor)
 IMPLEMENT_COPY_WRAPPER(copyCudaShort,   THCPTensor,     THCPShortTensor)
@@ -42,15 +40,6 @@ IMPLEMENT_COPY_WRAPPER_FULLNAME(TH_CONCAT_2(THLongTensor_copyCuda  , Real), THPL
 IMPLEMENT_COPY_WRAPPER_FULLNAME(TH_CONCAT_2(THFloatTensor_copyCuda , Real), THPFloatTensor,  THCPTensor);
 IMPLEMENT_COPY_WRAPPER_FULLNAME(TH_CONCAT_2(THDoubleTensor_copyCuda, Real), THPDoubleTensor, THCPTensor);
 
-// There is no THHalfTensor
-#ifndef THC_REAL_IS_HALF
-//IMPLEMENT_COPY_WRAPPER_FULLNAME(THTensor_(copyCuda), THPTensor,  THCPTensor);
-//IMPLEMENT_COPY_WRAPPER_FULLNAME(THCTensor_(copyCPU), THCPTensor, THPTensor);
-
-// TODO
-//THC_API void THCTensor_(copyAsyncCPU)(THCState *state, THCTensor *self, THTensor *src);
-//THC_API void THTensor_(copyAsyncCuda)(THCState *state, THTensor *self, THCTensor *src);
-#endif
 #endif
 
 #endif

@@ -12,3 +12,5 @@ struct pair_hasher {
 using THPCopyFunction = void (*)(PyObject *dst, PyObject *src);
 extern std::unordered_map<std::pair<PyObject *, PyObject *>, THPCopyFunction, pair_hasher> tensor_copy_handlers;
 extern std::unordered_map<std::pair<PyObject *, PyObject *>, THPCopyFunction, pair_hasher> storage_copy_handlers;
+extern std::unordered_map<std::pair<PyObject *, PyObject *>, THPCopyFunction, pair_hasher> tensor_async_copy_handlers;
+extern std::unordered_map<std::pair<PyObject *, PyObject *>, THPCopyFunction, pair_hasher> storage_async_copy_handlers;

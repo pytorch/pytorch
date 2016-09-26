@@ -16,7 +16,8 @@ class Variable(object):
         'is_signed',
         'numel',
         'dim',
-        # TODO: add more
+        'get_device',
+        'is_cuda',
     ]
 
     def __init__(self, tensor, creator=None, volatile=False, requires_grad=True):

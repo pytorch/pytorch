@@ -23,9 +23,21 @@ of the CUDA driver.""".format(str(torch._C._cuda_getDriverVersion())))
 @contextlib.contextmanager
 def device(idx):
     prev_idx = torch._C._cuda_getDevice()
-    torch._C._cuda_setDevice(idx)
-    yield
-    torch._C._cuda_setDevice(prev_idx)
+    if prev_idx != idx:
+        torch._C._cuda_setDevice(idx)
+        yield
+        torch._C._cuda_setDevice(prev_idx)
+    else:
+        yield
+
+
+@contextlib.contextmanager
+def device_of(tensor):
+    if tensor.is_cuda:
+        with device(tensor.get_device()):
+            yield
+    else:
+        yield
 
 
 @contextlib.contextmanager
@@ -107,20 +119,20 @@ torch._tensor_classes.add(CharTensor)
 torch._tensor_classes.add(ByteTensor)
 
 
-def _cuda(self, idx=None):
+def _cuda(self, idx=None, async=False):
     # This already is a CUDA tensor.
     # Let's check if it needs to be transfered to another GPU.
     if hasattr(self, 'get_device'):
         target_device = idx if idx else torch._C._cuda_getDevice()
         if self.get_device() != target_device:
             with device(target_device):
-                return type(self)(self.size()).copy_(self)
+                return type(self)(self.size()).copy_(self, async)
         else:
             return self
     else:
         ctx = device(idx) if idx else _dummy_ctx()
         with ctx:
-            return self.type(getattr(torch.cuda, self.__class__.__name__))
+            return self.type(getattr(torch.cuda, self.__class__.__name__), async)
 
 
 def _cpu(self):

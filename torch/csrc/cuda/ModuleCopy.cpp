@@ -67,6 +67,19 @@ DECLARE_CUDA_COPY(THCudaCharStorage)
 DECLARE_CUDA_COPY(THCudaByteStorage)
 #undef DECLARE_COPY
 
+#define DECLARE_ASYNC_COPY(TYPE)                                               \
+void TH_CONCAT_3(THCP,TYPE,Tensor_copyAsyncCPU)(PyObject *dst, PyObject *src); \
+void TH_CONCAT_3(THP,TYPE,Tensor_copyAsyncGPU)(PyObject *dst, PyObject *src);
+
+DECLARE_ASYNC_COPY(Double)
+DECLARE_ASYNC_COPY(Float)
+DECLARE_ASYNC_COPY(Long)
+DECLARE_ASYNC_COPY(Int)
+DECLARE_ASYNC_COPY(Short)
+DECLARE_ASYNC_COPY(Char)
+DECLARE_ASYNC_COPY(Byte)
+#undef DECLARE_ASYNC_COPY
+
 extern PyObject *THPDoubleStorageClass;
 extern PyObject *THPFloatStorageClass;
 extern PyObject *THPLongStorageClass;
@@ -102,7 +115,15 @@ static bool THCPModule_initCopy()
   tensor_copy_handlers.insert({{TYPE, THCPIntTensorClass},     TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaInt)});     \
   tensor_copy_handlers.insert({{TYPE, THCPShortTensorClass},   TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaShort)});   \
   tensor_copy_handlers.insert({{TYPE, THCPCharTensorClass},    TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaChar)});    \
-  tensor_copy_handlers.insert({{TYPE, THCPByteTensorClass},    TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaByte)});
+  tensor_copy_handlers.insert({{TYPE, THCPByteTensorClass},    TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaByte)});    \
+  /* CUDA copy launches are always async */                                                                      \
+  tensor_async_copy_handlers.insert({{TYPE, THCPDoubleTensorClass},  TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaDouble)}); \
+  tensor_async_copy_handlers.insert({{TYPE, THCPFloatTensorClass},   TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaFloat)});  \
+  tensor_async_copy_handlers.insert({{TYPE, THCPLongTensorClass},    TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaLong)});   \
+  tensor_async_copy_handlers.insert({{TYPE, THCPIntTensorClass},     TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaInt)});    \
+  tensor_async_copy_handlers.insert({{TYPE, THCPShortTensorClass},   TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaShort)});  \
+  tensor_async_copy_handlers.insert({{TYPE, THCPCharTensorClass},    TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaChar)});   \
+  tensor_async_copy_handlers.insert({{TYPE, THCPByteTensorClass},    TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaByte)});
 
 #define INIT_TENSOR_CPU_GPU_COPY(TYPE, THNAME)                                        \
   tensor_copy_handlers.insert({{TYPE, THPDoubleTensorClass},  TH_CONCAT_3(_THPCopy_,THNAME,_copyDouble)});  \
@@ -112,6 +133,10 @@ static bool THCPModule_initCopy()
   tensor_copy_handlers.insert({{TYPE, THPShortTensorClass},   TH_CONCAT_3(_THPCopy_,THNAME,_copyShort)});   \
   tensor_copy_handlers.insert({{TYPE, THPCharTensorClass},    TH_CONCAT_3(_THPCopy_,THNAME,_copyChar)});    \
   tensor_copy_handlers.insert({{TYPE, THPByteTensorClass},    TH_CONCAT_3(_THPCopy_,THNAME,_copyByte)});
+
+#define INIT_TENSOR_ASYNC_COPY(TYPE)                                           \
+  tensor_async_copy_handlers.insert({{TH_CONCAT_3(THP,TYPE,TensorClass), TH_CONCAT_3(THCP,TYPE,TensorClass)}, TH_CONCAT_3(THP,TYPE,Tensor_copyAsyncGPU)}); \
+  tensor_async_copy_handlers.insert({{TH_CONCAT_3(THCP,TYPE,TensorClass), TH_CONCAT_3(THP,TYPE,TensorClass)}, TH_CONCAT_3(THCP,TYPE,Tensor_copyAsyncCPU)});
 
   INIT_TENSOR_GPU_CPU_COPY(THPDoubleTensorClass, THDoubleTensor);
   INIT_TENSOR_GPU_CPU_COPY(THPFloatTensorClass,  THFloatTensor);
@@ -136,6 +161,14 @@ static bool THCPModule_initCopy()
   INIT_TENSOR_CPU_GPU_COPY(THCPShortTensorClass,  THCudaShortTensor);
   INIT_TENSOR_CPU_GPU_COPY(THCPCharTensorClass,   THCudaCharTensor);
   INIT_TENSOR_CPU_GPU_COPY(THCPByteTensorClass,   THCudaByteTensor);
+
+  INIT_TENSOR_ASYNC_COPY(Double)
+  INIT_TENSOR_ASYNC_COPY(Float)
+  INIT_TENSOR_ASYNC_COPY(Long)
+  INIT_TENSOR_ASYNC_COPY(Int)
+  INIT_TENSOR_ASYNC_COPY(Short)
+  INIT_TENSOR_ASYNC_COPY(Char)
+  INIT_TENSOR_ASYNC_COPY(Byte)
 
 #define INIT_STORAGE_GPU_CPU_COPY(TYPE, THNAME)                                \
   storage_copy_handlers.insert({{TYPE, THCPDoubleStorageClass},  TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaDouble)});  \
@@ -192,6 +225,7 @@ static bool THCPModule_initCopy()
 #undef INIT_TENSOR_GPU_CPU_COPY
 #undef INIT_TENSOR_GPU_GPU_COPY
 #undef INIT_TENSOR_CPU_GPU_COPY
+#undef INIT_TENSOR_ASYNC_COPY
 #undef INIT_STORAGE_GPU_CPU_COPY
 #undef INIT_STORAGE_GPU_GPU_COPY
 #undef INIT_STORAGE_CPU_GPU_COPY
