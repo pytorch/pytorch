@@ -30,6 +30,14 @@ THCTensor_(prod)(THCState* state, THCTensor *self, THCTensor *src, long dimensio
   THCudaCheck(cudaGetLastError());
 }
 
+THC_API void
+THCTensor_(mean)(THCState *state, THCTensor *self, THCTensor *src, long dim)
+{
+  THAssert(THCTensor_(checkGPU)(state, 2, self, src));
+  THCTensor_(sum)(state, self, src, dim);
+  THCTensor_(div)(state, self, self, ScalarConvert<long, real>::to(THCTensor_(size)(state, src, dim)));
+}
+
 THC_API accreal
 THCTensor_(sumall)(THCState *state, THCTensor *self) {
   THAssert(THCTensor_(checkGPU)(state, 1, self));

@@ -137,14 +137,6 @@ float THCudaTensor_meanall(THCState *state, THCudaTensor *self)
   return THCudaTensor_sumall(state, self)/THCudaTensor_nElement(state, self);
 }
 
-void
-THCudaTensor_mean(THCState *state, THCudaTensor *self, THCudaTensor *src, long dim)
-{
-  THAssert(THCudaTensor_checkGPU(state, 2, self, src));
-  THCudaTensor_sum(state, self, src, dim);
-  THCudaTensor_div(state, self, self, THCudaTensor_size(state, src, dim));
-}
-
 struct TensorLerpOp {
   TensorLerpOp(float w) : w(w) {}
 

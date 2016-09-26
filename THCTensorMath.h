@@ -73,7 +73,6 @@ THC_API void THCudaTensor_cat(THCState *state, THCudaTensor *result, THCudaTenso
 THC_API void THCudaTensor_catArray(THCState *state, THCudaTensor *result, THCudaTensor **inputs, int numInputs, int dimension);
 
 THC_API float THCudaTensor_meanall(THCState *state, THCudaTensor *self);
-THC_API void  THCudaTensor_mean(THCState *state, THCudaTensor *self, THCudaTensor *src, long dim);
 THC_API float THCudaTensor_varall(THCState *state, THCudaTensor *self);
 THC_API void  THCudaTensor_var(THCState *state, THCudaTensor *self, THCudaTensor *src, long dim, int flag);
 THC_API float THCudaTensor_stdall(THCState *state, THCudaTensor *self);
