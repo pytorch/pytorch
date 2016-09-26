@@ -6,6 +6,7 @@ from copy import deepcopy
 from itertools import repeat
 
 import torch.nn as nn
+import torch.nn.parallel as dp
 from torch.autograd import Variable
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     module_tests, criterion_tests, TEST_CUDA, PRECISION
@@ -305,6 +306,86 @@ class TestNN(NNTestCase):
 
     def test_MaxPool3d_indices(self):
         self._test_maxpool_indices(3)
+
+    def _test_scatter(self, x):
+        if torch.cuda.device_count() < 2:
+            raise unittest.SkipTest("Only one GPU detected")
+        x = Variable(x)
+        result = dp.scatter(x, (0, 1))
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0], x[:2])
+        self.assertEqual(result[0].get_device(), 0)
+        self.assertEqual(result[1], x[2:])
+        self.assertEqual(result[1].get_device(), 1)
+
+    def test_scatter_cpu(self):
+        self._test_scatter(torch.randn(4, 4))
+
+    def test_scatter_gpu(self):
+        self._test_scatter(torch.randn(4, 4))
+
+    def _test_gather(self, output_device):
+        if torch.cuda.device_count() < 2:
+            raise unittest.SkipTest("Only one GPU detected")
+        inputs = (
+            Variable(torch.randn(2, 4).cuda(0)),
+            Variable(torch.randn(2, 4).cuda(1))
+        )
+        result = dp.gather(inputs, output_device)
+        self.assertEqual(result.size().tolist(), [4, 4])
+        self.assertEqual(result[:2], inputs[0])
+        self.assertEqual(result[2:], inputs[1])
+        if output_device != -1:
+            self.assertEqual(result.get_device(), output_device)
+        else:
+            self.assertFalse(result.is_cuda)
+
+    def test_gather_cpu(self):
+        self._test_gather(-1)
+
+    def test_gather_gpu(self):
+        self._test_gather(0)
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "Only one GPU detected")
+    def _test_replicate(self):
+        module = nn.Linear(10, 5).float().cuda()
+        input = torch.randn(2, 10).float().cuda()
+        expected_output = module(input).data
+        replicas = dp.replicate(module, (0, 1))
+        for i, replica in enumerate(replicas):
+            for p in replica.parameters():
+                self.assertEqual(p.get_device(), i)
+            replica_input = input.cuda(i)
+            self.assertEqual(replica(replica_input).data, expected_output)
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "Only one GPU detected")
+    def test_parallel_apply(self):
+        l1 = nn.Linear(10, 5).float().cuda(0)
+        l2 = nn.Linear(10, 5).float().cuda(1)
+        i1 = Variable(torch.randn(2, 10).float().cuda(0))
+        i2 = Variable(torch.randn(2, 10).float().cuda(1))
+        expected1 = l1(i1).data
+        expected2 = l2(i2).data
+        inputs = (i1, i2)
+        modules = (l1, l2)
+        expected_outputs = (expected1, expected2)
+        outputs = dp.parallel_apply(modules, inputs)
+        for out, expected in zip(outputs, expected_outputs):
+            self.assertEqual(out.data, expected)
+
+        inputs = (i1, Variable(i2.data.new()))
+        expected_outputs = (expected1, expected2.new())
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "Only one GPU detected")
+    def test_data_parallel(self):
+        l = nn.Linear(10, 5).float().cuda()
+        i = Variable(torch.randn(20, 10).float().cuda(1))
+        l.cuda(1)
+        expected_out = l(i).data
+        l.cuda(0)
+        out = dp.data_parallel(l, i, (0, 1))
+        self.assertEqual(out.get_device(), 1)
+        self.assertEqual(out.data, expected_out)
 
 
 def add_test(test):

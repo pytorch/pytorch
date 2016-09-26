@@ -1,9 +1,11 @@
 import math
 import tempfile
 import unittest
+from itertools import repeat
 
 import torch
 import torch.cuda
+import torch.cuda.comm as comm
 
 from common import TestCase, get_gpu_type, to_gpu
 
@@ -262,17 +264,17 @@ class TestCuda(TestCase):
         if torch.cuda.device_count() > 1:
             x = torch.randn(5, 5).cuda()
             y = torch.randn(5, 5).cuda()
-            self.assertEqual(x.getDevice(), 0)
-            self.assertEqual(x.getDevice(), 0)
+            self.assertEqual(x.get_device(), 0)
+            self.assertEqual(x.get_device(), 0)
             with torch.cuda.device(1):
                 z = torch.randn(5, 5).cuda()
-                self.assertEqual(z.getDevice(), 1)
+                self.assertEqual(z.get_device(), 1)
                 q = x.add(y)
-                self.assertEqual(q.getDevice(), 0)
+                self.assertEqual(q.get_device(), 0)
                 w = torch.randn(5, 5).cuda()
-                self.assertEqual(w.getDevice(), 1)
+                self.assertEqual(w.get_device(), 1)
             z = z.cuda()
-            self.assertEqual(z.getDevice(), 0)
+            self.assertEqual(z.get_device(), 0)
 
     def test_serialization(self):
         x = torch.randn(5, 5).cuda()
@@ -310,7 +312,88 @@ class TestCuda(TestCase):
     @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
     def test_type_conversions_same_gpu(self):
         x = torch.randn(5, 5).cuda(1)
-        self.assertEqual(x.int().getDevice(), 1)
+        self.assertEqual(x.int().get_device(), 1)
+
+    def _test_broadcast(self, input):
+        if torch.cuda.device_count() < 2:
+            raise unittest.SkipTest("only one GPU detected")
+        result = comm.broadcast(input, (0, 1))
+        for i, t in enumerate(result):
+            self.assertEqual(t.get_device(), i)
+            self.assertEqual(t, input)
+
+    def test_broadcast_cpu(self):
+        self._test_broadcast(torch.randn(5, 5))
+
+    def test_broadcast_gpu(self):
+        self._test_broadcast(torch.randn(5, 5))
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
+    def test_reduce_add(self):
+        x = torch.randn(5, 5)
+        y = torch.randn(5, 5)
+        x_cuda = x.cuda(0)
+        y_cuda = y.cuda(1)
+        result = comm.reduce_add((x_cuda, y_cuda))
+        self.assertEqual(result.get_device(), 0)
+        self.assertEqual(result.cpu(), x+y)
+
+    def _test_scatter(self, input, chunk_sizes=None, dim=0):
+        if torch.cuda.device_count() < 2:
+            raise unittest.SkipTest("only one GPU detected")
+        result = comm.scatter(input, (0, 1), chunk_sizes, dim)
+        self.assertEqual(len(result), 2)
+        if chunk_sizes is None:
+            chunk_sizes = tuple(repeat(input.size(dim) // 2, 2))
+        chunk_start = 0
+        for i, r in enumerate(result):
+            chunk_end = chunk_start + chunk_sizes[i]
+            index = [slice(None, None), slice(None, None)]
+            index[dim] = slice(chunk_start, chunk_end)
+            self.assertEqual(r, input[tuple(index)], 0)
+            chunk_start = chunk_end
+
+    def test_scatter_cpu(self):
+        self._test_scatter(torch.randn(4, 4), dim=0)
+
+    def test_scatter_cpu_dim(self):
+        self._test_scatter(torch.randn(4, 4), dim=1)
+
+    def test_scatter_cpu_sizes(self):
+        self._test_scatter(torch.randn(6, 4), chunk_sizes=(2, 4))
+
+    def test_scatter_gpu(self):
+        self._test_scatter(torch.randn(4, 4).cuda(), dim=0)
+
+    def test_scatter_gpu_dim(self):
+        self._test_scatter(torch.randn(4, 4).cuda(), dim=1)
+
+    def test_scatter_gpu_sizes(self):
+        self._test_scatter(torch.randn(6, 4).cuda(), chunk_sizes=(2, 4))
+
+    def _test_gather(self, dim):
+        if torch.cuda.device_count() < 2:
+            raise unittest.SkipTest("only one GPU detected")
+        x = torch.randn(2, 5).cuda(0)
+        y = torch.randn(2, 5).cuda(1)
+        result = comm.gather((x, y), dim)
+
+        expected_size = x.size()
+        expected_size[dim] += y.size(dim)
+        self.assertEqual(result.get_device(), 0)
+        self.assertTrue(result.is_size(expected_size))
+
+        index = [slice(None, None), slice(None, None)]
+        index[dim] = slice(0, x.size(dim))
+        self.assertEqual(result[tuple(index)], x)
+        index[dim] = slice(x.size(dim), x.size(dim) + y.size(dim))
+        self.assertEqual(result[tuple(index)], y)
+
+    def test_gather(self):
+        self._test_gather(0)
+
+    def test_gather_dim(self):
+        self._test_gather(1)
 
 
 for decl in tests:
