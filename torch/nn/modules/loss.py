@@ -32,6 +32,11 @@ class _WeighedLoss(_Loss):
         backend_fn = getattr(self._backend, type(self).__name__)
         return backend_fn(self.size_average, weight=self.weight)(input, target)
 
+    def type(self, new_type, *forwarded_args):
+        if self.weight is not None:
+            self.weight = self.weight.type(new_type, *forwarded_args)
+        return super(_WeighedLoss, self).type(new_type, *forwarded_args)
+
 
 class L1Loss(_Loss):
     pass

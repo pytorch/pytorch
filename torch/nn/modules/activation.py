@@ -309,9 +309,10 @@ class PReLU(Module):
         >>> print(m.forward(input))
     """
     def __init__(self, num_parameters=1, init=0.25):
-        super(PReLU, self).__init__()
         self.num_parameters = num_parameters
-        self.weight = Variable(torch.Tensor(num_parameters).fill_(init))
+        super(PReLU, self).__init__(
+            weight=Variable(torch.Tensor(num_parameters).fill_(init))
+        )
 
     def forward(self, input):
         return self._backend.PReLU()(input, self.weight)

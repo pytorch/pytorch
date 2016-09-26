@@ -40,7 +40,7 @@ class Container(Module):
     """
     def __init__(self, **kwargs):
         super(Container, self).__init__()
-        self.modules = []
+        self.modules = OrderedDict()
         for key, value in kwargs.items():
             self.add_module(key, value)
 
@@ -50,16 +50,27 @@ class Container(Module):
         if not isinstance(module, Module) and module is not None:
             raise ValueError("{} is not a Module subclass".format(
                 torch.typename(module)))
-        setattr(self, name, module)
-        if module is not None:
-            self.modules.append(module)
+        self.modules[name] = module
+
+    def __getattr__(self, name):
+        if 'modules' in self.__dict__:
+            modules = self.__dict__['modules']
+            if name in modules:
+                return modules[name]
+        return Module.__getattr__(self, name)
 
     def parameters(self, memo=None):
         if memo is None:
             memo = set()
-        for module in self.modules:
+        super(Container, self).parameters(memo)
+        for module in self.modules.values():
             for p in module.parameters(memo):
                 yield p
+
+    def type(self, type, *forwarded_args):
+        for module in self.modules.values():
+            module.type(type, *forwarded_args)
+        return super(Container, self).type(type, *forwarded_args)
 
 
 class Sequential(Container):
@@ -76,9 +87,15 @@ class Sequential(Container):
                 idx += 1
 
     def __getitem__(self, idx):
-        return self.modules[idx]
+        if idx >= len(self.modules):
+            raise IndexError('index {} is out of range'.format(idx))
+        it = self.modules.values()
+        for i in range(idx-1):
+            it.next()
+        return it.next()
 
     def forward(self, input):
-        for module in self.modules:
+        for module in self.modules.values():
             input = module(input)
         return input
+

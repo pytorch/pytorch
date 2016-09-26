@@ -26,13 +26,13 @@ class Linear(Module):
         >>> print(output.size())
     """
     def __init__(self, in_features, out_features):
-        super(Linear, self).__init__()
         self.in_features = in_features
         self.out_features = out_features
 
-        self.weight = Variable(torch.Tensor(out_features, in_features))
-        self.bias = Variable(torch.Tensor(out_features))
-
+        super(Linear, self).__init__(
+            weight=Variable(torch.Tensor(out_features, in_features)),
+            bias=Variable(torch.Tensor(out_features))
+        )
         self.reset_parameters()
 
     def reset_parameters(self):

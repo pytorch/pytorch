@@ -39,15 +39,16 @@ class Conv1d(Module):
     """
 
     def __init__(self, in_features, out_features, kernel_size, stride=1):
-        super(Conv1d, self).__init__()
         self.in_features = in_features
         self.out_features = out_features
         self.kernel_size = kernel_size
         self.stride = stride
 
-        self.weight = Variable(torch.Tensor(
-            out_features, in_features, kernel_size))
-        self.bias = Variable(torch.Tensor(out_features))
+        kernel_elements = self.in_features * self.kernel_size
+        super(Conv1d, self).__init__(
+            weight = Variable(torch.Tensor(out_features, in_features, kernel_size)),
+            bias = Variable(torch.Tensor(out_features))
+        )
 
         self.reset_parameters()
 
@@ -107,8 +108,7 @@ class Conv2d(Module):
         >>> output = m.forward(input)
     """
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 padding=0, dilation=None, groups=1, no_bias=False):
-        super(Conv2d, self).__init__()
+                padding=0, dilation=None, groups=1, no_bias=False):
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.kh, self.kw = _pair(kernel_size)
@@ -119,12 +119,15 @@ class Conv2d(Module):
             self.dilh, self.dilw = _pair(dilation)
         self.groups = groups
 
-        self.weight = Variable(torch.Tensor(
+        weight = Variable(torch.Tensor(
             self.out_channels, self.in_channels, self.kh, self.kw))
         if no_bias:
-            self.bias = None
+            super(Conv2d, self).__init__(weight=weight)
         else:
-            self.bias = Variable(torch.Tensor(self.out_channels))
+            super(Conv2d, self).__init__(
+                weight=weight,
+                bias=Variable(torch.Tensor(self.out_channels))
+            )
 
         self.reset_parameters()
 
@@ -195,7 +198,24 @@ class FullConv2d(Conv2d):
             return func(input, self.weight, self.bias)
 
 
-class Conv3d(Module):
+class _Conv3dBase(Module):
+
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1,
+            padding=0):
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.kt, self.kh, self.kw = _triple(kernel_size)
+        self.dt, self.dh, self.dw = _triple(stride)
+        self.padt, self.padh, self.padw = _triple(padding)
+
+    def reset_parameters(self):
+        stdv = 1. / math.sqrt(self.kt * self.kh * self.kw * self.in_channels)
+        self.weight.data.uniform_(-stdv, stdv)
+        if self.bias is not None:
+            self.bias.data.uniform_(-stdv, stdv)
+
+
+class Conv3d(_Conv3dBase):
     """Applies a 3D convolution over an input image composed of several input
     planes.
 
@@ -209,7 +229,7 @@ class Conv3d(Module):
         kernel_size: the size of the convolving kernel. Can be a single number k (for a square kernel of k x k x k) or a tuple (kt x kh x kw)
         stride: the stride of the convolving kernel. Can be a single number s or a tuple (kt x sh x sw). Default: 1
         padding: implicit zero padding on the input. Can be a single number s or a tuple. Default: 0
-        no_bias: If set to true, the layer will not learn an additive bias. Default: False
+        bias: If set to False, the layer will not learn an additive bias. Default: True
     Input Shape: [ * , in_channels  , * , * , * ] : Input is minibatch x in_channels x iT x iH x iW
     Output Shape:[ * , out_channels , * , * , * ]  : Output shape is precisely minibatch x out_channels x floor((iT  + 2*padT - kT) / dT + 1) x floor((iH  + 2*padH - kH) / dH + 1) x floor((iW  + 2*padW - kW) / dW + 1)
     Members:
@@ -224,28 +244,16 @@ class Conv3d(Module):
         >>> output = m.forward(input)
     """
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 padding=0, no_bias=False):
-        super(Conv3d, self).__init__()
-        self.in_channels = in_channels
-        self.out_channels = out_channels
-        self.kt, self.kh, self.kw = _triple(kernel_size)
-        self.dt, self.dh, self.dw = _triple(stride)
-        self.padt, self.padh, self.padw = _triple(padding)
-
-        self.weight = Variable(torch.Tensor(self.out_channels,
+                padding=0):
+        super(Conv3d, self).__init__(in_channels, out_channels, kernel_size,
+                stride, padding)
+        weight = Variable(torch.Tensor(self.out_channels,
                 self.in_channels, self.kt, self.kh, self.kw))
-        if no_bias:
-            self.bias = None
-        else:
-            self.bias = Variable(torch.Tensor(self.out_channels))
+        bias = Variable(torch.Tensor(self.out_channels))
 
+        Module.__init__(self, weight=weight, bias=bias)
         self.reset_parameters()
 
-    def reset_parameters(self):
-        stdv = 1. / math.sqrt(self.kt * self.kh * self.kw * self.in_channels)
-        self.weight.data.uniform_(-stdv, stdv)
-        if self.bias is not None:
-            self.bias.data.uniform_(-stdv, stdv)
 
     def forward(self, input):
         func = self._backend.Conv3d(
@@ -257,7 +265,7 @@ class Conv3d(Module):
             return func(input, self.weight, self.bias)
 
 
-class FullConv3d(Conv3d):
+class FullConv3d(_Conv3dBase):
     """Applies a 3D deconvolution operator over an input image composed of several input
     planes.
     The deconvolution operator multiplies each input value element-wise by a learnable kernel,
@@ -271,7 +279,7 @@ class FullConv3d(Conv3d):
         stride: the stride of the convolving kernel. Can be a single number or a tuple (st x sh x sw). Default: 1
         padding: implicit zero padding on the input. Can be a single number or a tuple. Default: 0
         output_padding: A padding of 0 or 1 pixels that should be added to the output. Can be a single number or a tuple. Default: 0
-        no_bias: If set to true, the layer will not learn an additive bias. Default: False
+        bias: If set to False, the layer will not learn an additive bias. Default: True
     Input Shape: [ * , in_channels  , * , * , * ] : Input is minibatch x in_channels x iH x iW
     Output Shape:[ * , out_channels , * , * , * ]  : Output shape is precisely minibatch x out_channels x (iT - 1) * sT - 2*padT + kT + output_paddingT x (iH - 1) * sH - 2*padH + kH + output_paddingH x (iW - 1) * sW - 2*padW + kW
     Members:
@@ -286,22 +294,14 @@ class FullConv3d(Conv3d):
         >>> output = m.forward(input)
     """
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 padding=0, no_bias=False):
-        super(Conv3d, self).__init__()
-        self.in_channels = in_channels
-        self.out_channels = out_channels
-        self.kt, self.kh, self.kw = _triple(kernel_size)
-        self.dt, self.dh, self.dw = _triple(stride)
-        self.padt, self.padh, self.padw = _triple(padding)
-
-        self.weight = Variable(torch.Tensor(self.in_channels,
+                padding=0):
+        super(FullConv3d, self).__init__(in_channels, out_channels, kernel_size,
+                stride, padding)
+        weight = Variable(torch.Tensor(self.in_channels,
                 self.out_channels, self.kt, self.kh, self.kw))
-        if no_bias:
-            self.bias = None
-        else:
-            self.bias = Variable(torch.Tensor(self.out_channels))
+        bias = Variable(torch.Tensor(self.out_channels))
 
-        self.reset_parameters()
+        Module.__init__(self, weight=weight, bias=bias)
 
     def forward(self, input):
         func = self._backend.FullConv3d(

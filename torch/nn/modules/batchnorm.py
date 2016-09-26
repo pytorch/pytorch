@@ -8,7 +8,6 @@ from .module import Module
 class _BatchNorm(Module):
 
     def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True):
-        super(_BatchNorm, self).__init__()
 
         self.affine = affine
         self.eps = eps
@@ -17,35 +16,41 @@ class _BatchNorm(Module):
         self.running_var = torch.ones(num_features)
 
         if self.affine:
-            self.weight = Variable(torch.Tensor(num_features))
-            self.bias = Variable(torch.Tensor(num_features))
-            self.reset_parameters()
+            super(_BatchNorm, self).__init__(
+                weight=Variable(torch.Tensor(num_features)),
+                bias=Variable(torch.Tensor(num_features)),
+            )
         else:
+            super(_BatchNorm, self).__init__()
             self.weight = None
             self.bias = None
+        self.reset_parameters()
 
     def reset_parameters(self):
-        if self.weight:
-            self.weight.data.uniform_()
-        if self.bias:
-            self.bias.data.zero_()
-
         self.running_mean.zero_()
         self.running_var.fill_(1)
+        if self.affine:
+            self.weight.data.uniform_()
+            self.bias.data.zero_()
 
-    def _checkInputDim(self, input):
+    def _check_input_dim(self, input):
         if input.dim() != self.expected_dim:
             raise RuntimeError('only mini-batch supported ({}D tensor), got {}D tensor instead'.format(self.expected_dim, input.dim()))
         if input.size(1) != self.running_mean.nelement():
             raise RuntimeError('got {}-feature tensor, expected {}'.format(input.size(1), self.running_mean.nelement()))
 
     def forward(self, input):
-        self._checkInputDim(input)
+        self._check_input_dim(input)
         args = (input,)
         if self.weight is not None:
             args = args + (self.weight, self.bias)
         return self._backend.BatchNorm(self.running_mean,
                 self.running_var, self.train, self.momentum, self.eps)(*args)
+
+    def type(self, type, *forwarded_args):
+        self.running_var = self.running_var.type(type, *forwarded_args)
+        self.running_mean = self.running_mean.type(type, *forwarded_args)
+        return super(_BatchNorm, self).type(type, *forwarded_args)
 
 
 class BatchNorm1d(_BatchNorm):
@@ -62,7 +67,7 @@ class BatchNorm1d(_BatchNorm):
     of size N (where N is the input size).
 
     During training, this layer keeps a running estimate of its computed mean
-    and variance. The running sum is kept with a default momentum of 0.1 
+    and variance. The running sum is kept with a default momentum of 0.1
     During evaluation, this running mean/variance is used for normalization.
 
     Args:
@@ -99,7 +104,7 @@ class BatchNorm2d(_BatchNorm):
     of size N (where N is the input size).
 
     During training, this layer keeps a running estimate of its computed mean
-    and variance. The running sum is kept with a default momentum of 0.1 
+    and variance. The running sum is kept with a default momentum of 0.1
     During evaluation, this running mean/variance is used for normalization.
 
     Args:
@@ -118,7 +123,7 @@ class BatchNorm2d(_BatchNorm):
         >>> m = nn.BatchNorm2d(100, affine=False)
         >>> input = autograd.Variable(torch.randn(20, 100, 35, 45))
         >>> output = m.forward(input)
-    """    
+    """
     expected_dim = 4
 
 
@@ -136,7 +141,7 @@ class BatchNorm3d(_BatchNorm):
     of size N (where N is the input size).
 
     During training, this layer keeps a running estimate of its computed mean
-    and variance. The running sum is kept with a default momentum of 0.1 
+    and variance. The running sum is kept with a default momentum of 0.1
     During evaluation, this running mean/variance is used for normalization.
 
     Args:
@@ -155,6 +160,6 @@ class BatchNorm3d(_BatchNorm):
         >>> m = nn.BatchNorm3d(100, affine=False)
         >>> input = autograd.Variable(torch.randn(20, 100, 35, 45, 10))
         >>> output = m.forward(input)
-    """    
+    """
     expected_dim = 5
 

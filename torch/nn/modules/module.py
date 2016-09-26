@@ -7,8 +7,9 @@ from torch.autograd import Variable
 
 class Module(object):
 
-    def __init__(self):
+    def __init__(self, **parameters):
         self._backend = thnn_backend
+        self._parameters = OrderedDict(parameters)
         self.backward_hooks = OrderedDict()
         self.forward_hooks = OrderedDict()
         self.train = True
@@ -17,16 +18,11 @@ class Module(object):
         raise NotImplementedError
 
     def type(self, type, *forwarded_args):
-        # Find all tensors and convert them
-        for key, value in self.__dict__.items():
-            if isinstance(value, Variable):
+        for param in self._parameters.values():
+            if param is not None:
                 # Variables stored in modules are graph leaves,
                 # and we don't want to create copy nodes.
-                value._data = value.data.type(type, *forwarded_args)
-            elif torch.is_tensor(value):
-                setattr(self, key, value.type(type, *forwarded_args))
-            elif isinstance(value, Module):
-                value.type(type, *forwarded_args)
+                param._data = param.data.type(type, *forwarded_args)
         return self
 
     def cuda(self, device_id=None):
@@ -75,18 +71,22 @@ class Module(object):
             fn.register_hook(key, lambda gi,go,hook=hook: hook(self, gi, go))
         return result
 
+    def __getattr__(self, name):
+        if '_parameters' in self.__dict__:
+            _parameters = self.__dict__['_parameters']
+            if name in _parameters:
+                return _parameters[name]
+        return object.__getattribute__(self, name)
+
     def parameters(self, memo=None):
         if memo is None:
             memo = set()
-        if hasattr(self, 'weight') and self.weight is not None \
-                and self.weight not in memo:
-            memo.add(self.weight)
-            yield self.weight
-        if hasattr(self, 'bias') and self.bias is not None \
-                and self.bias not in memo:
-            memo.add(self.bias)
-            yield self.bias
+        for p in self._parameters.values():
+            if p not in memo:
+                memo.add(p)
+                yield p
 
     def zero_grad(self):
         for p in self.parameters():
             p.grad.zero_()
+

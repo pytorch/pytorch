@@ -27,7 +27,6 @@ class Embedding(Module):
     """
     def __init__(self, num_embeddings, embedding_dim, padding_idx=-1,
             max_norm=None, norm_type=2, scale_grad_by_freq=False):
-        super(Embedding, self).__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
         self.padding_idx = padding_idx
@@ -35,9 +34,9 @@ class Embedding(Module):
         self.norm_type = norm_type
         self.scale_grad_by_freq = scale_grad_by_freq
 
-        weight_t = torch.Tensor(num_embeddings, embedding_dim)
-        self.weight = Variable(weight_t)
-
+        super(Embedding, self).__init__(
+            weight=Variable(torch.Tensor(num_embeddings, embedding_dim))
+        )
         self.reset_parameters()
 
     def reset_parameters(self):
