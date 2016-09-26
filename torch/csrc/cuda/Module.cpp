@@ -3,11 +3,13 @@
 #include <stdbool.h>
 #include <unordered_map>
 #include <TH/TH.h>
+#include <THC/THCCachingAllocator.h>
 
 #include "THCP.h"
 
 THCState _state;
 THCState *state = &_state;
+THCDeviceAllocator deviceAllocator;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Class pointer cache
@@ -148,6 +150,7 @@ PyObject * THCPModule_getDriverVersion(PyObject *self)
 
 bool THCPModule_initCuda(PyObject *module_dict) {
 #define ASSERT_TRUE(cond) if (!(cond)) { return false; }
+  THCCachingAllocator_init(&state->cudaDeviceAllocator);
   THCudaInit(state);
 
 #ifdef USE_MAGMA
