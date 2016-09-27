@@ -12,18 +12,12 @@ class ClassNLLCriterion(Criterion):
 
         self.output_tensor = torch.zeros(1)
         self.total_weight_tensor = torch.ones(1)
-        self.target = torch.zeros(1).long()
 
     def updateOutput(self, input, target):
-        if target.type() == 'torch.cuda.FloatTensor':
-            self.target = target
-        else:
-            self.target = target.long()
-
         self._backend.ClassNLLCriterion_updateOutput(
             self._backend.library_state,
             input,
-            self.target,
+            target,
             self.output_tensor,
             self.sizeAverage,
             self.weights,
@@ -34,17 +28,12 @@ class ClassNLLCriterion(Criterion):
 
 
     def updateGradInput(self, input, target):
-        if target.type() == 'torch.cuda.FloatTensor':
-            self.target = target
-        else:
-            self.target = target.long()
-
         self.gradInput.resize_as_(input).zero_()
 
         self._backend.ClassNLLCriterion_updateGradInput(
             self._backend.library_state,
             input,
-            self.target,
+            target,
             self.gradInput,
             self.sizeAverage,
             self.weights,
@@ -52,4 +41,3 @@ class ClassNLLCriterion(Criterion):
         )
 
         return self.gradInput
-
