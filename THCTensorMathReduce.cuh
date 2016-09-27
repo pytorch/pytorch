@@ -143,6 +143,48 @@ __global__ void THCTensor_kernel_renorm(Real *data, const Real value, const long
   }
 }
 
+template <typename T>
+struct TensorNonZeroOp
+{
+  TensorNonZeroOp() {}
+  __host__ __device__ bool operator()(T lhs) const { return lhs != 0.0; }
+};
+
+template <typename T, int StaticExp>
+struct TensorNormOp
+{
+  TensorNormOp(T exp) : exponent(exp) {}
+
+  __host__ __device__ float operator()(T x) const {
+    if (StaticExp == 1) {
+      return (T) fabsf((float) x);
+    } else if (StaticExp == 2) {
+      return x * x;
+    } else {
+      return (T) powf(fabsf((float) x), (float) exponent);
+    }
+  }
+
+  const T exponent;
+};
+
+template <int StaticExp>
+struct TensorNormOp<double, StaticExp>
+{
+  TensorNormOp(double exp) : exponent(exp) {}
+
+  __host__ __device__ float operator()(double x) const {
+    if (StaticExp == 1) {
+      return fabs(x);
+    } else if (StaticExp == 2) {
+      return x * x;
+    } else {
+      return pow(fabs(x), exponent);
+    }
+  }
+
+  const double exponent;
+};
 
 #include <thrust/functional.h>
 
