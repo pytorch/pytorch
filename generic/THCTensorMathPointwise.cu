@@ -101,7 +101,7 @@ void THCTensor_(sigmoid)(THCState* state, THCTensor* self_, THCTensor* src) {
   THCudaCheck(cudaGetLastError());
 }
 
-void THCTensor_pow(THCState *state, THCTensor *self_, THCTensor *src, real value) {
+void THCTensor_(pow)(THCState *state, THCTensor *self_, THCTensor *src, real value) {
   THAssert(THCTensor_(checkGPU)(state, 2, self_, src));
   if (self_ == src) {
     if (!THC_pointwiseApply1(state, self_, TensorPowOp<real>(value))) {

@@ -17,6 +17,7 @@ struct ReduceAdd {
 };
 
 #ifdef CUDA_HALF_TENSOR
+
 template <>
 struct ReduceAdd<half, half> {
   inline __device__ half operator()(half a, half b) const {
@@ -147,7 +148,13 @@ template <typename T>
 struct TensorNonZeroOp
 {
   TensorNonZeroOp() {}
-  __host__ __device__ bool operator()(T lhs) const { return lhs != 0.0; }
+  __host__ __device__ T operator()(T lhs) const {
+    if (THCNumerics<T>::eq(lhs, ScalarConvert<float, T>::to(0.0))) {
+      return ScalarConvert<int, T>::to(0);
+    } else {
+      return ScalarConvert<int, T>::to(1);
+    }
+  }
 };
 
 template <typename T, int StaticExp>
@@ -155,7 +162,7 @@ struct TensorNormOp
 {
   TensorNormOp(T exp) : exponent(exp) {}
 
-  __host__ __device__ float operator()(T x) const {
+  __host__ __device__ T operator()(T x) const {
     if (StaticExp == 1) {
       return (T) fabsf((float) x);
     } else if (StaticExp == 2) {
@@ -173,7 +180,7 @@ struct TensorNormOp<double, StaticExp>
 {
   TensorNormOp(double exp) : exponent(exp) {}
 
-  __host__ __device__ float operator()(double x) const {
+  __host__ __device__ double operator()(double x) const {
     if (StaticExp == 1) {
       return fabs(x);
     } else if (StaticExp == 2) {
@@ -185,6 +192,26 @@ struct TensorNormOp<double, StaticExp>
 
   const double exponent;
 };
+
+#ifdef CUDA_HALF_TENSOR
+template <int StaticExp>
+struct TensorNormOp<half, StaticExp>
+{
+  TensorNormOp(half exp) : exponent(exp) {}
+
+  __host__ __device__ half operator()(half x) const {
+    if (StaticExp == 1) {
+      return THCNumerics<half>::abs(x);
+    } else if (StaticExp == 2) {
+      return THCNumerics<half>::mul(x, x);
+    } else {
+      return THCNumerics<half>::pow(THCNumerics<half>::abs(x), exponent);
+    }
+  }
+
+  const half exponent;
+};
+#endif
 
 #include <thrust/functional.h>
 

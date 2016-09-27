@@ -6,6 +6,7 @@
 #include "THCApply.cuh"
 #include "THCReduce.cuh"
 #include "THCTensorMathReduce.cuh"
+#include "THCTensorMathPointwise.cuh"
 
 #include <thrust/device_ptr.h>
 #include <thrust/transform_reduce.h>
@@ -230,34 +231,6 @@ float THCudaTensor_normall(THCState *state, THCudaTensor *self, float value)
 
   THCudaTensor_free(state, self);
   return result;
-}
-
-void THCudaTensor_norm(THCState *state, THCudaTensor* self, THCudaTensor* src, float value, long dimension)
-{
-  THAssert(THCudaTensor_checkGPU(state, 2, self, src));
-  if (value == 0.0f) {
-    THC_reduceDim(state, self, src,
-                  TensorNonZeroOp<float>(), thrust::plus<float>(),
-                  0.0f, dimension);
-  } else if (value == 1.0f) {
-    THC_reduceDim(state, self, src,
-                  TensorNormOp<float, 1>(value), thrust::plus<float>(),
-                  0.0f, dimension);
-
-  } else if (value == 2.0f) {
-    THC_reduceDim(state, self, src,
-                  TensorNormOp<float, 2>(value), thrust::plus<float>(),
-                  0.0f, dimension);
-    THCudaTensor_pow(state, self, self, 0.5f);
-
-  } else {
-    THC_reduceDim(state, self, src,
-                  TensorNormOp<float, -1>(value), thrust::plus<float>(),
-                  0.0f, dimension);
-    THCudaTensor_pow(state, self, self, 1.0f / value);
-  }
-
-  THCudaCheck(cudaGetLastError());
 }
 
 struct dist_functor

@@ -4,7 +4,6 @@
 
 THC_API void THCTensor_(fill)(THCState *state, THCTensor *self, real value);
 THC_API void THCTensor_(zero)(THCState *state, THCTensor *self);
-THC_API void THCTensor_(mean)(THCState *state, THCudaTensor *self, THCudaTensor *src, long dim);
 
 THC_API void THCTensor_(zeros)(THCState *state, THCTensor *r_, THLongStorage *size);
 THC_API void THCTensor_(ones)(THCState *state, THCTensor *r_, THLongStorage *size);
