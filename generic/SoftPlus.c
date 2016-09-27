@@ -26,6 +26,7 @@ void THNN_(SoftPlus_updateGradInput)(
           real beta,
           real threshold)
 {
+  THNN_CHECK_NELEMENT(input, gradOutput);
   THTensor_(resizeAs)(gradInput, output);
   
   // d/dx[log(1+exp(k*x))/k] = exp(kx) / (exp(kx) + 1)

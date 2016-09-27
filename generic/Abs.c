@@ -17,6 +17,7 @@ void THNN_(Abs_updateGradInput)(
           THTensor *gradOutput,
           THTensor *gradInput)
 {
+  THNN_CHECK_NELEMENT(input, gradOutput);
   THTensor_(resizeAs)(gradInput, input);
   TH_TENSOR_APPLY3(real, gradInput, real, gradOutput, real, input,
     real z = *input_data;

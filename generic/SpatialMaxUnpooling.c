@@ -49,10 +49,9 @@ void THNN_(SpatialMaxUnpooling_updateOutput)(
   real *indices_data;
 
 
-  THArgCheck(input->nDimension == 3 || input->nDimension == 4 , 2, "3D or 4D (batch mode) tensor expected");
-  if (!THTensor_(isSameSizeAs)(input, indices)){
-    THError("Invalid input size w.r.t current indices size");
-  }
+  THNN_ARGCHECK(input->nDimension == 3 || input->nDimension == 4, 2, input,
+		"3D or 4D (batch mode) tensor expected for input, but got: %s");
+  THNN_CHECK_SHAPE(input, indices);
 
   if (input->nDimension == 4)
   {
@@ -160,9 +159,7 @@ void THNN_(SpatialMaxUnpooling_updateGradInput)(
   real *gradOutput_data;
   real *indices_data;
 
-  if (!THTensor_(isSameSizeAs)(input, indices)){
-    THError("Invalid input size w.r.t current indices size");
-  }
+  THNN_CHECK_SHAPE(input, indices);
 
   /* get contiguous gradOutput and indices */
   gradOutput = THTensor_(newContiguous)(gradOutput);
@@ -184,7 +181,8 @@ void THNN_(SpatialMaxUnpooling_updateGradInput)(
   iwidth = input->size[dimw];
 
   if(owidth!=gradOutput->size[dimw] || oheight!=gradOutput->size[dimh]){
-    THError("Inconsistent gradOutput size. oheight= %d, owidth= %d, gradOutput: %dx%d", oheight, owidth,gradOutput->size[dimh],gradOutput->size[dimw]);
+    THError("Inconsistent gradOutput size. oheight= %d, owidth= %d, gradOutput: %dx%d",
+	    oheight, owidth,gradOutput->size[dimh],gradOutput->size[dimw]);
   }
 
   /* get raw pointers */

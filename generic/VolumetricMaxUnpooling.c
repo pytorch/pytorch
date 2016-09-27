@@ -84,9 +84,8 @@ void THNN_(VolumetricMaxUnpooling_updateOutput)(
   real *output_data;
   real *indices_data;
 
-  THArgCheck(input->nDimension == 4 || input->nDimension == 5 , 2,
-    "4D or 5D (batch mode) tensor expected"
-  );
+  THNN_ARGCHECK(input->nDimension == 4 || input->nDimension == 5, 2, input,
+		"4D or 5D (batch mode) tensor expected for input, but got: %s");
 
   if (!THTensor_(isSameSizeAs)(input, indices))
   {
@@ -250,6 +249,7 @@ void THNN_(VolumetricMaxUnpooling_updateGradInput)(
     THError("Invalid input size w.r.t current indices size");
   }
 
+  // TODO: check gradOutput shape
   /* get contiguous gradOutput */
   gradOutput = THTensor_(newContiguous)(gradOutput);
   indices = THTensor_(newContiguous)(indices);

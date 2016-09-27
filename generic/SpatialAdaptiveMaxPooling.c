@@ -96,7 +96,8 @@ void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
   real *indices_data;
 
 
-  THArgCheck(input->nDimension == 3 || input->nDimension == 4 , 2, "3D or 4D (batch mode) tensor expected");
+  THNN_ARGCHECK(input->nDimension == 3 || input->nDimension == 4, 2, input,
+		"3D or 4D (batch mode) tensor expected for input, but got: %s");
 
   if (input->nDimension == 4)
   {

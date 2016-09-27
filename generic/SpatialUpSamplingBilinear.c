@@ -9,6 +9,7 @@ void THNN_(SpatialUpSamplingBilinear_updateOutput)(
     THNNState *state,
     THTensor *input,
     THTensor *output){
+  // TODO: check argument shapes
   input = THTensor_(newContiguous)(input);
   output = THTensor_(newContiguous)(output);
   THTensor_(zero)(output);
@@ -68,6 +69,7 @@ void THNN_(SpatialUpSamplingBilinear_updateGradInput)(
     THNNState *state,
     THTensor *gradOutput,
     THTensor *gradInput){
+  // TODO: check argument shapes  
   gradInput = THTensor_(newContiguous)(gradInput);
   gradOutput = THTensor_(newContiguous)(gradOutput);
   THTensor_(zero)(gradInput);

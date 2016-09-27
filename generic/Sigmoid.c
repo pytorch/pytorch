@@ -21,6 +21,7 @@ void THNN_(Sigmoid_updateGradInput)(
           THTensor *gradInput,
           THTensor *output)
 {
+  THNN_CHECK_NELEMENT(input, gradOutput);
   THTensor_(resizeAs)(gradInput, output);
   TH_TENSOR_APPLY3(real, gradInput, real, gradOutput, real, output,
     real z = *output_data;

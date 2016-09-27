@@ -85,6 +85,7 @@ void THNN_(SoftMax_updateGradInput)(
           THTensor *gradInput,
           THTensor *output)
 {
+  THNN_CHECK_SHAPE(input, gradOutput);  
   real *gradInput_data, *gradOutput_data, *output_data;
   long nframe = 0, dim = 0, stride = 0;
   long t;

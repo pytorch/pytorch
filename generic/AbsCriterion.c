@@ -10,7 +10,7 @@ void THNN_(AbsCriterion_updateOutput)(
           bool sizeAverage)
 {
   real sum = 0;
-
+  THNN_CHECK_NELEMENT(input, target);
   TH_TENSOR_APPLY2(real, input, real, target,
     sum += fabs(*input_data - *target_data);
   );
@@ -28,6 +28,7 @@ void THNN_(AbsCriterion_updateGradInput)(
           THTensor *gradInput,
           bool sizeAverage)
 {
+  THNN_CHECK_NELEMENT(input, target);
   real norm = (sizeAverage ? 1./((real)THTensor_(nElement)(input)) : 1.);
 
   THTensor_(resizeAs)(gradInput, input);

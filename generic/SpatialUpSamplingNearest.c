@@ -8,6 +8,7 @@ void THNN_(SpatialUpSamplingNearest_updateOutput)(
     THTensor *output,
     int scale_factor)
 {
+  // TODO: check argument shapes  
   int dW = scale_factor;
   int dH = scale_factor;
   int xDim = input->nDimension-2;
@@ -74,6 +75,7 @@ void THNN_(SpatialUpSamplingNearest_updateGradInput)(
     THTensor *gradInput,
     int scale_factor)
 {
+  // TODO: check argument shapes  
   int dW = scale_factor;
   int dH = scale_factor;
   int xDim = gradInput->nDimension-2;

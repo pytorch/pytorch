@@ -15,11 +15,17 @@ void THNN_(SpatialDilatedConvolution_updateOutput)(
     int padW, int padH,
     int dilationW, int dilationH)
 {
-  THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch mode) tensor is expected");
-  THArgCheck(weight->nDimension == 4, 4, "weight tensor must be 4D (nOutputPlane,nInputPlane,kH,kW)");
-  THArgCheck(!bias || weight->size[0] == bias->size[0], 4, "nOutputPlane mismatch in weight and bias");
-  THArgCheck(kW > 0 && kH > 0, 8, "kernel size should be greater than zero");
-  THArgCheck(dW > 0 && dH > 0, 10, "stride should be greater than zero");
+  THNN_ARGCHECK(input->nDimension == 3 || input->nDimension == 4, 2, input,
+		"3D or 4D (batch mode) tensor expected for input, but got: %s");
+  THNN_ARGCHECK(weight->nDimension == 4, 4, weight,
+		"4D weight tensor (nOutputPlane,nInputPlane,kH,kW) expected, "
+		"but got: %s");
+  THArgCheck(!bias || weight->size[0] == bias->size[0], 4,
+	     "nOutputPlane mismatch in weight and bias");
+  THArgCheck(kW > 0 && kH > 0, 8,
+	       "kernel size should be greater than zero, but got kH: %d kW: %d", kH, kW);
+  THArgCheck(dW > 0 && dH > 0, 10,
+	     "stride should be greater than zero, but got dH: %d dW: %d", dH, dW);
 
   // Params:
   int nInputPlane = weight->size[1];
@@ -27,12 +33,16 @@ void THNN_(SpatialDilatedConvolution_updateOutput)(
 
   int batch = 1;
   if (input->nDimension == 3) {
-    THArgCheck(input->size[0] == nInputPlane, 2, "input channels and nInputPlane dont match");
+    THArgCheck(input->size[0] == nInputPlane, 2,
+	       "input channels %d and nInputPlane %d dont match.",
+	       input->size[0], nInputPlane);
     // Force batch
     batch = 0;
     THTensor_(resize4d)(input, 1, input->size[0], input->size[1], input->size[2]);
   } else {
-    THArgCheck(input->size[1] == nInputPlane, 2, "input channels and nInputPlane dont match");
+    THArgCheck(input->size[1] == nInputPlane, 2,
+	       "input channels %d and nInputPlane %d dont match",
+	       input->size[1], nInputPlane);
   }
 
   long inputWidth   = input->size[3];
@@ -41,7 +51,8 @@ void THNN_(SpatialDilatedConvolution_updateOutput)(
   long outputHeight = (inputHeight + 2*padH - (dilationH * (kH - 1) + 1)) / dH + 1;
 
   if (outputWidth < 1 || outputHeight < 1)
-    THError("Given input size: (%dx%dx%d). Calculated output size: (%dx%dx%d). Output size is too small",
+    THError("Given input size: (%dx%dx%d). "
+	    "Calculated output size: (%dx%dx%d). Output size is too small",
             nInputPlane,inputHeight,inputWidth,nOutputPlane,outputHeight,outputWidth);
 
   // Batch size + input planes
@@ -142,10 +153,15 @@ void THNN_(SpatialDilatedConvolution_updateGradInput)(
     int padW, int padH,
     int dilationW, int dilationH)
 {
-  THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch mode) tensor is expected");
-  THArgCheck(weight->nDimension == 4, 4, "weight tensor must be 4D (nOutputPlane,nInputPlane,kH,kW)");
-  THArgCheck(kW > 0 && kH > 0, 9, "kernel size should be greater than zero");
-  THArgCheck(dW > 0 && dH > 0, 11, "stride should be greater than zero");
+  THNN_ARGCHECK(input->nDimension == 3 || input->nDimension == 4, 2, input,
+		"3D or 4D (batch mode) tensor expected for input, but got: %s");
+  THNN_ARGCHECK(weight->nDimension == 4, 4, weight,
+		"4D weight tensor (nOutputPlane,nInputPlane,kH,kW) expected, "
+		"but got: %s");
+  THArgCheck(kW > 0 && kH > 0, 9,
+	       "kernel size should be greater than zero, but got kH: %d kW: %d", kH, kW);
+  THArgCheck(dW > 0 && dH > 0, 11,
+	     "stride should be greater than zero, but got dH: %d dW: %d", dH, dW);
 
   // Params
   int nInputPlane = weight->size[1];
@@ -156,7 +172,8 @@ void THNN_(SpatialDilatedConvolution_updateGradInput)(
     // Force batch
     batch = 0;
     THTensor_(resize4d)(input, 1, input->size[0], input->size[1], input->size[2]);
-    THTensor_(resize4d)(gradOutput, 1, gradOutput->size[0], gradOutput->size[1], gradOutput->size[2]);
+    THTensor_(resize4d)(gradOutput, 1, gradOutput->size[0], gradOutput->size[1],
+			gradOutput->size[2]);
   }
 
   long inputWidth   = input->size[3];
@@ -236,11 +253,17 @@ void THNN_(SpatialDilatedConvolution_accGradParameters)(
     int dilationW, int dilationH,
     real scale)
 {
-  THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch mode) tensor is expected");
-  THArgCheck(gradWeight->nDimension == 4, 4, "gradWeight tensor must be 4D (nOutputPlane,nInputPlane,kH,kW)");
-  THArgCheck(!gradBias || gradWeight->size[0] == gradBias->size[0], 4, "nOutputPlane mismatch in gradWeight and gradBias");
-  THArgCheck(kW > 0 && kH > 0, 8, "kernel size should be greater than zero");
-  THArgCheck(dW > 0 && dH > 0, 10, "stride should be greater than zero");
+  THNN_ARGCHECK(input->nDimension == 3 || input->nDimension == 4, 2, input,
+		"3D or 4D (batch mode) tensor expected for input, but got: %s");
+  THNN_ARGCHECK(gradWeight->nDimension == 4, 4, gradWeight,
+		"4D gradWeight tensor (nOutputPlane,nInputPlane,kH,kW) expected, "
+		"but got: %s");
+  THArgCheck(!gradBias || gradWeight->size[0] == gradBias->size[0], 4,
+	     "nOutputPlane mismatch in gradWeight and gradBias");
+  THArgCheck(kW > 0 && kH > 0, 8,
+	       "kernel size should be greater than zero, but got kH: %d kW: %d", kH, kW);
+  THArgCheck(dW > 0 && dH > 0, 10,
+	     "stride should be greater than zero, but got dH: %d dW: %d", dH, dW);
 
   // Params
   int nInputPlane = gradWeight->size[1];
@@ -251,7 +274,8 @@ void THNN_(SpatialDilatedConvolution_accGradParameters)(
     // Force batch
     batch = 0;
     THTensor_(resize4d)(input, 1, input->size[0], input->size[1], input->size[2]);
-    THTensor_(resize4d)(gradOutput, 1, gradOutput->size[0], gradOutput->size[1], gradOutput->size[2]);
+    THTensor_(resize4d)(gradOutput, 1, gradOutput->size[0],
+			gradOutput->size[1], gradOutput->size[2]);
   }
 
   long inputWidth   = input->size[3];

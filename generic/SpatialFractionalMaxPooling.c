@@ -103,8 +103,8 @@ void THNN_(SpatialFractionalMaxPooling_updateOutput)(
   int widthDim = 2;
 
   long numInputDims = THTensor_(nDimension)(input);
-  THArgCheck(numInputDims == 3 || numInputDims == 4, 2,
-             "3D or 4D (batch mode) tensor expected");
+  THNN_ARGCHECK(numInputDims == 3 || numInputDims == 4, 2, input,
+		"3D or 4D (batch mode) tensor expected for input, but got: %s");
 
   if (numInputDims == 4) {
     numBatch = THTensor_(size)(input, 0);
@@ -119,9 +119,11 @@ void THNN_(SpatialFractionalMaxPooling_updateOutput)(
   long inputW = THTensor_(size)(input, widthDim);
 
   THArgCheck(outputH + poolSizeH - 1 < inputH, 7,
-             "poolSizeH too large relative to input height");
+             "poolSizeH (%d) too large relative to input height (%d)",
+	     poolSizeH, inputH);
   THArgCheck(outputW + poolSizeW - 1 < inputW, 6,
-             "poolSizeW too large relative to input width");
+             "poolSizeW (%d) too large relative to input width (%d)",
+	     poolSizeW, inputW);
 
   /* get contiguous input */
   input = THTensor_(newContiguous)(input);

@@ -86,6 +86,7 @@ void THNN_(RReLU_updateGradInput)(
           bool train,
           bool inplace)
 {
+  THNN_CHECK_NELEMENT(input, gradOutput);
   if (train && upper - lower > 1E-6)    // e.g. if upper == lower, RReLU behaves like LeakyReLU
   {
     // multiply the gradient by the noise tensor

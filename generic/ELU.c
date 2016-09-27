@@ -8,7 +8,7 @@ void THNN_(ELU_updateOutput)(
           THTensor *output,
           real alpha,
           bool inplace)
-{
+{  
   if(inplace) {
     TH_TENSOR_APPLY(real, input,
       if(*input_data <= 0) {
@@ -33,6 +33,7 @@ void THNN_(ELU_updateGradInput)(
           real alpha,
           bool inplace)
 {
+  THNN_CHECK_NELEMENT(input, gradOutput);
   if(inplace) {
     TH_TENSOR_APPLY2(real, gradOutput, real, output,
       if(*output_data <= 0) {

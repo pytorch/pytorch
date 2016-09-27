@@ -11,6 +11,8 @@ void THNN_(ClassNLLCriterion_updateOutput)(
           THTensor *weights,
           THTensor *total_weight)
 {
+  THNN_CHECK_DIM_SIZE(output, 1, 0, 1);
+  THNN_CHECK_DIM_SIZE(total_weight, 1, 0, 1);
   int n_dims = THTensor_(nDimension)(input);
   int n_classes = THTensor_(size)(input, n_dims - 1);
 
@@ -21,7 +23,9 @@ void THNN_(ClassNLLCriterion_updateOutput)(
     THError("input tensor should be 1D or 2D");
   }
   if (weights && THTensor_(nElement)(weights) != n_classes) {
-    THError("weight tensor should be defined either for all or no classes");
+    THDescBuff s1 = THTensor_(sizeDesc)(weights);
+    THError("weight tensor should be defined either for all %d classes or no classes"
+	    " but got weight tensor of shape: %s", n_classes, s1.str);
   }
 
   input = THTensor_(newContiguous)(input);

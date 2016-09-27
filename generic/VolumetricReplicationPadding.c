@@ -85,8 +85,8 @@ void THNN_(VolumetricReplicationPadding_updateOutput)(THNNState *state,
   real *input_data;
   real *output_data;
 
-  THArgCheck(input->nDimension == 4 || input->nDimension == 5,
-             2, "input must be 4 or 5-dimensional");
+  THNN_ARGCHECK(input->nDimension == 4 || input->nDimension == 5, 2, input,
+		"4D or 5D (batch mode) tensor expected for input, but got: %s");
 
   if (input->nDimension == 5)
   {
@@ -106,8 +106,10 @@ void THNN_(VolumetricReplicationPadding_updateOutput)(THNNState *state,
   oheight = iheight + ptop + pbottom;
   owidth  = iwidth + pleft + pright;
 
-  THArgCheck(owidth >= 1 || oheight >= 1 || odepth >= 1 , 2,
-             "input is too small");
+  THArgCheck(owidth >= 1 || oheight >= 1 || odepth >= 1, 2,
+	     "input (D: %d H: %d, W: %d)is too small."
+	     " Calculated output D: %d H: %d W: %d",
+	     idepth, iheight, iwidth, odepth, oheight, owidth);
 
   /* get contiguous input */
   input = THTensor_(newContiguous)(input);
@@ -254,11 +256,15 @@ void THNN_(VolumetricReplicationPadding_updateGradInput)(THNNState *state,
   owidth  = iwidth + pleft + pright;
 
   THArgCheck(owidth == THTensor_(size)(gradOutput, dimw), 3,
-                "gradOutput width unexpected");
+	     "gradOutput width unexpected. Expected: %d, Got: %d",
+	     owidth, THTensor_(size)(gradOutput, dimw));
   THArgCheck(oheight == THTensor_(size)(gradOutput, dimh), 3,
-                "gradOutput height unexpected");
+	     "gradOutput height unexpected. Expected: %d, Got: %d",
+	     oheight, THTensor_(size)(gradOutput, dimh));
   THArgCheck(odepth == THTensor_(size)(gradOutput, dimd), 3,
-                "gradOutput depth unexpected");
+	     "gradOutput depth unexpected. Expected: %d, Got: %d",
+	     odepth, THTensor_(size)(gradOutput, dimd));
+  
 
   /* get contiguous gradOutput */
   gradOutput = THTensor_(newContiguous)(gradOutput);

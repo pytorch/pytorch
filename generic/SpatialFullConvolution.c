@@ -73,16 +73,21 @@ void THNN_(SpatialFullConvolution_updateOutput)(
   int nInputPlane = THTensor_(size)(weight,0);
   int nOutputPlane = THTensor_(size)(weight,1);
 
-  THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch mode) tensor is expected");
+  THNN_ARGCHECK(input->nDimension == 3 || input->nDimension == 4, 2, input,
+		"3D or 4D (batch mode) tensor expected for input, but got: %s")
 
   int batch = 1;
   if (input->nDimension == 3) {
-    THArgCheck(input->size[0] == nInputPlane, 2, "input channels and nInputPlane dont match");
+    THArgCheck(input->size[0] == nInputPlane, 2,
+	       "input channels (%d) and nInputPlane (%d) dont match",
+	       input->size[0], nInputPlane);
     // Force batch
     batch = 0;
     THTensor_(resize4d)(input, 1, input->size[0], input->size[1], input->size[2]);
   } else {
-    THArgCheck(input->size[1] == nInputPlane, 2, "input channels and nInputPlane dont match");
+    THArgCheck(input->size[1] == nInputPlane, 2,
+	       "input channels (%d) and nInputPlane (%d) dont match",
+	       input->size[1], nInputPlane);
   }
 
   long inputWidth   = input->size[3];
@@ -189,10 +194,12 @@ void THNN_(SpatialFullConvolution_updateGradInput)(
     int padW, int padH,
     int adjW, int adjH)
 {
+  // TODO: check gradOutput shape
   int nInputPlane = THTensor_(size)(weight,0);
   int nOutputPlane = THTensor_(size)(weight,1);
 
-  THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch mode) tensor is expected");
+  THNN_ARGCHECK(input->nDimension == 3 || input->nDimension == 4, 2, input,
+		"3D or 4D (batch mode) tensor expected for input, but got: %s");
 
   int batch = 1;
   if (input->nDimension == 3) {
@@ -286,7 +293,8 @@ void THNN_(SpatialFullConvolution_accGradParameters)(
   int nInputPlane = THTensor_(size)(gradWeight,0);
   int nOutputPlane = THTensor_(size)(gradWeight,1);
 
-  THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch mode) tensor is expected");
+  THNN_ARGCHECK(input->nDimension == 3 || input->nDimension == 4, 2, input,
+		"3D or 4D (batch mode) tensor expected for input, but got: %s");
 
   int batch = 1;
   if (input->nDimension == 3) {

@@ -4,9 +4,12 @@
 
 #define INITIAL_CHECK                                                            \
   THArgCheck(THIndexTensor_(nDimension)(target) == 3, 3,                         \
-              "only batches of spatial targets supported (3D tensors)");         \
-  THArgCheck(THTensor_(nDimension)(input) == 4, 2,                               \
-              "only batches of spatial inputs supported (4D tensors)");          \
+    "only batches of spatial targets supported (3D tensors)"		         \
+	     " but got targets of dimension: %d",			         \
+	     THIndexTensor_(nDimension)(target));			         \
+  THArgCheck(THTensor_(nDimension)(input) == 4, 2,			         \
+	     "only batches of spatial inputs supported (4D tensors), "	         \
+	     "but got input of dimension: %d", THTensor_(nDimension)(input));    \
   if (weights && THTensor_(nElement)(weights) != THTensor_(size)(input, 1)) {    \
     THError("weight tensor should be defined either for all or no classes");     \
   }                                                                              \

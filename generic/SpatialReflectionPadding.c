@@ -67,8 +67,8 @@ void THNN_(SpatialReflectionPadding_updateOutput)(THNNState *state,
   real *input_data;
   real *output_data;
 
-  THArgCheck(input->nDimension == 3 ||
-    input->nDimension == 4 , 2, "input must be 3 or 4-dimensional");
+  THNN_ARGCHECK(input->nDimension == 3 || input->nDimension == 4, 2, input,
+		"3D or 4D (batch mode) tensor expected for input, but got: %s");
 
   if (input->nDimension == 4)
   {
@@ -85,7 +85,10 @@ void THNN_(SpatialReflectionPadding_updateOutput)(THNNState *state,
   oheight = iheight + pad_t + pad_b;
   owidth  = iwidth + pad_l + pad_r;
 
-  THArgCheck(owidth >= 1 || oheight >= 1 , 2, "input is too small");
+  THArgCheck(owidth >= 1 || oheight >= 1 , 2,
+	     "input (H: %d, W: %d)is too small."
+	     " Calculated output H: %d W: %d",
+	     iheight, iwidth, oheight, owidth);
 
   /* get contiguous input */
   input = THTensor_(newContiguous)(input);
@@ -212,9 +215,11 @@ void THNN_(SpatialReflectionPadding_updateGradInput)(THNNState *state,
   owidth  = iwidth + pad_l + pad_r;
 
   THArgCheck(owidth == THTensor_(size)(gradOutput, dimw), 3,
-                "gradOutput width unexpected");
+	     "gradOutput width unexpected. Expected: %d, Got: %d",
+	     owidth, THTensor_(size)(gradOutput, dimw));
   THArgCheck(oheight == THTensor_(size)(gradOutput, dimh), 3,
-                "gradOutput height unexpected");
+                "gradOutput height unexpected. Expected: %d, Got: %d",
+	     oheight, THTensor_(size)(gradOutput, dimh));
 
   /* get contiguous gradOutput */
   gradOutput = THTensor_(newContiguous)(gradOutput);

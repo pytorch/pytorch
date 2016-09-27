@@ -102,7 +102,8 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
   real *indices_data;
 
 
-  THArgCheck(input->nDimension == 3 || input->nDimension == 4 , 2, "3D or 4D (batch mode) tensor expected");
+  THNN_ARGCHECK(input->nDimension == 3 || input->nDimension == 4, 2, input,
+		"3D or 4D (batch mode) tensor expected for input, but got: %s");
 
   if (input->nDimension == 4)
   {
@@ -110,8 +111,14 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
     dimw++;
     dimh++;
   }
-  THArgCheck(input->size[dimw] >= kW - padW && input->size[dimh] >= kH - padH, 2, "input image smaller than kernel size");
-  THArgCheck(kW/2 >= padW && kH/2 >= padH, 2, "pad should be smaller than half of kernel size");
+  THArgCheck(input->size[dimw] >= kW - padW && input->size[dimh] >= kH - padH, 2,
+	     "input image (H: %d, W: %d) smaller than kernel "
+	     "size - padding( kH: %d padH: %d kW: %d padW: %d",
+	     input->size[dimh], input->size[dimw], kH, padH, kW, padW);
+  THArgCheck(kW/2 >= padW && kH/2 >= padH, 2,
+	     "pad should be smaller than half of kernel size, but got "
+	     "padW = %d, padH = %d, kW = %d, kH = %d",
+	     padW, padH, kW, kH);
   
   /* sizes */
   nslices = input->size[dimh-1];
@@ -129,7 +136,8 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
   }
 
   if (owidth < 1 || oheight < 1)
-    THError("Given input size: (%dx%dx%d). Calculated output size: (%dx%dx%d). Output size is too small",
+    THError("Given input size: (%dx%dx%d). "
+	    "Calculated output size: (%dx%dx%d). Output size is too small",
             nslices,iheight,iwidth,nslices,oheight,owidth);
 
   if (padW || padH)
@@ -155,15 +163,16 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
     output_data = THTensor_(data)(output);
     indices_data = THTensor_(data)(indices);
 
-    THNN_(SpatialDilatedMaxPooling_updateOutput_frame)(input_data, output_data,
-                                              indices_data,
-                                              nslices,
-                                              iwidth, iheight,
-                                              owidth, oheight,
-                                              kW, kH, dW, dH,
-                                              padW, padH,
-                                              dilationW, dilationH
-                                              );
+    THNN_(SpatialDilatedMaxPooling_updateOutput_frame)
+      (input_data, output_data,
+       indices_data,
+       nslices,
+       iwidth, iheight,
+       owidth, oheight,
+       kW, kH, dW, dH,
+       padW, padH,
+       dilationW, dilationH
+       );
   }
   else
   {
@@ -180,15 +189,17 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
 #pragma omp parallel for private(p)
     for (p = 0; p < nbatch; p++)
     {
-      THNN_(SpatialDilatedMaxPooling_updateOutput_frame)(input_data+p*nslices*iwidth*iheight, output_data+p*nslices*owidth*oheight,
-                                                indices_data+p*nslices*owidth*oheight,
-                                                nslices,
-                                                iwidth, iheight,
-                                                owidth, oheight,
-                                                kW, kH, dW, dH,
-                                                padW, padH,
-                                                dilationW, dilationH
-                                                );
+      THNN_(SpatialDilatedMaxPooling_updateOutput_frame)
+	(input_data+p*nslices*iwidth*iheight,
+	 output_data+p*nslices*owidth*oheight,
+	 indices_data+p*nslices*owidth*oheight,
+	 nslices,
+	 iwidth, iheight,
+	 owidth, oheight,
+	 kW, kH, dW, dH,
+	 padW, padH,
+	 dilationW, dilationH
+	 );
     }
   }
 
@@ -259,6 +270,8 @@ void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
   real *gradOutput_data;
   real *indices_data;
 
+  // TODO: shape check gradOutput
+
   /* get contiguous gradOutput */
   gradOutput = THTensor_(newContiguous)(gradOutput);
 
@@ -287,12 +300,13 @@ void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
   /* backprop */
   if (input->nDimension == 3)
   {
-    THNN_(SpatialDilatedMaxPooling_updateGradInput_frame)(gradInput_data, gradOutput_data,
-                                                 indices_data,
-                                                 nslices,
-                                                 iwidth, iheight,
-                                                 owidth, oheight,
-                                                 dW, dH);
+    THNN_(SpatialDilatedMaxPooling_updateGradInput_frame)
+      (gradInput_data, gradOutput_data,
+       indices_data,
+       nslices,
+       iwidth, iheight,
+       owidth, oheight,
+       dW, dH);
   }
   else
   {
@@ -300,12 +314,14 @@ void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
 #pragma omp parallel for private(p)
     for (p = 0; p < nbatch; p++)
     {
-      THNN_(SpatialDilatedMaxPooling_updateGradInput_frame)(gradInput_data+p*nslices*iwidth*iheight, gradOutput_data+p*nslices*owidth*oheight,
-                                                   indices_data+p*nslices*owidth*oheight,
-                                                   nslices,
-                                                   iwidth, iheight,
-                                                   owidth, oheight,
-                                                   dW, dH);
+      THNN_(SpatialDilatedMaxPooling_updateGradInput_frame)
+	(gradInput_data+p*nslices*iwidth*iheight,
+	 gradOutput_data+p*nslices*owidth*oheight,
+	 indices_data+p*nslices*owidth*oheight,
+	 nslices,
+	 iwidth, iheight,
+	 owidth, oheight,
+	 dW, dH);
     }
   }
 
