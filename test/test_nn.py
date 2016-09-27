@@ -39,10 +39,77 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
             output = module(input)
             test_case.assertFalse(input.dirty)
 
-            output2 = module_ip(input)
-            test_case.assertTrue(input.dirty)
+            input_ip = deepcopy(input)
+            output_ip = module_ip(input_ip)
+            test_case.assertTrue(input_ip.dirty)
 
-            test_case.assertEqual(output, output2)
+            test_case.assertEqual(output, output_ip)
+
+        if type(input.data) == torch.LongTensor and TEST_CUDA:
+            input = input.cuda()
+            module.float().cuda()
+            module(input)
+            for p in module.parameters():
+                test_case.assertEqual(type(p.data), torch.cuda.FloatTensor)
+                test_case.assertEqual(p.get_device(), 0)
+
+            if torch.cuda.device_count() > 1:
+                input = input.cuda(1)
+                module.cuda(1)
+                with torch.cuda.device(1):
+                    module(input)
+                for p in module.parameters():
+                    test_case.assertEqual(type(p.data), torch.cuda.FloatTensor)
+                    test_case.assertEqual(p.get_device(), 1)
+        else:
+            # to float
+            input = input.float()
+            module.float()
+            module(input)
+            for p in module.parameters():
+                test_case.assertEqual(type(p.data), torch.FloatTensor)
+
+            # and back to double
+            input = input.double()
+            module.double()
+            module(input)
+            for p in module.parameters():
+                test_case.assertEqual(type(p.data), torch.DoubleTensor)
+
+            # TODO: Hardshrink is lacking a CUDA implementation
+            if TEST_CUDA and type(module) != nn.Hardshrink:
+                # to GPU0
+                input = input.float().cuda()
+                module.float().cuda()
+                module(input)
+                for p in module.parameters():
+                    test_case.assertEqual(type(p.data), torch.cuda.FloatTensor)
+                    test_case.assertEqual(p.get_device(), 0)
+
+                # to CPU
+                input = input.cpu()
+                module.cpu()
+                module(input)
+                for p in module.parameters():
+                    test_case.assertEqual(type(p.data), torch.FloatTensor)
+
+                # back to GPU0
+                input = input.cuda()
+                module.cuda()
+                module(input)
+                for p in module.parameters():
+                    test_case.assertEqual(type(p.data), torch.cuda.FloatTensor)
+                    test_case.assertEqual(p.get_device(), 0)
+
+                if torch.cuda.device_count() >= 2:
+                    # to GPU1
+                    input = input.cuda(1)
+                    module.cuda(1)
+                    with torch.cuda.device(1):
+                        module(input)
+                    for p in module.parameters():
+                        test_case.assertEqual(type(p.data), torch.cuda.FloatTensor)
+                        test_case.assertEqual(p.get_device(), 1)
 
 
 class NewCriterionTest(InputVariableMixin, CriterionTest):

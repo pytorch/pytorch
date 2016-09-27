@@ -7,7 +7,7 @@ from .utils import _pair, _triple
 
 class MaxPool1d(Module):
     """Applies a 1D max pooling over an input signal composed of several input
-    planes. 
+    planes.
 
     ```
     The output value of the layer with input (b x C x W) and output (b x C x oW)
@@ -48,7 +48,7 @@ class MaxPool1d(Module):
 
 class MaxPool2d(Module):
     """Applies a 2D max pooling over an input signal composed of several input
-    planes. 
+    planes.
 
     ```
     The output value of the layer with input (b x C x H x W) and output (b x C x oH x oW)
@@ -124,7 +124,7 @@ class MaxUnpool2d(Module):
 
 class AvgPool2d(Module):
     """Applies a 2D average pooling over an input signal composed of several input
-    planes. 
+    planes.
 
     ```
     The output value of the layer with input (b x C x H x W) and output (b x C x oH x oW)
@@ -164,7 +164,7 @@ class AvgPool2d(Module):
 
 class MaxPool3d(Module):
     """Applies a 3D max pooling over an input signal composed of several input
-    planes. 
+    planes.
 
     Args:
         kernel_size: the size of the window to take a max over. Can be a single number k (for a square kernel of k x k x k) or a tuple (kt x kh x kw)
@@ -202,7 +202,7 @@ class MaxPool3d(Module):
 
 class AvgPool3d(Module):
     """Applies a 3D average pooling over an input signal composed of several input
-    planes. 
+    planes.
 
     Args:
         kernel_size: the size of the window to take a average over. Can be a single number k (for a square kernel of k x k x k) or a tuple (kt x kh x kw)
@@ -229,7 +229,7 @@ class AvgPool3d(Module):
 
 class FractionalMaxPool2d(Module):
     """Applies a 2D fractional max pooling over an input signal composed of several input
-    planes. 
+    planes.
 
     Fractiona MaxPooling is described in detail in the paper ["Fractional Max-Pooling" by Ben Graham](http://arxiv.org/abs/1412.6071)
     The max-pooling operation is applied in kHxkW regions by a stochastic
@@ -240,7 +240,7 @@ class FractionalMaxPool2d(Module):
         kernel_size: the size of the window to take a max over. Can be a single number k (for a square kernel of k x k) or a tuple (kh x kw)
         output_size: the target output size of the image of the form oH x oW. Can be a tuple (oH, oW) or a single number oH for a square image oH x oH
         output_ratio: If one wants to have an output size as a ratio of the input size, this option can be given. This has to be a number or tuple in the range (0, 1)
-        return_indices: if True, will return the indices along with the outputs. Useful to pass to nn.MaxUnpool2d . Default: False        
+        return_indices: if True, will return the indices along with the outputs. Useful to pass to nn.MaxUnpool2d . Default: False
     Input Shape: [ * , * , *, * ] : Input is minibatch x channels x iH x iW
     Output Shape:[ * , * , *, * ]  : Output shape = minibatch x channels x floor((iH  + 2*padH - kH) / sH + 1) x floor((iW  + 2*padW - kW) / sW + 1)
     Examples:
@@ -256,7 +256,7 @@ class FractionalMaxPool2d(Module):
         super(FractionalMaxPool2d, self).__init__()
         self.kh, self.kw = _pair(kernel_size)
         self.return_indices = return_indices
-        self._random_samples = _random_samples
+        self.register_buffer('_random_samples', _random_samples)
         if output_size is not None:
             self.outh, self.outw = _pair(output_size)
             self.rh, self.rw = None, None
@@ -320,7 +320,7 @@ class MaxUnpool3d(Module):
 
 class LPPool2d(Module):
     """Applies a 2D power-average pooling over an input signal composed of several input
-    planes. 
+    planes.
     On each window, the function computed is: f(X) = pow(sum(pow(X, p)), 1/p)
     At p = infinity, one gets Max Pooling
     At p = 1, one gets Average Pooling

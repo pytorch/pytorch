@@ -1,3 +1,4 @@
+from itertools import chain
 from collections import OrderedDict
 
 import torch
@@ -10,6 +11,7 @@ class Module(object):
     def __init__(self, **parameters):
         self._backend = thnn_backend
         self._parameters = OrderedDict(parameters)
+        self._buffers = {}
         self.backward_hooks = OrderedDict()
         self.forward_hooks = OrderedDict()
         self.train = True
@@ -17,27 +19,33 @@ class Module(object):
     def forward(self, *input):
         raise NotImplementedError
 
-    def type(self, type, *forwarded_args):
+    def register_buffer(self, name, tensor):
+        self._buffers[name] = tensor
+
+    def _apply(self, fn):
         for param in self._parameters.values():
             if param is not None:
-                # Variables stored in modules are graph leaves,
-                # and we don't want to create copy nodes.
-                param._data = param.data.type(type, *forwarded_args)
+                # Variables stored in modules are graph leaves, and we don't
+                # want to create copy nodes, so we have to unpack the data.
+                param._data = fn(param.data)
+        for key, buf in self._buffers.items():
+            if buf is not None:
+                self._buffers[key] = fn(buf)
         return self
 
     def cuda(self, device_id=None):
         import torch.cuda
         import torch.nn.cuda
-        if device_id is not None:
-            return self.type(torch.cuda.FloatTensor, device_id)
-        else:
-            return self.type(torch.cuda.FloatTensor)
+        return self._apply(lambda t: t.cuda(device_id))
+
+    def cpu(self, device_id=None):
+        return self._apply(lambda t: t.cpu())
 
     def float(self):
-        return self.type(torch.FloatTensor)
+        return self._apply(lambda t: t.float())
 
     def double(self):
-        return self.type(torch.DoubleTensor)
+        return self._apply(lambda t: t.double())
 
     def register_backward_hook(self, name, hook):
         assert name not in self.backward_hooks, \
@@ -76,13 +84,17 @@ class Module(object):
             _parameters = self.__dict__['_parameters']
             if name in _parameters:
                 return _parameters[name]
+        if '_buffers' in self.__dict__:
+            _buffers = self.__dict__['_buffers']
+            if name in _buffers:
+                return _buffers[name]
         return object.__getattribute__(self, name)
 
     def parameters(self, memo=None):
         if memo is None:
             memo = set()
         for p in self._parameters.values():
-            if p not in memo:
+            if p is not None and p not in memo:
                 memo.add(p)
                 yield p
 

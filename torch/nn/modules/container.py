@@ -67,10 +67,10 @@ class Container(Module):
             for p in module.parameters(memo):
                 yield p
 
-    def type(self, type, *forwarded_args):
+    def _apply(self, fn):
         for module in self.modules.values():
-            module.type(type, *forwarded_args)
-        return super(Container, self).type(type, *forwarded_args)
+            module._apply(fn)
+        return super(Container, self)._apply(fn)
 
 
 class Sequential(Container):

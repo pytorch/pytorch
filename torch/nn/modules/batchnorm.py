@@ -8,22 +8,17 @@ from .module import Module
 class _BatchNorm(Module):
 
     def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True):
-
         self.affine = affine
         self.eps = eps
         self.momentum = momentum
-        self.running_mean = torch.zeros(num_features)
-        self.running_var = torch.ones(num_features)
 
+        weight = bias = None
         if self.affine:
-            super(_BatchNorm, self).__init__(
-                weight=Variable(torch.Tensor(num_features)),
-                bias=Variable(torch.Tensor(num_features)),
-            )
-        else:
-            super(_BatchNorm, self).__init__()
-            self.weight = None
-            self.bias = None
+            weight = Variable(torch.Tensor(num_features))
+            bias = Variable(torch.Tensor(num_features))
+        super(_BatchNorm, self).__init__(weight=weight, bias=bias)
+        self.register_buffer('running_mean', torch.zeros(num_features))
+        self.register_buffer('running_var', torch.ones(num_features))
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -46,11 +41,6 @@ class _BatchNorm(Module):
             args = args + (self.weight, self.bias)
         return self._backend.BatchNorm(self.running_mean,
                 self.running_var, self.train, self.momentum, self.eps)(*args)
-
-    def type(self, type, *forwarded_args):
-        self.running_var = self.running_var.type(type, *forwarded_args)
-        self.running_mean = self.running_mean.type(type, *forwarded_args)
-        return super(_BatchNorm, self).type(type, *forwarded_args)
 
 
 class BatchNorm1d(_BatchNorm):

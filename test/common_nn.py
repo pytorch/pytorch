@@ -557,7 +557,7 @@ class ModuleTest(TestBase):
             gpu_input = to_gpu(cpu_input, type_map=type_map)
 
             cpu_module = self.constructor(*self.constructor_args)
-            gpu_module = self.constructor(*self.constructor_args).cuda()
+            gpu_module = self.constructor(*self.constructor_args).float().cuda()
             test_case._zero_grad_parameters(cpu_module)
             test_case._zero_grad_parameters(gpu_module)
             cpu_param = test_case._get_parameters(cpu_module)
@@ -634,7 +634,7 @@ class CriterionTest(TestBase):
             gpu_target = to_gpu(self.target, type_map=type_map)
 
             cpu_module = self.constructor(*self.constructor_args)
-            gpu_module = self.constructor(*self.constructor_args).cuda()
+            gpu_module = self.constructor(*self.constructor_args).float().cuda()
 
             cpu_output = test_case._forward_criterion(cpu_module, cpu_input, cpu_target)
             gpu_output = test_case._forward_criterion(gpu_module, gpu_input, gpu_target)

@@ -19,16 +19,16 @@ class Broadcast(Function):
 
 class Gather(Function):
 
-    def __init__(self, target_gpu, dim=0):
+    def __init__(self, target_device, dim=0):
         super(Gather, self).__init__()
-        self.target_gpu = target_gpu
+        self.target_device = target_device
         self.dim = dim
 
     def forward(self, *inputs):
         assert all(map(lambda i: i.is_cuda, inputs))
         self.input_gpus = tuple(map(lambda i: i.get_device(), inputs))
         self.input_sizes = tuple(map(lambda i: i.size(self.dim), inputs))
-        return comm.gather(inputs, self.dim, self.target_gpu)
+        return comm.gather(inputs, self.dim, self.target_device)
 
     def backward(self, grad_output):
         return comm.scatter(grad_output, self.input_gpus, self.input_sizes,
