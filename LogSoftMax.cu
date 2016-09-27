@@ -12,31 +12,28 @@ __global__ void cunn_SpatialLogSoftMax_updateOutput_kernel(float *output, float 
     if (y >= height)
       break;
 
-    // calculate input starting index in cuda layout (B x H x W x P)
-    int inputStartIndex = 0
-    + (height*width*classSize)*batchIndex
-    + (width*classSize)*y
-    + (classSize)*x;
+    // calculate input starting index in cuda layout (B x H x W x C)
+    int inputStartIndex =
+      (height*width*classSize)*batchIndex +
+      (width*classSize)*y +
+      (classSize)*x;
 
-    // compute a
-    float a = 0;
+    float sum = 0;
     for (int i = 0; i < classSize; i++) {
-      a += __expf(input[inputStartIndex + i]);
+      sum += __expf(input[inputStartIndex + i]);
     }
-
-    // invert a
-    a = 1.0f / a;
+    sum = 1.0f / sum;
 
     for (int i = 0; i < classSize; i++) {
-      // calculate output index in torch layout (B x P x H x W)
-      int outputIndex = 0
-      + (classSize*height*width)*batchIndex
-      + (height*width)*i
-      + (width)*y
-      + x;
-      output[outputIndex] = logf(a * __expf(input[inputStartIndex + i]));
+      // calculate output index in torch layout (B x C x H x W)
+      int outputIndex =
+        (classSize*height*width)*batchIndex +
+        (height*width)*i +
+        (width)*y +
+        x;
+      output[outputIndex] = logf(sum * __expf(input[inputStartIndex + i]));
     }
-    index += 1024;
+    index += blockDim.x;
   }
 }
 
@@ -51,28 +48,27 @@ __global__ void cunn_SpatialLogSoftMax_updateGradInput_kernel(float *gradInput, 
     if (y >= height)
       break;
 
-    // calculate output starting index in cuda layout (B x H x W x P)
-    int outputStartIndex = 0
-    + (height*width*classSize)*batchIndex
-    + (width*classSize)*y
-    + (classSize)*x;
+    // calculate output starting index in cuda layout (B x H x W x C)
+    int outputStartIndex =
+      (height*width*classSize)*batchIndex +
+      (width*classSize)*y +
+      (classSize)*x;
 
-    // compute sum
-    float a = 0;
+    float sum = 0;
     for (int i = 0; i < classSize; i++) {
-      a += gradOutput[outputStartIndex + i];
+      sum += gradOutput[outputStartIndex + i];
     }
 
     for (int i = 0; i < classSize; i++) {
-      // calculate input index in torch layout (B x P x H x W)
-      int inputIndex = 0
-      + (classSize*height*width)*batchIndex
-      + (height*width)*i
-      + (width)*y
-      + x;
-      gradInput[inputIndex] = gradOutput[outputStartIndex + i] - __expf(output[outputStartIndex + i]) * a;
+      // calculate input index in torch layout (B x C x H x W)
+      int inputIndex =
+        (classSize*height*width)*batchIndex +
+        (height*width)*i +
+        (width)*y +
+        x;
+      gradInput[inputIndex] = gradOutput[outputStartIndex + i] - __expf(output[outputStartIndex + i]) * sum;
     }
-    index += 1024;
+    index += blockDim.x;
   }
 }
 
@@ -359,16 +355,15 @@ void THNN_CudaLogSoftMax_updateOutput(THCState *state, THCudaTensor *input, THCu
     height = THCudaTensor_size(state, input, 1);
     width = THCudaTensor_size(state, input, 2);
 
-    THCudaTensor *transposedInput = THCudaTensor_new(state);
-    THCudaTensor_resizeAs(state, transposedInput, input);
-    THCudaTensor_copy(state, transposedInput, input);
-    input = transposedInput;
-    // convert tensor from torch layout to cuda layout
-    // P x H x W -> W x H x P
+    // create contiguous tensor with cuda layout from tensor with torch layout
+    // C x H x W -> W x H x C
     THCudaTensor_transpose(state, input, input, 0, 2);
-    // W x H x P -> H x W x P
+    // W x H x C -> H x W x C
     THCudaTensor_transpose(state, input, input, 0, 1);
-    input = THCudaTensor_newContiguous(state, input);
+    THCudaTensor *transposedInput = THCudaTensor_newContiguous(state, input);
+    THCudaTensor_transpose(state, input, input, 0, 1);
+    THCudaTensor_transpose(state, input, input, 0, 2);
+    input = transposedInput;
   }
   else if (ndims == 4)
   {
@@ -378,16 +373,15 @@ void THNN_CudaLogSoftMax_updateOutput(THCState *state, THCudaTensor *input, THCu
     height = THCudaTensor_size(state, input, 2);
     width = THCudaTensor_size(state, input, 3);
 
-    THCudaTensor *transposedInput = THCudaTensor_new(state);
-    THCudaTensor_resizeAs(state, transposedInput, input);
-    THCudaTensor_copy(state, transposedInput, input);
-    input = transposedInput;
-    // convert tensor from torch layout to cuda layout
-    // B x P x H x W -> B x W x H x P
+    // create contiguous tensor with cuda layout from tensor with torch layout
+    // B x C x H x W -> B x W x H x C
     THCudaTensor_transpose(state, input, input, 1, 3);
-    // B x W x H x P -> B x H x W x P
+    // B x W x H x C -> B x H x W x C
     THCudaTensor_transpose(state, input, input, 1, 2);
-    input = THCudaTensor_newContiguous(state, input);
+    THCudaTensor *transposedInput = THCudaTensor_newContiguous(state, input);
+    THCudaTensor_transpose(state, input, input, 1, 2);
+    THCudaTensor_transpose(state, input, input, 1, 3);
+    input = transposedInput;
   }
   else
   {
@@ -463,27 +457,25 @@ void THNN_CudaLogSoftMax_updateGradInput(THCState *state, THCudaTensor *input, T
     height = THCudaTensor_size(state, input, 1);
     width = THCudaTensor_size(state, input, 2);
 
-    THCudaTensor *transposedOutput = THCudaTensor_new(state);
-    THCudaTensor_resizeAs(state, transposedOutput, output);
-    THCudaTensor_copy(state, transposedOutput, output);
-    output = transposedOutput;
-    // convert tensor from torch layout to cuda layout
-    // P x H x W -> W x H x P
+    // create contiguous tensor with cuda layout from tensor with torch layout
+    // C x H x W -> W x H x C
     THCudaTensor_transpose(state, output, output, 0, 2);
-    // W x H x P -> H x W x P
+    // W x H x C -> H x W x C
     THCudaTensor_transpose(state, output, output, 0, 1);
-    output = THCudaTensor_newContiguous(state, output);
+    THCudaTensor *transposedOutput = THCudaTensor_newContiguous(state, output);
+    THCudaTensor_transpose(state, output, output, 0, 1);
+    THCudaTensor_transpose(state, output, output, 0, 2);
+    output = transposedOutput;
 
-    THCudaTensor *transposedGradOutput = THCudaTensor_new(state);
-    THCudaTensor_resizeAs(state, transposedGradOutput, gradOutput);
-    THCudaTensor_copy(state, transposedGradOutput, gradOutput);
-    gradOutput = transposedGradOutput;
-    // convert tensor from torch layout to cuda layout
-    // P x H x W -> W x H x P
+    // create contiguous tensor with cuda layout from tensor with torch layout
+    // C x H x W -> W x H x C
     THCudaTensor_transpose(state, gradOutput, gradOutput, 0, 2);
-    // W x H x P -> H x W x P
+    // W x H x C -> H x W x C
     THCudaTensor_transpose(state, gradOutput, gradOutput, 0, 1);
-    gradOutput = THCudaTensor_newContiguous(state, gradOutput);
+    THCudaTensor *transposedGradOutput = THCudaTensor_newContiguous(state, gradOutput);
+    THCudaTensor_transpose(state, gradOutput, gradOutput, 0, 1);
+    THCudaTensor_transpose(state, gradOutput, gradOutput, 0, 2);
+    gradOutput = transposedGradOutput;
   }
   else if (ndims == 4)
   {
@@ -493,27 +485,25 @@ void THNN_CudaLogSoftMax_updateGradInput(THCState *state, THCudaTensor *input, T
     height = THCudaTensor_size(state, input, 2);
     width = THCudaTensor_size(state, input, 3);
 
-    THCudaTensor *transposedOutput = THCudaTensor_new(state);
-    THCudaTensor_resizeAs(state, transposedOutput, output);
-    THCudaTensor_copy(state, transposedOutput, output);
-    output = transposedOutput;
-    // convert tensor from torch layout to cuda layout
-    // B x P x H x W -> B x W x H x P
+    // create contiguous tensor with cuda layout from tensor with torch layout
+    // B x C x H x W -> B x W x H x C
     THCudaTensor_transpose(state, output, output, 1, 3);
-    // B x W x H x P -> B x H x W x P
+    // B x W x H x C -> B x H x W x C
     THCudaTensor_transpose(state, output, output, 1, 2);
-    output = THCudaTensor_newContiguous(state, output);
+    THCudaTensor *transposedOutput = THCudaTensor_newContiguous(state, output);
+    THCudaTensor_transpose(state, output, output, 1, 2);
+    THCudaTensor_transpose(state, output, output, 1, 3);
+    output = transposedOutput;
 
-    THCudaTensor *transposedGradOutput = THCudaTensor_new(state);
-    THCudaTensor_resizeAs(state, transposedGradOutput, gradOutput);
-    THCudaTensor_copy(state, transposedGradOutput, gradOutput);
-    gradOutput = transposedGradOutput;
-    // convert tensor from torch layout to cuda layout
-    // B x P x H x W -> B x W x H x P
+    // create contiguous tensor with cuda layout from tensor with torch layout
+    // B x C x H x W -> B x W x H x C
     THCudaTensor_transpose(state, gradOutput, gradOutput, 1, 3);
-    // B x W x H x P -> B x H x W x P
+    // B x W x H x C -> B x H x W x C
     THCudaTensor_transpose(state, gradOutput, gradOutput, 1, 2);
-    gradOutput = THCudaTensor_newContiguous(state, gradOutput);
+    THCudaTensor *transposedGradOutput = THCudaTensor_newContiguous(state, gradOutput);
+    THCudaTensor_transpose(state, gradOutput, gradOutput, 1, 2);
+    THCudaTensor_transpose(state, gradOutput, gradOutput, 1, 3);
+    gradOutput = transposedGradOutput;
   }
   else
   {
