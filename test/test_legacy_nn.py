@@ -989,7 +989,7 @@ class TestNN(NNTestCase):
 
     def test_MultiCriterion(self):
         input = torch.rand(2, 10)
-        target = torch.Tensor((1, 8))
+        target = torch.LongTensor((1, 8))
         nll = nn.ClassNLLCriterion()
         nll2 = nn.CrossEntropyCriterion()
         mc = nn.MultiCriterion().add(nll, 0.5).add(nll2)
@@ -1006,7 +1006,7 @@ class TestNN(NNTestCase):
         mc.float()
         gradInput = gradInput.clone()
         input3 = input.float()
-        target3 = target.float()
+        target3 = target
         output3 = mc.forward(input3, target3)
         gradInput3 = mc.backward(input3, target3)
         self.assertEqual(output, output3)
@@ -1039,7 +1039,7 @@ class TestNN(NNTestCase):
 
     def test_ParallelCriterion(self):
         input = [torch.rand(2, 10), torch.randn(2, 10)]
-        target = [torch.IntTensor((1, 8)), torch.randn(2, 10)]
+        target = [torch.LongTensor((1, 8)), torch.randn(2, 10)]
         nll = nn.ClassNLLCriterion()
         mse = nn.MSECriterion()
         pc = nn.ParallelCriterion().add(nll, 0.5).add(mse)
@@ -1055,7 +1055,7 @@ class TestNN(NNTestCase):
         pc.float()
         gradInput[0], gradInput[1] = gradInput[0].clone(), gradInput[1].clone()
         input3 = [input[0].float(), input[1].float()]
-        target3 = [target[0].float(), target[1].float()]
+        target3 = [target[0], target[1].float()]
         output3 = pc.forward(input3, target3)
         gradInput3 = pc.backward(input3, target3)
         self.assertEqual(output, output3)
@@ -1077,7 +1077,7 @@ class TestNN(NNTestCase):
 
         # table input
         input = [torch.randn(2, 10), [torch.rand(2, 10), torch.randn(2, 10)]]
-        target = [torch.IntTensor((2, 5)), [torch.IntTensor((1, 8)), torch.randn(2, 10)]]
+        target = [torch.LongTensor((2, 5)), [torch.LongTensor((1, 8)), torch.randn(2, 10)]]
         nll2 = nn.ClassNLLCriterion()
         nll = nn.ClassNLLCriterion()
         mse = nn.MSECriterion()

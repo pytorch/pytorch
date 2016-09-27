@@ -627,7 +627,6 @@ class CriterionTest(TestBase):
             cpu_input = self._get_input()
             type_map = {
                 torch.DoubleTensor: torch.cuda.FloatTensor,
-                torch.LongTensor: torch.cuda.FloatTensor
             }
             gpu_input = to_gpu(cpu_input, type_map=type_map)
 
@@ -646,4 +645,3 @@ class CriterionTest(TestBase):
             test_case.assertEqual(cpu_gradInput, gpu_gradInput, 2e-4)
         except NotImplementedError:
             pass
-
