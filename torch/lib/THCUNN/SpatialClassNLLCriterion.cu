@@ -10,7 +10,7 @@ __global__ void cunn_SpatialClassNLLCriterion_updateOutput_kernel(
           float *output,
           float *total_weight,
           float *input,
-          float *target,
+          long *target,
           float *weights,
           int size_average,
           int batch_size,
@@ -55,7 +55,7 @@ __global__ void cunn_SpatialClassNLLCriterion_updateOutput_kernel(
 
 __global__ void cunn_SpatialClassNLLCriterion_updateGradInput_kernel(
           float *gradInput,
-          float *target,
+          long *target,
           float *weights,
           float *total_weight,
           int size_average,
@@ -86,13 +86,13 @@ __global__ void cunn_SpatialClassNLLCriterion_updateGradInput_kernel(
 void THNN_CudaSpatialClassNLLCriterion_updateOutput(
           THCState *state,
           THCudaTensor *input,
-          THCudaTensor *target,
+          THCudaLongTensor *target,
           THCudaTensor *output,
           bool sizeAverage,
           THCudaTensor *weights,
           THCudaTensor *total_weight)
 {
-  THArgCheck(THCudaTensor_nDimension(state, target) == 3, 1,
+  THArgCheck(THCudaLongTensor_nDimension(state, target) == 3, 1,
                "only batches of spatial targets supported (3D tensors)");
   THArgCheck(THCudaTensor_nDimension(state, input) == 4, 2,
                "only batches of spatial inputs supported (4D tensors)");
@@ -107,16 +107,16 @@ void THNN_CudaSpatialClassNLLCriterion_updateOutput(
 
   input = THCudaTensor_newContiguous(state, input);
   weights = weights ? THCudaTensor_newContiguous(state, weights) : NULL;
-  target = THCudaTensor_newContiguous(state, target);
+  target = THCudaLongTensor_newContiguous(state, target);
 
   float *input_data = THCudaTensor_data(state, input);
   float *weights_data = weights ? THCudaTensor_data(state, weights) : NULL;
-  float *target_data = THCudaTensor_data(state, target);
+  long  *target_data = THCudaLongTensor_data(state, target);
   float *output_data = THCudaTensor_data(state, output);
   float *total_weight_data = THCudaTensor_data(state, total_weight);
 
-  long batch_size = THCudaTensor_size(state, target, 0);
-  long map_nelem = THCudaTensor_nElement(state, target) / batch_size;
+  long batch_size = THCudaLongTensor_size(state, target, 0);
+  long map_nelem = THCudaLongTensor_nElement(state, target) / batch_size;
   int blocks_per_sample = GET_BLOCKS(map_nelem) / 128;
   blocks_per_sample = (blocks_per_sample == 0) ? 1 : blocks_per_sample;
   int total_blocks = blocks_per_sample * batch_size;
@@ -141,20 +141,20 @@ void THNN_CudaSpatialClassNLLCriterion_updateOutput(
 
   if (weights)
     THCudaTensor_free(state, weights);
-  THCudaTensor_free(state, target);
+  THCudaLongTensor_free(state, target);
   THCudaTensor_free(state, input);
 }
 
 void THNN_CudaSpatialClassNLLCriterion_updateGradInput(
           THCState *state,
           THCudaTensor *input,
-          THCudaTensor *target,
+          THCudaLongTensor *target,
           THCudaTensor *gradInput,
           bool sizeAverage,
           THCudaTensor *weights,
           THCudaTensor *total_weight)
 {
-  THArgCheck(THCudaTensor_nDimension(state, target) == 3, 1,
+  THArgCheck(THCudaLongTensor_nDimension(state, target) == 3, 1,
                "only batches of spatial targets supported (3D tensors)");
   THArgCheck(THCudaTensor_nDimension(state, input) == 4, 2,
                "only batches of spatial inputs supported (4D tensors)");
@@ -171,15 +171,15 @@ void THNN_CudaSpatialClassNLLCriterion_updateGradInput(
 
   input = THCudaTensor_newContiguous(state, input);
   weights = weights ? THCudaTensor_newContiguous(state, weights) : NULL;
-  target = THCudaTensor_newContiguous(state, target);
+  target = THCudaLongTensor_newContiguous(state, target);
 
   float *weights_data = weights ? THCudaTensor_data(state, weights) : NULL;
   float *gradInput_data = THCudaTensor_data(state, gradInput);
-  float *target_data = THCudaTensor_data(state, target);
+  long *target_data = THCudaLongTensor_data(state, target);
   float *total_weight_data = THCudaTensor_data(state, total_weight);
 
-  long batch_size = THCudaTensor_size(state, target, 0);
-  long map_nelem = THCudaTensor_nElement(state, target) / batch_size;
+  long batch_size = THCudaLongTensor_size(state, target, 0);
+  long map_nelem = THCudaLongTensor_nElement(state, target) / batch_size;
   int blocks_per_sample = GET_BLOCKS(map_nelem) / 128;
   blocks_per_sample = (blocks_per_sample == 0) ? 1 : blocks_per_sample;
   int total_blocks = blocks_per_sample * batch_size;
@@ -200,6 +200,6 @@ void THNN_CudaSpatialClassNLLCriterion_updateGradInput(
 
   if (weights)
     THCudaTensor_free(state, weights);
-  THCudaTensor_free(state, target);
+  THCudaLongTensor_free(state, target);
   THCudaTensor_free(state, input);
 }
