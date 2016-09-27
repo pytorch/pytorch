@@ -120,6 +120,37 @@ class Variable(object):
             return Type(t)(self)
         return self
 
+    def _get_type(self, name):
+        module = torch._import_dotted_name(self.data.__module__)
+        return getattr(module, name)
+
+    def cuda(self, device_id=None):
+        return CudaTransfer(device_id)(self)
+
+    def cpu(self):
+        return self.type(getattr(torch, type(self.data).__name__))
+
+    def double(self):
+        return self.type(self._get_type('DoubleTensor'))
+
+    def float(self):
+        return self.type(self._get_type('FloatTensor'))
+
+    def long(self):
+        return self.type(self._get_type('LongTensor'))
+
+    def int(self):
+        return self.type(self._get_type('IntTensor'))
+
+    def short(self):
+        return self.type(self._get_type('ShortTensor'))
+
+    def char(self):
+        return self.type(self._get_type('CharTensor'))
+
+    def byte(self):
+        return self.type(self._get_type('ByteTensor'))
+
     def _add(self, other, inplace):
         if isinstance(other, Variable):
             return Add(inplace)(self, other)

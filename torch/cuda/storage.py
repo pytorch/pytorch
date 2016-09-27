@@ -11,3 +11,9 @@ class _CudaStorageBase(_StorageBase):
         with ctx:
             return super(_CudaStorageBase, self).type(*args, **kwargs)
 
+    def new(self, *args, **kwargs):
+        source_device = self.get_device()
+        ctx = device(source_device) if source_device != -1 else _dummy_ctx()
+        with ctx:
+            return super(_CudaStorageBase, self).new(*args, **kwargs)
+

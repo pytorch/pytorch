@@ -72,7 +72,7 @@ class Expand(Function):
 class Type(Function):
 
     def __init__(self, dest_type):
-        super(Copy, self).__init__()
+        super(Type, self).__init__()
         self.dest_type = dest_type
 
     def forward(self, i):
@@ -82,6 +82,26 @@ class Type(Function):
 
     def backward(self, grad_output):
         return grad_output.type(self.input_type)
+
+
+class CudaTransfer(Function):
+
+    def __init__(self, device_id=None):
+        super(CudaTransfer, self).__init__()
+        self.device_id = device_id
+
+    def forward(self, i):
+        self.source_device = -1 if not i.is_cuda else i.get_device()
+        if self.device_id:
+            return i.cuda(self.device_id)
+        else:
+            return i.cuda()
+
+    def backward(self, grad_output):
+        if self.source_device != -1:
+            return grad_output.cuda(self.source_device)
+        else:
+            return grad_output.cpu()
 
 
 class Permute(Function):
