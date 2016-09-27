@@ -2,39 +2,7 @@ import torch
 from torch._thnn import type2backend
 from torch.autograd import Function
 
-from .auto import Conv2d
 from . import _all_functions
-
-
-def interleave(iterable, obj):
-    for item in iterable:
-        yield obj
-        yield item
-
-
-class Conv1d(Conv2d):
-    def __init__(self, *args):
-        super(Conv1d, self).__init__(*args)
-        self.additional_args = self.additional_args[:2] + \
-            list(interleave(self.additional_args[2:], 1))
-
-    def _reshape(self, t):
-        t.resize_(t.size(0), t.size(1), 1, t.size(2))
-
-    def _revert_reshape(self, t):
-        t.resize_(t.size(0), t.size(1), t.size(3))
-
-    def forward(self, input, *params):
-        self._reshape(input)
-        result = super(Conv1d, self).forward(input, *params)
-        self._revert_reshape(input)
-        return result
-
-    def backward(self, grad_output):
-        self._reshape(self.saved_variables[0].data)
-        result = super(Conv1d, self).backward(grad_output)
-        self._revert_reshape(self.saved_variables[0].data)
-        return result
 
 
 class Conv3d(Function):
@@ -116,6 +84,4 @@ class Conv3d(Function):
         return grad
 
 
-_all_functions.append(Conv1d)
 _all_functions.append(Conv3d)
-

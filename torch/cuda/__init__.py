@@ -135,4 +135,7 @@ _StorageBase.cuda = _cuda
 _StorageBase.cpu = _cpu
 
 
+def current_device():
+    return torch._C._cuda_getDevice()
+
 assert torch._C._cuda_init()

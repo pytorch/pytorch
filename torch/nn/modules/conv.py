@@ -45,9 +45,8 @@ class Conv1d(Module):
         self.kernel_size = kernel_size
         self.stride = stride
 
-        kernel_elements = self.in_features * self.kernel_size
-        self.weight = Variable(torch.Tensor(out_features,
-                kernel_elements))
+        self.weight = Variable(torch.Tensor(
+            out_features, in_features, kernel_size))
         self.bias = Variable(torch.Tensor(out_features))
 
         self.reset_parameters()
@@ -58,9 +57,14 @@ class Conv1d(Module):
         self.bias.data.uniform_(-stdv, stdv)
 
     def forward(self, input):
-        func = self._backend.Conv1d(self.kernel_size, self.stride,
-                self.in_features, self.out_features)
-        return func(input, self.weight, self.bias)
+        func = self._backend.Conv2d(
+            stride=(1, self.stride),
+            pad=(0, 0),
+            groups=1)
+        input = input.view(input.size(0), input.size(1), 1, input.size(2))
+        weight = self.weight.view(self.weight.size(0), self.weight.size(1), 1,
+                                  self.weight.size(2))
+        return func(input, weight, self.bias)
 
 
 class Conv2d(Module):
@@ -103,7 +107,7 @@ class Conv2d(Module):
         >>> output = m.forward(input)
     """
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-            padding=0, dilation=None, no_bias=False):
+                 padding=0, dilation=None, groups=1, no_bias=False):
         super(Conv2d, self).__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -113,9 +117,10 @@ class Conv2d(Module):
         self.is_dilated = dilation is not None
         if self.is_dilated:
             self.dilh, self.dilw = _pair(dilation)
+        self.groups = groups
 
-        self.weight = Variable(torch.Tensor(self.out_channels,
-                self.in_channels, self.kh, self.kw))
+        self.weight = Variable(torch.Tensor(
+            self.out_channels, self.in_channels, self.kh, self.kw))
         if no_bias:
             self.bias = None
         else:
@@ -131,11 +136,15 @@ class Conv2d(Module):
 
     def forward(self, input):
         if self.is_dilated:
-            func = self._backend.DilatedConv2d(self.kw, self.kh, self.dw,
-                    self.dh, self.padw, self.padh, self.dilh, self.dilw)
+            # TODO: merge this into the Conv2d function
+            func = self._backend.DilatedConv2d(
+                self.kw, self.kh, self.dw, self.dh, self.padw, self.padh,
+                self.dilh, self.dilw)
         else:
-            func = self._backend.Conv2d(self.kw, self.kh, self.dw, self.dh,
-                    self.padw, self.padh)
+            func = self._backend.Conv2d(
+                stride=(self.dh, self.dw),
+                pad=(self.padh, self.padw),
+                groups=self.groups)
         if self.bias is None:
             return func(input, self.weight)
         else:
@@ -171,14 +180,15 @@ class FullConv2d(Conv2d):
         >>> output = m.forward(input)
     """
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-            padding=0, output_padding=0, no_bias=False):
+                 padding=0, output_padding=0, no_bias=False):
         super(FullConv2d, self).__init__(in_channels, out_channels, kernel_size,
-                stride, padding, no_bias)
+                                         stride, padding, no_bias)
         self.out_padh, self.out_padw = _pair(output_padding)
 
     def forward(self, input):
-        func = self._backend.FullConv2d(self.kw, self.kh, self.dw, self.dh,
-                self.padw, self.padh, self.out_padh, self.out_padw)
+        func = self._backend.FullConv2d(
+            self.kw, self.kh, self.dw, self.dh, self.padw, self.padh,
+            self.out_padh, self.out_padw)
         if self.bias is None:
             return func(input, self.weight)
         else:
@@ -214,7 +224,7 @@ class Conv3d(Module):
         >>> output = m.forward(input)
     """
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-            padding=0, no_bias=False):
+                 padding=0, no_bias=False):
         super(Conv3d, self).__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -238,8 +248,9 @@ class Conv3d(Module):
             self.bias.data.uniform_(-stdv, stdv)
 
     def forward(self, input):
-        func = self._backend.Conv3d(self.kt, self.kw, self.kh, self.dt,
-                self.dw, self.dh, self.padt, self.padw, self.padh)
+        func = self._backend.Conv3d(
+            self.kt, self.kw, self.kh, self.dt, self.dw, self.dh, self.padt,
+            self.padw, self.padh)
         if self.bias is None:
             return func(input, self.weight)
         else:
@@ -275,7 +286,7 @@ class FullConv3d(Conv3d):
         >>> output = m.forward(input)
     """
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-            padding=0, no_bias=False):
+                 padding=0, no_bias=False):
         super(Conv3d, self).__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -293,8 +304,9 @@ class FullConv3d(Conv3d):
         self.reset_parameters()
 
     def forward(self, input):
-        func = self._backend.FullConv3d(self.kt, self.kw, self.kh,
-                self.dt, self.dw, self.dh, self.padt, self.padw, self.padh)
+        func = self._backend.FullConv3d(
+            self.kt, self.kw, self.kh, self.dt, self.dw, self.dh, self.padt,
+            self.padw, self.padh)
         if self.bias is None:
             return func(input, self.weight)
         else:
