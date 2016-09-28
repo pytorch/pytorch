@@ -518,6 +518,12 @@ new_module_tests = [
         desc='dilated'
     ),
     dict(
+        module_name='Conv2d',
+        constructor_args=(3, 4, (3, 3), 1, 0, None, 1, True),
+        input_size=(2, 3, 6, 6),
+        desc='no_bias',
+    ),
+    dict(
         module_name='MaxPool2d',
         constructor_args=((3, 3), (2, 2), (1, 1)),
         input_size=(1, 3, 7, 7)

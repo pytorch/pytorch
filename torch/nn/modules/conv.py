@@ -121,13 +121,11 @@ class Conv2d(Module):
 
         weight = Variable(torch.Tensor(
             self.out_channels, self.in_channels, self.kh, self.kw))
-        if no_bias:
-            super(Conv2d, self).__init__(weight=weight)
-        else:
-            super(Conv2d, self).__init__(
-                weight=weight,
-                bias=Variable(torch.Tensor(self.out_channels))
-            )
+        bias = None if no_bias else Variable(torch.Tensor(self.out_channels))
+        super(Conv2d, self).__init__(
+            weight=weight,
+            bias=bias,
+        )
 
         self.reset_parameters()
 
