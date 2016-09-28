@@ -224,6 +224,7 @@ INSTALL(FILES
           THCGenerateLongType.h
           THCGenerateHalfType.h
           THCGenerateFloatType.h
+          THCGenerateFloatTypes.h
           THCGenerateDoubleType.h
           THCHalf.h
           THCNumerics.cuh
