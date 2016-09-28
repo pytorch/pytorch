@@ -52,7 +52,11 @@ class Variable(object):
         raise AttributeError(name)
 
     def __getitem__(self, key):
+        if isinstance(key, Variable) and isinstance(key.data, torch.ByteTensor):
+            return MaskedSelect()(self, key)
         return Index(key)(self)
+
+    # TODO: setitem
 
     def __deepcopy__(self, memo):
         if self.creator is None:
@@ -111,9 +115,12 @@ class Variable(object):
         self.grad.add_(grad_output[0])
         return tuple()
 
-    def contiguous_(self):
+    def contiguous(self):
         self._data = self.data.contiguous()
         return self
+
+    def clone(self):
+        return Clone()(self)
 
     def type(self, t):
         if t != type(self.data):
@@ -325,6 +332,9 @@ class Variable(object):
     def sum(self, dim=None):
         return Sum(dim)(self)
 
+    def prod(self, dim=None):
+        return Prod(dim)(self)
+
     def mean(self, dim=None):
         return Mean(dim)(self)
 
@@ -334,11 +344,20 @@ class Variable(object):
     def min(self, dim=None):
         return Min(dim)(self)
 
-    def mode(self, dim=None):
+    def mode(self, dim):
         return Mode(dim)(self)
 
-    def median(self, dim=None):
+    def median(self, dim):
         return Median(dim)(self)
+
+    def kthvalue(self, dim):
+        return Kthvalue(dim)(self)
+
+    def sort(self, dim=None, descending=False):
+        return Sort(dim, descending)(self)
+
+    def topk(self, k, dim=None, largest=True, sorted=True):
+        return Topk(k, dim, largest, sorted)(self)
 
     def view(self, *sizes):
         return View(*sizes)(self)
@@ -346,16 +365,43 @@ class Variable(object):
     def view_as(self, tensor):
         return View(*tensor.size())(self)
 
-    def _blas(self, cls, args, inplace):
+    @staticmethod
+    def _static_blas(cls, args, inplace):
         num_args = len(args)
         alpha = beta = 1
-        if num_args > 4:
+        if num_args > 5:
             raise RuntimeError("too many args")
+        if num_args == 5:
+            alpha, beta = args[1:3]
         if num_args == 4:
-            alpha, beta = args[:2]
-        if num_args == 3:
-            alpha = args[0]
-        return cls(alpha, beta, inplace)(self, *args[-2:])
+            alpha = args[1]
+        return cls(alpha, beta, inplace)(*(args[:1] + args[-2:]))
+
+    def _blas(self, cls, args, inplace):
+        return self._static_blas(cls, (self,) + args, inplace)
+
+    def mm(self, matrix):
+        output = Variable(self.data.new(self.data.size(0), matrix.data.size(1)))
+        return self._static_blas(Addmm, (output, 0, 1, self, matrix), False)
+
+    def bmm(self, batch):
+        output = Variable(self.data.new(self.data.size(0), self.data.size(1),
+                batch.data.size(2)))
+        return self._static_blas(Addbmm, (output, 0, 1, self, batch), False)
+
+    def mv(self, vector):
+        output = Variable(self.data.new(self.data.size(0)))
+        return self._static_blas(Addmv, (output, 0, 1, self, vector), False)
+
+    def ger(self, vector):
+        output = Variable(self.data.new(self.data.size(0), vector.data.size(0)))
+        return self._static_blas(Addr, (output, 0, 1, self, vector), False)
+
+    def resize(self, *sizes):
+        return Resize(*sizes)(self)
+
+    def resize_as(self, variable):
+        return Resize(*variable.size())(self)
 
     def addmm(self, *args):
         return self._blas(Addmm, args, False)
@@ -413,14 +459,38 @@ class Variable(object):
     def index_add(self, dim, index, tensor):
         return IndexAdd(dim)(self, index, tensor)
 
+    def index_add_(self, dim, index, tensor):
+        return IndexAdd(dim, True)(self, index, tensor)
+
     def index_copy(self, dim, index, tensor):
         return IndexCopy(dim)(self, index, tensor)
+
+    def index_copy_(self, dim, index, tensor):
+        return IndexCopy(dim, True)(self, index, tensor)
 
     def index_fill(self, dim, index, value):
         return IndexFill(dim, value)(self, index)
 
+    def index_fill_(self, dim, index, value):
+        return IndexFill(dim, value, True)(self, index)
+
     def index_select(self, dim, index):
         return IndexSelect(dim)(self, index)
+
+    def masked_copy(self, mask, variable):
+        return MaskedCopy()(self, mask, variable)
+
+    def masked_copy_(self, mask, variable):
+        return MaskedCopy(True)(self, mask, variable)
+
+    def masked_fill(self, mask, value):
+        return MaskedFill(value)(self, mask)
+
+    def masked_fill_(self, mask, value):
+        return MaskedFill(value, True)(self, mask)
+
+    def masked_select(self, mask):
+        return MaskedSelect()(self, mask)
 
     def expand(self, *sizes):
         return Expand(*sizes)(self)
@@ -434,8 +504,36 @@ class Variable(object):
     def transpose(self, dim1, dim2):
         return Transpose(dim1, dim2)(self)
 
-    # TODO: permute
-    # TODO: narrow
+    def cat(self, iterable, dim=0):
+        return Concat(dim)(*iterable)
+
+    def select(self, dim, _index):
+        index = tuple(slice(None, None) for _ in range(dim)) + (_index,)
+        return Index(*index)(self)
+
+    def narrow(self, dim, start_index, length):
+        index = tuple(slice(None, None) for _ in range(dim)) + \
+                    (slice(start_index, start_index+length),)
+
+        return Index(*index)(self)
+
+    def squeeze(self, dim=None):
+        return Squeeze(dim)(self)
+
+    def unsqueeze(self, dim):
+        return Unsqueeze(dim)(self)
+
+    def permute(self, *permutation):
+        return Permute(*permutation)(self)
+
+    def diag(self, diagonal_idx=0):
+        return Diag(diagonal_idx)(self)
+
+    def tril(self, diagonal_idx=0):
+        return Tril(diagonal_idx)(self)
+
+    def triu(self, diagonal_idx=0):
+        return Triu(diagonal_idx)(self)
 
     def __add__(self, other):
         return self.add(other)

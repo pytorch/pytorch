@@ -122,7 +122,7 @@ def contiguous(input):
     if torch.is_tensor(input):
         return input.contiguous()
     elif isinstance(input, Variable):
-        return input.contiguous_()
+        return input.contiguous()
     else:
         return type(input)(contiguous(e) for e in input)
 

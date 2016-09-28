@@ -35,3 +35,20 @@ def _import_dotted_name(name):
     for component in components[1:]:
         obj = getattr(obj, component)
     return obj
+
+
+# Taken from python 3.5 docs
+def _accumulate(iterable):
+    'Return running totals'
+    # _accumulate([1,2,3,4,5]) --> 1 3 6 10 15
+    # _accumulate([1,2,3,4,5], operator.mul) --> 1 2 6 24 120
+    it = iter(iterable)
+    try:
+        total = next(it)
+    except StopIteration:
+        return
+    yield total
+    for element in it:
+        total += element
+        yield total
+
