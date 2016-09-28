@@ -69,7 +69,8 @@ class Container(Module):
 
     def _apply(self, fn):
         for module in self.modules.values():
-            module._apply(fn)
+            if module is not None:
+                module._apply(fn)
         return super(Container, self)._apply(fn)
 
 
@@ -98,4 +99,3 @@ class Sequential(Container):
         for module in self.modules.values():
             input = module(input)
         return input
-

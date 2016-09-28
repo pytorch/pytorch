@@ -304,6 +304,20 @@ class TestNN(NNTestCase):
         self.assertRaises(KeyError, lambda: net.add_module('l', l))
         self.assertRaises(ValueError, lambda: net.add_module('x', 'non-module'))
 
+    def test_type(self):
+        l = nn.Linear(10, 20)
+        net = nn.Container(
+            l=l,
+            l2=l,
+            empty=None,
+        )
+        net.float()
+        self.assertIsInstance(l.weight.data, torch.FloatTensor)
+        self.assertIsInstance(l.bias.data, torch.FloatTensor)
+        net.double()
+        self.assertIsInstance(l.weight.data, torch.DoubleTensor)
+        self.assertIsInstance(l.bias.data, torch.DoubleTensor)
+
     def test_Dropout(self):
         input = torch.Tensor(1000)
         self._test_dropout(nn.Dropout, input)
