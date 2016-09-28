@@ -527,7 +527,10 @@ struct THCNumerics<float> {
   static inline __host__ __device__  float div  (float a, float b) { return a / b; }
   static inline __host__ __device__  float mul  (float a, float b) { return a * b; }
   static inline __host__ __device__  float sub  (float a, float b) { return a - b; }
+<<<<<<< 428317be4d5d9423ccb6ac2701c55baaffb8737b
   static inline __host__ __device__  float pow  (float a, float b) { return powf(a, b); }
+=======
+>>>>>>> [cutorch refactor] move std function into generic
 };
 
 template <>
@@ -570,7 +573,10 @@ struct THCNumerics<double> {
   static inline __host__ __device__  double div  (double a, double b) { return a / b; }
   static inline __host__ __device__  double mul  (double a, double b) { return a * b; }
   static inline __host__ __device__  double sub  (double a, double b) { return a - b; }
+<<<<<<< 428317be4d5d9423ccb6ac2701c55baaffb8737b
   static inline __host__ __device__  double pow  (double a, double b) { return pow(a, b); }
+=======
+>>>>>>> [cutorch refactor] move std function into generic
 };
 
 /// `half` has some type conversion issues associated with it, since it
