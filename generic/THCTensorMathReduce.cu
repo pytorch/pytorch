@@ -72,6 +72,14 @@ THCTensor_(prodall)(THCState *state, THCTensor *self) {
   return val;
 }
 
+THC_API accreal
+THCTensor_(meanall)(THCState *state, THCTensor *self)
+{
+  THAssert(THCTensor_(checkGPU)(state, 1, self));
+  THArgCheck(self->nDimension > 0, 1, "empty Tensor");
+  return THCTensor_(sumall)(state, self)/THCTensor_(nElement)(state, self);
+}
+
 THC_API real
 THCTensor_(minall)(THCState *state, THCTensor *self) {
   THAssert(THCTensor_(checkGPU)(state, 1, self));

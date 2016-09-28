@@ -130,13 +130,6 @@ void THCudaTensor_clamp(THCState *state, THCudaTensor *self_, THCudaTensor *src,
   THCudaCheck(cudaGetLastError());
 }
 
-float THCudaTensor_meanall(THCState *state, THCudaTensor *self)
-{
-  THAssert(THCudaTensor_checkGPU(state, 1, self));
-  THArgCheck(self->nDimension > 0, 1, "empty Tensor");
-  return THCudaTensor_sumall(state, self)/THCudaTensor_nElement(state, self);
-}
-
 struct TensorLerpOp {
   TensorLerpOp(float w) : w(w) {}
 

@@ -8,6 +8,7 @@ THC_API void THCTensor_(mean)(THCState *state, THCTensor *self, THCTensor *src, 
 
 THC_API accreal THCTensor_(sumall)(THCState *state, THCTensor *self);
 THC_API accreal THCTensor_(prodall)(THCState *state, THCTensor *self);
+THC_API accreal THCTensor_(meanall)(THCState *state, THCTensor *self);
 
 THC_API void THCTensor_(min)(THCState *state,
                              THCTensor *values,
