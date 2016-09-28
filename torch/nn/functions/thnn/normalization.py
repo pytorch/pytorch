@@ -22,7 +22,7 @@ class CrossMapLRN2d(Function):
         self.scale = self.scale or input.new()
         output = input.new()
 
-        backend = type2backend.get(type(input))
+        backend = type2backend[type(input)]
         if backend is not None:
             try:
                 backend.SpatialCrossMapLRN_updateOutput

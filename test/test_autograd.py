@@ -137,29 +137,24 @@ class TestAutograd(TestCase):
         self.assertRaises(RuntimeError, lambda: q.backward(torch.ones(5, 5)))
 
     def test_type_conversions(self):
-        import torch
-        try:
-            import torch.cuda
-            test_cuda = True
-        except Exception:
-            test_cuda = False
+        import torch.cuda
         x = Variable(torch.randn(5, 5))
-        self.assertTrue(type(x.float().data), torch.FloatTensor)
-        self.assertTrue(type(x.int().data), torch.IntTensor)
-        if test_cuda:
-            self.assertTrue(type(x.float().cuda().data), torch.cuda.FloatTensor)
-            self.assertTrue(type(x.int().cuda().data), torch.cuda.IntTensor)
-            self.assertTrue(type(x.int().cuda().cpu().data), torch.IntTensor)
+        self.assertIs(type(x.float().data), torch.FloatTensor)
+        self.assertIs(type(x.int().data), torch.IntTensor)
+        if torch.cuda.is_available():
+            self.assertIs(type(x.float().cuda().data), torch.cuda.FloatTensor)
+            self.assertIs(type(x.int().cuda().data), torch.cuda.IntTensor)
+            self.assertIs(type(x.int().cuda().cpu().data), torch.IntTensor)
             if torch.cuda.device_count() > 2:
                 x2 = x.float().cuda(1)
-                self.assertTrue(type(x2.data), torch.cuda.FloatTensor)
-                self.assertTrue(x2.get_device(), 1)
+                self.assertIs(type(x2.data), torch.cuda.FloatTensor)
+                self.assertIs(x2.get_device(), 1)
                 x2 = x.float().cuda()
-                self.assertTrue(type(x2.data), torch.cuda.FloatTensor)
-                self.assertTrue(x2.get_device(), 0)
+                self.assertIs(type(x2.data), torch.cuda.FloatTensor)
+                self.assertIs(x2.get_device(), 0)
                 x2 = x2.cuda(1)
-                self.assertTrue(type(x2.data), torch.cuda.FloatTensor)
-                self.assertTrue(x2.get_device(), 1)
+                self.assertIs(type(x2.data), torch.cuda.FloatTensor)
+                self.assertIs(x2.get_device(), 1)
 
 
 def index_variable(num_indices, max_indices):

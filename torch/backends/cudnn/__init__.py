@@ -1,5 +1,6 @@
 import ctypes
 import warnings
+import torch.cuda
 
 lib = None
 libname = 'libcudnn.so.5.1.3'
@@ -12,22 +13,17 @@ def _loadlib():
 
 
 def is_acceptable(tensor):
+    if not (isinstance(tensor, torch.cuda.HalfTensor) or
+            isinstance(tensor, torch.cuda.FloatTensor) or
+            isinstance(tensor, torch.cuda.DoubleTensor)):
+        return False
     if lib is None:
-        try:
-            import torch.cuda
-        except ImportError:
-            return False
         try:
             _loadlib()
         except Exception:
             warnings.warn('cuDNN library not found. Check your LD_LIBRARY_PATH')
             return False
-    if not (isinstance(tensor, torch.cuda.HalfTensor) or
-            isinstance(tensor, torch.cuda.FloatTensor) or
-            isinstance(tensor, torch.cuda.DoubleTensor)):
-        return False        
     return True
-
 
 
 _handles = {}

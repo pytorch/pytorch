@@ -1,6 +1,5 @@
 import torch
 from .Module import Module
-from . import _backends
 from .utils import recursiveType
 import torch._thnn
 
@@ -9,7 +8,7 @@ class Criterion(object):
     def __init__(self):
         self.gradInput = torch.Tensor()
         self.output = 0
-        self._backend = _backends.THNNDoubleBackend
+        self._backend = torch._thnn.type2backend[type(self.gradInput)]
 
     def updateOutput(self, input, target):
         raise NotImplementedError
@@ -42,4 +41,3 @@ class Criterion(object):
 
     def cuda(self):
         return self.type('torch.cuda.FloatTensor')
-

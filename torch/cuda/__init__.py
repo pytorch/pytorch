@@ -2,8 +2,19 @@ from __future__ import print_function
 import torch
 import contextlib
 
-try:
-    if torch._C._cuda_isDriverSufficient() == False:
+_initialized = False
+
+def is_available():
+    return (hasattr(torch._C, '_cuda_isDriverSufficient') and
+            torch._C._cuda_isDriverSufficient())
+
+def _lazy_init():
+    global _initialized
+    if _initialized:
+        return
+    if not hasattr(torch._C, '_cuda_isDriverSufficient'):
+        raise AssertionError("Torch not compiled with CUDA enabled")
+    if not torch._C._cuda_isDriverSufficient():
         if torch._C._cuda_getDriverVersion() == 0:
             # found no NVIDIA driver on the system
             raise AssertionError("""
@@ -19,11 +30,13 @@ version from the URL: http://www.nvidia.com/Download/index.aspx
 Alternatively, go to: https://pytorch.org/binaries to install
 a PyTorch version that has been compiled with your version
 of the CUDA driver.""".format(str(torch._C._cuda_getDriverVersion())))
-except AttributeError:
-    raise ImportError("Torch not compiled with CUDA enabled")
+    assert torch._C._cuda_init()
+    _initialized = True
+
 
 @contextlib.contextmanager
 def device(idx):
+    _lazy_init()
     prev_idx = torch._C._cuda_getDevice()
     if prev_idx != idx:
         torch._C._cuda_setDevice(idx)
@@ -48,8 +61,12 @@ def _dummy_ctx():
 
 
 def device_count():
+    _lazy_init()
     return torch._C._cuda_getDeviceCount()
 
+def current_device():
+    _lazy_init()
+    return torch._C._cuda_getDevice()
 
 ################################################################################
 # Define Storage and Tensor classes
@@ -59,47 +76,60 @@ def device_count():
 from .tensor import _CudaTensorBase
 from .storage import _CudaStorageBase
 
+if not hasattr(torch._C, 'CudaDoubleStorageBase'):
+    # Define dummy base classes
+    for t in ['Double', 'Float', 'Long', 'Int', 'Short', 'Char', 'Byte', 'Half']:
+        storage_name = 'Cuda{0}StorageBase'.format(t)
+        tensor_name = 'Cuda{0}TensorBase'.format(t)
 
-class DoubleStorage(torch._C.CudaDoubleStorageBase, _CudaStorageBase):
+        torch._C.__dict__[storage_name] = type(storage_name, (object,), {})
+        torch._C.__dict__[tensor_name] = type(tensor_name, (object,), {})
+
+class InitCuda(object):
+    def __new__(cls, *args, **kwargs):
+        _lazy_init()
+        return super(InitCuda, cls).__new__(cls, *args, **kwargs)
+
+class DoubleStorage(InitCuda, torch._C.CudaDoubleStorageBase, _CudaStorageBase):
     pass
-class FloatStorage(torch._C.CudaFloatStorageBase, _CudaStorageBase):
+class FloatStorage(InitCuda, torch._C.CudaFloatStorageBase, _CudaStorageBase):
     pass
-class LongStorage(torch._C.CudaLongStorageBase, _CudaStorageBase):
+class LongStorage(InitCuda, torch._C.CudaLongStorageBase, _CudaStorageBase):
     pass
-class IntStorage(torch._C.CudaIntStorageBase, _CudaStorageBase):
+class IntStorage(InitCuda, torch._C.CudaIntStorageBase, _CudaStorageBase):
     pass
-class ShortStorage(torch._C.CudaShortStorageBase, _CudaStorageBase):
+class ShortStorage(InitCuda, torch._C.CudaShortStorageBase, _CudaStorageBase):
     pass
-class CharStorage(torch._C.CudaCharStorageBase, _CudaStorageBase):
+class CharStorage(InitCuda, torch._C.CudaCharStorageBase, _CudaStorageBase):
     pass
-class ByteStorage(torch._C.CudaByteStorageBase, _CudaStorageBase):
+class ByteStorage(InitCuda, torch._C.CudaByteStorageBase, _CudaStorageBase):
     pass
-class HalfStorage(torch._C.CudaHalfStorageBase, _CudaStorageBase):
+class HalfStorage(InitCuda, torch._C.CudaHalfStorageBase, _CudaStorageBase):
     pass
 
-class DoubleTensor(torch._C.CudaDoubleTensorBase, _CudaTensorBase):
+class DoubleTensor(InitCuda, torch._C.CudaDoubleTensorBase, _CudaTensorBase):
     def is_signed(self):
         return True
-class FloatTensor(torch._C.CudaFloatTensorBase, _CudaTensorBase):
+class FloatTensor(InitCuda, torch._C.CudaFloatTensorBase, _CudaTensorBase):
     def is_signed(self):
         return True
-class LongTensor(torch._C.CudaLongTensorBase, _CudaTensorBase):
+class LongTensor(InitCuda, torch._C.CudaLongTensorBase, _CudaTensorBase):
     def is_signed(self):
         return True
-class IntTensor(torch._C.CudaIntTensorBase, _CudaTensorBase):
+class IntTensor(InitCuda, torch._C.CudaIntTensorBase, _CudaTensorBase):
     def is_signed(self):
         return True
-class ShortTensor(torch._C.CudaShortTensorBase, _CudaTensorBase):
+class ShortTensor(InitCuda, torch._C.CudaShortTensorBase, _CudaTensorBase):
     def is_signed(self):
         return True
-class CharTensor(torch._C.CudaCharTensorBase, _CudaTensorBase):
+class CharTensor(InitCuda, torch._C.CudaCharTensorBase, _CudaTensorBase):
     def is_signed(self):
         # TODO
         return False
-class ByteTensor(torch._C.CudaByteTensorBase, _CudaTensorBase):
+class ByteTensor(InitCuda, torch._C.CudaByteTensorBase, _CudaTensorBase):
     def is_signed(self):
         return False
-class HalfTensor(torch._C.CudaHalfTensorBase, _CudaTensorBase):
+class HalfTensor(InitCuda, torch._C.CudaHalfTensorBase, _CudaTensorBase):
     def is_signed(self):
         return True
 
@@ -119,37 +149,3 @@ torch._tensor_classes.add(IntTensor)
 torch._tensor_classes.add(ShortTensor)
 torch._tensor_classes.add(CharTensor)
 torch._tensor_classes.add(ByteTensor)
-
-
-def _cuda(self, idx=None, async=False):
-    # This already is a CUDA tensor.
-    # Let's check if it needs to be transfered to another GPU.
-    if hasattr(self, 'get_device'):
-        target_device = idx if idx else torch._C._cuda_getDevice()
-        if self.get_device() != target_device:
-            with device(target_device):
-                return type(self)(self.size()).copy_(self, async)
-        else:
-            return self
-    else:
-        ctx = device(idx) if idx else _dummy_ctx()
-        with ctx:
-            return self.type(getattr(torch.cuda, self.__class__.__name__), async)
-
-
-def _cpu(self):
-    return self.type(getattr(torch, self.__class__.__name__))
-
-
-from ..tensor import _TensorBase
-from ..storage import _StorageBase
-_TensorBase.cuda = _cuda
-_TensorBase.cpu = _cpu
-_StorageBase.cuda = _cuda
-_StorageBase.cpu = _cpu
-
-
-def current_device():
-    return torch._C._cuda_getDevice()
-
-assert torch._C._cuda_init()

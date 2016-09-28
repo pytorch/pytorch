@@ -1,9 +1,8 @@
 import torch
 from . import _tensor_str
-from ._utils import _type, _range
+from ._utils import _type, _cuda, _range
 from functools import reduce
 from itertools import chain
-import sys
 import math
 
 
@@ -30,6 +29,9 @@ class _TensorBase(object):
 
     def type_as(self, t, async=False):
         return self.type(t.type())
+
+    def cpu(self):
+        return self.type(getattr(torch, self.__class__.__name__))
 
     def double(self, async=False):
         return self.type(type(self).__module__ + '.DoubleTensor')
@@ -262,3 +264,4 @@ class _TensorBase(object):
 
 
 _TensorBase.type = _type
+_TensorBase.cuda = _cuda

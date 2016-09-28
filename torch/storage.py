@@ -1,5 +1,5 @@
 import torch
-from ._utils import _type, _range
+from ._utils import _type, _cuda, _range
 
 
 class _StorageBase(object):
@@ -42,6 +42,9 @@ class _StorageBase(object):
     def tolist(self):
         return [v for v in self]
 
+    def cpu(self):
+        return self.type(getattr(torch, self.__class__.__name__))
+
     def double(self, async=False):
         return self.type(type(self).__module__ + '.DoubleStorage', async)
 
@@ -65,3 +68,4 @@ class _StorageBase(object):
 
 
 _StorageBase.type = _type
+_StorageBase.cuda = _cuda
