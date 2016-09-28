@@ -38,6 +38,38 @@ THCTensor_(mean)(THCState *state, THCTensor *self, THCTensor *src, long dim)
   THCTensor_(div)(state, self, self, ScalarConvert<long, real>::to(THCTensor_(size)(state, src, dim)));
 }
 
+#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
+
+void THCTensor_(renorm)(THCState *state, THCTensor* self, THCTensor* src, real value, long dimension, real maxnorm)
+{
+  THAssert(THCTensor_(checkGPU)(state, 2, self, src));
+  THCTensor *self_;
+  THCTensor *src_ = THCTensor_(newTranspose)(state, src, dimension, 0);
+  THCTensor *data = THCTensor_(newClone)(state, src_);
+  long size = THCTensor_(nElement)(state, data)/data->size[0];
+
+  THArgCheck(dimension >= 0 && dimension < THCTensor_(nDimension)(state, src), 3, "invalid dimension");
+  THArgCheck(THCNumerics<real>::gt(value, ScalarConvert<int, real>::to(0)), 2, "non-positive-norm not supported");
+  THArgCheck(THCTensor_(nDimension)(state, src) > 1, 1, "need at least 2 dimensions");
+
+  dim3 grid(data->size[0]);
+  dim3 threads(32);
+
+  THCTensor_kernel_renorm<real><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(THCTensor_(data)(state, data), value, size, maxnorm);
+
+  cudaError errcode = cudaGetLastError();
+  if(errcode != cudaSuccess)
+    THError(cudaGetErrorString(errcode));
+
+  THCTensor_(free)(state, src_);
+  self_ = THCTensor_(newTranspose)(state, data, dimension, 0);
+  THCTensor_(resizeAs)(state, self, self_);
+  THCTensor_(freeCopyTo)(state, self_, self);
+  THCTensor_(free)(state, data);
+}
+
+#endif
+
 THC_API accreal
 THCTensor_(sumall)(THCState *state, THCTensor *self) {
   THAssert(THCTensor_(checkGPU)(state, 1, self));

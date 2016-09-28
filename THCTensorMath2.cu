@@ -336,34 +336,6 @@ void THCudaTensor_norm(THCState *state, THCudaTensor* self, THCudaTensor* src, f
   THCudaCheck(cudaGetLastError());
 }
 
-void THCudaTensor_renorm(THCState *state, THCudaTensor* self, THCudaTensor* src, float value, long dimension, float maxnorm)
-{
-  THAssert(THCudaTensor_checkGPU(state, 2, self, src));
-  THCudaTensor *self_;
-  THCudaTensor *src_ = THCudaTensor_newTranspose(state, src, dimension, 0);
-  THCudaTensor *data = THCudaTensor_newClone(state, src_);
-  long size = THCudaTensor_nElement(state, data)/data->size[0];
-
-  THArgCheck(dimension >= 0 && dimension < THCudaTensor_nDimension(state, src), 3, "invalid dimension");
-  THArgCheck(value > 0, 2, "non-positive-norm not supported");
-  THArgCheck(THCudaTensor_nDimension(state, src) > 1, 1, "need at least 2 dimensions");
-
-  dim3 grid(data->size[0]);
-  dim3 threads(32);
-
-  THCTensor_kernel_renorm<float><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(THCudaTensor_data(state, data), value, size, maxnorm);
-
-  cudaError errcode = cudaGetLastError();
-  if(errcode != cudaSuccess)
-    THError(cudaGetErrorString(errcode));
-
-  THCudaTensor_free(state, src_);
-  self_ = THCudaTensor_newTranspose(state, data, dimension, 0);
-  THCudaTensor_resizeAs(state, self, self_);
-  THCudaTensor_freeCopyTo(state, self_, self);
-  THCudaTensor_free(state, data);
-}
-
 struct dist_functor
 {
   const float exponent;
