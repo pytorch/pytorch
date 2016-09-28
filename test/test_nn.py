@@ -63,14 +63,16 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                     test_case.assertEqual(p.get_device(), 1)
         else:
             # to float
-            input = input.float()
+            if type(input.data) != torch.LongTensor:
+                input = input.float()
             module.float()
             module(input)
             for p in module.parameters():
                 test_case.assertEqual(type(p.data), torch.FloatTensor)
 
             # and back to double
-            input = input.double()
+            if type(input.data) != torch.LongTensor:
+                input = input.double()
             module.double()
             module(input)
             for p in module.parameters():
@@ -375,7 +377,7 @@ class TestNN(NNTestCase):
         self._test_maxpool_indices(3)
 
     def _test_scatter(self, x):
-        if torch.cuda.device_count() < 2:
+        if not TEST_CUDA or torch.cuda.device_count() < 2:
             raise unittest.SkipTest("Only one GPU detected")
         x = Variable(x)
         result = dp.scatter(x, (0, 1))
@@ -392,7 +394,7 @@ class TestNN(NNTestCase):
         self._test_scatter(torch.randn(4, 4))
 
     def _test_gather(self, output_device):
-        if torch.cuda.device_count() < 2:
+        if not TEST_CUDA or torch.cuda.device_count() < 2:
             raise unittest.SkipTest("Only one GPU detected")
         inputs = (
             Variable(torch.randn(2, 4).cuda(0)),
@@ -413,7 +415,8 @@ class TestNN(NNTestCase):
     def test_gather_gpu(self):
         self._test_gather(0)
 
-    @unittest.skipIf(torch.cuda.device_count() < 2, "Only one GPU detected")
+    @unittest.skipIf(not TEST_CUDA or torch.cuda.device_count() < 2,
+                     "Only one GPU detected")
     def _test_replicate(self):
         module = nn.Linear(10, 5).float().cuda()
         input = torch.randn(2, 10).float().cuda()
@@ -425,7 +428,8 @@ class TestNN(NNTestCase):
             replica_input = input.cuda(i)
             self.assertEqual(replica(replica_input).data, expected_output)
 
-    @unittest.skipIf(torch.cuda.device_count() < 2, "Only one GPU detected")
+    @unittest.skipIf(not TEST_CUDA or torch.cuda.device_count() < 2,
+                     "Only one GPU detected")
     def test_parallel_apply(self):
         l1 = nn.Linear(10, 5).float().cuda(0)
         l2 = nn.Linear(10, 5).float().cuda(1)
@@ -443,7 +447,8 @@ class TestNN(NNTestCase):
         inputs = (i1, Variable(i2.data.new()))
         expected_outputs = (expected1, expected2.new())
 
-    @unittest.skipIf(torch.cuda.device_count() < 2, "Only one GPU detected")
+    @unittest.skipIf(not TEST_CUDA or torch.cuda.device_count() < 2,
+                     "Only one GPU detected")
     def test_data_parallel(self):
         l = nn.Linear(10, 5).float().cuda()
         i = Variable(torch.randn(20, 10).float().cuda(1))

@@ -1,7 +1,10 @@
 from torch.autograd import Function
 from torch._thnn import type2backend
 import torch.backends.cudnn as cudnn
-import torch.backends.cudnn.conv
+try:
+    import torch.backends.cudnn.conv
+except ImportError:
+    pass
 
 
 class Conv2d(Function):

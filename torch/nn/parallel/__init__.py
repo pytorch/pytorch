@@ -1,4 +1,3 @@
-from .functions import Gather, Scatter
 from .parallel_apply import parallel_apply
 from .replicate import replicate
 
@@ -10,6 +9,7 @@ def scatter(variable, target_gpus):
     """Slices a given variable into approximately equal chunks and distributes
        them accross given GPUs
     """
+    from .functions import Scatter
     return Scatter(target_gpus)(variable)
 
 
@@ -17,6 +17,7 @@ def gather(variables, target_device):
     """Gathers variables from different GPUs on a specified device
        (-1 means the CPU).
     """
+    from .functions import Gather
     return Gather(target_device)(*variables)
 
 

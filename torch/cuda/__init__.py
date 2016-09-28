@@ -2,23 +2,25 @@ from __future__ import print_function
 import torch
 import contextlib
 
-if torch._C._cuda_isDriverSufficient() == False:
-    if torch._C._cuda_getDriverVersion() == 0:
-        # found no NVIDIA driver on the system
-        raise AssertionError("""
+try:
+    if torch._C._cuda_isDriverSufficient() == False:
+        if torch._C._cuda_getDriverVersion() == 0:
+            # found no NVIDIA driver on the system
+            raise AssertionError("""
 Found no NVIDIA driver on your system. Please check that you
 have an NVIDIA GPU and installed a driver from
 http://www.nvidia.com/Download/index.aspx""")
-    else:
-        # TODO: directly link to the alternative bin that needs install
-        raise AssertionError("""
+        else:
+            # TODO: directly link to the alternative bin that needs install
+            raise AssertionError("""
 The NVIDIA driver on your system is too old (found version {}).
 Please update your GPU driver by downloading and installing a new
 version from the URL: http://www.nvidia.com/Download/index.aspx
 Alternatively, go to: https://pytorch.org/binaries to install
 a PyTorch version that has been compiled with your version
 of the CUDA driver.""".format(str(torch._C._cuda_getDriverVersion())))
-
+except AttributeError:
+    raise ImportError("Torch not compiled with CUDA enabled")
 
 @contextlib.contextmanager
 def device(idx):

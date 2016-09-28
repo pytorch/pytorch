@@ -2,6 +2,7 @@ import torch.cuda
 import torch.cuda.comm as comm
 from torch.autograd import Function
 
+
 class Broadcast(Function):
 
     def __init__(self, target_gpus):
