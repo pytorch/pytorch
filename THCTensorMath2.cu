@@ -207,30 +207,9 @@ void THCudaTensor_var(THCState *state, THCudaTensor *self_, THCudaTensor *src, l
   src = THCudaTensor_newContiguous(state, src);
 
   if (dimension == THCudaTensor_nDimension(state, src) - 1) {
-    THCTensor_varInnermostDim<THCudaTensor, false>(state, self, src, flag);
+    THCTensor_varInnermostDim<THCudaTensor, float, false>(state, self, src, flag);
   } else {
-    THCTensor_varOuterDim<THCudaTensor, false>(state, self, src, dimension, flag);
-  }
-
-  THCudaTensor_free(state, src);
-  THCudaTensor_freeCopyTo(state, self, self_);
-}
-
-void THCudaTensor_std(THCState *state, THCudaTensor *self_, THCudaTensor *src, long dimension, int flag)
-{
-  THAssert(THCudaTensor_checkGPU(state, 2, self_, src));
-  THLongStorage *dim = THCudaTensor_newSizeOf(state, src);
-  THLongStorage_set(dim, dimension, 1);
-  THCudaTensor_resize(state, self_, dim, NULL);
-  THLongStorage_free(dim);
-
-  THCudaTensor *self = THCudaTensor_newContiguous(state, self_);
-  src = THCudaTensor_newContiguous(state, src);
-
-  if (dimension == THCudaTensor_nDimension(state, src) - 1) {
-    THCTensor_varInnermostDim<THCudaTensor, true>(state, self, src, flag);
-  } else {
-    THCTensor_varOuterDim<THCudaTensor, true>(state, self, src, dimension, flag);
+    THCTensor_varOuterDim<THCudaTensor, float, false>(state, self, src, dimension, flag);
   }
 
   THCudaTensor_free(state, src);

@@ -38,6 +38,31 @@ THCTensor_(mean)(THCState *state, THCTensor *self, THCTensor *src, long dim)
   THCTensor_(div)(state, self, self, ScalarConvert<long, real>::to(THCTensor_(size)(state, src, dim)));
 }
 
+#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
+
+void THCTensor_std(THCState *state, THCTensor *self_, THCTensor *src, long dimension, int flag)
+{
+  THAssert(THCTensor_(checkGPU)(state, 2, self_, src));
+  THLongStorage *dim = THCTensor_(newSizeOf)(state, src);
+  THLongStorage_set(dim, dimension, 1);
+  THCTensor_(resize)(state, self_, dim, NULL);
+  THLongStorage_free(dim);
+
+  THCTensor *self = THCTensor_(newContiguous)(state, self_);
+  src = THCTensor_(newContiguous)(state, src);
+
+  if (dimension == THCTensor_(nDimension)(state, src) - 1) {
+    THCTensor_varInnermostDim<THCTensor, real, true>(state, self, src, flag);
+  } else {
+    THCTensor_varOuterDim<THCTensor, real, true>(state, self, src, dimension, flag);
+  }
+
+  THCTensor_(free)(state, src);
+  THCTensor_(freeCopyTo)(state, self, self_);
+}
+
+#endif
+
 THC_API accreal
 THCTensor_(sumall)(THCState *state, THCTensor *self) {
   THAssert(THCTensor_(checkGPU)(state, 1, self));

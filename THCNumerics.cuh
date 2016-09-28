@@ -435,6 +435,45 @@ struct THCNumerics<half> {
     return THC_float2half(THC_half2float(a) + THC_half2float(b));
 #endif
   }
+
+  static inline __host__ __device__ half div(half a, half b) {
+#ifdef __CUDA_ARCH__
+    float fa = __half2float(a);
+    float fb = __half2float(b);
+    return __float2half( fa / fb );
+#else // __CUDA_ARCH__
+    return THC_float2half(THC_half2float(a) / THC_half2float(b));
+#endif
+  }
+
+  static inline __host__ __device__ half mul(half a, half b) {
+#ifdef __CUDA_ARCH__
+#ifdef CUDA_HALF_INSTRUCTIONS
+    return __hmul(a, b);
+#else
+    float fa = __half2float(a);
+    float fb = __half2float(b);
+    return __float2half( fa * fb );
+#endif
+#else // __CUDA_ARCH__
+    return THC_float2half(THC_half2float(a) * THC_half2float(b));
+#endif
+  }
+
+  static inline __host__ __device__ half sub(half a, half b) {
+#ifdef __CUDA_ARCH__
+#ifdef CUDA_HALF_INSTRUCTIONS
+    return __hsub(a, b);
+#else
+    float fa = __half2float(a);
+    float fb = __half2float(b);
+    return __float2half( fa - fb );
+#endif
+#else // __CUDA_ARCH__
+    return THC_float2half(THC_half2float(a) - THC_half2float(b));
+#endif
+  }
+
 };
 #endif
 
@@ -475,6 +514,9 @@ struct THCNumerics<float> {
   static inline __host__ __device__  float frac (float a) { return a - truncf(a); }
   static inline __host__ __device__  float cinv (float a) { return 1.0f / a; }
   static inline __host__ __device__  float add  (float a, float b) { return a + b; }
+  static inline __host__ __device__  float div  (float a, float b) { return a / b; }
+  static inline __host__ __device__  float mul  (float a, float b) { return a * b; }
+  static inline __host__ __device__  float sub  (float a, float b) { return a - b; }
 };
 
 template <>
@@ -514,6 +556,9 @@ struct THCNumerics<double> {
   static inline __host__ __device__  double frac (double a) { return a - ::trunc(a); }
   static inline __host__ __device__  double cinv (double a) { return 1.0 / a; }
   static inline __host__ __device__  double add  (double a, double b) { return a + b; }
+  static inline __host__ __device__  double div  (double a, double b) { return a / b; }
+  static inline __host__ __device__  double mul  (double a, double b) { return a * b; }
+  static inline __host__ __device__  double sub  (double a, double b) { return a - b; }
 };
 
 /// `half` has some type conversion issues associated with it, since it

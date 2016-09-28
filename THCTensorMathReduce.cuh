@@ -101,20 +101,26 @@ struct LogicalAny {
 // Given the sum of values and the sum of squares, compute the variance or standard deviation.
 template<typename Real, bool flag, bool apply_sqrt>
 __forceinline__ __device__ Real THCTensor_computeVar(Real sum, Real sum2, unsigned row_size) {
+  Real rs2 = ScalarConvert<unsigned, Real>::to(row_size);
+  Real rs2m = ScalarConvert<unsigned, Real>::to(row_size - 1);
+  Real zero = ScalarConvert<int, Real>::to(0);
   if (flag) {
-    sum /= row_size;
-    sum2 /= row_size;
-    sum2 -= sum * sum;
-    sum2 = (sum2 < 0 ? 0 : sum2);
+    sum = THCNumerics<Real>::div(sum, rs2);
+    sum2 = THCNumerics<Real>::div(sum2, rs2);
+    sum2 = THCNumerics<Real>::sub(sum2, THCNumerics<Real>::mul(sum, sum));
+    sum2 = (THCNumerics<Real>::lt(sum2, zero) ? zero : sum2);
   }
   else {
-    sum /= row_size;
-    sum2 /= row_size - 1;
-    sum2 -= ((Real)row_size) / ((Real)(row_size - 1)) * sum * sum;
-    sum2 = (sum2 < 0 ? 0 : sum2);
+    sum = THCNumerics<Real>::div(sum, rs2);
+    sum2 = THCNumerics<Real>::div(sum2, rs2m);
+    sum2 = THCNumerics<Real>::sub(sum2,
+      THCNumerics<Real>::mul(
+        THCNumerics<Real>::div(rs2 ,rs2m),
+        THCNumerics<Real>::mul(sum, sum)));
+    sum2 = (THCNumerics<Real>::lt(sum2, zero) ? zero : sum2);
   }
   if (apply_sqrt)
-    return sqrt(sum2);
+    return THCNumerics<Real>::sqrt(sum2);
   else
     return sum2;
 }
@@ -138,12 +144,15 @@ __global__ void THCTensor_kernel_varOuterDim(Real *tgt, Real *src_, unsigned num
   for (unsigned orow = blockIdx.x; orow < num_orows; orow += gridDim.x) {
     for (unsigned irow = blockIdx.y * blockDim.x + threadIdx.x; irow < num_irows; irow += gridDim.y * blockDim.x) {
       Real *src = src_ + orow * row_size * num_irows + irow;
-      Real sum = 0, sum2 = 0;
+      Real sum = ScalarConvert<int, Real>::to(0), sum2 = ScalarConvert<int, Real>::to(0);
 
       for (unsigned col = 0; col < row_size; ++col) {
         Real val = *src;
-        sum += val;
-        sum2 += val * val;
+        sum = THCNumerics<Real>::add(sum, val);
+        sum2 = THCNumerics<Real>::add(
+          sum2,
+          THCNumerics<Real>::mul(val, val)
+        );
 
         src += num_irows;
       }
@@ -153,7 +162,7 @@ __global__ void THCTensor_kernel_varOuterDim(Real *tgt, Real *src_, unsigned num
   }
 }
 
-template<typename TensorTypeK, bool apply_sqrt>
+template<typename TensorTypeK, typename Real, bool apply_sqrt>
 __host__ void THCTensor_varOuterDim(THCState *state, TensorTypeK *tgt, TensorTypeK *src, long dimension, int flag)
 {
   unsigned ndim = TensorUtils<TensorTypeK>::getDims(state, src);
@@ -174,10 +183,10 @@ __host__ void THCTensor_varOuterDim(THCState *state, TensorTypeK *tgt, TensorTyp
   dim3 grid(min(maxGridDim, num_orows), min(maxGridDim, THCCeilDiv(num_irows, threads.x)));
 
   if (flag) {
-    THCTensor_kernel_varOuterDim<float, true, apply_sqrt><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
+    THCTensor_kernel_varOuterDim<Real, true, apply_sqrt><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
         TensorUtils<TensorTypeK>::getData(state, tgt), TensorUtils<TensorTypeK>::getData(state, src), num_orows, num_irows, row_size);
   } else {
-    THCTensor_kernel_varOuterDim<float, false, apply_sqrt><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
+    THCTensor_kernel_varOuterDim<Real, false, apply_sqrt><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
         TensorUtils<TensorTypeK>::getData(state, tgt), TensorUtils<TensorTypeK>::getData(state, src), num_orows, num_irows, row_size);
   }
   cudaError errcode = cudaGetLastError();
@@ -206,14 +215,14 @@ __global__ void THCTensor_kernel_varInnermostDim(Real *tgt, Real *src_, unsigned
 
   for (unsigned block_row = blockIdx.x * blockDim.y; block_row < num_rows; block_row += blockDim.y * gridDim.x) {
     unsigned row = block_row + threadIdx.y;
-    Real sum = 0, sum2 = 0;
+    Real sum = ScalarConvert<int, Real>::to(0), sum2 = ScalarConvert<int, Real>::to(0);
     if (row < num_rows) {
       Real *src = src_ + row * row_size;
       // Sequential reduction within a thread.
       for (unsigned col = threadIdx.x; col < row_size; col += blockDim.x) {
         Real val = src[col];
-        sum += val;
-        sum2 += val * val;
+        sum = THCNumerics<Real>::add(sum, val);
+        sum2 = THCNumerics<Real>::add(sum2, THCNumerics<Real>::mul(val, val));
       }
     }
     ssum[threadIdx.y][threadIdx.x] = sum;
@@ -223,22 +232,24 @@ __global__ void THCTensor_kernel_varInnermostDim(Real *tgt, Real *src_, unsigned
     // Reduce intermediate values to single value.
     for (unsigned s = 8; s > 1; s >>= 1) {
       if (row < num_rows && threadIdx.x < s) {
-        ssum[threadIdx.y][threadIdx.x] += ssum[threadIdx.y][threadIdx.x + s];
-        ssum2[threadIdx.y][threadIdx.x] += ssum2[threadIdx.y][threadIdx.x + s];
+        ssum[threadIdx.y][threadIdx.x] =
+          THCNumerics<Real>::add(ssum[threadIdx.y][threadIdx.x], ssum[threadIdx.y][threadIdx.x + s]);
+        ssum2[threadIdx.y][threadIdx.x] =
+          THCNumerics<Real>::add(ssum2[threadIdx.y][threadIdx.x], ssum2[threadIdx.y][threadIdx.x + s]);
       }
       __syncthreads();
     }
 
     if (row < num_rows && threadIdx.x == 0) {
-      sum = ssum[threadIdx.y][0] + ssum[threadIdx.y][1];
-      sum2 = ssum2[threadIdx.y][0] + ssum2[threadIdx.y][1];
+      sum = THCNumerics<Real>::add(ssum[threadIdx.y][0], ssum[threadIdx.y][1]);
+      sum2 = THCNumerics<Real>::add(ssum2[threadIdx.y][0], ssum2[threadIdx.y][1]);
       tgt[row] = THCTensor_computeVar<Real, flag, apply_sqrt>(sum, sum2, row_size);
     }
     __syncthreads();
   }
 }
 
-template<typename TensorTypeK, bool apply_sqrt>
+template<typename TensorTypeK, typename Real, bool apply_sqrt>
 __host__ void THCTensor_varInnermostDim(THCState *state, TensorTypeK *tgt, TensorTypeK *src, int flag)
 {
   unsigned ndim = TensorUtils<TensorTypeK>::getDims(state, src);
@@ -254,10 +265,10 @@ __host__ void THCTensor_varInnermostDim(THCState *state, TensorTypeK *tgt, Tenso
   dim3 grid(min(1024, THCCeilDiv(num_rows, threads.y)));
 
   if (flag) {
-    THCTensor_kernel_varInnermostDim<float, true, apply_sqrt><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
+    THCTensor_kernel_varInnermostDim<Real, true, apply_sqrt><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
         TensorUtils<TensorTypeK>::getData(state, tgt), TensorUtils<TensorTypeK>::getData(state, src), num_rows, row_size);
   } else {
-    THCTensor_kernel_varInnermostDim<float, false, apply_sqrt><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
+    THCTensor_kernel_varInnermostDim<Real, false, apply_sqrt><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
         TensorUtils<TensorTypeK>::getData(state, tgt), TensorUtils<TensorTypeK>::getData(state, src), num_rows, row_size);
   }
   cudaError errcode = cudaGetLastError();
