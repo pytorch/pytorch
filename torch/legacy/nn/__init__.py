@@ -1,5 +1,4 @@
-import torch._thnn.thnn
-from torch._thnn import _backends
+from torch._thnn import type2backend
 
 from . import utils
 

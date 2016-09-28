@@ -194,7 +194,7 @@ def make_relative_rpath(path):
 ################################################################################
 
 extensions = []
-packages = find_packages(exclude=('tools.*', 'torch.cuda', 'torch.legacy.cunn'))
+packages = find_packages(exclude=('tools.*',))
 
 C = Extension("torch._C",
     libraries=main_libraries,
@@ -232,7 +232,6 @@ if WITH_CUDA:
         extra_link_args=extra_link_args + [make_relative_rpath('../lib')]
     )
     extensions.append(THCUNN)
-    packages += ['torch.cuda', 'torch.legacy.cunn']
 
 setup(name="torch", version="0.1",
     ext_modules=extensions,

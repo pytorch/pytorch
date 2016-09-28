@@ -34,8 +34,6 @@ class Module(object):
         return self
 
     def cuda(self, device_id=None):
-        import torch.cuda
-        import torch.nn.cuda
         return self._apply(lambda t: t.cuda(device_id))
 
     def cpu(self, device_id=None):

@@ -1,5 +1,3 @@
-import torch._thnn.thnn
-
 _all_functions = []
 
 from .auto import *

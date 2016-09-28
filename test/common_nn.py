@@ -4,6 +4,7 @@ import unittest
 from copy import deepcopy
 
 import torch
+import torch.cuda
 from torch.autograd import Variable
 from common import TestCase, to_gpu, get_numerical_jacobian, iter_tensors, contiguous
 
@@ -13,15 +14,7 @@ if sys.version_info[:2] == (3, 3):
 else:
     TemporaryFile = tempfile.TemporaryFile
 
-try:
-    import torch.cuda
-    import torch.legacy.cunn
-    import torch.nn.cuda
-    TEST_CUDA = True
-except Exception:
-    # TODO: catch ImportError once it works with "setup.py develop"
-    TEST_CUDA = False
-
+TEST_CUDA = torch.cuda.is_available()
 PRECISION = 1e-5
 
 module_tests = [

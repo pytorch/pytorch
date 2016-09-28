@@ -1,14 +1,14 @@
 import os
 import itertools
+import importlib
 
 THNN_H_PATH = os.path.join(os.path.dirname(__file__), '..', 'lib', 'THNN.h')
 THCUNN_H_PATH = os.path.join(os.path.dirname(__file__), '..', 'lib', 'THCUNN.h')
 
 
-def _unpickle_backend(init_module, backend_name):
-    import torch
-    __import__(init_module)
-    return getattr(torch._thnn._backends, backend_name)
+def _unpickle_backend(backend_name):
+    import torch._thnn
+    return torch._thnn.type2backend[backend_name]
 
 
 class THNNBackendBase(object):
@@ -29,7 +29,7 @@ class THNNBackendBase(object):
         return 0
 
     def __reduce__(self):
-        return (_unpickle_backend, (self.init_module, type(self).__name__))
+        return (_unpickle_backend, (type(self).__name__,))
 
 
 class Function(object):
@@ -98,12 +98,10 @@ def parse_header(path):
     return generic_functions
 
 
-def load_backend(t, lib_handle, generic_functions, init_module, mixins=tuple()):
-    from . import _backends
+def load_backend(t, lib, generic_functions, mixins=tuple()):
+    lib_handle = importlib.import_module(lib)
     backend_name = 'THNN{}Backend'.format(t)
     backend = type(backend_name, mixins + (THNNBackendBase,), {})()
-    backend.init_module = init_module
-    setattr(_backends, backend_name, backend)
     for function in generic_functions:
         full_fn_name = '{}{}'.format(t, function.name)
         fn = getattr(lib_handle, full_fn_name)

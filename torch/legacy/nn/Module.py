@@ -1,7 +1,6 @@
 import torch
 import torch._thnn
 from .utils import clear, recursiveType
-from . import _backends
 
 class Module(object):
 
@@ -9,7 +8,7 @@ class Module(object):
         self.gradInput = torch.Tensor()
         self.output = torch.Tensor()
         self._type = self.output.type()
-        self._backend = _backends.THNNDoubleBackend
+        self._backend = torch._thnn.type2backend[type(self.output)]
 
     def __repr__(self):
         return 'nn.' + self.__class__.__name__
@@ -291,4 +290,3 @@ class Module(object):
             for i, module in self.modules:
                 self.modules[i] = module.replace(callback)
         return out
-
