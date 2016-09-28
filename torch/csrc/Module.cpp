@@ -528,17 +528,20 @@ static PyObject * THPModule_cat(PyObject *_unused, PyObject *args)
 PyObject *THPModule_safeCall(PyObject *_unused, PyObject *args, PyObject *kwargs)
 {
   PyObject *result = NULL;
+  PyObject *args_slice = NULL;
   PyThreadState *thread_state = PyThreadState_Get();
   Py_ssize_t num_args = args ? PyTuple_Size(args) : 0;
   THPUtils_assert(num_args > 0, "expected at least one argument");
   try {
-    THPObjectPtr args_slice = PyTuple_GetSlice(args, 1, num_args);
+    args_slice = PyTuple_GetSlice(args, 1, num_args);
     result = PyObject_Call(PyTuple_GET_ITEM(args, 0), args_slice, kwargs);
   } catch (std::exception &e) {
     PyEval_RestoreThread(thread_state);
+    Py_DECREF(args_slice);
     PyErr_SetString(THPException_FatalError, e.what());
     Py_LeaveRecursiveCall();
   }
+  Py_DECREF(args_slice);
   return result;
 }
 

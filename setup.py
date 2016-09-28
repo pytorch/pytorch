@@ -244,6 +244,11 @@ setup(name="torch", version="0.1",
         'clean': clean,
     },
     packages=packages,
-    package_data={'torch': ['lib/*.so*', 'lib/*.dylib*', 'lib/*.h', 'lib/torch_shm_manager']},
+    package_data={'torch': [
+        'lib/*.so*', 'lib/*.dylib*',
+        'lib/torch_shm_manager',
+        'lib/*.h',
+        'lib/include/TH/*.h', 'lib/include/TH/generic/*.h',
+        'lib/include/THC/*.h', 'lib/include/THC/generic/*.h']},
     install_requires=['pyyaml'],
 )
