@@ -1,12 +1,18 @@
+import sys
+import os
 import math
+import shutil
 import random
+import tempfile
 import unittest
 import torch
+import torch.cuda
 from torch.autograd import Variable
 from torch.utils.trainer import Trainer
 from torch.utils.trainer.plugins import *
 from torch.utils.trainer.plugins.plugin import Plugin
 from torch.utils.data import *
+from torch.utils.ffi import compile_extension
 
 from common import TestCase
 
@@ -240,6 +246,72 @@ class TestDataset(TestCase):
         for samples, targets in dataset:
             self.assertIs(type(samples), torch.FloatTensor)
             self.assertIs(type(targets), torch.IntTensor)
+
+
+test_dir = os.path.abspath(os.path.dirname(__file__))
+
+
+class TestFFI(TestCase):
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        os.chdir(self.tmpdir)
+        sys.path.append(self.tmpdir)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir)
+
+    def test_cpu(self):
+        compile_extension(
+                name='test_extensions.cpulib',
+                header=test_dir + '/ffi/src/cpu/lib.h',
+                sources=[
+                    test_dir + '/ffi/src/cpu/lib1.c',
+                    test_dir + '/ffi/src/cpu/lib2.c',
+                ],
+                verbose=False,
+        )
+        from test_extensions import cpulib
+        tensor = torch.ones(2, 2).float()
+
+        cpulib.good_func(tensor, 2, 1.5)
+        self.assertEqual(tensor, torch.ones(2, 2) * 2 + 1.5)
+
+        new_tensor = cpulib.new_tensor(4)
+        self.assertEqual(new_tensor, torch.ones(4, 4) * 4)
+
+        f = cpulib.int_to_float(5)
+        self.assertIs(type(f), float)
+
+        self.assertRaises(TypeError,
+                lambda: cpulib.good_func(tensor.double(), 2, 1.5))
+        self.assertRaises(torch.FatalError,
+                lambda: cpulib.bad_func(tensor, 2, 1.5))
+
+    def test_gpu(self):
+        compile_extension(
+                name='gpulib',
+                header=test_dir + '/ffi/src/cuda/cudalib.h',
+                sources=[
+                    test_dir + '/ffi/src/cuda/cudalib.c',
+                ],
+                with_cuda=True,
+                verbose=False,
+        )
+        import gpulib
+        tensor = torch.ones(2, 2).float()
+
+        gpulib.good_func(tensor, 2, 1.5)
+        self.assertEqual(tensor, torch.ones(2, 2) * 2 + 1.5)
+
+        ctensor = tensor.cuda().fill_(1)
+        gpulib.cuda_func(ctensor, 2, 1.5)
+        self.assertEqual(ctensor, torch.ones(2, 2) * 2 + 1.5)
+
+        self.assertRaises(TypeError,
+                lambda: gpulib.cuda_func(tensor, 2, 1.5))
+        self.assertRaises(TypeError,
+                lambda: gpulib.cuda_func(ctensor.storage(), 2, 1.5))
 
 
 if __name__ == '__main__':
