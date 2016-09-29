@@ -2,12 +2,6 @@
 #define THC_GENERIC_FILE "generic/THCTensorMathReduce.h"
 #else
 
-#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
-
-THC_API void THCTensor_(std)(THCState *state, THCTensor *self, THCTensor *src, long dim, int flag);
-
-#endif
-
 THC_API void THCTensor_(sum)(THCState *state, THCTensor *self, THCTensor *src, long dim);
 THC_API void THCTensor_(prod)(THCState *state, THCTensor *self, THCTensor *src, long dim);
 THC_API void THCTensor_(mean)(THCState *state, THCTensor *self, THCTensor *src, long dim);

@@ -216,6 +216,27 @@ void THCudaTensor_var(THCState *state, THCudaTensor *self_, THCudaTensor *src, l
   THCudaTensor_freeCopyTo(state, self, self_);
 }
 
+void THCudaTensor_std(THCState *state, THCudaTensor *self_, THCudaTensor *src, long dimension, int flag)
+{
+  THAssert(THCudaTensor_checkGPU(state, 2, self_, src));
+  THLongStorage *dim = THCudaTensor_newSizeOf(state, src);
+  THLongStorage_set(dim, dimension, 1);
+  THCudaTensor_resize(state, self_, dim, NULL);
+  THLongStorage_free(dim);
+
+  THCudaTensor *self = THCudaTensor_newContiguous(state, self_);
+  src = THCudaTensor_newContiguous(state, src);
+
+  if (dimension == THCudaTensor_nDimension(state, src) - 1) {
+    THCTensor_varInnermostDim<THCudaTensor, float, true>(state, self, src, flag);
+  } else {
+    THCTensor_varOuterDim<THCudaTensor, float, true>(state, self, src, dimension, flag);
+  }
+
+  THCudaTensor_free(state, src);
+  THCudaTensor_freeCopyTo(state, self, self_);
+}
+
 template <int StaticExp>
 struct TensorNormOp
 {
@@ -315,42 +336,6 @@ void THCudaTensor_norm(THCState *state, THCudaTensor* self, THCudaTensor* src, f
   THCudaCheck(cudaGetLastError());
 }
 
-__global__ void THCudaTensor_kernel_renorm(float *data, const float value, const long size, const float maxnorm)
-{
-  __shared__ float buffer[32];
-  long tx = threadIdx.x;
-  long bx = blockIdx.x;
-  long step = blockDim.x;
-  float *row = data + size*bx;
-
-  buffer[tx] = 0;
-
-  // get norm of axis
-  for (long i=tx; i<size; i+=step)
-  {
-    buffer[tx] += pow(fabs(row[i]), value);
-  }
-  // add (reduce)
-  for (unsigned int stride = blockDim.x >> 1; stride > 0; stride >>= 1)
-  {
-    __syncthreads();
-    if (tx < stride)
-      buffer[tx] += buffer[tx+stride];
-  }
-  // clip norms
-  __syncthreads();
-  float norm = pow(buffer[0], 1/value);
-  if (norm > maxnorm)
-  {
-    norm = maxnorm / (norm + 1e-7);
-    // renormalize
-    for (long i=tx; i<size; i+=step)
-    {
-      row[i] *= norm;
-    }
-  }
-}
-
 void THCudaTensor_renorm(THCState *state, THCudaTensor* self, THCudaTensor* src, float value, long dimension, float maxnorm)
 {
   THAssert(THCudaTensor_checkGPU(state, 2, self, src));
@@ -366,7 +351,7 @@ void THCudaTensor_renorm(THCState *state, THCudaTensor* self, THCudaTensor* src,
   dim3 grid(data->size[0]);
   dim3 threads(32);
 
-  THCudaTensor_kernel_renorm<<<grid, threads, 0, THCState_getCurrentStream(state)>>>(THCudaTensor_data(state, data), value, size, maxnorm);
+  THCTensor_kernel_renorm<float><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(THCudaTensor_data(state, data), value, size, maxnorm);
 
   cudaError errcode = cudaGetLastError();
   if(errcode != cudaSuccess)

@@ -474,6 +474,16 @@ struct THCNumerics<half> {
 #endif
   }
 
+  static inline __host__ __device__ half pow(half a, half b) {
+#ifdef __CUDA_ARCH__
+    float fa = __half2float(a);
+    float fb = __half2float(b);
+    return __float2half(powf(fa, fb));
+#else // __CUDA_ARCH__
+    return THC_float2half(powf(THC_half2float(a), THC_half2float(b)));
+#endif
+  }
+
 };
 #endif
 
@@ -517,6 +527,7 @@ struct THCNumerics<float> {
   static inline __host__ __device__  float div  (float a, float b) { return a / b; }
   static inline __host__ __device__  float mul  (float a, float b) { return a * b; }
   static inline __host__ __device__  float sub  (float a, float b) { return a - b; }
+  static inline __host__ __device__  float pow  (float a, float b) { return powf(a, b); }
 };
 
 template <>
@@ -559,6 +570,7 @@ struct THCNumerics<double> {
   static inline __host__ __device__  double div  (double a, double b) { return a / b; }
   static inline __host__ __device__  double mul  (double a, double b) { return a * b; }
   static inline __host__ __device__  double sub  (double a, double b) { return a - b; }
+  static inline __host__ __device__  double pow  (double a, double b) { return pow(a, b); }
 };
 
 /// `half` has some type conversion issues associated with it, since it

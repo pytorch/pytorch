@@ -95,6 +95,54 @@ struct LogicalAny {
   }
 };
 
+template<typename Real>
+__global__ void THCTensor_kernel_renorm(Real *data, const Real value, const long size, const Real maxnorm)
+{
+  __shared__ Real buffer[32];
+  long tx = threadIdx.x;
+  long bx = blockIdx.x;
+  long step = blockDim.x;
+  Real *row = data + size*bx;
+
+  buffer[tx] = ScalarConvert<int, Real>::to(0);
+
+  // get norm of axis
+  for (long i=tx; i<size; i+=step)
+  {
+    buffer[tx] = THCNumerics<Real>::add(
+      buffer[tx],
+      THCNumerics<Real>::pow(
+        THCNumerics<Real>::abs(row[i]),
+        value)
+    );
+  }
+  // add (reduce)
+  for (unsigned int stride = blockDim.x >> 1; stride > 0; stride >>= 1)
+  {
+    __syncthreads();
+    if (tx < stride)
+      buffer[tx] = THCNumerics<Real>::add(buffer[tx], buffer[tx+stride]);
+  }
+  // clip norms
+  __syncthreads();
+  Real norm = THCNumerics<Real>::pow(buffer[0], THCNumerics<Real>::cinv(value));
+  if (THCNumerics<Real>::gt(norm, maxnorm))
+  {
+    norm = THCNumerics<Real>::div(
+      maxnorm,
+      THCNumerics<Real>::add(
+        norm,
+        ScalarConvert<float, Real>::to(1e-7)
+      )
+    );
+    // renormalize
+    for (long i=tx; i<size; i+=step)
+    {
+      row[i] = THCNumerics<Real>::mul(row[i], norm);
+    }
+  }
+}
+
 
 #include <thrust/functional.h>
 
