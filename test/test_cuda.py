@@ -7,7 +7,7 @@ import torch
 import torch.cuda
 import torch.cuda.comm as comm
 
-from common import TestCase, get_gpu_type, to_gpu
+from common import TestCase, get_gpu_type, to_gpu, freeze_rng_state
 
 def is_floating(t):
     return type(t) in [torch.FloatTensor, torch.DoubleTensor,
@@ -394,6 +394,17 @@ class TestCuda(TestCase):
 
     def test_gather_dim(self):
         self._test_gather(1)
+
+    def test_manual_seed(self):
+        with freeze_rng_state():
+            x = torch.zeros(4, 4).float().cuda()
+            torch.cuda.manual_seed(2)
+            self.assertEqual(torch.cuda.initial_seed(), 2)
+            x.uniform_()
+            torch.cuda.manual_seed(2)
+            y = x.clone().uniform_()
+            self.assertEqual(x, y)
+            self.assertEqual(torch.cuda.initial_seed(), 2)
 
 
 for decl in tests:

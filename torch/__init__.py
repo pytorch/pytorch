@@ -19,7 +19,7 @@ if not hasattr(_dl_flags, 'RTLD_GLOBAL') or not hasattr(_dl_flags, 'RTLD_NOW'):
     except ImportError:
         # as a last attempt, use compile-time constants
         import torch._dl as _dl_flags
-        
+
 old_flags = sys.getdlopenflags()
 sys.setdlopenflags(_dl_flags.RTLD_GLOBAL | _dl_flags.RTLD_NOW)
 from torch._C import *
@@ -62,6 +62,22 @@ def set_default_tensor_type(t):
     Tensor = _import_dotted_name(t)
     Storage = _import_dotted_name(t.replace('Tensor', 'Storage'))
     _C._set_default_tensor_type(Tensor)
+
+
+def set_rng_state(new_state):
+    default_generator.set_state(new_state)
+
+
+def get_rng_state():
+    return default_generator.get_state()
+
+
+def manual_seed(seed):
+    return default_generator.manual_seed(seed)
+
+
+def initial_seed():
+    return default_generator.initial_seed()
 
 
 from .serialization import save, load

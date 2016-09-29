@@ -1537,11 +1537,11 @@ class TestTorch(TestCase):
         after = torch.rand(1000)
         self.assertEqual(before, after, 0)
 
-    @unittest.skip("Not implemented yet")
     def test_RNGStateAliasing(self):
         # Fork the random number stream at this point
         gen = torch.Generator()
-        torch.set_rng_state(gen, torch.get_rng_state())
+        gen.set_state(torch.get_rng_state())
+        self.assertEqual(gen.get_state(), torch.get_rng_state())
 
         target_value = torch.rand(1000)
         # Dramatically alter the internal state of the main generator
@@ -1563,6 +1563,16 @@ class TestTorch(TestCase):
                 'get_rng_state/set_rng_state not generating same sequence of normally distributed numbers')
         self.assertEqual(seeded, reseeded, 0,
                 'repeated calls to manual_seed not generating same sequence of normally distributed numbers')
+
+    def test_manual_seed(self):
+        rng_state = torch.get_rng_state()
+        torch.manual_seed(2)
+        x = torch.randn(100)
+        self.assertEqual(torch.initial_seed(), 2)
+        torch.manual_seed(2)
+        y = torch.randn(100)
+        self.assertEqual(x, y)
+        torch.set_rng_state(rng_state)
 
     @unittest.skip("Not implemented yet")
     def test_cholesky(self):

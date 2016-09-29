@@ -161,46 +161,6 @@ static PyObject * THPModule_setNumThreads(PyObject *module, PyObject *arg)
   return 0;
 }
 
-static PyObject * THPModule_getRNGState(PyObject *module)
-{
-  HANDLE_TH_ERRORS
-  THPGenerator *self = THPDefaultGenerator;
-  THGenerator *generator = self->cdata;
-  THByteTensorPtr _t = THByteTensor_new();
-  THByteTensor_getRNGState(generator, _t.get());
-  PyObject *_ret =  THPByteTensor_New(_t);
-  _t.release();
-  return _ret;
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject * THPModule_setRNGState(PyObject *_unused, PyObject *_new_state)
-{
-  HANDLE_TH_ERRORS
-  THPGenerator *self = THPDefaultGenerator;
-  THGenerator *generator = self->cdata;
-  THPUtils_assert(THPByteTensor_Check(_new_state), "set_rng_state expects a "
-          "torch.ByteTensor, but got %s", THPUtils_typename(_new_state));
-  THByteTensor *new_state = ((THPByteTensor*)_new_state)->cdata;;
-  THByteTensor_setRNGState(generator, new_state);
-  Py_INCREF(self);
-  return (PyObject*)self;
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject * THPModule_manualSeed(PyObject *_unused, PyObject *seed)
-{
-  HANDLE_TH_ERRORS
-  THPGenerator *self = THPDefaultGenerator;
-  THGenerator *generator = self->cdata;
-  THPUtils_assert(THPUtils_checkLong(seed), "manual_seed expected a long, "
-          "but got %s", THPUtils_typename(seed));
-  THRandom_manualSeed(generator, THPUtils_unpackLong(seed));
-  Py_INCREF(self);
-  return (PyObject*)self;
-  END_HANDLE_TH_ERRORS
-}
-
 bool THPModule_isTensor(PyObject *obj)
 {
   int result = PySet_Contains(tensor_classes, (PyObject*)Py_TYPE(obj));
@@ -552,6 +512,13 @@ extern PyObject * THCPModule_getDevice_wrap(PyObject *self);
 extern PyObject * THCPModule_getDeviceCount_wrap(PyObject *self);
 extern PyObject * THCPModule_getDriverVersion(PyObject *self);
 extern PyObject * THCPModule_isDriverSufficient(PyObject *self);
+extern PyObject * THCPModule_getRNGState(PyObject *_unused);
+extern PyObject * THCPModule_setRNGState(PyObject *_unused, PyObject *_new_rng_state);
+extern PyObject * THCPModule_manualSeed(PyObject *_unused, PyObject *seed);
+extern PyObject * THCPModule_manualSeedAll(PyObject *_unused, PyObject *seed);
+extern PyObject * THCPModule_seed(PyObject *_unused);
+extern PyObject * THCPModule_seedAll(PyObject *_unused);
+extern PyObject * THCPModule_initialSeed(PyObject *_unused);
 #endif
 
 static PyMethodDef TorchMethods[] = {
@@ -563,6 +530,13 @@ static PyMethodDef TorchMethods[] = {
   {"_cuda_getDeviceCount", (PyCFunction)THCPModule_getDeviceCount_wrap, METH_NOARGS, NULL},
   {"_cuda_isDriverSufficient", (PyCFunction)THCPModule_isDriverSufficient, METH_NOARGS, NULL},
   {"_cuda_getDriverVersion", (PyCFunction)THCPModule_getDriverVersion, METH_NOARGS, NULL},
+  {"_cuda_getRNGState", (PyCFunction)THCPModule_getRNGState, METH_NOARGS, NULL},
+  {"_cuda_setRNGState", (PyCFunction)THCPModule_setRNGState, METH_O, NULL},
+  {"_cuda_manualSeed", (PyCFunction)THCPModule_manualSeed, METH_O, NULL},
+  {"_cuda_manualSeedAll", (PyCFunction)THCPModule_manualSeedAll, METH_O, NULL},
+  {"_cuda_seed", (PyCFunction)THCPModule_seed, METH_NOARGS, NULL},
+  {"_cuda_seedAll", (PyCFunction)THCPModule_seedAll, METH_NOARGS, NULL},
+  {"_cuda_initialSeed", (PyCFunction)THCPModule_initialSeed, METH_NOARGS, NULL},
 #endif
   {"_safe_call",      (PyCFunction)THPModule_safeCall,          METH_VARARGS | METH_KEYWORDS, NULL},
   {"_sendfd",         (PyCFunction)THPModule_sendfd,            METH_VARARGS, NULL},
@@ -574,9 +548,6 @@ static PyMethodDef TorchMethods[] = {
   {"_storageCopyAsync", (PyCFunction)THPModule_storage_asyncCopyWrapper, METH_VARARGS, NULL},
   {"get_num_threads", (PyCFunction)THPModule_getNumThreads,     METH_NOARGS,  NULL},
   {"set_num_threads", (PyCFunction)THPModule_setNumThreads,     METH_O,       NULL},
-  {"get_rng_state",   (PyCFunction)THPModule_getRNGState,       METH_NOARGS,  NULL},
-  {"set_rng_state",   (PyCFunction)THPModule_setRNGState,       METH_O,       NULL},
-  {"manual_seed",     (PyCFunction)THPModule_manualSeed,        METH_O,       NULL},
 
   {"sigmoid",         (PyCFunction)THPModule_sigmoid,           METH_VARARGS, NULL},
   {"log",             (PyCFunction)THPModule_log,               METH_VARARGS, NULL},
@@ -808,6 +779,7 @@ PyMODINIT_FUNC PyInit__C()
 #endif
 
   THPDefaultGenerator = (THPGenerator*)THPGenerator_New();
+  ASSERT_TRUE(PyModule_AddObject(module, "default_generator", (PyObject*)THPDefaultGenerator) == 0);
   ASSERT_TRUE(THPDefaultGenerator != nullptr);
 
   updateErrorHandlers();

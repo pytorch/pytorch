@@ -68,6 +68,9 @@ def current_device():
     _lazy_init()
     return torch._C._cuda_getDevice()
 
+
+from .random import *
+
 ################################################################################
 # Define Storage and Tensor classes
 ################################################################################
