@@ -65,10 +65,7 @@ void THNN_CudaRReLU_updateOutput(THCState *state, THCudaTensor *input, THCudaTen
   THCudaTensor *noise, double lower, double upper, bool train, bool inplace, void *generator)
 {
   THCUNN_assertSameGPU(state, 3, input, output, noise);
-  if (state->rngState->current_gen == NULL)
-  {
-    THError("Random number generators have not been initialized.");
-  }
+  struct curandStateMtgp32* gen_states = THCRandom_generatorStates(state);
 
   if (train)
   {
@@ -80,8 +77,7 @@ void THNN_CudaRReLU_updateOutput(THCState *state, THCudaTensor *input, THCudaTen
     if (inplace)
     {
       rreluUpdateOutputTrain<<<NUM_BLOCKS(n), BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-        n, state->rngState->current_gen->gen_states,
-        input_data, noise_data, input_data, lower, upper);
+        n, gen_states, input_data, noise_data, input_data, lower, upper);
       THCudaTensor_set(state, output, input);
     }
     else
@@ -89,8 +85,7 @@ void THNN_CudaRReLU_updateOutput(THCState *state, THCudaTensor *input, THCudaTen
       THCudaTensor_resizeAs(state, output, input);
       float *output_data = THCudaTensor_data(state, output);
       rreluUpdateOutputTrain<<<NUM_BLOCKS(n), BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-        n, state->rngState->current_gen->gen_states,
-        input_data, noise_data, output_data, lower, upper);
+        n, gen_states, input_data, noise_data, output_data, lower, upper);
     }
     THCudaCheck(cudaGetLastError());
     THCudaTensor_free(state, input);
