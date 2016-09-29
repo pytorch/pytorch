@@ -37,7 +37,7 @@ class Function(object):
         for i in input:
             if not isinstance(i, Variable):
                 raise RuntimeError("expected a Variable argument, but got " +
-                    torch.typename(i))
+                    type(i).__name__)
         unpacked_input = tuple(arg.data for arg in input)
         is_volatile = any(arg.volatile for arg in input)
         # Save the input, so _save_for_backward can access it
