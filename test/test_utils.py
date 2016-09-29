@@ -16,6 +16,12 @@ from torch.utils.ffi import compile_extension
 
 from common import TestCase
 
+try:
+    import cffi
+    HAS_CFFI = True
+except ImportError:
+    HAS_CFFI = False
+
 class SimplePlugin(Plugin):
     def __init__(self, interval):
         super(SimplePlugin, self).__init__(interval)
@@ -261,6 +267,7 @@ class TestFFI(TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmpdir)
 
+    @unittest.skipIf(not HAS_CFFI, "ffi tests require cffi package")
     def test_cpu(self):
         compile_extension(
                 name='test_extensions.cpulib',
@@ -288,6 +295,7 @@ class TestFFI(TestCase):
         self.assertRaises(torch.FatalError,
                 lambda: cpulib.bad_func(tensor, 2, 1.5))
 
+    @unittest.skipIf(not HAS_CFFI, "ffi tests require cffi package")
     def test_gpu(self):
         compile_extension(
                 name='gpulib',
