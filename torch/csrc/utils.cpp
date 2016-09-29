@@ -152,8 +152,18 @@ std::string THPUtils_formattedTupleDesc(
   for (size_t i = 0; i < argument_types.size(); i++) {
     bool is_matching = false;
     if (i < expected_arguments.size()) {
-      is_matching = argument_types[i] == expected_arguments[i].type ||
-        (expected_arguments[i].is_nullable && argument_types[i] == "NoneType");
+      if (expected_arguments[i].type == "float") {
+          is_matching = argument_types[i] == "float" ||
+                        argument_types[i] == "int" ||
+                        argument_types[i] == "long";
+      } else if (expected_arguments[i].type == "int") {
+          is_matching = argument_types[i] == "int" ||
+                        argument_types[i] == "long";
+      } else {
+          is_matching = expected_arguments[i].type == argument_types[i];
+      }
+      if (expected_arguments[i].is_nullable && argument_types[i] == "NoneType")
+          is_matching = true;
     } else if (is_variadic) {
       is_matching = argument_types[i] == expected_arguments.back().type;
     }
