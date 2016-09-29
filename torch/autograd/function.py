@@ -34,6 +34,10 @@ class Function(object):
         return tuple(arg.data for arg in self.saved_variables)
 
     def _do_forward(self, *input):
+        for i in input:
+            if not isinstance(i, Variable):
+                raise RuntimeError("expected a Variable argument, but got " +
+                    torch.typename(i))
         unpacked_input = tuple(arg.data for arg in input)
         is_volatile = any(arg.volatile for arg in input)
         # Save the input, so _save_for_backward can access it
@@ -78,6 +82,11 @@ class Function(object):
         return output
 
     def _do_backward(self, grad_output, retain_variables):
+        if not hasattr(self, 'saved_variables'):
+            raise RuntimeError("Trying to backward through the graph second "
+                    "time, but the buffers have already been freed. Please "
+                    "specify retain_variables=True when calling backward for "
+                    "the first time.")
         grad_input = self.backward(*grad_output)
         if not isinstance(grad_input, tuple):
             grad_input = (grad_input,)
