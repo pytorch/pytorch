@@ -126,6 +126,7 @@ SET(src
     THCStorageCopy.c
     THCTensor.c
     THCTensorCopy.c
+    THCThreadLocal.c
     )
 
 SET(src-cuda

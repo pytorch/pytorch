@@ -3,56 +3,121 @@
 #include "THCTensorRandom.h"
 #include "THCBlas.h"
 #include "THCAllocator.h"
+#include "THCThreadLocal.h"
 #include <stdlib.h>
+#include <stdint.h>
 
 /* Size of scratch space available in global memory per each SM + stream */
 #define GLOBAL_SCRATCH_SPACE_PER_SM_STREAM 4 * sizeof(float)
+
+
+typedef struct _THCCudaResourcesPerDevice {
+  cudaStream_t* streams;
+  cublasHandle_t* blasHandles;
+  /* Size of scratch space per each stream on this device available */
+  size_t scratchSpacePerStream;
+  /* Device-resident scratch space per stream, used for global memory
+     reduction kernels. */
+  void** devScratchSpacePerStream;
+} THCCudaResourcesPerDevice;
+
+struct THCState {
+  struct THCRNGState* rngState;
+  struct cudaDeviceProp* deviceProperties;
+  /* Set of all allocated resources. resourcePerDevice[dev]->streams[0] is NULL,
+     which specifies the per-device default stream. blasHandles do not have a
+     default and must be explicitly initialized. We always initialize 1
+     blasHandle but we can use more.
+  */
+  THCCudaResourcesPerDevice* resourcesPerDevice;
+  /* Captured number of devices upon startup; convenience for bounds checking */
+  int numDevices;
+  /* Number of Torch defined resources available, indices 1 ... numStreams */
+  int numUserStreams;
+  int numUserBlasHandles;
+
+  /* Allocator using cudaMallocHost. */
+  THAllocator* cudaHostAllocator;
+  THCDeviceAllocator cudaDeviceAllocator;
+
+  /* Index of the current selected per-device resource. Actual CUDA resource
+     changes based on the current device, since resources are per-device */
+  THCThreadLocal/*<int>*/ currentPerDeviceStream;
+  THCThreadLocal/*<int>*/ currentPerDeviceBlasHandle;
+
+  /* Table of enabled peer-to-peer access between directed pairs of GPUs.
+     If i accessing allocs on j is enabled, p2pAccess[i][j] is 1; 0 otherwise. */
+  int** p2pAccessEnabled;
+
+  /* Is direct cross-kernel p2p access allowed? Normally, only cross-GPU
+     copies are allowed via p2p if p2p access is enabled at all for
+     the pair of GPUs in question, but if this flag is true, then
+     all cross-GPU access checks are disabled, allowing kernels to
+     directly access memory on another GPUs.
+     Note that p2p access must exist and be enabled for the pair of
+     GPUs in question. */
+  int p2pKernelAccessEnabled;
+
+  void (*cutorchGCFunction)(void *data);
+  void *cutorchGCData;
+  long heapSoftmax;
+  long heapDelta;
+};
 
 THCCudaResourcesPerDevice* THCState_getDeviceResourcePtr(
   THCState *state, int device);
 
 static void THCState_initDefaultDeviceAllocator(THCDeviceAllocator* a);
 
+THCState* THCState_alloc()
+{
+  THCState* state = (THCState*) malloc(sizeof(THCState));
+  memset(state, 0, sizeof(THCState));
+  return state;
+}
+
+void THCState_free(THCState* state)
+{
+  free(state);
+}
+
 void THCudaInit(THCState* state)
 {
-  state->cutorchGCFunction = NULL;
-  state->cutorchGCData = NULL;
   if (!state->cudaDeviceAllocator.malloc) {
     THCState_initDefaultDeviceAllocator(&state->cudaDeviceAllocator);
   }
 
-  int count = 0;
-  THCudaCheck(cudaGetDeviceCount(&count));
+  int numDevices = 0;
+  THCudaCheck(cudaGetDeviceCount(&numDevices));
+  state->numDevices = numDevices;
 
   int device = 0;
   THCudaCheck(cudaGetDevice(&device));
 
-  state->rngState = (THCRNGState*)malloc(sizeof(THCRNGState));
-  THCRandom_init(state, count, device);
+  /* Start in the default stream on the current device */
+  state->currentPerDeviceStream = THCThreadLocal_alloc();
+  state->currentPerDeviceBlasHandle = THCThreadLocal_alloc();
 
-  THCAllocator_init(state);
+  state->resourcesPerDevice = (THCCudaResourcesPerDevice*)
+    malloc(numDevices * sizeof(THCCudaResourcesPerDevice));
+  memset(state->resourcesPerDevice, 0, numDevices * sizeof(THCCudaResourcesPerDevice));
 
-  state->numDevices = count;
   state->deviceProperties =
-    (struct cudaDeviceProp*)malloc(count * sizeof(struct cudaDeviceProp));
+    (struct cudaDeviceProp*)malloc(numDevices * sizeof(struct cudaDeviceProp));
 
-  state->numUserStreams = 0;
-  state->numUserBlasHandles = 0;
+  state->rngState = (THCRNGState*)malloc(sizeof(THCRNGState));
+  THCRandom_init(state, numDevices, device);
+
+  state->cudaHostAllocator = (THAllocator*)malloc(sizeof(THAllocator));
+  THCAllocator_init(state->cudaHostAllocator);
 
   /* Enable P2P access between all pairs, if possible */
   THCudaEnablePeerToPeerAccess(state);
 
-  state->resourcesPerDevice = (THCCudaResourcesPerDevice*)
-    malloc(count * sizeof(THCCudaResourcesPerDevice));
-  for (int i = 0; i < count; ++i) {
+  for (int i = 0; i < numDevices; ++i) {
     THCCudaResourcesPerDevice* res = THCState_getDeviceResourcePtr(state, i);
-
     THCudaCheck(cudaSetDevice(i));
     THCudaCheck(cudaGetDeviceProperties(&state->deviceProperties[i], i));
-    /* Stream index 0 will be the default stream for convenience; by
-       default no user streams are reserved */
-    res->streams = NULL;
-    res->blasHandles = NULL;
 
     /* The scratch space that we want to have available per each device is
        based on the number of SMs available per device */
@@ -69,17 +134,12 @@ void THCudaInit(THCState* state)
   /* Restore to previous device */
   THCudaCheck(cudaSetDevice(device));
 
-  /* Start in the default stream on the current device */
-  state->currentPerDeviceStream = 0;
-  state->currentStream = NULL;
-
   /* There is no such thing as a default cublas handle.
      To maintain consistency with streams API, handle 0 is always NULL and we
-     start counting at 1
+     start counting at 1. If currentPerDeviceBlasHandle is 0 (the default
+     thread-local value), then we assume it means 1.
    */
   THCState_reserveBlasHandles(state, 1);
-  state->currentPerDeviceBlasHandle = 1;
-  state->currentBlasHandle = THCState_getDeviceBlasHandle(state, device, 1);
 
   state->heapSoftmax = 3e8; // 300MB, adjusted upward dynamically
   state->heapDelta = 0;
@@ -88,9 +148,9 @@ void THCudaInit(THCState* state)
 void THCudaShutdown(THCState* state)
 {
   THCRandom_shutdown(state);
-  THCAllocator_shutdown(state);
 
   free(state->rngState);
+  free(state->cudaHostAllocator);
   free(state->deviceProperties);
 
   int deviceCount = 0;
@@ -129,6 +189,8 @@ void THCudaShutdown(THCState* state)
   }
   free(state->resourcesPerDevice);
   state->cudaDeviceAllocator.shutdown(state->cudaDeviceAllocator.state);
+  THCThreadLocal_free(state->currentPerDeviceStream);
+  THCThreadLocal_free(state->currentPerDeviceBlasHandle);
 
   THCudaCheck(cudaSetDevice(prevDev));
 }
@@ -194,13 +256,11 @@ void THCudaEnablePeerToPeerAccess(THCState* state)
 
 int THCState_getPeerToPeerAccess(THCState* state, int dev, int devToAccess)
 {
-  int numDevices = 0;
-  THCudaCheck(cudaGetDeviceCount(&numDevices));
-  if (dev < 0 || dev >= numDevices) {
+  if (dev < 0 || dev >= state->numDevices) {
     THError("%d is not a device", dev);
   }
 
-  if (devToAccess < 0 || dev >= numDevices) {
+  if (devToAccess < 0 || dev >= state->numDevices) {
     THError("%d is not a device", devToAccess);
   }
 
@@ -258,6 +318,22 @@ struct cudaDeviceProp* THCState_getCurrentDeviceProperties(THCState* state)
 
   return &(state->deviceProperties[curDev]);
 }
+
+struct THCRNGState* THCState_getRngState(THCState *state)
+{
+  return state->rngState;
+}
+
+THAllocator* THCState_getCudaHostAllocator(THCState* state)
+{
+  return state->cudaHostAllocator;
+}
+
+THCDeviceAllocator* THCState_getDeviceAllocator(THCState* state)
+{
+  return &state->cudaDeviceAllocator;
+}
+
 
 int THCState_getNumDevices(THCState *state)
 {
@@ -407,7 +483,15 @@ cudaStream_t THCState_getCurrentStream(THCState *state)
      For some debugging code or improperly instrumented kernels,
      `state` is null */
   if (state) {
-    return state->currentStream;
+    int device;
+    THCudaCheck(cudaGetDevice(&device));
+
+    int streamIndex = THCState_getCurrentStreamIndex(state);
+    if (streamIndex == 0) {
+      return NULL;
+    }
+
+    return THCState_getDeviceResourcePtr(state, device)->streams[streamIndex];
   } else {
     /* assume default stream */
     return NULL;
@@ -420,11 +504,11 @@ cublasHandle_t THCState_getCurrentBlasHandle(THCState *state)
      For some debugging code or improperly instrumented kernels,
      `state` is null */
   if (state) {
-    if (state->currentBlasHandle <= 0) {
-      THError("%d is not a valid handle, valid range is: (1, %d)",
-              state->currentBlasHandle, state->numUserBlasHandles);
-    }
-    return state->currentBlasHandle;
+    int device;
+    THCudaCheck(cudaGetDevice(&device));
+
+    int handle = THCState_getCurrentBlasHandleIndex(state);
+    return THCState_getDeviceBlasHandle(state, device, handle);
   }
   THError("THCState and blasHandles must be set as there is no default blasHandle");
   return NULL;
@@ -432,74 +516,32 @@ cublasHandle_t THCState_getCurrentBlasHandle(THCState *state)
 
 int THCState_getCurrentStreamIndex(THCState *state)
 {
-  return state->currentPerDeviceStream;
+  void* value = THCThreadLocal_get(state->currentPerDeviceStream);
+  return (int) (intptr_t) value;
 }
 
 int THCState_getCurrentBlasHandleIndex(THCState *state)
 {
-  if (state->currentPerDeviceBlasHandle <= 0)
-  {
-    THError("%d is not a valid handle, valid range is: (1, %d)",
-            state->currentPerDeviceBlasHandle, state->numUserBlasHandles);
+  void* value = THCThreadLocal_get(state->currentPerDeviceBlasHandle);
+  if (value == NULL) {
+    return 1;
   }
-  return state->currentPerDeviceBlasHandle;
+  return (int) (intptr_t) value;
 }
 
-void THCState_setStream(THCState *state, int device, int stream)
+void THCState_setCurrentStreamIndex(THCState *state, int stream)
 {
-  /* `device` is a CUDA index */
-  if (device >= state->numDevices || device < 0)
-  {
-    THError("%d is not a device", device + 1 /* back to Torch index */);
-  }
-
-  if (stream > state->numUserStreams || stream < 0)
-  {
-    THError("%d is not a stream", stream);
-  }
-  state->currentStream =
-    THCState_getDeviceStream(state, device, stream);
-  state->currentPerDeviceStream = stream;
-  THCublasCheck(cublasSetStream(state->currentBlasHandle,
-                                state->currentStream));
+  THCThreadLocal_set(state->currentPerDeviceStream, (void*)(intptr_t)stream);
 }
 
-void THCState_setBlasHandle(THCState *state, int device, int handle)
-{  /* `device` is a CUDA index */
-  if (device >= state->numDevices || device < 0)
-  {
-    THError("%d is not a device", device + 1 /* back to Torch index */);
-  }
-
+void THCState_setCurrentBlasHandleIndex(THCState *state, int handle)
+{
   if (handle > state->numUserBlasHandles || handle <= 0)
   {
     THError("%d is not a valid handle, valid range is: (1, %d)",
             handle, state->numUserBlasHandles);
   }
-  state->currentBlasHandle =
-    THCState_getDeviceBlasHandle(state, device, handle);
-  state->currentPerDeviceBlasHandle = handle;
-  THCublasCheck(cublasSetStream(state->currentBlasHandle, state->currentStream));
-}
-
-void THCState_setStreamForCurrentDevice(THCState *state, int stream)
-{
-  if (state->currentPerDeviceStream != stream)
-  {
-    int device = -1;
-    THCudaCheck(cudaGetDevice(&device));
-    THCState_setStream(state, device, stream);
-  }
-}
-
-void THCState_setBlasHandleForCurrentDevice(THCState *state, int handle)
-{
-  if (state->currentPerDeviceBlasHandle != handle)
-  {
-    int device = -1;
-    THCudaCheck(cudaGetDevice(&device));
-    THCState_setBlasHandle(state, device, handle);
-  }
+  THCThreadLocal_set(state->currentPerDeviceBlasHandle, (void*)(intptr_t)handle);
 }
 
 void* THCState_getCurrentDeviceScratchSpace(THCState* state)
