@@ -318,6 +318,15 @@ class TestNN(NNTestCase):
         self.assertIsInstance(l.weight.data, torch.DoubleTensor)
         self.assertIsInstance(l.bias.data, torch.DoubleTensor)
 
+    def test_non_leaf_parameters(self):
+        l1 = nn.Linear(10, 10)
+        l2 = nn.Linear(10, 10)
+        def assign_weight():
+            l2.weight = l1.weight + 2
+        self.assertRaises(RuntimeError, assign_weight)
+        # This should work though
+        l2.weight = Variable(torch.randn(10, 10))
+
     def test_Dropout(self):
         input = torch.Tensor(1000)
         self._test_dropout(nn.Dropout, input)
