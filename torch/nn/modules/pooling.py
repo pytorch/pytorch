@@ -103,11 +103,11 @@ class MaxUnpool2d(Module):
     Output Shape:[ * , * , *, * ]  : Output shape = minibatch x channels x padH x (iH - 1) * sH + kH x padW x (iW - 1) * sW + kW
     Examples:
         >>> # pool of square window of size=3, stride=2
-        >>> m = nn.MaxPool2d(3, stride=2, return_indices = True)
-        >>> mu = nn.MaxUnpool2d(3, stride=2)
-        >>> input, indices = autograd.Variable(torch.randn(20, 16, 50, 32))
-        >>> output = m.forward(input)
-        >>> unpooled_output = m2.forward(output, indices)
+        >>> m = nn.MaxPool2d(2, stride=2, return_indices = True)
+        >>> mu = nn.MaxUnpool2d(2, stride=2)
+        >>> input = autograd.Variable(torch.randn(20, 16, 50, 32))
+        >>> output, indices = m.forward(input)
+        >>> unpooled_output = mu.forward(output, indices)
     """
     def __init__(self, kernel_size, stride=None, padding=0):
         super(MaxUnpool2d, self).__init__()
