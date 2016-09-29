@@ -12,12 +12,12 @@ from torch.utils.trainer import Trainer
 from torch.utils.trainer.plugins import *
 from torch.utils.trainer.plugins.plugin import Plugin
 from torch.utils.data import *
-from torch.utils.ffi import compile_extension
 
 from common import TestCase
 
 try:
     import cffi
+    from torch.utils.ffi import compile_extension
     HAS_CFFI = True
 except ImportError:
     HAS_CFFI = False
