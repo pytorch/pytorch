@@ -68,6 +68,33 @@ struct ReduceMultiply<half, float> {
 };
 #endif // CUDA_HALF_TENSOR
 
+template <typename ResT, typename ArgT>
+struct SquareFunctor {
+    SquareFunctor(ResT mean): mean_(mean) {}
+
+    inline __device__ ResT operator()(ArgT x) const {
+      return (((ResT) x) - mean_) * (((ResT) x) - mean_);
+    }
+
+    const ResT mean_;
+};
+
+#ifdef CUDA_HALF_TENSOR
+template <typename ResT>
+struct SquareFunctor<ResT, half> {
+    SquareFunctor(ResT mean): mean_(mean) {}
+
+    inline __device__ ResT operator()(half x) const {
+      return THCNumerics<ResT>::mul(
+        THCNumerics<ResT>::sub(mean_, ScalarConvert<half, ResT>::to(x)),
+        THCNumerics<ResT>::sub(mean_, ScalarConvert<half, ResT>::to(x))
+      );
+    }
+
+    const ResT mean_;
+};
+#endif // CUDA_HALF_TENSOR
+
 template <typename T>
 struct ReduceMin {
   inline __device__ T operator()(T a, T b) const {

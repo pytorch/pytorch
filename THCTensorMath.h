@@ -72,7 +72,6 @@ THC_API void THCudaTensor_qr(THCState *state, THCudaTensor *rq_, THCudaTensor *r
 THC_API void THCudaTensor_cat(THCState *state, THCudaTensor *result, THCudaTensor *ta, THCudaTensor *tb, int dimension);
 THC_API void THCudaTensor_catArray(THCState *state, THCudaTensor *result, THCudaTensor **inputs, int numInputs, int dimension);
 
-THC_API float THCudaTensor_varall(THCState *state, THCudaTensor *self);
 THC_API void  THCudaTensor_var(THCState *state, THCudaTensor *self, THCudaTensor *src, long dim, int flag);
 THC_API float THCudaTensor_stdall(THCState *state, THCudaTensor *self);
 THC_API float THCudaTensor_dist(THCState *state, THCudaTensor *self, THCudaTensor *src, float value);

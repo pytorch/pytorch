@@ -89,6 +89,31 @@ void THCTensor_(std)(THCState *state, THCTensor *self_, THCTensor *src, long dim
   THCTensor_(freeCopyTo)(state, self, self_);
 }
 
+THC_API accreal
+THCTensor_(varall)(THCState *state, THCTensor *self)
+{
+  THAssert(THCTensor_(checkGPU)(state, 1, self));
+  accreal mean = THCTensor_(meanall)(state, self);
+
+  accreal val;
+  if (!THC_reduceAll(state, self,
+                     SquareFunctor<accreal, real>(mean),
+                     ReduceAdd<accreal, accreal>(),
+                     ReduceAdd<accreal, accreal>(),
+                     ScalarConvert<int, accreal>::to(0),
+                     &val, 0)) {
+    THArgCheck(false, 1, CUTORCH_DIM_WARNING);
+  }
+
+  val = THCNumerics<accreal>::div(
+    val,
+    ScalarConvert<int, accreal>::to(THCTensor_(nElement)(state, self) - 1)
+  );
+
+  THCudaCheck(cudaGetLastError());
+  return val;
+}
+
 #endif
 
 THC_API accreal
@@ -120,6 +145,11 @@ THCTensor_(prodall)(THCState *state, THCTensor *self) {
                      &val, 0)) {
     THArgCheck(false, 1, CUTORCH_DIM_WARNING);
   }
+
+  val = THCNumerics<accreal>::div(
+    val,
+    ScalarConvert<long, accreal>::to(THCTensor_(nElement)(state, self)) - 1
+  );
 
   THCudaCheck(cudaGetLastError());
   return val;

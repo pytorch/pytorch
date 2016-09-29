@@ -91,6 +91,7 @@ struct THCNumerics<long> {
 
   static inline __host__ __device__  long add(long a, long b) { return a + b; }
   static inline __host__ __device__  long abs(long a) { return labs(a); }
+  static inline __host__ __device__  long div(long a, long b) { return a / b; };
 };
 
 #ifdef CUDA_HALF_TENSOR

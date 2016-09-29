@@ -125,40 +125,6 @@ void THCudaTensor_lerp(THCState *state, THCudaTensor *result, THCudaTensor *a, T
   THCudaCheck(cudaGetLastError());
 }
 
-struct square_functor
-{
-  const float mean;
-
-  square_functor(float mean_) : mean(mean_) {}
-
-    __host__ __device__ float operator()(const float& x) const
-  {
-    return (x-mean)*(x-mean);
-  }
-};
-
-float THCudaTensor_varall(THCState *state, THCudaTensor *self)
-{
-  THAssert(THCudaTensor_checkGPU(state, 1, self));
-  self = THCudaTensor_newContiguous(state, self);
-  long size = THCudaTensor_nElement(state, self);
-  thrust::device_ptr<float> self_data(THCudaTensor_data(state, self));
-
-  float mean = THCudaTensor_meanall(state, self);
-  float result =
-    thrust::transform_reduce(
-#if CUDA_VERSION >= 7000
-      thrust::cuda::par.on(THCState_getCurrentStream(state)),
-#endif
-      self_data, self_data+size, square_functor(mean),
-      (float)0, thrust::plus<float>());
-
-  result = result/(THCudaTensor_nElement(state, self)-1);
-
-  THCudaTensor_free(state, self);
-  return result;
-}
-
 float THCudaTensor_stdall(THCState *state, THCudaTensor *self)
 {
   THAssert(THCudaTensor_checkGPU(state, 1, self));
