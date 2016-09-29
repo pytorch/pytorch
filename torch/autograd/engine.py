@@ -1,4 +1,4 @@
-from collections import Counter
+from collections import Counter, deque
 from .variable import Variable
 
 class ExecutionEngine(object):
@@ -56,7 +56,7 @@ class ExecutionEngine(object):
             variable._do_backward((grad,), retain_variables)
             return
 
-        ready = [(variable.creator, (grad,))]
+        ready = deque([(variable.creator, (grad,))])
         not_ready = {}
         need_copy = set()
 
@@ -82,7 +82,7 @@ class ExecutionEngine(object):
                     else:
                         assert output_nr == 0
                         prev_grad = (d_prev_fn,)
-                    ready.append((prev_fn, prev_grad))
+                    ready.appendleft((prev_fn, prev_grad))
                 else:
                     if prev_fn in not_ready:
                         prev_grad = not_ready[prev_fn]
