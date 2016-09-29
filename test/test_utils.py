@@ -7,6 +7,8 @@ import tempfile
 import unittest
 import torch
 import torch.cuda
+import sys
+import traceback
 from torch.autograd import Variable
 from torch.utils.trainer import Trainer
 from torch.utils.trainer.plugins import *
@@ -172,16 +174,16 @@ class TestTrainer(TestCase):
         self.assertEqual(output_var.grad, expected_grad)
 
 
-class TestTensorDataSource(TestCase):
+class TestTensorDataset(TestCase):
 
     def test_len(self):
-        source = TensorDataSource(torch.randn(15, 10, 2, 3, 4, 5), torch.randperm(15))
+        source = TensorDataset(torch.randn(15, 10, 2, 3, 4, 5), torch.randperm(15))
         self.assertEqual(len(source), 15)
 
     def test_getitem(self):
         t = torch.randn(15, 10, 2, 3, 4, 5)
         l = torch.randn(15, 10)
-        source = TensorDataSource(t, l)
+        source = TensorDataset(t, l)
         for i in range(15):
             self.assertEqual(t[i], source[i][0])
             self.assertEqual(l[i], source[i][1])
@@ -189,32 +191,39 @@ class TestTensorDataSource(TestCase):
     def test_getitem_1d(self):
         t = torch.randn(15)
         l = torch.randn(15)
-        source = TensorDataSource(t, l)
+        source = TensorDataset(t, l)
         for i in range(15):
             self.assertEqual(t[i:i+1], source[i][0])
             self.assertEqual(l[i:i+1], source[i][1])
 
 
-class TestDataset(TestCase):
+class ErrorDataset(Dataset):
+    def __init__(self, size):
+        self.size = size
+
+    def __len__(self):
+        return self.size
+
+class TestDataLoader(TestCase):
 
     def setUp(self):
-        self.data = torch.randn(10, 2, 3, 5)
-        self.labels = torch.randperm(5).repeat(2)
-        self.datasource = TensorDataSource(self.data, self.labels)
+        self.data = torch.randn(100, 2, 3, 5)
+        self.labels = torch.randperm(50).repeat(2)
+        self.dataset = TensorDataset(self.data, self.labels)
 
-    def _test_sequential(self, dataset):
-        batch_size = dataset.batch_size
-        for i, (sample, target) in enumerate(dataset):
+    def _test_sequential(self, loader):
+        batch_size = loader.batch_size
+        for i, (sample, target) in enumerate(loader):
             idx = i * batch_size
             self.assertEqual(sample, self.data[idx:idx+batch_size])
             self.assertEqual(target, self.labels[idx:idx+batch_size].view(-1, 1))
-        self.assertEqual(i, math.floor((len(self.datasource)-1) / batch_size))
+        self.assertEqual(i, math.floor((len(self.dataset)-1) / batch_size))
 
-    def _test_shuffle(self, dataset):
-        batch_size = dataset.batch_size
+    def _test_shuffle(self, loader):
         found_data = {i: 0 for i in range(self.data.size(0))}
         found_labels = {i: 0 for i in range(self.labels.size(0))}
-        for i, (batch_samples, batch_targets) in enumerate(dataset):
+        batch_size = loader.batch_size
+        for i, (batch_samples, batch_targets) in enumerate(loader):
             for sample, target in zip(batch_samples, batch_targets):
                 for data_point_idx, data_point in enumerate(self.data):
                     if data_point.eq(sample).all():
@@ -225,37 +234,59 @@ class TestDataset(TestCase):
                 found_labels[data_point_idx] += 1
             self.assertEqual(sum(found_data.values()), (i+1) * batch_size)
             self.assertEqual(sum(found_labels.values()), (i+1) * batch_size)
-        self.assertEqual(i, math.floor((len(self.datasource)-1) / batch_size))
+        self.assertEqual(i, math.floor((len(self.dataset)-1) / batch_size))
 
-    def test_seqential(self):
-        self._test_sequential(Dataset(self.datasource))
+    def _test_error(self, loader):
+        it = iter(loader)
+        errors = 0
+        while True:
+            try:
+                it.next()
+            except NotImplementedError:
+                msg = "".join(traceback.format_exception(*sys.exc_info()))
+                self.assertTrue("_processBatch" in msg)
+                errors += 1
+            except StopIteration:
+                self.assertEqual(errors,
+                    math.ceil(float(len(loader.dataset))/loader.batch_size))
+                return
 
-    def test_seqential_batch(self):
-        self._test_sequential(Dataset(self.datasource, batch_size=2))
+
+    def test_sequential(self):
+        self._test_sequential(DataLoader(self.dataset))
+
+    def test_sequential_batch(self):
+        self._test_sequential(DataLoader(self.dataset, batch_size=2))
 
     def test_shuffle(self):
-        self._test_shuffle(Dataset(self.datasource, shuffle=True))
+        self._test_shuffle(DataLoader(self.dataset, shuffle=True))
 
     def test_shuffle_batch(self):
-        self._test_shuffle(Dataset(self.datasource, batch_size=2, shuffle=True))
-
-    def test_types(self):
-        dataset = Dataset(self.datasource, batch_size=2)
-        for samples, targets in dataset:
-            self.assertIs(type(samples), torch.DoubleTensor)
-            self.assertIs(type(targets), torch.DoubleTensor)
-        dataset.input_type(torch.FloatTensor)
-        for samples, targets in dataset:
-            self.assertIs(type(samples), torch.FloatTensor)
-            self.assertIs(type(targets), torch.DoubleTensor)
-        dataset.target_type(torch.IntTensor)
-        for samples, targets in dataset:
-            self.assertIs(type(samples), torch.FloatTensor)
-            self.assertIs(type(targets), torch.IntTensor)
+        self._test_shuffle(DataLoader(self.dataset, batch_size=2, shuffle=True))
 
 
-test_dir = os.path.abspath(os.path.dirname(__file__))
+    def test_sequential_workers(self):
+        # still use test shuffle here because the workers may shuffle the order
+        self._test_shuffle(DataLoader(self.dataset, num_workers=4))
 
+    def test_seqential_batch_workers(self):
+        # still use test shuffle here because the workers may shuffle the order
+        self._test_shuffle(DataLoader(self.dataset, batch_size=2, num_workers=4))
+
+    def test_shuffle_workers(self):
+        self._test_shuffle(DataLoader(self.dataset, shuffle=True, num_workers=4))
+
+    def test_shuffle_batch_workers(self):
+        self._test_shuffle(DataLoader(self.dataset, batch_size=2, shuffle=True, num_workers=4))
+
+    def test_error(self):
+        self._test_error(DataLoader(ErrorDataset(100), batch_size=2, shuffle=True))
+
+    def test_error_workers(self):
+        self._test_error(DataLoader(ErrorDataset(41), batch_size=2, shuffle=True, num_workers=4))
+
+
+test_dir = os.path.abspath(os.path.dirname(str(__file__)))
 
 class TestFFI(TestCase):
 

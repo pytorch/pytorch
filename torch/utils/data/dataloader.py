@@ -26,19 +26,17 @@ def _workerLoop(dataset, index_queue, data_queue, collate_fn):
         if batch_indices == None:
             break
 
-        samples = None
         try:
             samples = _processBatch(dataset, batch_indices, collate_fn)
         except Exception as e:
             data_queue.put(ExceptionWrapper(sys.exc_info()))
-
-        if samples:
+        else:
             data_queue.put(samples)
 
 # default collate function, puts each data field into a
 # tensor with outer dimension batchSize
 def default_collate(batch):
-    if torch.isTensor(batch[0]):
+    if torch.is_tensor(batch[0]):
         return torch.cat([t.view(1, *t.size()) for t in batch], 0)
     else:
         # if each batch element is not a tensor, then it should be a list
@@ -89,7 +87,7 @@ class DataLoaderIter(object):
             self.batches_outstanding += 1
 
     def next(self):
-        if self.workers:
+        if self.num_workers:
             # multi-process loading
             if self.batches_outstanding:
                 assert(not self.joined)
@@ -120,11 +118,12 @@ class DataLoaderIter(object):
         # across multiple threads for HOGWILD.
         # Probably the best way to do this is by moving the sample pushing
         # to a separate thread and then just sharing the data queue
+        # but signalling the end is tricky without a non-blocking API
         raise NotImplementedError("DataLoaderIterator cannot be pickled")
 
     def _joinWorkers(self):
         self.joined = True
-        if self.workers:
+        if self.num_workers:
             [self.index_queue.put(None) for x in self.workers]
             [x.join() for x in self.workers]
         
