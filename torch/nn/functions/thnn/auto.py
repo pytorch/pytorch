@@ -196,6 +196,7 @@ def _generate_function_classes(scope_dict):
         'BatchNormalization',
         'LookupTable',
         'PReLU',
+        'RReLU',
         'unfolded',
     }
     name_remap = {

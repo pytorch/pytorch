@@ -1,4 +1,5 @@
-from torch.autograd.function import Function
+import torch
+from torch.autograd.function import Function, InplaceFunction
 from torch._thnn import type2backend
 
 from . import _all_functions
@@ -54,6 +55,50 @@ class PReLU(Function):
         return grad_input, grad_weight
 
 
+class RReLU(InplaceFunction):
+
+    def __init__(self, lower, upper, train, inplace=False):
+        super(RReLU, self).__init__(inplace)
+        self.lower = lower
+        self.upper = upper
+        self.train = train
+
+    def forward(self, input):
+        self._backend = type2backend[type(input)]
+        output = input.new()
+        self.noise = input.new()
+        self._backend.RReLU_updateOutput(
+            self._backend.library_state,
+            input,
+            output,
+            self.noise,
+            self.lower,
+            self.upper,
+            self.train,
+            self.inplace,
+            torch.default_generator if not input.is_cuda else 0
+        )
+        self.save_for_backward(input)
+        return output
+
+    def backward(self, grad_output):
+        input, = self.saved_tensors
+        # TODO: check if requires grad
+        grad_input = input.new()
+        self._backend.RReLU_updateGradInput(
+            self._backend.library_state,
+            input,
+            grad_output,
+            grad_input,
+            self.noise,
+            self.lower,
+            self.upper,
+            self.train,
+            self.inplace
+        )
+        return grad_input
+
+
 class Softmin(Function):
 
     def forward(self, input):
@@ -82,5 +127,6 @@ class Softmin(Function):
 
 
 _all_functions.append(PReLU)
+_all_functions.append(RReLU)
 _all_functions.append(Softmin)
 

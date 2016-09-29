@@ -38,8 +38,7 @@ class StandaloneExtension(CWrapPlugin):
         'int':              Template('THPUtils_unpackLong($arg)'),
         'long':             Template('THPUtils_unpackLong($arg)'),
         'void*':            Template('(void*)THPUtils_unpackLong($arg)'),
-        # TODO: implement this
-        'THGenerator*':     Template('NULL'),
+        'THGenerator*':     Template('THPGenerator_CData((THPGenerator*)$arg)'),
     }
 
     TYPE_CHECK = {
@@ -55,8 +54,7 @@ class StandaloneExtension(CWrapPlugin):
         'int':              Template('THPUtils_checkLong($arg)'),
         'long':             Template('THPUtils_checkLong($arg)'),
         'void*':            Template('THPUtils_checkLong($arg)'),
-        # TODO: implement this
-        'THGenerator*':     Template('false'),
+        'THGenerator*':     Template('(PyObject*)Py_TYPE($arg) == THPGeneratorClass'),
     }
 
     WRAPPER_TEMPLATE = Template("""

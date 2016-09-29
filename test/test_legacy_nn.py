@@ -5,8 +5,9 @@ from copy import deepcopy
 
 import torch
 import torch.legacy.nn as nn
-from common_nn import NNTestCase, ModuleTest, CriterionTest, iter_tensors, module_tests, criterion_tests, TEST_CUDA, PRECISION
-from common import to_gpu
+from common_nn import NNTestCase, ModuleTest, CriterionTest, iter_tensors, \
+    module_tests, criterion_tests, TEST_CUDA, PRECISION
+from common import to_gpu, freeze_rng_state
 
 class OldModuleTest(ModuleTest):
     def __init__(self, *args, **kwargs):
@@ -30,9 +31,11 @@ class OldModuleTest(ModuleTest):
         if self.check_inplace:
             input2 = deepcopy(input)
             module_ip = self.constructor(*self.constructor_args, inplace=True)
-            output = module.forward(input)
+            with freeze_rng_state():
+                output = module.forward(input)
             test_case.assertEqual(input, input2)
-            output2 = module_ip.forward(input2)
+            with freeze_rng_state():
+                output2 = module_ip.forward(input2)
             test_case.assertNotEqual(input, input2)
             test_case.assertEqual(output, input2)
 
@@ -76,15 +79,6 @@ tests = [
     OldModuleTest(nn.Abs,
                     input_size=(3, 20, 5),
                     reference_fn=lambda i,_: i.abs()),
-    # TODO implement
-    # OldModuleTest(nn.RReLU,
-                    # input_size=(4, 2, 5),
-                    # check_inplace=True),
-    # OldModuleTest(nn.RReLU,
-                    # (0.1, 0.9),
-                    # input_size=(4, 4, 5),
-                    # check_inplace=True,
-                    # desc='with_up_down'),
     OldModuleTest(nn.Bilinear,
                     (2, 3, 10),
                     input_size=[(4, 2), (4, 3)]),
@@ -589,7 +583,8 @@ def prepare_tests():
 class TestNN(NNTestCase):
 
     def _forward(self, module, input):
-        return module.forward(input)
+        with freeze_rng_state():
+            return module.forward(input)
 
     def _backward(self, module, input, output, grad_output):
         return module.backward(input, grad_output)

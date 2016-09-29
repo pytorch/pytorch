@@ -10,6 +10,7 @@ import torch.nn.parallel as dp
 from torch.autograd import Variable
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     module_tests, criterion_tests, TEST_CUDA, PRECISION
+from common import freeze_rng_state
 
 
 class InputVariableMixin(object):
@@ -124,7 +125,8 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
 class TestNN(NNTestCase):
 
     def _forward(self, module, input):
-        return module(input)
+        with freeze_rng_state():
+            return module(input)
 
     def _backward(self, module, input, output, grad_output):
         output.backward(grad_output, retain_variables=True)

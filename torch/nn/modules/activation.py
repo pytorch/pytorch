@@ -53,6 +53,18 @@ class ReLU(Threshold):
         super(ReLU, self).__init__(0, 0, inplace)
 
 
+class RReLU(Module):
+    def __init__(self, lower=1./8, upper=1./3, inplace=False):
+        super(RReLU, self).__init__()
+        self.lower = lower
+        self.upper = upper
+        self.inplace = inplace
+
+    def forward(self, input):
+        return self._backend.RReLU(self.lower, self.upper, self.train,
+                self.inplace)(input)
+
+
 class Hardtanh(Module):
     """Applies the HardTanh function element-wise
     HardTanh is defined as:
