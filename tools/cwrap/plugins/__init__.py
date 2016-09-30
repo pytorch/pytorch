@@ -56,3 +56,4 @@ from .BeforeCall import BeforeCall
 from .ConstantArguments import ConstantArguments
 from .ReturnArguments import ReturnArguments
 from .GILRelease import GILRelease
+from .AutoGPU import AutoGPU

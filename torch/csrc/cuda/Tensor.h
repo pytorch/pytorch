@@ -1,6 +1,14 @@
 #ifndef THCP_TENSOR_INC
 #define THCP_TENSOR_INC
 
+class THCPAutoGPU {
+public:
+  THCPAutoGPU(PyObject *args, PyObject *self=NULL);
+  ~THCPAutoGPU();
+  bool setDevice(PyObject *obj);
+  int device = -1;
+};
+
 #define THCPTensor TH_CONCAT_3(THCP,Real,Tensor)
 #define THCPTensorStr TH_CONCAT_STRING_3(torch.cuda.,Real,Tensor)
 #define THCPTensorClass TH_CONCAT_3(THCP,Real,TensorClass)

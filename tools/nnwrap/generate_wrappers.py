@@ -2,7 +2,7 @@ import os
 import sys
 from string import Template, ascii_lowercase
 from ..cwrap import cwrap
-from ..cwrap.plugins import StandaloneExtension, NullableArguments
+from ..cwrap.plugins import StandaloneExtension, NullableArguments, AutoGPU
 
 BASE_PATH = os.path.realpath(os.path.join(__file__, '..', '..', '..'))
 WRAPPER_PATH = os.path.join(BASE_PATH, 'torch', 'csrc', 'nn')
@@ -112,4 +112,5 @@ def wrap_cunn():
     cwrap('torch/csrc/nn/THCUNN.cwrap', plugins=[
         StandaloneExtension('torch._thnn._THCUNN'),
         NullableArguments(),
+        AutoGPU(has_self=False),
     ])
