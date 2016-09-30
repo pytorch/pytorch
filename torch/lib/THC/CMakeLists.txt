@@ -22,6 +22,19 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   endif(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER "4.9.3")
 endif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
 
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER "4.7" OR CMAKE_CXX_COMPILER_VERSION VERSION_EQUAL "4.7" )
+    # add c++11 flag
+    set_source_files_properties(THCCachingAllocator.cpp PROPERTIES COMPILE_FLAGS -std=c++11)
+  else()
+    # add c++0x flag
+    set_source_files_properties(THCCachingAllocator.cpp PROPERTIES COMPILE_FLAGS -std=c++0x)
+  endif()
+else()
+  SET(CMAKE_CXX_STANDARD 11)
+endif()
+
+
 INCLUDE_DIRECTORIES(${CUDA_INCLUDE_DIRS})
 INCLUDE_DIRECTORIES("${CUDA_SDK_ROOT_DIR}/common/inc")
 
@@ -104,7 +117,7 @@ INCLUDE_DIRECTORIES("${CMAKE_CURRENT_BINARY_DIR}")
 CONFIGURE_FILE(THCGeneral.h.in "${CMAKE_CURRENT_BINARY_DIR}/THCGeneral.h")
 
 SET(CMAKE_C_FLAGS "-std=c99 ${CMAKE_C_FLAGS}")
-SET(CMAKE_CXX_STANDARD 11)
+
 SET(src
     THCAllocator.c
     THCCachingAllocator.cpp
@@ -113,6 +126,7 @@ SET(src
     THCStorageCopy.c
     THCTensor.c
     THCTensorCopy.c
+    THCThreadLocal.c
     )
 
 SET(src-cuda
@@ -211,6 +225,7 @@ INSTALL(FILES
           THCGenerateLongType.h
           THCGenerateHalfType.h
           THCGenerateFloatType.h
+          THCGenerateFloatTypes.h
           THCGenerateDoubleType.h
           THCHalf.h
           THCNumerics.cuh

@@ -14,7 +14,6 @@ typedef struct _Generator {
 typedef struct THCRNGState {
   /* One generator per GPU */
   Generator* gen;
-  Generator* current_gen;
   int num_devices;
 } THCRNGState;
 
@@ -22,7 +21,6 @@ struct THCState;
 
 THC_API void THCRandom_init(struct THCState *state, int num_devices, int current_device);
 THC_API void THCRandom_shutdown(struct THCState *state);
-THC_API void THCRandom_setGenerator(struct THCState *state, int device);
 THC_API unsigned long THCRandom_seed(struct THCState *state);
 THC_API unsigned long THCRandom_seedAll(struct THCState *state);
 THC_API void THCRandom_manualSeed(struct THCState *state, unsigned long the_seed_);
@@ -39,5 +37,7 @@ THC_API void THCudaTensor_cauchy(struct THCState *state, THCudaTensor *self, dou
 THC_API void THCudaTensor_logNormal(struct THCState *state, THCudaTensor *self, double mean, double stdv);
 
 THC_API void THCudaTensor_multinomial(struct THCState *state, THCudaTensor *self, THCudaTensor *prob_dist, int n_sample, int with_replacement);
+
+THC_API struct curandStateMtgp32* THCRandom_generatorStates(struct THCState* state);
 
 #endif
