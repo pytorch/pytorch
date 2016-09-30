@@ -45,12 +45,18 @@
 #define TH_INDEX_BASE 1
 #endif
 
+typedef void (*THErrorHandlerFunction)(const char *msg, void *data);
+typedef void (*THArgErrorHandlerFunction)(int argNumber, const char *msg, void *data);
+
+
 TH_API double THLog1p(const double x);
 TH_API void _THError(const char *file, const int line, const char *fmt, ...);
 TH_API void _THAssertionFailed(const char *file, const int line, const char *exp, const char *fmt, ...);
-TH_API void THSetErrorHandler( void (*torchErrorHandlerFunction)(const char *msg, void *data), void *data );
+TH_API void THSetErrorHandler(THErrorHandlerFunction new_handler, void *data);
+TH_API void THSetDefaultErrorHandler(THErrorHandlerFunction new_handler, void *data);
 TH_API void _THArgCheck(const char *file, int line, int condition, int argNumber, const char *fmt, ...);
-TH_API void THSetArgErrorHandler( void (*torchArgErrorHandlerFunction)(int argNumber, const char *msg, void *data), void *data );
+TH_API void THSetArgErrorHandler(THArgErrorHandlerFunction new_handler, void *data);
+TH_API void THSetDefaultArgErrorHandler(THArgErrorHandlerFunction new_handler, void *data);
 TH_API void* THAlloc(long size);
 TH_API void* THRealloc(void *ptr, long size);
 TH_API void THFree(void *ptr);
