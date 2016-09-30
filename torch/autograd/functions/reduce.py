@@ -76,18 +76,19 @@ class _SelectionFunction(Function):
         super(_SelectionFunction, self).__init__()
         self.dim = dim
         self.return_indices = return_indices
+        self.additional_args = tuple()
         assert not self.return_indices or dim is not None
 
     def forward(self, input):
         fn = getattr(input, type(self).__name__.lower())
         self.input_size = input.size().tolist()
         if self.dim is None and self.has_all_reduce:
-            value = fn()
+            value = fn(*self.additional_args)
             self.indices = tuple(input.eq(value).nonzero()[0])
             return input.new((value,))
         else:
             dim = self.dim or input.dim() - 1
-            output, indices = fn(dim)
+            output, indices = fn(dim, *self.additional_args)
             if self.return_indices:
                 self.save_for_backward(indices)
                 self.mark_non_differentiable(indices)
@@ -96,7 +97,7 @@ class _SelectionFunction(Function):
                 self.indices = indices
                 return output
 
-    def backward(self, grad_output):
+    def backward(self, grad_output, grad_indices=None):
         grad_input = grad_output.new(*self.input_size).zero_()
         if self.dim is None and self.has_all_reduce:
             grad_input[self.indices] = grad_output[0]
@@ -124,6 +125,14 @@ class Mode(_SelectionFunction):
 
 class Median(_SelectionFunction):
     has_all_reduce = False
+
+
+class Kthvalue(_SelectionFunction):
+    has_all_reduce = False
+
+    def __init__(self, k, dim=None, return_indices=False):
+        super(Kthvalue, self).__init__(dim, return_indices)
+        self.additional_args = (k,)
 
 
 class Norm(Function):

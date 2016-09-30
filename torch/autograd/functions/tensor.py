@@ -1,6 +1,8 @@
+from functools import reduce
 import torch
+from torch._utils import _accumulate
 
-from ..function import Function
+from ..function import Function, InplaceFunction
 from ..variable import Variable
 
 
@@ -120,17 +122,21 @@ class Permute(Function):
         return grad_output.permute(*self.rev_dim_indices)
 
 
-class IndexAdd(Function):
+class IndexAdd(InplaceFunction):
 
-    def __init__(self, dim):
-        super(IndexAdd, self).__init__()
+    def __init__(self, dim, inplace=False):
+        super(IndexAdd, self).__init__(inplace)
         self.dim = dim
 
     def forward(self, tensor1, index, tensor2):
         assert not self.needs_input_grad[1]
         if self.needs_input_grad[2]:
             self.save_for_backward(index)
-        return tensor1.clone().index_add_(self.dim, index, tensor2)
+        if not self.inplace:
+            tensor1 = tensor1.clone()
+        else:
+            self.mark_dirty(tensor1)
+        return tensor1.index_add_(self.dim, index, tensor2)
 
     def backward(self, grad_output):
         grad_tensor1 = grad_tensor2 = None
@@ -145,17 +151,21 @@ class IndexAdd(Function):
         return grad_tensor1, None, grad_tensor2
 
 
-class IndexCopy(Function):
+class IndexCopy(InplaceFunction):
 
-    def __init__(self, dim):
-        super(IndexCopy, self).__init__()
+    def __init__(self, dim, inplace=False):
+        super(IndexCopy, self).__init__(inplace)
         self.dim = dim
 
     def forward(self, tensor1, index, tensor2):
         assert not self.needs_input_grad[1]
         if any(self.needs_input_grad):
             self.save_for_backward(index)
-        return tensor1.clone().index_copy_(self.dim, index, tensor2)
+        if not self.inplace:
+            tensor1 = tensor1.clone()
+        else:
+            self.mark_dirty(tensor1)
+        return tensor1.index_copy_(self.dim, index, tensor2)
 
     def backward(self, grad_output):
         grad_tensor1 = grad_tensor2 = None
@@ -172,10 +182,10 @@ class IndexCopy(Function):
         return grad_tensor1, None, grad_tensor2
 
 
-class IndexFill(Function):
+class IndexFill(InplaceFunction):
 
-    def __init__(self, dim, value):
-        super(IndexFill, self).__init__()
+    def __init__(self, dim, value, inplace=False):
+        super(IndexFill, self).__init__(inplace)
         self.dim = dim
         self.value = value
 
@@ -183,7 +193,11 @@ class IndexFill(Function):
         assert not self.needs_input_grad[1]
         if self.needs_input_grad[0]:
             self.save_for_backward(index)
-        return tensor.clone().index_fill_(self.dim, index, self.value)
+        if not self.inplace:
+            tensor = tensor.clone()
+        else:
+            self.mark_dirty(tensor)
+        return tensor.index_fill_(self.dim, index, self.value)
 
     def backward(self, grad_output):
         grad_tensor = None
@@ -221,14 +235,210 @@ class IndexSelect(Function):
         return grad_tensor, None
 
 
-# TODO: cat
+class Concat(Function):
+
+    def __init__(self, dim):
+        super(Concat, self).__init__()
+        self.dim = dim
+
+    def forward(self, *inputs):
+        self.input_sizes = [i.size(self.dim) for i in inputs]
+        return torch.cat(inputs, self.dim)
+
+    def backward(self, grad_output):
+        return tuple(grad_output.narrow(self.dim, end-size, size) for size, end
+                in zip(self.input_sizes, _accumulate(self.input_sizes)))
+
+
+class Resize(Function):
+
+    def __init__(self, *sizes):
+        super(Resize, self).__init__()
+        self.sizes = sizes
+        self.numel = reduce(lambda x, y: x * y, sizes, 1)
+
+    def forward(self, tensor):
+        if tensor.numel() != self.numel:
+            raise RuntimeError(("requested resize to {} ({} elements in total), "
+                    "but the given tensor has a size of {} ({} elements). "
+                    "autograd's resize can only change the shape of a given "
+                    "tensor, while preserving the number of elements. ").format(
+                        'x'.join(map(str, self.sizes)), self.numel,
+                        'x'.join(map(str, tensor.size())), tensor.numel()))
+        self.input_sizes = tensor.size()
+        return tensor.new(tensor).resize_(*self.sizes)
+
+    def backward(self, grad_output):
+        assert grad_output.numel() == self.numel
+        return grad_output.new(grad_output).resize_(self.input_sizes)
+
+
+class Clone(Function):
+
+    def forward(self, input):
+        return input.clone()
+
+    def backward(self, grad_output):
+        return grad_output
+
+
+class Squeeze(Function):
+
+    def __init__(self, dim=None):
+        super(Squeeze, self).__init__()
+        self.dim = dim
+
+    def forward(self, input):
+        self.input_size = input.size()
+        self.numel = input.numel()
+        if self.dim is not None:
+            return input.squeeze(self.dim)
+        else:
+            return input.squeeze()
+
+    def backward(self, grad_output):
+        assert grad_output.numel() == self.numel
+        return grad_output.new(grad_output).resize_(self.input_size)
+
+
+class Unsqueeze(Function):
+
+    def __init__(self, dim):
+        super(Unsqueeze, self).__init__()
+        self.dim = dim
+
+    def forward(self, input):
+        return input.unsqueeze(self.dim)
+
+    def backward(self, grad_output):
+        return grad_output.squeeze(self.dim)
+
+
+class MaskedCopy(InplaceFunction):
+
+    def forward(self, tensor1, mask, tensor2):
+        assert not self.needs_input_grad[1], "MaskedCopy can't differentiate " \
+            "the mask"
+        if not self.inplace:
+            tensor1 = tensor1.clone()
+        else:
+            self.mark_dirty(tensor1)
+        self.save_for_backward(mask)
+        return tensor1.masked_copy_(mask, tensor2)
+
+    def backward(self, grad_output):
+        mask, = self.saved_tensors
+        grad_tensor1 = grad_tensor2 = None
+        if self.needs_input_grad[0]:
+            grad_tensor1 = grad_output.clone().masked_fill_(mask, 0)
+        if self.needs_input_grad[2]:
+            grad_tensor2 = grad_output.clone().masked_fill_(mask.eq(0), 0)
+        return grad_tensor1, None, grad_tensor2
+
+
+class MaskedFill(InplaceFunction):
+
+    def __init__(self, value, inplace=False):
+        super(MaskedFill, self).__init__(inplace)
+        self.value = value
+
+    def forward(self, tensor, mask):
+        assert not self.needs_input_grad[1], "MaskedFill can't differentiate " \
+            "the mask"
+        if not self.inplace:
+            tensor = tensor.clone()
+        else:
+            self.mark_dirty(tensor)
+        self.save_for_backward(mask)
+        return tensor.masked_fill_(mask, self.value)
+
+    def backward(self, grad_output):
+        mask, = self.saved_tensors
+        grad_tensor = None
+        if self.needs_input_grad[0]:
+            grad_tensor = grad_output.clone().masked_fill_(mask, 0)
+        return grad_tensor, None
+
+
+class MaskedSelect(Function):
+
+    def forward(self, tensor, mask):
+        assert not self.needs_input_grad[1], "MaskedSelect can't differentiate " \
+            "the mask"
+        self.input_size = tensor.size()
+        self.save_for_backward(mask)
+        return tensor.masked_select(mask)
+
+    def backward(self, grad_output):
+        mask, = self.saved_tensors
+        grad_tensor = None
+        if self.needs_input_grad[0]:
+            # TODO: remove zero
+            grad_tensor = grad_output.new(self.input_size).zero_()
+            grad_tensor.masked_copy_(mask, grad_output)
+        return grad_tensor, None
+
+
+class _MultiSelectionFunction(Function):
+
+    def __init__(self, dim, return_indices):
+        super(_MultiSelectionFunction, self).__init__()
+        self.dim = dim
+        self.return_indices = return_indices
+
+    def forward(self, input):
+        fn = getattr(input, self.__class__.__name__.lower())
+        self.input_size = input.size()
+        output, indices = fn(*self.args)
+        if self.return_indices:
+            self.save_for_backward(indices)
+            self.mark_non_differentiable(indices)
+            return output, indices
+        else:
+            self.indices = indices
+            return output
+
+    def backward(self, grad_output, grad_indices=None):
+        grad_input = grad_output.new(self.input_size).zero_()
+        if self.return_indices:
+            indices, = self.saved_tensors
+        else:
+            indices = self.indices
+        dim = self.dim if self.dim is not None else grad_output.dim() - 1
+        return grad_input.scatter_(dim, indices, grad_output)
+
+
+class Sort(_MultiSelectionFunction):
+
+    def __init__(self, dim=None, descending=False, return_indices=False):
+        super(Sort, self).__init__(dim, return_indices)
+        self.descending = descending
+
+    def forward(self, input):
+        dim = self.dim if self.dim is not None else input.dim() - 1
+        self.args = (dim, self.descending)
+        return super(Sort, self).forward(input)
+
+
+class Topk(_MultiSelectionFunction):
+
+    def __init__(self, k, dim=None, largest=True, sort=True, return_indices=False):
+        super(Topk, self).__init__(dim, return_indices)
+        self.k = k
+        self.largest = largest
+        self.sort = sort
+
+    def forward(self, input):
+        dim = self.dim if self.dim is not None else input.dim()-1
+        self.args = (self.k, dim, self.largest, self.sort)
+        return super(Topk, self).forward(input)
+
+
 # TODO: chunk
-# TODO: copy
 # TODO: gather
 # TODO: kthvalue
 # TODO: repeat
 # TODO: sort
 # TODO: split
-# TODO: squeeze
 # TODO: topk
 # TODO: unfold

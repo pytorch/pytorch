@@ -237,6 +237,7 @@ function_tests = [
     (Max,           (0,),               ((S, S, S),),               'dim'           ),
     (Min,           (0,),               ((S, S, S),),               'dim'           ),
     (Mode,          (0,),               ((S, S, S),),                               ),
+    (Kthvalue,      (2, 0),             ((S, S, S),),                               ),
     (Median,        (0,),               ((S, S, S),),                               ),
     (Norm,          (1.5,),             (torch.rand(S, S, S),),     '1.5'           ),
     (Norm,          (),                 ((S, S, S),),               '2'             ),
@@ -252,6 +253,29 @@ function_tests = [
     (IndexCopy,     (0,),               ((S, S), index_variable(2, S), (2, S))      ),
     (IndexFill,     (0, 2),             ((S, S), index_variable(2, S))              ),
     (IndexSelect,   (0,),               ((S, S), index_variable(2, S))              ),
+    (Concat,        (0,),               ((1, S, S), (2, S, S), (3, S, S))           ),
+    (Resize,        (S*S, S),           ((S, S, S),)                                ),
+    (Diag,          (),                 ((S, S),),                  '2d'            ),
+    (Diag,          (),                 ((S,),),                    '1d'            ),
+    (Tril,          (),                 ((S, S),)                                   ),
+    (Tril,          (2,),               ((S, S),),                  'idx'           ),
+    (Triu,          (),                 ((S, S),)                                   ),
+    (Triu,          (2,),               ((S, S),),                  'idx'           ),
+    (Clone,         (),                 ((S, M, S),)                                ),
+    (Squeeze,       (),                 ((S, 1, M, 1),)                             ),
+    (Squeeze,       (1,),               ((S, 1, M, 1),),            'dim'           ),
+    (Unsqueeze,     (0,),               ((S, M, S),),               '0'             ),
+    (Unsqueeze,     (1,),               ((S, M, S),),               '1'             ),
+    # (MaskedCopy,    (),                 ((S, S), Variable(torch.randn(S, S).gt(0), requires_grad=False), (S, S),)),
+    (MaskedFill,    (10,),              ((S, S), Variable(torch.randn(S, S).gt(0), requires_grad=False))),
+    (MaskedSelect,  (),                 ((S, S), Variable(torch.randn(S, S).gt(0), requires_grad=False))),
+    (Sort,          (),                 ((S, M, S),)                               ),
+    (Sort,          (1,),               ((S, M, S),),               'dim'           ),
+    (Sort,          (1, True),          ((S, M, S),),               'dim_desc'      ),
+    (Topk,          (3,),               ((S, M, S),)                               ),
+    (Topk,          (3, 1),             ((S, M, S),),               'dim'           ),
+    (Topk,          (3, 1, True),       ((S, M, S),),               'dim_desc'      ),
+    (Topk,          (3, 1, True, True), ((S, M, S),),               'dim_desc_sort' ),
 ]
 
 
@@ -305,6 +329,8 @@ method_tests = [
     ('mean',        (S, S, S),          (1,),                       'dim'           ),
     ('sum',         (S, S, S),          ()                                          ),
     ('sum',         (S, S, S),          (1,),                       'dim'           ),
+    ('prod',        (S, S, S),          ()                                          ),
+    ('prod',        (S, S, S),          (1,),                       'dim'           ),
     ('addmm',       (S, M),             ((S, S), (S, M)),                           ),
     ('addmm',       (S, M),             (0.2, 0.6, (S, S), (S, M)), 'coef'          ),
     ('addbmm',      (S, M),             ((S, S, S), (S, S, M)),                     ),
@@ -326,21 +352,44 @@ method_tests = [
     ('norm',        (S, S, S),          (2, 1),                     'dim'           ),
     ('dist',        (S, S, S),          ((S, S, S),)                                ),
     ('dist',        (S, S, S),          ((S, S, S), 4),             '4'             ),
-    ('index_select', (S, S, S),          (0, index_variable(2, S))                   ),
+    ('index_select', (S, S, S),         (0, index_variable(2, S))                   ),
+    ('cat',         (1, S, S),          ((Variable(torch.randn(2, S, S)), Variable(torch.randn(3, S, S))), 0)),
+    ('diag',        (M, M),             (),                         '2d'            ),
+    ('diag',        (M,),               (),                         '1d'            ),
+    ('tril',        (M, M),             ()                                          ),
+    ('triu',        (M, M),             ()                                          ),
+    ('clone',       (S, M, S),          ()                                          ),
+    ('permute',     (1, 2, 3, 4),       (0, 2, 3, 1)                                ),
+    ('select',      (S, S, S),          (1, 2)                                      ),
+    ('narrow',      (S, S, S),          (1, 2, 2)                                   ),
+    ('squeeze',     (S, 1, S, 1),       ()                                          ),
+    ('squeeze',     (S, 1, S, 1),       (1,),                       '1_dim'         ),
+    ('squeeze',     (S, 1, S, 1),       (2,),                       'not_1_dim'     ),
+    ('unsqueeze',   (S, S, S),          (0,),                       'first'         ),
+    ('unsqueeze',   (S, S, S),          (1,),                       'middle'        ),
+    ('unsqueeze',   (S, S, S),          (3,),                       'last'          ),
+    ('masked_select', (M, M),           (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False),)           ),
+    ('masked_fill_',  (M, M),           (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False), 10)        ),
+    ('masked_copy_',  (M, M),           (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False), (M, M))    ),
 ]
-# TODO: max, min with dim
-# TODO: mode, median
+# TODO: mm, bmm, mv, ger
+# TODO: max, min with dim (problem with indices)
+# TODO: mode, median, sort, kthvalue, topk (problem with indices)
 # TODO: indexAdd, indexCopy, indexFill
+# TODO: resize, resize_as (tensors only have resize_ and resize_as_)
 
 
 def create_input(call_args):
     if not isinstance(call_args, tuple):
         call_args = (call_args,)
     def map_arg(arg):
-        if isinstance(arg, tuple):
+        if isinstance(arg, tuple) and not isinstance(arg[0], Variable):
             return Variable(torch.randn(*arg).double())
         elif torch.is_tensor(arg):
-            return Variable(arg.double())
+            if isinstance(arg, torch.FloatTensor):
+                return Variable(arg.double())
+            else:
+                return Variable(arg)
         else:
             return arg
     return tuple(map_arg(arg) for arg in call_args)
@@ -392,8 +441,10 @@ for test in function_tests:
             self.assertEqual(inplace_output, output)
             # Check that gradient is the same
             for inp_i, i in zip(inplace_input, input):
-                inp_i.grad.zero_()
-                i.grad.zero_()
+                if inp_i.grad is not None:
+                    inp_i.grad.zero_()
+                if i.grad is not None:
+                    i.grad.zero_()
             for io, o in zip(inplace_output, output):
                 grad = torch.randn(*io.size()).double()
                 io.backward(grad)
