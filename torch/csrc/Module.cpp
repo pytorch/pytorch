@@ -694,8 +694,8 @@ static void errorHandlerArg(int argNumber, const char *msg, void *data)
 
 static void updateErrorHandlers()
 {
-  THSetErrorHandler(errorHandler, NULL);
-  THSetArgErrorHandler(errorHandlerArg, NULL);
+  THSetDefaultErrorHandler(errorHandler, NULL);
+  THSetDefaultArgErrorHandler(errorHandlerArg, NULL);
 }
 
 bool THCPDoubleStorage_init(PyObject *module);
