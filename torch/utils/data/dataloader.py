@@ -75,7 +75,7 @@ class DataLoaderIter(object):
                 # prime the prefetch loop with exactly 1 batch per process
                 # this ensures no deadlocks on the queues using the blocking queue API
                 self._putBatch()
-        
+
     def _nextBatch(self):
         batch = [next(self.sample_iter) for x in range(min(self.samples_remaining, self.batch_size))]
         self.samples_remaining -= len(batch)
@@ -113,6 +113,8 @@ class DataLoaderIter(object):
             else:
                 raise StopIteration()
 
+    __next__ = next
+
     def __getstate__(self):
         # TODO: add limited pickling support for sharing an iterator
         # across multiple threads for HOGWILD.
@@ -126,13 +128,13 @@ class DataLoaderIter(object):
         if self.num_workers:
             [self.index_queue.put(None) for x in self.workers]
             [x.join() for x in self.workers]
-        
+
     def __del__(self):
         self._joinWorkers()
 
 class DataLoader(object):
     """
-    Data loader. Combines a dataset and a sampler, and provides 
+    Data loader. Combines a dataset and a sampler, and provides
     single- or multi-process iterators over the dataset.
     """
 
