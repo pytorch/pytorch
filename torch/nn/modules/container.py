@@ -64,8 +64,9 @@ class Container(Module):
             memo = set()
         super(Container, self).parameters(memo)
         for module in self.modules.values():
-            for p in module.parameters(memo):
-                yield p
+            if module is not None:
+                for p in module.parameters(memo):
+                    yield p
 
     def _apply(self, fn):
         for module in self.modules.values():
