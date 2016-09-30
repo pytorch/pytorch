@@ -1,9 +1,9 @@
-# WARGNING: this script assumes it's ran from repo's root
 set -e
 
+cd "$(dirname "$0")/../.."
 BASE_DIR=$(pwd)
 cd torch/lib
-INSTALL_DIR=$(pwd)/tmp_install
+INSTALL_DIR="$(pwd)/tmp_install"
 BASIC_C_FLAGS=" -DTH_INDEX_BASE=0 -I$INSTALL_DIR/include -I$INSTALL_DIR/include/TH -I$INSTALL_DIR/include/THC "
 LDFLAGS="-L$INSTALL_DIR/lib "
 if [[ $(uname) == 'Darwin' ]]; then
@@ -35,6 +35,26 @@ function build() {
     cd ../..
   fi
 }
+function build_nccl() {
+   mkdir -p build/nccl
+   cd build/nccl
+   cmake ../../nccl -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/FindCUDA" \
+               -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
+               -DCMAKE_C_FLAGS="$C_FLAGS" \
+               -DCMAKE_CXX_FLAGS="$C_FLAGS $CPP_FLAGS"
+   make install
+   cp "lib/libnccl.so" "${INSTALL_DIR}/lib/libnccl.so"
+   cd ../..
+
+   if [[ $(uname) == 'Darwin' ]]; then
+     cd tmp_install/lib
+     for lib in *.dylib; do
+      echo "Updating install_name for $lib"
+      install_name_tool -id @rpath/$lib $lib
+     done
+     cd ../..
+   fi
+}
 
 mkdir -p tmp_install
 build TH
@@ -43,6 +63,7 @@ build THNN
 if [[ "$1" == "--with-cuda" ]]; then
     build THC
     build THCUNN
+    build_nccl
 fi
 
 CPP_FLAGS=" -std=c++11 "
