@@ -22,7 +22,7 @@ class Linear(Module):
     Examples:
         >>> m = nn.Linear(20, 30)
         >>> input = autograd.Variable(torch.randn(128, 20))
-        >>> output = m.forward(input)
+        >>> output = m(input)
         >>> print(output.size())
     """
     def __init__(self, in_features, out_features):

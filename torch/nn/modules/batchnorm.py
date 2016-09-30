@@ -75,7 +75,7 @@ class BatchNorm1d(_BatchNorm):
         >>> # Without Learnable Parameters
         >>> m = nn.BatchNorm1d(100, affine=False)
         >>> input = autograd.Variable(torch.randn(20, 100))
-        >>> output = m.forward(input)
+        >>> output = m(input)
     """
     expected_dim = 2
 
@@ -112,7 +112,7 @@ class BatchNorm2d(_BatchNorm):
         >>> # Without Learnable Parameters
         >>> m = nn.BatchNorm2d(100, affine=False)
         >>> input = autograd.Variable(torch.randn(20, 100, 35, 45))
-        >>> output = m.forward(input)
+        >>> output = m(input)
     """
     expected_dim = 4
 
@@ -149,7 +149,7 @@ class BatchNorm3d(_BatchNorm):
         >>> # Without Learnable Parameters
         >>> m = nn.BatchNorm3d(100, affine=False)
         >>> input = autograd.Variable(torch.randn(20, 100, 35, 45, 10))
-        >>> output = m.forward(input)
+        >>> output = m(input)
     """
     expected_dim = 5
 

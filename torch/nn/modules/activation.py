@@ -21,7 +21,7 @@ class Threshold(Module):
         >>> m = nn.Threshold(0.1, 20)
         >>> input = Variable(torch.randn(2))
         >>> print(input)
-        >>> print(m.forward(input))
+        >>> print(m(input))
     """
     def __init__(self, threshold, value, inplace=False):
         super(Threshold, self).__init__()
@@ -47,7 +47,7 @@ class ReLU(Threshold):
         >>> m = nn.ReLU()
         >>> input = autograd.Variable(torch.randn(2))
         >>> print(input)
-        >>> print(m.forward(input))
+        >>> print(m(input))
     """
     def __init__(self, inplace=False):
         super(ReLU, self).__init__(0, 0, inplace)
@@ -85,7 +85,7 @@ class Hardtanh(Module):
         >>> m = nn.HardTanh(-2, 2)
         >>> input = autograd.Variable(torch.randn(2))
         >>> print(input)
-        >>> print(m.forward(input))
+        >>> print(m(input))
     """
     def __init__(self, min_value=-1, max_value=1, inplace=False):
         super(Hardtanh, self).__init__()
@@ -111,7 +111,7 @@ class ReLU6(Hardtanh):
         >>> m = nn.ReLU6()
         >>> input = autograd.Variable(torch.randn(2))
         >>> print(input)
-        >>> print(m.forward(input))
+        >>> print(m(input))
     """
     def __init__(self, inplace=False):
         super(ReLU6, self).__init__(0, 6, inplace)
@@ -128,7 +128,7 @@ class Sigmoid(Module):
         >>> m = nn.Sigmoid()
         >>> input = autograd.Variable(torch.randn(2))
         >>> print(input)
-        >>> print(m.forward(input))
+        >>> print(m(input))
     """
     def forward(self, input):
         return self._backend.Sigmoid()(input)
@@ -145,7 +145,7 @@ class Tanh(Module):
         >>> m = nn.Tanh()
         >>> input = autograd.Variable(torch.randn(2))
         >>> print(input)
-        >>> print(m.forward(input))
+        >>> print(m(input))
     """
     def forward(self, input):
         return self._backend.Tanh()(input)
@@ -165,7 +165,7 @@ class ELU(Module):
         >>> m = nn.ELU()
         >>> input = autograd.Variable(torch.randn(2))
         >>> print(input)
-        >>> print(m.forward(input))
+        >>> print(m(input))
     """
     def __init__(self, alpha=1., inplace=False):
         super(ELU, self).__init__()
@@ -192,7 +192,7 @@ class Hardshrink(Module):
         >>> m = nn.Hardshrink()
         >>> input = autograd.Variable(torch.randn(2))
         >>> print(input)
-        >>> print(m.forward(input))
+        >>> print(m(input))
     """
     def __init__(self, lambd=0.5):
         super(Hardshrink, self).__init__()
@@ -215,7 +215,7 @@ class LeakyReLU(Module):
         >>> m = nn.LeakyReLU(0.1)
         >>> input = autograd.Variable(torch.randn(2))
         >>> print(input)
-        >>> print(m.forward(input))
+        >>> print(m(input))
     """
     def __init__(self, negative_slope=1e-2, inplace=False):
         super(LeakyReLU, self).__init__()
@@ -237,7 +237,7 @@ class LogSigmoid(Module):
         >>> m = nn.LogSigmoid()
         >>> input = autograd.Variable(torch.randn(2))
         >>> print(input)
-        >>> print(m.forward(input))
+        >>> print(m(input))
     """
     def forward(self, input):
         return self._backend.LogSigmoid()(input)
@@ -261,7 +261,7 @@ class Softplus(Module):
         >>> m = nn.Softplus()
         >>> input = autograd.Variable(torch.randn(2))
         >>> print(input)
-        >>> print(m.forward(input))
+        >>> print(m(input))
     """
     def __init__(self, beta=1, threshold=20):
         super(Softplus, self).__init__()
@@ -288,7 +288,7 @@ class Softshrink(Module):
         >>> m = nn.Softshrink()
         >>> input = autograd.Variable(torch.randn(2))
         >>> print(input)
-        >>> print(m.forward(input))
+        >>> print(m(input))
     """
     def __init__(self, lambd=0.5):
         super(Softshrink, self).__init__()
@@ -318,7 +318,7 @@ class PReLU(Module):
         >>> m = nn.PReLU()
         >>> input = autograd.Variable(torch.randn(2))
         >>> print(input)
-        >>> print(m.forward(input))
+        >>> print(m(input))
     """
     def __init__(self, num_parameters=1, init=0.25):
         self.num_parameters = num_parameters
@@ -341,7 +341,7 @@ class Softsign(Module):
         >>> m = nn.Softsign()
         >>> input = autograd.Variable(torch.randn(2))
         >>> print(input)
-        >>> print(m.forward(input))
+        >>> print(m(input))
     """
     def forward(self, input):
         return self._backend.Softsign()(input)
@@ -357,7 +357,7 @@ class Tanhshrink(Module):
         >>> m = nn.Tanhshrink()
         >>> input = autograd.Variable(torch.randn(2))
         >>> print(input)
-        >>> print(m.forward(input))
+        >>> print(m(input))
     """
     def forward(self, input):
         tanh = self._backend.Tanh()(input)
@@ -380,7 +380,7 @@ class Softmin(Module):
         >>> m = nn.Softmin()
         >>> input = autograd.Variable(torch.randn(2, 3))
         >>> print(input)
-        >>> print(m.forward(input))
+        >>> print(m(input))
     """
     def forward(self, input):
         return self._backend.Softmin()(input)
@@ -408,7 +408,7 @@ class Softmax(Module):
         >>> m = nn.Softmax()
         >>> input = autograd.Variable(torch.randn(2, 3))
         >>> print(input)
-        >>> print(m.forward(input))
+        >>> print(m(input))
     """
     def forward(self, input):
         assert input.dim() == 2, 'Softmax requires a 2D tensor as input'
@@ -430,7 +430,7 @@ class Softmax2d(Module):
         >>> # you softmax over the 2nd dimension
         >>> input = autograd.Variable(torch.randn(2, 3, 12, 13))
         >>> print(input)
-        >>> print(m.forward(input))
+        >>> print(m(input))
     """
     def forward(self, input):
         assert input.dim() == 4, 'Softmax2d requires a 4D tensor as input'
@@ -450,7 +450,7 @@ class LogSoftmax(Module):
         >>> m = nn.LogSoftmax()
         >>> input = autograd.Variable(torch.randn(2, 3))
         >>> print(input)
-        >>> print(m.forward(input))
+        >>> print(m(input))
     """
     def forward(self, input):
         return self._backend.LogSoftmax()(input)

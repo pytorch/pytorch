@@ -28,7 +28,7 @@ class MaxPool1d(Module):
         >>> # pool of size=3, stride=2
         >>> m = nn.MaxPool1d(3, stride=2)
         >>> input = autograd.Variable(torch.randn(20, 16, 50))
-        >>> output = m.forward(input)
+        >>> output = m(input)
     """
     def __init__(self, kernel_size, stride=None, padding=0, dilation=1,
             return_indices=False, ceil_mode=False):
@@ -71,7 +71,7 @@ class MaxPool2d(Module):
         >>> # pool of non-square window
         >>> m = nn.MaxPool2d((3, 2), stride=(2, 1))
         >>> input = autograd.Variable(torch.randn(20, 16, 50, 32))
-        >>> output = m.forward(input)
+        >>> output = m(input)
     """
     def __init__(self, kernel_size, stride=None, padding=0, dilation=1,
             return_indices=False, ceil_mode=False):
@@ -106,7 +106,7 @@ class MaxUnpool2d(Module):
         >>> m = nn.MaxPool2d(2, stride=2, return_indices = True)
         >>> mu = nn.MaxUnpool2d(2, stride=2)
         >>> input = autograd.Variable(torch.randn(20, 16, 50, 32))
-        >>> output, indices = m.forward(input)
+        >>> output, indices = m(input)
         >>> unpooled_output = mu.forward(output, indices)
     """
     def __init__(self, kernel_size, stride=None, padding=0):
@@ -145,7 +145,7 @@ class AvgPool2d(Module):
         >>> # pool of non-square window
         >>> m = nn.AvgPool2d((3, 2), stride=(2, 1))
         >>> input = autograd.Variable(torch.randn(20, 16, 50, 32))
-        >>> output = m.forward(input)
+        >>> output = m(input)
     """
     def __init__(self, kernel_size, stride=None, padding=0, ceil_mode=False,
             count_include_pad=True):
@@ -181,7 +181,7 @@ class MaxPool3d(Module):
         >>> # pool of non-square window
         >>> m = nn.MaxPool3d((3, 2, 2), stride=(2, 1, 2))
         >>> input = autograd.Variable(torch.randn(20, 16, 50,44, 31))
-        >>> output = m.forward(input)
+        >>> output = m(input)
     """
     def __init__(self, kernel_size, stride=None, padding=0, dilation=1,
             return_indices=False, ceil_mode=False):
@@ -215,7 +215,7 @@ class AvgPool3d(Module):
         >>> # pool of non-square window
         >>> m = nn.AvgPool3d((3, 2, 2), stride=(2, 1, 2))
         >>> input = autograd.Variable(torch.randn(20, 16, 50,44, 31))
-        >>> output = m.forward(input)
+        >>> output = m(input)
     """
     def __init__(self, kernel_size, stride=None):
         super(AvgPool3d, self).__init__()
@@ -249,7 +249,7 @@ class FractionalMaxPool2d(Module):
         >>> # pool of square window and target output size being half of input image size
         >>> m = nn.FractionalMaxPool2d(3, output_ratio=(0.5, 0.5))
         >>> input = autograd.Variable(torch.randn(20, 16, 50, 32))
-        >>> output = m.forward(input)
+        >>> output = m(input)
     """
     def __init__(self, kernel_size, output_size=None, output_ratio=None,
             return_indices=False, _random_samples=None):
@@ -300,7 +300,7 @@ class MaxUnpool3d(Module):
         >>> m = nn.MaxPool3d(3, stride=2, return_indices = True)
         >>> mu = nn.MaxUnpool3d(3, stride=2)
         >>> input, indices = autograd.Variable(torch.randn(20, 16, 50, 32, 15))
-        >>> output = m.forward(input)
+        >>> output = m(input)
         >>> unpooled_output = m2.forward(output, indices)
     """
     def __init__(self, kernel_size, stride=None, padding=0):
@@ -336,7 +336,7 @@ class LPPool2d(Module):
         >>> # pool of non-square window of power 1.2
         >>> m = nn.LPPool2d(1.2, (3, 2), stride=(2, 1))
         >>> input = autograd.Variable(torch.randn(20, 16, 50, 32))
-        >>> output = m.forward(input)
+        >>> output = m(input)
     """
     def __init__(self, norm_type, kernel_size, stride=None, ceil_mode=False):
         super(LPPool2d, self).__init__()

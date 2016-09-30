@@ -12,7 +12,7 @@ class Dropout(Module):
     Examples:
         >>> m = nn.Dropout(p=0.2)
         >>> input = autograd.Variable(torch.randn(20, 16))
-        >>> output = m.forward(input)
+        >>> output = m(input)
     """
     def __init__(self, p=0.5, inplace=False):
         super(Dropout, self).__init__()
@@ -46,7 +46,7 @@ class Dropout2d(Module):
     Examples:
         >>> m = nn.Dropout2d(p=0.2)
         >>> input = autograd.Variable(torch.randn(20, 16, 32, 32))
-        >>> output = m.forward(input)
+        >>> output = m(input)
     """
     def __init__(self, p=0.5, inplace=False):
         super(Dropout2d, self).__init__()
@@ -72,7 +72,7 @@ class Dropout3d(Module):
     Examples:
         >>> m = nn.Dropout3d(p=0.2)
         >>> input = autograd.Variable(torch.randn(20, 16, 4, 32, 32))
-        >>> output = m.forward(input)
+        >>> output = m(input)
     """
     def __init__(self, p=0.5, inplace=False):
         super(Dropout3d, self).__init__()

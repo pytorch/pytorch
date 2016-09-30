@@ -35,7 +35,7 @@ class Conv1d(Module):
     Examples:
         >>> m = nn.Conv1d(16, 33, 3, stride=2)
         >>> input = autograd.Variable(torch.randn(20, 16, 50))
-        >>> output = m.forward(input)
+        >>> output = m(input)
     """
 
     def __init__(self, in_features, out_features, kernel_size, stride=1):
@@ -105,7 +105,7 @@ class Conv2d(Module):
         >>> # non-square kernels and unequal stride and with padding and dilation
         >>> m = nn.Conv2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(3, 1))
         >>> input = autograd.Variable(torch.randn(20, 16, 50, 100))
-        >>> output = m.forward(input)
+        >>> output = m(input)
     """
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                 padding=0, dilation=None, groups=1, no_bias=False):
@@ -178,7 +178,7 @@ class FullConv2d(Conv2d):
         >>> # non-square kernels and unequal stride and with padding
         >>> m = nn.Conv2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2))
         >>> input = autograd.Variable(torch.randn(20, 16, 50, 100))
-        >>> output = m.forward(input)
+        >>> output = m(input)
     """
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, output_padding=0, no_bias=False):
@@ -238,7 +238,7 @@ class Conv3d(_Conv3dBase):
         >>> # non-square kernels and unequal stride and with padding
         >>> m = nn.Conv3d(16, 33, (3, 5, 2), stride=(2, 1, 1), padding=(4, 2, 0))
         >>> input = autograd.Variable(torch.randn(20, 16, 10, 50, 100))
-        >>> output = m.forward(input)
+        >>> output = m(input)
     """
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                 padding=0):
@@ -285,7 +285,7 @@ class FullConv3d(_Conv3dBase):
         >>> # non-square kernels and unequal stride and with padding
         >>> m = nn.Conv3d(16, 33, (3, 5, 2), stride=(2, 1, 1), padding=(0, 4, 2))
         >>> input = autograd.Variable(torch.randn(20, 16, 10, 50, 100))
-        >>> output = m.forward(input)
+        >>> output = m(input)
     """
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                 padding=0):
