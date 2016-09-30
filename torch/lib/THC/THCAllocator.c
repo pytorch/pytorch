@@ -30,13 +30,8 @@ static void *THCudaHostAllocator_realloc(void* ctx, void* ptr, long size) {
   return ptr;
 }
 
-void THCAllocator_init(THCState *state) {
-  state->cudaHostAllocator = (THAllocator*)malloc(sizeof(THAllocator));
-  state->cudaHostAllocator->malloc = &THCudaHostAllocator_alloc;
-  state->cudaHostAllocator->realloc = &THCudaHostAllocator_realloc;
-  state->cudaHostAllocator->free = &THCudaHostAllocator_free;
-}
-
-void THCAllocator_shutdown(THCState *state) {
-  free(state->cudaHostAllocator);
+void THCAllocator_init(THAllocator *cudaHostAllocator) {
+  cudaHostAllocator->malloc = &THCudaHostAllocator_alloc;
+  cudaHostAllocator->realloc = &THCudaHostAllocator_realloc;
+  cudaHostAllocator->free = &THCudaHostAllocator_free;
 }

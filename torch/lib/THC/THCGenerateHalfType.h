@@ -22,5 +22,7 @@
 #endif // CUDA_HALF_TENSOR
 
 #ifndef THCGenerateAllTypes
+#ifndef THCGenerateFloatTypes
 #undef THC_GENERIC_FILE
+#endif
 #endif

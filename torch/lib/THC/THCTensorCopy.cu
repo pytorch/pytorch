@@ -117,22 +117,11 @@ THC_copyTensor(THCState* state, TensorTypeDst* dst, TensorTypeSrc* src) {
     // A device always has access to itself, so this also handles the
     // case srcDev == dstDev
     if (THCState_getPeerToPeerAccess(state, srcDev, dstDev)) {
-      // Make sure we have the current stream set in THCState, since
-      // pointwise uses that
-      if (srcDev != oldDev) {
-        THCState_setStream(state, srcDev, copyStreamIndex);
-      }
-
       bool succ =
         THC_pointwiseApply2(
           state, dst, src,
           CopyOp<typename TensorUtils<TensorTypeDst>::DataType,
                  typename TensorUtils<TensorTypeSrc>::DataType>());
-
-      // Restore prior THCState stream
-      if (srcDev != oldDev) {
-        THCState_setStream(state, oldDev, copyStreamIndex);
-      }
 
       THArgCheck(succ, 2, CUTORCH_DIM_WARNING);
     } else {
@@ -154,20 +143,11 @@ THC_copyTensor(THCState* state, TensorTypeDst* dst, TensorTypeSrc* src) {
         srcContig = TensorUtils<TensorTypeDst>::newTensor(state);
         TensorUtils<TensorTypeDst>::resizeAs(state, srcContig, dst);
 
-        if (srcDev != oldDev) {
-          THCState_setStream(state, srcDev, copyStreamIndex);
-        }
-
         bool succ =
           THC_pointwiseApply2(
             state, srcContig, src,
             CopyOp<typename TensorUtils<TensorTypeDst>::DataType,
                    typename TensorUtils<TensorTypeSrc>::DataType>());
-
-        // Restore prior THCState stream
-        if (srcDev != oldDev) {
-          THCState_setStream(state, oldDev, copyStreamIndex);
-        }
 
         THArgCheck(succ, 2, CUTORCH_DIM_WARNING);
       }

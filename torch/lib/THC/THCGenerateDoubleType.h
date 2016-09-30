@@ -16,5 +16,7 @@
 #undef THC_REAL_IS_DOUBLE
 
 #ifndef THCGenerateAllTypes
+#ifndef THCGenerateFloatTypes
 #undef THC_GENERIC_FILE
+#endif
 #endif
