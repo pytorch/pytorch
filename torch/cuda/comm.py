@@ -1,4 +1,5 @@
 import torch
+import torch.cuda.nccl as nccl
 from torch._utils import _accumulate
 
 # TODO: sync streams when implemented
@@ -6,6 +7,14 @@ from torch._utils import _accumulate
 
 def broadcast(tensor, devices):
     "Broadcasts a tensor to a number of GPUs"
+    if nccl.is_available([tensor]) and len(set(devices)) == len(devices):
+        tensors = [tensor]
+        for device in devices[1:]:
+            with torch.cuda.device(device):
+                tensors.append(type(tensor)(tensor.size()))
+        nccl.broadcast(tensors)
+        return tuple(tensors)
+
     # TODO: copy to a pinned buffer first (if copy is from CPU)
     return tuple(tensor.cuda(gpu, async=True) for gpu in devices)
 
@@ -24,6 +33,12 @@ def reduce_add(inputs, destination=None):
         destination = torch.cuda.current_device()
     with torch.cuda.device(destination):
         result = type(inp)(input_size).zero_()
+
+    if nccl.is_available(inputs) and inputs[0].get_device() == destination:
+        outputs = [result] + [t.new(t.size()) for t in inputs[1:]]
+        nccl.reduce(inputs, outputs)
+        return result
+
     for inp in inputs:
         input_correct_gpu = inp.cuda(result.get_device())
         result.add_(input_correct_gpu)
@@ -77,4 +92,3 @@ def gather(tensors, dim=0, destination=None):
         result.narrow(dim, chunk_start, tensor.size(dim)).copy_(tensor, True)
         chunk_start += tensor.size(dim)
     return result
-
