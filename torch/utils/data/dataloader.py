@@ -1,6 +1,7 @@
 import torch
 import torch.multiprocessing as multiprocessing
 from .sampler import SequentialSampler, RandomSampler
+import collections
 import sys
 import traceback
 
@@ -9,7 +10,7 @@ class ExceptionWrapper(object):
 
     def __init__(self, exc_info):
         self.exc_type = exc_info[0]
-        self.exc_msg  = "".join(traceback.format_exception(*exc_info))
+        self.exc_msg = "".join(traceback.format_exception(*exc_info))
 
 
 def _processBatch(dataset, indices, collate_fn):
@@ -23,12 +24,12 @@ def _workerLoop(dataset, index_queue, data_queue, collate_fn):
     while True:
         batch_indices = index_queue.get()
 
-        if batch_indices == None:
+        if batch_indices is None:
             break
 
         try:
             samples = _processBatch(dataset, batch_indices, collate_fn)
-        except Exception as e:
+        except Exception:
             data_queue.put(ExceptionWrapper(sys.exc_info()))
         else:
             data_queue.put(samples)
@@ -38,11 +39,20 @@ def _workerLoop(dataset, index_queue, data_queue, collate_fn):
 def default_collate(batch):
     if torch.is_tensor(batch[0]):
         return torch.cat([t.view(1, *t.size()) for t in batch], 0)
-    else:
-        # if each batch element is not a tensor, then it should be a list
-        # of tensors; in that case we collate each element in the list
+    elif isinstance(batch[0], int):
+        return torch.LongTensor(batch)
+    elif isinstance(batch[0], float):
+        return torch.DoubleTensor(batch)
+    elif isinstance(batch[0], str):
+        return batch
+    elif isinstance(batch[0], collections.Iterable):
+        # if each batch element is not a tensor, then it should be a tuple
+        # of tensors; in that case we collate each element in the tuple
         transposed = zip(*batch)
         return [default_collate(samples) for samples in transposed]
+
+    raise TypeError(("batch must contain tensors, numbers, or lists; found {}"
+                     .format(type(batch[0]))))
 
 class DataLoaderIter(object):
     "Iterates once over the DataLoader's dataset, as specified by the sampler"
