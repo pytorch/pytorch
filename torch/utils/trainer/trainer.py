@@ -1,6 +1,6 @@
 import heapq
-from collections import OrderedDict
 from torch.autograd import Variable
+
 
 class Trainer(object):
 
@@ -46,29 +46,28 @@ class Trainer(object):
         for q in self.plugin_queues.values():
             heapq.heapify(q)
 
-        for i in range(1, epochs+1):
+        for i in range(1, epochs + 1):
             self.train()
             self.call_plugins('epoch', i)
 
     def train(self):
-        for i, data in enumerate(self.dataset, self.iterations+1):
+        for i, data in enumerate(self.dataset, self.iterations + 1):
             batch_input, batch_target = data
             self.call_plugins('batch', i, batch_input, batch_target)
             input_var = Variable(batch_input, requires_grad=False)
+            target_var = Variable(batch_target, requires_grad=False)
 
             called_plugins = [False]
             def forward_closure():
                 batch_output = self.model(input_var)
-                loss = self.criterion(batch_output, batch_target)
+                loss = self.criterion(batch_output, target_var)
                 if not called_plugins[0]:
                     self.call_plugins('iteration', i, batch_input, batch_target,
-                            batch_output, loss)
+                                      batch_output, loss)
                     called_plugins[0] = True
                 return loss
-
 
             self.optimizer.step(forward_closure)
             self.call_plugins('update', i, self.model)
 
         self.iterations += i
-
