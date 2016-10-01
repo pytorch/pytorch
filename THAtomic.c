@@ -11,6 +11,7 @@
 
 #if defined(USE_MSC_ATOMICS)
 #include <intrin.h>
+#include <assert.h>
 #endif
 
 #if !defined(USE_MSC_ATOMICS) && !defined(USE_GCC_ATOMICS) && defined(USE_PTHREAD_ATOMICS)
@@ -23,6 +24,7 @@ void THAtomicSet(int volatile *a, int newvalue)
 #if defined(USE_C11_ATOMICS)
   atomic_store(a, newvalue);
 #elif defined(USE_MSC_ATOMICS)
+  assert(sizeof(int) == sizeof(long));
   _InterlockedExchange((long*)a, newvalue);
 #elif defined(USE_GCC_ATOMICS)
   __sync_lock_test_and_set(a, newvalue);
@@ -52,6 +54,7 @@ int THAtomicAdd(int volatile *a, int value)
 #if defined(USE_C11_ATOMICS)
   return atomic_fetch_add(a, value);
 #elif defined(USE_MSC_ATOMICS)
+  assert(sizeof(int) == sizeof(long));
   return _InterlockedExchangeAdd((long*)a, value);
 #elif defined(USE_GCC_ATOMICS)
   return __sync_fetch_and_add(a, value);
@@ -79,6 +82,7 @@ int THAtomicCompareAndSwap(int volatile *a, int oldvalue, int newvalue)
 #if defined(USE_C11_ATOMICS)
   return atomic_compare_exchange_strong(a, &oldvalue, newvalue);
 #elif defined(USE_MSC_ATOMICS)
+  assert(sizeof(int) == sizeof(long));
   return (_InterlockedCompareExchange((long*)a, (long)newvalue, (long)oldvalue) == (long)oldvalue);
 #elif defined(USE_GCC_ATOMICS)
   return __sync_bool_compare_and_swap(a, oldvalue, newvalue);

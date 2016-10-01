@@ -3,6 +3,8 @@
 
 #ifndef TH_HAVE_THREAD
 #define __thread
+#elif _MSC_VER
+#define __thread __declspec( thread )
 #endif
 
 #if (defined(__unix) || defined(_WIN32))
