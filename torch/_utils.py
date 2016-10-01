@@ -38,7 +38,7 @@ def _import_dotted_name(name):
 
 
 # Taken from python 3.5 docs
-def _accumulate(iterable):
+def _accumulate(iterable, fn=lambda x, y: x + y):
     'Return running totals'
     # _accumulate([1,2,3,4,5]) --> 1 3 6 10 15
     # _accumulate([1,2,3,4,5], operator.mul) --> 1 2 6 24 120
@@ -49,6 +49,6 @@ def _accumulate(iterable):
         return
     yield total
     for element in it:
-        total += element
+        total = fn(total, element)
         yield total
 

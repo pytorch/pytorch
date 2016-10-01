@@ -6,6 +6,7 @@ from functools import wraps, reduce
 from string import Template
 import torch
 import torch.cuda
+from torch._utils import _accumulate
 
 try:
     import cffi
@@ -75,12 +76,14 @@ def _create_module_dir(fullname):
     if not module:
         target_dir = name
     else:
-        target_dir = reduce(lambda path, segment: os.path.join(path, segment),
-                            fullname.split('.'))
+        target_dir = reduce(os.path.join, fullname.split('.'))
     try:
         os.makedirs(target_dir)
     except FileExistsError:
         pass
+    for dirname in _accumulate(fullname.split('.'), os.path.join):
+        init_file = os.path.join(dirname, '__init__.py')
+        open(init_file, 'a').close()  # Create file if it doesn't exist yet
     return name, target_dir
 
 
