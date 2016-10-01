@@ -21,7 +21,7 @@ def _cuda(self, idx=None, async=False):
         else:
             return self
     else:
-        ctx = torch.cuda.device(idx) if idx else torch.cuda._dummy_ctx()
+        ctx = torch.cuda.device(idx if idx else -1)
         with ctx:
             return self.type(getattr(torch.cuda, self.__class__.__name__), async)
 
