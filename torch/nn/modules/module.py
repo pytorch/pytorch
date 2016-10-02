@@ -31,7 +31,7 @@ class Module(object):
             if param is not None:
                 # Variables stored in modules are graph leaves, and we don't
                 # want to create copy nodes, so we have to unpack the data.
-                param._data = fn(param.data)
+                param.data = fn(param.data)
         for key, buf in self._buffers.items():
             if buf is not None:
                 self._buffers[key] = fn(buf)

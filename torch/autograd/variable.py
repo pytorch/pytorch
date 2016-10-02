@@ -24,9 +24,9 @@ class Variable(object):
             requires_grad=False):
         self.creator = creator
         self.volatile = volatile
-        self.dirty = False
         self._requires_grad = (not volatile) and requires_grad
-        self._data = tensor
+        self.data = tensor
+        self._version = [0]
         self._grad = None
         self.backward_hooks = OrderedDict()
         if not torch.is_tensor(tensor):
@@ -41,12 +41,6 @@ class Variable(object):
         return self._grad
 
     @property
-    def data(self):
-        if self.dirty:
-            raise RuntimeError('Accessing data of a dirty variable!')
-        return self._data
-
-    @property
     def requires_grad(self):
         return self._requires_grad
 
@@ -57,21 +51,22 @@ class Variable(object):
                     "leaf variables")
         self._requires_grad = value
 
-    def mark_dirty(self):
-        self.dirty = True
-        self._data = None
-
     def __getattr__(self, name):
         if name in self._fallthrough_methods:
             return getattr(self.data, name)
         raise AttributeError(name)
 
     def __getitem__(self, key):
-        if isinstance(key, Variable) and isinstance(key.data, torch.ByteTensor):
+        if (isinstance(key, Variable) and
+            type(key.data).__name__ == 'ByteTensor'):
             return MaskedSelect()(self, key)
         return Index(key)(self)
 
-    # TODO: setitem
+    def __setitem__(self, key, value):
+        if (isinstance(key, Variable) and
+            type(key.data).__name__ == 'ByteTensor'):
+            return MaskedFill(value, inplace=True)(self, key)
+        return SetValue(key, value)(self)
 
     def __deepcopy__(self, memo):
         if self.creator is None:
@@ -92,8 +87,6 @@ class Variable(object):
         self._execution_engine.run_backward(self, gradient, retain_variables)
 
     def __repr__(self):
-        if self.dirty:
-            return 'Variable used in an in-place operation'
         return 'Variable containing:' + self.data.__repr__()
 
     def _call_hooks(self, grad_output):
@@ -125,13 +118,14 @@ class Variable(object):
 
     def _do_backward(self, grad_output, retain_variables):
         assert len(grad_output) == 1
-        assert not self.dirty
+        assert self._version[0] == 0 and self.creator is None, \
+            "leaf variable was used in an inplace operation"
         self._call_hooks(grad_output[0])
         self.grad.add_(grad_output[0])
         return tuple()
 
     def contiguous(self):
-        self._data = self.data.contiguous()
+        self.data = self.data.contiguous()
         return self
 
     def clone(self):

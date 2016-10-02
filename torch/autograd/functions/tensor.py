@@ -19,12 +19,31 @@ class Index(Function):
         # TODO: this is a CUDA sync point
         if not torch.is_tensor(result):
             result = i.new((result,))
+        self.mark_shared_storage((i, result))
         return result
 
     def backward(self, grad_output):
         # TODO: this won't have to be zeroed
         grad_input = grad_output.new(self.input_size).zero_()
         grad_input[self.index].copy_(grad_output)
+        return grad_input
+
+
+class SetValue(InplaceFunction):
+
+    def __init__(self, index, value):
+        super(SetValue, self).__init__(True)
+        self.index = index
+        self.value = value
+
+    def forward(self, i):
+        self.mark_dirty(i)
+        i[self.index].fill_(self.value)
+        return i
+
+    def backward(self, grad_output):
+        grad_input = grad_output.clone()
+        grad_input[self.index].fill_(0)
         return grad_input
 
 
@@ -36,7 +55,9 @@ class Transpose(Function):
         self.dims = dims
 
     def forward(self, i):
-        return i.transpose(*self.dims)
+        result = i.transpose(*self.dims)
+        self.mark_shared_storage((i, result))
+        return result
 
     def backward(self, grad_output):
         return grad_output.transpose(*self.dims)
@@ -50,7 +71,9 @@ class View(Function):
 
     def forward(self, i):
         self.input_size = i.size()
-        return i.view(*self.sizes)
+        result = i.view(*self.sizes)
+        self.mark_shared_storage((i, result))
+        return result
 
     def backward(self, grad_output):
         # TODO: not sure if this clone is necessary
@@ -67,7 +90,9 @@ class Expand(Function):
         self.expanded_dims = [dim for dim, (expanded, original)
                 in enumerate(zip(self.sizes, i.size()))
                 if expanded != original]
-        return i.expand(*self.sizes)
+        result = i.expand(*self.sizes)
+        self.mark_shared_storage((i, result))
+        return result
 
     def backward(self, grad_output):
         grad_input = grad_output
@@ -99,6 +124,7 @@ class CudaTransfer(Function):
 
     def forward(self, i):
         self.source_device = -1 if not i.is_cuda else i.get_device()
+        self.source_was_cuda = i.is_cuda
         if self.device_id:
             return i.cuda(self.device_id)
         else:
@@ -107,6 +133,8 @@ class CudaTransfer(Function):
     def backward(self, grad_output):
         if self.source_device != -1:
             return grad_output.cuda(self.source_device)
+        elif self.source_was_cuda:
+            return grad_output
         else:
             return grad_output.cpu()
 
@@ -121,7 +149,9 @@ class Permute(Function):
             self.rev_dim_indices[dim_idx] = i
 
     def forward(self, i):
-        return i.permute(*self.dim_indices)
+        result = i.permute(*self.dim_indices)
+        self.mark_shared_storage((i, result))
+        return result
 
     def backward(self, grad_output):
         return grad_output.permute(*self.rev_dim_indices)
@@ -271,7 +301,9 @@ class Resize(Function):
                         'x'.join(map(str, self.sizes)), self.numel,
                         'x'.join(map(str, tensor.size())), tensor.numel()))
         self.input_sizes = tensor.size()
-        return tensor.new(tensor).resize_(*self.sizes)
+        result = tensor.new(tensor).resize_(*self.sizes)
+        self.mark_shared_storage((tensor, result))
+        return result
 
     def backward(self, grad_output):
         assert grad_output.numel() == self.numel
@@ -297,9 +329,11 @@ class Squeeze(Function):
         self.input_size = input.size()
         self.numel = input.numel()
         if self.dim is not None:
-            return input.squeeze(self.dim)
+            result = input.squeeze(self.dim)
         else:
-            return input.squeeze()
+            result = input.squeeze()
+        self.mark_shared_storage((input, result))
+        return result
 
     def backward(self, grad_output):
         assert grad_output.numel() == self.numel
@@ -313,7 +347,9 @@ class Unsqueeze(Function):
         self.dim = dim
 
     def forward(self, input):
-        return input.unsqueeze(self.dim)
+        result = input.unsqueeze(self.dim)
+        self.mark_shared_storage((input, result))
+        return result
 
     def backward(self, grad_output):
         return grad_output.squeeze(self.dim)
