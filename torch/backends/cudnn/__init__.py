@@ -1,16 +1,32 @@
 import ctypes
 import warnings
 import torch.cuda
+import os.path as path
 
 lib = None
+# TODO: fix libname for OSX / Windows
+# TODO: just load 5.1, not 5.1.3
+# TODO: dynamic version checks via cudnnGetVersion
 libname = 'libcudnn.so.5.1.3'
-
+thisdir = path.dirname(__file__)
+libpaths = ['', path.join(thisdir, '../../lib')]
 
 def _loadlib():
     global lib
-    lib = ctypes.cdll.LoadLibrary(libname)
-    lib.cudnnGetErrorString.restype = ctypes.c_char_p
+    loaded = False
+    for libpath in libpaths:
+        try:
+            lib = ctypes.cdll.LoadLibrary(path.join(libpath, libname))
+            loaded = True
+            break
+        except OSError:
+            continue
 
+    if loaded:
+        lib.cudnnGetErrorString.restype = ctypes.c_char_p
+    else:
+        lib = None
+        raise OSError("Could not load cuDNN")
 
 def is_acceptable(tensor):
     if not (isinstance(tensor, torch.cuda.HalfTensor) or
