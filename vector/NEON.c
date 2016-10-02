@@ -29,7 +29,7 @@ static void THFloatVector_fill_NEON(float *x, const float c, const long n) {
 }
 
 
-static void THFloatVector_diff_NEON(float *y, const float *x, const float c, const long n) {
+static void THFloatVector_diff_NEON(float *z, const float *x, const float *y, const long n) {
   __asm__ __volatile__ (
       "mov         r0, %2           @ \n\t"
       "mov         r1, %1           @ \n\t"
