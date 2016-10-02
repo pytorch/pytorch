@@ -12,9 +12,9 @@ def _replicate_module(module, gpu, param_remap):
     for key, param in module._parameters.items():
         replica._parameters[key] = param_remap.get(param)
     if isinstance(replica, Container):
-        replica.modules = OrderedDict()
-        for name, child in module.modules.items():
-            replica.modules[name] = _replicate_module(child, gpu, param_remap)
+        replica._modules = OrderedDict()
+        for name, child in module._modules.items():
+            replica._modules[name] = _replicate_module(child, gpu, param_remap)
     return replica
 
 

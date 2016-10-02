@@ -291,6 +291,17 @@ class TestNN(NNTestCase):
         self.assertEqual(num_params(n), 2)
         self.assertEqual(num_params(s), 2)
 
+    def test_Sequential_getitem(self):
+        l1 = nn.Linear(10, 20)
+        l2 = nn.Linear(20, 30)
+        l3 = nn.Linear(30, 40)
+        l4 = nn.Linear(40, 50)
+        n = nn.Sequential(l1, l2, l3, l4)
+        self.assertEqual(n[0], l1)
+        self.assertEqual(n[1], l2)
+        self.assertEqual(n[2], l3)
+        self.assertEqual(n[3], l4)
+
     def test_add_module(self):
         l = nn.Linear(10, 20)
         net = nn.Container(

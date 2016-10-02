@@ -113,7 +113,17 @@ class Module(object):
                 memo.add(p)
                 yield p
 
+    def children(self):
+        if False:
+            yield
+
+    def modules(self, memo=None):
+        if memo is None:
+            memo = set()
+        if self not in memo:
+            memo.add(self)
+            yield self
+
     def zero_grad(self):
         for p in self.parameters():
             p.grad.zero_()
-

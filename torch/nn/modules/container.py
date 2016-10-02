@@ -40,7 +40,7 @@ class Container(Module):
     """
     def __init__(self, **kwargs):
         super(Container, self).__init__()
-        self.modules = OrderedDict()
+        self._modules = OrderedDict()
         for key, value in kwargs.items():
             self.add_module(key, value)
 
@@ -50,11 +50,11 @@ class Container(Module):
         if not isinstance(module, Module) and module is not None:
             raise ValueError("{} is not a Module subclass".format(
                 torch.typename(module)))
-        self.modules[name] = module
+        self._modules[name] = module
 
     def __getattr__(self, name):
-        if 'modules' in self.__dict__:
-            modules = self.__dict__['modules']
+        if '_modules' in self.__dict__:
+            modules = self.__dict__['_modules']
             if name in modules:
                 return modules[name]
         return Module.__getattr__(self, name)
@@ -63,15 +63,29 @@ class Container(Module):
         if memo is None:
             memo = set()
         super(Container, self).parameters(memo)
-        for module in self.modules.values():
-            if module is not None:
-                for p in module.parameters(memo):
-                    yield p
+        for module in self.children():
+            for p in module.parameters(memo):
+                yield p
+
+    def children(self):
+        memo = set()
+        for module in self._modules.values():
+            if module is not None and module not in memo:
+                memo.add(module)
+                yield module
+
+    def modules(self, memo=None):
+        if memo is None:
+            memo = set()
+        if self not in memo:
+            super(Container, self).modules(memo)
+            for module in self.children():
+                for m in module.modules(memo):
+                    yield m
 
     def _apply(self, fn):
-        for module in self.modules.values():
-            if module is not None:
-                module._apply(fn)
+        for module in self.children():
+            module._apply(fn)
         return super(Container, self)._apply(fn)
 
 
@@ -89,14 +103,14 @@ class Sequential(Container):
                 idx += 1
 
     def __getitem__(self, idx):
-        if idx >= len(self.modules):
+        if idx < 0 or idx >= len(self._modules):
             raise IndexError('index {} is out of range'.format(idx))
-        it = self.modules.values()
-        for i in range(idx-1):
-            it.next()
-        return it.next()
+        it = iter(self._modules.values())
+        for i in range(idx):
+            next(it)
+        return next(it)
 
     def forward(self, input):
-        for module in self.modules.values():
+        for module in self._modules.values():
             input = module(input)
         return input
