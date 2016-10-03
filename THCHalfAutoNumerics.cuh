@@ -96,6 +96,10 @@ inline __host__ __device__ half log1p(half a) {
   return THCNumerics<half>::log1p(a);
 }
 
+inline __host__ __device__ half sqrt(half a) {
+  return THCNumerics<half>::sqrt(a);
+}
+
 inline __host__ __device__ half tanh(half a) {
   return THCNumerics<half>::tanh(a);
 }
