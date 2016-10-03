@@ -13,6 +13,10 @@ inline __host__ __device__ half operator+(half a, half b) {
   return THCNumerics<half>::add(a, b);
 }
 
+inline __host__ __device__ half operator-(half a) {
+  return THCNumerics<half>::neg(a);
+}
+
 inline __host__ __device__ half operator-(half a, int b) {
   return THCNumerics<half>::add(a, THCNumerics<half>::neg(ScalarConvert<int, half>::to(b)));
 }
@@ -44,6 +48,10 @@ inline __host__ __device__ bool operator<=(half a, half b) {
   return THCNumerics<half>::le(a, b);
 }
 
+inline __host__ __device__ bool operator<(half a, int b) {
+  return THCNumerics<half>::lt(a, ScalarConvert<int, half>::to(b));
+}
+
 inline __host__ __device__ bool operator>(half a, half b) {
   return THCNumerics<half>::gt(a, b);
 }
@@ -52,12 +60,16 @@ inline __host__ __device__ bool operator>=(half a, half b) {
   return THCNumerics<half>::ge(a, b);
 }
 
-inline __host__ __device__ half log1p(half a) {
-  return THCNumerics<half>::log1p(a);
+inline __host__ __device__ half abs(half a) {
+  return THCNumerics<half>::abs(a);
 }
 
 inline __host__ __device__ half exp(half a) {
   return THCNumerics<half>::exp(a);
+}
+
+inline __host__ __device__ half log1p(half a) {
+  return THCNumerics<half>::log1p(a);
 }
 
 inline __host__ __device__ half tanh(half a) {

@@ -6,16 +6,6 @@
 
 #define THNN_(NAME) TH_CONCAT_3(THNN_, CReal, NAME)
 
-TH_API void THNN_CudaAbs_updateOutput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *output);
-TH_API void THNN_CudaAbs_updateGradInput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *gradOutput,
-          THCudaTensor *gradInput);
-
 TH_API void THNN_CudaAbsCriterion_updateOutput(
           THCState *state,
           THCudaTensor *input,
