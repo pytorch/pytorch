@@ -13,6 +13,10 @@ inline __host__ __device__ half operator+(half a, half b) {
   return THCNumerics<half>::add(a, b);
 }
 
+inline __host__ __device__ double operator+(double a, half b) {
+  return a + ScalarConvert<half, double>::to(b);
+}
+
 inline __host__ __device__ half operator-(half a) {
   return THCNumerics<half>::neg(a);
 }
@@ -23,6 +27,10 @@ inline __host__ __device__ half operator-(half a, int b) {
 
 inline __host__ __device__ half operator-(int a, half b) {
   return THCNumerics<half>::add(ScalarConvert<int, half>::to(a), THCNumerics<half>::neg(b));
+}
+
+inline __host__ __device__ double operator-(double a, half b) {
+  return a - ScalarConvert<half, double>::to(b);
 }
 
 // This implementation could move to THCNumerics
@@ -38,6 +46,14 @@ inline __host__ __device__ half operator*(half a, half b) {
   #else // __CUDA_ARCH__
     return THC_float2half(THC_half2float(a) * THC_half2float(b));
   #endif
+}
+
+inline __host__ __device__ double operator*(half a, double b) {
+  return ScalarConvert<half, double>::to(a) * b;
+}
+
+inline __host__ __device__ double operator*(double a, half b) {
+  return a * ScalarConvert<half, double>::to(b);
 }
 
 inline __host__ __device__ bool operator<(half a, half b) {

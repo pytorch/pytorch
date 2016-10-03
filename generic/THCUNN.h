@@ -30,6 +30,18 @@ TH_API void THNN_(HardTanh_updateGradInput)(
                   real max_val,
                   bool inplace);
 
+TH_API void THNN_(Sigmoid_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *output);
+
+TH_API void THNN_(Sigmoid_updateGradInput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *gradOutput,
+                  THCTensor *gradInput,
+                  THCTensor *output);
+
 TH_API void THNN_(SoftPlus_updateOutput)(
                   THCState *state,
                   THCTensor *input,

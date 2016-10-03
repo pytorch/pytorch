@@ -283,17 +283,6 @@ TH_API void THNN_CudaRReLU_updateGradInput(
           bool train,
           bool inplace);
 
-TH_API void THNN_CudaSigmoid_updateOutput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *output);
-TH_API void THNN_CudaSigmoid_updateGradInput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *gradOutput,
-          THCudaTensor *gradInput,
-          THCudaTensor *output);
-
 TH_API void THNN_CudaSmoothL1Criterion_updateOutput(
           THCState *state,
           THCudaTensor *input,
