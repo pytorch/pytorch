@@ -294,16 +294,6 @@ TH_API void THNN_CudaSoftShrink_updateGradInput(
           THCudaTensor *gradInput,
           double lambda);
 
-TH_API void THNN_CudaSquare_updateOutput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *output);
-TH_API void THNN_CudaSquare_updateGradInput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *gradOutput,
-          THCudaTensor *gradInput);
-
 TH_API void THNN_CudaTemporalConvolution_updateOutput(
           THCState *state,
           THCudaTensor *input,
