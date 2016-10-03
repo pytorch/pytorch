@@ -3484,7 +3484,6 @@ static PyObject * THPTensor_stateless_(cat)(THPTensor *_unused, PyObject *args)
       try {
         std::tie(items, item_tensors) = THPTensor_(_iterableTensors)(iterable);
         THTensor_(catArray)(LIBRARY_STATE self->cdata, item_tensors.data(), items.size(), dimension);
-        Py_INCREF(self.get());
         return (PyObject*)self.release();
 
       } catch (std::invalid_argument &e) {
@@ -3501,7 +3500,6 @@ static PyObject * THPTensor_stateless_(cat)(THPTensor *_unused, PyObject *args)
       _self.release();
 
       THTensor_(cat)(LIBRARY_STATE self->cdata, tensor1->cdata, tensor2->cdata, dimension);
-      Py_INCREF(self.get());
       return (PyObject*)self.release();
     } else {
       PyErr_Clear();
