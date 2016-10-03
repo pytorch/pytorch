@@ -25,6 +25,10 @@ inline __host__ __device__ half operator-(half a, int b) {
   return THCNumerics<half>::add(a, THCNumerics<half>::neg(ScalarConvert<int, half>::to(b)));
 }
 
+inline __host__ __device__ double operator-(half a, double b) {
+  return ScalarConvert<half, double>::to(a) - b;
+}
+
 inline __host__ __device__ half operator-(int a, half b) {
   return THCNumerics<half>::add(ScalarConvert<int, half>::to(a), THCNumerics<half>::neg(b));
 }
@@ -109,6 +113,14 @@ inline __host__ __device__ half operator/(half a, half b) {
 
 inline __host__ __device__ half operator/(int a, half b) {
   return ScalarConvert<int, half>::to(a) / b;
+}
+
+inline __host__ __device__ double operator/(double a, half b) {
+  return a / ScalarConvert<half, double>::to(b);
+}
+
+inline __host__ __device__ double operator/(half a, double b) {
+  return ScalarConvert<half, double>::to(a) / b;
 }
 
 #endif

@@ -119,18 +119,6 @@ TH_API void THNN_CudaLeakyReLU_updateGradInput(
           double negval,
           bool inplace);
 
-TH_API void THNN_CudaLogSigmoid_updateOutput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *output,
-          THCudaTensor *buffer);
-TH_API void THNN_CudaLogSigmoid_updateGradInput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *gradOutput,
-          THCudaTensor *gradInput,
-          THCudaTensor *buffer);
-
 TH_API void THNN_CudaLogSoftMax_updateOutput(
           THCState *state,
           THCudaTensor *input,
