@@ -30,6 +30,21 @@ TH_API void THNN_(HardTanh_updateGradInput)(
                   real max_val,
                   bool inplace);
 
+TH_API void THNN_(LeakyReLU_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *output,
+                  real negval,
+                  bool inplace);
+
+TH_API void THNN_(LeakyReLU_updateGradInput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *gradOutput,
+                  THCTensor *gradInput,
+                  real negval,
+                  bool inplace);
+
 TH_API void THNN_(LogSigmoid_updateOutput)(
                   THCState *state,
                   THCTensor *input,

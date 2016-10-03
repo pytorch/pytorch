@@ -76,6 +76,10 @@ inline __host__ __device__ bool operator>(half a, half b) {
   return THCNumerics<half>::gt(a, b);
 }
 
+inline __host__ __device__ bool operator>(half a, int b) {
+  return THCNumerics<half>::gt(a, ScalarConvert<int, half>::to(b));
+}
+
 inline __host__ __device__ bool operator>=(half a, half b) {
   return THCNumerics<half>::ge(a, b);
 }
