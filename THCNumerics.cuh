@@ -571,7 +571,7 @@ struct THCNumerics<double> {
   static inline __host__ __device__  double div  (double a, double b) { return a / b; }
   static inline __host__ __device__  double mul  (double a, double b) { return a * b; }
   static inline __host__ __device__  double sub  (double a, double b) { return a - b; }
-  static inline __host__ __device__  double pow  (double a, double b) { return pow(a, b); }
+  static inline __host__ __device__  double pow  (double a, double b) { return ::pow(a, b); }
 };
 
 /// `half` has some type conversion issues associated with it, since it

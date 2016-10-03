@@ -267,7 +267,7 @@ THC_API void THCTensor_(norm)(THCState *state, THCTensor* self, THCTensor* src, 
   THCudaCheck(cudaGetLastError());
 }
 
-accreal THCTensor_(normall)(THCState *state, THCTensor *self, real value)
+THC_API accreal THCTensor_(normall)(THCState *state, THCTensor *self, real value)
 {
   THAssert(THCTensor_(checkGPU)(state, 1, self));
   accreal result;
@@ -293,7 +293,7 @@ accreal THCTensor_(normall)(THCState *state, THCTensor *self, real value)
                   ReduceAdd<accreal, accreal>(),
                   ScalarConvert<float, accreal>::to(0.0f),
                   &result, 0);
-    result = THCNumerics<accreal>::pow(result, ScalarConvert<float, accreal>::to(0.5f));
+    result = THCNumerics<accreal>::sqrt(result);
   } else {
     THC_reduceAll(state, self,
                   TensorNormOp<real, -1>(value),
@@ -303,10 +303,7 @@ accreal THCTensor_(normall)(THCState *state, THCTensor *self, real value)
                   &result, 0);
     result = THCNumerics<accreal>::pow(
       result,
-      THCNumerics<accreal>::div(
-        ScalarConvert<float, accreal>::to(1.0f),
-        ScalarConvert<real, accreal>::to(value)
-      )
+      ScalarConvert<real, accreal>::to(THCNumerics<real>::cinv(value))
     );
   }
 
