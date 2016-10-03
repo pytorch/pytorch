@@ -72,7 +72,7 @@ struct THCCachingAllocator
   FreeBlocks small_blocks;
 
   // allocated blocks by device pointer
-  std::unordered_map<char*, Block*> allocated_blocks;
+  std::unordered_map<void*, Block*> allocated_blocks;
 
   THCCachingAllocator() :
       large_blocks(BlockComparator),
@@ -141,13 +141,12 @@ struct THCCachingAllocator
       return cudaSuccess;
     }
 
-    auto it = allocated_blocks.find((char*)ptr);
+    auto it = allocated_blocks.find(ptr);
     if (it == allocated_blocks.end()) {
       return cudaErrorInvalidDevicePointer;
     }
 
     Block* block = it->second;
-    int device = block->device;
     allocated_blocks.erase(it);
 
     bool small = block->size <= kSmallAlloc;
