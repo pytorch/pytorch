@@ -1,0 +1,113 @@
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || \
+  defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || \
+defined(THC_REAL_IS_HALF)
+#define RealStr "float"
+#else
+#define RealStr "int"
+#endif
+
+#ifdef THC_REAL_IS_HALF
+#define AS_REAL(x) THC_float2half(x)
+#else
+#define AS_REAL(x) x
+#endif
+
+#define THPModuleStr "torch.sparse"
+
+[[
+  name: set
+  cname: set
+  return: THSTensor*
+  arguments:
+  - THSTensor* self
+  - THLongTensor* indicies
+  - THTensor* values
+]]
+
+[[
+  name: size
+  options:
+  - return: long
+    cname: size
+    arguments:
+    - THSTensor* self
+    - long dim
+  - return: THLongStorage*
+    cname: newSizeOf
+    arguments:
+    - THSTensor* self
+]]
+
+[[
+  name: nDimension
+  python_name: ndimension
+  return: long
+  arguments:
+  - THSTensor* self
+]]
+
+[[
+  name: nnz
+  return: long
+  arguments:
+  - THSTensor* self
+]]
+
+[[
+  name: isContiguous
+  python_name: is_contiguous
+  return: bool
+  arguments:
+  - THSTensor* self
+]]
+
+[[
+  name: indicies
+  return: THLongTensor*
+  arguments:
+  - THSTensor* self
+]]
+
+[[
+  name: values
+  return: THTensor*
+  arguments:
+  - THSTensor* self
+]]
+
+[[
+  name: contiguous
+  return: argument 0
+  arguments:
+  - THSTensor* self
+]]
+
+[[
+  name: toDense
+  python_name: to_dense
+  return: THTensor*
+  arguments:
+  - THSTensor* self
+]]
+
+[[
+  name: addSmm
+  with_stateless: True
+  return: argument 0
+  arguments:
+    - arg: THTensor* result
+      allocate: True
+    - arg: real beta
+      default: AS_REAL(1)
+    - THTensor* self
+    - arg: real alpha
+      default: AS_REAL(1)
+    - THSTensor* mat1
+    - THTensor* mat2
+]]
+
+// cwrap should put definitions before undefs, so let's mark this place
+// PUT DEFINITIONS IN HERE PLEASE
+
+#undef RealStr
+#undef AS_REAL

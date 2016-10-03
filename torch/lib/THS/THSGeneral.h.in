@@ -1,0 +1,33 @@
+#ifndef THS_GENERAL_INC
+#define THS_GENERAL_INC
+
+#include "THGeneral.h"
+// #include "THAllocator.h"
+// #undef log1p
+
+#ifdef __cplusplus
+# define THS_EXTERNC extern "C"
+#else
+# define THS_EXTERNC extern
+#endif
+
+#ifdef _WIN32
+# ifdef THS_EXPORTS
+#  define THS_API THS_EXTERNC __declspec(dllexport)
+# else
+#  define THS_API THS_EXTERNC __declspec(dllimport)
+# endif
+#else
+# define THS_API THS_EXTERNC
+#endif
+
+#ifndef THSAssert
+#define THSAssert(exp)                                                   \
+  do {                                                                  \
+    if (!(exp)) {                                                       \
+      _THSError(__FILE__, __LINE__, "assert(%s) failed", #exp);          \
+    }                                                                   \
+  } while(0)
+#endif
+
+#endif

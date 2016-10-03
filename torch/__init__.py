@@ -59,8 +59,10 @@ def is_storage(obj):
 def set_default_tensor_type(t):
     global Tensor
     global Storage
+    global SparseTensor
     Tensor = _import_dotted_name(t)
     Storage = _import_dotted_name(t.replace('Tensor', 'Storage'))
+    SparseTensor = _import_dotted_name(t.replace('.', '.Sparse'))
     _C._set_default_tensor_type(Tensor)
 
 
@@ -148,8 +150,31 @@ class ByteTensor(_C.ByteTensorBase, _TensorBase):
     def storage_type(cls):
         return ByteStorage
 
+class SparseDoubleTensor(_C.SparseDoubleTensorBase, _TensorBase):
+    def is_signed(self):
+        return True
+class SparseFloatTensor(_C.SparseFloatTensorBase, _TensorBase):
+    def is_signed(self):
+        return True
+class SparseLongTensor(_C.SparseLongTensorBase, _TensorBase):
+    def is_signed(self):
+        return True
+class SparseIntTensor(_C.SparseIntTensorBase, _TensorBase):
+    def is_signed(self):
+        return True
+class SparseShortTensor(_C.SparseShortTensorBase, _TensorBase):
+    def is_signed(self):
+        return True
+class SparseCharTensor(_C.SparseCharTensorBase, _TensorBase):
+    def is_signed(self):
+        # TODO
+        return False
+class SparseByteTensor(_C.SparseByteTensorBase, _TensorBase):
+    def is_signed(self):
+        return False
 
 _tensor_classes = set()
+_sparse_tensor_classes = set()
 _storage_classes = set()
 
 
@@ -169,6 +194,14 @@ _tensor_classes.add(ShortTensor)
 _tensor_classes.add(CharTensor)
 _tensor_classes.add(ByteTensor)
 
+_sparse_tensor_classes.add(SparseDoubleTensor)
+_sparse_tensor_classes.add(SparseFloatTensor)
+_sparse_tensor_classes.add(SparseLongTensor)
+_sparse_tensor_classes.add(SparseIntTensor)
+_sparse_tensor_classes.add(SparseShortTensor)
+_sparse_tensor_classes.add(SparseCharTensor)
+_sparse_tensor_classes.add(SparseByteTensor)
+_tensor_classes.update(_sparse_tensor_classes)
 
 set_default_tensor_type('torch.FloatTensor')
 
@@ -198,6 +231,7 @@ del IntStorageBase
 del ShortStorageBase
 del CharStorageBase
 del ByteStorageBase
+
 del DoubleTensorBase
 del FloatTensorBase
 del LongTensorBase
@@ -205,3 +239,11 @@ del IntTensorBase
 del ShortTensorBase
 del CharTensorBase
 del ByteTensorBase
+
+del SparseDoubleTensorBase
+del SparseFloatTensorBase
+del SparseLongTensorBase
+del SparseIntTensorBase
+del SparseShortTensorBase
+del SparseCharTensorBase
+del SparseByteTensorBase

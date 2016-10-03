@@ -1,9 +1,9 @@
 set -e
 
-cd "$(dirname "$0")/../.."
-BASE_DIR=$(pwd)
-cd torch/lib
-INSTALL_DIR="$(pwd)/tmp_install"
+DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
+BASE_DIR=$(readlink -f $DIR/../..)
+cd $DIR
+INSTALL_DIR=$(pwd)/tmp_install
 BASIC_C_FLAGS=" -DTH_INDEX_BASE=0 -I$INSTALL_DIR/include -I$INSTALL_DIR/include/TH -I$INSTALL_DIR/include/THC "
 LDFLAGS="-L$INSTALL_DIR/lib "
 if [[ $(uname) == 'Darwin' ]]; then
@@ -22,7 +22,8 @@ function build() {
               -DCMAKE_CXX_FLAGS="$C_FLAGS $CPP_FLAGS" \
               -DCUDA_NVCC_FLAGS="$BASIC_C_FLAGS" \
               -DTH_INCLUDE_PATH="$INSTALL_DIR/include" \
-              -DTH_LIB_PATH="$INSTALL_DIR/lib"
+              -DTH_LIB_PATH="$INSTALL_DIR/lib" \
+              -DCMAKE_BUILD_TYPE=Debug
   make install -j$(getconf _NPROCESSORS_ONLN)
   cd ../..
 
@@ -49,6 +50,7 @@ function build_nccl() {
 
 mkdir -p tmp_install
 build TH
+build THS
 build THNN
 
 if [[ "$1" == "--with-cuda" ]]; then
@@ -61,7 +63,6 @@ fi
 
 CPP_FLAGS=" -std=c++11 "
 build libshm
-
 
 cp $INSTALL_DIR/lib/* .
 cp THNN/generic/THNN.h .

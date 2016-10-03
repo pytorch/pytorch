@@ -76,6 +76,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
         # cwrap depends on pyyaml, so we can't import it earlier
         from tools.cwrap import cwrap
         from tools.cwrap.plugins.THPPlugin import THPPlugin
+        from tools.cwrap.plugins.THSPPlugin import THSPPlugin
         from tools.cwrap.plugins.THPLongArgsPlugin import THPLongArgsPlugin
         from tools.cwrap.plugins.ArgcountSortPlugin import ArgcountSortPlugin
         from tools.cwrap.plugins.AutoGPU import AutoGPU
@@ -84,6 +85,9 @@ class build_ext(setuptools.command.build_ext.build_ext):
         cwrap('torch/csrc/generic/TensorMethods.cwrap', plugins=[
             AutoGPU(condition='IS_CUDA'), THPLongArgsPlugin(), BoolOption(),
             THPPlugin(), ArgcountSortPlugin(), KwargsPlugin(),
+        ])
+        cwrap('torch/csrc/sparse/generic/TensorMethods.cwrap', plugins=[
+            THPLongArgsPlugin(), THSPPlugin(), ArgcountSortPlugin(),
         ])
         # It's an old-style class in Python 2.7...
         setuptools.command.build_ext.build_ext.run(self)
@@ -113,7 +117,7 @@ class clean(distutils.command.clean.clean):
                         os.remove(filename)
                     except OSError:
                         shutil.rmtree(filename, ignore_errors=True)
-                        
+
         # It's an old-style class in Python 2.7...
         distutils.command.clean.clean.run(self)
 
@@ -125,7 +129,7 @@ class clean(distutils.command.clean.clean):
 
 include_dirs = []
 extra_link_args = []
-extra_compile_args = ['-std=c++11', '-Wno-write-strings']
+extra_compile_args = ['-std=c++11', '-Wno-write-strings', '-g', '-O0']
 if os.getenv('PYTORCH_BINARY_BUILD') and platform.system() == 'Linux':
     print('PYTORCH_BINARY_BUILD found. Static linking libstdc++ on Linux')
     extra_compile_args += ['-static-libstdc++']
@@ -145,7 +149,7 @@ include_dirs += [
 extra_link_args.append('-L' + lib_path)
 
 main_compile_args = ['-D_THP_CORE']
-main_libraries = ['TH', 'shm']
+main_libraries = ['TH', 'THS', 'shm']
 main_sources = [
     "torch/csrc/Module.cpp",
     "torch/csrc/Generator.cpp",
@@ -160,6 +164,11 @@ main_sources = [
     "torch/csrc/autograd/variable.cpp",
     "torch/csrc/autograd/function.cpp",
     "torch/csrc/autograd/engine.cpp",
+
+    # Sparse Tensors
+    "torch/csrc/sparse/Tensor.cpp",
+    "torch/csrc/sparse/Module.cpp",
+    "torch/csrc/sparse/utils.cpp",
 ]
 
 try:
@@ -227,7 +236,7 @@ DL = Extension("torch._dl",
 extensions.append(DL)
 
 THNN = Extension("torch._thnn._THNN",
-    libraries=['TH', 'THNN'],
+    libraries=['TH', 'THNN', 'THS'],
     sources=['torch/csrc/nn/THNN.cpp'],
     language='c++',
     extra_compile_args=extra_compile_args,
@@ -263,6 +272,8 @@ setup(name="torch", version="0.1",
         'lib/torch_shm_manager',
         'lib/*.h',
         'lib/include/TH/*.h', 'lib/include/TH/generic/*.h',
-        'lib/include/THC/*.h', 'lib/include/THC/generic/*.h']},
+        'lib/include/THC/*.h', 'lib/include/THC/generic/*.h',
+        'lib/include/THS/*.h', 'lib/include/THS/generic/*.h',
+    ]},
     install_requires=['pyyaml'],
 )
