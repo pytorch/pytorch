@@ -36,8 +36,20 @@ inline __host__ __device__ half operator*(half a, half b) {
   #endif
 }
 
+inline __host__ __device__ bool operator<(half a, half b) {
+  return THCNumerics<half>::lt(a, b);
+}
+
+inline __host__ __device__ bool operator<=(half a, half b) {
+  return THCNumerics<half>::le(a, b);
+}
+
 inline __host__ __device__ bool operator>(half a, half b) {
   return THCNumerics<half>::gt(a, b);
+}
+
+inline __host__ __device__ bool operator>=(half a, half b) {
+  return THCNumerics<half>::ge(a, b);
 }
 
 inline __host__ __device__ half log1p(half a) {

@@ -106,22 +106,6 @@ TH_API void THNN_CudaELU_updateGradInput(
           float alpha,
           bool inplace);
 
-TH_API void THNN_CudaHardTanh_updateOutput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *output,
-          float min_val,
-          float max_val,
-          bool inplace);
-TH_API void THNN_CudaHardTanh_updateGradInput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *gradOutput,
-          THCudaTensor *gradInput,
-          float min_val,
-          float max_val,
-          bool inplace);
-
 TH_API void THNN_CudaL1Cost_updateOutput(
           THCState *state,
           THCudaTensor *input,

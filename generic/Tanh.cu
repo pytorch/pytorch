@@ -4,20 +4,22 @@
 
 #include "../common.h"
 
-void THNN_(Tanh_updateOutput)(THCState *state,
-                              THCTensor *input,
-                              THCTensor *output)
+void THNN_(Tanh_updateOutput)(
+           THCState *state,
+           THCTensor *input,
+           THCTensor *output)
 {
   THCUNN_assertSameGPU_generic(state, 2, input, output);
   THCTensor_(resizeAs)(state, output, input);
   THC_pointwiseApply2(state, output, input, tanhupdateOutput_functor<real>());
 }
 
-void THNN_(Tanh_updateGradInput)(THCState *state,
-                                   THCTensor *input,
-                                   THCTensor *gradOutput,
-                                   THCTensor *gradInput,
-                                   THCTensor *output)
+void THNN_(Tanh_updateGradInput)(
+           THCState *state,
+           THCTensor *input,
+           THCTensor *gradOutput,
+           THCTensor *gradInput,
+           THCTensor *output)
 {
   THCUNN_assertSameGPU_generic(state, 3, output, gradOutput, gradInput);
   THCTensor_(resizeAs)(state, gradInput, output);
