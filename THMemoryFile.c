@@ -375,7 +375,8 @@ static size_t THMemoryFile_readLong(THFile *self, long *data, size_t n)
       size_t nByteRemaining = (mfself->position + nByte <= mfself->size ? nByte : mfself->size-mfself->position);
       int32_t *storage = (int32_t *)(mfself->storage->data + mfself->position);
       nread = nByteRemaining/4;
-      for(size_t i = 0; i < nread; i++)
+      size_t i;
+      for(i = 0; i < nread; i++)
         data[i] = storage[i];
       mfself->position += nread*4;
     }
@@ -386,7 +387,8 @@ static size_t THMemoryFile_readLong(THFile *self, long *data, size_t n)
       int32_t *storage = (int32_t *)(mfself->storage->data + mfself->position);
       size_t nByteRemaining = (mfself->position + nByte <= mfself->size ? nByte : mfself->size-mfself->position);
       nread = nByteRemaining/8;
-      for(size_t i = 0; i < nread; i++)
+      size_t i;
+      for(i = 0; i < nread; i++)
         data[i] = storage[2*i + big_endian];
       mfself->position += nread*8;
     }
@@ -450,7 +452,8 @@ static size_t THMemoryFile_writeLong(THFile *self, long *data, size_t n)
       size_t nByte = 4*n;
       THMemoryFile_grow(mfself, mfself->position+nByte);
       int32_t *storage = (int32_t *)(mfself->storage->data + mfself->position);
-      for(size_t i = 0; i < n; i++)
+      size_t i;
+      for(i = 0; i < n; i++)
         storage[i] = data[i];
       mfself->position += nByte;
     }
@@ -460,7 +463,8 @@ static size_t THMemoryFile_writeLong(THFile *self, long *data, size_t n)
       size_t nByte = 8*n;
       THMemoryFile_grow(mfself, mfself->position+nByte);
       int32_t *storage = (int32_t *)(mfself->storage->data + mfself->position);
-      for(size_t i = 0; i < n; i++)
+      size_t i;
+      for(i = 0; i < n; i++)
       {
         storage[2*i + !big_endian] = 0;
         storage[2*i + big_endian] = data[i];
