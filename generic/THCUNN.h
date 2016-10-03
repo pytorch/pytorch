@@ -83,4 +83,21 @@ TH_API void THNN_(Tanh_updateGradInput)(
                   THCTensor *gradInput,
                   THCTensor *output);
 
+TH_API void THNN_(Threshold_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *output,
+                  real threshold,
+                  real val,
+                  bool inplace);
+
+TH_API void THNN_(Threshold_updateGradInput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *gradOutput,
+                  THCTensor *gradInput,
+                  real threshold,
+                  real val,
+                  bool inplace);
+
 #endif
