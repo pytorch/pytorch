@@ -129,10 +129,11 @@ void THSetDefaultArgErrorHandler(THArgErrorHandlerFunction new_handler, void *da
 
 static __thread void (*torchGCFunction)(void *data) = NULL;
 static __thread void *torchGCData;
-static long heapSize = 0;
-static __thread long heapDelta = 0;
-static const long heapMaxDelta = 1e6; // limit to +/- 1MB before updating heapSize
-static __thread long heapSoftmax = 3e8; // 300MB, adjusted upward dynamically
+static ptrdiff_t heapSize = 0;
+static __thread ptrdiff_t heapDelta = 0;
+static const ptrdiff_t heapMaxDelta = (ptrdiff_t)1e6; // limit to +/- 1MB before updating heapSize
+static const ptrdiff_t heapMinDelta = (ptrdiff_t)-1e6;
+static __thread ptrdiff_t heapSoftmax = (ptrdiff_t)3e8; // 300MB, adjusted upward dynamically
 static const double heapSoftmaxGrowthThresh = 0.8; // grow softmax if >80% max after GC
 static const double heapSoftmaxGrowthFactor = 1.4; // grow softmax by 40%
 
@@ -152,7 +153,8 @@ void THSetGCHandler( void (*torchGCFunction_)(void *data), void *data )
   torchGCData = data;
 }
 
-static long getAllocSize(void *ptr) {
+/* it is guaranteed the allocated size is not bigger than PTRDIFF_MAX */
+static ptrdiff_t getAllocSize(void *ptr) {
 #if defined(__unix) && defined(HAVE_MALLOC_USABLE_SIZE)
   return malloc_usable_size(ptr);
 #elif defined(__APPLE__)
@@ -164,8 +166,15 @@ static long getAllocSize(void *ptr) {
 #endif
 }
 
-static long applyHeapDelta() {
-  long newHeapSize = THAtomicAddLong(&heapSize, heapDelta) + heapDelta;
+static ptrdiff_t applyHeapDelta() {
+  ptrdiff_t oldHeapSize = THAtomicAddPtrdiff(&heapSize, heapDelta);
+#ifdef DEBUG
+  if (heapDelta > 0 && oldHeapSize > PTRDIFF_MAX - heapDelta)
+    THError("applyHeapDelta: heapSize(%td) + increased(%td) > PTRDIFF_MAX, heapSize overflow!", oldHeapSize, heapDelta);
+  if (heapDelta < 0 && oldHeapSize < PTRDIFF_MIN - heapDelta)
+    THError("applyHeapDelta: heapSize(%td) + decreased(%td) < PTRDIFF_MIN, heapSize underflow!", oldHeapSize, heapDelta);
+#endif
+  ptrdiff_t newHeapSize = oldHeapSize + heapDelta;
   heapDelta = 0;
   return newHeapSize;
 }
@@ -174,36 +183,43 @@ static long applyHeapDelta() {
  * (2) if post-GC heap size exceeds 80% of the soft max, increase the
  *     soft max by 40%
  */
-static void maybeTriggerGC(long curHeapSize) {
+static void maybeTriggerGC(ptrdiff_t curHeapSize) {
   if (torchGCFunction && curHeapSize > heapSoftmax) {
     torchGCFunction(torchGCData);
 
     // ensure heapSize is accurate before updating heapSoftmax
-    long newHeapSize = applyHeapDelta();
+    ptrdiff_t newHeapSize = applyHeapDelta();
 
     if (newHeapSize > heapSoftmax * heapSoftmaxGrowthThresh) {
-      heapSoftmax = heapSoftmax * heapSoftmaxGrowthFactor;
+      heapSoftmax = (ptrdiff_t)(heapSoftmax * heapSoftmaxGrowthFactor);
     }
   }
 }
 
 // hooks into the TH heap tracking
-void THHeapUpdate(long size) {
+void THHeapUpdate(ptrdiff_t size) {
+#ifdef DEBUG
+  if (size > 0 && heapDelta > PTRDIFF_MAX - size)
+    THError("THHeapUpdate: heapDelta(%td) + increased(%td) > PTRDIFF_MAX, heapDelta overflow!", heapDelta, size);
+  if (size < 0 && heapDelta < PTRDIFF_MIN - size)
+    THError("THHeapUpdate: heapDelta(%td) + decreased(%td) < PTRDIFF_MIN, heapDelta underflow!", heapDelta, size);
+#endif
+
   heapDelta += size;
 
   // batch updates to global heapSize to minimize thread contention
-  if (labs(heapDelta) < heapMaxDelta) {
+  if (heapDelta < heapMaxDelta && heapDelta > heapMinDelta) {
     return;
   }
 
-  long newHeapSize = applyHeapDelta();
+  ptrdiff_t newHeapSize = applyHeapDelta();
 
   if (size > 0) {
     maybeTriggerGC(newHeapSize);
   }
 }
 
-static void* THAllocInternal(long size)
+static void* THAllocInternal(ptrdiff_t size)
 {
   void *ptr;
 
@@ -229,7 +245,7 @@ static void* THAllocInternal(long size)
   return ptr;
 }
 
-void* THAlloc(long size)
+void* THAlloc(ptrdiff_t size)
 {
   void *ptr;
 
@@ -252,7 +268,7 @@ void* THAlloc(long size)
   return ptr;
 }
 
-void* THRealloc(void *ptr, long size)
+void* THRealloc(void *ptr, ptrdiff_t size)
 {
   if(!ptr)
     return(THAlloc(size));
@@ -266,17 +282,19 @@ void* THRealloc(void *ptr, long size)
   if(size < 0)
     THError("$ Torch: invalid memory size -- maybe an overflow?");
 
-  THHeapUpdate(-getAllocSize(ptr));
+  ptrdiff_t oldSize = -getAllocSize(ptr);
   void *newptr = realloc(ptr, size);
 
   if(!newptr && torchGCFunction) {
     torchGCFunction(torchGCData);
     newptr = realloc(ptr, size);
   }
-  THHeapUpdate(getAllocSize(newptr ? newptr : ptr));
 
   if(!newptr)
     THError("$ Torch: not enough memory: you tried to reallocate %dGB. Buy new RAM!", size/1073741824);
+
+  // update heapSize only after successfully reallocated
+  THHeapUpdate(oldSize + getAllocSize(newptr));
 
   return newptr;
 }

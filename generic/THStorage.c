@@ -7,12 +7,12 @@ real* THStorage_(data)(const THStorage *self)
   return self->data;
 }
 
-long THStorage_(size)(const THStorage *self)
+ptrdiff_t THStorage_(size)(const THStorage *self)
 {
   return self->size;
 }
 
-int THStorage_(elementSize)()
+size_t THStorage_(elementSize)()
 {
   return sizeof(real);
 }
@@ -22,12 +22,12 @@ THStorage* THStorage_(new)(void)
   return THStorage_(newWithSize)(0);
 }
 
-THStorage* THStorage_(newWithSize)(long size)
+THStorage* THStorage_(newWithSize)(ptrdiff_t size)
 {
   return THStorage_(newWithAllocator)(size, &THDefaultAllocator, NULL);
 }
 
-THStorage* THStorage_(newWithAllocator)(long size,
+THStorage* THStorage_(newWithAllocator)(ptrdiff_t size,
                                         THAllocator *allocator,
                                         void *allocatorContext)
 {
@@ -41,7 +41,7 @@ THStorage* THStorage_(newWithAllocator)(long size,
   return storage;
 }
 
-THStorage* THStorage_(newWithMapping)(const char *filename, long size, int flags)
+THStorage* THStorage_(newWithMapping)(const char *filename, ptrdiff_t size, int flags)
 {
   THMapAllocatorContext *ctx = THMapAllocatorContext_new(filename, flags);
 
@@ -127,13 +127,13 @@ void THStorage_(free)(THStorage *storage)
   }
 }
 
-THStorage* THStorage_(newWithData)(real *data, long size)
+THStorage* THStorage_(newWithData)(real *data, ptrdiff_t size)
 {
   return THStorage_(newWithDataAndAllocator)(data, size,
                                              &THDefaultAllocator, NULL);
 }
 
-THStorage* THStorage_(newWithDataAndAllocator)(real* data, long size,
+THStorage* THStorage_(newWithDataAndAllocator)(real* data, ptrdiff_t size,
                                                THAllocator* allocator,
                                                void* allocatorContext) {
   THStorage *storage = THAlloc(sizeof(THStorage));
@@ -146,14 +146,14 @@ THStorage* THStorage_(newWithDataAndAllocator)(real* data, long size,
   return storage;
 }
 
-void THStorage_(resize)(THStorage *storage, long size)
+void THStorage_(resize)(THStorage *storage, ptrdiff_t size)
 {
   if(storage->flag & TH_STORAGE_RESIZABLE)
   {
     if(storage->allocator->realloc == NULL) {
       /* case when the allocator does not have a realloc defined */
       real *old_data = storage->data;
-      long  old_size = storage->size;
+      ptrdiff_t old_size = storage->size;
       if (size == 0) {
 	storage->data = NULL;
       } else {
@@ -163,7 +163,7 @@ void THStorage_(resize)(THStorage *storage, long size)
       }
       storage->size = size;
       if (old_data != NULL) {
-	long copy_size = old_size;
+	ptrdiff_t copy_size = old_size;
 	if (storage->size < copy_size) {
 	  copy_size = storage->size;
 	}
@@ -186,18 +186,18 @@ void THStorage_(resize)(THStorage *storage, long size)
 
 void THStorage_(fill)(THStorage *storage, real value)
 {
-  long i;
+  ptrdiff_t i;
   for(i = 0; i < storage->size; i++)
     storage->data[i] = value;
 }
 
-void THStorage_(set)(THStorage *self, long idx, real value)
+void THStorage_(set)(THStorage *self, ptrdiff_t idx, real value)
 {
   THArgCheck((idx >= 0) && (idx < self->size), 2, "out of bounds");
   self->data[idx] = value;
 }
 
-real THStorage_(get)(const THStorage *self, long idx)
+real THStorage_(get)(const THStorage *self, ptrdiff_t idx)
 {
   THArgCheck((idx >= 0) && (idx < self->size), 2, "out of bounds");
   return self->data[idx];
@@ -207,7 +207,7 @@ void THStorage_(swap)(THStorage *storage1, THStorage *storage2)
 {
 #define SWAP(val) { val = storage1->val; storage1->val = storage2->val; storage2->val = val; }
     real *data;
-    long size;
+    ptrdiff_t size;
     char flag;
     THAllocator *allocator;
     void *allocatorContext;

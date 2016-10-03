@@ -1,4 +1,4 @@
-static void THFloatVector_fill_NEON(float *x, const float c, const long n) {
+static void THFloatVector_fill_NEON(float *x, const float c, const ptrdiff_t n) {
   float ctemp = c;
   float * caddr = &ctemp;
   __asm__ __volatile__ (
@@ -29,7 +29,7 @@ static void THFloatVector_fill_NEON(float *x, const float c, const long n) {
 }
 
 
-static void THFloatVector_diff_NEON(float *z, const float *x, const float *y, const long n) {
+static void THFloatVector_diff_NEON(float *z, const float *x, const float *y, const ptrdiff_t n) {
   __asm__ __volatile__ (
       "mov         r0, %2           @ \n\t"
       "mov         r1, %1           @ \n\t"
@@ -70,7 +70,7 @@ static void THFloatVector_diff_NEON(float *z, const float *x, const float *y, co
 }
 
 
-static void THFloatVector_scale_NEON(float *y, const float c, const long n) {
+static void THFloatVector_scale_NEON(float *y, const float c, const ptrdiff_t n) {
   float ctemp = c;
   float * caddr = &ctemp;
   __asm__ __volatile__ (
@@ -150,7 +150,7 @@ static void THFloatVector_scale_NEON(float *y, const float c, const long n) {
 
 }
 
-static void THFloatVector_mul_NEON(float *y, const float *x, const long n) {
+static void THFloatVector_mul_NEON(float *y, const float *x, const ptrdiff_t n) {
   __asm__ __volatile__ (
       "mov         r0, %0           @ \n\t"
       "mov         r1, %1           @ \n\t"
@@ -190,7 +190,7 @@ static void THFloatVector_mul_NEON(float *y, const float *x, const long n) {
       );
 }
 
-static void THFloatVector_add_NEON(float *y, const float *x, const float c, const long n) {
+static void THFloatVector_add_NEON(float *y, const float *x, const float c, const ptrdiff_t n) {
   float ctemp = c;
   float * caddr = &ctemp;
   __asm__ __volatile__ (

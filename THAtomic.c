@@ -179,3 +179,89 @@ long THAtomicCompareAndSwapLong(long volatile *a, long oldvalue, long newvalue)
     return 0;
 #endif
 }
+
+void THAtomicSetPtrdiff(ptrdiff_t volatile *a, ptrdiff_t newvalue)
+{
+#if defined(USE_C11_ATOMICS)
+  atomic_store(a, newvalue);
+#elif defined(USE_MSC_ATOMICS)
+#ifdef _WIN64
+  _InterlockedExchange64(a, newvalue);
+#else
+  _InterlockedExchange(a, newvalue);
+#endif
+#elif defined(USE_GCC_ATOMICS)
+  __sync_lock_test_and_set(a, newvalue);
+#else
+  ptrdiff_t oldvalue;
+  do {
+    oldvalue = *a;
+  } while (!THAtomicCompareAndSwapPtrdiff(a, oldvalue, newvalue));
+#endif
+}
+
+ptrdiff_t THAtomicGetPtrdiff(ptrdiff_t volatile *a)
+{
+#if defined(USE_C11_ATOMICS)
+  return atomic_load(a);
+#else
+  ptrdiff_t value;
+  do {
+    value = *a;
+  } while (!THAtomicCompareAndSwapPtrdiff(a, value, value));
+  return value;
+#endif
+}
+
+ptrdiff_t THAtomicAddPtrdiff(ptrdiff_t volatile *a, ptrdiff_t value)
+{
+#if defined(USE_C11_ATOMICS)
+  return atomic_fetch_add(a, value);
+#elif defined(USE_MSC_ATOMICS)
+#ifdef _WIN64
+  return _InterlockedExchangeAdd64(a, value);
+#else
+  return _InterlockedExchangeAdd(a, value);
+#endif
+#elif defined(USE_GCC_ATOMICS)
+  return __sync_fetch_and_add(a, value);
+#else
+  ptrdiff_t oldvalue;
+  do {
+    oldvalue = *a;
+  } while (!THAtomicCompareAndSwapPtrdiff(a, oldvalue, (oldvalue + value)));
+  return oldvalue;
+#endif
+}
+
+ptrdiff_t THAtomicCompareAndSwapPtrdiff(ptrdiff_t volatile *a, ptrdiff_t oldvalue, ptrdiff_t newvalue)
+{
+#if defined(USE_C11_ATOMICS)
+  return atomic_compare_exchange_strong(a, &oldvalue, newvalue);
+#elif defined(USE_MSC_ATOMICS)
+#ifdef _WIN64
+  return (_InterlockedCompareExchange64(a, newvalue, oldvalue) == oldvalue);
+#else
+  return (_InterlockedCompareExchange(a, newvalue, oldvalue) == oldvalue);
+#endif
+#elif defined(USE_GCC_ATOMICS)
+  return __sync_bool_compare_and_swap(a, oldvalue, newvalue);
+#elif defined(USE_PTHREAD_ATOMICS)
+  ptrdiff_t ret = 0;
+  pthread_mutex_lock(&ptm);
+  if(*a == oldvalue) {
+    *a = newvalue;
+    ret = 1;
+  }
+  pthread_mutex_unlock(&ptm);
+  return ret;
+#else
+#warning THAtomic is not thread safe
+  if(*a == oldvalue) {
+    *a = newvalue;
+    return 1;
+  }
+  else
+    return 0;
+#endif
+}

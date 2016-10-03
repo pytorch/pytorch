@@ -13,7 +13,7 @@ typedef struct THTensor
     int nDimension;
     
     THStorage *storage;
-    long storageOffset;
+    ptrdiff_t storageOffset;
     int refcount;
 
     char flag;
@@ -23,7 +23,7 @@ typedef struct THTensor
 
 /**** access methods ****/
 TH_API THStorage* THTensor_(storage)(const THTensor *self);
-TH_API long THTensor_(storageOffset)(const THTensor *self);
+TH_API ptrdiff_t THTensor_(storageOffset)(const THTensor *self);
 TH_API int THTensor_(nDimension)(const THTensor *self);
 TH_API long THTensor_(size)(const THTensor *self, int dim);
 TH_API long THTensor_(stride)(const THTensor *self, int dim);
@@ -39,17 +39,17 @@ TH_API void THTensor_(clearFlag)(THTensor *self, const char flag);
 TH_API THTensor *THTensor_(new)(void);
 TH_API THTensor *THTensor_(newWithTensor)(THTensor *tensor);
 /* stride might be NULL */
-TH_API THTensor *THTensor_(newWithStorage)(THStorage *storage_, long storageOffset_, THLongStorage *size_, THLongStorage *stride_);
-TH_API THTensor *THTensor_(newWithStorage1d)(THStorage *storage_, long storageOffset_,
+TH_API THTensor *THTensor_(newWithStorage)(THStorage *storage_, ptrdiff_t storageOffset_, THLongStorage *size_, THLongStorage *stride_);
+TH_API THTensor *THTensor_(newWithStorage1d)(THStorage *storage_, ptrdiff_t storageOffset_,
                                 long size0_, long stride0_);
-TH_API THTensor *THTensor_(newWithStorage2d)(THStorage *storage_, long storageOffset_,
+TH_API THTensor *THTensor_(newWithStorage2d)(THStorage *storage_, ptrdiff_t storageOffset_,
                                 long size0_, long stride0_,
                                 long size1_, long stride1_);
-TH_API THTensor *THTensor_(newWithStorage3d)(THStorage *storage_, long storageOffset_,
+TH_API THTensor *THTensor_(newWithStorage3d)(THStorage *storage_, ptrdiff_t storageOffset_,
                                 long size0_, long stride0_,
                                 long size1_, long stride1_,
                                 long size2_, long stride2_);
-TH_API THTensor *THTensor_(newWithStorage4d)(THStorage *storage_, long storageOffset_,
+TH_API THTensor *THTensor_(newWithStorage4d)(THStorage *storage_, ptrdiff_t storageOffset_,
                                 long size0_, long stride0_,
                                 long size1_, long stride1_,
                                 long size2_, long stride2_,
@@ -78,17 +78,17 @@ TH_API void THTensor_(resize4d)(THTensor *tensor, long size0_, long size1_, long
 TH_API void THTensor_(resize5d)(THTensor *tensor, long size0_, long size1_, long size2_, long size3_, long size4_);
 
 TH_API void THTensor_(set)(THTensor *self, THTensor *src);
-TH_API void THTensor_(setStorage)(THTensor *self, THStorage *storage_, long storageOffset_, THLongStorage *size_, THLongStorage *stride_);
-TH_API void THTensor_(setStorage1d)(THTensor *self, THStorage *storage_, long storageOffset_,
+TH_API void THTensor_(setStorage)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, THLongStorage *size_, THLongStorage *stride_);
+TH_API void THTensor_(setStorage1d)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_,
                                     long size0_, long stride0_);
-TH_API void THTensor_(setStorage2d)(THTensor *self, THStorage *storage_, long storageOffset_,
+TH_API void THTensor_(setStorage2d)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_,
                                     long size0_, long stride0_,
                                     long size1_, long stride1_);
-TH_API void THTensor_(setStorage3d)(THTensor *self, THStorage *storage_, long storageOffset_,
+TH_API void THTensor_(setStorage3d)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_,
                                     long size0_, long stride0_,
                                     long size1_, long stride1_,
                                     long size2_, long stride2_);
-TH_API void THTensor_(setStorage4d)(THTensor *self, THStorage *storage_, long storageOffset_,
+TH_API void THTensor_(setStorage4d)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_,
                                     long size0_, long stride0_,
                                     long size1_, long stride1_,
                                     long size2_, long stride2_,
@@ -106,7 +106,7 @@ TH_API int THTensor_(isContiguous)(const THTensor *self);
 TH_API int THTensor_(isSameSizeAs)(const THTensor *self, const THTensor *src);
 TH_API int THTensor_(isSetTo)(const THTensor *self, const THTensor *src);
 TH_API int THTensor_(isSize)(const THTensor *self, const THLongStorage *dims);
-TH_API long THTensor_(nElement)(const THTensor *self);
+TH_API ptrdiff_t THTensor_(nElement)(const THTensor *self);
 
 TH_API void THTensor_(retain)(THTensor *self);
 TH_API void THTensor_(free)(THTensor *self);
