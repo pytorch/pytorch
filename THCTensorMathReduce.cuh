@@ -17,7 +17,6 @@ struct ReduceAdd {
 };
 
 #ifdef CUDA_HALF_TENSOR
-
 template <>
 struct ReduceAdd<half, half> {
   inline __device__ half operator()(half a, half b) const {
