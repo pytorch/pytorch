@@ -176,13 +176,9 @@ THTensor* THPTensor_(fromNumpy)(PyObject *numpy_array) {
     }
 
     THTensor *result = THTensor_(newWithStorage)(storage, 0, sizes, strides);
-    // newWithStorage increases refcount
-    storage.release();
     return result;
   } else {
     THTensor *result = THTensor_(newWithStorage)(storage, 0, NULL, NULL);
-    // newWithStorage increases refcount
-    storage.release();
     return result;
   }
 }
