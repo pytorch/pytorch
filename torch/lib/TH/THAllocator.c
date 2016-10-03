@@ -112,8 +112,7 @@ static void *_map_alloc(void* ctx_, long size)
   {
     HANDLE hfile;
     HANDLE hmfile;
-    DWORD size_hi, size_lo;
-    size_t hfilesz;
+    LARGE_INTEGER hfilesz;
 
     if (ctx->flags & TH_ALLOCATOR_MAPPED_EXCLUSIVE)
       THError("exclusive file mapping is not supported on Windows");
@@ -130,78 +129,62 @@ static void *_map_alloc(void* ctx_, long size)
     {
       hfile = CreateFileA(ctx->filename, GENERIC_READ|GENERIC_WRITE, FILE_SHARE_WRITE|FILE_SHARE_READ, 0, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
       if (hfile == INVALID_HANDLE_VALUE)
-        THError("could not open file <%s> in read-write mode", ctx->filename);
+        THError("could not open file <%s> in read-write mode; error code: <%d>", ctx->filename, GetLastError());
     }
     else
     {
       hfile = CreateFileA(ctx->filename, GENERIC_READ, FILE_SHARE_WRITE|FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
       if (hfile == INVALID_HANDLE_VALUE)
-        THError("could not open file <%s> in read-only mode", ctx->filename);
+        THError("could not open file <%s> in read-only mode; error code: <%d>", ctx->filename, GetLastError());
     }
 
-    size_lo = GetFileSize(hfile, &size_hi);
-    if(sizeof(size_t) > 4)
+    if (GetFileSizeEx(hfile, &hfilesz) == 0)
     {
-      hfilesz = ((size_t)size_hi) << 32;
-      hfilesz |= size_lo;
+      THError("could not get file size: <%s>; error code: <%d>", ctx->filename, GetLastError());
     }
-    else
-      hfilesz = (size_t)(size_lo);
 
     if(size > 0)
     {
-      if(size > hfilesz)
+      if(size > hfilesz.QuadPart)
       {
         if(ctx->flags)
         {
-#if SIZEOF_SIZE_T > 4
-          size_hi = (DWORD)((size) >> 32);
-          size_lo = (DWORD)((size) & 0xFFFFFFFF);
-#else
-          size_hi = 0;
-          size_lo = (DWORD)(size);
-#endif
-          if((SetFilePointer(hfile, size_lo, &size_hi, FILE_BEGIN)) == INVALID_SET_FILE_POINTER)
+          hfilesz.QuadPart = size;
+          if(SetFilePointerEx(hfile, hfilesz, NULL, FILE_BEGIN) == 0)
           {
             CloseHandle(hfile);
-            THError("unable to stretch file <%s> to the right size", ctx->filename);
+            THError("unable to stretch file <%s> to the right size; error code: <%d>", ctx->filename, GetLastError());
           }
           if(SetEndOfFile(hfile) == 0)
           {
             CloseHandle(hfile);
-            THError("unable to write to file <%s>", ctx->filename);
+            THError("unable to write to file <%s>; error code: <%d>", ctx->filename, GetLastError());
           }
         }
         else
         {
           CloseHandle(hfile);
-          THError("file <%s> size is smaller than the required mapping size <%ld>", ctx->filename, size);
+          THError("file <%s> size is smaller than the required mapping size <%ld>; error code: <%d>", ctx->filename, size, GetLastError());
         }
       }
     }
     else
-      size = hfilesz;
+      size = hfilesz.QuadPart;
 
     ctx->size = size; /* if we are here, it must be the right size */
 
-#if SIZEOF_SIZE_T > 4
-    size_hi = (DWORD)((ctx->size) >> 32);
-    size_lo = (DWORD)((ctx->size) & 0xFFFFFFFF);
-#else
-    size_hi = 0;
-    size_lo = (DWORD)(ctx->size);
-#endif
+    hfilesz.QuadPart = ctx->size;
 
     /* get map handle */
     if(ctx->flags)
     {
-      if( (hmfile = CreateFileMapping(hfile, NULL, PAGE_READWRITE, size_hi, size_lo, NULL)) == NULL )
-        THError("could not create a map on file <%s>", ctx->filename);
+      if( (hmfile = CreateFileMapping(hfile, NULL, PAGE_READWRITE, hfilesz.HighPart, hfilesz.LowPart, NULL)) == NULL )
+        THError("could not create a map on file <%s>; error code: <%d>", ctx->filename, GetLastError());
     }
     else
     {
-      if( (hmfile = CreateFileMapping(hfile, NULL, PAGE_WRITECOPY, size_hi, size_lo, NULL)) == NULL )
-        THError("could not create a map on file <%s>", ctx->filename);
+      if( (hmfile = CreateFileMapping(hfile, NULL, PAGE_WRITECOPY, hfilesz.HighPart, hfilesz.LowPart, NULL)) == NULL )
+        THError("could not create a map on file <%s>; error code: <%d>", ctx->filename, GetLastError());
     }
 
     /* map the stuff */
@@ -356,7 +339,7 @@ static void THMapAllocator_free(void* ctx_, void* data) {
   THMapAllocatorContext *ctx = ctx_;
 
 #ifdef _WIN32
-  if(!UnmapViewOfFile((LPINT)data))
+  if(UnmapViewOfFile(data) == 0)
     THError("could not unmap the shared memory file");
 #else /* _WIN32 */
   if (ctx->flags & TH_ALLOCATOR_MAPPED_KEEPFD) {
@@ -447,7 +430,7 @@ static void THRefcountedMapAllocator_free(void* ctx_, void* data) {
   THMapAllocatorContext *ctx = ctx_;
 
 #ifdef _WIN32
-  if(!UnmapViewOfFile((LPINT)data))
+  if(UnmapViewOfFile(data) == 0)
     THError("could not unmap the shared memory file");
 #else /* _WIN32 */
 

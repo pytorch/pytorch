@@ -2,6 +2,10 @@
 #include "THDiskFile.h"
 #include "THFilePrivate.h"
 
+#ifdef _WIN64
+#include <stdint.h>
+#endif
+
 typedef struct THDiskFile__
 {
     THFile file;
@@ -170,7 +174,10 @@ static void THDiskFile_seek(THFile *self, size_t position)
 
   THArgCheck(dfself->handle != NULL, 1, "attempt to use a closed file");
 
-#ifdef _WIN32
+#if defined(_WIN64)
+  THArgCheck(position <= (size_t)INT64_MAX, 2, "position must be smaller than INT64_MAX");
+  if(_fseeki64(dfself->handle, (__int64)position, SEEK_SET) < 0)
+#elif defined(_WIN32)
   THArgCheck(position <= (size_t)LONG_MAX, 2, "position must be smaller than LONG_MAX");
   if(fseek(dfself->handle, (long)position, SEEK_SET) < 0)
 #else
@@ -190,7 +197,13 @@ static void THDiskFile_seekEnd(THFile *self)
 
   THArgCheck(dfself->handle != NULL, 1, "attempt to use a closed file");
 
-  if(fseek(dfself->handle, 0L, SEEK_END) < 0)
+#if defined(_WIN64)
+  if(_fseeki64(dfself->handle, 0, SEEK_END) < 0)
+#elif defined(_WIN32)
+  if(fseek(dfself->handle, 0, SEEK_END) < 0)
+#else
+  if(fseeko(dfself->handle, 0, SEEK_END) < 0)
+#endif
   {
     dfself->file.hasError = 1;
     if(!dfself->file.isQuiet)
@@ -203,7 +216,13 @@ static size_t THDiskFile_position(THFile *self)
   THDiskFile *dfself = (THDiskFile*)(self);
   THArgCheck(dfself->handle != NULL, 1, "attempt to use a closed file");
 
+#if defined(_WIN64)
+  __int64 offset = _ftelli64(dfself->handle);
+#elif defined(_WIN32)
   long offset = ftell(dfself->handle);
+#else
+  off_t offset = ftello(dfself->handle);
+#endif
   if (offset > -1)
       return (size_t)offset;
   else if(!dfself->file.isQuiet)
@@ -738,7 +757,7 @@ THFile *THPipeFile_new(const char *name, const char *mode, int isQuiet)
   THArgCheck(THPipeFile_mode(mode, &isReadable, &isWritable), 2, "file mode should be 'r','w'");
 
 #ifdef _WIN32
-  handle = popen(name, (isReadable ? "rb" : "wb"));
+  handle = _popen(name, (isReadable ? "rb" : "wb"));
 #else
   handle = popen(name, (isReadable ? "r" : "w"));
 #endif
