@@ -4,8 +4,13 @@
 
 #define EPS 1e-12
 
-void THNN_(BCECriterion_updateOutput)(THNNState *state, THTensor *input, THTensor *target, THTensor *output, bool sizeAverage, THTensor *weights)
+void THNN_(BCECriterion_updateOutput)(THNNState *state, THTensor *input,
+				      THTensor *target, THTensor *output,
+				      bool sizeAverage, THTensor *weights)
 {
+  THNN_CHECK_NELEMENT(input, target);
+  THNN_CHECK_NELEMENT(input, weights);
+  THNN_CHECK_DIM_SIZE(output, 1, 0, 1);
   real sum = 0;
 
   if(weights)
@@ -29,8 +34,13 @@ void THNN_(BCECriterion_updateOutput)(THNNState *state, THTensor *input, THTenso
   THTensor_(set1d)(output, 0, sum);
 }
 
-void THNN_(BCECriterion_updateGradInput)(THNNState *state, THTensor *input, THTensor *target, THTensor *gradInput, bool sizeAverage, THTensor *weights)
+void THNN_(BCECriterion_updateGradInput)(THNNState *state, THTensor *input,
+					 THTensor *target, THTensor *gradInput,
+					 bool sizeAverage, THTensor *weights)
 {
+  THNN_CHECK_NELEMENT(input, target);
+  THNN_CHECK_NELEMENT(input, weights);
+
   real norm = (sizeAverage ? 1./((real)THTensor_(nElement)(input)) : 1.);
 
   THTensor_(resizeAs)(gradInput, input);

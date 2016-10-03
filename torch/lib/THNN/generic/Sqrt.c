@@ -19,6 +19,7 @@ void THNN_(Sqrt_updateGradInput)(
           THTensor *gradInput,
           THTensor *output)
 {
+  THNN_CHECK_SHAPE(output, gradOutput);
   THTensor_(resizeAs)(gradInput, input);
 
   if (output->nDimension == 1 || 

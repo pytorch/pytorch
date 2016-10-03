@@ -76,6 +76,7 @@ void THNN_(PReLU_updateGradInput)(
           THTensor *weight,
           THIndex_t nOutputPlane)
 {
+  THNN_CHECK_NELEMENT(input, gradOutput);
   THTensor_(resizeAs)(gradInput, input);
 
   if (nOutputPlane == 0)
@@ -160,6 +161,7 @@ void THNN_(PReLU_accGradParameters)(
           THIndex_t nOutputPlane,
           real scale)
 {
+  THNN_CHECK_NELEMENT(input, gradOutput);  
   real *gradWeight_data = THTensor_(data)(gradWeight);
 
   if (nOutputPlane == 0)

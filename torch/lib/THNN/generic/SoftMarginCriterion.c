@@ -9,6 +9,9 @@ void THNN_(SoftMarginCriterion_updateOutput)(
   THTensor *output,
   bool sizeAverage)
 {
+  THNN_CHECK_NELEMENT(input, target);
+  THNN_CHECK_DIM_SIZE(output, 1, 0, 1);
+
   real sum;
 
   sum = 0;
@@ -29,6 +32,7 @@ void THNN_(SoftMarginCriterion_updateGradInput)(
   THTensor *gradInput,
   bool sizeAverage)
 {
+  THNN_CHECK_NELEMENT(input, target);
   real norm = (sizeAverage ? 1./((real)THTensor_(nElement)(input)) : 1.);
 
   THTensor_(resizeAs)(gradInput, input);

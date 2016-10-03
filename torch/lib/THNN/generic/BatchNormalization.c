@@ -9,6 +9,7 @@ void THNN_(BatchNormalization_updateOutput)(
   THTensor *save_mean, THTensor *save_std,
   bool train, double momentum, double eps)
 {
+  THTensor_(resizeAs)(output, input);
   long nInput = THTensor_(size)(input, 1);
   long f,n = THTensor_(nElement)(input) / nInput;
 
@@ -70,6 +71,7 @@ void THNN_(BatchNormalization_backward)(
   THTensor *save_mean, THTensor *save_std,
   bool train, double scale, double eps)
 {
+  THNN_CHECK_SHAPE(input, gradOutput);
   long nInput = THTensor_(size)(input, 1);
   long f,n = THTensor_(nElement)(input) / nInput;
 
@@ -97,6 +99,7 @@ void THNN_(BatchNormalization_backward)(
       dotp += (*in_data - mean) * (*gradOut_data););
 
     if (gradInput) {
+      THTensor_(resizeAs)(gradInput, input);      
       THTensor *gradIn = THTensor_(newSelect)(gradInput, 1, f);
 
       if (train) {

@@ -47,8 +47,10 @@ void THNN_(LookupTable_accGradParameters)(
     THError("gradWeight must be contiguous");
   if (!THIndexTensor_(isContiguous)(input))
     THError("input must be contiguous");
-  if (THIndexTensor_(nDimension)(input) != 1 && THIndexTensor_(nDimension)(input) != 2)
-    THError("input must be a vector or matrix");
+  if (THIndexTensor_(nDimension)(input) != 1 && THIndexTensor_(nDimension)(input) != 2) {
+    THDescBuff s1 = THIndexTensor_(sizeDesc)(input);
+    THError("input must be a vector or matrix, but is of shape: %s", s1.str);
+  }
 
   THIndex_t *input_data = THIndexTensor_(data)(input);
   long numel = THIndexTensor_(nElement)(input);
@@ -56,8 +58,11 @@ void THNN_(LookupTable_accGradParameters)(
 
   // check that inputs are all within range
   for (i=0; i<numel; i++)
-    if (input_data[i] < TH_INDEX_BASE || input_data[i] >= numw + TH_INDEX_BASE)
-      THError("input out of range");
+    if (input_data[i] < TH_INDEX_BASE || input_data[i] >= numw + TH_INDEX_BASE) {
+      THError("inputs need to be in the range %ld <= input < %ld, "
+	      "but got input of value: %ld", TH_INDEX_BASE, (numw + TH_INDEX_BASE),
+	      input_data[i]);
+    }
 
   gradOutput = THTensor_(newContiguous)(gradOutput);
 
@@ -177,9 +182,13 @@ void THNN_(LookupTable_renorm)(
   long numw = THTensor_(size)(weight, 0);
   long stride = THTensor_(stride)(weight, 0);
   real *gw = THTensor_(data)(weight);
-  for (i=0; i<numel; i++)
-    if (row_idx[i] < TH_INDEX_BASE || row_idx[i] >= numw + TH_INDEX_BASE)
-      THError("input out of range");
+  for (i=0; i<numel; i++) {
+    if (row_idx[i] < TH_INDEX_BASE || row_idx[i] >= numw + TH_INDEX_BASE) {
+      THError("input need to be in the range %ld <= input < %ld, "
+	      "but got input of value: %ld", TH_INDEX_BASE, (numw + TH_INDEX_BASE),
+	      row_idx[i]);
+    }
+  }
   // get unique indices
   qsort(row_idx, numel, sizeof(THIndex_t), THNN_(compare_THIndex));
   long ptr = 0;

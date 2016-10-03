@@ -81,9 +81,8 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
   real *input_data;
   real *output_data;
 
-  THArgCheck(input->nDimension == 4 || input->nDimension == 5, 2,
-    "4D or 5D (batch-mode) tensor expected"
-  );
+  THNN_ARGCHECK(input->nDimension == 4 || input->nDimension == 5, 2, input,
+		"4D or 5D (batch mode) tensor expected for input, but got: %s");
 
   int dimN = 0;
   int dimt = 1;
@@ -98,9 +97,12 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
     dimw++;
   }
 
-  THArgCheck(input->size[dimw] >= kW && input->size[dimh] >= kH && input->size[dimt] >= kT, 2,
-    "input image smaller than kernel size"
-  );
+  THArgCheck(input->size[dimw] >= kW && input->size[dimh] >= kH
+	     && input->size[dimt] >= kT, 2,
+	     "input image (T: %d H: %d W: %d) smaller than "
+	     "kernel size (kT: %d kH: %d kW: %d)",
+	     input->size[dimt], input->size[dimh], input->size[dimw],
+	     kT, kH, kW);
 
   /* sizes */
   nslices = input->size[dimN];
@@ -242,6 +244,7 @@ void THNN_(VolumetricAveragePooling_updateGradInput)(
   int dimh = 2;
   int dimw = 3;
 
+  // TODO: gradOutput shape check
   /* get contiguous gradOutput */
   gradOutput = THTensor_(newContiguous)(gradOutput);
 

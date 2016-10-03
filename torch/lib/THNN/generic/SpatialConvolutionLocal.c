@@ -3,10 +3,13 @@
 #else
 
 
-static void THNN_(SpatialConvolutionLocal_updateOutput_frame)(THTensor *input, THTensor *output, THTensor *weight, THTensor *bias, THTensor *finput,
-                                                         int kW, int kH, int dW, int dH, int padW, int padH,
-                                                         long nInputPlane, long inputWidth, long inputHeight,
-                                                         long nOutputPlane, long outputWidth, long outputHeight)
+static void THNN_(SpatialConvolutionLocal_updateOutput_frame)
+     (
+      THTensor *input, THTensor *output,
+      THTensor *weight, THTensor *bias, THTensor *finput,
+      int kW, int kH, int dW, int dH, int padW, int padH,
+      long nInputPlane, long inputWidth, long inputHeight,
+      long nOutputPlane, long outputWidth, long outputHeight)
 {
   long i;
   THTensor *output3d, *finput3d;
@@ -47,6 +50,7 @@ void THNN_(SpatialConvolutionLocal_updateOutput)(
     long inputWidth, long inputHeight,
     long outputWidth, long outputHeight)
 {
+  // TODO: add argument checking
   long nInputPlane = THTensor_(size)(weight,2)/(kW*kH);
   long nOutputPlane = THTensor_(size)(weight,1);
 
@@ -88,10 +92,12 @@ void THNN_(SpatialConvolutionLocal_updateOutput)(
 }
 
 
-static void THNN_(SpatialConvolutionLocal_updateGradInput_frame)(THTensor *gradInput, THTensor *gradOutput, THTensor *weight, THTensor *fgradInput,
-                                                            int kW, int kH, int dW, int dH, int padW, int padH, 
-                                                            long nInputPlane, long inputWidth, long inputHeight,
-                                                            long nOutputPlane, long outputWidth, long outputHeight)
+static void THNN_(SpatialConvolutionLocal_updateGradInput_frame)
+     (THTensor *gradInput, THTensor *gradOutput,
+      THTensor *weight, THTensor *fgradInput,
+      int kW, int kH, int dW, int dH, int padW, int padH, 
+      long nInputPlane, long inputWidth, long inputHeight,
+      long nOutputPlane, long outputWidth, long outputHeight)
 {
   THTensor *gradOutput3d, *fgradInput3d;
   gradOutput3d = THTensor_(newWithStorage3d)(gradOutput->storage, gradOutput->storageOffset,
@@ -168,10 +174,12 @@ void THNN_(SpatialConvolutionLocal_updateGradInput)(
   THTensor_(transpose)(weight, weight, 1, 2);
 }
 
-static void THNN_(SpatialConvolutionLocal_accGradParameters_frame)(THTensor *gradOutput, THTensor *gradWeight, THTensor *gradBias, THTensor *finput, real scale, 
-                                                            int kW, int kH, int dW, int dH, int padW, int padH, 
-                                                            long nInputPlane, long inputWidth, long inputHeight,
-                                                            long nOutputPlane, long outputWidth, long outputHeight)
+static void THNN_(SpatialConvolutionLocal_accGradParameters_frame)
+     (THTensor *gradOutput, THTensor *gradWeight, THTensor *gradBias,
+      THTensor *finput, real scale, 
+      int kW, int kH, int dW, int dH, int padW, int padH, 
+      long nInputPlane, long inputWidth, long inputHeight,
+      long nOutputPlane, long outputWidth, long outputHeight)
 {
    
   THTensor *gradOutput3d, *finput3d;

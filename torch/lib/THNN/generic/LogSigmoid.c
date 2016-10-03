@@ -25,6 +25,7 @@ void THNN_(LogSigmoid_updateGradInput)(
           THTensor *gradInput,
           THTensor *buffer)
 {
+  THNN_CHECK_NELEMENT(input, gradOutput);
   THTensor_(resizeAs)(gradInput, buffer);
   TH_TENSOR_APPLY3(real, gradInput, real, gradOutput, real, buffer,
     real z = *buffer_data;

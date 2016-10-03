@@ -72,6 +72,7 @@ void THNN_(HardTanh_updateGradInput)(
           real max_val,
           bool inplace)
 {
+  THNN_CHECK_NELEMENT(input, gradOutput);
   if (inplace)
     THTensor_(set)(gradInput, gradOutput);
   else

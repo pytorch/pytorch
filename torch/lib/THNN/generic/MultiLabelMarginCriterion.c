@@ -2,6 +2,7 @@
 #define TH_GENERIC_FILE "generic/MultiLabelMarginCriterion.c"
 #else
 
+// TODO: improve error messages
 void THNN_(MultiLabelMarginCriterion_updateOutput)(
           THNNState *state,
           THTensor *input,
@@ -15,19 +16,22 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
   long t, d, dt, ddt;
   real sum;
 
-  THArgCheck((input->nDimension == 1) || (input->nDimension == 2), 2, "vector or matrix expected");
+  THArgCheck((input->nDimension == 1) || (input->nDimension == 2), 2,
+	     "vector or matrix expected");
 
   if (input->nDimension == 1)
   {
     nframe = 1;
     dim = input->size[0];
-    THArgCheck((target->nDimension == 1) && (target->size[0] == dim), 3, "inconsistent target size");
+    THArgCheck((target->nDimension == 1) && (target->size[0] == dim), 3,
+	       "inconsistent target size");
   }
   else
   {
     nframe = input->size[0];
     dim = input->size[1];
-    THArgCheck((target->nDimension == 2) && (target->size[0] == nframe) && (target->size[1] == dim), 3, "inconsistent target size");
+    THArgCheck((target->nDimension == 2) && (target->size[0] == nframe)
+	       && (target->size[1] == dim), 3, "inconsistent target size");
   }
 
   THArgCheck(THTensor_(minall)(target) >= 0, 3, "target out of range");
@@ -101,21 +105,26 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
   long t, d, dt;
   real g;
 
-  THArgCheck((input->nDimension == 1) || (input->nDimension == 2), 2, "vector or matrix expected");
+  THArgCheck((input->nDimension == 1) || (input->nDimension == 2), 2,
+	     "vector or matrix expected");
 
   if (input->nDimension == 1)
   {
     nframe = 1;
     dim = input->size[0];
-    THArgCheck((target->nDimension == 1) && (target->size[0] == dim), 3, "inconsistent target size");
-    THArgCheck((isTarget->nDimension == 1) && (isTarget->size[0] == dim), 3, "inconsistent isTarget size");
+    THArgCheck((target->nDimension == 1) && (target->size[0] == dim), 3,
+	       "inconsistent target size");
+    THArgCheck((isTarget->nDimension == 1) && (isTarget->size[0] == dim), 3,
+	       "inconsistent isTarget size");
   }
   else
   {
     nframe = input->size[0];
     dim = input->size[1];
-    THArgCheck((target->nDimension == 2) && (target->size[0] == nframe) && (target->size[1] == dim), 3, "inconsistent target size");
-    THArgCheck((isTarget->nDimension == 2) && (isTarget->size[0] == nframe) && (isTarget->size[1] == dim), 3, "inconsistent isTarget size");
+    THArgCheck((target->nDimension == 2) && (target->size[0] == nframe)
+	       && (target->size[1] == dim), 3, "inconsistent target size");
+    THArgCheck((isTarget->nDimension == 2) && (isTarget->size[0] == nframe)
+	       && (isTarget->size[1] == dim), 3, "inconsistent isTarget size");
   }
 
   THArgCheck(THTensor_(minall)(target) >= 0, 3, "target out of range");

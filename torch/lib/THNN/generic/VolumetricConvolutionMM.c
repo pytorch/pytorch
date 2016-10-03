@@ -268,9 +268,8 @@ void THNN_(VolumetricConvolutionMM_updateOutput)(
   long outputHeight;
   long outputWidth;
 
-  THArgCheck(input->nDimension == 4 || input->nDimension == 5, 2,
-    "4D or 5D(batch mode) tensor expected"
-  );
+  THNN_ARGCHECK(input->nDimension == 4 || input->nDimension == 5, 2, input,
+		"4D or 5D (batch mode) tensor expected for input, but got: %s");
 
   if (input->nDimension == 5)
   {

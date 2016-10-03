@@ -27,6 +27,7 @@ void THNN_(HardShrink_updateGradInput)(
           THTensor *gradInput,
           real lambda)
 {
+  THNN_CHECK_NELEMENT(input, gradOutput);
   THTensor_(resizeAs)(gradInput, input);
   TH_TENSOR_APPLY3(real, gradInput, real, gradOutput, real, input,
     if (*input_data > lambda || *input_data < -lambda)

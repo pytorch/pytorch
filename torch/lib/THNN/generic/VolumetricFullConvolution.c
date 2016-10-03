@@ -101,9 +101,9 @@ void THNN_(VolumetricFullConvolution_updateOutput)(
   THTensor *ones    = fgradInput;
 
   // number of input & output planes and kernel size is indirectly defined by the weight tensor
-  THArgCheck(weight->nDimension == 5, 4,
-    "5D weight tensor is expected (nInputPlane x nOutputPlane x kT x kH x kW)"
-  );
+  THNN_ARGCHECK(weight->nDimension == 5, 4, weight,
+		"5D (nOutputPlane x nInputPlane x kT x kH x kW) tensor "
+		"expected for weight, but got: %s");
 
   const int nInputPlane  = (int)weight->size[0];
   const int nOutputPlane = (int)weight->size[1];
@@ -111,9 +111,8 @@ void THNN_(VolumetricFullConvolution_updateOutput)(
   const int kH           = (int)weight->size[3];
   const int kW           = (int)weight->size[4];
 
-  THArgCheck(input->nDimension == 4 || input->nDimension == 5, 2,
-    "4D or 5D (batch mode) tensor is expected"
-  );
+  THNN_ARGCHECK(input->nDimension == 4 || input->nDimension == 5, 2, input,
+		"4D or 5D (batch mode) tensor expected for input, but got: %s");
 
   int batch = 1;
   if (input->nDimension == 4)
@@ -241,9 +240,9 @@ void THNN_(VolumetricFullConvolution_updateGradInput)(
   THTensor *gradColumns = finput;
 
   // number of input & output planes and kernel size is indirectly defined by the weight tensor
-  THArgCheck(weight->nDimension == 5, 4,
-    "5D weight tensor is expected (nInputPlane x nOutputPlane x kT x kH x kW)"
-  );
+  THNN_ARGCHECK(weight->nDimension == 5, 4, weight,
+		"5D (nOutputPlane x nInputPlane x kT x kH x kW) tensor "
+		"expected for weight, but got: %s");
 
   const int nInputPlane  = (int)weight->size[0];
   const int nOutputPlane = (int)weight->size[1];
@@ -251,9 +250,8 @@ void THNN_(VolumetricFullConvolution_updateGradInput)(
   const int kH           = (int)weight->size[3];
   const int kW           = (int)weight->size[4];
 
-  THArgCheck(input->nDimension == 4 || input->nDimension == 5, 2,
-    "4D or 5D (batch mode) tensor is expected"
-  );
+  THNN_ARGCHECK(input->nDimension == 4 || input->nDimension == 5, 2, input,
+		"4D or 5D (batch mode) tensor expected for input, but got: %s");
 
   int batch = 1;
   if (input->nDimension == 4)
@@ -349,9 +347,9 @@ void THNN_(VolumetricFullConvolution_accGradParameters)(
   real scale)
 {
   // number of input & output planes and kernel size is indirectly defined by the gradWeight tensor
-  THArgCheck(gradWeight->nDimension == 5, 4,
-    "5D gradWeight tensor is expected (nInputPlane x nOutputPlane x kT x kH x kW)"
-  );
+  THNN_ARGCHECK(gradWeight->nDimension == 5, 4, gradWeight,
+		"5D (nOutputPlane x nInputPlane x kT x kH x kW) tensor "
+		"expected for gradWeight, but got: %s");
 
   int nInputPlane  = (int)gradWeight->size[0];
   int nOutputPlane = (int)gradWeight->size[1];
@@ -362,9 +360,8 @@ void THNN_(VolumetricFullConvolution_accGradParameters)(
   THTensor *columns = finput;
   THTensor *ones = fgradInput;
 
-  THArgCheck(input->nDimension == 4 || input->nDimension == 5, 2,
-    "4D or 5D (batch mode) tensor is expected"
-  );
+  THNN_ARGCHECK(input->nDimension == 4 || input->nDimension == 5, 2, input,
+		"4D or 5D (batch mode) tensor expected for input, but got: %s");
 
   int batch = 1;
   if (input->nDimension == 4)

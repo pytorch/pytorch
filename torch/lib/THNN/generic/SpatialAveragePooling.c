@@ -31,8 +31,12 @@ void THNN_(SpatialAveragePooling_updateOutput)(
 
   long k;
 
-  THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D(batch mode) tensor expected");
-  THArgCheck(kW/2 >= padW && kH/2 >= padH, 2, "pad should be smaller than half of kernel size");
+  THNN_ARGCHECK(input->nDimension == 3 || input->nDimension == 4, 2, input,
+		"3D or 4D (batch mode) tensor expected for input, but got: %s");
+  THArgCheck(kW/2 >= padW && kH/2 >= padH, 2,
+	     "pad should be smaller than half of kernel size, but got "
+	     "padW = %d, padH = %d, kW = %d, kH = %d",
+	     padW, padH, kW, kH);
 
   if (input->nDimension == 4) {
     nbatch = input->size[0];
@@ -65,7 +69,10 @@ void THNN_(SpatialAveragePooling_updateOutput)(
       --outputWidth;
   }
 
-  THArgCheck(inputWidth >= kW - 2 * padW && inputHeight >= kH - 2 * padH, 2, "input image smaller than kernel size");
+  THArgCheck(inputWidth >= kW - 2 * padW && inputHeight >= kH - 2 * padH, 2,
+	     "input image smaller than (kernel size - 2 * padW). Got "
+	     "inputHeight: %d inputWidth: %d kH %d kW %d padH %d padW %d",
+	     inputHeight, inputWidth, kH, kW, padH, padW);
 
   if (input->nDimension == 3)
     THTensor_(resize3d)(output, nInputPlane, outputHeight, outputWidth);
@@ -148,7 +155,8 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
   int dimh = 1;
   int dimc = 0;
   long nbatch = 1;
-
+  long ndim = 3;
+  
   long inputWidth;
   long inputHeight;
   long outputWidth;
@@ -165,6 +173,7 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
     dimw++;
     dimh++;
     dimc++;
+    ndim = 4;
   }
 
   inputWidth = input->size[dimw];
@@ -190,6 +199,9 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
     if ((outputWidth  - 1)*dW >= inputWidth  + padW)
       --outputWidth;
   }
+
+  THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimh, outputHeight);
+  THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimw, outputWidth);
 
   input_data = THTensor_(data)(input);
 
