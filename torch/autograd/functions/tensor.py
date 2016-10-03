@@ -8,13 +8,18 @@ from ..variable import Variable
 
 class Index(Function):
 
-    def __init__(self, *index):
+    def __init__(self, index):
         super(Index, self).__init__()
         self.index = index
 
     def forward(self, i):
         self.input_size = i.size()
-        return i[self.index]
+        result = i[self.index]
+        # TODO: support indexing that doesn't return a number
+        # TODO: this is a CUDA sync point
+        if not torch.is_tensor(result):
+            result = i.new((result,))
+        return result
 
     def backward(self, grad_output):
         # TODO: this won't have to be zeroed

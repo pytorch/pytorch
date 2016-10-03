@@ -509,13 +509,13 @@ class Variable(object):
 
     def select(self, dim, _index):
         index = tuple(slice(None, None) for _ in range(dim)) + (_index,)
-        return Index(*index)(self)
+        return Index(index)(self)
 
     def narrow(self, dim, start_index, length):
         index = tuple(slice(None, None) for _ in range(dim)) + \
                     (slice(start_index, start_index+length),)
 
-        return Index(*index)(self)
+        return Index(index)(self)
 
     def squeeze(self, dim=None):
         return Squeeze(dim)(self)

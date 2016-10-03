@@ -99,6 +99,17 @@ class TestAutograd(TestCase):
         self.assertRaises(RuntimeError, lambda: w.backward(torch.ones(5, 5)))
         self.assertIsNone(w.creator)
 
+    def test_indexing(self):
+        x = torch.range(1, 16).resize_(4, 4)
+        y = Variable(x)
+        self.assertEqual(x[1], y[1].data)
+        self.assertEqual(x[1, 1], y[1, 1].data[0])
+        self.assertEqual(x[1:], y[1:].data)
+        self.assertEqual(x[:2], y[:2].data)
+        self.assertEqual(x[:2, 2], y[:2, 2].data)
+        self.assertEqual(x[1:2, 2], y[1:2, 2].data)
+        self.assertEqual(x[1, 2:], y[1, 2:].data)
+
     def test_inplace(self):
         x = Variable(torch.ones(5, 5))
         y = Variable(torch.ones(5, 5) * 4)
@@ -179,9 +190,10 @@ function_tests = [
     (PowConstant,   (3.14,),            (torch.rand(L, L),)                         ),
     (Transpose,     (0, 1),             (torch.rand(L, L),)                         ),
     (Transpose,     (2, 0),             (torch.rand(S, S, S),),     '3d'            ),
-    (Permute,       (0, 4, 3, 5, 1, 2), ((1, 2, 3, 4, 5, 6),),                      ),
-    (Index,         (1, 2),             (torch.rand(S, S, S),)                      ),
+    (Permute,       (0, 4, 3, 5, 1, 2), ((1, 2, 3, 4, 5, 6),)                       ),
+    (Index,         ((1, 2),),          (torch.rand(S, S, S),)                      ),
     (Index,         (slice(0, 3),),     (torch.rand(S, S, S),),     'slice'         ),
+    (Index,         ((slice(0, 3), 1),),(torch.rand(S, S, S),),     'slice_index'   ),
     (View,          (S*S, S),           (torch.rand(S, S, S),)                      ),
     (Expand,        (S, 5, S, 5),       ((S, 1, S, 1),)                             ),
     (Exp,           (),                 (torch.rand(S, S, S),)                      ),
