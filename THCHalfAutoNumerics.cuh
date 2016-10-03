@@ -17,6 +17,10 @@ inline __host__ __device__ half operator-(half a, int b) {
   return THCNumerics<half>::add(a, THCNumerics<half>::neg(ScalarConvert<int, half>::to(b)));
 }
 
+inline __host__ __device__ half operator-(int a, half b) {
+  return THCNumerics<half>::add(ScalarConvert<int, half>::to(a), THCNumerics<half>::neg(b));
+}
+
 // This implementation could move to THCNumerics
 inline __host__ __device__ half operator*(half a, half b) {
   #ifdef __CUDA_ARCH__
@@ -42,6 +46,10 @@ inline __host__ __device__ half log1p(half a) {
 
 inline __host__ __device__ half exp(half a) {
   return THCNumerics<half>::exp(a);
+}
+
+inline __host__ __device__ half tanh(half a) {
+  return THCNumerics<half>::tanh(a);
 }
 
 // This implementation could move to THCNumerics

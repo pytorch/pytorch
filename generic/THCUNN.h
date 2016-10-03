@@ -18,4 +18,14 @@ TH_API void THNN_(SoftPlus_updateGradInput)(
                   real beta,
                   real threshold);
 
+TH_API void THNN_(Tanh_updateOutput)(THCState *state,
+                                     THCTensor *input,
+                                     THCTensor *output);
+
+TH_API void THNN_(Tanh_updateGradInput)(THCState *state,
+                                        THCTensor *input,
+                                        THCTensor *gradOutput,
+                                        THCTensor *gradInput,
+                                        THCTensor *output);
+
 #endif

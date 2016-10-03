@@ -378,17 +378,6 @@ TH_API void THNN_CudaSquare_updateGradInput(
           THCudaTensor *gradOutput,
           THCudaTensor *gradInput);
 
-TH_API void THNN_CudaTanh_updateOutput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *output);
-TH_API void THNN_CudaTanh_updateGradInput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *gradOutput,
-          THCudaTensor *gradInput,
-          THCudaTensor *output);
-
 TH_API void THNN_CudaThreshold_updateOutput(
           THCState *state,
           THCudaTensor *input,
