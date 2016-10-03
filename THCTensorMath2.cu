@@ -186,53 +186,6 @@ void THCudaTensor_var(THCState *state, THCudaTensor *self_, THCudaTensor *src, l
   THCudaTensor_freeCopyTo(state, self, self_);
 }
 
-float THCudaTensor_normall(THCState *state, THCudaTensor *self, float value)
-{
-  THAssert(THCudaTensor_checkGPU(state, 1, self));
-  self = THCudaTensor_newContiguous(state, self);
-  long size = THCudaTensor_nElement(state, self);
-  thrust::device_ptr<float> self_data(THCudaTensor_data(state, self));
-
-  float result;
-
-  if (value == 0.0f) {
-    result = thrust::transform_reduce(
-#if CUDA_VERSION >= 7000
-      thrust::cuda::par.on(THCState_getCurrentStream(state)),
-#endif
-      self_data, self_data+size, TensorNonZeroOp<float>(),
-      0.0f, thrust::plus<float>());
-  } else if (value == 1.0f) {
-    result = thrust::transform_reduce(
-#if CUDA_VERSION >= 7000
-      thrust::cuda::par.on(THCState_getCurrentStream(state)),
-#endif
-      self_data, self_data+size, TensorNormOp<float, 1>(value),
-      0.0f, thrust::plus<float>());
-
-  } else if (value == 2.0f) {
-    result = thrust::transform_reduce(
-#if CUDA_VERSION >= 7000
-      thrust::cuda::par.on(THCState_getCurrentStream(state)),
-#endif
-      self_data, self_data+size, TensorNormOp<float, 2>(value),
-      0.0f, thrust::plus<float>());
-    result = powf(result, 0.5f);
-
-  } else {
-    result = thrust::transform_reduce(
-#if CUDA_VERSION >= 7000
-      thrust::cuda::par.on(THCState_getCurrentStream(state)),
-#endif
-      self_data, self_data+size, TensorNormOp<float, -1>(value),
-      0.0f, thrust::plus<float>());
-    result = powf(result, 1.0f / value);
-  }
-
-  THCudaTensor_free(state, self);
-  return result;
-}
-
 struct dist_functor
 {
   const float exponent;
