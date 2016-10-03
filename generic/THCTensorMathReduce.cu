@@ -89,6 +89,12 @@ void THCTensor_(std)(THCState *state, THCTensor *self_, THCTensor *src, long dim
   THCTensor_(freeCopyTo)(state, self, self_);
 }
 
+accreal THCTensor_(stdall)(THCState *state, THCTensor *self)
+{
+  THAssert(THCTensor_(checkGPU)(state, 1, self));
+  return THCNumerics<accreal>::sqrt((THCTensor_(varall)(state, self)));
+}
+
 THC_API accreal
 THCTensor_(varall)(THCState *state, THCTensor *self)
 {

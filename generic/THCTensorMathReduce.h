@@ -8,8 +8,8 @@ THC_API void THCTensor_(renorm)(THCState *state, THCTensor* self, THCTensor* src
 THC_API void THCTensor_(std)(THCState *state, THCTensor *self, THCTensor *src, long dim, int flag);
 THC_API void THCTensor_(norm)(THCState *state, THCTensor* self, THCTensor* src, real value, long dimension);
 
+THC_API accreal THCTensor_(stdall)(THCState *state, THCTensor *self);
 THC_API accreal THCTensor_(normall)(THCState *state, THCTensor *self, real value);
-
 THC_API accreal THCTensor_(varall)(THCState *state, THCTensor *self);
 
 #endif

@@ -125,12 +125,6 @@ void THCudaTensor_lerp(THCState *state, THCudaTensor *result, THCudaTensor *a, T
   THCudaCheck(cudaGetLastError());
 }
 
-float THCudaTensor_stdall(THCState *state, THCudaTensor *self)
-{
-  THAssert(THCudaTensor_checkGPU(state, 1, self));
-  return sqrt(THCudaTensor_varall(state, self));
-}
-
 void THCudaTensor_var(THCState *state, THCudaTensor *self_, THCudaTensor *src, long dimension, int flag)
 {
   THAssert(THCudaTensor_checkGPU(state, 2, self_, src));
