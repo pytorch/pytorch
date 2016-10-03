@@ -86,6 +86,19 @@ TH_API void THNN_(SoftPlus_updateGradInput)(
                   real beta,
                   real threshold);
 
+TH_API void THNN_(SoftShrink_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *output,
+                  real lambda);
+
+TH_API void THNN_(SoftShrink_updateGradInput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *gradOutput,
+                  THCTensor *gradInput,
+                  real lambda);
+
 TH_API void THNN_(Square_updateOutput)(
                   THCState *state,
                   THCTensor *input,

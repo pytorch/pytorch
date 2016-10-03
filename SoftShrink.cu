@@ -1,54 +1,43 @@
 #include "THCUNN.h"
-#include "common.h"
+#include "THCHalf.h"
+#include "THCHalfAutoNumerics.cuh"
 
+template <typename T>
 struct SoftShrinkUpdateOutput
 {
-  const float lambda_;
+  const T lambda_;
 
-  SoftShrinkUpdateOutput(float lambda)
+  SoftShrinkUpdateOutput(T lambda)
     : lambda_(lambda)
   {}
 
-  __device__ __forceinline__ void operator()(float *out, float *in)
+  __device__ __forceinline__ void operator()(T *out, T *in)
   {
-    float x = *in;
+    T x = *in;
     if (x > lambda_) *out = x - lambda_;
     else if (x < -lambda_) *out = x + lambda_;
-    else *out = 0;
+    else *out = ScalarConvert<int, T>::to(0);
   }
 };
 
-void THNN_CudaSoftShrink_updateOutput(THCState *state, THCudaTensor *input, THCudaTensor *output, double lambda)
-{
-  THCUNN_assertSameGPU(state, 2, input, output);
-  THCudaTensor_resizeAs(state, output, input);
-  THC_pointwiseApply2(state, output, input, SoftShrinkUpdateOutput(lambda));
-  THCudaCheck(cudaGetLastError());
-}
-
+template <typename T>
 struct SoftShrinkUpdateGradInput
 {
-  const float lambda_;
+  const T lambda_;
 
-  SoftShrinkUpdateGradInput(float lambda)
+  SoftShrinkUpdateGradInput(T lambda)
     : lambda_(lambda)
   {}
 
-  __device__ __forceinline__ void operator()(float *gradInput, float *input, float *gradOutput) const
+  __device__ __forceinline__ void operator()(T *gradInput, T *input, T *gradOutput) const
   {
-    float x = *input;
+    T x = *input;
     if (x > lambda_ || x < -lambda_)
       *gradInput = *gradOutput;
     else
-      *gradInput = 0;
+      *gradInput = ScalarConvert<int, T>::to(0);
   }
 };
 
-
-void THNN_CudaSoftShrink_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput, THCudaTensor *gradInput, double lambda)
-{
-  THCUNN_assertSameGPU(state, 3, input, gradOutput, gradInput);
-  THCudaTensor_resizeAs(state, gradInput, input);
-  THC_pointwiseApply3(state, gradInput, input, gradOutput, SoftShrinkUpdateGradInput(lambda));
-  THCudaCheck(cudaGetLastError());
-}
+#include "generic/SoftShrink.cu"
+#include "THCGenerateFloatTypes.h"

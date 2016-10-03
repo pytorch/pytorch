@@ -21,6 +21,10 @@ inline __host__ __device__ half operator-(half a) {
   return THCNumerics<half>::neg(a);
 }
 
+inline __host__ __device__ half operator-(half a, half b) {
+  return THCNumerics<half>::add(a, THCNumerics<half>::neg(b));
+}
+
 inline __host__ __device__ half operator-(half a, int b) {
   return THCNumerics<half>::add(a, THCNumerics<half>::neg(ScalarConvert<int, half>::to(b)));
 }
