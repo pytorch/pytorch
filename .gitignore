@@ -14,6 +14,8 @@ torch/csrc/nn/THNN.cwrap
 torch/csrc/nn/THNN.cpp
 torch/csrc/nn/THCUNN.cwrap
 torch/csrc/nn/THCUNN.cpp
+torch/csrc/image/THIMG.cwrap
+torch/csrc/image/THIMG.cpp
 */**/*.pyc
 */**/*.so*
 */**/*.dylib*

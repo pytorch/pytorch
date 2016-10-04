@@ -1,0 +1,105 @@
+CMAKE_MINIMUM_REQUIRED(VERSION 2.6 FATAL_ERROR)
+CMAKE_POLICY(VERSION 2.6)
+
+FIND_PACKAGE(JPEG)
+FIND_PACKAGE(PNG)
+
+# Can be compiled standalone
+IF(NOT THIMG_INSTALL_LIB_SUBDIR)
+  SET(THIMG_INSTALL_LIB_SUBDIR "lib" CACHE PATH "THIMG install library subdirectory")
+ELSE()
+  SET(THC_INSTALL_LIB_SUBDIR ${Torch_INSTALL_LIB_SUBDIR})
+ENDIF()
+
+# OpenMP support?
+SET(WITH_OPENMP ON CACHE BOOL "OpenMP support if available?")
+IF (APPLE AND CMAKE_COMPILER_IS_GNUCC)
+  EXEC_PROGRAM (uname ARGS -v  OUTPUT_VARIABLE DARWIN_VERSION)
+  STRING (REGEX MATCH "[0-9]+" DARWIN_VERSION ${DARWIN_VERSION})
+  MESSAGE (STATUS "MAC OS Darwin Version: ${DARWIN_VERSION}")
+  IF (DARWIN_VERSION GREATER 9)
+    SET(APPLE_OPENMP_SUCKS 1)
+  ENDIF (DARWIN_VERSION GREATER 9)
+  EXECUTE_PROCESS (COMMAND ${CMAKE_C_COMPILER} -dumpversion
+    OUTPUT_VARIABLE GCC_VERSION)
+  IF (APPLE_OPENMP_SUCKS AND GCC_VERSION VERSION_LESS 4.6.2)
+    MESSAGE(STATUS "Warning: Disabling OpenMP (unstable with this version of GCC)")
+    MESSAGE(STATUS " Install GCC >= 4.6.2 or change your OS to enable OpenMP")
+    SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-unknown-pragmas")
+    SET(WITH_OPENMP OFF CACHE BOOL "OpenMP support if available?" FORCE)
+  ENDIF ()
+ENDIF ()
+
+IF (WITH_OPENMP)
+  FIND_PACKAGE(OpenMP)
+  IF(OPENMP_FOUND)
+    MESSAGE(STATUS "Compiling with OpenMP support")
+    SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
+    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+    SET(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
+  ENDIF(OPENMP_FOUND)
+ENDIF (WITH_OPENMP)
+
+IF (CMAKE_VERSION VERSION_LESS "3.1")
+  SET(CMAKE_C_FLAGS "-std=c99 ${CMAKE_C_FLAGS}")
+ELSE ()
+  SET(CMAKE_C_STANDARD 99)
+ENDIF ()
+
+#SET(src ppm.c)
+#ADD_TORCH_PACKAGE(ppm "${src}" "${luasrc}" "Image Processing")
+#TARGET_LINK_LIBRARIES(ppm TH)
+#IF(LUALIB)
+#  TARGET_LINK_LIBRARIES(ppm ${LUALIB})
+#ENDIF()
+
+if (JPEG_FOUND)
+    SET(src jpeg.c)
+    include_directories (${JPEG_INCLUDE_DIR})
+    SET(CMAKE_REQUIRED_INCLUDES "${JPEG_INCLUDE_DIR}")
+    SET(CMAKE_REQUIRED_LIBRARIES "${JPEG_LIBRARY}")
+    INCLUDE(CheckSymbolExists)
+    CHECK_SYMBOL_EXISTS(jpeg_mem_src "stddef.h;stdio.h;jpeglib.h" HAVE_JPEG_MEM_SRC)
+    IF (HAVE_JPEG_MEM_SRC)
+      SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DHAVE_JPEG_MEM_SRC")
+    ENDIF (HAVE_JPEG_MEM_SRC)
+    CHECK_SYMBOL_EXISTS(jpeg_mem_dest "stddef.h;stdio.h;jpeglib.h" HAVE_JPEG_MEM_DEST)
+    IF (HAVE_JPEG_MEM_DEST)
+      SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DHAVE_JPEG_MEM_DEST")
+    ENDIF (HAVE_JPEG_MEM_DEST)
+
+    #ADD_TORCH_PACKAGE(jpeg "${src}" "${luasrc}" "Image Processing")
+    #TARGET_LINK_LIBRARIES(jpeg luaT TH ${JPEG_LIBRARIES})
+    #IF(LUALIB)
+    #    TARGET_LINK_LIBRARIES(jpeg ${LUALIB})
+    #ENDIF()
+else (JPEG_FOUND)
+    message ("WARNING: Could not find JPEG libraries, JPEG wrapper will not be installed")
+endif (JPEG_FOUND)
+
+if (PNG_FOUND)
+#    SET(src png.c)
+#    include_directories (${PNG_INCLUDE_DIR})
+#    ADD_TORCH_PACKAGE(png "${src}" "${luasrc}" "Image Processing")
+#    TARGET_LINK_LIBRARIES(png luaT TH ${PNG_LIBRARIES})
+#    IF(LUALIB)
+#        TARGET_LINK_LIBRARIES(png ${LUALIB})
+#    ENDIF()
+else (PNG_FOUND)
+    message ("WARNING: Could not find PNG libraries, PNG wrapper will not be installed")
+endif (PNG_FOUND)
+
+#SET(src image.c)
+
+
+SET(src init.c)
+
+ADD_LIBRARY(THIMG SHARED ${src})
+INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR})
+### Torch packages supposes libraries prefix is "lib"
+SET_TARGET_PROPERTIES(THIMG PROPERTIES
+  PREFIX "lib"
+  IMPORT_PREFIX "lib")
+TARGET_LINK_LIBRARIES(THIMG TH)
+
+INSTALL(TARGETS THIMG LIBRARY DESTINATION "${THIMG_INSTALL_LIB_SUBDIR}")

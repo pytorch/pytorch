@@ -30,6 +30,7 @@ class StandaloneExtension(CWrapPlugin):
         'THDoubleTensor*':  Template('THPDoubleTensor_CData((THPDoubleTensor*)$arg)'),
         'THLongTensor*':    Template('THPLongTensor_CData((THPLongTensor*)$arg)'),
         'THIntTensor*':     Template('THPIntTensor_CData((THPIntTensor*)$arg)'),
+        'THByteTensor*':    Template('THPIntTensor_CData((THPByteTensor*)$arg)'),
         'THCudaTensor*':    Template('THCPFloatTensor_CData((THCPFloatTensor*)$arg)'),
         'THCudaLongTensor*': Template('THCPLongTensor_CData((THCPLongTensor*)$arg)'),
         'float':            Template('THPFloatUtils_unpackReal($arg)'),
@@ -39,6 +40,7 @@ class StandaloneExtension(CWrapPlugin):
         'long':             Template('THPUtils_unpackLong($arg)'),
         'void*':            Template('(void*)THPUtils_unpackLong($arg)'),
         'THGenerator*':     Template('THPGenerator_CData((THPGenerator*)$arg)'),
+        'const char*':      Template('PyString_AS_STRING($arg)'),
     }
 
     TYPE_CHECK = {
@@ -46,6 +48,7 @@ class StandaloneExtension(CWrapPlugin):
         'THFloatTensor*':   Template('(PyObject*)Py_TYPE($arg) == THPFloatTensorClass'),
         'THLongTensor*':    Template('(PyObject*)Py_TYPE($arg) == THPLongTensorClass'),
         'THIntTensor*':     Template('(PyObject*)Py_TYPE($arg) == THPIntTensorClass'),
+        'THByteTensor*':    Template('(PyObject*)Py_TYPE($arg) == THPByteTensorClass'),
         'THCudaTensor*':    Template('(PyObject*)Py_TYPE($arg) == THCPFloatTensorClass'),
         'THCudaLongTensor*': Template('(PyObject*)Py_TYPE($arg) == THCPLongTensorClass'),
         'float':            Template('THPDoubleUtils_checkReal($arg)'),
@@ -54,6 +57,7 @@ class StandaloneExtension(CWrapPlugin):
         'int':              Template('THPUtils_checkLong($arg)'),
         'long':             Template('THPUtils_checkLong($arg)'),
         'void*':            Template('THPUtils_checkLong($arg)'),
+        'const char*':      Template('PyString_Check($arg)'),
         'THGenerator*':     Template('(PyObject*)Py_TYPE($arg) == THPGeneratorClass'),
     }
 
@@ -81,6 +85,7 @@ PyObject * $name(PyObject *_unused, PyObject *args)
         'THLongTensor*': 'torch.LongTensor',
         'THIndexTensor*': 'torch.LongTensor',
         'THIntTensor*': 'torch.IntTensor',
+        'THByteTensor*': 'torch.ByteTensor',
         'THLongStorage*': 'torch.LongStorage',
         'long': 'int',
         'int': 'int',
@@ -90,6 +95,7 @@ PyObject * $name(PyObject *_unused, PyObject *args)
         'accreal': 'float',
         'bool': 'bool',
         'void*': 'int',
+        'const char*': 'const char*',
     }
 
     def __init__(self, module_name):

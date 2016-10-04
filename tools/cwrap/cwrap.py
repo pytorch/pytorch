@@ -103,15 +103,24 @@ class cwrap(object):
                     option.setdefault(k, v)
 
     def parse_arguments(self, args):
+        def split_type_and_name(s):
+            type, _, name = s.partition(' ')
+            if type == 'const':        # to support types like "const char*"
+                type, _, name = name.partition(' ')
+                type = 'const ' + type
+            return type, name
+
         new_args = []
         for arg in args:
             # Simple arg declaration of form "<type> <name>"
             if isinstance(arg, str):
-                t, _, name = arg.partition(' ')
+                print('string_arg: ' + arg)     # remove
+                t, name = split_type_and_name(arg)
                 new_args.append({'type': t, 'name': name})
             elif isinstance(arg, dict):
                 if 'arg' in arg:
-                    arg['type'], _, arg['name'] = arg['arg'].partition(' ')
+                    print('arg_arg: ' + arg['arg'])     # remove
+                    arg['type'], arg['name'] = split_type_and_name(arg['arg'])
                     del arg['arg']
                 new_args.append(arg)
             else:
@@ -153,6 +162,10 @@ class cwrap(object):
         result = []
         for arg in arguments:
             accessor = self.get_arg_accessor(arg, option)
+            print(arg) ## remove
+            print(accessor) ## remove
+            print(base_fn_name) ##remove
+            print(option)
             res = getattr(self, base_fn_name)(arg, option).substitute(arg=accessor)
             for plugin in self.plugins:
                 res = getattr(plugin, plugin_fn_name)(res, arg, accessor)

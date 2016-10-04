@@ -22,7 +22,7 @@ function build() {
               -DCMAKE_CXX_FLAGS="$C_FLAGS $CPP_FLAGS" \
               -DCUDA_NVCC_FLAGS="$BASIC_C_FLAGS" \
               -DTH_INCLUDE_PATH="$INSTALL_DIR/include" \
-              -DTH_LIB_PATH="$INSTALL_DIR/lib"
+                  -DTH_LIB_PATH="$INSTALL_DIR/lib"
   make install -j$(getconf _NPROCESSORS_ONLN)
   cd ../..
 
@@ -39,6 +39,7 @@ function build() {
 mkdir -p tmp_install
 build TH
 build THNN
+build THIMG
 
 if [[ "$1" == "--with-cuda" ]]; then
     build THC
@@ -52,5 +53,6 @@ build libshm
 cp $INSTALL_DIR/lib/* .
 cp THNN/generic/THNN.h .
 cp THCUNN/THCUNN.h .
+cp THIMG/generic/THIMG.h .
 cp -r tmp_install/include .
 cp $INSTALL_DIR/bin/* .
