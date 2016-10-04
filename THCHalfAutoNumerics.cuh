@@ -72,6 +72,10 @@ inline __host__ __device__ bool operator<=(half a, half b) {
   return THCNumerics<half>::le(a, b);
 }
 
+inline __host__ __device__ bool operator<=(half a, int b) {
+  return THCNumerics<half>::le(a, ScalarConvert<int, half>::to(b));
+}
+
 inline __host__ __device__ bool operator<(half a, int b) {
   return THCNumerics<half>::lt(a, ScalarConvert<int, half>::to(b));
 }

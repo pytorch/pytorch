@@ -81,21 +81,6 @@ TH_API void THNN_CudaDistKLDivCriterion_updateGradInput(
           THCudaTensor *gradInput,
           bool sizeAverage);
 
-TH_API void THNN_CudaELU_updateOutput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *output,
-          float alpha,
-          bool inplace);
-TH_API void THNN_CudaELU_updateGradInput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *gradOutput,
-          THCudaTensor *gradInput,
-          THCudaTensor *output,
-          float alpha,
-          bool inplace);
-
 TH_API void THNN_CudaL1Cost_updateOutput(
           THCState *state,
           THCudaTensor *input,

@@ -13,6 +13,22 @@ TH_API void THNN_(Abs_updateGradInput)(
                   THCTensor *gradOutput,
                   THCTensor *gradInput);
 
+TH_API void THNN_(ELU_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *output,
+                  real alpha,
+                  bool inplace);
+
+TH_API void THNN_(ELU_updateGradInput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *gradOutput,
+                  THCTensor *gradInput,
+                  THCTensor *output,
+                  real alpha,
+                  bool inplace);
+
 TH_API void THNN_(HardTanh_updateOutput)(
                   THCState *state,
                   THCTensor *input,
