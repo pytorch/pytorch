@@ -14,4 +14,4 @@
 #include "font.c"
 
 #include "generic/image.c"
-#include "THGenerateFloatTypes.h"
+#include "THGenerateAllTypes.h"

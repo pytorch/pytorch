@@ -225,16 +225,6 @@ THNN = Extension("torch._thnn._THNN",
 )
 extensions.append(THNN)
 
-THIMG = Extension("torch._image",
-    libraries=['TH', 'THIMG'],
-    sources=['torch/csrc/image/THIMG.cpp'],
-    language='c++',
-    extra_compile_args=extra_compile_args,
-    include_dirs=include_dirs,
-    extra_link_args=extra_link_args + [make_relative_rpath('../lib')]
-)
-extensions.append(THIMG)
-
 if WITH_CUDA:
     THCUNN = Extension("torch._thnn._THCUNN",
         libraries=['TH', 'THC', 'THCUNN'],
@@ -245,6 +235,16 @@ if WITH_CUDA:
         extra_link_args=extra_link_args + [make_relative_rpath('../lib')]
     )
     extensions.append(THCUNN)
+
+THIMG = Extension("torch._image",
+    libraries=['TH', 'THIMG'],
+    sources=['torch/csrc/image/THIMG.cpp'],
+    language='c++',
+    extra_compile_args=extra_compile_args,
+    include_dirs=include_dirs,
+    extra_link_args=extra_link_args + [make_relative_rpath('lib')]
+)
+extensions.append(THIMG)
 
 setup(name="torch", version="0.1",
     ext_modules=extensions,

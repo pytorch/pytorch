@@ -93,7 +93,6 @@ def wrap_image():
     with open('torch/csrc/image/THIMG.cwrap', 'w') as f:
         f.write(wrapper)
     cwrap('torch/csrc/image/THIMG.cwrap', plugins=[
-        StandaloneExtension('torch._image._THIMG'),
+        StandaloneExtension('torch._image'),
         NullableArguments(),
     ])
-
