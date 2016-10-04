@@ -86,6 +86,18 @@ TH_API void THNN_(Sigmoid_updateGradInput)(
                   THCTensor *gradInput,
                   THCTensor *output);
 
+TH_API void THNN_(SoftMax_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *output);
+
+TH_API void THNN_(SoftMax_updateGradInput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *gradOutput,
+                  THCTensor *gradInput,
+                  THCTensor *output);
+
 TH_API void THNN_(SoftPlus_updateOutput)(
                   THCState *state,
                   THCTensor *input,

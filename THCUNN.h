@@ -256,17 +256,6 @@ TH_API void THNN_CudaSmoothL1Criterion_updateGradInput(
           THCudaTensor *gradInput,
           bool sizeAverage);
 
-TH_API void THNN_CudaSoftMax_updateOutput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *output);
-TH_API void THNN_CudaSoftMax_updateGradInput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *gradOutput,
-          THCudaTensor *gradInput,
-          THCudaTensor *output);
-
 TH_API void THNN_CudaTemporalConvolution_updateOutput(
           THCState *state,
           THCudaTensor *input,

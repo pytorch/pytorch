@@ -139,5 +139,18 @@ inline __host__ __device__ double operator/(half a, double b) {
   return ScalarConvert<half, double>::to(a) / b;
 }
 
+inline __device__ half fastExpIfAvail(half a) {
+  return ScalarConvert<float, half>::to(__expf(ScalarConvert<half, float>::to(a)));
+}
+
+inline __device__ float fastExpIfAvail(float a) {
+  return __expf(a);
+}
+
+inline __device__ double fastExpIfAvail(double a) {
+  // should we convert down to float to be able to use __expf?
+  return THCNumerics<double>::exp(a);
+}
+
 #endif
 #endif
