@@ -406,6 +406,68 @@ class TestCuda(TestCase):
             self.assertEqual(x, y)
             self.assertEqual(torch.cuda.initial_seed(), 2)
 
+    def test_serialization(self):
+        x = torch.randn(4, 4).cuda()
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(x, f)
+            f.seek(0)
+            x_copy = torch.load(f)
+        self.assertEqual(x_copy, x)
+        self.assertIs(type(x_copy), type(x))
+        self.assertEqual(x_copy.get_device(), x.get_device())
+
+    def test_serialization_empty(self):
+        x = [torch.randn(4, 4).cuda(), torch.cuda.FloatTensor()]
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(x, f)
+            f.seek(0)
+            x_copy = torch.load(f)
+        for original, copy in zip(x, x_copy):
+            self.assertEqual(copy, original)
+            self.assertIs(type(copy), type(original))
+            self.assertEqual(copy.get_device(), original.get_device())
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "detected only one GPU")
+    def test_multigpu_serialization(self):
+        x = [torch.randn(4, 4).cuda(0), torch.randn(4, 4).cuda(1)]
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(x, f)
+            f.seek(0)
+            x_copy = torch.load(f)
+        for original, copy in zip(x, x_copy):
+            self.assertEqual(copy, original)
+            self.assertIs(type(copy), type(original))
+            self.assertEqual(copy.get_device(), original.get_device())
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "detected only one GPU")
+    def test_multigpu_serialization_remap(self):
+        x = [torch.randn(4, 4).cuda(0), torch.randn(4, 4).cuda(1)]
+        def gpu_remap(storage, location):
+            if location == 'cuda:1':
+                return storage.cuda(0)
+
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(x, f)
+            f.seek(0)
+            x_copy = torch.load(f, map_location=gpu_remap)
+
+        for original, copy in zip(x, x_copy):
+            self.assertEqual(copy, original)
+            self.assertIs(type(copy), type(original))
+            self.assertEqual(copy.get_device(), 0)
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "detected only one GPU")
+    def test_multigpu_serialization_remap_dict(self):
+        x = [torch.randn(4, 4).cuda(0), torch.randn(4, 4).cuda(1)]
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(x, f)
+            f.seek(0)
+            x_copy = torch.load(f, map_location={'cuda:1': 'cuda:0'})
+        for original, copy in zip(x, x_copy):
+            self.assertEqual(copy, original)
+            self.assertIs(type(copy), type(original))
+            self.assertEqual(copy.get_device(), 0)
+
 
 for decl in tests:
     for t in types:

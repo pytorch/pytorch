@@ -25,6 +25,7 @@
 #include "Tensor.h"
 #include "Module.h"
 #include "utils.h" // This requires defined Storage and Tensor types
+#include "byte_order.h"
 
 #ifdef _THP_CORE
 #include "serialization.h"

@@ -1,5 +1,7 @@
 #include "byte_order.h"
 
+#include <string.h>
+
 static inline uint16_t decodeUInt16LE(const uint8_t *data) {
   return (data[0]<<0) | (data[1]<<8);
 }
@@ -79,3 +81,71 @@ void THP_decodeDoubleBuffer(double* dst, const uint8_t* src, THPByteOrder order,
     src += sizeof(double);
   }
 }
+
+template<size_t size>
+static void swapBytes(uint8_t *ptr)
+{
+  uint8_t tmp;
+  for (size_t i = 0; i < size / 2; i++) {
+    tmp = ptr[i];
+    ptr[i] = ptr[size-i];
+    ptr[size-i] = tmp;
+  }
+}
+
+
+void THP_encodeInt16Buffer(uint8_t* dst, const int16_t* src, THPByteOrder order, size_t len)
+{
+  memcpy(dst, src, sizeof(int16_t) * len);
+  if (order != THP_nativeByteOrder()) {
+    for (size_t i = 0; i < len; i++) {
+      swapBytes<sizeof(int16_t)>(dst);
+      dst += sizeof(int16_t);
+    }
+  }
+}
+
+void THP_encodeInt32Buffer(uint8_t* dst, const int32_t* src, THPByteOrder order, size_t len)
+{
+  memcpy(dst, src, sizeof(int32_t) * len);
+  if (order != THP_nativeByteOrder()) {
+    for (size_t i = 0; i < len; i++) {
+      swapBytes<sizeof(int32_t)>(dst);
+      dst += sizeof(int32_t);
+    }
+  }
+}
+
+void THP_encodeInt64Buffer(uint8_t* dst, const int64_t* src, THPByteOrder order, size_t len)
+{
+  memcpy(dst, src, sizeof(int64_t) * len);
+  if (order != THP_nativeByteOrder()) {
+    for (size_t i = 0; i < len; i++) {
+      swapBytes<sizeof(int64_t)>(dst);
+      dst += sizeof(int64_t);
+    }
+  }
+}
+
+void THP_encodeFloatBuffer(uint8_t* dst, const float* src, THPByteOrder order, size_t len)
+{
+  memcpy(dst, src, sizeof(float) * len);
+  if (order != THP_nativeByteOrder()) {
+    for (size_t i = 0; i < len; i++) {
+      swapBytes<sizeof(float)>(dst);
+      dst += sizeof(float);
+    }
+  }
+}
+
+void THP_encodeDoubleBuffer(uint8_t* dst, const double* src, THPByteOrder order, size_t len)
+{
+  memcpy(dst, src, sizeof(double) * len);
+  if (order != THP_nativeByteOrder()) {
+    for (size_t i = 0; i < len; i++) {
+      swapBytes<sizeof(double)>(dst);
+      dst += sizeof(double);
+    }
+  }
+}
+
