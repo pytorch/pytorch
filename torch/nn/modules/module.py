@@ -105,6 +105,18 @@ class Module(object):
                             "computation at every forward pass.").format(name))
         return object.__setattr__(self, name, value)
 
+    def parameter_dict(self, destination=None, prefix=''):
+        if destination is None:
+            destination = OrderedDict()
+        for name, param in self._parameters.items():
+            if param is not None:
+                destination[prefix + name] = param
+        return destination
+
+    def load_parameter_dict(self, param_dict):
+        for name, param in self._parameters.items():
+            self._parameters[name] = param_dict.get(name, param)
+
     def parameters(self, memo=None):
         if memo is None:
             memo = set()

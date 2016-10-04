@@ -59,6 +59,22 @@ class Container(Module):
                 return modules[name]
         return Module.__getattr__(self, name)
 
+    def parameter_dict(self, destination=None, prefix=''):
+        result = super(Container, self).parameter_dict(destination, prefix)
+        for name, module in self._modules.items():
+            if module is not None:
+                module.parameter_dict(result, prefix + name + '.')
+        return result
+
+    def load_parameter_dict(self, param_dict):
+        super(Container, self).load_parameter_dict(param_dict)
+        for name, module in self._modules.items():
+            if module is not None:
+                filtered_params = {param_name[len(name)+1:]: param
+                        for param_name, param in param_dict.items()
+                        if param_name.startswith(name)}
+                module.load_parameter_dict(filtered_params)
+
     def parameters(self, memo=None):
         if memo is None:
             memo = set()

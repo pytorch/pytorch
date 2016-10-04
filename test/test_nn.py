@@ -495,6 +495,57 @@ class TestNN(NNTestCase):
         self.assertEqual(out.get_device(), 1)
         self.assertEqual(out.data, expected_out)
 
+    def test_parameter_dict(self):
+        l = nn.Linear(5, 5)
+        block = nn.Container(
+            conv=nn.Conv2d(3, 3, 3, no_bias=True)
+        )
+        net = nn.Container(
+            linear1=l,
+            linear2=l,
+            block=block,
+            empty=None,
+        )
+        param_dict = net.parameter_dict()
+        self.assertEqual(len(param_dict), 5)
+        self.assertIn('linear1.weight', param_dict)
+        self.assertIn('linear1.bias', param_dict)
+        self.assertIn('linear2.weight', param_dict)
+        self.assertIn('linear2.bias', param_dict)
+        self.assertIn('block.conv.weight', param_dict)
+        self.assertNotIn('block.conv.bias', param_dict)
+        self.assertFalse(any(map(lambda k: k.startswith('empty'), param_dict.keys())))
+        for k, v in param_dict.items():
+            param = net
+            for component in k.split('.'):
+                param = getattr(param, component)
+            self.assertIs(v, param)
+
+        l = nn.Linear(5, 5)
+        param_dict = l.parameter_dict()
+        self.assertEqual(len(param_dict), 2)
+        self.assertIs(param_dict['weight'], l.weight)
+        self.assertIs(param_dict['bias'], l.bias)
+
+    def test_load_parameter_dict(self):
+        l = nn.Linear(5, 5)
+        block = nn.Container(
+            conv=nn.Conv2d(3, 3, 3, no_bias=True)
+        )
+        net = nn.Container(
+            linear1=l,
+            linear2=l,
+            block=block,
+            empty=None,
+        )
+        param_dict = {
+            'linear1.weight': Variable(torch.ones(5, 5)),
+            'block.conv.bias': Variable(torch.range(1, 3)),
+        }
+        net.load_parameter_dict(param_dict)
+        self.assertIs(net.linear1.weight, param_dict['linear1.weight'])
+        self.assertIs(net.block.conv.bias, param_dict['block.conv.bias'])
+
 
 def add_test(test):
     test_name = test.get_name()
