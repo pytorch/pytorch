@@ -1,4 +1,3 @@
-from collections import defaultdict
 from .optimizer import Optimizer
 
 class SGD(Optimizer):
@@ -8,7 +7,15 @@ class SGD(Optimizer):
         self.lr = lr
         self.momentum = momentum
         self.dampening = dampening or 0
-        self.state = defaultdict(dict)
+
+    def __getstate__(self):
+        state = super(SGD, self).__getstate__()
+        state.update(
+            lr=self.lr,
+            momentum=self.momentum,
+            dampening=self.dampening
+        )
+        return state
 
     def step(self, forward_closure):
         loss = self._forward_backward(forward_closure)
