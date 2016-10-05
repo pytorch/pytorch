@@ -13,5 +13,11 @@
 
 #include "font.c"
 
+#define THIMG_ARGCHECK(COND, ARG, T, FORMAT)  \
+  if (!(COND)) {                              \
+    THDescBuff s1 = THTensor_(sizeDesc)(T);   \
+    THArgCheck(COND, ARG, FORMAT, s1.str);    \
+  }
+
 #include "generic/image.c"
 #include "THGenerateAllTypes.h"
