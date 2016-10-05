@@ -18,10 +18,10 @@ m = nn.AvgPool2d(3, stride=2)
 # pool of non-square window
 m = nn.AvgPool2d((3, 2), stride=(2, 1))
 input = autograd.Variable(torch.randn(20, 16, 50, 32))
-output = m.forward(input)
+output = m(input)
 ```
 
-planes. 
+planes.
 
 
 
@@ -49,10 +49,10 @@ m = nn.AvgPool3d(3, stride=2)
 # pool of non-square window
 m = nn.AvgPool3d((3, 2, 2), stride=(2, 1, 2))
 input = autograd.Variable(torch.randn(20, 16, 50,44, 31))
-output = m.forward(input)
+output = m(input)
 ```
 
-planes. 
+planes.
 
 
 ### Constructor Arguments
@@ -83,7 +83,7 @@ m = nn.BatchNorm1d(100)
 # Without Learnable Parameters
 m = nn.BatchNorm1d(100, affine=False)
 input = autograd.Variable(torch.randn(20, 100))
-output = m.forward(input)
+output = m(input)
 ```
 
 
@@ -93,7 +93,7 @@ the mini-batches and gamma and beta are learnable parameter vectors
 of size N (where N is the input size).
 
 During training, this layer keeps a running estimate of its computed mean
-and variance. The running sum is kept with a default momentum of 0.1 
+and variance. The running sum is kept with a default momentum of 0.1
 During evaluation, this running mean/variance is used for normalization.
 
 
@@ -130,7 +130,7 @@ m = nn.BatchNorm2d(100)
 # Without Learnable Parameters
 m = nn.BatchNorm2d(100, affine=False)
 input = autograd.Variable(torch.randn(20, 100, 35, 45))
-output = m.forward(input)
+output = m(input)
 ```
 
 
@@ -140,7 +140,7 @@ the mini-batches and gamma and beta are learnable parameter vectors
 of size N (where N is the input size).
 
 During training, this layer keeps a running estimate of its computed mean
-and variance. The running sum is kept with a default momentum of 0.1 
+and variance. The running sum is kept with a default momentum of 0.1
 During evaluation, this running mean/variance is used for normalization.
 
 
@@ -177,7 +177,7 @@ m = nn.BatchNorm3d(100)
 # Without Learnable Parameters
 m = nn.BatchNorm3d(100, affine=False)
 input = autograd.Variable(torch.randn(20, 100, 35, 45, 10))
-output = m.forward(input)
+output = m(input)
 ```
 
 
@@ -187,7 +187,7 @@ the mini-batches and gamma and beta are learnable parameter vectors
 of size N (where N is the input size).
 
 During training, this layer keeps a running estimate of its computed mean
-and variance. The running sum is kept with a default momentum of 0.1 
+and variance. The running sum is kept with a default momentum of 0.1
 During evaluation, this running mean/variance is used for normalization.
 
 
@@ -220,7 +220,7 @@ This is the base container class for all neural networks you would define.
             conv1 = nn.Conv2d(1, 20, 5),
             relu  = nn.ReLU()
          )
-    def __call__(self, input):
+    def forward(self, input):
         output = self.relu(self.conv1(x))
         return output
  model = Net()
@@ -228,12 +228,12 @@ This is the base container class for all neural networks you would define.
 
 ```python
 # one can add modules to the container after construction
-model.add_module('pool1', nn.MaxPool2d(2, 2)
+model.add_module('pool1', nn.MaxPool2d(2, 2))
 ```
 
 You will subclass your container from this class.
-In the constructor you define the modules that you would want to use, 
-and in the __call__ function you use the constructed modules in 
+In the constructor you define the modules that you would want to use,
+and in the "forward" function you use the constructed modules in
 your operations.
 
 To make it easier to understand, given is a small example.
@@ -251,18 +251,18 @@ Applies a 1D convolution over an input signal composed of several input
 ```python
 The output value of the layer with input (b x iC x W) and output (b x oC x oW)
 can be precisely described as:
-output[b_i][oc_i][w_i] = bias[oc_i] 
-            + sum_iC sum_{ow = 0, oW-1} sum_{kw = 0 to kW-1} 
+output[b_i][oc_i][w_i] = bias[oc_i]
+            + sum_iC sum_{ow = 0, oW-1} sum_{kw = 0 to kW-1}
                 weight[oc_i][ic_i][kw] * input[b_i][ic_i][stride_w * ow + kw)]
 ```
 
 ```python
 m = nn.Conv1d(16, 33, 3, stride=2)
 input = autograd.Variable(torch.randn(20, 16, 50))
-output = m.forward(input)
+output = m(input)
 ```
 
-planes. 
+planes.
 
 
 Note that depending of the size of your kernel, several (of the last)
@@ -294,8 +294,8 @@ Applies a 2D convolution over an input image composed of several input
 ```python
 The output value of the layer with input (b x iC x H x W) and output (b x oC x oH x oW)
 can be precisely described as:
-output[b_i][oc_i][h_i][w_i] = bias[oc_i] 
-            + sum_iC sum_{oh = 0, oH-1} sum_{ow = 0, oW-1} sum_{kh = 0 to kH-1} sum_{kw = 0 to kW-1} 
+output[b_i][oc_i][h_i][w_i] = bias[oc_i]
+            + sum_iC sum_{oh = 0, oH-1} sum_{ow = 0, oW-1} sum_{kh = 0 to kH-1} sum_{kw = 0 to kW-1}
                 weight[oc_i][ic_i][kh][kw] * input[b_i][ic_i][stride_h * oh + kh)][stride_w * ow + kw)]
 ```
 
@@ -307,10 +307,10 @@ m = nn.Conv2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2))
 # non-square kernels and unequal stride and with padding and dilation
 m = nn.Conv2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(3, 1))
 input = autograd.Variable(torch.randn(20, 16, 50, 100))
-output = m.forward(input)
+output = m(input)
 ```
 
-planes. 
+planes.
 
 
 Note that depending of the size of your kernel, several (of the last)
@@ -348,10 +348,10 @@ m = nn.Conv3d(16, 33, 3, stride=2)
 # non-square kernels and unequal stride and with padding
 m = nn.Conv3d(16, 33, (3, 5, 2), stride=(2, 1, 1), padding=(4, 2, 0))
 input = autograd.Variable(torch.randn(20, 16, 10, 50, 100))
-output = m.forward(input)
+output = m(input)
 ```
 
-planes. 
+planes.
 
 Note that depending of the size of your kernel, several (of the last)
 columns or rows of the input image might be lost. It is up to the user
@@ -367,7 +367,6 @@ out_channels |  | The number of output channels the convolution layer will produ
 kernel_size |  | the size of the convolving kernel. Can be a single number k (for a square kernel of k x k x k) or a tuple (kt x kh x kw)
 stride | 1 | the stride of the convolving kernel. Can be a single number s or a tuple (kt x sh x sw).
 padding | 0 | implicit zero padding on the input. Can be a single number s or a tuple.
-no_bias | False | If set to true, the layer will not learn an additive bias.
 
 ### Expected Shape
        | Shape | Description 
@@ -384,7 +383,7 @@ Randomly zeroes some of the elements of the input tensor.
 ```python
 m = nn.Dropout(p=0.2)
 input = autograd.Variable(torch.randn(20, 16))
-output = m.forward(input)
+output = m(input)
 ```
 
 The elements to zero are randomized on every forward call.
@@ -409,7 +408,7 @@ Randomly zeroes whole channels of the input tensor.
 ```python
 m = nn.Dropout2d(p=0.2)
 input = autograd.Variable(torch.randn(20, 16, 32, 32))
-output = m.forward(input)
+output = m(input)
 ```
 
 The input is 4D (batch x channels, height, width) and each channel 
@@ -445,7 +444,7 @@ Randomly zeroes whole channels of the input tensor.
 ```python
 m = nn.Dropout3d(p=0.2)
 input = autograd.Variable(torch.randn(20, 16, 4, 32, 32))
-output = m.forward(input)
+output = m(input)
 ```
 
 The input is 5D (batch x channels, depth, height, width) and each channel 
@@ -474,7 +473,7 @@ Applies element-wise, ELU(x) = max(0,x) + min(0, alpha * (exp(x) - 1))
 m = nn.ELU()
 input = autograd.Variable(torch.randn(2))
 print(input)
-print(m.forward(input))
+print(m(input))
 ```
 
 
@@ -537,10 +536,10 @@ m = nn.FractionalMaxPool2d(3, output_size=(13, 12))
 # pool of square window and target output size being half of input image size
 m = nn.FractionalMaxPool2d(3, output_ratio=(0.5, 0.5))
 input = autograd.Variable(torch.randn(20, 16, 50, 32))
-output = m.forward(input)
+output = m(input)
 ```
 
-planes. 
+planes.
 
 Fractiona MaxPooling is described in detail in the paper ["Fractional Max-Pooling" by Ben Graham](http://arxiv.org/abs/1412.6071)
 The max-pooling operation is applied in kHxkW regions by a stochastic
@@ -555,7 +554,7 @@ Parameter | Default | Description
 kernel_size |  | the size of the window to take a max over. Can be a single number k (for a square kernel of k x k) or a tuple (kh x kw)
 output_size |  | the target output size of the image of the form oH x oW. Can be a tuple (oH, oW) or a single number oH for a square image oH x oH
 output_ratio |  | If one wants to have an output size as a ratio of the input size, this option can be given. This has to be a number or tuple in the range (0, 1)
-return_indices | False         | if True, will return the indices along with the outputs. Useful to pass to nn.MaxUnpool2d .
+return_indices | False | if True, will return the indices along with the outputs. Useful to pass to nn.MaxUnpool2d .
 
 ### Expected Shape
        | Shape | Description 
@@ -572,10 +571,10 @@ m = nn.FullConv2d(16, 33, 3, stride=2)
 # non-square kernels and unequal stride and with padding
 m = nn.Conv2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2))
 input = autograd.Variable(torch.randn(20, 16, 50, 100))
-output = m.forward(input)
+output = m(input)
 ```
 
-planes. 
+planes.
 The deconvolution operator multiplies each input value element-wise by a learnable kernel,
 and sums over the outputs from all input feature planes.
 This module can be seen as the exact reverse of the Conv2d module.
@@ -611,10 +610,10 @@ m = nn.FullConv3d(16, 33, 3, stride=2)
 # non-square kernels and unequal stride and with padding
 m = nn.Conv3d(16, 33, (3, 5, 2), stride=(2, 1, 1), padding=(0, 4, 2))
 input = autograd.Variable(torch.randn(20, 16, 10, 50, 100))
-output = m.forward(input)
+output = m(input)
 ```
 
-planes. 
+planes.
 The deconvolution operator multiplies each input value element-wise by a learnable kernel,
 and sums over the outputs from all input feature planes.
 This module can be seen as the exact reverse of the Conv3d module.
@@ -630,7 +629,6 @@ kernel_size |  | the size of the convolving kernel. Can be a single number k (fo
 stride | 1 | the stride of the convolving kernel. Can be a single number or a tuple (st x sh x sw).
 padding | 0 | implicit zero padding on the input. Can be a single number or a tuple.
 output_padding | 0 | A padding of 0 or 1 pixels that should be added to the output. Can be a single number or a tuple.
-no_bias | False | If set to true, the layer will not learn an additive bias.
 
 ### Expected Shape
        | Shape | Description 
@@ -648,7 +646,7 @@ Applies the hard shrinkage function element-wise
 m = nn.Hardshrink()
 input = autograd.Variable(torch.randn(2))
 print(input)
-print(m.forward(input))
+print(m(input))
 ```
 
 Hardshrink is defined as f(x) = x, if x >  lambda
@@ -679,7 +677,7 @@ Applies the HardTanh function element-wise
 m = nn.HardTanh(-2, 2)
 input = autograd.Variable(torch.randn(2))
 print(input)
-print(m.forward(input))
+print(m(input))
 ```
 
 HardTanh is defined as:
@@ -716,10 +714,10 @@ m = nn.LPPool2d(2, 3, stride=2)
 # pool of non-square window of power 1.2
 m = nn.LPPool2d(1.2, (3, 2), stride=(2, 1))
 input = autograd.Variable(torch.randn(20, 16, 50, 32))
-output = m.forward(input)
+output = m(input)
 ```
 
-planes. 
+planes.
 On each window, the function computed is: f(X) = pow(sum(pow(X, p)), 1/p)
 At p = infinity, one gets Max Pooling
 At p = 1, one gets Average Pooling
@@ -745,7 +743,7 @@ Applies element-wise, f(x) = max(0, x) + negative_slope * min(0, x)
 m = nn.LeakyReLU(0.1)
 input = autograd.Variable(torch.randn(2))
 print(input)
-print(m.forward(input))
+print(m(input))
 ```
 
 
@@ -771,7 +769,7 @@ Applies a linear transformation to the incoming data, y = Ax + b
 ```python
 m = nn.Linear(20, 30)
 input = autograd.Variable(torch.randn(128, 20))
-output = m.forward(input)
+output = m(input)
 print(output.size())
 ```
 
@@ -802,7 +800,7 @@ Applies element-wise LogSigmoid(x) = log( 1 / (1 + exp(-x_i)))
 m = nn.LogSigmoid()
 input = autograd.Variable(torch.randn(2))
 print(input)
-print(m.forward(input))
+print(m(input))
 ```
 
 
@@ -824,7 +822,7 @@ Applies the Log(Softmax(x)) function to an n-dimensional input Tensor.
 m = nn.LogSoftmax()
 input = autograd.Variable(torch.randn(2, 3))
 print(input)
-print(m.forward(input))
+print(m(input))
 ```
 
 The LogSoftmax formulation can be simplified as
@@ -855,10 +853,10 @@ output[b_i][c_i][w_i] = max_{k=1, K} input[b_i][c_i][stride_w * w_i + k)]
 # pool of size=3, stride=2
 m = nn.MaxPool1d(3, stride=2)
 input = autograd.Variable(torch.randn(20, 16, 50))
-output = m.forward(input)
+output = m(input)
 ```
 
-planes. 
+planes.
 
 
 
@@ -894,10 +892,10 @@ m = nn.MaxPool2d(3, stride=2)
 # pool of non-square window
 m = nn.MaxPool2d((3, 2), stride=(2, 1))
 input = autograd.Variable(torch.randn(20, 16, 50, 32))
-output = m.forward(input)
+output = m(input)
 ```
 
-planes. 
+planes.
 
 
 
@@ -927,10 +925,10 @@ m = nn.MaxPool3d(3, stride=2)
 # pool of non-square window
 m = nn.MaxPool3d((3, 2, 2), stride=(2, 1, 2))
 input = autograd.Variable(torch.randn(20, 16, 50,44, 31))
-output = m.forward(input)
+output = m(input)
 ```
 
-planes. 
+planes.
 
 
 ### Constructor Arguments
@@ -955,11 +953,11 @@ Computes the inverse operation of MaxPool2d
 
 ```python
 # pool of square window of size=3, stride=2
-m = nn.MaxPool2d(3, stride=2, return_indices = True)
-mu = nn.MaxUnpool2d(3, stride=2)
-input, indices = autograd.Variable(torch.randn(20, 16, 50, 32))
-output = m.forward(input)
-unpooled_output = m2.forward(output, indices)
+m = nn.MaxPool2d(2, stride=2, return_indices = True)
+mu = nn.MaxUnpool2d(2, stride=2)
+input = autograd.Variable(torch.randn(20, 16, 50, 32))
+output, indices = m(input)
+unpooled_output = mu.forward(output, indices)
 ```
 
 MaxPool2d is not invertible, as the locations of the max locations are lost.
@@ -989,7 +987,7 @@ Computes the inverse operation of MaxPool3d
 m = nn.MaxPool3d(3, stride=2, return_indices = True)
 mu = nn.MaxUnpool3d(3, stride=2)
 input, indices = autograd.Variable(torch.randn(20, 16, 50, 32, 15))
-output = m.forward(input)
+output = m(input)
 unpooled_output = m2.forward(output, indices)
 ```
 
@@ -1019,7 +1017,7 @@ Applies element-wise the function PReLU(x) = max(0,x) + a * min(0,x)
 m = nn.PReLU()
 input = autograd.Variable(torch.randn(2))
 print(input)
-print(m.forward(input))
+print(m(input))
 ```
 
 Here "a" is a learnable parameter.
@@ -1054,7 +1052,7 @@ Applies the rectified linear unit function element-wise ReLU(x)= max(0,x)
 m = nn.ReLU()
 input = autograd.Variable(torch.randn(2))
 print(input)
-print(m.forward(input))
+print(m(input))
 ```
 
 
@@ -1082,7 +1080,7 @@ Applies the element-wise function ReLU6(x) = min( max(0,x), 6)
 m = nn.ReLU6()
 input = autograd.Variable(torch.randn(2))
 print(input)
-print(m.forward(input))
+print(m(input))
 ```
 
 
@@ -1110,7 +1108,7 @@ Applies the element-wise function sigmoid(x) = 1 / ( 1 + exp(-x))
 m = nn.Sigmoid()
 input = autograd.Variable(torch.randn(2))
 print(input)
-print(m.forward(input))
+print(m(input))
 ```
 
 
@@ -1132,7 +1130,7 @@ Applies the Softmax function to an n-dimensional input Tensor
 m = nn.Softmax()
 input = autograd.Variable(torch.randn(2, 3))
 print(input)
-print(m.forward(input))
+print(m(input))
 ```
 
 rescaling them so that the elements of the n-dimensional output Tensor
@@ -1166,7 +1164,7 @@ m = nn.Softmax2d()
 # you softmax over the 2nd dimension
 input = autograd.Variable(torch.randn(2, 3, 12, 13))
 print(input)
-print(m.forward(input))
+print(m(input))
 ```
 
 When given an image of Channels x Height x Width, it will
@@ -1190,7 +1188,7 @@ Applies the Softmin function to an n-dimensional input Tensor
 m = nn.Softmin()
 input = autograd.Variable(torch.randn(2, 3))
 print(input)
-print(m.forward(input))
+print(m(input))
 ```
 
 rescaling them so that the elements of the n-dimensional output Tensor
@@ -1217,7 +1215,7 @@ Applies element-wise SoftPlus(x) = 1/beta * log(1 + exp(beta * x_i))
 m = nn.Softplus()
 input = autograd.Variable(torch.randn(2))
 print(input)
-print(m.forward(input))
+print(m(input))
 ```
 
 SoftPlus is a smooth approximation to the ReLU function and can be used
@@ -1250,7 +1248,7 @@ Applies the soft shrinkage function elementwise
 m = nn.Softshrink()
 input = autograd.Variable(torch.randn(2))
 print(input)
-print(m.forward(input))
+print(m(input))
 ```
 
 SoftShrinkage operator is defined as:
@@ -1281,7 +1279,7 @@ Applies element-wise, the function Softsign(x) = x / (1 + |x|)
 m = nn.Softsign()
 input = autograd.Variable(torch.randn(2))
 print(input)
-print(m.forward(input))
+print(m(input))
 ```
 
 
@@ -1303,7 +1301,7 @@ Applies element-wise, Tanh(x) = (exp(x) - exp(-x)) / (exp(x) + exp(-x))
 m = nn.Tanh()
 input = autograd.Variable(torch.randn(2))
 print(input)
-print(m.forward(input))
+print(m(input))
 ```
 
 
@@ -1325,7 +1323,7 @@ Applies element-wise, Tanhshrink(x) = x - Tanh(x)
 m = nn.Tanhshrink()
 input = autograd.Variable(torch.randn(2))
 print(input)
-print(m.forward(input))
+print(m(input))
 ```
 
 
@@ -1345,7 +1343,7 @@ Thresholds each element of the input Tensor
 m = nn.Threshold(0.1, 20)
 input = Variable(torch.randn(2))
 print(input)
-print(m.forward(input))
+print(m(input))
 ```
 
 Threshold is defined as:
