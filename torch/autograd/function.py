@@ -43,7 +43,7 @@ class Function(object):
         # Save the input, so _save_for_backward can access it
         self.input = input
         if not is_volatile:
-            self.needs_input_grad = tuple(arg.requires_grad for arg in input)
+            self.needs_input_grad = tuple(arg._requires_grad for arg in input)
             self.requires_grad = any(self.needs_input_grad)
             self.previous_functions = [(arg.creator or arg, id(arg)) for arg in input]
 
@@ -73,7 +73,7 @@ class Function(object):
             if self.non_differentiable is not None:
                 for var in output:
                     if var.data in self.non_differentiable:
-                        var.requires_grad = False
+                        var._requires_grad = False
 
         del self.input  # Remove unnecessary references to input
         del self.non_differentiable  # and output

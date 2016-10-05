@@ -24,10 +24,13 @@ class Variable(object):
         self.creator = creator
         self.volatile = volatile
         self.dirty = False
-        self.requires_grad = (not volatile) and requires_grad
+        self._requires_grad = (not volatile) and requires_grad
         self._data = tensor
         self._grad = None
         self.backward_hooks = OrderedDict()
+        if not torch.is_tensor(tensor):
+            raise ValueError("Variable objects can only wrap tensors but got " +
+                    torch.typename(tensor))
 
     @property
     def grad(self):
@@ -41,6 +44,17 @@ class Variable(object):
         if self.dirty:
             raise RuntimeError('Accessing data of a dirty variable!')
         return self._data
+
+    @property
+    def requires_grad(self):
+        return self._requires_grad
+
+    @requires_grad.setter
+    def requires_grad(self, value):
+        if self.creator is not None:
+            raise RuntimeError("you can only change requires_grad flags of "
+                    "leaf variables")
+        self._requires_grad = value
 
     def mark_dirty(self):
         self.dirty = True
