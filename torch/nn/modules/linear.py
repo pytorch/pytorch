@@ -30,8 +30,8 @@ class Linear(Module):
         self.out_features = out_features
 
         super(Linear, self).__init__(
-            weight=Variable(torch.Tensor(out_features, in_features)),
-            bias=Variable(torch.Tensor(out_features))
+            weight=torch.Tensor(out_features, in_features),
+            bias=torch.Tensor(out_features)
         )
         self.reset_parameters()
 

@@ -20,7 +20,7 @@ class InputVariableMixin(object):
             if isinstance(i, Variable):
                 return i
             elif torch.is_tensor(i):
-                return Variable(i)
+                return Variable(i, requires_grad=True)
             else:
                 return type(i)(map_variables(elem) for elem in i)
         return map_variables(input)
@@ -170,7 +170,7 @@ class TestNN(NNTestCase):
 
     def test_hooks(self):
         module = nn.Sigmoid()
-        input = Variable(torch.ones(5, 5))
+        input = Variable(torch.ones(5, 5), requires_grad=True)
 
         counter = {
             'forwards': 0,
@@ -258,14 +258,14 @@ class TestNN(NNTestCase):
         input.fill_(1-p)
 
         module = cls(p)
-        input_var = Variable(input)
+        input_var = Variable(input, requires_grad=True)
         output = module(input_var)
         self.assertLess(abs(output.data.mean() - (1-p)), 0.05)
         output.backward(input)
         self.assertLess(abs(input_var.grad.mean() - (1-p)), 0.05)
 
         module = cls(p, True)
-        input_var = Variable(input.clone())
+        input_var = Variable(input.clone(), requires_grad=True)
         output = module(input_var + 0)
         self.assertLess(abs(output.data.mean() - (1-p)), 0.05)
         output.backward(input)
@@ -381,7 +381,7 @@ class TestNN(NNTestCase):
         module = module_cls(2, return_indices=True)
         numel = 4 ** num_dim
         input = torch.range(1, numel).view(1, 1, *repeat(4, num_dim))
-        input_var = Variable(input)
+        input_var = Variable(input, requires_grad=True)
 
         # Check forward
         output, indices = module(input_var)

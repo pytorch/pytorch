@@ -46,8 +46,8 @@ class Conv1d(Module):
 
         kernel_elements = self.in_features * self.kernel_size
         super(Conv1d, self).__init__(
-            weight = Variable(torch.Tensor(out_features, in_features, kernel_size)),
-            bias = Variable(torch.Tensor(out_features))
+            weight = torch.Tensor(out_features, in_features, kernel_size),
+            bias = torch.Tensor(out_features)
         )
 
         self.reset_parameters()
@@ -119,9 +119,9 @@ class Conv2d(Module):
             self.dilh, self.dilw = _pair(dilation)
         self.groups = groups
 
-        weight = Variable(torch.Tensor(
-            self.out_channels, self.in_channels, self.kh, self.kw))
-        bias = None if no_bias else Variable(torch.Tensor(self.out_channels))
+        weight = torch.Tensor(self.out_channels, self.in_channels, self.kh,
+                self.kw)
+        bias = None if no_bias else torch.Tensor(self.out_channels)
         super(Conv2d, self).__init__(
             weight=weight,
             bias=bias,
@@ -244,9 +244,9 @@ class Conv3d(_Conv3dBase):
                 padding=0):
         super(Conv3d, self).__init__(in_channels, out_channels, kernel_size,
                 stride, padding)
-        weight = Variable(torch.Tensor(self.out_channels,
-                self.in_channels, self.kt, self.kh, self.kw))
-        bias = Variable(torch.Tensor(self.out_channels))
+        weight = torch.Tensor(self.out_channels, self.in_channels, self.kt,
+                self.kh, self.kw)
+        bias = torch.Tensor(self.out_channels)
         Module.__init__(self, weight=weight, bias=bias)
         self.reset_parameters()
 
@@ -291,9 +291,9 @@ class FullConv3d(_Conv3dBase):
                 padding=0):
         super(FullConv3d, self).__init__(in_channels, out_channels, kernel_size,
                 stride, padding)
-        weight = Variable(torch.Tensor(self.in_channels,
-                self.out_channels, self.kt, self.kh, self.kw))
-        bias = Variable(torch.Tensor(self.out_channels))
+        weight = torch.Tensor(self.in_channels, self.out_channels, self.kt,
+                self.kh, self.kw)
+        bias = torch.Tensor(self.out_channels)
         Module.__init__(self, weight=weight, bias=bias)
         self.reset_parameters()
 

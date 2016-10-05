@@ -58,7 +58,7 @@ class SimplePlugin(Plugin):
 class ModelMock(object):
     def __init__(self):
         self.num_calls = 0
-        self.output = Variable(torch.ones(1, 1))
+        self.output = Variable(torch.ones(1, 1), requires_grad=True)
 
     def __call__(self, i):
         self.num_calls += 1

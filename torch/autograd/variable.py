@@ -20,7 +20,8 @@ class Variable(object):
         'is_cuda',
     ]
 
-    def __init__(self, tensor, creator=None, volatile=False, requires_grad=True):
+    def __init__(self, tensor, creator=None, volatile=False,
+            requires_grad=False):
         self.creator = creator
         self.volatile = volatile
         self.dirty = False

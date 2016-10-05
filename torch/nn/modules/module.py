@@ -15,6 +15,10 @@ class Module(object):
         self.backward_hooks = OrderedDict()
         self.forward_hooks = OrderedDict()
         self.train = True
+        for name, param in self._parameters.items():
+            if param is not None and not isinstance(param, Variable):
+                param = Variable(param, requires_grad=True)
+            self._parameters[name] = param
 
     def forward(self, *input):
         raise NotImplementedError

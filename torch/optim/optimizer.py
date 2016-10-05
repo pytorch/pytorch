@@ -41,6 +41,8 @@ class Optimizer(object):
     def _forward_backward(self, forward_closure):
         for group in self.param_groups:
             for p in group['params']:
+                assert p.requires_grad, "optimizing a parameter that doesn't " \
+                    "require gradients"
                 p.grad.zero_()
         loss = forward_closure()
         loss.backward()
