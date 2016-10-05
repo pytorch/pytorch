@@ -414,5 +414,21 @@ struct TensorClampOp {
   const T maxValue;
 };
 
+template <typename T>
+struct TensorLerpOp {
+  TensorLerpOp(T w) : w(w) {}
+
+  __device__ __forceinline__ void operator()(T *out, T *a, T *b) {
+    *out = THCNumerics<T>::add(
+      *a,
+      THCNumerics<T>::mul(
+          w,
+          THCNumerics<T>::sub(*b, *a)
+        )
+    );
+  }
+
+  const T w;
+};
 
 #endif // THC_TENSORMATH_POINTWISE_CUH
