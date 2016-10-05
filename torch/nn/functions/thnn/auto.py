@@ -1,3 +1,4 @@
+from itertools import repeat
 from collections import defaultdict
 
 import torch
@@ -45,8 +46,8 @@ def _make_function_class_criterion(class_name, update_output, update_grad_input,
         grad_input = grad_output.new().resize_as_(input).zero_()
         getattr(self._backend, update_grad_input.name)(self._backend.library_state, input, target,
             grad_input, *self.additional_args)
-        if grad_output[0] != 1:
-            grad_input.mul_(grad_output)
+        grad_output_expanded = grad_output.resize_(*repeat(1, grad_input.dim()))
+        grad_input.mul_(grad_output.expand_as(grad_input))
         return grad_input, None
 
     return type(class_name, (Function,), dict(__init__=__init__, forward=forward, backward=backward))

@@ -10,7 +10,7 @@ class AccuracyMonitor(Monitor):
 
     def _get_value(self, iteration, input, target, output, loss):
         batch_size = input.size(0)
-        predictions = output.data.max(1)[1].type_as(target)
+        predictions = output.max(1)[1].type_as(target)
         correct = predictions.eq(target)
         if not hasattr(correct, 'sum'):
             correct = correct.cpu()

@@ -44,7 +44,7 @@ class Optimizer(object):
                 p.grad.zero_()
         loss = forward_closure()
         loss.backward()
-        return loss.data[0]
+        return loss
 
     def step(self, forward_closure):
         raise NotImplementedError
