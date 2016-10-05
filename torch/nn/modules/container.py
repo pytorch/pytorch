@@ -15,7 +15,7 @@ class Container(Module):
     """This is the base container class for all neural networks you would define.
     You will subclass your container from this class.
     In the constructor you define the modules that you would want to use,
-    and in the __call__ function you use the constructed modules in
+    and in the "forward" function you use the constructed modules in
     your operations.
 
     To make it easier to understand, given is a small example.
@@ -27,7 +27,7 @@ class Container(Module):
                 conv1 = nn.Conv2d(1, 20, 5),
                 relu  = nn.ReLU()
              )
-        def __call__(self, input):
+        def forward(self, input):
             output = self.relu(self.conv1(x))
             return output
      model = Net()
