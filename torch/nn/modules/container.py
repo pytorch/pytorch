@@ -1,9 +1,15 @@
+import os
+import warnings
+import difflib
+import inspect
 from collections import OrderedDict
 
 import torch
 from torch.autograd import Variable
 from .module import Module
 
+class SourceChangeWarning(Warning):
+    pass
 
 class Container(Module):
     """This is the base container class for all neural networks you would define.
@@ -38,6 +44,9 @@ class Container(Module):
     The container has one additional method `parameters()` which
     returns the list of learnable parameters in the container instance.
     """
+
+    dump_patches = False
+
     def __init__(self, **kwargs):
         super(Container, self).__init__()
         self._modules = OrderedDict()
@@ -103,6 +112,51 @@ class Container(Module):
         for module in self.children():
             module._apply(fn)
         return super(Container, self)._apply(fn)
+
+    def __getstate__(self):
+        dump_source = type(self) != Container
+        if dump_source:
+            self.source_file = inspect.getsourcefile(type(self))
+            self.source = inspect.getsource(type(self))
+        return self.__dict__
+
+    def __setstate__(self, state):
+        if 'source' in state:
+            original_source = state['source']
+            current_source = inspect.getsource(type(self))
+            if original_source != current_source:
+                if self.dump_patches:
+                    file_name = type(self).__name__ + '.patch'
+                    diff = difflib.unified_diff(
+                            current_source.split('\n'),
+                            original_source.split('\n'),
+                            state['source_file'],
+                            state['source_file'], lineterm="")
+                    lines = '\n'.join(diff)
+                    try:
+                        with open(file_name, 'a+') as f:
+                            file_size = f.seek(0, 2)
+                            f.seek(0)
+                            if file_size == 0:
+                                f.write(lines)
+                            elif file_size != len(lines) or f.read() != lines:
+                                raise IOError
+                        msg = ("Saved a reverse patch to " + file_name + ". "
+                            "Run `patch -p0 <" + file_name + "` to revert your "
+                            "changes.")
+                    except IOError as e:
+                        msg = ("Tried to save a patch, but couldn't create a "
+                            "writable file " + file_name + ". Make sure it "
+                            "doesn't exist and your working directory is "
+                            "writable.")
+                else:
+                    msg = ("you can retrieve the original source code by "
+                        "accessing the object's source attribute or set "
+                        "torch.nn.Container.dump_patches to True and use the "
+                        "patch tool to revert the changes.")
+                warnings.warn("source code of class " + torch.typename(self) +
+                        " has changed. " + msg, SourceChangeWarning)
+        self.__dict__.update(state)
 
 
 class Sequential(Container):
