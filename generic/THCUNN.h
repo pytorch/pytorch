@@ -113,6 +113,28 @@ TH_API void THNN_(PReLU_accGradParameters)(
                   long nOutputPlane,
                   real scale);
 
+TH_API void THNN_(RReLU_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *output,
+                  THCTensor *noise,
+                  double lower,
+                  double upper,
+                  bool train,
+                  bool inplace,
+                  void *generator);
+
+TH_API void THNN_(RReLU_updateGradInput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *gradOutput,
+                  THCTensor *gradInput,
+                  THCTensor *noise,
+                  double lower,
+                  double upper,
+                  bool train,
+                  bool inplace);
+
 TH_API void THNN_(Sigmoid_updateOutput)(
                   THCState *state,
                   THCTensor *input,

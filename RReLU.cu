@@ -1,4 +1,6 @@
 #include "THCUNN.h"
+#include "THCHalf.h"
+#include "THCHalfAutoNumerics.cuh"
 #include "common.h"
 #include <curand.h>
 #include <curand_kernel.h>
@@ -8,51 +10,72 @@
 #define BLOCK_SIZE 256
 #define NUM_BLOCKS(n) min((int)THCCeilDiv(n, (long) BLOCK_SIZE), MAX_NUM_BLOCKS)
 
+template<typename T>
+inline T __device__ curand_uniform_type(curandStateMtgp32 *state);
+
+template <>
+inline half __device__ curand_uniform_type<half>(curandStateMtgp32 *state) {
+  return ScalarConvert<float, half>::to(curand_uniform(state));
+}
+
+template <>
+inline float __device__ curand_uniform_type<float>(curandStateMtgp32 *state) {
+  return curand_uniform(state);
+}
+
+template <>
+inline double __device__ curand_uniform_type<double>(curandStateMtgp32 *state) {
+  return curand_uniform_double(state);
+}
+
+template <typename T>
 __global__ void rreluUpdateOutputTrain(int n, curandStateMtgp32 *state,
-  float *input, float* noise, float *output, double a, double b)
+  T *input, T* noise, T *output, double a, double b)
 {
   CUDA_KERNEL_LOOP(i, n)
   {
     if (input[i] <= 0)
     {
-      float r = curand_uniform(&state[blockIdx.x]);
-      r = r * (b-a) + a;
+      T r = curand_uniform_type<T>(&state[blockIdx.x]);
+      r = ScalarConvert<double, T>::to(r * (b-a) + a);
       output[i] = input[i] * r;
       noise[i] = r;
     }
     else
     {
       output[i] = input[i];
-      noise[i] = 1;
+      noise[i] = ScalarConvert<int, T>::to(1);
     }
   }
 }
 
+template <typename T>
 struct RReLUUpdateOutputEval_functor
 {
-  const float negSlope_;
+  const T negSlope_;
 
-  RReLUUpdateOutputEval_functor(float negSlope)
+  RReLUUpdateOutputEval_functor(T negSlope)
     : negSlope_(negSlope)
   {}
 
-  __device__ __forceinline__ void operator()(float *out, float *in)
+  __device__ __forceinline__ void operator()(T *out, T *in)
   {
-    const float x = *in;
-    const float r = x <= 0 ? negSlope_ : 1;
+    const T x = *in;
+    const T r = x <= 0 ? negSlope_ : ScalarConvert<int, T>::to(1);
     *out = x * r;
   }
 };
 
+template <typename T>
 struct RReLUUpdateOutputEvalIP_functor
 {
-  const float negSlope_;
+  const T negSlope_;
 
-  RReLUUpdateOutputEvalIP_functor(float negSlope)
+  RReLUUpdateOutputEvalIP_functor(T negSlope)
     : negSlope_(negSlope)
   {}
 
-  __device__ __forceinline__ void operator()(float *x)
+  __device__ __forceinline__ void operator()(T *x)
   {
     if (*x <= 0)
     {
@@ -61,74 +84,31 @@ struct RReLUUpdateOutputEvalIP_functor
   }
 };
 
-void THNN_CudaRReLU_updateOutput(THCState *state, THCudaTensor *input, THCudaTensor *output,
-  THCudaTensor *noise, double lower, double upper, bool train, bool inplace, void *generator)
-{
-  THCUNN_assertSameGPU(state, 3, input, output, noise);
-  struct curandStateMtgp32* gen_states = THCRandom_generatorStates(state);
-
-  if (train)
-  {
-    input = THCudaTensor_newContiguous(state, input);
-    THCudaTensor_resizeAs(state, noise, input);
-    float *input_data = THCudaTensor_data(state, input);
-    float *noise_data = THCudaTensor_data(state, noise);
-    long n = THCudaTensor_nElement(state, input);
-    if (inplace)
-    {
-      rreluUpdateOutputTrain<<<NUM_BLOCKS(n), BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-        n, gen_states, input_data, noise_data, input_data, lower, upper);
-      THCudaTensor_set(state, output, input);
-    }
-    else
-    {
-      THCudaTensor_resizeAs(state, output, input);
-      float *output_data = THCudaTensor_data(state, output);
-      rreluUpdateOutputTrain<<<NUM_BLOCKS(n), BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-        n, gen_states, input_data, noise_data, output_data, lower, upper);
-    }
-    THCudaCheck(cudaGetLastError());
-    THCudaTensor_free(state, input);
-  }
-  else
-  {
-    const double negSlope = (lower + upper) / 2;
-    if (inplace)
-    {
-      THC_pointwiseApply1(state, input, RReLUUpdateOutputEvalIP_functor(negSlope));
-      THCudaTensor_set(state, output, input);
-    }
-    else
-    {
-      THCudaTensor_resizeAs(state, output, input);
-      THC_pointwiseApply2(state, output, input, RReLUUpdateOutputEval_functor(negSlope));
-    }
-  }
-}
-
+template <typename T>
 struct RReLUupdateGradInputEval_functor
 {
-  const float negSlope_;
+  const T negSlope_;
 
-  RReLUupdateGradInputEval_functor(float negSlope)
+  RReLUupdateGradInputEval_functor(T negSlope)
     : negSlope_(negSlope)
   {}
 
-  __device__ __forceinline__ void operator()(float *gradIn, float *gradOut, float *in)
+  __device__ __forceinline__ void operator()(T *gradIn, T *gradOut, T *in)
   {
     *gradIn = (*in) <= 0 ? (*gradOut) * negSlope_ : (*gradOut);
   }
 };
 
+template <typename T>
 struct RReLUupdateGradInputEvalIP_functor
 {
-  const float negSlope_;
+  const T negSlope_;
 
-  RReLUupdateGradInputEvalIP_functor(float negSlope)
+  RReLUupdateGradInputEvalIP_functor(T negSlope)
     : negSlope_(negSlope)
   {}
 
-  __device__ __forceinline__ void operator()(float *gradOut, float *in)
+  __device__ __forceinline__ void operator()(T *gradOut, T *in)
   {
     if (*in <= 0)
     {
@@ -137,42 +117,5 @@ struct RReLUupdateGradInputEvalIP_functor
   }
 };
 
-void THNN_CudaRReLU_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput,
-  THCudaTensor *gradInput, THCudaTensor *noise, double lower, double upper, bool train, bool inplace)
-{
-  THCUNN_assertSameGPU(state, 4, input, gradOutput, gradInput, noise);
-
-  gradOutput = THCudaTensor_newContiguous(state, gradOutput);
-
-  if (train && upper - lower > 1E-6)    // e.g. if upper == lower, RReLU behaves like LeakyReLU
-  {
-    // multiply the gradient by the noise tensor
-    if (inplace)
-    {
-      THCudaTensor_cmul(state, gradOutput, gradOutput, noise);
-      THCudaTensor_set(state, gradInput, gradOutput);
-    }
-    else
-    {
-      THCudaTensor_resizeAs(state, gradInput, input);
-      THCudaTensor_cmul(state, gradInput, gradOutput, noise);
-    }
-  }
-  else
-  {
-    // use constant factor for negative input values
-    const double negSlope = (lower + upper) / 2;
-    if (inplace)
-    {
-      THC_pointwiseApply2(state, gradOutput, input, RReLUupdateGradInputEvalIP_functor(negSlope));
-      THCudaTensor_set(state, gradInput, gradOutput);
-    }
-    else
-    {
-      THCudaTensor_resizeAs(state, gradInput, input);
-      THC_pointwiseApply3(state, gradInput, gradOutput, input, RReLUupdateGradInputEval_functor(negSlope));
-    }
-  }
-
-  THCudaTensor_free(state, gradOutput);
-}
+#include "generic/RReLU.cu"
+#include "THCGenerateFloatTypes.h"
