@@ -12,7 +12,7 @@ class ExecutionEngine(object):
         while len(queue) > 0:
             fn = queue.pop()
             for prev_fn, arg_id in fn.previous_functions:
-                if isinstance(prev_fn, Variable):
+                if not prev_fn.requires_grad or isinstance(prev_fn, Variable):
                     continue
                 if prev_fn not in dependencies:
                     dependencies[prev_fn] = [Counter() for _ in prev_fn.output_ids]
@@ -64,7 +64,6 @@ class ExecutionEngine(object):
 
         while len(ready) > 0:
             fn, grad = ready.pop()
-            # TODO: double-buffering
             grad_input = fn._do_backward(grad, retain_variables)
             for (prev_fn, arg_id), d_prev_fn in zip(fn.previous_functions, grad_input):
                 if not prev_fn.requires_grad:

@@ -110,6 +110,21 @@ class TestAutograd(TestCase):
         self.assertEqual(x[1:2, 2], y[1:2, 2].data)
         self.assertEqual(x[1, 2:], y[1, 2:].data)
 
+    def test_requires_grad(self):
+        x = Variable(torch.randn(5, 5))
+        y = Variable(torch.randn(5, 5))
+        z = Variable(torch.randn(5, 5), requires_grad=True)
+        a = x + y
+        self.assertFalse(a.requires_grad)
+        b = a + z
+        self.assertTrue(b.requires_grad)
+        def error():
+            raise RuntimeError
+        # Make sure backward isn't called on these
+        a.backward_hooks['test'] = error
+        x.backward_hooks['test'] = error
+        y.backward_hooks['test'] = error
+
     def test_inplace(self):
         x = Variable(torch.ones(5, 5), requires_grad=True)
         y = Variable(torch.ones(5, 5) * 4, requires_grad=True)
