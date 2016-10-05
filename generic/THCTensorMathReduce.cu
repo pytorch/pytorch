@@ -91,6 +91,28 @@ THCTensor_(std)(THCState *state, THCTensor *self_, THCTensor *src, long dimensio
   THCTensor_(freeCopyTo)(state, self, self_);
 }
 
+THC_API void
+THCTensor_(var)(THCState *state, THCTensor *self_, THCTensor *src, long dimension, int flag)
+{
+  THAssert(THCTensor_(checkGPU)(state, 2, self_, src));
+  THLongStorage *dim = THCTensor_(newSizeOf)(state, src);
+  THLongStorage_set(dim, dimension, 1);
+  THCTensor_(resize)(state, self_, dim, NULL);
+  THLongStorage_free(dim);
+
+  THCTensor *self = THCTensor_(newContiguous)(state, self_);
+  src = THCTensor_(newContiguous)(state, src);
+
+  if (dimension == THCTensor_(nDimension)(state, src) - 1) {
+    THCTensor_varInnermostDim<THCTensor, real, false>(state, self, src, flag);
+  } else {
+    THCTensor_varOuterDim<THCTensor, real, false>(state, self, src, dimension, flag);
+  }
+
+  THCTensor_(free)(state, src);
+  THCTensor_(freeCopyTo)(state, self, self_);
+}
+
 THC_API accreal
 THCTensor_(stdall)(THCState *state, THCTensor *self)
 {
