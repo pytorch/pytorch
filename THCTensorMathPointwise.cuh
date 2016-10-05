@@ -397,4 +397,22 @@ struct TensorDivOp<half> {
 };
 #endif // CUDA_HALF_TENSOR
 
+template <typename T>
+struct TensorClampOp {
+  TensorClampOp(T min, T max) : minValue(min), maxValue(max) {}
+  __device__ __forceinline__ void operator()(T* out, T* in) {
+    T val = THCNumerics<T>::lt(*in, maxValue) ? *in : maxValue;
+    *out = THCNumerics<T>::gt(minValue, val) ? minValue : val;
+  }
+
+  __device__ __forceinline__ void operator()(T* v) {
+    T val = THCNumerics<T>::lt(*v, maxValue) ? *v : maxValue;
+    *v = THCNumerics<T>::gt(minValue, val) ? minValue : val;
+  }
+
+  const T minValue;
+  const T maxValue;
+};
+
+
 #endif // THC_TENSORMATH_POINTWISE_CUH

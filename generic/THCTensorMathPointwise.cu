@@ -82,6 +82,25 @@ void THCTensor_(sign)(THCState* state, THCTensor* self_, THCTensor* src) {
   THCudaCheck(cudaGetLastError());
 }
 
+void THCTensor_(clamp)(THCState *state, THCTensor *self_, THCTensor *src, real min_value,
+  real max_value)
+{
+  THAssert(THCTensor_(checkGPU)(state, 2, self_, src));
+  if (self_ == src) {
+    if (!THC_pointwiseApply1(state, self_, TensorClampOp<real>(min_value, max_value))) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  } else {
+    THCTensor_(resizeAs)(state, self_, src);
+
+    if (!THC_pointwiseApply2(state, self_, src, TensorClampOp<real>(min_value, max_value))) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  }
+
+  THCudaCheck(cudaGetLastError());
+}
+
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
 
 void THCTensor_(sigmoid)(THCState* state, THCTensor* self_, THCTensor* src) {

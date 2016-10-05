@@ -68,39 +68,6 @@ void THCudaTensor_atan2(THCState *state, THCudaTensor *self_, THCudaTensor *tx, 
   THCudaCheck(cudaGetLastError());
 }
 
-struct TensorClampOp {
-  TensorClampOp(float min, float max) : minValue(min), maxValue(max) {}
-  __device__ __forceinline__ void operator()(float* out, float* in) {
-    *out = max(min(*in, maxValue), minValue);
-  }
-
-  __device__ __forceinline__ void operator()(float* v) {
-    *v = max(min(*v, maxValue), minValue);
-  }
-
-  const float minValue;
-  const float maxValue;
-};
-
-void THCudaTensor_clamp(THCState *state, THCudaTensor *self_, THCudaTensor *src, float min_value,
-  float max_value)
-{
-  THAssert(THCudaTensor_checkGPU(state, 2, self_, src));
-  if (self_ == src) {
-    if (!THC_pointwiseApply1(state, self_, TensorClampOp(min_value, max_value))) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  } else {
-    THCudaTensor_resizeAs(state, self_, src);
-
-    if (!THC_pointwiseApply2(state, self_, src, TensorClampOp(min_value, max_value))) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  }
-
-  THCudaCheck(cudaGetLastError());
-}
-
 struct TensorLerpOp {
   TensorLerpOp(float w) : w(w) {}
 
