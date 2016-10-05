@@ -69,14 +69,17 @@ class Module(object):
             "Trying to remove an inexistent forward hook with name {}".format(name)
         del self.forward_hooks[name]
 
+    def _find_any_variable(self, result):
+        if isinstance(result, Variable):
+            return result
+        else:
+            return self._find_any_variable(result[0])
+
     def __call__(self, *input):
         result = self.forward(*input)
         for hook in self.forward_hooks.values():
             hook(self, input, result)
-        if isinstance(result, tuple):
-            fn = result[0].creator
-        else:
-            fn = result.creator
+        fn = self._find_any_variable(result).creator
         for key, hook in self.backward_hooks.items():
             fn.register_hook(key, lambda gi,go,hook=hook: hook(self, gi, go))
         return result

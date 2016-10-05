@@ -606,7 +606,7 @@ new_module_tests = [
     ),
     dict(
         module_name='Conv2d',
-        constructor_args=(3, 4, (3, 3), 1, 0, None, 1, True),
+        constructor_args=(3, 4, (3, 3), 1, 0, None, 1, False),
         input_size=(2, 3, 6, 6),
         desc='no_bias',
     ),
