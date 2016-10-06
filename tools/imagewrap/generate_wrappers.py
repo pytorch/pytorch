@@ -53,7 +53,7 @@ TYPE_TRANSFORMS = {
     },
     'Byte': {
         'THTensor*': 'THByteTensor*',
-        'real': 'Byte',
+        'real': 'uint8_t',
     }
 }
 for t, transforms in TYPE_TRANSFORMS.items():

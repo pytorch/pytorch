@@ -22,7 +22,7 @@ function build() {
               -DCMAKE_CXX_FLAGS="$C_FLAGS $CPP_FLAGS" \
               -DCUDA_NVCC_FLAGS="$BASIC_C_FLAGS" \
               -DTH_INCLUDE_PATH="$INSTALL_DIR/include" \
-                  -DTH_LIB_PATH="$INSTALL_DIR/lib"
+              -DTH_LIB_PATH="$INSTALL_DIR/lib"
   make install -j$(getconf _NPROCESSORS_ONLN)
   cd ../..
 
