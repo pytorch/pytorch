@@ -239,6 +239,21 @@ struct TensorNormOp<half, StaticExp>
 };
 #endif
 
+template <typename T>
+struct TensorDistOp
+{
+  TensorDistOp(T exp) : exponent(exp) {}
+
+  __host__ __device__ T operator()(T x, T y) const {
+    return THCNumerics<T>::pow(
+      THCNumerics<T>::abs(THCNumerics<T>::sub(x, y)),
+      exponent
+    );
+  }
+
+  const T exponent;
+};
+
 #include <thrust/functional.h>
 
 // Given the sum of values and the sum of squares, compute the variance or standard deviation.

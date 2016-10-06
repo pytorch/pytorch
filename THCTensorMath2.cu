@@ -68,18 +68,6 @@ void THCudaTensor_atan2(THCState *state, THCudaTensor *self_, THCudaTensor *tx, 
   THCudaCheck(cudaGetLastError());
 }
 
-struct dist_functor
-{
-  const float exponent;
-
-  dist_functor(float exponent_) : exponent(exponent_) {}
-
-  __host__ __device__ float operator()(const float& x, const float& y) const
-  {
-    return pow(fabs(x-y), exponent);
-  }
-};
-
 float THCudaTensor_dist(THCState *state, THCudaTensor *self, THCudaTensor *src, float value)
 {
   THAssert(THCudaTensor_checkGPU(state, 2, self, src));
@@ -94,7 +82,7 @@ float THCudaTensor_dist(THCState *state, THCudaTensor *self, THCudaTensor *src, 
     thrust::cuda::par.on(THCState_getCurrentStream(state)),
 #endif
     self_data, self_data+size, src_data, (float) 0,
-    thrust::plus<float>(), dist_functor(value));
+    thrust::plus<float>(), TensorDistOp<float>(value));
 
   THCudaTensor_free(state, src);
   THCudaTensor_free(state, self);
