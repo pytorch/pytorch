@@ -1,3 +1,4 @@
+from itertools import repeat
 from collections import defaultdict
 
 import torch
@@ -45,8 +46,8 @@ def _make_function_class_criterion(class_name, update_output, update_grad_input,
         grad_input = grad_output.new().resize_as_(input).zero_()
         getattr(self._backend, update_grad_input.name)(self._backend.library_state, input, target,
             grad_input, *self.additional_args)
-        if grad_output[0] != 1:
-            grad_input.mul_(grad_output)
+        grad_output_expanded = grad_output.resize_(*repeat(1, grad_input.dim()))
+        grad_input.mul_(grad_output.expand_as(grad_input))
         return grad_input, None
 
     return type(class_name, (Function,), dict(__init__=__init__, forward=forward, backward=backward))
@@ -129,16 +130,18 @@ def _make_function_class(class_name, update_output, update_grad_input, acc_grad_
 
         args += tuple(additional_args)
 
-        output = input.new()
         # If the module is working in-place it's output will be set to the
         # same storage as input, but it's variable won't be dirty.
         if is_inplace and self.inplace:
             self.mark_dirty(input)
-            self.save_for_backward(output, *params)
-        elif save_output:
-            self.save_for_backward(input, output, *params)
-        else:
+            output = input
             self.save_for_backward(input, *params)
+        else:
+            output = input.new()
+            if save_output:
+                self.save_for_backward(input, output, *params)
+            else:
+                self.save_for_backward(input, *params)
 
         getattr(self._backend, update_output.name)(self._backend.library_state, input, output, *args)
         return output

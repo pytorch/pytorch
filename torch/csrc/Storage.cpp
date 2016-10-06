@@ -5,7 +5,6 @@
 #include <TH/TH.h>
 #include <libshm.h>
 #include "THP.h"
-#include "byte_order.h"
 
 #include "generic/Storage.cpp"
 #include <TH/THGenerateAllTypes.h>

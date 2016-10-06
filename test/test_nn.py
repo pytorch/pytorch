@@ -20,7 +20,7 @@ class InputVariableMixin(object):
             if isinstance(i, Variable):
                 return i
             elif torch.is_tensor(i):
-                return Variable(i)
+                return Variable(i, requires_grad=True)
             else:
                 return type(i)(map_variables(elem) for elem in i)
         return map_variables(input)
@@ -37,12 +37,13 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
         if self.check_inplace:
             module_ip = self.constructor(*self.constructor_args, inplace=True)
 
+            input_version = input._version
             output = module(input)
-            test_case.assertFalse(input.dirty)
+            test_case.assertEqual(input._version, input_version)
 
             input_ip = deepcopy(input)
             output_ip = module_ip(input_ip)
-            test_case.assertTrue(input_ip.dirty)
+            test_case.assertNotEqual(input_ip._version, input_version)
 
             test_case.assertEqual(output, output_ip)
 
@@ -170,7 +171,7 @@ class TestNN(NNTestCase):
 
     def test_hooks(self):
         module = nn.Sigmoid()
-        input = Variable(torch.ones(5, 5))
+        input = Variable(torch.ones(5, 5), requires_grad=True)
 
         counter = {
             'forwards': 0,
@@ -258,14 +259,14 @@ class TestNN(NNTestCase):
         input.fill_(1-p)
 
         module = cls(p)
-        input_var = Variable(input)
+        input_var = Variable(input, requires_grad=True)
         output = module(input_var)
         self.assertLess(abs(output.data.mean() - (1-p)), 0.05)
         output.backward(input)
         self.assertLess(abs(input_var.grad.mean() - (1-p)), 0.05)
 
         module = cls(p, True)
-        input_var = Variable(input.clone())
+        input_var = Variable(input.clone(), requires_grad=True)
         output = module(input_var + 0)
         self.assertLess(abs(output.data.mean() - (1-p)), 0.05)
         output.backward(input)
@@ -381,7 +382,7 @@ class TestNN(NNTestCase):
         module = module_cls(2, return_indices=True)
         numel = 4 ** num_dim
         input = torch.range(1, numel).view(1, 1, *repeat(4, num_dim))
-        input_var = Variable(input)
+        input_var = Variable(input, requires_grad=True)
 
         # Check forward
         output, indices = module(input_var)
@@ -495,6 +496,57 @@ class TestNN(NNTestCase):
         self.assertEqual(out.get_device(), 1)
         self.assertEqual(out.data, expected_out)
 
+    def test_parameter_dict(self):
+        l = nn.Linear(5, 5)
+        block = nn.Container(
+            conv=nn.Conv2d(3, 3, 3, bias=False)
+        )
+        net = nn.Container(
+            linear1=l,
+            linear2=l,
+            block=block,
+            empty=None,
+        )
+        param_dict = net.parameter_dict()
+        self.assertEqual(len(param_dict), 5)
+        self.assertIn('linear1.weight', param_dict)
+        self.assertIn('linear1.bias', param_dict)
+        self.assertIn('linear2.weight', param_dict)
+        self.assertIn('linear2.bias', param_dict)
+        self.assertIn('block.conv.weight', param_dict)
+        self.assertNotIn('block.conv.bias', param_dict)
+        self.assertFalse(any(map(lambda k: k.startswith('empty'), param_dict.keys())))
+        for k, v in param_dict.items():
+            param = net
+            for component in k.split('.'):
+                param = getattr(param, component)
+            self.assertIs(v, param)
+
+        l = nn.Linear(5, 5)
+        param_dict = l.parameter_dict()
+        self.assertEqual(len(param_dict), 2)
+        self.assertIs(param_dict['weight'], l.weight)
+        self.assertIs(param_dict['bias'], l.bias)
+
+    def test_load_parameter_dict(self):
+        l = nn.Linear(5, 5)
+        block = nn.Container(
+            conv=nn.Conv2d(3, 3, 3, bias=False)
+        )
+        net = nn.Container(
+            linear1=l,
+            linear2=l,
+            block=block,
+            empty=None,
+        )
+        param_dict = {
+            'linear1.weight': Variable(torch.ones(5, 5)),
+            'block.conv.bias': Variable(torch.range(1, 3)),
+        }
+        net.load_parameter_dict(param_dict)
+        self.assertIs(net.linear1.weight, param_dict['linear1.weight'])
+        self.assertIs(net.block.conv.bias, param_dict['block.conv.bias'])
+
 
 def add_test(test):
     test_name = test.get_name()
@@ -555,7 +607,7 @@ new_module_tests = [
     ),
     dict(
         module_name='Conv2d',
-        constructor_args=(3, 4, (3, 3), 1, 0, None, 1, True),
+        constructor_args=(3, 4, (3, 3), 1, 0, None, 1, False),
         input_size=(2, 3, 6, 6),
         desc='no_bias',
     ),

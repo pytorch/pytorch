@@ -38,8 +38,8 @@ def get_analytical_jacobian(input, output):
 class TestAutograd(TestCase):
 
     def test_hooks(self):
-        x = Variable(torch.ones(5, 5))
-        y = Variable(torch.ones(5, 5) * 4)
+        x = Variable(torch.ones(5, 5), requires_grad=True)
+        y = Variable(torch.ones(5, 5) * 4, requires_grad=True)
 
         counter = [0]
         def bw_hook(inc, grad):
@@ -65,10 +65,10 @@ class TestAutograd(TestCase):
         y_t = torch.rand(5, 5) + 0.1
         z_t = torch.randn(5, 5)
         grad_output = torch.randn(5, 5)
-        v = Variable(v_t)
-        x = Variable(x_t)
-        y = Variable(y_t)
-        z = Variable(z_t)
+        v = Variable(v_t, requires_grad=True)
+        x = Variable(x_t, requires_grad=True)
+        y = Variable(y_t, requires_grad=True)
+        z = Variable(z_t, requires_grad=True)
 
         v.backward(grad_output)
         self.assertEqual(v.grad, grad_output)
@@ -83,7 +83,7 @@ class TestAutograd(TestCase):
         self.assertEqual(z.grad, z_grad * grad_output)
 
     def test_volatile(self):
-        x = Variable(torch.ones(5, 5))
+        x = Variable(torch.ones(5, 5), requires_grad=True)
         y = Variable(torch.ones(5, 5) * 4, volatile=True)
 
         z = x ** 2
@@ -110,9 +110,24 @@ class TestAutograd(TestCase):
         self.assertEqual(x[1:2, 2], y[1:2, 2].data)
         self.assertEqual(x[1, 2:], y[1, 2:].data)
 
+    def test_requires_grad(self):
+        x = Variable(torch.randn(5, 5))
+        y = Variable(torch.randn(5, 5))
+        z = Variable(torch.randn(5, 5), requires_grad=True)
+        a = x + y
+        self.assertFalse(a.requires_grad)
+        b = a + z
+        self.assertTrue(b.requires_grad)
+        def error():
+            raise RuntimeError
+        # Make sure backward isn't called on these
+        a.backward_hooks['test'] = error
+        x.backward_hooks['test'] = error
+        y.backward_hooks['test'] = error
+
     def test_inplace(self):
-        x = Variable(torch.ones(5, 5))
-        y = Variable(torch.ones(5, 5) * 4)
+        x = Variable(torch.ones(5, 5), requires_grad=True)
+        y = Variable(torch.ones(5, 5) * 4, requires_grad=True)
 
         z = x * y
         q = z + y
@@ -139,13 +154,57 @@ class TestAutograd(TestCase):
         z = m + y / 8
         q = z * y
         r = z + y
+        prev_version = z._version[0]
         w = z.exp_()
-        self.assertTrue(z.dirty)
+        self.assertNotEqual(z._version[0], prev_version)
         r.backward(torch.ones(5, 5), retain_variables=True)
         self.assertEqual(x.grad, torch.ones(5, 5) / 2)
         w.backward(torch.ones(5, 5), retain_variables=True)
         self.assertEqual(x.grad, torch.Tensor(5, 5).fill_((1 + math.e) / 2))
         self.assertRaises(RuntimeError, lambda: q.backward(torch.ones(5, 5)))
+
+        leaf = Variable(torch.ones(5, 5), requires_grad=True)
+        x = leaf.clone()
+        x.add_(10)
+        self.assertEqual(x.data, torch.ones(5, 5) * 11)
+        # x should be still usable
+        y = x + 2
+        y.backward(torch.ones(5, 5))
+        self.assertEqual(leaf.grad, torch.ones(5, 5))
+        z = x * y
+        x.add_(2)
+        self.assertRaises(RuntimeError, lambda: z.backward(torch.ones(5, 5)))
+
+    def test_shared_storage(self):
+        x = Variable(torch.ones(5, 5))
+        x_version = x._version[0]
+        y = x.t()
+        z = x[1]
+        self.assertEqual(x._version[0], x_version)
+        z_version = z._version[0]
+        y.add_(2)
+        self.assertNotEqual(x._version[0], x_version)
+        self.assertNotEqual(z._version[0], z_version)
+
+    def _test_setitem(self, index):
+        x = Variable(torch.ones(5, 5), requires_grad=True)
+        y = x + 2
+        y_version = y._version[0]
+        y[index] = 2
+        self.assertNotEqual(y._version[0], y_version)
+        y.backward(torch.ones(5, 5))
+        expected_grad = torch.ones(5, 5)
+        if isinstance(index, Variable):
+            index = index.data
+        expected_grad[index] = 0
+        self.assertEqual(x.grad, expected_grad)
+
+    def test_setitem(self):
+        self._test_setitem(1)
+
+    def test_setitem_mask(self):
+        mask = Variable(torch.ByteTensor(5, 5).bernoulli_(), requires_grad=False)
+        self._test_setitem(mask)
 
     def test_type_conversions(self):
         import torch.cuda
@@ -396,12 +455,12 @@ def create_input(call_args):
         call_args = (call_args,)
     def map_arg(arg):
         if isinstance(arg, tuple) and not isinstance(arg[0], Variable):
-            return Variable(torch.randn(*arg).double())
+            return Variable(torch.randn(*arg).double(), requires_grad=True)
         elif torch.is_tensor(arg):
             if isinstance(arg, torch.FloatTensor):
-                return Variable(arg.double())
+                return Variable(arg.double(), requires_grad=True)
             else:
-                return Variable(arg)
+                return Variable(arg, requires_grad=True)
         else:
             return arg
     return tuple(map_arg(arg) for arg in call_args)

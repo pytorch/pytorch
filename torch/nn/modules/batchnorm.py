@@ -14,8 +14,8 @@ class _BatchNorm(Module):
 
         weight = bias = None
         if self.affine:
-            weight = Variable(torch.Tensor(num_features))
-            bias = Variable(torch.Tensor(num_features))
+            weight = torch.Tensor(num_features)
+            bias = torch.Tensor(num_features)
         super(_BatchNorm, self).__init__(weight=weight, bias=bias)
         self.register_buffer('running_mean', torch.zeros(num_features))
         self.register_buffer('running_var', torch.ones(num_features))

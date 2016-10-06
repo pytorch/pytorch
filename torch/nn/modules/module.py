@@ -15,6 +15,10 @@ class Module(object):
         self.backward_hooks = OrderedDict()
         self.forward_hooks = OrderedDict()
         self.train = True
+        for name, param in self._parameters.items():
+            if param is not None and not isinstance(param, Variable):
+                param = Variable(param, requires_grad=True)
+            self._parameters[name] = param
 
     def forward(self, *input):
         raise NotImplementedError
@@ -27,7 +31,7 @@ class Module(object):
             if param is not None:
                 # Variables stored in modules are graph leaves, and we don't
                 # want to create copy nodes, so we have to unpack the data.
-                param._data = fn(param.data)
+                param.data = fn(param.data)
         for key, buf in self._buffers.items():
             if buf is not None:
                 self._buffers[key] = fn(buf)
@@ -69,12 +73,12 @@ class Module(object):
         result = self.forward(*input)
         for hook in self.forward_hooks.values():
             hook(self, input, result)
-        if isinstance(result, tuple):
-            fn = result[0].creator
-        else:
-            fn = result.creator
+        var = result
+        while not isinstance(var, Variable):
+            var= var[0]
+        creator = var.creator
         for key, hook in self.backward_hooks.items():
-            fn.register_hook(key, lambda gi,go,hook=hook: hook(self, gi, go))
+            creator.register_hook(key, lambda gi,go,hook=hook: hook(self, gi, go))
         return result
 
     def __getattr__(self, name):
@@ -104,6 +108,18 @@ class Module(object):
                             "function of another variable, simply repeat the "
                             "computation at every forward pass.").format(name))
         return object.__setattr__(self, name, value)
+
+    def parameter_dict(self, destination=None, prefix=''):
+        if destination is None:
+            destination = OrderedDict()
+        for name, param in self._parameters.items():
+            if param is not None:
+                destination[prefix + name] = param
+        return destination
+
+    def load_parameter_dict(self, param_dict):
+        for name, param in self._parameters.items():
+            self._parameters[name] = param_dict.get(name, param)
 
     def parameters(self, memo=None):
         if memo is None:

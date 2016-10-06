@@ -25,6 +25,13 @@ module_tests = [
         reference_fn=lambda i,p: torch.mm(i, p[0].t()) + p[1].view(1, -1).expand(4, 8)
     ),
     dict(
+        module_name='Linear',
+        constructor_args=(10, 8, False),
+        input_size=(4, 10),
+        desc='no_bias',
+        reference_fn=lambda i,p: torch.mm(i, p[0].t())
+    ),
+    dict(
         module_name='Threshold',
         constructor_args=(2, 1),
         input_size=(2, 3, 4, 5),

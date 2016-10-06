@@ -20,14 +20,18 @@ class Variable(object):
         'is_cuda',
     ]
 
-    def __init__(self, tensor, creator=None, volatile=False, requires_grad=True):
+    def __init__(self, tensor, creator=None, volatile=False,
+            requires_grad=False):
         self.creator = creator
         self.volatile = volatile
-        self.dirty = False
-        self.requires_grad = (not volatile) and requires_grad
-        self._data = tensor
+        self._requires_grad = (not volatile) and requires_grad
+        self.data = tensor
+        self._version = [0]
         self._grad = None
         self.backward_hooks = OrderedDict()
+        if not torch.is_tensor(tensor):
+            raise ValueError("Variable objects can only wrap tensors but got " +
+                    torch.typename(tensor))
 
     @property
     def grad(self):
@@ -37,14 +41,15 @@ class Variable(object):
         return self._grad
 
     @property
-    def data(self):
-        if self.dirty:
-            raise RuntimeError('Accessing data of a dirty variable!')
-        return self._data
+    def requires_grad(self):
+        return self._requires_grad
 
-    def mark_dirty(self):
-        self.dirty = True
-        self._data = None
+    @requires_grad.setter
+    def requires_grad(self, value):
+        if self.creator is not None:
+            raise RuntimeError("you can only change requires_grad flags of "
+                    "leaf variables")
+        self._requires_grad = value
 
     def __getattr__(self, name):
         if name in self._fallthrough_methods:
@@ -52,11 +57,16 @@ class Variable(object):
         raise AttributeError(name)
 
     def __getitem__(self, key):
-        if isinstance(key, Variable) and isinstance(key.data, torch.ByteTensor):
+        if (isinstance(key, Variable) and
+            type(key.data).__name__ == 'ByteTensor'):
             return MaskedSelect()(self, key)
         return Index(key)(self)
 
-    # TODO: setitem
+    def __setitem__(self, key, value):
+        if (isinstance(key, Variable) and
+            type(key.data).__name__ == 'ByteTensor'):
+            return MaskedFill(value, inplace=True)(self, key)
+        return SetValue(key, value)(self)
 
     def __deepcopy__(self, memo):
         if self.creator is None:
@@ -77,8 +87,6 @@ class Variable(object):
         self._execution_engine.run_backward(self, gradient, retain_variables)
 
     def __repr__(self):
-        if self.dirty:
-            return 'Variable used in an in-place operation'
         return 'Variable containing:' + self.data.__repr__()
 
     def _call_hooks(self, grad_output):
@@ -110,13 +118,14 @@ class Variable(object):
 
     def _do_backward(self, grad_output, retain_variables):
         assert len(grad_output) == 1
-        assert not self.dirty
+        assert self._version[0] == 0 and self.creator is None, \
+            "leaf variable was used in an inplace operation"
         self._call_hooks(grad_output[0])
         self.grad.add_(grad_output[0])
         return tuple()
 
     def contiguous(self):
-        self._data = self.data.contiguous()
+        self.data = self.data.contiguous()
         return self
 
     def clone(self):

@@ -38,7 +38,33 @@ void THPStorage_(writeFileRaw)(THStorage *self, int fd)
   THCudaCheck(cudaMemcpy(data, self->data, self->size * sizeof(real), cudaMemcpyDeviceToHost));
 #endif
   SYSCHECK(write(fd, &self->size, sizeof(long)));
-  SYSCHECK(write(fd, data, sizeof(real) * self->size));
+  // fast track for bytes and little endian
+  if (sizeof(real) == 1 || THP_nativeByteOrder() == THPByteOrder::THP_LITTLE_ENDIAN) {
+    SYSCHECK(write(fd, data, sizeof(real) * self->size));
+  } else {
+    long buffer_size = std::min(self->size, (long)5000);
+    std::unique_ptr<uint8_t[]> le_buffer(new uint8_t[buffer_size * sizeof(real)]);
+    for (long i = 0; i < self->size; i += buffer_size) {
+      size_t to_convert = std::min(self->size - i, buffer_size);
+      if (sizeof(real) == 2) {
+        THP_encodeInt16Buffer((uint8_t*)le_buffer.get(),
+            (const int16_t*)data + i,
+            THPByteOrder::THP_LITTLE_ENDIAN,
+            to_convert);
+      } else if (sizeof(real) == 4) {
+        THP_encodeInt32Buffer((uint8_t*)le_buffer.get(),
+            (const int32_t*)data + i,
+            THPByteOrder::THP_LITTLE_ENDIAN,
+            to_convert);
+      } else if (sizeof(real) == 8) {
+        THP_encodeInt64Buffer((uint8_t*)le_buffer.get(),
+            (const int64_t*)data + i,
+            THPByteOrder::THP_LITTLE_ENDIAN,
+            to_convert);
+      }
+      SYSCHECK(write(fd, data, to_convert * sizeof(real)));
+    }
+  }
 }
 
 THStorage * THPStorage_(readFileRaw)(int fd)
@@ -55,7 +81,33 @@ THStorage * THPStorage_(readFileRaw)(int fd)
   data = (real*)cpu_data.get();
 #endif
 
-  SYSCHECK(read(fd, data, sizeof(real) * storage->size));
+  // fast track for bytes and little endian
+  if (sizeof(real) == 1 || THP_nativeByteOrder() == THPByteOrder::THP_LITTLE_ENDIAN) {
+    SYSCHECK(read(fd, data, sizeof(real) * storage->size));
+  } else {
+    long buffer_size = std::min(size, (long)5000);
+    std::unique_ptr<uint8_t[]> le_buffer(new uint8_t[buffer_size * sizeof(real)]);
+    for (long i = 0; i < size; i += buffer_size) {
+      size_t to_convert = std::min(size - i, buffer_size);
+      SYSCHECK(read(fd, le_buffer.get(), sizeof(real) * to_convert));
+      if (sizeof(real) == 2) {
+        THP_decodeInt16Buffer((int16_t*)data + i,
+            le_buffer.get(),
+            THPByteOrder::THP_LITTLE_ENDIAN,
+            to_convert);
+      } else if (sizeof(real) == 4) {
+        THP_decodeInt32Buffer((int32_t*)data + i,
+            le_buffer.get(),
+            THPByteOrder::THP_LITTLE_ENDIAN,
+            to_convert);
+      } else if (sizeof(real) == 8) {
+        THP_decodeInt64Buffer((int64_t*)data + i,
+            le_buffer.get(),
+            THPByteOrder::THP_LITTLE_ENDIAN,
+            to_convert);
+      }
+    }
+  }
 
 #ifdef THC_GENERIC_FILE
   THCudaCheck(cudaMemcpy(storage->data, data, size * sizeof(real), cudaMemcpyHostToDevice));

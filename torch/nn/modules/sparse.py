@@ -35,7 +35,7 @@ class Embedding(Module):
         self.scale_grad_by_freq = scale_grad_by_freq
 
         super(Embedding, self).__init__(
-            weight=Variable(torch.Tensor(num_embeddings, embedding_dim))
+            weight=torch.Tensor(num_embeddings, embedding_dim)
         )
         self.reset_parameters()
 
