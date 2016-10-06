@@ -128,6 +128,7 @@ SET(src
     THCGeneral.c
     THCStorage.c
     THCStorageCopy.c
+    THCStream.c
     THCTensor.c
     THCTensorCopy.c
     THCThreadLocal.c
@@ -200,6 +201,7 @@ INSTALL(FILES
           THCBlas.h
           THCStorage.h
           THCStorageCopy.h
+          THCStream.h
           THCTensor.h
           THCTensorCopy.h
           THCTensorRandom.h

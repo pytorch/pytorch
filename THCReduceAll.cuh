@@ -186,13 +186,21 @@ void callReduceAll(THCState* state,
   dim3 block;
 
   if (isTwoPassReductionSize(totalElements)) {
+    bool freeScratchSpace = false;
+    void* scratchSpace = THCState_getCurrentDeviceScratchSpace(state);
+    if (!scratchSpace) {
+      THCudaCheck(THCudaMalloc(state, &scratchSpace,
+          THCState_getCurrentDeviceScratchSpaceSize(state)));
+      freeScratchSpace = true;
+    }
+
     getPass1ReduceBlockGrid<InT, AccT>(state, totalElements, grid, block);
     size_t smemSize = block.x * sizeof(AccT);
 
     kernelReduceAllPass1<ModifyOp, ReduceOp, ReduceAccOp, InT, AccT, IndexType, ADims>
       <<<grid, block, smemSize, THCState_getCurrentStream(state)>>>(
         in, (IndexType) totalElements, init, modifyOp, reduceOp, reduceAccOp,
-        (AccT*) THCState_getCurrentDeviceScratchSpace(state));
+        (AccT*) scratchSpace);
 
     int numPass1Blocks = grid.x;
     getPass2ReduceBlockGrid<InT, AccT>(state, totalElements, grid, block);
@@ -201,9 +209,11 @@ void callReduceAll(THCState* state,
     kernelReduceAllPass2<ReduceAccOp, AccT, IndexType>
       <<<grid, block, smemSize, THCState_getCurrentStream(state)>>>(
         numPass1Blocks, init, reduceAccOp,
-        (AccT*) THCState_getCurrentDeviceScratchSpace(state),
-        devOut);
+        (AccT*) scratchSpace, devOut);
 
+    if (freeScratchSpace) {
+      THCudaCheck(THCudaFree(state, scratchSpace));
+    }
   } else {
     getSinglePassReduceBlockGrid<InT, AccT>(totalElements, grid, block);
     size_t smemSize = block.x * sizeof(AccT);
@@ -241,11 +251,17 @@ bool THC_reduceAll(THCState* state,
     return true;
   }
 
+  bool freeDevOut = false;
   AccT* devOut = out;
   if (!outOnDevice) {
     // Use the stream-specific scratch space for the reduction kernel
     // to write out its value
     devOut = (AccT*) THCState_getCurrentDeviceScratchSpace(state);
+    if (!devOut) {
+      THCudaCheck(THCudaMalloc(state, (void**)&devOut,
+          THCState_getCurrentDeviceScratchSpaceSize(state)));
+      freeDevOut = true;
+    }
   }
 
   // It is possible that the tensor dimensions are able to be collapsed,
@@ -311,6 +327,10 @@ bool THC_reduceAll(THCState* state,
   // the host (synchronous!)
   if (!outOnDevice) {
     cudaMemcpy(out, devOut, sizeof(AccT), cudaMemcpyDeviceToHost);
+  }
+
+  if (freeDevOut) {
+    THCudaCheck(THCudaFree(state, devOut));
   }
 
   return true;

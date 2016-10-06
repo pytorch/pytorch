@@ -153,8 +153,7 @@ void THCTensor_(copyAsyncCPU)(THCState *state, THCTensor *self, struct THTensor 
                               THTensor_(data)(src),
                               THTensor_(nElement)(src) * sizeof(real),
                               cudaMemcpyHostToDevice,
-                              THCState_getDeviceStream(state, tensorDevice,
-                                                       THCState_getCurrentStreamIndex(state))));
+                              THCState_getCurrentStream(state)));
 
   if (currentDevice != tensorDevice) {
     THCudaCheck(cudaSetDevice(currentDevice));
@@ -182,8 +181,7 @@ void THTensor_(copyAsyncCuda)(THCState *state, THTensor *self, struct THCTensor 
                               THCTensor_(data)(state, src),
                               THCTensor_(nElement)(state, src) * sizeof(real),
                               cudaMemcpyDeviceToHost,
-                              THCState_getDeviceStream(state, tensorDevice,
-                                                       THCState_getCurrentStreamIndex(state))));
+                              THCState_getCurrentStream(state)));
 
   if (currentDevice != tensorDevice) {
     THCudaCheck(cudaSetDevice(currentDevice));
