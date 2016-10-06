@@ -328,7 +328,7 @@ kernel_size |  | the size of the convolving kernel. Can be a single number k (fo
 stride | 1 | the stride of the convolving kernel. Can be a single number s or a tuple (sh x sw).
 padding | 0 | implicit zero padding on the input. Can be a single number s or a tuple.
 dilation | None | If given, will do dilated (or atrous) convolutions. Can be a single number s or a tuple.
-bias | True | If set to false, the layer will not learn an additive bias.
+no_bias | False | If set to true, the layer will not learn an additive bias.
 
 ### Expected Shape
        | Shape | Description 
@@ -783,7 +783,6 @@ Parameter | Default | Description
 --------- | ------- | -----------
 in_features |  | size of each input sample
 out_features |  | size of each output sample
-bias | True | if false, the layer will not learn an additive bias
 
 ### Expected Shape
        | Shape | Description 

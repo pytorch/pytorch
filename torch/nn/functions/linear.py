@@ -25,12 +25,13 @@ class Linear(Function):
         else:
             input, weight, bias = tensors
 
-        grad_input = (torch.mm(grad_output, weight) if
-            self.needs_input_grad[0] else None)
-        grad_weight = (torch.mm(grad_output.t(), input) if
-            self.needs_input_grad[1] else None)
-        grad_bias = (torch.mv(grad_output.t(), self.add_buffer) if
-            bias is not None and self.needs_input_grad[2] else None)
+        grad_input = grad_weight = grad_bias = None
+        if self.needs_input_grad[0]:
+            grad_input = torch.mm(grad_output, weight)
+        if self.needs_input_grad[1]:
+            grad_weight = torch.mm(grad_output.t(), input)
+        if bias is not None and self.needs_input_grad[2]:
+            grad_bias = torch.mv(grad_output.t(), self.add_buffer)
 
         if bias is not None:
             return grad_input, grad_weight, grad_bias

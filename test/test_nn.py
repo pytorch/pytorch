@@ -498,7 +498,7 @@ class TestNN(NNTestCase):
     def test_parameter_dict(self):
         l = nn.Linear(5, 5)
         block = nn.Container(
-            conv=nn.Conv2d(3, 3, 3, no_bias=True)
+            conv=nn.Conv2d(3, 3, 3, bias=False)
         )
         net = nn.Container(
             linear1=l,
@@ -530,7 +530,7 @@ class TestNN(NNTestCase):
     def test_load_parameter_dict(self):
         l = nn.Linear(5, 5)
         block = nn.Container(
-            conv=nn.Conv2d(3, 3, 3, no_bias=True)
+            conv=nn.Conv2d(3, 3, 3, bias=False)
         )
         net = nn.Container(
             linear1=l,
