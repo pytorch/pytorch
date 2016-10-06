@@ -86,6 +86,33 @@ TH_API void THNN_(LogSoftMax_updateGradInput)(
                   THCTensor *gradInput,
                   THCTensor *output);
 
+TH_API void THNN_(PReLU_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *output,
+                  THCTensor *weight,
+                  long nOutputPlane);
+
+TH_API void THNN_(PReLU_updateGradInput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *gradOutput,
+                  THCTensor *gradInput,
+                  THCTensor *weight,
+                  long nOutputPlane);
+
+TH_API void THNN_(PReLU_accGradParameters)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *gradOutput,
+                  THCTensor *gradInput,
+                  THCTensor *weight,
+                  THCTensor *gradWeight,
+                  THCTensor *gradWeightBuf,
+                  THCTensor *gradWeightBuf2,
+                  long nOutputPlane,
+                  real scale);
+
 TH_API void THNN_(Sigmoid_updateOutput)(
                   THCState *state,
                   THCTensor *input,

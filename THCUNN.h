@@ -186,31 +186,6 @@ TH_API void THNN_CudaMultiLabelMarginCriterion_updateGradInput(
           THCudaTensor *istarget,
           bool sizeAverage);
 
-TH_API void THNN_CudaPReLU_updateOutput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *output,
-          THCudaTensor *weight,
-          long nOutputPlane);
-TH_API void THNN_CudaPReLU_updateGradInput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *gradOutput,
-          THCudaTensor *gradInput,
-          THCudaTensor *weight,
-          long nOutputPlane);
-TH_API void THNN_CudaPReLU_accGradParameters(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *gradOutput,
-          THCudaTensor *gradInput,
-          THCudaTensor *weight,
-          THCudaTensor *gradWeight,
-          THCudaTensor *gradWeightBuf,
-          THCudaTensor *gradWeightBuf2,
-          long nOutputPlane,
-          float scale);
-
 TH_API void THNN_CudaRReLU_updateOutput(
           THCState *state,
           THCudaTensor *input,

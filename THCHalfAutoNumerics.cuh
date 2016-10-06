@@ -76,9 +76,12 @@ inline __host__ __device__ double operator*(half a, double b) {
   return ScalarConvert<half, double>::to(a) * b;
 }
 
+inline __host__ __device__ half operator*(half a, int b) {
+  return a * ScalarConvert<int, half>::to(b);
+}
+
 inline __host__ __device__ float operator*(float a, half b) {
   return a * ScalarConvert<half, float>::to(b);
-}
 
 inline __host__ __device__ double operator*(double a, half b) {
   return a * ScalarConvert<half, double>::to(b);
@@ -196,6 +199,11 @@ inline __host__ __device__ float fmaxType(float x, float y) {
 
 inline __host__ __device__ double fmaxType(double x, double y) {
   return fmax(x, y);
+}
+
+inline __host__ __device__ half& operator+=(half &lhs, const half &rhs) {
+  lhs = lhs + rhs;
+  return lhs;
 }
 
 #endif
