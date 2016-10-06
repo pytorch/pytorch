@@ -89,10 +89,8 @@ else (PNG_FOUND)
     message ("WARNING: Could not find PNG libraries, PNG wrapper will not be installed")
 endif (PNG_FOUND)
 
-#SET(src image.c)
 
-
-SET(src init.c)
+SET(src image.c png.c jpeg.c ppm.c)
 
 ADD_LIBRARY(THIMG SHARED ${src})
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR})

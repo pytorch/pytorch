@@ -2,12 +2,14 @@
 #define TH_GENERIC_FILE "generic/ppm.c"
 #else
 
-static int libppm_(Main_load)(lua_State *L)
+
+void THIMG_(PPM_load)(
+          const char *filename,
+          THTensor *result)
 {
-  const char *filename = luaL_checkstring(L, 1);
-  FILE* fp = fopen ( filename, "r" );
-  if ( !fp ) {
-    luaL_error(L, "cannot open file <%s> for reading", filename);
+  FILE *fp = fopen(filename, "r");
+  if (!fp) {
+    THError("cannot open file <%s> for reading", filename);
   }
 
   long W,H,C;
@@ -19,7 +21,7 @@ static int libppm_(Main_load)(lua_State *L)
   if ( p != 'P' ) {
     W = H = 0;
     fclose(fp);
-    luaL_error(L, "corrupted file");
+    THError("corrupted file");
   }
 
   n = (char)getc(fp);
@@ -75,17 +77,17 @@ static int libppm_(Main_load)(lua_State *L)
   } else {
     W=H=C=0;
     fclose ( fp );
-    luaL_error(L, "unsupported magic number: P%c", n);
+    THError("unsupported magic number: P%c", n);
   }
 
   if (!ok) {
     fclose ( fp );
-    luaL_error(L, "corrupted file or read error");
+    THError("corrupted file or read error");
   }
 
   // export tensor
-  THTensor *tensor = THTensor_(newWithSize3d)(C,H,W);
-  real *data = THTensor_(data)(tensor);
+  THTensor_(resize3d)(result, C, H, W);
+  real *data = THTensor_(data)(result);
   long i,k,j=0;
   int val;
   for (i=0; i<W*H; i++) {
@@ -103,16 +105,13 @@ static int libppm_(Main_load)(lua_State *L)
   // cleanup
   free(r);
   fclose(fp);
-
-  // return loaded image
-  luaT_pushudata(L, tensor, torch_Tensor);
-  return 1;
 }
 
-int libppm_(Main_save)(lua_State *L) {
-  // get args
-  const char *filename = luaL_checkstring(L, 1);
-  THTensor *tensor = luaT_checkudata(L, 2, torch_Tensor);
+
+void THIMG_(PPM_save)(
+          const char *filename,
+          THTensor *tensor)
+{
   THTensor *tensorc = THTensor_(newContiguous)(tensor);
   real *data = THTensor_(data)(tensorc);
 
@@ -128,7 +127,7 @@ int libppm_(Main_save)(lua_State *L) {
     W = tensorc->size[1];
   } else {
     C=W=H=0;
-    luaL_error(L, "can only export tensor with geometry: HxW or 1xHxW or 3xHxW");
+    THError("can only export tensor with geometry: HxW or 1xHxW or 3xHxW");
   }
   N = C*H*W;
 
@@ -144,7 +143,7 @@ int libppm_(Main_save)(lua_State *L) {
   // open file
   FILE* fp = fopen(filename, "w");
   if ( !fp ) {
-    luaL_error(L, "cannot open file <%s> for writing", filename);
+    THError("cannot open file <%s> for writing", filename);
   }
 
   // write 3 or 1 channel(s) header
@@ -161,23 +160,6 @@ int libppm_(Main_save)(lua_State *L) {
   THTensor_(free)(tensorc);
   free(bytes);
   fclose (fp);
-
-  // return result
-  return 1;
-}
-
-static const luaL_Reg libppm_(Main__)[] =
-{
-  {"load", libppm_(Main_load)},
-  {"save", libppm_(Main_save)},
-  {NULL, NULL}
-};
-
-DLL_EXPORT int libppm_(Main_init)(lua_State *L)
-{
-  luaT_pushmetatable(L, torch_Tensor);
-  luaT_registeratname(L, libppm_(Main__), "libppm");
-  return 1;
 }
 
 #endif

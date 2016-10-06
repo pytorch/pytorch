@@ -2,6 +2,44 @@
 #define TH_GENERIC_FILE "generic/THIMG.h"
 #else
 
+// JPEG functions
+TH_API void THIMG_(JPEG_size)(
+          const char *filename,
+          THLongStorage *result);
+TH_API void THIMG_(JPEG_load)(
+          int load_from_file,
+          const char *filename,
+          THByteTensor *src,
+          THTensor *result);
+TH_API void THIMG_(JPEG_save)(
+          const char *filename,
+          THTensor *tensor,
+          int save_to_file,
+          int quality,
+          THByteTensor *tensor_dest);
+
+// PNG functions
+TH_API void THIMG_(PNG_load)(
+          int load_from_file,
+          const char *file_name,
+          THByteTensor *src,
+          THTensor *result,
+          THIntTensor *result_bit_depth);
+TH_API void THIMG_(PNG_save)(
+          const char *file_name,
+          THTensor *tensor);
+TH_API void THIMG_(PNG_size)(
+          const char *filename,
+          THLongStorage *result);
+
+// PPM functions
+TH_API void THIMG_(PPM_load)(
+          const char *filename,
+          THTensor *result);
+TH_API void THIMG_(PPM_save)(
+          const char *filename,
+          THTensor *tensor);
+
 TH_API void THIMG_(Main_scaleBilinear)(
           THTensor *Tsrc,
           THTensor *Tdst);
