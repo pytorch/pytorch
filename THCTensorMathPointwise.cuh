@@ -431,4 +431,29 @@ struct TensorLerpOp {
   const T w;
 };
 
+template <typename T>
+struct TensorCrossOp {
+  TensorCrossOp(long sx, long sy, long so) : sx(sx), sy(sy), so(so) {}
+
+  __device__ __forceinline__ void operator()(T* out, T* x, T*y) {
+    out[0 * so] = THCNumerics<T>::sub(
+        THCNumerics<T>::mul(x[1 * sx], y[2 * sy]),
+        THCNumerics<T>::mul(x[2 * sx], y[1 * sy])
+    );
+
+    out[1 * so] = THCNumerics<T>::sub(
+        THCNumerics<T>::mul(x[2 * sx], y[0 * sy]),
+        THCNumerics<T>::mul(x[0 * sx], y[2 * sy])
+    );
+
+    out[2 * so] = THCNumerics<T>::sub(
+        THCNumerics<T>::mul(x[0 * sx], y[1 * sy]),
+        THCNumerics<T>::mul(x[1 * sx], y[0 * sy])
+    );
+  }
+
+  const long sx, sy, so;
+};
+
+
 #endif // THC_TENSORMATH_POINTWISE_CUH

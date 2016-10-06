@@ -26,6 +26,8 @@ struct THCNumerics<unsigned char> {
   static inline __host__ __device__ bool ne(unsigned char a, unsigned char b) { return a != b; }
 
   static inline __host__ __device__  unsigned char add(unsigned char a, unsigned char b) { return a + b; }
+  static inline __host__ __device__  unsigned char mul(unsigned char a, unsigned char b) { return a * b; }
+  static inline __host__ __device__  unsigned char sub(unsigned char a, unsigned char b) { return a - b; }
   static inline __host__ __device__  unsigned char abs(unsigned char a) { return abs(a); }
 };
 
@@ -42,6 +44,8 @@ struct THCNumerics<char> {
   static inline __host__ __device__ bool ne(char a, char b) { return a != b; }
 
   static inline __host__ __device__  char add(char a, char b) { return a + b; }
+  static inline __host__ __device__  char mul(char a, char b) { return a * b; }
+  static inline __host__ __device__  char sub(char a, char b) { return a - b; }
   static inline __host__ __device__  char abs(char a) { return abs(a); }
 };
 
@@ -58,6 +62,8 @@ struct THCNumerics<short> {
   static inline __host__ __device__ bool ne(short a, short b) { return a != b; }
 
   static inline __host__ __device__  short add(short a, short b) { return a + b; }
+  static inline __host__ __device__  short mul(short a, short b) { return a * b; }
+  static inline __host__ __device__  short sub(short a, short b) { return a - b; }
   static inline __host__ __device__  short abs(short a) { return abs(a); }
 };
 
@@ -74,6 +80,8 @@ struct THCNumerics<int> {
   static inline __host__ __device__ bool ne(int a, int b) { return a != b; }
 
   static inline __host__ __device__  int add(int a, int b) { return a + b; }
+  static inline __host__ __device__  int mul(int a, int b) { return a * b; }
+  static inline __host__ __device__  int sub(int a, int b) { return a - b; }
   static inline __host__ __device__  int abs(int a) { return ::abs(a); }
 };
 
@@ -90,8 +98,10 @@ struct THCNumerics<long> {
   static inline __host__ __device__ bool ne(long a, long b) { return a != b; }
 
   static inline __host__ __device__  long add(long a, long b) { return a + b; }
-  static inline __host__ __device__  long abs(long a) { return labs(a); }
+  static inline __host__ __device__  long mul(long a, long b) { return a * b; }
+  static inline __host__ __device__  long sub(long a, long b) { return a - b; }
   static inline __host__ __device__  long div(long a, long b) { return a / b; };
+  static inline __host__ __device__  long abs(long a) { return labs(a); }
 };
 
 #ifdef CUDA_HALF_TENSOR
