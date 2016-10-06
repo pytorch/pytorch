@@ -89,10 +89,23 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
   THPTensorPtr self = (THPTensor *)type->tp_alloc(type, 0);
   THPUtils_assert(self, "failed to allocate a " THPTensorStr " object");
   self->cdata = NULL;
+#ifdef THC_GENERIC_FILE
+  THCPAutoGPU gpu_guard;
+#endif
 
   // Internally we allow constructing with a keywoard only argument cdata
   if (kwargs != NULL) {
     Py_ssize_t num_kwargs = PyDict_Size(kwargs);
+#ifdef THC_GENERIC_FILE
+    PyObject *device_id = PyDict_GetItemString(kwargs, "device");
+    if (device_id) {
+      THPUtils_assert(THPUtils_checkLong(device_id), "device argument "
+          " has to be an int, but got %s", THPUtils_typename(device_id));
+      gpu_guard.setDevice(THPUtils_unpackLong(device_id));
+      // simulate pop() and pretend this key was never there
+      num_kwargs--;
+    }
+#endif
     if (num_args == 0) {
       PyObject *cdata_ptr = PyDict_GetItemString(kwargs, "cdata");
       if (num_kwargs == 1 && cdata_ptr && THPUtils_checkLong(cdata_ptr)) {
@@ -102,8 +115,13 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
       }
     }
     // This is an internal option, so we don't want to advertise it.
+#ifdef THC_GENERIC_FILE
+    THPUtils_assert(num_kwargs == 0, THPTensorStr " constructor only "
+        "accepts a 'device' keyword argument")
+#else
     THPUtils_assert(num_kwargs == 0, THPTensorStr " constructor doesn't "
         "accept any keyword arguments");
+#endif
   }
 
   // torch.Tensor()

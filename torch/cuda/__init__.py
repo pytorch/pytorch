@@ -95,14 +95,11 @@ class _CudaBase(object):
         with device(self.get_device()):
             return super(_CudaBase, self).type(*args, **kwargs)
 
-    def new(self, *args, **kwargs):
-        with device(kwargs.pop('device', self.get_device())):
-            return super(_CudaBase, self).new(*args, **kwargs)
-
     def __new__(cls, *args, **kwargs):
         _lazy_init()
-        with device(kwargs.pop('device', -1)):
-            return super(_CudaBase, cls).__new__(cls, *args, **kwargs)
+        # We need this method only for lazy init, so we can remove it
+        del _CudaBase.__new__
+        return super(_CudaBase, cls).__new__(cls, *args, **kwargs)
 
 
 class DoubleStorage(_CudaBase, torch._C.CudaDoubleStorageBase, _StorageBase):

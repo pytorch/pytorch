@@ -3,9 +3,11 @@
 
 class THCPAutoGPU {
 public:
+  THCPAutoGPU(int device_id=-1);
   THCPAutoGPU(PyObject *args, PyObject *self=NULL);
   ~THCPAutoGPU();
-  bool setDevice(PyObject *obj);
+  bool setObjDevice(PyObject *obj);
+  bool setDevice(int new_device);
   int device = -1;
 };
 
