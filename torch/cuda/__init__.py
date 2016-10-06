@@ -1,6 +1,5 @@
 from __future__ import print_function
 import torch
-import contextlib
 
 _initialized = False
 
@@ -34,28 +33,29 @@ of the CUDA driver.""".format(str(torch._C._cuda_getDriverVersion())))
     _initialized = True
 
 
-@contextlib.contextmanager
-def device(idx):
-    if idx is -1:
-        yield
-    else:
+class device(object):
+    def __init__(self, idx):
+        self.idx = idx
+        self.prev_idx = -1
+
+    def __enter__(self):
+        if self.idx is -1:
+            return
         _lazy_init()
-        prev_idx = torch._C._cuda_getDevice()
-        if prev_idx != idx:
-            torch._C._cuda_setDevice(idx)
-            yield
+        self.prev_idx = torch._C._cuda_getDevice()
+        if self.prev_idx != self.idx:
+            torch._C._cuda_setDevice(self.idx)
+
+    def __exit__(self, *args):
+        if self.prev_idx != self.idx:
             torch._C._cuda_setDevice(prev_idx)
-        else:
-            yield
+        return False
 
 
-@contextlib.contextmanager
-def device_of(tensor):
-    if tensor.is_cuda:
-        with device(tensor.get_device()):
-            yield
-    else:
-        yield
+class device_of(device):
+    def __init__(self, tensor):
+        idx = tensor.get_device() if tensor.is_cuda else -1
+        super(device_of, self).__init__(idx)
 
 
 def device_count():
