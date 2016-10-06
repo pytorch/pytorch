@@ -91,7 +91,7 @@ class Conv2d(Module):
         stride: the stride of the convolving kernel. Can be a single number s or a tuple (sh x sw). Default: 1
         padding: implicit zero padding on the input. Can be a single number s or a tuple. Default: 0
         dilation: If given, will do dilated (or atrous) convolutions. Can be a single number s or a tuple. Default: None
-        no_bias: If set to true, the layer will not learn an additive bias. Default: False
+        bias: If set to False, the layer will not learn an additive bias. Default: True
     Input Shape: [ * , in_channels  , * , * ] : Input is minibatch x in_channels x iH x iW
     Output Shape:[ * , out_channels , * , * ]  : Output shape is precisely minibatch x out_channels x floor((iH  + 2*padH - kH) / dH + 1) x floor((iW  + 2*padW - kW) / dW + 1)
     Members:
@@ -108,7 +108,7 @@ class Conv2d(Module):
         >>> output = m(input)
     """
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                padding=0, dilation=None, groups=1, no_bias=False):
+                padding=0, dilation=None, groups=1, bias=True):
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.kh, self.kw = _pair(kernel_size)
@@ -121,7 +121,7 @@ class Conv2d(Module):
 
         weight = torch.Tensor(self.out_channels, self.in_channels, self.kh,
                 self.kw)
-        bias = None if no_bias else torch.Tensor(self.out_channels)
+        bias = torch.Tensor(self.out_channels) if bias else None
         super(Conv2d, self).__init__(
             weight=weight,
             bias=bias,
@@ -166,7 +166,7 @@ class FullConv2d(Conv2d):
         stride: the stride of the convolving kernel. Can be a single number or a tuple (sh x sw). Default: 1
         padding: implicit zero padding on the input. Can be a single number or a tuple. Default: 0
         output_padding: A padding of 0 or 1 pixels that should be added to the output. Can be a single number or a tuple. Default: 0
-        no_bias: If set to true, the layer will not learn an additive bias. Default: False
+        bias: If set to False, the layer will not learn an additive bias. Default: True
     Input Shape: [ * , in_channels  , * , * ] : Input is minibatch x in_channels x iH x iW
     Output Shape:[ * , out_channels , * , * ]  : Output shape is precisely minibatch x out_channels x (iH - 1) * sH - 2*padH + kH + output_paddingH x (iW - 1) * sW - 2*padW + kW
     Members:
@@ -181,9 +181,9 @@ class FullConv2d(Conv2d):
         >>> output = m(input)
     """
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 padding=0, output_padding=0, no_bias=False):
+                 padding=0, output_padding=0, bias=True):
         super(FullConv2d, self).__init__(in_channels, out_channels, kernel_size,
-                                         stride, padding, no_bias)
+                                         stride, padding, bias)
         self.out_padh, self.out_padw = _pair(output_padding)
 
     def forward(self, input):

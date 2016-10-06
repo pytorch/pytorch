@@ -73,12 +73,12 @@ class Module(object):
         result = self.forward(*input)
         for hook in self.forward_hooks.values():
             hook(self, input, result)
-        if isinstance(result, tuple):
-            fn = result[0].creator
-        else:
-            fn = result.creator
+        var = result
+        while not isinstance(var, Variable):
+            var= var[0]
+        creator = var.creator
         for key, hook in self.backward_hooks.items():
-            fn.register_hook(key, lambda gi,go,hook=hook: hook(self, gi, go))
+            creator.register_hook(key, lambda gi,go,hook=hook: hook(self, gi, go))
         return result
 
     def __getattr__(self, name):
