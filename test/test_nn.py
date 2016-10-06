@@ -37,12 +37,13 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
         if self.check_inplace:
             module_ip = self.constructor(*self.constructor_args, inplace=True)
 
+            input_version = input._version
             output = module(input)
-            test_case.assertFalse(input.dirty)
+            test_case.assertEqual(input._version, input_version)
 
             input_ip = deepcopy(input)
             output_ip = module_ip(input_ip)
-            test_case.assertTrue(input_ip.dirty)
+            test_case.assertNotEqual(input_ip._version, input_version)
 
             test_case.assertEqual(output, output_ip)
 

@@ -11,6 +11,7 @@ class Function(object):
         self.needs_input_grad = None
         self.saved_variables = None
         self.to_save = None
+        self._shared_pairs = None
         self.non_differentiable = None
         self.backward_hooks = OrderedDict()
 
@@ -24,14 +25,21 @@ class Function(object):
         dirty_set = set(args)
         for var in self.input:
             if var.data in dirty_set:
-                var.mark_dirty()
+                var._version[0] += 1
+
+    def mark_shared_storage(self, *pairs):
+        self._shared_pairs = pairs
 
     def mark_non_differentiable(self, *args):
         self.non_differentiable = set(args)
 
     @property
     def saved_tensors(self):
-        return tuple(arg.data for arg in self.saved_variables)
+        for arg, expected_version in self.saved_variables:
+            if arg._version[0] != expected_version:
+                raise RuntimeError("one of the variables needed for gradient "
+                    "computation has been modified by an inplace operation")
+        return tuple(arg.data for arg, _ in self.saved_variables)
 
     def _do_forward(self, *input):
         for i in input:
@@ -55,21 +63,25 @@ class Function(object):
             output = tuple(Variable(tensor, volatile=True)
                            for tensor in raw_output)
         else:
+            t2var = {var.data: var for var in input}
             output = tuple(Variable(tensor, self, requires_grad=self.requires_grad)
-                           for tensor in raw_output)
+                            if tensor not in t2var
+                            else t2var[tensor]
+                            for tensor in raw_output)
+            for output_var in output:
+                output_var.creator = self
+                t2var[output_var.data] = output_var
             self.output_ids = {id(var): i for i, var in enumerate(output)}
             if self.to_save:
-                # output has to be chained after input, so if the same tensor
-                # appears both in the input and output (happens for in-place
-                # function), we save the clean output variable.
-                #
-                # Some variables might have been changed in-place, so accessing
-                # their .data will throw. If they also occur in the output
-                # these references will be overwritten by clean variables,
-                # if now, they'll raise an error on backward.
-                t2var = {var._data: var for var in chain(input, output)}
-                self.saved_variables = tuple(t2var[t] for t in self.to_save)
+                self.saved_variables = tuple((t2var[t], t2var[t]._version[0])
+                        for t in self.to_save)
                 del self.to_save
+            if self._shared_pairs:
+                for t1, t2 in self._shared_pairs:
+                    v1 = t2var[t1]
+                    v2 = t2var[t2]
+                    v2._version = v1._version
+                del self._shared_pairs
             if self.non_differentiable is not None:
                 for var in output:
                     if var.data in self.non_differentiable:
