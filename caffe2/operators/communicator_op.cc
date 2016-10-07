@@ -51,7 +51,7 @@ OPERATOR_SCHEMA(Allgather)
     .NumInputs(2)
     .NumOutputs(1)
     .SetDoc(R"DOC(
-Does an allgather operation among the nodes. Currently only Sum is supported.
+Does an allgather operation among the nodes.
 )DOC")
     .Input(0, "comm_world", "The common world.")
     .Input(1, "X", "A tensor to be allgathered.")

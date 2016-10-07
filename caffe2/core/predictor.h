@@ -10,7 +10,10 @@ class Predictor {
   using TensorVector = std::vector<TensorCPU*>;
   // Runs the `init_net` once, then saves the `run_net` to be executed
   // in `::run`
-  Predictor(const NetDef& init_net, const NetDef& run_net);
+  Predictor(
+      const NetDef& init_net,
+      const NetDef& run_net,
+      Workspace* parent = nullptr);
 
   // Executes `run_net` on the inputs.
   // The first `inputs.size()` inputs from run_net::external_inputs

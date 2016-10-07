@@ -56,7 +56,10 @@ class ConvPoolOpBase : public Operator<Context> {
             "stride_w",
             OperatorBase::GetSingleArgument<int>("stride", 1))),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
+            OperatorBase::GetSingleArgument<string>("order", "NCHW"))),
+        shared_buffer_(
+            OperatorBase::GetSingleArgument<int>("shared_buffer", 0)),
+        ws_(ws) {
     // For the padding, they should either be the legacy padding strategy
     // (VALID or SAME), or an explicit, non-negative value.
     if (legacy_pad_ == LegacyPadding::VALID ||
@@ -196,6 +199,8 @@ class ConvPoolOpBase : public Operator<Context> {
   int stride_h_;
   int stride_w_;
   StorageOrder order_;
+  bool shared_buffer_;
+  Workspace* ws_;
 
   inline void ComputeSizeAndPad(
       const int in_size,
@@ -280,20 +285,22 @@ class ConvPoolOpBase : public Operator<Context> {
  private:
 };
 
-#define USE_CONV_POOL_BASE_FUNCTIONS(Context) \
-  USE_OPERATOR_FUNCTIONS(Context);            \
-  using ConvPoolOpBase<Context>::pad_t_;      \
-  using ConvPoolOpBase<Context>::pad_l_;      \
-  using ConvPoolOpBase<Context>::pad_b_;      \
-  using ConvPoolOpBase<Context>::pad_r_;      \
-  using ConvPoolOpBase<Context>::legacy_pad_; \
-  using ConvPoolOpBase<Context>::kernel_h_;   \
-  using ConvPoolOpBase<Context>::kernel_w_;   \
-  using ConvPoolOpBase<Context>::dilation_h_; \
-  using ConvPoolOpBase<Context>::dilation_w_; \
-  using ConvPoolOpBase<Context>::stride_h_;   \
-  using ConvPoolOpBase<Context>::stride_w_;   \
-  using ConvPoolOpBase<Context>::order_
+#define USE_CONV_POOL_BASE_FUNCTIONS(Context)    \
+  USE_OPERATOR_FUNCTIONS(Context);               \
+  using ConvPoolOpBase<Context>::pad_t_;         \
+  using ConvPoolOpBase<Context>::pad_l_;         \
+  using ConvPoolOpBase<Context>::pad_b_;         \
+  using ConvPoolOpBase<Context>::pad_r_;         \
+  using ConvPoolOpBase<Context>::legacy_pad_;    \
+  using ConvPoolOpBase<Context>::kernel_h_;      \
+  using ConvPoolOpBase<Context>::kernel_w_;      \
+  using ConvPoolOpBase<Context>::dilation_h_;    \
+  using ConvPoolOpBase<Context>::dilation_w_;    \
+  using ConvPoolOpBase<Context>::stride_h_;      \
+  using ConvPoolOpBase<Context>::stride_w_;      \
+  using ConvPoolOpBase<Context>::order_;         \
+  using ConvPoolOpBase<Context>::shared_buffer_; \
+  using ConvPoolOpBase<Context>::ws_
 
 }  // namespace caffe2
 

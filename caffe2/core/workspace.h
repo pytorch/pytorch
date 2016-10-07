@@ -18,12 +18,18 @@ namespace caffe2 {
 class NetBase;
 
 struct StopOnSignal {
-  StopOnSignal(): handler_(SignalHandler::Action::STOP,
-                           SignalHandler::Action::STOP) {}
+  StopOnSignal()
+      : handler_(std::make_shared<SignalHandler>(
+            SignalHandler::Action::STOP,
+            SignalHandler::Action::STOP)) {}
+
+  StopOnSignal(const StopOnSignal& other) : handler_(other.handler_) {}
+
   bool operator()(int iter) {
-    return handler_.CheckForSignals() != SignalHandler::Action::STOP;
+    return handler_->CheckForSignals() != SignalHandler::Action::STOP;
   }
-  SignalHandler handler_;
+
+  std::shared_ptr<SignalHandler> handler_;
 };
 
 /**

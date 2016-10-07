@@ -31,7 +31,7 @@ __global__ void LSTMUnitKernel(
   CUDA_1D_KERNEL_LOOP(index, nthreads) {
     const int n = index / dim;
     const int d = index % dim;
-    const bool valid = seqLengths[n] < t;
+    const bool valid = t < seqLengths[n];
     if (!valid) {
       H[index] = 0;
       C[index] = C_prev[index];
@@ -66,7 +66,7 @@ __global__ void LSTMUnitGradientKernel(
     T* X_diff) {
   CUDA_1D_KERNEL_LOOP(index, nthreads) {
     const int n = index / dim;
-    const bool valid = seqLengths[n] < t;
+    const bool valid = t < seqLengths[n];
     const int d = index % dim;
     const T* X_offset = X + 4 * dim * n;
     T* c_prev_diff = C_prev_diff + index;

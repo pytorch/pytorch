@@ -14,8 +14,20 @@ template <class Context>
 class PackSegmentsOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  USE_SIMPLE_CTOR_DTOR(PackSegmentsOp)
+  // USE_SIMPLE_CTOR_DTOR(PackSegmentsOp)
   USE_DISPATCH_HELPER;
+
+  PackSegmentsOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
+      pad_minf_(
+        OperatorBase::GetSingleArgument<bool>("pad_minf", false)) {
+          if (pad_minf_) {
+            padding_ = -1.0 * std::numeric_limits<float>::infinity();
+          } else {
+            padding_ = 0;
+          }
+        }
+
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int, long>>::call(this, Input(LENGTHS));
@@ -30,16 +42,21 @@ class PackSegmentsOp final : public Operator<Context> {
     CAFFE_ENFORCE(data.ndim() >= 1, "DATA should be at least 1-D");
     CAFFE_ENFORCE(lengths.ndim() == 1, "LENGTH should be 1-D");
 
+    // Find the length of the longest sequence.
     const T* l = lengths.template data<T>();
-    T max_l = l[0];
+    T max_length = l[0];
     for (T i = 1; i < lengths.dim(0); ++i) {
-      max_l = std::max(max_l, l[i]);
+      max_length = std::max(max_length, l[i]);
     }
 
-    auto shape = data.dims();
-    shape[0] = max_l;
+    auto shape = data.dims(); // Shape of output is batch_size x max_len x ...
+    shape[0] = max_length;
     shape.insert(shape.begin(), lengths.size());
     output->Resize(shape);
+
+    // Do zero padding
+    float* data_ptr = output->template mutable_data<float>();
+    memset(data_ptr, padding_, sizeof(float) * output->size());
 
     int block_size = data.size() / data.dim(0);
     int block_bytesize = data.nbytes() / data.dim(0);
@@ -51,13 +68,17 @@ class PackSegmentsOp final : public Operator<Context> {
           data.meta(),
           l[i] * block_size,
           d + block_bytesize * start,
-          out + block_bytesize * max_l * i);
+          out + block_bytesize * max_length * i);
       start += l[i];
     }
+
     return true;
   }
 
   INPUT_TAGS(LENGTHS, DATA);
+  private:
+    bool pad_minf_;
+    float padding_;
 };
 
 template <class Context>
@@ -82,9 +103,9 @@ class UnpackSegmentsOp final : public Operator<Context> {
 
     const T* l = lengths.template data<T>();
 
-    T max_l = l[0];
+    T max_length = l[0];
     for (T i = 1; i < lengths.dim(0); ++i) {
-      max_l = std::max(max_l, l[i]);
+      max_length = std::max(max_length, l[i]);
     }
     T total_l = std::accumulate(l, l + lengths.dim(0), 0);
 
@@ -119,7 +140,9 @@ REGISTER_CPU_OPERATOR(UnpackSegments, UnpackSegmentsOp<CPUContext>);
 OPERATOR_SCHEMA(PackSegments)
     .NumInputs(2)
     .NumOutputs(1)
-    .SetDoc("Map N dim tensor to N+1 dim based on length blob")
+    .SetDoc(
+        "Map N dim tensor to N+1 dim based on length blob. Sequences that \
+    are shorter than the longest sequence are padded with zeros.")
     .Input(
         0,
         "lengths",
@@ -130,7 +153,10 @@ OPERATOR_SCHEMA(PackSegments)
         "packed_tensor",
         "N + 1 dim Tesor"
         "where dim(1) is the max length"
-        ", dim(0) is the batch size.");
+        ", dim(0) is the batch size.")
+    .Arg(
+        "pad_minf", "Padding number in the packed segments. Use true to pad \
+    -infinity, otherwise pad zeros");
 OPERATOR_SCHEMA(UnpackSegments)
     .NumInputs(2)
     .NumOutputs(1)

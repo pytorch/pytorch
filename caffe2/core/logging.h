@@ -3,6 +3,8 @@
 
 #include <climits>
 #include <exception>
+#include <functional>
+#include <limits>
 #include <sstream>
 
 #include "caffe2/core/flags.h"
@@ -75,6 +77,8 @@ string StripBasename(const std::string& full_path);
 // Returns number of replacements
 size_t ReplaceAll(string& s, const char* from, const char* to);
 
+void SetStackTraceFetcher(std::function<string(void)> fetcher);
+
 class EnforceNotMet : public std::exception {
  public:
   EnforceNotMet(
@@ -88,8 +92,11 @@ class EnforceNotMet : public std::exception {
     return msg_stack_;
   }
 
+  const char* what() const noexcept override;
+
  private:
   vector<string> msg_stack_;
+  string full_msg_;
 };
 
 #define CAFFE_ENFORCE(condition, ...)                                         \
@@ -103,6 +110,124 @@ class EnforceNotMet : public std::exception {
 #define CAFFE_THROW(...)         \
   throw ::caffe2::EnforceNotMet( \
       __FILE__, __LINE__, "", ::caffe2::MakeString(__VA_ARGS__))
+
+/**
+ * Rich logging messages
+ *
+ * CAFFE_ENFORCE_THAT can be used with one of the "checker functions" that
+ * capture input argument values and add it to the exception message. E.g.
+ * `CAFFE_ENFORCE_THAT(Equals(foo(x), bar(y)), "Optional additional message")`
+ * would evaluate both foo and bar only once and if the results are not equal -
+ * include them in the exception message.
+ *
+ * Some of the basic checker functions like Equals or Greater are already
+ * defined below. Other header might define customized checkers by adding
+ * functions to caffe2::enforce_detail namespace. For example:
+ *
+ *   namespace caffe2 { namespace enforce_detail {
+ *   inline EnforceFailMessage IsVector(const vector<TIndex>& shape) {
+ *     if (shape.size() == 1) { return EnforceOK(); }
+ *     return MakeString("Shape ", shape, " is not a vector");
+ *   }
+ *   }}
+ *
+ * With further usages like `CAFFE_ENFORCE_THAT(IsVector(Input(0).dims()))`
+ *
+ * Convenient wrappers for binary operations like CAFFE_ENFORCE_EQ are provided
+ * too. Please use them instead of CHECK_EQ and friends for failures in
+ * user-provided input.
+ */
+
+namespace enforce_detail {
+
+struct EnforceOK {};
+
+class EnforceFailMessage {
+ public:
+  constexpr /* implicit */ EnforceFailMessage(EnforceOK) : msg_(nullptr) {}
+
+  EnforceFailMessage(EnforceFailMessage&&) = default;
+  EnforceFailMessage(const EnforceFailMessage&) = delete;
+  EnforceFailMessage& operator=(EnforceFailMessage&&) = delete;
+  EnforceFailMessage& operator=(const EnforceFailMessage&) = delete;
+
+  // Catch all wrong usages like CAFFE_ENFORCE_THAT(x < y)
+  template <class... Args>
+  /* implicit */ EnforceFailMessage(Args...) {
+    static_assert(
+        // This stands for an "impossible" condition. Plain `false` doesn't
+        // trick compiler enough.
+        sizeof...(Args) == std::numeric_limits<std::size_t>::max(),
+        "CAFFE_ENFORCE_THAT has to be used with one of special check functions "
+        "like `Equals`. Use CAFFE_ENFORCE for simple boolean checks.");
+  }
+
+  /* implicit */ EnforceFailMessage(std::string&& msg) {
+    msg_ = new std::string(std::move(msg));
+  }
+  inline bool bad() const {
+    return msg_;
+  }
+  std::string get_message_and_free(std::string&& extra) const {
+    std::string r;
+    if (extra.empty()) {
+      r = std::move(*msg_);
+    } else {
+      r = ::caffe2::MakeString(std::move(*msg_), ". ", std::move(extra));
+    }
+    delete msg_;
+    return r;
+  }
+
+ private:
+  std::string* msg_;
+};
+
+#define BINARY_COMP_HELPER(name, op)                         \
+  template <typename T1, typename T2>                        \
+  inline EnforceFailMessage name(const T1& x, const T2& y) { \
+    if (x op y) {                                            \
+      return EnforceOK();                                    \
+    }                                                        \
+    return MakeString(x, " vs ", y);                         \
+  }
+BINARY_COMP_HELPER(Equals, ==)
+BINARY_COMP_HELPER(NotEquals, !=)
+BINARY_COMP_HELPER(Greater, >)
+BINARY_COMP_HELPER(GreaterEquals, >=)
+BINARY_COMP_HELPER(Less, <)
+BINARY_COMP_HELPER(LessEquals, <=)
+#undef BINARY_COMP_HELPER
+
+#define CAFFE_ENFORCE_THAT_IMPL(condition, expr, ...)                 \
+  do {                                                                \
+    using namespace ::caffe2::enforce_detail;                         \
+    const EnforceFailMessage& r = (condition);                        \
+    if (r.bad()) {                                                    \
+      throw ::caffe2::EnforceNotMet(                                  \
+          __FILE__,                                                   \
+          __LINE__,                                                   \
+          expr,                                                       \
+          r.get_message_and_free(::caffe2::MakeString(__VA_ARGS__))); \
+    }                                                                 \
+  } while (false)
+}
+
+#define CAFFE_ENFORCE_THAT(condition, ...) \
+  CAFFE_ENFORCE_THAT_IMPL((condition), #condition, __VA_ARGS__)
+
+#define CAFFE_ENFORCE_EQ(x, y, ...) \
+  CAFFE_ENFORCE_THAT_IMPL(Equals((x), (y)), #x " == " #y, __VA_ARGS__)
+#define CAFFE_ENFORCE_NE(x, y, ...) \
+  CAFFE_ENFORCE_THAT_IMPL(NotEquals((x), (y)), #x " != " #y, __VA_ARGS__)
+#define CAFFE_ENFORCE_LE(x, y, ...) \
+  CAFFE_ENFORCE_THAT_IMPL(LessEquals((x), (y)), #x " <= " #y, __VA_ARGS__)
+#define CAFFE_ENFORCE_LT(x, y, ...) \
+  CAFFE_ENFORCE_THAT_IMPL(Less((x), (y)), #x " < " #y, __VA_ARGS__)
+#define CAFFE_ENFORCE_GE(x, y, ...) \
+  CAFFE_ENFORCE_THAT_IMPL(GreaterEquals((x), (y)), #x " >= " #y, __VA_ARGS__)
+#define CAFFE_ENFORCE_GT(x, y, ...) \
+  CAFFE_ENFORCE_THAT_IMPL(Greater((x), (y)), #x " > " #y, __VA_ARGS__)
 
 } // namespace caffe2
 

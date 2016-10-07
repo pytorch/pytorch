@@ -11,10 +11,9 @@ namespace internal {
 class Caffe2InitializeRegistry {
  public:
   typedef bool (*InitFunction)(int*, char***);
-  static Caffe2InitializeRegistry* Registry() {
-    static Caffe2InitializeRegistry gRegistry;
-    return &gRegistry;
-  }
+  // Registry() is defined in .cpp file to make registration work across
+  // multiple shared libraries loaded with RTLD_LOCAL
+  static Caffe2InitializeRegistry* Registry();
 
   void Register(InitFunction function, bool run_early,
                 const char* description) {

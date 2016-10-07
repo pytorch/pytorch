@@ -130,8 +130,12 @@ class DBReader {
   friend class DBReaderSerializer;
   DBReader() {}
 
-  DBReader(const string& db_type, const string& source) {
-    Open(db_type, source);
+  DBReader(
+      const string& db_type,
+      const string& source,
+      const int32_t num_shards = 1,
+      const int32_t shard_id = 0) {
+    Open(db_type, source, num_shards, shard_id);
   }
 
   explicit DBReader(const DBReaderProto& proto) {
@@ -142,6 +146,8 @@ class DBReader {
           "does not support it.");
       cursor_->Seek(proto.key());
     }
+    num_shards_ = 1;
+    shard_id_ = 0;
   }
 
   explicit DBReader(std::unique_ptr<DB> db)
@@ -152,7 +158,11 @@ class DBReader {
     cursor_ = db_->NewCursor();
   }
 
-  void Open(const string& db_type, const string& source) {
+  void Open(
+      const string& db_type,
+      const string& source,
+      const int32_t num_shards = 1,
+      const int32_t shard_id = 0) {
     // Note(jiayq): resetting is needed when we re-open e.g. leveldb where no
     // concurrent access is allowed.
     cursor_.reset();
@@ -162,9 +172,16 @@ class DBReader {
     db_ = CreateDB(db_type_, source_, READ);
     CAFFE_ENFORCE(db_,
         "Cannot open db: ", source_, " of type ", db_type_);
+    CAFFE_ENFORCE(num_shards >= 1);
+    CAFFE_ENFORCE(shard_id >= 0);
+    CAFFE_ENFORCE(shard_id < num_shards);
+    num_shards_ = num_shards;
+    shard_id_ = shard_id;
     cursor_ = db_->NewCursor();
+    SeekToFirst();
   }
 
+ public:
   /**
    * Read a set of key and value from the db and move to next. Thread safe.
    *
@@ -182,13 +199,18 @@ class DBReader {
    * output blob.
    */
   void Read(string* key, string* value) const {
-    CHECK(cursor_ != nullptr) << "Reader not initialized.";
+    CAFFE_ENFORCE(cursor_ != nullptr, "Reader not initialized.");
     std::unique_lock<std::mutex> mutex_lock(reader_mutex_);
     *key = cursor_->key();
     *value = cursor_->value();
-    cursor_->Next();
-    if (!cursor_->Valid()) {
-      cursor_->SeekToFirst();
+
+    // In sharded mode, each read skips num_shards_ records
+    for (int s = 0; s < num_shards_; s++) {
+      cursor_->Next();
+      if (!cursor_->Valid()) {
+        MoveToBeginning();
+        break;
+      }
     }
   }
 
@@ -196,9 +218,9 @@ class DBReader {
    * @brief Seeks to the first key. Thread safe.
    */
   void SeekToFirst() const {
-    CHECK(cursor_ != nullptr) << "Reader not initialized.";
+    CAFFE_ENFORCE(cursor_ != nullptr, "Reader not initialized.");
     std::unique_lock<std::mutex> mutex_lock(reader_mutex_);
-    cursor_->SeekToFirst();
+    MoveToBeginning();
   }
 
   /**
@@ -215,11 +237,24 @@ class DBReader {
   }
 
  private:
+  void MoveToBeginning() const {
+    if (cursor_->SupportsSeek()) {
+      cursor_->SeekToFirst();
+    }
+    for (auto s = 0; s < shard_id_; s++) {
+      cursor_->Next();
+      CAFFE_ENFORCE(
+          cursor_->Valid(), "Db has less rows than shard id: ", s, shard_id_);
+    }
+  }
+
   string db_type_;
   string source_;
   unique_ptr<DB> db_;
   unique_ptr<Cursor> cursor_;
   mutable std::mutex reader_mutex_;
+  uint32_t num_shards_;
+  uint32_t shard_id_;
 
   DISABLE_COPY_AND_ASSIGN(DBReader);
 };

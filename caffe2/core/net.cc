@@ -1,6 +1,8 @@
 #include "caffe2/core/net.h"
 
 #include <set>
+#include <stack>
+#include <unordered_map>
 #include <unordered_set>
 
 #include "caffe2/core/operator.h"
@@ -9,7 +11,7 @@
 
 CAFFE2_DEFINE_bool(
     caffe2_disable_chaining,
-    true,
+    false,
     "Disable chaining logic (some latent multi-device issues).");
 
 namespace caffe2 {
@@ -23,25 +25,6 @@ bool sameDevice(const OperatorDef& lhs, const OperatorDef& rhs) {
 }
 
 using OpIndex = int;
-using Ancestry = std::vector<std::unordered_set<OpIndex>>;
-Ancestry computeAncestors(
-    const std::vector<internal::OperatorNode>& ops) {
-  Ancestry ancestors;
-  ancestors.resize(ops.size());
-  for (auto i = 0; i < ops.size(); ++i) {
-    const auto& parents = ops[i].parents_;
-    for (const auto parent : parents) {
-      ancestors[i].insert(parent);
-      for (const auto parent_ancestor : ancestors[parent]) {
-        ancestors[i].insert(parent_ancestor);
-      }
-    }
-    VLOG(2) << "Ancestors of op: " << i << ", "
-            << std::vector<OpIndex>(ancestors[i].begin(), ancestors[i].end());
-  }
-  return ancestors;
-}
-
 DAGNetBase::ExecutionChains singleChains(
     const std::vector<internal::OperatorNode>& nodes) {
   DAGNetBase::ExecutionChains chains;
@@ -53,74 +36,136 @@ DAGNetBase::ExecutionChains singleChains(
 
 DAGNetBase::ExecutionChains computeChains(
     const std::vector<internal::OperatorNode>& nodes) {
-  const auto& ancestry = computeAncestors(nodes);
+  vector<int> initial_frontier;
+  for (int idx = 0; idx < nodes.size(); ++idx) {
+    if (nodes[idx].parents_.size() == 0) {
+      initial_frontier.push_back(idx);
+    }
+  }
 
+  // We need to construct the node_seen_count to know how many inner edges each
+  // node has.
+  std::unordered_map<OpIndex, int> node_seen_count;
+
+  for (int root_index : initial_frontier) {
+    const auto& root = nodes[root_index];
+    std::stack<std::pair<OpIndex, std::vector<int>::const_iterator>>
+        depth_stack;
+    depth_stack.push(make_pair(root_index, root.children_.begin()));
+    node_seen_count[root_index]++;
+    CAFFE_ENFORCE(
+        node_seen_count[root_index] == 1,
+        "root node ",
+        root_index,
+        " visit count must be == 1");
+
+    while (depth_stack.size() > 0) {
+      auto cur = depth_stack.top();
+      depth_stack.pop();
+      if (cur.second != nodes[cur.first].children_.end()) {
+        OpIndex node_index = *cur.second;
+        node_seen_count[node_index]++;
+        cur.second++;
+        depth_stack.push(cur);
+        if (node_seen_count[node_index] == 1) {
+          // Visit each child only once.
+          depth_stack.push(
+              make_pair(node_index, nodes[node_index].children_.begin()));
+        }
+      }
+    }
+  }
   // Now, we compute the set of execution chains An execution chain is
   // a linear set of nodes that can be executed on a single stream
   // (e.g. a chain of single input, single output operators)
   DAGNetBase::ExecutionChains chains;
   std::unordered_set<OpIndex> seen_nodes;
-  for (auto i = 0; i < nodes.size(); ++i) {
-    if (seen_nodes.find(i) != seen_nodes.end()) {
-      // We've already executed this operator.
-      continue;
-    }
-    // Compute the execution chain rooted at this node.
-    std::vector<OpIndex> chain;
-    chain.push_back(i);
-
-    while (true) {
-      const auto current = chain.back();
-      const auto& children = nodes[current].children_;
-
-      // Find children for which this current node is the *single*
-      // direct ancestor. If there are more than one, then we can't
-      // chain.
-      std::vector<OpIndex> candidates;
-      for (const auto child : children) {
-        std::vector<OpIndex> direct_parents;
-        const auto& parents = nodes[child].parents_;
-        for (const auto parent : parents) {
-          if (std::all_of(
-                  parents.begin(), parents.end(), [&](OpIndex other_parent) {
-                    // If `other_parent` contains `parent` in it's
-                    // ancestors, we can ignore `parent`.
-                    return !ancestry.at(other_parent).count(parent);
-                  })) {
-            direct_parents.push_back(parent);
-          }
-        }
-        if (direct_parents.size() == 1 && direct_parents.front() == current) {
-          candidates.push_back(child);
-        }
-      }
-
-      if (candidates.size() != 1) {
-        break;
-      }
-
-      const auto candidate = candidates.front();
-      const auto parent = chain.back();
-
-      if (!sameDevice(
-              nodes[candidate].operator_->def(),
-              nodes[parent].operator_->def())) {
-        break;
-      }
-
-      chain.push_back(candidate);
-    };
-
-    for (const auto node : chain) {
+  std::vector<OpIndex> chain;
+  std::pair<OpIndex, std::vector<int>::const_iterator> cur;
+  std::stack<std::pair<OpIndex, std::vector<int>::const_iterator>> depth_stack;
+  auto check_current_for_chaining = [&]() -> bool {
+    return (
+        node_seen_count[cur.first] == 1 &&
+        (chain.size() == 0 || sameDevice(
+                                  nodes[cur.first].operator_->def(),
+                                  nodes[chain.back()].operator_->def())));
+  };
+  auto commit_chain = [&]() {
+    if (chain.size() > 0) {
       CAFFE_ENFORCE(
-          seen_nodes.insert(node).second,
-          "Node ",
-          node,
-          " is already in the net.");
+          chains.insert({chain.front(), chain}).second,
+          "Chain ",
+          chain.front(),
+          " was already added.");
+      VLOG(2) << "Added chain: " << chain.front() << "with elements";
+      for (auto ch : chain) {
+        VLOG(2) << ch << ", ";
+      }
+      chain.clear();
     }
-    CAFFE_ENFORCE(
-        chains.insert({i, chain}).second, "Chain ", i, " was already added.");
-    VLOG(2) << "Added chain: " << chain;
+  };
+  auto depth_traverse = [&]() {
+    while (cur.second != nodes[cur.first].children_.end() &&
+           seen_nodes.find(*cur.second) != seen_nodes.end()) {
+      cur.second++;
+    }
+
+    if (cur.second != nodes[cur.first].children_.end()) {
+      auto next = make_pair(*cur.second, nodes[*cur.second].children_.begin());
+      depth_stack.push(cur);
+      depth_stack.push(next);
+    }
+  };
+  for (int root_index : initial_frontier) {
+    depth_stack.push(
+        make_pair(root_index, nodes[root_index].children_.begin()));
+    while (depth_stack.size() > 0) {
+      cur = depth_stack.top();
+      depth_stack.pop();
+      if (seen_nodes.find(cur.first) == seen_nodes.end()) {
+        seen_nodes.insert(cur.first);
+        // Has one child, can be candidate for chain or can be added to the
+        // previous chain.
+        if (nodes[cur.first].children_.size() == 1) {
+          if (check_current_for_chaining()) {
+            // Add oneself to the current chain.
+            VLOG(1) << "Adding to existing chain" << cur.first;
+            chain.push_back(cur.first);
+            int index = *nodes[cur.first].children_.begin();
+            depth_stack.push(make_pair(index, nodes[index].children_.begin()));
+          } else {
+            // Can't belong to the previous chain, commit previous chain and
+            // start a new one.
+            commit_chain();
+            chain.push_back(cur.first);
+            int index = *nodes[cur.first].children_.begin();
+            depth_stack.push(make_pair(index, nodes[index].children_.begin()));
+          }
+        } else if (
+            nodes[cur.first].children_.size() == 0 &&
+            check_current_for_chaining()) {
+          // Add current node to the current chain and commit.
+          chain.push_back(cur.first);
+          commit_chain();
+        } else {
+          // Node has more than one child.
+          commit_chain();
+          // Add current node as an independent chain since it won't be a part
+          // of a bigger chain.
+          chain.push_back(cur.first);
+          commit_chain();
+          depth_traverse();
+        }
+      } else {
+        // This node has been seen before, we will only traverse its children.
+        // Commit any pending chains and continue traversing.
+        commit_chain();
+        depth_traverse();
+      }
+    } // End while
+
+    // Check if this if is even needed.
+    commit_chain();
   }
   CAFFE_ENFORCE(
       seen_nodes.size() == nodes.size(),
@@ -131,7 +176,6 @@ DAGNetBase::ExecutionChains computeChains(
       ".");
   return chains;
 }
-
 }
 
 CAFFE_DEFINE_REGISTRY(NetRegistry, NetBase, const NetDef&, Workspace*);
@@ -150,12 +194,19 @@ NetBase::NetBase(const NetDef& def, Workspace* /* unused */)
     for (const string& in : op.input()) {
       if (!known_blobs.count(in)) {
         if (external_input_.size()) {
-          CAFFE_ENFORCE(false,
-                        "Source for input ", in, " is unknown.");
+          CAFFE_THROW(
+              "op ",
+              op.type(),
+              ": Source for input ",
+              in,
+              " is unknown for net ",
+              def.name(),
+              ", operator ",
+              ProtoDebugString(op));
         } else {
           // If we are not declaring input and output, we will simply VLOG it
           // for debugging purposes.
-          VLOG(1) << "Source for input " << in << " is unknown.";
+          VLOG(1) << "op " << op.type() << ": input " << in << " is unknown.";
         }
       }
     }
@@ -168,7 +219,10 @@ NetBase::NetBase(const NetDef& def, Workspace* /* unused */)
   CAFFE_ENFORCE(
       remaining_output.size() == 0,
       "Some of the blobs are declared as output but never produced by the "
-      "net.");
+      "net ",
+      def.name(),
+      ", the first one is ",
+      *remaining_output.begin());
 }
 
 unique_ptr<NetBase> CreateNet(const NetDef& net_def, Workspace* ws) {
@@ -182,6 +236,7 @@ unique_ptr<NetBase> CreateNet(const NetDef& net_def, Workspace* ws) {
 
 SimpleNet::SimpleNet(const NetDef& net_def, Workspace* ws)
     : NetBase(net_def, ws) {
+  VLOG(1) << "Constructing SimpleNet " << net_def.name();
   bool net_def_has_device_option = net_def.has_device_option();
   // Initialize the operators
   for (const OperatorDef& operator_def : net_def.op()) {
@@ -317,6 +372,7 @@ vector<float> SimpleNet::TEST_Benchmark(
 DAGNetBase::DAGNetBase(const NetDef& net_def, Workspace* ws)
     : NetBase(net_def, ws), operator_nodes_(net_def.op_size()) {
   // Blob creator allows us to track which operator created which blob.
+  VLOG(1) << "Constructing DAGNet " << net_def.name();
   std::map<string, int> blob_creator;
   std::map<string, std::set<int> > blob_readers;
   bool net_def_has_device_option = net_def.has_device_option();
@@ -411,6 +467,9 @@ DAGNetBase::DAGNetBase(const NetDef& net_def, Workspace* ws)
       (FLAGS_caffe2_disable_chaining ? singleChains(operator_nodes_)
                                      : computeChains(operator_nodes_));
 
+  LOG(INFO) << "Number of parallel execution chains "
+            << execution_chains_.size()
+            << " Number of operators = " << net_def.op_size();
   // TODO: do we want to make sure that there are no loops in the
   // dependency graph?
 

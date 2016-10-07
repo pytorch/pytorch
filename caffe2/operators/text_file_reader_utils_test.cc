@@ -6,6 +6,7 @@
 #include "caffe2/utils/math.h"
 #include "gtest/gtest.h"
 
+#include "caffe2/operators/text_file_reader_utils.h"
 #include "caffe2/utils/string_utils.h"
 
 #include <cstdio>
@@ -13,7 +14,7 @@
 
 namespace caffe2 {
 
-TEST(StringTest, TokenizeTest) {
+TEST(TextFileReaderUtilsTest, TokenizeTest) {
   TokenizedString tokenized;
   std::string ch =
       "label\1text\xc3\xbf\nlabel2\\\nTest\1tex\\\\t2\n"

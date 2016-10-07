@@ -57,7 +57,7 @@ def IsOperatorWithEngine(op_type, engine):
     return (op_type + "_ENGINE_" + engine in _REGISTERED_OPERATORS)
 
 
-def DeviceOption(device_type, cuda_gpu_id, random_seed=None):
+def DeviceOption(device_type, cuda_gpu_id=0, random_seed=None):
     option = caffe2_pb2.DeviceOption()
     option.device_type = device_type
     option.cuda_gpu_id = cuda_gpu_id
@@ -105,6 +105,9 @@ class BlobReference(object):
 
     def __str__(self):
         return self._name
+
+    def __repr__(self):
+        return 'BlobReference("{}")'.format(self._name)
 
     def __add__(self, other):
         if not isinstance(other, basestring):
@@ -492,10 +495,17 @@ class IR(object):
             if (len(input_usage) <= 1 or fwd_op_idx != input_usage[0]):
                 # We do not need to do gradient accumulation yet.
                 continue
-
             generator = self.gradient_generators[input_name][input_version]
-            if not self._VerifyGradientGenerators(generator):
-                continue
+            try:
+                if not self._VerifyGradientGenerators(generator):
+                    continue
+            except RuntimeError as err:
+                raise RuntimeError(
+                    "Gradients for param ''{}'' failed to verity: {}".format(
+                        input_name,
+                        err
+                    )
+                )
 
             # Finally, let's create the sum operator.
             sum_op = self._MakeSumOp(input_name, input_version)
@@ -1125,6 +1135,24 @@ def get_net_name(netlike):
         return netlike
 
 
+def output_to_list(op_output):
+    """
+    Ensures that the output of an operator is a list.
+    Use when an operator has a variable number of outputs, but a list of
+    outputs is desired even when number of outputs is 1.
+
+    Args:
+        op_output: Either a BlobReferenece or an iterable of BlobReferences.
+
+    Returns:
+        A list of BlobReferences.
+    """
+    assert type(op_output) in (list, tuple, BlobReference)
+    return (
+        [op_output]
+        if isinstance(op_output, BlobReference) else list(op_output))
+
+
 def _add_net_to_dict(net_dict, net):
     name = get_net_name(net)
     if net in net_dict:
@@ -1151,6 +1179,9 @@ class ExecutionStep(object):
                     self._step.network.extend([get_net_name(net)])
         if num_iter is not None:
             self._step.num_iter = num_iter
+
+    def Name(self):
+        return self._step.name
 
     def __str__(self):
         return self._step.name
@@ -1227,10 +1258,16 @@ class ExecutionStep(object):
 
 
 class Plan(object):
-    def __init__(self, name):
+    def __init__(self, name_or_step):
         self._plan = caffe2_pb2.PlanDef()
-        self._plan.name = name
         self._net_dict = OrderedDict()
+        if isinstance(name_or_step, ExecutionStep):
+            self._plan.name = name_or_step.Name()
+            self.AddStep(name_or_step)
+        elif isinstance(name_or_step, basestring):
+            self._plan.name = name_or_step
+        else:
+            raise ValueError('name_or_step must be a string or ExecutionStep')
 
     def __str__(self):
         return self._plan.name

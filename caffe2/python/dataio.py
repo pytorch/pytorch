@@ -36,6 +36,24 @@ class Reader(object):
         assert self._schema is not None, 'Schema not provided for this reader.'
         return self._schema
 
+    def setup_ex(self, init_net, finish_net):
+        """Nets to be executed once at startup and finish.
+           Experimental extension. Don't use yet"""
+        pass
+
+    def read_ex(self, local_init_net, local_finish_net):
+        """Experimental extension to the interface. Don't use yet"""
+        read_net = core.Net('reader_body')
+        return ([read_net], ) + self.read(read_net)
+
+    def read_record_ex(self, local_init_net, local_finish_net):
+        """Experimental extension to the interface. Don't use yet"""
+        nets, should_stop, fields = self.read_ex(
+            local_init_net, local_finish_net)
+        if self._schema:
+            fields = from_blob_list(self._schema, fields)
+        return nets, should_stop, fields
+
     """
     Reader is a abstract class to be implemented in order to provide
     operations capable of iterating through a dataset or stream of data.
@@ -151,10 +169,31 @@ class Writer(object):
             fields = fields.field_blobs()
         self.write(writer_net, fields)
 
+    def setup_ex(self, init_net, finish_net):
+        """Experimental, don't use yet"""
+        self.commit(finish_net)
+
+    def write_ex(self, fields, local_init_net, local_finish_net, stop_blob):
+        """Experimental extension to the interface. Don't use yet"""
+        write_net = core.Net('write_net')
+        self.write(write_net, fields)
+        return [write_net]
+
+    def write_record_ex(
+            self, fields, local_init_net, local_finish_net, stop_blob=None):
+        """Experimental extension to the interface. Don't use yet."""
+        if isinstance(fields, Field):
+            fields = fields.field_blobs()
+        if stop_blob is None:
+            stop_blob = local_init_net.NextName("dequeue_status")
+        write_nets = self.write_ex(
+            fields, local_init_net, local_finish_net, stop_blob)
+        return (write_nets, stop_blob)
+
     def commit(self, finish_net):
         """Add operations to `finish_net` that signal end of data.
 
         This must be implemented by all Writers, but may be no-op for some
         of them.
         """
-        raise NotImplementedError('Writers must implement commit.')
+        pass

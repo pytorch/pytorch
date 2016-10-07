@@ -26,7 +26,7 @@ int main(int argc, char** argv) {
   }
 
   vector<vector<bool> > access_pattern;
-  CHECK(caffe2::GetCudaPeerAccessPattern(&access_pattern));
+  CAFFE_ENFORCE(caffe2::GetCudaPeerAccessPattern(&access_pattern));
 
   std::stringstream sstream;
   // Find topology

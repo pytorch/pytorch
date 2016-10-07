@@ -29,10 +29,10 @@ string Demangle(const char* name);
 
 template <typename T>
 struct TypeNameRegisterer {
-  TypeNameRegisterer() {
+  explicit TypeNameRegisterer(CaffeTypeId id) {
 #ifdef __GXX_RTTI
     string name = Demangle(typeid(T).name());
-    gTypeNames()[reinterpret_cast<CaffeTypeId>(Id())] = name;
+    gTypeNames()[reinterpret_cast<CaffeTypeId>(id)] = name;
     // If we are in RTTI mode, we will also use this opportunity to do sanity
     // check if there are duplicated ids registered for the same type. This
     // usually happens when one does not do RTLD_GLOBAL, which is often the
@@ -42,20 +42,15 @@ struct TypeNameRegisterer {
     if (gRegisteredTypeNames().count(name)) {
       std::cerr << "Type name " << name
                 << " registered twice. This should "
-                   "not happen. Are you using RTLD_GLOBAL correctly?"
+                   "not happen. Do you have duplicated CAFFE_KNOWN_TYPE?"
                 << std::endl;
       throw std::runtime_error("TypeNameRegisterer error with type " + name);
     }
     gRegisteredTypeNames().insert(name);
-#else  // __GXX_RTTI
-    gTypeNames()[reinterpret_cast<CaffeTypeId>(Id())] =
+#else // __GXX_RTTI
+    gTypeNames()[reinterpret_cast<CaffeTypeId>(id)] =
         "(RTTI disabled, cannot show name)";
-#endif  // __GXX_RTTI
-  }
-
-  static CaffeTypeId Id() {
-    static bool type_id_bit[1];
-    return reinterpret_cast<CaffeTypeId>(type_id_bit);
+#endif // __GXX_RTTI
   }
 };
 
@@ -73,20 +68,24 @@ class TypeMeta {
   /** Create a dummy TypeMeta object. To create a TypeMeta object for a specific
    * type, use TypeMeta::Make<T>().
    */
-  TypeMeta() : id_(0), itemsize_(0), ctor_(nullptr), copy_(nullptr),
-               dtor_(nullptr) {}
+  TypeMeta()
+      : id_(0), itemsize_(0), ctor_(nullptr), copy_(nullptr), dtor_(nullptr) {}
 
   /**
    * Copy constructor.
    */
   TypeMeta(const TypeMeta& src)
-      : id_(src.id_), itemsize_(src.itemsize_),
-        ctor_(src.ctor_), copy_(src.copy_), dtor_(src.dtor_) {}
+      : id_(src.id_),
+        itemsize_(src.itemsize_),
+        ctor_(src.ctor_),
+        copy_(src.copy_),
+        dtor_(src.dtor_) {}
   /**
    * Assignment operator.
    */
   TypeMeta& operator=(const TypeMeta& src) {
-    if (this == &src) return *this;
+    if (this == &src)
+      return *this;
     id_ = src.id_;
     itemsize_ = src.itemsize_;
     ctor_ = src.ctor_;
@@ -98,31 +97,45 @@ class TypeMeta {
  private:
   // TypeMeta can only be created by Make, making sure that we do not
   // create incorrectly mixed up TypeMeta objects.
-  TypeMeta(CaffeTypeId i, size_t s, PlacementNew ctor, TypedCopy copy,
-           TypedDestructor dtor)
+  TypeMeta(
+      CaffeTypeId i,
+      size_t s,
+      PlacementNew ctor,
+      TypedCopy copy,
+      TypedDestructor dtor)
       : id_(i), itemsize_(s), ctor_(ctor), copy_(copy), dtor_(dtor) {}
 
  public:
   /**
    * Returns the type id.
    */
-  inline const CaffeTypeId& id() const { return id_; }
+  inline const CaffeTypeId& id() const {
+    return id_;
+  }
   /**
    * Returns the size of the item.
    */
-  inline const size_t& itemsize() const { return itemsize_; }
+  inline const size_t& itemsize() const {
+    return itemsize_;
+  }
   /**
    * Returns the placement new function pointer for individual items.
    */
-  inline PlacementNew ctor() const { return ctor_; }
+  inline PlacementNew ctor() const {
+    return ctor_;
+  }
   /**
    * Returns the typed copy function pointer for individual iterms.
    */
-  inline TypedCopy copy() const { return copy_; }
+  inline TypedCopy copy() const {
+    return copy_;
+  }
   /**
    * Returns the destructor function pointer for individual items.
    */
-  inline TypedDestructor dtor() const { return dtor_; }
+  inline TypedDestructor dtor() const {
+    return dtor_;
+  }
   /**
    * Returns a printable name for the type.
    */
@@ -131,11 +144,17 @@ class TypeMeta {
     assert(it != gTypeNames().end());
     return it->second.c_str();
   }
-  inline bool operator==(const TypeMeta& m) const { return (id_ == m.id_); }
-  inline bool operator!=(const TypeMeta& m) const { return (id_ != m.id_); }
+  inline bool operator==(const TypeMeta& m) const {
+    return (id_ == m.id_);
+  }
+  inline bool operator!=(const TypeMeta& m) const {
+    return (id_ != m.id_);
+  }
 
   template <typename T>
-  inline bool Match() const { return (id_ == Id<T>()); }
+  inline bool Match() const {
+    return (id_ == Id<T>());
+  }
 
   // Below are static functions that can be called by passing a specific type.
 
@@ -147,22 +166,29 @@ class TypeMeta {
    * is generated during run-time. Do NOT serialize the id for storage.
    */
   template <typename T>
-  static CaffeTypeId Id() {
-    static TypeNameRegisterer<T> registerer;
-    return TypeNameRegisterer<T>::Id();
-  }
+  static CaffeTypeId Id();
+
   /**
    * Returns the item size of the type. This is equivalent to sizeof(T).
    */
   template <typename T>
-  static size_t ItemSize() { return sizeof(T); }
+  static size_t ItemSize() {
+    return sizeof(T);
+  }
 
   /**
    * Returns the printable name of the type.
+   *
+   * Works for all types, not only the ones registered with CAFFE_KNOWN_TYPE
    */
   template <typename T>
   static const char* Name() {
-    return gTypeNames()[Id<T>()].c_str();
+#ifdef __GXX_RTTI
+    static string name = Demangle(typeid(T).name());
+    return name.c_str();
+#else // __GXX_RTTI
+    return "(RTTI disabled, cannot show name)";
+#endif // __GXX_RTTI
   }
 
   /**
@@ -172,10 +198,9 @@ class TypeMeta {
   static void _Ctor(void* ptr, size_t n) {
     T* typed_ptr = static_cast<T*>(ptr);
     for (int i = 0; i < n; ++i) {
-      new(typed_ptr + i) T;
+      new (typed_ptr + i) T;
     }
   }
-
 
   /**
    * Typed copy function for classes.
@@ -219,20 +244,20 @@ class TypeMeta {
     return TypeMeta(Id<T>(), ItemSize<T>(), nullptr, nullptr, nullptr);
   }
 
-  template <typename T,
-            typename std::enable_if<
-                !std::is_fundamental<T>::value &&
-                std::is_copy_assignable<T>::value>::type* = nullptr>
+  template <
+      typename T,
+      typename std::enable_if<
+          !std::is_fundamental<T>::value &&
+          std::is_copy_assignable<T>::value>::type* = nullptr>
   static TypeMeta Make() {
-    return TypeMeta(
-        Id<T>(), ItemSize<T>(), _Ctor<T>, _Copy<T>, _Dtor<T>);
+    return TypeMeta(Id<T>(), ItemSize<T>(), _Ctor<T>, _Copy<T>, _Dtor<T>);
   }
 
   template <typename T>
   static TypeMeta Make(
       typename std::enable_if<
-          !std::is_fundamental<T>::value && !std::is_copy_assignable<T>::value
-      >::type* = 0) {
+          !std::is_fundamental<T>::value &&
+          !std::is_copy_assignable<T>::value>::type* = 0) {
     return TypeMeta(
         Id<T>(), ItemSize<T>(), _Ctor<T>, _CopyNotAllowed<T>, _Dtor<T>);
   }
@@ -245,6 +270,28 @@ class TypeMeta {
   TypedDestructor dtor_;
 };
 
-}  // namespace caffe2
+/**
+ * Register unique id for a type so it can be used in TypeMeta context, e.g. be
+ * used as a type for Blob or for Tensor elements.
+ *
+ * CAFFE_KNOWN_TYPE does explicit instantiation of TypeMeta::Id<T> template
+ * function and thus needs to be put in a single translation unit (.cpp file)
+ * for a given type T. Other translation units that use type T as a type of the
+ * caffe2::Blob or element type of caffe2::Tensor need to depend on the
+ * translation unit that contains CAFFE_KNOWN_TYPE declaration via regular
+ * linkage dependencies.
+ *
+ * NOTE: the macro needs to be invoked in ::caffe2 namespace
+ */
+#define CAFFE_KNOWN_TYPE(T)                            \
+  template <>                                          \
+  CaffeTypeId TypeMeta::Id<T>() {                      \
+    static bool type_id_bit[1];                        \
+    static TypeNameRegisterer<T> registerer(           \
+        reinterpret_cast<CaffeTypeId>(type_id_bit));   \
+    return reinterpret_cast<CaffeTypeId>(type_id_bit); \
+  }
 
-#endif  // CAFFE2_CORE_TYPEID_H_
+} // namespace caffe2
+
+#endif // CAFFE2_CORE_TYPEID_H_

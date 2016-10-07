@@ -3,6 +3,7 @@
 
 #include <climits>
 #include <cstddef>
+#include <exception>
 #include <typeinfo>
 #include <vector>
 
@@ -162,7 +163,7 @@ class Operator : public OperatorBase {
       }
       return (started && finished);
     } catch (EnforceNotMet& err) {
-      err.AppendMessage("Error from operator " + ProtoDebugString(def()));
+      err.AppendMessage("Error from operator: \n" + ProtoDebugString(def()));
       throw;
     }
   }
@@ -172,7 +173,7 @@ class Operator : public OperatorBase {
       context_.SwitchToDevice();
       return RunOnDevice();
     } catch (EnforceNotMet& err) {
-      err.AppendMessage("Error from operator " + ProtoDebugString(def()));
+      err.AppendMessage("Error from operator: \n" + ProtoDebugString(def()));
       throw;
     }
   }
@@ -338,6 +339,30 @@ CAFFE_DECLARE_REGISTRY(
 // Macros for cudnn since we use it often
 #define REGISTER_CUDNN_OPERATOR(name, ...) \
   REGISTER_CUDA_OPERATOR_WITH_ENGINE(name, CUDNN, __VA_ARGS__)
+
+// An exception that can be thrown by an operator constructor that notifies
+// that it does not support the given setting. This can be usually used for
+// specific engines that only implement a subset of the features required by
+// the original operator schema.
+// TODO(jiayq): make more feature-complete exception message.
+class UnsupportedOperatorFeature : public std::exception {
+ public:
+  UnsupportedOperatorFeature(const string& msg) : msg_(msg) {}
+  const char* what() const noexcept override {
+    return msg_.c_str();
+  }
+
+ private:
+  string msg_;
+};
+
+// A helper macro that should ONLY be used in the operator constructor to check
+// if needed features are met. If not, throws the UnsupportedOperatorFeature
+// exception with the given message.
+#define OPERATOR_NEEDS_FEATURE(condition, message) \
+  if (!(condition)) {                              \
+    throw UnsupportedOperatorFeature(message);     \
+  }
 
 // Creates an operator with the given operator definition.
 unique_ptr<OperatorBase> CreateOperator(

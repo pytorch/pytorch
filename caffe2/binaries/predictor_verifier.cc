@@ -19,8 +19,8 @@ void run() {
     LOG(FATAL) << "No predict net specified. Use --predict_net=/path/to/net.";
   }
   caffe2::NetDef init_net, predict_net;
-  CHECK(ReadProtoFromFile(FLAGS_init_net, &init_net));
-  CHECK(ReadProtoFromFile(FLAGS_predict_net, &predict_net));
+  CAFFE_ENFORCE(ReadProtoFromFile(FLAGS_init_net, &init_net));
+  CAFFE_ENFORCE(ReadProtoFromFile(FLAGS_predict_net, &predict_net));
   // Can be large due to constant fills
   VLOG(1) << "Init net: " << ProtoDebugString(init_net);
   LOG(INFO) << "Predict net: " << ProtoDebugString(predict_net);

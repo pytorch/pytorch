@@ -26,6 +26,7 @@ class TestConvolution(hu.HypothesisTestCase):
            batch_size=st.integers(1, 3),
            order=st.sampled_from(["NCHW", "NHWC"]),
            engine=st.sampled_from(["", "EIGEN"]),
+           shared_buffer=st.booleans(),
            **hu.gcs)
     @settings(max_examples=2, timeout=100)
     def test_convolution_separate_stride_pad_gradients(self, stride_h, stride_w,
@@ -34,7 +35,8 @@ class TestConvolution(hu.HypothesisTestCase):
                                                        input_channels,
                                                        output_channels,
                                                        batch_size, order,
-                                                       engine, gc, dc):
+                                                       engine, shared_buffer,
+                                                       gc, dc):
         op = core.CreateOperator(
             "Conv",
             ["X", "w", "b"],
@@ -48,6 +50,7 @@ class TestConvolution(hu.HypothesisTestCase):
             kernel=kernel,
             order=order,
             engine=engine,
+            shared_buffer=int(shared_buffer),
         )
         X = np.random.rand(
             batch_size, size, size, input_channels).astype(np.float32) - 0.5

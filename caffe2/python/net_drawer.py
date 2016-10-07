@@ -59,18 +59,33 @@ def _escape_label(name):
     return json.dumps(name)
 
 
-def GetPydotGraph(operators_or_net, name=None, rankdir='LR'):
+def GetOpNodeProducer(append_output, **kwargs):
+    def ReallyGetOpNode(op, op_id):
+        if op.name:
+            node_name = '%s/%s (op#%d)' % (op.name, op.type, op_id)
+        else:
+            node_name = '%s (op#%d)' % (op.type, op_id)
+        if append_output:
+            for output_name in op.output:
+                node_name += '\n' + output_name
+        return pydot.Node(node_name, **kwargs)
+    return ReallyGetOpNode
+
+
+def GetPydotGraph(
+    operators_or_net,
+    name=None,
+    rankdir='LR',
+    node_producer=None
+):
+    if node_producer is None:
+        node_producer = GetOpNodeProducer(False, **OP_STYLE)
     operators, name = _rectify_operator_and_name(operators_or_net, name)
     graph = pydot.Dot(name, rankdir=rankdir)
     pydot_nodes = {}
     pydot_node_counts = defaultdict(int)
     for op_id, op in enumerate(operators):
-        if op.name:
-            op_node = pydot.Node(
-                '%s/%s (op#%d)' % (op.name, op.type, op_id), **OP_STYLE
-            )
-        else:
-            op_node = pydot.Node('%s (op#%d)' % (op.type, op_id), **OP_STYLE)
+        op_node = node_producer(op, op_id)
         graph.add_node(op_node)
         # print 'Op: %s' % op.name
         # print 'inputs: %s' % str(op.input)
@@ -104,9 +119,10 @@ def GetPydotGraph(operators_or_net, name=None, rankdir='LR'):
 
 def GetPydotGraphMinimal(
     operators_or_net,
-    name,
+    name=None,
     rankdir='LR',
-    minimal_dependency=False
+    minimal_dependency=False,
+    node_producer=None,
 ):
     """Different from GetPydotGraph, hide all blob nodes and only show op nodes.
 
@@ -115,6 +131,8 @@ def GetPydotGraphMinimal(
     op a and b, and op b depends on a, then only the edge b->c will be drawn
     because a->c will be implied.
     """
+    if node_producer is None:
+        node_producer = GetOpNodeProducer(False, **OP_STYLE)
     operators, name = _rectify_operator_and_name(operators_or_net, name)
     graph = pydot.Dot(name, rankdir=rankdir)
     # blob_parents maps each blob name to its generating op.
@@ -122,12 +140,7 @@ def GetPydotGraphMinimal(
     # op_ancestry records the ancestors of each op.
     op_ancestry = defaultdict(set)
     for op_id, op in enumerate(operators):
-        if op.name:
-            op_node = pydot.Node(
-                '%s/%s (op#%d)' % (op.name, op.type, op_id), **OP_STYLE
-            )
-        else:
-            op_node = pydot.Node('%s (op#%d)' % (op.type, op_id), **OP_STYLE)
+        op_node = node_producer(op, op_id)
         graph.add_node(op_node)
         # Get parents, and set up op ancestry.
         parents = [
@@ -175,7 +188,7 @@ def _draw_nets(nets, g):
     return nodes
 
 
-def _draw_steps(steps, g, skip_step_edges=False):
+def _draw_steps(steps, g, skip_step_edges=False):  # noqa
     kMaxParallelSteps = 3
 
     def get_label():
@@ -253,6 +266,9 @@ def main():
         help="If set, only draw minimal dependency."
     )
     parser.add_argument(
+        "--append_output", action="store_true",
+        help="If set, append the output blobs to the operator names.")
+    parser.add_argument(
         "--rankdir", type=str, default="LR",
         help="The rank direction of the pydot graph."
     )
@@ -268,13 +284,17 @@ def main():
     for key, operators in graphs.items():
         if args.minimal:
             graph = GetPydotGraphMinimal(
-                operators, key,
+                operators,
+                name=key,
                 rankdir=args.rankdir,
+                node_producer=GetOpNodeProducer(args.append_output, **OP_STYLE),
                 minimal_dependency=args.minimal_dependency)
         else:
             graph = GetPydotGraph(
-                operators, key,
-                rankdir=args.rankdir)
+                operators,
+                name=key,
+                rankdir=args.rankdir,
+                node_producer=GetOpNodeProducer(args.append_output, **OP_STYLE))
         filename = args.output_prefix + graph.get_name() + '.dot'
         graph.write(filename, format='raw')
         pdf_filename = filename[:-3] + 'pdf'

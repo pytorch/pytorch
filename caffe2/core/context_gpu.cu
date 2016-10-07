@@ -8,6 +8,7 @@
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/core/init.h"
 #include "caffe2/core/logging.h"
+#include "caffe2/core/tensor.h"
 #include "caffe2/utils/string_utils.h"
 
 
@@ -42,6 +43,8 @@ DEFINE_int32(caffe2_cub_max_bin, 16,
              "bins.");
 
 namespace caffe2 {
+
+CAFFE_KNOWN_TYPE(Tensor<CUDAContext>);
 
 thread_local ThreadLocalCUDAObjects CUDAContext::cuda_objects_;
 

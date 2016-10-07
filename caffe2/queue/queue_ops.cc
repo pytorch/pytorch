@@ -3,6 +3,8 @@
 
 namespace caffe2 {
 
+CAFFE_KNOWN_TYPE(std::shared_ptr<BlobsQueue>);
+
 namespace {
 
 REGISTER_CPU_OPERATOR(CreateBlobsQueue, CreateBlobsQueueOp<CPUContext>);

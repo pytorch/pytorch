@@ -49,9 +49,10 @@ class Torch final {
   }
 
   static const char* tensorTy(const Blob& blob) {
-    CHECK(blob.template IsType<Tensor<Context>>());
+    CAFFE_ENFORCE(blob.template IsType<Tensor<Context>>());
     const auto& tc = blob.template Get<Tensor<Context>>();
-    CHECK(tc.template IsType<float>()) << tc.meta().name() << ", " << tc.size();
+    CAFFE_ENFORCE(
+        tc.template IsType<float>() + tc.meta().name(), ", ", tc.size());
     return Traits::tensorTy;
   }
 
@@ -141,7 +142,7 @@ class Torch final {
     auto* thDst = static_cast<typename Traits::Tensor*>(torchDst);
     auto* tcDst = dst->template GetMutable<Tensor<Context>>();
     CHECK_NOTNULL(src->storage->data);
-    CHECK(src->storage->size);
+    CAFFE_ENFORCE(src->storage->size);
     CHECK_EQ(src->storage->data, thDst->storage->data);
     CHECK_EQ(src->storage->data, tcDst->template data<float>());
     CHECK_EQ(src->storage->size, thDst->storage->size);
@@ -162,10 +163,10 @@ class Torch final {
       return;
     }
 
-    CHECK(lua_istable(L(), -1));
+    CAFFE_ENFORCE(lua_istable(L(), -1));
     lua_pushnil(L());
     for (auto i = 0; i < blobs.size(); ++i) {
-      CHECK(lua_next(L(), -2));
+      CAFFE_ENFORCE(lua_next(L(), -2));
       verifyOutput(blobs[i], tensors[i]);
       lua_pop(L(), 1);
     }
@@ -264,7 +265,8 @@ class TorchOpBase : public Operator<Context> {
       lua_pushnil(L);
       int i = 0;
       while (lua_next(L, -3) && i < paramBlobs.size()) {
-        CHECK(luaT_isudata(L, -1, torch::Torch<Context>::Traits::tensorTy));
+        CAFFE_ENFORCE(
+            luaT_isudata(L, -1, torch::Torch<Context>::Traits::tensorTy));
         auto* param =
             static_cast<typename torch::Torch<Context>::Traits::Tensor*>(
                 luaT_toudata(L, -1, torch::Torch<Context>::Traits::tensorTy));
@@ -275,7 +277,7 @@ class TorchOpBase : public Operator<Context> {
           tc->Resize(paramShape);
           tc->template mutable_data<float>();
         } else {
-          CHECK(tc->dims() == paramShape);
+          CAFFE_ENFORCE(tc->dims() == paramShape);
         }
         lua_pop(L, 1);
         i++;
@@ -286,7 +288,8 @@ class TorchOpBase : public Operator<Context> {
     lua_getfield(L, -1, "output");
     if (outputBlobs.size() == 0) {
     } else if (outputBlobs.size() == 1) {
-      CHECK(luaT_isudata(L, -1, torch::Torch<Context>::Traits::tensorTy));
+      CAFFE_ENFORCE(
+          luaT_isudata(L, -1, torch::Torch<Context>::Traits::tensorTy));
       auto* output =
           static_cast<typename torch::Torch<Context>::Traits::Tensor*>(
               luaT_toudata(L, -1, torch::Torch<Context>::Traits::tensorTy));
@@ -299,7 +302,8 @@ class TorchOpBase : public Operator<Context> {
       lua_pushnil(L);
       auto i = 0;
       while (lua_next(L, -2) && i < outputBlobs.size()) {
-        CHECK(luaT_isudata(L, -1, torch::Torch<Context>::Traits::tensorTy));
+        CAFFE_ENFORCE(
+            luaT_isudata(L, -1, torch::Torch<Context>::Traits::tensorTy));
         auto* output =
             static_cast<typename torch::Torch<Context>::Traits::Tensor*>(
                 luaT_toudata(L, -1, torch::Torch<Context>::Traits::tensorTy));
@@ -310,7 +314,7 @@ class TorchOpBase : public Operator<Context> {
           tc->Resize(outputShape);
           tc->template mutable_data<float>();
         } else {
-          CHECK(tc->dims() == outputShape);
+          CAFFE_ENFORCE(tc->dims() == outputShape);
         }
         ++i;
       }
@@ -385,8 +389,9 @@ class TorchOp : public TorchOpBase<Context> {
       lua_pushnil(L);
       auto i = 0;
       while (lua_next(L, -2) && i < numParams) {
-        CHECK(luaT_isudata(L, -1, state_.tensorTy(*paramBlobs[i])))
-            << luaT_typename(L, -1);
+        CAFFE_ENFORCE(
+            luaT_isudata(L, -1, state_.tensorTy(*paramBlobs[i])),
+            luaT_typename(L, -1));
         auto* udata = luaT_toudata(L, -1, state_.tensorTy(*paramBlobs[i]));
         state_.setTensor(
             static_cast<typename torch::Torch<Context>::Traits::Tensor*>(udata),
@@ -517,7 +522,7 @@ class TorchGradientOp : public TorchOpBase<Context> {
       lua_pushnil(L);
       auto i = 0;
       while (lua_next(L, -3) && i < numParams) {
-        CHECK(luaT_isudata(L, -1, state_.tensorTy(*paramBlobs[i])));
+        CAFFE_ENFORCE(luaT_isudata(L, -1, state_.tensorTy(*paramBlobs[i])));
         auto* udata = luaT_toudata(L, -1, state_.tensorTy(*paramBlobs[i]));
         state_.setTensor(
             static_cast<typename torch::Torch<Context>::Traits::Tensor*>(udata),
@@ -530,7 +535,7 @@ class TorchGradientOp : public TorchOpBase<Context> {
       lua_pushnil(L);
       i = 0;
       while (lua_next(L, -2) && i < numParams) {
-        CHECK(luaT_isudata(L, -1, state_.tensorTy(*gradParamBlobs[i])));
+        CAFFE_ENFORCE(luaT_isudata(L, -1, state_.tensorTy(*gradParamBlobs[i])));
         auto* udata = luaT_toudata(L, -1, state_.tensorTy(*gradParamBlobs[i]));
         state_.setTensor(
             static_cast<typename torch::Torch<Context>::Traits::Tensor*>(udata),

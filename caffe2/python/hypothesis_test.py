@@ -46,7 +46,7 @@ def lstm_unit(cell_t_prev, gates, seq_lengths, timestep):
     f_t = sigmoid(f_t)
     o_t = sigmoid(o_t)
     g_t = tanh(g_t)
-    valid = (seq_lengths < t).astype(np.int32)
+    valid = (t < seq_lengths).astype(np.int32)
     assert valid.shape == (N, D)
     cell_t = ((f_t * cell_t_prev) + (i_t * g_t)) * (valid) + \
         (1 - valid) * cell_t_prev
@@ -132,6 +132,7 @@ def _test_binary_broadcast(name, ref, filter_=None,
 
 
 class TestOperators(hu.HypothesisTestCase):
+
     def test_comparison_ops(self):
         ops = {"LT": lambda x1, x2: [x1 < x2],
                "LE": lambda x1, x2: [x1 <= x2],
@@ -584,8 +585,9 @@ class TestOperators(hu.HypothesisTestCase):
            in_place=st.booleans(),
            lr=st.floats(min_value=0.1, max_value=0.9),
            epsilon=st.floats(min_value=1e-5, max_value=1e-2),
+           engine=st.sampled_from([None, "SIMD"]),
            **hu.gcs_cpu_only)
-    def test_adagrad_sgd(self, inputs, in_place, lr, epsilon,
+    def test_adagrad_sgd(self, inputs, in_place, lr, epsilon, engine,
                          gc, dc):
         w, grad, h = inputs
         h = np.abs(h) + 0.01
@@ -595,7 +597,7 @@ class TestOperators(hu.HypothesisTestCase):
             ["w", "h", "grad", "lr"],
             ["w" if in_place else "grad_o",
              "h" if in_place else "h_o"],
-            epsilon=epsilon, device_option=gc)
+            epsilon=epsilon, engine=engine, device_option=gc)
         self.assertDeviceChecks(dc, op, [w, h, grad, lr], [0])
 
         self.assertReferenceChecks(gc, op, [w, h, grad, lr],
@@ -604,9 +606,10 @@ class TestOperators(hu.HypothesisTestCase):
     @given(inputs=hu.tensors(n=3),
            lr=st.floats(min_value=0.1, max_value=0.9),
            epsilon=st.floats(min_value=1e-5, max_value=1e-2),
+           engine=st.sampled_from([None, "SIMD"]),
            **hu.gcs_cpu_only)
     def test_sparse_adagrad_sgd(self, inputs, lr, epsilon,
-                                gc, dc):
+                                engine, gc, dc):
         w, grad, h = inputs
         indices = np.arange(h.shape[0])
         indices = indices[indices % 2 == 0]
@@ -618,6 +621,7 @@ class TestOperators(hu.HypothesisTestCase):
             ["param", "h", "indices", "grad", "lr"],
             ["param", "h"],
             epsilon=epsilon,
+            engine=engine,
             device_option=gc)
         self.assertDeviceChecks(
             dc, op, [w, h, indices, grad, lr], [0])
@@ -876,12 +880,12 @@ class TestOperators(hu.HypothesisTestCase):
             sids = []
             for i, l in enumerate(lengths):
                 sids.extend(l * [i])
-            return (np.array(sids, dtype=int), )
+            return (np.array(sids, dtype=np.int32), )
 
         self.assertReferenceChecks(
             device_option=gc,
             op=op,
-            inputs=[np.array(lengths, dtype=int)],
+            inputs=[np.array(lengths, dtype=np.int32)],
             reference=op_ref)
 
     @given(lengths=st.lists(st.integers(min_value=0, max_value=10),
@@ -903,7 +907,7 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertReferenceChecks(
             device_option=gc,
             op=op,
-            inputs=[np.array(lengths, dtype=int)],
+            inputs=[np.array(lengths, dtype=np.int32)],
             reference=op_ref)
 
     @given(prediction=hu.arrays(dims=[10, 3],
@@ -970,7 +974,7 @@ class TestOperators(hu.HypothesisTestCase):
         def ids_to_lengths(ids):
             ids_length = len(ids)
             if ids_length == 0:
-                return (np.array([], dtype=int),)
+                return (np.array([], dtype=np.int32),)
 
             lengths = []
             # segment id starts with 0
@@ -988,13 +992,67 @@ class TestOperators(hu.HypothesisTestCase):
                     tmp_length = 0
                 tmp_length += 1
             lengths.append(tmp_length)
-            return (np.array(lengths, dtype=int),)
+            return (np.array(lengths, dtype=np.int32),)
 
         self.assertReferenceChecks(
             device_option=gc,
             op=op,
-            inputs=[np.array(segment_ids, dtype=int)],
+            inputs=[np.array(segment_ids, dtype=np.int32)],
             reference=ids_to_lengths)
+
+    @given(lengths=st.lists(st.integers(min_value=1, max_value=10),
+                            min_size=0,
+                            max_size=10),
+            power=st.sampled_from([0.5, 1.0, 1.5, 2.0]),
+           **hu.gcs_cpu_only)
+    def test_segment_ids_to_lengths_weight(self, lengths, power, gc, dc):
+        op = core.CreateOperator(
+            "SegmentIdsToLengthWeights",
+            ["segment_ids"],
+            ["lengths"],
+            power=power)
+
+        def lengths_to_ids(lengths):
+            sids = []
+            for i, l in enumerate(lengths):
+                sids.extend(l * [i])
+            return sids
+
+        segment_ids = lengths_to_ids(lengths)
+
+        def ids_to_length_weights(ids):
+            ids_length = len(ids)
+            if ids_length == 0:
+                return (np.array([], dtype=float),)
+
+            lengths = []
+            # segment id starts with 0
+            prev_id = -1
+            tmp_length = 0
+            for idx in range(ids_length):
+                cur_id = ids[idx]
+                if cur_id != prev_id:
+                    if idx != 0:
+                        lengths.append(tmp_length)
+                    while prev_id + 1 != cur_id:
+                        lengths.append(0)
+                        prev_id += 1
+                    prev_id = cur_id
+                    tmp_length = 0
+                tmp_length += 1
+            lengths.append(tmp_length)
+
+            weighted_length = []
+            for l in lengths:
+                weighted_length.extend(l * [1 / pow(l, power)])
+
+            return (np.array(weighted_length, dtype=float),)
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[np.array(segment_ids, dtype=np.int32)],
+            reference=ids_to_length_weights)
 
     @given(input_tensor=hu.arrays(
         dims=[10], elements=st.floats(allow_nan=False,

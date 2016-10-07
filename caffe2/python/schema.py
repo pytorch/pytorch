@@ -37,6 +37,16 @@ def _join_field_name(prefix, suffix):
         return ''
 
 
+def _normalize_field(field_or_type_or_blob):
+    """Clones/normalizes a field before adding it to a container."""
+    if isinstance(field_or_type_or_blob, Field):
+        return field_or_type_or_blob.clone()
+    elif type(field_or_type_or_blob) in (type, np.dtype):
+        return Scalar(dtype=field_or_type_or_blob)
+    else:
+        return Scalar(blob=field_or_type_or_blob)
+
+
 class Field(object):
     """Represents an abstract field type in a dataset.
     """
@@ -116,9 +126,8 @@ class List(Field):
     the parent domain.
     """
     def __init__(self, values, lengths_blob=None):
-        assert isinstance(values, Field)
         self.lengths = Scalar(np.int32, lengths_blob)
-        self._items = values.clone()
+        self._items = _normalize_field(values)
         self.lengths._set_parent(self, 0)
         self._items._set_parent(self, 1)
         Field.__init__(self, [self.lengths, self._items])
@@ -160,8 +169,7 @@ class Struct(Field):
             assert field[0], 'Field names cannot be empty'
             assert field[0] != 'lengths', (
                 'Struct cannot contain a field named `lengths`.')
-            assert isinstance(field[1], Field)
-        fields = [(name, field.clone()) for name, field in fields]
+        fields = [(name, _normalize_field(field)) for name, field in fields]
         for id, (name, field) in enumerate(fields):
             field._set_parent(self, id)
         self.fields = OrderedDict(fields)
@@ -190,6 +198,16 @@ class Struct(Field):
 
     def clone(self):
         return Struct(*self.fields.items())
+
+    def __getitem__(self, item):
+        if isinstance(item, list) or isinstance(item, tuple):
+            return Struct(*[(
+                self.fields.keys()[k] if isinstance(k, int) else k, self[k])
+                for k in item])
+        elif isinstance(item, int):
+            return self.fields.values()[item]
+        else:
+            return self.fields[item]
 
     def __getattr__(self, item):
         if item.startswith('__'):
@@ -338,6 +356,23 @@ def Map(keys, values, keys_name='keys', values_name='values',
     return List(
         Struct((keys_name, keys), (values_name, values)),
         lengths_blob=lengths_blob)
+
+
+def Tuple(*fields):
+    """
+    Creates a Struct with default, sequential, field names of given types.
+    """
+    return Struct(*[
+        ('field_%d' % i, field) for i, field in enumerate(fields)])
+
+
+def RawTuple(num_fields):
+    """
+    Creates a tuple of `num_field` untyped scalars.
+    """
+    assert isinstance(num_fields, int)
+    assert num_fields > 0
+    return Tuple(*([np.void] * num_fields))
 
 
 def from_dtype(dtype, _outer_shape=()):

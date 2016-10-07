@@ -5,12 +5,20 @@
 #endif
 namespace caffe2 {
 
+namespace internal {
+Caffe2InitializeRegistry* Caffe2InitializeRegistry::Registry() {
+  static Caffe2InitializeRegistry gRegistry;
+  return &gRegistry;
+}
+}
+
 bool GlobalInit(int* pargc, char*** pargv) {
   static bool global_init_was_already_run = false;
   if (global_init_was_already_run) {
     VLOG(1) << "GlobalInit has already been called: did you double-call?";
     return true;
   }
+  global_init_was_already_run = true;
   bool success = true;
   success &= internal::Caffe2InitializeRegistry::Registry()
       ->RunRegisteredEarlyInitFunctions(pargc, pargv);
@@ -23,9 +31,11 @@ bool GlobalInit(int* pargc, char*** pargv) {
   // All other initialization functions.
   success &= internal::Caffe2InitializeRegistry::Registry()
       ->RunRegisteredInitFunctions(pargc, pargv);
+  if (!success) {
+    global_init_was_already_run = false;
+  }
   CAFFE_ENFORCE(success,
                 "Failed to run some init functions for caffe2.");
-  global_init_was_already_run = true;
   // TODO: if we fail GlobalInit(), should we continue?
   return success;
 }

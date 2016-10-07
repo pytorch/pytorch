@@ -109,6 +109,8 @@ def tensor(min_dim=1, max_dim=4, dtype=np.float32, elements=None, **kwargs):
 
 
 def segment_ids(size, is_sorted):
+    if size == 0:
+        return st.just(np.empty(shape=[0], dtype=np.int32))
     if is_sorted:
         return arrays(
             [size],
@@ -122,28 +124,71 @@ def segment_ids(size, is_sorted):
             elements=st.integers(min_value=0, max_value=2 * size))
 
 
-def segmented_tensor(min_dim=1, max_dim=4, dtype=np.float32, is_sorted=True,
-                     elements=None, **kwargs):
+def lengths(size, **kwargs):
+    # First generate number of boarders between segments
+    # Then create boarder values and add 0 and size
+    # By sorting and computing diff we convert them to lengths of
+    # possible 0 value
+    if size == 0:
+        return st.just(np.empty(shape=[0], dtype=np.int32))
+    return st.integers(
+        min_value=0, max_value=size - 1
+    ).flatmap(lambda num_boarders:
+        hypothesis.extra.numpy.arrays(
+            np.int32, num_boarders, elements=st.integers(
+                min_value=0, max_value=size
+            )
+        )
+    ).map(lambda x: np.append(x, np.array([0, size], dtype=np.int32))
+    ).map(sorted).map(np.diff)
+
+
+def segmented_tensor(
+    min_dim=1,
+    max_dim=4,
+    dtype=np.float32,
+    is_sorted=True,
+    elements=None,
+    segment_generator=segment_ids,
+    allow_empty=False,
+    **kwargs
+):
+    gen_empty = st.booleans() if allow_empty else st.just(False)
     data_dims_ = st.lists(dims(**kwargs), min_size=min_dim, max_size=max_dim)
+    data_dims_ = st.tuples(
+        gen_empty, data_dims_
+    ).map(lambda pair: ([0] if pair[0] else []) + pair[1])
     return data_dims_.flatmap(lambda data_dims: st.tuples(
         arrays(data_dims, dtype, elements),
-        segment_ids(data_dims[0], is_sorted=is_sorted),
+        segment_generator(data_dims[0], is_sorted=is_sorted),
     ))
+
+
+def lengths_tensor(*args, **kwargs):
+    return segmented_tensor(*args, segment_generator=lengths, **kwargs)
 
 
 def sparse_segmented_tensor(min_dim=1, max_dim=4, dtype=np.float32,
-                            is_sorted=True, elements=None, **kwargs):
+                            is_sorted=True, elements=None, allow_empty=False,
+                            segment_generator=segment_ids, **kwargs):
+    gen_empty = st.booleans() if allow_empty else st.just(False)
     data_dims_ = st.lists(dims(**kwargs), min_size=min_dim, max_size=max_dim)
-    all_dims_ = data_dims_.flatmap(lambda data_dims: st.tuples(
-        st.just(data_dims),
-        st.integers(min_value=1, max_value=data_dims[0]),
-    ))
+    all_dims_ = st.tuples(gen_empty, data_dims_).flatmap(
+        lambda pair: st.tuples(
+            st.just(pair[1]),
+            (st.integers(min_value=1, max_value=pair[1][0]) if not pair[0]
+             else st.just(0)),
+        ))
     return all_dims_.flatmap(lambda dims: st.tuples(
         arrays(dims[0], dtype, elements),
         arrays(dims[1], dtype=np.int64, elements=st.integers(
             min_value=0, max_value=dims[0][0] - 1)),
-        segment_ids(dims[1], is_sorted=is_sorted),
+        segment_generator(dims[1], is_sorted=is_sorted),
     ))
+
+
+def sparse_lengths_tensor(**kwargs):
+    return sparse_segmented_tensor(segment_generator=lengths, **kwargs)
 
 
 def tensors(n, min_dim=1, max_dim=4, dtype=np.float32, elements=None, **kwargs):

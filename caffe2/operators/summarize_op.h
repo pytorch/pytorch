@@ -24,9 +24,12 @@ class SummarizeOp final : public Operator<Context> {
       log_file_.reset(new std::ofstream(
           target_folder + "/" + def.input(0) + kSummaryzeOpExtension,
           std::ofstream::out | std::ofstream::trunc));
-      CHECK(log_file_->good())
-          << "Failed to open summarize file for tensor " << def.input(0)
-          << ". rdstate() = " << log_file_->rdstate();
+      CAFFE_ENFORCE(
+          log_file_->good(),
+          "Failed to open summarize file for tensor ",
+          def.input(0),
+          ". rdstate() = ",
+          log_file_->rdstate());
     }
   }
   ~SummarizeOp() { if (to_file_) log_file_->close(); }

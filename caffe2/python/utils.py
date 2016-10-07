@@ -42,6 +42,9 @@ def MakeArgument(key, value):
 
     if isinstance(value, np.ndarray):
         value = value.flatten().tolist()
+    elif isinstance(value, np.generic):
+        # convert numpy scalar to native python type
+        value = np.asscalar(value)
 
     if type(value) is float:
         argument.f = value

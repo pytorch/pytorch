@@ -53,10 +53,10 @@ struct Index: IndexBase {
   explicit Index(TIndexValue maxElements)
     : IndexBase(maxElements, TypeMeta::Make<T>()) {}
 
-  bool Get(const T* keys, TIndexValue* values, size_t numKeys) {
+  void Get(const T* keys, TIndexValue* values, size_t numKeys) {
     if (frozen_) {
       FrozenGet(keys, values, numKeys);
-      return true;
+      return;
     }
     std::lock_guard<std::mutex> lock(dictMutex_);
     for (int i = 0; i < numKeys; ++i) {
@@ -68,10 +68,9 @@ struct Index: IndexBase {
         dict_.insert({keys[i], newValue});
         values[i] = newValue;
       } else {
-        return false;
+        CAFFE_THROW("Dict max size reached");
       }
     }
-    return true;
   }
 
   bool Load(const T* keys, size_t numKeys) {
@@ -152,8 +151,8 @@ class IndexGetOp: public Operator<CPUContext> {
     const auto& keys = Input(1);
     auto* values = Output(0);
     values->ResizeLike(keys);
-    return dict->Get(
-        keys.data<T>(), values->mutable_data<TIndexValue>(), keys.size());
+    dict->Get(keys.data<T>(), values->mutable_data<TIndexValue>(), keys.size());
+    return true;
   }
 };
 
@@ -430,6 +429,8 @@ class IndexDeserializer : public BlobDeserializerBase {
     dict->Load(tensor_in.data<T>(), tensor_in.size());
   }
 };
+
+CAFFE_KNOWN_TYPE(std::unique_ptr<caffe2::IndexBase>);
 
 REGISTER_BLOB_SERIALIZER(
     (TypeMeta::Id<std::unique_ptr<caffe2::IndexBase>>()),

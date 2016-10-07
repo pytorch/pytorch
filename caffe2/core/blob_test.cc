@@ -25,6 +25,12 @@ namespace {
 
 class BlobTestFoo {};
 class BlobTestBar {};
+}
+
+CAFFE_KNOWN_TYPE(BlobTestFoo);
+CAFFE_KNOWN_TYPE(BlobTestBar);
+
+namespace {
 
 TEST(BlobTest, Blob) {
   Blob blob;
@@ -260,10 +266,10 @@ TYPED_TEST(TensorCPUTest, TensorShareDataRawPointer) {
   }
 }
 
-TYPED_TEST(TensorCPUDeathTest, CannotShareDataWhenShapeNotSet) {
+TYPED_TEST(TensorCPUTest, CannotShareDataWhenShapeNotSet) {
   std::unique_ptr<TypeParam[]> raw_buffer(new TypeParam[10]);
   TensorCPU tensor;
-  EXPECT_DEATH(tensor.ShareExternalPointer(raw_buffer.get()), "");
+  ASSERT_THROW(tensor.ShareExternalPointer(raw_buffer.get()), EnforceNotMet);
 }
 
 TYPED_TEST(TensorCPUTest, TensorShareDataCanUseDifferentShapes) {
@@ -581,5 +587,29 @@ TYPED_TEST(TypedTensorTest, BigTensorSerialization) {
   }
 }
 
+TEST(CustomChunkSize, BigTensorSerialization) {
+  int64_t d1 = 2;
+  int64_t d2 = FLAGS_caffe2_test_big_tensor_size
+      ? FLAGS_caffe2_test_big_tensor_size / d1
+      : static_cast<int64_t>(std::numeric_limits<int>::max()) + 1;
+  int64_t size = d1 * d2;
+
+  Blob blob;
+  TensorCPU* tensor = blob.GetMutable<TensorCPU>();
+  tensor->Resize(d1, d2);
+  tensor->mutable_data<float>();
+  std::mutex mutex;
+  int counter = 0;
+  auto acceptor = [&](const std::string& key, const std::string& value) {
+    std::lock_guard<std::mutex> guard(mutex);
+    counter++;
+  };
+  blob.Serialize("test", acceptor, size);
+  EXPECT_EQ(counter, 1);
+
+  counter = 0;
+  blob.Serialize("test", acceptor, (size / 2) + 1);
+  EXPECT_EQ(counter, 2);
+}
 } // namespace
 } // namespace caffe2

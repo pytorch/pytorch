@@ -73,7 +73,7 @@ inline bool ReadProtoFromFile(const string& filename, MessageLite* proto) {
 using ::google::protobuf::Message;
 
 inline string ProtoDebugString(const Message& proto) {
-  return proto.DebugString();
+  return proto.ShortDebugString();
 }
 
 bool ReadProtoFromTextFile(const char* filename, Message* proto);
@@ -179,8 +179,9 @@ class ArgumentHelper {
     CAFFE_ENFORCE(arg_map_.count(name), "Cannot find parameter named ", name);
     MessageType message;
     if (arg_map_.at(name)->has_s()) {
-      CHECK(message.ParseFromString(arg_map_.at(name)->s()))
-          << "Faild to parse content from the string";
+      CAFFE_ENFORCE(
+          message.ParseFromString(arg_map_.at(name)->s()),
+          "Faild to parse content from the string");
     } else {
       VLOG(1) << "Return empty message for parameter " << name;
     }
@@ -192,8 +193,9 @@ class ArgumentHelper {
     CAFFE_ENFORCE(arg_map_.count(name), "Cannot find parameter named ", name);
     vector<MessageType> messages(arg_map_.at(name)->strings_size());
     for (int i = 0; i < messages.size(); ++i) {
-      CHECK(messages[i].ParseFromString(arg_map_.at(name)->strings(i)))
-          << "Faild to parse content from the string";
+      CAFFE_ENFORCE(
+          messages[i].ParseFromString(arg_map_.at(name)->strings(i)),
+          "Faild to parse content from the string");
     }
     return messages;
   }

@@ -44,7 +44,10 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
             "adj_w",
             OperatorBase::GetSingleArgument<int>("adj", 0))),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
+            OperatorBase::GetSingleArgument<string>("order", "NCHW"))),
+        shared_buffer_(
+            OperatorBase::GetSingleArgument<int>("shared_buffer", 0)),
+        ws_(ws) {
     CAFFE_ENFORCE(kernel_h_ > 0);
     CAFFE_ENFORCE(kernel_w_ > 0);
     // For the padding, they should either be the legacy padding strategy
@@ -151,6 +154,8 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
   int adj_h_;
   int adj_w_;
   StorageOrder order_;
+  bool shared_buffer_;
+  Workspace* ws_;
 
   inline void ComputeSizeAndPad(
       const int in_size,
@@ -182,17 +187,19 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
   }
 };
 
-#define USE_CONV_TRANSPOSE_UNPOOL_BASE_FUNCTIONS     \
-  USE_OPERATOR_CONTEXT_FUNCTIONS;                    \
-  using ConvTransposeUnpoolBase<Context>::pad_t_;    \
-  using ConvTransposeUnpoolBase<Context>::pad_b_;    \
-  using ConvTransposeUnpoolBase<Context>::pad_l_;    \
-  using ConvTransposeUnpoolBase<Context>::pad_r_;    \
-  using ConvTransposeUnpoolBase<Context>::kernel_h_; \
-  using ConvTransposeUnpoolBase<Context>::kernel_w_; \
-  using ConvTransposeUnpoolBase<Context>::stride_h_; \
-  using ConvTransposeUnpoolBase<Context>::stride_w_; \
-  using ConvTransposeUnpoolBase<Context>::order_
+#define USE_CONV_TRANSPOSE_UNPOOL_BASE_FUNCTIONS          \
+  USE_OPERATOR_CONTEXT_FUNCTIONS;                         \
+  using ConvTransposeUnpoolBase<Context>::pad_t_;         \
+  using ConvTransposeUnpoolBase<Context>::pad_b_;         \
+  using ConvTransposeUnpoolBase<Context>::pad_l_;         \
+  using ConvTransposeUnpoolBase<Context>::pad_r_;         \
+  using ConvTransposeUnpoolBase<Context>::kernel_h_;      \
+  using ConvTransposeUnpoolBase<Context>::kernel_w_;      \
+  using ConvTransposeUnpoolBase<Context>::stride_h_;      \
+  using ConvTransposeUnpoolBase<Context>::stride_w_;      \
+  using ConvTransposeUnpoolBase<Context>::order_;         \
+  using ConvTransposeUnpoolBase<Context>::shared_buffer_; \
+  using ConvTransposeUnpoolBase<Context>::ws_
 
 } // namespace caffe2
 

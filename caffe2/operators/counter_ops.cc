@@ -8,6 +8,9 @@ namespace {
 REGISTER_CPU_OPERATOR(CreateCounter, CreateCounterOp<int64_t, CPUContext>);
 REGISTER_CPU_OPERATOR(ResetCounter, ResetCounterOp<int64_t, CPUContext>);
 REGISTER_CPU_OPERATOR(CountDown, CountDownOp<int64_t, CPUContext>);
+REGISTER_CPU_OPERATOR(
+    CheckCounterDone,
+    CheckCounterDoneOp<int64_t, CPUContext>);
 REGISTER_CPU_OPERATOR(CountUp, CountUpOp<int64_t, CPUContext>);
 REGISTER_CPU_OPERATOR(RetrieveCount, RetrieveCountOp<int64_t, CPUContext>);
 
@@ -41,6 +44,15 @@ otherwise outputs true.
     .Input(0, "counter", "A blob pointing to an instance of a counter.")
     .Output(0, "done", "false unless the internal count is zero.");
 
+OPERATOR_SCHEMA(CheckCounterDone)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .SetDoc(R"DOC(
+If the internal count value <= 0, outputs true, otherwise outputs false,
+)DOC")
+    .Input(0, "counter", "A blob pointing to an instance of a counter.")
+    .Output(0, "done", "true if the internal count is zero or negative.");
+
 OPERATOR_SCHEMA(CountUp)
     .NumInputs(1)
     .NumOutputs(1)
@@ -66,5 +78,7 @@ SHOULD_NOT_DO_GRADIENT(CountUp);
 SHOULD_NOT_DO_GRADIENT(RetrieveCount);
 
 } // namespace
+
+CAFFE_KNOWN_TYPE(std::unique_ptr<Counter<int64_t>>);
 
 } // namespace caffe2

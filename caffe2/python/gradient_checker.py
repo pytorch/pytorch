@@ -42,7 +42,17 @@ class GradientChecker:
         # Run gradient ops
         workspace.RunOperatorsOnce(grad_ops)
         # Get gradients
-        grad = workspace.FetchBlob(grad_name)
+        if isinstance(grad_name, core.GradientSlice):
+            workspace.FeedBlob('zeros', np.zeros_like(x, dtype=np.float32))
+            workspace.FeedBlob('one', np.ones(1, dtype=np.float32))
+            sparse_to_dense_op = core.CreateOperator(
+                'ScatterWeightedSum',
+                ['zeros', 'one', grad_name.indices, grad_name.values, 'one'],
+                'zeros')
+            workspace.RunOperatorOnce(sparse_to_dense_op)
+            grad = workspace.FetchBlob('zeros')
+        else:
+            grad = workspace.FetchBlob(grad_name)
         return loss, grad
 
     def CheckSimple(
@@ -85,10 +95,6 @@ class GradientChecker:
             # hack.
             grad_ops, g_input = core.GradientRegistry.GetGradientForOp(
                 op, [s + '_grad' for s in op.output])
-
-        # sanity check: we only support dense gradient checking in this checker
-        assert all(type(g) is not core.GradientSlice for g in g_input), \
-               "This checker does not support sparse gradient yet."""
 
         dims_to_check = inputs[input_to_check].size
         # First, feed in the input.

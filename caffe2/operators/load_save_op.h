@@ -80,7 +80,7 @@ class LoadOp final : public Operator<Context> {
 
         VLOG(2) << "Deserializing blob " << key;
         BlobProto proto;
-        CHECK(proto.ParseFromString(cursor->value()));
+        CAFFE_ENFORCE(proto.ParseFromString(cursor->value()));
         if (!keep_device_) {
           // If we are not keeping the device as the one specified in the
           // proto, we will set the current device.
@@ -97,7 +97,7 @@ class LoadOp final : public Operator<Context> {
           // different GPU.
           blob->Reset();
         }
-        CHECK(blob->Deserialize(proto));
+        CAFFE_ENFORCE(blob->Deserialize(proto));
 
         if (!blob->IsType<Tensor<Context>>()) {
           // Deal with non-tensors: we don't support chunking so we're done.
@@ -110,7 +110,7 @@ class LoadOp final : public Operator<Context> {
             blobSize.first->second += proto.tensor().segment().end() -
                 proto.tensor().segment().begin();
           } else {
-            CHECK(blobSize.first->second == 0);
+            CAFFE_ENFORCE(blobSize.first->second == 0);
             blobSize.first->second = tensorSize;
           }
           if (blobSize.first->second >= tensorSize) {
@@ -137,7 +137,15 @@ class LoadOp final : public Operator<Context> {
       }
     }
 
-    CHECK_EQ(loaded.size(), OutputSize());
+    if (loaded.size() != OutputSize()) {
+      for (const string& output_name : this->def().output()) {
+        if (loaded.count(output_name) <= 0) {
+          LOG(ERROR) << "Failed to load blob: " << output_name;
+        }
+      }
+      CAFFE_THROW(
+          "Expected to load ", OutputSize(), " blobs, ", "got ", loaded.size());
+    }
   }
 
  private:

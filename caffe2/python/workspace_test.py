@@ -42,11 +42,25 @@ class TestWorkspace(unittest.TestCase):
             workspace.RunNetOnce(self.net.Proto().SerializeToString()), True)
         self.assertEqual(workspace.HasBlob("testblob"), True)
 
+    def testCurrentWorkspaceWrapper(self):
+        self.assertNotIn("testblob", workspace.C.Workspace.current.blobs)
+        self.assertEqual(
+            workspace.RunNetOnce(self.net.Proto().SerializeToString()), True)
+        self.assertEqual(workspace.HasBlob("testblob"), True)
+        self.assertIn("testblob", workspace.C.Workspace.current.blobs)
+        workspace.ResetWorkspace()
+        self.assertNotIn("testblob", workspace.C.Workspace.current.blobs)
+
     def testRunPlan(self):
         plan = core.Plan("test-plan")
         plan.AddStep(core.ExecutionStep("test-step", self.net))
         self.assertEqual(
             workspace.RunPlan(plan.Proto().SerializeToString()), True)
+        self.assertEqual(workspace.HasBlob("testblob"), True)
+
+    def testConstructPlanFromSteps(self):
+        step = core.ExecutionStep("test-step-as-plan", self.net)
+        self.assertEqual(workspace.RunPlan(step), True)
         self.assertEqual(workspace.HasBlob("testblob"), True)
 
     def testResetWorkspace(self):

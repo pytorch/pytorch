@@ -190,6 +190,10 @@ TEST(OperatorSchemaTest, TestCastSchema) {
   // deduces the
   // schema from the "to" argument.
   const OpSchema* schema = OpSchemaRegistry::Schema("Cast");
+  if (!schema) {
+    // Compiled without the Cast op.
+    return;
+  }
   OperatorDef def = CreateOperatorDef(
       "Cast",
       "",

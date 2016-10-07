@@ -21,6 +21,7 @@ DEVICESCOPE = None
 _NAMESCOPE_SEPARATOR = '/'
 
 
+# NOTE: using NameScope is NOT thread-safe! (TODO t13621185)
 @contextlib.contextmanager
 def NameScope(prefix, reset=False):
     global NAMESCOPE

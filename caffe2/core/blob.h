@@ -152,7 +152,8 @@ class Blob {
    */
   void Serialize(
       const string& name,
-      BlobSerializerBase::SerializationAcceptor acceptor) const;
+      BlobSerializerBase::SerializationAcceptor acceptor,
+      int chunk_size = -1) const;
 
   /**
    * @brief Convenience function to serialize a blob to a string.

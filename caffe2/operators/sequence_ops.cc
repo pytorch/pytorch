@@ -34,17 +34,17 @@ class GatherPaddingOp final : public Operator<CPUContext> {
   bool DoRunWithType() {
     const auto& in = Input(0);
     CHECK_GE(in.ndim(), 1);
-    const auto outer_size = in.dims()[0];
+    const int32_t outer_size = in.dims()[0];
     const auto block_size = std::accumulate(
         in.dims().begin() + 1, in.dims().end(), 1, std::multiplies<TIndex>());
     const auto pad_width = startPaddingWidth_ + endPaddingWidth_;
 
     // if no lengths is provided, assume it is a single full-span entry
-    const int64_t* lengths_ptr = &outer_size;
+    const int32_t* lengths_ptr = &outer_size;
     int64_t lengths_size = 1;
     if (InputSize() > 1) {
       const auto& lengths = Input(1);
-      lengths_ptr = lengths.data<int64_t>();
+      lengths_ptr = lengths.data<int32_t>();
       lengths_size = lengths.size();
     }
 
@@ -124,17 +124,17 @@ class RemovePaddingOp final : public Operator<CPUContext> {
   bool DoRunWithType() {
     const auto& in = Input(0);
     CHECK_GE(in.ndim(), 1);
-    const auto outer_size = in.dims()[0];
+    const int32_t outer_size = in.dims()[0];
     const auto block_size = std::accumulate(
         in.dims().begin() + 1, in.dims().end(), 1, std::multiplies<TIndex>());
     const auto pad_width = startPaddingWidth_ + endPaddingWidth_;
 
     // if no lengths is provided, assume it is a single full-span entry
-    const int64_t* lengths_ptr = &outer_size;
+    const int32_t* lengths_ptr = &outer_size;
     int64_t lengths_size = 1;
     if (InputSize() > 1) {
       const auto& lengths = Input(1);
-      lengths_ptr = lengths.data<int64_t>();
+      lengths_ptr = lengths.data<int32_t>();
       lengths_size = lengths.size();
     }
 
@@ -167,8 +167,8 @@ class RemovePaddingOp final : public Operator<CPUContext> {
     std::transform(
         lengths_ptr,
         lengths_ptr + lengths_size,
-        lengths_out->mutable_data<int64_t>(),
-        [pad_width](int64_t x) { return x - pad_width; });
+        lengths_out->mutable_data<int32_t>(),
+        [pad_width](int32_t x) { return x - pad_width; });
     return true;
   }
 
@@ -207,16 +207,16 @@ class AddPaddingOp final : public Operator<CPUContext> {
   bool DoRunWithType() {
     const auto& in = Input(0);
     CHECK_GE(in.ndim(), 1);
-    const auto outer_size = in.dims()[0];
+    const int32_t outer_size = in.dims()[0];
     const auto block_size = std::accumulate(
         in.dims().begin() + 1, in.dims().end(), 1, std::multiplies<TIndex>());
 
     // if no lengths is provided, assume it is a single full-span entry
-    const int64_t* lengths_ptr = &outer_size;
+    const int32_t* lengths_ptr = &outer_size;
     int64_t lengths_size = 1;
     if (InputSize() > 1) {
       const auto& lengths = Input(1);
-      lengths_ptr = lengths.data<int64_t>();
+      lengths_ptr = lengths.data<int32_t>();
       lengths_size = lengths.size();
     }
 
@@ -288,8 +288,8 @@ class AddPaddingOp final : public Operator<CPUContext> {
     std::transform(
         lengths_ptr,
         lengths_ptr + lengths_size,
-        lengths_out->mutable_data<int64_t>(),
-        [pad_width](int64_t x) { return x + pad_width; });
+        lengths_out->mutable_data<int32_t>(),
+        [pad_width](int32_t x) { return x + pad_width; });
     return true;
   }
 

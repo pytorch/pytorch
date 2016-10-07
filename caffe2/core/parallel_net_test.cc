@@ -89,14 +89,14 @@ namespace {
 // Run a network and get its duration in milliseconds.
 int RunNetAndGetDuration(const string& net_def_str, const string& type) {
   NetDef net_def;
-  CHECK(google::protobuf::TextFormat::ParseFromString(
-    net_def_str, &net_def));
+  CAFFE_ENFORCE(
+      google::protobuf::TextFormat::ParseFromString(net_def_str, &net_def));
   net_def.set_type(type);
   Workspace ws;
   unique_ptr<NetBase> net(CreateNet(net_def, &ws));
-  CHECK(net.get() != nullptr);
+  CAFFE_ENFORCE(net.get() != nullptr);
   auto start_time = std::chrono::system_clock::now();
-  CHECK(net->Run());
+  CAFFE_ENFORCE(net->Run());
   // Inspect the time - it should be around 200 milliseconds, since sleep3 can
   // run in parallel with sleep1 and sleep2.
   auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(

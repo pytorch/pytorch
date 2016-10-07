@@ -19,7 +19,8 @@ class SpatialBNOp : public Operator<Context> {
         order_(StringToStorageOrder(
             OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
     // TODO(jiayq): update the input and output size checks.
-    CHECK((is_test_ && OutputSize() == 1) || (!is_test_ && OutputSize() == 5));
+    CAFFE_ENFORCE(
+        (is_test_ && OutputSize() == 1) || (!is_test_ && OutputSize() == 5));
     CHECK_GT(epsilon_, 0);
     CHECK_GE(momentum_, 0);
     CHECK_LE(momentum_, 1);
@@ -49,8 +50,8 @@ class SpatialBNGradientOp : public Operator<Context> {
         epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5)),
         order_(StringToStorageOrder(
             OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
-    CHECK(InputSize() == 5);
-    CHECK_EQ(OutputSize(), 3);
+    CAFFE_ENFORCE(InputSize() == 5);
+    CAFFE_ENFORCE(OutputSize() == 3);
   }
   ~SpatialBNGradientOp() {}
 

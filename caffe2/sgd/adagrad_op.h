@@ -19,7 +19,7 @@ void adagrad_update(
   for (auto i = 0; i < N; ++i) {
     float gi = g[i];
     float hi = nh[i] = h[i] + gi * gi;
-    ng[i] = lr[0] * gi / (sqrt(hi) + epsilon);
+    ng[i] = lr[0] * gi / (std::sqrt(hi) + epsilon);
   }
 }
 
@@ -32,12 +32,12 @@ void adagrad_compute(
     float* nw,
     float* nh,
     float epsilon,
-    const float* lr,
+    float lr,
     Context* context) {
   for (auto i = 0; i < N; ++i) {
     float gi = g[i];
     float hi = nh[i] = h[i] + gi * gi;
-    nw[i] = w[i] + lr[0] * gi / (sqrt(hi) + epsilon);
+    nw[i] = w[i] + lr * gi / (std::sqrt(hi) + epsilon);
   }
 }
 
@@ -61,7 +61,7 @@ class AdagradOp final : public Operator<Context> {
         Output(OUTPUT_PARAM)->template mutable_data<T>(),
         Output(OUTPUT_MOMENT_1)->template mutable_data<T>(),
         epsilon_,
-        Input(LR).template data<T>(),
+        Input(LR).template data<T>()[0],
         &context_);
     return true;
   }
@@ -92,7 +92,6 @@ class SparseAdagradOp final : public Operator<Context> {
     Output(OUTPUT_MOMENT_1)->ResizeLike(Input(MOMENT_1));
 
     auto n = Input(GRAD).dim(0);
-    auto block_size = Input(GRAD).size() / n;
 
     const auto* indices = Input(INDICES).template data<SIndex>();
     const auto* gradIn = Input(GRAD).template data<T>();
@@ -100,12 +99,18 @@ class SparseAdagradOp final : public Operator<Context> {
     const auto* momentIn = Input(MOMENT_1).template data<T>();
     auto* paramOut = Output(OUTPUT_PARAM)->template mutable_data<T>();
     auto* momentOut = Output(OUTPUT_MOMENT_1)->template mutable_data<T>();
+
+    if (n == 0) {
+      return true;
+    }
+
+    auto block_size = Input(GRAD).size_from_dim(1);
     for (auto i = 0; i < n; ++i) {
       auto idx = indices[i];
       if (block_size == 1) {
         float gi = gradIn[i];
         float hi = momentOut[idx] = momentIn[idx] + gi * gi;
-        paramOut[idx] = paramIn[idx] + lr[0] * gi / (sqrt(hi) + epsilon_);
+        paramOut[idx] = paramIn[idx] + lr[0] * gi / (std::sqrt(hi) + epsilon_);
       } else {
         auto offsetI = i * block_size;
         auto offsetIdx = idx * block_size;
@@ -117,7 +122,7 @@ class SparseAdagradOp final : public Operator<Context> {
             paramOut + offsetIdx,
             momentOut + offsetIdx,
             epsilon_,
-            lr,
+            lr[0],
             &context_);
       }
     }

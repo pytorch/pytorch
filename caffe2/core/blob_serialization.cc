@@ -30,7 +30,7 @@ class StringSerializer : public BlobSerializerBase {
       const Blob& blob,
       const string& name,
       SerializationAcceptor acceptor) override {
-    CHECK(blob.IsType<std::string>());
+    CAFFE_ENFORCE(blob.IsType<std::string>());
 
     BlobProto blob_proto;
     blob_proto.set_name(name);
@@ -72,10 +72,11 @@ std::string tensorDeviceTypeName(const DeviceType& d) {
 // The blob serialization member function implementation.
 void Blob::Serialize(
     const string& name,
-    BlobSerializerBase::SerializationAcceptor acceptor) const {
+    BlobSerializerBase::SerializationAcceptor acceptor,
+    int chunk_size) const {
   std::unique_ptr<BlobSerializerBase> serializer(CreateSerializer(meta_.id()));
   CAFFE_ENFORCE(serializer, "No known serializer for ", meta_.name());
-  serializer->Serialize(*this, name, acceptor);
+  serializer->SerializeWithChunkSize(*this, name, acceptor, chunk_size);
 }
 
 // The blob serialization member function implementation.

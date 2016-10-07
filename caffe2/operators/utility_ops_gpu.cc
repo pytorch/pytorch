@@ -6,23 +6,31 @@ namespace {
 
 REGISTER_CUDA_OPERATOR(Print, PrintOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(Flatten, FlattenOp<CUDAContext>);
+REGISTER_CUDA_OPERATOR(FlattenToVec, FlattenToVecOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(Alias, AliasOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(ResizeLike, ResizeLikeOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(Sum, SumOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(WeightedSum, WeightedSumOp<float, CUDAContext>);
 // From whatever the current context, ensure the output is TensorCPU
-REGISTER_CUDA_OPERATOR(EnsureCPUOutput,
-                       CopyOp<CUDAContext, CPUContext, CUDAContext>);
+REGISTER_CUDA_OPERATOR(
+    EnsureCPUOutput,
+    CopyOp<CUDAContext, CPUContext, CUDAContext>);
+// From CPU, copy it to whatever the current context
+REGISTER_CUDA_OPERATOR(
+    CopyFromCPUInput,
+    CopyOp<CUDAContext, CUDAContext, CPUContext>);
+
 // CopyGPUToCPU and CopyCPUToGPU should both be carried out in a cuda context,
 // since gpu code will be involved.
-REGISTER_CUDA_OPERATOR(CopyGPUToCPU,
-                       CopyOp<CUDAContext, CPUContext, CUDAContext>);
-REGISTER_CUDA_OPERATOR(CopyCPUToGPU,
-                       CopyOp<CUDAContext, CUDAContext, CPUContext>);
+REGISTER_CUDA_OPERATOR(
+    CopyGPUToCPU,
+    CopyOp<CUDAContext, CPUContext, CUDAContext>);
+REGISTER_CUDA_OPERATOR(
+    CopyCPUToGPU,
+    CopyOp<CUDAContext, CUDAContext, CPUContext>);
 // If we only specify Copy, we assume that it is a gpu to gpu copy - maybe
 // involving different GPUs.
-REGISTER_CUDA_OPERATOR(Copy,
-                       CopyOp<CUDAContext, CUDAContext, CUDAContext>);
+REGISTER_CUDA_OPERATOR(Copy, CopyOp<CUDAContext, CUDAContext, CUDAContext>);
 
 }  // namespace
 }  // namespace caffe2

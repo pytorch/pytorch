@@ -75,7 +75,7 @@ class ElementwiseRTCOp final : public Operator<CUDAContext> {
       : Operator<CUDAContext>(operator_def, ws) {
     const string src = OperatorBase::GetSingleArgument<string>(
         "rtc_src", "");
-    CHECK(src.size()) << "Op should have a non-zero source code size.";
+    CAFFE_ENFORCE(src.size(), "Op should have a non-zero source code size.");
     func_.Compile(InputSize(), OutputSize(), src);
   }
   ~ElementwiseRTCOp() {}
@@ -85,8 +85,9 @@ class ElementwiseRTCOp final : public Operator<CUDAContext> {
                   "The argbuffer relies on the assumption that void* and "
                   "size_t have the same size.");
     size_t argBuffer[InputSize() + OutputSize() + 1];
-    CHECK(Input(0).size() < std::numeric_limits<int>::max())
-        << "The kernel function currently only supports int index.";
+    CAFFE_ENFORCE(
+        Input(0).size() < std::numeric_limits<int>::max(),
+        "The kernel function currently only supports int index.");
     argBuffer[0] = Input(0).size();
     void** ptr_buffer = reinterpret_cast<void**>(argBuffer + 1);
     for (int i = 0; i < InputSize(); ++i) {

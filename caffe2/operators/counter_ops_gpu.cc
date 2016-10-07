@@ -6,6 +6,9 @@ namespace {
 REGISTER_CUDA_OPERATOR(CreateCounter, CreateCounterOp<int64_t, CUDAContext>);
 REGISTER_CUDA_OPERATOR(ResetCounter, ResetCounterOp<int64_t, CUDAContext>);
 REGISTER_CUDA_OPERATOR(CountDown, CountDownOp<int64_t, CUDAContext>);
+REGISTER_CUDA_OPERATOR(
+    CheckCounterDone,
+    CheckCounterDoneOp<int64_t, CUDAContext>);
 REGISTER_CUDA_OPERATOR(CountUp, CountUpOp<int64_t, CUDAContext>);
 REGISTER_CUDA_OPERATOR(RetrieveCount, RetrieveCountOp<int64_t, CUDAContext>);
 } // namespace

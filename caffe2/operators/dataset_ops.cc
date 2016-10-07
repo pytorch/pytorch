@@ -634,6 +634,144 @@ class AtomicAppendOp final : public Operator<Context> {
   }
 };
 
+template <class Context>
+using TensorVectorPtr = std::unique_ptr<std::vector<Tensor<Context>>>;
+
+template <class Context>
+class CreateTensorVectorOp final : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  using Operator<Context>::Operator;
+
+  bool RunOnDevice() override {
+    auto ptr = std::make_unique<std::vector<Tensor<Context>>>();
+    *OperatorBase::Output<TensorVectorPtr<Context>>(TENSOR_VECTOR) =
+        std::move(ptr);
+    return true;
+  }
+
+ private:
+  OUTPUT_TAGS(TENSOR_VECTOR);
+};
+
+template <class Context>
+class ConcatTensorVectorOp final : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  using Operator<Context>::Operator;
+
+  bool RunOnDevice() override {
+    const TensorVectorPtr<Context>& tensorVector =
+        OperatorBase::Input<TensorVectorPtr<Context>>(TENSOR_VECTOR);
+
+    auto* tensor = Output(TENSOR);
+    CAFFE_ENFORCE(!tensorVector->empty());
+
+    vector<TIndex> outputDims(tensorVector->at(0).dims());
+    CAFFE_ENFORCE(outputDims.size() > 0);
+    for (int i = 1; i < tensorVector->size(); i++) {
+      // the tensor shapes are the same except for the first dimension
+      for (int j = 1; j < tensorVector->at(i).ndim(); j++) {
+        CAFFE_ENFORCE(outputDims[j] == tensorVector->at(i).dims()[j]);
+      }
+      CAFFE_ENFORCE(tensorVector->at(0).meta() == tensorVector->at(i).meta());
+      outputDims[0] += tensorVector->at(i).dims()[0];
+    }
+
+    tensor->Resize(outputDims);
+    TIndex offset = 0;
+    auto* dst = (char*)tensor->raw_mutable_data(tensorVector->at(0).meta());
+
+    for (const auto& t : *tensorVector) {
+      context_.template CopyItems<Context, Context>(
+          t.meta(), t.size(), t.raw_data(), dst + offset);
+      offset += t.nbytes();
+    }
+
+    return true;
+  }
+
+ private:
+  INPUT_TAGS(TENSOR_VECTOR);
+  OUTPUT_TAGS(TENSOR);
+};
+
+template <class Context>
+class CollectTensorOp final : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  CollectTensorOp(const OperatorDef operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
+        numToCollect_(
+            OperatorBase::GetSingleArgument<int>("num_to_collect", -1)),
+        numVisited_(0) {
+    CAFFE_ENFORCE(numToCollect_ > 0);
+  }
+
+  bool RunOnDevice() override {
+    // TENSOR_VECTOR_IN is enforced inplace with TENSOR_VECTOR_OUT
+    TensorVectorPtr<Context>& tensorVector =
+        *OperatorBase::Output<TensorVectorPtr<Context>>(TENSOR_VECTOR_OUT);
+
+    auto* position_out = Output(POSITION_OUT);
+    const auto& tensor = Input(TENSOR_TO_COLLECT);
+
+    int pos = -1;
+    if (InputSize() >= 3) {
+      CAFFE_ENFORCE(0 == Input(POSITION_IN).ndim());
+      pos = Input(POSITION_IN).template data<int>()[0];
+    } else {
+      if (numVisited_ < numToCollect_) {
+        // append
+        pos = tensorVector->size();
+      } else {
+        CAFFE_ENFORCE(
+            tensorVector->size() == numToCollect_,
+            "TensorVecotor size = ",
+            tensorVector->size(),
+            " is different from numToCollect = ",
+            numToCollect_);
+        auto& gen = context_.RandGenerator();
+        // uniform between [0, numVisited_]
+        std::uniform_int_distribution<int> uniformDist(0, numVisited_);
+        pos = uniformDist(gen);
+        if (pos >= numToCollect_) {
+          // discard
+          pos = -1;
+        }
+      }
+    }
+
+    if (pos < 0) {
+      // discard
+      CAFFE_ENFORCE(numVisited_ >= numToCollect_);
+    } else if (pos >= tensorVector->size()) {
+      // append
+      tensorVector->push_back(Tensor<Context>());
+      tensorVector->back().template CopyFrom<Context, Context>(
+          tensor, &context_);
+    } else {
+      // replace
+      tensorVector->at(pos).template CopyFrom<Context, Context>(
+          tensor, &context_);
+    }
+
+    position_out->Resize(vector<TIndex>());
+    position_out->template mutable_data<int>()[0] = pos;
+
+    numVisited_++;
+    return true;
+  }
+
+ private:
+  // number of tensors to collect
+  int numToCollect_;
+  // number of tensors visited
+  int numVisited_;
+  INPUT_TAGS(TENSOR_VECTOR_IN, TENSOR_TO_COLLECT, POSITION_IN);
+  OUTPUT_TAGS(TENSOR_VECTOR_OUT, POSITION_OUT);
+};
+
 REGISTER_CPU_OPERATOR(CreateTreeCursor, CreateTreeCursorOp);
 REGISTER_CPU_OPERATOR(ResetCursor, ResetCursorOp);
 REGISTER_CPU_OPERATOR(ReadNextBatch, ReadNextBatchOp);
@@ -643,6 +781,9 @@ REGISTER_CPU_OPERATOR(ReadRandomBatch, ReadRandomBatchOp);
 REGISTER_CPU_OPERATOR(CheckDatasetConsistency, CheckDatasetConsistencyOp);
 REGISTER_CPU_OPERATOR(Append, AppendOp<CPUContext>);
 REGISTER_CPU_OPERATOR(AtomicAppend, AtomicAppendOp<CPUContext>);
+REGISTER_CPU_OPERATOR(CreateTensorVector, CreateTensorVectorOp<CPUContext>);
+REGISTER_CPU_OPERATOR(ConcatTensorVector, ConcatTensorVectorOp<CPUContext>);
+REGISTER_CPU_OPERATOR(CollectTensor, CollectTensorOp<CPUContext>);
 
 OPERATOR_SCHEMA(CreateTreeCursor)
     .NumInputs(0)
@@ -850,6 +991,45 @@ OPERATOR_SCHEMA(AtomicAppend)
     .NumOutputs(1, INT_MAX)
     .AllowInplace([](int in, int out) { return in == out + 1; });
 
+OPERATOR_SCHEMA(CreateTensorVector)
+    .NumInputs(0)
+    .NumOutputs(1)
+    .SetDoc("Create a std::unique_ptr<std::vector<Tensor> >");
+
+OPERATOR_SCHEMA(ConcatTensorVector)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .SetDoc(R"DOC(
+Concat Tensors in the std::unique_ptr<std::vector<Tensor> >
+along the first dimension.
+    )DOC")
+    .Input(0, "vector of Tensor", "std::unique_ptr<std::vector<Tensor> >")
+    .Output(0, "tensor", "tensor after concatenating");
+
+OPERATOR_SCHEMA(CollectTensor)
+    .NumInputs(2, 3)
+    .NumOutputs(2)
+    .EnforceInplace({{0, 0}})
+    .AllowInplace({{2, 1}})
+    .SetDoc(R"DOC(
+Collect tensor into tensor vector by reservoir sampling,
+argument num_to_collect indicates the max number of tensors that will be
+collcted
+  )DOC")
+    .Arg("num_to_collect", "The max number of tensors to collect")
+    .Input(0, "input tensor vector", "tensor vector with collected tensors")
+    .Input(1, "tensor", "new tensor will be collected by reservoir sampling")
+    .Input(2, "input position", R"DOC(
+if provided, new tensor will be collected in the way indicated by position.
+e.g. if position < 0, discard the new tensor, if position == k and k < the size
+of input tensor vector, replace the tensor at position k with the new tensor.
+    )DOC")
+    .Output(0, "output tensor vector", "enforce inplace with input 0")
+    .Output(1, "output position", R"DOC(
+record the position at which the new tensor was collcted,
+position < 0 means it's discarded.
+    )DOC");
+
 SHOULD_NOT_DO_GRADIENT(CreateTreeCursor);
 SHOULD_NOT_DO_GRADIENT(ResetCursor);
 SHOULD_NOT_DO_GRADIENT(ReadNextBatch);
@@ -858,5 +1038,10 @@ SHOULD_NOT_DO_GRADIENT(ReadRandomBatch);
 SHOULD_NOT_DO_GRADIENT(CheckDatasetConsistency);
 SHOULD_NOT_DO_GRADIENT(Append);
 SHOULD_NOT_DO_GRADIENT(AtomicAppend);
-}
-}
+SHOULD_NOT_DO_GRADIENT(CreateTensorVector);
+SHOULD_NOT_DO_GRADIENT(ConcatTensorVector);
+SHOULD_NOT_DO_GRADIENT(CollectTensor);
+} // namespace
+CAFFE_KNOWN_TYPE(std::unique_ptr<TreeCursor>);
+CAFFE_KNOWN_TYPE(TensorVectorPtr<CPUContext>);
+} // caffe2

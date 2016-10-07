@@ -151,5 +151,50 @@ TEST(DBReaderTest, Reader) {
   EXPECT_EQ(keys_set.size(), kMaxItems);
 }
 
+TEST(DBReaderShardedTest, Reader) {
+  std::string name = std::tmpnam(nullptr);
+  CreateAndFill("leveldb", name);
+
+  std::unique_ptr<DBReader> reader0(new DBReader("leveldb", name, 3, 0));
+  string key;
+  string value;
+  reader0->Read(&key, &value);
+  EXPECT_EQ(key, "00");
+  EXPECT_EQ(value, "00");
+  reader0->Read(&key, &value);
+  EXPECT_EQ(key, "03");
+  EXPECT_EQ(value, "03");
+  reader0->Read(&key, &value);
+  EXPECT_EQ(key, "06");
+  EXPECT_EQ(value, "06");
+  reader0->Read(&key, &value);
+  EXPECT_EQ(key, "09");
+  EXPECT_EQ(value, "09");
+  reader0->Read(&key, &value);
+  EXPECT_EQ(key, "00");
+  EXPECT_EQ(value, "00");
+  reader0->Read(&key, &value);
+  EXPECT_EQ(key, "03");
+  EXPECT_EQ(value, "03");
+
+  CreateAndFill("leveldb", name + "1");
+  std::unique_ptr<DBReader> reader1(new DBReader("leveldb", name + "1", 3, 1));
+  reader1->Read(&key, &value);
+  EXPECT_EQ(key, "01");
+  EXPECT_EQ(value, "01");
+  reader1->Read(&key, &value);
+  EXPECT_EQ(key, "04");
+  EXPECT_EQ(value, "04");
+
+  CreateAndFill("leveldb", name + "2");
+  std::unique_ptr<DBReader> reader2(new DBReader("leveldb", name + "2", 3, 2));
+  reader2->Read(&key, &value);
+  EXPECT_EQ(key, "02");
+  EXPECT_EQ(value, "02");
+  reader2->Read(&key, &value);
+  EXPECT_EQ(key, "05");
+  EXPECT_EQ(value, "05");
+}
+
 }  // namespace db
 }  // namespace caffe2

@@ -12,10 +12,7 @@ import unittest
 from caffe2.python import core, workspace, dyndep
 import caffe2.python.hypothesis_test_util as hu
 
-if workspace.has_gpu_support:
-    dyndep.InitOpsLibrary("@/caffe2/caffe2/mpi:mpi_ops_gpu")
-else:
-    dyndep.InitOpsLibrary("@/caffe2/caffe2/mpi:mpi_ops")
+dyndep.InitOpsLibrary("@/caffe2/caffe2/mpi:mpi_ops")
 
 try:
     from mpi4py import MPI

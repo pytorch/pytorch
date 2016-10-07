@@ -35,5 +35,5 @@ struct UninitializedTypeNameRegisterer {
 };
 static UninitializedTypeNameRegisterer g_uninitialized_type_name_registerer;
 
-}  // namespace
-}  // namespace caffe2
+} // namespace
+} // namespace caffe2

@@ -36,23 +36,6 @@ class SparseToDenseMaskOp : public Operator<CPUContext> {
 
   template <typename TInd>
   bool DoRunWithType() {
-    if (InputSize() < 4) {
-      return DoRunWithTypeAndLength<TInd, int32_t>();
-    } else {
-      const TypeMeta& meta = Input(LENGTHS).meta();
-      if (meta.Match<int32_t>()) {
-        return DoRunWithTypeAndLength<TInd, int32_t>();
-      } else if (meta.Match<int64_t>()) {
-        return DoRunWithTypeAndLength<TInd, int64_t>();
-      } else {
-        CAFFE_THROW("Unsupported type of tensor: ", meta.name());
-        return false;
-      }
-    }
-  }
-
-  template <typename TInd, typename TLen>
-  bool DoRunWithTypeAndLength() {
     auto& sparse_indices = Input(INDICES);
     CAFFE_ENFORCE(sparse_indices.ndim() == 1);
     auto& sparse_values = Input(VALUES);
@@ -73,14 +56,14 @@ class SparseToDenseMaskOp : public Operator<CPUContext> {
 
     int cols = featuresCount_;
     int rows = 0;
-    TLen default_length = sparse_indices.dim32(0);
-    const TLen* lengths_vec = nullptr;
+    int32_t default_length = sparse_indices.dim32(0);
+    const int32_t* lengths_vec = nullptr;
     auto* output = Output(0);
     vector<TIndex> shape;
     if (InputSize() == 4) {
       auto& lengths = Input(LENGTHS);
       CAFFE_ENFORCE(lengths.ndim() == 1);
-      lengths_vec = lengths.data<TLen>();
+      lengths_vec = lengths.data<int32_t>();
       rows = lengths.dim32(0);
     }
     if (rows == 0) {
@@ -107,7 +90,7 @@ class SparseToDenseMaskOp : public Operator<CPUContext> {
           output_data + i * block_nbytes);
     }
 
-    TLen offset = 0;
+    int32_t offset = 0;
     for (int r = 0; r < rows; r++) {
       for (int c = 0; c < lengths_vec[r]; c++) {
         int idx = getFeatureIdx(sparse_indices_vec[offset + c]);
@@ -163,8 +146,8 @@ corresponds to each id provided in mask argument. Missing values are filled with
 the value of `default_value`. After running this op:
 
 ```
-output[indices[i], :] = values[i]
-output[j, :] = default_value # for j not in indices
+output[j, :] = values[i] # where mask[j] == indices[i]
+output[j, ...] = default_value # when mask[j] doesn't appear in indices
 ```
 
 If `lengths` is provided and not empty, and extra "batch" dimension is prepended

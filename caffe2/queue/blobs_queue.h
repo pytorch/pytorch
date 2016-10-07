@@ -74,29 +74,26 @@ class BlobsQueue : public std::enable_shared_from_this<BlobsQueue> {
     return true;
   }
 
-  bool blockingWrite(const std::vector<Blob*>& inputs) {
+  bool tryWrite(const std::vector<Blob*>& inputs) {
     auto keeper = this->shared_from_this();
     std::unique_lock<std::mutex> g(mutex_);
-    auto canWrite = [this]() {
-      // writer is always within [reader, reader + size)
-      // we can write if reader is within [reader, reader + size)
-      CHECK_LE(reader_, writer_);
-      CHECK_LE(writer_, reader_ + queue_.size());
-      return writer_ != reader_ + queue_.size();
-    };
-    cv_.wait(g, [this, canWrite]() { return closing_ || canWrite(); });
     if (!canWrite()) {
       return false;
     }
     DCHECK(canWrite());
-    auto& result = queue_[writer_ % queue_.size()];
-    CAFFE_ENFORCE(inputs.size() >= result.size());
-    for (auto i = 0; i < result.size(); ++i) {
-      using std::swap;
-      swap(*(inputs[i]), *(result[i]));
+    doWrite(inputs);
+    return true;
+  }
+
+  bool blockingWrite(const std::vector<Blob*>& inputs) {
+    auto keeper = this->shared_from_this();
+    std::unique_lock<std::mutex> g(mutex_);
+    cv_.wait(g, [this]() { return closing_ || canWrite(); });
+    if (!canWrite()) {
+      return false;
     }
-    ++writer_;
-    cv_.notify_all();
+    DCHECK(canWrite());
+    doWrite(inputs);
     return true;
   }
 
@@ -112,6 +109,25 @@ class BlobsQueue : public std::enable_shared_from_this<BlobsQueue> {
   }
 
  private:
+  bool canWrite() {
+    // writer is always within [reader, reader + size)
+    // we can write if reader is within [reader, reader + size)
+    CHECK_LE(reader_, writer_);
+    CHECK_LE(writer_, reader_ + queue_.size());
+    return writer_ != reader_ + queue_.size();
+  }
+
+  void doWrite(const std::vector<Blob*>& inputs) {
+    auto& result = queue_[writer_ % queue_.size()];
+    CAFFE_ENFORCE(inputs.size() >= result.size());
+    for (auto i = 0; i < result.size(); ++i) {
+      using std::swap;
+      swap(*(inputs[i]), *(result[i]));
+    }
+    ++writer_;
+    cv_.notify_all();
+  }
+
   std::atomic<bool> closing_{false};
 
   size_t numBlobs_;

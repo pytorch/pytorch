@@ -19,11 +19,13 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
            input_channels=st.integers(1, 8),
            output_channels=st.integers(1, 8),
            batch_size=st.integers(1, 3),
-           engine=st.sampled_from(["", "CUDNN"]), **hu.gcs)
+           engine=st.sampled_from(["", "CUDNN"]),
+           shared_buffer=st.booleans(),
+           **hu.gcs)
     def test_convolution_transpose_layout(self, stride, pad, kernel, adj,
                                           size, input_channels,
                                           output_channels, batch_size,
-                                          engine, gc, dc):
+                                          engine, shared_buffer, gc, dc):
         assume(adj < stride)
         X = np.random.rand(
             batch_size, size, size, input_channels).astype(np.float32) - 0.5
@@ -43,6 +45,7 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
                 adj=adj,
                 order=order,
                 engine=engine,
+                shared_buffer=int(shared_buffer),
                 device_option=gc,
             )
             if order == "NCHW":

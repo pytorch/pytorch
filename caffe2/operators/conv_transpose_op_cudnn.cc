@@ -45,7 +45,7 @@ class CudnnConvTransposeOpBase : public ConvTransposeUnpoolBase<CUDAContext> {
         deterministic_(
             OperatorBase::GetSingleArgument<int>("deterministic", 0)),
         cudnn_state_(OperatorBase::GetSingleArgument<int>("cudnn_state", 0)) {
-    CHECK(!deterministic_ || !exhaustive_search_);
+    CAFFE_ENFORCE(!deterministic_ || !exhaustive_search_);
     CUDNN_CHECK(cudnnCreateTensorDescriptor(&bottom_desc_));
     CUDNN_CHECK(cudnnCreateFilterDescriptor(&filter_desc_));
     CUDNN_CHECK(cudnnCreateTensorDescriptor(&bias_desc_));

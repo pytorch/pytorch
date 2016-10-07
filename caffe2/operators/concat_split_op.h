@@ -30,10 +30,10 @@ class SplitOp final : public Operator<Context> {
   SplitOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         split_(OperatorBase::GetRepeatedArgument<int>("split")) {
-    CHECK(OperatorBase::HasArgument("axis") ^
-          OperatorBase::HasArgument("order"))
-        << "You should either specify the dim to split, or the order "
-           "in the case of 4-D images.";
+    CAFFE_ENFORCE(
+        OperatorBase::HasArgument("axis") ^ OperatorBase::HasArgument("order"),
+        "You should either specify the dim to split, or the order "
+        "in the case of 4-D images.");
     if (OperatorBase::HasArgument("axis")) {
       axis_ = OperatorBase::GetSingleArgument<int>("axis", -1);
     } else {
@@ -58,10 +58,10 @@ class ConcatOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   ConcatOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws) {
-    CHECK(OperatorBase::HasArgument("axis") ^
-                OperatorBase::HasArgument("order"))
-        << "You should either specify the dim to split, or the order "
-           "in the case of 4-D images.";
+    CAFFE_ENFORCE(
+        OperatorBase::HasArgument("axis") ^ OperatorBase::HasArgument("order"),
+        "You should either specify the dim to split, or the order "
+        "in the case of 4-D images.");
     if (OperatorBase::HasArgument("axis")) {
       axis_ = OperatorBase::GetSingleArgument<int>("axis", -1);
     } else {

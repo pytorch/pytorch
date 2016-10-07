@@ -29,9 +29,9 @@ const char* TyTraits<CUDAContext>::prelude = R"(
 THCState* cudaState(Torch<CUDAContext>* t) {
   auto* L = t->L();
   lua_getglobal(L, "cutorch");
-  CHECK(!lua_isnil(L, -1));
+  CAFFE_ENFORCE(!lua_isnil(L, -1));
   lua_getfield(L, -1, "_state");
-  CHECK(!lua_isnil(L, -1));
+  CAFFE_ENFORCE(!lua_isnil(L, -1));
   THCState* state = reinterpret_cast<THCState*>(lua_touserdata(L, -1));
   lua_pop(L, 2);
   return state;

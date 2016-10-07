@@ -163,6 +163,7 @@ void Event::record(const Stream& stream) {
 class AsyncDAGNet : public DAGNetBase {
  public:
   AsyncDAGNet(const NetDef& net_def, Workspace* ws) : DAGNetBase(net_def, ws) {
+    VLOG(1) << "Constructing Async DAG Net " << net_def.name();
     eventRecorded_.resize(net_def.op_size());
     events_.reserve(net_def.op_size());
     for (int idx = 0; idx < net_def.op_size(); ++idx) {

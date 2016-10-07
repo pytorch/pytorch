@@ -31,8 +31,11 @@ TensorCPU* extractOutputTensor(Workspace* ws, const std::string& name) {
 }
 }
 
-Predictor::Predictor(const NetDef& init_net, const NetDef& run_net)
-    : run_net_(run_net) {
+Predictor::Predictor(
+    const NetDef& init_net,
+    const NetDef& run_net,
+    Workspace* parent)
+    : run_net_(run_net), ws_(parent) {
   CAFFE_ENFORCE(ws_.RunNetOnce(init_net));
   CAFFE_ENFORCE(ws_.CreateNet(run_net));
 }

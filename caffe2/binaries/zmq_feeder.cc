@@ -23,8 +23,10 @@ int main(int argc, char** argv) {
   LOG(INFO) << "Opening DB...";
   auto in_db = caffe2::db::CreateDB(
       caffe2::FLAGS_input_db_type, caffe2::FLAGS_input_db, caffe2::db::READ);
-  CHECK(in_db) << "Cannot load input db " << caffe2::FLAGS_input_db
-               << " of expected type " << caffe2::FLAGS_input_db_type;
+  CAFFE_ENFORCE(
+      in_db,
+      "Cannot load input db " + caffe2::FLAGS_input_db + " of expected type " +
+          caffe2::FLAGS_input_db_type);
   auto cursor = in_db->NewCursor();
   LOG(INFO) << "DB opened.";
 

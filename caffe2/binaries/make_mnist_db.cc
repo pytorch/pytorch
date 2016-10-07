@@ -32,8 +32,8 @@ void convert_dataset(const char* image_filename, const char* label_filename,
   // Open files
   std::ifstream image_file(image_filename, std::ios::in | std::ios::binary);
   std::ifstream label_file(label_filename, std::ios::in | std::ios::binary);
-  CHECK(image_file) << "Unable to open file " << image_filename;
-  CHECK(label_file) << "Unable to open file " << label_filename;
+  CAFFE_ENFORCE(image_file, "Unable to open file ", image_filename);
+  CAFFE_ENFORCE(label_file, "Unable to open file ", label_filename);
   // Read the magic and the meta data
   uint32_t magic;
   uint32_t num_items;

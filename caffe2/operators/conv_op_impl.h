@@ -3,24 +3,33 @@
 #define CAFFE2_OPERATORS_CONV_OP_IMPL_H_
 
 #include "caffe2/core/context.h"
+#include "caffe2/core/flags.h"
+#include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/operators/conv_op.h"
+#include "caffe2/operators/conv_op_shared.h"
 #include "caffe2/operators/conv_pool_op_base.h"
 #include "caffe2/utils/math.h"
-#include "caffe2/core/logging.h"
+
+CAFFE2_DECLARE_bool(caffe2_force_shared_col_buffer);
 
 namespace caffe2 {
 
 template <typename T, class Context>
 bool ConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
-  auto& X = Input(INPUT);
+  const Tensor<Context>& X = Input(INPUT);
   auto& filter = Input(FILTER);
   auto& bias = Input(BIAS);
-  auto* Y = Output(0);
+  Tensor<Context>* Y = Output(0);
   const int N = X.dim32(0), C = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
   CAFFE_ENFORCE(4 == filter.ndim());
   const int M = filter.dim32(0);
-  CAFFE_ENFORCE(C == filter.dim32(1));
+  CAFFE_ENFORCE(
+      C == filter.dim32(1),
+      "Convolution op: # of input channels does not match: # of input channels ",
+      C,
+      " is not equal to kernel channels:",
+      filter.dim32(1));
   CAFFE_ENFORCE(filter.dim32(2) == kernel_h_);
   CAFFE_ENFORCE(filter.dim32(3) == kernel_w_);
   CAFFE_ENFORCE(bias.ndim() == 1);
@@ -36,51 +45,77 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const int output_image_size = Y->dim32(2) * Y->dim32(3);
   // The col buffer is stored in CHW order as well - kernel_dim, and the height
   // and width.
-  col_buffer_.Resize(vector<TIndex>{
-      C, kernel_h_, kernel_w_, Y->dim32(2), Y->dim32(3)});
+  const T* Xdata = X.template data<T>();
   if (bias_multiplier_.size() != output_image_size) {
     // If the helper bias multiplier is not M, reshape and fill it with one.
     bias_multiplier_.Resize(vector<TIndex>(1, output_image_size));
     math::Set<T, Context>(
-        output_image_size, static_cast<T>(1),
-        bias_multiplier_.template mutable_data<T>(), &context_);
+        output_image_size,
+        static_cast<T>(1),
+        bias_multiplier_.template mutable_data<T>(),
+        &context_);
   }
-  const T* Xdata = X.template data<T>();
-  T* col_buffer_data = col_buffer_.template mutable_data<T>();
   T* Ydata = Y->template mutable_data<T>();
-  // Im2col, followed by gemm.
-  for (int image_id = 0; image_id < N; ++image_id) {
-    math::Im2col<T, Context, StorageOrder::NCHW>(
-        Xdata,
-        C,
-        H,
-        W,
-        kernel_h_,
-        kernel_w_,
-        dilation_h_,
-        dilation_w_,
-        pad_t_,
-        pad_l_,
-        pad_b_,
-        pad_r_,
-        stride_h_,
-        stride_w_,
-        col_buffer_data,
-        &context_);
-    // Weight term
-    math::Gemm<T, Context>(
-        CblasNoTrans, CblasNoTrans, M, output_image_size, kernel_dim,
-        1, filter.template data<T>(), col_buffer_data,
-        0, Ydata,
-        &context_);
-    // Bias term
-    math::Gemm<T, Context>(
-        CblasNoTrans, CblasNoTrans, M, output_image_size, 1, 1,
-        bias.template data<T>(), bias_multiplier_.template data<T>(),
-        1, Ydata,
-        &context_);
-    Xdata += input_offset;
-    Ydata += output_offset;
+
+  auto f = [&](Tensor<Context>* col_buffer) {
+    col_buffer->Resize(
+        vector<TIndex>{C, kernel_h_, kernel_w_, Y->dim32(2), Y->dim32(3)});
+
+    T* col_buffer_data = col_buffer->template mutable_data<T>();
+    // Im2col, followed by gemm.
+    for (int image_id = 0; image_id < N; ++image_id) {
+      math::Im2col<T, Context, StorageOrder::NCHW>(
+          Xdata,
+          C,
+          H,
+          W,
+          kernel_h_,
+          kernel_w_,
+          dilation_h_,
+          dilation_w_,
+          pad_t_,
+          pad_l_,
+          pad_b_,
+          pad_r_,
+          stride_h_,
+          stride_w_,
+          col_buffer_data,
+          &context_);
+      // Weight term
+      math::Gemm<T, Context>(
+          CblasNoTrans,
+          CblasNoTrans,
+          M,
+          output_image_size,
+          kernel_dim,
+          1,
+          filter.template data<T>(),
+          col_buffer_data,
+          0,
+          Ydata,
+          &context_);
+      // Bias term
+      math::Gemm<T, Context>(
+          CblasNoTrans,
+          CblasNoTrans,
+          M,
+          output_image_size,
+          1,
+          1,
+          bias.template data<T>(),
+          bias_multiplier_.template data<T>(),
+          1,
+          Ydata,
+          &context_);
+      Xdata += input_offset;
+      Ydata += output_offset;
+    }
+  };
+
+  if (FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
+    runWithSharedBuffer<Context>(ws_, f);
+  } else {
+    f(&col_buffer_);
   }
   return true;
 }
@@ -88,10 +123,10 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
 // The implementations.
 template <typename T, class Context>
 bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
-  auto& X = Input(INPUT);
+  const Tensor<Context>& X = Input(INPUT);
   auto& filter = Input(FILTER);
   auto& bias = Input(BIAS);
-  auto* Y = Output(0);
+  Tensor<Context>* Y = Output(0);
   const int N = X.dim32(0), H = X.dim32(1), W = X.dim32(2), C = X.dim32(3);
   CAFFE_ENFORCE(4 == filter.ndim());
   const int M = filter.dim32(0);
@@ -147,41 +182,64 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
           output_image_size, static_cast<T>(1),
           bias_multiplier_.template mutable_data<T>(), &context_);
     }
-    col_buffer_.Resize(vector<TIndex>{
-        Y->dim32(1), Y->dim32(2), kernel_h_, kernel_w_, C});
-    T* col_buffer_data = col_buffer_.template mutable_data<T>();
-    // Im2col, followed by gemm.
-    for (int image_id = 0; image_id < N; ++image_id) {
-      math::Im2col<T, Context, StorageOrder::NHWC>(
-          Xdata,
-          C,
-          H,
-          W,
-          kernel_h_,
-          kernel_w_,
-          dilation_h_,
-          dilation_w_,
-          pad_t_,
-          pad_l_,
-          pad_b_,
-          pad_r_,
-          stride_h_,
-          stride_w_,
-          col_buffer_data,
-          &context_);
-      // Weight term
-      // Wait, is this right....?
-      math::Gemm<T, Context>(
-          CblasNoTrans, CblasTrans, output_image_size, M, kernel_dim,
-          1, col_buffer_data, filter.template data<T>(), 0, Ydata,
-          &context_);
-      // Bias term
-      math::Gemm<T, Context>(
-          CblasNoTrans, CblasNoTrans, output_image_size, M, 1, 1,
-          bias_multiplier_.template data<T>(), bias.template data<T>(), 1,
-          Ydata, &context_);
-      Xdata += input_offset;
-      Ydata += output_offset;
+    auto f = [&](Tensor<Context>* col_buffer) {
+      col_buffer->Resize(
+          vector<TIndex>{Y->dim32(1), Y->dim32(2), kernel_h_, kernel_w_, C});
+      T* col_buffer_data = col_buffer->template mutable_data<T>();
+      // Im2col, followed by gemm.
+      for (int image_id = 0; image_id < N; ++image_id) {
+        math::Im2col<T, Context, StorageOrder::NHWC>(
+            Xdata,
+            C,
+            H,
+            W,
+            kernel_h_,
+            kernel_w_,
+            dilation_h_,
+            dilation_w_,
+            pad_t_,
+            pad_l_,
+            pad_b_,
+            pad_r_,
+            stride_h_,
+            stride_w_,
+            col_buffer_data,
+            &context_);
+        // Weight term
+        // Wait, is this right....?
+        math::Gemm<T, Context>(
+            CblasNoTrans,
+            CblasTrans,
+            output_image_size,
+            M,
+            kernel_dim,
+            1,
+            col_buffer_data,
+            filter.template data<T>(),
+            0,
+            Ydata,
+            &context_);
+        // Bias term
+        math::Gemm<T, Context>(
+            CblasNoTrans,
+            CblasNoTrans,
+            output_image_size,
+            M,
+            1,
+            1,
+            bias_multiplier_.template data<T>(),
+            bias.template data<T>(),
+            1,
+            Ydata,
+            &context_);
+        Xdata += input_offset;
+        Ydata += output_offset;
+      }
+    };
+    if (FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
+      runWithSharedBuffer<Context>(ws_, f);
+    } else {
+      f(&col_buffer_);
     }
   }
   return true;
