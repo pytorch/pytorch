@@ -2,6 +2,7 @@
 #define THC_THREAD_LOCAL_INC
 
 #ifdef _WIN32
+#include <windows.h>
 typedef DWORD THCThreadLocal;
 #else
 #include <pthread.h>

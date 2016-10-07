@@ -148,7 +148,7 @@ THC_transformReduceOuterDimIndex(THCState *state,
                                  BinaryFunction binary_op) {
   unsigned ndim = TensorUtils<TensorTypeK>::getDims(state, src);
   unsigned num_orows = 1;
-  for (unsigned dim = 0; dim < rdim; dim++) {
+  for (long dim = 0; dim < rdim; dim++) {
     num_orows *= TensorUtils<TensorTypeK>::getSize(state, src, dim);
   }
   unsigned row_size = TensorUtils<TensorTypeK>::getSize(state, src, rdim);

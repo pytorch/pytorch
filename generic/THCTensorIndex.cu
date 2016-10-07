@@ -16,7 +16,7 @@ void THCTensor_(indexCopy_long)(THCState *state, THCTensor *dst, int dim, THLong
 
 void THCTensor_(indexCopy)(THCState *state, THCTensor *dst, int dim, THCudaLongTensor *indices, THCTensor *src)
 {
-  THAssert(THCTensor_(checkGPU)(state, 3, dst, src));
+  THAssert(THCTensor_(checkGPU)(state, 2, dst, src));
   THAssert(THCudaLongTensor_checkGPU(state, 1, indices));
 
   long dims = THCTensor_(nDimension)(state, dst);
@@ -144,7 +144,7 @@ void THCTensor_(indexAdd_long)(THCState *state, THCTensor *dst, int dim, THLongT
 
 void THCTensor_(indexAdd)(THCState *state, THCTensor *dst, int dim, THCudaLongTensor *indices, THCTensor *src)
 {
-  THAssert(THCTensor_(checkGPU)(state, 3, dst, src));
+  THAssert(THCTensor_(checkGPU)(state, 2, dst, src));
   THAssert(THCudaLongTensor_checkGPU(state, 1, indices));
 
   long dims = THCTensor_(nDimension)(state, dst);

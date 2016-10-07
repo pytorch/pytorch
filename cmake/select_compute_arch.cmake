@@ -69,6 +69,10 @@ function(CUDA_DETECT_INSTALLED_GPUS OUT_VARIABLE)
                     ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE)
 
     if(nvcc_res EQUAL 0)
+      # only keep the last line of nvcc_out
+      STRING(REGEX REPLACE ";" "\\\\;" nvcc_out "${nvcc_out}")
+      STRING(REGEX REPLACE "\n" ";" nvcc_out "${nvcc_out}")
+      list(GET nvcc_out -1 nvcc_out)
       string(REPLACE "2.1" "2.1(2.0)" nvcc_out "${nvcc_out}")
       set(CUDA_GPU_DETECT_OUTPUT ${nvcc_out} CACHE INTERNAL "Returned GPU architetures from detect_gpus tool" FORCE)
     endif()

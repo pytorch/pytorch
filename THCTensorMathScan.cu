@@ -47,7 +47,7 @@ __host__ void THCudaTensor_scanOuterDim(THCState *state, THCudaTensor *tgt, THCu
   unsigned ndim = THCudaTensor_nDimension(state, src);
   // Treat all outer dimensions (i.e. dim < dimension) as one.
   unsigned num_orows = 1;
-  for (unsigned dim = 0; dim < dimension; dim++) {
+  for (long dim = 0; dim < dimension; dim++) {
     num_orows *= THCudaTensor_size(state, src, dim);
   }
   unsigned row_size = THCudaTensor_size(state, src, dimension);
