@@ -414,4 +414,53 @@ THCTensor_(cminValue)(THCState *state, THCTensor *self, THCTensor *src, real val
   }
 }
 
+THC_API void
+THCTensor_(addcmul)(THCState *state, THCTensor *self_, THCTensor *t, real value, THCTensor *src1, THCTensor *src2)
+{
+  THAssert(THCTensor_(checkGPU)(state, 4, self_, t, src1, src2));
+  if(self_ != t)
+  {
+    THCTensor_(resizeAs)(state, self_, t);
+    THCTensor_(copy)(state, self_, t);
+  }
+  else
+  {
+    THArgCheck(THCTensor_(nElement)(state, self_) == THCTensor_(nElement)(state, src1),
+               1, "sizes do not match");
+  }
+
+  THArgCheck(THCTensor_(nElement)(state, src1) == THCTensor_(nElement)(state, src2),
+             3, "sizes do not match");
+
+  if (!THC_pointwiseApply3(state, self_, src1, src2, TensorAddCMulOp<real>(value))) {
+    THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+  }
+
+  THCudaCheck(cudaGetLastError());
+}
+
+THC_API void
+THCTensor_(addcdiv)(THCState *state, THCTensor *self_, THCTensor *t, real value, THCTensor *src1, THCTensor *src2)
+{
+  THAssert(THCTensor_(checkGPU)(state, 4, self_, t, src1, src2));
+  if(self_ != t)
+  {
+    THCTensor_(resizeAs)(state, self_, t);
+    THCTensor_(copy)(state, self_, t);
+  }
+  else
+  {
+    THArgCheck(THCTensor_(nElement)(state, self_) == THCTensor_(nElement)(state, src1),
+               1, "sizes do not match");
+  }
+  THArgCheck(THCTensor_(nElement)(state, src1) == THCTensor_(nElement)(state, src2),
+             3, "sizes do not match");
+
+  if (!THC_pointwiseApply3(state, self_, src1, src2, TensorAddCDivOp<real>(value))) {
+    THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+  }
+
+  THCudaCheck(cudaGetLastError());
+}
+
 #endif
