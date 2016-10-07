@@ -455,5 +455,56 @@ struct TensorCrossOp {
   const long sx, sy, so;
 };
 
+template <typename T>
+struct TensorMaxOp {
+  __device__ __forceinline__ void operator()(T* out, T* in) {
+    *out = THCNumerics<T>::gt(*out, *in) ? *out : *in;
+  }
+
+  __device__ __forceinline__ void operator()(T* out, T* in1, T* in2) {
+    *out = THCNumerics<T>::gt(*in1, *in2) ? *in1 : *in2;
+  }
+};
+
+template <typename T>
+struct TensorMinOp {
+  __device__ __forceinline__ void operator()(T* out, T* in) {
+    *out = THCNumerics<T>::lt(*out, *in) ? *out : *in;
+  }
+
+  __device__ __forceinline__ void operator()(T* out, T* in1, T* in2) {
+    *out = THCNumerics<T>::lt(*in1, *in2) ? *in1 : *in2;
+  }
+};
+
+template <typename T>
+struct TensorMaxValueOp {
+  TensorMaxValueOp(T v) : val(v) {}
+
+  __device__ __forceinline__ void operator()(T* out) {
+    *out = THCNumerics<T>::gt(*out, val) ? *out : val;
+  }
+
+  __device__ __forceinline__ void operator()(T* out, T* in) {
+    *out = THCNumerics<T>::gt(*in, val) ? *in : val;
+  }
+
+  T val;
+};
+
+template <typename T>
+struct TensorMinValueOp {
+  TensorMinValueOp(T v) : val(v) {}
+
+  __device__ __forceinline__ void operator()(T* out) {
+    *out = THCNumerics<T>::lt(*out, val) ? *out : val;
+  }
+
+  __device__ __forceinline__ void operator()(T* out, T* in) {
+    *out = THCNumerics<T>::lt(*in, val) ? *in : val;
+  }
+
+  T val;
+};
 
 #endif // THC_TENSORMATH_POINTWISE_CUH

@@ -145,7 +145,6 @@ SET(src-cuda
   THCTensorMathBlas.cu
   THCTensorMathMagma.cu
   THCTensorMathPairwise.cu
-  THCTensorMathPointwise.cu
   THCTensorMathReduce.cu
   THCTensorMathScan.cu
   THCTensorIndex.cu

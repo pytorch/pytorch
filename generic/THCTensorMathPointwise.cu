@@ -342,4 +342,76 @@ THCTensor_(cdiv)(THCState* state, THCTensor *self_, THCTensor *src1, THCTensor *
   THCudaCheck(cudaGetLastError());
 }
 
+THC_API void
+THCTensor_(cmax)(THCState *state, THCTensor *self, THCTensor *src1, THCTensor *src2)
+{
+  THAssert(THCTensor_(checkGPU)(state, 3, self, src1, src2));
+  THArgCheck(THCTensor_(nElement)(state, src1) ==
+             THCTensor_(nElement)(state, src2), 2, "sizes do not match");
+
+  if (self == src1) {
+    if (!THC_pointwiseApply2(state, self, src2, TensorMaxOp<real>())) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  } else {
+    THCTensor_(resizeAs)(state, self, src1);
+    if (!THC_pointwiseApply3(state, self, src1, src2, TensorMaxOp<real>())) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  }
+}
+
+THC_API void
+THCTensor_(cmin)(THCState *state, THCTensor *self, THCTensor *src1, THCTensor *src2)
+{
+  THAssert(THCTensor_(checkGPU)(state, 3, self, src1, src2));
+  THArgCheck(THCTensor_(nElement)(state, src1) ==
+             THCTensor_(nElement)(state, src2), 2, "sizes do not match");
+
+  if (self == src1) {
+    if (!THC_pointwiseApply2(state, self, src2, TensorMinOp<real>())) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  } else {
+    THCTensor_(resizeAs)(state, self, src1);
+    if (!THC_pointwiseApply3(state, self, src1, src2, TensorMinOp<real>())) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  }
+}
+
+THC_API void
+THCTensor_(cmaxValue)(THCState *state, THCTensor *self, THCTensor *src, real value)
+{
+  THAssert(THCTensor_(checkGPU)(state, 2, self, src));
+
+  if (self == src) {
+    if (!THC_pointwiseApply1(state, self, TensorMaxValueOp<real>(value))) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  } else {
+    THCTensor_(resizeAs)(state, self, src);
+    if (!THC_pointwiseApply2(state, self, src, TensorMaxValueOp<real>(value))) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  }
+}
+
+THC_API void
+THCTensor_(cminValue)(THCState *state, THCTensor *self, THCTensor *src, real value)
+{
+  THAssert(THCTensor_(checkGPU)(state, 2, self, src));
+
+  if (self == src) {
+    if (!THC_pointwiseApply1(state, self, TensorMinValueOp<real>(value))) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  } else {
+    THCTensor_(resizeAs)(state, self, src);
+    if (!THC_pointwiseApply2(state, self, src, TensorMinValueOp<real>(value))) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  }
+}
+
 #endif
