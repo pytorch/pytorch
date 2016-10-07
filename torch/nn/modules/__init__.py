@@ -15,4 +15,4 @@ from .dropout import Dropout, Dropout2d, Dropout3d
 from .padding import ReflectionPad2d, ReplicationPad2d, ReplicationPad3d
 from .normalization import CrossMapLRN2d
 from .sparse import Embedding
-
+from .rnn import RNN
