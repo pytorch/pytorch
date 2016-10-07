@@ -454,9 +454,14 @@ class CNNModelHelper(ModelHelperBase):
         self.biases.append(bias)
         blob_outs = [blob_out, running_mean, running_inv_var,
                      blob_out + "_sm", blob_out + "_siv"]
-        blob_outputs = self.net.SpatialBN(
-            [blob_in, scale, bias, running_mean, running_inv_var], blob_outs,
-            order=self.order, **kwargs)
+        if kwargs['is_test']:
+            blob_outputs = self.net.SpatialBN(
+                [blob_in, scale, bias, blob_outs[1], blob_outs[2]], [blob_out],
+                order=self.order, **kwargs)
+        else:
+            blob_outputs = self.net.SpatialBN(
+                [blob_in, scale, bias, blob_outs[1], blob_outs[2]], blob_outs,
+                order=self.order, **kwargs)
         # Return the output
         return blob_outputs[0]
 
