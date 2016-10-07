@@ -150,7 +150,7 @@ PYBIND11_PLUGIN(python_ops_python) {
     CAFFE_ENFORCE(func != py::none());
     const std::string name = func.attr("__name__").cast<std::string>();
     // Unique name since registry is never cleared.
-    const std::string token = name + std::to_string(gRegistery().size());
+    const std::string token = name + to_string(gRegistery().size());
     CAFFE_ENFORCE(gRegistery().find(name) == gRegistery().end());
     gRegistery()[token] = func;
     return token;
