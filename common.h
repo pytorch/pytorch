@@ -8,6 +8,10 @@
 #define THCUNN_assertSameGPU(...) THAssertMsg(THCudaTensor_checkGPU(__VA_ARGS__), \
   "Some of weight/gradient/input tensors are located on different GPUs. Please move them to a single one.")
 
+// _generic can be removed once everything is genericized
+#define THCUNN_assertSameGPU_generic(...) THAssertMsg(THCTensor_(checkGPU)(__VA_ARGS__), \
+  "Some of weight/gradient/input tensors are located on different GPUs. Please move them to a single one.")
+
 // Use 1024 threads per block, which requires cuda sm_2x or above
 const int CUDA_NUM_THREADS = 1024;
 

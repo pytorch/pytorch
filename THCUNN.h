@@ -4,6 +4,8 @@
 #define THIndexTensor THCudaLongTensor
 #define THIndexTensor_(NAME) THCudaLongTensor_ ## NAME
 
+#define THNN_(NAME) TH_CONCAT_3(THNN_, CReal, NAME)
+
 TH_API void THNN_CudaAbs_updateOutput(
           THCState *state,
           THCudaTensor *input,
@@ -341,21 +343,6 @@ TH_API void THNN_CudaSoftMax_updateGradInput(
           THCudaTensor *gradOutput,
           THCudaTensor *gradInput,
           THCudaTensor *output);
-
-TH_API void THNN_CudaSoftPlus_updateOutput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *output,
-          float beta,
-          float threshold);
-TH_API void THNN_CudaSoftPlus_updateGradInput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *gradOutput,
-          THCudaTensor *gradInput,
-          THCudaTensor *output,
-          float beta,
-          float threshold);
 
 TH_API void THNN_CudaSoftShrink_updateOutput(
           THCState *state,
@@ -1088,3 +1075,6 @@ TH_API void THNN_CudaVolumetricReplicationPadding_updateGradInput(
           int pleft, int pright,
           int ptop, int pbottom,
           int pfront, int pback);
+
+#include "generic/THCUNN.h"
+#include "THCGenerateFloatTypes.h"
