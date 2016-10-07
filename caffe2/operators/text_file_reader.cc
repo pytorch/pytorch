@@ -99,8 +99,8 @@ class TextFileReaderReadOp : public Operator<CPUContext> {
     CAFFE_ENFORCE(
         instance->fieldTypes.size() == numFields,
         "Invalid number of outputs. Expected " +
-            std::to_string(instance->fieldTypes.size()) + " got " +
-            std::to_string(numFields));
+            to_string(instance->fieldTypes.size()) + " got " +
+            to_string(numFields));
 
     char* datas[numFields];
     for (int i = 0; i < numFields; ++i) {

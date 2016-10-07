@@ -14,7 +14,7 @@ STANDALONE_TCHAIN_ROOT variable below.
 from build import Config
 
 STANDALONE_TCHAIN_ROOT = (
-    '/Users/jiayq/Research/android-ndk-r12b/'
+    '/opt/android_ndk/android-ndk-r10e/'
     'standalone-toolchains/arm-linux-androideabi-4.9-android-21/')
 
 # We change necessary components in the Config class.
@@ -24,7 +24,7 @@ Config.CC = STANDALONE_TCHAIN_ROOT + 'bin/arm-linux-androideabi-g++'
 Config.AR = STANDALONE_TCHAIN_ROOT + 'bin/arm-linux-androideabi-ar'
 Config.GENDIR = "gen-android"
 Config.USE_SYSTEM_PROTOBUF = False
-Config.PROTOC_BINARY = 'gen/third_party/google/protoc'
+Config.PROTOC_BINARY = 'gen/third_party/protoc'
 Config.USE_LITE_PROTO = False
 Config.USE_SYSTEM_EIGEN = False
 Config.USE_GLOG = False
@@ -36,8 +36,7 @@ Config.MPICC = "non-existing"
 Config.MPIRUN = "non-existing"
 Config.OMPI_INFO = "non-existing"
 Config.PYTHON_CONFIG = "non-existing"
-Config.OPTIMIZATION_FLAGS = ["-Os"]
-
+Config.OPTIMIZATION_FLAGS = ["-O3", "-D__ARM_NEON__", "-mfpu=neon"]
 
 # brew.py
 if __name__ == '__main__':

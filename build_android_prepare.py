@@ -5,7 +5,7 @@ from build import Config
 import sys
 
 Config.USE_SYSTEM_PROTOBUF = False
-Config.PROTOC_BINARY = 'gen/third_party/google/protoc'
+Config.PROTOC_BINARY = 'gen/third_party/protoc'
 Config.USE_OPENMP = False
 
 if __name__ == '__main__':
@@ -13,7 +13,7 @@ if __name__ == '__main__':
     Brewery.Run(
         Config,
         ['build_android_prepare.py',
-         'build', '//third_party/google:protoc'])
+         'build', '//third_party:protoc'])
 else:
     print('This script is not intended to be used as an imported module.')
     sys.exit(1)

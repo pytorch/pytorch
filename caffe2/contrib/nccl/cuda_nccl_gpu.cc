@@ -75,7 +75,7 @@ std::unordered_map<std::string, std::unique_ptr<NCCLContext>>& gContexts() {
 std::string ncclKey(const NCCLExecution& ex) {
   std::string result;
   for (const auto& el : ex.elements) {
-    result += std::to_string(el.device) + ",";
+    result += to_string(el.device) + ",";
   }
   return result;
 }
