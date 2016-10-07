@@ -49,12 +49,14 @@ class build_deps(Command):
 
     def run(self):
         from tools.nnwrap import generate_wrappers as generate_nn_wrappers
+        from tools.imagewrap import generate_wrappers as generate_image_wrappers
         build_all_cmd = ['bash', 'torch/lib/build_all.sh']
         if WITH_CUDA:
             build_all_cmd += ['--with-cuda']
         if subprocess.call(build_all_cmd) != 0:
             sys.exit(1)
         generate_nn_wrappers()
+        generate_image_wrappers()
 
 
 class build_module(Command):
@@ -233,6 +235,16 @@ if WITH_CUDA:
         extra_link_args=extra_link_args + [make_relative_rpath('../lib')]
     )
     extensions.append(THCUNN)
+
+THIMG = Extension("torch._image",
+    libraries=['TH', 'THIMG'],
+    sources=['torch/csrc/image/THIMG.cpp'],
+    language='c++',
+    extra_compile_args=extra_compile_args,
+    include_dirs=include_dirs,
+    extra_link_args=extra_link_args + [make_relative_rpath('lib')]
+)
+extensions.append(THIMG)
 
 setup(name="torch", version="0.1",
     ext_modules=extensions,

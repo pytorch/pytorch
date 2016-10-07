@@ -2,8 +2,9 @@ import os
 import itertools
 import importlib
 
-THNN_H_PATH = os.path.join(os.path.dirname(__file__), '..', 'lib', 'THNN.h')
-THCUNN_H_PATH = os.path.join(os.path.dirname(__file__), '..', 'lib', 'THCUNN.h')
+LIB_PATH = os.path.join(os.path.dirname(__file__), '..', 'lib')
+THNN_H_PATH = os.path.join(LIB_PATH, 'THNN.h')
+THCUNN_H_PATH = os.path.join(LIB_PATH, 'THCUNN.h')
 
 
 def _unpickle_backend(backend_name):
@@ -55,7 +56,7 @@ class Argument(object):
         return self.type + ' ' + self.name
 
 
-def parse_header(path):
+def parse_header(path, prefix='THNN_'):
     with open(path, 'r') as f:
         lines = f.read().split('\n')
 
@@ -81,16 +82,17 @@ def parse_header(path):
     # Remove empty lines
     lines = filter(lambda l: l[0], lines)
     generic_functions = []
+    fn_prefix = 'TH_API void ' + prefix
     for l, c in lines:
-        if l.startswith('TH_API void THNN_'):
-            fn_name = l.lstrip('TH_API void THNN_')
+        if l.startswith(fn_prefix):
+            fn_name = l.lstrip(fn_prefix)
             if fn_name[0] == '(' and fn_name[-2] == ')':
                 fn_name = fn_name[1:-2]
             else:
                 fn_name = fn_name[:-1]
             generic_functions.append(Function(fn_name))
         elif l:
-            t, name = l.split(' ')
+            t, _, name = l.rpartition(' ')
             if '*' in name:
                 t = t + '*'
                 name = name[1:]

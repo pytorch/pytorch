@@ -24,6 +24,7 @@ class THPPlugin(CWrapPlugin):
         'double':           Template('THPDoubleUtils_unpackReal($arg)'),
         'real':             Template('THPUtils_(unpackReal)($arg)'),
         'accreal':          Template('THPUtils_(unpackAccreal)($arg)'),
+        'const char*':      Template('PyString_AS_STRING($arg)'),
     }
 
     TYPE_CHECK = {
@@ -47,6 +48,7 @@ class THPPlugin(CWrapPlugin):
         'real':             Template('THPUtils_(checkReal)($arg)'),
         # TODO
         'accreal':          Template('THPUtils_(checkReal)($arg)'),
+        'const char*':      Template('PyString_Check($arg)'),
     }
 
     RETURN_WRAPPER = {
@@ -145,6 +147,7 @@ PyObject * $name(PyObject *self, PyObject *args)
         'double': 'float',
         'accreal': '" RealStr "',
         'bool': 'bool',
+        'const char*': 'const char*',
     }
 
     def __init__(self):
