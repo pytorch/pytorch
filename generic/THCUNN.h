@@ -113,6 +113,24 @@ TH_API void THNN_(PReLU_accGradParameters)(
                   long nOutputPlane,
                   real scale);
 
+TH_API void THNN_(SpatialClassNLLCriterion_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCudaLongTensor *target,
+                  THCTensor *output,
+                  bool sizeAverage,
+                  THCTensor *weights,       // [OPTIONAL]
+                  THCTensor *total_weight);
+
+TH_API void THNN_(SpatialClassNLLCriterion_updateGradInput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCudaLongTensor *target,
+                  THCTensor *gradInput,
+                  bool sizeAverage,
+                  THCTensor *weights,       // [OPTIONAL]
+                  THCTensor *total_weight);
+
 TH_API void THNN_(RReLU_updateOutput)(
                   THCState *state,
                   THCTensor *input,

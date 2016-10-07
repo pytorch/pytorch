@@ -155,6 +155,11 @@ inline __host__ __device__ float& operator+=(float &lhs, const half &rhs) {
   return lhs;
 }
 
+inline __host__ __device__ float& operator-=(float &lhs, const half &rhs) {
+  lhs = lhs - rhs;
+  return lhs;
+}
+
 inline __host__ __device__ half abs(half a) {
   return THCNumerics<half>::abs(a);
 }
