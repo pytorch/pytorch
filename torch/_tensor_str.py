@@ -6,10 +6,9 @@ from ._utils import _range
 SCALE_FORMAT = '{:.5f} *\n'
 
 
-def _number_format(storage):
+def _number_format(tensor):
     min_sz = 0
-    double_storage = torch.DoubleStorage(storage.size()).copy_(storage)
-    tensor = torch.DoubleTensor(double_storage).abs()
+    tensor = torch.DoubleTensor(tensor.nelement()).copy_(tensor).abs_()
 
     pos_inf_mask = tensor.eq(float('inf'))
     neg_inf_mask = tensor.eq(float('-inf'))
@@ -72,7 +71,7 @@ def _number_format(storage):
 
 
 def _tensor_str(self):
-    counter_dim = self.ndimension()-2
+    counter_dim = self.ndimension() - 2
     counter = torch.LongStorage(counter_dim).fill_(0)
     counter[0] = -1
     finished = False
@@ -97,7 +96,7 @@ def _tensor_str(self):
 
 
 def _matrix_str(self, indent=''):
-    fmt, scale, sz = _number_format(self.storage())
+    fmt, scale, sz = _number_format(self)
     nColumnPerLine = int(math.floor((80-len(indent))/(sz+1)))
     strt = ''
     firstColumn = 0
@@ -116,12 +115,12 @@ def _matrix_str(self, indent=''):
     return strt
 
 
-def _vector_str(tensor):
-    fmt, scale, _ = _number_format(tensor.storage())
+def _vector_str(self):
+    fmt, scale, _ = _number_format(self)
     strt = ''
     if scale != 1:
         strt += SCALE_FORMAT.format(scale)
-    return '\n'.join(fmt.format(val/scale) for val in tensor) + '\n'
+    return '\n'.join(fmt.format(val/scale) for val in self) + '\n'
 
 
 def _str(self):
