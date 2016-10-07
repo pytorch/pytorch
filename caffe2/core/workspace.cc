@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <ctime>
+#include <mutex>
 
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
@@ -290,14 +291,24 @@ bool Workspace::ExecuteStepRecursive(
         auto substepShouldContinue = [&, externalShouldContinue](int64_t iter) {
           return !got_failure && externalShouldContinue(iter);
         };
+        std::mutex exception_mutex;
+        std::exception_ptr first_exception;
         auto worker = [&]() {
           while (true) {
             int substep_id = next_substep++;
             if (got_failure || (substep_id >= step.substep().size())) {
               break;
             }
-            if (!ExecuteStepRecursive(
-                    step.substep().Get(substep_id), substepShouldContinue)) {
+            try {
+              if (!ExecuteStepRecursive(
+                      step.substep().Get(substep_id), substepShouldContinue)) {
+                got_failure = true;
+              }
+            } catch (const std::exception& ex) {
+              std::lock_guard<std::mutex> guard(exception_mutex);
+              if (!first_exception) {
+                first_exception = std::current_exception();
+              }
               got_failure = true;
             }
           }
@@ -311,6 +322,10 @@ bool Workspace::ExecuteStepRecursive(
           thread.join();
         }
         if (got_failure) {
+          LOG(ERROR) << "One of the workers died with an unhandled exception";
+          if (first_exception != nullptr) {
+            std::rethrow_exception(first_exception);
+          }
           return false;
         }
         // concurrent substeps should be careful about setting should_stop_blob

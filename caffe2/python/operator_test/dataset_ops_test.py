@@ -314,3 +314,63 @@ class TestDatasetOps(TestCase):
             workspace.RunNet(str(read_next_net))
             actual = FetchRecord(batch)
             _assert_records_equal(actual, entry)
+
+    def test_collect_tensor_ops(self):
+        init_net = core.Net('init_net')
+        blobs = ['blob_1', 'blob_2', 'blob_3']
+        bvec_map = {}
+        ONE = init_net.ConstantFill([], 'ONE', shape=[1, 2], value=1)
+        for b in blobs:
+            init_net.ConstantFill([], [b], shape=[1, 2], value=0)
+            bvec_map[b] = b + '_vec'
+            init_net.CreateTensorVector([], [bvec_map[b]])
+
+        reader_net = core.Net('reader_net')
+        for b in blobs:
+            reader_net.Add([b, ONE], [b])
+
+        collect_net = core.Net('collect_net')
+        num_to_collect = 1000
+        max_example_to_cover = 100000
+        for i, b in enumerate(blobs):
+            if i == 0:
+                bvec_map[b], position = collect_net.CollectTensor(
+                    [bvec_map[b], b], [bvec_map[b], 'position'],
+                    num_to_collect=num_to_collect)
+            else:
+                # sample in the same way as the first blob
+                bvec_map[b], position = collect_net.CollectTensor(
+                    [bvec_map[b], b, position], [bvec_map[b], position],
+                    num_to_collect=num_to_collect)
+
+        print('Collect Net Proto: {}'.format(collect_net.Proto()))
+
+        plan = core.Plan('collect_data')
+        plan.AddStep(core.execution_step('collect_init', init_net))
+        plan.AddStep(core.execution_step('collect_data',
+                                         [reader_net, collect_net],
+                                         num_iter=max_example_to_cover))
+        workspace.RunPlan(plan)
+
+        # concat the collected tensors
+        concat_net = core.Net('concat_net')
+        bconcated_map = {}
+        for b in blobs:
+            bconcated_map[b] = b + '_concated'
+            concat_net.ConcatTensorVector([bvec_map[b]], [bconcated_map[b]])
+
+        workspace.RunNetOnce(concat_net)
+
+        # check data
+        reference_result = workspace.FetchBlob(bconcated_map[blobs[0]])
+        self.assertEqual(reference_result.shape,
+                         (min(num_to_collect, max_example_to_cover), 2))
+
+        hist, _ = np.histogram(reference_result[:, 0], bins=10,
+                               range=(1, max_example_to_cover))
+        print('Sample histogram: {}'.format(hist))
+
+        self.assertTrue(all(hist > 0.7 * (num_to_collect / 10)))
+        for i in range(1, len(blobs)):
+            result = workspace.FetchBlob(bconcated_map[blobs[i]])
+            self.assertEqual(reference_result.tolist(), result.tolist())

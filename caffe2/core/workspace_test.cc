@@ -8,6 +8,8 @@ namespace caffe2 {
 
 class WorkspaceTestFoo {};
 
+CAFFE_KNOWN_TYPE(WorkspaceTestFoo);
+
 TEST(WorkspaceTest, BlobAccess) {
   Workspace ws;
 
@@ -71,5 +73,3 @@ TEST(WorkspaceTest, Sharing) {
 }
 
 }  // namespace caffe2
-
-

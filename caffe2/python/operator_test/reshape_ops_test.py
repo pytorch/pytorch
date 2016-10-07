@@ -10,10 +10,10 @@ from caffe2.python.test_util import TestCase
 
 class TestLengthsToShapeOps(TestCase):
     def test_lengths_to_shape_ops(self):
-        workspace.FeedBlob('l', np.array([200, 200, 200], dtype=np.int64))
+        workspace.FeedBlob('l', np.array([200, 200, 200], dtype=np.int32))
         workspace.RunOperatorOnce(core.CreateOperator(
             'LengthsToShape', ['l'], ['s']))
-        workspace.FeedBlob('res', np.array([3, 200]))
+        workspace.FeedBlob('res', np.array([3, 200], dtype=np.int32))
         assert ((workspace.FetchBlob('s') == workspace.FetchBlob('res')).all())
 
     def test_reshape_ops(self):

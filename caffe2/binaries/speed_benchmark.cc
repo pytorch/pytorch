@@ -16,12 +16,12 @@ int main(int argc, char** argv) {
   std::unique_ptr<caffe2::Workspace> workspace(new caffe2::Workspace());
   // Run initialization network.
   caffe2::NetDef net_def;
-  CHECK(ReadProtoFromFile(caffe2::FLAGS_init_net, &net_def));
-  CHECK(workspace->RunNetOnce(net_def));
-  CHECK(ReadProtoFromFile(caffe2::FLAGS_net, &net_def));
+  CAFFE_ENFORCE(ReadProtoFromFile(caffe2::FLAGS_init_net, &net_def));
+  CAFFE_ENFORCE(workspace->RunNetOnce(net_def));
+  CAFFE_ENFORCE(ReadProtoFromFile(caffe2::FLAGS_net, &net_def));
   caffe2::NetBase* net = workspace->CreateNet(net_def);
   CHECK_NOTNULL(net);
-  CHECK(net->Run());
+  CAFFE_ENFORCE(net->Run());
   net->TEST_Benchmark(caffe2::FLAGS_warmup, caffe2::FLAGS_iter, caffe2::FLAGS_run_individual);
   return 0;
 }

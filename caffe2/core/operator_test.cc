@@ -13,6 +13,34 @@ class JustTest : public OperatorBase {
  public:
   using OperatorBase::OperatorBase;
   bool Run() override { return true; }
+  virtual string type() {
+    return "base";
+  }
+};
+
+class JustTestAndNeverConstructs : public JustTest {
+ public:
+  JustTestAndNeverConstructs(const OperatorDef& def, Workspace* ws)
+      : JustTest(def, ws) {
+    throw UnsupportedOperatorFeature("I just don't construct.");
+  }
+  bool Run() override {
+    return true;
+  }
+  string type() override {
+    return "FOO";
+  }
+};
+
+class JustTestAndDoesConstruct : public JustTest {
+ public:
+  using JustTest::JustTest;
+  bool Run() override {
+    return true;
+  }
+  string type() override {
+    return "BAR";
+  }
 };
 
 class ThrowException : public Operator<CPUContext> {
@@ -28,6 +56,8 @@ OPERATOR_SCHEMA(JustTest).NumInputs(0, 1).NumOutputs(0, 1);
 OPERATOR_SCHEMA(ThrowException).NumInputs(0).NumOutputs(0);
 
 REGISTER_CPU_OPERATOR(JustTest, JustTest);
+REGISTER_CPU_OPERATOR_WITH_ENGINE(JustTest, FOO, JustTestAndNeverConstructs);
+REGISTER_CPU_OPERATOR_WITH_ENGINE(JustTest, BAR, JustTestAndDoesConstruct);
 REGISTER_CUDA_OPERATOR(JustTest, JustTest);
 REGISTER_CPU_OPERATOR(ThrowException, ThrowException);
 
@@ -63,6 +93,26 @@ TEST(OperatorTest, ExceptionWorks) {
   } catch (const EnforceNotMet& err) {
     LOG(INFO) << err.msg();
   }
+}
+
+TEST(OperatorTest, FallbackIfEngineDoesNotBuild) {
+  OperatorDef op_def;
+  Workspace ws;
+  op_def.set_type("JustTest");
+  op_def.set_engine("FOO");
+  unique_ptr<OperatorBase> op = CreateOperator(op_def, &ws);
+  EXPECT_NE(nullptr, op.get());
+  EXPECT_EQ(static_cast<JustTest*>(op.get())->type(), "base");
+}
+
+TEST(OperatorTest, MultipleEngineChoices) {
+  OperatorDef op_def;
+  Workspace ws;
+  op_def.set_type("JustTest");
+  op_def.set_engine("FOO,BAR");
+  unique_ptr<OperatorBase> op = CreateOperator(op_def, &ws);
+  EXPECT_NE(nullptr, op.get());
+  EXPECT_EQ(static_cast<JustTest*>(op.get())->type(), "BAR");
 }
 
 TEST(OperatorTest, CannotUseUninitializedBlob) {

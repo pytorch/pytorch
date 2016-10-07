@@ -203,7 +203,7 @@ class XavierFillOp final : public FillerOp<Context> {
 
   bool Fill(Tensor<Context>* output) override {
     const int fan_in = output->size() / output->dim32(0);
-    T scale = sqrt(T(3) / fan_in);
+    T scale = std::sqrt(T(3) / fan_in);
     math::RandUniform<T, Context>(
         output->size(), -scale, scale,
         output->template mutable_data<T>(), &context_);
@@ -221,7 +221,7 @@ class MSRAFillOp final : public FillerOp<Context> {
 
   bool Fill(Tensor<Context>* output) override {
     const int fan_in = output->size() / output->dim32(0);
-    T scale = sqrt(T(2) / fan_in);
+    T scale = std::sqrt(T(2) / fan_in);
     math::RandUniform<T, Context>(
         output->size(), -scale, scale,
         output->template mutable_data<T>(), &context_);

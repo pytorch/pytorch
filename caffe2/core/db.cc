@@ -6,6 +6,10 @@
 #include "caffe2/core/logging.h"
 
 namespace caffe2 {
+
+CAFFE_KNOWN_TYPE(db::DBReader);
+CAFFE_KNOWN_TYPE(db::Cursor);
+
 namespace db {
 
 CAFFE_DEFINE_REGISTRY(Caffe2DBRegistry, DB, const string&, Mode);
@@ -30,7 +34,7 @@ class MiniDBCursor : public Cursor {
 
   void SeekToFirst() override {
     fseek(file_, 0, SEEK_SET);
-    CHECK(!feof(file_)) << "Hmm, empty file?";
+    CAFFE_ENFORCE(!feof(file_), "Hmm, empty file?");
     // Read the first item.
     valid_ = true;
     Next();
@@ -64,12 +68,12 @@ class MiniDBCursor : public Cursor {
   }
 
   string key() override {
-    CHECK(valid_) << "Cursor is at invalid location!";
+    CAFFE_ENFORCE(valid_, "Cursor is at invalid location!");
     return string(key_.data(), key_len_);
   }
 
   string value() override {
-    CHECK(valid_) << "Cursor is at invalid location!";
+    CAFFE_ENFORCE(valid_, "Cursor is at invalid location!");
     return string(value_.data(), value_len_);
   }
 
@@ -133,7 +137,7 @@ class MiniDB : public DB {
         file_ = fopen(source.c_str(), "rb");
         break;
     }
-    CHECK(file_) << "Cannot open file: " << source;
+    CAFFE_ENFORCE(file_, "Cannot open file: " + source);
     VLOG(1) << "Opened MiniDB " << source;
   }
   ~MiniDB() { Close(); }
@@ -151,7 +155,7 @@ class MiniDB : public DB {
   }
 
   unique_ptr<Transaction> NewTransaction() override {
-    CHECK(this->mode_ == NEW || this->mode_ == WRITE);
+    CAFFE_ENFORCE(this->mode_ == NEW || this->mode_ == WRITE);
     return make_unique<MiniDBTransaction>(file_, &file_access_mutex_);
   }
 
@@ -169,7 +173,7 @@ void DBReaderSerializer::Serialize(
     const Blob& blob,
     const string& name,
     BlobSerializerBase::SerializationAcceptor acceptor) {
-  CHECK(blob.IsType<DBReader>());
+  CAFFE_ENFORCE(blob.IsType<DBReader>());
   auto& reader = blob.Get<DBReader>();
   DBReaderProto proto;
   proto.set_name(name);

@@ -3,15 +3,11 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 import contextlib
-import sys
-import DLFCN
-
 
 @contextlib.contextmanager
 def DlopenGuard():
-    # In python 2.7 required constants are not defined.
-    # Thus they are listed explicitly
-    flags = sys.getdlopenflags()
-    sys.setdlopenflags(DLFCN.RTLD_GLOBAL | DLFCN.RTLD_NOW)
+    # This is a stub for setting up special tricks around python extensions
+    # loading. For example, it might do
+    #   sys.setdlopenflags(DLFCN.RTLD_GLOBAL | DLFCN.RTLD_NOW)
+    # which might be required in some setups of python
     yield
-    sys.setdlopenflags(flags)

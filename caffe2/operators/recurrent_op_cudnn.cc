@@ -72,7 +72,7 @@ void RecurrentBaseOp<T>::initialize(
   CHECK_GT(hiddenSize, 0);
   const auto bidirectional =
       OperatorBase::GetSingleArgument<int>("bidirectional", 0);
-  CHECK(bidirectional == 0 || bidirectional == 1);
+  CAFFE_ENFORCE(bidirectional == 0 || bidirectional == 1);
   const auto numDirections = bidirectional == 1 ? 2 : 1;
   const auto outputDim = hiddenSize * numDirections;
   const auto rnnDirection =
@@ -81,11 +81,11 @@ void RecurrentBaseOp<T>::initialize(
   CHECK_GT(numLayers, 0);
   const auto& rnnModeStr =
       OperatorBase::GetSingleArgument<string>("rnn_mode", "");
-  CHECK(rnnModeStr == "lstm" || rnnModeStr == "gru");
+  CAFFE_ENFORCE(rnnModeStr == "lstm" || rnnModeStr == "gru");
   const auto rnnMode = rnnModeStr == "lstm" ? CUDNN_LSTM : CUDNN_GRU;
   const auto& rnnInputStr =
       OperatorBase::GetSingleArgument<string>("input_mode", "");
-  CHECK(rnnInputStr == "linear" || rnnInputStr == "skip");
+  CAFFE_ENFORCE(rnnInputStr == "linear" || rnnInputStr == "skip");
   const auto rnnInput =
       rnnInputStr == "linear" ? CUDNN_LINEAR_INPUT : CUDNN_SKIP_INPUT;
   // Dropout setup

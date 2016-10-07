@@ -28,7 +28,7 @@ int main(int argc, char** argv) {
   int count = 0;
   for (; cursor->Valid(); cursor->Next()) {
     caffe::Datum datum;
-    CHECK(datum.ParseFromString(cursor->value()));
+    CAFFE_ENFORCE(datum.ParseFromString(cursor->value()));
     TensorProtos protos;
     TensorProto* data = protos.add_protos();
     TensorProto* label = protos.add_protos();

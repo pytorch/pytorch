@@ -15,7 +15,7 @@ def _gen_test_add_padding(with_pad_data=True,
     def gen_with_size(args):
         lengths, inner_shape = args
         data_dim = [sum(lengths)] + inner_shape
-        lengths = np.array(lengths, dtype=np.int64)
+        lengths = np.array(lengths, dtype=np.int32)
         if with_pad_data:
             return st.tuples(
                 st.just(lengths),

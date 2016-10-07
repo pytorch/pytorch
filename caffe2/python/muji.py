@@ -22,6 +22,12 @@ def OnGPU(gpu_id):
     return device_option
 
 
+def OnCPU():
+    device_option = caffe2_pb2.DeviceOption()
+    device_option.device_type = caffe2_pb2.CPU
+    return device_option
+
+
 def Allreduce(net, blobs, reduced_affix="_reduced", gpu_indices=None):
     """The general Allreduce interface that reroutes the function calls.
   """

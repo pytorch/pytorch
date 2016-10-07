@@ -108,6 +108,9 @@ def StringfyProto(obj):
             return obj.SerializeToString()
         elif hasattr(obj, 'Proto'):
             return obj.Proto().SerializeToString()
+        else:
+            raise ValueError("Unexpected argument to StringfyProto of type " +
+                             type(obj).__name__)
 
 
 def ResetWorkspace(root_folder=None):
@@ -155,8 +158,12 @@ def RunNet(name):
     return C.run_net(StringifyNetName(name))
 
 
-def RunPlan(plan):
-    return C.run_plan(StringfyProto(plan))
+def RunPlan(plan_or_step):
+    # TODO(jiayq): refactor core.py/workspace.py to avoid circular deps
+    import caffe2.python.core as core
+    if isinstance(plan_or_step, core.ExecutionStep):
+        plan_or_step = core.Plan(plan_or_step)
+    return C.run_plan(StringfyProto(plan_or_step))
 
 
 def _StringifyName(name, expected_type):

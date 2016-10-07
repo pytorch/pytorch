@@ -220,11 +220,19 @@ void addObjectMethods(py::module& m) {
             py::gil_scoped_release g;
             CAFFE_ENFORCE(self->RunOperatorOnce(proto));
           })
-      .def("_run_plan", [](Workspace* self, py::bytes def) {
-        caffe2::PlanDef proto;
-        CAFFE_ENFORCE(proto.ParseFromString(def));
-        py::gil_scoped_release g;
-        CAFFE_ENFORCE(self->RunPlan(proto));
+      .def(
+          "_run_plan",
+          [](Workspace* self, py::bytes def) {
+            caffe2::PlanDef proto;
+            CAFFE_ENFORCE(proto.ParseFromString(def));
+            py::gil_scoped_release g;
+            CAFFE_ENFORCE(self->RunPlan(proto));
+          })
+      .def_property_readonly_static("current", [](py::object /* type */) {
+        auto ws = gWorkspaces.find(gCurrentWorkspaceName);
+        CAFFE_ENFORCE(ws != gWorkspaces.end());
+        CAFFE_ENFORCE(ws->second.get());
+        return py::cast(ws->second.get(), py::return_value_policy::reference);
       });
 
   // Gradients
@@ -369,6 +377,7 @@ void addGlobalMethods(py::module& m) {
       },
       "Reset the workspace",
       py::arg("root_folder") = py::none());
+
   m.def("root_folder", []() {
     CAFFE_ENFORCE(gWorkspace);
     return gWorkspace->RootFolder();

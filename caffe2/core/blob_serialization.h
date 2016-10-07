@@ -49,6 +49,12 @@ class TensorSerializer : public BlobSerializerBase {
       const Blob& blob,
       const string& name,
       SerializationAcceptor acceptor) override;
+  void SerializeWithChunkSize(
+      const Blob& blob,
+      const string& name,
+      SerializationAcceptor acceptor,
+      int chunk_size) override;
+
   void Serialize(const Tensor<Context>& tensor, const string& name,
                  TensorProto* proto, size_t chunkBegin, int32_t chunkSize);
 
@@ -175,15 +181,26 @@ void TensorSerializer<Context>::Serialize(
     const Blob& blob,
     const string& name,
     BlobSerializerBase::SerializationAcceptor acceptor) {
-  CHECK(blob.IsType<Tensor<Context>>());
+  this->SerializeWithChunkSize(
+      blob, name, acceptor, FLAGS_caffe2_tensor_chunk_size);
+}
+
+template <class Context>
+void TensorSerializer<Context>::SerializeWithChunkSize(
+    const Blob& blob,
+    const string& name,
+    BlobSerializerBase::SerializationAcceptor acceptor,
+    int chunk_size) {
+  CAFFE_ENFORCE(blob.IsType<Tensor<Context>>());
   const auto& tensor = blob.template Get<Tensor<Context>>();
+  chunk_size = chunk_size == -1 ? FLAGS_caffe2_tensor_chunk_size : chunk_size;
 
 #ifndef __ANDROID__
   std::vector<std::future<void>> futures;
 #endif
 
   for (size_t chunkBegin = 0; chunkBegin < tensor.size();
-       chunkBegin += FLAGS_caffe2_tensor_chunk_size) {
+       chunkBegin += chunk_size) {
     auto task = [&](size_t chunkBegin) {
       BlobProto blob_proto;
       blob_proto.set_name(name);
@@ -191,15 +208,11 @@ void TensorSerializer<Context>::Serialize(
       TensorProto& proto = *blob_proto.mutable_tensor();
       proto.set_name(name);
       this->Serialize(
-          tensor,
-          name,
-          blob_proto.mutable_tensor(),
-          chunkBegin,
-          FLAGS_caffe2_tensor_chunk_size);
+          tensor, name, blob_proto.mutable_tensor(), chunkBegin, chunk_size);
       acceptor(name, blob_proto.SerializeAsString());
     };
 #ifndef __ANDROID__
-    if (tensor.size() > FLAGS_caffe2_tensor_chunk_size) {
+    if (tensor.size() > chunk_size) {
       futures.emplace_back(std::async(std::launch::async, task, chunkBegin));
     } else {
       // Sync mode for small tensors
@@ -224,11 +237,17 @@ void TensorSerializer<Context>::Serialize(
     const Tensor<Context>& input, const string& name,
     TensorProto* proto_ptr, size_t chunkBegin, int32_t chunkSize) {
   CAFFE_ENFORCE(
-    chunkBegin < input.size(),
-    "Chunk begin is out of tensor: ",
-    chunkBegin,
-    ' ',
-    input.size());
+      chunkBegin < input.size(),
+      "Chunk begin is out of tensor: ",
+      chunkBegin,
+      ' ',
+      input.size());
+  CAFFE_ENFORCE(
+      input.raw_data(),
+      "The input does not have data input yet. This is probably because you "
+      "created a tensor of non-zero shape but never filled its data via "
+      "mutable_data() calls. This means that it makes no sense to serialize "
+      "the tensor content.");
   if (chunkBegin + chunkSize > input.size()) {
     chunkSize = input.size() - chunkBegin;
   }

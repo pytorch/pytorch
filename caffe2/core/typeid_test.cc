@@ -7,6 +7,12 @@ namespace {
 
 class TypeMetaTestFoo {};
 class TypeMetaTestBar {};
+}
+
+CAFFE_KNOWN_TYPE(TypeMetaTestFoo);
+CAFFE_KNOWN_TYPE(TypeMetaTestBar);
+
+namespace {
 
 TEST(TypeMetaTest, TypeMetaStatic) {
   EXPECT_EQ(TypeMeta::ItemSize<int>(), sizeof(int));
@@ -63,10 +69,10 @@ TEST(TypeMetaTest, TypeMeta) {
   EXPECT_EQ(float_meta.itemsize(), TypeMeta::ItemSize<float>());
   EXPECT_EQ(foo_meta.itemsize(), TypeMeta::ItemSize<TypeMetaTestFoo>());
   EXPECT_EQ(bar_meta.itemsize(), TypeMeta::ItemSize<TypeMetaTestBar>());
-  EXPECT_EQ(int_meta.name(), TypeMeta::Name<int>());
-  EXPECT_EQ(float_meta.name(), TypeMeta::Name<float>());
-  EXPECT_EQ(foo_meta.name(), TypeMeta::Name<TypeMetaTestFoo>());
-  EXPECT_EQ(bar_meta.name(), TypeMeta::Name<TypeMetaTestBar>());
+  EXPECT_STREQ(int_meta.name(), TypeMeta::Name<int>());
+  EXPECT_STREQ(float_meta.name(), TypeMeta::Name<float>());
+  EXPECT_STREQ(foo_meta.name(), TypeMeta::Name<TypeMetaTestFoo>());
+  EXPECT_STREQ(bar_meta.name(), TypeMeta::Name<TypeMetaTestBar>());
 }
 
 
@@ -85,6 +91,12 @@ class ClassNoAssignment {
   ClassNoAssignment& operator=(const ClassNoAssignment& src) = delete;
   int x;
 };
+}
+
+CAFFE_KNOWN_TYPE(ClassAllowAssignment);
+CAFFE_KNOWN_TYPE(ClassNoAssignment);
+
+namespace {
 
 TEST(TypeMetaTest, CtorDtorAndCopy) {
   TypeMeta fundamental_meta = TypeMeta::Make<int>();

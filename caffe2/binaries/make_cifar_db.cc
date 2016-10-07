@@ -76,7 +76,7 @@ void WriteToDB(const string& filename, const int num_items,
   LOG(INFO) << "Converting file " << filename;
   std::ifstream data_file(filename.c_str(),
       std::ios::in | std::ios::binary);
-  CHECK(data_file) << "Unable to open file " << filename;
+  CAFFE_ENFORCE(data_file, "Unable to open file ", filename);
   char str_buffer[kCIFARImageNBytes];
   int label_value;
   string serialized_protos;

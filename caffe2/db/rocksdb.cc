@@ -42,8 +42,8 @@ class RocksDBTransaction : public Transaction {
   void Commit() override {
     rocksdb::Status status = db_->Write(rocksdb::WriteOptions(), batch_.get());
     batch_.reset(new rocksdb::WriteBatch());
-    CHECK(status.ok()) << "Failed to write batch to rocksdb "
-                       << std::endl << status.ToString();
+    CAFFE_ENFORCE(
+        status.ok(), "Failed to write batch to rocksdb: " + status.ToString());
   }
 
  private:

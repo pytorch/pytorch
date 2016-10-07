@@ -50,13 +50,13 @@ bool TensorProtosDBInput<Context>::Prefetch() {
     // deserialize everything into the target prefetched blob.
     reader.Read(&key_, &value_);
     TensorProtos protos;
-    CHECK(protos.ParseFromString(value_));
-    CHECK_EQ(protos.protos_size(), OutputSize());
+    CAFFE_ENFORCE(protos.ParseFromString(value_));
+    CAFFE_ENFORCE(protos.protos_size() == OutputSize());
     for (int i = 0; i < protos.protos_size(); ++i) {
       if (protos.protos(i).has_device_detail()) {
         protos.mutable_protos(i)->clear_device_detail();
       }
-      CHECK(deserializer.Deserialize(
+      CAFFE_ENFORCE(deserializer.Deserialize(
           protos.protos(i),
           prefetched_blobs_[i].template GetMutable<TensorCPU>()));
     }
@@ -65,8 +65,8 @@ bool TensorProtosDBInput<Context>::Prefetch() {
     for (int item_id = 0; item_id < batch_size_; ++item_id) {
       reader.Read(&key_, &value_);
       TensorProtos protos;
-      CHECK(protos.ParseFromString(value_));
-      CHECK_EQ(protos.protos_size(), OutputSize());
+      CAFFE_ENFORCE(protos.ParseFromString(value_));
+      CAFFE_ENFORCE(protos.protos_size() == OutputSize());
       if (!shape_inferred_) {
         // First, set the shape of all the blobs.
         for (int i = 0; i < protos.protos_size(); ++i) {
@@ -82,7 +82,7 @@ bool TensorProtosDBInput<Context>::Prefetch() {
         if (protos.protos(i).has_device_detail()) {
           protos.mutable_protos(i)->clear_device_detail();
         }
-        CHECK(deserializer.Deserialize(protos.protos(i), &src));
+        CAFFE_ENFORCE(deserializer.Deserialize(protos.protos(i), &src));
         DCHECK_EQ(src.size() * batch_size_, dst->size());
         this->context_.template CopyItems<CPUContext, CPUContext>(
             src.meta(),

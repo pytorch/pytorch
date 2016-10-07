@@ -6,7 +6,8 @@
 #include "caffe2/core/logging.h"
 
 namespace caffe2 {
-namespace registry_test {
+namespace {
+
 class Foo {
  public:
   explicit Foo(int x) { LOG(INFO) << "Foo " << x; }
@@ -41,8 +42,5 @@ TEST(RegistryTest, CanRunCreator) {
 TEST(RegistryTest, ReturnNullOnNonExistingCreator) {
   EXPECT_EQ(FooRegistry()->Create("Non-existing bar", 1), nullptr);
 }
-
-} // registry_test
+}
 }  // namespace caffe2
-
-

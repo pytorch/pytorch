@@ -110,7 +110,7 @@ bool ImageInputOp<Context>::GetImageAndLabelFromDBValue(
   if (use_caffe_datum_) {
     // The input is a caffe datum format.
     caffe::Datum datum;
-    CHECK(datum.ParseFromString(value));
+    CAFFE_ENFORCE(datum.ParseFromString(value));
     *label = datum.label();
     if (datum.encoded()) {
       // encoded image in datum.
@@ -123,8 +123,8 @@ bool ImageInputOp<Context>::GetImageAndLabelFromDBValue(
       *img = cv::Mat(datum.height(), datum.width(),
                      color_ ? CV_8UC3 : CV_8UC1);
       // Note(Yangqing): I believe that the mat should be created continuous.
-      CHECK(img->isContinuous());
-      CHECK((color_ && datum.channels() == 3) || datum.channels() == 1);
+      CAFFE_ENFORCE(img->isContinuous());
+      CAFFE_ENFORCE((color_ && datum.channels() == 3) || datum.channels() == 1);
       if (datum.channels() == 1) {
         memcpy(img->ptr<uchar>(0), datum.data().data(), datum.data().size());
       } else {
@@ -146,7 +146,7 @@ bool ImageInputOp<Context>::GetImageAndLabelFromDBValue(
   } else {
     // The input is a caffe2 format.
     TensorProtos protos;
-    CHECK(protos.ParseFromString(value));
+    CAFFE_ENFORCE(protos.ParseFromString(value));
     const TensorProto& image_proto = protos.protos(0);
     const TensorProto& label_proto = protos.protos(1);
     if (image_proto.data_type() == TensorProto::STRING) {
@@ -166,7 +166,7 @@ bool ImageInputOp<Context>::GetImageAndLabelFromDBValue(
           << "Image height must be bigger than crop.";
       CHECK_GE(image_proto.dims(1), crop_)
           << "Image width must be bigger than crop.";
-      CHECK(!color_ || image_proto.dims(2) == 3);
+      CAFFE_ENFORCE(!color_ || image_proto.dims(2) == 3);
       *img = cv::Mat(
           image_proto.dims(0), image_proto.dims(1), color_ ? CV_8UC3 : CV_8UC1);
       memcpy(img->ptr<uchar>(0), image_proto.byte_data().data(),
@@ -214,7 +214,7 @@ bool ImageInputOp<Context>::Prefetch() {
     cv::Mat scaled_img;
     // process data
     reader_->Read(&key, &value);
-    CHECK(GetImageAndLabelFromDBValue(value, &img, &label));
+    CAFFE_ENFORCE(GetImageAndLabelFromDBValue(value, &img, &label));
     // deal with scaling.
     int scaled_width, scaled_height;
     if (warp_) {

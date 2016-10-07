@@ -296,7 +296,7 @@ class Tensor {
     // It is possible that the source tensor hasn't called mutable_data() yet,
     // in which case ShareData() doesn't make much sense since we don't really
     // know what to share yet.
-    CHECK(src.data_.get()) << "Source tensor has no content yet.";
+    CAFFE_ENFORCE(src.data_.get(), "Source tensor has no content yet.");
     // Finally, do sharing.
     data_ = src.data_;
     capacity_ = src.capacity_;
@@ -313,8 +313,9 @@ class Tensor {
   template <typename T>
   void ShareExternalPointer(T* src, size_t capacity = 0) {
     meta_ = TypeMeta::Make<T>();
-    CHECK(size_ > 0)
-        << "To share data with a raw pointer, you need to set shape first.";
+    CAFFE_ENFORCE(
+        size_ > 0,
+        "To share data with a raw pointer, you need to set shape first.");
     data_.reset(src, [](void*)->void {});
     // Sets capacity. If not specified, we will implicitly assume that
     // the capacity is the current size.
@@ -344,8 +345,9 @@ class Tensor {
   inline const T* data() const {
     CAFFE_ENFORCE(
         data_.get() || size_ == 0,
-        "The tensor is uninitialized. You probably need to call ",
-        "Resize() and mutable_data() first.");
+        "The tensor is of non-zero shape, but its data is not allocated yet. "
+        "Caffe2 uses a lazy allocation, so you will need to call "
+        "mutable_data() or raw_mutable_data() to actually allocate memory.");
     CAFFE_ENFORCE(
         IsType<T>(),
         "Tensor type mistmatch, caller expects elements to be ",
@@ -467,7 +469,7 @@ class Tensor {
 
   // Product of all dims up to
   inline TIndex size_to_dim(int k) const {
-    CHECK(k < dims_.size());
+    CAFFE_ENFORCE(k < dims_.size());
     TIndex r = 1;
     for (int i = 0; i < k; ++i) {
       r *= dims_[i];
@@ -544,11 +546,12 @@ class Tensor {
   bool SetDims(const vector<T>& src) {
     auto old_size = size_;
     dims_.resize(src.size());
-    size_ = 1;
+    TIndex new_size = 1;
     for (int i = 0; i < src.size(); ++i) {
-      size_ *= src[i];
+      new_size *= src[i];
       dims_[i] = src[i];
     }
+    size_ = new_size;
     return size_ != old_size;
   }
 

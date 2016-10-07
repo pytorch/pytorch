@@ -1,6 +1,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/tensor.h"
+#include "caffe2/operators/text_file_reader_utils.h"
 #include "caffe2/utils/string_utils.h"
 
 namespace caffe2 {
@@ -153,6 +154,8 @@ class TextFileReaderReadOp : public Operator<CPUContext> {
  private:
   TIndex batchSize_;
 };
+
+CAFFE_KNOWN_TYPE(std::unique_ptr<TextFileReaderInstance>);
 
 REGISTER_CPU_OPERATOR(CreateTextFileReader, CreateTextFileReaderOp);
 REGISTER_CPU_OPERATOR(TextFileReaderRead, TextFileReaderReadOp);

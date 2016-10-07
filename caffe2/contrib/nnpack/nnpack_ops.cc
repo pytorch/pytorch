@@ -72,10 +72,10 @@ class NNPACKConvOp final : public ConvPoolOpBase<CPUContext> {
             OperatorBase::GetSingleArgument<std::string>("algo", "AUTO"))),
         kts_(get_nnp_convolution_transform_strategy(
             OperatorBase::GetSingleArgument<std::string>("kts", "TUPLE"))) {
-    CAFFE_ENFORCE(
+    OPERATOR_NEEDS_FEATURE(
         this->order_ == StorageOrder::NCHW,
-        "NNPack only supports NCHW order. Please consider add \
-            TransposeOp with axes=[0, 3, 1, 2] before NNPack Conv.");
+        "NNPack only supports NCHW order. Please consider adding "
+        "TransposeOp with axes=[0, 3, 1, 2] before NNPack Conv.");
   }
 
   bool RunOnDeviceWithOrderNCHW() override;
@@ -176,28 +176,28 @@ class NNPACKMaxPoolOp final : public ConvPoolOpBase<CPUContext> {
  public:
   NNPACKMaxPoolOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<CPUContext>(operator_def, ws) {
-    CAFFE_ENFORCE(
+    OPERATOR_NEEDS_FEATURE(
         this->order_ == StorageOrder::NCHW,
-        "NNPack only supports NCHW order. Please consider add \
-            TransposeOp with axes=[0, 3, 1, 2] before NNPack Conv.");
-    CAFFE_ENFORCE(
+        "NNPack only supports NCHW order. Please consider add "
+        "TransposeOp with axes=[0, 3, 1, 2] before NNPack Conv.");
+    OPERATOR_NEEDS_FEATURE(
         this->kernel_h_ == 2, "NNPack only supports MaxPool kernel size 2*2!");
-    CAFFE_ENFORCE(
+    OPERATOR_NEEDS_FEATURE(
         this->kernel_w_ == 2, "NNPack only supports MaxPool kernel size 2*2!");
-    CAFFE_ENFORCE(
+    OPERATOR_NEEDS_FEATURE(
         this->stride_h_ == 2, "NNPack only supports MaxPool stride size 2*2!");
-    CAFFE_ENFORCE(
+    OPERATOR_NEEDS_FEATURE(
         this->stride_w_ == 2, "NNPack only supports MaxPool stride size 2*2!");
-    CAFFE_ENFORCE(
+    OPERATOR_NEEDS_FEATURE(
         this->pad_t_ == 0,
         "NNPack Pooling differs from Caffe2 Pooling when pad > 0!");
-    CAFFE_ENFORCE(
+    OPERATOR_NEEDS_FEATURE(
         this->pad_l_ == 0,
         "NNPack Pooling differs from Caffe2 Pooling when pad > 0!");
-    CAFFE_ENFORCE(
+    OPERATOR_NEEDS_FEATURE(
         this->pad_r_ == 0,
         "NNPack Pooling differs from Caffe2 Pooling when pad > 0!");
-    CAFFE_ENFORCE(
+    OPERATOR_NEEDS_FEATURE(
         this->pad_b_ == 0,
         "NNPack Pooling differs from Caffe2 Pooling when pad > 0!");
   }

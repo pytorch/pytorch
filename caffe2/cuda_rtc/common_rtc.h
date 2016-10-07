@@ -73,8 +73,8 @@ class CudaRTCFunction {
               unsigned int bx, unsigned int by, unsigned int bz,
               unsigned int shared_mem, cudaStream_t stream,
               Args... args) {
-    CHECK(module_loaded_)
-        << "Cannot call Launch before a module is loaded.";
+    CAFFE_ENFORCE(
+        module_loaded_, "Cannot call Launch before a module is loaded.");
     void * args_voidp[] = {&args...};
     CUDA_DRIVERAPI_CHECK(cuLaunchKernel(
         kernel_, gx, gy, gz, bx, by, bz, shared_mem, stream,
@@ -85,8 +85,8 @@ class CudaRTCFunction {
                 unsigned int bx, unsigned int by, unsigned int bz,
                 unsigned int shared_mem, cudaStream_t stream,
                 void** extra) {
-    CHECK(module_loaded_)
-        << "Cannot call Launch before a module is loaded.";
+    CAFFE_ENFORCE(
+        module_loaded_, "Cannot call Launch before a module is loaded.");
     CUDA_DRIVERAPI_CHECK(cuLaunchKernel(
         kernel_, gx, gy, gz, bx, by, bz, shared_mem, stream,
         nullptr, extra));

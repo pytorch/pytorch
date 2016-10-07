@@ -10,7 +10,7 @@ namespace caffe2 {
 class ZmqContext {
  public:
   explicit ZmqContext(int io_threads) : ptr_(zmq_ctx_new()) {
-    CHECK(ptr_ != nullptr) << "Failed to create zmq context.";
+    CAFFE_ENFORCE(ptr_ != nullptr, "Failed to create zmq context.");
     int rc = zmq_ctx_set(ptr_, ZMQ_IO_THREADS, io_threads);
     CHECK_EQ(rc, 0);
     rc = zmq_ctx_set(ptr_, ZMQ_MAX_SOCKETS, ZMQ_MAX_SOCKETS_DFLT);
@@ -55,7 +55,7 @@ class ZmqSocket {
  public:
   explicit ZmqSocket(int type)
       : context_(1), ptr_(zmq_socket(context_.ptr(), type)) {
-    CHECK(ptr_ != nullptr) << "Faild to create zmq socket.";
+    CAFFE_ENFORCE(ptr_ != nullptr, "Faild to create zmq socket.");
   }
 
   ~ZmqSocket() {
@@ -97,7 +97,7 @@ class ZmqSocket {
   }
 
   int SendTillSuccess(const string& msg, int flags) {
-    CHECK(msg.size()) << "You cannot send an empty message.";
+    CAFFE_ENFORCE(msg.size(), "You cannot send an empty message.");
     int nbytes = 0;
     do {
       nbytes = Send(msg, flags);

@@ -8,7 +8,6 @@
 #include "caffe2/core/operator.h"
 
 namespace caffe2 {
-namespace {
 template <typename T>
 class Counter {
  public:
@@ -28,6 +27,10 @@ class Counter {
     return count_.load();
   }
 
+  T checkIfDone() const {
+    return (count_.load() <= 0);
+  }
+
   void reset(T init_count) {
     count_ = init_count;
   }
@@ -35,7 +38,6 @@ class Counter {
  private:
   std::atomic<T> count_;
 };
-}
 
 // TODO(jiayq): deprecate these ops & consolidate them with IterOp/AtomicIterOp
 
@@ -92,6 +94,23 @@ class CountDownOp final : public Operator<Context> {
     auto* output = OperatorBase::Output<TensorCPU>(0);
     output->Resize(std::vector<int>{});
     *output->template mutable_data<bool>() = counterPtr->countDown();
+    return true;
+  }
+};
+
+// Will always use TensorCPU regardless the Context
+template <typename T, class Context>
+class CheckCounterDoneOp final : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  CheckCounterDoneOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws) {}
+
+  bool RunOnDevice() override {
+    auto& counterPtr = OperatorBase::Input<std::unique_ptr<Counter<T>>>(0);
+    auto* output = OperatorBase::Output<TensorCPU>(0);
+    output->Resize(std::vector<int>{});
+    *output->template mutable_data<bool>() = counterPtr->checkIfDone();
     return true;
   }
 };

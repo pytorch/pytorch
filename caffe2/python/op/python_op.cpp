@@ -64,7 +64,29 @@ class PythonOpBase : public Operator<CPUContext> {
       try {
         pyFunc(inputs, outputs);
       } catch (const py::error_already_set& e) {
-        LOG(ERROR) << "Python exception: " << e.what();
+        LOG(ERROR) << "Exception encountered running PythonOp function: "
+                   << e.what() << "\nTraceback: ";
+        PyObject *type = nullptr, *value = nullptr, *trace = nullptr;
+        PyErr_Fetch(&type, &value, &trace);
+        PyTracebackObject* traceback =
+            reinterpret_cast<PyTracebackObject*>(trace);
+        vector<PyTracebackObject*> trace_vec;
+        while (traceback) {
+          trace_vec.push_back(traceback);
+          traceback = traceback->tb_next;
+        }
+        for (int i = trace_vec.size() - 1; i >= 0; --i) {
+          int line = trace_vec[i]->tb_lineno;
+          const char* filename =
+              PyString_AsString(trace_vec[i]->tb_frame->f_code->co_filename);
+          const char* funcname =
+              PyString_AsString(trace_vec[i]->tb_frame->f_code->co_name);
+          LOG(ERROR) << "    # " << trace_vec.size() - i - 1 << "  " << filename
+                     << " (" << line << "): " << funcname;
+        }
+        Py_XDECREF(type);
+        Py_XDECREF(value);
+        Py_XDECREF(trace);
         return false;
       }
     }

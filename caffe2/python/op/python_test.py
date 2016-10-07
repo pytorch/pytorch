@@ -10,6 +10,14 @@ import hypothesis.strategies as st
 import numpy as np
 
 
+def SubFunctionThatThrowsRuntimeError():
+    raise RuntimeError("This is an intentional exception.")
+
+
+def MainOpFunctionThatThrowsRuntimeError(inputs, _):
+    return SubFunctionThatThrowsRuntimeError()
+
+
 class PythonOpTest(hu.HypothesisTestCase):
     @given(x=hu.tensor())
     def test_feed(self, x):
@@ -21,6 +29,11 @@ class PythonOpTest(hu.HypothesisTestCase):
         op = CreatePythonOperator(f, ["x"], [])
         workspace.FeedBlob("x", x)
         workspace.RunOperatorOnce(op)
+
+    def test_exception(self):
+        op = CreatePythonOperator(MainOpFunctionThatThrowsRuntimeError, [], [])
+        with self.assertRaises(RuntimeError):
+            workspace.RunOperatorOnce(op)
 
     @given(x=hu.tensor())
     def test_feed_with_helper_function(self, x):
@@ -65,7 +78,7 @@ class PythonOpTest(hu.HypothesisTestCase):
         def f(inputs, outputs):
             try:
                 raise Exception("Exception in handler")
-            except:
+            except Exception:
                 pass
 
         op = CreatePythonOperator(f, ["x"], ["y"])

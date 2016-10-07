@@ -111,7 +111,7 @@ bool ReadProtoFromTextFile(const char* filename, Message* proto) {
 void WriteProtoToTextFile(const Message& proto, const char* filename) {
   int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
   FileOutputStream* output = new FileOutputStream(fd);
-  CHECK(google::protobuf::TextFormat::Print(proto, output));
+  CAFFE_ENFORCE(google::protobuf::TextFormat::Print(proto, output));
   delete output;
   close(fd);
 }
@@ -138,7 +138,7 @@ void WriteProtoToBinaryFile(const MessageLite& proto, const char* filename) {
   std::unique_ptr<ZeroCopyOutputStream> raw_output(new FileOutputStream(fd));
   std::unique_ptr<CodedOutputStream> coded_output(
       new CodedOutputStream(raw_output.get()));
-  CHECK(proto.SerializeToCodedStream(coded_output.get()));
+  CAFFE_ENFORCE(proto.SerializeToCodedStream(coded_output.get()));
   coded_output.reset();
   raw_output.reset();
   close(fd);

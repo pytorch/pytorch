@@ -134,7 +134,7 @@ TYPED_TEST(TensorGPUDeathTest, CannotAccessDataWhenEmpty) {
     blob.GetMutable<TensorCUDA>()->CopyFrom(cpu_tensor);                   \
     string serialized = blob.Serialize("test");                            \
     BlobProto proto;                                                       \
-    CHECK(proto.ParseFromString(serialized));                              \
+    CAFFE_ENFORCE(proto.ParseFromString(serialized));                      \
     EXPECT_EQ(proto.name(), "test");                                       \
     EXPECT_EQ(proto.type(), "Tensor");                                     \
     EXPECT_TRUE(proto.has_tensor());                                       \
@@ -183,7 +183,7 @@ TEST(TensorTest, TensorSerializationMultiDevices) {
     blob.Reset(new TensorCUDA(tensor, &context));
     string serialized = blob.Serialize("test");
     BlobProto proto;
-    CHECK(proto.ParseFromString(serialized));
+    CAFFE_ENFORCE(proto.ParseFromString(serialized));
     EXPECT_EQ(proto.name(), "test");
     EXPECT_TRUE(proto.has_tensor());
     const TensorProto& tensor_proto = proto.tensor();

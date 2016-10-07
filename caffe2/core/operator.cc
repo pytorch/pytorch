@@ -8,6 +8,7 @@
 #include "caffe2/core/workspace.h"
 #include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/utils/proto_utils.h"
+#include "caffe2/utils/string_utils.h"
 
 namespace caffe2 {
 
@@ -16,8 +17,12 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
     : operator_def_(operator_def), arg_helper_(operator_def_) {
   for (const string& input_str : operator_def_.input()) {
     auto* blob = ws->GetBlob(input_str);
-    CAFFE_ENFORCE(blob != nullptr,
-                  "Encountered a non-existing input blob: ", input_str);
+    CAFFE_ENFORCE(
+        blob != nullptr,
+        "op ",
+        operator_def_.type(),
+        ": Encountered a non-existing input blob: ",
+        input_str);
     inputs_.push_back(blob);
   }
   for (const string& output_str : operator_def_.output()) {
@@ -28,16 +33,23 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
 namespace {
 unique_ptr<OperatorBase> TryCreateOperator(
     const string& key, const OperatorDef& operator_def, Workspace* ws) {
-  switch (operator_def.device_option().device_type()) {
-  case CPU:
-    VLOG(1) << "Creating CPU operator " << key;
-    return CPUOperatorRegistry()->Create(key, operator_def, ws);
-  case CUDA:
-    VLOG(1) << "Creating CUDA operator " << key;
-    return CUDAOperatorRegistry()->Create(key, operator_def, ws);
-  default:
-    LOG(FATAL) << "Unknown device type: "
-                << operator_def.device_option().device_type();
+  try {
+    switch (operator_def.device_option().device_type()) {
+      case CPU:
+        VLOG(1) << "Creating CPU operator " << key;
+        return CPUOperatorRegistry()->Create(key, operator_def, ws);
+      case CUDA:
+        VLOG(1) << "Creating CUDA operator " << key;
+        return CUDAOperatorRegistry()->Create(key, operator_def, ws);
+      default:
+        LOG(FATAL) << "Unknown device type: "
+                   << operator_def.device_option().device_type();
+        return nullptr;
+    }
+  } catch (const UnsupportedOperatorFeature& err) {
+    VLOG(1) << "Operator " << operator_def.type()
+            << " with engine does not support the requested feature. Msg: "
+            << err.what() << ". Proto is: " << ProtoDebugString(operator_def);
     return nullptr;
   }
 }
@@ -63,17 +75,21 @@ unique_ptr<OperatorBase> CreateOperator(
 
   // Second, if the user has provided an engine, try create that engine
   if (operator_def.engine().size()) {
-    string key = operator_def.type() +  "_ENGINE_" + operator_def.engine();
-    VLOG(1) << "Trying to create operator " << operator_def.type()
-            << " with engine " << operator_def.engine();
-    auto op = TryCreateOperator(key, operator_def, ws);
-    if (op) {
-      return op;
+    vector<string> engine_choices = split(',', operator_def.engine());
+    for (const string& engine : engine_choices) {
+      string key = operator_def.type() + "_ENGINE_" + engine;
+      VLOG(1) << "Trying to create operator " << operator_def.type()
+              << " with engine " << engine;
+      auto op = TryCreateOperator(key, operator_def, ws);
+      if (op) {
+        return op;
+      } else {
+        // If the above fails, we will just return the normal case with the
+        // default implementation.
+        VLOG(1) << "Operator with engine " << engine
+                << " is not available. Using default implementation.";
+      }
     }
-    // If the above fails, we will just return the normal case with the default
-    // implementation.
-    VLOG(1) << "Operator with engine " << operator_def.engine()
-            << " is not available. Using default implementation.";
   }
 
   // Lastly, if the engine does not work here, try using the default engine.
@@ -142,10 +158,11 @@ GradientOpsMeta GetGradientForOp(
     } else if (grad.IsDense()) {
       VLOG(1) << "\t [dense]" << grad.dense_;
     } else {
-      CHECK(grad.indices_.size() && grad.values_.size())
-          << "For sparse gradient, one should set both indices and values. "
-          << "Currently we have: (" << grad.indices_ << ", " << grad.values_
-          << ").";
+      CAFFE_ENFORCE(
+          grad.indices_.size() && grad.values_.size(),
+          "For sparse gradient, one should set both indices and values. "
+          "Currently we have: (" +
+              grad.indices_ + ", " + grad.values_ + ").");
       VLOG(1) << "\t [sparse] " << grad.indices_ << ", " << grad.values_;
     }
   }

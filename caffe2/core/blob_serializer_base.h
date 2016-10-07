@@ -38,6 +38,15 @@ class BlobSerializerBase {
    */
   virtual void Serialize(const Blob& blob, const std::string& name,
                         SerializationAcceptor acceptor) = 0;
+
+  virtual void SerializeWithChunkSize(
+      const Blob& blob,
+      const std::string& name,
+      SerializationAcceptor acceptor,
+      int chunk_size) {
+    // Base implementation.
+    Serialize(blob, name, acceptor);
+  }
 };
 
 } // namespace caffe2

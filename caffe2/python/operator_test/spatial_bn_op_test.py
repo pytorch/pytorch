@@ -93,9 +93,7 @@ class TestSpatialBN(hu.HypothesisTestCase):
            seed=st.integers(0, 65535),
            order=st.sampled_from(["NCHW", "NHWC"]),
            epsilon=st.floats(1e-5, 1e-2),
-           **hu.gcs_gpu_only)
-    @unittest.skipIf(not workspace.has_gpu_support,
-                     "SpatialBN gradient only implemented through gpu.")
+           **hu.gcs)
     def test_spatialbn_train_mode_gradient_check(
             self, size, input_channels, batch_size, seed, order, epsilon,
             gc, dc):
@@ -107,7 +105,7 @@ class TestSpatialBN(hu.HypothesisTestCase):
             is_test=False,
             epsilon=epsilon,
         )
-        np.random.seed(1701)
+        np.random.seed(seed)
         scale = np.random.rand(input_channels).astype(np.float32) + 0.5
         bias = np.random.rand(input_channels).astype(np.float32) - 0.5
         mean = np.random.randn(input_channels).astype(np.float32)
@@ -117,5 +115,6 @@ class TestSpatialBN(hu.HypothesisTestCase):
         if order == "NHWC":
             X = X.swapaxes(1, 2).swapaxes(2, 3)
 
-        self.assertGradientChecks(gc, op, [X, scale, bias, mean, var],
-                                  0, [0])
+        for input_to_check in [0, 1, 2]:  # dX, dScale, dBias
+            self.assertGradientChecks(gc, op, [X, scale, bias, mean, var],
+                                      input_to_check, [0])

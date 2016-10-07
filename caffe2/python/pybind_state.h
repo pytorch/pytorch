@@ -65,7 +65,7 @@ class TensorFetcher : public BlobFetcherBase {
   pybind11::object Fetch(const Blob& blob) override {
     const Tensor<Context>& tensor = blob.Get<Tensor<Context>>();
     Context context;
-    CHECK_GE(tensor.size(), 0);
+    CAFFE_ENFORCE_GE(tensor.size(), 0, "Trying to fetch unitilized tensor");
     std::vector<npy_intp> npy_dims;
     for (const auto dim : tensor.dims()) {
       npy_dims.push_back(dim);

@@ -336,14 +336,15 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
     const auto stepNet =
         OperatorBase::GetSingleArgument<string>("backward_step_net", "");
     NetDef stepNetDef;
-    CHECK(google::protobuf::TextFormat::ParseFromString(stepNet, &stepNetDef));
+    CAFFE_ENFORCE(
+        google::protobuf::TextFormat::ParseFromString(stepNet, &stepNetDef));
     ws_.CreateBlob(timestep_)->template GetMutable<TensorCPU>()->Resize(1);
 
     for (const auto& blob : stepNetDef.external_input()) {
       ws_.CreateBlob(blob);
     }
     stepNet_ = ws_.CreateNet(stepNetDef);
-    CHECK(stepNet_);
+    CAFFE_ENFORCE(stepNet_);
   }
 
   std::vector<detail::Scratch> constructScratches(Workspace* sharedWs) {
@@ -483,7 +484,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
                             ->template Get<Tensor<Context>>();
         auto* ag = CHECK_NOTNULL(ws_.GetBlob(param.accGrad))
                        ->template GetMutable<Tensor<Context>>();
-        CHECK(ag->dims() == g.dims());
+        CAFFE_ENFORCE(ag->dims() == g.dims());
         math::Add<T, Context>(
             g.size(),
             g.template data<T>(),

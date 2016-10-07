@@ -45,7 +45,7 @@ void ConvertToRawDataset(
     leveldb::DB* db_temp;
     leveldb::Status status = leveldb::DB::Open(
         options, input_db_name, &db_temp);
-    CHECK(status.ok()) << "Failed to open leveldb " << input_db_name << ".";
+    CAFFE_ENFORCE(status.ok(), "Failed to open leveldb ", input_db_name, ".");
     input_db.reset(db_temp);
   }
 
@@ -61,8 +61,11 @@ void ConvertToRawDataset(
     leveldb::DB* db_temp;
     leveldb::Status status = leveldb::DB::Open(
         options, output_db_name, &db_temp);
-    CHECK(status.ok()) << "Failed to open leveldb " << output_db_name
-        << ". Is it already existing?";
+    CAFFE_ENFORCE(
+        status.ok(),
+        "Failed to open leveldb ",
+        output_db_name,
+        ". Is it already existing?");
     output_db.reset(db_temp);
   }
   batch.reset(new leveldb::WriteBatch());
@@ -84,7 +87,7 @@ void ConvertToRawDataset(
   iter->SeekToFirst();
   int count = 0;
   for (; iter->Valid(); iter->Next()) {
-    CHECK(input_protos.ParseFromString(iter->value().ToString()));
+    CAFFE_ENFORCE(input_protos.ParseFromString(iter->value().ToString()));
     label->CopyFrom(input_protos.protos(1));
     const string& encoded_image = input_protos.protos(0).string_data(0);
     int encoded_size = encoded_image.size();

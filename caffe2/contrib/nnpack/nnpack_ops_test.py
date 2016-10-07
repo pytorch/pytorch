@@ -9,8 +9,11 @@ from hypothesis import given, assume, settings
 import numpy as np
 import time
 import os
-from caffe2.python import core
+from caffe2.python import core, dyndep
 import caffe2.python.hypothesis_test_util as hu
+
+
+dyndep.InitOpsLibrary("@/caffe2/caffe2/contrib/nnpack:nnpack_ops")
 
 np.random.seed(1)
 

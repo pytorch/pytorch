@@ -23,8 +23,8 @@ std::string StripBasename(const std::string &full_path) {
 }
 
 size_t ReplaceAll(string& s, const char* from, const char* to) {
-  CHECK(from && *from);
-  CHECK(to);
+  CAFFE_ENFORCE(from && *from);
+  CAFFE_ENFORCE(to);
 
   size_t numReplaced = 0;
   string::size_type lenFrom = std::strlen(from);
@@ -37,12 +37,19 @@ size_t ReplaceAll(string& s, const char* from, const char* to) {
   return numReplaced;
 }
 
+static std::function<string(void)> FetchStackTrace = []() { return ""; };
+
+void SetStackTraceFetcher(std::function<string(void)> fetcher) {
+  FetchStackTrace = fetcher;
+}
+
 EnforceNotMet::EnforceNotMet(
     const char* file,
     const int line,
     const char* condition,
     const string& msg)
     : msg_stack_{MakeString(
+          FetchStackTrace(),
           "[enforce fail at ",
           StripBasename(std::string(file)),
           ":",
@@ -50,22 +57,27 @@ EnforceNotMet::EnforceNotMet(
           "] ",
           condition,
           ". ",
-          msg)} {
+          msg,
+          " ")} {
   if (FLAGS_caffe2_use_fatal_for_enforce) {
     LOG(FATAL) << msg_stack_[0];
-  } else {
-    LOG(ERROR) << msg_stack_[0];
   }
+  full_msg_ = this->msg();
 }
 
 void EnforceNotMet::AppendMessage(const string& msg) {
-  LOG(ERROR) << msg;
   msg_stack_.push_back(msg);
+  full_msg_ = this->msg();
 }
 
 string EnforceNotMet::msg() const {
   return std::accumulate(msg_stack_.begin(), msg_stack_.end(), string(""));
 }
+
+const char* EnforceNotMet::what() const noexcept {
+  return full_msg_.c_str();
+}
+
 }  // namespace caffe2
 
 

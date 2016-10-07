@@ -17,16 +17,58 @@ TEST(LoggingTest, TestEnforceFalse) {
     CAFFE_ENFORCE(false, "This throws.");
     // This should never be triggered.
     EXPECT_FALSE(true);
-  } catch (const EnforceNotMet& err) {}
+  } catch (const EnforceNotMet& err) {
+  }
   std::swap(FLAGS_caffe2_use_fatal_for_enforce, kFalse);
+}
+
+TEST(LoggingTest, TestEnforceEquals) {
+  int x = 4;
+  int y = 5;
+  try {
+    CAFFE_ENFORCE_THAT(Equals(++x, ++y));
+    // This should never be triggered.
+    EXPECT_FALSE(true);
+  } catch (const EnforceNotMet& err) {
+    EXPECT_NE(err.msg().find("5 vs 6"), string::npos);
+  }
+
+  // arguments are expanded only once
+  CAFFE_ENFORCE_THAT(Equals(++x, y));
+  EXPECT_EQ(x, 6);
+  EXPECT_EQ(y, 6);
+}
+
+TEST(LoggingTest, EnforceShowcase) {
+  // It's not really a test but rather a convenient thing that you can run and
+  // see all messages
+  int one = 1;
+  int two = 2;
+  int three = 3;
+#define WRAP_AND_PRINT(exp)                     \
+  try {                                         \
+    exp;                                        \
+  } catch (const EnforceNotMet& err) {          \
+    /* EnforceNotMet already does LOG(ERROR) */ \
+  }
+  WRAP_AND_PRINT(CAFFE_ENFORCE_EQ(one, two));
+  WRAP_AND_PRINT(CAFFE_ENFORCE_NE(one * 2, two));
+  WRAP_AND_PRINT(CAFFE_ENFORCE_GT(one, two));
+  WRAP_AND_PRINT(CAFFE_ENFORCE_GE(one, two));
+  WRAP_AND_PRINT(CAFFE_ENFORCE_LT(three, two));
+  WRAP_AND_PRINT(CAFFE_ENFORCE_LE(three, two));
+
+  WRAP_AND_PRINT(CAFFE_ENFORCE_EQ(
+      one * two + three, three * two, "It's a pretty complicated expression"));
+
+  WRAP_AND_PRINT(CAFFE_ENFORCE_THAT(Equals(one * two + three, three * two)));
 }
 
 TEST(LoggingDeathTest, TestEnforceUsingFatal) {
   bool kTrue = true;
   std::swap(FLAGS_caffe2_use_fatal_for_enforce, kTrue);
-  EXPECT_DEATH(
-      CAFFE_ENFORCE(false, "This goes fatal."), "");
+  EXPECT_DEATH(CAFFE_ENFORCE(false, "This goes fatal."), "");
   std::swap(FLAGS_caffe2_use_fatal_for_enforce, kTrue);
 }
 
-}  // namespace caffe2
+} // namespace caffe2

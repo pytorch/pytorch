@@ -1,10 +1,11 @@
 from caffe2.python import core
+from caffe2.python.model_helper import ModelHelperBase
 from caffe2.proto import caffe2_pb2
 
 import logging
 
 
-class CNNModelHelper(object):
+class CNNModelHelper(ModelHelperBase):
     """A helper model so we can write CNN models more easily, without having to
     manually define parameter initializations and operators separately.
     """
@@ -12,39 +13,19 @@ class CNNModelHelper(object):
     def __init__(self, order="NCHW", name=None,
                  use_cudnn=True, cudnn_exhaustive_search=False,
                  ws_nbytes_limit=None, init_params=True):
-        if name is None:
-            name = "CNN"
-        self.net = core.Net(name)
-        self.param_init_net = core.Net(name + '_init')
-        self.params = []
-        self.param_to_grad = {}
+        super(CNNModelHelper, self).__init__(
+            name="CNN" if name is None else name, init_params=init_params)
+
         self.weights = []
         self.biases = []
         self.order = order
         self.use_cudnn = use_cudnn
         self.cudnn_exhaustive_search = cudnn_exhaustive_search
         self.ws_nbytes_limit = ws_nbytes_limit
-        self.init_params = init_params
-        self.gradient_ops_added = False
         if self.order != "NHWC" and self.order != "NCHW":
             raise ValueError(
                 "Cannot understand the CNN storage order %s." % self.order
             )
-
-    def Proto(self):
-        return self.net.Proto()
-
-    def InitProto(self):
-        return self.param_init_net.Proto()
-
-    def RunAllOnGPU(self, *args, **kwargs):
-        self.param_init_net.RunAllOnGPU(*args, **kwargs)
-        self.net.RunAllOnGPU(*args, **kwargs)
-
-    def CreateDB(self, blob_out, db, db_type, **kwargs):
-        dbreader = self.param_init_net.CreateDB(
-            [], blob_out, db=db, db_type=db_type, **kwargs)
-        return dbreader
 
     def ImageInput(
             self, blob_in, blob_out, **kwargs
@@ -58,17 +39,6 @@ class CNNModelHelper(object):
             data, label = self.net.ImageInput(
                 blob_in, blob_out, **kwargs)
         return data, label
-
-    def TensorProtosDBInput(
-        self, unused_blob_in, blob_out, batch_size, db, db_type, **kwargs
-    ):
-        """TensorProtosDBInput."""
-        dbreader_name = "dbreader_" + db
-        dbreader = self.param_init_net.CreateDB(
-            [], dbreader_name,
-            db=db, db_type=db_type)
-        return self.net.TensorProtosDBInput(
-            dbreader, blob_out, batch_size=batch_size)
 
     def Conv(
         self, blob_in, blob_out, dim_in, dim_out, kernel, weight_init=None,
@@ -237,8 +207,8 @@ class CNNModelHelper(object):
         )
         return concat
 
-    def FC(
-        self, blob_in, blob_out, dim_in, dim_out, weight_init=None,
+    def _FC_or_packed_FC(
+        self, op_call, blob_in, blob_out, dim_in, dim_out, weight_init=None,
         bias_init=None, **kwargs
     ):
         """FC"""
@@ -264,7 +234,15 @@ class CNNModelHelper(object):
             bias = core.ScopedBlobReference(
                 blob_out + '_b', self.param_init_net)
         self.params.extend([weight, bias])
-        return self.net.FC([blob_in, weight, bias], blob_out, **kwargs)
+        self.weights.append(weight)
+        self.biases.append(bias)
+        return op_call([blob_in, weight, bias], blob_out, **kwargs)
+
+    def FC(self, *args, **kwargs):
+        return self._FC_or_packed_FC(self.net.FC, *args, **kwargs)
+
+    def PackedFC(self, *args, **kwargs):
+        return self._FC_or_packed_FC(self.net.PackedFC, *args, **kwargs)
 
     def FC_Decomp(
         self, blob_in, blob_out, dim_in, dim_out,
@@ -431,7 +409,7 @@ class CNNModelHelper(object):
         """Depth Concat."""
         return self.net.Concat(
             blobs_in,
-            [blob_out, "_" + blob_out + "_condat_dims"],
+            [blob_out, "_" + blob_out + "_concat_dims"],
             order=self.order,
             **kwargs
         )[0]
@@ -451,6 +429,10 @@ class CNNModelHelper(object):
         """Transpose."""
         return self.net.Transpose(blob_in, blob_out, **kwargs)
 
+    def Sum(self, blob_in, blob_out, **kwargs):
+        """Sum"""
+        return self.net.Sum(blob_in, blob_out, **kwargs)
+
     def SpatialBN(self, blob_in, blob_out, dim_in, **kwargs):
         blob_out = blob_out or self.net.NextName()
         # Input: input, scale, bias, est_mean, est_inv_var
@@ -465,13 +447,15 @@ class CNNModelHelper(object):
             return self.param_init_net.ConstantFill(
                 [], blob_out + "_" + suffix, shape=[dim_in], value=value)
         scale, bias = init_blob(1.0, "s"), init_blob(0.0, "b")
+        running_mean = init_blob(0.0, "rm")
+        running_inv_var = init_blob(1.0, "riv")
         self.params.extend([scale, bias])
         self.weights.append(scale)
         self.biases.append(bias)
-        blob_outs = [blob_out, blob_out + "_rm", blob_out + "_riv",
+        blob_outs = [blob_out, running_mean, running_inv_var,
                      blob_out + "_sm", blob_out + "_siv"]
         blob_outputs = self.net.SpatialBN(
-            [blob_in, scale, bias, blob_outs[1], blob_outs[2]], blob_outs,
+            [blob_in, scale, bias, running_mean, running_inv_var], blob_outs,
             order=self.order, **kwargs)
         # Return the output
         return blob_outputs[0]
@@ -500,15 +484,22 @@ class CNNModelHelper(object):
     def ZeroInit(self):
         return ('ConstantFill', {})
 
-    def AddGradientOperators(self, *args, **kwargs):
-        if self.gradient_ops_added:
-            raise RuntimeError("You cannot run AddGradientOperators twice.")
-        self.gradient_ops_added = True
-        grad_map = self.net.AddGradientOperators(*args, **kwargs)
-        for p in self.params:
-            if str(p) in grad_map:
-                self.param_to_grad[p] = grad_map[str(p)]
-        return grad_map
+    def AddWeightDecay(self, weight_decay):
+        """Adds a decay to weights in the model.
+
+        This is a form of L2 regularization.
+
+        Args:
+            weight_decay: strength of the regularization
+        """
+        if weight_decay <= 0.0:
+            return
+        wd = self.param_init_net.ConstantFill([], 'wd', shape=[1],
+                                              value=weight_decay)
+        ONE = self.param_init_net.ConstantFill([], "ONE", shape=[1], value=1.0)
+        for param in self.weights:
+            #  Equivalent to: grad += wd * param
+            self.net.WeightedSum([self.param_to_grad[param], ONE, param, wd])
 
     @property
     def CPU(self):
@@ -635,32 +626,3 @@ class CNNModelHelper(object):
         self.weights += step_net.weights
         self.biases += step_net.biases
         return output, hidden_state, cell_state
-
-    def __getattr__(self, op_type):
-        """Catch-all for all other operators, mostly those without params."""
-        if not core.IsOperator(op_type):
-            raise RuntimeError(
-                'Method ' + op_type + ' is not a registered operator.'
-            )
-        # known_working_ops are operators that do not need special care.
-        known_working_ops = [
-            "Accuracy",
-            "Adam",
-            "AveragedLoss",
-            "Cast",
-            "LabelCrossEntropy",
-            "LearningRate",
-            "Print",
-            "Sigmoid",
-            "Scale",
-            "Snapshot",
-            "Softmax",
-            "StopGradient",
-            "Summarize",
-            "Tanh",
-            "WeightedSum",
-        ]
-        if op_type not in known_working_ops:
-            logging.warning("You are creating an op that the CNNModelHelper "
-                            "does not recognize: {}.".format(op_type))
-        return self.net.__getattr__(op_type)

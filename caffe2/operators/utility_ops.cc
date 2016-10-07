@@ -6,6 +6,7 @@ namespace {
 REGISTER_CPU_OPERATOR(WallClockTime, WallClockTimeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Print, PrintOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Flatten, FlattenOp<CPUContext>);
+REGISTER_CPU_OPERATOR(FlattenToVec, FlattenToVecOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Alias, AliasOp<CPUContext>);
 REGISTER_CPU_OPERATOR(ResizeLike, ResizeLikeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Sum, SumOp<float, CPUContext>);
@@ -16,8 +17,13 @@ REGISTER_CPU_OPERATOR(
     ScatterWeightedSumOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(ScatterAssign, ScatterAssignOp<float, CPUContext>);
 // From whatever the current context, ensure the output is TensorCPU
-REGISTER_CPU_OPERATOR(EnsureCPUOutput,
-                      CopyOp<CPUContext, CPUContext, CPUContext>);
+REGISTER_CPU_OPERATOR(
+    EnsureCPUOutput,
+    CopyOp<CPUContext, CPUContext, CPUContext>);
+// From CPU, copy it to whatever the current context
+REGISTER_CPU_OPERATOR(
+    CopyFromCPUInput,
+    CopyOp<CPUContext, CPUContext, CPUContext>);
 REGISTER_CPU_OPERATOR(Copy, CopyOp<CPUContext, CPUContext, CPUContext>);
 REGISTER_CPU_OPERATOR(Shape, ShapeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Reshape, ReshapeOp<float, CPUContext>);
@@ -25,6 +31,7 @@ REGISTER_CPU_OPERATOR(LengthsToShape, LengthsToShapeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(HasElements, HasElementsOp<CPUContext>);
 REGISTER_CPU_OPERATOR(IsEmpty, IsEmptyOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Gather, GatherOp<CPUContext>);
+REGISTER_CPU_OPERATOR(GatherRanges, GatherRangesOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Unique, UniqueOp<CPUContext>);
 REGISTER_CPU_OPERATOR(LengthsToSegmentIds, LengthsToSegmentIdsOp<CPUContext>);
 REGISTER_CPU_OPERATOR(LengthsToRanges, LengthsToRangesOp<CPUContext>);
@@ -32,6 +39,9 @@ REGISTER_CPU_OPERATOR(SegmentIdsToLengths, SegmentIdsToLengthsOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Slice, SliceOp<int, CPUContext>);
 REGISTER_CPU_OPERATOR(Squeeze, SqueezeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(ExpandDims, ExpandDimsOp<CPUContext>);
+REGISTER_CPU_OPERATOR(
+    SegmentIdsToLengthWeights,
+    SegmentIdsToLengthWeightsOp<CPUContext>);
 
 OPERATOR_SCHEMA(WallClockTime)
     .NumInputs(0)
@@ -103,6 +113,18 @@ unchanged.
         "A tensor of rank 2 with the contents of the input tensor, "
         "with first dimension equal first dimension of input, and remaining "
         "input dimensions flatenned into the inner dimension of the output.");
+
+OPERATOR_SCHEMA(FlattenToVec)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .SetDoc(R"DOC(
+Flattens the input tensor into a 1D vector.
+)DOC")
+    .Input(0, "input", "A tensor of rank >= 1.")
+    .Output(
+        0,
+        "output",
+        "A tensor of rank 1 with the contents of the input tensor");
 
 OPERATOR_SCHEMA(Alias)
     .NumInputs(1)
@@ -257,6 +279,16 @@ which is always a TensorCPU. This may involves cross-device MemCpy.
     .Input(0, "input", "The input CUDA or CPU tensor.")
     .Output(0, "output", "TensorCPU that is a copy of the input.");
 
+OPERATOR_SCHEMA(CopyFromCPUInput)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .SetDoc(R"DOC(
+Take a CPU input tensor and copy it to an output in the current
+Context (GPU or CPU). This may involves cross-device MemCpy.
+)DOC")
+    .Input(0, "input", "The input CPU tensor.")
+    .Output(0, "output", "either a TensorCUDA or a TensorCPU");
+
 OPERATOR_SCHEMA(Shape)
     .NumInputs(1)
     .NumOutputs(1)
@@ -311,6 +343,49 @@ Example:
     .Input(0, "DATA", "Tensor of rank r >= 1.")
     .Input(1, "INDICES", "Tensor of int32/int64 indices, of any rank q.")
     .Output(0, "OUTPUT", "Tensor of rank q + (r - 1).");
+
+OPERATOR_SCHEMA(GatherRanges)
+    .NumInputs(2)
+    .NumOutputs(2)
+    .SetDoc(R"DOC(
+Given DATA tensor of rank 1, and RANGES tensor of rank 3, gather
+corresponding ranges into a 1-D tensor OUTPUT.
+
+RANGES dimentions description:
+1: represents list of examples within a batch
+2: represents list features
+3: two values which are start and length or a range (to be applied on DATA)
+
+Another output LENGTHS represents each example length within OUTPUT
+
+Example:
+  DATA  = [1, 2, 3, 4, 5, 6]
+  RANGES = [
+    [
+      [0, 1],
+      [2, 2],
+    ],
+    [
+      [4, 1],
+      [5, 1],
+    ]
+  ]
+  OUTPUT = [1, 3, 4, 5, 6]
+  LENGTHS = [3, 2]
+)DOC")
+    .Input(0, "DATA", "Tensor of rank 1.")
+    .Input(
+        1,
+        "RANGES",
+        "Tensor of int32/int64 ranges, of dims (N, M, 2). "
+        "Where N is number of examples and M is a size of each example. "
+        "Last dimention represents a range in the format (start, lengths)")
+    .Output(0, "OUTPUT", "1-D tensor of size sum of range lengths")
+    .Output(
+        1,
+        "LENGTHS",
+        "1-D tensor of size N with lengths over gathered data"
+        " for each row in a batch. sum(LENGTHS) == OUTPUT.size()");
 
 OPERATOR_SCHEMA(Unique)
     .NumInputs(1)
@@ -367,6 +442,20 @@ cannot represent empty segments at the end.
     .Input(0, "segment_ids", "1-D int32_t or int64_t tensor of segment ids")
     .Output(0, "lengths", "1-D int64_t tensor of segment lengths");
 
+OPERATOR_SCHEMA(SegmentIdsToLengthWeights)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .Arg("power", "n of 1/pow(length,n) for normalization")
+    .SetDoc(
+        R"DOC( Similar as SegmentIdsToLengths but output vector of segment
+weights derived by lengths. i.e 1/pow(length, power)
+)DOC")
+    .Input(0, "segment_ids", "1-D int32_t or int64_t tensor of segment ids")
+    .Output(
+        0,
+        "a vector of weights",
+        "1-D float tensor of segment weights by length");
+
 OPERATOR_SCHEMA(Slice)
     .NumInputs(3)
     .NumOutputs(1)
@@ -403,8 +492,7 @@ OPERATOR_SCHEMA(Squeeze)
     .AllowInplace({{0, 0}})
     .SetDoc(R"DOC(
 Remove single-dimensional entries from the shape of a tensor.
-Takes an optional parameter `dims` with a list of dimension to squeeze.
-If `dims` is not provided, all singleton dimensions are squeezed.
+Takes a  parameter `dims` with a list of dimension to squeeze.
 If the same blob is provided in input and output, the operation is copy-free.
 This is the exact inverse operation of ExpandDims given the same `dims` arg.
 )DOC")
@@ -522,8 +610,10 @@ REGISTER_GRADIENT(Gather, GetGatherGradient);
 SHOULD_NOT_DO_GRADIENT(Unique);
 SHOULD_NOT_DO_GRADIENT(LengthsToSegmentIds);
 SHOULD_NOT_DO_GRADIENT(SegmentIdsToLengths);
+SHOULD_NOT_DO_GRADIENT(SegmentIdsToLengthWeights);
 // TODO(azzolini): Add support for slice gradient
 SHOULD_NOT_DO_GRADIENT(Slice);
+SHOULD_NOT_DO_GRADIENT(GatherRangesOp);
 
 } // namespace
 

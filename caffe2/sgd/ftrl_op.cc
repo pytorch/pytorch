@@ -18,13 +18,13 @@ inline void ftrl_compute(
     T& nz,
     const FtrlParams<T>& params) {
   auto new_n = n + g * g;
-  auto sigma = (sqrt(new_n) - sqrt(n)) / params.alpha;
+  auto sigma = (sqrt(new_n) - sqrt(n)) * params.alphaInv;
   nn = new_n;
   nz = z + g - sigma * w;
   // update the weight
   if (std::abs(nz) > params.lambda1) {
     nw = (params.lambda1 * sgn(nz) - nz) /
-        ((params.beta + sqrt(new_n)) / params.alpha + params.lambda2);
+        ((params.beta + sqrt(new_n)) * params.alphaInv + params.lambda2);
   } else {
     nw = 0.0;
   }
