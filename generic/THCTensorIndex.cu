@@ -26,7 +26,7 @@ void THCTensor_(indexCopy)(THCState *state, THCTensor *dst, int dim, THCudaLongT
   dims = THCudaLongTensor_nDimension(state, indices);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 4, CUTORCH_DIM_WARNING);
 
-  long numIndices = THCudaLongTensor_nElement(state, indices);
+  ptrdiff_t numIndices = THCudaLongTensor_nElement(state, indices);
 
   long srcDims = THCTensor_(nDimension)(state, src);
   cudaStream_t stream = THCState_getCurrentStream(state);
@@ -44,9 +44,9 @@ void THCTensor_(indexCopy)(THCState *state, THCTensor *dst, int dim, THCudaLongT
   // total size of the tensor ignoring dimension `dim`;
   // -the number of indices we are choosing, which is the total size
   // of the tensor `indices`.
-  long srcTotalSize = THCTensor_(nElement)(state, src);
+  ptrdiff_t srcTotalSize = THCTensor_(nElement)(state, src);
   long dstCopyDimSize = THCTensor_(size)(state, dst, dim);
-  long sliceSize = srcTotalSize / numIndices;
+  ptrdiff_t sliceSize = srcTotalSize / numIndices;
 
   int mpc = THCState_getCurrentDeviceProperties(state)->multiProcessorCount;
 
@@ -62,11 +62,11 @@ void THCTensor_(indexCopy)(THCState *state, THCTensor *dst, int dim, THCudaLongT
       dstInfo, srcInfo, indicesInfo,                            \
       dstCopyDim, srcCopyDim, sliceSize, dstCopyDimSize);
 
-  dim3 smallIndexGrid(std::min(THCCeilDiv(sliceSize, 128L), (long)(mpc * 8)));
-  dim3 smallIndexBlock(std::min(sliceSize, 128L));
+  dim3 smallIndexGrid(std::min(THCCeilDiv(sliceSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
+  dim3 smallIndexBlock(std::min(sliceSize, (ptrdiff_t)128));
 
-  dim3 largeIndexGrid(std::min(THCCeilDiv(srcTotalSize, 128L), (long)(mpc * 8)));
-  dim3 largeIndexBlock(std::min(srcTotalSize, 128L));
+  dim3 largeIndexGrid(std::min(THCCeilDiv(srcTotalSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
+  dim3 largeIndexBlock(std::min(srcTotalSize, (ptrdiff_t)128));
 
   if (TensorUtils<THCTensor>::canUse32BitIndexMath(state, dst) &&
       TensorUtils<THCTensor>::canUse32BitIndexMath(state, src) &&
@@ -154,7 +154,7 @@ void THCTensor_(indexAdd)(THCState *state, THCTensor *dst, int dim, THCudaLongTe
   dims = THCudaLongTensor_nDimension(state, indices);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 4, CUTORCH_DIM_WARNING);
 
-  long numIndices = THCudaLongTensor_nElement(state, indices);
+  ptrdiff_t numIndices = THCudaLongTensor_nElement(state, indices);
 
   long srcDims = THCTensor_(nDimension)(state, src);
   cudaStream_t stream = THCState_getCurrentStream(state);
@@ -172,9 +172,9 @@ void THCTensor_(indexAdd)(THCState *state, THCTensor *dst, int dim, THCudaLongTe
   // total size of the tensor ignoring dimension `dim`;
   // -the number of indices we are choosing, which is the total size
   // of the tensor `indices`.
-  long srcTotalSize = THCTensor_(nElement)(state, src);
+  ptrdiff_t srcTotalSize = THCTensor_(nElement)(state, src);
   long dstAddDimSize = THCTensor_(size)(state, dst, dim);
-  long sliceSize = srcTotalSize / numIndices;
+  ptrdiff_t sliceSize = srcTotalSize / numIndices;
 
   int mpc = THCState_getCurrentDeviceProperties(state)->multiProcessorCount;
 
@@ -190,11 +190,11 @@ void THCTensor_(indexAdd)(THCState *state, THCTensor *dst, int dim, THCudaLongTe
       dstInfo, srcInfo, indicesInfo,                    \
       dstAddDim, srcAddDim, sliceSize, dstAddDimSize);
 
-  dim3 smallIndexGrid(std::min(THCCeilDiv(sliceSize, 128L), (long)(mpc * 8)));
-  dim3 smallIndexBlock(std::min(sliceSize, 128L));
+  dim3 smallIndexGrid(std::min(THCCeilDiv(sliceSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
+  dim3 smallIndexBlock(std::min(sliceSize, (ptrdiff_t)128));
 
-  dim3 largeIndexGrid(std::min(THCCeilDiv(srcTotalSize, 128L), (long)(mpc * 8)));
-  dim3 largeIndexBlock(std::min(srcTotalSize, 128L));
+  dim3 largeIndexGrid(std::min(THCCeilDiv(srcTotalSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
+  dim3 largeIndexBlock(std::min(srcTotalSize, (ptrdiff_t)128));
 
   if (TensorUtils<THCTensor>::canUse32BitIndexMath(state, dst) &&
       TensorUtils<THCTensor>::canUse32BitIndexMath(state, src) &&
@@ -279,7 +279,7 @@ void THCTensor_(indexFill)(THCState *state, THCTensor *dst, int dim, THCudaLongT
   dims = THCudaLongTensor_nDimension(state, indices);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 4, CUTORCH_DIM_WARNING);
 
-  long numIndices = THCudaLongTensor_nElement(state, indices);
+  ptrdiff_t numIndices = THCudaLongTensor_nElement(state, indices);
 
   long srcDims = THCTensor_(nDimension)(state, dst);
   cudaStream_t stream = THCState_getCurrentStream(state);
@@ -296,9 +296,9 @@ void THCTensor_(indexFill)(THCState *state, THCTensor *dst, int dim, THCudaLongT
   // total size of the tensor ignoring dimension `dim`;
   // -the number of indices we are choosing, which is the total size
   // of the tensor `indices`.
-  long dstTotalSize = THCTensor_(nElement)(state, dst);
+  ptrdiff_t dstTotalSize = THCTensor_(nElement)(state, dst);
   long dstFillDimSize = THCTensor_(size)(state, dst, dim);
-  long sliceSize = dstTotalSize / dstFillDimSize;
+  ptrdiff_t sliceSize = dstTotalSize / dstFillDimSize;
 
   int mpc = THCState_getCurrentDeviceProperties(state)->multiProcessorCount;
 
@@ -314,11 +314,11 @@ void THCTensor_(indexFill)(THCState *state, THCTensor *dst, int dim, THCudaLongT
       dstInfo, indicesInfo,                             \
       dstFillDim, sliceSize, dstFillDimSize, val);
 
-  dim3 smallIndexGrid(std::min(THCCeilDiv(sliceSize, 128L), (long)(mpc * 8)));
-  dim3 smallIndexBlock(std::min(sliceSize, 128L));
+  dim3 smallIndexGrid(std::min(THCCeilDiv(sliceSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
+  dim3 smallIndexBlock(std::min(sliceSize, (ptrdiff_t)128));
 
-  dim3 largeIndexGrid(std::min(THCCeilDiv(dstTotalSize, 128L), (long)(mpc * 8)));
-  dim3 largeIndexBlock(std::min(dstTotalSize, 128L));
+  dim3 largeIndexGrid(std::min(THCCeilDiv(dstTotalSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
+  dim3 largeIndexBlock(std::min(dstTotalSize, (ptrdiff_t)128));
 
   if (TensorUtils<THCTensor>::canUse32BitIndexMath(state, dst) &&
       TensorUtils<THCudaLongTensor>::canUse32BitIndexMath(state, indices)) {
@@ -396,7 +396,7 @@ void THCTensor_(indexSelect)(THCState *state, THCTensor *dst, THCTensor *src, in
   dims = THCudaLongTensor_nDimension(state, indices);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 5, CUTORCH_DIM_WARNING);
 
-  long numIndices = THCudaLongTensor_nElement(state, indices);
+  ptrdiff_t numIndices = THCudaLongTensor_nElement(state, indices);
 
   long srcDims = THCTensor_(nDimension)(state, src);
   cudaStream_t stream = THCState_getCurrentStream(state);
@@ -418,9 +418,9 @@ void THCTensor_(indexSelect)(THCState *state, THCTensor *dst, THCTensor *src, in
   // total size of the tensor ignoring dimension `dim`;
   // -the number of indices we are choosing, which is the total size
   // of the tensor `indices`.
-  long dstTotalSize = THCTensor_(nElement)(state, dst);
+  ptrdiff_t dstTotalSize = THCTensor_(nElement)(state, dst);
   long srcSelectDimSize = THCTensor_(size)(state, src, dim);
-  long sliceSize = dstTotalSize / numIndices;
+  ptrdiff_t sliceSize = dstTotalSize / numIndices;
 
   int mpc = THCState_getCurrentDeviceProperties(state)->multiProcessorCount;
 
@@ -436,11 +436,11 @@ void THCTensor_(indexSelect)(THCState *state, THCTensor *dst, THCTensor *src, in
       dstInfo, srcInfo, indicesInfo,                                    \
       dstSelectDim, srcSelectDim, dstTotalSize, sliceSize, srcSelectDimSize);
 
-  dim3 smallIndexGrid(std::min(THCCeilDiv(sliceSize, 128L), (long)(mpc * 8)));
-  dim3 smallIndexBlock(std::min(sliceSize, 128L));
+  dim3 smallIndexGrid(std::min(THCCeilDiv(sliceSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
+  dim3 smallIndexBlock(std::min(sliceSize, (ptrdiff_t)128));
 
-  dim3 largeIndexGrid(std::min(THCCeilDiv(dstTotalSize, 128L), (long)(mpc * 8)));
-  dim3 largeIndexBlock(std::min(dstTotalSize, 128L));
+  dim3 largeIndexGrid(std::min(THCCeilDiv(dstTotalSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
+  dim3 largeIndexBlock(std::min(dstTotalSize, (ptrdiff_t)128));
 
   if (TensorUtils<THCTensor>::canUse32BitIndexMath(state, dst) &&
       TensorUtils<THCTensor>::canUse32BitIndexMath(state, src) &&

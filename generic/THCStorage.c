@@ -7,7 +7,7 @@ real* THCStorage_(data)(THCState *state, const THCStorage *self)
   return self->data;
 }
 
-long THCStorage_(size)(THCState *state, const THCStorage *self)
+ptrdiff_t THCStorage_(size)(THCState *state, const THCStorage *self)
 {
   return self->size;
 }
@@ -17,13 +17,13 @@ int THCStorage_(elementSize)(THCState *state)
   return sizeof(real);
 }
 
-void THCStorage_(set)(THCState *state, THCStorage *self, long index, real value)
+void THCStorage_(set)(THCState *state, THCStorage *self, ptrdiff_t index, real value)
 {
   THArgCheck((index >= 0) && (index < self->size), 2, "index out of bounds");
   THCudaCheck(cudaMemcpy(self->data + index, &value, sizeof(real), cudaMemcpyHostToDevice));
 }
 
-real THCStorage_(get)(THCState *state, const THCStorage *self, long index)
+real THCStorage_(get)(THCState *state, const THCStorage *self, ptrdiff_t index)
 {
   THArgCheck((index >= 0) && (index < self->size), 2, "index out of bounds");
   real value;
@@ -41,7 +41,7 @@ THCStorage* THCStorage_(new)(THCState *state)
   return storage;
 }
 
-THCStorage* THCStorage_(newWithSize)(THCState *state, long size)
+THCStorage* THCStorage_(newWithSize)(THCState *state, ptrdiff_t size)
 {
   THArgCheck(size >= 0, 2, "invalid size");
 
@@ -103,13 +103,13 @@ THCStorage* THCStorage_(newWithSize4)(THCState *state, real data0, real data1, r
   return self;
 }
 
-THCStorage* THCStorage_(newWithMapping)(THCState *state, const char *fileName, long size, int isShared)
+THCStorage* THCStorage_(newWithMapping)(THCState *state, const char *fileName, ptrdiff_t size, int isShared)
 {
   THError("not available yet for THCStorage");
   return NULL;
 }
 
-THCStorage* THCStorage_(newWithData)(THCState *state, real *data, long size)
+THCStorage* THCStorage_(newWithData)(THCState *state, real *data, ptrdiff_t size)
 {
   THCStorage *storage = (THCStorage*)THAlloc(sizeof(THCStorage));
   storage->data = data;

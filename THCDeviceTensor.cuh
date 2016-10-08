@@ -142,7 +142,7 @@ class THCDeviceTensor {
 
   /// Returns the total number of elements contained within our data
   /// (product of `getSize(i)`)
-  __host__ __device__ long numElements() const;
+  __host__ __device__ ptrdiff_t numElements() const;
 
   /// Returns the size array.
   __host__ __device__ __forceinline__ const IndexT* sizes() const {

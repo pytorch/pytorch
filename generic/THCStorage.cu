@@ -12,7 +12,7 @@ void THCStorage_(fill)(THCState *state, THCStorage *self, real value)
     self_data, self_data+self->size, value);
 }
 
-void THCStorage_(resize)(THCState *state, THCStorage *self, long size)
+void THCStorage_(resize)(THCState *state, THCStorage *self, ptrdiff_t size)
 {
   THArgCheck(size >= 0, 2, "invalid size");
 

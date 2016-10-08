@@ -18,8 +18,8 @@
 #include <cuda_fp16.h>
 #include <stdint.h>
 
-THC_EXTERNC void THCFloat2Half(THCState *state, half *out, float *in, long len);
-THC_EXTERNC void THCHalf2Float(THCState *state, float *out, half *in, long len);
+THC_EXTERNC void THCFloat2Half(THCState *state, half *out, float *in, ptrdiff_t len);
+THC_EXTERNC void THCHalf2Float(THCState *state, float *out, half *in, ptrdiff_t len);
 THC_API half THC_float2half(float a);
 THC_API float THC_half2float(half a);
 

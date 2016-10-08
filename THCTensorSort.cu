@@ -22,9 +22,9 @@ void THCudaLongTensor_fillSliceWithIndex(THCState* state,
   long dims = THCudaLongTensor_nDimension(state, t);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
 
-  long inElements = THCudaLongTensor_nElement(state, t);
+  ptrdiff_t inElements = THCudaLongTensor_nElement(state, t);
   long sliceSize = THCudaLongTensor_size(state, t, dim);
-  long numSlices = inElements / sliceSize;
+  ptrdiff_t numSlices = inElements / sliceSize;
 
   dim3 grid;
   if (!THC_getGridFromTiles(numSlices, grid)) {

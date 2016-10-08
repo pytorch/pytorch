@@ -80,7 +80,7 @@ TensorUtils<TENSOR_TYPE>::getData(THCState* state,                      \
   return (DATA_TYPE*) TENSOR_TYPE##_data(state, t);                     \
 }                                                                       \
                                                                         \
-long                                                                    \
+ptrdiff_t                                                               \
 TensorUtils<TENSOR_TYPE>::getNumElements(THCState* state,               \
                                          TENSOR_TYPE* t) {              \
   return TENSOR_TYPE##_nElement(state, t);                              \
@@ -185,18 +185,18 @@ TensorUtils<TENSOR_TYPE>::overlappingIndices(THCState* state,           \
 bool                                                                    \
 TensorUtils<TENSOR_TYPE>::canUse32BitIndexMath(THCState* state,         \
                                                TENSOR_TYPE* t) {        \
-  long elements = TensorUtils<TENSOR_TYPE>::getNumElements(state, t);   \
+  ptrdiff_t elements = TensorUtils<TENSOR_TYPE>::getNumElements(state, t);   \
   if (elements >= UINT_MAX) {                                           \
     return false;                                                       \
   }                                                                     \
                                                                         \
-  long offset = 0;                                                      \
-  long linearId = elements - 1;                                         \
+  ptrdiff_t offset = 0;                                                 \
+  ptrdiff_t linearId = elements - 1;                                    \
                                                                         \
   for (int i = TensorUtils<TENSOR_TYPE>::getDims(state, t) - 1; i >= 0; --i) { \
-    long curDimIndex =                                                  \
+    ptrdiff_t curDimIndex =                                             \
       linearId % TensorUtils<TENSOR_TYPE>::getSize(state, t, i);        \
-    long curDimOffset = curDimIndex *                                   \
+    ptrdiff_t curDimOffset = curDimIndex *                              \
       TensorUtils<TENSOR_TYPE>::getStride(state, t, i);                 \
     offset += curDimOffset;                                             \
     linearId /= TensorUtils<TENSOR_TYPE>::getSize(state, t, i);         \

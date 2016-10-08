@@ -38,16 +38,16 @@ THCTensor_(maskedCopy)(THCState* state,
                        THCTensor *tensor, THCudaByteTensor *mask, THCTensor *src)
 {
   THAssert(THCTensor_(checkGPU)(state, 3, tensor, src, mask));
-  long maskSize = THCudaByteTensor_nElement(state, mask);
-  long tensorSize = THCTensor_(nElement)(state, tensor);
-  long srcSize = THCTensor_(nElement)(state, src);
+  ptrdiff_t maskSize = THCudaByteTensor_nElement(state, mask);
+  ptrdiff_t tensorSize = THCTensor_(nElement)(state, tensor);
+  ptrdiff_t srcSize = THCTensor_(nElement)(state, src);
 
   // `mask` and `tensor` must have the same number of elements
   THArgCheck(maskSize == tensorSize, 2,
              "mask and tensor must have the same number of elements");
 
   // Determine our output size
-  long totalElements = THCudaByteTensor_sumall(state, mask);
+  ptrdiff_t totalElements = THCudaByteTensor_sumall(state, mask);
 
   // The number of `1` elements present in the mask must be <= the
   // number of elements available in `src`
@@ -121,7 +121,7 @@ THCTensor_(maskedSelect)(THCState* state,
              2, "sizes do not match");
 
   // Determine our output size
-  long totalElements = THCudaByteTensor_sumall(state, mask);
+  ptrdiff_t totalElements = THCudaByteTensor_sumall(state, mask);
   THCTensor* tensorContig = THCTensor_(newContiguous)(state, tensor);
 
   THCTensor_(resize1d)(state, tensorContig, totalElements);

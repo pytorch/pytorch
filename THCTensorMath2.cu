@@ -185,7 +185,7 @@ float THCudaTensor_varall(THCState *state, THCudaTensor *self)
 {
   THAssert(THCudaTensor_checkGPU(state, 1, self));
   self = THCudaTensor_newContiguous(state, self);
-  long size = THCudaTensor_nElement(state, self);
+  ptrdiff_t size = THCudaTensor_nElement(state, self);
   thrust::device_ptr<float> self_data(THCudaTensor_data(state, self));
 
   float mean = THCudaTensor_meanall(state, self);
@@ -448,7 +448,7 @@ float THCudaTensor_normall(THCState *state, THCudaTensor *self, float value)
 {
   THAssert(THCudaTensor_checkGPU(state, 1, self));
   self = THCudaTensor_newContiguous(state, self);
-  long size = THCudaTensor_nElement(state, self);
+  ptrdiff_t size = THCudaTensor_nElement(state, self);
   thrust::device_ptr<float> self_data(THCudaTensor_data(state, self));
 
   float result;
@@ -519,7 +519,7 @@ void THCudaTensor_norm(THCState *state, THCudaTensor* self, THCudaTensor* src, f
   THCudaCheck(cudaGetLastError());
 }
 
-__global__ void THCudaTensor_kernel_renorm(float *data, const float value, const long size, const float maxnorm)
+__global__ void THCudaTensor_kernel_renorm(float *data, const float value, const ptrdiff_t size, const float maxnorm)
 {
   __shared__ float buffer[32];
   long tx = threadIdx.x;
@@ -530,7 +530,7 @@ __global__ void THCudaTensor_kernel_renorm(float *data, const float value, const
   buffer[tx] = 0;
 
   // get norm of axis
-  for (long i=tx; i<size; i+=step)
+  for (ptrdiff_t i=tx; i<size; i+=step)
   {
     buffer[tx] += pow(fabs(row[i]), value);
   }
@@ -548,7 +548,7 @@ __global__ void THCudaTensor_kernel_renorm(float *data, const float value, const
   {
     norm = maxnorm / (norm + 1e-7);
     // renormalize
-    for (long i=tx; i<size; i+=step)
+    for (ptrdiff_t i=tx; i<size; i+=step)
     {
       row[i] *= norm;
     }
@@ -561,7 +561,7 @@ void THCudaTensor_renorm(THCState *state, THCudaTensor* self, THCudaTensor* src,
   THCudaTensor *self_;
   THCudaTensor *src_ = THCudaTensor_newTranspose(state, src, dimension, 0);
   THCudaTensor *data = THCudaTensor_newClone(state, src_);
-  long size = THCudaTensor_nElement(state, data)/data->size[0];
+  ptrdiff_t size = THCudaTensor_nElement(state, data)/data->size[0];
 
   THArgCheck(dimension >= 0 && dimension < THCudaTensor_nDimension(state, src), 3, "invalid dimension");
   THArgCheck(value > 0, 2, "non-positive-norm not supported");
@@ -599,7 +599,7 @@ float THCudaTensor_dist(THCState *state, THCudaTensor *self, THCudaTensor *src, 
 {
   THAssert(THCudaTensor_checkGPU(state, 2, self, src));
   self = THCudaTensor_newContiguous(state, self);
-  long size = THCudaTensor_nElement(state, self);
+  ptrdiff_t size = THCudaTensor_nElement(state, self);
   src = THCudaTensor_newContiguous(state, src);
   thrust::device_ptr<float> self_data(THCudaTensor_data(state, self));
   thrust::device_ptr<float> src_data(THCudaTensor_data(state, src));
@@ -649,7 +649,7 @@ THC_API void THCudaTensor_cross(THCState *state, THCudaTensor *self, THCudaTenso
 
   int i;
   long nd = THCudaTensor_nDimension(state, x);
-  long nelem = THCudaTensor_nElement(state, x);
+  ptrdiff_t nelem = THCudaTensor_nElement(state, x);
   THArgCheck(nd == THCudaTensor_nDimension(state, y), 1, "tensors must have same number of dimensions");
   for (i = 0; i < nd; i++) {
     THArgCheck(THCudaTensor_size(state, x, i) == THCudaTensor_size(state, y, i), 1, "dimension %i of x and y does not match", i);

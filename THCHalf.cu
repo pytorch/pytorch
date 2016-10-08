@@ -10,7 +10,7 @@ struct __float2halfOp {
   __device__ half operator()(float v) { return __float2half(v); }
 };
 
-void THCFloat2Half(THCState *state, half *out, float *in, long len) {
+void THCFloat2Half(THCState *state, half *out, float *in, ptrdiff_t len) {
   thrust::transform(
 #if CUDA_VERSION >= 7000
     thrust::cuda::par.on(THCState_getCurrentStream(state)),
@@ -20,7 +20,7 @@ void THCFloat2Half(THCState *state, half *out, float *in, long len) {
     in, in + len, out, __float2halfOp());
 }
 
-void THCHalf2Float(THCState *state, float *out, half *in, long len) {
+void THCHalf2Float(THCState *state, float *out, half *in, ptrdiff_t len) {
   thrust::transform(
 #if CUDA_VERSION >= 7000
     thrust::cuda::par.on(THCState_getCurrentStream(state)),

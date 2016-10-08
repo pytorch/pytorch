@@ -34,7 +34,7 @@ void THCTensor_(gather)(THCState* state, THCTensor *tensor,
              1, CUTORCH_DIM_WARNING);
 
 
-  const long totalElements = THCudaLongTensor_nElement(state, index);
+  const ptrdiff_t totalElements = THCudaLongTensor_nElement(state, index);
   const dim3 block = getApplyBlock();
   dim3 grid;
   THArgCheck(getApplyGrid(state, totalElements, grid), 1, CUTORCH_DIM_WARNING);
@@ -126,7 +126,7 @@ void THCTensor_(scatter)(THCState* state, THCTensor *tensor, int dim, THCudaLong
   THArgCheck(THCTensor_(nDimension)(state, tensor) <= MAX_CUTORCH_DIMS,
              1, CUTORCH_DIM_WARNING);
 
-  const long totalElements = THCudaLongTensor_nElement(state, index);
+  const ptrdiff_t totalElements = THCudaLongTensor_nElement(state, index);
   const dim3 block = getApplyBlock();
   dim3 grid;
   THArgCheck(getApplyGrid(state, totalElements, grid), 1, CUTORCH_DIM_WARNING);
@@ -211,7 +211,7 @@ THCTensor_(scatterFill)(THCState* state, THCTensor *tensor,
   THArgCheck(THCTensor_(nDimension)(state, tensor) <= MAX_CUTORCH_DIMS,
              1, CUTORCH_DIM_WARNING);
 
-  const long totalElements = THCudaLongTensor_nElement(state, index);
+  const ptrdiff_t totalElements = THCudaLongTensor_nElement(state, index);
   const dim3 block = getApplyBlock();
   dim3 grid;
   THArgCheck(getApplyGrid(state, totalElements, grid), 1, CUTORCH_DIM_WARNING);

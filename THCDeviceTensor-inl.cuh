@@ -103,9 +103,9 @@ THCDeviceTensor<T, Dim, IndexT, PtrTraits>::cast() const {
 
 template <typename T, int Dim,
           typename IndexT, template <typename U> class PtrTraits>
-__host__ __device__ long
+__host__ __device__ ptrdiff_t
 THCDeviceTensor<T, Dim, IndexT, PtrTraits>::numElements() const {
-  long size = getSize(0);
+  ptrdiff_t size = getSize(0);
 
   for (int i = 1; i < Dim; ++i) {
     size *= getSize(i);

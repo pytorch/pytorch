@@ -11,7 +11,7 @@ void THCCheckTensorDims(THCState* state, THCudaTensor* tensor, int arg) {
   THArgCheck(dims <= MAX_CUTORCH_DIMS, arg, CUTORCH_DIM_WARNING);
 }
 
-bool THC_getGridFromTiles(long gridTiles, dim3& grid) {
+bool THC_getGridFromTiles(ptrdiff_t gridTiles, dim3& grid) {
   if (gridTiles > MAX_GRID_SIZE * MAX_GRID_SIZE * MAX_GRID_SIZE) {
     return false;
   }
@@ -21,11 +21,11 @@ bool THC_getGridFromTiles(long gridTiles, dim3& grid) {
   long gridZ = 1;
 
   if (gridTiles > MAX_GRID_SIZE) {
-    gridTiles = THCCeilDiv(gridTiles, (long) MAX_GRID_SIZE);
+    gridTiles = THCCeilDiv(gridTiles, (ptrdiff_t) MAX_GRID_SIZE);
     gridY = gridTiles > MAX_GRID_SIZE ? MAX_GRID_SIZE : gridTiles;
 
     if (gridTiles > MAX_GRID_SIZE) {
-      gridTiles = THCCeilDiv(gridTiles, (long) MAX_GRID_SIZE);
+      gridTiles = THCCeilDiv(gridTiles, (ptrdiff_t) MAX_GRID_SIZE);
       gridZ = gridTiles > MAX_GRID_SIZE ? MAX_GRID_SIZE : gridTiles;
     }
   }
