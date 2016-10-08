@@ -945,11 +945,19 @@ TH_API void THNN_(SpatialUpSamplingNearest_updateGradInput)(
 TH_API void THNN_(SpatialUpSamplingBilinear_updateOutput)(
           THNNState *state,
           THTensor *input,
-          THTensor *output);
+          THTensor *output,
+	  int outputHeight,
+          int outputWidth);
 TH_API void THNN_(SpatialUpSamplingBilinear_updateGradInput)(
           THNNState *state,
           THTensor *gradOutput,
-          THTensor *gradInput);
+          THTensor *gradInput,
+          int nbatch,
+          int nchannels,
+          int inputHeight,
+          int inputWidth,
+          int outputHeight,
+          int outputWidth);
 
 TH_API void THNN_(unfolded_acc)(
           THTensor *finput,
