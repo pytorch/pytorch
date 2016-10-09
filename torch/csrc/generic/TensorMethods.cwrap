@@ -40,6 +40,12 @@
 #define THPBoolTensorClass THPByteTensorClass
 #endif
 
+#if !IS_CUDA
+#define THPModuleStr "torch."
+#else
+#define THPModuleStr "torch.cuda."
+#endif
+
 [[
   name: THPTensor_(writeMetadata)
   python_name: _write_metadata

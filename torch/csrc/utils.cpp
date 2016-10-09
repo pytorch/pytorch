@@ -178,7 +178,8 @@ std::string THPUtils_formattedTupleDesc(
         result += reset_red;
     result += ", ";
   }
-  result.erase(result.length()-2);
+  if (argument_types.size() > 0)
+    result.erase(result.length()-2);
   result += ")";
   return result;
 }
@@ -188,7 +189,8 @@ std::string THPUtils_tupleDesc(const std::vector<std::string> argument_types)
   std::string result = "(";
   for (auto &type: argument_types)
     result += type + ", ";
-  result.erase(result.length()-2);
+  if (argument_types.size() > 0)
+    result.erase(result.length()-2);
   result += ")";
   return result;
 }
