@@ -152,7 +152,7 @@ class Conv2d(Module):
             return func(input, self.weight, self.bias)
 
 
-class FullConv2d(Conv2d):
+class ConvTranspose2d(Conv2d):
     """Applies a 2D deconvolution operator over an input image composed of several input
     planes.
     The deconvolution operator multiplies each input value element-wise by a learnable kernel,
@@ -168,28 +168,65 @@ class FullConv2d(Conv2d):
         output_padding: A padding of 0 or 1 pixels that should be added to the output. Can be a single number or a tuple. Default: 0
         bias: If set to False, the layer will not learn an additive bias. Default: True
     Input Shape: [ * , in_channels  , * , * ] : Input is minibatch x in_channels x iH x iW
-    Output Shape:[ * , out_channels , * , * ]  : Output shape is precisely minibatch x out_channels x (iH - 1) * sH - 2*padH + kH + output_paddingH x (iW - 1) * sW - 2*padW + kW
+    Output Shape:[ * , out_channels , * , * ]  : Output shape is minibatch x out_channels x (iH - 1) * sH - 2*padH + kH + output_paddingH x (iW - 1) * sW - 2*padW + kW, or as specified in a second argument to the call.
     Members:
         weight: the learnable weights of the module of shape (in_channels x out_channels x kH x kW)
         bias:   the learnable bias of the module of shape (out_channels)
     Examples:
         >>> # With square kernels and equal stride
-        >>> m = nn.FullConv2d(16, 33, 3, stride=2)
+        >>> m = nn.ConvTranspose2d(16, 33, 3, stride=2)
         >>> # non-square kernels and unequal stride and with padding
-        >>> m = nn.Conv2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2))
+        >>> m = nn.ConvTranspose2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2))
         >>> input = autograd.Variable(torch.randn(20, 16, 50, 100))
         >>> output = m(input)
+        >>> # exact output size can be also specified as an argument
+        >>> input = autograd.Variable(torch.randn(1, 16, 12, 12))
+        >>> downsample = nn.Conv2d(16, 16, 3, stride=2, padding=1)
+        >>> upsample = nn.ConvTranspose2d(16, 16, 3, stride=2, padding=1)
+        >>> h = downsample(input)
+        >>> output = upsample(h, output_size=input.size())
     """
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, output_padding=0, bias=True):
-        super(FullConv2d, self).__init__(in_channels, out_channels, kernel_size,
+        super(ConvTranspose2d, self).__init__(in_channels, out_channels, kernel_size,
                                          stride, padding, bias)
+        # Conv2d uses a different weight layout than Conv2d
+        self.weight.data = self.weight.data.transpose(0, 1).contiguous()
         self.out_padh, self.out_padw = _pair(output_padding)
 
+    def __call__(self, input, output_size=None):
+        if output_size:
+            self.output_size = list(output_size)
+            if len(self.output_size) == 4:
+                self.output_size = self.output_size[-2:]
+            if len(self.output_size) != 2:
+                raise ValueError("output_size should be a sequence containing "
+                        "2 or 4 elements, but it has a length of {}".format(
+                            len(output_size)))
+        else:
+            self.output_size = None
+        return super(ConvTranspose2d, self).__call__(input)
+
+
     def forward(self, input):
-        func = self._backend.FullConv2d(
+        out_padh, out_padw = self.out_padh, self.out_padw
+        if self.output_size is not None:
+            out_sizew, out_sizeh = self.output_size
+            sizew = ((input.size(3) - 1) * self.dw - 2 * self.padw + self.kw)
+            sizeh = ((input.size(2) - 1) * self.dh - 2 * self.padh + self.kh)
+            out_padw = out_sizew - sizew
+            out_padh = out_sizeh - sizeh
+            out_padw_ok = 0 <= out_padw < self.dw
+            out_padh_ok = 0 <= out_padh < self.dh
+            if not out_padw_ok or not out_padh_ok:
+                raise ValueError(("requested an output size of {}x{}, but "
+                    "valid sizes range from {}x{} to {}x{} (for an input of "
+                    "{}x{})").format(out_sizeh, out_sizew, sizeh, sizew,
+                        sizeh+self.dh-1, sizew+self.dw-1,
+                        input.size(2), input.size(3)))
+        func = self._backend.ConvTranspose2d(
             self.kw, self.kh, self.dw, self.dh, self.padw, self.padh,
-            self.out_padh, self.out_padw)
+            out_padw, out_padh)
         if self.bias is None:
             return func(input, self.weight)
         else:
@@ -260,7 +297,7 @@ class Conv3d(_Conv3dBase):
             return func(input, self.weight, self.bias)
 
 
-class FullConv3d(_Conv3dBase):
+class ConvTranspose3d(_Conv3dBase):
     """Applies a 3D deconvolution operator over an input image composed of several input
     planes.
     The deconvolution operator multiplies each input value element-wise by a learnable kernel,
@@ -281,7 +318,7 @@ class FullConv3d(_Conv3dBase):
         bias:   the learnable bias of the module of shape (out_channels)
     Examples:
         >>> # With square kernels and equal stride
-        >>> m = nn.FullConv3d(16, 33, 3, stride=2)
+        >>> m = nn.ConvTranspose3d(16, 33, 3, stride=2)
         >>> # non-square kernels and unequal stride and with padding
         >>> m = nn.Conv3d(16, 33, (3, 5, 2), stride=(2, 1, 1), padding=(0, 4, 2))
         >>> input = autograd.Variable(torch.randn(20, 16, 10, 50, 100))
@@ -289,7 +326,7 @@ class FullConv3d(_Conv3dBase):
     """
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                 padding=0):
-        super(FullConv3d, self).__init__(in_channels, out_channels, kernel_size,
+        super(ConvTranspose3d, self).__init__(in_channels, out_channels, kernel_size,
                 stride, padding)
         weight = torch.Tensor(self.in_channels, self.out_channels, self.kt,
                 self.kh, self.kw)
@@ -298,7 +335,7 @@ class FullConv3d(_Conv3dBase):
         self.reset_parameters()
 
     def forward(self, input):
-        func = self._backend.FullConv3d(
+        func = self._backend.ConvTranspose3d(
             self.kt, self.kw, self.kh, self.dt, self.dw, self.dh, self.padt,
             self.padw, self.padh)
         if self.bias is None:
@@ -309,4 +346,4 @@ class FullConv3d(_Conv3dBase):
 
 # TODO: Conv2dLocal
 # TODO: Conv2dMap
-# TODO: FullConv2dMap
+# TODO: ConvTranspose2dMap

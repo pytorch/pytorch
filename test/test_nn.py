@@ -547,6 +547,21 @@ class TestNN(NNTestCase):
         self.assertIs(net.linear1.weight, param_dict['linear1.weight'])
         self.assertIs(net.block.conv.bias, param_dict['block.conv.bias'])
 
+    def test_ConvTranspose2d_output_size(self):
+        m = nn.ConvTranspose2d(3, 4, 3, 3, 0, 2)
+        i = Variable(torch.randn(2, 3, 6, 6))
+        for h in range(15, 22):
+            for w in range(15, 22):
+                if 18 <= h <= 20 and 18 <= w <= 20:
+                    size = (h, w)
+                    if h == 19:
+                        size = torch.LongStorage(size)
+                    elif h == 2:
+                        size = torch.LongStorage((2, 4) + size)
+                    m(i, output_size=(h, w))
+                else:
+                    self.assertRaises(ValueError, lambda: m(i, (h, w)))
+
 
 def add_test(test):
     test_name = test.get_name()
@@ -612,6 +627,11 @@ new_module_tests = [
         desc='no_bias',
     ),
     dict(
+        module_name='ConvTranspose2d',
+        constructor_args=(3, 4, 3, (2, 2), 1, (1, 1)),
+        input_size=(1, 3, 7, 7)
+    ),
+    dict(
         module_name='MaxPool2d',
         constructor_args=((3, 3), (2, 2), (1, 1)),
         input_size=(1, 3, 7, 7)
@@ -672,7 +692,7 @@ new_module_tests = [
         desc='stride_padding'
     ),
     dict(
-        module_name='FullConv3d',
+        module_name='ConvTranspose3d',
         constructor_args=(2, 3, (2, 2, 2)),
         input_size=(1, 2, 4, 4, 4)
     ),
