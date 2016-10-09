@@ -3705,12 +3705,6 @@ static const char *R = &__R;
 
 
 [[
-  name: THPTensor_(cat)
-  python_name: cat
-  only_register: True
-  defined_if: CUDA_FLOAT || !IS_CUDA
-]]
-[[
   name: THPTensor_stateless_(cat)
   python_name: cat
   only_register: True
@@ -3718,148 +3712,60 @@ static const char *R = &__R;
   defined_if: CUDA_FLOAT || !IS_CUDA
 ]]
 #if !IS_CUDA || CUDA_FLOAT
-static std::pair<std::vector<THPObjectPtr>, std::vector<THTensor *>>
-THPTensor_(_iterableTensors)(PyObject *iterable)
-{
-  THPObjectPtr iterator;
-  THPObjectPtr item;
-  std::vector<THPObjectPtr> items;
-  std::vector<THTensor *> item_tensors;
-  if ((iterator = PyObject_GetIter(iterable))) {
-    while((item = PyIter_Next(iterator))) {
-      if (!THPTensor_(Check)(item)) {
-        THPUtils_setError("expected an iterable of " THPTensorStr ", but found %s in it", Py_TYPE(item)->tp_name);
-        throw std::exception();
-      }
-      item_tensors.push_back(((THPTensor*)item.get())->cdata);
-      items.emplace_back(std::move(item));
-    }
-  } else {
-    throw std::invalid_argument("");
-  }
-  return std::make_pair(std::move(items), std::move(item_tensors));
-}
-
-static PyObject * THPTensor_(cat)(THPTensor *self, PyObject *args)
-{
-#if IS_CUDA && THCP_AUTO_GPU
-  THCPAutoGPU __autogpu_guard = THCPAutoGPU(args);
-#endif
-  HANDLE_TH_ERRORS
-  THPTensor *tensor1;
-  THPTensor *tensor2;
-  long dimension;
-  Py_ssize_t _argcount = PyTuple_Size(args);
-  if (_argcount == 2) {
-      PyObject *iterable = PyTuple_GET_ITEM(args, 0);
-      PyObject *dim = PyTuple_GET_ITEM(args, 1);
-      std::vector<THPObjectPtr> items;
-      std::vector<THTensor *> item_tensors;
-      if (THPUtils_checkLong(dim)) {
-        dimension = THPUtils_unpackLong(dim);
-        try {
-          std::tie(items, item_tensors) = THPTensor_(_iterableTensors)(iterable);
-          THTensor_(catArray)(LIBRARY_STATE self->cdata, item_tensors.data(), items.size(), dimension);
-          Py_INCREF(self);
-          return (PyObject*)self;
-
-        } catch (std::invalid_argument &e) {
-        } catch (std::exception &e) {
-          return NULL;
-        }
-      }
-  } else if (_argcount == 3) {
-    if (PyArg_ParseTuple(args, "O!O!l", THPTensorClass, &tensor1, THPTensorClass, &tensor2, &dimension)) {
-      THTensor_(cat)(LIBRARY_STATE self->cdata, tensor1->cdata, tensor2->cdata, dimension);
-      Py_INCREF(self);
-      return (PyObject*)self;
-    }
-  }
-
-  // TODO: describe args
-  THPUtils_invalidArguments(args, "cat", 1, "(TODO)");
-  return NULL;
-  END_HANDLE_TH_ERRORS
-}
-
 static PyObject * THPTensor_stateless_(cat)(THPTensor *_unused, PyObject *args)
 {
 #if IS_CUDA && THCP_AUTO_GPU
   THCPAutoGPU __autogpu_guard = THCPAutoGPU(args);
 #endif
   HANDLE_TH_ERRORS
-  THPTensor *tensor1;
-  THPTensor *tensor2;
-  long dimension;
-  Py_ssize_t _argcount = PyTuple_Size(args);
-  if (_argcount == 2) {
-    THTensorPtr _self = THTensor_(new)(LIBRARY_STATE_NOARGS);
-    THPTensorPtr self = (THPTensor*)THPTensor_(New)(_self);
-    if (!self)
-      return NULL;
-    _self.release();
+  Py_ssize_t _argcount = args ? PyTuple_Size(args) : 0;
+  std::vector<THPObjectPtr> items;
+  std::vector<THTensor *> item_tensors;
+  PyObject *sequence;
+  Py_ssize_t seq_length;
+  THTensorPtr _result;
+  THPTensorPtr result;
+  long dimension = -1;
 
-    PyObject *iterable = PyTuple_GET_ITEM(args, 0);
-    PyObject *dim = PyTuple_GET_ITEM(args, 1);
-    std::vector<THPObjectPtr> items;
-    std::vector<THTensor *> item_tensors;
-    if (THPUtils_checkLong(dim)) {
-      dimension = THPUtils_unpackLong(dim);
-      try {
-        std::tie(items, item_tensors) = THPTensor_(_iterableTensors)(iterable);
-        THTensor_(catArray)(LIBRARY_STATE self->cdata, item_tensors.data(), items.size(), dimension);
-        return (PyObject*)self.release();
+  if (_argcount == 0 || _argcount > 2 || !PySequence_Check(PyTuple_GET_ITEM(args, 0)))
+    goto invalid_arguments;
+  sequence = PyTuple_GET_ITEM(args, 0);
+  seq_length = PySequence_Length(sequence);
+  if (seq_length <= 0)
+    goto invalid_arguments;
 
-      } catch (std::invalid_argument &e) {
-      } catch (std::exception &e) {
-        return NULL;
-      }
-    }
-  } else if (_argcount == 3) {
-    if (PyArg_ParseTuple(args, "O!O!l", THPTensorClass, &tensor1, THPTensorClass, &tensor2, &dimension)) {
-      THTensorPtr _self = THTensor_(new)(LIBRARY_STATE_NOARGS);
-      THPTensorPtr self = (THPTensor*)THPTensor_(New)(_self.get());
-      if (!self)
-        return NULL;
-      _self.release();
-
-      THTensor_(cat)(LIBRARY_STATE self->cdata, tensor1->cdata, tensor2->cdata, dimension);
-      return (PyObject*)self.release();
-    } else {
-      PyErr_Clear();
-      THPTensor *self = (THPTensor*)PyTuple_GET_ITEM(args, 0);
-      PyObject *iterable = PyTuple_GET_ITEM(args, 1);
-      PyObject *dim = PyTuple_GET_ITEM(args, 2);
-
-      std::vector<THPObjectPtr> items;
-      std::vector<THTensor *> item_tensors;
-      if (THPUtils_checkLong(dim)) {
-        dimension = THPUtils_unpackLong(dim);
-        try {
-          std::tie(items, item_tensors) = THPTensor_(_iterableTensors)(iterable);
-          THTensor_(catArray)(LIBRARY_STATE self->cdata, item_tensors.data(), items.size(), dimension);
-          Py_INCREF(self);
-          return (PyObject*)self;
-
-        } catch (std::invalid_argument &e) {
-        } catch (std::exception &e) {
-          // FIXME TODO: that's not a good way of handling errors
-          fprintf(stderr, "e: %s\n", e.what());
-          return NULL;
-        }
-      }
-    }
-  } else if (_argcount == 4) {
-    THPTensor *self;
-    if (PyArg_ParseTuple(args, "O!O!O!l", THPTensorClass, &self, THPTensorClass, &tensor1, THPTensorClass, &tensor2, &dimension)) {
-      THTensor_(cat)(LIBRARY_STATE self->cdata, tensor1->cdata, tensor2->cdata, dimension);
-      Py_INCREF(self);
-      return (PyObject*)self;
-    }
+  items.reserve(seq_length);
+  item_tensors.reserve(seq_length);
+  for (int i = 0; i < seq_length; i++) {
+    items.push_back(PySequence_ITEM(sequence, i));
+    if (!THPTensor_(Check)(items[i].get()))
+      goto invalid_arguments;
+    item_tensors.push_back(((THPTensor*)items[i].get())->cdata);
   }
 
-  // TODO: describe args
-  THPUtils_invalidArguments(args, "cat", 1, "(TODO)");
+  if (_argcount == 2) {
+    if (!THPUtils_checkLong(PyTuple_GET_ITEM(args, 1)))
+      goto invalid_arguments;
+    dimension = THPUtils_unpackLong(PyTuple_GET_ITEM(args, 1));
+  } else {
+    dimension = THTensor_(size)(LIBRARY_STATE item_tensors[0],
+        THTensor_(nDimension)(LIBRARY_STATE item_tensors[0])-1);
+  }
+
+  _result = THTensor_(new)(LIBRARY_STATE_NOARGS);
+  result = (THPTensor*)THPTensor_(New)(_result);
+  if (!result)
+    return NULL;
+  _result.release();
+
+  THTensor_(catArray)(LIBRARY_STATE result->cdata, item_tensors.data(),
+      items.size(), dimension);
+  return (PyObject*)result.release();
+
+invalid_arguments:
+  THPUtils_invalidArguments(args, "cat", 2,
+      "(sequence tensors)",
+      "(sequence tensors, int dim)");
   return NULL;
   END_HANDLE_TH_ERRORS
 }

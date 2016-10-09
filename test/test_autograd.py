@@ -424,7 +424,6 @@ method_tests = [
     ('dist',        (S, S, S),          ((S, S, S),)                                ),
     ('dist',        (S, S, S),          ((S, S, S), 4),             '4'             ),
     ('index_select', (S, S, S),         (0, index_variable(2, S))                   ),
-    ('cat',         (1, S, S),          ((Variable(torch.randn(2, S, S)), Variable(torch.randn(3, S, S))), 0)),
     ('diag',        (M, M),             (),                         '2d'            ),
     ('diag',        (M,),               (),                         '1d'            ),
     ('tril',        (M, M),             ()                                          ),

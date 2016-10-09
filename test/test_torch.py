@@ -1014,14 +1014,9 @@ class TestTorch(TestCase):
         for dim in range(3):
             x = torch.rand(13, SIZE, SIZE).transpose(0, dim)
             y = torch.rand(17, SIZE, SIZE).transpose(0, dim)
-            res1 = torch.cat(x, y, dim)
+            res1 = torch.cat((x, y), dim)
             self.assertEqual(res1.narrow(dim, 0, 13), x, 0)
             self.assertEqual(res1.narrow(dim, 13, 17), y, 0)
-
-            # Check stateless implementation
-            res2 = torch.Tensor()
-            torch.cat(res2, x, y, dim)
-            self.assertEqual(res1, res2, 0)
 
         # Check iterables
         for dim in range(3):
@@ -1034,16 +1029,6 @@ class TestTorch(TestCase):
             self.assertEqual(res1.narrow(dim, 13, 17), y, 0)
             self.assertEqual(res1.narrow(dim, 30, 19), z, 0)
             self.assertRaises(ValueError, lambda: torch.cat([]))
-
-            res2 = torch.Tensor()
-            torch.cat(res2, (x, y, z), dim)
-            self.assertEqual(res1, res2, 0)
-            res2 = res2.float()
-            torch.cat(res2, (x.float(), y.float(), z.float()), dim)
-            self.assertEqual(res1.float(), res2, 0)
-            res2 = res2.double()
-            torch.cat(res2, (x.double(), y.double(), z.double()), dim)
-            self.assertEqual(res1.double(), res2, 0)
 
     def test_linspace(self):
         _from = random.random()

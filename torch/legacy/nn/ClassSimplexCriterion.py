@@ -21,7 +21,7 @@ class ClassSimplexCriterion(MSECriterion):
          # embedding the simplex in a space of dimension strictly greater than
          # the minimum possible (nClasses-1) is critical for effective training.
          simp = self._regsplex(nClasses - 1)
-         self.simplex = torch.cat(simp, torch.zeros(simp.size(0), nClasses - simp.size(1)), 1)
+         self.simplex = torch.cat((simp, torch.zeros(simp.size(0), nClasses - simp.size(1))), 1)
          self._target = torch.Tensor(nClasses)
 
          self.output_tensor = None
