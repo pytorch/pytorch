@@ -100,7 +100,7 @@ class MaxUnpool2d(Module):
         stride: the stride of the window. Can be a single number s or a tuple (sh x sw). Default: kernel_size
         padding: implicit padding that was added to the input. Can be a single number or a tuple. Default: 0
     Input Shape: [ * , * , *, * ] : Input is minibatch x channels x iH x iW
-    Output Shape:[ * , * , *, * ]  : Output shape = minibatch x channels x padH x (iH - 1) * sH + kH x padW x (iW - 1) * sW + kW
+    Output Shape:[ * , * , *, * ]  : Output shape is minibatch x channels x padH x (iH - 1) * sH + kH x padW x (iW - 1) * sW + kW, or as specified to the call.
     Examples:
         >>> # pool of square window of size=3, stride=2
         >>> m = nn.MaxPool2d(2, stride=2, return_indices = True)
@@ -108,16 +108,47 @@ class MaxUnpool2d(Module):
         >>> input = autograd.Variable(torch.randn(20, 16, 50, 32))
         >>> output, indices = m(input)
         >>> unpooled_output = mu.forward(output, indices)
+        >>> # exact output size can be also specified as an argument
+        >>> input = autograd.Variable(torch.randn(1, 16, 11, 11))
+        >>> downsample = nn.MaxPool2d(3, 3, return_indices=True)
+        >>> upsample = nn.MaxUnpool2d(3, 3)
+        >>> h, indices = downsample(input)
+        >>> output = upsample(h, indices, output_size=input.size())
     """
     def __init__(self, kernel_size, stride=None, padding=0):
         super(MaxUnpool2d, self).__init__()
         self.kh, self.kw = _pair(kernel_size)
         self.dh, self.dw = _pair(stride or kernel_size)
         self.padh, self.padw = _pair(padding)
+        self.output_size = None
+
+    def __call__(self, input, indices, output_size=None):
+        if output_size:
+            self.output_size = list(output_size)
+            if len(self.output_size) == 4:
+                self.output_size = self.output_size[-2:]
+            if len(self.output_size) != 2:
+                raise ValueError("output_size should be a sequence containing "
+                        "2 or 4 elements, but it has a length of {}".format(
+                            len(output_size)))
+        else:
+            self.output_size = None
+        return super(MaxUnpool2d, self).__call__(input, indices)
 
     def forward(self, input, indices):
         out_height = (input.size(2) - 1) * self.dh + self.kh - 2*self.padh
         out_width = (input.size(3) - 1) * self.dw + self.kw - 2*self.padw
+        if self.output_size is not None:
+            h, w = self.output_size
+            h_ok = out_height - self.dh < h < out_height + self.dh
+            w_ok = out_width - self.dw < w < out_width + self.dw
+            if not h_ok or not w_ok:
+                raise ValueError(("specified incorrect output size. Got {}x{}, "
+                        "but valid sizes range from {}x{} to {}x{}").format(
+                            h, w,
+                            out_height - self.dh + 1, out_width - self.dw + 1,
+                            out_height + self.dh - 1, out_width + self.dw - 1))
+            out_height, out_width = h, w
         return self._backend.MaxUnpool2d(out_width,
                 out_height)(input, indices)
 
@@ -194,6 +225,7 @@ class MaxPool3d(Module):
         self.ceil_mode = ceil_mode
 
     def forward(self, input):
+        # TODO: allow to specify output size
         return self._backend.MaxPool3d(self.kt, self.kw, self.kh,
                 self.dt, self.dw, self.dh, self.padt, self.padw, self.padh,
                 self.dilt, self.dilw, self.dilh,
