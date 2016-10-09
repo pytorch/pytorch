@@ -3,7 +3,7 @@ import yaml
 from string import Template
 from copy import deepcopy
 from .plugins import ArgcountChecker, OptionalArguments, ArgumentReferences, \
-    BeforeCall, ConstantArguments, ReturnArguments, GILRelease
+    BeforeAfterCall, ConstantArguments, ReturnArguments, GILRelease
 
 
 class cwrap(object):
@@ -26,7 +26,7 @@ class cwrap(object):
 
     FUNCTION_CALL_TEMPLATE = Template("$capture_result$cname($arg_unpack);")
 
-    DEFAULT_PLUGIN_CLASSES = [ArgcountChecker, ConstantArguments, OptionalArguments, ArgumentReferences, BeforeCall, ReturnArguments, GILRelease]
+    DEFAULT_PLUGIN_CLASSES = [ArgcountChecker, ConstantArguments, OptionalArguments, ArgumentReferences, BeforeAfterCall, ReturnArguments, GILRelease]
 
     def __init__(self, source, destination=None, plugins=[], default_plugins=True):
         if destination is None:

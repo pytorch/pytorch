@@ -401,6 +401,21 @@ IMPLEMENT_STATELESS(randn)
 IMPLEMENT_STATELESS(all)
 IMPLEMENT_STATELESS(any)
 IMPLEMENT_STATELESS(masked_select)
+IMPLEMENT_STATELESS(gesv)
+IMPLEMENT_STATELESS(gels)
+IMPLEMENT_STATELESS(trtrs)
+IMPLEMENT_STATELESS(symeig)
+IMPLEMENT_STATELESS(eig)
+IMPLEMENT_STATELESS(svd)
+IMPLEMENT_STATELESS(inverse)
+IMPLEMENT_STATELESS(potrf)
+IMPLEMENT_STATELESS(potrs)
+IMPLEMENT_STATELESS(potri)
+IMPLEMENT_STATELESS(pstrf)
+IMPLEMENT_STATELESS(qr)
+IMPLEMENT_STATELESS(geqrf)
+IMPLEMENT_STATELESS(orgqr)
+IMPLEMENT_STATELESS(ormqr)
 
 #undef IMPLEMENT_STATELESS
 
@@ -669,6 +684,21 @@ static PyMethodDef TorchMethods[] = {
   {"any",             (PyCFunction)THPModule_any,               METH_VARARGS, NULL},
   {"cat",             (PyCFunction)THPModule_cat,               METH_VARARGS, NULL},
   {"masked_select",   (PyCFunction)THPModule_masked_select,     METH_VARARGS, NULL},
+  {"gesv",            (PyCFunction)THPModule_gesv,              METH_VARARGS, NULL},
+  {"gels",            (PyCFunction)THPModule_gels,              METH_VARARGS, NULL},
+  {"trtrs",           (PyCFunction)THPModule_trtrs,             METH_VARARGS, NULL},
+  {"symeig",          (PyCFunction)THPModule_symeig,            METH_VARARGS, NULL},
+  {"eig",             (PyCFunction)THPModule_eig,               METH_VARARGS, NULL},
+  {"svd",             (PyCFunction)THPModule_svd,               METH_VARARGS, NULL},
+  {"inverse",         (PyCFunction)THPModule_inverse,           METH_VARARGS, NULL},
+  {"potrf",           (PyCFunction)THPModule_potrf,             METH_VARARGS, NULL},
+  {"potrs",           (PyCFunction)THPModule_potrs,             METH_VARARGS, NULL},
+  {"potri",           (PyCFunction)THPModule_potri,             METH_VARARGS, NULL},
+  {"pstrf",           (PyCFunction)THPModule_pstrf,             METH_VARARGS, NULL},
+  {"qe",              (PyCFunction)THPModule_qr,                METH_VARARGS, NULL},
+  {"geqrf",           (PyCFunction)THPModule_geqrf,             METH_VARARGS, NULL},
+  {"orgqr",           (PyCFunction)THPModule_orgqr,             METH_VARARGS, NULL},
+  {"ormqr",           (PyCFunction)THPModule_ormqr,             METH_VARARGS, NULL},
   {NULL, NULL, 0, NULL}
 };
 

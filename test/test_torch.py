@@ -5,9 +5,21 @@ import torch
 import tempfile
 import unittest
 from itertools import product, chain
+from functools import wraps
 from common import TestCase, iter_indices
 
 SIZE = 100
+
+def skipIfNoLapack(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            fn(*args, **kwargs)
+        except Exception as e:
+            if 'Lapack library not found' in e.args[0]:
+                raise unittest.SkipTest('Compiled without Lapack')
+            raise
+    return wrapper
 
 class TestTorch(TestCase):
 
@@ -1085,7 +1097,7 @@ class TestTorch(TestCase):
         torch.randn(res2, SIZE, SIZE)
         self.assertEqual(res1, res2)
 
-    @unittest.skipIf(not hasattr(torch, 'gesv'), 'Compiled without gesv')
+    @skipIfNoLapack
     def test_gesv(self):
         a = torch.Tensor(((6.80, -2.11,  5.66,  5.97,  8.23),
                         (-6.05, -3.30,  5.36, -4.44,  1.08),
@@ -1096,27 +1108,27 @@ class TestTorch(TestCase):
                         (-1.56,  4.00, -8.67,  1.75,  2.86),
                         (9.81, -4.09, -4.57, -8.61,  8.99))).t()
 
-        res1 = torch.gesv(b,a)
-        self.assertLessEqual(b.dist(a * res1), 1e-12)
+        res1 = torch.gesv(b,a)[0]
+        self.assertLessEqual(b.dist(torch.mm(a, res1)), 1e-12)
         ta = torch.Tensor()
         tb = torch.Tensor()
-        res2 = torch.gesv(tb, ta, b, a)
-        res3 = torch.gesv(b, a, b, a)
+        res2 = torch.gesv(tb, ta, b, a)[0]
+        res3 = torch.gesv(b, a, b, a)[0]
         self.assertEqual(res1, tb)
         self.assertEqual(res1, b)
         self.assertEqual(res1, res2)
         self.assertEqual(res1, res3)
 
         # test reuse
-        res1 = torch.gesv(b, a)
+        res1 = torch.gesv(b, a)[0]
         ta = torch.Tensor()
         tb = torch.Tensor()
-        torch.gesv(tb, ta, b, a)
+        torch.gesv(tb, ta, b, a)[0]
         self.assertEqual(res1, tb)
-        torch.gesv(tb, ta, b, a)
+        torch.gesv(tb, ta, b, a)[0]
         self.assertEqual(res1, tb)
 
-    @unittest.skipIf(not hasattr(torch, 'trtrs'), 'Compiled without trtrs')
+    @skipIfNoLapack
     def test_trtrs(self):
         a = torch.Tensor(((6.80, -2.11,  5.66,  5.97,  8.23),
                         (-6.05, -3.30,  5.36, -4.44,  1.08),
@@ -1131,39 +1143,39 @@ class TestTorch(TestCase):
         L = torch.tril(a)
 
         # solve Ux = b
-        x = torch.trtrs(b, U)
-        self.assertLessEqual(b.dist(U * x), 1e-12)
-        x = torch.trtrs(b, U, 'U', 'N', 'N')
-        self.assertLessEqual(b.dist(U * x), 1e-12)
+        x = torch.trtrs(b, U)[0]
+        self.assertLessEqual(b.dist(torch.mm(U, x)), 1e-12)
+        x = torch.trtrs(b, U, True, False, False)[0]
+        self.assertLessEqual(b.dist(torch.mm(U, x)), 1e-12)
 
         # solve Lx = b
-        x = torch.trtrs(b, L, 'L')
-        self.assertLessEqual(b.dist(L * x), 1e-12)
-        x = torch.trtrs(b, L, 'L', 'N', 'N')
-        self.assertLessEqual(b.dist(L * x), 1e-12)
+        x = torch.trtrs(b, L, False)[0]
+        self.assertLessEqual(b.dist(torch.mm(L, x)), 1e-12)
+        x = torch.trtrs(b, L, False, False, False)[0]
+        self.assertLessEqual(b.dist(torch.mm(L, x)), 1e-12)
 
         # solve U'x = b
-        x = torch.trtrs(b, U, 'U', 'T')
-        self.assertLessEqual(b.dist(U.t() * x), 1e-12)
-        x = torch.trtrs(b, U, 'U', 'T', 'N')
-        self.assertLessEqual(b.dist(U.t() * x), 1e-12)
+        x = torch.trtrs(b, U, True, True)[0]
+        self.assertLessEqual(b.dist(torch.mm(U.t(), x)), 1e-12)
+        x = torch.trtrs(b, U, True, True, False)[0]
+        self.assertLessEqual(b.dist(torch.mm(U.t(), x)), 1e-12)
 
         # solve U'x = b by manual transposition
-        y = torch.trtrs(b, U.t(), 'L', 'N')
+        y = torch.trtrs(b, U.t(), False, False)[0]
         self.assertLessEqual(x.dist(y), 1e-12)
 
         # solve L'x = b
-        x = torch.trtrs(b, L, 'L', 'T')
-        self.assertLessEqual(b.dist(L.t() * x), 1e-12)
-        x = torch.trtrs(b, L, 'L', 'T', 'N')
-        self.assertLessEqual(b.dist(L.t() * x), 1e-12)
+        x = torch.trtrs(b, L, False, True)[0]
+        self.assertLessEqual(b.dist(torch.mm(L.t(), x)), 1e-12)
+        x = torch.trtrs(b, L, False, True, False)[0]
+        self.assertLessEqual(b.dist(torch.mm(L.t(), x)), 1e-12)
 
         # solve L'x = b by manual transposition
-        y = torch.trtrs(b, L.t(), 'U', 'N')
+        y = torch.trtrs(b, L.t(), True, False)[0]
         self.assertLessEqual(x.dist(y), 1e-12)
 
         # test reuse
-        res1 = torch.trtrs(b,a)
+        res1 = torch.trtrs(b,a)[0]
         ta = torch.Tensor()
         tb = torch.Tensor()
         torch.trtrs(tb,ta,b,a)
@@ -1172,25 +1184,25 @@ class TestTorch(TestCase):
         torch.trtrs(tb,ta,b,a)
         self.assertEqual(res1, tb, 0)
 
-    @unittest.skipIf(not hasattr(torch, 'gels'), 'Compiled without gels')
+    @skipIfNoLapack
     def test_gels(self):
         def _test(a, b, expectedNorm):
             a_copy = a.clone()
             b_copy = b.clone()
-            res1 = torch.gels(b, a)
+            res1 = torch.gels(b, a)[0]
             self.assertEqual(a, a_copy, 0)
             self.assertEqual(b, b_copy, 0)
-            self.assertEqual((a * res1 - b).norm(), expectedNorm, 1e-8)
+            self.assertEqual((torch.mm(a, res1) - b).norm(), expectedNorm, 1e-8)
 
             ta = torch.Tensor()
             tb = torch.Tensor()
-            res2 = torch.gels(tb, ta, b, a)
+            res2 = torch.gels(tb, ta, b, a)[0]
             self.assertEqual(a, a_copy, 0)
             self.assertEqual(b, b_copy, 0)
-            self.assertEqual((a * res1 - b).norm(), expectedNorm, 1e-8)
+            self.assertEqual((torch.mm(a, res1) - b).norm(), expectedNorm, 1e-8)
 
-            res3 = torch.gels(b, a, b, a)
-            self.assertEqual((a_copy * b - b_copy).norm(), expectedNorm, 1e-8)
+            res3 = torch.gels(b, a, b, a)[0]
+            self.assertEqual((torch.mm(a_copy, b) - b_copy).norm(), expectedNorm, 1e-8)
             self.assertEqual(res1, tb, 0)
             self.assertEqual(res1, b, 0)
             self.assertEqual(res1, res2, 0)
@@ -1237,24 +1249,24 @@ class TestTorch(TestCase):
         ta = torch.Tensor()
         tb = torch.Tensor()
         torch.gels(tb, ta, b, a)
-        self.assertEqual((a * tb - b).norm(), expectedNorm, 1e-8)
+        self.assertEqual((torch.mm(a, tb) - b).norm(), expectedNorm, 1e-8)
         torch.gels(tb, ta, b, a)
-        self.assertEqual((a * tb - b).norm(), expectedNorm, 1e-8)
+        self.assertEqual((torch.mm(a, tb) - b).norm(), expectedNorm, 1e-8)
         torch.gels(tb, ta, b, a)
-        self.assertEqual((a * tb - b).norm(), expectedNorm, 1e-8)
+        self.assertEqual((torch.mm(a, tb) - b).norm(), expectedNorm, 1e-8)
 
-    @unittest.skipIf(not hasattr(torch, 'eig'), 'Compiled without eig')
+    @skipIfNoLapack
     def test_eig(self):
         a = torch.Tensor(((1.96,  0.00,  0.00,  0.00,  0.00),
                         (-6.49,  3.80,  0.00,  0.00,  0.00),
                         (-0.47, -6.39,  4.17,  0.00,  0.00),
                         (-7.20,  1.50, -1.51,  5.70,  0.00),
                         (-0.65, -6.34,  2.67,  1.80, -7.10))).t().contiguous()
-        e = torch.eig(a)
-        ee, vv = torch.eig(a, 'V')
+        e = torch.eig(a)[0]
+        ee, vv = torch.eig(a, True)
         te = torch.Tensor()
         tv = torch.Tensor()
-        eee, vvv = torch.eig(te, tv, a, 'V')
+        eee, vvv = torch.eig(te, tv, a, True)
         self.assertEqual(e, ee, 1e-12)
         self.assertEqual(ee, eee, 1e-12)
         self.assertEqual(ee, te, 1e-12)
@@ -1263,30 +1275,30 @@ class TestTorch(TestCase):
 
         # test reuse
         X = torch.randn(4,4)
-        X = X.t() * X
+        X = torch.mm(X.t(), X)
         e, v = torch.zeros(4,2), torch.zeros(4,4)
-        torch.eig(e, v, X, 'V')
-        Xhat = v * torch.diag(e.select(1, 0)) * v.t()
+        torch.eig(e, v, X, True)
+        Xhat = torch.mm(torch.mm(v, torch.diag(e.select(1, 0))), v.t())
         self.assertEqual(X, Xhat, 1e-8, 'VeV\' wrong')
         self.assertFalse(v.is_contiguous(), 'V is contiguous')
 
-        torch.eig(e, v, X, 'V')
+        torch.eig(e, v, X, True)
         Xhat = torch.mm(v, torch.mm(e.select(1, 0).diag(), v.t()))
         self.assertEqual(X, Xhat, 1e-8, 'VeV\' wrong')
         self.assertFalse(v.is_contiguous(), 'V is contiguous')
 
         # test non-contiguous
         X = torch.randn(4, 4)
-        X = X.t() * X
-        e = torch.zeros(4, 2, 2)[:,2]
-        v = torch.zeros(4, 2, 4)[:,2]
+        X = torch.mm(X.t(), X)
+        e = torch.zeros(4, 2, 2)[:,1]
+        v = torch.zeros(4, 2, 4)[:,1]
         self.assertFalse(v.is_contiguous(), 'V is contiguous')
         self.assertFalse(e.is_contiguous(), 'E is contiguous')
-        torch.eig(e, v, X, 'V')
-        Xhat = v * torch.diag(e.select(1, 0)) * v.t()
+        torch.eig(e, v, X, True)
+        Xhat = torch.mm(torch.mm(v, torch.diag(e.select(1, 0))), v.t())
         self.assertEqual(X, Xhat, 1e-8, 'VeV\' wrong')
 
-    @unittest.skipIf(not hasattr(torch, 'symeig'), 'Compiled without symeig')
+    @skipIfNoLapack
     def test_symeig(self):
         xval = torch.rand(100,3)
         cov = torch.mm(xval.t(), xval)
@@ -1295,15 +1307,15 @@ class TestTorch(TestCase):
 
         # First call to symeig
         self.assertTrue(resv.is_contiguous(), 'resv is not contiguous')
-        torch.symeig(rese, resv, cov.clone(), 'V')
-        ahat = resv * torch.diag(rese) * resv.t()
+        torch.symeig(rese, resv, cov.clone(), True)
+        ahat = torch.mm(torch.mm(resv, torch.diag(rese)), resv.t())
         self.assertEqual(cov, ahat, 1e-8, 'VeV\' wrong')
 
         # Second call to symeig
         self.assertFalse(resv.is_contiguous(), 'resv is contiguous')
-        torch.symeig(rese, resv, cov.clone(), 'V')
+        torch.symeig(rese, resv, cov.clone(), True)
         ahat = torch.mm(torch.mm(resv, torch.diag(rese)), resv.t())
-        mytester.assertTensorEq(cov, ahat, 1e-8, 'VeV\' wrong')
+        self.assertEqual(cov, ahat, 1e-8, 'VeV\' wrong')
 
         # test non-contiguous
         X = torch.rand(5, 5)
@@ -1312,11 +1324,11 @@ class TestTorch(TestCase):
         v = torch.zeros(4, 2, 4)[:,1]
         self.assertFalse(v.is_contiguous(), 'V is contiguous')
         self.assertFalse(e.is_contiguous(), 'E is contiguous')
-        torch.symeig(e, v, X, 'V')
-        Xhat = v * torch.diag(e) * v.t()
+        torch.symeig(e, v, X, True)
+        Xhat = torch.mm(torch.mm(v, torch.diag(e)), v.t())
         self.assertEqual(X, Xhat, 1e-8, 'VeV\' wrong')
 
-    @unittest.skipIf(not hasattr(torch, 'svd'), 'Compiled without svd')
+    @skipIfNoLapack
     def test_svd(self):
         a=torch.Tensor(((8.79,  6.11, -9.15,  9.57, -3.49,  9.84),
                         (9.93,  6.91, -7.93,  1.64,  4.02,  0.15),
@@ -1339,7 +1351,7 @@ class TestTorch(TestCase):
         X = torch.randn(4, 4)
         U, S, V = torch.svd(X)
         Xhat = torch.mm(U, torch.mm(S.diag(), V.t()))
-        mytester.assertEqual(X, Xhat, 1e-8, 'USV\' wrong')
+        self.assertEqual(X, Xhat, 1e-8, 'USV\' wrong')
 
         self.assertFalse(U.is_contiguous(), 'U is contiguous')
         torch.svd(U, S, V, X)
@@ -1349,8 +1361,8 @@ class TestTorch(TestCase):
         # test non-contiguous
         X = torch.randn(5, 5)
         U = torch.zeros(5, 2, 5)[:,1]
-        S = torch.zeros(5, 2)[:,2]
-        V = torch.zeros(5, 2, 5)[:,2]
+        S = torch.zeros(5, 2)[:,1]
+        V = torch.zeros(5, 2, 5)[:,1]
 
         self.assertFalse(U.is_contiguous(), 'U is contiguous')
         self.assertFalse(S.is_contiguous(), 'S is contiguous')
@@ -1359,7 +1371,7 @@ class TestTorch(TestCase):
         Xhat = torch.mm(U, torch.mm(S.diag(), V.t()))
         self.assertEqual(X, Xhat, 1e-8, 'USV\' wrong')
 
-    @unittest.skipIf(not hasattr(torch, 'inverse'), 'Compiled without inverse')
+    @skipIfNoLapack
     def test_inverse(self):
         M = torch.randn(5,5)
         MI = torch.inverse(M)
@@ -1574,27 +1586,27 @@ class TestTorch(TestCase):
         self.assertEqual(x, y)
         torch.set_rng_state(rng_state)
 
-    @unittest.skip("Not implemented yet")
+    @skipIfNoLapack
     def test_cholesky(self):
-        x = torch.rand(10, 10)
-        A = x * x.t()
+        x = torch.rand(10, 10) + 1e-1
+        A = torch.mm(x, x.t())
 
         # default Case
         C = torch.potrf(A)
-        B = C.t() * C
+        B = torch.mm(C.t(), C)
         self.assertEqual(A, B, 1e-14)
 
         # test Upper Triangular
-        U = torch.potrf(A, 'U')
-        B = U.t() * U
+        U = torch.potrf(A, True)
+        B = torch.mm(U.t(), U)
         self.assertEqual(A, B, 1e-14, 'potrf (upper) did not allow rebuilding the original matrix')
 
         # test Lower Triangular
-        L = torch.potrf(A, 'L')
-        B = L * L.t()
+        L = torch.potrf(A, False)
+        B = torch.mm(L, L.t())
         self.assertEqual(A, B, 1e-14, 'potrf (lower) did not allow rebuilding the original matrix')
 
-    @unittest.skipIf(not hasattr(torch, 'potrs'), 'Compiled without potrs')
+    @skipIfNoLapack
     def test_potrs(self):
         a=torch.Tensor(((6.80, -2.11,  5.66,  5.97,  8.23),
                         (-6.05, -3.30,  5.36, -4.44,  1.08),
@@ -1606,19 +1618,19 @@ class TestTorch(TestCase):
                         (9.81, -4.09, -4.57, -8.61,  8.99))).t()
 
         # make sure 'a' is symmetric PSD
-        a = a * a.t()
+        a = torch.mm(a, a.t())
 
         # upper Triangular Test
-        U = torch.potrf(a, 'U')
-        x = torch.potrs(b, U, 'U')
-        self.assertLessEqual(b.dist(a * x), 1e-12)
+        U = torch.potrf(a)
+        x = torch.potrs(b, U)
+        self.assertLessEqual(b.dist(torch.mm(a, x)), 1e-12)
 
         # lower Triangular Test
-        L = torch.potrf(a, 'L')
-        x = torch.potrs(b, L, 'L')
-        self.assertLessEqual(b.dist(a * x), 1e-12)
+        L = torch.potrf(a, False)
+        x = torch.potrs(b, L, False)
+        self.assertLessEqual(b.dist(torch.mm(a, x)), 1e-12)
 
-    @unittest.skipIf(not hasattr(torch, 'potri'), 'Compiled without potri')
+    @skipIfNoLapack
     def tset_potri(self):
         a=torch.Tensor(((6.80, -2.11,  5.66,  5.97,  8.23),
                         (-6.05, -3.30,  5.36, -4.44,  1.08),
@@ -1647,7 +1659,7 @@ class TestTorch(TestCase):
         inv1 = torch.potri(chol, 'L')
         self.assertLessEqual(inv0.dist(inv1), 1e-12)
 
-    @unittest.skip("Not implemented yet")
+    @skipIfNoLapack
     def test_pstrf(self):
         def checkPsdCholesky(a, uplo, inplace):
             if inplace:
@@ -1662,28 +1674,25 @@ class TestTorch(TestCase):
 
             u, piv = torch.pstrf(*args)
 
-            if uplo == 'L':
-                a_reconstructed = u * u.t()
+            if uplo is False:
+                a_reconstructed = torch.mm(u, u.t())
             else:
-                a_reconstructed = u.t() * u
+                a_reconstructed = torch.mm(u.t(), u)
 
             piv = piv.long()
-            a_permuted = a.index(0, piv-1).index(1, piv-1)
-            self.assertTensorEq(a_permuted, a_reconstructed, 1e-14)
+            a_permuted = a.index_select(0, piv).index_select(1, piv)
+            self.assertEqual(a_permuted, a_reconstructed, 1e-14)
 
         dimensions = ((5, 1), (5, 3), (5, 5), (10, 10))
         for dim in dimensions:
             m = torch.Tensor(*dim).uniform_()
-            a = m * m.t()
+            a = torch.mm(m, m.t())
             # add a small number to the diagonal to make the matrix numerically positive semidefinite
             for i in range(m.size(0)):
                 a[i][i] = a[i][i] + 1e-7
-            checkPsdCholesky(a, None, False)
-            checkPsdCholesky(a, 'U', False)
-            checkPsdCholesky(a, 'L', False)
-            checkPsdCholesky(a, None, True)
-            checkPsdCholesky(a, 'U', True)
-            checkPsdCholesky(a, 'L', True)
+            for inplace in (True, False):
+                for uplo in (None, True, False):
+                    checkPsdCholesky(a, uplo, inplace)
 
     def test_numel(self):
         b = torch.ByteTensor(3, 100, 100)

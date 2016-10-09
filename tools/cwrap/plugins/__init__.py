@@ -52,7 +52,7 @@ from .NullableArguments import NullableArguments
 from .OptionalArguments import OptionalArguments
 from .ArgcountChecker import ArgcountChecker
 from .ArgumentReferences import ArgumentReferences
-from .BeforeCall import BeforeCall
+from .BeforeAfterCall import BeforeAfterCall
 from .ConstantArguments import ConstantArguments
 from .ReturnArguments import ReturnArguments
 from .GILRelease import GILRelease

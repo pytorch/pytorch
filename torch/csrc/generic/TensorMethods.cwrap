@@ -3376,6 +3376,328 @@ static void THTensor_(random1__)(THTensor *self, THGenerator *gen, long b)
       default: 0.5
 ]]
 
+#ifndef THP_LAPACK_CONSTANTS
+#define THP_LAPACK_CONSTANTS
+// We need to pass pointers to chars to tensor lapack functions...
+static const char __U = 'U';
+static const char __L = 'L';
+static const char __N = 'N';
+static const char __V = 'V';
+static const char __A = 'A';
+static const char __S = 'S';
+#if !IS_CUDA
+static const char __T = 'T';
+static const char __R = 'R';
+#endif
+static const char *U = &__U;
+static const char *L = &__L;
+static const char *N = &__N;
+static const char *V = &__V;
+static const char *A = &__A;
+static const char *S = &__S;
+#if !IS_CUDA
+static const char *T = &__T;
+static const char *R = &__R;
+#endif
+#endif
+
+[[
+  name: gesv
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  only_stateless: True
+  return: argument 0,1
+  arguments:
+    - arg: THTensor* solution
+      allocate: True
+    - arg: THTensor* lu
+      allocate: True
+    - THTensor* B
+    - THTensor* A
+]]
+
+[[
+  name: gels
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  only_stateless: True
+  return: argument 0,1
+  arguments:
+    - arg: THTensor* res1
+      allocate: True
+    - arg: THTensor* res2
+      allocate: True
+    - THTensor* B
+    - THTensor* A
+]]
+
+[[
+  name: trtrs
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  only_stateless: True
+  return: argument 0,1
+  arguments:
+    - arg: THTensor* res1
+      allocate: True
+    - arg: THTensor* res2
+      allocate: True
+    - THTensor* B
+    - THTensor* A
+    - arg: bool upper
+      if_true: U
+      if_false: L
+      default: U
+    - arg: bool transpose
+      if_true: T
+      if_false: N
+      default: N
+    - arg: bool unitriangular
+      if_true: U
+      if_false: N
+      default: N
+]]
+
+[[
+  name: symeig
+  cname: syev
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  only_stateless: True
+  return: argument 0,1
+  arguments:
+    - arg: THTensor* res1
+      allocate: True
+    - arg: THTensor* res2
+      allocate: True
+    - THTensor* A
+    - arg: bool eigenvectors
+      if_true: V
+      if_false: N
+      default: N
+    - arg: bool upper
+      if_true: U
+      if_false: L
+      default: U
+]]
+
+[[
+  name: eig
+  cname: geev
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  only_stateless: True
+  return: argument 0,1
+  arguments:
+    - arg: THTensor* res1
+      allocate: True
+    - arg: THTensor* res2
+      allocate: True
+    - THTensor* A
+    - arg: bool eigenvectors
+      if_true: V
+      if_false: N
+      default: N
+]]
+
+[[
+  name: svd
+  cname: gesvd
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  only_stateless: True
+  return: argument 0,1,2
+  arguments:
+    - arg: THTensor* res1
+      allocate: True
+    - arg: THTensor* res2
+      allocate: True
+    - arg: THTensor* res3
+      allocate: True
+    - THTensor* A
+    - arg: bool some
+      if_true: S
+      if_false: A
+      default: S
+]]
+
+[[
+  name: inverse
+  cname: getri
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  only_stateless: True
+  return: argument 0
+  arguments:
+    - arg: THTensor* output
+      allocate: True
+    - THTensor* input
+]]
+
+[[
+  name: potrf
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  only_stateless: True
+  return: argument 0
+  before_call:
+  arguments:
+    - arg: THTensor* output
+      allocate: True
+    - THTensor* input
+    - arg: bool upper
+      if_true: U
+      if_false: L
+      default: U
+]]
+
+[[
+  name: potrf
+  defined_if: CUDA_FLOAT
+  only_stateless: True
+  return: argument 0
+  before_call:
+  arguments:
+    - arg: THTensor* output
+      allocate: True
+    - THTensor* input
+]]
+
+[[
+  name: potrs
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  only_stateless: True
+  return: argument 0
+  before_call:
+  arguments:
+    - arg: THTensor* result
+      allocate: True
+    - THTensor* input1
+    - THTensor* input2
+    - arg: bool upper
+      if_true: U
+      if_false: L
+      default: U
+]]
+
+[[
+  name: potrs
+  defined_if: CUDA_FLOAT
+  only_stateless: True
+  return: argument 0
+  before_call:
+  arguments:
+    - arg: THTensor* result
+      allocate: True
+    - THTensor* input1
+    - THTensor* input2
+]]
+
+[[
+  name: potri
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  only_stateless: True
+  return: argument 0
+  before_call:
+  arguments:
+    - arg: THTensor* output
+      allocate: True
+    - THTensor* input
+    - arg: bool upper
+      if_true: U
+      if_false: L
+      default: U
+]]
+
+[[
+  name: potri
+  defined_if: CUDA_FLOAT
+  only_stateless: True
+  return: argument 0
+  before_call:
+  arguments:
+    - arg: THTensor* output
+      allocate: True
+    - THTensor* input
+]]
+
+[[
+  name: pstrf
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  only_stateless: True
+  return: argument 0,1
+  after_call:
+    THIntTensor_sub(((THPIntTensor*)$arg1)->cdata, ((THPIntTensor*)$arg1)->cdata, 1);
+  arguments:
+    - arg: THTensor* res1
+      allocate: True
+    - arg: THIntTensor* res2
+      allocate: True
+    - THTensor* input
+    - arg: bool upper
+      if_true: U
+      if_false: L
+      default: U
+    - arg: real tol
+      default: -1
+]]
+
+[[
+  name: qr
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  only_stateless: True
+  return: argument 0,1
+  before_call:
+  arguments:
+    - arg: THTensor* res1
+      allocate: True
+    - arg: THTensor* res2
+      allocate: True
+    - THTensor* input
+]]
+
+[[
+  name: geqrf
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  only_stateless: True
+  return: argument 0,1
+  before_call:
+  arguments:
+    - arg: THTensor* res1
+      allocate: True
+    - arg: THTensor* res2
+      allocate: True
+    - THTensor* input
+]]
+
+[[
+  name: orgqr
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  only_stateless: True
+  return: argument 0,1
+  before_call:
+  arguments:
+    - arg: THTensor* result
+      allocate: True
+    - THTensor* input1
+    - THTensor* input2
+]]
+
+[[
+  name: ormqr
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  only_stateless: True
+  return: argument 0,1
+  before_call:
+  arguments:
+    - arg: THTensor* result
+      allocate: True
+    - THTensor* input1
+    - THTensor* input2
+    - THTensor* input3
+    - arg: bool left_mul
+      if_true: L
+      if_false: R
+      default: L
+    - arg: bool transpose
+      if_true: T
+      if_false: N
+      default: T
+]]
+
+
 [[
   name: THPTensor_(cat)
   python_name: cat

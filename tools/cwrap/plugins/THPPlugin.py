@@ -98,6 +98,14 @@ PyObject * $name(PyObject *self, PyObject *args)
         return NULL;
       _th_$name.release();
 """),
+        'THIntTensor*':        Template("""\
+      THIntTensorPtr _th_$name = THIntTensor_new(LIBRARY_STATE_NOARGS);
+      THPIntTensorPtr _${name}_guard = (THPIntTensor*)THPIntTensor_New(_th_$name.get());
+      THPIntTensor* $name = _${name}_guard.get();
+      if (!$name)
+        return NULL;
+      _th_$name.release();
+"""),
         'THBoolTensor*':    Template("""
 #if IS_CUDA
       THCByteTensorPtr _t_$name = THCudaByteTensor_new(LIBRARY_STATE_NOARGS);
@@ -136,6 +144,7 @@ PyObject * $name(PyObject *self, PyObject *args)
         'THGenerator*': 'Generator',
         'THLongStorage*': 'LongStorage',
         'THLongTensor*': 'LongTensor',
+        'THIntTensor*': 'IntTensor',
         'THBoolTensor*': 'ByteTensor',
         'THIndexTensor*': 'LongTensor',
         'THFloatTensor*': 'FloatTensor',
