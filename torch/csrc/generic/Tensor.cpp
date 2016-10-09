@@ -279,6 +279,10 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
     THLongStoragePtr sizes = THPUtils_getLongStorage(args);
     self->cdata = THTensor_(newWithSize)(LIBRARY_STATE sizes, nullptr);
     return (PyObject *)self.release();
+  } catch(THException &e) {
+      throw;
+  // C++ exceptions were comming from getLongStorage, and indicate invalid
+  // arguments. Let's ignore them and print a nice error message instead.
   } catch(std::exception &e) {};
 
   THPUtils_invalidArguments(args, THPTensorStr " constructor", 6,
