@@ -5,9 +5,9 @@ import os.path as path
 
 lib = None
 # TODO: fix libname for OSX / Windows
-# TODO: just load 5.1, not 5.1.3
 # TODO: dynamic version checks via cudnnGetVersion
-libname = 'libcudnn.so.5.1.3'
+# TODO: load 5.1.3 if using CUDA 7.5 and 5.1.5 if using CUDA 8.0
+libname = 'libcudnn.so.5.1'
 thisdir = path.dirname(__file__)
 libpaths = ['', path.join(thisdir, '../../lib')]
 
