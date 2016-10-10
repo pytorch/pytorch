@@ -7,21 +7,23 @@ lib = None
 # TODO: fix libname for OSX / Windows
 # TODO: dynamic version checks via cudnnGetVersion
 # TODO: load 5.1.3 if using CUDA 7.5 and 5.1.5 if using CUDA 8.0
-libname = 'libcudnn.so.5.1'
 thisdir = path.dirname(__file__)
 libpaths = ['', path.join(thisdir, '../../lib')]
+libnames = ['libcudnn.so.5.1.5', 'libcudnn.so.5.1.3']
 
 def _loadlib():
     global lib
     loaded = False
     for libpath in libpaths:
-        try:
-            lib = ctypes.cdll.LoadLibrary(path.join(libpath, libname))
-            loaded = True
+        for libname in libnames:
+            try:
+                lib = ctypes.cdll.LoadLibrary(path.join(libpath, libname))
+                loaded = True
+                break
+            except OSError:
+                continue
+        if loaded:
             break
-        except OSError:
-            continue
-
     if loaded:
         lib.cudnnGetErrorString.restype = ctypes.c_char_p
     else:
