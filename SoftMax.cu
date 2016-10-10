@@ -47,7 +47,7 @@ __global__ void cunn_SoftMax_updateOutput_kernel(
   T max_k = ScalarConvert<AccumT, T>::to(buffer[SOFTMAX_THREADS]);
   buffer[threadIdx.x] = ScalarConvert<int, AccumT>::to(0);
   for (int i=i_start; i<i_end; i+=i_step) {
-    T z = fastExpIfAvail(input_k[i*stride0]-max_k);
+    T z = THCNumerics<T>::exp(input_k[i*stride0]-max_k);
     buffer[threadIdx.x] += ScalarConvert<T, AccumT>::to(z);
     output_k[i*stride0] = z;
   }

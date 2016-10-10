@@ -1,4 +1,4 @@
-#ifndef THC_HALCNI_SCIREMUN_OTUA_F
+#ifndef THC_HALF_AUTO_NUMERICS_INC
 #define THC_HALF_AUTO_NUMERICS_INC
 
 #include "THCHalf.h"

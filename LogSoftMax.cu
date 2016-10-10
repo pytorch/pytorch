@@ -327,14 +327,14 @@ cunn_LogSoftMax_updateGradInput_kernel(T *gradInput,
     for (int j = 0; j < ILP; ++j)
     {
       gradInput[offset + j * blockDim.x] =
-        tmpGradOutput[j] - fastExpIfAvail(tmpOutput[j]) * sum_k;
+        tmpGradOutput[j] - THCNumerics<T>::exp(tmpOutput[j]) * sum_k;
     }
   }
 
   for (; offset < classes; offset += blockDim.x)
   {
     gradInput[offset] =
-      gradOutput[offset] - fastExpIfAvail(output[offset]) * sum_k;
+      gradOutput[offset] - THCNumerics<T>::exp(output[offset]) * sum_k;
   }
 }
 
