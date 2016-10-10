@@ -78,7 +78,7 @@ void THNN_(LogSoftMax_updateOutput)(
     dim3 block(1024);
 
     cunn_LogSoftMax_updateOutput_kernel<2, real, accreal>
-      <<<grid, block, block.x * sizeof(float), THCState_getCurrentStream(state)>>>(
+      <<<grid, block, block.x * sizeof(accreal), THCState_getCurrentStream(state)>>>(
         THCTensor_(data)(state, output),
         THCTensor_(data)(state, input),
         classSize
@@ -204,7 +204,7 @@ void THNN_(LogSoftMax_updateGradInput)(
     dim3 block(1024);
 
     cunn_LogSoftMax_updateGradInput_kernel<2, real, accreal>
-      <<<grid, block, block.x * sizeof(float), THCState_getCurrentStream(state)>>>(
+      <<<grid, block, block.x * sizeof(accreal), THCState_getCurrentStream(state)>>>(
         THCTensor_(data)(state, gradInput),
         THCTensor_(data)(state, output),
         THCTensor_(data)(state, gradOutput),
