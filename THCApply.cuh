@@ -101,7 +101,7 @@ inline dim3 getApplyBlock() {
   return dim3(THC_APPLY_THREADS_PER_BLOCK);
 }
 
-inline bool getApplyGrid(THCState* state, long totalElements, dim3& grid) {
+inline bool getApplyGrid(THCState* state, ptrdiff_t totalElements, dim3& grid) {
   int curDevice = -1;
   cudaGetDevice(&curDevice);
 
@@ -116,7 +116,7 @@ inline bool getApplyGrid(THCState* state, long totalElements, dim3& grid) {
   // 16 warps per block * 4 per SM gives 64 warps per SM at maximum,
   // which seems to be a good sweetspot for latency hiding
   grid = dim3(min((long long) THCCeilDiv(totalElements,
-                                         (long) THC_APPLY_THREADS_PER_BLOCK),
+                                         (ptrdiff_t) THC_APPLY_THREADS_PER_BLOCK),
                   4LL * numSM));
   return true;
 }
@@ -139,7 +139,7 @@ bool THC_pointwiseApply1(THCState* state,
   const dim3 block = getApplyBlock();
 
   dim3 grid;
-  long totalElements = TensorUtils<TensorTypeA>::getNumElements(state, a);
+  ptrdiff_t totalElements = TensorUtils<TensorTypeA>::getNumElements(state, a);
 
   if (!getApplyGrid(state, totalElements, grid)) {
     return false;
@@ -253,7 +253,7 @@ bool THC_pointwiseApply2(THCState* state,
                          const Op& op,
                          TensorArgType aType = ReadWrite,
                          TensorArgType bType = ReadOnly) {
-  long totalElements = TensorUtils<TensorTypeA>::getNumElements(state, a);
+  ptrdiff_t totalElements = TensorUtils<TensorTypeA>::getNumElements(state, a);
 
   if (totalElements != TensorUtils<TensorTypeB>::getNumElements(state, b)) {
     return false;
@@ -431,7 +431,7 @@ bool THC_pointwiseApply3(THCState* state,
                          TensorArgType aType = ReadWrite,
                          TensorArgType bType = ReadOnly,
                          TensorArgType cType = ReadOnly) {
-  long totalElements = TensorUtils<TensorTypeA>::getNumElements(state, a);
+  ptrdiff_t totalElements = TensorUtils<TensorTypeA>::getNumElements(state, a);
 
   if (totalElements != TensorUtils<TensorTypeB>::getNumElements(state, b) ||
       totalElements != TensorUtils<TensorTypeC>::getNumElements(state, c)) {

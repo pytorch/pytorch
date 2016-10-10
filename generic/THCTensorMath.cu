@@ -59,7 +59,7 @@ THCTensor_(reshape)(THCState *state, THCTensor *r_, THCTensor *t, THLongStorage 
   THCTensor_(copy)(state, r_, t);
 }
 
-long
+ptrdiff_t
 THCTensor_(numel)(THCState *state, THCTensor *t)
 {
   return THCTensor_(nElement)(state, t);

@@ -123,7 +123,7 @@ struct LogicalAny {
 };
 
 template<typename Real>
-__global__ void THCTensor_kernel_renorm(Real *data, const Real value, const long size, const Real maxnorm)
+__global__ void THCTensor_kernel_renorm(Real *data, const Real value, const ptrdiff_t size, const Real maxnorm)
 {
   __shared__ Real buffer[32];
   long tx = threadIdx.x;
@@ -134,7 +134,7 @@ __global__ void THCTensor_kernel_renorm(Real *data, const Real value, const long
   buffer[tx] = ScalarConvert<int, Real>::to(0);
 
   // get norm of axis
-  for (long i=tx; i<size; i+=step)
+  for (ptrdiff_t i=tx; i<size; i+=step)
   {
     buffer[tx] = THCNumerics<Real>::add(
       buffer[tx],
@@ -163,7 +163,7 @@ __global__ void THCTensor_kernel_renorm(Real *data, const Real value, const long
       )
     );
     // renormalize
-    for (long i=tx; i<size; i+=step)
+    for (ptrdiff_t i=tx; i<size; i+=step)
     {
       row[i] = THCNumerics<Real>::mul(row[i], norm);
     }
@@ -326,7 +326,7 @@ __host__ void THCTensor_varOuterDim(THCState *state, TensorTypeK *tgt, TensorTyp
   unsigned ndim = TensorUtils<TensorTypeK>::getDims(state, src);
   // Treat all outer dimensions (i.e. dim < dimension) as one.
   unsigned num_orows = 1;
-  for (unsigned dim = 0; dim < dimension; dim++) {
+  for (long dim = 0; dim < dimension; dim++) {
     num_orows *= TensorUtils<TensorTypeK>::getSize(state, src, dim);
   }
   unsigned row_size = TensorUtils<TensorTypeK>::getSize(state, src, dimension);

@@ -211,6 +211,7 @@ INSTALL(FILES
           THCReduceAll.cuh
           THCReduceApplyUtils.cuh
           THCAsmUtils.cuh
+          THCAtomics.cuh
           THCScanUtils.cuh
           THCSortUtils.cuh
           THCAllocator.h

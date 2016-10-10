@@ -47,7 +47,7 @@ THCTensor_(renorm)(THCState *state, THCTensor* self, THCTensor* src, real value,
   THCTensor *self_;
   THCTensor *src_ = THCTensor_(newTranspose)(state, src, dimension, 0);
   THCTensor *data = THCTensor_(newClone)(state, src_);
-  long size = THCTensor_(nElement)(state, data)/data->size[0];
+  ptrdiff_t size = THCTensor_(nElement)(state, data)/data->size[0];
 
   THArgCheck(dimension >= 0 && dimension < THCTensor_(nDimension)(state, src), 3, "invalid dimension");
   THArgCheck(THCNumerics<real>::gt(value, ScalarConvert<int, real>::to(0)), 2, "non-positive-norm not supported");
@@ -138,7 +138,7 @@ THCTensor_(varall)(THCState *state, THCTensor *self)
 
   val = THCNumerics<accreal>::div(
     val,
-    ScalarConvert<int, accreal>::to(THCTensor_(nElement)(state, self) - 1)
+    ScalarConvert<ptrdiff_t, accreal>::to(THCTensor_(nElement)(state, self) - 1)
   );
 
   THCudaCheck(cudaGetLastError());

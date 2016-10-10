@@ -24,7 +24,7 @@ struct CopyOp {
 template <typename TensorTypeDst, typename TensorTypeSrc>
 void
 THC_copyTensor(THCState* state, TensorTypeDst* dst, TensorTypeSrc* src) {
-  long totalElements = TensorUtils<TensorTypeDst>::getNumElements(state, dst);
+  ptrdiff_t totalElements = TensorUtils<TensorTypeDst>::getNumElements(state, dst);
 
   THArgCheck(totalElements ==
              TensorUtils<TensorTypeSrc>::getNumElements(state, src),

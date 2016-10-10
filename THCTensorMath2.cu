@@ -72,7 +72,7 @@ float THCudaTensor_dist(THCState *state, THCudaTensor *self, THCudaTensor *src, 
 {
   THAssert(THCudaTensor_checkGPU(state, 2, self, src));
   self = THCudaTensor_newContiguous(state, self);
-  long size = THCudaTensor_nElement(state, self);
+  ptrdiff_t size = THCudaTensor_nElement(state, self);
   src = THCudaTensor_newContiguous(state, src);
   thrust::device_ptr<float> self_data(THCudaTensor_data(state, self));
   thrust::device_ptr<float> src_data(THCudaTensor_data(state, src));
@@ -103,4 +103,3 @@ void THCudaTensor_randn(THCState *state, THCudaTensor *r_, THLongStorage *size)
   THCudaTensor_resize(state, r_, size, NULL);
   THCudaTensor_normal(state, r_, 0, 1);
 }
-
