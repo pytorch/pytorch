@@ -1,4 +1,4 @@
-#ifndef THC_HALF_AUTO_NUMERICS_INC
+#ifndef THC_HALCNI_SCIREMUN_OTUA_F
 #define THC_HALF_AUTO_NUMERICS_INC
 
 #include "THCHalf.h"
@@ -11,6 +11,10 @@
 
 inline __host__ __device__ half operator+(half a, half b) {
   return THCNumerics<half>::add(a, b);
+}
+
+inline __host__ __device__ float operator+(float a, half b) {
+  return a + ScalarConvert<half, float>::to(b);
 }
 
 inline __host__ __device__ double operator+(double a, half b) {
@@ -29,12 +33,20 @@ inline __host__ __device__ half operator-(half a, int b) {
   return THCNumerics<half>::add(a, THCNumerics<half>::neg(ScalarConvert<int, half>::to(b)));
 }
 
+inline __host__ __device__ float operator-(half a, float b) {
+  return ScalarConvert<half, float>::to(a) - b;
+}
+
 inline __host__ __device__ double operator-(half a, double b) {
   return ScalarConvert<half, double>::to(a) - b;
 }
 
 inline __host__ __device__ half operator-(int a, half b) {
   return THCNumerics<half>::add(ScalarConvert<int, half>::to(a), THCNumerics<half>::neg(b));
+}
+
+inline __host__ __device__ float operator-(float a, half b) {
+  return a - ScalarConvert<half, float>::to(b);
 }
 
 inline __host__ __device__ double operator-(double a, half b) {
@@ -56,8 +68,16 @@ inline __host__ __device__ half operator*(half a, half b) {
   #endif
 }
 
+inline __host__ __device__ float operator*(half a, float b) {
+  return ScalarConvert<half, float>::to(a) * b;
+}
+
 inline __host__ __device__ double operator*(half a, double b) {
   return ScalarConvert<half, double>::to(a) * b;
+}
+
+inline __host__ __device__ float operator*(float a, half b) {
+  return a * ScalarConvert<half, float>::to(b);
 }
 
 inline __host__ __device__ double operator*(double a, half b) {
@@ -90,6 +110,11 @@ inline __host__ __device__ bool operator>(half a, int b) {
 
 inline __host__ __device__ bool operator>=(half a, half b) {
   return THCNumerics<half>::ge(a, b);
+}
+
+inline __host__ __device__ float& operator+=(float &lhs, const half &rhs) {
+  lhs = lhs + rhs;
+  return lhs;
 }
 
 inline __host__ __device__ half abs(half a) {
@@ -131,8 +156,16 @@ inline __host__ __device__ half operator/(int a, half b) {
   return ScalarConvert<int, half>::to(a) / b;
 }
 
+inline __host__ __device__ float operator/(float a, half b) {
+  return a / ScalarConvert<half, float>::to(b);
+}
+
 inline __host__ __device__ double operator/(double a, half b) {
   return a / ScalarConvert<half, double>::to(b);
+}
+
+inline __host__ __device__ float operator/(half a, float b) {
+  return ScalarConvert<half, float>::to(a) / b;
 }
 
 inline __host__ __device__ double operator/(half a, double b) {
@@ -150,6 +183,19 @@ inline __device__ float fastExpIfAvail(float a) {
 inline __device__ double fastExpIfAvail(double a) {
   // should we convert down to float to be able to use __expf?
   return THCNumerics<double>::exp(a);
+}
+
+// these should move to THCNumerics
+inline __host__ __device__ float fmaxType(float x, half y) {
+  return fmaxf(x, ScalarConvert<half, float>::to(y));
+}
+
+inline __host__ __device__ float fmaxType(float x, float y) {
+  return fmaxf(x, y);
+}
+
+inline __host__ __device__ double fmaxType(double x, double y) {
+  return fmax(x, y);
 }
 
 #endif

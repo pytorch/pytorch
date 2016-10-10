@@ -91,17 +91,6 @@ TH_API void THNN_CudaL1Cost_updateGradInput(
           THCudaTensor *gradOutput,    // [OPTIONAL]
           THCudaTensor *gradInput);
 
-TH_API void THNN_CudaLogSoftMax_updateOutput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *output);
-TH_API void THNN_CudaLogSoftMax_updateGradInput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *gradOutput,
-          THCudaTensor *gradInput,
-          THCudaTensor *output);
-
 TH_API void THNN_CudaLookupTable_accGradParameters(
           THCState *state,
           THIndexTensor *input,

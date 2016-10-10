@@ -1,7 +1,10 @@
 #include "THCUNN.h"
-#include "common.h"
+#include "THCHalf.h"
+#include "THCHalfAutoNumerics.cuh"
+#include "SharedMem.cuh"
 
-__global__ void cunn_SpatialLogSoftMax_updateOutput_kernel(float *output, float *input, int classSize, int height, int width)
+template <typename T, typename AccumT>
+__global__ void cunn_SpatialLogSoftMax_updateOutput_kernel(T *output, T *input, int classSize, int height, int width)
 {
   int batchIndex = blockIdx.x;
   int index = threadIdx.x;
@@ -18,11 +21,11 @@ __global__ void cunn_SpatialLogSoftMax_updateOutput_kernel(float *output, float 
       (width*classSize)*y +
       (classSize)*x;
 
-    float sum = 0;
+    AccumT sum = 0;
     for (int i = 0; i < classSize; i++) {
-      sum += __expf(input[inputStartIndex + i]);
+      sum += THCNumerics<T>::exp(input[inputStartIndex + i]);
     }
-    sum = 1.0f / sum;
+    sum = AccumT(1) / sum;
 
     for (int i = 0; i < classSize; i++) {
       // calculate output index in torch layout (B x C x H x W)
@@ -31,13 +34,15 @@ __global__ void cunn_SpatialLogSoftMax_updateOutput_kernel(float *output, float 
         (height*width)*i +
         (width)*y +
         x;
-      output[outputIndex] = logf(sum * __expf(input[inputStartIndex + i]));
+      output[outputIndex] = ScalarConvert<AccumT, T>::to(
+        THCNumerics<AccumT>::log(sum * THCNumerics<T>::exp(input[inputStartIndex + i])));
     }
     index += blockDim.x;
   }
 }
 
-__global__ void cunn_SpatialLogSoftMax_updateGradInput_kernel(float *gradInput, float *output, float *gradOutput, int classSize, int height, int width)
+template <typename T, typename AccumT>
+__global__ void cunn_SpatialLogSoftMax_updateGradInput_kernel(T *gradInput, T *output, T *gradOutput, int classSize, int height, int width)
 {
   int batchIndex = blockIdx.x;
   int index = threadIdx.x;
@@ -54,7 +59,7 @@ __global__ void cunn_SpatialLogSoftMax_updateGradInput_kernel(float *gradInput, 
       (width*classSize)*y +
       (classSize)*x;
 
-    float sum = 0;
+    AccumT sum = 0;
     for (int i = 0; i < classSize; i++) {
       sum += gradOutput[outputStartIndex + i];
     }
@@ -66,70 +71,76 @@ __global__ void cunn_SpatialLogSoftMax_updateGradInput_kernel(float *gradInput, 
         (height*width)*i +
         (width)*y +
         x;
-      gradInput[inputIndex] = gradOutput[outputStartIndex + i] - __expf(output[outputStartIndex + i]) * sum;
+      gradInput[inputIndex] = ScalarConvert<AccumT, T>::to(
+        gradOutput[outputStartIndex + i] - THCNumerics<T>::exp(output[outputStartIndex + i]) * sum);
     }
     index += blockDim.x;
   }
 }
 
+template <typename T, typename AccumT>
 struct MaxFloat
 {
-  __device__ __forceinline__ float operator()(float max, float v) const
+  __device__ __forceinline__ AccumT operator()(AccumT max, T v) const
   {
-    return fmaxf(max, v);
+    return fmaxType(max, v);
   }
 };
 
+template<typename T, typename AccumT>
 struct SumFloat
 {
-  __device__ __forceinline__ float operator()(float sum, float v) const
+  __device__ __forceinline__ AccumT operator()(AccumT sum, T v) const
   {
     return sum + v;
   }
 };
 
+template<typename T, typename AccumT>
 struct SumExpFloat
 {
-  __device__ __forceinline__ SumExpFloat(float v)
+  __device__ __forceinline__ SumExpFloat(T v)
     : max_k(v)
   {}
 
-  __device__ __forceinline__ float operator()(float sum, float v) const
+  __device__ __forceinline__ AccumT operator()(AccumT sum, T v) const
   {
-    return sum + expf(v - max_k);
+    return sum + THCNumerics<T>::exp(v - max_k);
   }
 
-  const float max_k;
+  const T max_k;
 };
 
+template<typename AccumT>
 struct NoFinal
 {
-  __device__ __forceinline__ float operator()(float v) const
+  __device__ __forceinline__ AccumT operator()(AccumT v) const
   {
     return v;
   }
 };
 
+template<typename AccumT>
 struct LSMFinal
 {
-  __device__ __forceinline__ LSMFinal(float m)
+  __device__ __forceinline__ LSMFinal(AccumT m)
     : max_k(m)
   {}
 
-  __device__ __forceinline__ float operator()(float v) const
+  __device__ __forceinline__ AccumT operator()(AccumT v) const
   {
-    return max_k + logf(v);
+    return max_k + THCNumerics<AccumT>::log(v);
   }
 
-  const float max_k;
+  const AccumT max_k;
 };
 
-template <typename Reduction, typename Finalize>
-__device__ __forceinline__ float
-blockReduce(float* smem, float val,
-            const Reduction& r,
-            float defaultVal,
-            const Finalize& f)
+template <template<typename, typename> class Reduction, template<typename> class Finalize, typename AccumT>
+__device__ __forceinline__ AccumT
+blockReduce(AccumT* smem, AccumT val,
+            const Reduction<AccumT, AccumT>& r,
+            AccumT defaultVal,
+            const Finalize<AccumT>& f)
 {
   // To avoid RaW races from chaining blockReduce calls together, we
   // need a sync here
@@ -139,7 +150,7 @@ blockReduce(float* smem, float val,
 
   __syncthreads();
 
-  float warpVal = defaultVal;
+  AccumT warpVal = defaultVal;
 
   // First warp will perform per-warp reductions for the remaining warps
   if ((threadIdx.x / 32) == 0) // only threads in warp1 go into this (if)
@@ -162,7 +173,7 @@ blockReduce(float* smem, float val,
   __syncthreads();
 
   // First thread will perform a reduction of the above per-warp reductions
-  float blockVal = defaultVal;
+  AccumT blockVal = defaultVal;
 
   if (threadIdx.x == 0)
   {
@@ -179,23 +190,23 @@ blockReduce(float* smem, float val,
   return smem[0];
 }
 
-template <typename Reduction>
-__device__ __forceinline__ float
-blockReduce(float* smem, float val,
-            const Reduction& r,
-            float defaultVal)
+template <template<typename, typename> class Reduction, typename AccumT>
+__device__ __forceinline__ AccumT
+blockReduce(AccumT* smem, AccumT val,
+            const Reduction<AccumT, AccumT>& r,
+            AccumT defaultVal)
 {
-  return blockReduce<Reduction, NoFinal>(smem, val, r, defaultVal, NoFinal());
+  return blockReduce<Reduction, NoFinal, AccumT>(smem, val, r, defaultVal, NoFinal<AccumT>());
 }
 
-template <typename Reduction, int ILP>
-__device__ __forceinline__ float
-ilpReduce(float* data,
+template <template<typename, typename> class Reduction, int ILP, typename T, typename AccumT>
+__device__ __forceinline__ AccumT
+ilpReduce(T* data,
           int size,
-          const Reduction& r,
-          float defaultVal)
+          const Reduction<T, AccumT>& r,
+          AccumT defaultVal)
 {
-  float threadVal = defaultVal;
+  AccumT threadVal = defaultVal;
   int offset = threadIdx.x;
 
   int last = size % (ILP * blockDim.x);
@@ -203,7 +214,7 @@ ilpReduce(float* data,
   // Body (unroll by ILP times)
   for (; offset < size - last; offset += blockDim.x * ILP)
   {
-    float tmp[ILP];
+    T tmp[ILP];
 
 #pragma unroll
     for (int j = 0; j < ILP; ++j)
@@ -227,28 +238,30 @@ ilpReduce(float* data,
   return threadVal;
 }
 
-template <int ILP>
+template <int ILP, typename T, typename AccumT>
 __global__ void
-cunn_LogSoftMax_updateOutput_kernel(float *output, float *input, int classes)
+cunn_LogSoftMax_updateOutput_kernel(T *output, T *input, int classes)
 {
-  extern __shared__ float buffer[];
+  SharedMem<AccumT> smem;
+  AccumT *buffer = smem.getPointer();
   // forward pointers to batch[blockIdx.x]
   // each block handles a sample in the mini-batch
   input += blockIdx.x * classes;
   output += blockIdx.x * classes;
 
   // find the max of the batch
-  float threadMax =
-    ilpReduce<MaxFloat, ILP>(input, classes, MaxFloat(), -FLT_MAX);
+  AccumT threadMax = ilpReduce<MaxFloat, ILP, T, AccumT>(
+      input, classes, MaxFloat<T, AccumT>(), -THCNumerics<AccumT>::max());
   // find the max over all batches
-  float max_k =
-    blockReduce<MaxFloat>(buffer, threadMax, MaxFloat(), -FLT_MAX);
+  AccumT max_k = blockReduce<MaxFloat, AccumT>(
+      buffer, threadMax, MaxFloat<AccumT, AccumT>(), -THCNumerics<AccumT>::max());
+  T max_k_non_accum = ScalarConvert<AccumT, T>::to(max_k);
 
-  float threadExp =
-    ilpReduce<SumExpFloat, ILP>(input, classes, SumExpFloat(max_k), 0.0f);
-  float logsum_k =
-    blockReduce<SumFloat, LSMFinal>(
-      buffer, threadExp, SumFloat(), 0.0f, LSMFinal(max_k));
+  AccumT threadExp = ilpReduce<SumExpFloat, ILP, T, AccumT>(
+      input, classes, SumExpFloat<T, AccumT>(max_k_non_accum), AccumT(0));
+  T logsum_k = ScalarConvert<AccumT, T>::to(
+      blockReduce<SumFloat, LSMFinal, AccumT>(
+          buffer, threadExp, SumFloat<AccumT, AccumT>(), AccumT(0), LSMFinal<AccumT>(max_k)));
 
   // Output LSM (hand ILP)
   int offset = threadIdx.x;
@@ -256,7 +269,7 @@ cunn_LogSoftMax_updateOutput_kernel(float *output, float *input, int classes)
   int last = classes % (ILP * blockDim.x);
   for (; offset < classes - last; offset += blockDim.x * ILP)
   {
-    float tmp[ILP];
+    T tmp[ILP];
 
 #pragma unroll
     for (int j = 0; j < ILP; ++j) {
@@ -276,30 +289,32 @@ cunn_LogSoftMax_updateOutput_kernel(float *output, float *input, int classes)
   }
 }
 
-template <int ILP>
+template <int ILP, typename T, typename AccumT>
 __global__ void
-cunn_LogSoftMax_updateGradInput_kernel(float *gradInput,
-                                       float *output,
-                                       float *gradOutput,
+cunn_LogSoftMax_updateGradInput_kernel(T *gradInput,
+                                       T *output,
+                                       T *gradOutput,
                                        int classes)
 {
-  extern __shared__ float buffer[];
+  SharedMem<AccumT> smem;
+  AccumT *buffer = smem.getPointer();
   gradInput += blockIdx.x * classes;
   output += blockIdx.x * classes;
   gradOutput += blockIdx.x * classes;
 
-  float threadSum =
-    ilpReduce<SumFloat, 4>(gradOutput, classes, SumFloat(), 0.0f);
-  float sum_k =
-    blockReduce<SumFloat>(buffer, threadSum, SumFloat(), 0.0f);
+  AccumT threadSum = ilpReduce<SumFloat, 4, T, AccumT>(
+      gradOutput, classes, SumFloat<T, AccumT>(), AccumT(0));
+  T sum_k = ScalarConvert<AccumT, T>::to(
+      blockReduce<SumFloat, AccumT>(
+          buffer, threadSum, SumFloat<AccumT, AccumT>(), AccumT(0)));
 
   // Update gradInput (hand ILP)
   int offset = threadIdx.x;
   int last = classes % (ILP * blockDim.x);
   for (; offset < classes - last; offset += blockDim.x * ILP)
   {
-    float tmpGradOutput[ILP];
-    float tmpOutput[ILP];
+    T tmpGradOutput[ILP];
+    T tmpOutput[ILP];
 
 #pragma unroll
     for (int j = 0; j < ILP; ++j)
@@ -312,237 +327,16 @@ cunn_LogSoftMax_updateGradInput_kernel(float *gradInput,
     for (int j = 0; j < ILP; ++j)
     {
       gradInput[offset + j * blockDim.x] =
-        tmpGradOutput[j] - __expf(tmpOutput[j]) * sum_k;
+        tmpGradOutput[j] - fastExpIfAvail(tmpOutput[j]) * sum_k;
     }
   }
 
   for (; offset < classes; offset += blockDim.x)
   {
     gradInput[offset] =
-      gradOutput[offset] - __expf(output[offset]) * sum_k;
+      gradOutput[offset] - fastExpIfAvail(output[offset]) * sum_k;
   }
 }
 
-void THNN_CudaLogSoftMax_updateOutput(THCState *state, THCudaTensor *input, THCudaTensor *output)
-{
-  THCUNN_assertSameGPU(state, 2, input, output);
-
-  THCudaTensor_resizeAs(state, output, input);
-
-  bool spatial  = false;
-  int batchSize = 1;
-  int classSize = 0;
-  int height = 0;
-  int width = 0;
-
-  int ndims = THCudaTensor_nDimension(state, input);
-
-  if (ndims == 1)
-  {
-    classSize = THCudaTensor_size(state, input, 0);
-    input = THCudaTensor_newContiguous(state, input);
-  }
-  else if (ndims == 2)
-  {
-    batchSize = THCudaTensor_size(state, input, 0);
-    classSize = THCudaTensor_size(state, input, 1);
-    input = THCudaTensor_newContiguous(state, input);
-  }
-  else if (ndims == 3)
-  {
-    spatial = true;
-    classSize = THCudaTensor_size(state, input, 0);
-    height = THCudaTensor_size(state, input, 1);
-    width = THCudaTensor_size(state, input, 2);
-
-    // create contiguous tensor with cuda layout from tensor with torch layout
-    // C x H x W -> W x H x C
-    THCudaTensor_transpose(state, input, input, 0, 2);
-    // W x H x C -> H x W x C
-    THCudaTensor_transpose(state, input, input, 0, 1);
-    THCudaTensor *transposedInput = THCudaTensor_newContiguous(state, input);
-    THCudaTensor_transpose(state, input, input, 0, 1);
-    THCudaTensor_transpose(state, input, input, 0, 2);
-    input = transposedInput;
-  }
-  else if (ndims == 4)
-  {
-    spatial = true;
-    batchSize = THCudaTensor_size(state, input, 0);
-    classSize = THCudaTensor_size(state, input, 1);
-    height = THCudaTensor_size(state, input, 2);
-    width = THCudaTensor_size(state, input, 3);
-
-    // create contiguous tensor with cuda layout from tensor with torch layout
-    // B x C x H x W -> B x W x H x C
-    THCudaTensor_transpose(state, input, input, 1, 3);
-    // B x W x H x C -> B x H x W x C
-    THCudaTensor_transpose(state, input, input, 1, 2);
-    THCudaTensor *transposedInput = THCudaTensor_newContiguous(state, input);
-    THCudaTensor_transpose(state, input, input, 1, 2);
-    THCudaTensor_transpose(state, input, input, 1, 3);
-    input = transposedInput;
-  }
-  else
-  {
-    THError("1D, 2D, 3D or 4D Tensor expected");
-  }
-
-  if (!spatial)
-  {
-    dim3 grid(batchSize);
-    dim3 block(1024);
-
-    cunn_LogSoftMax_updateOutput_kernel<2>
-      <<<grid, block, block.x * sizeof(float), THCState_getCurrentStream(state)>>>(
-        THCudaTensor_data(state, output),
-        THCudaTensor_data(state, input),
-        classSize
-    );
-  }
-  else
-  {
-    dim3 grid(batchSize);
-    dim3 block(1024);
-
-    cunn_SpatialLogSoftMax_updateOutput_kernel
-      <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-        THCudaTensor_data(state, output),
-        THCudaTensor_data(state, input),
-        classSize, height, width
-    );
-  }
-
-  cudaError errcode = cudaGetLastError();
-  if (errcode != cudaSuccess)
-  {
-    THError(cudaGetErrorString(errcode));
-  }
-
-  THCudaTensor_free(state, input);
-}
-
-void THNN_CudaLogSoftMax_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput,
-  THCudaTensor *gradInput, THCudaTensor *output)
-{
-  THCUNN_assertSameGPU(state, 3, output, gradOutput, gradInput);
-
-  THCudaTensor_resizeAs(state, gradInput, output);
-
-  bool spatial  = false;
-  int batchSize = 1;
-  int classSize = 0;
-  int height = 0;
-  int width = 0;
-
-  int ndims = THCudaTensor_nDimension(state, input);
-
-  if (ndims == 1)
-  {
-    classSize = THCudaTensor_size(state, gradInput, 0);
-    output = THCudaTensor_newContiguous(state, output);
-    gradOutput = THCudaTensor_newContiguous(state, gradOutput);
-  }
-  else if (ndims == 2)
-  {
-    batchSize = THCudaTensor_size(state, gradInput, 0);
-    classSize = THCudaTensor_size(state, gradInput, 1);
-    output = THCudaTensor_newContiguous(state, output);
-    gradOutput = THCudaTensor_newContiguous(state, gradOutput);
-  }
-  else if (ndims == 3)
-  {
-    spatial = true;
-    classSize = THCudaTensor_size(state, input, 0);
-    height = THCudaTensor_size(state, input, 1);
-    width = THCudaTensor_size(state, input, 2);
-
-    // create contiguous tensor with cuda layout from tensor with torch layout
-    // C x H x W -> W x H x C
-    THCudaTensor_transpose(state, output, output, 0, 2);
-    // W x H x C -> H x W x C
-    THCudaTensor_transpose(state, output, output, 0, 1);
-    THCudaTensor *transposedOutput = THCudaTensor_newContiguous(state, output);
-    THCudaTensor_transpose(state, output, output, 0, 1);
-    THCudaTensor_transpose(state, output, output, 0, 2);
-    output = transposedOutput;
-
-    // create contiguous tensor with cuda layout from tensor with torch layout
-    // C x H x W -> W x H x C
-    THCudaTensor_transpose(state, gradOutput, gradOutput, 0, 2);
-    // W x H x C -> H x W x C
-    THCudaTensor_transpose(state, gradOutput, gradOutput, 0, 1);
-    THCudaTensor *transposedGradOutput = THCudaTensor_newContiguous(state, gradOutput);
-    THCudaTensor_transpose(state, gradOutput, gradOutput, 0, 1);
-    THCudaTensor_transpose(state, gradOutput, gradOutput, 0, 2);
-    gradOutput = transposedGradOutput;
-  }
-  else if (ndims == 4)
-  {
-    spatial = true;
-    batchSize = THCudaTensor_size(state, gradInput, 0);
-    classSize = THCudaTensor_size(state, input, 1);
-    height = THCudaTensor_size(state, input, 2);
-    width = THCudaTensor_size(state, input, 3);
-
-    // create contiguous tensor with cuda layout from tensor with torch layout
-    // B x C x H x W -> B x W x H x C
-    THCudaTensor_transpose(state, output, output, 1, 3);
-    // B x W x H x C -> B x H x W x C
-    THCudaTensor_transpose(state, output, output, 1, 2);
-    THCudaTensor *transposedOutput = THCudaTensor_newContiguous(state, output);
-    THCudaTensor_transpose(state, output, output, 1, 2);
-    THCudaTensor_transpose(state, output, output, 1, 3);
-    output = transposedOutput;
-
-    // create contiguous tensor with cuda layout from tensor with torch layout
-    // B x C x H x W -> B x W x H x C
-    THCudaTensor_transpose(state, gradOutput, gradOutput, 1, 3);
-    // B x W x H x C -> B x H x W x C
-    THCudaTensor_transpose(state, gradOutput, gradOutput, 1, 2);
-    THCudaTensor *transposedGradOutput = THCudaTensor_newContiguous(state, gradOutput);
-    THCudaTensor_transpose(state, gradOutput, gradOutput, 1, 2);
-    THCudaTensor_transpose(state, gradOutput, gradOutput, 1, 3);
-    gradOutput = transposedGradOutput;
-  }
-  else
-  {
-    THError("1D, 2D, 3D or 4D Tensor expected");
-  }
-
-  if (!spatial)
-  {
-    dim3 grid(batchSize);
-    dim3 block(1024);
-
-    cunn_LogSoftMax_updateGradInput_kernel<2>
-      <<<grid, block, block.x * sizeof(float), THCState_getCurrentStream(state)>>>(
-        THCudaTensor_data(state, gradInput),
-        THCudaTensor_data(state, output),
-        THCudaTensor_data(state, gradOutput),
-        classSize
-    );
-  }
-  else
-  {
-    dim3 grid(batchSize);
-    dim3 block(1024);
-
-    cunn_SpatialLogSoftMax_updateGradInput_kernel
-      <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-        THCudaTensor_data(state, gradInput),
-        THCudaTensor_data(state, output),
-        THCudaTensor_data(state, gradOutput),
-        classSize, height, width
-    );
-  }
-
-  cudaError errcode = cudaGetLastError();
-  if (errcode != cudaSuccess)
-  {
-    THError(cudaGetErrorString(errcode));
-  }
-
-  THCudaTensor_free(state, gradOutput);
-  THCudaTensor_free(state, output);
-}
+#include "generic/LogSoftMax.cu"
+#include "THCGenerateFloatTypes.h"
