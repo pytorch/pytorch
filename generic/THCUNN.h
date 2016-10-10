@@ -131,6 +131,29 @@ TH_API void THNN_(SpatialClassNLLCriterion_updateGradInput)(
                   THCTensor *weights,       // [OPTIONAL]
                   THCTensor *total_weight);
 
+TH_API void THNN_(SpatialDilatedMaxPooling_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *output,
+                  THCTensor *indices,
+                  int kW, int kH,
+                  int dW, int dH,
+                  int padW, int padH,
+                  int dilationW, int dilationH,
+                  bool ceil_mode);
+
+TH_API void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *gradOutput,
+                  THCTensor *gradInput,
+                  THCTensor *indices,
+                  int kW, int kH,
+                  int dW, int dH,
+                  int padW, int padH,
+                  int dilationW, int dilationH,
+                  bool ceil_mode);
+
 TH_API void THNN_(RReLU_updateOutput)(
                   THCState *state,
                   THCTensor *input,
