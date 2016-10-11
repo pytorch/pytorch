@@ -877,7 +877,7 @@ TH_API void THNN_(SpatialMaxPooling_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
-          THTensor *indices,
+          THIndexTensor *indices,
           int kW, int kH,
           int dW, int dH,
           int padW, int padH,
@@ -887,7 +887,7 @@ TH_API void THNN_(SpatialMaxPooling_updateGradInput)(
           THTensor *input,
           THTensor *gradOutput,
           THTensor *gradInput,
-          THTensor *indices,
+          THIndexTensor *indices,
           int kW, int kH,
           int dW, int dH,
           int padW, int padH,
@@ -897,7 +897,7 @@ TH_API void THNN_(SpatialDilatedMaxPooling_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
-          THTensor *indices,
+          THIndexTensor *indices,
           int kW, int kH,
           int dW, int dH,
           int padW, int padH,
@@ -908,7 +908,7 @@ TH_API void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
           THTensor *input,
           THTensor *gradOutput,
           THTensor *gradInput,
-          THTensor *indices,
+          THIndexTensor *indices,
           int kW, int kH,
           int dW, int dH,
           int padW, int padH,
@@ -919,14 +919,14 @@ TH_API void THNN_(SpatialMaxUnpooling_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
-          THTensor *indices,
+          THIndexTensor *indices,
           int owidth, int oheight);
 TH_API void THNN_(SpatialMaxUnpooling_updateGradInput)(
           THNNState *state,
           THTensor *input,
           THTensor *gradOutput,
           THTensor *gradInput,
-          THTensor *indices,
+          THIndexTensor *indices,
           int owidth, int oheight);
 
 TH_API void THNN_(SpatialSubSampling_updateOutput)(
