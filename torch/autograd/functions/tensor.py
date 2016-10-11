@@ -3,7 +3,6 @@ import torch
 from torch._utils import _accumulate
 
 from ..function import Function, InplaceFunction
-from ..variable import Variable
 
 
 class Index(Function):
@@ -475,7 +474,29 @@ class Topk(_MultiSelectionFunction):
         return super(Topk, self).forward(input)
 
 
-# TODO: chunk
+class Chunk(Function):
+
+    def __init__(self, num_chunks, dim=0):
+        super(Chunk, self).__init__()
+        self.num_chunks = num_chunks
+        self.dim = dim
+
+    def forward(self, i):
+        self.input_size = i.size()
+        result = i.chunk(self.num_chunks, self.dim)
+        self.mark_shared_storage(*((i, chunk) for chunk in result))
+        return result
+
+    def backward(self, *grad_output):
+        grad_input = grad_output[0].new(self.input_size)
+        offset = 0
+        for grad in grad_output:
+            grad_size = grad.size(self.dim)
+            grad_input.narrow(self.dim, offset, grad_size).copy_(grad)
+            offset += grad_size
+        return grad_input
+
+
 # TODO: gather
 # TODO: kthvalue
 # TODO: repeat

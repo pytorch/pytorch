@@ -29,7 +29,7 @@ class Embedding(Function):
 
     def forward(self, indices, weight):
         assert indices.dim() <= 2
-        assert not self.input[0].requires_grad, "Embedding doesn't " \
+        assert not self.needs_input_grad[0], "Embedding doesn't " \
             "compute the gradient w.r.t. the indices"
         self._backend = type2backend[type(weight)]
         self._weight_size = weight.size()

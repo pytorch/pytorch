@@ -48,7 +48,7 @@ class device(object):
 
     def __exit__(self, *args):
         if self.prev_idx != self.idx:
-            torch._C._cuda_setDevice(prev_idx)
+            torch._C._cuda_setDevice(self.prev_idx)
         return False
 
 

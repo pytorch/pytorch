@@ -1,6 +1,5 @@
 from itertools import repeat
 
-from ..variable import Variable
 from ..function import Function, InplaceFunction
 
 

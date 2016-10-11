@@ -123,8 +123,9 @@
 #define THPByteUtils_unpackAccreal(object)    (long)THPUtils_unpackReal_INT(object)
 #define THPByteUtils_newAccreal(value)        THPUtils_newReal_INT(value)
 
-#define THPUtils_assert(cond, ...)                                             \
-if (!(cond)) { THPUtils_setError(__VA_ARGS__); return NULL; }
+#define THPUtils_assert(cond, ...) THPUtils_assertRet(NULL, cond, __VA_ARGS__)
+#define THPUtils_assertRet(value, cond, ...)                                   \
+if (__builtin_expect(!(cond), 0)) { THPUtils_setError(__VA_ARGS__); return value; }
 THP_API void THPUtils_setError(const char *format, ...);
 THP_API void THPUtils_invalidArguments(PyObject *given_args,
             const char *function_name, size_t num_options, ...);

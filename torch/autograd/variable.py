@@ -1,9 +1,12 @@
+import torch._C as _C
 from collections import OrderedDict
 
+from .functions import *
 
-class Variable(object):
 
-    _fallthrough_methods = [
+class Variable(_C._VariableBase):
+
+    _fallthrough_methods = {
         'size',
         'stride',
         'nelement',
@@ -18,20 +21,7 @@ class Variable(object):
         'dim',
         'get_device',
         'is_cuda',
-    ]
-
-    def __init__(self, tensor, creator=None, volatile=False,
-            requires_grad=False):
-        self.creator = creator
-        self.volatile = volatile
-        self._requires_grad = (not volatile) and requires_grad
-        self.data = tensor
-        self._version = [0]
-        self._grad = None
-        self.backward_hooks = OrderedDict()
-        if not torch.is_tensor(tensor):
-            raise ValueError("Variable objects can only wrap tensors but got " +
-                    torch.typename(tensor))
+    }
 
     @property
     def grad(self):
@@ -89,19 +79,15 @@ class Variable(object):
     def __repr__(self):
         return 'Variable containing:' + self.data.__repr__()
 
-    def _call_hooks(self, grad_output):
-        for hook in self.backward_hooks.values():
-            hook(grad_output)
-
     def register_hook(self, name, hook):
         if self.volatile:
             raise RuntimeError('registering hook on a volatile variable')
         if not self.requires_grad:
             raise RuntimeError("registering hook on a variable that doesn't require gradient")
         if self.creator is not None:
-            idx = self.creator.output_ids[id(self)]
-            self.creator.register_hook(name, lambda gi, go: hook(go[idx]))
+            self.creator.register_hook(name, lambda gi, go: hook(go[self.output_nr]))
         else:
+            self.backward_hooks = self.backward_hooks or OrderedDict()
             assert name not in self.backward_hooks, \
                 "Trying to register a second hook with name {}".format(name)
             self.backward_hooks[name] = hook
@@ -112,15 +98,17 @@ class Variable(object):
         if self.creator is not None:
             self.creator.remove_hook(name)
         else:
-            assert name in self.backward_hooks, \
+            assert self.backward_hooks and name in self.backward_hooks, \
                 "Trying to remove an inexistent hook with name {}".format(name)
             del self.backward_hooks[name]
 
     def _do_backward(self, grad_output, retain_variables):
         assert len(grad_output) == 1
-        assert self._version[0] == 0 and self.creator is None, \
+        assert self._version == 0 and self.creator is None, \
             "leaf variable was used in an inplace operation"
-        self._call_hooks(grad_output[0])
+        if self.backward_hooks:
+            for hook in self.backward_hooks.values():
+                hook(grad_output[0])
         self.grad.add_(grad_output[0])
         return tuple()
 
@@ -526,6 +514,9 @@ class Variable(object):
 
         return Index(index)(self)
 
+    def chunk(self, num_chunks, dim=0):
+        return Chunk(num_chunks, dim)(self)
+
     def squeeze(self, dim=None):
         return Squeeze(dim)(self)
 
@@ -576,7 +567,6 @@ class Variable(object):
         return Negate()(self)
 
 
-from .functions import *
-from .engine import ExecutionEngine
+from .engine import ImperativeEngine
+Variable._execution_engine = ImperativeEngine()
 
-Variable._execution_engine = ExecutionEngine()

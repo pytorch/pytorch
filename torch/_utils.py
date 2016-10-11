@@ -1,3 +1,4 @@
+import torch
 
 def _type(self, new_type=None, async=False):
     if new_type is None:
@@ -10,10 +11,7 @@ def _type(self, new_type=None, async=False):
     return new_type(self.size()).copy_(self, async)
 
 def _cuda(self, idx=None, async=False):
-    import torch.cuda
-    # This already is a CUDA tensor.
-    # Let's check if it needs to be transfered to another GPU.
-    if hasattr(self, 'get_device'):
+    if self.is_cuda:
         target_device = idx if idx else torch.cuda.current_device()
         if self.get_device() != target_device:
             with torch.cuda.device(target_device):

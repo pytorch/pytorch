@@ -292,10 +292,10 @@ static PyObject * TH_CONCAT_2(THPModule_, name)(PyObject *_unused, PyObject *arg
   }                                                                            \
                                                                                \
 dispatch:                                                                      \
-  PyObject *methods = PyObject_GetAttrString(tensor, THP_STATELESS_ATTRIBUTE_NAME); \
+  THPObjectPtr methods = PyObject_GetAttrString(tensor, THP_STATELESS_ATTRIBUTE_NAME); \
   THPUtils_assert(methods, "Type %s doesn't implement statless methods",       \
       Py_TYPE(tensor)->tp_name);                                               \
-  PyObject *method = PyObject_GetAttrString(methods, #name);                   \
+  THPObjectPtr method = PyObject_GetAttrString(methods, #name);                   \
   THPUtils_assert(method, "Type %s doesn't implement stateless method " #name, \
       Py_TYPE(tensor)->tp_name);                                               \
   return PyObject_Call(method, args, kwargs);                                  \
@@ -455,10 +455,10 @@ static PyObject * TH_CONCAT_2(THPModule_, name)(PyObject *_unused, PyObject *arg
   }                                                                            \
                                                                                \
 dispatch:                                                                      \
-  PyObject *methods = PyObject_GetAttrString(tensor, THP_STATELESS_ATTRIBUTE_NAME); \
+  THPObjectPtr methods = PyObject_GetAttrString(tensor, THP_STATELESS_ATTRIBUTE_NAME); \
   THPUtils_assert(methods, "Type %s doesn't implement statless methods",       \
       Py_TYPE(tensor)->tp_name);                                               \
-  PyObject *method = PyObject_GetAttrString(methods, #name);                   \
+  THPObjectPtr method = PyObject_GetAttrString(methods, #name);                \
   THPUtils_assert(method, "Type %s doesn't implement stateless method " #name, \
       Py_TYPE(tensor)->tp_name);                                               \
   return PyObject_Call(method, args, kwargs);                                  \
@@ -484,10 +484,10 @@ static PyObject * THPModule_nonzero(PyObject *_unused, PyObject *args)
   else if (PyTuple_Size(args) == 2)
     tensor = PyTuple_GET_ITEM(args, 1);
 
-  PyObject *methods = PyObject_GetAttrString(tensor, THP_STATELESS_ATTRIBUTE_NAME);
+  THPObjectPtr methods = PyObject_GetAttrString(tensor, THP_STATELESS_ATTRIBUTE_NAME);
   THPUtils_assert(methods, "Type %s doesn't implement statless methods",
       Py_TYPE(tensor)->tp_name);
-  PyObject *method = PyObject_GetAttrString(methods, "nonzero");
+  THPObjectPtr method = PyObject_GetAttrString(methods, "nonzero");
   THPUtils_assert(method, "Type %s doesn't implement stateless method nonzero",
       Py_TYPE(tensor)->tp_name);
   return PyObject_Call(method, args, NULL);
@@ -510,10 +510,10 @@ static PyObject * THPModule_cat(PyObject *_unused, PyObject *args)
     PyErr_Clear();
   }
 
-  PyObject *methods = PyObject_GetAttrString(tensor, THP_STATELESS_ATTRIBUTE_NAME);
+  THPObjectPtr methods = PyObject_GetAttrString(tensor, THP_STATELESS_ATTRIBUTE_NAME);
   THPUtils_assert(methods, "Type %s doesn't implement statless methods",
       Py_TYPE(tensor)->tp_name);
-  PyObject *method = PyObject_GetAttrString(methods, "cat");
+  THPObjectPtr method = PyObject_GetAttrString(methods, "cat");
   THPUtils_assert(method, "Type %s doesn't implement stateless method nonzero",
       Py_TYPE(tensor)->tp_name);
   return PyObject_Call(method, args, NULL);
@@ -557,6 +557,7 @@ extern PyObject * THCPModule_initialSeed(PyObject *_unused);
 
 static PyMethodDef TorchMethods[] = {
   {"_initExtension",  (PyCFunction)THPModule_initExtension,     METH_O,  NULL},
+  {"_autograd_init",  (PyCFunction)THPAutograd_initExtension,   METH_NOARGS,  NULL},
 #ifdef WITH_CUDA
   {"_cuda_init",      (PyCFunction)THCPModule_initExtension,    METH_NOARGS,  NULL},
   {"_cuda_setDevice", (PyCFunction)THCPModule_setDevice_wrap,   METH_O,       NULL},
@@ -785,6 +786,9 @@ PyMODINIT_FUNC PyInit__C()
 #endif
   ASSERT_TRUE(THPGenerator_init(module));
   ASSERT_TRUE(THPException_init(module));
+  ASSERT_TRUE(THPVariable_initModule(module));
+  ASSERT_TRUE(THPFunction_initModule(module));
+  ASSERT_TRUE(THPEngine_initModule(module));
 
   ASSERT_TRUE(THPDoubleStorage_init(module));
   ASSERT_TRUE(THPFloatStorage_init(module));
