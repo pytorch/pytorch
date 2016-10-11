@@ -21,4 +21,12 @@ inline int GET_BLOCKS(const int N)
   return (N + CUDA_NUM_THREADS - 1) / CUDA_NUM_THREADS;
 }
 
+#define THCUNN_resizeAs_indices(STATE, I1, I2)              \
+  THLongStorage *size2 = THCTensor_(newSizeOf)(STATE, I2); \
+  if (!THCudaLongTensor_isSize(STATE, I1, size2))           \
+  { \
+    THCudaLongTensor_resize(STATE, I1, size2, NULL);        \
+  } \
+  THLongStorage_free(size2);
+
 #endif

@@ -8,7 +8,7 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
            THCState *state,
            THCTensor *input,
            THCTensor *output,
-           THCTensor *indices,
+           THCudaLongTensor *indices,
            int kW, int kH,
            int dW, int dH,
            int padW, int padH,
@@ -40,16 +40,12 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
   THArgCheck(kW/2 >= padW && kH/2 >= padH, 2, "pad should be smaller than half of kernel size");
 
   if(ceil_mode) {
-    nOutputCols = ScalarConvert<real,long>::to(
-      THCNumerics<real>::ceil(ScalarConvert<long,real>::to(nInputCols - (dilationW * (kW - 1) + 1) + 2*padW) / ScalarConvert<long,real>::to(dW))) + 1;
-    nOutputRows = ScalarConvert<real,long>::to(
-      THCNumerics<real>::ceil(ScalarConvert<long,real>::to(nInputRows - (dilationH * (kH - 1) + 1) + 2*padH) / ScalarConvert<long,real>::to(dH))) + 1;
+    nOutputCols = ceil(float(nInputCols - (dilationW * (kW - 1) + 1) + 2*padW) / float(dW)) + 1;
+    nOutputRows = ceil(float(nInputRows - (dilationH * (kH - 1) + 1) + 2*padH) / float(dH)) + 1;
   }
   else {
-    nOutputCols = ScalarConvert<real,long>::to(
-      THCNumerics<real>::floor(ScalarConvert<long,real>::to(nInputCols - (dilationW * (kW - 1) + 1) + 2*padW) / ScalarConvert<long,real>::to(dW))) + 1;
-    nOutputRows = ScalarConvert<real,long>::to(
-      THCNumerics<real>::floor(ScalarConvert<long,real>::to(nInputRows - (dilationH * (kH - 1) + 1) + 2*padH) / ScalarConvert<long,real>::to(dH))) + 1;
+    nOutputCols = floor(float(nInputCols - (dilationW * (kW - 1) + 1) + 2*padW) / float(dW)) + 1;
+    nOutputRows = floor(float(nInputRows - (dilationH * (kH - 1) + 1) + 2*padH) / float(dH)) + 1;
   }
 
 if (nOutputCols < 1 || nOutputRows < 1)
@@ -69,14 +65,14 @@ if (padW || padH)
   real* input_data = THCTensor_(data)(state, input);
 
   THCTensor_(resize4d)(state, output, batchSize, nInputPlane, nOutputRows, nOutputCols);
-  THCTensor_(resizeAs)(state, indices, output);
+  THCUNN_resizeAs_indices(state, indices, output);
 
-  real* indices_data = THCTensor_(data)(state, indices);
+  long* indices_data = THCudaLongTensor_data(state, indices);
   real* output_data = THCTensor_(data)(state, output);
 
   int count = THCTensor_(nElement)(state, output);
 
-  MaxPoolForward <<< GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state) >>>
+  MaxPoolForward<real, accreal> <<< GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state) >>>
       (count, input_data,
       batchSize, nInputPlane, nInputRows, nInputCols, nOutputRows, nOutputCols,
       kH, kW, dH, dW, padH, padW, dilationH, dilationW, output_data, indices_data);
@@ -93,7 +89,7 @@ void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
            THCTensor *input,
            THCTensor *gradOutput,
            THCTensor *gradInput,
-           THCTensor *indices,
+           THCudaLongTensor *indices,
            int kW, int kH,
            int dW, int dH,
            int padW, int padH,
@@ -123,17 +119,13 @@ void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
   }
 
   if(ceil_mode) {
-    nOutputCols = ScalarConvert<real,long>::to(
-      THCNumerics<real>::ceil(ScalarConvert<long,real>::to(nInputCols - (dilationW * (kW - 1) + 1) + 2*padW) / ScalarConvert<long,real>::to(dW))) + 1;
-    nOutputRows = ScalarConvert<real,long>::to(
-      THCNumerics<real>::ceil(ScalarConvert<long,real>::to(nInputRows - (dilationH * (kH - 1) + 1) + 2*padH) / ScalarConvert<long,real>::to(dH))) + 1;
-  }
-  else {
-    nOutputCols = ScalarConvert<real,long>::to(
-      THCNumerics<real>::floor(ScalarConvert<long,real>::to(nInputCols - (dilationW * (kW - 1) + 1) + 2*padW) / ScalarConvert<long,real>::to(dW))) + 1;
-    nOutputRows = ScalarConvert<real,long>::to(
-      THCNumerics<real>::floor(ScalarConvert<long,real>::to(nInputRows - (dilationH * (kH - 1) + 1) + 2*padH) / ScalarConvert<long,real>::to(dH))) + 1;
-  }
+     nOutputCols = ceil(float(nInputCols - (dilationW * (kW - 1) + 1) + 2*padW) / float(dW)) + 1;
+     nOutputRows = ceil(float(nInputRows - (dilationH * (kH - 1) + 1) + 2*padH) / float(dH)) + 1;
+   }
+   else {
+     nOutputCols = floor(float(nInputCols - (dilationW * (kW - 1) + 1) + 2*padW) / float(dW)) + 1;
+     nOutputRows = floor(float(nInputRows - (dilationH * (kH - 1) + 1) + 2*padH) / float(dH)) + 1;
+   }
 
   if (nOutputCols < 1 || nOutputRows < 1)
     THError("Given input size: (%dx%dx%d). Calculated output size: (%dx%dx%d). Output size is too small",
@@ -144,10 +136,10 @@ void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
 
   int count = THCTensor_(nElement)(state, input);
 
-  MaxPoolBackward <<< GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state) >>>
+  MaxPoolBackward<real, accreal> <<< GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state) >>>
       (count,
       THCTensor_(data)(state, gradOutput),
-      THCTensor_(data)(state, indices),
+      THCudaLongTensor_data(state, indices),
       batchSize, nInputPlane, nInputRows, nInputCols, nOutputRows, nOutputCols,
       kH, kW, dH, dW, padH, padW, dilationH, dilationW,
       THCTensor_(data)(state, gradInput));

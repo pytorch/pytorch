@@ -510,7 +510,7 @@ TH_API void THNN_CudaSpatialMaxPooling_updateOutput(
           THCState *state,
           THCudaTensor *input,
           THCudaTensor *output,
-          THCudaTensor *indices,
+          THCudaLongTensor *indices,
           int kW, int kH,
           int dW, int dH,
           int padW, int padH,
@@ -520,7 +520,7 @@ TH_API void THNN_CudaSpatialMaxPooling_updateGradInput(
           THCudaTensor *input,
           THCudaTensor *gradOutput,
           THCudaTensor *gradInput,
-          THCudaTensor *indices,
+          THCudaLongTensor *indices,
           int kW, int kH,
           int dW, int dH,
           int padW, int padH,
@@ -530,14 +530,14 @@ TH_API void THNN_CudaSpatialMaxUnpooling_updateOutput(
           THCState *state,
           THCudaTensor *input,
           THCudaTensor *output,
-          THCudaTensor *indices,
+          THCudaLongTensor *indices,
           int owidth, int oheight);
 TH_API void THNN_CudaSpatialMaxUnpooling_updateGradInput(
           THCState *state,
           THCudaTensor *input,
           THCudaTensor *gradOutput,
           THCudaTensor *gradInput,
-          THCudaTensor *indices,
+          THCudaLongTensor *indices,
           int owidth, int oheight);
 
 TH_API void THNN_CudaSpatialFractionalMaxPooling_updateOutput(
