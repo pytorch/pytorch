@@ -328,7 +328,7 @@ kernel_size |  | the size of the convolving kernel. Can be a single number k (fo
 stride | 1 | the stride of the convolving kernel. Can be a single number s or a tuple (sh x sw).
 padding | 0 | implicit zero padding on the input. Can be a single number s or a tuple.
 dilation | None | If given, will do dilated (or atrous) convolutions. Can be a single number s or a tuple.
-no_bias | False | If set to true, the layer will not learn an additive bias.
+bias | True | If set to False, the layer will not learn an additive bias.
 
 ### Expected Shape
        | Shape | Description 
@@ -375,6 +375,89 @@ padding | 0 | implicit zero padding on the input. Can be a single number s or a 
 output | [ * , out_channels , * , * , * ]   | Output shape is precisely minibatch x out_channels x floor((iT  + 2*padT - kT) / dT + 1) x floor((iH  + 2*padH - kH) / dH + 1) x floor((iW  + 2*padW - kW) / dW + 1)
 Members:
     weight: the learnable weights of the module of shape (out_channels x in_channels x kT x kH x kW)
+    bias:   the learnable bias of the module of shape (out_channels)
+## ConvTranspose2d
+
+Applies a 2D deconvolution operator over an input image composed of several input
+
+```python
+# With square kernels and equal stride
+m = nn.ConvTranspose2d(16, 33, 3, stride=2)
+# non-square kernels and unequal stride and with padding
+m = nn.ConvTranspose2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2))
+input = autograd.Variable(torch.randn(20, 16, 50, 100))
+output = m(input)
+# exact output size can be also specified as an argument
+input = autograd.Variable(torch.randn(1, 16, 12, 12))
+downsample = nn.Conv2d(16, 16, 3, stride=2, padding=1)
+upsample = nn.ConvTranspose2d(16, 16, 3, stride=2, padding=1)
+h = downsample(input)
+output = upsample(h, output_size=input.size())
+```
+
+planes.
+The deconvolution operator multiplies each input value element-wise by a learnable kernel,
+and sums over the outputs from all input feature planes.
+This module can be seen as the exact reverse of the Conv2d module.
+
+
+### Constructor Arguments
+
+Parameter | Default | Description
+--------- | ------- | -----------
+in_channels |  | The number of expected input channels in the image given as input
+out_channels |  | The number of output channels the convolution layer will produce
+kernel_size |  | the size of the convolving kernel. Can be a single number k (for a square kernel of k x k) or a tuple (kh x kw)
+stride | 1 | the stride of the convolving kernel. Can be a single number or a tuple (sh x sw).
+padding | 0 | implicit zero padding on the input. Can be a single number or a tuple.
+output_padding | 0 | A padding of 0 or 1 pixels that should be added to the output. Can be a single number or a tuple.
+bias | True | If set to False, the layer will not learn an additive bias.
+
+### Expected Shape
+       | Shape | Description 
+------ | ----- | ------------
+ input | [ * , in_channels  , * , * ]  | Input is minibatch x in_channels x iH x iW
+output | [ * , out_channels , * , * ]   | Output shape is minibatch x out_channels x (iH - 1) * sH - 2*padH + kH + output_paddingH x (iW - 1) * sW - 2*padW + kW, or as specified in a second argument to the call.
+Members:
+    weight: the learnable weights of the module of shape (in_channels x out_channels x kH x kW)
+    bias:   the learnable bias of the module of shape (out_channels)
+## ConvTranspose3d
+
+Applies a 3D deconvolution operator over an input image composed of several input
+
+```python
+# With square kernels and equal stride
+m = nn.ConvTranspose3d(16, 33, 3, stride=2)
+# non-square kernels and unequal stride and with padding
+m = nn.Conv3d(16, 33, (3, 5, 2), stride=(2, 1, 1), padding=(0, 4, 2))
+input = autograd.Variable(torch.randn(20, 16, 10, 50, 100))
+output = m(input)
+```
+
+planes.
+The deconvolution operator multiplies each input value element-wise by a learnable kernel,
+and sums over the outputs from all input feature planes.
+This module can be seen as the exact reverse of the Conv3d module.
+
+
+### Constructor Arguments
+
+Parameter | Default | Description
+--------- | ------- | -----------
+in_channels |  | The number of expected input channels in the image given as input
+out_channels |  | The number of output channels the convolution layer will produce
+kernel_size |  | the size of the convolving kernel. Can be a single number k (for a square kernel of k x k x k) or a tuple (kt x kh x kw)
+stride | 1 | the stride of the convolving kernel. Can be a single number or a tuple (st x sh x sw).
+padding | 0 | implicit zero padding on the input. Can be a single number or a tuple.
+output_padding | 0 | A padding of 0 or 1 pixels that should be added to the output. Can be a single number or a tuple.
+
+### Expected Shape
+       | Shape | Description 
+------ | ----- | ------------
+ input | [ * , in_channels  , * , * , * ]  | Input is minibatch x in_channels x iH x iW
+output | [ * , out_channels , * , * , * ]   | Output shape is precisely minibatch x out_channels x (iT - 1) * sT - 2*padT + kT + output_paddingT x (iH - 1) * sH - 2*padH + kH + output_paddingH x (iW - 1) * sW - 2*padW + kW
+Members:
+    weight: the learnable weights of the module of shape (in_channels x out_channels x kT x kH x kW)
     bias:   the learnable bias of the module of shape (out_channels)
 ## Dropout
 
@@ -561,83 +644,6 @@ return_indices | False | if True, will return the indices along with the outputs
 ------ | ----- | ------------
  input | [ * , * , *, * ]  | Input is minibatch x channels x iH x iW
 output | [ * , * , *, * ]   | Output shape = minibatch x channels x floor((iH  + 2*padH - kH) / sH + 1) x floor((iW  + 2*padW - kW) / sW + 1)
-## FullConv2d
-
-Applies a 2D deconvolution operator over an input image composed of several input
-
-```python
-# With square kernels and equal stride
-m = nn.FullConv2d(16, 33, 3, stride=2)
-# non-square kernels and unequal stride and with padding
-m = nn.Conv2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2))
-input = autograd.Variable(torch.randn(20, 16, 50, 100))
-output = m(input)
-```
-
-planes.
-The deconvolution operator multiplies each input value element-wise by a learnable kernel,
-and sums over the outputs from all input feature planes.
-This module can be seen as the exact reverse of the Conv2d module.
-
-
-### Constructor Arguments
-
-Parameter | Default | Description
---------- | ------- | -----------
-in_channels |  | The number of expected input channels in the image given as input
-out_channels |  | The number of output channels the convolution layer will produce
-kernel_size |  | the size of the convolving kernel. Can be a single number k (for a square kernel of k x k) or a tuple (kh x kw)
-stride | 1 | the stride of the convolving kernel. Can be a single number or a tuple (sh x sw).
-padding | 0 | implicit zero padding on the input. Can be a single number or a tuple.
-output_padding | 0 | A padding of 0 or 1 pixels that should be added to the output. Can be a single number or a tuple.
-no_bias | False | If set to true, the layer will not learn an additive bias.
-
-### Expected Shape
-       | Shape | Description 
------- | ----- | ------------
- input | [ * , in_channels  , * , * ]  | Input is minibatch x in_channels x iH x iW
-output | [ * , out_channels , * , * ]   | Output shape is precisely minibatch x out_channels x (iH - 1) * sH - 2*padH + kH + output_paddingH x (iW - 1) * sW - 2*padW + kW
-Members:
-    weight: the learnable weights of the module of shape (in_channels x out_channels x kH x kW)
-    bias:   the learnable bias of the module of shape (out_channels)
-## FullConv3d
-
-Applies a 3D deconvolution operator over an input image composed of several input
-
-```python
-# With square kernels and equal stride
-m = nn.FullConv3d(16, 33, 3, stride=2)
-# non-square kernels and unequal stride and with padding
-m = nn.Conv3d(16, 33, (3, 5, 2), stride=(2, 1, 1), padding=(0, 4, 2))
-input = autograd.Variable(torch.randn(20, 16, 10, 50, 100))
-output = m(input)
-```
-
-planes.
-The deconvolution operator multiplies each input value element-wise by a learnable kernel,
-and sums over the outputs from all input feature planes.
-This module can be seen as the exact reverse of the Conv3d module.
-
-
-### Constructor Arguments
-
-Parameter | Default | Description
---------- | ------- | -----------
-in_channels |  | The number of expected input channels in the image given as input
-out_channels |  | The number of output channels the convolution layer will produce
-kernel_size |  | the size of the convolving kernel. Can be a single number k (for a square kernel of k x k x k) or a tuple (kt x kh x kw)
-stride | 1 | the stride of the convolving kernel. Can be a single number or a tuple (st x sh x sw).
-padding | 0 | implicit zero padding on the input. Can be a single number or a tuple.
-output_padding | 0 | A padding of 0 or 1 pixels that should be added to the output. Can be a single number or a tuple.
-
-### Expected Shape
-       | Shape | Description 
------- | ----- | ------------
- input | [ * , in_channels  , * , * , * ]  | Input is minibatch x in_channels x iH x iW
-output | [ * , out_channels , * , * , * ]   | Output shape is precisely minibatch x out_channels x (iT - 1) * sT - 2*padT + kT + output_paddingT x (iH - 1) * sH - 2*padH + kH + output_paddingH x (iW - 1) * sW - 2*padW + kW
-Members:
-    weight: the learnable weights of the module of shape (in_channels x out_channels x kT x kH x kW)
-    bias:   the learnable bias of the module of shape (out_channels)
 ## Hardshrink
 
 Applies the hard shrinkage function element-wise
@@ -783,6 +789,7 @@ Parameter | Default | Description
 --------- | ------- | -----------
 in_features |  | size of each input sample
 out_features |  | size of each output sample
+bias | True | If set to False, the layer will not learn an additive bias.
 
 ### Expected Shape
        | Shape | Description 
@@ -958,6 +965,12 @@ mu = nn.MaxUnpool2d(2, stride=2)
 input = autograd.Variable(torch.randn(20, 16, 50, 32))
 output, indices = m(input)
 unpooled_output = mu.forward(output, indices)
+# exact output size can be also specified as an argument
+input = autograd.Variable(torch.randn(1, 16, 11, 11))
+downsample = nn.MaxPool2d(3, 3, return_indices=True)
+upsample = nn.MaxUnpool2d(3, 3)
+h, indices = downsample(input)
+output = upsample(h, indices, output_size=input.size())
 ```
 
 MaxPool2d is not invertible, as the locations of the max locations are lost.
@@ -977,7 +990,7 @@ padding | 0 | implicit padding that was added to the input. Can be a single numb
        | Shape | Description 
 ------ | ----- | ------------
  input | [ * , * , *, * ]  | Input is minibatch x channels x iH x iW
-output | [ * , * , *, * ]   | Output shape = minibatch x channels x padH x (iH - 1) * sH + kH x padW x (iW - 1) * sW + kW
+output | [ * , * , *, * ]   | Output shape is minibatch x channels x padH x (iH - 1) * sH + kH x padW x (iW - 1) * sW + kW, or as specified to the call.
 ## MaxUnpool3d
 
 Computes the inverse operation of MaxPool3d
