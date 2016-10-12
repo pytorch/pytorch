@@ -59,6 +59,18 @@ def small_3d_positive(t):
 def small_3d_unique(t):
     return t(S, S, S).copy_(torch.range(1, S*S*S))
 
+def small_1d_lapack(t):
+    return torch.range(1, 3).view(3)
+
+def small_2d_lapack(t):
+    return torch.range(1, 9).view(3, 3)
+
+def small_2d_lapack_skinny(t):
+    return torch.range(1, 12).view(3, 4)
+
+def small_2d_lapack_fat(t):
+    return torch.range(1, 12).view(4, 3)
+
 def new_t(*sizes):
     def tmp(t):
         return t(*sizes).copy_(torch.randn(*sizes))
@@ -92,12 +104,8 @@ tests = [
     ('addmv',         medium_1d,          lambda t: [medium_2d(t), medium_1d(t)],                           ),
     ('addmv',         medium_1d,          lambda t: [number(0.4, 2, t), medium_2d(t), medium_1d(t)], 'scalar' ),
     ('addmv',         medium_1d,          lambda t: [number(0.5, 3, t), number(0.4, 2, t), medium_2d(t), medium_1d(t)], 'two_scalars'   ),
-    ('addmv',         medium_1d,          lambda t: [medium_2d(t), medium_1d(t)],                           ),
-    ('addmv',         medium_1d,          lambda t: [number(0.4, 2, t), medium_2d(t), medium_1d(t)], 'scalar' ),
-    ('addmv',         medium_1d,          lambda t: [number(0.5, 3, t), number(0.4, 2, t), medium_2d(t), medium_1d(t)], 'two_scalars'   ),
     ('addr',          medium_2d,          lambda t: [medium_1d(t), medium_1d(t)],                           ),
     ('addr',          medium_2d,          lambda t: [number(0.4, 2, t), medium_1d(t), medium_1d(t)], 'scalar' ),
-    ('addr',          medium_2d,          lambda t: [number(0.5, 3, t), number(0.4, 2, t), medium_1d(t), medium_1d(t)], 'two_scalars'   ),
     ('addr',          medium_2d,          lambda t: [number(0.5, 3, t), number(0.4, 2, t), medium_1d(t), medium_1d(t)], 'two_scalars'   ),
     ('atan2',         medium_2d,          lambda t: [medium_2d(t)],                                         ),
     ('chunk',         medium_2d,          lambda t: [4],                                                    ),
@@ -195,6 +203,11 @@ tests = [
     ('rsqrt',         lambda t: small_3d(t) + 1,                lambda t: [],                               ),
     ('sinh',          lambda t: small_3d(t).clamp(-1, 1),       lambda t: [],                               ),
     ('tan',           lambda t: small_3d(t).clamp(-1, 1),       lambda t: [],                               ),
+    # lapack tests
+    ('qr',            small_2d_lapack,           lambda t: [],   'square'                                   ),
+    ('qr',            small_2d_lapack_skinny,    lambda t: [],   'skinny'                                   ),
+    ('qr',            small_2d_lapack_fat,       lambda t: [],   'fat'                                      ),
+ 
 ]
 
 # TODO: random functions, cat, gather, scatter, index*, masked*, resize, resizeAs, storage_offset, storage, stride, unfold
@@ -251,6 +264,11 @@ def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t, precision=1e-5):
             if 'unimplemented data type' in reason:
                 raise unittest.SkipTest('unimplemented data type')
             raise
+        except AttributeError as e:
+            reason = e.args[0]
+            if 'object has no attribute' in reason:
+                raise unittest.SkipTest('unimplemented data type')
+            raise        
         # If one changes, another should change as well
         self.assertEqual(cpu_tensor, gpu_tensor, precision)
         self.assertEqual(cpu_args, gpu_args, precision)
@@ -482,19 +500,22 @@ for decl in tests:
         precision = custom_precision.get(name, TestCuda.precision)
         for inplace in (True, False):
             if inplace:
-                name = name + '_'
-            if not hasattr(tensor, name):
+                name_inner = name + '_'
+            else:
+                name_inner = name
+            if not hasattr(tensor, name_inner):
+                print("Ignoring {}, because it's not implemented by torch.{}".format(name_inner, tensor.__class__.__name__))
                 continue
-            if not hasattr(gpu_tensor, name):
-                print("Ignoring {}, because it's not implemented by torch.cuda.{}".format(name, gpu_tensor.__class__.__name__))
+            if not hasattr(gpu_tensor, name_inner):
+                print("Ignoring {}, because it's not implemented by torch.cuda.{}".format(name_inner, gpu_tensor.__class__.__name__))
                 continue
 
-            test_name = 'test_' + t.__name__ + '_' + name
+            test_name = 'test_' + t.__name__ + '_' + name_inner
             if desc:
                 test_name += '_' + desc
 
-            assert not hasattr(TestCase, test_name)
-            setattr(TestCuda, test_name, compare_cpu_gpu(constr, arg_constr, name, t, precision))
+            assert not hasattr(TestCuda, test_name), "Duplicated test name: " + test_name
+            setattr(TestCuda, test_name, compare_cpu_gpu(constr, arg_constr, name_inner, t, precision))
 
 if __name__ == '__main__':
     unittest.main()

@@ -715,7 +715,7 @@ static PyMethodDef TorchMethods[] = {
   {"potrs",           (PyCFunction)THPModule_potrs,             METH_VARARGS | METH_KEYWORDS, NULL},
   {"potri",           (PyCFunction)THPModule_potri,             METH_VARARGS | METH_KEYWORDS, NULL},
   {"pstrf",           (PyCFunction)THPModule_pstrf,             METH_VARARGS | METH_KEYWORDS, NULL},
-  {"qe",              (PyCFunction)THPModule_qr,                METH_VARARGS | METH_KEYWORDS, NULL},
+  {"qr",              (PyCFunction)THPModule_qr,                METH_VARARGS | METH_KEYWORDS, NULL},
   {"geqrf",           (PyCFunction)THPModule_geqrf,             METH_VARARGS | METH_KEYWORDS, NULL},
   {"orgqr",           (PyCFunction)THPModule_orgqr,             METH_VARARGS | METH_KEYWORDS, NULL},
   {"ormqr",           (PyCFunction)THPModule_ormqr,             METH_VARARGS | METH_KEYWORDS, NULL},

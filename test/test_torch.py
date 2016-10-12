@@ -1114,6 +1114,123 @@ class TestTorch(TestCase):
         self.assertEqual(res1, tb)
 
     @skipIfNoLapack
+    def test_qr(self):
+
+        # Since the QR decomposition is unique only up to the signs of the rows of
+        # R, we must ensure these are positive before doing the comparison.
+        def canonicalize(q, r):
+            d = r.diag().sign().diag()
+            return torch.mm(q, d), torch.mm(d, r)
+
+        def canon_and_check(q, r, expected_q, expected_r):
+            q_canon, r_canon = canonicalize(q, r)
+            expected_q_canon, expected_r_canon = canonicalize(expected_q, expected_r)
+            self.assertEqual(q_canon, expected_q_canon)
+            self.assertEqual(r_canon, expected_r_canon)
+
+        def check_qr(a, expected_q, expected_r):
+            # standard invocation
+            q, r = torch.qr(a)
+            canon_and_check(q, r, expected_q, expected_r)
+            
+            # in-place
+            q, r = torch.Tensor(), torch.Tensor()
+            torch.qr(q, r, a)
+            canon_and_check(q, r, expected_q, expected_r)
+            
+            # manually calculate qr using geqrf and orgqr
+            m = a.size(0)
+            n = a.size(1)
+            k = min(m, n)
+            result, tau = torch.geqrf(a)
+            self.assertEqual(result.size(0), m)
+            self.assertEqual(result.size(1), n)
+            self.assertEqual(tau.size(0), k)
+            r = torch.triu(result.narrow(0, 0, k))
+            q, _ = torch.orgqr(result, tau)
+            q, r = q.narrow(1, 0, k), r
+            canon_and_check(q, r, expected_q, expected_r)
+
+        # check square case
+        a = torch.Tensor(((1, 2, 3), (4, 5, 6), (7, 8, 10)))
+
+        expected_q = torch.Tensor((
+            (-1.230914909793328e-01,  9.045340337332914e-01, 4.082482904638621e-01),
+            (-4.923659639173310e-01,  3.015113445777629e-01, -8.164965809277264e-01),
+            (-8.616404368553292e-01, -3.015113445777631e-01, 4.082482904638634e-01)))
+        expected_r = torch.Tensor((
+            (-8.124038404635959e+00, -9.601136296387955e+00, -1.193987e+01),
+            ( 0.000000000000000e+00,  9.045340337332926e-01, 1.507557e+00),
+            ( 0.000000000000000e+00,  0.000000000000000e+00, 4.082483e-01)))
+
+        check_qr(a, expected_q, expected_r)
+
+        # check rectangular thin
+        a = torch.Tensor((
+              ( 1,  2,  3),
+              ( 4,  5,  6),
+              ( 7,  8,  9),
+              (10, 11, 13),
+          ))
+        expected_q = torch.Tensor((
+            (-0.0776150525706334, -0.833052161400748 ,  0.3651483716701106),
+            (-0.3104602102825332, -0.4512365874254053, -0.1825741858350556),
+            (-0.5433053679944331, -0.0694210134500621, -0.7302967433402217),
+            (-0.7761505257063329,  0.3123945605252804,  0.5477225575051663)
+        ))
+        expected_r = torch.Tensor((
+            (-12.8840987267251261, -14.5916298832790581, -17.0753115655393231),
+            (  0,                  -1.0413152017509357,  -1.770235842976589 ),
+            (  0,                   0,                    0.5477225575051664)
+        ))
+        
+        check_qr(a, expected_q, expected_r)
+
+        # check rectangular fat
+        a = torch.Tensor((
+              (1,  2,  3,  4),
+              (5,  6,  7,  8),
+              (9, 10, 11, 13)
+          ))
+        expected_q = torch.Tensor((
+            (-0.0966736489045663,  0.907737593658436 ,  0.4082482904638653),
+            (-0.4833682445228317,  0.3157348151855452, -0.8164965809277254),
+            (-0.870062840141097 , -0.2762679632873518,  0.4082482904638621)
+        ))
+        expected_r = torch.Tensor((
+            ( -1.0344080432788603e+01,  -1.1794185166357092e+01,
+              -1.3244289899925587e+01,  -1.5564457473635180e+01),
+            (  0.0000000000000000e+00,   9.4720444555662542e-01,
+               1.8944088911132546e+00,   2.5653453733825331e+00),
+            (  0.0000000000000000e+00,   0.0000000000000000e+00,
+               1.5543122344752192e-15,   4.0824829046386757e-01)
+        ))
+        check_qr(a, expected_q, expected_r)
+
+    @skipIfNoLapack
+    def test_ormqr(self):
+        mat1 = torch.randn(10, 10)
+        mat2 = torch.randn(10, 10)
+        q, r = torch.qr(mat1)
+        m, tau = torch.geqrf(mat1)
+
+        res1 = torch.mm(q, mat2)
+        res2, _ = torch.ormqr(m, tau, mat2)
+        self.assertEqual(res1, res2)
+
+        res1 = torch.mm(mat2, q)
+        res2, _ = torch.ormqr(m, tau, mat2, False)
+        self.assertEqual(res1, res2)
+
+        res1 = torch.mm(q.t(), mat2)
+        res2, _ = torch.ormqr(m, tau, mat2, True, True)
+        self.assertEqual(res1, res2)
+
+        res1 = torch.mm(mat2, q.t())
+        res2, _ = torch.ormqr(m, tau, mat2, False, True)
+        self.assertEqual(res1, res2)
+
+    @skipIfNoLapack
     def test_trtrs(self):
         a = torch.Tensor(((6.80, -2.11,  5.66,  5.97,  8.23),
                         (-6.05, -3.30,  5.36, -4.44,  1.08),
