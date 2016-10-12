@@ -2,9 +2,9 @@
 #define CAFFE2_OPERATORS_LOSS_OP_H_
 
 #include "caffe2/core/context.h"
+#include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
-#include "caffe2/core/logging.h"
 
 namespace caffe2 {
 
@@ -23,11 +23,9 @@ class AveragedLoss final : public Operator<Context> {
     T* loss_data = Loss->template mutable_data<T>();
     // Well... technically we won't need to sum and scale, but I am too lazy
     // to write an average function.
-    math::Sum<T, Context>(
-        X.size(), X.template data<T>(), loss_data, &context_);
+    math::Sum<T, Context>(X.size(), X.template data<T>(), loss_data, &context_);
     math::Scale<T, Context>(
-        1, static_cast<T>(1.) / X.size(), loss_data, loss_data,
-        &context_);
+        1, static_cast<T>(1.) / X.size(), loss_data, loss_data, &context_);
     return true;
   }
 
@@ -48,13 +46,14 @@ class AveragedLossGradient final : public Operator<Context> {
     dX->ResizeLike(X);
     DCHECK_EQ(loss_grad.size(), 1);
     math::Set<T, Context>(
-        dX->size(), static_cast<T>(loss_grad.data<T>()[0]) / X.size(),
+        dX->size(),
+        static_cast<T>(loss_grad.data<T>()[0]) / X.size(),
         dX->template mutable_data<T>(),
         &context_);
     return true;
   }
 };
 
-}  // namespace caffe2
+} // namespace caffe2
 
-#endif  // CAFFE2_OPERATORS_LOSS_OP_H_
+#endif // CAFFE2_OPERATORS_LOSS_OP_H_

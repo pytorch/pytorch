@@ -138,13 +138,23 @@ class TTLinearOp final : public Operator<Context> {
       // If the helper bias multiplier is not M, reshape and fill it with one.
       bias_multiplier_.Resize(batch_size);
       math::Set<T, Context>(
-          batch_size, static_cast<T>(1),
-          bias_multiplier_.template mutable_data<T>(), &context_);
+          batch_size,
+          static_cast<T>(1),
+          bias_multiplier_.template mutable_data<T>(),
+          &context_);
     }
     math::Gemm<T, Context, Engine>(
-        CblasNoTrans, CblasNoTrans, Y->dim32(0), Y->dim32(1), 1, 1,
-        bias_multiplier_.template data<T>(), b.template data<T>(), 1,
-        Y->template mutable_data<T>(), &context_);
+        CblasNoTrans,
+        CblasNoTrans,
+        Y->dim32(0),
+        Y->dim32(1),
+        1,
+        1,
+        bias_multiplier_.template data<T>(),
+        b.template data<T>(),
+        1,
+        Y->template mutable_data<T>(),
+        &context_);
     return true;
   }
 

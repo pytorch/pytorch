@@ -121,16 +121,18 @@ class BinaryElementwiseOp : public Operator<Context> {
     if (enable_broadcast_) {
       if (axis_ != -1) {
         // Get axis from an explicit axis argument.
-        CAFFE_ENFORCE(
-            axis_str_.size() == 0,
+        CAFFE_ENFORCE_EQ(
+            axis_str_.size(),
+            0,
             "Args axis and axis_str cannot be used simultaneously.");
       } else if (axis_str_.size()) {
         // Get the axis index semantically.
-        CAFFE_ENFORCE(
-            axis_str_.size() == 1, "Unsupported axis string", axis_str_);
+        CAFFE_ENFORCE_EQ(
+            axis_str_.size(), 1, "Unsupported axis string", axis_str_);
         size_t semantic_axis_ = order_.find(axis_str_);
-        CAFFE_ENFORCE(
-            semantic_axis_ != string::npos,
+        CAFFE_ENFORCE_NE(
+            semantic_axis_,
+            string::npos,
             "Unrecognizable axis string ",
             axis_str_,
             " from order string ",
@@ -162,15 +164,17 @@ class BinaryElementwiseOp : public Operator<Context> {
     auto* Cdata =
         C->template mutable_data<typename TypeMap::template type<T>>();
     if (!enable_broadcast_) {
-      CAFFE_ENFORCE(
-          A.dims() == B.dims(),
+      CAFFE_ENFORCE_EQ(
+          A.dims(),
+          B.dims(),
           "Dimension mismatch - did you forget to set broadcast=1?");
       functor_.template Run<false>(A.size(), Adata, Bdata, Cdata, &context_);
     } else if (B.size() == 1) {
       functor_.template Run<true>(A.size(), Adata, Bdata, Cdata, &context_);
     } else {
-      CAFFE_ENFORCE(
-          A.ndim() > B.ndim(),
+      CAFFE_ENFORCE_GT(
+          A.ndim(),
+          B.ndim(),
           "If you are doing broadcasting, input1 should have "
           "a smaller number of dimensions.");
       const int axis = (axis_ == -1 ? A.ndim() - B.ndim() : axis_);
@@ -183,8 +187,8 @@ class BinaryElementwiseOp : public Operator<Context> {
         pre *= A.dim(i);
       }
       for (int i = 0; i < B.ndim(); ++i) {
-        CAFFE_ENFORCE(
-            A.dim(i + axis) == B.dim(i), "Broadcast dimension mismatch.");
+        CAFFE_ENFORCE_EQ(
+            A.dim(i + axis), B.dim(i), "Broadcast dimension mismatch.");
         n *= B.dim(i);
       }
       for (int i = axis + B.ndim(); i < A.ndim(); ++i) {

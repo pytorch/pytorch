@@ -322,6 +322,8 @@ def TranslatePool(layer, pretrained_blobs, is_test):
     AddArgument(caffe_op, "order", "NCHW")
     AddArgument(caffe_op, "legacy_pad",
                 caffe2_legacy_pb2.CAFFE_LEGACY_POOLING)
+    if param.global_pooling:
+        AddArgument(caffe_op, "global_pooling", 1)
     return caffe_op, []
 
 

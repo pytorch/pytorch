@@ -184,4 +184,5 @@ OPERATOR_SCHEMA(TextFileReaderRead)
 
 NO_GRADIENT(CreateTextFileReader);
 NO_GRADIENT(TextFileReaderRead);
-}
+
+} // namespace caffe2

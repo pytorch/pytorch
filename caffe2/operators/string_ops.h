@@ -1,4 +1,6 @@
-#pragma once
+#ifndef CAFFE2_OPERATORS_STRING_OPS_H_
+#define CAFFE2_OPERATORS_STRING_OPS_H_
+
 #include "caffe2/core/operator.h"
 #include "caffe2/operators/elementwise_op.h"
 
@@ -33,3 +35,5 @@ using StringElementwiseOp = UnaryElementwiseWithArgsOp<
     TypeMap>;
 
 } // namespace caffe2
+
+#endif // CAFFE2_OPERATORS_STRING_OPS_H_

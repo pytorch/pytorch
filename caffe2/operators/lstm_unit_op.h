@@ -1,10 +1,10 @@
-#pragma once
+#ifndef CAFFE2_OPERATORS_LSTM_UNIT_OP_H_
+#define CAFFE2_OPERATORS_LSTM_UNIT_OP_H_
 
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 
 namespace caffe2 {
-
 namespace detail {
 
 template <typename T>
@@ -108,7 +108,7 @@ void LSTMUnitGradient(
     C_prev_diff += D;
   }
 }
-}
+} // namespace detail
 
 template <typename T, typename Context>
 class LSTMUnitOp : public Operator<Context> {
@@ -195,8 +195,10 @@ class LSTMUnitGradientOp : public Operator<Context> {
       HIDDEN_T,
       CELL_T,
       HIDDEN_T_GRAD,
-      CELL_T_GRAD,
-      );
+      CELL_T_GRAD, );
   OUTPUT_TAGS(CELL_T_M_1_GRAD, GATES_GRAD);
 };
-}
+
+} // namespace caffe2
+
+#endif // CAFFE2_OPERATORS_LSTM_UNIT_OP_H_

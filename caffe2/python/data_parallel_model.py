@@ -130,11 +130,13 @@ class GPUDataParallelModel(cnn.CNNModelHelper):
     def __init__(self, devices, *args, **kwargs):
         assert len(devices) >= 1, "Should have at least 1 GPU devices"
         assert len(devices) <= workspace.NumCudaDevices(), \
-            "Requested number of devices is greater than the number of GPUs"
+            "Requested # of devices {} is greater than the # of GPUs {}".\
+            format(devices, workspace.NumCudaDevices())
         _GPUDataParallelMetaClass._devices = devices
         self._devices = devices
         self._explicit_scope = False
         self._gradient_reduce_all_added = False
+        self._mpi_comm = None
         super(GPUDataParallelModel, self).__init__(*args, **kwargs)
 
     def explicit_scope(self):
@@ -193,9 +195,16 @@ class GPUDataParallelModel(cnn.CNNModelHelper):
     def SquaredL2Distance(self, *args, **kwargs):
         return self._call("SquaredL2Distance", *args, **kwargs)
 
+    def SetMPIComm(self, mpi_comm):
+        self._mpi_comm = mpi_comm
+
     def FinalizeSetup(self):
         self.param_init_net.RunAllOnGPU()
         self.RunAllOnGPU()
+
+        # If MPI enabled, broadcast params from master
+        if (self._mpi_comm is not None):
+            self._AddMPIParameterSync()
 
         # Setup sync of initial params
         self._SyncInitialParams()
@@ -255,34 +264,105 @@ class GPUDataParallelModel(cnn.CNNModelHelper):
 
         self._explicit_scope = False
 
-    def _SyncInitialParams(self):
+    def _Broadcast(self, net, param):
         # TODO(akyrola): replace with NCCLBroadcast when it's working
-        # This doesn't work right now:
-        # with core.DeviceScope(core.DeviceOption(caffe2_pb2.CUDA, 0)):
-        #     workspace.RunOperatorOnce(
-        #         core.CreateOperator(
-        #             'NCCLBroadcast', model.params, model.params, root=0))
+        # Copy params from gpu_0 to other
+        for gpu_idx in self._devices[1:]:
+            device_opt = core.DeviceOption(caffe2_pb2.CUDA, gpu_idx)
+            with core.DeviceScope(device_opt):
+                net.Copy(
+                    "gpu_{}/{}".format(self._devices[0], param),
+                    "gpu_{}/{}".format(gpu_idx, param)
+                )
+
+    def _SyncInitialParams(self):
         unique_param_names = set(
             stripParamName(p)
             for p in self.params
         )
 
         self._explicit_scope = True
-        # Copy params from gpu_0 to other
         for param in unique_param_names:
-            for gpu_idx in self._devices[1:]:
-                device_opt = core.DeviceOption(caffe2_pb2.CUDA, gpu_idx)
-                with core.DeviceScope(device_opt):
-                    self.param_init_net.Copy(
-                        "gpu_{}/{}".format(self._devices[0], param),
-                        "gpu_{}/{}".format(gpu_idx, param)
-                    )
+            self._Broadcast(self.param_init_net, param)
+
+        self._explicit_scope = False
+
+    def _AddMPIParameterSync(self):
+        # Sync from master
+        unique_param_names = set(
+            stripParamName(p)
+            for p in self.params
+        )
+
+        self._explicit_scope = True
+
+        # Should this be done in GPU 0 scope?
+        for param_name in unique_param_names:
+            param = "gpu_{}/{}".format(self._devices[0], param_name)
+            self.param_init_net.Broadcast(
+                inputs=[self._mpi_comm, param],
+                outputs=[param],
+                engine='MPI'
+            )
         self._explicit_scope = False
 
     def _AllReduceGradients(self):
-        """Performs NCCL AllReduce to distribute gradients to all the GPUs."""
-
         self._gradient_reduce_all_added = True
+
+        if self._mpi_comm is None:
+            self._AllReduceGradientsSingleHost()
+        else:
+            self._AllReduceGradientsWithMPI()
+
+    def _AllReduceGradientsWithMPI(self):
+        self._explicit_scope = True
+        unique_grads_names = set(
+            stripParamName(grad)
+            for grad in self.param_to_grad.values()
+        )
+
+        # Step 1: sum gradients from local GPUs to master GPU
+        last_out = None
+        master_device_opt = core.DeviceOption(caffe2_pb2.CUDA, self._devices[0])
+
+        # Note: sorted order to ensure each host puts the operators in
+        # same order.
+        for grad_name in sorted(unique_grads_names):
+            grads_group = [
+                grad
+                for grad in self.param_to_grad.values()
+                if stripParamName(grad) == grad_name
+            ]
+            master_grad = "gpu_{}/{}".format(self._devices[0], grad_name)
+            assert master_grad in grads_group
+
+            # Remark: NCCLReduce does not support in-place modifications
+            # so we need a temporary gradient blob
+            reduced_grad = "gpu_{}/{}_red".format(
+                self._devices[0],
+                grad_name
+            )
+
+            with core.DeviceScope(master_device_opt):
+                self.ConstantFill(master_grad, reduced_grad, value=0.0)
+                self.net.NCCLReduce(grads_group, reduced_grad)
+
+                # Step 2: allreduce over MPI to all hosts, between master GPUs
+                self.net.Allreduce(
+                    inputs=[self._mpi_comm, reduced_grad],
+                    outputs=[master_grad],
+                    engine='MPI',
+                    control_input=None if last_out is None else [last_out],
+                )
+                last_out = master_grad
+
+            # Step 3: broadcast locally
+            self._Broadcast(self.net, grad_name)
+
+        self._explicit_scope = False
+
+    def _AllReduceGradientsSingleHost(self):
+        """Performs NCCL AllReduce to distribute gradients to all the GPUs."""
 
         if len(self._devices) == 1:
             return
@@ -292,12 +372,12 @@ class GPUDataParallelModel(cnn.CNNModelHelper):
             stripParamName(grad)
             for grad in self.param_to_grad.values()
         )
+
         # Now we need to Allreduce gradients on all the GPUs.
         # Pick GPU #0 as a master GPU.
         self._explicit_scope = True
-        with core.DeviceScope(
-            core.DeviceOption(caffe2_pb2.CUDA, self._devices[0])
-        ):
+        master_device_opt = core.DeviceOption(caffe2_pb2.CUDA, self._devices[0])
+        with core.DeviceScope(master_device_opt):
             # Group by grads for reduce.
             for grad_name in unique_grads_names:
                 grads_group = [
@@ -405,3 +485,27 @@ def stripParamName(param):
     name = str(param)
     sep = scope._NAMESCOPE_SEPARATOR
     return name[name.rindex(sep) + 1:]
+
+
+def SetupMPICluster(num_replicas, role, job_path):
+    from caffe2.python import mpi
+    print("Initing library")
+    dyndep.InitOpsLibrary('@/caffe2/caffe2/mpi:mpi_ops')
+    print("Setup peers")
+    mpi.SetupPeers(
+        replicas=int(num_replicas),
+        role=role,
+        job_path=job_path
+    )
+    print("Create mpi_init net")
+    mpi_init_net = core.Net('mpi_init')
+    print("Create commonworld")
+    mpi_comm = mpi_init_net.CreateCommonWorld(
+        inputs=[],
+        outputs=['comm_world'],
+        engine='MPI'
+    )
+    print("Run mpi_init net")
+    workspace.RunNetOnce(mpi_init_net)
+    print("Finished MPI setup")
+    return mpi_comm

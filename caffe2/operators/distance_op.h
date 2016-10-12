@@ -21,8 +21,7 @@ class SquaredL2DistanceOp : public Operator<Context> {
 };
 
 template <typename T, class Context>
-class SquaredL2DistanceGradientOp final
-    : public Operator<Context> {
+class SquaredL2DistanceGradientOp final : public Operator<Context> {
  public:
   SquaredL2DistanceGradientOp(const OperatorDef& def, Workspace* ws)
       : Operator<Context>(def, ws) {}
@@ -45,16 +44,24 @@ class SquaredL2DistanceGradientOp final
     dX->ResizeLike(X);
     dY->ResizeLike(Y);
     math::Sub<T, Context>(
-        X.size(), X.template data<T>(), Y.template data<T>(),
-        dX->template mutable_data<T>(), &context_);
+        X.size(),
+        X.template data<T>(),
+        Y.template data<T>(),
+        dX->template mutable_data<T>(),
+        &context_);
     for (int i = 0; i < N; ++i) {
       math::Scale<T, Context>(
-          D, dDistance.template data<T>() + i, dX->template data<T>() + i * D,
-          dX->template mutable_data<T>() + i * D, &context_);
+          D,
+          dDistance.template data<T>() + i,
+          dX->template data<T>() + i * D,
+          dX->template mutable_data<T>() + i * D,
+          &context_);
     }
     // The gradient of the other side is basically the negative.
     math::Scale<T, Context>(
-        X.size(), -1, dX->template data<T>(),
+        X.size(),
+        -1,
+        dX->template data<T>(),
         dY->template mutable_data<T>(),
         &context_);
     return true;
@@ -213,6 +220,6 @@ class CosineSimilarityGradientOp final : public Operator<Context> {
   OUTPUT_TAGS(DER_X_OUT, DER_Y_OUT);
 };
 
-}  // namespace caffe2
+} // namespace caffe2
 
 #endif // CAFFE2_OPERATORS_DISTANCE_OP_H_

@@ -7,10 +7,10 @@
 
 #include "caffe2/core/context.h"
 #include "caffe2/core/db.h"
+#include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
 #include "caffe2/utils/proto_utils.h"
-#include "caffe2/core/logging.h"
 
 namespace caffe2 {
 
@@ -23,9 +23,10 @@ class LoadOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   LoadOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws), ws_(ws),
-        absolute_path_(OperatorBase::GetSingleArgument<int>(
-            "absolute_path", false)),
+      : Operator<Context>(operator_def, ws),
+        ws_(ws),
+        absolute_path_(
+            OperatorBase::GetSingleArgument<int>("absolute_path", false)),
         db_name_(OperatorBase::GetSingleArgument<string>("db", "")),
         db_type_(OperatorBase::GetSingleArgument<string>("db_type", "")),
         keep_device_(OperatorBase::GetSingleArgument<int>("keep_device", 0)) {
@@ -49,8 +50,8 @@ class LoadOp final : public Operator<Context> {
     } else {
       string full_db_name =
           absolute_path_ ? db_name_ : (ws_->RootFolder() + "/" + db_name_);
-      std::unique_ptr<DB> in_db(caffe2::db::CreateDB(
-          db_type_, full_db_name, caffe2::db::READ));
+      std::unique_ptr<DB> in_db(
+          caffe2::db::CreateDB(db_type_, full_db_name, caffe2::db::READ));
       CAFFE_ENFORCE(in_db.get(), "Cannot open db: ", db_name_);
       std::unique_ptr<Cursor> cursor(in_db->NewCursor());
       extractFrom(cursor.get(), outputs);
@@ -175,10 +176,9 @@ class SaveOp final : public Operator<Context> {
   bool RunOnDevice() override {
     string full_db_name =
         absolute_path_ ? db_name_ : (ws_->RootFolder() + "/" + db_name_);
-    std::unique_ptr<DB> out_db(caffe2::db::CreateDB(
-        db_type_, full_db_name, caffe2::db::NEW));
-    CAFFE_ENFORCE(out_db.get(),
-        "Cannot open db for writing: ", full_db_name);
+    std::unique_ptr<DB> out_db(
+        caffe2::db::CreateDB(db_type_, full_db_name, caffe2::db::NEW));
+    CAFFE_ENFORCE(out_db.get(), "Cannot open db for writing: ", full_db_name);
 
     const vector<const Blob*>& inputs = OperatorBase::Inputs();
     BlobSerializerBase::SerializationAcceptor acceptor = [&](
@@ -201,7 +201,7 @@ class SaveOp final : public Operator<Context> {
   string db_type_;
 };
 
-template <typename ... Ts>
+template <typename... Ts>
 string FormatString(const string& pattern, Ts... values) {
   // Note(Yangqing): We believe that 1024 is enough, but who are we to assert
   // that?
@@ -236,9 +236,9 @@ class SnapshotOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws),
         db_pattern_(OperatorBase::GetSingleArgument<string>("db", "")),
         every_(OperatorBase::GetSingleArgument<int>("every", 1)),
-        ws_(ws), save_op_def_(operator_def) {
-    CHECK_GT(db_pattern_.size(), 0)
-        << "Must specify a snapshot file pattern.";
+        ws_(ws),
+        save_op_def_(operator_def) {
+    CHECK_GT(db_pattern_.size(), 0) << "Must specify a snapshot file pattern.";
     CHECK_GT(every_, 0) << "Snapshot interval should be positive.";
     if (every_ == 1) {
       // Just issue a warning, but it's totally legal so we don't do anything.
@@ -252,8 +252,8 @@ class SnapshotOp final : public Operator<Context> {
     int64_t iter =
         OperatorBase::Input<TensorCPU>(0).template data<int64_t>()[0];
     if (iter % every_ == 0) {
-      GetMutableArgument("db", true, &save_op_def_)->set_s(
-          FormatString(db_pattern_, iter));
+      GetMutableArgument("db", true, &save_op_def_)
+          ->set_s(FormatString(db_pattern_, iter));
       SaveOp<Context> sub_op(save_op_def_, ws_);
       return sub_op.Run();
     } else {
@@ -268,6 +268,6 @@ class SnapshotOp final : public Operator<Context> {
   OperatorDef save_op_def_;
 };
 
-}  // namespace caffe2
+} // namespace caffe2
 
-#endif  // CAFFE2_OPERATORS_LOAD_SAVE_OP_H_
+#endif // CAFFE2_OPERATORS_LOAD_SAVE_OP_H_

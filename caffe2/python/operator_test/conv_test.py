@@ -134,7 +134,7 @@ class TestConvolution(hu.HypothesisTestCase):
            output_channels=st.integers(1, 8),
            batch_size=st.integers(1, 3),
            order=st.sampled_from(["NCHW", "NHWC"]),
-           engine=st.sampled_from(["", "CUDNN"]),
+           engine=st.sampled_from(["", "CUDNN", "MKLDNN"]),
            **hu.gcs)
     @settings(max_examples=2, timeout=100)
     def test_convolution_gradients(self, stride, pad, kernel, dilation, size,

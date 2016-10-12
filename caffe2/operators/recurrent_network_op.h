@@ -1,4 +1,5 @@
-#pragma once
+#ifndef CAFFE2_OPERATORS_RECURRENT_NETWORK_OP_H_
+#define CAFFE2_OPERATORS_RECURRENT_NETWORK_OP_H_
 
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
@@ -7,7 +8,6 @@
 #include "google/protobuf/text_format.h"
 
 namespace caffe2 {
-
 namespace detail {
 
 struct Param {
@@ -152,7 +152,7 @@ void extractLinks(
     links->push_back(l);
   }
 }
-}
+} // namespace detail
 
 template <typename T, class Context>
 class RecurrentNetworkOp final : public Operator<Context> {
@@ -561,4 +561,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
   std::vector<int32_t> recurrentSizes_;
   std::string timestep_;
 };
-}
+
+} // namespace caffe2
+
+#endif // CAFFE2_OPERATORS_RECURRENT_NETWORK_OP_H_

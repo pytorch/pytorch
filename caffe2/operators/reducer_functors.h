@@ -1,4 +1,5 @@
-#pragma once
+#ifndef CAFFE2_OPERATORS_RECUDER_FUNCTORS_H_
+#define CAFFE2_OPERATORS_RECUDER_FUNCTORS_H_
 
 #include <array>
 
@@ -549,4 +550,7 @@ struct WeightedSumReducerDef {
         "length matching the first dimension of DATA");
   }
 };
-}
+
+} // namespace caffe2
+
+#endif // CAFFE2_OPERATORS_RECUDER_FUNCTORS_H_

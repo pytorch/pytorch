@@ -32,7 +32,10 @@ class SummarizeOp final : public Operator<Context> {
           log_file_->rdstate());
     }
   }
-  ~SummarizeOp() { if (to_file_) log_file_->close(); }
+  ~SummarizeOp() {
+    if (to_file_)
+      log_file_->close();
+  }
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   bool RunOnDevice() override;
 
@@ -48,6 +51,6 @@ class SummarizeOp final : public Operator<Context> {
   std::unique_ptr<std::ofstream> log_file_;
 };
 
-}  // namespace caffe2
+} // namespace caffe2
 
-#endif  // CAFFE2_OPERATORS_SUMMARIZE_OP_H_
+#endif // CAFFE2_OPERATORS_SUMMARIZE_OP_H_
