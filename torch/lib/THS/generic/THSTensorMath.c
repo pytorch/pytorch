@@ -5,7 +5,7 @@
 #define ROW_PTR2(t, r) (THTensor_(data)(t) + (r) * (t)->stride[0])
 #define COL_PTR2(t, c) (THTensor_(data)(t) + (c) * (t)->stride[1])
 
-THLongTensor *THSTensor_(toCSR)(long const *indicies, long dim, long nnz) {
+THLongTensor *THSTensor_(toCSR)(long const *indices, long dim, long nnz) {
   long h, i, hp0, hp1;
   THLongTensor *csr = THLongTensor_newWithSize1d(dim + 1);
   THLongTensor_zero(csr);
@@ -13,8 +13,8 @@ THLongTensor *THSTensor_(toCSR)(long const *indicies, long dim, long nnz) {
   // Convert the sparse matrix to CSR format
 #pragma omp parallel for private(i, h, hp0, hp1) schedule(static) if (nnz > 10000)
   for (i=0; i<nnz; i++) {
-    hp0 = indicies[i];
-    hp1 = (i+1 == nnz) ?  dim : indicies[i+1];
+    hp0 = indices[i];
+    hp1 = (i+1 == nnz) ?  dim : indices[i+1];
     if (hp0 != hp1) for (h = hp0; h < hp1; h++) {
       THTensor_fastSet1d(csr, h+1, i+1);
     }
@@ -26,7 +26,7 @@ void THSTensor_(spmm)(THTensor *r_, THSTensor *sparse, THTensor *dense) {
   long h, i;
   long dim_i, dim_j, dim_k; // ixj * jxk = ixk
   long nnz;
-  THLongTensor *csr, *indicies;
+  THLongTensor *csr, *indices;
   THTensor *values;
 
   if( (sparse->nDimension != 2) || (dense->nDimension != 2))
@@ -40,10 +40,10 @@ void THSTensor_(spmm)(THTensor *r_, THSTensor *sparse, THTensor *dense) {
   dim_k = THTensor_(size)(dense, 1);
 
   nnz = THSTensor_(nnz)(sparse);
-  indicies = THSTensor_(indicies)(sparse);
+  indices = THSTensor_(indices)(sparse);
   values = THSTensor_(values)(sparse);
 
-  csr = THSTensor_(toCSR)(THLongTensor_data(indicies), dim_i, nnz);
+  csr = THSTensor_(toCSR)(THLongTensor_data(indices), dim_i, nnz);
 
   // r_ = sparse * dense
   THTensor_(resize2d)(r_, dim_i, dim_k);
@@ -54,7 +54,7 @@ void THSTensor_(spmm)(THTensor *r_, THSTensor *sparse, THTensor *dense) {
     long i_end = THTensor_fastGet1d(csr, h+1);
     for (i = i_start; i < i_end; i++) {
       real val = THTensor_fastGet1d(values, i);
-      long col = THTensor_fastGet2d(indicies, 1, i);
+      long col = THTensor_fastGet2d(indices, 1, i);
       if (col >= 0 && col < dim_j) {
         THBlas_(axpy)(dim_k,
             val,
@@ -68,7 +68,7 @@ void THSTensor_(spmm)(THTensor *r_, THSTensor *sparse, THTensor *dense) {
   }
 
   THFree(csr);
-  THFree(indicies);
+  THFree(indices);
   THFree(values);
 }
 
@@ -76,7 +76,7 @@ void THSTensor_(sspmm)(THSTensor *r_, THSTensor *sparse, THTensor *dense) {
   long h, i, p;
   long dim_i, dim_j, dim_k; // ixj * jxk = ixk
   long nnz;
-  THLongTensor *csr, *indicies, *newi;
+  THLongTensor *csr, *indices, *newi;
   THTensor *values, *newv;
 
   if( (sparse->nDimension != 2) || (dense->nDimension != 2))
@@ -90,10 +90,10 @@ void THSTensor_(sspmm)(THSTensor *r_, THSTensor *sparse, THTensor *dense) {
   dim_k = THTensor_(size)(dense, 1);
 
   nnz = THSTensor_(nnz)(sparse);
-  indicies = THSTensor_(indicies)(sparse);
+  indices = THSTensor_(indices)(sparse);
   values = THSTensor_(values)(sparse);
 
-  csr = THSTensor_(toCSR)(THLongTensor_data(indicies), dim_i, nnz);
+  csr = THSTensor_(toCSR)(THLongTensor_data(indices), dim_i, nnz);
 
   newi = THLongTensor_newWithSize2d(2, nnz * dim_k);
   newv = THTensor_(newWithSize1d)(nnz * dim_k);
@@ -107,7 +107,7 @@ void THSTensor_(sspmm)(THSTensor *r_, THSTensor *sparse, THTensor *dense) {
     long i_end = THTensor_fastGet1d(csr, h+1);
     for (i = i_start; i < i_end; i++) {
       real val = THTensor_fastGet1d(values, i);
-      long col = THTensor_fastGet2d(indicies, 1, i);
+      long col = THTensor_fastGet2d(indices, 1, i);
       if (col >= 0 && col < dim_j) {
         THBlas_(axpy)(dim_k,
             val,
@@ -118,7 +118,7 @@ void THSTensor_(sspmm)(THSTensor *r_, THSTensor *sparse, THTensor *dense) {
             col, dim_j);
       }
     }
-    // Fill up the indicies with the right values
+    // Fill up the indices with the right values
     if (i_start != i_end) {
       for (i = 0; i < dim_k; i++) {
         THTensor_fastSet2d(newi, 0, p + i, h);
@@ -131,19 +131,19 @@ void THSTensor_(sspmm)(THSTensor *r_, THSTensor *sparse, THTensor *dense) {
 
   THSTensor_(resize2d)(r_, dim_i, dim_k);
   // to avoid a clone
-  r_->indicies = newi;
+  r_->indices = newi;
   r_->values = newv;
   r_->nnz = p;
   THSTensor_(contiguous)(r_);
 
   THFree(csr);
-  THFree(indicies);
+  THFree(indices);
   THFree(values);
 }
 
 void THSTensor_(spcadd)(THTensor *r_, THTensor *dense, real value, THSTensor *sparse) {
   long k;
-  THLongTensor  *indicies = THSTensor_(indicies)(sparse);
+  THLongTensor  *indices = THSTensor_(indices)(sparse);
   THTensor      *values = THSTensor_(values)(sparse);
   THLongStorage *storage = THSTensor_(newSizeOf)(sparse);
   long          *sizes = storage->data;
@@ -157,8 +157,8 @@ void THSTensor_(spcadd)(THTensor *r_, THTensor *dense, real value, THSTensor *sp
       long index = 0;
       long i2 = r_->storageOffset;
       for (long d = 0; d < sparse->nDimension; d++) {
-        index = index + THTensor_fastGet2d(indicies, d, k);
-        i2 += r_->stride[d] * THTensor_fastGet2d(indicies, d, k);
+        index = index + THTensor_fastGet2d(indices, d, k);
+        i2 += r_->stride[d] * THTensor_fastGet2d(indices, d, k);
       }
       r_->storage->data[i2]  += THTensor_fastGet1d(values, k);
     }
@@ -170,9 +170,9 @@ void THSTensor_(spcadd)(THTensor *r_, THTensor *dense, real value, THSTensor *sp
       long i2 = r_->storageOffset;
       long i3 = dense->storageOffset;
       for (long d = 0; d < sparse->nDimension; d++) {
-        index = sizes[d] * index + THTensor_fastGet2d(indicies, d, k);
-        i2 += r_->stride[d] * THTensor_fastGet2d(indicies, d, k);
-        i3 += dense->stride[d] * THTensor_fastGet2d(indicies, d, k);
+        index = sizes[d] * index + THTensor_fastGet2d(indices, d, k);
+        i2 += r_->stride[d] * THTensor_fastGet2d(indices, d, k);
+        i3 += dense->stride[d] * THTensor_fastGet2d(indices, d, k);
       }
       r_->storage->data[i2] = dense->storage->data[i3] + THTensor_fastGet1d(values, k);
     }

@@ -90,16 +90,16 @@ static PyObject * THSPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
     THLongStorage *sizes = ((THPLongStorage*)first_arg)->cdata;
     self->cdata = THSTensor_(newWithSize)(LIBRARY_STATE sizes);
   }
-  // torch.SparseTensor(torch.LongTensor indicies, torch.LongTensor values)
+  // torch.SparseTensor(torch.LongTensor indices, torch.LongTensor values)
   else if (num_args == 2 && THPLongTensor_Check(first_arg)) {
     PyObject *second_arg = PyTuple_GET_ITEM(args, 1);
     if (!THPTensor_(Check)(second_arg)) goto invalid_arguments;
 
-    THLongTensor *indicies = ((THPLongTensor*)first_arg)->cdata;
+    THLongTensor *indices = ((THPLongTensor*)first_arg)->cdata;
     THTensor *values = ((THPTensor*)second_arg)->cdata;
-    self->cdata = THSTensor_(newWithTensor)(LIBRARY_STATE indicies, values);
+    self->cdata = THSTensor_(newWithTensor)(LIBRARY_STATE indices, values);
   }
-  // torch.SparseTensor(torch.LongTensor indicies,
+  // torch.SparseTensor(torch.LongTensor indices,
   //                    torch.LongTensor values, torch.LongTensor sizes)
   else if (num_args > 2 && THPLongTensor_Check(first_arg)) {
     PyObject *second_arg = PyTuple_GET_ITEM(args, 1);
@@ -107,11 +107,11 @@ static PyObject * THSPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
     if (!THPTensor_(Check)(second_arg)) goto invalid_arguments;
     if (!THPLongTensor_Check(third_arg)) goto invalid_arguments;
 
-    THLongTensor *indicies = ((THPLongTensor*)first_arg)->cdata;
+    THLongTensor *indices = ((THPLongTensor*)first_arg)->cdata;
     THTensor *values = ((THPTensor*)second_arg)->cdata;
     THLongTensor *sizes = ((THPLongTensor*)third_arg)->cdata;
     self->cdata = THSTensor_(newWithTensorAndSize)(
-        LIBRARY_STATE indicies, values, sizes);
+        LIBRARY_STATE indices, values, sizes);
   }
   // torch.Tensor(int ...)
   else try {

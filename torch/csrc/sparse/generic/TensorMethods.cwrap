@@ -20,7 +20,7 @@ defined(THC_REAL_IS_HALF)
   return: THSTensor*
   arguments:
   - THSTensor* self
-  - THLongTensor* indicies
+  - THLongTensor* indices
   - THTensor* values
 ]]
 
@@ -62,7 +62,7 @@ defined(THC_REAL_IS_HALF)
 ]]
 
 [[
-  name: indicies
+  name: indices
   return: THLongTensor*
   arguments:
   - THSTensor* self

@@ -27,11 +27,11 @@ class TestSparse(TestCase):
     def test_basic(self):
         x, i, v = self.__gen_sparse(3, 10, 100)
 
-        self.assertEqual(i, x.indicies())
+        self.assertEqual(i, x.indices())
         self.assertEqual(v, x.values())
 
         x, i, v = self.__gen_sparse(3, 10, [100, 100, 100])
-        self.assertEqual(i, x.indicies())
+        self.assertEqual(i, x.indices())
         self.assertEqual(v, x.values())
         self.assertEqual(x.ndimension(), 3)
         self.assertEqual(x.nnz(), 10)
@@ -79,7 +79,7 @@ class TestSparse(TestCase):
         ])
         exp_v = torch.Tensor([2, 1, 6, 4, 10, 3, 5, 9, 8, 7])
         x.contiguous()
-        self.assertEqual(exp_i, x.indicies())
+        self.assertEqual(exp_i, x.indices())
         self.assertEqual(exp_v, x.values())
 
         i = torch.LongTensor([
@@ -97,10 +97,10 @@ class TestSparse(TestCase):
         exp_v = torch.Tensor([2, 1, 3, 4])
 
         x.contiguous()
-        self.assertEqual(exp_i, x.indicies())
+        self.assertEqual(exp_i, x.indices())
         self.assertEqual(exp_v, x.values())
 
-        # Duplicate indicies
+        # Duplicate indices
         i = torch.LongTensor([
             [0, 0, 2, 0],
             [0, 0, 3, 0],
@@ -116,7 +116,7 @@ class TestSparse(TestCase):
         exp_v = torch.Tensor([6, 4])
 
         x.contiguous()
-        self.assertEqual(exp_i, x.indicies())
+        self.assertEqual(exp_i, x.indices())
         self.assertEqual(exp_v, x.values())
 
     def test_transpose(self):

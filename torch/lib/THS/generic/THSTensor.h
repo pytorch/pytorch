@@ -3,14 +3,14 @@
 #else
 
 typedef struct THSTensor
-{  // Stored in COO format, indicies + values
+{  // Stored in COO format, indices + values
     long *size;
     long nnz;
     int nDimension;
 
-    // 2-D tensor of nDim x nnz of indicies. May have nnz dim bigger than nnz
+    // 2-D tensor of nDim x nnz of indices. May have nnz dim bigger than nnz
     // as buffer, so we keep track of both
-    THLongTensor *indicies;
+    THLongTensor *indices;
     THTensor *values;
     // Math operations can only be performed on ordered sparse tensors
     int contiguous;
@@ -28,14 +28,14 @@ TH_API int THSTensor_(nDimension)(const THSTensor *self);
 TH_API long THSTensor_(size)(const THSTensor *self, int dim);
 TH_API long THSTensor_(nnz)(const THSTensor *self);
 TH_API THLongStorage *THSTensor_(newSizeOf)(THSTensor *self);
-TH_API THLongTensor *THSTensor_(indicies)(const THSTensor *self);
+TH_API THLongTensor *THSTensor_(indices)(const THSTensor *self);
 TH_API THTensor *THSTensor_(values)(const THSTensor *self);
-TH_API THSTensor *THSTensor_(set)(THSTensor *self, THLongTensor *indicies, THTensor *values);
+TH_API THSTensor *THSTensor_(set)(THSTensor *self, THLongTensor *indices, THTensor *values);
 
 /**** creation methods ****/
 TH_API THSTensor *THSTensor_(new)(void);
-TH_API THSTensor *THSTensor_(newWithTensor)(THLongTensor *indicies, THTensor *values);
-TH_API THSTensor *THSTensor_(newWithTensorAndSize)(THLongTensor *indicies, THTensor *values, THLongTensor *sizes);
+TH_API THSTensor *THSTensor_(newWithTensor)(THLongTensor *indices, THTensor *values);
+TH_API THSTensor *THSTensor_(newWithTensorAndSize)(THLongTensor *indices, THTensor *values, THLongTensor *sizes);
 
 TH_API THSTensor *THSTensor_(newWithSize)(THLongStorage *size_);
 TH_API THSTensor *THSTensor_(newWithSize1d)(long size0_);

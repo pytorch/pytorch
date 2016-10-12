@@ -30,23 +30,23 @@ THLongStorage *THSTensor_(newSizeOf)(THSTensor *self)
 }
 
 /*** TODO: watch out for memory leaks ***/
-THLongTensor *THSTensor_(indicies)(const THSTensor *self) {
-  return THLongTensor_newNarrow(self->indicies, 1, 0, self->nnz);
+THLongTensor *THSTensor_(indices)(const THSTensor *self) {
+  return THLongTensor_newNarrow(self->indices, 1, 0, self->nnz);
 }
 
 THTensor *THSTensor_(values)(const THSTensor *self) {
   return THTensor_(newNarrow)(self->values, 0, 0, self->nnz);
 }
 
-THSTensor *THSTensor_(set)(THSTensor *self, THLongTensor *indicies, THTensor *values) {
-  THArgCheck(THLongTensor_nDimension(indicies) == 2, 1,
-      "indicies must be nDim x nnz");
+THSTensor *THSTensor_(set)(THSTensor *self, THLongTensor *indices, THTensor *values) {
+  THArgCheck(THLongTensor_nDimension(indices) == 2, 1,
+      "indices must be nDim x nnz");
   THArgCheck(THTensor_(nDimension)(values) == 1, 2, "values must nnz vector");
-  THArgCheck(THLongTensor_size(indicies, 1) == THTensor_(size)(values, 0), 1,
-      "indicies and values must have same nnz");
-  THFree(self->indicies);
+  THArgCheck(THLongTensor_size(indices, 1) == THTensor_(size)(values, 0), 1,
+      "indices and values must have same nnz");
+  THFree(self->indices);
   THFree(self->values);
-  self->indicies = THLongTensor_newClone(indicies);
+  self->indices = THLongTensor_newClone(indices);
   self->values = THTensor_(newClone)(values);
   self->nnz = THTensor_(size)(values, 0);
 }
@@ -61,7 +61,7 @@ THSTensor *THSTensor_(set)(THSTensor *self, THLongTensor *indicies, THTensor *va
 static void THSTensor_(rawInit)(THSTensor *self)
 {
   self->size = NULL;
-  self->indicies = NULL;
+  self->indices = NULL;
   self->values = NULL;
   self->nDimension = 0;
   self->contiguous = 0;
@@ -92,25 +92,25 @@ THSTensor *THSTensor_(new)(void)
 }
 
 /* Pointer-copy init */
-THSTensor *THSTensor_(newWithTensor)(THLongTensor *indicies, THTensor *values)
+THSTensor *THSTensor_(newWithTensor)(THLongTensor *indices, THTensor *values)
 {
-  return THSTensor_(newWithTensorAndSize)(indicies, values, NULL);
+  return THSTensor_(newWithTensorAndSize)(indices, values, NULL);
 }
 
-THSTensor *THSTensor_(newWithTensorAndSize)(THLongTensor *indicies, THTensor *values, THLongTensor *sizes)
+THSTensor *THSTensor_(newWithTensorAndSize)(THLongTensor *indices, THTensor *values, THLongTensor *sizes)
 {  // If sizes are not given, it is inferred as max index of each dim.
   long nDim;
   THLongTensor *ignore;
 
   THSTensor *self = THAlloc(sizeof(THSTensor));
   THSTensor_(rawInit)(self);
-  THSTensor_(set)(self, indicies, values);
+  THSTensor_(set)(self, indices, values);
 
-  nDim = THLongTensor_size(indicies, 0);
+  nDim = THLongTensor_size(indices, 0);
   if (!sizes) {
     ignore = THLongTensor_new();
     sizes = THLongTensor_new();
-    THLongTensor_max(sizes, ignore, indicies, 0);
+    THLongTensor_max(sizes, ignore, indices, 0);
     THFree(sizes);
     THFree(ignore);
   }
@@ -160,7 +160,7 @@ THSTensor *THSTensor_(newClone)(THSTensor *self) {
 
   THSTensor_(set)(
     other,
-    THLongTensor_newClone(THSTensor_(indicies)(self)),
+    THLongTensor_newClone(THSTensor_(indices)(self)),
     THTensor_(newClone)(THSTensor_(values)(self))
   );
 
@@ -221,8 +221,8 @@ THTensor *THSTensor_(toDense)(THSTensor *self) {
 
   THTensor *other_, *values_;
   real *other, *values;
-  THLongTensor *indicies_;
-  long *indicies;
+  THLongTensor *indices_;
+  long *indices;
 
   // set up the new tensor
   storage = THSTensor_(newSizeOf)(self);
@@ -237,15 +237,15 @@ THTensor *THSTensor_(toDense)(THSTensor *self) {
 
   // These should be contiguous...
   values_ = THSTensor_(values)(self);
-  indicies_ = self->indicies;
+  indices_ = self->indices;
   values = THTensor_(data)(values_);
-  indicies = THLongTensor_data(indicies_);
-  indskip = THLongTensor_size(indicies_, 1); // To index indicies
+  indices = THLongTensor_data(indices_);
+  indskip = THLongTensor_size(indices_, 1); // To index indices
 
   #pragma omp parallel for private(k, index)
   for (k = 0; k < nnz; k++) {
     for (d = 0, index = 0; d < ndim; d++)
-      index = sizes[d] * index + indicies[d * indskip + k];
+      index = sizes[d] * index + indices[d * indskip + k];
     other[index] += values[k];
   }
 
@@ -256,13 +256,13 @@ THTensor *THSTensor_(toDense)(THSTensor *self) {
 
 // In place transpose
 void THSTensor_(transpose)(THSTensor *self, int d1, int d2) {
-  THLongTensor *indicies = THSTensor_(indicies)(self);
+  THLongTensor *indices = THSTensor_(indices)(self);
   long i;
   for (i = 0; i < THSTensor_(nnz)(self); i++) {
-    long tmp = THTensor_fastGet2d(indicies, d1, i);
-    THTensor_fastSet2d(indicies, d1, i,
-        THTensor_fastGet2d(indicies, d2, i));
-    THTensor_fastSet2d(indicies, d2, i, tmp);
+    long tmp = THTensor_fastGet2d(indices, d1, i);
+    THTensor_fastSet2d(indices, d1, i,
+        THTensor_fastGet2d(indices, d2, i));
+    THTensor_fastSet2d(indices, d2, i, tmp);
   }
   self->contiguous = 0;
 }
@@ -277,14 +277,14 @@ void THSTensor_(reorder)(THSTensor *self) {
   if (self->nnz < 2) return;
   long d, i, j, p, cmp, ndim, indskip, tmplong;
   real tmpreal;
-  THLongTensor *indicies_ = self->indicies;
+  THLongTensor *indices_ = self->indices;
   THTensor *values_ = self->values;
-  long *indicies = THLongTensor_data(indicies_);
+  long *indices = THLongTensor_data(indices_);
   real *values = THTensor_(data)(values_);
-  indskip = THLongTensor_size(indicies_, 1); // To index indicies
+  indskip = THLongTensor_size(indices_, 1); // To index indices
   ndim = THSTensor_(nDimension)(self);
 
-#define IND(i, d) indicies[d * indskip + i]
+#define IND(i, d) indices[d * indskip + i]
   for (i = 1; i < self->nnz; i++) {
     for (j = i-1; j >= 0; j--) {
       cmp = 0;
@@ -333,7 +333,7 @@ void THSTensor_(free)(THSTensor *self)
   if(!self)
     return;
 
-  THFree(self->indicies);
+  THFree(self->indices);
   THFree(self->values);
   THFree(self);
 }
