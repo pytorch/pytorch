@@ -154,6 +154,28 @@ TH_API void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
                   int dilationW, int dilationH,
                   bool ceil_mode);
 
+
+TH_API void THNN_(SpatialMaxPooling_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *output,
+                  THCudaLongTensor *indices,
+                  int kW, int kH,
+                  int dW, int dH,
+                  int padW, int padH,
+                  bool ceil_mode);
+
+TH_API void THNN_(SpatialMaxPooling_updateGradInput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *gradOutput,
+                  THCTensor *gradInput,
+                  THCudaLongTensor *indices,
+                  int kW, int kH,
+                  int dW, int dH,
+                  int padW, int padH,
+                  bool ceil_mode);
+
 TH_API void THNN_(RReLU_updateOutput)(
                   THCState *state,
                   THCTensor *input,

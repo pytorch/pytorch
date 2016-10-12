@@ -506,26 +506,6 @@ TH_API void THNN_CudaSpatialAveragePooling_updateGradInput(
           bool ceil_mode,
           bool count_include_pad);
 
-TH_API void THNN_CudaSpatialMaxPooling_updateOutput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *output,
-          THCudaLongTensor *indices,
-          int kW, int kH,
-          int dW, int dH,
-          int padW, int padH,
-          bool ceil_mode);
-TH_API void THNN_CudaSpatialMaxPooling_updateGradInput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *gradOutput,
-          THCudaTensor *gradInput,
-          THCudaLongTensor *indices,
-          int kW, int kH,
-          int dW, int dH,
-          int padW, int padH,
-          bool ceil_mode);
-
 TH_API void THNN_CudaSpatialMaxUnpooling_updateOutput(
           THCState *state,
           THCudaTensor *input,
