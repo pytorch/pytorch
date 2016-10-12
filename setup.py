@@ -11,7 +11,7 @@ import os
 
 # TODO: make this more robust
 WITH_CUDA = os.path.exists('/Developer/NVIDIA/CUDA-7.5/include') or os.path.exists('/usr/local/cuda/include')
-DEBUG = False
+DEBUG = True
 
 ################################################################################
 # Monkey-patch setuptools to compile in parallel
@@ -129,7 +129,7 @@ class clean(distutils.command.clean.clean):
 
 include_dirs = []
 extra_link_args = []
-extra_compile_args = ['-std=c++11', '-Wno-write-strings', '-g', '-O0']
+extra_compile_args = ['-std=c++11', '-Wno-write-strings']
 if os.getenv('PYTORCH_BINARY_BUILD') and platform.system() == 'Linux':
     print('PYTORCH_BINARY_BUILD found. Static linking libstdc++ on Linux')
     extra_compile_args += ['-static-libstdc++']
@@ -236,7 +236,7 @@ DL = Extension("torch._dl",
 extensions.append(DL)
 
 THNN = Extension("torch._thnn._THNN",
-    libraries=['TH', 'THNN', 'THS'],
+    libraries=['TH', 'THNN'],
     sources=['torch/csrc/nn/THNN.cpp'],
     language='c++',
     extra_compile_args=extra_compile_args,

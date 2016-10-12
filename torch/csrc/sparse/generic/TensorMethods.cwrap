@@ -91,19 +91,48 @@ defined(THC_REAL_IS_HALF)
 ]]
 
 [[
-  name: addSmm
+  name: transpose_
+  cname: transpose
+  return: self
+  arguments:
+  - THSTensor* self
+  - long dim0
+  - long dim1
+]]
+
+[[
+  name: spmm
   with_stateless: True
   return: argument 0
   arguments:
     - arg: THTensor* result
       allocate: True
-    - arg: real beta
-      default: AS_REAL(1)
-    - THTensor* self
-    - arg: real alpha
-      default: AS_REAL(1)
     - THSTensor* mat1
     - THTensor* mat2
+]]
+
+[[
+  name: sspmm
+  with_stateless: True
+  return: argument 0
+  arguments:
+    - arg: THSTensor* result
+      allocate: True
+    - THSTensor* mat1
+    - THTensor* mat2
+]]
+
+[[
+  name: spcadd
+  with_stateless: True
+  return: argument 0
+  arguments:
+    - arg: THTensor* result
+      allocate: True
+    - THTensor* mat1
+    - arg: real value
+      default: AS_REAL(1)
+    - THSTensor* mat2
 ]]
 
 // cwrap should put definitions before undefs, so let's mark this place

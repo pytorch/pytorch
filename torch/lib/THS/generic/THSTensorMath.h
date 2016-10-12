@@ -2,20 +2,19 @@
 #define THS_GENERIC_FILE "generic/THSTensorMath.h"
 #else
 
-/* operations
- * S indicates sparseness
- * t is one of matrix (m) or vector (v)
- * OP is the operation implemented
+/* The convention is:
+ * spOP has one of the OP as a sparse tensor
+ * sspOP returns a sparse result
+ * spOPs has all arguments sparse
  *
- * Opcode grammar:
- *    [S]OP[S]t[S]t
- * For example, SgemSm = sparse output, Y = dense * sparse matrix
+ * Everything is is up to discretion
  */
 
-// dense = dense + real * sparse * dense
-TH_API void THSTensor_(addSmm)(THTensor *r_, real beta, THTensor *t, real alpha, THSTensor *sparse, THTensor *dense);
-// sparse = dense * sparse
-TH_API void THSTensor_(SgemSm)(THSTensor *r_, THTensor *mat1, THTensor *mat2);
+// dense = sparse * dense
+TH_API void THSTensor_(spmm)(THTensor *r_, THSTensor *sparse, THTensor *dense);
+// sparse = sparse * dense
+TH_API void THSTensor_(sspmm)(THSTensor *r_, THSTensor *sparse, THTensor *dense);
+TH_API void THSTensor_(spcadd)(THTensor *r_, THTensor *dense, real value, THSTensor *sparse);
 
 #endif
 

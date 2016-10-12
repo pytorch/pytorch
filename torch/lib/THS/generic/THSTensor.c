@@ -2,7 +2,10 @@
 #define THS_GENERIC_FILE "generic/THSTensor.c"
 #else
 
-/**** access methods ****/
+/******************************************************************************
+ * access methods
+ ******************************************************************************/
+
 int THSTensor_(nDimension)(const THSTensor *self)
 {
   return self->nDimension;
@@ -48,68 +51,13 @@ THSTensor *THSTensor_(set)(THSTensor *self, THLongTensor *indicies, THTensor *va
   self->nnz = THTensor_(size)(values, 0);
 }
 
-int THSTensor_(isContiguous)(const THSTensor *self) {
-  return self->contiguous;
-}
 
 
-void THSTensor_(reorder)(THSTensor *self) {
-  /* TODO: We do an insertion sort here, should change to quicksort or shellsort
-   */
-  if (self->nnz < 2) return;
-  long d, i, j, p, cmp, ndim, indskip, tmplong;
-  real tmpreal;
-  THLongTensor *indicies_ = self->indicies;
-  THTensor *values_ = self->values;
-  long *indicies = THLongTensor_data(indicies_);
-  real *values = THTensor_(data)(values_);
-  indskip = THLongTensor_size(indicies_, 1); // To index indicies
-  ndim = THSTensor_(nDimension)(self);
+/******************************************************************************
+ * creation methods
+ ******************************************************************************/
 
-#define IND(i, d) indicies[d * indskip + i]
-  for (i = 1; i < self->nnz; i++) {
-    for (j = i-1; j >= 0; j--) {
-      cmp = 0;
-      for (d = 0; d < ndim; d++) {
-        if (IND(j+1, d) < IND(j, d))
-          cmp = 1;
-        if (IND(j+1, d) != IND(j, d)) break;
-      }
-      if (cmp) {
-        tmpreal = values[j+1]; values[j+1] = values[j]; values[j] = tmpreal;
-        for (d = 0; d < ndim; d++) {
-          tmplong = IND(j+1, d); IND(j+1, d) = IND(j, d); IND(j, d) = tmplong;
-        }
-      } else break;
-    }
-  }
-
-  i = 0;
-  for (j = 1; j < self->nnz; j++) {
-    cmp = 1;
-    for (d = 0; d < ndim; d++)
-      if (IND(i, d) != IND(j, d)) {
-        cmp = 0;
-        break;
-      }
-    if (cmp) values[i] += values[j];
-    else {
-      values[++i] = values[j];
-      for (d = 0; d < ndim; d++) IND(i, d) = IND(j, d);
-    }
-  }
-  self->nnz = i + 1;
-#undef IND
-}
-
-void THSTensor_(contiguous)(THSTensor *self) {
-  if (self->contiguous) return;
-  THSTensor_(reorder)(self);
-  self->contiguous = 1;
-}
-
-/**** creation methods ****/
-
+/*** Helper methods ***/
 static void THSTensor_(rawInit)(THSTensor *self)
 {
   self->size = NULL;
@@ -130,8 +78,10 @@ static void THSTensor_(rawResize)(THSTensor *self, int nDim, long *size) {
     if (size[d] > 0)
       self->size[nDim_++] = size[d];
   self->nDimension = nDim_;
+  self->contiguous = 0;
 }
 
+/*** end helper methods ***/
 
 /* Empty init */
 THSTensor *THSTensor_(new)(void)
@@ -174,6 +124,8 @@ THSTensor *THSTensor_(newWithSize)(THLongStorage *size)
   THSTensor *self = THAlloc(sizeof(THSTensor));
   THSTensor_(rawInit)(self);
   THSTensor_(rawResize)(self, size->size, size->data);
+
+  return self;
 }
 
 THSTensor *THSTensor_(newWithSize1d)(long size0)
@@ -199,6 +151,65 @@ THSTensor *THSTensor_(newWithSize4d)(long size0, long size1, long size2, long si
   THSTensor_(rawInit)(self);
   THSTensor_(rawResize)(self, 4, size);
 
+  return self;
+}
+
+THSTensor *THSTensor_(newClone)(THSTensor *self) {
+  THSTensor *other = THSTensor_(new)();
+  THSTensor_(rawResize)(other, self->nDimension, self->size);
+
+  THSTensor_(set)(
+    other,
+    THLongTensor_newClone(THSTensor_(indicies)(self)),
+    THTensor_(newClone)(THSTensor_(values)(self))
+  );
+
+  other->nnz = self->nnz;
+  return other;
+}
+
+THSTensor *THSTensor_(newContiguous)(THSTensor *self) {
+  THSTensor *other = THSTensor_(newClone)(self);
+  THSTensor_(contiguous)(other);
+  return other;
+}
+
+THSTensor *THSTensor_(newTranspose)(THSTensor *self, int d1, int d2) {
+  THSTensor *other = THSTensor_(newClone)(self);
+  THSTensor_(transpose)(self, d1, d2);
+  return other;
+}
+
+
+/******************************************************************************
+ * reshaping methods
+ ******************************************************************************/
+
+THSTensor *THSTensor_(resize)(THSTensor *self, THLongStorage *size)
+{
+  THSTensor_(rawResize)(self, size->size, size->data);
+  return self;
+}
+
+THSTensor *THSTensor_(resize1d)(THSTensor *self, long size0)
+{
+  return THSTensor_(resize4d)(self, size0, -1, -1, -1);
+}
+
+THSTensor *THSTensor_(resize2d)(THSTensor *self, long size0, long size1)
+{
+  return THSTensor_(resize4d)(self, size0, size1, -1, -1);
+}
+
+THSTensor *THSTensor_(resize3d)(THSTensor *self, long size0, long size1, long size2)
+{
+  return THSTensor_(resize4d)(self, size0, size1, size2, -1);
+}
+
+THSTensor *THSTensor_(resize4d)(THSTensor *self, long size0, long size1, long size2, long size3)
+{
+  long size[4] = {size0, size1, size2, size3};
+  THSTensor_(rawResize)(self, 4, size);
   return self;
 }
 
@@ -241,6 +252,80 @@ THTensor *THSTensor_(toDense)(THSTensor *self) {
   THFree(values_);
   THLongStorage_free(storage);
   return other_;
+}
+
+// In place transpose
+void THSTensor_(transpose)(THSTensor *self, int d1, int d2) {
+  THLongTensor *indicies = THSTensor_(indicies)(self);
+  long i;
+  for (i = 0; i < THSTensor_(nnz)(self); i++) {
+    long tmp = THTensor_fastGet2d(indicies, d1, i);
+    THTensor_fastSet2d(indicies, d1, i,
+        THTensor_fastGet2d(indicies, d2, i));
+    THTensor_fastSet2d(indicies, d2, i, tmp);
+  }
+  self->contiguous = 0;
+}
+
+int THSTensor_(isContiguous)(const THSTensor *self) {
+  return self->contiguous;
+}
+
+void THSTensor_(reorder)(THSTensor *self) {
+  /* TODO: We do an insertion sort here, should change to quicksort or shellsort
+  */
+  if (self->nnz < 2) return;
+  long d, i, j, p, cmp, ndim, indskip, tmplong;
+  real tmpreal;
+  THLongTensor *indicies_ = self->indicies;
+  THTensor *values_ = self->values;
+  long *indicies = THLongTensor_data(indicies_);
+  real *values = THTensor_(data)(values_);
+  indskip = THLongTensor_size(indicies_, 1); // To index indicies
+  ndim = THSTensor_(nDimension)(self);
+
+#define IND(i, d) indicies[d * indskip + i]
+  for (i = 1; i < self->nnz; i++) {
+    for (j = i-1; j >= 0; j--) {
+      cmp = 0;
+      for (d = 0; d < ndim; d++) {
+        if (IND(j+1, d) < IND(j, d))
+          cmp = 1;
+        if (IND(j+1, d) != IND(j, d)) break;
+      }
+      if (cmp) {
+        tmpreal = values[j+1]; values[j+1] = values[j]; values[j] = tmpreal;
+        for (d = 0; d < ndim; d++) {
+          tmplong = IND(j+1, d); IND(j+1, d) = IND(j, d); IND(j, d) = tmplong;
+        }
+      } else break;
+    }
+  }
+
+  i = 0;
+  for (j = 1; j < self->nnz; j++) {
+    cmp = 1;
+    // TODO: pass eps in as a parameter
+    if (values[j] == 0) continue;
+    for (d = 0; d < ndim; d++)
+      if (IND(i, d) != IND(j, d)) {
+        cmp = 0;
+        break;
+      }
+    if (cmp) values[i] += values[j];
+    else {
+      values[++i] = values[j];
+      for (d = 0; d < ndim; d++) IND(i, d) = IND(j, d);
+    }
+  }
+  self->nnz = i + 1;
+#undef IND
+}
+
+void THSTensor_(contiguous)(THSTensor *self) {
+  if (self->contiguous) return;
+  THSTensor_(reorder)(self);
+  self->contiguous = 1;
 }
 
 void THSTensor_(free)(THSTensor *self)

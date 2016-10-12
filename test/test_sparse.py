@@ -1,23 +1,22 @@
-import sys
-import math
-import random
 import torch
-import tempfile
+import itertools
 import unittest
-from itertools import product, chain
-from common import TestCase, iter_indices
+from common import TestCase
+from numbers import Number
 
-SIZE = 100
 
 class TestSparse(TestCase):
     @staticmethod
-    def __gen_sparse(d, nnz, max_dim, with_size=None):
-        i = (torch.rand(d, nnz) * max_dim).type(torch.LongTensor)
-        v = torch.rand(nnz)
-        if with_size is None:
+    def __gen_sparse(d, nnz, with_size):
+        v = torch.randn(nnz)
+        if isinstance(with_size, Number):
+            i = (torch.rand(d, nnz) * with_size).type(torch.LongTensor)
             x = torch.SparseTensor(i, v)
         else:
-            x = torch.SparseTensor(i, v, with_size)
+            i = torch.rand(d, nnz) * \
+                    torch.Tensor(with_size).repeat(nnz, 1).transpose(0, 1)
+            i = i.type(torch.LongTensor)
+            x = torch.SparseTensor(i, v, torch.LongTensor(with_size))
 
         return x, i, v
 
@@ -28,14 +27,12 @@ class TestSparse(TestCase):
     def test_basic(self):
         x, i, v = self.__gen_sparse(3, 10, 100)
 
-        self.assertTrue(i.eq(x.indicies()).all())
-        self.assertTrue(self.__eq(v, x.values()))
+        self.assertEqual(i, x.indicies())
+        self.assertEqual(v, x.values())
 
-        x, i, v = self.__gen_sparse(3, 10, 100,
-                                    torch.LongTensor([100, 100, 100]))
-
-        self.assertTrue(i.eq(x.indicies()).all())
-        self.assertTrue(self.__eq(v, x.values()))
+        x, i, v = self.__gen_sparse(3, 10, [100, 100, 100])
+        self.assertEqual(i, x.indicies())
+        self.assertEqual(v, x.values())
         self.assertEqual(x.ndimension(), 3)
         self.assertEqual(x.nnz(), 10)
         for i in range(3):
@@ -67,23 +64,23 @@ class TestSparse(TestCase):
         x.to_dense()  # Tests double to_dense for memory corruption
         x.to_dense()
         x.to_dense()
-        self.assertTrue(self.__eq(res, x.to_dense()))
+        self.assertEqual(res, x.to_dense())
 
     def test_contig(self):
         i = torch.LongTensor([
-            [ 1,  0, 35, 14, 39,  6, 71, 66, 40, 27],
+            [1,  0, 35, 14, 39,  6, 71, 66, 40, 27],
             [92, 31, 62, 50, 22, 65, 89, 74, 56, 34],
         ])
         v = torch.Tensor([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
         x = torch.SparseTensor(i, v, torch.LongTensor([100, 100]))
         exp_i = torch.LongTensor([
-            [ 0,  1,  6, 14, 27, 35, 39, 40, 66, 71],
+            [0,  1,  6, 14, 27, 35, 39, 40, 66, 71],
             [31, 92, 65, 50, 34, 62, 22, 56, 74, 89],
         ])
         exp_v = torch.Tensor([2, 1, 6, 4, 10, 3, 5, 9, 8, 7])
         x.contiguous()
-        self.assertTrue(x.indicies().eq(exp_i).all())
-        self.assertTrue(self.__eq(exp_v, x.values()))
+        self.assertEqual(exp_i, x.indicies())
+        self.assertEqual(exp_v, x.values())
 
         i = torch.LongTensor([
             [2, 0, 2, 1],
@@ -100,8 +97,8 @@ class TestSparse(TestCase):
         exp_v = torch.Tensor([2, 1, 3, 4])
 
         x.contiguous()
-        self.assertTrue(x.indicies().eq(exp_i).all())
-        self.assertTrue(self.__eq(exp_v, x.values()))
+        self.assertEqual(exp_i, x.indicies())
+        self.assertEqual(exp_v, x.values())
 
         # Duplicate indicies
         i = torch.LongTensor([
@@ -119,25 +116,62 @@ class TestSparse(TestCase):
         exp_v = torch.Tensor([6, 4])
 
         x.contiguous()
-        self.assertTrue(x.indicies().eq(exp_i).all())
-        self.assertTrue(self.__eq(exp_v, x.values()))
+        self.assertEqual(exp_i, x.indicies())
+        self.assertEqual(exp_v, x.values())
 
+    def test_transpose(self):
+        return
+        x = self.__gen_sparse(3, 5, 5)[0]
+        y = x.to_dense()
 
-    def test_addSmm(self):
+        for i, j in itertools.combinations(range(4), 2):
+            x = x.transpose_(i, j)
+            y = y.transpose(i, j)
+            print(x.to_dense())
+            print(y)
+            self.assertEqual(x.to_dense(), y)
+
+    def test_spmm(self):
         def test_shape(di, dj, dk):
-            x, _, _ = self.__gen_sparse(2, 20, di, torch.LongTensor([di, dj]))
+            x, _, _ = self.__gen_sparse(2, 20, [di, dj])
             y = torch.randn(dj, dk)
-            t = torch.zeros(di, dk)
 
-            expected = torch.addmm(t, x.to_dense(), y)
-            res = torch.SparseTensor._torch.addSmm(t, x, y)
+            expected = torch.mm(x.to_dense(), y)
+            res = torch.SparseTensor._torch.spmm(x, y)
 
-            self.assertTrue(self.__eq(res, expected))
+            self.assertEqual(res, expected)
 
         test_shape(10, 100, 100)
         test_shape(100, 1000, 200)
-        test_shape(1000, 1000, 500)
+        test_shape(64, 10000, 300)
 
+    def test_sspmm(self):
+        def test_shape(di, dj, dk):
+            x, _, _ = self.__gen_sparse(2, 20, [di, dj])
+            y = torch.randn(dj, dk)
+
+            expected = torch.mm(x.to_dense(), y)
+            res = torch.SparseTensor._torch.sspmm(x, y)
+
+            self.assertEqual(res.to_dense(), expected)
+
+        test_shape(7, 5, 3)
+        test_shape(1000, 100, 100)
+        test_shape(3000, 64, 300)
+
+    def test_spcadd(self):
+        def test_shape(*shape):
+            x, _, _ = self.__gen_sparse(len(shape), 10, shape)
+            y = torch.randn(*shape)
+
+            expected = y + x.to_dense()
+            res = torch.SparseTensor._torch.spcadd(y, x)
+
+            self.assertEqual(res, expected)
+
+        test_shape(10, 10, 10)
+        test_shape(50, 30, 20)
+        test_shape(5, 5, 5, 5, 5, 5)
 
 
 if __name__ == '__main__':
