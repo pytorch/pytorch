@@ -16,7 +16,7 @@ static void (*THVector_(fill_DISPATCHPTR))(real *, const real, const ptrdiff_t) 
 static FunctionDescription THVector_(fill_DISPATCHTABLE)[] = {
   #if defined(__NEON__)
     #if defined(TH_REAL_IS_FLOAT)
-      FUNCTION_IMPL(THVector_(fill_NEON), SIMDExtension_NEON);
+      FUNCTION_IMPL(THVector_(fill_NEON), SIMDExtension_NEON),
     #endif
   #endif
 
@@ -37,7 +37,7 @@ static void (*THVector_(add_DISPATCHPTR))(real *, const real *, const real, cons
 static FunctionDescription THVector_(add_DISPATCHTABLE)[] = {
   #if defined(__NEON__)
     #if defined(TH_REAL_IS_FLOAT)
-      FUNCTION_IMPL(THVector_(add_NEON), SIMDExtension_NEON);
+      FUNCTION_IMPL(THVector_(add_NEON), SIMDExtension_NEON),
     #endif
   #endif
 
@@ -59,7 +59,7 @@ static void (*THVector_(diff_DISPATCHPTR))(real *, const real *, const real *, c
 static FunctionDescription THVector_(diff_DISPATCHTABLE)[] = {
   #if defined(__NEON__)
     #if defined(TH_REAL_IS_FLOAT)
-      FUNCTION_IMPL(THVector_(diff_NEON), SIMDExtension_NEON);
+      FUNCTION_IMPL(THVector_(diff_NEON), SIMDExtension_NEON),
     #endif
   #endif
 
@@ -81,7 +81,7 @@ static void (*THVector_(scale_DISPATCHPTR))(real *, const real, const ptrdiff_t)
 static FunctionDescription THVector_(scale_DISPATCHTABLE)[] = {
   #if defined(__NEON__)
     #if defined(TH_REAL_IS_FLOAT)
-      FUNCTION_IMPL(THVector_(scale_NEON), SIMDExtension_NEON);
+      FUNCTION_IMPL(THVector_(scale_NEON), SIMDExtension_NEON),
     #endif
   #endif
 
@@ -103,7 +103,7 @@ static void (*THVector_(mul_DISPATCHPTR))(real *, const real *, const ptrdiff_t)
 static FunctionDescription THVector_(mul_DISPATCHTABLE)[] = {
   #if defined(__NEON__)
     #if defined(TH_REAL_IS_FLOAT)
-      FUNCTION_IMPL(THVector_(mul_NEON), SIMDExtension_NEON);
+      FUNCTION_IMPL(THVector_(mul_NEON), SIMDExtension_NEON),
     #endif
   #endif
 
