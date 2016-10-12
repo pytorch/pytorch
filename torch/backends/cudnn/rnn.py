@@ -5,27 +5,27 @@ import ctypes
 
 
 def initDropoutDescriptor(fn, handle):
-    fn.dropout_desc = cudnn.DropoutDescriptor()
+    dropout_desc = cudnn.DropoutDescriptor()
 
     dropout_states_size = ctypes.c_long()
     check_error(cudnn.lib.cudnnDropoutGetStatesSize(
         handle,
         ctypes.byref(dropout_states_size)))
 
-    fn.dropout_states = torch.cuda.ByteTensor(dropout_states_size.value)
-
+    dropout_states = torch.cuda.ByteTensor(dropout_states_size.value)
     fn.dropout_desc.set(
         handle,
         fn.dropout,
-        fn.dropout_states,
+        dropout_states,
         fn.seed
     )
+    return dropout_desc
 
 
 def initRNNDescriptor(fn):
-    fn.rnn_desc = cudnn.RNNDescriptor()
+    rnn_desc = cudnn.RNNDescriptor()
 
-    fn.rnn_desc.set(
+    rnn_desc.set(
         fn.hidden_size,
         fn.num_layers,
         fn.dropout_desc,
@@ -34,30 +34,15 @@ def initRNNDescriptor(fn):
         fn.mode,
         fn.datatype
     )
+    return rnn_desc
 
 
 def initWeightDescriptor(fn, weight):
-    fn.w_desc = cudnn.FilterDescriptor()
+    w_desc = cudnn.FilterDescriptor()
     w_view = weight.view(-1, 1, 1)  # seems that filters require >=3 dimensions
-    fn.w_desc.set(w_view)
+    w_desc.set(w_view)
+    return w_desc
 
-
-def initIODescriptor(fn, input, output):
-    fn.x_descs = cudnn.descriptor(input[0], fn.seq_length)
-    fn.y_descs = cudnn.descriptor(output[0], fn.seq_length)
-
-
-def initHiddenDescriptors(fn, hx):
-    fn.hx_desc = cudnn.descriptor(hx)
-    fn.hy_desc = cudnn.descriptor(hx)
-
-
-def initCellDescriptors(fn, cx):
-    if cx:
-        fn.cx_desc = cudnn.descriptor(cx)
-        fn.cy_desc = cudnn.descriptor(cx)
-    else:
-        fn.cx_desc = fn.cy_desc = None
 
 def _inputSize(fn):
     return (fn.seq_length, fn.mini_batch, fn.input_size)
@@ -71,73 +56,88 @@ def _outputSize(fn):
     return (fn.seq_length, fn.mini_batch, fn.hidden_size * fn.num_directions)
 
 
-def getNumWeights(fn, handle):
+def getNumWeights(handle, rnn_desc, x_desc, datatype):
     weight_size = ctypes.c_long()
     check_error(cudnn.lib.cudnnGetRNNParamsSize(
         handle,
-        fn.rnn_desc,
-        fn.x_descs[0],
+        rnn_desc,
+        x_desc,
         ctypes.byref(weight_size),
-        fn.datatype
+        datatype
     ))
     elem_size = cudnn._sizeofmap[fn.datatype]
     assert(weight_size.value % elem_size == 0)
     return weight_size.value // elem_size
 
 
-def _parametersHelper(fn, handle, weight, cudnn_method):
-    linear_params = []
+def getParameters(fn, handle, weight_buf):
+
+    param_types = {
+        'weight': cudnn.lib.cudnnGetRNNLinLayerMatrixParams,
+        'bias' : cudnn.lib.cudnnGetRNNLinLayerBiasParams
+    }
+
+    # if fn.mode == cudnn.CUDNN_RNN_RELU or fn.mode == cudnn.CUDNN_RNN_TANH:
+    #     linear_name = ["ih", "hh"]
+    # elif fn.mode == cudnn.CUDNN_LSTM:
+    #     linear_name = ["ii", "if", "ic", "io", "hi", "hf", "hc", "ho"]
+    # elif fn.mode == cudnn.CUDNN_GRU:
+    #     linear_name = ["ir", "iu", "ic", "hr", "hu", "hc"]
+    # else:
+    #     raise Exception("Unknown mode: {}".format(fn.mode))
+
+    params = []
     num_linear_layers = _numLinearLayers(fn)
     num_layers = fn.num_directions * fn.num_layers
     for layer in range(num_layers):
-        layer_info = []
-        for layer_id in range(num_linear_layers):
-            lin_layer_mat_desc = cudnn.FilterDescriptor()
-            matrix_pointer = ctypes.c_void_p()
-            check_error(cudnn_method(
-                handle,
-                fn.rnn_desc,
-                layer,
-                fn.x_descs[0],
-                fn.w_desc,
-                ctypes.c_void_p(weight.data_ptr()),
-                layer_id,
-                lin_layer_mat_desc,
-                ctypes.byref(matrix_pointer)))
+        layer_params = []
+        for param_type, cudnn_method in enumerate(param_types):
+            for layer_id in range(num_linear_layers):
+                lin_layer_mat_desc = cudnn.FilterDescriptor()
+                matrix_pointer = ctypes.c_void_p()
+                check_error(cudnn_method(
+                    handle,
+                    fn.rnn_desc,
+                    layer,
+                    fn.x_desc,
+                    fn.w_desc,
+                    ctypes.c_void_p(weight_buf.data_ptr()),
+                    layer_id,
+                    lin_layer_mat_desc,
+                    ctypes.byref(matrix_pointer)))
 
-            data_type = ctypes.c_int()
-            format = ctypes.c_int()
-            nb_dims = ctypes.c_int()
-            min_dim = 3
-            filter_dim_a = torch.IntStorage(min_dim)
-            check_error(cudnn.lib.cudnnGetFilterNdDescriptor(
-                lin_layer_mat_desc,
-                min_dim,
-                ctypes.byref(data_type),
-                ctypes.byref(format),
-                ctypes.byref(nb_dims),
-                ctypes.c_void_p(filter_dim_a.data_ptr())))
+                data_type = ctypes.c_int()
+                format = ctypes.c_int()
+                nb_dims = ctypes.c_int()
+                min_dim = 3
+                filter_dim_a = torch.IntStorage(min_dim)
+                check_error(cudnn.lib.cudnnGetFilterNdDescriptor(
+                    lin_layer_mat_desc,
+                    min_dim,
+                    ctypes.byref(data_type),
+                    ctypes.byref(format),
+                    ctypes.byref(nb_dims),
+                    ctypes.c_void_p(filter_dim_a.data_ptr())))
 
-            filter_dim_a.resize_(nb_dims.value)
-            elem_size = cudnn._sizeofmap[fn.datatype]
-            offset_bytes = (matrix_pointer.value - weight.data_ptr())
-            assert(offset_bytes % elem_size == 0)
-            offset = offset_bytes // elem_size
-            params = weight.new().set_(weight.storage(), offset, filter_dim_a.long())
-            layer_info.append(params)
+                filter_dim_a.resize_(nb_dims.value)
+                elem_size = cudnn._sizeofmap[fn.datatype]
+                offset_bytes = (matrix_pointer.value - weight.data_ptr())
+                assert(offset_bytes % elem_size == 0)
+                offset = offset_bytes // elem_size
+                param = fn.weight_buf.new().set_(weight.storage(), offset, filter_dim_a.long())
+                # name = "l{}.{}.{}".format(layer, linear_name[layer_id], param_type)
+                layer_params.append(param)
 
-        linear_params.append(layer_info)
+            params.append(layer_params)
 
-    return linear_params
+    return params
 
-def parameters(fn, handle, weight):
-    parameters = {}
-    parameters['weight'] = _parametersHelper(
-        fn, handle, weight, cudnn.lib.cudnnGetRNNLinLayerMatrixParams)
-    parameters['bias'] = _parametersHelper(
-        fn, handle, weight, cudnn.lib.cudnnGetRNNLinLayerBiasParams)
-    return parameters
 
+def _copyParams(params_from, params_to):
+    for layer_params_from, layer_weights_from in zip(params_from, params_to):
+        for param_from, param_to in zip(layer_params_from, layer_params_to):
+            assert(param_from.type() == tuple(param_to.type()))
+            param_to.copy(param_from)
 
 def forward(fn, input, hx, cx, weight, output, hy, cy):
     with torch.cuda.device_of(input):
@@ -167,20 +167,24 @@ def forward(fn, input, hx, cx, weight, output, hy, cy):
         if cy:
             cy.resize_(*hidden_size).zero_()
         y = output
-        w = weight
 
-        initDropoutDescriptor(fn, handle)
-        initRNNDescriptor(fn)
-        initIODescriptor(fn, x, y)
-        initHiddenDescriptors(fn, hx)
-        initCellDescriptors(fn, cx)
-        initWeightDescriptor(fn, weight)
+        # init descriptors
+        fn.dropout_desc = initDropoutDescriptor(fn, handle)
+        fn.rnn_desc     = initRNNDescriptor(fn)
+        fn.x_descs      = cudnn.descriptor(x[0], fn.seq_length)
+        fn.y_descs      = cudnn.descriptor(y[0], fn.seq_length)
+        fn.hx_desc      = cudnn.descriptor(hx)
+        fn.hy_desc      = cudnn.descriptor(hx)
+        fn.cx_desc      = cudnn.descriptor(cx) if cx else None
+        fn.cy_desc      = cudnn.descriptor(cx) if cx else None
 
-        params = parameters(fn, handle, weight)
-        for ptype in params:
-            for l, layer in enumerate(params[ptype]):
-                for ll, param in enumerate(layer):
-                    print(ptype, l, ll, param.storage_offset(), tuple(param.size()))
+        num_weights = getNumWeights(handle, fn.rnn_desc, fn.x_desc, fn.datatype)
+        fn.weight_buf = input.new(num_weights)
+        fn.w_desc       = initWeightDescriptor(fn, fn.weight_buf)
+        w = fn.weight_buf
+
+        params = getParameters(fn, handle, weight)
+        _copyParams(weight, params)
 
         if tuple(hx.size()) != hidden_size:
             raise Exception('Expected hx size {}, got {}'.format(
@@ -188,9 +192,10 @@ def forward(fn, input, hx, cx, weight, output, hy, cy):
         if cx and tuple(cx.size()) != hidden_size:
             raise Exception('Expected cx size {}, got {}'.format(
                 tuple(hidden_size, cx.size())))
-        if weight.nelement() != getNumWeights(fn, handle):
+        expected_num_weights = getNumWeights(handle, fn.rnn_desc, fn.x_descs[0], fn.datatype)
+        if weight.nelement() != expected_num_weights:
             raise Exception("Expected #weights {}, got {}".format(
-                getNumWeights(fn, handle), weight.nelement()))
+                expected_num_weights, weight.nelement()))
         workspace_size = ctypes.c_long()
         check_error(lib.cudnnGetRNNWorkspaceSize(
             handle,
@@ -259,7 +264,7 @@ def backward_grad(fn, input, hx, cx, weight, output, grad_output, grad_hy, grad_
         x = input.contiguous()
         dy = grad_output.contiguous()
         y = output
-        w = weight
+        w = fn.weight_buf
         dx = grad_input.resize_as_(input)
         dhy = grad_hy.resize_(*hidden_size)
         dcy = grad_cy.resize_(*hidden_size) if grad_cy else None
@@ -351,7 +356,7 @@ def backward_weight(fn, input, hx, output, weight, grad_weight):
 
         x = input.contiguous()
         y = output
-        dw = grad_weight.resize_as_(weight)
+        dw = fn.weight_buf.new().resize_as_(weight_buf)
 
         check_error(cudnn.lib.cudnnRNNBackwardWeights(
             handle,
@@ -365,4 +370,7 @@ def backward_weight(fn, input, hx, output, weight, grad_weight):
             ctypes.c_void_p(fn.reserve.data_ptr()), fn.reserve.size(0)
         ))
 
-        return dw
+        params = getParameters(fn, handle, dw)
+        _copyParams(grad_params, grad_weight)
+        
+        return grad_weight

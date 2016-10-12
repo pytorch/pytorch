@@ -199,6 +199,7 @@ class DropoutDescriptor(object):
         check_error(lib.cudnnDestroyDropoutDescriptor(self))
 
     def set(self, handle, dropout, dropout_states, seed):
+        self.dropout_states = dropout_states  # make sure it's retained
         check_error(lib.cudnnSetDropoutDescriptor(
             self,
             handle,

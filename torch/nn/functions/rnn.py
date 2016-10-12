@@ -8,6 +8,9 @@ except ImportError:
     pass
 import torch.backends.cudnn.rnn
 
+
+
+
 def _getCudnnMode(mode):
     if mode == 'RNN_RELU':
         return cudnn.CUDNN_RNN_RELU
@@ -20,6 +23,75 @@ def _getCudnnMode(mode):
     else:
         raise Exception("Unknown mode: {}".format(mode))
 
+import thnn
+import linear
+
+ReLU = thnn.Threshold(0, 0)
+tanh = thnn.Tanh
+linear = linear.Linear
+sigmoid = thnn.Sigmoid
+
+def RNNReLUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
+        hy = ReLU(linear(input, w_ih, b_ih) +
+                  linear(hidden, w_hh, b_hh))
+        return hy, hy
+
+def RNNTanhCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
+        hy = tanh(linear(input, w_ih, b_ih) +
+                  linear(hidden, w_hh, b_hh))
+        return hy, hy
+
+def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
+        hx, cx = hidden
+        hsz = hx.size(1)
+        gates = linear(input, w_ih, b_ih) + linear(hx, w_hh, b_hh)
+        # FIXME: chunk
+        ingate     = sigmoid(gates[:,0*hsz:1*hsz])
+        forgetgate = sigmoid(gates[:,1*hsz:2*hsz])
+        cellgate   = tanh(   gates[:,2*hsz:3*hsz])
+        outgate    = sigmoid(gates[:,3*hsz:4*hsz])
+        nextc = (forgetgate * c) + (ingate * cellgate)
+        nexth = outgate * tanh(nextc)
+
+        return [nexth, nextc], nexth
+
+def GRU(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
+        hsz = hx.size(1)
+        gi = linear(input, w_ih, b_ih)
+        gh = linear(hidden, w_hh, b_hh)
+        # FIXME: chunk
+        resetgate = sigmoid(gi[:,0*hsz:1*hsz] + gh[:,0*hsz:1*hsz])
+        inputgate = sigmoid(gi[:,0*hsz:1*hsz] + gh[:,0*hsz:1*hsz])
+        output    = tanh(gi[2] + resetgate * gh[2])
+        nexth     = output + inputgate * (hidden - output)
+
+        return nexth, output  # FIXME: nexth, nexth ???
+
+def StackedRNN(cell, num_layers):
+    def forward(input, hx, weight):
+        assert(len(weight) == num_layers)
+        next_hidden = []
+        for i in range(num_layers):
+            hy, input = cell(input, hidden[i], weight[i])
+            next_hidden.append(hy)
+
+        return next_hidden, input
+
+    return forward
+
+def Recurrent(rnn):
+    def forward(input, hidden, weight):
+        output = None
+        for i in range(input.size(0)):
+            hidden, y = rnn(input[i], hidden, weight)
+            if not output:
+                output = input.new(input.size(0), *y.size())
+            output[i] = y
+
+        return hidden, output
+
+    return forward
+
 def THNN_RNN(self, mode, input_size, hidden_size, num_layers=1, batch_first=False, dropout=0, train=True, bidirectional=False):
     if num_layers != 1:
         raise NotImplementedError()
@@ -30,19 +102,31 @@ def THNN_RNN(self, mode, input_size, hidden_size, num_layers=1, batch_first=Fals
     if dropout != 0:
         raise NotImplementedError()
 
-    def forward(self, input, weight, hx, cx=None):
+    if mode == 'RNN_RELU':
+        cell = RNNReLUCell
+    elif mode == 'RNN_TANH':
+        cell = RNNTanhCell
+    elif mode == 'RNN_LSTM':
+        cell = LSTMCell
+    elif mode == 'RNN_GRU':
+        cell = GRUCell
+    else:
+        raise Exception('Unknown mode: {}'.format(mode))
+
+    func = Recurrent(StackedRNN(cell, num_layers))
+
+    def forward(self, input, weight, hidden):
         if batch_first:
             input.transpose(0, 1)
-        seq_len = input.size(0)
-        for i in range(seq_len):
-            if mode == 'RNN_RELU':
-                hx = nn.ReLU(XXX)
-            else:
-                raise Exception('Unknown mode: {}'.format(mode))
+
+        nexth, output = func(input, hx, hidden)
+
         if batch_first:
             output.transpose(0, 1)
-    return forward
 
+        return output, nexth
+
+    return forward
 
 
 class CudnnRNN(Function):
@@ -58,8 +142,6 @@ class CudnnRNN(Function):
         self.train = train
         self.bidirectional = 1 if bidirectional else 0
         self.num_directions = 2 if bidirectional else 1
-        # ???
-        # we can't use the same seed at every iteration
         self.seed = torch.IntTensor(1).random_()[0]
 
     def forward(self, input, weight, hx, cx=None):
@@ -73,20 +155,21 @@ class CudnnRNN(Function):
         cudnn.rnn.forward(self, input, hx, cx, weight, output, hy, cy)
 
         if cx is not None:
-            self.save_for_backward(input, hx, cx, weight, output, hy, cy)
+            self.save_for_backward(input, hx, cx, weight, output)
             return output, hy, cy
         else:
-            self.save_for_backward(input, hx, weight, output, hy)
+            self.save_for_backward(input, hx, weight, output)
             return output, hy
 
 
     def backward(self, grad_output, grad_hy, grad_cy=None):
         tensors = self.saved_tensors
         if len(tensors) == 5:
-            input, hx, weight, output, hy = tensors
-            cx, cy = None, None
+            input, hx, cx, weight, output = tensors
+
         else:
-            input, hx, cx, weight, output, hy, cy = tensors
+            input, hx, weight, output = tensors
+            cx = None
 
         grad_input, grad_weight, grad_hx, grad_cx = None, None, None, None
 
@@ -130,7 +213,9 @@ class CudnnRNN(Function):
 def RNN(*args, **kwargs):
     def forward(input, *fargs, **fkwargs):
         if cudnn.is_acceptable(input.data):
-            return CudnnRNN(*args, **kwargs)(input, *fargs, **fkwargs)
+            func = CudnnRNN(*args, **kwargs)
         else:
-            return THNN_RNN(*args, **kwargs)(input, *fargs, **fkwargs)
+            func = THNN_RNN(*args, **kwargs)
+        return func(input, *fargs, **fkwargs)
+
     return forward
