@@ -110,7 +110,7 @@ class GPUFallbackOp final : public Operator<CUDAContext> {
 
     if (!base_op_->Run()) {
       LOG(ERROR) << "Base op run failed in GPUFallbackOp. Def: "
-                      << ProtoDebugString(def());
+                 << ProtoDebugString(def());
       return false;
     }
     for (int i = 0; i < OutputSize(); ++i) {
@@ -135,6 +135,6 @@ class GPUFallbackOp final : public Operator<CUDAContext> {
   std::unique_ptr<CPUOp> base_op_;
 };
 
-}  // namespace caffe2
+} // namespace caffe2
 
-#endif  // CAFFE2_OPERATORS_OPERATOR_FALLBACK_H_
+#endif // CAFFE2_OPERATORS_OPERATOR_FALLBACK_H_

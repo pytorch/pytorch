@@ -1,9 +1,9 @@
 #ifndef CAFFE2_OPERATORS_PREFETCH_OP_H_
 #define CAFFE2_OPERATORS_PREFETCH_OP_H_
 
-#include <thread>  // NOLINT
-#include <mutex>
 #include <condition_variable>
+#include <mutex>
+#include <thread> // NOLINT
 
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
@@ -42,7 +42,8 @@ class PrefetchOperator : public OperatorBase {
     if (prefetch_thread_.get()) {
       {
         std::unique_lock<std::mutex> lock(prefetch_access_mutex_);
-        while (!prefetched_) consumer_.wait(lock);
+        while (!prefetched_)
+          consumer_.wait(lock);
         finalize_ = true;
         prefetched_ = false;
       }
@@ -66,7 +67,8 @@ class PrefetchOperator : public OperatorBase {
     }
     context_.SwitchToDevice();
     std::unique_lock<std::mutex> lock(prefetch_access_mutex_);
-    while (!prefetched_) consumer_.wait(lock);
+    while (!prefetched_)
+      consumer_.wait(lock);
     if (!prefetch_success_) {
       LOG(ERROR) << "Prefetching failed.";
       return false;
@@ -84,7 +86,8 @@ class PrefetchOperator : public OperatorBase {
   void PrefetchWorker() {
     context_.SwitchToDevice();
     std::unique_lock<std::mutex> lock(prefetch_access_mutex_);
-    while (prefetched_) producer_.wait(lock);
+    while (prefetched_)
+      producer_.wait(lock);
     while (!finalize_) {
       // We will need to run a FinishDeviceComputation() call because the
       // prefetcher thread and the main thread are potentially using different
@@ -92,7 +95,8 @@ class PrefetchOperator : public OperatorBase {
       prefetch_success_ = Prefetch() && context_.FinishDeviceComputation();
       prefetched_ = true;
       consumer_.notify_one();
-      while (prefetched_) producer_.wait(lock);
+      while (prefetched_)
+        producer_.wait(lock);
     }
   }
 
@@ -113,6 +117,6 @@ class PrefetchOperator : public OperatorBase {
   unique_ptr<std::thread> prefetch_thread_;
 };
 
-}  // namespace caffe2
+} // namespace caffe2
 
-#endif  // CAFFE2_OPERATORS_PREFETCH_OP_H_
+#endif // CAFFE2_OPERATORS_PREFETCH_OP_H_

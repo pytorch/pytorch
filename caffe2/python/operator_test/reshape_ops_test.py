@@ -68,6 +68,21 @@ class TestLengthsToShapeOps(TestCase):
         # Check the gradient
         np.testing.assert_allclose(X_grad, Y.reshape(old_shape), rtol=1e-5)
 
+    def test_input_shape_changes(self):
+        workspace.FeedBlob(
+            'input_blob',
+            np.array(np.random.rand(10, 20, 10), dtype=np.float32))
+        net = core.Net('mynet')
+        z, _ = net.Reshape('input_blob',
+                           ['z_reshape', 'dummy_size'],
+                           shape=(-1, 10))
+        workspace.CreateNet(net)
+        workspace.RunNet(net)
+        workspace.FeedBlob(
+            'input_blob',
+            np.array(np.random.rand(10, 40, 10), dtype=np.float32))
+        workspace.RunNet(net)
+
 
 def test_reshape(old_shape, new_shape, arg_shape=True, in_place=False):
     X = np.random.rand(*old_shape).astype(np.float32)

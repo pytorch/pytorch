@@ -911,6 +911,7 @@ class ReshapeOp : public Operator<Context> {
     auto& input = Input(0);
     CAFFE_ENFORCE(input.ndim() >= 1, "DATA should be at least 1-D");
 
+    vector<int64_t> actual_new_shape = new_shape_;
     if (InputSize() == 2) {
       CAFFE_ENFORCE(
           !OperatorBase::HasArgument("shape"),
@@ -921,7 +922,7 @@ class ReshapeOp : public Operator<Context> {
       CAFFE_ENFORCE(shape.ndim() == 1, "Shape should be 1-D");
 
       const T* shape_data = shape.template data<T>();
-      new_shape_.assign(shape_data, shape_data + shape.size());
+      actual_new_shape.assign(shape_data, shape_data + shape.size());
     }
 
     // Checks if the new shape is valid and fills in the missing dimension
@@ -930,8 +931,8 @@ class ReshapeOp : public Operator<Context> {
     auto total_size = input.size_from_dim(0);
     T size = 1;
     int unknown_idx = -1;
-    for (int i = 0; i < new_shape_.size(); ++i) {
-      const auto dim = new_shape_[i];
+    for (int i = 0; i < actual_new_shape.size(); ++i) {
+      const auto dim = actual_new_shape[i];
       if (dim == -1) {
         CAFFE_ENFORCE(
             unknown_idx == -1,
@@ -951,7 +952,7 @@ class ReshapeOp : public Operator<Context> {
           " vs ",
           size,
           ")");
-      new_shape_[unknown_idx] = total_size / size;
+      actual_new_shape[unknown_idx] = total_size / size;
     } else {
       CAFFE_ENFORCE_EQ(
           total_size,
@@ -973,7 +974,7 @@ class ReshapeOp : public Operator<Context> {
     }
 
     auto* output = Output(0);
-    output->Resize(new_shape_);
+    output->Resize(actual_new_shape);
     context_.template CopyBytes<Context, Context>(
         input.nbytes(),
         input.raw_data(),
@@ -1051,8 +1052,13 @@ class SqueezeOp : public Operator<Context> {
     for (int i = 0; i < input.dims().size(); ++i) {
       if (j < dims_.size() && dims_[j] == i) {
         CAFFE_ENFORCE(
-            input.dims()[i] == 1, "Dimension ", i, " of input must be 1",
-            " instead of ", input.dims()[i], ".");
+            input.dims()[i] == 1,
+            "Dimension ",
+            i,
+            " of input must be 1",
+            " instead of ",
+            input.dims()[i],
+            ".");
         ++j;
         continue;
       }

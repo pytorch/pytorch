@@ -57,10 +57,8 @@ pass.
 """
 
 import argparse
-import numpy as np
-import time
 
-from caffe2.python import cnn, workspace, core
+from caffe2.python import cnn, workspace
 
 
 def MLP(order):
@@ -88,8 +86,9 @@ def MLP(order):
 
 
 def AlexNet(order):
-    model = cnn.CNNModelHelper(order, name="alexnet",
-            use_cudnn=True, cudnn_exhaustive_search=True)
+    model = cnn.CNNModelHelper(
+        order, name="alexnet",
+        use_cudnn=True, cudnn_exhaustive_search=True)
     conv1 = model.Conv(
         "data",
         "conv1",
@@ -168,8 +167,9 @@ def AlexNet(order):
 
 
 def OverFeat(order):
-    model = cnn.CNNModelHelper(order, name="overfeat",
-            use_cudnn=True, cudnn_exhaustive_search=True)
+    model = cnn.CNNModelHelper(
+        order, name="overfeat",
+        use_cudnn=True, cudnn_exhaustive_search=True)
     conv1 = model.Conv(
         "data",
         "conv1",
@@ -240,8 +240,9 @@ def OverFeat(order):
 
 
 def VGGA(order):
-    model = cnn.CNNModelHelper(order, name='vgg-a',
-            use_cudnn=True, cudnn_exhaustive_search=True)
+    model = cnn.CNNModelHelper(
+        order, name='vgg-a',
+        use_cudnn=True, cudnn_exhaustive_search=True)
     conv1 = model.Conv(
         "data",
         "conv1",
@@ -416,8 +417,9 @@ def _InceptionModule(
 
 
 def Inception(order):
-    model = cnn.CNNModelHelper(order, name="inception",
-            use_cudnn=True, cudnn_exhaustive_search=True)
+    model = cnn.CNNModelHelper(
+        order, name="inception",
+        use_cudnn=True, cudnn_exhaustive_search=True)
     conv1 = model.Conv(
         "data",
         "conv1",
@@ -547,6 +549,10 @@ def Benchmark(model_gen, arg):
         model.param_init_net.RunAllOnGPU()
         model.net.RunAllOnGPU()
 
+    if arg.engine:
+        for op in model.net.Proto().op:
+            op.engine = arg.engine
+
     if arg.dump_model:
         # Writes out the pbtxt for benchmarks on e.g. Android
         with open(
@@ -611,6 +617,11 @@ def GetArgumentParser():
         action='store_true',
         help="If True, run testing on CPU instead of GPU."
     )
+    parser.add_argument(
+        "--engine",
+        type=str,
+        default="",
+        help="If set, blindly prefer the given engine(s) for every op.")
     parser.add_argument(
         "--dump_model",
         action='store_true',

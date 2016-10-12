@@ -2,9 +2,9 @@
 #define CAFFE2_OPERATORS_SOFTMAX_OP_H_
 
 #include "caffe2/core/context.h"
+#include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
-#include "caffe2/core/logging.h"
 
 namespace caffe2 {
 
@@ -32,6 +32,6 @@ class SoftmaxGradientOp final : public Operator<Context> {
   Tensor<Context> sum_multiplier_;
 };
 
-}  // namespace caffe2
+} // namespace caffe2
 
-#endif  // CAFFE2_OPERATORS_SOFTMAX_OP_H_
+#endif // CAFFE2_OPERATORS_SOFTMAX_OP_H_

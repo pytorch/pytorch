@@ -68,6 +68,6 @@ class SpatialBNGradientOp : public Operator<Context> {
   OUTPUT_TAGS(INPUT_GRAD, SCALE_GRAD, BIAS_GRAD);
 };
 
-}  // namespace caffe2
+} // namespace caffe2
 
-#endif  // CAFFE2_OPERATORS_SPATIAL_BATCH_NORM_OP_H_
+#endif // CAFFE2_OPERATORS_SPATIAL_BATCH_NORM_OP_H_

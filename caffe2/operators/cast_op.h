@@ -1,9 +1,10 @@
-#pragma once
+#ifndef CAFFE2_OPERATORS_CAST_OP_H_
+#define CAFFE2_OPERATORS_CAST_OP_H_
 
 #include "caffe2/core/context.h"
+#include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
-#include "caffe2/core/logging.h"
 
 namespace caffe2 {
 
@@ -18,13 +19,13 @@ inline TensorProto_DataType GetCastDataType(const ArgumentHelper& helper) {
     CAFFE_ENFORCE(
         TensorProto_DataType_Parse(s, &to), "Unknown 'to' argument: ", s);
 #else
-      CAFFE_THROW("String cast op not supported");
+    CAFFE_THROW("String cast op not supported");
 #endif
-    } else {
-      to = static_cast<TensorProto_DataType>(
-          helper.GetSingleArgument<int>("to", TensorProto_DataType_UNDEFINED));
-    }
-    return to;
+  } else {
+    to = static_cast<TensorProto_DataType>(
+        helper.GetSingleArgument<int>("to", TensorProto_DataType_UNDEFINED));
+  }
+  return to;
 }
 } // namespace cast
 
@@ -48,7 +49,7 @@ class CastOp : public Operator<Context> {
         break;
       case TensorProto_DataType_STRING:
         CAFFE_THROW("Casting to and from strings is not supported yet");
-        // break;
+      // break;
       case TensorProto_DataType_BOOL:
         body_ = &CastOp::DoRunWithDstType<bool>;
         break;
@@ -69,13 +70,13 @@ class CastOp : public Operator<Context> {
         break;
       case TensorProto_DataType_FLOAT16:
         CAFFE_THROW("Casting to and from float16 is not supported yet");
-        // break;
+      // break;
       case TensorProto_DataType_DOUBLE:
         body_ = &CastOp::DoRunWithDstType<double>;
         break;
       case TensorProto_DataType_UNDEFINED:
         CAFFE_THROW("Cast op must have 'to' argument of type DataType");
-        // break;
+      // break;
       default:
         CAFFE_THROW("Unexpected 'to' argument value: ", to);
     }
@@ -119,6 +120,6 @@ class CastOp : public Operator<Context> {
   bool (CastOp::*body_)();
 };
 
+} // namespace caffe2
 
-
-}  // namespace caffe2
+#endif // CAFFE2_OPERATORS_CAST_OP_H_

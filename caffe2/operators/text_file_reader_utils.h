@@ -1,4 +1,5 @@
-#pragma once
+#ifndef CAFFE2_OPERATORS_TEXT_FILE_READER_UTILS_H
+#define CAFFE2_OPERATORS_TEXT_FILE_READER_UTILS_H
 
 #include <memory>
 #include <string>
@@ -113,4 +114,7 @@ class FileReader : public StringProvider {
   int fd_;
   std::unique_ptr<char[]> buffer_;
 };
-}
+
+} // namespace caffe2
+
+#endif // CAFFE2_OPERATORS_TEXT_FILE_READER_UTILS_H

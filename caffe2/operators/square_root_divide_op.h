@@ -1,4 +1,5 @@
-#pragma once
+#ifndef CAFFE2_OPERATORS_SQUARE_ROOT_DIVIDE_OP_H_
+#define CAFFE2_OPERATORS_SQUARE_ROOT_DIVIDE_OP_H_
 
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
@@ -50,3 +51,5 @@ class SquareRootDivideOp final : public Operator<Context> {
 };
 
 } // namespace caffe2
+
+#endif // CAFFE2_OPERATORS_SQUARE_ROOT_DIVIDE_OP_H_
