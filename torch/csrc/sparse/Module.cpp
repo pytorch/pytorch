@@ -12,13 +12,13 @@ static bool THSPModule_loadClasses(PyObject *module_dict)
 {
 #define ASSERT_NOT_NULL(ptr) if (!(ptr)) { THPUtils_setError("couldn't load classes"); return false; }
   ASSERT_NOT_NULL(sparse_tensor_classes = PyMapping_GetItemString(module_dict, (char*)"_sparse_tensor_classes"));
-  ASSERT_NOT_NULL(THSPDoubleTensorClass  = PyMapping_GetItemString(module_dict, (char*)"SparseDoubleTensor"));
-  ASSERT_NOT_NULL(THSPFloatTensorClass   = PyMapping_GetItemString(module_dict, (char*)"SparseFloatTensor"));
-  ASSERT_NOT_NULL(THSPLongTensorClass    = PyMapping_GetItemString(module_dict, (char*)"SparseLongTensor"));
-  ASSERT_NOT_NULL(THSPIntTensorClass     = PyMapping_GetItemString(module_dict, (char*)"SparseIntTensor"));
-  ASSERT_NOT_NULL(THSPShortTensorClass   = PyMapping_GetItemString(module_dict, (char*)"SparseShortTensor"));
-  ASSERT_NOT_NULL(THSPCharTensorClass    = PyMapping_GetItemString(module_dict, (char*)"SparseCharTensor"));
-  ASSERT_NOT_NULL(THSPByteTensorClass    = PyMapping_GetItemString(module_dict, (char*)"SparseByteTensor"));
+  ASSERT_NOT_NULL(THSPDoubleTensorClass  = PyMapping_GetItemString(module_dict, (char*)"DoubleTensor"));
+  ASSERT_NOT_NULL(THSPFloatTensorClass   = PyMapping_GetItemString(module_dict, (char*)"FloatTensor"));
+  ASSERT_NOT_NULL(THSPLongTensorClass    = PyMapping_GetItemString(module_dict, (char*)"LongTensor"));
+  ASSERT_NOT_NULL(THSPIntTensorClass     = PyMapping_GetItemString(module_dict, (char*)"IntTensor"));
+  ASSERT_NOT_NULL(THSPShortTensorClass   = PyMapping_GetItemString(module_dict, (char*)"ShortTensor"));
+  ASSERT_NOT_NULL(THSPCharTensorClass    = PyMapping_GetItemString(module_dict, (char*)"CharTensor"));
+  ASSERT_NOT_NULL(THSPByteTensorClass    = PyMapping_GetItemString(module_dict, (char*)"ByteTensor"));
 
   return true;
 #undef ASSERT_NOT_NULL
@@ -49,25 +49,32 @@ static bool THSPModule_assignStateless()
 #undef INIT_STATELESS
 }
 
-bool THSPModule_initSparse(PyObject *module_dict) {
+bool THSPModule_initSparse(PyObject *module) {
 #define ASSERT_TRUE(cond) if (!(cond)) { return false; }
+  ASSERT_TRUE(THSPDoubleTensor_init(module));
+  ASSERT_TRUE(THSPFloatTensor_init(module));
+  ASSERT_TRUE(THSPLongTensor_init(module));
+  ASSERT_TRUE(THSPIntTensor_init(module));
+  ASSERT_TRUE(THSPShortTensor_init(module));
+  ASSERT_TRUE(THSPCharTensor_init(module));
+  ASSERT_TRUE(THSPByteTensor_init(module));
+
+  PyObject* module_dict = PyModule_GetDict(module);
   ASSERT_TRUE(THSPModule_loadClasses(module_dict));
   ASSERT_TRUE(THSPModule_assignStateless());
   return true;
 #undef ASSERT_TRUE
 }
 
-#include <stdio.h>
 // Callback for python part. Used for additional initialization of python classes
 bool THSPModule_initExtension(PyObject *self)
 {
-  PyObject *torch_module = PyImport_ImportModule("torch");
+  PyObject *torch_module = PyImport_ImportModule("torch.sparse");
   if (!torch_module) {
-    THPUtils_setError("class loader couldn't access torch module");
+    THPUtils_setError("class loader couldn't access torch.sparse module");
     return NULL;
   }
-  PyObject* module_dict = PyModule_GetDict(torch_module);
-  bool res = THSPModule_initSparse(module_dict);
+  bool res = THSPModule_initSparse(torch_module);
   printf("%i\n", res);
   return res;
 }

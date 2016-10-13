@@ -1,22 +1,25 @@
 import torch
+from torch import sparse
 import itertools
 import unittest
 from common import TestCase
 from numbers import Number
 
+SparseTensor = sparse.DoubleTensor
+
 
 class TestSparse(TestCase):
     @staticmethod
-    def __gen_sparse(d, nnz, with_size):
+    def _gen_sparse(d, nnz, with_size):
         v = torch.randn(nnz)
         if isinstance(with_size, Number):
             i = (torch.rand(d, nnz) * with_size).type(torch.LongTensor)
-            x = torch.SparseTensor(i, v)
+            x = SparseTensor(i, v)
         else:
             i = torch.rand(d, nnz) * \
                     torch.Tensor(with_size).repeat(nnz, 1).transpose(0, 1)
             i = i.type(torch.LongTensor)
-            x = torch.SparseTensor(i, v, torch.LongTensor(with_size))
+            x = SparseTensor(i, v, torch.LongTensor(with_size))
 
         return x, i, v
 
@@ -25,12 +28,12 @@ class TestSparse(TestCase):
         return (x - y).abs().le(prec).all()
 
     def test_basic(self):
-        x, i, v = self.__gen_sparse(3, 10, 100)
+        x, i, v = self._gen_sparse(3, 10, 100)
 
         self.assertEqual(i, x.indices())
         self.assertEqual(v, x.values())
 
-        x, i, v = self.__gen_sparse(3, 10, [100, 100, 100])
+        x, i, v = self._gen_sparse(3, 10, [100, 100, 100])
         self.assertEqual(i, x.indices())
         self.assertEqual(v, x.values())
         self.assertEqual(x.ndimension(), 3)
@@ -45,7 +48,7 @@ class TestSparse(TestCase):
             [0, 0, 1, 4],
         ])
         v = torch.Tensor([2, 1, 3, 4])
-        x = torch.SparseTensor(i, v, torch.LongTensor([3, 4, 5]))
+        x = SparseTensor(i, v, torch.LongTensor([3, 4, 5]))
         res = torch.Tensor([
             [[2, 0, 0, 0, 0],
              [0, 0, 0, 0, 0],
@@ -72,7 +75,7 @@ class TestSparse(TestCase):
             [92, 31, 62, 50, 22, 65, 89, 74, 56, 34],
         ])
         v = torch.Tensor([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
-        x = torch.SparseTensor(i, v, torch.LongTensor([100, 100]))
+        x = SparseTensor(i, v, torch.LongTensor([100, 100]))
         exp_i = torch.LongTensor([
             [0,  1,  6, 14, 27, 35, 39, 40, 66, 71],
             [31, 92, 65, 50, 34, 62, 22, 56, 74, 89],
@@ -88,7 +91,7 @@ class TestSparse(TestCase):
             [1, 0, 4, 0],
         ])
         v = torch.Tensor([3, 2, 4, 1])
-        x = torch.SparseTensor(i, v, torch.LongTensor([3, 4, 5]))
+        x = SparseTensor(i, v, torch.LongTensor([3, 4, 5]))
         exp_i = torch.LongTensor([
             [0, 1, 2, 2],
             [0, 0, 0, 3],
@@ -107,7 +110,7 @@ class TestSparse(TestCase):
             [0, 0, 4, 0],
         ])
         v = torch.Tensor([3, 2, 4, 1])
-        x = torch.SparseTensor(i, v, torch.LongTensor([3, 4, 5]))
+        x = SparseTensor(i, v, torch.LongTensor([3, 4, 5]))
         exp_i = torch.LongTensor([
             [0, 2],
             [0, 3],
@@ -121,7 +124,7 @@ class TestSparse(TestCase):
 
     def test_transpose(self):
         return
-        x = self.__gen_sparse(3, 5, 5)[0]
+        x = self._gen_sparse(3, 5, 5)[0]
         y = x.to_dense()
 
         for i, j in itertools.combinations(range(4), 2):
@@ -133,11 +136,11 @@ class TestSparse(TestCase):
 
     def test_spmm(self):
         def test_shape(di, dj, dk):
-            x, _, _ = self.__gen_sparse(2, 20, [di, dj])
+            x, _, _ = self._gen_sparse(2, 20, [di, dj])
             y = torch.randn(dj, dk)
 
             expected = torch.mm(x.to_dense(), y)
-            res = torch.SparseTensor._torch.spmm(x, y)
+            res = SparseTensor._torch.spmm(x, y)
 
             self.assertEqual(res, expected)
 
@@ -147,11 +150,11 @@ class TestSparse(TestCase):
 
     def test_sspmm(self):
         def test_shape(di, dj, dk):
-            x, _, _ = self.__gen_sparse(2, 20, [di, dj])
+            x, _, _ = self._gen_sparse(2, 20, [di, dj])
             y = torch.randn(dj, dk)
 
             expected = torch.mm(x.to_dense(), y)
-            res = torch.SparseTensor._torch.sspmm(x, y)
+            res = SparseTensor._torch.sspmm(x, y)
 
             self.assertEqual(res.to_dense(), expected)
 
@@ -161,11 +164,11 @@ class TestSparse(TestCase):
 
     def test_spcadd(self):
         def test_shape(*shape):
-            x, _, _ = self.__gen_sparse(len(shape), 10, shape)
+            x, _, _ = self._gen_sparse(len(shape), 10, shape)
             y = torch.randn(*shape)
 
             expected = y + x.to_dense()
-            res = torch.SparseTensor._torch.spcadd(y, x)
+            res = SparseTensor._torch.spcadd(y, x)
 
             self.assertEqual(res, expected)
 
