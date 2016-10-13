@@ -51,12 +51,8 @@ $methods
     }.items()))
 
     TYPE_NAMES = dict(chain(THPPlugin.TYPE_NAMES.items(), {
+        'THLongStorage*': 'torch.LongStorage',
         'THSTensor*': '" THSPTensorStr "',
-        'THSLongTensor*': 'SparseLongTensor',
-        'THSBoolTensor*': 'SparseByteTensor',
-        'THSIndexTensor*': 'SparseLongTensor',
-        'THSFloatTensor*': 'SparseFloatTensor',
-        'THSDoubleTensor*': 'SparseDoubleTensor',
     }.items()))
 
     # These functions have TH hardcoded in, so we just copy them

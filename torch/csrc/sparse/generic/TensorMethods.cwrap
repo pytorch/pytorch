@@ -11,6 +11,7 @@ defined(THC_REAL_IS_HALF)
 #else
 #define AS_REAL(x) x
 #endif
+#define THPModuleStr "torch.sparse"
 
 #define THPModuleStr "torch.sparse"
 
