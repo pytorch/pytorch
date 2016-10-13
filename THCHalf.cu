@@ -128,3 +128,11 @@ THC_EXTERNC int THC_nativeHalfInstructions(THCState *state) {
   return (prop->major > 5 ||
           (prop->major == 5 && prop->minor == 3));
 }
+
+THC_EXTERNC int THC_fastHalfInstructions(THCState *state) {
+  cudaDeviceProp* prop =
+    THCState_getCurrentDeviceProperties(state);
+
+  // Check for CC 6.0 only (corresponds to P100)
+  return (prop->major == 6 && prop->minor == 0);
+}

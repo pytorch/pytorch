@@ -8,11 +8,6 @@
 #define CUDA_HALF_TENSOR 1
 #endif
 
-/* Kernel side: Native fp16 ALU instructions are available if we have this: */
-#if defined(CUDA_HALF_TENSOR) && (CUDA_VERSION >= 8000) && (__CUDA_ARCH__ >= 530)
-#define CUDA_HALF_INSTRUCTIONS 1
-#endif
-
 #ifdef CUDA_HALF_TENSOR
 
 #include <cuda_fp16.h>
@@ -25,6 +20,9 @@ THC_API float THC_half2float(half a);
 
 /* Check for native fp16 support on the current device (CC 5.3+) */
 THC_EXTERNC int THC_nativeHalfInstructions(THCState *state);
+
+/* Check for performant native fp16 support on the current device */
+THC_EXTERNC int THC_fastHalfInstructions(THCState *state);
 
 #endif /* CUDA_HALF_TENSOR */
 
