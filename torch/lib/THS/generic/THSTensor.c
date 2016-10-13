@@ -49,6 +49,8 @@ THSTensor *THSTensor_(set)(THSTensor *self, THLongTensor *indices, THTensor *val
   self->indices = THLongTensor_newClone(indices);
   self->values = THTensor_(newClone)(values);
   self->nnz = THTensor_(size)(values, 0);
+
+  return self;
 }
 
 

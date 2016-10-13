@@ -11,7 +11,7 @@ import os
 
 # TODO: make this more robust
 WITH_CUDA = os.path.exists('/Developer/NVIDIA/CUDA-7.5/include') or os.path.exists('/usr/local/cuda/include')
-DEBUG = True
+DEBUG = False
 
 ################################################################################
 # Monkey-patch setuptools to compile in parallel

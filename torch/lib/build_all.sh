@@ -1,7 +1,7 @@
 set -e
 
 DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
-BASE_DIR=$(readlink -f $DIR/../..)
+BASE_DIR=$DIR/../..
 cd $DIR
 INSTALL_DIR=$(pwd)/tmp_install
 BASIC_C_FLAGS=" -DTH_INDEX_BASE=0 -I$INSTALL_DIR/include -I$INSTALL_DIR/include/TH -I$INSTALL_DIR/include/THC "
@@ -22,8 +22,7 @@ function build() {
               -DCMAKE_CXX_FLAGS="$C_FLAGS $CPP_FLAGS" \
               -DCUDA_NVCC_FLAGS="$BASIC_C_FLAGS" \
               -DTH_INCLUDE_PATH="$INSTALL_DIR/include" \
-              -DTH_LIB_PATH="$INSTALL_DIR/lib" \
-              -DCMAKE_BUILD_TYPE=Debug
+              -DTH_LIB_PATH="$INSTALL_DIR/lib"
   make install -j$(getconf _NPROCESSORS_ONLN)
   cd ../..
 

@@ -94,7 +94,7 @@ static bool THSPModule_assignStateless()
 #undef INIT_STATELESS
 }
 
-#define ASSERT_TRUE(cond) if (!(cond)) { return false; }
+#define ASSERT_TRUE(cond) if (!(cond)) { Py_RETURN_FALSE; }
 bool THSPModule_initSparse(PyObject *module) {
   ASSERT_TRUE(THSPDoubleTensor_init(module));
   ASSERT_TRUE(THSPFloatTensor_init(module));
