@@ -11,7 +11,7 @@ __global__ void cunn_SpatialClassNLLCriterion_updateOutput_kernel(
           T *output,
           T *total_weight,
           T *input,
-          long *target,
+          THCIndex_t *target,
           T *weights,
           int size_average,
           int batch_size,
@@ -57,7 +57,7 @@ __global__ void cunn_SpatialClassNLLCriterion_updateOutput_kernel(
 template<typename T>
 __global__ void cunn_SpatialClassNLLCriterion_updateGradInput_kernel(
           T *gradInput,
-          long *target,
+          THCIndex_t *target,
           T *weights,
           T *total_weight,
           int size_average,

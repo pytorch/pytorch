@@ -7,7 +7,7 @@
 #include <cfloat>
 
 void THNN_CudaVolumetricMaxPooling_updateOutput(
-  THCState *state, THCudaTensor *input, THCudaTensor *output, THCudaTensor *indices,
+  THCState *state, THCudaTensor *input, THCudaTensor *output, THCIndexTensor *indices,
   int kT, int kW, int kH,
   int dT, int dW, int dH,
   int padT, int padW, int padH,
@@ -21,7 +21,7 @@ void THNN_CudaVolumetricMaxPooling_updateOutput(
 
 void THNN_CudaVolumetricMaxPooling_updateGradInput(
   THCState *state, THCudaTensor *input, THCudaTensor *gradOutput, THCudaTensor *gradInput,
-  THCudaTensor *indices,
+  THCIndexTensor *indices,
   int dT, int dW, int dH,
   int padT, int padW, int padH)
 {

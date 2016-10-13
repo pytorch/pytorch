@@ -8,7 +8,7 @@
 
 __global__ void cuda_VolumetricMaxUnpooling_updateOutput(
   THCDeviceTensor<float, 4> input,
-  THCDeviceTensor<float, 4> indices,
+  THCDeviceTensor<THCIndex_t, 4> indices,
   THCDeviceTensor<float, 4> output,
   int dT, int dH, int dW,
   int padT, int padH, int padW, int offsetZ)
@@ -25,8 +25,8 @@ __global__ void cuda_VolumetricMaxUnpooling_updateOutput(
     long start_w = iColumn * dW - padW;
 
     float val = input[slice][iFrame][iRow][iColumn];
-    
-    float *idx = &indices[slice][iFrame][iRow][iColumn];
+
+    THCIndex_t *idx = &indices[slice][iFrame][iRow][iColumn];
     long maxz = ((unsigned char*)(idx))[0];
     long maxy = ((unsigned char*)(idx))[1];
     long maxx = ((unsigned char*)(idx))[2];
@@ -35,7 +35,7 @@ __global__ void cuda_VolumetricMaxUnpooling_updateOutput(
 }
 
 void THNN_CudaVolumetricMaxUnpooling_updateOutput(
-  THCState *state, THCudaTensor *input, THCudaTensor *output, THCudaTensor *indices,
+  THCState *state, THCudaTensor *input, THCudaTensor *output, THCIndexTensor *indices,
   int outputTime, int outputWidth, int outputHeight,
   int dT, int dW, int dH,
   int padT, int padW, int padH)
@@ -84,25 +84,25 @@ void THNN_CudaVolumetricMaxUnpooling_updateOutput(
   }
 
   input = THCudaTensor_newContiguous(state, input);
-  indices = THCudaTensor_newContiguous(state, indices);
+  indices = THCIndexTensor_(newContiguous)(state, indices);
   THCudaTensor_zero(state, output);
-  
+
   // Collapse batch and feature dimensions
   THCDeviceTensor<float, 4> cudaInput;
   THCDeviceTensor<float, 4> cudaOutput;
-  THCDeviceTensor<float, 4> cudaIndices;
+  THCDeviceTensor<THCIndex_t, 4> cudaIndices;
 
   if (THCudaTensor_nDimension(state, input) == 4)
   {
     cudaInput  = toDeviceTensor<float, 4>(state, input);
     cudaOutput = toDeviceTensor<float, 4>(state, output);
-    cudaIndices = toDeviceTensor<float, 4>(state, indices);
+    cudaIndices = toDeviceTensor<THCIndex_t, 4>(state, indices);
   }
   else
   {
     cudaInput  = toDeviceTensor<float, 5>(state, input).downcastOuter<4>();
     cudaOutput = toDeviceTensor<float, 5>(state, output).downcastOuter<4>();
-    cudaIndices = toDeviceTensor<float, 5>(state, indices).downcastOuter<4>();
+    cudaIndices = toDeviceTensor<THCIndex_t, 5>(state, indices).downcastOuter<4>();
   }
 
   int totalZ = inputTime * inputSlices * batchSize;
@@ -125,12 +125,12 @@ void THNN_CudaVolumetricMaxUnpooling_updateOutput(
   }
 
   THCudaTensor_free(state, input);
-  THCudaTensor_free(state, indices);
+  THCIndexTensor_(free)(state, indices);
 }
 
 __global__ void cuda_VolumetricMaxUnpooling_updateGradInput(
   THCDeviceTensor<float, 4> gradOutput,
-  THCDeviceTensor<float, 4> indices,
+  THCDeviceTensor<THCIndex_t, 4> indices,
   THCDeviceTensor<float, 4> gradInput,
   int dT, int dH, int dW,
   int padT, int padH, int padW, int offsetZ)
@@ -142,12 +142,12 @@ __global__ void cuda_VolumetricMaxUnpooling_updateGradInput(
 
   if (iRow < gradInput.getSize(2) && iColumn < gradInput.getSize(3))
   {
-    
+
     long start_t = iFrame * dT - padT;
     long start_h = iRow * dH - padH;
     long start_w = iColumn * dW - padW;
 
-    float *idx = &indices[slice][iFrame][iRow][iColumn];
+    THCIndex_t *idx = &indices[slice][iFrame][iRow][iColumn];
     long maxz = ((unsigned char*)(idx))[0];
     long maxy = ((unsigned char*)(idx))[1];
     long maxx = ((unsigned char*)(idx))[2];
@@ -160,18 +160,18 @@ __global__ void cuda_VolumetricMaxUnpooling_updateGradInput(
 
 void THNN_CudaVolumetricMaxUnpooling_updateGradInput(
   THCState *state, THCudaTensor *input, THCudaTensor *gradOutput, THCudaTensor *gradInput,
-  THCudaTensor *indices,
+  THCIndexTensor *indices,
   int outputTime, int outputWidth, int outputHeight,
   int dT, int dW, int dH,
   int padT, int padW, int padH)
 {
-  
+
   int batchSize;
   int inputSlices;
   int inputTime;
   int inputHeight;
   int inputWidth;
-  
+
   THCUNN_assertSameGPU(state, 4, input, indices, gradOutput, gradInput);
 
   if (THCudaTensor_nDimension(state, input) == 4) /* 4D */
@@ -192,7 +192,7 @@ void THNN_CudaVolumetricMaxUnpooling_updateGradInput(
   }
 
   input = THCudaTensor_newContiguous(state, input);
-  indices = THCudaTensor_newContiguous(state, indices);
+  indices = THCIndexTensor_(newContiguous)(state, indices);
   gradOutput = THCudaTensor_newContiguous(state, gradOutput);
   THCudaTensor_resizeAs(state, gradInput, input);
   THCudaTensor_zero(state, gradInput);
@@ -200,13 +200,13 @@ void THNN_CudaVolumetricMaxUnpooling_updateGradInput(
   // Collapse batch and feature dimensions
   THCDeviceTensor<float, 4> cudaGradInput;
   THCDeviceTensor<float, 4> cudaGradOutput;
-  THCDeviceTensor<float, 4> cudaIndices;
-  
+  THCDeviceTensor<THCIndex_t, 4> cudaIndices;
+
   if (THCudaTensor_nDimension(state, input) == 4)
   {
     cudaGradInput  = toDeviceTensor<float, 4>(state, gradInput);
     cudaGradOutput = toDeviceTensor<float, 4>(state, gradOutput);
-    cudaIndices = toDeviceTensor<float, 4>(state, indices);
+    cudaIndices = toDeviceTensor<THCIndex_t, 4>(state, indices);
   }
   else
   {
@@ -215,7 +215,7 @@ void THNN_CudaVolumetricMaxUnpooling_updateGradInput(
     cudaGradOutput =
       toDeviceTensor<float, 5>(state, gradOutput).downcastOuter<4>();
     cudaIndices =
-      toDeviceTensor<float, 5>(state, indices).downcastOuter<4>();
+      toDeviceTensor<THCIndex_t, 5>(state, indices).downcastOuter<4>();
   }
 
   int totalZ = inputTime * inputSlices * batchSize;
@@ -242,5 +242,5 @@ void THNN_CudaVolumetricMaxUnpooling_updateGradInput(
   // cleanup
   THCudaTensor_free(state, input);
   THCudaTensor_free(state, gradOutput);
-  THCudaTensor_free(state, indices);
+  THCIndexTensor_(free)(state, indices);
 }

@@ -116,7 +116,7 @@ TH_API void THNN_(PReLU_accGradParameters)(
 TH_API void THNN_(SpatialClassNLLCriterion_updateOutput)(
                   THCState *state,
                   THCTensor *input,
-                  THCudaLongTensor *target,
+                  THCIndexTensor *target,
                   THCTensor *output,
                   bool sizeAverage,
                   THCTensor *weights,       // [OPTIONAL]
@@ -125,7 +125,7 @@ TH_API void THNN_(SpatialClassNLLCriterion_updateOutput)(
 TH_API void THNN_(SpatialClassNLLCriterion_updateGradInput)(
                   THCState *state,
                   THCTensor *input,
-                  THCudaLongTensor *target,
+                  THCIndexTensor *target,
                   THCTensor *gradInput,
                   bool sizeAverage,
                   THCTensor *weights,       // [OPTIONAL]
@@ -135,7 +135,7 @@ TH_API void THNN_(SpatialDilatedMaxPooling_updateOutput)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *output,
-                  THCudaLongTensor *indices,
+                  THCIndexTensor *indices,
                   int kW, int kH,
                   int dW, int dH,
                   int padW, int padH,
@@ -147,7 +147,7 @@ TH_API void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
                   THCTensor *input,
                   THCTensor *gradOutput,
                   THCTensor *gradInput,
-                  THCudaLongTensor *indices,
+                  THCIndexTensor *indices,
                   int kW, int kH,
                   int dW, int dH,
                   int padW, int padH,
@@ -159,7 +159,7 @@ TH_API void THNN_(SpatialMaxPooling_updateOutput)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *output,
-                  THCudaLongTensor *indices,
+                  THCIndexTensor *indices,
                   int kW, int kH,
                   int dW, int dH,
                   int padW, int padH,
@@ -170,7 +170,7 @@ TH_API void THNN_(SpatialMaxPooling_updateGradInput)(
                   THCTensor *input,
                   THCTensor *gradOutput,
                   THCTensor *gradInput,
-                  THCudaLongTensor *indices,
+                  THCIndexTensor *indices,
                   int kW, int kH,
                   int dW, int dH,
                   int padW, int padH,
@@ -180,7 +180,7 @@ TH_API void THNN_(SpatialMaxUnpooling_updateOutput)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *output,
-                  THCudaLongTensor *indices,
+                  THCIndexTensor *indices,
                   int owidth, int oheight);
 
 TH_API void THNN_(SpatialMaxUnpooling_updateGradInput)(
@@ -188,7 +188,7 @@ TH_API void THNN_(SpatialMaxUnpooling_updateGradInput)(
                   THCTensor *input,
                   THCTensor *gradOutput,
                   THCTensor *gradInput,
-                  THCudaLongTensor *indices,
+                  THCIndexTensor *indices,
                   int owidth, int oheight);
 
 TH_API void THNN_(RReLU_updateOutput)(

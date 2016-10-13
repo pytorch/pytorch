@@ -24,7 +24,7 @@ template <int PoolSizeWStatic>
 __global__ void SpatialFractionalMaxPooling_updateOutput(
   THCDeviceTensor<float, 4> input,
   THCDeviceTensor<float, 4> output,
-  THCDeviceTensor<float, 4> indices,
+  THCDeviceTensor<THCIndex_t, 4> indices,
   THCDeviceTensor<float, 3> samples,
   int poolSizeW, int poolSizeH) {
 
@@ -79,7 +79,7 @@ void THNN_CudaSpatialFractionalMaxPooling_updateOutput(
     THCudaTensor *output,
     int outputW, int outputH,
     int poolSizeW, int poolSizeH,
-    THCudaTensor *indices,
+    THCIndexTensor *indices,
     THCudaTensor *randomSamples)
 {
   int planeDim = 0;
@@ -110,7 +110,7 @@ void THNN_CudaSpatialFractionalMaxPooling_updateOutput(
 
   THCDeviceTensor<float, 4> devInput;
   THCDeviceTensor<float, 4> devOutput;
-  THCDeviceTensor<float, 4> devIndices;
+  THCDeviceTensor<THCIndex_t, 4> devIndices;
   THCDeviceTensor<float, 3> devSamples =
     toDeviceTensor<float, 3>(state, randomSamples);
 
@@ -118,19 +118,19 @@ void THNN_CudaSpatialFractionalMaxPooling_updateOutput(
     /* resize output */
     THCudaTensor_resize3d(state, output, numPlanes, outputH, outputW);
     /* indices will contain the locations for each output point */
-    THCudaTensor_resize3d(state, indices, numPlanes, outputH, outputW);
+    THCIndexTensor_(resize3d)(state, indices, numPlanes, outputH, outputW);
 
     devInput = toDeviceTensor<float, 3>(state, input).upcastOuter<4>();
     devOutput = toDeviceTensor<float, 3>(state, output).upcastOuter<4>();
-    devIndices = toDeviceTensor<float, 3>(state, indices).upcastOuter<4>();
+    devIndices = toDeviceTensor<THCIndex_t, 3>(state, indices).upcastOuter<4>();
   } else {
     THCudaTensor_resize4d(state, output, numBatch, numPlanes, outputH, outputW);
     /* indices will contain the locations for each output point */
-    THCudaTensor_resize4d(state, indices, numBatch, numPlanes, outputH, outputW);
+    THCIndexTensor_(resize4d)(state, indices, numBatch, numPlanes, outputH, outputW);
 
     devInput = toDeviceTensor<float, 4>(state, input);
     devOutput = toDeviceTensor<float, 4>(state, output);
-    devIndices = toDeviceTensor<float, 4>(state, indices);
+    devIndices = toDeviceTensor<THCIndex_t, 4>(state, indices);
   }
 
   // block is limited to 4 warps
@@ -166,7 +166,7 @@ void THNN_CudaSpatialFractionalMaxPooling_updateOutput(
 __global__ void SpatialFractionalMaxPooling_updateGradInput(
   THCDeviceTensor<float, 4> gradInput,
   THCDeviceTensor<float, 4> gradOutput,
-  THCDeviceTensor<float, 4> indices) {
+  THCDeviceTensor<THCIndex_t, 4> indices) {
   // Output (h, w) point that this thread is responsible for
   int ourOutputPoint = threadIdx.x + blockIdx.x * blockDim.x;
   int plane = blockIdx.y;
@@ -195,7 +195,7 @@ void THNN_CudaSpatialFractionalMaxPooling_updateGradInput(
     THCudaTensor *gradInput,
     int outputW, int outputH,
     int poolSizeW, int poolSizeH,
-    THCudaTensor *indices)
+    THCIndexTensor *indices)
 {
   int dimh = 1;
   int dimw = 2;
@@ -221,17 +221,17 @@ void THNN_CudaSpatialFractionalMaxPooling_updateGradInput(
 
   THCDeviceTensor<float, 4> devGradInput;
   THCDeviceTensor<float, 4> devGradOutput;
-  THCDeviceTensor<float, 4> devIndices;
+  THCDeviceTensor<THCIndex_t, 4> devIndices;
 
   /* backprop */
   if (numInputDims == 3) {
     devGradInput = toDeviceTensor<float, 3>(state, gradInput).upcastOuter<4>();
     devGradOutput = toDeviceTensor<float, 3>(state, gradOutput).upcastOuter<4>();
-    devIndices = toDeviceTensor<float, 3>(state, indices).upcastOuter<4>();
+    devIndices = toDeviceTensor<THCIndex_t, 3>(state, indices).upcastOuter<4>();
   } else {
     devGradInput = toDeviceTensor<float, 4>(state, gradInput);
     devGradOutput = toDeviceTensor<float, 4>(state, gradOutput);
-    devIndices = toDeviceTensor<float, 4>(state, indices);
+    devIndices = toDeviceTensor<THCIndex_t, 4>(state, indices);
   }
 
   // block is limited to 4 warps

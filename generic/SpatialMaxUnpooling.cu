@@ -6,7 +6,7 @@ void THNN_(SpatialMaxUnpooling_updateOutput)(
            THCState *state,
            THCTensor *input,
            THCTensor *output,
-           THCudaLongTensor *indices,
+           THCIndexTensor *indices,
            int owidth, int oheight)
 {
   THCUNN_assertSameGPU_generic(state, 3, input, output, indices);
@@ -29,14 +29,14 @@ void THNN_(SpatialMaxUnpooling_updateOutput)(
   }
 
   input = THCTensor_(newContiguous)(state, input);
-  indices = THCudaLongTensor_newContiguous(state, indices);
+  indices = THCIndexTensor_(newContiguous)(state, indices);
   THCTensor_(resize4d)(state, output, batchSize, nInputPlane, oheight, owidth);
   THCTensor_(zero)(state, output);
 
   int count = THCTensor_(nElement)(state, input);
 
   MaxUnpoolForward <<< GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state) >>>
-      (count, THCTensor_(data)(state, input), THCudaLongTensor_data(state, indices),
+      (count, THCTensor_(data)(state, input), THCIndexTensor_(data)(state, indices),
       batchSize, nInputPlane, nInputRows, nInputCols, oheight, owidth, THCTensor_(data)(state, output));
   THCudaCheck(cudaGetLastError());
 
@@ -52,7 +52,7 @@ void THNN_(SpatialMaxUnpooling_updateGradInput)(
            THCTensor *input,
            THCTensor *gradOutput,
            THCTensor *gradInput,
-           THCudaLongTensor *indices,
+           THCIndexTensor *indices,
            int owidth, int oheight)
 {
   THCUNN_assertSameGPU_generic(state, 4, input, gradOutput, indices, gradInput);
@@ -74,14 +74,14 @@ void THNN_(SpatialMaxUnpooling_updateGradInput)(
   }
 
   input = THCTensor_(newContiguous)(state, input);
-  indices = THCudaLongTensor_newContiguous(state, indices);
+  indices = THCIndexTensor_(newContiguous)(state, indices);
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
   THCTensor_(resizeAs)(state, gradInput, input);
 
   int count = THCTensor_(nElement)(state, input);
 
   MaxUnpoolBackward <<< GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state) >>>
-      (count, THCTensor_(data)(state, gradOutput), THCudaLongTensor_data(state, indices),
+      (count, THCTensor_(data)(state, gradOutput), THCIndexTensor_(data)(state, indices),
       batchSize, nInputPlane, nInputRows, nInputCols, oheight, owidth, THCTensor_(data)(state, gradInput));
   THCudaCheck(cudaGetLastError());
 

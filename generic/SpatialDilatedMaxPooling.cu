@@ -8,7 +8,7 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
            THCState *state,
            THCTensor *input,
            THCTensor *output,
-           THCudaLongTensor *indices,
+           THCIndexTensor *indices,
            int kW, int kH,
            int dW, int dH,
            int padW, int padH,
@@ -67,7 +67,7 @@ if (padW || padH)
   THCTensor_(resize4d)(state, output, batchSize, nInputPlane, nOutputRows, nOutputCols);
   THCUNN_resizeAs_indices(state, indices, output);
 
-  long* indices_data = THCudaLongTensor_data(state, indices);
+  THCIndex_t* indices_data = THCIndexTensor_(data)(state, indices);
   real* output_data = THCTensor_(data)(state, output);
 
   int count = THCTensor_(nElement)(state, output);
@@ -89,7 +89,7 @@ void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
            THCTensor *input,
            THCTensor *gradOutput,
            THCTensor *gradInput,
-           THCudaLongTensor *indices,
+           THCIndexTensor *indices,
            int kW, int kH,
            int dW, int dH,
            int padW, int padH,
@@ -139,7 +139,7 @@ void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
   MaxPoolBackward<real, accreal> <<< GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state) >>>
       (count,
       THCTensor_(data)(state, gradOutput),
-      THCudaLongTensor_data(state, indices),
+      THCIndexTensor_(data)(state, indices),
       batchSize, nInputPlane, nInputRows, nInputCols, nOutputRows, nOutputCols,
       kH, kW, dH, dW, padH, padW, dilationH, dilationW,
       THCTensor_(data)(state, gradInput));

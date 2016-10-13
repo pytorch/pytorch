@@ -8,11 +8,11 @@
 
 __global__ void cuda_VolumetricDilatedMaxPooling_updateOutput(
   THCDeviceTensor<float, 4> input,
-  THCDeviceTensor<float, 4> indices,
+  THCDeviceTensor<THCIndex_t, 4> indices,
   THCDeviceTensor<float, 4> output,
   int kT, int kH, int kW,
   int dT, int dH, int dW,
-  int padT, int padH, int padW, 
+  int padT, int padH, int padW,
   int dilationT, int dilationH, int dilationW,
   int offsetZ)
 {
@@ -62,7 +62,7 @@ __global__ void cuda_VolumetricDilatedMaxPooling_updateOutput(
     }
 
     output[slice][oFrame][oRow][oColumn] = max;
-    float *idx = &indices[slice][oFrame][oRow][oColumn];
+    THCIndex_t *idx = &indices[slice][oFrame][oRow][oColumn];
     ((unsigned char*)(idx))[0] = maxFrame;
     ((unsigned char*)(idx))[1] = maxRow;
     ((unsigned char*)(idx))[2] = maxColumn;
@@ -72,11 +72,11 @@ __global__ void cuda_VolumetricDilatedMaxPooling_updateOutput(
 
 template <int KERNEL_WIDTH>
 __global__ void cuda_VolumetricDilatedMaxPooling_updateOutput(
-  THCDeviceTensor<float, 4> input, THCDeviceTensor<float, 4> indices,
+  THCDeviceTensor<float, 4> input, THCDeviceTensor<THCIndex_t, 4> indices,
   THCDeviceTensor<float, 4> output,
   int kT, int kH,
   int dT, int dH, int dW,
-  int padT, int padH, int padW, 
+  int padT, int padH, int padW,
   int dilationT, int dilationH, int dilationW,
   int offsetZ)
 {
@@ -126,7 +126,7 @@ __global__ void cuda_VolumetricDilatedMaxPooling_updateOutput(
     }
 
     output[slice][oFrame][oRow][oColumn] = max;
-    float *idx = &indices[slice][oFrame][oRow][oColumn];
+    THCIndex_t *idx = &indices[slice][oFrame][oRow][oColumn];
     ((unsigned char*)(idx))[0] = maxFrame;
     ((unsigned char*)(idx))[1] = maxRow;
     ((unsigned char*)(idx))[2] = maxColumn;
@@ -143,7 +143,7 @@ __global__ void cuda_VolumetricDilatedMaxPooling_updateOutput(
 
 
 void THNN_CudaVolumetricDilatedMaxPooling_updateOutput(
-  THCState *state, THCudaTensor *input, THCudaTensor *output, THCudaTensor *indices,
+  THCState *state, THCudaTensor *input, THCudaTensor *output, THCIndexTensor *indices,
   int kT, int kW, int kH,
   int dT, int dW, int dH,
   int padT, int padW, int padH,
@@ -236,7 +236,7 @@ void THNN_CudaVolumetricDilatedMaxPooling_updateOutput(
                           outputTime, outputHeight, outputWidth);
     /* indices pack ti,i,j locations for each output point as uchar into
      each float of the tensor */
-    THCudaTensor_resize4d(state, indices, inputSlices,
+    THCIndexTensor_(resize4d)(state, indices, inputSlices,
                           outputTime, outputHeight, outputWidth);
   }
   else
@@ -244,7 +244,7 @@ void THNN_CudaVolumetricDilatedMaxPooling_updateOutput(
     THCudaTensor_resize5d(state, output, batchSize, inputSlices,
                           outputTime, outputHeight, outputWidth);
     // Index tensor packs index offsets as uchars into floats
-    THCudaTensor_resize5d(state, indices, batchSize, inputSlices,
+    THCIndexTensor_(resize5d)(state, indices, batchSize, inputSlices,
                           outputTime, outputHeight, outputWidth);
   }
 
@@ -269,15 +269,15 @@ void THNN_CudaVolumetricDilatedMaxPooling_updateOutput(
                             outputTime, outputHeight, outputWidth };
   THLongStorage_rawCopy(indicesSize, indicesSizeRaw);
 
-  THCudaTensor *indices1 = THCudaTensor_newWithStorage(
-    state, THCudaTensor_storage(state, indices),
-    THCudaTensor_storageOffset(state, indices),
+  THCIndexTensor *indices1 = THCIndexTensor_(newWithStorage)(
+    state, THCIndexTensor_(storage)(state, indices),
+    THCIndexTensor_(storageOffset)(state, indices),
     indicesSize, NULL);
 
   THLongStorage_free(indicesSize);
 
-  THCDeviceTensor<float, 4> cudaIndices =
-    toDeviceTensor<float, 4>(state, indices1);
+  THCDeviceTensor<THCIndex_t, 4> cudaIndices =
+    toDeviceTensor<THCIndex_t, 4>(state, indices1);
 
   int totalZ = outputTime * inputSlices * batchSize;
   int offsetZ = 0;
@@ -310,17 +310,17 @@ void THNN_CudaVolumetricDilatedMaxPooling_updateOutput(
   }
 
   THCudaTensor_free(state, input);
-  THCudaTensor_free(state, indices1);
+  THCIndexTensor_(free)(state, indices1);
 }
 
 #undef UPDATE_OUTPUT_KERNEL_WIDTH
 
 __global__ void cuda_VolumetricDilatedMaxPooling_updateGradInput(
   THCDeviceTensor<float, 4> gradOutput,
-  THCDeviceTensor<float, 4> indices,
+  THCDeviceTensor<THCIndex_t, 4> indices,
   THCDeviceTensor<float, 4> gradInput,
   int dT, int dH, int dW,
-  int padT, int padH, int padW, 
+  int padT, int padH, int padW,
   int dilationT, int dilationH, int dilationW,
   int offsetZ)
 {
@@ -331,7 +331,7 @@ __global__ void cuda_VolumetricDilatedMaxPooling_updateGradInput(
 
   if (oRow < gradOutput.getSize(2) && oColumn < gradOutput.getSize(3))
   {
-    float *idx = &indices[slice][oFrame][oRow][oColumn];
+    THCIndex_t *idx = &indices[slice][oFrame][oRow][oColumn];
     int iFrame  = ((unsigned char*)(idx))[0] * dilationT + oFrame  * dT - padT;
     int iRow    = ((unsigned char*)(idx))[1] * dilationH + oRow    * dH - padH;
     int iColumn = ((unsigned char*)(idx))[2] * dilationW + oColumn * dW - padW;
@@ -342,7 +342,7 @@ __global__ void cuda_VolumetricDilatedMaxPooling_updateGradInput(
 
 void THNN_CudaVolumetricDilatedMaxPooling_updateGradInput(
   THCState *state, THCudaTensor *input, THCudaTensor *gradOutput, THCudaTensor *gradInput,
-  THCudaTensor *indices,
+  THCIndexTensor *indices,
   int dT, int dW, int dH,
   int padT, int padW, int padH,
   int dilationT, int dilationW, int dilationH)
@@ -401,13 +401,13 @@ void THNN_CudaVolumetricDilatedMaxPooling_updateGradInput(
   long indicesSizeRaw[4] = { batchSize * inputSlices,
                            outputTime, outputHeight, outputWidth };
   THLongStorage_rawCopy(indicesSize, indicesSizeRaw);
-  THCudaTensor *indices1 = THCudaTensor_newWithStorage(
-    state, THCudaTensor_storage(state, indices),
-    THCudaTensor_storageOffset(state, indices), indicesSize, NULL);
+  THCIndexTensor *indices1 = THCIndexTensor_(newWithStorage)(
+    state, THCIndexTensor_(storage)(state, indices),
+    THCIndexTensor_(storageOffset)(state, indices), indicesSize, NULL);
   THLongStorage_free(indicesSize);
 
-  THCDeviceTensor<float, 4> cudaIndices =
-    toDeviceTensor<float, 4>(state, indices1);
+  THCDeviceTensor<THCIndex_t, 4> cudaIndices =
+    toDeviceTensor<THCIndex_t, 4>(state, indices1);
 
   int totalZ = outputTime * inputSlices * batchSize;
   int offsetZ = 0;
@@ -424,7 +424,7 @@ void THNN_CudaVolumetricDilatedMaxPooling_updateGradInput(
                                              cudaIndices,
                                              cudaGradInput,
                                              dT, dH, dW,
-                                             padT, padH, padW, 
+                                             padT, padH, padW,
                                              dilationT, dilationH, dilationW, offsetZ);
     THCudaCheck(cudaGetLastError());
     totalZ -= 65535;
@@ -433,5 +433,5 @@ void THNN_CudaVolumetricDilatedMaxPooling_updateGradInput(
 
   // cleanup
   THCudaTensor_free(state, gradOutput);
-  THCudaTensor_free(state, indices1);
+  THCIndexTensor_(free)(state, indices1);
 }
