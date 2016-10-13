@@ -1,7 +1,7 @@
 #ifndef THS_INC
 #define THS_INC
 
-#include "THSGeneral.h"
+#include "THGeneral.h"
 #include "THSTensor.h"
 
 /*

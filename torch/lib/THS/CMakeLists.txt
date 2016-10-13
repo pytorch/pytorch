@@ -70,13 +70,11 @@ ENDIF ()
 
 SET(hdr
   THS.h
-  THSGeneral.h
   THSTensor.h
   )
 
 SET(src
   THSTensor.c
-  THSGeneral.c
   )
 
 SET(src ${src} ${hdr})
@@ -85,7 +83,6 @@ ADD_LIBRARY(THS SHARED ${src})
 
 
 INCLUDE_DIRECTORIES("${CMAKE_CURRENT_BINARY_DIR}")
-CONFIGURE_FILE(THSGeneral.h.in "${CMAKE_CURRENT_BINARY_DIR}/THSGeneral.h")
 
 INSTALL(TARGETS THS
   RUNTIME DESTINATION "${THS_INSTALL_BIN_SUBDIR}"
@@ -95,7 +92,6 @@ INSTALL(TARGETS THS
 
 INSTALL(FILES
   THS.h
-  ${CMAKE_CURRENT_BINARY_DIR}/THSGeneral.h
   THSGenerateAllTypes.h
   THSGenerateFloatTypes.h
   THSGenerateIntTypes.h
