@@ -8,6 +8,51 @@
 
 PyObject* sparse_tensor_classes;
 
+/***
+ * SPARSE TENSOR OPS
+ ***/
+
+bool THSPModule_isSparseTensor(PyObject *obj)
+{
+  int result = PySet_Contains(sparse_tensor_classes, (PyObject*)Py_TYPE(obj));
+  if (result == -1)
+    throw std::logic_error("FATAL: sparse_tensor_classes isn't a set!");
+  return result;
+}
+
+#define IMPLEMENT_SPARSE_STATELESS(name)                                              \
+  PyObject * TH_CONCAT_2(THSPModule_, name)(PyObject *_unused, PyObject *args) \
+{                                                                              \
+  PyObject *tensor = THSPFloatTensorClass;                                    \
+  for (int i = 0; i < PyTuple_Size(args); i++) {                               \
+    PyObject *item = PyTuple_GET_ITEM(args, i);                                \
+    if (THSPModule_isSparseTensor(item)) {                                            \
+      tensor = item;                                                           \
+      break;                                                                   \
+    }                                                                          \
+  }                                                                            \
+  \
+  PyObject *methods = PyObject_GetAttrString(tensor, THP_STATELESS_ATTRIBUTE_NAME);     \
+  THPUtils_assert(methods, "Type %s doesn't implement stateless methods",       \
+      Py_TYPE(tensor)->tp_name);                                               \
+  PyObject *method = PyObject_GetAttrString(methods, #name);                   \
+  THPUtils_assert(method, "Type %s doesn't implement stateless method " #name, \
+      Py_TYPE(tensor)->tp_name);                                               \
+  return PyObject_Call(method, args, NULL);                                    \
+}
+
+IMPLEMENT_SPARSE_STATELESS(spmm);
+IMPLEMENT_SPARSE_STATELESS(sspmm);
+IMPLEMENT_SPARSE_STATELESS(spcadd);
+// REMEMBER TO REGISTER THESE IN csrc/Module.cpp
+// TODO: Make it so we don't have to...
+
+#undef IMPLEMENT_SPARSE_STATELESS
+
+/***
+ * MODULE INITIALIZATION
+ **/
+
 static bool THSPModule_loadClasses(PyObject *module_dict)
 {
 #define ASSERT_NOT_NULL(ptr) if (!(ptr)) { THPUtils_setError("couldn't load classes"); return false; }

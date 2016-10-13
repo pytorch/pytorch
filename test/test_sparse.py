@@ -142,7 +142,7 @@ class TestSparse(TestCase):
             y = torch.randn(dj, dk)
 
             expected = torch.mm(x.to_dense(), y)
-            res = SparseTensor._torch.spmm(x, y)
+            res = sparse.mm(x, y)
 
             self.assertEqual(res, expected)
 
@@ -156,7 +156,7 @@ class TestSparse(TestCase):
             y = torch.randn(dj, dk)
 
             expected = torch.mm(x.to_dense(), y)
-            res = SparseTensor._torch.sspmm(x, y)
+            res = sparse.smm(x, y)
 
             self.assertEqual(res.to_dense(), expected)
 
@@ -171,7 +171,7 @@ class TestSparse(TestCase):
             r = random.random()
 
             expected = y + r * x.to_dense()
-            res = SparseTensor._torch.spcadd(y, r, x)
+            res = sparse.cadd(y, r, x)
 
             self.assertEqual(res, expected)
 
@@ -183,7 +183,7 @@ class TestSparse(TestCase):
             r = random.random()
 
             expected = y + r * x.to_dense()
-            res = SparseTensor._torch.spcadd(y, r, x)
+            res = sparse.cadd(y, r, x)
 
             self.assertEqual(res, expected)
 

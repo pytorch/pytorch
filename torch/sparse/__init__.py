@@ -1,6 +1,8 @@
 import torch
 from torch import _C
 
+import sys
+
 _sparse_tensor_classes = set()
 
 class DoubleTensor(_C.SparseDoubleTensorBase):
@@ -34,5 +36,10 @@ _sparse_tensor_classes.add(ShortTensor)
 _sparse_tensor_classes.add(CharTensor)
 _sparse_tensor_classes.add(ByteTensor)
 torch._tensor_classes.update(_sparse_tensor_classes)
+
+module = sys.modules[__name__]
+for k, v in _C.__dict__.items():
+    if '_spfunc_' in k:
+        setattr(module, k.replace('_spfunc_', ''), v)
 
 _C._sparse_init()
