@@ -2,6 +2,7 @@ import math
 import torch
 import random
 import unittest
+import contextlib
 from copy import deepcopy
 from itertools import repeat
 
@@ -9,9 +10,17 @@ import torch.nn as nn
 import torch.nn.parallel as dp
 from torch.autograd import Variable
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
-    module_tests, criterion_tests, TEST_CUDA, PRECISION
+    module_tests, criterion_tests, TEST_CUDA, TEST_CUDNN, PRECISION
 from common import freeze_rng_state
 
+@contextlib.contextmanager
+def set_default_tensor_type(type):
+    old_type = torch.typename(torch.Tensor())
+    torch.set_default_tensor_type(type)
+    try:
+        yield
+    finally:
+        torch.set_default_tensor_type(old_type)
 
 class InputVariableMixin(object):
     def _get_input(self):
@@ -607,6 +616,87 @@ class TestNN(NNTestCase):
                 else:
                     self.assertRaises(ValueError, lambda:
                             mu(output_small, indices_small, (h, w)))
+
+
+    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
+    def test_RNN_cpu_vs_cudnn(self):
+        
+        def forwardBackward(cuda, mode, input_val, hx_val, weights_val):
+            rnn = nn.RNNBase(mode, input_size, hidden_size, num_layers)
+
+            for x_layer, y_layer in zip(rnn.all_weights, weights_val):
+                for x, y in zip(x_layer, y_layer):
+                    x.data.copy_(y.data)
+
+            input = Variable(input_val.clone(), requires_grad=True)
+            if mode == 'LSTM':
+                hx = (Variable(hx_val.clone(), requires_grad=True),
+                      Variable(hx_val.add(1), requires_grad=True))
+            else:
+                hx = Variable(hx_val.clone(), requires_grad=True)
+        
+            if cuda:
+                rnn.cuda()
+                input.data = input.data.cuda()
+                if mode == 'LSTM':
+                    hx[0].data = hx[0].data.cuda()
+                    hx[1].data = hx[1].data.cuda()
+                else:
+                    hx.data = hx.data.cuda()
+
+            output, hy = rnn(input, hx)
+            # FIXME this is because of a pytorch bug
+            if mode == 'LSTM':
+                fake_loss = 0*(hy[0] + hy[1]).sum()
+            else:
+                fake_loss = 0*hy.sum()
+        
+            loss = output.sum() + fake_loss
+            loss.backward()
+        
+            return {'output': output.data,
+                    'hy': hy[0].data if mode == 'LSTM' else hy.data,
+                    'weights': rnn.all_weights,
+                    'grad_input': input.grad,
+                    'grad_hx': hx[0].grad if mode == 'LSTM' else hx.grad,
+                    'cy': hy[1].data if mode == 'LSTM' else None,
+                    'grad_cx': hx[1].grad if mode == 'LSTM' else None}
+        
+        def diff(t_cpu, t_gpu, name):
+            self.assertTrue(torch.is_tensor(t_cpu))
+            self.assertTrue(torch.is_tensor(t_gpu))
+            delta = t_gpu.cpu().add(-1, t_cpu).abs().max()
+            # print("{:30s} cpu: {:10g} gpu: {:10g} diff: {:10g}".format(name, t_cpu.abs().max(), t_gpu.abs().max(), delta))
+            self.assertLess(delta, 2 * PRECISION)
+        
+        input_size = 10
+        hidden_size = 20
+        num_layers = 2
+        seq_length = 7
+        batch = 5
+
+        # FIXME: we can't use torch.cuda.DoubleTensor because sum() is not yet defined on it
+        with set_default_tensor_type('torch.FloatTensor'):
+            for mode in ("RNN_RELU", "RNN_TANH", "GRU", "LSTM"):
+                input_val = torch.randn(seq_length, batch, input_size)
+                hx_val = torch.randn(num_layers, batch, hidden_size)
+            
+                weights_val = nn.RNNBase(mode, input_size, hidden_size, num_layers).all_weights
+            
+                outputs_cpu = forwardBackward(False, mode, input_val, hx_val, weights_val)
+                outputs_gpu = forwardBackward(True,  mode, input_val, hx_val, weights_val)
+            
+                diff(outputs_cpu['output'], outputs_gpu['output'], 'output')
+                diff(outputs_cpu['hy'], outputs_gpu['hy'], 'hy')
+                diff(outputs_cpu['grad_input'], outputs_gpu['grad_input'], 'grad_input')
+                diff(outputs_cpu['grad_hx'], outputs_gpu['grad_hx'], 'grad_hx')
+                if outputs_cpu['cy'] is not None:
+                    diff(outputs_cpu['cy'], outputs_gpu['cy'], 'cy')
+                    diff(outputs_cpu['grad_cx'], outputs_gpu['grad_cx'], 'grad_cx')
+            
+                for i, (cpu_layer_weight, gpu_layer_weight) in enumerate(zip(outputs_cpu['weights'], outputs_gpu['weights'])):
+                    for j, (cpu_weight, gpu_weight) in enumerate(zip(cpu_layer_weight, gpu_layer_weight)):
+                        diff(cpu_weight.grad, gpu_weight.grad, mode + ' grad_weight[{},{}]'.format(i, j))
 
 
 def add_test(test):
