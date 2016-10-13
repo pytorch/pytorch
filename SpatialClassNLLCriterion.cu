@@ -116,7 +116,7 @@ void THNN_CudaSpatialClassNLLCriterion_updateOutput(
   float *total_weight_data = THCudaTensor_data(state, total_weight);
 
   long batch_size = THCudaLongTensor_size(state, target, 0);
-  long map_nelem = THCudaLongTensor_nElement(state, target) / batch_size;
+  ptrdiff_t map_nelem = THCudaLongTensor_nElement(state, target) / batch_size;
   int blocks_per_sample = GET_BLOCKS(map_nelem) / 128;
   blocks_per_sample = (blocks_per_sample == 0) ? 1 : blocks_per_sample;
   int total_blocks = blocks_per_sample * batch_size;
@@ -179,7 +179,7 @@ void THNN_CudaSpatialClassNLLCriterion_updateGradInput(
   float *total_weight_data = THCudaTensor_data(state, total_weight);
 
   long batch_size = THCudaLongTensor_size(state, target, 0);
-  long map_nelem = THCudaLongTensor_nElement(state, target) / batch_size;
+  ptrdiff_t map_nelem = THCudaLongTensor_nElement(state, target) / batch_size;
   int blocks_per_sample = GET_BLOCKS(map_nelem) / 128;
   blocks_per_sample = (blocks_per_sample == 0) ? 1 : blocks_per_sample;
   int total_blocks = blocks_per_sample * batch_size;

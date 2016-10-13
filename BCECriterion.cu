@@ -7,7 +7,16 @@
 #include <thrust/transform.h>
 #include <thrust/transform_reduce.h>
 
+#ifndef _MSC_VER
+// got compilation error: identifier "eps" is undefined in device code
+// on x64 windows with msvc19 and cuda 8.0 when eps is defined as below
 const float eps = 1e-12f;
+#else
+#ifdef eps
+#error eps has alread been defined!
+#endif
+#define eps 1e-12f
+#endif
 
 struct bce_functor
 {
@@ -38,7 +47,7 @@ void THNN_CudaBCECriterion_updateOutput(THCState *state, THCudaTensor *input, TH
 {
   THCUNN_assertSameGPU(state, 3, input, target, weights);
 
-  long size = THCudaTensor_nElement(state, input);
+  ptrdiff_t size = THCudaTensor_nElement(state, input);
 
   input = THCudaTensor_newContiguous(state, input);
   target = THCudaTensor_newContiguous(state, target);
@@ -114,11 +123,15 @@ struct bce_updateGradInput_functor_weights
   }
 };
 
+#ifdef _MSC_VER
+#undef eps
+#endif
+
 void THNN_CudaBCECriterion_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *target, THCudaTensor *gradInput, bool sizeAverage, THCudaTensor *weights)
 {
   THCUNN_assertSameGPU(state, 4, input, target, gradInput, weights);
 
-  long size = THCudaTensor_nElement(state, input);
+  ptrdiff_t size = THCudaTensor_nElement(state, input);
   float norm = (sizeAverage ? 1./size : 1.);
 
   input = THCudaTensor_newContiguous(state, input);

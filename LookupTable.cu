@@ -50,7 +50,7 @@ __device__ __forceinline__ bool warpHasCollision(int val)
 }
 
 __global__ void cunn_LookupTable_accGradParametersKernelByFeature(
-  long *input, float *gradOutput, float *gradWeight, float scale, long numel,
+  long *input, float *gradOutput, float *gradWeight, float scale, ptrdiff_t numel,
   long stride, int paddingValue) {
 
   const int featureDim = blockIdx.x * 4 + threadIdx.x / 32;
@@ -72,7 +72,7 @@ __global__ void cunn_LookupTable_accGradParametersKernelByFeature(
   // updates are serialized in their order of execution by using the
   // warp-wide collision detector `warpHasCollision`.
   const int laneId = threadIdx.x % 32;
-  for (int i = laneId; i < numel; i += WARP_SIZE) {
+  for (ptrdiff_t i = laneId; i < numel; i += WARP_SIZE) {
     const int weightIndex = (int) (input[i] - TH_INDEX_BASE);
     if (weightIndex == paddingValue - TH_INDEX_BASE) {
       continue;
@@ -97,7 +97,7 @@ __global__ void cunn_LookupTable_accGradParametersKernelByFeature(
 
 __global__ void cunn_LookupTable_accGradParametersKernel(
   long *input, long *indices, float *gradOutput, float *gradWeight,
-  long *count, float defaultScale, long numel, long stride, int paddingValue) {
+  long *count, float defaultScale, ptrdiff_t numel, long stride, int paddingValue) {
 
   int idx = blockIdx.x * 4 + threadIdx.y;
 
@@ -183,7 +183,7 @@ void THNN_CudaLookupTable_accGradParameters(
   if (nDim != 1 && nDim != 2)
     THError("input must be a vector or matrix");
 
-  long numel = THIndexTensor_(nElement)(state, input);
+  ptrdiff_t numel = THIndexTensor_(nElement)(state, input);
   long stride = gradWeight->stride[0];
 
   cudaStream_t stream = THCState_getCurrentStream(state);
@@ -314,7 +314,7 @@ void THNN_CudaLookupTable_renorm(
   if (normType <= 0)
     THError("non-positive-norm not supported");
 
-  long numel = THIndexTensor_(nElement)(state, idx);
+  ptrdiff_t numel = THIndexTensor_(nElement)(state, idx);
   long stride = weight->stride[0];
 
   // get the unique indices
@@ -326,7 +326,7 @@ void THNN_CudaLookupTable_renorm(
   pow_v<float> unary_pow(normType);
   thrust::plus<float> binary_plus;
   // numel << stride, since idx usually contains sparse row indices
-  for (long i = 0; i < numel; i++)
+  for (ptrdiff_t i = 0; i < numel; i++)
   {
     long k = idx_ptr[i] - TH_INDEX_BASE;
     thrust::device_ptr<float> row_ptr = weight_ptr + k * stride;

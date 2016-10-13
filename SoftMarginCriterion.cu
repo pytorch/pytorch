@@ -26,7 +26,7 @@ void THNN_CudaSoftMarginCriterion_updateOutput(THCState *state,
   THCUNN_assertSameGPU(state, 2, input, target);
   float sum;
 
-  long size = THCudaTensor_nElement(state, input);
+  ptrdiff_t size = THCudaTensor_nElement(state, input);
 
   input = THCudaTensor_newContiguous(state, input);
   target = THCudaTensor_newContiguous(state, target);
@@ -68,7 +68,7 @@ void THNN_CudaSoftMarginCriterion_updateGradInput(THCState *state,
 {
   THCUNN_assertSameGPU(state, 3, input, target, gradInput);
 
-  long size = THCudaTensor_nElement(state, input);
+  ptrdiff_t size = THCudaTensor_nElement(state, input);
   float norm = (sizeAverage ? 1./size : 1.);
 
   input = THCudaTensor_newContiguous(state, input);

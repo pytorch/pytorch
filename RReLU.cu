@@ -6,9 +6,9 @@
 // copied from cutorch/lib/THC/THCTensorRandom.cu
 #define MAX_NUM_BLOCKS 64
 #define BLOCK_SIZE 256
-#define NUM_BLOCKS(n) min((int)THCCeilDiv(n, (long) BLOCK_SIZE), MAX_NUM_BLOCKS)
+#define NUM_BLOCKS(n) min((int)THCCeilDiv(n, (ptrdiff_t) BLOCK_SIZE), MAX_NUM_BLOCKS)
 
-__global__ void rreluUpdateOutputTrain(int n, curandStateMtgp32 *state,
+__global__ void rreluUpdateOutputTrain(ptrdiff_t n, curandStateMtgp32 *state,
   float *input, float* noise, float *output, double a, double b)
 {
   CUDA_KERNEL_LOOP(i, n)
@@ -73,7 +73,7 @@ void THNN_CudaRReLU_updateOutput(THCState *state, THCudaTensor *input, THCudaTen
     THCudaTensor_resizeAs(state, noise, input);
     float *input_data = THCudaTensor_data(state, input);
     float *noise_data = THCudaTensor_data(state, noise);
-    long n = THCudaTensor_nElement(state, input);
+    ptrdiff_t n = THCudaTensor_nElement(state, input);
     if (inplace)
     {
       rreluUpdateOutputTrain<<<NUM_BLOCKS(n), BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
