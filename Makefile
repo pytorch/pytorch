@@ -51,7 +51,7 @@ endif
 
 NCCL_MAJOR   := 1
 NCCL_MINOR   := 3
-NCCL_PATCH   := 0
+NCCL_PATCH   := 1
 CXXFLAGS  += -DNCCL_MAJOR=$(NCCL_MAJOR) -DNCCL_MINOR=$(NCCL_MINOR) -DNCCL_PATCH=$(NCCL_PATCH)
 
 CUDA_VERSION ?= $(shell ls $(CUDA_LIB)/libcudart.so.* | head -1 | rev | cut -d "." -f -2 | rev)
@@ -146,7 +146,7 @@ MPITESTBINS:= $(patsubst %, $(MPITSTDIR)/%, $(MPITESTS))
 
 test : $(TESTBINS)
 
-$(TSTDIR)/% : test/single/%.cu test/include/*.h $(TSTDEP) 
+$(TSTDIR)/% : test/single/%.cu test/include/*.h $(TSTDEP)
 	@printf "Building  %-25s > %-24s\n" $< $@
 	mkdir -p $(TSTDIR)
 	$(NVCC) $(TSTINC) $(NVCUFLAGS) --compiler-options "$(CXXFLAGS)" -o $@ $< $(TSTLIB) -lcuda -lcurand -lnvToolsExt
@@ -158,7 +158,7 @@ $(TSTDIR)/% : test/single/%.cu test/include/*.h $(TSTDEP)
 
 mpitest : $(MPITESTBINS)
 
-$(MPITSTDIR)/% : test/mpi/%.cu $(TSTDEP) 
+$(MPITSTDIR)/% : test/mpi/%.cu $(TSTDEP)
 	@printf "Building  %-25s > %-24s\n" $< $@
 	mkdir -p $(MPITSTDIR)
 	$(NVCC) $(MPIFLAGS) $(TSTINC) $(NVCUFLAGS) --compiler-options "$(CXXFLAGS)" -o $@ $< $(TSTLIB) -lcurand
