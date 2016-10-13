@@ -39,9 +39,9 @@ void THSTensor_(spmm)(THTensor *r_, THSTensor *sparse, THTensor *dense) {
   dim_j = THSTensor_(size)(sparse, 1);
   dim_k = THTensor_(size)(dense, 1);
 
-  nnz = THSTensor_(nnz)(sparse);
+  nnz     = THSTensor_(nnz)(sparse);
   indices = THSTensor_(indices)(sparse);
-  values = THSTensor_(values)(sparse);
+  values  = THSTensor_(values)(sparse);
 
   csr = THSTensor_(toCSR)(THLongTensor_data(indices), dim_i, nnz);
 
@@ -89,9 +89,9 @@ void THSTensor_(sspmm)(THSTensor *r_, THSTensor *sparse, THTensor *dense) {
   dim_j = THSTensor_(size)(sparse, 1);
   dim_k = THTensor_(size)(dense, 1);
 
-  nnz = THSTensor_(nnz)(sparse);
+  nnz     = THSTensor_(nnz)(sparse);
   indices = THSTensor_(indices)(sparse);
-  values = THSTensor_(values)(sparse);
+  values  = THSTensor_(values)(sparse);
 
   csr = THSTensor_(toCSR)(THLongTensor_data(indices), dim_i, nnz);
 
@@ -132,8 +132,8 @@ void THSTensor_(sspmm)(THSTensor *r_, THSTensor *sparse, THTensor *dense) {
   THSTensor_(resize2d)(r_, dim_i, dim_k);
   // to avoid a clone
   r_->indices = newi;
-  r_->values = newv;
-  r_->nnz = p;
+  r_-> values = newv;
+  r_->    nnz = p;
   THSTensor_(contiguous)(r_);
 
   THFree(csr);
@@ -151,32 +151,19 @@ void THSTensor_(spcadd)(THTensor *r_, THTensor *dense, real value, THSTensor *sp
   THTensor_(resizeAs)(r_, dense);
   THSTensor_(contiguous)(sparse);
 
-  if (r_ == dense) {
+  if (r_ != dense) THTensor_(copy)(r_, dense);
+
 #pragma omp parallel for private(k)
-    for (k = 0; k < sparse->nnz; k++) {
-      long index = 0;
-      long i2 = r_->storageOffset;
-      for (long d = 0; d < sparse->nDimension; d++) {
-        index = index + THTensor_fastGet2d(indices, d, k);
-        i2 += r_->stride[d] * THTensor_fastGet2d(indices, d, k);
-      }
-      r_->storage->data[i2]  += THTensor_fastGet1d(values, k);
-    }
-  } else {
-    THTensor_(copy)(r_, dense);
-#pragma omp parallel for private(k)
-    for (k = 0; k < sparse->nnz; k++) {
-      long index = 0;
-      long i2 = r_->storageOffset;
-      long i3 = dense->storageOffset;
-      for (long d = 0; d < sparse->nDimension; d++) {
-        index = sizes[d] * index + THTensor_fastGet2d(indices, d, k);
-        i2 += r_->stride[d] * THTensor_fastGet2d(indices, d, k);
-        i3 += dense->stride[d] * THTensor_fastGet2d(indices, d, k);
-      }
-      r_->storage->data[i2] = dense->storage->data[i3] + THTensor_fastGet1d(values, k);
-    }
+  for (k = 0; k < sparse->nnz; k++) {
+    long index = r_->storageOffset;
+    for (long d = 0; d < sparse->nDimension; d++)
+      index += r_->stride[d] * THTensor_fastGet2d(indices, d, k);
+    r_->storage->data[index]  += value * THTensor_fastGet1d(values, k);
   }
+
+  THFree(indices);
+  THFree(values);
+  THLongStorage_free(storage);
 }
 
 #undef ROW_PTR2

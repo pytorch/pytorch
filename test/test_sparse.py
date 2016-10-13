@@ -1,6 +1,8 @@
 import torch
 from torch import sparse
+
 import itertools
+import random
 import unittest
 from common import TestCase
 from numbers import Number
@@ -166,12 +168,26 @@ class TestSparse(TestCase):
         def test_shape(*shape):
             x, _, _ = self._gen_sparse(len(shape), 10, shape)
             y = torch.randn(*shape)
+            r = random.random()
 
-            expected = y + x.to_dense()
-            res = SparseTensor._torch.spcadd(y, x)
+            expected = y + r * x.to_dense()
+            res = SparseTensor._torch.spcadd(y, r, x)
 
             self.assertEqual(res, expected)
 
+            # Non contiguous dense tensor
+            s = list(shape)
+            s[0] = shape[-1]
+            s[-1] = shape[0]
+            y = torch.randn(*s).transpose_(0, len(s) - 1)
+            r = random.random()
+
+            expected = y + r * x.to_dense()
+            res = SparseTensor._torch.spcadd(y, r, x)
+
+            self.assertEqual(res, expected)
+
+        test_shape(5, 6)
         test_shape(10, 10, 10)
         test_shape(50, 30, 20)
         test_shape(5, 5, 5, 5, 5, 5)
