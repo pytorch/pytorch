@@ -29,7 +29,7 @@ void THNN_CudaSmoothL1Criterion_updateOutput(THCState *state, THCudaTensor *inpu
     "input and target need to have the same number of elements"
   );
 
-  ptrdiff_t size = THCudaTensor_nElement(state, input);
+  long size = THCudaTensor_nElement(state, input);
 
   input = THCudaTensor_newContiguous(state, input);
   target = THCudaTensor_newContiguous(state, target);
@@ -81,7 +81,7 @@ void THNN_CudaSmoothL1Criterion_updateGradInput(THCState *state, THCudaTensor *i
     "input and target need to have the same number of elements"
   );
 
-  ptrdiff_t size = THCudaTensor_nElement(state, input);
+  long size = THCudaTensor_nElement(state, input);
   float norm = sizeAverage ? 1./size : 1.;
 
   input = THCudaTensor_newContiguous(state, input);

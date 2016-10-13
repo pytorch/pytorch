@@ -17,7 +17,7 @@ void THNN_CudaL1Cost_updateOutput(THCState *state, THCudaTensor *input, THCudaTe
 {
   THCUNN_assertSameGPU(state, 1, input);
   float sum;
-  ptrdiff_t size = THCudaTensor_nElement(state, input);
+  long size = THCudaTensor_nElement(state, input);
   input = THCudaTensor_newContiguous(state, input);
   thrust::device_ptr<float> input_data(THCudaTensor_data(state, input));
   sum = thrust::reduce(input_data, input_data+size, (float) 0, l1cost_functor());
@@ -43,7 +43,7 @@ struct l1cost_updateGradInput_functor
 void THNN_CudaL1Cost_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput, THCudaTensor *gradInput)
 {
   THCUNN_assertSameGPU(state, 2, input, gradInput);
-  ptrdiff_t size = THCudaTensor_nElement(state, input);
+  long size = THCudaTensor_nElement(state, input);
 
   input = THCudaTensor_newContiguous(state, input);
   THCudaTensor_resizeAs(state, gradInput, input);

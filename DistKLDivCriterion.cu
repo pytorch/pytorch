@@ -24,7 +24,7 @@ void THNN_CudaDistKLDivCriterion_updateOutput(THCState *state, THCudaTensor *inp
 
   float sum;
 
-  ptrdiff_t size = THCudaTensor_nElement(state, input);
+  long size = THCudaTensor_nElement(state, input);
 
   input = THCudaTensor_newContiguous(state, input);
   target = THCudaTensor_newContiguous(state, target);
@@ -63,7 +63,7 @@ void THNN_CudaDistKLDivCriterion_updateGradInput(THCState *state, THCudaTensor *
   THArgCheck(THCudaTensor_nElement(state, input) == THCudaTensor_nElement(state, target), 2,
              "input and target need to have the same number of elements");
 
-  ptrdiff_t size = THCudaTensor_nElement(state, input);
+  long size = THCudaTensor_nElement(state, input);
   float norm = (sizeAverage ? 1./size : 1.);
 
   input = THCudaTensor_newContiguous(state, input);
