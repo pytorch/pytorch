@@ -8,8 +8,8 @@ void THNN_(SoftMax_updateOutput)(
           THTensor *output)
 {
   real *input_data, *output_data;
-  long nframe = 0, dim = 0, stride = 0;
-  long t;
+  ptrdiff_t nframe = 0, dim = 0, stride = 0;
+  ptrdiff_t t;
 
   if (input->nDimension == 1)
   {
@@ -55,7 +55,7 @@ void THNN_(SoftMax_updateOutput)(
     real inputMax = -THInf;
     accreal sum;
 
-    long d;
+    ptrdiff_t d;
     for (d = 0; d < dim; d++)
     {
       if (input_ptr[d*stride] >= inputMax) inputMax = input_ptr[d*stride];
@@ -87,8 +87,8 @@ void THNN_(SoftMax_updateGradInput)(
 {
   THNN_CHECK_SHAPE(input, gradOutput);  
   real *gradInput_data, *gradOutput_data, *output_data;
-  long nframe = 0, dim = 0, stride = 0;
-  long t;
+  ptrdiff_t nframe = 0, dim = 0, stride = 0;
+  ptrdiff_t t;
 
   if (output->nDimension == 1)
   {
@@ -134,7 +134,7 @@ void THNN_(SoftMax_updateGradInput)(
     real *output_ptr = output_data + (t/stride)*dim*stride + t % stride;
     real *gradOutput_ptr = gradOutput_data + (t/stride)*dim*stride + t % stride;
 
-    long d;
+    ptrdiff_t d;
     accreal sum = 0;
     for (d = 0; d < dim; d++)
       sum += (accreal)gradOutput_ptr[d*stride] * output_ptr[d*stride];
