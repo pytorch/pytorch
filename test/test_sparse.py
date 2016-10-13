@@ -165,14 +165,14 @@ class TestSparse(TestCase):
         test_shape(1000, 100, 100)
         test_shape(3000, 64, 300)
 
-    def test_spcadd(self):
+    def test_spadd(self):
         def test_shape(*shape):
             x, _, _ = self._gen_sparse(len(shape), 10, shape)
             y = torch.randn(*shape)
             r = random.random()
 
             expected = y + r * x.to_dense()
-            res = sparse.cadd(y, r, x)
+            res = sparse.add(y, r, x)
 
             self.assertEqual(res, expected)
 
@@ -184,7 +184,7 @@ class TestSparse(TestCase):
             r = random.random()
 
             expected = y + r * x.to_dense()
-            res = sparse.cadd(y, r, x)
+            res = sparse.add(y, r, x)
 
             self.assertEqual(res, expected)
 

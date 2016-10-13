@@ -579,7 +579,7 @@ extern PyObject * THCPModule_cudaSynchronize(PyObject *_unused);
 
 extern PyObject * THSPModule_spmm(PyObject *_unused, PyObject *args);
 extern PyObject * THSPModule_sspmm(PyObject *_unused, PyObject *args);
-extern PyObject * THSPModule_spcadd(PyObject *_unused, PyObject *args);
+extern PyObject * THSPModule_spadd(PyObject *_unused, PyObject *args);
 
 static PyMethodDef TorchMethods[] = {
   {"_initExtension",  (PyCFunction)THPModule_initExtension,     METH_O,  NULL},
@@ -607,7 +607,7 @@ static PyMethodDef TorchMethods[] = {
   // _spfunc_(name) prefixed functions will be put in sparse.name
   {"_spfunc_mm",        (PyCFunction)THSPModule_spmm,             METH_VARARGS,  NULL},
   {"_spfunc_smm",       (PyCFunction)THSPModule_sspmm,            METH_VARARGS,  NULL},
-  {"_spfunc_cadd",      (PyCFunction)THSPModule_spcadd,           METH_VARARGS,  NULL},
+  {"_spfunc_add",      (PyCFunction)THSPModule_spadd,           METH_VARARGS,  NULL},
 
 
   {"_safe_call",      (PyCFunction)THPModule_safeCall,          METH_VARARGS | METH_KEYWORDS, NULL},

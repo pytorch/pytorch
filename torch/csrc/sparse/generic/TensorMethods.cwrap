@@ -134,7 +134,8 @@ defined(THC_REAL_IS_HALF)
 ]]
 
 [[
-  name: spcadd
+  name: spadd
+  cname: spcadd
   with_stateless: True
   return: argument 0
   arguments:

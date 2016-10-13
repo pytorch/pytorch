@@ -43,7 +43,7 @@ bool THSPModule_isSparseTensor(PyObject *obj)
 
 IMPLEMENT_SPARSE_STATELESS(spmm);
 IMPLEMENT_SPARSE_STATELESS(sspmm);
-IMPLEMENT_SPARSE_STATELESS(spcadd);
+IMPLEMENT_SPARSE_STATELESS(spadd);
 // REMEMBER TO REGISTER THESE IN csrc/Module.cpp
 // TODO: Make it so we don't have to...
 
