@@ -92,9 +92,19 @@ defined(THC_REAL_IS_HALF)
 ]]
 
 [[
+  name: transpose
+  cname: newTranspose
+  return: THSTensor*
+  arguments:
+  - THSTensor* self
+  - long dim0
+  - long dim1
+]]
+
+[[
   name: transpose_
   cname: transpose
-  return: self
+  return: argument 0
   arguments:
   - THSTensor* self
   - long dim0

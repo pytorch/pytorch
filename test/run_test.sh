@@ -9,6 +9,9 @@ python test_torch.py
 echo "Running autograd tests"
 python test_autograd.py
 
+echo "Running sparse tests"
+python test_sparse.py
+
 echo "Running nn tests"
 python test_nn.py
 

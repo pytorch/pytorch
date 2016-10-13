@@ -112,12 +112,13 @@ THSTensor *THSTensor_(newWithTensorAndSize)(THLongTensor *indices, THTensor *val
   if (!sizes) {
     ignore = THLongTensor_new();
     sizes = THLongTensor_new();
-    THLongTensor_max(sizes, ignore, indices, 0);
+    THLongTensor_max(sizes, ignore, indices, 1);
+    THLongTensor_add(sizes, sizes, 1);
+    THSTensor_(rawResize)(self, nDim, THLongTensor_data(sizes));
     THFree(sizes);
     THFree(ignore);
-  }
+  } else THSTensor_(rawResize)(self, nDim, THLongTensor_data(sizes));
 
-  THSTensor_(rawResize)(self, nDim, THLongTensor_data(sizes));
   return self;
 }
 
@@ -162,8 +163,8 @@ THSTensor *THSTensor_(newClone)(THSTensor *self) {
 
   THSTensor_(set)(
     other,
-    THLongTensor_newClone(THSTensor_(indices)(self)),
-    THTensor_(newClone)(THSTensor_(values)(self))
+    THLongTensor_newClone(self->indices),
+    THTensor_(newClone)(self->values)
   );
 
   other->nnz = self->nnz;
@@ -178,7 +179,7 @@ THSTensor *THSTensor_(newContiguous)(THSTensor *self) {
 
 THSTensor *THSTensor_(newTranspose)(THSTensor *self, int d1, int d2) {
   THSTensor *other = THSTensor_(newClone)(self);
-  THSTensor_(transpose)(self, d1, d2);
+  THSTensor_(transpose)(other, d1, d2);
   return other;
 }
 
@@ -226,6 +227,8 @@ THTensor *THSTensor_(toDense)(THSTensor *self) {
   THLongTensor *indices_;
   long *indices;
 
+  THSTensor_(contiguous)(self);
+
   // set up the new tensor
   storage = THSTensor_(newSizeOf)(self);
   other_ = THTensor_(newWithSize)(storage, NULL);
@@ -266,7 +269,11 @@ void THSTensor_(transpose)(THSTensor *self, int d1, int d2) {
         THTensor_fastGet2d(indices, d2, i));
     THTensor_fastSet2d(indices, d2, i, tmp);
   }
+  i = self->size[d1];
+  self->size[d1] = self->size[d2];
+  self->size[d2] = i;
   self->contiguous = 0;
+  THFree(indices);
 }
 
 int THSTensor_(isContiguous)(const THSTensor *self) {

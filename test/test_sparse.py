@@ -125,15 +125,16 @@ class TestSparse(TestCase):
         self.assertEqual(exp_v, x.values())
 
     def test_transpose(self):
-        return
-        x = self._gen_sparse(3, 5, 5)[0]
+        x = self._gen_sparse(4, 20, 5)[0]
         y = x.to_dense()
 
         for i, j in itertools.combinations(range(4), 2):
             x = x.transpose_(i, j)
             y = y.transpose(i, j)
-            print(x.to_dense())
-            print(y)
+            self.assertEqual(x.to_dense(), y)
+
+            x = x.transpose(i, j)
+            y = y.transpose(i, j)
             self.assertEqual(x.to_dense(), y)
 
     def test_spmm(self):
