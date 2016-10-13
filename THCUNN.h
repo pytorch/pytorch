@@ -476,7 +476,7 @@ TH_API void THNN_CudaSpatialAdaptiveMaxPooling_updateOutput(
           THCState *state,
           THCudaTensor *input,
           THCudaTensor *output,
-          THCudaTensor *indices,
+          THCudaLongTensor *indices,
           int nOutputCols,
           int nOutputRows);
 TH_API void THNN_CudaSpatialAdaptiveMaxPooling_updateGradInput(
@@ -484,7 +484,7 @@ TH_API void THNN_CudaSpatialAdaptiveMaxPooling_updateGradInput(
           THCudaTensor *input,
           THCudaTensor *gradOutput,
           THCudaTensor *gradInput,
-          THCudaTensor *indices);
+          THCudaLongTensor *indices);
 
 TH_API void THNN_CudaSpatialAveragePooling_updateOutput(
           THCState *state,
