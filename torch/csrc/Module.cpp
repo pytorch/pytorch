@@ -125,8 +125,6 @@ static bool THPModule_assignStateless(PyObject *self)
 #undef INIT_STATELESS
 }
 
-bool THSPModule_initExtension(PyObject *self);
-
 // Callback for python part. Used for additional initialization of python classes
 static PyObject * THPModule_initExtension(PyObject *self, PyObject *shm_manager_path)
 {
@@ -138,8 +136,6 @@ static PyObject * THPModule_initExtension(PyObject *self, PyObject *shm_manager_
   if (!THPModule_loadClasses(self))         return NULL;
   if (!THPModule_assignStateless(self))     return NULL;
   if (!THPModule_initCopy(self))            return NULL;
-
-  if (!THSPModule_initExtension(self))      return NULL;
   return PyBool_FromLong(true);
 }
 
@@ -603,6 +599,8 @@ static PyMethodDef TorchMethods[] = {
   {"_cuda_cudaHostAllocator", (PyCFunction)THCPModule_cudaHostAllocator, METH_NOARGS, NULL},
   {"_cuda_synchronize", (PyCFunction)THCPModule_cudaSynchronize, METH_NOARGS, NULL},
 #endif
+  {"_sparse_init",      (PyCFunction)THSPModule_initExtension,    METH_NOARGS,  NULL},
+
 
   {"_safe_call",      (PyCFunction)THPModule_safeCall,          METH_VARARGS | METH_KEYWORDS, NULL},
   {"_sendfd",         (PyCFunction)THPModule_sendfd,            METH_VARARGS, NULL},
@@ -800,13 +798,7 @@ bool THCPByteTensor_init(PyObject *module);
 
 bool THCPStream_init(PyObject *module);
 
-bool THSPDoubleTensor_init(PyObject *module);
-bool THSPFloatTensor_init(PyObject *module);
-bool THSPLongTensor_init(PyObject *module);
-bool THSPIntTensor_init(PyObject *module);
-bool THSPShortTensor_init(PyObject *module);
-bool THSPCharTensor_init(PyObject *module);
-bool THSPByteTensor_init(PyObject *module);
+bool THSPModule_initSparse(PyObject *module);
 
 #if PY_MAJOR_VERSION == 2
 PyMODINIT_FUNC init_C()
@@ -848,14 +840,7 @@ PyMODINIT_FUNC PyInit__C()
   ASSERT_TRUE(THPCharTensor_init(module));
   ASSERT_TRUE(THPByteTensor_init(module));
 
-  /* SPARSE TENSORS */
-  ASSERT_TRUE(THSPDoubleTensor_init(module));
-  ASSERT_TRUE(THSPFloatTensor_init(module));
-  ASSERT_TRUE(THSPLongTensor_init(module));
-  ASSERT_TRUE(THSPIntTensor_init(module));
-  ASSERT_TRUE(THSPShortTensor_init(module));
-  ASSERT_TRUE(THSPCharTensor_init(module));
-  ASSERT_TRUE(THSPByteTensor_init(module));
+  THSPModule_initSparse(module);
 
 #ifdef WITH_CUDA
   // This will only initialise base classes and attach them to library namespace

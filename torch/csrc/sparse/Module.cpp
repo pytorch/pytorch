@@ -49,8 +49,8 @@ static bool THSPModule_assignStateless()
 #undef INIT_STATELESS
 }
 
-bool THSPModule_initSparse(PyObject *module) {
 #define ASSERT_TRUE(cond) if (!(cond)) { return false; }
+bool THSPModule_initSparse(PyObject *module) {
   ASSERT_TRUE(THSPDoubleTensor_init(module));
   ASSERT_TRUE(THSPFloatTensor_init(module));
   ASSERT_TRUE(THSPLongTensor_init(module));
@@ -58,23 +58,21 @@ bool THSPModule_initSparse(PyObject *module) {
   ASSERT_TRUE(THSPShortTensor_init(module));
   ASSERT_TRUE(THSPCharTensor_init(module));
   ASSERT_TRUE(THSPByteTensor_init(module));
+  return true;
+}
+
+// Callback for python part. Used for additional initialization of python classes
+PyObject *THSPModule_initExtension(PyObject *self)
+{
+  PyObject *module = PyImport_ImportModule("torch.sparse");
+  if (!module) {
+    THPUtils_setError("class loader couldn't access torch.sparse module");
+    return NULL;
+  }
 
   PyObject* module_dict = PyModule_GetDict(module);
   ASSERT_TRUE(THSPModule_loadClasses(module_dict));
   ASSERT_TRUE(THSPModule_assignStateless());
-  return true;
+  Py_RETURN_TRUE;
+}
 #undef ASSERT_TRUE
-}
-
-// Callback for python part. Used for additional initialization of python classes
-bool THSPModule_initExtension(PyObject *self)
-{
-  PyObject *torch_module = PyImport_ImportModule("torch.sparse");
-  if (!torch_module) {
-    THPUtils_setError("class loader couldn't access torch.sparse module");
-    return NULL;
-  }
-  bool res = THSPModule_initSparse(torch_module);
-  printf("%i\n", res);
-  return res;
-}
