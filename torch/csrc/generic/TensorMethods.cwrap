@@ -249,6 +249,7 @@ static PyObject * THPTensor_(storage)(THPTensor *self, PyObject *args)
   name: THPTensor_(nDimension)
   python_name: dim
   only_register: True
+  method_flags: METH_KEYWORDS
 ]]
 
 [[
@@ -329,6 +330,7 @@ static PyObject * THPTensor_(storage)(THPTensor *self, PyObject *args)
   name: THPTensor_(numel)
   python_name: nelement
   only_register: True
+  method_flags: METH_KEYWORDS
 ]]
 
 [[

@@ -80,9 +80,10 @@ class build_ext(setuptools.command.build_ext.build_ext):
         from tools.cwrap.plugins.ArgcountSortPlugin import ArgcountSortPlugin
         from tools.cwrap.plugins.AutoGPU import AutoGPU
         from tools.cwrap.plugins.BoolOption import BoolOption
+        from tools.cwrap.plugins.KwargsPlugin import KwargsPlugin
         cwrap('torch/csrc/generic/TensorMethods.cwrap', plugins=[
             AutoGPU(condition='IS_CUDA'), THPLongArgsPlugin(), BoolOption(),
-            THPPlugin(), ArgcountSortPlugin(),
+            THPPlugin(), ArgcountSortPlugin(), KwargsPlugin(),
         ])
         # It's an old-style class in Python 2.7...
         setuptools.command.build_ext.build_ext.run(self)

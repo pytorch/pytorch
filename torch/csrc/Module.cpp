@@ -270,24 +270,35 @@ PyObject * THPModule_setDefaultTensorType(PyObject *_unused, PyObject *type)
 
 
 #define IMPLEMENT_STATELESS(name)                                              \
-static PyObject * TH_CONCAT_2(THPModule_, name)(PyObject *_unused, PyObject *args) \
+static PyObject * TH_CONCAT_2(THPModule_, name)(PyObject *_unused, PyObject *args, PyObject *kwargs) \
 {                                                                              \
   PyObject *tensor = THPDefaultTensorClass;                                    \
+  PyObject *key, *value;                                                       \
+  Py_ssize_t pos = 0;                                                          \
   for (int i = 0; i < PyTuple_Size(args); i++) {                               \
     PyObject *item = PyTuple_GET_ITEM(args, i);                                \
     if (THPModule_isTensor(item)) {                                            \
       tensor = item;                                                           \
-      break;                                                                   \
+      goto dispatch;                                                           \
+    }                                                                          \
+  }                                                                            \
+  if (kwargs) {                                                                \
+    while (PyDict_Next(kwargs, &pos, &key, &value)) {                          \
+      if (THPModule_isTensor(value)) {                                         \
+        tensor = value;                                                        \
+        goto dispatch;                                                         \
+      }                                                                        \
     }                                                                          \
   }                                                                            \
                                                                                \
-  PyObject *methods = PyObject_GetAttrString(tensor, THP_STATELESS_ATTRIBUTE_NAME);     \
+dispatch:                                                                      \
+  PyObject *methods = PyObject_GetAttrString(tensor, THP_STATELESS_ATTRIBUTE_NAME); \
   THPUtils_assert(methods, "Type %s doesn't implement statless methods",       \
       Py_TYPE(tensor)->tp_name);                                               \
   PyObject *method = PyObject_GetAttrString(methods, #name);                   \
   THPUtils_assert(method, "Type %s doesn't implement stateless method " #name, \
       Py_TYPE(tensor)->tp_name);                                               \
-  return PyObject_Call(method, args, NULL);                                    \
+  return PyObject_Call(method, args, kwargs);                                  \
 }
 
 IMPLEMENT_STATELESS(sigmoid)
@@ -422,24 +433,35 @@ IMPLEMENT_STATELESS(ormqr)
 // For logical functions a reverse type search is required (if the first argument
 // is a ByteTensor (result), it shouldn't pick it's version).
 #define IMPLEMENT_STATELESS_REVERSED(name)                                     \
-static PyObject * TH_CONCAT_2(THPModule_, name)(PyObject *_unused, PyObject *args) \
+static PyObject * TH_CONCAT_2(THPModule_, name)(PyObject *_unused, PyObject *args, PyObject *kwargs) \
 {                                                                              \
   PyObject *tensor = THPDefaultTensorClass;                                    \
+  PyObject *key, *value;                                                       \
+  Py_ssize_t pos = 0;                                                          \
   for (int i = PyTuple_Size(args)-1; i >= 0; i--) {                            \
     PyObject *item = PyTuple_GET_ITEM(args, i);                                \
     if (THPModule_isTensor(item)) {                                            \
       tensor = item;                                                           \
-      break;                                                                   \
+      goto dispatch;                                                           \
+    }                                                                          \
+  }                                                                            \
+  if (kwargs) {                                                                \
+    while (PyDict_Next(kwargs, &pos, &key, &value)) {                          \
+      if (THPModule_isTensor(value)) {                                         \
+        tensor = value;                                                        \
+        goto dispatch;                                                         \
+      }                                                                        \
     }                                                                          \
   }                                                                            \
                                                                                \
-  PyObject *methods = PyObject_GetAttrString(tensor, THP_STATELESS_ATTRIBUTE_NAME);     \
+dispatch:                                                                      \
+  PyObject *methods = PyObject_GetAttrString(tensor, THP_STATELESS_ATTRIBUTE_NAME); \
   THPUtils_assert(methods, "Type %s doesn't implement statless methods",       \
       Py_TYPE(tensor)->tp_name);                                               \
   PyObject *method = PyObject_GetAttrString(methods, #name);                   \
   THPUtils_assert(method, "Type %s doesn't implement stateless method " #name, \
       Py_TYPE(tensor)->tp_name);                                               \
-  return PyObject_Call(method, args, NULL);                                    \
+  return PyObject_Call(method, args, kwargs);                                  \
 }
 
 IMPLEMENT_STATELESS_REVERSED(gt)
@@ -471,9 +493,6 @@ static PyObject * THPModule_nonzero(PyObject *_unused, PyObject *args)
   return PyObject_Call(method, args, NULL);
 }
 
-// In nonzero, the first argument might be a LongTensor that will be used
-// for indices output, so we should pick a function based on second
-// tensor's type.
 static PyObject * THPModule_cat(PyObject *_unused, PyObject *args)
 {
   PyObject *tensor = THPDefaultTensorClass;
@@ -564,141 +583,141 @@ static PyMethodDef TorchMethods[] = {
   {"get_num_threads", (PyCFunction)THPModule_getNumThreads,     METH_NOARGS,  NULL},
   {"set_num_threads", (PyCFunction)THPModule_setNumThreads,     METH_O,       NULL},
 
-  {"sigmoid",         (PyCFunction)THPModule_sigmoid,           METH_VARARGS, NULL},
-  {"log",             (PyCFunction)THPModule_log,               METH_VARARGS, NULL},
-  {"log1p",           (PyCFunction)THPModule_log1p,             METH_VARARGS, NULL},
-  {"exp",             (PyCFunction)THPModule_exp,               METH_VARARGS, NULL},
-  {"cos",             (PyCFunction)THPModule_cos,               METH_VARARGS, NULL},
-  {"acos",            (PyCFunction)THPModule_acos,              METH_VARARGS, NULL},
-  {"cosh",            (PyCFunction)THPModule_cosh,              METH_VARARGS, NULL},
-  {"sin",             (PyCFunction)THPModule_sin,               METH_VARARGS, NULL},
-  {"asin",            (PyCFunction)THPModule_asin,              METH_VARARGS, NULL},
-  {"sinh",            (PyCFunction)THPModule_sinh,              METH_VARARGS, NULL},
-  {"tan",             (PyCFunction)THPModule_tan,               METH_VARARGS, NULL},
-  {"atan",            (PyCFunction)THPModule_atan,              METH_VARARGS, NULL},
-  {"tanh",            (PyCFunction)THPModule_tanh,              METH_VARARGS, NULL},
-  {"sqrt",            (PyCFunction)THPModule_sqrt,              METH_VARARGS, NULL},
-  {"rsqrt",           (PyCFunction)THPModule_rsqrt,             METH_VARARGS, NULL},
-  {"ceil",            (PyCFunction)THPModule_ceil,              METH_VARARGS, NULL},
-  {"floor",           (PyCFunction)THPModule_floor,             METH_VARARGS, NULL},
-  {"round",           (PyCFunction)THPModule_round,             METH_VARARGS, NULL},
-  {"abs",             (PyCFunction)THPModule_abs,               METH_VARARGS, NULL},
-  {"trunc",           (PyCFunction)THPModule_trunc,             METH_VARARGS, NULL},
-  {"frac",            (PyCFunction)THPModule_frac,              METH_VARARGS, NULL},
-  {"mean",            (PyCFunction)THPModule_mean,              METH_VARARGS, NULL},
-  {"std",             (PyCFunction)THPModule_std,               METH_VARARGS, NULL},
-  {"var",             (PyCFunction)THPModule_var,               METH_VARARGS, NULL},
-  {"norm",            (PyCFunction)THPModule_norm,              METH_VARARGS, NULL},
-  {"cinv",            (PyCFunction)THPModule_cinv,              METH_VARARGS, NULL},
-  {"neg",             (PyCFunction)THPModule_neg,               METH_VARARGS, NULL},
-  {"add",             (PyCFunction)THPModule_add,               METH_VARARGS, NULL},
-  {"csub",            (PyCFunction)THPModule_csub,              METH_VARARGS, NULL},
-  {"mul",             (PyCFunction)THPModule_mul,               METH_VARARGS, NULL},
-  {"div",             (PyCFunction)THPModule_div,               METH_VARARGS, NULL},
-  {"fmod",            (PyCFunction)THPModule_fmod,              METH_VARARGS, NULL},
-  {"mod",             (PyCFunction)THPModule_fmod,              METH_VARARGS, NULL},
-  {"cmul",            (PyCFunction)THPModule_cmul,              METH_VARARGS, NULL},
-  {"cdiv",            (PyCFunction)THPModule_cdiv,              METH_VARARGS, NULL},
-  {"cfmod",           (PyCFunction)THPModule_cfmod,             METH_VARARGS, NULL},
-  {"cmod",            (PyCFunction)THPModule_cfmod,             METH_VARARGS, NULL},
-  {"min",             (PyCFunction)THPModule_min,               METH_VARARGS, NULL},
-  {"max",             (PyCFunction)THPModule_max,               METH_VARARGS, NULL},
-  {"cmax",            (PyCFunction)THPModule_cmax,              METH_VARARGS, NULL},
-  {"cmin",            (PyCFunction)THPModule_cmin,              METH_VARARGS, NULL},
-  {"cpow",            (PyCFunction)THPModule_cpow,              METH_VARARGS, NULL},
-  {"dot",             (PyCFunction)THPModule_dot,               METH_VARARGS, NULL},
-  {"sum",             (PyCFunction)THPModule_sum,               METH_VARARGS, NULL},
-  {"prod",            (PyCFunction)THPModule_prod,              METH_VARARGS, NULL},
-  {"remainder",       (PyCFunction)THPModule_remainder,         METH_VARARGS, NULL},
-  {"cremainder",      (PyCFunction)THPModule_cremainder,        METH_VARARGS, NULL},
-  {"cumsum",          (PyCFunction)THPModule_cumsum,            METH_VARARGS, NULL},
-  {"cumprod",         (PyCFunction)THPModule_cumprod,           METH_VARARGS, NULL},
-  {"clamp",           (PyCFunction)THPModule_clamp,             METH_VARARGS, NULL},
-  {"equal",           (PyCFunction)THPModule_equal,             METH_VARARGS, NULL},
-  {"eye",             (PyCFunction)THPModule_eye,               METH_VARARGS, NULL},
-  {"fill",            (PyCFunction)THPModule_fill,              METH_VARARGS, NULL},
-  {"diag",            (PyCFunction)THPModule_diag,              METH_VARARGS, NULL},
-  {"numel",           (PyCFunction)THPModule_numel,             METH_VARARGS, NULL},
-  {"sign",            (PyCFunction)THPModule_sign,              METH_VARARGS, NULL},
-  {"trace",           (PyCFunction)THPModule_trace,             METH_VARARGS, NULL},
-  {"tril",            (PyCFunction)THPModule_tril,              METH_VARARGS, NULL},
-  {"triu",            (PyCFunction)THPModule_triu,              METH_VARARGS, NULL},
-  {"zero",            (PyCFunction)THPModule_zero,              METH_VARARGS, NULL},
-  {"gt",              (PyCFunction)THPModule_gt,                METH_VARARGS, NULL},
-  {"lt",              (PyCFunction)THPModule_lt,                METH_VARARGS, NULL},
-  {"ge",              (PyCFunction)THPModule_ge,                METH_VARARGS, NULL},
-  {"le",              (PyCFunction)THPModule_le,                METH_VARARGS, NULL},
-  {"eq",              (PyCFunction)THPModule_eq,                METH_VARARGS, NULL},
-  {"ne",              (PyCFunction)THPModule_ne,                METH_VARARGS, NULL},
-  {"kthvalue",        (PyCFunction)THPModule_kthvalue,          METH_VARARGS, NULL},
-  {"mode",            (PyCFunction)THPModule_mode,              METH_VARARGS, NULL},
-  {"median",          (PyCFunction)THPModule_median,            METH_VARARGS, NULL},
-  {"cross",           (PyCFunction)THPModule_cross,             METH_VARARGS, NULL},
-  {"sort",            (PyCFunction)THPModule_sort,              METH_VARARGS, NULL},
-  {"topk",            (PyCFunction)THPModule_topk,              METH_VARARGS, NULL},
-  {"t",               (PyCFunction)THPModule_t,                 METH_VARARGS, NULL},
-  {"transpose",       (PyCFunction)THPModule_transpose,         METH_VARARGS, NULL},
-  {"squeeze",         (PyCFunction)THPModule_squeeze,           METH_VARARGS, NULL},
+  {"sigmoid",         (PyCFunction)THPModule_sigmoid,           METH_VARARGS | METH_KEYWORDS, NULL},
+  {"log",             (PyCFunction)THPModule_log,               METH_VARARGS | METH_KEYWORDS, NULL},
+  {"log1p",           (PyCFunction)THPModule_log1p,             METH_VARARGS | METH_KEYWORDS, NULL},
+  {"exp",             (PyCFunction)THPModule_exp,               METH_VARARGS | METH_KEYWORDS, NULL},
+  {"cos",             (PyCFunction)THPModule_cos,               METH_VARARGS | METH_KEYWORDS, NULL},
+  {"acos",            (PyCFunction)THPModule_acos,              METH_VARARGS | METH_KEYWORDS, NULL},
+  {"cosh",            (PyCFunction)THPModule_cosh,              METH_VARARGS | METH_KEYWORDS, NULL},
+  {"sin",             (PyCFunction)THPModule_sin,               METH_VARARGS | METH_KEYWORDS, NULL},
+  {"asin",            (PyCFunction)THPModule_asin,              METH_VARARGS | METH_KEYWORDS, NULL},
+  {"sinh",            (PyCFunction)THPModule_sinh,              METH_VARARGS | METH_KEYWORDS, NULL},
+  {"tan",             (PyCFunction)THPModule_tan,               METH_VARARGS | METH_KEYWORDS, NULL},
+  {"atan",            (PyCFunction)THPModule_atan,              METH_VARARGS | METH_KEYWORDS, NULL},
+  {"tanh",            (PyCFunction)THPModule_tanh,              METH_VARARGS | METH_KEYWORDS, NULL},
+  {"sqrt",            (PyCFunction)THPModule_sqrt,              METH_VARARGS | METH_KEYWORDS, NULL},
+  {"rsqrt",           (PyCFunction)THPModule_rsqrt,             METH_VARARGS | METH_KEYWORDS, NULL},
+  {"ceil",            (PyCFunction)THPModule_ceil,              METH_VARARGS | METH_KEYWORDS, NULL},
+  {"floor",           (PyCFunction)THPModule_floor,             METH_VARARGS | METH_KEYWORDS, NULL},
+  {"round",           (PyCFunction)THPModule_round,             METH_VARARGS | METH_KEYWORDS, NULL},
+  {"abs",             (PyCFunction)THPModule_abs,               METH_VARARGS | METH_KEYWORDS, NULL},
+  {"trunc",           (PyCFunction)THPModule_trunc,             METH_VARARGS | METH_KEYWORDS, NULL},
+  {"frac",            (PyCFunction)THPModule_frac,              METH_VARARGS | METH_KEYWORDS, NULL},
+  {"mean",            (PyCFunction)THPModule_mean,              METH_VARARGS | METH_KEYWORDS, NULL},
+  {"std",             (PyCFunction)THPModule_std,               METH_VARARGS | METH_KEYWORDS, NULL},
+  {"var",             (PyCFunction)THPModule_var,               METH_VARARGS | METH_KEYWORDS, NULL},
+  {"norm",            (PyCFunction)THPModule_norm,              METH_VARARGS | METH_KEYWORDS, NULL},
+  {"cinv",            (PyCFunction)THPModule_cinv,              METH_VARARGS | METH_KEYWORDS, NULL},
+  {"neg",             (PyCFunction)THPModule_neg,               METH_VARARGS | METH_KEYWORDS, NULL},
+  {"add",             (PyCFunction)THPModule_add,               METH_VARARGS | METH_KEYWORDS, NULL},
+  {"csub",            (PyCFunction)THPModule_csub,              METH_VARARGS | METH_KEYWORDS, NULL},
+  {"mul",             (PyCFunction)THPModule_mul,               METH_VARARGS | METH_KEYWORDS, NULL},
+  {"div",             (PyCFunction)THPModule_div,               METH_VARARGS | METH_KEYWORDS, NULL},
+  {"fmod",            (PyCFunction)THPModule_fmod,              METH_VARARGS | METH_KEYWORDS, NULL},
+  {"mod",             (PyCFunction)THPModule_fmod,              METH_VARARGS | METH_KEYWORDS, NULL},
+  {"cmul",            (PyCFunction)THPModule_cmul,              METH_VARARGS | METH_KEYWORDS, NULL},
+  {"cdiv",            (PyCFunction)THPModule_cdiv,              METH_VARARGS | METH_KEYWORDS, NULL},
+  {"cfmod",           (PyCFunction)THPModule_cfmod,             METH_VARARGS | METH_KEYWORDS, NULL},
+  {"cmod",            (PyCFunction)THPModule_cfmod,             METH_VARARGS | METH_KEYWORDS, NULL},
+  {"min",             (PyCFunction)THPModule_min,               METH_VARARGS | METH_KEYWORDS, NULL},
+  {"max",             (PyCFunction)THPModule_max,               METH_VARARGS | METH_KEYWORDS, NULL},
+  {"cmax",            (PyCFunction)THPModule_cmax,              METH_VARARGS | METH_KEYWORDS, NULL},
+  {"cmin",            (PyCFunction)THPModule_cmin,              METH_VARARGS | METH_KEYWORDS, NULL},
+  {"cpow",            (PyCFunction)THPModule_cpow,              METH_VARARGS | METH_KEYWORDS, NULL},
+  {"dot",             (PyCFunction)THPModule_dot,               METH_VARARGS | METH_KEYWORDS, NULL},
+  {"sum",             (PyCFunction)THPModule_sum,               METH_VARARGS | METH_KEYWORDS, NULL},
+  {"prod",            (PyCFunction)THPModule_prod,              METH_VARARGS | METH_KEYWORDS, NULL},
+  {"remainder",       (PyCFunction)THPModule_remainder,         METH_VARARGS | METH_KEYWORDS, NULL},
+  {"cremainder",      (PyCFunction)THPModule_cremainder,        METH_VARARGS | METH_KEYWORDS, NULL},
+  {"cumsum",          (PyCFunction)THPModule_cumsum,            METH_VARARGS | METH_KEYWORDS, NULL},
+  {"cumprod",         (PyCFunction)THPModule_cumprod,           METH_VARARGS | METH_KEYWORDS, NULL},
+  {"clamp",           (PyCFunction)THPModule_clamp,             METH_VARARGS | METH_KEYWORDS, NULL},
+  {"equal",           (PyCFunction)THPModule_equal,             METH_VARARGS | METH_KEYWORDS, NULL},
+  {"eye",             (PyCFunction)THPModule_eye,               METH_VARARGS | METH_KEYWORDS, NULL},
+  {"fill",            (PyCFunction)THPModule_fill,              METH_VARARGS | METH_KEYWORDS, NULL},
+  {"diag",            (PyCFunction)THPModule_diag,              METH_VARARGS | METH_KEYWORDS, NULL},
+  {"numel",           (PyCFunction)THPModule_numel,             METH_VARARGS | METH_KEYWORDS, NULL},
+  {"sign",            (PyCFunction)THPModule_sign,              METH_VARARGS | METH_KEYWORDS, NULL},
+  {"trace",           (PyCFunction)THPModule_trace,             METH_VARARGS | METH_KEYWORDS, NULL},
+  {"tril",            (PyCFunction)THPModule_tril,              METH_VARARGS | METH_KEYWORDS, NULL},
+  {"triu",            (PyCFunction)THPModule_triu,              METH_VARARGS | METH_KEYWORDS, NULL},
+  {"zero",            (PyCFunction)THPModule_zero,              METH_VARARGS | METH_KEYWORDS, NULL},
+  {"gt",              (PyCFunction)THPModule_gt,                METH_VARARGS | METH_KEYWORDS, NULL},
+  {"lt",              (PyCFunction)THPModule_lt,                METH_VARARGS | METH_KEYWORDS, NULL},
+  {"ge",              (PyCFunction)THPModule_ge,                METH_VARARGS | METH_KEYWORDS, NULL},
+  {"le",              (PyCFunction)THPModule_le,                METH_VARARGS | METH_KEYWORDS, NULL},
+  {"eq",              (PyCFunction)THPModule_eq,                METH_VARARGS | METH_KEYWORDS, NULL},
+  {"ne",              (PyCFunction)THPModule_ne,                METH_VARARGS | METH_KEYWORDS, NULL},
+  {"kthvalue",        (PyCFunction)THPModule_kthvalue,          METH_VARARGS | METH_KEYWORDS, NULL},
+  {"mode",            (PyCFunction)THPModule_mode,              METH_VARARGS | METH_KEYWORDS, NULL},
+  {"median",          (PyCFunction)THPModule_median,            METH_VARARGS | METH_KEYWORDS, NULL},
+  {"cross",           (PyCFunction)THPModule_cross,             METH_VARARGS | METH_KEYWORDS, NULL},
+  {"sort",            (PyCFunction)THPModule_sort,              METH_VARARGS | METH_KEYWORDS, NULL},
+  {"topk",            (PyCFunction)THPModule_topk,              METH_VARARGS | METH_KEYWORDS, NULL},
+  {"t",               (PyCFunction)THPModule_t,                 METH_VARARGS | METH_KEYWORDS, NULL},
+  {"transpose",       (PyCFunction)THPModule_transpose,         METH_VARARGS | METH_KEYWORDS, NULL},
+  {"squeeze",         (PyCFunction)THPModule_squeeze,           METH_VARARGS | METH_KEYWORDS, NULL},
   {"nonzero",         (PyCFunction)THPModule_nonzero,           METH_VARARGS, NULL},
-  {"renorm",          (PyCFunction)THPModule_renorm,            METH_VARARGS, NULL},
-  {"dist",            (PyCFunction)THPModule_dist,              METH_VARARGS, NULL},
-  {"linspace",        (PyCFunction)THPModule_linspace,          METH_VARARGS, NULL},
-  {"logspace",        (PyCFunction)THPModule_logspace,          METH_VARARGS, NULL},
-  {"histc",           (PyCFunction)THPModule_histc,             METH_VARARGS, NULL},
-  {"atan2",           (PyCFunction)THPModule_atan2,             METH_VARARGS, NULL},
-  {"pow",             (PyCFunction)THPModule_pow,               METH_VARARGS, NULL},
-  {"lerp",            (PyCFunction)THPModule_lerp,              METH_VARARGS, NULL},
-  {"reshape",         (PyCFunction)THPModule_reshape,           METH_VARARGS, NULL},
-  {"zeros",           (PyCFunction)THPModule_zeros,             METH_VARARGS, NULL},
-  {"ones",            (PyCFunction)THPModule_ones,              METH_VARARGS, NULL},
-  {"index_select",    (PyCFunction)THPModule_index_select,      METH_VARARGS, NULL},
-  {"narrow",          (PyCFunction)THPModule_narrow,            METH_VARARGS, NULL},
-  {"addmm",           (PyCFunction)THPModule_addmm,             METH_VARARGS, NULL},
-  {"addmv",           (PyCFunction)THPModule_addmv,             METH_VARARGS, NULL},
-  {"addr",            (PyCFunction)THPModule_addr,              METH_VARARGS, NULL},
-  {"ger",             (PyCFunction)THPModule_ger,               METH_VARARGS, NULL},
-  {"mv",              (PyCFunction)THPModule_mv,                METH_VARARGS, NULL},
-  {"addbmm",          (PyCFunction)THPModule_addbmm,            METH_VARARGS, NULL},
-  {"baddbmm",         (PyCFunction)THPModule_baddbmm,           METH_VARARGS, NULL},
-  {"addcmul",         (PyCFunction)THPModule_addcmul,           METH_VARARGS, NULL},
-  {"addcdiv",         (PyCFunction)THPModule_addcdiv,           METH_VARARGS, NULL},
-  {"mm",              (PyCFunction)THPModule_mm,                METH_VARARGS, NULL},
-  {"bmm",             (PyCFunction)THPModule_bmm,               METH_VARARGS, NULL},
-  {"multinomial",     (PyCFunction)THPModule_multinomial,       METH_VARARGS, NULL},
-  {"uniform",         (PyCFunction)THPModule_uniform,           METH_VARARGS, NULL},
-  {"normal",          (PyCFunction)THPModule_normal,            METH_VARARGS, NULL},
-  {"cauchy",          (PyCFunction)THPModule_cauchy,            METH_VARARGS, NULL},
-  {"log_normal",      (PyCFunction)THPModule_log_normal,        METH_VARARGS, NULL},
-  {"exponential",     (PyCFunction)THPModule_exponential,       METH_VARARGS, NULL},
-  {"random",          (PyCFunction)THPModule_random,            METH_VARARGS, NULL},
-  {"geometric",       (PyCFunction)THPModule_geometric,         METH_VARARGS, NULL},
-  {"bernoulli",       (PyCFunction)THPModule_bernoulli,         METH_VARARGS, NULL},
-  {"rand",            (PyCFunction)THPModule_rand,              METH_VARARGS, NULL},
-  {"randn",           (PyCFunction)THPModule_randn,             METH_VARARGS, NULL},
-  {"randperm",        (PyCFunction)THPModule_randperm,          METH_VARARGS, NULL},
-  {"unfold",          (PyCFunction)THPModule_unfold,            METH_VARARGS, NULL},
-  {"range",           (PyCFunction)THPModule_range,             METH_VARARGS, NULL},
-  {"gather",          (PyCFunction)THPModule_gather,            METH_VARARGS, NULL},
-  {"scatter",         (PyCFunction)THPModule_scatter,           METH_VARARGS, NULL},
-  {"all",             (PyCFunction)THPModule_all,               METH_VARARGS, NULL},
-  {"any",             (PyCFunction)THPModule_any,               METH_VARARGS, NULL},
+  {"renorm",          (PyCFunction)THPModule_renorm,            METH_VARARGS | METH_KEYWORDS, NULL},
+  {"dist",            (PyCFunction)THPModule_dist,              METH_VARARGS | METH_KEYWORDS, NULL},
+  {"linspace",        (PyCFunction)THPModule_linspace,          METH_VARARGS | METH_KEYWORDS, NULL},
+  {"logspace",        (PyCFunction)THPModule_logspace,          METH_VARARGS | METH_KEYWORDS, NULL},
+  {"histc",           (PyCFunction)THPModule_histc,             METH_VARARGS | METH_KEYWORDS, NULL},
+  {"atan2",           (PyCFunction)THPModule_atan2,             METH_VARARGS | METH_KEYWORDS, NULL},
+  {"pow",             (PyCFunction)THPModule_pow,               METH_VARARGS | METH_KEYWORDS, NULL},
+  {"lerp",            (PyCFunction)THPModule_lerp,              METH_VARARGS | METH_KEYWORDS, NULL},
+  {"reshape",         (PyCFunction)THPModule_reshape,           METH_VARARGS | METH_KEYWORDS, NULL},
+  {"zeros",           (PyCFunction)THPModule_zeros,             METH_VARARGS | METH_KEYWORDS, NULL},
+  {"ones",            (PyCFunction)THPModule_ones,              METH_VARARGS | METH_KEYWORDS, NULL},
+  {"index_select",    (PyCFunction)THPModule_index_select,      METH_VARARGS | METH_KEYWORDS, NULL},
+  {"narrow",          (PyCFunction)THPModule_narrow,            METH_VARARGS | METH_KEYWORDS, NULL},
+  {"addmm",           (PyCFunction)THPModule_addmm,             METH_VARARGS | METH_KEYWORDS, NULL},
+  {"addmv",           (PyCFunction)THPModule_addmv,             METH_VARARGS | METH_KEYWORDS, NULL},
+  {"addr",            (PyCFunction)THPModule_addr,              METH_VARARGS | METH_KEYWORDS, NULL},
+  {"ger",             (PyCFunction)THPModule_ger,               METH_VARARGS | METH_KEYWORDS, NULL},
+  {"mv",              (PyCFunction)THPModule_mv,                METH_VARARGS | METH_KEYWORDS, NULL},
+  {"addbmm",          (PyCFunction)THPModule_addbmm,            METH_VARARGS | METH_KEYWORDS, NULL},
+  {"baddbmm",         (PyCFunction)THPModule_baddbmm,           METH_VARARGS | METH_KEYWORDS, NULL},
+  {"addcmul",         (PyCFunction)THPModule_addcmul,           METH_VARARGS | METH_KEYWORDS, NULL},
+  {"addcdiv",         (PyCFunction)THPModule_addcdiv,           METH_VARARGS | METH_KEYWORDS, NULL},
+  {"mm",              (PyCFunction)THPModule_mm,                METH_VARARGS | METH_KEYWORDS, NULL},
+  {"bmm",             (PyCFunction)THPModule_bmm,               METH_VARARGS | METH_KEYWORDS, NULL},
+  {"multinomial",     (PyCFunction)THPModule_multinomial,       METH_VARARGS | METH_KEYWORDS, NULL},
+  {"uniform",         (PyCFunction)THPModule_uniform,           METH_VARARGS | METH_KEYWORDS, NULL},
+  {"normal",          (PyCFunction)THPModule_normal,            METH_VARARGS | METH_KEYWORDS, NULL},
+  {"cauchy",          (PyCFunction)THPModule_cauchy,            METH_VARARGS | METH_KEYWORDS, NULL},
+  {"log_normal",      (PyCFunction)THPModule_log_normal,        METH_VARARGS | METH_KEYWORDS, NULL},
+  {"exponential",     (PyCFunction)THPModule_exponential,       METH_VARARGS | METH_KEYWORDS, NULL},
+  {"random",          (PyCFunction)THPModule_random,            METH_VARARGS | METH_KEYWORDS, NULL},
+  {"geometric",       (PyCFunction)THPModule_geometric,         METH_VARARGS | METH_KEYWORDS, NULL},
+  {"bernoulli",       (PyCFunction)THPModule_bernoulli,         METH_VARARGS | METH_KEYWORDS, NULL},
+  {"rand",            (PyCFunction)THPModule_rand,              METH_VARARGS | METH_KEYWORDS, NULL},
+  {"randn",           (PyCFunction)THPModule_randn,             METH_VARARGS | METH_KEYWORDS, NULL},
+  {"randperm",        (PyCFunction)THPModule_randperm,          METH_VARARGS | METH_KEYWORDS, NULL},
+  {"unfold",          (PyCFunction)THPModule_unfold,            METH_VARARGS | METH_KEYWORDS, NULL},
+  {"range",           (PyCFunction)THPModule_range,             METH_VARARGS | METH_KEYWORDS, NULL},
+  {"gather",          (PyCFunction)THPModule_gather,            METH_VARARGS | METH_KEYWORDS, NULL},
+  {"scatter",         (PyCFunction)THPModule_scatter,           METH_VARARGS | METH_KEYWORDS, NULL},
+  {"all",             (PyCFunction)THPModule_all,               METH_VARARGS | METH_KEYWORDS, NULL},
+  {"any",             (PyCFunction)THPModule_any,               METH_VARARGS | METH_KEYWORDS, NULL},
   {"cat",             (PyCFunction)THPModule_cat,               METH_VARARGS, NULL},
-  {"masked_select",   (PyCFunction)THPModule_masked_select,     METH_VARARGS, NULL},
-  {"gesv",            (PyCFunction)THPModule_gesv,              METH_VARARGS, NULL},
-  {"gels",            (PyCFunction)THPModule_gels,              METH_VARARGS, NULL},
-  {"trtrs",           (PyCFunction)THPModule_trtrs,             METH_VARARGS, NULL},
-  {"symeig",          (PyCFunction)THPModule_symeig,            METH_VARARGS, NULL},
-  {"eig",             (PyCFunction)THPModule_eig,               METH_VARARGS, NULL},
-  {"svd",             (PyCFunction)THPModule_svd,               METH_VARARGS, NULL},
-  {"inverse",         (PyCFunction)THPModule_inverse,           METH_VARARGS, NULL},
-  {"potrf",           (PyCFunction)THPModule_potrf,             METH_VARARGS, NULL},
-  {"potrs",           (PyCFunction)THPModule_potrs,             METH_VARARGS, NULL},
-  {"potri",           (PyCFunction)THPModule_potri,             METH_VARARGS, NULL},
-  {"pstrf",           (PyCFunction)THPModule_pstrf,             METH_VARARGS, NULL},
-  {"qe",              (PyCFunction)THPModule_qr,                METH_VARARGS, NULL},
-  {"geqrf",           (PyCFunction)THPModule_geqrf,             METH_VARARGS, NULL},
-  {"orgqr",           (PyCFunction)THPModule_orgqr,             METH_VARARGS, NULL},
-  {"ormqr",           (PyCFunction)THPModule_ormqr,             METH_VARARGS, NULL},
+  {"masked_select",   (PyCFunction)THPModule_masked_select,     METH_VARARGS | METH_KEYWORDS, NULL},
+  {"gesv",            (PyCFunction)THPModule_gesv,              METH_VARARGS | METH_KEYWORDS, NULL},
+  {"gels",            (PyCFunction)THPModule_gels,              METH_VARARGS | METH_KEYWORDS, NULL},
+  {"trtrs",           (PyCFunction)THPModule_trtrs,             METH_VARARGS | METH_KEYWORDS, NULL},
+  {"symeig",          (PyCFunction)THPModule_symeig,            METH_VARARGS | METH_KEYWORDS, NULL},
+  {"eig",             (PyCFunction)THPModule_eig,               METH_VARARGS | METH_KEYWORDS, NULL},
+  {"svd",             (PyCFunction)THPModule_svd,               METH_VARARGS | METH_KEYWORDS, NULL},
+  {"inverse",         (PyCFunction)THPModule_inverse,           METH_VARARGS | METH_KEYWORDS, NULL},
+  {"potrf",           (PyCFunction)THPModule_potrf,             METH_VARARGS | METH_KEYWORDS, NULL},
+  {"potrs",           (PyCFunction)THPModule_potrs,             METH_VARARGS | METH_KEYWORDS, NULL},
+  {"potri",           (PyCFunction)THPModule_potri,             METH_VARARGS | METH_KEYWORDS, NULL},
+  {"pstrf",           (PyCFunction)THPModule_pstrf,             METH_VARARGS | METH_KEYWORDS, NULL},
+  {"qe",              (PyCFunction)THPModule_qr,                METH_VARARGS | METH_KEYWORDS, NULL},
+  {"geqrf",           (PyCFunction)THPModule_geqrf,             METH_VARARGS | METH_KEYWORDS, NULL},
+  {"orgqr",           (PyCFunction)THPModule_orgqr,             METH_VARARGS | METH_KEYWORDS, NULL},
+  {"ormqr",           (PyCFunction)THPModule_ormqr,             METH_VARARGS | METH_KEYWORDS, NULL},
   {NULL, NULL, 0, NULL}
 };
 

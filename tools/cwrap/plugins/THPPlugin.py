@@ -68,10 +68,13 @@ $methods
 """)
 
     WRAPPER_TEMPLATE = Template("""\
-PyObject * $name(PyObject *self, PyObject *args)
+PyObject * $name(PyObject *self, PyObject *args, PyObject *kwargs)
 {
     HANDLE_TH_ERRORS
-    int __argcount = args ? PyTuple_Size(args) : 0;
+    int __tuplecount = args ? PyTuple_Size(args) : 0;
+    int __dictcount = kwargs ? PyDict_Size(kwargs) : 0;
+    int __argcount = __tuplecount + __dictcount;
+
     $options
     }
 
@@ -227,10 +230,17 @@ PyObject * $name(PyObject *self, PyObject *args)
             # TODO: we can probably allow duplicate signatures once we implement
             # keyword arguments
             declaration['options'] = self.filter_unique_options(declaration['options'])
+
         declarations = [d for d in declarations if not d.get('only_stateless', False)]
         self.declarations.extend(filter(lambda x: not x.get('only_stateless', False), register_only))
         self.stateless_declarations.extend(filter(lambda x: x.get('only_stateless', False), register_only))
-        return declarations + new_declarations
+
+        all_declarations = declarations + new_declarations
+        for declaration in all_declarations:
+            if declaration.get('long_args'):
+                declaration['no_kwargs'] = True
+
+        return all_declarations
 
     def make_stateless(self, declaration):
         declaration['name'] = 'THPTensor_stateless_({})'.format(declaration['name'])
@@ -272,6 +282,8 @@ PyObject * $name(PyObject *self, PyObject *args)
         tensor_methods = ''
         for declaration in (self.declarations if not stateless else self.stateless_declarations):
             extra_flags = ' | ' + declaration.get('method_flags') if 'method_flags' in declaration else ''
+            if not declaration.get('only_register'):
+                extra_flags += ' | METH_KEYWORDS'
             entry = Template('  {"$python_name", (PyCFunction)$name, METH_VARARGS$extra_flags, NULL},\n').substitute(
                     python_name=declaration['python_name'], name=declaration['name'], extra_flags=extra_flags
                 )
