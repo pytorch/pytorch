@@ -23,7 +23,7 @@ static long* THNN_(SpatialFractionalMaxPooling_generateIntervals)(
 static void THNN_(SpatialFractionalMaxPooling_updateOutput_frame)(
   real* input,
   real* output,
-  real* indices,
+  THIndex_t* indices,
   real* randomSamples,
   long numPlanes,
   long inputW, long inputH,
@@ -48,7 +48,7 @@ static void THNN_(SpatialFractionalMaxPooling_updateOutput_frame)(
 
     real* inputForPlane = input + plane * inputW * inputH;
     real* outputForPlane = output + plane * outputW * outputH;
-    real* indicesForPlane = indices + plane * outputW * outputH;
+    THIndex_t* indicesForPlane = indices + plane * outputW * outputH;
 
     for (h = 0; h < outputH; ++h) {
       long inputHStart = sequenceH[h];
@@ -79,7 +79,7 @@ static void THNN_(SpatialFractionalMaxPooling_updateOutput_frame)(
 
         outputForPlane[h * outputW + w] = maxVal;
         /* +1 to lua index */
-        indicesForPlane[h * outputW + w] = (real) maxIndex + TH_INDEX_BASE;
+        indicesForPlane[h * outputW + w] = maxIndex + TH_INDEX_BASE;
       }
     }
 
@@ -94,7 +94,7 @@ void THNN_(SpatialFractionalMaxPooling_updateOutput)(
     THTensor *output,
     int outputW, int outputH,
     int poolSizeW, int poolSizeH,
-    THTensor *indices,
+    THIndexTensor *indices,
     THTensor *randomSamples) {
 
   long numBatch = 1;
@@ -132,18 +132,18 @@ void THNN_(SpatialFractionalMaxPooling_updateOutput)(
     /* resize output */
     THTensor_(resize3d)(output, numPlanes, outputH, outputW);
     /* indices will contain the locations for each output point */
-    THTensor_(resize3d)(indices, numPlanes, outputH, outputW);
+    THIndexTensor_(resize3d)(indices, numPlanes, outputH, outputW);
 
     THNN_(SpatialFractionalMaxPooling_updateOutput_frame)(
       THTensor_(data)(input),
       THTensor_(data)(output),
-      THTensor_(data)(indices),
+      THIndexTensor_(data)(indices),
       THTensor_(data)(randomSamples),
       numPlanes, inputW, inputH, outputW, outputH, poolSizeW, poolSizeH);
   } else {
     THTensor_(resize4d)(output, numBatch, numPlanes, outputH, outputW);
     /* indices will contain the locations for each output point */
-    THTensor_(resize4d)(indices, numBatch, numPlanes, outputH, outputW);
+    THIndexTensor_(resize4d)(indices, numBatch, numPlanes, outputH, outputW);
 
     long batch;
 #pragma omp parallel for private(batch)
@@ -151,7 +151,7 @@ void THNN_(SpatialFractionalMaxPooling_updateOutput)(
       THNN_(SpatialFractionalMaxPooling_updateOutput_frame)(
         THTensor_(data)(input) + batch * numPlanes * inputH * inputW,
         THTensor_(data)(output) + batch * numPlanes * outputH * outputW,
-        THTensor_(data)(indices) + batch * numPlanes * outputH * outputW,
+        THIndexTensor_(data)(indices) + batch * numPlanes * outputH * outputW,
         THTensor_(data)(randomSamples) + batch * numPlanes * 2,
         numPlanes, inputW, inputH, outputW, outputH, poolSizeW, poolSizeH);
     }
@@ -164,7 +164,7 @@ void THNN_(SpatialFractionalMaxPooling_updateOutput)(
 static void THNN_(SpatialFractionalMaxPooling_updateGradInput_frame)(
   real* gradInput,
   real* gradOutput,
-  real* indices,
+  THIndex_t* indices,
   long numPlanes,
   long inputW, long inputH,
   long outputW, long outputH) {
@@ -173,7 +173,7 @@ static void THNN_(SpatialFractionalMaxPooling_updateGradInput_frame)(
   for (plane = 0; plane < numPlanes; plane++) {
     real* gradInputForPlane = gradInput + plane * inputW * inputH;
     real* gradOutputForPlane = gradOutput + plane * outputW * outputH;
-    real* indicesForPlane = indices + plane * outputW * outputH;
+    THIndex_t* indicesForPlane = indices + plane * outputW * outputH;
 
     long h, w;
     for (h = 0; h < outputH; ++h) {
@@ -195,7 +195,7 @@ void THNN_(SpatialFractionalMaxPooling_updateGradInput)(
     THTensor *gradInput,
     int outputW, int outputH,
     int poolSizeW, int poolSizeH,
-    THTensor *indices) {
+    THIndexTensor *indices) {
 
   long numBatch = 1;
   int planeDim = 0;
@@ -232,7 +232,7 @@ void THNN_(SpatialFractionalMaxPooling_updateGradInput)(
     THNN_(SpatialFractionalMaxPooling_updateGradInput_frame)(
       THTensor_(data)(gradInput),
       THTensor_(data)(gradOutput),
-      THTensor_(data)(indices),
+      THIndexTensor_(data)(indices),
       numPlanes, inputW, inputH, outputW, outputH);
   } else {
     long batch;
@@ -241,7 +241,7 @@ void THNN_(SpatialFractionalMaxPooling_updateGradInput)(
       THNN_(SpatialFractionalMaxPooling_updateGradInput_frame)(
         THTensor_(data)(gradInput) + batch * numPlanes * inputH * inputW,
         THTensor_(data)(gradOutput) + batch * numPlanes * outputH * outputW,
-        THTensor_(data)(indices) + batch * numPlanes * outputH * outputW,
+        THIndexTensor_(data)(indices) + batch * numPlanes * outputH * outputW,
         numPlanes, inputW, inputH, outputW, outputH);
     }
   }
