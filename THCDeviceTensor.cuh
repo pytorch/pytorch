@@ -70,21 +70,12 @@ class THCDeviceTensor {
 
   /// Constructor that calculates strides with no padding
   __host__ __device__ THCDeviceTensor(DataPtrType data,
-#ifdef _MSC_VER
-                                      const IndexT (&sizes)[Dim]);
-#else
                                       const IndexT sizes[Dim]);
-#endif
 
   /// Constructor that takes arbitrary size/stride arrays
   __host__ __device__ THCDeviceTensor(DataPtrType data,
-#ifdef _MSC_VER
-                                      const IndexT (&sizes)[Dim],
-                                      const IndexT (&strides)[Dim]);
-#else
                                       const IndexT sizes[Dim],
                                       const IndexT strides[Dim]);
-#endif
 
   /// Returns true if the two tensors are of the same dimensionality,
   /// size and stride.

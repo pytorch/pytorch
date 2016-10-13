@@ -33,7 +33,7 @@ struct TensorUtils {
 
 #define TENSOR_UTILS(TENSOR_TYPE, DATA_TYPE, ACC_DATA_TYPE)             \
   template <>                                                           \
-  struct THC_CLASS TensorUtils<TENSOR_TYPE> {                                     \
+  struct TensorUtils<TENSOR_TYPE> {                                     \
     typedef DATA_TYPE DataType;                                         \
     typedef ACC_DATA_TYPE AccDataType;                                  \
                                                                         \
