@@ -198,7 +198,7 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
               return NULL;
         }
         // Put the function into the ready queue.
-        ready.emplace_front(prev_fn, std::move(prev_grad));
+        ready.emplace_front(prev_fn, std::move(prev_buffer));
       } else {
         // Allocate a buffer if necessary
         if (not_ready_it == not_ready.end()) {
