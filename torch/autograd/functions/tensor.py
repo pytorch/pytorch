@@ -28,16 +28,19 @@ class Index(Function):
         return grad_input
 
 
-class SetValue(InplaceFunction):
+class SetItem(InplaceFunction):
 
-    def __init__(self, index, value):
-        super(SetValue, self).__init__(True)
+    def __init__(self, index, value=None):
+        super(SetItem, self).__init__(True)
         self.index = index
         self.value = value
 
-    def forward(self, i):
+    def forward(self, i, value=None):
         self.mark_dirty(i)
-        i[self.index].fill_(self.value)
+        if self.value is None:
+            i[self.index].copy_(value)
+        else:
+            i[self.index].fill_(self.value)
         return i
 
     def backward(self, grad_output):
