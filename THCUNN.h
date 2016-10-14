@@ -473,20 +473,6 @@ TH_API void THNN_CudaSpatialCrossMapLRN_updateGradInput(
           float beta,
           float k);
 
-TH_API void THNN_CudaSpatialAdaptiveMaxPooling_updateOutput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *output,
-          THCIndexTensor *indices,
-          int nOutputCols,
-          int nOutputRows);
-TH_API void THNN_CudaSpatialAdaptiveMaxPooling_updateGradInput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *gradOutput,
-          THCudaTensor *gradInput,
-          THCIndexTensor *indices);
-
 TH_API void THNN_CudaSpatialAveragePooling_updateOutput(
           THCState *state,
           THCudaTensor *input,

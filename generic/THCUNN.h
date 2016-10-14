@@ -113,6 +113,21 @@ TH_API void THNN_(PReLU_accGradParameters)(
                   long nOutputPlane,
                   real scale);
 
+TH_API void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *output,
+                  THCIndexTensor *indices,
+                  int nOutputCols,
+                  int nOutputRows);
+
+TH_API void THNN_(SpatialAdaptiveMaxPooling_updateGradInput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *gradOutput,
+                  THCTensor *gradInput,
+                  THCIndexTensor *indices);
+
 TH_API void THNN_(SpatialClassNLLCriterion_updateOutput)(
                   THCState *state,
                   THCTensor *input,
