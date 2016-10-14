@@ -109,7 +109,7 @@ class TensorDescriptor(object):
     def as_tuple(self):
         return (self._type, tuple(self._size), tuple(self._stride))
 
-class ConvolutionDescriptor(object)::
+class ConvolutionDescriptor(object):
     def __init__(self):
         ptr = ctypes.c_void_p()
         check_error(lib.cudnnCreateConvolutionDescriptor(ctypes.byref(ptr)))
@@ -130,7 +130,7 @@ class ConvolutionDescriptor(object)::
     def as_tuple(self):
         return (self._pad, self._stride)
 
-class FilterDescriptor(object)::
+class FilterDescriptor(object):
     def __init__(self):
         ptr = ctypes.c_void_p()
         check_error(lib.cudnnCreateFilterDescriptor(ctypes.byref(ptr)))
