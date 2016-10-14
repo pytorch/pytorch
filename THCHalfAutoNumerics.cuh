@@ -145,6 +145,10 @@ inline __host__ __device__ double operator/(half a, double b) {
   return ScalarConvert<half, double>::to(a) / b;
 }
 
+inline __host__ __device__ half operator/(half a, int b) {
+  return a / ScalarConvert<int, half>::to(b);
+}
+
 inline __host__ __device__ half& operator+=(half &lhs, const half &rhs) {
   lhs = lhs + rhs;
   return lhs;

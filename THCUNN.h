@@ -473,26 +473,6 @@ TH_API void THNN_CudaSpatialCrossMapLRN_updateGradInput(
           float beta,
           float k);
 
-TH_API void THNN_CudaSpatialAveragePooling_updateOutput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *output,
-          int kW, int kH,
-          int dW, int dH,
-          int padW, int padH,
-          bool ceil_mode,
-          bool count_include_pad);
-TH_API void THNN_CudaSpatialAveragePooling_updateGradInput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *gradOutput,
-          THCudaTensor *gradInput,
-          int kW, int kH,
-          int dW, int dH,
-          int padW, int padH,
-          bool ceil_mode,
-          bool count_include_pad);
-
 TH_API void THNN_CudaSpatialFractionalMaxPooling_updateOutput(
           THCState *state,
           THCudaTensor *input,

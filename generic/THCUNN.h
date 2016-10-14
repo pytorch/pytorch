@@ -128,6 +128,27 @@ TH_API void THNN_(SpatialAdaptiveMaxPooling_updateGradInput)(
                   THCTensor *gradInput,
                   THCIndexTensor *indices);
 
+TH_API void THNN_(SpatialAveragePooling_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *output,
+                  int kW, int kH,
+                  int dW, int dH,
+                  int padW, int padH,
+                  bool ceil_mode,
+                  bool count_include_pad);
+
+TH_API void THNN_(SpatialAveragePooling_updateGradInput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *gradOutput,
+                  THCTensor *gradInput,
+                  int kW, int kH,
+                  int dW, int dH,
+                  int padW, int padH,
+                  bool ceil_mode,
+                  bool count_include_pad);
+
 TH_API void THNN_(SpatialClassNLLCriterion_updateOutput)(
                   THCState *state,
                   THCTensor *input,
