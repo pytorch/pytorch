@@ -88,14 +88,15 @@ class CuDNNError(RuntimeError):
         msg = '{}: {}'.format(status, get_error_string(status))
         super(CuDNNError, self).__init__(msg)
 
-class TensorDescriptor:
+class TensorDescriptor(object):
     def __init__(self):
         ptr = ctypes.c_void_p()
         check_error(lib.cudnnCreateTensorDescriptor(ctypes.byref(ptr)))
         self._as_parameter_ = ptr
 
     def __del__(self):
-        check_error(lib.cudnnDestroyTensorDescriptor(self))
+        check_error(lib.cudnnDestroyTensorDescriptor(self._as_parameter_))
+        del self._as_parameter_
 
     def set(self, tensor):
         self._type = tensor.type()
@@ -108,14 +109,15 @@ class TensorDescriptor:
     def as_tuple(self):
         return (self._type, tuple(self._size), tuple(self._stride))
 
-class ConvolutionDescriptor:
+class ConvolutionDescriptor(object)::
     def __init__(self):
         ptr = ctypes.c_void_p()
         check_error(lib.cudnnCreateConvolutionDescriptor(ctypes.byref(ptr)))
         self._as_parameter_ = ptr
 
     def __del__(self):
-        check_error(lib.cudnnDestroyConvolutionDescriptor(self))
+        check_error(lib.cudnnDestroyConvolutionDescriptor(self._as_parameter_))
+        del self._as_parameter_
 
     def set(self, typename, pad, stride):
         self._pad = pad
@@ -128,14 +130,15 @@ class ConvolutionDescriptor:
     def as_tuple(self):
         return (self._pad, self._stride)
 
-class FilterDescriptor:
+class FilterDescriptor(object)::
     def __init__(self):
         ptr = ctypes.c_void_p()
         check_error(lib.cudnnCreateFilterDescriptor(ctypes.byref(ptr)))
         self._as_parameter_ = ptr
 
     def __del__(self):
-        check_error(lib.cudnnDestroyFilterDescriptor(self))
+        check_error(lib.cudnnDestroyFilterDescriptor(self._as_parameter_))
+        del self._as_parameter_
 
     def set(self, weight):
         self._size = weight.size()
