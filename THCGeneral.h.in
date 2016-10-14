@@ -41,7 +41,7 @@ struct THCRNGState;  /* Random number generator state. */
 typedef struct _THCDeviceAllocator {
    cudaError_t (*malloc)(void*, void**, size_t, cudaStream_t);
    cudaError_t (*free)(void*, void*);
-   cudaError_t (*shutdown)(void*);
+   cudaError_t (*emptyCache)(void*);
    void* state;
 } THCDeviceAllocator;
 
@@ -75,7 +75,7 @@ THC_API struct cudaDeviceProp* THCState_getCurrentDeviceProperties(THCState* sta
 
 THC_API struct THCRNGState* THCState_getRngState(THCState* state);
 THC_API THAllocator* THCState_getCudaHostAllocator(THCState* state);
-THC_API THCDeviceAllocator* THCState_getDeviceAllocator(THCState* state);
+THC_API void THCState_setDeviceAllocator(THCState* state, THCDeviceAllocator* allocator);
 
 THC_API void THCMagma_init(THCState *state);
 

@@ -20,6 +20,13 @@
 // - Large (>1MB) and small allocation requestss are handled separately. Large
 //   allocation requests can be filled by a cudaMalloc call of the exact size.
 //   Small requests will allocate and split a 1MB buffer, if necessary.
+//
+// With this allocator, allocations and frees should logically be considered
+// "usages" of the memory segment associated with streams, just like kernel
+// launches. The programmer must insert the proper synchronization if memory
+// segments are used from multiple streams.
+//
+
 
 namespace {
 
@@ -78,6 +85,7 @@ struct THCCachingAllocator
       large_blocks(BlockComparator),
       small_blocks(BlockComparator) {}
 
+  /** allocates a block which is safe to use from the provided stream */
   cudaError_t malloc(void** devPtr, size_t size, cudaStream_t stream)
   {
     std::lock_guard<std::mutex> lock(mutex);
@@ -160,6 +168,22 @@ struct THCCachingAllocator
     return cudaSuccess;
   }
 
+  /** returns cached blocks to the system allocator */
+  cudaError_t emptyCache()
+  {
+    std::lock_guard<std::mutex> lock(mutex);
+    cudaError_t err = free_blocks(large_blocks, large_blocks.begin(), large_blocks.end());
+    if (err != cudaSuccess) {
+      return err;
+    }
+    err = free_blocks(small_blocks, small_blocks.begin(), small_blocks.end());
+    if (err != cudaSuccess) {
+      return err;
+    }
+    return cudaSuccess;
+  }
+
+  /** combine previously split blocks */
   void try_merge_blocks(Block* dst, Block* src, FreeBlocks& free_blocks)
   {
     if (!src || src->allocated) {
@@ -196,6 +220,8 @@ struct THCCachingAllocator
 
   cudaError_t cuda_malloc_retry(int device, void** devPtr, size_t size)
   {
+    // Try cudaMalloc. If cudaMalloc fails, frees all non-split cached blocks
+    // and retries.
     cudaError_t err = cudaMalloc(devPtr, size);
     if (err != cudaSuccess) {
       cudaGetLastError();
@@ -233,6 +259,7 @@ struct THCCachingAllocator
 
   cudaError_t free_blocks(FreeBlocks& blocks, FreeBlocks::iterator it, FreeBlocks::iterator end)
   {
+    // Frees all non-split blocks between `it` and `end`
     while (it != end) {
       Block* block = *it;
       if (!block->prev && !block->next) {
@@ -264,27 +291,21 @@ static cudaError_t THCCachingAllocator_free(void* ctx, void* ptr)
   return a->free(ptr);
 }
 
-static cudaError_t THCCachingAllocator_shutdown(void* ctx)
+static cudaError_t THCCachingAllocator_emptyCache(void* ctx)
 {
-  cudaError_t err;
   THCCachingAllocator* a = (THCCachingAllocator*) ctx;
-  err = a->free_blocks(a->large_blocks, a->large_blocks.begin(), a->large_blocks.end());
-  if (err != cudaSuccess) {
-    return err;
-  }
-  err = a->free_blocks(a->small_blocks, a->small_blocks.begin(), a->small_blocks.end());
-  if (err != cudaSuccess) {
-    return err;
-  }
-  delete a;
-  return cudaSuccess;
+  return a->emptyCache();
 }
 
-THC_API void THCCachingAllocator_init(THCDeviceAllocator* alloc)
+static THCCachingAllocator caching_allocator;
+static THCDeviceAllocator device_allocator = {
+  &THCCachingAllocator_malloc,
+  &THCCachingAllocator_free,
+  &THCCachingAllocator_emptyCache,
+  &caching_allocator
+};
+
+THC_API THCDeviceAllocator* THCCachingAllocator_get()
 {
-  THCCachingAllocator* allocator = new THCCachingAllocator();
-  alloc->state = allocator;
-  alloc->malloc = &THCCachingAllocator_malloc;
-  alloc->free = &THCCachingAllocator_free;
-  alloc->shutdown = &THCCachingAllocator_shutdown;
+  return &device_allocator;
 }

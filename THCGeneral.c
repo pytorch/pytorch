@@ -38,7 +38,7 @@ struct THCState {
 
   /* Allocator using cudaMallocHost. */
   THAllocator* cudaHostAllocator;
-  THCDeviceAllocator cudaDeviceAllocator;
+  THCDeviceAllocator* cudaDeviceAllocator;
 
   /* Index of the current selected per-device resource. Actual CUDA resource
      changes based on the current device, since resources are per-device */
@@ -67,8 +67,6 @@ struct THCState {
 THCCudaResourcesPerDevice* THCState_getDeviceResourcePtr(
   THCState *state, int device);
 
-static void THCState_initDefaultDeviceAllocator(THCDeviceAllocator* a);
-
 THCState* THCState_alloc()
 {
   THCState* state = (THCState*) malloc(sizeof(THCState));
@@ -81,10 +79,27 @@ void THCState_free(THCState* state)
   free(state);
 }
 
+static cudaError_t cudaMallocWrapper(void* ctx, void** devPtr, size_t size, cudaStream_t stream)
+{
+  return cudaMalloc(devPtr, size);
+}
+
+static cudaError_t cudaFreeWrapper(void* ctx, void* devPtr)
+{
+  return cudaFree(devPtr);
+}
+
+static THCDeviceAllocator defaultDeviceAllocator = {
+  &cudaMallocWrapper,
+  &cudaFreeWrapper,
+  NULL,
+  NULL
+};
+
 void THCudaInit(THCState* state)
 {
-  if (!state->cudaDeviceAllocator.malloc) {
-    THCState_initDefaultDeviceAllocator(&state->cudaDeviceAllocator);
+  if (!state->cudaDeviceAllocator) {
+    state->cudaDeviceAllocator = &defaultDeviceAllocator;
   }
 
   int numDevices = 0;
@@ -188,7 +203,9 @@ void THCudaShutdown(THCState* state)
     free(state->resourcesPerDevice[dev].devScratchSpacePerStream);
   }
   free(state->resourcesPerDevice);
-  state->cudaDeviceAllocator.shutdown(state->cudaDeviceAllocator.state);
+  if (state->cudaDeviceAllocator->emptyCache) {
+    state->cudaDeviceAllocator->emptyCache(state->cudaDeviceAllocator->state);
+  }
   THCThreadLocal_free(state->currentPerDeviceStream);
   THCThreadLocal_free(state->currentPerDeviceBlasHandle);
 
@@ -329,11 +346,10 @@ THAllocator* THCState_getCudaHostAllocator(THCState* state)
   return state->cudaHostAllocator;
 }
 
-THCDeviceAllocator* THCState_getDeviceAllocator(THCState* state)
+void THCState_setDeviceAllocator(THCState* state, THCDeviceAllocator* allocator)
 {
-  return &state->cudaDeviceAllocator;
+  state->cudaDeviceAllocator = allocator;
 }
-
 
 int THCState_getNumDevices(THCState *state)
 {
@@ -652,31 +668,11 @@ void THCSetGCHandler(THCState *state, void (*cutorchGCFunction_)(void *data), vo
   state->cutorchGCData = data;
 }
 
-static cudaError_t cudaMallocWrapper(void* ctx, void** devPtr, size_t size, cudaStream_t stream)
-{
-  return cudaMalloc(devPtr, size);
-}
-
-static cudaError_t cudaFreeWrapper(void* ctx, void* devPtr)
-{
-  return cudaFree(devPtr);
-}
-
-static cudaError_t noop(void* ctx) { return cudaSuccess; }
-
-static void THCState_initDefaultDeviceAllocator(THCDeviceAllocator* a)
-{
-  a->malloc = &cudaMallocWrapper;
-  a->free = &cudaFreeWrapper;
-  a->shutdown = &noop;
-  a->state = NULL;
-}
-
 cudaError_t THCudaMalloc(THCState *state, void** ptr, size_t size)
 {
   THCudaCheck(cudaGetLastError());
   cudaStream_t stream = THCState_getCurrentStream(state);
-  THCDeviceAllocator* allocator = &state->cudaDeviceAllocator;
+  THCDeviceAllocator* allocator = state->cudaDeviceAllocator;
   cudaError_t err = allocator->malloc(allocator->state, ptr, size, stream);
   if (state->cutorchGCFunction != NULL && err != cudaSuccess) {
     cudaGetLastError(); // reset OOM error
@@ -688,7 +684,7 @@ cudaError_t THCudaMalloc(THCState *state, void** ptr, size_t size)
 
 cudaError_t THCudaFree(THCState *state, void *ptr)
 {
-  THCDeviceAllocator* allocator = &state->cudaDeviceAllocator;
+  THCDeviceAllocator* allocator = state->cudaDeviceAllocator;
   return allocator->free(allocator->state, ptr);
 }
 
