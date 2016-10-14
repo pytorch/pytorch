@@ -12,7 +12,7 @@ class Embedding(Module):
     Args:
         num_embeddings: size of the dictionary of embeddings
         embedding_dim: the size of each embedding vector
-        padding_idx: If given, pads the output with zeros whenever it encounters the index. Default: -1
+        padding_idx: If given, pads the output with zeros whenever it encounters the index. Default: None
         max_norm: If given, will renormalize the embeddings to always have a norm lesser than this Default: None
         norm_type: The p of the p-norm to compute for the max_norm option
         scale_grad_by_freq: if given, this will scale gradients by the frequency of the words in the dictionary.
@@ -22,10 +22,14 @@ class Embedding(Module):
         >>> # an Embedding module containing 10 tensors of size 3
         >>> embedding = nn.Embedding(10, 3)
         >>> # a batch of 2 samples of 4 indices each
-        >>> input = torch.Tensor([[1,2,4,5],[4,3,2,10]])
+        >>> input = torch.LongTensor([[1,2,4,5],[4,3,2,9]])
+        >>> print(embedding(input))
+        >>> # example with padding_idx
+        >>> embedding = nn.Embedding(10, 3, padding_idx=0)
+        >>> input = torch.LongTensor([[0,2,0,5]])
         >>> print(embedding(input))
     """
-    def __init__(self, num_embeddings, embedding_dim, padding_idx=-1,
+    def __init__(self, num_embeddings, embedding_dim, padding_idx=None,
             max_norm=None, norm_type=2, scale_grad_by_freq=False):
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
@@ -41,10 +45,15 @@ class Embedding(Module):
 
     def reset_parameters(self):
         self.weight.data.normal_(0, 1)
+        if self.padding_idx is not None:
+            self.weight.data[self.padding_idx].fill_(0)
 
     def forward(self, input):
-        return self._backend.Embedding(self.padding_idx, self.max_norm,
-                self.norm_type, self.scale_grad_by_freq)(input, self.weight)
+        padding_idx = self.padding_idx
+        if padding_idx is None:
+            padding_idx = -1
+        return self._backend.Embedding(padding_idx, self.max_norm,
+            self.norm_type, self.scale_grad_by_freq)(input, self.weight)
 
 
 # TODO: SparseLinear

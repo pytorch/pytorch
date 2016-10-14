@@ -341,6 +341,13 @@ class TestNN(NNTestCase):
         # This should work though
         l2.weight = Variable(torch.randn(10, 10))
 
+    def test_embedding_padding_idx(self):
+        embedding = nn.Embedding(10, 20, padding_idx = 0)
+        input = Variable(torch.LongTensor([[0,2,4,5],[4,3,0,9]]))
+        output = embedding(input)
+        self.assertEqual(output[0][0].sum().data[0], 0)
+        self.assertEqual(output[1][2].sum().data[0], 0)
+
     def test_Dropout(self):
         input = torch.Tensor(1000)
         self._test_dropout(nn.Dropout, input)
