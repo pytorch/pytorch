@@ -24,6 +24,9 @@ if which nvcc >/dev/null 2>&1
 then
     echo "Running cuda tests"
     python test_cuda.py
+
+    echo "Running NCCL tests"
+    python test_nccl.py
 else
     echo "nvcc not found in PATH, skipping CUDA tests"
 fi
