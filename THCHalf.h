@@ -19,10 +19,10 @@ THC_API half THC_float2half(float a);
 THC_API float THC_half2float(half a);
 
 /* Check for native fp16 support on the current device (CC 5.3+) */
-THC_EXTERNC int THC_nativeHalfInstructions(THCState *state);
+THC_API int THC_nativeHalfInstructions(THCState *state);
 
 /* Check for performant native fp16 support on the current device */
-THC_EXTERNC int THC_fastHalfInstructions(THCState *state);
+THC_API int THC_fastHalfInstructions(THCState *state);
 
 #endif /* CUDA_HALF_TENSOR */
 

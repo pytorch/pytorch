@@ -28,7 +28,11 @@ template <typename T, int Dim,
           typename IndexT, template <typename U> class PtrTraits>
 __host__ __device__
 THCDeviceTensor<T, Dim, IndexT, PtrTraits>::
+#ifdef _MSC_VER
+THCDeviceTensor(DataPtrType data, const IndexT (&sizes)[Dim])
+#else
 THCDeviceTensor(DataPtrType data, const IndexT sizes[Dim])
+#endif
     : data_(data) {
   thc_static_assert(Dim > 0);
 
@@ -46,7 +50,11 @@ template <typename T, int Dim,
           typename IndexT, template <typename U> class PtrTraits>
 __host__ __device__
 THCDeviceTensor<T, Dim, IndexT, PtrTraits>::THCDeviceTensor(
+#ifdef _MSC_VER
+  DataPtrType data, const IndexT (&sizes)[Dim], const IndexT (&strides)[Dim])
+#else
   DataPtrType data, const IndexT sizes[Dim], const IndexT strides[Dim])
+#endif
     : data_(data) {
   thc_static_assert(Dim > 0);
 

@@ -238,7 +238,7 @@ __global__ void generate_log_normal(curandStateMtgp32 *state, int size, float *r
   }
 }
 
-#define NUM_BLOCKS min(THCCeilDiv(size, (ptrdiff_t) BLOCK_SIZE), (ptrdiff_t) MAX_NUM_BLOCKS)
+#define NUM_BLOCKS min((int)THCCeilDiv(size, (ptrdiff_t) BLOCK_SIZE), MAX_NUM_BLOCKS)
 THC_API void THCudaTensor_uniform(THCState* state, THCudaTensor *self_, double a, double b)
 {
   THAssert(THCudaTensor_checkGPU(state, 1, self_));
