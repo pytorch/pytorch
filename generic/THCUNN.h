@@ -212,7 +212,6 @@ TH_API void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
                   int dilationW, int dilationH,
                   bool ceil_mode);
 
-
 TH_API void THNN_(SpatialMaxPooling_updateOutput)(
                   THCState *state,
                   THCTensor *input,
@@ -248,6 +247,34 @@ TH_API void THNN_(SpatialMaxUnpooling_updateGradInput)(
                   THCTensor *gradInput,
                   THCIndexTensor *indices,
                   int owidth, int oheight);
+
+TH_API void THNN_(SpatialSubSampling_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *output,
+                  THCTensor *weight,
+                  THCTensor *bias,
+                  int kW, int kH,
+                  int dW, int dH);
+
+TH_API void THNN_(SpatialSubSampling_updateGradInput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *gradOutput,
+                  THCTensor *gradInput,
+                  THCTensor *weight,
+                  int kW, int kH,
+                  int dW, int dH);
+
+TH_API void THNN_(SpatialSubSampling_accGradParameters)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *gradOutput,
+                  THCTensor *gradWeight,
+                  THCTensor *gradBias,
+                  int kW, int kH,
+                  int dW, int dH,
+                  float scale);
 
 TH_API void THNN_(RReLU_updateOutput)(
                   THCState *state,
