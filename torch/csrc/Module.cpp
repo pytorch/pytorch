@@ -553,6 +553,8 @@ extern PyObject * THCPModule_manualSeedAll(PyObject *_unused, PyObject *seed);
 extern PyObject * THCPModule_seed(PyObject *_unused);
 extern PyObject * THCPModule_seedAll(PyObject *_unused);
 extern PyObject * THCPModule_initialSeed(PyObject *_unused);
+extern PyObject * THCPModule_cudaHostAllocator(PyObject *_unused);
+extern PyObject * THCPModule_cudaSynchronize(PyObject *_unused);
 #endif
 
 static PyMethodDef TorchMethods[] = {
@@ -572,6 +574,8 @@ static PyMethodDef TorchMethods[] = {
   {"_cuda_seed", (PyCFunction)THCPModule_seed, METH_NOARGS, NULL},
   {"_cuda_seedAll", (PyCFunction)THCPModule_seedAll, METH_NOARGS, NULL},
   {"_cuda_initialSeed", (PyCFunction)THCPModule_initialSeed, METH_NOARGS, NULL},
+  {"_cuda_cudaHostAllocator", (PyCFunction)THCPModule_cudaHostAllocator, METH_NOARGS, NULL},
+  {"_cuda_synchronize", (PyCFunction)THCPModule_cudaSynchronize, METH_NOARGS, NULL},
 #endif
   {"_safe_call",      (PyCFunction)THPModule_safeCall,          METH_VARARGS | METH_KEYWORDS, NULL},
   {"_sendfd",         (PyCFunction)THPModule_sendfd,            METH_VARARGS, NULL},

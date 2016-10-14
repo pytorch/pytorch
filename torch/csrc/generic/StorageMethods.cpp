@@ -1,3 +1,7 @@
+#ifdef WITH_CUDA
+#include <cuda_runtime.h>
+#endif
+
 static PyObject * THPStorage_(size)(THPStorage *self)
 {
   HANDLE_TH_ERRORS
@@ -9,6 +13,23 @@ static PyObject * THPStorage_(dataPtr)(THPStorage *self)
 {
   HANDLE_TH_ERRORS
   return PyLong_FromVoidPtr(THStorage_(data)(LIBRARY_STATE self->cdata));
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPStorage_(isPinned)(THPStorage *self)
+{
+  HANDLE_TH_ERRORS
+#ifdef WITH_CUDA
+  cudaPointerAttributes attr;
+  cudaError_t err = cudaPointerGetAttributes(&attr, self->cdata->data);
+  if (err != cudaSuccess) {
+    cudaGetLastError();
+    Py_RETURN_FALSE;
+  }
+  return PyBool_FromLong(attr.memoryType == cudaMemoryTypeHost);
+#else
+  Py_RETURN_FALSE;
+#endif
   END_HANDLE_TH_ERRORS
 }
 
@@ -460,6 +481,7 @@ static PyMethodDef THPStorage_(methods)[] = {
   {"retain", (PyCFunction)THPStorage_(retain), METH_NOARGS, NULL},
   {"size", (PyCFunction)THPStorage_(size), METH_NOARGS, NULL},
   {"data_ptr", (PyCFunction)THPStorage_(dataPtr), METH_NOARGS, NULL},
+  {"is_pinned", (PyCFunction)THPStorage_(isPinned), METH_NOARGS, NULL},
   {"_write_file", (PyCFunction)THPStorage_(writeFile), METH_O, NULL},
   {"_new_with_file", (PyCFunction)THPStorage_(newWithFile), METH_O | METH_STATIC, NULL},
 #ifndef THC_GENERIC_FILE

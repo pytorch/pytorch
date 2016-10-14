@@ -44,6 +44,16 @@ static void THPStorage_(dealloc)(THPStorage* self)
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
+static THStorage* THPStorage_(newWithAllocator)(long size, THAllocator* allocator)
+{
+#ifdef THC_GENERIC_FILE
+  THPUtils_setError(THPStorageStr " does not support custom allocators");
+  return NULL;
+#else
+  return THStorage_(newWithAllocator)(LIBRARY_STATE size, allocator, NULL);
+#endif
+}
+
 static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
   HANDLE_TH_ERRORS
@@ -51,9 +61,17 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
 
   THPStoragePtr self = (THPStorage *)type->tp_alloc(type, 0);
   THPUtils_assert(self, "failed to allocate a " THPStorageStr " object");
+  THAllocator* allocator = NULL;
 
   // Internally we allow constructing with a keywoard only argument cdata
   if (kwargs != NULL) {
+    PyObject *allocator_ptr = PyDict_GetItemString(kwargs, "allocator");
+    if (allocator_ptr) {
+      THPUtils_assert(THPUtils_checkLong(allocator_ptr), "invalid allocator");
+      allocator = (THAllocator*) PyLong_AsVoidPtr(allocator_ptr);
+      PyDict_DelItemString(kwargs, "allocator");
+    }
+
     Py_ssize_t num_kwargs = PyDict_Size(kwargs);
     if (num_args == 0) {
       PyObject *cdata_ptr = PyDict_GetItemString(kwargs, "cdata");
@@ -63,14 +81,16 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
         return (PyObject*)self.release();
       }
     }
-    // This is an internal option, so we don't want to advertise it.
-    THPUtils_assert(num_kwargs == 0, THPStorageStr " constructor doesn't "
-        "accept any keyword arguments");
+    THPUtils_assert(num_kwargs == 0, THPStorageStr "(): invalid keyword arguments");
   }
 
   // torch.Storage()
   if (num_args == 0) {
-    self->cdata = THStorage_(new)(LIBRARY_STATE_NOARGS);
+    if (allocator) {
+      self->cdata = THPStorage_(newWithAllocator)(0, allocator);
+    } else {
+      self->cdata = THStorage_(new)(LIBRARY_STATE_NOARGS);
+    }
     return (PyObject*)self.release();
   }
 
@@ -79,7 +99,11 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
   // torch.Storage(size)
   if (num_args == 1 && THPUtils_checkLong(first_arg)) {
     long size = THPUtils_unpackLong(first_arg);
-    self->cdata = THStorage_(newWithSize)(LIBRARY_STATE size);
+    if (allocator) {
+      self->cdata = THPStorage_(newWithAllocator)(size, allocator);
+    } else {
+      self->cdata = THStorage_(newWithSize)(LIBRARY_STATE size);
+    }
     return (PyObject*)self.release();
   }
 
