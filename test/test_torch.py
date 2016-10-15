@@ -2038,6 +2038,7 @@ class TestTorch(TestCase):
     def test_view(self):
         tensor = torch.rand(15)
         template = torch.rand(3, 5)
+        empty = torch.Tensor()
         target = template.size().tolist()
         self.assertEqual(tensor.view_as(template).size().tolist(), target)
         self.assertEqual(tensor.view(3, 5).size().tolist(), target)
@@ -2047,6 +2048,8 @@ class TestTorch(TestCase):
         tensor_view = tensor.view(5, 3)
         tensor_view.fill_(random.uniform(0, 1))
         self.assertEqual((tensor_view-tensor).abs().max(), 0)
+        self.assertEqual(empty.view_as(empty), empty)
+        self.assertEqual(empty.view(0), empty)
 
     def test_expand(self):
         result = torch.Tensor()
