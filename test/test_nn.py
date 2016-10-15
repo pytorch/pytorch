@@ -621,8 +621,8 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     def test_RNN_cpu_vs_cudnn(self):
         
-        def forwardBackward(cuda, mode, input_val, hx_val, weights_val):
-            rnn = nn.RNNBase(mode, input_size, hidden_size, num_layers)
+        def forward_backward(cuda, mode, bias, input_val, hx_val, weights_val):
+            rnn = nn.RNNBase(mode, input_size, hidden_size, num_layers, bias=bias)
 
             for x_layer, y_layer in zip(rnn.all_weights, weights_val):
                 for x, y in zip(x_layer, y_layer):
@@ -678,25 +678,26 @@ class TestNN(NNTestCase):
         # FIXME: we can't use torch.cuda.DoubleTensor because sum() is not yet defined on it
         with set_default_tensor_type('torch.FloatTensor'):
             for mode in ("RNN_RELU", "RNN_TANH", "GRU", "LSTM"):
-                input_val = torch.randn(seq_length, batch, input_size)
-                hx_val = torch.randn(num_layers, batch, hidden_size)
+                for bias in (True, False):
+                    input_val = torch.randn(seq_length, batch, input_size)
+                    hx_val = torch.randn(num_layers, batch, hidden_size)
             
-                weights_val = nn.RNNBase(mode, input_size, hidden_size, num_layers).all_weights
+                    weights_val = nn.RNNBase(mode, input_size, hidden_size, num_layers).all_weights
             
-                outputs_cpu = forwardBackward(False, mode, input_val, hx_val, weights_val)
-                outputs_gpu = forwardBackward(True,  mode, input_val, hx_val, weights_val)
+                    outputs_cpu = forward_backward(False, mode, bias, input_val, hx_val, weights_val)
+                    outputs_gpu = forward_backward(True,  mode, bias, input_val, hx_val, weights_val)
             
-                diff(outputs_cpu['output'], outputs_gpu['output'], 'output')
-                diff(outputs_cpu['hy'], outputs_gpu['hy'], 'hy')
-                diff(outputs_cpu['grad_input'], outputs_gpu['grad_input'], 'grad_input')
-                diff(outputs_cpu['grad_hx'], outputs_gpu['grad_hx'], 'grad_hx')
-                if outputs_cpu['cy'] is not None:
-                    diff(outputs_cpu['cy'], outputs_gpu['cy'], 'cy')
-                    diff(outputs_cpu['grad_cx'], outputs_gpu['grad_cx'], 'grad_cx')
+                    diff(outputs_cpu['output'], outputs_gpu['output'], 'output')
+                    diff(outputs_cpu['hy'], outputs_gpu['hy'], 'hy')
+                    diff(outputs_cpu['grad_input'], outputs_gpu['grad_input'], 'grad_input')
+                    diff(outputs_cpu['grad_hx'], outputs_gpu['grad_hx'], 'grad_hx')
+                    if outputs_cpu['cy'] is not None:
+                        diff(outputs_cpu['cy'], outputs_gpu['cy'], 'cy')
+                        diff(outputs_cpu['grad_cx'], outputs_gpu['grad_cx'], 'grad_cx')
             
-                for i, (cpu_layer_weight, gpu_layer_weight) in enumerate(zip(outputs_cpu['weights'], outputs_gpu['weights'])):
-                    for j, (cpu_weight, gpu_weight) in enumerate(zip(cpu_layer_weight, gpu_layer_weight)):
-                        diff(cpu_weight.grad, gpu_weight.grad, mode + ' grad_weight[{},{}]'.format(i, j))
+                    for i, (cpu_layer_weight, gpu_layer_weight) in enumerate(zip(outputs_cpu['weights'], outputs_gpu['weights'])):
+                        for j, (cpu_weight, gpu_weight) in enumerate(zip(cpu_layer_weight, gpu_layer_weight)):
+                            diff(cpu_weight.grad, gpu_weight.grad, mode + ' grad_weight[{},{}]'.format(i, j))
 
 
 def add_test(test):

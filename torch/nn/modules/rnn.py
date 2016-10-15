@@ -10,11 +10,12 @@ class RNNBase(Module):
     # FIXME: docstring
 
     def __init__(self, mode, input_size, hidden_size,
-                 num_layers=1, batch_first=False, dropout=0):
+                 num_layers=1, bias=True, batch_first=False, dropout=0):
         self.mode = mode
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.num_layers = num_layers
+        self.bias = bias
         self.batch_first = batch_first
         self.dropout = dropout
 
@@ -34,12 +35,15 @@ class RNNBase(Module):
             w_hh = Variable(torch.Tensor(gate_size, hidden_size), requires_grad=True)
             b_ih = Variable(torch.Tensor(gate_size), requires_grad=True)
             b_hh = Variable(torch.Tensor(gate_size), requires_grad=True)
-            self.all_weights += [(w_ih, w_hh, b_ih, b_hh)]
 
             super_weights['weight_ih_l{}'.format(layer)] = w_ih
             super_weights['weight_hh_l{}'.format(layer)] = w_hh
-            super_weights['bias_ih_l{}'.format(layer)] = b_ih
-            super_weights['bias_hh_l{}'.format(layer)] = b_hh
+            if bias:
+                super_weights['bias_ih_l{}'.format(layer)] = b_ih
+                super_weights['bias_hh_l{}'.format(layer)] = b_hh
+                self.all_weights += [(w_ih, w_hh, b_ih, b_hh)]
+            else:
+                self.all_weights += [(w_ih, w_hh)]
 
         super(RNNBase, self).__init__(
             **super_weights
@@ -49,9 +53,8 @@ class RNNBase(Module):
 
     def reset_parameters(self):
         stdv = 1.0 / math.sqrt(self.hidden_size)
-        for layer_weights in self.all_weights:
-            for weight in layer_weights:
-                weight.data.uniform_(-stdv, stdv)
+        for weight in self.parameters():
+            weight.data.uniform_(-stdv, stdv)
 
 
     def forward(self, input, hx):

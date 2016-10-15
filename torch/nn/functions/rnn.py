@@ -27,16 +27,24 @@ def _getCudnnMode(mode):
 
 # FIXME: write a proper function library!
 import thnn
-import linear
+import linear as _linear
 import activation
+
 def _wrap(fn, *args):
     def inner(*inner_args):
         return fn(*args)(*inner_args)
     return inner
 tanh = _wrap(thnn.Tanh)
-linear = _wrap(linear.Linear)
 sigmoid = _wrap(thnn.Sigmoid)
 ReLU = _wrap(thnn.Threshold, 0, 0, False)
+
+# get around autograd's lack of None-handling
+def linear(input, w, b):
+    if b is not None:
+        return _linear.Linear()(input, w, b)
+    else:
+        return _linear.Linear()(input, w)
+
 
 def RNNReLUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
         hy = ReLU(linear(input, w_ih, b_ih) + linear(hidden, w_hh, b_hh))

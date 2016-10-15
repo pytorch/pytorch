@@ -203,15 +203,19 @@ def forward(fn, input, hx, weight, output, hy):
         fn.weight_buf = input.new(num_weights)
         fn.w_desc       = initWeightDescriptor(fn, fn.weight_buf)
         w = fn.weight_buf
+        # this zero might not seem necessary, but it is in the case
+        # where biases are disabled; then they won't be copied and must be zero'd.
+        # Alternatively, _copyParams could be written more carefully.
+        w.zero_()
         params = getParameters(fn, handle, w)
         _copyParams(weight, params)
 
         if tuple(hx.size()) != hidden_size:
             raise Exception('Expected hx size {}, got {}'.format(
-                tuple(hidden_size, hx.size())))
+               hidden_size, tuple(hx.size())))
         if cx and tuple(cx.size()) != hidden_size:
             raise Exception('Expected cx size {}, got {}'.format(
-                tuple(hidden_size, cx.size())))
+                hidden_size, tuple(cx.size())))
 
         workspace_size = ctypes.c_long()
         check_error(lib.cudnnGetRNNWorkspaceSize(
