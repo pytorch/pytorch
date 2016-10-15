@@ -107,25 +107,46 @@ class ByteStorage(_C.ByteStorageBase, _StorageBase):
 class DoubleTensor(_C.DoubleTensorBase, _TensorBase):
     def is_signed(self):
         return True
+    @classmethod
+    def storage_type(cls):
+        return DoubleStorage
 class FloatTensor(_C.FloatTensorBase, _TensorBase):
     def is_signed(self):
         return True
+    @classmethod
+    def storage_type(cls):
+        return FloatStorage
 class LongTensor(_C.LongTensorBase, _TensorBase):
     def is_signed(self):
         return True
+    @classmethod
+    def storage_type(cls):
+        return LongStorage
 class IntTensor(_C.IntTensorBase, _TensorBase):
     def is_signed(self):
         return True
+    @classmethod
+    def storage_type(cls):
+        return IntStorage
 class ShortTensor(_C.ShortTensorBase, _TensorBase):
     def is_signed(self):
         return True
+    @classmethod
+    def storage_type(cls):
+        return ShortStorage
 class CharTensor(_C.CharTensorBase, _TensorBase):
     def is_signed(self):
         # TODO
         return False
+    @classmethod
+    def storage_type(cls):
+        return CharStorage
 class ByteTensor(_C.ByteTensorBase, _TensorBase):
     def is_signed(self):
         return False
+    @classmethod
+    def storage_type(cls):
+        return ByteStorage
 
 
 _tensor_classes = set()
@@ -184,4 +205,3 @@ del IntTensorBase
 del ShortTensorBase
 del CharTensorBase
 del ByteTensorBase
-

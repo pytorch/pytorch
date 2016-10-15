@@ -54,6 +54,19 @@ class _TensorBase(object):
     def byte(self, async=False):
         return self.type(type(self).__module__ + '.ByteTensor')
 
+    def is_pinned(self):
+        storage = self.storage()
+        return storage.is_pinned() if storage else False
+
+    def pin_memory(self):
+        if self.is_cuda:
+            raise TypeError("cannot pin '{0}' only CPU memory can be pinned"
+                            .format(self.type()))
+        storage = self.storage()
+        if storage is None:
+            storage = (self.storage_type())()
+        return type(self)().set_(storage.pin_memory()).view_as(self)
+
     def copy_(self, source, async=False):
         if async:
             torch._C._tensorCopyAsync(self, source)

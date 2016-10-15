@@ -207,7 +207,7 @@ tests = [
     ('qr',            small_2d_lapack,           lambda t: [],   'square'                                   ),
     ('qr',            small_2d_lapack_skinny,    lambda t: [],   'skinny'                                   ),
     ('qr',            small_2d_lapack_fat,       lambda t: [],   'fat'                                      ),
- 
+
 ]
 
 # TODO: random functions, cat, gather, scatter, index*, masked*, resize, resizeAs, storage_offset, storage, stride, unfold
@@ -268,7 +268,7 @@ def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t, precision=1e-5):
             reason = e.args[0]
             if 'object has no attribute' in reason:
                 raise unittest.SkipTest('unimplemented data type')
-            raise        
+            raise
         # If one changes, another should change as well
         self.assertEqual(cpu_tensor, gpu_tensor, precision)
         self.assertEqual(cpu_args, gpu_args, precision)
@@ -485,6 +485,9 @@ class TestCuda(TestCase):
             self.assertEqual(copy, original)
             self.assertIs(type(copy), type(original))
             self.assertEqual(copy.get_device(), 0)
+
+    def test_cuda_synchronize(self):
+        torch.cuda.synchronize()
 
 
 for decl in tests:

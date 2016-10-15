@@ -2,6 +2,7 @@ import sys
 import math
 import random
 import torch
+import torch.cuda
 import tempfile
 import unittest
 from itertools import product, chain
@@ -1132,12 +1133,12 @@ class TestTorch(TestCase):
             # standard invocation
             q, r = torch.qr(a)
             canon_and_check(q, r, expected_q, expected_r)
-            
+
             # in-place
             q, r = torch.Tensor(), torch.Tensor()
             torch.qr(q, r, a)
             canon_and_check(q, r, expected_q, expected_r)
-            
+
             # manually calculate qr using geqrf and orgqr
             m = a.size(0)
             n = a.size(1)
@@ -1183,7 +1184,7 @@ class TestTorch(TestCase):
             (  0,                  -1.0413152017509357,  -1.770235842976589 ),
             (  0,                   0,                    0.5477225575051664)
         ))
-        
+
         check_qr(a, expected_q, expected_r)
 
         # check rectangular fat
@@ -2404,7 +2405,15 @@ class TestTorch(TestCase):
         y = x.clone().unsqueeze_(2)
         self.assertEqual(y, x.contiguous().view(2, 4, 1))
 
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_pin_memory(self):
+        x = torch.randn(3, 5)
+        self.assertFalse(x.is_pinned())
+        pinned = x.pin_memory()
+        self.assertTrue(pinned.is_pinned())
+        self.assertEqual(pinned, x)
+        self.assertNotEqual(pinned.data_ptr(), x.data_ptr())
+
 
 if __name__ == '__main__':
     unittest.main()
-

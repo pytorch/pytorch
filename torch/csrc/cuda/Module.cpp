@@ -200,6 +200,22 @@ PyObject * THCPModule_initialSeed(PyObject *_unused)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject * THCPModule_cudaHostAllocator(PyObject *_unused)
+{
+  HANDLE_TH_ERRORS
+  THAllocator* allocator = THCState_getCudaHostAllocator(state);
+  return PyLong_FromVoidPtr(allocator);
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject * THCPModule_cudaSynchronize(PyObject *_unused)
+{
+  HANDLE_TH_ERRORS
+  THCudaCheck(cudaDeviceSynchronize());
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Cuda module initialization
 ////////////////////////////////////////////////////////////////////////////////

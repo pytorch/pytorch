@@ -66,6 +66,14 @@ class _StorageBase(object):
     def byte(self, async=False):
         return self.type(type(self).__module__ + '.ByteStorage', async)
 
+    def pin_memory(self):
+        if self.is_cuda:
+            raise TypeError("cannot pin '{0}' only CPU memory can be pinned"
+                            .format(self.type()))
+        import torch.cuda
+        allocator = torch.cuda._host_allocator()
+        return type(self)(self.size(), allocator=allocator).copy_(self)
+
 
 _StorageBase.type = _type
 _StorageBase.cuda = _cuda

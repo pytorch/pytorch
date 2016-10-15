@@ -68,6 +68,16 @@ def current_device():
     return torch._C._cuda_getDevice()
 
 
+def synchronize():
+    _lazy_init()
+    return torch._C._cuda_synchronize()
+
+
+def _host_allocator():
+    _lazy_init()
+    return torch._C._cuda_cudaHostAllocator()
+
+
 from .random import *
 
 ################################################################################
@@ -122,28 +132,52 @@ class HalfStorage(_CudaBase, torch._C.CudaHalfStorageBase, _StorageBase):
 class DoubleTensor(_CudaBase, torch._C.CudaDoubleTensorBase, _TensorBase):
     def is_signed(self):
         return True
+    @classmethod
+    def storage_type(cls):
+        return DoubleStorage
 class FloatTensor(_CudaBase, torch._C.CudaFloatTensorBase, _TensorBase):
     def is_signed(self):
         return True
+    @classmethod
+    def storage_type(cls):
+        return FloatStorage
 class LongTensor(_CudaBase, torch._C.CudaLongTensorBase, _TensorBase):
     def is_signed(self):
         return True
+    @classmethod
+    def storage_type(cls):
+        return LongStorage
 class IntTensor(_CudaBase, torch._C.CudaIntTensorBase, _TensorBase):
     def is_signed(self):
         return True
+    @classmethod
+    def storage_type(cls):
+        return IntStorage
 class ShortTensor(_CudaBase, torch._C.CudaShortTensorBase, _TensorBase):
     def is_signed(self):
         return True
+    @classmethod
+    def storage_type(cls):
+        return ShortStorage
 class CharTensor(_CudaBase, torch._C.CudaCharTensorBase, _TensorBase):
     def is_signed(self):
         # TODO
         return False
+    @classmethod
+    def storage_type(cls):
+        return CharStorage
 class ByteTensor(_CudaBase, torch._C.CudaByteTensorBase, _TensorBase):
     def is_signed(self):
         return False
+    @classmethod
+    def storage_type(cls):
+        return ByteStorage
 class HalfTensor(_CudaBase, torch._C.CudaHalfTensorBase, _TensorBase):
     def is_signed(self):
         return True
+    @classmethod
+    def storage_type():
+        return HalfStorage
 
 
 torch._storage_classes.add(DoubleStorage)
