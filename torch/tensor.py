@@ -111,15 +111,18 @@ class _TensorBase(object):
         else:
             sizes = torch.LongStorage(args)
         sizes = _infer_sizes(sizes, self.nelement())
+        numel = reduce(lambda a,b: a * b, sizes) if len(sizes) > 0 else 0
 
-        if reduce(lambda a,b: a * b, sizes) != self.nelement():
-            raise RuntimeError('Invalid size for view. Input size: ' +
-                    'x'.join(map(lambda v: str(v), self.size())) +
-                    ', output size: ' +
-                    'x'.join(map(lambda v: str(v), sizes)) + '.')
-
-        assert self.is_contiguous(), "expecting a contiguous tensor"
-        dst.set_(self.storage(), self.storage_offset(), sizes)
+        if numel != self.nelement():
+            def format_size(size):
+                return 'x'.join(str(v) for v in size) if len(size) > 0 else '0'
+            raise ValueError(
+                "view of size '{0}' is invalid for input of size '{1}'"
+                .format(format_size(sizes), format_size(self.size())))
+        if not self.is_contiguous():
+            raise ValueError("input should be contiguous")
+        if self.storage() is not None:
+            dst.set_(self.storage(), self.storage_offset(), sizes)
         return dst
 
     def view_as(self, tensor):
