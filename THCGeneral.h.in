@@ -20,11 +20,14 @@
 #ifdef _WIN32
 # ifdef THC_EXPORTS
 #  define THC_API THC_EXTERNC __declspec(dllexport)
+#  define THC_CLASS __declspec(dllexport)
 # else
 #  define THC_API THC_EXTERNC __declspec(dllimport)
+#  define THC_CLASS __declspec(dllimport)
 # endif
 #else
 # define THC_API THC_EXTERNC
+# define THC_CLASS
 #endif
 
 #ifndef THAssert
