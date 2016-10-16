@@ -620,25 +620,26 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     def test_RNN_cpu_vs_cudnn(self):
-        
-        def forward_backward(cuda, mode, bias, input_val, hx_val, weights_val):
-            rnn = nn.RNNBase(mode, input_size, hidden_size, num_layers, bias=bias)
+
+        def forward_backward(cuda, module, bias, input_val, hx_val, weights_val):
+            rnn = module(input_size, hidden_size, num_layers, bias=bias)
+            is_lstm = module == nn.LSTM
 
             for x_layer, y_layer in zip(rnn.all_weights, weights_val):
                 for x, y in zip(x_layer, y_layer):
                     x.data.copy_(y.data)
 
             input = Variable(input_val.clone(), requires_grad=True)
-            if mode == 'LSTM':
+            if is_lstm:
                 hx = (Variable(hx_val.clone(), requires_grad=True),
                       Variable(hx_val.add(1), requires_grad=True))
             else:
                 hx = Variable(hx_val.clone(), requires_grad=True)
-        
+
             if cuda:
                 rnn.cuda()
                 input.data = input.data.cuda()
-                if mode == 'LSTM':
+                if is_lstm:
                     hx[0].data = hx[0].data.cuda()
                     hx[1].data = hx[1].data.cuda()
                 else:
@@ -646,29 +647,29 @@ class TestNN(NNTestCase):
 
             output, hy = rnn(input, hx)
             # FIXME this is because of a pytorch bug
-            if mode == 'LSTM':
+            if is_lstm:
                 fake_loss = 0*(hy[0] + hy[1]).sum()
             else:
                 fake_loss = 0*hy.sum()
-        
+
             loss = output.sum() + fake_loss
             loss.backward()
-        
+
             return {'output': output.data,
-                    'hy': hy[0].data if mode == 'LSTM' else hy.data,
+                    'hy': hy[0].data if is_lstm else hy.data,
                     'weights': rnn.all_weights,
                     'grad_input': input.grad,
-                    'grad_hx': hx[0].grad if mode == 'LSTM' else hx.grad,
-                    'cy': hy[1].data if mode == 'LSTM' else None,
-                    'grad_cx': hx[1].grad if mode == 'LSTM' else None}
-        
+                    'grad_hx': hx[0].grad if is_lstm else hx.grad,
+                    'cy': hy[1].data if is_lstm else None,
+                    'grad_cx': hx[1].grad if is_lstm else None}
+
         def diff(t_cpu, t_gpu, name):
             self.assertTrue(torch.is_tensor(t_cpu))
             self.assertTrue(torch.is_tensor(t_gpu))
             delta = t_gpu.cpu().add(-1, t_cpu).abs().max()
             # print("{:30s} cpu: {:10g} gpu: {:10g} diff: {:10g}".format(name, t_cpu.abs().max(), t_gpu.abs().max(), delta))
             self.assertLess(delta, 2 * PRECISION)
-        
+
         input_size = 10
         hidden_size = 20
         num_layers = 2
@@ -677,16 +678,16 @@ class TestNN(NNTestCase):
 
         # FIXME: we can't use torch.cuda.DoubleTensor because sum() is not yet defined on it
         with set_default_tensor_type('torch.FloatTensor'):
-            for mode in ("RNN_RELU", "RNN_TANH", "GRU", "LSTM"):
+            for module in (nn.RNN, nn.RNNReLU, nn.LSTM, nn.GRU):
                 for bias in (True, False):
                     input_val = torch.randn(seq_length, batch, input_size)
                     hx_val = torch.randn(num_layers, batch, hidden_size)
-            
-                    weights_val = nn.RNNBase(mode, input_size, hidden_size, num_layers).all_weights
-            
-                    outputs_cpu = forward_backward(False, mode, bias, input_val, hx_val, weights_val)
-                    outputs_gpu = forward_backward(True,  mode, bias, input_val, hx_val, weights_val)
-            
+
+                    weights_val = module(input_size, hidden_size, num_layers).all_weights
+
+                    outputs_cpu = forward_backward(False, module, bias, input_val, hx_val, weights_val)
+                    outputs_gpu = forward_backward(True,  module, bias, input_val, hx_val, weights_val)
+
                     diff(outputs_cpu['output'], outputs_gpu['output'], 'output')
                     diff(outputs_cpu['hy'], outputs_gpu['hy'], 'hy')
                     diff(outputs_cpu['grad_input'], outputs_gpu['grad_input'], 'grad_input')
@@ -694,10 +695,10 @@ class TestNN(NNTestCase):
                     if outputs_cpu['cy'] is not None:
                         diff(outputs_cpu['cy'], outputs_gpu['cy'], 'cy')
                         diff(outputs_cpu['grad_cx'], outputs_gpu['grad_cx'], 'grad_cx')
-            
+
                     for i, (cpu_layer_weight, gpu_layer_weight) in enumerate(zip(outputs_cpu['weights'], outputs_gpu['weights'])):
                         for j, (cpu_weight, gpu_weight) in enumerate(zip(cpu_layer_weight, gpu_layer_weight)):
-                            diff(cpu_weight.grad, gpu_weight.grad, mode + ' grad_weight[{},{}]'.format(i, j))
+                            diff(cpu_weight.grad, gpu_weight.grad, 'grad_weight[{},{}]'.format(i, j))
 
 
 def add_test(test):

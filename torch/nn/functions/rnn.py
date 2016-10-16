@@ -77,9 +77,9 @@ def GRUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
         # this is a bit weird, it doesn't match the order of parameters
         # implied by the cudnn docs, and it also uses nexth for output...
         resetgate = sigmoid(gi[:,0*hsz:1*hsz] + gh[:,0*hsz:1*hsz])
-        updategate = sigmoid(gi[:,1*hsz:2*hsz] + gh[:,1*hsz:2*hsz])
-        output    = tanh(gi[:,2*hsz:3*hsz] + resetgate * gh[:,2*hsz:3*hsz])
-        nexth     = output + updategate * (hidden - output)
+        inputgate = sigmoid(gi[:,1*hsz:2*hsz] + gh[:,1*hsz:2*hsz])
+        newgate   = tanh(gi[:,2*hsz:3*hsz] + resetgate * gh[:,2*hsz:3*hsz])
+        nexth     = newgate + inputgate * (hidden - newgate)
 
         return nexth, nexth  # FIXME: nexth, nexth ???
 
