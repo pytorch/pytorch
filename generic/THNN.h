@@ -299,6 +299,31 @@ TH_API void THNN_(PReLU_accGradParameters)(
           THIndex_t nOutputPlane,
           real scale);
 
+TH_API void THNN_(Linear_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          THTensor *weight,
+          THTensor *bias,
+          THTensor *addBuffer);
+TH_API void THNN_(Linear_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          THTensor *weight);
+TH_API void THNN_(Linear_accGradParameters)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          THTensor *weight,
+          THTensor *bias,
+          THTensor *gradWeight,
+          THTensor *gradBias,
+          THTensor *addBuffer,
+          real scale);
+
 TH_API void THNN_(RReLU_updateOutput)(
           THNNState *state,
           THTensor *input,
