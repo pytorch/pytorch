@@ -210,6 +210,43 @@ TH_API void THNN_(SpatialConvolutionLocal_accGradParameters)(
                   long outputWidth, long outputHeight,
                   real scale);
 
+TH_API void THNN_(SpatialConvolutionMM_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *output,
+                  THCTensor *weight,
+                  THCTensor *bias,
+                  THCTensor *columns,
+                  THCTensor *ones,
+                  int kW, int kH,
+                  int dW, int dH,
+                  int padW, int padH);
+
+TH_API void THNN_(SpatialConvolutionMM_updateGradInput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *gradOutput,
+                  THCTensor *gradInput,
+                  THCTensor *weight,
+                  THCTensor *gradColumns,
+                  THCTensor *ones,
+                  int kW, int kH,
+                  int dW, int dH,
+                  int padW, int padH);
+
+TH_API void THNN_(SpatialConvolutionMM_accGradParameters)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *gradOutput,
+                  THCTensor *gradWeight,
+                  THCTensor *gradBias,
+                  THCTensor *columns,
+                  THCTensor *ones,
+                  int kW, int kH,
+                  int dW, int dH,
+                  int padW, int padH,
+                  real scale);
+
 TH_API void THNN_(SpatialCrossMapLRN_updateOutput)(
                   THCState *state,
                   THCTensor *input,

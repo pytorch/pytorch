@@ -300,41 +300,6 @@ TH_API void THNN_CudaBatchNormalization_backward(
           float scale,
           double eps);
 
-TH_API void THNN_CudaSpatialConvolutionMM_updateOutput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *output,
-          THCudaTensor *weight,
-          THCudaTensor *bias,          // [OPTIONAL]
-          THCudaTensor *columns,
-          THCudaTensor *ones,
-          int kW, int kH,
-          int dW, int dH,
-          int padW, int padH);
-TH_API void THNN_CudaSpatialConvolutionMM_updateGradInput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *gradOutput,
-          THCudaTensor *gradInput,
-          THCudaTensor *weight,
-          THCudaTensor *columns,
-          THCudaTensor *ones,
-          int kW, int kH,
-          int dW, int dH,
-          int padW, int padH);
-TH_API void THNN_CudaSpatialConvolutionMM_accGradParameters(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *gradOutput,
-          THCudaTensor *gradWeight,
-          THCudaTensor *gradBias,      // [OPTIONAL]
-          THCudaTensor *columns,
-          THCudaTensor *ones,
-          int kW, int kH,
-          int dW, int dH,
-          int padW, int padH,
-          float scale);
-
 TH_API void THNN_CudaSpatialFullConvolution_updateOutput(
           THCState *state,
           THCudaTensor *input,
