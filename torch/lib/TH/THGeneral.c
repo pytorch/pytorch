@@ -1,6 +1,10 @@
 #include "THGeneral.h"
 #include "THAtomic.h"
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
 #ifndef TH_HAVE_THREAD
 #define __thread
 #elif _MSC_VER
@@ -312,5 +316,30 @@ double THLog1p(const double x)
   return log(y) - ((y-1)-x)/y ;  /* cancels errors with IEEE arithmetic */
 #else
   return log1p(x);
+#endif
+}
+
+void THSetNumThreads(int num_threads)
+{
+#ifdef _OPENMP
+  omp_set_num_threads(num_threads);
+#endif
+}
+
+int THGetNumThreads()
+{
+#ifdef _OPENMP
+  return omp_get_max_threads();
+#else
+  return 1;
+#endif
+}
+
+int THGetNumCores()
+{
+#ifdef _OPENMP
+  return omp_get_num_procs();
+#else
+  return 1;
 #endif
 }
