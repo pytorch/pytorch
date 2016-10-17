@@ -856,11 +856,19 @@ TH_API void THNN_CudaSpatialUpSamplingNearest_updateGradInput(
 TH_API void THNN_CudaSpatialUpSamplingBilinear_updateOutput(
           THCState *state,
           THCudaTensor *input,
-          THCudaTensor *output);
+          THCudaTensor *output,
+	  int outputHeight,
+          int outputWidth);
 TH_API void THNN_CudaSpatialUpSamplingBilinear_updateGradInput(
           THCState *state,
           THCudaTensor *gradOutput,
-          THCudaTensor *gradInput);
+          THCudaTensor *gradInput,
+          int nbatch,
+          int nchannels,
+          int inputHeight,
+          int inputWidth,
+          int outputHeight,
+          int outputWidth);
 
 TH_API void THNN_CudaVolumetricAveragePooling_updateOutput(
           THCState *state,
