@@ -263,6 +263,21 @@ TH_API void THNN_(SpatialReflectionPadding_updateGradInput)(
                   int padL, int padR,
                   int padT, int padB);
 
+TH_API void THNN_(SpatialReplicationPadding_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *output,
+                  int padL, int padR,
+                  int padT, int padB);
+
+TH_API void THNN_(SpatialReplicationPadding_updateGradInput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *gradOutput,
+                  THCTensor *gradInput,
+                  int padL, int padR,
+                  int padT, int padB);
+
 TH_API void THNN_(SpatialSubSampling_updateOutput)(
                   THCState *state,
                   THCTensor *input,
