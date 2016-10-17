@@ -489,6 +489,48 @@ class TestCuda(TestCase):
     def test_cuda_synchronize(self):
         torch.cuda.synchronize()
 
+    def test_streams(self):
+        default_stream = torch.cuda.current_stream()
+        user_stream = torch.cuda.Stream()
+        self.assertEqual(torch.cuda.current_stream(), default_stream)
+        self.assertNotEqual(default_stream, user_stream)
+        self.assertEqual(default_stream.cuda_stream, 0)
+        self.assertNotEqual(user_stream.cuda_stream, 0)
+        with torch.cuda.stream(user_stream):
+            self.assertEqual(torch.cuda.current_stream(), user_stream)
+        self.assertTrue(user_stream.query())
+        # copy 10 MB tensor from CPU-GPU which should take some time
+        tensor1 = torch.ByteTensor(10000000).pin_memory()
+        tensor2 = tensor1.cuda(async=True)
+        self.assertFalse(default_stream.query())
+        default_stream.synchronize()
+        self.assertTrue(default_stream.query())
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "detected only one GPU")
+    def test_streams_multi_gpu(self):
+        default_stream = torch.cuda.current_stream()
+        self.assertEqual(default_stream.device, 0)
+        stream = torch.cuda.Stream(device=1)
+        self.assertEqual(stream.device, 1)
+        with torch.cuda.device(1):
+            self.assertEqual(torch.cuda.current_stream().device, 1)
+            self.assertNotEqual(torch.cuda.current_stream(), default_stream)
+
+    def test_events(self):
+        stream = torch.cuda.current_stream()
+        event = torch.cuda.Event(enable_timing=True)
+        self.assertTrue(event.query())
+        # copy 10 MB tensor from CPU-GPU which should take some time
+        tensor1 = torch.ByteTensor(10000000).pin_memory()
+        start_event = torch.cuda.Event(enable_timing=True)
+        stream.record_event(start_event)
+        tensor2 = tensor1.cuda(async=True)
+        stream.record_event(event)
+        self.assertFalse(event.query())
+        event.synchronize()
+        self.assertTrue(event.query())
+        self.assertGreater(start_event.elapsed_time(event), 0)
+
 
 for decl in tests:
     for t in types:

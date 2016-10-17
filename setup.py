@@ -180,6 +180,7 @@ if WITH_CUDA:
     main_sources += [
         "torch/csrc/cuda/Module.cpp",
         "torch/csrc/cuda/Storage.cpp",
+        "torch/csrc/cuda/Stream.cpp",
         "torch/csrc/cuda/Tensor.cpp",
         "torch/csrc/cuda/utils.cpp",
         "torch/csrc/cuda/serialization.cpp",

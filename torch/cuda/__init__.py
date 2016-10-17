@@ -1,14 +1,18 @@
 from __future__ import print_function
+import contextlib
+import ctypes
+import os
 import torch
 
 _initialized = False
+_cudart = None
 
 def is_available():
     return (hasattr(torch._C, '_cuda_isDriverSufficient') and
             torch._C._cuda_isDriverSufficient())
 
 def _lazy_init():
-    global _initialized
+    global _initialized, _cudart
     if _initialized:
         return
     if not hasattr(torch._C, '_cuda_isDriverSufficient'):
@@ -31,6 +35,19 @@ a PyTorch version that has been compiled with your version
 of the CUDA driver.""".format(str(torch._C._cuda_getDriverVersion())))
     assert torch._C._cuda_init()
     _initialized = True
+    if os.name == 'mac':
+        _cudart = ctypes.cdll.LoadLibrary('libcudart.dylib')
+    elif os.name == 'nt':
+        _cudart = ctypes.cdll.LoadLibrary('cudart.dll')
+    else:
+        _cudart = ctypes.cdll.LoadLibrary('libcudart.so')
+    _cudart.cudaGetErrorName.restype = ctypes.c_char_p
+    _cudart.cudaGetErrorString.restype = ctypes.c_char_p
+
+
+def cudart():
+    _lazy_init()
+    return _cudart
 
 
 class device(object):
@@ -58,6 +75,19 @@ class device_of(device):
         super(device_of, self).__init__(idx)
 
 
+@contextlib.contextmanager
+def stream(stream):
+    if stream is None:
+        yield
+        return
+    prev_stream = current_stream()
+    torch._C._cuda_setStream(stream._cdata)
+    try:
+        yield
+    finally:
+        torch._C._cuda_setStream(prev_stream._cdata)
+
+
 def device_count():
     _lazy_init()
     return torch._C._cuda_getDeviceCount()
@@ -71,6 +101,11 @@ def current_device():
 def synchronize():
     _lazy_init()
     return torch._C._cuda_synchronize()
+
+
+def current_stream():
+    _lazy_init()
+    return torch.cuda.Stream(_cdata=torch._C._cuda_getCurrentStream())
 
 
 def _host_allocator():
@@ -195,3 +230,5 @@ torch._tensor_classes.add(IntTensor)
 torch._tensor_classes.add(ShortTensor)
 torch._tensor_classes.add(CharTensor)
 torch._tensor_classes.add(ByteTensor)
+
+from .streams import Stream, Event

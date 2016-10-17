@@ -114,6 +114,24 @@ PyObject * THCPModule_getDeviceCount_wrap(PyObject *self)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject * THCPModule_getCurrentStream_wrap(PyObject *self)
+{
+  HANDLE_TH_ERRORS
+  THCStream* stream = THCState_getStream(state);
+  return PyLong_FromVoidPtr(stream);
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject * THCPModule_setStream_wrap(PyObject *self, PyObject *obj)
+{
+  HANDLE_TH_ERRORS
+  THPUtils_assert(PyLong_Check(obj), "invalid stream");
+  THCStream* stream = (THCStream *)PyLong_AsVoidPtr(obj);
+  THCState_setStream(state, stream);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject * THCPModule_isDriverSufficient(PyObject *self)
 {
   int count;

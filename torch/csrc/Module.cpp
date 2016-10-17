@@ -535,6 +535,8 @@ extern PyObject * THCPModule_initExtension(PyObject *self);
 extern PyObject * THCPModule_setDevice_wrap(PyObject *self, PyObject *arg);
 extern PyObject * THCPModule_getDevice_wrap(PyObject *self);
 extern PyObject * THCPModule_getDeviceCount_wrap(PyObject *self);
+extern PyObject * THCPModule_getCurrentStream_wrap(PyObject *self);
+extern PyObject * THCPModule_setStream_wrap(PyObject *self, PyObject *stream);
 extern PyObject * THCPModule_getDriverVersion(PyObject *self);
 extern PyObject * THCPModule_isDriverSufficient(PyObject *self);
 extern PyObject * THCPModule_getRNGState(PyObject *_unused);
@@ -556,6 +558,8 @@ static PyMethodDef TorchMethods[] = {
   {"_cuda_setDevice", (PyCFunction)THCPModule_setDevice_wrap,   METH_O,       NULL},
   {"_cuda_getDevice", (PyCFunction)THCPModule_getDevice_wrap,   METH_NOARGS,  NULL},
   {"_cuda_getDeviceCount", (PyCFunction)THCPModule_getDeviceCount_wrap, METH_NOARGS, NULL},
+  {"_cuda_getCurrentStream", (PyCFunction)THCPModule_getCurrentStream_wrap, METH_NOARGS, NULL},
+  {"_cuda_setStream", (PyCFunction)THCPModule_setStream_wrap, METH_O, NULL},
   {"_cuda_isDriverSufficient", (PyCFunction)THCPModule_isDriverSufficient, METH_NOARGS, NULL},
   {"_cuda_getDriverVersion", (PyCFunction)THCPModule_getDriverVersion, METH_NOARGS, NULL},
   {"_cuda_getRNGState", (PyCFunction)THCPModule_getRNGState, METH_NOARGS, NULL},
@@ -761,6 +765,8 @@ bool THCPShortTensor_init(PyObject *module);
 bool THCPCharTensor_init(PyObject *module);
 bool THCPByteTensor_init(PyObject *module);
 
+bool THCPStream_init(PyObject *module);
+
 #if PY_MAJOR_VERSION == 2
 PyMODINIT_FUNC init_C()
 #else
@@ -824,6 +830,8 @@ PyMODINIT_FUNC PyInit__C()
   ASSERT_TRUE(THCPShortTensor_init(module));
   ASSERT_TRUE(THCPCharTensor_init(module));
   ASSERT_TRUE(THCPByteTensor_init(module));
+
+  ASSERT_TRUE(THCPStream_init(module));
 #endif
 
   THPDefaultGenerator = (THPGenerator*)THPGenerator_New();
