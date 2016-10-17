@@ -2,8 +2,8 @@
 #define TH_GENERIC_FILE "generic/THVectorDefault.c"
 #else
 
-void THVector_(fill_DEFAULT)(real *x, const real c, const long n) {
-  long i = 0;
+void THVector_(fill_DEFAULT)(real *x, const real c, const ptrdiff_t n) {
+  ptrdiff_t i = 0;
 
   for(; i < n-4; i += 4)
   {
@@ -17,9 +17,9 @@ void THVector_(fill_DEFAULT)(real *x, const real c, const long n) {
     x[i] = c;
 }
 
-void THVector_(add_DEFAULT)(real *y, const real *x, const real c, const long n)
+void THVector_(add_DEFAULT)(real *y, const real *x, const real c, const ptrdiff_t n)
 {
-  long i = 0;
+  ptrdiff_t i = 0;
 
   for(;i < n-4; i += 4)
   {
@@ -33,9 +33,9 @@ void THVector_(add_DEFAULT)(real *y, const real *x, const real c, const long n)
     y[i] += c * x[i];
 }
 
-void THVector_(diff_DEFAULT)(real *z, const real *x, const real *y, const long n)
+void THVector_(diff_DEFAULT)(real *z, const real *x, const real *y, const ptrdiff_t n)
 {
-  long i = 0;
+  ptrdiff_t i = 0;
 
   for(; i < n-4; i += 4)
   {
@@ -49,9 +49,9 @@ void THVector_(diff_DEFAULT)(real *z, const real *x, const real *y, const long n
     z[i] = x[i] - y[i];
 }
 
-void THVector_(scale_DEFAULT)(real *y, const real c, const long n)
+void THVector_(scale_DEFAULT)(real *y, const real c, const ptrdiff_t n)
 {
-  long i = 0;
+  ptrdiff_t i = 0;
 
   for(; i < n-4; i +=4)
   {
@@ -65,9 +65,9 @@ void THVector_(scale_DEFAULT)(real *y, const real c, const long n)
     y[i] *= c;
 }
 
-void THVector_(mul_DEFAULT)(real *y, const real *x, const long n)
+void THVector_(mul_DEFAULT)(real *y, const real *x, const ptrdiff_t n)
 {
-  long i = 0;
+  ptrdiff_t i = 0;
 
   for(; i < n-4; i += 4)
   {

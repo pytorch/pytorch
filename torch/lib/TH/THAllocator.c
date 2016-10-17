@@ -15,11 +15,11 @@
 #endif
 /* end of stuff for mapped files */
 
-static void *THDefaultAllocator_alloc(void* ctx, long size) {
+static void *THDefaultAllocator_alloc(void* ctx, ptrdiff_t size) {
   return THAlloc(size);
 }
 
-static void *THDefaultAllocator_realloc(void* ctx, void* ptr, long size) {
+static void *THDefaultAllocator_realloc(void* ctx, void* ptr, ptrdiff_t size) {
   return THRealloc(ptr, size);
 }
 
@@ -38,7 +38,7 @@ THAllocator THDefaultAllocator = {
 struct THMapAllocatorContext_ {
   char *filename; /* file name */
   int flags;
-  long size; /* mapped size */
+  ptrdiff_t size; /* mapped size */
   int fd;
 };
 
@@ -91,7 +91,7 @@ int THMapAllocatorContext_fd(THMapAllocatorContext *ctx)
   return ctx->fd;
 }
 
-long THMapAllocatorContext_size(THMapAllocatorContext *ctx)
+ptrdiff_t THMapAllocatorContext_size(THMapAllocatorContext *ctx)
 {
   return ctx->size;
 }
@@ -103,7 +103,7 @@ void THMapAllocatorContext_free(THMapAllocatorContext *ctx)
   THFree(ctx);
 }
 
-static void *_map_alloc(void* ctx_, long size)
+static void *_map_alloc(void* ctx_, ptrdiff_t size)
 {
   THMapAllocatorContext *ctx = ctx_;
   void *data = NULL;
@@ -326,11 +326,11 @@ static void *_map_alloc(void* ctx_, long size)
   return data;
 }
 
-static void * THMapAllocator_alloc(void *ctx, long size) {
+static void * THMapAllocator_alloc(void *ctx, ptrdiff_t size) {
   return _map_alloc(ctx, size);
 }
 
-static void *THMapAllocator_realloc(void* ctx, void* ptr, long size) {
+static void *THMapAllocator_realloc(void* ctx, void* ptr, ptrdiff_t size) {
   THError("cannot realloc mapped data");
   return NULL;
 }
@@ -378,12 +378,12 @@ void THMapAllocatorContext_free(THMapAllocatorContext *ctx) {
   THError("file mapping not supported on your system");
 }
 
-static void *THMapAllocator_alloc(void* ctx_, long size) {
+static void *THMapAllocator_alloc(void* ctx_, ptrdiff_t size) {
   THError("file mapping not supported on your system");
   return NULL;
 }
 
-static void *THMapAllocator_realloc(void* ctx, void* ptr, long size) {
+static void *THMapAllocator_realloc(void* ctx, void* ptr, ptrdiff_t size) {
   THError("file mapping not supported on your system");
   return NULL;
 }
@@ -396,7 +396,7 @@ static void THMapAllocator_free(void* ctx, void* data) {
 
 #if (defined(_WIN32) || defined(HAVE_MMAP)) && defined(TH_ATOMIC_IPC_REFCOUNT)
 
-static void * THRefcountedMapAllocator_alloc(void *_ctx, long size) {
+static void * THRefcountedMapAllocator_alloc(void *_ctx, ptrdiff_t size) {
   THMapAllocatorContext *ctx = _ctx;
 
   if (ctx->flags & TH_ALLOCATOR_MAPPED_FROMFD)
@@ -421,7 +421,7 @@ static void * THRefcountedMapAllocator_alloc(void *_ctx, long size) {
   return (void*)data;
 }
 
-static void *THRefcountedMapAllocator_realloc(void* ctx, void* ptr, long size) {
+static void *THRefcountedMapAllocator_realloc(void* ctx, void* ptr, ptrdiff_t size) {
   THError("cannot realloc mapped data");
   return NULL;
 }
@@ -464,12 +464,12 @@ int THRefcountedMapAllocator_decref(THMapAllocatorContext *ctx, void *data)
 
 #else
 
-static void * THRefcountedMapAllocator_alloc(void *ctx, long size) {
+static void * THRefcountedMapAllocator_alloc(void *ctx, ptrdiff_t size) {
   THError("refcounted file mapping not supported on your system");
   return NULL;
 }
 
-static void *THRefcountedMapAllocator_realloc(void* ctx, void* ptr, long size) {
+static void *THRefcountedMapAllocator_realloc(void* ctx, void* ptr, ptrdiff_t size) {
   THError("refcounted file mapping not supported on your system");
   return NULL;
 }

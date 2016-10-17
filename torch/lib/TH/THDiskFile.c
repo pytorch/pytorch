@@ -381,20 +381,21 @@ static size_t THDiskFile_readLong(THFile *self, long *data, size_t n)
         THDiskFile_reverseMemory(data, data, sizeof(long), nread);
     } else if(dfself->longSize == 4)
     {
-      int i;
       nread = fread__(data, 4, n, dfself->handle);
       if(!dfself->isNativeEncoding && (nread > 0))
         THDiskFile_reverseMemory(data, data, 4, nread);
-      for(i = nread-1; i >= 0; i--)
-        data[i] = ((int *)data)[i];
+      size_t i;
+      for(i = nread; i > 0; i--)
+        data[i-1] = ((int *)data)[i-1];
     }
     else /* if(dfself->longSize == 8) */
     {
-      int i, big_endian = !THDiskFile_isLittleEndianCPU();
-      long *buffer = THAlloc(8*n);
+      int big_endian = !THDiskFile_isLittleEndianCPU();
+      int32_t *buffer = THAlloc(8*n);
       nread = fread__(buffer, 8, n, dfself->handle);
-      for(i = nread-1; i >= 0; i--)
-        data[i] = buffer[2*i + big_endian];
+      size_t i;
+      for(i = nread; i > 0; i--)
+        data[i-1] = buffer[2*(i-1) + big_endian];
       THFree(buffer);
       if(!dfself->isNativeEncoding && (nread > 0))
         THDiskFile_reverseMemory(data, data, 4, nread);
@@ -450,8 +451,8 @@ static size_t THDiskFile_writeLong(THFile *self, long *data, size_t n)
       }
     } else if(dfself->longSize == 4)
     {
-      int i;
-      int *buffer = THAlloc(4*n);
+      int32_t *buffer = THAlloc(4*n);
+      size_t i;
       for(i = 0; i < n; i++)
         buffer[i] = data[i];
       if(!dfself->isNativeEncoding)
@@ -461,8 +462,9 @@ static size_t THDiskFile_writeLong(THFile *self, long *data, size_t n)
     }
     else /* if(dfself->longSize == 8) */
     {
-      int i, big_endian = !THDiskFile_isLittleEndianCPU();
-      long *buffer = THAlloc(8*n);
+      int big_endian = !THDiskFile_isLittleEndianCPU();
+      int32_t *buffer = THAlloc(8*n);
+      size_t i;
       for(i = 0; i < n; i++)
       {
         buffer[2*i + !big_endian] = 0;

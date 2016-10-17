@@ -55,7 +55,7 @@ double THLogSub(double log_a, double log_b)
 }
 
 /* Credits to Leon Bottou */
-double THExpMinusApprox(double x)
+double THExpMinusApprox(const double x)
 {
 #define EXACT_EXPONENTIAL 0
 #if EXACT_EXPONENTIAL
