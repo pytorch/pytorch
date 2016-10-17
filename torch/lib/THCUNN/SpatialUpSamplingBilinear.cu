@@ -57,9 +57,12 @@ __global__ void caffe_gpu_interp2_kernel(const int n,
   }
 }
 
-void THNN_CudaSpatialUpSamplingBilinear_updateOutput(THCState *state,
-THCudaTensor *input, THCudaTensor *output)
-{
+void THNN_CudaSpatialUpSamplingBilinear_updateOutput(
+          THCState *state,
+          THCudaTensor *input,
+          THCudaTensor *output,
+	  int outputHeight,
+          int outputWidth) {
   input = THCudaTensor_newContiguous(state, input);
   output = THCudaTensor_newContiguous(state, output);
   THCUNN_assertSameGPU(state, 2, input, output);
@@ -138,9 +141,16 @@ __global__ void caffe_gpu_interp2_kernel_backward(const int n,
 }
 
 
-void THNN_CudaSpatialUpSamplingBilinear_updateGradInput(THCState *state,
-  THCudaTensor *gradOutput, THCudaTensor *gradInput)
-{
+void THNN_CudaSpatialUpSamplingBilinear_updateGradInput(
+          THCState *state,
+          THCudaTensor *gradOutput,
+          THCudaTensor *gradInput,
+          int nbatch,
+          int nchannels,
+          int inputHeight,
+          int inputWidth,
+          int outputHeight,
+          int outputWidth) {
   gradInput = THCudaTensor_newContiguous(state, gradInput);
   gradOutput = THCudaTensor_newContiguous(state, gradOutput);
   THCUNN_assertSameGPU(state, 2, gradOutput, gradInput);

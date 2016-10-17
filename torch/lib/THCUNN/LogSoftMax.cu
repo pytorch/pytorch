@@ -1,6 +1,77 @@
 #include "THCUNN.h"
 #include "common.h"
 
+__global__ void cunn_SpatialLogSoftMax_updateOutput_kernel(float *output, float *input, int classSize, int height, int width)
+{
+  int batchIndex = blockIdx.x;
+  int index = threadIdx.x;
+
+  while (index < height*width) {
+    int y = index / width;
+    int x = index % width;
+    if (y >= height)
+      break;
+
+    // calculate input starting index in cuda layout (B x H x W x C)
+    int inputStartIndex =
+      (height*width*classSize)*batchIndex +
+      (width*classSize)*y +
+      (classSize)*x;
+
+    float sum = 0;
+    for (int i = 0; i < classSize; i++) {
+      sum += __expf(input[inputStartIndex + i]);
+    }
+    sum = 1.0f / sum;
+
+    for (int i = 0; i < classSize; i++) {
+      // calculate output index in torch layout (B x C x H x W)
+      int outputIndex =
+        (classSize*height*width)*batchIndex +
+        (height*width)*i +
+        (width)*y +
+        x;
+      output[outputIndex] = logf(sum * __expf(input[inputStartIndex + i]));
+    }
+    index += blockDim.x;
+  }
+}
+
+__global__ void cunn_SpatialLogSoftMax_updateGradInput_kernel(float *gradInput, float *output, float *gradOutput, int classSize, int height, int width)
+{
+  int batchIndex = blockIdx.x;
+  int index = threadIdx.x;
+
+  while (index < height*width) {
+    int y = index / width;
+    int x = index % width;
+    if (y >= height)
+      break;
+
+    // calculate output starting index in cuda layout (B x H x W x C)
+    int outputStartIndex =
+      (height*width*classSize)*batchIndex +
+      (width*classSize)*y +
+      (classSize)*x;
+
+    float sum = 0;
+    for (int i = 0; i < classSize; i++) {
+      sum += gradOutput[outputStartIndex + i];
+    }
+
+    for (int i = 0; i < classSize; i++) {
+      // calculate input index in torch layout (B x C x H x W)
+      int inputIndex =
+        (classSize*height*width)*batchIndex +
+        (height*width)*i +
+        (width)*y +
+        x;
+      gradInput[inputIndex] = gradOutput[outputStartIndex + i] - __expf(output[outputStartIndex + i]) * sum;
+    }
+    index += blockDim.x;
+  }
+}
+
 struct MaxFloat
 {
   __device__ __forceinline__ float operator()(float max, float v) const
@@ -76,7 +147,7 @@ blockReduce(float* smem, float val,
     int lane = threadIdx.x % 32; // from 0 to 31
 
     // if less than 1024 threads per block, then only activate the relevant lanes
-    if (lane < blockDim.x / 32) 
+    if (lane < blockDim.x / 32)
     {
 #pragma unroll
       for (int i = 0; i < 32; ++i)
@@ -256,36 +327,98 @@ void THNN_CudaLogSoftMax_updateOutput(THCState *state, THCudaTensor *input, THCu
 {
   THCUNN_assertSameGPU(state, 2, input, output);
 
-  input = THCudaTensor_newContiguous(state, input);
   THCudaTensor_resizeAs(state, output, input);
 
+  bool spatial  = false;
   int batchSize = 1;
   int classSize = 0;
+  int height = 0;
+  int width = 0;
 
-  if (THCudaTensor_nDimension(state, input) == 1)
+  int ndims = THCudaTensor_nDimension(state, input);
+
+  if (ndims == 1)
   {
     classSize = THCudaTensor_size(state, input, 0);
+    input = THCudaTensor_newContiguous(state, input);
   }
-  else if (THCudaTensor_nDimension(state, input) == 2)
+  else if (ndims == 2)
   {
     batchSize = THCudaTensor_size(state, input, 0);
     classSize = THCudaTensor_size(state, input, 1);
+    input = THCudaTensor_newContiguous(state, input);
+  }
+  else if (ndims == 3)
+  {
+    spatial = true;
+    classSize = THCudaTensor_size(state, input, 0);
+    height = THCudaTensor_size(state, input, 1);
+    width = THCudaTensor_size(state, input, 2);
+
+    // create contiguous tensor with cuda layout from tensor with torch layout
+    // C x H x W -> W x H x C
+    THCudaTensor_transpose(state, input, input, 0, 2);
+    // W x H x C -> H x W x C
+    THCudaTensor_transpose(state, input, input, 0, 1);
+    THCudaTensor *transposedInput = THCudaTensor_newContiguous(state, input);
+    THCudaTensor_transpose(state, input, input, 0, 1);
+    THCudaTensor_transpose(state, input, input, 0, 2);
+    input = transposedInput;
+  }
+  else if (ndims == 4)
+  {
+    spatial = true;
+    batchSize = THCudaTensor_size(state, input, 0);
+    classSize = THCudaTensor_size(state, input, 1);
+    height = THCudaTensor_size(state, input, 2);
+    width = THCudaTensor_size(state, input, 3);
+
+    // create contiguous tensor with cuda layout from tensor with torch layout
+    // B x C x H x W -> B x W x H x C
+    THCudaTensor_transpose(state, input, input, 1, 3);
+    // B x W x H x C -> B x H x W x C
+    THCudaTensor_transpose(state, input, input, 1, 2);
+    THCudaTensor *transposedInput = THCudaTensor_newContiguous(state, input);
+    THCudaTensor_transpose(state, input, input, 1, 2);
+    THCudaTensor_transpose(state, input, input, 1, 3);
+    input = transposedInput;
   }
   else
   {
-    THError("vector or matrix expected");
+    THError("1D, 2D, 3D or 4D Tensor expected");
   }
 
-  dim3 grid(batchSize);
-  dim3 block(1024);
+  if (!spatial)
+  {
+    dim3 grid(batchSize);
+    dim3 block(1024);
 
-  cunn_LogSoftMax_updateOutput_kernel<2>
-    <<<grid, block, block.x * sizeof(float), THCState_getCurrentStream(state)>>>(
-      THCudaTensor_data(state, output),
-      THCudaTensor_data(state, input),
-      classSize
-  );
-  THCudaCheck(cudaGetLastError());
+    cunn_LogSoftMax_updateOutput_kernel<2>
+      <<<grid, block, block.x * sizeof(float), THCState_getCurrentStream(state)>>>(
+        THCudaTensor_data(state, output),
+        THCudaTensor_data(state, input),
+        classSize
+    );
+  }
+  else
+  {
+    dim3 grid(batchSize);
+    dim3 block(1024);
+
+    cunn_SpatialLogSoftMax_updateOutput_kernel
+      <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+        THCudaTensor_data(state, output),
+        THCudaTensor_data(state, input),
+        classSize, height, width
+    );
+  }
+
+  cudaError errcode = cudaGetLastError();
+  if (errcode != cudaSuccess)
+  {
+    THError(cudaGetErrorString(errcode));
+  }
+
   THCudaTensor_free(state, input);
 }
 
@@ -294,39 +427,122 @@ void THNN_CudaLogSoftMax_updateGradInput(THCState *state, THCudaTensor *input, T
 {
   THCUNN_assertSameGPU(state, 3, output, gradOutput, gradInput);
 
-  output = THCudaTensor_newContiguous(state, output);
-  gradOutput = THCudaTensor_newContiguous(state, gradOutput);
-
   THCudaTensor_resizeAs(state, gradInput, output);
 
+  bool spatial  = false;
   int batchSize = 1;
   int classSize = 0;
+  int height = 0;
+  int width = 0;
 
-  if (THCudaTensor_nDimension(state, gradInput) == 1)
+  int ndims = THCudaTensor_nDimension(state, input);
+
+  if (ndims == 1)
   {
     classSize = THCudaTensor_size(state, gradInput, 0);
+    output = THCudaTensor_newContiguous(state, output);
+    gradOutput = THCudaTensor_newContiguous(state, gradOutput);
   }
-  else if (THCudaTensor_nDimension(state, gradInput) == 2)
+  else if (ndims == 2)
   {
     batchSize = THCudaTensor_size(state, gradInput, 0);
     classSize = THCudaTensor_size(state, gradInput, 1);
+    output = THCudaTensor_newContiguous(state, output);
+    gradOutput = THCudaTensor_newContiguous(state, gradOutput);
+  }
+  else if (ndims == 3)
+  {
+    spatial = true;
+    classSize = THCudaTensor_size(state, input, 0);
+    height = THCudaTensor_size(state, input, 1);
+    width = THCudaTensor_size(state, input, 2);
+
+    // create contiguous tensor with cuda layout from tensor with torch layout
+    // C x H x W -> W x H x C
+    THCudaTensor_transpose(state, output, output, 0, 2);
+    // W x H x C -> H x W x C
+    THCudaTensor_transpose(state, output, output, 0, 1);
+    THCudaTensor *transposedOutput = THCudaTensor_newContiguous(state, output);
+    THCudaTensor_transpose(state, output, output, 0, 1);
+    THCudaTensor_transpose(state, output, output, 0, 2);
+    output = transposedOutput;
+
+    // create contiguous tensor with cuda layout from tensor with torch layout
+    // C x H x W -> W x H x C
+    THCudaTensor_transpose(state, gradOutput, gradOutput, 0, 2);
+    // W x H x C -> H x W x C
+    THCudaTensor_transpose(state, gradOutput, gradOutput, 0, 1);
+    THCudaTensor *transposedGradOutput = THCudaTensor_newContiguous(state, gradOutput);
+    THCudaTensor_transpose(state, gradOutput, gradOutput, 0, 1);
+    THCudaTensor_transpose(state, gradOutput, gradOutput, 0, 2);
+    gradOutput = transposedGradOutput;
+  }
+  else if (ndims == 4)
+  {
+    spatial = true;
+    batchSize = THCudaTensor_size(state, gradInput, 0);
+    classSize = THCudaTensor_size(state, input, 1);
+    height = THCudaTensor_size(state, input, 2);
+    width = THCudaTensor_size(state, input, 3);
+
+    // create contiguous tensor with cuda layout from tensor with torch layout
+    // B x C x H x W -> B x W x H x C
+    THCudaTensor_transpose(state, output, output, 1, 3);
+    // B x W x H x C -> B x H x W x C
+    THCudaTensor_transpose(state, output, output, 1, 2);
+    THCudaTensor *transposedOutput = THCudaTensor_newContiguous(state, output);
+    THCudaTensor_transpose(state, output, output, 1, 2);
+    THCudaTensor_transpose(state, output, output, 1, 3);
+    output = transposedOutput;
+
+    // create contiguous tensor with cuda layout from tensor with torch layout
+    // B x C x H x W -> B x W x H x C
+    THCudaTensor_transpose(state, gradOutput, gradOutput, 1, 3);
+    // B x W x H x C -> B x H x W x C
+    THCudaTensor_transpose(state, gradOutput, gradOutput, 1, 2);
+    THCudaTensor *transposedGradOutput = THCudaTensor_newContiguous(state, gradOutput);
+    THCudaTensor_transpose(state, gradOutput, gradOutput, 1, 2);
+    THCudaTensor_transpose(state, gradOutput, gradOutput, 1, 3);
+    gradOutput = transposedGradOutput;
   }
   else
   {
-    THError("vector or matrix expected");
+    THError("1D, 2D, 3D or 4D Tensor expected");
   }
 
-  dim3 grid(batchSize);
-  dim3 block(1024);
+  if (!spatial)
+  {
+    dim3 grid(batchSize);
+    dim3 block(1024);
 
-  cunn_LogSoftMax_updateGradInput_kernel<2>
-    <<<grid, block, block.x * sizeof(float), THCState_getCurrentStream(state)>>>(
-      THCudaTensor_data(state, gradInput),
-      THCudaTensor_data(state, output),
-      THCudaTensor_data(state, gradOutput),
-      classSize
-  );
-  THCudaCheck(cudaGetLastError());
+    cunn_LogSoftMax_updateGradInput_kernel<2>
+      <<<grid, block, block.x * sizeof(float), THCState_getCurrentStream(state)>>>(
+        THCudaTensor_data(state, gradInput),
+        THCudaTensor_data(state, output),
+        THCudaTensor_data(state, gradOutput),
+        classSize
+    );
+  }
+  else
+  {
+    dim3 grid(batchSize);
+    dim3 block(1024);
+
+    cunn_SpatialLogSoftMax_updateGradInput_kernel
+      <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+        THCudaTensor_data(state, gradInput),
+        THCudaTensor_data(state, output),
+        THCudaTensor_data(state, gradOutput),
+        classSize, height, width
+    );
+  }
+
+  cudaError errcode = cudaGetLastError();
+  if (errcode != cudaSuccess)
+  {
+    THError(cudaGetErrorString(errcode));
+  }
+
   THCudaTensor_free(state, gradOutput);
   THCudaTensor_free(state, output);
 }
