@@ -452,27 +452,6 @@ TH_API void THNN_CudaSpatialDilatedConvolution_accGradParameters(
           int dilationW, int dilationH,
           float scale);
 
-TH_API void THNN_CudaSpatialCrossMapLRN_updateOutput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *output,
-          THCudaTensor *scale,
-          int size,
-          float alpha,
-          float beta,
-          float k);
-TH_API void THNN_CudaSpatialCrossMapLRN_updateGradInput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *gradOutput,
-          THCudaTensor *gradInput,
-          THCudaTensor *scale,
-          THCudaTensor *output,
-          int size,
-          float alpha,
-          float beta,
-          float k);
-
 TH_API void THNN_CudaSpatialFractionalMaxPooling_updateOutput(
           THCState *state,
           THCudaTensor *input,

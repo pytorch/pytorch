@@ -57,6 +57,10 @@ inline __host__ __device__ half operator+(half a, half b) {
   return THCNumerics<half>::add(a, b);
 }
 
+inline __host__ __device__ float operator+(half a, float b) {
+  return ScalarConvert<half, float>::to(a) + b;
+}
+
 inline __host__ __device__ float operator+(float a, half b) {
   return a + ScalarConvert<half, float>::to(b);
 }
@@ -153,7 +157,6 @@ inline __host__ __device__ half& operator+=(half &lhs, const half &rhs) {
   lhs = lhs + rhs;
   return lhs;
 }
-
 inline __host__ __device__ float& operator+=(float &lhs, const half &rhs) {
   lhs = lhs + rhs;
   return lhs;
@@ -174,6 +177,10 @@ inline __host__ __device__ half exp(half a) {
 
 inline __host__ __device__ half log1p(half a) {
   return THCNumerics<half>::log1p(a);
+}
+
+inline __host__ __device__ half pow(half a, half b) {
+  return THCNumerics<half>::pow(a, b);
 }
 
 inline __host__ __device__ half sqrt(half a) {

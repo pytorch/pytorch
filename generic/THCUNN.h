@@ -167,6 +167,28 @@ TH_API void THNN_(SpatialClassNLLCriterion_updateGradInput)(
                   THCTensor *weights,       // [OPTIONAL]
                   THCTensor *total_weight);
 
+TH_API void THNN_(SpatialCrossMapLRN_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *output,
+                  THCTensor *scale,
+                  int size,
+                  real alpha,
+                  real beta,
+                  real k);
+
+TH_API void THNN_(SpatialCrossMapLRN_updateGradInput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *gradOutput,
+                  THCTensor *gradInput,
+                  THCTensor *scale,
+                  THCTensor *output,
+                  int size,
+                  real alpha,
+                  real beta,
+                  real k);
+
 TH_API void THNN_(SpatialDilatedMaxPooling_updateOutput)(
                   THCState *state,
                   THCTensor *input,
