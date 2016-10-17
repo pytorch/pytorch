@@ -141,24 +141,15 @@ static PyObject * THPModule_initExtension(PyObject *self, PyObject *shm_manager_
 
 static PyObject * THPModule_getNumThreads(PyObject *module)
 {
-#ifdef _OPENMP
-  return PyLong_FromLong(omp_get_max_threads());
-#else
-  return PyLong_FromLong(1);
-#endif
+  return PyLong_FromLong(THGetNumThreads());
 }
 
 static PyObject * THPModule_setNumThreads(PyObject *module, PyObject *arg)
 {
   THPUtils_assert(THPUtils_checkLong(arg), "set_num_threads expects an int, "
           "but got %s", THPUtils_typename(arg));
-#ifdef _OPENMP
-  omp_set_num_threads(THPUtils_unpackLong(arg));
-#else
-  PyErr_WarnEx(PyExc_RuntimeWarning, "set_num_threads is a no-op - torch was "
-          "compiled without OpenMP support", 1);
-#endif
-  return 0;
+  THSetNumThreads((int)THPUtils_unpackLong(arg));
+  Py_RETURN_NONE;
 }
 
 bool THPModule_isTensor(PyObject *obj)
