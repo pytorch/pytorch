@@ -26,6 +26,9 @@ struct THCNumerics<unsigned char> {
   static inline __host__ __device__ bool ne(unsigned char a, unsigned char b) { return a != b; }
 
   static inline __host__ __device__  unsigned char add(unsigned char a, unsigned char b) { return a + b; }
+  static inline __host__ __device__  unsigned char mul(unsigned char a, unsigned char b) { return a * b; }
+  static inline __host__ __device__  unsigned char sub(unsigned char a, unsigned char b) { return a - b; }
+  static inline __host__ __device__  unsigned char div(unsigned char a, unsigned char b) { return a / b; }
   static inline __host__ __device__  unsigned char abs(unsigned char a) { return abs(a); }
 };
 
@@ -42,6 +45,9 @@ struct THCNumerics<char> {
   static inline __host__ __device__ bool ne(char a, char b) { return a != b; }
 
   static inline __host__ __device__  char add(char a, char b) { return a + b; }
+  static inline __host__ __device__  char mul(char a, char b) { return a * b; }
+  static inline __host__ __device__  char sub(char a, char b) { return a - b; }
+  static inline __host__ __device__  char div(char a, char b) { return a / b; }
   static inline __host__ __device__  char abs(char a) { return abs(a); }
 };
 
@@ -58,6 +64,9 @@ struct THCNumerics<short> {
   static inline __host__ __device__ bool ne(short a, short b) { return a != b; }
 
   static inline __host__ __device__  short add(short a, short b) { return a + b; }
+  static inline __host__ __device__  short mul(short a, short b) { return a * b; }
+  static inline __host__ __device__  short sub(short a, short b) { return a - b; }
+  static inline __host__ __device__  short div(short a, short b) { return a / b; }
   static inline __host__ __device__  short abs(short a) { return abs(a); }
 };
 
@@ -74,6 +83,9 @@ struct THCNumerics<int> {
   static inline __host__ __device__ bool ne(int a, int b) { return a != b; }
 
   static inline __host__ __device__  int add(int a, int b) { return a + b; }
+  static inline __host__ __device__  int mul(int a, int b) { return a * b; }
+  static inline __host__ __device__  int sub(int a, int b) { return a - b; }
+  static inline __host__ __device__  int div(int a, int b) { return a / b; }
   static inline __host__ __device__  int abs(int a) { return ::abs(a); }
 };
 
@@ -90,6 +102,9 @@ struct THCNumerics<long> {
   static inline __host__ __device__ bool ne(long a, long b) { return a != b; }
 
   static inline __host__ __device__  long add(long a, long b) { return a + b; }
+  static inline __host__ __device__  long mul(long a, long b) { return a * b; }
+  static inline __host__ __device__  long sub(long a, long b) { return a - b; }
+  static inline __host__ __device__  long div(long a, long b) { return a / b; };
   static inline __host__ __device__  long abs(long a) { return labs(a); }
 };
 
@@ -435,6 +450,55 @@ struct THCNumerics<half> {
     return THC_float2half(THC_half2float(a) + THC_half2float(b));
 #endif
   }
+
+  static inline __host__ __device__ half div(half a, half b) {
+#ifdef __CUDA_ARCH__
+    float fa = __half2float(a);
+    float fb = __half2float(b);
+    return __float2half( fa / fb );
+#else // __CUDA_ARCH__
+    return THC_float2half(THC_half2float(a) / THC_half2float(b));
+#endif
+  }
+
+  static inline __host__ __device__ half mul(half a, half b) {
+#ifdef __CUDA_ARCH__
+#ifdef CUDA_HALF_INSTRUCTIONS
+    return __hmul(a, b);
+#else
+    float fa = __half2float(a);
+    float fb = __half2float(b);
+    return __float2half( fa * fb );
+#endif
+#else // __CUDA_ARCH__
+    return THC_float2half(THC_half2float(a) * THC_half2float(b));
+#endif
+  }
+
+  static inline __host__ __device__ half sub(half a, half b) {
+#ifdef __CUDA_ARCH__
+#ifdef CUDA_HALF_INSTRUCTIONS
+    return __hsub(a, b);
+#else
+    float fa = __half2float(a);
+    float fb = __half2float(b);
+    return __float2half( fa - fb );
+#endif
+#else // __CUDA_ARCH__
+    return THC_float2half(THC_half2float(a) - THC_half2float(b));
+#endif
+  }
+
+  static inline __host__ __device__ half pow(half a, half b) {
+#ifdef __CUDA_ARCH__
+    float fa = __half2float(a);
+    float fb = __half2float(b);
+    return __float2half(powf(fa, fb));
+#else // __CUDA_ARCH__
+    return THC_float2half(powf(THC_half2float(a), THC_half2float(b)));
+#endif
+  }
+
 };
 #endif
 
@@ -475,6 +539,10 @@ struct THCNumerics<float> {
   static inline __host__ __device__  float frac (float a) { return a - truncf(a); }
   static inline __host__ __device__  float cinv (float a) { return 1.0f / a; }
   static inline __host__ __device__  float add  (float a, float b) { return a + b; }
+  static inline __host__ __device__  float div  (float a, float b) { return a / b; }
+  static inline __host__ __device__  float mul  (float a, float b) { return a * b; }
+  static inline __host__ __device__  float sub  (float a, float b) { return a - b; }
+  static inline __host__ __device__  float pow  (float a, float b) { return powf(a, b); }
 };
 
 template <>
@@ -514,6 +582,10 @@ struct THCNumerics<double> {
   static inline __host__ __device__  double frac (double a) { return a - ::trunc(a); }
   static inline __host__ __device__  double cinv (double a) { return 1.0 / a; }
   static inline __host__ __device__  double add  (double a, double b) { return a + b; }
+  static inline __host__ __device__  double div  (double a, double b) { return a / b; }
+  static inline __host__ __device__  double mul  (double a, double b) { return a * b; }
+  static inline __host__ __device__  double sub  (double a, double b) { return a - b; }
+  static inline __host__ __device__  double pow  (double a, double b) { return ::pow(a, b); }
 };
 
 /// `half` has some type conversion issues associated with it, since it

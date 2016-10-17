@@ -123,7 +123,7 @@ inline dim3 getNoncontigReduceBlock() {
   return dim3(THC_NONCONTIG_REDUCE_BLOCK_SIZE);
 }
 
-inline dim3 getContigReduceBlock(long numSlices, long reductionSize) {
+inline dim3 getContigReduceBlock(ptrdiff_t numSlices, long reductionSize) {
   // If the number of slices is low but the reduction dimension size
   // is high, then we should increase block size for greater parallelism.
   // Aim for at least 32 warps per SM (assume 15 SMs; don't bother
@@ -148,13 +148,13 @@ inline dim3 getContigReduceBlock(long numSlices, long reductionSize) {
   return dim3(numWarps * 32);
 }
 
-inline bool getNoncontigReduceGrid(long elements, dim3& grid) {
+inline bool getNoncontigReduceGrid(ptrdiff_t elements, dim3& grid) {
   // One output point per thread
   return THC_getGridFromTiles(THCCeilDiv(elements,
-                                         (long) THC_NONCONTIG_REDUCE_BLOCK_SIZE), grid);
+                                         (ptrdiff_t) THC_NONCONTIG_REDUCE_BLOCK_SIZE), grid);
 }
 
-inline bool getContigReduceGrid(long elements, dim3& grid) {
+inline bool getContigReduceGrid(ptrdiff_t elements, dim3& grid) {
   // One output point per block
   return THC_getGridFromTiles(elements, grid);
 }
@@ -169,11 +169,11 @@ bool THC_reduceDim(THCState* state,
                    const ReduceOp& reduceOp,
                    typename TensorUtils<TensorType>::DataType init,
                    int dim) {
-  long inElements = TensorUtils<TensorType>::getNumElements(state, in);
+  ptrdiff_t inElements = TensorUtils<TensorType>::getNumElements(state, in);
 
   long reductionSize = TensorUtils<TensorType>::getSize(state, in, dim);
   long reductionStride = TensorUtils<TensorType>::getStride(state, in, dim);
-  long outElements = inElements / reductionSize;
+  ptrdiff_t outElements = inElements / reductionSize;
 
   if (TensorUtils<TensorType>::getDims(state, out) > MAX_CUTORCH_DIMS ||
       TensorUtils<TensorType>::getDims(state, in) > MAX_CUTORCH_DIMS) {

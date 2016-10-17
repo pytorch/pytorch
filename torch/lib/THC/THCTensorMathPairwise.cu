@@ -344,21 +344,21 @@ void THCudaTensor_triu(THCState *state, THCudaTensor *self_, THCudaTensor *src_,
 #include "THCGenerateAllTypes.h"
 
 // Copy the kth diagonal of a matrix B to a vector A.
-__global__ void THCudaTensor_copyFromDiagonal(float* a, float* b, long start, long size, long strideSum, long strideA) {
-  for (long linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+__global__ void THCudaTensor_copyFromDiagonal(float* a, float* b, ptrdiff_t start, ptrdiff_t size, ptrdiff_t strideSum, ptrdiff_t strideA) {
+  for (ptrdiff_t linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
        linearIndex < size;
        linearIndex += gridDim.x * blockDim.x) {
-    const long bOffset = start + strideSum * linearIndex;
+    const ptrdiff_t bOffset = start + strideSum * linearIndex;
     a[strideA * linearIndex] = b[bOffset];
   }
 }
 
 // Copy vector B to the kth diagonal of a matrix A
-__global__ void THCudaTensor_copyToDiagonal(float* a, float* b, long start, long size, long strideSum, long strideB) {
-  for (long linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+__global__ void THCudaTensor_copyToDiagonal(float* a, float* b, ptrdiff_t start, ptrdiff_t size, ptrdiff_t strideSum, ptrdiff_t strideB) {
+  for (ptrdiff_t linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
        linearIndex < size;
        linearIndex += gridDim.x * blockDim.x) {
-    const long aOffset = start + strideSum * linearIndex;
+    const ptrdiff_t aOffset = start + strideSum * linearIndex;
     a[aOffset] = b[strideB * linearIndex];
   }
 }
@@ -381,16 +381,16 @@ void THCudaTensor_diag(THCState *state, THCudaTensor *self_, THCudaTensor *src_,
     THCudaTensor_copyFromDiagonal<<<grid, threads, 0, THCState_getCurrentStream(state)>>>
     (THCudaTensor_data(state, self_), THCudaTensor_data(state, src_), start, size, stride0 + stride1, strideSelf);
   } else {
-    long totalElements = THCudaTensor_nElement(state, src_);
-    long size = (k > 0) ? totalElements + k : totalElements - k;
+    ptrdiff_t totalElements = THCudaTensor_nElement(state, src_);
+    ptrdiff_t size = (k > 0) ? totalElements + k : totalElements - k;
     long strideSrc = THCudaTensor_stride(state, src_, 0);
     THCudaTensor_resize2d(state, self_, size, size);
     THCudaTensor_zero(state, self_);
     long stride0 = THCudaTensor_stride(state, self_, 0);
     long stride1 = THCudaTensor_stride(state, self_, 1);
     const dim3 threads(min((long long)THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock, (long long)size));
-    dim3 grid(min((long long)1024, (long long)THCCeilDiv(size, (long)threads.x)));
-    long start = (k >= 0 ? k * stride1 : -k * stride0);
+    dim3 grid(min((long long)1024, (long long)THCCeilDiv(size, (ptrdiff_t)threads.x)));
+    ptrdiff_t start = (k >= 0 ? k * stride1 : -k * stride0);
     THCudaTensor_copyToDiagonal<<<grid, threads, 0, THCState_getCurrentStream(state)>>>
     (THCudaTensor_data(state, self_), THCudaTensor_data(state, src_), start, totalElements, stride0 + stride1, strideSrc);
   }

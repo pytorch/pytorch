@@ -10,7 +10,7 @@ toDeviceTensor(THCState* state, THCudaTensor* t) {
 
   // Determine the maximum offset into the tensor achievable; `IndexT`
   // must be smaller than this type in order to use it.
-  long maxOffset = 0;
+  ptrdiff_t maxOffset = 0;
   IndexT sizes[Dim];
   IndexT strides[Dim];
 

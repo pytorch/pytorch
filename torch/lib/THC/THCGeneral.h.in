@@ -20,11 +20,14 @@
 #ifdef _WIN32
 # ifdef THC_EXPORTS
 #  define THC_API THC_EXTERNC __declspec(dllexport)
+#  define THC_CLASS __declspec(dllexport)
 # else
 #  define THC_API THC_EXTERNC __declspec(dllimport)
+#  define THC_CLASS __declspec(dllimport)
 # endif
 #else
 # define THC_API THC_EXTERNC
+# define THC_CLASS
 #endif
 
 #ifndef THAssert
@@ -37,11 +40,12 @@
 #endif
 
 struct THCRNGState;  /* Random number generator state. */
+struct THCStream;
 
 typedef struct _THCDeviceAllocator {
    cudaError_t (*malloc)(void*, void**, size_t, cudaStream_t);
    cudaError_t (*free)(void*, void*);
-   cudaError_t (*shutdown)(void*);
+   cudaError_t (*emptyCache)(void*);
    void* state;
 } THCDeviceAllocator;
 
@@ -75,7 +79,7 @@ THC_API struct cudaDeviceProp* THCState_getCurrentDeviceProperties(THCState* sta
 
 THC_API struct THCRNGState* THCState_getRngState(THCState* state);
 THC_API THAllocator* THCState_getCudaHostAllocator(THCState* state);
-THC_API THCDeviceAllocator* THCState_getDeviceAllocator(THCState* state);
+THC_API void THCState_setDeviceAllocator(THCState* state, THCDeviceAllocator* allocator);
 
 THC_API void THCMagma_init(THCState *state);
 
@@ -84,8 +88,13 @@ THC_API int THCState_getNumDevices(THCState* state);
 THC_API void THCState_reserveStreams(THCState* state, int numStreams, int nonBlocking);
 THC_API int THCState_getNumStreams(THCState* state);
 
-THC_API cudaStream_t THCState_getDeviceStream(THCState *state, int device, int stream);
+/* Stream API */
+THC_API cudaStream_t THCState_getCurrentStreamOnDevice(THCState *state, int device);
 THC_API cudaStream_t THCState_getCurrentStream(THCState *state);
+THC_API struct THCStream* THCState_getStream(THCState *state);
+THC_API void THCState_setStream(THCState *state, struct THCStream* stream);
+/* deprecated stream API */
+THC_API cudaStream_t THCState_getDeviceStream(THCState *state, int device, int stream);
 THC_API int THCState_getCurrentStreamIndex(THCState *state);
 THC_API void THCState_setCurrentStreamIndex(THCState *state, int stream);
 
@@ -114,6 +123,6 @@ THC_API cudaError_t THCudaFree(THCState *state, void *ptr);
 THC_API void THCSetGCHandler(THCState *state,
                              void (*torchGCHandlerFunction)(void *data),
                              void *data );
-THC_API void THCHeapUpdate(THCState *state, long size);
+THC_API void THCHeapUpdate(THCState *state, ptrdiff_t size);
 
 #endif

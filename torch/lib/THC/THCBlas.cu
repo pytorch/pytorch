@@ -245,7 +245,7 @@ void THCudaBlas_Hgemm(THCState *state, char transa, char transb, long m, long n,
     cublasSetStream(handle, THCState_getCurrentStream(state));
 
     // Check for native Hgemm support
-    if (THC_nativeHalfInstructions(state)) {
+    if (THC_fastHalfInstructions(state)) {
       THCublasCheck(cublasHgemm(handle, opa, opb,
 				i_m, i_n, i_k, &alpha, a, i_lda, b, i_ldb,
 				&beta, c, i_ldc));

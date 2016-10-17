@@ -18,9 +18,9 @@ THC_API void THCTensor_(sortKeyValueInplace)(THCState* state,
   dims = THCTensor_(nDimension)(state, key);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
 
-  long inElements = THCTensor_(nElement)(state, key);
+  ptrdiff_t inElements = THCTensor_(nElement)(state, key);
   long keySliceSize = THCTensor_(size)(state, key, dim);
-  long keySlices = inElements / keySliceSize;
+  ptrdiff_t keySlices = inElements / keySliceSize;
 
   if (THCTensor_(nDimension)(state, key) == 0) {
     // Zero-dim tensor; do nothing
@@ -160,7 +160,7 @@ void sortViaThrust(THCState* state,
                    int dim, bool dir) {
   long nDims = THCTensor_(nDimension)(state, input);
 
-  long totalElements = THCTensor_(nElement)(state, input);
+  ptrdiff_t totalElements = THCTensor_(nElement)(state, input);
   long sliceSize = THCTensor_(size)(state, input, dim);
   long sliceStride = THCTensor_(stride)(state, input, dim);
 

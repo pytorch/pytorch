@@ -264,6 +264,60 @@ struct TensorMulOp<half> {
 };
 #endif // CUDA_HALF_TENSOR
 
+template<typename T>
+struct TensorPowOp {
+  TensorPowOp(T v) : val(v) {}
+  __device__ __forceinline__ void operator()(T* out, T* in) {
+    *out = powf((float) *in, (float) val);
+  }
+
+  __device__ __forceinline__ void operator()(T* v) {
+    *v = powf((float) *v, (float) val);
+  }
+
+  const T val;
+};
+
+template <>
+struct TensorPowOp<double> {
+  TensorPowOp(double v) : val(v) {}
+
+  __device__ __forceinline__ void operator()(double* out, double* in) {
+    *out = pow(*in, val);
+  }
+
+  __device__ __forceinline__ void operator()(double* v) {
+    *v = pow(*v, val);
+  }
+
+  const double val;
+};
+
+#ifdef CUDA_HALF_TENSOR
+template <>
+struct TensorPowOp<half> {
+  TensorPowOp(half v) : val(v) {}
+
+  __device__ __forceinline__ void operator()(half* out, half* in) {
+    // No fp16 pow function yet
+    float fin = __half2float(*in);
+    float fval = __half2float(val);
+    float fout = powf(fin, fval);
+    *out = __float2half(fout);
+  }
+
+  __device__ __forceinline__ void operator()(half* v) {
+    // No fp16 pow function yet
+    float fv = __half2float(*v);
+    float fval = __half2float(val);
+    float fout = powf(fv, fval);
+    *v = __float2half(fout);
+  }
+
+  const half val;
+};
+#endif // CUDA_HALF_TENSOR
+
 template <typename T>
 struct TensorCPowOp {
   __device__ __forceinline__ void operator()(T* out, T* in) {
@@ -342,5 +396,149 @@ struct TensorDivOp<half> {
   }
 };
 #endif // CUDA_HALF_TENSOR
+
+template <typename T>
+struct TensorClampOp {
+  TensorClampOp(T min, T max) : minValue(min), maxValue(max) {}
+  __device__ __forceinline__ void operator()(T* out, T* in) {
+    T val = THCNumerics<T>::lt(*in, maxValue) ? *in : maxValue;
+    *out = THCNumerics<T>::gt(minValue, val) ? minValue : val;
+  }
+
+  __device__ __forceinline__ void operator()(T* v) {
+    T val = THCNumerics<T>::lt(*v, maxValue) ? *v : maxValue;
+    *v = THCNumerics<T>::gt(minValue, val) ? minValue : val;
+  }
+
+  const T minValue;
+  const T maxValue;
+};
+
+template <typename T>
+struct TensorLerpOp {
+  TensorLerpOp(T w) : w(w) {}
+
+  __device__ __forceinline__ void operator()(T *out, T *a, T *b) {
+    *out = THCNumerics<T>::add(
+      *a,
+      THCNumerics<T>::mul(
+          w,
+          THCNumerics<T>::sub(*b, *a)
+        )
+    );
+  }
+
+  const T w;
+};
+
+template <typename T>
+struct TensorCrossOp {
+  TensorCrossOp(long sx, long sy, long so) : sx(sx), sy(sy), so(so) {}
+
+  __device__ __forceinline__ void operator()(T* out, T* x, T*y) {
+    out[0 * so] = THCNumerics<T>::sub(
+        THCNumerics<T>::mul(x[1 * sx], y[2 * sy]),
+        THCNumerics<T>::mul(x[2 * sx], y[1 * sy])
+    );
+
+    out[1 * so] = THCNumerics<T>::sub(
+        THCNumerics<T>::mul(x[2 * sx], y[0 * sy]),
+        THCNumerics<T>::mul(x[0 * sx], y[2 * sy])
+    );
+
+    out[2 * so] = THCNumerics<T>::sub(
+        THCNumerics<T>::mul(x[0 * sx], y[1 * sy]),
+        THCNumerics<T>::mul(x[1 * sx], y[0 * sy])
+    );
+  }
+
+  const long sx, sy, so;
+};
+
+template <typename T>
+struct TensorMaxOp {
+  __device__ __forceinline__ void operator()(T* out, T* in) {
+    *out = THCNumerics<T>::gt(*out, *in) ? *out : *in;
+  }
+
+  __device__ __forceinline__ void operator()(T* out, T* in1, T* in2) {
+    *out = THCNumerics<T>::gt(*in1, *in2) ? *in1 : *in2;
+  }
+};
+
+template <typename T>
+struct TensorMinOp {
+  __device__ __forceinline__ void operator()(T* out, T* in) {
+    *out = THCNumerics<T>::lt(*out, *in) ? *out : *in;
+  }
+
+  __device__ __forceinline__ void operator()(T* out, T* in1, T* in2) {
+    *out = THCNumerics<T>::lt(*in1, *in2) ? *in1 : *in2;
+  }
+};
+
+template <typename T>
+struct TensorMaxValueOp {
+  TensorMaxValueOp(T v) : val(v) {}
+
+  __device__ __forceinline__ void operator()(T* out) {
+    *out = THCNumerics<T>::gt(*out, val) ? *out : val;
+  }
+
+  __device__ __forceinline__ void operator()(T* out, T* in) {
+    *out = THCNumerics<T>::gt(*in, val) ? *in : val;
+  }
+
+  T val;
+};
+
+template <typename T>
+struct TensorMinValueOp {
+  TensorMinValueOp(T v) : val(v) {}
+
+  __device__ __forceinline__ void operator()(T* out) {
+    *out = THCNumerics<T>::lt(*out, val) ? *out : val;
+  }
+
+  __device__ __forceinline__ void operator()(T* out, T* in) {
+    *out = THCNumerics<T>::lt(*in, val) ? *in : val;
+  }
+
+  T val;
+};
+
+template <typename T>
+struct TensorAddCMulOp {
+  TensorAddCMulOp(T v) : val(v) {}
+
+  __device__ __forceinline__ void operator()(T* out, T* in1, T* in2) {
+    *out = THCNumerics<T>::add(
+      *out,
+      THCNumerics<T>::mul(
+        val,
+        THCNumerics<T>::mul(*in1, *in2)
+      )
+    );
+  }
+
+  T val;
+};
+
+template <typename T>
+struct TensorAddCDivOp {
+  TensorAddCDivOp(T v) : val(v) {}
+
+  __device__ __forceinline__ void operator()(T* out, T* in1, T* in2) {
+    *out = THCNumerics<T>::add(
+      *out,
+      THCNumerics<T>::mul(
+        val,
+        THCNumerics<T>::div(*in1, *in2)
+      )
+    );
+  }
+
+  T val;
+};
 
 #endif // THC_TENSORMATH_POINTWISE_CUH

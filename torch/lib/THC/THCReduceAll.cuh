@@ -124,16 +124,16 @@ kernelReduceAllPass2(int numPass1Blocks,
 
 // Perform a two-pass reduction if the tensor is large enough to
 // warrant it.
-inline bool isTwoPassReductionSize(long elements) {
+inline bool isTwoPassReductionSize(ptrdiff_t elements) {
   return (elements > THC_TWO_PASS_REDUCTION_SIZE);
 }
 
 template <typename InT, typename AccT>
-inline long getTwoPassBlocks(THCState* state, long elements) {
-  long numBlocks = THCCeilDiv(elements, THC_REDUCE_ALL_BLOCK_SIZE);
+inline ptrdiff_t getTwoPassBlocks(THCState* state, ptrdiff_t elements) {
+  ptrdiff_t numBlocks = THCCeilDiv(elements, (ptrdiff_t)THC_REDUCE_ALL_BLOCK_SIZE);
 
   // We can only have as many blocks as there is scratch space
-  long scratchSpace =
+  ptrdiff_t scratchSpace =
     THCState_getCurrentDeviceScratchSpaceSize(state) / sizeof(AccT);
   THAssert(scratchSpace > 0);
 
@@ -146,14 +146,14 @@ inline long getTwoPassBlocks(THCState* state, long elements) {
 
 // Get the block/grid size that we want
 template <typename InT, typename AccT>
-inline void getPass1ReduceBlockGrid(THCState* state, long elements,
+inline void getPass1ReduceBlockGrid(THCState* state, ptrdiff_t elements,
                                     dim3& grid, dim3& block) {
   grid = dim3(getTwoPassBlocks<InT, AccT>(state, elements));
   block = dim3(THC_REDUCE_ALL_BLOCK_SIZE);
 }
 
 template <typename InT, typename AccT>
-inline void getPass2ReduceBlockGrid(THCState* state, long elements,
+inline void getPass2ReduceBlockGrid(THCState* state, ptrdiff_t elements,
                                     dim3& grid, dim3& block) {
   grid = dim3(1);
   // We only need as many threads as there were blocks originally
@@ -161,7 +161,7 @@ inline void getPass2ReduceBlockGrid(THCState* state, long elements,
 }
 
 template <typename InT, typename AccT>
-inline void getSinglePassReduceBlockGrid(long elements,
+inline void getSinglePassReduceBlockGrid(ptrdiff_t elements,
                                          dim3& grid, dim3& block) {
   grid = dim3(1);
   block = dim3(THC_REDUCE_ALL_BLOCK_SIZE);
@@ -176,7 +176,7 @@ template <typename ModifyOp,
           int ADims>
 void callReduceAll(THCState* state,
                    const TensorInfo<InT, IndexType>& in,
-                   long totalElements,
+                   ptrdiff_t totalElements,
                    AccT init,
                    const ModifyOp& modifyOp,
                    const ReduceOp& reduceOp,
@@ -186,13 +186,21 @@ void callReduceAll(THCState* state,
   dim3 block;
 
   if (isTwoPassReductionSize(totalElements)) {
+    bool freeScratchSpace = false;
+    void* scratchSpace = THCState_getCurrentDeviceScratchSpace(state);
+    if (!scratchSpace) {
+      THCudaCheck(THCudaMalloc(state, &scratchSpace,
+          THCState_getCurrentDeviceScratchSpaceSize(state)));
+      freeScratchSpace = true;
+    }
+
     getPass1ReduceBlockGrid<InT, AccT>(state, totalElements, grid, block);
     size_t smemSize = block.x * sizeof(AccT);
 
     kernelReduceAllPass1<ModifyOp, ReduceOp, ReduceAccOp, InT, AccT, IndexType, ADims>
       <<<grid, block, smemSize, THCState_getCurrentStream(state)>>>(
         in, (IndexType) totalElements, init, modifyOp, reduceOp, reduceAccOp,
-        (AccT*) THCState_getCurrentDeviceScratchSpace(state));
+        (AccT*) scratchSpace);
 
     int numPass1Blocks = grid.x;
     getPass2ReduceBlockGrid<InT, AccT>(state, totalElements, grid, block);
@@ -201,9 +209,11 @@ void callReduceAll(THCState* state,
     kernelReduceAllPass2<ReduceAccOp, AccT, IndexType>
       <<<grid, block, smemSize, THCState_getCurrentStream(state)>>>(
         numPass1Blocks, init, reduceAccOp,
-        (AccT*) THCState_getCurrentDeviceScratchSpace(state),
-        devOut);
+        (AccT*) scratchSpace, devOut);
 
+    if (freeScratchSpace) {
+      THCudaCheck(THCudaFree(state, scratchSpace));
+    }
   } else {
     getSinglePassReduceBlockGrid<InT, AccT>(totalElements, grid, block);
     size_t smemSize = block.x * sizeof(AccT);
@@ -229,7 +239,7 @@ bool THC_reduceAll(THCState* state,
                    AccT init,
                    AccT* out,
                    int outOnDevice) {
-  long inElements = TensorUtils<TensorType>::getNumElements(state, in);
+  ptrdiff_t inElements = TensorUtils<TensorType>::getNumElements(state, in);
 
   if (TensorUtils<TensorType>::getDims(state, in) > MAX_CUTORCH_DIMS) {
     return false;
@@ -241,11 +251,17 @@ bool THC_reduceAll(THCState* state,
     return true;
   }
 
+  bool freeDevOut = false;
   AccT* devOut = out;
   if (!outOnDevice) {
     // Use the stream-specific scratch space for the reduction kernel
     // to write out its value
     devOut = (AccT*) THCState_getCurrentDeviceScratchSpace(state);
+    if (!devOut) {
+      THCudaCheck(THCudaMalloc(state, (void**)&devOut,
+          THCState_getCurrentDeviceScratchSpaceSize(state)));
+      freeDevOut = true;
+    }
   }
 
   // It is possible that the tensor dimensions are able to be collapsed,
@@ -311,6 +327,10 @@ bool THC_reduceAll(THCState* state,
   // the host (synchronous!)
   if (!outOnDevice) {
     cudaMemcpy(out, devOut, sizeof(AccT), cudaMemcpyDeviceToHost);
+  }
+
+  if (freeDevOut) {
+    THCudaCheck(THCudaFree(state, devOut));
   }
 
   return true;

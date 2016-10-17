@@ -354,7 +354,7 @@ THC_API void THCudaTensor_conv2Dmv(THCState *state, THCudaTensor *output, float 
     nOutputCols = (nInputCols - nKernelCols) / scol + 1;
   }
 
-  long nelem = THCudaTensor_nElement(state, output);
+  ptrdiff_t nelem = THCudaTensor_nElement(state, output);
   THCudaTensor_resize3d(state, output, nOutputPlane, nOutputRows, nOutputCols);
 
   if (beta == 0 || nelem != THCudaTensor_nElement(state, output)) {
@@ -475,7 +475,7 @@ THC_API void THCudaTensor_conv2Dmm(THCState *state, THCudaTensor *output, float 
     nOutputCols = (nInputCols - nKernelCols) / scol + 1;
   }
 
-  long nelem = THCudaTensor_nElement(state, output);
+  ptrdiff_t nelem = THCudaTensor_nElement(state, output);
   THCudaTensor_resize4d(state, output, nbatch, nOutputPlane, nOutputRows, nOutputCols);
 
   if (beta == 0 || nelem != THCudaTensor_nElement(state, output)) {
@@ -576,7 +576,7 @@ THC_API void THCudaTensor_conv2DRevger(THCState *state, THCudaTensor *output, fl
   nOutputRows = nInputRows - (nKernelRows - 1) * srow;
   nOutputCols = nInputCols - (nKernelCols - 1) * scol;
 
-  long nelem = THCudaTensor_nElement(state, output);
+  ptrdiff_t nelem = THCudaTensor_nElement(state, output);
   THCudaTensor_resize4d(state, output, nKernelPlane, nInputPlane, nOutputRows, nOutputCols);
 
   if (nelem == 0 || beta == 0 || nelem != THCudaTensor_nElement(state, output)) {
@@ -649,7 +649,7 @@ THC_API void THCudaTensor_conv2DRevgerm(THCState *state, THCudaTensor *output, f
   nOutputRows = nInputRows - (nKernelRows - 1) * srow;
   nOutputCols = nInputCols - (nKernelCols - 1) * scol;
 
-  long nelem = THCudaTensor_nElement(state, output);
+  ptrdiff_t nelem = THCudaTensor_nElement(state, output);
   THCudaTensor_resize4d(state, output, nKernelPlane, nInputPlane, nOutputRows, nOutputCols);
 
   if (nelem == 0 || beta == 0 || nelem != THCudaTensor_nElement(state, output)) {
@@ -912,7 +912,7 @@ THC_API void THCudaTensor_conv2Dmap(THCState *state, THCudaTensor *output, THCud
   nOutputRows = (nInputRows - nKernelRows) / stride_y + 1;
   nOutputCols = (nInputCols - nKernelCols) / stride_x + 1;
 
-  // long nelem = THCudaTensor_nElement(state, output);
+  // ptrdiff_t nelem = THCudaTensor_nElement(state, output);
   THCudaTensor_resize3d(state, output, nOutputPlane, nOutputRows, nOutputCols);
 
   float *input_data = THCudaTensor_data(state, input);

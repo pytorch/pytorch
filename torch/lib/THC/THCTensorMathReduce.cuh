@@ -67,6 +67,33 @@ struct ReduceMultiply<half, float> {
 };
 #endif // CUDA_HALF_TENSOR
 
+template <typename ResT, typename ArgT>
+struct SquareFunctor {
+    SquareFunctor(ResT mean): mean_(mean) {}
+
+    inline __device__ ResT operator()(ArgT x) const {
+      return (((ResT) x) - mean_) * (((ResT) x) - mean_);
+    }
+
+    const ResT mean_;
+};
+
+#ifdef CUDA_HALF_TENSOR
+template <typename ResT>
+struct SquareFunctor<ResT, half> {
+    SquareFunctor(ResT mean): mean_(mean) {}
+
+    inline __device__ ResT operator()(half x) const {
+      return THCNumerics<ResT>::mul(
+        THCNumerics<ResT>::sub(mean_, ScalarConvert<half, ResT>::to(x)),
+        THCNumerics<ResT>::sub(mean_, ScalarConvert<half, ResT>::to(x))
+      );
+    }
+
+    const ResT mean_;
+};
+#endif // CUDA_HALF_TENSOR
+
 template <typename T>
 struct ReduceMin {
   inline __device__ T operator()(T a, T b) const {
@@ -95,8 +122,319 @@ struct LogicalAny {
   }
 };
 
+template<typename Real>
+__global__ void THCTensor_kernel_renorm(Real *data, const Real value, const ptrdiff_t size, const Real maxnorm)
+{
+  __shared__ Real buffer[32];
+  long tx = threadIdx.x;
+  long bx = blockIdx.x;
+  long step = blockDim.x;
+  Real *row = data + size*bx;
+
+  buffer[tx] = ScalarConvert<int, Real>::to(0);
+
+  // get norm of axis
+  for (ptrdiff_t i=tx; i<size; i+=step)
+  {
+    buffer[tx] = THCNumerics<Real>::add(
+      buffer[tx],
+      THCNumerics<Real>::pow(
+        THCNumerics<Real>::abs(row[i]),
+        value)
+    );
+  }
+  // add (reduce)
+  for (unsigned int stride = blockDim.x >> 1; stride > 0; stride >>= 1)
+  {
+    __syncthreads();
+    if (tx < stride)
+      buffer[tx] = THCNumerics<Real>::add(buffer[tx], buffer[tx+stride]);
+  }
+  // clip norms
+  __syncthreads();
+  Real norm = THCNumerics<Real>::pow(buffer[0], THCNumerics<Real>::cinv(value));
+  if (THCNumerics<Real>::gt(norm, maxnorm))
+  {
+    norm = THCNumerics<Real>::div(
+      maxnorm,
+      THCNumerics<Real>::add(
+        norm,
+        ScalarConvert<float, Real>::to(1e-7)
+      )
+    );
+    // renormalize
+    for (ptrdiff_t i=tx; i<size; i+=step)
+    {
+      row[i] = THCNumerics<Real>::mul(row[i], norm);
+    }
+  }
+}
+
+template <typename T>
+struct TensorNonZeroOp
+{
+  TensorNonZeroOp() {}
+  __host__ __device__ T operator()(T lhs) const {
+    if (THCNumerics<T>::eq(lhs, ScalarConvert<float, T>::to(0.0))) {
+      return ScalarConvert<int, T>::to(0);
+    } else {
+      return ScalarConvert<int, T>::to(1);
+    }
+  }
+};
+
+template <typename T, int StaticExp>
+struct TensorNormOp
+{
+  TensorNormOp(T exp) : exponent(exp) {}
+
+  __host__ __device__ T operator()(T x) const {
+    if (StaticExp == 1) {
+      return (T) fabsf((float) x);
+    } else if (StaticExp == 2) {
+      return x * x;
+    } else {
+      return (T) powf(fabsf((float) x), (float) exponent);
+    }
+  }
+
+  const T exponent;
+};
+
+template <int StaticExp>
+struct TensorNormOp<double, StaticExp>
+{
+  TensorNormOp(double exp) : exponent(exp) {}
+
+  __host__ __device__ double operator()(double x) const {
+    if (StaticExp == 1) {
+      return fabs(x);
+    } else if (StaticExp == 2) {
+      return x * x;
+    } else {
+      return pow(fabs(x), exponent);
+    }
+  }
+
+  const double exponent;
+};
+
+#ifdef CUDA_HALF_TENSOR
+template <int StaticExp>
+struct TensorNormOp<half, StaticExp>
+{
+  TensorNormOp(half exp) : exponent(exp) {}
+
+  __host__ __device__ half operator()(half x) const {
+    if (StaticExp == 1) {
+      return THCNumerics<half>::abs(x);
+    } else if (StaticExp == 2) {
+      return THCNumerics<half>::mul(x, x);
+    } else {
+      return THCNumerics<half>::pow(THCNumerics<half>::abs(x), exponent);
+    }
+  }
+
+  const half exponent;
+};
+#endif
+
+template <typename T>
+struct TensorDistOp
+{
+  TensorDistOp(T exp) : exponent(exp) {}
+
+  __host__ __device__ T operator()(T x, T y) const {
+    return THCNumerics<T>::pow(
+      THCNumerics<T>::abs(THCNumerics<T>::sub(x, y)),
+      exponent
+    );
+  }
+
+  const T exponent;
+};
 
 #include <thrust/functional.h>
+
+// Given the sum of values and the sum of squares, compute the variance or standard deviation.
+template<typename Real, bool flag, bool apply_sqrt>
+__forceinline__ __device__ Real THCTensor_computeVar(Real sum, Real sum2, unsigned row_size) {
+  Real rs2 = ScalarConvert<unsigned, Real>::to(row_size);
+  Real rs2m = ScalarConvert<unsigned, Real>::to(row_size - 1);
+  Real zero = ScalarConvert<int, Real>::to(0);
+  if (flag) {
+    sum = THCNumerics<Real>::div(sum, rs2);
+    sum2 = THCNumerics<Real>::div(sum2, rs2);
+    sum2 = THCNumerics<Real>::sub(sum2, THCNumerics<Real>::mul(sum, sum));
+    sum2 = (THCNumerics<Real>::lt(sum2, zero) ? zero : sum2);
+  }
+  else {
+    sum = THCNumerics<Real>::div(sum, rs2);
+    sum2 = THCNumerics<Real>::div(sum2, rs2m);
+    sum2 = THCNumerics<Real>::sub(sum2,
+      THCNumerics<Real>::mul(
+        THCNumerics<Real>::div(rs2 ,rs2m),
+        THCNumerics<Real>::mul(sum, sum)));
+    sum2 = (THCNumerics<Real>::lt(sum2, zero) ? zero : sum2);
+  }
+  if (apply_sqrt)
+    return THCNumerics<Real>::sqrt(sum2);
+  else
+    return sum2;
+}
+
+/* Compute the variance (or standard deviation) along an outer dimension of a tensor.
+ *
+ * - num_orows is the size of the flattened outer dimensions;
+ * - num_irows is the size of the flattened inner dimensions;
+ * - row_size is the size of the dimension along which to compute the variance;
+ * - if flag is set, normalize by `row_size` instead of `row_size - 1`
+ * - if apply_sqrt is set, compute the standard deviation instead of variance
+ *
+ * The dimensions to the outside and inside of the specified dimension are considered as flattened.
+ * Thread blocks with the same blockIdx.y process an "outer row" (i.e. an element of the flattened
+ * outer dimensions, which contains several "inner rows").
+ * Each thread processes a single inner row at a time.
+ */
+template<typename Real, bool flag, bool apply_sqrt>
+__global__ void THCTensor_kernel_varOuterDim(Real *tgt, Real *src_, unsigned num_orows, unsigned num_irows, unsigned row_size)
+{
+  for (unsigned orow = blockIdx.x; orow < num_orows; orow += gridDim.x) {
+    for (unsigned irow = blockIdx.y * blockDim.x + threadIdx.x; irow < num_irows; irow += gridDim.y * blockDim.x) {
+      Real *src = src_ + orow * row_size * num_irows + irow;
+      Real sum = ScalarConvert<int, Real>::to(0), sum2 = ScalarConvert<int, Real>::to(0);
+
+      for (unsigned col = 0; col < row_size; ++col) {
+        Real val = *src;
+        sum = THCNumerics<Real>::add(sum, val);
+        sum2 = THCNumerics<Real>::add(
+          sum2,
+          THCNumerics<Real>::mul(val, val)
+        );
+
+        src += num_irows;
+      }
+
+      tgt[orow * num_irows + irow] = THCTensor_computeVar<Real, flag, apply_sqrt>(sum, sum2, row_size);
+    }
+  }
+}
+
+template<typename TensorTypeK, typename Real, bool apply_sqrt>
+__host__ void THCTensor_varOuterDim(THCState *state, TensorTypeK *tgt, TensorTypeK *src, long dimension, int flag)
+{
+  unsigned ndim = TensorUtils<TensorTypeK>::getDims(state, src);
+  // Treat all outer dimensions (i.e. dim < dimension) as one.
+  unsigned num_orows = 1;
+  for (long dim = 0; dim < dimension; dim++) {
+    num_orows *= TensorUtils<TensorTypeK>::getSize(state, src, dim);
+  }
+  unsigned row_size = TensorUtils<TensorTypeK>::getSize(state, src, dimension);
+  // Treat all inner dimensions (i.e. dim > dimension) as one.
+  unsigned num_irows = 1;
+  for (unsigned dim = dimension + 1; dim < ndim; dim++) {
+    num_irows *= TensorUtils<TensorTypeK>::getSize(state, src, dim);
+  }
+
+  dim3 threads(min(512, num_irows));
+  unsigned maxGridDim = 1024;
+  dim3 grid(min(maxGridDim, num_orows), min(maxGridDim, THCCeilDiv(num_irows, threads.x)));
+
+  if (flag) {
+    THCTensor_kernel_varOuterDim<Real, true, apply_sqrt><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
+        TensorUtils<TensorTypeK>::getData(state, tgt), TensorUtils<TensorTypeK>::getData(state, src), num_orows, num_irows, row_size);
+  } else {
+    THCTensor_kernel_varOuterDim<Real, false, apply_sqrt><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
+        TensorUtils<TensorTypeK>::getData(state, tgt), TensorUtils<TensorTypeK>::getData(state, src), num_orows, num_irows, row_size);
+  }
+  cudaError errcode = cudaGetLastError();
+  if (errcode != cudaSuccess) {
+    THError(cudaGetErrorString(errcode));
+  }
+}
+
+/* Compute the variance (or standard deviation) of the innermost dimension of a tensor.
+ *
+ * - num_rows is the size of the flattened outer dimensions;
+ * - row_size is the size of the innermost dimension;
+ * - if flag is set, normalize by `row_size` instead of `row_size - 1`
+ * - if apply_sqrt is set, compute the standard deviation instead of variance
+ *
+ * The outer dimensions of the tensor are considered as a single dimension, i.e. the tensor is
+ * considered as having 'num_rows' rows of size 'row_size'.
+ * Each thread block processes one or more sets of contiguous rows (processing multiple rows
+ * per thread block is quicker than processing a single row, especially for short rows).
+ */
+template<typename Real, bool flag, bool apply_sqrt>
+__global__ void THCTensor_kernel_varInnermostDim(Real *tgt, Real *src_, unsigned num_rows, unsigned row_size)
+{
+  __shared__ Real ssum[32][16];
+  __shared__ Real ssum2[32][16];
+
+  for (unsigned block_row = blockIdx.x * blockDim.y; block_row < num_rows; block_row += blockDim.y * gridDim.x) {
+    unsigned row = block_row + threadIdx.y;
+    Real sum = ScalarConvert<int, Real>::to(0), sum2 = ScalarConvert<int, Real>::to(0);
+    if (row < num_rows) {
+      Real *src = src_ + row * row_size;
+      // Sequential reduction within a thread.
+      for (unsigned col = threadIdx.x; col < row_size; col += blockDim.x) {
+        Real val = src[col];
+        sum = THCNumerics<Real>::add(sum, val);
+        sum2 = THCNumerics<Real>::add(sum2, THCNumerics<Real>::mul(val, val));
+      }
+    }
+    ssum[threadIdx.y][threadIdx.x] = sum;
+    ssum2[threadIdx.y][threadIdx.x] = sum2;
+    __syncthreads();
+
+    // Reduce intermediate values to single value.
+    for (unsigned s = 8; s > 1; s >>= 1) {
+      if (row < num_rows && threadIdx.x < s) {
+        ssum[threadIdx.y][threadIdx.x] =
+          THCNumerics<Real>::add(ssum[threadIdx.y][threadIdx.x], ssum[threadIdx.y][threadIdx.x + s]);
+        ssum2[threadIdx.y][threadIdx.x] =
+          THCNumerics<Real>::add(ssum2[threadIdx.y][threadIdx.x], ssum2[threadIdx.y][threadIdx.x + s]);
+      }
+      __syncthreads();
+    }
+
+    if (row < num_rows && threadIdx.x == 0) {
+      sum = THCNumerics<Real>::add(ssum[threadIdx.y][0], ssum[threadIdx.y][1]);
+      sum2 = THCNumerics<Real>::add(ssum2[threadIdx.y][0], ssum2[threadIdx.y][1]);
+      tgt[row] = THCTensor_computeVar<Real, flag, apply_sqrt>(sum, sum2, row_size);
+    }
+    __syncthreads();
+  }
+}
+
+template<typename TensorTypeK, typename Real, bool apply_sqrt>
+__host__ void THCTensor_varInnermostDim(THCState *state, TensorTypeK *tgt, TensorTypeK *src, int flag)
+{
+  unsigned ndim = TensorUtils<TensorTypeK>::getDims(state, src);
+  // Treat all outer dimensions as a single dimension.
+  unsigned num_rows = 1;
+  for (unsigned dim = 0; dim < ndim - 1; dim++) {
+    num_rows *= TensorUtils<TensorTypeK>::getSize(state, src, dim);
+  }
+  unsigned row_size = TensorUtils<TensorTypeK>::getSize(state, src, ndim - 1);
+
+  // From limited testing, 16x32 seemed a good compromise for handling both long and short dimensions.
+  dim3 threads(16, 32);
+  dim3 grid(min(1024, THCCeilDiv(num_rows, threads.y)));
+
+  if (flag) {
+    THCTensor_kernel_varInnermostDim<Real, true, apply_sqrt><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
+        TensorUtils<TensorTypeK>::getData(state, tgt), TensorUtils<TensorTypeK>::getData(state, src), num_rows, row_size);
+  } else {
+    THCTensor_kernel_varInnermostDim<Real, false, apply_sqrt><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
+        TensorUtils<TensorTypeK>::getData(state, tgt), TensorUtils<TensorTypeK>::getData(state, src), num_rows, row_size);
+  }
+  cudaError errcode = cudaGetLastError();
+  if (errcode != cudaSuccess) {
+    THError(cudaGetErrorString(errcode));
+  }
+}
+
 
 /* A set of reduction kernels that take in binary ops on thrust pairs (of value, index).
    These are useful when you not only have to do a reduction, but you might have
@@ -148,7 +486,7 @@ THC_transformReduceOuterDimIndex(THCState *state,
                                  BinaryFunction binary_op) {
   unsigned ndim = TensorUtils<TensorTypeK>::getDims(state, src);
   unsigned num_orows = 1;
-  for (unsigned dim = 0; dim < rdim; dim++) {
+  for (long dim = 0; dim < rdim; dim++) {
     num_orows *= TensorUtils<TensorTypeK>::getSize(state, src, dim);
   }
   unsigned row_size = TensorUtils<TensorTypeK>::getSize(state, src, rdim);

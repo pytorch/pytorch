@@ -238,13 +238,13 @@ __global__ void generate_log_normal(curandStateMtgp32 *state, int size, float *r
   }
 }
 
-#define NUM_BLOCKS min((int)THCCeilDiv(size, (long) BLOCK_SIZE), MAX_NUM_BLOCKS)
+#define NUM_BLOCKS min((int)THCCeilDiv(size, (ptrdiff_t) BLOCK_SIZE), MAX_NUM_BLOCKS)
 THC_API void THCudaTensor_uniform(THCState* state, THCudaTensor *self_, double a, double b)
 {
   THAssert(THCudaTensor_checkGPU(state, 1, self_));
   Generator* gen = THCRandom_getGenerator(state);
   THCudaTensor *self = THCudaTensor_newContiguous(state, self_);
-  long size = THCudaTensor_nElement(state, self);
+  ptrdiff_t size = THCudaTensor_nElement(state, self);
   float *data = THCudaTensor_data(state, self);
 
   generate_uniform<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
@@ -258,7 +258,7 @@ THC_API void THCudaTensor_bernoulli(THCState* state, THCudaTensor *self_, double
   THAssert(THCudaTensor_checkGPU(state, 1, self_));
   Generator* gen = THCRandom_getGenerator(state);
   THCudaTensor *self = THCudaTensor_newContiguous(state, self_);
-  long size = THCudaTensor_nElement(state, self);
+  ptrdiff_t size = THCudaTensor_nElement(state, self);
   float *data = THCudaTensor_data(state, self);
 
   generate_bernoulli<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
@@ -272,7 +272,7 @@ THC_API void THCudaTensor_normal(THCState* state, THCudaTensor *self_, double me
   THAssert(THCudaTensor_checkGPU(state, 1, self_));
   Generator* gen = THCRandom_getGenerator(state);
   THCudaTensor *self = THCudaTensor_newContiguous(state, self_);
-  long size = THCudaTensor_nElement(state, self);
+  ptrdiff_t size = THCudaTensor_nElement(state, self);
   float *data = THCudaTensor_data(state, self);
 
   generate_normal<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
@@ -287,7 +287,7 @@ THC_API void THCudaTensor_logNormal(THCState* state, THCudaTensor *self_, double
   Generator* gen = THCRandom_getGenerator(state);
 
   THCudaTensor *self = THCudaTensor_newContiguous(state, self_);
-  long size = THCudaTensor_nElement(state, self);
+  ptrdiff_t size = THCudaTensor_nElement(state, self);
   float *data = THCudaTensor_data(state, self);
 
   generate_log_normal<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
@@ -302,7 +302,7 @@ THC_API void THCudaTensor_geometric(THCState* state, THCudaTensor *self_, double
   Generator* gen = THCRandom_getGenerator(state);
 
   THCudaTensor *self = THCudaTensor_newContiguous(state, self_);
-  long size = THCudaTensor_nElement(state, self);
+  ptrdiff_t size = THCudaTensor_nElement(state, self);
   float *data = THCudaTensor_data(state, self);
 
   generate_geometric<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
@@ -317,7 +317,7 @@ THC_API void THCudaTensor_exponential(THCState* state, THCudaTensor *self_, doub
   Generator* gen = THCRandom_getGenerator(state);
 
   THCudaTensor *self = THCudaTensor_newContiguous(state, self_);
-  long size = THCudaTensor_nElement(state, self);
+  ptrdiff_t size = THCudaTensor_nElement(state, self);
   float *data = THCudaTensor_data(state, self);
 
   generate_exponential<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
@@ -332,7 +332,7 @@ THC_API void THCudaTensor_cauchy(THCState* state, THCudaTensor *self_, double me
   Generator* gen = THCRandom_getGenerator(state);
 
   THCudaTensor *self = THCudaTensor_newContiguous(state, self_);
-  long size = THCudaTensor_nElement(state, self);
+  ptrdiff_t size = THCudaTensor_nElement(state, self);
   float *data = THCudaTensor_data(state, self);
 
   generate_cauchy<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
@@ -704,7 +704,7 @@ THC_API void THCudaTensor_multinomial(struct THCState *state,
 
       // Each warp in a block will generate a sample from a different
       // distribution concurrently.
-      long numBlocks = THCCeilDiv(numDist, 4L);
+      ptrdiff_t numBlocks = THCCeilDiv(numDist, 4L);
       dim3 grid(numBlocks < MAX_NUM_BLOCKS ? numBlocks : MAX_NUM_BLOCKS);
 
       for (int sample = 0; sample < n_sample; ++sample) {

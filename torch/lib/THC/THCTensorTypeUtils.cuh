@@ -33,7 +33,7 @@ struct TensorUtils {
 
 #define TENSOR_UTILS(TENSOR_TYPE, DATA_TYPE, ACC_DATA_TYPE)             \
   template <>                                                           \
-  struct TensorUtils<TENSOR_TYPE> {                                     \
+  struct THC_CLASS TensorUtils<TENSOR_TYPE> {                                     \
     typedef DATA_TYPE DataType;                                         \
     typedef ACC_DATA_TYPE AccDataType;                                  \
                                                                         \
@@ -50,7 +50,7 @@ struct TensorUtils {
     static void resizeAs(THCState* state, TENSOR_TYPE* dst,             \
                          TENSOR_TYPE* src);                             \
     static DATA_TYPE* getData(THCState* state, TENSOR_TYPE* t);         \
-    static long getNumElements(THCState* state, TENSOR_TYPE* t);        \
+    static ptrdiff_t getNumElements(THCState* state, TENSOR_TYPE* t);        \
     static long getSize(THCState* state, TENSOR_TYPE* t, int dim);      \
     static long getStride(THCState* state, TENSOR_TYPE* t, int dim);    \
     static int getDims(THCState* state, TENSOR_TYPE* t);                \

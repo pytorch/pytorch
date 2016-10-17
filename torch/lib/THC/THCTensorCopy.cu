@@ -24,7 +24,7 @@ struct CopyOp {
 template <typename TensorTypeDst, typename TensorTypeSrc>
 void
 THC_copyTensor(THCState* state, TensorTypeDst* dst, TensorTypeSrc* src) {
-  long totalElements = TensorUtils<TensorTypeDst>::getNumElements(state, dst);
+  ptrdiff_t totalElements = TensorUtils<TensorTypeDst>::getNumElements(state, dst);
 
   THArgCheck(totalElements ==
              TensorUtils<TensorTypeSrc>::getNumElements(state, src),
@@ -65,12 +65,8 @@ THC_copyTensor(THCState* state, TensorTypeDst* dst, TensorTypeSrc* src) {
   // user to add needed synchronization on the dst device, since the
   // stream on the dst device that wishes to synchronize may not be
   // the same index as the one on the src device.
-  int copyStreamIndex =
-    THCState_getCurrentStreamIndex(state);
-  cudaStream_t copyStream =
-    THCState_getDeviceStream(state, srcDev, copyStreamIndex);
-
-  if (srcDev != dstDev && copyStreamIndex == 0) {
+  cudaStream_t copyStream = THCState_getCurrentStreamOnDevice(state, srcDev);
+  if (srcDev != dstDev && copyStream == NULL) {
     // This is a cross-device copy on the default stream. We perform a
     // two-way barrier between both devices' default streams before
     // the copy. This ensures that any write-after-write and
@@ -182,7 +178,7 @@ THC_copyTensor(THCState* state, TensorTypeDst* dst, TensorTypeSrc* src) {
     }
   }
 
-  if (srcDev != dstDev && copyStreamIndex == 0) {
+  if (srcDev != dstDev && copyStream == NULL) {
     // dst waits on src barrier (dst already waits on dst). We cannot
     // operate on dst's copy until the copy is complete.
 
