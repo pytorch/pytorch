@@ -559,7 +559,7 @@ int THCState_getCurrentStreamIndex(THCState *state)
   int device;
   THCudaCheck(cudaGetDevice(&device));
   THCCudaResourcesPerDevice* res = THCState_getDeviceResourcePtr(state, device);
-  for (int i = 0; i < state->numUserStreams; ++i) {
+  for (int i = 0; i <= state->numUserStreams; ++i) {
     if (res->streams[i] == stream) {
       return i;
     }
