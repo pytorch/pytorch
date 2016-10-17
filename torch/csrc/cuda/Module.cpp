@@ -223,7 +223,7 @@ PyObject * THCPModule_cudaSynchronize(PyObject *_unused)
 bool THCPModule_initCuda(PyObject *module_dict) {
 #define ASSERT_TRUE(cond) if (!(cond)) { return false; }
   state = THCState_alloc();
-  THCCachingAllocator_init(THCState_getDeviceAllocator(state));
+  THCState_setDeviceAllocator(state, THCCachingAllocator_get());
   THCudaInit(state);
 
 #ifdef USE_MAGMA
