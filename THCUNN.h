@@ -469,18 +469,6 @@ TH_API void THNN_CudaSpatialFractionalMaxPooling_updateGradInput(
           int poolSizeW, int poolSizeH,
           THCIndexTensor *indices);
 
-TH_API void THNN_CudaSpatialUpSamplingNearest_updateOutput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *output,
-          int scale_factor);
-TH_API void THNN_CudaSpatialUpSamplingNearest_updateGradInput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *gradOutput,
-          THCudaTensor *gradInput,
-          int scale_factor);
-
 TH_API void THNN_CudaSpatialUpSamplingBilinear_updateOutput(
           THCState *state,
           THCudaTensor *input,

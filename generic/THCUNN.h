@@ -306,6 +306,19 @@ TH_API void THNN_(SpatialSubSampling_accGradParameters)(
                   int dW, int dH,
                   float scale);
 
+TH_API void THNN_(SpatialUpSamplingNearest_updateGradInput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *gradOutput,
+                  THCTensor *gradInput,
+                  int scale_factor);
+
+TH_API void THNN_(SpatialUpSamplingNearest_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *output,
+                  int scale_factor);
+
 TH_API void THNN_(RReLU_updateOutput)(
                   THCState *state,
                   THCTensor *input,
