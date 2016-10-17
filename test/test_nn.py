@@ -618,12 +618,38 @@ class TestNN(NNTestCase):
                             mu(output_small, indices_small, (h, w)))
 
 
+    def test_RNN_cell(self):
+        # this is just a smoke test; these modules are implemented through
+        # autograd so no Jacobian test is needed
+        for module in (nn.rnn.cell.RNN, nn.rnn.cell.RNNReLU, nn.rnn.cell.GRU):
+            for bias in (True, False):
+                input = Variable(torch.randn(3, 10))
+                hx = Variable(torch.randn(3, 20))
+                cell = module(10, 20, bias=bias)
+                for i in range(6):
+                    hx = cell(input, hx)
+
+                hx.sum().backward()
+
+    def test_LSTM_cell(self):
+        # this is just a smoke test; these modules are implemented through
+        # autograd so no Jacobian test is needed
+        for bias in (True, False):
+            input = Variable(torch.randn(3, 10))
+            hx = Variable(torch.randn(3, 20))
+            cx = Variable(torch.randn(3, 20))
+            lstm = nn.rnn.cell.LSTM(10, 20, bias=bias)
+            for i in range(6):
+                hx, cx = lstm(input, (hx, cx))
+
+            (hx+cx).sum().backward()
+
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     def test_RNN_cpu_vs_cudnn(self):
 
         def forward_backward(cuda, module, bias, input_val, hx_val, weights_val):
             rnn = module(input_size, hidden_size, num_layers, bias=bias)
-            is_lstm = module == nn.LSTM
+            is_lstm = module == nn.rnn.LSTM
 
             for x_layer, y_layer in zip(rnn.all_weights, weights_val):
                 for x, y in zip(x_layer, y_layer):
@@ -678,7 +704,7 @@ class TestNN(NNTestCase):
 
         # FIXME: we can't use torch.cuda.DoubleTensor because sum() is not yet defined on it
         with set_default_tensor_type('torch.FloatTensor'):
-            for module in (nn.RNN, nn.RNNReLU, nn.LSTM, nn.GRU):
+            for module in (nn.rnn.RNNTanh, nn.rnn.RNNReLU, nn.rnn.LSTM, nn.rnn.GRU):
                 for bias in (True, False):
                     input_val = torch.randn(seq_length, batch, input_size)
                     hx_val = torch.randn(num_layers, batch, hidden_size)
@@ -880,7 +906,8 @@ new_module_tests = [
         constructor=lambda: nn.FractionalMaxPool2d(2, output_ratio=0.5, _random_samples=torch.DoubleTensor(1, 3, 2).uniform_()),
         input_size=(1, 3, 5, 5),
         fullname='FractionalMaxPool2d_ratio',
-        test_cuda=False),
+        test_cuda=False
+    ),
     dict(
         constructor=lambda: nn.FractionalMaxPool2d((2, 2), output_size=(4, 4), _random_samples=torch.DoubleTensor(1, 3, 2).uniform_()),
         input_size=(1, 3, 7, 7),

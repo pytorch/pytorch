@@ -9,8 +9,6 @@ except ImportError:
 import torch.backends.cudnn.rnn
 
 
-
-
 def _getCudnnMode(mode):
     if mode == 'RNN_RELU':
         return cudnn.CUDNN_RNN_RELU
@@ -48,11 +46,11 @@ def linear(input, w, b):
 
 def RNNReLUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
         hy = ReLU(linear(input, w_ih, b_ih) + linear(hidden, w_hh, b_hh))
-        return hy, hy
+        return hy
 
 def RNNTanhCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
         hy = tanh(linear(input, w_ih, b_ih) + linear(hidden, w_hh, b_hh))
-        return hy, hy
+        return hy
 
 def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
         hx, cx = hidden
@@ -63,10 +61,10 @@ def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
         forgetgate = sigmoid(gates[:,1*hsz:2*hsz])
         cellgate   = tanh(   gates[:,2*hsz:3*hsz])
         outgate    = sigmoid(gates[:,3*hsz:4*hsz])
-        nextc = (forgetgate * cx) + (ingate * cellgate)
-        nexth = outgate * tanh(nextc)
+        cy = (forgetgate * cx) + (ingate * cellgate)
+        hy = outgate * tanh(cy)
 
-        return (nexth, nextc), nexth
+        return hy, cy
 
 def GRUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
         hsz = hidden.size(1)
@@ -74,14 +72,12 @@ def GRUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
         gh = linear(hidden, w_hh, b_hh)
         # FIXME: chunk
 
-        # this is a bit weird, it doesn't match the order of parameters
-        # implied by the cudnn docs, and it also uses nexth for output...
         resetgate = sigmoid(gi[:,0*hsz:1*hsz] + gh[:,0*hsz:1*hsz])
         inputgate = sigmoid(gi[:,1*hsz:2*hsz] + gh[:,1*hsz:2*hsz])
         newgate   = tanh(gi[:,2*hsz:3*hsz] + resetgate * gh[:,2*hsz:3*hsz])
-        nexth     = newgate + inputgate * (hidden - newgate)
+        hy     = newgate + inputgate * (hidden - newgate)
 
-        return nexth, nexth  # FIXME: nexth, nexth ???
+        return hy
 
 def StackedRNN(cell, num_layers, lstm=False):
     def forward(input, hidden, weight):
@@ -92,8 +88,9 @@ def StackedRNN(cell, num_layers, lstm=False):
             hidden = zip(*hidden)
 
         for i in range(num_layers):
-            hy, input = cell(input, hidden[i], *weight[i])
+            hy = cell(input, hidden[i], *weight[i])
             next_hidden.append(hy)
+            input = hy[0] if lstm else hy
 
         if lstm:
             next_h, next_c = zip(*next_hidden)
@@ -221,8 +218,6 @@ class CudnnRNN(NestedIOFunction):
                 output,
                 weight,
                 grad_weight)
-
-        # FIXME: zero out grad_bias if necessary :)
 
         return grad_input, grad_weight, grad_hx
 

@@ -117,8 +117,6 @@ class TensorDescriptor(object):
     def as_tuple(self):
         return (self._type, tuple(self._size), tuple(self._stride))
 
-<<<<<<< 9cd68129da50023929aff0ca4e4ba667ae75d785
-=======
 
 class TensorDescriptorArray(object):
     def __init__(self, N):
@@ -148,7 +146,6 @@ class TensorDescriptorArray(object):
         return (self._type, tuple(self._size), tuple(self._stride))
 
 
->>>>>>> CUDNN RNN bindings
 class ConvolutionDescriptor(object):
     def __init__(self):
         ptr = ctypes.c_void_p()

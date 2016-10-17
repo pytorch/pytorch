@@ -2,8 +2,7 @@ import math
 import torch
 from torch.autograd import Variable
 
-from .module import Module
-from .utils import _pair, _triple
+from ..module import Module
 
 
 class RNNBase(Module):
@@ -70,8 +69,8 @@ class RNNBase(Module):
         return func(input, self.all_weights, hx)
 
 
-class RNN(RNNBase):
-    """Applies a multi-layer RNN with tanh non-linearity to an input sequence.
+class RNNTanh(RNNBase):
+    """Applies a multi-layer Elman RNN with tanh non-linearity to an input sequence.
 
 
     For each element in the input sequence, each layer computes the following
@@ -101,17 +100,17 @@ class RNN(RNNBase):
         bias_ih_l[k]: the learnable input-hidden bias of the k-th layer, of shape (hidden_size)
         bias_hh_l[k]: the learnable hidden-hidden bias of the k-th layer, of shape (hidden_size)
     Examples:
-        >>> rnn = nn.RNN(10, 20, 2)
+        >>> rnn = nn.RNNTanh(10, 20, 2)
         >>> input = Variable(torch.randn(5, 3, 10))
         >>> h0 = Variable(torch.randn(2, 3, 20))
         >>> output, hn = rnn(input, h0)
     """
 
     def __init__(self, *args, **kwargs):
-        super(RNN, self).__init__('RNN_TANH', *args, **kwargs)
+        super(RNNTanh, self).__init__('RNN_TANH', *args, **kwargs)
 
 class RNNReLU(RNNBase):
-    """Applies a multi-layer RNN with ReLU non-linearity to an input sequence.
+    """Applies a multi-layer Elman RNN with ReLU non-linearity to an input sequence.
 
 
     For each element in the input sequence, each layer computes the following
