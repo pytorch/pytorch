@@ -5,6 +5,7 @@ import collections
 import sys
 import traceback
 
+
 class ExceptionWrapper(object):
     "Wraps an exception plus traceback to communicate across threads"
 
@@ -13,31 +14,23 @@ class ExceptionWrapper(object):
         self.exc_msg = "".join(traceback.format_exception(*exc_info))
 
 
-def _processBatch(dataset, indices, collate_fn):
-    samples = [dataset[idx] for idx in indices]
-
-    samples = collate_fn(samples)
-    return samples
-
-
-def _workerLoop(dataset, index_queue, data_queue, collate_fn):
+def _worker_loop(dataset, index_queue, data_queue, collate_fn):
     torch.set_num_threads(1)
     while True:
-        batch_indices = index_queue.get()
-
-        if batch_indices is None:
+        r = index_queue.get()
+        if r is None:
             break
-
+        idx, batch_indices = r
         try:
-            samples = _processBatch(dataset, batch_indices, collate_fn)
+            samples = collate_fn([dataset[i] for i in batch_indices])
         except Exception:
-            data_queue.put(ExceptionWrapper(sys.exc_info()))
+            data_queue.put((idx, ExceptionWrapper(sys.exc_info())))
         else:
-            data_queue.put(samples)
+            data_queue.put((idx, samples))
 
-# default collate function, puts each data field into a
-# tensor with outer dimension batchSize
+
 def default_collate(batch):
+    "Puts each data field into a tensor with outer dimension batch size"
     if torch.is_tensor(batch[0]):
         return torch.cat([t.view(1, *t.size()) for t in batch], 0)
     elif isinstance(batch[0], int):
@@ -55,6 +48,7 @@ def default_collate(batch):
     raise TypeError(("batch must contain tensors, numbers, or lists; found {}"
                      .format(type(batch[0]))))
 
+
 class DataLoaderIter(object):
     "Iterates once over the DataLoader's dataset, as specified by the sampler"
 
@@ -68,63 +62,83 @@ class DataLoaderIter(object):
         self.samples_remaining = len(self.sampler)
         self.sample_iter = iter(self.sampler)
 
-        if self.num_workers:
+        if self.num_workers > 0:
             self.index_queue = multiprocessing.Queue()
             self.data_queue = multiprocessing.Queue()
             self.batches_outstanding = 0
-            self.joined = False
+            self.shutdown = False
+            self.send_idx = 0
+            self.rcvd_idx = 0
+            self.reorder_dict = {}
 
             self.workers = [
                 multiprocessing.Process(
-                    target=_workerLoop,
+                    target=_worker_loop,
                     args=(self.dataset, self.index_queue, self.data_queue, self.collate_fn))
-                for i in range(self.num_workers)]
+                for _ in range(self.num_workers)]
 
             for w in self.workers:
-                w.daemon = True # ensure that the worker exits on process exit
+                w.daemon = True  # ensure that the worker exits on process exit
                 w.start()
-                # prime the prefetch loop with exactly 1 batch per process
-                # this ensures no deadlocks on the queues using the blocking queue API
-                self._putBatch()
 
-    def _nextBatch(self):
-        batch = [next(self.sample_iter) for x in range(min(self.samples_remaining, self.batch_size))]
+            # prime the prefetch loop
+            for _ in range(2 * self.num_workers):
+                self._put_indices()
+
+    def __len__(self):
+        return len(self.sampler)
+
+    def __next__(self):
+        if self.num_workers == 0:
+            # same-process loading
+            if self.samples_remaining == 0:
+                raise StopIteration
+            indices = self._next_indices()
+            return self.collate_fn([self.dataset[i] for i in indices])
+
+        # check if the next sample has already been generated
+        if self.rcvd_idx in self.reorder_dict:
+            batch = self.reorder_dict.pop(self.rcvd_idx)
+            return self._process_next_batch(batch)
+
+        if self.batches_outstanding == 0:
+            self._shutdown_workers()
+            raise StopIteration
+
+        while True:
+            assert (not self.shutdown and self.batches_outstanding > 0)
+            idx, batch = self.data_queue.get()
+            self.batches_outstanding -= 1
+            if idx != self.rcvd_idx:
+                # store out-of-order samples
+                self.reorder_dict[idx] = batch
+                continue
+            return self._process_next_batch(batch)
+
+    next = __next__  # Python 2 compatibility
+
+    def __iter__(self):
+        return self
+
+    def _next_indices(self):
+        batch_size = min(self.samples_remaining, self.batch_size)
+        batch = [next(self.sample_iter) for _ in range(batch_size)]
         self.samples_remaining -= len(batch)
         return batch
 
-    def _putBatch(self):
+    def _put_indices(self):
+        assert self.batches_outstanding < 2 * self.num_workers
         if self.samples_remaining > 0:
-            self.index_queue.put(self._nextBatch())
+            self.index_queue.put((self.send_idx, self._next_indices()))
             self.batches_outstanding += 1
+            self.send_idx += 1
 
-    def next(self):
-        if self.num_workers:
-            # multi-process loading
-            if self.batches_outstanding:
-                assert(not self.joined)
-                # maintain at most len(workers)+1 outstanding batches
-                # to avoid deadlocks in the queues, using the blocking queue API
-                # TODO: add and use non-blocking queue API
-                self._putBatch()
-                assert(self.batches_outstanding <= len(self.workers) + 1)
-                self.batches_outstanding -= 1
-                data = self.data_queue.get()
-
-                if isinstance(data, ExceptionWrapper):
-                    raise data.exc_type(data.exc_msg)
-                else:
-                    return data
-            else:
-                self._joinWorkers()
-                raise StopIteration()
-        else:
-            # single-process loading
-            if self.samples_remaining:
-                return _processBatch(self.dataset, self._nextBatch(), self.collate_fn)
-            else:
-                raise StopIteration()
-
-    __next__ = next
+    def _process_next_batch(self, batch):
+        self.rcvd_idx += 1
+        self._put_indices()
+        if isinstance(batch, ExceptionWrapper):
+            raise batch.exc_type(batch.exc_msg)
+        return batch
 
     def __getstate__(self):
         # TODO: add limited pickling support for sharing an iterator
@@ -134,14 +148,16 @@ class DataLoaderIter(object):
         # but signalling the end is tricky without a non-blocking API
         raise NotImplementedError("DataLoaderIterator cannot be pickled")
 
-    def _joinWorkers(self):
-        self.joined = True
-        if self.num_workers:
-            [self.index_queue.put(None) for x in self.workers]
-            [x.join() for x in self.workers]
+    def _shutdown_workers(self):
+        if not self.shutdown:
+            self.shutdown = True
+            for _ in self.workers:
+                self.index_queue.put(None)
 
     def __del__(self):
-        self._joinWorkers()
+        if self.num_workers > 0:
+            self._shutdown_workers()
+
 
 class DataLoader(object):
     """
@@ -149,12 +165,12 @@ class DataLoader(object):
     single- or multi-process iterators over the dataset.
     """
 
-    def __init__(self, dataset, batch_size=1, shuffle=False,
-                 sampler=None, num_workers=0, collate_fn=default_collate):
-        self.dataset     = dataset
-        self.batch_size  = batch_size
+    def __init__(self, dataset, batch_size=1, shuffle=False, sampler=None,
+                 num_workers=0, collate_fn=default_collate):
+        self.dataset = dataset
+        self.batch_size = batch_size
         self.num_workers = num_workers
-        self.collate_fn  = collate_fn
+        self.collate_fn = collate_fn
 
         if sampler is not None:
             self.sampler = sampler

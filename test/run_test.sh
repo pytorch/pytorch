@@ -20,6 +20,10 @@ python test_multiprocessing.py
 
 echo "Running util tests"
 python test_utils.py
+
+echo "Running dataloader tests"
+python test_dataloader.py
+
 if which nvcc >/dev/null 2>&1
 then
     echo "Running cuda tests"
