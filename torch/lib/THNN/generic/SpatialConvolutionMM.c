@@ -2,6 +2,57 @@
 #define TH_GENERIC_FILE "generic/SpatialConvolutionMM.c"
 #else
 
+static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
+	THTensor *input, THTensor *gradOutput,
+	THTensor *weight, THTensor *bias, 
+	int kH, int kW, int dH, int dW, int padH, int padW) {
+
+  THArgCheck(kW > 0 && kH > 0, 9,
+	       "kernel size should be greater than zero, but got kH: %d kW: %d", kH, kW);
+  THArgCheck(dW > 0 && dH > 0, 11,
+	     "stride should be greater than zero, but got dH: %d dW: %d", dH, dW);
+  THNN_ARGCHECK(weight->nDimension == 2 || weight->nDimension == 4, 5, weight,
+		"2D or 4D weight tensor expected, but got: %s");
+
+  if (bias != NULL) {
+    THNN_CHECK_DIM_SIZE(bias, 1, 0, weight->size[0]);
+  }
+
+  int ndim = input->nDimension;
+  int dimf = 0;
+  int dimh = 1;
+  int dimw = 2;
+
+  if (ndim == 4) {
+    dimf++;
+    dimh++;
+    dimw++;
+  }
+
+  THNN_ARGCHECK(ndim == 3 || ndim == 4, 2, input,
+		"3D or 4D input tensor expected but got: %s");
+
+  long nInputPlane  = weight->size[1] / (kH * kW);
+  long inputHeight  = input->size[dimh];
+  long inputWidth   = input->size[dimw];
+  long nOutputPlane = weight->size[0];
+  long outputHeight = (inputHeight + 2*padH - kH) / dH + 1;
+  long outputWidth  = (inputWidth + 2*padW - kW) / dW + 1;
+
+  if (outputWidth < 1 || outputHeight < 1)
+    THError("Given input size: (%d x %d x %d). "
+	    "Calculated output size: (%d x %d x %d). Output size is too small",
+	    nInputPlane,inputHeight,inputWidth,nOutputPlane,outputHeight,outputWidth);
+
+  THNN_CHECK_DIM_SIZE(input, ndim, dimf, nInputPlane);
+  
+  if (gradOutput != NULL) {
+    THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimf, nOutputPlane);
+    THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimh, outputHeight);
+    THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimw, outputWidth);
+  }
+}
+
 static void THNN_(SpatialConvolutionMM_updateOutput_frame)(
           THTensor *input,
           THTensor *output,
@@ -60,52 +111,7 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
           int padW,
           int padH)
 {
-  int dimf = 0;
-  int dimw = 2;
-  int dimh = 1;
-
-  long nInputPlane;
-  long inputWidth;
-  long inputHeight;
-  long nOutputPlane;
-  long outputWidth;
-  long outputHeight;
-
   int freeWeight = 0;
-
-  THNN_ARGCHECK(input->nDimension == 3 || input->nDimension == 4, 2, input,
-		"3D or 4D (batch mode) tensor expected for input, but got: %s");
-  THArgCheck(kW > 0 && kH > 0, 8,
-	       "kernel size should be greater than zero, but got kH: %d kW: %d", kH, kW);
-  THArgCheck(dW > 0 && dH > 0, 10,
-	     "stride should be greater than zero, but got dH: %d dW: %d", dH, dW);
-  THNN_ARGCHECK(weight->nDimension == 2 || weight->nDimension == 4, 2, weight,
-		"2D or 4D weight tensor expected, but got: %s");
-
-  if (input->nDimension == 4) {
-    dimf++;
-    dimw++;
-    dimh++;
-  }
-
-  nInputPlane = input->size[dimf];
-  inputWidth   = input->size[dimw];
-  inputHeight  = input->size[dimh];
-  nOutputPlane = weight->size[0];
-  outputWidth  = (inputWidth + 2*padW - kW) / dW + 1;
-  outputHeight = (inputHeight + 2*padH - kH) / dH + 1;
-
-  if (outputWidth < 1 || outputHeight < 1)
-    THError("Given input size: (%d x %d x %d). "
-	    "Calculated output size: (%d x %d x %d). Output size is too small",
-	    nInputPlane,inputHeight,inputWidth,nOutputPlane,outputHeight,outputWidth);
-
-
-  int expectedWeightSize = weight->nDimension == 2 ? nInputPlane*kW*kH : nInputPlane;
-  int weightInputPlanes = weight->nDimension == 2 ? weight->size[1]/(kW*kH) : weight->size[1];
-  if (expectedWeightSize != weight->size[1])
-    THError("Wrong number of input channels! Input has %d channels, expected %d",
-        nInputPlane, weightInputPlanes);
 
   if (weight->nDimension == 4) {
     long s1 = weight->size[0];
@@ -114,6 +120,27 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
 					 s1, -1, s2, -1);
     freeWeight = 1;
   }
+
+  THNN_(SpatialConvolutionMM_shapeCheck)
+    (input, NULL, weight, bias, kH, kW, dH, dW, padH, padW);
+
+  int ndim = input->nDimension;
+  int dimf = 0;
+  int dimh = 1;
+  int dimw = 2;
+
+  if (ndim == 4) {
+    dimf++;
+    dimh++;
+    dimw++;
+  }
+
+  long nInputPlane = input->size[dimf];
+  long inputHeight  = input->size[dimh];
+  long inputWidth   = input->size[dimw];
+  long nOutputPlane = weight->size[0];
+  long outputHeight = (inputHeight + 2*padH - kH) / dH + 1;
+  long outputWidth  = (inputWidth + 2*padW - kW) / dW + 1;
 
   if(input->nDimension == 3)
   {
@@ -199,24 +226,7 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
           int padW,
           int padH)
 {
-  long nOutputPlane = weight->size[0];
   int freeWeight = 0;
-
-  THArgCheck( nOutputPlane == gradOutput->size[input->nDimension == 4 ? 1 : 0], 3,
-	      "Number of output features is not equal to nOutputPlane" );
-  THArgCheck(kW > 0 && kH > 0, 9,
-	       "kernel size should be greater than zero, but got kH: %d kW: %d", kH, kW);
-  THArgCheck(dW > 0 && dH > 0, 11,
-	     "stride should be greater than zero, but got dH: %d dW: %d", dH, dW);
-  THNN_ARGCHECK(weight->nDimension == 2 || weight->nDimension == 4, 2, weight,
-		"2D or 4D weight tensor expected, but got: %s");
-
-  THTensor_(resizeAs)(gradInput, input);
-  THTensor_(resizeAs)(fgradInput, finput);
-  // depending on the BLAS library, fgradInput (result tensor) might
-  // be left uninitialized on zero alpha, which might lead to weird behavior
-  // hence, to be safe, zero it
-  THTensor_(zero)(fgradInput);
 
   if (weight->nDimension == 4) {
     long s1 = weight->size[0];
@@ -225,6 +235,17 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
 					 s1, -1, s2, -1);
     freeWeight = 1;
   }
+
+  THNN_(SpatialConvolutionMM_shapeCheck)
+    (input, gradOutput, weight, NULL, kH, kW, dH, dW, padH, padW);
+
+  THTensor_(resizeAs)(gradInput, input);
+  THTensor_(resizeAs)(fgradInput, finput);
+
+  // depending on the BLAS library, fgradInput (result tensor) might
+  // be left uninitialized on zero alpha, which might lead to weird behavior
+  // hence, to be safe, zero it
+  THTensor_(zero)(fgradInput);
 
   THTensor_(transpose)(weight, weight, 0, 1);
 
@@ -310,17 +331,7 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
           int padH,
           real scale)
 {
-  // TODO: gradOutput shape checks
   int freeWeight = 0;
-  long nOutputPlane = gradWeight->size[0];
-  THArgCheck( nOutputPlane == gradOutput->size[input->nDimension == 4 ? 1 : 0], 3,
-	      "Number of output features is not equal to nOutputPlane" );
-  THArgCheck(kW > 0 && kH > 0, 8,
-	       "kernel size should be greater than zero, but got kH: %d kW: %d", kH, kW);
-  THArgCheck(dW > 0 && dH > 0, 10,
-	     "stride should be greater than zero, but got dH: %d dW: %d", dH, dW);
-  THNN_ARGCHECK(gradWeight->nDimension == 2 || gradWeight->nDimension == 4,
-		2, gradWeight, "2D or 4D gradWeight tensor expected, but got: %s");
 
   if (gradWeight->nDimension == 4) {
     long s1 = gradWeight->size[0];
@@ -330,6 +341,9 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
 					     s1, -1, s2, -1);
     freeWeight = 1;
   }
+
+  THNN_(SpatialConvolutionMM_shapeCheck)
+    (input, gradOutput, gradWeight, gradBias, kH, kW, dH, dW, padH, padW);
 
   if(input->nDimension == 3)
   {

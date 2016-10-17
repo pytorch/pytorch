@@ -11,7 +11,8 @@ void THNN_(BatchNormalization_updateOutput)(
 {
   THTensor_(resizeAs)(output, input);
   long nInput = THTensor_(size)(input, 1);
-  long f,n = THTensor_(nElement)(input) / nInput;
+  long f;
+  ptrdiff_t n = THTensor_(nElement)(input) / nInput;
 
   #pragma omp parallel for
   for (f = 0; f < nInput; ++f) {
@@ -73,7 +74,8 @@ void THNN_(BatchNormalization_backward)(
 {
   THNN_CHECK_SHAPE(input, gradOutput);
   long nInput = THTensor_(size)(input, 1);
-  long f,n = THTensor_(nElement)(input) / nInput;
+  long f;
+  ptrdiff_t n = THTensor_(nElement)(input) / nInput;
 
   #pragma omp parallel for
   for (f = 0; f < nInput; ++f) {

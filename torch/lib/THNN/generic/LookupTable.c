@@ -6,9 +6,9 @@ static void THNN_(LookupTable_resetCount)(
           THInteger_t *count_data,
           THIndexTensor *input)
 {
-  int i;
+  ptrdiff_t i;
   THIndex_t *input_data = THIndexTensor_(data)(input);
-  long numel = THIndexTensor_(nElement)(input);
+  ptrdiff_t numel = THIndexTensor_(nElement)(input);
 
   for (i = 0; i<numel; i++)
   {
@@ -34,7 +34,7 @@ void THNN_(LookupTable_accGradParameters)(
           int paddingValue,
           real scale)
 {
-  long i;
+  ptrdiff_t i;
   THInteger_t *count_data = NULL;
 
   if (scaleGradByFreq)
@@ -53,7 +53,7 @@ void THNN_(LookupTable_accGradParameters)(
   }
 
   THIndex_t *input_data = THIndexTensor_(data)(input);
-  long numel = THIndexTensor_(nElement)(input);
+  ptrdiff_t numel = THIndexTensor_(nElement)(input);
   long numw = THTensor_(size)(gradWeight, 0);
 
   // check that inputs are all within range
@@ -175,9 +175,9 @@ void THNN_(LookupTable_renorm)(
   if (normType <= 0)
     THError("non-positive-norm not supported");
 
-  long i;
+  ptrdiff_t i;
   THIndex_t *row_idx = THIndexTensor_(data)(idx);
-  long numel = THIndexTensor_(nElement)(idx);
+  ptrdiff_t numel = THIndexTensor_(nElement)(idx);
 
   long numw = THTensor_(size)(weight, 0);
   long stride = THTensor_(stride)(weight, 0);
@@ -191,7 +191,7 @@ void THNN_(LookupTable_renorm)(
   }
   // get unique indices
   qsort(row_idx, numel, sizeof(THIndex_t), THNN_(compare_THIndex));
-  long ptr = 0;
+  ptrdiff_t ptr = 0;
   for (i=0; i<numel; i++)
     if (i == 0 || row_idx[i] != row_idx[i-1])
       row_idx[ptr++] = row_idx[i];

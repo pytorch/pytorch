@@ -2,6 +2,73 @@
 #define TH_GENERIC_FILE "generic/SpatialDilatedMaxPooling.c"
 #else
 
+static inline void THNN_(SpatialDilatedMaxPooling_shapeCheck)(
+	THTensor *input, THTensor *gradOutput, THTensor *indices,
+	int kH, int kW, int dH, int dW, int padH, int padW,
+	int dilationH, int dilationW, bool ceil_mode) {
+
+  THArgCheck(kW > 0 && kH > 0, 5,
+	       "kernel size should be greater than zero, but got kH: %d kW: %d", kH, kW);
+  THArgCheck(dW > 0 && dH > 0, 8,
+	     "stride should be greater than zero, but got dH: %d dW: %d", dH, dW);
+
+  int ndim = input->nDimension;
+  int dimf = 0;
+  int dimh = 1;
+  int dimw = 2;
+
+  if (ndim == 4) {
+    dimf++;
+    dimh++;
+    dimw++;
+  }
+
+  THNN_ARGCHECK(ndim == 3 || ndim == 4, 2, input,
+		"3D or 4D input tensor expected but got: %s");
+
+  THArgCheck(input->size[dimw] >= kW - padW && input->size[dimh] >= kH - padH, 2,
+	     "input image (H: %d, W: %d) smaller than kernel "
+	     "size - padding( kH: %d padH: %d kW: %d padW: %d",
+	     input->size[dimh], input->size[dimw], kH, padH, kW, padW);
+  THArgCheck(kW/2 >= padW && kH/2 >= padH, 2,
+	     "pad should be smaller than half of kernel size, but got "
+	     "padW = %d, padH = %d, kW = %d, kH = %d",
+	     padW, padH, kW, kH);
+  
+  long nInputPlane = input->size[dimh-1];
+  long inputHeight = input->size[dimh];
+  long inputWidth = input->size[dimw];
+  long outputHeight, outputWidth;
+  long nOutputPlane = nInputPlane;
+
+  if (ceil_mode)
+  {
+    outputHeight = (long)(ceil((float)(inputHeight - (dilationH * (kH - 1) + 1) + 2*padH) / dH)) + 1;
+    outputWidth  = (long)(ceil((float)(inputWidth  - (dilationW * (kW - 1) + 1) + 2*padW) / dW)) + 1;
+  }
+  else
+  {
+    outputHeight = (long)(floor((float)(inputHeight - (dilationH * (kH - 1) + 1) + 2*padH) / dH)) + 1;
+    outputWidth  = (long)(floor((float)(inputWidth  - (dilationW * (kW - 1) + 1) + 2*padW) / dW)) + 1;
+  }
+
+  if (outputWidth < 1 || outputHeight < 1)
+    THError("Given input size: (%dx%dx%d). "
+	    "Calculated output size: (%dx%dx%d). Output size is too small",
+            nInputPlane,inputHeight,inputWidth,nInputPlane,outputHeight,outputWidth);
+
+  if (gradOutput != NULL) {
+    THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimf, nOutputPlane);
+    THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimh, outputHeight);
+    THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimw, outputWidth);
+  }
+  if (indices != NULL) {
+    THNN_CHECK_DIM_SIZE(indices, ndim, dimf, nOutputPlane);
+    THNN_CHECK_DIM_SIZE(indices, ndim, dimh, outputHeight);
+    THNN_CHECK_DIM_SIZE(indices, ndim, dimw, outputWidth);
+  }
+}
+
 static void THNN_(SpatialDilatedMaxPooling_updateOutput_frame)(
           real *input_p,
           real *output_p,
@@ -89,21 +156,22 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
           int dilationH,
           bool ceil_mode)
 {
+
   int dimw = 2;
   int dimh = 1;
   long nbatch = 1;
-  long nslices;
-  long iheight;
-  long iwidth;
-  long oheight;
-  long owidth;
+  long nInputPlane;
+  long inputHeight;
+  long inputWidth;
+  long outputHeight;
+  long outputWidth;
   real *input_data;
   real *output_data;
   real *indices_data;
 
-
-  THNN_ARGCHECK(input->nDimension == 3 || input->nDimension == 4, 2, input,
-		"3D or 4D (batch mode) tensor expected for input, but got: %s");
+  THNN_(SpatialDilatedMaxPooling_shapeCheck)
+    (input, NULL, NULL, kH, kW, dH, dW,
+     padH, padW, dilationH, dilationW, ceil_mode);
 
   if (input->nDimension == 4)
   {
@@ -111,42 +179,29 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
     dimw++;
     dimh++;
   }
-  THArgCheck(input->size[dimw] >= kW - padW && input->size[dimh] >= kH - padH, 2,
-	     "input image (H: %d, W: %d) smaller than kernel "
-	     "size - padding( kH: %d padH: %d kW: %d padW: %d",
-	     input->size[dimh], input->size[dimw], kH, padH, kW, padW);
-  THArgCheck(kW/2 >= padW && kH/2 >= padH, 2,
-	     "pad should be smaller than half of kernel size, but got "
-	     "padW = %d, padH = %d, kW = %d, kH = %d",
-	     padW, padH, kW, kH);
-  
+
   /* sizes */
-  nslices = input->size[dimh-1];
-  iheight = input->size[dimh];
-  iwidth = input->size[dimw];
+  nInputPlane = input->size[dimh-1];
+  inputHeight = input->size[dimh];
+  inputWidth = input->size[dimw];
   if (ceil_mode)
   {
-    oheight = (long)(ceil((float)(iheight - (dilationH * (kH - 1) + 1) + 2*padH) / dH)) + 1;
-    owidth  = (long)(ceil((float)(iwidth  - (dilationW * (kW - 1) + 1) + 2*padW) / dW)) + 1;
+    outputHeight = (long)(ceil((float)(inputHeight - (dilationH * (kH - 1) + 1) + 2*padH) / dH)) + 1;
+    outputWidth  = (long)(ceil((float)(inputWidth  - (dilationW * (kW - 1) + 1) + 2*padW) / dW)) + 1;
   }
   else
   {
-    oheight = (long)(floor((float)(iheight - (dilationH * (kH - 1) + 1) + 2*padH) / dH)) + 1;
-    owidth  = (long)(floor((float)(iwidth  - (dilationW * (kW - 1) + 1) + 2*padW) / dW)) + 1;
+    outputHeight = (long)(floor((float)(inputHeight - (dilationH * (kH - 1) + 1) + 2*padH) / dH)) + 1;
+    outputWidth  = (long)(floor((float)(inputWidth  - (dilationW * (kW - 1) + 1) + 2*padW) / dW)) + 1;
   }
-
-  if (owidth < 1 || oheight < 1)
-    THError("Given input size: (%dx%dx%d). "
-	    "Calculated output size: (%dx%dx%d). Output size is too small",
-            nslices,iheight,iwidth,nslices,oheight,owidth);
 
   if (padW || padH)
   {
     // ensure that the last pooling starts inside the image
-    if ((oheight - 1)*dH >= iheight + padH)
-      --oheight;
-    if ((owidth  - 1)*dW >= iwidth  + padW)
-      --owidth;
+    if ((outputHeight - 1)*dH >= inputHeight + padH)
+      --outputHeight;
+    if ((outputWidth  - 1)*dW >= inputWidth  + padW)
+      --outputWidth;
   }
 
   /* get contiguous input */
@@ -155,9 +210,9 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
   /* resize output */
   if (input->nDimension == 3)
   {
-    THTensor_(resize3d)(output, nslices, oheight, owidth);
+    THTensor_(resize3d)(output, nInputPlane, outputHeight, outputWidth);
     /* indices will contain the locations for each output point */
-    THTensor_(resize3d)(indices,  nslices, oheight, owidth);
+    THTensor_(resize3d)(indices,  nInputPlane, outputHeight, outputWidth);
 
     input_data = THTensor_(data)(input);
     output_data = THTensor_(data)(output);
@@ -166,9 +221,9 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
     THNN_(SpatialDilatedMaxPooling_updateOutput_frame)
       (input_data, output_data,
        indices_data,
-       nslices,
-       iwidth, iheight,
-       owidth, oheight,
+       nInputPlane,
+       inputWidth, inputHeight,
+       outputWidth, outputHeight,
        kW, kH, dW, dH,
        padW, padH,
        dilationW, dilationH
@@ -178,9 +233,9 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
   {
     long p;
 
-    THTensor_(resize4d)(output, nbatch, nslices, oheight, owidth);
+    THTensor_(resize4d)(output, nbatch, nInputPlane, outputHeight, outputWidth);
     /* indices will contain the locations for each output point */
-    THTensor_(resize4d)(indices, nbatch, nslices, oheight, owidth);
+    THTensor_(resize4d)(indices, nbatch, nInputPlane, outputHeight, outputWidth);
 
     input_data = THTensor_(data)(input);
     output_data = THTensor_(data)(output);
@@ -190,12 +245,12 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
     for (p = 0; p < nbatch; p++)
     {
       THNN_(SpatialDilatedMaxPooling_updateOutput_frame)
-	(input_data+p*nslices*iwidth*iheight,
-	 output_data+p*nslices*owidth*oheight,
-	 indices_data+p*nslices*owidth*oheight,
-	 nslices,
-	 iwidth, iheight,
-	 owidth, oheight,
+	(input_data+p*nInputPlane*inputWidth*inputHeight,
+	 output_data+p*nInputPlane*outputWidth*outputHeight,
+	 indices_data+p*nInputPlane*outputWidth*outputHeight,
+	 nInputPlane,
+	 inputWidth, inputHeight,
+	 outputWidth, outputHeight,
 	 kW, kH, dW, dH,
 	 padW, padH,
 	 dilationW, dilationH
@@ -211,32 +266,32 @@ static void THNN_(SpatialDilatedMaxPooling_updateGradInput_frame)(
           real *gradInput_p,
           real *gradOutput_p,
           real *ind_p,
-          long nslices,
-          long iwidth,
-          long iheight,
-          long owidth,
-          long oheight,
+          long nInputPlane,
+          long inputWidth,
+          long inputHeight,
+          long outputWidth,
+          long outputHeight,
           int dW,
           int dH)
 {
   long k;
 #pragma omp parallel for private(k)
-  for (k = 0; k < nslices; k++)
+  for (k = 0; k < nInputPlane; k++)
   {
-    real *gradInput_p_k = gradInput_p + k*iwidth*iheight;
-    real *gradOutput_p_k = gradOutput_p + k*owidth*oheight;
-    real *ind_p_k = ind_p + k*owidth*oheight;
+    real *gradInput_p_k = gradInput_p + k*inputWidth*inputHeight;
+    real *gradOutput_p_k = gradOutput_p + k*outputWidth*outputHeight;
+    real *ind_p_k = ind_p + k*outputWidth*outputHeight;
 
     /* calculate max points */
     long i, j;
-    for(i = 0; i < oheight; i++)
+    for(i = 0; i < outputHeight; i++)
     {
-      for(j = 0; j < owidth; j++)
+      for(j = 0; j < outputWidth; j++)
       {
         /* retrieve position of max */
-        long maxp = ind_p_k[i*owidth + j] - TH_INDEX_BASE;
+        long maxp = ind_p_k[i*outputWidth + j] - TH_INDEX_BASE;
         /* update gradient */
-        gradInput_p_k[maxp] += gradOutput_p_k[i*owidth + j];
+        gradInput_p_k[maxp] += gradOutput_p_k[i*outputWidth + j];
       }
     }
   }
@@ -261,16 +316,18 @@ void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
   int dimw = 2;
   int dimh = 1;
   long nbatch = 1;
-  int nslices;
-  int iheight;
-  int iwidth;
-  int oheight;
-  int owidth;
+  int nInputPlane;
+  int inputHeight;
+  int inputWidth;
+  int outputHeight;
+  int outputWidth;
   real *gradInput_data;
   real *gradOutput_data;
   real *indices_data;
 
-  // TODO: shape check gradOutput
+  THNN_(SpatialDilatedMaxPooling_shapeCheck)
+    (input, gradOutput, indices, kH, kW, dH, dW,
+     padH, padW, dilationH, dilationW, ceil_mode);
 
   /* get contiguous gradOutput */
   gradOutput = THTensor_(newContiguous)(gradOutput);
@@ -286,11 +343,11 @@ void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
   }
 
   /* sizes */
-  nslices = input->size[dimh-1];
-  iheight = input->size[dimh];
-  iwidth = input->size[dimw];
-  oheight = gradOutput->size[dimh];
-  owidth = gradOutput->size[dimw];
+  nInputPlane = input->size[dimh-1];
+  inputHeight = input->size[dimh];
+  inputWidth = input->size[dimw];
+  outputHeight = gradOutput->size[dimh];
+  outputWidth = gradOutput->size[dimw];
 
   /* get raw pointers */
   gradInput_data = THTensor_(data)(gradInput);
@@ -303,9 +360,9 @@ void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
     THNN_(SpatialDilatedMaxPooling_updateGradInput_frame)
       (gradInput_data, gradOutput_data,
        indices_data,
-       nslices,
-       iwidth, iheight,
-       owidth, oheight,
+       nInputPlane,
+       inputWidth, inputHeight,
+       outputWidth, outputHeight,
        dW, dH);
   }
   else
@@ -315,12 +372,12 @@ void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
     for (p = 0; p < nbatch; p++)
     {
       THNN_(SpatialDilatedMaxPooling_updateGradInput_frame)
-	(gradInput_data+p*nslices*iwidth*iheight,
-	 gradOutput_data+p*nslices*owidth*oheight,
-	 indices_data+p*nslices*owidth*oheight,
-	 nslices,
-	 iwidth, iheight,
-	 owidth, oheight,
+	(gradInput_data+p*nInputPlane*inputWidth*inputHeight,
+	 gradOutput_data+p*nInputPlane*outputWidth*outputHeight,
+	 indices_data+p*nInputPlane*outputWidth*outputHeight,
+	 nInputPlane,
+	 inputWidth, inputHeight,
+	 outputWidth, outputHeight,
 	 dW, dH);
     }
   }

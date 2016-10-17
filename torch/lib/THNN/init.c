@@ -15,8 +15,8 @@
 
 #define THNN_CHECK_NELEMENT(I1, I2) \
   if (I1 != NULL && I2 != NULL ) {					\
-    long n1 = THTensor_(nElement)(I1);					\
-    long n2 = THTensor_(nElement)(I2);	                                \
+    ptrdiff_t n1 = THTensor_(nElement)(I1);					\
+    ptrdiff_t n2 = THTensor_(nElement)(I2);	                                \
     if (n1 != n2)							\
       {									\
 	THDescBuff s1 = THTensor_(sizeDesc)(I1);			\
@@ -96,6 +96,9 @@
 #include "THGenerateFloatTypes.h"
 
 #include "generic/MultiMarginCriterion.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/Linear.c"
 #include "THGenerateFloatTypes.h"
 
 #include "generic/PReLU.c"
