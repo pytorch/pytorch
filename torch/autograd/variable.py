@@ -502,7 +502,7 @@ class Variable(_C._VariableBase):
         return Transpose(dim1, dim2)(self)
 
     def cat(self, iterable, dim=0):
-        return Concat(dim)(*iterable)
+        return Concat(dim)(self, *iterable)
 
     def select(self, dim, _index):
         index = tuple(slice(None, None) for _ in range(dim)) + (_index,)
@@ -569,4 +569,3 @@ class Variable(_C._VariableBase):
 
 from .engine import ImperativeEngine
 Variable._execution_engine = ImperativeEngine()
-
