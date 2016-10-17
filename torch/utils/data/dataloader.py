@@ -21,6 +21,7 @@ def _processBatch(dataset, indices, collate_fn):
 
 
 def _workerLoop(dataset, index_queue, data_queue, collate_fn):
+    torch.set_num_threads(1)
     while True:
         batch_indices = index_queue.get()
 
