@@ -335,47 +335,6 @@ TH_API void THNN_CudaSpatialConvolutionMM_accGradParameters(
           int padW, int padH,
           float scale);
 
-TH_API void THNN_CudaSpatialConvolutionLocal_updateOutput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *output,
-          THCudaTensor *weight,
-          THCudaTensor *bias,
-          THCudaTensor *finput,
-          THCudaTensor *fgradInput,
-          int kW, int kH,
-          int dW, int dH,
-          int padW, int padH,
-          long inputWidth, long inputHeight,
-          long outputWidth, long outputHeight);
-TH_API void THNN_CudaSpatialConvolutionLocal_updateGradInput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *gradOutput,
-          THCudaTensor *gradInput,
-          THCudaTensor *weight,
-          THCudaTensor *finput,
-          THCudaTensor *fgradInput,
-          int kW, int kH,
-          int dW, int dH,
-          int padW, int padH,
-          long inputWidth, long inputHeight,
-          long outputWidth, long outputHeight);
-TH_API void THNN_CudaSpatialConvolutionLocal_accGradParameters(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *gradOutput,
-          THCudaTensor *gradWeight,
-          THCudaTensor *gradBias,
-          THCudaTensor *finput,
-          THCudaTensor *fgradInput,
-          int kW, int kH,
-          int dW, int dH,
-          int padW, int padH,
-          long inputWidth, long inputHeight,
-          long outputWidth, long outputHeight,
-          float scale);
-
 TH_API void THNN_CudaSpatialFullConvolution_updateOutput(
           THCState *state,
           THCudaTensor *input,

@@ -2,6 +2,7 @@
 #define THCUNN_IM2COL_H
 
 #include "common.h"
+#include "THCNumerics.cuh"
 
 // Kernel for fast unfold+copy
 // (borrowed from Caffe: https://github.com/BVLC/caffe/blob/master/src/caffe/layers/conv_layer.cu)
@@ -29,7 +30,7 @@ __global__ void im2col_kernel(const int n, const Dtype* data_im,
         int h = h_in + i * dilation_h;
         int w = w_in + j * dilation_w;
         *data_col = (h >= 0 && w >= 0 && h < height && w < width) ?
-          data_im[i * dilation_h * width + j * dilation_w] : 0;
+          data_im[i * dilation_h * width + j * dilation_w] : ScalarConvert<int, Dtype>::to(0);
         data_col += height_col * width_col;
       }
     }
@@ -69,7 +70,7 @@ __global__ void col2im_kernel(const int n, const Dtype* data_col,
                                   const int height_col, const int width_col,
                                   Dtype* data_im) {
   CUDA_KERNEL_LOOP(index, n) {
-    Dtype val = 0;
+    Dtype val = ScalarConvert<int, Dtype>::to(0);
     const int w_im = index % width + pad_w;
     const int h_im = (index / width) % height + pad_h;
     const int c_im = index / (width * height);
