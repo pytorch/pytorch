@@ -5,6 +5,7 @@ import unittest
 import contextlib
 from copy import deepcopy
 from itertools import repeat
+from functools import wraps
 
 import torch.nn as nn
 import torch.nn.parallel as dp
@@ -13,14 +14,19 @@ from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     module_tests, criterion_tests, TEST_CUDA, TEST_CUDNN, PRECISION
 from common import freeze_rng_state
 
-@contextlib.contextmanager
-def set_default_tensor_type(type):
-    old_type = torch.typename(torch.Tensor())
-    torch.set_default_tensor_type(type)
-    try:
-        yield
-    finally:
-        torch.set_default_tensor_type(old_type)
+def default_tensor_type(type):
+    type_str = torch.typename(type)
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            old_type = torch.typename(torch.Tensor())
+            torch.set_default_tensor_type(type_str)
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                torch.set_default_tensor_type(old_type)
+        return wrapper
+    return decorator
 
 class InputVariableMixin(object):
     def _get_input(self):
@@ -621,7 +627,7 @@ class TestNN(NNTestCase):
     def test_RNN_cell(self):
         # this is just a smoke test; these modules are implemented through
         # autograd so no Jacobian test is needed
-        for module in (nn.rnn.cell.RNN, nn.rnn.cell.RNNReLU, nn.rnn.cell.GRU):
+        for module in (nn.RNNCell, nn.GRUCell):
             for bias in (True, False):
                 input = Variable(torch.randn(3, 10))
                 hx = Variable(torch.randn(3, 20))
@@ -638,18 +644,18 @@ class TestNN(NNTestCase):
             input = Variable(torch.randn(3, 10))
             hx = Variable(torch.randn(3, 20))
             cx = Variable(torch.randn(3, 20))
-            lstm = nn.rnn.cell.LSTM(10, 20, bias=bias)
+            lstm = nn.LSTMCell(10, 20, bias=bias)
             for i in range(6):
                 hx, cx = lstm(input, (hx, cx))
 
             (hx+cx).sum().backward()
 
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
+    @default_tensor_type(torch.FloatTensor)  # FIXME: just until torch.cuda.DoubleTensor.sum() implemented
     def test_RNN_cpu_vs_cudnn(self):
 
-        def forward_backward(cuda, module, bias, input_val, hx_val, weights_val):
-            rnn = module(input_size, hidden_size, num_layers, bias=bias)
-            is_lstm = module == nn.rnn.LSTM
+        def forward_backward(cuda, rnn, input_val, hx_val, weights_val):
+            is_lstm = type(rnn) == nn.LSTM
 
             for x_layer, y_layer in zip(rnn.all_weights, weights_val):
                 for x, y in zip(x_layer, y_layer):
@@ -689,42 +695,46 @@ class TestNN(NNTestCase):
                     'cy': hy[1].data if is_lstm else None,
                     'grad_cx': hx[1].grad if is_lstm else None}
 
-        def diff(t_cpu, t_gpu, name):
-            self.assertTrue(torch.is_tensor(t_cpu))
-            self.assertTrue(torch.is_tensor(t_gpu))
-            delta = t_gpu.cpu().add(-1, t_cpu).abs().max()
-            # print("{:30s} cpu: {:10g} gpu: {:10g} diff: {:10g}".format(name, t_cpu.abs().max(), t_gpu.abs().max(), delta))
-            self.assertLess(delta, 2 * PRECISION)
-
         input_size = 10
         hidden_size = 20
         num_layers = 2
         seq_length = 7
         batch = 5
 
-        # FIXME: we can't use torch.cuda.DoubleTensor because sum() is not yet defined on it
-        with set_default_tensor_type('torch.FloatTensor'):
-            for module in (nn.rnn.RNNTanh, nn.rnn.RNNReLU, nn.rnn.LSTM, nn.rnn.GRU):
-                for bias in (True, False):
-                    input_val = torch.randn(seq_length, batch, input_size)
-                    hx_val = torch.randn(num_layers, batch, hidden_size)
+        def compare_cpu_gpu(outputs_cpu, outputs_gpu):
+            self.assertEqual(list(outputs_cpu.keys()), list(outputs_gpu.keys()))
+            for key in outputs_cpu.keys():
+                if key != 'weights':
+                    self.assertEqual(outputs_cpu[key], outputs_gpu[key], prec=5e-5)
 
-                    weights_val = module(input_size, hidden_size, num_layers).all_weights
+            # check grad weights separately, as nested dict
+            for cpu_layer_weight, gpu_layer_weight in zip(outputs_cpu['weights'], outputs_gpu['weights']):
+                for (cpu_weight, gpu_weight) in zip(cpu_layer_weight, gpu_layer_weight):
+                    self.assertEqual(cpu_weight.grad, gpu_weight.grad, prec=5e-5)
 
-                    outputs_cpu = forward_backward(False, module, bias, input_val, hx_val, weights_val)
-                    outputs_gpu = forward_backward(True,  module, bias, input_val, hx_val, weights_val)
 
-                    diff(outputs_cpu['output'], outputs_gpu['output'], 'output')
-                    diff(outputs_cpu['hy'], outputs_gpu['hy'], 'hy')
-                    diff(outputs_cpu['grad_input'], outputs_gpu['grad_input'], 'grad_input')
-                    diff(outputs_cpu['grad_hx'], outputs_gpu['grad_hx'], 'grad_hx')
-                    if outputs_cpu['cy'] is not None:
-                        diff(outputs_cpu['cy'], outputs_gpu['cy'], 'cy')
-                        diff(outputs_cpu['grad_cx'], outputs_gpu['grad_cx'], 'grad_cx')
+        input_val = torch.randn(seq_length, batch, input_size)
+        hx_val = torch.randn(num_layers, batch, hidden_size)
+        # FIXME: add bidirectional
+        # FIXME: add dropout
+        for module in (nn.RNN, nn.LSTM, nn.GRU):
+            for bias in (True, False):
+                rnn = module(input_size, hidden_size, num_layers, bias=bias)
+                outputs_cpu = forward_backward(False, rnn, input_val, hx_val, rnn.all_weights)
 
-                    for i, (cpu_layer_weight, gpu_layer_weight) in enumerate(zip(outputs_cpu['weights'], outputs_gpu['weights'])):
-                        for j, (cpu_weight, gpu_weight) in enumerate(zip(cpu_layer_weight, gpu_layer_weight)):
-                            diff(cpu_weight.grad, gpu_weight.grad, 'grad_weight[{},{}]'.format(i, j))
+                rnn_gpu = module(input_size, hidden_size, num_layers, bias=bias)
+                outputs_gpu = forward_backward(True, rnn_gpu, input_val, hx_val, rnn.all_weights)
+
+                compare_cpu_gpu(outputs_cpu, outputs_gpu)
+
+        for nonlinearity in ('tanh', 'relu'):
+            rnn = nn.rnn.RNN(input_size, hidden_size, num_layers, bias=bias, nonlinearity=nonlinearity)
+            outputs_cpu = forward_backward(False, rnn, input_val, hx_val, rnn.all_weights)
+
+            rnn_gpu = nn.rnn.RNN(input_size, hidden_size, num_layers, bias=bias, nonlinearity=nonlinearity)
+            outputs_gpu = forward_backward(True, rnn_gpu, input_val, hx_val, rnn.all_weights)
+
+            compare_cpu_gpu(outputs_cpu, outputs_gpu)
 
 
 def add_test(test):

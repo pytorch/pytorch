@@ -32,30 +32,25 @@ class Module(object):
                 # Variables stored in modules are graph leaves, and we don't
                 # want to create copy nodes, so we have to unpack the data.
                 param.data = fn(param.data)
+                if param.grad is not None:
+                    param._grad = fn(param._grad)
+
         for key, buf in self._buffers.items():
             if buf is not None:
                 self._buffers[key] = fn(buf)
         return self
 
-    def _deleteGradParameters(self):
-        for param in self._parameters.values():
-            if hasattr(param, '_grad'):
-                param._grad = None
-
     def cuda(self, device_id=None):
-        self._deleteGradParameters()
         return self._apply(lambda t: t.cuda(device_id))
 
 
     def cpu(self, device_id=None):
-        self._deleteGradParameters()
         return self._apply(lambda t: t.cpu())
 
     def float(self):
         return self._apply(lambda t: t.float())
 
     def double(self):
-        self._deleteGradParameters()
         return self._apply(lambda t: t.double())
 
     def register_backward_hook(self, name, hook):

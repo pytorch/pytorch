@@ -230,6 +230,20 @@ class TestAutograd(TestCase):
         mask = Variable(torch.ByteTensor(5, 5).bernoulli_(), requires_grad=False)
         self._test_setitem(mask)
 
+    def test_setitem_tensor(self):
+        x = Variable(torch.ones(5, 5), requires_grad=True)
+        y = x + 2
+        y_version = y._version
+        value = Variable(torch.Tensor(5).fill_(7), requires_grad=True)
+        index = 3
+        y[index] = value
+        self.assertNotEqual(y._version, y_version)
+        y.backward(torch.ones(5, 5))
+        expected_grad_input = torch.ones(5, 5)
+        expected_grad_input[index] = 0
+        self.assertEqual(x.grad, expected_grad_input)
+        self.assertEqual(value.grad, torch.ones(5))
+
     def test_type_conversions(self):
         import torch.cuda
         x = Variable(torch.randn(5, 5))

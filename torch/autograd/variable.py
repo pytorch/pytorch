@@ -58,7 +58,8 @@ class Variable(_C._VariableBase):
             return MaskedFill(value, inplace=True)(self, key)
         if isinstance(value, Variable):
             return SetItem(key)(self, value)
-        return SetItem(key, value)(self)
+        else:
+            return SetItem(key, value)(self)
 
     def __iter__(self):
         return iter(map(lambda i: self[i], range(self.size(0))))

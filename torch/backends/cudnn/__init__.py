@@ -280,7 +280,7 @@ def int_array(itr):
     return array_type(*itr)
 
 def descriptor(tensor, N=None):
-    if N:
+    if N is not None:
         descriptor = TensorDescriptorArray(N)
     else:
         descriptor = TensorDescriptor()

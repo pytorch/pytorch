@@ -4,44 +4,27 @@ import torch.backends.cudnn as cudnn
 try:
     import torch.backends.cudnn.rnn
 except ImportError:
-    print "Couldn't import cudnn.rnn"
     pass
-import torch.backends.cudnn.rnn
 
 
-def _getCudnnMode(mode):
-    if mode == 'RNN_RELU':
-        return cudnn.CUDNN_RNN_RELU
-    elif mode == 'RNN_TANH':
-        return cudnn.CUDNN_RNN_TANH
-    elif mode == 'LSTM':
-        return cudnn.CUDNN_LSTM
-    elif mode == 'GRU':
-        return cudnn.CUDNN_GRU
-    else:
-        raise Exception("Unknown mode: {}".format(mode))
-
-
-
-# FIXME: write a proper function library!
-import thnn
-import linear as _linear
-import activation
+# FIXME: write a proper function library
+from .thnn import Tanh, Sigmoid, Threshold
+from .linear import Linear
 
 def _wrap(fn, *args):
     def inner(*inner_args):
         return fn(*args)(*inner_args)
     return inner
-tanh = _wrap(thnn.Tanh)
-sigmoid = _wrap(thnn.Sigmoid)
-ReLU = _wrap(thnn.Threshold, 0, 0, False)
+tanh = _wrap(Tanh)
+sigmoid = _wrap(Sigmoid)
+ReLU = _wrap(Threshold, 0, 0, False)
 
 # get around autograd's lack of None-handling
 def linear(input, w, b):
     if b is not None:
-        return _linear.Linear()(input, w, b)
+        return Linear()(input, w, b)
     else:
-        return _linear.Linear()(input, w)
+        return Linear()(input, w)
 
 
 def RNNReLUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
@@ -56,11 +39,13 @@ def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
         hx, cx = hidden
         hsz = hx.size(1)
         gates = linear(input, w_ih, b_ih) + linear(hx, w_hh, b_hh)
-        # FIXME: chunk
-        ingate     = sigmoid(gates[:,0*hsz:1*hsz])
-        forgetgate = sigmoid(gates[:,1*hsz:2*hsz])
-        cellgate   = tanh(   gates[:,2*hsz:3*hsz])
-        outgate    = sigmoid(gates[:,3*hsz:4*hsz])
+        ingate, forgetgate, cellgate, outgate = gates.chunk(4, 1)
+
+        ingate = sigmoid(ingate)
+        forgetgate = sigmoid(forgetgate)
+        cellgate = tanh(cellgate)
+        outgate = sigmoid(outgate)
+
         cy = (forgetgate * cx) + (ingate * cellgate)
         hy = outgate * tanh(cy)
 
@@ -70,11 +55,12 @@ def GRUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
         hsz = hidden.size(1)
         gi = linear(input, w_ih, b_ih)
         gh = linear(hidden, w_hh, b_hh)
-        # FIXME: chunk
+        i_r, i_i, i_n = gi.chunk(3, 1)
+        h_r, h_i, h_n = gh.chunk(3, 1)
 
-        resetgate = sigmoid(gi[:,0*hsz:1*hsz] + gh[:,0*hsz:1*hsz])
-        inputgate = sigmoid(gi[:,1*hsz:2*hsz] + gh[:,1*hsz:2*hsz])
-        newgate   = tanh(gi[:,2*hsz:3*hsz] + resetgate * gh[:,2*hsz:3*hsz])
+        resetgate = sigmoid(i_r + h_r)
+        inputgate = sigmoid(i_i + h_i)
+        newgate = tanh(i_n + resetgate * h_n)
         hy     = newgate + inputgate * (hidden - newgate)
 
         return hy
@@ -85,7 +71,7 @@ def StackedRNN(cell, num_layers, lstm=False):
         next_hidden = []
 
         if lstm:
-            hidden = zip(*hidden)
+            hidden = list(zip(*hidden))
 
         for i in range(num_layers):
             hy = cell(input, hidden[i], *weight[i])
@@ -95,12 +81,12 @@ def StackedRNN(cell, num_layers, lstm=False):
         if lstm:
             next_h, next_c = zip(*next_hidden)
             next_hidden = (
-                input.cat(next_h, 0).view(num_layers, *next_h[0].size()),
-                input.cat(next_c, 0).view(num_layers, *next_c[0].size())
+                next_h[0].cat(next_h[1:], 0).view(num_layers, *next_h[0].size()),
+                next_c[0].cat(next_c[1:], 0).view(num_layers, *next_c[0].size())
             )
         else:
-            next_hidden = input.cat(next_hidden, 0).view(
-                num_layers, *next_hidden[0].size()) # FIXME: why input.cat???
+            next_hidden = next_hidden[0].cat(next_hidden[1:], 0).view(
+                num_layers, *next_hidden[0].size()) # FIXME: torch.cat
 
         return next_hidden, input
 
@@ -113,12 +99,12 @@ def Recurrent(rnn):
             hidden, y = rnn(input[i], hidden, weight)
             output.append(y)
 
-        output = input.cat(output, 0).view(input.size(0), *output[0].size())  # yikes!
+        output = output[0].cat(output[1:], 0).view(input.size(0), *output[0].size())  # FIXME: torch.cat
         return hidden, output
 
     return forward
 
-def THNN_RNN(mode, input_size, hidden_size, num_layers=1, batch_first=False, dropout=0, train=True, bidirectional=False):
+def AutogradRNN(mode, input_size, hidden_size, num_layers=1, batch_first=False, dropout=0, train=True, bidirectional=False):
     if bidirectional:
         raise NotImplementedError()
     if dropout != 0:
@@ -154,7 +140,7 @@ def THNN_RNN(mode, input_size, hidden_size, num_layers=1, batch_first=False, dro
 class CudnnRNN(NestedIOFunction):
     def __init__(self, mode, input_size, hidden_size, num_layers=1, batch_first=False, dropout=0, train=True, bidirectional=False):
         super(CudnnRNN, self).__init__()
-        self.mode = _getCudnnMode(mode)
+        self.mode = cudnn.rnn.get_cudnn_mode(mode)
         self.input_mode = cudnn.CUDNN_LINEAR_INPUT
         self.input_size = input_size
         self.hidden_size = hidden_size
@@ -227,7 +213,7 @@ def RNN(*args, **kwargs):
         if cudnn.is_acceptable(input.data):
             func = CudnnRNN(*args, **kwargs)
         else:
-            func = THNN_RNN(*args, **kwargs)
+            func = AutogradRNN(*args, **kwargs)
         return func(input, *fargs, **fkwargs)
 
     return forward

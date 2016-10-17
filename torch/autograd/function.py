@@ -1,9 +1,8 @@
+import torch
 import torch._C as _C
 from collections import OrderedDict
 from itertools import chain
 
-import torch  # FIXME: is this ok? Needed for torch.is_tensor
-import collections
 
 class Function(_C._FunctionBase):
 
@@ -78,12 +77,9 @@ _iter_variables = _iter_filter(lambda o: isinstance(o, torch.autograd.Variable))
 _iter_tensors = _iter_filter(torch.is_tensor)
 _iter_None_tensors = _iter_filter(lambda o: o is None or torch.is_tensor(o))
 _map_variable_tensor = _nested_map(lambda o: isinstance(o, torch.autograd.Variable), lambda o: o.data)
-_map_tensor_type = _nested_map(lambda o: torch.is_tensor(o), lambda o: o.type())
 
 def _map_tensor_fromiter(itr):
-     return _nested_map(lambda o: torch.is_tensor(o), lambda o: itr.next())
-def _map_variable_fromiter(itr):
-     return _nested_map(lambda o: isinstance(o, torch.autograd.Variable), lambda o: itr.next())
+     return _nested_map(lambda o: torch.is_tensor(o), lambda o: next(itr))
 
 class NestedIOFunction(Function):
 
@@ -99,6 +95,7 @@ class NestedIOFunction(Function):
         nested_gradients = _map_tensor_fromiter(iter(gradients))(self._nested_output)
         del self._nested_output
         result = self.backward_extended(*nested_gradients)
+        del self._to_save_nested
         return tuple(_iter_None_tensors(result))
 
     __call__ = _do_forward
@@ -129,5 +126,4 @@ class NestedIOFunction(Function):
         raise NotImplementedError
 
     def backward_extended(self, *grad_output):
-        raise NotImplementedError
         raise NotImplementedError

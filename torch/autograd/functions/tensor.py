@@ -44,9 +44,15 @@ class SetItem(InplaceFunction):
         return i
 
     def backward(self, grad_output):
-        grad_input = grad_output.clone()
-        grad_input[self.index].fill_(0)
-        return grad_input
+        if self.value is None:
+            grad_input = grad_output.clone()
+            grad_value = grad_output[self.index].clone()
+            grad_input[self.index].fill_(0)
+            return grad_input, grad_value
+        else:
+            grad_input = grad_output.clone()
+            grad_input[self.index].fill_(0)
+            return grad_input
 
 
 class Transpose(Function):
