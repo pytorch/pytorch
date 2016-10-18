@@ -57,7 +57,7 @@ class Container(Module):
         if hasattr(self, name):
             raise KeyError("attribute already exists '{}'".format(name))
         if not isinstance(module, Module) and module is not None:
-            raise ValueError("{} is not a Module subclass".format(
+            raise TypeError("{} is not a Module subclass".format(
                 torch.typename(module)))
         self._modules[name] = module
 
@@ -67,6 +67,28 @@ class Container(Module):
             if name in modules:
                 return modules[name]
         return Module.__getattr__(self, name)
+
+    def __setattr__(self, name, value):
+        _modules = self.__dict__.get('_modules')
+        if isinstance(value, Module):
+            if _modules is None:
+                raise AttributeError(
+                    "cannot assign module before Container.__init__() call")
+            _modules[name] = value
+        elif _modules is not None and name in _modules:
+            if value is not None:
+                raise TypeError("cannot assign '{}' as child module '{}' "
+                                "(torch.nn.Module or None expected)"
+                                 .format(torch.typename(value), name))
+            _modules[name] = value
+        else:
+            Module.__setattr__(self, name, value)
+
+    def __delattr__(self, name):
+        if name in self._modules:
+            del self._modules[name]
+        else:
+            Module.__delattr__(self, name)
 
     def parameter_dict(self, destination=None, prefix=''):
         result = super(Container, self).parameter_dict(destination, prefix)

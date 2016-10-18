@@ -93,21 +93,32 @@ class Module(object):
         return object.__getattribute__(self, name)
 
     def __setattr__(self, name, value):
-        if '_parameters' in self.__dict__:
-            _parameters = self.__dict__['_parameters']
-            if name in _parameters:
-                if not isinstance(value, Variable):
-                    raise RuntimeError(("assiging a {} object as parameter {} "
-                        "- you can only assign Variables as model"
-                        "parameters").format(type(value), name))
-                if value.creator:
-                    raise RuntimeError(("All parameters should be leaf "
-                            "variables - they should be created explicitly, "
-                            "not as a result of computation on other "
-                            "variables. If you want to express {} as a "
-                            "function of another variable, simply repeat the "
-                            "computation at every forward pass.").format(name))
-        return object.__setattr__(self, name, value)
+        _parameters = self.__dict__.get('_parameters')
+        if isinstance(value, Variable):
+            if _parameters is None:
+                raise AttributeError(
+                    "cannot assign parameter before Module.__init__() call")
+            if value.creator:
+                raise ValueError(
+                    "Cannot assign non-leaf Variable to parameter '{0}'. Model "
+                    "parameters must be created explicitly. To express '{0}' "
+                    "as a function of another variable, compute the value in "
+                    "the forward() method.".format(name))
+            _parameters[name] = value
+        elif _parameters and name in _parameters:
+            if value is not None:
+                raise TypeError("cannot assign '{}' object to parameter '{}' "
+                                "(torch.autograd.Variable or None required)"
+                                .format(torch.typename(value), name))
+            _parameters[name] = value
+        else:
+            object.__setattr__(self, name, value)
+
+    def __delattr__(self, name):
+        if name in self._parameters:
+            del self._parameters[name]
+        else:
+            object.__delattr__(self, name)
 
     def parameter_dict(self, destination=None, prefix=''):
         if destination is None:
