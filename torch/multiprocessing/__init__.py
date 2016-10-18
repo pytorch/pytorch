@@ -10,10 +10,10 @@ else:
     _all_sharing_strategies = {'file_descriptor', 'file_system'}
 
 
-def set_sharing_strategy(new_stragegy):
+def set_sharing_strategy(new_strategy):
     global _sharing_strategy
-    assert new_stragegy in _all_sharing_strategies
-    _sharing_strategy = new_stragegy
+    assert new_strategy in _all_sharing_strategies
+    _sharing_strategy = new_strategy
 
 
 def get_sharing_strategy():
@@ -36,4 +36,3 @@ from ._storage import _init_storage_sharing
 from ._tensor import _init_tensor_sharing
 _init_storage_sharing()
 _init_tensor_sharing()
-
