@@ -117,17 +117,18 @@ class Type(Function):
 
 class CudaTransfer(Function):
 
-    def __init__(self, device_id=None):
+    def __init__(self, device_id=None, async=False):
         super(CudaTransfer, self).__init__()
         self.device_id = device_id
+        self.async = async
 
     def forward(self, i):
         self.source_device = -1 if not i.is_cuda else i.get_device()
         self.source_was_cuda = i.is_cuda
         if self.device_id:
-            return i.cuda(self.device_id)
+            return i.cuda(self.device_id, async=self.async)
         else:
-            return i.cuda()
+            return i.cuda(async=self.async)
 
     def backward(self, grad_output):
         if self.source_device != -1:
