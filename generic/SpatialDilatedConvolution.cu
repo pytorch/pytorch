@@ -1,8 +1,8 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/SpatialConvolutionMM.cu"
+#define THC_GENERIC_FILE "generic/SpatialDilatedConvolution.cu"
 #else
 
-void THNN_(SpatialConvolutionMM_updateOutput)(
+void THNN_(SpatialDilatedConvolution_updateOutput)(
            THCState *state,
            THCTensor *input,
            THCTensor *output,
@@ -12,30 +12,22 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
            THCTensor *ones,
            int kW, int kH,
            int dW, int dH,
-           int padW, int padH) {
+           int padW, int padH,
+           int dilationW, int dilationH) {
 
   THCUNN_assertSameGPU_generic(state, 5, input, output, weight, columns, ones);
   if (bias) {
     THCUNN_assertSameGPU_generic(state, 2, weight, bias);
   }
   THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch mode) tensor is expected");
+  THArgCheck(weight->nDimension == 4, 4, "weight tensor must be 4D (nOutputPlane,nInputPlane,kH,kW)");
   THArgCheck(!bias || weight->size[0] == bias->size[0], 4, "nOutputPlane mismatch in weight and bias");
   THArgCheck(kW > 0 && kH > 0, 8, "kernel size should be greater than zero");
   THArgCheck(dW > 0 && dH > 0, 10, "stride should be greater than zero");
-  THArgCheck(weight->nDimension == 2 || weight->nDimension == 4, 4, "weight tensor should be 2D or 4D");
-
-  int freeWeight = 0;
 
   // Params:
-  int nInputPlane = weight->nDimension == 2 ? weight->size[1]/(kH*kW) : weight->size[1];
+  int nInputPlane = weight->size[1];
   int nOutputPlane = weight->size[0];
-
-  if (weight->nDimension == 4) {
-    long s1 = weight->size[0];
-    long s2 = weight->size[1] * weight->size[2] * weight->size[3];
-    weight = THCTensor_(newWithStorage2d)(state, weight->storage, weight->storageOffset, s1, -1, s2, -1);
-    freeWeight = 1;
-  }
 
   int batch = 1;
   if (input->nDimension == 3) {
@@ -49,8 +41,8 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
 
   long inputWidth   = input->size[3];
   long inputHeight  = input->size[2];
-  long outputWidth  = (inputWidth + 2*padW - kW) / dW + 1;
-  long outputHeight = (inputHeight + 2*padH - kH) / dH + 1;
+  long outputWidth  = (inputWidth + 2*padW - (dilationW * (kW - 1) + 1)) / dW + 1;
+  long outputHeight = (inputHeight + 2*padH - (dilationH * (kH - 1) + 1)) / dH + 1;
 
   if (outputWidth < 1 || outputHeight < 1)
     THError("Given input size: (%dx%dx%d). Calculated output size: (%dx%dx%d). Output size is too small",
@@ -118,7 +110,8 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
       THCState_getCurrentStream(state),
       THCTensor_(data)(state, input_n),
       nInputPlane, inputHeight, inputWidth, kH, kW, padH, padW, dH, dW,
-      1, 1, THCTensor_(data)(state, columns)
+      dilationH, dilationW,
+      THCTensor_(data)(state, columns)
     );
 
     // M,N,K are dims of matrix A and B
@@ -149,8 +142,6 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
   // Free
   THCTensor_(free)(state, input_n);
   THCTensor_(free)(state, output_n);
-  if (freeWeight)
-    THCTensor_(free)(state, weight);
 
   // Resize output
   if (batch == 0) {
@@ -159,36 +150,28 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
   }
 }
 
-void THNN_(SpatialConvolutionMM_updateGradInput)(
+void THNN_(SpatialDilatedConvolution_updateGradInput)(
            THCState *state,
            THCTensor *input,
            THCTensor *gradOutput,
            THCTensor *gradInput,
            THCTensor *weight,
            THCTensor *gradColumns,
-           THCTensor *ones,
            int kW, int kH,
            int dW, int dH,
-           int padW, int padH) {
+           int padW, int padH,
+           int dilationW, int dilationH) {
 
   THCUNN_assertSameGPU_generic(state, 5, input, gradOutput, weight,
                                  gradColumns, gradInput);
   THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch mode) tensor is expected");
+  THArgCheck(weight->nDimension == 4, 4, "weight tensor must be 4D (nOutputPlane,nInputPlane,kH,kW)");
   THArgCheck(kW > 0 && kH > 0, 9, "kernel size should be greater than zero");
   THArgCheck(dW > 0 && dH > 0, 11, "stride should be greater than zero");
-  THArgCheck(weight->nDimension == 2 || weight->nDimension == 4, 4, "weight tensor should be 2D or 4D");
 
   // Params
-  int nInputPlane = weight->nDimension == 2 ? weight->size[1]/(kW*kH) : weight->size[1];
+  int nInputPlane = weight->size[1];
   int nOutputPlane = weight->size[0];
-
-  int freeWeight = 0;
-  if (weight->nDimension == 4) {
-    long s1 = weight->size[0];
-    long s2 = weight->size[1] * weight->size[2] * weight->size[3];
-    weight = THCTensor_(newWithStorage2d)(state, weight->storage, weight->storageOffset, s1, -1, s2, -1);
-    freeWeight = 1;
-  }
 
   int batch = 1;
   if (input->nDimension == 3) {
@@ -200,8 +183,8 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
 
   long inputWidth   = input->size[3];
   long inputHeight  = input->size[2];
-  long outputWidth  = (inputWidth + 2*padW - kW) / dW + 1;
-  long outputHeight = (inputHeight + 2*padH - kH) / dH + 1;
+  long outputWidth  = (inputWidth + 2*padW - (dilationW * (kW - 1) + 1)) / dW + 1;
+  long outputHeight = (inputHeight + 2*padH - (dilationH * (kH - 1) + 1)) / dH + 1;
 
   // Batch size + input planes
   long batchSize = input->size[0];
@@ -251,15 +234,14 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
       THCState_getCurrentStream(state),
       THCTensor_(data)(state, gradColumns),
       nInputPlane, inputHeight, inputWidth, kH, kW, padH, padW, dH, dW,
-      1, 1, THCTensor_(data)(state, gradInput_n)
+      dilationH, dilationW,
+      THCTensor_(data)(state, gradInput_n)
     );
   }
 
   // Free
   THCTensor_(free)(state, gradInput_n);
   THCTensor_(free)(state, gradOutput_n);
-  if (freeWeight)
-    THCTensor_(free)(state, weight);
 
   // Resize output
   if (batch == 0) {
@@ -269,7 +251,7 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
   }
 }
 
-void THNN_(SpatialConvolutionMM_accGradParameters)(
+void THNN_(SpatialDilatedConvolution_accGradParameters)(
            THCState *state,
            THCTensor *input,
            THCTensor *gradOutput,
@@ -280,6 +262,7 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
            int kW, int kH,
            int dW, int dH,
            int padW, int padH,
+           int dilationW, int dilationH,
            real scale) {
 
   THCUNN_assertSameGPU_generic(state, 5, input, gradOutput, gradWeight, columns, ones);
@@ -287,22 +270,14 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
    THCUNN_assertSameGPU_generic(state, 2, gradWeight, gradBias);
   }
   THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch mode) tensor is expected");
+  THArgCheck(gradWeight->nDimension == 4, 4, "gradWeight tensor must be 4D (nOutputPlane,nInputPlane,kH,kW)");
   THArgCheck(!gradBias || gradWeight->size[0] == gradBias->size[0], 4, "nOutputPlane mismatch in gradWeight and gradBias");
   THArgCheck(kW > 0 && kH > 0, 8, "kernel size should be greater than zero");
   THArgCheck(dW > 0 && dH > 0, 10, "stride should be greater than zero");
-  THArgCheck(gradWeight->nDimension == 2 || gradWeight->nDimension == 4, 4, "gradWeight tensor should be 2D or 4D");
 
   // Params
-  int nInputPlane = gradWeight->nDimension == 2 ? gradWeight->size[1]/(kW*kH) : gradWeight->size[1];
+  int nInputPlane = gradWeight->size[1];
   int nOutputPlane = gradWeight->size[0];
-
-  int freeWeight = 0;
-  if (gradWeight->nDimension == 4) {
-    long s1 = gradWeight->size[0];
-    long s2 = gradWeight->size[1] * gradWeight->size[2] * gradWeight->size[3];
-    gradWeight = THCTensor_(newWithStorage2d)(state, gradWeight->storage, gradWeight->storageOffset, s1, -1, s2, -1);
-    freeWeight = 1;
-  }
 
   int batch = 1;
   if (input->nDimension == 3) {
@@ -314,8 +289,8 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
 
   long inputWidth   = input->size[3];
   long inputHeight  = input->size[2];
-  long outputWidth  = (inputWidth + 2*padW - kW) / dW + 1;
-  long outputHeight = (inputHeight + 2*padH - kH) / dH + 1;
+  long outputWidth  = (inputWidth + 2*padW - (dilationW * (kW - 1) + 1)) / dW + 1;
+  long outputHeight = (inputHeight + 2*padH - (dilationH * (kH - 1) + 1)) / dH + 1;
 
   // Batch size + input planes
   long batchSize = input->size[0];
@@ -345,7 +320,8 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
       THCState_getCurrentStream(state),
       THCTensor_(data)(state, input_n),
       nInputPlane, inputHeight, inputWidth, kH, kW, padH, padW, dH, dW,
-      1, 1, THCTensor_(data)(state, columns)
+      dilationH, dilationW,
+      THCTensor_(data)(state, columns)
     );
 
     // M,N,K are dims of matrix A and B
@@ -414,8 +390,6 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
   // Free
   THCTensor_(free)(state, input_n);
   THCTensor_(free)(state, gradOutput_n);
-  if (freeWeight)
-    THCTensor_(free)(state, gradWeight);
 
   // Resize
   if (batch == 0) {
