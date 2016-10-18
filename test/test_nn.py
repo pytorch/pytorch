@@ -316,7 +316,7 @@ class TestNN(NNTestCase):
         net.add_module('l3', l)
         self.assertEqual(net.l3, l)
         self.assertRaises(KeyError, lambda: net.add_module('l', l))
-        self.assertRaises(ValueError, lambda: net.add_module('x', 'non-module'))
+        self.assertRaises(TypeError, lambda: net.add_module('x', 'non-module'))
 
     def test_type(self):
         l = nn.Linear(10, 20)
@@ -337,7 +337,7 @@ class TestNN(NNTestCase):
         l2 = nn.Linear(10, 10)
         def assign_weight():
             l2.weight = l1.weight + 2
-        self.assertRaises(RuntimeError, assign_weight)
+        self.assertRaises(ValueError, assign_weight)
         # This should work though
         l2.weight = Variable(torch.randn(10, 10))
 
