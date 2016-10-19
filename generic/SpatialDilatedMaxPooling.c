@@ -63,9 +63,9 @@ static inline void THNN_(SpatialDilatedMaxPooling_shapeCheck)(
     THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimw, outputWidth);
   }
   if (indices != NULL) {
-    THNN_CHECK_DIM_SIZE(indices, ndim, dimf, nOutputPlane);
-    THNN_CHECK_DIM_SIZE(indices, ndim, dimh, outputHeight);
-    THNN_CHECK_DIM_SIZE(indices, ndim, dimw, outputWidth);
+    THNN_CHECK_DIM_SIZE_INDICES(indices, ndim, dimf, nOutputPlane);
+    THNN_CHECK_DIM_SIZE_INDICES(indices, ndim, dimh, outputHeight);
+    THNN_CHECK_DIM_SIZE_INDICES(indices, ndim, dimw, outputWidth);
   }
 }
 
