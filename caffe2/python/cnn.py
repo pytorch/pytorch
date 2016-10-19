@@ -458,12 +458,13 @@ class CNNModelHelper(ModelHelperBase):
             blob_outputs = self.net.SpatialBN(
                 [blob_in, scale, bias, blob_outs[1], blob_outs[2]], [blob_out],
                 order=self.order, **kwargs)
+            return blob_outputs
         else:
             blob_outputs = self.net.SpatialBN(
                 [blob_in, scale, bias, blob_outs[1], blob_outs[2]], blob_outs,
                 order=self.order, **kwargs)
-        # Return the output
-        return blob_outputs[0]
+            # Return the output
+            return blob_outputs[0]
 
     def Iter(self, blob_out, **kwargs):
         if 'device_option' in kwargs:
