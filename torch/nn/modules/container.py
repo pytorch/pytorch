@@ -109,7 +109,8 @@ class Container(Module):
     def parameters(self, memo=None):
         if memo is None:
             memo = set()
-        super(Container, self).parameters(memo)
+        for p in super(Container, self).parameters(memo):
+            yield p
         for module in self.children():
             for p in module.parameters(memo):
                 yield p
@@ -125,7 +126,8 @@ class Container(Module):
         if memo is None:
             memo = set()
         if self not in memo:
-            super(Container, self).modules(memo)
+            for m in super(Container, self).modules(memo):
+                yield m
             for module in self.children():
                 for m in module.modules(memo):
                     yield m

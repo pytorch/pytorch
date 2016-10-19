@@ -285,12 +285,25 @@ class TestNN(NNTestCase):
                     l1=l,
                     l2=l
                 )
+                self.param = Variable(torch.Tensor(3, 5))
         l = nn.Linear(10, 20)
         n = Net()
-        s = nn.Sequential(l, l, l, l)
+        s = nn.Sequential(n, n, n, n)
         self.assertEqual(num_params(l), 2)
-        self.assertEqual(num_params(n), 2)
-        self.assertEqual(num_params(s), 2)
+        self.assertEqual(num_params(n), 3)
+        self.assertEqual(num_params(s), 3)
+
+    def test_modules(self):
+        class Net(nn.Container):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.l1 = l
+                self.l2 = l
+                self.param = Variable(torch.Tensor(3, 5))
+        l = nn.Linear(10, 20)
+        n = Net()
+        s = nn.Sequential(n, n, n, n)
+        self.assertEqual(list(s.modules()), [s, n, l])
 
     def test_Sequential_getitem(self):
         l1 = nn.Linear(10, 20)
