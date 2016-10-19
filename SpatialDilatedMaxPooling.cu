@@ -70,9 +70,9 @@ __global__ void MaxPoolBackward(const int nthreads, const Dtype* top_diff,
     top_mask += offset;
     for (int ph = phstart; ph < phend; ++ph) {
       for (int pw = pwstart; pw < pwend; ++pw) {
-	       if (top_mask[ph * pooled_width + pw] - TH_INDEX_BASE == h * width + w) {
-	          gradient += ScalarConvert<Dtype, AccType>::to(top_diff[ph * pooled_width + pw]);
-	       }
+        if (top_mask[ph * pooled_width + pw] - TH_INDEX_BASE == h * width + w) {
+          gradient += ScalarConvert<Dtype, AccType>::to(top_diff[ph * pooled_width + pw]);
+        }
       }
     }
     bottom_diff[index] = ScalarConvert<AccType, Dtype>::to(gradient);
