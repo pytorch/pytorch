@@ -1,10 +1,7 @@
+import torch
 from torch.autograd import Function
 from torch._thnn import type2backend
 import torch.backends.cudnn as cudnn
-try:
-    import torch.backends.cudnn.conv
-except ImportError:
-    pass
 
 
 class Conv2d(Function):
@@ -22,7 +19,9 @@ class Conv2d(Function):
             self.save_for_backward(input, weight)
 
         if cudnn.is_acceptable(input):
-            cudnn.conv.forward(self, input, weight, bias, output)
+            self._cudnn_info = torch._C._cudnn_convolution_forward(
+                input, weight, bias, output, self.pad[0], self.pad[1],
+                self.stride[0], self.stride[1], self.groups, cudnn.benchmark)
         else:
             # TODO: implement groups for THNN
             if self.groups != 1:
@@ -49,16 +48,21 @@ class Conv2d(Function):
 
         if cudnn.is_acceptable(input):
             if self.needs_input_grad[0]:
-                grad_input = cudnn.conv.backward_data(
-                    self, grad_output, input, weight)
+                grad_input = input.new().resize_as_(input)
+                torch._C._cudnn_convolution_backward_data(
+                    grad_output, grad_input, weight, self._cudnn_info,
+                    cudnn.benchmark)
 
             if self.needs_input_grad[1]:
-                grad_weight = cudnn.conv.backward_filter(
-                    self, grad_output, input, weight)
+                grad_weight = weight.new().resize_as_(weight)
+                torch._C._cudnn_convolution_backward_filter(
+                    grad_output, input, grad_weight, self._cudnn_info,
+                    cudnn.benchmark)
 
             if bias is not None and self.needs_input_grad[2]:
-                grad_bias = cudnn.conv.backward_bias(
-                    self, grad_output, bias)
+                grad_bias = bias.new().resize_as_(bias)
+                torch._C._cudnn_convolution_backward_bias(
+                    grad_output, grad_bias, self._cudnn_info)
         else:
             backend = type2backend[type(input)]
             if self.needs_input_grad[0]:

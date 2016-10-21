@@ -138,7 +138,13 @@ class cwrap(object):
         return self.search_plugins('get_wrapper_template', (declaration,), lambda _: None)
 
     def get_arg_accessor(self, arg, option):
-        return self.search_plugins('get_arg_accessor', (arg, option), lambda arg,_: 'PyTuple_GET_ITEM(args, {})'.format(arg['idx']))
+        def wrap_accessor(arg, _):
+            if arg.get('idx') is None:
+                raise RuntimeError("Missing accessor for '{} {}'".format(
+                                   arg['type'], arg['name']))
+            return 'PyTuple_GET_ITEM(args, {})'.format(arg['idx'])
+
+        return self.search_plugins('get_arg_accessor', (arg, option), wrap_accessor)
 
     def generate_wrapper(self, declaration):
         wrapper = ''
@@ -153,7 +159,12 @@ class cwrap(object):
         result = []
         for arg in arguments:
             accessor = self.get_arg_accessor(arg, option)
-            res = getattr(self, base_fn_name)(arg, option).substitute(arg=accessor)
+            tmpl = getattr(self, base_fn_name)(arg, option)
+            if tmpl is None:
+                fn = 'check' if base_fn_name == 'get_type_check' else 'unpack'
+                raise RuntimeError("Missing type {} for '{} {}'".format(
+                                   fn, arg['type'], arg['name']))
+            res = tmpl.substitute(arg=accessor)
             for plugin in self.plugins:
                 res = getattr(plugin, plugin_fn_name)(res, arg, accessor)
             result.append(res)

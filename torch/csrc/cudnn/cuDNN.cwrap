@@ -1,0 +1,68 @@
+#include <cudnn.h>
+#include "Types.h"
+#include "Handles.h"
+#include "Conv.h"
+#include "torch/csrc/cuda/THCP.h"
+#include "CppWrapper.h"
+
+
+using namespace torch::cudnn;
+
+extern THCState* state;
+
+[[
+  name: cudnn_convolution_forward
+  return: Convolution*
+  arguments:
+    - cudnnHandle_t handle
+    - cudnnDataType_t dataType
+    - THTensor* input
+    - THTensor* weight
+    - type: THTensor*
+      name: bias
+      nullable: True
+    - THTensor* output
+    - int padH
+    - int padW
+    - int dH
+    - int dW
+    - int groups
+    - bool benchmark
+]]
+
+[[
+  name: cudnn_convolution_backward_data
+  return: void
+  arguments:
+    - cudnnHandle_t handle
+    - cudnnDataType_t dataType
+    - THTensor* grad_output
+    - THTensor* grad_input
+    - THTensor* weight
+    - Convolution* info
+    - bool benchmark
+]]
+
+[[
+  name: cudnn_convolution_backward_filter
+  return: void
+  arguments:
+    - cudnnHandle_t handle
+    - cudnnDataType_t dataType
+    - THTensor* grad_output
+    - THTensor* input
+    - THTensor* grad_weight
+    - Convolution* info
+    - bool benchmark
+]]
+
+[[
+  name: cudnn_convolution_backward_bias
+  return: void
+  arguments:
+    - cudnnHandle_t handle
+    - cudnnDataType_t dataType
+    - THTensor* grad_output
+    - THTensor* grad_bias
+    - Convolution* info
+]]

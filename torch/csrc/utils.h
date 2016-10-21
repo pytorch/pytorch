@@ -132,6 +132,8 @@ THP_API void THPUtils_invalidArguments(PyObject *given_args,
 
 #ifdef _THP_CORE
 
+void THPUtils_addPyMethodDefs(std::vector<PyMethodDef>& vector, PyMethodDef* methods);
+
 #define THPUtils_classname(obj) (((PyTypeObject*)obj)->tp_name)
 THLongStorage * THPUtils_getLongStorage(PyObject *args, int ignore_first=0);
 int THPUtils_getCallable(PyObject *arg, PyObject **result);
@@ -176,4 +178,3 @@ struct THPUtils_typeTraits {};
 #endif /* _THP_CORE */
 
 #endif
-
