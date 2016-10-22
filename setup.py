@@ -104,10 +104,16 @@ class install(setuptools.command.install.install):
 
 class clean(distutils.command.clean.clean):
     def run(self):
+        import glob
         with open('.gitignore', 'r') as f:
             ignores = f.read()
-            for glob in filter(bool, ignores.split('\n')):
-                shutil.rmtree(glob, ignore_errors=True)
+            for wildcard in filter(bool, ignores.split('\n')):
+                for filename in glob.glob(wildcard):
+                    try:
+                        os.remove(filename)
+                    except OSError:
+                        shutil.rmtree(filename, ignore_errors=True)
+                        
         # It's an old-style class in Python 2.7...
         distutils.command.clean.clean.run(self)
 
