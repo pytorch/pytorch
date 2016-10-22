@@ -136,8 +136,8 @@ PyObject * THPTensor_(toNumpy)(THPTensor *self, PyObject *args) {
 
   THPObjectPtr array = PyArray_New(
       &PyArray_Type, ndim, sizes_ptr, NUMPY_TYPE_ENUM,
-      strides.get(), self->cdata->storage->data, 0,
-      NPY_ARRAY_ALIGNED, nullptr);
+      strides.get(), self->cdata->storage->data + self->cdata->storageOffset,
+      0, NPY_ARRAY_ALIGNED, nullptr);
   if (!array) {
     THPUtils_setError("an error occured during conversion to numpy array");
     return NULL;

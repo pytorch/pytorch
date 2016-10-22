@@ -9,6 +9,11 @@ from torch.autograd import Variable, Function
 
 torch.set_default_tensor_type('torch.DoubleTensor')
 
+TEST_NUMPY = True
+try:
+    import numpy
+except ImportError:
+    TEST_NUMPY = False
 
 def get_cpu_type(t):
     assert t.__module__ == 'torch.cuda'
