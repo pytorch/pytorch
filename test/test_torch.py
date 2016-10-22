@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from itertools import product, chain
 from functools import wraps
-from common import TestCase, iter_indices
+from common import TestCase, iter_indices, TEST_NUMPY
 
 SIZE = 100
 
@@ -2414,6 +2414,68 @@ class TestTorch(TestCase):
         self.assertEqual(pinned, x)
         self.assertNotEqual(pinned.data_ptr(), x.data_ptr())
 
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_toNumpy(self):
+        types = [
+            'torch.ByteTensor',
+            'torch.IntTensor',
+            'torch.FloatTensor',
+            'torch.DoubleTensor',
+            'torch.LongTensor',
+        ]
+        for tp in types:
+            # 1D
+            sz = 10
+            x = torch.randn(sz).mul(255).type(tp)
+            y = x.numpy()
+            for i in range(sz):
+                self.assertEqual(x[i], y[i])
+
+            # 1D > 0 storage offset
+            xm = torch.randn(sz * 2).mul(255).type(tp)
+            x = xm.narrow(0, sz-1, sz)
+            self.assertTrue(x.storage_offset() > 0)
+            y = x.numpy()
+            for i in range(sz):
+                self.assertEqual(x[i], y[i])
+
+            def check2d(x, y):
+                for i in range(sz1):
+                    for j in range(sz2):
+                        self.assertEqual(x[i][j], y[i][j])
+
+            # contiguous 2D
+            sz1 = 3
+            sz2 = 5
+            x = torch.randn(sz1, sz2).mul(255).type(tp)
+            y = x.numpy()
+            check2d(x, y)
+
+            # with storage offset
+            xm = torch.randn(sz1 * 2, sz2).mul(255).type(tp)
+            x = xm.narrow(0, sz1-1, sz1)
+            y = x.numpy()
+            self.assertTrue(x.storage_offset() > 0)
+            check2d(x, y)
+
+            # non-contiguous 2D
+            x = torch.randn(sz2, sz1).t().mul(255).type(tp)
+            y = x.numpy()
+            check2d(x, y)
+
+            # with storage offset
+            xm = torch.randn(sz2 * 2, sz1).mul(255).type(tp)
+            x = xm.narrow(0, sz2-1, sz2).t()
+            y = x.numpy()
+            self.assertTrue(x.storage_offset() > 0)
+            check2d(x, y)
+
+            # non-contiguous 2D with holes
+            xm = torch.randn(sz2 * 2, sz1 * 2).mul(255).type(tp)
+            x = xm.narrow(0, sz2-1, sz2).narrow(1, sz1-1, sz1).t()
+            y = x.numpy()
+            self.assertTrue(x.storage_offset() > 0)
+            check2d(x, y)
 
 if __name__ == '__main__':
     unittest.main()
