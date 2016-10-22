@@ -2379,10 +2379,14 @@ class TestTorch(TestCase):
 
     def test_print(self):
         for t in torch._tensor_classes:
+            if t.is_cuda and not torch.cuda.is_available():
+                continue
             obj = t(100, 100).fill_(1)
             obj.__repr__()
             str(obj)
         for t in torch._storage_classes:
+            if  t.is_cuda and not torch.cuda.is_available():
+                continue
             obj = t(100).fill_(1)
             obj.__repr__()
             str(obj)
