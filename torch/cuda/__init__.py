@@ -132,6 +132,8 @@ if not hasattr(torch._C, 'CudaDoubleStorageBase'):
         torch._C.__dict__[storage_name] = type(storage_name, (object,), {})
         torch._C.__dict__[tensor_name] = type(tensor_name, (object,), {})
 
+    torch._C.__dict__['_CudaStreamBase'] = type('CudaStreamBase', (object,), {})
+
 
 class _CudaBase(object):
     is_cuda = True
