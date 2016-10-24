@@ -45,15 +45,6 @@ function build_nccl() {
    make install
    cp "lib/libnccl.so" "${INSTALL_DIR}/lib/libnccl.so"
    cd ../..
-
-   if [[ $(uname) == 'Darwin' ]]; then
-     cd tmp_install/lib
-     for lib in *.dylib; do
-      echo "Updating install_name for $lib"
-      install_name_tool -id @rpath/$lib $lib
-     done
-     cd ../..
-   fi
 }
 
 mkdir -p tmp_install
@@ -63,7 +54,9 @@ build THNN
 if [[ "$1" == "--with-cuda" ]]; then
     build THC
     build THCUNN
-    build_nccl
+    if [[ $(uname) != 'Darwin' ]]; then
+        build_nccl
+    fi
 fi
 
 CPP_FLAGS=" -std=c++11 "
