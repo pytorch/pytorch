@@ -35,7 +35,7 @@ def asgd(opfunc, x, config, state=None):
     # (0) get/update state
     if config is None and state is None:
         raise ValueError("asgd requires a dictionary to retain state between iterations")
-    state = state or config
+    state = state if state is not None else config
     config['eta0'] = config.get('eta0', 1e-4)
     config['lambda'] = config.get('lambda', 1e-4)
     config['alpha'] = config.get('alpha', 0.75)

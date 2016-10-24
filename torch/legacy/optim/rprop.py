@@ -26,7 +26,7 @@ def rprop(opfunc, x, config, state=None):
         raise ValueError("rprop requires a dictionary to retain state between iterations")
 
     # (0) get/update state
-    state = state or config
+    state = state if state is not None else config
     stepsize = config.get('stepsize', 0.1)
     etaplus = config.get('etaplus', 1.2)
     etaminus = config.get('etaminus', 0.5)

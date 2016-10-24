@@ -25,7 +25,7 @@ def adam(opfunc, x, config, state=None):
     # (0) get/update state
     if config is None and state is None:
         raise ValueError("adam requires a dictionary to retain state between iterations")
-    state = state or config
+    state = state if state is not None else config
     lr = config.get('learningRate', 0.001)
     beta1 = config.get('beta1', 0.9)
     beta2 = config.get('beta2', 0.999)
