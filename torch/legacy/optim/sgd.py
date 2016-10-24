@@ -28,7 +28,7 @@ def sgd(opfunc, x, config, state=None):
     (Clement Farabet, 2012)
     """
     # (0) get/update state
-    state = state or config
+    state = state if state is not None else config
     lr = config.get('learningRate', 1e-3)
     lrd = config.get('learningRateDecay', 0)
     wd = config.get('weightDecay', 0)

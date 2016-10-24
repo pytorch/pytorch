@@ -26,7 +26,7 @@ def rmsprop(opfunc, x, config, state=None):
     # (0) get/update state
     if config is None and state is None:
         raise ValueError("rmsprop requires a dictionary to retain state between iterations")
-    state = state or config
+    state = state if state is not None else config
     lr = config.get('learningRate', 1e-2)
     alpha = config.get('alpha', 0.99)
     epsilon = config.get('epsilon', 1e-8)

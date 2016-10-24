@@ -21,7 +21,7 @@ def adadelta(opfunc, x, config, state=None):
     # (0) get/update state
     if config is None and state is None:
         raise ValueError("adadelta requires a dictionary to retain state between iterations")
-    state = state or config
+    state = state if state is not None else config
     rho = config.get('rho', 0.9)
     eps = config.get('eps', 1e-6)
     wd = config.get('weightDecay', 0)

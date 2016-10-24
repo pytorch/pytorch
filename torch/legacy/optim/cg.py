@@ -44,7 +44,7 @@ def cg(opfunc, x, config, state=None):
     # parameters
     if config is None and state is None:
         raise ValueError("cg requires a dictionary to retain state between iterations")
-    state = state or config
+    state = state if state is not None else config
     rho  = config.get('rho', 0.01)
     sig  = config.get('sig', 0.5)
     _int  = config.get('int', 0.1)
