@@ -13,6 +13,20 @@ TH_API void THNN_(Abs_updateGradInput)(
                   THCTensor *gradOutput,
                   THCTensor *gradInput);
 
+TH_API void THNN_(AbsCriterion_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *target,
+                  THCTensor *output,
+                  bool sizeAverage);
+
+TH_API void THNN_(AbsCriterion_updateGradInput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *target,
+                  THCTensor *gradInput,
+                  bool sizeAverage);
+
 TH_API void THNN_(ELU_updateOutput)(
                   THCState *state,
                   THCTensor *input,

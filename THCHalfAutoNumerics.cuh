@@ -171,6 +171,11 @@ inline __host__ __device__ float& operator-=(float &lhs, const half &rhs) {
   return lhs;
 }
 
+inline __host__ __device__ half& operator/=(half &lhs, const int &rhs) {
+  lhs = lhs / rhs;
+  return lhs;
+}
+
 inline __host__ __device__ half abs(half a) {
   return THCNumerics<half>::abs(a);
 }
@@ -223,6 +228,10 @@ inline __host__ __device__ bool operator>(half a, int b) {
 
 inline __host__ __device__ bool operator>=(half a, half b) {
   return THCNumerics<half>::ge(a, b);
+}
+
+inline __host__ __device__ bool operator>=(half a, int b) {
+  return THCNumerics<half>::ge(a, ScalarConvert<int ,half>::to(b));
 }
 
 #endif
