@@ -1,5 +1,6 @@
 from __future__ import print_function
 import contextlib
+import platform
 import ctypes
 import os
 import torch
@@ -35,10 +36,8 @@ a PyTorch version that has been compiled with your version
 of the CUDA driver.""".format(str(torch._C._cuda_getDriverVersion())))
     assert torch._C._cuda_init()
     _initialized = True
-    if os.name == 'mac':
+    if platform.system() == 'Darwin':
         _cudart = ctypes.cdll.LoadLibrary('libcudart.dylib')
-    elif os.name == 'nt':
-        _cudart = ctypes.cdll.LoadLibrary('cudart.dll')
     else:
         _cudart = ctypes.cdll.LoadLibrary('libcudart.so')
     _cudart.cudaGetErrorName.restype = ctypes.c_char_p
