@@ -577,6 +577,20 @@ TH_API void THNN_(Sigmoid_updateGradInput)(
                   THCTensor *gradInput,
                   THCTensor *output);
 
+TH_API void THNN_(SoftMarginCriterion_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *target,
+                  THCTensor *output,
+                  int sizeAverage);
+
+TH_API void THNN_(SoftMarginCriterion_updateGradInput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *target,
+                  THCTensor *gradInput,
+                  int sizeAverage);
+
 TH_API void THNN_(SoftMax_updateOutput)(
                   THCState *state,
                   THCTensor *input,
