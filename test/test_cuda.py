@@ -413,6 +413,13 @@ class TestCuda(TestCase):
     def test_gather_dim(self):
         self._test_gather(1)
 
+    def test_from_sequence(self):
+        seq = [list(range(i*4,i*4+4)) for i in range(5)]
+        reference = torch.range(0, 19).resize_(5, 4)
+        for t in types:
+            cuda_type = get_gpu_type(t)
+            self.assertEqual(cuda_type(seq), reference)
+
     def test_manual_seed(self):
         with freeze_rng_state():
             x = torch.zeros(4, 4).float().cuda()

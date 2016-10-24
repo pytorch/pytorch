@@ -30,3 +30,7 @@
 #undef THTensorPtr
 #undef THPTensorPtr
 
+#undef THHostTensor
+#undef THHostTensor_
+#undef THHostStorage
+#undef THHostStorage_

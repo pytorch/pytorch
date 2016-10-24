@@ -251,14 +251,21 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
       }
     }
 
+    // half tensors don't have CPU counterparts so we have to buffer them as
+    // floats while loading
+#ifndef THC_REAL_IS_HALF
+#define load_real real
+#define UNPACK_REAL(item) THPUtils_(unpackReal)(item)
+#else
+#define load_real float
+#define UNPACK_REAL(item) THPFloatUtils_unpackReal(item)
+#endif
 #ifndef THC_GENERIC_FILE
-#define SET_ITEM *data++ = THPUtils_(unpackReal)(item)
     real *data = tensor->storage->data;
 #else
-#define SET_ITEM item_value = THPUtils_(unpackReal)(item); THStorage_(set)(LIBRARY_STATE storage, item_nr++, item_value)
-    real item_value;
-    size_t item_nr = 0;
-    THStorage *storage = tensor->storage;
+    size_t numel = THTensor_(numel)(LIBRARY_STATE tensor);
+    std::unique_ptr<load_real> data_guard(new load_real[numel]);
+    load_real *data = data_guard.get();
 #endif
     THPObjectPtr final_sequence;
     while (true) {
@@ -271,7 +278,7 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
           // We've checked the length earlier, so it must have been an error
           if (!item)
             return NULL;
-          SET_ITEM;
+          *data++ = UNPACK_REAL(item);
         }
       } catch(std::runtime_error &e) {
         std::string index = THPTensor_(indicesToString)(indices, ndims-1);
@@ -283,7 +290,21 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
             index.c_str());
         return NULL;
       }
-#undef SET_ITEM
+#ifdef THC_GENERIC_FILE
+#ifdef THC_REAL_IS_HALF
+      THFloatStorage *cpu_storage = THFloatStorage_newWithData(data_guard.get(), numel);
+      cpu_storage->flag &= ~TH_STORAGE_FREEMEM;
+      THCudaHalfStorage_copyFloat(LIBRARY_STATE tensor->storage, cpu_storage);
+      THFloatStorage_free(cpu_storage);
+#else
+      THHostStorage *cpu_storage = THHostStorage_(newWithData)(data_guard.get(), numel);
+      cpu_storage->flag &= ~TH_STORAGE_FREEMEM;
+      THCStorage_(copyCPU)(LIBRARY_STATE tensor->storage, cpu_storage);
+      THHostStorage_(free)(cpu_storage);
+#endif
+#endif
+#undef UNPACK_REAL
+#undef load_real
 
       // Update the counters
       int dim = ndims-2;
