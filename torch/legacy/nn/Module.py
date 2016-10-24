@@ -249,19 +249,19 @@ class Module(object):
 
     def apply(self, callback):
         callback(self)
-        for _, module in self.modules:
-            module.apply(callback)
+        if hasattr(self, 'modules'):
+            for _, module in self.modules:
+                module.apply(callback)
 
-    def findModules(self, typename, container=None):
+    def findModules(self, cls, container=None):
         nodes = []
         containers = []
-        mod_type = str(type(self))
-        if mod_type == typename:
+        if isinstance(self, cls):
             nodes.append(self)
             containers.append(container)
 
         # Recurse on nodes with 'modules'
-        if self.modules:
+        if hasattr(self, 'modules'):
             for child in self.modules:
                 child_nodes, child_containers = child.findModules(typename, self)
                 assert len(child_nodes) == len(child_containers)
@@ -275,7 +275,7 @@ class Module(object):
     def listModules(self):
         # include self first
         modules = [self]
-        if self.modules:
+        if hasattr(self, 'modules'):
             for child in self.modules:
                 modules.extend(child.listModules())
         return modules
@@ -286,7 +286,8 @@ class Module(object):
     def replace(self, callback):
         out = callback(self)
         # TODO: not out.modules?
-        if self.modules:
+        if hasattr(self, 'modules'):
             for i, module in self.modules:
                 self.modules[i] = module.replace(callback)
         return out
+

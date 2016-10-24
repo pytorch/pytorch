@@ -15,7 +15,7 @@ class Sequential(Container):
         return self
 
     def insert(self, module, index):
-        self.module.insert(module, index)
+        self.modules.insert(module, index)
         self.output = self.modules[-1].output
         self.gradInput = self.modules[0].gradInput
 
