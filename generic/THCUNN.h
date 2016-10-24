@@ -100,6 +100,22 @@ TH_API void THNN_(LogSoftMax_updateGradInput)(
                   THCTensor *gradInput,
                   THCTensor *output);
 
+TH_API void THNN_(MarginCriterion_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *target,
+                  THCTensor *output,
+                  bool sizeAverage,
+                  real margin);
+
+TH_API void THNN_(MarginCriterion_updateGradInput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *target,
+                  THCTensor *gradInput,
+                  bool sizeAverage,
+                  real margin);
+
 TH_API void THNN_(PReLU_updateOutput)(
                   THCState *state,
                   THCTensor *input,

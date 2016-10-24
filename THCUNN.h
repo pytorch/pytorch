@@ -81,21 +81,6 @@ TH_API void THNN_CudaLookupTable_renorm(
           float maxNorm,
           float normType);
 
-TH_API void THNN_CudaMarginCriterion_updateOutput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *target,
-          THCudaTensor *output,
-          bool sizeAverage,
-          float margin);
-TH_API void THNN_CudaMarginCriterion_updateGradInput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *target,
-          THCudaTensor *gradInput,
-          bool sizeAverage,
-          float margin);
-
 TH_API void THNN_CudaSoftMarginCriterion_updateOutput(
           THCState *state,
           THCudaTensor *input,
