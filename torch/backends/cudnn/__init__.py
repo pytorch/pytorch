@@ -72,6 +72,13 @@ CUDNN_CONVOLUTION_BWD_DATA_SPECIFY_WORKSPACE_LIMIT = 2
 CUDNN_TENSOR_NCHW = 0
 CUDNN_TENSOR_NHWC = 1
 
+CUDNN_RNN_RELU = 0
+CUDNN_RNN_TANH = 1
+CUDNN_LSTM = 2
+CUDNN_GRU = 3
+
+CUDNN_LINEAR_INPUT = 0
+CUDNN_SKIP_INPUT = 1
 
 class CuDNNHandle:
     def __init__(self):
@@ -87,6 +94,7 @@ class CuDNNError(RuntimeError):
         self.status = status
         msg = '{}: {}'.format(status, get_error_string(status))
         super(CuDNNError, self).__init__(msg)
+
 
 class TensorDescriptor(object):
     def __init__(self):
@@ -108,6 +116,35 @@ class TensorDescriptor(object):
 
     def as_tuple(self):
         return (self._type, tuple(self._size), tuple(self._stride))
+
+
+class TensorDescriptorArray(object):
+    def __init__(self, N):
+        self.ptrs = (ctypes.c_void_p * N)()
+        for i in range(N):
+            ptr = ctypes.byref(self.ptrs, i * ctypes.sizeof(ctypes.c_void_p))
+            check_error(lib.cudnnCreateTensorDescriptor(ptr))
+        self._as_parameter_ = self.ptrs
+
+    def __del__(self):
+        for ptr in self.ptrs:
+            check_error(lib.cudnnDestroyTensorDescriptor(ptr))
+
+    def __getitem__(self, key):
+        return self.ptrs[key]
+
+    def set(self, tensor):
+        self._type = tensor.type()
+        self._size = tensor.size()
+        self._stride = tensor.stride()
+        for ptr in self.ptrs:
+            check_error(lib.cudnnSetTensorNdDescriptor(
+                ptr, _typemap[tensor.type()], tensor.dim(),
+                int_array(tensor.size()), int_array(tensor.stride())))
+
+    def as_tuple(self):
+        return (self._type, tuple(self._size), tuple(self._stride))
+
 
 class ConvolutionDescriptor(object):
     def __init__(self):
@@ -144,10 +181,52 @@ class FilterDescriptor(object):
         self._size = weight.size()
         datatype = _typemap[weight.type()]
         check_error(lib.cudnnSetFilterNdDescriptor(
-            self, datatype, CUDNN_TENSOR_NCHW, 4, int_array(weight.size())))
+            self, datatype, CUDNN_TENSOR_NCHW, weight.ndimension(), int_array(weight.size())))
 
     def as_tuple(self):
         return tuple(self._size)
+
+class DropoutDescriptor(object):
+    def __init__(self):
+        ptr = ctypes.c_void_p()
+        check_error(lib.cudnnCreateDropoutDescriptor(ctypes.byref(ptr)))
+        self._as_parameter_ = ptr
+
+    def __del__(self):
+        check_error(lib.cudnnDestroyDropoutDescriptor(self))
+
+    def set(self, handle, dropout, dropout_states, seed):
+        self.dropout_states = dropout_states  # make sure it's retained
+        check_error(lib.cudnnSetDropoutDescriptor(
+            self,
+            handle,
+            dropout,
+            ctypes.c_void_p(dropout_states.data_ptr()),
+            dropout_states.size(0),
+            seed
+        ))
+
+class RNNDescriptor(object):
+    def __init__(self):
+        ptr = ctypes.c_void_p()
+        check_error(lib.cudnnCreateRNNDescriptor(ctypes.byref(ptr)))
+        self._as_parameter_ = ptr
+
+    def __del__(self):
+        check_error(lib.cudnnDestroyRNNDescriptor(self))
+
+    def set(self, hidden_size, num_layers, dropout_desc, input_mode,
+            bidirectional, mode, datatype):
+        check_error(lib.cudnnSetRNNDescriptor(
+            self,
+            hidden_size,
+            num_layers,
+            dropout_desc,
+            input_mode,
+            bidirectional,
+            mode,
+            datatype
+        ))
 
 class ConvolutionAlgoPerf(ctypes.Structure):
     _fields_ = [
@@ -180,6 +259,12 @@ _typemap = {
     'torch.cuda.DoubleTensor': CUDNN_DATA_DOUBLE,
 }
 
+_sizeofmap = {
+    CUDNN_DATA_HALF : 2,
+    CUDNN_DATA_FLOAT : 4,
+    CUDNN_DATA_DOUBLE : 8,
+}
+
 def c_type(tensor):
     if isinstance(tensor, torch.cuda.HalfTensor):
         return ctypes.c_float
@@ -194,8 +279,11 @@ def int_array(itr):
     array_type = ctypes.c_int * len(itr)
     return array_type(*itr)
 
-def descriptor(tensor):
-    descriptor = TensorDescriptor()
+def descriptor(tensor, N=None):
+    if N is not None:
+        descriptor = TensorDescriptorArray(N)
+    else:
+        descriptor = TensorDescriptor()
     if tensor.dim() == 2:
         tensor = tensor.view(tensor.size(0), tensor.size(1), 1, 1)
     elif tensor.dim() == 3:

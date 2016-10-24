@@ -202,7 +202,7 @@ void THPUtils_invalidArguments(PyObject *given_args,
   std::string error_msg;
   error_msg.reserve(2000);
   error_msg += function_name;
-  error_msg += " recieved an invalid combination of argument types - got ";
+  error_msg += " received an invalid combination of argument types - got ";
   va_list option_list;
   va_start(option_list, num_options);
   for (size_t i = 0; i < num_options; i++)

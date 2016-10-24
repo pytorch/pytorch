@@ -56,7 +56,13 @@ class Variable(_C._VariableBase):
         if (isinstance(key, Variable) and
             type(key.data).__name__ == 'ByteTensor'):
             return MaskedFill(value, inplace=True)(self, key)
-        return SetValue(key, value)(self)
+        if isinstance(value, Variable):
+            return SetItem(key)(self, value)
+        else:
+            return SetItem(key, value)(self)
+
+    def __iter__(self):
+        return iter(map(lambda i: self[i], range(self.size(0))))
 
     def __deepcopy__(self, memo):
         if self.creator is None:

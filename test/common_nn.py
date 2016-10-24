@@ -7,6 +7,7 @@ import torch
 import torch.cuda
 from torch.autograd import Variable
 from common import TestCase, to_gpu, get_numerical_jacobian, iter_tensors, contiguous
+import torch.backends.cudnn
 
 # tarfile module tries to obtain a file object name in python 3.3
 if sys.version_info[:2] == (3, 3):
@@ -15,6 +16,7 @@ else:
     TemporaryFile = tempfile.TemporaryFile
 
 TEST_CUDA = torch.cuda.is_available()
+TEST_CUDNN = TEST_CUDA and torch.backends.cudnn.is_acceptable(torch.cuda.FloatTensor(1))
 PRECISION = 1e-5
 
 module_tests = [
