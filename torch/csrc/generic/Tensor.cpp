@@ -81,6 +81,42 @@ static void THPTensor_(setInconsistentDepthError)(std::vector<size_t> &sizes,
   THPUtils_setError(error.c_str());
 }
 
+#ifdef NUMPY_TYPE_ENUM
+THTensor* THPTensor_(fromNumpy)(PyObject *numpy_array) {
+  PyArrayObject *array = (PyArrayObject*)numpy_array;
+  THStoragePtr storage = THStorage_(newWithDataAndAllocator)(
+      (real*)PyArray_DATA(array),
+      PyArray_NBYTES(array) / sizeof(real),
+      &THNumpyArrayAllocator,
+      new NumpyArrayAllocator(numpy_array));
+
+  // Numpy and Torch disagree on empty tensors. In Torch, an empty
+  // tensor is a tensor with zero dimensions. In Numpy, an empty tensor
+  // keeps its shape, but has 0 as the size of one of the dimensions.
+  // So we'll convert all Numpy tensors of 0 elements to empty Torch tensors.
+  if (PyArray_SIZE(array) != 0) {
+    auto ndim = PyArray_NDIM(array);
+    THLongStoragePtr sizes = THLongStorage_newWithSize(ndim);
+    long *sizes_data = sizes->data;
+    for (int i = 0; i < ndim; ++i) {
+      sizes_data[i] = PyArray_DIM(array, i);
+    }
+
+    THLongStoragePtr strides = THLongStorage_newWithSize(ndim);
+    long *strides_data = strides->data;
+    for (int i = 0; i < ndim; ++i) {
+      strides_data[i] = PyArray_STRIDE(array, i) / sizeof(real);   // numpy uses bytes, torch uses elements
+    }
+
+    THTensor *result = THTensor_(newWithStorage)(storage, 0, sizes, strides);
+    return result;
+  } else {
+    THTensor *result = THTensor_(newWithStorage)(storage, 0, NULL, NULL);
+    return result;
+  }
+}
+#endif
+
 static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
   HANDLE_TH_ERRORS
@@ -319,8 +355,8 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
   long dimsize = THTensor_(size)(LIBRARY_STATE TENSOR_VARIABLE, DIM);          \
   idx = (idx < 0) ? dimsize + idx : idx;                                       \
                                                                                \
-  THPUtils_assert(dimsize > 0, "indexing an empty tensor");                    \
-  THPUtils_assert(idx >= 0 && idx < dimsize, "index %ld is out of range for "  \
+  THPUtils_assertRet(false, dimsize > 0, "indexing an empty tensor");          \
+  THPUtils_assertRet(false, idx >= 0 && idx < dimsize, "index %ld is out of range for " \
       "dimension %ld (of size %ld)", idx, DIM, dimsize);                       \
                                                                                \
   if(THTensor_(nDimension)(LIBRARY_STATE TENSOR_VARIABLE) == 1) {              \
@@ -362,7 +398,7 @@ static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
     } else if(PyTuple_Check(index)) {
       long num_index_dim = (long)PyTuple_Size(index);
       long num_tensor_dim = THTensor_(nDimension)(LIBRARY_STATE self->cdata);
-      THPUtils_assert(num_index_dim <= num_tensor_dim, "trying to index %ld "
+      THPUtils_assertRet(false, num_index_dim <= num_tensor_dim, "trying to index %ld "
           "dimensions of a %ld dimensional tensor", num_index_dim,
           num_tensor_dim);
 

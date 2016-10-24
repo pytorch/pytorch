@@ -354,7 +354,7 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *inputs)
       // the object and remembers which output did we use.
       PyObject *prev_fn = input_var->creator ? input_var->creator : (PyObject*)input_var;
       Py_INCREF(prev_fn);
-      self->previous_functions[i] = std::move(THPFunctionPtr(prev_fn, input_var->output_nr));
+      self->previous_functions[i] = THPFunctionPtr(prev_fn, input_var->output_nr);
     }
 
     if (!_mark_dirty(self, t2var))
