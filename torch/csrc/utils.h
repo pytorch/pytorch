@@ -132,6 +132,7 @@ THP_API void THPUtils_invalidArguments(PyObject *given_args,
 
 #ifdef _THP_CORE
 
+#define THPUtils_classname(obj) (((PyTypeObject*)obj)->tp_name)
 THLongStorage * THPUtils_getLongStorage(PyObject *args, int ignore_first=0);
 int THPUtils_getCallable(PyObject *arg, PyObject **result);
 bool THPUtils_parseSlice(PyObject *slice, Py_ssize_t len, Py_ssize_t *ostart,
