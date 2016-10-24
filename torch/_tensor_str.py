@@ -3,11 +3,11 @@ import torch
 from functools import reduce
 from ._utils import _range
 
-SCALE_FORMAT = '{:.5f} *\n'
+SCALE_FORMAT = '{:.5e} *\n'
 
 
 def _number_format(tensor):
-    min_sz = 0
+    min_sz = 2
     tensor = torch.DoubleTensor(tensor.nelement()).copy_(tensor).abs_()
 
     pos_inf_mask = tensor.eq(float('inf'))
@@ -118,9 +118,11 @@ def _matrix_str(self, indent=''):
 def _vector_str(self):
     fmt, scale, _ = _number_format(self)
     strt = ''
+    ident = ''
     if scale != 1:
         strt += SCALE_FORMAT.format(scale)
-    return '\n'.join(fmt.format(val/scale) for val in self) + '\n'
+        ident = ' '
+    return strt + '\n'.join(ident + fmt.format(val/scale) for val in self) + '\n'
 
 
 def _str(self):
