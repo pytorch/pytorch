@@ -2481,5 +2481,16 @@ class TestTorch(TestCase):
             self.assertTrue(x.storage_offset() > 0)
             check2d(x, y)
 
+            # check writeable
+            x = torch.randn(3, 4).mul(255).type(tp)
+            y = x.numpy()
+            self.assertTrue(y.flags.writeable)
+            y[0][1] = 3
+            self.assertTrue(x[0][1] == 3)
+            y = x.t().numpy()
+            self.assertTrue(y.flags.writeable)
+            y[0][1] = 3
+            self.assertTrue(x[0][1] == 3)
+
 if __name__ == '__main__':
     unittest.main()
