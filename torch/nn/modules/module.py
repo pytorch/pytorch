@@ -155,6 +155,20 @@ class Module(object):
             memo.add(self)
             yield self
 
+    def training(self):
+        self.train = True
+        for p in self._parameters.values():
+            if p is not None:
+                p.requires_grad = True
+        return self
+
+    def evaluation(self):
+        self.train = False
+        for p in self._parameters.values():
+            if p is not None:
+                p.requires_grad = False
+        return self
+
     def zero_grad(self):
         for p in self.parameters():
             p.grad.zero_()

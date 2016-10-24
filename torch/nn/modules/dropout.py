@@ -25,7 +25,7 @@ class Dropout(Module):
 
 class Dropout2d(Module):
     """Randomly zeroes whole channels of the input tensor.
-    The input is 4D (batch x channels, height, width) and each channel 
+    The input is 4D (batch x channels, height, width) and each channel
     is of size (1, height, width).
     The channels to zero are randomized on every forward call.
     Usually the input comes from Conv2d modules.
@@ -59,7 +59,7 @@ class Dropout2d(Module):
 
 class Dropout3d(Module):
     """Randomly zeroes whole channels of the input tensor.
-    The input is 5D (batch x channels, depth, height, width) and each channel 
+    The input is 5D (batch x channels, depth, height, width) and each channel
     is of size (1, depth, height, width).
     The channels to zero are randomized on every forward call.
     Usually the input comes from Conv3d modules.
