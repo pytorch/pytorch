@@ -14,6 +14,11 @@ except ImportError:
     raise ImportError("torch.utils.ffi requires the cffi package")
 
 
+if cffi.__version_info__ < (1,4,0):
+    raise ImportError("torch.utils.ffi requires cffi version >= 1.4, but "
+            "got " + '.'.join(map(str, cffi.__version_info__)))
+
+
 def _generate_typedefs():
     typedefs = []
     for t in ['Double', 'Float', 'Long', 'Int', 'Short', 'Char', 'Byte']:
@@ -79,7 +84,7 @@ def _create_module_dir(fullname):
         target_dir = reduce(os.path.join, fullname.split('.'))
     try:
         os.makedirs(target_dir)
-    except FileExistsError:
+    except os.error:
         pass
     for dirname in _accumulate(fullname.split('.'), os.path.join):
         init_file = os.path.join(dirname, '__init__.py')
