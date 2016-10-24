@@ -4,10 +4,15 @@ from itertools import product
 from copy import deepcopy
 
 import torch
+import torch.cuda
 from torch.autograd import Variable, Function
 
 
 torch.set_default_tensor_type('torch.DoubleTensor')
+torch.manual_seed(123)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed_all(123)
+
 
 TEST_NUMPY = True
 try:
