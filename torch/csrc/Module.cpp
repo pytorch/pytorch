@@ -259,6 +259,33 @@ PyObject * THPModule_setDefaultTensorType(PyObject *_unused, PyObject *type)
   Py_RETURN_NONE;
 }
 
+PyObject * THPModule_fromNumpy(PyObject *_unused, PyObject *array)
+{
+#ifndef WITH_NUMPY
+  THPUtils_setError("torch was compiled without numpy support");
+  return NULL;
+#else
+  THPUtils_assert(PyArray_Check(array), "from_numpy expects an np.ndarray "
+      "but got %s", THPUtils_typename(array));
+  int type = PyArray_TYPE((PyArrayObject*)array);
+  if (type == NPY_DOUBLE) {
+    return PyObject_CallFunctionObjArgs(THPDoubleTensorClass, array, NULL);
+  } else if (type == NPY_FLOAT) {
+    return PyObject_CallFunctionObjArgs(THPFloatTensorClass, array, NULL);
+  } else if (type == NPY_INT64) {
+    return PyObject_CallFunctionObjArgs(THPLongTensorClass, array, NULL);
+  } else if (type == NPY_INT32) {
+    return PyObject_CallFunctionObjArgs(THPIntTensorClass, array, NULL);
+  } else if (type == NPY_UINT8) {
+    return PyObject_CallFunctionObjArgs(THPByteTensorClass, array, NULL);
+  }
+  THPUtils_setError("can't convert a given np.ndarray to a tensor - it has an "
+      "invalid type. The only supported types are: double, float, int64, "
+      "int32, and uint8.");
+  return NULL;
+#endif
+}
+
 
 #define IMPLEMENT_STATELESS(name)                                              \
 static PyObject * TH_CONCAT_2(THPModule_, name)(PyObject *_unused, PyObject *args, PyObject *kwargs) \
@@ -582,6 +609,7 @@ static PyMethodDef TorchMethods[] = {
   {"_storageCopyAsync", (PyCFunction)THPModule_storage_asyncCopyWrapper, METH_VARARGS, NULL},
   {"get_num_threads", (PyCFunction)THPModule_getNumThreads,     METH_NOARGS,  NULL},
   {"set_num_threads", (PyCFunction)THPModule_setNumThreads,     METH_O,       NULL},
+  {"from_numpy",      (PyCFunction)THPModule_fromNumpy,         METH_O,       NULL},
 
   {"sigmoid",         (PyCFunction)THPModule_sigmoid,           METH_VARARGS | METH_KEYWORDS, NULL},
   {"log",             (PyCFunction)THPModule_log,               METH_VARARGS | METH_KEYWORDS, NULL},

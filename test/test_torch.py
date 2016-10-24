@@ -9,6 +9,9 @@ from itertools import product, chain
 from functools import wraps
 from common import TestCase, iter_indices, TEST_NUMPY
 
+if TEST_NUMPY:
+    import numpy as np
+
 SIZE = 100
 
 def skipIfNoLapack(fn):
@@ -2418,7 +2421,7 @@ class TestTorch(TestCase):
         self.assertEqual(pinned, x)
         self.assertNotEqual(pinned.data_ptr(), x.data_ptr())
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_toNumpy(self):
         types = [
             'torch.ByteTensor',
@@ -2491,6 +2494,20 @@ class TestTorch(TestCase):
             self.assertTrue(y.flags.writeable)
             y[0][1] = 3
             self.assertTrue(x[0][1] == 3)
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_from_numpy(self):
+        dtypes = [
+            np.double,
+            np.float,
+            np.int64,
+            np.int32,
+            np.uint8
+        ]
+        for dtype in dtypes:
+            array = np.array([1, 2, 3, 4], dtype=dtype)
+            self.assertEqual(torch.from_numpy(array), torch.Tensor([1, 2, 3, 4]))
+
 
 if __name__ == '__main__':
     unittest.main()
