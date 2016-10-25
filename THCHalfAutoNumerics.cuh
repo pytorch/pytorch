@@ -171,6 +171,11 @@ inline __host__ __device__ float& operator-=(float &lhs, const half &rhs) {
   return lhs;
 }
 
+inline __host__ __device__ half& operator*=(half &lhs, const half &rhs) {
+  lhs = lhs * rhs;
+  return lhs;
+}
+
 inline __host__ __device__ half& operator/=(half &lhs, const int &rhs) {
   lhs = lhs / rhs;
   return lhs;

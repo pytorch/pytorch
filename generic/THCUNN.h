@@ -130,6 +130,26 @@ TH_API void THNN_(MSECriterion_updateGradInput)(
                   THCTensor *gradInput,
                   bool sizeAverage);
 
+TH_API void THNN_(MultiMarginCriterion_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCIndexTensor *target,
+                  THCTensor *output,
+                  bool sizeAverage,
+                  int p,
+                  THCTensor *weights,       // [OPTIONAL]
+                  real margin);
+
+TH_API void THNN_(MultiMarginCriterion_updateGradInput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCIndexTensor *target,
+                  THCTensor *gradInput,
+                  bool sizeAverage,
+                  int p,
+                  THCTensor *weights,       // [OPTIONAL]
+                  real margin);
+
 TH_API void THNN_(PReLU_updateOutput)(
                   THCState *state,
                   THCTensor *input,
