@@ -605,8 +605,8 @@ static PyMethodDef TorchMethods[] = {
 #endif
   {"_sparse_init",      (PyCFunction)THSPModule_initExtension,    METH_NOARGS,  NULL},
   // _spfunc_(name) prefixed functions will be put in sparse.name
-  {"_spfunc_mm",        (PyCFunction)THSPModule_spmm,             METH_VARARGS,  NULL},
-  {"_spfunc_smm",       (PyCFunction)THSPModule_sspmm,            METH_VARARGS,  NULL},
+  {"_spfunc_addmm",        (PyCFunction)THSPModule_spmm,             METH_VARARGS,  NULL},
+  {"_spfunc_saddmm",       (PyCFunction)THSPModule_sspmm,            METH_VARARGS,  NULL},
   {"_spfunc_add",      (PyCFunction)THSPModule_spadd,           METH_VARARGS,  NULL},
 
 

@@ -118,6 +118,11 @@ defined(THC_REAL_IS_HALF)
   arguments:
     - arg: THTensor* result
       allocate: True
+    - arg: real beta
+      default: AS_REAL(1)
+    - THTensor* self
+    - arg: real alpha
+      default: AS_REAL(1)
     - THSTensor* mat1
     - THTensor* mat2
 ]]
@@ -129,6 +134,11 @@ defined(THC_REAL_IS_HALF)
   arguments:
     - arg: THSTensor* result
       allocate: True
+    - arg: real beta
+      default: AS_REAL(1)
+    - THSTensor* self
+    - arg: real alpha
+      default: AS_REAL(1)
     - THSTensor* mat1
     - THTensor* mat2
 ]]

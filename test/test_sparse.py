@@ -137,28 +137,40 @@ class TestSparse(TestCase):
             y = y.transpose(i, j)
             self.assertEqual(x.to_dense(), y)
 
-    def test_spmm(self):
+    def test_addmm(self):
         def test_shape(di, dj, dk):
             x, _, _ = self._gen_sparse(2, 20, [di, dj])
+            t = torch.randn(di, dk)
             y = torch.randn(dj, dk)
+            alpha = random.random()
+            beta = random.random()
 
-            expected = torch.mm(x.to_dense(), y)
-            res = sparse.mm(x, y)
+            expected = torch.addmm(alpha, t, beta, x.to_dense(), y)
+            res = sparse.addmm(alpha, t, beta, x, y)
+            self.assertEqual(res, expected)
 
+            expected = torch.addmm(t, x.to_dense(), y)
+            res = sparse.addmm(t, x, y)
             self.assertEqual(res, expected)
 
         test_shape(10, 100, 100)
         test_shape(100, 1000, 200)
         test_shape(64, 10000, 300)
 
-    def test_sspmm(self):
+    def test_saddmm(self):
         def test_shape(di, dj, dk):
-            x, _, _ = self._gen_sparse(2, 20, [di, dj])
+            x = self._gen_sparse(2, 20, [di, dj])[0]
+            t = self._gen_sparse(2, 20, [di, dk])[0]
             y = torch.randn(dj, dk)
+            alpha = random.random()
+            beta = random.random()
 
-            expected = torch.mm(x.to_dense(), y)
-            res = sparse.smm(x, y)
+            expected = torch.addmm(alpha, t.to_dense(), beta, x.to_dense(), y)
+            res = sparse.saddmm(alpha, t, beta, x, y)
+            self.assertEqual(res.to_dense(), expected)
 
+            expected = torch.addmm(t.to_dense(), x.to_dense(), y)
+            res = sparse.saddmm(t, x, y)
             self.assertEqual(res.to_dense(), expected)
 
         test_shape(7, 5, 3)
