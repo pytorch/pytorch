@@ -96,3 +96,5 @@ __global__ void cunn_MultiMarginCriterion_updateGradInput_kernel(Dtype *gradInpu
 
 #include "generic/MultiMarginCriterion.cu"
 #include "THCGenerateFloatTypes.h"
+
+#undef MULTIMARGIN_THREADS
