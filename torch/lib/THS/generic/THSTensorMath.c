@@ -32,9 +32,9 @@ void THSTensor_(spmm)(THTensor *r_,
   THTensor *values;
 
   THArgCheck(sparse->nDimension == 2, 2,
-      "matricies expected, got %dD tensor", sparse->nDimension);
+      "matrices expected, got %dD tensor", sparse->nDimension);
   THArgCheck(dense->nDimension == 2, 2,
-      "matricies expected, got %dD tensor", dense->nDimension);
+      "matrices expected, got %dD tensor", dense->nDimension);
 
   THSTensor_(contiguous)(sparse);
 
@@ -91,15 +91,23 @@ void THSTensor_(sspmm)(THSTensor *r_,
   THLongTensor *csr, *indices, *newi, *narrowi;
   THTensor *values, *newv, *narrowv;
 
-  if( (sparse->nDimension != 2) || (dense->nDimension != 2))
-    THError("matrices expected, got %dD, %dD tensors",
-        sparse->nDimension, dense->nDimension);
+  THArgCheck(sparse->nDimension == 2, 2,
+      "matrices expected, got %dD tensor", sparse->nDimension);
+  THArgCheck(dense->nDimension == 2, 2,
+      "matrices expected, got %dD tensor", dense->nDimension);
 
   THSTensor_(contiguous)(sparse);
 
   dim_i = THSTensor_(size)(sparse, 0);
   dim_j = THSTensor_(size)(sparse, 1);
   dim_k = THTensor_(size)(dense, 1);
+
+  THArgCheck(THTensor_(size)(dense, 0) == dim_j, 3,
+      "Expected dim 0 size %d, got %d", dim_j, THTensor_(size)(dense, 0));
+  THArgCheck(THSTensor_(size)(t, 0) == dim_i, 1,
+      "Expected dim 0 size %d, got %d", dim_i, THSTensor_(size)(t, 0));
+  THArgCheck(THSTensor_(size)(t, 1) == dim_k, 1,
+      "Expected dim 1 size %d, got %d", dim_k, THSTensor_(size)(t, 1));
 
   nnz     = THSTensor_(nnz)(sparse);
   indices = THSTensor_(indices)(sparse);
