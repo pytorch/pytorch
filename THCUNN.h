@@ -81,19 +81,6 @@ TH_API void THNN_CudaLookupTable_renorm(
           float maxNorm,
           float normType);
 
-TH_API void THNN_CudaSmoothL1Criterion_updateOutput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *target,
-          THCudaTensor *output,
-          bool sizeAverage);
-TH_API void THNN_CudaSmoothL1Criterion_updateGradInput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *target,
-          THCudaTensor *gradInput,
-          bool sizeAverage);
-
 TH_API void THNN_CudaTemporalConvolution_updateOutput(
           THCState *state,
           THCudaTensor *input,
