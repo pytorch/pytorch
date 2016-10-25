@@ -15,6 +15,7 @@ typedef struct THCStorage
     THCDeviceAllocator *allocator;
     void *allocatorContext;
     struct THCStorage *view;
+    int device;
 } THCStorage;
 
 

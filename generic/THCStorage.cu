@@ -16,6 +16,8 @@ void THCStorage_(resize)(THCState *state, THCStorage *self, ptrdiff_t size)
 {
   THArgCheck(size >= 0, 2, "invalid size");
   THAssert(self->allocator != NULL);
+  int device;
+  THCudaCheck(cudaGetDevice(&device));
 
   if(!(self->flag & TH_STORAGE_RESIZABLE))
     THError("Trying to resize storage that is not resizable");
@@ -32,6 +34,7 @@ void THCStorage_(resize)(THCState *state, THCStorage *self, ptrdiff_t size)
       THCudaCheck(err);
     }
     self->size = size;
+    self->device = device;
     return;
   }
 
@@ -44,6 +47,7 @@ void THCStorage_(resize)(THCState *state, THCStorage *self, ptrdiff_t size)
     }
     self->data = NULL;
     self->size = 0;
+    self->device = device;
   }
   else
   {
@@ -75,14 +79,12 @@ void THCStorage_(resize)(THCState *state, THCStorage *self, ptrdiff_t size)
 
     self->data = data;
     self->size = size;
+    self->device = device;
   }
 }
 
 THC_API int THCStorage_(getDevice)(THCState* state, const THCStorage* storage) {
-  if (!storage->data) return -1;
-  cudaPointerAttributes attr;
-  THCudaCheck(cudaPointerGetAttributes(&attr, storage->data));
-  return attr.device;
+  return storage->device;
 }
 
 #endif

@@ -51,6 +51,8 @@ THCStorage* THCStorage_(newWithAllocator)(THCState *state, ptrdiff_t size,
                                           void* allocatorContext)
 {
   THArgCheck(size >= 0, 2, "invalid size");
+  int device;
+  THCudaCheck(cudaGetDevice(&device));
 
   THCStorage *storage = (THCStorage*)THAlloc(sizeof(THCStorage));
   memset(storage, 0, sizeof(THCStorage));
@@ -59,6 +61,7 @@ THCStorage* THCStorage_(newWithAllocator)(THCState *state, ptrdiff_t size,
   storage->allocator = allocator;
   storage->allocatorContext = allocatorContext;
   storage->size = size;
+  storage->device = device;
 
   if(size > 0)
   {
@@ -138,6 +141,15 @@ THCStorage* THCStorage_(newWithDataAndAllocator)(
   storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE | TH_STORAGE_FREEMEM;
   storage->allocator = allocator;
   storage->allocatorContext = allocatorContext;
+  int device;
+  if (data) {
+    struct cudaPointerAttributes attr;
+    THCudaCheck(cudaPointerGetAttributes(&attr, data));
+    device = attr.device;
+  } else {
+    THCudaCheck(cudaGetDevice(&device));
+  }
+  storage->device = device;
   return storage;
 }
 
