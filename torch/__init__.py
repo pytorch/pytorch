@@ -148,6 +148,7 @@ class ByteTensor(_C.ByteTensorBase, _TensorBase):
     def storage_type(cls):
         return ByteStorage
 
+
 _tensor_classes = set()
 _storage_classes = set()
 
@@ -167,6 +168,7 @@ _tensor_classes.add(IntTensor)
 _tensor_classes.add(ShortTensor)
 _tensor_classes.add(CharTensor)
 _tensor_classes.add(ByteTensor)
+
 
 set_default_tensor_type('torch.FloatTensor')
 
@@ -196,7 +198,6 @@ del IntStorageBase
 del ShortStorageBase
 del CharStorageBase
 del ByteStorageBase
-
 del DoubleTensorBase
 del FloatTensorBase
 del LongTensorBase
@@ -204,3 +205,4 @@ del IntTensorBase
 del ShortTensorBase
 del CharTensorBase
 del ByteTensorBase
+

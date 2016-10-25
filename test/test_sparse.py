@@ -25,10 +25,6 @@ class TestSparse(TestCase):
 
         return x, i, v
 
-    @staticmethod
-    def __eq(x, y, prec=1e-5):
-        return (x - y).abs().le(prec).all()
-
     def test_basic(self):
         x, i, v = self._gen_sparse(3, 10, 100)
 
