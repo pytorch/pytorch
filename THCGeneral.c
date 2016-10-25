@@ -261,17 +261,21 @@ void THCudaEnablePeerToPeerAccess(THCState* state)
         if (access) {
           cudaError_t err = cudaDeviceEnablePeerAccess(j, 0);
           if (err == cudaErrorPeerAccessAlreadyEnabled) {
+            /* It is possible that another thread has already enabled access. */
             /* Any future call to cudaGetLastError will now return an error, */
             /* even though we've already dealt with this specific error here. */
             /* Call cudaGetLastError once to reset the last error state. */
             cudaGetLastError();
-            continue;
+
+            /* The above should have cleared status */
+            THCudaCheck(cudaGetLastError());
+          } else {
+            /* In case there are other unhandled errors returned from the */
+            /* above */
+            THCudaCheck(err);
           }
 
-          /* In case there are unknown errors returned from the above */
-          THCudaCheck(err);
-
-          /* Access could be enabled */
+          /* Access could be enabled, or was already enabled */
           state->p2pAccessEnabled[i][j] = 1;
         }
       }
