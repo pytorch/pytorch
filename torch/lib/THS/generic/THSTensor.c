@@ -31,10 +31,12 @@ THLongStorage *THSTensor_(newSizeOf)(THSTensor *self)
 
 /*** TODO: watch out for memory leaks ***/
 THLongTensor *THSTensor_(indices)(const THSTensor *self) {
+  if (!self->indices) return self->indices;
   return THLongTensor_newNarrow(self->indices, 1, 0, self->nnz);
 }
 
 THTensor *THSTensor_(values)(const THSTensor *self) {
+  if (!self->values) return self->values;
   return THTensor_(newNarrow)(self->values, 0, 0, self->nnz);
 }
 

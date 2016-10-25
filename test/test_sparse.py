@@ -39,6 +39,11 @@ class TestSparse(TestCase):
         for i in range(3):
             self.assertEqual(x.size(i), 100)
 
+        # Make sure we can access empty indices / values
+        x = SparseTensor()
+        x.indices()
+        x.values()
+
     def test_to_dense(self):
         i = torch.LongTensor([
             [0, 1, 2, 2],
