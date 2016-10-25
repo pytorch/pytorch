@@ -35,13 +35,16 @@ class KwargsPlugin(CWrapPlugin):
     def process_wrapper(self, code, declaration):
         if declaration.get('no_kwargs'):
             return code
-        args = set()
+        seen_args = set()
+        args = []
         for option in declaration['options']:
-            checked_arguments = filter(lambda a: not a.get('ignore_check'), option['arguments'])
-            args.update(set(map(lambda o: o['name'], checked_arguments)))
+            for arg in option['arguments']:
+                name = arg['name']
+                if not arg.get('ignore_check') and name not in seen_args:
+                    seen_args.add(name)
+                    args.append(name)
         declarations = '\n    '.join(['PyObject *__kw_{} = NULL;'.format(name) for name in args])
         lookups = '\n      '.join(['__kw_{name} = PyDict_GetItemString(kwargs, "{name}");'.format(name=name) for name in args])
         start_idx = code.find('{') + 1
         new_code = self.WRAPPER_TEMPLATE.substitute(declarations=declarations, lookups=lookups)
         return code[:start_idx] + new_code + code[start_idx:]
-
