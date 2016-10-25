@@ -43,7 +43,8 @@ struct THCRNGState;  /* Random number generator state. */
 struct THCStream;
 
 typedef struct _THCDeviceAllocator {
-   cudaError_t (*malloc)(void*, void**, size_t, cudaStream_t);
+   cudaError_t (*malloc)( void*, void**, size_t,         cudaStream_t);
+   cudaError_t (*realloc)(void*, void**, size_t, size_t, cudaStream_t);
    cudaError_t (*free)(void*, void*);
    cudaError_t (*emptyCache)(void*);
    void* state;

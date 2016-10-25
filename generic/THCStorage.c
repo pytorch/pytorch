@@ -20,53 +20,64 @@ int THCStorage_(elementSize)(THCState *state)
 void THCStorage_(set)(THCState *state, THCStorage *self, ptrdiff_t index, real value)
 {
   THArgCheck((index >= 0) && (index < self->size), 2, "index out of bounds");
-  THCudaCheck(cudaMemcpy(self->data + index, &value, sizeof(real), cudaMemcpyHostToDevice));
+  THCudaCheck(cudaMemcpy(self->data + index, &value, sizeof(real),
+                         cudaMemcpyHostToDevice));
 }
 
 real THCStorage_(get)(THCState *state, const THCStorage *self, ptrdiff_t index)
 {
   THArgCheck((index >= 0) && (index < self->size), 2, "index out of bounds");
   real value;
-  THCudaCheck(cudaMemcpy(&value, self->data + index, sizeof(real), cudaMemcpyDeviceToHost));
+  THCudaCheck(cudaMemcpy(&value, self->data + index, sizeof(real),
+                         cudaMemcpyDeviceToHost));
   return value;
 }
 
 THCStorage* THCStorage_(new)(THCState *state)
 {
-  THCStorage *storage = (THCStorage*)THAlloc(sizeof(THCStorage));
-  storage->data = NULL;
-  storage->size = 0;
-  storage->refcount = 1;
-  storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE | TH_STORAGE_FREEMEM;
-  return storage;
+  return THCStorage_(newWithSize)(state, 0);
 }
 
 THCStorage* THCStorage_(newWithSize)(THCState *state, ptrdiff_t size)
 {
+  return THCStorage_(newWithAllocator)(
+    state, size,
+    state->cudaDeviceAllocator,
+    state->cudaDeviceAllocator->state);
+}
+
+THCStorage* THCStorage_(newWithAllocator)(THCState *state, ptrdiff_t size,
+                                          THCDeviceAllocator* allocator,
+                                          void* allocatorContext)
+{
   THArgCheck(size >= 0, 2, "invalid size");
+
+  THCStorage *storage = (THCStorage*)THAlloc(sizeof(THCStorage));
+  memset(storage, 0, sizeof(THCStorage));
+  storage->refcount = 1;
+  storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE | TH_STORAGE_FREEMEM;
+  storage->allocator = allocator;
+  storage->allocatorContext = allocatorContext;
+  storage->size = size;
 
   if(size > 0)
   {
-    THCStorage *storage = (THCStorage*)THAlloc(sizeof(THCStorage));
-
     // update heap *before* attempting malloc, to free space for the malloc
     THCHeapUpdate(state, size * sizeof(real));
     cudaError_t err =
-      THCudaMalloc(state, (void**)&(storage->data), size * sizeof(real));
+      (*allocator->malloc)(allocatorContext, (void**)&(storage->data),
+                           size * sizeof(real),
+                           THCState_getCurrentStream(state));
     if(err != cudaSuccess){
       THCHeapUpdate(state, -size * sizeof(real));
+      free(storage);
     }
     THCudaCheck(err);
 
-    storage->size = size;
-    storage->refcount = 1;
-    storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE | TH_STORAGE_FREEMEM;
-    return storage;
+  } else {
+    storage->data = NULL;
   }
-  else
-  {
-    return THCStorage_(new)(state);
-  }
+  return storage;
 }
 
 THCStorage* THCStorage_(newWithSize1)(THCState *state, real data0)
@@ -111,11 +122,22 @@ THCStorage* THCStorage_(newWithMapping)(THCState *state, const char *fileName, p
 
 THCStorage* THCStorage_(newWithData)(THCState *state, real *data, ptrdiff_t size)
 {
+  return THCStorage_(newWithDataAndAllocator)(state, data, size,
+                                              state->cudaDeviceAllocator,
+                                              state->cudaDeviceAllocator->state);
+}
+
+THCStorage* THCStorage_(newWithDataAndAllocator)(
+  THCState *state, real *data, long size,
+  THCDeviceAllocator *allocator, void *allocatorContext) {
   THCStorage *storage = (THCStorage*)THAlloc(sizeof(THCStorage));
+  memset(storage, 0, sizeof(THCStorage));
   storage->data = data;
   storage->size = size;
   storage->refcount = 1;
   storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE | TH_STORAGE_FREEMEM;
+  storage->allocator = allocator;
+  storage->allocatorContext = allocatorContext;
   return storage;
 }
 
@@ -144,7 +166,8 @@ void THCStorage_(free)(THCState *state, THCStorage *self)
   {
     if(self->flag & TH_STORAGE_FREEMEM) {
       THCHeapUpdate(state, -self->size * sizeof(real));
-      THCudaCheck(THCudaFree(state, self->data));
+      THCudaCheck(
+        (*self->allocator->free)(self->allocatorContext, self->data));
     }
     THFree(self);
   }

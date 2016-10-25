@@ -123,10 +123,8 @@ ELSE()
 ENDIF()
 
 SET(src
-    THCAllocator.c
     THCCachingAllocator.cpp
     THCGeneral.c
-    THCStorage.c
     THCStorageCopy.c
     THCStream.c
     THCTensor.c

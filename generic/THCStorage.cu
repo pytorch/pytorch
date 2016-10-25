@@ -15,14 +15,31 @@ void THCStorage_(fill)(THCState *state, THCStorage *self, real value)
 void THCStorage_(resize)(THCState *state, THCStorage *self, ptrdiff_t size)
 {
   THArgCheck(size >= 0, 2, "invalid size");
+  THAssert(self->allocator != NULL);
 
   if(!(self->flag & TH_STORAGE_RESIZABLE))
     THError("Trying to resize storage that is not resizable");
 
+  if (self->allocator->realloc) {
+    THCHeapUpdate(state, (size - self->size) * sizeof(real));
+    cudaError_t err = (*self->allocator->realloc)(
+      self->allocatorContext,
+      (void**)&(self->data),
+      self->size * sizeof(real),
+      size * sizeof(real), THCState_getCurrentStream(state));
+    if (err != cudaSuccess) {
+      THCHeapUpdate(state, (self->size - size) * sizeof(real));
+      THCudaCheck(err);
+    }
+    self->size = size;
+    return;
+  }
+
   if(size == 0)
   {
     if(self->flag & TH_STORAGE_FREEMEM) {
-      THCudaCheck(THCudaFree(state, self->data));
+      THCudaCheck(
+        (*self->allocator->free)(self->allocatorContext, self->data));
       THCHeapUpdate(state, -self->size * sizeof(real));
     }
     self->data = NULL;
@@ -33,7 +50,11 @@ void THCStorage_(resize)(THCState *state, THCStorage *self, ptrdiff_t size)
     real *data = NULL;
     // update heap *before* attempting malloc, to free space for the malloc
     THCHeapUpdate(state, size * sizeof(real));
-    cudaError_t err = THCudaMalloc(state, (void**)(&data), size * sizeof(real));
+    cudaError_t err =
+      (*self->allocator->malloc)(self->allocatorContext,
+                                 (void**)&(data),
+                                 size * sizeof(real),
+                                 THCState_getCurrentStream(state));
     if(err != cudaSuccess) {
       THCHeapUpdate(state, -size * sizeof(real));
     }
@@ -45,8 +66,11 @@ void THCStorage_(resize)(THCState *state, THCStorage *self, ptrdiff_t size)
                                   THMin(self->size, size) * sizeof(real),
                                   cudaMemcpyDeviceToDevice,
                                   THCState_getCurrentStream(state)));
-      THCudaCheck(THCudaFree(state, self->data));
-      THCHeapUpdate(state, -self->size * sizeof(real));
+      if(self->flag & TH_STORAGE_FREEMEM) {
+        THCudaCheck(
+          (*self->allocator->free)(self->allocatorContext, self->data));
+        THCHeapUpdate(state, -self->size * sizeof(real));
+      }
     }
 
     self->data = data;

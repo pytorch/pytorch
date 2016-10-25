@@ -1,6 +1,6 @@
 #include "THCAllocator.h"
 
-static void *THCudaHostAllocator_alloc(void* ctx, ptrdiff_t size) {
+static void *THCudaHostAllocator_malloc(void* ctx, ptrdiff_t size) {
   void* ptr;
 
   if (size < 0) THError("Invalid memory size: %ld", size);
@@ -18,8 +18,8 @@ static void THCudaHostAllocator_free(void* ctx, void* ptr) {
   THCudaCheck(cudaFreeHost(ptr));
 }
 
-void THCAllocator_init(THAllocator *cudaHostAllocator) {
-  cudaHostAllocator->malloc = &THCudaHostAllocator_alloc;
-  cudaHostAllocator->realloc = NULL;
-  cudaHostAllocator->free = &THCudaHostAllocator_free;
+void THCAllocator_init(THCState *state) {
+  state->cudaHostAllocator->malloc = &THCudaHostAllocator_malloc;
+  state->cudaHostAllocator->realloc = NULL;
+  state->cudaHostAllocator->free = &THCudaHostAllocator_free;
 }

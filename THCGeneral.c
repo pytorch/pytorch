@@ -93,6 +93,7 @@ static cudaError_t cudaFreeWrapper(void* ctx, void* devPtr)
 
 static THCDeviceAllocator defaultDeviceAllocator = {
   &cudaMallocWrapper,
+  NULL,
   &cudaFreeWrapper,
   NULL,
   NULL
@@ -129,7 +130,7 @@ void THCudaInit(THCState* state)
   THCRandom_init(state, numDevices, device);
 
   state->cudaHostAllocator = (THAllocator*)malloc(sizeof(THAllocator));
-  THCAllocator_init(state->cudaHostAllocator);
+  THCAllocator_init(state);
 
   /* Enable P2P access between all pairs, if possible */
   THCudaEnablePeerToPeerAccess(state);
@@ -792,3 +793,6 @@ void THCHeapUpdate(THCState *state, ptrdiff_t size) {
 }
 
 #undef GLOBAL_SCRATCH_SPACE_PER_SM_STREAM
+
+#include "THCStorage.c"
+#include "THCAllocator.c"
