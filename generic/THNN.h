@@ -258,7 +258,7 @@ TH_API void THNN_(MultiLabelMarginCriterion_updateGradInput)(
 TH_API void THNN_(MultiMarginCriterion_updateOutput)(
           THNNState *state,
           THTensor *input,
-          THTensor *target,
+          THIndexTensor *target,
           THTensor *output,
           bool sizeAverage,
           int p,
@@ -267,7 +267,7 @@ TH_API void THNN_(MultiMarginCriterion_updateOutput)(
 TH_API void THNN_(MultiMarginCriterion_updateGradInput)(
           THNNState *state,
           THTensor *input,
-          THTensor *target,
+          THIndexTensor *target,
           THTensor *gradInput,
           bool sizeAverage,
           int p,
