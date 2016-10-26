@@ -181,6 +181,11 @@ inline __host__ __device__ half& operator/=(half &lhs, const int &rhs) {
   return lhs;
 }
 
+inline __host__ __device__ half& operator/=(half &lhs, const half &rhs) {
+  lhs = lhs / rhs;
+  return lhs;
+}
+
 inline __host__ __device__ half abs(half a) {
   return THCNumerics<half>::abs(a);
 }
