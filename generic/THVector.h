@@ -9,6 +9,6 @@ TH_API void THVector_(scale)(real *y, const real c, const ptrdiff_t n);
 TH_API void THVector_(mul)(real *y, const real *x, const ptrdiff_t n);
 
 /* Initialize the dispatch pointers */
-TH_API void THVector_(vectorDispatchInit)();
+TH_API void THVector_(vectorDispatchInit)(void);
 
 #endif

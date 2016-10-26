@@ -326,7 +326,7 @@ void THSetNumThreads(int num_threads)
 #endif
 }
 
-int THGetNumThreads()
+int THGetNumThreads(void)
 {
 #ifdef _OPENMP
   return omp_get_max_threads();
@@ -335,7 +335,7 @@ int THGetNumThreads()
 #endif
 }
 
-int THGetNumCores()
+int THGetNumCores(void)
 {
 #ifdef _OPENMP
   return omp_get_num_procs();
