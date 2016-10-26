@@ -1,8 +1,8 @@
 import math
 import torch
-from torch.autograd import Variable
 
 from .module import Module
+from ..parameter import Parameter
 
 
 class RNNBase(Module):
@@ -28,10 +28,10 @@ class RNNBase(Module):
             else:
                 gate_size = hidden_size
 
-            w_ih = Variable(torch.Tensor(gate_size, layer_input_size), requires_grad=True)
-            w_hh = Variable(torch.Tensor(gate_size, hidden_size), requires_grad=True)
-            b_ih = Variable(torch.Tensor(gate_size), requires_grad=True)
-            b_hh = Variable(torch.Tensor(gate_size), requires_grad=True)
+            w_ih = Parameter(torch.Tensor(gate_size, layer_input_size))
+            w_hh = Parameter(torch.Tensor(gate_size, hidden_size))
+            b_ih = Parameter(torch.Tensor(gate_size))
+            b_hh = Parameter(torch.Tensor(gate_size))
 
             super_weights['weight_ih_l{}'.format(layer)] = w_ih
             super_weights['weight_hh_l{}'.format(layer)] = w_hh

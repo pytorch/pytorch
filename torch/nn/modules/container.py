@@ -5,7 +5,6 @@ import inspect
 from collections import OrderedDict
 
 import torch
-from torch.autograd import Variable
 from .module import Module
 
 class SourceChangeWarning(Warning):

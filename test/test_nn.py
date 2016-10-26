@@ -10,6 +10,7 @@ from functools import wraps
 import torch.nn as nn
 import torch.nn.parallel as dp
 from torch.autograd import Variable
+from torch.nn import Parameter
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     module_tests, criterion_tests, TEST_CUDA, TEST_CUDNN, PRECISION
 from common import freeze_rng_state
@@ -300,7 +301,7 @@ class TestNN(NNTestCase):
                     l1=l,
                     l2=l
                 )
-                self.param = Variable(torch.Tensor(3, 5))
+                self.param = Parameter(torch.Tensor(3, 5))
         l = nn.Linear(10, 20)
         n = Net()
         s = nn.Sequential(n, n, n, n)
@@ -365,9 +366,9 @@ class TestNN(NNTestCase):
         l2 = nn.Linear(10, 10)
         def assign_weight():
             l2.weight = l1.weight + 2
-        self.assertRaises(ValueError, assign_weight)
+        self.assertRaises(TypeError, assign_weight)
         # This should work though
-        l2.weight = Variable(torch.randn(10, 10))
+        l2.weight = Parameter(torch.randn(10, 10))
 
     def test_embedding_padding_idx(self):
         embedding = nn.Embedding(10, 20, padding_idx = 0)
@@ -581,6 +582,36 @@ class TestNN(NNTestCase):
         net.load_parameter_dict(param_dict)
         self.assertIs(net.linear1.weight, param_dict['linear1.weight'])
         self.assertIs(net.block.conv.bias, param_dict['block.conv.bias'])
+
+    def test_parameter_assignment(self):
+        l = nn.Linear(5, 5)
+        def num_params():
+            return len(list(l.parameters()))
+        self.assertEqual(num_params(), 2)
+
+        new_param = Parameter(torch.randn(5, 5))
+        l.param_name = new_param
+        self.assertEqual(num_params(), 3)
+        self.assertIn(new_param, l.parameters())
+
+        var = Variable(torch.randn(5, 5))
+        l.var_name = var
+        self.assertEqual(num_params(), 3)
+        self.assertNotIn(var, l.parameters())
+
+        # Make sure Variables are not saved as parameters
+        l.variable_attr = Variable(torch.Tensor(5, 5))
+        self.assertEqual(num_params(), 3)
+        l.param_attr = Parameter(torch.Tensor(5, 5))
+        self.assertEqual(num_params(), 4)
+
+        # It shouldn't be possible to replace a parameter with a Variable
+        def assign_var():
+            l.param_attr = Variable(torch.Tensor(5, 5))
+        self.assertRaises(TypeError, assign_var)
+        # But replacing it with None should be fine
+        l.param_attr = None
+        self.assertEqual(num_params(), 3)
 
     def test_ConvTranspose2d_output_size(self):
         m = nn.ConvTranspose2d(3, 4, 3, 3, 0, 2)

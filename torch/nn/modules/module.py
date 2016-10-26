@@ -3,6 +3,7 @@ from collections import OrderedDict
 
 import torch
 from ..backends.thnn import backend as thnn_backend
+from ..parameter import Parameter
 from torch.autograd import Variable
 
 
@@ -16,8 +17,12 @@ class Module(object):
         self.forward_hooks = OrderedDict()
         self.train = True
         for name, param in self._parameters.items():
-            if param is not None and not isinstance(param, Variable):
-                param = Variable(param, requires_grad=True)
+            if not isinstance(param, Parameter):
+                if isinstance(param, Variable):
+                    raise TypeError("can't use a Variable as a module "
+                        "parameter.  Convert it to torch.nn.Parameter first.")
+                if param is not None:
+                    param = Parameter(param)
             self._parameters[name] = param
 
     def forward(self, *input):
@@ -79,7 +84,7 @@ class Module(object):
             hook(self, input, result)
         var = result
         while not isinstance(var, Variable):
-            var= var[0]
+            var = var[0]
         creator = var.creator
         for key, hook in self.backward_hooks.items():
             creator.register_hook(key, lambda gi,go,hook=hook: hook(self, gi, go))
@@ -98,7 +103,7 @@ class Module(object):
 
     def __setattr__(self, name, value):
         _parameters = self.__dict__.get('_parameters')
-        if isinstance(value, Variable):
+        if isinstance(value, Parameter):
             if _parameters is None:
                 raise AttributeError(
                     "cannot assign parameter before Module.__init__() call")
@@ -112,7 +117,7 @@ class Module(object):
         elif _parameters and name in _parameters:
             if value is not None:
                 raise TypeError("cannot assign '{}' object to parameter '{}' "
-                                "(torch.autograd.Variable or None required)"
+                                "(torch.nn.Parameter or None required)"
                                 .format(torch.typename(value), name))
             _parameters[name] = value
         else:
