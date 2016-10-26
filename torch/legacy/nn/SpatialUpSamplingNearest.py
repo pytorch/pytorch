@@ -23,22 +23,16 @@ class SpatialUpSamplingNearest(Module):
         if self.scale_factor % 1 != 0:
             raise ValueError('scale_factor must be integer')
 
-        self.inputSize = torch.LongStorage(4)
-        self.outputSize = torch.LongStorage(4)
-
     def updateOutput(self, input):
         assert input.dim() == 4
 
         # Copy the input size
         xdim = input.dim() - 1
         ydim = input.dim() - 2
-        for i in range(input.dim()):
-          self.inputSize[i] = input.size(i)
-          self.outputSize[i] = input.size(i)
-
-        self.outputSize[ydim] = self.outputSize[ydim] * self.scale_factor
-        self.outputSize[xdim] = self.outputSize[xdim] * self.scale_factor
-        self.output.resize_(self.outputSize)
+        outputSize = list(input.size())
+        outputSize[ydim] = outputSize[ydim] * self.scale_factor
+        outputSize[xdim] = outputSize[xdim] * self.scale_factor
+        self.output.resize_(*outputSize)
         self._backend.SpatialUpSamplingNearest_updateOutput(
             self._backend.library_state,
             input,
@@ -58,4 +52,3 @@ class SpatialUpSamplingNearest(Module):
             self.scale_factor
         )
         return self.gradInput
-

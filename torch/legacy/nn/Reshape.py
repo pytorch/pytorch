@@ -2,49 +2,42 @@ import torch
 from .Module import Module
 from .utils import clear
 
+
 class Reshape(Module):
 
     def __init__(self, *args):
         super(Reshape, self).__init__()
 
-        self.size = torch.LongStorage()
-        self.batchsize = torch.LongStorage()
-
-        n = len(args)
-        if n == 0 and isinstance(args[0], torch.LongStorage):
-            self.size.resize_(args[0].size()).copy_(args[0])
+        if len(args) == 0 and isinstance(args[0], torch.Size):
+            self.size = args[0]
         else:
-            self.size.resize_(n)
-            for i in range(n):
-                self.size[i] = args[i]
+            self.size = torch.Size(args)
 
         self.nelement = 1
-        self.batchsize.resize_(self.size.size() + 1)
-        for i, s in enumerate(self.size):
-           self.nelement *= s
-           self.batchsize[i+1] = self.size[i]
+        for s in self.size:
+            self.nelement *= s
 
         self._input = None
         self._gradOutput = None
 
     def updateOutput(self, input):
         if not input.is_contiguous():
-           self._input = self._input or input.new()
-           self._input.resize_as_(input)
-           self._input.copy_(input)
-           input = self._input
+            self._input = self._input or input.new()
+            self._input.resize_as_(input)
+            self._input.copy_(input)
+            input = self._input
 
-        self.batchsize[0] = input.size(0)
-        self.output = input.view(self.batchsize)
+        batchsize = [input.size(0)] + list(self.size)
+        self.output = input.view(torch.Size(batchsize))
 
         return self.output
 
     def updateGradInput(self, input, gradOutput):
         if not gradOutput.is_contiguous():
-           self._gradOutput = self._gradOutput or gradOutput.new()
-           self._gradOutput.resize_as_(gradOutput)
-           self._gradOutput.copy_(gradOutput)
-           gradOutput = self._gradOutput
+            self._gradOutput = self._gradOutput or gradOutput.new()
+            self._gradOutput.resize_as_(gradOutput)
+            self._gradOutput.copy_(gradOutput)
+            gradOutput = self._gradOutput
 
         self.gradInput = gradOutput.view_as(input)
         return self.gradInput
@@ -56,4 +49,3 @@ class Reshape(Module):
     def clearState(self):
         clear(self, '_input', '_gradOutput')
         return super(Reshape, self).clearState()
-

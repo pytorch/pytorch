@@ -2,8 +2,7 @@ import torch
 
 
 def _shared_serialize(self):
-    metadata = (self.storage_offset(), self.size().tolist(),
-            self.stride().tolist())
+    metadata = (self.storage_offset(), self.size(), self.stride())
     storage = self.storage()
     return (storage, metadata)
 
@@ -11,8 +10,6 @@ def _shared_serialize(self):
 def _shared_deserialize(cls, args):
     storage, metadata = args
     storage_offset, size, stride = metadata
-    size = torch.LongStorage(size)
-    stride = torch.LongStorage(stride)
     new_tensor = cls()
     if hasattr(storage, '_tensor_users'):
         storage._tensor_users.add(new_tensor)
@@ -27,4 +24,3 @@ def reduce_tensor(self, obj):
 def _init_tensor_sharing():
     from torch.tensor import _TensorBase
     _TensorBase._shared_serialize = _shared_serialize
-

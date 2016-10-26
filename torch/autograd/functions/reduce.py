@@ -9,7 +9,7 @@ class _DimReduceFunction(Function):
         self.dim = dim
 
     def forward(self, input):
-        self.input_size = input.size().tolist()
+        self.input_size = input.size()
         fn = getattr(input, self.fn_name)
         if self.dim is None:
             return input.new((fn(),))
@@ -22,7 +22,7 @@ class Sum(_DimReduceFunction):
 
     def backward(self, grad_output):
         if self.dim is None:
-            return grad_output.new(*self.input_size).fill_(grad_output[0])
+            return grad_output.new(self.input_size).fill_(grad_output[0])
         else:
             repeats = [1 for _ in self.input_size]
             repeats[self.dim] = self.input_size[self.dim]
@@ -32,7 +32,7 @@ class Sum(_DimReduceFunction):
 class Prod(_DimReduceFunction):
 
     def forward(self, input):
-        self.input_size = input.size().tolist()
+        self.input_size = input.size()
         if self.dim is None:
             self.result = input.prod()
             self.save_for_backward(input)
@@ -45,7 +45,7 @@ class Prod(_DimReduceFunction):
     def backward(self, grad_output):
         if self.dim is None:
             input, = self.saved_tensors
-            grad_input = grad_output.new(*self.input_size).fill_(self.result)
+            grad_input = grad_output.new(self.input_size).fill_(self.result)
             return grad_input.div(input)
         else:
             input, output = self.saved_tensors
@@ -81,7 +81,7 @@ class _SelectionFunction(Function):
 
     def forward(self, input):
         fn = getattr(input, type(self).__name__.lower())
-        self.input_size = input.size().tolist()
+        self.input_size = input.size()
         if self.dim is None and self.has_all_reduce:
             value = fn(*self.additional_args)
             self.indices = tuple(input.eq(value).nonzero()[0])
@@ -142,7 +142,6 @@ class Norm(Function):
         self.dim = dim
 
     def forward(self, input):
-        self.input_size = input.size().tolist()
         if self.dim is None:
             self.norm = input.norm(self.norm_type)
             self.save_for_backward(input)

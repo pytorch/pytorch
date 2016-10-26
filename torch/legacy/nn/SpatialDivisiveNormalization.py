@@ -12,6 +12,7 @@ from .CDivTable import CDivTable
 from .Threshold import Threshold
 from .utils import clear
 
+
 class SpatialDivisiveNormalization(Module):
 
     def __init__(self, nInputPlane=1, kernel=None, threshold=1e-4, thresval=None):
@@ -105,7 +106,7 @@ class SpatialDivisiveNormalization(Module):
             coef = self.meanestimator.updateOutput(self.ones).squeeze(0)
             self._coef = self._coef or input.new()
             self._coef.resize_as_(coef).copy_(coef) # make contiguous for view
-            self.coef = self._coef.view(1, *(self._coef.size().tolist())).expand_as(self.localstds)
+            self.coef = self._coef.view(1, *self._coef.size()).expand_as(self.localstds)
 
         # normalize std dev
         self.adjustedstds = self.divider.updateOutput([self.localstds, self.coef])
@@ -132,4 +133,3 @@ class SpatialDivisiveNormalization(Module):
         self.meanestimator.clearState()
         self.stdestimator.clearState()
         return super(SpatialDivisiveNormalization, self).clearState()
-

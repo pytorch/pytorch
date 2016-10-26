@@ -1,6 +1,7 @@
 import torch
 from .Container import Container
 
+
 class Parallel(Container):
 
     def __init__(self, inputDimension, outputDimension):
@@ -12,8 +13,6 @@ class Parallel(Container):
     def updateOutput(self, input):
         nModule = input.size(self.inputDimension)
         outputs = []
-        self.totalOutputSize = self.totalOutputSize or torch.LongStorage()
-        totalOutputSize = self.totalOutputSize
 
         for i in range(nModule):
             currentInput = input.select(self.inputDimension, i)
@@ -22,11 +21,12 @@ class Parallel(Container):
             outputSize = currentOutput.size(self.outputDimension)
 
             if i == 0:
-                totalOutputSize.resize_(currentOutput.dim()).copy_(currentOutput.size())
+                totalOutputSize = list(currentOutput.size())
             else:
-                totalOutputSize[self.outputDimension] = totalOutputSize[self.outputDimension] + outputSize
+                totalOutputSize[self.outputDimension] += outputSize
 
-        self.output.resize_(totalOutputSize)
+        self.totalOutputSize = torch.Size(totalOutputSize)
+        self.output.resize_(self.totalOutputSize)
 
         offset = 0
         for i in range(nModule):
@@ -38,12 +38,12 @@ class Parallel(Container):
         return self.output
 
     def updateGradInput(self, input, gradOutput):
-        nModule=input.size(self.inputDimension)
+        nModule = input.size(self.inputDimension)
         self.gradInput.resize_as_(input)
 
         offset = 0
         for i in range(nModule):
-            module=self.modules[i]
+            module = self.modules[i]
             currentInput = input.select(self.inputDimension, i)
             currentOutput = module.output
             outputSize = currentOutput.size(self.outputDimension)
@@ -61,25 +61,28 @@ class Parallel(Container):
 
         offset = 0
         for i in range(nModule):
-           module = self.modules[i]
-           currentOutput = module.output
-           outputSize = currentOutput.size(self.outputDimension)
+            module = self.modules[i]
+            currentOutput = module.output
+            outputSize = currentOutput.size(self.outputDimension)
 
-           module.accGradParameters(input.select(self.inputDimension, i),
-                   gradOutput.narrow(self.outputDimension, offset, outputSize), scale)
-           offset = offset + outputSize
+            module.accGradParameters(
+                input.select(self.inputDimension, i),
+                gradOutput.narrow(self.outputDimension, offset, outputSize),
+                scale)
+            offset += outputSize
 
     def accUpdateGradParameters(self, input, gradOutput, lr):
         nModule = input.size(self.inputDimension)
 
         offset = 0
         for i in range(nModule):
-           module = self.modules[i];
-           currentOutput = module.output
-           module.accupdateGradParameters(input.select(self.inputDimension, i),
-               gradOutput.narrow(self.outputDimension, offset, currentOutput.size(self.outputDimension)),
-               lr)
-           offset = offset + currentOutput.size(self.outputDimension)
+            module = self.modules[i]
+            currentOutput = module.output
+            module.accupdateGradParameters(
+                input.select(self.inputDimension, i),
+                gradOutput.narrow(self.outputDimension, offset, currentOutput.size(self.outputDimension)),
+                lr)
+            offset = offset + currentOutput.size(self.outputDimension)
 
     def __repr__(self):
         tab = '  '
@@ -99,4 +102,3 @@ class Parallel(Container):
         res += line + tab + last + 'output'
         res += line + '}'
         return res
-

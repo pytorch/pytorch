@@ -135,7 +135,6 @@ THP_API void THPUtils_invalidArguments(PyObject *given_args,
 void THPUtils_addPyMethodDefs(std::vector<PyMethodDef>& vector, PyMethodDef* methods);
 
 #define THPUtils_classname(obj) (((PyTypeObject*)obj)->tp_name)
-THLongStorage * THPUtils_getLongStorage(PyObject *args, int ignore_first=0);
 int THPUtils_getCallable(PyObject *arg, PyObject **result);
 bool THPUtils_parseSlice(PyObject *slice, Py_ssize_t len, Py_ssize_t *ostart,
         Py_ssize_t *ostop, Py_ssize_t *oslicelength);
@@ -174,6 +173,10 @@ struct THPUtils_typeTraits {};
 
 #include "generic/utils.h"
 #include <TH/THGenerateAllTypes.h>
+
+THLongStoragePtr THPUtils_unpackSize(PyObject *arg);
+bool THPUtils_tryUnpackLongs(PyObject *arg, THLongStoragePtr& result);
+bool THPUtils_tryUnpackLongVarArgs(PyObject *args, int ignore_first, THLongStoragePtr& result);
 
 #endif /* _THP_CORE */
 

@@ -3,7 +3,6 @@ import torch.cuda.nccl as nccl
 from torch._utils import _accumulate
 
 # TODO: sync streams when implemented
-# TODO: use nccl for broadcast and reduce_add
 
 def broadcast(tensor, devices):
     "Broadcasts a tensor to a number of GPUs"
@@ -26,9 +25,11 @@ def reduce_add(inputs, destination=None):
     input_size = inputs[0].size()
     for i, inp in enumerate(inputs):
         assert inp.is_cuda, "reduce_add expects all inputs to be on GPUs"
-        if not inp.is_size(input_size):
-            raise ValueError("input {} has invalid size: got {}, but expected {}"
-                .format('x'.join(inp.size()), 'x'.join(input_size)))
+        if inp.size() != input_size:
+            got = 'x'.join(str(x) for x in inp.size())
+            expected = 'x'.join(str(x) for x in input_size)
+            raise ValueError("input {} has invalid size: got {}, but expected "
+                             "{}".format(i, got, expected))
     if destination is None:
         destination = torch.cuda.current_device()
     with torch.cuda.device(destination):
@@ -55,10 +56,10 @@ def scatter(tensor, devices, chunk_sizes=None, dim=0):
             "expected {})".format(sum(chunk_sizes), tensor.size(dim))
         assert min(chunk_sizes) > 0, "got a negative chunk_size"
         chunks = [tensor.narrow(dim, start - size, size)
-            for start, size in zip(_accumulate(chunk_sizes), chunk_sizes)]
+                  for start, size in zip(_accumulate(chunk_sizes), chunk_sizes)]
     # TODO: copy to a pinned buffer first (if copying from CPU)
     return tuple(chunk.cuda(gpu_id, async=chunk.is_contiguous())
-            for gpu_id, chunk in zip(devices, chunks))
+                 for gpu_id, chunk in zip(devices, chunks))
 
 
 def gather(tensors, dim=0, destination=None):
@@ -66,17 +67,18 @@ def gather(tensors, dim=0, destination=None):
        on CPU)
     """
     total_size = 0
-    expected_size = tensors[0].size()
+    expected_size = list(tensors[0].size())
     for tensor in tensors:
         assert tensor.is_cuda, "gather expects all inputs to be on GPUs"
         expected_size[dim] = tensor.size(dim)
-        if not tensor.is_size(expected_size):
-            got = 'x'.join(tensor.size())
-            expected = 'x'.join(expected_size)
+        if list(tensor.size()) != expected_size:
+            got = 'x'.join(str(x) for x in tensor.size())
+            expected = 'x'.join(str(x) for x in expected_size)
             raise ValueError("gather got an input of invalid size: got {}, "
-                    "but expected {}".format(got, expected))
+                             "but expected {}".format(got, expected))
         total_size += tensor.size(dim)
     expected_size[dim] = total_size
+    expected_size = torch.Size(expected_size)
     if destination is None:
         destination = torch.cuda.current_device()
     if destination == -1:

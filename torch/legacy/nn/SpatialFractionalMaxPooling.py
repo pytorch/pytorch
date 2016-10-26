@@ -51,14 +51,11 @@ class SpatialFractionalMaxPooling(Module):
            assert self.ratioH > 0 and self.ratioH < 1
 
     def _getBufferSize(self, input):
-        batchSize = 0
-        planeSize = 0
-
         assert input.ndimension() == 4
         batchSize = input.size(0)
         planeSize = input.size(1)
 
-        return torch.LongStorage((batchSize, planeSize, 2))
+        return torch.Size([batchSize, planeSize, 2])
 
 
     def _initSampleBuffer(self, input):
@@ -134,4 +131,3 @@ class SpatialFractionalMaxPooling(Module):
                 '({}x{}, {}, {})'.format(self.outW or self.ratioW,
                                         self.outH or self.ratioH,
                                         self.poolSizeW, self.poolSizeH)
-

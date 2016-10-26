@@ -164,7 +164,7 @@ class cwrap(object):
                 fn = 'check' if base_fn_name == 'get_type_check' else 'unpack'
                 raise RuntimeError("Missing type {} for '{} {}'".format(
                                    fn, arg['type'], arg['name']))
-            res = tmpl.substitute(arg=accessor)
+            res = tmpl.substitute(arg=accessor, idx=arg.get('idx'))
             for plugin in self.plugins:
                 res = getattr(plugin, plugin_fn_name)(res, arg, accessor)
             result.append(res)

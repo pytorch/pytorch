@@ -1630,7 +1630,7 @@ class TestTorch(TestCase):
         self._test_conv_corr_eq(lambda x, k: torch.conv3(x, k, 'F'), reference)
 
     def test_logical(self):
-        x = torch.rand(100, 100) * 2 - 1;
+        x = torch.rand(100, 100) * 2 - 1
         xx = x.clone()
 
         xgt = torch.gt(x, 1)
@@ -2061,12 +2061,12 @@ class TestTorch(TestCase):
         tensor = torch.rand(15)
         template = torch.rand(3, 5)
         empty = torch.Tensor()
-        target = template.size().tolist()
-        self.assertEqual(tensor.view_as(template).size().tolist(), target)
-        self.assertEqual(tensor.view(3, 5).size().tolist(), target)
-        self.assertEqual(tensor.view(torch.LongStorage((3, 5))).size().tolist(), target)
-        self.assertEqual(tensor.view(-1, 5).size().tolist(), target)
-        self.assertEqual(tensor.view(3, -1).size().tolist(), target)
+        target = template.size()
+        self.assertEqual(tensor.view_as(template).size(), target)
+        self.assertEqual(tensor.view(3, 5).size(), target)
+        self.assertEqual(tensor.view(torch.Size([3, 5])).size(), target)
+        self.assertEqual(tensor.view(-1, 5).size(), target)
+        self.assertEqual(tensor.view(3, -1).size(), target)
         tensor_view = tensor.view(5, 3)
         tensor_view.fill_(random.uniform(0, 1))
         self.assertEqual((tensor_view-tensor).abs().max(), 0)
@@ -2077,23 +2077,23 @@ class TestTorch(TestCase):
         result = torch.Tensor()
         tensor = torch.rand(8, 1)
         template = torch.rand(8, 5)
-        target = template.size().tolist()
-        self.assertEqual(tensor.expand_as(template).size().tolist(), target)
-        self.assertEqual(tensor.expand(8, 5).size().tolist(), target)
-        self.assertEqual(tensor.expand(torch.LongStorage((8, 5))).size().tolist(), target)
+        target = template.size()
+        self.assertEqual(tensor.expand_as(template).size(), target)
+        self.assertEqual(tensor.expand(8, 5).size(), target)
+        self.assertEqual(tensor.expand(torch.Size([8, 5])).size(), target)
 
     def test_repeat(self):
         result = torch.Tensor()
         tensor = torch.rand(8, 4)
         size = (3, 1, 1)
-        sizeStorage = torch.LongStorage(size)
+        torchSize = torch.Size(size)
         target = [3, 8, 4]
-        self.assertEqual(tensor.repeat(*size).size().tolist(), target, 'Error in repeat')
-        self.assertEqual(tensor.repeat(sizeStorage).size().tolist(), target, 'Error in repeat using LongStorage')
+        self.assertEqual(tensor.repeat(*size).size(), target, 'Error in repeat')
+        self.assertEqual(tensor.repeat(torchSize).size(), target, 'Error in repeat using LongStorage')
         result = tensor.repeat(*size)
-        self.assertEqual(result.size().tolist(), target, 'Error in repeat using result')
-        result = tensor.repeat(sizeStorage)
-        self.assertEqual(result.size().tolist(), target, 'Error in repeat using result and LongStorage')
+        self.assertEqual(result.size(), target, 'Error in repeat using result')
+        result = tensor.repeat(torchSize)
+        self.assertEqual(result.size(), target, 'Error in repeat using result and LongStorage')
         self.assertEqual((result.mean(0).view(8, 4)-tensor).abs().max(), 0, 'Error in repeat (not equal)')
 
     def test_is_same_size(self):
@@ -2118,6 +2118,21 @@ class TestTorch(TestCase):
         self.assertFalse(torch.Tensor().is_set_to(torch.Tensor()),
                 "Tensors with no storages should not appear to be set "
                 "to each other")
+
+    def test_tensor_set(self):
+        t1 = torch.Tensor()
+        t2 = torch.Tensor(3, 4, 9, 10).uniform_()
+        t1.set_(t2)
+        self.assertEqual(t1.storage()._cdata, t2.storage()._cdata)
+        size = torch.Size([9, 3, 4, 10])
+        t1.set_(t2.storage(), 0, size)
+        self.assertEqual(t1.size(), size)
+        t1.set_(t2.storage(), 0, tuple(size))
+        self.assertEqual(t1.size(), size)
+        self.assertEqual(t1.stride(), (120, 40, 10, 1))
+        stride = (10, 360, 90, 1)
+        t1.set_(t2.storage(), 0, size, stride)
+        self.assertEqual(t1.stride(), stride)
 
     def test_equal(self):
         # Contiguous, 1D
@@ -2149,15 +2164,6 @@ class TestTorch(TestCase):
         self.assertTrue(torch.equal(s1, s2))
         self.assertTrue(torch.equal(s1, s3))
         self.assertFalse(torch.equal(s1, s4))
-
-    def test_is_size(self):
-        t1 = torch.Tensor(3, 4, 5)
-        s1 = torch.LongStorage((3, 4, 5))
-        s2 = torch.LongStorage((5, 4, 3))
-
-        self.assertTrue(t1.is_size(s1))
-        self.assertFalse(t1.is_size(s2))
-        self.assertTrue(t1.is_size(t1.size()))
 
     def test_element_size(self):
         byte   =   torch.ByteStorage().element_size()
@@ -2202,7 +2208,7 @@ class TestTorch(TestCase):
         splits = tensor.split(split_size, dim)
         start = 0
         for target_size, split in zip(target_sizes, splits):
-            self.assertEqual(split.size().tolist(), target_size)
+            self.assertEqual(split.size(), target_size)
             self.assertEqual(tensor.narrow(dim, start, target_size[dim]), split, 0)
             start = start + target_size[dim]
 
@@ -2214,7 +2220,7 @@ class TestTorch(TestCase):
         splits = tensor.chunk(num_chunks, dim)
         start = 0
         for target_size, split in zip(target_sizes, splits):
-            self.assertEqual(split.size().tolist(), target_size)
+            self.assertEqual(split.size(), target_size)
             self.assertEqual(tensor.narrow(dim, start, target_size[dim]), split, 0)
             start = start + target_size[dim]
 
@@ -2246,7 +2252,7 @@ class TestTorch(TestCase):
         x = torch.Tensor(*orig).fill_(0)
         new = list(map(lambda x: x - 1, x.permute(*perm).size()))
         self.assertEqual(perm, new)
-        self.assertEqual(x.size().tolist(), orig)
+        self.assertEqual(x.size(), orig)
 
     def test_storageview(self):
         s1 = torch.LongStorage((3, 4, 5))
@@ -2273,11 +2279,11 @@ class TestTorch(TestCase):
         ]
 
         shapes = [
-            torch.LongStorage((12,)),
-            torch.LongStorage((12, 1)),
-            torch.LongStorage((1, 12)),
-            torch.LongStorage((6, 2)),
-            torch.LongStorage((3, 2, 2)),
+            torch.Size((12,)),
+            torch.Size((12, 1)),
+            torch.Size((1, 12)),
+            torch.Size((6, 2)),
+            torch.Size((3, 2, 2)),
         ]
 
         for t in types:
@@ -2291,7 +2297,7 @@ class TestTorch(TestCase):
                 dst2 = tensor.nonzero()
                 dst3 = torch.LongTensor()
                 torch.nonzero(dst3, tensor)
-                if shape.size() == 1:
+                if len(shape) == 1:
                     dst = []
                     for i in range(num_src):
                         if tensor[i] != 0:
@@ -2300,12 +2306,12 @@ class TestTorch(TestCase):
                     self.assertEqual(dst1.select(1, 0), torch.LongTensor(dst), 0)
                     self.assertEqual(dst2.select(1, 0), torch.LongTensor(dst), 0)
                     self.assertEqual(dst3.select(1, 0), torch.LongTensor(dst), 0)
-                elif shape.size() == 2:
+                elif len(shape) == 2:
                     # This test will allow through some False positives. It only checks
                     # that the elements flagged positive are indeed non-zero.
                     for i in range(dst1.size(0)):
                         self.assertNotEqual(tensor[dst1[i,0], dst1[i,1]], 0)
-                elif shape.size() == 3:
+                elif len(shape) == 3:
                 # This test will allow through some False positives. It only checks
                 # that the elements flagged positive are indeed non-zero.
                     for i in range(dst1.size(0)):

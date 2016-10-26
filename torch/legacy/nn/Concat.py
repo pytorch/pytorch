@@ -5,7 +5,7 @@ class Concat(Container):
 
     def __init__(self, dimension):
         super(Concat, self).__init__()
-        self.size = torch.LongStorage()
+        self.size = torch.Size()
         self.dimension = dimension
 
     def updateOutput(self, input):
@@ -14,10 +14,10 @@ class Concat(Container):
             currentOutput = self.modules[i].updateOutput(input)
             outs.append(currentOutput)
             if i == 0:
-                self.size.resize_(currentOutput.dim()).copy_(currentOutput.size())
+                size = list(currentOutput.size())
             else:
-                self.size[self.dimension] = self.size[self.dimension] + currentOutput.size(self.dimension)
-
+                size[self.dimension] += currentOutput.size(self.dimension)
+        self.size = torch.Size(size)
         self.output.resize_(self.size)
 
         offset = 0
@@ -100,5 +100,3 @@ class Concat(Container):
         res += line + tab + last + 'output'
         res += line + '}'
         return res
-
-

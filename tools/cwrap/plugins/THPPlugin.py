@@ -2,6 +2,7 @@ from string import Template
 from copy import deepcopy
 from . import CWrapPlugin
 from itertools import product
+from collections import OrderedDict
 
 class THPPlugin(CWrapPlugin):
 
@@ -16,7 +17,8 @@ class THPPlugin(CWrapPlugin):
         'THLongStorage*':   Template('((THPLongStorage*)$arg)->cdata'),
         'THStorage*':       Template('((THPStorage*)$arg)->cdata'),
         'THGenerator*':     Template('((THPGenerator*)$arg)->cdata'),
-        'THSize*':          Template('THPUtils_unpackSize($arg)'),
+        'THSize*':          Template('__size.get()'),
+        'THStride*':        Template('__stride.get()'),
         'void*':            Template('THPUtils_unpackLong($arg)'),
         'long':             Template('THPUtils_unpackLong($arg)'),
         'int':              Template('THPUtils_unpackLong($arg)'),
@@ -39,7 +41,8 @@ class THPPlugin(CWrapPlugin):
         'THLongStorage*':   Template('(PyObject*)Py_TYPE($arg) == THPLongStorageClass'),
         'THStorage*':       Template('(PyObject*)Py_TYPE($arg) == THPStorageClass'),
         'THGenerator*':     Template('(PyObject*)Py_TYPE($arg) == THPGeneratorClass'),
-        'THSize*':          Template('(PyObject*)Py_TYPE($arg) == THPSizeClass'),
+        'THSize*':          Template('THPUtils_tryUnpackLongs($arg, __size)'),
+        'THStride*':        Template('THPUtils_tryUnpackLongs($arg, __stride)'),
         'void*':            Template('THPUtils_checkLong($arg)'),
         'long':             Template('THPUtils_checkLong($arg)'),
         'int':              Template('THPUtils_checkLong($arg)'),
@@ -50,6 +53,8 @@ class THPPlugin(CWrapPlugin):
         # TODO
         'accreal':          Template('THPUtils_(checkReal)($arg)'),
     }
+
+    SIZE_VARARG_CHECK = Template('THPUtils_tryUnpackLongVarArgs(args, $idx, __size)')
 
     RETURN_WRAPPER = {
         'THTensor*':        Template('return THPTensor_(New)($result);'),
@@ -76,6 +81,7 @@ PyObject * $name(PyObject *self, PyObject *args, PyObject *kwargs)
     int __tuplecount = args ? PyTuple_Size(args) : 0;
     int __dictcount = kwargs ? PyDict_Size(kwargs) : 0;
     int __argcount = __tuplecount + __dictcount;
+    $variables
 
     $options
     }
@@ -155,6 +161,7 @@ PyObject * $name(PyObject *self, PyObject *args, PyObject *kwargs)
         'THFloatTensor*': '" THPModuleStr "FloatTensor',
         'THDoubleTensor*': '" THPModuleStr "DoubleTensor',
         'THSize*': 'torch.Size',
+        'THStride*': 'tuple',
         'long': 'int',
         'real': '" RealStr "',
         'double': 'float',
@@ -170,32 +177,44 @@ PyObject * $name(PyObject *self, PyObject *args, PyObject *kwargs)
         return self.TYPE_UNPACK.get(arg['type'], None)
 
     def get_type_check(self, arg, option):
+        if arg['type'] == 'THSize*' and arg.get('long_args', False):
+            return self.SIZE_VARARG_CHECK
         return self.TYPE_CHECK.get(arg['type'], None)
 
     # TODO: argument descriptions shouldn't be part of THP, but rather a general cwrap thing
     def get_wrapper_template(self, declaration):
-        arg_desc = []
-        for option in declaration['options']:
-            option_desc = [self.TYPE_NAMES[arg['type']] + ' ' + arg['name']
-                    for arg in option['arguments']
-                    if not arg.get('ignore_check', False)]
-            # TODO: this should probably go to THPLongArgsPlugin
-            if option.get('long_args'):
-                option_desc.append('int ...')
-            if option_desc:
-                arg_desc.append('({})'.format(', '.join(option_desc)))
+        arg_desc = OrderedDict()
+
+        def format_arg(arg, var_args=False):
+            if var_args and arg.get('long_args', False):
+                return 'int ... ' + arg['name']
             else:
-                arg_desc.append('no arguments')
-        arg_desc.sort(key=len)
+                return self.TYPE_NAMES[arg['type']] + ' ' + arg['name']
+
+        def format_args(args, var_args=False):
+            option_desc = [format_arg(arg, var_args)
+                           for arg in args
+                           if not arg.get('ignore_check', False)]
+            if option_desc:
+                return '({})'.format(', '.join(option_desc))
+            else:
+                return 'no arguments'
+
+        for option in declaration['options']:
+            arg_desc[format_args(option['arguments'], False)] = True
+            arg_desc[format_args(option['arguments'], True)] = True
+
+        arg_desc = sorted(list(arg_desc.keys()), key=len)
         arg_desc = ['"' + desc + '"' for desc in arg_desc]
         arg_str = ', '.join(arg_desc)
+        variables_str = '\n'.join(declaration.get('variables', []))
         if 'stateless' in declaration['name']:
             readable_name = 'torch.' + declaration['python_name']
         else:
             readable_name = declaration['python_name']
         return Template(self.WRAPPER_TEMPLATE.safe_substitute(
             readable_name=readable_name, num_options=len(arg_desc),
-            expected_args=arg_str))
+            expected_args=arg_str, variables=variables_str))
 
     def get_return_wrapper(self, option):
         return self.RETURN_WRAPPER.get(option['return'], None)
@@ -210,10 +229,28 @@ PyObject * $name(PyObject *self, PyObject *args, PyObject *kwargs)
         new_declarations = []
         register_only = [d for d in declarations if d.get('only_register', False)]
         declarations = [d for d in declarations if not d.get('only_register', False)]
+
+        def has_arg_type(declaration, type_name):
+            return any(arg['type'] == type_name
+                       for option in declaration['options']
+                       for arg in option['arguments'])
+
+        def has_long_args(declaration):
+            return any(arg.get('long_args', False)
+                       for option in declaration['options']
+                       for arg in option['arguments'])
+
         for declaration in declarations:
             if declaration.get('only_register', False):
                 continue
             declaration.setdefault('python_name', declaration['name'])
+            declaration.setdefault('variables', [])
+            if has_arg_type(declaration, 'THSize*'):
+                declaration['variables'] += ['THLongStoragePtr __size;']
+            if has_arg_type(declaration, 'THStride*'):
+                declaration['variables'] += ['THLongStoragePtr __stride;']
+            if has_long_args(declaration):
+                declaration['no_kwargs'] = True
             if declaration.get('with_stateless', False) or declaration.get('only_stateless', False):
                 stateless_declaration = self.make_stateless(deepcopy(declaration))
                 new_declarations.append(stateless_declaration)
@@ -234,15 +271,12 @@ PyObject * $name(PyObject *self, PyObject *args, PyObject *kwargs)
             # keyword arguments
             declaration['options'] = self.filter_unique_options(declaration['options'])
 
+
         declarations = [d for d in declarations if not d.get('only_stateless', False)]
         self.declarations.extend(filter(lambda x: not x.get('only_stateless', False), register_only))
         self.stateless_declarations.extend(filter(lambda x: x.get('only_stateless', False), register_only))
 
         all_declarations = declarations + new_declarations
-        for declaration in all_declarations:
-            if declaration.get('long_args'):
-                declaration['no_kwargs'] = True
-
         return all_declarations
 
     def make_stateless(self, declaration):
@@ -310,6 +344,11 @@ PyObject * $name(PyObject *self, PyObject *args, PyObject *kwargs)
 
     def process_all_unpacks(self, code, option):
         return 'LIBRARY_STATE ' + code
+
+    def process_all_checks(self, code, option):
+        if any(arg.get('long_args', False) for arg in option['arguments']):
+            code = code.replace('__argcount ==', '__argcount >=')
+        return code
 
     def process_option_code_template(self, template, option):
         new_args = []

@@ -143,7 +143,6 @@ tests = [
     ('is_same_size',  medium_2d,          lambda t: [medium_2d(t)],                         'positive'      ),
     ('is_set_to',     medium_2d,          lambda t: [medium_2d(t)],                                         ),
     # TODO: positive case
-    ('is_size',       medium_2d,          lambda t: [torch.LongStorage((M, M))],                            ),
     ('kthvalue',      small_3d_unique,    lambda t: [3],                                                    ),
     ('kthvalue',      small_3d_unique,    lambda t: [3, 1],                                 'dim'           ),
     ('lerp',          small_3d,           lambda t: [small_3d(t), 0.3],                                     ),
@@ -396,10 +395,11 @@ class TestCuda(TestCase):
         y = torch.randn(2, 5).cuda(1)
         result = comm.gather((x, y), dim)
 
-        expected_size = x.size()
+        expected_size = list(x.size())
         expected_size[dim] += y.size(dim)
+        expected_size = torch.Size(expected_size)
         self.assertEqual(result.get_device(), 0)
-        self.assertTrue(result.is_size(expected_size))
+        self.assertEqual(result.size(), expected_size)
 
         index = [slice(None, None), slice(None, None)]
         index[dim] = slice(0, x.size(dim))

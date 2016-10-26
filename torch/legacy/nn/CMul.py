@@ -9,13 +9,10 @@ class CMul(Module):
     def __init__(self, *args):
         super(CMul, self).__init__()
 
-        self.size = torch.LongStorage()
-        if len(args) == 1 and torch.type(args[0]) == 'torch.LongStorage':
-            self.size.resize_(arg[0].size()).copy_(arg[0])
+        if len(args) == 1 and isinstance(args[0], torch.Size):
+            self.size = args[0]
         else:
-            self.size.resize_(len(args))
-            for i, arg in enumerate(args):
-                    self.size[i] = arg
+            self.size = torch.Size(args)
 
         self.weight = torch.Tensor(self.size)
         self.gradWeight = torch.Tensor(self.size)
@@ -120,4 +117,3 @@ class CMul(Module):
            '_sum',
         ])
         return super(CMul, self).clearState()
-

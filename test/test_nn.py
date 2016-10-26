@@ -474,7 +474,7 @@ class TestNN(NNTestCase):
             Variable(torch.randn(2, 4).cuda(1))
         )
         result = dp.gather(inputs, output_device)
-        self.assertEqual(result.size().tolist(), [4, 4])
+        self.assertEqual(result.size(), torch.Size([4, 4]))
         self.assertEqual(result[:2], inputs[0])
         self.assertEqual(result[2:], inputs[1])
         if output_device != -1:

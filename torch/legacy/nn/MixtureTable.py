@@ -2,14 +2,15 @@ import torch
 from .Module import Module
 from .utils import clear, recursiveResizeAs
 
+
 class MixtureTable(Module):
 
     def __init__(self, dim=1):
         super(MixtureTable, self).__init__()
         self.dim = dim
-        self.size = torch.LongStorage()
+        self.size = torch.Size()
+        self.size2 = torch.Size()
         self.batchSize = 0
-        self.size2 = torch.LongStorage()
         self.backwardSetup = False
         self.gradInput = []
 
@@ -39,11 +40,11 @@ class MixtureTable(Module):
 
             expertInput = expertInputs[0]
             if self.batchSize != batchSize:
-                self.size.resize_(expertInput.dim()+1).fill_(1)
+                size = [1] * (expertInput.dim()+1)
                 if self.dimG > 0:
-                    self.size[0] = gaterInput.size(0)
-
-                self.size[self.dim] = gaterInput.size(self.dimG)
+                    size[0] = gaterInput.size(0)
+                size[self.dim] = gaterInput.size(self.dimG)
+                self.size = torch.Size(size)
                 self.output.resize_as_(expertInput)
                 self.backwardSetup = False
                 self.batchSize = batchSize
@@ -56,11 +57,11 @@ class MixtureTable(Module):
                 self.output.addcmul_(expertInput, gate)
         else:
             if self.batchSize != batchSize:
-                self.size.resize_(expertInputs.dim()).fill_(1)
+                size = [1] * expertInputs.dim()
                 if self.dimG > 0:
-                    self.size[0] = gaterInput.size(0)
-
-                self.size[self.dim] = gaterInput.size(self.dimG)
+                    size[0] = gaterInput.size(0)
+                size[self.dim] = gaterInput.size(self.dimG)
+                self.size = torch.Size(size)
                 self.output.resize_as_(expertInputs.select(self.dim, 0))
                 self.batchSize = batchSize
                 self.backwardSetup = False
@@ -71,7 +72,6 @@ class MixtureTable(Module):
             self.output.resize_as_(expertInputs.select(self.dim, 0))
 
         return self.output
-
 
     def updateGradInput(self, input, gradOutput):
         gaterInput, expertInputs = input
@@ -114,14 +114,14 @@ class MixtureTable(Module):
                 expertGradInput.mul_(gate, gradOutput)
         else:
             if not self.backwardSetup:
-                self.size2.resize_(expertInputs.dim())
-                self.size2.copy_(expertInputs.size())
-                self.size2[self.dim] = 1
+                size2 = list(expertInputs.size())
+                size2[self.dim] = 1
+                self.size2 = torch.Size(size2)
                 gaterGradInput.resize_as_(gaterInput)
                 self.backwardSetup = True
 
             # gater updateGradInput
-            self._expertView = gradOutput.view(self.size2)
+            self._expertView = gradOutput.view(torch.Size(self.size2))
             gradOutput = self._expertView.expand_as(expertInputs)
             torch.mul(self._expert, gradOutput, expertInputs)
             expert = self._expert.transpose(self.dim, self.dimG)
@@ -134,7 +134,6 @@ class MixtureTable(Module):
             else:
                 self._expertView2 = expert.view(gaterInput.size(0), gaterInput.size(1), -1)
 
-
             torch.sum(gaterGradInput, self._expertView2, self.dimG+1)
             gaterGradInput.resize_as_(gaterInput)
 
@@ -142,7 +141,6 @@ class MixtureTable(Module):
             torch.mul(expertGradInputs, self._gaterView.expand_as(expertInputs), gradOutput)
 
         return self.gradInput
-
 
     def type(self, type, tensorCache=None):
         self._gaterView = None
@@ -152,7 +150,6 @@ class MixtureTable(Module):
         self._expert2 = None
         self._expertView2 = None
         return super(MixtureTable, self).type(type, tensorCache)
-
 
     def clearState(self, ):
         clear(self, [
@@ -164,4 +161,3 @@ class MixtureTable(Module):
           '_expertView2',
         ])
         return super(MixtureTable, self).clearState()
-
