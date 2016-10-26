@@ -7,6 +7,9 @@
 /* Level 1 */
 THC_API float THCudaBlas_Sdot(THCState *state, long n, float *x, long incx, float *y, long incy);
 THC_API double THCudaBlas_Ddot(THCState *state, long n, double *x, long incx, double *y, long incy);
+#ifdef CUDA_HALF_TENSOR
+THC_API half THCudaBlas_Hdot(THCState *state, long n, half *x, long incx, half *y, long incy);
+#endif
 
 /* Level 2 */
 THC_API void THCudaBlas_Sgemv(THCState *state, char trans, long m, long n, float alpha, float *a, long lda, float *x, long incx, float beta, float *y, long incy);

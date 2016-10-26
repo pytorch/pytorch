@@ -5,7 +5,7 @@
 THC_API real
 THCTensor_(dot)(THCState *state, THCTensor *self, THCTensor *src)
 {
-#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
+#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
   THAssert(THCTensor_(checkGPU)(state, 2, self, src));
   THArgCheck(THCTensor_(nElement)(state, self) ==
              THCTensor_(nElement)(state, src), 2, "sizes do not match");
@@ -20,6 +20,11 @@ THCTensor_(dot)(THCState *state, THCTensor *self, THCTensor *src)
                                 THCTensor_(data)(state, src), 1);
 #elif defined(THC_REAL_IS_DOUBLE)
   real result = THCudaBlas_Ddot(state,
+                                THCTensor_(nElement)(state, self),
+                                THCTensor_(data)(state, self), 1,
+                                THCTensor_(data)(state, src), 1);
+#elif defined(THC_REAL_IS_HALF)
+  real result = THCudaBlas_Hdot(state,
                                 THCTensor_(nElement)(state, self),
                                 THCTensor_(data)(state, self), 1,
                                 THCTensor_(data)(state, src), 1);

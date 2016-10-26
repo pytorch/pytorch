@@ -48,6 +48,36 @@ double THCudaBlas_Ddot(THCState *state, long n, double *x, long incx, double *y,
   return 0;
 }
 
+#ifdef CUDA_HALF_TENSOR
+half THCudaBlas_Hdot(THCState *state, long n, half *x, long incx, half *y, long incy)
+{
+#if CUDA_VERSION >= 8000
+  if (n == 1) {
+    incx = 1;
+    incy = 1;
+  }
+
+  if ((n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX)) {
+    int i_n = (int)n;
+    int i_incx = (int)incx;
+    int i_incy = (int)incy;
+    half result;
+    cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
+    cublasSetStream(handle, THCState_getCurrentStream(state));
+    THCublasCheck(cublasDotEx(handle, i_n, x, CUDA_R_16F, i_incx, y, CUDA_R_16F, i_incy, &result, CUDA_R_16F, CUDA_R_32F));
+    return result;
+}
+
+  THError("Cublas_Hdot only supports n, incx and incy "
+          "up to signed integer limits: %d", INT_MAX);
+  return THC_float2half(0);
+#else
+  THError("Cublas_Hdot requires CUDA 8.0+");
+  return THC_float2half(0);
+#endif
+}
+#endif
+
 /* Level 2 */
 void THCudaBlas_Sgemv(THCState *state, char trans, long m, long n, float alpha, float *a, long lda, float *x, long incx, float beta, float *y, long incy)
 {
