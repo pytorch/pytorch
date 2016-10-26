@@ -119,13 +119,19 @@ void THSTensor_(sspaddmm)(THSTensor *r_,
   r_nnz = nnz * dim_k + t_nnz;
   newi = THLongTensor_newWithSize2d(2, r_nnz);
   newv = THTensor_(newWithSize1d)(r_nnz);
-  narrowi = THLongTensor_newNarrow(newi, 1, 0, t_nnz);
-  narrowv = THTensor_(newNarrow)(newv, 0, 0, t_nnz);
   THTensor_(zero)(newv);
 
-  THLongTensor_copy(narrowi, THSTensor_(indices)(t));
-  THTensor_(copy)(narrowv, THSTensor_(values)(t));
-  THTensor_(mul)(newv, newv, beta);
+  if (t_nnz != 0) {
+    narrowi = THLongTensor_newNarrow(newi, 1, 0, t_nnz);
+    narrowv = THTensor_(newNarrow)(newv, 0, 0, t_nnz);
+
+    THLongTensor_copy(narrowi, THSTensor_(indices)(t));
+    THTensor_(copy)(narrowv, THSTensor_(values)(t));
+    THTensor_(mul)(newv, newv, beta);
+
+    THFree(narrowi);
+    THFree(narrowv);
+  }
 
   // sparse = sparse * dense
   p = t_nnz;
@@ -167,8 +173,6 @@ void THSTensor_(sspaddmm)(THSTensor *r_,
   THFree(csr);
   THFree(indices);
   THFree(values);
-  THFree(narrowi);
-  THFree(narrowv);
 }
 
 void THSTensor_(spcadd)(THTensor *r_, THTensor *dense, real value, THSTensor *sparse) {

@@ -41,6 +41,8 @@ bool THSPModule_isSparseTensor(PyObject *obj)
   return PyObject_Call(method, args, NULL);                                    \
 }
 
+IMPLEMENT_SPARSE_STATELESS(spmm);
+IMPLEMENT_SPARSE_STATELESS(sspmm);
 IMPLEMENT_SPARSE_STATELESS(spaddmm);
 IMPLEMENT_SPARSE_STATELESS(sspaddmm);
 IMPLEMENT_SPARSE_STATELESS(spadd);

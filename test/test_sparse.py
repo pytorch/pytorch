@@ -154,6 +154,10 @@ class TestSparse(TestCase):
             res = sparse.addmm(t, x, y)
             self.assertEqual(res, expected)
 
+            expected = torch.mm(x.to_dense(), y)
+            res = sparse.mm(x, y)
+            self.assertEqual(res, expected)
+
         test_shape(10, 100, 100)
         test_shape(100, 1000, 200)
         test_shape(64, 10000, 300)
@@ -172,6 +176,10 @@ class TestSparse(TestCase):
 
             expected = torch.addmm(t.to_dense(), x.to_dense(), y)
             res = sparse.saddmm(t, x, y)
+            self.assertEqual(res.to_dense(), expected)
+
+            expected = torch.mm(x.to_dense(), y)
+            res = sparse.smm(x, y)
             self.assertEqual(res.to_dense(), expected)
 
         test_shape(7, 5, 3)
