@@ -16,6 +16,14 @@ class THPPlugin(CWrapPlugin):
         'THLongStorage*':   Template('((THPLongStorage*)$arg)->cdata'),
         'THStorage*':       Template('((THPStorage*)$arg)->cdata'),
         'THGenerator*':     Template('((THPGenerator*)$arg)->cdata'),
+        'THSFloatTensor*':  Template('((THSPFloatTensor*)$arg)->cdata'),
+        'THSDoubleTensor*': Template('((THSPDoubleTensor*)$arg)->cdata'),
+        'THSLongTensor*':   Template('((THSPLongTensor*)$arg)->cdata'),
+        'THSIntTensor*':    Template('((THSPIntTensor*)$arg)->cdata'),
+        'THSTensor*':       Template('((THSPTensor*)$arg)->cdata'),
+        'THSBoolTensor*':   Template('((THSPBoolTensor*)$arg)->cdata'),
+        'THSIndexTensor*':  Template('((THSPIndexTensor*)$arg)->cdata'),
+        'THSLongStorage*':  Template('((THSPLongStorage*)$arg)->cdata'),
         'void*':            Template('THPUtils_unpackLong($arg)'),
         'long':             Template('THPUtils_unpackLong($arg)'),
         'int':              Template('THPUtils_unpackLong($arg)'),
@@ -38,6 +46,14 @@ class THPPlugin(CWrapPlugin):
         'THLongStorage*':   Template('(PyObject*)Py_TYPE($arg) == THPLongStorageClass'),
         'THStorage*':       Template('(PyObject*)Py_TYPE($arg) == THPStorageClass'),
         'THGenerator*':     Template('(PyObject*)Py_TYPE($arg) == THPGeneratorClass'),
+        'THSDoubleTensor*': Template('(PyObject*)Py_TYPE($arg) == THSPDoubleTensorClass'),
+        'THSFloatTensor*':  Template('(PyObject*)Py_TYPE($arg) == THSPFloatTensorClass'),
+        'THSLongTensor*':   Template('(PyObject*)Py_TYPE($arg) == THSPLongTensorClass'),
+        'THSIntTensor*':    Template('(PyObject*)Py_TYPE($arg) == THSPIntTensorClass'),
+        'THSTensor*':       Template('(PyObject*)Py_TYPE($arg) == THSPTensorClass'),
+        'THSBoolTensor*':   Template('(PyObject*)Py_TYPE($arg) == THSPBoolTensorClass'),
+        'THSIndexTensor*':  Template('(PyObject*)Py_TYPE($arg) == THSPIndexTensorClass'),
+        'THSLongStorage*':  Template('(PyObject*)Py_TYPE($arg) == THSPLongStorageClass'),
         'void*':            Template('THPUtils_checkLong($arg)'),
         'long':             Template('THPUtils_checkLong($arg)'),
         'int':              Template('THPUtils_checkLong($arg)'),
@@ -52,6 +68,8 @@ class THPPlugin(CWrapPlugin):
     RETURN_WRAPPER = {
         'THTensor*':        Template('return THPTensor_(New)($result);'),
         'THLongStorage*':   Template('return THPLongStorage_New($result);'),
+        'THSTensor*':       Template('return THSPTensor_(New)($result);'),
+        'THLongTensor*':    Template('return THPLongTensor_New($result);'),
         # TODO: make it smarter - it should return python long if result doesn't fit into an int
         'long':             Template('return PyInt_FromLong($result);'),
         # TODO
@@ -59,13 +77,6 @@ class THPPlugin(CWrapPlugin):
         'self':             Template('Py_INCREF(self);\nreturn (PyObject*)self;'),
         'real':             Template('return THPUtils_(newReal)($result);'),
     }
-
-    TENSOR_METHODS_DECLARATION = Template("""
-static PyMethodDef THPTensor_$stateless(methods)[] = {
-$methods
-  {NULL}
-};
-""")
 
     WRAPPER_TEMPLATE = Template("""\
 PyObject * $name(PyObject *self, PyObject *args, PyObject *kwargs)
@@ -137,6 +148,14 @@ PyObject * $name(PyObject *self, PyObject *args, PyObject *kwargs)
         return NULL;
       _t_$name.release();
 """),
+    'THSTensor*':        Template("""\
+        THSTensorPtr _th_$name = THSTensor_(new)(LIBRARY_STATE_NOARGS);
+        THSPTensorPtr _${name}_guard = (THSPTensor*)THSPTensor_(New)(_th_$name.get());
+        THSPTensor* $name = _${name}_guard.get();
+        if (!$name)
+            return NULL;
+        _th_$name.release();
+"""),
     }
 
     RELEASE_ARG = Template("_${name}_guard.release();")
@@ -152,6 +171,7 @@ PyObject * $name(PyObject *self, PyObject *args, PyObject *kwargs)
         'THIndexTensor*': '" THPModuleStr "LongTensor',
         'THFloatTensor*': '" THPModuleStr "FloatTensor',
         'THDoubleTensor*': '" THPModuleStr "DoubleTensor',
+        'THSTensor*': '" THSPTensorStr "',
         'long': 'int',
         'real': '" RealStr "',
         'double': 'float',
@@ -159,9 +179,18 @@ PyObject * $name(PyObject *self, PyObject *args, PyObject *kwargs)
         'bool': 'bool',
     }
 
-    def __init__(self):
+    def __init__(self, sparse=False):
+        self.TH_prefix = "THS" if sparse else "TH"
         self.declarations = []
         self.stateless_declarations = []
+
+        # Remember {{ literal is just a single { in python string templates
+        self.TENSOR_METHODS_DECLARATION = Template("""
+static PyMethodDef {}PTensor_$stateless(methods)[] = {{
+$methods
+{{NULL}}
+}};
+""".format(self.TH_prefix))
 
     def get_type_unpack(self, arg, option):
         return self.TYPE_UNPACK.get(arg['type'], None)
@@ -219,9 +248,9 @@ PyObject * $name(PyObject *self, PyObject *args, PyObject *kwargs)
                 continue
 
             self.declarations.append(declaration)
-            declaration['name'] = 'THPTensor_({})'.format(declaration['name'])
+            declaration['name'] = '{}PTensor_({})'.format(self.TH_prefix, declaration['name'])
             for option in declaration['options']:
-                option['cname'] = 'THTensor_({})'.format(option['cname'])
+                option['cname'] = '{}Tensor_({})'.format(self.TH_prefix, option['cname'])
                 for arg in option['arguments']:
                     if arg['name'] == 'self':
                         arg['ignore_check'] = True
@@ -243,10 +272,10 @@ PyObject * $name(PyObject *self, PyObject *args, PyObject *kwargs)
         return all_declarations
 
     def make_stateless(self, declaration):
-        declaration['name'] = 'THPTensor_stateless_({})'.format(declaration['name'])
+        declaration['name'] = '{}PTensor_stateless_({})'.format(self.TH_prefix, declaration['name'])
         new_options = []
         for option in declaration['options']:
-            option['cname'] = 'THTensor_({})'.format(option['cname'])
+            option['cname'] = '{}Tensor_({})'.format(self.TH_prefix, option['cname'])
             allocated = []
             for i, arg in enumerate(option['arguments']):
                 if 'allocate' in arg and arg['allocate']:

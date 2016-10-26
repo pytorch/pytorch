@@ -32,6 +32,7 @@
 #include "allocators.h"
 
 #include "autograd/autograd.h"
+PyObject * THSPModule_initExtension(PyObject *self);
 #endif
 
 #endif

@@ -577,6 +577,12 @@ extern PyObject * THCPModule_cudaHostAllocator(PyObject *_unused);
 extern PyObject * THCPModule_cudaSynchronize(PyObject *_unused);
 #endif
 
+extern PyObject * THSPModule_spaddmm(PyObject *_unused, PyObject *args);
+extern PyObject * THSPModule_spmm(PyObject *_unused, PyObject *args);
+extern PyObject * THSPModule_sspaddmm(PyObject *_unused, PyObject *args);
+extern PyObject * THSPModule_sspmm(PyObject *_unused, PyObject *args);
+extern PyObject * THSPModule_spadd(PyObject *_unused, PyObject *args);
+
 static PyMethodDef TorchMethods[] = {
   {"_initExtension",  (PyCFunction)THPModule_initExtension,     METH_O,  NULL},
   {"_autograd_init",  (PyCFunction)THPAutograd_initExtension,   METH_NOARGS,  NULL},
@@ -599,6 +605,15 @@ static PyMethodDef TorchMethods[] = {
   {"_cuda_cudaHostAllocator", (PyCFunction)THCPModule_cudaHostAllocator, METH_NOARGS, NULL},
   {"_cuda_synchronize", (PyCFunction)THCPModule_cudaSynchronize, METH_NOARGS, NULL},
 #endif
+  {"_sparse_init",      (PyCFunction)THSPModule_initExtension,  METH_NOARGS,  NULL},
+  // _spfunc_(name) prefixed functions will be put in sparse.name
+  {"_spfunc_mm",        (PyCFunction)THSPModule_spmm,           METH_VARARGS,  NULL},
+  {"_spfunc_smm",       (PyCFunction)THSPModule_sspmm,          METH_VARARGS,  NULL},
+  {"_spfunc_addmm",     (PyCFunction)THSPModule_spaddmm,        METH_VARARGS,  NULL},
+  {"_spfunc_saddmm",    (PyCFunction)THSPModule_sspaddmm,       METH_VARARGS,  NULL},
+  {"_spfunc_add",       (PyCFunction)THSPModule_spadd,          METH_VARARGS,  NULL},
+
+
   {"_safe_call",      (PyCFunction)THPModule_safeCall,          METH_VARARGS | METH_KEYWORDS, NULL},
   {"_sendfd",         (PyCFunction)THPModule_sendfd,            METH_VARARGS, NULL},
   {"_recvfd",         (PyCFunction)THPModule_recvfd,            METH_VARARGS, NULL},
@@ -795,6 +810,8 @@ bool THCPByteTensor_init(PyObject *module);
 
 bool THCPStream_init(PyObject *module);
 
+bool THSPModule_initSparse(PyObject *module);
+
 #if PY_MAJOR_VERSION == 2
 PyMODINIT_FUNC init_C()
 #else
@@ -834,6 +851,8 @@ PyMODINIT_FUNC PyInit__C()
   ASSERT_TRUE(THPShortTensor_init(module));
   ASSERT_TRUE(THPCharTensor_init(module));
   ASSERT_TRUE(THPByteTensor_init(module));
+
+  THSPModule_initSparse(module);
 
 #ifdef WITH_CUDA
   // This will only initialise base classes and attach them to library namespace

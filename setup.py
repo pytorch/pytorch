@@ -85,6 +85,9 @@ class build_ext(setuptools.command.build_ext.build_ext):
             AutoGPU(condition='IS_CUDA'), THPLongArgsPlugin(), BoolOption(),
             THPPlugin(), ArgcountSortPlugin(), KwargsPlugin(),
         ])
+        cwrap('torch/csrc/sparse/generic/TensorMethods.cwrap', plugins=[
+            THPLongArgsPlugin(), THPPlugin(sparse=True), ArgcountSortPlugin(),
+        ])
         # It's an old-style class in Python 2.7...
         setuptools.command.build_ext.build_ext.run(self)
 
@@ -113,7 +116,7 @@ class clean(distutils.command.clean.clean):
                         os.remove(filename)
                     except OSError:
                         shutil.rmtree(filename, ignore_errors=True)
-                        
+
         # It's an old-style class in Python 2.7...
         distutils.command.clean.clean.run(self)
 
@@ -145,7 +148,7 @@ include_dirs += [
 extra_link_args.append('-L' + lib_path)
 
 main_compile_args = ['-D_THP_CORE']
-main_libraries = ['TH', 'shm']
+main_libraries = ['TH', 'THS', 'shm']
 main_sources = [
     "torch/csrc/Module.cpp",
     "torch/csrc/Generator.cpp",
@@ -160,6 +163,11 @@ main_sources = [
     "torch/csrc/autograd/variable.cpp",
     "torch/csrc/autograd/function.cpp",
     "torch/csrc/autograd/engine.cpp",
+
+    # Sparse Tensors
+    "torch/csrc/sparse/Tensor.cpp",
+    "torch/csrc/sparse/Module.cpp",
+    "torch/csrc/sparse/utils.cpp",
 ]
 
 try:
@@ -263,6 +271,8 @@ setup(name="torch", version="0.1",
         'lib/torch_shm_manager',
         'lib/*.h',
         'lib/include/TH/*.h', 'lib/include/TH/generic/*.h',
-        'lib/include/THC/*.h', 'lib/include/THC/generic/*.h']},
+        'lib/include/THC/*.h', 'lib/include/THC/generic/*.h',
+        'lib/include/THS/*.h', 'lib/include/THS/generic/*.h',
+    ]},
     install_requires=['pyyaml'],
 )
