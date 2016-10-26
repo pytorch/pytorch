@@ -78,52 +78,6 @@ TH_API void THNN_CudaTemporalMaxPooling_updateGradInput(
           THCIndexTensor *indices,
           int kW, int dW);
 
-TH_API void THNN_CudaSparseLinear_updateOutput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *output,
-          THCudaTensor *weight,
-          THCudaTensor *bias);
-TH_API void THNN_CudaSparseLinear_accGradParameters(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *gradOutput,
-          THCudaTensor *gradWeight,
-          THCudaTensor *gradBias,
-          THCudaTensor *weight,
-          THCudaTensor *bias,
-          double weightDecay,
-          double scale);
-TH_API void THNN_CudaSparseLinear_legacyUpdateOutput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *output,
-          THCudaTensor *weight,
-          THCudaTensor *bias);
-TH_API void THNN_CudaSparseLinear_legacyAccGradParameters(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *gradOutput,
-          THCudaTensor *gradWeight,
-          THCudaTensor *gradBias,
-          THCudaTensor *weight,
-          THCudaTensor *bias,
-          double weightDecay,
-          double scale);
-TH_API void THNN_CudaSparseLinear_zeroGradParameters(
-          THCState *state,
-          THCudaTensor *gradWeight,
-          THCudaTensor *gradBias,
-          THCudaTensor *lastInput);
-TH_API void THNN_CudaSparseLinear_updateParameters(
-          THCState *state,
-          THCudaTensor *weight,
-          THCudaTensor *bias,
-          THCudaTensor *gradWeight,
-          THCudaTensor *gradBias,
-          THCudaTensor *lastInput,
-          double learningRate);
-
 TH_API void THNN_CudaBatchNormalization_updateOutput(
           THCState *state,
           THCudaTensor *input,

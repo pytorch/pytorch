@@ -265,6 +265,57 @@ TH_API void THNN_(SmoothL1Criterion_updateGradInput)(
                   THCTensor *gradInput,
                   bool sizeAverage);
 
+TH_API void THNN_(SparseLinear_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *output,
+                  THCTensor *weight,
+                  THCTensor *bias);
+
+TH_API void THNN_(SparseLinear_accGradParameters)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *gradOutput,
+                  THCTensor *gradWeight,
+                  THCTensor *gradBias,
+                  THCTensor *weight,
+                  THCTensor *bias,
+                  double weightDecay,
+                  double scale);
+
+TH_API void THNN_(SparseLinear_legacyUpdateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *output,
+                  THCTensor *weight,
+                  THCTensor *bias);
+
+TH_API void THNN_(SparseLinear_legacyAccGradParameters)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *gradOutput,
+                  THCTensor *gradWeight,
+                  THCTensor *gradBias,
+                  THCTensor *weight,
+                  THCTensor *bias,
+                  double weightDecay,
+                  double scale);
+
+TH_API void THNN_(SparseLinear_zeroGradParameters)(
+                  THCState *state,
+                  THCTensor *gradWeight,
+                  THCTensor *gradBias,
+                  THCTensor *lastInput);
+
+TH_API void THNN_(SparseLinear_updateParameters)(
+                  THCState *state,
+                  THCTensor *weight,
+                  THCTensor *bias,
+                  THCTensor *gradWeight,
+                  THCTensor *gradBias,
+                  THCTensor *lastInput,
+                  double learningRate);
+
 TH_API void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
                   THCState *state,
                   THCTensor *input,
