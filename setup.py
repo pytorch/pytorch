@@ -11,6 +11,7 @@ import os
 
 # TODO: make this more robust
 WITH_CUDA = os.path.exists('/Developer/NVIDIA/CUDA-7.5/include') or os.path.exists('/usr/local/cuda/include')
+WITH_CUDNN = WITH_CUDA
 DEBUG = False
 
 ################################################################################
@@ -81,9 +82,14 @@ class build_ext(setuptools.command.build_ext.build_ext):
         from tools.cwrap.plugins.AutoGPU import AutoGPU
         from tools.cwrap.plugins.BoolOption import BoolOption
         from tools.cwrap.plugins.KwargsPlugin import KwargsPlugin
+        from tools.cwrap.plugins.NullableArguments import NullableArguments
+        from tools.cwrap.plugins.CuDNNPlugin import CuDNNPlugin
         cwrap('torch/csrc/generic/TensorMethods.cwrap', plugins=[
             AutoGPU(condition='IS_CUDA'), THPLongArgsPlugin(), BoolOption(),
             THPPlugin(), ArgcountSortPlugin(), KwargsPlugin(),
+        ])
+        cwrap('torch/csrc/cudnn/cuDNN.cwrap', plugins=[
+            CuDNNPlugin(), NullableArguments()
         ])
         # It's an old-style class in Python 2.7...
         setuptools.command.build_ext.build_ext.run(self)
@@ -191,6 +197,18 @@ if WITH_CUDA:
         "torch/csrc/cuda/utils.cpp",
         "torch/csrc/cuda/serialization.cpp",
     ]
+
+if WITH_CUDNN:
+    main_libraries += ['cudnn']
+    main_sources += [
+        "torch/csrc/cudnn/Module.cpp",
+        "torch/csrc/cudnn/Conv.cpp",
+        "torch/csrc/cudnn/cuDNN.cpp",
+        "torch/csrc/cudnn/Types.cpp",
+        "torch/csrc/cudnn/Handles.cpp",
+        "torch/csrc/cudnn/CppWrapper.cpp",
+    ]
+    extra_compile_args += ['-DWITH_CUDNN']
 
 if DEBUG:
     extra_compile_args += ['-O0', '-g']

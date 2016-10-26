@@ -7,6 +7,10 @@
 #include <libshm.h>
 #include <TH/TH.h>
 
+#ifdef WITH_CUDNN
+#include "cudnn/Module.h"
+#endif
+
 #define WITH_NUMPY_IMPORT_ARRAY
 #include "THP.h"
 
@@ -749,16 +753,6 @@ static PyMethodDef TorchMethods[] = {
   {NULL, NULL, 0, NULL}
 };
 
-#if PY_MAJOR_VERSION != 2
-static struct PyModuleDef torchmodule = {
-   PyModuleDef_HEAD_INIT,
-   "torch._C",
-   NULL,
-   -1,
-   TorchMethods
-};
-#endif
-
 static void errorHandler(const char *msg, void *data)
 {
   throw THException(msg);
@@ -795,6 +789,8 @@ bool THCPByteTensor_init(PyObject *module);
 
 bool THCPStream_init(PyObject *module);
 
+static std::vector<PyMethodDef> methods;
+
 #if PY_MAJOR_VERSION == 2
 PyMODINIT_FUNC init_C()
 #else
@@ -808,9 +804,21 @@ PyMODINIT_FUNC PyInit__C()
 #define ASSERT_TRUE(cmd) if (!(cmd)) return NULL
 #endif
 
+  THPUtils_addPyMethodDefs(methods, TorchMethods);
+#ifdef WITH_CUDNN
+  THPUtils_addPyMethodDefs(methods, THCUDNN_methods());
+#endif
+
 #if PY_MAJOR_VERSION == 2
-  ASSERT_TRUE(module = Py_InitModule("torch._C", TorchMethods));
+  ASSERT_TRUE(module = Py_InitModule("torch._C", methods.data()));
 #else
+  static struct PyModuleDef torchmodule = {
+     PyModuleDef_HEAD_INIT,
+     "torch._C",
+     NULL,
+     -1,
+     methods.data()
+  };
   ASSERT_TRUE(module = PyModule_Create(&torchmodule));
 #endif
   ASSERT_TRUE(THPGenerator_init(module));
@@ -860,6 +868,10 @@ PyMODINIT_FUNC PyInit__C()
   ASSERT_TRUE(THCPByteTensor_init(module));
 
   ASSERT_TRUE(THCPStream_init(module));
+#endif
+
+#ifdef WITH_CUDNN
+  ASSERT_TRUE(THCUDNNModule_initModule(module));
 #endif
 
   THPDefaultGenerator = (THPGenerator*)THPGenerator_New();

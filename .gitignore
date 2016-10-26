@@ -10,6 +10,7 @@ torch/lib/build
 torch/lib/tmp_install
 torch/lib/include
 torch/lib/torch_shm_manager
+torch/csrc/cudnn/cuDNN.cpp
 torch/csrc/nn/THNN.cwrap
 torch/csrc/nn/THNN.cpp
 torch/csrc/nn/THCUNN.cwrap

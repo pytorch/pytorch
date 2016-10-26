@@ -55,6 +55,21 @@ void THPUtils_setError(const char *format, ...)
   PyErr_SetString(PyExc_RuntimeError, buffer);
 }
 
+void THPUtils_addPyMethodDefs(std::vector<PyMethodDef>& vector, PyMethodDef* methods)
+{
+  if (!vector.empty()) {
+    // remove NULL terminator
+    vector.pop_back();
+  }
+  while (1) {
+    vector.push_back(*methods);
+    if (!methods->ml_name) {
+      break;
+    }
+    methods++;
+  }
+}
+
 std::string _THPUtils_typename(PyObject *object)
 {
   std::string type_name = Py_TYPE(object)->tp_name;
