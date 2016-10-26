@@ -88,7 +88,7 @@ class TestCase(unittest.TestCase):
 
         if torch.is_tensor(x) and torch.is_tensor(y):
             max_err = 0
-            super(TestCase, self).assertEqual(x.size().tolist(), y.size().tolist())
+            super(TestCase, self).assertEqual(x.size(), y.size())
             for index in iter_indices(x):
                 max_err = max(max_err, abs(x[index] - y[index]))
             self.assertLessEqual(max_err, prec, message)

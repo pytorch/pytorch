@@ -12,30 +12,21 @@ class Replicate(Module):
     def updateOutput(self, input):
         assert self.dim < input.dim()
 
-        sz = torch.LongStorage(input.dim()+1)
-        sz[self.dim] = self.nfeatures
-        for i in range(input.dim()):
-            offset = 1 if i >= self.dim else 0
-            sz[i+offset] = input.size(i)
+        size = list(input.size())
+        size.insert(self.dim, self.nfeatures)
 
-        st = torch.LongStorage(input.dim()+1)
-        st[self.dim] = 0
-        for i in range(input.dim()):
-            offset = 1 if i >= self.dim else 0
-            st[i+offset] = input.stride(i)
+        stride = list(input.stride())
+        stride.insert(self.dim, 0)
 
-        self.output.set_(input.storage(), input.storage_offset(), sz, st)
+        self.output.set_(input.storage(), input.storage_offset(),
+                         torch.Size(size), tuple(stride))
         return self.output
 
     def updateGradInput(self, input, gradOutput):
         self.gradInput.resize_as_(input).zero_()
-        sz = torch.LongStorage(input.dim()+1)
-        sz[self.dim] = 1
-        for i in range(input.dim()):
-           offset = 1 if i >= self.dim else 0
-           sz[i+offset] = input.size(i)
+        size = list(input.size())
+        size.insert(self.dim, 1)
 
-        gradInput = self.gradInput.view(sz)
+        gradInput = self.gradInput.view(*size)
         torch.sum(gradInput, gradOutput, self.dim)
         return self.gradInput
-

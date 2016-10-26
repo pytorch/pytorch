@@ -102,28 +102,12 @@ def addSingletondimension(*args):
     view = None
     if len(args) < 3:
         t, dim = args
+        return t.unsqueeze(dim)
     else:
         view, t, dim = args
         assert torch.is_tensor(view)
-
-    assert torch.is_tensor(t)
-
-    if view is None:
-        view = t.new()
-    size = torch.LongStorage(t.dim() + 1)
-    stride = torch.LongStorage(t.dim() + 1)
-
-    for d in range(dim):
-        size[d] = t.size(d)
-        stride[d] = t.stride(d)
-    size[dim] = 1
-    stride[dim] = 1
-    for d in range(dim+1, t.dim()+1):
-        size[d] = t.size(d - 1)
-        stride[d] = t.stride(d - 1)
-
-    view.set_(t.storage(), t.storage_offset(), size, stride)
-    return view
+        view.set_(t)
+        return view.unsqueeze_(dim)
 
 def contiguousView(output, input, *args):
     output = output or input.new()
@@ -154,4 +138,3 @@ def clear(self, *args):
     for key in args:
         _clear(key)
     return self
-

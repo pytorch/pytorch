@@ -77,7 +77,6 @@ class build_ext(setuptools.command.build_ext.build_ext):
         # cwrap depends on pyyaml, so we can't import it earlier
         from tools.cwrap import cwrap
         from tools.cwrap.plugins.THPPlugin import THPPlugin
-        from tools.cwrap.plugins.THPLongArgsPlugin import THPLongArgsPlugin
         from tools.cwrap.plugins.ArgcountSortPlugin import ArgcountSortPlugin
         from tools.cwrap.plugins.AutoGPU import AutoGPU
         from tools.cwrap.plugins.BoolOption import BoolOption
@@ -85,8 +84,8 @@ class build_ext(setuptools.command.build_ext.build_ext):
         from tools.cwrap.plugins.NullableArguments import NullableArguments
         from tools.cwrap.plugins.CuDNNPlugin import CuDNNPlugin
         cwrap('torch/csrc/generic/TensorMethods.cwrap', plugins=[
-            AutoGPU(condition='IS_CUDA'), THPLongArgsPlugin(), BoolOption(),
-            THPPlugin(), ArgcountSortPlugin(), KwargsPlugin(),
+            AutoGPU(condition='IS_CUDA'), BoolOption(), THPPlugin(),
+            ArgcountSortPlugin(), KwargsPlugin(),
         ])
         cwrap('torch/csrc/cudnn/cuDNN.cwrap', plugins=[
             CuDNNPlugin(), NullableArguments()
@@ -119,7 +118,7 @@ class clean(distutils.command.clean.clean):
                         os.remove(filename)
                     except OSError:
                         shutil.rmtree(filename, ignore_errors=True)
-                        
+
         # It's an old-style class in Python 2.7...
         distutils.command.clean.clean.run(self)
 
@@ -155,6 +154,7 @@ main_libraries = ['TH', 'shm']
 main_sources = [
     "torch/csrc/Module.cpp",
     "torch/csrc/Generator.cpp",
+    "torch/csrc/Size.cpp",
     "torch/csrc/Exceptions.cpp",
     "torch/csrc/Tensor.cpp",
     "torch/csrc/Storage.cpp",

@@ -42,7 +42,7 @@ class OldModuleTest(ModuleTest):
 # TODO: hessian tests
 tests = [
     OldModuleTest(nn.Add,
-                    (torch.LongStorage([5, 4]),),
+                    (torch.Size([5, 4]),),
                     input_size=(3, 5, 4),
                     desc='3D'),
     OldModuleTest(nn.Add,

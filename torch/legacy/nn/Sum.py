@@ -2,11 +2,12 @@ import torch
 from .Module import Module
 from .utils import clear
 
+
 class Sum(Module):
 
     def __init__(self, dimension=0, sizeAverage=False):
         super(Sum, self).__init__()
-        self.dimension   = dimension
+        self.dimension = dimension
         self.sizeAverage = sizeAverage
         self._gradOutput = None
 
@@ -30,14 +31,14 @@ class Sum(Module):
         # zero-strides dont work with MKL/BLAS, so
         # dont set self.gradInput to zero-stride tensor.
         # Instead, do a deepcopy.
-        size = input.size()
+        size = list(input.size())
         size[dimension] = 1
         if not gradOutput.is_contiguous():
             self._gradOutput = self._gradOutput or gradOutput.new()
             self._gradOutput.resize_as_(gradOutput).copy_(gradOutput)
             gradOutput = self._gradOutput
 
-        gradOutput = gradOutput.view(size)
+        gradOutput = gradOutput.view(*size)
         self.gradInput.resize_as_(input)
         self.gradInput.copy_(gradOutput.expand_as(input))
         if self.sizeAverage:
@@ -45,8 +46,6 @@ class Sum(Module):
 
         return self.gradInput
 
-
     def clearState(self):
-         clear(self, '_gradOutput')
-         return super(Sum, self).clearState()
-
+        clear(self, '_gradOutput')
+        return super(Sum, self).clearState()

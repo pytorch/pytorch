@@ -22,10 +22,10 @@ class SpatialSubtractiveNormalization(Module):
 
         # check args
         if kdim != 2 and kdim != 1:
-           error('SpatialSubtractiveNormalization averaging kernel must be 2D or 1D')
+           raise ValueError('SpatialSubtractiveNormalization averaging kernel must be 2D or 1D')
 
         if (self.kernel.size(0) % 2) == 0 or (kdim == 2 and (self.kernel.size(1) % 2) == 0):
-           error('<SpatialSubtractiveNormalization> averaging kernel must have ODD dimensions')
+           raise ValueError('SpatialSubtractiveNormalization averaging kernel must have ODD dimensions')
 
         # normalize kernel
         self.kernel.div_(self.kernel.sum() * self.nInputPlane)
@@ -81,9 +81,9 @@ class SpatialSubtractiveNormalization(Module):
             self.ones.resize_as_(input[0:1]).fill_(1)
             coef = self.meanestimator.updateOutput(self.ones).squeeze(0)
             self._coef.resize_as_(coef).copy_(coef) # make contiguous for view
-            size = coef.size().tolist()
+            size = list(coef.size())
             size = [input.size(0)] + size
-            self.coef = self._coef.view(1, *(self._coef.size().tolist())).expand(*size)
+            self.coef = self._coef.view(1, *self._coef.size()).expand(*size)
 
         # compute mean
         self.localsums = self.meanestimator.updateOutput(input)
@@ -109,4 +109,3 @@ class SpatialSubtractiveNormalization(Module):
         clear(self, 'ones', '_coef')
         self.meanestimator.clearState()
         return super(SpatialSubtractiveNormalization, self).clearState()
-

@@ -4,10 +4,10 @@ from .Module import Module
 class View(Module):
 
     def resetSize(self, *args):
-        if len(args) == 1 and isinstance(args[0], torch.LongStorage):
+        if len(args) == 1 and isinstance(args[0], torch.Size):
             self.size = args[0]
         else:
-            self.size = torch.LongStorage(args)
+            self.size = torch.Size(args)
 
         self.numElements = 1
         inferdim = False
@@ -39,4 +39,3 @@ class View(Module):
 
     def __repr__(self):
         return super(View, self).__repr__() + '({})'.format(', '.join(map(str, self.size)))
-

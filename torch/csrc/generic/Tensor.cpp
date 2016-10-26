@@ -175,10 +175,10 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
     return (PyObject*)self.release();
   }
 
-  // torch.Tensor(torch.LongStorage sizes)
-  if (num_args == 1 && THPLongStorage_Check(first_arg)) {
-    THLongStorage *sizes = ((THPLongStorage*)first_arg)->cdata;
-    self->cdata = THTensor_(newWithSize)(LIBRARY_STATE sizes, nullptr);
+  // torch.Tensor(torch.Size sizes)
+  if (num_args == 1 && THPSize_Check(first_arg)) {
+    THLongStoragePtr sizes = THPUtils_unpackSize(first_arg);
+    self->cdata = THTensor_(newWithSize)(LIBRARY_STATE sizes.get(), nullptr);
     return (PyObject *)self.release();
   }
 
@@ -350,21 +350,17 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
   }
 
   // torch.Tensor(int ...)
-  try {
-    THLongStoragePtr sizes = THPUtils_getLongStorage(args);
-    self->cdata = THTensor_(newWithSize)(LIBRARY_STATE sizes, nullptr);
+  THLongStoragePtr sizes;
+  if (THPUtils_tryUnpackLongVarArgs(args, 0, sizes)) {
+    self->cdata = THTensor_(newWithSize)(LIBRARY_STATE sizes.get(), nullptr);
     return (PyObject *)self.release();
-  } catch(THException &e) {
-      throw;
-  // C++ exceptions were comming from getLongStorage, and indicate invalid
-  // arguments. Let's ignore them and print a nice error message instead.
-  } catch(std::exception &e) {};
+  }
 
   THPUtils_invalidArguments(args, THPTensorStr " constructor", 6,
           "no arguments",
           "(int ...)",
           "(" THPTensorStr " viewed_tensor)",
-          "(torch.LongStorage sizes)",
+          "(torch.Size size)",
           "(" THPStorageStr " data)",
           "(Sequence data)");
   return NULL;

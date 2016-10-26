@@ -1,11 +1,12 @@
 import torch
 from .Module import Module
 
+
 class JoinTable(Module):
 
     def __init__(self, dimension):
         super(JoinTable, self).__init__()
-        self.size = torch.LongStorage()
+        self.size = torch.Size()
         self.dimension = dimension
         self.gradInput = []
 
@@ -17,47 +18,45 @@ class JoinTable(Module):
         return dimension
 
     def updateOutput(self, input):
-        dimension = self._getPositiveDimension(input)
+        dim = self._getPositiveDimension(input)
 
         for i in range(len(input)):
-           currentOutput = input[i]
-           if i == 0:
-              self.size.resize_(currentOutput.dim()).copy_(currentOutput.size())
-           else:
-              self.size[dimension] = self.size[dimension] + currentOutput.size(dimension)
+            currentOutput = input[i]
+            if i == 0:
+                size = list(currentOutput.size())
+            else:
+                size[dim] += currentOutput.size(dim)
 
+        self.size = torch.Size(size)
         self.output.resize_(self.size)
 
         # TODO: use cat?
         offset = 0
         for i in range(len(input)):
-           currentOutput = input[i]
-           self.output.narrow(dimension, offset,
-              currentOutput.size(dimension)).copy_(currentOutput)
-           offset = offset + currentOutput.size(dimension)
+            currentOutput = input[i]
+            self.output.narrow(dim, offset, currentOutput.size(dim)).copy_(currentOutput)
+            offset += currentOutput.size(dim)
 
         return self.output
 
     def updateGradInput(self, input, gradOutput):
-        dimension = self._getPositiveDimension(input)
+        dim = self._getPositiveDimension(input)
 
         for i in range(len(input)):
-           if i not in self.gradInput:
-              self.gradInput.append(input[i].new())
-           self.gradInput[i].resize_as_(input[i])
+            if i not in self.gradInput:
+                self.gradInput.append(input[i].new())
+            self.gradInput[i].resize_as_(input[i])
         self.gradInput = self.gradInput[:len(input)]
 
         offset = 0
         for i in range(len(input)):
-           currentOutput = input[i]
-           currentGradInput = gradOutput.narrow(dimension, offset,
-                           currentOutput.size(dimension))
-           self.gradInput[i].copy_(currentGradInput)
-           offset = offset + currentOutput.size(dimension)
+            currentOutput = input[i]
+            currentGradInput = gradOutput.narrow(dim, offset, currentOutput.size(dim))
+            self.gradInput[i].copy_(currentGradInput)
+            offset = offset + currentOutput.size(dim)
 
         return self.gradInput
 
     def type(self, type=None, tensorCache=None):
         self.gradInput = []
         return super(JoinTable, self).type(type, tensorCache)
-

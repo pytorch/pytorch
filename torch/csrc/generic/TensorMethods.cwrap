@@ -46,6 +46,11 @@
 #define THPModuleStr "torch.cuda."
 #endif
 
+// The C API uses THLongStorage for size and stride, but the Python API uses
+// torch.Size or tuple
+typedef THLongStorage THSize;
+typedef THLongStorage THStride;
+
 [[
   name: THPTensor_(writeMetadata)
   python_name: _write_metadata
@@ -59,7 +64,7 @@ PyObject * THPTensor_(writeMetadata)(THPTensor *self, PyObject *args)
   }
   int fd = PyObject_AsFileDescriptor(PyTuple_GET_ITEM(args, 0));
   if (fd == -1) {
-    THPUtils_setError("write_file couln't retrieve file descriptor from given object");
+    THPUtils_setError("write_file could not retrieve file descriptor from given object");
     return NULL;
   }
   THPTensor_(writeMetadataRaw)(self->cdata, fd);
@@ -249,12 +254,12 @@ static PyObject * THPTensor_(storage)(THPTensor *self, PyObject *args)
 
 [[
   name: resize_
-  cname: resize
   return: self
-  long_args: True
+  cname: resize
   arguments:
     - THTensor* self
-    - THLongStorage* long_args
+    - arg: THSize* size
+      long_args: True
     - CONSTANT NULL
 ]]
 
@@ -262,42 +267,42 @@ static PyObject * THPTensor_(storage)(THPTensor *self, PyObject *args)
   name: zeros
   only_stateless: True
   return: argument 0
-  long_args: True
   arguments:
     - arg: THTensor* result
       allocate: True
-    - THLongStorage* long_args
+    - arg: THSize* size
+      long_args: True
 ]]
 
 [[
   name: zeros_
   cname: zeros
   return: self
-  long_args: True
   arguments:
     - THTensor* self
-    - THLongStorage* long_args
+    - arg: THSize* size
+      long_args: True
 ]]
 
 [[
   name: ones
   only_stateless: True
   return: argument 0
-  long_args: True
   arguments:
     - arg: THTensor* result
       allocate: True
-    - THLongStorage* long_args
+    - arg: THSize* size
+      long_args: True
 ]]
 
 [[
   name: ones_
   cname: ones
   return: self
-  long_args: True
   arguments:
     - THTensor* self
-    - THLongStorage* long_args
+    - arg: THSize* size
+      long_args: True
 ]]
 
 [[
@@ -340,16 +345,16 @@ static PyObject * THPTensor_(storage)(THPTensor *self, PyObject *args)
         - THTensor* self
         - THStorage* sourceStorage
         - long storage_offset
-        - THLongStorage* sizes
-        - THLongStorage* strides
+        - arg: THSize* size
+          long_args: True
+        - CONSTANT NULL
     - cname: setStorage
-      long_args: True
       arguments:
         - THTensor* self
         - THStorage* sourceStorage
         - long storage_offset
-        - THLongStorage* long_args
-        - CONSTANT NULL
+        - THSize* size
+        - THStride* strides
 ]]
 
 [[
@@ -1299,32 +1304,76 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
     - THTensor* self
 ]]
 
+PyObject * THPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
+{
+  HANDLE_TH_ERRORS
+  THTensor* tensor = ((THPTensor*)self)->cdata;
+  if (PyTuple_Size(args) == 0 && (!kwargs || PyDict_Size(kwargs) == 0)) {
+    return THPSize_New(tensor->nDimension, tensor->size);
+  }
+
+  int tuplecount = args ? PyTuple_Size(args) : 0;
+  int dictcount = kwargs ? PyDict_Size(kwargs) : 0;
+
+  PyObject* pydim = NULL;
+  if (tuplecount == 1 && dictcount == 0) {
+    pydim = PyTuple_GET_ITEM(args, 0);
+  } else if (dictcount == 1 && tuplecount == 0) {
+    pydim = PyDict_GetItemString(kwargs, "dim");
+  }
+
+  if (pydim && THPUtils_checkLong(pydim)) {
+    int dim = (int)THPUtils_unpackLong(pydim);
+    return PyInt_FromLong(THTensor_(size)(LIBRARY_STATE tensor, dim));
+  }
+
+  THPUtils_invalidArguments(args, "size", 2, "(int dim)", "no arguments");
+  return NULL;
+  END_HANDLE_TH_ERRORS
+}
 [[
-  name: size
-  options:
-    - return: long
-      cname: size
-      arguments:
-        - THTensor* self
-        - long dim
-    - return: THLongStorage*
-      cname: newSizeOf
-      arguments:
-        - THTensor* self
+  name: THPTensor_(size)
+  python_name: size
+  method_flags: METH_KEYWORDS
+  only_register: True
 ]]
 
+PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
+{
+  HANDLE_TH_ERRORS
+  THTensor* tensor = ((THPTensor*)self)->cdata;
+  if (PyTuple_Size(args) == 0 && (!kwargs || PyDict_Size(kwargs) == 0)) {
+    PyObject* stride = PyTuple_New(tensor->nDimension);
+    for (int i = 0; i != tensor->nDimension; ++i) {
+      PyTuple_SET_ITEM(stride, i, PyLong_FromLong(tensor->stride[i]));
+    }
+    return stride;
+  }
+
+  int tuplecount = args ? PyTuple_Size(args) : 0;
+  int dictcount = kwargs ? PyDict_Size(kwargs) : 0;
+
+  PyObject* pydim = NULL;
+  if (tuplecount == 1 && dictcount == 0) {
+    pydim = PyTuple_GET_ITEM(args, 0);
+  } else if (dictcount == 1 && tuplecount == 0) {
+    pydim = PyDict_GetItemString(kwargs, "dim");
+  }
+
+  if (pydim && THPUtils_checkLong(pydim)) {
+    int dim = (int)THPUtils_unpackLong(pydim);
+    return PyInt_FromLong(THTensor_(stride)(LIBRARY_STATE tensor, dim));
+  }
+
+  THPUtils_invalidArguments(args, "stride", 2, "(int dim)", "no arguments");
+  return NULL;
+  END_HANDLE_TH_ERRORS
+}
 [[
-  name: stride
-  options:
-    - return: long
-      cname: stride
-      arguments:
-        - THTensor* self
-        - long dim
-    - return: THLongStorage*
-      cname: newStrideOf
-      arguments:
-        - THTensor* self
+  name: THPTensor_(stride)
+  python_name: stride
+  method_flags: METH_KEYWORDS
+  only_register: True
 ]]
 
 [[
@@ -1360,15 +1409,6 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
   arguments:
     - THTensor* self
     - THTensor* tensor
-]]
-
-[[
-  name: isSize
-  python_name: is_size
-  return: bool
-  arguments:
-    - THTensor* self
-    - THLongStorage* size
 ]]
 
 [[
@@ -3181,28 +3221,28 @@ static void THTensor_(random1__)(THTensor *self, THGenerator *gen, long b)
   name: rand
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
   only_stateless: True
-  long_args: True
   return: argument 0
   arguments:
     - arg: THTensor* result
       allocate: True
     - arg: THGenerator* generator
       default: THPDefaultGenerator->cdata
-    - THLongStorage* long_args
+    - arg: THSize* size
+      long_args: True
 ]]
 
 [[
   name: randn
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
   only_stateless: True
-  long_args: True
   return: argument 0
   arguments:
     - arg: THTensor* result
       allocate: True
     - arg: THGenerator* generator
       default: THPDefaultGenerator->cdata
-    - THLongStorage* long_args
+    - arg: THSize* size
+      long_args: True
 ]]
 
 [[
@@ -3286,24 +3326,24 @@ static void THTensor_(random1__)(THTensor *self, THGenerator *gen, long b)
   name: rand
   defined_if: CUDA_FLOAT
   only_stateless: True
-  long_args: True
   return: argument 0
   arguments:
     - arg: THTensor* result
       allocate: True
-    - THLongStorage* long_args
+    - arg: THSize* size
+      long_args: True
 ]]
 
 [[
   name: randn
   defined_if: CUDA_FLOAT
   only_stateless: True
-  long_args: True
   return: argument 0
   arguments:
     - arg: THTensor* result
       allocate: True
-    - THLongStorage* long_args
+    - arg: THSize* size
+      long_args: True
 ]]
 
 [[

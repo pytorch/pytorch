@@ -14,34 +14,58 @@ int THPUtils_getCallable(PyObject *arg, PyObject **result) {
   return 1;
 }
 
-
-THLongStorage * THPUtils_getLongStorage(PyObject *args, int ignore_first) {
-  Py_ssize_t length = PyTuple_Size(args);
-  if (length < ignore_first+1)
-    throw std::runtime_error("Provided " + std::to_string(length) +
-        " arguments, but expected at least " + std::to_string(ignore_first+1));
-
-  // Maybe there's a LongStorage
-  PyObject *first_arg = PyTuple_GET_ITEM(args, ignore_first);
-  if (length == ignore_first+1 && THPLongStorage_Check(first_arg)) {
-    THPLongStorage *storage = (THPLongStorage*)first_arg;
-    THLongStorage_retain(storage->cdata);
-    return storage->cdata;
+THLongStoragePtr THPUtils_unpackSize(PyObject *arg) {
+  THLongStoragePtr result;
+  if (!THPUtils_tryUnpackLongs(arg, result)) {
+    std::string msg = "THPUtils_unpackSize() expects a torch.Size (got '";
+    msg += Py_TYPE(arg)->tp_name;
+    msg += "')";
+    throw std::runtime_error(msg);
   }
-
-  // If not, let's try to parse the numbers
-  THLongStoragePtr result = THLongStorage_newWithSize(length-ignore_first);
-  for (Py_ssize_t i = ignore_first; i < length; ++i) {
-    PyObject *arg = PyTuple_GET_ITEM(args, i);
-    if (!THPUtils_checkLong(arg))
-      throw std::invalid_argument("Expected an int argument, but got " +
-          std::string(THPUtils_typename(arg)) + "at position " +
-          std::to_string(i));
-    result->data[i-ignore_first] = THPUtils_unpackLong(arg);
-  }
-  return result.release();
+  return result;
 }
 
+bool THPUtils_tryUnpackLongs(PyObject *arg, THLongStoragePtr& result) {
+  bool tuple = PyTuple_Check(arg);
+  bool list = PyList_Check(arg);
+  if (tuple || list) {
+    int nDim = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
+    THLongStoragePtr storage = THLongStorage_newWithSize(nDim);
+    for (int i = 0; i != nDim; ++i) {
+      PyObject* item = tuple ? PyTuple_GET_ITEM(arg, i) : PyList_GET_ITEM(arg, i);
+      if (!THPUtils_checkLong(item)) {
+        return false;
+      }
+      storage->data[i] = THPUtils_unpackLong(item);
+    }
+    result = storage.release();
+    return true;
+  }
+  return false;
+}
+
+bool THPUtils_tryUnpackLongVarArgs(PyObject *args, int ignore_first, THLongStoragePtr& result) {
+  Py_ssize_t length = PyTuple_Size(args) - ignore_first;
+  if (length < 1) {
+    return false;
+  }
+
+  PyObject *first_arg = PyTuple_GET_ITEM(args, ignore_first);
+  if (length == 1 && THPUtils_tryUnpackLongs(first_arg, result)) {
+    return true;
+  }
+
+  // Try to parse the numbers
+  result = THLongStorage_newWithSize(length);
+  for (Py_ssize_t i = 0; i < length; ++i) {
+    PyObject *arg = PyTuple_GET_ITEM(args, i + ignore_first);
+    if (!THPUtils_checkLong(arg)) {
+      return false;
+    }
+    result->data[i] = THPUtils_unpackLong(arg);
+  }
+  return true;
+}
 
 void THPUtils_setError(const char *format, ...)
 {

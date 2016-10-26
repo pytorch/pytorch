@@ -15,7 +15,6 @@ class Variable(_C._VariableBase):
         'is_contiguous',
         'is_same_size',
         'is_set_to',
-        'is_size',
         'is_signed',
         'numel',
         'dim',

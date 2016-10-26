@@ -344,7 +344,6 @@ class Addcmul(InplaceFunction):
         self.scale = scale
 
     def forward(self, add_tensor, mul_tensor1, mul_tensor2):
-        self.add_tensor_size = add_tensor.size().tolist()
         self.save_for_backward(mul_tensor1, mul_tensor2)
         if self.inplace:
             return add_tensor.addcmul_(self.scale, mul_tensor1, mul_tensor2)
@@ -374,7 +373,6 @@ class Addcdiv(InplaceFunction):
         self.scale = scale
 
     def forward(self, add_tensor, div_tensor1, div_tensor2):
-        self.add_tensor_size = add_tensor.size().tolist()
         self.save_for_backward(div_tensor1, div_tensor2)
         if self.inplace:
             return add_tensor.addcdiv_(self.scale, div_tensor1, div_tensor2)

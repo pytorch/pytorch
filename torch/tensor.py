@@ -17,7 +17,9 @@ def _infer_sizes(sizes, total):
             to_infer = i
     if to_infer >= 0:
         assert total % total_sizes == 0, "Can't make sizes have exactly %d elements" % total
+        sizes = list(sizes)
         sizes[to_infer] = -total // total_sizes
+        return torch.Size(sizes)
     return sizes
 
 
@@ -119,12 +121,12 @@ class _TensorBase(object):
 
     def view(self, *args):
         dst = self.new()
-        if len(args) == 1 and torch.is_storage(args[0]):
+        if len(args) == 1 and isinstance(args[0], torch.Size):
             sizes = args[0]
         else:
-            sizes = torch.LongStorage(args)
+            sizes = torch.Size(args)
         sizes = _infer_sizes(sizes, self.nelement())
-        numel = reduce(lambda a,b: a * b, sizes) if len(sizes) > 0 else 0
+        numel = reduce(lambda a, b: a * b, sizes) if len(sizes) > 0 else 0
 
         if numel != self.nelement():
             def format_size(size):
@@ -163,14 +165,17 @@ class _TensorBase(object):
 
     def expand(self, *args):
         result = self.new()
-        sizes = args[0] if len(args) == 1 and isinstance(args[0], torch.LongStorage) else torch.LongStorage(args)
+        if len(args) == 1 and isinstance(args[0], torch.Size):
+            sizes = args[0]
+        else:
+            sizes = torch.Size(args)
         src = self
 
         src_dim = src.dim()
-        src_stride = src.stride()
-        src_size = src.size()
+        src_stride = list(src.stride())
+        src_size = list(src.size())
 
-        if sizes.size() != src_dim:
+        if len(sizes) != src_dim:
             raise ValueError('the number of dimensions provided must equal tensor.dim()')
 
         # create a new geometry for tensor:
@@ -181,13 +186,13 @@ class _TensorBase(object):
             elif size != sizes[i]:
                 raise ValueError('incorrect size: only supporting singleton expansion (size=1)')
 
-        result.set_(src.storage(), src.storage_offset(),
-                                src_size, src_stride)
+        result.set_(src.storage(), src.storage_offset(), torch.Size(src_size),
+                    tuple(src_stride))
         return result
 
     def repeat(self, *args):
-        # If args == (torch.LongStorage,), then we need to unpack the tuple
-        if len(args) == 1 and isinstance(args[0], torch.LongStorage):
+        # If args == (torch.Size,), then we need to unpack the tuple
+        if len(args) == 1 and isinstance(args[0], torch.Size):
             args = args[0]
         repeats = list(args)
         result = self.new()
@@ -197,19 +202,19 @@ class _TensorBase(object):
             raise ValueError('Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor')
 
         xtensor = src.new().set_(src)
-        xsize = xtensor.size().tolist()
+        xsize = list(xtensor.size())
         for i in _range(len(repeats)-src.dim()):
             xsize = [1] + xsize
 
-        size = torch.LongStorage([a * b for a, b in zip(xsize, repeats)])
-        xtensor.resize_(torch.LongStorage(xsize))
+        size = torch.Size([a * b for a, b in zip(xsize, repeats)])
+        xtensor.resize_(torch.Size(xsize))
         result.resize_(size)
         urtensor = result.new(result)
         for i in _range(xtensor.dim()):
             urtensor = urtensor.unfold(i,xtensor.size(i),xtensor.size(i))
         for i in _range(urtensor.dim()-xtensor.dim()):
             xsize = [1] + xsize
-        xtensor.resize_(torch.LongStorage(xsize))
+        xtensor.resize_(torch.Size(xsize))
         xxtensor = xtensor.expand_as(urtensor)
         urtensor.copy_(xxtensor)
         return result
@@ -218,12 +223,12 @@ class _TensorBase(object):
         return self.new(self).unsqueeze_(dim)
 
     def unsqueeze_(self, dim):
-        sizes = self.size().tolist()
+        sizes = list(self.size())
         sizes.insert(dim, 1)
-        strides = self.stride().tolist()
+        strides = list(self.stride())
         strides.insert(dim, 0)
         return self.set_(self.storage(), self.storage_offset(),
-                torch.LongStorage(sizes), torch.LongStorage(strides))
+                         torch.Size(sizes), tuple(strides))
 
     #TODO: add tests for operators
     def __add__(self, other):
