@@ -418,14 +418,27 @@ static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
     // Indexing multiple dimensions
     } else if(PyTuple_Check(index)) {
       long num_index_dim = (long)PyTuple_Size(index);
+      long num_effective_index = num_index_dim;
       long num_tensor_dim = THTensor_(nDimension)(LIBRARY_STATE self->cdata);
-      THPUtils_assertRet(false, num_index_dim <= num_tensor_dim, "trying to index %ld "
-          "dimensions of a %ld dimensional tensor", num_index_dim,
-          num_tensor_dim);
+      long ellipsis_idx = num_tensor_dim + 1;
+      for (int i = 0; i < num_index_dim; i++) {
+        if (PyTuple_GET_ITEM(index, i) == Py_Ellipsis) {
+          ellipsis_idx = i;
+          num_effective_index--;
+          break;
+        }
+      }
+      THPUtils_assertRet(false, num_effective_index <= num_tensor_dim,
+          "trying to index %ld dimensions of a %ld dimensional tensor",
+          num_effective_index, num_tensor_dim);
 
       tresult = THTensor_(newWithTensor)(LIBRARY_STATE self->cdata);
       int t_dim = 0;
       for(int dim = 0; dim < num_index_dim; dim++) {
+        if (dim == ellipsis_idx) {
+          t_dim = tresult->nDimension - (num_index_dim - dim - 1);
+          continue;
+        }
         PyObject *dimidx = PyTuple_GET_ITEM(index, dim);
         if(THPUtils_checkLong(dimidx)) {
           INDEX_LONG(t_dim, dimidx, tresult,

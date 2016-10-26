@@ -1820,6 +1820,24 @@ class TestTorch(TestCase):
         self.assertEqual(reference[2, 2, 2], 27, 0)
         self.assertEqual(reference[:], self._consecutive((3, 3, 3)), 0)
 
+        # Check Ellipsis
+        self.assertEqual(reference[..., 2], torch.Tensor([[3, 6, 9],
+                                                          [12, 15, 18],
+                                                          [21, 24, 27]]), 0)
+        self.assertEqual(reference[0, ..., 2], torch.Tensor([3, 6, 9]), 0)
+        self.assertEqual(reference[..., 2], reference[:, :, 2], 0)
+        self.assertEqual(reference[0, ..., 2], reference[0, :, 2], 0)
+        self.assertEqual(reference[0, 2, ...], reference[0, 2], 0)
+        self.assertEqual(reference[..., 2, 2, 2], 27, 0)
+        self.assertEqual(reference[2, ..., 2, 2], 27, 0)
+        self.assertEqual(reference[2, 2, ..., 2], 27, 0)
+        self.assertEqual(reference[2, 2, 2, ...], 27, 0)
+
+        reference_5d = self._consecutive((3, 3, 3, 3, 3))
+        self.assertEqual(reference_5d[..., 1, 0], reference_5d[:, :, :, 1, 0], 0)
+        self.assertEqual(reference_5d[2, ..., 1, 0], reference_5d[2, :, :, 1, 0], 0)
+        self.assertEqual(reference_5d[2, 1, 0, ..., 1], reference_5d[2, 1, 0, :, 1], 0)
+
         self.assertRaises(RuntimeError, lambda: reference[1, 1, 1, 1])
         self.assertRaises(RuntimeError, lambda: reference[1, 1, 1, 1:1])
         self.assertRaises(RuntimeError, lambda: reference[3, 3, 3, 3, 3, 3, 3, 3])
