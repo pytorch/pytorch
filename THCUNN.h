@@ -7,21 +7,6 @@ typedef long THCIndex_t;
 
 #define THNN_(NAME) TH_CONCAT_3(THNN_, CReal, NAME)
 
-TH_API void THNN_CudaBCECriterion_updateOutput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *target,
-          THCudaTensor *output,
-          bool sizeAverage,
-          THCudaTensor *weights);      // [OPTIONAL]
-TH_API void THNN_CudaBCECriterion_updateGradInput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *target,
-          THCudaTensor *gradInput,
-          bool sizeAverage,
-          THCudaTensor *weights);      // [OPTIONAL]
-
 TH_API void THNN_CudaClassNLLCriterion_updateOutput(
           THCState *state,
           THCudaTensor *input,
