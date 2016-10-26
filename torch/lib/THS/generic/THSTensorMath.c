@@ -22,7 +22,7 @@ THLongTensor *THSTensor_(toCSR)(long const *indices, long dim, long nnz) {
   return csr;
 }
 
-void THSTensor_(spmm)(THTensor *r_, 
+void THSTensor_(spaddmm)(THTensor *r_, 
     real beta, THTensor *t, 
     real alpha, THSTensor *sparse, THTensor *dense) {
   long h, i;
@@ -82,7 +82,7 @@ void THSTensor_(spmm)(THTensor *r_,
   THFree(values);
 }
 
-void THSTensor_(sspmm)(THSTensor *r_, 
+void THSTensor_(sspaddmm)(THSTensor *r_, 
     real beta, THSTensor *t, 
     real alpha, THSTensor *sparse, THTensor *dense) {
   long h, i, p;

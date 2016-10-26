@@ -138,7 +138,7 @@ class TestSparse(TestCase):
             y = y.transpose(i, j)
             self.assertEqual(x.to_dense(), y)
 
-    def test_addmm(self):
+    def test_mm(self):
         def test_shape(di, dj, dk):
             x, _, _ = self._gen_sparse(2, 20, [di, dj])
             t = torch.randn(di, dk)

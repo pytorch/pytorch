@@ -11,9 +11,8 @@ defined(THC_REAL_IS_HALF)
 #else
 #define AS_REAL(x) x
 #endif
-#define THPModuleStr "torch.sparse"
-
-#define THPModuleStr "torch.sparse"
+#define THSPModuleStr "torch.sparse"
+#define THPModuleStr "torch"
 
 [[
   name: set
@@ -112,7 +111,7 @@ defined(THC_REAL_IS_HALF)
 ]]
 
 [[
-  name: spmm
+  name: spaddmm
   with_stateless: True
   return: argument 0
   arguments:
@@ -128,7 +127,7 @@ defined(THC_REAL_IS_HALF)
 ]]
 
 [[
-  name: sspmm
+  name: sspaddmm
   with_stateless: True
   return: argument 0
   arguments:

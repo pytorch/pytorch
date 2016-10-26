@@ -11,9 +11,9 @@
  */
 
 // dense = beta * dense + alpha * sparse * dense
-TH_API void THSTensor_(spmm)(THTensor *r_, real beta, THTensor *t, real alpha, THSTensor *sparse, THTensor *dense);
+TH_API void THSTensor_(spaddmm)(THTensor *r_, real beta, THTensor *t, real alpha, THSTensor *sparse, THTensor *dense);
 // sparse = beta * sparse + alpha * sparse * dense
-TH_API void THSTensor_(sspmm)(THSTensor *r_, real beta, THSTensor *t, real alpha, THSTensor *sparse, THTensor *dense);
+TH_API void THSTensor_(sspaddmm)(THSTensor *r_, real beta, THSTensor *t, real alpha, THSTensor *sparse, THTensor *dense);
 TH_API void THSTensor_(spcadd)(THTensor *r_, THTensor *dense, real value, THSTensor *sparse);
 
 #endif
