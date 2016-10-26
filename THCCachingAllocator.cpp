@@ -306,7 +306,7 @@ static THCDeviceAllocator device_allocator = {
   &caching_allocator
 };
 
-THC_API THCDeviceAllocator* THCCachingAllocator_get()
+THC_API THCDeviceAllocator* THCCachingAllocator_get(void)
 {
   return &device_allocator;
 }

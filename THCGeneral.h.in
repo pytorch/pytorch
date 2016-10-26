@@ -108,7 +108,7 @@ struct THCState {
   ptrdiff_t heapDelta;
 };
 
-THC_API THCState* THCState_alloc();
+THC_API THCState* THCState_alloc(void);
 THC_API void THCState_free(THCState* state);
 
 THC_API void THCudaInit(THCState* state);

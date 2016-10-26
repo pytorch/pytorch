@@ -2,7 +2,7 @@
 #include "THCGeneral.h"
 
 
-THCThreadLocal THCThreadLocal_alloc()
+THCThreadLocal THCThreadLocal_alloc(void)
 {
 #ifndef _WIN32
   pthread_key_t key;

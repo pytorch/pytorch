@@ -9,7 +9,7 @@ typedef DWORD THCThreadLocal;
 typedef pthread_key_t THCThreadLocal;
 #endif
 
-THCThreadLocal THCThreadLocal_alloc();
+THCThreadLocal THCThreadLocal_alloc(void);
 void THCThreadLocal_free(THCThreadLocal local);
 void* THCThreadLocal_get(THCThreadLocal local);
 void THCThreadLocal_set(THCThreadLocal local, void* value);

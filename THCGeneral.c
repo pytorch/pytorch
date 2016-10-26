@@ -15,7 +15,7 @@
 THCCudaResourcesPerDevice* THCState_getDeviceResourcePtr(
   THCState *state, int device);
 
-THCState* THCState_alloc()
+THCState* THCState_alloc(void)
 {
   THCState* state = (THCState*) malloc(sizeof(THCState));
   memset(state, 0, sizeof(THCState));
