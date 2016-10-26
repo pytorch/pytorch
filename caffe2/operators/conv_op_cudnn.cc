@@ -205,21 +205,24 @@ bool CudnnConvOp<T>::RunOnDevice() {
         int returned_algo_count;
         std::array<cudnnConvolutionFwdAlgoPerf_t, kNUM_CUDNN_FWD_ALGS>
             perf_stat;
-        // We clean up the current workspace memory so that the forward
-        // algorithm
-        // is free to allocate memory.
+
+        // no need to clean up workspace, 
         cudnn_wrapper_.with_cudnn_state(cudnn_state_, [&](CuDNNState* state) {
-          state->workspace().reset();
           // Actually run the search.
-          CUDNN_CHECK(cudnnFindConvolutionForwardAlgorithm(
+          CUDNN_CHECK(cudnnFindConvolutionForwardAlgorithmEx(
               state->cudnn_handle(),
               bottom_desc_,
+              X.template data<T>(),
               filter_desc_,
+              filter.template data<T>(),
               conv_desc_,
               top_desc_,
+              Y->template mutable_data<T>(),
               kNUM_CUDNN_FWD_ALGS,
               &returned_algo_count,
-              perf_stat.data()));
+              perf_stat.data(),
+              state->workspace().get(cudnn_ws_nbytes_limit_),
+              cudnn_ws_nbytes_limit_));
         });
         LogCuDNNPerfStats(perf_stat, returned_algo_count);
         return perf_stat[0].algo;
@@ -281,6 +284,7 @@ bool CudnnConvGradientOp<T>::RunOnDevice() {
   auto& dY = Input(OUTPUT_GRAD);
   auto* dfilter = Output(FILTER_GRAD);
   auto* dbias = Output(BIAS_GRAD);
+
   DCHECK_EQ(X.ndim(), 4);
   DCHECK_EQ(filter.ndim(), 4);
   const int M = filter.dim32(0);
@@ -373,47 +377,59 @@ bool CudnnConvGradientOp<T>::RunOnDevice() {
 
             cudnn_wrapper_.with_cudnn_state(
                 cudnn_state_, [&](CuDNNState* state) {
-                  state->workspace().reset();
-                  CUDNN_CHECK(cudnnFindConvolutionBackwardFilterAlgorithm(
+                  CUDNN_CHECK(cudnnFindConvolutionBackwardFilterAlgorithmEx(
                       state->cudnn_handle(),
                       bottom_desc_,
+                      X.template data<T>(),
                       top_desc_,
+                      dY.template data<T>(),
                       conv_desc_,
                       filter_desc_,
+                      dfilter->template mutable_data<T>(),
                       kNUM_CUDNN_BWD_FILTER_ALGS,
                       &returned_algo_count,
-                      filter_perf_stat.data()));
+                      filter_perf_stat.data(),
+                      state->workspace().get(cudnn_ws_nbytes_limit_),
+                      cudnn_ws_nbytes_limit_));
                 });
             LogCuDNNPerfStats(filter_perf_stat, returned_algo_count);
             return filter_perf_stat[0].algo;
           });
 
-      bwd_data_algo_ =
-          data_algo_cache_.getAlgorithm(X.dims(), filter.dims(), [&]() {
-            VLOG(1) << "CUDNN Convolution bwd: doing data exhaustive search.";
-            int returned_algo_count;
+      if (OutputSize() == 3) {
+        bwd_data_algo_ =
+            data_algo_cache_.getAlgorithm(X.dims(), filter.dims(), [&]() {
+              VLOG(1) << "CUDNN Convolution bwd: doing data exhaustive search.";
+              int returned_algo_count;
 
-            std::array<
-                cudnnConvolutionBwdDataAlgoPerf_t,
-                kNUM_CUDNN_BWD_DATA_ALGS>
-                data_perf_stat;
-            cudnn_wrapper_.with_cudnn_state(
-                cudnn_state_, [&](CuDNNState* state) {
-                  state->workspace().reset();
-                  CUDNN_CHECK(cudnnFindConvolutionBackwardDataAlgorithm(
-                      state->cudnn_handle(),
-                      filter_desc_,
-                      top_desc_,
-                      conv_desc_,
-                      bottom_desc_,
-                      kNUM_CUDNN_BWD_DATA_ALGS,
-                      &returned_algo_count,
-                      data_perf_stat.data()));
-                });
+              std::array<
+                  cudnnConvolutionBwdDataAlgoPerf_t,
+                  kNUM_CUDNN_BWD_DATA_ALGS>
+                  data_perf_stat;
+              cudnn_wrapper_.with_cudnn_state(
+                  cudnn_state_, [&](CuDNNState* state) {
+                    auto* dX = Output(INPUT_GRAD);
+                    dX->ResizeLike(X);
+                    CUDNN_CHECK(cudnnFindConvolutionBackwardDataAlgorithmEx(
+                        state->cudnn_handle(),
+                        filter_desc_,
+                        filter.template data<T>(),
+                        top_desc_,
+                        dY.template data<T>(),
+                        conv_desc_,
+                        bottom_desc_,
+                        dX->template mutable_data<T>(),
+                        kNUM_CUDNN_BWD_DATA_ALGS,
+                        &returned_algo_count,
+                        data_perf_stat.data(),
+                        state->workspace().get(cudnn_ws_nbytes_limit_),
+                        cudnn_ws_nbytes_limit_));
+                  });
 
-            LogCuDNNPerfStats(data_perf_stat, returned_algo_count);
-            return data_perf_stat[0].algo;
-          });
+              LogCuDNNPerfStats(data_perf_stat, returned_algo_count);
+              return data_perf_stat[0].algo;
+            });
+      }
     } else {
       // choose backward algorithm for filter
       CUDNN_CHECK(cudnnGetConvolutionBackwardFilterAlgorithm(
