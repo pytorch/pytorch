@@ -113,6 +113,7 @@ ELSE()
   SET(THC_INSTALL_CMAKE_SUBDIR ${Torch_INSTALL_CMAKE_SUBDIR})
 ENDIF()
 
+INCLUDE_DIRECTORIES("${CMAKE_CURRENT_SOURCE_DIR}")
 INCLUDE_DIRECTORIES("${CMAKE_CURRENT_BINARY_DIR}")
 CONFIGURE_FILE(THCGeneral.h.in "${CMAKE_CURRENT_BINARY_DIR}/THCGeneral.h")
 
@@ -200,6 +201,7 @@ INSTALL(FILES
           THCStorage.h
           THCStorageCopy.h
           THCStream.h
+          THCThreadLocal.h
           THCTensor.h
           THCTensorCopy.h
           THCTensorRandom.h
