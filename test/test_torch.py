@@ -2281,7 +2281,10 @@ class TestTorch(TestCase):
         ]
 
         for t in types:
-            tensor = torch.rand(num_src).mul(2).floor().type(t)
+            while True:
+                tensor = torch.rand(num_src).mul(2).floor().type(t)
+                if tensor.sum() > 0:
+                    break
             for shape in shapes:
                 tensor = tensor.clone().resize_(shape)
                 dst1 = torch.nonzero(tensor)
