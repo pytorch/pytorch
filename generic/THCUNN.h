@@ -61,6 +61,20 @@ TH_API void THNN_(ClassNLLCriterion_updateGradInput)(
                   THCTensor *weights,       // [OPTIONAL]
                   THCTensor *total_weight);
 
+TH_API void THNN_(DistKLDivCriterion_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *target,
+                  THCTensor *output,
+                  bool sizeAverage);
+
+TH_API void THNN_(DistKLDivCriterion_updateGradInput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *target,
+                  THCTensor *gradInput,
+                  bool sizeAverage);
+
 TH_API void THNN_(ELU_updateOutput)(
                   THCState *state,
                   THCTensor *input,
