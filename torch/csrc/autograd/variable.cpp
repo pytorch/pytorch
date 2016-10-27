@@ -94,7 +94,7 @@ static void THPVariable_dealloc(THPVariable* self)
 PyObject *THPVariable_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
   THPVariable *self;
-  if (num_cached == 0) {
+  if ((PyObject*)type != THPVariableClass || num_cached == 0) {
     self = (THPVariable*)type->tp_alloc(type, 0);
     self->version_counter = new THPVariableVersion();
   } else {
