@@ -40,7 +40,7 @@ class _BatchNorm(Module):
         if self.weight is not None:
             args = args + (self.weight, self.bias)
         return self._backend.BatchNorm(self.running_mean,
-                self.running_var, self.train, self.momentum, self.eps)(*args)
+                self.running_var, self.training, self.momentum, self.eps)(*args)
 
 
 class BatchNorm1d(_BatchNorm):

@@ -131,16 +131,16 @@ class Container(Module):
                 for m in module.modules(memo):
                     yield m
 
-    def training(self):
-        super(Container, self).training()
+    def train(self):
+        super(Container, self).train()
         for module in self.children():
-            module.training()
+            module.train()
         return self
 
-    def evaluation(self):
-        super(Container, self).evaluation()
+    def eval(self):
+        super(Container, self).eval()
         for module in self.children():
-            module.evaluation()
+            module.eval()
         return self
 
     def _apply(self, fn):

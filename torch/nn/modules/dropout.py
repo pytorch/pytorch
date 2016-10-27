@@ -20,7 +20,7 @@ class Dropout(Module):
         self.inplace = inplace
 
     def forward(self, input):
-        return self._backend.Dropout(self.p, self.train, self.inplace)(input)
+        return self._backend.Dropout(self.p, self.training, self.inplace)(input)
 
 
 class Dropout2d(Module):
@@ -54,7 +54,7 @@ class Dropout2d(Module):
         self.inplace = inplace
 
     def forward(self, input):
-        return self._backend.Dropout2d(self.p, self.train, self.inplace)(input)
+        return self._backend.Dropout2d(self.p, self.training, self.inplace)(input)
 
 
 class Dropout3d(Module):
@@ -80,5 +80,5 @@ class Dropout3d(Module):
         self.inplace = inplace
 
     def forward(self, input):
-        return self._backend.Dropout3d(self.p, self.train, self.inplace)(input)
+        return self._backend.Dropout3d(self.p, self.training, self.inplace)(input)
 

@@ -15,7 +15,7 @@ class Module(object):
         self._buffers = {}
         self.backward_hooks = OrderedDict()
         self.forward_hooks = OrderedDict()
-        self.train = True
+        self.training = True
         for name, param in self._parameters.items():
             if not isinstance(param, Parameter):
                 if isinstance(param, Variable):
@@ -160,15 +160,15 @@ class Module(object):
             memo.add(self)
             yield self
 
-    def training(self):
-        self.train = True
+    def train(self):
+        self.training = True
         for p in self._parameters.values():
             if p is not None:
                 p.requires_grad = True
         return self
 
-    def evaluation(self):
-        self.train = False
+    def eval(self):
+        self.training = False
         for p in self._parameters.values():
             if p is not None:
                 p.requires_grad = False
