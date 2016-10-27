@@ -300,12 +300,13 @@ static cudaError_t THCCachingAllocator_emptyCache(void* ctx)
 static THCCachingAllocator caching_allocator;
 static THCDeviceAllocator device_allocator = {
   &THCCachingAllocator_malloc,
+  NULL,
   &THCCachingAllocator_free,
   &THCCachingAllocator_emptyCache,
   &caching_allocator
 };
 
-THC_API THCDeviceAllocator* THCCachingAllocator_get()
+THC_API THCDeviceAllocator* THCCachingAllocator_get(void)
 {
   return &device_allocator;
 }

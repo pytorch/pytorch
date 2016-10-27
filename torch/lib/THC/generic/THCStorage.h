@@ -12,9 +12,10 @@ typedef struct THCStorage
     ptrdiff_t size;
     int refcount;
     char flag;
-    THAllocator *allocator;
+    THCDeviceAllocator *allocator;
     void *allocatorContext;
     struct THCStorage *view;
+    int device;
 } THCStorage;
 
 
@@ -37,11 +38,14 @@ THC_API THCStorage* THCStorage_(newWithMapping)(THCState *state, const char *fil
 /* takes ownership of data */
 THC_API THCStorage* THCStorage_(newWithData)(THCState *state, real *data, ptrdiff_t size);
 
-THC_API THCStorage* THCStorage_(newWithAllocator)(THCState *state, ptrdiff_t size,
-                                                      THAllocator* allocator,
-                                                      void *allocatorContext);
+THC_API THCStorage* THCStorage_(newWithAllocator)(
+  THCState *state, ptrdiff_t size,
+  THCDeviceAllocator* allocator,
+  void *allocatorContext);
 THC_API THCStorage* THCStorage_(newWithDataAndAllocator)(
-    THCState *state, real* data, ptrdiff_t size, THAllocator* allocator, void *allocatorContext);
+  THCState *state, real* data, ptrdiff_t size,
+  THCDeviceAllocator* allocator,
+  void *allocatorContext);
 
 THC_API void THCStorage_(setFlag)(THCState *state, THCStorage *storage, const char flag);
 THC_API void THCStorage_(clearFlag)(THCState *state, THCStorage *storage, const char flag);

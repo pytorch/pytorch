@@ -3,6 +3,7 @@
 
 #include "THGeneral.h"
 #include "THAllocator.h"
+#include "THCThreadLocal.h"
 #undef log1p
 
 #include "cuda.h"
@@ -40,20 +41,74 @@
 #endif
 
 struct THCRNGState;  /* Random number generator state. */
-struct THCStream;
+typedef struct THCStream THCStream;
+typedef struct THCState THCState;
 
 typedef struct _THCDeviceAllocator {
-   cudaError_t (*malloc)(void*, void**, size_t, cudaStream_t);
+   cudaError_t (*malloc)( void*, void**, size_t,         cudaStream_t);
+   cudaError_t (*realloc)(void*, void**, size_t, size_t, cudaStream_t);
    cudaError_t (*free)(void*, void*);
    cudaError_t (*emptyCache)(void*);
    void* state;
 } THCDeviceAllocator;
 
+typedef struct _THCCudaResourcesPerDevice {
+  THCStream** streams;
+  cublasHandle_t* blasHandles;
+  /* Size of scratch space per each stream on this device available */
+  size_t scratchSpacePerStream;
+  /* Device-resident scratch space per stream, used for global memory
+     reduction kernels. */
+  void** devScratchSpacePerStream;
+} THCCudaResourcesPerDevice;
+
 
 /* Global state to be held in the cutorch table. */
-typedef struct THCState THCState;
+struct THCState {
+  struct THCRNGState* rngState;
+  struct cudaDeviceProp* deviceProperties;
+  /* Set of all allocated resources. resourcePerDevice[dev]->streams[0] is NULL,
+     which specifies the per-device default stream. blasHandles do not have a
+     default and must be explicitly initialized. We always initialize 1
+     blasHandle but we can use more.
+  */
+  THCCudaResourcesPerDevice* resourcesPerDevice;
+  /* Captured number of devices upon startup; convenience for bounds checking */
+  int numDevices;
+  /* Number of Torch defined resources available, indices 1 ... numStreams */
+  int numUserStreams;
+  int numUserBlasHandles;
 
-THC_API THCState* THCState_alloc();
+  /* Allocator using cudaMallocHost. */
+  THAllocator* cudaHostAllocator;
+  THCDeviceAllocator* cudaDeviceAllocator;
+
+  /* Index of the current selected BLAS handle. The actual BLAS handle used
+     depends on the current device. */
+  THCThreadLocal/*<int>*/ currentPerDeviceBlasHandle;
+  /* Array of thread locals containing the current stream for each device */
+  THCThreadLocal* currentStreams;
+
+  /* Table of enabled peer-to-peer access between directed pairs of GPUs.
+     If i accessing allocs on j is enabled, p2pAccess[i][j] is 1; 0 otherwise. */
+  int** p2pAccessEnabled;
+
+  /* Is direct cross-kernel p2p access allowed? Normally, only cross-GPU
+     copies are allowed via p2p if p2p access is enabled at all for
+     the pair of GPUs in question, but if this flag is true, then
+     all cross-GPU access checks are disabled, allowing kernels to
+     directly access memory on another GPUs.
+     Note that p2p access must exist and be enabled for the pair of
+     GPUs in question. */
+  int p2pKernelAccessEnabled;
+
+  void (*cutorchGCFunction)(void *data);
+  void *cutorchGCData;
+  ptrdiff_t heapSoftmax;
+  ptrdiff_t heapDelta;
+};
+
+THC_API THCState* THCState_alloc(void);
 THC_API void THCState_free(THCState* state);
 
 THC_API void THCudaInit(THCState* state);

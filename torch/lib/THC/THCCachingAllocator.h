@@ -3,6 +3,6 @@
 
 #include "THCGeneral.h"
 
-THC_API THCDeviceAllocator* THCCachingAllocator_get();
+THC_API THCDeviceAllocator* THCCachingAllocator_get(void);
 
 #endif

@@ -17,7 +17,7 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER "4.9.3")
     if(CUDA_VERSION VERSION_LESS "8.0")
       MESSAGE(STATUS "Found gcc >=5 and CUDA <= 7.5, adding workaround C++ flags")
-      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_FORCE_INLINES")
+      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_FORCE_INLINES -D_MWAITXINTRIN_H_INCLUDED -D__STRICT_ANSI__")
     endif(CUDA_VERSION VERSION_LESS "8.0")
   endif(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER "4.9.3")
 endif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
@@ -113,6 +113,7 @@ ELSE()
   SET(THC_INSTALL_CMAKE_SUBDIR ${Torch_INSTALL_CMAKE_SUBDIR})
 ENDIF()
 
+INCLUDE_DIRECTORIES("${CMAKE_CURRENT_SOURCE_DIR}")
 INCLUDE_DIRECTORIES("${CMAKE_CURRENT_BINARY_DIR}")
 CONFIGURE_FILE(THCGeneral.h.in "${CMAKE_CURRENT_BINARY_DIR}/THCGeneral.h")
 
@@ -123,10 +124,8 @@ ELSE()
 ENDIF()
 
 SET(src
-    THCAllocator.c
     THCCachingAllocator.cpp
     THCGeneral.c
-    THCStorage.c
     THCStorageCopy.c
     THCStream.c
     THCTensor.c
@@ -202,6 +201,7 @@ INSTALL(FILES
           THCStorage.h
           THCStorageCopy.h
           THCStream.h
+          THCThreadLocal.h
           THCTensor.h
           THCTensorCopy.h
           THCTensorRandom.h
@@ -275,4 +275,5 @@ INSTALL(FILES
           generic/THCTensorIndex.cu
           generic/THCTensorSort.h
           generic/THCTensorSort.cu
+          generic/THCDeviceTensorUtils.cu
           DESTINATION "${THC_INSTALL_INCLUDE_SUBDIR}/THC/generic")
