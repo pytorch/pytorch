@@ -136,6 +136,8 @@ def _str(self):
         strt = _tensor_str(self)
 
     size_str = 'x'.join(str(size) for size in self.size())
-    strt += '[{} of size {}]\n'.format(torch.typename(self), size_str)
+    device_str = '' if not self.is_cuda else ' (GPU {})'.format(self.get_device())
+    strt += '[{} of size {}{}]\n'.format(torch.typename(self),
+            size_str, device_str)
     return '\n' + strt
 
