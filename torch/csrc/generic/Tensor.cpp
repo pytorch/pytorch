@@ -367,8 +367,24 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
   END_HANDLE_TH_ERRORS
 }
 
-#define INDEX_LONG(DIM, IDX_VARIABLE, TENSOR_VARIABLE, CASE_1D, CASE_MD)       \
-  long idx = THPUtils_unpackLong(IDX_VARIABLE);                                \
+#ifdef WITH_NUMPY
+#define IS_SCALAR(NAME)                                                        \
+  ((is_long = THPUtils_checkLong(NAME)) ||                                     \
+   (is_scalar_array = PyArray_CheckScalar(NAME)))
+#define UNPACK_SCALAR(IDX_VARIABLE)                                            \
+  if (is_long) {                                                               \
+    idx = THPUtils_unpackLong(IDX_VARIABLE);                                   \
+  } else {                                                                     \
+    PyArray_CastScalarToCtype(IDX_VARIABLE, &idx, NumpyLongArrDescr);          \
+  }
+#else
+#define IS_SCALAR(NAME) THPUtils_checkLong(NAME)
+#define UNPACK_SCALAR(IDX_VARIABLE) idx = THPUtils_unpackLong(IDX_VARIABLE);
+#endif
+
+#define INDEX_SCALAR(DIM, IDX_VARIABLE, TENSOR_VARIABLE, CASE_1D, CASE_MD)     \
+  int64_t idx;                                                                 \
+  UNPACK_SCALAR(IDX_VARIABLE);                                                 \
   long dimsize = THTensor_(size)(LIBRARY_STATE TENSOR_VARIABLE, DIM);          \
   idx = (idx < 0) ? dimsize + idx : idx;                                       \
                                                                                \
@@ -388,13 +404,17 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
 static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
     THTensor * &tresult, THStorage * &sresult, long &storage_offset)
 {
+#ifdef WITH_NUMPY
+  static PyArray_Descr *NumpyLongArrDescr = PyArray_DescrFromType(NPY_INT64);
+  bool is_long, is_scalar_array;
+#endif
   tresult = NULL;
   sresult = NULL;
   try {
     // Indexing with an integer
-    if(PyLong_Check(index) || PyInt_Check(index)) {
+    if(IS_SCALAR(index)) {
       THTensor *self_t = self->cdata;
-      INDEX_LONG(0, index, self_t,
+      INDEX_SCALAR(0, index, self_t,
         // 1D tensor
         sresult = self_t->storage;
         storage_offset = GET_OFFSET(self_t, idx),
@@ -436,8 +456,8 @@ static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
           continue;
         }
         PyObject *dimidx = PyTuple_GET_ITEM(index, dim);
-        if(THPUtils_checkLong(dimidx)) {
-          INDEX_LONG(t_dim, dimidx, tresult,
+        if(IS_SCALAR(dimidx)) {
+          INDEX_SCALAR(t_dim, dimidx, tresult,
               // 1D tensor
               sresult = tresult->storage;
               storage_offset = GET_OFFSET(tresult, idx);
@@ -469,7 +489,11 @@ static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
 
 invalid_index_type:
   THPUtils_setError("indexing a tensor with an object of type %s. The only "
-      "supported types are integers, slices and "
+      "supported types are integers, slices"
+#ifdef WITH_NUMPY
+      ", numpy scalars"
+#endif
+      " and "
 #ifndef THC_GENERIC_FILE
       "torch.ByteTensor.",
 #else
@@ -478,7 +502,8 @@ invalid_index_type:
     THPUtils_typename(index));
   return false;
 }
-#undef INDEX_LONG
+#undef IS_SCALAR
+#undef INDEX_SCALAR
 #undef GET_OFFSET
 
 static PyObject * THPTensor_(getValue)(THPTensor *self, PyObject *index)
