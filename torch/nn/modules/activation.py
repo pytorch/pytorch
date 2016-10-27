@@ -61,7 +61,7 @@ class RReLU(Module):
         self.inplace = inplace
 
     def forward(self, input):
-        return self._backend.RReLU(self.lower, self.upper, self.train,
+        return self._backend.RReLU(self.lower, self.upper, self.training,
                 self.inplace)(input)
 
 
