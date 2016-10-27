@@ -250,12 +250,8 @@ static void *_map_alloc(void* ctx_, ptrdiff_t size)
       {
         if(ctx->flags)
         {
-          /* if it is shared mem, let's put it in correct size */
-          if (ctx->flags & TH_ALLOCATOR_MAPPED_SHAREDMEM)
-          {
-            if(ftruncate(fd, size) == -1)
-              THError("unable to resize shared memory file <%s> to the right size", ctx->filename);
-          }
+          if(ftruncate(fd, size) == -1)
+            THError("unable to resize file <%s> to the right size", ctx->filename);
           if(fstat(fd, &file_stat) == -1 || file_stat.st_size < size)
           {
             close(fd);

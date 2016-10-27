@@ -127,7 +127,7 @@ void THVector_(mul)(real *y, const real *x, const ptrdiff_t n) {
  *       This means that in the dispatch tables, implementations supporting more recent extensions
  *       need to come first
  */
-void THVector_(vectorDispatchInit)()
+void THVector_(vectorDispatchInit)(void)
 {
   uint32_t hostSimdExts = detectHostSIMDExtensions();
   INIT_DISPATCH_PTR(fill);
