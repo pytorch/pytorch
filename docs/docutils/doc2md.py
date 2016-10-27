@@ -128,6 +128,60 @@ def args_block(lines):
         out += [name + ' | ' + default + ' | ' + description]
     return out
 
+# Inputs
+_inputs_section = re.compile('^\s*Inputs:\s*(.*)\s*')
+def is_inputs_check(line):
+    return _inputs_section.match(line)
+
+def inputs_block(lines):
+    out = ['']
+    out += ['Parameter | Default | Description']
+    out += ['--------- | ------- | -----------']
+    for line in lines:
+        matches = re.findall(r'\s*([^:]+):\s*(.*?)\s*(Default:\s(.*))?\s*$', line)
+        assert matches != None
+        name = matches[0][0]
+        description = matches[0][1]
+        default = matches[0][3]
+        out += [name + ' | ' + default + ' | ' + description]
+    return out
+
+# Outputs
+_outputs_section = re.compile('^\s*Outputs:\s*(.*)\s*')
+def is_outputs_check(line):
+    return _outputs_section.match(line)
+
+def outputs_block(lines):
+    out = ['']
+    out += ['Parameter |  Description']
+    out += ['--------- |  -----------']
+    for line in lines:
+        matches = re.findall(r'\s*([^:]+):\s*(.*?)\s*(Default:\s(.*))?\s*$', line)
+        assert matches != None
+        name = matches[0][0]
+        description = matches[0][1]
+        default = matches[0][3]
+        out += [name + ' | ' + description]
+    return out
+
+# Members
+_members_section = re.compile('^\s*Members:\s*(.*)\s*')
+def is_members_check(line):
+    return _members_section.match(line)
+
+def members_block(lines):
+    out = ['']
+    out += ['Parameter | Description']
+    out += ['--------- | -----------']
+    for line in lines:
+        matches = re.findall(r'\s*([^:]+):\s*(.*?)\s*(Default:\s(.*))?\s*$', line)
+        assert matches != None
+        name = matches[0][0]
+        description = matches[0][1]
+        default = matches[0][3]
+        out += [name + ' | ' + description]
+    return out
+
 _returns_section = re.compile('^\s*Returns:\s*')
 def is_returns_check(line):
     return _returns_section.match(line)
@@ -147,10 +201,7 @@ def is_inputshape_check(line):
 _outputshape_section = re.compile('^\s*Returns:\s*|^\s*Output Shape:\s*')
 def is_outputshape_check(line):
     return _outputshape_section.match(line)
-
-
-#def get_docargs(line)
-
+###############################################
 _reg_section = re.compile('^#+ ')
 def is_heading(line):
     return _reg_section.match(line)
@@ -193,6 +244,9 @@ def _doc2md(lines, shiftlevel=0):
     _doc2md.is_code = False
     _doc2md.is_code_block = False
     _doc2md.is_args = False
+    _doc2md.is_inputs = False
+    _doc2md.is_outputs = False
+    _doc2md.is_members = False
     _doc2md.is_returns = False
     _doc2md.is_inputshape = False
     _doc2md.is_outputshape = False
@@ -211,6 +265,18 @@ def _doc2md(lines, shiftlevel=0):
             _doc2md.is_args = False
             _doc2md.md += args_block(args)
 
+        if _doc2md.is_inputs:
+            _doc2md.is_inputs = False
+            _doc2md.md += inputs_block(inputs)
+
+        if _doc2md.is_outputs:
+            _doc2md.is_outputs = False
+            _doc2md.md += outputs_block(outputs)
+
+        if _doc2md.is_members:
+            _doc2md.is_members = False
+            _doc2md.md += members_block(members)
+
         if _doc2md.is_returns:
             _doc2md.is_returns = False
             _doc2md.md += returns
@@ -226,6 +292,24 @@ def _doc2md(lines, shiftlevel=0):
             _doc2md.md += ['']
             _doc2md.md += ['#' * (shiftlevel+2) + ' Constructor Arguments']
             args = []
+        elif is_inputs_check(line):
+            reset()
+            _doc2md.is_inputs = True
+            _doc2md.md += ['']
+            _doc2md.md += ['#' * (shiftlevel+2) + ' Inputs']
+            inputs = []
+        elif is_outputs_check(line):
+            reset()
+            _doc2md.is_outputs = True
+            _doc2md.md += ['']
+            _doc2md.md += ['#' * (shiftlevel+2) + ' Outputs']
+            outputs = []
+        elif is_members_check(line):
+            reset()
+            _doc2md.is_members = True
+            _doc2md.md += ['']
+            _doc2md.md += ['#' * (shiftlevel+2) + ' Members']
+            members = []
         elif is_returns_check(line):
             reset()
             _doc2md.is_returns = True
@@ -274,6 +358,21 @@ def _doc2md(lines, shiftlevel=0):
         elif _doc2md.is_args:
             if line:
                 args.append(line)
+            else:
+                reset()
+        elif _doc2md.is_inputs:
+            if line:
+                inputs.append(line)
+            else:
+                reset()
+        elif _doc2md.is_outputs:
+            if line:
+                outputs.append(line)
+            else:
+                reset()
+        elif _doc2md.is_members:
+            if line:
+                members.append(line)
             else:
                 reset()
         elif _doc2md.is_returns:

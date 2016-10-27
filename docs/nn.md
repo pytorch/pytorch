@@ -284,9 +284,13 @@ stride |  | the stride of the convolving kernel.
 ------ | ----- | ------------
  input | [ * , in_channels  , * ]  | Input is minibatch x in_channels x iW
 output | [ * , out_channels , * ]   | Output shape is precisely minibatch x out_channels x floor((iW  + 2*padW - kW) / dW + 1)
-Members:
-    weight: the learnable weights of the module of shape (out_channels x in_channels x kW)
-    bias:   the learnable bias of the module of shape (out_channels)
+
+### Members
+
+Parameter | Description
+--------- | -----------
+weight | the learnable weights of the module of shape (out_channels x in_channels x kW)
+bias | the learnable bias of the module of shape (out_channels)
 ## Conv2d
 
 Applies a 2D convolution over an input image composed of several input
@@ -335,9 +339,13 @@ bias | True | If set to False, the layer will not learn an additive bias.
 ------ | ----- | ------------
  input | [ * , in_channels  , * , * ]  | Input is minibatch x in_channels x iH x iW
 output | [ * , out_channels , * , * ]   | Output shape is precisely minibatch x out_channels x floor((iH  + 2*padH - kH) / dH + 1) x floor((iW  + 2*padW - kW) / dW + 1)
-Members:
-    weight: the learnable weights of the module of shape (out_channels x in_channels x kH x kW)
-    bias:   the learnable bias of the module of shape (out_channels)
+
+### Members
+
+Parameter | Description
+--------- | -----------
+weight | the learnable weights of the module of shape (out_channels x in_channels x kH x kW)
+bias | the learnable bias of the module of shape (out_channels)
 ## Conv3d
 
 Applies a 3D convolution over an input image composed of several input
@@ -373,9 +381,13 @@ padding | 0 | implicit zero padding on the input. Can be a single number s or a 
 ------ | ----- | ------------
  input | [ * , in_channels  , * , * , * ]  | Input is minibatch x in_channels x iT x iH x iW
 output | [ * , out_channels , * , * , * ]   | Output shape is precisely minibatch x out_channels x floor((iT  + 2*padT - kT) / dT + 1) x floor((iH  + 2*padH - kH) / dH + 1) x floor((iW  + 2*padW - kW) / dW + 1)
-Members:
-    weight: the learnable weights of the module of shape (out_channels x in_channels x kT x kH x kW)
-    bias:   the learnable bias of the module of shape (out_channels)
+
+### Members
+
+Parameter | Description
+--------- | -----------
+weight | the learnable weights of the module of shape (out_channels x in_channels x kT x kH x kW)
+bias | the learnable bias of the module of shape (out_channels)
 ## ConvTranspose2d
 
 Applies a 2D deconvolution operator over an input image composed of several input
@@ -418,9 +430,13 @@ bias | True | If set to False, the layer will not learn an additive bias.
 ------ | ----- | ------------
  input | [ * , in_channels  , * , * ]  | Input is minibatch x in_channels x iH x iW
 output | [ * , out_channels , * , * ]   | Output shape is minibatch x out_channels x (iH - 1) * sH - 2*padH + kH + output_paddingH x (iW - 1) * sW - 2*padW + kW, or as specified in a second argument to the call.
-Members:
-    weight: the learnable weights of the module of shape (in_channels x out_channels x kH x kW)
-    bias:   the learnable bias of the module of shape (out_channels)
+
+### Members
+
+Parameter | Description
+--------- | -----------
+weight | the learnable weights of the module of shape (in_channels x out_channels x kH x kW)
+bias | the learnable bias of the module of shape (out_channels)
 ## ConvTranspose3d
 
 Applies a 3D deconvolution operator over an input image composed of several input
@@ -456,9 +472,13 @@ output_padding | 0 | A padding of 0 or 1 pixels that should be added to the outp
 ------ | ----- | ------------
  input | [ * , in_channels  , * , * , * ]  | Input is minibatch x in_channels x iH x iW
 output | [ * , out_channels , * , * , * ]   | Output shape is precisely minibatch x out_channels x (iT - 1) * sT - 2*padT + kT + output_paddingT x (iH - 1) * sH - 2*padH + kH + output_paddingH x (iW - 1) * sW - 2*padW + kW
-Members:
-    weight: the learnable weights of the module of shape (in_channels x out_channels x kT x kH x kW)
-    bias:   the learnable bias of the module of shape (out_channels)
+
+### Members
+
+Parameter | Description
+--------- | -----------
+weight | the learnable weights of the module of shape (in_channels x out_channels x kT x kH x kW)
+bias | the learnable bias of the module of shape (out_channels)
 ## Dropout
 
 Randomly zeroes some of the elements of the input tensor.
@@ -682,23 +702,35 @@ Parameter | Default | Description
 input_size |  | The number of expected features in the input x
 hidden_size |  | The number of features in the hidden state h
 num_layers |  | the size of the convolving kernel.
-bias |  | If False, then the layer does not use bias weights b_ih and b_hh (default=True).
+bias | True | If False, then the layer does not use bias weights b_ih and b_hh.
 batch_first |  | If True, then the input tensor is provided as (batch, seq, feature)
 dropout |  | If non-zero, introduces a dropout layer on the outputs of each RNN layer
-Input |  | input, h_0
+
+### Inputs
+
+Parameter | Default | Description
+--------- | ------- | -----------
 input |  | A (seq_len x batch x input_size) tensor containing the features of the input sequence.
 h_0 |  | A (num_layers x batch x hidden_size) tensor containing the initial hidden state for each element in the batch.
-Output |  | output, h_n
-output |  | A (seq_len x batch x hidden_size) tensor containing the output features (h_t) from the last layer of the RNN, for each t
-h_n |  | A (num_layers x batch x hidden_size) tensor containing the hidden state for t=seq_len
-Members |  | 
-weight_ih_l[k] |  | the learnable input-hidden weights of the k-th layer (W_ir|W_ii|W_in), of shape (input_size x 3*hidden_size)
-weight_hh_l[k] |  | the learnable hidden-hidden weights of the k-th layer (W_hr|W_hi|W_hn), of shape (hidden_size x 3*hidden_size)
-bias_ih_l[k] |  | the learnable input-hidden bias of the k-th layer (b_ir|b_ii|b_in), of shape (3*hidden_size)
-bias_hh_l[k] |  | the learnable hidden-hidden bias of the k-th layer (W_hr|W_hi|W_hn), of shape (3*hidden_size)
+
+### Outputs
+
+Parameter |  Description
+--------- |  -----------
+output | A (seq_len x batch x hidden_size) tensor containing the output features (h_t) from the last layer of the RNN, for each t
+h_n | A (num_layers x batch x hidden_size) tensor containing the hidden state for t=seq_len
+
+### Members
+
+Parameter | Description
+--------- | -----------
+weight_ih_l[k] | the learnable input-hidden weights of the k-th layer (W_ir|W_ii|W_in), of shape (input_size x 3*hidden_size)
+weight_hh_l[k] | the learnable hidden-hidden weights of the k-th layer (W_hr|W_hi|W_hn), of shape (hidden_size x 3*hidden_size)
+bias_ih_l[k] | the learnable input-hidden bias of the k-th layer (b_ir|b_ii|b_in), of shape (3*hidden_size)
+bias_hh_l[k] | the learnable hidden-hidden bias of the k-th layer (W_hr|W_hi|W_hn), of shape (3*hidden_size)
 ## GRUCell
 
-A gated recurrent unit (GRU) cell with ReLU linearity.
+A gated recurrent unit (GRU) cell
 
 ```python
 r = sigmoid(W_ir x + b_ir + W_hr h + b_hr)
@@ -725,17 +757,29 @@ Parameter | Default | Description
 --------- | ------- | -----------
 input_size |  | The number of expected features in the input x
 hidden_size |  | The number of features in the hidden state h
-bias |  | If False, then the layer does not use bias weights b_ih and b_hh (default=True).
-Input |  | input, h
+bias | True | If False, then the layer does not use bias weights b_ih and b_hh.
+
+### Inputs
+
+Parameter | Default | Description
+--------- | ------- | -----------
 input |  | A (batch x input_size) tensor containing input features
 hidden |  | A (batch x hidden_size) tensor containing the initial hidden state for each element in the batch.
-Output |  | h'
-h' |  | A (batch x hidden_size) tensor containing the next hidden state for each element in the batch
-Members |  | 
-weight_ih |  | the learnable input-hidden weights, of shape (input_size x hidden_size)
-weight_hh |  | the learnable hidden-hidden weights, of shape (hidden_size x hidden_size)
-bias_ih |  | the learnable input-hidden bias, of shape (hidden_size)
-bias_hh |  | the learnable hidden-hidden bias, of shape (hidden_size)
+
+### Outputs
+
+Parameter |  Description
+--------- |  -----------
+h' | A (batch x hidden_size) tensor containing the next hidden state for each element in the batch
+
+### Members
+
+Parameter | Description
+--------- | -----------
+weight_ih | the learnable input-hidden weights, of shape (input_size x hidden_size)
+weight_hh | the learnable hidden-hidden weights, of shape (hidden_size x hidden_size)
+bias_ih | the learnable input-hidden bias, of shape (hidden_size)
+bias_hh | the learnable hidden-hidden bias, of shape (hidden_size)
 ## Hardshrink
 
 Applies the hard shrinkage function element-wise
@@ -870,22 +914,34 @@ Parameter | Default | Description
 input_size |  | The number of expected features in the input x
 hidden_size |  | The number of features in the hidden state h
 num_layers |  | the size of the convolving kernel.
-bias |  | If False, then the layer does not use bias weights b_ih and b_hh (default=True).
+bias | True | If False, then the layer does not use bias weights b_ih and b_hh.
 batch_first |  | If True, then the input tensor is provided as (batch, seq, feature)
 dropout |  | If non-zero, introduces a dropout layer on the outputs of each RNN layer
-Input |  | input, (h_0, c_0)
+
+### Inputs
+
+Parameter | Default | Description
+--------- | ------- | -----------
 input |  | A (seq_len x batch x input_size) tensor containing the features of the input sequence.
 h_0 |  | A (num_layers x batch x hidden_size) tensor containing the initial hidden state for each element in the batch.
 c_0 |  | A (num_layers x batch x hidden_size) tensor containing the initial cell state for each element in the batch.
-Output |  | output, (h_n, c_n)
-output |  | A (seq_len x batch x hidden_size) tensor containing the output features (h_t) from the last layer of the RNN, for each t
-h_n |  | A (num_layers x batch x hidden_size) tensor containing the hidden state for t=seq_len
-c_n |  | A (num_layers x batch x hidden_size) tensor containing the cell state for t=seq_len
-Members |  | 
-weight_ih_l[k] |  | the learnable input-hidden weights of the k-th layer (W_ir|W_ii|W_in), of shape (input_size x 3*hidden_size)
-weight_hh_l[k] |  | the learnable hidden-hidden weights of the k-th layer (W_hr|W_hi|W_hn), of shape (hidden_size x 3*hidden_size)
-bias_ih_l[k] |  | the learnable input-hidden bias of the k-th layer (b_ir|b_ii|b_in), of shape (3*hidden_size)
-bias_hh_l[k] |  | the learnable hidden-hidden bias of the k-th layer (W_hr|W_hi|W_hn), of shape (3*hidden_size)
+
+### Outputs
+
+Parameter |  Description
+--------- |  -----------
+output | A (seq_len x batch x hidden_size) tensor containing the output features (h_t) from the last layer of the RNN, for each t
+h_n | A (num_layers x batch x hidden_size) tensor containing the hidden state for t=seq_len
+c_n | A (num_layers x batch x hidden_size) tensor containing the cell state for t=seq_len
+
+### Members
+
+Parameter | Description
+--------- | -----------
+weight_ih_l[k] | the learnable input-hidden weights of the k-th layer (W_ir|W_ii|W_in), of shape (input_size x 3*hidden_size)
+weight_hh_l[k] | the learnable hidden-hidden weights of the k-th layer (W_hr|W_hi|W_hn), of shape (hidden_size x 3*hidden_size)
+bias_ih_l[k] | the learnable input-hidden bias of the k-th layer (b_ir|b_ii|b_in), of shape (3*hidden_size)
+bias_hh_l[k] | the learnable hidden-hidden bias of the k-th layer (W_hr|W_hi|W_hn), of shape (3*hidden_size)
 ## LSTMCell
 
 A long short-term memory (LSTM) cell.
@@ -918,18 +974,30 @@ Parameter | Default | Description
 --------- | ------- | -----------
 input_size |  | The number of expected features in the input x
 hidden_size |  | The number of features in the hidden state h
-bias |  | If False, then the layer does not use bias weights b_ih and b_hh (default=True).
-Input |  | input, h
+bias | True | If False, then the layer does not use bias weights b_ih and b_hh.
+
+### Inputs
+
+Parameter | Default | Description
+--------- | ------- | -----------
 input |  | A (batch x input_size) tensor containing input features
 hidden |  | A (batch x hidden_size) tensor containing the initial hidden state for each element in the batch.
-Output |  | h', c'
-h' |  | A (batch x hidden_size) tensor containing the next hidden state for each element in the batch
-h' |  | A (batch x hidden_size) tensor containing the next cell state for each element in the batch
-Members |  | 
-weight_ih |  | the learnable input-hidden weights, of shape (input_size x hidden_size)
-weight_hh |  | the learnable hidden-hidden weights, of shape (hidden_size x hidden_size)
-bias_ih |  | the learnable input-hidden bias, of shape (hidden_size)
-bias_hh |  | the learnable hidden-hidden bias, of shape (hidden_size)
+
+### Outputs
+
+Parameter |  Description
+--------- |  -----------
+h' | A (batch x hidden_size) tensor containing the next hidden state for each element in the batch
+c' | A (batch x hidden_size) tensor containing the next cell state for each element in the batch
+
+### Members
+
+Parameter | Description
+--------- | -----------
+weight_ih | the learnable input-hidden weights, of shape (input_size x hidden_size)
+weight_hh | the learnable hidden-hidden weights, of shape (hidden_size x hidden_size)
+bias_ih | the learnable input-hidden bias, of shape (hidden_size)
+bias_hh | the learnable hidden-hidden bias, of shape (hidden_size)
 ## LeakyReLU
 
 Applies element-wise, f(x) = max(0, x) + negative_slope * min(0, x)
@@ -985,9 +1053,13 @@ bias | True | If set to False, the layer will not learn an additive bias.
 ------ | ----- | ------------
  input | [*, in_features]  | Input can be of shape minibatch x in_features
 output | [*, out_features]   | Output is of shape minibatch x out_features
-Members:
-    weight: the learnable weights of the module of shape (out_features x in_features)
-    bias:   the learnable bias of the module of shape (out_features)
+
+### Members
+
+Parameter | Description
+--------- | -----------
+weight | the learnable weights of the module of shape (out_features x in_features)
+bias | the learnable bias of the module of shape (out_features)
 ## LogSigmoid
 
 Applies element-wise LogSigmoid(x) = log( 1 / (1 + exp(-x_i)))
@@ -1277,24 +1349,36 @@ Parameter | Default | Description
 input_size |  | The number of expected features in the input x
 hidden_size |  | The number of features in the hidden state h
 num_layers |  | the size of the convolving kernel.
-nonlinearity |  | The non-linearity to use ['tanh'|'relu'] (Default='tanh')
-bias |  | If False, then the layer does not use bias weights b_ih and b_hh (default=True).
+nonlinearity | 'tanh' | The non-linearity to use ['tanh'|'relu'].
+bias | True | If False, then the layer does not use bias weights b_ih and b_hh.
 batch_first |  | If True, then the input tensor is provided as (batch, seq, feature)
 dropout |  | If non-zero, introduces a dropout layer on the outputs of each RNN layer
-Input |  | input, h_0
+
+### Inputs
+
+Parameter | Default | Description
+--------- | ------- | -----------
 input |  | A (seq_len x batch x input_size) tensor containing the features of the input sequence.
 h_0 |  | A (num_layers x batch x hidden_size) tensor containing the initial hidden state for each element in the batch.
-Output |  | output, h_n
-output |  | A (seq_len x batch x hidden_size) tensor containing the output features (h_k) from the last layer of the RNN, for each k
-h_n |  | A (num_layers x batch x hidden_size) tensor containing the hidden state for k=seq_len
-Members |  | 
-weight_ih_l[k] |  | the learnable input-hidden weights of the k-th layer, of shape (input_size x hidden_size)
-weight_hh_l[k] |  | the learnable hidden-hidden weights of the k-th layer, of shape (hidden_size x hidden_size)
-bias_ih_l[k] |  | the learnable input-hidden bias of the k-th layer, of shape (hidden_size)
-bias_hh_l[k] |  | the learnable hidden-hidden bias of the k-th layer, of shape (hidden_size)
+
+### Outputs
+
+Parameter |  Description
+--------- |  -----------
+output | A (seq_len x batch x hidden_size) tensor containing the output features (h_k) from the last layer of the RNN, for each k
+h_n | A (num_layers x batch x hidden_size) tensor containing the hidden state for k=seq_len
+
+### Members
+
+Parameter | Description
+--------- | -----------
+weight_ih_l[k] | the learnable input-hidden weights of the k-th layer, of shape (input_size x hidden_size)
+weight_hh_l[k] | the learnable hidden-hidden weights of the k-th layer, of shape (hidden_size x hidden_size)
+bias_ih_l[k] | the learnable input-hidden bias of the k-th layer, of shape (hidden_size)
+bias_hh_l[k] | the learnable hidden-hidden bias of the k-th layer, of shape (hidden_size)
 ## RNNCell
 
-An Elman RNN cell with tanh or ReLU linearity.
+An Elman RNN cell with tanh or ReLU non-linearity.
 
 ```python
 h' = tanh(w_ih * x + b_ih  +  w_hh * h + b_hh)
@@ -1319,18 +1403,30 @@ Parameter | Default | Description
 --------- | ------- | -----------
 input_size |  | The number of expected features in the input x
 hidden_size |  | The number of features in the hidden state h
-bias |  | If False, then the layer does not use bias weights b_ih and b_hh (default=True).
-nonlinearity |  | The non-linearity to use ['tanh'|'relu'] (Default='tanh')
-Input |  | input, h
+bias | True | If False, then the layer does not use bias weights b_ih and b_hh.
+nonlinearity | 'tanh' | The non-linearity to use ['tanh'|'relu'].
+
+### Inputs
+
+Parameter | Default | Description
+--------- | ------- | -----------
 input |  | A (batch x input_size) tensor containing input features
 hidden |  | A (batch x hidden_size) tensor containing the initial hidden state for each element in the batch.
-Output |  | h'
-h' |  | A (batch x hidden_size) tensor containing the next hidden state for each element in the batch
-Members |  | 
-weight_ih |  | the learnable input-hidden weights, of shape (input_size x hidden_size)
-weight_hh |  | the learnable hidden-hidden weights, of shape (hidden_size x hidden_size)
-bias_ih |  | the learnable input-hidden bias, of shape (hidden_size)
-bias_hh |  | the learnable hidden-hidden bias, of shape (hidden_size)
+
+### Outputs
+
+Parameter |  Description
+--------- |  -----------
+h' | A (batch x hidden_size) tensor containing the next hidden state for each element in the batch
+
+### Members
+
+Parameter | Description
+--------- | -----------
+weight_ih | the learnable input-hidden weights, of shape (input_size x hidden_size)
+weight_hh | the learnable hidden-hidden weights, of shape (hidden_size x hidden_size)
+bias_ih | the learnable input-hidden bias, of shape (hidden_size)
+bias_hh | the learnable hidden-hidden bias, of shape (hidden_size)
 ## ReLU
 
 Applies the rectified linear unit function element-wise ReLU(x)= max(0,x)
