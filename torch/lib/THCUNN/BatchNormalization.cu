@@ -1,4 +1,5 @@
 #include "THCUNN.h"
+#include "common.h"
 
 #include "THCDeviceTensor.cuh"
 #include "THCDeviceTensorUtils.cuh"
@@ -233,6 +234,8 @@ void THNN_CudaBatchNormalization_updateOutput(
   THCudaTensor *runningVar_, THCudaTensor *saveMean_, THCudaTensor *saveStd_,
   bool train, double momentum, double eps) {
 
+  THCUNN_assertSameGPU(state, 8, input_, output_, weight_, bias_, runningMean_,
+    runningVar_, saveMean_, saveStd_);
   DeviceTensor3 input = devicetensor<3>(state, input_);
   DeviceTensor3 output = devicetensor<3>(state, output_);
   DeviceTensor1 weight = devicetensor<1>(state, weight_);
@@ -335,6 +338,8 @@ void THNN_CudaBatchNormalization_backward(
   THCudaTensor *weight_, THCudaTensor *runningMean_, THCudaTensor *runningVar_,
   THCudaTensor *saveMean_, THCudaTensor *saveStd_, bool train, float scale, double eps) {
 
+  THCUNN_assertSameGPU(state, 10, input_, gradOutput_, gradInput_, gradWeight_,
+    gradBias_, weight_, runningMean_, runningVar_, saveMean_, saveStd_);
   DeviceTensor3 input = devicetensor<3>(state, input_);
   DeviceTensor3 gradOutput = devicetensor<3>(state, gradOutput_);
   DeviceTensor3 gradInput = devicetensor<3>(state, gradInput_);
