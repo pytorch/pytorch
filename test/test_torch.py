@@ -2535,6 +2535,14 @@ class TestTorch(TestCase):
             array = np.array([1, 2, 3, 4], dtype=dtype)
             self.assertEqual(torch.from_numpy(array), torch.Tensor([1, 2, 3, 4]))
 
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_numpy_index(self):
+        i = np.int32([0, 1, 2])
+        x = torch.randn(5, 5)
+        for idx in i:
+            self.assertFalse(isinstance(idx, int))
+            self.assertEqual(x[idx], x[int(idx)])
+
 
 if __name__ == '__main__':
     unittest.main()
