@@ -2,6 +2,7 @@ from copy import copy
 from collections import OrderedDict
 
 from ..modules.container import Container
+import torch.cuda.comm as comm
 
 
 def _replicate_module(module, gpu, param_remap):
@@ -11,6 +12,9 @@ def _replicate_module(module, gpu, param_remap):
     replica._parameters = OrderedDict()
     for key, param in module._parameters.items():
         replica._parameters[key] = param_remap.get(param)
+    replica._buffers = {}
+    for key, buffer in module._buffers.items():
+        replica._buffers[key] = param_remap.get(buffer)
     if isinstance(replica, Container):
         replica._modules = OrderedDict()
         for name, child in module._modules.items():
@@ -27,7 +31,12 @@ def replicate(module, device_ids):
             continue
         seen_params.add(param)
         param_copies = Broadcast(device_ids)(param)
-        for copy, remap in zip(param_copies, param_remap):
-            remap[param] = copy
+        for param_copy, remap in zip(param_copies, param_remap):
+            remap[param] = param_copy
+    for m in module.modules():
+        for buffer in m._buffers.values():
+            copies = comm.broadcast(buffer, device_ids)
+            for buf_copy, remap in zip(copies, param_remap):
+                remap[buffer] = buf_copy
     return [_replicate_module(module, device_id, remap)
             for device_id, remap in zip(device_ids, param_remap)]

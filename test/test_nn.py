@@ -12,7 +12,7 @@ import torch.nn.parallel as dp
 from torch.autograd import Variable
 from torch.nn import Parameter
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
-    module_tests, criterion_tests, TEST_CUDA, TEST_CUDNN, PRECISION
+    module_tests, criterion_tests, TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, PRECISION
 from common import freeze_rng_state
 
 def default_tensor_type(type):
@@ -450,7 +450,7 @@ class TestNN(NNTestCase):
         self._test_maxpool_indices(3)
 
     def _test_scatter(self, x):
-        if not TEST_CUDA or torch.cuda.device_count() < 2:
+        if not TEST_MULTIGPU:
             raise unittest.SkipTest("Only one GPU detected")
         x = Variable(x)
         result = dp.scatter(x, (0, 1))
@@ -464,10 +464,10 @@ class TestNN(NNTestCase):
         self._test_scatter(torch.randn(4, 4))
 
     def test_scatter_gpu(self):
-        self._test_scatter(torch.randn(4, 4))
+        self._test_scatter(torch.randn(4, 4).cuda())
 
     def _test_gather(self, output_device):
-        if not TEST_CUDA or torch.cuda.device_count() < 2:
+        if not TEST_MULTIGPU:
             raise unittest.SkipTest("Only one GPU detected")
         inputs = (
             Variable(torch.randn(2, 4).cuda(0)),
@@ -488,11 +488,10 @@ class TestNN(NNTestCase):
     def test_gather_gpu(self):
         self._test_gather(0)
 
-    @unittest.skipIf(not TEST_CUDA or torch.cuda.device_count() < 2,
-                     "Only one GPU detected")
-    def _test_replicate(self):
+    @unittest.skipIf(not TEST_MULTIGPU, "Only one GPU detected")
+    def test_replicate(self):
         module = nn.Linear(10, 5).float().cuda()
-        input = torch.randn(2, 10).float().cuda()
+        input = Variable(torch.randn(2, 10).float().cuda())
         expected_output = module(input).data
         replicas = dp.replicate(module, (0, 1))
         for i, replica in enumerate(replicas):
@@ -501,8 +500,17 @@ class TestNN(NNTestCase):
             replica_input = input.cuda(i)
             self.assertEqual(replica(replica_input).data, expected_output)
 
-    @unittest.skipIf(not TEST_CUDA or torch.cuda.device_count() < 2,
-                     "Only one GPU detected")
+    @unittest.skipIf(not TEST_MULTIGPU, "Only one GPU detected")
+    def test_replicate_buffers(self):
+        net = nn.Container()
+        net.bn = nn.BatchNorm2d(10)
+        net.cuda()
+        replicas = dp.replicate(net, (0, 1))
+        for i, replica in enumerate(replicas):
+            self.assertEqual(replica.bn.running_mean.get_device(), i, 'buffer on wrong device')
+            self.assertEqual(replica.bn.running_var.get_device(), i, 'buffer on wrong device')
+
+    @unittest.skipIf(not TEST_MULTIGPU, "Only one GPU detected")
     def test_parallel_apply(self):
         l1 = nn.Linear(10, 5).float().cuda(0)
         l2 = nn.Linear(10, 5).float().cuda(1)
@@ -520,8 +528,7 @@ class TestNN(NNTestCase):
         inputs = (i1, Variable(i2.data.new()))
         expected_outputs = (expected1, expected2.new())
 
-    @unittest.skipIf(not TEST_CUDA or torch.cuda.device_count() < 2,
-                     "Only one GPU detected")
+    @unittest.skipIf(not TEST_MULTIGPU, "Only one GPU detected")
     def test_data_parallel(self):
         l = nn.Linear(10, 5).float().cuda()
         i = Variable(torch.randn(20, 10).float().cuda(1))
