@@ -23,7 +23,6 @@ class CuDNNPlugin(CWrapPlugin):
 
     RETURN_WRAPPER = {
         'Convolution*':     Template('return THPWrapper_New($result, [](void* arg) { delete (Convolution*)arg; });'),
-        'THTensor*':        Template('return THPTensor_(New)($result);'),
     }
 
     METHODS_DECLARATION = Template("""

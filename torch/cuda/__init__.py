@@ -2,7 +2,6 @@ from __future__ import print_function
 import contextlib
 import platform
 import ctypes
-import os
 import torch
 
 _initialized = False
