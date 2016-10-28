@@ -281,6 +281,25 @@ class TestAutograd(TestCase):
         y.sum().backward()
         self.assertEqual(x.grad, torch.ones(5, 5) * 2)
 
+    def test_no_grad(self):
+        x = Variable(torch.randn(10, 10), requires_grad=True)
+        y = x + 2
+        y = y.no_grad()
+        z = y * 4 + 2
+        self.assertFalse(y.requires_grad)
+        self.assertFalse(z.requires_grad)
+
+        x = Variable(torch.randn(10, 10), requires_grad=True)
+        y = x * 2
+        y = y.no_grad()
+        self.assertFalse(y.requires_grad)
+        self.assertFalse(y.creator.requires_grad)
+        z = x + y
+        z.sum().backward()
+        # This is an incorrect gradient, but we assume that's what the user
+        # wanted. no_grad() is an advanced option.
+        self.assertEqual(x.grad, torch.ones(10, 10))
+
     def test_type_conversions(self):
         import torch.cuda
         x = Variable(torch.randn(5, 5))
