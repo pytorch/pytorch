@@ -253,6 +253,27 @@ static PyObject * THPTensor_(storage)(THPTensor *self, PyObject *args)
 ]]
 
 [[
+  python_name: index
+  name: THPTensor_(getValue)<true>
+  only_register: True
+  override_method_flags: METH_O
+]]
+
+[[
+  python_name: set_index
+  name: THPTensor_(setIndex)
+  only_register: True
+]]
+PyObject * THPTensor_(setIndex)(THPTensor *self, PyObject *args)
+{
+  THPUtils_assert(PyTuple_GET_SIZE(args) == 2, "set_index takes exactly two "
+      "arguments (%d given)", (int)PyTuple_GET_SIZE(args));
+  if (THPTensor_(setValue)<true>(self, PyTuple_GET_ITEM(args, 0), PyTuple_GET_ITEM(args, 1)) != 0)
+    return NULL;
+  Py_RETURN_NONE;
+}
+
+[[
   name: resize_
   return: self
   cname: resize

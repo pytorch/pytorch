@@ -54,11 +54,15 @@ class Variable(_C._VariableBase):
     def __setitem__(self, key, value):
         if (isinstance(key, Variable) and
             type(key.data).__name__ == 'ByteTensor'):
-            return MaskedFill(value, inplace=True)(self, key)
-        if isinstance(value, Variable):
-            return SetItem(key)(self, value)
+            if isinstance(value, Variable):
+                return MaskedCopy(inplace=True)(self, key, value)
+            else:
+                return MaskedFill(value, inplace=True)(self, key)
         else:
-            return SetItem(key, value)(self)
+            if isinstance(value, Variable):
+                return SetItem(key)(self, value)
+            else:
+                return SetItem(key, value)(self)
 
     def __iter__(self):
         return iter(map(lambda i: self[i], range(self.size(0))))

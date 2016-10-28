@@ -48,8 +48,6 @@ PyObject * THPTensor_(New)(THTensor *ptr)
   return result;
 }
 
-#include "TensorMethods.cpp"
-
 static void THPTensor_(dealloc)(THPTensor* self)
 {
   THTensor_(free)(LIBRARY_STATE self->cdata);
@@ -506,6 +504,7 @@ invalid_index_type:
 #undef INDEX_SCALAR
 #undef GET_OFFSET
 
+template<bool force_tensor>
 static PyObject * THPTensor_(getValue)(THPTensor *self, PyObject *index)
 {
   HANDLE_TH_ERRORS
@@ -531,8 +530,17 @@ static PyObject * THPTensor_(getValue)(THPTensor *self, PyObject *index)
   try {
     if (tresult)
       return THPTensor_(New)(tresult);
-    if (sresult)
-      return THPUtils_(newReal)(THStorage_(get)(LIBRARY_STATE sresult, storage_offset));
+    if (sresult) {
+      if (force_tensor) {
+        THTensorPtr t = THTensor_(newWithStorage1d)(LIBRARY_STATE sresult, storage_offset, 1, -1);
+        THPTensorPtr result = (THPTensor*)THPTensor_(New)(t.get());
+        if (!result) return NULL;
+        t.release();
+        return (PyObject*)result.release();
+      } else {
+        return THPUtils_(newReal)(THStorage_(get)(LIBRARY_STATE sresult, storage_offset));
+      }
+    }
   } catch (...) {
     if (tresult) {
       THTensor_(free)(LIBRARY_STATE tresult);
@@ -547,6 +555,7 @@ static PyObject * THPTensor_(getValue)(THPTensor *self, PyObject *index)
   END_HANDLE_TH_ERRORS
 }
 
+template<bool force_tensor>
 int THPTensor_(setValue)(THPTensor *self, PyObject *index, PyObject *value)
 {
   HANDLE_TH_ERRORS
@@ -566,7 +575,6 @@ int THPTensor_(setValue)(THPTensor *self, PyObject *index, PyObject *value)
       THPUtils_setError("can't assign %s to a " THPTensorStr " using a mask "
           "(only " THPTensorStr " or %s are supported)",
           THPUtils_typename(value), THPUtils_typeTraits<real>::python_type_str);
-      // TODO
     }
     return 0;
   }
@@ -579,14 +587,20 @@ int THPTensor_(setValue)(THPTensor *self, PyObject *index, PyObject *value)
 
   THTensorPtr tresult_ptr = tresult;
   if (sresult) {
-    if (!THPUtils_(checkReal)(value)) {
-      THPUtils_setError("can't assign a %s to a scalar value of type %s",
-          THPUtils_typename(value), THPUtils_typeTraits<real>::python_type_str);
-      return -1;
+    if (!force_tensor) {
+      if (!THPUtils_(checkReal)(value)) {
+        THPUtils_setError("can't assign a %s to a scalar value of type %s",
+            THPUtils_typename(value), THPUtils_typeTraits<real>::python_type_str);
+        return -1;
+      }
+      THStorage_(set)(LIBRARY_STATE sresult, storage_offset, THPUtils_(unpackReal)(value));
+      return 0;
+    } else {
+      tresult_ptr = THTensor_(newWithStorage1d)(LIBRARY_STATE sresult, storage_offset, 1, -1);
+      tresult = tresult_ptr.get();
     }
-    THStorage_(set)(LIBRARY_STATE sresult, storage_offset, THPUtils_(unpackReal)(value));
-    return 0;
-  } else if (tresult) {
+  }
+  if (tresult) {
     if (THPUtils_(checkReal)(value)) {
       THTensor_(fill)(LIBRARY_STATE tresult, THPUtils_(unpackReal)(value));
     } else {
@@ -607,10 +621,12 @@ int THPTensor_(setValue)(THPTensor *self, PyObject *index, PyObject *value)
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
+#include "TensorMethods.cpp"
+
 static PyMappingMethods THPTensor_(mappingmethods) = {
   NULL,
-  (binaryfunc)THPTensor_(getValue),
-  (objobjargproc)THPTensor_(setValue)
+  (binaryfunc)THPTensor_(getValue)<false>,
+  (objobjargproc)THPTensor_(setValue)<false>
 };
 
 // TODO: implement equality

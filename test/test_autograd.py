@@ -210,39 +210,48 @@ class TestAutograd(TestCase):
         self.assertNotEqual(x._version, x_version)
         self.assertNotEqual(z._version, z_version)
 
-    def _test_setitem(self, index):
-        x = Variable(torch.ones(5, 5), requires_grad=True)
+    def _test_setitem(self, size, index):
+        x = Variable(torch.ones(*size), requires_grad=True)
         y = x + 2
         y_version = y._version
         y[index] = 2
         self.assertNotEqual(y._version, y_version)
-        y.backward(torch.ones(5, 5))
-        expected_grad = torch.ones(5, 5)
+        y.backward(torch.ones(*size))
+        expected_grad = torch.ones(*size)
         if isinstance(index, Variable):
             index = index.data
         expected_grad[index] = 0
         self.assertEqual(x.grad, expected_grad)
 
-    def test_setitem(self):
-        self._test_setitem(1)
-
-    def test_setitem_mask(self):
-        mask = Variable(torch.ByteTensor(5, 5).bernoulli_(), requires_grad=False)
-        self._test_setitem(mask)
-
-    def test_setitem_tensor(self):
-        x = Variable(torch.ones(5, 5), requires_grad=True)
+    def _test_setitem_tensor(self, size, index):
+        x = Variable(torch.ones(*size), requires_grad=True)
         y = x + 2
         y_version = y._version
-        value = Variable(torch.Tensor(5).fill_(7), requires_grad=True)
-        index = 3
+        value = Variable(torch.Tensor(x[index].size()).fill_(7), requires_grad=True)
         y[index] = value
         self.assertNotEqual(y._version, y_version)
-        y.backward(torch.ones(5, 5))
-        expected_grad_input = torch.ones(5, 5)
+        y.backward(torch.ones(*size))
+        expected_grad_input = torch.ones(*size)
+        if isinstance(index, Variable):
+            index = index.data
         expected_grad_input[index] = 0
         self.assertEqual(x.grad, expected_grad_input)
-        self.assertEqual(value.grad, torch.ones(5))
+        self.assertEqual(value.grad, torch.ones(value.size()))
+
+    def test_setitem(self):
+        self._test_setitem((5, 5), 1)
+        self._test_setitem((5,), 1)
+        self._test_setitem((1,), 0)
+        self._test_setitem_tensor((5, 5), 3)
+        self._test_setitem_tensor((5,), 3)
+
+    def test_setitem_mask(self):
+        mask = torch.ByteTensor(5, 5).bernoulli_()
+        self._test_setitem((5, 5), Variable(mask))
+        self._test_setitem((5,), Variable(mask[0]))
+        self._test_setitem((1,), Variable(mask[0, 0:1]))
+        self._test_setitem_tensor((5, 5), Variable(mask))
+        self._test_setitem_tensor((5,), Variable(mask[0]))
 
     def test_type_conversions(self):
         import torch.cuda
