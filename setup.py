@@ -194,6 +194,7 @@ if WITH_CUDA:
         "torch/csrc/cuda/Storage.cpp",
         "torch/csrc/cuda/Stream.cpp",
         "torch/csrc/cuda/Tensor.cpp",
+        "torch/csrc/cuda/AutoGPU.cpp",
         "torch/csrc/cuda/utils.cpp",
         "torch/csrc/cuda/serialization.cpp",
     ]

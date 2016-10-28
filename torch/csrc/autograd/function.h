@@ -24,6 +24,9 @@ struct THPFunctionPtr: public THPObjectPtr {
     int output_nr;
 };
 
+// (class, gpu id, sizes)
+using output_info_type = std::tuple<PyObject *, int, std::vector<long>>;
+
 struct THPFunction {
     PyObject_HEAD
 
@@ -37,6 +40,7 @@ struct THPFunction {
     PyObject *dirty_tensors;
 
     THPFunctionPtr *previous_functions;
+    std::vector<output_info_type> *output_info;
     int num_inputs;
     int num_outputs;
     char requires_grad;

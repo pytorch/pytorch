@@ -253,6 +253,34 @@ class TestAutograd(TestCase):
         self._test_setitem_tensor((5, 5), Variable(mask))
         self._test_setitem_tensor((5,), Variable(mask[0]))
 
+    def test_unused_output(self):
+        x = Variable(torch.randn(10, 10), requires_grad=True)
+        outputs = x.chunk(5)
+        o = outputs[2]
+        o = o * 4 + 2
+        o.sum().backward()
+        expected_grad = torch.zeros(10, 10)
+        expected_grad[4:6] = 4
+        self.assertEqual(x.grad, expected_grad)
+
+        x.grad.zero_()
+        grad_output = torch.randn(2, 10)
+        outputs = x.chunk(5)
+        outputs[0].backward(grad_output)
+        expected_grad = torch.zeros(10, 10)
+        expected_grad[:2] = grad_output
+        self.assertEqual(x.grad, expected_grad)
+
+    @unittest.skipIf(not torch.cuda.is_available() or torch.cuda.device_count() < 2,
+            "CUDA not available or <2 GPUs detected")
+    def test_unused_output_gpu(self):
+        from torch.nn.parallel.functions import Broadcast
+        x = Variable(torch.randn(5, 5).float().cuda(), requires_grad=True)
+        outputs = Broadcast(list(range(torch.cuda.device_count())))(x)
+        y = outputs[-1] * 2
+        y.sum().backward()
+        self.assertEqual(x.grad, torch.ones(5, 5) * 2)
+
     def test_type_conversions(self):
         import torch.cuda
         x = Variable(torch.randn(5, 5))

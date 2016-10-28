@@ -25,6 +25,7 @@
 #include "Tensor.h"
 #include "Size.h"
 #include "Module.h"
+#include "Types.h"
 #include "utils.h" // This requires defined Storage and Tensor types
 #include "byte_order.h"
 
