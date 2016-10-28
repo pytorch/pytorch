@@ -159,7 +159,6 @@ cudnnConvolutionBwdFilterAlgo_t chooseBackwardFilterAlgorithm(
     cudnnConvolutionBwdFilterAlgoPerf_t perfResults;
     CHECK(cudnnFindConvolutionBackwardFilterAlgorithm(handle, conv.idesc.desc,
         conv.odesc.desc, conv.cdesc.desc, conv.wdesc.desc, 1, &algoCount, &perfResults));
-    return perfResults.algo;
     bwd_filter_algos.insert(conv.params, perfResults.algo);
     return perfResults.algo;
   }

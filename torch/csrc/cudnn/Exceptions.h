@@ -4,12 +4,6 @@
 #include <cudnn.h>
 #include <stdexcept>
 
-#define END_HANDLE_CUDNN_ERRORS                                              \
-} catch (std::cudnn_exception &e) {                                          \
-  PyErr_SetString(PyExc_RuntimeError, e.what());                             \
-  return retval;                                                             \
-}
-
 namespace torch { namespace cudnn {
 
 class cudnn_exception : public std::runtime_error {
