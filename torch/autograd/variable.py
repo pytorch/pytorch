@@ -36,8 +36,14 @@ class Variable(_C._VariableBase):
     @requires_grad.setter
     def requires_grad(self, value):
         if self.creator is not None:
+            if value is False:
+                hint = (" If you want to use a computed variable in a subgraph "
+                    "that doesn't require differentiation use "
+                    "var_no_grad = var.no_grad().")
+            else:
+                hint = ''
             raise RuntimeError("you can only change requires_grad flags of "
-                    "leaf variables")
+                    "leaf variables." + hint)
         self._requires_grad = value
 
     def __getattr__(self, name):
@@ -120,6 +126,9 @@ class Variable(_C._VariableBase):
                 hook(grad_output[0])
         self.grad.add_(grad_output[0])
         return tuple()
+
+    def no_grad(self):
+        return NoGrad()(self)
 
     def contiguous(self):
         self.data = self.data.contiguous()
