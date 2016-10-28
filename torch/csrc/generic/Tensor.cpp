@@ -24,28 +24,41 @@
 
 PyObject *THPTensorClass = NULL;
 
-PyObject * THPTensor_(New)(THTensor *ptr)
+PyObject * THPTensor_(NewEmpty)()
 {
-  PyObject *args = PyTuple_New(0);
-  PyObject *kwargs = NULL;
-  if (!args) {
-    PyErr_SetString(PyExc_RuntimeError, "Could not create a new storage object - "
-        "failed to allocate argument tuple");
-    return NULL;
+  return THPTensor_(New)(THTensor_(new)(LIBRARY_STATE_NOARGS));
+}
+
+PyObject * THPTensor_(New)(THTensor *tensor)
+{
+  THTensorPtr ptr(tensor);
+  if (!tensor->storage) {
+    tensor->storage = THStorage_(new)(LIBRARY_STATE_NOARGS);
   }
-  if (ptr) {
-    kwargs = Py_BuildValue("{s:N}", "cdata", PyLong_FromVoidPtr(ptr));
-    if (!kwargs) {
-      PyErr_SetString(PyExc_RuntimeError, "Could not create a new storage object - "
-          "failed to allocate keyword argument dictionary");
-      Py_DECREF(args);
-      return NULL;
-    }
+  PyTypeObject *type = (PyTypeObject *)THPTensorClass;
+  PyObject *obj = type->tp_alloc(type, 0);
+  if (obj) {
+    ((THPTensor *)obj)->cdata = ptr.release();
   }
-  PyObject *result = PyObject_Call(THPTensorClass, args, kwargs);
-  Py_DECREF(args);
-  Py_XDECREF(kwargs);
-  return result;
+  return obj;
+}
+
+static THTensor* THPTensor_(_new)()
+{
+  THTensorPtr tensor = THTensor_(new)(LIBRARY_STATE_NOARGS);
+  if (!tensor->storage) {
+    tensor->storage = THStorage_(new)(LIBRARY_STATE_NOARGS);
+  }
+  return tensor.release();
+}
+
+static THTensor* THPTensor_(_newWithSize)(THLongStorage *size)
+{
+  THTensorPtr tensor = THTensor_(newWithSize)(LIBRARY_STATE size, NULL);
+  if (!tensor->storage) {
+    tensor->storage = THStorage_(new)(LIBRARY_STATE_NOARGS);
+  }
+  return tensor.release();
 }
 
 static void THPTensor_(dealloc)(THPTensor* self)
@@ -121,7 +134,9 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
   Py_ssize_t num_args = args ? PyTuple_Size(args) : 0;
 
   THPTensorPtr self = (THPTensor *)type->tp_alloc(type, 0);
-  THPUtils_assert(self, "failed to allocate a " THPTensorStr " object");
+  if (!self) {
+    return NULL;
+  }
   self->cdata = NULL;
 #ifdef THC_GENERIC_FILE
   THCPAutoGPU gpu_guard;
@@ -160,7 +175,7 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
 
   // torch.Tensor()
   if (num_args == 0) {
-    self->cdata = THTensor_(new)(LIBRARY_STATE_NOARGS);
+    self->cdata = THPTensor_(_new)();
     return (PyObject*)self.release();
   }
 
@@ -176,7 +191,7 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
   // torch.Tensor(torch.Size sizes)
   if (num_args == 1 && THPSize_Check(first_arg)) {
     THLongStoragePtr sizes = THPUtils_unpackSize(first_arg);
-    self->cdata = THTensor_(newWithSize)(LIBRARY_STATE sizes.get(), nullptr);
+    self->cdata = THPTensor_(_newWithSize)(sizes.get());
     return (PyObject *)self.release();
   }
 
@@ -205,7 +220,7 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
     THPUtils_assert(length >= 0, "couldn't obtain the length of %s",
         THPUtils_typename(first_arg));
     if (length == 0) {
-      self->cdata = THTensor_(new)(LIBRARY_STATE_NOARGS);
+      self->cdata = THPTensor_(_new)();
       return (PyObject*)self.release();
     }
 
@@ -350,7 +365,7 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
   // torch.Tensor(int ...)
   THLongStoragePtr sizes;
   if (THPUtils_tryUnpackLongVarArgs(args, 0, sizes)) {
-    self->cdata = THTensor_(newWithSize)(LIBRARY_STATE sizes.get(), nullptr);
+    self->cdata = THPTensor_(_newWithSize)(sizes.get());
     return (PyObject *)self.release();
   }
 
@@ -400,7 +415,7 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
   t->storageOffset + t->stride[0] * idx;
 
 static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
-    THTensor * &tresult, THStorage * &sresult, long &storage_offset)
+    THTensorPtr &tresult, THStorage * &sresult, long &storage_offset)
 {
 #ifdef WITH_NUMPY
   static PyArray_Descr *NumpyLongArrDescr = PyArray_DescrFromType(NPY_INT64);
@@ -408,84 +423,77 @@ static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
 #endif
   tresult = NULL;
   sresult = NULL;
-  try {
-    // Indexing with an integer
-    if(IS_SCALAR(index)) {
-      THTensor *self_t = self->cdata;
-      INDEX_SCALAR(0, index, self_t,
-        // 1D tensor
-        sresult = self_t->storage;
-        storage_offset = GET_OFFSET(self_t, idx),
-        // >1D tensor
-        tresult = THTensor_(newWithTensor)(LIBRARY_STATE self_t);
-        THTensor_(select)(LIBRARY_STATE tresult, NULL, 0, idx)
-      )
-      return true;
-    // Indexing with a slice
-    } else if (PySlice_Check(index)) {
-      tresult = THTensor_(newWithTensor)(LIBRARY_STATE self->cdata);
-      Py_ssize_t start, end, length;
-      if (!THPUtils_parseSlice(index, THTensor_(size)(LIBRARY_STATE tresult, 0), &start, &end, &length))
-        return false;
-      THTensor_(narrow)(LIBRARY_STATE tresult, NULL, 0, start, length);
-      return true;
-    // Indexing multiple dimensions
-    } else if(PyTuple_Check(index)) {
-      long num_index_dim = (long)PyTuple_Size(index);
-      long num_effective_index = num_index_dim;
-      long num_tensor_dim = THTensor_(nDimension)(LIBRARY_STATE self->cdata);
-      long ellipsis_idx = num_tensor_dim + 1;
-      for (int i = 0; i < num_index_dim; i++) {
-        if (PyTuple_GET_ITEM(index, i) == Py_Ellipsis) {
-          ellipsis_idx = i;
-          num_effective_index--;
-          break;
-        }
+  // Indexing with an integer
+  if(IS_SCALAR(index)) {
+    THTensor *self_t = self->cdata;
+    INDEX_SCALAR(0, index, self_t,
+      // 1D tensor
+      sresult = self_t->storage;
+      storage_offset = GET_OFFSET(self_t, idx),
+      // >1D tensor
+      tresult = THTensor_(newWithTensor)(LIBRARY_STATE self_t);
+      THTensor_(select)(LIBRARY_STATE tresult.get(), NULL, 0, idx)
+    )
+    return true;
+  // Indexing with a slice
+  } else if (PySlice_Check(index)) {
+    tresult = THTensor_(newWithTensor)(LIBRARY_STATE self->cdata);
+    Py_ssize_t start, end, length;
+    if (!THPUtils_parseSlice(index, THTensor_(size)(LIBRARY_STATE tresult.get(), 0), &start, &end, &length))
+      return false;
+    THTensor_(narrow)(LIBRARY_STATE tresult.get(), NULL, 0, start, length);
+    return true;
+  // Indexing multiple dimensions
+  } else if(PyTuple_Check(index)) {
+    long num_index_dim = (long)PyTuple_Size(index);
+    long num_effective_index = num_index_dim;
+    long num_tensor_dim = THTensor_(nDimension)(LIBRARY_STATE self->cdata);
+    long ellipsis_idx = num_tensor_dim + 1;
+    for (int i = 0; i < num_index_dim; i++) {
+      if (PyTuple_GET_ITEM(index, i) == Py_Ellipsis) {
+        ellipsis_idx = i;
+        num_effective_index--;
+        break;
       }
-      THPUtils_assertRet(false, num_effective_index <= num_tensor_dim,
-          "trying to index %ld dimensions of a %ld dimensional tensor",
-          num_effective_index, num_tensor_dim);
+    }
+    THPUtils_assertRet(false, num_effective_index <= num_tensor_dim,
+        "trying to index %ld dimensions of a %ld dimensional tensor",
+        num_effective_index, num_tensor_dim);
 
-      tresult = THTensor_(newWithTensor)(LIBRARY_STATE self->cdata);
-      int t_dim = 0;
-      for(int dim = 0; dim < num_index_dim; dim++) {
-        if (dim == ellipsis_idx) {
-          t_dim = tresult->nDimension - (num_index_dim - dim - 1);
-          continue;
-        }
-        PyObject *dimidx = PyTuple_GET_ITEM(index, dim);
-        if(IS_SCALAR(dimidx)) {
-          INDEX_SCALAR(t_dim, dimidx, tresult,
-              // 1D tensor
-              sresult = tresult->storage;
-              storage_offset = GET_OFFSET(tresult, idx);
-              THTensor_(free)(LIBRARY_STATE tresult);
-              tresult = NULL;
-              return true,
-              // >1D tensor
-              THTensor_(select)(LIBRARY_STATE tresult, NULL, t_dim, idx)
-            )
-        } else if (PySlice_Check(dimidx)) {
-          Py_ssize_t start, end, length;
-          if (!THPUtils_parseSlice(dimidx, THTensor_(size)(LIBRARY_STATE tresult, t_dim), &start, &end, &length))
-            return false;
-          THTensor_(narrow)(LIBRARY_STATE tresult, NULL, t_dim++, start, length);
-        } else {
-          THTensor_(free)(LIBRARY_STATE tresult);
-          goto invalid_index_type;
-        }
+    tresult = THTensor_(newWithTensor)(LIBRARY_STATE self->cdata);
+    int t_dim = 0;
+    bool valid = true;
+    for(int dim = 0; dim < num_index_dim; dim++) {
+      if (dim == ellipsis_idx) {
+        t_dim = tresult->nDimension - (num_index_dim - dim - 1);
+        continue;
       }
+      PyObject *dimidx = PyTuple_GET_ITEM(index, dim);
+      if(IS_SCALAR(dimidx)) {
+        INDEX_SCALAR(t_dim, dimidx, tresult,
+            // 1D tensor
+            sresult = tresult->storage;
+            storage_offset = GET_OFFSET(tresult, idx);
+            tresult = NULL;
+            return true,
+            // >1D tensor
+            THTensor_(select)(LIBRARY_STATE tresult.get(), NULL, t_dim, idx)
+          )
+      } else if (PySlice_Check(dimidx)) {
+        Py_ssize_t start, end, length;
+        if (!THPUtils_parseSlice(dimidx, THTensor_(size)(LIBRARY_STATE tresult.get(), t_dim), &start, &end, &length))
+          return false;
+        THTensor_(narrow)(LIBRARY_STATE tresult.get(), NULL, t_dim++, start, length);
+      } else {
+        tresult = NULL;
+        valid = false;
+      }
+    }
+    if (valid) {
       return true;
     }
-  } catch(...) {
-    if (tresult) {
-      THTensor_(free)(LIBRARY_STATE tresult);
-      tresult = NULL;
-    }
-    throw;
   }
 
-invalid_index_type:
   THPUtils_setError("indexing a tensor with an object of type %s. The only "
       "supported types are integers, slices"
 #ifdef WITH_NUMPY
@@ -508,45 +516,31 @@ template<bool force_tensor>
 static PyObject * THPTensor_(getValue)(THPTensor *self, PyObject *index)
 {
   HANDLE_TH_ERRORS
-#ifndef THC_GENERIC_FILE
-  if(THPByteTensor_Check(index)) {
-    THTensor *t = THTensor_(new)(LIBRARY_STATE_NOARGS);
-    THTensor_(maskedSelect)(LIBRARY_STATE t, self->cdata, ((THPByteTensor*)index)->cdata);
-    return THPTensor_(New)(t);
-  }
-#else
-  if(THCPByteTensor_Check(index)) {
-    THTensor *t = THTensor_(new)(LIBRARY_STATE_NOARGS);
-    THTensor_(maskedSelect)(LIBRARY_STATE t, self->cdata, ((THCPByteTensor*)index)->cdata);
-    return THPTensor_(New)(t);
-  }
-#endif
 
-  THTensor *tresult;
+#ifndef THC_GENERIC_FILE
+  THPByteTensor *mask = THPByteTensor_Check(index) ? (THPByteTensor*)index : NULL;
+#else
+  THCPByteTensor *mask = THCPByteTensor_Check(index) ? (THCPByteTensor*)index : NULL;
+#endif
+  if (mask) {
+    THTensorPtr t = THTensor_(new)(LIBRARY_STATE_NOARGS);
+    THTensor_(maskedSelect)(LIBRARY_STATE t.get(), self->cdata, mask->cdata);
+    return THPTensor_(New)(t.release());
+  }
+
+  THTensorPtr tresult;
   THStorage *sresult;
   long storage_offset;
   if (!THPTensor_(_index)(self, index, tresult, sresult, storage_offset))
     return NULL;
-  try {
-    if (tresult)
-      return THPTensor_(New)(tresult);
-    if (sresult) {
-      if (force_tensor) {
-        THTensorPtr t = THTensor_(newWithStorage1d)(LIBRARY_STATE sresult, storage_offset, 1, -1);
-        THPTensorPtr result = (THPTensor*)THPTensor_(New)(t.get());
-        if (!result) return NULL;
-        t.release();
-        return (PyObject*)result.release();
-      } else {
-        return THPUtils_(newReal)(THStorage_(get)(LIBRARY_STATE sresult, storage_offset));
-      }
+  if (tresult)
+    return THPTensor_(New)(tresult.release());
+  if (sresult) {
+    if (force_tensor) {
+      return THPTensor_(New)(THTensor_(newWithStorage1d)(LIBRARY_STATE sresult, storage_offset, 1, -1));
+    } else {
+      return THPUtils_(newReal)(THStorage_(get)(LIBRARY_STATE sresult, storage_offset));
     }
-  } catch (...) {
-    if (tresult) {
-      THTensor_(free)(LIBRARY_STATE tresult);
-      tresult = NULL;
-    }
-    throw;
   }
   THPUtils_setError("An unknown error has occured when indexing a tensor "
       "in THPTensor_(getValue). Please report this in a github issue at: "
@@ -556,16 +550,16 @@ static PyObject * THPTensor_(getValue)(THPTensor *self, PyObject *index)
 }
 
 template<bool force_tensor>
-int THPTensor_(setValue)(THPTensor *self, PyObject *index, PyObject *value)
+static int THPTensor_(setValue)(THPTensor *self, PyObject *index, PyObject *value)
 {
   HANDLE_TH_ERRORS
+
 #ifndef THC_GENERIC_FILE
-  if (THPByteTensor_Check(index)) {
-    THPByteTensor *mask = (THPByteTensor*)index;
+  THPByteTensor *mask = THPByteTensor_Check(index) ? (THPByteTensor*)index : NULL;
 #else
-  if (THCPByteTensor_Check(index)) {
-    THCPByteTensor *mask = (THCPByteTensor*)index;
+  THCPByteTensor *mask = THCPByteTensor_Check(index) ? (THCPByteTensor*)index : NULL;
 #endif
+  if (mask) {
     if (THPUtils_(checkReal)(value)) {
       real v = THPUtils_(unpackReal)(value);
       THTensor_(maskedFill)(LIBRARY_STATE self->cdata, mask->cdata, v);
@@ -579,13 +573,11 @@ int THPTensor_(setValue)(THPTensor *self, PyObject *index, PyObject *value)
     return 0;
   }
 
-  THTensor *tresult;
+  THTensorPtr tresult;
   THStorage *sresult;
   long storage_offset;
   if (!THPTensor_(_index)(self, index, tresult, sresult, storage_offset))
     return -1;
-
-  THTensorPtr tresult_ptr = tresult;
   if (sresult) {
     if (!force_tensor) {
       if (!THPUtils_(checkReal)(value)) {
@@ -596,19 +588,17 @@ int THPTensor_(setValue)(THPTensor *self, PyObject *index, PyObject *value)
       THStorage_(set)(LIBRARY_STATE sresult, storage_offset, THPUtils_(unpackReal)(value));
       return 0;
     } else {
-      tresult_ptr = THTensor_(newWithStorage1d)(LIBRARY_STATE sresult, storage_offset, 1, -1);
-      tresult = tresult_ptr.get();
+      tresult = THTensor_(newWithStorage1d)(LIBRARY_STATE sresult, storage_offset, 1, -1);
     }
   }
   if (tresult) {
     if (THPUtils_(checkReal)(value)) {
-      THTensor_(fill)(LIBRARY_STATE tresult, THPUtils_(unpackReal)(value));
+      THTensor_(fill)(LIBRARY_STATE tresult.get(), THPUtils_(unpackReal)(value));
     } else {
       // TODO: try to do this without creating a temporary object
-      THPTensorPtr tmp = (THPTensor*)THPTensor_(New)(tresult_ptr.get());
+      THPTensorPtr tmp = (THPTensor*)THPTensor_(New)(tresult.release());
       if (!tmp)
         return -1;
-      tresult_ptr.release();
       if (!THPModule_tensorCopy((PyObject*)tmp.get(), value))
         return -1;
     }
