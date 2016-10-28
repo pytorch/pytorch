@@ -13,18 +13,14 @@ class Index(Function):
 
     def forward(self, i):
         self.input_size = i.size()
-        result = i[self.index]
-        # TODO: support indexing that doesn't return a number
-        # TODO: this is a CUDA sync point
-        if not torch.is_tensor(result):
-            result = i.new((result,))
+        result = i.index(self.index)
         self.mark_shared_storage((i, result))
         return result
 
     def backward(self, grad_output):
         # TODO: this won't have to be zeroed
         grad_input = grad_output.new(self.input_size).zero_()
-        grad_input[self.index].copy_(grad_output)
+        grad_input.index(self.index).copy_(grad_output)
         return grad_input
 
 
@@ -37,21 +33,20 @@ class SetItem(InplaceFunction):
 
     def forward(self, i, value=None):
         self.mark_dirty(i)
-        if self.value is None:
-            i[self.index].copy_(value)
-        else:
-            i[self.index].fill_(self.value)
+        if value is None:
+            value = self.value
+        i.set_index(self.index, value)
         return i
 
     def backward(self, grad_output):
         if self.value is None:
             grad_input = grad_output.clone()
-            grad_value = grad_output[self.index].clone()
-            grad_input[self.index].fill_(0)
+            grad_input.set_index(self.index, 0)
+            grad_value = grad_output.index(self.index).clone()
             return grad_input, grad_value
         else:
             grad_input = grad_output.clone()
-            grad_input[self.index].fill_(0)
+            grad_input.set_index(self.index, 0)
             return grad_input
 
 
@@ -382,7 +377,7 @@ class MaskedCopy(InplaceFunction):
         if self.needs_input_grad[0]:
             grad_tensor1 = grad_output.clone().masked_fill_(mask, 0)
         if self.needs_input_grad[2]:
-            grad_tensor2 = grad_output.clone().masked_fill_(mask.eq(0), 0)
+            grad_tensor2 = grad_output.masked_select(mask)
         return grad_tensor1, None, grad_tensor2
 
 

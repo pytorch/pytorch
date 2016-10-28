@@ -318,11 +318,14 @@ PyObject * $name(PyObject *self, PyObject *args, PyObject *kwargs)
     def declare_methods(self, stateless):
         tensor_methods = ''
         for declaration in (self.declarations if not stateless else self.stateless_declarations):
-            extra_flags = ' | ' + declaration.get('method_flags') if 'method_flags' in declaration else ''
+            flags = 'METH_VARARGS'
+            flags += ' | ' + declaration.get('method_flags') if 'method_flags' in declaration else ''
             if not declaration.get('only_register'):
-                extra_flags += ' | METH_KEYWORDS'
-            entry = Template('  {"$python_name", (PyCFunction)$name, METH_VARARGS$extra_flags, NULL},\n').substitute(
-                    python_name=declaration['python_name'], name=declaration['name'], extra_flags=extra_flags
+                flags += ' | METH_KEYWORDS'
+            if declaration.get('override_method_flags'):
+                flags = declaration['override_method_flags']
+            entry = Template('  {"$python_name", (PyCFunction)$name, $flags, NULL},\n').substitute(
+                    python_name=declaration['python_name'], name=declaration['name'], flags=flags
                 )
             if 'defined_if' in declaration:
                 entry = self.preprocessor_guard(entry, declaration['defined_if'])
