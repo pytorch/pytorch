@@ -7,16 +7,6 @@ typedef long THCIndex_t;
 
 #define THNN_(NAME) TH_CONCAT_3(THNN_, CReal, NAME)
 
-TH_API void THNN_CudaL1Cost_updateOutput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *output);
-TH_API void THNN_CudaL1Cost_updateGradInput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *gradOutput,    // [OPTIONAL]
-          THCudaTensor *gradInput);
-
 TH_API void THNN_CudaLookupTable_accGradParameters(
           THCState *state,
           THCIndexTensor *input,
