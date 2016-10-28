@@ -44,7 +44,9 @@ class BasicEngine(object):
             variable._do_backward((grad,), retain_variables)
             return
 
-        ready = deque([(variable.creator, (grad,))])
+        initial_grad = [None for _ in range(variable.creator.num_outputs)]
+        initial_grad[variable.output_nr] = grad
+        ready = deque([(variable.creator, initial_grad)])
         not_ready = {}
         need_copy = set()
 

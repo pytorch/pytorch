@@ -122,9 +122,9 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
   buffer_set_type need_copy;
 
   // Initialize the queue
-  grad_buffer_type buf(next_buf_id++, 1);
+  grad_buffer_type buf(next_buf_id++, ((THPFunction*)variable->creator)->num_outputs);
   Py_INCREF(grad_variable);
-  buf[0] = grad_variable;
+  buf[variable->output_nr] = grad_variable;
   ready.emplace_front((THPFunction*)variable->creator, std::move(buf));
 
   dependencies_type dependencies = THPEngine_compute_dependencies((THPFunction*)variable->creator);
@@ -139,10 +139,14 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     THPObjectPtr grad_tuple = PyTuple_New(fn_grad_buffer.size());
     if (!grad_tuple) return NULL;
     for (unsigned int i = 0; i < fn_grad_buffer.size(); i++) {
-      // TODO: allocate correctly sized zero buffer
-      THPUtils_assert(fn_grad_buffer[i], "error no grad buffer - this will be "
-              "fixed in upcoming releases!");
-      PyTuple_SET_ITEM(grad_tuple.get(), i, fn_grad_buffer[i].release());
+      PyObject *_grad;
+      if (fn_grad_buffer[i]) {
+        _grad = fn_grad_buffer[i].release();
+      } else {
+        _grad = Py_None;
+        Py_INCREF(_grad);
+      }
+      PyTuple_SET_ITEM(grad_tuple.get(), i, _grad);
     }
 
     // Call _do_backward and make sure grad_input is sound
@@ -187,7 +191,7 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
         grad_buffer_type prev_buffer(-1);
         if (not_ready_it == not_ready.end()) {
           // The function is ready and no buffers have been allocated for it.
-          prev_buffer = grad_buffer_type(next_buf_id++, 1);
+          prev_buffer = grad_buffer_type(next_buf_id++, prev_fn->num_outputs);
           Py_INCREF(grad_prev);
           prev_buffer[output_idx] = grad_prev;
         } else {

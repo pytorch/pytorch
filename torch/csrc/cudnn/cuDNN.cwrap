@@ -7,6 +7,7 @@
 
 
 using namespace torch::cudnn;
+using namespace torch;
 
 extern THCState* state;
 

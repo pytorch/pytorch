@@ -5,6 +5,10 @@
 
 #include "THP.h"
 
+#ifdef WITH_CUDA
+#include "cuda/AutoGPU.h"
+#endif
+
 PyObject *THPFunctionClass = NULL;
 
 static void THPFunction_dealloc(THPFunction* self)
@@ -24,6 +28,7 @@ static void THPFunction_dealloc(THPFunction* self)
   THPFunctionPtr *previous_functions = self->previous_functions;
   self->previous_functions = NULL;
   delete[] previous_functions;
+  delete self->output_info;
 
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
@@ -71,17 +76,8 @@ PyObject *THPFunction_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
   THPFunction *self = (THPFunction*)type->tp_alloc(type, 0);
   if (!self)
     return NULL;
-  self->previous_functions = NULL;
-  self->needs_input_grad = NULL;
-  self->saved_variables = NULL;
-  self->backward_hooks = NULL;
-  self->to_save = NULL;
-  self->shared_pairs = NULL;
-  self->non_differentiable = NULL;
-  self->dirty_tensors = NULL;
-  self->needs_input_grad = 0;
-  self->has_freed_buffers = 0;
-  self->num_inputs = 0;
+  // Python zero-initializes the object memory, so there's no need to initialize
+  // most fields
   self->num_outputs = -1;
   return (PyObject*)self;
 }
@@ -123,6 +119,8 @@ static bool _wrap_outputs(THPFunction *self, t2var_type &t2var,
 {
   // Wrap outputs in Variables
   Py_ssize_t num_outputs = PyTuple_GET_SIZE(raw_output);
+  self->output_info = new std::vector<output_info_type>(num_outputs);
+  auto &output_info = *self->output_info;
   for (int i = 0; i < num_outputs; i++) {
     PyObject *output = PyTuple_GET_ITEM(raw_output, i);
     THPVariable *output_var;
@@ -158,6 +156,23 @@ static bool _wrap_outputs(THPFunction *self, t2var_type &t2var,
     if (!output_var)
       return false;
 
+    torch::THPVoidTensor *output_obj = (torch::THPVoidTensor*)output_var->data;
+    torch::THVoidTensor *output_tensor = output_obj->cdata;
+    long ndim = output_tensor->nDimension;
+    int device_id = -1;
+    THPObjectPtr is_cuda = PyObject_GetAttrString(output_var->data, "is_cuda");
+    if (is_cuda.get() == Py_True) {
+      THPObjectPtr device_id_obj = PyObject_CallMethod(output_var->data,
+          "get_device", "");
+      THPUtils_assertRet(false, THPUtils_checkLong(device_id_obj), "get_device "
+          "should return an int, but got %s", THPUtils_typename(device_id_obj));
+      device_id = THPUtils_unpackLong(device_id_obj);
+    }
+    output_info[i] = std::make_tuple(
+      (PyObject*)Py_TYPE(output_var->data),
+      device_id,
+      std::vector<long>(output_tensor->size, output_tensor->size + ndim)
+    );
     t2var[output] = output_var;
     output_var->output_nr = i;
     PyTuple_SET_ITEM(outputs, i, (PyObject*)output_var);
@@ -371,7 +386,6 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *inputs)
     // Mark non-differentiable outputs as not requiring gradients
   }
 
-
   if (num_outputs == 1) {
     PyObject *output = PyTuple_GET_ITEM(outputs.get(), 0);
     Py_INCREF(output);
@@ -385,17 +399,43 @@ PyObject * THPFunction_do_backward(THPFunction *self, PyObject *args)
 {
   Py_ssize_t num_args = args ? PyTuple_GET_SIZE(args) : 0;
   THPUtils_assert(num_args == 2, "_do_backward expects exactly two arguments");
-  PyObject *grad_output = PyTuple_GET_ITEM(args, 0);
+  PyObject *raw_grad_output = PyTuple_GET_ITEM(args, 0);
   PyObject *retain_variables = PyTuple_GET_ITEM(args, 1);
-  if (!PyTuple_Check(grad_output) || !PyBool_Check(retain_variables)) {
+  if (!PyTuple_Check(raw_grad_output) || !PyBool_Check(retain_variables)) {
     THPUtils_invalidArguments(args, "_do_backward", 1, "(tuple, bool)");
     return NULL;
+  }
+
+  int num_grad_output = PyTuple_GET_SIZE(raw_grad_output);
+  THPObjectPtr grad_output = PyTuple_New(num_grad_output);
+  if (!grad_output) return NULL;
+#ifdef WITH_CUDA
+  THCPAutoGPU gpu_guard(-1);
+#endif
+  for (int i = 0; i < num_grad_output; i++) {
+    PyObject *grad = PyTuple_GET_ITEM(raw_grad_output, i);
+    // If there's no gradient we have to allocate a buffer ourselves
+    if (grad == Py_None) {
+      auto &info = (*self->output_info)[i];
+      PyObject *tensor_cls = std::get<0>(info);
+      gpu_guard.setDevice(std::get<1>(info));
+      std::vector<long> &sizes = std::get<2>(info);
+      THPObjectPtr grad_size = THPSize_New(sizes.size(), sizes.data());
+      THPObjectPtr new_grad = PyObject_CallFunctionObjArgs(tensor_cls, grad_size.get(), NULL);
+      if (!new_grad) return NULL;
+      THPObjectPtr result = PyObject_CallMethod(new_grad.get(), "zero_", "");
+      if (!result) return NULL;
+      grad = new_grad.release();
+    } else {
+      Py_INCREF(grad);
+    }
+    PyTuple_SET_ITEM(grad_output.get(), i, grad);
   }
 
   THPObjectPtr backward_fn = PyObject_GetAttrString((PyObject*)self, "backward");
   THPUtils_assert(backward_fn.get(), "function %s doesn't implement a required "
       "'backward' method", THPUtils_typename((PyObject*)self));
-  THPObjectPtr grad_input = PyObject_CallObject(backward_fn, grad_output);
+  THPObjectPtr grad_input = PyObject_CallObject(backward_fn, grad_output.get());
   if (!grad_input)
     return NULL;
 
@@ -421,7 +461,7 @@ PyObject * THPFunction_do_backward(THPFunction *self, PyObject *args)
         "attribute has to be a dictionary");
     while (PyDict_Next(self->backward_hooks, &pos, &key, &value)) {
       THPObjectPtr result = PyObject_CallFunctionObjArgs(value,
-          grad_input.get(), grad_output, NULL);
+          grad_input.get(), grad_output.get(), NULL);
       if (!result)
         return NULL;
     }
