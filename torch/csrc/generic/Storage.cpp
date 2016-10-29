@@ -20,7 +20,7 @@ PyObject * THPStorage_(New)(THStorage *ptr)
 }
 
 PyObject * THPStorage_(newWeakObject)(THStorage *storage) {
-#ifdef WITH_CUDA
+#ifdef THC_GENERIC_FILE
   return PyErr_Format(PyExc_TypeError, "newWeakObject not supported on CUDA storages");
 #else
   if (storage->allocator == &THStorageWeakRefAllocator) {
