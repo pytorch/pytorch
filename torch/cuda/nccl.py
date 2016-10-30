@@ -196,7 +196,7 @@ def all_gather(inputs, outputs):
 
 
 def reduce_scatter(inputs, outputs, op=SUM):
-    _check_inputs(inputs, outputs, 1/len(inputs))
+    _check_inputs(inputs, outputs, 1.0/len(inputs))
     comm = communicator(inputs, outputs)
     count = inputs[0].numel() // len(inputs)
     data_type = nccl_types[inputs[0].type()]
