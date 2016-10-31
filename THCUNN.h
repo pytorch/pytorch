@@ -53,20 +53,6 @@ TH_API void THNN_CudaTemporalConvolution_accGradParameters(
           int kW, int dW,
           float scale);
 
-TH_API void THNN_CudaVolumetricAveragePooling_updateOutput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *output,
-          int kT, int kW, int kH,
-          int dT, int dW, int dH);
-TH_API void THNN_CudaVolumetricAveragePooling_updateGradInput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *gradOutput,
-          THCudaTensor *gradInput,
-          int kT, int kW, int kH,
-          int dT, int dW, int dH);
-
 TH_API void THNN_CudaVolumetricConvolution_updateOutput(
           THCState *state,
           THCudaTensor *input,
