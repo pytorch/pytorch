@@ -92,62 +92,36 @@ PyObject * $name(PyObject *self, PyObject *args, PyObject *kwargs)
 }
 """)
 
-    ALLOCATE_TYPE = {
-        'THTensor*':        Template("""\
-      THTensorPtr _th_$name = THTensor_(new)(LIBRARY_STATE_NOARGS);
-      THPTensorPtr _${name}_guard = (THPTensor*)THPTensor_(New)(_th_$name.get());
-      THPTensor* $name = _${name}_guard.get();
-      if (!$name)
-        return NULL;
-      _th_$name.release();
-"""),
-        'THLongTensor*':        Template("""\
-      THLongTensorPtr _th_$name = THLongTensor_new(LIBRARY_STATE_NOARGS);
-      THPLongTensorPtr _${name}_guard = (THPLongTensor*)THPLongTensor_New(_th_$name.get());
-      THPLongTensor* $name = _${name}_guard.get();
-      if (!$name)
-        return NULL;
-      _th_$name.release();
-"""),
-        'THIntTensor*':        Template("""\
-      THIntTensorPtr _th_$name = THIntTensor_new(LIBRARY_STATE_NOARGS);
-      THPIntTensorPtr _${name}_guard = (THPIntTensor*)THPIntTensor_New(_th_$name.get());
-      THPIntTensor* $name = _${name}_guard.get();
-      if (!$name)
-        return NULL;
-      _th_$name.release();
-"""),
-        'THBoolTensor*':    Template("""
-#if IS_CUDA
-      THCByteTensorPtr _t_$name = THCudaByteTensor_new(LIBRARY_STATE_NOARGS);
-      THCPByteTensorPtr _${name}_guard = (THCPByteTensor*)THCPByteTensor_New(_t_$name);
-      THCPByteTensor *$name = _${name}_guard.get();
-#else
-      THByteTensorPtr _t_$name = THByteTensor_new();
-      THPByteTensorPtr _${name}_guard = (THPByteTensor*)THPByteTensor_New(_t_$name);
-      THPByteTensor *$name = _${name}_guard.get();
-#endif
-      if (!$name)
-        return NULL;
-      _t_$name.release();
-"""),
-        'THIndexTensor*':    Template("""
-#if IS_CUDA
-      THCLongTensorPtr _t_$name = THCudaLongTensor_new(LIBRARY_STATE_NOARGS);
-      THCPLongTensorPtr _${name}_guard = (THCPLongTensor*)THCPLongTensor_New(_t_$name);
-      THCPLongTensor *$name = _${name}_guard.get();
-#else
-      THLongTensorPtr _t_$name = THLongTensor_new();
-      THPLongTensorPtr _${name}_guard = (THPLongTensor*)THPLongTensor_New(_t_$name);
-      THPLongTensor *$name = _${name}_guard.get();
-#endif
-      if (!$name)
-        return NULL;
-      _t_$name.release();
-"""),
-    }
+    ALLOCATE_TMPL = Template("""\
+THP${type}TensorPtr _${name}_guard = (THP${type}Tensor*) THP${type}Tensor_NewEmpty();
+if (!_${name}_guard.get()) return NULL;
+THP${type}Tensor* $name = _${name}_guard.get();
+""")
 
-    RELEASE_ARG = Template("_${name}_guard.release();")
+    ALLOCATE_CUDA = Template("""\
+#if IS_CUDA
+${cuda}
+#else
+${cpu}
+#endif
+""")
+
+    def _allocate(typename, tmpl, cuda_tmpl=None):
+        code = tmpl.safe_substitute(type=typename)
+        if typename == '':
+            code = code.replace('NewEmpty', '(NewEmpty)')
+        if cuda_tmpl:
+            cuda_code = code.replace('THP', 'THCP')
+            code = cuda_tmpl.substitute(cuda=cuda_code, cpu=code)
+        return Template(code)
+
+    ALLOCATE_TYPE = {
+        'THTensor*':        _allocate('', ALLOCATE_TMPL),
+        'THLongTensor*':    _allocate('Long', ALLOCATE_TMPL),
+        'THIntTensor*':     _allocate('Int', ALLOCATE_TMPL),
+        'THBoolTensor*':    _allocate('Byte', ALLOCATE_TMPL, ALLOCATE_CUDA),
+        'THIndexTensor*':   _allocate('Long', ALLOCATE_TMPL, ALLOCATE_CUDA),
+    }
 
     TYPE_NAMES = {
         'THTensor*': '" THPTensorStr "',

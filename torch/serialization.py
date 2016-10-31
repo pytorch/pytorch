@@ -248,12 +248,9 @@ def load(f, map_location=None, pickle_module=pickle):
             for i in range(num_tensors):
                 args = pickle_module.load(f)
                 key, storage_id, original_tensor_type = args
-                storage = deserialized_objects.get(storage_id, None)
-                if storage:
-                    tensor_type = storage_to_tensor_type(storage)
-                    tensor = tensor_type._new_with_metadata_file(f, storage)
-                else:
-                    tensor = original_tensor_type._new_with_metadata_file(f, storage)
+                storage = deserialized_objects[storage_id]
+                tensor_type = storage_to_tensor_type(storage)
+                tensor = tensor_type._new_with_metadata_file(f, storage)
                 deserialized_objects[key] = tensor
 
         pickle_file = tar.extractfile('pickle')
@@ -261,4 +258,3 @@ def load(f, map_location=None, pickle_module=pickle):
         unpickler.persistent_load = persistent_load
         result = unpickler.load()
         return result
-

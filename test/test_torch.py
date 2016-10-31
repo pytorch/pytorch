@@ -130,6 +130,18 @@ class TestTorch(TestCase):
     def test_round(self):
         self._testMath(torch.round, round)
 
+    def test_has_storage(self):
+        self.assertIsNotNone(torch.Tensor().storage())
+        self.assertIsNotNone(torch.Tensor(0).storage())
+        self.assertIsNotNone(torch.Tensor([]).storage())
+        self.assertIsNotNone(torch.Tensor().clone().storage())
+        self.assertIsNotNone(torch.Tensor([0, 0, 0]).nonzero().storage())
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_has_storage_numpy(self):
+        arr = np.array([], dtype=np.float32)
+        self.assertIsNotNone(torch.Tensor(arr).storage())
+
     def _testSelection(self, torchfn, mathfn):
         # contiguous
         m1 = torch.randn(100,100)
@@ -2477,6 +2489,11 @@ class TestTorch(TestCase):
                 for i in range(sz1):
                     for j in range(sz2):
                         self.assertEqual(x[i][j], y[i][j])
+
+            # empty
+            x = torch.Tensor().type(tp)
+            y = x.numpy()
+            self.assertEqual(y.size, 0)
 
             # contiguous 2D
             sz1 = 3

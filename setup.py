@@ -84,7 +84,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
         from tools.cwrap.plugins.NullableArguments import NullableArguments
         from tools.cwrap.plugins.CuDNNPlugin import CuDNNPlugin
         cwrap('torch/csrc/generic/TensorMethods.cwrap', plugins=[
-            AutoGPU(condition='IS_CUDA'), BoolOption(), THPPlugin(),
+            BoolOption(), THPPlugin(), AutoGPU(condition='IS_CUDA'),
             ArgcountSortPlugin(), KwargsPlugin(),
         ])
         cwrap('torch/csrc/cudnn/cuDNN.cwrap', plugins=[

@@ -45,11 +45,10 @@ static PyObject * THPGenerator_getState(THPGenerator *self)
 {
   HANDLE_TH_ERRORS
   THGenerator *generator = self->cdata;
-  THByteTensorPtr _t = THByteTensor_new();
-  THByteTensor_getRNGState(generator, _t.get());
-  PyObject *_ret =  THPByteTensor_New(_t.get());
-  _t.release();
-  return _ret;
+  THPByteTensorPtr res = (THPByteTensor *)THPByteTensor_NewEmpty();
+  if (!res) return NULL;
+  THByteTensor_getRNGState(generator, res->cdata);
+  return (PyObject *)res.release();
   END_HANDLE_TH_ERRORS
 }
 
