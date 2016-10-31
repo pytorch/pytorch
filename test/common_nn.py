@@ -16,6 +16,7 @@ else:
     TemporaryFile = tempfile.TemporaryFile
 
 TEST_CUDA = torch.cuda.is_available()
+TEST_MULTIGPU = TEST_CUDA and torch.cuda.device_count() >= 2
 TEST_CUDNN = TEST_CUDA and torch.backends.cudnn.is_acceptable(torch.cuda.FloatTensor(1))
 PRECISION = 1e-5
 
