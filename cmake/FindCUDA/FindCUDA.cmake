@@ -512,8 +512,9 @@ else()
     endif()
     set(CUDA_HOST_COMPILER "${c_compiler_realpath}" CACHE FILEPATH "Host side compiler used by NVCC")
   else()
-    set(CUDA_HOST_COMPILER "${CMAKE_C_COMPILER}"
-      CACHE FILEPATH "Host side compiler used by NVCC")
+    # Disable default CUDA_HOST_COMPILER ("-ccbin" flag) because it's not handled by ccache
+    # set(CUDA_HOST_COMPILER "${CMAKE_C_COMPILER}"
+    #   CACHE FILEPATH "Host side compiler used by NVCC")
   endif()
 endif()
 
@@ -685,17 +686,21 @@ endif()
 
 
 # CUDA_NVCC_EXECUTABLE
-cuda_find_host_program(CUDA_NVCC_EXECUTABLE
-  NAMES nvcc
-  PATHS "${CUDA_TOOLKIT_ROOT_DIR}"
-  ENV CUDA_PATH
-  ENV CUDA_BIN_PATH
-  PATH_SUFFIXES bin bin64
-  NO_DEFAULT_PATH
-  )
-# Search default search paths, after we search our own set of paths.
-cuda_find_host_program(CUDA_NVCC_EXECUTABLE nvcc)
-mark_as_advanced(CUDA_NVCC_EXECUTABLE)
+if(DEFINED ENV{CUDA_NVCC_EXECUTABLE})
+  SET(CUDA_NVCC_EXECUTABLE "$ENV{CUDA_NVCC_EXECUTABLE}")
+else()
+  cuda_find_host_program(CUDA_NVCC_EXECUTABLE
+    NAMES nvcc
+    PATHS "${CUDA_TOOLKIT_ROOT_DIR}"
+    ENV CUDA_PATH
+    ENV CUDA_BIN_PATH
+    PATH_SUFFIXES bin bin64
+    NO_DEFAULT_PATH
+    )
+  # Search default search paths, after we search our own set of paths.
+  cuda_find_host_program(CUDA_NVCC_EXECUTABLE nvcc)
+  mark_as_advanced(CUDA_NVCC_EXECUTABLE)
+endif()
 
 if(CUDA_NVCC_EXECUTABLE AND NOT CUDA_VERSION)
   # Compute the version.
