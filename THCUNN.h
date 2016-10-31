@@ -158,21 +158,5 @@ TH_API void THNN_CudaVolumetricDilatedConvolution_accGradParameters(
           int dilationT, int dilationW, int dilationH,
           float scale);
 
-TH_API void THNN_CudaVolumetricReplicationPadding_updateOutput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *output,
-          int pleft, int pright,
-          int ptop, int pbottom,
-          int pfront, int pback);
-TH_API void THNN_CudaVolumetricReplicationPadding_updateGradInput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *gradOutput,
-          THCudaTensor *gradInput,
-          int pleft, int pright,
-          int ptop, int pbottom,
-          int pfront, int pback);
-
 #include "generic/THCUNN.h"
 #include "THCGenerateFloatTypes.h"

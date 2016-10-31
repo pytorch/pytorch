@@ -988,4 +988,21 @@ TH_API void THNN_(VolumetricMaxUnpooling_updateGradInput)(
                   int dT, int dW, int dH,
                   int padT, int padW, int padH);
 
+TH_API void THNN_(VolumetricReplicationPadding_updateGradInput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *gradOutput,
+                  THCTensor *gradInput,
+                  int pleft, int pright,
+                  int ptop, int pbottom,
+                  int pfront, int pback);
+
+TH_API void THNN_(VolumetricReplicationPadding_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *output,
+                  int pleft, int pright,
+                  int ptop, int pbottom,
+                  int pfront, int pback);
+
 #endif
