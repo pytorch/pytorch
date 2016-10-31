@@ -6,17 +6,10 @@ class SGD(Optimizer):
         defaults = dict(lr=lr, momentum=momentum, dampening=dampening)
         super(SGD, self).__init__(params, defaults)
 
-    def __getstate__(self):
-        state = super(SGD, self).__getstate__()
-        state.update(
-            lr=self.lr,
-            momentum=self.momentum,
-            dampening=self.dampening
-        )
-        return state
-
-    def step(self, forward_closure):
-        loss = self._forward_backward(forward_closure)
+    def step(self, forward_closure=None):
+        loss = None
+        if forward_closure is not None:
+            loss = self._forward_backward(forward_closure)
 
         for group in self.param_groups:
             for p in group['params']:
