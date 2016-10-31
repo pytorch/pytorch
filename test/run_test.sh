@@ -15,6 +15,9 @@ python test_nn.py
 echo "Running legacy nn tests"
 python test_legacy_nn.py
 
+echo "Running optim tests"
+python test_optim.py
+
 echo "Running multiprocessing tests"
 python test_multiprocessing.py
 MULTIPROCESSING_METHOD=spawn python test_multiprocessing.py

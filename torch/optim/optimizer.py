@@ -32,7 +32,7 @@ class Optimizer(object):
     def __getstate__(self):
         return {
             'state': self.state,
-            'parameters': self.parameters,
+            'param_groups': self.param_groups,
         }
 
     def state_dict(self):

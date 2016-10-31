@@ -47,7 +47,7 @@ def adamax(opfunc, x, config, state=None):
         # Exponential moving average of the infinity norm
         state['u'] = x.new().resize_as_(dfdx).zero_()
         # A tmp tensor to hold the input to max()
-        state['max'] = x.new(*([2] + dfdx.size().tolist())).zero_()
+        state['max'] = x.new(*((2,) + dfdx.size())).zero_()
 
     state['t'] += 1
 
