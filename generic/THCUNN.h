@@ -882,6 +882,21 @@ TH_API void THNN_(Tanh_updateGradInput)(
                   THCTensor *gradInput,
                   THCTensor *output);
 
+TH_API void THNN_(TemporalMaxPooling_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *output,
+                  THCIndexTensor *indices,
+                  int kW, int dW);
+
+TH_API void THNN_(TemporalMaxPooling_updateGradInput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *gradOutput,
+                  THCTensor *gradInput,
+                  THCIndexTensor *indices,
+                  int kW, int dW);
+
 TH_API void THNN_(Threshold_updateOutput)(
                   THCState *state,
                   THCTensor *input,
