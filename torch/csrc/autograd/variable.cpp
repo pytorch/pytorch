@@ -198,7 +198,7 @@ static struct PyMemberDef THPVariable_members[] = {
   {(char*)"volatile",       T_BOOL,     offsetof(THPVariable, is_volatile), 0, NULL},
   {(char*)"output_nr",      T_INT,      offsetof(THPVariable, output_nr), 0, NULL},
   {(char*)"backward_hooks", T_OBJECT,   offsetof(THPVariable, backward_hooks), 0, NULL},
-  {(char*)"_requires_grad", T_BOOL,     offsetof(THPVariable, requires_grad), READONLY, NULL},
+  {(char*)"_requires_grad", T_BOOL,     offsetof(THPVariable, requires_grad), 0, NULL},
   {NULL}
 };
 
