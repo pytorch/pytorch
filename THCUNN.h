@@ -172,62 +172,6 @@ TH_API void THNN_CudaVolumetricDilatedConvolution_accGradParameters(
           int dilationT, int dilationW, int dilationH,
           float scale);
 
-TH_API void THNN_CudaVolumetricMaxPooling_updateOutput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *output,
-          THCIndexTensor *indices,
-          int kT, int kW, int kH,
-          int dT, int dW, int dH,
-          int padT, int padW, int padH,
-          bool ceilMode);
-TH_API void THNN_CudaVolumetricMaxPooling_updateGradInput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *gradOutput,
-          THCudaTensor *gradInput,
-          THCIndexTensor *indices,
-          int dT, int dW, int dH,
-          int padT, int padW, int padH);
-
-TH_API void THNN_CudaVolumetricDilatedMaxPooling_updateOutput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *output,
-          THCIndexTensor *indices,
-          int kT, int kW, int kH,
-          int dT, int dW, int dH,
-          int padT, int padW, int padH,
-          int dilationT, int dilationW, int dilationH,
-          bool ceilMode);
-TH_API void THNN_CudaVolumetricDilatedMaxPooling_updateGradInput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *gradOutput,
-          THCudaTensor *gradInput,
-          THCIndexTensor *indices,
-          int dT, int dW, int dH,
-          int padT, int padW, int padH,
-          int dilationT, int dilationW, int dilationH);
-
-TH_API void THNN_CudaVolumetricMaxUnpooling_updateOutput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *output,
-          THCIndexTensor *indices,
-          int outputTime, int outputWidth, int outputHeight,
-          int dT, int dW, int dH,
-          int padT, int padW, int padH);
-TH_API void THNN_CudaVolumetricMaxUnpooling_updateGradInput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *gradOutput,
-          THCudaTensor *gradInput,
-          THCIndexTensor *indices,
-          int outputTime, int outputWidth, int outputHeight,
-          int dT, int dW, int dH,
-          int padT, int padW, int padH);
-
 TH_API void THNN_CudaVolumetricReplicationPadding_updateOutput(
           THCState *state,
           THCudaTensor *input,
