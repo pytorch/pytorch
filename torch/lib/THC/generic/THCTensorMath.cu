@@ -136,4 +136,114 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
   }
 }
 
+void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,
+                          THCTensor *self)
+{
+  THAssert(THCTensor_(checkGPU)(state, 1, self  ));
+  THAssert(THCudaLongTensor_checkGPU(state, 1, tensor));
+
+  using namespace thrust::placeholders;
+
+  self = THCTensor_(newContiguous)(state, self);
+  thrust::device_ptr<real> self_data(THCTensor_(data)(state, self));
+
+  int num_dim = THCTensor_(nDimension)(state, self);
+  long N = THCTensor_(nElement)(state, self);
+
+  THCudaLongTensor_resize2d(state, tensor, N, num_dim);
+  tensor = THCudaLongTensor_newContiguous(state, tensor);
+  thrust::device_ptr<long> tensor_data(THCudaLongTensor_data(state, tensor));
+
+  thrust::counting_iterator<long> idxfirst(0);
+  thrust::counting_iterator<long> idxlast = idxfirst + N;
+
+  typedef thrust::device_ptr<long> Iter;
+  strided_range<Iter> strided_tensor(tensor_data,
+                                     tensor_data+N*num_dim, num_dim);
+
+#if CUDA_VERSION >= 7000
+  cudaStream_t stream = THCState_getCurrentStream(state);
+#endif
+
+  strided_range<Iter>::iterator dend = thrust::copy_if(
+#if CUDA_VERSION >= 7000
+    thrust::cuda::par.on(stream),
+#endif
+    idxfirst,
+    idxlast,
+    self_data,
+    strided_tensor.begin(),
+    NonZeroOp<real>()
+  );
+
+  long num_nonzeros = thrust::distance(strided_tensor.begin(), dend);
+
+  long div = 1;
+  for (int dim = num_dim-1; dim >= 0; dim--) {
+    strided_range<Iter> stride_dim(tensor_data+dim,
+                                   tensor_data+N*num_dim, num_dim);
+    thrust::transform(
+#if CUDA_VERSION >= 7000
+      thrust::cuda::par.on(stream),
+#endif
+      strided_tensor.begin(),
+      strided_tensor.end(),
+      stride_dim.begin(),
+      idx_functor(div, self->size[dim])
+    );
+    div *= self->size[dim];
+  }
+
+  THCudaLongTensor_resize2d(state, tensor, num_nonzeros, num_dim);
+
+  THCTensor_(free)(state, self);
+  THCudaLongTensor_free(state, tensor);
+
+  THCudaCheck(cudaGetLastError());
+}
+
+void THCTensor_(diag)(THCState *state, THCTensor *self_, THCTensor *src_, long k){
+  THAssert(THCTensor_(checkGPU)(state, 2, self_, src_));
+  int nDimension = THCTensor_(nDimension)(state, src_);
+  THArgCheck((nDimension == 2) || (nDimension == 1), 1, "expected a matrix or a vector");
+  if (nDimension == 2) {
+    long stride0 = THCTensor_(stride)(state, src_, 0);
+    long stride1 = THCTensor_(stride)(state, src_, 1);
+    long size0 = THCTensor_(size)(state, src_, 0);
+    long size1 = THCTensor_(size)(state, src_, 1);
+    long size = (k > 0) ? min((long long)size0, (long long)size1 - k) : min((long long)size0 + k, (long long)size1);
+    THCTensor_(resize1d)(state, self_, size);
+    long strideSelf = THCTensor_(stride)(state, self_, 0);
+    const dim3 threads(min((long long)THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock, (long long)size));
+    dim3 grid(min((long long)1024, (long long)THCCeilDiv(size, (long)threads.x)));
+    long start = (k >= 0 ? k * stride1 : -k * stride0);
+    THCTensor_copyFromDiagonal<real><<<grid, threads, 0, THCState_getCurrentStream(state)>>>
+    (THCTensor_(data)(state, self_), THCTensor_(data)(state, src_), start, size, stride0 + stride1, strideSelf);
+  } else {
+    ptrdiff_t totalElements = THCTensor_(nElement)(state, src_);
+    ptrdiff_t size = (k > 0) ? totalElements + k : totalElements - k;
+    long strideSrc = THCTensor_(stride)(state, src_, 0);
+    THCTensor_(resize2d)(state, self_, size, size);
+    THCTensor_(zero)(state, self_);
+    long stride0 = THCTensor_(stride)(state, self_, 0);
+    long stride1 = THCTensor_(stride)(state, self_, 1);
+    const dim3 threads(min((long long)THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock, (long long)size));
+    dim3 grid(min((long long)1024, (long long)THCCeilDiv(size, (ptrdiff_t)threads.x)));
+    ptrdiff_t start = (k >= 0 ? k * stride1 : -k * stride0);
+    THCTensor_copyToDiagonal<real><<<grid, threads, 0, THCState_getCurrentStream(state)>>>
+    (THCTensor_(data)(state, self_), THCTensor_(data)(state, src_), start, totalElements, stride0 + stride1, strideSrc);
+  }
+  THCudaCheck(cudaGetLastError());
+}
+
+accreal THCTensor_(trace)(THCState *state, THCTensor *src_) {
+  THAssert(THCTensor_(checkGPU)(state, 1, src_));
+  THArgCheck((src_->nDimension == 2), 1, "expected a matrix");
+  THCTensor *diag = THCTensor_(new)(state);
+  THCTensor_(diag)(state, diag, src_, 0);
+  accreal trace = THCTensor_(sumall)(state, diag);
+  THCTensor_(free)(state, diag);
+  return trace;
+}
+
 #endif

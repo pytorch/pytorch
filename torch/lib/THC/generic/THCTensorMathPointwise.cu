@@ -173,6 +173,24 @@ void THCTensor_(pow)(THCState *state, THCTensor *self_, THCTensor *src, real val
   THCudaCheck(cudaGetLastError());
 }
 
+void THCTensor_(tpow)(THCState *state, THCTensor *self_, real value, THCTensor *src)
+{
+  THAssert(THCTensor_(checkGPU)(state, 2, self_, src));
+  if (self_ == src) {
+    if (!THC_pointwiseApply1(state, self_, TensorTPowOp<real>(value))) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  } else {
+    THCTensor_(resizeAs)(state, self_, src);
+
+    if (!THC_pointwiseApply2(state, self_, src, TensorTPowOp<real>(value))) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  }
+
+  THCudaCheck(cudaGetLastError());
+}
+
 THC_API void
 THCTensor_(lerp)(THCState *state, THCTensor *result, THCTensor *a, THCTensor *b, real w)
 {
