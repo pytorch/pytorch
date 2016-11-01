@@ -318,6 +318,21 @@ struct TensorPowOp<half> {
 };
 #endif // CUDA_HALF_TENSOR
 
+template<typename T>
+struct TensorTPowOp {
+  TensorTPowOp(T v) : val(v) {}
+
+  __device__ __forceinline__ void operator()(T* out, T* in) {
+    *out = THCNumerics<T>::pow(val, *in);
+  }
+
+  __device__ __forceinline__ void operator()(T* v) {
+    *v = THCNumerics<T>::pow(val, *v);
+  }
+
+  const T val;
+};
+
 template <typename T>
 struct TensorCPowOp {
   __device__ __forceinline__ void operator()(T* out, T* in) {

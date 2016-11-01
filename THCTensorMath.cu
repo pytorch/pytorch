@@ -3,6 +3,7 @@
 #include "THCTensorCopy.h"
 #include "THCApply.cuh"
 #include "THCNumerics.cuh"
+#include "THCTensorMath.cuh"
 
 #include <thrust/copy.h>
 #include <thrust/count.h>
