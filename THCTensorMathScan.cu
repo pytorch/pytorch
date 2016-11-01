@@ -5,20 +5,7 @@
 #include "THCApply.cuh"
 #include "THCReduce.cuh"
 #include "THCNumerics.cuh"
-
-template <typename T>
-struct AddOp {
-  __device__ __forceinline__ T operator()(T &lhs, T &rhs) {
-    return THCNumerics<T>::add(lhs, rhs);
-  }
-};
-
-template <typename T>
-struct MulOp {
-  __device__ __forceinline__ T operator()(T &lhs, T &rhs) {
-    return THCNumerics<T>::mul(lhs, rhs);
-  }
-};
+#include "THCTensorMathReduce.cuh"
 
 /* Perform an inclusive scan along an outer dimension of a tensor.
  *

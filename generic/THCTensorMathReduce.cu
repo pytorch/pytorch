@@ -219,6 +219,30 @@ THCTensor_(normall)(THCState *state, THCTensor *self, real value)
   return result;
 }
 
+accreal THCTensor_(dist)(THCState *state, THCTensor *self,
+                         THCTensor *src, real value)
+{
+  THAssert(THCTensor_(checkGPU)(state, 2, self, src));
+  self = THCTensor_(newContiguous)(state, self);
+  ptrdiff_t size = THCTensor_(nElement)(state, self);
+  src = THCTensor_(newContiguous)(state, src);
+  thrust::device_ptr<real> self_data(THCTensor_(data)(state, self));
+  thrust::device_ptr<real> src_data(THCTensor_(data)(state, src));
+
+  accreal result = thrust::inner_product(
+#if CUDA_VERSION >= 7000
+    thrust::cuda::par.on(THCState_getCurrentStream(state)),
+#endif
+    self_data, self_data+size, src_data, ScalarConvert<int, accreal>::to(0),
+    thrust::plus<accreal>(),
+    TensorDistOp<accreal, real>(ScalarConvert<real, accreal>::to(value)));
+
+  THCTensor_(free)(state, src);
+  THCTensor_(free)(state, self);
+
+  return THCNumerics<accreal>::pow(result, 1.0 / ScalarConvert<real, accreal>::to(value));
+}
+
 #endif
 
 THC_API accreal

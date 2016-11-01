@@ -7,6 +7,12 @@
 #include "THCReduce.cuh"
 #include "THCReduceAll.cuh"
 #include <thrust/functional.h>
+#include <thrust/device_ptr.h>
+#include <thrust/transform_reduce.h>
+#include <thrust/inner_product.h>
+#if CUDA_VERSION >= 7000
+#include <thrust/system/cuda/execution_policy.h>
+#endif
 
 // Reduction operators that support `half`, unlike Thrust
 template <typename InT, typename AccT>
@@ -239,19 +245,21 @@ struct TensorNormOp<half, StaticExp>
 };
 #endif
 
-template <typename T>
+template <typename Tacc, typename T>
 struct TensorDistOp
 {
-  TensorDistOp(T exp) : exponent(exp) {}
+  TensorDistOp(Tacc exp) : exponent(exp) {}
 
-  __host__ __device__ T operator()(T x, T y) const {
-    return THCNumerics<T>::pow(
-      THCNumerics<T>::abs(THCNumerics<T>::sub(x, y)),
+  __host__ __device__ Tacc operator()(T x, T y) const {
+    Tacc xr = ScalarConvert<T, Tacc>::to(x);
+    Tacc yr = ScalarConvert<T, Tacc>::to(y);
+    return THCNumerics<Tacc>::pow(
+      THCNumerics<Tacc>::abs(THCNumerics<Tacc>::sub(xr, yr)),
       exponent
     );
   }
 
-  const T exponent;
+  const Tacc exponent;
 };
 
 #include <thrust/functional.h>
@@ -661,6 +669,20 @@ struct MinValuePair {
   thrust::pair<T, Index> operator()(const thrust::pair<T, Index>& a,
                                     const thrust::pair<T, Index>& b) {
     return THCNumerics<T>::le(a.first, b.first) ? a : b;
+  }
+};
+
+template <typename T>
+struct AddOp {
+  __device__ __forceinline__ T operator()(T &lhs, T &rhs) {
+    return THCNumerics<T>::add(lhs, rhs);
+  }
+};
+
+template <typename T>
+struct MulOp {
+  __device__ __forceinline__ T operator()(T &lhs, T &rhs) {
+    return THCNumerics<T>::mul(lhs, rhs);
   }
 };
 
