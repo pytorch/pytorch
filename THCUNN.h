@@ -26,32 +26,5 @@ TH_API void THNN_CudaLookupTable_renorm(
           float maxNorm,
           float normType);
 
-TH_API void THNN_CudaTemporalConvolution_updateOutput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *output,
-          THCudaTensor *weight,
-          THCudaTensor *bias,
-          int kW, int dW,
-          int inputFrameSize,
-          int outputFrameSize);
-
-TH_API void THNN_CudaTemporalConvolution_updateGradInput(
-          THCState* state,
-          THCudaTensor *input,
-          THCudaTensor *gradOutput,
-          THCudaTensor *gradInput,
-          THCudaTensor *weight,
-          int kW, int dW);
-
-TH_API void THNN_CudaTemporalConvolution_accGradParameters(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *gradOutput,
-          THCudaTensor *gradWeight,
-          THCudaTensor *gradBias,
-          int kW, int dW,
-          float scale);
-
 #include "generic/THCUNN.h"
 #include "THCGenerateFloatTypes.h"

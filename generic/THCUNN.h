@@ -882,6 +882,33 @@ TH_API void THNN_(Tanh_updateGradInput)(
                   THCTensor *gradInput,
                   THCTensor *output);
 
+TH_API void THNN_(TemporalConvolution_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *output,
+                  THCTensor *weight,
+                  THCTensor *bias,
+                  int kW, int dW,
+                  int inputFrameSize,
+                  int outputFrameSize);
+
+TH_API void THNN_(TemporalConvolution_updateGradInput)(
+                  THCState* state,
+                  THCTensor *input,
+                  THCTensor *gradOutput,
+                  THCTensor *gradInput,
+                  THCTensor *weight,
+                  int kW, int dW);
+
+TH_API void THNN_(TemporalConvolution_accGradParameters)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *gradOutput,
+                  THCTensor *gradWeight,
+                  THCTensor *gradBias,
+                  int kW, int dW,
+                  real scale);
+
 TH_API void THNN_(TemporalMaxPooling_updateOutput)(
                   THCState *state,
                   THCTensor *input,
