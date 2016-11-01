@@ -99,16 +99,28 @@ def storage_to_tensor_type(storage):
     return getattr(module, storage_type.__name__.replace('Storage', 'Tensor'))
 
 
-# TODO: choose pickle protocol
 def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
     """Saves an object to a disk file.
 
     Args:
         obj: saved object
         f: a file-like object (has to implement fileno that returns a file descriptor)
+            or a string containing a file name
         pickle_module: module used for pickling metadata and objects
         pickle_protocol: can be specified to override the default protocol
     """
+    new_fd = False
+    if isinstance(f, str):
+        new_fd = True
+        f = open(f, "wb")
+    try:
+        return _save(obj, f, pickle_module, pickle_protocol)
+    finally:
+        if new_fd:
+            f.close()
+
+
+def _save(obj, f, pickle_module, pickle_protocol):
     serialized_tensors = {}
     serialized_storages = {}
 
@@ -202,10 +214,23 @@ def load(f, map_location=None, pickle_module=pickle):
 
     Args:
         f: a file-like object (has to implement fileno that returns a file descriptor)
+            or a string containing a file name
         map_location: a function or a dict specifying how to remap storage locations
         pickle_module: module used for unpickling metadata and objects (has to match
             the pickle_module used to serialize file)
     """
+    new_fd = False
+    if isinstance(f, str):
+        new_fd = True
+        f = open(f, 'rb')
+    try:
+        return _load(f, map_location, pickle_module)
+    finally:
+        if new_fd:
+            f.close()
+
+
+def _load(f, map_location, pickle_module):
     deserialized_objects = {}
 
     if map_location is None:

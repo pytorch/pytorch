@@ -2388,22 +2388,24 @@ class TestTorch(TestCase):
         b = [a[i % 2] for i in range(4)]
         b += [a[0].storage()]
         b += [a[0].storage()[1:4]]
-        with tempfile.NamedTemporaryFile() as f:
-            torch.save(b, f)
-            f.seek(0)
-            c = torch.load(f)
-        self.assertEqual(b, c, 0)
-        self.assertTrue(isinstance(c[0], torch.FloatTensor))
-        self.assertTrue(isinstance(c[1], torch.FloatTensor))
-        self.assertTrue(isinstance(c[2], torch.FloatTensor))
-        self.assertTrue(isinstance(c[3], torch.FloatTensor))
-        self.assertTrue(isinstance(c[4], torch.FloatStorage))
-        c[0].fill_(10)
-        self.assertEqual(c[0], c[2], 0)
-        self.assertEqual(c[4], torch.FloatStorage(25).fill_(10), 0)
-        c[1].fill_(20)
-        self.assertEqual(c[1], c[3], 0)
-        self.assertEqual(c[4], c[5][1:4], 0)
+        for use_name in (False, True):
+            with tempfile.NamedTemporaryFile() as f:
+                handle = f if not use_name else f.name
+                torch.save(b, handle)
+                f.seek(0)
+                c = torch.load(handle)
+            self.assertEqual(b, c, 0)
+            self.assertTrue(isinstance(c[0], torch.FloatTensor))
+            self.assertTrue(isinstance(c[1], torch.FloatTensor))
+            self.assertTrue(isinstance(c[2], torch.FloatTensor))
+            self.assertTrue(isinstance(c[3], torch.FloatTensor))
+            self.assertTrue(isinstance(c[4], torch.FloatStorage))
+            c[0].fill_(10)
+            self.assertEqual(c[0], c[2], 0)
+            self.assertEqual(c[4], torch.FloatStorage(25).fill_(10), 0)
+            c[1].fill_(20)
+            self.assertEqual(c[1], c[3], 0)
+            self.assertEqual(c[4], c[5][1:4], 0)
 
     def test_from_buffer(self):
         a = bytearray([1, 2, 3, 4])
