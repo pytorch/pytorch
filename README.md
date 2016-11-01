@@ -85,6 +85,16 @@ conda install pytorch -c https://conda.anaconda.org/t/6N-MsQ4WZ7jo/soumith
 ```
 
 ### From source
+
+#### Install optional dependencies
+
+```bash
+export CMAKE_PREFIX_PATH=[anaconda root directory]
+conda install numpy mkl
+conda install -c soumith magma-cuda75# or magma-cuda80
+```
+
+#### Install PyTorch
 ```bash
 pip install -r requirements.txt
 pip install .
