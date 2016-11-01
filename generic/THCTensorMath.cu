@@ -136,4 +136,70 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
   }
 }
 
+void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,
+                          THCTensor *self)
+{
+  THAssert(THCTensor_(checkGPU)(state, 1, self  ));
+  THAssert(THCudaLongTensor_checkGPU(state, 1, tensor));
+
+  using namespace thrust::placeholders;
+
+  self = THCTensor_(newContiguous)(state, self);
+  thrust::device_ptr<real> self_data(THCTensor_(data)(state, self));
+
+  int num_dim = THCTensor_(nDimension)(state, self);
+  long N = THCTensor_(nElement)(state, self);
+
+  THCudaLongTensor_resize2d(state, tensor, N, num_dim);
+  tensor = THCudaLongTensor_newContiguous(state, tensor);
+  thrust::device_ptr<long> tensor_data(THCudaLongTensor_data(state, tensor));
+
+  thrust::counting_iterator<long> idxfirst(0);
+  thrust::counting_iterator<long> idxlast = idxfirst + N;
+
+  typedef thrust::device_ptr<long> Iter;
+  strided_range<Iter> strided_tensor(tensor_data,
+                                     tensor_data+N*num_dim, num_dim);
+
+#if CUDA_VERSION >= 7000
+  cudaStream_t stream = THCState_getCurrentStream(state);
+#endif
+
+  strided_range<Iter>::iterator dend = thrust::copy_if(
+#if CUDA_VERSION >= 7000
+    thrust::cuda::par.on(stream),
+#endif
+    idxfirst,
+    idxlast,
+    self_data,
+    strided_tensor.begin(),
+    NonZeroOp<real>()
+  );
+
+  long num_nonzeros = thrust::distance(strided_tensor.begin(), dend);
+
+  long div = 1;
+  for (int dim = num_dim-1; dim >= 0; dim--) {
+    strided_range<Iter> stride_dim(tensor_data+dim,
+                                   tensor_data+N*num_dim, num_dim);
+    thrust::transform(
+#if CUDA_VERSION >= 7000
+      thrust::cuda::par.on(stream),
+#endif
+      strided_tensor.begin(),
+      strided_tensor.end(),
+      stride_dim.begin(),
+      idx_functor(div, self->size[dim])
+    );
+    div *= self->size[dim];
+  }
+
+  THCudaLongTensor_resize2d(state, tensor, num_nonzeros, num_dim);
+
+  THCTensor_(free)(state, self);
+  THCudaLongTensor_free(state, tensor);
+
+  THCudaCheck(cudaGetLastError());
+}
+
 #endif
