@@ -178,6 +178,25 @@ TH_API void THNN_(LogSoftMax_updateGradInput)(
                   THCTensor *gradInput,
                   THCTensor *output);
 
+TH_API void THNN_(LookupTable_accGradParameters)(
+                  THCState *state,
+                  THCIndexTensor *input,
+                  THCTensor *gradOutput,
+                  THCTensor *gradWeight,
+                  THCIndexTensor *count,
+                  THCIndexTensor *sorted,       // [OPTIONAL]
+                  THCIndexTensor *indices,      // [OPTIONAL]
+                  bool scaleGradByFreq,
+                  int paddingValue,
+                  real scale);
+
+TH_API void THNN_(LookupTable_renorm)(
+                  THCState *state,
+                  THCIndexTensor *idx,
+                  THCTensor *weight,
+                  real maxNorm,
+                  real normType);
+
 TH_API void THNN_(L1Cost_updateOutput)(
                   THCState *state,
                   THCTensor *input,

@@ -7,24 +7,5 @@ typedef long THCIndex_t;
 
 #define THNN_(NAME) TH_CONCAT_3(THNN_, CReal, NAME)
 
-TH_API void THNN_CudaLookupTable_accGradParameters(
-          THCState *state,
-          THCIndexTensor *input,
-          THCudaTensor *gradOutput,
-          THCudaTensor *gradWeight,
-          THCIndexTensor *count,
-          THCIndexTensor *sorted,        // [OPTIONAL]
-          THCIndexTensor *indices,       // [OPTIONAL]
-          bool scaleGradByFreq,
-          int paddingValue,
-          float scale);
-
-TH_API void THNN_CudaLookupTable_renorm(
-          THCState *state,
-          THCIndexTensor *idx,
-          THCudaTensor *weight,
-          float maxNorm,
-          float normType);
-
 #include "generic/THCUNN.h"
 #include "THCGenerateFloatTypes.h"
