@@ -154,15 +154,17 @@ PyObject * THPVariable_setstate(THPVariable *self, PyObject *state)
   THPUtils_assert(size == 5, "__setstate__ expects state tuple to have 5 "
       "elements, but it has %d", size);
 
-  Py_XDECREF(self->data);
-  self->data = PyTuple_GET_ITEM(state, 0);
-  Py_INCREF(self->data);
+#define LOAD(NAME, IDX)                                                        \
+  Py_XDECREF(self->NAME);                                                      \
+  self->NAME = PyTuple_GET_ITEM(state, IDX) == Py_None ? NULL : PyTuple_GET_ITEM(state, IDX); \
+  Py_XINCREF(self->NAME);
+  THPUtils_assert(THPModule_isTensor(PyTuple_GET_ITEM(state, 0)), "first "
+          "element of variable state tuple has to be a tensor");
+  LOAD(data, 0);
 
-#define CHECK_NONE(idx)                                                        \
-    PyTuple_GET_ITEM(state, idx) == Py_None ? NULL : PyTuple_GET_ITEM(state, idx)
-  self->grad = CHECK_NONE(1);
-  self->backward_hooks = CHECK_NONE(2);
-#undef CHECK_NONE
+  LOAD(grad, 1);
+  LOAD(backward_hooks, 2);
+#undef LOAD
 
   PyObject *requires_grad_obj = PyTuple_GET_ITEM(state, 3);
   PyObject *is_volatile_obj = PyTuple_GET_ITEM(state, 4);
