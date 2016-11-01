@@ -418,7 +418,9 @@ PyObject * THPFunction_do_backward(THPFunction *self, PyObject *args)
     if (grad == Py_None) {
       auto &info = (*self->output_info)[i];
       PyObject *tensor_cls = std::get<0>(info);
+#ifdef WITH_CUDA
       gpu_guard.setDevice(std::get<1>(info));
+#endif
       std::vector<long> &sizes = std::get<2>(info);
       THPObjectPtr grad_size = THPSize_New(sizes.size(), sizes.data());
       THPObjectPtr new_grad = PyObject_CallFunctionObjArgs(tensor_cls, grad_size.get(), NULL);
