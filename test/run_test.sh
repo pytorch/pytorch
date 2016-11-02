@@ -17,6 +17,8 @@ python test_legacy_nn.py
 
 echo "Running multiprocessing tests"
 python test_multiprocessing.py
+MULTIPROCESSING_METHOD=spawn python test_multiprocessing.py
+MULTIPROCESSING_METHOD=forkserver python test_multiprocessing.py
 
 echo "Running util tests"
 python test_utils.py

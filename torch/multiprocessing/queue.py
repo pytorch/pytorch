@@ -37,6 +37,14 @@ class FdQueue(Queue):
         self._fd_reader.close()
         self._fd_writer.close()
 
+    def __getstate__(self):
+        state = super(FdQueue, self).__getstate__()
+        return (state, self._fd_reader, self._fd_writer)
+
+    def __setstate__(self, state):
+        super(FdQueue, self).__setstate__(state[0])
+        self._fd_reader, self._fd_writer = state[1:]
+
     def _send(self, obj):
         buffer = BytesIO()
         pickler = ExtendedInitPickler(buffer, self._reducers)
@@ -62,4 +70,3 @@ class FdQueue(Queue):
         for new_fd in fd_map.values():
             os.close(new_fd)
         return result
-

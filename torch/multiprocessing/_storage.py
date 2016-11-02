@@ -1,6 +1,6 @@
 import os
 import weakref
-from . import get_sharing_strategy
+from torch.multiprocessing.common import ExtendedInitPickler
 
 
 _shared_cache = weakref.WeakValueDictionary()
@@ -18,8 +18,8 @@ def _shm_object_handle(handle):
         return _fd_id(handle[0])
 
 
-def _shared_serialize(self):
-    handle, weak_storage = self._share(get_sharing_strategy() == 'file_descriptor')
+def _shared_serialize(self, use_fd):
+    handle, weak_storage = self._share(use_fd)
     object_handle = _shm_object_handle(handle)
     _shared_cache[object_handle] = weak_storage
     self._shared_incref()
@@ -66,15 +66,16 @@ def _open_shared_fd(self, fd_map):
 
 
 def reduce_storage(self, obj):
-    handle = obj._shared_serialize()
-    if get_sharing_strategy() == 'file_descriptor':
+    if isinstance(self, ExtendedInitPickler):
+        handle = obj._shared_serialize(True)
         self.register_extended_init(obj)
         return (_save_shared_args, (type(obj), handle,))
-    return (_shared_deserialize, (type(obj), handle,))
+    else:
+        handle = obj._shared_serialize(False)
+        return (_shared_deserialize, (type(obj), handle,))
 
 
 def _init_storage_sharing():
     from torch.storage import _StorageBase
     _StorageBase._shared_serialize = _shared_serialize
     _StorageBase._open_shared_fd = _open_shared_fd
-
