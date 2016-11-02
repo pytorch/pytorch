@@ -1,8 +1,10 @@
-import os
+import contextlib
 import gc
+import multiprocessing
+import os
+import sys
 import time
 import unittest
-import contextlib
 from sys import platform
 
 import torch
@@ -178,5 +180,12 @@ class TestMultiprocessing(TestCase):
 
 
 if __name__ == '__main__':
+    start_method = os.environ.get('MULTIPROCESSING_METHOD')
+    if start_method:
+        if sys.version_info[0] < 3:
+            print("Python 2 does not support 'multiprocessing.set_start_method'")
+            sys.exit(0)
+        else:
+            print("INFO: Using multiprocessing start method '{}'".format(start_method))
+            multiprocessing.set_start_method(start_method)
     unittest.main()
-
