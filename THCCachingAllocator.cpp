@@ -183,6 +183,28 @@ struct THCCachingAllocator
     return cudaSuccess;
   }
 
+  void* getBaseAllocation(void* ptr, size_t* outSize)
+  {
+    std::lock_guard<std::mutex> lock(mutex);
+    Block* block = find_allocated_block(ptr);
+    if (!block) {
+      THError("invalid device pointer: %p", ptr);
+    }
+    while (block->prev) {
+      block = block->prev;
+    }
+    void *basePtr = block->ptr;
+    if (outSize) {
+      size_t size = 0;
+      while (block) {
+        size += block->size;
+        block = block->next;
+      }
+      *outSize = size;
+    }
+    return basePtr;
+  }
+
   /** combine previously split blocks */
   void try_merge_blocks(Block* dst, Block* src, FreeBlocks& free_blocks)
   {
@@ -277,6 +299,14 @@ struct THCCachingAllocator
     }
     return cudaSuccess;
   }
+
+  Block* find_allocated_block(void *ptr) {
+    auto it = allocated_blocks.find(ptr);
+    if (it == allocated_blocks.end()) {
+      return NULL;
+    }
+    return it->second;
+  }
 };
 
 static cudaError_t THCCachingAllocator_malloc(void* ctx, void** ptr, size_t size, cudaStream_t stream)
@@ -309,4 +339,9 @@ static THCDeviceAllocator device_allocator = {
 THC_API THCDeviceAllocator* THCCachingAllocator_get(void)
 {
   return &device_allocator;
+}
+
+THC_API void* THCCachingAllocator_getBaseAllocation(void *ptr, size_t *size)
+{
+  return caching_allocator.getBaseAllocation(ptr, size);
 }

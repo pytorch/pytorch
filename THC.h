@@ -4,6 +4,7 @@
 #include "THCGeneral.h"
 #include "THCAllocator.h"
 #include "THCBlas.h"
+#include "THCCachingAllocator.h"
 #include "THCStorage.h"
 #include "THCStorageCopy.h"
 #include "THCStream.h"
