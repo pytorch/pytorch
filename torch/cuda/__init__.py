@@ -2,6 +2,7 @@ from __future__ import print_function
 import contextlib
 import platform
 import ctypes
+import os
 import torch
 
 _initialized = False
@@ -11,10 +12,28 @@ def is_available():
     return (hasattr(torch._C, '_cuda_isDriverSufficient') and
             torch._C._cuda_isDriverSufficient())
 
-def _lazy_init():
-    global _initialized, _cudart
-    if _initialized:
-        return
+
+def _load_cudart():
+    system = platform.system()
+    lib_name = 'libcudart.' + ('dylib' if system == 'Darwin' else 'so')
+    lib_paths = [
+        lib_name,
+        os.path.join(torch._C._cuda_getLibPath(), lib_name),
+        os.path.join('/usr/local/cuda/lib64', lib_name),
+        os.path.join('/usr/local/cuda/lib', lib_name),
+    ]
+    for path in lib_paths:
+        try:
+            return ctypes.cdll.LoadLibrary(path)
+        except OSError:
+            pass
+    raise RuntimeError("couldn't find libcudart. Make sure CUDA libraries "
+        "are installed in a default location, or that they're in " +
+        ("DYLD_LIBRARY_PATH" if system == 'Darwin' else "LD_LIBRARY_PATH") +
+        ".")
+
+
+def _check_driver():
     if not hasattr(torch._C, '_cuda_isDriverSufficient'):
         raise AssertionError("Torch not compiled with CUDA enabled")
     if not torch._C._cuda_isDriverSufficient():
@@ -33,14 +52,18 @@ version from the URL: http://www.nvidia.com/Download/index.aspx
 Alternatively, go to: https://pytorch.org/binaries to install
 a PyTorch version that has been compiled with your version
 of the CUDA driver.""".format(str(torch._C._cuda_getDriverVersion())))
+
+
+def _lazy_init():
+    global _initialized, _cudart
+    if _initialized:
+        return
+    _check_driver()
     assert torch._C._cuda_init()
-    _initialized = True
-    if platform.system() == 'Darwin':
-        _cudart = ctypes.cdll.LoadLibrary('libcudart.dylib')
-    else:
-        _cudart = ctypes.cdll.LoadLibrary('libcudart.so')
+    _cudart = _load_cudart()
     _cudart.cudaGetErrorName.restype = ctypes.c_char_p
     _cudart.cudaGetErrorString.restype = ctypes.c_char_p
+    _initialized = True
 
 
 def cudart():

@@ -233,6 +233,19 @@ PyObject * THCPModule_cudaSynchronize(PyObject *_unused)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject * THCPModule_getLibPath(PyObject *_unused)
+{
+#define _STR(x) #x
+#define STR(x) _STR(x)
+#if PY_MAJOR_VERSION == 2
+  return PyString_FromString(STR(CUDA_LIB_PATH));
+#else
+  return PyUnicode_FromString(STR(CUDA_LIB_PATH));
+#endif
+#undef STR
+#undef _STR
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Cuda module initialization
 ////////////////////////////////////////////////////////////////////////////////

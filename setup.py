@@ -9,8 +9,8 @@ import shutil
 import sys
 import os
 
-# TODO: make this more robust
-WITH_CUDA = os.path.exists('/Developer/NVIDIA/CUDA-7.5/include') or os.path.exists('/usr/local/cuda/include')
+CUDA_HOME = os.getenv('CUDA_HOME', '/usr/local/cuda')
+WITH_CUDA = os.path.exists(CUDA_HOME)
 WITH_CUDNN = WITH_CUDA
 DEBUG = False
 
@@ -176,18 +176,17 @@ except ImportError:
     pass
 
 if WITH_CUDA:
-    if platform.system() == 'Darwin':
-        cuda_path = '/Developer/NVIDIA/CUDA-7.5'
-        cuda_include_path = cuda_path + '/include'
-        cuda_lib_path = cuda_path + '/lib'
-    else:
-        cuda_path = '/usr/local/cuda'
-        cuda_include_path = cuda_path + '/include'
-        cuda_lib_path = cuda_path + '/lib64'
+    cuda_lib_dirs = ['lib64', 'lib']
+    cuda_include_path = os.path.join(CUDA_HOME, 'include')
+    for lib_dir in cuda_lib_dirs:
+        cuda_lib_path = os.path.join(CUDA_HOME, lib_dir)
+        if os.path.exists(cuda_lib_path):
+            break
     include_dirs.append(cuda_include_path)
     extra_link_args.append('-L' + cuda_lib_path)
     extra_link_args.append('-Wl,-rpath,' + cuda_lib_path)
     extra_compile_args += ['-DWITH_CUDA']
+    extra_compile_args += ['-DCUDA_LIB_PATH=' + cuda_lib_path]
     main_libraries += ['THC']
     main_sources += [
         "torch/csrc/cuda/Module.cpp",
