@@ -23,6 +23,11 @@ types = [
     torch.ByteTensor,
 ]
 
+float_types = [
+    torch.FloatTensor,
+    torch.DoubleTensor
+] # TODO: add half...
+
 def number(floating, integer, t):
     name = type(t).__name__
     if 'Double' in name or 'Float' in name or 'Half' in name:
@@ -40,6 +45,9 @@ def make_tensor(t, *sizes):
 def small_2d(t):
     return make_tensor(t, S, S)
 
+def small_2d_scaled(t, scale=10):
+    return make_tensor(t, S, S).mul(scale)
+
 def small_3d(t):
     return make_tensor(t, S, S, S)
 
@@ -48,6 +56,9 @@ def medium_1d(t):
 
 def medium_2d(t):
     return make_tensor(t, M, M)
+
+def medium_2d_scaled(t, scale=10):
+    return make_tensor(t, M, M).mul(scale)
 
 def small_3d_ones(t):
     return t(S, S, S).copy_(torch.ones(S, S, S))
@@ -86,16 +97,16 @@ tests = [
     ('mul',           small_3d,           lambda t: [small_3d_positive(t)],                 'tensor'        ),
     ('div',           small_3d,           lambda t: [number(3.14, 3, t)],                                   ),
     ('div',           small_3d,           lambda t: [small_3d_positive(t)],                 'tensor'        ),
-    ('pow',           small_3d,           lambda t: [number(3.14, 3, t)],                                   ),
-    ('pow',           small_3d,           lambda t: [small_3d(t).abs_()],                   'tensor'        ),
-    ('addbmm',        small_2d,           lambda t: [small_3d(t), small_3d(t)],                             ),
+    ('pow',           small_3d,           lambda t: [number(3.14, 3, t)],                    None,    float_types),
+    ('pow',           small_3d,           lambda t: [small_3d(t).abs_()],                   'tensor', float_types),
+    ('addbmm',        small_2d,           lambda t: [small_3d(t), small_3d(t)],              None,    float_types),
     ('addbmm',        small_2d,           lambda t: [number(0.4, 2, t), small_3d(t), small_3d(t)], 'scalar' ),
     ('addbmm',        small_2d,           lambda t: [number(0.5, 3, t), number(0.4, 2, t), small_3d(t), small_3d(t)], 'two_scalars' ),
     ('baddbmm',       small_3d,           lambda t: [small_3d(t), small_3d(t)],                             ),
     ('baddbmm',       small_3d,           lambda t: [number(0.4, 2, t), small_3d(t), small_3d(t)], 'scalar' ),
     ('baddbmm',       small_3d,           lambda t: [number(0.5, 3, t), number(0.4, 2, t), small_3d(t), small_3d(t)], 'two_scalars' ),
-    ('addcdiv',       small_3d,           lambda t: [small_3d(t), small_3d(t)],                             ),
-    ('addcdiv',       small_3d,           lambda t: [number(0.4, 2, t), small_3d(t), small_3d(t)], 'scalar' ),
+    ('addcdiv',       small_2d_lapack,    lambda t: [small_2d_lapack(t).mul(2), small_2d_lapack(t)],        ),
+    ('addcdiv',       small_2d_lapack,    lambda t: [number(2.8, 1, t), small_2d_lapack(t).mul(2), small_2d_lapack(t)], 'scalar' ),
     ('addcmul',       small_3d,           lambda t: [small_3d(t), small_3d(t)],                             ),
     ('addcmul',       small_3d,           lambda t: [number(0.4, 2, t), small_3d(t), small_3d(t)], 'scalar' ),
     ('addmm',         medium_2d,          lambda t: [medium_2d(t), medium_2d(t)],                           ),
@@ -107,10 +118,10 @@ tests = [
     ('addr',          medium_2d,          lambda t: [medium_1d(t), medium_1d(t)],                           ),
     ('addr',          medium_2d,          lambda t: [number(0.4, 2, t), medium_1d(t), medium_1d(t)], 'scalar' ),
     ('addr',          medium_2d,          lambda t: [number(0.5, 3, t), number(0.4, 2, t), medium_1d(t), medium_1d(t)], 'two_scalars'   ),
-    ('atan2',         medium_2d,          lambda t: [medium_2d(t)],                                         ),
+    ('atan2',         medium_2d,          lambda t: [medium_2d(t)],                          None,    float_types),
     ('chunk',         medium_2d,          lambda t: [4],                                                    ),
     ('chunk',         medium_2d,          lambda t: [4, 1],                                 'dim'           ),
-    ('clamp',         medium_2d,          lambda t: [-0.1, 0.5],                                            ),
+    ('clamp',         medium_2d_scaled,   lambda t: [-1, 5],                                                ),
     ('clone',         medium_2d,          lambda t: [],                                                     ),
     ('cmax',          medium_2d,          lambda t: [medium_2d(t)],                                         ),
     ('cmin',          medium_2d,          lambda t: [medium_2d(t)],                                         ),
@@ -199,17 +210,18 @@ tests = [
     ('view_as',       small_3d,           lambda t: [t(100, 10)],                                           ),
     ('zero',          small_3d,           lambda t: [],                                                     ),
     ('zeros',         small_3d,           lambda t: [1, 2, 3, 4],                                           ),
-    ('rsqrt',         lambda t: small_3d(t) + 1,                lambda t: [],                               ),
-    ('sinh',          lambda t: small_3d(t).clamp(-1, 1),       lambda t: [],                               ),
-    ('tan',           lambda t: small_3d(t).clamp(-1, 1),       lambda t: [],                               ),
+    ('rsqrt',         lambda t: small_3d(t) + 1,                lambda t: [], None,              float_types),
+    ('sinh',          lambda t: small_3d(t).clamp(-1, 1),       lambda t: [], None,              float_types),
+    ('tan',           lambda t: small_3d(t).clamp(-1, 1),       lambda t: [], None,              float_types),
     # lapack tests
-    ('qr',            small_2d_lapack,           lambda t: [],   'square'                                   ),
-    ('qr',            small_2d_lapack_skinny,    lambda t: [],   'skinny'                                   ),
-    ('qr',            small_2d_lapack_fat,       lambda t: [],   'fat'                                      ),
+    ('qr',            small_2d_lapack,           lambda t: [],   'square',                       float_types),
+    ('qr',            small_2d_lapack_skinny,    lambda t: [],   'skinny',                       float_types),
+    ('qr',            small_2d_lapack_fat,       lambda t: [],   'fat',                          float_types),
 
 ]
 
-# TODO: random functions, cat, gather, scatter, index*, masked*, resize, resizeAs, storage_offset, storage, stride, unfold
+# TODO: random functions, cat, gather, scatter, index*, masked*,
+#       resize, resizeAs, storage_offset, storage, stride, unfold
 
 custom_precision = {
     'addbmm': 1e-4,
@@ -223,31 +235,37 @@ custom_precision = {
 
 simple_pointwise = [
     'abs',
-    'acos',
-    'asin',
-    'atan',
-    'ceil',
-    'cinv',
-    'cos',
-    'cosh',
-    'exp',
-    'floor',
-    'fmod',
-    'frac',
-    'log',
-    'log1p',
-    'neg',
     'remainder',
-    'round',
-    'sigmoid',
     'sign',
-    'sin',
-    'sqrt',
-    'tanh',
-    'trunc',
 ]
 for fn in simple_pointwise:
     tests.append((fn, small_3d, lambda t: []))
+
+simple_pointwise_float = [
+    'log',
+    'log1p',
+    'sigmoid',
+    'sin',
+    'sqrt',
+    'tanh',
+    'acos',
+    'asin',
+    'atan',
+    'cos',
+    'cosh',
+    'exp',
+    'cinv',
+    'floor',
+    'fmod',
+    'frac',
+    'neg',
+    'round',
+    'trunc',
+    'ceil',
+]
+    
+for fn in simple_pointwise_float:
+    tests.append((fn, small_3d, lambda t: [], None, float_types))
 
 def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t, precision=1e-5):
     def tmp(self):
@@ -548,6 +566,10 @@ for decl in tests:
             desc = ''
         elif len(decl) == 4:
             name, constr, arg_constr, desc = decl
+        elif len(decl) == 5:
+            name, constr, arg_constr, desc, type_subset = decl
+            if t not in type_subset:
+                continue
 
         precision = custom_precision.get(name, TestCuda.precision)
         for inplace in (True, False):
@@ -556,7 +578,6 @@ for decl in tests:
             else:
                 name_inner = name
             if not hasattr(tensor, name_inner):
-                print("Ignoring {}, because it's not implemented by torch.{}".format(name_inner, tensor.__class__.__name__))
                 continue
             if not hasattr(gpu_tensor, name_inner):
                 print("Ignoring {}, because it's not implemented by torch.cuda.{}".format(name_inner, gpu_tensor.__class__.__name__))

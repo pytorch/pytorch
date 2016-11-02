@@ -17,6 +17,9 @@
 #define CUDA_FLOAT false
 #else
 #define IS_CUDA true
+#define CUDA_BYTE defined(THC_REAL_IS_BYTE)
+#define CUDA_CHAR defined(THC_REAL_IS_CHAR)
+#define CUDA_SHORT defined(THC_REAL_IS_SHORT)
 #define CUDA_INT defined(THC_REAL_IS_INT)
 #define CUDA_LONG defined(THC_REAL_IS_LONG)
 #define CUDA_FLOAT defined(THC_REAL_IS_FLOAT)
@@ -975,7 +978,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: mean
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   with_stateless: True
   options:
     - cname: meanall
@@ -993,7 +996,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: var
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   with_stateless: True
   options:
     - cname: varall
@@ -1012,7 +1015,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: std
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   with_stateless: True
   options:
     - cname: stdall
@@ -1031,7 +1034,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: norm
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_HALF || CUDA_FLOAT || CUDA_DOUBLE
   with_stateless: True
   options:
     - cname: normall
@@ -1039,7 +1042,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
       arguments:
         - THTensor* self
         - arg: real p
-          default: 2
+          default: AS_REAL(2)
     - cname: norm
       return: argument 0
       arguments:
@@ -1052,7 +1055,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: renorm
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   with_stateless: True
   options:
     - cname: renorm
@@ -1068,7 +1071,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: renorm_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   options:
     - cname: renorm
       return: self
@@ -1082,7 +1085,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: dist
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_HALF || CUDA_FLOAT || CUDA_DOUBLE
   with_stateless: True
   options:
     - cname: dist
@@ -1091,7 +1094,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
         - THTensor* self
         - THTensor* other
         - arg: real p
-          default: 2
+          default: AS_REAL(2)
 ]]
 
 [[
@@ -1178,7 +1181,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 // be available. Still, they differ in torch.pow.
 [[
   name: pow
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   with_stateless: True
   return: argument 0
   options:
@@ -1204,7 +1207,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: pow_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   return: argument 0
   cname: pow
   options:
@@ -1222,7 +1225,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: lerp
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   with_stateless: True
   return: argument 0
   cname: lerp
@@ -1236,7 +1239,7 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
 
 [[
   name: lerp_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   return: self
   cname: lerp
   arguments:
@@ -1427,7 +1430,6 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: cmax
-  defined_if: CUDA_FLOAT || !IS_CUDA
   return: argument 0
   with_stateless: True
   options:
@@ -1447,7 +1449,6 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: cmax_
-  defined_if: CUDA_FLOAT || !IS_CUDA
   return: self
   options:
     - cname: cmax
@@ -1464,7 +1465,6 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: cmin
-  defined_if: CUDA_FLOAT || !IS_CUDA
   return: argument 0
   with_stateless: True
   options:
@@ -1484,7 +1484,6 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: cmin_
-  defined_if: CUDA_FLOAT || !IS_CUDA
   return: self
   options:
     - cname: cmin
@@ -1501,7 +1500,6 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: sum
-  defined_if: CUDA_FLOAT || !IS_CUDA
   with_stateless: True
   options:
     - cname: sumall
@@ -1519,7 +1517,6 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: prod
-  defined_if: CUDA_FLOAT || !IS_CUDA
   with_stateless: True
   options:
     - cname: prodall
@@ -1537,7 +1534,6 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: cumsum
-  defined_if: CUDA_FLOAT || !IS_CUDA
   with_stateless: True
   return: argument 0
   arguments:
@@ -1549,7 +1545,6 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: cumprod
-  defined_if: CUDA_FLOAT || !IS_CUDA
   with_stateless: True
   return: argument 0
   arguments:
@@ -1581,7 +1576,6 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: trace
   with_stateless: True
-  defined_if: "!IS_CUDA"
   return: accreal
   arguments:
     - THTensor* self
@@ -1816,7 +1810,6 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: clamp
-  defined_if: CUDA_FLOAT || !IS_CUDA
   with_stateless: True
   return: argument 0
   arguments:
@@ -1829,7 +1822,6 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: clamp_
-  defined_if: CUDA_FLOAT || !IS_CUDA
   cname: clamp
   return: self
   arguments:
@@ -1839,9 +1831,10 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
     - real max
 ]]
 
+// TODO: enable CUDA_HALF and integer types here, after fixing the return type to be accreal for half in THC
 [[
   name: dot
-  defined_if: CUDA_FLOAT || !IS_CUDA
+  defined_if: CUDA_FLOAT || CUDA_DOUBLE || !IS_CUDA
   with_stateless: True
   return: accreal
   arguments:
@@ -1851,7 +1844,6 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: tril
-  defined_if: CUDA_FLOAT || !IS_CUDA
   with_stateless: True
   return: argument 0
   arguments:
@@ -1865,7 +1857,6 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: tril_
   cname: tril
-  defined_if: CUDA_FLOAT || !IS_CUDA
   return: self
   arguments:
     - THTensor* self
@@ -1876,7 +1867,6 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: triu
-  defined_if: CUDA_FLOAT || !IS_CUDA
   with_stateless: True
   return: argument 0
   arguments:
@@ -1890,7 +1880,6 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: triu_
   cname: triu
-  defined_if: CUDA_FLOAT || !IS_CUDA
   return: self
   arguments:
     - THTensor* self
@@ -1901,7 +1890,6 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: cross
-  defined_if: CUDA_FLOAT || !IS_CUDA
   with_stateless: True
   return: argument 0
   arguments:
@@ -1944,7 +1932,6 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: diag
-  defined_if: "!IS_CUDA"
   with_stateless: True
   return: argument 0
   options:
@@ -2548,7 +2535,7 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: all
-  defined_if: defined(TH_REAL_IS_BYTE)
+  defined_if: defined(TH_REAL_IS_BYTE) || defined(THC_REAL_IS_BYTE)
   cname: logicalall
   return: bool
   arguments:
@@ -2557,7 +2544,7 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: any
-  defined_if: defined(TH_REAL_IS_BYTE)
+  defined_if: defined(TH_REAL_IS_BYTE) || defined(THC_REAL_IS_BYTE)
   cname: logicalany
   return: bool
   arguments:
@@ -2642,7 +2629,6 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: nonzero
-  defined_if: "!IS_CUDA"
   with_stateless: True
   return: argument 0
   arguments:
@@ -2705,7 +2691,6 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: indexAdd_
   python_name: index_add_
-  defined_if: CUDA_FLOAT || !IS_CUDA
   cname: indexAdd
   return: argument 0
   arguments:
@@ -2767,7 +2752,6 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: scatter_
-  defined_if: "!IS_CUDA"
   return: argument 0
   options:
     - cname: scatter
@@ -3033,7 +3017,6 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: addcmul
-  defined_if: CUDA_FLOAT || !IS_CUDA
   with_stateless: True
   return: argument 0
   arguments:
@@ -3048,7 +3031,6 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: addcmul_
-  defined_if: CUDA_FLOAT || !IS_CUDA
   cname: addcmul
   return: argument 0
   arguments:
@@ -3062,7 +3044,6 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: addcdiv
-  defined_if: CUDA_FLOAT || !IS_CUDA
   with_stateless: True
   return: argument 0
   arguments:
@@ -3077,7 +3058,6 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: addcdiv_
-  defined_if: CUDA_FLOAT || !IS_CUDA
   cname: addcdiv
   return: argument 0
   arguments:
@@ -3746,9 +3726,7 @@ static const char *R = &__R;
   python_name: cat
   only_register: True
   only_stateless: True
-  defined_if: CUDA_FLOAT || !IS_CUDA
 ]]
-#if !IS_CUDA || CUDA_FLOAT
 static PyObject * THPTensor_stateless_(cat)(THPTensor *_unused, PyObject *args)
 {
 #if IS_CUDA && THCP_AUTO_GPU
@@ -3802,12 +3780,14 @@ invalid_arguments:
   return NULL;
   END_HANDLE_TH_ERRORS
 }
-#endif
 
 // cwrap should put definitions before undefs, so let's mark this place
 // PUT DEFINITIONS IN HERE PLEASE
 
 #undef IS_CUDA
+#undef CUDA_BYTE
+#undef CUDA_CHAR
+#undef CUDA_SHORT
 #undef CUDA_INT
 #undef CUDA_LONG
 #undef CUDA_FLOAT
