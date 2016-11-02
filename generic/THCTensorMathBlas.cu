@@ -2,7 +2,7 @@
 #define THC_GENERIC_FILE "generic/THCTensorMathBlas.cu"
 #else
 
-THC_API real
+THC_API accreal
 THCTensor_(dot)(THCState *state, THCTensor *self, THCTensor *src)
 {
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
@@ -14,17 +14,17 @@ THCTensor_(dot)(THCState *state, THCTensor *self, THCTensor *src)
   src = THCTensor_(newContiguous)(state, src);
 
 #ifdef THC_REAL_IS_FLOAT
-  real result = THCudaBlas_Sdot(state,
+  accreal result = THCudaBlas_Sdot(state,
                                 THCTensor_(nElement)(state, self),
                                 THCTensor_(data)(state, self), 1,
                                 THCTensor_(data)(state, src), 1);
 #elif defined(THC_REAL_IS_DOUBLE)
-  real result = THCudaBlas_Ddot(state,
+  accreal result = THCudaBlas_Ddot(state,
                                 THCTensor_(nElement)(state, self),
                                 THCTensor_(data)(state, self), 1,
                                 THCTensor_(data)(state, src), 1);
 #elif defined(THC_REAL_IS_HALF)
-  real result = THCudaBlas_Hdot(state,
+  accreal result = THCudaBlas_Hdot(state,
                                 THCTensor_(nElement)(state, self),
                                 THCTensor_(data)(state, self), 1,
                                 THCTensor_(data)(state, src), 1);
@@ -36,7 +36,7 @@ THCTensor_(dot)(THCState *state, THCTensor *self, THCTensor *src)
 
 #else
   THError("unimplemented data type");
-  return ScalarConvert<int, real>::to(0);
+  return ScalarConvert<int, accreal>::to(0);
 #endif
 }
 
