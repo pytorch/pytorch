@@ -1,5 +1,4 @@
 import os
-import re
 import yaml
 from string import Template
 from copy import deepcopy

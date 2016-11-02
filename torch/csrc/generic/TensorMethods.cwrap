@@ -54,13 +54,13 @@
 typedef THLongStorage THSize;
 typedef THLongStorage THStride;
 
-!!inc methods/serialization.cwrap
-!!inc methods/tensor.cwrap
-!!inc methods/tensor_apply.cwrap
-!!inc methods/tensor_math.cwrap
-!!inc methods/tensor_compare.cwrap
-!!inc methods/tensor_random.cwrap
-!!inc methods/cuda.cwrap
+!!inc methods/Tensor.cwrap
+!!inc methods/TensorSerialization.cwrap
+!!inc methods/TensorApply.cwrap
+!!inc methods/TensorMath.cwrap
+!!inc methods/TensorCompare.cwrap
+!!inc methods/TensorRandom.cwrap
+!!inc methods/TensorCuda.cwrap
 
 // cwrap should put definitions before undefs, so let's mark this place
 // PUT DEFINITIONS IN HERE PLEASE
