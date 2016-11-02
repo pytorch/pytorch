@@ -40,6 +40,7 @@ class cwrap(object):
         for plugin in self.plugins:
             plugin.initialize(self)
 
+        self.base_path = os.path.dirname(os.path.abspath(source))
         with open(source, 'r') as f:
             declarations = f.read()
 
@@ -55,8 +56,10 @@ class cwrap(object):
         declaration_lines = []
         output = []
         in_declaration = False
+        i = 0
 
-        for line in lines:
+        while i < len(lines):
+            line = lines[i]
             if line == '[[':
                 declaration_lines = []
                 in_declaration = True
@@ -79,8 +82,15 @@ class cwrap(object):
                     output.append(wrapper)
             elif in_declaration:
                 declaration_lines.append(line)
+            elif '!!inc ' == line[:6]:
+                fname = os.path.join(self.base_path, line[6:].strip())
+                with open(fname, 'r') as f:
+                    included = f.read().split('\n')
+                # insert it into lines at position i+1
+                lines[i+1:i+1] = included
             else:
                 output.append(line)
+            i += 1
 
         return '\n'.join(output)
 
