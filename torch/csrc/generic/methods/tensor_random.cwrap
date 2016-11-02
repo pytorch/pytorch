@@ -1,0 +1,330 @@
+[[
+  name: randperm
+  defined_if: "!IS_CUDA"
+  only_stateless: True
+  return: argument 0
+  arguments:
+    - arg: THTensor* result
+      allocate: True
+    - arg: THGenerator* generator
+      default: THPDefaultGenerator->cdata
+    - long n
+]]
+
+#if !IS_CUDA
+static void THTensor_(random2__)(THTensor *self, THGenerator *gen, long a, long b)
+{
+  THArgCheck(b >= a, 2, "upper bound must be greater or equal than lower bound");
+  TH_TENSOR_APPLY(real, self, *self_data = ((THRandom_random(gen) % (b+1-a)) + a);)
+}
+
+static void THTensor_(random1__)(THTensor *self, THGenerator *gen, long b)
+{
+  THArgCheck(b >= 0, 1, "upper bound must be positive");
+  TH_TENSOR_APPLY(real, self, *self_data = (THRandom_random(gen) % b);)
+}
+#endif
+
+[[
+  name: random_
+  defined_if: "!IS_CUDA"
+  return: self
+  options:
+    - cname: random
+      arguments:
+        - THTensor* self
+        - arg: THGenerator* generator
+          default: THPDefaultGenerator->cdata
+    - cname: random1__
+      arguments:
+        - THTensor* self
+        - arg: THGenerator* generator
+          default: THPDefaultGenerator->cdata
+        - long to
+    - cname: random2__
+      arguments:
+        - THTensor* self
+        - arg: THGenerator* generator
+          default: THPDefaultGenerator->cdata
+        - long from
+        - long to
+]]
+
+[[
+  name: multinomial
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  with_stateless: True
+  return: argument 0
+  arguments:
+    - arg: THLongTensor* result
+      allocate: True
+    - arg: THGenerator* generator
+      default: THPDefaultGenerator->cdata
+    - THTensor* self
+    - long num_samples
+    - arg: bool replacement
+      default: "false"
+]]
+
+[[
+  name: uniform_
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  cname: uniform
+  return: self
+  arguments:
+    - THTensor* self
+    - arg: THGenerator* generator
+      default: THPDefaultGenerator->cdata
+    - arg: real from
+      default: 0
+    - arg: real to
+      default: 1
+]]
+
+[[
+  name: normal_
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  cname: normal
+  return: self
+  arguments:
+    - THTensor* self
+    - arg: THGenerator* generator
+      default: THPDefaultGenerator->cdata
+    - arg: real mean
+      default: 0
+    - arg: real var
+      default: 1
+]]
+
+[[
+  name: cauchy_
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  cname: cauchy
+  return: self
+  arguments:
+    - THTensor* self
+    - arg: THGenerator* generator
+      default: THPDefaultGenerator->cdata
+    - arg: real location
+      default: 0
+    - arg: real scale
+      default: 1
+]]
+
+[[
+  name: logNormal_
+  cname: logNormal
+  python_name: log_normal_
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  return: self
+  arguments:
+    - THTensor* self
+    - arg: THGenerator* generator
+      default: THPDefaultGenerator->cdata
+    - arg: real location
+      default: 1
+    - arg: real scale
+      default: 2
+]]
+
+[[
+  name: exponential_
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  cname: exponential
+  return: self
+  arguments:
+    - THTensor* self
+    - arg: THGenerator* generator
+      default: THPDefaultGenerator->cdata
+    - arg: real lambd
+      default: 1
+]]
+
+[[
+  name: rand
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  only_stateless: True
+  return: argument 0
+  arguments:
+    - arg: THTensor* result
+      allocate: True
+    - arg: THGenerator* generator
+      default: THPDefaultGenerator->cdata
+    - arg: THSize* size
+      long_args: True
+]]
+
+[[
+  name: randn
+  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  only_stateless: True
+  return: argument 0
+  arguments:
+    - arg: THTensor* result
+      allocate: True
+    - arg: THGenerator* generator
+      default: THPDefaultGenerator->cdata
+    - arg: THSize* size
+      long_args: True
+]]
+
+[[
+  name: multinomial
+  defined_if: CUDA_FLOAT
+  return: argument 0
+  arguments:
+    - arg: THTensor* result
+      allocate: True
+    - THTensor* self
+    - long num_samples
+    - arg: bool replacement
+      default: "false"
+]]
+
+[[
+  name: uniform_
+  defined_if: CUDA_FLOAT
+  cname: uniform
+  return: self
+  arguments:
+    - THTensor* self
+    - arg: real from
+      default: 0
+    - arg: real to
+      default: 1
+]]
+
+[[
+  name: normal_
+  defined_if: CUDA_FLOAT
+  cname: normal
+  return: self
+  arguments:
+    - THTensor* self
+    - arg: real mean
+      default: 0
+    - arg: real var
+      default: 1
+]]
+
+[[
+  name: cauchy_
+  defined_if: CUDA_FLOAT
+  cname: cauchy
+  return: self
+  arguments:
+    - THTensor* self
+    - arg: real location
+      default: 0
+    - arg: real scale
+      default: 1
+]]
+
+[[
+  name: logNormal_
+  cname: logNormal
+  python_name: log_normal_
+  defined_if: CUDA_FLOAT
+  return: self
+  arguments:
+    - THTensor* self
+    - arg: real location
+      default: 1
+    - arg: real scale
+      default: 2
+]]
+
+[[
+  name: exponential_
+  defined_if: CUDA_FLOAT
+  cname: exponential
+  return: self
+  arguments:
+    - THTensor* self
+    - arg: real lambd
+      default: 1
+]]
+
+[[
+  name: rand
+  defined_if: CUDA_FLOAT
+  only_stateless: True
+  return: argument 0
+  arguments:
+    - arg: THTensor* result
+      allocate: True
+    - arg: THSize* size
+      long_args: True
+]]
+
+[[
+  name: randn
+  defined_if: CUDA_FLOAT
+  only_stateless: True
+  return: argument 0
+  arguments:
+    - arg: THTensor* result
+      allocate: True
+    - arg: THSize* size
+      long_args: True
+]]
+
+[[
+  name: geometric_
+  defined_if: "!IS_CUDA"
+  cname: geometric
+  return: self
+  arguments:
+    - THTensor* self
+    - arg: THGenerator* generator
+      default: THPDefaultGenerator->cdata
+    - double p
+]]
+
+[[
+  name: bernoulli_
+  defined_if: "!IS_CUDA"
+  return: self
+  options:
+    - cname: bernoulli
+      arguments:
+        - THTensor* self
+        - arg: THGenerator* generator
+          default: THPDefaultGenerator->cdata
+        - arg: double p
+          default: 0.5
+    - cname: bernoulli_FloatTensor
+      arguments:
+        - THTensor* self
+        - arg: THGenerator* generator
+          default: THPDefaultGenerator->cdata
+        - THFloatTensor* float_p
+    - cname: bernoulli_DoubleTensor
+      arguments:
+        - THTensor* self
+        - arg: THGenerator* generator
+          default: THPDefaultGenerator->cdata
+        - THDoubleTensor* float_p
+]]
+
+[[
+  name: geometric_
+  cname: geometric
+  defined_if: CUDA_FLOAT
+  return: self
+  arguments:
+    - THTensor* self
+    - double p
+]]
+
+[[
+  name: bernoulli_
+  defined_if: CUDA_FLOAT
+  cname: bernoulli
+  return: self
+  arguments:
+    - THTensor* self
+    - arg: double p
+      default: 0.5
+]]
+
