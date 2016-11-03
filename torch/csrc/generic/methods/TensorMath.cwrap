@@ -1202,10 +1202,9 @@
     - real max
 ]]
 
-// TODO: enable CUDA_HALF and integer types here, after fixing the return type to be accreal for half in THC
 [[
   name: dot
-  defined_if: CUDA_FLOAT || CUDA_DOUBLE || !IS_CUDA
+  defined_if: CUDA_FLOAT || CUDA_DOUBLE || CUDA_HALF || !IS_CUDA
   with_stateless: True
   return: accreal
   arguments:
