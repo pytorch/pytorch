@@ -61,7 +61,7 @@ float THCudaBlas_Hdot(THCState *state, long n, half *x, long incx, half *y, long
     int i_n = (int)n;
     int i_incx = (int)incx;
     int i_incy = (int)incy;
-    half result;
+    float result;
     cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
     cublasSetStream(handle, THCState_getCurrentStream(state));
     THCublasCheck(cublasDotEx(handle, i_n, x, CUDA_R_16F, i_incx, y, CUDA_R_16F, i_incy, &result, CUDA_R_32F, CUDA_R_32F));
