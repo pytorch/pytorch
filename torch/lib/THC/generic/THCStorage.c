@@ -181,6 +181,9 @@ void THCStorage_(free)(THCState *state, THCStorage *self)
       THCudaCheck(
         (*self->allocator->free)(self->allocatorContext, self->data));
     }
+    if(self->flag & TH_STORAGE_VIEW) {
+      THCStorage_(free)(state, self->view);
+    }
     THFree(self);
   }
 }

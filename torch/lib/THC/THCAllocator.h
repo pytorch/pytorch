@@ -5,4 +5,6 @@
 
 THC_API void THCAllocator_init(THCState *state);
 
+extern THCDeviceAllocator THCIpcAllocator;
+
 #endif

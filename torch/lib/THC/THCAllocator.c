@@ -23,3 +23,22 @@ void THCAllocator_init(THCState *state) {
   state->cudaHostAllocator->realloc = NULL;
   state->cudaHostAllocator->free = &THCudaHostAllocator_free;
 }
+
+static cudaError_t THCIpcAllocator_malloc(void* ctx, void** devPtr, size_t size, cudaStream_t stream)
+{
+  THError("THCIpcAllocator.malloc() not supported");
+  return cudaSuccess;
+}
+
+static cudaError_t THCIpcAllocator_free(void* ctx, void* devPtr)
+{
+  return cudaIpcCloseMemHandle(devPtr);
+}
+
+THCDeviceAllocator THCIpcAllocator = {
+  &THCIpcAllocator_malloc,
+  NULL,
+  &THCIpcAllocator_free,
+  NULL,
+  NULL
+};
