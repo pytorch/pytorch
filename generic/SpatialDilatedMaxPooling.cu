@@ -38,7 +38,7 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
 
   THArgCheck(nInputCols >= kW - padW && nInputRows >= kH - padH, 2, "input image smaller than kernel size");
   THArgCheck(kW/2 >= padW && kH/2 >= padH, 2, "pad should be smaller than half of kernel size");
-
+  THArgCheck(dilationW > 0 && dilationH > 0, 11, "dilation should be greater than 0");
   if(ceil_mode) {
     nOutputCols = ceil(float(nInputCols - (dilationW * (kW - 1) + 1) + 2*padW) / float(dW)) + 1;
     nOutputRows = ceil(float(nInputRows - (dilationH * (kH - 1) + 1) + 2*padH) / float(dH)) + 1;

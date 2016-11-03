@@ -24,6 +24,7 @@ void THNN_(SpatialDilatedConvolution_updateOutput)(
   THArgCheck(!bias || weight->size[0] == bias->size[0], 4, "nOutputPlane mismatch in weight and bias");
   THArgCheck(kW > 0 && kH > 0, 8, "kernel size should be greater than zero");
   THArgCheck(dW > 0 && dH > 0, 10, "stride should be greater than zero");
+  THArgCheck(dilationW > 0 && dilationH > 0, 14, "dilation should be greater than 0");
 
   // Params:
   int nInputPlane = weight->size[1];

@@ -71,6 +71,9 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
   THArgCheck(kT/2 >= padT && kW/2 >= padW && kH/2 >= padH, 2,
     "pad should be smaller than half of kernel size"
   );
+  THArgCheck(dilationT > 0 && dilationW > 0 && dilationH > 0, 14,
+    "dilation should be greater than 0"
+  );
 
   if (ceilMode)
   {
