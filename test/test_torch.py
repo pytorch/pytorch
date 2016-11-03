@@ -5,6 +5,7 @@ import torch
 import torch.cuda
 import tempfile
 import unittest
+import warnings
 from itertools import product, chain
 from functools import wraps
 from common import TestCase, iter_indices, TEST_NUMPY
@@ -2406,6 +2407,39 @@ class TestTorch(TestCase):
             c[1].fill_(20)
             self.assertEqual(c[1], c[3], 0)
             self.assertEqual(c[4], c[5][1:4], 0)
+
+    def test_serialization_container(self):
+        def import_module(name, filename):
+            if sys.version_info[0] == 3:
+                import importlib.util
+                spec = importlib.util.spec_from_file_location(name, filename)
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+            else:
+                import imp
+                module = imp.load_source(name, filename)
+            sys.modules[module.__name__] = module
+            return module
+
+        with tempfile.NamedTemporaryFile() as checkpoint:
+            module = import_module('tmpmodule', 'data/network1.py')
+            torch.save(module.Net(), checkpoint)
+
+            # First check that the checkpoint can be loaded without warnings
+            checkpoint.seek(0)
+            with warnings.catch_warnings(record=True) as w:
+                loaded = torch.load(checkpoint)
+                self.assertTrue(isinstance(loaded, module.Net))
+                self.assertEquals(len(w), 0)
+
+            # Replace the module with different source
+            module = import_module('tmpmodule', 'data/network2.py')
+            checkpoint.seek(0)
+            with warnings.catch_warnings(record=True) as w:
+                loaded = torch.load(checkpoint)
+                self.assertTrue(isinstance(loaded, module.Net))
+                self.assertEquals(len(w), 1)
+                self.assertTrue(w[0].category, 'SourceChangeWarning')
 
     def test_from_buffer(self):
         a = bytearray([1, 2, 3, 4])

@@ -1,24 +1,30 @@
+import difflib
+import inspect
 import os
-import sys
-import tempfile
-import tarfile
-import pickle
 import shutil
 import struct
+import sys
+import torch
+import tarfile
+import tempfile
+import warnings
 from contextlib import closing, contextmanager
+from ._utils import _import_dotted_name
 if sys.version_info[0] == 2:
     import cPickle as pickle
 else:
     import pickle
-
-import torch
-from ._utils import _import_dotted_name
 
 DEFAULT_PROTOCOL = 2
 
 LONG_SIZE = struct.Struct('=l').size
 INT_SIZE = struct.Struct('=i').size
 SHORT_SIZE = struct.Struct('=h').size
+
+
+class SourceChangeWarning(Warning):
+    pass
+
 
 def _add_to_tar(fn, tar_file, name):
     tmp_file = tempfile.NamedTemporaryFile(delete=False)
@@ -121,10 +127,19 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
 
 
 def _save(obj, f, pickle_module, pickle_protocol):
+    import torch.nn as nn
     serialized_tensors = {}
     serialized_storages = {}
+    serialized_container_types = {}
 
     def persistent_id(obj):
+        if isinstance(obj, type) and issubclass(obj, nn.Container):
+            if obj in serialized_container_types:
+                return None
+            serialized_container_types[obj] = True
+            source_file = inspect.getsourcefile(obj)
+            source = inspect.getsource(obj)
+            return (obj, source_file, source)
         if torch.is_tensor(obj):
             serialized_tensors[obj._cdata] = obj
             return str(obj._cdata)
@@ -246,7 +261,46 @@ def _load(f, map_location, pickle_module):
                 result = default_restore_location(storage, location)
             return result
 
+    def _check_container_source(container_type, source_file, original_source):
+        current_source = inspect.getsource(container_type)
+        if original_source != current_source:
+            if container_type.dump_patches:
+                file_name = container_type.__name__ + '.patch'
+                diff = difflib.unified_diff(
+                        current_source.split('\n'),
+                        original_source.split('\n'),
+                        source_file,
+                        source_file, lineterm="")
+                lines = '\n'.join(diff)
+                try:
+                    with open(file_name, 'a+') as f:
+                        file_size = f.seek(0, 2)
+                        f.seek(0)
+                        if file_size == 0:
+                            f.write(lines)
+                        elif file_size != len(lines) or f.read() != lines:
+                            raise IOError
+                    msg = ("Saved a reverse patch to " + file_name + ". "
+                           "Run `patch -p0 < " + file_name + "` to revert your "
+                           "changes.")
+                except IOError:
+                    msg = ("Tried to save a patch, but couldn't create a "
+                           "writable file " + file_name + ". Make sure it "
+                           "doesn't exist and your working directory is "
+                           "writable.")
+            else:
+                msg = ("you can retrieve the original source code by "
+                       "accessing the object's source attribute or set "
+                       "`torch.nn.Container.dump_patches = True` and use the "
+                       "patch tool to revert the changes.")
+            msg = ("source code of class '{}' has changed. {}"
+                   .format(torch.typename(container_type), msg))
+            warnings.warn(msg, SourceChangeWarning)
+
     def persistent_load(saved_id):
+        if isinstance(saved_id, tuple):
+            _check_container_source(*saved_id)
+            return saved_id[0]
         return deserialized_objects[int(saved_id)]
 
     with closing(tarfile.open(fileobj=f, mode='r:', format=tarfile.PAX_FORMAT)) as tar, \
