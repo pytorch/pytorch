@@ -49,7 +49,7 @@ double THCudaBlas_Ddot(THCState *state, long n, double *x, long incx, double *y,
 }
 
 #ifdef CUDA_HALF_TENSOR
-half THCudaBlas_Hdot(THCState *state, long n, half *x, long incx, half *y, long incy)
+float THCudaBlas_Hdot(THCState *state, long n, half *x, long incx, half *y, long incy)
 {
 #if CUDA_VERSION >= 8000
   if (n == 1) {
@@ -64,16 +64,16 @@ half THCudaBlas_Hdot(THCState *state, long n, half *x, long incx, half *y, long 
     half result;
     cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
     cublasSetStream(handle, THCState_getCurrentStream(state));
-    THCublasCheck(cublasDotEx(handle, i_n, x, CUDA_R_16F, i_incx, y, CUDA_R_16F, i_incy, &result, CUDA_R_16F, CUDA_R_32F));
+    THCublasCheck(cublasDotEx(handle, i_n, x, CUDA_R_16F, i_incx, y, CUDA_R_16F, i_incy, &result, CUDA_R_32F, CUDA_R_32F));
     return result;
 }
 
   THError("Cublas_Hdot only supports n, incx and incy "
           "up to signed integer limits: %d", INT_MAX);
-  return THC_float2half(0);
+  return 0;
 #else
   THError("Cublas_Hdot requires CUDA 8.0+");
-  return THC_float2half(0);
+  return 0;
 #endif
 }
 #endif
