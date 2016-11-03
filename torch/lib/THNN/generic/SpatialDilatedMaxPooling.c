@@ -11,6 +11,9 @@ static inline void THNN_(SpatialDilatedMaxPooling_shapeCheck)(
 	       "kernel size should be greater than zero, but got kH: %d kW: %d", kH, kW);
   THArgCheck(dW > 0 && dH > 0, 8,
 	     "stride should be greater than zero, but got dH: %d dW: %d", dH, dW);
+	THArgCheck(dW > 0 && dH > 0, 12,
+	     "dilation should be greater than zero, but got dilationH: %d dilationW: %d",
+	     dilationH, dilationW);
 
   int ndim = input->nDimension;
   int dimf = 0;
