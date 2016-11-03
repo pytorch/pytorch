@@ -2,9 +2,7 @@
 #include "THDiskFile.h"
 #include "THFilePrivate.h"
 
-#ifdef _WIN64
 #include <stdint.h>
-#endif
 
 typedef struct THDiskFile__
 {
