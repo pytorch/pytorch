@@ -160,6 +160,9 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
     "pad should be smaller than half of kernel size"
   );
 
+  THArgCheck(dilationT > 0 && dilationW > 0 && dilationH > 0, 14,
+      "dilation should be greater than 0");
+
   /* sizes */
   nslices = input->size[dimN];
   itime   = input->size[dimt];

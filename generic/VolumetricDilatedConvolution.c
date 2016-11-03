@@ -23,6 +23,7 @@ void THNN_(VolumetricDilatedConvolution_updateOutput)(
   THArgCheck(!bias || weight->size[0] == bias->size[0], 4, "nOutputPlane mismatch in weight and bias");
   THArgCheck(kT > 0 && kW > 0 && kH > 0, 8, "kernel size should be greater than zero");
   THArgCheck(dT > 0 && dW > 0 && dH > 0, 10, "stride should be greater than zero");
+  THArgCheck(dilationT > 0 && dilationW > 0 && dilationH > 0, 17, "dilation should be greater than zero");
 
   // Params:
   int nInputPlane = weight->size[1];
