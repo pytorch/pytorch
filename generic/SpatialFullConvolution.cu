@@ -92,7 +92,7 @@ void THNN_(SpatialFullConvolution_updateOutput)(
     );
 
     // Unpack columns back into input:
-    col2im(
+    col2im<real, accreal>(
       THCState_getCurrentStream(state),
       THCTensor_(data)(state, columns),
       nOutputPlane, outputHeight, outputWidth, kH, kW, padH, padW, dH, dW,

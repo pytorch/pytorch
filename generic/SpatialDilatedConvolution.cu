@@ -231,7 +231,7 @@ void THNN_(SpatialDilatedConvolution_updateGradInput)(
     );
 
     // Unpack columns back into input:
-    col2im(
+    col2im<real, accreal>(
       THCState_getCurrentStream(state),
       THCTensor_(data)(state, gradColumns),
       nInputPlane, inputHeight, inputWidth, kH, kW, padH, padW, dH, dW,

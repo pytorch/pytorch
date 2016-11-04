@@ -191,7 +191,7 @@ void THNN_(SpatialConvolutionLocal_updateGradInput)(
     // fgradInput3d:  oH*oW x nInputPlane*kH*kW x 1
 
     // Unpack columns back into input:
-    col2im(
+    col2im<real, accreal>(
       THCState_getCurrentStream(state),
       THCTensor_(data)(state, fgradInput_n),
       nInputPlane, inputHeight, inputWidth, kH, kW, padH, padW, dH, dW,
