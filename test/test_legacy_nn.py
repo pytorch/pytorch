@@ -1109,6 +1109,90 @@ class TestNN(NNTestCase):
         module.__repr__()
         str(module)
 
+    def _build_net(self):
+        return (nn.Sequential()
+                    .add(nn.Concat(0)
+                            .add(nn.Linear(2, 5))
+                            .add(nn.Linear(2, 5)))
+                    .add(nn.ReLU())
+                    .add(nn.Linear(10, 20)))
+
+    def test_parameters(self):
+        net = self._build_net()
+        concat = net.modules[0]
+        param, grad = net.parameters()
+
+        self.assertEqual(len(param), 6)
+        self.assertEqual(len(grad), 6)
+
+        self.assertIn(concat.modules[0].weight, param)
+        self.assertIn(concat.modules[0].bias, param)
+        self.assertIn(concat.modules[1].weight, param)
+        self.assertIn(concat.modules[1].bias, param)
+        self.assertIn(net.modules[2].weight, param)
+        self.assertIn(net.modules[2].bias, param)
+
+        self.assertIn(concat.modules[0].gradWeight, grad)
+        self.assertIn(concat.modules[0].gradBias, grad)
+        self.assertIn(concat.modules[1].gradWeight, grad)
+        self.assertIn(concat.modules[1].gradBias, grad)
+        self.assertIn(net.modules[2].gradWeight, grad)
+        self.assertIn(net.modules[2].gradBias, grad)
+
+    def test_flattenParameters(self):
+        net = self._build_net()
+        param, grad_param = net.flattenParameters()
+        self.assertEqual(param.dim(), 1)
+        self.assertEqual(param.size(0), 250)
+        self.assertEqual(grad_param.dim(), 1)
+        self.assertEqual(grad_param.size(0), 250)
+
+    def test_findModules(self):
+        net = self._build_net()
+        modules, containers = net.findModules(nn.Linear)
+        self.assertEqual(len(modules), 3)
+        self.assertEqual(len(modules), len(containers))
+        self.assertIn(net.modules[0].modules[0], modules)
+        self.assertIn(net.modules[0].modules[1], modules)
+        self.assertIn(net.modules[2], modules)
+        self.assertIn(net.modules[0], containers)
+        self.assertEqual(containers.count(net.modules[0]), 2)
+        self.assertIn(net, containers)
+        for m, c in zip(modules, containers):
+            self.assertIn(m, c.modules)
+
+    def test_apply(self):
+        net = self._build_net()
+        seen_modules = set()
+        def callback(module):
+            self.assertNotIn(module, seen_modules)
+            seen_modules.add(module)
+        net.apply(callback)
+        self.assertEqual(len(seen_modules), 6)
+
+    def test_listModules(self):
+        net = self._build_net()
+        module_list = list()
+        def callback(module):
+            module_list.append(module)
+        net.apply(callback)
+        self.assertEqual(module_list, net.listModules())
+
+    def test_replace(self):
+        ref_net = self._build_net()
+        net = self._build_net()
+        def callback(module):
+            if isinstance(module, nn.ReLU):
+                return nn.Tanh()
+            return module
+        net.replace(callback)
+
+        for module, reference in zip(net.listModules(), ref_net.listModules()):
+            if isinstance(reference, nn.ReLU):
+                self.assertIsInstance(module, nn.Tanh)
+            else:
+                self.assertIsInstance(module, type(reference))
+
 
 if __name__ == '__main__':
     prepare_tests()
