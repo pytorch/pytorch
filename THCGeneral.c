@@ -11,7 +11,6 @@
 /* Size of scratch space available in global memory per each SM + stream */
 #define GLOBAL_SCRATCH_SPACE_PER_SM_STREAM 4 * sizeof(float)
 
-
 THCCudaResourcesPerDevice* THCState_getDeviceResourcePtr(
   THCState *state, int device);
 
@@ -78,6 +77,9 @@ void THCudaInit(THCState* state)
   state->cudaHostAllocator = (THAllocator*)malloc(sizeof(THAllocator));
   THCAllocator_init(state);
 
+  state->cudaUVAAllocator = (THAllocator*)malloc(sizeof(THAllocator));
+  THCUVAAllocator_init(state->cudaUVAAllocator);
+
   /* Enable P2P access between all pairs, if possible */
   THCudaEnablePeerToPeerAccess(state);
 
@@ -122,6 +124,7 @@ void THCudaShutdown(THCState* state)
 
   free(state->rngState);
   free(state->cudaHostAllocator);
+  free(state->cudaUVAAllocator);
   free(state->deviceProperties);
 
   int deviceCount = 0;
@@ -306,6 +309,11 @@ struct THCRNGState* THCState_getRngState(THCState *state)
 THAllocator* THCState_getCudaHostAllocator(THCState* state)
 {
   return state->cudaHostAllocator;
+}
+
+THAllocator* THCState_getCudaUVAAllocator(THCState* state)
+{
+  return state->cudaUVAAllocator;
 }
 
 void THCState_setDeviceAllocator(THCState* state, THCDeviceAllocator* allocator)

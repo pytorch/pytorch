@@ -81,6 +81,7 @@ struct THCState {
 
   /* Allocator using cudaMallocHost. */
   THAllocator* cudaHostAllocator;
+  THAllocator* cudaUVAAllocator;
   THCDeviceAllocator* cudaDeviceAllocator;
 
   /* Index of the current selected BLAS handle. The actual BLAS handle used
@@ -134,6 +135,7 @@ THC_API struct cudaDeviceProp* THCState_getCurrentDeviceProperties(THCState* sta
 
 THC_API struct THCRNGState* THCState_getRngState(THCState* state);
 THC_API THAllocator* THCState_getCudaHostAllocator(THCState* state);
+THC_API THAllocator* THCState_getCudaUVAAllocator(THCState* state);
 THC_API void THCState_setDeviceAllocator(THCState* state, THCDeviceAllocator* allocator);
 
 THC_API void THCMagma_init(THCState *state);

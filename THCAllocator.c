@@ -42,3 +42,26 @@ THCDeviceAllocator THCIpcAllocator = {
   NULL,
   NULL
 };
+
+static void *THCUVAAllocator_alloc(void* ctx, ptrdiff_t size) {
+  if (size < 0) THError("Invalid memory size: %ld", size);
+
+  if (size == 0) return NULL;
+
+  // See J.1.1 of the CUDA_C_Programming_Guide.pdf for UVA and coherence rules
+  // on various compute capabilities.
+  void* ptr;
+  THCudaCheck(cudaMallocManaged(&ptr, size, cudaMemAttachGlobal));
+  return ptr;
+}
+
+static void THCUVAAllocator_free(void* ctx, void* ptr) {
+  if (!ptr) return;
+  THCudaCheck(cudaFree(ptr));
+}
+
+void THCUVAAllocator_init(THAllocator *cudaUVAAllocator) {
+  cudaUVAAllocator->malloc = &THCUVAAllocator_alloc;
+  cudaUVAAllocator->realloc = NULL;
+  cudaUVAAllocator->free = &THCUVAAllocator_free;
+}
