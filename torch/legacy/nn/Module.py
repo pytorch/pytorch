@@ -151,14 +151,14 @@ class Module(object):
         # returns True if tensor occupies a contiguous region of memory (no holes)
         def isCompact(tensor):
             # isn't it enough to check if strides == size.cumprod(0)?
-            sortedStride, perm = torch.sort(torch.LongTensor(tensor.ndimension()).set_(tensor.stride()), 0, True)
-            sortedSize = torch.LongTensor(tensor.ndimension()).set_(tensor.size()).index_select(0, perm)
+            sortedStride, perm = torch.sort(torch.LongTensor(tensor.stride()), 0, True)
+            sortedSize = torch.LongTensor(list(tensor.size())).index_select(0, perm)
             nRealDim = int(torch.clamp(sortedStride, 0, 1).sum())
             sortedStride = sortedStride.narrow(0, 0, nRealDim).clone()
             sortedSize   = sortedSize.narrow(0, 0, nRealDim).clone()
             t = tensor.new().set_(tensor.storage(), 0,
-                                 sortedSize.storage(),
-                                 sortedStride.storage())
+                                 tuple(sortedSize),
+                                 tuple(sortedStride))
             return t.is_contiguous()
 
         if not parameters:
@@ -250,7 +250,7 @@ class Module(object):
     def apply(self, callback):
         callback(self)
         if hasattr(self, 'modules'):
-            for _, module in self.modules:
+            for module in self.modules:
                 module.apply(callback)
 
     def findModules(self, cls, container=None):
@@ -263,7 +263,7 @@ class Module(object):
         # Recurse on nodes with 'modules'
         if hasattr(self, 'modules'):
             for child in self.modules:
-                child_nodes, child_containers = child.findModules(typename, self)
+                child_nodes, child_containers = child.findModules(cls, self)
                 assert len(child_nodes) == len(child_containers)
                 # add the list items from our child to our list (i.e. return a
                 # flattened table of the return nodes).
@@ -287,7 +287,7 @@ class Module(object):
         out = callback(self)
         # TODO: not out.modules?
         if hasattr(self, 'modules'):
-            for i, module in self.modules:
+            for i, module in enumerate(self.modules):
                 self.modules[i] = module.replace(callback)
         return out
 
