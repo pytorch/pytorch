@@ -1397,8 +1397,8 @@
 
 [[
   name: ger
-  only_stateless: True
   cname: addr
+  with_stateless: True
   return: argument 0
   before_call: |
     long s1 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg4)->cdata, 0);
@@ -1410,14 +1410,14 @@
     - CONSTANT AS_REAL(0)
     - argument 0
     - CONSTANT AS_REAL(1)
-    - THTensor* vec1
+    - THTensor* self
     - THTensor* vec2
 ]]
 
 [[
   name: mv
-  only_stateless: True
   cname: addmv
+  with_stateless: True
   return: argument 0
   before_call: |
     long s = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg4)->cdata, 0);
@@ -1428,14 +1428,14 @@
     - CONSTANT AS_REAL(0)
     - argument 0
     - CONSTANT AS_REAL(1)
-    - THTensor* mat
+    - THTensor* self
     - THTensor* vec
 ]]
 
 [[
   name: mm
-  only_stateless: True
   cname: addmm
+  with_stateless: True
   return: argument 0
   before_call: |
     long s1 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg4)->cdata, 0);
@@ -1447,14 +1447,14 @@
     - CONSTANT AS_REAL(0)
     - argument 0
     - CONSTANT AS_REAL(1)
-    - THTensor* mat1
+    - THTensor* self
     - THTensor* mat2
 ]]
 
 [[
   name: bmm
-  only_stateless: True
   cname: baddbmm
+  with_stateless: True
   return: argument 0
   before_call: |
     long s1 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg4)->cdata, 0);
@@ -1467,7 +1467,7 @@
     - CONSTANT AS_REAL(0)
     - argument 0
     - CONSTANT AS_REAL(1)
-    - THTensor* mat1
+    - THTensor* self
     - THTensor* mat2
 ]]
 
