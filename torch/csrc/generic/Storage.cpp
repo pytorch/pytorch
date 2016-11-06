@@ -262,6 +262,99 @@ static PyMappingMethods THPStorage_(mappingmethods) = {
   (objobjargproc)THPStorage_(set)
 };
 
+static Py_ssize_t THPStorage_(getbufferproc)(THPStorage *self, Py_ssize_t segment, void **ptrptr)
+{
+  HANDLE_TH_ERRORS
+  if (segment != 0) {
+    *ptrptr = NULL;
+    PyErr_SetString(PyExc_SystemError, "there is only 1 segment in the buffer of" THPStorageStr);
+    return -1;
+  }
+  *ptrptr = self->cdata->data;
+  return self->cdata->size;
+  END_HANDLE_TH_ERRORS_RET(-1)
+}
+
+static Py_ssize_t THPStorage_(segcountproc)(PyObject *self, Py_ssize_t *lenp)
+{
+  // XXX: This function shall never fail. Do we need HANDLE_TH_ERRORS?
+  HANDLE_TH_ERRORS
+  if (lenp != NULL)
+    *lenp = THStorage_(size)(LIBRARY_STATE ((THStorage*)PyTuple_GET_ITEM(self, 0)));
+  return 1;
+  END_HANDLE_TH_ERRORS
+}
+
+static int THPStorage_(getbufferproc)(PyObject *obj, Py_buffer *view, int flags)
+{
+  HANDLE_TH_ERRORS
+  // The first variable is the "exporting" object. The second argument is the
+  // address to a bufferinfo structure. Both arguments must never be NULL.
+  if (obj == NULL) {
+    THPUtils_setError("obj is NULL in getbufferproc; it should not happen "
+        "accodring to PEP 3118");
+    return -1;
+  }
+  if (view == NULL) {
+    THPUtils_setError("view is NULL in getbufferproc; it should not happen "
+        "accodring to PEP 3118");
+    return -1;
+  }
+
+  THPStorage* self = (THPStorage*)obj;
+
+  view->obj = (PyObject*)self;
+  // view->buf = (void*)self->arr.arr;
+  view->buf = (void*)THStorage_(data)(self);
+  // the total bytes of memory the object uses. This should be the same as the
+  // product of the shape array multiplied by the number of bytes per item of
+  // memory.
+  // TODO: Is it the size of data only or the whole object?
+  view->len = THStorage_(size)(self);
+  // 1 means the memory is readonly, zero means the memory is writable.
+  view->readonly = 0;
+  // TODO: a NULL-terminated format-string (following the struct-style syntax
+  // including extensions) indicating what is in each element of memory. The
+  // number of elements is len / itemsize, where itemsize is the number of
+  // bytes implied by the format. This can be NULL which implies standard
+  // unsigned bytes ("B").
+  view->format = "";  // integer
+  view->ndim = 1;
+  // TODO: an array of Py_ssize_t of length ndims indicating the shape of the
+  // memory as an N-D array. Note that ((*shape)[0] * ... *
+  // (*shape)[ndims-1])*itemsize = len . If ndims is 0 (indicating a scalar),
+  // then this must be NULL.
+  view->shape = NULL;
+  // TODO
+  view->strides = &view->itemsize;  // for the simple case we can do this
+  // TODO
+  view->suboffsets = NULL;
+  // TODO
+  view->itemsize = sizeof(int);
+  // TODO
+  view->internal = NULL;
+
+  Py_INCREF(self);
+
+  return 0;
+  END_HANDLE_TH_ERRORS_RET(-1)
+}
+
+static void THPStorage_(releasebufferproc)(PyObject *obj, Py_buffer *view)
+{
+  // TODO
+  return;
+}
+
+static PyBufferProcs THPStorage_(bufferprocs) = {
+  (readbufferproc)THPStorage_(getbufferproc),       /* bf_getreadbuffer */
+  (writebufferproc)THPStorage_(getbufferproc),      /* bf_getwritebuffer */
+  (segcountproc)THPStorage_(segcountproc),          /* bf_getsegcount */
+  (charbufferproc)NULL,                             /* bf_getcharbuffer */
+  (getbufferproc)THPStorage_(getbufferproc),        /* bf_getbuffer */
+  (releasebufferproc)THPStorage_(releasebufferproc) /* bf_releasebuffer */
+};
+
 // TODO: implement equality
 PyTypeObject THPStorageType = {
   PyVarObject_HEAD_INIT(NULL, 0)
@@ -282,8 +375,9 @@ PyTypeObject THPStorageType = {
   0,                                     /* tp_str */
   0,                                     /* tp_getattro */
   0,                                     /* tp_setattro */
-  0,                                     /* tp_as_buffer */
-  Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags */
+  &THPStorage_(bufferprocs),             /* tp_as_buffer */
+  Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_HAVE_GETCHARBUFFER |
+    Py_TPFLAGS_HAVE_NEWBUFFER,           /* tp_flags */
   NULL,                                  /* tp_doc */
   0,                                     /* tp_traverse */
   0,                                     /* tp_clear */
