@@ -464,7 +464,8 @@ class TestNN(NNTestCase):
         self._test_scatter(torch.randn(4, 4))
 
     def test_scatter_gpu(self):
-        self._test_scatter(torch.randn(4, 4).cuda())
+        if TEST_CUDA:
+            self._test_scatter(torch.randn(4, 4).cuda())
 
     def _test_gather(self, output_device):
         if not TEST_MULTIGPU:
