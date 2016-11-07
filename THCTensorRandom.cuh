@@ -5,6 +5,8 @@
 #include "THCReduceApplyUtils.cuh"
 #include "THCTensorMathReduce.cuh"
 
+#include <curand_kernel.h>
+
 // Normalizes the L1 norm of every row to 1; used by multinomial
 template <typename T>
 __global__ void renormRowsL1(T* dist, long rows, long cols) {
@@ -150,6 +152,46 @@ __device__ int binarySearchForMultinomial(T* dist,
   }
 
   return start;
+}
+
+template <typename T>
+__global__ void
+sampleMultinomialWithReplacement(curandStateMtgp32* state,
+                                 int totalSamples,
+                                 T* dest,
+                                 long distributions,
+                                 int categories,
+                                 T* normDistPrefixSum) {
+  // At the moment, each warp computes one sample value in the binary
+  // search due to divergence. It seems possible to compute multiple
+  // values and limit divergence though later on. However, no matter
+  // what, all block threads must participate in the curand_uniform
+  // call to update the generator state.
+
+  // The block determines the distribution for which we generate a point
+  for (long curDist = blockIdx.x;
+       curDist < distributions;
+       curDist += gridDim.x) {
+    for (int sampleBase = 0;
+         sampleBase < totalSamples; sampleBase += blockDim.y) {
+      // The warp determines the sample
+      int sample = sampleBase + threadIdx.y;
+
+      // All threads participate in this
+      float r = curand_uniform(&state[blockIdx.x]);
+
+      if (threadIdx.x == 0 && sample < totalSamples) {
+        // Find the bucket that a uniform sample lies in
+        int choice = binarySearchForMultinomial<T>(
+          normDistPrefixSum + curDist * categories,
+          categories,
+          r);
+
+        // Torch indices are 1-based
+        dest[curDist * totalSamples + sample] = ScalarConvert<int, T>::to(choice + TH_INDEX_BASE);
+      }
+    }
+  }
 }
 
 #endif // THC_TENSOR_RANDOM_CUH
