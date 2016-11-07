@@ -342,31 +342,6 @@ THC_API void THCudaTensor_cauchy(THCState* state, THCudaTensor *self_, double me
   THCudaTensor_freeCopyTo(state, self, self_);
 };
 
-// Normalizes the L1 norm of every row to 1; used by multinomial
-__global__ void renormRowsL1(float* dist, long rows, long cols) {
-  extern __shared__ float smem[];
-
-  for (long row = blockIdx.x; row < rows; row += gridDim.x) {
-    float sum = 0.0f;
-    for (long col = threadIdx.x; col < cols; col += blockDim.x) {
-      sum += dist[row * cols + col];
-    }
-
-    sum = reduceBlock(smem, blockDim.x, sum, thrust::plus<float>(), 0.0f);
-    if (threadIdx.x == 0) {
-      smem[0] = sum;
-    }
-    __syncthreads();
-
-    sum = smem[0];
-    if (sum > 0.0f) {
-      for (long col = threadIdx.x; col < cols; col += blockDim.x) {
-        dist[row * cols + col] /= sum;
-      }
-    }
-  }
-}
-
 void THCudaTensor_renormRows(struct THCState* state,
                              THCudaTensor* t) {
   THAssert(THCudaTensor_nDimension(state, t) == 2);
@@ -382,7 +357,7 @@ void THCudaTensor_renormRows(struct THCState* state,
   dim3 grid(rows < numSM * 4 ? rows : numSM * 4);
   dim3 block(cols < maxThreads ? cols : maxThreads);
 
-  renormRowsL1
+  renormRowsL1<float>
     <<<grid, block, block.x * sizeof(float),
     THCState_getCurrentStream(state)>>>(THCudaTensor_data(state, t),
                                         rows, cols);
