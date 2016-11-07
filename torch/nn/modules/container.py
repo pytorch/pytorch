@@ -152,6 +152,12 @@ class Container(Module):
             module._apply(fn)
         return super(Container, self)._apply(fn)
 
+    def apply(self, fn):
+        for module in self.children():
+            module.apply(fn)
+        fn(self)
+        return self
+
     def __repr__(self):
         tmpstr = self.__class__.__name__ + ' (\n'
         for key, module in self._modules.items():

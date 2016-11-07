@@ -45,6 +45,10 @@ class Module(object):
                 self._buffers[key] = fn(buf)
         return self
 
+    def apply(self, fn):
+        fn(self)
+        return self
+
     def cuda(self, device_id=None):
         return self._apply(lambda t: t.cuda(device_id))
 
