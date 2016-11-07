@@ -1483,6 +1483,34 @@ output | Same  | Output has the same shape as input
     a Tensor of the same dimension and shape as the input
 
 <img src="image/relu6.png" >
+## Sequential
+
+A sequential Container. It is derived from the base nn.Container class
+
+```python
+# Example of using Sequential
+model = nn.Sequential(
+          nn.Conv2d(1,20,5),
+          nn.ReLU(),
+          nn.Conv2d(20,64,5),
+          nn.ReLU()
+        )
+```
+
+```python
+```
+
+Modules will be added to it in the order they are passed in the constructor.
+Alternatively, an ordered dict of modules can also be passed in.
+
+To make it easier to understand, given is a small example.
+### Example of using Sequential with OrderedDict
+model = nn.Sequential(OrderedDict([
+          ('conv1', nn.Conv2d(1,20,5)),
+          ('relu1', nn.ReLU()),
+          ('conv2', nn.Conv2d(20,64,5)),
+          ('relu2', nn.ReLU())
+        ]))
 ## Sigmoid
 
 Applies the element-wise function sigmoid(x) = 1 / ( 1 + exp(-x))

@@ -19,6 +19,16 @@
 
 **Returns        : nothing**
 
+## index 
+
+|    Name                      |    Autograd |    defined if                |
+| ---------------------------- | ----------- | ---------------------------- |
+|    index                     |         no  | All Types (CPU and CUDA) |
+
+**No Arguments**
+
+**Returns        : nothing**
+
 ## map_ 
 
 |    Name                      |    Autograd |    defined if                |
@@ -79,11 +89,41 @@
 
 **Returns        : nothing**
 
+## set_index 
+
+|    Name                      |    Autograd |    defined if                |
+| ---------------------------- | ----------- | ---------------------------- |
+|    set_index                 |         no  | All Types (CPU and CUDA) |
+
+**No Arguments**
+
+**Returns        : nothing**
+
+## size 
+
+|    Name                      |    Autograd |    defined if                |
+| ---------------------------- | ----------- | ---------------------------- |
+|    size                      |        yes  | All Types (CPU and CUDA) |
+
+**No Arguments**
+
+**Returns        : nothing**
+
 ## storage 
 
 |    Name                      |    Autograd |    defined if                |
 | ---------------------------- | ----------- | ---------------------------- |
 |    storage                   |         no  | All Types (CPU and CUDA) |
+
+**No Arguments**
+
+**Returns        : nothing**
+
+## stride 
+
+|    Name                      |    Autograd |    defined if                |
+| ---------------------------- | ----------- | ---------------------------- |
+|    stride                    |        yes  | All Types (CPU and CUDA) |
 
 **No Arguments**
 
@@ -103,7 +143,7 @@
 
 |    Name                      |    Autograd |    defined if                |
 | ---------------------------- | ----------- | ---------------------------- |
-|    cat                       |        yes  | Cuda_Float // All CPU Types |
+|    cat                       |        yes  | All Types (CPU and CUDA) |
 
 **No Arguments**
 
@@ -178,7 +218,7 @@
 
 |    Name                      |    Autograd |    defined if                |
 | ---------------------------- | ----------- | ---------------------------- |
-|    addcdiv  //  addcdiv_     |        yes  | Cuda_Float // All CPU Types |
+|    addcdiv  //  addcdiv_     |        yes  | All Types (CPU and CUDA) |
 
 **Arguments**
 
@@ -196,7 +236,7 @@
 
 |    Name                      |    Autograd |    defined if                |
 | ---------------------------- | ----------- | ---------------------------- |
-|    addcmul  //  addcmul_     |        yes  | Cuda_Float // All CPU Types |
+|    addcmul  //  addcmul_     |        yes  | All Types (CPU and CUDA) |
 
 **Arguments**
 
@@ -271,7 +311,7 @@
 
 |    Name                      |    Autograd |    defined if                |
 | ---------------------------- | ----------- | ---------------------------- |
-|    all                       |         no  | Byte |
+|    all                       |         no  | Byte // defined(THC_REAL_IS_BYTE) |
 
 **Arguments**
 
@@ -285,7 +325,7 @@
 
 |    Name                      |    Autograd |    defined if                |
 | ---------------------------- | ----------- | ---------------------------- |
-|    any                       |         no  | Byte |
+|    any                       |         no  | Byte // defined(THC_REAL_IS_BYTE) |
 
 **Arguments**
 
@@ -389,7 +429,7 @@
 |      AS_REAL(0)    |      CONSTANT   |        [required] |
 |               0    |        Tensor   |        [required] |
 |      AS_REAL(1)    |      CONSTANT   |        [required] |
-|            mat1    |        Tensor   |        [required] |
+|            self    |        Tensor   |        [required] |
 |            mat2    |        Tensor   |        [required] |
 
 **Returns        : argument 0**
@@ -444,7 +484,7 @@
 
 |    Name                      |    Autograd |    defined if                |
 | ---------------------------- | ----------- | ---------------------------- |
-|    clamp  //  clamp_         |        yes  | Cuda_Float // All CPU Types |
+|    clamp  //  clamp_         |        yes  | All Types (CPU and CUDA) |
 
 **Arguments**
 
@@ -475,7 +515,7 @@
 
 |    Name                      |    Autograd |    defined if                |
 | ---------------------------- | ----------- | ---------------------------- |
-|    cmax  //  cmax_           |        yes  | Cuda_Float // All CPU Types |
+|    cmax  //  cmax_           |        yes  | All Types (CPU and CUDA) |
 
 **Arguments**
 
@@ -491,7 +531,7 @@
 
 |    Name                      |    Autograd |    defined if                |
 | ---------------------------- | ----------- | ---------------------------- |
-|    cmin  //  cmin_           |        yes  | Cuda_Float // All CPU Types |
+|    cmin  //  cmin_           |        yes  | All Types (CPU and CUDA) |
 
 **Arguments**
 
@@ -551,7 +591,7 @@
 
 |    Name                      |    Autograd |    defined if                |
 | ---------------------------- | ----------- | ---------------------------- |
-|    cross                     |         no  | Cuda_Float // All CPU Types |
+|    cross                     |         no  | All Types (CPU and CUDA) |
 
 **Arguments**
 
@@ -568,7 +608,7 @@
 
 |    Name                      |    Autograd |    defined if                |
 | ---------------------------- | ----------- | ---------------------------- |
-|    cumprod                   |         no  | Cuda_Float // All CPU Types |
+|    cumprod                   |         no  | All Types (CPU and CUDA) |
 
 **Arguments**
 
@@ -584,7 +624,7 @@
 
 |    Name                      |    Autograd |    defined if                |
 | ---------------------------- | ----------- | ---------------------------- |
-|    cumsum                    |         no  | Cuda_Float // All CPU Types |
+|    cumsum                    |         no  | All Types (CPU and CUDA) |
 
 **Arguments**
 
@@ -614,7 +654,7 @@
 
 |    Name                      |    Autograd |    defined if                |
 | ---------------------------- | ----------- | ---------------------------- |
-|    diag                      |        yes  | All CPU Types |
+|    diag                      |        yes  | All Types (CPU and CUDA) |
 
 **Arguments**
 
@@ -630,7 +670,7 @@
 
 |    Name                      |    Autograd |    defined if                |
 | ---------------------------- | ----------- | ---------------------------- |
-|    dist                      |        yes  | Float // Double // Cuda_Float |
+|    dist                      |        yes  | Float // Double // Cuda_Float // Cuda_Half // Cuda_Double |
 
 **Arguments**
 
@@ -662,7 +702,7 @@
 
 |    Name                      |    Autograd |    defined if                |
 | ---------------------------- | ----------- | ---------------------------- |
-|    dot                       |        yes  | Cuda_Float // All CPU Types |
+|    dot                       |        yes  | Cuda_Float // Cuda_Double // Cuda_Half // All CPU Types |
 
 **Arguments**
 
@@ -937,7 +977,7 @@
 |      AS_REAL(0)    |      CONSTANT   |        [required] |
 |               0    |        Tensor   |        [required] |
 |      AS_REAL(1)    |      CONSTANT   |        [required] |
-|            vec1    |        Tensor   |        [required] |
+|            self    |        Tensor   |        [required] |
 |            vec2    |        Tensor   |        [required] |
 
 **Returns        : argument 0**
@@ -1011,7 +1051,7 @@
 
 |    Name                      |    Autograd |    defined if                |
 | ---------------------------- | ----------- | ---------------------------- |
-|    index_add_                |        yes  | Cuda_Float // All CPU Types |
+|    index_add_                |        yes  | All Types (CPU and CUDA) |
 
 **Arguments**
 
@@ -1134,21 +1174,6 @@
 
 **Returns        : bool**
 
-## is_size 
-
-|    Name                      |    Autograd |    defined if                |
-| ---------------------------- | ----------- | ---------------------------- |
-|    is_size                   |        yes  | All Types (CPU and CUDA) |
-
-**Arguments**
-
-|    Name            |    Type         |    Default         |
-| ------------------ | --------------- | ------------------ |
-|            self    |        Tensor   |        [required] |
-|            size    |   LongStorage   |        [required] |
-
-**Returns        : bool**
-
 ## kthvalue 
 
 |    Name                      |    Autograd |    defined if                |
@@ -1187,7 +1212,7 @@
 
 |    Name                      |    Autograd |    defined if                |
 | ---------------------------- | ----------- | ---------------------------- |
-|    lerp  //  lerp_           |        yes  | Float // Double // Cuda_Float |
+|    lerp  //  lerp_           |        yes  | Float // Double // Cuda_Float // Cuda_Half // Cuda_Double |
 
 **Arguments**
 
@@ -1362,7 +1387,7 @@
 
 |    Name                      |    Autograd |    defined if                |
 | ---------------------------- | ----------- | ---------------------------- |
-|    mean                      |        yes  | Float // Double // Cuda_Float |
+|    mean                      |        yes  | Float // Double // Cuda_Float // Cuda_Half // Cuda_Double |
 
 **Arguments**
 
@@ -1417,7 +1442,7 @@
 |      AS_REAL(0)    |      CONSTANT   |        [required] |
 |               0    |        Tensor   |        [required] |
 |      AS_REAL(1)    |      CONSTANT   |        [required] |
-|            mat1    |        Tensor   |        [required] |
+|            self    |        Tensor   |        [required] |
 |            mat2    |        Tensor   |        [required] |
 
 **Returns        : argument 0**
@@ -1486,7 +1511,7 @@
 |      AS_REAL(0)    |      CONSTANT   |        [required] |
 |               0    |        Tensor   |        [required] |
 |      AS_REAL(1)    |      CONSTANT   |        [required] |
-|             mat    |        Tensor   |        [required] |
+|            self    |        Tensor   |        [required] |
 |             vec    |        Tensor   |        [required] |
 
 **Returns        : argument 0**
@@ -1558,7 +1583,7 @@
 
 |    Name                      |    Autograd |    defined if                |
 | ---------------------------- | ----------- | ---------------------------- |
-|    nonzero                   |         no  | All CPU Types |
+|    nonzero                   |         no  | All Types (CPU and CUDA) |
 
 **Arguments**
 
@@ -1573,7 +1598,7 @@
 
 |    Name                      |    Autograd |    defined if                |
 | ---------------------------- | ----------- | ---------------------------- |
-|    norm                      |        yes  | Float // Double // Cuda_Float |
+|    norm                      |        yes  | Float // Double // Cuda_Float // Cuda_Half // Cuda_Double |
 
 **Arguments**
 
@@ -1625,7 +1650,7 @@
 |    Name            |    Type         |    Default         |
 | ------------------ | --------------- | ------------------ |
 |          result    |        Tensor   |        [optional] |
-|       long_args    |   LongStorage   |        [required] |
+|            size    |       THSize*   |        [required] |
 
 **Returns        : argument 0**
 
@@ -1714,7 +1739,7 @@
 
 |    Name                      |    Autograd |    defined if                |
 | ---------------------------- | ----------- | ---------------------------- |
-|    pow  //  pow_             |        yes  | Float // Double // Cuda_Float |
+|    pow  //  pow_             |        yes  | Float // Double // Cuda_Float // Cuda_Half // Cuda_Double |
 
 **Arguments**
 
@@ -1730,7 +1755,7 @@
 
 |    Name                      |    Autograd |    defined if                |
 | ---------------------------- | ----------- | ---------------------------- |
-|    prod                      |        yes  | Cuda_Float // All CPU Types |
+|    prod                      |        yes  | All Types (CPU and CUDA) |
 
 **Arguments**
 
@@ -1785,7 +1810,7 @@
 |    Name            |    Type         |    Default         |
 | ------------------ | --------------- | ------------------ |
 |          result    |        Tensor   |        [optional] |
-|       long_args    |   LongStorage   |        [required] |
+|            size    |       THSize*   |        [required] |
 
 **Returns        : argument 0**
 
@@ -1800,7 +1825,7 @@
 |    Name            |    Type         |    Default         |
 | ------------------ | --------------- | ------------------ |
 |          result    |        Tensor   |        [optional] |
-|       long_args    |   LongStorage   |        [required] |
+|            size    |       THSize*   |        [required] |
 
 **Returns        : argument 0**
 
@@ -1870,7 +1895,7 @@
 
 |    Name                      |    Autograd |    defined if                |
 | ---------------------------- | ----------- | ---------------------------- |
-|    renorm  //  renorm_       |         no  | Float // Double // Cuda_Float |
+|    renorm  //  renorm_       |         no  | Float // Double // Cuda_Float // Cuda_Half // Cuda_Double |
 
 **Arguments**
 
@@ -1910,7 +1935,7 @@
 |    Name            |    Type         |    Default         |
 | ------------------ | --------------- | ------------------ |
 |            self    |        Tensor   |        [required] |
-|       long_args    |   LongStorage   |        [required] |
+|            size    |       THSize*   |        [required] |
 |            NULL    |      CONSTANT   |        [required] |
 
 **Returns        : self**
@@ -1963,7 +1988,7 @@
 
 |    Name                      |    Autograd |    defined if                |
 | ---------------------------- | ----------- | ---------------------------- |
-|    scatter_                  |         no  | All CPU Types |
+|    scatter_                  |         no  | All Types (CPU and CUDA) |
 
 **Arguments**
 
@@ -2051,21 +2076,6 @@
 
 **Returns        : argument 0**
 
-## size 
-
-|    Name                      |    Autograd |    defined if                |
-| ---------------------------- | ----------- | ---------------------------- |
-|    size                      |        yes  | All Types (CPU and CUDA) |
-
-**Arguments**
-
-|    Name            |    Type         |    Default         |
-| ------------------ | --------------- | ------------------ |
-|            self    |        Tensor   |        [required] |
-|             dim    |          long   |        [required] |
-
-**Returns        : nothing**
-
 ## sort 
 
 |    Name                      |    Autograd |    defined if                |
@@ -2118,7 +2128,7 @@
 
 |    Name                      |    Autograd |    defined if                |
 | ---------------------------- | ----------- | ---------------------------- |
-|    std                       |         no  | Float // Double // Cuda_Float |
+|    std                       |         no  | Float // Double // Cuda_Float // Cuda_Half // Cuda_Double |
 
 **Arguments**
 
@@ -2142,21 +2152,6 @@
 
 **Returns        : long**
 
-## stride 
-
-|    Name                      |    Autograd |    defined if                |
-| ---------------------------- | ----------- | ---------------------------- |
-|    stride                    |        yes  | All Types (CPU and CUDA) |
-
-**Arguments**
-
-|    Name            |    Type         |    Default         |
-| ------------------ | --------------- | ------------------ |
-|            self    |        Tensor   |        [required] |
-|             dim    |          long   |        [required] |
-
-**Returns        : nothing**
-
 ## sub 
 
 |    Name                      |    Autograd |    defined if                |
@@ -2177,7 +2172,7 @@
 
 |    Name                      |    Autograd |    defined if                |
 | ---------------------------- | ----------- | ---------------------------- |
-|    sum                       |        yes  | Cuda_Float // All CPU Types |
+|    sum                       |        yes  | All Types (CPU and CUDA) |
 
 **Arguments**
 
@@ -2293,7 +2288,7 @@
 
 |    Name                      |    Autograd |    defined if                |
 | ---------------------------- | ----------- | ---------------------------- |
-|    trace                     |         no  | All CPU Types |
+|    trace                     |         no  | All Types (CPU and CUDA) |
 
 **Arguments**
 
@@ -2323,7 +2318,7 @@
 
 |    Name                      |    Autograd |    defined if                |
 | ---------------------------- | ----------- | ---------------------------- |
-|    tril  //  tril_           |        yes  | Cuda_Float // All CPU Types |
+|    tril  //  tril_           |        yes  | All Types (CPU and CUDA) |
 
 **Arguments**
 
@@ -2339,7 +2334,7 @@
 
 |    Name                      |    Autograd |    defined if                |
 | ---------------------------- | ----------- | ---------------------------- |
-|    triu  //  triu_           |        yes  | Cuda_Float // All CPU Types |
+|    triu  //  triu_           |        yes  | All Types (CPU and CUDA) |
 
 **Arguments**
 
@@ -2424,7 +2419,7 @@
 
 |    Name                      |    Autograd |    defined if                |
 | ---------------------------- | ----------- | ---------------------------- |
-|    var                       |         no  | Float // Double // Cuda_Float |
+|    var                       |         no  | Float // Double // Cuda_Float // Cuda_Half // Cuda_Double |
 
 **Arguments**
 
@@ -2459,7 +2454,7 @@
 |    Name            |    Type         |    Default         |
 | ------------------ | --------------- | ------------------ |
 |          result    |        Tensor   |        [optional] |
-|       long_args    |   LongStorage   |        [required] |
+|            size    |       THSize*   |        [required] |
 
 **Returns        : argument 0**
 
