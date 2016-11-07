@@ -135,7 +135,7 @@ def _tensor_str(self):
     has_hdots = self.size()[-1] > 2*n
     has_vdots = self.size()[-2] > 2*n
     print_full_mat = not has_hdots and not has_vdots
-    formatter = _number_format(self, min_sz=5 if not print_full_mat else 0)
+    formatter = _number_format(self, min_sz=3 if not print_full_mat else 0)
     print_dots = self.numel() >= PRINT_OPTS.threshold
 
     dim_sz = max(2, max(len(str(x)) for x in self.size()))
@@ -144,19 +144,19 @@ def _tensor_str(self):
 
     counter_dim = self.ndimension() - 2
     counter = torch.LongStorage(counter_dim).fill_(0)
-    counter[0] = -1
+    counter[counter.size()-1] = -1
     finished = False
     strt = ''
     while True:
         nrestarted = [False for i in counter]
         nskipped = [False for i in counter]
-        for i in _range(counter_dim):
+        for i in _range(counter_dim - 1, -1, -1):
             counter[i] += 1
             if print_dots and counter[i] == n and self.size(i) > 2*n:
                 counter[i] = self.size(i) - n
                 nskipped[i] = True
             if counter[i] == self.size(i):
-                if i == counter_dim-1:
+                if i == 0:
                     finished = True
                 counter[i] = 0
                 nrestarted[i] = True
@@ -171,11 +171,10 @@ def _tensor_str(self):
                         else dot_fmt.format('')
                 strt += '\n'
             if any(nrestarted):
-                line = ' '
+                strt += ' '
                 for vdot in nrestarted:
-                    line += dot_fmt.format('.') if vdot else dot_fmt.format('')
-                line += '\n'
-                strt += line*3
+                    strt += dot_fmt.format(':') if vdot else dot_fmt.format('')
+                strt += '\n'
         if strt != '':
             strt += '\n'
         strt += '({},.,.) = \n'.format(
@@ -190,7 +189,7 @@ def __repr_row(row, indent, fmt, scale, sz, truncate=None):
         dotfmt = " {:^" + str(sz) + "} "
         return (indent +
                 ' '.join(fmt.format(val/scale) for val in row[:truncate]) +
-                dotfmt.format('. . .') +
+                dotfmt.format('...') +
                 ' '.join(fmt.format(val/scale) for val in row[-truncate:]) +
                 '\n')
     else:
@@ -234,13 +233,11 @@ def _matrix_str(self, indent='', formatter=None, force_truncate=False):
         if has_vdots and has_hdots:
             vdotfmt = "{:^" + str((sz+1)*n-1) + "}"
             ddotfmt = "{:^" + str(sz) + "}"
-            ddots = ['.    ', '  .  ', '    .']
             for row in self[:n]:
                 strt += __repr_row(row, indent, fmt, scale, sz, n)
-            for ddot in ddots:
-                strt += indent + ' '.join([vdotfmt.format('.'),
-                                           ddotfmt.format(ddot),
-                                           vdotfmt.format('.')]) + "\n"
+            strt += indent + ' '.join([vdotfmt.format('...'),
+                                       ddotfmt.format(u'\u22F1'),
+                                       vdotfmt.format('...')]) + "\n"
             for row in self[-n:]:
                 strt += __repr_row(row, indent, fmt, scale, sz, n)
         elif not has_vdots and has_hdots:
@@ -252,7 +249,7 @@ def _matrix_str(self, indent='', formatter=None, force_truncate=False):
                     "}\n"
             for row in self[:n]:
                 strt += __repr_row(row, indent, fmt, scale, sz)
-            strt += 3 * vdotfmt.format('.')
+            strt += vdotfmt.format('...')
             for row in self[-n:]:
                 strt += __repr_row(row, indent, fmt, scale, sz)
         else:
@@ -277,7 +274,7 @@ def _vector_str(self):
     else:
         return (strt +
                 '\n'.join(ident + fmt.format(val/scale) for val in self[:n]) +
-                '\n' + (ident + dotfmt.format(".")) * 3 +
+                '\n' + (ident + dotfmt.format("...")) +
                 '\n'.join(ident + fmt.format(val/scale) for val in self[-n:]) +
                 '\n')
 
