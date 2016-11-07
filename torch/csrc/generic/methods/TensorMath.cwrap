@@ -1404,6 +1404,7 @@
     long s1 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg4)->cdata, 0);
     long s2 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg5)->cdata, 0);
     THTensor_(resize2d)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, s1, s2);
+    THTensor_(zero)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata);
   arguments:
     - arg: THTensor* result
       allocate: True
@@ -1422,6 +1423,7 @@
   before_call: |
     long s = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg4)->cdata, 0);
     THTensor_(resize1d)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, s);
+    THTensor_(zero)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata);
   arguments:
     - arg: THTensor* result
       allocate: True
@@ -1441,6 +1443,7 @@
     long s1 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg4)->cdata, 0);
     long s2 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg5)->cdata, 1);
     THTensor_(resize2d)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, s1, s2);
+    THTensor_(zero)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata);
   arguments:
     - arg: THTensor* result
       allocate: True
@@ -1461,6 +1464,7 @@
     long s2 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg4)->cdata, 1);
     long s3 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg5)->cdata, 2);
     THTensor_(resize3d)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, s1, s2, s3);
+    THTensor_(zero)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata);
   arguments:
     - arg: THTensor* result
       allocate: True
@@ -1743,7 +1747,6 @@ static const char *R = &__R;
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
   with_stateless: True
   return: argument 0
-  before_call:
   arguments:
     - arg: THTensor* output
       allocate: True
@@ -1759,7 +1762,6 @@ static const char *R = &__R;
   defined_if: CUDA_FLOAT
   with_stateless: True
   return: argument 0
-  before_call:
   arguments:
     - arg: THTensor* output
       allocate: True
@@ -1771,7 +1773,6 @@ static const char *R = &__R;
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
   with_stateless: True
   return: argument 0
-  before_call:
   arguments:
     - arg: THTensor* result
       allocate: True
@@ -1788,7 +1789,6 @@ static const char *R = &__R;
   defined_if: CUDA_FLOAT
   with_stateless: True
   return: argument 0
-  before_call:
   arguments:
     - arg: THTensor* result
       allocate: True
@@ -1801,7 +1801,6 @@ static const char *R = &__R;
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
   with_stateless: True
   return: argument 0
-  before_call:
   arguments:
     - arg: THTensor* output
       allocate: True
@@ -1817,7 +1816,6 @@ static const char *R = &__R;
   defined_if: CUDA_FLOAT
   with_stateless: True
   return: argument 0
-  before_call:
   arguments:
     - arg: THTensor* output
       allocate: True
@@ -1850,7 +1848,6 @@ static const char *R = &__R;
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
   with_stateless: True
   return: argument 0,1
-  before_call:
   arguments:
     - arg: THTensor* res1
       allocate: True
@@ -1864,7 +1861,6 @@ static const char *R = &__R;
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
   with_stateless: True
   return: argument 0,1
-  before_call:
   arguments:
     - arg: THTensor* res1
       allocate: True
@@ -1878,7 +1874,6 @@ static const char *R = &__R;
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
   with_stateless: True
   return: argument 0,1
-  before_call:
   arguments:
     - arg: THTensor* result
       allocate: True
@@ -1891,7 +1886,6 @@ static const char *R = &__R;
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
   with_stateless: True
   return: argument 0,1
-  before_call:
   arguments:
     - arg: THTensor* result
       allocate: True
