@@ -53,7 +53,6 @@ THC_API void THCudaTensor_potrf(THCState *state, THCudaTensor *ra_, THCudaTensor
 THC_API void THCudaTensor_potrs(THCState *state, THCudaTensor *rb_, THCudaTensor *a, THCudaTensor *b);
 THC_API void THCudaTensor_qr(THCState *state, THCudaTensor *rq_, THCudaTensor *rr_, THCudaTensor *a);
 
-THC_API void THCudaTensor_rand(THCState *state, THCudaTensor *r_, THLongStorage *size);
 THC_API void THCudaTensor_randn(THCState *state, THCudaTensor *r_, THLongStorage *size);
 
 THC_API int THCudaByteTensor_logicalall(THCState *state, THCudaByteTensor *self);

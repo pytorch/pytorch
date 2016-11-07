@@ -188,40 +188,42 @@ __host__ void THCRandom_setRNGState(THCState* state, THByteTensor *rng_state)
   memcpy(&gen->initial_seed, THByteTensor_data(rng_state) + states_size, seed_size);
 }
 
-#define GENERATE_KERNEL1(NAME, ARG1, CURAND_FUNC, TRANSFORM)                   \
-__global__ void NAME(curandStateMtgp32 *state, int size, float *result, ARG1)  \
+#define GENERATE_KERNEL1(NAME, T, ARG1, CURAND_T, CURAND_FUNC, TRANSFORM)               \
+__global__ void NAME(curandStateMtgp32 *state, int size, T *result, ARG1)  \
 {                                                                              \
   int idx = blockIdx.x * BLOCK_SIZE + threadIdx.x;                             \
   int rounded_size = THCCeilDiv(size, BLOCK_SIZE) * BLOCK_SIZE;                     \
   for (int i = idx; i < rounded_size; i += BLOCK_SIZE * MAX_NUM_BLOCKS) {      \
-    float x = CURAND_FUNC(&state[blockIdx.x]);                                 \
+    CURAND_T x = CURAND_FUNC(&state[blockIdx.x]);                                 \
     if (i < size) {                                                            \
-      x = TRANSFORM;                                                           \
-      result[i] = x;                                                           \
+      T y = TRANSFORM;                                                           \
+      result[i] = y;                                                           \
     }                                                                          \
   }                                                                            \
 }
 
-#define GENERATE_KERNEL2(NAME, ARG1, ARG2, CURAND_FUNC, TRANSFORM)                   \
-__global__ void NAME(curandStateMtgp32 *state, int size, float *result, ARG1, ARG2)  \
+#define GENERATE_KERNEL2(NAME, T, ARG1, ARG2, CURAND_T, CURAND_FUNC, TRANSFORM)                \
+__global__ void NAME(curandStateMtgp32 *state, int size, T *result, ARG1, ARG2)  \
 {                                                                                    \
   int idx = blockIdx.x * BLOCK_SIZE + threadIdx.x;                                   \
   int rounded_size = THCCeilDiv(size, BLOCK_SIZE) * BLOCK_SIZE;                           \
   for (int i = idx; i < rounded_size; i += BLOCK_SIZE * MAX_NUM_BLOCKS) {            \
-    float x = CURAND_FUNC(&state[blockIdx.x]);                                       \
+    CURAND_T x = CURAND_FUNC(&state[blockIdx.x]);                                       \
     if (i < size) {                                                                  \
-      x = TRANSFORM;                                                                 \
-      result[i] = x;                                                                 \
+      T y = TRANSFORM;                                                                 \
+      result[i] = y;                                                                 \
     }                                                                                \
   }                                                                                  \
 }
 
-GENERATE_KERNEL2(generate_uniform, double a, double b, curand_uniform, x * (b-a) + a)
-GENERATE_KERNEL1(generate_bernoulli, double p, curand_uniform, (float)x <= p)
-GENERATE_KERNEL2(generate_normal, double mean, double stdv, curand_normal, (x * stdv) + mean)
-GENERATE_KERNEL1(generate_geometric, double p, curand_uniform, (log(1-x) / log(p)) + 1)
-GENERATE_KERNEL1(generate_exponential, double lambda, curand_uniform, (float)(-1. / lambda * log(1-x)))
-GENERATE_KERNEL2(generate_cauchy, double median, double sigma, curand_uniform, (float)(median + sigma * tan(M_PI*(x-0.5))))
+GENERATE_KERNEL2(generate_uniform, float, double a, double b, float, curand_uniform, x * (b-a) + a)
+GENERATE_KERNEL2(generate_uniform, double, double a, double b, double, curand_uniform_double, x * (b-a) + a)
+GENERATE_KERNEL2(generate_uniform, half, double a, double b, float, curand_uniform, (ScalarConvert<double, half>::to(x * (b-a) + a)))
+GENERATE_KERNEL1(generate_bernoulli, float, double p, float, curand_uniform, (float)x <= p)
+GENERATE_KERNEL2(generate_normal, float, double mean, double stdv, float, curand_normal, (x * stdv) + mean)
+GENERATE_KERNEL1(generate_geometric, float, double p, float, curand_uniform, (log(1-x) / log(p)) + 1)
+GENERATE_KERNEL1(generate_exponential, float, double lambda, float, curand_uniform, (float)(-1. / lambda * log(1-x)))
+GENERATE_KERNEL2(generate_cauchy, float, double median, double sigma, float, curand_uniform, (float)(median + sigma * tan(M_PI*(x-0.5))))
 
 #undef GENERATE_KERNEL1
 #undef GENERATE_KERNEL2
@@ -240,20 +242,6 @@ __global__ void generate_log_normal(curandStateMtgp32 *state, int size, float *r
 }
 
 #define NUM_BLOCKS min((int)THCCeilDiv(size, (ptrdiff_t) BLOCK_SIZE), MAX_NUM_BLOCKS)
-THC_API void THCudaTensor_uniform(THCState* state, THCudaTensor *self_, double a, double b)
-{
-  THAssert(THCudaTensor_checkGPU(state, 1, self_));
-  Generator* gen = THCRandom_getGenerator(state);
-  THCudaTensor *self = THCudaTensor_newContiguous(state, self_);
-  ptrdiff_t size = THCudaTensor_nElement(state, self);
-  float *data = THCudaTensor_data(state, self);
-
-  generate_uniform<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-      gen->gen_states, size, data, a, b);
-
-  THCudaTensor_freeCopyTo(state, self, self_);
-};
-
 THC_API void THCudaTensor_bernoulli(THCState* state, THCudaTensor *self_, double p)
 {
   THAssert(THCudaTensor_checkGPU(state, 1, self_));
@@ -529,3 +517,6 @@ THC_API void THCudaTensor_multinomial(struct THCState *state,
 }
 
 #undef NUM_BLOCKS
+
+#include "generic/THCTensorRandom.cu"
+#include "THCGenerateAllTypes.h"
