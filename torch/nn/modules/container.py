@@ -1,8 +1,18 @@
 from collections import OrderedDict
-
+import string
 import torch
 from .module import Module
 
+def _addindent(s_, numSpaces):
+    s = string.split(s_, '\n')
+    # dont do anything for single-line stuff
+    if len(s) == 1:
+        return s_
+    first = s.pop(0)
+    s = [(numSpaces * ' ') + line for line in s]
+    s = string.join(s, '\n')
+    s = first + '\n' + s
+    return s
 
 class Container(Module):
     """This is the base container class for all neural networks you would define.
@@ -142,8 +152,40 @@ class Container(Module):
             module._apply(fn)
         return super(Container, self)._apply(fn)
 
+    def __repr__(self):
+        tmpstr = self.__class__.__name__ + ' (\n'
+        for key, module in self._modules.items():
+            modstr = module.__repr__()
+            modstr = _addindent(modstr, 2)
+            tmpstr = tmpstr + '  ('  + key + '): ' + modstr + '\n'
+        tmpstr = tmpstr + ')'
+        return tmpstr
+
 
 class Sequential(Container):
+    """A sequential Container. It is derived from the base nn.Container class
+    Modules will be added to it in the order they are passed in the constructor.
+    Alternatively, an ordered dict of modules can also be passed in.
+
+    To make it easier to understand, given is a small example.
+    ```
+    # Example of using Sequential
+    model = nn.Sequential(
+              nn.Conv2d(1,20,5),
+              nn.ReLU(),
+              nn.Conv2d(20,64,5),
+              nn.ReLU()
+            )
+
+    # Example of using Sequential with OrderedDict
+    model = nn.Sequential(OrderedDict([
+              ('conv1', nn.Conv2d(1,20,5)),
+              ('relu1', nn.ReLU()),
+              ('conv2', nn.Conv2d(20,64,5)),
+              ('relu2', nn.ReLU())
+            ]))
+     ```
+    """
 
     def __init__(self, *args):
         super(Sequential, self).__init__()
@@ -168,3 +210,12 @@ class Sequential(Container):
         for module in self._modules.values():
             input = module(input)
         return input
+
+    def __repr__(self):
+        tmpstr = self.__class__.__name__ + ' (\n'
+        for key, module in self._modules.items():
+            modstr = module.__repr__()
+            modstr = _addindent(modstr, 2)
+            tmpstr = tmpstr + '  ('  + key + '): ' + modstr + '\n'
+        tmpstr = tmpstr + ')'
+        return tmpstr

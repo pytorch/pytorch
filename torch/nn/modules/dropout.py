@@ -22,6 +22,12 @@ class Dropout(Module):
     def forward(self, input):
         return self._backend.Dropout(self.p, self.training, self.inplace)(input)
 
+    def __repr__(self):
+        inplace_str = ', inplace' if self.inplace else ''
+        return self.__class__.__name__ + ' (' \
+            + 'p = ' + str(self.p) \
+            + inplace_str + ')'
+
 
 class Dropout2d(Module):
     """Randomly zeroes whole channels of the input tensor.
@@ -56,6 +62,11 @@ class Dropout2d(Module):
     def forward(self, input):
         return self._backend.Dropout2d(self.p, self.training, self.inplace)(input)
 
+    def __repr__(self):
+        inplace_str=', inplace' if self.inplace else ''
+        return self.__class__.__name__ + ' (' \
+            + 'p=' + str(self.p) \
+            + inplace_str + ')'
 
 class Dropout3d(Module):
     """Randomly zeroes whole channels of the input tensor.
@@ -81,4 +92,10 @@ class Dropout3d(Module):
 
     def forward(self, input):
         return self._backend.Dropout3d(self.p, self.training, self.inplace)(input)
+
+    def __repr__(self):
+        inplace_str=', inplace' if self.inplace else ''
+        return self.__class__.__name__ + ' (' \
+            + 'p=' + str(self.p) \
+            + inplace_str + ')'
 

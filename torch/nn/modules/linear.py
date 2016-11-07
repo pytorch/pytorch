@@ -48,6 +48,11 @@ class Linear(Module):
         else:
             return self._backend.Linear()(input, self.weight, self.bias)
 
+    def __repr__(self):
+        return self.__class__.__name__ + ' (' \
+            + str(self.in_features) + ' -> ' \
+            + str(self.out_features) + ')'
+
 
 # TODO: Bilinear
 # TODO: PartialLinear - maybe in sparse?

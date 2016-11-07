@@ -33,6 +33,13 @@ class Threshold(Module):
     def forward(self, input):
         return self._backend.Threshold(self.threshold, self.value, self.inplace)(input)
 
+    def __repr__(self):
+        inplace_str=', inplace' if self.inplace else ''
+        return self.__class__.__name__ + ' (' \
+            + str(self.threshold) \
+            + ', ' + str(self.value) \
+            + inplace_str + ')'
+
 
 class ReLU(Threshold):
     """Applies the rectified linear unit function element-wise ReLU(x)= max(0,x)
@@ -52,6 +59,11 @@ class ReLU(Threshold):
     def __init__(self, inplace=False):
         super(ReLU, self).__init__(0, 0, inplace)
 
+    def __repr__(self):
+        inplace_str='inplace' if self.inplace else ''
+        return self.__class__.__name__ + ' (' \
+            + inplace_str + ')'
+
 
 class RReLU(Module):
     def __init__(self, lower=1./8, upper=1./3, inplace=False):
@@ -63,6 +75,13 @@ class RReLU(Module):
     def forward(self, input):
         return self._backend.RReLU(self.lower, self.upper, self.training,
                 self.inplace)(input)
+
+    def __repr__(self):
+        inplace_str=', inplace' if self.inplace else ''
+        return self.__class__.__name__ + ' (' \
+            + str(self.lower) \
+            + ', ' + str(self.upper) \
+            + inplace_str + ')'
 
 
 class Hardtanh(Module):
@@ -97,6 +116,12 @@ class Hardtanh(Module):
     def forward(self, input):
         return self._backend.Hardtanh(self.min_val, self.max_val, self.inplace)(input)
 
+    def __repr__(self):
+        inplace_str=', inplace' if self.inplace else ''
+        return self.__class__.__name__ + ' (' \
+            + 'min_val=' + str(self.min_val) \
+            + ', max_val=' + str(self.max_val) \
+            + inplace_str + ')'
 
 class ReLU6(Hardtanh):
     """Applies the element-wise function ReLU6(x) = min( max(0,x), 6)
@@ -116,6 +141,10 @@ class ReLU6(Hardtanh):
     def __init__(self, inplace=False):
         super(ReLU6, self).__init__(0, 6, inplace)
 
+    def __repr__(self):
+        inplace_str='inplace' if self.inplace else ''
+        return self.__class__.__name__ + ' (' \
+            + inplace_str + ')'
 
 class Sigmoid(Module):
     """Applies the element-wise function sigmoid(x) = 1 / ( 1 + exp(-x))
@@ -132,6 +161,10 @@ class Sigmoid(Module):
     """
     def forward(self, input):
         return self._backend.Sigmoid()(input)
+
+    def __repr__(self):
+        return self.__class__.__name__ + ' ()'
+
 
 
 class Tanh(Module):
@@ -150,6 +183,8 @@ class Tanh(Module):
     def forward(self, input):
         return self._backend.Tanh()(input)
 
+    def __repr__(self):
+        return self.__class__.__name__ + ' ()'
 
 class ELU(Module):
     """Applies element-wise, ELU(x) = max(0,x) + min(0, alpha * (exp(x) - 1))
@@ -174,6 +209,12 @@ class ELU(Module):
 
     def forward(self, input):
         return self._backend.ELU(self.alpha, self.inplace)(input)
+
+    def __repr__(self):
+        inplace_str=', inplace' if self.inplace else ''
+        return self.__class__.__name__ + ' (' \
+            + 'alpha=' + str(self.alpha) \
+            + inplace_str + ')'
 
 
 class Hardshrink(Module):
@@ -201,6 +242,10 @@ class Hardshrink(Module):
     def forward(self, input):
         return self._backend.Hardshrink(self.lambd)(input)
 
+    def __repr__(self):
+        return self.__class__.__name__ + ' (' \
+            + str(self.lambd) + ')'
+
 
 class LeakyReLU(Module):
     """Applies element-wise, f(x) = max(0, x) + negative_slope * min(0, x)
@@ -225,6 +270,11 @@ class LeakyReLU(Module):
     def forward(self, input):
         return self._backend.LeakyReLU(self.negative_slope, self.inplace)(input)
 
+    def __repr__(self):
+        inplace_str=', inplace' if self.inplace else ''
+        return self.__class__.__name__ + ' (' \
+            + str(self.negative_slope) \
+            + inplace_str + ')'
 
 class LogSigmoid(Module):
     """Applies element-wise LogSigmoid(x) = log( 1 / (1 + exp(-x_i)))
@@ -242,6 +292,8 @@ class LogSigmoid(Module):
     def forward(self, input):
         return self._backend.LogSigmoid()(input)
 
+    def __repr__(self):
+        return self.__class__.__name__ + ' ()'
 
 class Softplus(Module):
     """Applies element-wise SoftPlus(x) = 1/beta * log(1 + exp(beta * x_i))
@@ -271,6 +323,10 @@ class Softplus(Module):
     def forward(self, input):
         return self._backend.Softplus(self.beta, self.threshold)(input)
 
+    def __repr__(self):
+        return self.__class__.__name__ + ' (' \
+            + 'beta=' + str(self.beta) \
+            + ', threshold=' + str(self.threshold) + ')'
 
 class Softshrink(Module):
     """Applies the soft shrinkage function elementwise
@@ -296,6 +352,10 @@ class Softshrink(Module):
 
     def forward(self, input):
         return self._backend.Softshrink(self.lambd)(input)
+
+    def __repr__(self):
+        return self.__class__.__name__ + ' (' \
+            + str(self.lambd) + ')'
 
 
 class PReLU(Module):
@@ -329,6 +389,10 @@ class PReLU(Module):
     def forward(self, input):
         return self._backend.PReLU()(input, self.weight)
 
+    def __repr__(self):
+        return self.__class__.__name__ + ' (' \
+            + str(self.num_parameters) + ')'
+
 
 class Softsign(Module):
     """Applies element-wise, the function Softsign(x) = x / (1 + |x|)
@@ -345,6 +409,9 @@ class Softsign(Module):
     """
     def forward(self, input):
         return self._backend.Softsign()(input)
+
+    def __repr__(self):
+        return self.__class__.__name__ + ' ()'
 
 
 class Tanhshrink(Module):
@@ -363,6 +430,8 @@ class Tanhshrink(Module):
         tanh = self._backend.Tanh()(input)
         return input - tanh
 
+    def __repr__(self):
+        return self.__class__.__name__ + ' ()'
 
 class Softmin(Module):
     """Applies the Softmin function to an n-dimensional input Tensor
@@ -385,6 +454,8 @@ class Softmin(Module):
     def forward(self, input):
         return self._backend.Softmin()(input)
 
+    def __repr__(self):
+        return self.__class__.__name__ + ' ()'
 
 class Softmax(Module):
     """Applies the Softmax function to an n-dimensional input Tensor
@@ -414,6 +485,8 @@ class Softmax(Module):
         assert input.dim() == 2, 'Softmax requires a 2D tensor as input'
         return self._backend.Softmax()(input)
 
+    def __repr__(self):
+        return self.__class__.__name__ + ' ()'
 
 class Softmax2d(Module):
     """Applies SoftMax over features to each spatial location
@@ -436,6 +509,9 @@ class Softmax2d(Module):
         assert input.dim() == 4, 'Softmax2d requires a 4D tensor as input'
         return self._backend.Softmax()(input)
 
+    def __repr__(self):
+        return self.__class__.__name__ + ' ()'
+
 class LogSoftmax(Module):
     """Applies the Log(Softmax(x)) function to an n-dimensional input Tensor.
     The LogSoftmax formulation can be simplified as
@@ -455,6 +531,8 @@ class LogSoftmax(Module):
     def forward(self, input):
         return self._backend.LogSoftmax()(input)
 
+    def __repr__(self):
+        return self.__class__.__name__ + ' ()'
 
 
 # TODO: RReLU

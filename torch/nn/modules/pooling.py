@@ -45,6 +45,13 @@ class MaxPool1d(Module):
                 self.padding, self.dilation, self.ceil_mode,
                 self.return_indices)(input)
 
+    def __repr__(self):
+        return self.__class__.__name__ + ' (' \
+            + 'size=' + str(self.kernel_size) \
+            + ', stride=' + str(self.stride) \
+            + ', padding=' + str(self.padding) \
+            + ', dilation=' + str(self.dilation) \
+            + ', ceil_mode=' + str(self.ceil_mode) + ')'
 
 class MaxPool2d(Module):
     """Applies a 2D max pooling over an input signal composed of several input
@@ -87,6 +94,17 @@ class MaxPool2d(Module):
         return self._backend.MaxPool2d(self.kw, self.kh, self.dw, self.dh,
                 self.padw, self.padh, self.dilh, self.dilw, self.ceil_mode,
                 self.return_indices)(input)
+
+    def __repr__(self):
+        padding_str=', padding=(' + str(self.padh) + ', ' + str(self.padw) + ')' \
+                      if self.padh != 0 and self.padw !=0 else ''
+        dilation_str=(', dilation=(' + str(self.dilh) + ', ' + str(self.dilw) + ')' \
+                        if self.dilh != 0 and self.dilw != 0 else '')
+        return  self.__class__.__name__ + ' (' \
+            + 'size=(' + str(self.kh) + ', ' + str(self.kw) + ')' \
+            + ', stride=(' + str(self.dh) + ', ' + str(self.dw) + ')' \
+            + padding_str + dilation_str + ')'
+
 
 
 class MaxUnpool2d(Module):
@@ -151,7 +169,6 @@ class MaxUnpool2d(Module):
             out_height, out_width = h, w
         return self._backend.MaxUnpool2d(out_width,
                 out_height)(input, indices)
-
 
 class AvgPool2d(Module):
     """Applies a 2D average pooling over an input signal composed of several input

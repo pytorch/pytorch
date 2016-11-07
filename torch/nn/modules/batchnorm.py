@@ -42,6 +42,12 @@ class _BatchNorm(Module):
         return self._backend.BatchNorm(self.running_mean,
                 self.running_var, self.training, self.momentum, self.eps)(*args)
 
+    def __repr__(self):
+        return  self.__class__.__name__ + ' (' + str(self.weight.data.size(0)) \
+            + ', eps=' + str(self.eps) \
+            + ', momentum=' + str(self.momentum) \
+            + ', affine=' + str(self.affine) + ')'
+
 
 class BatchNorm1d(_BatchNorm):
     """Applies Batch Normalization over a 2d input that is seen as a mini-batch of 1d inputs

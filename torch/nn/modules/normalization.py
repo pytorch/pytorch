@@ -14,6 +14,14 @@ class CrossMapLRN2d(Module):
         return self._backend.CrossMapLRN2d(self.size, self.alpha, self.beta,
                 self.k)(input)
 
+    def __repr__(self):
+        return self.__class__.__name__ + ' (' \
+            + 'size=' + str(self.threshold) \
+            + ', alpha=' + str(self.alpha) \
+            + ', beta=' + str(self.beta) \
+            + ', k=' + str(self.k) \
+            + ')'
+
 
 # TODO: ContrastiveNorm2d
 # TODO: DivisiveNorm2d
