@@ -9,4 +9,6 @@ THC_API void THCTensor_(rand)(THCState *state, THCTensor *r_, THLongStorage *siz
 
 #endif
 
+THC_API void THCTensor_(bernoulli)(struct THCState *state, THCTensor *self, double p);
+
 #endif

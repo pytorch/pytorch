@@ -32,7 +32,6 @@ THC_API unsigned long THCRandom_initialSeed(struct THCState *state);
 THC_API void THCRandom_getRNGState(struct THCState *state, THByteTensor *rng_state);
 THC_API void THCRandom_setRNGState(struct THCState *state, THByteTensor *rng_state);
 THC_API void THCudaTensor_geometric(struct THCState *state, THCudaTensor *self, double p);
-THC_API void THCudaTensor_bernoulli(struct THCState *state, THCudaTensor *self, double p);
 THC_API void THCudaTensor_normal(struct THCState *state, THCudaTensor *self, double mean, double stdv);
 THC_API void THCudaTensor_exponential(struct THCState *state, THCudaTensor *self, double lambda);
 THC_API void THCudaTensor_cauchy(struct THCState *state, THCudaTensor *self, double median, double sigma);
