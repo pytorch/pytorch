@@ -218,9 +218,8 @@ __global__ void NAME(curandStateMtgp32 *state, int size, T *result, ARG1, ARG2) 
 
 GENERATE_KERNEL2(generate_uniform, float, double a, double b, float, curand_uniform, x * (b-a) + a)
 GENERATE_KERNEL2(generate_uniform, double, double a, double b, double, curand_uniform_double, x * (b-a) + a)
-GENERATE_KERNEL2(generate_uniform, half, double a, double b, float, curand_uniform, (ScalarConvert<double, half>::to(x * (b-a) + a)))
+GENERATE_KERNEL2(generate_uniform, half, double a, double b, float, curand_uniform, (ScalarConvert<float, half>::to(x * (b-a) + a)))
 
-GENERATE_KERNEL2(generate_normal, float, double mean, double stdv, float, curand_normal, (x * stdv) + mean)
 GENERATE_KERNEL1(generate_geometric, float, double p, float, curand_uniform, (log(1-x) / log(p)) + 1)
 GENERATE_KERNEL1(generate_exponential, float, double lambda, float, curand_uniform, (float)(-1. / lambda * log(1-x)))
 GENERATE_KERNEL2(generate_cauchy, float, double median, double sigma, float, curand_uniform, (float)(median + sigma * tan(M_PI*(x-0.5))))
@@ -239,20 +238,6 @@ __global__ void generate_log_normal(curandStateMtgp32 *state, int size, float *r
 }
 
 #define NUM_BLOCKS min((int)THCCeilDiv(size, (ptrdiff_t) BLOCK_SIZE), MAX_NUM_BLOCKS)
-THC_API void THCudaTensor_normal(THCState* state, THCudaTensor *self_, double mean, double stdv)
-{
-  THAssert(THCudaTensor_checkGPU(state, 1, self_));
-  Generator* gen = THCRandom_getGenerator(state);
-  THCudaTensor *self = THCudaTensor_newContiguous(state, self_);
-  ptrdiff_t size = THCudaTensor_nElement(state, self);
-  float *data = THCudaTensor_data(state, self);
-
-  generate_normal<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-      gen->gen_states, size, data, mean, stdv);
-
-  THCudaTensor_freeCopyTo(state, self, self_);
-};
-
 THC_API void THCudaTensor_logNormal(THCState* state, THCudaTensor *self_, double mean, double stdv)
 {
   THAssert(THCudaTensor_checkGPU(state, 1, self_));
