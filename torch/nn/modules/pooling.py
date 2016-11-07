@@ -47,11 +47,11 @@ class MaxPool1d(Module):
 
     def __repr__(self):
         return self.__class__.__name__ + ' (' \
-            + 'size = ' + str(self.kernel_size) \
-            + ', stride = ' + str(self.stride) \
-            + ', padding = ' + str(self.padding) \
-            + ', dilation = ' + str(self.dilation) \
-            + ', ceil_mode = ' + str(self.ceil_mode) + ')'
+            + 'size=' + str(self.kernel_size) \
+            + ', stride=' + str(self.stride) \
+            + ', padding=' + str(self.padding) \
+            + ', dilation=' + str(self.dilation) \
+            + ', ceil_mode=' + str(self.ceil_mode) + ')'
 
 class MaxPool2d(Module):
     """Applies a 2D max pooling over an input signal composed of several input
@@ -96,13 +96,13 @@ class MaxPool2d(Module):
                 self.return_indices)(input)
 
     def __repr__(self):
-        padding_str = ', padding = (' + str(self.padh) + ', ' + str(self.padw) + ')' \
+        padding_str=', padding=(' + str(self.padh) + ', ' + str(self.padw) + ')' \
                       if self.padh != 0 and self.padw !=0 else ''
-        dilation_str = (', dilation = (' + str(self.dilh) + ', ' + str(self.dilw) + ')' \
+        dilation_str=(', dilation=(' + str(self.dilh) + ', ' + str(self.dilw) + ')' \
                         if self.dilh != 0 and self.dilw != 0 else '')
         return  self.__class__.__name__ + ' (' \
-            + 'size = (' + str(self.kh) + ', ' + str(self.kw) + ')' \
-            + ', stride = (' + str(self.dh) + ', ' + str(self.dw) + ')' \
+            + 'size=(' + str(self.kh) + ', ' + str(self.kw) + ')' \
+            + ', stride=(' + str(self.dh) + ', ' + str(self.dw) + ')' \
             + padding_str + dilation_str + ')'
 
 

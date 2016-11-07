@@ -34,10 +34,10 @@ class Threshold(Module):
         return self._backend.Threshold(self.threshold, self.value, self.inplace)(input)
 
     def __repr__(self):
-        inplace_str = ', inplace' if self.inplace else ''
+        inplace_str=', inplace' if self.inplace else ''
         return self.__class__.__name__ + ' (' \
-            + 'threshold = ' + str(self.threshold) \
-            + ', value = ' + str(self.value) \
+            + 'threshold=' + str(self.threshold) \
+            + ', value=' + str(self.value) \
             + inplace_str + ')'
 
 
@@ -60,7 +60,7 @@ class ReLU(Threshold):
         super(ReLU, self).__init__(0, 0, inplace)
 
     def __repr__(self):
-        inplace_str = 'inplace' if self.inplace else ''
+        inplace_str='inplace' if self.inplace else ''
         return self.__class__.__name__ + ' (' \
             + inplace_str + ')'
 
@@ -77,10 +77,10 @@ class RReLU(Module):
                 self.inplace)(input)
 
     def __repr__(self):
-        inplace_str = ', inplace' if self.inplace else ''
+        inplace_str=', inplace' if self.inplace else ''
         return self.__class__.__name__ + ' (' \
-            + 'lower = ' + str(self.lower) \
-            + ', upper = ' + str(self.upper) \
+            + 'lower=' + str(self.lower) \
+            + ', upper=' + str(self.upper) \
             + inplace_str + ')'
 
 
@@ -117,10 +117,10 @@ class Hardtanh(Module):
         return self._backend.Hardtanh(self.min_val, self.max_val, self.inplace)(input)
 
     def __repr__(self):
-        inplace_str = ', inplace' if self.inplace else ''
+        inplace_str=', inplace' if self.inplace else ''
         return self.__class__.__name__ + ' (' \
-            + 'min_val = ' + str(self.min_val) \
-            + ', max_val = ' + str(self.max_val) \
+            + 'min_val=' + str(self.min_val) \
+            + ', max_val=' + str(self.max_val) \
             + inplace_str + ')'
 
 class ReLU6(Hardtanh):
@@ -142,7 +142,7 @@ class ReLU6(Hardtanh):
         super(ReLU6, self).__init__(0, 6, inplace)
 
     def __repr__(self):
-        inplace_str = 'inplace' if self.inplace else ''
+        inplace_str='inplace' if self.inplace else ''
         return self.__class__.__name__ + ' (' \
             + inplace_str + ')'
 
@@ -211,9 +211,9 @@ class ELU(Module):
         return self._backend.ELU(self.alpha, self.inplace)(input)
 
     def __repr__(self):
-        inplace_str = ', inplace' if self.inplace else ''
+        inplace_str=', inplace' if self.inplace else ''
         return self.__class__.__name__ + ' (' \
-            + 'alpha = ' + str(self.alpha) \
+            + 'alpha=' + str(self.alpha) \
             + inplace_str + ')'
 
 
@@ -244,7 +244,7 @@ class Hardshrink(Module):
 
     def __repr__(self):
         return self.__class__.__name__ + ' (' \
-            + 'lambda = ' + str(self.lambd) + ')'
+            + 'lambda=' + str(self.lambd) + ')'
 
 
 class LeakyReLU(Module):
@@ -271,9 +271,9 @@ class LeakyReLU(Module):
         return self._backend.LeakyReLU(self.negative_slope, self.inplace)(input)
 
     def __repr__(self):
-        inplace_str = ', inplace' if self.inplace else ''
+        inplace_str=', inplace' if self.inplace else ''
         return self.__class__.__name__ + ' (' \
-            + 'negative slope = ' + str(self.negative_slope) \
+            + 'negative slope=' + str(self.negative_slope) \
             + inplace_str + ')'
 
 class LogSigmoid(Module):
@@ -325,8 +325,8 @@ class Softplus(Module):
 
     def __repr__(self):
         return self.__class__.__name__ + ' (' \
-            + 'beta = ' + str(self.beta) \
-            + ', threshold = ' + str(self.threshold) + ')'
+            + 'beta=' + str(self.beta) \
+            + ', threshold=' + str(self.threshold) + ')'
 
 class Softshrink(Module):
     """Applies the soft shrinkage function elementwise
@@ -355,7 +355,7 @@ class Softshrink(Module):
 
     def __repr__(self):
         return self.__class__.__name__ + ' (' \
-            + 'lambda = ' + str(self.lambd) + ')'
+            + 'lambda=' + str(self.lambd) + ')'
 
 
 class PReLU(Module):
@@ -391,7 +391,7 @@ class PReLU(Module):
 
     def __repr__(self):
         return self.__class__.__name__ + ' (' \
-            + 'num_parameters = ' + str(self.num_parameters) + ')'
+            + 'num_parameters=' + str(self.num_parameters) + ')'
 
 
 class Softsign(Module):

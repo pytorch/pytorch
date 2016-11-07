@@ -44,9 +44,9 @@ class _BatchNorm(Module):
 
     def __repr__(self):
         return  self.__class__.__name__ + ' (' + str(self.weight.data.size(0)) \
-            + ', eps = ' + str(self.eps) \
-            + ', momentum = ' + str(self.momentum) \
-            + ', affine = ' + str(self.affine) + ')'
+            + ', eps=' + str(self.eps) \
+            + ', momentum=' + str(self.momentum) \
+            + ', affine=' + str(self.affine) + ')'
 
 
 class BatchNorm1d(_BatchNorm):

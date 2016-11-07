@@ -68,11 +68,11 @@ class Conv1d(Module):
         return func(input, weight, self.bias)
 
     def __repr__(self):
-        inplace_str = ', inplace' if self.inplace else ''
+        inplace_str=', inplace' if self.inplace else ''
         return self.__class__.__name__ + ' (' \
             + str(self.in_features) + ' -> ' + str(self.out_features) \
-            + ', size = ' + str(self.kernel_size) \
-            + ', stride = ' + str(self.stride) + ')'
+            + ', size=' + str(self.kernel_size) \
+            + ', stride=' + str(self.stride) + ')'
 
 class Conv2d(Module):
     """Applies a 2D convolution over an input image composed of several input
@@ -158,16 +158,16 @@ class Conv2d(Module):
             return func(input, self.weight, self.bias)
     
     def __repr__(self):
-        padding_str = ', padding = (' + str(self.padh) + ', ' + str(self.padw) + ')' \
+        padding_str=', padding=(' + str(self.padh) + ', ' + str(self.padw) + ')' \
                       if self.padh != 0 and self.padw !=0 else ''
-        dilation_str = (', dilation = (' + str(self.dilh) + ', ' \
+        dilation_str=(', dilation=(' + str(self.dilh) + ', ' \
                         + str(self.dilw) + ')' if self.is_dilated else '')
-        groups_str = (', groups = ' + str(self.groups) if self.groups != 1 else '')
-        bias_str = (', bias = False' if self.bias == None else '')
+        groups_str=(', groups=' + str(self.groups) if self.groups != 1 else '')
+        bias_str=(', bias=False' if self.bias == None else '')
         return  self.__class__.__name__ + ' (' + str(self.in_channels) \
             + ' -> ' + str(self.out_channels) \
-            + ', size = (' + str(self.kh) + ', ' + str(self.kw) + ')' \
-            + ', stride = (' + str(self.dh) + ', ' + str(self.dw) + ')' \
+            + ', size=(' + str(self.kh) + ', ' + str(self.kw) + ')' \
+            + ', stride=(' + str(self.dh) + ', ' + str(self.dw) + ')' \
             + padding_str + dilation_str + groups_str + bias_str + ')'
 
 
@@ -269,13 +269,13 @@ class _Conv3dBase(Module):
             self.bias.data.uniform_(-stdv, stdv)
 
     def __repr__(self):
-        padding_str = ', padding = (' + str(self.padt) \
+        padding_str=', padding=(' + str(self.padt) \
                       + ', ' + str(self.padh) + ', ' + str(self.padw) + ')' \
                       if self.padt != 0 and self.padh != 0 and self.padw !=0 else ''
         return  self.__class__.__name__ + ' (' + str(self.in_channels) \
             + ' -> ' + str(self.out_channels) \
-            + ', size = (' + str(self.kt) + ', ' + str(self.kh) + ', ' + str(self.kw) + ')' \
-            + ', stride = (' + str(self.dt) + ', ' + str(self.dh) + ', ' + str(self.dw) + ')' \
+            + ', size=(' + str(self.kt) + ', ' + str(self.kh) + ', ' + str(self.kw) + ')' \
+            + ', stride=(' + str(self.dt) + ', ' + str(self.dh) + ', ' + str(self.dw) + ')' \
             + padding_str + ')'
 
 
