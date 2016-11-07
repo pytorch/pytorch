@@ -364,45 +364,6 @@ void THCudaTensor_renormRows(struct THCState* state,
 }
 
 __global__ void
-sampleMultinomialWithReplacement(curandStateMtgp32* state,
-                                 int totalSamples,
-                                 float* dest,
-                                 long distributions,
-                                 int categories,
-                                 float* normDistPrefixSum) {
-  // At the moment, each warp computes one sample value in the binary
-  // search due to divergence. It seems possible to compute multiple
-  // values and limit divergence though later on. However, no matter
-  // what, all block threads must participate in the curand_uniform
-  // call to update the generator state.
-
-  // The block determines the distribution for which we generate a point
-  for (long curDist = blockIdx.x;
-       curDist < distributions;
-       curDist += gridDim.x) {
-    for (int sampleBase = 0;
-         sampleBase < totalSamples; sampleBase += blockDim.y) {
-      // The warp determines the sample
-      int sample = sampleBase + threadIdx.y;
-
-      // All threads participate in this
-      float r = curand_uniform(&state[blockIdx.x]);
-
-      if (threadIdx.x == 0 && sample < totalSamples) {
-        // Find the bucket that a uniform sample lies in
-        int choice = binarySearchForMultinomial<float>(
-          normDistPrefixSum + curDist * categories,
-          categories,
-          r);
-
-        // Torch indices are 1-based
-        dest[curDist * totalSamples + sample] = (float) choice + (float)TH_INDEX_BASE;
-      }
-    }
-  }
-}
-
-__global__ void
 sampleMultinomialWithoutReplacement(curandStateMtgp32* state,
                                     int totalSamples,
                                     int sample,
