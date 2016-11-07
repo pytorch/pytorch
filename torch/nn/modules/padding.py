@@ -11,6 +11,8 @@ class ReflectionPad2d(Module):
     def forward(self, input):
         return self._backend.ReflectionPad2d(*self.padding)(input)
 
+    def __repr__(self):
+        return self.__class__.__name__ + ' ' + str(self.padding)
 
 class ReplicationPad2d(Module):
 
@@ -21,6 +23,8 @@ class ReplicationPad2d(Module):
     def forward(self, input):
         return self._backend.ReplicationPad2d(*self.padding)(input)
 
+    def __repr__(self):
+        return self.__class__.__name__ + ' ' + str(self.padding)
 
 class ReplicationPad3d(Module):
 
@@ -31,6 +35,8 @@ class ReplicationPad3d(Module):
     def forward(self, input):
         return self._backend.ReplicationPad3d(*self.padding)(input)
 
+    def __repr__(self):
+        return self.__class__.__name__ + ' ' + str(self.padding)
 
 # TODO: ZeroPad2d
 
