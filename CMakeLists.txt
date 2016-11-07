@@ -238,6 +238,7 @@ INSTALL(FILES
           THCTensorSort.cuh
           THCTensorInfo.cuh
           THCTensorTypeUtils.cuh
+          THCTensorRandom.cuh
           DESTINATION "${THC_INSTALL_INCLUDE_SUBDIR}/THC")
 
 INSTALL(FILES
