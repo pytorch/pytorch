@@ -4,6 +4,7 @@
 #include "THCTensorCopy.h"
 #include "THCTensorMath.h"
 #include "THCReduceApplyUtils.cuh"
+#include "THCTensorRandom.cuh"
 
 #include <thrust/functional.h>
 #include <curand.h>
@@ -341,32 +342,6 @@ THC_API void THCudaTensor_cauchy(THCState* state, THCudaTensor *self_, double me
   THCudaTensor_freeCopyTo(state, self, self_);
 };
 
-__device__ int binarySearchForMultinomial(float* dist,
-                                          int size,
-                                          float val) {
-  int start = 0;
-  int end = size;
-
-  while (end - start > 0) {
-    int mid = start + (end - start) / 2;
-
-    float midVal = dist[mid];
-    if (midVal < val) {
-      start = mid + 1;
-    } else {
-      end = mid;
-    }
-  }
-
-  if (start == size) {
-    // No probability mass or precision problems; just return the
-    // first element
-    start = 0;
-  }
-
-  return start;
-}
-
 // Normalizes the L1 norm of every row to 1; used by multinomial
 __global__ void renormRowsL1(float* dist, long rows, long cols) {
   extern __shared__ float smem[];
@@ -530,7 +505,7 @@ sampleMultinomialWithReplacement(curandStateMtgp32* state,
 
       if (threadIdx.x == 0 && sample < totalSamples) {
         // Find the bucket that a uniform sample lies in
-        int choice = binarySearchForMultinomial(
+        int choice = binarySearchForMultinomial<float>(
           normDistPrefixSum + curDist * categories,
           categories,
           r);
@@ -570,7 +545,7 @@ sampleMultinomialWithoutReplacement(curandStateMtgp32* state,
 
     if (threadIdx.x == 0 && curDist < distributions) {
       // Find the bucket that a uniform sample lies in
-      int choice = binarySearchForMultinomial(
+      int choice = binarySearchForMultinomial<float>(
         normDistPrefixSum + curDist * categories,
         categories,
         r);
