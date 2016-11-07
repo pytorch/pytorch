@@ -3,6 +3,7 @@ from . import _tensor_str
 from ._utils import _type, _cuda, _range
 from functools import reduce
 from itertools import chain
+import sys
 import math
 
 
@@ -90,10 +91,17 @@ class _TensorBase(object):
         return type(self), (self.tolist(),)
 
     def __repr__(self):
-        return str(self)
+        return repr(str(self))
 
     def __str__(self):
-        return _tensor_str._str(self)
+        # All strings are unicode in Python 3, while we have to encode unicode
+        # strings in Python2. If we can't, let python decide the best
+        # characters to replace unicode characters with.
+        if sys.version_info > (3,):
+            return _tensor_str._str(self)
+        else:
+            return _tensor_str._str(self).encode(
+                sys.stdout.encoding or 'UTF-8', 'replace')
 
     def __iter__(self):
         return iter(map(lambda i: self.select(0, i), _range(self.size(0))))

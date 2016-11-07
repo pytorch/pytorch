@@ -140,7 +140,7 @@ def _tensor_str(self):
 
     dim_sz = max(2, max(len(str(x)) for x in self.size()))
     dim_fmt = "{:^" + str(dim_sz) + "}"
-    dot_fmt = "{:^" + str(dim_sz+1) + "}"
+    dot_fmt = u"{:^" + str(dim_sz+1) + "}"
 
     counter_dim = self.ndimension() - 2
     counter = torch.LongStorage(counter_dim).fill_(0)
@@ -173,7 +173,7 @@ def _tensor_str(self):
             if any(nrestarted):
                 strt += ' '
                 for vdot in nrestarted:
-                    strt += dot_fmt.format(':') if vdot else dot_fmt.format('')
+                    strt += dot_fmt.format(u'\u22EE' if vdot else '')
                 strt += '\n'
         if strt != '':
             strt += '\n'
@@ -186,7 +186,7 @@ def _tensor_str(self):
 
 def __repr_row(row, indent, fmt, scale, sz, truncate=None):
     if truncate is not None:
-        dotfmt = " {:^" + str(sz) + "} "
+        dotfmt = " {:^5} "
         return (indent +
                 ' '.join(fmt.format(val/scale) for val in row[:truncate]) +
                 dotfmt.format('...') +
@@ -232,7 +232,7 @@ def _matrix_str(self, indent='', formatter=None, force_truncate=False):
             strt += SCALE_FORMAT.format(scale)
         if has_vdots and has_hdots:
             vdotfmt = "{:^" + str((sz+1)*n-1) + "}"
-            ddotfmt = "{:^" + str(sz) + "}"
+            ddotfmt = u"{:^5}"
             for row in self[:n]:
                 strt += __repr_row(row, indent, fmt, scale, sz, n)
             strt += indent + ' '.join([vdotfmt.format('...'),
@@ -244,12 +244,12 @@ def _matrix_str(self, indent='', formatter=None, force_truncate=False):
             for row in self:
                 strt += __repr_row(row, indent, fmt, scale, sz, n)
         elif has_vdots and not has_hdots:
-            vdotfmt = "{:^" + \
+            vdotfmt = u"{:^" + \
                     str(len(__repr_row(self[0], '', fmt, scale, sz))) + \
                     "}\n"
             for row in self[:n]:
                 strt += __repr_row(row, indent, fmt, scale, sz)
-            strt += vdotfmt.format('...')
+            strt += vdotfmt.format(u'\u22EE')
             for row in self[-n:]:
                 strt += __repr_row(row, indent, fmt, scale, sz)
         else:
@@ -263,7 +263,7 @@ def _vector_str(self):
     strt = ''
     ident = ''
     n = PRINT_OPTS.edgeitems
-    dotfmt = "{:^" + str(sz) + "}\n"
+    dotfmt = u"{:^" + str(sz) + "}\n"
     if scale != 1:
         strt += SCALE_FORMAT.format(scale)
         ident = ' '
@@ -274,7 +274,7 @@ def _vector_str(self):
     else:
         return (strt +
                 '\n'.join(ident + fmt.format(val/scale) for val in self[:n]) +
-                '\n' + (ident + dotfmt.format("...")) +
+                '\n' + (ident + dotfmt.format(u"\u22EE")) +
                 '\n'.join(ident + fmt.format(val/scale) for val in self[-n:]) +
                 '\n')
 
