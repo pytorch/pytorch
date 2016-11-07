@@ -36,8 +36,8 @@ class Threshold(Module):
     def __repr__(self):
         inplace_str=', inplace' if self.inplace else ''
         return self.__class__.__name__ + ' (' \
-            + 'threshold=' + str(self.threshold) \
-            + ', value=' + str(self.value) \
+            + str(self.threshold) \
+            + ', ' + str(self.value) \
             + inplace_str + ')'
 
 
@@ -79,8 +79,8 @@ class RReLU(Module):
     def __repr__(self):
         inplace_str=', inplace' if self.inplace else ''
         return self.__class__.__name__ + ' (' \
-            + 'lower=' + str(self.lower) \
-            + ', upper=' + str(self.upper) \
+            + str(self.lower) \
+            + ', ' + str(self.upper) \
             + inplace_str + ')'
 
 
@@ -244,7 +244,7 @@ class Hardshrink(Module):
 
     def __repr__(self):
         return self.__class__.__name__ + ' (' \
-            + 'lambda=' + str(self.lambd) + ')'
+            + str(self.lambd) + ')'
 
 
 class LeakyReLU(Module):
@@ -273,7 +273,7 @@ class LeakyReLU(Module):
     def __repr__(self):
         inplace_str=', inplace' if self.inplace else ''
         return self.__class__.__name__ + ' (' \
-            + 'negative slope=' + str(self.negative_slope) \
+            + str(self.negative_slope) \
             + inplace_str + ')'
 
 class LogSigmoid(Module):
@@ -355,7 +355,7 @@ class Softshrink(Module):
 
     def __repr__(self):
         return self.__class__.__name__ + ' (' \
-            + 'lambda=' + str(self.lambd) + ')'
+            + str(self.lambd) + ')'
 
 
 class PReLU(Module):
@@ -391,7 +391,7 @@ class PReLU(Module):
 
     def __repr__(self):
         return self.__class__.__name__ + ' (' \
-            + 'num_parameters=' + str(self.num_parameters) + ')'
+            + str(self.num_parameters) + ')'
 
 
 class Softsign(Module):
