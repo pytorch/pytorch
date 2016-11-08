@@ -91,7 +91,7 @@ class _TensorBase(object):
         return type(self), (self.tolist(),)
 
     def __repr__(self):
-        return repr(str(self))
+        return str(self)
 
     def __str__(self):
         # All strings are unicode in Python 3, while we have to encode unicode
