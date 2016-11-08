@@ -262,7 +262,7 @@ static PyMappingMethods THPStorage_(mappingmethods) = {
   (objobjargproc)THPStorage_(set)
 };
 
-static Py_ssize_t THPStorage_(getbufferproc)(THPStorage *self, Py_ssize_t segment, void **ptrptr)
+static Py_ssize_t THPStorage_(readbufferproc)(THPStorage *self, Py_ssize_t segment, void **ptrptr)
 {
   HANDLE_TH_ERRORS
   if (segment != 0) {
@@ -291,12 +291,13 @@ static int THPStorage_(getbufferproc)(PyObject *obj, Py_buffer *view, int flags)
 
   view->obj = (PyObject*)self;
   // view->buf = (void*)self->arr.arr;
-  view->buf = (void*)THStorage_(data)(self);
+  // view->buf = (void*)THStorage_(data)(self);
+  view->buf = (void*)self->cdata->data;
   // the total bytes of memory the object uses. This should be the same as the
   // product of the shape array multiplied by the number of bytes per item of
   // memory.
   // TODO: Is it the size of data only or the whole object?
-  view->len = THStorage_(size)(self) * THStorage_(elementSize)();
+  view->len = self->cdata->size * THStorage_(elementSize)();
   // 1 means the memory is readonly, zero means the memory is writable.
   view->readonly = 0;
   // TODO: a NULL-terminated format-string (following the struct-style syntax
@@ -333,8 +334,8 @@ static void THPStorage_(releasebufferproc)(PyObject *obj, Py_buffer *view)
 }
 
 static PyBufferProcs THPStorage_(bufferprocs) = {
-  (readbufferproc)THPStorage_(getbufferproc),       /* bf_getreadbuffer */
-  (writebufferproc)THPStorage_(getbufferproc),      /* bf_getwritebuffer */
+  (readbufferproc)THPStorage_(readbufferproc),       /* bf_getreadbuffer */
+  (writebufferproc)THPStorage_(readbufferproc),      /* bf_getwritebuffer */
   (segcountproc)THPStorage_(segcountproc),          /* bf_getsegcount */
   (charbufferproc)NULL,                             /* bf_getcharbuffer */
   (getbufferproc)THPStorage_(getbufferproc),        /* bf_getbuffer */
