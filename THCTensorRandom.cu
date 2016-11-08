@@ -221,7 +221,6 @@ GENERATE_KERNEL2(generate_uniform, double, double a, double b, double, curand_un
 GENERATE_KERNEL2(generate_uniform, half, double a, double b, float, curand_uniform, (ScalarConvert<float, half>::to(x * (b-a) + a)))
 
 GENERATE_KERNEL1(generate_geometric, float, double p, float, curand_uniform, (log(1-x) / log(p)) + 1)
-GENERATE_KERNEL1(generate_exponential, float, double lambda, float, curand_uniform, (float)(-1. / lambda * log(1-x)))
 GENERATE_KERNEL2(generate_cauchy, float, double median, double sigma, float, curand_uniform, (float)(median + sigma * tan(M_PI*(x-0.5))))
 
 /* Separate kernel because curand_log_normal gets extra parameters. */
@@ -264,21 +263,6 @@ THC_API void THCudaTensor_geometric(THCState* state, THCudaTensor *self_, double
 
   generate_geometric<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
       gen->gen_states, size, data, p);
-
-  THCudaTensor_freeCopyTo(state, self, self_);
-};
-
-THC_API void THCudaTensor_exponential(THCState* state, THCudaTensor *self_, double lambda)
-{
-  THAssert(THCudaTensor_checkGPU(state, 1, self_));
-  Generator* gen = THCRandom_getGenerator(state);
-
-  THCudaTensor *self = THCudaTensor_newContiguous(state, self_);
-  ptrdiff_t size = THCudaTensor_nElement(state, self);
-  float *data = THCudaTensor_data(state, self);
-
-  generate_exponential<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-      gen->gen_states, size, data, lambda);
 
   THCudaTensor_freeCopyTo(state, self, self_);
 };
