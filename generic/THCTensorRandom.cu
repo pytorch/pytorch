@@ -52,6 +52,23 @@ THC_API void THCTensor_(exponential)(THCState* state, THCTensor *self_, double l
   THCTensor_(freeCopyTo)(state, self, self_);
 };
 
+GENERATE_KERNEL2(generate_cauchy, real, double median, double sigma, float, curand_uniform, (ScalarConvert<float, real>::to((float)(median + sigma * tan(M_PI*(x-0.5))))))
+
+THC_API void THCTensor_(cauchy)(THCState* state, THCTensor *self_, double median, double sigma)
+{
+  THAssert(THCTensor_(checkGPU)(state, 1, self_));
+  Generator* gen = THCRandom_getGenerator(state);
+
+  THCTensor *self = THCTensor_(newContiguous)(state, self_);
+  ptrdiff_t size = THCTensor_(nElement)(state, self);
+  real *data = THCTensor_(data)(state, self);
+
+  generate_cauchy<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
+      gen->gen_states, size, data, median, sigma);
+
+  THCTensor_(freeCopyTo)(state, self, self_);
+};
+
 #undef NUM_BLOCKS
 
 THC_API void THCTensor_(rand)(THCState *state, THCTensor *r_, THLongStorage *size)
