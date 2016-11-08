@@ -105,7 +105,12 @@ static bool _mark_dirty(THPFunction *self, t2var_type &t2var)
             "argument %d isn't one", i);
         return false;
       }
-      (*variable->version_counter)++;
+      auto &v_counter = *variable->version_counter;
+      THPUtils_assert(v_counter.refcnt() == 1, "in-place operations can be "
+          "only used on variables that don't share storage with any other "
+          "variables, but detected that there are %d objects sharing it",
+          v_counter.refcnt());
+      v_counter++;
     }
     // We're not going to ever need this so let's remove references now
     Py_DECREF(self->dirty_tensors);
@@ -376,14 +381,12 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *inputs)
       return NULL;
     if (!_wrap_outputs(self, t2var, raw_output, outputs))
       return NULL;
-    if (!_save_variables(self, t2var))
-      return NULL;
     if (!_join_version_counters(self, t2var))
+      return NULL;
+    if (!_save_variables(self, t2var))
       return NULL;
     if (!_mark_non_differentiable(self, t2var))
       return NULL;
-
-    // Mark non-differentiable outputs as not requiring gradients
   }
 
   if (num_outputs == 1) {

@@ -12,6 +12,8 @@ struct THPVariableVersion {
 
   int operator*() { return *version_block; }
 
+  int refcnt() { return version_block[1]; }
+
   void join_with(THPVariableVersion &other) {
     cleanup();
     version_block = other.version_block;
