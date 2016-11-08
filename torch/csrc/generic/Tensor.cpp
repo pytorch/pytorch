@@ -588,8 +588,10 @@ int THPTensor_(setValue)(THPTensor *self, PyObject *index, PyObject *value)
 
 
 #if PY_MAJOR_VERSION == 2
-#else
-int THPTensor_(getBuffer)(THPTensor *self, Py_buffer *view, int flags)
+  // TODO: implement
+#endif
+
+static int THPTensor_(getBuffer)(THPTensor *self, Py_buffer *view, int flags)
 {
   HANDLE_TH_ERRORS
 
@@ -663,12 +665,11 @@ int THPTensor_(getBuffer)(THPTensor *self, Py_buffer *view, int flags)
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
-void THPTensor_(releaseBuffer)(Py_buffer *view)
+static void THPTensor_(releaseBuffer)(PyObject *obj, Py_buffer *view)
 {
   free(view->shape);
   free(view->strides);
 }
-#endif
 
 
 static PyMappingMethods THPTensor_(mappingmethods) = {
