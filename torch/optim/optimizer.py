@@ -29,6 +29,12 @@ class Optimizer(object):
                 else:
                     group.setdefault(name, default)
 
+        for group in self.param_groups:
+            for param in group['params']:
+                if not param.requires_grad:
+                    raise ValueError("optimizing a parameter that doesn't "
+                        "require gradients")
+
     def __getstate__(self):
         return {
             'state': self.state,
@@ -38,15 +44,10 @@ class Optimizer(object):
     def state_dict(self):
         return self.__getstate__()
 
-    def _forward_backward(self, forward_closure):
+    def zero_grad(self):
         for group in self.param_groups:
-            for p in group['params']:
-                assert p.requires_grad, "optimizing a parameter that doesn't " \
-                    "require gradients"
-                p.grad.zero_()
-        loss = forward_closure()
-        loss.backward()
-        return loss
+            for param in group['params']:
+                param.grad.zero_()
 
     def step(self, forward_closure):
         raise NotImplementedError
