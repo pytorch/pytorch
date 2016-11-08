@@ -49,6 +49,8 @@ extern PyObject *THPVariableClass;
 PyObject * THPVariable_NewVolatile(PyObject *data);
 PyObject * THPVariable_New(PyObject *data, PyObject *creator, char requires_grad);
 
-#define THPVariable_Check(obj) PyObject_IsInstance(obj, THPVariableClass)
+#define THPVariable_Check(obj)                                                 \
+    (THPVariableClass &&                                                       \
+     PyObject_IsInstance(obj, THPVariableClass))
 
 #endif
