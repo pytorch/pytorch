@@ -2410,7 +2410,7 @@ class TestTorch(TestCase):
 
     def test_serialization_container(self):
         def import_module(name, filename):
-            if sys.version_info[0] == 3:
+            if sys.version_info >= (3, 5):
                 import importlib.util
                 spec = importlib.util.spec_from_file_location(name, filename)
                 module = importlib.util.module_from_spec(spec)
