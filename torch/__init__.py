@@ -81,6 +81,7 @@ def initial_seed():
 
 
 from .serialization import save, load
+from ._tensor_str import set_printoptions
 
 ################################################################################
 # Define Storage and Tensor classes
