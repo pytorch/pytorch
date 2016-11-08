@@ -81,12 +81,12 @@ def StackedRNN(cell, num_layers, lstm=False):
         if lstm:
             next_h, next_c = zip(*next_hidden)
             next_hidden = (
-                next_h[0].cat(next_h[1:], 0).view(num_layers, *next_h[0].size()),
-                next_c[0].cat(next_c[1:], 0).view(num_layers, *next_c[0].size())
+                torch.cat(next_h, 0).view(num_layers, *next_h[0].size()),
+                torch.cat(next_c, 0).view(num_layers, *next_c[0].size())
             )
         else:
-            next_hidden = next_hidden[0].cat(next_hidden[1:], 0).view(
-                num_layers, *next_hidden[0].size()) # FIXME: torch.cat
+            next_hidden = torch.cat(next_hidden, 0).view(
+                num_layers, *next_hidden[0].size())
 
         return next_hidden, input
 
@@ -99,7 +99,7 @@ def Recurrent(rnn):
             hidden, y = rnn(input[i], hidden, weight)
             output.append(y)
 
-        output = output[0].cat(output[1:], 0).view(input.size(0), *output[0].size())  # FIXME: torch.cat
+        output = torch.cat(output, 0).view(input.size(0), *output[0].size())
         return hidden, output
 
     return forward

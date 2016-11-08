@@ -359,6 +359,30 @@ class TestAutograd(TestCase):
       self.assertEqual(x.grad, torch.ones(5, 5) * 34)
       self.assertEqual(y.grad, torch.ones(5, 5) * 17)
 
+    def test_functional_blas(self):
+        def compare(fn, *args):
+            unpacked_args = tuple(arg.data if isinstance(arg, Variable) else arg
+                                    for arg in args)
+            self.assertEqual(fn(*args).data, fn(*unpacked_args))
+
+        def test_blas(fn, x, y, z):
+            # Checks all signatures
+            compare(fn, x, y, z)
+            compare(fn, 0.5, x, y, z)
+            compare(fn, 0.5, x, 0.25, y, z)
+
+        test_blas(torch.addmm, Variable(torch.randn(2, 4)),
+                Variable(torch.randn(2, 10)), Variable(torch.randn(10, 4)))
+        test_blas(torch.addbmm, Variable(torch.randn(2, 4)),
+                Variable(torch.randn(4, 2, 10)), Variable(torch.randn(4, 10, 4)))
+        test_blas(torch.baddbmm, Variable(torch.randn(4, 2, 4)),
+                Variable(torch.randn(4, 2, 10)), Variable(torch.randn(4, 10, 4)))
+        test_blas(torch.addmv, Variable(torch.randn(2)),
+                Variable(torch.randn(2, 10)), Variable(torch.randn(10)))
+        test_blas(torch.addr, Variable(torch.randn(5, 6)),
+                Variable(torch.randn(5)), Variable(torch.randn(6)))
+
+
 
 def index_variable(num_indices, max_indices):
     index = torch.randperm(max_indices)[:num_indices].long()
@@ -659,6 +683,13 @@ for test in function_tests:
     setattr(TestAutograd, test_name, do_test)
 
 
+EXCLUDE_FUNCTIONAL = {
+    'addmm',
+    'addbmm',
+    'baddbmm',
+    'addmv',
+    'addr',
+}
 for test in method_tests:
     name, self_size, args = test[:3]
     test_name = 'test_' + name + ('_' + test[3] if len(test) == 4 else '')
@@ -674,6 +705,16 @@ for test in method_tests:
                 output_tensor = torch.DoubleTensor((output_tensor,))
             self.assertEqual(unpack_variables(output_variable), output_tensor)
             # TODO: check that both have changed after adding all inplace ops
+
+            # functional interface tests
+            if hasattr(torch, name) and name not in EXCLUDE_FUNCTIONAL:
+                f_args_variable = (self_variable,) + args_variable
+                f_args_tensor = (self_tensor,) + args_tensor
+                output_variable = getattr(torch, name)(*f_args_variable)
+                output_tensor = getattr(torch, name)(*f_args_tensor)
+                if not torch.is_tensor(output_tensor) and not isinstance(output_tensor, tuple):
+                    output_tensor = torch.DoubleTensor((output_tensor,))
+                self.assertEqual(unpack_variables(output_variable), output_tensor)
 
         check(name)
         inplace_name = name + '_'

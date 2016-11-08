@@ -299,14 +299,14 @@ static PyObject * TH_CONCAT_2(THPModule_, name)(PyObject *_unused, PyObject *arg
   Py_ssize_t pos = 0;                                                          \
   for (int i = 0; i < PyTuple_Size(args); i++) {                               \
     PyObject *item = PyTuple_GET_ITEM(args, i);                                \
-    if (THPModule_isTensor(item)) {                                            \
+    if (THPModule_isTensor(item) || THPVariable_Check(item)) {                 \
       tensor = item;                                                           \
       goto dispatch;                                                           \
     }                                                                          \
   }                                                                            \
   if (kwargs) {                                                                \
     while (PyDict_Next(kwargs, &pos, &key, &value)) {                          \
-      if (THPModule_isTensor(value)) {                                         \
+      if (THPModule_isTensor(value) || THPVariable_Check(value)) {             \
         tensor = value;                                                        \
         goto dispatch;                                                         \
       }                                                                        \
@@ -402,7 +402,6 @@ IMPLEMENT_STATELESS(reshape)
 IMPLEMENT_STATELESS(zeros)
 IMPLEMENT_STATELESS(ones)
 IMPLEMENT_STATELESS(index_select)
-IMPLEMENT_STATELESS(narrow)
 IMPLEMENT_STATELESS(addmm)
 IMPLEMENT_STATELESS(addmv)
 IMPLEMENT_STATELESS(addr)
@@ -462,14 +461,14 @@ static PyObject * TH_CONCAT_2(THPModule_, name)(PyObject *_unused, PyObject *arg
   Py_ssize_t pos = 0;                                                          \
   for (int i = PyTuple_Size(args)-1; i >= 0; i--) {                            \
     PyObject *item = PyTuple_GET_ITEM(args, i);                                \
-    if (THPModule_isTensor(item)) {                                            \
+    if (THPModule_isTensor(item) || THPVariable_Check(item)) {                 \
       tensor = item;                                                           \
       goto dispatch;                                                           \
     }                                                                          \
   }                                                                            \
   if (kwargs) {                                                                \
     while (PyDict_Next(kwargs, &pos, &key, &value)) {                          \
-      if (THPModule_isTensor(value)) {                                         \
+      if (THPModule_isTensor(value) || THPVariable_Check(value)) {             \
         tensor = value;                                                        \
         goto dispatch;                                                         \
       }                                                                        \
@@ -521,11 +520,12 @@ static PyObject * THPModule_cat(PyObject *_unused, PyObject *args)
   THPObjectPtr iterator;
   THPObjectPtr item;
   if (args && PyTuple_Size(args) > 0) {
-    if (THPModule_isTensor(PyTuple_GET_ITEM(args, 0))) {
-      tensor = PyTuple_GET_ITEM(args, 0);
-    } else if ((iterator = PyObject_GetIter(PyTuple_GET_ITEM(args, 0)))) {
+    PyObject *first_arg = PyTuple_GET_ITEM(args, 0);
+    if (THPModule_isTensor(first_arg)) {
+      tensor = first_arg;
+    } else if ((iterator = PyObject_GetIter(first_arg))) {
       item = PyIter_Next(iterator);
-      if (item && THPModule_isTensor(item)) {
+      if (item && (THPModule_isTensor(item) || THPVariable_Check(item))) {
         tensor = item;
       }
     }
@@ -705,7 +705,6 @@ static PyMethodDef TorchMethods[] = {
   {"zeros",           (PyCFunction)THPModule_zeros,             METH_VARARGS | METH_KEYWORDS, NULL},
   {"ones",            (PyCFunction)THPModule_ones,              METH_VARARGS | METH_KEYWORDS, NULL},
   {"index_select",    (PyCFunction)THPModule_index_select,      METH_VARARGS | METH_KEYWORDS, NULL},
-  {"narrow",          (PyCFunction)THPModule_narrow,            METH_VARARGS | METH_KEYWORDS, NULL},
   {"addmm",           (PyCFunction)THPModule_addmm,             METH_VARARGS | METH_KEYWORDS, NULL},
   {"addmv",           (PyCFunction)THPModule_addmv,             METH_VARARGS | METH_KEYWORDS, NULL},
   {"addr",            (PyCFunction)THPModule_addr,              METH_VARARGS | METH_KEYWORDS, NULL},

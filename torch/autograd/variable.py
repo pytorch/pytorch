@@ -445,7 +445,7 @@ class Variable(_C._VariableBase):
     def addr(self, *args):
         return self._blas(Addr, args, False)
 
-    def addr(self, *args):
+    def addr_(self, *args):
         return self._blas(Addr, args, True)
 
     def dot(self, other):
@@ -519,9 +519,6 @@ class Variable(_C._VariableBase):
     def transpose(self, dim1, dim2):
         return Transpose(dim1, dim2)(self)
 
-    def cat(self, iterable, dim=0):
-        return Concat(dim)(self, *iterable)
-
     def select(self, dim, _index):
         index = tuple(slice(None, None) for _ in range(dim)) + (_index,)
         return Index(index)(self)
@@ -583,6 +580,59 @@ class Variable(_C._VariableBase):
 
     def __neg__(self):
         return Negate()(self)
+
+    class _torch(object):
+
+        @staticmethod
+        def cat(iterable, dim=0):
+            return Concat(dim)(*iterable)
+
+        @staticmethod
+        def _blas(cls, args, inplace):
+            num_args = len(args)
+            alpha = beta = 1
+            if num_args > 5:
+                raise RuntimeError("too many args")
+            if num_args == 5:
+                alpha, beta = args[0], args[2]
+                tensors = args[1:2] + args[3:]
+            elif num_args == 4:
+                alpha = args[0]
+                tensors = args[1:]
+            else:
+                tensors = args
+            return cls(alpha, beta, inplace)(*tensors)
+
+        @classmethod
+        def addmm(cls, *args):
+            return cls._blas(Addmm, args, False)
+
+        @classmethod
+        def addbmm(cls, *args):
+            return cls._blas(Addbmm, args, False)
+
+        @classmethod
+        def baddbmm(cls, *args):
+            return cls._blas(Baddbmm, args, False)
+
+        @classmethod
+        def addmv(cls, *args):
+            return cls._blas(Addmv, args, False)
+
+        @classmethod
+        def addr(cls, *args):
+            return cls._blas(Addr, args, False)
+
+
+for method in dir(Variable):
+    # This will also wrap some methods that normally aren't part of the
+    # funcitonal interface, but we don't care, as they won't ever be used
+    if method.startswith('_') or method.endswith('_'):
+        continue
+    if hasattr(Variable._torch, method):
+        continue
+    as_static = staticmethod(getattr(Variable, method))
+    setattr(Variable._torch, method, as_static)
 
 
 from .engine import ImperativeEngine
