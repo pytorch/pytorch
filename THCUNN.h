@@ -68,35 +68,6 @@ TH_API void THNN_CudaTemporalMaxPooling_updateGradInput(
           THCIndexTensor *indices,
           int kW, int dW);
 
-TH_API void THNN_CudaBatchNormalization_updateOutput(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *output,
-          THCudaTensor *weight,        // [OPTIONAL]
-          THCudaTensor *bias,          // [OPTIONAL]
-          THCudaTensor *runningMean,
-          THCudaTensor *runningVar,
-          THCudaTensor *saveMean,
-          THCudaTensor *saveStd,
-          bool train,
-          double momentum,
-          double eps);
-TH_API void THNN_CudaBatchNormalization_backward(
-          THCState *state,
-          THCudaTensor *input,
-          THCudaTensor *gradOutput,
-          THCudaTensor *gradInput,     // [OPTIONAL]
-          THCudaTensor *gradWeight,    // [OPTIONAL]
-          THCudaTensor *gradBias,      // [OPTIONAL]
-          THCudaTensor *weight,        // [OPTIONAL]
-          THCudaTensor *running_mean,
-          THCudaTensor *running_var,
-          THCudaTensor *save_mean,
-          THCudaTensor *save_std,
-          bool train,
-          float scale,
-          double eps);
-
 TH_API void THNN_CudaVolumetricAveragePooling_updateOutput(
           THCState *state,
           THCudaTensor *input,

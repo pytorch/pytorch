@@ -27,6 +27,36 @@ TH_API void THNN_(AbsCriterion_updateGradInput)(
                   THCTensor *gradInput,
                   bool sizeAverage);
 
+TH_API void THNN_(BatchNormalization_updateOutput)(
+                  THCState *state,
+                  THCTensor *input_,
+                  THCTensor *output_,
+                  THCTensor *weight_,        // [OPTIONAL]
+                  THCTensor *bias_,          // [OPTIONAL]
+                  THCTensor *runningMean_,
+                  THCTensor *runningVar_,
+                  THCTensor *saveMean_,
+                  THCTensor *saveStd_,
+                  bool train,
+                  double momentum,
+                  double eps);
+
+TH_API void THNN_(BatchNormalization_backward)(
+                  THCState *state,
+                  THCTensor *input_,
+                  THCTensor *gradOutput_,
+                  THCTensor *gradInput_,        // [OPTIONAL]
+                  THCTensor *gradWeight_,       // [OPTIONAL]
+                  THCTensor *gradBias_,         // [OPTIONAL]
+                  THCTensor *weight_,           // [OPTIONAL]
+                  THCTensor *runningMean_,
+                  THCTensor *runningVar_,
+                  THCTensor *saveMean_,
+                  THCTensor *saveStd_,
+                  bool train,
+                  float scale,
+                  double eps);
+
 TH_API void THNN_(BCECriterion_updateOutput)(
                   THCState *state,
                   THCTensor *input,
