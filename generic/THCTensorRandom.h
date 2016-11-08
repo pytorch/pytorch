@@ -14,5 +14,6 @@ THC_API void THCTensor_(multinomial)(struct THCState *state, THCTensor *self, TH
 #endif
 
 THC_API void THCTensor_(bernoulli)(struct THCState *state, THCTensor *self, double p);
+THC_API void THCTensor_(geometric)(struct THCState *state, THCTensor *self, double p);
 
 #endif
