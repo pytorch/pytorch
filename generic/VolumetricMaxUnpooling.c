@@ -21,6 +21,8 @@ static void THNN_(VolumetricMaxUnpooling_updateOutput_frame)(
           int pH)
 {
   long k;
+  int has_error = 0;
+  long error_index;
 #pragma omp parallel for private(k)
   for (k = 0; k < nslices; k++)
   {
@@ -43,17 +45,26 @@ static void THNN_(VolumetricMaxUnpooling_updateOutput_frame)(
           maxy = ((unsigned char*)(ind_p_k))[1];
           maxx = ((unsigned char*)(ind_p_k))[2];
 
+          size_t idx = k*oT*oW*oH + oH*oW*(start_t+maxz) + oW*(start_h+maxy) + (start_w+maxx);
           if (start_t+maxz<0 || start_h+maxy<0 || start_w+maxx<0 || start_t+maxz>=oT || start_h+maxy>=oH || start_w+maxx>=oW)
           {
-            THError(
-              "invalid max index z= %d, y= %d, x= %d, oT= %d, oW= %d, oH= %d",
-              start_t+maxz, start_h+maxy, start_w+maxx, oT, oW, oH
-            );
+#pragma omp critical
+            {
+              has_error = 1;
+              error_index = idx;
+            }
+          } else {
+            output_p[idx] = *input_p_k; /* update output */
           }
-          output_p[k*oT*oW*oH + oH*oW*(start_t+maxz) + oW*(start_h+maxy) + (start_w+maxx)] = *input_p_k; /* update output */
         }
       }
     }
+  }
+  if (has_error) {
+    THError(
+        "found an invalid max index %ld (output volumes are of size %ldx%ldx%ld)",
+        error_index, oT, oH, oW
+    );
   }
 }
 

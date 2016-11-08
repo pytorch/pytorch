@@ -9,6 +9,8 @@ static void THNN_(SpatialMaxUnpooling_updateOutput_frame)(real *input_p, real *o
                                                       long owidth, long oheight)
 {
   long k;
+  int has_error = 0;
+  long error_index;
 #pragma omp parallel for private(k)
   for (k = 0; k < nslices; k++)
   {
@@ -23,11 +25,20 @@ static void THNN_(SpatialMaxUnpooling_updateOutput_frame)(real *input_p, real *o
       {
         maxp = ind_p_k[i*iwidth + j] - TH_INDEX_BASE;  /* retrieve position of max */
         if(maxp<0 || maxp>=owidth*oheight){
-            THError("invalid max index %d, owidth= %d, oheight= %d",maxp,owidth,oheight);
+#pragma omp critical
+          {
+            has_error = 1;
+            error_index = maxp;
+          }
+        } else {
+          output_p_k[maxp] = input_p_k[i*iwidth + j]; /* update output */
         }
-        output_p_k[maxp] = input_p_k[i*iwidth + j]; /* update output */
       }
     }
+  }
+  if (has_error) {
+    THError("found an invalid max index %ld (output volumes are of size %ldx%ld)",
+        error_index, oheight, owidth);
   }
 }
 
