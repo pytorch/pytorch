@@ -609,26 +609,26 @@ int THPTensor_(getBuffer)(THPTensor *self, Py_buffer *view, int flags)
   view->readonly = 0;
   view->ndim = self_t->nDimension;
 
+  view->format = NULL;
+  if ((flags & PyBUF_FORMAT) == PyBUF_FORMAT) {
 #if defined(TH_REAL_IS_CHAR)
-  view->format = "c";
+    view->format = "c";
 #elif defined(TH_REAL_IS_BYTE)
-  view->format = "B";
+    view->format = "B";
 #elif defined(TH_REAL_IS_SHORT)
-  view->format = "h";
+    view->format = "h";
 #elif defined(TH_REAL_IS_INT)
-  view->format = "i";
+    view->format = "i";
 #elif defined(TH_REAL_IS_LONG)
-  view->format = "l";
+    view->format = "l";
 #elif defined(TH_REAL_IS_FLOAT)
-  view->format = "f";
+    view->format = "f";
 #elif defined(TH_REAL_IS_DOUBLE)
-  view->format = "d";
+    view->format = "d";
 #else
-#error "You must update THPTensor_(getbufferproc)() if you introduce a new real type"
+#error "You must update THPStorage_(getbufferproc)()"\
+    "if you introduce a new real type"
 #endif
-
-  if ((flags & PyBUF_FORMAT) != PyBUF_FORMAT) {
-    view->format = NULL;
   }
 
   view->shape = NULL;
@@ -679,16 +679,13 @@ static PyMappingMethods THPTensor_(mappingmethods) = {
 
 static PyBufferProcs THPTensor_(buffermethods) = {
 #if PY_MAJOR_VERSION == 2
-  (readbufferproc)0,       /* bf_getreadbuffer */
-  (writebufferproc)0,      /* bf_getwritebuffer */
-  (segcountproc)0,         /* bf_getsegcount */
-  (charbufferproc)0,       /* bf_getcharbuffer */
-  (getbufferproc)0,        /* bf_getbuffer */
-  (releasebufferproc)0     /* bf_releasebuffer */
-#else
-  (getbufferproc)THPTensor_(getBuffer),         /* bf_getbuffer */
-  (releasebufferproc)THPTensor_(releaseBuffer) /* bf_releasebuffer */
+  (readbufferproc)0,        /* bf_getreadbuffer */
+  (writebufferproc)0,       /* bf_getwritebuffer */
+  (segcountproc)0,          /* bf_getsegcount */
+  (charbufferproc)0,        /* bf_getcharbuffer */
 #endif
+  (getbufferproc)THPTensor_(getBuffer),        /* bf_getbuffer */
+  (releasebufferproc)THPTensor_(releaseBuffer) /* bf_releasebuffer */
 };
 
 // TODO: implement equality

@@ -263,12 +263,14 @@ static PyMappingMethods THPStorage_(mappingmethods) = {
 };
 
 #if PY_MAJOR_VERSION == 2
-static Py_ssize_t THPStorage_(readbufferproc)(THPStorage *self, Py_ssize_t segment, void **ptrptr)
+static Py_ssize_t THPStorage_(readbufferproc)(THPStorage *self,
+    Py_ssize_t segment, void **ptrptr)
 {
   HANDLE_TH_ERRORS
   if (segment != 0) {
     *ptrptr = NULL;
-    PyErr_SetString(PyExc_SystemError, "there is only 1 segment in the buffer of" THPStorageStr);
+    PyErr_SetString(PyExc_SystemError,
+          "there is only 1 segment in the buffer of" THPStorageStr);
     return -1;
   }
   *ptrptr = self->cdata->data;
@@ -276,71 +278,67 @@ static Py_ssize_t THPStorage_(readbufferproc)(THPStorage *self, Py_ssize_t segme
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
-static Py_ssize_t THPStorage_(segcountproc)(PyObject *self, Py_ssize_t *lenp)
+static Py_ssize_t THPStorage_(segcountproc)(THPStorage *self, Py_ssize_t *lenp)
 {
-  HANDLE_TH_ERRORS
   if (lenp != NULL)
-    *lenp = THStorage_(size)(LIBRARY_STATE ((THStorage*)PyTuple_GET_ITEM(self, 0)));
+    *lenp = self->cdata->size;
   return 1;
-  END_HANDLE_TH_ERRORS
 }
-#endif // PY_MAJOR_VERSION
+#endif /* Python 2 */
 
-static int THPStorage_(getbufferproc)(THPStorage *self, Py_buffer *view, int flags)
+static int THPStorage_(getbufferproc)(THPStorage *self,
+    Py_buffer *view, int flags)
 {
   HANDLE_TH_ERRORS
-
   view->obj = (PyObject*)self;
-  // view->buf = (void*)self->arr.arr;
-  // view->buf = (void*)THStorage_(data)(self);
-  view->buf = (void*)self->cdata->data;
-  // the total bytes of memory the object uses. This should be the same as the
-  // product of the shape array multiplied by the number of bytes per item of
-  // memory.
-  view->len = self->cdata->size * THStorage_(elementSize)();
-  // 1 means the memory is readonly, zero means the memory is writable.
-  view->readonly = 0;
-  // TODO: a NULL-terminated format-string (following the struct-style syntax
-  // including extensions) indicating what is in each element of memory. The
-  // number of elements is len / itemsize, where itemsize is the number of
-  // bytes implied by the format. This can be NULL which implies standard
-  // unsigned bytes ("B").
-  // See: https://docs.python.org/3/library/struct.html#format-characters
-#if defined(TH_REAL_IS_CHAR)
-  view->format = "c";
-#elif defined(TH_REAL_IS_BYTE)
-  view->format = "B";
-#elif defined(TH_REAL_IS_SHORT)
-  view->format = "h";
-#elif defined(TH_REAL_IS_INT)
-  view->format = "i";
-#elif defined(TH_REAL_IS_LONG)
-  view->format = "l";
-#elif defined(TH_REAL_IS_FLOAT)
-  view->format = "f";
-#elif defined(TH_REAL_IS_DOUBLE)
-  view->format = "d";
-#else
-#error "You must update THPStorage_(getbufferproc)() if you introduce a new real type"
-#endif
-  view->ndim = 1;
-  // TODO: an array of Py_ssize_t of length ndims indicating the shape of the
-  // memory as an N-D array. Note that ((*shape)[0] * ... *
-  // (*shape)[ndims-1])*itemsize = len . If ndims is 0 (indicating a scalar),
-  // then this must be NULL.
-  Py_ssize_t *shape = (Py_ssize_t*)malloc(1 * sizeof(Py_ssize_t));
-  shape[0] = (Py_ssize_t)self->cdata->size;
-  view->shape = shape;
-  // TODO
-  view->strides = &view->itemsize;  // for the simple case we can do this
-  // TODO
-  view->suboffsets = NULL;
-  // TODO
-  view->itemsize = sizeof(int);
-  // TODO
-  view->internal = NULL;
-
   Py_INCREF(self);
+
+  view->buf = (void*)self->cdata->data;
+  view->len = self->cdata->size * sizeof(real);
+  view->readonly = 0;
+  view->itemsize = (Py_ssize_t)sizeof(real);
+  view->ndim = 1;
+
+  // The following members depend on flags
+  view->shape = NULL;
+  view->strides = NULL;
+  view->suboffsets = NULL;
+  if ((flags & PyBUF_ND) == PyBUF_ND) {
+    Py_ssize_t *shape = (Py_ssize_t*)malloc(sizeof(Py_ssize_t));
+    shape[0] = (Py_ssize_t)self->cdata->size;
+    view->shape = shape;
+  }
+  if ((flags & PyBUF_STRIDES) == PyBUF_STRIDES) {
+    Py_ssize_t *strides = (Py_ssize_t*)malloc(sizeof(Py_ssize_t));
+    strides[0] = (Py_ssize_t)sizeof(real);
+    view->strides = strides;
+  }
+  view->internal = NULL;
+  view->format = NULL;
+  if ((flags & PyBUF_FORMAT) == PyBUF_FORMAT) {
+#if defined(TH_REAL_IS_CHAR)
+    view->format = "c";
+#elif defined(TH_REAL_IS_BYTE)
+    view->format = "B";
+#elif defined(TH_REAL_IS_SHORT)
+    view->format = "h";
+#elif defined(TH_REAL_IS_INT)
+    view->format = "i";
+#elif defined(TH_REAL_IS_LONG)
+    view->format = "l";
+#elif defined(TH_REAL_IS_FLOAT)
+    view->format = "f";
+#elif defined(TH_REAL_IS_DOUBLE)
+    view->format = "d";
+#else
+#error "You must update THPStorage_(getbufferproc)()"\
+    "if you introduce a new real type"
+#endif
+  }
+
+  // C and F contiguity are guaranteed, hence there's
+  // no need to handle those flags:
+  // https://docs.python.org/3/c-api/buffer.html#contiguity-requests
 
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
@@ -348,20 +346,19 @@ static int THPStorage_(getbufferproc)(THPStorage *self, Py_buffer *view, int fla
 
 static void THPStorage_(releasebufferproc)(PyObject *obj, Py_buffer *view)
 {
-  // TODO
-  return;
+  free(view->shape);
+  free(view->strides);
 }
 
 static PyBufferProcs THPStorage_(bufferprocs) = {
 #if PY_MAJOR_VERSION == 2
-  (readbufferproc)THPStorage_(readbufferproc),       /* bf_getreadbuffer */
-  (writebufferproc)THPStorage_(readbufferproc),      /* bf_getwritebuffer */
+  (readbufferproc)THPStorage_(readbufferproc),      /* bf_getreadbuffer */
+  (writebufferproc)THPStorage_(readbufferproc),     /* bf_getwritebuffer */
   (segcountproc)THPStorage_(segcountproc),          /* bf_getsegcount */
   (charbufferproc)NULL,                             /* bf_getcharbuffer */
-#else
+#endif
   (getbufferproc)THPStorage_(getbufferproc),        /* bf_getbuffer */
   (releasebufferproc)THPStorage_(releasebufferproc) /* bf_releasebuffer */
-#endif
 };
 
 // TODO: implement equality
