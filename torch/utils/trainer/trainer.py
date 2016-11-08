@@ -61,11 +61,13 @@ class Trainer(object):
             def forward_closure():
                 batch_output = self.model(input_var)
                 loss = self.criterion(batch_output, target_var)
+                loss.backward()
                 if plugin_data[0] is None:
                     plugin_data[0] = batch_output.data
                     plugin_data[1] = loss.data
                 return loss
 
+            self.optimizer.zero_grad()
             self.optimizer.step(forward_closure)
             self.call_plugins('iteration', i, batch_input, batch_target,
                                 *plugin_data)
