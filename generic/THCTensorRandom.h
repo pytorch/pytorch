@@ -8,6 +8,7 @@ THC_API void THCTensor_(uniform)(struct THCState *state, THCTensor *self, double
 THC_API void THCTensor_(rand)(THCState *state, THCTensor *r_, THLongStorage *size);
 THC_API void THCTensor_(normal)(struct THCState *state, THCTensor *self, double mean, double stdv);
 THC_API void THCTensor_(exponential)(struct THCState *state, THCTensor *self, double lambda);
+THC_API void THCTensor_(cauchy)(struct THCState *state, THCTensor *self, double median, double sigma);
 
 #endif
 
