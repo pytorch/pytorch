@@ -262,7 +262,7 @@ static PyMappingMethods THPStorage_(mappingmethods) = {
   (objobjargproc)THPStorage_(set)
 };
 
-#if PYTHON_MAJOR_VERSION == 2
+#if PY_MAJOR_VERSION == 2
 static Py_ssize_t THPStorage_(readbufferproc)(THPStorage *self,
     Py_ssize_t segment, void **ptrptr)
 {
@@ -347,16 +347,16 @@ static int THPStorage_(getbufferproc)(THPStorage *self,
 static void THPStorage_(releasebufferproc)(PyObject *obj, Py_buffer *view)
 {
   free(view->shape);
-  free(view->strides); 
+  free(view->strides);
 }
 
 static PyBufferProcs THPStorage_(bufferprocs) = {
-#if PYTHON_MAJOR_VERSION == 2
+#if PY_MAJOR_VERSION == 2
   (readbufferproc)THPStorage_(readbufferproc),      /* bf_getreadbuffer */
   (writebufferproc)THPStorage_(readbufferproc),     /* bf_getwritebuffer */
   (segcountproc)THPStorage_(segcountproc),          /* bf_getsegcount */
   (charbufferproc)NULL,                             /* bf_getcharbuffer */
-#endif /* Python 2 */
+#endif
   (getbufferproc)THPStorage_(getbufferproc),        /* bf_getbuffer */
   (releasebufferproc)THPStorage_(releasebufferproc) /* bf_releasebuffer */
 };
@@ -364,46 +364,46 @@ static PyBufferProcs THPStorage_(bufferprocs) = {
 // TODO: implement equality
 PyTypeObject THPStorageType = {
   PyVarObject_HEAD_INIT(NULL, 0)
-  "torch._C." THPStorageBaseStr,            /* tp_name */
-  sizeof(THPStorage),                       /* tp_basicsize */
-  0,                                        /* tp_itemsize */
-  (destructor)THPStorage_(dealloc),         /* tp_dealloc */
-  0,                                        /* tp_print */
-  0,                                        /* tp_getattr */
-  0,                                        /* tp_setattr */
-  0,                                        /* tp_reserved */
-  0,                                        /* tp_repr */
-  0,                                        /* tp_as_number */
-  0,                                        /* tp_as_sequence */
-  &THPStorage_(mappingmethods),             /* tp_as_mapping */
-  0,                                        /* tp_hash  */
-  0,                                        /* tp_call */
-  0,                                        /* tp_str */
-  0,                                        /* tp_getattro */
-  0,                                        /* tp_setattro */
-  &THPStorage_(bufferprocs),                /* tp_as_buffer */
-#if PYTHON_MAJOR_VERSION == 2
+  "torch._C." THPStorageBaseStr,         /* tp_name */
+  sizeof(THPStorage),                    /* tp_basicsize */
+  0,                                     /* tp_itemsize */
+  (destructor)THPStorage_(dealloc),      /* tp_dealloc */
+  0,                                     /* tp_print */
+  0,                                     /* tp_getattr */
+  0,                                     /* tp_setattr */
+  0,                                     /* tp_reserved */
+  0,                                     /* tp_repr */
+  0,                                     /* tp_as_number */
+  0,                                     /* tp_as_sequence */
+  &THPStorage_(mappingmethods),          /* tp_as_mapping */
+  0,                                     /* tp_hash  */
+  0,                                     /* tp_call */
+  0,                                     /* tp_str */
+  0,                                     /* tp_getattro */
+  0,                                     /* tp_setattro */
+  &THPStorage_(bufferprocs),             /* tp_as_buffer */
+#if PY_MAJOR_VERSION == 2
   Py_TPFLAGS_HAVE_GETCHARBUFFER | Py_TPFLAGS_HAVE_NEWBUFFER |
-#endif /* Python 2 */
-  Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags */
-  NULL,                                     /* tp_doc */
-  0,                                        /* tp_traverse */
-  0,                                        /* tp_clear */
-  0,                                        /* tp_richcompare */
-  0,                                        /* tp_weaklistoffset */
-  0,                                        /* tp_iter */
-  0,                                        /* tp_iternext */
-  0,   /* will be assigned in init */       /* tp_methods */
-  0,   /* will be assigned in init */       /* tp_members */
-  0,                                        /* tp_getset */
-  0,                                        /* tp_base */
-  0,                                        /* tp_dict */
-  0,                                        /* tp_descr_get */
-  0,                                        /* tp_descr_set */
-  0,                                        /* tp_dictoffset */
-  0,                                        /* tp_init */
-  0,                                        /* tp_alloc */
-  THPStorage_(pynew),                       /* tp_new */
+#endif
+  Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,           /* tp_flags */
+  NULL,                                  /* tp_doc */
+  0,                                     /* tp_traverse */
+  0,                                     /* tp_clear */
+  0,                                     /* tp_richcompare */
+  0,                                     /* tp_weaklistoffset */
+  0,                                     /* tp_iter */
+  0,                                     /* tp_iternext */
+  0,   /* will be assigned in init */    /* tp_methods */
+  0,   /* will be assigned in init */    /* tp_members */
+  0,                                     /* tp_getset */
+  0,                                     /* tp_base */
+  0,                                     /* tp_dict */
+  0,                                     /* tp_descr_get */
+  0,                                     /* tp_descr_set */
+  0,                                     /* tp_dictoffset */
+  0,                                     /* tp_init */
+  0,                                     /* tp_alloc */
+  THPStorage_(pynew),                    /* tp_new */
 };
 
 static struct PyMemberDef THPStorage_(members)[] = {
