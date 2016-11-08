@@ -305,7 +305,7 @@ static int THPStorage_(getbufferproc)(THPStorage *self,
   view->suboffsets = NULL;
   if ((flags & PyBUF_ND) == PyBUF_ND) {
     Py_ssize_t *shape = (Py_ssize_t*)malloc(sizeof(Py_ssize_t));
-    shape[0] = (Py_ssize_t)self->cdata->size;
+    shape[0] = (Py_ssize_t)self->cdata->size * (Py_ssize_t)sizeof(real);
     view->shape = shape;
   }
   if ((flags & PyBUF_STRIDES) == PyBUF_STRIDES) {
