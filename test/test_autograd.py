@@ -201,14 +201,11 @@ class TestAutograd(TestCase):
 
     def test_shared_storage(self):
         x = Variable(torch.ones(5, 5))
-        x_version = x._version
         y = x.t()
         z = x[1]
-        self.assertEqual(x._version, x_version)
-        z_version = z._version
-        y.add_(2)
-        self.assertNotEqual(x._version, x_version)
-        self.assertNotEqual(z._version, z_version)
+        self.assertRaises(RuntimeError, lambda: x.add_(2))
+        self.assertRaises(RuntimeError, lambda: y.add_(2))
+        self.assertRaises(RuntimeError, lambda: z.add_(2))
 
     def _test_setitem(self, size, index):
         x = Variable(torch.ones(*size), requires_grad=True)

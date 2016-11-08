@@ -77,6 +77,7 @@ static void THPVariable_dealloc(THPVariable* self)
   Py_XDECREF(self->grad);
   Py_XDECREF(self->backward_hooks);
   delete self->version_counter;
+  self->version_counter = nullptr;
 
   // We don't want to cache any subclasses
   if ((PyObject*)Py_TYPE(self) == THPVariableClass && num_cached < CACHE_SIZE) {
