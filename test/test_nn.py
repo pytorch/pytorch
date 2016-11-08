@@ -140,6 +140,10 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
 
 
 class TestNN(NNTestCase):
+    # # protip: uncomment this line to figure out which test is segfaulting
+    # def setUp(self):
+    #     print("In method", self._testMethodName)
+    #     super(TestNN, self).setUp()
 
     def _forward(self, module, input):
         with freeze_rng_state():
@@ -735,7 +739,7 @@ class TestNN(NNTestCase):
                     'grad_cx': hx[1].grad if is_lstm else None}
 
         input_size = 10
-        hidden_size = 20
+        hidden_size = 6
         num_layers = 2
         seq_length = 7
         batch = 5
@@ -744,7 +748,7 @@ class TestNN(NNTestCase):
             self.assertEqual(list(outputs_cpu.keys()), list(outputs_gpu.keys()))
             for key in outputs_cpu.keys():
                 if key != 'weights':
-                    self.assertEqual(outputs_cpu[key], outputs_gpu[key], prec=5e-5)
+                    self.assertEqual(outputs_cpu[key], outputs_gpu[key], prec=5e-5, message=key)
 
             # check grad weights separately, as nested dict
             for cpu_layer_weight, gpu_layer_weight in zip(outputs_cpu['weights'], outputs_gpu['weights']):
@@ -753,20 +757,38 @@ class TestNN(NNTestCase):
 
 
         input_val = torch.randn(seq_length, batch, input_size)
-        hx_val = torch.randn(num_layers, batch, hidden_size)
-        # FIXME: add bidirectional
-        # FIXME: add dropout
         for module in (nn.RNN, nn.LSTM, nn.GRU):
             for bias in (True, False):
-                rnn = module(input_size, hidden_size, num_layers, bias=bias)
-                outputs_cpu = forward_backward(False, rnn, input_val, hx_val, rnn.all_weights)
+                for bidirectional in (False, True):
+                    for dropout in (0, 1): # Because of dropout randomness, can only compare 0 and 1
+                        num_directions = 2 if bidirectional else 1
+                        hx_val = torch.randn(num_layers * num_directions, batch, hidden_size)
 
-                rnn_gpu = module(input_size, hidden_size, num_layers, bias=bias)
-                outputs_gpu = forward_backward(True, rnn_gpu, input_val, hx_val, rnn.all_weights)
+                        rnn = module(input_size,
+                                     hidden_size,
+                                     num_layers,
+                                     bias=bias,
+                                     dropout=dropout,
+                                     bidirectional=bidirectional)
 
-                compare_cpu_gpu(outputs_cpu, outputs_gpu)
+                        outputs_cpu = forward_backward(
+                            False, rnn, input_val, hx_val, rnn.all_weights)
+
+                        rnn_gpu = module(input_size,
+                                         hidden_size,
+                                         num_layers,
+                                         bias=bias,
+                                         dropout=dropout,
+                                         bidirectional=bidirectional)
+
+                        outputs_gpu = forward_backward(
+                            True, rnn_gpu, input_val, hx_val, rnn.all_weights)
+
+                        compare_cpu_gpu(outputs_cpu, outputs_gpu)
 
         for nonlinearity in ('tanh', 'relu'):
+            hx_val = torch.randn(num_layers, batch, hidden_size)
+
             rnn = nn.rnn.RNN(input_size, hidden_size, num_layers, bias=bias, nonlinearity=nonlinearity)
             outputs_cpu = forward_backward(False, rnn, input_val, hx_val, rnn.all_weights)
 
@@ -774,6 +796,49 @@ class TestNN(NNTestCase):
             outputs_gpu = forward_backward(True, rnn_gpu, input_val, hx_val, rnn.all_weights)
 
             compare_cpu_gpu(outputs_cpu, outputs_gpu)
+
+    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
+    def test_RNN_dropout(self):
+        # checking the assumption that cuDNN sticks dropout in between
+        # RNN layers
+        for p in (0, 0.276, 0.731, 1):
+            for train in (True, False):
+                for cuda in (True, False):
+                    rnn = nn.RNN(10, 1000, 2, bias=False, dropout=p, nonlinearity='relu')
+                    if cuda:
+                        rnn.cuda()
+
+                    if train:
+                        rnn.train()
+                    else:
+                        rnn.eval()
+                    rnn.weight_ih_l0.data.fill_(1)
+                    rnn.weight_hh_l0.data.fill_(1)
+                    rnn.weight_ih_l1.data.fill_(1)
+                    rnn.weight_hh_l1.data.fill_(1)
+                    input = Variable(torch.Tensor(1,1,10).fill_(1))
+                    hx = Variable(torch.Tensor(2,1,1000).fill_(0))
+                    if cuda:
+                        input = input.cuda()
+                        hx = hx.cuda()
+
+                    output, hy = rnn(input, hx)
+                    self.assertEqual(output.data.min(), output.data.max())
+                    output_val = output.data[0][0][0]
+                    if p == 0 or not train:
+                        self.assertEqual(output_val, 10000)
+                    elif p == 1:
+                        self.assertEqual(output_val, 0)
+                    else:
+                        self.assertGreater(output_val, 8000)
+                        self.assertLess(output_val, 12000)
+                        denorm_mod = (output_val * (1 - p)) % 10
+                        self.assertLess(min(denorm_mod, 10 - denorm_mod), 1e-2)
+
+                    self.assertEqual(hy[0].data.min(), hy[0].data.max())
+                    self.assertEqual(hy[1].data.min(), hy[1].data.max())
+                    self.assertEqual(hy.data[0][0][0], 10)
+                    self.assertEqual(hy.data[1][0][0], output_val)
 
 
 def add_test(test):

@@ -24,6 +24,8 @@ class Dropout(InplaceFunction):
         if self.p > 0 and self.train:
             self.noise = self._make_noise(input)
             self.noise.bernoulli_(1-self.p).div_(1-self.p)
+            if self.p == 1:
+                self.noise.fill_(0)
             self.noise = self.noise.expand_as(input)
             output.mul_(self.noise)
 
@@ -41,4 +43,3 @@ class FeatureDropout(Dropout):
     def _make_noise(self, input):
         return input.new().resize_(input.size(0), input.size(1),
                 *repeat(1, input.dim()-2))
-

@@ -43,6 +43,13 @@ def is_acceptable(tensor):
             return False
     return True
 
+__cudnn_version = []
+def version():
+    if not lib:
+        raise RuntimeError("cuDNN not initialized")
+    if len(__cudnn_version) == 0:
+        __cudnn_version.append(lib.cudnnGetVersion())
+    return __cudnn_version[0]
 
 _handles = {}
 
@@ -128,10 +135,10 @@ class TensorDescriptorArray(object):
 
     def __del__(self):
         for ptr in self.ptrs:
-            check_error(lib.cudnnDestroyTensorDescriptor(ptr))
+            check_error(lib.cudnnDestroyTensorDescriptor(ctypes.c_void_p(ptr)))
 
     def __getitem__(self, key):
-        return self.ptrs[key]
+        return ctypes.c_void_p(self.ptrs[key])
 
     def set(self, tensor):
         self._type = tensor.type()
@@ -139,7 +146,7 @@ class TensorDescriptorArray(object):
         self._stride = tensor.stride()
         for ptr in self.ptrs:
             check_error(lib.cudnnSetTensorNdDescriptor(
-                ptr, _typemap[tensor.type()], tensor.dim(),
+                ctypes.c_void_p(ptr), _typemap[tensor.type()], tensor.dim(),
                 int_array(tensor.size()), int_array(tensor.stride())))
 
     def as_tuple(self):
@@ -186,37 +193,41 @@ class FilterDescriptor(object):
     def as_tuple(self):
         return tuple(self._size)
 
+
 class DropoutDescriptor(object):
-    def __init__(self):
+    def __init__(self, handle, dropout, seed):
         ptr = ctypes.c_void_p()
         check_error(lib.cudnnCreateDropoutDescriptor(ctypes.byref(ptr)))
         self._as_parameter_ = ptr
 
-    def __del__(self):
-        check_error(lib.cudnnDestroyDropoutDescriptor(self))
+        dropout_states_size = ctypes.c_long()
+        check_error(lib.cudnnDropoutGetStatesSize(
+            handle,
+            ctypes.byref(dropout_states_size)))
 
-    def set(self, handle, dropout, dropout_states, seed):
-        self.dropout_states = dropout_states  # make sure it's retained
+        self.state = torch.cuda.ByteTensor(dropout_states_size.value)
+
         check_error(lib.cudnnSetDropoutDescriptor(
             self,
             handle,
-            dropout,
-            ctypes.c_void_p(dropout_states.data_ptr()),
-            dropout_states.size(0),
-            seed
+            ctypes.c_float(dropout),
+            ctypes.c_void_p(self.state.data_ptr()),
+            ctypes.c_size_t(self.state.size(0)),
+            ctypes.c_ulonglong(seed),
         ))
 
+    def __del__(self):
+        check_error(lib.cudnnDestroyDropoutDescriptor(self))
+
+
+
 class RNNDescriptor(object):
-    def __init__(self):
+    def __init__(self, hidden_size, num_layers, dropout_desc, input_mode,
+            bidirectional, mode, datatype):
         ptr = ctypes.c_void_p()
         check_error(lib.cudnnCreateRNNDescriptor(ctypes.byref(ptr)))
         self._as_parameter_ = ptr
 
-    def __del__(self):
-        check_error(lib.cudnnDestroyRNNDescriptor(self))
-
-    def set(self, hidden_size, num_layers, dropout_desc, input_mode,
-            bidirectional, mode, datatype):
         check_error(lib.cudnnSetRNNDescriptor(
             self,
             hidden_size,
@@ -227,6 +238,10 @@ class RNNDescriptor(object):
             mode,
             datatype
         ))
+
+    def __del__(self):
+        check_error(lib.cudnnDestroyRNNDescriptor(self))
+
 
 class ConvolutionAlgoPerf(ctypes.Structure):
     _fields_ = [
