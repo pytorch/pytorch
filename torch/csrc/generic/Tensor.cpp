@@ -586,10 +586,109 @@ int THPTensor_(setValue)(THPTensor *self, PyObject *index, PyObject *value)
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
+
+#if PY_MAJOR_VERSION == 2
+#else
+int THPTensor_(getBuffer)(THPTensor *self, Py_buffer *view, int flags)
+{
+  HANDLE_TH_ERRORS
+
+  THTensor *self_t = self->cdata;
+  THStorage *self_s = THTensor_(storage)(self_t);
+
+  if (!THTensor_(isContiguous)(self_t) && ((flags & PyBUF_C_CONTIGUOUS) == PyBUF_C_CONTIGUOUS)) {
+    THPUtils_setError("THTensor is not contiguous as requested");
+    return -1;
+  }
+
+  Py_INCREF(self);
+  view->obj = (PyObject*)self;
+  view->buf = (void *)THTensor_(data)(self_t);
+  view->len = (Py_ssize_t)(THStorage_(size)(self_s) * THStorage_(elementSize)());
+  view->itemsize = (Py_ssize_t)THStorage_(elementSize)();
+  view->readonly = 0;
+  view->ndim = self_t->nDimension;
+
+#if defined(TH_REAL_IS_CHAR)
+  view->format = "c";
+#elif defined(TH_REAL_IS_BYTE)
+  view->format = "B";
+#elif defined(TH_REAL_IS_SHORT)
+  view->format = "h";
+#elif defined(TH_REAL_IS_INT)
+  view->format = "i";
+#elif defined(TH_REAL_IS_LONG)
+  view->format = "l";
+#elif defined(TH_REAL_IS_FLOAT)
+  view->format = "f";
+#elif defined(TH_REAL_IS_DOUBLE)
+  view->format = "d";
+#else
+#error "You must update THPTensor_(getbufferproc)() if you introduce a new real type"
+#endif
+
+  if ((flags & PyBUF_FORMAT) != PyBUF_FORMAT) {
+    view->format = NULL;
+  }
+
+  view->shape = NULL;
+  view->strides = NULL;
+  view->suboffsets = NULL;
+  view->internal = NULL;
+
+  // all flags contain all the bits of the simpler flag
+  if ((flags & PyBUF_ND) == PyBUF_ND) {
+    Py_ssize_t *shape = (Py_ssize_t*)malloc(self_t->nDimension * sizeof(Py_ssize_t));
+
+    for (int dim = 0; dim < self_t->nDimension; ++dim) {
+      shape[dim] = (Py_ssize_t)THTensor_(size)(self_t, dim) * sizeof(real);
+    }
+    view->shape = shape;
+  }
+
+  if ((flags & PyBUF_STRIDES) == PyBUF_STRIDES) {
+    Py_ssize_t *strides = (Py_ssize_t*)malloc(self_t->nDimension * sizeof(Py_ssize_t));
+
+    for (int dim = 0; dim < self_t->nDimension; ++dim) {
+      strides[dim] = (Py_ssize_t)THTensor_(stride)(self_t, dim) * sizeof(real);
+    }
+    view->strides = strides;
+  }
+
+  if ((flags & PyBUF_INDIRECT) == PyBUF_INDIRECT) {
+    view->suboffsets = NULL; // we do not have any special suboffsets
+  }
+
+  return 0;
+  END_HANDLE_TH_ERRORS_RET(-1)
+}
+
+void THPTensor_(releaseBuffer)(Py_buffer *view)
+{
+  free(view->shape);
+  free(view->strides);
+}
+#endif
+
+
 static PyMappingMethods THPTensor_(mappingmethods) = {
   NULL,
   (binaryfunc)THPTensor_(getValue),
   (objobjargproc)THPTensor_(setValue)
+};
+
+static PyBufferProcs THPTensor_(buffermethods) = {
+#if PY_MAJOR_VERSION == 2
+  (readbufferproc)0,       /* bf_getreadbuffer */
+  (writebufferproc)0,      /* bf_getwritebuffer */
+  (segcountproc)0,         /* bf_getsegcount */
+  (charbufferproc)0,       /* bf_getcharbuffer */
+  (getbufferproc)0,        /* bf_getbuffer */
+  (releasebufferproc)0     /* bf_releasebuffer */
+#else
+  (getbufferproc)THPTensor_(getBuffer),         /* bf_getbuffer */
+  (releasebufferproc)THPTensor_(releaseBuffer) /* bf_releasebuffer */
+#endif
 };
 
 // TODO: implement equality
@@ -612,7 +711,10 @@ PyTypeObject THPTensorType = {
   0,                                     /* tp_str */
   0,                                     /* tp_getattro */
   0,                                     /* tp_setattro */
-  0,                                     /* tp_as_buffer */
+  &THPTensor_(buffermethods),            /* tp_as_buffer */
+#if PY_MAJOR_VERSION == 2
+  Py_TPFLAGS_HAVE_GETCHARBUFFER | Py_TPFLAGS_HAVE_NEWBUFFER |
+#endif
   Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,   /* tp_flags */
   NULL,                                  /* tp_doc */
   0,                                     /* tp_traverse */

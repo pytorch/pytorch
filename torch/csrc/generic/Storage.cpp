@@ -262,6 +262,7 @@ static PyMappingMethods THPStorage_(mappingmethods) = {
   (objobjargproc)THPStorage_(set)
 };
 
+#if PY_MAJOR_VERSION == 2
 static Py_ssize_t THPStorage_(readbufferproc)(THPStorage *self, Py_ssize_t segment, void **ptrptr)
 {
   HANDLE_TH_ERRORS
@@ -283,6 +284,7 @@ static Py_ssize_t THPStorage_(segcountproc)(PyObject *self, Py_ssize_t *lenp)
   return 1;
   END_HANDLE_TH_ERRORS
 }
+#endif // PY_MAJOR_VERSION
 
 static int THPStorage_(getbufferproc)(THPStorage *self, Py_buffer *view, int flags)
 {
@@ -351,12 +353,15 @@ static void THPStorage_(releasebufferproc)(PyObject *obj, Py_buffer *view)
 }
 
 static PyBufferProcs THPStorage_(bufferprocs) = {
+#if PY_MAJOR_VERSION == 2
   (readbufferproc)THPStorage_(readbufferproc),       /* bf_getreadbuffer */
   (writebufferproc)THPStorage_(readbufferproc),      /* bf_getwritebuffer */
   (segcountproc)THPStorage_(segcountproc),          /* bf_getsegcount */
   (charbufferproc)NULL,                             /* bf_getcharbuffer */
+#else
   (getbufferproc)THPStorage_(getbufferproc),        /* bf_getbuffer */
   (releasebufferproc)THPStorage_(releasebufferproc) /* bf_releasebuffer */
+#endif
 };
 
 // TODO: implement equality
@@ -380,8 +385,10 @@ PyTypeObject THPStorageType = {
   0,                                     /* tp_getattro */
   0,                                     /* tp_setattro */
   &THPStorage_(bufferprocs),             /* tp_as_buffer */
-  Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_HAVE_GETCHARBUFFER |
-    Py_TPFLAGS_HAVE_NEWBUFFER,           /* tp_flags */
+#if PY_MAJOR_VERSION == 2
+  Py_TPFLAGS_HAVE_GETCHARBUFFER | Py_TPFLAGS_HAVE_NEWBUFFER |
+#endif
+  Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,           /* tp_flags */
   NULL,                                  /* tp_doc */
   0,                                     /* tp_traverse */
   0,                                     /* tp_clear */
