@@ -271,13 +271,12 @@ static Py_ssize_t THPStorage_(getbufferproc)(THPStorage *self, Py_ssize_t segmen
     return -1;
   }
   *ptrptr = self->cdata->data;
-  return self->cdata->size;
+  return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
 static Py_ssize_t THPStorage_(segcountproc)(PyObject *self, Py_ssize_t *lenp)
 {
-  // XXX: This function shall never fail. Do we need HANDLE_TH_ERRORS?
   HANDLE_TH_ERRORS
   if (lenp != NULL)
     *lenp = THStorage_(size)(LIBRARY_STATE ((THStorage*)PyTuple_GET_ITEM(self, 0)));
@@ -288,19 +287,6 @@ static Py_ssize_t THPStorage_(segcountproc)(PyObject *self, Py_ssize_t *lenp)
 static int THPStorage_(getbufferproc)(PyObject *obj, Py_buffer *view, int flags)
 {
   HANDLE_TH_ERRORS
-  // The first variable is the "exporting" object. The second argument is the
-  // address to a bufferinfo structure. Both arguments must never be NULL.
-  if (obj == NULL) {
-    THPUtils_setError("obj is NULL in getbufferproc; it should not happen "
-        "accodring to PEP 3118");
-    return -1;
-  }
-  if (view == NULL) {
-    THPUtils_setError("view is NULL in getbufferproc; it should not happen "
-        "accodring to PEP 3118");
-    return -1;
-  }
-
   THPStorage* self = (THPStorage*)obj;
 
   view->obj = (PyObject*)self;
@@ -310,7 +296,7 @@ static int THPStorage_(getbufferproc)(PyObject *obj, Py_buffer *view, int flags)
   // product of the shape array multiplied by the number of bytes per item of
   // memory.
   // TODO: Is it the size of data only or the whole object?
-  view->len = THStorage_(size)(self);
+  view->len = THStorage_(size)(self) * THStorage_(elementSize)();
   // 1 means the memory is readonly, zero means the memory is writable.
   view->readonly = 0;
   // TODO: a NULL-terminated format-string (following the struct-style syntax
