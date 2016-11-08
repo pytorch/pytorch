@@ -10,7 +10,8 @@
 // Normalizes the L1 norm of every row to 1; used by multinomial
 template <typename T>
 __global__ void renormRowsL1(T* dist, long rows, long cols) {
-  extern __shared__ T smem[];
+  extern __shared__ __align__(sizeof(T)) unsigned char my_smem[];
+  T *smem = reinterpret_cast<T *>(my_smem);
 
   for (long row = blockIdx.x; row < rows; row += gridDim.x) {
     T sum = ScalarConvert<int, T>::to(0);
@@ -39,7 +40,8 @@ sampleMultinomialOnce(T* dest,
                       long distributions,
                       int categories,
                       T* dist) {
-  extern __shared__ T smem[];
+  extern __shared__ __align__(sizeof(T)) unsigned char my_smem[];
+  T *smem = reinterpret_cast<T *>(my_smem);
   T zero = ScalarConvert<int, T>::to(0);
 
   for (long curDist = blockIdx.x;
@@ -48,7 +50,7 @@ sampleMultinomialOnce(T* dest,
     // First pass, find the total sum of the distribution
     T sum = zero;
     for (int cat = threadIdx.x; cat < categories; cat += blockDim.x) {
-      sum += dist[curDist * categories + cat];
+      sum = THCNumerics<T>::add(sum, dist[curDist * categories + cat]);
     }
 
     // threadIdx.x == 0 has the sum value from this
@@ -65,10 +67,10 @@ sampleMultinomialOnce(T* dest,
     T sample = smem[1];
     __syncthreads();
 
-    if (sum == zero || sample == zero) {
+    if (THCNumerics<T>::eq(sum,  zero) || THCNumerics<T>::eq(sample, zero)) {
       // Choose the first element
       if (threadIdx.x == 0) {
-        dest[curDist] = 1;
+        dest[curDist] = ScalarConvert<int, T>::to(1);
       }
 
       continue;
@@ -93,7 +95,7 @@ sampleMultinomialOnce(T* dest,
         T val = zero;
 
         if (threadIdx.x >= offset) {
-          val = smem[threadIdx.x - offset] + smem[threadIdx.x];
+          val = THCNumerics<T>::add(smem[threadIdx.x - offset], smem[threadIdx.x]);
         }
 
         __syncthreads();
@@ -105,22 +107,24 @@ sampleMultinomialOnce(T* dest,
 
       // Each thread will check to see if the sample falls in its
       // bucket
-      T curBucket =
-        smem[threadIdx.x] + prevHighProb;
+      T curBucket = THCNumerics<T>::add(smem[threadIdx.x], prevHighProb);
       T prevBucket =
-        threadIdx.x == 0 ? prevHighProb : smem[threadIdx.x - 1] + prevHighProb;
+        threadIdx.x == 0 ? prevHighProb :
+        THCNumerics<T>::add(smem[threadIdx.x - 1], prevHighProb);
       bool inBucket =
-        (cat < categories) && (sample <= curBucket) && (sample > prevBucket);
+        (cat < categories) &&
+        (!THCNumerics<T>::gt(sample, curBucket)) &&
+        (THCNumerics<T>::gt(sample, prevBucket));
 
       if (inBucket) {
         // We're done; we have the sample
         // Torch indices are 1-based
         // FIXME: broadcast exit flag?
-        dest[curDist] = cat + TH_INDEX_BASE;
+        dest[curDist] = ScalarConvert<int, T>::to(cat + TH_INDEX_BASE);
       }
 
       // Store the previous scan's high value for future use
-      prevHighProb += smem[blockDim.x - 1];
+      prevHighProb = THCNumerics<T>::add(prevHighProb, smem[blockDim.x - 1]);
 
       __syncthreads();
     }
@@ -178,7 +182,7 @@ sampleMultinomialWithReplacement(curandStateMtgp32* state,
       int sample = sampleBase + threadIdx.y;
 
       // All threads participate in this
-      float r = curand_uniform(&state[blockIdx.x]);
+      T r = ScalarConvert<float, T>::to(curand_uniform(&state[blockIdx.x]));
 
       if (threadIdx.x == 0 && sample < totalSamples) {
         // Find the bucket that a uniform sample lies in
@@ -219,7 +223,7 @@ sampleMultinomialWithoutReplacement(curandStateMtgp32* state,
     long curDist = curDistBase + threadIdx.y;
 
     // All threads must participate in this
-    float r = curand_uniform(&state[blockIdx.x]);
+    T r = ScalarConvert<float, T>::to(curand_uniform(&state[blockIdx.x]));
 
     if (threadIdx.x == 0 && curDist < distributions) {
       // Find the bucket that a uniform sample lies in

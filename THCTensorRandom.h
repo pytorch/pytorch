@@ -34,8 +34,6 @@ THC_API void THCRandom_setRNGState(struct THCState *state, THByteTensor *rng_sta
 THC_API void THCudaTensor_geometric(struct THCState *state, THCudaTensor *self, double p);
 THC_API void THCudaTensor_logNormal(struct THCState *state, THCudaTensor *self, double mean, double stdv);
 
-THC_API void THCudaTensor_multinomial(struct THCState *state, THCudaTensor *self, THCudaTensor *prob_dist, int n_sample, int with_replacement);
-
 THC_API struct curandStateMtgp32* THCRandom_generatorStates(struct THCState* state);
 
 #endif
