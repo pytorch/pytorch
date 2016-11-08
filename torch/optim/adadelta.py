@@ -6,10 +6,10 @@ class Adadelta(Optimizer):
         defaults = dict(rho=rho, eps=eps, weight_decay=weight_decay)
         super(Adadelta, self).__init__(params, defaults)
 
-    def step(self, forward_closure=None):
+    def step(self, closure=None):
         loss = None
-        if forward_closure is not None:
-            loss = self._forward_backward(forward_closure)
+        if closure is not None:
+            loss = closure()
 
         for group in self.param_groups:
             for p in group['params']:

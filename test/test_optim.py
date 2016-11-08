@@ -35,8 +35,14 @@ class TestOptim(TestCase):
         solution = torch.Tensor([1, 1])
         initial_dist = params.data.dist(solution)
 
+        def eval():
+            loss = rosenbrock(params)
+            loss.backward()
+            return loss
+
         for i in range(2000):
-            optimizer.step(lambda: rosenbrock(params))
+            optimizer.zero_grad()
+            optimizer.step(eval)
             old_fn(lambda _: (rosenbrock(params_t), drosenbrock(params_t)),
                     params_t, state)
             self.assertEqual(params.data, params_t)
