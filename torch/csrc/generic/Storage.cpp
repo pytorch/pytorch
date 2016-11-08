@@ -284,10 +284,9 @@ static Py_ssize_t THPStorage_(segcountproc)(PyObject *self, Py_ssize_t *lenp)
   END_HANDLE_TH_ERRORS
 }
 
-static int THPStorage_(getbufferproc)(PyObject *obj, Py_buffer *view, int flags)
+static int THPStorage_(getbufferproc)(THPStorage *self, Py_buffer *view, int flags)
 {
   HANDLE_TH_ERRORS
-  THPStorage* self = (THPStorage*)obj;
 
   view->obj = (PyObject*)self;
   // view->buf = (void*)self->arr.arr;
@@ -296,7 +295,6 @@ static int THPStorage_(getbufferproc)(PyObject *obj, Py_buffer *view, int flags)
   // the total bytes of memory the object uses. This should be the same as the
   // product of the shape array multiplied by the number of bytes per item of
   // memory.
-  // TODO: Is it the size of data only or the whole object?
   view->len = self->cdata->size * THStorage_(elementSize)();
   // 1 means the memory is readonly, zero means the memory is writable.
   view->readonly = 0;
@@ -305,13 +303,32 @@ static int THPStorage_(getbufferproc)(PyObject *obj, Py_buffer *view, int flags)
   // number of elements is len / itemsize, where itemsize is the number of
   // bytes implied by the format. This can be NULL which implies standard
   // unsigned bytes ("B").
-  view->format = "";  // integer
+  // See: https://docs.python.org/3/library/struct.html#format-characters
+#if defined(TH_REAL_IS_CHAR)
+  view->format = "c";
+#elif defined(TH_REAL_IS_BYTE)
+  view->format = "B";
+#elif defined(TH_REAL_IS_SHORT)
+  view->format = "h";
+#elif defined(TH_REAL_IS_INT)
+  view->format = "i";
+#elif defined(TH_REAL_IS_LONG)
+  view->format = "l";
+#elif defined(TH_REAL_IS_FLOAT)
+  view->format = "f";
+#elif defined(TH_REAL_IS_DOUBLE)
+  view->format = "d";
+#else
+#error "You must update THPStorage_(getbufferproc)() if you introduce a new real type"
+#endif
   view->ndim = 1;
   // TODO: an array of Py_ssize_t of length ndims indicating the shape of the
   // memory as an N-D array. Note that ((*shape)[0] * ... *
   // (*shape)[ndims-1])*itemsize = len . If ndims is 0 (indicating a scalar),
   // then this must be NULL.
-  view->shape = NULL;
+  Py_ssize_t *shape = (Py_ssize_t*)malloc(1 * sizeof(Py_ssize_t));
+  shape[0] = (Py_ssize_t)self->cdata->size;
+  view->shape = shape;
   // TODO
   view->strides = &view->itemsize;  // for the simple case we can do this
   // TODO
