@@ -220,37 +220,6 @@ GENERATE_KERNEL2(generate_uniform, float, double a, double b, float, curand_unif
 GENERATE_KERNEL2(generate_uniform, double, double a, double b, double, curand_uniform_double, x * (b-a) + a)
 GENERATE_KERNEL2(generate_uniform, half, double a, double b, float, curand_uniform, (ScalarConvert<float, half>::to(x * (b-a) + a)))
 
-/* Separate kernel because curand_log_normal gets extra parameters. */
-__global__ void generate_log_normal(curandStateMtgp32 *state, int size, float *result, float mean, float stddev)
-{
-  int idx = blockIdx.x * BLOCK_SIZE + threadIdx.x;
-  int rounded_size = THCCeilDiv(size, BLOCK_SIZE) * BLOCK_SIZE;
-  for (int i = idx; i < rounded_size; i += BLOCK_SIZE * MAX_NUM_BLOCKS) {
-    float x = curand_log_normal(&state[blockIdx.x], mean, stddev);
-    if (i < size) {
-      result[i] = x;
-    }
-  }
-}
-
-#define NUM_BLOCKS min((int)THCCeilDiv(size, (ptrdiff_t) BLOCK_SIZE), MAX_NUM_BLOCKS)
-THC_API void THCudaTensor_logNormal(THCState* state, THCudaTensor *self_, double mean, double stdv)
-{
-  THAssert(THCudaTensor_checkGPU(state, 1, self_));
-  Generator* gen = THCRandom_getGenerator(state);
-
-  THCudaTensor *self = THCudaTensor_newContiguous(state, self_);
-  ptrdiff_t size = THCudaTensor_nElement(state, self);
-  float *data = THCudaTensor_data(state, self);
-
-  generate_log_normal<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-      gen->gen_states, size, data, mean, stdv);
-
-  THCudaTensor_freeCopyTo(state, self, self_);
-};
-
-#undef NUM_BLOCKS
-
 #include "generic/THCTensorRandom.cu"
 #include "THCGenerateAllTypes.h"
 

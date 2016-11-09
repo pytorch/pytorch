@@ -7,6 +7,39 @@
 
 #include <curand_kernel.h>
 
+#define MAX_NUM_BLOCKS 64
+#define BLOCK_SIZE 256
+/* Separate kernel because curand_log_normal gets extra parameters. */
+
+template <typename T>
+__global__ void generateLogNormal(curandStateMtgp32 *state, int size, T *result, double mean, double stddev)
+{
+  int idx = blockIdx.x * BLOCK_SIZE + threadIdx.x;
+  int rounded_size = THCCeilDiv(size, BLOCK_SIZE) * BLOCK_SIZE;
+  for (int i = idx; i < rounded_size; i += BLOCK_SIZE * MAX_NUM_BLOCKS) {
+    float x = curand_log_normal(&state[blockIdx.x], mean, stddev);
+    if (i < size) {
+      result[i] = ScalarConvert<float, T>::to(x);
+    }
+  }
+}
+
+template <>
+__global__ void generateLogNormal<double>(curandStateMtgp32 *state, int size, double *result, double mean, double stddev)
+{
+  int idx = blockIdx.x * BLOCK_SIZE + threadIdx.x;
+  int rounded_size = THCCeilDiv(size, BLOCK_SIZE) * BLOCK_SIZE;
+  for (int i = idx; i < rounded_size; i += BLOCK_SIZE * MAX_NUM_BLOCKS) {
+    double x = curand_log_normal_double(&state[blockIdx.x], mean, stddev);
+    if (i < size) {
+      result[i] = x;
+    }
+  }
+}
+
+#undef MAX_NUM_BLOCKS
+#undef BLOCK_SIZE
+
 // Normalizes the L1 norm of every row to 1; used by multinomial
 template <typename T>
 __global__ void renormRowsL1(T* dist, long rows, long cols) {
