@@ -82,11 +82,13 @@ class OptimizerMock(object):
         self.num_evals = 0
 
     def step(self, closure):
-        for i in range(random.randint(1, self.max_evals)):
+        for i in range(random.randint(self.min_evals, self.max_evals)):
             loss = closure()
             self.num_evals += 1
-        loss.backward()
         self.num_steps += 1
+
+    def zero_grad(self):
+        pass
 
 
 class DatasetMock(object):
@@ -115,8 +117,9 @@ class TestTrainer(TestCase):
     ]
 
     def setUp(self):
-        self.trainer = Trainer(ModelMock(), CriterionMock(), OptimizerMock(),
-                DatasetMock())
+        self.optimizer = OptimizerMock()
+        self.trainer = Trainer(ModelMock(), CriterionMock(),
+                               self.optimizer, DatasetMock())
         self.num_epochs = 3
         self.dataset_size = len(self.trainer.dataset)
         self.num_iters = self.num_epochs * self.dataset_size
@@ -171,7 +174,7 @@ class TestTrainer(TestCase):
     def test_model_gradient(self):
         self.trainer.run(epochs=self.num_epochs)
         output_var = self.trainer.model.output
-        expected_grad = torch.ones(1, 1) * 2 * self.num_iters
+        expected_grad = torch.ones(1, 1) * 2 * self.optimizer.num_evals
         self.assertEqual(output_var.grad, expected_grad)
 
 
