@@ -2,9 +2,10 @@
 #define THC_GENERIC_FILE "generic/THCTensorRandom.cu"
 #else
 
+#define NUM_BLOCKS min((int)THCCeilDiv(size, (ptrdiff_t) BLOCK_SIZE), MAX_NUM_BLOCKS)
+
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
 
-#define NUM_BLOCKS min((int)THCCeilDiv(size, (ptrdiff_t) BLOCK_SIZE), MAX_NUM_BLOCKS)
 THC_API void THCTensor_(uniform)(THCState* state, THCTensor *self_, double a, double b)
 {
   THAssert(THCTensor_(checkGPU)(state, 1, self_));
@@ -30,6 +31,22 @@ THC_API void THCTensor_(normal)(THCState* state, THCTensor *self_, double mean, 
   real *data = THCTensor_(data)(state, self);
 
   generate_normal<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
+      gen->gen_states, size, data, mean, stdv);
+
+  THCTensor_(freeCopyTo)(state, self, self_);
+};
+
+THC_API void THCTensor_(logNormal)(THCState* state, THCTensor *self_, double mean, double stdv)
+{
+
+  THAssert(THCTensor_(checkGPU)(state, 1, self_));
+  Generator* gen = THCRandom_getGenerator(state);
+
+  THCTensor *self = THCTensor_(newContiguous)(state, self_);
+  ptrdiff_t size = THCTensor_(nElement)(state, self);
+  real *data = THCTensor_(data)(state, self);
+
+  generateLogNormal<real><<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
       gen->gen_states, size, data, mean, stdv);
 
   THCTensor_(freeCopyTo)(state, self, self_);
@@ -255,9 +272,6 @@ THC_API void THCTensor_(multinomial)(struct THCState *state,
   THCTensor_(free)(state, probDistContig);
 }
 
-
-#undef NUM_BLOCKS
-
 THC_API void THCTensor_(rand)(THCState *state, THCTensor *r_, THLongStorage *size)
 {
   THAssert(THCTensor_(checkGPU)(state, 1, r_));
@@ -269,7 +283,6 @@ THC_API void THCTensor_(rand)(THCState *state, THCTensor *r_, THLongStorage *siz
 
 GENERATE_KERNEL1(generate_bernoulli, real, double p, float, curand_uniform, (ScalarConvert<bool, real>::to(x <= p)))
 
-#define NUM_BLOCKS min((int)THCCeilDiv(size, (ptrdiff_t) BLOCK_SIZE), MAX_NUM_BLOCKS)
 THC_API void THCTensor_(bernoulli)(THCState* state, THCTensor *self_, double p)
 {
   THAssert(THCTensor_(checkGPU)(state, 1, self_));
