@@ -20,8 +20,6 @@ THC_API void THCTensor_(uniform)(THCState* state, THCTensor *self_, double a, do
   THCTensor_(freeCopyTo)(state, self, self_);
 };
 
-GENERATE_KERNEL2(generate_normal, real, double mean, double stdv, float, curand_normal, (ScalarConvert<float, real>::to((x * stdv) + mean)))
-
 THC_API void THCTensor_(normal)(THCState* state, THCTensor *self_, double mean, double stdv)
 {
   THAssert(THCTensor_(checkGPU)(state, 1, self_));
@@ -52,8 +50,6 @@ THC_API void THCTensor_(logNormal)(THCState* state, THCTensor *self_, double mea
   THCTensor_(freeCopyTo)(state, self, self_);
 };
 
-GENERATE_KERNEL1(generate_exponential, real, double lambda, float, curand_uniform, (ScalarConvert<float, real>::to((float)(-1. / lambda * log(1-x)))))
-
 THC_API void THCTensor_(exponential)(THCState* state, THCTensor *self_, double lambda)
 {
   THAssert(THCTensor_(checkGPU)(state, 1, self_));
@@ -68,8 +64,6 @@ THC_API void THCTensor_(exponential)(THCState* state, THCTensor *self_, double l
 
   THCTensor_(freeCopyTo)(state, self, self_);
 };
-
-GENERATE_KERNEL2(generate_cauchy, real, double median, double sigma, float, curand_uniform, (ScalarConvert<float, real>::to((float)(median + sigma * tan(M_PI*(x-0.5))))))
 
 THC_API void THCTensor_(cauchy)(THCState* state, THCTensor *self_, double median, double sigma)
 {
@@ -288,7 +282,11 @@ void THCTensor_(randn)(THCState *state, THCTensor *r_, THLongStorage *size)
 
 #endif
 
+#if defined(THC_REAL_IS_DOUBLE)
+GENERATE_KERNEL1(generate_bernoulli, double, double p, double, curand_uniform_double, x <= p)
+#else
 GENERATE_KERNEL1(generate_bernoulli, real, double p, float, curand_uniform, (ScalarConvert<bool, real>::to(x <= p)))
+#endif
 
 THC_API void THCTensor_(bernoulli)(THCState* state, THCTensor *self_, double p)
 {
@@ -304,7 +302,12 @@ THC_API void THCTensor_(bernoulli)(THCState* state, THCTensor *self_, double p)
   THCTensor_(freeCopyTo)(state, self, self_);
 };
 
+#if defined(THC_REAL_IS_DOUBLE)
+
+GENERATE_KERNEL1(generate_geometric, double, double p, double, curand_uniform_double, (log(1-x) / log(p)) + 1)
+#else
 GENERATE_KERNEL1(generate_geometric, real, double p, float, curand_uniform, (ScalarConvert<float, real>::to((log(1-x) / log(p)) + 1)))
+#endif
 
 THC_API void THCTensor_(geometric)(THCState* state, THCTensor *self_, double p)
 {
