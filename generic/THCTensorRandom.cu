@@ -279,6 +279,13 @@ THC_API void THCTensor_(rand)(THCState *state, THCTensor *r_, THLongStorage *siz
   THCTensor_(uniform)(state, r_, 0, 1);
 }
 
+void THCTensor_(randn)(THCState *state, THCTensor *r_, THLongStorage *size)
+{
+  THAssert(THCTensor_(checkGPU)(state, 1, r_));
+  THCTensor_(resize)(state, r_, size, NULL);
+  THCTensor_(normal)(state, r_, 0, 1);
+}
+
 #endif
 
 GENERATE_KERNEL1(generate_bernoulli, real, double p, float, curand_uniform, (ScalarConvert<bool, real>::to(x <= p)))
