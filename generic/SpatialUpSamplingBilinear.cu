@@ -9,6 +9,7 @@ void THNN_(SpatialUpSamplingBilinear_updateOutput)(
            int outputHeight,
            int outputWidth)
 {
+  // TODO: check argument shapes
   input = THCTensor_(newContiguous)(state, input);
   output = THCTensor_(newContiguous)(state, output);
   THCUNN_assertSameGPU_generic(state, 2, input, output);
@@ -45,6 +46,7 @@ void THNN_(SpatialUpSamplingBilinear_updateGradInput)(
            int outputHeight,
            int outputWidth)
 {
+  // TODO: check argument shapes
   gradInput = THCTensor_(newContiguous)(state, gradInput);
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
   THCUNN_assertSameGPU_generic(state, 2, gradOutput, gradInput);

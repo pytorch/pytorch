@@ -13,7 +13,12 @@ void THNN_(SpatialAveragePooling_updateOutput)(
            bool count_include_pad)
 {
   THCUNN_assertSameGPU_generic(state, 2, input, output);
-  THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch) tensor expected");
+  THCUNN_argCheck(state, input->nDimension == 3 || input->nDimension == 4, 2, input,
+                  "3D or 4D (batch mode) tensor expected for input, but got: %s");
+  THArgCheck(kW/2 >= padW && kH/2 >= padH, 2,
+             "pad should be smaller than half of kernel size, but got "
+             "padW = %d, padH = %d, kW = %d, kH = %d",
+             padW, padH, kW, kH);
 
   long nInputCols, nInputRows, nInputPlane, batchSize;
   long nOutputCols, nOutputRows;
@@ -32,8 +37,10 @@ void THNN_(SpatialAveragePooling_updateOutput)(
     batchSize = input->size[0];
   }
 
-  THArgCheck(nInputCols >= kW - 2*padW && nInputRows >= kH - 2*padH, 2, "input image smaller than kernel size");
-  THArgCheck(kW/2 >= padW && kH/2 >= padH, 2, "pad should be smaller than half of kernel size");
+  THArgCheck(nInputCols >= kW - 2 * padW && nInputRows >= kH - 2 * padH, 2,
+             "input image smaller than (kernel size - 2 * padW). Got "
+             "inputHeight: %nInputCols inputWidth: %d kH %d kW %d padH %d padW %d",
+             nInputRows, nInputCols, kH, kW, padH, padW);
 
   if(ceil_mode) {
     nOutputCols = ceil(float(nInputCols - kW + 2*padW) / float(dW)) + 1;
@@ -101,20 +108,22 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
 
   long nInputCols, nInputRows, nInputPlane, batchSize;
   long nOutputCols, nOutputRows;
+  int dimCol = 2;
+  int dimRow = 1;
 
   if (input->nDimension == 3) {
-    nInputCols = input->size[2];
-    nInputRows = input->size[1];
     nInputPlane = input->size[0];
     batchSize = 1;
   }
   else
   {
-    nInputCols = input->size[3];
-    nInputRows = input->size[2];
+    dimCol = 3;
+    dimRow = 2;
     nInputPlane = input->size[1];
     batchSize = input->size[0];
   }
+  nInputCols = input->size[dimCol];
+  nInputRows = input->size[dimRow];
 
   if(ceil_mode) {
     nOutputCols = ceil(float(nInputCols - kW + 2*padW) / float(dW)) + 1;
@@ -134,6 +143,8 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
       --nOutputCols;
   }
 
+  THCUNN_check_dim_size(state, gradOutput, input->nDimension, dimRow, nOutputRows);
+  THCUNN_check_dim_size(state, gradOutput, input->nDimension, dimCol, nOutputCols);
   THCTensor_(resizeAs)(state, gradInput, input);
 
   int count = THCTensor_(nElement)(state, input);

@@ -81,6 +81,7 @@ void THNN_(SoftMax_updateGradInput)(
            THCTensor *gradInput,
            THCTensor *output)
 {
+  THCUNN_check_nElement(state, input, gradOutput);
   THCUNN_assertSameGPU_generic(state, 3, output, gradOutput, gradInput);
 
   output = THCTensor_(newContiguous)(state, output);

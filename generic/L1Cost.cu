@@ -7,6 +7,7 @@ void THNN_(L1Cost_updateOutput)(
            THCTensor *input,
            THCTensor *output)
 {
+  THCUNN_check_dim_size(state, output, 1, 0, 1);
   THCUNN_assertSameGPU_generic(state, 1, input);
   accreal sum;
   long size = THCTensor_(nElement)(state, input);
@@ -25,6 +26,7 @@ void THNN_(L1Cost_updateGradInput)(
            THCTensor *gradOutput,
            THCTensor *gradInput)
 {
+  THCUNN_check_nElement(state, input, gradOutput);
   THCUNN_assertSameGPU_generic(state, 2, input, gradInput);
   long size = THCTensor_(nElement)(state, input);
 

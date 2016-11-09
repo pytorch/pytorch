@@ -35,6 +35,7 @@ void THNN_(HardTanh_updateGradInput)(
            real max_val,
            bool inplace)
 {
+  THCUNN_check_nElement(state, input, gradOutput);
   THCUNN_assertSameGPU_generic(state, 3, input, gradOutput, gradInput);
 
   if (inplace)

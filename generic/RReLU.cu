@@ -68,6 +68,7 @@ void THNN_(RReLU_updateGradInput)(
            bool train,
            bool inplace)
 {
+  THCUNN_check_nElement(state, input, gradOutput);
   THCUNN_assertSameGPU_generic(state, 4, input, gradOutput, gradInput, noise);
 
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);

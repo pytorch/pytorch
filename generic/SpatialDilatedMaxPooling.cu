@@ -17,7 +17,8 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
 {
 
   THCUNN_assertSameGPU_generic(state, 3, input, output, indices);
-  THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch) tensor expected");
+  THCUNN_argCheck(state, input->nDimension == 3 || input->nDimension == 4, 2, input,
+                  "3D or 4D (batch mode) tensor expected for input, but got: %s");
 
   long nInputCols, nInputRows, nInputPlane, batchSize;
   long nOutputCols, nOutputRows;
@@ -37,8 +38,18 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
   }
 
   THArgCheck(nInputCols >= kW - padW && nInputRows >= kH - padH, 2, "input image smaller than kernel size");
-  THArgCheck(kW/2 >= padW && kH/2 >= padH, 2, "pad should be smaller than half of kernel size");
-  THArgCheck(dilationW > 0 && dilationH > 0, 11, "dilation should be greater than 0");
+  THArgCheck(nInputCols>= kW - padW && nInputRows >= kH - padH, 2,
+             "input image (H: %d, W: %d) smaller than kernel "
+             "size - padding( kH: %d padH: %d kW: %d padW: %d",
+             nInputRows, nInputCols, kH, padH, kW, padW);
+  THArgCheck(kW/2 >= padW && kH/2 >= padH, 2,
+             "pad should be smaller than half of kernel size, but got "
+             "padW = %d, padH = %d, kW = %d, kH = %d",
+             padW, padH, kW, kH);
+  THArgCheck(dilationW > 0 && dilationH > 0, 11,
+             "dilation should be greater than 0, but got "
+             "dilationH = %d dilationW = %d", dilationH, dilationW);
+
   if(ceil_mode) {
     nOutputCols = ceil(float(nInputCols - (dilationW * (kW - 1) + 1) + 2*padW) / float(dW)) + 1;
     nOutputRows = ceil(float(nInputRows - (dilationH * (kH - 1) + 1) + 2*padH) / float(dH)) + 1;
@@ -49,7 +60,8 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
   }
 
 if (nOutputCols < 1 || nOutputRows < 1)
-    THError("Given input size: (%dx%dx%d). Calculated output size: (%dx%dx%d). Output size is too small",
+    THError("Given input size: (%dx%dx%d). "
+            "Calculated output size: (%dx%dx%d). Output size is too small",
             nInputPlane,nInputRows,nInputCols,nInputPlane,nOutputRows,nOutputCols);
 
 if (padW || padH)
@@ -96,6 +108,7 @@ void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
            int dilationW, int dilationH,
            bool ceil_mode)
 {
+  // TODO: shape check gradOutput
   THCUNN_assertSameGPU_generic(state, 4, input, gradOutput, indices, gradInput);
 
   input = THCTensor_(newContiguous)(state, input);

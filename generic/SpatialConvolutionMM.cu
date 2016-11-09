@@ -18,11 +18,16 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
   if (bias) {
     THCUNN_assertSameGPU_generic(state, 2, weight, bias);
   }
-  THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch mode) tensor is expected");
+
+  THCUNN_argCheck(state, input->nDimension == 3 || input->nDimension == 4, 2, input,
+                  "3D or 4D (batch mode) tensor expected for input, but got: %s");
+  THArgCheck(kW > 0 && kH > 0, 8,
+             "kernel size should be greater than zero, but got kH: %d kW: %d", kH, kW);
+  THArgCheck(dW > 0 && dH > 0, 10,
+             "stride should be greater than zero, but got dH: %d dW: %d", dH, dW);
+  THCUNN_argCheck(state, weight->nDimension == 2 || weight->nDimension == 4, 2, weight,
+                  "2D or 4D weight tensor expected, but got: %s");
   THArgCheck(!bias || weight->size[0] == bias->size[0], 4, "nOutputPlane mismatch in weight and bias");
-  THArgCheck(kW > 0 && kH > 0, 8, "kernel size should be greater than zero");
-  THArgCheck(dW > 0 && dH > 0, 10, "stride should be greater than zero");
-  THArgCheck(weight->nDimension == 2 || weight->nDimension == 4, 4, "weight tensor should be 2D or 4D");
 
   int freeWeight = 0;
 
@@ -53,8 +58,10 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
   long outputHeight = (inputHeight + 2*padH - kH) / dH + 1;
 
   if (outputWidth < 1 || outputHeight < 1)
-    THError("Given input size: (%dx%dx%d). Calculated output size: (%dx%dx%d). Output size is too small",
-        nInputPlane,inputHeight,inputWidth,nOutputPlane,outputHeight,outputWidth);
+    THError("Given input size: (%d x %d x %d). "
+            "Calculated output size: (%d x %d x %d). Output size is too small",
+            nInputPlane,inputHeight,inputWidth,nOutputPlane,outputHeight,outputWidth);
+
 
   // Batch size + input planes
   long batchSize = input->size[0];
@@ -173,10 +180,16 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
 
   THCUNN_assertSameGPU_generic(state, 5, input, gradOutput, weight,
                                  gradColumns, gradInput);
-  THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch mode) tensor is expected");
-  THArgCheck(kW > 0 && kH > 0, 9, "kernel size should be greater than zero");
-  THArgCheck(dW > 0 && dH > 0, 11, "stride should be greater than zero");
-  THArgCheck(weight->nDimension == 2 || weight->nDimension == 4, 4, "weight tensor should be 2D or 4D");
+  THCUNN_argCheck(state, input->nDimension == 3 || input->nDimension == 4, 2, input,
+                  "3D or 4D (batch mode) tensor expected for input, but got: %s");
+  THArgCheck( weight->size[0] == gradOutput->size[input->nDimension == 4 ? 1 : 0], 3,
+             "Number of output features is not equal to nOutputPlane" );
+  THArgCheck(kW > 0 && kH > 0, 9,
+             "kernel size should be greater than zero, but got kH: %d kW: %d", kH, kW);
+  THArgCheck(dW > 0 && dH > 0, 11,
+             "stride should be greater than zero, but got dH: %d dW: %d", dH, dW);
+  THCUNN_argCheck(state, weight->nDimension == 2 || weight->nDimension == 4, 2, weight,
+                  "2D or 4D weight tensor expected, but got: %s");
 
   // Params
   int nInputPlane = weight->nDimension == 2 ? weight->size[1]/(kW*kH) : weight->size[1];
@@ -286,11 +299,17 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
   if (gradBias) {
    THCUNN_assertSameGPU_generic(state, 2, gradWeight, gradBias);
   }
-  THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch mode) tensor is expected");
+  THCUNN_argCheck(state, input->nDimension == 3 || input->nDimension == 4, 2, input,
+                  "3D or 4D (batch mode) tensor expected for input, but got: %s");
   THArgCheck(!gradBias || gradWeight->size[0] == gradBias->size[0], 4, "nOutputPlane mismatch in gradWeight and gradBias");
-  THArgCheck(kW > 0 && kH > 0, 8, "kernel size should be greater than zero");
-  THArgCheck(dW > 0 && dH > 0, 10, "stride should be greater than zero");
-  THArgCheck(gradWeight->nDimension == 2 || gradWeight->nDimension == 4, 4, "gradWeight tensor should be 2D or 4D");
+  THArgCheck( gradWeight->size[0] == gradOutput->size[input->nDimension == 4 ? 1 : 0], 3,
+             "Number of output features is not equal to nOutputPlane" );
+  THArgCheck(kW > 0 && kH > 0, 8,
+             "kernel size should be greater than zero, but got kH: %d kW: %d", kH, kW);
+  THArgCheck(dW > 0 && dH > 0, 10,
+             "stride should be greater than zero, but got dH: %d dW: %d", dH, dW);
+  THCUNN_argCheck(state, gradWeight->nDimension == 2 || gradWeight->nDimension == 4,
+                  2, gradWeight, "2D or 4D gradWeight tensor expected, but got: %s");
 
   // Params
   int nInputPlane = gradWeight->nDimension == 2 ? gradWeight->size[1]/(kW*kH) : gradWeight->size[1];

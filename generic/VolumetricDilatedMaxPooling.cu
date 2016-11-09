@@ -29,16 +29,27 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
   int outputHeight;
   int outputWidth;
 
+  int dimt = 1;
+  int dimh = 2;
+  int dimw = 3;
+
+  if (input->nDimension == 5)
+  {
+    dimt++;
+    dimh++;
+    dimw++;
+  }
+
   THCUNN_assertSameGPU_generic(state, 3, input, indices, output);
 
   if (THCTensor_(nDimension)(state, input) == 4)
   {
-    THArgCheck(
-      THCTensor_(size)(state, input, 1) >= kT &&
-      THCTensor_(size)(state, input, 2) >= kH &&
-      THCTensor_(size)(state, input, 3) >= kW, 2,
-      "input image smaller than kernel size"
-    );
+    THArgCheck(input->size[dimw] >= kW && input->size[dimh] >= kH
+               && input->size[dimt] >= kT, 2,
+               "input image (T: %d H: %d W: %d) smaller than "
+               "kernel size (kT: %d kH: %d kW: %d)",
+               input->size[dimt], input->size[dimh], input->size[dimw],
+               kT, kH, kW);
 
     /* sizes */
     batchSize   = 1;
@@ -49,12 +60,12 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
   }
   else if (THCTensor_(nDimension)(state, input) == 5)
   {
-    THArgCheck(
-      THCTensor_(size)(state, input, 4) >= kW &&
-      THCTensor_(size)(state, input, 3) >= kH &&
-      THCTensor_(size)(state, input, 2) >= kT, 2,
-      "input image smaller than kernel size"
-    );
+    THArgCheck(input->size[dimw] >= kW && input->size[dimh] >= kH
+               && input->size[dimt] >= kT, 2,
+               "input image (T: %d H: %d W: %d) smaller than "
+               "kernel size (kT: %d kH: %d kW: %d)",
+               input->size[dimt], input->size[dimh], input->size[dimw],
+               kT, kH, kW);
 
     /* sizes */
     batchSize   = THCTensor_(size)(state, input, 0);
@@ -65,14 +76,14 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
   }
   else
   {
-    THArgCheck(false, 2, "4D or 5D tensor expected");
+    THArgCheck(false, 2, "4D or 5D tensor expected, got %d", THCTensor_(nDimension)(state, input));
   }
 
   THArgCheck(kT/2 >= padT && kW/2 >= padW && kH/2 >= padH, 2,
-    "pad should be smaller than half of kernel size"
+             "pad should be smaller than half of kernel size"
   );
   THArgCheck(dilationT > 0 && dilationW > 0 && dilationH > 0, 14,
-    "dilation should be greater than 0"
+             "dilation should be greater than 0"
   );
 
   if (ceilMode)
@@ -198,6 +209,7 @@ void THNN_(VolumetricDilatedMaxPooling_updateGradInput)(
            int padT, int padW, int padH,
            int dilationT, int dilationW, int dilationH)
 {
+  // TODO: gradOutput shape check
   // Resize and initialize result tensor.
   THCTensor_(resizeAs)(state, gradInput, input);
   THCTensor_(zero)(state, gradInput);
