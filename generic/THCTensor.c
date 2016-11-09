@@ -833,4 +833,26 @@ int THCTensor_(checkGPU)(THCState *state, unsigned int nTensors, ...)
 #endif // DISABLE_CHECK_GPU
 }
 
+THCDescBuff THCTensor_(sizeDesc)(THCState *state, const THCTensor *tensor) {
+  const int L = THC_DESC_BUFF_LEN;
+  THCDescBuff buf;
+  char *str = buf.str;
+  int n = 0;
+  n += snprintf(str, L-n, "[");
+  int i;
+  for(i = 0; i < tensor->nDimension; i++) {
+    if(n >= L) break;
+    n += snprintf(str+n, L-n, "%ld", tensor->size[i]);
+    if(i < tensor->nDimension-1) {
+      n += snprintf(str+n, L-n, " x ");
+    }
+  }
+  if(n < L - 2) {
+    snprintf(str+n, L-n, "]");
+  } else {
+    snprintf(str+L-5, 5, "...]");
+  }
+  return buf;
+}
+
 #endif

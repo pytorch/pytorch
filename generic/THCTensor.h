@@ -127,4 +127,7 @@ THC_API cudaTextureObject_t THCTensor_(getTextureObject)(THCState *state, THCTen
 THC_API int THCTensor_(getDevice)(THCState *state, const THCTensor *self);
 THC_API int THCTensor_(checkGPU)(THCState *state, unsigned int nTensors, ...);
 
+/* debug methods */
+THC_API THCDescBuff THCTensor_(sizeDesc)(THCState *state, const THCTensor *tensor);
+
 #endif
