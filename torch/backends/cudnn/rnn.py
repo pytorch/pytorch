@@ -17,27 +17,14 @@ def get_cudnn_mode(mode):
 
 
 def init_dropout_descriptor(fn, handle):
-    dropout_desc = cudnn.DropoutDescriptor()
-
-    dropout_states_size = ctypes.c_long()
-    check_error(cudnn.lib.cudnnDropoutGetStatesSize(
-        handle,
-        ctypes.byref(dropout_states_size)))
-
-    dropout_states = torch.cuda.ByteTensor(dropout_states_size.value)
-    dropout_desc.set(
+    return cudnn.DropoutDescriptor(
         handle,
         fn.dropout,
-        dropout_states,
         fn.seed
     )
-    return dropout_desc
-
 
 def init_rnn_descriptor(fn):
-    rnn_desc = cudnn.RNNDescriptor()
-
-    rnn_desc.set(
+    return cudnn.RNNDescriptor(
         fn.hidden_size,
         fn.num_layers,
         fn.dropout_desc,
@@ -46,7 +33,6 @@ def init_rnn_descriptor(fn):
         fn.mode,
         fn.datatype
     )
-    return rnn_desc
 
 
 def init_weight_descriptor(fn, weight):
@@ -194,7 +180,7 @@ def forward(fn, input, hx, weight, output, hy):
             raise RuntimeError('input.size(2) must be equal to input_size. Expected {}, got {}'.format(
                 fn.input_size
             ))
-        if fn.dropout != 0 and cudnn.lib.version < 5103:
+        if fn.dropout != 0 and cudnn.version() < 5103:
             raise RuntimeError('dropout supported only in cudnn v5.1 and above')
 
         fn.seq_length, fn.mini_batch, fn.input_size = input.size()
@@ -221,7 +207,7 @@ def forward(fn, input, hx, weight, output, hy):
         num_weights = get_num_weights(
             handle, fn.rnn_desc, fn.x_descs[0], fn.datatype)
         fn.weight_buf = input.new(num_weights)
-        fn.w_desc       = init_weight_descriptor(fn, fn.weight_buf)
+        fn.w_desc = init_weight_descriptor(fn, fn.weight_buf)
         w = fn.weight_buf
         # this zero might not seem necessary, but it is in the case
         # where biases are disabled; then they won't be copied and must be zero'd.
@@ -283,7 +269,7 @@ def forward(fn, input, hx, weight, output, hy):
                 fn.y_descs, ctypes.c_void_p(y.data_ptr()),
                 fn.hy_desc, ctypes.c_void_p(hy.data_ptr()),
                 fn.cy_desc, ctypes.c_void_p(cy.data_ptr()) if cx else None,
-                ctypes.c_void_p(fn.reserve.data_ptr()), fn.reserve.size(0)
+                ctypes.c_void_p(fn.workspace.data_ptr()), fn.workspace.size(0)
             ))
 
         if fn.batch_first:
@@ -320,7 +306,7 @@ def backward_grad(fn, input, hx, weight, output, grad_output, grad_hy, grad_inpu
         dhx = grad_hx.resize_(*hidden_size)
         dcx = grad_cx.resize_(*hidden_size) if grad_cx else None
 
-        if fn.dropout != 0 and lib.version < 5103:
+        if fn.dropout != 0 and cudnn.version() < 5103:
             raise RuntimeError('dropout supported only in cudnn v 5.1 and above')
         if not fn.train:
             raise RuntimeError('backward_grad can only be called when training!')
@@ -395,7 +381,7 @@ def backward_weight(fn, input, hx, output, weight, grad_weight):
         hidden_size = _hidden_size(fn)
         if not fn.train:
             raise RuntimeError('backward_weight can only be called when training!')
-        if fn.dropout != 0 and lib.version < 5103:
+        if fn.dropout != 0 and cudnn.version() < 5103:
             raise RuntimeError('dropout supported only in cudnn v 5.1 and above')
         if tuple(input.size()) != input_size:
             raise RuntimeError('Expected input size {}, got {}'.format(

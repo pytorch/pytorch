@@ -10,6 +10,8 @@ except ImportError:
 # FIXME: write a proper function library
 from .thnn import Tanh, Sigmoid, Threshold
 from .linear import Linear
+from .dropout import Dropout
+
 
 def _wrap(fn, *args):
     def inner(*inner_args):
@@ -18,6 +20,7 @@ def _wrap(fn, *args):
 tanh = _wrap(Tanh)
 sigmoid = _wrap(Sigmoid)
 ReLU = _wrap(Threshold, 0, 0, False)
+
 
 # get around autograd's lack of None-handling
 def linear(input, w, b):
@@ -31,13 +34,14 @@ def RNNReLUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
         hy = ReLU(linear(input, w_ih, b_ih) + linear(hidden, w_hh, b_hh))
         return hy
 
+
 def RNNTanhCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
         hy = tanh(linear(input, w_ih, b_ih) + linear(hidden, w_hh, b_hh))
         return hy
 
+
 def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
         hx, cx = hidden
-        hsz = hx.size(1)
         gates = linear(input, w_ih, b_ih) + linear(hx, w_hh, b_hh)
         ingate, forgetgate, cellgate, outgate = gates.chunk(4, 1)
 
@@ -51,8 +55,8 @@ def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
 
         return hy, cy
 
+
 def GRUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
-        hsz = hidden.size(1)
         gi = linear(input, w_ih, b_ih)
         gh = linear(hidden, w_hh, b_hh)
         i_r, i_i, i_n = gi.chunk(3, 1)
@@ -61,54 +65,70 @@ def GRUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
         resetgate = sigmoid(i_r + h_r)
         inputgate = sigmoid(i_i + h_i)
         newgate = tanh(i_n + resetgate * h_n)
-        hy     = newgate + inputgate * (hidden - newgate)
+        hy = newgate + inputgate * (hidden - newgate)
 
         return hy
 
-def StackedRNN(cell, num_layers, lstm=False):
+
+def StackedRNN(inners, num_layers, lstm=False, dropout=0, train=True):
+
+    num_directions = len(inners)
+    total_layers = num_layers * num_directions
+
     def forward(input, hidden, weight):
-        assert(len(weight) == num_layers)
+        assert(len(weight) == total_layers)
         next_hidden = []
 
         if lstm:
             hidden = list(zip(*hidden))
 
         for i in range(num_layers):
-            hy = cell(input, hidden[i], *weight[i])
-            next_hidden.append(hy)
-            input = hy[0] if lstm else hy
+            all_output = []
+            for j, inner in enumerate(inners):
+                l = i * num_directions + j
+
+                hy, output = inner(input, hidden[l], weight[l])
+                next_hidden.append(hy)
+                all_output.append(output)
+
+            input = torch.cat(all_output, 2)
+
+            if dropout != 0 and i < num_layers - 1:
+                input = Dropout(p=dropout, train=train, inplace=False)(input)
 
         if lstm:
             next_h, next_c = zip(*next_hidden)
             next_hidden = (
-                torch.cat(next_h, 0).view(num_layers, *next_h[0].size()),
-                torch.cat(next_c, 0).view(num_layers, *next_c[0].size())
+                torch.cat(next_h, 0).view(total_layers, *next_h[0].size()),
+                torch.cat(next_c, 0).view(total_layers, *next_c[0].size())
             )
         else:
             next_hidden = torch.cat(next_hidden, 0).view(
-                num_layers, *next_hidden[0].size())
+                total_layers, *next_hidden[0].size())
 
         return next_hidden, input
 
     return forward
 
-def Recurrent(rnn):
+def Recurrent(inner, reverse=False):
     def forward(input, hidden, weight):
         output = []
-        for i in range(input.size(0)):
-            hidden, y = rnn(input[i], hidden, weight)
-            output.append(y)
+        steps = range(input.size(0) - 1, -1, -1) if reverse else range(input.size(0))
+        for i in steps:
+            hidden = inner(input[i], hidden, *weight)
+            # hack to handle LSTM
+            output.append(isinstance(hidden, tuple) and hidden[0] or hidden)
 
+        if reverse:
+            output.reverse()
         output = torch.cat(output, 0).view(input.size(0), *output[0].size())
+
         return hidden, output
 
     return forward
 
+
 def AutogradRNN(mode, input_size, hidden_size, num_layers=1, batch_first=False, dropout=0, train=True, bidirectional=False):
-    if bidirectional:
-        raise NotImplementedError()
-    if dropout != 0:
-        raise NotImplementedError()
 
     if mode == 'RNN_RELU':
         cell = RNNReLUCell
@@ -121,7 +141,16 @@ def AutogradRNN(mode, input_size, hidden_size, num_layers=1, batch_first=False, 
     else:
         raise Exception('Unknown mode: {}'.format(mode))
 
-    func = Recurrent(StackedRNN(cell, num_layers, (mode == 'LSTM')))
+    if bidirectional:
+        layer = (Recurrent(cell), Recurrent(cell, reverse=True))
+    else:
+        layer = (Recurrent(cell),)
+
+    func = StackedRNN(layer,
+                      num_layers,
+                      (mode == 'LSTM'),
+                      dropout=dropout,
+                      train=train)
 
     def forward(input, weight, hidden):
         if batch_first:

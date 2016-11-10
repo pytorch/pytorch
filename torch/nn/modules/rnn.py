@@ -8,7 +8,8 @@ from ..parameter import Parameter
 class RNNBase(Module):
 
     def __init__(self, mode, input_size, hidden_size,
-                 num_layers=1, bias=True, batch_first=False, dropout=0):
+                 num_layers=1, bias=True, batch_first=False,
+                 dropout=0, bidirectional=False):
         self.mode = mode
         self.input_size = input_size
         self.hidden_size = hidden_size
@@ -16,31 +17,35 @@ class RNNBase(Module):
         self.bias = bias
         self.batch_first = batch_first
         self.dropout = dropout
+        self.bidirectional = bidirectional
+        num_directions = 2 if bidirectional else 1
 
         self.all_weights = []
         super_weights = {}
         for layer in range(num_layers):
-            layer_input_size = input_size if layer == 0 else hidden_size
-            if mode == 'LSTM':
-                gate_size = 4 * hidden_size
-            elif mode == 'GRU':
-                gate_size = 3 * hidden_size
-            else:
-                gate_size = hidden_size
+            for direction in range(num_directions):
+                layer_input_size = input_size if layer == 0 else hidden_size * num_directions
+                if mode == 'LSTM':
+                    gate_size = 4 * hidden_size
+                elif mode == 'GRU':
+                    gate_size = 3 * hidden_size
+                else:
+                    gate_size = hidden_size
 
-            w_ih = Parameter(torch.Tensor(gate_size, layer_input_size))
-            w_hh = Parameter(torch.Tensor(gate_size, hidden_size))
-            b_ih = Parameter(torch.Tensor(gate_size))
-            b_hh = Parameter(torch.Tensor(gate_size))
+                w_ih = Parameter(torch.Tensor(gate_size, layer_input_size))
+                w_hh = Parameter(torch.Tensor(gate_size, hidden_size))
+                b_ih = Parameter(torch.Tensor(gate_size))
+                b_hh = Parameter(torch.Tensor(gate_size))
 
-            super_weights['weight_ih_l{}'.format(layer)] = w_ih
-            super_weights['weight_hh_l{}'.format(layer)] = w_hh
-            if bias:
-                super_weights['bias_ih_l{}'.format(layer)] = b_ih
-                super_weights['bias_hh_l{}'.format(layer)] = b_hh
-                self.all_weights += [(w_ih, w_hh, b_ih, b_hh)]
-            else:
-                self.all_weights += [(w_ih, w_hh)]
+                suffix = '_reverse' if direction == 1 else ''
+                super_weights['weight_ih_l{}{}'.format(layer, suffix)] = w_ih
+                super_weights['weight_hh_l{}{}'.format(layer, suffix)] = w_hh
+                if bias:
+                    super_weights['bias_ih_l{}{}'.format(layer, suffix)] = b_ih
+                    super_weights['bias_hh_l{}{}'.format(layer, suffix)] = b_hh
+                    self.all_weights += [(w_ih, w_hh, b_ih, b_hh)]
+                else:
+                    self.all_weights += [(w_ih, w_hh)]
 
         super(RNNBase, self).__init__(
             **super_weights
@@ -62,8 +67,8 @@ class RNNBase(Module):
             self.num_layers,
             self.batch_first,
             self.dropout,
-            train=True,  #FIXME
-            bidirectional=False,  #FIXME
+            self.training,
+            self.bidirectional
         )
 
         return func(input, self.all_weights, hx)
