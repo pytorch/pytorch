@@ -1,5 +1,6 @@
 #include <iostream>
 #include <cassert>
+#include <typeinfo>
 
 #include "../_THD.h"
 
