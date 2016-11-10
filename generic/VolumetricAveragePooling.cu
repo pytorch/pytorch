@@ -15,14 +15,25 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
   int inputHeight;
   int inputWidth;
 
+  int dimt = 1;
+  int dimh = 2;
+  int dimw = 3;
+
+  if (input->nDimension == 5)
+  {
+    dimt++;
+    dimh++;
+    dimw++;
+  }
+
   if (THCTensor_(nDimension)(state, input) == 4)
   {
-    THArgCheck(
-      THCTensor_(size)(state, input, 1) >= kT &&
-      THCTensor_(size)(state, input, 2) >= kH &&
-      THCTensor_(size)(state, input, 3) >= kW, 2,
-      "input image smaller than kernel size"
-    );
+    THArgCheck(input->size[dimw] >= kW && input->size[dimh] >= kH
+               && input->size[dimt] >= kT, 2,
+               "input image (T: %d H: %d W: %d) smaller than "
+               "kernel size (kT: %d kH: %d kW: %d)",
+               input->size[dimt], input->size[dimh], input->size[dimw],
+               kT, kH, kW);
 
     /* sizes */
     batchSize   = 1;
@@ -33,13 +44,13 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
   }
   else if (THCTensor_(nDimension)(state, input) == 5)
   {
-    THArgCheck(
-      THCTensor_(size)(state, input, 2) >= kT &&
-      THCTensor_(size)(state, input, 3) >= kH &&
-      THCTensor_(size)(state, input, 4) >= kW, 2,
-      "input image smaller than kernel size"
+    THArgCheck(input->size[dimw] >= kW && input->size[dimh] >= kH
+               && input->size[dimt] >= kT, 2,
+               "input image (T: %d H: %d W: %d) smaller than "
+               "kernel size (kT: %d kH: %d kW: %d)",
+               input->size[dimt], input->size[dimh], input->size[dimw],
+               kT, kH, kW);
 
-    );
     /* sizes */
     batchSize   = THCTensor_(size)(state, input, 0);
     inputSlices = THCTensor_(size)(state, input, 1);
@@ -49,7 +60,7 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
   }
   else
   {
-    THArgCheck(false, 2, "4D or 5D tensor expected");
+    THArgCheck(false, 2, "4D or 5D tensor expected, but got: %d", input->nDimension);
   }
 
   int outputTime   = (inputTime   - kT) / dT + 1;
@@ -128,6 +139,7 @@ void THNN_(VolumetricAveragePooling_updateGradInput)(
            int kT, int kW, int kH,
            int dT, int dW, int dH)
 {
+  // TODO: gradOutput shape check
   bool kernelsOverlap = (dT < kT) || (dH < kH) || (dW < kW);
 
   // Resize and initialize result tensor.

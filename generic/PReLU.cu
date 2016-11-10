@@ -48,6 +48,7 @@ void THNN_(PReLU_updateGradInput)(
            THCTensor *weight,
            long nOutputPlane)
 {
+  THCUNN_check_nElement(state, input, gradOutput);
   THCTensor_(resizeAs)(state, gradInput, input);
 
   real *w = THCTensor_(data)(state, weight);
@@ -93,6 +94,7 @@ void THNN_(PReLU_accGradParameters)(
            long nOutputPlane,
            real scale)
 {
+  THCUNN_check_nElement(state, input, gradOutput);
   // use grad input for temporary storage, then call updateGradInput again
 
   if (nOutputPlane == 0)

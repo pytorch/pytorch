@@ -36,6 +36,7 @@ void THNN_(ELU_updateGradInput)(
            real alpha,
            bool inplace)
 {
+  THCUNN_check_nElement(state, input, gradOutput);
   THCUNN_assertSameGPU_generic(state, 3, output, gradOutput, gradInput);
 
   if (inplace)

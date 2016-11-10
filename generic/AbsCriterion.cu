@@ -9,6 +9,7 @@ void THNN_(AbsCriterion_updateOutput)(
            THCTensor *output,
            bool sizeAverage)
 {
+  THCUNN_check_nElement(state, input, target);
   THCUNN_assertSameGPU_generic(state, 2, input, target);
 
   long size = THCTensor_(nElement)(state, input);
@@ -36,6 +37,7 @@ void THNN_(AbsCriterion_updateGradInput)(
            THCTensor *gradInput,
            bool sizeAverage)
 {
+  THCUNN_check_nElement(state, input, target);
   THCUNN_assertSameGPU_generic(state, 3, input, target, gradInput);
 
   long size = THCTensor_(nElement)(state, input);

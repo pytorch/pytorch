@@ -17,8 +17,8 @@ void THNN_(SpatialFractionalMaxPooling_updateOutput)(
   long numBatch = 1;
 
   long numInputDims = THCTensor_(nDimension)(state, input);
-  THArgCheck(numInputDims == 3 || numInputDims == 4, 2,
-                "3D or 4D (batch mode) tensor expected");
+  THCUNN_argCheck(state, numInputDims == 3 || numInputDims == 4, 2, input,
+                  "3D or 4D (batch mode) tensor expected for input, but got: %s");
 
   if (numInputDims == 4) {
     numBatch = THCTensor_(size)(state, input, 0);
@@ -33,9 +33,11 @@ void THNN_(SpatialFractionalMaxPooling_updateOutput)(
   long inputW = THCTensor_(size)(state, input, dimw);
 
   THArgCheck(outputH + poolSizeH - 1 < inputH, 6,
-                "poolSizeH too large relative to input height");
+             "poolSizeH (%d) too large relative to input height (%d)",
+             poolSizeH, inputH);
   THArgCheck(outputW + poolSizeW - 1 < inputW, 5,
-                "poolSizeW too large relative to input width");
+             "poolSizeW (%d) too large relative to input width (%d)",
+             poolSizeW, inputW);
 
   THCDeviceTensor<real, 4> devInput;
   THCDeviceTensor<real, 4> devOutput;

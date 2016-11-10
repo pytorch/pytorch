@@ -19,8 +19,8 @@ void THNN_(VolumetricReplicationPadding_updateOutput)(
   int numBatch = 1;
 
   int numInputDims = THCTensor_(nDimension)(state, input);
-  THArgCheck(numInputDims == 4 || numInputDims == 5, 2,
-             "input must be 4 or 5-dimensional");
+  THCUNN_argCheck(state, numInputDims == 4 || numInputDims == 5, 2, input,
+    "4D or 5D (batch mode) tensor expected for input, but got: %s");
 
   if (numInputDims == 5) {
     numBatch = THCTensor_(size)(state, input, 0);
@@ -29,6 +29,18 @@ void THNN_(VolumetricReplicationPadding_updateOutput)(
     dimh++;
     dimw++;
   }
+
+  int idepth = input->size[dimd];
+  int iheight = input->size[dimh];
+  int iwidth = input->size[dimw];
+  int odepth = idepth + pfront + pback;
+  int oheight = iheight + ptop + pbottom;
+  int owidth  = iwidth + pleft + pright;
+
+  THArgCheck(owidth >= 1 || oheight >= 1 || odepth >= 1, 2,
+             "input (D: %d H: %d, W: %d)is too small."
+             " Calculated output D: %d H: %d W: %d",
+             idepth, iheight, iwidth, odepth, oheight, owidth);
 
   int numPlanes = THCTensor_(size)(state, input, planeDim);
   int inputD = THCTensor_(size)(state, input, dimd);
@@ -91,6 +103,22 @@ void THNN_(VolumetricReplicationPadding_updateGradInput)(
     dimw++;
   }
 
+  int idepth = input->size[dimd];
+  int iheight = input->size[dimh];
+  int iwidth = input->size[dimw];
+  int odepth = idepth + pfront + pback;
+  int oheight = iheight + ptop + pbottom;
+  int owidth  = iwidth + pleft + pright;
+
+  THArgCheck(owidth == THCTensor_(size)(state, gradOutput, dimw), 3,
+             "gradOutput width unexpected. Expected: %d, Got: %d",
+             owidth, THCTensor_(size)(state, gradOutput, dimw));
+  THArgCheck(oheight == THCTensor_(size)(state, gradOutput, dimh), 3,
+             "gradOutput height unexpected. Expected: %d, Got: %d",
+             oheight, THCTensor_(size)(state, gradOutput, dimh));
+  THArgCheck(odepth == THCTensor_(size)(state, gradOutput, dimd), 3,
+             "gradOutput depth unexpected. Expected: %d, Got: %d",
+             odepth, THCTensor_(size)(state, gradOutput, dimd));
   THCTensor_(resizeAs)(state, gradInput, input);
   THCTensor_(zero)(state, gradInput);
 

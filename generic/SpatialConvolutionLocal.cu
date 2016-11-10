@@ -19,6 +19,7 @@ void THNN_(SpatialConvolutionLocal_updateOutput)(
   THCUNN_assertSameGPU_generic(state, 5, input, output, weight,
                                  bias, finput);
 
+  // TODO: add argument checking
   long nInputPlane = THCTensor_(size)(state,weight,2)/(kW*kH);
   long nOutputPlane = THCTensor_(size)(state,weight,1);
 

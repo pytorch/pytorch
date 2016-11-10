@@ -2,6 +2,7 @@
 #define THC_GENERIC_FILE "generic/MultiMarginCriterion.cu"
 #else
 
+// TODO: improve error messages
 void THNN_(MultiMarginCriterion_updateOutput)(
            THCState *state,
            THCTensor *input,
@@ -48,6 +49,9 @@ void THNN_(MultiMarginCriterion_updateOutput)(
   }
   else if (input->nDimension == 2)
   {
+    int nframe = input->size[0];
+    THArgCheck((target->nDimension == 1) && (target->size[0] == nframe), 3,
+               "inconsistent target size");
     THCTensor *output_ = THCTensor_(newWithSize1d)(state, input->size[0]);  // tmp outupt buffer
     dim3 blocks(input->size[0]);
     dim3 threads(MULTIMARGIN_THREADS);
@@ -58,7 +62,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
         THCTensor_(data)(state, input),
         THCIndexTensor_(data)(state, target),
         weights ? THCTensor_(data)(state, weights) : NULL,
-        input->size[0], input->size[1],
+        nframe, input->size[1],
         sizeAverage,
         margin
       );
@@ -139,6 +143,9 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
   }
   else if (input->nDimension == 2)
   {
+    int nframe = gradInput->size[0];
+    THArgCheck((target->nDimension == 1) && (target->size[0] == nframe), 3,
+               "inconsistent target size");
     dim3 blocks(gradInput->size[0]);
     dim3 threads(MULTIMARGIN_THREADS);
 
@@ -149,7 +156,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
         THCTensor_(data)(state, input),
         THCIndexTensor_(data)(state, target),
         weights ? THCTensor_(data)(state, weights) : NULL,
-        gradInput->size[0], gradInput->size[1],
+        nframe, gradInput->size[1],
         sizeAverage,
         margin
       );
@@ -161,7 +168,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
         THCTensor_(data)(state, input),
         THCIndexTensor_(data)(state, target),
         weights ? THCTensor_(data)(state, weights) : NULL,
-        gradInput->size[0], gradInput->size[1],
+        nframe, gradInput->size[1],
         sizeAverage,
         margin
       );

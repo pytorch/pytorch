@@ -10,6 +10,7 @@ void THNN_(SpatialUpSamplingNearest_updateOutput)(
            THCTensor *output,
            int scale_factor)
 {
+  // TODO: check argument shapes
   THCTensor_(zero)(state, output);
 
   THCUNN_assertSameGPU_generic(state, 2, input, output);
@@ -67,6 +68,7 @@ void THNN_(SpatialUpSamplingNearest_updateGradInput)(
            THCTensor *gradInput,
            int scale_factor)
 {
+  // TODO: check argument shapes
   THCUNN_assertSameGPU_generic(state, 2, gradOutput, gradInput);
 
   THCTensor_(zero)(state, gradInput);

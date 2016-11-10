@@ -35,6 +35,7 @@ void THNN_(LeakyReLU_updateGradInput)(
            real negval,
            bool inplace)
 {
+  THCUNN_check_nElement(state, input, gradOutput);
   THCUNN_assertSameGPU_generic(state, 3, input, gradInput, gradOutput);
 
   if (inplace)

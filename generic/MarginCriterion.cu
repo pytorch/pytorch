@@ -10,6 +10,8 @@ void THNN_(MarginCriterion_updateOutput)(
            bool sizeAverage,
            real margin)
 {
+  THCUNN_check_nElement(state, input, target);
+  THCUNN_check_dim_size(state, output, 1, 0, 1);
   THCUNN_assertSameGPU_generic(state, 2, input, target);
 
   long size = THCTensor_(nElement)(state, input);
@@ -40,6 +42,7 @@ void THNN_(MarginCriterion_updateGradInput)(
            bool sizeAverage,
            real margin)
 {
+  THCUNN_check_nElement(state, input, target);
   THCUNN_assertSameGPU_generic(state, 3, input, target, gradInput);
 
   long size = THCTensor_(nElement)(state, input);

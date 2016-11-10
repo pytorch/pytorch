@@ -113,6 +113,7 @@ void THNN_(LogSoftMax_updateGradInput)(
            THCTensor *gradInput,
            THCTensor *output)
 {
+  THCUNN_check_nElement(state, input, gradOutput);
   THCUNN_assertSameGPU_generic(state, 3, output, gradOutput, gradInput);
 
   THCTensor_(resizeAs)(state, gradInput, output);

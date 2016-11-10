@@ -10,7 +10,9 @@ void THNN_(SpatialMaxUnpooling_updateOutput)(
            int owidth, int oheight)
 {
   THCUNN_assertSameGPU_generic(state, 3, input, output, indices);
-  THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch) tensor expected");
+  THCUNN_argCheck(state, input->nDimension == 3 || input->nDimension == 4, 2, input,
+                  "3D or 4D (batch mode) tensor expected for input, but got: %s");
+  THCUNN_check_shape_indices(state, indices, input);
 
   long nInputCols, nInputRows, nInputPlane, batchSize;
 
@@ -56,21 +58,29 @@ void THNN_(SpatialMaxUnpooling_updateGradInput)(
            int owidth, int oheight)
 {
   THCUNN_assertSameGPU_generic(state, 4, input, gradOutput, indices, gradInput);
+  THCUNN_check_shape_indices(state, indices, input);
 
   long nInputCols, nInputRows, nInputPlane, batchSize;
+  int dimw = 2;
+  int dimh = 1;
 
   if (input->nDimension == 3) {
-    nInputCols = input->size[2];
-    nInputRows = input->size[1];
     nInputPlane = input->size[0];
     batchSize = 1;
   }
   else
   {
-    nInputCols = input->size[3];
-    nInputRows = input->size[2];
+    ++dimw;
+    ++dimh;
     nInputPlane = input->size[1];
     batchSize = input->size[0];
+  }
+  nInputCols = input->size[dimw];
+  nInputRows = input->size[dimh];
+
+  if(owidth!=gradOutput->size[dimw] || oheight!=gradOutput->size[dimh]){
+     THError("Inconsistent gradOutput size. oheight= %d, owidth= %d, gradOutput: %dx%d",
+             oheight, owidth,gradOutput->size[dimh],gradOutput->size[dimw]);
   }
 
   input = THCTensor_(newContiguous)(state, input);

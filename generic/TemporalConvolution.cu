@@ -20,15 +20,20 @@ void THNN_(TemporalConvolution_updateOutput)(
   int dimF = 1; // feature dimension
 
   THCUNN_assertSameGPU_generic(state, 4, input, output, weight, bias);
-  THArgCheck( input->nDimension == 2 || input->nDimension == 3, 2, "2D or 3D(batch mode) tensor expected");
+  THCUNN_argCheck(state, input->nDimension == 2 || input->nDimension == 3, 2, input,
+                  "2D or 3D (batch mode) tensor expected for input, but got: %s");
 
   if (input->nDimension == 3)
   {
     dimS = 1;
     dimF = 2;
   }
-  THArgCheck( input->size[dimF] == inputFrameSize, 2, "invalid input frame size");
-  THArgCheck( input->size[dimS] >= kW, 2, "input sequence smaller than kernel size");
+  THArgCheck(input->size[dimF] == inputFrameSize, 2,
+             "invalid input frame size. Got: %d, Expected: %d",
+             input->size[dimF], inputFrameSize);
+  THArgCheck(input->size[dimS] >= kW, 2,
+             "input sequence smaller than kernel size. Got: %d, Expected: %d",
+             input->size[dimS], kW);
 
   input = THCTensor_(newContiguous)(state, input);
   outputWindow = THCTensor_(new)(state);

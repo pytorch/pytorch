@@ -22,16 +22,21 @@ void THNN_(SpatialFullConvolution_updateOutput)(
   THCUNN_assertSameGPU_generic(state, 6, input, output, weight,
                                  bias, columns, ones);
 
-  THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch mode) tensor is expected");
+  THCUNN_argCheck(state, input->nDimension == 3 || input->nDimension == 4, 2, input,
+                  "3D or 4D (batch mode) tensor expected for input, but got: %s")
 
   int batch = 1;
   if (input->nDimension == 3) {
-    THArgCheck(input->size[0] == nInputPlane, 2, "input channels and nInputPlane dont match");
+    THArgCheck(input->size[0] == nInputPlane, 2,
+               "input channels (%d) and nInputPlane (%d) dont match",
+               input->size[0], nInputPlane);
     // Force batch
     batch = 0;
     THCTensor_(resize4d)(state, input, 1, input->size[0], input->size[1], input->size[2]);
   } else {
-    THArgCheck(input->size[1] == nInputPlane, 2, "input channels and nInputPlane dont match");
+    THArgCheck(input->size[1] == nInputPlane, 2,
+               "input channels (%d) and nInputPlane (%d) dont match",
+               input->size[1], nInputPlane);
   }
 
   long inputWidth   = input->size[3];
@@ -154,9 +159,11 @@ void THNN_(SpatialFullConvolution_updateGradInput)(
   int nInputPlane = THCTensor_(size)(state, weight, 0);
   int nOutputPlane = THCTensor_(size)(state, weight, 1);
 
+  // TODO: check gradOutput shape
   THCUNN_assertSameGPU_generic(state, 5, input, gradOutput, weight,
                                  gradColumns, gradInput);
-  THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch mode) tensor is expected");
+  THCUNN_argCheck(state, input->nDimension == 3 || input->nDimension == 4, 2, input,
+                  "3D or 4D (batch mode) tensor expected for input, but got: %s")
 
   int batch = 1;
   if (input->nDimension == 3) {
@@ -258,7 +265,8 @@ void THNN_(SpatialFullConvolution_accGradParameters)(
   THCUNN_assertSameGPU_generic(state, 6, input, gradOutput, gradWeight,
                                  gradBias, columns, ones);
 
-  THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch mode) tensor is expected");
+  THCUNN_argCheck(state, input->nDimension == 3 || input->nDimension == 4, 2, input,
+                  "3D or 4D (batch mode) tensor expected for input, but got: %s")
 
   int batch = 1;
   if (input->nDimension == 3) {

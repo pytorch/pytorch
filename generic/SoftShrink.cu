@@ -23,6 +23,7 @@ void THNN_(SoftShrink_updateGradInput)(
            THCTensor *gradInput,
            real lambda)
 {
+  THCUNN_check_nElement(state, input, gradOutput);
   THCUNN_assertSameGPU_generic(state, 3, input, gradOutput, gradInput);
   THCTensor_(resizeAs)(state, gradInput, input);
   THC_pointwiseApply3(state, gradInput, input, gradOutput, SoftShrinkUpdateGradInput<real>(lambda));

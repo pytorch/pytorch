@@ -16,8 +16,8 @@ void THNN_(SpatialReflectionPadding_updateOutput)(THCState *state,
   int numBatch = 1;
 
   int numInputDims = THCTensor_(nDimension)(state, input);
-  THArgCheck(numInputDims == 3 || numInputDims == 4, 2,
-                "input must be 3 or 4-dimensional");
+  THCUNN_argCheck(state, numInputDims == 3 || numInputDims == 4, 2, input,
+                  "3D or 4D (batch mode) tensor expected for input, but got: %s")
 
   if (numInputDims == 4) {
     numBatch = THCTensor_(size)(state, input, 0);
@@ -31,6 +31,11 @@ void THNN_(SpatialReflectionPadding_updateOutput)(THCState *state,
   int inputW = THCTensor_(size)(state, input, dimw);
   int outputH = inputH + padT + padB;
   int outputW  = inputW + padL + padR;
+
+  THArgCheck(outputW >= 1 || outputH >= 1 , 2,
+             "input (H: %d, W: %d)is too small."
+             " Calculated output H: %d W: %d",
+             inputH, inputW, outputH, outputW);
 
   THCDeviceTensor<real, 4> devInput;
   THCDeviceTensor<real, 4> devOutput;
@@ -81,6 +86,17 @@ void THNN_(SpatialReflectionPadding_updateGradInput)(
     dimh++;
     dimw++;
   }
+  int iheight = input->size[dimh];
+  int iwidth = input->size[dimw];
+  int oheight = iheight + padT + padB;
+  int owidth  = iwidth + padL + padR;
+
+  THArgCheck(owidth == THCTensor_(size)(state, gradOutput, dimw), 3,
+             "gradOutput width unexpected. Expected: %d, Got: %d",
+             owidth, THCTensor_(size)(state, gradOutput, dimw));
+  THArgCheck(oheight == THCTensor_(size)(state, gradOutput, dimh), 3,
+             "gradOutput height unexpected. Expected: %d, Got: %d",
+             oheight, THCTensor_(size)(state, gradOutput, dimh));
 
   THCTensor_(resizeAs)(state, gradInput, input);
   THCTensor_(zero)(state, gradInput);
