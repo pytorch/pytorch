@@ -12,7 +12,7 @@ void THNN_(SpatialUpSamplingBilinear_updateOutput)(
   // TODO: check argument shapes
   input = THCTensor_(newContiguous)(state, input);
   output = THCTensor_(newContiguous)(state, output);
-  THCUNN_assertSameGPU_generic(state, 2, input, output);
+  THCUNN_assertSameGPU(state, 2, input, output);
   THCTensor_(zero)(state, output);
   THCDeviceTensor<real, 4> idata = toDeviceTensor<real, 4>(state, input);
   THCDeviceTensor<real, 4> odata = toDeviceTensor<real, 4>(state, output);
@@ -49,7 +49,7 @@ void THNN_(SpatialUpSamplingBilinear_updateGradInput)(
   // TODO: check argument shapes
   gradInput = THCTensor_(newContiguous)(state, gradInput);
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
-  THCUNN_assertSameGPU_generic(state, 2, gradOutput, gradInput);
+  THCUNN_assertSameGPU(state, 2, gradOutput, gradInput);
   THCTensor_(zero)(state, gradInput);
   THCDeviceTensor<real, 4> data1 = toDeviceTensor<real, 4>(state, gradInput);
   THCDeviceTensor<real, 4> data2 = toDeviceTensor<real, 4>(state, gradOutput);

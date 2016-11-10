@@ -19,8 +19,8 @@ void THNN_(SpatialFullConvolution_updateOutput)(
   int nInputPlane = THCTensor_(size)(state, weight, 0);
   int nOutputPlane = THCTensor_(size)(state, weight, 1);
 
-  THCUNN_assertSameGPU_generic(state, 6, input, output, weight,
-                                 bias, columns, ones);
+  THCUNN_assertSameGPU(state, 6, input, output, weight,
+                       bias, columns, ones);
 
   THCUNN_argCheck(state, input->nDimension == 3 || input->nDimension == 4, 2, input,
                   "3D or 4D (batch mode) tensor expected for input, but got: %s")
@@ -160,8 +160,8 @@ void THNN_(SpatialFullConvolution_updateGradInput)(
   int nOutputPlane = THCTensor_(size)(state, weight, 1);
 
   // TODO: check gradOutput shape
-  THCUNN_assertSameGPU_generic(state, 5, input, gradOutput, weight,
-                                 gradColumns, gradInput);
+  THCUNN_assertSameGPU(state, 5, input, gradOutput, weight,
+                       gradColumns, gradInput);
   THCUNN_argCheck(state, input->nDimension == 3 || input->nDimension == 4, 2, input,
                   "3D or 4D (batch mode) tensor expected for input, but got: %s")
 
@@ -262,8 +262,8 @@ void THNN_(SpatialFullConvolution_accGradParameters)(
   int nInputPlane = THCTensor_(size)(state, gradWeight, 0);
   int nOutputPlane = THCTensor_(size)(state, gradWeight, 1);
 
-  THCUNN_assertSameGPU_generic(state, 6, input, gradOutput, gradWeight,
-                                 gradBias, columns, ones);
+  THCUNN_assertSameGPU(state, 6, input, gradOutput, gradWeight,
+                       gradBias, columns, ones);
 
   THCUNN_argCheck(state, input->nDimension == 3 || input->nDimension == 4, 2, input,
                   "3D or 4D (batch mode) tensor expected for input, but got: %s")

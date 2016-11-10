@@ -11,7 +11,7 @@ void THNN_(SmoothL1Criterion_updateOutput)(
 {
   THCUNN_check_nElement(state, input, target);
   THCUNN_check_dim_size(state, output, 1, 0, 1);
-  THCUNN_assertSameGPU_generic(state, 2, input, target);
+  THCUNN_assertSameGPU(state, 2, input, target);
   THArgCheck(
     THCTensor_(nElement)(state, input) == THCTensor_(nElement)(state, target), 2,
     "input and target need to have the same number of elements"
@@ -49,7 +49,7 @@ void THNN_(SmoothL1Criterion_updateGradInput)(
            bool sizeAverage)
 {
   THCUNN_check_nElement(state, input, target);
-  THCUNN_assertSameGPU_generic(state, 3, input, target, gradInput);
+  THCUNN_assertSameGPU(state, 3, input, target, gradInput);
   THArgCheck(
     THCTensor_(nElement)(state, input) == THCTensor_(nElement)(state, target), 2,
     "input and target need to have the same number of elements"

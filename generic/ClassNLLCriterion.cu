@@ -21,11 +21,11 @@ void THNN_(ClassNLLCriterion_updateOutput)(
   int n_classes = THCTensor_(size)(state, input, n_dims - 1);
 
   if (weights) {
-    THCUNN_assertSameGPU_generic(
+    THCUNN_assertSameGPU(
       state, 5, input, target, weights, output, total_weight
     );
   } else {
-    THCUNN_assertSameGPU_generic(
+    THCUNN_assertSameGPU(
       state, 4, input, target, output, total_weight
     );
   }

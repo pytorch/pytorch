@@ -10,7 +10,7 @@ void THNN_(AbsCriterion_updateOutput)(
            bool sizeAverage)
 {
   THCUNN_check_nElement(state, input, target);
-  THCUNN_assertSameGPU_generic(state, 2, input, target);
+  THCUNN_assertSameGPU(state, 2, input, target);
 
   long size = THCTensor_(nElement)(state, input);
 
@@ -38,7 +38,7 @@ void THNN_(AbsCriterion_updateGradInput)(
            bool sizeAverage)
 {
   THCUNN_check_nElement(state, input, target);
-  THCUNN_assertSameGPU_generic(state, 3, input, target, gradInput);
+  THCUNN_assertSameGPU(state, 3, input, target, gradInput);
 
   long size = THCTensor_(nElement)(state, input);
   real norm = ScalarConvert<double, real>::to(sizeAverage ? 1./size : 1.);

@@ -13,7 +13,7 @@ void THNN_(SpatialUpSamplingNearest_updateOutput)(
   // TODO: check argument shapes
   THCTensor_(zero)(state, output);
 
-  THCUNN_assertSameGPU_generic(state, 2, input, output);
+  THCUNN_assertSameGPU(state, 2, input, output);
 
   input = THCTensor_(newContiguous)(state, input);
   // This is for allocating output Tensor
@@ -69,7 +69,7 @@ void THNN_(SpatialUpSamplingNearest_updateGradInput)(
            int scale_factor)
 {
   // TODO: check argument shapes
-  THCUNN_assertSameGPU_generic(state, 2, gradOutput, gradInput);
+  THCUNN_assertSameGPU(state, 2, gradOutput, gradInput);
 
   THCTensor_(zero)(state, gradInput);
 

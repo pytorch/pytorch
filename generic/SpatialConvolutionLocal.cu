@@ -16,8 +16,8 @@ void THNN_(SpatialConvolutionLocal_updateOutput)(
            long inputWidth, long inputHeight,
            long outputWidth, long outputHeight)
 {
-  THCUNN_assertSameGPU_generic(state, 5, input, output, weight,
-                                 bias, finput);
+  THCUNN_assertSameGPU(state, 5, input, output, weight,
+                       bias, finput);
 
   // TODO: add argument checking
   long nInputPlane = THCTensor_(size)(state,weight,2)/(kW*kH);
@@ -125,8 +125,8 @@ void THNN_(SpatialConvolutionLocal_updateGradInput)(
            long inputWidth, long inputHeight,
            long outputWidth, long outputHeight)
 {
-  THCUNN_assertSameGPU_generic(state, 5, input, gradOutput, weight,
-                                 fgradInput, gradInput);
+  THCUNN_assertSameGPU(state, 5, input, gradOutput, weight,
+                       fgradInput, gradInput);
 
   long nInputPlane = THCTensor_(size)(state,weight,2)/(kW*kH);
   long nOutputPlane = THCTensor_(size)(state,weight,1);
@@ -236,8 +236,8 @@ void THNN_(SpatialConvolutionLocal_accGradParameters)(
            long outputWidth, long outputHeight,
            real scale)
 {
-  THCUNN_assertSameGPU_generic(state, 5, input, gradOutput, gradWeight,
-                                 gradBias, finput);
+  THCUNN_assertSameGPU(state, 5, input, gradOutput, gradWeight,
+                       gradBias, finput);
 
   long nInputPlane = THCTensor_(size)(state,gradWeight,2)/(kW*kH);
   long nOutputPlane = THCTensor_(size)(state,gradWeight,1);

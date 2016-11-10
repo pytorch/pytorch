@@ -20,7 +20,7 @@ void THNN_(SpatialSubSampling_updateOutput)(
 
   int nInputPlane = THCTensor_(size)(state, weight, 0);
 
-  THCUNN_assertSameGPU_generic(state, 4, input, output, weight, bias);
+  THCUNN_assertSameGPU(state, 4, input, output, weight, bias);
   THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch) tensor expected");
 
   if (input->nDimension == 3) {
@@ -92,7 +92,7 @@ void THNN_(SpatialSubSampling_updateGradInput)(
            int kW, int kH,
            int dW, int dH)
 {
-  THCUNN_assertSameGPU_generic(state, 4, input, gradOutput, weight, gradInput);
+  THCUNN_assertSameGPU(state, 4, input, gradOutput, weight, gradInput);
 
   int nInputPlane = THCTensor_(size)(state, weight, 0);
 
@@ -168,7 +168,7 @@ void THNN_(SpatialSubSampling_accGradParameters)(
            int dW, int dH,
            float scale)
 {
-  THCUNN_assertSameGPU_generic(state, 4, input, gradOutput, gradWeight, gradBias);
+  THCUNN_assertSameGPU(state, 4, input, gradOutput, gradWeight, gradBias);
 
   int nInputPlane = THCTensor_(size)(state, gradWeight, 0);
 

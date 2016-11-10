@@ -11,7 +11,7 @@ void THNN_(SoftMarginCriterion_updateOutput)(
 {
   THCUNN_check_nElement(state, input, target);
   THCUNN_check_dim_size(state, output, 1, 0, 1);
-  THCUNN_assertSameGPU_generic(state, 2, input, target);
+  THCUNN_assertSameGPU(state, 2, input, target);
   accreal sum;
 
   long size = THCTensor_(nElement)(state, input);
@@ -40,7 +40,7 @@ void THNN_(SoftMarginCriterion_updateGradInput)(
            int sizeAverage)
 {
   THCUNN_check_nElement(state, input, target);
-  THCUNN_assertSameGPU_generic(state, 3, input, target, gradInput);
+  THCUNN_assertSameGPU(state, 3, input, target, gradInput);
 
   long size = THCTensor_(nElement)(state, input);
   accreal norm = (sizeAverage ? 1./size : 1.);

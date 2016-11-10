@@ -19,7 +19,7 @@ void THNN_(TemporalConvolution_updateOutput)(
   int dimS = 0; // sequence dimension
   int dimF = 1; // feature dimension
 
-  THCUNN_assertSameGPU_generic(state, 4, input, output, weight, bias);
+  THCUNN_assertSameGPU(state, 4, input, output, weight, bias);
   THCUNN_argCheck(state, input->nDimension == 2 || input->nDimension == 3, 2, input,
                   "2D or 3D (batch mode) tensor expected for input, but got: %s");
 
@@ -153,7 +153,7 @@ void THNN_(TemporalConvolution_updateGradInput)(
 
   int dimS = 0; // sequence dimension
 
-  THCUNN_assertSameGPU_generic(state, 4, input, gradOutput, weight, gradInput);
+  THCUNN_assertSameGPU(state, 4, input, gradOutput, weight, gradInput);
 
   if (gradOutput->nDimension == 3)
   {

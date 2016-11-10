@@ -12,7 +12,7 @@ void THNN_(HardTanh_updateOutput)(
            real max_val,
            bool inplace)
 {
-  THCUNN_assertSameGPU_generic(state, 2, input, output);
+  THCUNN_assertSameGPU(state, 2, input, output);
   if(inplace)
   {
     THCTensor_(set)(state, output, input);
@@ -36,7 +36,7 @@ void THNN_(HardTanh_updateGradInput)(
            bool inplace)
 {
   THCUNN_check_nElement(state, input, gradOutput);
-  THCUNN_assertSameGPU_generic(state, 3, input, gradOutput, gradInput);
+  THCUNN_assertSameGPU(state, 3, input, gradOutput, gradInput);
 
   if (inplace)
   {

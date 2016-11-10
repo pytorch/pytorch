@@ -11,7 +11,7 @@ void THNN_(SoftPlus_updateOutput)(
            real beta,
            real threshold)
 {
-  THCUNN_assertSameGPU_generic(state, 2, input, output);
+  THCUNN_assertSameGPU(state, 2, input, output);
   THCTensor_(resizeAs)(state, output, input);
   THC_pointwiseApply2(state, output, input, softPlusupdateOutput_functor<real>(threshold, beta));
 }
@@ -26,7 +26,7 @@ void THNN_(SoftPlus_updateGradInput)(
            real threshold)
 {
   THCUNN_check_nElement(state, input, gradOutput);
-  THCUNN_assertSameGPU_generic(state, 4, input, output, gradOutput, gradInput);
+  THCUNN_assertSameGPU(state, 4, input, output, gradOutput, gradInput);
   THCTensor_(resizeAs)(state, gradInput, output);
   THC_pointwiseApply3(state, gradInput, output, gradOutput, softPlusupdateGradInput_functor<real>(threshold, beta));
 }

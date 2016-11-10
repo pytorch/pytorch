@@ -12,7 +12,7 @@ void THNN_(SpatialAveragePooling_updateOutput)(
            bool ceil_mode,
            bool count_include_pad)
 {
-  THCUNN_assertSameGPU_generic(state, 2, input, output);
+  THCUNN_assertSameGPU(state, 2, input, output);
   THCUNN_argCheck(state, input->nDimension == 3 || input->nDimension == 4, 2, input,
                   "3D or 4D (batch mode) tensor expected for input, but got: %s");
   THArgCheck(kW/2 >= padW && kH/2 >= padH, 2,
@@ -101,7 +101,7 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
            bool ceil_mode,
            bool count_include_pad)
 {
-  THCUNN_assertSameGPU_generic(state, 3, input, gradOutput, gradInput);
+  THCUNN_assertSameGPU(state, 3, input, gradOutput, gradInput);
 
   input = THCTensor_(newContiguous)(state, input);
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);

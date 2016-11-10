@@ -15,7 +15,7 @@ void THNN_(VolumetricConvolution_updateOutput)(
 {
   THCTensor *columns = finput;
   THCTensor *ones = fgradInput;
-  THCUNN_assertSameGPU_generic(state, 6, input, output, weight, bias, columns, ones);
+  THCUNN_assertSameGPU(state, 6, input, output, weight, bias, columns, ones);
 
   THCUNN_argCheck(state, input->nDimension == 4 || input->nDimension == 5, 2, input,
                   "4D or 5D (batch mode) tensor expected for input, but got: %s");
@@ -172,7 +172,7 @@ void THNN_(VolumetricConvolution_updateGradInput)(
 
   THCTensor *gradColumns = finput;
 
-  THCUNN_assertSameGPU_generic(state, 5, input, gradOutput, weight, gradColumns, gradInput);
+  THCUNN_assertSameGPU(state, 5, input, gradOutput, weight, gradColumns, gradInput);
   THCUNN_argCheck(state, input->nDimension == 4 || input->nDimension == 5, 2, input,
                   "4D or 5D (batch mode) tensor expected for input, but got: %s");
 
@@ -275,7 +275,7 @@ void THNN_(VolumetricConvolution_accGradParameters)(
 {
   THCTensor *columns = finput;
   THCTensor *ones = fgradInput;
-  THCUNN_assertSameGPU_generic(state, 6, input, gradOutput, gradWeight, gradBias, columns, ones);
+  THCUNN_assertSameGPU(state, 6, input, gradOutput, gradWeight, gradBias, columns, ones);
 
   THCUNN_argCheck(state, gradWeight->nDimension == 5, 4, gradWeight,
                   "5D (nOutputPlane x nInputPlane x kT x kH x kW) tensor "

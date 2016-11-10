@@ -24,8 +24,8 @@ void THNN_(VolumetricFullConvolution_updateOutput)(
   const int kH           = (int)weight->size[3];
   const int kW           = (int)weight->size[4];
 
-  THCUNN_assertSameGPU_generic(state, 6, input, output, weight,
-                                 bias, columns, ones);
+  THCUNN_assertSameGPU(state, 6, input, output, weight,
+                       bias, columns, ones);
   THCUNN_argCheck(state, input->nDimension == 4 || input->nDimension == 5, 2, input,
     "4D or 5D (batch mode) tensor expected for input, but got: %s");
   THCUNN_argCheck(state, weight->nDimension == 5, 4, weight,
@@ -169,8 +169,8 @@ void THNN_(VolumetricFullConvolution_updateGradInput)(
   const int kH           = (int)weight->size[3];
   const int kW           = (int)weight->size[4];
 
-  THCUNN_assertSameGPU_generic(state, 5, input, gradOutput, weight,
-                                 gradColumns, gradInput);
+  THCUNN_assertSameGPU(state, 5, input, gradOutput, weight,
+                       gradColumns, gradInput);
   THCUNN_argCheck(state, input->nDimension == 4 || input->nDimension == 5, 2, input,
     "4D or 5D (batch mode) tensor expected for input, but got: %s");
   THCUNN_argCheck(state, weight->nDimension == 5, 4, weight,
@@ -282,8 +282,8 @@ void THNN_(VolumetricFullConvolution_accGradParameters)(
   const int kH           = (int)gradWeight->size[3];
   const int kW           = (int)gradWeight->size[4];
 
-  THCUNN_assertSameGPU_generic(state, 6, input, gradOutput, gradWeight,
-                                 gradBias, columns, ones);
+  THCUNN_assertSameGPU(state, 6, input, gradOutput, gradWeight,
+                       gradBias, columns, ones);
   THCUNN_argCheck(state, input->nDimension == 4 || input->nDimension == 5, 2, input,
     "4D or 5D (batch mode) tensor expected for input, but got: %s");
   THCUNN_argCheck(state, gradWeight->nDimension == 5, 4, gradWeight,

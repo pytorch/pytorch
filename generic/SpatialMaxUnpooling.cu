@@ -9,7 +9,7 @@ void THNN_(SpatialMaxUnpooling_updateOutput)(
            THCIndexTensor *indices,
            int owidth, int oheight)
 {
-  THCUNN_assertSameGPU_generic(state, 3, input, output, indices);
+  THCUNN_assertSameGPU(state, 3, input, output, indices);
   THCUNN_argCheck(state, input->nDimension == 3 || input->nDimension == 4, 2, input,
                   "3D or 4D (batch mode) tensor expected for input, but got: %s");
   THCUNN_check_shape_indices(state, indices, input);
@@ -57,7 +57,7 @@ void THNN_(SpatialMaxUnpooling_updateGradInput)(
            THCIndexTensor *indices,
            int owidth, int oheight)
 {
-  THCUNN_assertSameGPU_generic(state, 4, input, gradOutput, indices, gradInput);
+  THCUNN_assertSameGPU(state, 4, input, gradOutput, indices, gradInput);
   THCUNN_check_shape_indices(state, indices, input);
 
   long nInputCols, nInputRows, nInputPlane, batchSize;

@@ -24,9 +24,9 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
   }
 
   if (weights)
-    THCUNN_assertSameGPU_generic(state, 5, input, target, weights, output, total_weight);
+    THCUNN_assertSameGPU(state, 5, input, target, weights, output, total_weight);
   else
-    THCUNN_assertSameGPU_generic(state, 4, input, target, output, total_weight);
+    THCUNN_assertSameGPU(state, 4, input, target, output, total_weight);
 
   input = THCTensor_(newContiguous)(state, input);
   weights = weights ? THCTensor_(newContiguous)(state, weights) : NULL;
@@ -88,9 +88,9 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
   }
 
   if (weights)
-    THCUNN_assertSameGPU_generic(state, 5, weights, input, target, gradInput, total_weight);
+    THCUNN_assertSameGPU(state, 5, weights, input, target, gradInput, total_weight);
   else
-    THCUNN_assertSameGPU_generic(state, 4, input, target, gradInput, total_weight);
+    THCUNN_assertSameGPU(state, 4, input, target, gradInput, total_weight);
 
   input = THCTensor_(newContiguous)(state, input);
   weights = weights ? THCTensor_(newContiguous)(state, weights) : NULL;

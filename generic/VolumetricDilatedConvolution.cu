@@ -15,9 +15,9 @@ void THNN_(VolumetricDilatedConvolution_updateOutput)(
            int padT, int padW, int padH,
            int dilationT, int dilationW, int dilationH) {
 
-  THCUNN_assertSameGPU_generic(state, 5, input, output, weight, columns, ones);
+  THCUNN_assertSameGPU(state, 5, input, output, weight, columns, ones);
   if (bias) {
-    THCUNN_assertSameGPU_generic(state, 2, weight, bias);
+    THCUNN_assertSameGPU(state, 2, weight, bias);
   }
   THCUNN_argCheck(state, input->nDimension == 4 || input->nDimension == 5, 2, input,
                   "4D or 5D (batch mode) tensor expected for input, but got: %s");
@@ -169,8 +169,8 @@ void THNN_(VolumetricDilatedConvolution_updateGradInput)(
            int padT, int padW, int padH,
            int dilationT, int dilationW, int dilationH) {
 
-  THCUNN_assertSameGPU_generic(state, 5, input, gradOutput, weight,
-                                 gradColumns, gradInput);
+  THCUNN_assertSameGPU(state, 5, input, gradOutput, weight,
+                       gradColumns, gradInput);
   THCUNN_argCheck(state, input->nDimension == 4 || input->nDimension == 5, 2, input,
                   "4D or 5D (batch mode) tensor expected for input, but got: %s");
   THCUNN_argCheck(state, gradOutput->nDimension == 4 || gradOutput->nDimension == 5, 3,
@@ -281,9 +281,9 @@ void THNN_(VolumetricDilatedConvolution_accGradParameters)(
            int dilationT, int dilationW, int dilationH,
            real scale) {
 
-  THCUNN_assertSameGPU_generic(state, 5, input, gradOutput, gradWeight, columns, ones);
+  THCUNN_assertSameGPU(state, 5, input, gradOutput, gradWeight, columns, ones);
   if (gradBias) {
-   THCUNN_assertSameGPU_generic(state, 2, gradWeight, gradBias);
+   THCUNN_assertSameGPU(state, 2, gradWeight, gradBias);
   }
   THCUNN_argCheck(state, input->nDimension == 4 || input->nDimension == 5, 2, input,
                   "4D or 5D (batch mode) tensor expected for input, but got: %s");

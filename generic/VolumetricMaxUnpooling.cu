@@ -17,7 +17,7 @@ void THNN_(VolumetricMaxUnpooling_updateOutput)(
   int inputHeight;
   int inputWidth;
 
-  THCUNN_assertSameGPU_generic(state, 3, input, indices, output);
+  THCUNN_assertSameGPU(state, 3, input, indices, output);
 
   if (THCTensor_(nDimension)(state, input) == 4)
   {
@@ -118,7 +118,7 @@ void THNN_(VolumetricMaxUnpooling_updateGradInput)(
   int inputWidth;
 
   // TODO: check gradOutput shape
-  THCUNN_assertSameGPU_generic(state, 4, input, indices, gradOutput, gradInput);
+  THCUNN_assertSameGPU(state, 4, input, indices, gradOutput, gradInput);
 
   if (THCTensor_(nDimension)(state, input) == 4) /* 4D */
   {

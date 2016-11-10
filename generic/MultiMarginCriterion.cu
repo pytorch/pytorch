@@ -13,7 +13,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
            THCTensor *weights,
            real margin)
 {
-  THCUNN_assertSameGPU_generic(state, 2, input, target);
+  THCUNN_assertSameGPU(state, 2, input, target);
   input = THCTensor_(newContiguous)(state, input);
   if(weights)
     weights = THCTensor_(newContiguous)(state, weights);
@@ -104,7 +104,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
            THCTensor *weights,
            real margin)
 {
-  THCUNN_assertSameGPU_generic(state, 3, input, gradInput, target);
+  THCUNN_assertSameGPU(state, 3, input, gradInput, target);
   input = THCTensor_(newContiguous)(state, input);
   THCTensor_(resizeAs)(state, gradInput, input);
   if(weights)

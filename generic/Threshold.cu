@@ -12,7 +12,7 @@ void THNN_(Threshold_updateOutput)(
            real val,
            bool inplace)
 {
-  THCUNN_assertSameGPU_generic(state, 2, input, output);
+  THCUNN_assertSameGPU(state, 2, input, output);
 
   if (inplace)
   {
@@ -42,7 +42,7 @@ void THNN_(Threshold_updateGradInput)(
            bool inplace)
 {
   THCUNN_check_nElement(state, input, gradOutput);
-  THCUNN_assertSameGPU_generic(state, 3, input, gradInput, gradOutput);
+  THCUNN_assertSameGPU(state, 3, input, gradInput, gradOutput);
 
   if (inplace)
   {

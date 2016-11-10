@@ -12,7 +12,7 @@ void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
            int nOutputCols,
            int nOutputRows)
 {
-  THCUNN_assertSameGPU_generic(state, 3, input, output, indices);
+  THCUNN_assertSameGPU(state, 3, input, output, indices);
 
   THCIndex_t *indices_data;
   real *output_data;
@@ -96,7 +96,7 @@ void THNN_(SpatialAdaptiveMaxPooling_updateGradInput)(
 {
   bool atomic = true; // suboptimal, but without atomic it doesn't pass the tests
 
-  THCUNN_assertSameGPU_generic(state, 4, input, indices, gradOutput, gradInput);
+  THCUNN_assertSameGPU(state, 4, input, indices, gradOutput, gradInput);
 
   THCIndex_t *indices_data;
   real *gradInput_data;

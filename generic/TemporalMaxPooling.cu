@@ -22,7 +22,7 @@ void THNN_(TemporalMaxPooling_updateOutput)(
   real *output_data;
   THCIndex_t *indices_data;
 
-  THCUNN_assertSameGPU_generic(state, 3, input, output, indices);
+  THCUNN_assertSameGPU(state, 3, input, output, indices);
   THArgCheck( input->nDimension == 2 || input->nDimension == 3, 2, "2D or 3D(batch mode) tensor expected");
 
   if (input->nDimension == 3)
@@ -97,7 +97,7 @@ void THNN_(TemporalMaxPooling_updateGradInput)(
   real *gradOutput_data;
   THCIndex_t *indices_data;
 
-  THCUNN_assertSameGPU_generic(state, 4, input, gradOutput, gradInput, indices);
+  THCUNN_assertSameGPU(state, 4, input, gradOutput, gradInput, indices);
   THArgCheck( input->nDimension == 2 || input->nDimension == 3, 2, "2D or 3D(batch mode) tensor expected");
 
   THCTensor_(resizeAs)(state, gradInput, input);
