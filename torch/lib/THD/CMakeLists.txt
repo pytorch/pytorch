@@ -23,10 +23,14 @@ SET_PROPERTY(TARGET THD PROPERTY CXX_STANDARD 11)
 
 # Test executables
 ADD_EXECUTABLE(test_tensor_smoke test/tensor_smoke.cpp)
+ADD_EXECUTABLE(test_rpc_serialization test/rpc_serialization.cpp)
 TARGET_LINK_LIBRARIES(test_tensor_smoke THD)
+TARGET_LINK_LIBRARIES(test_rpc_serialization THD)
 SET_PROPERTY(TARGET test_tensor_smoke PROPERTY CXX_STANDARD 11)
+SET_PROPERTY(TARGET test_rpc_serialization PROPERTY CXX_STANDARD 11)
 ENABLE_TESTING()
 ADD_TEST(tensor_smoke test_tensor_smoke)
+ADD_TEST(rpc_serialization test_rpc_serialization)
 
 INSTALL(TARGETS THD
   RUNTIME DESTINATION "${THD_INSTALL_BIN_DIR}"
