@@ -96,7 +96,7 @@ void THCTensor_(renormRows)(struct THCState* state,
   dim3 block(cols < maxThreads ? cols : maxThreads);
 
   renormRowsL1<real>
-    <<<grid, block, block.x * sizeof(float),
+    <<<grid, block, block.x * sizeof(real),
     THCState_getCurrentStream(state)>>>(THCTensor_(data)(state, t),
                                         rows, cols);
 }
@@ -164,7 +164,7 @@ THC_API void THCTensor_(multinomial)(struct THCState *state,
     dim3 grid(numDist < numSM * 4 ? numDist : numSM * 4);
 
     sampleMultinomialOnce
-      <<<grid, block, block.x * sizeof(float),
+      <<<grid, block, block.x * sizeof(real),
          THCState_getCurrentStream(state)>>>(
       THCTensor_(data)(state, self),
       numDist,
