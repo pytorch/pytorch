@@ -304,9 +304,9 @@ THC_API void THCTensor_(bernoulli)(THCState* state, THCTensor *self_, double p)
 
 #if defined(THC_REAL_IS_DOUBLE)
 
-GENERATE_KERNEL1(generate_geometric, double, double p, double, curand_uniform_double, (log(1-x) / log(p)) + 1)
+GENERATE_KERNEL1(generate_geometric, double, double p, double, curand_uniform_double, floor((log(1-x) / log(p)) + 1))
 #else
-GENERATE_KERNEL1(generate_geometric, real, double p, float, curand_uniform, (ScalarConvert<float, real>::to((log(1-x) / log(p)) + 1)))
+GENERATE_KERNEL1(generate_geometric, real, double p, float, curand_uniform, (ScalarConvert<float, real>::to(floorf((log(1-x) / log(p)) + 1))))
 #endif
 
 THC_API void THCTensor_(geometric)(THCState* state, THCTensor *self_, double p)
