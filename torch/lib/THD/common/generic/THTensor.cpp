@@ -1,0 +1,91 @@
+#ifndef TH_GENERIC_FILE
+#define TH_GENERIC_FILE "common/generic/THTensor.cpp"
+#else
+
+template<>
+THTensor<real>::THTensor():
+  tensor(THTensor_(new)())
+  {};
+
+template<>
+THTensor<real>::THTensor(THRealTensor *wrapped):
+  tensor(wrapped)
+  {};
+
+template<>
+THTensor<real>::~THTensor() {
+  if (tensor)
+    THTensor_(free)(tensor);
+}
+
+template<>
+int THTensor<real>::nDim() const {
+  return tensor->nDimension;
+};
+
+template<>
+auto THTensor<real>::sizes() const -> long_range {
+  return std::vector<long>(tensor->size, tensor->size + tensor->nDimension);
+};
+
+template<>
+const long* THTensor<real>::rawSizes() const {
+  return tensor->size;
+};
+
+template<>
+auto THTensor<real>::strides() const -> long_range {
+  return long_range(tensor->stride, tensor->stride + tensor->nDimension);
+};
+
+template<>
+const long* THTensor<real>::rawStrides() const {
+  return tensor->stride;
+};
+
+template<>
+size_t THTensor<real>::storageOffset() const {
+  return tensor->storageOffset;
+};
+
+template<>
+size_t THTensor<real>::elementSize() const {
+  return sizeof(real);
+};
+
+template<>
+void* THTensor<real>::data() {
+  return THTensor_(data)(tensor);
+};
+
+template<>
+const void* THTensor<real>::data() const {
+  return THTensor_(data)(tensor);
+};
+
+#define non_const_cast(tensor) const_cast<THTensor&>(dynamic_cast<const THTensor&>(tensor))
+
+template<>
+auto THTensor<real>::add(const Tensor &source, scalar_type value) -> THTensor& {
+  THTensor &source_t = non_const_cast(source);
+  THTensor_(add)(tensor, source_t.tensor, value);
+  return *this;
+};
+
+template<>
+auto THTensor<real>::resize(const std::initializer_list<long> &new_size) -> THTensor& {
+  THLongStorage *sizes = THLongStorage_newWithSize(new_size.size());
+  long *sizes_d = sizes->data;
+  for (long s: new_size)
+    *sizes_d++ = s;
+  THTensor_(resize)(tensor, sizes, nullptr);
+  return *this;
+};
+
+template<>
+auto THTensor<real>::fill(scalar_type value) -> THTensor& {
+  THTensor_(fill)(tensor, value);
+  return *this;
+};
+
+#endif

@@ -13,11 +13,20 @@ FILE(GLOB_RECURSE worker_h "worker/*.h")
 FILE(GLOB_RECURSE worker_cpp "worker/*.cpp")
 FILE(GLOB_RECURSE common_h "common/*.h")
 FILE(GLOB_RECURSE common_cpp "common/*.cpp")
+FILE(GLOB_RECURSE test_cpp "test/*.cpp")
 
 SET(src_cpp ${master_cpp} ${worker_cpp} ${common_cpp})
 
+INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR})
 ADD_LIBRARY(THD SHARED ${src_cpp})
 SET_PROPERTY(TARGET THD PROPERTY CXX_STANDARD 11)
+
+# Test executables
+ADD_EXECUTABLE(test_tensor_smoke test/tensor_smoke.cpp)
+TARGET_LINK_LIBRARIES(test_tensor_smoke THD)
+SET_PROPERTY(TARGET test_tensor_smoke PROPERTY CXX_STANDARD 11)
+ENABLE_TESTING()
+ADD_TEST(tensor_smoke test_tensor_smoke)
 
 INSTALL(TARGETS THD
   RUNTIME DESTINATION "${THD_INSTALL_BIN_DIR}"
