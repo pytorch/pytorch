@@ -13,6 +13,7 @@ struct SharedMem {
   }
 };
 
+#ifdef CUDA_HALF_TENSOR
 template <>
 struct SharedMem<half>
 {
@@ -21,6 +22,7 @@ struct SharedMem<half>
     return s_half;
   }
 };
+#endif
 
 template <>
 struct SharedMem<float>
