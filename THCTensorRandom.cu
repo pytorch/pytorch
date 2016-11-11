@@ -4,7 +4,6 @@
 #include "THCTensorCopy.h"
 #include "THCTensorMath.h"
 #include "THCReduceApplyUtils.cuh"
-#include "THCTensorRandom.cuh"
 
 #include <thrust/functional.h>
 #include <curand.h>
@@ -188,53 +187,567 @@ __host__ void THCRandom_setRNGState(THCState* state, THByteTensor *rng_state)
   memcpy(&gen->initial_seed, THByteTensor_data(rng_state) + states_size, seed_size);
 }
 
-#define GENERATE_KERNEL1(NAME, T, ARG1, CURAND_T, CURAND_FUNC, TRANSFORM)               \
-__global__ void NAME(curandStateMtgp32 *state, int size, T *result, ARG1)  \
+#define GENERATE_KERNEL1(NAME, ARG1, CURAND_FUNC, TRANSFORM)                   \
+__global__ void NAME(curandStateMtgp32 *state, int size, float *result, ARG1)  \
 {                                                                              \
   int idx = blockIdx.x * BLOCK_SIZE + threadIdx.x;                             \
   int rounded_size = THCCeilDiv(size, BLOCK_SIZE) * BLOCK_SIZE;                     \
   for (int i = idx; i < rounded_size; i += BLOCK_SIZE * MAX_NUM_BLOCKS) {      \
-    CURAND_T x = CURAND_FUNC(&state[blockIdx.x]);                                 \
+    float x = CURAND_FUNC(&state[blockIdx.x]);                                 \
     if (i < size) {                                                            \
-      T y = TRANSFORM;                                                           \
-      result[i] = y;                                                           \
+      x = TRANSFORM;                                                           \
+      result[i] = x;                                                           \
     }                                                                          \
   }                                                                            \
 }
 
-#define GENERATE_KERNEL2(NAME, T, ARG1, ARG2, CURAND_T, CURAND_FUNC, TRANSFORM)                \
-__global__ void NAME(curandStateMtgp32 *state, int size, T *result, ARG1, ARG2)  \
+#define GENERATE_KERNEL2(NAME, ARG1, ARG2, CURAND_FUNC, TRANSFORM)                   \
+__global__ void NAME(curandStateMtgp32 *state, int size, float *result, ARG1, ARG2)  \
 {                                                                                    \
   int idx = blockIdx.x * BLOCK_SIZE + threadIdx.x;                                   \
   int rounded_size = THCCeilDiv(size, BLOCK_SIZE) * BLOCK_SIZE;                           \
   for (int i = idx; i < rounded_size; i += BLOCK_SIZE * MAX_NUM_BLOCKS) {            \
-    CURAND_T x = CURAND_FUNC(&state[blockIdx.x]);                                       \
+    float x = CURAND_FUNC(&state[blockIdx.x]);                                       \
     if (i < size) {                                                                  \
-      T y = TRANSFORM;                                                                 \
-      result[i] = y;                                                                 \
+      x = TRANSFORM;                                                                 \
+      result[i] = x;                                                                 \
     }                                                                                \
   }                                                                                  \
 }
 
-GENERATE_KERNEL2(generate_uniform, float, double a, double b, float, curand_uniform, x * (b-a) + a)
-GENERATE_KERNEL2(generate_uniform, double, double a, double b, double, curand_uniform_double, x * (b-a) + a)
-GENERATE_KERNEL2(generate_uniform, half, double a, double b, float, curand_uniform, (ScalarConvert<float, half>::to(x * (b-a) + a)))
-
-GENERATE_KERNEL2(generate_normal, float, double mean, double stdv, float, curand_normal, (x * stdv) + mean)
-GENERATE_KERNEL2(generate_normal, double, double mean, double stdv, double, curand_normal_double, (x * stdv) + mean)
-GENERATE_KERNEL2(generate_normal, half, double mean, double stdv, float, curand_normal, (ScalarConvert<float, half>::to((x * stdv) + mean)))
-
-GENERATE_KERNEL1(generate_exponential, float, double lambda, float, curand_uniform, (float)(-1. / lambda * log(1-x)))
-GENERATE_KERNEL1(generate_exponential, double, double lambda, double, curand_uniform_double, (double)(-1. / lambda * log(1-x)))
-GENERATE_KERNEL1(generate_exponential, half, double lambda, float, curand_uniform, (ScalarConvert<float, half>::to((float)(-1. / lambda * log(1-x)))))
-
-GENERATE_KERNEL2(generate_cauchy, float, double median, double sigma, float, curand_uniform, (float)(median + sigma * tan(M_PI*(x-0.5))))
-GENERATE_KERNEL2(generate_cauchy, double, double median, double sigma, double, curand_uniform_double, (double)(median + sigma * tan(M_PI*(x-0.5))))
-GENERATE_KERNEL2(generate_cauchy, half, double median, double sigma, float, curand_uniform, (ScalarConvert<float, half>::to((float)(median + sigma * tan(M_PI*(x-0.5))))))
-
-#include "generic/THCTensorRandom.cu"
-#include "THCGenerateAllTypes.h"
+GENERATE_KERNEL2(generate_uniform, double a, double b, curand_uniform, x * (b-a) + a)
+GENERATE_KERNEL1(generate_bernoulli, double p, curand_uniform, (float)x <= p)
+GENERATE_KERNEL2(generate_normal, double mean, double stdv, curand_normal, (x * stdv) + mean)
+GENERATE_KERNEL1(generate_geometric, double p, curand_uniform, (log(1-x) / log(p)) + 1)
+GENERATE_KERNEL1(generate_exponential, double lambda, curand_uniform, (float)(-1. / lambda * log(1-x)))
+GENERATE_KERNEL2(generate_cauchy, double median, double sigma, curand_uniform, (float)(median + sigma * tan(M_PI*(x-0.5))))
 
 #undef GENERATE_KERNEL1
 #undef GENERATE_KERNEL2
 
+/* Separate kernel because curand_log_normal gets extra parameters. */
+__global__ void generate_log_normal(curandStateMtgp32 *state, int size, float *result, float mean, float stddev)
+{
+  int idx = blockIdx.x * BLOCK_SIZE + threadIdx.x;
+  int rounded_size = THCCeilDiv(size, BLOCK_SIZE) * BLOCK_SIZE;
+  for (int i = idx; i < rounded_size; i += BLOCK_SIZE * MAX_NUM_BLOCKS) {
+    float x = curand_log_normal(&state[blockIdx.x], mean, stddev);
+    if (i < size) {
+      result[i] = x;
+    }
+  }
+}
+
+#define NUM_BLOCKS min((int)THCCeilDiv(size, (ptrdiff_t) BLOCK_SIZE), MAX_NUM_BLOCKS)
+THC_API void THCudaTensor_uniform(THCState* state, THCudaTensor *self_, double a, double b)
+{
+  THAssert(THCudaTensor_checkGPU(state, 1, self_));
+  Generator* gen = THCRandom_getGenerator(state);
+  THCudaTensor *self = THCudaTensor_newContiguous(state, self_);
+  ptrdiff_t size = THCudaTensor_nElement(state, self);
+  float *data = THCudaTensor_data(state, self);
+
+  generate_uniform<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
+      gen->gen_states, size, data, a, b);
+
+  THCudaTensor_freeCopyTo(state, self, self_);
+};
+
+THC_API void THCudaTensor_bernoulli(THCState* state, THCudaTensor *self_, double p)
+{
+  THAssert(THCudaTensor_checkGPU(state, 1, self_));
+  Generator* gen = THCRandom_getGenerator(state);
+  THCudaTensor *self = THCudaTensor_newContiguous(state, self_);
+  ptrdiff_t size = THCudaTensor_nElement(state, self);
+  float *data = THCudaTensor_data(state, self);
+
+  generate_bernoulli<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
+      gen->gen_states, size, data, p);
+
+  THCudaTensor_freeCopyTo(state, self, self_);
+};
+
+THC_API void THCudaTensor_normal(THCState* state, THCudaTensor *self_, double mean, double stdv)
+{
+  THAssert(THCudaTensor_checkGPU(state, 1, self_));
+  Generator* gen = THCRandom_getGenerator(state);
+  THCudaTensor *self = THCudaTensor_newContiguous(state, self_);
+  ptrdiff_t size = THCudaTensor_nElement(state, self);
+  float *data = THCudaTensor_data(state, self);
+
+  generate_normal<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
+      gen->gen_states, size, data, mean, stdv);
+
+  THCudaTensor_freeCopyTo(state, self, self_);
+};
+
+THC_API void THCudaTensor_logNormal(THCState* state, THCudaTensor *self_, double mean, double stdv)
+{
+  THAssert(THCudaTensor_checkGPU(state, 1, self_));
+  Generator* gen = THCRandom_getGenerator(state);
+
+  THCudaTensor *self = THCudaTensor_newContiguous(state, self_);
+  ptrdiff_t size = THCudaTensor_nElement(state, self);
+  float *data = THCudaTensor_data(state, self);
+
+  generate_log_normal<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
+      gen->gen_states, size, data, mean, stdv);
+
+  THCudaTensor_freeCopyTo(state, self, self_);
+};
+
+THC_API void THCudaTensor_geometric(THCState* state, THCudaTensor *self_, double p)
+{
+  THAssert(THCudaTensor_checkGPU(state, 1, self_));
+  Generator* gen = THCRandom_getGenerator(state);
+
+  THCudaTensor *self = THCudaTensor_newContiguous(state, self_);
+  ptrdiff_t size = THCudaTensor_nElement(state, self);
+  float *data = THCudaTensor_data(state, self);
+
+  generate_geometric<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
+      gen->gen_states, size, data, p);
+
+  THCudaTensor_freeCopyTo(state, self, self_);
+};
+
+THC_API void THCudaTensor_exponential(THCState* state, THCudaTensor *self_, double lambda)
+{
+  THAssert(THCudaTensor_checkGPU(state, 1, self_));
+  Generator* gen = THCRandom_getGenerator(state);
+
+  THCudaTensor *self = THCudaTensor_newContiguous(state, self_);
+  ptrdiff_t size = THCudaTensor_nElement(state, self);
+  float *data = THCudaTensor_data(state, self);
+
+  generate_exponential<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
+      gen->gen_states, size, data, lambda);
+
+  THCudaTensor_freeCopyTo(state, self, self_);
+};
+
+THC_API void THCudaTensor_cauchy(THCState* state, THCudaTensor *self_, double median, double sigma)
+{
+  THAssert(THCudaTensor_checkGPU(state, 1, self_));
+  Generator* gen = THCRandom_getGenerator(state);
+
+  THCudaTensor *self = THCudaTensor_newContiguous(state, self_);
+  ptrdiff_t size = THCudaTensor_nElement(state, self);
+  float *data = THCudaTensor_data(state, self);
+
+  generate_cauchy<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
+      gen->gen_states, size, data, median, sigma);
+
+  THCudaTensor_freeCopyTo(state, self, self_);
+};
+
+__device__ int binarySearchForMultinomial(float* dist,
+                                          int size,
+                                          float val) {
+  int start = 0;
+  int end = size;
+
+  while (end - start > 0) {
+    int mid = start + (end - start) / 2;
+
+    float midVal = dist[mid];
+    if (midVal < val) {
+      start = mid + 1;
+    } else {
+      end = mid;
+    }
+  }
+
+  if (start == size) {
+    // No probability mass or precision problems; just return the
+    // first element
+    start = 0;
+  }
+
+  return start;
+}
+
+// Normalizes the L1 norm of every row to 1; used by multinomial
+__global__ void renormRowsL1(float* dist, long rows, long cols) {
+  extern __shared__ float smem[];
+
+  for (long row = blockIdx.x; row < rows; row += gridDim.x) {
+    float sum = 0.0f;
+    for (long col = threadIdx.x; col < cols; col += blockDim.x) {
+      sum += dist[row * cols + col];
+    }
+
+    sum = reduceBlock(smem, blockDim.x, sum, thrust::plus<float>(), 0.0f);
+    if (threadIdx.x == 0) {
+      smem[0] = sum;
+    }
+    __syncthreads();
+
+    sum = smem[0];
+    if (sum > 0.0f) {
+      for (long col = threadIdx.x; col < cols; col += blockDim.x) {
+        dist[row * cols + col] /= sum;
+      }
+    }
+  }
+}
+
+void THCudaTensor_renormRows(struct THCState* state,
+                             THCudaTensor* t) {
+  THAssert(THCudaTensor_nDimension(state, t) == 2);
+  long rows = THCudaTensor_size(state, t, 0);
+  long cols = THCudaTensor_size(state, t, 1);
+
+  cudaDeviceProp* props = THCState_getCurrentDeviceProperties(state);
+  THAssert(props != NULL);
+
+  int numSM = props->multiProcessorCount;
+  int maxThreads = props->maxThreadsPerBlock;
+
+  dim3 grid(rows < numSM * 4 ? rows : numSM * 4);
+  dim3 block(cols < maxThreads ? cols : maxThreads);
+
+  renormRowsL1
+    <<<grid, block, block.x * sizeof(float),
+    THCState_getCurrentStream(state)>>>(THCudaTensor_data(state, t),
+                                        rows, cols);
+}
+
+__global__ void
+sampleMultinomialOnce(float* dest,
+                      long distributions,
+                      int categories,
+                      float* dist) {
+  extern __shared__ float smem[];
+
+  for (long curDist = blockIdx.x;
+       curDist < distributions; curDist += gridDim.x) {
+    // Each block handles one distribution
+    // First pass, find the total sum of the distribution
+    float sum = 0.0f;
+    for (int cat = threadIdx.x; cat < categories; cat += blockDim.x) {
+      sum += dist[curDist * categories + cat];
+    }
+
+    // threadIdx.x == 0 has the sum value from this
+    sum = reduceBlock(smem, blockDim.x, sum, thrust::plus<float>(), 0.0f);
+
+    // Broadcast sum and sample value
+    if (threadIdx.x == 0) {
+      smem[0] = sum;
+      smem[1] = dest[curDist];
+    }
+    __syncthreads();
+
+    sum = smem[0];
+    float sample = smem[1];
+    __syncthreads();
+
+    if (sum == 0.0f || sample == 0.0f) {
+      // Choose the first element
+      if (threadIdx.x == 0) {
+        dest[curDist] = 1;
+      }
+
+      continue;
+    }
+
+    int chunks = THCCeilDiv(categories, (int) blockDim.x);
+    float prevHighProb = 0.0f;
+
+    for (int chunk = 0; chunk < chunks; ++chunk) {
+      // All threads in bounds load a value
+      int cat = chunk * blockDim.x + threadIdx.x;
+
+      float val =
+        cat < categories ? dist[curDist * categories + cat] / sum : 0.0f;
+      smem[threadIdx.x] = val;
+      __syncthreads();
+
+      // Perform an inclusive prefix sum of the shared memory contents
+      for (int offset = 1; offset < blockDim.x; offset *= 2) {
+        float val = 0.0f;
+
+        if (threadIdx.x >= offset) {
+          val = smem[threadIdx.x - offset] + smem[threadIdx.x];
+        }
+
+        __syncthreads();
+        if (threadIdx.x >= offset) {
+          smem[threadIdx.x] = val;
+        }
+        __syncthreads();
+      }
+
+      // Each thread will check to see if the sample falls in its
+      // bucket
+      float curBucket =
+        smem[threadIdx.x] + prevHighProb;
+      float prevBucket =
+        threadIdx.x == 0 ? prevHighProb : smem[threadIdx.x - 1] + prevHighProb;
+      bool inBucket =
+        (cat < categories) && (sample <= curBucket) && (sample > prevBucket);
+
+      if (inBucket) {
+        // We're done; we have the sample
+        // Torch indices are 1-based
+        // FIXME: broadcast exit flag?
+        dest[curDist] = cat + TH_INDEX_BASE;
+      }
+
+      // Store the previous scan's high value for future use
+      prevHighProb += smem[blockDim.x - 1];
+
+      __syncthreads();
+    }
+  }
+}
+
+__global__ void
+sampleMultinomialWithReplacement(curandStateMtgp32* state,
+                                 int totalSamples,
+                                 float* dest,
+                                 long distributions,
+                                 int categories,
+                                 float* normDistPrefixSum) {
+  // At the moment, each warp computes one sample value in the binary
+  // search due to divergence. It seems possible to compute multiple
+  // values and limit divergence though later on. However, no matter
+  // what, all block threads must participate in the curand_uniform
+  // call to update the generator state.
+
+  // The block determines the distribution for which we generate a point
+  for (long curDist = blockIdx.x;
+       curDist < distributions;
+       curDist += gridDim.x) {
+    for (int sampleBase = 0;
+         sampleBase < totalSamples; sampleBase += blockDim.y) {
+      // The warp determines the sample
+      int sample = sampleBase + threadIdx.y;
+
+      // All threads participate in this
+      float r = curand_uniform(&state[blockIdx.x]);
+
+      if (threadIdx.x == 0 && sample < totalSamples) {
+        // Find the bucket that a uniform sample lies in
+        int choice = binarySearchForMultinomial(
+          normDistPrefixSum + curDist * categories,
+          categories,
+          r);
+
+        // Torch indices are 1-based
+        dest[curDist * totalSamples + sample] = (float) choice + (float)TH_INDEX_BASE;
+      }
+    }
+  }
+}
+
+__global__ void
+sampleMultinomialWithoutReplacement(curandStateMtgp32* state,
+                                    int totalSamples,
+                                    int sample,
+                                    float* dest,
+                                    long distributions,
+                                    int categories,
+                                    float* origDist,
+                                    float* normDistPrefixSum) {
+  // At the moment, each warp computes one sample value in the binary
+  // search due to divergence. It seems possible to compute multiple
+  // values and limit divergence though later on. However, no matter
+  // what, all block threads must participate in the curand_uniform
+  // call to update the generator state.
+
+  // The block and warp determines the distribution for which we
+  // generate a point
+  for (long curDistBase = blockIdx.x * blockDim.y;
+       curDistBase < distributions;
+       curDistBase += gridDim.x * blockDim.y) {
+    // The warp determines the distribution
+    long curDist = curDistBase + threadIdx.y;
+
+    // All threads must participate in this
+    float r = curand_uniform(&state[blockIdx.x]);
+
+    if (threadIdx.x == 0 && curDist < distributions) {
+      // Find the bucket that a uniform sample lies in
+      int choice = binarySearchForMultinomial(
+        normDistPrefixSum + curDist * categories,
+        categories,
+        r);
+
+      // Torch indices are 1-based
+      dest[curDist * totalSamples + sample] = (float) choice + (float)TH_INDEX_BASE;
+
+      // Without replacement, so update the original probability so it
+      // is not considered a second time
+      origDist[curDist * categories + choice] = 0.0f;
+    }
+  }
+}
+
+THC_API void THCudaTensor_multinomial(struct THCState *state,
+                                      THCudaTensor *self,
+                                      THCudaTensor *prob_dist,
+                                      int n_sample,
+                                      int with_replacement)
+{
+  THAssert(THCudaTensor_checkGPU(state, 2, self, prob_dist));
+  Generator* gen = THCRandom_getGenerator(state);
+
+  int inputSize = THCudaTensor_nDimension(state, prob_dist);
+  THArgCheck(inputSize > 0 && inputSize <= 2, 2,
+             "prob_dist must be 1 or 2 dim");
+
+  // Categories are in the innermost dimension
+  long numDist =
+    inputSize == 1 ? 1 : THCudaTensor_size(state, prob_dist, 0);
+  long numCategoriesLong =
+    inputSize == 1 ? THCudaTensor_size(state, prob_dist, 0) :
+    THCudaTensor_size(state, prob_dist, 1);
+
+  // Since the index tensor is float, numCategories cannot exceed max
+  // float integer precision
+  THArgCheck(numCategoriesLong <= FLOAT32_MAX_CONSECUTIVE_INT, 2,
+             "number of categories cannot exceed 2^24");
+  int numCategories = (int) numCategoriesLong;
+
+  THArgCheck(n_sample > 0, 3, "cannot sample <= 0 samples");
+
+  if (!with_replacement) {
+    THArgCheck(n_sample <= numCategories, 2,
+               "cannot sample n_sample > prob_dist:size(1) samples without "
+               "replacement");
+  }
+
+  // It is possible that prob_dist is non-contiguous
+  THCudaTensor* probDistContig =
+    THCudaTensor_newContiguous(state, prob_dist);
+
+  // Restructure data for 2d
+  if (inputSize == 1) {
+    THCudaTensor_resize2d(state, probDistContig, 1, numCategories);
+  }
+
+  THCudaTensor_resize2d(state, self, numDist, n_sample);
+
+  if (n_sample == 1) {
+    // Optimized allocation-free implementation
+
+    // To exploit greater parallelism for the sampling, generate the
+    // Uniform random samples in a separate kernel launch, into the
+    // result memory. The device RNG is thread-limited
+    THCudaTensor_uniform(state, self, 0.0, 1.0);
+
+    cudaDeviceProp* props = THCState_getCurrentDeviceProperties(state);
+    THAssert(props != NULL);
+
+    int numSM = props->multiProcessorCount;
+    int maxThreads = props->maxThreadsPerBlock;
+
+    dim3 block(numCategories < maxThreads ? numCategories : maxThreads);
+    dim3 grid(numDist < numSM * 4 ? numDist : numSM * 4);
+
+    sampleMultinomialOnce
+      <<<grid, block, block.x * sizeof(float),
+         THCState_getCurrentStream(state)>>>(
+      THCudaTensor_data(state, self),
+      numDist,
+      numCategories,
+      THCudaTensor_data(state, probDistContig));
+  } else {
+    // Generic, slow implementation with memory allocations
+
+    // For sampling without replacement, we modify the distribution
+    // for subsequent samples in this space
+    THCudaTensor* origDist = THCudaTensor_new(state);
+    THCudaTensor_resizeAs(state, origDist, probDistContig);
+    THCudaTensor_copy(state, origDist, probDistContig);
+
+    THCudaTensor* normDist = THCudaTensor_new(state);
+    THCudaTensor_resizeAs(state, normDist, probDistContig);
+
+    THCudaTensor* prefixSum = THCudaTensor_new(state);
+
+    // Renorm along rows
+    THCudaTensor_copy(state, normDist, origDist);
+    THCudaTensor_renormRows(state, normDist);
+
+    // Prefix sum along rows
+    THCudaTensor_cumsum(state, prefixSum, normDist, 1);
+
+    if (with_replacement) {
+      // Sample with replacement
+
+      // Binary search is warp divergent (so effectively we're running
+      // with just a single thread), but for better utilization,
+      // we need each block to have at least 4 warps.
+      dim3 block(32, 4);
+
+      // Each warp in a block will generate a sample from one
+      // distribution concurrently.
+      dim3 grid(numDist < MAX_NUM_BLOCKS ? numDist : MAX_NUM_BLOCKS);
+
+      sampleMultinomialWithReplacement
+        <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+          gen->gen_states,
+          n_sample,
+          THCudaTensor_data(state, self),
+          numDist, numCategories,
+          THCudaTensor_data(state, prefixSum));
+    } else {
+      // Sample without replacement
+
+      // Binary search is warp divergent (so effectively we're running
+      // with just a single thread), but for better utilization,
+      // we need each block to have at least 4 warps.
+      dim3 block(32, 4);
+
+      // Each warp in a block will generate a sample from a different
+      // distribution concurrently.
+      ptrdiff_t numBlocks = THCCeilDiv(numDist, 4L);
+      dim3 grid(numBlocks < MAX_NUM_BLOCKS ? numBlocks : MAX_NUM_BLOCKS);
+
+      for (int sample = 0; sample < n_sample; ++sample) {
+        if (sample > 0) {
+          // Update probabilities
+          // Renorm along rows
+          THCudaTensor_copy(state, normDist, origDist);
+          THCudaTensor_renormRows(state, normDist);
+
+          // Prefix sum along rows
+          THCudaTensor_cumsum(state, prefixSum, normDist, 1);
+        }
+
+        // The kernel can only draw one sample before we have to
+        // recalculate our distribution
+        sampleMultinomialWithoutReplacement
+          <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+            gen->gen_states,
+            n_sample,
+            sample,
+            THCudaTensor_data(state, self),
+            numDist, numCategories,
+            THCudaTensor_data(state, origDist),
+            THCudaTensor_data(state, prefixSum));
+      }
+    }
+
+    THCudaTensor_free(state, prefixSum);
+    THCudaTensor_free(state, normDist);
+    THCudaTensor_free(state, origDist);
+  }
+
+  // Revert data restructuring based on input sizes
+  if (inputSize == 1) {
+    THCudaTensor_resize1d(state, self, n_sample);
+
+    // Unfortunately, if prob_dist is contiguous already,
+    // newContiguous is not a private copy, so we have to restructure
+    // this too, so as to not affect prob_dist
+    THCudaTensor_resize1d(state, probDistContig, numCategories);
+  }
+
+  THCudaTensor_free(state, probDistContig);
+}
+
+#undef NUM_BLOCKS
