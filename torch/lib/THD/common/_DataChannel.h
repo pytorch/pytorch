@@ -8,8 +8,7 @@
 namespace thd {
 
 
-class DataChannel {
-public:
+struct DataChannel {
   virtual bool init();
 
   virtual int get_id();
@@ -27,14 +26,13 @@ public:
 };
 
 
-class DataChannelRegistry {
-public:
+struct DataChannelRegistry {
   using channel_key_type = int;
 
   static DataChannel& backend_for(channel_key_type type);
 
 private:
-  static std::unordered_map<channel_key_type, DataChannel> registered_channels;
+  static std::unordered_map<channel_key_type, DataChannel> s_registered_channels;
 };
 
 
