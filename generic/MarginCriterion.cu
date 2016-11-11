@@ -14,7 +14,7 @@ void THNN_(MarginCriterion_updateOutput)(
   THCUNN_check_dim_size(state, output, 1, 0, 1);
   THCUNN_assertSameGPU(state, 2, input, target);
 
-  long size = THCTensor_(nElement)(state, input);
+  ptrdiff_t size = THCTensor_(nElement)(state, input);
 
   input = THCTensor_(newContiguous)(state, input);
   target = THCTensor_(newContiguous)(state, target);
@@ -45,7 +45,7 @@ void THNN_(MarginCriterion_updateGradInput)(
   THCUNN_check_nElement(state, input, target);
   THCUNN_assertSameGPU(state, 3, input, target, gradInput);
 
-  long size = THCTensor_(nElement)(state, input);
+  ptrdiff_t size = THCTensor_(nElement)(state, input);
   accreal norm = sizeAverage ? 1.f/size : 1;
 
   input = THCTensor_(newContiguous)(state, input);

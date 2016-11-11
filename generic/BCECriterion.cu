@@ -15,7 +15,7 @@ void THNN_(BCECriterion_updateOutput)(
   THCUNN_check_dim_size(state, output, 1, 0, 1);
   THCUNN_assertSameGPU(state, 3, input, target, weights);
 
-  long size = THCTensor_(nElement)(state, input);
+  ptrdiff_t size = THCTensor_(nElement)(state, input);
 
   input = THCTensor_(newContiguous)(state, input);
   target = THCTensor_(newContiguous)(state, target);
@@ -66,7 +66,7 @@ void THNN_(BCECriterion_updateGradInput)(
   THCUNN_check_nElement(state, input, weights);
   THCUNN_assertSameGPU(state, 4, input, target, gradInput, weights);
 
-  long size = THCTensor_(nElement)(state, input);
+  ptrdiff_t size = THCTensor_(nElement)(state, input);
   real norm = ScalarConvert<accreal, real>::to(sizeAverage ? accreal(1)/size : accreal(1));
 
   input = THCTensor_(newContiguous)(state, input);

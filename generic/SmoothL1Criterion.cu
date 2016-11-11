@@ -17,7 +17,7 @@ void THNN_(SmoothL1Criterion_updateOutput)(
     "input and target need to have the same number of elements"
   );
 
-  long size = THCTensor_(nElement)(state, input);
+  ptrdiff_t size = THCTensor_(nElement)(state, input);
 
   input = THCTensor_(newContiguous)(state, input);
   target = THCTensor_(newContiguous)(state, target);
@@ -55,7 +55,7 @@ void THNN_(SmoothL1Criterion_updateGradInput)(
     "input and target need to have the same number of elements"
   );
 
-  long size = THCTensor_(nElement)(state, input);
+  ptrdiff_t size = THCTensor_(nElement)(state, input);
   real norm = ScalarConvert<accreal, real>::to(sizeAverage ? accreal(1)/size : accreal(1));
 
   input = THCTensor_(newContiguous)(state, input);

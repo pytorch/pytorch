@@ -28,7 +28,7 @@ void THNN_(LookupTable_accGradParameters)(
     THError("input must be a vector or matrix, but is of shape: %s", s1.str);
   }
 
-  long numel = THCIndexTensor_(nElement)(state, input);
+  ptrdiff_t numel = THCIndexTensor_(nElement)(state, input);
   long stride = gradWeight->stride[0];
 
   cudaStream_t stream = THCState_getCurrentStream(state);
@@ -141,7 +141,7 @@ void THNN_(LookupTable_renorm)(
   pow_v<real, accreal> unary_pow(normType);
   thrust::plus<accreal> binary_plus;
   // numel << stride, since idx usually contains sparse row indices
-  for (long i = 0; i < numel; i++)
+  for (THCIndex_t i = 0; i < numel; i++)
   {
     THCIndex_t k = idx_ptr[i] - TH_INDEX_BASE;
     thrust::device_ptr<real> row_ptr = weight_ptr + k * stride;

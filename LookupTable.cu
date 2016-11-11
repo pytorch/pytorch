@@ -53,7 +53,7 @@ __device__ __forceinline__ bool warpHasCollision(int val)
 
 template <typename Dtype>
 __global__ void cunn_LookupTable_accGradParametersKernelByFeature(
-  long *input, Dtype *gradOutput, Dtype *gradWeight, Dtype scale, long numel,
+  long *input, Dtype *gradOutput, Dtype *gradWeight, Dtype scale, ptrdiff_t numel,
   long stride, int paddingValue) {
 
   const int featureDim = blockIdx.x * 4 + threadIdx.x / 32;
@@ -75,7 +75,7 @@ __global__ void cunn_LookupTable_accGradParametersKernelByFeature(
   // updates are serialized in their order of execution by using the
   // warp-wide collision detector `warpHasCollision`.
   const int laneId = threadIdx.x % 32;
-  for (int i = laneId; i < numel; i += WARP_SIZE) {
+  for (ptrdiff_t i = laneId; i < numel; i += WARP_SIZE) {
     const int weightIndex = (int) (input[i] - TH_INDEX_BASE);
     if (weightIndex == paddingValue - TH_INDEX_BASE) {
       continue;
@@ -102,7 +102,7 @@ __global__ void cunn_LookupTable_accGradParametersKernelByFeature(
 template <typename Dtype, typename Acctype>
 __global__ void cunn_LookupTable_accGradParametersKernel(
   long *input, long *indices, Dtype *gradOutput, Dtype *gradWeight,
-  long *count, Dtype defaultScale, long numel, long stride, int paddingValue) {
+  long *count, Dtype defaultScale, ptrdiff_t numel, long stride, int paddingValue) {
 
   int idx = blockIdx.x * 4 + threadIdx.y;
 

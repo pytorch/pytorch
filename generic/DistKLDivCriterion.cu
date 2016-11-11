@@ -18,7 +18,7 @@ void THNN_(DistKLDivCriterion_updateOutput)(
 
   accreal sum;
 
-  long size = THCTensor_(nElement)(state, input);
+  ptrdiff_t size = THCTensor_(nElement)(state, input);
 
   input = THCTensor_(newContiguous)(state, input);
   target = THCTensor_(newContiguous)(state, target);
@@ -49,7 +49,7 @@ void THNN_(DistKLDivCriterion_updateGradInput)(
   THArgCheck(THCTensor_(nElement)(state, input) == THCTensor_(nElement)(state, target), 2,
              "input and target need to have the same number of elements");
 
-  long size = THCTensor_(nElement)(state, input);
+  ptrdiff_t size = THCTensor_(nElement)(state, input);
   real norm = (sizeAverage ? ScalarConvert<accreal, real>::to(accreal(1)/size) : ScalarConvert<int, real>::to(1));
 
   input = THCTensor_(newContiguous)(state, input);

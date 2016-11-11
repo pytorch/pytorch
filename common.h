@@ -48,8 +48,8 @@ inline int GET_BLOCKS(const int N)
 
 #define THCUNN_check_nElement(STATE, I1, I2)                \
   if (I1 != NULL && I2 != NULL ) {                          \
-    long n1 = THCTensor_(nElement)(STATE, I1);              \
-    long n2 = THCTensor_(nElement)(STATE, I2);              \
+    ptrdiff_t n1 = THCTensor_(nElement)(STATE, I1);              \
+    ptrdiff_t n2 = THCTensor_(nElement)(STATE, I2);              \
     if (n1 != n2)                                           \
     {	\
       THCDescBuff s1 = THCTensor_(sizeDesc)(state, I1);     \

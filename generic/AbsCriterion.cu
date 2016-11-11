@@ -12,7 +12,7 @@ void THNN_(AbsCriterion_updateOutput)(
   THCUNN_check_nElement(state, input, target);
   THCUNN_assertSameGPU(state, 2, input, target);
 
-  long size = THCTensor_(nElement)(state, input);
+  ptrdiff_t size = THCTensor_(nElement)(state, input);
 
   input = THCTensor_(newContiguous)(state, input);
   target = THCTensor_(newContiguous)(state, target);
@@ -40,7 +40,7 @@ void THNN_(AbsCriterion_updateGradInput)(
   THCUNN_check_nElement(state, input, target);
   THCUNN_assertSameGPU(state, 3, input, target, gradInput);
 
-  long size = THCTensor_(nElement)(state, input);
+  ptrdiff_t size = THCTensor_(nElement)(state, input);
   real norm = ScalarConvert<double, real>::to(sizeAverage ? 1./size : 1.);
 
   input = THCTensor_(newContiguous)(state, input);

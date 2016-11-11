@@ -24,7 +24,7 @@ void THNN_(RReLU_updateOutput)(
     THCTensor_(resizeAs)(state, noise, input);
     real *input_data = THCTensor_(data)(state, input);
     real *noise_data = THCTensor_(data)(state, noise);
-    long n = THCTensor_(nElement)(state, input);
+    ptrdiff_t n = THCTensor_(nElement)(state, input);
     if (inplace)
     {
       rreluUpdateOutputTrain<<<NUM_BLOCKS(n), BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
