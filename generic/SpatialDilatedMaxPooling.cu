@@ -22,8 +22,10 @@ static inline void THNN_(SpatialDilatedMaxPooling_shapeCheck)(
   int dimf = 0;
   int dimh = 1;
   int dimw = 2;
+  int batchSize = 1;
 
   if (ndim == 4) {
+    batchSize = input->size[0];
     dimf++;
     dimh++;
     dimw++;
@@ -67,9 +69,10 @@ static inline void THNN_(SpatialDilatedMaxPooling_shapeCheck)(
     THCUNN_check_dim_size(state, gradOutput, ndim, dimw, nOutputCols);
   }
   if (indices != NULL) {
-    THCUNN_check_dim_size_indices(state, indices, ndim, dimf, nOutputPlane);
-    THCUNN_check_dim_size_indices(state, indices, ndim, dimh, nOutputRows);
-    THCUNN_check_dim_size_indices (state, indices, ndim, dimw, nOutputCols);
+    THCUNN_check_dim_size_indices(state, indices, 4, 0, batchSize);
+    THCUNN_check_dim_size_indices(state, indices, 4, 1, nOutputPlane);
+    THCUNN_check_dim_size_indices(state, indices, 4, 2, nOutputRows);
+    THCUNN_check_dim_size_indices(state, indices, 4, 3, nOutputCols);
   }
 }
 
