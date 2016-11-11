@@ -95,6 +95,7 @@ class RNN(RNNBase):
         bias: If False, then the layer does not use bias weights b_ih and b_hh. Default: True
         batch_first: If True, then the input tensor is provided as (batch, seq, feature)
         dropout: If non-zero, introduces a dropout layer on the outputs of each RNN layer
+        bidirectional: If True, becomes a bidirectional RNN. Default: False
     Inputs: input, h_0
         input: A (seq_len x batch x input_size) tensor containing the features of the input sequence.
         h_0: A (num_layers x batch x hidden_size) tensor containing the initial hidden state for each element in the batch.
@@ -155,6 +156,7 @@ class LSTM(RNNBase):
         bias: If False, then the layer does not use bias weights b_ih and b_hh. Default: True
         batch_first: If True, then the input tensor is provided as (batch, seq, feature)
         dropout: If non-zero, introduces a dropout layer on the outputs of each RNN layer
+        bidirectional: If True, becomes a bidirectional RNN. Default: False
     Inputs: input, (h_0, c_0)
         input: A (seq_len x batch x input_size) tensor containing the features of the input sequence.
         h_0: A (num_layers x batch x hidden_size) tensor containing the initial hidden state for each element in the batch.
@@ -202,6 +204,7 @@ class GRU(RNNBase):
         bias: If False, then the layer does not use bias weights b_ih and b_hh. Default: True
         batch_first: If True, then the input tensor is provided as (batch, seq, feature)
         dropout: If non-zero, introduces a dropout layer on the outputs of each RNN layer
+        bidirectional: If True, becomes a bidirectional RNN. Default: False
     Inputs: input, h_0
         input: A (seq_len x batch x input_size) tensor containing the features of the input sequence.
         h_0: A (num_layers x batch x hidden_size) tensor containing the initial hidden state for each element in the batch.
