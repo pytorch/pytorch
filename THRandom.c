@@ -255,10 +255,8 @@ double THRandom_cauchy(THGenerator *_generator, double median, double sigma)
    M'enfin. */
 double THRandom_logNormal(THGenerator *_generator, double mean, double stdv)
 {
-  double zm = mean*mean;
-  double zs = stdv*stdv;
   THArgCheck(stdv > 0, 2, "standard deviation must be strictly positive");
-  return(exp(THRandom_normal(_generator, log(zm/sqrt(zs + zm)), sqrt(log(zs/zm+1)) )));
+  return(exp(THRandom_normal(_generator, mean, stdv)));
 }
 
 int THRandom_geometric(THGenerator *_generator, double p)
