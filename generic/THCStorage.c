@@ -131,7 +131,7 @@ THCStorage* THCStorage_(newWithData)(THCState *state, real *data, ptrdiff_t size
 }
 
 THCStorage* THCStorage_(newWithDataAndAllocator)(
-  THCState *state, real *data, long size,
+  THCState *state, real *data, ptrdiff_t size,
   THCDeviceAllocator *allocator, void *allocatorContext) {
   THCStorage *storage = (THCStorage*)THAlloc(sizeof(THCStorage));
   memset(storage, 0, sizeof(THCStorage));
