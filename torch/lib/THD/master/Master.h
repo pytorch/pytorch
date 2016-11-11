@@ -1,6 +1,3 @@
-#ifndef THD_GENERAL_H
-#define THD_GENERAL_H
+#pragma once
 
 THD_API bool THDInit();
-
-#endif

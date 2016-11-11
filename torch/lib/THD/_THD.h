@@ -1,5 +1,4 @@
-#ifndef _THD_MASTER_H
-#define _THD_MASTER_H
+#pragma once
 
 #include "common/_DataChannel.h"
 #include "common/_Functions.h"
@@ -11,5 +10,3 @@
 #include "worker/_Dispatch.h"
 
 #include "THD.h"
-
-#endif

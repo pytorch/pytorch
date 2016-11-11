@@ -1,5 +1,4 @@
-#ifndef THD_MASTER_H
-#define THD_MASTER_H
+#pragma once
 
 #ifdef __cplusplus__
 #define THD_API extern "C"
@@ -12,5 +11,3 @@
 #include "master/THDTensor.h"
 
 #include "worker/Worker.h"
-
-#endif

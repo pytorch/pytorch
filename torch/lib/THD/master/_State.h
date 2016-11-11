@@ -1,5 +1,4 @@
-#ifndef _THD_STATE_H
-#define _THD_STATE_H
+#pragma once
 
 #include <vector>
 
@@ -16,5 +15,3 @@ struct THDState {
 
 } // namespace master
 } // namespace thd
-
-#endif

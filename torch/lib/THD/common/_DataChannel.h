@@ -1,5 +1,4 @@
-#ifndef _THD_BACKEND_H
-#define _THD_BACKEND_H
+#pragma once
 
 #include <unordered_map>
 
@@ -37,5 +36,3 @@ private:
 
 
 } // namespace thd
-
-#endif
