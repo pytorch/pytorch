@@ -18,8 +18,6 @@ static inline void THNN_(SpatialDilatedConvolution_shapeCheck)(
 	THArgCheck(dilationW > 0 && dilationH > 0, 15,
 			 "dilation should be greater than zero, but got dilationH: %d, dilationW: %d",
 			 dilationH, dilationW);
-  THNN_ARGCHECK(weight->nDimension == 2 || weight->nDimension == 4, 5, weight,
-		"2D or 4D weight tensor expected, but got: %s");
 
   if (bias != NULL) {
     THNN_CHECK_DIM_SIZE(bias, 1, 0, weight->size[0]);
