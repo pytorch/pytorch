@@ -6,12 +6,12 @@
 namespace thd {
 namespace master {
 
-class WorkerState {
+struct WorkerState {
 };
 
-class THDState {
-  static std::vector<WorkerState> workers;
-  thread_local static size_t current_worker;
+struct THDState {
+  static std::vector<WorkerState> s_workers;
+  thread_local static size_t s_current_worker;
 };
 
 } // namespace master
