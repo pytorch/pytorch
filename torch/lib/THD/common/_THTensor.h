@@ -1,5 +1,4 @@
-#ifndef _THD_TH_TENSOR_H
-#define _THD_TH_TENSOR_H
+#pragma once
 
 #include <TH/TH.h>
 
@@ -43,5 +42,3 @@ public:
 protected:
   tensor_type *tensor;
 };
-
-#endif

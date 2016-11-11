@@ -1,3 +1,4 @@
+#pragma once
 
 namespace thd {
 namespace worker {

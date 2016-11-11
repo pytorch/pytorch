@@ -1,6 +1,3 @@
-#ifndef THD_WORKER_H
-#define THD_WORKER_H
+#pragma once
 
 THD_API void THDWorkerMain();
-
-#endif

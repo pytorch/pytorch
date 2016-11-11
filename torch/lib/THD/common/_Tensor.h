@@ -1,5 +1,4 @@
-#ifndef _THD_TENSOR_H
-#define _THD_TENSOR_H
+#pragma once
 
 #include <initializer_list>
 #include <vector>
@@ -44,5 +43,3 @@ struct tensor_traits {
     long long>::type;
   using interface_type = TensorScalarInterface<scalar_type>;
 };
-
-#endif

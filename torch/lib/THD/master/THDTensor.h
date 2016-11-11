@@ -1,5 +1,4 @@
-#ifndef THD_TENSOR_H
-#define THD_TENSOR_H
+#pragma once
 
 struct THDTensor {
   unsigned long long tensor_id;
@@ -8,5 +7,3 @@ struct THDTensor {
 };
 
 void THDTensor_add(THDTensor *result, THDTensor *source, double value);
-
-#endif

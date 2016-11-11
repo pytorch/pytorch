@@ -1,5 +1,4 @@
-#ifndef _THD_FUNCTIONS_H
-#define _THD_FUNCTIONS_H
+#pragma once
 
 #include <stdint.h>
 
@@ -10,5 +9,3 @@ enum Functions: uint16_t {
 };
 
 } // namespace thd
-
-#endif
