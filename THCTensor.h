@@ -10,7 +10,7 @@
 
 #define THC_DESC_BUFF_LEN 64
 
-typedef struct THCDescBuff
+typedef struct THC_CLASS THCDescBuff
 {
     char str[THC_DESC_BUFF_LEN];
 } THCDescBuff;
