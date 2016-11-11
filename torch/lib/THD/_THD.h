@@ -1,6 +1,7 @@
 #pragma once
 
 #import "common/_Channel.h"
+#include "common/_CommandChannel.h"
 #include "common/_DataChannel.h"
 #ifdef WITH_MPI
 #include "common/_DataChannelMPI.h"
