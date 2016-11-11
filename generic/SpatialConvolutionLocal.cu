@@ -2,6 +2,72 @@
 #define THC_GENERIC_FILE "generic/SpatialConvolutionLocal.cu"
 #else
 
+static inline void THNN_(SpatialConvolutionLocal_shapeCheck)(
+                         THCState *state,
+                         THCTensor *input, THCTensor *gradOutput,
+                         THCTensor *weight, THCTensor *bias,
+                         int kH, int kW, int dH,
+                         int dW, int padH, int padW,
+                         long inputHeight, long inputWidth,
+                         long outputHeight, long outputWidth) {
+
+  THArgCheck(kW > 0 && kH > 0, 9,
+             "kernel size should be greater than zero, but got kH: %d kW: %d", kH, kW);
+  THArgCheck(dW > 0 && dH > 0, 11,
+             "stride should be greater than zero, but got dH: %d dW: %d", dH, dW);
+
+  int ndim = input->nDimension;
+  int dimf = 0;
+  int dimh = 1;
+  int dimw = 2;
+
+  if (ndim == 4) {
+    dimf++;
+    dimh++;
+    dimw++;
+  }
+
+  THCUNN_argCheck(state, ndim == 3 || ndim == 4, 2, input,
+                  "3D or 4D input tensor expected but got: %s");
+
+  long nInputPlane = weight->size[2] / (kH * kW);
+  long nOutputPlane = weight->size[1];
+
+  if (bias != NULL) {
+   THCUNN_check_dim_size(state, bias, 3, 0, nOutputPlane);
+   THCUNN_check_dim_size(state, bias, 3, 1, outputHeight);
+   THCUNN_check_dim_size(state, bias, 3, 2, outputWidth);
+  }
+
+  THCUNN_check_dim_size(state, input, ndim, dimf, nInputPlane);
+
+  if (gradOutput != NULL) {
+    THCUNN_check_dim_size(state, gradOutput, ndim, dimf, nOutputPlane);
+    THCUNN_check_dim_size(state, gradOutput, ndim, dimh, outputHeight);
+    THCUNN_check_dim_size(state, gradOutput, ndim, dimw, outputWidth);
+  }
+}
+
+static int THNN_(view_weight_local)(
+                 THCState *state,
+                 THCTensor **_weight)
+{
+  THCTensor *weight = *_weight;
+  THArgCheck(weight->nDimension == 3 || weight->nDimension == 6, 4,
+            "weight tensor should be 3D or 6D - got %dD", weight->nDimension);
+  if (weight->nDimension == 6) {
+    long s1 = weight->size[0] * weight->size[1];
+    long s2 = weight->size[2];
+    long s3 = weight->size[3] * weight->size[4] * weight->size[5];
+    *_weight = THCTensor_(newWithStorage3d)(state,
+                          weight->storage,
+                          weight->storageOffset,
+                          s1, -1, s2, -1, s3, -1);
+    return 1;
+  }
+  return 0;
+}
+
 void THNN_(SpatialConvolutionLocal_updateOutput)(
            THCState *state,
            THCTensor *input,
@@ -18,6 +84,14 @@ void THNN_(SpatialConvolutionLocal_updateOutput)(
 {
   THCUNN_assertSameGPU(state, 5, input, output, weight,
                        bias, finput);
+
+  int freeWeight = THNN_(view_weight_local)(state, &weight);
+
+  THNN_(SpatialConvolutionLocal_shapeCheck)
+       (state, input, NULL, weight, bias, kH, kW, dH, dW, padH, padW,
+        inputHeight, inputWidth, outputHeight, outputWidth);
+
+  input = THCTensor_(newContiguous)(state, input);
 
   // TODO: add argument checking
   long nInputPlane = THCTensor_(size)(state,weight,2)/(kW*kH);
@@ -109,6 +183,10 @@ void THNN_(SpatialConvolutionLocal_updateOutput)(
     THCTensor_(resize3d)(state, output, nOutputPlane, outputHeight, outputWidth);
     THCTensor_(resize3d)(state, input, nInputPlane, inputHeight, inputWidth);
   }
+
+  THCTensor_(free)(state, input);
+  if (freeWeight)
+     THCTensor_(free)(state, weight);
 }
 
 void THNN_(SpatialConvolutionLocal_updateGradInput)(
@@ -127,6 +205,14 @@ void THNN_(SpatialConvolutionLocal_updateGradInput)(
 {
   THCUNN_assertSameGPU(state, 5, input, gradOutput, weight,
                        fgradInput, gradInput);
+
+  int freeWeight = THNN_(view_weight_local)(state, &weight);
+
+  THNN_(SpatialConvolutionLocal_shapeCheck)
+       (state, input, gradOutput, weight, NULL, kH, kW, dH, dW, padH, padW,
+        inputHeight, inputWidth, outputHeight, outputWidth);
+
+  input = THCTensor_(newContiguous)(state, input);
 
   long nInputPlane = THCTensor_(size)(state,weight,2)/(kW*kH);
   long nOutputPlane = THCTensor_(size)(state,weight,1);
@@ -219,6 +305,10 @@ void THNN_(SpatialConvolutionLocal_updateGradInput)(
   }
 
   THCTensor_(transpose)(state, weight, weight, 1, 2);
+
+  THCTensor_(free)(state, input);
+  if (freeWeight)
+     THCTensor_(free)(state, weight);
 }
 
 void THNN_(SpatialConvolutionLocal_accGradParameters)(
@@ -238,6 +328,15 @@ void THNN_(SpatialConvolutionLocal_accGradParameters)(
 {
   THCUNN_assertSameGPU(state, 5, input, gradOutput, gradWeight,
                        gradBias, finput);
+
+  int freeWeight = THNN_(view_weight_local)(state, &gradWeight);
+
+  THNN_(SpatialConvolutionLocal_shapeCheck)
+       (state, input, gradOutput, gradWeight, gradBias, kH, kW, dH, dW, padH, padW,
+        inputHeight, inputWidth, outputHeight, outputWidth);
+
+  input = THCTensor_(newContiguous)(state, input);
+  gradOutput = THCTensor_(newContiguous)(state, gradOutput);
 
   long nInputPlane = THCTensor_(size)(state,gradWeight,2)/(kW*kH);
   long nOutputPlane = THCTensor_(size)(state,gradWeight,1);
@@ -320,6 +419,11 @@ void THNN_(SpatialConvolutionLocal_accGradParameters)(
     THCTensor_(resize3d)(state, gradOutput, nOutputPlane, outputHeight, outputWidth);
     THCTensor_(resize3d)(state, input, nInputPlane, inputHeight, inputWidth);
   }
+
+  THCTensor_(free)(state, input);
+  THCTensor_(free)(state, gradOutput);
+  if (freeWeight)
+     THCTensor_(free)(state, gradWeight);
 }
 
 #endif

@@ -2,6 +2,58 @@
 #define THC_GENERIC_FILE "generic/SpatialFullConvolution.cu"
 #else
 
+static inline void THNN_(SpatialFullConvolution_shapeCheck)(
+                         THCState *state,
+                         THCTensor *input, THCTensor *gradOutput,
+                         THCTensor *weight, THCTensor *bias,
+                         int kH, int kW, int dH, int dW, int padH, int padW,
+                         int adjH, int adjW) {
+  THArgCheck(kW > 0 && kH > 0, 9,
+             "kernel size should be greater than zero, but got kH: %d kW: %d", kH, kW);
+  THArgCheck(dW > 0 && dH > 0, 11,
+             "stride should be greater than zero, but got dH: %d dW: %d", dH, dW);
+  THCUNN_argCheck(state, weight->nDimension == 2 || weight->nDimension == 4, 5, weight,
+                  "2D or 4D weight tensor expected, but got: %s");
+
+  if (bias != NULL) {
+    THCUNN_check_dim_size(state, bias, 1, 0, weight->size[1]);
+  }
+
+  int ndim = input->nDimension;
+  int dimf = 0;
+  int dimh = 1;
+  int dimw = 2;
+
+  if (ndim == 4) {
+    dimf++;
+    dimh++;
+    dimw++;
+  }
+
+  THCUNN_argCheck(state, ndim == 3 || ndim == 4, 2, input,
+                  "3D or 4D input tensor expected but got: %s");
+
+  long nInputPlane  = weight->size[0];
+  long inputHeight  = input->size[dimh];
+  long inputWidth   = input->size[dimw];
+  long nOutputPlane = weight->size[1];
+  long outputHeight = (inputHeight - 1) * dH - 2*padH + kH + adjH;
+  long outputWidth  = (inputWidth - 1) * dW - 2*padW + kW + adjW;
+
+  if (outputWidth < 1 || outputHeight < 1)
+    THError("Given input size: (%d x %d x %d). "
+            "Calculated output size: (%d x %d x %d). Output size is too small",
+            nInputPlane,inputHeight,inputWidth,nOutputPlane,outputHeight,outputWidth);
+
+  THCUNN_check_dim_size(state, input, ndim, dimf, nInputPlane);
+
+  if (gradOutput != NULL) {
+    THCUNN_check_dim_size(state, gradOutput, ndim, dimf, nOutputPlane);
+    THCUNN_check_dim_size(state, gradOutput, ndim, dimh, outputHeight);
+    THCUNN_check_dim_size(state, gradOutput, ndim, dimw, outputWidth);
+  }
+}
+
 void THNN_(SpatialFullConvolution_updateOutput)(
            THCState *state,
            THCTensor *input,
@@ -21,22 +73,14 @@ void THNN_(SpatialFullConvolution_updateOutput)(
 
   THCUNN_assertSameGPU(state, 6, input, output, weight,
                        bias, columns, ones);
-
-  THCUNN_argCheck(state, input->nDimension == 3 || input->nDimension == 4, 2, input,
-                  "3D or 4D (batch mode) tensor expected for input, but got: %s")
+  THNN_(SpatialFullConvolution_shapeCheck)
+       (state, input, NULL, weight, bias, kH, kW, dH, dW, padH, padW, adjH, adjW);
 
   int batch = 1;
   if (input->nDimension == 3) {
-    THArgCheck(input->size[0] == nInputPlane, 2,
-               "input channels (%d) and nInputPlane (%d) dont match",
-               input->size[0], nInputPlane);
     // Force batch
     batch = 0;
     THCTensor_(resize4d)(state, input, 1, input->size[0], input->size[1], input->size[2]);
-  } else {
-    THArgCheck(input->size[1] == nInputPlane, 2,
-               "input channels (%d) and nInputPlane (%d) dont match",
-               input->size[1], nInputPlane);
   }
 
   long inputWidth   = input->size[3];
@@ -159,11 +203,10 @@ void THNN_(SpatialFullConvolution_updateGradInput)(
   int nInputPlane = THCTensor_(size)(state, weight, 0);
   int nOutputPlane = THCTensor_(size)(state, weight, 1);
 
-  // TODO: check gradOutput shape
   THCUNN_assertSameGPU(state, 5, input, gradOutput, weight,
                        gradColumns, gradInput);
-  THCUNN_argCheck(state, input->nDimension == 3 || input->nDimension == 4, 2, input,
-                  "3D or 4D (batch mode) tensor expected for input, but got: %s")
+  THNN_(SpatialFullConvolution_shapeCheck)
+       (state, input, gradOutput, weight, NULL, kH, kW, dH, dW, padH, padW, adjH, adjW);
 
   int batch = 1;
   if (input->nDimension == 3) {
@@ -264,9 +307,8 @@ void THNN_(SpatialFullConvolution_accGradParameters)(
 
   THCUNN_assertSameGPU(state, 6, input, gradOutput, gradWeight,
                        gradBias, columns, ones);
-
-  THCUNN_argCheck(state, input->nDimension == 3 || input->nDimension == 4, 2, input,
-                  "3D or 4D (batch mode) tensor expected for input, but got: %s")
+  THNN_(SpatialFullConvolution_shapeCheck)
+       (state, input, gradOutput, gradWeight, gradBias, kH, kW, dH, dW, padH, padW, adjH, adjW);
 
   int batch = 1;
   if (input->nDimension == 3) {

@@ -4,6 +4,75 @@
 
 #include "../common.h"
 
+static inline void THNN_(SpatialDilatedMaxPooling_shapeCheck)(
+  THCState *state,
+	THCTensor *input, THCTensor *gradOutput, THCIndexTensor *indices,
+	int kH, int kW, int dH, int dW, int padH, int padW,
+	int dilationH, int dilationW, bool ceil_mode) {
+
+  THArgCheck(kW > 0 && kH > 0, 5,
+             "kernel size should be greater than zero, but got kH: %d kW: %d", kH, kW);
+  THArgCheck(dW > 0 && dH > 0, 8,
+             "stride should be greater than zero, but got dH: %d dW: %d", dH, dW);
+  THArgCheck(dilationH > 0 && dilationW > 0, 12,
+             "dilation should be greater than zero, but got dilationH: %d dilationW: %d",
+             dilationH, dilationW);
+
+  int ndim = input->nDimension;
+  int dimf = 0;
+  int dimh = 1;
+  int dimw = 2;
+
+  if (ndim == 4) {
+    dimf++;
+    dimh++;
+    dimw++;
+  }
+
+  THCUNN_argCheck(state, ndim == 3 || ndim == 4, 2, input,
+                  "3D or 4D input tensor expected but got: %s");
+
+  THArgCheck(input->size[dimw] >= kW - padW && input->size[dimh] >= kH - padH, 2,
+             "input image (H: %d, W: %d) smaller than kernel "
+             "size - padding( kH: %d padH: %d kW: %d padW: %d",
+             input->size[dimh], input->size[dimw], kH, padH, kW, padW);
+  THArgCheck(kW/2 >= padW && kH/2 >= padH, 2,
+             "pad should be smaller than half of kernel size, but got "
+             "padW = %d, padH = %d, kW = %d, kH = %d",
+             padW, padH, kW, kH);
+
+  long nInputPlane = input->size[dimh-1];
+  long nInputRows = input->size[dimh];
+  long nInputCols = input->size[dimw];
+  long nOutputRows, nOutputCols;
+  long nOutputPlane = nInputPlane;
+
+  if(ceil_mode) {
+    nOutputCols = ceil(float(nInputCols - (dilationW * (kW - 1) + 1) + 2*padW) / float(dW)) + 1;
+    nOutputRows = ceil(float(nInputRows - (dilationH * (kH - 1) + 1) + 2*padH) / float(dH)) + 1;
+  }
+  else {
+    nOutputCols = floor(float(nInputCols - (dilationW * (kW - 1) + 1) + 2*padW) / float(dW)) + 1;
+    nOutputRows = floor(float(nInputRows - (dilationH * (kH - 1) + 1) + 2*padH) / float(dH)) + 1;
+  }
+
+  if (nOutputCols < 1 || nOutputRows < 1)
+    THError("Given input size: (%dx%dx%d). "
+            "Calculated output size: (%dx%dx%d). Output size is too small",
+            nInputPlane,nInputRows,nInputCols,nInputPlane,nOutputRows,nOutputCols);
+
+  if (gradOutput != NULL) {
+    THCUNN_check_dim_size(state, gradOutput, ndim, dimf, nOutputPlane);
+    THCUNN_check_dim_size(state, gradOutput, ndim, dimh, nOutputRows);
+    THCUNN_check_dim_size(state, gradOutput, ndim, dimw, nOutputCols);
+  }
+  if (indices != NULL) {
+    THCUNN_check_dim_size_indices(state, indices, ndim, dimf, nOutputPlane);
+    THCUNN_check_dim_size_indices(state, indices, ndim, dimh, nOutputRows);
+    THCUNN_check_dim_size_indices (state, indices, ndim, dimw, nOutputCols);
+  }
+}
+
 void THNN_(SpatialDilatedMaxPooling_updateOutput)(
            THCState *state,
            THCTensor *input,
@@ -17,8 +86,9 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
 {
 
   THCUNN_assertSameGPU(state, 3, input, output, indices);
-  THCUNN_argCheck(state, input->nDimension == 3 || input->nDimension == 4, 2, input,
-                  "3D or 4D (batch mode) tensor expected for input, but got: %s");
+  THNN_(SpatialDilatedMaxPooling_shapeCheck)
+       (state, input, NULL, NULL, kH, kW, dH, dW,
+        padH, padW, dilationH, dilationW, ceil_mode);
 
   long nInputCols, nInputRows, nInputPlane, batchSize;
   long nOutputCols, nOutputRows;
@@ -37,19 +107,6 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
     batchSize = input->size[0];
   }
 
-  THArgCheck(nInputCols >= kW - padW && nInputRows >= kH - padH, 2, "input image smaller than kernel size");
-  THArgCheck(nInputCols>= kW - padW && nInputRows >= kH - padH, 2,
-             "input image (H: %d, W: %d) smaller than kernel "
-             "size - padding( kH: %d padH: %d kW: %d padW: %d",
-             nInputRows, nInputCols, kH, padH, kW, padW);
-  THArgCheck(kW/2 >= padW && kH/2 >= padH, 2,
-             "pad should be smaller than half of kernel size, but got "
-             "padW = %d, padH = %d, kW = %d, kH = %d",
-             padW, padH, kW, kH);
-  THArgCheck(dilationW > 0 && dilationH > 0, 11,
-             "dilation should be greater than 0, but got "
-             "dilationH = %d dilationW = %d", dilationH, dilationW);
-
   if(ceil_mode) {
     nOutputCols = ceil(float(nInputCols - (dilationW * (kW - 1) + 1) + 2*padW) / float(dW)) + 1;
     nOutputRows = ceil(float(nInputRows - (dilationH * (kH - 1) + 1) + 2*padH) / float(dH)) + 1;
@@ -58,11 +115,6 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
     nOutputCols = floor(float(nInputCols - (dilationW * (kW - 1) + 1) + 2*padW) / float(dW)) + 1;
     nOutputRows = floor(float(nInputRows - (dilationH * (kH - 1) + 1) + 2*padH) / float(dH)) + 1;
   }
-
-if (nOutputCols < 1 || nOutputRows < 1)
-    THError("Given input size: (%dx%dx%d). "
-            "Calculated output size: (%dx%dx%d). Output size is too small",
-            nInputPlane,nInputRows,nInputCols,nInputPlane,nOutputRows,nOutputCols);
 
 if (padW || padH)
   {
@@ -108,8 +160,10 @@ void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
            int dilationW, int dilationH,
            bool ceil_mode)
 {
-  // TODO: shape check gradOutput
   THCUNN_assertSameGPU(state, 4, input, gradOutput, indices, gradInput);
+  THNN_(SpatialDilatedMaxPooling_shapeCheck)
+       (state, input, gradOutput, indices, kH, kW, dH, dW,
+       padH, padW, dilationH, dilationW, ceil_mode);
 
   input = THCTensor_(newContiguous)(state, input);
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
@@ -139,10 +193,6 @@ void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
      nOutputCols = floor(float(nInputCols - (dilationW * (kW - 1) + 1) + 2*padW) / float(dW)) + 1;
      nOutputRows = floor(float(nInputRows - (dilationH * (kH - 1) + 1) + 2*padH) / float(dH)) + 1;
    }
-
-  if (nOutputCols < 1 || nOutputRows < 1)
-    THError("Given input size: (%dx%dx%d). Calculated output size: (%dx%dx%d). Output size is too small",
-            nInputPlane,nInputRows,nInputCols,nInputPlane,nOutputRows,nOutputCols);
 
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
   THCTensor_(resizeAs)(state, gradInput, input);

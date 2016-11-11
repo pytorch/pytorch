@@ -4,16 +4,66 @@
 
 #include "../common.h"
 
+static inline void THNN_(SpatialUpSamplingNearest_shapeCheck)
+                        (THCState *state,THCTensor *input, THCTensor *gradOutput,
+                         int scale_factor) {
+  THArgCheck(input != NULL, 2, "4D input tensor expected but got NULL");
+  THArgCheck(scale_factor > 1, 4,
+             "scale_factor must be greater than 1, but got: %d", scale_factor);
+  THCUNN_argCheck(state, input->nDimension == 3 || input->nDimension == 4, 2, input,
+                  "3D or 4D input tensor expected but got: %s");
+  if (input->nDimension == 3) {
+    int nChannels    = THCTensor_(size)(state, input, 0);
+    int inputHeight  = THCTensor_(size)(state, input, 1);
+    int inputWidth   = THCTensor_(size)(state, input, 2);
+    int outputHeight = inputHeight * scale_factor;
+    int outputWidth  = inputWidth  * scale_factor;
+    if (gradOutput != NULL) {
+      THCUNN_check_dim_size(state, gradOutput, 3, 0, nChannels);
+      THCUNN_check_dim_size(state, gradOutput, 3, 1, outputHeight);
+      THCUNN_check_dim_size(state, gradOutput, 3, 2, outputWidth);
+    }
+  } else {
+    int nBatch       = THCTensor_(size)(state, input, 0);
+    int nChannels    = THCTensor_(size)(state, input, 1);
+    int inputHeight  = THCTensor_(size)(state, input, 2);
+    int inputWidth   = THCTensor_(size)(state, input, 3);
+    int outputHeight = inputHeight * scale_factor;
+    int outputWidth  = inputWidth  * scale_factor;
+    if (gradOutput != NULL) {
+      THCUNN_check_dim_size(state, gradOutput, 4, 0, nBatch);
+      THCUNN_check_dim_size(state, gradOutput, 4, 1, nChannels);
+      THCUNN_check_dim_size(state, gradOutput, 4, 2, outputHeight);
+      THCUNN_check_dim_size(state, gradOutput, 4, 3, outputWidth);
+    }
+  }
+}
+
 void THNN_(SpatialUpSamplingNearest_updateOutput)(
            THCState *state,
            THCTensor *input,
            THCTensor *output,
            int scale_factor)
 {
-  // TODO: check argument shapes
   THCTensor_(zero)(state, output);
 
   THCUNN_assertSameGPU(state, 2, input, output);
+  THNN_(SpatialUpSamplingNearest_shapeCheck)(state, input, NULL, scale_factor);
+  int inputHeight = THCTensor_(size)(state, input, input->nDimension-2);
+  int inputWidth  = THCTensor_(size)(state, input,  input->nDimension-1);
+  int outputHeight = inputHeight * scale_factor;
+  int outputWidth = inputWidth * scale_factor;
+
+   if (input->nDimension == 3) {
+     THCTensor_(resize3d)(state, output,
+                          THCTensor_(size)(state, input, 0),
+                          outputHeight, outputWidth);
+   } else {
+     THCTensor_(resize4d)(state, output,
+                          THCTensor_(size)(state, input, 0),
+                          THCTensor_(size)(state, input, 1),
+                          outputHeight, outputWidth);
+  }
 
   input = THCTensor_(newContiguous)(state, input);
   // This is for allocating output Tensor
@@ -68,8 +118,10 @@ void THNN_(SpatialUpSamplingNearest_updateGradInput)(
            THCTensor *gradInput,
            int scale_factor)
 {
-  // TODO: check argument shapes
+
   THCUNN_assertSameGPU(state, 2, gradOutput, gradInput);
+  THNN_(SpatialUpSamplingNearest_shapeCheck)(state, input, gradOutput, scale_factor);
+  THCTensor_(resizeAs)(state, gradInput, input);
 
   THCTensor_(zero)(state, gradInput);
 

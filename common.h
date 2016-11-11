@@ -68,6 +68,14 @@ inline int GET_BLOCKS(const int N)
               " but got " #T " to be of shape: %s", DIM, DIM_SIZE, SIZE, s1.str); \
   }
 
+#define THCUNN_check_dim_size_indices(STATE, T, DIM, DIM_SIZE, SIZE)  \
+  if (THCIndexTensor_(nDimension)(STATE, T) != DIM ||                 \
+      THCIndexTensor_(size)(STATE, T, DIM_SIZE) != SIZE) {            \
+      THCDescBuff s1 = THCIndexTensor_(sizeDesc)(state, T);           \
+      THError("Need " #T " of dimension %d and " #T ".size[%d] == %d" \
+              " but got " #T " to be of shape: %s", DIM, DIM_SIZE, SIZE, s1.str); \
+  }
+
 #define THCUNN_argCheck(STATE, COND, ARG, T, FORMAT) \
   if (!(COND)) { \
     THCDescBuff s1 = THCTensor_(sizeDesc)(state, T); \
