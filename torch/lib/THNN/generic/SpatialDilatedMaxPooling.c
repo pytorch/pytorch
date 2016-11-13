@@ -3,17 +3,17 @@
 #else
 
 static inline void THNN_(SpatialDilatedMaxPooling_shapeCheck)(
-	THTensor *input, THTensor *gradOutput, THTensor *indices,
+	THTensor *input, THTensor *gradOutput, THIndexTensor *indices,
 	int kH, int kW, int dH, int dW, int padH, int padW,
 	int dilationH, int dilationW, bool ceil_mode) {
 
   THArgCheck(kW > 0 && kH > 0, 5,
-	       "kernel size should be greater than zero, but got kH: %d kW: %d", kH, kW);
+             "kernel size should be greater than zero, but got kH: %d kW: %d", kH, kW);
   THArgCheck(dW > 0 && dH > 0, 8,
-	     "stride should be greater than zero, but got dH: %d dW: %d", dH, dW);
-	THArgCheck(dW > 0 && dH > 0, 12,
-	     "dilation should be greater than zero, but got dilationH: %d dilationW: %d",
-	     dilationH, dilationW);
+             "stride should be greater than zero, but got dH: %d dW: %d", dH, dW);
+  THArgCheck(dilationH > 0 && dilationW > 0, 12,
+             "dilation should be greater than zero, but got dilationH: %d dilationW: %d",
+             dilationH, dilationW);
 
   int ndim = input->nDimension;
   int dimf = 0;
@@ -37,7 +37,7 @@ static inline void THNN_(SpatialDilatedMaxPooling_shapeCheck)(
 	     "pad should be smaller than half of kernel size, but got "
 	     "padW = %d, padH = %d, kW = %d, kH = %d",
 	     padW, padH, kW, kH);
-  
+
   long nInputPlane = input->size[dimh-1];
   long inputHeight = input->size[dimh];
   long inputWidth = input->size[dimw];
@@ -66,16 +66,16 @@ static inline void THNN_(SpatialDilatedMaxPooling_shapeCheck)(
     THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimw, outputWidth);
   }
   if (indices != NULL) {
-    THNN_CHECK_DIM_SIZE(indices, ndim, dimf, nOutputPlane);
-    THNN_CHECK_DIM_SIZE(indices, ndim, dimh, outputHeight);
-    THNN_CHECK_DIM_SIZE(indices, ndim, dimw, outputWidth);
+    THNN_CHECK_DIM_SIZE_INDICES(indices, ndim, dimf, nOutputPlane);
+    THNN_CHECK_DIM_SIZE_INDICES(indices, ndim, dimh, outputHeight);
+    THNN_CHECK_DIM_SIZE_INDICES(indices, ndim, dimw, outputWidth);
   }
 }
 
 static void THNN_(SpatialDilatedMaxPooling_updateOutput_frame)(
           real *input_p,
           real *output_p,
-          real *ind_p,
+          THIndex_t *ind_p,
           long nslices,
           long iwidth,
           long iheight,
@@ -113,7 +113,7 @@ static void THNN_(SpatialDilatedMaxPooling_updateOutput_frame)(
 
         /* local pointers */
         real *op = output_p  + k*owidth*oheight + i*owidth + j;
-        real *indp = ind_p   + k*owidth*oheight + i*owidth + j;
+        THIndex_t *indp = ind_p   + k*owidth*oheight + i*owidth + j;
 
         /* compute local max: */
         long maxindex = -1;
@@ -148,7 +148,7 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
-          THTensor *indices,
+          THIndexTensor *indices,
           int kW,
           int kH,
           int dW,
@@ -170,7 +170,7 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
   long outputWidth;
   real *input_data;
   real *output_data;
-  real *indices_data;
+  THIndex_t *indices_data;
 
   THNN_(SpatialDilatedMaxPooling_shapeCheck)
     (input, NULL, NULL, kH, kW, dH, dW,
@@ -215,11 +215,11 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
   {
     THTensor_(resize3d)(output, nInputPlane, outputHeight, outputWidth);
     /* indices will contain the locations for each output point */
-    THTensor_(resize3d)(indices,  nInputPlane, outputHeight, outputWidth);
+    THIndexTensor_(resize3d)(indices,  nInputPlane, outputHeight, outputWidth);
 
     input_data = THTensor_(data)(input);
     output_data = THTensor_(data)(output);
-    indices_data = THTensor_(data)(indices);
+    indices_data = THIndexTensor_(data)(indices);
 
     THNN_(SpatialDilatedMaxPooling_updateOutput_frame)
       (input_data, output_data,
@@ -238,11 +238,11 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
 
     THTensor_(resize4d)(output, nbatch, nInputPlane, outputHeight, outputWidth);
     /* indices will contain the locations for each output point */
-    THTensor_(resize4d)(indices, nbatch, nInputPlane, outputHeight, outputWidth);
+    THIndexTensor_(resize4d)(indices, nbatch, nInputPlane, outputHeight, outputWidth);
 
     input_data = THTensor_(data)(input);
     output_data = THTensor_(data)(output);
-    indices_data = THTensor_(data)(indices);
+    indices_data = THIndexTensor_(data)(indices);
 
 #pragma omp parallel for private(p)
     for (p = 0; p < nbatch; p++)
@@ -268,7 +268,7 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
 static void THNN_(SpatialDilatedMaxPooling_updateGradInput_frame)(
           real *gradInput_p,
           real *gradOutput_p,
-          real *ind_p,
+          THIndex_t *ind_p,
           long nInputPlane,
           long inputWidth,
           long inputHeight,
@@ -283,7 +283,7 @@ static void THNN_(SpatialDilatedMaxPooling_updateGradInput_frame)(
   {
     real *gradInput_p_k = gradInput_p + k*inputWidth*inputHeight;
     real *gradOutput_p_k = gradOutput_p + k*outputWidth*outputHeight;
-    real *ind_p_k = ind_p + k*outputWidth*outputHeight;
+    THIndex_t *ind_p_k = ind_p + k*outputWidth*outputHeight;
 
     /* calculate max points */
     long i, j;
@@ -305,7 +305,7 @@ void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
           THTensor *input,
           THTensor *gradOutput,
           THTensor *gradInput,
-          THTensor *indices,
+          THIndexTensor *indices,
           int kW,
           int kH,
           int dW,
@@ -326,7 +326,7 @@ void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
   int outputWidth;
   real *gradInput_data;
   real *gradOutput_data;
-  real *indices_data;
+  THIndex_t *indices_data;
 
   THNN_(SpatialDilatedMaxPooling_shapeCheck)
     (input, gradOutput, indices, kH, kW, dH, dW,
@@ -355,7 +355,7 @@ void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
   /* get raw pointers */
   gradInput_data = THTensor_(data)(gradInput);
   gradOutput_data = THTensor_(data)(gradOutput);
-  indices_data = THTensor_(data)(indices);
+  indices_data = THIndexTensor_(data)(indices);
 
   /* backprop */
   if (input->nDimension == 3)

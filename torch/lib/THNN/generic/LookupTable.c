@@ -29,7 +29,7 @@ void THNN_(LookupTable_accGradParameters)(
           THTensor *gradWeight,
           THIntegerTensor *count,
           THTensor *sorted,
-          THTensor *indices,
+          THIndexTensor *indices,
           bool scaleGradByFreq,
           int paddingValue,
           real scale)

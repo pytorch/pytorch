@@ -9,17 +9,15 @@ static inline void THNN_(SpatialDilatedConvolution_shapeCheck)(
 	int dilationH, int dilationW) {
 
   THNN_ARGCHECK(weight->nDimension == 4, 4, weight,
-		"4D weight tensor (nOutputPlane,nInputPlane,kH,kW) expected, "
-		"but got: %s");
+                "4D weight tensor (nOutputPlane,nInputPlane,kH,kW) expected, "
+                "but got: %s");
   THArgCheck(kW > 0 && kH > 0, 9,
-	       "kernel size should be greater than zero, but got kH: %d kW: %d", kH, kW);
+             "kernel size should be greater than zero, but got kH: %d kW: %d", kH, kW);
   THArgCheck(dW > 0 && dH > 0, 11,
-	     "stride should be greater than zero, but got dH: %d dW: %d", dH, dW);
-	THArgCheck(dilationW > 0 && dilationH > 0, 15,
-			 "dilation should be greater than zero, but got dilationH: %d, dilationW: %d",
-			 dilationH, dilationW);
-  THNN_ARGCHECK(weight->nDimension == 2 || weight->nDimension == 4, 5, weight,
-		"2D or 4D weight tensor expected, but got: %s");
+             "stride should be greater than zero, but got dH: %d dW: %d", dH, dW);
+  THArgCheck(dilationW > 0 && dilationH > 0, 15,
+             "dilation should be greater than zero, but got dilationH: %d, dilationW: %d",
+             dilationH, dilationW);
 
   if (bias != NULL) {
     THNN_CHECK_DIM_SIZE(bias, 1, 0, weight->size[0]);

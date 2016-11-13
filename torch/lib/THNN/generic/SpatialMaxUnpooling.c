@@ -3,7 +3,7 @@
 #else
 
 static void THNN_(SpatialMaxUnpooling_updateOutput_frame)(real *input_p, real *output_p,
-                                                      real *ind_p,
+                                                      THIndex_t *ind_p,
                                                       long nslices,
                                                       long iwidth, long iheight,
                                                       long owidth, long oheight)
@@ -16,7 +16,7 @@ static void THNN_(SpatialMaxUnpooling_updateOutput_frame)(real *input_p, real *o
   {
     real *output_p_k = output_p + k*owidth*oheight;
     real *input_p_k = input_p + k*iwidth*iheight;
-    real *ind_p_k = ind_p + k*iwidth*iheight;
+    THIndex_t *ind_p_k = ind_p + k*iwidth*iheight;
 
     long i, j, maxp;
     for(i = 0; i < iheight; i++)
@@ -46,7 +46,7 @@ void THNN_(SpatialMaxUnpooling_updateOutput)(
     THNNState *state,
     THTensor *input,
     THTensor *output,
-    THTensor *indices,
+    THIndexTensor *indices,
     int owidth, int oheight)
 {
   int dimw = 2;
@@ -57,12 +57,12 @@ void THNN_(SpatialMaxUnpooling_updateOutput)(
   int iwidth;
   real *input_data;
   real *output_data;
-  real *indices_data;
+  THIndex_t *indices_data;
 
 
   THNN_ARGCHECK(input->nDimension == 3 || input->nDimension == 4, 2, input,
 		"3D or 4D (batch mode) tensor expected for input, but got: %s");
-  THNN_CHECK_SHAPE(input, indices);
+  THNN_CHECK_SHAPE_INDICES(input, indices);
 
   if (input->nDimension == 4)
   {
@@ -78,7 +78,7 @@ void THNN_(SpatialMaxUnpooling_updateOutput)(
 
   /* get contiguous input and indices */
   input = THTensor_(newContiguous)(input);
-  indices = THTensor_(newContiguous)(indices);
+  indices = THIndexTensor_(newContiguous)(indices);
 
   /* resize output */
   if (input->nDimension == 3)
@@ -88,7 +88,7 @@ void THNN_(SpatialMaxUnpooling_updateOutput)(
 
     input_data = THTensor_(data)(input);
     output_data = THTensor_(data)(output);
-    indices_data = THTensor_(data)(indices);
+    indices_data = THIndexTensor_(data)(indices);
 
     THNN_(SpatialMaxUnpooling_updateOutput_frame)(input_data, output_data,
                                               indices_data,
@@ -105,7 +105,7 @@ void THNN_(SpatialMaxUnpooling_updateOutput)(
 
     input_data = THTensor_(data)(input);
     output_data = THTensor_(data)(output);
-    indices_data = THTensor_(data)(indices);
+    indices_data = THIndexTensor_(data)(indices);
 
 #pragma omp parallel for private(p)
     for (p = 0; p < nbatch; p++)
@@ -120,11 +120,11 @@ void THNN_(SpatialMaxUnpooling_updateOutput)(
 
   /* cleanup */
   THTensor_(free)(input);
-  THTensor_(free)(indices);
+  THIndexTensor_(free)(indices);
 }
 
 static void THNN_(SpatialMaxUnpooling_updateGradInput_frame)(real *gradInput_p, real *gradOutput_p,
-                                                         real *ind_p,
+                                                         THIndex_t *ind_p,
                                                          long nslices,
                                                          long iwidth, long iheight,
                                                          long owidth, long oheight)
@@ -135,7 +135,7 @@ static void THNN_(SpatialMaxUnpooling_updateGradInput_frame)(real *gradInput_p, 
   {
     real *gradInput_p_k = gradInput_p + k*iwidth*iheight;
     real *gradOutput_p_k = gradOutput_p + k*owidth*oheight;
-    real *ind_p_k = ind_p + k*iwidth*iheight;
+    THIndex_t *ind_p_k = ind_p + k*iwidth*iheight;
 
     long i, j, maxp;
     for(i = 0; i < iheight; i++)
@@ -157,7 +157,7 @@ void THNN_(SpatialMaxUnpooling_updateGradInput)(
     THTensor *input,
     THTensor *gradOutput,
     THTensor *gradInput,
-    THTensor *indices,
+    THIndexTensor *indices,
     int owidth, int oheight)
 {
   int dimw = 2;
@@ -168,13 +168,13 @@ void THNN_(SpatialMaxUnpooling_updateGradInput)(
   int iwidth;
   real *gradInput_data;
   real *gradOutput_data;
-  real *indices_data;
+  THIndex_t *indices_data;
 
-  THNN_CHECK_SHAPE(input, indices);
+  THNN_CHECK_SHAPE_INDICES(input, indices);
 
   /* get contiguous gradOutput and indices */
   gradOutput = THTensor_(newContiguous)(gradOutput);
-  indices = THTensor_(newContiguous)(indices);
+  indices = THIndexTensor_(newContiguous)(indices);
 
   /* resize */
   THTensor_(resizeAs)(gradInput, input);
@@ -199,7 +199,7 @@ void THNN_(SpatialMaxUnpooling_updateGradInput)(
   /* get raw pointers */
   gradInput_data = THTensor_(data)(gradInput);
   gradOutput_data = THTensor_(data)(gradOutput);
-  indices_data = THTensor_(data)(indices);
+  indices_data = THIndexTensor_(data)(indices);
 
   /* backprop */
   if (input->nDimension == 3)
@@ -226,7 +226,7 @@ void THNN_(SpatialMaxUnpooling_updateGradInput)(
 
   /* cleanup */
   THTensor_(free)(gradOutput);
-  THTensor_(free)(indices);
+  THIndexTensor_(free)(indices);
 }
 
 #endif

@@ -6,12 +6,13 @@
 void THNN_(MultiLabelMarginCriterion_updateOutput)(
           THNNState *state,
           THTensor *input,
-          THTensor *target,
+          THIndexTensor *target,
           THTensor *output,
           THTensor *isTarget,
           bool sizeAverage)
 {
-  real *input_data, *target_data, *isTarget_data;
+  real *input_data, *isTarget_data;
+  THIndex_t *target_data;
   long nframe, dim;
   long t, d, dt, ddt;
   real sum;
@@ -34,15 +35,15 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
 	       && (target->size[1] == dim), 3, "inconsistent target size");
   }
 
-  THArgCheck(THTensor_(minall)(target) >= 0, 3, "target out of range");
-  THArgCheck(THTensor_(maxall)(target) <= dim, 3, "target out of range");
+  THArgCheck(THIndexTensor_(minall)(target) >= 0, 3, "target out of range");
+  THArgCheck(THIndexTensor_(maxall)(target) <= dim, 3, "target out of range");
 
-  target = THTensor_(newContiguous)(target);
+  target = THIndexTensor_(newContiguous)(target);
   input = THTensor_(newContiguous)(input);
   input_data = THTensor_(data)(input);
-  target_data = THTensor_(data)(target);
+  target_data = THIndexTensor_(data)(target);
 
-  THTensor_(resizeAs)(isTarget, target);
+  THNN_resizeAs_indices(isTarget, target);
   THTensor_(zero)(isTarget);
   isTarget_data = THTensor_(data)(isTarget);
 
@@ -51,14 +52,14 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
   {
     for (ddt = 0; ddt < dim; ddt++)
     {
-      long target_idx = (long)target_data[ddt] - TH_INDEX_BASE;
+      THIndex_t target_idx = target_data[ddt] - TH_INDEX_BASE;
       if (target_idx < 0)
         break;
       isTarget_data[target_idx] = 1;
     }
     for (dt = 0; dt < dim; dt++)
     {
-      long target_idx = (long)target_data[dt] - TH_INDEX_BASE;
+      THIndex_t target_idx = target_data[dt] - TH_INDEX_BASE;
       real input_target;
       if (target_idx < 0)
         break;
@@ -86,20 +87,20 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
   THTensor_(set1d)(output, 0, sum);
 
   THTensor_(free)(input);
-  THTensor_(free)(target);
+  THIndexTensor_(free)(target);
 }
 
 void THNN_(MultiLabelMarginCriterion_updateGradInput)(
           THNNState *state,
           THTensor *input,
-          THTensor *target,
+          THIndexTensor *target,
           THTensor *gradInput,
           THTensor *isTarget,
           bool sizeAverage)
 {
   real *input_data;
   real *gradInput_data;
-  real *target_data;
+  THIndex_t *target_data;
   real *isTarget_data;
   long nframe, dim;
   long t, d, dt;
@@ -127,17 +128,17 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
 	       && (isTarget->size[1] == dim), 3, "inconsistent isTarget size");
   }
 
-  THArgCheck(THTensor_(minall)(target) >= 0, 3, "target out of range");
-  THArgCheck(THTensor_(maxall)(target) <= dim, 3, "target out of range");
+  THArgCheck(THIndexTensor_(minall)(target) >= 0, 3, "target out of range");
+  THArgCheck(THIndexTensor_(maxall)(target) <= dim, 3, "target out of range");
 
   THArgCheck(THTensor_(minall)(isTarget) >= 0, 3, "isTarget out of range");
   THArgCheck(THTensor_(maxall)(isTarget) <= 1, 3, "isTarget out of range");
 
-  target = THTensor_(newContiguous)(target);
+  target = THIndexTensor_(newContiguous)(target);
   input = THTensor_(newContiguous)(input);
   isTarget = THTensor_(newContiguous)(isTarget);
   input_data = THTensor_(data)(input);
-  target_data = THTensor_(data)(target);
+  target_data = THIndexTensor_(data)(target);
   isTarget_data = THTensor_(data)(isTarget);
 
   g = sizeAverage ? ( 1./((real)(nframe*dim)) ) : ( 1./((real)dim) );
@@ -150,7 +151,7 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
   {
     for (dt = 0; dt < dim; dt++)
     {
-      long target_idx = (long)target_data[dt] - TH_INDEX_BASE;
+      THIndex_t target_idx = target_data[dt] - TH_INDEX_BASE;
       real input_target;
       if (target_idx < 0)
         break;
@@ -176,7 +177,7 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
   }
 
   THTensor_(free)(input);
-  THTensor_(free)(target);
+  THIndexTensor_(free)(target);
   THTensor_(free)(isTarget);
 }
 
