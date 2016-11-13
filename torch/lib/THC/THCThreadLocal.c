@@ -1,5 +1,8 @@
 #include "THCThreadLocal.h"
 #include "THCGeneral.h"
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 
 THCThreadLocal THCThreadLocal_alloc(void)
