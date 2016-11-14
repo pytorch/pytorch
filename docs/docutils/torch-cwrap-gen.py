@@ -49,7 +49,7 @@ class DocGen(CWrapPlugin):
         return Template("")
 
     def print_declarations(self):  
-        print(" # torch.Tensor")
+        print("# torch.Tensor")
         for name, declarations in sorted(self.declarations.items()):
             if name.endswith('_') and name[:-1] in self.declarations:
                 continue
