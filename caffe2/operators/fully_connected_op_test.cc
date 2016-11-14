@@ -1,3 +1,5 @@
+// TODO(#14383029) cblas_sgemm not yet implemented on osmeta
+#if !defined(__OSMETA__)
 #include <iostream>
 
 #include "caffe2/operators/fully_connected_op.h"
@@ -47,3 +49,4 @@ TEST(FullyConnectedTest, Test) {
 }
 
 }  // namespace caffe2
+#endif

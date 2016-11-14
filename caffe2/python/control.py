@@ -17,6 +17,67 @@ from __future__ import unicode_literals
 from caffe2.python import core
 
 
+# Used to generate names of the steps created by the control functions.
+# It is actually the internal index of these steps.
+_current_idx = 1
+_used_step_names = set()
+
+
+def _get_next_step_name(control_name, base_name):
+    global _current_idx, _used_step_names
+    concat_name = '%s/%s' % (base_name, control_name)
+    next_name = concat_name
+    while next_name in _used_step_names:
+        next_name = '%s_%d' % (concat_name, _current_idx)
+        _current_idx += 1
+    _used_step_names.add(next_name)
+    return next_name
+
+
+def _MakeList(input):
+    """ input is a tuple.
+    Example:
+    (a, b, c)   --> [a, b, c]
+    (a)         --> [a]
+    ([a, b, c]) --> [a, b, c]
+    """
+    if len(input) == 0:
+        raise ValueError(
+            'input cannot be empty.')
+    elif len(input) == 1:
+        output = input[0]
+        if not isinstance(output, list):
+            output = [output]
+    else:
+        output = list(input)
+    return output
+
+
+def _IsNets(nets_or_steps):
+    if isinstance(nets_or_steps, list):
+        return all(isinstance(n, core.Net) for n in nets_or_steps)
+    else:
+        return isinstance(nets_or_steps, core.Net)
+
+
+def _PrependNets(nets_or_steps, *nets):
+    nets_or_steps = _MakeList((nets_or_steps,))
+    nets = _MakeList(nets)
+    if _IsNets(nets_or_steps):
+        return nets + nets_or_steps
+    else:
+        return [Do('prepend', nets)] + nets_or_steps
+
+
+def _AppendNets(nets_or_steps, *nets):
+    nets_or_steps = _MakeList((nets_or_steps,))
+    nets = _MakeList(nets)
+    if _IsNets(nets_or_steps):
+        return nets_or_steps + nets
+    else:
+        return nets_or_steps + [Do('append', nets)]
+
+
 def GetConditionBlobFromNet(condition_net):
     """
     The condition blob is the last external_output that must
@@ -29,6 +90,39 @@ def GetConditionBlobFromNet(condition_net):
     # otherwise, it will add another name_scope to the input later
     # when we create new ops (such as OR of two inputs)
     return core.BlobReference(condition_net.Proto().external_output[-1])
+
+
+def BoolNet(*blobs_with_bool_value):
+    """A net assigning constant bool values to blobs. It is mainly used for
+    initializing condition blobs, for example, in multi-task learning, we
+    need to access reader_done blobs before reader_net run. In that case,
+    the reader_done blobs must be initialized.
+
+    Args:
+    blobs_with_bool_value: one or more (blob, bool_value) pairs. The net will
+    assign each bool_value to the corresponding blob.
+
+    returns
+    bool_net: A net assigning constant bool values to blobs.
+
+    Examples:
+    - BoolNet((blob_1, bool_value_1), ..., (blob_n, bool_value_n))
+    - BoolNet([(blob_1, net1), ..., (blob_n, bool_value_n)])
+    - BoolNet((cond_1, bool_value_1))
+    """
+    blobs_with_bool_value = _MakeList(blobs_with_bool_value)
+    bool_net = core.Net('bool_net')
+    for blob, bool_value in blobs_with_bool_value:
+        out_blob = bool_net.ConstantFill(
+            [],
+            [blob],
+            shape=[],
+            value=bool_value,
+            dtype=core.DataType.BOOL)
+        bool_net.AddExternalOutput(out_blob)
+
+    return bool_net
+
 
 def NotNet(condition_blob_or_net):
     """Not of a condition blob or net
@@ -109,114 +203,149 @@ def MergeConditionNets(name, condition_nets, relation):
     return merged_net
 
 
-def Do(*nets_or_steps):
+def CombineConditions(name, condition_nets, relation):
+    """
+    Combine conditions of multi nets into a single condition nets. Unlike
+    MergeConditionNets, the actual body of condition_nets is not copied into
+    the combine condition net.
+
+    One example is about multi readers. Each reader net has a reader_done
+    condition. When we want to check whether all readers are done, we can
+    use this function to build a new net.
+
+    Args:
+        name: name of the new condition net.
+        condition_nets: a list of condition nets. The last external_output
+                        of each condition net must be single bool value.
+        relation: can be 'And' or 'Or'.
+
+    Returns:
+        - A new condition net. Its last external output is relation of all
+          condition_nets.
+    """
+    if not condition_nets:
+        return None
+    if not isinstance(condition_nets, list):
+        raise ValueError('condition_nets must be a list of nets.')
+
+    if len(condition_nets) == 1:
+        condition_blob = GetConditionBlobFromNet(condition_nets[0])
+        condition_net, _ = _CopyConditionBlobNet(condition_blob)
+        return condition_net
+
+    combined_net = core.Net(name)
+    for i in range(len(condition_nets)):
+        curr_cond = GetConditionBlobFromNet(condition_nets[i])
+        if i == 0:
+            last_cond = curr_cond
+        else:
+            last_cond = combined_net.__getattr__(relation)(
+                [last_cond, curr_cond])
+
+    combined_net.AddExternalOutput(last_cond)
+
+    return combined_net
+
+
+def Do(name, *nets_or_steps):
     """
     Execute the sequence of nets or steps once.
 
     Examples:
-    - Do(net1, net2, ..., net_n)
-    - Do(list_of_nets)
-    - Do(step1, step2, ..., step_n)
-    - Do(list_of_steps)
+    - Do('myDo', net1, net2, ..., net_n)
+    - Do('myDo', list_of_nets)
+    - Do('myDo', step1, step2, ..., step_n)
+    - Do('myDo', list_of_steps)
     """
-    if len(nets_or_steps) == 0:
-        raise ValueError(
-            'nets_or_steps cannot be empty.')
-    elif len(nets_or_steps) == 1:
-        nets_or_steps = nets_or_steps[0]
+    nets_or_steps = _MakeList(nets_or_steps)
+    if (len(nets_or_steps) == 1 and isinstance(
+            nets_or_steps[0], core.ExecutionStep)):
+        return nets_or_steps[0]
     else:
-        nets_or_steps = list(nets_or_steps)
+        return core.execution_step(
+            _get_next_step_name('Do', name), nets_or_steps)
 
-    return core.execution_step('Do', nets_or_steps)
 
-
-def DoParallel(*nets_or_steps):
+def DoParallel(name, *nets_or_steps):
     """
     Execute the nets or steps in parallel, waiting for all of them to finish
 
     Examples:
-    - DoParallel(net1, net2, ..., net_n)
-    - DoParallel(list_of_nets)
-    - DoParallel(step1, step2, ..., step_n)
-    - DoParallel(list_of_steps)
+    - DoParallel('pDo', net1, net2, ..., net_n)
+    - DoParallel('pDo', list_of_nets)
+    - DoParallel('pDo', step1, step2, ..., step_n)
+    - DoParallel('pDo', list_of_steps)
     """
-    if len(nets_or_steps) == 0:
-        raise ValueError(
-            'nets_or_steps cannot be empty.')
-    elif len(nets_or_steps) == 1:
-        nets_or_steps = nets_or_steps[0]
+    nets_or_steps = _MakeList(nets_or_steps)
+    if (len(nets_or_steps) == 1 and isinstance(
+            nets_or_steps[0], core.ExecutionStep)):
+        return nets_or_steps[0]
     else:
-        nets_or_steps = list(nets_or_steps)
-
-    return core.execution_step(
-        'DoParallel', nets_or_steps, concurrent_substeps=True)
-
-
-def _StopNet(stop_blob):
-    stop_net = core.Net('stop_net')
-    stop_net.ConstantFill(
-        [], [stop_blob], shape=[], value=True, dtype=core.DataType.BOOL)
-    return stop_net
+        return core.execution_step(
+            _get_next_step_name('DoParallel', name),
+            nets_or_steps,
+            concurrent_substeps=True)
 
 
-def _ToExecutionStep(net_or_step):
-    if isinstance(net_or_step, core.Net):
-        return Do(net_or_step)
-    elif isinstance(net_or_step, core.ExecutionStep):
-        return net_or_step
-    else:
-        raise ValueError(
-            'net_or_step must be a net or a step.')
-
-
-def _RunOnceIf(condition_blob_or_net, net_or_step):
+def _RunOnceIf(name, condition_blob_or_net, nets_or_steps):
     """
-    Execute net_or_step once if condition_blob_or_net evaluates as true.
+    Execute nets_or_steps once if condition_blob_or_net evaluates as true.
 
     If condition_blob_or_net is Net, the condition is its last external_output
-    that must be a single bool. And this net will be executed before net_or_step
-    so as to get the condition.
+    that must be a single bool. And this net will be executed before
+    nets_or_steps so as to get the condition.
     """
+    condition_not_net, stop_blob = NotNet(condition_blob_or_net)
     if isinstance(condition_blob_or_net, core.Net):
-        condition_blob = GetConditionBlobFromNet(condition_blob_or_net)
-        return Do(Do(condition_blob_or_net),
-                  _RunOnceIf(condition_blob, net_or_step))
+        nets_or_steps = _PrependNets(
+            nets_or_steps, condition_blob_or_net, condition_not_net)
+    else:
+        nets_or_steps = _PrependNets(nets_or_steps, condition_not_net)
 
-    stop_if_not_net, stop_blob = NotNet(condition_blob_or_net)
-    stop_net = _StopNet(stop_blob)
+    def if_step(control_name):
+        return core.execution_step(
+            _get_next_step_name(control_name, name),
+            nets_or_steps,
+            should_stop_blob=stop_blob,
+            only_once=True,
+        )
 
-    return core.execution_step(
-        '_RunOnceIf',
-        [Do(stop_if_not_net), _ToExecutionStep(net_or_step), Do(stop_net)],
-        should_stop_blob=stop_blob)
+    if _IsNets(nets_or_steps):
+        bool_net = BoolNet((stop_blob, False))
+        return Do(name + '/_RunOnceIf',
+                  bool_net, if_step('_RunOnceIf-inner'))
+    else:
+        return if_step('_RunOnceIf')
 
 
-def _RunOnceIfNot(condition_blob_or_net, net_or_step):
+def _RunOnceIfNot(name, condition_blob_or_net, nets_or_steps):
     """
-    Similar to _RunOnceIf() but Execute net_or_step once if
+    Similar to _RunOnceIf() but Execute nets_or_steps once if
     condition_blob_or_net evaluates as false.
     """
     if isinstance(condition_blob_or_net, core.Net):
         condition_blob = GetConditionBlobFromNet(condition_blob_or_net)
-        return Do(Do(condition_blob_or_net),
-                  _RunOnceIfNot(condition_blob, net_or_step))
-
-    stop_if_net, stop_blob = _CopyConditionBlobNet(condition_blob_or_net)
-    stop_net = _StopNet(stop_blob)
+        nets_or_steps = _PrependNets(nets_or_steps, condition_blob_or_net)
+    else:
+        copy_net, condition_blob = _CopyConditionBlobNet(condition_blob_or_net)
+        nets_or_steps = _PrependNets(nets_or_steps, copy_net)
 
     return core.execution_step(
-        '_RunOnceIfNot',
-        [Do(stop_if_net), _ToExecutionStep(net_or_step), Do(stop_net)],
-        should_stop_blob=stop_blob)
+        _get_next_step_name('_RunOnceIfNot', name),
+        nets_or_steps,
+        should_stop_blob=condition_blob,
+        only_once=True,
+    )
 
 
-def For(net_or_step, iter_num):
+def For(name, nets_or_steps, iter_num):
     """
-    Execute net_or_step iter_num times.
+    Execute nets_or_steps iter_num times.
 
     Args:
-    net_or_step: an instance of a ExecutionStep or a Net.
-    iter_num:    the number times to execute the net_or_step.
+    nets_or_steps: a ExecutionStep or a Net or a list of ExecutionSteps or
+                   a list nets.
+    iter_num:    the number times to execute the nets_or_steps.
 
     Returns:
     A ExecutionStep instance.
@@ -226,175 +355,215 @@ def For(net_or_step, iter_num):
     iter_net = core.Net('For-iter')
     iter_done = iter_net.CountDown([iter_cnt])
 
-    if isinstance(net_or_step, core.Net):
-        for_step = core.execution_step(
-            'For', [iter_net, net_or_step], should_stop_blob=iter_done)
-    elif isinstance(net_or_step, core.ExecutionStep):
-        for_step = core.execution_step(
-            'For', [Do(iter_net), net_or_step], should_stop_blob=iter_done)
-    else:
-        raise ValueError(
-            'net_or_step must be a net or a step.')
-
-    return Do(Do(init_net), for_step)
+    for_step = core.execution_step(
+        _get_next_step_name('For-inner', name),
+        _PrependNets(nets_or_steps, iter_net),
+        should_stop_blob=iter_done)
+    return Do(name + '/For',
+              Do(name + '/For-init-net', init_net),
+              for_step)
 
 
-def While(condition_blob_or_net, net_or_step):
+def While(name, condition_blob_or_net, nets_or_steps):
     """
-    Execute net_or_step when condition_blob_or_net returns true.
+    Execute nets_or_steps when condition_blob_or_net returns true.
 
     Args:
     condition_blob_or_net: If it is an instance of Net, its last
       external_output must be a single bool.
-    net_or_step: an instance of a ExecutionStep or a Net.
+    nets_or_steps: a ExecutionStep or a Net or a list of ExecutionSteps or
+                   a list nets.
 
     Returns:
     A ExecutionStep instance.
     """
     condition_not_net, stop_blob = NotNet(condition_blob_or_net)
     if isinstance(condition_blob_or_net, core.Net):
-        condition_step = Do(condition_blob_or_net, condition_not_net)
+        nets_or_steps = _PrependNets(
+            nets_or_steps, condition_blob_or_net, condition_not_net)
     else:
-        condition_step = Do(condition_not_net)
+        nets_or_steps = _PrependNets(nets_or_steps, condition_not_net)
 
-    return core.execution_step(
-        'While',
-        [condition_step, _ToExecutionStep(net_or_step)],
-        should_stop_blob=stop_blob)
+    def while_step(control_name):
+        return core.execution_step(
+            _get_next_step_name(control_name, name),
+            nets_or_steps,
+            should_stop_blob=stop_blob,
+        )
+
+    if _IsNets(nets_or_steps):
+        # In this case, while_step has sub-nets:
+        # [condition_blob_or_net, condition_not_net, nets_or_steps]
+        # If stop_blob is pre-set to True (this may happen when While() is
+        # called twice), the loop will exit after executing
+        # condition_blob_or_net. So we use BootNet to set stop_blob to
+        # False.
+        bool_net = BoolNet((stop_blob, False))
+        return Do(name + '/While', bool_net, while_step('While-inner'))
+    else:
+        return while_step('While')
 
 
-def Until(condition_blob_or_net, net_or_step):
+def Until(name, condition_blob_or_net, nets_or_steps):
     """
-    Similar to While() but execute net_or_step when
+    Similar to While() but execute nets_or_steps when
     condition_blob_or_net returns false
     """
     if isinstance(condition_blob_or_net, core.Net):
         stop_blob = GetConditionBlobFromNet(condition_blob_or_net)
-        condition_step = Do(condition_blob_or_net)
+        nets_or_steps = _PrependNets(nets_or_steps, condition_blob_or_net)
     else:
-        copy_net, stop_blob = _CopyConditionBlobNet(condition_blob_or_net)
-        condition_step = Do(copy_net)
+        stop_blob = core.BlobReference(str(condition_blob_or_net))
 
     return core.execution_step(
-        'Until',
-        [condition_step, _ToExecutionStep(net_or_step)],
+        _get_next_step_name('Until', name),
+        nets_or_steps,
         should_stop_blob=stop_blob)
 
 
-def DoWhile(condition_blob_or_net, net_or_step):
+def DoWhile(name, condition_blob_or_net, nets_or_steps):
     """
-    Execute net_or_step when condition_blob_or_net returns true. It will execute
-    net_or_step at least once.
+    Execute nets_or_steps when condition_blob_or_net returns true. It will
+    execute nets_or_steps before evaluating condition_blob_or_net.
 
     Args:
     condition_blob_or_net: if it is an instance of Net, tts last external_output
       must be a single bool.
-    net_or_step: an instance of a ExecutionStep or a Net.
+    nets_or_steps: a ExecutionStep or a Net or a list of ExecutionSteps or
+                   a list nets.
 
     Returns:
     A ExecutionStep instance.
     """
     condition_not_net, stop_blob = NotNet(condition_blob_or_net)
     if isinstance(condition_blob_or_net, core.Net):
-        condition_step = Do(condition_blob_or_net, condition_not_net)
+        nets_or_steps = _AppendNets(
+            nets_or_steps, condition_blob_or_net, condition_not_net)
     else:
-        condition_step = Do(condition_not_net)
+        nets_or_steps = _AppendNets(nets_or_steps, condition_not_net)
 
-    return core.execution_step(
-        'DoWhile',
-        [_ToExecutionStep(net_or_step), condition_step],
-        should_stop_blob=stop_blob)
+    # If stop_blob is pre-set to True (this may happen when DoWhile() is
+    # called twice), the loop will exit after executing the first net/step
+    # in nets_or_steps. This is not what we want. So we use BootNet to
+    # set stop_blob to False.
+    bool_net = BoolNet((stop_blob, False))
+    return Do(name + '/DoWhile', bool_net, core.execution_step(
+        _get_next_step_name('DoWhile-inner', name),
+        nets_or_steps,
+        should_stop_blob=stop_blob,
+    ))
 
 
-def DoUntil(condition_blob_or_net, net_or_step):
+def DoUntil(name, condition_blob_or_net, nets_or_steps):
     """
-    Similar to DoWhile() but execute net_or_step when
-    condition_blob_or_net returns false
+    Similar to DoWhile() but execute nets_or_steps when
+    condition_blob_or_net returns false. It will execute
+    nets_or_steps before evaluating condition_blob_or_net.
+
+    Special case: if condition_blob_or_net is a blob and is pre-set to
+    true, then only the first net/step of nets_or_steps will be executed and
+    loop is exited. So you need to be careful about the initial value the
+    condition blob when using DoUntil(), esp when DoUntil() is called twice.
     """
-    steps = [_ToExecutionStep(net_or_step)]
+    if not isinstance(condition_blob_or_net, core.Net):
+        stop_blob = core.BlobReference(condition_blob_or_net)
+        return core.execution_step(
+            _get_next_step_name('DoUntil', name),
+            nets_or_steps,
+            should_stop_blob=stop_blob)
 
-    if isinstance(condition_blob_or_net, core.Net):
-        steps.append(Do(condition_blob_or_net))
-        stop_blob = GetConditionBlobFromNet(condition_blob_or_net)
-    else:
-        stop_blob = condition_blob_or_net
+    nets_or_steps = _AppendNets(nets_or_steps, condition_blob_or_net)
+    stop_blob = GetConditionBlobFromNet(condition_blob_or_net)
 
-    stop_blob = core.BlobReference(str(stop_blob))
-    return core.execution_step('DoUntil', steps, should_stop_blob=stop_blob)
+    # If stop_blob is pre-set to True (this may happen when DoWhile() is
+    # called twice), the loop will exit after executing the first net/step
+    # in nets_or_steps. This is not what we want. So we use BootNet to
+    # set stop_blob to False.
+    bool_net = BoolNet((stop_blob, False))
+    return Do(name + '/DoUntil', bool_net, core.execution_step(
+        _get_next_step_name('DoUntil-inner', name),
+        nets_or_steps,
+        should_stop_blob=stop_blob,
+    ))
 
 
-def Switch(*conditions):
+def Switch(name, *conditions):
     """
     Execute the steps for which the condition is true.
-    Each condition is a tuple (condition_blob_or_net, step).
+    Each condition is a tuple (condition_blob_or_net, nets_or_steps).
     Note:
       1. Multi steps can be executed if their conditions are true.
       2. The conditions_blob_or_net (if it is Net) of all steps will be
          executed once.
 
     Examples:
-    - Switch((cond_1, net_1), (cond_2, net_2), ..., (cond_n, net_n))
-    - Switch([(cond_1, net1), (cond_2, net_2), ..., (cond_n, net_n)])
-    - Switch((cond_1, net_1))
+    - Switch('name', (cond_1, net_1), (cond_2, net_2), ..., (cond_n, net_n))
+    - Switch('name', [(cond_1, net1), (cond_2, net_2), ..., (cond_n, net_n)])
+    - Switch('name', (cond_1, net_1))
     """
-    if len(conditions) == 0:
-        raise ValueError(
-            'conditions cannot be empty.')
-    elif len(conditions) == 1:
-        conditions = conditions[0]
-        if not isinstance(conditions, list):
-            conditions = [conditions]
-    else:
-        conditions = list(conditions)
-
+    conditions = _MakeList(conditions)
     return core.execution_step(
-        'Switch', [_RunOnceIf(cond, step) for cond, step in conditions])
+        _get_next_step_name('Switch', name),
+        [_RunOnceIf(name + '/Switch', cond, step) for cond, step in conditions])
 
 
-def If(condition_blob_or_net, true_net_or_step, false_net_or_step=None):
+def SwitchNot(name, *conditions):
+    """
+    Similar to Switch() but execute the steps for which the condition is False.
+    """
+    conditions = _MakeList(conditions)
+    return core.execution_step(
+        _get_next_step_name('SwitchNot', name),
+        [_RunOnceIfNot(name + '/SwitchNot', cond, step)
+         for cond, step in conditions])
+
+
+def If(name, condition_blob_or_net,
+       true_nets_or_steps, false_nets_or_steps=None):
     """
     condition_blob_or_net is first evaluated or executed. If the condition is
-    true, true_net_or_step is then executed, otherwise, false_net_or_step
+    true, true_nets_or_steps is then executed, otherwise, false_nets_or_steps
     is executed.
 
     If condition_blob_or_net is Net, the condition is its last external_output
     that must be a single bool. And this Net will be executred before both
-    true/false_net_or_step so as to get the condition.
+    true/false_nets_or_steps so as to get the condition.
     """
-    if not false_net_or_step:
-        return _RunOnceIf(condition_blob_or_net, true_net_or_step)
+    if not false_nets_or_steps:
+        return _RunOnceIf(name + '/If',
+                          condition_blob_or_net, true_nets_or_steps)
 
     if isinstance(condition_blob_or_net, core.Net):
         condition_blob = GetConditionBlobFromNet(condition_blob_or_net)
-        return Do(Do(condition_blob_or_net),
-                  If(condition_blob, true_net_or_step, false_net_or_step))
+    else:
+        condition_blob = condition_blob_or_net
 
-    condition_blob = condition_blob_or_net
-    not_net, _ = NotNet(condition_blob)
-
-    return Switch(
-        (condition_blob, true_net_or_step),
-        (not_net, false_net_or_step),
+    return Do(
+        name + '/If',
+        _RunOnceIf(name + '/If-true',
+                   condition_blob_or_net, true_nets_or_steps),
+        _RunOnceIfNot(name + '/If-false', condition_blob, false_nets_or_steps)
     )
 
 
-def IfNot(condition_blob_or_net, true_net_or_step, false_net_or_step=None):
+def IfNot(name, condition_blob_or_net,
+          true_nets_or_steps, false_nets_or_steps=None):
     """
-    If condition_blob_or_net returns false, executes true_net_or_step,
-    otherwise executes false_net_or_step
+    If condition_blob_or_net returns false, executes true_nets_or_steps,
+    otherwise executes false_nets_or_steps
     """
-    if not false_net_or_step:
-        return _RunOnceIfNot(condition_blob_or_net, true_net_or_step)
+    if not false_nets_or_steps:
+        return _RunOnceIfNot(name + '/IfNot',
+                             condition_blob_or_net, true_nets_or_steps)
 
     if isinstance(condition_blob_or_net, core.Net):
         condition_blob = GetConditionBlobFromNet(condition_blob_or_net)
-        return Do(Do(condition_blob_or_net),
-                  IfNot(condition_blob, true_net_or_step, false_net_or_step))
+    else:
+        condition_blob = condition_blob_or_net
 
-    condition_blob = condition_blob_or_net
-    not_net, _ = NotNet(condition_blob)
-
-    return Switch(
-        (condition_blob, false_net_or_step),
-        (not_net, true_net_or_step),
+    return Do(
+        name + '/IfNot',
+        _RunOnceIfNot(name + '/IfNot-true',
+                      condition_blob_or_net, true_nets_or_steps),
+        _RunOnceIf(name + '/IfNot-false', condition_blob, false_nets_or_steps)
     )

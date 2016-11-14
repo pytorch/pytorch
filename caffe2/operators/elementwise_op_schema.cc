@@ -86,6 +86,10 @@ class GetAddGradient : public GradientMakerBase {
           vector<string>{GI(1)});
     }
   }
+  // Make sure the broadcast argument is not copied over.
+  bool CopyArguments() const override {
+    return false;
+  }
 };
 REGISTER_GRADIENT(Add, GetAddGradient);
 
@@ -113,6 +117,10 @@ class GetSubGradient : public GradientMakerBase {
               vector<string>{GI(1)})};
     }
   }
+  // Make sure the broadcast argument is not copied over.
+  bool CopyArguments() const override {
+    return false;
+  }
 };
 REGISTER_GRADIENT(Sub, GetSubGradient);
 
@@ -133,18 +141,26 @@ class GetMulGradient : public GradientMakerBase {
     } else {
       return vector<OperatorDef>{
           CreateOperatorDef(
-              "Mul", "", vector<string>{GO(0), I(1)}, vector<string>{GI(0)}),
+              "Mul",
+              "mul_with_broadcast_grad_1",
+              vector<string>{GO(0), I(1)},
+              vector<string>{GI(0)},
+              vector<Argument>{MakeArgument<int>("broadcast", 1)}),
           CreateOperatorDef(
               "Mul",
-              "",
+              "mul_with_broadcast_grad_2",
               vector<string>{GO(0), I(0)},
               vector<string>{GI(1) + "_autogen_pre_red"}),
           CreateOperatorDef(
               "SumReduceLike",
-              "",
+              "mul_with_broadcast_grad_3",
               vector<string>{GI(1) + "_autogen_pre_red", I(1)},
               vector<string>{GI(1)})};
     }
+  }
+  // Make sure the broadcast argument is not copied over.
+  bool CopyArguments() const override {
+    return false;
   }
 };
 REGISTER_GRADIENT(Mul, GetMulGradient);

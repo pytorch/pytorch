@@ -8,7 +8,8 @@ from collections import OrderedDict
 
 from caffe2.proto import caffe2_pb2
 from collections import defaultdict
-from caffe2.python import scope, utils, workspace, extension_loader
+from caffe2.python import scope, utils, workspace
+import numpy as np
 
 import caffe2.python._import_c_extension as C
 
@@ -122,6 +123,9 @@ class BlobReference(object):
     def Net(self):
         return self._from_net
 
+    def GetNameScope(self):
+        return self._name[:self._name.rfind(scope._NAMESCOPE_SEPARATOR) + 1]
+
     def _CreateAndAddToNet(self, op_type, inputs=None, *args, **kwargs):
         """Internal function that routes the operator generation to the
         network's __getattr__ function.
@@ -156,9 +160,14 @@ class BlobReference(object):
             op_type, *args, **kwargs)
 
 
+def ScopedName(name):
+    """prefix the name with the current scope."""
+    return scope.CurrentNameScope() + name
+
+
 def ScopedBlobReference(name, *args, **kwargs):
     """Returns a blob reference with scope prefixed."""
-    return BlobReference(scope.NAMESCOPE + name, *args, **kwargs)
+    return BlobReference(ScopedName(name), *args, **kwargs)
 
 
 def _RectifyInputOutput(blobs, net=None):
@@ -166,8 +175,8 @@ def _RectifyInputOutput(blobs, net=None):
     interface.
     """
     if isinstance(blobs, basestring):
-        # If blobs is a single string, prepend scope.NAMESCOPE and put it as a
-        # list.
+        # If blobs is a single string, prepend scope.CurrentNameScope()
+        # and put it as a list.
         # TODO(jiayq): enforce using BlobReference instead of raw strings.
         return [ScopedBlobReference(blobs, net=net)]
     elif type(blobs) is BlobReference:
@@ -221,12 +230,13 @@ def CreateOperator(
         operator.control_input.extend([str(i) for i in control_input])
     # Set device option:
     # (1) If device_option is explicitly set, use device_option.
-    # (2) If not, but scope.DEVICESCOPE is set, then we use scope.DEVICESCOPE.
+    # (2) If not, but scope.CurrentDeviceScope() is set,
+    #     then we use scope.CurrentDeviceScope().
     # (3) Otherwise, do not set device option.
     if device_option is not None:
         operator.device_option.CopyFrom(device_option)
-    elif scope.DEVICESCOPE is not None:
-        operator.device_option.CopyFrom(scope.DEVICESCOPE)
+    elif scope.CurrentDeviceScope() is not None:
+        operator.device_option.CopyFrom(scope.CurrentDeviceScope())
     if engine is not None:
         operator.engine = engine
     # random seed is defined in the device option, so we need to do special
@@ -244,6 +254,14 @@ def CreateOperator(
     if workspace.IsImmediate():
         workspace.RunOperatorImmediate(operator)
     return operator
+
+
+def CreatePythonOperator(f, inputs, outputs, grad_f=None, *args, **kwargs):
+    token = C.register_python_op(f)
+    if grad_f:
+        C.register_python_gradient_op(token, grad_f)
+    kwargs["token"] = token
+    return CreateOperator("Python", inputs, outputs, *args, **kwargs)
 
 
 def GetIndexFromGradientList(g_list, name):
@@ -665,13 +683,17 @@ class GradientRegistry(object):
     def GetGradientForOp(cls, op, g_output):
         try:
             gradient_ops, g_input = cls._GetGradientForOpCC(op, g_output)
-        except Exception:
+        except Exception as e:
             # Not supported in C++; will try python registration next.
+
             try:
                 gradient_ops, g_input = cls.gradient_registry_[op.type](
                     op, g_output)
             except KeyError:
-                raise KeyError('No gradient registered for op: %s' % op.type)
+                raise Exception(
+                    "No gradient registered for {}. ".format(op.type) +
+                    "Exception from creating the gradient op: {}.".format(e))
+
         if gradient_ops is None:
             return [], g_input
         if type(gradient_ops) is not list:
@@ -785,6 +807,59 @@ def get_op_ids_in_path(ssa, blob_versions, inputs, outputs):
     return sorted(used_op_ids)
 
 
+def clone_and_bind_net(net, name, prefix, blob_remap=None, inputs=None):
+    """
+    Clone the given Net, binding its input schema to the given `inputs` record.
+    Blob names defined by the net are prepended with the given `prefix`.
+
+    Args:
+        net:        the net to clone
+        name:       the name of the new net
+        prefix:     the prefix to append to local blobs
+        blob_remap: (optional) dict with additional blob name remapping.
+        inputs:     (optional) input record that will provide actual input
+                    values for the cloned net. Must be compatible with the
+                    net's input schema.
+    Returns:
+        Tuple (cloned_net, blob_remap)
+        clone_net:  the cloned Net
+        blob_remap: a map from original blob names into remapped blob names
+    """
+    from caffe2.python import schema
+    assert isinstance(net, Net)
+    if blob_remap is None:
+        blob_remap = {}
+    if inputs is not None:
+        assert isinstance(inputs, schema.Field)
+        original = net.input_record()
+        assert original is not None
+        # TODO(azzolini): improve schema type checking
+        assert set(original.field_names()) == set(inputs.field_names()), (
+            'Schemas do not match.')
+        original_mapping = dict(zip(original.field_names(),
+                                    original.field_blobs()))
+        for a, b in zip(inputs.field_names(), inputs.field_blobs()):
+            blob_remap[str(original_mapping[a])] = str(b)
+    proto = net.Proto()
+    ssa, blob_versions = get_ssa(proto)
+    undef_blobs = get_undefined_blobs(ssa)
+
+    for blob in blob_versions.keys():
+        if blob in blob_remap:
+            continue
+        elif blob in undef_blobs:
+            blob_remap[blob] = blob
+        else:
+            blob_remap[blob] = prefix + blob
+    return net.Clone(name, blob_remap), blob_remap
+
+
+def _get_blob_ref(blob_name_or_ref):
+    return (
+        blob_name_or_ref if isinstance(input, BlobReference)
+        else BlobReference(blob_name_or_ref)
+    )
+
 class Net(object):
     _net_names_used = set()
     operator_registry_ = {}
@@ -806,6 +881,9 @@ class Net(object):
             name_or_proto:  If a NetDef is provided, clone it. Otherwise,
                             create an empty net with the given name.
         """
+        self._input_record = None
+        self._output_record = None
+        self._attr_dict = defaultdict(list)
         if type(name_or_proto) is caffe2_pb2.NetDef:
             proto = name_or_proto
             # We rae initializing a network by a NetDef. In this case, we will
@@ -840,8 +918,75 @@ class Net(object):
         # make sure that this net name hasn't been used before
         self._net.name = Net._get_next_net_name(self._net.name)
 
-    def __str__(self):
+    def AppendNet(self, net):
+        assert isinstance(net, Net)
+        self.Proto().op.extend(net.Proto().op)
+        self.Proto().external_input.extend(
+            [i for i in net.Proto().external_input
+                if i not in self.Proto().external_input])
+        self.Proto().external_output.extend(
+            [o for o in net.Proto().external_output
+                if o not in self.Proto().external_output])
+        return self
+
+    def LogInfo(self, *msg_or_blobs):
+        for msg_or_blob in msg_or_blobs:
+            if not isinstance(msg_or_blob, BlobReference):
+                blob = self.GivenTensorStringFill(
+                    [], self.NextName('log'),
+                    shape=[], values=[msg_or_blob])
+            else:
+                blob = msg_or_blob
+            self.Print(blob, [])
+
+    def add_attribute(self, name, obj):
+        """
+        Add `obj` to the list of attributes in this net under the given `name`.
+        Attributes are user-defined objects and have no pre-defined semantics.
+        """
+        self._attr_dict[name].append(obj)
+
+    def get_attributes(self, name):
+        """
+        Returns the list of attributes in this net for a given `name`.
+        Attributes are user-defined objects added with `add_attribute'.
+        """
+        return self._attr_dict.get(name, [])
+
+    def Name(self):
         return self._net.name
+
+    def __str__(self):
+        return self.Name()
+
+    def Const(self, array, blob_out=None, dtype=None):
+        if isinstance(array, bool):
+            return self.ConstantFill(
+                [],
+                blob_out or 1,
+                dtype=DataType.BOOL,
+                value=array)
+
+        if dtype is None:
+            array = np.array(array)
+        else:
+            array = np.array(array, dtype=dtype)
+
+        def do_set(operator):
+            return operator(
+                [],
+                blob_out or 1,
+                shape=array.shape,
+                values=array.flatten().tolist())
+
+        if array.dtype == np.int32:
+            return do_set(self.GivenTensorIntFill)
+        elif array.dtype == np.int64:
+            return do_set(self.GivenTensorInt64Fill)
+        elif array.dtype == np.str:
+            return do_set(self.GivenTensorStringFill)
+        else:
+            return do_set(self.GivenTensorFill)
 
     def BlobIsDefined(self, blob):
         """
@@ -925,7 +1070,27 @@ class Net(object):
         new_proto.op.extend(remap_op(proto.op[op_id]) for op_id in op_id_mask)
         remap_list(new_proto.external_input)
         remap_list(new_proto.external_output)
-        return Net(new_proto)
+        new_net = Net(new_proto)
+
+        from caffe2.python import schema
+        if self._input_record:
+            new_net._input_record = schema.from_blob_list(
+                self._input_record,
+                [
+                    BlobReference(str(blob_remap[str(blob)]), net=new_net)
+                    for blob in self._input_record.field_blobs()
+                ],
+            )
+        if self._output_record:
+            new_net._output_record = schema.from_blob_list(
+                self._output_record,
+                [
+                    BlobReference(str(blob_remap[str(blob)]), net=new_net)
+                    for blob in self._output_record.field_blobs()
+                ],
+            )
+        new_net._attr_dict.update(self._attr_dict)
+        return new_net
 
     def ClonePartial(self, name, inputs, outputs, remap_funcs=None):
         """
@@ -1051,14 +1216,49 @@ class Net(object):
         assert input_name not in self._net.external_input, (
             'Net already contains an input named %s' % input_name)
         self._net.external_input.extend([input_name])
-        return (
-            input if isinstance(input, BlobReference)
-            else BlobReference(input_name))
+        return _get_blob_ref(input_name)
 
     def AddExternalOutput(self, output):
         assert isinstance(output, BlobReference)
         assert self.BlobIsDefined(output)
         self.Proto().external_output.extend([str(output)])
+        return output
+
+    @property
+    def external_inputs(self):
+        return map(_get_blob_ref, self._net.external_input)
+
+    @property
+    def external_outputs(self):
+        return map(_get_blob_ref, self._net.external_output)
+
+    def set_input_record(self, input_record):
+        from caffe2.python import schema
+        assert self._input_record is None, (
+            'Input schema cannot be reset')
+        if not input_record.has_blobs():
+            self._input_record = schema.NewRecord(self, input_record)
+        else:
+            self._input_record = input_record
+            for blob in input_record.field_blobs():
+                if blob not in self.external_inputs:
+                    self.AddExternalInput(blob)
+        return self._input_record
+
+    def set_output_record(self, record):
+        assert self._output_record is None, (
+            'Output record cannot be reset')
+        for blob in record.field_blobs():
+            assert self.BlobIsDefined(blob)
+        for blob in record.field_blobs():
+            self.AddExternalOutput(blob)
+        self._output_record = record
+
+    def input_record(self):
+        return self._input_record
+
+    def output_record(self):
+        return self._output_record
 
     def DeduplicateGradientSlices(self, g):
         assert isinstance(g, GradientSlice)
@@ -1115,13 +1315,10 @@ class Net(object):
             op_type, *args, **kwargs)
 
     def Python(self, f, grad_f=None):
-        with extension_loader.DlopenGuard():
-            import caffe2.python.op.python_ops_python as ops_python
-        RefreshRegisteredOperators()
         assert(IsOperator('Python'))
-        token = ops_python.register(f)
+        token = C.register_python_op(f)
         if grad_f:
-            ops_python.register_gradient(token, grad_f)
+            C.register_python_gradient_op(token, grad_f)
         return lambda *args, **kwargs: self._CreateAndAddToSelf(
             'Python', token=token, *args, **kwargs)
 
@@ -1165,9 +1362,21 @@ def _add_net_to_dict(net_dict, net):
 
 
 class ExecutionStep(object):
+    _step_names_used = set()
+
+    @staticmethod
+    def _get_next_step_name(basename):
+        name = basename
+        next_idx = 1
+        while name in ExecutionStep._step_names_used:
+            name = basename + '_' + str(next_idx)
+            next_idx += 1
+        ExecutionStep._step_names_used |= set([name])
+        return name
+
     def __init__(self, name, nets=None, num_iter=None):
         self._step = caffe2_pb2.ExecutionStep()
-        self._step.name = name
+        self._step.name = name or ExecutionStep._get_next_step_name('step')
         self._net_dict = OrderedDict()
         self._is_used = False
         self._substeps = []
@@ -1180,6 +1389,9 @@ class ExecutionStep(object):
         if num_iter is not None:
             self._step.num_iter = num_iter
 
+    def get_net(self, name):
+        return self._net_dict[name]
+
     def Name(self):
         return self._step.name
 
@@ -1191,7 +1403,6 @@ class ExecutionStep(object):
             'Cannot mutate a step that has already been added to a plan/step.')
 
     def _notify_is_used(self):
-        self._assert_can_mutate()
         self._is_used = True
 
     def Proto(self):
@@ -1214,6 +1425,10 @@ class ExecutionStep(object):
     def SetIter(self, num_iter):
         self._assert_can_mutate()
         self._step.num_iter = num_iter
+
+    def SetOnlyOnce(self, only_once):
+        self._assert_can_mutate()
+        self._step.only_once = only_once
 
     def SetShouldStopBlob(self, should_stop_blob):
         assert isinstance(should_stop_blob, BlobReference), (
@@ -1256,6 +1471,30 @@ class ExecutionStep(object):
         self._step.network.extend([get_net_name(net)])
         return self
 
+    def get_all_attributes(self, name):
+        """
+        Return the list of all attributes under the given `name`, present in
+        all of the nets used in this execution step and its children.
+        """
+        objs = []
+        for net in self._net_dict.values():
+            objs += net.get_attributes(name)
+        return objs
+
+
+def add_nets_in_order(step, net_list):
+    proto = step.Proto()
+    for substep in step.Substeps():
+        add_nets_in_order(substep, net_list)
+    for net in proto.network:
+        if net not in net_list:
+            net_list.append(net)
+    # FIXME(azzolini): This is actually wrong. Report nets should be
+    # instantiated first since they may run before any substep is run.
+    # However, curerntly, Reporter depends on this behavior.
+    if proto.report_net and proto.report_net not in net_list:
+        net_list.append(proto.report_net)
+
 
 class Plan(object):
     def __init__(self, name_or_step):
@@ -1290,7 +1529,33 @@ class Plan(object):
         if not step.HasNets() and not step.HasSubsteps():
             return
         self._plan.execution_step.add().CopyFrom(step.Proto())
-        self.AddNets(step.Nets())
+        # nets need to be added to the plan in order of usage
+        net_list = []
+        add_nets_in_order(step, net_list)
+        self.AddNets([step.get_net(n) for n in net_list])
+
+    def get_all_attributes(self, name):
+        """
+        Return the list of all attributes under the given `name`, present in
+        all of the nets used in this plan.
+        """
+        objs = []
+        for net in self._net_dict.values():
+            objs += net.get_attributes(name)
+        return objs
+
+
+def to_execution_step(step_or_nets, default_name=None):
+    from caffe2.python.net_builder import NetBuilder
+    if isinstance(step_or_nets, ExecutionStep):
+        return step_or_nets
+
+    stop_blob = None
+    if isinstance(step_or_nets, NetBuilder):
+        stop_blob = step_or_nets._stop_blob
+        step_or_nets = step_or_nets.get()
+    return execution_step(
+        default_name, step_or_nets, should_stop_blob=stop_blob)
 
 
 def execution_step(default_name,
@@ -1299,7 +1564,8 @@ def execution_step(default_name,
                    report_net=None,
                    report_interval=None,
                    concurrent_substeps=None,
-                   should_stop_blob=None):
+                   should_stop_blob=None,
+                   only_once=None):
     """
     Helper for creating an ExecutionStep.
     - steps_or_nets can be:
@@ -1319,38 +1585,29 @@ def execution_step(default_name,
     if should_stop_blob is None and num_iter is None:
         num_iter = 1
 
-    def set_step_attr(step):
-        if should_stop_blob is not None:
-            step.SetShouldStopBlob(should_stop_blob)
-        else:
-            step.SetIter(num_iter)
-        if concurrent_substeps is not None:
-            step.SetConcurrentSubsteps(concurrent_substeps)
-        if report_net is not None:
-            assert report_interval is not None
-            step.SetReportNet(report_net, report_interval)
-        return step
+    step = ExecutionStep(default_name)
+    if should_stop_blob is not None:
+        step.SetShouldStopBlob(should_stop_blob)
+    if num_iter is not None:
+        step.SetIter(num_iter)
+    if only_once is not None:
+        step.SetOnlyOnce(only_once)
+    if concurrent_substeps is not None:
+        step.SetConcurrentSubsteps(concurrent_substeps)
+    if report_net is not None:
+        assert report_interval is not None
+        step.SetReportNet(report_net, report_interval)
 
-    if not steps_or_nets:
-        return ExecutionStep(default_name)
     if isinstance(steps_or_nets, ExecutionStep):
-        step = set_step_attr(ExecutionStep(default_name))
         step.AddSubstep(steps_or_nets)
-        return step
     elif isinstance(steps_or_nets, Net):
-        step = set_step_attr(ExecutionStep(default_name))
         step.AddNet(steps_or_nets)
-        return step
     elif isinstance(steps_or_nets, list):
-        step = set_step_attr(ExecutionStep(default_name))
-        for step_or_net in steps_or_nets:
-            if isinstance(step_or_net, Net):
-                step.AddNet(step_or_net)
-            elif isinstance(step_or_net, ExecutionStep):
-                step.AddSubstep(step_or_net)
-            else:
-                raise ValueError('unsupported type {}'.format(step_or_net))
-        return step
-    else:
+        if all(isinstance(x, Net) for x in steps_or_nets):
+            map(step.AddNet, steps_or_nets)
+        else:
+            map(step.AddSubstep, map(to_execution_step, steps_or_nets))
+    elif steps_or_nets:
         raise ValueError(
             'steps_or_nets must be a step, a net, or a list of nets or steps.')
+    return step

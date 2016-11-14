@@ -5,7 +5,7 @@ from __future__ import print_function
 import numpy as np
 import unittest
 from caffe2.proto import caffe2_pb2
-from caffe2.python import core, workspace, data_parallel_model
+from caffe2.python import core, workspace, data_parallel_model, cnn
 from caffe2.python.test_util import TestCase
 
 
@@ -21,23 +21,49 @@ class GPUDataParallelModelTest(TestCase):
         ).astype(np.float32)
         label = np.dot(data, perfect_model)[:, np.newaxis]
 
-        model = data_parallel_model.GPUDataParallelModel(
-            gpu_devices, order="NHWC", name="fake")
+        def input_builder_fun(model):
+            return None
 
-        fc = model.FC("data", "fc", perfect_model.size, 1,
-                      ("ConstantFill", {}), ("ConstantFill", {}), axis=0)
-        sq = model.SquaredL2Distance([fc, "label"], "sq")
-        loss = model.AveragedLoss(sq, "loss")
-        model.AddGradientOperators([loss])
-        model.SGD(-0.1)
-        model.RunAllOnGPU()
+        def model_build_fun(model):
+            fc = model.FC("data", "fc", perfect_model.size, 1,
+                          ("ConstantFill", {}), ("ConstantFill", {}), axis=0)
+            sq = model.SquaredL2Distance([fc, "label"], "sq")
+            loss = model.AveragedLoss(sq, "loss")
+            return [loss]
 
+        def param_update_fun(model):
+            ITER = model.Iter("ITER")
+            LR = model.net.LearningRate(
+                [ITER],
+                "LR",
+                base_lr=(-0.1 / len(gpu_devices)),
+                policy="fixed",
+            )
+            ONE = model.param_init_net.ConstantFill(
+                [], "ONE", shape=[1], value=1.0,
+            )
+            for param in model.GetParams():
+                grad = model.param_to_grad[param]
+                model.WeightedSum([param, ONE, grad, LR], param)
+
+        # Create model
+        model = cnn.CNNModelHelper(order="NHWC", name="fake")
+        data_parallel_model.Parallelize_GPU(
+            model,
+            input_builder_fun=input_builder_fun,
+            forward_pass_builder_fun=model_build_fun,
+            param_update_builder_fun=param_update_fun,
+            devices=gpu_devices,
+        )
+
+        # Feed some data
         for gpu_id in gpu_devices:
             with core.DeviceScope(core.DeviceOption(caffe2_pb2.CUDA, gpu_id)):
                 workspace.FeedBlob(
                     "gpu_{}/data".format(gpu_id), data[0])
                 workspace.FeedBlob(
                     "gpu_{}/label".format(gpu_id), label[0])
+
 
         workspace.RunNetOnce(model.param_init_net)
         workspace.CreateNet(model.net)

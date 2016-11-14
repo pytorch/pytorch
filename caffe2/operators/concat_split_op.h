@@ -184,9 +184,11 @@ bool ConcatOp<Context>::RunOnDevice() {
           ". The input tensors can only have different dimensions "
           "along the axis = ",
           axis_,
+          " <",
           Input(0).dims(),
-          " vs ",
-          Input(j).dims());
+          "> vs <",
+          Input(j).dims(),
+          ">.");
     }
   }
 

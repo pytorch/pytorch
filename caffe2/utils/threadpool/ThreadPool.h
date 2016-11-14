@@ -1,0 +1,143 @@
+#ifndef CAFFE2_UTILS_THREADPOOL_H_
+#define CAFFE2_UTILS_THREADPOOL_H_
+
+#include "ThreadPoolCommon.h"
+
+#ifndef CAFFE2_THREADPOOL_MOBILE
+#error "mobile build state not defined"
+#endif
+
+// ThreadPool only used in mobile builds at the moment
+#if CAFFE2_THREADPOOL_MOBILE
+
+#include <atomic>
+#include <condition_variable>
+#include <memory>
+#include <mutex>
+#include <thread>
+#include <vector>
+#include <functional>
+
+//
+// A work-stealing threadpool loosely based off of pthreadpool
+//
+
+namespace caffe2 {
+
+struct ThreadPool;
+
+struct __attribute__((__aligned__(64))) ThreadInfo {
+  ThreadInfo(int threadId, int numThreads) :
+    rangeStart_(0),
+    rangeEnd_(0),
+    rangeLength_(0),
+    wantExit_(false),
+    threadId_(threadId),
+    numThreads_(numThreads) {
+  }
+
+  // Entry point for all worker threads
+  void threadMain(int threadId, ThreadPool* pool);
+
+  // Runs a task, and when we're done with our local queue, steal from
+  // neighbors.
+  // Returns true if all work is done (we were the last thread to do
+  // work)
+  bool runAndSteal(int threadId, ThreadPool* pool);
+
+  // Index of first element in the work range.
+  // Before processing a new element the owning worker thread
+  // increments this value.
+  long rangeStart_;
+
+  // Index of the element after the last element of the work range.
+  // Before processing a new element the stealing worker thread
+  // decrements this value.
+  std::atomic<long> rangeEnd_;
+
+  // The number of elements in the work range.
+  // Due to race conditions range_length <= range_end - range_start.
+  // The owning worker thread must decrement this value before
+  // incrementing @a range_start.
+  // The stealing worker thread must decrement this value before
+  // decrementing @a range_end.
+  std::atomic<long> rangeLength_;
+
+  // Should this thread exit?
+  bool wantExit_;
+
+  // Our thread index
+  int threadId_;
+
+  // How many threads are there in total?
+  int numThreads_;
+};
+
+class  __attribute__((__aligned__(64))) ThreadPool {
+  public:
+  ThreadPool(int numThreads);
+  ~ThreadPool();
+
+  // Returns the number of threads currently in use
+  int getNumThreads() const;
+
+  // Sets the minimum work size (range) for which to invoke the
+  // threadpool; work sizes smaller than this will just be run on the
+  // main (calling) thread
+  void setMinWorkSize(size_t size);
+
+  // Called to schedule work on the threadpool
+  void run(const std::function<void(int, size_t)>& fn, size_t range);
+
+  protected:
+  friend struct ThreadInfo;
+
+  // What we are currently working on
+  const std::function<void(int, size_t)>* fn_;
+
+  // How many work items are outstanding? When this reaches 0, our
+  // main thread is resumed
+  std::atomic<long> workItemsPending_;
+
+  // Current work ID that we're running; sequentially increments
+  long currentWorkId_;
+
+  // Mutex that guards all monitors and state updates
+  std::mutex mutex_;
+
+  // Main thread waits on this before running new work, to make sure
+  // that all worker threads have looped back around to await new work
+  std::condition_variable threadReadyMonitor_;
+
+  // All worker threads wait on this to make sure that they have work
+  // available for processing
+  std::condition_variable threadStartMonitor_;
+
+  // Main thread waits on this before returning to the thread pool
+  // caller; note that we don't actually wait on the worker threads
+  // saying that they're all done (woken up); we only check when the
+  // thread pool is called again
+  std::condition_variable threadDoneMonitor_;
+
+  // How many threads are ready to process new work?
+  size_t threadsReady_;
+
+  // The first entry is always for the main thread
+  std::vector<std::unique_ptr<ThreadInfo>> threadInfo_;
+
+  // Set of threads that we are managing
+  std::vector<std::thread> threads_;
+
+  // What's the minimum work size for using the threadpool?
+  size_t minWorkSize_;
+
+  // Mutex that ensures that only one user call to the ThreadPool is
+  // outstanding
+  mutable std::mutex executionMutex_;
+};
+
+} // namespace caffe2
+
+#endif // CAFFE2_THREADPOOL_MOBILE
+
+#endif  // CAFFE2_UTILS_THREADPOOL_H_

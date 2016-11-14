@@ -30,7 +30,19 @@ def InitOpsLibrary(name):
         # time when an actual call is made.
         print('Ignoring {} as it is not a valid file.'.format(name))
         return
+    _init_impl(name)
+
+
+_IMPORTED_DYNDEPS = set()
+
+
+def GetImportedOpsLibraries():
+    return _IMPORTED_DYNDEPS
+
+
+def _init_impl(path):
+    _IMPORTED_DYNDEPS.add(path)
     with extension_loader.DlopenGuard():
-        ctypes.CDLL(name)
+        ctypes.CDLL(path)
     # reinitialize available ops
     core.RefreshRegisteredOperators()

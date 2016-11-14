@@ -238,9 +238,7 @@ class DBReader {
 
  private:
   void MoveToBeginning() const {
-    if (cursor_->SupportsSeek()) {
-      cursor_->SeekToFirst();
-    }
+    cursor_->SeekToFirst();
     for (auto s = 0; s < shard_id_; s++) {
       cursor_->Next();
       CAFFE_ENFORCE(

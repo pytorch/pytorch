@@ -6,13 +6,12 @@ namespace {
 REGISTER_CPU_OPERATOR(Partition, PartitionOp);
 REGISTER_CPU_OPERATOR(LengthsPartition, LengthsPartitionOp);
 
-OPERATOR_SCHEMA(Shard)
+OPERATOR_SCHEMA(Partition)
     .NumInputsOutputs([](int in, int out) {
       return in > 0 && out > 0 && out % in == 0;
     })
     .SetDoc(R"DOC(
-Sharding splits the input int tensor into multiple ones according to the first
-tensor.
+Splits the input int tensor into multiple ones according to the first tensor.
 
 Takes the first input and partitions it to shards according to the remainder of
 values modulo the number of partitions. It requires that the first tensor is of
@@ -35,21 +34,21 @@ X_0_part_0, X_1_part_0, ..., X_N-1_part_0, X_0_part_1, ..., X_N-1_part_K-1
     .Input(
         0,
         "input",
-        "Input tensor containing data to be sharded. The "
+        "Input tensor containing data to be partitioned. The "
         "number of input tensors might be greater than 1 but must have the "
         "same shape as the previous tensors.")
     .Output(
         0,
-        "shards",
-        "Output Shards. The number of output shards has to be a "
-        "multiple of the number of input shards.");
+        "partitions",
+        "Output Partitions. The number of output tensors has to be a "
+        "multiple of the number of input tensors.");
 
-OPERATOR_SCHEMA(LengthsSharding)
+OPERATOR_SCHEMA(LengthsPartition)
     .NumInputsOutputs([](int in, int out) {
       return in >= 2 && out > 0 && out % in == 0;
     })
     .SetDoc(R"DOC(
-LengthsSharding splits the input int tensor into multiple ones according to the
+LengthsPartition splits the input int tensor into multiple ones according to the
 second tensor. The first dimension is expected to be the tensor that describes
 lengths of the elements.
 
@@ -76,19 +75,19 @@ X_0_part_0, X_1_part_0, ..., X_N-1_part_0, X_0_part_1, ..., X_N-1_part_K-1
     .Input(
         0,
         "input",
-        "Input tensor containing data to be sharded. The "
+        "Input tensor containing data to be partitioned. The "
         "number of input tensors might be greater than 1 but must have the "
         "same shape as the previous tensors.")
     .Output(
         0,
-        "shards",
-        "Output Shards. The number of output shards has to be a "
-        "multiple of the number of input shards.");
+        "partitions",
+        "Output Partitions. The number of output tensors has to be a "
+        "multiple of the number of input tensors.");
 
 // This should actually have gradient, but for now nothing uses it.
 // Because gradient computation right now is not input/output aware it can't be
 // GRADIENT_NOT_IMPLEMENTEDYET
-NO_GRADIENT(Sharding);
-NO_GRADIENT(ShardingLengths);
+NO_GRADIENT(Partition);
+NO_GRADIENT(LengthsPartition);
 } // namespace
 } // namespace caffe2

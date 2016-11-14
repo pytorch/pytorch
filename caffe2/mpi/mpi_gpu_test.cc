@@ -42,7 +42,7 @@ const char kBcastNet[] = R"NET(
     }
   }
   device_option {
-    device_type: CUDA
+    device_type: 1
   }
 )NET";
 
@@ -106,7 +106,7 @@ const char kReduceNet[] = R"NET(
     }
   }
   device_option {
-    device_type: CUDA
+    device_type: 1
   }
 )NET";
 
@@ -174,7 +174,7 @@ const char kMPIAllgatherNet[] = R"NET(
     type: "Allgather"
   }
   device_option {
-    device_type: CUDA
+    device_type: 1
   }
 )NET";
 
@@ -239,7 +239,7 @@ const char kMPIAllreduceNet[] = R"NET(
     engine: "MPI"
   }
   device_option {
-    device_type: CUDA
+    device_type: 1
   }
 )NET";
 
@@ -303,7 +303,7 @@ const char kInPlaceMPIAllreduceNet[] = R"NET(
     engine: "MPI"
   }
   device_option {
-    device_type: CUDA
+    device_type: 1
   }
 )NET";
 

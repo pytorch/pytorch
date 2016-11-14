@@ -182,7 +182,7 @@ class ResNetBuilder():
         self.comp_count += 1
 
 
-def create_resnet50(model, data, num_input_channels, num_labels):
+def create_resnet50(model, data, num_input_channels, num_labels, label=None):
     # conv1 + maxpool
     model.Conv(data, 'conv1', num_input_channels, 64, weight_init=("MSRAFill", {}), kernel=7, stride=2, pad=3)
     model.SpatialBN('conv1', 'conv1_spatbn', 64, epsilon=1e-3)
@@ -218,9 +218,17 @@ def create_resnet50(model, data, num_input_channels, num_labels):
     # Final dimension of the "image" is reduced to 7x7
     model.FC('final_avg', 'pred', 2048, num_labels)
 
-    softmax = model.Softmax('pred', 'softmax')
-    return softmax
+    # If we create model for training, use softmax-with-loss
+    if (label is not None):
+        (softmax, loss) = model.SoftmaxWithLoss(
+            ["pred", label],
+            ["softmax", "loss"],
+        )
 
+        return (softmax, loss)
+    else:
+        # For inference, we just return softmax
+        return model.Softmax("pred", "softmax")
 
 def create_resnet_32x32(
     model, data, num_input_channels, num_groups, num_labels

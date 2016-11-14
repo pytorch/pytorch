@@ -38,6 +38,26 @@ class TestLengthsToShapeOps(TestCase):
         test_reshape(old_shape=(4, 2, 1), new_shape=(-1, 8),
                      in_place=True, arg_shape=False)
 
+    def test_zero_dim(self):
+        test_reshape(old_shape=(4, 2, 1), new_shape=(0, 0, 0),
+                     expected_shape=(4, 2, 1))
+        test_reshape(old_shape=(4, 2, 1), new_shape=(0, 0, 0),
+                     expected_shape=(4, 2, 1), arg_shape=False)
+        test_reshape(old_shape=(4, 2, 1), new_shape=(0, 2, 1),
+                     expected_shape=(4, 2, 1))
+        test_reshape(old_shape=(4, 2, 1), new_shape=(0, 2, 1),
+                     expected_shape=(4, 2, 1), arg_shape=False)
+
+    def test_zero_dim_and_missing_dim(self):
+        test_reshape(old_shape=(4, 2, 1), new_shape=(0, -1, 0),
+                     expected_shape=(4, 2, 1))
+        test_reshape(old_shape=(4, 2, 1), new_shape=(0, -1, 0),
+                     expected_shape=(4, 2, 1), arg_shape=False)
+        test_reshape(old_shape=(4, 3, 2), new_shape=(-1, 0),
+                     expected_shape=(8, 3))
+        test_reshape(old_shape=(4, 3, 2), new_shape=(-1, 0),
+                     expected_shape=(8, 3), arg_shape=False)
+
     def test_backprop(self):
         old_shape = (4, 2, 1)
         new_shape = (1, 8)
@@ -84,7 +104,10 @@ class TestLengthsToShapeOps(TestCase):
         workspace.RunNet(net)
 
 
-def test_reshape(old_shape, new_shape, arg_shape=True, in_place=False):
+def test_reshape(old_shape, new_shape, expected_shape=None, arg_shape=True,
+                 in_place=False):
+    if expected_shape is None:
+        expected_shape = new_shape
     X = np.random.rand(*old_shape).astype(np.float32)
 
     blob_in = 'X'
@@ -105,4 +128,4 @@ def test_reshape(old_shape, new_shape, arg_shape=True, in_place=False):
     workspace.RunOperatorOnce(op)
 
     Y = workspace.FetchBlob(blob_out)
-    np.testing.assert_allclose(Y, X.reshape(new_shape))
+    np.testing.assert_allclose(Y, X.reshape(expected_shape))

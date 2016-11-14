@@ -24,6 +24,8 @@ class ModelTrainerLog():
         self.logstr("# %s" % str(runtime_args))
         self.headers = None
         self.start_time = time.time()
+        self.last_time = self.start_time
+        self.last_input_count = 0
 
     def logstr(self, str):
         with open(self.filename, "a") as f:
@@ -33,11 +35,15 @@ class ModelTrainerLog():
 
     def log(self, input_count, batch_count, additional_values):
         logdict = OrderedDict()
+        delta_t = time.time() - self.last_time
+        delta_count = input_count - self.last_input_count
+        self.last_time = time.time()
+        self.last_input_count = input_count
         logdict['time'] = time.time() - self.start_time
         logdict['input_counter'] = input_count
         logdict['batch_count'] = batch_count
-        if logdict['time'] > 0:
-            logdict['inputs_per_sec'] = input_count / logdict['time']
+        if delta_t > 0:
+            logdict['inputs_per_sec'] = delta_count / delta_t
         else:
             logdict['inputs_per_sec'] = 0.0
 

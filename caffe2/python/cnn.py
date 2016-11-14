@@ -1,8 +1,11 @@
-from caffe2.python import core
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+from __future__ import unicode_literals
+
+from caffe2.python import core, scope
 from caffe2.python.model_helper import ModelHelperBase
 from caffe2.proto import caffe2_pb2
-
-import logging
 
 
 class CNNModelHelper(ModelHelperBase):
@@ -26,6 +29,24 @@ class CNNModelHelper(ModelHelperBase):
             raise ValueError(
                 "Cannot understand the CNN storage order %s." % self.order
             )
+
+    def GetWeights(self, namescope=None):
+        if namescope is None:
+            namescope = scope.CurrentNameScope()
+
+        if namescope == '':
+            return self.weights[:]
+        else:
+            return [w for w in self.weights if w.GetNameScope() == namescope]
+
+    def GetBiases(self, namescope=None):
+        if namescope is None:
+            namescope = scope.CurrentNameScope()
+
+        if namescope == '':
+            return self.biases[:]
+        else:
+            return [b for b in self.biases if b.GetNameScope() == namescope]
 
     def ImageInput(
             self, blob_in, blob_out, **kwargs
@@ -233,7 +254,12 @@ class CNNModelHelper(ModelHelperBase):
                 blob_out + '_w', self.param_init_net)
             bias = core.ScopedBlobReference(
                 blob_out + '_b', self.param_init_net)
-        self.params.extend([weight, bias])
+
+        if 'freeze_bias' in kwargs:
+            self.params.extend([weight])
+        else:
+            self.params.extend([weight, bias])
+
         self.weights.append(weight)
         self.biases.append(bias)
         return op_call([blob_in, weight, bias], blob_out, **kwargs)
@@ -419,6 +445,26 @@ class CNNModelHelper(ModelHelperBase):
         print("DepthConcat is deprecated. use Concat instead.")
         return self.Concat(blobs_in, blob_out, **kwargs)
 
+    def PRelu(self, blob_in, blob_out, num_channels=1, slope_init=None,
+              **kwargs):
+        """PRelu"""
+        slope_init = (
+            slope_init if slope_init else ('ConstantFill', {'value': 0.25}))
+        if self.init_params:
+            slope = self.param_init_net.__getattr__(slope_init[0])(
+                [],
+                blob_out + '_slope',
+                shape=[num_channels],
+                **slope_init[1]
+            )
+        else:
+            slope = core.ScopedBlobReference(
+                blob_out + '_slope', self.param_init_net)
+
+        self.params.extend([slope])
+
+        return self.net.PRelu([blob_in, slope], [blob_out])
+
     def Relu(self, blob_in, blob_out, **kwargs):
         """Relu."""
         if self.use_cudnn:
@@ -454,7 +500,7 @@ class CNNModelHelper(ModelHelperBase):
         self.biases.append(bias)
         blob_outs = [blob_out, running_mean, running_inv_var,
                      blob_out + "_sm", blob_out + "_siv"]
-        if kwargs['is_test']:
+        if 'is_test' in kwargs and kwargs['is_test']:
             blob_outputs = self.net.SpatialBN(
                 [blob_in, scale, bias, blob_outs[1], blob_outs[2]], [blob_out],
                 order=self.order, **kwargs)
@@ -503,9 +549,13 @@ class CNNModelHelper(ModelHelperBase):
         wd = self.param_init_net.ConstantFill([], 'wd', shape=[1],
                                               value=weight_decay)
         ONE = self.param_init_net.ConstantFill([], "ONE", shape=[1], value=1.0)
-        for param in self.weights:
+        for param in self.GetWeights():
             #  Equivalent to: grad += wd * param
-            self.net.WeightedSum([self.param_to_grad[param], ONE, param, wd])
+            grad = self.param_to_grad[param]
+            self.net.WeightedSum(
+                [grad, ONE, param, wd],
+                grad,
+            )
 
     @property
     def CPU(self):

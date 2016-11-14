@@ -36,7 +36,11 @@ DBReader to load from, and we ignore the db and db_type arguments.
         "keep_device",
         "(int, default 0) if nonzero, the blobs are loaded into the device that "
         "is specified in the serialized BlobProto. Otherwise, the device will be "
-        "set as the one that the Load operator is being run under.");
+        "set as the one that the Load operator is being run under.")
+    .Arg(
+        "load_all",
+        "(int, default 0) if nonzero, will load all blobs pointed to by the db "
+        "to the workspace overwriting/creating blobs as needed.");
 
 OPERATOR_SCHEMA(Save).NumInputs(1, INT_MAX).NumOutputs(0)
 .SetDoc(R"DOC(

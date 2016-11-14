@@ -213,7 +213,9 @@ template <typename T>
 Argument MakeArgument(const string& name, const T& value);
 
 template <typename T>
-void AddArgument(const string& name, const T& value, OperatorDef* def);
+inline void AddArgument(const string& name, const T& value, OperatorDef* def) {
+  GetMutableArgument(name, true, def)->CopyFrom(MakeArgument(name, value));
+}
 
 }  // namespace caffe2
 
