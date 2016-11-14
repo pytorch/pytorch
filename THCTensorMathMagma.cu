@@ -432,7 +432,6 @@ void THCudaTensor_getri(THCState *state, THCudaTensor *ra_, THCudaTensor *a)
 
 }
 
-
 __global__ void THCudaTensor_copyUpperSymmetric(float *input, int n, int len)
 {
   for (int idx = threadIdx.x + blockIdx.x * blockDim.x; idx < len; idx += 65535) {
@@ -444,25 +443,31 @@ __global__ void THCudaTensor_copyUpperSymmetric(float *input, int n, int len)
   }
 }
 
-void THCudaTensor_potri(THCState *state, THCudaTensor *ra_, THCudaTensor *a)
+__global__ void THCudaTensor_copyLowerSymmetric(float *input, int n, int len)
+{
+  for (int idx = threadIdx.x + blockIdx.x * blockDim.x; idx < len; idx += 65535) {
+    const int r = idx % n;
+    const int c = idx / n;
+    if (r < c) {
+      input[idx] = input[r*n + c];
+    }
+  }
+}
+
+void THCudaTensor_potri(THCState *state, THCudaTensor *ra_, THCudaTensor *a, const char *uplo)
 {
 #ifdef USE_MAGMA
   THArgCheck(a->nDimension == 2, 2, "A should be 2 dimensional");
   THArgCheck(a->size[0] == a->size[1], 2, "A should be square");
 
   int n = a->size[0];
+  magma_uplo_t ul = uplo[0] == 'U' ?  MagmaUpper : MagmaLower;
 
   THCudaTensor *input = THCudaTensor_newColumnMajor(state, ra_, a);
   float *input_data = THCudaTensor_data(state, input);
 
   int info;
-  magma_spotrf_gpu(MagmaUpper, n, input_data, n, &info);
-  if (info > 0)
-    THError("MAGMA potrf : A(%d,%d) is 0, A cannot be factorized", info, info);
-  else if (info < 0)
-    THError("MAGMA potrf : Argument %d : illegal value", -info);
-
-  magma_spotri_gpu(MagmaUpper, n, input_data, n, &info);
+  magma_spotri_gpu(ul, n, input_data, n, &info);
   if (info > 0)
     THError("MAGMA potri : A(%d,%d) is 0, A cannot be factorized", info, info);
   else if (info < 0)
@@ -472,7 +477,11 @@ void THCudaTensor_potri(THCState *state, THCudaTensor *ra_, THCudaTensor *a)
   const int len = n*n;
   dim3 blocks(std::min(DIVUP(len, 128), 65535));
   dim3 threads(128);
-  THCudaTensor_copyUpperSymmetric<<<blocks, threads, 0, stream>>>(input_data, n, len);
+  if (uplo[0] == 'U') {
+    THCudaTensor_copyUpperSymmetric<<<blocks, threads, 0, stream>>>(input_data, n, len);
+  } else {
+    THCudaTensor_copyLowerSymmetric<<<blocks, threads, 0, stream>>>(input_data, n, len);
+  }
 
   THCudaTensor_freeCopyTo(state, input, ra_);
 #else
@@ -480,19 +489,20 @@ void THCudaTensor_potri(THCState *state, THCudaTensor *ra_, THCudaTensor *a)
 #endif
 }
 
-void THCudaTensor_potrf(THCState *state, THCudaTensor *ra_, THCudaTensor *a)
+void THCudaTensor_potrf(THCState *state, THCudaTensor *ra_, THCudaTensor *a, const char *uplo)
 {
 #ifdef USE_MAGMA
   THArgCheck(a->nDimension == 2, 2, "A should be 2 dimensional");
   THArgCheck(a->size[0] == a->size[1], 2, "A should be square");
 
   int n = a->size[0];
+  magma_uplo_t ul = uplo[0] == 'U' ?  MagmaUpper : MagmaLower;
 
   THCudaTensor *input = THCudaTensor_newColumnMajor(state, ra_, a);
   float *input_data = THCudaTensor_data(state, input);
 
   int info;
-  magma_spotrf_gpu(MagmaUpper, n, input_data, n, &info);
+  magma_spotrf_gpu(ul, n, input_data, n, &info);
 
   // check error value
   if (info > 0)
@@ -500,20 +510,25 @@ void THCudaTensor_potrf(THCState *state, THCudaTensor *ra_, THCudaTensor *a)
   else if (info < 0)
     THError("MAGMA potrf : Argument %d : illegal value", -info);
 
-  THCudaTensor_triu(state, ra_, input, 0);
+  if (uplo[0] == 'U') {
+    THCudaTensor_triu(state, ra_, input, 0);
+  } else {
+    THCudaTensor_tril(state, ra_, input, 0);
+  }
   THCudaTensor_free(state, input);
 #else
   THError(NoMagma(potrf));
 #endif
 }
 
-void THCudaTensor_potrs(THCState *state, THCudaTensor *rb_, THCudaTensor *b, THCudaTensor *a)
+void THCudaTensor_potrs(THCState *state, THCudaTensor *rb_, THCudaTensor *b, THCudaTensor *a, const char *uplo)
 {
 #ifdef USE_MAGMA
   THArgCheck(a->size[0] == a->size[1], 2, "A should be square");
 
   int n = a->size[0];
   int nrhs = b->size[1];
+  magma_uplo_t ul = uplo[0] == 'U' ?  MagmaUpper : MagmaLower;
 
   THCudaTensor *b_ = THCudaTensor_newColumnMajor(state, rb_, b);
   float *b_data = THCudaTensor_data(state, b_);
@@ -521,7 +536,7 @@ void THCudaTensor_potrs(THCState *state, THCudaTensor *rb_, THCudaTensor *b, THC
   float *a_data = THCudaTensor_data(state, a_);
 
   int info;
-  magma_spotrs_gpu(MagmaUpper, n, nrhs, a_data, n, b_data, n, &info);
+  magma_spotrs_gpu(ul, n, nrhs, a_data, n, b_data, n, &info);
 
   // check error value
   if (info < 0)
