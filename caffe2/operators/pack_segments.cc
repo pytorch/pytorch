@@ -5,6 +5,7 @@
 #include <vector>
 #include "caffe2/core/operator.h"
 #include "caffe2/core/tensor.h"
+#include "caffe2/utils/math.h"
 
 namespace caffe2 {
 
@@ -54,9 +55,12 @@ class PackSegmentsOp final : public Operator<Context> {
     shape.insert(shape.begin(), lengths.size());
     output->Resize(shape);
 
-    // Do zero padding
-    float* data_ptr = output->template mutable_data<float>();
-    memset(data_ptr, padding_, sizeof(float) * output->size());
+    // Do padding
+    math::Set<float, Context>(
+        output->size(),
+        padding_,
+        output->template mutable_data<float>(),
+        &context_);
 
     int block_size = data.size() / data.dim(0);
     int block_bytesize = data.nbytes() / data.dim(0);

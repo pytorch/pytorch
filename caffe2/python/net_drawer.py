@@ -93,7 +93,8 @@ def GetPydotGraph(
         for input_name in op.input:
             if input_name not in pydot_nodes:
                 input_node = pydot.Node(
-                    input_name + str(pydot_node_counts[input_name]),
+                    _escape_label(
+                        input_name + str(pydot_node_counts[input_name])),
                     label=_escape_label(input_name),
                     **BLOB_STYLE
                 )
@@ -107,7 +108,8 @@ def GetPydotGraph(
                 # we are overwriting an existing blob. need to updat the count.
                 pydot_node_counts[output_name] += 1
             output_node = pydot.Node(
-                output_name + str(pydot_node_counts[output_name]),
+                _escape_label(
+                    output_name + str(pydot_node_counts[output_name])),
                 label=_escape_label(output_name),
                 **BLOB_STYLE
             )
@@ -199,6 +201,8 @@ def _draw_steps(steps, g, skip_step_edges=False):  # noqa
             label.append('Stopper: {}'.format(step.should_stop_blob))
         if step.concurrent_substeps:
             label.append('Concurrent')
+        if step.only_once:
+            label.append('Once')
         return '\n'.join(label)
 
     def substep_edge(start, end):

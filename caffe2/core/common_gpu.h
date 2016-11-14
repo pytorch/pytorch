@@ -108,17 +108,6 @@ const char* cublasGetErrorString(cublasStatus_t error);
  */
 const char* curandGetErrorString(curandStatus_t error);
 
-/**
- * Caffe2's CUDA initialization function.
- *
- * This is going to be run once when caffe2's GlobalInit() function is called.
- * If you have an initialization function that depends on CUDA's initialization
- * first, you can call this function inside your init function - this will
- * ensure that CUDA is initialized before any of your custom initialization is
- * carried out. This function is NOT thread safe.
- */
-bool Caffe2InitializeCuda();
-
 // CUDA: various checks for different function calls.
 #define CUDA_CHECK(condition)                                                  \
   do {                                                                         \

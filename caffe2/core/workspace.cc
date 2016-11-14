@@ -10,6 +10,12 @@
 #include "caffe2/core/timer.h"
 #include "caffe2/proto/caffe2.pb.h"
 
+CAFFE2_DEFINE_bool(
+    caffe2_handle_executor_threads_exceptions,
+    false,
+    "If used we will handle exceptions in executor threads. "
+    "This avoids SIGABRT but may cause process to deadlock");
+
 namespace caffe2 {
 
 namespace {
@@ -36,18 +42,32 @@ std::function<bool(int64_t)> getContinuationTest(
         "Must not specify num_iter if should_stop_blob is set");
   }
 
-  if (!step.has_should_stop_blob()) {
+  if (!step.has_should_stop_blob()) { // control by iteration
+    CAFFE_ENFORCE(!step.has_only_once(), "not supported");
     int64_t iterations = step.has_num_iter() ? step.num_iter() : 1;
     VLOG(1) << "Will execute step " << step.name() << " for " << iterations
             << " iterations.";
     return [=](int64_t i) { return i < iterations; };
-  } else {
-    VLOG(1) << "Will execute step " << step.name() << " until stopped by blob "
-            << step.should_stop_blob();
-    return [](int64_t i) { return true; };
+  } else { // control by signal blob
+    bool onlyOnce = step.has_only_once() && step.only_once();
+    VLOG(1) << "Will execute step" << step.name() << (onlyOnce ? " once " : "")
+            << " until stopped by blob " << step.should_stop_blob();
+    if (onlyOnce) {
+      return [](int64_t i) { return i == 0; };
+    } else {
+      return [](int64_t i) { return true; };
+    }
   }
 };
 }  // namespace
+
+vector<string> Workspace::LocalBlobs() const {
+  vector<string> names;
+  for (auto& entry : blob_map_) {
+    names.push_back(entry.first);
+  }
+  return names;
+}
 
 vector<string> Workspace::Blobs() const {
   vector<string> names;
@@ -188,6 +208,20 @@ bool Workspace::RunPlan(const PlanDef& plan,
   return true;
 }
 
+#if CAFFE2_MOBILE
+ThreadPool* Workspace::GetThreadPool() {
+  std::lock_guard<std::mutex> guard(thread_pool_creation_mutex_);
+
+  if (!thread_pool_) {
+    auto numThreads = std::thread::hardware_concurrency();
+    LOG(INFO) << "Constructing thread pool with " << numThreads << " threads";
+    thread_pool_.reset(new ThreadPool(numThreads));
+  }
+
+  return thread_pool_.get();
+}
+#endif // CAFFE2_MOBILE
+
 namespace {
 
 struct Reporter {
@@ -272,8 +306,8 @@ bool Workspace::ExecuteStepRecursive(
       if (!step.concurrent_substeps() || step.substep().size() <= 1) {
         VLOG(1) << "Executing step " << step.name() << " iteration " << iter;
 
-        auto substepShouldContinue = [&, externalShouldContinue](int64_t iter) {
-          return externalShouldContinue(iter);
+        auto substepShouldContinue = [&, externalShouldContinue](int64_t it) {
+          return externalShouldContinue(it);
         };
 
         for (auto& ss : step.substep()) {
@@ -288,11 +322,11 @@ bool Workspace::ExecuteStepRecursive(
 
         std::atomic<int> next_substep{0};
         std::atomic<bool> got_failure{false};
-        auto substepShouldContinue = [&, externalShouldContinue](int64_t iter) {
-          return !got_failure && externalShouldContinue(iter);
+        auto substepShouldContinue = [&, externalShouldContinue](int64_t it) {
+          return !got_failure && externalShouldContinue(it);
         };
         std::mutex exception_mutex;
-        std::exception_ptr first_exception;
+        string first_exception;
         auto worker = [&]() {
           while (true) {
             int substep_id = next_substep++;
@@ -306,10 +340,18 @@ bool Workspace::ExecuteStepRecursive(
               }
             } catch (const std::exception& ex) {
               std::lock_guard<std::mutex> guard(exception_mutex);
-              if (!first_exception) {
-                first_exception = std::current_exception();
+              if (!first_exception.size()) {
+                first_exception = GetExceptionString(ex);
+                LOG(ERROR) << "Parallel worker exception:\n" << first_exception;
               }
               got_failure = true;
+              if (!FLAGS_caffe2_handle_executor_threads_exceptions) {
+                // In complex plans other threads might get stuck if another
+                // one fails. So we let exception to go out of thread which
+                // causes SIGABRT. In local setup one might use this flag
+                // in order to use Python debugger after a failure
+                throw;
+              }
             }
           }
         };
@@ -322,9 +364,11 @@ bool Workspace::ExecuteStepRecursive(
           thread.join();
         }
         if (got_failure) {
-          LOG(ERROR) << "One of the workers died with an unhandled exception";
-          if (first_exception != nullptr) {
-            std::rethrow_exception(first_exception);
+          LOG(ERROR) << "One of the workers failed.";
+          if (first_exception.size()) {
+            CAFFE_THROW(
+                "One of the workers died with an unhandled exception ",
+                first_exception);
           }
           return false;
         }

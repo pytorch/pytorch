@@ -89,7 +89,7 @@ bool SigmoidCrossEntropyWithLogitsGradientOp<float, CPUContext>::RunOnDevice() {
   auto in_idx = 0;
   for (int i = 0; i < outer_size; ++i) {
     auto g_factor = -g_ptr[i] / inner_size;
-    for (int i = 0; i < inner_size; ++i) {
+    for (int j = 0; j < inner_size; ++j) {
       out_ptr[in_idx] = g_factor *
           sigmoid_xent_backward(logits_ptr[in_idx], targets_ptr[in_idx]);
       ++in_idx;

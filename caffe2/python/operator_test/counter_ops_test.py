@@ -5,9 +5,11 @@ from __future__ import unicode_literals
 
 from caffe2.python import core, workspace
 from caffe2.python.test_util import TestCase
+import tempfile
 
 
 class TestCounterOps(TestCase):
+
     def test_counter_ops(self):
         workspace.RunOperatorOnce(core.CreateOperator(
             'CreateCounter', [], ['c'], init_count=1))
@@ -50,3 +52,22 @@ class TestCounterOps(TestCase):
         assert workspace.RunOperatorOnce(core.CreateOperator(
             'And', ['t2', 't5'], ['t7']))
         assert workspace.FetchBlob('t7')  # True && True
+
+        workspace.RunOperatorOnce(core.CreateOperator(
+            'CreateCounter', [], ['serialized_c'], init_count=22))
+        with tempfile.NamedTemporaryFile() as tmp:
+            workspace.RunOperatorOnce(core.CreateOperator(
+                'Save', ['serialized_c'], [], absolute_path=1,
+                db_type='minidb', db=tmp.name))
+            for i in range(10):
+                workspace.RunOperatorOnce(core.CreateOperator(
+                    'CountDown', ['serialized_c'], ['t8']))
+            workspace.RunOperatorOnce(core.CreateOperator(
+                'RetrieveCount', ['serialized_c'], ['t8']))
+            assert workspace.FetchBlob('t8') == 12
+            workspace.RunOperatorOnce(core.CreateOperator(
+                'Load', [], ['serialized_c'], absolute_path=1,
+                db_type='minidb', db=tmp.name))
+            workspace.RunOperatorOnce(core.CreateOperator(
+                'RetrieveCount', ['serialized_c'], ['t8']))
+            assert workspace.FetchBlob('t8') == 22

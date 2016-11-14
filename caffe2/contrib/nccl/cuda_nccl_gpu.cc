@@ -30,7 +30,8 @@ class NCCLContext {
       // get stream priorities
       int lo_pri, hi_pri;
       CUDA_CHECK(cudaDeviceGetStreamPriorityRange(&lo_pri, &hi_pri));
-      CUDA_CHECK(cudaStreamCreateWithPriority(&streams_[i], cudaStreamNonBlocking, hi_pri));
+      CUDA_CHECK(cudaStreamCreateWithPriority(
+          &streams_[i], cudaStreamNonBlocking, hi_pri));
       CUDA_CHECK(cudaEventCreateWithFlags(
           &events_[i], cudaEventDefault | cudaEventDisableTiming));
     }

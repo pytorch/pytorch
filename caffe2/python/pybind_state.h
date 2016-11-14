@@ -1,23 +1,37 @@
 #pragma once
 
+#include <unordered_map>
+
 #include "caffe2/core/context.h"
 #include "caffe2/core/init.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/net.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/scope_guard.h"
+#include "caffe2/core/tensor.h"
 #include "caffe2/core/types.h"
 #include "caffe2/core/workspace.h"
 #include "caffe2/proto/caffe2.pb.h"
 
 #include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
 
 #include <Python.h>
 #define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
 #define PY_ARRAY_UNIQUE_SYMBOL caffe2_python_ARRAY_API
 #include <numpy/arrayobject.h>
 
+// Temporary solution for numpy < 1.7 versions: old macro, no promises.
+// You're strongly advised to upgrade to >= 1.7.
+#ifndef NPY_ARRAY_C_CONTIGUOUS
+#define NPY_ARRAY_C_CONTIGUOUS NPY_C_CONTIGUOUS
+#define PyArray_SetBaseObject(arr, x) (PyArray_BASE(arr) = (x))
+#endif
+
 namespace caffe2 {
+namespace python {
+
+namespace py = pybind11;
 
 // Add methods common to both CPU and GPU mode.
 void addGlobalMethods(pybind11::module& m);
@@ -161,4 +175,93 @@ class TensorFeeder : public BlobFeederBase {
     context.FinishDeviceComputation();
   }
 };
-}
+
+// Python Op implementations.
+using FuncRegistery = std::unordered_map<std::string, py::object>;
+FuncRegistery& gRegistery();
+
+py::object& getOpFunc(const std::string& token);
+
+py::object& getGradientFunc(const std::string& token);
+
+class PythonOpBase : public Operator<CPUContext> {
+ public:
+  using Operator::Operator;
+
+  bool RunOnDevice() final {
+    std::vector<TensorCPU*> inputs;
+    inputs.reserve(InputSize());
+    for (auto i = 0; i < InputSize(); ++i) {
+      inputs.push_back(const_cast<TensorCPU*>(&Input(i)));
+    }
+    std::vector<TensorCPU*> outputs;
+    outputs.reserve(OutputSize());
+    for (auto i = 0; i < OutputSize(); ++i) {
+      outputs.push_back(Output(i));
+    }
+    auto& pyFunc = getFunc();
+    {
+      // Acquire GIL for call to Python runtime.
+      py::gil_scoped_acquire g;
+      try {
+        pyFunc(inputs, outputs);
+      } catch (const py::error_already_set& e) {
+        LOG(ERROR) << "Exception encountered running PythonOp function: "
+                   << e.what() << "\nTraceback: ";
+        PyObject *type = nullptr, *value = nullptr, *trace = nullptr;
+        PyErr_Fetch(&type, &value, &trace);
+        PyTracebackObject* traceback =
+            reinterpret_cast<PyTracebackObject*>(trace);
+        vector<PyTracebackObject*> trace_vec;
+        while (traceback) {
+          trace_vec.push_back(traceback);
+          traceback = traceback->tb_next;
+        }
+        for (int i = trace_vec.size() - 1; i >= 0; --i) {
+          int line = trace_vec[i]->tb_lineno;
+          const char* filename =
+              PyString_AsString(trace_vec[i]->tb_frame->f_code->co_filename);
+          const char* funcname =
+              PyString_AsString(trace_vec[i]->tb_frame->f_code->co_name);
+          LOG(ERROR) << "    # " << trace_vec.size() - i - 1 << "  " << filename
+                     << " (" << line << "): " << funcname;
+        }
+        Py_XDECREF(type);
+        Py_XDECREF(value);
+        Py_XDECREF(trace);
+        return false;
+      }
+    }
+    return true;
+  }
+
+ private:
+  virtual py::object& getFunc() = 0;
+};
+
+class PythonOp final : public PythonOpBase {
+ public:
+  using PythonOpBase::PythonOpBase;
+
+ private:
+  py::object& getFunc() override {
+    const std::string& token =
+        OperatorBase::GetSingleArgument<std::string>("token", "");
+    return getOpFunc(token);
+  }
+};
+
+class PythonGradientOp final : public PythonOpBase {
+ public:
+  using PythonOpBase::PythonOpBase;
+
+ private:
+  py::object& getFunc() override {
+    const std::string& token =
+        OperatorBase::GetSingleArgument<std::string>("token", "");
+    return getGradientFunc(token);
+  }
+};
+
+} // namespace python
+} // namespace caffe2

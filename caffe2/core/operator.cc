@@ -33,23 +33,20 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
 namespace {
 unique_ptr<OperatorBase> TryCreateOperator(
     const string& key, const OperatorDef& operator_def, Workspace* ws) {
+  auto type = operator_def.device_option().device_type();
+  CAFFE_ENFORCE(
+      gDeviceTypeRegistry()->count(type),
+      "Device type ",
+      type,
+      " not registered.");
+  OperatorRegistry* registry = gDeviceTypeRegistry()->at(type);
+  VLOG(1) << "Creating operator with device type " << type;
   try {
-    switch (operator_def.device_option().device_type()) {
-      case CPU:
-        VLOG(1) << "Creating CPU operator " << key;
-        return CPUOperatorRegistry()->Create(key, operator_def, ws);
-      case CUDA:
-        VLOG(1) << "Creating CUDA operator " << key;
-        return CUDAOperatorRegistry()->Create(key, operator_def, ws);
-      default:
-        LOG(FATAL) << "Unknown device type: "
-                   << operator_def.device_option().device_type();
-        return nullptr;
-    }
+    return registry->Create(key, operator_def, ws);
   } catch (const UnsupportedOperatorFeature& err) {
     VLOG(1) << "Operator " << operator_def.type()
-            << " with engine does not support the requested feature. Msg: "
-            << err.what() << ". Proto is: " << ProtoDebugString(operator_def);
+            << " does not support the requested feature. Msg: " << err.what()
+            << ". Proto is: " << ProtoDebugString(operator_def);
     return nullptr;
   }
 }
@@ -94,11 +91,21 @@ unique_ptr<OperatorBase> CreateOperator(
 
   // Lastly, if the engine does not work here, try using the default engine.
   auto op = TryCreateOperator(operator_def.type(), operator_def, ws);
-  if (!op) {
-    LOG(ERROR) << "Cannot create op from def: "
-               << ProtoDebugString(operator_def);
-  }
+  CAFFE_ENFORCE(
+      op,
+      "Cannot create operator of type '",
+      operator_def.type(),
+      "'. Verify that implementation for the corresponding device exist. It "
+      "might also happen if the binary is not linked with the operator "
+      "implementation code. If Python frontend is used it might happen if "
+      "dyndep.InitOpsLibrary call is missing. Operator def: ",
+      ProtoDebugString(operator_def));
   return op;
+}
+
+std::map<int32_t, OperatorRegistry*>* gDeviceTypeRegistry() {
+  static std::map<int32_t, OperatorRegistry*> g_device_type_registry;
+  return &g_device_type_registry;
 }
 
 CAFFE_DEFINE_REGISTRY(
@@ -106,11 +113,14 @@ CAFFE_DEFINE_REGISTRY(
     OperatorBase,
     const OperatorDef&,
     Workspace*);
+CAFFE_REGISTER_DEVICE_TYPE(DeviceType::CPU, CPUOperatorRegistry);
+
 CAFFE_DEFINE_REGISTRY(
     CUDAOperatorRegistry,
     OperatorBase,
     const OperatorDef&,
     Workspace*);
+CAFFE_REGISTER_DEVICE_TYPE(DeviceType::CUDA, CUDAOperatorRegistry);
 
 CAFFE_DEFINE_REGISTRY(
     GradientRegistry,

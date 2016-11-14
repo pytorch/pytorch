@@ -6,8 +6,8 @@
 namespace caffe2 {
 namespace mkl {
 struct MKLPackedMatrix {
-  char identifier_;
-  char trans_;
+  CBLAS_IDENTIFIER identifier_;
+  CBLAS_TRANSPOSE trans_;
   int m_;
   int n_;
   int k_;
@@ -16,8 +16,8 @@ struct MKLPackedMatrix {
   float* data_ = nullptr;
 
   MKLPackedMatrix(
-      const char identifier,
-      const char trans,
+      const CBLAS_IDENTIFIER identifier,
+      const CBLAS_TRANSPOSE trans,
       const int m,
       const int n,
       const int k,
@@ -31,14 +31,15 @@ struct MKLPackedMatrix {
         k_(k),
         alpha_(alpha),
         ld_(ld) {
-    data_ = sgemm_alloc(&identifier, &m, &n, &k);
+    data_ = cblas_sgemm_alloc(identifier, m, n, k);
     CAFFE_ENFORCE(data_, "MKL runtime error: cannot allocate sgemm memory.");
-    sgemm_pack(&identifier, &trans, &m, &n, &k, &alpha, src, &ld, data_);
+    cblas_sgemm_pack(
+        CblasRowMajor, identifier, trans, m, n, k, alpha, src, ld, data_);
   }
 
   ~MKLPackedMatrix() {
     if (data_) {
-      sgemm_free(data_);
+      cblas_sgemm_free(data_);
     }
   }
 };

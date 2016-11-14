@@ -56,7 +56,7 @@ class StringDeserializer : public BlobDeserializerBase {
 namespace {
 
 // We can't use DeviceType_Name because of a protobuf-lite constraint.
-std::string tensorDeviceTypeName(const DeviceType& d) {
+std::string tensorDeviceTypeName(const int32_t& d) {
   switch (d) {
     case CPU:
       return "TensorCPU";
@@ -84,7 +84,7 @@ std::string Blob::Serialize(const string& name) const {
   std::stringstream data;
   std::mutex mutex;
   BlobSerializerBase::SerializationAcceptor acceptor =
-    [&data, &mutex](const std::string& name, const std::string& blob) {
+    [&data, &mutex](const std::string&, const std::string& blob) {
     std::lock_guard<std::mutex> guard(mutex);
     data << blob;
   };

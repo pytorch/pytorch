@@ -20,7 +20,8 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 from caffe2.python import core
-from caffe2.python.schema import Field, from_blob_list
+from caffe2.python.schema import Field, Struct, from_blob_list
+import numpy as np
 
 
 class Reader(object):
@@ -35,6 +36,9 @@ class Reader(object):
         """
         assert self._schema is not None, 'Schema not provided for this reader.'
         return self._schema
+
+    def _set_schema(self, schema):
+        self._schema = schema
 
     def setup_ex(self, init_net, finish_net):
         """Nets to be executed once at startup and finish.
@@ -152,6 +156,11 @@ class Writer(object):
     that no more data will be written.
     """
 
+    _schema = None
+
+    def schema(self):
+        return self._schema
+
     def write(self, writer_net, fields):
         """Add operations to `writer_net` that write the next batch of data.
 
@@ -166,6 +175,7 @@ class Writer(object):
 
     def write_record(self, writer_net, fields):
         if isinstance(fields, Field):
+            self._schema = fields
             fields = fields.field_blobs()
         self.write(writer_net, fields)
 
@@ -183,6 +193,7 @@ class Writer(object):
             self, fields, local_init_net, local_finish_net, stop_blob=None):
         """Experimental extension to the interface. Don't use yet."""
         if isinstance(fields, Field):
+            self._schema = fields
             fields = fields.field_blobs()
         if stop_blob is None:
             stop_blob = local_init_net.NextName("dequeue_status")
@@ -197,3 +208,126 @@ class Writer(object):
         of them.
         """
         pass
+
+
+class ReaderBuilder(object):
+    """ Allow usage of a reader in distributed fashion. """
+    def schema(self):
+        raise NotImplementedError()
+
+    def enqueue_splits(self, net, split_queue):
+        raise NotImplementedError()
+
+    def splits(self, net):
+        raise NotImplementedError()
+
+    def new_reader(self, split_queue):
+        raise NotImplementedError()
+
+
+class Pipe(object):
+    def __init__(self, schema=None, obj_key=None):
+        self._num_writers = 0
+        self._num_readers = 0
+        self._schema = schema
+        self._obj_key = obj_key
+
+    def schema(self):
+        return self._schema
+
+    def setup(self, global_init_net):
+        pass
+
+    def reader(self):
+        raise NotImplementedError()
+
+    def writer(self):
+        raise NotImplementedError()
+
+    def num_readers(self):
+        return self._num_readers
+
+    def num_writers(self):
+        return self._num_writers
+
+    def _new_writer(self, writer_schema, writer_init_net):
+        if writer_schema is not None and self._schema is None:
+            self._schema = writer_schema
+        self._num_writers += 1
+        if self._obj_key is not None:
+            writer_init_net.add_attribute(self._obj_key, self)
+
+    def _new_reader(self, reader_init_net):
+        self._num_readers += 1
+        if self._obj_key is not None:
+            reader_init_net.add_attribute(self._obj_key, self)
+
+
+class CounterReader(Reader):
+    """ Reader that produces increasing integers. """
+    def __init__(self):
+        Reader.__init__(self, schema=Struct(('iter', np.int64)))
+        self.counter = None
+        self.should_stop = None
+
+    def setup_ex(self, global_init_net, global_finish_net):
+        if self.counter is None:
+            self.counter = global_init_net.CreateCounter([], init_count=0)
+            self.should_stop = global_init_net.ConstantFill(
+                [], shape=[], dtype=core.DataType.BOOL, value=False)
+
+    def read_ex(self, local_init_net, local_finish_net):
+        count_net = core.Net('limited_reader_counter')
+        value = count_net.CountUp([self.counter], 1)
+        return [count_net], self.should_stop, [value]
+
+
+class ReaderWithLimit(Reader):
+    """ Reader that stops after `num_iter` calls. """
+    def __init__(self, reader, num_iter=1):
+        Reader.__init__(self, schema=reader._schema)
+        self.reader = reader
+        self.counter = None
+        self.num_iter = num_iter
+        self._data_finished = None
+
+    def setup_ex(self, global_init_net, global_finish_net):
+        if self._data_finished is None:
+            self.counter = global_init_net.CreateCounter(
+                [], init_count=int(self.num_iter))
+            self.reader.setup_ex(global_init_net, global_finish_net)
+            self._data_finished = global_init_net.ConstantFill(
+                [], shape=[], value=False, dtype=core.DataType.BOOL)
+
+    def read_ex(self, local_init_net, local_finish_net):
+        """ 1. check if we reached number of iterations """
+        count_net = core.Net('limited_reader_counter')
+        should_stop = count_net.CountDown([self.counter], 1)
+
+        """ 2. call original reader """
+        nets, local_data_finished, fields = self.reader.read_ex(
+            local_init_net, local_finish_net)
+        self._set_schema(self.reader._schema)
+
+        """ 3. check if original reader is done. """
+        check_done_net = core.Net('limited_reader_post')
+        check_done_net.Copy(local_data_finished, should_stop)
+        check_done_net.Copy([local_data_finished], [self._data_finished])
+
+        # this relies on `should_stop` being called after each net.
+        return [count_net] + nets + [check_done_net], should_stop, fields
+
+    def data_finished(self):
+        """
+        Return a blob that can be checked after the end of the reading task,
+        which will contain a scalar float indicating whether the underlying
+        reader has been exhausted (True) or whether we stopped because reached
+        the limit of iterations (False).
+        """
+        assert self._data_finished is not None, (
+            'read_record must be called before data_finished()')
+        return self._data_finished
+
+
+def CountUntil(num_iter):
+    return ReaderWithLimit(CounterReader(), num_iter)

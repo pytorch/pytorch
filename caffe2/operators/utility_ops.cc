@@ -15,6 +15,8 @@ REGISTER_CPU_OPERATOR(WeightedSum, WeightedSumOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(
     ScatterWeightedSum,
     ScatterWeightedSumOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(Max, MaxOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(MaxGradient, MaxGradientOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(ScatterAssign, ScatterAssignOp<float, CPUContext>);
 // From whatever the current context, ensure the output is TensorCPU
 REGISTER_CPU_OPERATOR(
@@ -74,7 +76,9 @@ When the second input is absent, an extra argument `shape` must be specified.
 It outputs the reshaped tensor as well as the original shape.
 
 At most one dimension of the new shape can be -1. In this case, the value is
-inferred from the size of the tensor and the remaining dimensions.
+inferred from the size of the tensor and the remaining dimensions. A dimension
+could also be 0, in which case the actual dimension value is going to be copied
+from the input tensor.
 )DOC")
     .Arg("shape", "New shape")
     .Input(0, "data", "An input tensor.")
@@ -231,6 +235,21 @@ Currently only works on CPU because of access to INDICES.
     .Input(4, "Weight_1", "Scalar weight for X_1 update")
     .Output(0, "X_0", "Has to be exactly the same tensor as the input 0")
     .EnforceInplace({{0, 0}});
+
+OPERATOR_SCHEMA(Max)
+    .NumInputs(1, INT_MAX)
+    .NumOutputs(1)
+    .AllowInplace({{0, 0}})
+    .SetDoc(R"DOC(
+Element-wise max of each of the input tensors. The first input tensor can be
+used in-place as the output tensor, in which case the max will be done in
+place and results will be accumulated in input0. All inputs and outputs must
+have the same shape and data type.
+)DOC")
+    .Input(0, "data_0", "First of the input tensors. Can be inplace.")
+    .Output(0, "max", "Output tensor. Same dimension as inputs.");
+
+OPERATOR_SCHEMA(MaxGradient).NumInputs(3, INT_MAX).NumOutputs(1, INT_MAX);
 
 OPERATOR_SCHEMA(ScatterAssign)
     .NumInputs(3)
@@ -587,6 +606,20 @@ REGISTER_GRADIENT(Sum, GetSumGradient);
 SHOULD_NOT_DO_GRADIENT(WeightedSum);
 SHOULD_NOT_DO_GRADIENT(ScatterWeightedSum);
 SHOULD_NOT_DO_GRADIENT(ScatterAssign);
+
+class GetMaxGradient : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  vector<OperatorDef> GetGradientDefs() override {
+    auto gradInputs = vector<string>();
+    auto inputs = vector<string>{O(0), GO(0)};
+    for (int i = 0; i < def_.input_size(); i++) {
+      gradInputs.push_back(GI(i));
+      inputs.push_back(I(i));
+    }
+    return SingleGradientDef("MaxGradient", "", inputs, gradInputs);
+  }
+};
+REGISTER_GRADIENT(Max, GetMaxGradient);
 
 // TODO(jiayq): Copy is a bit tricky because one need to figure out correctly
 // where the input lies (e.g. for muji, which gpu). Right now I am marking it

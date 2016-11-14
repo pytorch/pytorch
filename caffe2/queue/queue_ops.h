@@ -79,7 +79,6 @@ class CloseBlobsQueueOp final : public Operator<Context> {
         OperatorBase::Inputs()[0]->template Get<std::shared_ptr<BlobsQueue>>();
     CHECK(queue);
     queue->close();
-    queue.reset();
     return true;
   }
 
@@ -98,8 +97,8 @@ class SafeEnqueueBlobsOp final : public Operator<Context> {
     auto size = queue->getNumBlobs();
     CAFFE_ENFORCE(
         OutputSize() == size + 1,
-        "Expected " + std::to_string(size + 1) + ", " + " got: " +
-            std::to_string(size));
+        "Expected " + caffe2::to_string(size + 1) + ", " + " got: " +
+            caffe2::to_string(size));
     bool status = queue->blockingWrite(this->Outputs());
     Output(size)->Resize();
     *Output(size)->template mutable_data<bool>() = !status;
@@ -120,8 +119,8 @@ class SafeDequeueBlobsOp final : public Operator<Context> {
     auto size = queue->getNumBlobs();
     CAFFE_ENFORCE(
         OutputSize() == size + 1,
-        "Expected " + std::to_string(size + 1) + ", " + " got: " +
-            std::to_string(size));
+        "Expected " + caffe2::to_string(size + 1) + ", " + " got: " +
+            caffe2::to_string(size));
     bool status = queue->blockingRead(this->Outputs());
     Output(size)->Resize();
     *Output(size)->template mutable_data<bool>() = !status;

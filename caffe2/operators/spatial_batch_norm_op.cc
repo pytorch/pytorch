@@ -75,11 +75,13 @@ bool SpatialBNOp<CPUContext>::RunOnDevice() {
     // Check if they are initialized
     if (!running_mean->size()) {
       running_mean->Resize(C);
-      EigenVectorArrayMap<float>(running_mean->mutable_data<float>(), C) = 0;
+      EigenVectorArrayMap<float> running_mean_map(running_mean->mutable_data<float>(), C);
+      running_mean_map.setZero();
     }
     if (!running_var->size()) {
       running_var->Resize(C);
-      EigenVectorArrayMap<float>(running_var->mutable_data<float>(), C) = 0;
+      EigenVectorArrayMap<float> running_var_map(running_var->mutable_data<float>(), C);
+      running_var_map.setZero();
     }
     EigenVectorArrayMap<float> running_mean_arr(
         running_mean->mutable_data<float>(), C);

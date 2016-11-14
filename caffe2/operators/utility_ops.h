@@ -72,7 +72,8 @@ class PrintOp final : public Operator<Context> {
   bool RunOnDevice() override {
     if (!OperatorBase::InputIsType<Tensor<Context>>(0) &&
         !OperatorBase::InputIsType<TensorCPU>(0)) {
-      LOG(INFO) << "Non-tensor input.";
+      LOG(INFO) << "Blob of type: "
+                << OperatorBase::Inputs().at(0)->meta().name();
       return true;
     }
     // special-case empty tensors since they may have no meta()
@@ -459,6 +460,83 @@ class ScatterWeightedSumOp : public Operator<Context> {
   }
 };
 
+template <typename T, class Context>
+class MaxOp : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  USE_SIMPLE_CTOR_DTOR(MaxOp);
+
+  bool RunOnDevice() override {
+    auto& input0 = Input(0);
+    auto* output = Output(0);
+
+    output->ResizeLike(input0);
+    output->CopyFrom(input0, &context_);
+
+    if (InputSize() == 1) {
+      return true;
+    }
+
+    // Dimension checking
+    for (int i = 1; i < InputSize(); ++i) {
+      CAFFE_ENFORCE_EQ(
+          output->dims(),
+          Input(i).dims(),
+          "Description: Input #",
+          i,
+          ", input dimension:",
+          Input(i).dims(),
+          " should match output dimension: ",
+          output->dims());
+    }
+
+    T* output_data = output->template mutable_data<T>();
+#pragma omp parallel for
+    for (int i = 1; i < InputSize(); i++) {
+      auto input_data = Input(i).template data<T>();
+      for (int j = 0; j < input0.size(); j++) {
+        output_data[j] = std::max(output_data[j], input_data[j]);
+      }
+    }
+
+    return true;
+  }
+};
+
+template <typename T, class Context>
+class MaxGradientOp : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  USE_SIMPLE_CTOR_DTOR(MaxGradientOp);
+
+  bool RunOnDevice() override {
+    auto& output = Input(0);
+    auto& grad_output = Input(1);
+    const int kInputStartOffset = 2;
+
+    const T* data = output.template data<T>();
+    ConstEigenArrayMap<T> output_array(
+        output.template data<T>(), 1, output.size());
+    ConstEigenArrayMap<T> grad_out_array(
+        grad_output.template data<T>(), 1, grad_output.size());
+
+    for (int i = 0; i < OutputSize(); i++) {
+      auto& input = Input(i + kInputStartOffset);
+      ConstEigenArrayMap<T> input_array(
+          input.template data<T>(), 1, input.size());
+
+      auto* grad_input = Output(i);
+      grad_input->ResizeLike(input);
+      EigenArrayMap<T> grad_in_array(
+          grad_input->template mutable_data<T>(), 1, grad_input->size());
+      grad_in_array = grad_out_array *
+          input_array.cwiseEqual(output_array).template cast<T>();
+    }
+
+    return true;
+  }
+};
+
 /**
  * @brief Update slices of the tensor in-place by overriding.
  *
@@ -744,10 +822,10 @@ class SliceOp : public Operator<Context> {
     auto* starts_data = starts.template data<SIndex>();
     auto* ends_data = ends.template data<SIndex>();
 
-    CHECK_EQ(starts.ndim(), 1);
-    CHECK_EQ(ends.ndim(), 1);
-    CHECK_LE(data.ndim(), starts.size());
-    CHECK_EQ(starts.size(), ends.size());
+    CAFFE_ENFORCE_EQ(starts.ndim(), 1);
+    CAFFE_ENFORCE_EQ(ends.ndim(), 1);
+    CAFFE_ENFORCE_GE(data.ndim(), starts.size());
+    CAFFE_ENFORCE_EQ(starts.size(), ends.size());
 
     std::vector<SIndex> starts_idx(data.ndim());
     std::vector<SIndex> ends_idx(data.ndim());
@@ -767,11 +845,11 @@ class SliceOp : public Operator<Context> {
       if (end < 0) {
         end = data.dims()[i] + 1 + end;
       }
-      CHECK_GE(start, 0);
-      CHECK_GE(end, 0);
-      CHECK_LT(start, data.dims()[i]);
-      CHECK_LE(end, data.dims()[i]);
-      CHECK_GE(end, start);
+      CAFFE_ENFORCE_GE(start, 0);
+      CAFFE_ENFORCE_GE(end, 0);
+      CAFFE_ENFORCE_LT(start, data.dims()[i]);
+      CAFFE_ENFORCE_LE(end, data.dims()[i]);
+      CAFFE_ENFORCE_GE(end, start);
       starts_idx[i] = start;
       ends_idx[i] = end;
       dst_sizes[i] = end - start;
@@ -780,7 +858,8 @@ class SliceOp : public Operator<Context> {
     int dim = -1;
     for (int i = 0; i < data.ndim(); ++i) {
       if (starts_idx[i] > 0 || ends_idx[i] < data.dims()[i]) {
-        CHECK_EQ(dim, -1) << "Currently only possible to slice in 1 dimension.";
+        CAFFE_ENFORCE_EQ(
+            dim, -1, "Currently only possible to slice in 1 dimension.");
         dim = i;
       }
     }
@@ -923,6 +1002,13 @@ class ReshapeOp : public Operator<Context> {
 
       const T* shape_data = shape.template data<T>();
       actual_new_shape.assign(shape_data, shape_data + shape.size());
+    }
+
+    // Copy over the dimensions for those that are specified zero.
+    for (int i = 0; i < actual_new_shape.size(); ++i) {
+      if (actual_new_shape[i] == 0) {
+        actual_new_shape[i] = input.dim(i);
+      }
     }
 
     // Checks if the new shape is valid and fills in the missing dimension

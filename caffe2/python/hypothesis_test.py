@@ -150,6 +150,23 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [X1, X2], [0])
         self.assertGradientChecks(gc, op, [X1, X2], 0, [0])
 
+    @given(inputs=hu.tensors(n=2), **hu.gcs)
+    def test_max(self, inputs, gc, dc):
+        op = core.CreateOperator("Max", ["X1", "X2"], ["Y"])
+
+        X1, X2 = inputs
+        # Make X1 and X2 far from each other, since X1=X2 is not differentiable
+        # and the step size of gradient checker is 0.05
+        X1[np.logical_and(X1 >= X2 - 0.05, X1 <= X2)] -= 0.05
+        X1[np.logical_and(X1 <= X2 + 0.05, X1 >= X2)] += 0.05
+        self.assertDeviceChecks(dc, op, [X1, X2], [0])
+        for i in range(2):
+            self.assertGradientChecks(gc, op, [X1, X2], i, [0])
+
+        def elementwise_max(X, Y):
+            return [np.maximum(X, Y)]
+        self.assertReferenceChecks(gc, op, [X1, X2], elementwise_max)
+
     def test_add(self):
         def ref(x, y):
             return (x + y, )
@@ -227,6 +244,11 @@ class TestOperators(hu.HypothesisTestCase):
 
         self.assertDeviceChecks(dc, op, [X], [0])
         self.assertReferenceChecks(gc, op, [X], softsign)
+        if inplace:
+            with self.assertRaises(Exception):
+                self.assertGradientChecks(gc, op, [X], 0, [0])
+        else:
+            self.assertGradientChecks(gc, op, [X], 0, [0])
 
     @given(
         device_options=st.lists(
@@ -261,8 +283,9 @@ class TestOperators(hu.HypothesisTestCase):
 
     @given(axis=st.integers(min_value=1, max_value=4),
            num_output=st.integers(min_value=4, max_value=8),
+           engine=st.sampled_from(["", "PACKED"]),
            **hu.gcs)
-    def test_fully_connected_axis(self, axis, num_output, gc, dc):
+    def test_fully_connected_axis(self, axis, num_output, engine, gc, dc):
         np.random.seed(1)
         X = np.random.randn(1, 2, 3, 2, 1).astype(np.float32)
 
@@ -281,6 +304,7 @@ class TestOperators(hu.HypothesisTestCase):
             "FC",
             ["X", "W", "b"],
             ["Y"],
+            engine=engine,
             axis=axis)
         for name, param in [("X", X), ("W", W), ("b", b)]:
             self.ws.create_blob(name).feed(param)
@@ -354,16 +378,15 @@ class TestOperators(hu.HypothesisTestCase):
            axis=st.integers(0, 3),
            num_inputs=st.integers(2, 4), **hu.gcs)
     def test_depth_concat(self, ndim, axis, num_inputs, gc, dc):
-        if (axis >= ndim):
-            return
+        assume(axis < ndim)
         input_names = ['X0', 'X1', 'X2', 'X3'][:num_inputs]
         shape = [2, 3, 5, 7][:ndim]
-        individual_dims = [11, 13, 17, 19][:num_inputs]
+        individual_dims = [1, 2, 3, 4, 5][:num_inputs]
         inputs = []
         for i in range(num_inputs):
             # Sets a unique dim and create the input.
             shape[axis] = individual_dims[i]
-            inputs.append(np.random.rand(*shape).astype(np.float32))
+            inputs.append(np.random.randn(*shape).astype(np.float32))
         op = core.CreateOperator("Concat", input_names, ["Y", "Y_dims"],
                                  axis=axis)
         self.assertDeviceChecks(dc, op, inputs, [0])
@@ -376,7 +399,7 @@ class TestOperators(hu.HypothesisTestCase):
     def test_depth_concat_with_order(self, num_inputs, order, gc, dc):
         input_names = ['X0', 'X1', 'X2', 'X3'][:num_inputs]
         shape = [2, 3, 5, 7]
-        individual_dims = [11, 13, 17, 19][:num_inputs]
+        individual_dims = [1, 2, 3, 4][:num_inputs]
         inputs = []
         for i in range(num_inputs):
             # Sets a unique dim and create the input.

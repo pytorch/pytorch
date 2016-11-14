@@ -25,6 +25,7 @@ RootFolder = C.root_folder
 Workspaces = C.workspaces
 BenchmarkNet = C.benchmark_net
 
+is_asan = C.is_asan
 has_gpu_support = C.has_gpu_support
 if has_gpu_support:
     NumCudaDevices = C.num_cuda_devices
@@ -201,8 +202,8 @@ def FeedBlob(name, arr, device_option=None):
     name = StringifyBlobName(name)
     if device_option is not None:
         return C.feed_blob(name, arr, StringfyProto(device_option))
-    elif scope.DEVICESCOPE is not None:
-        return C.feed_blob(name, arr, StringfyProto(scope.DEVICESCOPE))
+    elif scope.CurrentDeviceScope() is not None:
+        return C.feed_blob(name, arr, StringfyProto(scope.CurrentDeviceScope()))
     else:
         return C.feed_blob(name, arr)
 
@@ -231,7 +232,7 @@ def FetchBlob(name):
 
 def GetNameScope():
     """Return the current namescope string. To be used to fetch blobs"""
-    return scope.NAMESCOPE
+    return scope.CurrentNameScope()
 
 
 class _BlobDict(object):

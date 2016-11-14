@@ -17,7 +17,21 @@ class PackedFCOp final : public Operator<CPUContext> {
   USE_OPERATOR_FUNCTIONS(CPUContext);
   PackedFCOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<CPUContext>(operator_def, ws),
-        axis_(OperatorBase::GetSingleArgument<int32_t>("axis", 1)) {}
+        axis_(OperatorBase::GetSingleArgument<int32_t>("axis", 1)) {
+    OPERATOR_NEEDS_FEATURE(
+        __builtin_cpu_supports("avx2") || operator_def.type() == "PackedFC",
+        "If you are trying to use PackedFCOp as a FC with PACKED engine on "
+        "a machine that does not have avx2, be noted that the functionality "
+        "is not tuned and you are better off directly using FC.");
+    // TODO(jiayq): after MKL update, remove this constraint. This is different
+    // from the check above, as the above is a performance hint and the below
+    // is about correctness.
+    CAFFE_ENFORCE(
+        __builtin_cpu_supports("avx2"),
+        "Do not run PackedFC on a machine that does not have avx2 "
+        "right now, as there is an known issue with MKL 2017.0.098 "
+        "that produces wrong results on non-avx2 machines.");
+  }
   ~PackedFCOp() {}
 
   bool RunOnDevice() override {
@@ -50,35 +64,47 @@ class PackedFCOp final : public Operator<CPUContext> {
       if (!local_packed_matrix_.get() || local_packed_matrix_->n_ != M) {
         // If there is no pre packed matrix, or the batch size changed, we
         // do a re-pack.
-        // Note that the packed sgemm follows the blas interfaces, not cblas
         local_packed_matrix_.reset(new MKLPackedMatrix(
-            'A', 'T', N, M, K, 1.f, W.template data<float>(), K));
+            CblasBMatrix,
+            CblasTrans,
+            M,
+            N,
+            K,
+            1.f,
+            W.template data<float>(),
+            K));
       }
       packed_matrix = local_packed_matrix_.get();
     } else if (OperatorBase::InputIsType<MKLPackedMatrix>(1)) {
       packed_matrix = &OperatorBase::Input<MKLPackedMatrix>(1);
     }
-    CAFFE_ENFORCE_EQ(packed_matrix->m_, N);
+    CAFFE_ENFORCE_EQ(packed_matrix->m_, M);
     CAFFE_ENFORCE_EQ(packed_matrix->k_, K);
-    CAFFE_ENFORCE_EQ(packed_matrix->n_, M);
+    CAFFE_ENFORCE_EQ(packed_matrix->n_, N);
     // Do we want to check the other flags as well?
 
-    Y->Resize(M, N);
+    Y_shape_cache_ = X.dims();
+    // This is an invariant of canonical_axis, so we can DCHECK.
+    DCHECK_LE(canonical_axis + 1, Y_shape_cache_.size());
+    Y_shape_cache_.resize(canonical_axis + 1);
+    Y_shape_cache_[canonical_axis] = N;
+    Y->Resize(Y_shape_cache_);
+    CAFFE_ENFORCE(M * N == Y->size());
 
-    const float kZero = 0;
-    sgemm_compute(
-        "P",
-        "N",
-        &N,
-        &M,
-        &K,
-        packed_matrix->data_,
-        &K,
+    cblas_sgemm_compute(
+        CblasRowMajor,
+        CblasNoTrans,
+        CblasPacked,
+        M,
+        N,
+        K,
         X.template data<float>(),
-        &K,
-        &kZero,
+        K,
+        packed_matrix->data_,
+        K,
+        0,
         Y->template mutable_data<float>(),
-        &N);
+        N);
 
     // Add bias term
     if (bias_multiplier_.size() != M) {
@@ -113,6 +139,7 @@ class PackedFCOp final : public Operator<CPUContext> {
   }
   size_t axis_{1};
   uint32_t hash_{0};
+  vector<TIndex> Y_shape_cache_;
   Tensor<CPUContext> bias_multiplier_;
   std::unique_ptr<MKLPackedMatrix> local_packed_matrix_;
 };
@@ -120,6 +147,7 @@ class PackedFCOp final : public Operator<CPUContext> {
 } // namespace mkl
 
 REGISTER_CPU_OPERATOR(PackedFC, mkl::PackedFCOp);
+REGISTER_CPU_OPERATOR_WITH_ENGINE(FC, PACKED, mkl::PackedFCOp);
 
 OPERATOR_SCHEMA(PackedFC).NumInputs(3).NumOutputs(1).SetDoc(R"DOC(
 Computes the result of passing an input vector X into a fully connected

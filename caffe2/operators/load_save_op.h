@@ -29,24 +29,26 @@ class LoadOp final : public Operator<Context> {
             OperatorBase::GetSingleArgument<int>("absolute_path", false)),
         db_name_(OperatorBase::GetSingleArgument<string>("db", "")),
         db_type_(OperatorBase::GetSingleArgument<string>("db_type", "")),
-        keep_device_(OperatorBase::GetSingleArgument<int>("keep_device", 0)) {
+        keep_device_(OperatorBase::GetSingleArgument<int>("keep_device", 0)),
+        load_all_(OperatorBase::GetSingleArgument<int>("load_all", 0)) {
     if (InputSize() == 0) {
       CHECK_GT(db_name_.size(), 0) << "Must specify a db name.";
       CHECK_GT(db_type_.size(), 0) << "Must specify a db type.";
     }
-    int idx = 0;
-    for (const string& output_name : this->def().output()) {
-      output_indices_[output_name] = idx++;
+    if (!load_all_) {
+      int idx = 0;
+      for (const string& output_name : this->def().output()) {
+        output_indices_[output_name] = idx++;
+      }
     }
   }
 
   void SetCurrentDevice(BlobProto* proto);
 
   bool RunOnDevice() override {
-    const vector<Blob*>& outputs = OperatorBase::Outputs();
     if (InputSize() == 1) {
       const db::DBReader& reader = OperatorBase::Input<db::DBReader>(0);
-      extractFrom(reader.cursor(), outputs);
+      extract(reader.cursor());
     } else {
       string full_db_name =
           absolute_path_ ? db_name_ : (ws_->RootFolder() + "/" + db_name_);
@@ -54,12 +56,50 @@ class LoadOp final : public Operator<Context> {
           caffe2::db::CreateDB(db_type_, full_db_name, caffe2::db::READ));
       CAFFE_ENFORCE(in_db.get(), "Cannot open db: ", db_name_);
       std::unique_ptr<Cursor> cursor(in_db->NewCursor());
-      extractFrom(cursor.get(), outputs);
+      extract(cursor.get());
     }
+
     return true;
   }
 
  private:
+  void extract(Cursor* cursor) {
+    if (load_all_) {
+      extractAll(cursor);
+    } else {
+      extractFrom(cursor, OperatorBase::Outputs());
+    }
+  }
+
+  void extractAll(Cursor* cursor) {
+    CAFFE_ENFORCE(cursor, "cursor is not valid");
+    std::unordered_set<string> seen_blobs;
+    for (; cursor->Valid(); cursor->Next()) {
+      const string& key = cursor->key();
+      BlobProto proto;
+      CAFFE_ENFORCE(
+          proto.ParseFromString(cursor->value()), "Couldn't parse Proto");
+      if (!keep_device_) {
+        // If we are not keeping the device as the one specified in the
+        // proto, we will set the current device.
+        SetCurrentDevice(&proto);
+      }
+
+      if (seen_blobs.count(key) == 0 && ws_->GetBlob(key)) {
+        // This blob already exists, reset it, read below about why!
+        ws_->GetBlob(key)->Reset();
+      }
+
+      Blob* blob = ws_->CreateBlob(key);
+      CAFFE_ENFORCE(blob->Deserialize(proto), "Couldn't deserialize blob");
+      if (!blob->IsType<Tensor<Context>>()) {
+        // Only tensors can be seen multiple times as chunks.
+        CAFFE_ENFORCE(seen_blobs.count(key) == 0, "Blob duplicated");
+      }
+      seen_blobs.insert(key);
+    }
+  }
+
   void extractFrom(Cursor* cursor, const vector<Blob*>& outputs) {
     CHECK(cursor);
 
@@ -155,6 +195,7 @@ class LoadOp final : public Operator<Context> {
   string db_name_;
   string db_type_;
   bool keep_device_;
+  bool load_all_;
   std::map<string, int> output_indices_;
 };
 
@@ -188,6 +229,13 @@ class SaveOp final : public Operator<Context> {
       transaction->Put(blobName, data);
       transaction->Commit();
     };
+    std::set<std::string> input_names;
+    for (int i = 0; i < inputs.size(); ++i) {
+      CAFFE_ENFORCE(
+          input_names.insert(def().input(i)).second,
+          "Duplicated feature: ",
+          def().input(i));
+    }
     for (int i = 0; i < inputs.size(); ++i) {
       inputs[i]->Serialize(def().input(i), acceptor);
     }

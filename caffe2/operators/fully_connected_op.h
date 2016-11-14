@@ -26,8 +26,8 @@ class FullyConnectedOp final : public Operator<Context> {
     CAFFE_ENFORCE(b.ndim() == 1, b.ndim());
     // batch size
     const auto canonical_axis = X.canonical_axis_index(axis_);
-    const int M = X.size_to_dim(canonical_axis);
-    const int K = X.size_from_dim(canonical_axis);
+    const auto M = X.size_to_dim(canonical_axis);
+    const auto K = X.size_from_dim(canonical_axis);
     const int N = W.dim32(0);
 
     auto dimErrorString = [&]() {
@@ -50,8 +50,7 @@ class FullyConnectedOp final : public Operator<Context> {
     };
 
     // Error checking
-    CAFFE_ENFORCE(M * K == X.size(), dimErrorString());
-    CAFFE_ENFORCE(K * N == W.size(), dimErrorString());
+    CAFFE_ENFORCE(M == X.size() / K, dimErrorString());
     CAFFE_ENFORCE(K == W.size() / W.dim32(0), dimErrorString());
     CAFFE_ENFORCE(N == b.dim32(0), dimErrorString());
     CAFFE_ENFORCE(N == b.size(), dimErrorString());

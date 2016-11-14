@@ -21,7 +21,7 @@ __global__ void AdamUpdate(
     float gi = g[i];
     float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
     float vi = nv[i] = v[i] * beta2 + gi * gi * (1 - beta2);
-    ng[i] = lr[0] * correction * mi / (sqrt(vi) + eps_hat);
+    ng[i] = lr[0] * correction * mi / (std::sqrt(vi) + eps_hat);
   }
 }
 
