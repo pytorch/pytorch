@@ -1,93 +1,67 @@
 #include "THCUNN.h"
-#include "common.h"
+#include "THCHalf.h"
+#include "THCHalfAutoNumerics.cuh"
 
+template <typename T>
 struct ELUupdateOutput_functor
 {
-  const float alpha_;
+  const T alpha_;
 
-  ELUupdateOutput_functor(float alpha)
+  ELUupdateOutput_functor(T alpha)
     : alpha_(alpha)
   {}
 
-  __device__ void operator()(float *output, const float *input) const
+  __device__ void operator()(T *output, const T *input) const
   {
     *output = *input <= 0 ? (exp(*input) - 1) * alpha_ : *input;
   }
 };
 
 // in-place variant
+template <typename T>
 struct ELUupdateOutputIP_functor
 {
-  const float alpha_;
+  const T alpha_;
 
-  ELUupdateOutputIP_functor(float alpha)
+  ELUupdateOutputIP_functor(T alpha)
     : alpha_(alpha)
   {}
 
-  __device__ void operator()(float *x) const
+  __device__ void operator()(T *x) const
   {
     *x = *x <= 0 ? (exp(*x) - 1) * alpha_ : *x;
   }
 };
 
-void THNN_CudaELU_updateOutput(THCState *state, THCudaTensor *input, THCudaTensor *output,
-  float alpha, bool inplace)
-{
-  THCUNN_assertSameGPU(state, 2, input, output);
-
-  if (inplace)
-  {
-    THC_pointwiseApply1(state, input, ELUupdateOutputIP_functor(alpha));
-    THCudaTensor_set(state, output, input);
-  }
-  else
-  {
-    THCudaTensor_resizeAs(state, output, input);
-    THC_pointwiseApply2(state, output, input, ELUupdateOutput_functor(alpha));
-  }
-}
-
+template <typename T>
 struct ELUupdateGradInput_functor
 {
-  const float alpha_;
+  const T alpha_;
 
-  ELUupdateGradInput_functor(float alpha)
+  ELUupdateGradInput_functor(T alpha)
     : alpha_(alpha)
   {}
 
-  __device__ void operator()(float *gradInput, const float *output, const float *gradOutput) const
+  __device__ void operator()(T *gradInput, const T *output, const T *gradOutput) const
   {
     *gradInput = (*output) <= 0 ? (*gradOutput * (*output + alpha_)) : (*gradOutput);
   }
 };
 
+template <typename T>
 struct ELUupdateGradInputIP_functor
 {
-  const float alpha_;
+  const T alpha_;
 
-  ELUupdateGradInputIP_functor(float alpha)
+  ELUupdateGradInputIP_functor(T alpha)
     : alpha_(alpha)
   {}
 
-  __device__ void operator()(float *gradOutput, const float *output) const
+  __device__ void operator()(T *gradOutput, const T *output) const
   {
     *gradOutput = (*output) <= 0 ? (*gradOutput * (*output + alpha_)) : (*gradOutput);
   }
 };
 
-void THNN_CudaELU_updateGradInput(THCState *state, THCudaTensor *input, THCudaTensor *gradOutput,
-  THCudaTensor *gradInput, THCudaTensor *output, float alpha, bool inplace)
-{
-  THCUNN_assertSameGPU(state, 3, output, gradOutput, gradInput);
-
-  if (inplace)
-  {
-    THC_pointwiseApply2(state, gradOutput, output, ELUupdateGradInputIP_functor(alpha));
-    THCudaTensor_set(state, gradInput, gradOutput);
-  }
-  else
-  {
-    THCudaTensor_resizeAs(state, gradInput, output);
-    THC_pointwiseApply3(state, gradInput, output, gradOutput, ELUupdateGradInput_functor(alpha));
-  }
-}
+#include "generic/ELU.cu"
+#include "THCGenerateFloatTypes.h"

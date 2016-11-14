@@ -9,6 +9,8 @@
 #include <thrust/system/cuda/execution_policy.h>
 #endif
 #include <thrust/unique.h>
+#include "THCHalf.h"
+#include "THCHalfAutoNumerics.cuh"
 
 #ifndef DIVUP
 #define DIVUP(x, y) (((x) + (y) - 1) / (y))
@@ -49,8 +51,9 @@ __device__ __forceinline__ bool warpHasCollision(int val)
   return __any(dup) != 0;
 }
 
+template <typename Dtype>
 __global__ void cunn_LookupTable_accGradParametersKernelByFeature(
-  long *input, float *gradOutput, float *gradWeight, float scale, long numel,
+  long *input, Dtype *gradOutput, Dtype *gradWeight, Dtype scale, ptrdiff_t numel,
   long stride, int paddingValue) {
 
   const int featureDim = blockIdx.x * 4 + threadIdx.x / 32;
@@ -72,14 +75,15 @@ __global__ void cunn_LookupTable_accGradParametersKernelByFeature(
   // updates are serialized in their order of execution by using the
   // warp-wide collision detector `warpHasCollision`.
   const int laneId = threadIdx.x % 32;
-  for (int i = laneId; i < numel; i += WARP_SIZE) {
+  for (ptrdiff_t i = laneId; i < numel; i += WARP_SIZE) {
     const int weightIndex = (int) (input[i] - TH_INDEX_BASE);
     if (weightIndex == paddingValue - TH_INDEX_BASE) {
       continue;
     }
 
-    float update = gradOutput[i*stride + featureDim] * scale;
+    Dtype update = gradOutput[i*stride + featureDim] * scale;
 
+    // FIXME: should we accumulate as accreal?
     // Check for collision
     if (warpHasCollision(weightIndex)) {
       // Run all lanes sequentially; warp divergence
@@ -95,9 +99,10 @@ __global__ void cunn_LookupTable_accGradParametersKernelByFeature(
   }
 }
 
+template <typename Dtype, typename Acctype>
 __global__ void cunn_LookupTable_accGradParametersKernel(
-  long *input, long *indices, float *gradOutput, float *gradWeight,
-  long *count, float defaultScale, long numel, long stride, int paddingValue) {
+  long *input, long *indices, Dtype *gradOutput, Dtype *gradWeight,
+  long *count, Dtype defaultScale, ptrdiff_t numel, long stride, int paddingValue) {
 
   int idx = blockIdx.x * 4 + threadIdx.y;
 
@@ -122,10 +127,10 @@ __global__ void cunn_LookupTable_accGradParametersKernel(
       const int startFeature = threadIdx.x + blockIdx.y * blockDim.x * SZ;
       const int weightRow = ((int) input[idx] - TH_INDEX_BASE) * stride;
       const int gradOutputRow = ((int) indices[idx] - TH_INDEX_BASE) * stride;
-      const float scale = count ? defaultScale / count[idx] : defaultScale;
+      const Acctype scale = count ? ScalarConvert<Dtype, Acctype>::to(defaultScale) / count[idx] : ScalarConvert<Dtype, Acctype>::to(defaultScale);
 
-      float gradient[SZ];
-      float weight[SZ];
+      Acctype gradient[SZ];
+      Acctype weight[SZ];
 
       #pragma unroll
       for (int ii = 0; ii < SZ; ii++)
@@ -133,8 +138,8 @@ __global__ void cunn_LookupTable_accGradParametersKernel(
         int featureDim = startFeature + ii * WARP_SIZE;
         if (featureDim < stride)
         {
-          gradient[ii] = gradOutput[gradOutputRow + featureDim];
-          weight[ii] = gradWeight[weightRow + featureDim];
+          gradient[ii] = ScalarConvert<Dtype, Acctype>::to(gradOutput[gradOutputRow + featureDim]);
+          weight[ii] = ScalarConvert<Dtype, Acctype>::to(gradWeight[weightRow + featureDim]);
         }
       }
 
@@ -150,7 +155,7 @@ __global__ void cunn_LookupTable_accGradParametersKernel(
         int featureDim = startFeature + ii * WARP_SIZE;
         if (featureDim < stride)
         {
-          gradWeight[weightRow + featureDim] = weight[ii];
+          gradWeight[weightRow + featureDim] = ScalarConvert<Acctype, Dtype>::to(weight[ii]);
         }
       }
 
@@ -159,129 +164,23 @@ __global__ void cunn_LookupTable_accGradParametersKernel(
   }
 }
 
-void THNN_CudaLookupTable_accGradParameters(
-  THCState *state,
-  THIndexTensor *input,
-  THCudaTensor *gradOutput,
-  THCudaTensor *gradWeight,
-  THIndexTensor *count,
-  THIndexTensor *sorted,
-  THIndexTensor *indices,
-  bool scaleGradByFreq,
-  int paddingValue,
-  float scale)
-{
-  THCUNN_assertSameGPU(state, 5, input, gradOutput, gradWeight, sorted, indices);
-  if (!(THIndexTensor_(isContiguous)(state, input) &&
-        THCudaTensor_isContiguous(state, gradOutput) &&
-        THCudaTensor_isContiguous(state, gradWeight)))
-  {
-    THError("Tensors must be contiguous");
-  }
-
-  int nDim = THIndexTensor_(nDimension)(state, input);
-  if (nDim != 1 && nDim != 2)
-    THError("input must be a vector or matrix");
-
-  long numel = THIndexTensor_(nElement)(state, input);
-  long stride = gradWeight->stride[0];
-
-  cudaStream_t stream = THCState_getCurrentStream(state);
-
-  if (numel <= 768 && !scaleGradByFreq) {
-    cunn_LookupTable_accGradParametersKernelByFeature<<<DIVUP(stride,4), 128, 0, stream>>>(
-      THIndexTensor_(data)(state, input),
-      THCudaTensor_data(state, gradOutput),
-      THCudaTensor_data(state, gradWeight),
-      scale,
-      numel,
-      stride,
-      paddingValue);
-    THCudaCheck(cudaGetLastError());
-    return;
-  }
-
-  THLongStorage *inputSize = THIndexTensor_(newSizeOf)(state, input);
-  THIndexTensor_(resize)(state, sorted, inputSize, NULL);
-  THIndexTensor_(resize)(state, indices, inputSize, NULL);
-  THLongStorage_free(inputSize);
-
-  // Sort the inputs into sorted with the corresponding indices
-  THIndexTensor_(sort)(state, sorted, indices, input, 0, 0);
-
-  long *sorted_data = THIndexTensor_(data)(state, sorted);
-  long  *indices_data = THIndexTensor_(data)(state, indices);
-  long *count_data = NULL;
-
-  if (scaleGradByFreq)
-  {
-    THIndexTensor_(resizeAs)(state, count, input);
-    count_data = THIndexTensor_(data)(state, count);
-
-    thrust::device_ptr<long> sorted_ptr(sorted_data);
-    thrust::device_ptr<long> count_ptr(count_data);
-
-    // Compute an increasing sequence per unique item in sorted:
-    // sorted: 2 5 5 5 7 7 8 9 9
-    //  count: 1 1 2 3 1 2 1 1 2
-    thrust::inclusive_scan_by_key(
-#if CUDA_VERSION >= 7000
-      thrust::cuda::par.on(THCState_getCurrentStream(state)),
-#endif
-      sorted_ptr,
-      sorted_ptr + numel,
-      thrust::make_constant_iterator(1),
-      count_ptr
-    );
-
-    // Take the maximum of each count per unique key in reverse:
-    // sorted: 2 5 5 5 7 7 8 9 9
-    //  count: 1 3 3 3 2 2 1 2 2
-    thrust::inclusive_scan_by_key(
-#if CUDA_VERSION >= 7000
-      thrust::cuda::par.on(THCState_getCurrentStream(state)),
-#endif
-      thrust::make_reverse_iterator(sorted_ptr + numel),
-      thrust::make_reverse_iterator(sorted_ptr),
-      thrust::make_reverse_iterator(count_ptr + numel),
-      thrust::make_reverse_iterator(count_ptr + numel),
-      thrust::equal_to<long>(),
-      thrust::maximum<long>()
-    );
-  }
-
-  dim3 grid(DIVUP(numel,4), DIVUP(stride,128));
-  dim3 block(32, 4);
-  cunn_LookupTable_accGradParametersKernel<<<grid, block, 0, stream>>>(
-    sorted_data,
-    indices_data,
-    THCudaTensor_data(state, gradOutput),
-    THCudaTensor_data(state, gradWeight),
-    count_data,
-    scale,
-    numel,
-    stride,
-    paddingValue
-  );
-  THCudaCheck(cudaGetLastError());
-}
-
 /*
  * Keep the norm of weight smaller than maxNorm
  */
-template <typename T>
+template <typename Dtype, typename Acctype>
 struct pow_v
 {
-  T normType;
-  pow_v(T v) : normType(v) {}
+  Acctype normType;
+  pow_v(Dtype v) : normType(ScalarConvert<Dtype, Acctype>::to(v)) {}
   __host__ __device__
-  T operator()(const T& x) const {
+  Acctype operator()(const Dtype& x) const {
+    Acctype xA = ScalarConvert<Dtype, Acctype>::to(x);
     if (normType == 1)
-      return std::abs(x);
+      return std::abs(xA);
     else if (normType == 2)
-      return x * x;
+      return xA * xA;
     else
-      return std::pow(std::abs(x), normType);
+      return std::pow(std::abs(xA), normType);
   }
 };
 
@@ -296,47 +195,5 @@ struct multiply_s
   }
 };
 
-void THNN_CudaLookupTable_renorm(
-  THCState *state,
-  THIndexTensor *idx,
-  THCudaTensor *weight,
-  float maxNorm,
-  float normType)
-{
-  THCUNN_assertSameGPU(state, 2, idx, weight);
-  if (!(THIndexTensor_(isContiguous)(state, idx) &&
-        THCudaTensor_isContiguous(state, weight)))
-  {
-    THError("Tensors must be contiguous");
-  }
-  if (THIndexTensor_(nDimension)(state, idx) != 1)
-    THError("idx must be a vector");
-  if (normType <= 0)
-    THError("non-positive-norm not supported");
-
-  long numel = THIndexTensor_(nElement)(state, idx);
-  long stride = weight->stride[0];
-
-  // get the unique indices
-  thrust::device_ptr<float> weight_ptr(THCudaTensor_data(state, weight));
-  thrust::device_ptr<long> idx_ptr(THIndexTensor_(data)(state, idx));
-  thrust::device_ptr<long> end_ptr = thrust::unique(idx_ptr, idx_ptr+numel);
-  numel = end_ptr - idx_ptr;
-
-  pow_v<float> unary_pow(normType);
-  thrust::plus<float> binary_plus;
-  // numel << stride, since idx usually contains sparse row indices
-  for (long i = 0; i < numel; i++)
-  {
-    long k = idx_ptr[i] - TH_INDEX_BASE;
-    thrust::device_ptr<float> row_ptr = weight_ptr + k * stride;
-    float norm = thrust::transform_reduce(row_ptr, row_ptr + stride,
-      unary_pow, 0, binary_plus);
-    norm = std::pow(norm, (float) (1.0 / normType));
-    if (norm > maxNorm)
-    {
-      multiply_s<float> unary_mul(maxNorm / (norm + 1e-7));
-      thrust::transform(row_ptr, row_ptr + stride, row_ptr, unary_mul);
-    }
-  }
-}
+#include "generic/LookupTable.cu"
+#include "THCGenerateFloatTypes.h"
