@@ -3,11 +3,15 @@
 
 #include "THCTensor.h"
 #include "THCGeneral.h"
+#include "THCTensorCopy.h"
 
 #include "generic/THCTensorMath.h"
 #include "THCGenerateAllTypes.h"
 
 #include "generic/THCTensorMathBlas.h"
+#include "THCGenerateAllTypes.h"
+
+#include "generic/THCTensorMathMagma.h"
 #include "THCGenerateAllTypes.h"
 
 #include "generic/THCTensorMathPairwise.h"
@@ -41,7 +45,6 @@
 #include "THCGenerateAllTypes.h"
 
 // MAGMA (i.e. CUDA implementation of LAPACK functions)
-THC_API void THCudaTensor_gesv(THCState *state, THCudaTensor *rb_, THCudaTensor *ra_, THCudaTensor *b_, THCudaTensor *a_);
 THC_API void THCudaTensor_gels(THCState *state, THCudaTensor *rb_, THCudaTensor *ra_, THCudaTensor *b_, THCudaTensor *a_);
 THC_API void THCudaTensor_syev(THCState *state, THCudaTensor *re_, THCudaTensor *rv_, THCudaTensor *a_, const char *jobz, const char *uplo);
 THC_API void THCudaTensor_geev(THCState *state, THCudaTensor *re_, THCudaTensor *rv_, THCudaTensor *a_, const char *jobvr);

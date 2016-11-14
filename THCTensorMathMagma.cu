@@ -1,6 +1,7 @@
 #include "THCGeneral.h"
 #include "THCTensorMath.h"
 #include "THCTensorCopy.h"
+#include "THCTensorMathMagma.cuh"
 #include <algorithm>
 
 #ifdef USE_MAGMA
@@ -19,104 +20,6 @@ void THCMagma_init(THCState *state)
 {
 #ifdef USE_MAGMA
   magma_init();
-#endif
-}
-
-#ifdef USE_MAGMA
-template <typename T>
-static inline T* th_magma_malloc_pinned(size_t n)
-{
-  void* ptr;
-  if (MAGMA_SUCCESS != magma_malloc_pinned(&ptr, n * sizeof(T)))
-    THError("$ Torch: not enough memory: you tried to allocate %dGB. Buy new RAM!", n/268435456);
-  return reinterpret_cast<T*>(ptr);
-}
-
-static void THCudaTensor_copyArray1d(THCState *state, THCudaTensor *self, float *src, int k)
-{
-  long size[1] = { k };
-  long stride[1] = { 1 };
-  THCudaTensor_rawResize(state, self, 1, size, stride);
-  size_t len = k * sizeof(float);
-  THCudaCheck(cudaMemcpy(self->storage->data + self->storageOffset, src, len, cudaMemcpyHostToDevice));
-}
-
-static void THCudaTensor_copyArray2d(THCState *state, THCudaTensor *self, float *src, int m, int n)
-{
-  long size[2] = { m, n };
-  long stride[2] = { 1, m };
-  THCudaTensor_rawResize(state, self, 2, size, stride);
-  size_t len = m * n * sizeof(float);
-  THCudaCheck(cudaMemcpy(self->storage->data + self->storageOffset, src, len, cudaMemcpyHostToDevice));
-}
-
-static void THCudaTensor_copyTensor2d(THCState *state, float *dst, THCudaTensor *self)
-{
-  THAssert(self->nDimension == 2);
-  size_t len = THCudaTensor_nElement(state, self)*sizeof(float);
-  THCudaTensor *temp = THCudaTensor_newTranspose(state, self, 0, 1);
-  THCudaTensor *selfc = THCudaTensor_newContiguous(state, temp);
-  THCudaCheck(cudaMemcpy(dst, selfc->storage->data + selfc->storageOffset, len, cudaMemcpyDeviceToHost));
-  THCudaTensor_free(state, temp);
-  THCudaTensor_free(state, selfc);
-}
-
-#endif
-
-static THCudaTensor* THCudaTensor_newColumnMajor(THCState *state, THCudaTensor *self, THCudaTensor *src)
-{
-  THAssert(src->nDimension == 2);
-  if (self == src && self->stride[0] == 1 && self->stride[1] == self->size[0])
-  {
-    THCudaTensor_retain(state, self);
-    return self;
-  }
-
-  if (self == src)
-    self = THCudaTensor_new(state);
-  else
-    THCudaTensor_retain(state, self);
-
-  long size[2] = { src->size[0], src->size[1] };
-  long stride[2] = { 1, src->size[0] };
-
-  THCudaTensor_rawResize(state, self, 2, size, stride);
-  THCudaTensor_copy(state, self, src);
-  return self;
-}
-
-
-void THCudaTensor_gesv(THCState *state, THCudaTensor *rb_, THCudaTensor *ra_, THCudaTensor *b_, THCudaTensor *a_)
-{
-#ifdef USE_MAGMA
-  THArgCheck(a_->nDimension == 2, 1, "A should be 2 dimensional");
-  THArgCheck(b_->nDimension == 2, 2, "b should be 2 dimensional");
-  THArgCheck(a_->size[0] == a_->size[1], 1, "A should be square");
-  THArgCheck(b_->size[0] == a_->size[0], 2, "A,b size incompatible");
-
-  int n = a_->size[0];
-  int nrhs = b_->size[1];
-
-  THCudaTensor *a = THCudaTensor_newColumnMajor(state, ra_, a_);
-  THCudaTensor *b = THCudaTensor_newColumnMajor(state, rb_, b_);
-  float *a_data = THCudaTensor_data(state, a);
-  float *b_data = THCudaTensor_data(state, b);
-
-  int *ipiv = th_magma_malloc_pinned<int>(n);
-
-  int info;
-  magma_sgesv_gpu(n, nrhs, a_data, n, ipiv, b_data, n, &info);
-
-  if (info < 0)
-    THError("MAGMA gesv : Argument %d : illegal value", -info);
-  else if (info > 0)
-    THError("MAGMA gesv : U(%d,%d) is zero, singular U.", info, info);
-
-  magma_free_pinned(ipiv);
-  THCudaTensor_freeCopyTo(state, a, ra_);
-  THCudaTensor_freeCopyTo(state, b, rb_);
-#else
-  THError(NoMagma(gesv));
 #endif
 }
 
@@ -591,3 +494,6 @@ void THCudaTensor_qr(THCState *state, THCudaTensor *rq_, THCudaTensor *rr_, THCu
   THError(NoMagma(qr));
 #endif
 }
+
+#include "generic/THCTensorMathMagma.cu"
+#include "THCGenerateAllTypes.h"
