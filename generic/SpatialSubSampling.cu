@@ -29,10 +29,6 @@ static inline void THNN_(SpatialSubSampling_shapeCheck)(
   long nInputRows = input->size[dimr];
   THArgCheck(input->size[dimp] == nInputPlane, 2, "invalid number of input planes");
   THArgCheck(nInputCols >= kW && nInputRows >= kH, 2, "input image smaller than kernel size");
-
-  if (gradOutput != NULL) {
-    THArgCheck(THCTensor_(isContiguous)(state, gradOutput), 3, "gradOutput must be contiguous");
-  }
 }
 
 void THNN_(SpatialSubSampling_updateOutput)(
@@ -127,6 +123,7 @@ void THNN_(SpatialSubSampling_updateGradInput)(
     long nInputRows = input->size[1];
 
     real *weight_data = THCTensor_(data)(state, weight);
+    gradOutput = THCTensor_(newContiguous)(state, gradOutput);
     real *gradOutput_data = THCTensor_(data)(state, gradOutput);
     real *gradInput_data;
 
@@ -157,6 +154,7 @@ void THNN_(SpatialSubSampling_updateGradInput)(
     long nbatch = input->size[0];
 
     real *weight_data = THCTensor_(data)(state, weight);
+    gradOutput = THCTensor_(newContiguous)(state, gradOutput);
     real *gradOutput_data = THCTensor_(data)(state, gradOutput);
     real *gradInput_data;
 
@@ -182,6 +180,7 @@ void THNN_(SpatialSubSampling_updateGradInput)(
     }
     THCudaCheck(cudaGetLastError());
   }
+  THCTensor_(free)(state, gradOutput);
 }
 
 void THNN_(SpatialSubSampling_accGradParameters)(
@@ -205,6 +204,7 @@ void THNN_(SpatialSubSampling_accGradParameters)(
 
     real *gradWeight_data = THCTensor_(data)(state, gradWeight);
     real *gradBias_data = THCTensor_(data)(state, gradBias);
+    gradOutput = THCTensor_(newContiguous)(state, gradOutput);
     real *gradOutput_data = THCTensor_(data)(state, gradOutput);
     real *input_data;
 
@@ -227,6 +227,7 @@ void THNN_(SpatialSubSampling_accGradParameters)(
 
     real *gradWeight_data = THCTensor_(data)(state, gradWeight);
     real *gradBias_data = THCTensor_(data)(state, gradBias);
+    gradOutput = THCTensor_(newContiguous)(state, gradOutput);
     real *gradOutput_data = THCTensor_(data)(state, gradOutput);
     real *input_data;
 
@@ -251,6 +252,7 @@ void THNN_(SpatialSubSampling_accGradParameters)(
 
   // clean
   THCTensor_(free)(state, input);
+  THCTensor_(free)(state, gradOutput);
 
 }
 

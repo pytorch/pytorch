@@ -136,8 +136,6 @@ void THNN_(SparseLinear_accGradParameters)(
   THArgCheck(checkInput(input), 2, "input size must be batchsize x nnz x 2");
   THArgCheck(checkSize2D(gradWeight, outDim, inDim), 4, "gradWeight size wrong");
   THArgCheck(checkSize1D(gradBias, outDim), 5, "gradBias size wrong");
-  THArgCheck(THCTensor_(isContiguous)(state, gradOutput), 3,
-             "gradOutput must be contiguous");
 
   long nnz = THCTensor_(size)(state, input, 0);
   long batchnum = THCTensor_(size)(state, gradOutput, 0);
