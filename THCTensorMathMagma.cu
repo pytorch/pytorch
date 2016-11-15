@@ -23,41 +23,6 @@ void THCMagma_init(THCState *state)
 #endif
 }
 
-void THCudaTensor_gels(THCState *state, THCudaTensor *rb_, THCudaTensor *ra_, THCudaTensor *b_, THCudaTensor *a_)
-{
-#ifdef USE_MAGMA
-  THArgCheck(a_->nDimension == 2, 1, "A should be 2 dimensional");
-  THArgCheck(b_->nDimension == 2, 1, "b should be 2 dimensional");
-  THArgCheck(a_->size[0] == b_->size[0], 2, "size incompatible A,b");
-  THArgCheck(a_->size[0] >= a_->size[1], 2, "A should have m >= n");
-
-  THCudaTensor *a = THCudaTensor_newColumnMajor(state, ra_, a_);
-  THCudaTensor *b = THCudaTensor_newColumnMajor(state, rb_, b_);
-  float *a_data = THCudaTensor_data(state, a);
-  float *b_data = THCudaTensor_data(state, b);
-
-  int m = a->size[0];
-  int n = a->size[1];
-  int nrhs = b->size[1];
-  float wkopt;
-
-  int info;
-  magma_sgels_gpu(MagmaNoTrans, m, n, nrhs, a_data, m, b_data, m, &wkopt, -1, &info);
-
-  float *hwork = th_magma_malloc_pinned<float>((size_t)wkopt);
-  magma_sgels_gpu(MagmaNoTrans, m, n, nrhs, a_data, m, b_data, m, hwork, (int)wkopt, &info);
-  magma_free_pinned(hwork);
-
-  if (info != 0)
-    THError("MAGMA gels : Argument %d : illegal value", -info);
-
-  THCudaTensor_freeCopyTo(state, a, ra_);
-  THCudaTensor_freeCopyTo(state, b, rb_);
-#else
-  THError(NoMagma(gels));
-#endif
-}
-
 void THCudaTensor_syev(THCState *state, THCudaTensor *re_, THCudaTensor *rv_, THCudaTensor *a, const char *jobzs, const char *uplos)
 {
 #ifdef USE_MAGMA
