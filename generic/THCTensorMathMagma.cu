@@ -145,6 +145,74 @@ THC_API void THCTensor_(syev)(THCState *state, THCTensor *re_, THCTensor *rv_, T
 #endif
 }
 
+THC_API void THCTensor_(geev)(THCState *state, THCTensor *re_, THCTensor *rv_, THCTensor *a_, const char *jobvrs)
+{
+#ifdef USE_MAGMA
+  THArgCheck(a_->nDimension == 2, 3, "A should be 2 dimensional");
+  THArgCheck(a_->size[0] == a_->size[1], 3, "A should be square");
+
+  magma_vec_t jobvr = jobvrs[0] == 'N' ? MagmaNoVec : MagmaVec;
+  int n = a_->size[0];
+
+  real *a_data = th_magma_malloc_pinned<real>(n * n);
+  THCTensor_(copyTensor2d)(state, a_data, a_);
+
+  real *wr = th_magma_malloc_pinned<real>(n);
+  real *wi = th_magma_malloc_pinned<real>(n);
+
+  real *vr_data = NULL;
+  int ldvr = 1;
+  if (jobvr == MagmaVec)
+  {
+    vr_data = th_magma_malloc_pinned<real>(n * n);
+    ldvr = n;
+  }
+
+  real wkopt;
+  int info;
+
+#if defined(THC_REAL_IS_FLOAT)
+  magma_sgeev(MagmaNoVec, jobvr, n, a_data, n, wr, wi, NULL, 1, vr_data, ldvr, &wkopt, -1, &info);
+#else
+  magma_dgeev(MagmaNoVec, jobvr, n, a_data, n, wr, wi, NULL, 1, vr_data, ldvr, &wkopt, -1, &info);
+#endif
+
+  int lwork = (int) wkopt;
+  real *work_data = th_magma_malloc_pinned<real>(lwork);
+
+#if defined(THC_REAL_IS_FLOAT)
+  magma_sgeev(MagmaNoVec, jobvr, n, a_data, n, wr, wi, NULL, 1, vr_data, ldvr, work_data, lwork, &info);
+#else
+  magma_dgeev(MagmaNoVec, jobvr, n, a_data, n, wr, wi, NULL, 1, vr_data, ldvr, work_data, lwork, &info);
+#endif
+
+  if (info > 0)
+    THError("MAGMA geev : Failed to converge. %d off-diagonal elements of an didn't converge to zero", info);
+  else if (info < 0)
+    THError("MAGMA geev : Argument %d : illegal value", -info);
+
+  {
+    THCTensor_(resize2d)(state, re_, 2, n);
+    THCTensor *re = THCTensor_(newContiguous)(state, re_);
+    THCudaCheck(cudaMemcpy(re->storage->data + re->storageOffset, wr, n*sizeof(real), cudaMemcpyHostToDevice));
+    THCudaCheck(cudaMemcpy(re->storage->data + re->storageOffset + n, wi, n*sizeof(real), cudaMemcpyHostToDevice));
+    THCTensor_(freeCopyTo)(state, re, re_);
+    THCTensor_(transpose)(state, re_, NULL, 0, 1);
+  }
+
+  if (jobvr == MagmaVec)
+    THCTensor_(copyArray2d)(state, rv_, vr_data, n, n);
+
+  magma_free_pinned(work_data);
+  magma_free_pinned(vr_data);
+  magma_free_pinned(wi);
+  magma_free_pinned(wr);
+  magma_free_pinned(a_data);
+
+#else
+  THError(NoMagma(geev));
+#endif
+}
 
 #endif
 

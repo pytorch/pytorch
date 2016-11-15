@@ -23,67 +23,6 @@ void THCMagma_init(THCState *state)
 #endif
 }
 
-void THCudaTensor_geev(THCState *state, THCudaTensor *re_, THCudaTensor *rv_, THCudaTensor *a_, const char *jobvrs)
-{
-#ifdef USE_MAGMA
-  THArgCheck(a_->nDimension == 2, 3, "A should be 2 dimensional");
-  THArgCheck(a_->size[0] == a_->size[1], 3, "A should be square");
-
-  magma_vec_t jobvr = jobvrs[0] == 'N' ? MagmaNoVec : MagmaVec;
-  int n = a_->size[0];
-
-  float *a_data = th_magma_malloc_pinned<float>(n * n);
-  THCudaTensor_copyTensor2d(state, a_data, a_);
-
-  float *wr = th_magma_malloc_pinned<float>(n);
-  float *wi = th_magma_malloc_pinned<float>(n);
-
-  float *vr_data = NULL;
-  int ldvr = 1;
-  if (jobvr == MagmaVec)
-  {
-    vr_data = th_magma_malloc_pinned<float>(n * n);
-    ldvr = n;
-  }
-
-  float wkopt;
-  int info;
-
-  magma_sgeev(MagmaNoVec, jobvr, n, a_data, n, wr, wi, NULL, 1, vr_data, ldvr, &wkopt, -1, &info);
-
-  int lwork = (int) wkopt;
-  float *work_data = th_magma_malloc_pinned<float>(lwork);
-
-  magma_sgeev(MagmaNoVec, jobvr, n, a_data, n, wr, wi, NULL, 1, vr_data, ldvr, work_data, lwork, &info);
-
-  if (info > 0)
-    THError("MAGMA geev : Failed to converge. %d off-diagonal elements of an didn't converge to zero", info);
-  else if (info < 0)
-    THError("MAGMA geev : Argument %d : illegal value", -info);
-
-  {
-    THCudaTensor_resize2d(state, re_, 2, n);
-    THCudaTensor *re = THCudaTensor_newContiguous(state, re_);
-    THCudaCheck(cudaMemcpy(re->storage->data + re->storageOffset, wr, n*sizeof(float), cudaMemcpyHostToDevice));
-    THCudaCheck(cudaMemcpy(re->storage->data + re->storageOffset + n, wi, n*sizeof(float), cudaMemcpyHostToDevice));
-    THCudaTensor_freeCopyTo(state, re, re_);
-    THCudaTensor_transpose(state, re_, NULL, 0, 1);
-  }
-
-  if (jobvr == MagmaVec)
-    THCudaTensor_copyArray2d(state, rv_, vr_data, n, n);
-
-  magma_free_pinned(work_data);
-  magma_free_pinned(vr_data);
-  magma_free_pinned(wi);
-  magma_free_pinned(wr);
-  magma_free_pinned(a_data);
-
-#else
-  THError(NoMagma(geev));
-#endif
-}
-
 void THCudaTensor_gesvd(THCState *state, THCudaTensor *ru_, THCudaTensor *rs_, THCudaTensor *rv_, THCudaTensor *a, const char *jobu)
 {
 #ifdef USE_MAGMA
