@@ -163,6 +163,9 @@ void THNN_(TemporalConvolution_updateGradInput)(
   nInputFrame = input->size[dimS];
   nOutputFrame = gradOutput->size[dimS];
 
+  input = THTensor_(newContiguous)(input);
+  gradOutput = THTensor_(newContiguous)(gradOutput);
+
   gradOutputWindow = THTensor_(new)();
   gradInputWindow = THTensor_(new)();
 
@@ -231,6 +234,8 @@ void THNN_(TemporalConvolution_updateGradInput)(
 
   THTensor_(free)(gradOutputWindow);
   THTensor_(free)(gradInputWindow);
+  THTensor_(free)(gradOutput);
+  THTensor_(free)(input);
 
 }
 
@@ -264,6 +269,7 @@ void THNN_(TemporalConvolution_accGradParameters)(
   nOutputFrame = gradOutput->size[dimS];
 
   input = THTensor_(newContiguous)(input);
+  gradOutput = THTensor_(newContiguous)(gradOutput);
   gradOutputWindow = THTensor_(new)();
   inputWindow = THTensor_(new)();
   
@@ -347,6 +353,7 @@ void THNN_(TemporalConvolution_accGradParameters)(
 
   THTensor_(free)(gradOutputWindow);
   THTensor_(free)(inputWindow);
+  THTensor_(free)(gradOutput);
   THTensor_(free)(input);
 
 }
