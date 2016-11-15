@@ -270,6 +270,7 @@ void THNN_(VolumetricConvolutionMM_updateOutput)(
 
   THNN_ARGCHECK(input->nDimension == 4 || input->nDimension == 5, 2, input,
 		"4D or 5D (batch mode) tensor expected for input, but got: %s");
+  input = THTensor_(newContiguous)(input);
 
   if (input->nDimension == 5)
   {
@@ -343,6 +344,7 @@ void THNN_(VolumetricConvolutionMM_updateOutput)(
     }
   }
 
+  THTensor_(free)(input);
   if (freeWeight)
     THTensor_(free)(weight);
 }
@@ -406,6 +408,8 @@ void THNN_(VolumetricConvolutionMM_updateGradInput)(
   THArgCheck(nOutputPlane == gradOutput->size[input->nDimension == 5 ? 1 : 0], 1,
     "Number of output features is not equal to nOutputPlane"
   );
+  input = THTensor_(newContiguous)(input);
+  gradOutput = THTensor_(newContiguous)(gradOutput);
 
   int freeWeight = THNN_(view_weight)(&weight);
 
@@ -453,6 +457,8 @@ void THNN_(VolumetricConvolutionMM_updateGradInput)(
 
   THTensor_(transpose)(weight, weight, 0, 1);
 
+  THTensor_(free)(input);
+  THTensor_(free)(gradOutput);
   if (freeWeight)
     THTensor_(free)(weight);
 }
@@ -508,6 +514,8 @@ void THNN_(VolumetricConvolutionMM_accGradParameters)(
   THArgCheck(nOutputPlane == gradOutput->size[input->nDimension == 5 ? 1 : 0], 3,
     "Number of output features is not equal to nOutputPlane"
   );
+  input = THTensor_(newContiguous)(input);
+  gradOutput = THTensor_(newContiguous)(gradOutput);
 
   freeWeight = THNN_(view_weight)(&gradWeight);
 
@@ -532,6 +540,8 @@ void THNN_(VolumetricConvolutionMM_accGradParameters)(
     }
   }
 
+  THTensor_(free)(input);
+  THTensor_(free)(gradOutput);
   if (freeWeight)
     THTensor_(free)(gradWeight);
 }
