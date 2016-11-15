@@ -2,6 +2,38 @@
 #define THC_GENERIC_FILE "generic/TemporalConvolution.cu"
 #else
 
+static inline void THNN_(TemporalConvolution_shapeCheck)(
+                         THCState *state,
+                         THCTensor *input,
+                         int kW,
+                         int dW,
+                         int *inputFrameSize) {
+
+  THArgCheck(kW > 0, 9,
+             "kernel size should be greater than zero, but got kW: %d", kW);
+  THArgCheck(dW > 0, 11,
+             "stride should be greater than zero, but got dW: %d", dW);
+
+  int dimS = 0; // sequence dimension
+  int dimF = 1; // feature dimension
+
+  if (input->nDimension == 3)
+  {
+    dimS = 1;
+    dimF = 2;
+  }
+  THCUNN_argCheck(state, input->nDimension == 2 || input->nDimension == 3, 2, input,
+                  "2D or 3D (batch mode) tensor expected for input, but got: %s");
+  if (inputFrameSize != NULL) {
+    THArgCheck(input->size[dimF] == *inputFrameSize, 2,
+               "invalid input frame size. Got: %d, Expected: %d",
+               input->size[dimF], *inputFrameSize);
+  }
+  THArgCheck(input->size[dimS] >= kW, 2,
+             "input sequence smaller than kernel size. Got: %d, Expected: %d",
+             input->size[dimS], kW);
+}
+
 void THNN_(TemporalConvolution_updateOutput)(
            THCState *state,
            THCTensor *input,
@@ -17,23 +49,15 @@ void THNN_(TemporalConvolution_updateOutput)(
   long k, i;
 
   int dimS = 0; // sequence dimension
-  int dimF = 1; // feature dimension
 
   THCUNN_assertSameGPU(state, 4, input, output, weight, bias);
-  THCUNN_argCheck(state, input->nDimension == 2 || input->nDimension == 3, 2, input,
-                  "2D or 3D (batch mode) tensor expected for input, but got: %s");
+  THNN_(TemporalConvolution_shapeCheck)
+       (state, input, kW, dW, &inputFrameSize);
 
   if (input->nDimension == 3)
   {
     dimS = 1;
-    dimF = 2;
   }
-  THArgCheck(input->size[dimF] == inputFrameSize, 2,
-             "invalid input frame size. Got: %d, Expected: %d",
-             input->size[dimF], inputFrameSize);
-  THArgCheck(input->size[dimS] >= kW, 2,
-             "input sequence smaller than kernel size. Got: %d, Expected: %d",
-             input->size[dimS], kW);
 
   input = THCTensor_(newContiguous)(state, input);
   outputWindow = THCTensor_(new)(state);
@@ -154,6 +178,11 @@ void THNN_(TemporalConvolution_updateGradInput)(
   int dimS = 0; // sequence dimension
 
   THCUNN_assertSameGPU(state, 4, input, gradOutput, weight, gradInput);
+  input = THCTensor_(newContiguous)(state, input);
+  gradOutput = THCTensor_(newContiguous)(state, gradOutput);
+
+  THNN_(TemporalConvolution_shapeCheck)
+       (state, input, kW, dW, NULL);
 
   if (gradOutput->nDimension == 3)
   {
@@ -230,6 +259,8 @@ void THNN_(TemporalConvolution_updateGradInput)(
     THCTensor_(free)(state, gradInputSample);
   }
 
+  THCTensor_(free)(state, input);
+  THCTensor_(free)(state, gradOutput);
   THCTensor_(free)(state, gradOutputWindow);
   THCTensor_(free)(state, gradInputWindow);
 
@@ -251,6 +282,9 @@ void THNN_(TemporalConvolution_accGradParameters)(
   THCTensor *inputWindow;
   long k, i;
 
+  THNN_(TemporalConvolution_shapeCheck)
+       (state, input, kW, dW, NULL);
+
   int dimS = 0; // sequence dimension
 
   if (gradOutput->nDimension == 3)
@@ -263,6 +297,7 @@ void THNN_(TemporalConvolution_accGradParameters)(
 
   /* Not necessary with partial backprop: */
   input = THCTensor_(newContiguous)(state, input);
+  gradOutput = THCTensor_(newContiguous)(state, gradOutput);
   gradOutputWindow = THCTensor_(new)(state);
   inputWindow = THCTensor_(new)(state);
 
@@ -346,6 +381,7 @@ void THNN_(TemporalConvolution_accGradParameters)(
 
   THCTensor_(free)(state, gradOutputWindow);
   THCTensor_(free)(state, inputWindow);
+  THCTensor_(free)(state, gradOutput);
   THCTensor_(free)(state, input);
 
 }
