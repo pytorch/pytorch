@@ -13,6 +13,15 @@ IF(CMAKE_SYSTEM_NAME MATCHES "Linux")
       set(NEON_FOUND false CACHE BOOL "NEON available on host")
    ENDIF (NEON_TRUE)
 
+   # on ARMv8, neon is inherit and instead listed as 'asimd' in /proc/cpuinfo
+   STRING(REGEX REPLACE "^.*(asimd).*$" "\\1" ASIMD_THERE ${CPUINFO})
+   STRING(COMPARE EQUAL "asimd" "${ASIMD_THERE}" ASIMD_TRUE)
+   IF (ASIMD_TRUE)
+      set(ASIMD_FOUND true CACHE BOOL "ASIMD/NEON available on host")
+   ELSE (ASIMD_TRUE)
+      set(ASIMD_FOUND false CACHE BOOL "ASIMD/NEON available on host")
+   ENDIF (ASIMD_TRUE)
+
    #Find the processor type (for now OMAP3 or OMAP4)
    STRING(REGEX REPLACE "^.*(OMAP3).*$" "\\1" OMAP3_THERE ${CPUINFO})
    STRING(COMPARE EQUAL "OMAP3" "${OMAP3_THERE}" OMAP3_TRUE)
