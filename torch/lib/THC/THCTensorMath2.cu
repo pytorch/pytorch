@@ -28,16 +28,3 @@ void THCudaTensor_atan2(THCState *state, THCudaTensor *self_, THCudaTensor *tx, 
   THCudaCheck(cudaGetLastError());
 }
 
-void THCudaTensor_rand(THCState *state, THCudaTensor *r_, THLongStorage *size)
-{
-  THAssert(THCudaTensor_checkGPU(state, 1, r_));
-  THCudaTensor_resize(state, r_, size, NULL);
-  THCudaTensor_uniform(state, r_, 0, 1);
-}
-
-void THCudaTensor_randn(THCState *state, THCudaTensor *r_, THLongStorage *size)
-{
-  THAssert(THCudaTensor_checkGPU(state, 1, r_));
-  THCudaTensor_resize(state, r_, size, NULL);
-  THCudaTensor_normal(state, r_, 0, 1);
-}
