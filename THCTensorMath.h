@@ -44,10 +44,6 @@
 #include "generic/THCTensorSort.h"
 #include "THCGenerateAllTypes.h"
 
-// MAGMA (i.e. CUDA implementation of LAPACK functions)
-THC_API void THCudaTensor_qr(THCState *state, THCudaTensor *rq_, THCudaTensor *rr_, THCudaTensor *a);
-
-
 THC_API int THCudaByteTensor_logicalall(THCState *state, THCudaByteTensor *self);
 THC_API int THCudaByteTensor_logicalany(THCState *state, THCudaByteTensor *self);
 

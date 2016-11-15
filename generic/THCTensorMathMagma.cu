@@ -423,7 +423,7 @@ __global__ void THCTensor_(copyLowerSymmetric)(real *input, int n, int len)
   }
 }
 
-void THCTensor_(potri)(THCState *state, THCTensor *ra_, THCTensor *a, const char *uplo)
+THC_API void THCTensor_(potri)(THCState *state, THCTensor *ra_, THCTensor *a, const char *uplo)
 {
 #ifdef USE_MAGMA
   THArgCheck(a->nDimension == 2, 2, "A should be 2 dimensional");
@@ -463,7 +463,7 @@ void THCTensor_(potri)(THCState *state, THCTensor *ra_, THCTensor *a, const char
 #endif
 }
 
-void THCTensor_(potrf)(THCState *state, THCTensor *ra_, THCTensor *a, const char *uplo)
+THC_API void THCTensor_(potrf)(THCState *state, THCTensor *ra_, THCTensor *a, const char *uplo)
 {
 #ifdef USE_MAGMA
   THArgCheck(a->nDimension == 2, 2, "A should be 2 dimensional");
@@ -499,7 +499,7 @@ void THCTensor_(potrf)(THCState *state, THCTensor *ra_, THCTensor *a, const char
 #endif
 }
 
-void THCTensor_(potrs)(THCState *state, THCTensor *rb_, THCTensor *b, THCTensor *a, const char *uplo)
+THC_API void THCTensor_(potrs)(THCState *state, THCTensor *rb_, THCTensor *b, THCTensor *a, const char *uplo)
 {
 #ifdef USE_MAGMA
   THArgCheck(a->size[0] == a->size[1], 2, "A should be square");
@@ -531,6 +531,63 @@ void THCTensor_(potrs)(THCState *state, THCTensor *rb_, THCTensor *b, THCTensor 
 #endif
 }
 
+THC_API void THCTensor_(qr)(THCState *state, THCTensor *rq_, THCTensor *rr_, THCTensor *a_)
+{
+#ifdef USE_MAGMA
+  THArgCheck(a_->nDimension == 2, 2, "A should be 2 dimensional");
+
+  THCTensor *a = THCTensor_(newColumnMajor)(state, rr_, a_);
+  int m = a->size[0];
+  int n = a->size[1];
+  int k = (m < n ? m : n);
+
+#ifdef MAGMA_V2
+  int nb = magma_get_sgeqrf_nb(m, n);
+#else
+  int nb = magma_get_sgeqrf_nb(m);
+#endif
+
+  real *a_data = THCTensor_(data)(state, a);
+  real *tau_data = th_magma_malloc_pinned<real>(n*n);
+
+  THCTensor *work = THCTensor_(newWithSize1d)(state, (2*k + ((n+31)/32)*32)*nb);
+  real *work_data = THCTensor_(data)(state, work);
+
+  int info;
+#if defined(THC_REAL_IS_FLOAT)
+  magma_sgeqrf_gpu(m, n, a_data, m, tau_data, work_data, &info);
+#else
+  magma_dgeqrf_gpu(m, n, a_data, m, tau_data, work_data, &info);
+#endif
+
+  if (info != 0)
+    THError("MAGMA geqrf : Argument %d : illegal value.", -info);
+
+  THCTensor *q = THCTensor_(newColumnMajor)(state, rq_, a);
+  real *q_data = THCTensor_(data)(state, q);
+
+  THCTensor_(narrow)(state, a, a, 0, 0, k);
+  THCTensor_(triu)(state, rr_, a, 0);
+  THCTensor_(free)(state, a);
+
+#if defined(THC_REAL_IS_FLOAT)
+  magma_sorgqr_gpu(m, n, k, q_data, m, tau_data, work_data, nb, &info);
+#else
+  magma_dorgqr_gpu(m, n, k, q_data, m, tau_data, work_data, nb, &info);
+#endif
+
+  if (info != 0)
+    THError("MAGMA orgqr : Argument %d : illegal value.", -info);
+
+  THCTensor_(free)(state, work);
+  magma_free_pinned(tau_data);
+
+  THCTensor_(narrow)(state, q, q, 1, 0, k);
+  THCTensor_(freeCopyTo)(state, q, rq_);
+#else
+  THError(NoMagma(qr));
+#endif
+}
 
 #endif
 
