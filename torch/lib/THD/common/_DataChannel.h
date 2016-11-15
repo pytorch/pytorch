@@ -1,38 +1,36 @@
 #pragma once
 
+#import "_Tensor.h"
 #include <unordered_map>
-
-#include "_Tensor.h"
 
 namespace thd {
 
-
 struct DataChannel {
-  virtual bool init();
+public:
+  DataChannel() {};
+  virtual ~DataChannel() {};
 
-  virtual int get_id();
-  virtual int get_num_processes();
+  virtual bool init() = 0;
 
-  virtual void all_reduce(Tensor &data);
+  virtual int getRank() const = 0;
+  virtual int getNumProcesses() const = 0;
 
-  virtual void reduce(Tensor &data, int dst_id);
-
-  virtual void broadcast(Tensor &data, int src_id);
-
-  virtual void send(Tensor &data, int dst_id);
-
-  virtual void recieve(Tensor &data, int src_id);
+  virtual void allReduce(Tensor& data) = 0;
+  virtual void reduce(Tensor& data, int dst_rank) = 0;
+  virtual void broadcast(Tensor& data, int src_rank) = 0;
+  virtual void send(Tensor& data, int dst_rank) = 0;
+  virtual void receive(Tensor& data, int src_rank) = 0;
 };
 
 
 struct DataChannelRegistry {
   using channel_key_type = int;
+  using channels_map = std::unordered_map<channel_key_type, DataChannel*>;
 
-  static DataChannel& backend_for(channel_key_type type);
+  static DataChannel* dataChannelFor(channel_key_type type);
 
 private:
-  static std::unordered_map<channel_key_type, DataChannel> s_registered_channels;
+  static channels_map s_registered_channels;
 };
-
 
 } // namespace thd

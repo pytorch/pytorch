@@ -31,13 +31,20 @@ public:
   virtual const long* rawStrides() const override;
   virtual size_t storageOffset() const override;
   virtual size_t elementSize() const override;
+  virtual long long numel() const override;
+  virtual bool isContiguous() const override;
   virtual void* data() override;
   virtual const void* data() const override;
 
-  virtual THTensor& resize(const std::initializer_list<long> &new_size) override;
+  virtual THTensor& resize(const std::initializer_list<long>& new_size) override;
+  virtual THTensor& resize(const std::vector<long>& new_size) override;
 
   virtual THTensor& fill(scalar_type value) override;
-  virtual THTensor& add(const Tensor &source, scalar_type scalar) override;
+  virtual THTensor& add(const Tensor& source, scalar_type scalar) override;
+
+private:
+  template<typename iterator>
+  THTensor& resize(const iterator& begin, const iterator& end);
 
 protected:
   tensor_type *tensor;

@@ -20,10 +20,13 @@ struct Tensor {
   virtual const long* rawStrides() const = 0;
   virtual size_t storageOffset() const = 0;
   virtual size_t elementSize() const = 0;
+  virtual long long numel() const = 0;
+  virtual bool isContiguous() const = 0;
   virtual void* data() = 0;
   virtual const void* data() const = 0;
 
   virtual Tensor& resize(const std::initializer_list<long>& new_size) = 0;
+  virtual Tensor& resize(const std::vector<long>& new_size) = 0;
 };
 
 template<typename real>
