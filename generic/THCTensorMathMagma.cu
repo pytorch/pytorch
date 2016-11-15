@@ -214,6 +214,76 @@ THC_API void THCTensor_(geev)(THCState *state, THCTensor *re_, THCTensor *rv_, T
 #endif
 }
 
+THC_API void THCTensor_(gesvd)(THCState *state, THCTensor *ru_, THCTensor *rs_, THCTensor *rv_, THCTensor *a, const char *jobu)
+{
+#ifdef USE_MAGMA
+  THCTensor *ra_ = THCTensor_(new)(state);
+  THCTensor_(gesvd2)(state, ru_, rs_, rv_,  ra_, a, jobu);
+  THCTensor_(free)(state, ra_);
+#else
+  THError(NoMagma(gesvd));
+#endif
+}
+
+THC_API void THCTensor_(gesvd2)(THCState *state, THCTensor *ru_, THCTensor *rs_, THCTensor *rv_, THCTensor *ra_, THCTensor *a, const char *jobus)
+{
+#ifdef USE_MAGMA
+  THArgCheck(a->nDimension == 2, 2, "A should be 2 dimensional");
+
+  magma_vec_t jobu = jobus[0] == 'A' ? MagmaAllVec : jobus[0] == 'S' ? MagmaSomeVec : jobus[0] == 'O' ? MagmaOverwriteVec : MagmaNoVec;
+  magma_vec_t jobvt = jobu;
+
+  int m = a->size[0];
+  int n = a->size[1];
+  int k = m < n ? m : n;
+  int j = (jobu == MagmaAllVec) ? m : k;
+
+  real *a_data = th_magma_malloc_pinned<real>(m * n);
+  THCTensor_(copyTensor2d)(state, a_data, a);
+
+  real *rs_data = th_magma_malloc_pinned<real>(k);
+  real *ru_data = th_magma_malloc_pinned<real>(m * j);
+  real *rv_data = th_magma_malloc_pinned<real>(n * n);
+
+  real wkopt;
+  int info;
+
+#if defined(THC_REAL_IS_FLOAT)
+  magma_sgesvd(jobu, jobvt, m, n, a_data, m, rs_data, ru_data, m, rv_data, n, &wkopt, -1, &info);
+#else
+  magma_dgesvd(jobu, jobvt, m, n, a_data, m, rs_data, ru_data, m, rv_data, n, &wkopt, -1, &info);
+#endif
+
+  int lwork = (int) wkopt;
+  real *work_data = th_magma_malloc_pinned<real>(lwork);
+
+#if defined(THC_REAL_IS_FLOAT)
+  magma_sgesvd(jobu, jobvt, m, n, a_data, m, rs_data, ru_data, m, rv_data, n, work_data, lwork, &info);
+#else
+  magma_dgesvd(jobu, jobvt, m, n, a_data, m, rs_data, ru_data, m, rv_data, n, work_data, lwork, &info);
+#endif
+
+  if (info > 0)
+    THError("MAGMA gesvd : %d superdiagonals failed to converge", info);
+  else if (info < 0)
+    THError("MAGMA gesvd : Argument %d : illegal value", -info);
+
+  THCTensor_(copyArray2d)(state, rv_, rv_data, n, n);
+  THCTensor_(transpose)(state, rv_, NULL, 0, 1);
+  THCTensor_(copyArray2d)(state, ru_, ru_data, m, j);
+  THCTensor_(copyArray1d)(state, rs_, rs_data, k);
+  THCTensor_(copyArray2d)(state, ra_, a_data,  m, n);
+
+  magma_free_pinned(work_data);
+  magma_free_pinned(rv_data);
+  magma_free_pinned(ru_data);
+  magma_free_pinned(rs_data);
+  magma_free_pinned(a_data);
+#else
+  THError(NoMagma(gesvd2));
+#endif
+}
+
 #endif
 
 #endif

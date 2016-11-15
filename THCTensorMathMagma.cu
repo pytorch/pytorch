@@ -23,67 +23,6 @@ void THCMagma_init(THCState *state)
 #endif
 }
 
-void THCudaTensor_gesvd(THCState *state, THCudaTensor *ru_, THCudaTensor *rs_, THCudaTensor *rv_, THCudaTensor *a, const char *jobu)
-{
-#ifdef USE_MAGMA
-  THCudaTensor *ra_ = THCudaTensor_new(state);
-  THCudaTensor_gesvd2(state, ru_, rs_, rv_,  ra_, a, jobu);
-  THCudaTensor_free(state, ra_);
-#else
-  THError(NoMagma(gesvd));
-#endif
-}
-
-void THCudaTensor_gesvd2(THCState *state, THCudaTensor *ru_, THCudaTensor *rs_, THCudaTensor *rv_, THCudaTensor *ra_, THCudaTensor *a, const char *jobus)
-{
-#ifdef USE_MAGMA
-  THArgCheck(a->nDimension == 2, 2, "A should be 2 dimensional");
-
-  magma_vec_t jobu = jobus[0] == 'A' ? MagmaAllVec : jobus[0] == 'S' ? MagmaSomeVec : jobus[0] == 'O' ? MagmaOverwriteVec : MagmaNoVec;
-  magma_vec_t jobvt = jobu;
-
-  int m = a->size[0];
-  int n = a->size[1];
-  int k = m < n ? m : n;
-  int j = (jobu == MagmaAllVec) ? m : k;
-
-  float *a_data = th_magma_malloc_pinned<float>(m * n);
-  THCudaTensor_copyTensor2d(state, a_data, a);
-
-  float *rs_data = th_magma_malloc_pinned<float>(k);
-  float *ru_data = th_magma_malloc_pinned<float>(m * j);
-  float *rv_data = th_magma_malloc_pinned<float>(n * n);
-
-  float wkopt;
-  int info;
-  magma_sgesvd(jobu, jobvt, m, n, a_data, m, rs_data, ru_data, m, rv_data, n, &wkopt, -1, &info);
-
-  int lwork = (int) wkopt;
-  float *work_data = th_magma_malloc_pinned<float>(lwork);
-
-  magma_sgesvd(jobu, jobvt, m, n, a_data, m, rs_data, ru_data, m, rv_data, n, work_data, lwork, &info);
-
-  if (info > 0)
-    THError("MAGMA gesvd : %d superdiagonals failed to converge", info);
-  else if (info < 0)
-    THError("MAGMA gesvd : Argument %d : illegal value", -info);
-
-  THCudaTensor_copyArray2d(state, rv_, rv_data, n, n);
-  THCudaTensor_transpose(state, rv_, NULL, 0, 1);
-  THCudaTensor_copyArray2d(state, ru_, ru_data, m, j);
-  THCudaTensor_copyArray1d(state, rs_, rs_data, k);
-  THCudaTensor_copyArray2d(state, ra_, a_data,  m, n);
-
-  magma_free_pinned(work_data);
-  magma_free_pinned(rv_data);
-  magma_free_pinned(ru_data);
-  magma_free_pinned(rs_data);
-  magma_free_pinned(a_data);
-#else
-  THError(NoMagma(gesvd2));
-#endif
-}
-
 void THCudaTensor_getri(THCState *state, THCudaTensor *ra_, THCudaTensor *a)
 {
 #ifdef USE_MAGMA
