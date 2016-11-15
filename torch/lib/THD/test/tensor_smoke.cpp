@@ -18,7 +18,8 @@ int main() {
   for (auto s: tensor->sizes())
     assert(s == ++i);
 
-  tensor2->resize({2, 2});
+  vector<long> sizes = {2, 2};
+  tensor2->resize(sizes);
   tensor2->fill(4);
   tensor->add(*tensor2, 1);
   assert(tensor->nDim() == 2);

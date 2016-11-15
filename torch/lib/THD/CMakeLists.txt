@@ -1,5 +1,12 @@
 CMAKE_MINIMUM_REQUIRED(VERSION 2.6)
 
+
+FIND_PACKAGE(MPI)
+
+IF(MPI_FOUND)
+  ADD_DEFINITIONS(-DWITH_MPI=1)
+ENDIF()
+
 # Can be compiled standalone
 IF(NOT THD_INSTALL_BIN_DIR OR NOT THD_INSTALL_LIB_DIR OR NOT THD_INSTALL_INCLUDE_DIR)
   SET(THD_INSTALL_BIN_DIR "bin" CACHE PATH "THD install binary subdirectory")
@@ -15,22 +22,44 @@ FILE(GLOB_RECURSE common_h "common/*.h")
 FILE(GLOB_RECURSE common_cpp "common/*.cpp")
 FILE(GLOB_RECURSE test_cpp "test/*.cpp")
 
+IF(NOT MPI_FOUND)
+  LIST(REMOVE_ITEM common_cpp "${CMAKE_CURRENT_SOURCE_DIR}/common/DataChannelMPI.cpp")
+  LIST(REMOVE_ITEM test_cpp "${CMAKE_CURRENT_SOURCE_DIR}/test/data_channel_mpi_smoke.cpp")
+ENDIF()
+
 SET(src_cpp ${master_cpp} ${worker_cpp} ${common_cpp})
 
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR})
 ADD_LIBRARY(THD SHARED ${src_cpp})
 SET_PROPERTY(TARGET THD PROPERTY CXX_STANDARD 11)
 
+IF(MPI_FOUND)
+  INCLUDE_DIRECTORIES(${MPI_INCLUDE_PATH})
+  TARGET_LINK_LIBRARIES(THD ${MPI_LIBRARIES})
+
+  IF(MPI_COMPILE_FLAGS)
+    SET_TARGET_PROPERTIES(THD PROPERTIES COMPILE_FLAGS "${MPI_COMPILE_FLAGS}")
+  ENDIF()
+
+  IF(MPI_LINK_FLAGS)
+    SET_TARGET_PROPERTIES(THD PROPERTIES LINK_FLAGS "${MPI_LINK_FLAGS}")
+  ENDIF()
+ENDIF()
+
 # Test executables
-ADD_EXECUTABLE(test_tensor_smoke test/tensor_smoke.cpp)
-ADD_EXECUTABLE(test_rpc_serialization test/rpc_serialization.cpp)
-TARGET_LINK_LIBRARIES(test_tensor_smoke THD)
-TARGET_LINK_LIBRARIES(test_rpc_serialization THD)
-SET_PROPERTY(TARGET test_tensor_smoke PROPERTY CXX_STANDARD 11)
-SET_PROPERTY(TARGET test_rpc_serialization PROPERTY CXX_STANDARD 11)
 ENABLE_TESTING()
-ADD_TEST(tensor_smoke test_tensor_smoke)
-ADD_TEST(rpc_serialization test_rpc_serialization)
+
+FOREACH(test_source_file ${test_cpp})
+  # Prepare test names
+  GET_FILENAME_COMPONENT(test_source_file ${test_source_file} NAME)
+  STRING(REPLACE ".cpp" "" test_name ${test_source_file})
+  SET(test_executable_name "test_${test_name}")
+
+  ADD_EXECUTABLE(${test_executable_name} "test/${test_source_file}")
+  TARGET_LINK_LIBRARIES(${test_executable_name} THD)
+  SET_PROPERTY(TARGET ${test_executable_name} PROPERTY CXX_STANDARD 11)
+  ADD_TEST(${test_name} ${test_executable_name})
+ENDFOREACH()
 
 INSTALL(TARGETS THD
   RUNTIME DESTINATION "${THD_INSTALL_BIN_DIR}"
@@ -38,4 +67,3 @@ INSTALL(TARGETS THD
   ARCHIVE DESTINATION "${THD_INSTALL_LIB_DIR}")
 
 INSTALL(FILES ${master_h} DESTINATION "${THD_INSTALL_INCLUDE_DIR}/THD")
-
