@@ -42,7 +42,7 @@ THC_API void THCTensor_(gesv)(THCState *state, THCTensor *rb_, THCTensor *ra_, T
 #endif
 }
 
-void THCTensor_(gels)(THCState *state, THCTensor *rb_, THCTensor *ra_, THCTensor *b_, THCTensor *a_)
+THC_API void THCTensor_(gels)(THCState *state, THCTensor *rb_, THCTensor *ra_, THCTensor *b_, THCTensor *a_)
 {
 #ifdef USE_MAGMA
   THArgCheck(a_->nDimension == 2, 1, "A should be 2 dimensional");
@@ -86,6 +86,65 @@ void THCTensor_(gels)(THCState *state, THCTensor *rb_, THCTensor *ra_, THCTensor
   THError(NoMagma(gels));
 #endif
 }
+
+THC_API void THCTensor_(syev)(THCState *state, THCTensor *re_, THCTensor *rv_, THCTensor *a, const char *jobzs, const char *uplos)
+{
+#ifdef USE_MAGMA
+  int n = a->size[0];
+  int lda = n;
+
+  magma_uplo_t uplo = uplos[0] == 'U' ?  MagmaUpper : MagmaLower;
+  magma_vec_t jobz = jobzs[0] == 'N' ? MagmaNoVec : MagmaVec;
+
+  THCTensor *input = THCTensor_(newColumnMajor)(state, rv_, a);
+  real *input_data = THCTensor_(data)(state, input);
+
+  // eigen values and workspace
+  real *w = th_magma_malloc_pinned<real>(n);
+  real *wA = th_magma_malloc_pinned<real>(lda);
+
+  // compute optimal size of work array
+  int info;
+  real lwork;
+  int liwork;
+
+#if defined(THC_REAL_IS_FLOAT)
+  magma_ssyevd_gpu(jobz, uplo, n, input_data, lda, w, wA, n, &lwork, -1, &liwork, -1, &info);
+#else
+  magma_dsyevd_gpu(jobz, uplo, n, input_data, lda, w, wA, n, &lwork, -1, &liwork, -1, &info);
+#endif
+
+  real *work = th_magma_malloc_pinned<real>((size_t)lwork);
+  int *iwork = th_magma_malloc_pinned<int>(liwork);
+
+  // compute eigenvalues and, optionally, eigenvectors
+#if defined(THC_REAL_IS_FLOAT)
+  magma_ssyevd_gpu(jobz, uplo, n, input_data, lda, w, wA, n, work, (int) lwork, iwork, liwork, &info);
+#else
+  magma_dsyevd_gpu(jobz, uplo, n, input_data, lda, w, wA, n, work, (int) lwork, iwork, liwork, &info);
+#endif
+
+  // copy eigen values from w to re_
+  if (info == 0)
+    THCTensor_(copyArray1d)(state, re_, w, n);
+
+  magma_free_pinned(iwork);
+  magma_free_pinned(work);
+  magma_free_pinned(wA);
+  magma_free_pinned(w);
+
+  // check error value
+  if (info > 0)
+    THError("MAGMA syev : Failed to converge. %d off-diagonal elements of an didn't converge to zero", info);
+  else if (info < 0)
+    THError("MAGMA syev : Argument %d : illegal value", -info);
+
+  THCTensor_(freeCopyTo)(state, input, rv_);
+#else
+  THError(NoMagma(syev));
+#endif
+}
+
 
 #endif
 

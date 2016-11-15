@@ -23,55 +23,6 @@ void THCMagma_init(THCState *state)
 #endif
 }
 
-void THCudaTensor_syev(THCState *state, THCudaTensor *re_, THCudaTensor *rv_, THCudaTensor *a, const char *jobzs, const char *uplos)
-{
-#ifdef USE_MAGMA
-  int n = a->size[0];
-  int lda = n;
-
-  magma_uplo_t uplo = uplos[0] == 'U' ?  MagmaUpper : MagmaLower;
-  magma_vec_t jobz = jobzs[0] == 'N' ? MagmaNoVec : MagmaVec;
-
-  THCudaTensor *input = THCudaTensor_newColumnMajor(state, rv_, a);
-  float *input_data = THCudaTensor_data(state, input);
-
-  // eigen values and workspace
-  float *w = th_magma_malloc_pinned<float>(n);
-  float *wA = th_magma_malloc_pinned<float>(lda);
-
-  // compute optimal size of work array
-  int info;
-  float lwork;
-  int liwork;
-  magma_ssyevd_gpu(jobz, uplo, n, input_data, lda, w, wA, n, &lwork, -1, &liwork, -1, &info);
-
-  float *work = th_magma_malloc_pinned<float>((size_t)lwork);
-  int *iwork = th_magma_malloc_pinned<int>(liwork);
-
-  // compute eigenvalues and, optionally, eigenvectors
-  magma_ssyevd_gpu(jobz, uplo, n, input_data, lda, w, wA, n, work, (int) lwork, iwork, liwork, &info);
-
-  // copy eigen values from w to re_
-  if (info == 0)
-    THCudaTensor_copyArray1d(state, re_, w, n);
-
-  magma_free_pinned(iwork);
-  magma_free_pinned(work);
-  magma_free_pinned(wA);
-  magma_free_pinned(w);
-
-  // check error value
-  if (info > 0)
-    THError("MAGMA syev : Failed to converge. %d off-diagonal elements of an didn't converge to zero", info);
-  else if (info < 0)
-    THError("MAGMA syev : Argument %d : illegal value", -info);
-
-  THCudaTensor_freeCopyTo(state, input, rv_);
-#else
-  THError(NoMagma(syev));
-#endif
-}
-
 void THCudaTensor_geev(THCState *state, THCudaTensor *re_, THCudaTensor *rv_, THCudaTensor *a_, const char *jobvrs)
 {
 #ifdef USE_MAGMA
