@@ -45,9 +45,6 @@
 #include "THCGenerateAllTypes.h"
 
 // MAGMA (i.e. CUDA implementation of LAPACK functions)
-THC_API void THCudaTensor_potri(THCState *state, THCudaTensor *ra_, THCudaTensor *a, const char *uplo);
-THC_API void THCudaTensor_potrf(THCState *state, THCudaTensor *ra_, THCudaTensor *a, const char *uplo);
-THC_API void THCudaTensor_potrs(THCState *state, THCudaTensor *rb_, THCudaTensor *a, THCudaTensor *b, const char *uplo);
 THC_API void THCudaTensor_qr(THCState *state, THCudaTensor *rq_, THCudaTensor *rr_, THCudaTensor *a);
 
 

@@ -66,6 +66,9 @@ THC_API void THCTensor_(geev)(THCState *state, THCTensor *re_, THCTensor *rv_, T
 THC_API void THCTensor_(gesvd)(THCState *state, THCTensor *ru_, THCTensor *rs_, THCTensor *rv_, THCTensor *a, const char *jobu);
 THC_API void THCTensor_(gesvd2)(THCState *state, THCTensor *ru_, THCTensor *rs_, THCTensor *rv_, THCTensor *ra_, THCTensor *a, const char *jobu);
 THC_API void THCTensor_(getri)(THCState *state, THCTensor *ra_, THCTensor *a);
+THC_API void THCTensor_(potri)(THCState *state, THCTensor *ra_, THCTensor *a, const char *uplo);
+THC_API void THCTensor_(potrf)(THCState *state, THCTensor *ra_, THCTensor *a, const char *uplo);
+THC_API void THCTensor_(potrs)(THCState *state, THCTensor *rb_, THCTensor *a, THCTensor *b, const char *uplo);
 
 #endif // defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
 
