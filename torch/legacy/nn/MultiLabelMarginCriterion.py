@@ -11,6 +11,7 @@ class MultiLabelMarginCriterion(Criterion):
 
     def updateOutput(self, input, target):
         self.output_tensor = self.output_tensor or input.new(1)
+        target = target.long()
         self._backend.MultiLabelMarginCriterion_updateOutput(
             self._backend.library_state,
             input,
@@ -23,6 +24,7 @@ class MultiLabelMarginCriterion(Criterion):
         return self.output
 
     def updateGradInput(self, input, target):
+        target = target.long()
         self._backend.MultiLabelMarginCriterion_updateGradInput(
             self._backend.library_state,
             input,

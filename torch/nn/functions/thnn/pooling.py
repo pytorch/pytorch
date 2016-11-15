@@ -18,7 +18,7 @@ class _MaxPoolingBase(Function):
 
     def forward(self, input):
         self._backend = type2backend[type(input)]
-        indices, output = input.new(), input.new()
+        indices, output = input.new().long(), input.new()
         self._fw_call(self._backend.library_state, input, output, indices,
                 *self.additional_args)
         if self.save_indices:
@@ -155,7 +155,7 @@ class FractionalMaxPool2d(Function):
             self.ow = int(input.size(3) * self.rw)
         assert isinstance(self.oh, int) and isinstance(self.ow, int)
 
-        indices = input.new()
+        indices = input.new().long()
         output = input.new()
         self._backend = type2backend[type(input)]
         self._backend.SpatialFractionalMaxPooling_updateOutput(

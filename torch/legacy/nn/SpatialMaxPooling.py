@@ -19,7 +19,7 @@ class SpatialMaxPooling(Module):
         self.padH = padH
 
         self.ceil_mode = False
-        self.indices = torch.Tensor()
+        self.indices = torch.LongTensor()
 
     def ceil(self):
         self.ceil_mode = True
@@ -31,6 +31,7 @@ class SpatialMaxPooling(Module):
 
     def updateOutput(self, input):
         self.indices = self.indices or input.new()
+        self.indices = self.indices.long()
 
         dims = input.dim()
         self.iheight = input.size(dims-2)

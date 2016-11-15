@@ -67,6 +67,6 @@ build libshm
 
 cp $INSTALL_DIR/lib/* .
 cp THNN/generic/THNN.h .
-cp THCUNN/THCUNN.h .
+cp THCUNN/generic/THCUNN.h .
 cp -r tmp_install/include .
 cp $INSTALL_DIR/bin/* .

@@ -17,6 +17,7 @@ class MultiMarginCriterion(Criterion):
 
     def updateOutput(self, input, target):
         self.output_tensor = self.output_tensor or input.new(1)
+        target = target.long()
         self._backend.MultiMarginCriterion_updateOutput(
             self._backend.library_state,
             input,
@@ -32,6 +33,7 @@ class MultiMarginCriterion(Criterion):
 
 
     def updateGradInput(self, input, target):
+        target = target.long()
         self._backend.MultiMarginCriterion_updateGradInput(
             self._backend.library_state,
             input,

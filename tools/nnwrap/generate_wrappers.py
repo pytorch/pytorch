@@ -34,12 +34,17 @@ FUNCTION_TEMPLATE = Template("""\
 
 COMMON_TRANSFORMS = {
     'THIndex_t': 'long',
+    'THCIndex_t': 'long',
     'THInteger_t': 'int',
 }
 COMMON_CPU_TRANSFORMS = {
     'THNNState*': 'void*',
     'THIndexTensor*': 'THLongTensor*',
     'THIntegerTensor*': 'THIntTensor*',
+}
+COMMON_GPU_TRANSFORMS = {
+    'THCState*': 'void*',
+    'THCIndexTensor*': 'THCudaLongTensor*',
 }
 
 TYPE_TRANSFORMS = {
@@ -51,15 +56,26 @@ TYPE_TRANSFORMS = {
         'THTensor*': 'THDoubleTensor*',
         'real': 'double',
     },
+    'CudaHalf': {
+        'THCTensor*': 'THCudaHalfTensor*',
+        'real': 'half',
+    },
     'Cuda': {
-        'THCState*': 'void*',
-        'THIndexTensor*': 'THCudaLongTensor*',
-    }
+        'THCTensor*': 'THCudaTensor*',
+        'real': 'float',
+    },
+    'CudaDouble': {
+        'THCTensor*': 'THCudaDoubleTensor*',
+        'real': 'double',
+    },
 }
 for t, transforms in TYPE_TRANSFORMS.items():
     transforms.update(COMMON_TRANSFORMS)
-TYPE_TRANSFORMS['Float'].update(COMMON_CPU_TRANSFORMS)
-TYPE_TRANSFORMS['Double'].update(COMMON_CPU_TRANSFORMS)
+
+for t in ['Float', 'Double']:
+    TYPE_TRANSFORMS[t].update(COMMON_CPU_TRANSFORMS)
+for t in ['CudaHalf', 'Cuda', 'CudaDouble']:
+    TYPE_TRANSFORMS[t].update(COMMON_GPU_TRANSFORMS)
 
 
 def wrap_function(name, type, arguments):
@@ -102,11 +118,9 @@ def wrap_cunn():
     wrapper = '#include <TH/TH.h>\n'
     wrapper += '#include <THC/THC.h>\n\n\n'
     cunn_functions = thnn_utils.parse_header(thnn_utils.THCUNN_H_PATH)
-    # Get rid of Cuda prefix
-    for function in cunn_functions:
-        function.name = function.name[4:]
     for fn in cunn_functions:
-        wrapper += wrap_function(fn.name, 'Cuda', fn.arguments)
+        for t in ['CudaHalf', 'Cuda', 'CudaDouble']:
+            wrapper += wrap_function(fn.name, t, fn.arguments)
     with open('torch/csrc/nn/THCUNN.cwrap', 'w') as f:
         f.write(wrapper)
     cwrap('torch/csrc/nn/THCUNN.cwrap', plugins=[

@@ -299,7 +299,7 @@ criterion_tests = [
     dict(
         module_name='MultiLabelMarginLoss',
         input_size=(5, 10),
-        target=torch.rand(5, 10).mul(10).floor()
+        target=torch.rand(5, 10).mul(10).floor().long()
     ),
     dict(
         module_name='MultiLabelSoftMarginLoss',
@@ -316,7 +316,7 @@ criterion_tests = [
     dict(
         module_name='MultiMarginLoss',
         input_size=(5, 10),
-        target=torch.rand(5).mul(8).floor()
+        target=torch.rand(5).mul(8).floor().long()
     ),
     dict(
         module_name='SmoothL1Loss',

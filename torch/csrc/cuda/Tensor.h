@@ -8,7 +8,7 @@
 
 #define THCPDoubleTensor_Check(obj)  PyObject_IsInstance(obj, THCPDoubleTensorClass)
 #define THCPFloatTensor_Check(obj)   PyObject_IsInstance(obj, THCPFloatTensorClass)
-#define THCPHalfTensor_Check(obj)   PyObject_IsInstance(obj, THCPHalfTensorClass)
+#define THCPHalfTensor_Check(obj)    PyObject_IsInstance(obj, THCPHalfTensorClass)
 #define THCPLongTensor_Check(obj)    PyObject_IsInstance(obj, THCPLongTensorClass)
 #define THCPIntTensor_Check(obj)     PyObject_IsInstance(obj, THCPIntTensorClass)
 #define THCPShortTensor_Check(obj)   PyObject_IsInstance(obj, THCPShortTensorClass)
@@ -17,6 +17,7 @@
 
 #define THCPDoubleTensor_CData(obj)  (obj)->cdata
 #define THCPFloatTensor_CData(obj)   (obj)->cdata
+#define THCPHalfTensor_CData(obj)    (obj)->cdata
 #define THCPLongTensor_CData(obj)    (obj)->cdata
 #define THCPIntTensor_CData(obj)     (obj)->cdata
 #define THCPShortTensor_CData(obj)   (obj)->cdata

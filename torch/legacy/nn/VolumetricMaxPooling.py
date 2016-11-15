@@ -19,7 +19,7 @@ class VolumetricMaxPooling(Module):
         self.padH = padH
 
         self.ceil_mode = False
-        self.indices = torch.Tensor()
+        self.indices = torch.LongTensor()
 
     def ceil(self):
          self.ceil_mode = True
@@ -36,6 +36,7 @@ class VolumetricMaxPooling(Module):
         self.iwidth = input.size(dims-1)
 
         self.indices = self.indices or input.new()
+        self.indices = self.indices.long()
         self._backend.VolumetricMaxPooling_updateOutput(
             self._backend.library_state,
             input,

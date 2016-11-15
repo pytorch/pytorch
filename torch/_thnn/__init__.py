@@ -46,8 +46,6 @@ type2backend = Backends()
 
 _thnn_headers = parse_header(THNN_H_PATH)
 _thcunn_headers = parse_header(THCUNN_H_PATH)
-for function in _thcunn_headers:
-    function.name = function.name[4:]
 
 for t in ['Float', 'Double']:
     backend = Backend(t, 'torch._thnn._THNN', _thnn_headers)

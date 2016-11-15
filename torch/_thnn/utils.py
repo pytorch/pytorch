@@ -90,7 +90,7 @@ def parse_header(path):
                 fn_name = fn_name[:-1]
             generic_functions.append(Function(fn_name))
         elif l:
-            t, name = l.split(' ')
+            t, name = l.split()
             if '*' in name:
                 t = t + '*'
                 name = name[1:]
