@@ -138,26 +138,19 @@ class MaxUnpool2d(Module):
         self.kh, self.kw = _pair(kernel_size)
         self.dh, self.dw = _pair(stride or kernel_size)
         self.padh, self.padw = _pair(padding)
-        self.output_size = None
 
-    def __call__(self, input, indices, output_size=None):
+    def forward(self, input, indices, output_size=None):
+        out_height = (input.size(2) - 1) * self.dh + self.kh - 2*self.padh
+        out_width = (input.size(3) - 1) * self.dw + self.kw - 2*self.padw
         if output_size:
-            self.output_size = list(output_size)
-            if len(self.output_size) == 4:
-                self.output_size = self.output_size[-2:]
-            if len(self.output_size) != 2:
+            output_size = list(output_size)
+            if len(output_size) == 4:
+                output_size = output_size[-2:]
+            if len(output_size) != 2:
                 raise ValueError("output_size should be a sequence containing "
                         "2 or 4 elements, but it has a length of {}".format(
                             len(output_size)))
-        else:
-            self.output_size = None
-        return super(MaxUnpool2d, self).__call__(input, indices)
-
-    def forward(self, input, indices):
-        out_height = (input.size(2) - 1) * self.dh + self.kh - 2*self.padh
-        out_width = (input.size(3) - 1) * self.dw + self.kw - 2*self.padw
-        if self.output_size is not None:
-            h, w = self.output_size
+            h, w = output_size
             h_ok = out_height - self.dh < h < out_height + self.dh
             w_ok = out_width - self.dw < w < out_width + self.dw
             if not h_ok or not w_ok:
