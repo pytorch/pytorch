@@ -206,12 +206,13 @@ class ConvTranspose2d(Conv2d):
         >>> output = upsample(h, output_size=input.size())
     """
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 padding=0, output_padding=0, bias=True):
+                 padding=0, output_padding=0, groups=1, bias=True):
         super(ConvTranspose2d, self).__init__(in_channels, out_channels, kernel_size,
                                               stride=stride, padding=padding, bias=bias)
         # Conv2d uses a different weight layout than Conv2d
         self.weight.data = self.weight.data.transpose(0, 1).contiguous()
         self.out_padh, self.out_padw = _pair(output_padding)
+        self.groups = groups
 
     def forward(self, input, output_size=None):
         out_padh, out_padw = self.out_padh, self.out_padw
@@ -239,7 +240,7 @@ class ConvTranspose2d(Conv2d):
 
         func = self._backend.ConvTranspose2d(
             self.kw, self.kh, self.dw, self.dh, self.padw, self.padh,
-            out_padw, out_padh)
+            out_padw, out_padh, self.groups)
         if self.bias is None:
             return func(input, self.weight)
         else:

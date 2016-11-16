@@ -29,16 +29,34 @@ struct Convolution
   TensorDescriptor bdesc;
   FilterDescriptor wdesc;
   ConvolutionDescriptor cdesc;
+  int groups;
+  bool transposed;
+
+  // WARNING: if transposed == true, then idesc and odesc are swapped!
+  // WARNING2: WARNING does not apply to odesc_bias :)
+  // This allows for reusing the function code (with a small exception in
+  // backward_filter)
 
   Convolution(
       cudnnDataType_t dataType, THVoidTensor* input, THVoidTensor* weight,
-      THVoidTensor* bias, THVoidTensor* output, int pad[2], int stride[2], int groups);
+      THVoidTensor* bias, THVoidTensor* output, int pad[2], int stride[2],
+      int groups, bool transposed);
 };
 
-Convolution* cudnn_convolution_forward(
+Convolution* cudnn_convolution_init(
     THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
     THVoidTensor* input, THVoidTensor* weight, THVoidTensor* bias, THVoidTensor* output,
-    int padH, int padW, int dH, int dW, int groups, bool benchmark);
+    int padH, int padW, int dH, int dW, int groups, bool transposed);
+
+void cudnn_convolution_forward(
+    THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
+    THVoidTensor* input, THVoidTensor* weight, THVoidTensor* output,
+    Convolution* info, bool benchmark);
+
+void cudnn_convolution_add_bias(
+    THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
+    THVoidTensor* bias, THVoidTensor* output,
+    Convolution* info);
 
 void cudnn_convolution_backward_data(
     THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
@@ -53,6 +71,18 @@ void cudnn_convolution_backward_filter(
 void cudnn_convolution_backward_bias(
     THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
     THVoidTensor* gradOutput, THVoidTensor* gradBias, Convolution* info);
+
+// Helpers that allow to queue initialization, conv kernel and bias addition
+// without reacquiring GIL in between.
+Convolution* cudnn_convolution_full_forward(
+    THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
+    THVoidTensor* input, THVoidTensor* weight, THVoidTensor* bias, THVoidTensor* output,
+    int padH, int padW, int dH, int dW, int groups, bool benchmark);
+
+Convolution* cudnn_convolution_transpose_full_forward(
+    THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
+    THVoidTensor* input, THVoidTensor* weight, THVoidTensor* bias, THVoidTensor* output,
+    int padH, int padW, int dH, int dW, int groups, bool benchmark);
 
 }}  // namespace torch::cudnn
 

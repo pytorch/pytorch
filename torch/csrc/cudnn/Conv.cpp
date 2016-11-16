@@ -198,8 +198,10 @@ static_assert(std::is_pod<ConvolutionParams>::value, "ConvolutionParams not POD"
 
 Convolution::Convolution(
     cudnnDataType_t dataType, THVoidTensor* input, THVoidTensor* weight,
-    THVoidTensor* bias, THVoidTensor* output, int pad[2], int stride[2], int groups)
-  : idesc(), odesc(), odesc_bias(), bdesc(), wdesc(), cdesc()
+    THVoidTensor* bias, THVoidTensor* output, int pad[2], int stride[2],
+    int groups, bool transposed)
+  : idesc(), odesc(), odesc_bias(), bdesc(), wdesc(), cdesc(), groups(groups)
+  , transposed(transposed)
 {
   memset(&params, 0, sizeof(ConvolutionParams));
   params.dataType = dataType;
@@ -215,25 +217,34 @@ Convolution::Convolution(
   params.groups = groups;
   setTensorDescriptor(idesc, dataType, input, groups);
   setTensorDescriptor(odesc, dataType, output, groups);
-  setTensorDescriptor(odesc_bias, dataType, output, 1);
+  if (!transposed)
+    setTensorDescriptor(odesc_bias, dataType, output, 1);
+  else
+    setTensorDescriptor(odesc_bias, dataType, input, 1);
   setWeightDescriptor(wdesc, dataType, weight, groups);
   cdesc.set(dataType, pad, stride);
 }
 
-Convolution* cudnn_convolution_forward(
+Convolution* cudnn_convolution_init(
     THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
     THVoidTensor* input, THVoidTensor* weight, THVoidTensor* bias, THVoidTensor* output,
-    int padH, int padW, int dH, int dW, int groups, bool benchmark)
+    int padH, int padW, int dH, int dW, int groups, bool transposed)
 {
   int pad[2] = {padH, padW};
   int stride[2] = {dH, dW};
-  std::unique_ptr<Convolution> info(new Convolution(
-      dataType, input, weight, bias, output, pad, stride, groups));
+  return new Convolution(dataType, input, weight, bias, output, pad,
+          stride, groups, transposed);
 
+}
+
+void cudnn_convolution_forward(
+    THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
+    THVoidTensor* input, THVoidTensor* weight, THVoidTensor* output,
+    Convolution* info, bool benchmark)
+{
+  int groups = info->groups;
   TensorDescriptor& idesc = info->idesc;
   TensorDescriptor& odesc = info->odesc;
-  TensorDescriptor& odesc_bias = info->odesc_bias;
-  TensorDescriptor& bdesc = info->bdesc;
   FilterDescriptor& wdesc = info->wdesc;
   ConvolutionDescriptor& cdesc = info->cdesc;
 
@@ -257,19 +268,26 @@ Convolution* cudnn_convolution_forward(
               weight_ptr, cdesc.desc, fwdAlg, workspace.data,
               workspaceSize, &zero, odesc.desc, output_ptr));
   }
+}
 
-  if (bias) {
-    int size[4] = { 1, (int)bias->size[0], 1, 1 };
-    int stride[4] = { 1, (int)bias->stride[0], 1, 1};
-    bdesc.set(dataType, 4, size, stride);
+void cudnn_convolution_add_bias(
+    THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
+    THVoidTensor* bias, THVoidTensor* output,
+    Convolution* info)
+{
+  TensorDescriptor& odesc_bias = info->odesc_bias;
+  TensorDescriptor& bdesc = info->bdesc;
 
-    void* bias_ptr = tensorPointer(dataType, bias, 0, 1);
-    void* output_ptr = tensorPointer(dataType, output, 0, 1);
+  int size[4] = { 1, (int)bias->size[0], 1, 1 };
+  int stride[4] = { 1, (int)bias->stride[0], 1, 1};
+  bdesc.set(dataType, 4, size, stride);
 
-    CHECK(cudnnAddTensor(handle, &one, bdesc.desc, bias_ptr, &one,
-        odesc_bias.desc, output_ptr));
-  }
-  return info.release();
+  void* bias_ptr = tensorPointer(dataType, bias, 0, 1);
+  void* output_ptr = tensorPointer(dataType, output, 0, 1);
+
+  Constant one(dataType, 1);
+  CHECK(cudnnAddTensor(handle, &one, bdesc.desc, bias_ptr, &one,
+      odesc_bias.desc, output_ptr));
 }
 
 void cudnn_convolution_backward_data(
@@ -331,6 +349,10 @@ void cudnn_convolution_backward_filter(
     void* gradOutput_ptr = tensorPointer(dataType, gradOutput, i, groups);
     void* gradWeight_ptr = tensorPointer(dataType, gradWeight, i, groups);
 
+    if (info->transposed) {
+        std::swap(input_ptr, gradOutput_ptr);
+    }
+
     CHECK(cudnnConvolutionBackwardFilter(
         handle, &one, idesc.desc, input_ptr, odesc.desc, gradOutput_ptr,
         cdesc.desc, bwdFilterAlg, workspace.data, workspaceSize, &zero,
@@ -353,6 +375,40 @@ void cudnn_convolution_backward_bias(
   CHECK(cudnnConvolutionBackwardBias(
       handle, &one, odesc_bias.desc, gradOutput_ptr, &zero, bdesc.desc,
       gradBias_ptr));
+}
+
+Convolution* cudnn_convolution_full_forward(
+    THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
+    THVoidTensor* input, THVoidTensor* weight, THVoidTensor* bias, THVoidTensor* output,
+    int padH, int padW, int dH, int dW, int groups, bool benchmark)
+{
+    std::unique_ptr<Convolution> info(cudnn_convolution_init(
+        state, handle, dataType, input, weight, bias, output, padH, padW,
+        dH, dW, groups, false));
+    cudnn_convolution_forward(state, handle, dataType, input, weight, output,
+        info.get(), benchmark);
+    if (bias) {
+        cudnn_convolution_add_bias(
+            state, handle, dataType, bias, output, info.get());
+    }
+    return info.release();
+}
+
+Convolution* cudnn_convolution_transpose_full_forward(
+    THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
+    THVoidTensor* input, THVoidTensor* weight, THVoidTensor* bias, THVoidTensor* output,
+    int padH, int padW, int dH, int dW, int groups, bool benchmark)
+{
+    std::unique_ptr<Convolution> info(cudnn_convolution_init(
+        state, handle, dataType, output, weight, bias, input, padH, padW,
+        dH, dW, groups, true));
+    cudnn_convolution_backward_data(state, handle, dataType, input, output,
+            weight, info.get(), benchmark);
+    if (bias) {
+        cudnn_convolution_add_bias(
+            state, handle, dataType, bias, output, info.get());
+    }
+    return info.release();
 }
 
 }}  // namespace
