@@ -29,10 +29,6 @@ static inline void THNN_(SpatialSubSampling_shapeCheck)(
 
   THArgCheck(input->size[dimh-1] == nInputPlane, 2, "invalid number of input planes");
   THArgCheck(inputWidth >= kW && inputHeight >= kH, 2, "input image smaller than kernel size");
-
-  if (gradOutput != NULL) {
-    THArgCheck(THTensor_(isContiguous)(gradOutput), 3, "gradOutput must be contiguous");
-  }
 }
 
 void THNN_(SpatialSubSampling_updateOutput)(
@@ -166,13 +162,13 @@ void THNN_(SpatialSubSampling_updateGradInput)(
   outputHeight = (inputHeight - kH) / dH + 1;
 
   weight_data = THTensor_(data)(weight);
+  gradOutput = THTensor_(newContiguous)(gradOutput);
   gradOutput_data = THTensor_(data)(gradOutput);
 
   input_data = THTensor_(data)(input);
 
   THTensor_(resizeAs)(gradInput, input);
   gradInput_data = THTensor_(data)(gradInput);
-  gradOutput_data = THTensor_(data)(gradOutput);
 
 #pragma omp parallel for private(k)
   for(k = 0; k < nInputPlane; k++)
@@ -207,6 +203,7 @@ void THNN_(SpatialSubSampling_updateGradInput)(
       }
     }
   }
+  THTensor_(free)(gradOutput);
 }
 
 void THNN_(SpatialSubSampling_accGradParameters)(
@@ -252,6 +249,7 @@ void THNN_(SpatialSubSampling_accGradParameters)(
 
   gradWeight_data = THTensor_(data)(gradWeight);
   gradBias_data = THTensor_(data)(gradBias);
+  gradOutput = THTensor_(newContiguous)(gradOutput);
   gradOutput_data = THTensor_(data)(gradOutput);
 
   input = THTensor_(newContiguous)(input);
@@ -295,6 +293,7 @@ void THNN_(SpatialSubSampling_accGradParameters)(
   }
 
   THTensor_(free)(input);
+  THTensor_(free)(gradOutput);
 }
 
 #endif
