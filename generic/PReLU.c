@@ -2,16 +2,6 @@
 #define TH_GENERIC_FILE "generic/PReLU.c"
 #else
 
-static inline void THNN_(PReLU_shapeCheck)(
-                         THNNState *state,
-                         THTensor *input,
-                         THTensor *gradOutput) {
-  THArgCheck(THTensor_(isContiguous)(input), 2, "input must be contiguous");
-  if (gradOutput != NULL) {
-    THArgCheck(THTensor_(isContiguous)(gradOutput), 2, "gradOuput must be contiguous");
-  }
-}
-
 void THNN_(PReLU_updateOutput)(
           THNNState *state,
           THTensor *input,
@@ -19,7 +9,6 @@ void THNN_(PReLU_updateOutput)(
           THTensor *weight,
           THIndex_t nOutputPlane)
 {
-  THNN_(PReLU_shapeCheck)(state, input, NULL);
   THTensor_(resizeAs)(output, input);
 
   if (nOutputPlane == 0)
@@ -32,6 +21,7 @@ void THNN_(PReLU_updateOutput)(
   }
   else
   {
+    input = THTensor_(newContiguous)(input);
     long bs, ks;
     {
       long input_ndim = THTensor_(nDimension)(input);
@@ -76,6 +66,7 @@ void THNN_(PReLU_updateOutput)(
         n_output_data += ks;
       }
     }
+    THTensor_(free)(input);
   }
 }
 
@@ -87,7 +78,6 @@ void THNN_(PReLU_updateGradInput)(
           THTensor *weight,
           THIndex_t nOutputPlane)
 {
-  THNN_(PReLU_shapeCheck)(state, input, gradOutput);
   THNN_CHECK_NELEMENT(input, gradOutput);
   THTensor_(resizeAs)(gradInput, input);
 
@@ -103,6 +93,8 @@ void THNN_(PReLU_updateGradInput)(
   }
   else
   {
+    input = THTensor_(newContiguous)(input);
+    gradOutput = THTensor_(newContiguous)(gradOutput);
     const real *input_data = THTensor_(data)(input);
     const real *gradOutput_data = THTensor_(data)(gradOutput);
     const real *weight_data = THTensor_(data)(weight);
@@ -158,6 +150,8 @@ void THNN_(PReLU_updateGradInput)(
         n_gradOutput_data += ks;
       }
     }
+    THTensor_(free)(input);
+    THTensor_(free)(gradOutput);
   }
 }
 
@@ -173,7 +167,6 @@ void THNN_(PReLU_accGradParameters)(
           THIndex_t nOutputPlane,
           real scale)
 {
-  THNN_(PReLU_shapeCheck)(state, input, gradOutput);
   THNN_CHECK_NELEMENT(input, gradOutput);
   real *gradWeight_data = THTensor_(data)(gradWeight);
 
@@ -188,6 +181,8 @@ void THNN_(PReLU_accGradParameters)(
   }
   else
   {
+    input = THTensor_(newContiguous)(input);
+    gradOutput = THTensor_(newContiguous)(gradOutput);
     long bs, ks;
     {
       long input_ndim = THTensor_(nDimension)(input);
@@ -237,6 +232,8 @@ void THNN_(PReLU_accGradParameters)(
         n_gradOutput_data += ks;
       }
     }
+    THTensor_(free)(input);
+    THTensor_(free)(gradOutput);
   }
 }
 
