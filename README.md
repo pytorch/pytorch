@@ -96,6 +96,7 @@ conda install -c soumith magma-cuda75# or magma-cuda80
 
 #### Install PyTorch
 ```bash
+export MACOSX_DEPLOYMENT_TARGET=10.9 # for OSX
 pip install -r requirements.txt
 pip install .
 ```
