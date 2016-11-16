@@ -223,14 +223,14 @@ class ConvTranspose2d(Conv2d):
                 raise ValueError("output_size should be a sequence containing "
                         "2 or 4 elements, but it has a length of {}".format(
                             len(output_size)))
-            out_sizew, out_sizeh = output_size
-            sizew = ((input.size(3) - 1) * self.dw - 2 * self.padw + self.kw)
+            out_sizeh, out_sizew = output_size
             sizeh = ((input.size(2) - 1) * self.dh - 2 * self.padh + self.kh)
-            out_padw = out_sizew - sizew
+            sizew = ((input.size(3) - 1) * self.dw - 2 * self.padw + self.kw)
             out_padh = out_sizeh - sizeh
-            out_padw_ok = 0 <= out_padw < self.dw
+            out_padw = out_sizew - sizew
             out_padh_ok = 0 <= out_padh < self.dh
-            if not out_padw_ok or not out_padh_ok:
+            out_padw_ok = 0 <= out_padw < self.dw
+            if not out_padh_ok or not out_padw_ok:
                 raise ValueError(("requested an output size of {}x{}, but "
                     "valid sizes range from {}x{} to {}x{} (for an input of "
                     "{}x{})").format(out_sizeh, out_sizew, sizeh, sizew,
