@@ -318,6 +318,51 @@ struct TensorRemainderOp<half> {
 };
 #endif // CUDA_HALF_TENSOR
 
+template <typename T>
+struct TensorFmodOp {
+  TensorFmodOp(T v) : val((float)v) {}
+  __device__ __forceinline__ void operator()(T* out, T* in) {
+    *out = (T) fmodf((float) *in, val);
+  }
+
+  __device__ __forceinline__ void operator()(T* v) {
+    *v = (T) fmodf((float) *v, val);
+  }
+
+  const float val;
+};
+
+template <>
+struct TensorFmodOp<double> {
+  TensorFmodOp(double v) : val(v) {}
+  __device__ __forceinline__ void operator()(double* out, double* in) {
+    *out = fmod(*in, val);
+  }
+
+  __device__ __forceinline__ void operator()(double* v) {
+    *v = fmod(*v, val);
+  }
+
+  const double val;
+};
+
+#ifdef CUDA_HALF_TENSOR
+template <>
+struct TensorFmodOp<half> {
+  TensorFmodOp(half v): fval(THC_half2float(v)) {}
+
+  __device__ __forceinline__ void operator()(half* out, half* in) {
+    *out = __float2half(fmodf(__half2float(*in), fval));
+  }
+
+  __device__ __forceinline__ void operator()(half* v) {
+    *v = __float2half(fmodf(__half2float(*v), fval));
+  }
+
+  const float fval;
+};
+#endif // CUDA_HALF_TENSOR
+
 template <typename T, int Upper>
 struct TensorTriOp {
   TensorTriOp(T *start_, long stride0_, long stride1_, long k_)
