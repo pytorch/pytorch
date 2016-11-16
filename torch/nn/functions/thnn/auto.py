@@ -167,12 +167,17 @@ def _make_function_class(class_name, update_output, update_grad_input, acc_grad_
             update_grad_input_fn(self._backend.library_state, input, grad_output, grad_input, *gi_args)
             grad_input_tuple = (grad_input,)
 
+
         if acc_grad_parameters and any(self.needs_input_grad[1:]):
             additional_args = self._initialize_buffers('acc_grad_parameters')
             grad_params = tuple(p.new().resize_as_(p).zero_() for p in params)
+            appended_grads = len(expected_params) - len(grad_params)
+            grad_params += (None,) * appended_grads
             acc_grad_parameters_fn = getattr(self._backend, acc_grad_parameters.name)
             param_args = grad_params + additional_args + (1,)
             acc_grad_parameters_fn(self._backend.library_state, input, grad_output, *param_args)
+            if appended_grads:
+                grad_params = grad_params[:-appended_grads]
 
         return grad_input_tuple + grad_params
 
