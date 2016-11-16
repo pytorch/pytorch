@@ -4,6 +4,7 @@
 #include "THCTensorCopy.h"
 #include "THCApply.cuh"
 #include "THCNumerics.cuh"
+#include "THCTensorMathCompareT.cuh"
 
 template <typename T>
 struct TensorAddConstantOp {

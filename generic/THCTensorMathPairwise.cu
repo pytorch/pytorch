@@ -184,4 +184,28 @@ void THCTensor_(triu)(THCState *state, THCTensor *self_, THCTensor *src_, long k
   THCudaCheck(cudaGetLastError());
 }
 
+THC_API int THCTensor_(equal)(THCState *state, THCTensor *self_, THCTensor *src_)
+{
+  THAssert(THCTensor_(checkGPU)(state, 2, self_, src_));
+  if (!THCTensor_(isSameSizeAs(state, self_, src_))) {
+    return 0;
+  }
+
+  // This is not as efficient as TH, but the basic idea: create a buffer that stores
+  // 1 if the two tensors are equal at a position, otherwise 0. If the minimum value
+  // in this buffer is 1, the two tensors are equal, otherwise they are not
+
+  THLongStorage *size = THCTensor_(newSizeOf)(state, self_);
+  THCudaByteTensor *buf = THCudaByteTensor_newWithSize(state, size, NULL);
+
+  if (!THC_pointwiseApply3(state, buf, self_, src_, TensorEQOp<real, unsigned char>())) {
+    THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+  }
+
+  unsigned char min = THCudaByteTensor_minall(state, buf);
+  THCudaByteTensor_free(state, buf);
+
+  return min != 0;
+}
+
 #endif
