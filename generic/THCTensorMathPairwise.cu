@@ -203,6 +203,8 @@ THC_API int THCTensor_(equal)(THCState *state, THCTensor *self_, THCTensor *src_
   }
 
   unsigned char min = THCudaByteTensor_minall(state, buf);
+
+  THLongStorage_free(size);
   THCudaByteTensor_free(state, buf);
 
   return min != 0;
