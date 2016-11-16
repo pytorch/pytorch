@@ -13,7 +13,7 @@ def _get_thnn_function_backend():
 def _initialize_backend():
     from ..functions.thnn import _all_functions as _thnn_functions
     from ..functions.linear import Linear
-    from ..functions.conv import Conv2d
+    from ..functions.conv import Conv2d, ConvTranspose2d
     from ..functions.rnn import RNN, \
             RNNTanhCell, RNNReLUCell, GRUCell, LSTMCell
     from ..functions.dropout import Dropout, FeatureDropout
@@ -23,6 +23,7 @@ def _initialize_backend():
 
     backend.register_function('Linear', Linear)
     backend.register_function('Conv2d', Conv2d)
+    backend.register_function('ConvTranspose2d', ConvTranspose2d)
     backend.register_function('RNN', RNN)
     backend.register_function('RNNTanhCell', RNNTanhCell)
     backend.register_function('RNNReLUCell', RNNReLUCell)

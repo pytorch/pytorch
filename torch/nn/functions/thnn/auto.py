@@ -190,6 +190,7 @@ def _generate_function_classes(scope_dict):
     classes_to_generate = {fn.name.partition('_')[0] for fn in function_list}
     exceptions = {
         'Linear',
+        'SpatialFullConvolution',
         'SpatialConvolutionMM',
         'SparseLinear',
         'TemporalConvolution',
@@ -214,7 +215,6 @@ def _generate_function_classes(scope_dict):
         'SpatialMaxUnpooling': 'MaxUnpool2d',
         'SpatialReflectionPadding': 'ReflectionPad2d',
         'SpatialReplicationPadding': 'ReplicationPad2d',
-        'SpatialFullConvolution': 'ConvTranspose2d',
         'VolumetricFullConvolution': 'ConvTranspose3d',
         'VolumetricReplicationPadding': 'ReplicationPad3d',
         'VolumetricMaxUnpooling': 'MaxUnpool3d',

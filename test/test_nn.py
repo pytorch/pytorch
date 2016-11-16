@@ -911,7 +911,7 @@ new_module_tests = [
     ),
     dict(
         module_name='ConvTranspose2d',
-        constructor_args=(3, 4, 3, (2, 2), 1, (1, 1), False),
+        constructor_args=(3, 4, 3, (2, 2), 1, (1, 1), 1, False),
         input_size=(1, 3, 7, 7),
         desc='no_bias'
     ),
