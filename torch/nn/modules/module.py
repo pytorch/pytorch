@@ -82,8 +82,8 @@ class Module(object):
             "Trying to remove an inexistent forward hook with name {}".format(name)
         del self.forward_hooks[name]
 
-    def __call__(self, *input):
-        result = self.forward(*input)
+    def __call__(self, *input, **kwargs):
+        result = self.forward(*input, **kwargs)
         for hook in self.forward_hooks.values():
             hook(self, input, result)
         var = result

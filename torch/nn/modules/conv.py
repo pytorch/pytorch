@@ -156,7 +156,7 @@ class Conv2d(Module):
             return func(input, self.weight)
         else:
             return func(input, self.weight, self.bias)
-    
+
     def __repr__(self):
         padding_str=', padding=(' + str(self.padh) + ', ' + str(self.padw) + ')' \
                       if self.padh != 0 and self.padw !=0 else ''
@@ -213,24 +213,17 @@ class ConvTranspose2d(Conv2d):
         self.weight.data = self.weight.data.transpose(0, 1).contiguous()
         self.out_padh, self.out_padw = _pair(output_padding)
 
-    def __call__(self, input, output_size=None):
-        if output_size:
-            self.output_size = list(output_size)
-            if len(self.output_size) == 4:
-                self.output_size = self.output_size[-2:]
-            if len(self.output_size) != 2:
+    def forward(self, input, output_size=None):
+        out_padh, out_padw = self.out_padh, self.out_padw
+        if output_size is not None:
+            output_size = list(output_size)
+            if len(output_size) == 4:
+                output_size = output_size[-2:]
+            if len(output_size) != 2:
                 raise ValueError("output_size should be a sequence containing "
                         "2 or 4 elements, but it has a length of {}".format(
                             len(output_size)))
-        else:
-            self.output_size = None
-        return super(ConvTranspose2d, self).__call__(input)
-
-
-    def forward(self, input):
-        out_padh, out_padw = self.out_padh, self.out_padw
-        if self.output_size is not None:
-            out_sizew, out_sizeh = self.output_size
+            out_sizew, out_sizeh = output_size
             sizew = ((input.size(3) - 1) * self.dw - 2 * self.padw + self.kw)
             sizeh = ((input.size(2) - 1) * self.dh - 2 * self.padh + self.kh)
             out_padw = out_sizew - sizew
@@ -243,6 +236,7 @@ class ConvTranspose2d(Conv2d):
                     "{}x{})").format(out_sizeh, out_sizew, sizeh, sizew,
                         sizeh+self.dh-1, sizew+self.dw-1,
                         input.size(2), input.size(3)))
+
         func = self._backend.ConvTranspose2d(
             self.kw, self.kh, self.dw, self.dh, self.padw, self.padh,
             out_padw, out_padh)
