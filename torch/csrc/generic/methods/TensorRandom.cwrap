@@ -170,7 +170,7 @@ static void THTensor_(random1__)(THTensor *self, THGenerator *gen, long b)
 
 [[
   name: multinomial
-  defined_if: CUDA_FLOAT
+  defined_if: CUDA_FLOAT || CUDA_DOUBLE || CUDA_HALF
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -183,40 +183,40 @@ static void THTensor_(random1__)(THTensor *self, THGenerator *gen, long b)
 
 [[
   name: uniform_
-  defined_if: CUDA_FLOAT
+  defined_if: CUDA_FLOAT || CUDA_DOUBLE || CUDA_HALF
   cname: uniform
   return: self
   arguments:
     - THTensor* self
-    - arg: real from
+    - arg: double from
       default: 0
-    - arg: real to
+    - arg: double to
       default: 1
 ]]
 
 [[
   name: normal_
-  defined_if: CUDA_FLOAT
+  defined_if: CUDA_FLOAT || CUDA_DOUBLE || CUDA_HALF
   cname: normal
   return: self
   arguments:
     - THTensor* self
-    - arg: real mean
+    - arg: double mean
       default: 0
-    - arg: real var
+    - arg: double var
       default: 1
 ]]
 
 [[
   name: cauchy_
-  defined_if: CUDA_FLOAT
+  defined_if: CUDA_FLOAT || CUDA_DOUBLE || CUDA_HALF
   cname: cauchy
   return: self
   arguments:
     - THTensor* self
-    - arg: real location
+    - arg: double location
       default: 0
-    - arg: real scale
+    - arg: double scale
       default: 1
 ]]
 
@@ -224,30 +224,30 @@ static void THTensor_(random1__)(THTensor *self, THGenerator *gen, long b)
   name: logNormal_
   cname: logNormal
   python_name: log_normal_
-  defined_if: CUDA_FLOAT
+  defined_if: CUDA_FLOAT || CUDA_DOUBLE || CUDA_HALF
   return: self
   arguments:
     - THTensor* self
-    - arg: real location
+    - arg: double location
       default: 1
-    - arg: real scale
+    - arg: double scale
       default: 2
 ]]
 
 [[
   name: exponential_
-  defined_if: CUDA_FLOAT
+  defined_if: CUDA_FLOAT || CUDA_DOUBLE || CUDA_HALF
   cname: exponential
   return: self
   arguments:
     - THTensor* self
-    - arg: real lambd
+    - arg: double lambd
       default: 1
 ]]
 
 [[
   name: rand
-  defined_if: CUDA_FLOAT
+  defined_if: CUDA_FLOAT || CUDA_DOUBLE || CUDA_HALF
   only_stateless: True
   return: argument 0
   arguments:
@@ -259,7 +259,7 @@ static void THTensor_(random1__)(THTensor *self, THGenerator *gen, long b)
 
 [[
   name: randn
-  defined_if: CUDA_FLOAT
+  defined_if: CUDA_FLOAT || CUDA_DOUBLE || CUDA_HALF
   only_stateless: True
   return: argument 0
   arguments:
@@ -310,7 +310,7 @@ static void THTensor_(random1__)(THTensor *self, THGenerator *gen, long b)
 [[
   name: geometric_
   cname: geometric
-  defined_if: CUDA_FLOAT
+  defined_if: CUDA_FLOAT || CUDA_DOUBLE || CUDA_HALF
   return: self
   arguments:
     - THTensor* self
@@ -319,7 +319,7 @@ static void THTensor_(random1__)(THTensor *self, THGenerator *gen, long b)
 
 [[
   name: bernoulli_
-  defined_if: CUDA_FLOAT
+  defined_if: CUDA_FLOAT || CUDA_DOUBLE || CUDA_HALF
   cname: bernoulli
   return: self
   arguments:
@@ -327,4 +327,3 @@ static void THTensor_(random1__)(THTensor *self, THGenerator *gen, long b)
     - arg: double p
       default: 0.5
 ]]
-
