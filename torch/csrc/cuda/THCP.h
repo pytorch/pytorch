@@ -3,6 +3,7 @@
 
 #include <TH/TH.h>
 #include <THC/THC.h>
+#include <THC/THCHalf.h>
 
 #include "torch/csrc/THP.h"
 #include "serialization.h"

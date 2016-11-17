@@ -42,6 +42,9 @@ class _TensorBase(object):
     def float(self, async=False):
         return self.type(type(self).__module__ + '.FloatTensor')
 
+    def half(self, async=False):
+        return self.type(type(self).__module__ + '.HalfTensor')
+
     def long(self, async=False):
         return self.type(type(self).__module__ + '.LongTensor')
 
