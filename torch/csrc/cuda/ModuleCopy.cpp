@@ -9,9 +9,18 @@ void TH_CONCAT_3(_THPCopy_,THNAME,_copyShort)(PyObject *dst, PyObject *src);   \
 void TH_CONCAT_3(_THPCopy_,THNAME,_copyChar)(PyObject *dst, PyObject *src);    \
 void TH_CONCAT_3(_THPCopy_,THNAME,_copyByte)(PyObject *dst, PyObject *src);
 
+#ifdef CUDA_HALF_TENSOR
+#define THCP_COPY_CUDA_HALF(THNAME)                                            \
+void TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaHalf)(PyObject *dst, PyObject *src);
+#else
+#define THCP_COPY_CUDA_HALF(THNAME)
+#endif
+
 #define DECLARE_CUDA_COPY(THNAME)                                              \
 void TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaDouble)(PyObject *dst, PyObject *src);  \
 void TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaFloat)(PyObject *dst, PyObject *src);   \
+THCP_COPY_CUDA_HALF(THNAME)                                                        \
+void TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaHalf)(PyObject *dst, PyObject *src);    \
 void TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaLong)(PyObject *dst, PyObject *src);    \
 void TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaInt)(PyObject *dst, PyObject *src);     \
 void TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaShort)(PyObject *dst, PyObject *src);   \
@@ -28,6 +37,7 @@ DECLARE_CUDA_COPY(THByteTensor)
 
 DECLARE_COPY(THCudaDoubleTensor)
 DECLARE_COPY(THCudaTensor)
+DECLARE_COPY(THCudaHalfTensor)
 DECLARE_COPY(THCudaLongTensor)
 DECLARE_COPY(THCudaIntTensor)
 DECLARE_COPY(THCudaShortTensor)
@@ -36,6 +46,7 @@ DECLARE_COPY(THCudaByteTensor)
 
 DECLARE_CUDA_COPY(THCudaDoubleTensor)
 DECLARE_CUDA_COPY(THCudaTensor)
+DECLARE_CUDA_COPY(THCudaHalfTensor)
 DECLARE_CUDA_COPY(THCudaLongTensor)
 DECLARE_CUDA_COPY(THCudaIntTensor)
 DECLARE_CUDA_COPY(THCudaShortTensor)
@@ -52,6 +63,7 @@ DECLARE_CUDA_COPY(THByteStorage)
 
 DECLARE_COPY(THCudaDoubleStorage)
 DECLARE_COPY(THCudaStorage)
+DECLARE_COPY(THCudaHalfStorage)
 DECLARE_COPY(THCudaLongStorage)
 DECLARE_COPY(THCudaIntStorage)
 DECLARE_COPY(THCudaShortStorage)
@@ -60,12 +72,14 @@ DECLARE_COPY(THCudaByteStorage)
 
 DECLARE_CUDA_COPY(THCudaDoubleStorage)
 DECLARE_CUDA_COPY(THCudaStorage)
+DECLARE_CUDA_COPY(THCudaHalfStorage)
 DECLARE_CUDA_COPY(THCudaLongStorage)
 DECLARE_CUDA_COPY(THCudaIntStorage)
 DECLARE_CUDA_COPY(THCudaShortStorage)
 DECLARE_CUDA_COPY(THCudaCharStorage)
 DECLARE_CUDA_COPY(THCudaByteStorage)
 #undef DECLARE_COPY
+#undef THCP_COPY_CUDA_HALF
 
 #define DECLARE_ASYNC_COPY(TYPE)                                               \
 void TH_CONCAT_3(THCP,TYPE,Tensor_copyAsyncCPU)(PyObject *dst, PyObject *src); \
@@ -98,7 +112,19 @@ extern PyObject *THPByteTensorClass;
 
 static bool THCPModule_initCopy()
 {
-// TODO: half
+#ifdef CUDA_HALF_TENSOR
+#define HALF_TENSOR_GPU_CPU_COPY(TYPE, THNAME)                                 \
+  tensor_copy_handlers.insert({{TYPE, THCPHalfTensorClass},    TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaHalf)});
+#define HALF_TENSOR_GPU_GPU_COPY(TYPE, THNAME)                                 \
+  tensor_copy_handlers.insert({{TYPE, THCPHalfTensorClass},    TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaHalf)});
+#define HALF_TENSOR_GPU_GPU_COPY_ASYNC(TYPE, THNAME)                           \
+  tensor_async_copy_handlers.insert({{TYPE, THCPHalfTensorClass},    TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaHalf)});
+#else
+#define HALF_TENSOR_GPU_CPU_COPY(TYPE, THNAME)
+#define HALF_TENSOR_GPU_GPU_COPY(TYPE, THNAME)
+#define HALF_TENSOR_GPU_GPU_COPY_ASYNC(TYPE, THNAME)
+#endif
+
 #define INIT_TENSOR_GPU_CPU_COPY(TYPE, THNAME)                                        \
   tensor_copy_handlers.insert({{TYPE, THCPDoubleTensorClass},  TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaDouble)});  \
   tensor_copy_handlers.insert({{TYPE, THCPFloatTensorClass},   TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaFloat)});   \
@@ -106,7 +132,8 @@ static bool THCPModule_initCopy()
   tensor_copy_handlers.insert({{TYPE, THCPIntTensorClass},     TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaInt)});     \
   tensor_copy_handlers.insert({{TYPE, THCPShortTensorClass},   TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaShort)});   \
   tensor_copy_handlers.insert({{TYPE, THCPCharTensorClass},    TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaChar)});    \
-  tensor_copy_handlers.insert({{TYPE, THCPByteTensorClass},    TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaByte)});
+  tensor_copy_handlers.insert({{TYPE, THCPByteTensorClass},    TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaByte)});    \
+  HALF_TENSOR_GPU_CPU_COPY(TYPE, THNAME)
 
 #define INIT_TENSOR_GPU_GPU_COPY(TYPE, THNAME)                                        \
   tensor_copy_handlers.insert({{TYPE, THCPDoubleTensorClass},  TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaDouble)});  \
@@ -116,6 +143,7 @@ static bool THCPModule_initCopy()
   tensor_copy_handlers.insert({{TYPE, THCPShortTensorClass},   TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaShort)});   \
   tensor_copy_handlers.insert({{TYPE, THCPCharTensorClass},    TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaChar)});    \
   tensor_copy_handlers.insert({{TYPE, THCPByteTensorClass},    TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaByte)});    \
+  HALF_TENSOR_GPU_GPU_COPY(TYPE, THNAME)                                                                         \
   /* CUDA copy launches are always async */                                                                      \
   tensor_async_copy_handlers.insert({{TYPE, THCPDoubleTensorClass},  TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaDouble)}); \
   tensor_async_copy_handlers.insert({{TYPE, THCPFloatTensorClass},   TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaFloat)});  \
@@ -123,7 +151,8 @@ static bool THCPModule_initCopy()
   tensor_async_copy_handlers.insert({{TYPE, THCPIntTensorClass},     TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaInt)});    \
   tensor_async_copy_handlers.insert({{TYPE, THCPShortTensorClass},   TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaShort)});  \
   tensor_async_copy_handlers.insert({{TYPE, THCPCharTensorClass},    TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaChar)});   \
-  tensor_async_copy_handlers.insert({{TYPE, THCPByteTensorClass},    TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaByte)});
+  tensor_async_copy_handlers.insert({{TYPE, THCPByteTensorClass},    TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaByte)});   \
+  HALF_TENSOR_GPU_GPU_COPY_ASYNC(TYPE, THNAME)
 
 #define INIT_TENSOR_CPU_GPU_COPY(TYPE, THNAME)                                        \
   tensor_copy_handlers.insert({{TYPE, THPDoubleTensorClass},  TH_CONCAT_3(_THPCopy_,THNAME,_copyDouble)});  \
@@ -132,7 +161,7 @@ static bool THCPModule_initCopy()
   tensor_copy_handlers.insert({{TYPE, THPIntTensorClass},     TH_CONCAT_3(_THPCopy_,THNAME,_copyInt)});     \
   tensor_copy_handlers.insert({{TYPE, THPShortTensorClass},   TH_CONCAT_3(_THPCopy_,THNAME,_copyShort)});   \
   tensor_copy_handlers.insert({{TYPE, THPCharTensorClass},    TH_CONCAT_3(_THPCopy_,THNAME,_copyChar)});    \
-  tensor_copy_handlers.insert({{TYPE, THPByteTensorClass},    TH_CONCAT_3(_THPCopy_,THNAME,_copyByte)});
+  tensor_copy_handlers.insert({{TYPE, THPByteTensorClass},    TH_CONCAT_3(_THPCopy_,THNAME,_copyByte)});    \
 
 #define INIT_TENSOR_ASYNC_COPY(TYPE)                                           \
   tensor_async_copy_handlers.insert({{TH_CONCAT_3(THP,TYPE,TensorClass), TH_CONCAT_3(THCP,TYPE,TensorClass)}, TH_CONCAT_3(THP,TYPE,Tensor_copyAsyncGPU)}); \
@@ -148,6 +177,7 @@ static bool THCPModule_initCopy()
 
   INIT_TENSOR_GPU_GPU_COPY(THCPDoubleTensorClass, THCudaDoubleTensor);
   INIT_TENSOR_GPU_GPU_COPY(THCPFloatTensorClass,  THCudaTensor);
+  INIT_TENSOR_GPU_GPU_COPY(THCPHalfTensorClass,   THCudaHalfTensor);
   INIT_TENSOR_GPU_GPU_COPY(THCPLongTensorClass,   THCudaLongTensor);
   INIT_TENSOR_GPU_GPU_COPY(THCPIntTensorClass,    THCudaIntTensor);
   INIT_TENSOR_GPU_GPU_COPY(THCPShortTensorClass,  THCudaShortTensor);
@@ -156,6 +186,7 @@ static bool THCPModule_initCopy()
 
   INIT_TENSOR_CPU_GPU_COPY(THCPDoubleTensorClass, THCudaDoubleTensor);
   INIT_TENSOR_CPU_GPU_COPY(THCPFloatTensorClass,  THCudaTensor);
+  INIT_TENSOR_CPU_GPU_COPY(THCPHalfTensorClass,   THCudaHalfTensor);
   INIT_TENSOR_CPU_GPU_COPY(THCPLongTensorClass,   THCudaLongTensor);
   INIT_TENSOR_CPU_GPU_COPY(THCPIntTensorClass,    THCudaIntTensor);
   INIT_TENSOR_CPU_GPU_COPY(THCPShortTensorClass,  THCudaShortTensor);
@@ -170,6 +201,20 @@ static bool THCPModule_initCopy()
   INIT_TENSOR_ASYNC_COPY(Char)
   INIT_TENSOR_ASYNC_COPY(Byte)
 
+#ifdef CUDA_HALF_TENSOR
+#define HALF_STORAGE_GPU_CPU_COPY(TYPE, THNAME)                                 \
+  storage_copy_handlers.insert({{TYPE, THCPHalfStorageClass},    TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaHalf)});
+#define HALF_STORAGE_GPU_GPU_COPY(TYPE, THNAME)                                 \
+  storage_copy_handlers.insert({{TYPE, THCPHalfStorageClass},    TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaHalf)});
+#define HALF_STORAGE_GPU_GPU_COPY_ASYNC(TYPE, THNAME)                           \
+  storage_async_copy_handlers.insert({{TYPE, THCPHalfStorageClass},    TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaHalf)});
+#else
+#define HALF_STORAGE_GPU_CPU_COPY(TYPE, THNAME)
+#define HALF_STORAGE_GPU_GPU_COPY(TYPE, THNAME)
+#define HALF_STORAGE_GPU_GPU_COPY_ASYNC(TYPE, THNAME)
+#endif
+
+
 #define INIT_STORAGE_GPU_CPU_COPY(TYPE, THNAME)                                \
   storage_copy_handlers.insert({{TYPE, THCPDoubleStorageClass},  TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaDouble)});  \
   storage_copy_handlers.insert({{TYPE, THCPFloatStorageClass},   TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaFloat)});   \
@@ -177,7 +222,8 @@ static bool THCPModule_initCopy()
   storage_copy_handlers.insert({{TYPE, THCPIntStorageClass},     TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaInt)});     \
   storage_copy_handlers.insert({{TYPE, THCPShortStorageClass},   TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaShort)});   \
   storage_copy_handlers.insert({{TYPE, THCPCharStorageClass},    TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaChar)});    \
-  storage_copy_handlers.insert({{TYPE, THCPByteStorageClass},    TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaByte)});
+  storage_copy_handlers.insert({{TYPE, THCPByteStorageClass},    TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaByte)});    \
+  HALF_STORAGE_GPU_CPU_COPY(TYPE, THNAME)
 
 #define INIT_STORAGE_GPU_GPU_COPY(TYPE, THNAME)                                \
   storage_copy_handlers.insert({{TYPE, THCPDoubleStorageClass},  TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaDouble)});  \
@@ -186,7 +232,17 @@ static bool THCPModule_initCopy()
   storage_copy_handlers.insert({{TYPE, THCPIntStorageClass},     TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaInt)});     \
   storage_copy_handlers.insert({{TYPE, THCPShortStorageClass},   TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaShort)});   \
   storage_copy_handlers.insert({{TYPE, THCPCharStorageClass},    TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaChar)});    \
-  storage_copy_handlers.insert({{TYPE, THCPByteStorageClass},    TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaByte)});
+  storage_copy_handlers.insert({{TYPE, THCPByteStorageClass},    TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaByte)});    \
+  HALF_STORAGE_GPU_GPU_COPY_ASYNC(TYPE, THNAME)                                                                    \
+  /* CUDA copy launches are always async */                                                                        \
+  storage_async_copy_handlers.insert({{TYPE, THCPDoubleStorageClass},  TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaDouble)}); \
+  storage_async_copy_handlers.insert({{TYPE, THCPFloatStorageClass},   TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaFloat)});  \
+  storage_async_copy_handlers.insert({{TYPE, THCPLongStorageClass},    TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaLong)});   \
+  storage_async_copy_handlers.insert({{TYPE, THCPIntStorageClass},     TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaInt)});    \
+  storage_async_copy_handlers.insert({{TYPE, THCPShortStorageClass},   TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaShort)});  \
+  storage_async_copy_handlers.insert({{TYPE, THCPCharStorageClass},    TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaChar)});   \
+  storage_async_copy_handlers.insert({{TYPE, THCPByteStorageClass},    TH_CONCAT_3(_THPCopy_,THNAME,_copyCudaByte)});   \
+  HALF_STORAGE_GPU_GPU_COPY_ASYNC(TYPE, THNAME)
 
 #define INIT_STORAGE_CPU_GPU_COPY(TYPE, THNAME)                                \
   storage_copy_handlers.insert({{TYPE, THPDoubleStorageClass},  TH_CONCAT_3(_THPCopy_,THNAME,_copyDouble)});  \
@@ -207,6 +263,7 @@ static bool THCPModule_initCopy()
 
   INIT_STORAGE_GPU_GPU_COPY(THCPDoubleStorageClass, THCudaDoubleStorage);
   INIT_STORAGE_GPU_GPU_COPY(THCPFloatStorageClass,  THCudaStorage);
+  INIT_STORAGE_GPU_GPU_COPY(THCPHalfStorageClass,   THCudaHalfStorage);
   INIT_STORAGE_GPU_GPU_COPY(THCPLongStorageClass,   THCudaLongStorage);
   INIT_STORAGE_GPU_GPU_COPY(THCPIntStorageClass,    THCudaIntStorage);
   INIT_STORAGE_GPU_GPU_COPY(THCPShortStorageClass,  THCudaShortStorage);
@@ -215,6 +272,7 @@ static bool THCPModule_initCopy()
 
   INIT_STORAGE_CPU_GPU_COPY(THCPDoubleStorageClass, THCudaDoubleStorage);
   INIT_STORAGE_CPU_GPU_COPY(THCPFloatStorageClass,  THCudaStorage);
+  INIT_STORAGE_CPU_GPU_COPY(THCPHalfStorageClass,   THCudaHalfStorage);
   INIT_STORAGE_CPU_GPU_COPY(THCPLongStorageClass,   THCudaLongStorage);
   INIT_STORAGE_CPU_GPU_COPY(THCPIntStorageClass,    THCudaIntStorage);
   INIT_STORAGE_CPU_GPU_COPY(THCPShortStorageClass,  THCudaShortStorage);
@@ -229,4 +287,10 @@ static bool THCPModule_initCopy()
 #undef INIT_STORAGE_GPU_CPU_COPY
 #undef INIT_STORAGE_GPU_GPU_COPY
 #undef INIT_STORAGE_CPU_GPU_COPY
+#undef HALF_TENSOR_GPU_CPU_COPY
+#undef HALF_TENSOR_GPU_GPU_COPY
+#undef HALF_TENSOR_CPU_GPU_COPY
+#undef HALF_TENSOR_GPU_CPU_COPY
+#undef HALF_TENSOR_GPU_GPU_COPY
+#undef HALF_TENSOR_CPU_GPU_COPY
 }

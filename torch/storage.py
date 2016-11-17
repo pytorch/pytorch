@@ -51,6 +51,9 @@ class _StorageBase(object):
     def float(self, async=False):
         return self.type(type(self).__module__ + '.FloatStorage', async)
 
+    def half(self, async=False):
+        return self.type(type(self).__module__ + '.HalfStorage', async)
+
     def long(self, async=False):
         return self.type(type(self).__module__ + '.LongStorage', async)
 
