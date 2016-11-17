@@ -11,6 +11,7 @@ KEEP ?= 0
 DEBUG ?= 0
 PROFAPI ?= 0
 BUILDDIR ?= build
+BUILDDIR := $(abspath $(BUILDDIR))
 
 CUDA_LIB ?= $(CUDA_HOME)/lib64
 CUDA_INC ?= $(CUDA_HOME)/include
@@ -21,7 +22,7 @@ NVCC_GENCODE ?= -gencode=arch=compute_35,code=sm_35 \
                 -gencode=arch=compute_52,code=sm_52 \
                 -gencode=arch=compute_52,code=compute_52
 
-CXXFLAGS   := -I$(CUDA_INC) -fPIC -fvisibility=hidden 
+CXXFLAGS   := -I$(CUDA_INC) -fPIC -fvisibility=hidden
 NVCUFLAGS  := -ccbin $(CXX) $(NVCC_GENCODE) -lineinfo -std=c++11 -maxrregcount 96
 # Use addprefix so that we can specify more than one path
 LDFLAGS    := $(addprefix -L,${CUDA_LIB}) -lcudart -lrt
@@ -59,7 +60,7 @@ CUDA_MAJOR = $(shell echo $(CUDA_VERSION) | cut -d "." -f 1)
 CUDA_MINOR = $(shell echo $(CUDA_VERSION) | cut -d "." -f 2)
 CXXFLAGS  += -DCUDA_MAJOR=$(CUDA_MAJOR) -DCUDA_MINOR=$(CUDA_MINOR)
 
-.PHONY : lib clean test mpitest install deb debian debclean
+.PHONY : lib clean test mpitest install deb debian debclean forlib fortest forclean
 .DEFAULT : lib
 
 INCEXPORTS  := nccl.h
@@ -82,19 +83,19 @@ lib : $(INCTARGETS) $(LIBDIR)/$(LIBTARGET)
 -include $(DEPFILES)
 
 $(LIBDIR)/$(LIBTARGET) : $(LIBOBJ)
-	@printf "Linking   %-25s\n" $@
+	@printf "Linking   %-35s > %s\n" $(LIBTARGET) $@
 	mkdir -p $(LIBDIR)
 	$(CXX) $(CXXFLAGS) -shared -Wl,--no-as-needed -Wl,-soname,$(LIBSONAME) -o $@ $(LDFLAGS) $(LIBOBJ)
 	ln -sf $(LIBSONAME) $(LIBDIR)/$(LIBNAME)
 	ln -sf $(LIBTARGET) $(LIBDIR)/$(LIBSONAME)
 
 $(INCDIR)/%.h : src/%.h
-	@printf "Grabbing  %-25s > %-25s\n" $< $@
+	@printf "Grabbing  %-35s > %s\n" $< $@
 	mkdir -p $(INCDIR)
 	cp -f $< $@
 
 $(OBJDIR)/%.o : src/%.cu
-	@printf "Compiling %-25s > %-25s\n" $< $@
+	@printf "Compiling %-35s > %s\n" $< $@
 	mkdir -p $(OBJDIR)
 	$(NVCC) -c $(NVCUFLAGS) --compiler-options "$(CXXFLAGS)" $< -o $@
 	@$(NVCC) -M $(NVCUFLAGS) --compiler-options "$(CXXFLAGS)" $< > $(@:%.o=%.d.tmp)
@@ -147,7 +148,7 @@ MPITESTBINS:= $(patsubst %, $(MPITSTDIR)/%, $(MPITESTS))
 test : $(TESTBINS)
 
 $(TSTDIR)/% : test/single/%.cu test/include/*.h $(TSTDEP)
-	@printf "Building  %-25s > %-24s\n" $< $@
+	@printf "Building  %-35s > %s\n" $< $@
 	mkdir -p $(TSTDIR)
 	$(NVCC) $(TSTINC) $(NVCUFLAGS) --compiler-options "$(CXXFLAGS)" -o $@ $< $(TSTLIB) -lcuda -lcurand -lnvToolsExt
 	@$(NVCC) -M $(TSTINC) $(NVCUFLAGS) --compiler-options "$(CXXFLAGS)" $< $(TSTLIB) -lcuda -lcurand -lnvToolsExt > $(@:%=%.d.tmp)
@@ -159,7 +160,7 @@ $(TSTDIR)/% : test/single/%.cu test/include/*.h $(TSTDEP)
 mpitest : $(MPITESTBINS)
 
 $(MPITSTDIR)/% : test/mpi/%.cu $(TSTDEP)
-	@printf "Building  %-25s > %-24s\n" $< $@
+	@printf "Building  %-35s > %s\n" $< $@
 	mkdir -p $(MPITSTDIR)
 	$(NVCC) $(MPIFLAGS) $(TSTINC) $(NVCUFLAGS) --compiler-options "$(CXXFLAGS)" -o $@ $< $(TSTLIB) -lcurand
 	@$(NVCC) $(MPIFLAGS) -M $(TSTINC) $(NVCUFLAGS) --compiler-options "$(CXXFLAGS)" $< $(TSTLIB) -lcurand > $(@:%=%.d.tmp)
@@ -193,7 +194,7 @@ debclean :
 	rm -Rf $(DEBIANDIR)
 
 $(DEBIANDIR)/% : debian/%.in
-	@printf "Generating %-25s > %-24s\n" $< $@
+	@printf "Generating %-35s > %s\n" $< $@
 	sed -e "s/\$${nccl:Major}/$(NCCL_MAJOR)/g" \
 	    -e "s/\$${nccl:Minor}/$(NCCL_MINOR)/g" \
 	    -e "s/\$${nccl:Patch}/$(NCCL_PATCH)/g" \
@@ -205,7 +206,18 @@ $(DEBIANDIR)/% : debian/%.in
 	    $< > $@
 
 $(DEBIANDIR)/% : debian/%
-	@printf "Grabbing  %-25s > %-25s\n" $< $@
+	@printf "Grabbing  %-35s > %s\n" $< $@
 	mkdir -p $(DEBIANDIR)
 	cp -f $< $@
+
+#### FORTRAN BINDINGS ####
+
+export NCCL_MAJOR NCCL_MINOR NCCL_PATCH CUDA_MAJOR CUDA_MINOR LIBLINK CUDA_LIB BUILDDIR
+
+forlib : lib
+	$(MAKE) -C fortran lib
+fortest : forlib
+	$(MAKE) -C fortran test
+forclean :
+	$(MAKE) -C fortran clean
 
