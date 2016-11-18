@@ -392,7 +392,7 @@ def _doc2md(lines, shiftlevel=0):
     _doc2md.code += _doc2md.md
     return _doc2md.code
 
-def doc2md(docstr, title, min_level=1, more_info=False, toc=True):
+def doc2md(docstr, title, min_level=3, more_info=False, toc=True):
     """
     Convert a docstring to a markdown text.
     """
@@ -444,7 +444,7 @@ def mod2md(module, title, title_api_section, toc=True):
     api_sec = []
     if title_api_section :
         # sections.append((level+1, title_api_section))
-        for name, entry in iter(sorted(module.__dict__.items())):
+        for name, entry in iter(module.__dict__.items()):
             if name[0] != '_' and entry.__doc__:
                 #api_sec.append((level+1, name))
                 #api_md += ['', '']

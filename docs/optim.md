@@ -6,14 +6,14 @@ using a wide variety of optimization methods such as SGD, Adam etc.
 Currently, the following optimization methods are supported, typically with
 options such as weight decay and other bells and whistles.
 
-- SGD
-- AdaDelta
-- Adagrad
-- Adam
-- AdaMax
-- Averaged SGD
-- RProp
-- RMSProp
+- SGD          `(params, lr=required, momentum=0, dampening=0)`
+- AdaDelta     `(params, rho=0.9, eps=1e-6, weight_decay=0)`
+- Adagrad      `(params, lr=1e-2, lr_decay=0, weight_decay=0)`
+- Adam         `(params, lr=1e-2, betas=(0.9, 0.999), epsilon=1e-8, weight_decay=0)`
+- AdaMax       `(params, lr=1e-2, betas=(0.9, 0.999), eps=1e-38, weight_decay=0)`
+- Averaged SGD `(params, lr=1e-2, lambd=1e-4, alpha=0.75, t0=1e6, weight_decay=0)`
+- RProp        `(params, lr=1e-2, etas=(0.5, 1.2), step_sizes=(1e-6, 50))`
+- RMSProp      `(params, lr=1e-2, alpha=0.99, eps=1e-8, weight_decay=0)`
 
 
 The usage of the Optim package itself is as follows.
@@ -50,7 +50,7 @@ Example:
 
 Then, you can use the optimizer by calling `optimizer.zero_grad()` and `optimizer.step(...)`. Read the next sections.
 
-## 2. `Optimizer.step(...)`
+## 2. Taking an optimization step using `Optimizer.step(...)`
 
 The step function has the following two signatures:
 
