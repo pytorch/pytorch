@@ -453,30 +453,31 @@ class TestNN(NNTestCase):
     def test_MaxPool3d_indices(self):
         self._test_maxpool_indices(3)
 
-    def _test_scatter(self, x):
-        if not TEST_MULTIGPU:
-            raise unittest.SkipTest("Only one GPU detected")
-        x = Variable(x)
+    def _test_scatter(self, tensor):
+        x = Variable(tensor, requires_grad=True)
         result = dp.scatter(x, (0, 1))
         self.assertEqual(len(result), 2)
         self.assertEqual(result[0], x[:2])
         self.assertEqual(result[0].get_device(), 0)
         self.assertEqual(result[1], x[2:])
         self.assertEqual(result[1].get_device(), 1)
+        grad = result[0].data.clone().fill_(2)
+        result[0].backward(grad)
+        self.assertEqual(x.grad[:2], grad)
+        self.assertEqual(x.grad[2:], grad.clone().zero_())
 
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_scatter_cpu(self):
         self._test_scatter(torch.randn(4, 4))
 
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_scatter_gpu(self):
-        if TEST_CUDA:
-            self._test_scatter(torch.randn(4, 4).cuda())
+        self._test_scatter(torch.randn(4, 4).cuda())
 
     def _test_gather(self, output_device):
-        if not TEST_MULTIGPU:
-            raise unittest.SkipTest("Only one GPU detected")
         inputs = (
-            Variable(torch.randn(2, 4).cuda(0)),
-            Variable(torch.randn(2, 4).cuda(1))
+            Variable(torch.randn(2, 4).cuda(0), requires_grad=True),
+            Variable(torch.randn(2, 4).cuda(1), requires_grad=True)
         )
         result = dp.gather(inputs, output_device)
         self.assertEqual(result.size(), torch.Size([4, 4]))
@@ -486,14 +487,22 @@ class TestNN(NNTestCase):
             self.assertEqual(result.get_device(), output_device)
         else:
             self.assertFalse(result.is_cuda)
+        grad = torch.randn(4, 4)
+        if output_device != -1:
+            grad = grad.cuda(output_device)
+        result.backward(grad)
+        self.assertEqual(inputs[0].grad, grad[:2])
+        self.assertEqual(inputs[1].grad, grad[2:])
 
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_gather_cpu(self):
         self._test_gather(-1)
 
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_gather_gpu(self):
         self._test_gather(0)
 
-    @unittest.skipIf(not TEST_MULTIGPU, "Only one GPU detected")
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_replicate(self):
         module = nn.Linear(10, 5).float().cuda()
         input = Variable(torch.randn(2, 10).float().cuda())
@@ -505,7 +514,7 @@ class TestNN(NNTestCase):
             replica_input = input.cuda(i)
             self.assertEqual(replica(replica_input).data, expected_output)
 
-    @unittest.skipIf(not TEST_MULTIGPU, "Only one GPU detected")
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_replicate_buffers(self):
         net = nn.Container()
         net.bn = nn.BatchNorm2d(10)
@@ -515,7 +524,7 @@ class TestNN(NNTestCase):
             self.assertEqual(replica.bn.running_mean.get_device(), i, 'buffer on wrong device')
             self.assertEqual(replica.bn.running_var.get_device(), i, 'buffer on wrong device')
 
-    @unittest.skipIf(not TEST_MULTIGPU, "Only one GPU detected")
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_parallel_apply(self):
         l1 = nn.Linear(10, 5).float().cuda(0)
         l2 = nn.Linear(10, 5).float().cuda(1)
@@ -533,7 +542,7 @@ class TestNN(NNTestCase):
         inputs = (i1, Variable(i2.data.new()))
         expected_outputs = (expected1, expected2.new())
 
-    @unittest.skipIf(not TEST_MULTIGPU, "Only one GPU detected")
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel(self):
         l = nn.Linear(10, 5).float().cuda()
         i = Variable(torch.randn(20, 10).float().cuda(1))
