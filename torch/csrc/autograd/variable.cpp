@@ -72,6 +72,7 @@ static int THPVariable_clear(THPVariable *self)
 
 static void THPVariable_dealloc(THPVariable* self)
 {
+  PyObject_GC_UnTrack(self);
   Py_XDECREF(self->creator);
   Py_XDECREF(self->data);
   Py_XDECREF(self->grad);
@@ -81,7 +82,6 @@ static void THPVariable_dealloc(THPVariable* self)
 
   // We don't want to cache any subclasses
   if ((PyObject*)Py_TYPE(self) == THPVariableClass && num_cached < CACHE_SIZE) {
-    PyObject_GC_UnTrack(self);
     cached_variables[num_cached++] = self;
     // Variable class is defined in Python code, and as such has a
     // Py_TPFLAGS_HEAPTYPE flag set, so python DECREFs the class at each
@@ -262,4 +262,3 @@ bool THPVariable_initModule(PyObject *module)
   PyModule_AddObject(module, "_VariableBase", (PyObject *)&THPVariableType);
   return true;
 }
-
