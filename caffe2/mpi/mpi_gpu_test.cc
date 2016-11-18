@@ -52,7 +52,7 @@ TEST(MPITest, TestMPIBroadcast) {
       string(kBcastNet), &net_def));
   // Let's set the network's constant fill value to be the mpi rank.
   auto* arg = net_def.mutable_op(1)->mutable_arg(1);
-  CHECK_EQ(arg->name(), "value");
+  CAFFE_ENFORCE_EQ(arg->name(), "value");
   int rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   arg->set_f(rank);
@@ -116,7 +116,7 @@ TEST(MPITest, TestMPIReduce) {
       string(kReduceNet), &net_def));
   // Let's set the network's constant fill value to be the mpi rank.
   auto* arg = net_def.mutable_op(1)->mutable_arg(1);
-  CHECK_EQ(arg->name(), "value");
+  CAFFE_ENFORCE_EQ(arg->name(), "value");
   int rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   arg->set_f(rank);
@@ -184,7 +184,7 @@ TEST(MPITest, TestMPIAllgather) {
       string(kMPIAllgatherNet), &net_def));
   // Let's set the network's constant fill value to be the mpi rank.
   auto* arg = net_def.mutable_op(1)->mutable_arg(1);
-  CHECK_EQ(arg->name(), "value");
+  CAFFE_ENFORCE_EQ(arg->name(), "value");
   int rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   arg->set_f(rank);
@@ -249,7 +249,7 @@ TEST(MPITest, TestMPIAllreduce) {
       string(kMPIAllreduceNet), &net_def));
   // Let's set the network's constant fill value to be the mpi rank.
   auto* arg = net_def.mutable_op(1)->mutable_arg(1);
-  CHECK_EQ(arg->name(), "value");
+  CAFFE_ENFORCE_EQ(arg->name(), "value");
   int rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   arg->set_f(rank);
@@ -313,7 +313,7 @@ TEST(MPITest, TestInPlaceMPIAllreduce) {
       string(kInPlaceMPIAllreduceNet), &net_def));
   // Let's set the network's constant fill value to be the mpi rank.
   auto* arg = net_def.mutable_op(1)->mutable_arg(1);
-  CHECK_EQ(arg->name(), "value");
+  CAFFE_ENFORCE_EQ(arg->name(), "value");
   int rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   arg->set_f(rank);

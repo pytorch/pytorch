@@ -70,6 +70,50 @@ class TestWorkspace(unittest.TestCase):
         self.assertEqual(workspace.ResetWorkspace(), True)
         self.assertEqual(workspace.HasBlob("testblob"), False)
 
+    def testTensorAccess(self):
+        ws = workspace.C.Workspace()
+
+        """ test in-place modification """
+        ws.create_blob("tensor").feed(np.array([1.1, 1.2, 1.3]))
+        tensor = ws.blobs["tensor"].tensor()
+        tensor.data[0] = 3.3
+        val = np.array([3.3, 1.2, 1.3])
+        np.testing.assert_array_equal(tensor.data, val)
+        np.testing.assert_array_equal(ws.blobs["tensor"].fetch(), val)
+
+        """ test in-place initialization """
+        tensor.init([2, 3], core.DataType.INT32)
+        tensor.data[1, 1] = 100
+        val = np.zeros([2, 3], dtype=np.int32)
+        val[1, 1] = 100
+        np.testing.assert_array_equal(tensor.data, val)
+        np.testing.assert_array_equal(ws.blobs["tensor"].fetch(), val)
+
+        """ strings cannot be initialized from python """
+        with self.assertRaises(RuntimeError):
+            tensor.init([3, 4], core.DataType.STRING)
+
+        """ feed (copy) data into tensor """
+        val = np.array([['abc', 'def'], ['ghi', 'jkl']], dtype=np.object)
+        tensor.feed(val)
+        self.assertEquals(tensor.data[0, 0], 'abc')
+        np.testing.assert_array_equal(ws.blobs["tensor"].fetch(), val)
+
+        val = np.array([1.1, 10.2])
+        tensor.feed(val)
+        val[0] = 5.2
+        self.assertEquals(tensor.data[0], 1.1)
+
+        """ fetch (copy) data from tensor """
+        val = np.array([1.1, 1.2])
+        tensor.feed(val)
+        val2 = tensor.fetch()
+        tensor.data[0] = 5.2
+        val3 = tensor.fetch()
+        np.testing.assert_array_equal(val, val2)
+        self.assertEquals(val3[0], 5.2)
+
+
     def testFetchFeedBlob(self):
         self.assertEqual(
             workspace.RunNetOnce(self.net.Proto().SerializeToString()), True)

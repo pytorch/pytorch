@@ -29,7 +29,7 @@ class BatchLRLoss(ModelLayer):
 
         self.output_schema = schema.Scalar(
             np.float32,
-            core.BlobReference(model.net.NextName(self.name + '_output')))
+            core.ScopedBlobReference(model.net.NextName(self.name + '_output')))
 
     # This should be a bit more complicated than it is right now
     def add_ops(self, net):

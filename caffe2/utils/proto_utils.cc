@@ -100,7 +100,7 @@ using ::google::protobuf::io::CodedOutputStream;
 
 bool ReadProtoFromTextFile(const char* filename, Message* proto) {
   int fd = open(filename, O_RDONLY);
-  CHECK_NE(fd, -1) << "File not found: " << filename;
+  CAFFE_ENFORCE_NE(fd, -1, "File not found: ", filename);
   FileInputStream* input = new FileInputStream(fd);
   bool success = google::protobuf::TextFormat::Parse(input, proto);
   delete input;
@@ -118,7 +118,7 @@ void WriteProtoToTextFile(const Message& proto, const char* filename) {
 
 bool ReadProtoFromBinaryFile(const char* filename, MessageLite* proto) {
   int fd = open(filename, O_RDONLY);
-  CHECK_NE(fd, -1) << "File not found: " << filename;
+  CAFFE_ENFORCE_NE(fd, -1, "File not found: ", filename);
   std::unique_ptr<ZeroCopyInputStream> raw_input(new FileInputStream(fd));
   std::unique_ptr<CodedInputStream> coded_input(
       new CodedInputStream(raw_input.get()));
@@ -133,8 +133,8 @@ bool ReadProtoFromBinaryFile(const char* filename, MessageLite* proto) {
 
 void WriteProtoToBinaryFile(const MessageLite& proto, const char* filename) {
   int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-  CHECK_NE(fd, -1) << "File cannot be created: " << filename
-                   << " error number: " << errno;
+  CAFFE_ENFORCE_NE(
+      fd, -1, "File cannot be created: ", filename, " error number: ", errno);
   std::unique_ptr<ZeroCopyOutputStream> raw_output(new FileOutputStream(fd));
   std::unique_ptr<CodedOutputStream> coded_output(
       new CodedOutputStream(raw_output.get()));

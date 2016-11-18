@@ -68,7 +68,7 @@ class GPUFallbackOp final : public Operator<CUDAContext> {
   USE_OPERATOR_FUNCTIONS(CUDAContext);
   GPUFallbackOp(const OperatorDef& def, Workspace* ws)
       : Operator<CUDAContext>(def, ws) {
-    CHECK_EQ(def.device_option().device_type(), CUDA);
+    CAFFE_ENFORCE_EQ(def.device_option().device_type(), CUDA);
     OperatorDef base_def_(def);
     // base_def_ runs on CPU, so we will set its device option to CPU.
     base_def_.clear_device_option();

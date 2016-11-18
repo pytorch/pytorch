@@ -40,14 +40,14 @@ class SparseLookup(ModelLayer):
 
         self.output_schema = schema.Scalar(
             (np.float32, inner_shape),
-            core.BlobReference(model.net.NextName(self.name + '_output')))
+            core.ScopedBlobReference(model.net.NextName(self.name + '_output')))
 
         scale = math.sqrt(1.0 / input_dim)
         self.shape = [input_dim] + inner_shape
         self.weight_init = weight_init if weight_init else (
             'UniformFill', {'min': -scale, 'max': scale})
 
-        self.w = model.net.NextName(self.name + "_w")
+        self.w = core.ScopedBlobReference(model.net.NextName(self.name + "_w"))
         self.params.append(
             LayerParameter(
                 parameter=self.w,
@@ -73,9 +73,10 @@ class SparseLookup(ModelLayer):
                 )
             else:
                 table_rows = net.Gather([self.w, self.input_record.keys()])
-                segments = net.LengthsToRanges(self.input_record.lengths())
+                segment_ids = net.LengthsToSegmentIds(
+                    self.input_record.lengths())
                 net.__getattr__('SortedSegmentRange' + self.reducer)(
-                    [table_rows, segments],
+                    [table_rows, segment_ids],
                     self.output_schema.field_blobs()
                 )
         elif schema.equal_schemas(self.input_record, IdScoreList):

@@ -22,11 +22,11 @@ class CreateBlobsQueueOp final : public Operator<Context> {
     const auto enforceUniqueName =
         OperatorBase::template GetSingleArgument<int>(
             "enforce_unique_name", false);
-    CHECK_EQ(def().output().size(), 1);
+    CAFFE_ENFORCE_EQ(def().output().size(), 1);
     const auto name = def().output().Get(0);
     auto queuePtr = Operator<Context>::Outputs()[0]
                         ->template GetMutable<std::shared_ptr<BlobsQueue>>();
-    CHECK(queuePtr);
+    CAFFE_ENFORCE(queuePtr);
     *queuePtr = std::make_shared<BlobsQueue>(
         ws_, name, capacity, numBlobs, enforceUniqueName);
     return true;
@@ -74,7 +74,7 @@ class CloseBlobsQueueOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   using Operator<Context>::Operator;
   bool RunOnDevice() override {
-    CHECK_EQ(InputSize(), 1);
+    CAFFE_ENFORCE_EQ(InputSize(), 1);
     auto queue =
         OperatorBase::Inputs()[0]->template Get<std::shared_ptr<BlobsQueue>>();
     CHECK(queue);

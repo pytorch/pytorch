@@ -43,7 +43,7 @@ class Concat(ModelLayer):
 
         self.output_schema = schema.Scalar(
             (np.float32, output_dims),
-            core.BlobReference(model.net.NextName(self.name + '_output')))
+            core.ScopedBlobReference(model.net.NextName(self.name + '_output')))
 
     def add_ops(self, net):
         net.Concat(

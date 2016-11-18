@@ -208,7 +208,7 @@ void NCCL<T>::AllGather(const NCCLExecution& ex) {
   const auto n = ex.elements.size();
   return runNCCL<T>(
       ex, [n](const NCCLElement& ctx, ncclComm_t comm, cudaStream_t stream) {
-        CHECK_NE(ctx.src, ctx.dst);
+        CAFFE_ENFORCE_NE(ctx.src, ctx.dst);
         std::vector<TIndex> dims;
         dims.reserve(ctx.src->ndim() + 1);
         dims.push_back(n);

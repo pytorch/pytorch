@@ -11,7 +11,7 @@ namespace caffe2 {
 inline void CheckInitializedMPI() {
   int flag;
   MPI_Initialized(&flag);
-  CHECK(flag) << "MPI does not seem to have been initialized.";
+  CAFFE_ENFORCE(flag, "MPI does not seem to have been initialized.");
 }
 
 template <typename T> class MPIDataTypeWrapper;

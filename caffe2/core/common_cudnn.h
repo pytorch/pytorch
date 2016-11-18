@@ -56,13 +56,18 @@ inline const char* cudnnGetErrorString(cudnnStatus_t status) {
 
 // A macro that wraps around a cudnn statement so we can check if the cudnn
 // execution finishes or not.
-#define CUDNN_CHECK(condition)                                 \
-  do {                                                         \
-    cudnnStatus_t status = condition;                          \
-    CHECK_EQ(status, CUDNN_STATUS_SUCCESS)                     \
-        << " "                                                 \
-        << "Error at: " << __FILE__ << ":" << __LINE__ << ": " \
-        << ::caffe2::internal::cudnnGetErrorString(status);    \
+#define CUDNN_CHECK(condition)                            \
+  do {                                                    \
+    cudnnStatus_t status = condition;                     \
+    CAFFE_ENFORCE_EQ(                                     \
+        status,                                           \
+        CUDNN_STATUS_SUCCESS,                             \
+        ", Error at: ",                                   \
+        __FILE__,                                         \
+        ":",                                              \
+        __LINE__,                                         \
+        ": ",                                             \
+        ::caffe2::internal::cudnnGetErrorString(status)); \
   } while (0)
 
 /**
@@ -160,8 +165,8 @@ class cudnnTensorDescWrapper {
         *changed = false;
       return desc_;
     }
-    CHECK_EQ(dims.size(), 4)
-        << "Currently only 4-dimensional descriptor supported.";
+    CAFFE_ENFORCE_EQ(
+        dims.size(), 4, "Currently only 4-dimensional descriptor supported.");
     format_ = format;
     type_ = type;
     dims_ = dims;
@@ -214,8 +219,8 @@ class cudnnFilterDescWrapper {
         *changed = false;
       return desc_;
     }
-    CHECK_EQ(dims.size(), 4)
-        << "Currently only 4-dimensional descriptor supported.";
+    CAFFE_ENFORCE_EQ(
+        dims.size(), 4, "Currently only 4-dimensional descriptor supported.");
     order_ = order;
     type_ = type;
     dims_ = dims;
@@ -295,7 +300,7 @@ struct CuDNNWorkspace {
       data_ = CUDAContext::New(nbytes);
       nbytes_ = nbytes;
     }
-    CHECK_GE(nbytes_, nbytes);
+    CAFFE_ENFORCE_GE(nbytes_, nbytes);
     return data_;
   }
 

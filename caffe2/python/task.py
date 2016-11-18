@@ -75,10 +75,10 @@ def get_setup_nets(key, steps, target):
     exit_net = core.Net(key + '/exit')
     init_nets = []
     exit_nets = []
-    objs = set()
+    objs = []
     for step in steps:
         if step is not None:
-            objs |= set(step.get_all_attributes(key))
+            objs += step.get_all_attributes(key)
     for obj in objs:
         # these are needed in order to allow nesting of TaskGroup, which
         # is a feature not yet implemented.
@@ -271,7 +271,10 @@ class TaskGroup(object):
         return grouped_by_node
 
     def to_task(self, node='local'):
-        return self.tasks_by_node(lambda x: 'local').tasks()[0]
+        tasks = self.tasks_by_node(lambda x: 'local').tasks()
+        if len(tasks) == 0:
+            return Task()
+        return tasks[0]
 
 
 class TaskOutput(object):
@@ -403,6 +406,8 @@ class Task(object):
                     core.execution_step('task_exit', exit_nets),
                 ]
             )
+        elif self._step_with_setup is None:
+            self._step_with_setup = core.execution_step('task', [])
         return self._step_with_setup
 
     def outputs(self):

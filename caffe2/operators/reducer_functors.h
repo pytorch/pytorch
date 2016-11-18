@@ -447,8 +447,8 @@ class WeightedSumReducer<T, CPUContext> {
     void
     observeInput(int input, const Tensor<CPUContext>& value, int skip_dims) {
       if (input == 1) {
-        CHECK_EQ(skip_dims, value.ndim())
-            << "SCALARS mustn't have extra dimensions";
+        CAFFE_ENFORCE_EQ(
+            skip_dims, value.ndim(), "SCALARS mustn't have extra dimensions");
         scalars = value.data<T>();
         return;
       }
@@ -505,7 +505,7 @@ class WeightedSumReducerGradient {
         int original_input,
         const Tensor<CPUContext>& value,
         int skip_dims) {
-      CHECK_EQ(1, original_input);
+      CAFFE_ENFORCE_EQ(1, original_input);
       scalars = value.data<T>();
     }
 

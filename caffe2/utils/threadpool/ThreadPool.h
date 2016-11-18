@@ -10,6 +10,12 @@
 // ThreadPool only used in mobile builds at the moment
 #if CAFFE2_THREADPOOL_MOBILE
 
+// Compile-time flag to control inclusion of per-worker thread stats
+// #define CAFFE2_THREADPOOL_STATS
+
+// Compile-time flag to control usage of main thread work imbalance
+// #define CAFFE2_THREADPOOL_MAIN_IMBALANCE
+
 #include <atomic>
 #include <condition_variable>
 #include <memory>
@@ -17,6 +23,7 @@
 #include <thread>
 #include <vector>
 #include <functional>
+#include <stdlib.h> // posix_memalign
 
 //
 // A work-stealing threadpool loosely based off of pthreadpool
@@ -24,10 +31,78 @@
 
 namespace caffe2 {
 
+constexpr size_t kCacheLineSize = 64;
+
+template <typename T>
+struct AllocAligned {
+  // Allocate a T aligned at an `align` byte address
+  template <typename... Args>
+  static T* alloc(size_t align, Args&&... args) {
+    void* p = nullptr;
+    // FIXME: we should just be able to use std::align
+#if !defined(__ANDROID__)
+    posix_memalign((void**) &p, align, sizeof(T));
+#else
+    p = memalign(align, sizeof(T));
+#endif
+
+    if (p) {
+      return new(p) T(std::forward<Args>(args)...);
+    }
+
+    return nullptr;
+  }
+
+  // Free a T previously allocated via AllocAligned<T>::alloc()
+  static void release(T* p) {
+    if (p) {
+      p->~T();
+      free((void*) p);
+    }
+  }
+};
+
+// Deleter object for unique_ptr for an aligned object
+template <typename T>
+struct AlignedDeleter {
+  void operator()(T* p) const {
+    AllocAligned<T>::release(p);
+  }
+};
+
+// make_unique that guarantees alignment
+template <typename T>
+struct MakeAligned {
+  template <typename... Args>
+  static std::unique_ptr<T, AlignedDeleter<T>> make(size_t align,
+                                                    Args&&... args) {
+    return std::unique_ptr<T, AlignedDeleter<T>>(
+      AllocAligned<T>::alloc(align, std::forward<Args>(args)...));
+  }
+};
+
 struct ThreadPool;
 
-struct __attribute__((__aligned__(64))) ThreadInfo {
-  ThreadInfo(int threadId, int numThreads) :
+#ifdef CAFFE2_THREADPOOL_STATS
+struct ThreadStats {
+  inline ThreadStats() :
+      numAssigned(0), numWorkedOn(0), numStolen(0) {
+  }
+
+  inline void reset() {
+    numAssigned = 0;
+    numWorkedOn = 0;
+    numStolen = 0;
+  }
+
+  int numAssigned;
+  int numWorkedOn;
+  int numStolen;
+};
+#endif
+
+struct alignas(kCacheLineSize) ThreadInfo {
+  inline ThreadInfo(int threadId, int numThreads) :
     rangeStart_(0),
     rangeEnd_(0),
     rangeLength_(0),
@@ -71,11 +146,20 @@ struct __attribute__((__aligned__(64))) ThreadInfo {
 
   // How many threads are there in total?
   int numThreads_;
+
+#ifdef CAFFE2_THREADPOOL_STATS
+  // Updated stats
+  ThreadStats stats_;
+#endif
 };
 
-class  __attribute__((__aligned__(64))) ThreadPool {
+class alignas(kCacheLineSize) ThreadPool {
   public:
+  // Constructs a work-stealing threadpool with the given number of
+  // threads
   ThreadPool(int numThreads);
+
+  // Shuts down all worker threads (if any) before destroying ourselves
   ~ThreadPool();
 
   // Returns the number of threads currently in use
@@ -86,8 +170,20 @@ class  __attribute__((__aligned__(64))) ThreadPool {
   // main (calling) thread
   void setMinWorkSize(size_t size);
 
+#ifdef CAFFE2_THREADPOOL_MAIN_IMBALANCE
+  // Set imbalance factor for the main thread versus other threads;
+  // default is 1.25
+  void setImbalanceRatio(float ratio);
+#endif
+
   // Called to schedule work on the threadpool
   void run(const std::function<void(int, size_t)>& fn, size_t range);
+
+#ifdef CAFFE2_THREADPOOL_STATS
+  // Returns current per-thread statistics. If reset is true, reset
+  // current values.
+  std::vector<ThreadStats> getStats(bool reset = false);
+#endif
 
   protected:
   friend struct ThreadInfo;
@@ -123,13 +219,19 @@ class  __attribute__((__aligned__(64))) ThreadPool {
   size_t threadsReady_;
 
   // The first entry is always for the main thread
-  std::vector<std::unique_ptr<ThreadInfo>> threadInfo_;
+  std::vector<
+    std::unique_ptr<ThreadInfo, AlignedDeleter<ThreadInfo>>> threadInfo_;
 
   // Set of threads that we are managing
   std::vector<std::thread> threads_;
 
   // What's the minimum work size for using the threadpool?
   size_t minWorkSize_;
+
+#ifdef CAFFE2_THREADPOOL_MAIN_IMBALANCE
+  // Imbalance factor for main vs. other thread work
+  float imbalanceRatio_;
+#endif
 
   // Mutex that ensures that only one user call to the ThreadPool is
   // outstanding

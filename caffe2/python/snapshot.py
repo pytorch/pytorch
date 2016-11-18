@@ -15,8 +15,8 @@ logger.setLevel(logging.INFO)
 @context.define_context()
 class Job(object):
     """
-    A Job defines two TaskGroups: the `init_group` and the `epoch_group`, which
-    will be run by a JobRunner.
+    A Job defines three TaskGroups: the `init_group`, the `epoch_group` and the
+    `exit_group` which will be run by a JobRunner.
 
     The `init_group` will be run only once at startup. Its role is to
     initialize globally persistent blobs such as model weights, accumulators
@@ -25,6 +25,10 @@ class Job(object):
     The `epoch_group` will be run in a loop after init_group. The loop will
     exit when any of the stop signals added with `add_stop_signal` is True
     at the end of an epoch.
+
+    The `exit_group` will be run only once at the very end of the job, when one
+    of the stopping criterias for `epoch_group` was met. The role of this group
+    is save the results of training in the end of the job.
 
     Jobs are context-driven, so that Tasks can be added to the active Job
     without having to explicitly pass the job object around.
@@ -46,6 +50,8 @@ class Job(object):
             Task(step=model.param_init_net)
         with Job.current().epoch_group:
             pipe(reader, processor=model, num_threads=8)
+        with Job.current().exit_group:
+            Task(step=model.save_model_net)
 
     with Job() as job:
         reader = build_reader(partitions)
@@ -55,6 +61,7 @@ class Job(object):
     def __init__(self):
         self.init_group = TaskGroup(workspace_type=WorkspaceType.GLOBAL)
         self.epoch_group = TaskGroup()
+        self.exit_group = TaskGroup()
         self.stop_signals = []
 
     def __enter__(self):
@@ -245,6 +252,7 @@ class JobRunner(object):
                 logger.info('Stopping.')
                 break
             epoch += 1
+        client.run(self.job.exit_group)
         return epoch
 
 

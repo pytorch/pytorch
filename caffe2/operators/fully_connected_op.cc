@@ -32,7 +32,7 @@ OPERATOR_SCHEMA(FCGradient).NumInputs(3).NumOutputs(2, 3);
 class GetFCGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
-    CHECK_EQ(def_.input_size(), 3);
+    CAFFE_ENFORCE_EQ(def_.input_size(), 3);
     return SingleGradientDef(
         "FCGradient", "",
         vector<string>{I(0), I(1), GO(0)},

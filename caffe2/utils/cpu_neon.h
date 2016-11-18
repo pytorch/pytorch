@@ -7,14 +7,6 @@
 
 namespace caffe2 {
 
-inline int divUp(int a, int b) {
-  return (a + b - 1) / b;
-}
-
-inline int roundUp(int a, int b) {
-  return divUp(a, b) * b;
-}
-
 template <typename T>
 inline bool isPointerAligned(T* p, size_t align) {
   return (reinterpret_cast<uintptr_t>(p) % align == 0);

@@ -268,6 +268,22 @@ inline bool is_a_ge_zero_and_a_lt_b(int a, int b) {
   return static_cast<unsigned>(a) < static_cast<unsigned>(b);
 }
 
+// Calculates ceil(a / b). User must be careful to ensure that there
+// is no overflow or underflow in the calculation.
+template <typename T>
+inline T divUp(T a, T b) {
+  return (a + b - (T) 1) / b;
+}
+
+// Rounds a up to the next highest multiple of b. User must be careful
+// to ensure that there is no overflow or underflow in the calculation
+// of divUp.
+template <typename T>
+inline T roundUp(T a, T b) {
+  return divUp<T>(a, b) * b;
+}
+
+
 }  // namespace math
 }  // namespace caffe2
 

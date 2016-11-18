@@ -92,7 +92,7 @@ class Tensor {
   Tensor(const vector<TIndex>& dims, const vector<T>& values, Context* context)
       : meta_(TypeMeta::Make<T>()) {
     Resize(dims);
-    CHECK_EQ(values.size(), size_);
+    CAFFE_ENFORCE_EQ(values.size(), size_);
     T* data = mutable_data<T>();
     for (TIndex i = 0; i < size_; ++i) {
       data[i] = values[i];
@@ -159,7 +159,7 @@ class Tensor {
    */
   template <class ContextForCopy>
   void Extend(TIndex num, int growthPct, ContextForCopy* context) {
-    CHECK_GE(dims_.size(), 1);
+    CAFFE_ENFORCE_GE(dims_.size(), 1);
     auto oldSize = size_;
     auto newDims = dims_;
     newDims[0] += num;
@@ -242,7 +242,7 @@ class Tensor {
   inline void Reshape(const vector<TIndex>& dims) {
     TIndex new_size = 1;
     for (auto d : dims) {
-      CHECK_GE(d, 0);
+      CAFFE_ENFORCE_GE(d, 0);
       new_size *= d;
     }
     CAFFE_ENFORCE(
@@ -291,8 +291,10 @@ class Tensor {
    */
   void ShareData(const Tensor& src) {
     meta_ = src.meta();
-    CHECK_EQ(src.size_, size_)
-        << "Size mismatch - did you call reshape before sharing the data?";
+    CAFFE_ENFORCE_EQ(
+        src.size_,
+        size_,
+        "Size mismatch - did you call reshape before sharing the data?");
     // It is possible that the source tensor hasn't called mutable_data() yet,
     // in which case ShareData() doesn't make much sense since we don't really
     // know what to share yet.
@@ -374,9 +376,11 @@ class Tensor {
       return data_.get();
     } else {
       meta_ = meta;
-      CHECK_GE(size_, 0)
-          << "Tensor is not initialized. You probably need to call Resize() "
-          << "before calling mutable_data()";
+      CAFFE_ENFORCE_GE(
+          size_,
+          0,
+          "Tensor is not initialized. You probably need to call Resize() "
+          "before calling mutable_data()");
       if (size_ == 0) {
         return data_.get();
       }
@@ -413,9 +417,11 @@ class Tensor {
    * and a new storage will be created.
    */
   inline void* raw_mutable_data() {
-    CHECK_NE(meta_.id(), 0)
-        << "Calling raw_mutable_data() without meta, but the current meta is "
-           "of unknown type.";
+    CAFFE_ENFORCE_NE(
+        meta_.id(),
+        0,
+        "Calling raw_mutable_data() without meta, but the current meta is "
+        "of unknown type.");
     return raw_mutable_data(meta_);
   }
 
@@ -489,8 +495,8 @@ class Tensor {
   *        Dies on out of range index.
   */
   inline int canonical_axis_index(int axis_index) const {
-    CHECK_GE(axis_index, -ndim());
-    CHECK_LT(axis_index, ndim());
+    CAFFE_ENFORCE_GE(axis_index, -ndim());
+    CAFFE_ENFORCE_LT(axis_index, ndim());
     if (axis_index < 0) {
       return axis_index + ndim();
     }
@@ -516,7 +522,7 @@ class Tensor {
   inline int dim32(const int i) const {
     DCHECK_LT(i, dims_.size()) << "Exceeding ndim limit " << dims_.size();
     DCHECK_GE(i, 0) << "Cannot have negative index";
-    CHECK_LT(dims_[i], std::numeric_limits<int>::max());
+    CAFFE_ENFORCE_LT(dims_[i], std::numeric_limits<int>::max());
     return static_cast<int>(dims_[i]);
   }
 

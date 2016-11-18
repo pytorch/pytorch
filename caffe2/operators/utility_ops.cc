@@ -38,6 +38,7 @@ REGISTER_CPU_OPERATOR(Unique, UniqueOp<CPUContext>);
 REGISTER_CPU_OPERATOR(LengthsToSegmentIds, LengthsToSegmentIdsOp<CPUContext>);
 REGISTER_CPU_OPERATOR(LengthsToRanges, LengthsToRangesOp<CPUContext>);
 REGISTER_CPU_OPERATOR(SegmentIdsToLengths, SegmentIdsToLengthsOp<CPUContext>);
+REGISTER_CPU_OPERATOR(SegmentIdsToRanges, SegmentIdsToRangesOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Slice, SliceOp<int, CPUContext>);
 REGISTER_CPU_OPERATOR(Squeeze, SqueezeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(ExpandDims, ExpandDimsOp<CPUContext>);
@@ -447,18 +448,41 @@ For example, `[1, 3, 0, 2]` transforms into `[[0, 1], [1, 3], [4, 0], [4, 2]]`.
         "2D tensor of shape len(lengths) X 2 and the same type as `lengths`");
 
 OPERATOR_SCHEMA(SegmentIdsToLengths)
-    .NumInputs(1)
+    .NumInputs(1, 2)
     .NumOutputs(1)
     .SetDoc(R"DOC(
 Transfers a vector of segment ids to a vector of segment lengths. This operation
 supports non-consecutive segment ids. Segments not appearing in the input vector
-will have length 0. The range of segments of interest has ids [0, last id in the
-input vector].
+will have length 0. If the second input is provided, the number of segments =
+the size of its first dimension. Otherwise, the number of segments
+= the last index in the first input vector + 1.
+
 In general, for consecutive, zero-based segment IDs, this is the inverse
 operation of LengthsToSegmentIds, except that a vector of segment IDs
-cannot represent empty segments at the end.
+cannot represent empty segments at the end (if the second input is absent).
 )DOC")
     .Input(0, "segment_ids", "1-D int32_t or int64_t tensor of segment ids")
+    .Input(
+        1,
+        "data (optional)",
+        "if provided, number of segments = the size of its first dimension")
+    .Output(0, "lengths", "1-D int64_t tensor of segment lengths");
+
+OPERATOR_SCHEMA(SegmentIdsToRanges)
+    .NumInputs(1, 2)
+    .NumOutputs(1)
+    .SetDoc(R"DOC(
+Transfers a vector of segment ids to a vector of segment ranges. This operation
+supports non-consecutive segment ids. Segments not appearing in the input vector
+will have length 0. If the second input is provided, the number of segments =
+the size of its first dimension. Otherwise, the number of segments
+= the last index in the first input vector + 1.
+)DOC")
+    .Input(0, "segment_ids", "1-D int32_t or int64_t tensor of segment ids")
+    .Input(
+        1,
+        "data (optional)",
+        "if provided, number of segments = the size of its first dimension")
     .Output(0, "lengths", "1-D int64_t tensor of segment lengths");
 
 OPERATOR_SCHEMA(SegmentIdsToLengthWeights)
@@ -643,6 +667,7 @@ REGISTER_GRADIENT(Gather, GetGatherGradient);
 SHOULD_NOT_DO_GRADIENT(Unique);
 SHOULD_NOT_DO_GRADIENT(LengthsToSegmentIds);
 SHOULD_NOT_DO_GRADIENT(SegmentIdsToLengths);
+SHOULD_NOT_DO_GRADIENT(SegmentIdsToRanges);
 SHOULD_NOT_DO_GRADIENT(SegmentIdsToLengthWeights);
 // TODO(azzolini): Add support for slice gradient
 SHOULD_NOT_DO_GRADIENT(Slice);

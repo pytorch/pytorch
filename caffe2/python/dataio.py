@@ -289,15 +289,18 @@ class ReaderWithLimit(Reader):
         self.reader = reader
         self.counter = None
         self.num_iter = num_iter
-        self._data_finished = None
+        net = core.Net('reader_with_limit')
+        self._data_finished = net.AddExternalInput(
+            net.NextName('data_finished'))
+        self.counter = net.AddExternalInput(net.NextName('counter'))
 
     def setup_ex(self, global_init_net, global_finish_net):
-        if self._data_finished is None:
-            self.counter = global_init_net.CreateCounter(
-                [], init_count=int(self.num_iter))
-            self.reader.setup_ex(global_init_net, global_finish_net)
-            self._data_finished = global_init_net.ConstantFill(
-                [], shape=[], value=False, dtype=core.DataType.BOOL)
+        global_init_net.CreateCounter(
+            [], [self.counter], init_count=int(self.num_iter))
+        self.reader.setup_ex(global_init_net, global_finish_net)
+        global_init_net.ConstantFill(
+            [], [self._data_finished],
+            shape=[], value=False, dtype=core.DataType.BOOL)
 
     def read_ex(self, local_init_net, local_finish_net):
         """ 1. check if we reached number of iterations """
@@ -324,8 +327,6 @@ class ReaderWithLimit(Reader):
         reader has been exhausted (True) or whether we stopped because reached
         the limit of iterations (False).
         """
-        assert self._data_finished is not None, (
-            'read_record must be called before data_finished()')
         return self._data_finished
 
 

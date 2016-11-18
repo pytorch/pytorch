@@ -281,7 +281,7 @@ bool PoolGradientOp<float, CPUContext, AveragePool>::RunOnDeviceWithOrderNCHW() 
   const float* dYdata = dY.data<float>();
   float* dXdata = dX->mutable_data<float>();
   int channels = X.dim32(1);
-  CHECK_EQ(channels, dY.dim32(1));
+  CAFFE_ENFORCE_EQ(channels, dY.dim32(1));
   int height = X.dim32(2);
   int width = X.dim32(3);
   ConvPoolOpBase<CPUContext>::ComputePads(height, width);
@@ -320,7 +320,7 @@ bool PoolGradientOp<float, CPUContext, AveragePool>::RunOnDeviceWithOrderNHWC() 
   auto& X = Input(0);
   // Note that Input(1) is not needed in average pooling.
   auto& dY = Input(2);
-  CHECK_EQ(dY.ndim(), 4);
+  CAFFE_ENFORCE_EQ(dY.ndim(), 4);
   auto* dX = Output(0);
   // TODO(Yangqing): Add shape checks.
   dX->ResizeLike(X);
@@ -335,7 +335,7 @@ bool PoolGradientOp<float, CPUContext, AveragePool>::RunOnDeviceWithOrderNHWC() 
   int pooled_height = dY.dim32(1);
   int pooled_width = dY.dim32(2);
   int channels = X.dim32(3);
-  CHECK_EQ(channels, dY.dim32(3));
+  CAFFE_ENFORCE_EQ(channels, dY.dim32(3));
   for (int n = 0; n < X.dim32(0); ++n) {
     for (int ph = 0; ph < pooled_height; ++ph) {
       for (int pw = 0; pw < pooled_width; ++pw) {
@@ -465,7 +465,7 @@ bool PoolGradientOp<float, CPUContext, MaxPool>::RunOnDeviceWithOrderNCHW() {
   const float* dYdata = dY.data<float>();
   float* dXdata = dX->mutable_data<float>();
   int channels = X.dim32(1);
-  CHECK_EQ(channels, dY.dim32(1));
+  CAFFE_ENFORCE_EQ(channels, dY.dim32(1));
   int height = X.dim32(2);
   int width = X.dim32(3);
   ConvPoolOpBase<CPUContext>::ComputePads(height, width);
@@ -514,7 +514,7 @@ bool PoolGradientOp<float, CPUContext, MaxPool>::RunOnDeviceWithOrderNHWC() {
   dX->ResizeLike(X);
 
   int channels = X.dim32(3);
-  CHECK_EQ(channels, dY.dim32(3));
+  CAFFE_ENFORCE_EQ(channels, dY.dim32(3));
   ConstEigenArrayMap<float> Ymat(
       Y.data<float>(), channels, Y.size() / channels);
   ConstEigenArrayMap<float> dYmat(

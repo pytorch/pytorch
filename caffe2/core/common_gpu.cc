@@ -59,9 +59,14 @@ int gDefaultGPUID = 0;
 }  // namespace
 
 void SetDefaultGPUID(const int deviceid) {
-  CHECK_LT(deviceid, NumCudaDevices())
-      << "The default gpu id should be smaller than the number of gpus "
-         "on this machine: " << deviceid << " vs " << NumCudaDevices();
+  CAFFE_ENFORCE_LT(
+      deviceid,
+      NumCudaDevices(),
+      "The default gpu id should be smaller than the number of gpus "
+      "on this machine: ",
+      deviceid,
+      " vs ",
+      NumCudaDevices());
   gDefaultGPUID = deviceid;
 }
 int GetDefaultGPUID() { return gDefaultGPUID; }
@@ -80,9 +85,14 @@ int GetGPUIDForPointer(const void* ptr) {
 
 const cudaDeviceProp& GetDeviceProperty(const int deviceid) {
   static vector<cudaDeviceProp> props;
-  CHECK_LT(deviceid, NumCudaDevices())
-      << "The gpu id should be smaller than the number of gpus "
-         "on this machine: " << deviceid << " vs " << NumCudaDevices();
+  CAFFE_ENFORCE_LT(
+      deviceid,
+      NumCudaDevices(),
+      "The gpu id should be smaller than the number of gpus ",
+      "on this machine: ",
+      deviceid,
+      " vs ",
+      NumCudaDevices());
   if (props.size() == 0) {
     props.resize(NumCudaDevices());
     for (int i = 0; i < NumCudaDevices(); ++i) {

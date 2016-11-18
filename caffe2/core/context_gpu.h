@@ -109,7 +109,7 @@ class CUDAContext final {
     if (curand_generator_) {
       CURAND_CHECK(curandDestroyGenerator(curand_generator_));
     }
-    CHECK(FinishDeviceComputation());
+    CAFFE_ENFORCE(FinishDeviceComputation());
   }
 
   inline void SwitchToDevice() {

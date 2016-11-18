@@ -65,7 +65,7 @@ UniqueTHCudaTensor aliasFromTensorCUDA(
       THCudaTensor_newWithStorage(state, storage, 0, thshape, nullptr);
   THCudaStorage_free(state, storage);
   THLongStorage_free(thshape);
-  CHECK_EQ(
+  CAFFE_ENFORCE_EQ(
       THCudaTensor_storage(state, th)->data,
       tensor->mutable_data<float>());
   return UniqueTHCudaTensor(th, THCudaTensorDeleter(state));

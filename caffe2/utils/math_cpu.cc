@@ -1096,6 +1096,13 @@ template <>
 void CopyMatrix<CPUContext>(
     const size_t itemsize, const int M, const int N, const void* A,
     const int lda, void* B, const int ldb, CPUContext* context) {
+  if (lda == N && ldb == N) {
+    // can coalese to a single memcpy of size M * N
+    memcpy(
+        static_cast<char*>(B), static_cast<const char*>(A), itemsize * N * M);
+    return;
+  }
+
   for (int i = 0; i < M; ++i) {
     memcpy(static_cast<char*>(B) + ldb * i * itemsize,
            static_cast<const char*>(A) + lda * i * itemsize,

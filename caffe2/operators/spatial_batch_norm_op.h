@@ -21,9 +21,9 @@ class SpatialBNOp : public Operator<Context> {
     // TODO(jiayq): update the input and output size checks.
     CAFFE_ENFORCE(
         (is_test_ && OutputSize() == 1) || (!is_test_ && OutputSize() == 5));
-    CHECK_GT(epsilon_, 0);
-    CHECK_GE(momentum_, 0);
-    CHECK_LE(momentum_, 1);
+    CAFFE_ENFORCE_GT(epsilon_, 0);
+    CAFFE_ENFORCE_GE(momentum_, 0);
+    CAFFE_ENFORCE_LE(momentum_, 1);
   }
   ~SpatialBNOp() {}
 

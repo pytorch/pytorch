@@ -140,9 +140,55 @@ class TestSoftmaxOps(hu.HypothesisTestCase):
         self.assertGradientChecks(
             gc, op, [X, label], 0, [1], stepsize=1e-4, threshold=1e-2)
 
-    @unittest.skipIf(not workspace.has_gpu_support, "No gpu support")
+    @given(n=st.integers(2, 10), D=st.integers(4, 16), **hu.gcs)
+    def test_softmax_with_loss_weighted(self, n, D, gc, dc):
+        # n = number of examples, D = |labels|
+        # Initialize X and add 1e-2 for numerical stability
+        X = np.random.rand(n, D).astype(np.float32)
+        X = X + 1e-2
+
+        # Initialize label
+        label = (np.random.rand(n) * D).astype(np.int32)
+
+        # Init weights (weight by sample)
+        weights = np.random.rand(n).astype(np.float32)
+
+        # Reference implementation of cross entropy with soft labels
+        def label_softmax_crossent_weighted(X, label, weights):
+            probs = np.zeros((n, D))
+            rowmax = np.zeros(n)
+            for i in range(n):
+                rowmax[i] = max(X[i, ])
+                # We need to subtract the max to avoid numerical issues
+                probs[i] = X[i] - rowmax[i]
+                exps = np.exp(probs[i, ])
+                norm = sum(exps)
+                probs[i, ] = exps / norm
+
+            label_xent = [-weights[i] * np.log(max(probs[i][label[i]], 1e-20))
+                          for i in range(n)]
+            avgloss = np.sum(label_xent) / sum(weights)
+            return (probs, avgloss)
+
+        op = core.CreateOperator(
+            "SoftmaxWithLoss",
+            ["X", "label", "weights"],
+            ["probs", "avgloss"]
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[X, label, weights],
+            reference=label_softmax_crossent_weighted,
+        )
+
+        self.assertGradientChecks(
+            gc, op, [X, label, weights], 0, [1], stepsize=1e-4, threshold=1e-2)
+
+
     @given(n=st.integers(2, 5), D=st.integers(2, 4),
-           weighted=st.booleans(), **hu.gcs_gpu_only)
+           weighted=st.booleans(), **hu.gcs)
     def test_spatial_softmax_with_loss(self, n, D, weighted, gc, dc):
         # n = number of examples, D = |labels|
         # Initialize X and add 1e-2 for numerical stability

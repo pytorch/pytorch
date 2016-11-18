@@ -183,6 +183,12 @@ void addObjectMethods(py::module& m) {
             return fetcher->Fetch(blob);
           })
       .def(
+          "tensor",
+          [](Blob* blob) {
+            auto t = blob->GetMutable<TensorCPU>();
+            return py::cast(t, py::return_value_policy::reference_internal);
+          })
+      .def(
           "_feed",
           [](Blob* blob,
              const py::object& arg,
@@ -219,47 +225,46 @@ void addObjectMethods(py::module& m) {
       .def_property_readonly(
           "data",
           [](TensorCPU* t) -> py::object {
-            CAFFE_ENFORCE(t->size() > 0);
-            std::vector<npy_intp> npy_dims;
-            for (const auto dim : t->dims()) {
-              npy_dims.push_back(dim);
+            if (t->meta() == TypeMeta{}) {
+              // keep this behavior for backward compatibility
+              t->mutable_data<float>();
             }
-            // TODO: use float as default data type if it's a new Tensor.
-            // consider to support setting data type
-            TypeMeta meta = t->meta();
-            if (meta.id() == 0) {
-              meta = TypeMeta::Make<float>();
+            auto res = TensorFetcher<CPUContext>().FetchTensor(*t, false);
+            return res.obj;
+          },
+          "Return numpy array pointing to this tensor's data if possible. "
+          "Otherwise (e.g. for strings) copies the data (same as fetch).")
+      .def(
+          "feed",
+          [](TensorCPU* t, py::object obj) {
+            if (!PyArray_Check(obj.ptr())) {
+              CAFFE_THROW(
+                  "Unexpected type of argument -- expected numpy array");
             }
-            auto numpy_type = CaffeToNumpyType(meta);
-            if (numpy_type == NPY_OBJECT) {
-              PyObject* array =
-                  PyArray_SimpleNew(t->ndim(), npy_dims.data(), numpy_type);
-              void* outPtr = static_cast<void*>(
-                  PyArray_DATA(reinterpret_cast<PyArrayObject*>(array)));
-              PyObject** outObj = reinterpret_cast<PyObject**>(outPtr);
-              auto* str = t->template mutable_data<std::string>();
-              for (TIndex i = 0; i < t->size(); ++i) {
-                outObj[i] = PyBytes_FromStringAndSize(str->data(), str->size());
-                str++;
-                // cleanup on failure
-                if (outObj[i] == nullptr) {
-                  for (TIndex j = 0; j < i; ++j) {
-                    Py_DECREF(outObj[j]);
-                  }
-                  Py_DECREF(array);
-                  CAFFE_THROW(
-                      "Failed to allocate string for ndarray of strings.");
-                }
-              }
-              return pybind11::object(array, /* borrowed= */ false);
-            }
-            PyObject* array = PyArray_SimpleNewFromData(
-                t->ndim(),
-                npy_dims.data(),
-                numpy_type,
-                t->raw_mutable_data(meta));
-            return py::object(array, /* borrowed= */ false);
-          })
+            TensorFeeder<CPUContext>().FeedTensor(
+                DeviceOption{}, reinterpret_cast<PyArrayObject*>(obj.ptr()), t);
+          },
+          "Copy data from given numpy array into this tensor.")
+      .def(
+          "fetch",
+          [](TensorCPU* t) {
+            auto res = TensorFetcher<CPUContext>().FetchTensor(*t, true);
+            return res.obj;
+          },
+          "Copy data from this tensor into a new numpy array.")
+      .def(
+          "init",
+          [](TensorCPU* t, std::vector<TIndex> dims, int caffe_type) {
+            const auto& meta =
+                DataTypeToTypeMeta((TensorProto::DataType)caffe_type);
+            CAFFE_ENFORCE(
+                !TensorFetcher<CPUContext>().NeedsCopy(meta),
+                "Cannot init tensor of this type. Use `feed` instead.");
+            t->Resize(dims);
+            t->raw_mutable_data(meta);
+          },
+          "Initialize this tensor to given shape and data type. "
+          "Fail if the given data type cannot be accessed from python.")
       .def_property_readonly(
           "_shape", [](const TensorCPU& t) { return t.dims(); })
       .def("_reshape", [](TensorCPU* t, std::vector<TIndex> dims) {

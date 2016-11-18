@@ -76,12 +76,12 @@ bool HSoftmaxOp<float, CPUContext>::RunOnDevice() {
   int M = X.ndim() > 1 ? X.dim32(0) : 1;
   // Input feature dimension
   int K = X.size() / M;
-  CHECK_GE(W.ndim(), 2);//N*K
-  CHECK_EQ(b.ndim(), 1);//N
-  CHECK_EQ(K, W.size() / (W.dim32(0)));
+  CAFFE_ENFORCE_GE(W.ndim(), 2); // N*K
+  CAFFE_ENFORCE_EQ(b.ndim(), 1); // N
+  CAFFE_ENFORCE_EQ(K, W.size() / (W.dim32(0)));
   // Sum of output dimensions of all hierarchy nodes
   int N = W.dim32(0);
-  CHECK_EQ(N, b.dim32(0));
+  CAFFE_ENFORCE_EQ(N, b.dim32(0));
   Y->Resize(M);
   auto* Ydata = Y->mutable_data<float>();
   math::Set<float, CPUContext>(M, 0.f, Ydata, &context_);
