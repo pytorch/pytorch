@@ -1,14 +1,17 @@
-import math
-import unittest
 import contextlib
+import gc
+import math
+import torch
+import unittest
 from copy import deepcopy
 from collections import OrderedDict
 
 from common import make_jacobian, TestCase, iter_tensors, get_numerical_jacobian
 from torch.autograd.functions import *
-from torch.autograd import Variable
+from torch.autograd import Variable, Function
 
 PRECISION = 1e-4
+
 
 def iter_gradients(x):
     if isinstance(x, Variable):
@@ -19,9 +22,11 @@ def iter_gradients(x):
             for result in iter_gradients(elem):
                 yield result
 
+
 def zero_gradients(i):
     for t in iter_gradients(i):
         t.zero_()
+
 
 def get_analytical_jacobian(input, output):
     jacobian = make_jacobian(input, output.numel())
@@ -47,6 +52,7 @@ def backward_engine(engine):
         yield
     finally:
         Variable._execution_engine = _prev_engine
+
 
 class TestAutograd(TestCase):
 
@@ -267,6 +273,19 @@ class TestAutograd(TestCase):
         expected_grad = torch.zeros(10, 10)
         expected_grad[:2] = grad_output
         self.assertEqual(x.grad, expected_grad)
+
+    def test_gc_in_destructor(self):
+        """
+        Previously, if a Function destructor triggered a garbage collection,
+        the Variable's tp_dealloc handler would get called twice leading to a
+        segfault.
+        """
+        class CollectOnDelete(Function):
+            def __del__(self):
+                gc.collect()
+
+        for i in range(10):
+            Variable(torch.randn(10, 10), creator=CollectOnDelete())
 
     @unittest.skipIf(not torch.cuda.is_available() or torch.cuda.device_count() < 2,
             "CUDA not available or <2 GPUs detected")

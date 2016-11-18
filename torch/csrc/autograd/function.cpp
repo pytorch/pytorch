@@ -13,6 +13,7 @@ PyObject *THPFunctionClass = NULL;
 
 static void THPFunction_dealloc(THPFunction* self)
 {
+  PyObject_GC_UnTrack(self);
   self->num_inputs = 0;
   self->num_outputs = 0;
 
@@ -603,4 +604,3 @@ bool THPFunction_initModule(PyObject *module)
   PyModule_AddObject(module, "_FunctionBase", (PyObject *)&THPFunctionType);
   return true;
 }
-
