@@ -13,13 +13,11 @@
 #include "caffe2/core/tensor.h"
 #include "caffe2/utils/string_utils.h"
 
-
-#define CNMEM_CHECK(condition) \
-  do { \
-    cnmemStatus_t error = condition; \
-    CHECK_EQ(error, CNMEM_STATUS_SUCCESS) << cnmemGetErrorString(error); \
+#define CNMEM_CHECK(condition)                                                 \
+  do {                                                                         \
+    cnmemStatus_t error = condition;                                           \
+    CAFFE_ENFORCE_EQ(error, CNMEM_STATUS_SUCCESS, cnmemGetErrorString(error)); \
   } while (0)
-
 
 DEFINE_string(caffe2_cuda_memory_pool, "",
               "Sets the memory pool used by caffe2. Possible values are "
@@ -82,11 +80,13 @@ static void Caffe2InitializeCuda() {
   }
   // Check if the number of GPUs matches the expected compile-time max number
   // of GPUs.
-  CHECK_LE(NumCudaDevices(), CAFFE2_COMPILE_TIME_MAX_GPUS)
-      << "Number of CUDA devices on the machine is larger than the compiled "
-         "max number of gpus expected ("
-      << CAFFE2_COMPILE_TIME_MAX_GPUS
-      << "). Increase that and recompile the caffe binary.";
+  CAFFE_ENFORCE_LE(
+      NumCudaDevices(),
+      CAFFE2_COMPILE_TIME_MAX_GPUS,
+      "Number of CUDA devices on the machine is larger than the compiled "
+      "max number of gpus expected (",
+      CAFFE2_COMPILE_TIME_MAX_GPUS,
+      "). Increase that and recompile the caffe binary.");
   // Save the current device so we can restore it after moving across
   // different devices.
   int init_device;

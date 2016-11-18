@@ -85,6 +85,7 @@ message Argument {
 enum DeviceType {
   CPU = 0;                    // In default, we will use CPU.
   CUDA = 1;                   // CUDA.
+  MKLDNN = 2;                 // Reserved for explicit MKLDNN
   ONLY_FOR_TEST = 20901701;   // This device type is only for test.
 }
 

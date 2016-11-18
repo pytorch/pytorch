@@ -43,6 +43,8 @@ class ConvMKLDNNOp final : public ConvPoolOpBase<CPUContext> {
     CAFFE_ENFORCE(bias.ndim() == 1);
     CAFFE_ENFORCE(bias.dim32(0) == M);
     ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, filter.dim32(0));
+    // Pre-allocate Y so we can potentially share memory if applicable.
+    Y->mutable_data<T>();
 
     if (cached_input_dims_ != X.dims() ||
         cached_filter_dims_ != filter.dims()) {
@@ -58,8 +60,8 @@ class ConvMKLDNNOp final : public ConvPoolOpBase<CPUContext> {
       size_t strides[2] = {stride_w_, stride_h_};
       int pads[2] = {-pad_l_, -pad_t_};
 
-      MKLDNN_SAFE_CALL(dnnConvolutionCreateForwardBias<float>(
-          primitive_.ptr(),
+      primitive_.Reset(
+          dnnConvolutionCreateForwardBias<float>,
           nullptr,
           dnnAlgorithmConvolutionDirect,
           dimension,
@@ -68,26 +70,29 @@ class ConvMKLDNNOp final : public ConvPoolOpBase<CPUContext> {
           fdata_sizes,
           strides,
           pads,
-          dnnBorderZeros));
-      X_wrapper_.reset(
-          new InternalResourceWrapper<T>(X, primitive_.ref(), dnnResourceSrc));
-      filter_wrapper_.reset(new InternalResourceWrapper<T>(
-          filter, primitive_.ref(), dnnResourceFilter));
-      bias_wrapper_.reset(new InternalResourceWrapper<T>(
-          bias, primitive_.ref(), dnnResourceBias));
-      Y_wrapper_.reset(
-          new InternalResourceWrapper<T>(*Y, primitive_.ref(), dnnResourceDst));
+          dnnBorderZeros);
+      X_wrapper_.reset(new MKLMemory<T>(X, primitive_, dnnResourceSrc, true));
+      filter_wrapper_.reset(
+          new MKLMemory<T>(filter, primitive_, dnnResourceFilter, true));
+      bias_wrapper_.reset(
+          new MKLMemory<T>(bias, primitive_, dnnResourceBias, true));
+      Y_wrapper_.reset(new MKLMemory<T>(*Y, primitive_, dnnResourceDst, true));
+      X_wrapper_->CopyFrom(X);
+      filter_wrapper_->CopyFrom(filter);
+      bias_wrapper_->CopyFrom(bias);
+      Y_wrapper_->ShareFrom(*Y);
       resources_[dnnResourceSrc] = X_wrapper_->buffer();
       resources_[dnnResourceFilter] = filter_wrapper_->buffer();
       resources_[dnnResourceBias] = bias_wrapper_->buffer();
       resources_[dnnResourceDst] = Y_wrapper_->buffer();
+    } else {
+      X_wrapper_->CopyFrom(X);
+      filter_wrapper_->CopyFrom(filter);
+      bias_wrapper_->CopyFrom(bias);
+      Y_wrapper_->ShareFrom(*Y);
     }
-    X_wrapper_->CopyIn(X);
-    filter_wrapper_->CopyIn(filter);
-    bias_wrapper_->CopyIn(bias);
-
-    MKLDNN_SAFE_CALL(dnnExecute<float>(primitive_.ref(), resources_));
-    Y_wrapper_->CopyOut(Y);
+    MKLDNN_SAFE_CALL(dnnExecute<float>(primitive_, resources_));
+    Y_wrapper_->CopyTo(Y);
     return true;
   }
 
@@ -101,10 +106,10 @@ class ConvMKLDNNOp final : public ConvPoolOpBase<CPUContext> {
   vector<TIndex> cached_input_dims_;
   vector<TIndex> cached_filter_dims_;
   PrimitiveWrapper<T> primitive_;
-  unique_ptr<InternalResourceWrapper<T>> X_wrapper_ = nullptr;
-  unique_ptr<InternalResourceWrapper<T>> filter_wrapper_ = nullptr;
-  unique_ptr<InternalResourceWrapper<T>> bias_wrapper_ = nullptr;
-  unique_ptr<InternalResourceWrapper<T>> Y_wrapper_ = nullptr;
+  unique_ptr<MKLMemory<T>> X_wrapper_ = nullptr;
+  unique_ptr<MKLMemory<T>> filter_wrapper_ = nullptr;
+  unique_ptr<MKLMemory<T>> bias_wrapper_ = nullptr;
+  unique_ptr<MKLMemory<T>> Y_wrapper_ = nullptr;
   void* resources_[dnnResourceNumber] = {0};
   INPUT_TAGS(INPUT, FILTER, BIAS);
 };

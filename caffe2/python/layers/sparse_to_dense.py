@@ -34,7 +34,7 @@ class SparseToDense(ModelLayer):
                     field,
                     schema.Scalar(
                         (np.float32, len(feature_specs.feature_ids)),
-                        core.BlobReference(
+                        core.ScopedBlobReference(
                             model.net.NextName(self.name + field + '_output'))
                     )
                 ))
@@ -48,7 +48,7 @@ class SparseToDense(ModelLayer):
                                     np.int32,
                                     (len(feature_specs.feature_ids), 2)
                                 ),
-                                core.BlobReference(
+                                core.ScopedBlobReference(
                                     model.net.NextName(
                                         self.name + field + '_ranges')
                                 )
@@ -123,9 +123,15 @@ class SparseToDense(ModelLayer):
         for field, feature_specs in self.input_specs:
             metadata.append(
                 (
-                    feature_specs,
+                    {
+                        'type': feature_specs.feature_type,
+                        'names': feature_specs.feature_names,
+                        'ids': feature_specs.feature_ids,
+                    },
                     self.output_schema[field].field_blobs(),
                     self.output_schema[field].field_types()
                 )
             )
+            if feature_specs.feature_type == 'FLOAT':
+                metadata[-1][0]['cardinality'] = 1
         return metadata

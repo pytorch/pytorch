@@ -9,20 +9,34 @@ namespace {
 
 __global__ void LabelCrossEntropyKernel(
     const int N, const int D, const float* Pdata, const int* labeldata,
-    float* Ydata) {
+    const float* weights, float* Ydata) {
   CUDA_1D_KERNEL_LOOP(i, N) {
     CUDA_KERNEL_ASSERT(labeldata[i] < D);
-    Ydata[i] = -logf(max(Pdata[i * D + labeldata[i]], FLT_MIN));
+    float weight = weights ? weights[i] : 1.0;
+    Ydata[i] = -logf(max(Pdata[i * D + labeldata[i]], FLT_MIN)) * weight;
   }
 }
 
 __global__ void LabelCrossEntropyGradientKernel(
     const int N, const int D, const float* Pdata, const int* labeldata,
-    float* dXdata) {
-  CUDA_1D_KERNEL_LOOP(i, N) {
-    int idx = i * D + labeldata[i];
-    dXdata[idx] = Pdata[idx] - 1.;
-  }
+    float* dXdata, const float *weights) {
+      if (weights == NULL) {
+        CUDA_1D_KERNEL_LOOP(i, N) {
+         int idx = i * D + labeldata[i];
+         dXdata[idx] = Pdata[idx] - 1.;
+       }
+     } else {
+       CUDA_1D_KERNEL_LOOP(i, N) {
+        int idx = i * D + labeldata[i];
+        dXdata[idx] = Pdata[idx] - 1.;
+
+        float weight = weights[i];
+        for(int d=0; d<D; d++) {
+            int idx = i * D + d;
+            dXdata[idx] *= weight;
+        }
+     }
+   }
 }
 
 __global__ void RowMaxKernel(const int num, const int D, const float* data,
@@ -220,6 +234,8 @@ bool SoftmaxWithLossOp<float, CUDAContext>::RunOnDevice() {
   auto& T = Input(1);  // Labels / targets
   auto* P = Output(0); // Probabilities from softmax
   auto* avg_loss = Output(1); // Average loss
+  const float* weights = (InputSize() > 2 ? Input(2).data<float>() : NULL);
+
   int N = X.dim32(0);
   int D = X.dim32(1);
   P->ResizeLike(X);
@@ -243,14 +259,27 @@ bool SoftmaxWithLossOp<float, CUDAContext>::RunOnDevice() {
     // Compute label xent loss per example
     LabelCrossEntropyKernel<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS,
                               0, context_.cuda_stream()>>>(
-        N, D, P->data<float>(), T.data<int>(), losses_.mutable_data<float>());
+        N, D, P->data<float>(), T.data<int>(), weights,
+        losses_.mutable_data<float>());
+
+    float total_weight = N;
+    if (weights) {
+      // Sum weights
+      float* total_weight_ptr;
+      cudaMalloc(&total_weight_ptr, sizeof(float));
+      math::Sum<float, CUDAContext>(N, weights, total_weight_ptr, &context_);
+      cudaMemcpyAsync(&total_weight, total_weight_ptr, sizeof(float),
+        cudaMemcpyDeviceToHost, context_.cuda_stream());
+      cudaFree(total_weight_ptr);
+    }
+
     // Sum of all losses
     float* avg_loss_data = avg_loss->mutable_data<float>();
     math::Sum<float, CUDAContext>(
         losses_.size(), losses_.data<float>(), avg_loss_data, &context_);
     // Average of input batch size
     math::Scale<float, CUDAContext>(
-        1, scale_ / N, avg_loss_data, avg_loss_data, &context_);
+        1, scale_ / total_weight, avg_loss_data, avg_loss_data, &context_);
   } else {
     DCHECK_EQ(X.ndim(), 4);
     DCHECK_EQ(T.ndim(), 3);
@@ -258,7 +287,6 @@ bool SoftmaxWithLossOp<float, CUDAContext>::RunOnDevice() {
     int H = X.dim32(2);
     int W = X.dim32(3);
 
-    const float* weights = (InputSize() > 2 ? Input(2).data<float>() : NULL);
     const float* Xdata = X.data<float>();
     float* Pdata = P->mutable_data<float>();
 
@@ -309,6 +337,8 @@ bool SoftmaxWithLossGradientOp<float, CUDAContext>::RunOnDevice() {
   // Input(2) is weights, if given
   auto& P = Input(InputSize() - 2);  // Probabilities from softmax
   auto& d_avg_loss = Input(InputSize() - 1); // Gradient w.r.t. avg loss
+  const float* weights = (InputSize() > 4 ? Input(2).data<float>() : NULL);
+
   auto* dX = Output(0);
   int N = X.dim32(0);
   int D = X.dim32(1);
@@ -324,10 +354,23 @@ bool SoftmaxWithLossGradientOp<float, CUDAContext>::RunOnDevice() {
     // Subtract 1 from labeled positions
     LabelCrossEntropyGradientKernel<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS,
                                       0, context_.cuda_stream()>>>(
-        N, D, P.data<float>(), T.data<int>(), dX->mutable_data<float>());
+        N, D, P.data<float>(), T.data<int>(), dX->mutable_data<float>(),
+        weights);
+
+    float total_weight = N;
+    if (weights) {
+      // Sum weights
+      float* total_weight_ptr;
+      cudaMalloc(&total_weight_ptr, sizeof(float));
+      math::Sum<float, CUDAContext>(N, weights, total_weight_ptr, &context_);
+      cudaMemcpyAsync(&total_weight, total_weight_ptr, sizeof(float),
+        cudaMemcpyDeviceToHost, context_.cuda_stream());
+      cudaFree(total_weight_ptr);
+    }
+        
     // Scale by d_avg_loss / N
     math::Scale<float, CUDAContext>(
-        dX->size(), scale_ / N, dX->data<float>(),
+        dX->size(), scale_ / total_weight, dX->data<float>(),
         dX->mutable_data<float>(), &context_);
     math::Scale<float, CUDAContext>(
         dX->size(), d_avg_loss.data<float>(), dX->data<float>(),
@@ -341,7 +384,6 @@ bool SoftmaxWithLossGradientOp<float, CUDAContext>::RunOnDevice() {
     int W = X.dim32(3);
     dX->ResizeLike(X);
 
-    const float* weights = (InputSize() > 4 ? Input(2).data<float>() : NULL);
     const float* Pdata = P.data<float>();
     float* dX_data = dX->mutable_data<float>();
     const int* label_data = T.data<int>();

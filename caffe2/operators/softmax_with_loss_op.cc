@@ -21,7 +21,8 @@ and averaged loss (scalar). Use parameter spatial=1 to enable spatial softmax.
 Spatial softmax also supports special \"don't care\" label (-1) that is ignored
 when computing the loss.
 
-For spatial version additional weight blob can be added as the third input.
+Optional third input blob can be used to weight the samples for the loss.
+For the spatial version, weighting is by x,y position of the input.
 )DOC");
 // Input: X, T, P, dY; Output: dX
 OPERATOR_SCHEMA(SoftmaxWithLossGradient).NumOutputs(1);
@@ -46,6 +47,7 @@ bool SoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
   }
 
   float* Pdata = P->mutable_data<float>();
+  const float* weights = (InputSize() > 2 ? Input(2).data<float>() : nullptr);
 
   if (!spatial_mode_) {
     DCHECK_EQ(X.ndim(), 2);
@@ -66,6 +68,7 @@ bool SoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
     // Then compute cross entropy
     const int* label_data = T.data<int>();
     float loss_sum = 0.0;
+    float weight_sum = 0.0;
     for (int i = 0; i < N; ++i) {
       CAFFE_ENFORCE(
           label_data[i] < D,
@@ -73,13 +76,15 @@ bool SoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
           label_data[i],
           " vs ",
           D);
-      float l = -log(std::max(Pdata[i * D + label_data[i]], 1e-20f));
+      float weight = weights ? weights[i] : 1.0;
+      float l = -log(std::max(Pdata[i * D + label_data[i]], 1e-20f)) * weight;
       loss_sum += l;
+      weight_sum += weight;
     }
 
     avg_loss->Resize(vector<TIndex>());
     float* avg_loss_data = avg_loss->mutable_data<float>();
-    avg_loss_data[0] = loss_sum * scale_ / N;
+    avg_loss_data[0] = loss_sum * scale_ / weight_sum;
   } else {
     // Spatial mode, compute softmax for each x, y location
     DCHECK_EQ(X.ndim(), 4);
@@ -88,7 +93,6 @@ bool SoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
     int H = X.dim32(2);
     int W = X.dim32(3);
 
-    const float* weights = (InputSize() > 2 ? Input(2).data<float>() : nullptr);
     const float* Xdata = X.data<float>();
 
     for (int i = 0; i < N; ++i) {
@@ -155,6 +159,7 @@ bool SoftmaxWithLossGradientOp<float, CPUContext>::RunOnDevice() {
   auto& P = Input(InputSize() - 2); // Probabilities from softmax
   auto& d_avg_loss = Input(InputSize() - 1); // Gradient w.r.t. avg loss
   auto* dX = Output(0);
+  const float* weights = (InputSize() > 4 ? Input(2).data<float>() : nullptr);
 
   int N = X.dim32(0);
   int D = X.dim32(1);
@@ -175,15 +180,31 @@ bool SoftmaxWithLossGradientOp<float, CPUContext>::RunOnDevice() {
     context_.Copy<float, CPUContext, CPUContext>(P.size(), Pdata, dX_data);
 
     // Compute gradient for the matching labels.
-    for (int i = 0; i < N; ++i) {
-      int idx = i * D + label_data[i];
-      dX_data[idx] = Pdata[idx] - 1.0f;
+    float total_weight = 0.0f;
+    if (weights) {
+      for (int i = 0; i < N; ++i) {
+        int idx = i * D + label_data[i];
+        float weight = weights[i];
+        dX_data[idx] = Pdata[idx] - 1.0;
+        for (int d = 0; d < D; d++) {
+          int idx = i * D + d;
+          dX_data[idx] *= weight;
+        }
+
+        total_weight += weight;
+      }
+    } else {
+      for (int i = 0; i < N; ++i) {
+        int idx = i * D + label_data[i];
+        dX_data[idx] = Pdata[idx] - 1.0f;
+      }
+      total_weight = N;
     }
 
     // Scale by d_avg_loss / N
     math::Scale<float, CPUContext>(
         dX->size(),
-        scale_ / N * d_avg_loss.data<float>()[0],
+        scale_ / total_weight * d_avg_loss.data<float>()[0],
         dX->data<float>(),
         dX_data,
         &context_);
@@ -194,8 +215,6 @@ bool SoftmaxWithLossGradientOp<float, CPUContext>::RunOnDevice() {
 
     int H = X.dim32(2);
     int W = X.dim32(3);
-
-    const float* weights = (InputSize() > 4 ? Input(2).data<float>() : nullptr);
 
     const float* Pdata = P.data<float>();
     float* dX_data = dX->mutable_data<float>();

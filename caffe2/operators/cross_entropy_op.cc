@@ -148,8 +148,8 @@ bool MakeTwoClassGradientOp<float, CPUContext>::RunOnDevice() {
   auto& dY = Input(0);
   auto* dX = Output(0);
   auto shape = dY.dims();
-  CHECK_GE(shape.size(), 1);
-  CHECK_EQ(shape.back(), 2);
+  CAFFE_ENFORCE_GE(shape.size(), 1);
+  CAFFE_ENFORCE_EQ(shape.back(), 2);
   shape.pop_back();
   dX->Resize(shape);
   const float* dYdata = dY.data<float>();

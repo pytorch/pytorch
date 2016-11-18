@@ -278,7 +278,7 @@ class ConvPoolOpBase : public Operator<Context> {
         // we will only use pad_head and will compute pad_tail to match the
         // old caffe pooling strategy. Also see caffe2_legacy.proto for more
         // details.
-        CHECK_GE(*pad_head, 0);
+        CAFFE_ENFORCE_GE(*pad_head, 0);
         // Here, notice that caffe casts UP while caffe2 casts DOWN for the
         // output size computation.
         *out_size = std::ceil(
@@ -296,9 +296,11 @@ class ConvPoolOpBase : public Operator<Context> {
         // size of caffe.
         int standard_out_size = static_cast<int>(
             static_cast<float>(in_size + *pad_head * 2 - kernel) / stride + 1);
-        CHECK_GE(*out_size, standard_out_size)
-            << "This should never happen. If this happens, double check the logic "
-            << "above.";
+        CAFFE_ENFORCE_GE(
+            *out_size,
+            standard_out_size,
+            "This should never happen. If this happens, double check the logic "
+            "above.");
         if (*out_size > standard_out_size) {
           LOG(WARNING)
               << "You are hitting a case where Caffe's legacy padding calculation "

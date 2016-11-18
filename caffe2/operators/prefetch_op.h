@@ -33,9 +33,10 @@ class PrefetchOperator : public OperatorBase {
         finalize_(false) {}
 
   virtual ~PrefetchOperator() {
-    CHECK(finalize_)
-        << "Your derived class should call Finalize() in its destructor "
-           "so the prefetching thread is joined. ";
+    CAFFE_ENFORCE(
+        finalize_,
+        "Your derived class should call Finalize() in its destructor "
+        "so the prefetching thread is joined. ");
   }
 
   void Finalize() {

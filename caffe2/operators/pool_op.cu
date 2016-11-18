@@ -186,7 +186,7 @@ template <>
 bool PoolGradientOp<float, CUDAContext, AveragePool>::RunOnDeviceWithOrderNCHW() {
   auto& X = Input(0);
   auto& dY = Input(2);
-  CHECK_EQ(dY.ndim(), 4);
+  CAFFE_ENFORCE_EQ(dY.ndim(), 4);
   auto* dX = Output(0);
   dX->ResizeLike(X);
   ConvPoolOpBase<CUDAContext>::ComputePads(X.dim32(2), X.dim32(3));
@@ -203,7 +203,7 @@ template <>
 bool PoolGradientOp<float, CUDAContext, AveragePool>::RunOnDeviceWithOrderNHWC() {
   auto& X = Input(0);
   auto& dY = Input(2);
-  CHECK_EQ(dY.ndim(), 4);
+  CAFFE_ENFORCE_EQ(dY.ndim(), 4);
   auto* dX = Output(0);
   dX->ResizeLike(X);
   ConvPoolOpBase<CUDAContext>::ComputePads(X.dim32(1), X.dim32(2));
@@ -383,7 +383,7 @@ bool PoolGradientOp<float, CUDAContext, MaxPool>::RunOnDeviceWithOrderNCHW() {
   auto& X = Input(0);
   auto& Y = Input(1);
   auto& dY = Input(2);
-  CHECK_EQ(dY.ndim(), 4);
+  CAFFE_ENFORCE_EQ(dY.ndim(), 4);
   auto* dX = Output(0);
   dX->ResizeLike(X);
   ConvPoolOpBase<CUDAContext>::ComputePads(X.dim32(2), X.dim32(3));
@@ -402,7 +402,7 @@ bool PoolGradientOp<float, CUDAContext, MaxPool>::RunOnDeviceWithOrderNHWC() {
   auto& X = Input(0);
   auto& Y = Input(1);
   auto& dY = Input(2);
-  CHECK_EQ(dY.ndim(), 4);
+  CAFFE_ENFORCE_EQ(dY.ndim(), 4);
   auto* dX = Output(0);
   dX->ResizeLike(X);
   ConvPoolOpBase<CUDAContext>::ComputePads(X.dim32(1), X.dim32(2));

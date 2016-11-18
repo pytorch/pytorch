@@ -185,12 +185,16 @@ bool CudnnConvOp<T>::RunOnDevice() {
           top_desc_, GetCudnnTensorFormat(order_), cudnnTypeWrapper<T>::type,
           N, M, H_out, W_out));
     // Set the convolution descriptor
-    CHECK_EQ(pad_t_, pad_b_)
-        << "The current padding scheme leads to unequal padding on the top and "
-           "bottom, which is not supported by cudnn.";
-    CHECK_EQ(pad_l_, pad_r_)
-        << "The current padding scheme leads to unequal padding on the left "
-           "and right, which is not supported by cudnn.";
+    CAFFE_ENFORCE_EQ(
+        pad_t_,
+        pad_b_,
+        "The current padding scheme leads to unequal padding on the top and "
+        "bottom, which is not supported by cudnn.");
+    CAFFE_ENFORCE_EQ(
+        pad_l_,
+        pad_r_,
+        "The current padding scheme leads to unequal padding on the left "
+        "and right, which is not supported by cudnn.");
     CUDNN_CHECK(cudnnSetConvolution2dDescriptor(
           conv_desc_, pad_t_, pad_l_, stride_h_, stride_w_, 1, 1,
           CUDNN_CROSS_CORRELATION));
@@ -206,7 +210,7 @@ bool CudnnConvOp<T>::RunOnDevice() {
         std::array<cudnnConvolutionFwdAlgoPerf_t, kNUM_CUDNN_FWD_ALGS>
             perf_stat;
 
-        // no need to clean up workspace, 
+        // no need to clean up workspace,
         cudnn_wrapper_.with_cudnn_state(cudnn_state_, [&](CuDNNState* state) {
           // Actually run the search.
           CUDNN_CHECK(cudnnFindConvolutionForwardAlgorithmEx(
@@ -341,12 +345,16 @@ bool CudnnConvGradientOp<T>::RunOnDevice() {
           top_desc_, GetCudnnTensorFormat(order_), cudnnTypeWrapper<T>::type,
           N, M, H_out, W_out));
     // Set the convolution descriptor
-    CHECK_EQ(pad_t_, pad_b_)
-        << "The current padding scheme leads to unequal padding on the top and "
-           "bottom, which is not supported by cudnn.";
-    CHECK_EQ(pad_l_, pad_r_)
-        << "The current padding scheme leads to unequal padding on the left "
-           "and right, which is not supported by cudnn.";
+    CAFFE_ENFORCE_EQ(
+        pad_t_,
+        pad_b_,
+        "The current padding scheme leads to unequal padding on the top and "
+        "bottom, which is not supported by cudnn.");
+    CAFFE_ENFORCE_EQ(
+        pad_l_,
+        pad_r_,
+        "The current padding scheme leads to unequal padding on the left "
+        "and right, which is not supported by cudnn.");
     CUDNN_CHECK(cudnnSetConvolution2dDescriptor(
           conv_desc_, pad_t_, pad_l_, stride_h_, stride_w_, 1, 1,
           CUDNN_CROSS_CORRELATION));
@@ -514,7 +522,7 @@ REGISTER_CUDNN_OPERATOR(ConvFp16Gradient, CudnnConvGradientOp<float16>);
 class GetConvFp16Gradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
-    CHECK_EQ(def_.input_size(), 3);
+    CAFFE_ENFORCE_EQ(def_.input_size(), 3);
     return SingleGradientDef(
         "ConvFp16Gradient", "",
         vector<string>{I(0), I(1), GO(0)},

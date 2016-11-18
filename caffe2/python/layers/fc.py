@@ -26,7 +26,7 @@ class FC(ModelLayer):
 
         self.output_schema = schema.Scalar(
             (np.float32, output_dims),
-            core.BlobReference(model.net.NextName(self.name + '_output'))
+            core.ScopedBlobReference(model.net.NextName(self.name + '_output'))
         )
 
         scale = math.sqrt(1.0 / input_dims)
@@ -35,8 +35,8 @@ class FC(ModelLayer):
         bias_init = bias_init if bias_init else (
             'UniformFill', {'min': -scale, 'max': scale})
 
-        self.w = model.net.NextName(self.name + "_w")
-        self.b = model.net.NextName(self.name + "_b")
+        self.w = core.ScopedBlobReference(model.net.NextName(self.name + "_w"))
+        self.b = core.ScopedBlobReference(model.net.NextName(self.name + "_b"))
 
         self.params.append(
             LayerParameter(

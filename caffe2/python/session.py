@@ -118,9 +118,9 @@ class LocalSession(Session):
     but this behavior may change in the future. Only tasks pointing to the
     same logical node are guaranteed to always run in the same workspace.
     """
-    def __init__(self, ws):
+    def __init__(self, ws=None):
         Session.__init__(self)
-        self._ws = ws
+        self._ws = ws or workspace.C.Workspace()
         self._plan_caches = {}
 
     def _run_task_group(self, task_group):

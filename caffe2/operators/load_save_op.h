@@ -32,8 +32,8 @@ class LoadOp final : public Operator<Context> {
         keep_device_(OperatorBase::GetSingleArgument<int>("keep_device", 0)),
         load_all_(OperatorBase::GetSingleArgument<int>("load_all", 0)) {
     if (InputSize() == 0) {
-      CHECK_GT(db_name_.size(), 0) << "Must specify a db name.";
-      CHECK_GT(db_type_.size(), 0) << "Must specify a db type.";
+      CAFFE_ENFORCE_GT(db_name_.size(), 0, "Must specify a db name.");
+      CAFFE_ENFORCE_GT(db_type_.size(), 0, "Must specify a db type.");
     }
     if (!load_all_) {
       int idx = 0;
@@ -101,7 +101,7 @@ class LoadOp final : public Operator<Context> {
   }
 
   void extractFrom(Cursor* cursor, const vector<Blob*>& outputs) {
-    CHECK(cursor);
+    CAFFE_ENFORCE(cursor);
 
     // We are tracking sizes of already read tensor parts while reading data
     // chunks. This way we can make sure that all chunks were loaded in the end.
@@ -210,8 +210,8 @@ class SaveOp final : public Operator<Context> {
             OperatorBase::GetSingleArgument<int>("absolute_path", false)),
         db_name_(OperatorBase::GetSingleArgument<string>("db", "")),
         db_type_(OperatorBase::GetSingleArgument<string>("db_type", "")) {
-    CHECK_GT(db_name_.size(), 0) << "Must specify a db name.";
-    CHECK_GT(db_type_.size(), 0) << "Must specify a db type.";
+    CAFFE_ENFORCE_GT(db_name_.size(), 0, "Must specify a db name.");
+    CAFFE_ENFORCE_GT(db_type_.size(), 0, "Must specify a db type.");
   }
 
   bool RunOnDevice() override {
@@ -286,8 +286,9 @@ class SnapshotOp final : public Operator<Context> {
         every_(OperatorBase::GetSingleArgument<int>("every", 1)),
         ws_(ws),
         save_op_def_(operator_def) {
-    CHECK_GT(db_pattern_.size(), 0) << "Must specify a snapshot file pattern.";
-    CHECK_GT(every_, 0) << "Snapshot interval should be positive.";
+    CAFFE_ENFORCE_GT(
+        db_pattern_.size(), 0, "Must specify a snapshot file pattern.");
+    CAFFE_ENFORCE_GT(every_, 0, "Snapshot interval should be positive.");
     if (every_ == 1) {
       // Just issue a warning, but it's totally legal so we don't do anything.
       LOG(WARNING) << "It seems that we are snapshotting every iteration. "

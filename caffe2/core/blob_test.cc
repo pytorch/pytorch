@@ -401,7 +401,7 @@ TEST(TensorDeathTest, CannotCastDownLargeDims) {
   TensorCPU tensor(vector<TIndex>{large_number});
   EXPECT_EQ(tensor.ndim(), 1);
   EXPECT_EQ(tensor.dim(0), large_number);
-  ASSERT_DEATH(tensor.dim32(0), "");
+  ASSERT_THROW(tensor.dim32(0), EnforceNotMet);
 }
 
 #define TEST_SERIALIZATION_WITH_TYPE(TypeParam, field_name)               \

@@ -40,8 +40,7 @@ class SimpleQueue {
   void Push(const T& value) {
     {
       std::lock_guard<std::mutex> mutex_lock(mutex_);
-      CHECK(!no_more_jobs_)
-          << "Cannot push to a closed queue.";
+      CAFFE_ENFORCE(!no_more_jobs_, "Cannot push to a closed queue.");
       queue_.push(value);
     }
     cv_.notify_one();

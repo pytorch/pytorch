@@ -6,11 +6,18 @@
 
 // MKLDNN_CHECK should be used in places where exceptions should not be thrown,
 // such as in destructors.
-#define MKLDNN_CHECK(condition)                                                \
-  do {                                                                         \
-    dnnError_t error = condition;                                              \
-    CHECK_EQ(error, E_SUCCESS) << "Error at : " << __FILE__ << ":" << __LINE__ \
-                               << ", error number: " << error;                 \
+#define MKLDNN_CHECK(condition)   \
+  do {                            \
+    dnnError_t error = condition; \
+    CAFFE_ENFORCE_EQ(             \
+        error,                    \
+        E_SUCCESS,                \
+        "Error at : ",            \
+        __FILE__,                 \
+        ":",                      \
+        __LINE__,                 \
+        ", error number: ",       \
+        error);                   \
   } while (0)
 
 #define MKLDNN_SAFE_CALL(condition) \

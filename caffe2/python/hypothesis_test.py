@@ -911,6 +911,36 @@ class TestOperators(hu.HypothesisTestCase):
             inputs=[np.array(lengths, dtype=np.int32)],
             reference=op_ref)
 
+    @given(**hu.gcs_cpu_only)
+    def test_segment_ids_to_ranges(self, gc, dc):
+        lengths = [4, 6, 3, 2, 0, 4]
+        op = core.CreateOperator(
+            "SegmentIdsToRanges",
+            ["segment_ids"],
+            ["ranges"])
+
+        def op_ref(segment_ids):
+            ranges = [np.array([0, 0], dtype=np.int32)]
+            prev = 0
+            for i, sid in enumerate(segment_ids):
+                while sid != prev:
+                    prev += 1
+                    ranges.append(np.array([i, 0], dtype=np.int32))
+                ranges[-1][1] += 1
+            return (np.array(ranges, dtype=np.int32), )
+
+        def lengths_to_segment_ids(lengths):
+            sids = []
+            for i, l in enumerate(lengths):
+                sids.extend(l * [i])
+            return (np.array(sids, dtype=np.int32), )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=np.array(lengths_to_segment_ids(lengths), dtype=np.int32),
+            reference=op_ref)
+
     @given(lengths=st.lists(st.integers(min_value=0, max_value=10),
                             min_size=0,
                             max_size=10),
@@ -1249,7 +1279,7 @@ class TestOperators(hu.HypothesisTestCase):
         data=hu.tensor(),
         **hu.gcs_cpu_only)
     def test_squeeze_expand_dims(self, data, gc, dc):
-            dims = [0]
+            dims = [0, 0]
             if len(data.shape) > 2:
                 dims.append(2)
             op = core.CreateOperator(
@@ -2051,18 +2081,20 @@ class TestOperators(hu.HypothesisTestCase):
                                    rtol=1e-4, atol=1e-4)
         check_grad(cos_op)
 
-    @given(pad_t=st.integers(1, 3),
-           pad_l=st.integers(1, 3),
-           pad_b=st.integers(1, 3),
-           pad_r=st.integers(1, 3),
-           size=st.integers(7, 10),
-           input_channels=st.integers(1, 3),
-           batch_size=st.integers(1, 3),
+    @given(pad_t=st.integers(0, 3),
+           pad_l=st.integers(0, 3),
+           pad_b=st.integers(0, 3),
+           pad_r=st.integers(0, 3),
+           size=st.integers(1, 10),
+           input_channels=st.integers(1, 5),
+           batch_size=st.integers(1, 5),
            order=st.sampled_from(["NCHW", "NHWC"]),
            mode=st.sampled_from(["constant", "reflect", "edge"]),
            **hu.gcs)
     def test_pad_image(self, pad_t, pad_l, pad_b, pad_r, size, input_channels,
                        batch_size, order, mode, gc, dc):
+        assume(size > max(pad_b, pad_r, pad_t, pad_l))
+
         op = core.CreateOperator(
             "PadImage",
             ["X"],

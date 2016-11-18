@@ -410,7 +410,7 @@ class ScatterWeightedSumOp : public Operator<Context> {
     auto& weight0 = Input(1);
     auto& indices = Input(2);
     auto* output = Output(0);
-    CHECK_EQ(&X0, output) << "In place operation is required";
+    CAFFE_ENFORCE_EQ(&X0, output, "In place operation is required");
 
     DCHECK_GT(X0.size(), 0);
     DCHECK_GT(X0.ndim(), 0) << "X0 has to be at least the vector";
@@ -587,7 +587,7 @@ class ScatterAssignOp : public Operator<Context> {
     auto& indices = Input(INDICES);
     auto& slices = Input(SLICES);
     auto* output = Output(0);
-    CHECK_EQ(&input, output) << "In place operation is required";
+    CAFFE_ENFORCE_EQ(&input, output, "In place operation is required");
 
     DCHECK_GT(input.ndim(), 0) << "X0 has to be at least the vector";
     TIndex M = input.size();
@@ -707,6 +707,15 @@ class SegmentIdsToLengthsOp : public Operator<Context> {
     auto* output = Output(0);
     // segment id starts from 0
     auto num_segments = input_size ? input_data[input_size - 1] + 1 : 0;
+    if (InputSize() > 1) {
+      CAFFE_ENFORCE_GE(Input(1).ndim(), 1);
+      CAFFE_ENFORCE_LE(
+          num_segments,
+          Input(1).dim(0),
+          "The number of segments inferred should *NOT* be larger "
+          "than the size of Input(1)'s first dimension");
+      num_segments = Input(1).dim(0);
+    }
     CAFFE_ENFORCE(0 <= num_segments, "Indices must be in 0..K-1 range");
     output->Resize(num_segments);
     auto* output_data = output->template mutable_data<int32_t>();
@@ -724,6 +733,60 @@ class SegmentIdsToLengthsOp : public Operator<Context> {
           input_data[i]);
       prev = input_data[i];
       output_data[input_data[i]] += 1;
+    }
+
+    return true;
+  }
+};
+
+template <class Context>
+class SegmentIdsToRangesOp : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  USE_SIMPLE_CTOR_DTOR(SegmentIdsToRangesOp);
+
+  bool RunOnDevice() override {
+    return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(this, Input(0));
+  }
+
+  template <typename Index>
+  bool DoRunWithType() {
+    auto& input = Input(0);
+    CAFFE_ENFORCE(input.dims().size() == 1, "Input must be a vector.");
+    auto* input_data = input.template data<Index>();
+    auto input_size = input.size();
+    auto* output = Output(0);
+    // segment id starts from 0
+    auto num_segments = input_size ? input_data[input_size - 1] + 1 : 0;
+    if (InputSize() > 1) {
+      CAFFE_ENFORCE_GE(Input(1).ndim(), 1);
+      CAFFE_ENFORCE_LE(
+          num_segments,
+          Input(1).dim(0),
+          "The number of segments inferred should *NOT* be larger "
+          "than the size of Input(1)'s first dimension");
+      num_segments = Input(1).dim(0);
+    }
+    CAFFE_ENFORCE(0 <= num_segments, "Indices must be in 0..K-1 range");
+    output->Resize(num_segments, 2);
+    auto* output_data = output->template mutable_data<int32_t>();
+    if (num_segments == 0) {
+      return true;
+    }
+    std::fill(output_data, output_data + num_segments * 2, 0);
+    Index prev = input_data[0];
+    for (int64_t i = 0; i < input_size; i++) {
+      CAFFE_ENFORCE(
+          prev <= input_data[i],
+          "Segment ids must be sorted: ",
+          prev,
+          " vs ",
+          input_data[i]);
+      while (prev != input_data[i]) {
+        ++prev;
+        output_data[prev * 2] = i;
+      }
+      output_data[input_data[i] * 2 + 1] += 1;
     }
 
     return true;
@@ -1116,7 +1179,7 @@ class SqueezeOp : public Operator<Context> {
     CAFFE_ENFORCE(originalSize > 0, "Parameter `dims` must be provided.");
 
     std::sort(dims_.begin(), dims_.end());
-    std::unique(dims_.begin(), dims_.end());
+    dims_.erase(std::unique(dims_.begin(), dims_.end()), dims_.end());
     if (dims_.size() < originalSize) {
       LOG(WARNING) << "Parameter `dims` has repeated dimensions.";
     }
@@ -1171,7 +1234,7 @@ class ExpandDimsOp : public Operator<Context> {
     auto originalSize = dims_.size();
     CAFFE_ENFORCE(originalSize > 0, "Parameter `dims` must be provided.");
     std::sort(dims_.begin(), dims_.end());
-    std::unique(dims_.begin(), dims_.end());
+    dims_.erase(std::unique(dims_.begin(), dims_.end()), dims_.end());
     if (dims_.size() < originalSize) {
       LOG(WARNING) << "Parameter `dims` has repeated dimensions.";
     }
@@ -1187,9 +1250,12 @@ class ExpandDimsOp : public Operator<Context> {
     }
 
     auto newDims = input.dims();
-    CHECK_GE(input.dims().size() + dims_.size(), dims_.back() + 1)
-        << "Input needs at least " << (1 + dims_.back() - dims_.size())
-        << " dimensions given `dims`.";
+    CAFFE_ENFORCE_GE(
+        input.dims().size() + dims_.size(),
+        dims_.back() + 1,
+        "Input needs at least ",
+        (1 + dims_.back() - dims_.size()),
+        " dimensions given `dims`.");
     for (const auto dim : dims_) {
       newDims.insert(newDims.begin() + dim, 1);
     }
@@ -1220,7 +1286,7 @@ class GatherOp : public Operator<Context> {
     auto& indices = Input(INDICES);
     auto* output = Output(0);
 
-    CHECK_GE(data.ndim(), 1) << "DATA should be at least 1-D";
+    CAFFE_ENFORCE_GE(data.ndim(), 1, "DATA should be at least 1-D");
     auto shape = indices.dims();
     shape.insert(shape.end(), data.dims().begin() + 1, data.dims().end());
     output->Resize(shape);
@@ -1302,7 +1368,6 @@ class GatherRangesOp : public Operator<Context> {
       auto rangeSizeBytes = rangeLength * itemsize;
       CAFFE_ENFORCE(outputOffsetBytes < outputSize * itemsize);
       CAFFE_ENFORCE(rangeStart + rangeLength <= data.size());
-      VLOG(2) << "Performing copy for range i";
       context_.template CopyItems<Context, Context>(
           data.meta(),
           rangeLength,
@@ -1361,7 +1426,7 @@ class UniqueOp : public Operator<Context> {
     auto& inputTensor = Input(0);
     // use dim32 to enforce that it's fine to have remapping of type int
     int N = inputTensor.dim32(0);
-    CHECK_EQ(inputTensor.ndim(), 1) << "Input should be a vector";
+    CAFFE_ENFORCE_EQ(inputTensor.ndim(), 1, "Input should be a vector");
     auto* uniqueTensor = Output(UNIQUE);
 
     int* remapping = nullptr;

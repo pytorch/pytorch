@@ -48,7 +48,7 @@ class CreateCounterOp final : public Operator<Context> {
   CreateCounterOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         init_count_(OperatorBase::GetSingleArgument<T>("init_count", 0)) {
-    CHECK_LE(0, init_count_) << "negative init_count is not permitted.";
+    CAFFE_ENFORCE_LE(0, init_count_, "negative init_count is not permitted.");
   }
 
   bool RunOnDevice() override {
@@ -68,7 +68,7 @@ class ResetCounterOp final : public Operator<Context> {
   ResetCounterOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         init_count_(OperatorBase::GetSingleArgument<T>("init_count", 0)) {
-    CHECK_LE(0, init_count_) << "negative init_count is not permitted.";
+    CAFFE_ENFORCE_LE(0, init_count_, "negative init_count is not permitted.");
   }
 
   bool RunOnDevice() override {

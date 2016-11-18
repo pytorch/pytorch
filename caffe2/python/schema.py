@@ -20,7 +20,7 @@ import logging
 import numpy as np
 from caffe2.python import core
 from caffe2.python import workspace
-from caffe2.python.core import BlobReference
+from caffe2.python.core import ScopedBlobReference, BlobReference
 from collections import OrderedDict, namedtuple
 
 logger = logging.getLogger(__name__)
@@ -724,7 +724,8 @@ def NewRecord(net, schema):
     """
     if isinstance(schema, Scalar):
         result = schema.clone()
-        result.set_value(blob=BlobReference(net.NextName('unnamed_scalar')))
+        result.set_value(
+            blob=ScopedBlobReference(net.NextName('unnamed_scalar')))
         return result
 
     assert isinstance(schema, Field), 'Record must be a schema.Field instance.'

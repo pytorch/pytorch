@@ -9,18 +9,26 @@ namespace caffe2 {
 // multiple threads; the runtime value is configurable
 constexpr size_t kDefaultMinWorkSize = 80;
 
+#ifdef CAFFE2_THREADPOOL_MAIN_IMBALANCE
+constexpr float kDefaultImbalanceRatio = 1.0f;
+#endif
+
 ThreadPool::ThreadPool(int numThreads)
     : fn_(nullptr),
       workItemsPending_(0),
       currentWorkId_(0),
       threadsReady_(0),
-      minWorkSize_(kDefaultMinWorkSize) {
+      minWorkSize_(kDefaultMinWorkSize)
+#ifdef CAFFE2_THREADPOOL_MAIN_IMBALANCE
+    , imbalanceRatio_(kDefaultImbalanceRatio)
+#endif
+{
   std::lock_guard<std::mutex> guard(mutex_);
 
   // All worker threads (and the main thread) have a ThreadInfo
   for (auto i = 0; i < numThreads; ++i) {
     threadInfo_.emplace_back(
-      std::unique_ptr<ThreadInfo>(new ThreadInfo(i, numThreads)));
+      MakeAligned<ThreadInfo>::make(kCacheLineSize, i, numThreads));
   }
 
   // The first ThreadInfo is for the main thread
@@ -67,20 +75,106 @@ ThreadPool::setMinWorkSize(size_t size) {
   minWorkSize_ = size;
 }
 
+#ifdef CAFFE2_THREADPOOL_MAIN_IMBALANCE
+void
+ThreadPool::setImbalanceRatio(float ratio) {
+  std::lock_guard<std::mutex> guard(executionMutex_);
+
+  imbalanceRatio_ = ratio;
+}
+#endif
+
+#ifdef CAFFE2_THREADPOOL_STATS
+std::vector<ThreadStats>
+ThreadPool::getStats(bool reset) {
+  std::lock_guard<std::mutex> guard(executionMutex_);
+
+  // Set up thread state
+  {
+    std::unique_lock<std::mutex> lock(mutex_);
+
+    // We've guaranteed that all threads have finished work for the
+    // previous round, but we don't want threads to read new work
+    // information out of order. Wait for all of the old threads to
+    // check in first
+    while (threadsReady_ < threads_.size()) {
+      threadReadyMonitor_.wait(lock);
+    }
+
+    // The above serves as a barrier to ensure the stats are complete
+
+    std::vector<ThreadStats> stats;
+    for (auto& t : threadInfo_) {
+      stats.push_back(t->stats_);
+      if (reset) {
+        t->stats_.reset();
+      }
+    }
+
+    return stats;
+  }
+}
+#endif
+
 void
 ThreadPool::run(const std::function<void(int, size_t)>& fn, size_t range) {
   std::lock_guard<std::mutex> guard(executionMutex_);
 
   // If there are no worker threads, or if the range is too small (too
   // little work), just run locally
-  if (threads_.size() == 0 || range < minWorkSize_) {
+  bool runLocally = (threads_.empty() || range < minWorkSize_);
+
+  auto numThreads = threadInfo_.size();
+  size_t workUnitsPerThread = 0;
+  size_t firstThreadWork = 0;
+  size_t otherThreadWork = 0;
+
+  if (!runLocally) {
+    size_t workUnitsPerThread = (numThreads + range - 1) / numThreads;
+
+    // On mobile devices (especially big.LITTLE cores), there is
+    // significant lag in getting other threads to participate versus
+    // the current thread, which is likely already running on a big
+    // core.
+    // Based on tests, the main thread will execute (through its own
+    // work and stealing others) about 25% more work than other
+    // threads.
+    // To reduce the work stealing overhead, give the main thread 25%
+    // more work to start with.
+#ifdef CAFFE2_THREADPOOL_MAIN_IMBALANCE
+    firstThreadWork = (size_t) (imbalanceRatio_ * workUnitsPerThread);
+    if (firstThreadWork >= range) {
+      // give all to first thread
+      runLocally = true;
+    }
+
+    size_t remainderWork = range - firstThreadWork;
+    otherThreadWork =
+      ((numThreads - 1) + remainderWork - 1) / (numThreads - 1);
+#else
+    firstThreadWork = workUnitsPerThread;
+    otherThreadWork = workUnitsPerThread;
+#endif
+  }
+
+  if (runLocally) {
+    // Work is small enough to just run locally; multithread overhead
+    // is too high
     for (size_t i = 0; i < range; ++i) {
       fn(0, i);
     }
 
+#ifdef CAFFE2_THREADPOOL_STATS
+    // The main thread worked on this directly
+    auto& stats = threadInfo_[0]->stats_;
+    stats.numWorkedOn += range;
+    stats.numAssigned += range;
+#endif
+
     return;
   }
 
+  // Otherwise, all worker threads participate
   // Set up thread state
   {
     std::unique_lock<std::mutex> lock(mutex_);
@@ -98,16 +192,33 @@ ThreadPool::run(const std::function<void(int, size_t)>& fn, size_t range) {
 
     fn_ = &fn;
 
-    auto numThreads = threadInfo_.size();
-    size_t workUnitsPerThread = (numThreads + range - 1) / numThreads;
+    // Work given to main thread
+    {
+      auto& info = threadInfo_[0];
+      info->rangeStart_ = 0;
+      // already guaranteed to be within bounds
+      info->rangeEnd_ = firstThreadWork;
+      info->rangeLength_ = firstThreadWork;
+#ifdef CAFFE2_THREADPOOL_STATS
+      info->stats_.numAssigned += firstThreadWork;
+#endif
+    }
 
-    for (size_t i = 0; i < numThreads; ++i) {
-      auto& threadInfo = threadInfo_[i];
+    // Work given to other threads
+    size_t workStart = firstThreadWork;
+    for (size_t i = 1; i < numThreads; ++i) {
+      auto& info = threadInfo_[i];
 
-      threadInfo->rangeStart_ = std::min(i * workUnitsPerThread, range);
-      threadInfo->rangeEnd_ = std::min((i + 1) * workUnitsPerThread, range);
-      threadInfo->rangeLength_ =
-        threadInfo->rangeEnd_ - threadInfo->rangeStart_;
+      auto start = std::min(workStart, range);
+      auto end = std::min(workStart + otherThreadWork, range);
+      auto numAssigned = end - start;
+      info->rangeStart_ = start;
+      info->rangeEnd_ = end;
+      info->rangeLength_ = numAssigned;
+#ifdef CAFFE2_THREADPOOL_STATS
+      info->stats_.numAssigned += numAssigned;
+#endif
+      workStart += otherThreadWork;
     }
 
     workItemsPending_ = range;
@@ -173,7 +284,8 @@ ThreadInfo::threadMain(int threadId, ThreadPool* pool) {
 bool
 ThreadInfo::runAndSteal(int threadId, ThreadPool* pool) {
   auto lambdaFunctionToRun = pool->fn_;
-  auto localItemsCompleted = 0;
+  int localItemsCompleted = 0;
+  int localItemsStolen = 0;
 
   /* Process thread's own range of items */
   auto curItem = rangeStart_;
@@ -191,7 +303,7 @@ ThreadInfo::runAndSteal(int threadId, ThreadPool* pool) {
     ++localItemsCompleted;
   }
 
-  /* Done, now look for other threads' items to steal */
+  // Done, now look for other threads' items to steal
   for (auto i = (threadId_ + 1) % numThreads_;
        i != threadId_;
        i = (i + 1) % numThreads_) {
@@ -209,8 +321,13 @@ ThreadInfo::runAndSteal(int threadId, ThreadPool* pool) {
 
       (*lambdaFunctionToRun)(threadId, itemId);
       ++localItemsCompleted;
+#ifdef CAFFE2_THREADPOOL_STATS
+      ++localItemsStolen;
+#endif
     }
   }
+
+  bool lastThread = false;
 
   if (localItemsCompleted > 0) {
     auto numRemaining =
@@ -219,11 +336,16 @@ ThreadInfo::runAndSteal(int threadId, ThreadPool* pool) {
 
     if (numRemaining == 0) {
       // We were the last thread to finish all work
-      return true;
+      lastThread = true;
     }
   }
 
-  return false;
+#ifdef CAFFE2_THREADPOOL_STATS
+  stats_.numWorkedOn += localItemsCompleted;
+  stats_.numStolen += localItemsStolen;
+#endif
+
+  return lastThread;
 }
 
 } // namespace caffe2

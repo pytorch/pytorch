@@ -13,13 +13,18 @@ namespace caffe2 {
 
 namespace nccl {
 
-#define CAFFE_NCCL_CHECK(condition)                                  \
-  do {                                                               \
-    ncclResult_t status = (condition);                               \
-    CHECK_EQ(status, ncclSuccess) << " "                             \
-                                  << "Error at: " << __FILE__ << ":" \
-                                  << __LINE__ << ": "                \
-                                  << ncclGetErrorString(status);     \
+#define CAFFE_NCCL_CHECK(condition)    \
+  do {                                 \
+    ncclResult_t status = (condition); \
+    CAFFE_ENFORCE_EQ(                  \
+        status,                        \
+        ncclSuccess,                   \
+        " ",                           \
+        "Error at: ",                  \
+        __FILE__,                      \
+        __LINE__,                      \
+        ": ",                          \
+        ncclGetErrorString(status));   \
   } while (0)
 
 struct NCCLElement {

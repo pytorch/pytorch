@@ -37,7 +37,7 @@ def simple_add_ops(self, net):
     )
 
 _simple_operators = ['Softmax', 'Relu', 'Sigmoid', 'Tanh']
-_first_field_schema_operators = ['Add']
+_first_field_schema_operators = ['Add', 'Sum']
 
 for operator in _simple_operators:
     # Generate class instance with name 'operator', that is doing going to use

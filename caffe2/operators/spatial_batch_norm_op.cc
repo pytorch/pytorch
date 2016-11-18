@@ -317,12 +317,12 @@ class GetSpatialBNGradient : public GradientMakerBase {
       //     X, scale, bias, estimated_mean, estimated_variance
       // The gradient inputs are:
       //     X, scale, dY, estimated_mean, estimated_variance
-      CHECK_EQ(def_.input_size(), 5);
-      CHECK_EQ(def_.output_size(), 1);
+      CAFFE_ENFORCE_EQ(def_.input_size(), 5);
+      CAFFE_ENFORCE_EQ(def_.output_size(), 1);
       grad_inputs = vector<string>{I(0), I(1), GO(0), I(3), I(4)};
     } else {
-      CHECK_EQ(def_.input_size(), 5);
-      CHECK_EQ(def_.output_size(), 5);
+      CAFFE_ENFORCE_EQ(def_.input_size(), 5);
+      CAFFE_ENFORCE_EQ(def_.output_size(), 5);
       grad_inputs = vector<string>{I(0), I(1), GO(0), O(3), O(4)};
     }
     return SingleGradientDef(

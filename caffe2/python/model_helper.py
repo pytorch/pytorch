@@ -92,7 +92,7 @@ class ModelHelperBase(object):
 
     def add_param(self, param, key=None, shape=None, length=None):
         self._update_param_info()
-        if key is not None:
+        if key is not None and self.net.input_record() is not None:
             idx = self.net.input_record().field_blobs().index(key)
             key = self.net.input_record().field_names()[idx]
         shape = shape if shape is not None else self._infer_param_shape(param)
@@ -156,15 +156,26 @@ class ModelHelperBase(object):
         if self.gradient_ops_added:
             raise RuntimeError("You cannot run AddGradientOperators twice.")
         self.gradient_ops_added = True
+        self.grad_map = self.net.AddGradientOperators(*args, **kwargs)
+        self.param_to_grad = self.get_param_to_grad(self.params)
+        return self.grad_map
 
+    def get_param_to_grad(self, params):
+        '''
+        Given a list of parameters returns a dict from a parameter
+        to a corresponding gradient
+        '''
+
+        param_to_grad = {}
+        if not self.gradient_ops_added:
+            raise RuntimeError("You need to run AddGradientOperators first.")
         # We need to use empty namescope when creating the gradients
         # to prevent duplicating the namescope prefix for gradient blobs.
-        grad_map = self.net.AddGradientOperators(*args, **kwargs)
-        for p in self.params:
-            if str(p) in grad_map:
-                self.param_to_grad[p] = grad_map[str(p)]
+        for p in params:
+            if str(p) in self.grad_map:
+                param_to_grad[p] = self.grad_map[str(p)]
+        return param_to_grad
 
-        return grad_map
 
     def TensorProtosDBInput(
         self, unused_blob_in, blob_out, batch_size, db, db_type, **kwargs
@@ -222,6 +233,8 @@ class ModelHelperBase(object):
             "Accuracy",
             "Adam",
             "Add",
+            "Adagrad",
+            "SparseAdagrad",
             "AveragedLoss",
             "Cast",
             "ConstantFill",
@@ -249,7 +262,10 @@ class ModelHelperBase(object):
             "WeightedSum",
         ]
         if op_type not in known_working_ops:
-            assert self.allow_not_known_ops
+            if not self.allow_not_known_ops:
+                raise RuntimeError(
+                    "Operator {} is not known to be safe".format(op_type))
+
             logging.warning("You are creating an op that the ModelHelperBase "
                             "does not recognize: {}.".format(op_type))
         return self.net.__getattr__(op_type)

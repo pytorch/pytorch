@@ -1,21 +1,10 @@
 #ifndef CAFFE2_UTILS_FIXED_DIVISOR_H_
 #define CAFFE2_UTILS_FIXED_DIVISOR_H_
 
-#ifdef __ARM_NEON__
-#include <arm_neon.h>
-#endif
-#include <cmath>
+#include <cstdlib>
+#include <stdint.h>
 
 namespace caffe2 {
-
-namespace detail {
-
-inline uint32_t mulHi(uint32_t x, uint32_t y) {
-  uint64_t v = (uint64_t) x * (uint64_t) y;
-  return (uint32_t) (v >> 32);
-}
-
-}
 
 // Utility class for quickly calculating quotients and remainders for
 // a known integer divisor
@@ -23,90 +12,67 @@ template <typename T>
 class FixedDivisor {
 };
 
+// Works for any positive divisor, 1 to INT_MAX. One 64-bit
+// multiplication and one 64-bit shift is used to calculate the
+// result.
 template <>
-class FixedDivisor<int> {
+class FixedDivisor<int32_t> {
  public:
-  typedef int Type;
-
-  FixedDivisor(int d) : d_(d) {
+  FixedDivisor(int32_t d) : d_(d) {
     calcSignedMagic();
   }
 
+  uint64_t getMagic() const {
+    return magic_;
+  }
+
+  int getShift() const {
+    return shift_;
+  }
+
   /// Calculates `q = n / d`.
-  inline int div(int n) const {
-    return (int) (detail::mulHi(magic_, n) >> shift_);
+  inline int32_t div(int32_t n) const {
+    // In lieu of a mulhi instruction being available, perform the
+    // work in uint64
+    uint64_t mul64 = magic_ * (uint64_t) n;
+    return (int32_t) (mul64 >> shift_);
   }
 
   /// Calculates `r = n % d`.
-  inline int mod(int n) const {
+  inline int32_t mod(int32_t n) const {
     return n - d_ * div(n);
   }
 
   /// Calculates `q = n / d` and `r = n % d` together.
-  inline void divMod(int n, int& q, int& r) const {
-    const int quotient = div(n);
+  inline void divMod(int32_t n, int32_t& q, int32_t& r) const {
+    const int32_t quotient = div(n);
     q = quotient;
     r = n - d_ * quotient;
   }
-
-#ifdef __ARM_NEON__
-  inline void divModVector(int32x4_t n,
-                           int32x4_t& q,
-                           int32x4_t& r) const {
-    int32x2_t loQ;
-    int32x2_t loR;
-    divModVector(vget_low_s32(n), loQ, loR);
-
-    int32x2_t hiQ;
-    int32x2_t hiR;
-    divModVector(vget_high_s32(n), hiQ, hiR);
-
-    q = vcombine_s32(loQ, hiQ);
-    r = vcombine_s32(loR, hiR);
-  }
-
-  inline void divModVector(int32x2_t n,
-                           int32x2_t& q,
-                           int32x2_t& r) const {
-    q = divVector(n);
-
-    // r = n - d * q
-    r = vsub_s32(n, vmul_s32(vdup_n_s32(d_), q));
-  }
-
-  // Calculates `q1 = v1 / d, q2 = v2 / d` using NEON
-  inline int32x2_t divVector(int32x2_t v) const {
-    uint32x2_t vUnsigned = vreinterpret_u32_s32(v);
-
-    uint32x2_t resultUnsigned =
-      vmovn_u64(
-        vshlq_u64(
-          vmull_u32(vUnsigned, vdup_n_u32(magic_)),
-          vdupq_n_s64(-32 - shift_)));
-
-    return vreinterpret_s32_u32(resultUnsigned);
-  }
-#endif
 
  private:
   /**
      Calculates magic multiplicative value and shift amount for
      calculating `q = n / d` for signed 32-bit integers.
      Implementation taken from Hacker's Delight section 10.
-     `d` cannot be in [-1, 1].
   */
   void calcSignedMagic() {
-    const unsigned int two31 = 0x80000000;
+    if (d_ == 1) {
+      magic_ = UINT64_C(0x1) << 32;
+      shift_ = 32;
+      return;
+    }
 
-    unsigned int ad = std::abs(d_);
-    unsigned int t = two31 + ((unsigned int) d_ >> 31);
-    unsigned int anc = t - 1 - t % ad;   // Absolute value of nc.
-    unsigned int p = 31;                 // Init. p.
-    unsigned int q1 = two31 / anc;       // Init. q1 = 2**p/|nc|.
-    unsigned int r1 = two31 - q1 * anc;  // Init. r1 = rem(2**p, |nc|).
-    unsigned int q2 = two31 / ad;        // Init. q2 = 2**p/|d|.
-    unsigned int r2 = two31 - q2 * ad;   // Init. r2 = rem(2**p, |d|).
-    unsigned int delta = 0;
+    const uint32_t two31 = UINT32_C(0x80000000);
+    uint32_t ad = std::abs(d_);
+    uint32_t t = two31 + ((uint32_t) d_ >> 31);
+    uint32_t anc = t - 1 - t % ad;   // Absolute value of nc.
+    uint32_t p = 31;                 // Init. p.
+    uint32_t q1 = two31 / anc;       // Init. q1 = 2**p/|nc|.
+    uint32_t r1 = two31 - q1 * anc;  // Init. r1 = rem(2**p, |nc|).
+    uint32_t q2 = two31 / ad;        // Init. q2 = 2**p/|d|.
+    uint32_t r2 = two31 - q2 * ad;   // Init. r2 = rem(2**p, |d|).
+    uint32_t delta = 0;
 
     do {
       p = p + 1;
@@ -129,15 +95,16 @@ class FixedDivisor<int> {
       delta = ad - r2;
     } while (q1 < delta || (q1 == delta && r1 == 0));
 
-    magic_ = q2 + 1;
+    int32_t magic = q2 + 1;
     if (d_ < 0) {
-      magic_ = -magic_;
+      magic = -magic;
     }
-    shift_ = p - 32;
+    shift_ = p;
+    magic_ = (uint64_t) (uint32_t) magic;
   }
 
-  int d_;
-  int magic_;
+  int32_t d_;
+  uint64_t magic_;
   int shift_;
 };
 

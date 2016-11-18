@@ -105,8 +105,8 @@ class TreeIterator {
       std::vector<TOffset>& limits,
       TOffset num) {
     std::vector<TOffset> newOffsets;
-    CHECK_EQ(lengths.size(), numLengthFields());
-    CHECK_EQ(offsets.size(), numOffsetFields());
+    CAFFE_ENFORCE_EQ(lengths.size(), numLengthFields());
+    CAFFE_ENFORCE_EQ(offsets.size(), numOffsetFields());
     sizes.resize(offsets.size());
     newOffsets.resize(offsets.size());
     // first index, top level

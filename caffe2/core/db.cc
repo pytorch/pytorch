@@ -48,9 +48,9 @@ class MiniDBCursor : public Cursor {
       valid_ = false;
       return;
     }
-    CHECK_EQ(fread(&value_len_, sizeof(int), 1, file_), 1);
-    CHECK_GT(key_len_, 0);
-    CHECK_GT(value_len_, 0);
+    CAFFE_ENFORCE_EQ(fread(&value_len_, sizeof(int), 1, file_), 1);
+    CAFFE_ENFORCE_GT(key_len_, 0);
+    CAFFE_ENFORCE_GT(value_len_, 0);
     // Resize if the key and value len is larger than the current one.
     if (key_len_ > key_.size()) {
       key_.resize(key_len_);
@@ -59,9 +59,9 @@ class MiniDBCursor : public Cursor {
       value_.resize(value_len_);
     }
     // Actually read in the contents.
-    CHECK_EQ(
+    CAFFE_ENFORCE_EQ(
         fread(key_.data(), sizeof(char), key_len_, file_), key_len_);
-    CHECK_EQ(
+    CAFFE_ENFORCE_EQ(
         fread(value_.data(), sizeof(char), value_len_, file_), value_len_);
     // Note(Yangqing): as we read the file, the cursor naturally moves to the
     // beginning of the next entry.
@@ -100,17 +100,17 @@ class MiniDBTransaction : public Transaction {
   void Put(const string& key, const string& value) override {
     int key_len = key.size();
     int value_len = value.size();
-    CHECK_EQ(fwrite(&key_len, sizeof(int), 1, file_), 1);
-    CHECK_EQ(fwrite(&value_len, sizeof(int), 1, file_), 1);
-    CHECK_EQ(
+    CAFFE_ENFORCE_EQ(fwrite(&key_len, sizeof(int), 1, file_), 1);
+    CAFFE_ENFORCE_EQ(fwrite(&value_len, sizeof(int), 1, file_), 1);
+    CAFFE_ENFORCE_EQ(
         fwrite(key.c_str(), sizeof(char), key_len, file_), key_len);
-    CHECK_EQ(
+    CAFFE_ENFORCE_EQ(
         fwrite(value.c_str(), sizeof(char), value_len, file_), value_len);
   }
 
   void Commit() override {
     if (file_ != nullptr) {
-      CHECK_EQ(fflush(file_), 0);
+      CAFFE_ENFORCE_EQ(fflush(file_), 0);
       file_ = nullptr;
     }
   }
@@ -150,7 +150,7 @@ class MiniDB : public DB {
   }
 
   unique_ptr<Cursor> NewCursor() override {
-    CHECK_EQ(this->mode_, READ);
+    CAFFE_ENFORCE_EQ(this->mode_, READ);
     return make_unique<MiniDBCursor>(file_, &file_access_mutex_);
   }
 

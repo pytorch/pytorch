@@ -224,8 +224,8 @@ def _AddMPIParameterSync(devices, model, net, mpi_comm, uniq_param_names=None):
     # ITER is in CPU scope :(
     with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU)):
         net.Broadcast(
-            inputs=[mpi_comm, "gpu_0/ITER"],
-            outputs=["gpu_0/ITER"],
+            inputs=[mpi_comm, "gpu_{}/ITER".format(devices[0])],
+            outputs=["gpu_{}/ITER".format(devices[0])],
             engine='MPI'
         )
 
@@ -403,7 +403,7 @@ def _GroupByDevice(devices, params):
             "Param {} is not of type BlobReference".format(p)
 
         name = stripParamName(p)
-        gpuid = i // num_params_per_device
+        gpuid = devices[i // num_params_per_device]
         assert "gpu_{}/".format(gpuid) in p.GetNameScope(),\
             "Param {} expected to have namescope 'gpu_{}'".format(str(p), gpuid)
 

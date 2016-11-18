@@ -40,9 +40,8 @@ TEST(MKLDNNTest, SimpleConvolutionTest) {
     data[i] = 0.1;
   }
 
-  PrimitiveWrapper<float> primitive;
-  MKLDNN_SAFE_CALL(dnnConvolutionCreateForwardBias<float>(
-      primitive.ptr(),
+  PrimitiveWrapper<float> primitive(
+      dnnConvolutionCreateForwardBias<float>,
       nullptr,
       dnnAlgorithmConvolutionDirect,
       dimension,
@@ -51,25 +50,24 @@ TEST(MKLDNNTest, SimpleConvolutionTest) {
       fdata_sizes,
       strides,
       pads,
-      dnnBorderZeros));
+      dnnBorderZeros);
 
   // Test if the resource wrapper works.
-  InternalResourceWrapper<float> X_wrapper(X, primitive.ref(), dnnResourceSrc);
-  X_wrapper.CopyIn(X);
+  MKLMemory<float> X_wrapper(X, primitive, dnnResourceSrc);
+  X_wrapper.CopyFrom(X);
   TensorCPU X_recover(X.dims());
-  X_wrapper.CopyOut(&X_recover);
+  X_wrapper.CopyTo(&X_recover);
   const float* recover_data = X_recover.data<float>();
   for (int i = 0; i < X_recover.size(); ++i) {
     EXPECT_EQ(recover_data[i], 1);
   }
 
   // Create W, b and Y wrappers, and run the convolution algorithm.
-  InternalResourceWrapper<float> W_wrapper(
-      W, primitive.ref(), dnnResourceFilter);
-  W_wrapper.CopyIn(W);
-  InternalResourceWrapper<float> b_wrapper(b, primitive.ref(), dnnResourceBias);
-  b_wrapper.CopyIn(b);
-  InternalResourceWrapper<float> Y_wrapper(Y, primitive.ref(), dnnResourceDst);
+  MKLMemory<float> W_wrapper(W, primitive, dnnResourceFilter);
+  W_wrapper.CopyFrom(W);
+  MKLMemory<float> b_wrapper(b, primitive, dnnResourceBias);
+  b_wrapper.CopyFrom(b);
+  MKLMemory<float> Y_wrapper(Y, primitive, dnnResourceDst);
 
   void* resources[dnnResourceNumber] = {
       X_wrapper.buffer(),
@@ -78,8 +76,8 @@ TEST(MKLDNNTest, SimpleConvolutionTest) {
       b_wrapper.buffer(),
   };
 
-  MKLDNN_SAFE_CALL(dnnExecute<float>(primitive.ref(), resources));
-  Y_wrapper.CopyOut(&Y);
+  MKLDNN_SAFE_CALL(dnnExecute<float>(primitive, resources));
+  Y_wrapper.CopyTo(&Y);
   const float* out_data = Y.data<float>();
   for (int i = 0; i < Y.size(); ++i) {
     EXPECT_NEAR(out_data[i], 72.1, 1e-5);

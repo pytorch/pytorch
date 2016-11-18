@@ -16,6 +16,24 @@ CAFFE2_DEFINE_bool(
     "If used we will handle exceptions in executor threads. "
     "This avoids SIGABRT but may cause process to deadlock");
 
+#if CAFFE2_MOBILE
+// Threadpool restrictions
+
+// Whether or not threadpool caps apply to Android
+CAFFE2_DEFINE_int(caffe2_threadpool_android_cap, true, "");
+
+// Whether or not threadpool caps apply to iOS
+CAFFE2_DEFINE_int(caffe2_threadpool_ios_cap, false, "");
+
+// Minimum number of cores before removing threads from the threadpool
+CAFFE2_DEFINE_int(caffe2_threadpool_cap_min, 4, "");
+
+// Over that level, number of threads to subtract (by default 1, so we
+// will run on all cores except for 1)
+CAFFE2_DEFINE_int(caffe2_threadpool_cap_diff, 1, "");
+
+#endif // CAFFE2_MOBILE
+
 namespace caffe2 {
 
 namespace {
@@ -213,7 +231,24 @@ ThreadPool* Workspace::GetThreadPool() {
   std::lock_guard<std::mutex> guard(thread_pool_creation_mutex_);
 
   if (!thread_pool_) {
-    auto numThreads = std::thread::hardware_concurrency();
+    int numThreads = std::thread::hardware_concurrency();
+
+    bool applyCap = false;
+#if CAFFE2_ANDROID
+    applyCap = caffe2::FLAGS_caffe2_threadpool_android_cap;
+#elif CAFFE2_IOS
+    applyCap = caffe2::FLAGS_caffe2_threadpool_ios_cap;
+#else
+#error Undefined architecture
+#endif
+
+    if (applyCap) {
+      if (numThreads >= caffe2::FLAGS_caffe2_threadpool_cap_min) {
+        numThreads -= caffe2::FLAGS_caffe2_threadpool_cap_diff;
+        numThreads = std::max(1, numThreads);
+      }
+    }
+
     LOG(INFO) << "Constructing thread pool with " << numThreads << " threads";
     thread_pool_.reset(new ThreadPool(numThreads));
   }
