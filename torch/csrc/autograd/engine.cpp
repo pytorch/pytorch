@@ -165,7 +165,7 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
 
       // A shortcut for variables - there's no need to buffer gradients for them
       // as their _do_backward is super fast (and we can save memory).
-      // TODO: this might call leaf variable hooks multiple times
+      // FIXME: this might call leaf variable hooks multiple times
       if (THPVariable_Check(prev_obj)) {
         THPVariable *prev_var = (THPVariable*)prev_obj;
         if (prev_var->requires_grad) {
