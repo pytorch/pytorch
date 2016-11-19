@@ -1,3 +1,10 @@
+!*************************************************************************
+!* Copyright (c) 2016 Research Computing Services (RCS), University of
+!* Cambridge. All rights reserved.
+!*
+!* See LICENSE.txt for license information
+!*************************************************************************
+
 program test
 use iso_c_binding
 use iso_fortran_env

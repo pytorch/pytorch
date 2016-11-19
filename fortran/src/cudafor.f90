@@ -1,3 +1,10 @@
+!*************************************************************************
+!* Copyright (c) 2016 Research Computing Services (RCS), University of
+!* Cambridge. All rights reserved.
+!*
+!* See LICENSE.txt for license information
+!*************************************************************************
+
 #ifndef _CUDA
 
 !Start cudaFor module
