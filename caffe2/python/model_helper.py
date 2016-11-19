@@ -176,7 +176,6 @@ class ModelHelperBase(object):
                 param_to_grad[p] = self.grad_map[str(p)]
         return param_to_grad
 
-
     def TensorProtosDBInput(
         self, unused_blob_in, blob_out, batch_size, db, db_type, **kwargs
     ):
@@ -244,12 +243,16 @@ class ModelHelperBase(object):
             "LabelCrossEntropy",
             "LearningRate",
             "MakeTwoClass",
+            "MatMul",
             "NCCLAllreduce",
             "NHWC2NCHW",
+            "PackSegments",
             "Print",
+            "PRelu",
             "Scale",
             "ScatterWeightedSum",
             "Sigmoid",
+            "SortedSegmentSum",
             "Snapshot",
             "Softmax",
             "SoftmaxWithLoss",
@@ -258,7 +261,7 @@ class ModelHelperBase(object):
             "StopGradient",
             "Summarize",
             "Tanh",
-            "PRelu",
+            "UnpackSegments"
             "WeightedSum",
         ]
         if op_type not in known_working_ops:
