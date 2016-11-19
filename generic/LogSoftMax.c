@@ -76,7 +76,6 @@ void THNN_(LogSoftMax_updateGradInput)(
           THTensor *output)
 {
   THNN_CHECK_SHAPE(input, gradOutput);
-  gradOutput = THTensor_(newContiguous)(gradOutput);
   real *gradInput_data, *gradOutput_data, *output_data;
   ptrdiff_t nframe = 0, dim = 0, stride = 0;
   ptrdiff_t t, d;
