@@ -171,6 +171,7 @@ static void THTensor_(random1__)(THTensor *self, THGenerator *gen, long b)
 [[
   name: multinomial
   defined_if: CUDA_FLOAT || CUDA_DOUBLE || CUDA_HALF
+  with_stateless: True
   return: argument 0
   arguments:
     - arg: THTensor* result
