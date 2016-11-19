@@ -49,7 +49,14 @@ class OperatorBase {
   template <typename T>
   inline const T& Input(int idx) {
     DCHECK_LT(idx, inputs_.size());
-    return inputs_.at(idx)->template Get<T>();
+    try {
+      return inputs_.at(idx)->template Get<T>();
+    } catch (::caffe2::EnforceNotMet& enf) {
+      enf.AppendMessage(".\nOffending Blob name: ");
+      enf.AppendMessage(operator_def_.input(idx));
+      enf.AppendMessage(".\n");
+      throw enf;
+    }
   }
 
   template <typename T>
