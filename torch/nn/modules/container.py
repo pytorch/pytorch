@@ -4,13 +4,13 @@ import torch
 from .module import Module
 
 def _addindent(s_, numSpaces):
-    s = string.split(s_, '\n')
+    s = s_.split('\n')
     # dont do anything for single-line stuff
     if len(s) == 1:
         return s_
     first = s.pop(0)
     s = [(numSpaces * ' ') + line for line in s]
-    s = string.join(s, '\n')
+    s = '\n'.join(s)
     s = first + '\n' + s
     return s
 
@@ -37,7 +37,7 @@ class Container(Module):
      ```
 
     One can also add new modules to a container after construction.
-    You can do this with the add_module function 
+    You can do this with the add_module function
     or by assigning them as Container attributes.
 
     ```python
@@ -48,11 +48,11 @@ class Container(Module):
     model.conv1 = nn.Conv2d(12, 24, 3)
     ```
 
-    The container has some important additional methods: 
-    
+    The container has some important additional methods:
+
     **`[generator] parameters()`**
-    
-    returns a generator over all learnable parameters in the container instance. 
+
+    returns a generator over all learnable parameters in the container instance.
     This can typically be passed to the optimizer API
 
     ```python
@@ -62,9 +62,9 @@ class Container(Module):
     <class 'torch.FloatTensor'> (20L,)
     <class 'torch.FloatTensor'> (20L, 1L, 5L, 5L)
     ```
-    
+
     **`[dict] parameter_dict()`**
-    
+
     returns a dictionary of learnable parameters of the Container.
     For example: ['conv1.weight' : Parameter(torch.FloatTensor(20x1x5x5)),
                   'conv1.bias'   : Parameter(torch.FloatTensor(20)),
@@ -83,7 +83,7 @@ class Container(Module):
     Given a parameter dict, sets the parameters of self to be the given dict.
     It loads loads the parameters recursively.
     Excessive or non-matching parameter names are ignored.
-    For example, the input dict has an entry 'conv44.weight', but 
+    For example, the input dict has an entry 'conv44.weight', but
     if the container does not have a module named 'conv44', then this entry is ignored.
 
     **`children()`**
@@ -100,11 +100,11 @@ class Container(Module):
 
     **`apply(closure)`**
 
-    Applies the given closure to each parameter of the container. 
+    Applies the given closure to each parameter of the container.
 
 
     **__Note: Apart from these, the container will define the base functions that it has derived from nn.Module __**
-    
+
 
     """
 
