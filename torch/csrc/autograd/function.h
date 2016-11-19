@@ -26,12 +26,15 @@ struct THPFunctionPtr: public THPObjectPtr {
 
 // (class, gpu id, sizes)
 using output_info_type = std::tuple<PyObject *, int, std::vector<long>>;
+// (tensor, version when saved, version counter)
+// or
+// (None, 0, nullptr)
+using saved_var_info_type = std::tuple<THPObjectPtr, int, std::unique_ptr<THPVariableVersion>>;
 
 struct THPFunction {
     PyObject_HEAD
 
     PyObject *needs_input_grad;
-    PyObject *saved_variables;
     PyObject *backward_hooks;
 
     PyObject *to_save;
@@ -41,6 +44,7 @@ struct THPFunction {
 
     THPFunctionPtr *previous_functions;
     std::vector<output_info_type> *output_info;
+    std::vector<saved_var_info_type> *saved_variables;
     int num_inputs;
     int num_outputs;
     char requires_grad;

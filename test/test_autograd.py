@@ -401,6 +401,36 @@ class TestAutograd(TestCase):
         test_blas(torch.addr, Variable(torch.randn(5, 6)),
                 Variable(torch.randn(5)), Variable(torch.randn(6)))
 
+    def test_save_none_for_backward(self):
+        test_case = self
+        class MyFn(Function):
+            def forward(self, input):
+                self.save_for_backward(None, input, None)
+                return input
+
+            def backward(self, grad_output):
+                n1, input, n2 = self.saved_tensors
+                test_case.assertIsNone(n1)
+                test_case.assertIsNone(n2)
+                return input * grad_output
+
+        x = Variable(torch.randn(5, 5), requires_grad=True)
+        y = MyFn()(x)
+        y.sum().backward()
+        self.assertEqual(x.grad, x.data)
+
+    def test_too_many_grads(self):
+        class MyFn(Function):
+            def forward(self, input):
+                return input
+
+            def backward(self, grad_output):
+                return grad_output, None, None
+
+        x = Variable(torch.randn(5, 5), requires_grad=True)
+        y = MyFn()(x)
+        y.sum().backward()
+        self.assertEqual(x.grad, x.data.clone().fill_(1))
 
 
 def index_variable(num_indices, max_indices):

@@ -18,7 +18,6 @@ static void THPFunction_dealloc(THPFunction* self)
   self->num_outputs = 0;
 
   Py_XDECREF(self->needs_input_grad);
-  Py_XDECREF(self->saved_variables);
   Py_XDECREF(self->backward_hooks);
 
   Py_XDECREF(self->to_save);
@@ -31,6 +30,10 @@ static void THPFunction_dealloc(THPFunction* self)
   delete[] previous_functions;
   delete self->output_info;
 
+  auto saved_variables = self->saved_variables;
+  self->saved_variables = NULL;
+  delete saved_variables;
+
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
@@ -38,10 +41,13 @@ static void THPFunction_dealloc(THPFunction* self)
 static int THPFunction_traverse(THPFunction *self, visitproc visit, void *arg)
 {
   Py_VISIT(self->needs_input_grad);
-  Py_VISIT(self->saved_variables);
   Py_VISIT(self->backward_hooks);
   for (int i = 0; i < self->num_inputs; i++)
       Py_VISIT(self->previous_functions[i].get());
+  if (self->saved_variables) {
+    for (unsigned int i = 0; i < self->saved_variables->size(); i++)
+      Py_VISIT(std::get<0>(self->saved_variables->at(i)));
+  }
 
   Py_VISIT(self->to_save);
   Py_VISIT(self->shared_pairs);
@@ -57,7 +63,6 @@ static int THPFunction_clear(THPFunction *self)
   self->num_outputs = 0;
 
   Py_CLEAR(self->needs_input_grad);
-  Py_CLEAR(self->saved_variables);
   Py_CLEAR(self->backward_hooks);
 
   Py_CLEAR(self->to_save);
@@ -68,6 +73,10 @@ static int THPFunction_clear(THPFunction *self)
   THPFunctionPtr *previous_functions = self->previous_functions;
   self->previous_functions = NULL;
   delete[] previous_functions;
+
+  auto saved_variables = self->saved_variables;
+  self->saved_variables = NULL;
+  delete saved_variables;
 
   return 0;
 }
@@ -107,10 +116,10 @@ static bool _mark_dirty(THPFunction *self, t2var_type &t2var)
         return false;
       }
       auto &v_counter = *variable->version_counter;
-      THPUtils_assert(v_counter.refcnt() == 1, "in-place operations can be "
+      THPUtils_assert(v_counter.var_refcnt() == 1, "in-place operations can be "
           "only used on variables that don't share storage with any other "
           "variables, but detected that there are %d objects sharing it",
-          v_counter.refcnt());
+          v_counter.var_refcnt());
       v_counter++;
     }
     // We're not going to ever need this so let's remove references now
@@ -188,16 +197,21 @@ static bool _wrap_outputs(THPFunction *self, t2var_type &t2var,
 
 static bool _save_variables(THPFunction*self, t2var_type &t2var)
 {
-  // TODO: this can be stored without using python types
   if (self->to_save) {
     THPUtils_assertRet(false, PyTuple_Check(self->to_save), "autograd internal "
         "error: to_save attribute is expected to be a tuple but is %s",
         THPUtils_typename(self->to_save));
     Py_ssize_t num_saved = PyTuple_GET_SIZE(self->to_save);
-    self->saved_variables = PyTuple_New(num_saved);
-    if (!self->saved_variables) return false;
+    self->saved_variables = new std::vector<saved_var_info_type>();
+    self->saved_variables->reserve(num_saved);
     for (int i = 0; i < num_saved; i++) {
       PyObject *tensor = PyTuple_GET_ITEM(self->to_save, i);
+      if (tensor == Py_None) {
+        Py_INCREF(tensor);
+        self->saved_variables->emplace_back(tensor, 0, nullptr);
+        continue;
+      }
+
       THPVariable *variable;
       try {
         variable = t2var.at(tensor);
@@ -210,13 +224,12 @@ static bool _save_variables(THPFunction*self, t2var_type &t2var)
         return false;
       }
 
-      PyObject *tuple = PyTuple_New(2);
-      if (!tuple)
-        return false;
-      Py_INCREF(variable);
-      PyTuple_SET_ITEM(tuple, 0, (PyObject*)variable);
-      PyTuple_SET_ITEM(tuple, 1, PyInt_FromLong(**variable->version_counter));
-      PyTuple_SET_ITEM(self->saved_variables, i, tuple);
+      Py_INCREF(tensor);
+      self->saved_variables->emplace_back(
+        tensor,
+        **variable->version_counter,
+        std::unique_ptr<THPVariableVersion>(variable->version_counter->new_saved_ref())
+      );
     }
     // Free .to_save
     Py_DECREF(self->to_save);
@@ -384,8 +397,10 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *inputs)
       return NULL;
     if (!_join_version_counters(self, t2var))
       return NULL;
-    if (!_save_variables(self, t2var))
-      return NULL;
+    if (self->requires_grad) {
+      if (!_save_variables(self, t2var))
+        return NULL;
+    }
     if (!_mark_non_differentiable(self, t2var))
       return NULL;
   }
@@ -455,6 +470,19 @@ PyObject * THPFunction_do_backward(THPFunction *self, PyObject *args)
   int num_grads = PyTuple_GET_SIZE(grad_input.get());
   int num_prev_fns = self->num_inputs;
 
+  if (num_grads > num_prev_fns) {
+    bool all_none = true;
+    for (int i = num_prev_fns; i < num_grads; i++) {
+      all_none = all_none && (PyTuple_GET_ITEM(grad_input.get(), i) == Py_None);
+      if (!all_none) break;
+    }
+    if (all_none) {
+      num_grads = num_prev_fns;
+      grad_input = PyTuple_GetSlice(grad_input.get(), 0, num_grads);
+      if (!grad_input)
+        return NULL;
+    }
+  }
   THPUtils_assert(num_grads == num_prev_fns, "%s returned an invalid number of "
       "gradient tensors (expected %d, but got %d)", THPUtils_typename(self),
       num_prev_fns, num_grads);
@@ -474,8 +502,8 @@ PyObject * THPFunction_do_backward(THPFunction *self, PyObject *args)
   }
 
   if (retain_variables == Py_False) {
-    Py_XDECREF(self->saved_variables);
-    self->saved_variables = NULL;
+    delete self->saved_variables;
+    self->saved_variables = nullptr;
     self->has_freed_buffers = 1;
   }
 
@@ -490,20 +518,22 @@ PyObject *THPFunction_saved_tensors(THPFunction *self, void *_unused)
   if (!self->saved_variables)
     return PyTuple_New(0);
 
-  Py_ssize_t num_saved = PyTuple_GET_SIZE(self->saved_variables);
+  int num_saved = self->saved_variables->size();
   THPObjectPtr saved_tensors = PyTuple_New(num_saved);
   if (!saved_tensors)
     return NULL;
   for (int i = 0; i < num_saved; i++) {
-    PyObject *tuple = PyTuple_GET_ITEM(self->saved_variables, i);
-    long expected_version = THPUtils_unpackLong(PyTuple_GET_ITEM(tuple, 1));
-    THPVariable *variable = (THPVariable*)PyTuple_GET_ITEM(tuple, 0);
-    int current_version = **variable->version_counter;
-    THPUtils_assert(expected_version == current_version, "one of the variables "
-        "needed for gradient computation has been modified by an "
-        "inplace operation");
-    Py_INCREF(variable->data);
-    PyTuple_SET_ITEM(saved_tensors.get(), i, variable->data);
+    saved_var_info_type &tuple = (*self->saved_variables)[i];
+    PyObject *tensor = std::get<0>(tuple);
+    if (tensor != Py_None) {
+      int expected_version = std::get<1>(tuple);
+      int current_version = **(std::get<2>(tuple));
+      THPUtils_assert(expected_version == current_version, "one of the variables "
+          "needed for gradient computation has been modified by an "
+          "inplace operation");
+    }
+    Py_INCREF(tensor);
+    PyTuple_SET_ITEM(saved_tensors.get(), i, tensor);
   }
   return saved_tensors.release();
 }
@@ -536,7 +566,6 @@ static struct PyGetSetDef THPFunction_properties[] = {
 };
 
 static struct PyMemberDef THPFunction_members[] = {
-  {(char*)"saved_variables", T_OBJECT, offsetof(THPFunction, saved_variables), 0, NULL},
   {(char*)"backward_hooks", T_OBJECT, offsetof(THPFunction, backward_hooks), 0, NULL},
   {(char*)"to_save", T_OBJECT, offsetof(THPFunction, to_save), 0, NULL},
   {(char*)"shared_pairs", T_OBJECT, offsetof(THPFunction, shared_pairs), 0, NULL},
