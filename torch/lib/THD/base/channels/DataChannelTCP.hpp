@@ -1,10 +1,11 @@
 #pragma once
 
-#import "_DataChannel.h"
+#include "../DataChannel.hpp"
+#include "../ChannelEnvVars.hpp"
 
-#import <string>
-#import <vector>
-#import <utility>
+#include <string>
+#include <vector>
+#include <utility>
 
 namespace thd {
 

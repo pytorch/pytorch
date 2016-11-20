@@ -2,13 +2,16 @@
 
 #include <TH/TH.h>
 
+// We're defining THTensor as a custom class
 #undef THTensor
 #define THRealTensor TH_CONCAT_3(TH,Real,Tensor)
+
+#include "../Tensor.hpp"
 
 template<typename real>
 struct th_traits {};
 
-#include "generic/_THTensor.h"
+#include "base/tensors/generic/THTensor.hpp"
 #include <TH/THGenerateAllTypes.h>
 
 template<typename real>

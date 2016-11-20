@@ -1,7 +1,7 @@
 #include <unordered_map>
 #include <string>
 
-#include "../_THD.h"
+#include "../common/Functions.hpp"
 
 namespace thd {
 namespace worker {

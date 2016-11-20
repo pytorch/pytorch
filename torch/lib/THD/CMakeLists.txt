@@ -14,23 +14,21 @@ IF(NOT THD_INSTALL_BIN_DIR OR NOT THD_INSTALL_LIB_DIR OR NOT THD_INSTALL_INCLUDE
   SET(THD_INSTALL_INCLUDE_DIR "include" CACHE PATH "THD install include subdirectory")
 ENDIF()
 
-FILE(GLOB_RECURSE master_h "master/*.h")
-FILE(GLOB_RECURSE master_cpp "master/*.cpp")
-FILE(GLOB_RECURSE worker_h "worker/*.h")
-FILE(GLOB_RECURSE worker_cpp "worker/*.cpp")
-FILE(GLOB_RECURSE common_h "common/*.h")
-FILE(GLOB_RECURSE common_cpp "common/*.cpp")
+FILE(GLOB_RECURSE master_worker_h "master_worker/*.h")
+FILE(GLOB_RECURSE master_worker_cpp "master_worker/*.cpp")
+FILE(GLOB_RECURSE base_h "base/*.h")
+FILE(GLOB_RECURSE base_cpp "base/*.cpp")
 FILE(GLOB_RECURSE test_cpp "test/*.cpp")
 
 IF(NOT MPI_FOUND)
-  LIST(REMOVE_ITEM common_cpp "${CMAKE_CURRENT_SOURCE_DIR}/common/DataChannelMPI.cpp")
+  LIST(REMOVE_ITEM base_cpp "${CMAKE_CURRENT_SOURCE_DIR}/common/DataChannelMPI.cpp")
   LIST(REMOVE_ITEM test_cpp "${CMAKE_CURRENT_SOURCE_DIR}/test/data_channel_mpi_smoke.cpp")
 ENDIF()
 
-SET(src_cpp ${master_cpp} ${worker_cpp} ${common_cpp})
+SET(all_cpp ${base_cpp} ${master_worker_cpp})
 
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR})
-ADD_LIBRARY(THD SHARED ${src_cpp})
+ADD_LIBRARY(THD SHARED ${all_cpp})
 SET_PROPERTY(TARGET THD PROPERTY CXX_STANDARD 11)
 
 IF(MPI_FOUND)

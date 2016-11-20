@@ -10,7 +10,8 @@
  */
 
 
-#include "../_THD.h"
+#include "../base/channels/DataChannelTCP.hpp"
+#include "../base/tensors/THTensor.hpp"
 
 #include <cassert>
 #include <iostream>

@@ -1,6 +1,6 @@
 #pragma once
 
-#import "_DataChannel.h"
+#include "../DataChannel.hpp"
 
 namespace thd {
 

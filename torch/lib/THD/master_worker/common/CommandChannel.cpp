@@ -1,8 +1,8 @@
-#include "_CommandChannel.h"
+#include "CommandChannel.hpp"
 
-#include "_Channel.h"
-#include "_ByteArray.h"
-#include "_RPC.h"
+#include "../../base/ChannelEnvVars.hpp"
+#include "ByteArray.hpp"
+#include "RPC.hpp"
 
 #include <cstdlib>
 #include <cstring>

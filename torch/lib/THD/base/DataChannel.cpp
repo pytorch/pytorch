@@ -1,4 +1,4 @@
-#include "../_THD.h"
+#include "DataChannel.hpp"
 
 namespace thd {
 

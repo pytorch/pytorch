@@ -2,7 +2,7 @@
 #include <cassert>
 #include <typeinfo>
 
-#include "../_THD.h"
+#include "../base/tensors/THTensor.hpp"
 
 using namespace std;
 

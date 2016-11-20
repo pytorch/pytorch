@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "common/generic/THTensor.cpp"
+#define TH_GENERIC_FILE "base/tensors/generic/THTensor.cpp"
 #else
 
 template<>

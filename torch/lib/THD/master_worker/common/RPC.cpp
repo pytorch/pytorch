@@ -1,6 +1,5 @@
-#include "_RPC.h"
-
-#include "_ByteArray.h"
+#include "RPC.hpp"
+#include "ByteArray.hpp"
 
 #include <cstdarg>
 #include <cstring>
