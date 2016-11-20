@@ -1,6 +1,6 @@
 #pragma once
 
-#import "_Tensor.h"
+#include "Tensor.hpp"
 #include <unordered_map>
 
 namespace thd {

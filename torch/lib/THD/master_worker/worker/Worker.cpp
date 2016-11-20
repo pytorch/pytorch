@@ -1,4 +1,4 @@
-#include "../_THD.h"
+#include "Worker.h"
 
 void THDWorkerMain() {
   // TODO: initialize worker

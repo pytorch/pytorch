@@ -1,8 +1,8 @@
 #pragma once
 
+#include "../../base/Tensor.hpp"
 #include "../master/THDTensor.h"
-#include "_ByteArray.h"
-#include "_Tensor.h"
+#include "ByteArray.hpp"
 
 #include <cstdint>
 #include <string>
@@ -44,4 +44,4 @@ Tensor* unpackTensor(RPCMessage& raw_message);
 
 }} // namespace rpc, thd
 
-#include "_RPC-inl.h"
+#include "RPC-inl.hpp"

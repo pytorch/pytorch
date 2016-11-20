@@ -1,4 +1,5 @@
-#include "../_THD.h"
+#include "../../base/DataChannel.hpp"
+#include "../worker/Worker.h"
 
 namespace thd {
 
@@ -17,4 +18,4 @@ bool THDInit() {
   return true;
 }
 
-}
+} // namespace thd

@@ -1,8 +1,10 @@
+#include "../base/channels/DataChannelMPI.hpp"
+#include "../base/tensors/THTensor.hpp"
+
 #include <iostream>
 #include <cassert>
 #include <unistd.h>
 
-#include "../_THD.h"
 
 void master(std::shared_ptr<thd::DataChannelMPI> dataChannel) {
   FloatTensor *float_tensor = new THTensor<float>();

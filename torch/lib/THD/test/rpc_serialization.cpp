@@ -3,7 +3,7 @@
 #include <climits>
 #include <typeinfo>
 
-#include "../_THD.h"
+#include "../master_worker/common/RPC.hpp"
 
 using namespace std;
 using namespace thd::rpc;

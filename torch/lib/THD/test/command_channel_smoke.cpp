@@ -1,4 +1,5 @@
-#include "../_THD.h"
+#include "../master_worker/common/CommandChannel.hpp"
+#include "../base/ChannelEnvVars.hpp"
 
 #include <cerrno>
 #include <cstdlib>

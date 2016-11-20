@@ -1,4 +1,4 @@
-#include "_ByteArray.h"
+#include "ByteArray.hpp"
 
 #include <cstdlib>
 #include <cstddef>

@@ -1,4 +1,4 @@
-#include "../_THD.h"
+#include "DataChannelMPI.hpp"
 
 #include <mpi.h>
 #include <stdexcept>
