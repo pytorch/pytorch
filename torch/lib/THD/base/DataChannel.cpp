@@ -1,11 +1,15 @@
 #include "DataChannel.hpp"
+#include "channels/DataChannelMPI.hpp"
+#include "channels/DataChannelTCP.hpp"
 
 namespace thd {
 
-DataChannelRegistry::channels_map DataChannelRegistry::s_registered_channels;
-
-DataChannel* DataChannelRegistry::dataChannelFor(channel_key_type key) {
-  return s_registered_channels.at(key);
+DataChannel* DataChannel::newChannel(THDChannelType type) {
+  if (type == THDChannelTCP)
+    return new DataChannelTCP();
+  else if (type == THDChannelMPI)
+    return new DataChannelMPI();
+  throw std::runtime_error("unsupported data channel type");
 }
 
 } // namespace thd

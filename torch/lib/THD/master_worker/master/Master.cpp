@@ -1,14 +1,12 @@
-#include "../../base/DataChannel.hpp"
+#include "Master.h"
 #include "../worker/Worker.h"
+#include "../../process_group/General.hpp"
+
 
 namespace thd {
 
-bool THDInit() {
-  // TODO: initialize registry with all available backends
-  auto dataChannel = DataChannelRegistry::dataChannelFor(0);
-  if (!dataChannel->init()) {
-    return false;
-  }
+bool THDMasterWorkerInit(THDChannelType channel_type) {
+  if (!THDProcessGroupInit(channel_type)) return false;
 
   if (dataChannel->getRank() > 0) {
     THDWorkerMain();
