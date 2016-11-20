@@ -21,11 +21,11 @@ IF(NOT THD_INSTALL_BIN_DIR OR NOT THD_INSTALL_LIB_DIR OR NOT THD_INSTALL_INCLUDE
   SET(THD_INSTALL_INCLUDE_DIR "include" CACHE PATH "THD install include subdirectory")
 ENDIF()
 
-FILE(GLOB_RECURSE master_worker_h "master_worker/*.h")
+FILE(GLOB_RECURSE master_worker_h RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "master_worker/*.h")
 FILE(GLOB_RECURSE master_worker_cpp "master_worker/*.cpp")
-FILE(GLOB_RECURSE process_group_h "process_group/*.h")
+FILE(GLOB_RECURSE process_group_h RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "process_group/*.h")
 FILE(GLOB_RECURSE process_group_cpp "process_group/*.cpp")
-FILE(GLOB_RECURSE base_h "base/*.h")
+FILE(GLOB_RECURSE base_h RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "base/*.h")
 FILE(GLOB_RECURSE base_cpp "base/*.cpp")
 FILE(GLOB_RECURSE test_cpp "test/*.cpp")
 
@@ -35,6 +35,7 @@ IF(NOT MPI_FOUND)
 ENDIF()
 
 SET(all_cpp ${base_cpp} ${process_group_cpp} ${master_worker_cpp})
+SET(all_h THD.h ${base_h} ${process_group_h} ${master_worker_h})
 
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR})
 ADD_LIBRARY(THD SHARED ${all_cpp})
@@ -76,4 +77,8 @@ INSTALL(TARGETS THD
   LIBRARY DESTINATION "${THD_INSTALL_LIB_DIR}"
   ARCHIVE DESTINATION "${THD_INSTALL_LIB_DIR}")
 
-INSTALL(FILES ${master_h} DESTINATION "${THD_INSTALL_INCLUDE_DIR}/THD")
+FOREACH(HEADER ${all_h})
+  STRING(REGEX MATCH "(.*)[/\\]" DIR ${HEADER})
+  MESSAGE(STATUS ${DIR})
+  INSTALL(FILES ${HEADER} DESTINATION ${THD_INSTALL_INCLUDE_DIR}/THD/${DIR})
+ENDFOREACH()
