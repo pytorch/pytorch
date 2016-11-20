@@ -125,17 +125,6 @@ type(c_devptr), allocatable :: recvBuffPtr(:)
     err = maxval(abs(hostBuff(:, nDev + 1) / hostBuff(:, i) - 1.0_real32))
     print "(a, i2.2, a, e11.4e2)", "maximum error in sendbuff of rank ", i - 1," = ", err
   end do
-
-  print "(a)", ""
-  do i = 1, nDev
-    if (i - 1 /= root) then
-      stat = cudaSetDevice(devList(i))
-      call c_f_pointer(recvBuffPtr(i), recvBuff, [nEl])
-      hostBuff(:, nDev + 1) = recvBuff
-      err = maxval(abs(hostBuff(:, nDev + 1) / hostBuff(:, i) - 1.0_real32))
-      print "(a, i2.2, a, e11.4e2)", "maximum error in recvbuff of rank ", i - 1," = ", err
-    end if
-  end do
   print "(a)", ""
 
   do i = 1, nDev
