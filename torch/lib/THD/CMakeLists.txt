@@ -6,6 +6,7 @@ FIND_PACKAGE(MPI)
 IF(MPI_FOUND)
   ADD_DEFINITIONS(-DWITH_MPI=1)
 ENDIF()
+ADD_DEFINITIONS(-D_THD_CORE=1)
 
 # Can be compiled standalone
 IF(NOT THD_INSTALL_BIN_DIR OR NOT THD_INSTALL_LIB_DIR OR NOT THD_INSTALL_INCLUDE_DIR)
@@ -16,6 +17,8 @@ ENDIF()
 
 FILE(GLOB_RECURSE master_worker_h "master_worker/*.h")
 FILE(GLOB_RECURSE master_worker_cpp "master_worker/*.cpp")
+FILE(GLOB_RECURSE process_group_h "process_group/*.h")
+FILE(GLOB_RECURSE process_group_cpp "process_group/*.cpp")
 FILE(GLOB_RECURSE base_h "base/*.h")
 FILE(GLOB_RECURSE base_cpp "base/*.cpp")
 FILE(GLOB_RECURSE test_cpp "test/*.cpp")
@@ -25,7 +28,7 @@ IF(NOT MPI_FOUND)
   LIST(REMOVE_ITEM test_cpp "${CMAKE_CURRENT_SOURCE_DIR}/test/data_channel_mpi_smoke.cpp")
 ENDIF()
 
-SET(all_cpp ${base_cpp} ${master_worker_cpp})
+SET(all_cpp ${base_cpp} ${process_group_cpp} ${master_worker_cpp})
 
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR})
 ADD_LIBRARY(THD SHARED ${all_cpp})
