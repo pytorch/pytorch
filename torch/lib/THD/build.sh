@@ -11,6 +11,6 @@ cd THD
 
 mkdir -p build
 cd build
-cmake .. -DCMAKE_CXX_FLAGS=" -I${lib_dir}/tmp_install/include -I/usr/local/include"  \
-         -DCMAKE_SHARED_LINKER_FLAGS="-L${lib_dir}/tmp_install/lib -lTH -L/usr/local/lib -lzmq"
+cmake .. -DCMAKE_CXX_FLAGS=" -I${lib_dir}/tmp_install/include "  \
+         -DCMAKE_SHARED_LINKER_FLAGS="-L${lib_dir}/tmp_install/lib -lTH "
 make
