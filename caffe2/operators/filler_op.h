@@ -256,6 +256,38 @@ class RangeFillOp final : public FillerOp<Context> {
   bool Fill(Tensor<Context>* output) override;
 };
 
+template <class Context>
+class LengthsRangeFillOp : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  USE_SIMPLE_CTOR_DTOR(LengthsRangeFillOp);
+
+  bool RunOnDevice() override {
+    auto& input = Input(0);
+    auto* output = Output(0);
+    auto* input_data = input.template data<int32_t>();
+
+    CAFFE_ENFORCE_EQ(input.ndim(), 1, "Input must be a vector.");
+
+    auto len_sum = std::accumulate(input_data, input_data + input.size(), 0);
+
+    output->Resize(len_sum);
+    auto* output_data = output->template mutable_data<int32_t>();
+
+    int32_t offset = 0;
+    for (int i = 0; i < input.size(); ++i) {
+      auto len = input_data[i];
+      auto start = output_data + offset;
+      std::iota(
+          start,
+          start + len,
+          0); // make the third argument the arg of this operator
+      offset += len;
+    }
+    return true;
+  }
+};
+
 } // namespace caffe2
 
 #endif // CAFFE2_OPERATORS_FILLER_OP_H_

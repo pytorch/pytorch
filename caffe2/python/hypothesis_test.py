@@ -911,6 +911,28 @@ class TestOperators(hu.HypothesisTestCase):
             inputs=[np.array(lengths, dtype=np.int32)],
             reference=op_ref)
 
+    @given(lengths=st.lists(st.integers(min_value=0, max_value=10),
+                            min_size=0,
+                            max_size=10),
+           **hu.gcs_cpu_only)
+    def test_lengths_range_fill(self, lengths, gc, dc):
+        op = core.CreateOperator(
+            "LengthsRangeFill",
+            ["lengths"],
+            ["increasing_seq"])
+
+        def op_ref(lengths):
+            sids = []
+            for i, l in enumerate(lengths):
+                sids.extend(range(l))
+            return (np.array(sids, dtype=np.int32), )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[np.array(lengths, dtype=np.int32)],
+            reference=op_ref)
+
     @given(**hu.gcs_cpu_only)
     def test_segment_ids_to_ranges(self, gc, dc):
         lengths = [4, 6, 3, 2, 0, 4]
