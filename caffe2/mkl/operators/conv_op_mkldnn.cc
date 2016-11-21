@@ -71,12 +71,14 @@ class ConvMKLDNNOp final : public ConvPoolOpBase<CPUContext> {
           strides,
           pads,
           dnnBorderZeros);
-      X_wrapper_.reset(new MKLMemory<T>(X, primitive_, dnnResourceSrc, true));
+      X_wrapper_.reset(
+          new MKLMemory<T>(X.dims(), primitive_, dnnResourceSrc, true));
       filter_wrapper_.reset(
-          new MKLMemory<T>(filter, primitive_, dnnResourceFilter, true));
+          new MKLMemory<T>(filter.dims(), primitive_, dnnResourceFilter, true));
       bias_wrapper_.reset(
-          new MKLMemory<T>(bias, primitive_, dnnResourceBias, true));
-      Y_wrapper_.reset(new MKLMemory<T>(*Y, primitive_, dnnResourceDst, true));
+          new MKLMemory<T>(bias.dims(), primitive_, dnnResourceBias, true));
+      Y_wrapper_.reset(
+          new MKLMemory<T>(Y->dims(), primitive_, dnnResourceDst, true));
       X_wrapper_->CopyFrom(X);
       filter_wrapper_->CopyFrom(filter);
       bias_wrapper_->CopyFrom(bias);

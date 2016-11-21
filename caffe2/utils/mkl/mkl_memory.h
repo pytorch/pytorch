@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "caffe2/core/tensor.h" // for TIndex
 #include "caffe2/utils/mkl/mkl_dnn_cppwrapper.h"
 
 namespace caffe2 {
@@ -127,15 +128,19 @@ class MKLMemory {
       const size_t dimension,
       const size_t size[],
       const size_t strides[],
-      const dnnPrimitive_t primitive,
-      const dnnResourceType_t type,
+      const dnnPrimitive_t primitive = nullptr,
+      const dnnResourceType_t type = dnnResourceNumber,
       bool share_mem_if_possible = false) {
     dims_.resize(dimension);
     for (int i = 0; i < dimension; ++i) {
       dims_[i] = size[dimension - 1 - i];
     }
     user_layout_.Reset(dimension, size, strides);
-    layout_.Reset(primitive, type);
+    if (!primitive) {
+      layout_.Reset(dimension, size, strides);
+    } else {
+      layout_.Reset(primitive, type);
+    }
     convert_in_.Reset(dnnConversionCreate<T>, user_layout_, layout_);
     convert_out_.Reset(dnnConversionCreate<T>, layout_, user_layout_);
     share_mem_ =
@@ -150,23 +155,28 @@ class MKLMemory {
     }
   }
 
-  // Initialize an MKLMemory, with the size and stride
-  // derived from the tensor itself.
-  MKLMemory(
-      const TensorCPU& tensor,
-      const dnnPrimitive_t primitive,
-      const dnnResourceType_t type,
+  // Initialize an MKLMemory, with the given dimension assuming a C-contiguous
+  // storage.
+  template <typename IndexType>
+  explicit MKLMemory(
+      const vector<IndexType>& dims,
+      const dnnPrimitive_t primitive = nullptr,
+      const dnnResourceType_t type = dnnResourceNumber,
       bool share_mem_if_possible = false) {
-    dims_ = tensor.dims();
-    size_t dimension = tensor.ndim();
+    dims_ = dims;
+    size_t dimension = dims.size();
     size_t size[dimension];
     size_t strides[dimension];
     for (int i = 0; i < dimension; ++i) {
-      size[i] = tensor.dim(dimension - i - 1);
+      size[i] = dims[dimension - i - 1];
       strides[i] = (i == 0) ? 1 : strides[i - 1] * size[i - 1];
     }
-    user_layout_.Reset(tensor.ndim(), size, strides);
-    layout_.Reset(primitive, type);
+    user_layout_.Reset(dims.size(), size, strides);
+    if (!primitive) {
+      layout_.Reset(dimension, size, strides);
+    } else {
+      layout_.Reset(primitive, type);
+    }
     convert_in_.Reset(dnnConversionCreate<T>, user_layout_, layout_);
     convert_out_.Reset(dnnConversionCreate<T>, layout_, user_layout_);
     share_mem_ =
@@ -218,7 +228,7 @@ class MKLMemory {
     return ShareFrom(tensor.template data<T>());
   }
 
-  void CopyTo(void* ptr) {
+  void CopyTo(void* ptr) const {
     if (buffer_.get() == ptr) {
       // This is already mapping to the same memory region. Skip copy.
       return;
@@ -228,7 +238,7 @@ class MKLMemory {
     MKLDNN_SAFE_CALL(dnnConversionExecute<T>(convert_out_, buffer_.get(), ptr));
   }
 
-  void CopyTo(TensorCPU* tensor) {
+  void CopyTo(TensorCPU* tensor) const {
     if (buffer_.get() == tensor->mutable_data<T>()) {
       // This is already mapping to the same memory region. Skip copy.
       return;
@@ -243,6 +253,10 @@ class MKLMemory {
 
   inline const void* buffer() const {
     return buffer_.get();
+  }
+
+  const vector<TIndex>& dims() const {
+    return dims_;
   }
 
   // Returns a view of the content. We mark this function const, but be noted
