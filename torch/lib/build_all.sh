@@ -68,6 +68,7 @@ mkdir -p tmp_install
 build TH
 build THS
 build THNN
+build THD
 
 if [[ "$1" == "--with-cuda" ]]; then
     build THC

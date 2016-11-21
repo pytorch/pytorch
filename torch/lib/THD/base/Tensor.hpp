@@ -140,6 +140,8 @@ struct Tensor {
   virtual bool isContiguous() const = 0;
   virtual void* data() = 0;
   virtual const void* data() const = 0;
+  virtual Tensor& retain() = 0;
+  virtual Tensor& free() = 0;
 
   virtual Tensor& resize(const std::initializer_list<long>& new_size) = 0;
   virtual Tensor& resize(const std::vector<long>& new_size) = 0;

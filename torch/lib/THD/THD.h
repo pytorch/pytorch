@@ -1,6 +1,6 @@
 #pragma once
 
-#ifdef __cplusplus__
+#ifdef __cplusplus
 #define THD_API extern "C"
 #else
 #define THD_API
@@ -14,6 +14,7 @@
 #include "base/ChannelType.h"
 
 #include "process_group/General.h"
+#include "process_group/Collectives.h"
 
 #include "master_worker/master/Master.h"
 #include "master_worker/master/State.h"
