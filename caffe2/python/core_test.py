@@ -217,6 +217,10 @@ class TestCreateOperator(test_util.TestCase):
         self.assertEqual(op.arg[1].s, "2")
         self.assertEqual(list(op.arg[2].ints), [1, 2, 3])
 
+    def testCreateWithNoneKwarg(self):
+        with self.assertRaises(ValueError):
+            core.CreateOperator("Ludicrous", "x", "y", arg1=None)
+
 
 class TestAutoNaming(test_util.TestCase):
     """
