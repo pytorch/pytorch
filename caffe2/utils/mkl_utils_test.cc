@@ -53,7 +53,7 @@ TEST(MKLDNNTest, SimpleConvolutionTest) {
       dnnBorderZeros);
 
   // Test if the resource wrapper works.
-  MKLMemory<float> X_wrapper(X, primitive, dnnResourceSrc);
+  MKLMemory<float> X_wrapper(X.dims(), primitive, dnnResourceSrc);
   X_wrapper.CopyFrom(X);
   TensorCPU X_recover(X.dims());
   X_wrapper.CopyTo(&X_recover);
@@ -63,11 +63,11 @@ TEST(MKLDNNTest, SimpleConvolutionTest) {
   }
 
   // Create W, b and Y wrappers, and run the convolution algorithm.
-  MKLMemory<float> W_wrapper(W, primitive, dnnResourceFilter);
+  MKLMemory<float> W_wrapper(W.dims(), primitive, dnnResourceFilter);
   W_wrapper.CopyFrom(W);
-  MKLMemory<float> b_wrapper(b, primitive, dnnResourceBias);
+  MKLMemory<float> b_wrapper(b.dims(), primitive, dnnResourceBias);
   b_wrapper.CopyFrom(b);
-  MKLMemory<float> Y_wrapper(Y, primitive, dnnResourceDst);
+  MKLMemory<float> Y_wrapper(Y.dims(), primitive, dnnResourceDst);
 
   void* resources[dnnResourceNumber] = {
       X_wrapper.buffer(),

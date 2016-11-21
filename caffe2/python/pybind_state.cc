@@ -6,6 +6,7 @@
 #include "caffe2/core/asan.h"
 #include "caffe2/core/db.h"
 #include "caffe2/core/predictor.h"
+#include "caffe2/utils/mkl_utils.h"
 
 namespace caffe2 {
 namespace python {
@@ -433,6 +434,14 @@ void addObjectMethods(py::module& m) {
 
 void addGlobalMethods(py::module& m) {
   m.attr("is_asan") = py::bool_(CAFFE2_ASAN_ENABLED);
+
+  m.attr("has_mkldnn") = py::bool_(
+#ifdef CAFFE2_HAS_MKL_DNN
+      true
+#else // CAFFE2_HAS_MKL_DNN
+      false
+#endif // CAFFE2_HAS_MKL_DNN
+      );
 
   m.def("global_init", [](std::vector<std::string> args) -> void {
     int argc = args.size();
