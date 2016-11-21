@@ -116,7 +116,16 @@ THTensor* THPTensor_(fromNumpy)(PyObject *numpy_array) {
     THLongStoragePtr strides = THLongStorage_newWithSize(ndim);
     long *strides_data = strides->data;
     for (int i = 0; i < ndim; ++i) {
-      strides_data[i] = PyArray_STRIDE(array, i) / sizeof(real);   // numpy uses bytes, torch uses elements
+      // numpy uses bytes, torch uses elements
+      // we have to cast sizeof to long, because otherwise stride gets
+      // promoted to size_t, and is UB for negative values
+      strides_data[i] = PyArray_STRIDE(array, i) / ((long)sizeof(real));
+      if (strides_data[i] < 0) {
+        THPUtils_setError("some of the strides of a given numpy array are "
+            "negative. This is currently not supported, but will be added in "
+            "future releases.");
+        return NULL;
+      }
     }
 
     THTensor *result = THTensor_(newWithStorage)(storage, 0, sizes, strides);
@@ -210,6 +219,8 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
     THPObjectPtr numpy_array =
       PyArray_FromArray((PyArrayObject*)first_arg, nullptr, NPY_ARRAY_BEHAVED);
     self->cdata = THPTensor_(fromNumpy)(numpy_array.get());
+    if (!self->cdata)
+        return NULL;
     return (PyObject*)self.release();
   }
 #endif
