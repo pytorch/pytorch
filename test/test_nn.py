@@ -542,6 +542,20 @@ class TestNN(NNTestCase):
         inputs = (i1, Variable(i2.data.new()))
         expected_outputs = (expected1, expected2.new())
 
+    def test_data_parallel_noop(self):
+        l = nn.Linear(10, 5).float()
+        i = Variable(torch.randn(20, 10).float())
+        out = dp.data_parallel(l, i, [])
+        self.assertEqual(out, l(i))
+        self.assertFalse(out.is_cuda)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    def test_data_parallel_small_back(self):
+        l = nn.Linear(10, 5).float().cuda()
+        i = Variable(torch.randn(20, 10).float().cuda())
+        out = dp.data_parallel(l, i, (0, 1))
+        self.assertEqual(out, l(i))
+
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel(self):
         l = nn.Linear(10, 5).float().cuda()
@@ -552,6 +566,38 @@ class TestNN(NNTestCase):
         out = dp.data_parallel(l, i, (0, 1))
         self.assertEqual(out.get_device(), 1)
         self.assertEqual(out.data, expected_out)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    def test_data_parallel_nested_output(self):
+        def fn(input):
+            return [input, (input.sin(), input.cos(), [input.add(1)]), input]
+        class Net(nn.Container):
+            def forward(self, input):
+                return fn(input)
+        i = Variable(torch.randn(2, 2).float().cuda(1))
+        gpus = range(torch.cuda.device_count())
+        output = dp.data_parallel(Net(), i, gpus)
+        self.assertEqual(output, fn(i))
+        self.assertIsInstance(output[0], Variable)
+        self.assertIsInstance(output[1], tuple)
+        self.assertIsInstance(output[1][0], Variable)
+        self.assertIsInstance(output[1][1], Variable)
+        self.assertIsInstance(output[1][2], list)
+        self.assertIsInstance(output[1][2][0], Variable)
+        self.assertIsInstance(output[2], Variable)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    def test_data_parallel_nested_input(self):
+        def fn(input):
+            return input[1][0]
+        class Net(nn.Container):
+            def forward(self, input):
+                return fn(input)
+        i = Variable(torch.randn(20, 3).float().cuda(1))
+        input = (i.cos(), (i.sin(), i), i.sin())
+        gpus = range(torch.cuda.device_count())
+        output = dp.data_parallel(Net(), input, gpus)
+        self.assertEqual(output, fn(input))
 
     def test_parameter_dict(self):
         l = nn.Linear(5, 5)
