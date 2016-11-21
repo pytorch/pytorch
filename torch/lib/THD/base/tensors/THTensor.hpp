@@ -40,6 +40,8 @@ public:
   virtual bool isContiguous() const override;
   virtual void* data() override;
   virtual const void* data() const override;
+  virtual THTensor& retain() override;
+  virtual THTensor& free() override;
 
   virtual THTensor& resize(const std::initializer_list<long>& new_size) override;
   virtual THTensor& resize(const std::vector<long>& new_size) override;
@@ -48,6 +50,7 @@ public:
   virtual THTensor& add(const Tensor& source, scalar_type scalar) override;
 
   virtual thd::TensorType type() const override;
+
 private:
   template<typename iterator>
   THTensor& resize(const iterator& begin, const iterator& end);

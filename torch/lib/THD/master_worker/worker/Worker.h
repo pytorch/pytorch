@@ -1,5 +1,5 @@
 #pragma once
 
-#include "THD.h"
+#include "../../THD.h"
 
 THD_API void THDWorkerMain();

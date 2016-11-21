@@ -105,13 +105,24 @@ auto THTensor<real>::fill(scalar_type value) -> THTensor& {
   return *this;
 }
 
+template<>
+auto THTensor<real>::retain() -> THTensor& {
+  THTensor_(retain)(tensor);
+  return *this;
+}
+
+template<>
+auto THTensor<real>::free() -> THTensor& {
+  THTensor_(free)(tensor);
+  return *this;
+}
+
 #define non_const_cast(tensor) const_cast<THTensor&>(dynamic_cast<const THTensor&>(tensor))
 
 template<>
 auto THTensor<real>::add(const Tensor &source, scalar_type value) -> THTensor& {
   THTensor &source_t = non_const_cast(source);
   THTensor_(add)(tensor, source_t.tensor, value);
-  return *this;
 }
 
 template<>

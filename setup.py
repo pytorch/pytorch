@@ -14,6 +14,7 @@ from tools.setup_helpers.env import check_env_flag
 from tools.setup_helpers.cuda import WITH_CUDA, CUDA_HOME
 from tools.setup_helpers.cudnn import WITH_CUDNN, CUDNN_LIB_DIR, CUDNN_INCLUDE_DIR
 DEBUG = check_env_flag('DEBUG')
+WITH_DISTRIBUTED = check_env_flag('WITH_DISTRIBUTED')
 
 ################################################################################
 # Monkey-patch setuptools to compile in parallel
@@ -229,6 +230,14 @@ try:
     WITH_NUMPY = True
 except ImportError:
     WITH_NUMPY = False
+
+if WITH_DISTRIBUTED:
+    extra_compile_args += ['-DWITH_DISTRIBUTED']
+    main_sources += [
+        "torch/csrc/distributed/Module.cpp",
+        "torch/csrc/distributed/utils.cpp"
+    ]
+    main_libraries += ['THD']
 
 if WITH_CUDA:
     cuda_lib_dirs = ['lib64', 'lib']
