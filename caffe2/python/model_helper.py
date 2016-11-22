@@ -261,7 +261,7 @@ class ModelHelperBase(object):
             "StopGradient",
             "Summarize",
             "Tanh",
-            "UnpackSegments"
+            "UnpackSegments",
             "WeightedSum",
         ]
         if op_type not in known_working_ops:
