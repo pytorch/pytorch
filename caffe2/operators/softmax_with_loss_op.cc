@@ -187,8 +187,8 @@ bool SoftmaxWithLossGradientOp<float, CPUContext>::RunOnDevice() {
         float weight = weights[i];
         dX_data[idx] = Pdata[idx] - 1.0;
         for (int d = 0; d < D; d++) {
-          int idx = i * D + d;
-          dX_data[idx] *= weight;
+          int k = i * D + d;
+          dX_data[k] *= weight;
         }
 
         total_weight += weight;
