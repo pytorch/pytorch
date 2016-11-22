@@ -91,6 +91,23 @@
   THFree(TH_TENSOR_DIM_APPLY_counter); \
 }
 
+/**
+ * Similar to DIM_APPLY(...) but we maintain two sets of pointers: one for the first tensor
+ * and one for the second. The two tensors must have the same shape, other than at the
+ * specified DIMENSION. This function makes it easy to store the output from reducing the
+ * TENSOR at index. For example, in the sum example described below, we could instead do:
+ *
+ * long i = 0;
+ * TYPE1 sum;
+ *
+ * for (i = 0; i < TENSOR1##_size; ++i) {
+ *   sum += TENSOR1##_data[i * TENSOR1##_stride]
+ * }
+ * *TENSOR2##_data = (TYPE2) sum;
+ *
+ * In particular, we guarantee that the offset into TENSOR2 will be what you would get if
+ * you applied all of the index values used to generate the offset into TENSOR1.
+ */
 #define TH_TENSOR_DIM_APPLY2(TYPE1, TENSOR1, TYPE2, TENSOR2, DIMENSION, CODE) \
 { \
   TYPE1 *TENSOR1##_data = NULL; \
@@ -169,6 +186,45 @@
   THFree(TH_TENSOR_DIM_APPLY_counter); \
 }
 
+/**
+ * The basic idea for DIM_APPLY: Given a TENSOR and a DIMENSION, provide access to the data stored
+ * at all sets of dimension values other than DIMENSION, such that we can get all the values at those
+ * fixed indices for the various values at DIMENSION.
+ *
+ * Suppose we have a 2x3x4 Tensor A, and we have DIMENSION=2. Then we will hit CODE (2x3) times, and the
+ * pointer into storage will be at:
+ *
+ * A[0][0]
+ * A[0][1]
+ * A[0][2]
+ * A[1][0]
+ * A[1][1]
+ * A[1][2]
+ *
+ * And at each point, we can access the data for each of the four elements of the Tensor via
+ * TENSOR##_stride. So for example, if we wanted to sum the elements there, we could do:
+ *
+ * long i = 0;
+ * TYPE sum;
+ * for (i = 0; i < TENSOR##_size; i++) {
+ *  sum += TENSOR##_data[i * TENSOR##_stride]
+ * }
+ *
+ * Note that we don't have to have DIMENSION be the last tensor. If we have DIMENSION=1, then we will hit the
+ * code (2x4) times, with pointer into the storage at:
+ *
+ * offset +
+ *   stride_0 * 0 + stride_2 * 0
+ *   stride_0 * 1 + stride_2 * 0
+ *   stride_0 * 0 + stride_2 * 1
+ *   stride_0 * 1 + stride_2 * 1
+ *   stride_0 * 0 + stride_2 * 2
+ *   stride_0 * 1 + stride_2 * 2
+ *   stride_0 * 0 + stride_2 * 3
+ *   stride_0 * 1 + stride_2 * 3
+ *
+ * So we can again sum over the values at DIMENSION with the other indices fixed.
+ */
 #define TH_TENSOR_DIM_APPLY(TYPE, TENSOR, DIMENSION, CODE) \
 { \
   TYPE *TENSOR##_data = NULL; \
@@ -183,6 +239,7 @@
   TENSOR##_data = (TENSOR)->storage->data+(TENSOR)->storageOffset; \
   TENSOR##_stride = (TENSOR)->stride[DIMENSION]; \
   TENSOR##_size = TENSOR->size[DIMENSION]; \
+  /* Counter stores the indices into the Tensor at any time */ \
   TH_TENSOR_DIM_APPLY_counter = (long*)THAlloc(sizeof(long)*(TENSOR->nDimension)); \
   for(TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < TENSOR->nDimension; TH_TENSOR_DIM_APPLY_i++) \
     TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i] = 0; \
@@ -196,6 +253,10 @@
  \
     for(TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < TENSOR->nDimension; TH_TENSOR_DIM_APPLY_i++) \
     { \
+       /* Check if the index is equal to DIMENSION. We don't need to update the */ \
+       /* offset if this is the case, and can consider the next index. However, */ \
+       /* in the case that the DIMENSION is the last index in the Tensor, then */ \
+       /* we have parsed the entire tensor and can exit */ \
       if(TH_TENSOR_DIM_APPLY_i == DIMENSION) \
       { \
         if(TH_TENSOR_DIM_APPLY_i == TENSOR->nDimension-1) \
@@ -206,11 +267,13 @@
         continue; \
       } \
 \
+      /* Bump the counter at this index, update the pointer */ \
       TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i]++; \
       TENSOR##_data += TENSOR->stride[TH_TENSOR_DIM_APPLY_i]; \
 \
       if(TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i] == TENSOR->size[TH_TENSOR_DIM_APPLY_i]) \
       { \
+        /* Handled TENSOR_size(dim) iterations for DIM_APPLY_i. If this is the last dimension, exit */ \
         if(TH_TENSOR_DIM_APPLY_i == TENSOR->nDimension-1) \
         { \
           TH_TENSOR_DIM_APPLY_hasFinished = 1; \
@@ -218,6 +281,7 @@
         } \
         else \
         { \
+          /* Reset the counter, and the pointer to the beginning of the storage for this combination of indices */ \
           TENSOR##_data -= TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i]*TENSOR->stride[TH_TENSOR_DIM_APPLY_i]; \
           TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i] = 0; \
         } \
