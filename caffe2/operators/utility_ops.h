@@ -1064,7 +1064,12 @@ class ReshapeOp : public Operator<Context> {
       CAFFE_ENFORCE(shape.ndim() == 1, "Shape should be 1-D");
 
       const T* shape_data = shape.template data<T>();
-      actual_new_shape.assign(shape_data, shape_data + shape.size());
+
+      // Bit awkward, but needed so works on both CPU and CUDA contexts
+      std::vector<T> tmpv(shape.size());
+      context_.template CopyBytes<Context, CPUContext>(
+          shape.size() * sizeof(T), shape_data, &tmpv[0]);
+      actual_new_shape.assign(tmpv.begin(), tmpv.begin() + shape.size());
     }
 
     // Copy over the dimensions for those that are specified zero.
@@ -1119,7 +1124,7 @@ class ReshapeOp : public Operator<Context> {
     old_shape->Resize(input.ndim());
     T* old_shape_data = old_shape->template mutable_data<T>();
     for (int i = 0; i < input.ndim(); ++i) {
-      old_shape_data[i] = input.dim(i);
+      math::Set<T, Context>(1, input.dim(i), old_shape_data + i, &context_);
     }
 
     auto* output = Output(0);

@@ -6,6 +6,7 @@ import numpy as np
 
 from caffe2.python import core, workspace
 from caffe2.python.test_util import TestCase
+from caffe2.proto import caffe2_pb2
 
 
 class TestLengthsToShapeOps(TestCase):
@@ -106,26 +107,32 @@ class TestLengthsToShapeOps(TestCase):
 
 def test_reshape(old_shape, new_shape, expected_shape=None, arg_shape=True,
                  in_place=False):
-    if expected_shape is None:
-        expected_shape = new_shape
-    X = np.random.rand(*old_shape).astype(np.float32)
+    devices = [core.DeviceOption(caffe2_pb2.CPU, 0)]
+    if workspace.NumCudaDevices() > 0:
+        devices.append(core.DeviceOption(caffe2_pb2.CUDA, 0))
 
-    blob_in = 'X'
-    blob_out = blob_in if in_place else blob_in + '_out'
+    for device_opt in devices:
+        with core.DeviceScope(device_opt):
+            if expected_shape is None:
+                expected_shape = new_shape
+            X = np.random.rand(*old_shape).astype(np.float32)
 
-    if arg_shape:
-        op = core.CreateOperator('Reshape',
-                                 [blob_in],
-                                 [blob_out, 'old_shape'],
-                                 shape=new_shape)
-    else:
-        op = core.CreateOperator('Reshape',
-                                 [blob_in, 'new_shape'],
-                                 [blob_out, 'old_shape'])
-        workspace.FeedBlob('new_shape', np.asarray(new_shape))
+            blob_in = 'X'
+            blob_out = blob_in if in_place else blob_in + '_out'
 
-    workspace.FeedBlob(blob_in, X)
-    workspace.RunOperatorOnce(op)
+            if arg_shape:
+                op = core.CreateOperator('Reshape',
+                                         [blob_in],
+                                         [blob_out, 'old_shape'],
+                                         shape=new_shape)
+            else:
+                op = core.CreateOperator('Reshape',
+                                         [blob_in, 'new_shape'],
+                                         [blob_out, 'old_shape'])
+                workspace.FeedBlob('new_shape', np.asarray(new_shape))
 
-    Y = workspace.FetchBlob(blob_out)
-    np.testing.assert_allclose(Y, X.reshape(expected_shape))
+            workspace.FeedBlob(blob_in, X)
+            workspace.RunOperatorOnce(op)
+
+            Y = workspace.FetchBlob(blob_out)
+            np.testing.assert_allclose(Y, X.reshape(expected_shape))
