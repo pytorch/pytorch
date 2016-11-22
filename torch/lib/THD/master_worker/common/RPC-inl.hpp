@@ -4,46 +4,6 @@ namespace thd { namespace rpc { namespace detail {
 
 constexpr size_t MAX_VAR_SIZE = 8;
 
-// The following notation comes from:
-// docs.python.org/3/library/struct.html#module-struct
-// except from 'T', which stands for Tensor.
-template<typename T>
-struct rpc_traits {};
-
-template<>
-struct rpc_traits<double> {
-  static constexpr char scalar_char = 'd';
-};
-
-template<>
-struct rpc_traits<char> {
-  static constexpr char scalar_char = 'c';
-};
-
-template<>
-struct rpc_traits<float> {
-  static constexpr char scalar_char = 'f';
-};
-
-template<>
-struct rpc_traits<int> {
-  static constexpr char scalar_char = 'i';
-};
-
-template<>
-struct rpc_traits<long> {
-  static constexpr char scalar_char = 'l';
-};
-
-template<>
-struct rpc_traits<long long> {
-  static constexpr char scalar_char = 'q';
-};
-
-template<>
-struct rpc_traits<short> {
-  static constexpr char scalar_char = 'h';
-};
 
 template<typename real>
 void _appendData(ByteArray& str, real data) {
@@ -52,12 +12,12 @@ void _appendData(ByteArray& str, real data) {
 
 template <typename T>
 void _appendTensorOrScalar(ByteArray& str, const T& arg) {
-  _appendData<char>(str, rpc_traits<T>::scalar_char);
+  _appendData<char>(str, (char)tensor_type_traits<T>::type);
   _appendData<T>(str, arg);
 }
 
 inline void _appendTensorOrScalar(ByteArray& str, const THDTensor& arg) {
-  _appendData<char>(str, 'T');
+  _appendData<char>(str, (char)TensorType::TENSOR);
   _appendData<unsigned long long>(str, arg.tensor_id);
 }
 

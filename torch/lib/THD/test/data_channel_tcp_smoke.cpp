@@ -23,6 +23,12 @@ constexpr int MASTER_PORT = 45678;
 std::vector<std::thread> g_all_workers;
 std::mutex g_mutex;
 
+template<class T>
+typename std::enable_if<!std::numeric_limits<T>::is_integer, bool>::type almost_equal(T x, T y, int ulp) {
+  return std::abs(x-y) < std::numeric_limits<T>::epsilon() * std::abs(x+y) * ulp
+      || std::abs(x-y) < std::numeric_limits<T>::min();
+}
+
 void master()
 {
   g_mutex.lock();
@@ -38,7 +44,7 @@ void master()
 
   FloatTensor *float_tensor = new THTensor<float>();
   float_tensor->resize({1, 2, 3});
-  float_tensor->fill(4);
+  float_tensor->fill(4.3);
 
   // we cannot send to ourselves
   bool thrown = false;
@@ -62,6 +68,22 @@ void master()
   int_tensor->fill(1000000000);
 
   masterChannel->broadcast(*int_tensor, 0);
+
+  // reduce
+  float_tensor->resize({1, 2, 3, 4});
+  float_tensor->fill(4.3);
+  masterChannel->reduce(*float_tensor, THDReduceOp::THDReduceSUM, 0);
+  for (int i = 0; i < float_tensor->numel(); i++) {
+    assert(almost_equal(((float*)float_tensor->data())[i], (float)(4.3 + 2.2 * WORKERS_NUM), 5));
+  }
+
+  // allReduce
+  int_tensor->resize({1, 2, 3, 4, 5});
+  int_tensor->fill(1000);
+  masterChannel->allReduce(*int_tensor, THDReduceOp::THDReduceSUM);
+  for (int i = 0; i < int_tensor->numel(); i++) {
+    assert(((int*)int_tensor->data())[i] == (1000 + 10 * WORKERS_NUM));
+  }
 
   // wait for all workers to finish
   for (auto& worker : g_all_workers) {
@@ -97,7 +119,7 @@ void worker(int id)
     workerChannel->receive(*float_tensor, 0);
 
     for (int i = 0; i < float_tensor->numel(); i++) {
-      assert(((float*)float_tensor->data())[i] == 4);
+      assert(almost_equal(((float*)float_tensor->data())[i], (float)4.3, 5));
     }
 
     // new sizes does not match
@@ -118,6 +140,22 @@ void worker(int id)
 
   for (int i = 0; i < int_tensor->numel(); i++) {
     assert(((int*)int_tensor->data())[i] == 1000000000);
+  }
+
+  // reduce
+  float_tensor->resize({1, 2, 3, 4});
+  float_tensor->fill(2.2);
+  workerChannel->reduce(*float_tensor, THDReduceOp::THDReduceSUM, 0);
+  for (int i = 0; i < float_tensor->numel(); i++) { // tensor values should not change
+    assert(almost_equal(((float*)float_tensor->data())[i], (float)2.2, 5));
+  }
+
+  // allReduce
+  int_tensor->resize({1, 2, 3, 4, 5});
+  int_tensor->fill(10);
+  workerChannel->allReduce(*int_tensor, THDReduceOp::THDReduceSUM);
+  for (int i = 0; i < int_tensor->numel(); i++) {
+    assert(((int*)int_tensor->data())[i] == (1000 + 10 * WORKERS_NUM));
   }
 
   delete float_tensor;

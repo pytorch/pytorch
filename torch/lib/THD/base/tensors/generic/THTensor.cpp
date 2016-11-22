@@ -19,6 +19,11 @@ THTensor<real>::~THTensor() {
 }
 
 template<>
+auto THTensor<real>::clone() const -> THTensor* {
+  return new THTensor(THTensor_(newClone)(tensor));
+}
+
+template<>
 int THTensor<real>::nDim() const {
   return tensor->nDimension;
 }
@@ -73,15 +78,6 @@ const void* THTensor<real>::data() const {
   return THTensor_(data)(tensor);
 }
 
-#define non_const_cast(tensor) const_cast<THTensor&>(dynamic_cast<const THTensor&>(tensor))
-
-template<>
-auto THTensor<real>::add(const Tensor &source, scalar_type value) -> THTensor& {
-  THTensor &source_t = non_const_cast(source);
-  THTensor_(add)(tensor, source_t.tensor, value);
-  return *this;
-}
-
 template<>
 auto THTensor<real>::resize(const std::initializer_list<long> &new_size) -> THTensor& {
   return resize(new_size.begin(), new_size.end());
@@ -107,6 +103,20 @@ template<>
 auto THTensor<real>::fill(scalar_type value) -> THTensor& {
   THTensor_(fill)(tensor, value);
   return *this;
+}
+
+#define non_const_cast(tensor) const_cast<THTensor&>(dynamic_cast<const THTensor&>(tensor))
+
+template<>
+auto THTensor<real>::add(const Tensor &source, scalar_type value) -> THTensor& {
+  THTensor &source_t = non_const_cast(source);
+  THTensor_(add)(tensor, source_t.tensor, value);
+  return *this;
+}
+
+template<>
+thd::TensorType THTensor<real>::type() const {
+  return thd::tensor_type_traits<real>::type;
 }
 
 #endif

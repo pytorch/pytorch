@@ -27,6 +27,8 @@ public:
   THTensor(tensor_type *wrapped);
   virtual ~THTensor();
 
+  virtual THTensor* clone() const override;
+
   virtual int nDim() const override;
   virtual long_range sizes() const override;
   virtual long_range strides() const override;
@@ -45,6 +47,7 @@ public:
   virtual THTensor& fill(scalar_type value) override;
   virtual THTensor& add(const Tensor& source, scalar_type scalar) override;
 
+  virtual thd::TensorType type() const override;
 private:
   template<typename iterator>
   THTensor& resize(const iterator& begin, const iterator& end);

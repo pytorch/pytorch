@@ -1,8 +1,10 @@
 #pragma once
 
-#include "Tensor.hpp"
 #include "ChannelType.h"
+#include "DataChannel.h"
+#include "Tensor.hpp"
 #include <unordered_map>
+#include <cstdint>
 
 namespace thd {
 
@@ -13,11 +15,11 @@ public:
 
   virtual bool init() = 0;
 
-  virtual int getRank() const = 0;
-  virtual int getNumProcesses() const = 0;
+  virtual int getRank() = 0;
+  virtual int getNumProcesses() = 0;
 
-  virtual void allReduce(Tensor& data) = 0;
-  virtual void reduce(Tensor& data, int dst_rank) = 0;
+  virtual void allReduce(Tensor& data, THDReduceOp operation) = 0;
+  virtual void reduce(Tensor& data, THDReduceOp operation, int dst_rank) = 0;
   virtual void broadcast(Tensor& data, int src_rank) = 0;
   virtual void send(Tensor& data, int dst_rank) = 0;
   virtual void receive(Tensor& data, int src_rank) = 0;

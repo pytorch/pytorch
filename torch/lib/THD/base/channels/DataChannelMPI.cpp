@@ -2,8 +2,34 @@
 
 #include <mpi.h>
 #include <stdexcept>
+#include <map>
 
 namespace thd {
+
+namespace {
+
+std::map<THDReduceOp, MPI_Op> mpi_op = {
+  {THDReduceOp::THDReduceMIN, MPI_MIN},
+  {THDReduceOp::THDReduceMAX, MPI_MAX},
+  {THDReduceOp::THDReduceSUM, MPI_SUM},
+  {THDReduceOp::THDReducePRODUCT, MPI_PROD},
+};
+
+std::map<TensorType, MPI_Datatype> mpi_datatype = {
+  {TensorType::CHAR, MPI_CHAR},
+  {TensorType::FLOAT, MPI_FLOAT},
+  {TensorType::DOUBLE, MPI_DOUBLE},
+  {TensorType::SHORT, MPI_SHORT},
+  {TensorType::USHORT, MPI_UNSIGNED_SHORT},
+  {TensorType::INT, MPI_INT},
+  {TensorType::UINT, MPI_UNSIGNED},
+  {TensorType::LONG, MPI_LONG},
+  {TensorType::ULONG, MPI_UNSIGNED_LONG},
+  {TensorType::LONG_LONG, MPI_LONG_LONG},
+  {TensorType::ULONG_LONG, MPI_UNSIGNED_LONG_LONG},
+};
+
+} // namespace
 
 DataChannelMPI::DataChannelMPI()
   : m_rank(-1)
@@ -25,40 +51,44 @@ bool DataChannelMPI::init() {
 }
 
 
-int DataChannelMPI::getRank() const {
+int DataChannelMPI::getRank() {
   return m_rank;
 }
 
 
-int DataChannelMPI::getNumProcesses() const {
+int DataChannelMPI::getNumProcesses() {
   return m_num_processes;
 }
 
 
-void DataChannelMPI::allReduce(Tensor& data) {
-  // TODO: implement
-  // MPI_Allreduce(data, data, 1, MPI_FLOAT, MPI_SUM, MPI_COMM_WORLD);
+void DataChannelMPI::allReduce(Tensor& data, THDReduceOp operation) {
+  uint64_t tensor_bytes = data.elementSize() * data.numel();
+  std::unique_ptr<uint8_t[]> tmp_data(new uint8_t[tensor_bytes]);
+  MPI_Allreduce(data.data(), tmp_data.get(), data.numel(),
+                mpi_datatype.at(data.type()), mpi_op.at(operation), MPI_COMM_WORLD);
+
+  memcpy(data.data(), tmp_data.get(), data.elementSize() * data.numel());
 }
 
 
-void DataChannelMPI::reduce(Tensor& data, int dst_rank) {
-  // TODO: implement
-  // std::unique_ptr<uint8_t[]> bytes(new uint8_t[tensor_bytes]);
-  // MPI_Reduce(data, bytes.get(), 1, MPI_BYTE, MPI_SUM, dst_rank, MPI_COMM_WORLD);
-  // std::memcpy(data.data(), bytes.get(), tensor_bytes);
+void DataChannelMPI::reduce(Tensor& data, THDReduceOp operation, int dst_rank) {
+  uint64_t tensor_bytes = data.elementSize() * data.numel();
+  std::unique_ptr<uint8_t[]> tmp_data(new uint8_t[tensor_bytes]);
+  MPI_Reduce(data.data(), tmp_data.get(), data.numel(),
+             mpi_datatype.at(data.type()), mpi_op.at(operation), dst_rank, MPI_COMM_WORLD);
+
+  memcpy(data.data(), tmp_data.get(), data.elementSize() * data.numel());
 }
 
 
-void DataChannelMPI::broadcastPack(Tensor& data, int src_rank)
-{
+void DataChannelMPI::broadcastPack(Tensor& data, int src_rank) const {
   uint64_t tensor_bytes = data.elementSize() * data.numel();
   MPI_Bcast(&tensor_bytes, 1, MPI_UINT64_T, src_rank, MPI_COMM_WORLD);
   MPI_Bcast(reinterpret_cast<uint8_t*>(data.data()), tensor_bytes, MPI_UINT8_T, src_rank, MPI_COMM_WORLD);
 }
 
 
-void DataChannelMPI::broadcastUnpack(Tensor& data, int src_rank)
-{
+void DataChannelMPI::broadcastUnpack(Tensor& data, int src_rank) const {
   uint64_t tensor_bytes;
   MPI_Bcast(&tensor_bytes, 1, MPI_UINT64_T, src_rank, MPI_COMM_WORLD);
 
@@ -67,7 +97,7 @@ void DataChannelMPI::broadcastUnpack(Tensor& data, int src_rank)
 
   uint64_t actual_tensor_bytes = data.elementSize() * data.numel();
   if (actual_tensor_bytes != tensor_bytes) {
-    throw std::logic_error("Tensor sizes does not match");
+    throw std::logic_error("tensor sizes does not match");
   }
 
   std::memcpy(data.data(), bytes.get(), tensor_bytes);
@@ -107,7 +137,7 @@ void DataChannelMPI::receive(Tensor& data, int src_rank) {
 
   uint64_t actual_tensor_bytes = data.elementSize() * data.numel();
   if (actual_tensor_bytes != tensor_bytes) {
-    throw std::logic_error("Tensor sizes does not match");
+    throw std::logic_error("tensor sizes does not match");
   }
 
   memcpy(data.data(), bytes.get(), tensor_bytes);

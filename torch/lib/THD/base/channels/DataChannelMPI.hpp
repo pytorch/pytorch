@@ -11,18 +11,18 @@ public:
 
   bool init() override;
 
-  int getRank() const override;
-  int getNumProcesses() const override;
+  int getRank() override;
+  int getNumProcesses() override;
 
-  void allReduce(Tensor& data) override;
-  void reduce(Tensor& data, int dst_rank) override;
+  void allReduce(Tensor& data, THDReduceOp operation) override;
+  void reduce(Tensor& data, THDReduceOp operation, int dst_rank) override;
   void broadcast(Tensor& data, int src_rank) override;
   void send(Tensor& data, int dst_rank) override;
   void receive(Tensor& data, int src_rank) override;
 
 private:
-  void broadcastPack(Tensor& data, int src_rank);
-  void broadcastUnpack(Tensor& data, int src_rank);
+  void broadcastPack(Tensor& data, int src_rank) const;
+  void broadcastUnpack(Tensor& data, int src_rank) const;
 
 
   int m_rank; // Current process' rank
