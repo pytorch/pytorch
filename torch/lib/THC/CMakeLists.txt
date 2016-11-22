@@ -239,6 +239,7 @@ INSTALL(FILES
           THCTensorInfo.cuh
           THCTensorTypeUtils.cuh
           THCTensorRandom.cuh
+          THCTensorMathMagma.cuh
           DESTINATION "${THC_INSTALL_INCLUDE_SUBDIR}/THC")
 
 INSTALL(FILES
@@ -264,6 +265,8 @@ INSTALL(FILES
           generic/THCTensorMathCompare.cu
           generic/THCTensorMathCompareT.h
           generic/THCTensorMathCompareT.cu
+          generic/THCTensorMathMagma.h
+          generic/THCTensorMathMagma.cu
           generic/THCTensorMathPairwise.h
           generic/THCTensorMathPairwise.cu
           generic/THCTensorMathPointwise.h
