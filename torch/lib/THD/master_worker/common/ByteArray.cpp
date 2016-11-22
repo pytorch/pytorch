@@ -15,7 +15,7 @@ ByteArray::ByteArray()
   , _size(0)
 {}
 
-ByteArray::ByteArray(size_t size)
+ByteArray::ByteArray(std::size_t size)
   : _data(nullptr)
   , _length(0)
   , _size(0)
@@ -23,7 +23,7 @@ ByteArray::ByteArray(size_t size)
   _resize(size);
 }
 
-ByteArray::ByteArray(char* arr, size_t size)
+ByteArray::ByteArray(char* arr, std::size_t size)
   : _data(arr)
   , _length(size)
   , _size(_length)
@@ -53,7 +53,7 @@ ByteArray::~ByteArray() {
   std::free(_data);
 }
 
-ByteArray& ByteArray::append(const char* arr, size_t size) {
+ByteArray& ByteArray::append(const char* arr, std::size_t size) {
   this->_resize(_length + size);
   std::memcpy(_data + _length, arr, size);
   _length += size;
@@ -64,11 +64,11 @@ char* ByteArray::data() const {
   return _data;
 }
 
-size_t ByteArray::length() const {
+std::size_t ByteArray::length() const {
   return _length;
 }
 
-ByteArray ByteArray::fromData(const char* arr, size_t size) {
+ByteArray ByteArray::fromData(const char* arr, std::size_t size) {
   char* new_arr = static_cast<char*>(std::malloc(size));
   if (new_arr == nullptr) {
     throw std::system_error(errno,
@@ -79,7 +79,7 @@ ByteArray ByteArray::fromData(const char* arr, size_t size) {
   return ByteArray(new_arr, size);
 }
 
-void ByteArray::_realloc(size_t new_size) {
+void ByteArray::_realloc(std::size_t new_size) {
   char* new_data = static_cast<char*>(std::realloc(_data, new_size));
   if (new_data == nullptr) {
     throw std::system_error(errno,
@@ -92,10 +92,10 @@ void ByteArray::_realloc(size_t new_size) {
   _size = new_size;
 }
 
-void ByteArray::_resize(size_t desired_size) {
+void ByteArray::_resize(std::size_t desired_size) {
   if (desired_size <= _size)
     return;
-  size_t new_size = _size == 0 ? 1 : _size;
+  std::size_t new_size = _size == 0 ? 1 : _size;
   while (desired_size > new_size) {
       new_size *= 2;
       if (new_size < _size) {
@@ -107,7 +107,7 @@ void ByteArray::_resize(size_t desired_size) {
   _realloc(new_size);
 }
 
-void ByteArray::_resizeExact(size_t desired_size) {
+void ByteArray::_resizeExact(std::size_t desired_size) {
   if (desired_size <= _size)
     return;
   _realloc(desired_size);

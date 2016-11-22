@@ -25,8 +25,8 @@ private:
   void broadcastUnpack(Tensor& data, int src_rank) const;
 
 
-  int m_rank; // Current process' rank
-  int m_num_processes; // Number of processes in network
+  int _rank; // Current process' rank
+  int _num_processes; // Number of processes in network
 };
 
 } // namespace thd

@@ -4,7 +4,7 @@
 
 namespace thd {
 
-enum Functions: uint16_t {
+enum Functions: std::uint16_t {
   add
 };
 

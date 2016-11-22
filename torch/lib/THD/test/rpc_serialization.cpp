@@ -1,6 +1,7 @@
-#include <iostream>
 #include <cassert>
 #include <climits>
+#include <cstdint>
+#include <iostream>
 #include <typeinfo>
 
 #include "../master_worker/common/RPC.hpp"
@@ -10,9 +11,9 @@ using namespace thd::rpc;
 
 int main() {
   auto msg = packMessage(1, 3, 1.0f, 100l, -12, LLONG_MAX);
-  uint16_t fid = unpackFunctionId(msg);
+  std::uint16_t fid = unpackFunctionId(msg);
   assert(fid == 1);
-  uint16_t num_args = unpackArgCount(msg);
+  std::uint16_t num_args = unpackArgCount(msg);
   assert(num_args == 3);
   double arg1 = unpackFloat(msg);
   assert(arg1 == 1.0);

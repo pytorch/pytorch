@@ -2,6 +2,8 @@
 #include "channels/DataChannelMPI.hpp"
 #include "channels/DataChannelTCP.hpp"
 
+#include <stdexcept>
+
 namespace thd {
 
 DataChannel* DataChannel::newChannel(THDChannelType type) {

@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <iostream>
+#include <memory>
 #include <thread>
 
 constexpr int WORKERS_NUM = 2;

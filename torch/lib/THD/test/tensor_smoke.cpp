@@ -27,7 +27,7 @@ int main() {
   for (auto s: tensor->sizes())
     assert(s == 2);
   for (int i = 0; i < 2; i++)
-    assert(((float*)tensor->data())[i] == 5);
+    assert(reinterpret_cast<float*>(tensor->data())[i] == 5);
 
   bool thrown = false;
   try {

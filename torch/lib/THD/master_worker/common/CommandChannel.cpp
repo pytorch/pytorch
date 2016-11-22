@@ -55,7 +55,7 @@ void composeEndpoint(std::string& endpoint,
 // Instead of specifying a port, let the opertating system assign a free port.
 std::string bindPort(zmq::socket_t& socket, std::string& endpoint) {
   rpc::ByteArray addr(MAX_ADDR_SIZE);
-  size_t size = addr.length() - 1;
+  std::size_t size = addr.length() - 1;
   socket.bind("tcp://*:*");
   socket.getsockopt(ZMQ_LAST_ENDPOINT, addr.data(), &size);
   addr.data()[size] = '\0';
@@ -68,10 +68,10 @@ void unpackInitMessage(const zmq::message_t& msg,
                        std::string& pull_port,
                        std::string& push_port) {
     std::string data(msg.data<char>(), msg.size());
-    size_t first_separator = data.find(';');
-    size_t second_separator = data.find(';', first_separator + 1);
+    std::size_t first_separator = data.find(';');
+    std::size_t second_separator = data.find(';', first_separator + 1);
     rank = std::stoi(data.substr(0, first_separator));
-    size_t length = second_separator - (first_separator + 1);
+    std::size_t length = second_separator - (first_separator + 1);
     pull_port = data.substr(first_separator + 1, length);
     push_port = data.substr(second_separator + 1);
 }

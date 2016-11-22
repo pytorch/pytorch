@@ -3,6 +3,7 @@
 #include "../DataChannel.hpp"
 #include "../ChannelEnvVars.hpp"
 
+#include <cstdint>
 #include <string>
 #include <vector>
 #include <utility>
@@ -28,15 +29,15 @@ struct DataChannelTCP : DataChannel {
 private:
   // Defines process to which master or worker is connected
   struct Process {
-    uint32_t rank;
+    std::uint32_t rank;
     std::string address;
-    uint16_t port;
+    std::uint16_t port;
     int socket;
   };
 
 
-  void listen(uint16_t port);
-  int connect(const std::string& address, uint16_t port, int wait) const;
+  void listen(std::uint16_t port);
+  int connect(const std::string& address, std::uint16_t port, int wait) const;
   std::tuple<int, std::string> accept() const;
 
   bool initMaster();
@@ -47,12 +48,12 @@ private:
   void reduce_(Tensor& result, Tensor& data, THDReduceOp operation) const;
 
 
-  int m_rank; // Rank of current process, range: [0..m_processes.size()-1]
-  int m_socket; // Socket on which process is listening
-  int m_port; // Port on which process is listening
-  int m_timeout; // Accept waiting timeout in milliseconds (it is optional, default = infinity)
+  int _rank; // Rank of current process, range: [0.._processes.size()-1]
+  int _socket; // Socket on which process is listening
+  int _port; // Port on which process is listening
+  int _timeout; // Accept waiting timeout in milliseconds (it is optional, default = infinity)
 
-  std::vector<Process> m_processes; // Other processes in network
+  std::vector<Process> _processes; // Other processes in network
 };
 
 } // namespace thd

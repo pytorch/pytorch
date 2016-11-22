@@ -62,7 +62,7 @@ struct tensor_type_traits<unsigned short> {
 };
 
 template<>
-struct tensor_type_traits<uint8_t> {
+struct tensor_type_traits<std::uint8_t> {
   static constexpr TensorType type = TensorType::USHORT;
 };
 
@@ -134,8 +134,8 @@ struct Tensor {
   virtual long_range strides() const = 0;
   virtual const long* rawSizes() const = 0;
   virtual const long* rawStrides() const = 0;
-  virtual size_t storageOffset() const = 0;
-  virtual size_t elementSize() const = 0;
+  virtual std::size_t storageOffset() const = 0;
+  virtual std::size_t elementSize() const = 0;
   virtual long long numel() const = 0;
   virtual bool isContiguous() const = 0;
   virtual void* data() = 0;

@@ -3,8 +3,6 @@
 #include "ChannelType.h"
 #include "DataChannel.h"
 #include "Tensor.hpp"
-#include <unordered_map>
-#include <cstdint>
 
 namespace thd {
 
