@@ -5,6 +5,7 @@ from __future__ import unicode_literals
 
 import datetime
 import time
+import logging
 
 from collections import OrderedDict
 
@@ -31,7 +32,7 @@ class ModelTrainerLog():
         with open(self.filename, "a") as f:
             f.write(str + "\n")
             f.close()
-        print(str)
+        logging.getLogger("experiment_logger").info(str)
 
     def log(self, input_count, batch_count, additional_values):
         logdict = OrderedDict()

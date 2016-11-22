@@ -20,8 +20,7 @@ def Parallelize_GPU(
     forward_pass_builder_fun,
     param_update_builder_fun,
     devices=range(0, workspace.NumCudaDevices()),
-    mpi_comm=None,
-    all_reduce_engine=None,
+    rendezvous=None,
 ):
     '''
     Function to create a model that can run on many GPUs.
@@ -41,28 +40,24 @@ def Parallelize_GPU(
                         gradient update, such as updating the weights and
                         weight decaying.
                         Signature: param_update_builder_fun(model)
-      devices:          List of GPU ids, such as [0, 1, 2, 3]
-      mpi_comm:         MPI communicator object if distribuetd computation
-                        is being used. Use SetupMPICluster() function to
-                        create. Default is None.
-      all_reduce_engine For MPI reduce: RDMA_IBVERBS, RDMA_TCP, or MPI
+      devices:          List of GPU ids, such as [0, 1, 2, 3],
+      rendezvous:       used for rendezvous in distributed computation, if None
+                        then only one node is used. To create rendezvous,
+                        use <TBD>.
 
     '''
     log.info("Parallelizing model for devices: {}".format(devices))
-    mpi_workers = 8 if mpi_comm is None else 0  # best-guess
-    model_helper_obj.net.Proto().num_workers = len(devices) * 2 + mpi_workers
+    extra_workers = 8 if rendezvous is not None else 0  # best-guess
+    model_helper_obj.net.Proto().num_workers = len(devices) * 2 + extra_workers
     model_helper_obj.net.Proto().type = 'dag'
 
     # Store some information in the model -- a bit ugly
     model_helper_obj._devices = devices
-    model_helper_obj._mpi_comm = mpi_comm
+    model_helper_obj._rendezvous = rendezvous
     model_helper_obj._grad_names = []
 
     assert isinstance(model_helper_obj, model_helper.ModelHelperBase)
     assert model_helper_obj.params == [], "Model needs to be empty"
-
-    if mpi_comm is not None:
-        assert all_reduce_engine in ['MPI', 'RDMA_IBVERBS', 'RDMA_TCP']
 
     # Add input and model
     log.info("Create input and model training operators")
@@ -108,7 +103,9 @@ def Parallelize_GPU(
     model_helper_obj._grad_names = gradients_grouped.keys()
 
     log.info("Add gradient all-reduces for SyncSGD")
-    _AllReduceGradients(devices, model_helper_obj, all_reduce_engine, mpi_comm)
+    _AllReduceGradients(
+        devices, model_helper_obj, rendezvous
+    )
 
     log.info("Post-iteration operators for updating params")
     for device in devices:
@@ -119,12 +116,12 @@ def Parallelize_GPU(
 
     # Add initial parameter syncs
     log.info("Add initial parameter sync")
-    if (mpi_comm is not None):
-        _AddMPIParameterSync(
+    if (rendezvous is not None):
+        _AddDistributedParameterSync(
             devices,
             model_helper_obj,
             model_helper_obj.param_init_net,
-            mpi_comm,
+            rendezvous,
         )
 
     _SyncParams(devices, model_helper_obj, model_helper_obj.param_init_net)
@@ -168,12 +165,12 @@ def FinalizeAfterCheckpoint(model, blobs, sync_iter=True):
         model._checkpoint_net = core.Net("checkpoint_sync_net")
         model._checkpoint_net.RunAllOnGPU()
 
-        if (model._mpi_comm is not None):
-            _AddMPIParameterSync(
+        if (model._rendezvous is not None):
+            _AddDistributedParameterSync(
                 devices,
                 model,
                 model._checkpoint_net,
-                model._mpi_comm,
+                model._rendezvous,
                 uniq_blob_names,
             )
 
@@ -215,7 +212,13 @@ def _SyncParams(devices, model, net, unique_param_names=None):
         _Broadcast(devices, model, net, param)
 
 
-def _AddMPIParameterSync(devices, model, net, mpi_comm, uniq_param_names=None):
+def _AddDistributedParameterSync(
+    devices,
+    model,
+    net,
+    rendezvous,
+    uniq_param_names=None,
+):
     if uniq_param_names is None:
         uniq_param_names = model._param_names
 
@@ -223,32 +226,61 @@ def _AddMPIParameterSync(devices, model, net, mpi_comm, uniq_param_names=None):
 
     # ITER is in CPU scope :(
     with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU)):
+        comm_world = net.CreateCommonWorld(
+            rendezvous['kv_handler'],
+            "iter_cw",
+            name="iter_cw_op",
+            size=rendezvous['num_shards'],
+            rank=rendezvous['shard_id'],
+            engine=rendezvous['engine'],
+        )
         net.Broadcast(
-            inputs=[mpi_comm, "gpu_{}/ITER".format(devices[0])],
+            inputs=[comm_world, "gpu_{}/ITER".format(devices[0])],
             outputs=["gpu_{}/ITER".format(devices[0])],
-            engine='MPI'
+            engine=rendezvous['engine'],
         )
 
-    with core.DeviceScope(device_opt):
-        for param_name in sorted(uniq_param_names):
-            param = model._device_grouped_blobs[param_name][devices[0]]
-            net.Broadcast(
-                inputs=[mpi_comm, param],
-                outputs=[param],
-                engine='MPI'
+    for param_name in sorted(uniq_param_names):
+        param = model._device_grouped_blobs[param_name][devices[0]]
+
+        with core.DeviceScope(device_opt):
+            param_cpu = net.CopyGPUToCPU(param, str(param) + "cpu")
+
+        with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU)):
+            comm_world = net.CreateCommonWorld(
+                rendezvous['kv_handler'],
+                "{}_cw".format(param_name),
+                name="{}_cw_op".format(param_name),
+                size=rendezvous['num_shards'],
+                rank=rendezvous['shard_id'],
+                engine=rendezvous['engine'],
             )
 
+            # Temp: copy to CPU
+            net.Broadcast(
+                inputs=[comm_world, param_cpu],
+                outputs=[param_cpu],
+                engine=rendezvous['engine'],
+            )
+        with core.DeviceScope(device_opt):
+            net.CopyCPUToGPU(param_cpu, param)
 
-def _AllReduceGradients(devices, model, all_reduce_engine, mpi_comm):
-    if mpi_comm is None:
+
+def _AllReduceGradients(devices, model, rendezvous):
+    if rendezvous is None:
         _AllReduceGradientsSingleHost(devices, model)
     else:
-        _AllReduceGradientsWithMPI(devices, model, all_reduce_engine, mpi_comm)
+        _AllReduceGradientsDistributed(devices, model, rendezvous)
 
 
-def _AllReduceGradientsWithMPI(devices, model, all_reduce_engine, mpi_comm):
+def _AllReduceGradientsDistributed(
+    devices,
+    model,
+    rendezvous,
+):
     num_workers = model.net.Proto().num_workers
     assert num_workers > 1, "Please specify more than 1 worker"
+    all_reduce_engine = rendezvous['engine']
 
     # Make list of gradients in reverse order
     reverse_ordered_grads = _GetReverseOrderedGrads(model)
@@ -263,10 +295,6 @@ def _AllReduceGradientsWithMPI(devices, model, all_reduce_engine, mpi_comm):
     # ensure progress (since all machines need to do same all reduces
     # in parallel)
     num_controls = min(4, num_workers - 1)
-    if all_reduce_engine in ['MPI']:
-        # With MPI we need to sequentialize
-        num_controls = 1
-    assert num_controls > 0
 
     cyclical_controls = []
     counter = 0
@@ -316,9 +344,17 @@ def _AllReduceGradientsWithMPI(devices, model, all_reduce_engine, mpi_comm):
                         else cyclical_controls[counter % num_controls]
 
         with core.DeviceScope(reducing_device_opt):
-            # Step 2: allreduce over MPI to all hosts, between master GPUs
+            # Step 2: allreduce between all hosts, between master GPUs
+            comm_world = model.param_init_net.CreateCommonWorld(
+                rendezvous['kv_handler'],
+                "{}_cw".format(grad_name),
+                name="{}_cw_op".format(grad_name),
+                size=rendezvous['num_shards'],
+                rank=rendezvous['shard_id'],
+                engine=rendezvous['engine'],
+            )
             model.net.Allreduce(
-                inputs=[mpi_comm, reduced_grad],
+                inputs=[comm_world, reduced_grad],
                 outputs=[reduced_grad],
                 engine=all_reduce_engine,
                 control_input=control_input,
@@ -422,25 +458,3 @@ def _GroupByDevice(devices, params):
         assert(ps[devices[0]] == params[j])
 
     return grouped
-
-
-def SetupMPICluster(num_replicas, role, job_path):
-    from caffe2.python import mpi
-    dyndep.InitOpsLibrary('@/caffe2/caffe2/mpi:mpi_ops')
-    dyndep.InitOpsLibrary('@/caffe2/caffe2/fb/rdma:rdma_ops')
-
-    log.info("MPI: Setup peers")
-    mpi.SetupPeers(
-        replicas=int(num_replicas),
-        role=role,
-        job_path=job_path
-    )
-    mpi_init_net = core.Net('mpi_init')
-    mpi_comm = mpi_init_net.CreateCommonWorld(
-        inputs=[],
-        outputs=['comm_world'],
-        engine='MPI',
-    )
-    workspace.RunNetOnce(mpi_init_net)
-    log.info("Finished MPI setup")
-    return mpi_comm
