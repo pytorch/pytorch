@@ -25,10 +25,10 @@ endif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER "4.7" OR CMAKE_CXX_COMPILER_VERSION VERSION_EQUAL "4.7" )
     # add c++11 flag
-    set_source_files_properties(THCCachingAllocator.cpp PROPERTIES COMPILE_FLAGS -std=c++11)
+    set_source_files_properties(THCTensorRandom.cpp THCCachingAllocator.cpp PROPERTIES COMPILE_FLAGS -std=c++11)
   else()
     # add c++0x flag
-    set_source_files_properties(THCCachingAllocator.cpp PROPERTIES COMPILE_FLAGS -std=c++0x)
+    set_source_files_properties(THCTensorRandom.cpp THCCachingAllocator.cpp PROPERTIES COMPILE_FLAGS -std=c++0x)
   endif()
 else()
   SET(CMAKE_CXX_STANDARD 11)
@@ -130,6 +130,7 @@ SET(src
     THCStream.c
     THCTensor.c
     THCTensorCopy.c
+    THCTensorRandom.cpp
     THCThreadLocal.c
     )
 
