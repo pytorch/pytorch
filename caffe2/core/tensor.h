@@ -158,7 +158,7 @@ class Tensor {
    * complexity.
    */
   template <class ContextForCopy>
-  void Extend(TIndex num, int growthPct, ContextForCopy* context) {
+  void Extend(TIndex num, float growthPct, ContextForCopy* context) {
     CAFFE_ENFORCE_GE(dims_.size(), 1);
     auto oldSize = size_;
     auto newDims = dims_;
@@ -171,7 +171,8 @@ class Tensor {
         newDims.begin(), newDims.end(), 1, std::multiplies<TIndex>());
     if (newSize * meta_.itemsize() > capacity_) {
       auto newCapacity = dims_;
-      newCapacity[0] = std::max(newDims[0], dims_[0] * (growthPct + 100) / 100);
+      newCapacity[0] = std::max<size_t>(
+          newDims[0], std::ceil(dims_[0] * (growthPct + 100) / 100));
       auto oldData = std::move(data_);
       Resize(newCapacity);
       auto* newData = raw_mutable_data(meta_);
