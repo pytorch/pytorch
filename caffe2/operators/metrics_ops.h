@@ -75,9 +75,10 @@ class QPSMetricReportOp final : public Operator<CPUContext> {
     }
     // TODO(amalevich): Add output blobs, so it would be relatively easy to
     // access this metrics from the outside
-    LOG(INFO) << "Overal QPS = "
+    LOG(INFO) << "Lifetime Examples = " << lifetimeExamples
+              << ", Lifetime QPS = "
               << (static_cast<double>(lifetimeExamples) / lifetimeSeconds)
-              << ", Window QPS = "
+              << ", Window Examples = " << windowExamples << ", Window QPS = "
               << (static_cast<double>(windowExamples) / windowSeconds);
     return true;
   }
