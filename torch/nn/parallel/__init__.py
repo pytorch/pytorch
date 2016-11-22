@@ -1,6 +1,5 @@
 from .parallel_apply import parallel_apply
 from .replicate import replicate
-from .utils import _ensure_iterable
 from torch.autograd import Variable
 
 
@@ -14,7 +13,7 @@ def scatter(input, target_gpus):
     from .functions import Scatter
     def scatter_map(obj):
         if isinstance(obj, Variable):
-            return _ensure_iterable(Scatter(target_gpus)(obj))
+            return Scatter(target_gpus)(obj)
         return tuple(zip(*map(scatter_map, obj)))
     return scatter_map(input)
 

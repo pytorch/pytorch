@@ -348,7 +348,9 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *inputs)
   if (!raw_output)
     return NULL;
   // Wrap output in a tuple, if it's not one already
+  bool unpack_output = false;
   if (!PyTuple_Check(raw_output.get())) {
+    unpack_output = true;
     PyObject *tuple = PyTuple_New(1);
     if (!tuple)
       return NULL;
@@ -405,7 +407,7 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *inputs)
       return NULL;
   }
 
-  if (num_outputs == 1) {
+  if (unpack_output) {
     PyObject *output = PyTuple_GET_ITEM(outputs.get(), 0);
     Py_INCREF(output);
     return output;

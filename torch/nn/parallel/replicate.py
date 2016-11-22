@@ -2,7 +2,6 @@ from copy import copy
 from collections import OrderedDict
 
 from ..modules.container import Container
-from .utils import _ensure_iterable
 import torch.cuda.comm as comm
 
 
@@ -31,7 +30,7 @@ def replicate(module, device_ids):
         if param in seen_params:
             continue
         seen_params.add(param)
-        param_copies = _ensure_iterable(Broadcast(device_ids)(param))
+        param_copies = Broadcast(device_ids)(param)
         for param_copy, remap in zip(param_copies, param_remap):
             remap[param] = param_copy
     for m in module.modules():
