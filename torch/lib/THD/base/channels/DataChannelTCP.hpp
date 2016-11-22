@@ -16,11 +16,11 @@ struct DataChannelTCP : DataChannel {
 
   bool init() override;
 
-  int getRank() const override;
-  int getNumProcesses() const override;
+  int getRank() override;
+  int getNumProcesses() override;
 
-  void allReduce(Tensor& data) override;
-  void reduce(Tensor& data, int dst_id) override;
+  void allReduce(Tensor& data, THDReduceOp operation) override;
+  void reduce(Tensor& data, THDReduceOp operation, int dst_rank) override;
   void broadcast(Tensor& data, int src_id) override;
   void send(Tensor& data, int dst_id) override;
   void receive(Tensor& data, int src_id) override;
@@ -41,6 +41,10 @@ private:
 
   bool initMaster();
   bool initWorker();
+
+  void reduce_(Tensor& result, Tensor& data, THDReduceOp operation) const;
+  template<typename T>
+  void reduce_(Tensor& result, Tensor& data, THDReduceOp operation) const;
 
 
   int m_rank; // Rank of current process, range: [0..m_processes.size()-1]

@@ -11,12 +11,12 @@ int THDGetNumProcesses() {
   return dataChannel->getNumProcesses();
 }
 
-void THDAllReduce(THDTensorDescriptor desc) {
-  dataChannel->allReduce(*desc);
+void THDAllReduce(THDTensorDescriptor desc, THDReduceOp operation) {
+  dataChannel->allReduce(*desc, operation);
 }
 
-void THDReduce(THDTensorDescriptor desc, int dst_rank) {
-  dataChannel->reduce(*desc, dst_rank);
+void THDReduce(THDTensorDescriptor desc, THDReduceOp operation, int dst_rank) {
+  dataChannel->reduce(*desc, operation, dst_rank);
 }
 
 void THDBroadcast(THDTensorDescriptor desc, int src_rank) {

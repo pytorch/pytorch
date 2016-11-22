@@ -75,11 +75,12 @@ uint16_t unpackArgCount(RPCMessage& raw_message) {
 }
 
 double unpackFloat(RPCMessage& raw_message) {
-  char type = *(raw_message.read(sizeof(char)));
-  if (type == 'd')
+  const TensorType& type = format_to_type.at(*(raw_message.read(sizeof(char))));
+  if (type == TensorType::DOUBLE)
     return _readValue<double>(raw_message);
-  else if (type == 'f')
+  else if (type == TensorType::FLOAT)
     return _readValue<float>(raw_message);
+
   throw std::invalid_argument("wrong real type in the raw message");
 }
 
@@ -88,23 +89,24 @@ uint16_t unpackFunctionId(RPCMessage& raw_message) {
 }
 
 long long unpackInteger(RPCMessage& raw_message) {
-  char type = *(raw_message.read(sizeof(char)));
-  if (type == 'c')
+  const TensorType& type = format_to_type.at(*(raw_message.read(sizeof(char))));
+  if (type == TensorType::CHAR)
     return _readValue<char, long long>(raw_message);
-  else if (type == 'i')
-    return _readValue<int, long long>(raw_message);
-  else if (type == 'l')
-    return _readValue<long, long long>(raw_message);
-  else if (type == 'h')
+  else if (type == TensorType::SHORT)
     return _readValue<short, long long>(raw_message);
-  else if (type == 'q')
+  else if (type == TensorType::INT)
+    return _readValue<int, long long>(raw_message);
+  else if (type == TensorType::LONG)
+    return _readValue<long, long long>(raw_message);
+  else if (type == TensorType::LONG_LONG)
     return _readValue<long long, long long>(raw_message);
+
   throw std::invalid_argument("wrong integer type in the raw message");
 }
 
 Tensor *unpackTensor(RPCMessage& raw_message) {
-  char type = *raw_message.read(sizeof(char));
-  if (type == 'T')
+  const TensorType& type = format_to_type.at(*raw_message.read(sizeof(char)));
+  if (type == TensorType::TENSOR)
     return NULL; //_readValue<long long int>(raw_message); TODO
   throw std::invalid_argument("expected tensor in the raw message");
 }

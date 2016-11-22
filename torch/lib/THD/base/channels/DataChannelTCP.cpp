@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <netdb.h>
 #include <unistd.h>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <stdexcept>
@@ -388,37 +389,93 @@ bool DataChannelTCP::init() {
 }
 
 
-int DataChannelTCP::getRank() const {
+int DataChannelTCP::getRank() {
   return m_rank;
 }
 
 
-int DataChannelTCP::getNumProcesses() const {
+int DataChannelTCP::getNumProcesses() {
   return m_processes.size();
 }
 
 
-void DataChannelTCP::allReduce(Tensor& data) {
-  // TODO: implement
+void DataChannelTCP::allReduce(Tensor& data, THDReduceOp operation) {
+  /*
+   * Since an all-reduce operation is semantically equivalent to an
+   * all-to-one reduction followed by a one-to-all broadcast, the asymptotically
+   * optimal algorithms for these two operations can be used to construct
+   * a similar algorithm for the all-reduce operation.
+   *
+   * Even though we use 0 rank as point of broadcast and aggregation we should
+   * not see any bottlenecks here.
+   */
+
+  reduce(data, operation, 0);
+  broadcast(data, 0);
 }
 
 
-void DataChannelTCP::reduce(Tensor& data, int dst_rank) {
-  // TODO: implement
+void DataChannelTCP::reduce(Tensor& data, THDReduceOp operation, int dst_rank) {
+  /*
+   * Idea of this algorithm is similar to broadcast but with reversed
+   * order and direction of communication.
+   */
+
+  int d = (int)std::ceil(std::log2((long double)m_processes.size()));
+  int virtual_rank = m_rank ^ dst_rank;
+  long long mask = 0;
+  auto result_tensor = data.clone();
+
+  for (int k = 0; k <= d - 1; ++k) {
+    if ((virtual_rank & mask) == 0) {
+      int partner = virtual_rank ^ (1 << k); // partner has opposite bit `k`
+      if (partner >= m_processes.size())
+        continue;
+
+      if (virtual_rank & (1 << k)) {
+        send(*result_tensor, partner);
+      } else {
+        receive(data, partner);
+        reduce_(*result_tensor, data, operation);
+      }
+    }
+    mask ^= (1 << k); // set bit `k`
+  }
+
+  if (m_rank == dst_rank)
+    std::memcpy(data.data(), result_tensor->data(), data.elementSize() * data.numel());
+
+  delete result_tensor;
 }
 
 
 void DataChannelTCP::broadcast(Tensor& data, int src_rank) {
-  if (src_rank != m_rank) {
-    receive(data, src_rank);
-  } else {
-    /*
-     * NOTE: This can be inefficient because send can block entire broadcast.
-     * There can be used poll or select.
-     */
-    for (const auto& process : m_processes) {
-      if (process.rank != m_rank)
-        send(data, process.rank);
+  /*
+   * General idea of this algorithm is to send data in `d` dimensional
+   * hypercube where vertices are nodes (processes) and edges are
+   * network connections which can be used to transfer data.
+   *
+   * Since hypercube algorithm works for case when broadcasting rank is 0
+   * we have to create `virtual_rank` which converts regular ranks to
+   * virtual ones where `virtual_rank` for `src_rank` is 0.
+   */
+
+  int d = (int)std::ceil(std::log2((long double)m_processes.size()));
+  int virtual_rank = m_rank ^ src_rank;
+  long long mask = (1 << d) - 1;
+
+  for (int k = d - 1; k >= 0; --k) {
+    mask ^= (1 << k); // clear bit `k`
+    if ((virtual_rank & mask) == 0) {
+      int partner = virtual_rank ^ (1 << k); // partner has opposite bit `k`
+      if (partner >= m_processes.size())
+        continue;
+
+      if ((virtual_rank & (1 << k)) == 0) {
+        send(data, partner);
+      } else {
+        receive(data, partner);
+      }
     }
   }
 }
@@ -471,6 +528,47 @@ void DataChannelTCP::receive(Tensor& data, int src_rank) {
   }
 
   std::memcpy(data.data(), bytes.get(), tensor_bytes);
+}
+
+
+void DataChannelTCP::reduce_(Tensor& result, Tensor& data, THDReduceOp operation) const {
+  TensorType tensor_type = data.type();
+  switch(tensor_type) {
+    case TensorType::CHAR:   reduce_<char>(result, data, operation); break;
+    case TensorType::FLOAT:  reduce_<float>(result, data, operation); break;
+    case TensorType::DOUBLE: reduce_<double>(result, data, operation); break;
+    case TensorType::SHORT:  reduce_<short>(result, data, operation); break;
+    case TensorType::USHORT: reduce_<unsigned short>(result, data, operation); break;
+    case TensorType::INT:    reduce_<int>(result, data, operation); break;
+    case TensorType::UINT:   reduce_<unsigned int>(result, data, operation); break;
+    case TensorType::LONG:   reduce_<long>(result, data, operation); break;
+    case TensorType::ULONG:  reduce_<unsigned long>(result, data, operation); break;
+    case TensorType::LONG_LONG:  reduce_<long long>(result, data, operation); break;
+    case TensorType::ULONG_LONG: reduce_<unsigned long long>(result, data, operation); break;
+    default:
+      throw std::logic_error("unsupported tensor type in reduce");
+  }
+}
+
+
+template<typename T>
+void DataChannelTCP::reduce_(Tensor& result, Tensor& data, THDReduceOp operation) const {
+  auto result_data = reinterpret_cast<T*>(result.data());
+  auto new_data = reinterpret_cast<T*>(data.data());
+
+  for (size_t i = 0; i < data.numel(); ++i) {
+    if (operation == THDReduceOp::THDReduceMIN) {
+      result_data[i] = std::min(result_data[i], new_data[i]);
+    } else if (operation == THDReduceOp::THDReduceMAX) {
+      result_data[i] = std::max(result_data[i], new_data[i]);
+    } else if (operation == THDReduceOp::THDReduceSUM) {
+      result_data[i] += new_data[i];
+    } else if (operation == THDReduceOp::THDReducePRODUCT) {
+      result_data[i] *= new_data[i];
+    } else {
+      throw std::logic_error("unsupported reduce operation");
+    }
+  }
 }
 
 } // namespace thd
