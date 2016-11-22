@@ -63,26 +63,26 @@ class Container(Module):
     <class 'torch.FloatTensor'> (20L, 1L, 5L, 5L)
     ```
 
-    **`[dict] parameter_dict()`**
+    **`[dict] state_dict()`**
 
-    returns a dictionary of learnable parameters of the Container.
+    returns a dictionary containing a whole state of the Container (both
+    parameters and persistent buffers e.g. running averages)
     For example: ['conv1.weight' : Parameter(torch.FloatTensor(20x1x5x5)),
                   'conv1.bias'   : Parameter(torch.FloatTensor(20)),
                  ]
 
     ```python
-    # .parameter_dict()
-    >>> pdict = model.parameter_dict()
+    # .state_dict()
+    >>> pdict = model.state_dict()
     >>> print(pdict.keys())
     ['conv1.bias', 'conv1.weight']
     ```
 
 
-    **`load_parameter_dict(dict)`**
+    **`load_state_dict(dict)`**
 
-    Given a parameter dict, sets the parameters of self to be the given dict.
-    It loads loads the parameters recursively.
-    Excessive or non-matching parameter names are ignored.
+    Given a state dict, updates the parameters of self if respective keys are
+    present in the dict. Excessive or non-matching parameter names are ignored.
     For example, the input dict has an entry 'conv44.weight', but
     if the container does not have a module named 'conv44', then this entry is ignored.
 
@@ -153,21 +153,21 @@ class Container(Module):
         else:
             Module.__delattr__(self, name)
 
-    def parameter_dict(self, destination=None, prefix=''):
-        result = super(Container, self).parameter_dict(destination, prefix)
+    def state_dict(self, destination=None, prefix=''):
+        result = super(Container, self).state_dict(destination, prefix)
         for name, module in self._modules.items():
             if module is not None:
-                module.parameter_dict(result, prefix + name + '.')
+                module.state_dict(result, prefix + name + '.')
         return result
 
-    def load_parameter_dict(self, param_dict):
-        super(Container, self).load_parameter_dict(param_dict)
+    def load_state_dict(self, state_dict):
+        super(Container, self).load_state_dict(state_dict)
         for name, module in self._modules.items():
             if module is not None:
                 filtered_params = {param_name[len(name)+1:]: param
-                        for param_name, param in param_dict.items()
+                        for param_name, param in state_dict.items()
                         if param_name.startswith(name)}
-                module.load_parameter_dict(filtered_params)
+                module.load_state_dict(filtered_params)
 
     def parameters(self, memo=None):
         if memo is None:

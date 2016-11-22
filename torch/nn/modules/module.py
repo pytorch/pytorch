@@ -10,39 +10,39 @@ from torch.autograd import Variable
 class Module(object):
     """This is the base class for all Modules defined in the nn package.
     Even the Container class derives from this class.
-    
+
     An nn.Module has the following interface:
 
     **Constructor:**
        nn.Module(**parameters)
 
-    All arguments passed in to the constructor need to be of type 
+    All arguments passed in to the constructor need to be of type
     nn.Parameter or a Tensor.
-    
+
 
     **forward(...)**
-    
+
     This is the function that one defines when subclassing to create
     their own modules.
     It takes in inputs and returns outputs.
 
     **__call__(...)**
-    
+
     This calls the forward function, as well as the hooks
 
     **register_buffer(name, tensor)**
-    
+
     This is typically used to register a buffer that is not a Parameter.
     For example, in BatchNorm, the running_mean is a buffer, so one would
     register it in the constructor of BatchNorm with:
 
     `self.register_buffer('running_mean', torch.zeros(num_features))`
-    
+
     The registered buffers can simply be accessed as class members
     when needed.
 
     **cpu()**
-    
+
     Recursively moves all it's parameters and buffers to the CPU
 
     **cuda(device_id=None)**
@@ -56,14 +56,14 @@ class Module(object):
     Typecasts the parameters and buffers to double
 
     **register_forward_hook(name, hook)**
-    
+
     This will register a user-defined closure on the module.
     Whenever the module finishes it's forward operation,
     the user closure is called.
     The signature of the closure is `def closure(input, output)`
 
     **register_backward_hook(name, hook)**
-    
+
     This will register a user-defined closure on the module.
     Whenever the module finishes it's backward operation,
     the user closure is called.
@@ -78,8 +78,8 @@ class Module(object):
     Removes a registered backward hook with the given name
 
     **`[generator] parameters()`**
-    
-    returns a generator over all learnable parameters in the container instance. 
+
+    returns a generator over all learnable parameters in the container instance.
     This can typically be passed to the optimizer API
 
     ```python
@@ -89,22 +89,22 @@ class Module(object):
     <class 'torch.FloatTensor'> (20L,)
     <class 'torch.FloatTensor'> (20L, 1L, 5L, 5L)
     ```
-    
-    **`[dict] parameter_dict()`**
-    
+
+    **`[dict] state_dict()`**
+
     returns a dictionary of learnable parameters of the Module.
     For example: ['weight' : Parameter(torch.FloatTensor(20x1x5x5)),
                   'bias'   : Parameter(torch.FloatTensor(20)),
                  ]
 
     ```python
-    # .parameter_dict()
-    >>> pdict = model.parameter_dict()
+    # .state_dict()
+    >>> pdict = model.state_dict()
     >>> print(pdict.keys())
     ['bias', 'weight']
     ```
 
-    **`load_parameter_dict(dict)`**
+    **`load_state_dict(dict)`**
 
     Given a parameter dict, sets the parameters of self to be the given dict.
 
@@ -119,7 +119,7 @@ class Module(object):
     **`zero_grad()`**
 
     Zeroes the gradients of each Parameter of the module
-    
+
     """
     def __init__(self, **parameters):
         self._backend = thnn_backend
@@ -245,17 +245,24 @@ class Module(object):
         else:
             object.__delattr__(self, name)
 
-    def parameter_dict(self, destination=None, prefix=''):
+    def state_dict(self, destination=None, prefix=''):
         if destination is None:
             destination = OrderedDict()
-        for name, param in self._parameters.items():
+        for name, param in chain(self._buffers.items(), self._parameters.items()):
             if param is not None:
                 destination[prefix + name] = param
         return destination
 
-    def load_parameter_dict(self, param_dict):
+    def load_state_dict(self, state_dict):
         for name, param in self._parameters.items():
-            self._parameters[name] = param_dict.get(name, param)
+            new_param = state_dict.get(name, param)
+            if not isinstance(new_param, Parameter):
+                raise TypeError(("state_dict contains keys corresponding to "
+                        "parameter {}, but it has a type of {}, "
+                        "not Parameter").format(name, torch.typename(new_param)))
+            self._parameters[name] = new_param
+        for name, buf in self._buffers.items():
+            self._buffers[name] = state_dict.get(name, buf)
 
     def parameters(self, memo=None):
         if memo is None:
