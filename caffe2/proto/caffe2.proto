@@ -82,6 +82,8 @@ message Argument {
 }
 
 // DeviceType that Caffe2 currently supports.
+// Note: if you add a device type, make sure you add the corresponding device
+// line in core/blob_serialization.cc.
 enum DeviceType {
   CPU = 0;                    // In default, we will use CPU.
   CUDA = 1;                   // CUDA.
