@@ -1,13 +1,13 @@
 #include "../master_worker/common/CommandChannel.hpp"
 #include "../base/ChannelEnvVars.hpp"
 
+#include <stdlib.h>
+#include <unistd.h>
 #include <cerrno>
 #include <cstdlib>
 #include <exception>
 #include <iostream>
 #include <string>
-#include <stdlib.h>
-#include <unistd.h>
 
 constexpr int kWORKERS_NUM = 3;
 constexpr int kWORLD_SIZE = kWORKERS_NUM + 1;

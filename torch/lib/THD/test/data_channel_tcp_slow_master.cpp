@@ -3,6 +3,8 @@
 
 #include <cassert>
 #include <iostream>
+#include <memory>
+#include <mutex>
 #include <thread>
 
 constexpr int WORKERS_NUM = 2;
@@ -60,7 +62,7 @@ void worker(int id)
 
   workerChannel->broadcast(*float_tensor, 0);
   for (int i = 0; i < float_tensor->numel(); i++) {
-    assert(((float*)float_tensor->data())[i] == 4);
+    assert(reinterpret_cast<float*>(float_tensor->data())[i] == 4);
   }
 
   delete float_tensor;

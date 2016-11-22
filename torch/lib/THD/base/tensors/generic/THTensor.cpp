@@ -49,12 +49,12 @@ const long* THTensor<real>::rawStrides() const {
 }
 
 template<>
-size_t THTensor<real>::storageOffset() const {
+std::size_t THTensor<real>::storageOffset() const {
   return tensor->storageOffset;
 }
 
 template<>
-size_t THTensor<real>::elementSize() const {
+std::size_t THTensor<real>::elementSize() const {
   return sizeof(real);
 }
 

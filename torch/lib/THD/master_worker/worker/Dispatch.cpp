@@ -1,3 +1,4 @@
+#include <cstdint>
 #include <unordered_map>
 #include <string>
 
@@ -31,7 +32,7 @@ using dispatch_fn = void (*)(const std::string&);
 using Functions = thd::Functions;
 
 
-static const std::unordered_map<uint16_t, dispatch_fn> functions {
+static const std::unordered_map<std::uint16_t, dispatch_fn> functions {
     {Functions::add, add}
 };
 

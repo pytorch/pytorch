@@ -14,7 +14,7 @@ RPCMessage::RPCMessage()
   , _offset(0)
 {}
 
-RPCMessage::RPCMessage(char* str, size_t size)
+RPCMessage::RPCMessage(char* str, std::size_t size)
   : _msg(str, size)
   , _offset(0)
 {}
@@ -41,11 +41,11 @@ bool RPCMessage::isEmpty() const {
   return _offset >= _msg.length();
 }
 
-size_t RPCMessage::remaining() const {
+std::size_t RPCMessage::remaining() const {
   return _msg.length() - _offset;
 }
 
-const char* RPCMessage::read(size_t num_bytes) {
+const char* RPCMessage::read(std::size_t num_bytes) {
   if (_offset + num_bytes > _msg.length())
     throw std::out_of_range("invalid access: out of bounds");
   const char* ret_val = _msg.data() + _offset;
@@ -70,8 +70,8 @@ return_type _readValue(RPCMessage& msg) {
 ////////////////////////////////////////////////////////////////////////////////
 } // anonymous namespace
 
-uint16_t unpackArgCount(RPCMessage& raw_message) {
-  return _readValue<uint16_t, uint16_t>(raw_message);
+std::uint16_t unpackArgCount(RPCMessage& raw_message) {
+  return _readValue<std::uint16_t, std::uint16_t>(raw_message);
 }
 
 double unpackFloat(RPCMessage& raw_message) {
@@ -84,8 +84,8 @@ double unpackFloat(RPCMessage& raw_message) {
   throw std::invalid_argument("wrong real type in the raw message");
 }
 
-uint16_t unpackFunctionId(RPCMessage& raw_message) {
-  return _readValue<uint16_t, uint16_t>(raw_message);
+std::uint16_t unpackFunctionId(RPCMessage& raw_message) {
+  return _readValue<std::uint16_t, std::uint16_t>(raw_message);
 }
 
 long long unpackInteger(RPCMessage& raw_message) {

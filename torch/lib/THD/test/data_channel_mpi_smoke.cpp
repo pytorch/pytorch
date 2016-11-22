@@ -1,10 +1,10 @@
 #include "../base/channels/DataChannelMPI.hpp"
 #include "../base/tensors/THTensor.hpp"
 
-#include <iostream>
-#include <cassert>
 #include <unistd.h>
-
+#include <cassert>
+#include <iostream>
+#include <memory>
 
 constexpr int WORKERS_NUM = 2;
 
@@ -26,7 +26,7 @@ void master(std::shared_ptr<thd::DataChannelMPI> dataChannel) {
   int_tensor->fill(100);
   dataChannel->reduce(*int_tensor, THDReduceOp::THDReduceSUM, 0);
   for (int i = 0; i < int_tensor->numel(); i++) {
-    assert(((int*)int_tensor->data())[i] == (100 + 10 * WORKERS_NUM));
+    assert(reinterpret_cast<int*>(int_tensor->data())[i] == (100 + 10 * WORKERS_NUM));
   }
 
   // allReduce
@@ -34,7 +34,7 @@ void master(std::shared_ptr<thd::DataChannelMPI> dataChannel) {
   int_tensor->fill(1000);
   dataChannel->allReduce(*int_tensor, THDReduceOp::THDReduceMAX);
   for (int i = 0; i < int_tensor->numel(); i++) {
-    assert(((int*)int_tensor->data())[i] == 1000);
+    assert(reinterpret_cast<int*>(int_tensor->data())[i] == 1000);
   }
 
   delete float_tensor;
@@ -49,7 +49,7 @@ void worker(std::shared_ptr<thd::DataChannelMPI> dataChannel) {
     dataChannel->receive(*float_tensor, 0);
 
     for (int i = 0; i < float_tensor->numel(); i++) {
-      assert(((float*)float_tensor->data())[i] == 4);
+      assert(reinterpret_cast<float*>(float_tensor->data())[i] == 4);
     }
   }
 
@@ -59,7 +59,7 @@ void worker(std::shared_ptr<thd::DataChannelMPI> dataChannel) {
   dataChannel->broadcast(*int_tensor, 0);
 
   for (int i = 0; i < int_tensor->numel(); i++) {
-    assert(((int*)int_tensor->data())[i] == 1000000000);
+    assert(reinterpret_cast<int*>(int_tensor->data())[i] == 1000000000);
   }
 
   // reduce
@@ -72,7 +72,7 @@ void worker(std::shared_ptr<thd::DataChannelMPI> dataChannel) {
   int_tensor->fill(1);
   dataChannel->allReduce(*int_tensor, THDReduceOp::THDReduceMAX);
   for (int i = 0; i < int_tensor->numel(); i++) {
-    assert(((int*)int_tensor->data())[i] == 1000);
+    assert(reinterpret_cast<int*>(int_tensor->data())[i] == 1000);
   }
 
   delete float_tensor;

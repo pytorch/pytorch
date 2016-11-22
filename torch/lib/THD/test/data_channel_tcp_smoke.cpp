@@ -15,6 +15,8 @@
 
 #include <cassert>
 #include <iostream>
+#include <memory>
+#include <mutex>
 #include <thread>
 
 constexpr int WORKERS_NUM = 2;
@@ -24,7 +26,7 @@ std::vector<std::thread> g_all_workers;
 std::mutex g_mutex;
 
 template<class T>
-typename std::enable_if<!std::numeric_limits<T>::is_integer, bool>::type almost_equal(T x, T y, int ulp) {
+typename std::enable_if<!std::numeric_limits<T>::is_integer, bool>::type almost_equal(T x, T y, int ulp = 5) {
   return std::abs(x-y) < std::numeric_limits<T>::epsilon() * std::abs(x+y) * ulp
       || std::abs(x-y) < std::numeric_limits<T>::min();
 }
@@ -74,7 +76,10 @@ void master()
   float_tensor->fill(4.3);
   masterChannel->reduce(*float_tensor, THDReduceOp::THDReduceSUM, 0);
   for (int i = 0; i < float_tensor->numel(); i++) {
-    assert(almost_equal(((float*)float_tensor->data())[i], (float)(4.3 + 2.2 * WORKERS_NUM), 5));
+    assert(almost_equal(
+      reinterpret_cast<float*>(float_tensor->data())[i],
+      static_cast<float>(4.3 + 2.2 * WORKERS_NUM)
+    ));
   }
 
   // allReduce
@@ -82,7 +87,7 @@ void master()
   int_tensor->fill(1000);
   masterChannel->allReduce(*int_tensor, THDReduceOp::THDReduceSUM);
   for (int i = 0; i < int_tensor->numel(); i++) {
-    assert(((int*)int_tensor->data())[i] == (1000 + 10 * WORKERS_NUM));
+    assert(reinterpret_cast<int*>(int_tensor->data())[i] == (1000 + 10 * WORKERS_NUM));
   }
 
   // wait for all workers to finish
@@ -119,7 +124,10 @@ void worker(int id)
     workerChannel->receive(*float_tensor, 0);
 
     for (int i = 0; i < float_tensor->numel(); i++) {
-      assert(almost_equal(((float*)float_tensor->data())[i], (float)4.3, 5));
+      assert(almost_equal(
+        reinterpret_cast<float*>(float_tensor->data())[i],
+        static_cast<float>(4.3)
+      ));
     }
 
     // new sizes does not match
@@ -139,7 +147,7 @@ void worker(int id)
   workerChannel->broadcast(*int_tensor, 0);
 
   for (int i = 0; i < int_tensor->numel(); i++) {
-    assert(((int*)int_tensor->data())[i] == 1000000000);
+    assert(reinterpret_cast<int*>(int_tensor->data())[i] == 1000000000);
   }
 
   // reduce
@@ -147,7 +155,10 @@ void worker(int id)
   float_tensor->fill(2.2);
   workerChannel->reduce(*float_tensor, THDReduceOp::THDReduceSUM, 0);
   for (int i = 0; i < float_tensor->numel(); i++) { // tensor values should not change
-    assert(almost_equal(((float*)float_tensor->data())[i], (float)2.2, 5));
+    assert(almost_equal(
+      reinterpret_cast<float*>(float_tensor->data())[i],
+      static_cast<float>(2.2)
+    ));
   }
 
   // allReduce
@@ -155,7 +166,7 @@ void worker(int id)
   int_tensor->fill(10);
   workerChannel->allReduce(*int_tensor, THDReduceOp::THDReduceSUM);
   for (int i = 0; i < int_tensor->numel(); i++) {
-    assert(((int*)int_tensor->data())[i] == (1000 + 10 * WORKERS_NUM));
+    assert(reinterpret_cast<int*>(int_tensor->data())[i] == (1000 + 10 * WORKERS_NUM));
   }
 
   delete float_tensor;

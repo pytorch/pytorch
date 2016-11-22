@@ -34,8 +34,8 @@ public:
   virtual long_range strides() const override;
   virtual const long* rawSizes() const override;
   virtual const long* rawStrides() const override;
-  virtual size_t storageOffset() const override;
-  virtual size_t elementSize() const override;
+  virtual std::size_t storageOffset() const override;
+  virtual std::size_t elementSize() const override;
   virtual long long numel() const override;
   virtual bool isContiguous() const override;
   virtual void* data() override;
