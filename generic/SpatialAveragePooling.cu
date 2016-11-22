@@ -2,6 +2,68 @@
 #define THC_GENERIC_FILE "generic/SpatialAveragePooling.cu"
 #else
 
+#include "../common.h"
+
+static inline void THNN_(SpatialAveragePooling_shapeCheck)(
+  THCState *state,
+  THCTensor *input, THCTensor *gradOutput,
+  int kH, int kW, int dH, int dW, int padH, int padW, bool ceil_mode) {
+
+  THArgCheck(kW > 0 && kH > 0, 5,
+             "kernel size should be greater than zero, but got kH: %d kW: %d", kH, kW);
+  THArgCheck(dW > 0 && dH > 0, 8,
+             "stride should be greater than zero, but got dH: %d dW: %d", dH, dW);
+
+  int ndim = input->nDimension;
+  int dimf = 0;
+  int dimh = 1;
+  int dimw = 2;
+
+  if (ndim == 4) {
+    dimf++;
+    dimh++;
+    dimw++;
+  }
+
+  THCUNN_argCheck(state, ndim == 3 || ndim == 4, 2, input,
+                  "3D or 4D input tensor expected but got: %s");
+
+  THArgCheck(input->size[dimw] >= kW - padW && input->size[dimh] >= kH - padH, 2,
+             "input image (H: %d, W: %d) smaller than kernel "
+             "size - padding( kH: %d padH: %d kW: %d padW: %d",
+             input->size[dimh], input->size[dimw], kH, padH, kW, padW);
+  THArgCheck(kW/2 >= padW && kH/2 >= padH, 2,
+             "pad should be smaller than half of kernel size, but got "
+             "padW = %d, padH = %d, kW = %d, kH = %d",
+             padW, padH, kW, kH);
+
+  long nInputPlane = input->size[dimh-1];
+  long nInputRows = input->size[dimh];
+  long nInputCols = input->size[dimw];
+  long nOutputRows, nOutputCols;
+  long nOutputPlane = nInputPlane;
+
+  if(ceil_mode) {
+    nOutputCols = ceil(float(nInputCols - kW + 2*padW) / float(dW)) + 1;
+    nOutputRows = ceil(float(nInputRows - kH + 2*padH) / float(dH)) + 1;
+  }
+  else {
+    nOutputCols = floor(float(nInputCols - kW + 2*padW) / float(dW)) + 1;
+    nOutputRows = floor(float(nInputRows - kH + 2*padH) / float(dH)) + 1;
+  }
+
+  if (nOutputCols < 1 || nOutputRows < 1)
+    THError("Given input size: (%dx%dx%d). "
+            "Calculated output size: (%dx%dx%d). Output size is too small",
+            nInputPlane,nInputRows,nInputCols,nInputPlane,nOutputRows,nOutputCols);
+
+  if (gradOutput != NULL) {
+    THCUNN_check_dim_size(state, gradOutput, ndim, dimf, nOutputPlane);
+    THCUNN_check_dim_size(state, gradOutput, ndim, dimh, nOutputRows);
+    THCUNN_check_dim_size(state, gradOutput, ndim, dimw, nOutputCols);
+  }
+}
+
 void THNN_(SpatialAveragePooling_updateOutput)(
            THCState *state,
            THCTensor *input,
@@ -13,12 +75,9 @@ void THNN_(SpatialAveragePooling_updateOutput)(
            bool count_include_pad)
 {
   THCUNN_assertSameGPU(state, 2, input, output);
-  THCUNN_argCheck(state, input->nDimension == 3 || input->nDimension == 4, 2, input,
-                  "3D or 4D (batch mode) tensor expected for input, but got: %s");
-  THArgCheck(kW/2 >= padW && kH/2 >= padH, 2,
-             "pad should be smaller than half of kernel size, but got "
-             "padW = %d, padH = %d, kW = %d, kH = %d",
-             padW, padH, kW, kH);
+  THNN_(SpatialAveragePooling_shapeCheck)
+       (state, input, NULL, kH, kW, dH, dW,
+        padH, padW, ceil_mode);
 
   long nInputCols, nInputRows, nInputPlane, batchSize;
   long nOutputCols, nOutputRows;
@@ -36,11 +95,6 @@ void THNN_(SpatialAveragePooling_updateOutput)(
     nInputPlane = input->size[1];
     batchSize = input->size[0];
   }
-
-  THArgCheck(nInputCols >= kW - 2 * padW && nInputRows >= kH - 2 * padH, 2,
-             "input image smaller than (kernel size - 2 * padW). Got "
-             "inputHeight: %nInputCols inputWidth: %d kH %d kW %d padH %d padW %d",
-             nInputRows, nInputCols, kH, kW, padH, padW);
 
   if(ceil_mode) {
     nOutputCols = ceil(float(nInputCols - kW + 2*padW) / float(dW)) + 1;
@@ -102,6 +156,9 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
            bool count_include_pad)
 {
   THCUNN_assertSameGPU(state, 3, input, gradOutput, gradInput);
+  THNN_(SpatialAveragePooling_shapeCheck)
+       (state, input, gradOutput, kH, kW, dH, dW,
+        padH, padW, ceil_mode);
 
   input = THCTensor_(newContiguous)(state, input);
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
