@@ -607,29 +607,35 @@ class TestNN(NNTestCase):
         net = nn.Container(
             linear1=l,
             linear2=l,
+            bn=nn.BatchNorm2d(2),
             block=block,
             empty=None,
         )
-        param_dict = net.parameter_dict()
-        self.assertEqual(len(param_dict), 5)
-        self.assertIn('linear1.weight', param_dict)
-        self.assertIn('linear1.bias', param_dict)
-        self.assertIn('linear2.weight', param_dict)
-        self.assertIn('linear2.bias', param_dict)
-        self.assertIn('block.conv.weight', param_dict)
-        self.assertNotIn('block.conv.bias', param_dict)
-        self.assertFalse(any(map(lambda k: k.startswith('empty'), param_dict.keys())))
-        for k, v in param_dict.items():
+        state_dict = net.state_dict()
+        self.assertEqual(len(state_dict), 9)
+        self.assertIn('linear1.weight', state_dict)
+        self.assertIn('linear1.bias', state_dict)
+        self.assertIn('linear2.weight', state_dict)
+        self.assertIn('linear2.bias', state_dict)
+        self.assertIn('block.conv.weight', state_dict)
+        self.assertIn('block.conv.weight', state_dict)
+        self.assertNotIn('block.conv.bias', state_dict)
+        self.assertIn('bn.weight', state_dict)
+        self.assertIn('bn.bias', state_dict)
+        self.assertIn('bn.running_var', state_dict)
+        self.assertIn('bn.running_mean', state_dict)
+        self.assertFalse(any(map(lambda k: k.startswith('empty'), state_dict.keys())))
+        for k, v in state_dict.items():
             param = net
             for component in k.split('.'):
                 param = getattr(param, component)
             self.assertIs(v, param)
 
         l = nn.Linear(5, 5)
-        param_dict = l.parameter_dict()
-        self.assertEqual(len(param_dict), 2)
-        self.assertIs(param_dict['weight'], l.weight)
-        self.assertIs(param_dict['bias'], l.bias)
+        state_dict = l.state_dict()
+        self.assertEqual(len(state_dict), 2)
+        self.assertIs(state_dict['weight'], l.weight)
+        self.assertIs(state_dict['bias'], l.bias)
 
     def test_load_parameter_dict(self):
         l = nn.Linear(5, 5)
@@ -639,16 +645,24 @@ class TestNN(NNTestCase):
         net = nn.Container(
             linear1=l,
             linear2=l,
+            bn=nn.BatchNorm2d(2),
             block=block,
             empty=None,
         )
-        param_dict = {
-            'linear1.weight': Variable(torch.ones(5, 5)),
-            'block.conv.bias': Variable(torch.range(1, 3)),
+        state_dict = {
+            'linear1.weight': Parameter(torch.ones(5, 5)),
+            'block.conv.bias': Parameter(torch.range(1, 3)),
+            'bn.running_mean': torch.randn(2),
         }
-        net.load_parameter_dict(param_dict)
-        self.assertIs(net.linear1.weight, param_dict['linear1.weight'])
-        self.assertIs(net.block.conv.bias, param_dict['block.conv.bias'])
+        net.load_state_dict(state_dict)
+        self.assertIs(net.linear1.weight, state_dict['linear1.weight'])
+        self.assertIs(net.block.conv.bias, state_dict['block.conv.bias'])
+        self.assertIs(net.bn.running_mean, state_dict['bn.running_mean'])
+
+        state_dict = {
+            'linear1.weight': torch.ones(5, 5)
+        }
+        self.assertRaises(TypeError, lambda: net.load_state_dict(state_dict))
 
     def test_parameter_assignment(self):
         l = nn.Linear(5, 5)
