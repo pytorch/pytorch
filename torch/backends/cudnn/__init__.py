@@ -1,15 +1,21 @@
 import ctypes
 import warnings
 import torch.cuda
+import sys
 import os.path as path
 
 lib = None
-# TODO: fix libname for OSX / Windows
+# TODO: fix libname for Windows
 # TODO: dynamic version checks via cudnnGetVersion
 # TODO: load 5.1.3 if using CUDA 7.5 and 5.1.5 if using CUDA 8.0
 thisdir = path.dirname(__file__)
 libpaths = ['', path.join(thisdir, '../../lib')]
-libnames = ['libcudnn.so.5.1.5', 'libcudnn.so.5.1.3']
+if sys.platform.startswith('linux'):
+    libnames = ['libcudnn.so.5.1.5', 'libcudnn.so.5.1.3']
+elif sys.platform == 'darwin':
+    libnames = ['libcudnn.5.dylib']
+else:
+    libnames = []
 
 def _loadlib():
     global lib
@@ -39,7 +45,11 @@ def is_acceptable(tensor):
         try:
             _loadlib()
         except Exception:
-            warnings.warn('cuDNN library not found. Check your LD_LIBRARY_PATH')
+            warnings.warn('cuDNN library not found. Check your {libpath}'.format(
+                libpath={
+                    'darwin': 'DYLD_LIBRARY_PATH',
+                    'win32': 'PATH'
+                }.get(sys.platform, 'LD_LIBRARY_PATH')))
             return False
     return True
 
