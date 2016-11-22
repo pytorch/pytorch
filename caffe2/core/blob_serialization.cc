@@ -11,7 +11,6 @@ CAFFE2_DEFINE_int(
     "Chunk size to split tensor data into");
 
 namespace caffe2 {
-namespace {
 /**
  * @brief StringSerializer is the serializer for String.
  *
@@ -51,17 +50,24 @@ class StringDeserializer : public BlobDeserializerBase {
     return true;
   }
 };
-}
 
 namespace {
 
-// We can't use DeviceType_Name because of a protobuf-lite constraint.
-std::string tensorDeviceTypeName(const int32_t& d) {
+// A wrapper function to return tensor type string appended with the device
+// name, for use in blob serialization / deserialization. This should have one
+// to one correspondence with caffe2/proto/caffe2.proto: enum DeviceType.
+//
+// Note that we can't use DeviceType_Name, because that is only available in
+// protobuf-full, and some platforms (like mobile) may want to use
+// protobuf-lite instead.
+std::string TensorDeviceTypeName(const int32_t& d) {
   switch (d) {
     case CPU:
       return "TensorCPU";
     case CUDA:
       return "TensorCUDA";
+    case MKLDNN:
+      return "TensorMKLDNN";
     default:
       CAFFE_THROW("Unknown device: ", d);
       return "";
@@ -118,7 +124,7 @@ bool Blob::Deserialize(const BlobProto& blob_proto) {
   if (blob_proto.type() == kTensorBlobType) {
     // This is a tensor object. Depending on the device type, we will
     // use the corresponding TensorDeserializer.
-    auto deserializer = CreateDeserializer(tensorDeviceTypeName(
+    auto deserializer = CreateDeserializer(TensorDeviceTypeName(
         blob_proto.tensor().device_detail().device_type()));
     // Tensor's deserializer should always be registered, but we will double
     // check if it is not null anyway.
