@@ -4,6 +4,33 @@
 
 #include "../common.h"
 
+static inline void THNN_(SpatialSubSampling_shapeCheck)(
+                         THCState *state,
+                         THCTensor *input,
+                         THCTensor *gradOutput,
+                         THCTensor *weight,
+                         int kW, int kH) {
+  THCUNN_argCheck(state, input->nDimension == 3 || input->nDimension == 4, 2, input,
+                  "3D or 4D input tensor expected but got: %s");
+
+  int nInputPlane = THCTensor_(size)(state, weight, 0);
+
+  int dimc = 2;
+  int dimr = 1;
+  int dimp = 0;
+
+  if (input->nDimension == 4) {
+    dimc++;
+    dimr++;
+    dimp++;
+  }
+
+  long nInputCols = input->size[dimc];
+  long nInputRows = input->size[dimr];
+  THArgCheck(input->size[dimp] == nInputPlane, 2, "invalid number of input planes");
+  THArgCheck(nInputCols >= kW && nInputRows >= kH, 2, "input image smaller than kernel size");
+}
+
 void THNN_(SpatialSubSampling_updateOutput)(
            THCState *state,
            THCTensor *input,
@@ -21,16 +48,13 @@ void THNN_(SpatialSubSampling_updateOutput)(
   int nInputPlane = THCTensor_(size)(state, weight, 0);
 
   THCUNN_assertSameGPU(state, 4, input, output, weight, bias);
-  THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D (batch) tensor expected");
+  THNN_(SpatialSubSampling_shapeCheck)(state, input, NULL, weight, kW, kH);
 
   if (input->nDimension == 3) {
     long nInputCols = input->size[2];
     long nInputRows = input->size[1];
     long nOutputCols = (nInputCols - kW) / dW + 1;
     long nOutputRows = (nInputRows - kH) / dH + 1;
-
-    THArgCheck(input->size[0] == nInputPlane, 2, "invalid number of input planes");
-    THArgCheck(nInputCols >= kW && nInputRows >= kH, 2, "input image smaller than kernel size");
 
     input = THCTensor_(newContiguous)(state, input);
     input_data = THCTensor_(data)(state, input);
@@ -55,9 +79,6 @@ void THNN_(SpatialSubSampling_updateOutput)(
     long nbatch = input->size[0];
     long nOutputCols = (nInputCols - kW) / dW + 1;
     long nOutputRows = (nInputRows - kH) / dH + 1;
-
-    THArgCheck(input->size[1] == nInputPlane, 2, "invalid number of input planes");
-    THArgCheck(nInputCols >= kW && nInputRows >= kH, 2, "input image smaller than kernel size");
 
     input = THCTensor_(newContiguous)(state, input);
     input_data = THCTensor_(data)(state, input);
@@ -93,6 +114,7 @@ void THNN_(SpatialSubSampling_updateGradInput)(
            int dW, int dH)
 {
   THCUNN_assertSameGPU(state, 4, input, gradOutput, weight, gradInput);
+  THNN_(SpatialSubSampling_shapeCheck)(state, input, gradOutput, weight, kW, kH);
 
   int nInputPlane = THCTensor_(size)(state, weight, 0);
 
@@ -101,6 +123,7 @@ void THNN_(SpatialSubSampling_updateGradInput)(
     long nInputRows = input->size[1];
 
     real *weight_data = THCTensor_(data)(state, weight);
+    gradOutput = THCTensor_(newContiguous)(state, gradOutput);
     real *gradOutput_data = THCTensor_(data)(state, gradOutput);
     real *gradInput_data;
 
@@ -131,6 +154,7 @@ void THNN_(SpatialSubSampling_updateGradInput)(
     long nbatch = input->size[0];
 
     real *weight_data = THCTensor_(data)(state, weight);
+    gradOutput = THCTensor_(newContiguous)(state, gradOutput);
     real *gradOutput_data = THCTensor_(data)(state, gradOutput);
     real *gradInput_data;
 
@@ -156,6 +180,7 @@ void THNN_(SpatialSubSampling_updateGradInput)(
     }
     THCudaCheck(cudaGetLastError());
   }
+  THCTensor_(free)(state, gradOutput);
 }
 
 void THNN_(SpatialSubSampling_accGradParameters)(
@@ -169,6 +194,7 @@ void THNN_(SpatialSubSampling_accGradParameters)(
            float scale)
 {
   THCUNN_assertSameGPU(state, 4, input, gradOutput, gradWeight, gradBias);
+  THNN_(SpatialSubSampling_shapeCheck)(state, input, gradOutput, gradWeight, kW, kH);
 
   int nInputPlane = THCTensor_(size)(state, gradWeight, 0);
 
@@ -178,6 +204,7 @@ void THNN_(SpatialSubSampling_accGradParameters)(
 
     real *gradWeight_data = THCTensor_(data)(state, gradWeight);
     real *gradBias_data = THCTensor_(data)(state, gradBias);
+    gradOutput = THCTensor_(newContiguous)(state, gradOutput);
     real *gradOutput_data = THCTensor_(data)(state, gradOutput);
     real *input_data;
 
@@ -200,6 +227,7 @@ void THNN_(SpatialSubSampling_accGradParameters)(
 
     real *gradWeight_data = THCTensor_(data)(state, gradWeight);
     real *gradBias_data = THCTensor_(data)(state, gradBias);
+    gradOutput = THCTensor_(newContiguous)(state, gradOutput);
     real *gradOutput_data = THCTensor_(data)(state, gradOutput);
     real *input_data;
 
@@ -224,6 +252,7 @@ void THNN_(SpatialSubSampling_accGradParameters)(
 
   // clean
   THCTensor_(free)(state, input);
+  THCTensor_(free)(state, gradOutput);
 
 }
 

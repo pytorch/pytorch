@@ -121,6 +121,7 @@ void THNN_(SpatialUpSamplingNearest_updateGradInput)(
 
   THCUNN_assertSameGPU(state, 2, gradOutput, gradInput);
   THNN_(SpatialUpSamplingNearest_shapeCheck)(state, input, gradOutput, scale_factor);
+  gradOutput = THCTensor_(newContiguous)(state, gradOutput);
   THCTensor_(resizeAs)(state, gradInput, input);
 
   THCTensor_(zero)(state, gradInput);
@@ -164,6 +165,7 @@ void THNN_(SpatialUpSamplingNearest_updateGradInput)(
   downscale<real ,accreal> <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (gradInput_data, gradOutput_data, no_elements,
     scale_factor, d1, d2, d3);
   THCudaCheck(cudaGetLastError());
+  THCTensor_(free)(state, gradOutput);
 }
 
 #endif

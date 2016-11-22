@@ -52,6 +52,7 @@ void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
     THCudaCheck(cudaGetLastError());
 
   } else {
+    input = THCTensor_(newContiguous)(state, input);
     long nInputCols = input->size[3];
     long nInputRows = input->size[2];
     long nInputPlane = input->size[1];
@@ -61,7 +62,6 @@ void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
     long istride_h = input->stride[2];
     long istride_w = input->stride[3];
 
-    input = THCTensor_(newContiguous)(state, input);
     input_data = THCTensor_(data)(state, input);
 
     THCTensor_(resize4d)(state, output, nbatch, nInputPlane, nOutputRows, nOutputCols);

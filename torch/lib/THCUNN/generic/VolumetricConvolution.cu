@@ -2,6 +2,34 @@
 #define THC_GENERIC_FILE "generic/VolumetricConvolution.cu"
 #else
 
+static inline void THNN_(VolumetricConvolution_shapeCheck)
+                        (THCState *state,
+                         THCTensor *input,
+                         THCTensor *gradOutput,
+                         THCTensor *weight,
+                         THCTensor *gradWeight) {
+  THCUNN_argCheck(state, input->nDimension == 4 || input->nDimension == 5, 2, input,
+                  "4D or 5D (batch mode) tensor expected for input, but got: %s");
+
+  if (gradOutput != NULL) {
+    THCUNN_argCheck(state, gradOutput->nDimension == 4 || gradOutput->nDimension == 5, 3,
+                    gradOutput,
+                    "4D or 5D (batch mode) tensor expected for gradOutput, but got: %s");
+  }
+
+  if (weight != NULL) {
+    THCUNN_argCheck(state, weight->nDimension == 5, 4, weight,
+                    "5D (nOutputPlane x nInputPlane x kT x kH x kW) tensor "
+                    "expected for weight, but got: %s");
+  }
+
+  if (gradWeight != NULL) {
+    THCUNN_argCheck(state, gradWeight->nDimension == 5, 4, gradWeight,
+                    "5D (nOutputPlane x nInputPlane x kT x kH x kW) tensor "
+                    "expected for gradWeight, but got: %s");
+  }
+}
+
 void THNN_(VolumetricConvolution_updateOutput)(
            THCState *state,
            THCTensor *input,
@@ -16,13 +44,8 @@ void THNN_(VolumetricConvolution_updateOutput)(
   THCTensor *columns = finput;
   THCTensor *ones = fgradInput;
   THCUNN_assertSameGPU(state, 6, input, output, weight, bias, columns, ones);
-
-  THCUNN_argCheck(state, input->nDimension == 4 || input->nDimension == 5, 2, input,
-                  "4D or 5D (batch mode) tensor expected for input, but got: %s");
-
-  THCUNN_argCheck(state, weight->nDimension == 5, 4, weight,
-                  "5D (nOutputPlane x nInputPlane x kT x kH x kW) tensor "
-                  "expected for weight, but got: %s");
+  THNN_(VolumetricConvolution_shapeCheck)(state, input, NULL, weight, NULL);
+  input = THCTensor_(newContiguous)(state, input);
 
   int nOutputPlane = (int)weight->size[0];
   int nInputPlane  = (int)weight->size[1];
@@ -145,6 +168,7 @@ void THNN_(VolumetricConvolution_updateOutput)(
     THCTensor_(resize4d)(state, output, nOutputPlane, outputHeight, outputWidth, outputDepth);
     THCTensor_(resize4d)(state, input, nInputPlane, inputHeight, inputWidth, inputDepth);
   }
+  THCTensor_(free)(state, input);
 }
 
 void THNN_(VolumetricConvolution_updateGradInput)(
@@ -157,12 +181,6 @@ void THNN_(VolumetricConvolution_updateGradInput)(
            int dT, int dW, int dH,
            int padT, int padW, int padH)
 {
-  THCUNN_argCheck(state, weight->nDimension == 5, 4, weight,
-                  "5D (nOutputPlane x nInputPlane x kT x kH x kW) tensor "
-                  "expected for weight, but got: %s");
-  THCUNN_argCheck(state, gradOutput->nDimension == 4 || gradOutput->nDimension == 5, 3,
-                  gradOutput,
-                  "4D or 5D (batch mode) tensor expected for gradOutput, but got: %s");
 
   int nOutputPlane = (int)weight->size[0];
   int nInputPlane  = (int)weight->size[1];
@@ -173,12 +191,13 @@ void THNN_(VolumetricConvolution_updateGradInput)(
   THCTensor *gradColumns = finput;
 
   THCUNN_assertSameGPU(state, 5, input, gradOutput, weight, gradColumns, gradInput);
-  THCUNN_argCheck(state, input->nDimension == 4 || input->nDimension == 5, 2, input,
-                  "4D or 5D (batch mode) tensor expected for input, but got: %s");
+  THNN_(VolumetricConvolution_shapeCheck)(state, input, gradOutput, weight, NULL);
+  gradOutput = THCTensor_(newContiguous)(state, gradOutput);
 
   int batch = 1;
   if (input->nDimension == 4)
   {
+    input = THCTensor_(newContiguous)(state, input);
     // Force batch
     batch = 0;
     THCTensor_(resize5d)(state, input, 1, input->size[0], input->size[1], input->size[2], input->size[3]);
@@ -202,7 +221,6 @@ void THNN_(VolumetricConvolution_updateGradInput)(
   THCTensor_(resize2d)(state, gradColumns, nInputPlane*kH*kT*kW, outputDepth*outputHeight*outputWidth);
 
   // Helpers
-  THCTensor *input_n = THCTensor_(new)(state);
   THCTensor *gradInput_n = THCTensor_(new)(state);
   THCTensor *gradOutput_n = THCTensor_(new)(state);
 
@@ -210,7 +228,6 @@ void THNN_(VolumetricConvolution_updateGradInput)(
   for (int elt = 0; elt < batchSize; elt ++)
   {
     // Matrix mulitply per sample:
-    THCTensor_(select)(state, input_n, input, 0, elt);
     THCTensor_(select)(state, gradInput_n, gradInput, 0, elt);
     THCTensor_(select)(state, gradOutput_n, gradOutput, 0, elt);
 
@@ -248,7 +265,6 @@ void THNN_(VolumetricConvolution_updateGradInput)(
   }
 
   // Free
-  THCTensor_(free)(state, input_n);
   THCTensor_(free)(state, gradInput_n);
   THCTensor_(free)(state, gradOutput_n);
 
@@ -258,7 +274,10 @@ void THNN_(VolumetricConvolution_updateGradInput)(
     THCTensor_(resize4d)(state, gradOutput, nOutputPlane, outputHeight, outputWidth, outputDepth);
     THCTensor_(resize4d)(state, input, nInputPlane, inputHeight, inputWidth, inputDepth);
     THCTensor_(resize4d)(state, gradInput, nInputPlane, inputHeight, inputWidth, inputDepth);
+    THCTensor_(free)(state, input);
   }
+  THCTensor_(free)(state, gradOutput);
+
 }
 
 void THNN_(VolumetricConvolution_accGradParameters)(
@@ -277,18 +296,16 @@ void THNN_(VolumetricConvolution_accGradParameters)(
   THCTensor *ones = fgradInput;
   THCUNN_assertSameGPU(state, 6, input, gradOutput, gradWeight, gradBias, columns, ones);
 
-  THCUNN_argCheck(state, gradWeight->nDimension == 5, 4, gradWeight,
-                  "5D (nOutputPlane x nInputPlane x kT x kH x kW) tensor "
-                  "expected for gradWeight, but got: %s");
-
   int nOutputPlane = (int)gradWeight->size[0];
   int nInputPlane  = (int)gradWeight->size[1];
   int kT           = (int)gradWeight->size[2];
   int kH           = (int)gradWeight->size[3];
   int kW           = (int)gradWeight->size[4];
 
-  THCUNN_argCheck(state, input->nDimension == 4 || input->nDimension == 5, 2, input,
-                  "4D or 5D (batch mode) tensor expected for input, but got: %s");
+  THNN_(VolumetricConvolution_shapeCheck)(state, input, gradOutput, NULL, gradWeight);
+
+  input = THCTensor_(newContiguous)(state, input);
+  gradOutput = THCTensor_(newContiguous)(state, gradOutput);
 
   int batch = 1;
   if (input->nDimension == 4)
@@ -410,6 +427,8 @@ void THNN_(VolumetricConvolution_accGradParameters)(
     THCTensor_(resize4d)(state, gradOutput, nOutputPlane, outputHeight, outputWidth, outputDepth);
     THCTensor_(resize4d)(state, input, nInputPlane, inputHeight, inputWidth, inputDepth);
   }
+  THCTensor_(free)(state, input);
+  THCTensor_(free)(state, gradOutput);
 }
 
 #endif

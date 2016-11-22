@@ -149,20 +149,11 @@ void THNN_(SpatialConvolutionLocal_updateOutput)(
 
     THCTensor_(copy)(state, output_n, bias);
 
-    for (int i = 0; i < outputHeight; i++) {
-      for(int j = 0; j < outputWidth; j++) {
-        int sliceidx = i * outputWidth + j;
-        THCTensor_(select)(state, wslice, weight, 0, sliceidx);
-        THCTensor_(select)(state, islice, finput3d, 0, sliceidx);
-        THCTensor_(select)(state, oslice, output3d, 0, sliceidx);
-        THCTensor_(addmm)(state, oslice, ScalarConvert<int, real>::to(1), oslice, ScalarConvert<int, real>::to(1), wslice, islice);
-      }
-    }
-
-
     // weight:    oH*oW x nOutputPlane x nInputPlane*kH*kW
     // finput3d:  oH*oW x nInputPlane*kH*kW x 1
-    // THCTensor_(baddbmm)(state, output3d, 1.0, output3d, 1.0, weight, finput3d);
+    THCTensor_(baddbmm)(state, output3d, ScalarConvert<int, real>::to(1),
+                        output3d, ScalarConvert<int, real>::to(1),
+                        weight, finput3d);
     // output3d:  oH*oW x nOutputPlane x 1
 
     THCTensor_(free)(state, output3d);
@@ -261,19 +252,12 @@ void THNN_(SpatialConvolutionLocal_updateGradInput)(
                                                kW*kH*nInputPlane, outputHeight*outputWidth,
                                                1, kW*kH*nInputPlane*outputHeight*outputWidth);
 
-    for (int i = 0; i < outputHeight; i++) {
-      for(int j = 0; j < outputWidth; j++) {
-        int sliceidx = i * outputWidth + j;
-        THCTensor_(select)(state, wslice, weight, 0, sliceidx);
-        THCTensor_(select)(state, gislice, fgradInput3d, 0, sliceidx);
-        THCTensor_(select)(state, goslice, gradOutput3d, 0, sliceidx);
-        THCTensor_(addmm)(state, gislice, ScalarConvert<int, real>::to(0), gislice, ScalarConvert<int, real>::to(1), wslice, goslice);
-      }
-    }
-
     // weight:        oH*oW x nInputPlane*kH*kW x nOutputPlane
     // gradOutput3d:  oH*oW x nOutputPlane x 1
-    //THCTensor_(baddbmm)(state, fgradInput3d, 0.0, fgradInput3d, 1.0, weight, gradOutput3d);
+    THCTensor_(baddbmm)(state, fgradInput3d,
+                        ScalarConvert<int, real>::to(0),
+                        fgradInput3d, ScalarConvert<int, real>::to(1),
+                        weight, gradOutput3d);
     // fgradInput3d:  oH*oW x nInputPlane*kH*kW x 1
 
     // Unpack columns back into input:
@@ -385,18 +369,10 @@ void THNN_(SpatialConvolutionLocal_accGradParameters)(
       1, 1, THCTensor_(data)(state, finput_n)
     );
 
-    for (int i = 0; i < outputHeight; i++) {
-      for(int j = 0; j < outputWidth; j++) {
-        int sliceidx = i * outputWidth + j;
-        THCTensor_(select)(state, gwslice, gradWeight, 0, sliceidx);
-        THCTensor_(select)(state, goslice, gradOutput3d, 0, sliceidx);
-        THCTensor_(select)(state, islice, finput3d, 0, sliceidx);
-        THCTensor_(addmm)(state, gwslice, ScalarConvert<int, real>::to(1), gwslice, scale, goslice, islice);
-      }
-    }
     // gradOutput3d:  oH*oW x nOutputPlane x 1
     // finput3d:      oH*oW x 1 x kW*kH*nInputPlane
-    //THCTensor_(baddbmm)(state, gradWeight, 1.0, gradWeight, scale, gradOutput3d, finput3d);
+    THCTensor_(baddbmm)(state, gradWeight, ScalarConvert<int, real>::to(1),
+                        gradWeight, scale, gradOutput3d, finput3d);
     // gradWeight:    oH*oW x nOutputPlane x kW*kH*nInputPlane
 
     THCTensor_(cadd)(state, gradBias, gradBias, scale, gradOutput_n);
