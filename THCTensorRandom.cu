@@ -15,6 +15,9 @@
 #define MAX_NUM_BLOCKS 64
 #define BLOCK_SIZE 256
 
+
+Generator* THCRandom_getGenerator(THCState* state);
+
 /* Sets up generator. Allocates but does not create the generator states. */
 __host__ void initializeGenerator(THCState *state, Generator* gen)
 {
@@ -22,23 +25,8 @@ __host__ void initializeGenerator(THCState *state, Generator* gen)
   THCudaCheck(THCudaMalloc(state, (void**)&gen->kernel_params, sizeof(mtgp32_kernel_params)));
 }
 
-/* Frees memory allocated during setup. */
-__host__ void destroyGenerator(THCState *state, Generator* gen)
-{
-  if (gen->gen_states)
-  {
-    THCudaCheck(THCudaFree(state, gen->gen_states));
-    gen->gen_states = NULL;
-  }
-  if (gen->kernel_params)
-  {
-    THCudaCheck(THCudaFree(state, gen->kernel_params));
-    gen->kernel_params = NULL;
-  }
-}
-
 /* Creates a new generator state given the seed. */
-__host__ void createGeneratorState(Generator* gen, unsigned long seed)
+__host__ void createGeneratorState(Generator* gen, unsigned long long seed)
 {
   if (curandMakeMTGP32Constants(mtgp32dc_params_fast_11213, gen->kernel_params) != CURAND_STATUS_SUCCESS)
   {
@@ -51,112 +39,13 @@ __host__ void createGeneratorState(Generator* gen, unsigned long seed)
   }
 }
 
-/* Initialize generator array (must be called before any other function) */
-__host__ void THCRandom_init(THCState* state, int devices, int current_device)
-{
-  THCRNGState* rng_state = THCState_getRngState(state);
-  rng_state->num_devices = devices;
-  rng_state->gen = (Generator*)malloc(rng_state->num_devices * sizeof(Generator));
-  for (int i = 0; i < rng_state->num_devices; ++i)
-  {
-    rng_state->gen[i].initf = 0;
-    rng_state->gen[i].initial_seed = 0;
-    rng_state->gen[i].gen_states = NULL;
-    rng_state->gen[i].kernel_params = NULL;
-  }
-}
-
-/* Destroy generators and free memory */
-__host__ void THCRandom_shutdown(THCState* state)
-{
-  THCRNGState* rng_state = THCState_getRngState(state);
-  if (rng_state->gen == NULL) return;
-  for (int i = 0; i < rng_state->num_devices; ++i)
-  {
-    destroyGenerator(state, &rng_state->gen[i]);
-  }
-  free(rng_state->gen);
-  rng_state->gen = NULL;
-}
-
-/* Manually set the generator seed */
-__host__ static void THCRandom_manualSeedGen(Generator* gen, unsigned long seed)
-{
-  gen->initial_seed = seed;
-  createGeneratorState(gen, seed);
-  gen->initf = 1;
-}
-
-/* Get the generator for the current device */
-__host__ Generator* THCRandom_getGenerator(THCState* state)
-{
-  THCRNGState* rng_state = THCState_getRngState(state);
-
-  int device;
-  THCudaCheck(cudaGetDevice(&device));
-  if (device >= rng_state->num_devices) THError("Invalid device index.");
-
-  Generator* gen = &rng_state->gen[device];
-  if (gen->initf == 0)
-  {
-    initializeGenerator(state, gen);
-    THCRandom_manualSeedGen(gen, (unsigned long)time(0));
-  }
-  return gen;
-}
-
-__host__ struct curandStateMtgp32* THCRandom_generatorStates(struct THCState* state)
-{
-  return THCRandom_getGenerator(state)->gen_states;
-}
-
-/* Random seed */
-__host__ unsigned long THCRandom_seed(THCState* state)
-{
-  unsigned long s = (unsigned long)time(0);
-  THCRandom_manualSeed(state, s);
-  return s;
-}
-
-__host__ unsigned long THCRandom_seedAll(THCState* state)
-{
-  unsigned long s = (unsigned long)time(0);
-  THCRandom_manualSeedAll(state, s);
-  return s;
-}
-
-/* Manually set the seed */
-__host__ void THCRandom_manualSeed(THCState* state, unsigned long seed)
-{
-  Generator* gen = THCRandom_getGenerator(state);
-  THCRandom_manualSeedGen(gen, seed);
-}
-
-__host__ void THCRandom_manualSeedAll(THCState* state, unsigned long seed)
-{
-  THCRNGState* rng_state = THCState_getRngState(state);
-  int currentDevice;
-  THCudaCheck(cudaGetDevice(&currentDevice));
-  for (int i = 0; i < rng_state->num_devices; ++i) {
-    THCudaCheck(cudaSetDevice(i));
-    THCRandom_manualSeed(state, seed);
-  }
-  THCudaCheck(cudaSetDevice(currentDevice));
-}
-
-/* Get the initial seed */
-__host__ unsigned long THCRandom_initialSeed(THCState* state)
-{
-  return THCRandom_getGenerator(state)->initial_seed;
-}
-
 __host__ void THCRandom_getRNGState(THCState* state, THByteTensor *rng_state)
 {
   Generator* gen = THCRandom_getGenerator(state);
 
   // The RNG state comprises the MTPG32 states and the seed.
   static const size_t states_size = MAX_NUM_BLOCKS * sizeof(curandStateMtgp32);
-  static const size_t seed_size = sizeof(unsigned long);
+  static const size_t seed_size = sizeof(gen->initial_seed);
   static const size_t total_size = states_size + seed_size;
   THByteTensor_resize1d(rng_state, total_size);
   THArgCheck(THByteTensor_nElement(rng_state) == total_size, 1, "RNG state is wrong size");
@@ -176,7 +65,7 @@ __host__ void THCRandom_setRNGState(THCState* state, THByteTensor *rng_state)
   Generator* gen = THCRandom_getGenerator(state);
 
   static const size_t states_size = MAX_NUM_BLOCKS * sizeof(curandStateMtgp32);
-  static const size_t seed_size = sizeof(unsigned long);
+  static const size_t seed_size = sizeof(gen->initial_seed);
   static const size_t total_size = states_size + seed_size;
   THArgCheck(THByteTensor_nElement(rng_state) == total_size, 1, "RNG state is wrong size");
   THArgCheck(THByteTensor_isContiguous(rng_state), 1, "RNG state must be contiguous");
@@ -240,4 +129,3 @@ GENERATE_KERNEL2(generate_cauchy, half, double median, double sigma, float, cura
 
 #undef GENERATE_KERNEL1
 #undef GENERATE_KERNEL2
-
