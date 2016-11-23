@@ -44,3 +44,7 @@ class PythonOpTest(hu.HypothesisTestCase):
         for i in range(n):
             y = workspace.FetchBlob(str(i))
             np.testing.assert_almost_equal(x, y)
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()

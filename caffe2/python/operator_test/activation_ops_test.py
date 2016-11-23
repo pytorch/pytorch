@@ -79,3 +79,7 @@ class TestActivations(hu.HypothesisTestCase):
             self.assertGradientChecks(gc, op, [X, W], 0, [0])
             # Gradient check wrt W
             self.assertGradientChecks(gc, op, [X, W], 1, [0])
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()

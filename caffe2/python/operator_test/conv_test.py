@@ -316,3 +316,7 @@ class TestConvolution(hu.HypothesisTestCase):
                 np.sum(np.square(output)),
                 1763719461732352.0,
                 rtol=1e-5)
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()

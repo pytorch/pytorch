@@ -310,3 +310,7 @@ class TestSoftmaxOps(hu.HypothesisTestCase):
 
             np.testing.assert_allclose(probs_gpu, probs_cpu, rtol=1e-4)
             np.testing.assert_allclose(loss_gpu, loss_cpu, rtol=1e-1)
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()

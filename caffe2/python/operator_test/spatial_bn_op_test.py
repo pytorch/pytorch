@@ -6,9 +6,7 @@ from __future__ import unicode_literals
 from hypothesis import given
 import hypothesis.strategies as st
 import numpy as np
-import unittest
-
-from caffe2.python import core, workspace
+from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
 
 
@@ -118,3 +116,7 @@ class TestSpatialBN(hu.HypothesisTestCase):
         for input_to_check in [0, 1, 2]:  # dX, dScale, dBias
             self.assertGradientChecks(gc, op, [X, scale, bias, mean, var],
                                       input_to_check, [0])
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()

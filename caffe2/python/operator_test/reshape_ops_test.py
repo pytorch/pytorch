@@ -136,3 +136,7 @@ def test_reshape(old_shape, new_shape, expected_shape=None, arg_shape=True,
 
             Y = workspace.FetchBlob(blob_out)
             np.testing.assert_allclose(Y, X.reshape(expected_shape))
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()

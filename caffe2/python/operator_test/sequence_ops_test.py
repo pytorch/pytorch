@@ -286,3 +286,7 @@ class TestSequenceOps(hu.HypothesisTestCase):
             op=op,
             inputs=[data],
             reference=op_ref)
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()

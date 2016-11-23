@@ -298,3 +298,7 @@ class TestSegmentOps(hu.HypothesisTestCase):
             ),
             REFERENCES_ALL
         )(self)
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()

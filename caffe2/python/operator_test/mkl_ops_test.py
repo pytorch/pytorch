@@ -70,3 +70,7 @@ class PackedFCTest(hu.HypothesisTestCase):
                 np.dot(X.reshape(X.size / K, K), W.T).reshape(output_axes) + b,)
 
         self.assertReferenceChecks(gc, op, [X, W, b], ref)
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()

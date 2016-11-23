@@ -44,3 +44,7 @@ class TestCosineEmbeddingCriterion(hu.HypothesisTestCase):
         # checking the gradient of the first input (S), and the second [0] means
         # that the gradient check should initiate from the 0-th output.
         self.assertGradientChecks(gc, op, [S, Y], 0, [0])
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()

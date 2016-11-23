@@ -230,3 +230,7 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [X, w, b], [0])
         for i in range(3):
             self.assertGradientChecks(gc, op, [X, w, b], i, [0])
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()

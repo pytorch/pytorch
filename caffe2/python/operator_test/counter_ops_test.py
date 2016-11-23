@@ -71,3 +71,7 @@ class TestCounterOps(TestCase):
             workspace.RunOperatorOnce(core.CreateOperator(
                 'RetrieveCount', ['serialized_c'], ['t8']))
             assert workspace.FetchBlob('t8') == 22
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()
