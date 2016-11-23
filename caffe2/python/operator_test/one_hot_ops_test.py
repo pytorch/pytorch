@@ -74,3 +74,7 @@ class TestOneHotOps(hu.HypothesisTestCase):
             op,
             [lengths, indices, index_size],
             segment_one_hot_ref)
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()

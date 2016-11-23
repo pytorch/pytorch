@@ -86,3 +86,7 @@ class TestRecordQueue(TestCase):
         self.assertEqual(6, sum(data[0]))
         self.assertEqual(150, sum(data[1]))
         self.assertAlmostEqual(15, sum(data[2]), places=5)
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()

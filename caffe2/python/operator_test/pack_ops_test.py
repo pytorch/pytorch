@@ -66,3 +66,7 @@ class TestTensorPackOps(TestCase):
         # then it should be zero.
         exponentiated = workspace.FetchBlob('r')
         assert(exponentiated[0, -1, 0] == 0.0)
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()

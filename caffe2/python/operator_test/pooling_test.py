@@ -114,3 +114,7 @@ class TestPooling(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [X], [0])
         if method not in ('MaxPool'):
             self.assertGradientChecks(gc, op, [X], 0, [0])
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()

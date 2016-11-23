@@ -67,3 +67,7 @@ class TestGatherRanges(hu.HypothesisTestCase):
             inputs=[data, ranges],
             reference=gather_ranges,
         )
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()

@@ -40,3 +40,7 @@ class TestSparseGradient(hu.HypothesisTestCase):
         # Gradient check wrt Y
         self.assertGradientChecks(
             gc, op, [Y, val, key, seg], 0, [0])
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()

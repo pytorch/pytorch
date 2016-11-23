@@ -370,3 +370,7 @@ class TestDatasetOps(TestCase):
         for i in range(1, len(blobs)):
             result = workspace.FetchBlob(bconcated_map[blobs[i]])
             self.assertEqual(reference_result.tolist(), result.tolist())
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()

@@ -45,3 +45,7 @@ class TestMarginRankingCriterion(hu.HypothesisTestCase):
         self.assertGradientChecks(gc, op, inputs, 0, [0])
         # Check dX2
         self.assertGradientChecks(gc, op, inputs, 1, [0])
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()
