@@ -43,21 +43,6 @@ def AddImageInput(model, reader, batch_size, img_size):
     data = model.StopGradient(data, data)
 
 
-def AddModel(args, train_model):
-    '''
-    Add the resnet-50 model operators.
-    '''
-    [softmax, loss] = resnet.create_resnet50(
-        train_model,
-        "data",
-        num_input_channels=args.num_channels,
-        num_labels=args.num_labels,
-        label="label",
-    )
-    train_model.Accuracy([softmax, "label"], "accuracy")
-    return loss
-
-
 def AddMomentumParameterUpdate(train_model, LR):
     '''
     Add the momentum-SGD update.
