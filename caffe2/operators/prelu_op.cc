@@ -175,7 +175,6 @@ bool PReluGradientOp<float, CPUContext>::RunOnDevice() {
   auto* dX = Output(0);
   auto* dW = Output(1);
 
-  DCHECK_GT(Y.size(), 0);
   DCHECK_EQ(dY.size(), Y.size());
   dX->ResizeLike(Y);
   dW->ResizeLike(W);

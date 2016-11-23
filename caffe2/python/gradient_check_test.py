@@ -47,6 +47,7 @@ else:
 
 
 class TestConv(test_util.TestCase):
+
     def setUp(self):
         self.test_configs = [
             (1, 1, 0, 7, "NHWC", ""),
@@ -79,14 +80,14 @@ class TestConv(test_util.TestCase):
                 stride, kernel, pad, size, order, engine)
             )
             op = core.CreateOperator("Conv",
-                ["X", "w", "b"],
-                ["Y"],
-                stride=stride,
-                kernel=kernel,
-                pad=pad,
-                order=order,
-                engine=engine,
-            )
+                                     ["X", "w", "b"],
+                                     ["Y"],
+                                     stride=stride,
+                                     kernel=kernel,
+                                     pad=pad,
+                                     order=order,
+                                     engine=engine,
+                                     )
             if order == "NHWC":
                 X = np.random.rand(2, size, size, 3).astype(np.float32) - 0.5
                 w = np.random.rand(4, kernel, kernel,
@@ -118,15 +119,15 @@ class TestConv(test_util.TestCase):
                 outputs = {}
                 for order in ["NCHW", "NHWC"]:
                     op = core.CreateOperator("Conv",
-                        ["X", "w", "b"],
-                        ["Y"],
-                        stride=stride,
-                        kernel=kernel,
-                        pad=pad,
-                        order=order,
-                        engine=engine,
-                        device_option=device_option,
-                    )
+                                             ["X", "w", "b"],
+                                             ["Y"],
+                                             stride=stride,
+                                             kernel=kernel,
+                                             pad=pad,
+                                             order=order,
+                                             engine=engine,
+                                             device_option=device_option,
+                                             )
                     if order == "NCHW":
                         X_f = X.transpose((0, 3, 1, 2))
                         w_f = w.transpose((0, 3, 1, 2))
@@ -146,6 +147,7 @@ class TestConv(test_util.TestCase):
 
 
 class TestConvLegacyPooling(test_util.TestCase):
+
     def setUp(self):
         self.test_configs = [
             # stride, kernel, legacy_pad, size, order
@@ -173,13 +175,13 @@ class TestConvLegacyPooling(test_util.TestCase):
                 stride, kernel, legacy_pad, size, order)
             )
             op = core.CreateOperator("Conv",
-                ["X", "w", "b"],
-                ["Y"],
-                stride=stride,
-                kernel=kernel,
-                legacy_pad=legacy_pad,
-                order=order
-            )
+                                     ["X", "w", "b"],
+                                     ["Y"],
+                                     stride=stride,
+                                     kernel=kernel,
+                                     legacy_pad=legacy_pad,
+                                     order=order
+                                     )
             if order == "NHWC":
                 X = np.random.rand(2, size, size, 3).astype(np.float32) - 0.5
                 w = np.random.rand(4, kernel, kernel,
@@ -200,6 +202,7 @@ class TestConvLegacyPooling(test_util.TestCase):
 
 
 class TestMaxPoolingLegacyPadding(test_util.TestCase):
+
     def setUp(self):
         self.test_configs = [
             (2, 3, 2, 12, "NHWC"),
@@ -221,13 +224,13 @@ class TestMaxPoolingLegacyPadding(test_util.TestCase):
             print('MaxPool {} {} {} {} {}'.format(stride, kernel, legacy_pad,
                                                   size, order))
             op = core.CreateOperator("MaxPool",
-                ["X"],
-                ["Y"],
-                stride=stride,
-                kernel=kernel,
-                legacy_pad=legacy_pad,
-                order=order
-            )
+                                     ["X"],
+                                     ["Y"],
+                                     stride=stride,
+                                     kernel=kernel,
+                                     legacy_pad=legacy_pad,
+                                     order=order
+                                     )
             # In order to avoid the problem of race conditions, we will do a
             # randperm so that the values will be apart at least 0.01
             if order == "NHWC":
@@ -244,6 +247,7 @@ class TestMaxPoolingLegacyPadding(test_util.TestCase):
 
 
 class TestAveragePoolingLegacyPadding(test_util.TestCase):
+
     def setUp(self):
         self.test_configs = [
             (1, 7, 1, 7, "NHWC"),
@@ -257,13 +261,13 @@ class TestAveragePoolingLegacyPadding(test_util.TestCase):
             print('AveragePool {} {} {} {} {}'.format(
                 stride, kernel, legacy_pad, size, order))
             op = core.CreateOperator("AveragePool",
-                ["X"],
-                ["Y"],
-                stride=stride,
-                kernel=kernel,
-                legacy_pad=legacy_pad,
-                order=order
-            )
+                                     ["X"],
+                                     ["Y"],
+                                     stride=stride,
+                                     kernel=kernel,
+                                     legacy_pad=legacy_pad,
+                                     order=order
+                                     )
             if order == "NHWC":
                 X = np.random.rand(2, size, size, 3).astype(np.float32)
             else:
@@ -276,20 +280,21 @@ class TestAveragePoolingLegacyPadding(test_util.TestCase):
 
 
 class TestLRN(test_util.TestCase):
+
     def setUp(self):
         self.test_configs = [(6, 10), (3, 13), ]
 
     def testLRN(self):
         for input_size, depth in self.test_configs:
             op = core.CreateOperator("LRN",
-                ["X"],
-                ["Y", "Y_scale"],
-                size=11,
-                alpha=0.001,
-                beta=0.5,
-                bias=2.0,
-                order="NHWC"
-            )
+                                     ["X"],
+                                     ["Y", "Y_scale"],
+                                     size=11,
+                                     alpha=0.001,
+                                     beta=0.5,
+                                     bias=2.0,
+                                     order="NHWC"
+                                     )
             X = np.random.rand(2, input_size, input_size,
                                depth).astype(np.float32)
             res = device_checker.CheckSimple(op, [X], [0])
@@ -300,6 +305,7 @@ class TestLRN(test_util.TestCase):
 
 
 class TestFlatten(test_util.TestCase):
+
     def testFlatten(self):
         op = core.CreateOperator("Flatten", ["X"], ["Y"])
         X = np.random.rand(2, 3, 4, 5).astype(np.float32)
@@ -311,6 +317,7 @@ class TestFlatten(test_util.TestCase):
 
 
 class TestConcat(test_util.TestCase):
+
     def setUp(self):
         self.test_configs = [
             # input_size, depth1, depth2, depth3, depth4
@@ -321,10 +328,10 @@ class TestConcat(test_util.TestCase):
     def testConcatNHWC(self):
         for input_size, d1, d2, d3, d4 in self.test_configs:
             op = core.CreateOperator("Concat",
-                ["X1", "X2", "X3", "X4"],
-                ["Y", "Y_dims"],
-                order="NHWC"
-            )
+                                     ["X1", "X2", "X3", "X4"],
+                                     ["Y", "Y_dims"],
+                                     order="NHWC"
+                                     )
             Xs = [
                 np.random.rand(2, input_size, input_size,
                                d1).astype(np.float32),
@@ -345,10 +352,10 @@ class TestConcat(test_util.TestCase):
     def testConcatNCHW(self):
         for input_size, d1, d2, d3, d4 in self.test_configs:
             op = core.CreateOperator("Concat",
-                ["X1", "X2", "X3", "X4"],
-                ["Y", "Y_dims"],
-                order="NCHW"
-            )
+                                     ["X1", "X2", "X3", "X4"],
+                                     ["Y", "Y_dims"],
+                                     order="NCHW"
+                                     )
             Xs = [
                 np.random.rand(2, d1, input_size,
                                input_size).astype(np.float32),
@@ -368,9 +375,11 @@ class TestConcat(test_util.TestCase):
 
 
 class TestRelu(test_util.TestCase):
+
     def setUp(self):
         self.test_configs = [
             # input size
+            (0, 1),
             (1, 1),
             (2, 1),
             (1, 3, 3, 1),
@@ -394,8 +403,14 @@ class TestRelu(test_util.TestCase):
 
 
 class TestTanh(test_util.TestCase):
+
     def setUp(self):
-        self.test_configs = [(1, 1), (2, 1), (1, 2, 3, 4), ]
+        self.test_configs = [
+            (0, 1),
+            (1, 1),
+            (2, 1),
+            (1, 2, 3, 4),
+        ]
 
     def testTanh(self):
         for input_size in self.test_configs:
@@ -409,8 +424,9 @@ class TestTanh(test_util.TestCase):
 
 
 class TestExp(test_util.TestCase):
+
     def setUp(self):
-        self.test_configs = [(1, 1), (2, 1), (1, 2, 3, 4), ]
+        self.test_configs = [(0, 1), (1, 1), (2, 1), (1, 2, 3, 4), ]
 
     def testExp(self):
         for input_size in self.test_configs:
@@ -424,8 +440,9 @@ class TestExp(test_util.TestCase):
 
 
 class TestSigmoid(test_util.TestCase):
+
     def setUp(self):
-        self.test_configs = [(1, 1), (2, 1), (1, 2, 3, 4), ]
+        self.test_configs = [(0, 1), (1, 1), (2, 1), (1, 2, 3, 4), ]
 
     def testSigmoid(self):
         for input_size in self.test_configs:
@@ -439,13 +456,17 @@ class TestSigmoid(test_util.TestCase):
 
 
 class TestSum(test_util.TestCase):
+
     def setUp(self):
-        self.test_configs = [((1, 2, 3, 4), True), ((1, 2, 3, 4), False) ]
+        self.test_configs = [
+            ((0, 1), False),
+            ((1, 2, 3, 4), True),
+            ((1, 2, 3, 4), False)]
 
     def testSum(self):
         for (input_size, in_place) in self.test_configs:
             op = core.CreateOperator("Sum", ["X1", "X2"],
-                                            ["Y" if not in_place else "X1"])
+                                     ["Y" if not in_place else "X1"])
             X1 = np.random.rand(*input_size).astype(np.float32) - 0.5
             X2 = np.random.rand(*input_size).astype(np.float32) - 0.5
             res = device_checker.CheckSimple(op, [X1, X2], [0])
@@ -457,9 +478,11 @@ class TestSum(test_util.TestCase):
 
 
 class TestMakeTwoClass(test_util.TestCase):
+
     def setUp(self):
         self.test_configs = [
             # input size
+            (0, 1),
             (1,),
             (7,),
             (1, 3),

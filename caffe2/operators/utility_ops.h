@@ -1339,9 +1339,9 @@ class GatherRangesOp : public Operator<Context> {
     auto batchSize = ranges.dim(0);
     CAFFE_ENFORCE(data.ndim() == 1, "Data has to be 1-D");
     CAFFE_ENFORCE(ranges.ndim() == 3, "Ranges must be 3-D");
-    CAFFE_ENFORCE(batchSize > 0, "Batch of examples can't be empty");
     CAFFE_ENFORCE(ranges.dim(1) > 0, "There has to be at least one range");
-    CAFFE_ENFORCE(ranges.dim(2), "Ranges last dimention should be of size 2");
+    CAFFE_ENFORCE_EQ(
+        ranges.dim(2), 2, "Ranges last dimention should be of size 2");
 
     auto* rawData = static_cast<const char*>(data.raw_data());
     auto* rangesData = ranges.template data<Index>();
@@ -1349,7 +1349,7 @@ class GatherRangesOp : public Operator<Context> {
     outputLengths->Resize(batchSize);
     auto* outputLengthsPtr = outputLengths->template mutable_data<int32_t>();
     size_t start = 0;
-    size_t blockSize = ranges.size() / batchSize;
+    size_t blockSize = ranges.size_from_dim(1);
     for (size_t i = 0; i < batchSize; ++i) {
       auto end = start + blockSize;
       outputLengthsPtr[i] = accumulate(rangesData, start, end);
