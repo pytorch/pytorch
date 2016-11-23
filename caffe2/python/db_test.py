@@ -35,5 +35,7 @@ class TestDB(unittest.TestCase):
         while cursor.valid():
             data.append((cursor.key(), cursor.value()))
             cursor.next()
+        del cursor
+
         db.close()  # test explicit db closer
         self.assertEqual(data, self.data)
